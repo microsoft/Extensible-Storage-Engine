@@ -2,7 +2,7 @@
 
 A Non-SQL Database Engine.
 
-The Extensible Storage Engine (ESE, once known as JET Blue) is one of those rare code bases having proven to have a more than 25 year serviceable lifetime.  First shipping in Windows NT 3.51 and shortly thereafter in Exchange 4.0, and rewritten twice in the 90s (amusingly the old adage Microsoft gets it right on third version rings true for us too), and heavily updated over the subsequent two decades after that, it remains a core Microsoft asset to this day running:
+The Extensible Storage Engine (ESE, once known as JET Blue) is one of those rare code bases having proven to have a more than 25 year serviceable lifetime.  First shipping in Windows NT 3.51 and shortly thereafter in Exchange 4.0, and rewritten twice in the 90s, and heavily updated over the subsequent two decades after that, it remains a core Microsoft asset to this day running:
 - On 100s of thousands of machines and millions of disks for the Office 365 Mailbox Storage Backend servers.
 - Large SMP systems with TB of memory for large Active Directory deployments.
 - And finally every single Windows Client computer has several database instances running in low memory modes (over 1 billion devices just for Windows 10, but ESE has been in use in Windows client SKUs since Windows XP).
