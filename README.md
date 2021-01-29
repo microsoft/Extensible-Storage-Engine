@@ -1,33 +1,29 @@
-# Project
+# Extensible-Storage-Engine
 
-> This repo has been populated by an initial template to help get you started. Please
-> make sure to update the content to build a great experience for community-building.
+A Non-SQL Database Engine.
 
-As the maintainer of this project, please make a few updates:
+The Extensible Storage Engine (ESE, once known as JET Blue) is one of those rare code bases having proven to have a more than 25 year serviceable lifetime.  First shipping in Windows NT 3.51 and shortly thereafter in Exchange 4.0, and rewritten twice in the 90s (amusingly the old adage Microsoft gets it right on third version rings true for us too), and heavily updated over the subsequent two decades after that, it remains a core Microsoft asset to this day running:
+- On 100s of thousands of machines and millions of disks for the Office 365 Mailbox Storage Backend servers.
+- Large SMP systems with TB of memory for large Active Directory deployments.
+- And finally every single Windows Client computer has several database instances running in low memory modes (over 1 billion devices just for Windows 10, but ESE has been in use in Windows client SKUs since Windows XP).
 
-- Improving this README.MD file to provide a great experience
-- Updating SUPPORT.MD with content about this project's support experience
-- Understanding the security reporting process in SECURITY.MD
-- Remove this section from the README
+ESE enables applications to store and retrieve data from tables using indexed or sequential cursor navigation. It supports denormalized schemas including wide tables with numerous sparse columns, multi-valued columns, and sparse and rich indexes. It enables applications to enjoy a consistent data state using transacted data update and retrieval. A crash recovery mechanism is provided so that data consistency is maintained even in the event of a system crash. It provides ACID (Atomic Consistent Isolated Durable) transactions over data and schema by way of a write-ahead log and a snapshot isolation model. 
+- [Summary of features and the JET API](https://docs.microsoft.com/en-us/windows/win32/extensible-storage-engine/extensible-storage-engine)
+- [More extensive list of ESE database features are documented in our Wikipedia entry](https://en.wikipedia.org/wiki/Extensible_Storage_Engine)
+
+However the library provides many other strongly layered and and thus reusable sub-facilities as well:
+- A Synchronization / Locking library
+- A Data-structures / STL-like library
+- An OS-abstraction layer
+- A Block / Cache Manager
+... as well the full blown database engine itself.
+
+The version of source we post here will likely be a bit in advance of the version compiled into the latest Windows update.  So the JET API documentation may be out of date with it.
+
+## Future Plans
+
+You may notice the initial code is without comments!  The code is so good, it is self evident right?  :-D   We are of course teasing, we are evaluating the comments to clean them of names of individuals that may wish to remain private and/or for tone.  We will be pushing enhanced and cleaned up comments as we are able.  We also will be pushing build project files and a little more infrastructure to get a building ESE.  Right now the code is provided just for instructional purposes only.
 
 ## Contributing
 
-This project welcomes contributions and suggestions.  Most contributions require you to agree to a
-Contributor License Agreement (CLA) declaring that you have the right to, and actually do, grant us
-the rights to use your contribution. For details, visit https://cla.opensource.microsoft.com.
-
-When you submit a pull request, a CLA bot will automatically determine whether you need to provide
-a CLA and decorate the PR appropriately (e.g., status check, comment). Simply follow the instructions
-provided by the bot. You will only need to do this once across all repos using our CLA.
-
-This project has adopted the [Microsoft Open Source Code of Conduct](https://opensource.microsoft.com/codeofconduct/).
-For more information see the [Code of Conduct FAQ](https://opensource.microsoft.com/codeofconduct/faq/) or
-contact [opencode@microsoft.com](mailto:opencode@microsoft.com) with any additional questions or comments.
-
-## Trademarks
-
-This project may contain trademarks or logos for projects, products, or services. Authorized use of Microsoft 
-trademarks or logos is subject to and must follow 
-[Microsoft's Trademark & Brand Guidelines](https://www.microsoft.com/en-us/legal/intellectualproperty/trademarks/usage/general).
-Use of Microsoft trademarks or logos in modified versions of this project must not cause confusion or imply Microsoft sponsorship.
-Any use of third-party trademarks or logos are subject to those third-party's policies.
+Initially our code synchronization process will be one way, so we will be unable to take code contributions.  We will likely be allowing contributions in the future.  If you are interested in contributing, we would like to hear from you.
