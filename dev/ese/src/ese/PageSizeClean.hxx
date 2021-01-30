@@ -1,0 +1,19 @@
+// Copyright (c) Microsoft Corporation.
+// Licensed under the MIT License.
+
+
+
+
+
+
+
+#undef g_cbPage
+#define g_cbPage g_cbPage_THIS_FILE_EVOLVED_PAST_GLOBAL_PAGE_SIZE_SEE_see_PageSizeCleanHxx
+
+#undef JET_paramDatabasePageSize
+#define JET_paramDatabasePageSize JET_paramDatabasePageSize_THIS_FILE_EVOLVED_PAST_GLOBAL_PAGE_SIZE_SEE_see_PageSizeCleanHxx
+
+#define FIsSmallPage FIsSmallPage_THIS_FILE_EVOLVED_PAST_GLOBAL_PAGE_SIZE_FUNCS_see_PageSizeCleanHxx
+#define CbRecordMostWithGlobalPageSize CbRecordMostWithGlobalPageSize_THIS_FILE_EVOLVED_PAST_GLOBAL_PAGE_SIZE_FUNCS_see_PageSizeCleanHxx
+
+
