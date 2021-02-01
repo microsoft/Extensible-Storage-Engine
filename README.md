@@ -2,7 +2,7 @@
 
 ## A Non-SQL Database Engine
 
-The Extensible Storage Engine (ESE, once known as JET Blue) is one of those rare codebases having proven to have a more than 25 year serviceable lifetime.  First shipping in Windows NT 3.51 and shortly thereafter in Exchange 4.0, and rewritten twice in the 90s, and heavily updated over the subsequent two decades after that, it remains a core Microsoft asset to this day.
+The Extensible Storage Engine (ESE) is one of those rare codebases having proven to have a more than 25 year serviceable lifetime.  First shipping in Windows NT 3.51 and shortly thereafter in Exchange 4.0, and rewritten twice in the 90s, and heavily updated over the subsequent two decades after that, it remains a core Microsoft asset to this day.
 
 - It's running on 100s of thousands of machines and millions of disks for the Office 365 Mailbox Storage Backend servers
 - It's also running on large SMP systems with TB of memory for large Active Directory deployments
@@ -22,6 +22,10 @@ The library provides many other strongly layered and, thus, reusable sub-facilit
 All this is in addition to the full-blown database engine itself.
 
 The version of source we post here will likely be a bit in advance of the version compiled into the latest Windows update.  Therefore, the JET API documentation may be out of date with it.
+
+## Is this the JET database / engine?
+
+No.  Well ... it depends ... the question is not quite correct.  Most people do not know that JET was an acronym for an API set, not a specific database format or engine.  Just as there is no such thing as "the SQL engine", as there are many implementations of the protocol, there is no "JET engine" or "JET database".  It is in the acronym, "Joint Engine Technology".  And as such, there are two separate implementations of the JET API.  This is the JET Blue engine implementation, see [Notes in here](https://docs.microsoft.com/en-us/windows/win32/extensible-storage-engine/extensible-storage-engine).  The origin of the [colors have an an amusing source](https://en.wikipedia.org/wiki/Extensible_Storage_Engine#History) by the way.  Most people think of the "JET engine" as JET Red, that shipped under Microsoft Access.  This is not that "JET engine".  We renamed to ESE to try to avoid this confusion, but it seems confusion continues to this day.
 
 ## Future Plans
 
