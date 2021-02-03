@@ -4,7 +4,7 @@ For us to be able to accept code contributions, they have to build and pass test
 
 Initially, none of our code builds or includes tests. Until that changes, our code synchronization process will be one-way, and we will be unable to take *any* code contributions.
 
-We will be accepting code contributions in the future. If you are interested in contributing code, we would like to hear from you! You can create a new issue (explaining the idea, feature, or improvement) or comment on an existing issue and stating your interest in working on it here on GitHub.
+We will be accepting code contributions in the future. If you are interested in contributing code, we would like to hear from you! You can create a new issue (explaining the idea, feature, or improvement) or comment on an existing issue and state your interest in working on it here on GitHub.
 
 ## Contributor License Agreement
 Before we can review and accept a pull request from you, you'll need to sign a Contributor License Agreement (CLA). The CLA ensures that the community is free to use your contributions. More information about the agreement is available on the Microsoft web site. Signing the CLA is an automated process, and you only need to do it once for Microsoft projects on GitHub.
