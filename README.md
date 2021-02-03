@@ -40,7 +40,3 @@ We also will be pushing build files, codegen scripts, and a little more infrastr
 ### Tests
 
 We are initially withholding the test code, and, as with the comments and the codegen scripts, we will be gradually releasing the tests, as well as adding Azure pipelines to run them.
-
-## Contributing
-
-Initially, our code synchronization process will be one way, so we will be unable to take code contributions.  We will be allowing contributions in the future.  If you are interested in contributing, we would like to hear from you!
