@@ -226,7 +226,7 @@ enum IOREASONFLAGS : BYTE
     iorfForeground  = 0x08,
     iorfDependantOrVersion  = 0x10,
     iorfReclaimPageFromOS   = 0x20,
-    iorfSuperCold   = 0x40,
+    iorfSuperColdOrLowPriority   = 0x40,
 };
 
 enum IOFLUSHREASON
