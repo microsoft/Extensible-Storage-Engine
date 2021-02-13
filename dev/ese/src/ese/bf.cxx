@@ -22239,6 +22239,10 @@ ERR ErrBFIFlushExclusiveLatchedAndPreparedBF(   __inout const PBF       pbf,
     {
         tcFlush->iorReason.AddFlag( iorfOpportune );
     }
+    if ( pbf->lrukic.FSuperColded() || pbf->lrukic.PctCachePriority() < 50 )
+    {
+        tcFlush->iorReason.AddFlag( iorfSuperColdOrLowPriority );
+    }
 
     if ( FBFIDatabasePage( pbf ) )
     {
