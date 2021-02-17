@@ -1721,6 +1721,8 @@ LOCAL ERR ErrRECIIRetrieveKey(
                 case JET_coltypText:
                 case JET_coltypLongText:
 
+                    // If not a template table, should not use template index for localization
+                    Assert( pfucb->u.pfcb->FTemplateTable() || !pidb->FTemplateIndex() );
                     Call( ErrFLDNormalizeTextSegment(
                                 pbField,
                                 cbField,
@@ -2251,6 +2253,8 @@ LOCAL ERR ErrFLDNormalizeSegment(
                     }
                 }
 
+                // If not a template table, should not use template index for localization
+                Assert( pfucb->u.pfcb->FTemplateTable() || !pidb->FTemplateIndex() );
                 const ERR   errNorm     = ErrFLDNormalizeTextSegment(
                                                 pbColumn,
                                                 cbColumn,
@@ -2499,7 +2503,7 @@ ERR VTAPI ErrIsamMakeKey(
             Assert( pfucb->u.pfcb->FTypeSecondaryIndex() );
             pidb = pfucb->u.pfcb->Pidb();
             fInitialIndex = pfucb->u.pfcb->FInitialIndex();
-            if ( pfucb->u.pfcb->FDerivedIndex() &&  !pidb->FIDBOwnedByFCB() )
+            if ( pfucb->u.pfcb->FDerivedIndex() && !pidb->FIDBOwnedByFCB() )
             {
                 // If secondary index is inherited, use FCB of template table.
                 Assert( pidb->FTemplateIndex() );
@@ -2511,9 +2515,10 @@ ERR VTAPI ErrIsamMakeKey(
         else
         {
             BOOL    fPrimaryIndexTemplate   = fFalse;
+            pidb = pfcbTable->Pidb();
 
             Assert( pfcbTable->FPrimaryIndex() );
-            if ( pfcbTable->FDerivedTable() )
+            if ( pfcbTable->FDerivedTable() && ( pidb == NULL || !pidb->FIDBOwnedByFCB() ) )
             {
                 Assert( pfcbTable->Ptdb() != ptdbNil );
                 Assert( pfcbTable->Ptdb()->PfcbTemplateTable() != pfcbNil );
