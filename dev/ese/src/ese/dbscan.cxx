@@ -4242,9 +4242,18 @@ void DBMObjectCache::CloseCachedObjectsWithPendingDeletes()
 {
     for( INT i = 0; i < m_cobjectsMax; ++i )
     {
-        if( pfucbNil != m_rgstate[i].pfucb && m_rgstate[i].pfucb->u.pfcb->FDeletePending() )
+        if( pfucbNil != m_rgstate[i].pfucb)
         {
-            CloseObjectAt_( i );
+            if ( m_rgstate[i].pfucb->u.pfcb->FDeletePending() )
+            {
+                AssertTrack( !m_rgstate[i].pfucb->m_iae.FUninitialized(), "UnlinkedFUCBWithDeletePendingInDBScanCache" );
+            
+                CloseObjectAt_( i );
+            }
+            else
+            {
+                AssertTrack( !m_rgstate[i].pfucb->m_iae.FUninitialized(), "UnlinkedFUCBInDBScanCache" );
+            }
         }
     }
 }
