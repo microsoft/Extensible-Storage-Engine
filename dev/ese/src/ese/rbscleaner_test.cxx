@@ -144,6 +144,7 @@ public:
     QWORD m_cbDiskSize;
 
     LONG    m_lRBSGenWithInvalidPrevTime;
+    __int64 m_ftStart;
 };
 
 RBSCleanerTestIOOperator::RBSCleanerTestIOOperator()
@@ -164,9 +165,10 @@ RBSCleanerTestIOOperator::RBSCleanerTestIOOperator()
     m_lRBSGenMax = 10;
 
     m_cbDirSize     = 104857;     // Such that size of 10 snapshots is less than 1MB threshold we setting in config in case of low disk space.
-    m_cbDiskSize = 2147483648; // 2GB, twice the threshold we are setting in config
+    m_cbDiskSize    = 2147483648; // 2GB, twice the threshold we are setting in config
 
-    m_lRBSGenWithInvalidPrevTime = 1;
+    m_lRBSGenWithInvalidPrevTime    = 1;
+    m_ftStart                       = UtilGetCurrentFileTime();
 }
 
 ERR RBSCleanerTestIOOperator::ErrRBSDiskSpace( QWORD* pcbFreeForUser )
@@ -231,7 +233,6 @@ ERR RBSCleanerTestIOOperator::ErrRBSFileHeader( PCWSTR wszRBSFilePath, _Out_ RBS
     {
         Assert( prbsfilehdr );
         INT     lRBSGen         = wcstol( wszRBSFilePath, NULL, 10 );
-        __int64 ftCurrent       = UtilGetCurrentFileTime();
         __int64 cSecBehind      = m_cSecLastCreateTimeFromCurrentTime + ( ( m_lRBSGenMax - lRBSGen ) * m_cSecBetweenCreateTime );
         __int64 cSecBehindPrev  = m_cSecLastCreateTimeFromCurrentTime + ( ( m_lRBSGenMax - lRBSGen + 1) * m_cSecBetweenCreateTime );
 
@@ -241,10 +242,10 @@ ERR RBSCleanerTestIOOperator::ErrRBSFileHeader( PCWSTR wszRBSFilePath, _Out_ RBS
         }
         else
         {
-            ConvertFileTimeToLogTime( ftCurrent - ( cSecBehindPrev * 10000000 ), &prbsfilehdr->rbsfilehdr.tmPrevGen );
+            ConvertFileTimeToLogTime( m_ftStart - ( cSecBehindPrev * 10000000 ), &prbsfilehdr->rbsfilehdr.tmPrevGen );
         }
 
-        ConvertFileTimeToLogTime( ftCurrent - ( cSecBehind * 10000000 ), &prbsfilehdr->rbsfilehdr.tmCreate );
+        ConvertFileTimeToLogTime( m_ftStart - ( cSecBehind * 10000000 ), &prbsfilehdr->rbsfilehdr.tmCreate );
     }
 
     return m_errRBSFileHdr;
@@ -390,7 +391,7 @@ JETUNITTEST( RBSCleaner, ExpiredSnapshotRemoved )
     unique_ptr<RBSCleanerTestConfig> pconfig( new RBSCleanerTestConfig() );
 
     // Set file time such that it is valid for snapshot 5 onwards ( + 1 )
-    pconfig->SetCSecRBSMaxTimeSpan(  piooperator->m_cSecLastCreateTimeFromCurrentTime + ( ( piooperator->m_lRBSGenMax - 5 ) * piooperator->m_cSecBetweenCreateTime ) + 1);
+    pconfig->SetCSecRBSMaxTimeSpan(  piooperator->m_cSecLastCreateTimeFromCurrentTime + ( ( piooperator->m_lRBSGenMax - 5 ) * piooperator->m_cSecBetweenCreateTime ) + 10);
 
     INST* pinst;
     CHECKCALLS( JetCreateInstance2W( (JET_INSTANCE*) &pinst, NULL, NULL, JET_bitNil ) );
