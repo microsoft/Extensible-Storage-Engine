@@ -11435,7 +11435,7 @@ typedef enum
     opTestHookGetBFLowMemoryCallback,                   //  return pointer to function
     opTestHookTraceTestMarker,                          //  traces a test marker ETW/OSTrace event
     opTestHookGetCheckpointDepth,                       //  return value of the current checkpoint depth
-    opTestHookGetOLD2Status,                            //  return whether we are accept B+ tree defrag requests in the defrag manager
+    opTestHookGetOLD2Status,                            //  return whether we are processing B+ tree defrag tasks in the defrag manager
     opTestHookGetEngineTickNow,                         //  returns the TickOSTimeCurrent() from inside the engine
     opTestHookSetEngineTickTime,                        //  takes a JET_TESTHOOKTIMEINJECTION structure
     opTestHookCacheQuery,                               //  takes a JET_TESTHOOKCACHEQUERY*

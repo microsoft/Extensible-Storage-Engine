@@ -513,4 +513,5 @@ VOID OLDTerm();
 
 VOID OLD2PauseTasks();
 VOID OLD2UnpauseTasks();
+BOOL COLD2Tasks();
 

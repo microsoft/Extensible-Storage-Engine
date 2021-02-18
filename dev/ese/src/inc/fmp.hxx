@@ -863,6 +863,7 @@ public:
 
         VOID PauseOLD2Tasks();
         VOID UnpauseOLD2Tasks();
+        BOOL FOLD2TasksPaused();
 
 
     // =====================================================================

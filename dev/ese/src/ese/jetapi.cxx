@@ -23425,7 +23425,7 @@ JET_ERR JET_API JetTestHook(
             INST * pinst = *(INST**)pv;
             Assert( pinst );
             Assert( pinst->m_mpdbidifmp[dbidUserLeast] != ifmpNil );
-            *((__int64*)pv) = (__int64)( g_rgfmp[pinst->m_mpdbidifmp[dbidUserLeast]].FDontRegisterOLD2Tasks() );
+            *((__int64*)pv) = (__int64)( g_rgfmp[pinst->m_mpdbidifmp[dbidUserLeast]].FOLD2TasksPaused() );
         }
             break;
 
