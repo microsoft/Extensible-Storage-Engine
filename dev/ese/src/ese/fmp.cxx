@@ -2978,6 +2978,13 @@ VOID FMP::UnpauseOLD2Tasks()
     OLD2UnpauseTasks();
 }
 
+//  ================================================================
+BOOL FMP::FOLD2TasksPaused()
+//  ================================================================
+{
+    return COLD2Tasks() == 0;
+}
+
 #ifdef ENABLE_JET_UNIT_TEST
 
 // these are used by testing routines that need a mock FMP

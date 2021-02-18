@@ -1309,6 +1309,11 @@ VOID OLD2UnpauseTasks()
     CDefragManager::Instance().Unpause();
 }
 
+BOOL COLD2Tasks()
+{
+    return CDefragManager::Instance().CTasksMax();
+}
+
 BOOL FOLDRunning( const IFMP ifmp )
 {
     INST * const        pinst       = PinstFromIfmp( ifmp );
