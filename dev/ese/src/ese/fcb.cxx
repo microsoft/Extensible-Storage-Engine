@@ -3221,10 +3221,7 @@ VOID FCB::DecrementRefCountAndUnlink_( FUCB *pfucb, const BOOL fLockList, const 
     //  Decrement the refcount in a threadsafe way as there is only a shared lock held at this point.
 
     LONG lResultRefCount = AtomicDecrement( &m_wRefCount );
-    if ( lResultRefCount < 0 )
-    {
-        Enforce( fFalse );
-    }
+    Enforce( lResultRefCount >= 0 );
 
     if ( pinst->m_pFCBRefTrace != NULL )
     {
@@ -3256,7 +3253,8 @@ VOID FCB::DecrementRefCountAndUnlink_( FUCB *pfucb, const BOOL fLockList, const 
     // drop the lock, but we'll increment the refcount to make sure the FCB isn't
     // purged out from under us.
 
-    AtomicIncrement( &m_wRefCount );
+    lResultRefCount = AtomicIncrement( &m_wRefCount );
+    AssertTrack( lResultRefCount > 0, "RefCountTooLowAfterInc" );
     Unlock_( LOCK_TYPE::ltShared );
     if ( fLockList )
     {
@@ -3270,8 +3268,8 @@ VOID FCB::DecrementRefCountAndUnlink_( FUCB *pfucb, const BOOL fLockList, const 
     }
     Lock();
     // Take off the refcount we just put on to keep this from being purged.
-    AtomicDecrement( &m_wRefCount );
-
+    lResultRefCount = AtomicDecrement( &m_wRefCount );
+    AssertTrack( lResultRefCount >= 0, "RefCountTooLowAfterDec" );
     Assert( pinst->m_critFCBList.FOwner() );
 
     if ( FTypeTable() && ( 0 == WRefCount() ) && !FInLRU() )
@@ -3379,11 +3377,7 @@ INLINE ERR FCB::ErrIncrementRefCountAndLink_( FUCB *pfucb, const BOOL fOwnWriteL
 
     // Increment the refcount in a threadsafe way.
     LONG lResultRefCount = AtomicIncrement( &m_wRefCount );
-
-    if ( lResultRefCount <= 0 )
-    {
-        Enforce( fFalse );
-    }
+    EnforceSz( lResultRefCount > 0, OSFormat( "InvalidRefCount:%d", lResultRefCount ) );
 
     if ( pinst->m_pFCBRefTrace != NULL )
     {
