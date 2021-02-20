@@ -357,17 +357,78 @@ ERR COSFileSystem::ErrPathRoot( const WCHAR* const  wszPath,
     // UNDONE_BANAPI:
                                 __out_bcount(OSFSAPI_MAX_PATH*sizeof(WCHAR)) WCHAR* const       wszAbsRootPath )
 {
-    ERR                     err         = JET_errSuccess;
+    ERR                     err             = JET_errSuccess;
     WCHAR                   wszAbsPath[ IFileSystemAPI::cchPathMax ];
+    DWORD                   dwAttr          = INVALID_FILE_ATTRIBUTES;
+    HANDLE                  hFile           = INVALID_HANDLE_VALUE;
+    WCHAR*                  wszAbsPathT     = wszAbsPath;
+    DWORD                   cwchAbsPathT    = 0;
     WCHAR                   wszFolder[ IFileSystemAPI::cchPathMax ];
     WCHAR                   wszFileBase[ IFileSystemAPI::cchPathMax ];
     WCHAR                   wszFileExt[ IFileSystemAPI::cchPathMax ];
-    CVolumePathCacheEntry*  pvpce       = NULL;
+    CVolumePathCacheEntry*  pvpce           = NULL;
     WCHAR                   wszRootPath[ IFileSystemAPI::cchPathMax ];
 
     //  get the absolute path for the given path
 
     Call( ErrPathComplete( wszPath, wszAbsPath ) );
+
+    //  if the absolute path is a reparse point then it may be a symbolic link to another volume
+
+    dwAttr = GetFileAttributesW( wszAbsPath );
+    if ( dwAttr == INVALID_FILE_ATTRIBUTES )
+    {
+        err = ErrGetLastError( GetLastError() );
+        Call( err == JET_errFileNotFound || err == JET_errInvalidPath ? JET_errSuccess : err );
+    }
+
+    if ( dwAttr != INVALID_FILE_ATTRIBUTES && !!( dwAttr & FILE_ATTRIBUTE_REPARSE_POINT ) )
+    {
+        hFile = CreateFileW(    wszAbsPath,
+                                0,
+                                FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
+                                NULL,
+                                OPEN_EXISTING,
+                                FILE_ATTRIBUTE_NORMAL | FILE_FLAG_BACKUP_SEMANTICS,
+                                NULL );
+        if ( hFile == INVALID_HANDLE_VALUE )
+        {
+            err = ErrGetLastError( GetLastError() );
+            Call( err == JET_errFileNotFound || err == JET_errInvalidPath ? JET_errSuccess : err );
+        }
+
+        if ( hFile != INVALID_HANDLE_VALUE )
+        {
+            cwchAbsPathT = GetFinalPathNameByHandleW( hFile, wszAbsPathT, _countof( wszAbsPath ), VOLUME_NAME_DOS );
+            if ( cwchAbsPathT == 0 )
+            {
+                Call( ErrGetLastError() );
+            }
+            else if ( cwchAbsPathT >= _countof( wszAbsPath ) )
+            {
+                Alloc( wszAbsPathT = new WCHAR[cwchAbsPathT] );
+                if ( !GetFinalPathNameByHandleW( hFile, wszAbsPathT, _countof( wszAbsPath ), VOLUME_NAME_DOS ) )
+                {
+                    Call( ErrGetLastError() );
+                }
+            }
+
+            const WCHAR* const wszPrefix = L"\\\\?\\";
+            DWORD cwchOffset = 0;
+            if ( wcsncmp( wszAbsPathT, wszPrefix, wcslen( wszPrefix ) ) == 0 )
+            {
+                cwchOffset += wcslen( wszPrefix );
+            }
+
+            if ( wmemmove_s( wszAbsPath, _countof( wszAbsPath ), wszAbsPathT + cwchOffset, cwchAbsPathT - cwchOffset ) )
+            {
+                Call( ErrERRCheck( JET_errInvalidPath ) );
+            }
+
+            CloseHandle( hFile );
+            hFile = INVALID_HANDLE_VALUE;
+        }
+    }
 
     //  get the folder of the absolute path
 
@@ -431,6 +492,14 @@ HandleError:
     if ( err < JET_errSuccess )
     {
         OSStrCbCopyW( wszAbsRootPath, cbOSFSAPI_MAX_PATHW, L"" );
+    }
+    if ( wszAbsPathT != wszAbsPath )
+    {
+        delete[] wszAbsPathT;
+    }
+    if ( hFile != INVALID_HANDLE_VALUE )
+    {
+        CloseHandle( hFile );
     }
     return err;
 }
@@ -3249,7 +3318,7 @@ ERR ErrOSVolumeConnect(
 
     //  Retrieve the volume canonical path and disk ID.
 
-    posfs->PathVolumeCanonicalAndDiskId( wszVolumePath,
+    posfs->PathVolumeCanonicalAndDiskId(    wszVolumePath,
                                             wszVolumeCanonicalPath, _countof( wszVolumeCanonicalPath ),
                                             wszDiskId, _countof( wszDiskId ),
                                             &dwDiskNumber );
