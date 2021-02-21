@@ -2031,7 +2031,6 @@ private:
     ERR ErrLGRIIRedoPageMove( __in PIB * const ppib, const LRPAGEMOVE * const plrpagemove );
     ERR ErrLGRIRedoPageMove( const LRPAGEMOVE * const plrpagemove );
     ERR ErrLGIRedoRootMoveStructures( PIB* const ppib, const DBTIME dbtime, ROOTMOVE* const prm );
-    ERR ErrLGIRedoRootMoveUpgradeLatches( ROOTMOVE* const prm );
     VOID LGIRedoRootMoveUpdateDbtime( ROOTMOVE* const prm );
     ERR ErrLGRIRedoRootPageMove( PIB* const ppib, const DBTIME dbtime );
     ERR ErrLGRIRedoPagePatch( const LRPAGEPATCHREQUEST * const plrpagepatchrequest );
