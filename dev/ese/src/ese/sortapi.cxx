@@ -56,7 +56,7 @@ LOCAL ERR ErrSORTTableOpen(
     JET_COLUMNDEF   *pcolumndef             = NULL;
     JET_COLUMNID    *pcolumnid              = NULL;
     JET_COLUMNDEF   *pcolumndefMax          = rgcolumndef+icolumndefMax;
-    TCIB            tcib                    = { fidFixedLeast-1, fidVarLeast-1, fidTaggedLeast-1 };
+    TCIB            tcib;
     WORD            ibRec;
     BOOL            fTruncate;
     BOOL            fIndexOnLocalizedText   = fFalse;
@@ -1423,7 +1423,7 @@ CheckTagged:
             printf( "\nReset corrupt bit in Fid of TAGFLD." );
         }
         Assert( ptagfld->fid <= pfdb->fidTaggedLast );
-        Assert( FTaggedFid( ptagfld->fid ) );
+        Assert( ptagfld->fid.FTagged() );
         if ( (BYTE *)PtagfldNext( ptagfld ) > pbRecMax
             && ( ptagfld->cbData & wCorruptBit ) )
         {
@@ -1666,7 +1666,7 @@ InsertRecord:
     f8BytesAutoInc = pfucbDest->u.pfcb->Ptdb()->F8BytesAutoInc();
     if ( fidAutoInc != 0 )
     {
-        Assert( FFixedFid( fidAutoInc ) );
+        Assert( fidAutoInc.FFixed() );
         Assert( fidAutoInc <= pfucbDest->u.pfcb->Ptdb()->FidFixedLast() );
         Assert( FFUCBColumnSet( pfucbDest, fidAutoInc ) );
         
@@ -1963,7 +1963,7 @@ ERR ErrSORTCopyRecords(
     /**/
     FID         fidT        = ptdb->FidTaggedFirst();
     const FID   fidLast     = ptdb->FidTaggedLast();
-    Assert( fidLast == fidT-1 || FTaggedFid( fidLast ) );
+    Assert( fidLast == fidT-1 || fidLast.FTagged() );
 
     if ( ptdb->FESE97DerivedTable() )
     {

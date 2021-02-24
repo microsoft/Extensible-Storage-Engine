@@ -3416,7 +3416,7 @@ BOOL TAGFIELDS::FValidate(
     {
         const TAGFLD    * const ptagfld     = Ptagfld( itagfld );
 
-        if ( !FTaggedFid( ptagfld->Fid() ) )
+        if ( !ptagfld->Fid().FTagged() )
         {
             (*pcprintf)( "FID %d is not a tagged column.\r\n", ptagfld->Fid() );
             AssertSz( fFalse, "FID is not a tagged column." );

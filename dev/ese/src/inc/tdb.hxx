@@ -755,7 +755,7 @@ INLINE MEMPOOL& TDB::MemPool() const                        { return const_cast<
 
 INLINE FID TDB::FidFixedFirst() const
 {
-    Assert( m_fidFixedFirst == fidFixedLeast || pfcbNil != PfcbTemplateTable() );
+    Assert( m_fidFixedFirst.FFixedLeast() || pfcbNil != PfcbTemplateTable() );
     return m_fidFixedFirst;
 }
 INLINE FID TDB::FidFixedLastInitial() const                 { return m_fidFixedLastInitial; }
@@ -763,7 +763,7 @@ INLINE FID TDB::FidFixedLast() const                        { return m_fidFixedL
 
 INLINE FID TDB::FidVarFirst() const
 {
-    Assert( m_fidVarFirst == fidVarLeast || pfcbNil != PfcbTemplateTable() );
+    Assert( m_fidVarFirst.FVarLeast() || pfcbNil != PfcbTemplateTable() );
     return m_fidVarFirst;
 }
 INLINE FID TDB::FidVarLastInitial() const                   { return m_fidVarLastInitial; }
@@ -771,7 +771,7 @@ INLINE FID TDB::FidVarLast() const                          { return m_fidVarLas
 
 INLINE FID TDB::FidTaggedFirst() const
 {
-    Assert( m_fidTaggedFirst == fidTaggedLeast || pfcbNil != PfcbTemplateTable() );
+    Assert( m_fidTaggedFirst.FTaggedLeast() || pfcbNil != PfcbTemplateTable() );
     return m_fidTaggedFirst;
 }
 INLINE FID TDB::FidTaggedLastInitial() const                { return m_fidTaggedLastInitial; }
@@ -824,7 +824,7 @@ INLINE VOID TDB::SetPfcbTemplateTable( FCB *pfcb )          { m_pfcbTemplateTabl
 
 INLINE VOID TDB::SetFidTaggedLastOfESE97Template( const FID fid )
 {
-    Assert( FTaggedFid( fid ) );
+    Assert( fid.FTagged() );
     m_fidTaggedLastOfESE97Template = fid;
 }
 
@@ -834,15 +834,15 @@ INLINE VOID TDB::AssertValidTemplateTable() const
     Assert( FTemplateTable() );
     Assert( !FDerivedTable() );
     Assert( pfcbNil == PfcbTemplateTable() );
-    Assert( fidFixedLeast == FidFixedFirst() );
-    Assert( fidVarLeast == FidVarFirst() );
-    Assert( fidTaggedLeast == FidTaggedFirst() );
+    Assert( FidFixedFirst().FFixedLeast() );
+    Assert( FidVarFirst().FVarLeast() );
+    Assert( FidTaggedFirst().FTaggedLeast() );
     Assert( FidFixedLastInitial() == FidFixedLast() );
     Assert( FidVarLastInitial() == FidVarLast() );
     Assert( FidTaggedLastInitial() <= FidTaggedLast() );
-    Assert( fidFixedLeast-1 == FidFixedLast() || FFixedFid( FidFixedLast() ) );
-    Assert( fidVarLeast-1 == FidVarLast() || FVarFid( FidVarLast() ) );
-    Assert( fidTaggedLeast-1 == FidTaggedLast() || FTaggedFid( FidTaggedLast() ) );
+    Assert( FidFixedLast().FFixedNone() || FidFixedLast().FFixed() );
+    Assert( FidVarLast().FVarNone() || FidVarLast().FVar() );
+    Assert( FidTaggedLast().FTaggedNone() || FidTaggedLast().FTagged() );
     Assert( 0 == FidTaggedLastOfESE97Template() || FESE97TemplateTable() );
 #endif
 }
@@ -864,7 +864,7 @@ INLINE VOID TDB::AssertValidDerivedTable() const
     else
         Assert( !FESE97DerivedTable() );
 
-    Assert( fidTaggedLeast == FidTaggedFirst()
+    Assert( FidTaggedFirst().FTaggedLeast()
         || ( FESE97DerivedTable()
             && FidTaggedFirst() == ptdbTemplate->FidTaggedLastOfESE97Template() + 1 ) );
 #endif
@@ -938,23 +938,23 @@ INLINE VOID TDB::SetIbEndFixedColumns( const WORD ibRec, const FID fidFixedLast 
 
 INLINE VOID TDB::SetFidVersion( FID fid )
 {
-    Assert( 0 == m_fidVersion );
-    Assert( 0 == fid || FFixedFid( fid ) );     //  UNDONE: Not sure if this is ever called with fid==0, but relax the assert to allow it
+    Assert( m_fidVersion.FFixedNone() );
+    Assert( fid.FFixedNone() || fid.FFixed() );     //  UNDONE: Not sure if this is ever called with FixedNone, but relax the assert to allow it
     m_fidVersion = fid;
 }
 INLINE VOID TDB::ResetFidVersion()
 {
-    Assert( m_fidVersion != 0 );
-    Assert( FFixedFid( m_fidVersion ) );
-    m_fidVersion = 0;
+    Assert( m_fidVersion.FFixed() );
+    m_fidVersion = FID( fidtypFixed, fidlimNone );
+    Assert( m_fidVersion.FFixedNone() );
 }
 
 INLINE VOID TDB::SetFidAutoincrement( FID fid, BOOL f8BytesAutoInc )
 {
-    Assert( 0 == m_fidAutoincrement );
-    Assert( 0 == fid || FFixedFid( fid ) );     //  UNDONE: Not sure if this is ever called with fid==0, but relax the assert to allow it
+    Assert( m_fidAutoincrement.FFixedNone() );
+    Assert( fid.FFixedNone() || fid.FFixed() );     //  UNDONE: Not sure if this is ever called with fidFixedNone, but relax the assert to allow it
     m_fidAutoincrement = fid;
-    m_f8BytesAutoInc = (USHORT)( fid != 0 ? f8BytesAutoInc : fFalse );
+    m_f8BytesAutoInc = (USHORT)( !fid.FFixedNone() ? f8BytesAutoInc : fFalse );
 }
 
 INLINE VOID TDB::InitAutoincrement( QWORD qw )
@@ -1028,15 +1028,17 @@ INLINE ERR TDB::ErrGetAndIncrAutoincrement( QWORD * const pqwT )
 
 INLINE VOID TDB::ResetFidAutoincrement()
 {
-    Assert( m_fidAutoincrement != 0 );
-    Assert( FFixedFid( m_fidAutoincrement ) );
+    Assert( m_fidAutoincrement.FFixed() );
     m_f8BytesAutoInc = fFalse;
-    m_fidAutoincrement = 0;
+    m_fidAutoincrement = FID( fidtypFixed, fidlimNone );
+    Assert( m_fidAutoincrement.FFixedNone() );
 }
+
 INLINE VOID TDB::InitDbkMost( DBK dbk )
 {
     AtomicCompareExchange( (LONG *)&m_dbkMost, 0, dbk );
 }
+
 INLINE ERR TDB::ErrGetAndIncrDbkMost( DBK * const pdbk )
 {
     ERR err = JET_errSuccess;
@@ -1370,7 +1372,7 @@ INLINE WORD TDB::IbOffsetOfNextColumn( const FID fid ) const
 {
     WORD    ib;
 
-    Assert( fidFixedLeast-1 == fid || FFixedFid( fid ) );
+    Assert( fid.FFixedNone() || fid.FFixed() );
     Assert( fid <= FidFixedLast() );
 
     if ( FidFixedLast() == fid )
@@ -1388,7 +1390,7 @@ INLINE WORD TDB::IbOffsetOfNextColumn( const FID fid ) const
         //  (and not deleted), so we can compute the offset
         //  of the next column by using the offset/length of
         //  this column
-        if ( fid >= fidFixedLeast )
+        if ( !fid.FFixedNone() )
         {
             const BOOL      fTemplateColumn     = FFixedTemplateColumn( fid );
             const COLUMNID  columnid            = ColumnidOfFid( fid, fTemplateColumn );
@@ -1415,7 +1417,7 @@ INLINE WORD TDB::IbOffsetOfNextColumn( const FID fid ) const
         Assert( ib <= IbEndFixedColumns() );
 
         // Last fixed column always has cbMaxLen set, even if deleted.
-        if ( fid >= fidFixedLeast )
+        if ( !fid.FFixedNone() )
         {
             const COLUMNID  columnid    = ColumnidOfFid( fid, FFixedTemplateColumn( fid ) );
             Assert( ib > ibRECStartFixedColumns );
@@ -1431,7 +1433,7 @@ INLINE WORD TDB::IbOffsetOfNextColumn( const FID fid ) const
     {
         Assert( ib < IbEndFixedColumns() );
 
-        if ( fid >= fidFixedLeast )
+        if ( !fid.FFixedNone() )
         {
             const COLUMNID  columnid    = ColumnidOfFid( fid, FFixedTemplateColumn( fid ) );
             if ( !FFIELDCommittedDelete( PfieldFixed( columnid )->ffield ) )
@@ -1506,7 +1508,7 @@ INLINE ULONG TDB::CColumns() const
 
 INLINE BOOL TDB::FFixedTemplateColumn( const FID fid ) const
 {
-    Assert( FFixedFid( fid ) );
+    Assert( fid.FFixed() );
     Assert( fid <= FidFixedLast() );
     if ( fid < FidFixedFirst() )
         AssertValidDerivedTable();
@@ -1514,7 +1516,7 @@ INLINE BOOL TDB::FFixedTemplateColumn( const FID fid ) const
 }
 INLINE BOOL TDB::FVarTemplateColumn( const FID fid ) const
 {
-    Assert( FVarFid( fid ) );
+    Assert( fid.FVar() );
     Assert( fid <= FidVarLast() );
     if ( fid < FidVarFirst() )
         AssertValidDerivedTable();

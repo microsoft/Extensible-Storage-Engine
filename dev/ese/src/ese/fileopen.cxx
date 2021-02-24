@@ -2638,13 +2638,13 @@ VOID SetIdxSegFromOldFormat(
             //  in the derived table, so if any are equal to fidLeast-1,
             //  it actually means there were no columns in the derived
             //  table and hence the column must belong to the template
-            if ( FTaggedFid( fid ) )
+            if ( fid.FTagged() )
             {
                 if ( fidTaggedLeast-1 == ptcibTemplateTable->fidTaggedLast
                     || fid <= ptcibTemplateTable->fidTaggedLast )
                     rgidxseg[iidxseg].SetFTemplateColumn();
             }
-            else if ( FFixedFid( fid ) )
+            else if ( fid.FFixed() )
             {
                 if ( fidFixedLeast-1 == ptcibTemplateTable->fidFixedLast
                     || fid <= ptcibTemplateTable->fidFixedLast )
@@ -2652,7 +2652,7 @@ VOID SetIdxSegFromOldFormat(
             }
             else
             {
-                Assert( FVarFid( fid ) );
+                Assert( fid.FVar() );
                 if ( fidVarLeast-1 == ptcibTemplateTable->fidVarLast
                     || fid <= ptcibTemplateTable->fidVarLast )
                     rgidxseg[iidxseg].SetFTemplateColumn();

@@ -1021,7 +1021,7 @@ RECCHECKFINALIZE<TDelta>::RECCHECKFINALIZE(
     m_fCallback( !!fCallback ),
     m_fDelete( !!fDelete )
 {
-    Assert( FFixedFid( m_fid ) );
+    Assert( m_fid.FFixed() );
 
     //
     //  UNDONE: issue callback if m_fCallback and delete record if m_fDelete
@@ -1479,7 +1479,7 @@ LOCAL ERR ErrOLDStatusUpdate(
         dataT.SetPv( defragstat.RgbCurrentKey() );
         dataT.SetCb( defragstat.CbCurrentKey() );
 
-        Assert( FTaggedFid( fidOLDCurrentKey ) );
+        Assert( fidOLDCurrentKey.FTagged() );
         err = ErrRECSetLongField(
                     pfucbDefrag,
                     fidOLDCurrentKey,
@@ -2329,7 +2329,7 @@ LOCAL ERR ErrOLDIExplicitDefragOneTable(
     fLatchedCatalog = fTrue;
 
     //  first record with this objidFDP should always be the Table object.
-    Assert( FFixedFid( fidMSO_Type ) );
+    Assert( fidMSO_Type.FFixed() );
     CallS( ErrRECIRetrieveFixedColumn(
                 pfcbNil,
                 pfucbCatalog->u.pfcb->Ptdb(),
@@ -2350,7 +2350,7 @@ LOCAL ERR ErrOLDIExplicitDefragOneTable(
         goto HandleError;
     }
 
-    Assert( FFixedFid( fidMSO_ObjidTable ) );
+    Assert( fidMSO_ObjidTable.FFixed() );
     Call( ErrRECIRetrieveFixedColumn(
                 pfcbNil,
                 pfucbCatalog->u.pfcb->Ptdb(),
@@ -2371,7 +2371,7 @@ LOCAL ERR ErrOLDIExplicitDefragOneTable(
         defragstat.SetTypeNull();
     }
 
-    Assert( FVarFid( fidMSO_Name ) );
+    Assert( fidMSO_Name.FVar() );
     Call( ErrRECIRetrieveVarColumn(
                 pfcbNil,
                 pfucbCatalog->u.pfcb->Ptdb(),
@@ -2959,7 +2959,7 @@ DWORD OLDDefragDb( DWORD_PTR dw )
     Assert( !Pcsr( pfucb )->FLatched() );
     Call( ErrDIRGet( pfucb ) );
 
-    Assert( FFixedFid( fidOLDObjidFDP ) );
+    Assert( fidOLDObjidFDP.FFixed() );
     Call( ErrRECIRetrieveFixedColumn(
                 pfcbNil,
                 pfucb->u.pfcb->Ptdb(),
@@ -2970,7 +2970,7 @@ DWORD OLDDefragDb( DWORD_PTR dw )
     Assert( dataField.Cb() == sizeof(OBJID) );
     defragstat.SetObjidCurrentTable( *( (UnalignedLittleEndian< OBJID > *)dataField.Pv() ) );
 
-    Assert( FFixedFid( fidOLDStatus ) );
+    Assert( fidOLDStatus.FFixed() );
     Call( ErrRECIRetrieveFixedColumn(
                 pfcbNil,
                 pfucb->u.pfcb->Ptdb(),
@@ -2983,7 +2983,7 @@ DWORD OLDDefragDb( DWORD_PTR dw )
         defragstat.SetType( *( (UnalignedLittleEndian< DEFRAGTYPE > *)dataField.Pv() ) );
         Assert( defragstat.FTypeTable() || defragstat.FTypeLV() || defragstat.FTypeIndex() );
 
-        Assert( FTaggedFid( fidOLDCurrentKey ) );
+        Assert( fidOLDCurrentKey.FTagged() );
         Call( ErrRECIRetrieveTaggedColumn(
                     pfucb->u.pfcb,
                     ColumnidOfFid( fidOLDCurrentKey, fFalse ),
@@ -4230,7 +4230,7 @@ ERR OLD2_STATUS::ErrSave(
     dataT.SetPv( bm.key.suffix.Pv() );
     dataT.SetCb( bm.key.suffix.Cb() );
 
-    Assert( FTaggedFid( s_fidOLD2BookmarkKey ) );
+    Assert( s_fidOLD2BookmarkKey.FTagged() );
     Call( ErrRECSetLongField(
                 pfucbDefrag,
                 s_fidOLD2BookmarkKey,
@@ -4241,7 +4241,7 @@ ERR OLD2_STATUS::ErrSave(
     dataT.SetPv( bm.data.Pv() );
     dataT.SetCb( bm.data.Cb() );
 
-    Assert( FTaggedFid( s_fidOLD2BookmarkData ) );
+    Assert( s_fidOLD2BookmarkData.FTagged() );
     Call( ErrRECSetLongField(
                 pfucbDefrag,
                 s_fidOLD2BookmarkData,

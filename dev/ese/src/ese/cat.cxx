@@ -560,7 +560,7 @@ ERR ErrCATIRetrieveTaggedColumn(
 {
     ERR err;
 
-    Assert( FTaggedFid( fid ) );
+    Assert( fid.FTagged() );
     Assert( 1 == itagSequence );
     Assert( Pcsr( pfucb )->FLatched() );
 
@@ -691,7 +691,7 @@ LOCAL ERR ErrCATIRetrieveLocaleInformation(
 
     // First retrieve the status of FLocaleSet (whether the caller specified JET_bitIndexUnicode),
     // and fLocalizedText (whether any of the text columns are the Unicode code page).
-    Assert( FFixedFid( fidMSO_Flags ) );
+    Assert( fidMSO_Flags.FFixed() );
     Call( ErrRECIRetrieveFixedColumn(
                 pfcbNil,
                 pfucbCatalog->u.pfcb->Ptdb(),
@@ -733,7 +733,7 @@ LOCAL ERR ErrCATIRetrieveLocaleInformation(
     else
     {
         //  If there was no locale name set, we will attempt to read in the LCID.
-        Assert( FFixedFid( fidMSO_Localization ) );
+        Assert( fidMSO_Localization.FFixed() );
         Call( ErrRECIRetrieveFixedColumn(
                     pfcbNil,
                     pfucbCatalog->u.pfcb->Ptdb(),
@@ -762,7 +762,7 @@ LOCAL ERR ErrCATIRetrieveLocaleInformation(
     // Look up the stored Versioning information, but only if there's a Unicode column.
     if ( fLocalizedText )
     {
-        Assert( FVarFid( fidMSO_Version ) );
+        Assert( fidMSO_Version.FVar() );
         Call( ErrRECIRetrieveVarColumn(
             pfcbNil,
             pfucbCatalog->u.pfcb->Ptdb(),
@@ -793,7 +793,7 @@ LOCAL ERR ErrCATIRetrieveLocaleInformation(
             Assert( dataField.Cb() == sizeof( QWORD ) );
             *pqwOutputSortVersion = *(UnalignedLittleEndian< QWORD > * ) dataField.Pv();
 
-            Assert( FVarFid( fidMSO_SortID ) );
+            Assert( fidMSO_SortID.FVar() );
             Call( ErrRECIRetrieveVarColumn(
                 pfcbNil,
                 pfucbCatalog->u.pfcb->Ptdb(),
@@ -817,7 +817,7 @@ LOCAL ERR ErrCATIRetrieveLocaleInformation(
                 Expected( dataField.Cb() == 0 );
             }
 
-            Assert( FFixedFid( fidMSO_LCMapFlags ) );
+            Assert( fidMSO_LCMapFlags.FFixed() );
             Call( ErrRECIRetrieveFixedColumn(
                         pfcbNil,
                         pfucbCatalog->u.pfcb->Ptdb(),
@@ -1834,7 +1834,7 @@ ERR ErrCATIRetrieveSpaceHints(
     memset( pSpacehints, 0, sizeof(*pSpacehints) );
     pSpacehints->cbStruct = sizeof(*pSpacehints);
 
-    Assert( FFixedFid( fidMSO_Type ) );
+    Assert( fidMSO_Type.FFixed() );
     Call( ErrRECIRetrieveFixedColumn(
                 pfcbNil,
                 ptdbCatalog,
@@ -1850,7 +1850,7 @@ ERR ErrCATIRetrieveSpaceHints(
     {
         //  First get the density.
         //
-        Assert( FFixedFid( fidMSO_SpaceUsage ) );
+        Assert( fidMSO_SpaceUsage.FFixed() );
         Call( ErrRECIRetrieveFixedColumn(
                     pfcbNil,
                     ptdbCatalog,
@@ -1865,7 +1865,7 @@ ERR ErrCATIRetrieveSpaceHints(
 
         if ( sysobj == sysobjTable )
         {
-            Assert( FFixedFid( fidMSO_Pages ) );
+            Assert( fidMSO_Pages.FFixed() );
             Call( ErrRECIRetrieveFixedColumn(
                         pfcbNil,
                         ptdbCatalog,
@@ -3056,7 +3056,7 @@ LOCAL ERR ErrCATISeekTable(
 {
     //  verify this is a table
     DATA    dataField;
-    Assert( FFixedFid( fidMSO_Type ) );
+    Assert( fidMSO_Type.FFixed() );
     Call( ErrRECIRetrieveFixedColumn(
                 pfcbNil,
                 pfucbCatalog->u.pfcb->Ptdb(),
@@ -3178,7 +3178,7 @@ ERR ErrCATSeekObjectByObjid(
 
     if ( NULL != ppgnoFDP )
     {
-        Assert( FFixedFid( fidMSO_PgnoFDP ) );
+        Assert( fidMSO_PgnoFDP.FFixed() );
         Call( ErrRECIRetrieveFixedColumn(
                 pfcbNil,
                 pfucbCatalog->u.pfcb->Ptdb(),
@@ -3192,7 +3192,7 @@ ERR ErrCATSeekObjectByObjid(
 
     if ( ( NULL != szName ) && ( 0 != cchName ) )
     {
-        Assert( FVarFid( fidMSO_Name ) );
+        Assert( fidMSO_Name.FVar() );
         Call( ErrRECIRetrieveVarColumn(
                 pfcbNil,
                 pfucbCatalog->u.pfcb->Ptdb(),
@@ -3244,7 +3244,7 @@ ERR ErrCATSeekTable(
 
     if ( NULL != ppgnoTableFDP )
     {
-        Assert( FFixedFid( fidMSO_PgnoFDP ) );
+        Assert( fidMSO_PgnoFDP.FFixed() );
         Call( ErrRECIRetrieveFixedColumn(
                     pfcbNil,
                     pfucbCatalog->u.pfcb->Ptdb(),
@@ -3259,7 +3259,7 @@ ERR ErrCATSeekTable(
 
     if ( NULL != pobjidTable )
     {
-        Assert( FFixedFid( fidMSO_Id ) );
+        Assert( fidMSO_Id.FFixed() );
         Call( ErrRECIRetrieveFixedColumn(
                     pfcbNil,
                     pfucbCatalog->u.pfcb->Ptdb(),
@@ -3521,7 +3521,7 @@ LOCAL ERR ErrCATIDeleteTableColumn(
     }
     Assert( Pcsr( pfucbCatalog )->FLatched() );
 
-    Assert( FFixedFid( fidMSO_Id ) );
+    Assert( fidMSO_Id.FFixed() );
     Call( ErrRECIRetrieveFixedColumn(
                 pfcbNil,
                 pfucbCatalog->u.pfcb->Ptdb(),
@@ -3536,7 +3536,7 @@ LOCAL ERR ErrCATIDeleteTableColumn(
     Assert( !FCOLUMNIDTemplateColumn( columnid ) ); //  Template bit is not persisted
 
 #ifdef DEBUG
-    Assert( FFixedFid( fidMSO_Coltyp ) );
+    Assert( fidMSO_Coltyp.FFixed() );
     Call( ErrRECIRetrieveFixedColumn(
                 pfcbNil,
                 pfucbCatalog->u.pfcb->Ptdb(),
@@ -3548,7 +3548,7 @@ LOCAL ERR ErrCATIDeleteTableColumn(
     Assert( JET_coltypNil != *( UnalignedLittleEndian< JET_COLTYP > *)dataField.Pv() );
 #endif
 
-    Assert( FFixedFid( fidMSO_Flags ) );
+    Assert( fidMSO_Flags.FFixed() );
     Call( ErrRECIRetrieveFixedColumn(
                 pfcbNil,
                 pfucbCatalog->u.pfcb->Ptdb(),
@@ -3727,7 +3727,7 @@ LOCAL ERR ErrCATIDeleteTableIndex(
     }
     Assert( Pcsr( pfucbCatalog )->FLatched() );
 
-    Assert( FFixedFid( fidMSO_PgnoFDP ) );
+    Assert( fidMSO_PgnoFDP.FFixed() );
     Call( ErrRECIRetrieveFixedColumn(
                 pfcbNil,
                 pfucbCatalog->u.pfcb->Ptdb(),
@@ -3739,7 +3739,7 @@ LOCAL ERR ErrCATIDeleteTableIndex(
     *ppgnoIndexFDP = *(UnalignedLittleEndian< PGNO > *) dataField.Pv();
 //  UtilMemCpy( ppgnoIndexFDP, dataField.Pv(), sizeof(PGNO) );
 
-    Assert( FFixedFid( fidMSO_Id ) );
+    Assert( fidMSO_Id.FFixed() );
     Call( ErrRECIRetrieveFixedColumn(
                 pfcbNil,
                 pfucbCatalog->u.pfcb->Ptdb(),
@@ -3754,7 +3754,7 @@ LOCAL ERR ErrCATIDeleteTableIndex(
 #ifdef DEBUG
     LE_IDXFLAG      *ple_idxflag;
     IDBFLAG         fidb;
-    Assert( FFixedFid( fidMSO_Flags ) );
+    Assert( fidMSO_Flags.FFixed() );
     Call( ErrRECIRetrieveFixedColumn(
                 pfcbNil,
                 pfucbCatalog->u.pfcb->Ptdb(),
@@ -3975,7 +3975,7 @@ ERR ErrCATAccessTableColumn(
     }
     Assert( Pcsr( pfucbCatalog )->FLatched() );
 
-    Assert( FFixedFid( fidMSO_Coltyp ) );
+    Assert( fidMSO_Coltyp.FFixed() );
     Call( ErrRECIRetrieveFixedColumn(
                 pfcbNil,
                 pfucbCatalog->u.pfcb->Ptdb(),
@@ -3997,7 +3997,7 @@ ERR ErrCATAccessTableColumn(
     Assert( !fLockColumn || fSearchByName );        // Locking column only done by name.
     if ( fSearchByName )
     {
-        Assert( FFixedFid( fidMSO_Id ) );
+        Assert( fidMSO_Id.FFixed() );
         Call( ErrRECIRetrieveFixedColumn(
                     pfcbNil,
                     pfucbCatalog->u.pfcb->Ptdb(),
@@ -4099,7 +4099,7 @@ ERR ErrCATAccessTableLV(
 
         Assert( Pcsr( pfucbCatalog )->FLatched() );
 
-        Assert( FFixedFid( fidMSO_PgnoFDP ) );
+        Assert( fidMSO_PgnoFDP.FFixed() );
         Call( ErrRECIRetrieveFixedColumn(
                     pfcbNil,
                     pfucbCatalog->u.pfcb->Ptdb(),
@@ -4114,7 +4114,7 @@ ERR ErrCATAccessTableLV(
 
         if( NULL != pobjidLV )
         {
-            Assert( FFixedFid( fidMSO_Id ) );
+            Assert( fidMSO_Id.FFixed() );
             Call( ErrRECIRetrieveFixedColumn(
                         pfcbNil,
                         pfucbCatalog->u.pfcb->Ptdb(),
@@ -4210,7 +4210,7 @@ ERR ErrCATGetObjectNameFromObjid(
     Call (ErrCATISeekTableObject( ppib, pfucbCatalog, objidTable, sysobj, objid) );
     Assert( Pcsr( pfucbCatalog )->FLatched() );
 
-    Assert( FVarFid( fidMSO_Name ) );
+    Assert( fidMSO_Name.FVar() );
     Call( ErrRECIRetrieveVarColumn(
                 pfcbNil,
                 pfucbCatalog->u.pfcb->Ptdb(),
@@ -4252,7 +4252,7 @@ ERR ErrCATGetTableAllocInfo(
     //  pages are optional, density is not
     if ( NULL != pulPages )
     {
-        Assert( FFixedFid( fidMSO_Pages ) );
+        Assert( fidMSO_Pages.FFixed() );
         Call( ErrRECIRetrieveFixedColumn(
                     pfcbNil,
                     pfucbCatalog->u.pfcb->Ptdb(),
@@ -4267,7 +4267,7 @@ ERR ErrCATGetTableAllocInfo(
 
     Assert( NULL != pulDensity );
 
-    Assert( FFixedFid( fidMSO_SpaceUsage ) );
+    Assert( fidMSO_SpaceUsage.FFixed() );
     Call( ErrRECIRetrieveFixedColumn(
                 pfcbNil,
                 pfucbCatalog->u.pfcb->Ptdb(),
@@ -4281,7 +4281,7 @@ ERR ErrCATGetTableAllocInfo(
 
     if ( NULL != ppgnoFDP )
     {
-        Assert( FFixedFid( iMSO_PgnoFDP ) );
+        Assert( fidMSO_PgnoFDP.FFixed() );
         Call( ErrRECIRetrieveFixedColumn(
                     pfcbNil,
                     pfucbCatalog->u.pfcb->Ptdb(),
@@ -4324,7 +4324,7 @@ ERR ErrCATGetIndexAllocInfo(
 
     Assert( NULL != pulDensity );
 
-    Assert( FFixedFid( fidMSO_SpaceUsage ) );
+    Assert( fidMSO_SpaceUsage.FFixed() );
     Call( ErrRECIRetrieveFixedColumn(
                 pfcbNil,
                 pfucbCatalog->u.pfcb->Ptdb(),
@@ -4573,7 +4573,7 @@ ERR ErrCATGetIndexVarSegMac(
 
     Assert( NULL != pusVarSegMac );
 
-    Assert( FVarFid( fidMSO_VarSegMac ) );
+    Assert( fidMSO_VarSegMac.FVar() );
     Call( ErrRECIRetrieveVarColumn(
                 pfcbNil,
                 pfucbCatalog->u.pfcb->Ptdb(),
@@ -4586,7 +4586,7 @@ ERR ErrCATGetIndexVarSegMac(
     {
         Assert( dataField.Cb() == 0 );
 
-        Assert( FFixedFid( fidMSO_KeyMost ) );
+        Assert( fidMSO_KeyMost.FFixed() );
         Call( ErrRECIRetrieveFixedColumn(
                     pfcbNil,
                     pfucbCatalog->u.pfcb->Ptdb(),
@@ -4649,7 +4649,7 @@ ERR ErrCATGetIndexKeyMost(
 
     Assert( NULL != pusKeyMost );
 
-    Assert( FFixedFid( fidMSO_KeyMost ) );
+    Assert( fidMSO_KeyMost.FFixed() );
     Call( ErrRECIRetrieveFixedColumn(
                 pfcbNil,
                 pfucbCatalog->u.pfcb->Ptdb(),
@@ -4705,7 +4705,7 @@ ERR ErrCATGetIndexSegments(
     //  should be on primary index
     Assert( pfucbNil == pfucbCatalog->pfucbCurIndex );
 
-    Assert( FFixedFid( fidMSO_Flags ) );
+    Assert( fidMSO_Flags.FFixed() );
     Call( ErrRECIRetrieveFixedColumn(
                 pfcbNil,
                 pfucbCatalog->u.pfcb->Ptdb(),
@@ -4720,7 +4720,7 @@ ERR ErrCATGetIndexSegments(
     {
         CHAR    szTemplateTable[JET_cbNameMost+1];
 
-        Assert( FVarFid( fidMSO_TemplateTable ) );
+        Assert( fidMSO_TemplateTable.FVar() );
         Call( ErrRECIRetrieveVarColumn(
                     pfcbNil,
                     pfucbCatalog->u.pfcb->Ptdb(),
@@ -4810,7 +4810,7 @@ ERR ErrCATGetIndexSegments(
         //  should be on primary index
         Assert( pfucbNil == pfucbCatalog->pfucbCurIndex );
 
-        Assert( FVarFid( fidMSO_Name ) );
+        Assert( fidMSO_Name.FVar() );
         Call( ErrRECIRetrieveVarColumn(
                     pfcbNil,
                     pfucbCatalog->u.pfcb->Ptdb(),
@@ -4901,7 +4901,7 @@ ERR ErrCATGetColumnCallbackInfo(
             columnid ) );
     Assert( Pcsr( pfucbCatalog )->FLatched() );
 
-    Assert( FVarFid( fidMSO_Callback ) );
+    Assert( fidMSO_Callback.FVar() );
     Call( ErrRECIRetrieveVarColumn(
                 pfcbNil,
                 pfucbCatalog->u.pfcb->Ptdb(),
@@ -4929,7 +4929,7 @@ ERR ErrCATGetColumnCallbackInfo(
     *pcchCallback = cbDataField + 1;
     szCallback[cbDataField] = '\0';
 
-    Assert( FTaggedFid( fidMSO_CallbackData ) );
+    Assert( fidMSO_CallbackData.FTagged() );
     Call( ErrCATIRetrieveTaggedColumn(
             pfucbCatalog,
             fidMSO_CallbackData,
@@ -4940,7 +4940,7 @@ ERR ErrCATGetColumnCallbackInfo(
             pcbUserData ) );
     Assert( JET_errSuccess == err || JET_wrnColumnNull == err );
 
-    Assert( FTaggedFid( fidMSO_CallbackDependencies ) );
+    Assert( fidMSO_CallbackDependencies.FTagged() );
     Call( ErrCATIRetrieveTaggedColumn(
             pfucbCatalog,
             fidMSO_CallbackDependencies,
@@ -4968,8 +4968,7 @@ ERR ErrCATGetColumnCallbackInfo(
         {
             CHAR            szColumnName[JET_cbNameMost+1];
             const COLUMNID  columnidT = rgfidDependencies[iFid];
-            Assert( columnidT <= fidMax );
-            Assert( columnidT >= fidMin );
+            Assert( fidtypUnknown != FidOfColumnid( columnidT ).Fidtyp() );
             Assert( Pcsr( pfucbCatalog )->FLatched() );
 
             CallS( ErrDIRRelease( pfucbCatalog ) );
@@ -4996,7 +4995,7 @@ ERR ErrCATGetColumnCallbackInfo(
             //  should be on primary index
             Assert( pfucbNil == pfucbCatalog->pfucbCurIndex );
 
-            Assert( FVarFid( fidMSO_Name ) );
+            Assert( fidMSO_Name.FVar() );
             Call( ErrRECIRetrieveVarColumn(
                         pfcbNil,
                         pfucbCatalog->u.pfcb->Ptdb(),
@@ -5064,7 +5063,7 @@ INLINE ERR ErrCATIInitCatalogTDB( INST *pinst, IFMP ifmp, TDB **pptdbNew )
     FIELD               field;
     const CDESC         *pcdesc;
     TDB                 *ptdb                       = ptdbNil;
-    TCIB                tcib                        = { fidFixedLeast-1, fidVarLeast-1, fidTaggedLeast-1 };
+    TCIB                tcib;
     REC::RECOFFSET      ibRec                       = ibRECStartFixedColumns;
     COLUMNID            columnidT;
 
@@ -5439,7 +5438,7 @@ LOCAL ERR ErrCATIFindHighestColumnid(
         Call( ErrDIRGet( pfucbCatalog ) );
         fLatched = fTrue;
 
-        Assert( FFixedFid( fidMSO_Type ) );
+        Assert( fidMSO_Type.FFixed() );
         Call( ErrRECIRetrieveFixedColumn(
                     pfcbNil,
                     pfucbCatalog->u.pfcb->Ptdb(),
@@ -5451,7 +5450,7 @@ LOCAL ERR ErrCATIFindHighestColumnid(
 
         if ( sysobjColumn == *( (UnalignedLittleEndian< SYSOBJ > *)dataField.Pv() ) )
         {
-            Assert( FFixedFid( fidMSO_Id ) );
+            Assert( fidMSO_Id.FFixed() );
             Call( ErrRECIRetrieveFixedColumn(
                         pfcbNil,
                         pfucbCatalog->u.pfcb->Ptdb(),
@@ -5484,7 +5483,7 @@ LOCAL ERR ErrCATIFindHighestColumnid(
         Call( ErrDIRGet( pfucbCatalog ) );
         fLatched = fTrue;
 
-        Assert( FFixedFid( fidMSO_Id ) );
+        Assert( fidMSO_Id.FFixed() );
         Call( ErrRECIRetrieveFixedColumn(
                     pfcbNil,
                     pfucbCatalog->u.pfcb->Ptdb(),
@@ -5539,7 +5538,7 @@ LOCAL ERR ErrCATIFindAllHighestColumnids(
                 &columnidMost ) );
     ptcib->fidFixedLast = FidOfColumnid( columnidMost );
     Assert( ptcib->fidFixedLast == fidFixedLeast-1
-        || FFixedFid( ptcib->fidFixedLast ) );
+        || ptcib->fidFixedLast.FFixed() );
 
     columnidMost = fidVarMost;
     Call( ErrCATIFindHighestColumnid(
@@ -5550,7 +5549,7 @@ LOCAL ERR ErrCATIFindAllHighestColumnids(
                 &columnidMost ) );
     ptcib->fidVarLast = FidOfColumnid( columnidMost );
     Assert( ptcib->fidVarLast == fidVarLeast-1
-        || FVarFid( ptcib->fidVarLast ) );
+        || ptcib->fidVarLast.FVar() );
 
     columnidMost = fidTaggedMost;
     Call( ErrCATIFindHighestColumnid(
@@ -5561,7 +5560,7 @@ LOCAL ERR ErrCATIFindAllHighestColumnids(
                 &columnidMost ) );
     ptcib->fidTaggedLast = FidOfColumnid( columnidMost );
     Assert( ptcib->fidTaggedLast == fidTaggedLeast-1
-        || FTaggedFid( ptcib->fidTaggedLast ) );
+        || ptcib->fidTaggedLast.FTagged() );
 
 
 HandleError:
@@ -5618,7 +5617,7 @@ LOCAL ERR ErrCATIFindLowestColumnid(
         Call( ErrDIRGet( pfucbCatalog ) );
         fLatched = fTrue;
 
-        Assert( FFixedFid( fidMSO_Type ) );
+        Assert( fidMSO_Type.FFixed() );
         Call( ErrRECIRetrieveFixedColumn(
                     pfcbNil,
                     pfucbCatalog->u.pfcb->Ptdb(),
@@ -5630,7 +5629,7 @@ LOCAL ERR ErrCATIFindLowestColumnid(
 
         if ( sysobjColumn == *( (UnalignedLittleEndian< SYSOBJ > *)dataField.Pv() ) )
         {
-            Assert( FFixedFid( fidMSO_Id ) );
+            Assert( fidMSO_Id.FFixed() );
             Call( ErrRECIRetrieveFixedColumn(
                         pfcbNil,
                         pfucbCatalog->u.pfcb->Ptdb(),
@@ -5640,11 +5639,11 @@ LOCAL ERR ErrCATIFindLowestColumnid(
             CallS( err );
             Assert( dataField.Cb() == sizeof(COLUMNID) );
 
-            Assert( *( (UnalignedLittleEndian< COLUMNID > *)dataField.Pv() ) <= fidMax );
-            Assert( *( (UnalignedLittleEndian< COLUMNID > *)dataField.Pv() ) >= fidMin );
-
             //  note that we might have found a column of a different type
             *pcolumnidLeast = *( (UnalignedLittleEndian< COLUMNID > *)dataField.Pv() );
+
+            Assert( fidtypUnknown != FidOfColumnid( *pcolumnidLeast ).Fidtyp() );
+            
         }
         else
         {
@@ -5661,7 +5660,7 @@ LOCAL ERR ErrCATIFindLowestColumnid(
         Call( ErrDIRGet( pfucbCatalog ) );
         fLatched = fTrue;
 
-        Assert( FFixedFid( fidMSO_Id ) );
+        Assert( fidMSO_Id.FFixed() );
         Call( ErrRECIRetrieveFixedColumn(
                     pfcbNil,
                     pfucbCatalog->u.pfcb->Ptdb(),
@@ -5728,7 +5727,7 @@ LOCAL ERR ErrCATIInitFIELD(
 
 #ifdef DEBUG
     //  verify still on same table
-    Assert( FFixedFid( fidMSO_ObjidTable ) );
+    Assert( fidMSO_ObjidTable.FFixed() );
     Call( ErrRECIRetrieveFixedColumn(
                 pfcbNil,
                 ptdbCatalog,
@@ -5740,7 +5739,7 @@ LOCAL ERR ErrCATIInitFIELD(
     Assert( objidTable == *( (UnalignedLittleEndian< OBJID > *)dataField.Pv() ) );
 
     //  verify this is a column
-    Assert( FFixedFid( fidMSO_Type ) );
+    Assert( fidMSO_Type.FFixed() );
     Call( ErrRECIRetrieveFixedColumn(
                 pfcbNil,
                 ptdbCatalog,
@@ -5753,7 +5752,7 @@ LOCAL ERR ErrCATIInitFIELD(
 #endif
 
 
-    Assert( FFixedFid( fidMSO_Id ) );
+    Assert( fidMSO_Id.FFixed() );
     Call( ErrRECIRetrieveFixedColumn(
                 pfcbNil,
                 ptdbCatalog,
@@ -5770,7 +5769,7 @@ LOCAL ERR ErrCATIInitFIELD(
     if ( ptdb->FTemplateTable() )
         COLUMNIDSetFTemplateColumn( *pcolumnid );
 
-    Assert( FFixedFid( fidMSO_Coltyp ) );
+    Assert( fidMSO_Coltyp.FFixed() );
     Call( ErrRECIRetrieveFixedColumn(
                 pfcbNil,
                 ptdbCatalog,
@@ -5785,7 +5784,7 @@ LOCAL ERR ErrCATIInitFIELD(
     Assert( pfield->coltyp < JET_coltypMax );
     Assert( pfield->coltyp != JET_coltypSLV );
 
-    Assert( FFixedFid( fidMSO_SpaceUsage ) );
+    Assert( fidMSO_SpaceUsage.FFixed() );
     Call( ErrRECIRetrieveFixedColumn(
                 pfcbNil,
                 ptdbCatalog,
@@ -5804,7 +5803,7 @@ LOCAL ERR ErrCATIInitFIELD(
     //  }
 //  UtilMemCpy( &pfield->cbMaxLen, dataField.Pv(), sizeof(ULONG) );
 
-    Assert( FFixedFid( fidMSO_Localization ) );
+    Assert( fidMSO_Localization.FFixed() );
     Call( ErrRECIRetrieveFixedColumn(
                 pfcbNil,
                 ptdbCatalog,
@@ -5822,7 +5821,7 @@ LOCAL ERR ErrCATIInitFIELD(
         Assert( pfield->cp == usEnglishCodePage || pfield->cp == usUniCodePage );
     }
 
-    Assert( FFixedFid( fidMSO_Flags ) );
+    Assert( fidMSO_Flags.FFixed() );
     Call( ErrRECIRetrieveFixedColumn(
                 pfcbNil,
                 ptdbCatalog,
@@ -5838,7 +5837,7 @@ LOCAL ERR ErrCATIInitFIELD(
     Assert( !FFIELDDeleted( pfield->ffield ) );
     Assert( !FFIELDVersionedAdd( pfield->ffield ) );
 
-    Assert( FFixedFid( fidMSO_RecordOffset ) );
+    Assert( fidMSO_RecordOffset.FFixed() );
     Call( ErrRECIRetrieveFixedColumn(
                 pfcbNil,
                 ptdbCatalog,
@@ -5860,7 +5859,7 @@ LOCAL ERR ErrCATIInitFIELD(
     }
 
     CHAR    szColumnName[JET_cbNameMost+1];
-    Assert( FVarFid( fidMSO_Name ) );
+    Assert( fidMSO_Name.FVar() );
     Call( ErrRECIRetrieveVarColumn(
                 pfcbNil,
                 ptdbCatalog,
@@ -5895,7 +5894,7 @@ LOCAL ERR ErrCATIInitFIELD(
         //  extract the callback information about this column
         //  add a CBDESC to the TDB
 
-        Assert( FVarFid( fidMSO_Callback ) );
+        Assert( fidMSO_Callback.FVar() );
         Call( ErrRECIRetrieveVarColumn(
                     pfcbNil,
                     ptdbCatalog,
@@ -5922,7 +5921,7 @@ LOCAL ERR ErrCATIInitFIELD(
             Call( ErrCALLBACKResolve( szCallback, &callback ) );
         }
 
-        Assert( FTaggedFid( fidMSO_CallbackData ) );
+        Assert( fidMSO_CallbackData.FTagged() );
         ULONG cbUserData;
         cbUserData = 0;
         Call( ErrCATIRetrieveTaggedColumn(
@@ -5985,7 +5984,7 @@ LOCAL ERR ErrCATIInitFIELD(
     }
     else if ( FFIELDDefault( pfield->ffield ) )
     {
-        Assert( FVarFid( fidMSO_DefaultValue ) );
+        Assert( fidMSO_DefaultValue.FVar() );
         Call( ErrRECIRetrieveVarColumn(
                     pfcbNil,
                     ptdbCatalog,
@@ -6013,7 +6012,7 @@ LOCAL ERR ErrCATIInitFIELD(
     else
     {
 #ifdef DEBUG
-        Assert( FVarFid( fidMSO_DefaultValue ) );
+        Assert( fidMSO_DefaultValue.FVar() );
         Call( ErrRECIRetrieveVarColumn(
                     pfcbNil,
                     ptdbCatalog,
@@ -6179,7 +6178,7 @@ LOCAL ERR ErrCATIBuildFIELDArray(
         Assert( locOnCurBM == pfucbCatalog->locLogical );
         Assert( Pcsr( pfucbCatalog )->FLatched() );
 
-        Assert( FFixedFid( fidMSO_ObjidTable ) );
+        Assert( fidMSO_ObjidTable.FFixed() );
         Call( ErrRECIRetrieveFixedColumn(
                     pfcbNil,
                     pfucbCatalog->u.pfcb->Ptdb(),
@@ -6194,7 +6193,7 @@ LOCAL ERR ErrCATIBuildFIELDArray(
         }
 
         //  verify this is a column
-        Assert( FFixedFid( fidMSO_Type ) );
+        Assert( fidMSO_Type.FFixed() );
         Call( ErrRECIRetrieveFixedColumn(
                     pfcbNil,
                     pfucbCatalog->u.pfcb->Ptdb(),
@@ -6540,7 +6539,7 @@ INLINE ERR ErrCATIInitTDB(
 {
     ERR             err;
     TDB             *ptdb           = ptdbNil;
-    TCIB            tcib            = { fidFixedLeast-1, fidVarLeast-1, fidTaggedLeast-1 };
+    TCIB            tcib;
     INST            *pinst          = PinstFromPpib( ppib );
     BOOL            fSystemTable    = fFalse;
 
@@ -6783,7 +6782,7 @@ LOCAL ERR ErrCATIInitIDB(
 
 #ifdef DEBUG
     //  verify still on same table
-    Assert( FFixedFid( fidMSO_ObjidTable ) );
+    Assert( fidMSO_ObjidTable.FFixed() );
     Call( ErrRECIRetrieveFixedColumn(
                 pfcbNil,
                 ptdbCatalog,
@@ -6795,7 +6794,7 @@ LOCAL ERR ErrCATIInitIDB(
     Assert( objidTable == *( (UnalignedLittleEndian< OBJID > *)dataField.Pv() ) );
 
     //  verify this is an index
-    Assert( FFixedFid( fidMSO_Type ) );
+    Assert( fidMSO_Type.FFixed() );
     Call( ErrRECIRetrieveFixedColumn(
                 pfcbNil,
                 ptdbCatalog,
@@ -6807,7 +6806,7 @@ LOCAL ERR ErrCATIInitIDB(
     Assert( sysobjIndex == *( (UnalignedLittleEndian< SYSOBJ > *)dataField.Pv() ) );
 #endif
 
-    Assert( FVarFid( fidMSO_Name ) );
+    Assert( fidMSO_Name.FVar() );
     Call( ErrRECIRetrieveVarColumn(
                 pfcbNil,
                 ptdbCatalog,
@@ -6828,7 +6827,7 @@ LOCAL ERR ErrCATIInitIDB(
     UtilMemCpy( szIndexName, dataField.Pv(), cbDataField );
     szIndexName[cbDataField] = 0;
 
-    Assert( FFixedFid( fidMSO_PgnoFDP ) );
+    Assert( fidMSO_PgnoFDP.FFixed() );
     Call( ErrRECIRetrieveFixedColumn(
                 pfcbNil,
                 ptdbCatalog,
@@ -6840,7 +6839,7 @@ LOCAL ERR ErrCATIInitIDB(
     *ppgnoIndexFDP = *(UnalignedLittleEndian< PGNO > *) dataField.Pv();
 //  UtilMemCpy( ppgnoIndexFDP, dataField.Pv(), sizeof(PGNO) );
 
-    Assert( FFixedFid( fidMSO_Id ) );
+    Assert( fidMSO_Id.FFixed() );
     Call( ErrRECIRetrieveFixedColumn(
                 pfcbNil,
                 ptdbCatalog,
@@ -6852,7 +6851,7 @@ LOCAL ERR ErrCATIInitIDB(
     *ppgnoObjidFDP = *(UnalignedLittleEndian< PGNO > *) dataField.Pv();
 //  UtilMemCpy( ppgnoObjidFDP, dataField.Pv(), sizeof(PGNO) );
 
-    Assert( FFixedFid( fidMSO_Flags ) );
+    Assert( fidMSO_Flags.FFixed() );
     Call( ErrRECIRetrieveFixedColumn(
                 pfcbNil,
                 ptdbCatalog,
@@ -7102,7 +7101,7 @@ LOCAL ERR ErrCATIInitIDB(
 
     // Done with Locale information!
 
-    Assert( FFixedFid( fidMSO_KeyMost ) );
+    Assert( fidMSO_KeyMost.FFixed() );
     Call( ErrRECIRetrieveFixedColumn(
                 pfcbNil,
                 ptdbCatalog,
@@ -7129,7 +7128,7 @@ LOCAL ERR ErrCATIInitIDB(
     //  KeyFldIDs so cbVarSegMac can be specified
     //  on a per-field basis
     //
-    Assert( FVarFid( fidMSO_VarSegMac ) );
+    Assert( fidMSO_VarSegMac.FVar() );
     Call( ErrRECIRetrieveVarColumn(
                 pfcbNil,
                 ptdbCatalog,
@@ -7152,7 +7151,7 @@ LOCAL ERR ErrCATIInitIDB(
         Assert( pidb->CbVarSegMac() <= cbKeyMostMost );
     }
 
-    Assert( FVarFid( fidMSO_KeyFldIDs ) );
+    Assert( fidMSO_KeyFldIDs.FVar() );
     Call( ErrRECIRetrieveVarColumn(
             pfcbNil,
             ptdbCatalog,
@@ -7188,7 +7187,7 @@ LOCAL ERR ErrCATIInitIDB(
     }
 
 
-    Assert( FVarFid( fidMSO_ConditionalColumns ) );
+    Assert( fidMSO_ConditionalColumns.FVar() );
     Call( ErrRECIRetrieveVarColumn(
                 pfcbNil,
                 ptdbCatalog,
@@ -7222,7 +7221,7 @@ LOCAL ERR ErrCATIInitIDB(
     }
 
 
-    Assert( FVarFid( fidMSO_TupleLimits ) );
+    Assert( fidMSO_TupleLimits.FVar() );
     Call( ErrRECIRetrieveVarColumn(
                 pfcbNil,
                 ptdbCatalog,
@@ -7359,7 +7358,7 @@ LOCAL ERR ErrCATIInitIndexFCBs(
         Assert( locOnCurBM == pfucbCatalog->locLogical );
         Assert( Pcsr( pfucbCatalog )->FLatched() );
 
-        Assert( FFixedFid( fidMSO_ObjidTable ) );
+        Assert( fidMSO_ObjidTable.FFixed() );
         Call( ErrRECIRetrieveFixedColumn(
                     pfcbNil,
                     pfucbCatalog->u.pfcb->Ptdb(),
@@ -7374,7 +7373,7 @@ LOCAL ERR ErrCATIInitIndexFCBs(
         }
 
         //  verify this is an index
-        Assert( FFixedFid( fidMSO_Type ) );
+        Assert( fidMSO_Type.FFixed() );
         Call( ErrRECIRetrieveFixedColumn(
                     pfcbNil,
                     pfucbCatalog->u.pfcb->Ptdb(),
@@ -7735,7 +7734,7 @@ LOCAL ERR ErrCATIInitCallbacks(
         Assert( locOnCurBM == pfucbCatalog->locLogical );
         Assert( Pcsr( pfucbCatalog )->FLatched() );
 
-        Assert( FFixedFid( fidMSO_ObjidTable ) );
+        Assert( fidMSO_ObjidTable.FFixed() );
         Call( ErrRECIRetrieveFixedColumn(
                     pfcbNil,
                     pfucbCatalog->u.pfcb->Ptdb(),
@@ -7750,7 +7749,7 @@ LOCAL ERR ErrCATIInitCallbacks(
         }
 
         //  verify this is a callback
-        Assert( FFixedFid( fidMSO_Type ) );
+        Assert( fidMSO_Type.FFixed() );
         Call( ErrRECIRetrieveFixedColumn(
                     pfcbNil,
                     pfucbCatalog->u.pfcb->Ptdb(),
@@ -7763,7 +7762,7 @@ LOCAL ERR ErrCATIInitCallbacks(
         {
             case sysobjCallback:
             {
-                Assert( FFixedFid( fidMSO_Flags ) );
+                Assert( fidMSO_Flags.FFixed() );
                 Call( ErrRECIRetrieveFixedColumn(
                             pfcbNil,
                             pfucbCatalog->u.pfcb->Ptdb(),
@@ -7775,7 +7774,7 @@ LOCAL ERR ErrCATIInitCallbacks(
                 cbtyp = *(UnalignedLittleEndian< ULONG > *) dataField.Pv();
                 Assert( JET_cbtypNull != cbtyp );
 
-                Assert( FVarFid( fidMSO_Callback ) );
+                Assert( fidMSO_Callback.FVar() );
                 Call( ErrRECIRetrieveVarColumn(
                             pfcbNil,
                             pfucbCatalog->u.pfcb->Ptdb(),
@@ -7912,7 +7911,7 @@ ERR ErrCATInitFCB( FUCB *pfucbTable, OBJID objidTable )
     Assert( pfucbNil == pfucbCatalog->pfucbCurIndex );
     Assert( locOnCurBM == pfucbCatalog->locLogical );
 
-    Assert( FVarFid( fidMSO_Name ) );
+    Assert( fidMSO_Name.FVar() );
     Call( ErrRECIRetrieveVarColumn(
                 pfcbNil,
                 pfucbCatalog->u.pfcb->Ptdb(),
@@ -7944,7 +7943,7 @@ ERR ErrCATInitFCB( FUCB *pfucbTable, OBJID objidTable )
             (ULONG)ifmp,
             objidTable ) );
 
-    Assert( FTaggedFid( fidMSO_SeparateLVThreshold ) );
+    Assert( fidMSO_SeparateLVThreshold.FTagged() );
     ULONG cbActual = 0;
     Call( ErrCATIRetrieveTaggedColumn(
                     pfucbCatalog,
@@ -7971,7 +7970,7 @@ ERR ErrCATInitFCB( FUCB *pfucbTable, OBJID objidTable )
     }
     ULONG cbSeparateLV = le_ulSeparateLV;   // if we leave this at zero, we get the defautl later ...
 
-    Assert( FFixedFid( fidMSO_Flags ) );
+    Assert( fidMSO_Flags.FFixed() );
     Call( ErrRECIRetrieveFixedColumn(
                 pfcbNil,
                 pfucbCatalog->u.pfcb->Ptdb(),
@@ -8006,7 +8005,7 @@ ERR ErrCATInitFCB( FUCB *pfucbTable, OBJID objidTable )
             CHAR    szTemplateTable[JET_cbNameMost+1];
             FUCB    *pfucbTemplateTable;
 
-            Assert( FVarFid( fidMSO_TemplateTable ) );
+            Assert( fidMSO_TemplateTable.FVar() );
             Call( ErrRECIRetrieveVarColumn(
                         pfcbNil,
                         pfucbCatalog->u.pfcb->Ptdb(),
@@ -8066,7 +8065,7 @@ ERR ErrCATInitFCB( FUCB *pfucbTable, OBJID objidTable )
 
 #ifdef DEBUG
             //  verify still on same record
-            Assert( FFixedFid( fidMSO_ObjidTable ) );
+            Assert( fidMSO_ObjidTable.FFixed() );
             CallS( ErrRECIRetrieveFixedColumn(
                         pfcbNil,
                         pfucbCatalog->u.pfcb->Ptdb(),
@@ -8076,7 +8075,7 @@ ERR ErrCATInitFCB( FUCB *pfucbTable, OBJID objidTable )
             Assert( dataField.Cb() == sizeof(OBJID) );
             Assert( objidTable == *( (UnalignedLittleEndian< OBJID > *)dataField.Pv() ) );
 
-            Assert( FFixedFid( fidMSO_Type ) );
+            Assert( fidMSO_Type.FFixed() );
             CallS( ErrRECIRetrieveFixedColumn(
                         pfcbNil,
                         pfucbCatalog->u.pfcb->Ptdb(),
@@ -8111,7 +8110,7 @@ ERR ErrCATInitFCB( FUCB *pfucbTable, OBJID objidTable )
     fSetDeferredLVSpacehints = ( err != JET_wrnColumnNull );
 
     LONG cbLVChunkMost = 0;
-    Assert( FFixedFid( fidMSO_LVChunkMax ) );
+    Assert( fidMSO_LVChunkMax.FFixed() );
     Call( ErrRECIRetrieveFixedColumn(
                 pfcbNil,
                 pfucbCatalog->u.pfcb->Ptdb(),
@@ -8281,7 +8280,7 @@ ERR ErrCATInitTempFCB( FUCB *pfucbTable )
     PIB     *ppib = pfucbTable->ppib;
     FCB     *pfcb = pfucbTable->u.pfcb;
     TDB     *ptdb = ptdbNil;
-    TCIB    tcib = { fidFixedLeast-1, fidVarLeast-1, fidTaggedLeast-1 };
+    TCIB    tcib;
     INST    *pinst = PinstFromPpib( ppib );
 
     Assert( !pfcb->FInitialized() || pfcb->FInitedForRecovery() );
@@ -8480,7 +8479,7 @@ ERR ErrCATStats(
     {
         DATA    dataField;
 
-        Assert( FVarFid( fidMSO_Stats ) );
+        Assert( fidMSO_Stats.FVar() );
         Call( ErrRECIRetrieveVarColumn(
                     pfcbNil,
                     pfucbCatalog->u.pfcb->Ptdb(),
@@ -8593,7 +8592,7 @@ LOCAL ERR ErrCATIChangeColumnDefaultValue(
     CallR( ErrIsamPrepareUpdate( ppib, pfucbCatalog, JET_prepReplaceNoLock ) );
 
     // get the exsiting flags
-    Assert( FFixedFid( fidMSO_Flags ) );
+    Assert( fidMSO_Flags.FFixed() );
     Call( ErrRECIRetrieveFixedColumn(
                 pfcbNil,
                 pfucbCatalog->u.pfcb->Ptdb(),
@@ -8737,7 +8736,7 @@ LOCAL ERR ErrCATIUpgradeLocaleForOneIndex(
     PGNO    pgnoFDPIndex;
     WCHAR wszLocaleNameT[NORM_LOCALE_NAME_MAX_LENGTH];
 
-    Assert( FFixedFid( fidMSO_PgnoFDP ) );
+    Assert( fidMSO_PgnoFDP.FFixed() );
     Call( ErrRECIRetrieveFixedColumn(
                 pfcbNil,
                 pfucbCatalog->u.pfcb->Ptdb(),
@@ -8775,7 +8774,7 @@ LOCAL ERR ErrCATIUpgradeLocaleForOneIndex(
         LCID lcid;
         WCHAR wszLocaleNameFromLcid[ NORM_LOCALE_NAME_MAX_LENGTH ];
 
-        Assert( FFixedFid( fidMSO_Localization ) );
+        Assert( fidMSO_Localization.FFixed() );
         Call( ErrRECIRetrieveFixedColumn(
             pfcbNil,
             pfucbCatalog->u.pfcb->Ptdb(),
@@ -8817,7 +8816,7 @@ LOCAL ERR ErrCATIUpgradeLocaleForOneIndex(
     }
 
     // The Sort Version should be the same as in the IDB.
-    Assert( FVarFid( fidMSO_Version ) );
+    Assert( fidMSO_Version.FVar() );
     Call( ErrRECIRetrieveVarColumn(
         pfcbNil,
         pfucbCatalog->u.pfcb->Ptdb(),
@@ -8848,7 +8847,7 @@ LOCAL ERR ErrCATIUpgradeLocaleForOneIndex(
 }
 #endif
 
-    Assert( FVarFid( fidMSO_SortID ) );
+    Assert( fidMSO_SortID.FVar() );
     Call( ErrRECIRetrieveVarColumn(
         pfcbNil,
         pfucbCatalog->u.pfcb->Ptdb(),
@@ -9451,7 +9450,7 @@ ERR ErrCATDeleteOrUpdateOutOfDateLocalizedIndexes(
         Call( ErrDIRGet( pfucbCatalog ) );
         fLatched = fTrue;
 
-        Assert( FFixedFid( fidMSO_ObjidTable ) );
+        Assert( fidMSO_ObjidTable.FFixed() );
         Call( ErrRECIRetrieveFixedColumn(
             pfcbNil,
             pfucbCatalog->u.pfcb->Ptdb(),
@@ -9465,7 +9464,7 @@ ERR ErrCATDeleteOrUpdateOutOfDateLocalizedIndexes(
         Assert( objidTable >= objidTableLastWithLocalized );
         if ( objidTable > objidTableLastWithLocalized )
         {
-            Assert( FFixedFid( fidMSO_Type ) );
+            Assert( fidMSO_Type.FFixed() );
             Call( ErrRECIRetrieveFixedColumn(
                         pfcbNil,
                         pfucbCatalog->u.pfcb->Ptdb(),
@@ -9478,7 +9477,7 @@ ERR ErrCATDeleteOrUpdateOutOfDateLocalizedIndexes(
 
             if ( sysobjTable == sysobj )
             {
-                Assert( FVarFid( fidMSO_Name ) );
+                Assert( fidMSO_Name.FVar() );
                 Call( ErrRECIRetrieveVarColumn(
                             pfcbNil,
                             pfucbCatalog->u.pfcb->Ptdb(),
@@ -9503,7 +9502,7 @@ ERR ErrCATDeleteOrUpdateOutOfDateLocalizedIndexes(
             {
                 IDBFLAG     fidb;
 
-                Assert( FFixedFid( fidMSO_Flags ) );
+                Assert( fidMSO_Flags.FFixed() );
                 Call( ErrRECIRetrieveFixedColumn(
                             pfcbNil,
                             pfucbCatalog->u.pfcb->Ptdb(),
@@ -9514,7 +9513,7 @@ ERR ErrCATDeleteOrUpdateOutOfDateLocalizedIndexes(
                 Assert( dataField.Cb() == sizeof(ULONG) );
                 fidb = *(UnalignedLittleEndian< IDBFLAG > *) dataField.Pv();
 
-                Assert( FVarFid( fidMSO_Name ) );
+                Assert( fidMSO_Name.FVar() );
                 Call( ErrRECIRetrieveVarColumn(
                     pfcbNil,
                     pfucbCatalog->u.pfcb->Ptdb(),
@@ -10189,7 +10188,7 @@ ERR ErrCATAddColumnCallback(
     Call( ErrCATISeekTableObject( ppib, pfucbCatalog, objidTable, sysobjColumn, szColumn ) );
 
     // get the exsiting flags
-    Assert( FFixedFid( fidMSO_Flags ) );
+    Assert( fidMSO_Flags.FFixed() );
     Call( ErrRECIRetrieveFixedColumn(
                 pfcbNil,
                 pfucbCatalog->u.pfcb->Ptdb(),
@@ -10410,7 +10409,7 @@ ERR ErrCATIncreaseMaxColumnSize(
 
     Assert( Pcsr( pfucbCatalog )->FLatched() );
 
-    Assert( FFixedFid( fidMSO_Coltyp ) );
+    Assert( fidMSO_Coltyp.FFixed() );
     Call( ErrRECIRetrieveFixedColumn(
         pfcbNil,
         pfucbCatalog->u.pfcb->Ptdb(),
@@ -10430,7 +10429,7 @@ ERR ErrCATIncreaseMaxColumnSize(
 
         case JET_coltypBinary:
         case JET_coltypText:
-            Assert( FFixedFid( fidMSO_Id ) );
+            Assert( fidMSO_Id.FFixed() );
             Call( ErrRECIRetrieveFixedColumn(
                 pfcbNil,
                 pfucbCatalog->u.pfcb->Ptdb(),
@@ -10455,7 +10454,7 @@ ERR ErrCATIncreaseMaxColumnSize(
 
     if ( cbMaxLen > 0 )
     {
-        Assert( FFixedFid( fidMSO_SpaceUsage ) );
+        Assert( fidMSO_SpaceUsage.FFixed() );
         Call( ErrRECIRetrieveFixedColumn(
                     pfcbNil,
                     pfucbCatalog->u.pfcb->Ptdb(),
@@ -10807,7 +10806,7 @@ LOCAL ERR ErrCATIPossiblyChangeOneCallbackDLL(
 
     // retrieve the name of the current callback
 
-    Assert( FVarFid( fidMSO_Callback ) );
+    Assert( fidMSO_Callback.FVar() );
     Call( ErrRECIRetrieveVarColumn(
                 pfcbNil,
                 pfucbCatalog->u.pfcb->Ptdb(),
@@ -10922,7 +10921,7 @@ ERR ErrCATChangeCallbackDLL(
         Call( ErrDIRGet( pfucbCatalog ) );
         fLatched = true;
 
-        Assert( FFixedFid( fidMSO_Type ) );
+        Assert( fidMSO_Type.FFixed() );
         Call( ErrRECIRetrieveFixedColumn(
                     pfcbNil,
                     pfucbCatalog->u.pfcb->Ptdb(),
@@ -11011,7 +11010,7 @@ LOCAL ERR ErrCATIGetColumnsOfIndex(
     TDB * const ptdbCatalog = pfucbCatalog->u.pfcb->Ptdb();
 
     //  verify still on same table
-    Assert( FFixedFid( fidMSO_ObjidTable ) );
+    Assert( fidMSO_ObjidTable.FFixed() );
     Call( ErrRECIRetrieveFixedColumn(
                 pfcbNil,
                 ptdbCatalog,
@@ -11028,7 +11027,7 @@ LOCAL ERR ErrCATIGetColumnsOfIndex(
     }
 
     //  verify this is an index
-    Assert( FFixedFid( fidMSO_Type ) );
+    Assert( fidMSO_Type.FFixed() );
     Call( ErrRECIRetrieveFixedColumn(
                 pfcbNil,
                 ptdbCatalog,
@@ -11044,7 +11043,7 @@ LOCAL ERR ErrCATIGetColumnsOfIndex(
         Call( ErrERRCheck( JET_errCatalogCorrupted ) );
     }
 
-    Assert( FFixedFid( fidMSO_Flags ) );
+    Assert( fidMSO_Flags.FFixed() );
     Call( ErrRECIRetrieveFixedColumn(
                 pfcbNil,
                 ptdbCatalog,
@@ -11066,7 +11065,7 @@ LOCAL ERR ErrCATIGetColumnsOfIndex(
 
     *pfPrimaryIndex = fFalse;
 
-    Assert( FVarFid( fidMSO_KeyFldIDs ) );
+    Assert( fidMSO_KeyFldIDs.FVar() );
     Call( ErrRECIRetrieveVarColumn(
                 pfcbNil,
                 ptdbCatalog,
@@ -11129,7 +11128,7 @@ LOCAL ERR ErrCATIGetColumnsOfIndex(
                 ptcibTemplateTable );
     }
 
-    Assert( FVarFid( fidMSO_ConditionalColumns ) );
+    Assert( fidMSO_ConditionalColumns.FVar() );
     Call( ErrRECIRetrieveVarColumn(
                 pfcbNil,
                 ptdbCatalog,
@@ -11407,7 +11406,7 @@ ERR ErrCATAddConditionalColumnsToAllIndexes(
     DATA            dataField;
     BOOL            fTemplateTable          = fFalse;
     OBJID           objidTemplateTable      = objidNil;
-    TCIB            tcibTemplateTable       = { fidFixedLeast-1, fidVarLeast-1, fidTaggedLeast-1 };
+    TCIB            tcibTemplateTable;
     LE_IDXFLAG      le_idxflag;
     const SYSOBJ    sysobj                  = sysobjIndex;
 
@@ -11424,7 +11423,7 @@ ERR ErrCATAddConditionalColumnsToAllIndexes(
     //  should be on primary index
     Assert( pfucbNil == pfucbCatalog->pfucbCurIndex );
 
-    Assert( FFixedFid( fidMSO_Flags ) );
+    Assert( fidMSO_Flags.FFixed() );
     Call( ErrRECIRetrieveFixedColumn(
                 pfcbNil,
                 pfucbCatalog->u.pfcb->Ptdb(),
@@ -11441,7 +11440,7 @@ ERR ErrCATAddConditionalColumnsToAllIndexes(
         CHAR        szTemplateTable[JET_cbNameMost+1];
         COLUMNID    columnidLeast;
 
-        Assert( FVarFid( fidMSO_TemplateTable ) );
+        Assert( fidMSO_TemplateTable.FVar() );
         Call( ErrRECIRetrieveVarColumn(
                     pfcbNil,
                     pfucbCatalog->u.pfcb->Ptdb(),
@@ -11474,7 +11473,7 @@ ERR ErrCATAddConditionalColumnsToAllIndexes(
                     pfucbCatalog,
                     objidTable,
                     &columnidLeast ) );
-        tcibTemplateTable.fidFixedLast = FID( FFixedFid( FidOfColumnid( columnidLeast ) ) ? //  use FFixedFid() to avoid valid columnid check
+        tcibTemplateTable.fidFixedLast = FID( FidOfColumnid( columnidLeast ).FFixed() ? //  use FID:FFixed() to avoid valid columnid check
                                             FidOfColumnid( columnidLeast ) - 1 :
                                             fidFixedLeast - 1 );
 
@@ -12077,7 +12076,7 @@ ERR ErrCATScanTableIndices(
             objidNext = objidCurrent + 1;
         }
 
-        Assert( FVarFid( fidMSO_Name ) );
+        Assert( fidMSO_Name.FVar() );
         Call( ErrRECIRetrieveVarColumn(
             pfcbNil,
             pfucbCatalog->u.pfcb->Ptdb(),
@@ -12217,7 +12216,7 @@ ERR ErrCATISeekTableType(
         Call( ErrDIRGet( pfucbCatalog ) );
         fCatalogLatched = fTrue;
 
-        Assert( FVarFid( fidMSO_Name ) );
+        Assert( fidMSO_Name.FVar() );
         Call( ErrRECIRetrieveVarColumn(
             pfcbNil,
             pfucbCatalog->u.pfcb->Ptdb(),
@@ -14232,7 +14231,7 @@ ERR ErrCATIAccumulateIndexLocales(
         Call( ErrDIRGet( pfucbCatalog ) );
         fLatched = fTrue;
 
-        Assert( FFixedFid( fidMSO_ObjidTable ) );
+        Assert( fidMSO_ObjidTable.FFixed() );
         Call( ErrRECIRetrieveFixedColumn(
                     pfcbNil,
                     pfucbCatalog->u.pfcb->Ptdb(),
@@ -14244,7 +14243,7 @@ ERR ErrCATIAccumulateIndexLocales(
         objidTable = *(UnalignedLittleEndian< OBJID > *) dataField.Pv();
 
 
-        Assert( FFixedFid( fidMSO_Type ) );
+        Assert( fidMSO_Type.FFixed() );
         Call( ErrRECIRetrieveFixedColumn(
                     pfcbNil,
                     pfucbCatalog->u.pfcb->Ptdb(),
@@ -14259,7 +14258,7 @@ ERR ErrCATIAccumulateIndexLocales(
         {
             // Don't really need anymore ... UNLESS the primary unicode index slips through here ... leaving
             // here for similarity with above code.
-            Assert( FVarFid( fidMSO_Name ) );
+            Assert( fidMSO_Name.FVar() );
             Call( ErrRECIRetrieveVarColumn(
                         pfcbNil,
                         pfucbCatalog->u.pfcb->Ptdb(),
@@ -14282,7 +14281,7 @@ ERR ErrCATIAccumulateIndexLocales(
         {
             IDBFLAG     fidb;
 
-            Assert( FFixedFid( fidMSO_Flags ) );
+            Assert( fidMSO_Flags.FFixed() );
             Call( ErrRECIRetrieveFixedColumn(
                         pfcbNil,
                         pfucbCatalog->u.pfcb->Ptdb(),

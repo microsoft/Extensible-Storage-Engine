@@ -9825,7 +9825,7 @@ LOCAL VOID EDBGDumpColumnMetaData(
         szType,
         ( FRECTextColumn( pfield->coltyp ) && usUniCodePage == pfield->cp ? " (Unicode)" : "" ) );
 
-    if ( FFixedFid( FidOfColumnid( columnid ) ) )
+    if ( FidOfColumnid( columnid ).FFixed() )
     {
         dprintf( "offset=0x%04x, ", pfield->ibRecordOffset );
     }

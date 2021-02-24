@@ -155,7 +155,7 @@ typedef WORD            _FID;
 enum FIDTYP { fidtypUnknown = 0, fidtypFixed, fidtypVar, fidtypTagged };
 // Special case values used for FID constructors.  Values other than those explicitly defined
 // here are used as offsets.  See the constructor for their use.
-enum FIDLIMIT { fidlimMin = 0, fidlimMax = (0xFFFE), fidlimNone = (0xFFFF) };
+enum FIDLIMIT { fidlimLeast = 0, fidlimMost = (0xFFFE), fidlimNone = (0xFFFF) };
 
 //  these are needed for setting columns and tracking indexes
 //
@@ -170,42 +170,89 @@ class FID
 private:
     _FID m_fidVal;
 
-    // NOTE: The "None" val is one less than the "Min" val and is often used as a
-    // NULL marker.  For example,
-    //    fidHighestRequestedTagged = FID(FixedNoneVal)
-    // might be used to indicate that no Tagged values were requested.
+    // There are 3 types of FIDs:
+    //   fidtypFixed: Represents a fixed column.
+    //   fidtypVar: Represents a variable column.
+    //   fidtypTagged: Represents a tagged column.
     //
-    // More rarely, the "NoneFull" value is one more than the "Max" val and is used
-    // as a marker that a table inherits from a Template table that has used up all the
-    // FIDs of a given type, and the derived table has no explicit FIDs of that type.
+    // There are 4 "special" FIDs with a type that can be referred to by constants:
+    //   fidlimLeast: The smallest value for the FID type.  That is, the left hand limit of the range.
+    //   fidlimMost: The largest value for the FID type.  That is, the right hand limit of the range.
+    //   fidlimNone: An exceptional value, one less than the smallest value. The "None" val for a FID
+    //     type than the "Least" val and is used as a NULL marker.  For example, to indicate that no Tagged
+    //     FIDs were requested, you might use the following:
     //
-    // Note the unfortunate duplication.
-    // 256 == VarNoneFullVal    & TaggedMinVal
-    // 255 == TaggedNoneVal     & VarMaxVal
-    // 128 == FixedNoneFullVal  & VarMinVal
-    // 127 == VarNoneVal        & FixedMaxVal
-    // 0   == FixedNoneVal      & fid.FNull()
-    // This means that fid.Fidtyp() is unreliable for those cases.
+    //             fidHighestRequestedTagged = FID( fidtypTagged, fidlimNone )
+    //
+    //   fidlimNoneFull: Another exceptional value, and very rarely used.  The "NoneFull" value is one greater
+    //     than the "Most" val and is used as a marker that a table inherits from a Template table that has used
+    //     up all the FIDs of a given type, and the derived table has no explicit FIDs of that type.
+    //
+    // The following table shows actual numeric values:
+    //
+    //               | fidlimNone  | fidlimLeast |   fidlimMost   |  fidlimNoneFull  |
+    //               |-------------|-------------|----------------|------------------|
+    //               |             |             |                |                  |
+    //  fidtypFixed  |    0        |      1      |      127       |      128         |
+    //               |             |             |                |                  |
+    //               |-------------|-------------|----------------|------------------|
+    //               |             |             |                |                  |
+    //  fidtypVar    |   127       |     128     |      255       |      256         |
+    //               |             |             |                |                  |
+    //               |-------------|-------------|----------------|--_---------------|
+    //               |             |             |                |                  |
+    //  fidtypTagged |   255       |     256     |  JET_ccolMost  | JET_ccolMost + 1 |
+    //               |             |             |                |                  |
+    //               |-------------|-------------|----------------|------------------|
+    //
+    //
+    // The sharped-eyed reader will see some unfortunate duplication:
+    //     256 == VarNoneFullVal   == TaggedLeastVal
+    //     255 == TaggedNoneVal    == VarMostVal
+    //     128 == FixedNoneFullVal == VarLeastVal
+    //     127 == VarNoneVal       == FixedMostVal
+    //
+    // This means that FID::Fidtyp() is unreliable for those (and only those) cases, and differentiation
+    // must be done by context.
+    //
     
-public:
-    // Tagged range from 256 to
+    // Tagged range from 256 to JET_ccolMost
     static const _FID _fidTaggedNoneFullVal = JET_ccolMost + 1;
-    static const _FID _fidTaggedMaxVal      = JET_ccolMost;
-    static const _FID _fidTaggedMinVal      = 256;
-    static const _FID _fidTaggedNoneVal     = _fidTaggedMinVal - 1;
+    static const _FID _fidTaggedMostVal     = JET_ccolMost;
+    static const _FID _fidTaggedLeastVal    = 256;
+    static const _FID _fidTaggedNoneVal     = _fidTaggedLeastVal - 1;
 
     // Var range from 128 to 255
-    static const _FID _fidVarNoneFullVal    = _fidTaggedMinVal;
-    static const _FID _fidVarMaxVal         = _fidTaggedMinVal - 1;
-    static const _FID _fidVarMinVal         = 128;
-    static const _FID _fidVarNoneVal        = _fidVarMinVal - 1;
+    static const _FID _fidVarNoneFullVal    = _fidTaggedLeastVal;
+    static const _FID _fidVarMostVal        = _fidTaggedLeastVal - 1;
+    static const _FID _fidVarLeastVal       = 128;
+    static const _FID _fidVarNoneVal        = _fidVarLeastVal - 1;
 
     // Fixed range from 1 to 127
-    static const _FID _fidFixedNoneFullVal  = _fidVarMinVal;
-    static const _FID _fidFixedMaxVal       = _fidVarMinVal - 1;
-    static const _FID _fidFixedMinVal       = 1;
-    static const _FID _fidFixedNoneVal      = _fidFixedMinVal - 1;
-    
+    static const _FID _fidFixedNoneFullVal  = _fidVarLeastVal;
+    static const _FID _fidFixedMostVal      = _fidVarLeastVal - 1;
+    static const _FID _fidFixedLeastVal     = 1;
+    static const _FID _fidFixedNoneVal      = _fidFixedLeastVal - 1;
+
+    // Private function that can be applied as a hash (used FID::IbHash()) or to count
+    // bits (used in FID::CbMapSize() ).  Why Omicron? Because the Gamma function is
+    // already taken.
+    INLINE INT _Omicron( const WORD wBaseVal, const WORD cbitMod, const WORD cbitOffset) const
+    {
+        Assert( FValid() );
+        Assert( m_fidVal >= wBaseVal );
+
+        if ( 0 != cbitMod ) {
+            return ( ( ( ( m_fidVal - wBaseVal ) % cbitMod ) + cbitOffset ) / 8 );
+        }
+        else
+        {
+            // Since there is no modulo identity value, treat modulo 0 as an
+            // identity function.
+            return ( ( ( m_fidVal - wBaseVal ) + cbitOffset ) / 8 );
+        }
+    }
+
 public:
     FID( const _FID wFidVal = 0 )
     {
@@ -213,15 +260,15 @@ public:
         Assert( FValid() );
     }
 
-    explicit FID( const FIDTYP fidtypType, const WORD wIndex )
+    explicit FID( const FIDTYP fidtyp, const WORD wIndex )
     {
-        switch ( fidtypType )
+        switch ( fidtyp )
         {
         case fidtypFixed:
             switch ( wIndex )
             {
-            case fidlimMax:
-                m_fidVal = _fidFixedMaxVal;
+            case fidlimMost:
+                m_fidVal = _fidFixedMostVal;
                 break;
 
             case fidlimNone:
@@ -229,7 +276,7 @@ public:
                 break;
 
             default:
-                m_fidVal = _fidFixedMinVal + wIndex;
+                m_fidVal = _fidFixedLeastVal + wIndex;
                 Assert( FFixed() );
                 break;
             }
@@ -238,8 +285,8 @@ public:
         case fidtypVar:
             switch ( wIndex )
             {
-            case fidlimMax:
-                m_fidVal = _fidVarMaxVal;
+            case fidlimMost:
+                m_fidVal = _fidVarMostVal;
                 break;
 
             case fidlimNone:
@@ -247,7 +294,7 @@ public:
                 break;
 
             default:
-                m_fidVal = _fidVarMinVal + wIndex;
+                m_fidVal = _fidVarLeastVal + wIndex;
                 Assert( FVar() );
                 break;
             }
@@ -256,8 +303,8 @@ public:
         case fidtypTagged:
             switch ( wIndex )
             {
-            case fidlimMax:
-                m_fidVal = _fidTaggedMaxVal;
+            case fidlimMost:
+                m_fidVal = _fidTaggedMostVal;
                 break;
 
             case fidlimNone:
@@ -265,7 +312,7 @@ public:
                 break;
 
             default:
-                m_fidVal = _fidTaggedMinVal + wIndex;
+                m_fidVal = _fidTaggedLeastVal + wIndex;
                 Assert( FTagged() );
             }
             break;
@@ -306,7 +353,11 @@ public:
             return fidtypTagged;
         }
 
-        AssertSz( fFalse, "Unknown fid type." );
+        // Given that we get COLUMNIDs and thus FIDs from user input, we can see invalid
+        // fidtyp values.  Especially, there are negative tests that do so.  Therefore, 
+        // don't do an Assert like:
+        //     AssertSz( fFalse, "Unknown fid type." );
+        // except, perhaps, during development work.
         return fidtypUnknown;
     }
     
@@ -342,95 +393,41 @@ public:
         return fFalse;
     }
     
-    INLINE BOOL FFixed( ) const
-    {
-        Assert( FValid() );
-        return ( ( _fidFixedMinVal <= m_fidVal ) && ( m_fidVal <= _fidFixedMaxVal ) );
-    }
+    INLINE BOOL FFixed( ) const          { Assert( FValid() ); return ( ( _fidFixedLeastVal <= m_fidVal ) && ( m_fidVal <= _fidFixedMostVal ) ); }
+    INLINE BOOL FFixedNone( ) const      { Assert( FValid() ); return ( m_fidVal == _fidFixedNoneVal ); }
+    INLINE BOOL FFixedMost( ) const      { Assert( FValid() ); return ( m_fidVal == _fidFixedMostVal ); }
+    INLINE BOOL FFixedLeast( ) const     { Assert( FValid() ); return ( m_fidVal == _fidFixedLeastVal ); }
+    INLINE BOOL FFixedNoneFull( ) const  { Assert( FValid() ); return ( m_fidVal == _fidFixedNoneFullVal ); }
 
-    INLINE BOOL FFixedNone( ) const
-    {
-        Assert( FValid() );
-        return ( m_fidVal == _fidFixedNoneVal );
-    }
-
-    INLINE BOOL FFixedMax( ) const
-    {
-        Assert( FValid() );
-        return ( m_fidVal == _fidFixedMaxVal );
-    }
-            
-    INLINE BOOL FFixedNoneFull( ) const
-    {
-        Assert( FValid() );
-        return ( m_fidVal == _fidFixedNoneFullVal );
-    }
+    // FVar() uses fancy math to do:  return ( ( _fidVarLeast <= m_fidVal ) && ( m_fidVal <= _fidVarMostVal ) )
+    INLINE BOOL FVar( ) const            { Assert( FValid() ); return ( m_fidVal ^ _fidVarLeastVal ) < _fidVarLeastVal; }
+    INLINE BOOL FVarNone( ) const        { Assert( FValid() ); return ( m_fidVal == _fidVarNoneVal ); }
+    INLINE BOOL FVarMost( ) const        { Assert( FValid() ); return ( m_fidVal == _fidVarMostVal ); }
+    INLINE BOOL FVarLeast( ) const       { Assert( FValid() ); return ( m_fidVal == _fidVarLeastVal ); }
+    INLINE BOOL FVarNoneFull( ) const    { Assert( FValid() ); return ( m_fidVal == _fidVarNoneFullVal ); }
     
-    INLINE BOOL FVar( ) const
-    {
-        Assert( FValid() );
-        //  return ( ( _fidVarLeast <= m_fidVal ) && ( m_fidVal <= _fidVarMaxVal ) )
-        return ( m_fidVal ^ _fidVarMinVal ) < _fidVarMinVal;
-    }
-
-    INLINE BOOL FVarNone( ) const
-    {
-        Assert( FValid() );
-        return ( m_fidVal == _fidVarNoneVal );
-    }
+    INLINE BOOL FTagged( ) const         { Assert( FValid() ); return ( ( _fidTaggedLeastVal <= m_fidVal ) && ( m_fidVal <= _fidTaggedMostVal ) ); }
+    INLINE BOOL FTaggedNone( ) const     { Assert( FValid() ); return ( m_fidVal == _fidTaggedNoneVal ); }
+    INLINE BOOL FTaggedMost( ) const     { Assert( FValid() ); return ( m_fidVal == _fidTaggedMostVal ); }
+    INLINE BOOL FTaggedLeast( ) const    { Assert( FValid() ); return ( m_fidVal == _fidTaggedLeastVal ); }
+    INLINE BOOL FTaggedNoneFull( ) const { Assert( FValid() ); return ( m_fidVal == _fidTaggedNoneFullVal ); }
     
-    INLINE BOOL FVarMax( ) const
-    {
-        Assert( FValid() );
-        return ( m_fidVal == _fidVarMaxVal );
-    }
-            
-    INLINE BOOL FVarNoneFull( ) const
-    {
-        Assert( FValid() );
-        return ( m_fidVal == _fidVarNoneFullVal );
-    }
-    
-    INLINE BOOL FTagged( ) const
-    {
-        Assert( FValid() );
-        return ( ( _fidTaggedMinVal <= m_fidVal ) && ( m_fidVal <= _fidTaggedMaxVal ) );
-    }
-
-    INLINE BOOL FTaggedNone( ) const
-    {
-        Assert( FValid() );
-        return ( m_fidVal == _fidTaggedNoneVal );
-    }
-
-    INLINE BOOL FTaggedMax( ) const
-    {
-        Assert( FValid() );
-        return ( m_fidVal == _fidTaggedMaxVal );
-    }
-            
-    INLINE BOOL FTaggedNoneFull( ) const
-    {
-        Assert( FValid() );
-        return ( m_fidVal == _fidTaggedNoneFullVal );
-    }
-    
-    INLINE INT Index( FIDTYP fidtypType ) const
+    INLINE INT IndexOf( FIDTYP fidtyp ) const
     {
         // Return the index of a fid value into the specified type.
-        switch ( fidtypType )
+        switch ( fidtyp )
         {
         case fidtypFixed:
             Assert( FFixed() );
-            return ( m_fidVal - _fidFixedMinVal );
+            return ( m_fidVal - _fidFixedLeastVal );
 
         case fidtypVar:
             Assert( FVar() );
-            return ( m_fidVal - _fidVarMinVal );
+            return ( m_fidVal - _fidVarLeastVal );
 
         case fidtypTagged:
             Assert( FTagged() );
-            return ( m_fidVal - _fidTaggedMinVal );
+            return ( m_fidVal - _fidTaggedLeastVal );
 
         default:
             AssertSz( fFalse, "Unknown fid type." );
@@ -438,7 +435,7 @@ public:
         }
     }
 
-    INLINE INT Index( const FID& fidBase ) const
+    INLINE INT IndexOf( const FID& fidBase ) const
     {
         // Return the index of a fid value from the specified base FID.
 #ifdef DEBUG
@@ -465,9 +462,103 @@ public:
         Assert( m_fidVal >= fidBase.m_fidVal );
         return ( m_fidVal - fidBase.m_fidVal );
     }
+
     
+    INLINE INT CountOf( const FIDTYP fidTyp ) const
+    {
+        // Return the count of fids between a fid value and the first fid of specified type, inclusive.
+        // Basically, Index() + 1, with slightly different assertions.
+        switch ( fidTyp )
+        {
+        case fidtypFixed:
+            Assert( FFixedNone() || FFixed() );
+            return m_fidVal - _fidFixedLeastVal + 1;
+
+        case fidtypVar:
+            Assert( FVarNone() || FVar() );
+            return m_fidVal - _fidVarLeastVal + 1;
+
+        case fidtypTagged:
+            Assert( FTaggedNone() || FTagged() );
+            return m_fidVal - _fidTaggedLeastVal + 1;
+
+        default:
+            AssertSz( fFalse, "Unexpected fid type." );
+            return -1;
+        }
+    }
+
+    INLINE INT CbMapSize( ) const
+    {
+        // How many bytes do you need to make a bitmap that will hold
+        // all values up to m_fidVal?  For example, if m_fidVal = 0-7, you need
+        // 1 byte.  If m_fidVal = 250, you'd need 32 bytes, 1 bit per unique
+        // value up to and including 250.
+        return _Omicron( 0, 7, 8 );
+    }
+    
+    INLINE INT IbHash ( ) const
+    {
+        Assert( FValid() );
+        
+        INT ib;
+        switch ( Fidtyp() )
+        {
+        case fidtypFixed:
+            ib = _Omicron( _fidFixedLeastVal, cbitFixed, 0 );
+            break;
+
+        case fidtypVar:
+            ib = _Omicron( _fidVarLeastVal, cbitVariable, cbitFixed );
+            break;
+
+        case fidtypTagged:
+            ib = _Omicron( _fidTaggedLeastVal, cbitTagged, cbitFixedVariable );
+            break;
+
+        default:
+            AssertSz( fFalse, "Unexpected fid type." );
+            ib = 0;
+        }
+        Assert( ib >= 0 && ib < 32 );
+        return ib;
+    }
+    
+    INLINE INT IbitHash ( ) const
+    {
+        Assert( FValid() );
+        
+        INT ibit;
+        switch ( Fidtyp() )
+        {
+        case fidtypFixed:
+            ibit =  1 << ((m_fidVal - _fidFixedLeastVal) % 8 );
+            break;
+
+        case fidtypVar:
+            ibit =  1 << ((m_fidVal - _fidVarLeastVal) % 8);
+            break;
+
+        case fidtypTagged:
+            ibit =  1 << ((m_fidVal - _fidTaggedLeastVal) % 8);
+            break;
+
+        default:
+            AssertSz( fFalse, "Unexpected fid type." );
+            ibit = 0;
+        }
+        return ibit;
+    }
+
 };
-static_assert( sizeof(_FID) == sizeof(FID), "FID is just a wrapper around a _FID to monitor its use.");
+static_assert( sizeof(_FID) == sizeof( FID ), "FID is just a wrapper around a _FID to monitor its use.");
+
+const _FID fidFixedLeast     = FID( fidtypFixed, fidlimLeast );
+const _FID fidVarLeast       = FID( fidtypVar, fidlimLeast );
+const _FID fidTaggedLeast    = FID( fidtypTagged, fidlimLeast );
+const _FID fidFixedMost      = FID( fidtypFixed, fidlimMost );
+const _FID fidVarMost        = FID( fidtypVar, fidlimMost );
+const _FID fidTaggedMost     = FID( fidtypTagged, fidlimMost );
 
 class FID_ITERATOR
 {
@@ -485,9 +576,9 @@ public:
         // table where the template table has already used up the full FID space.
         // In this case, fidFirst == fidFixedNoneFull (128) and fidLast == fidFixedMax (127).
         // If fidFirst < fidLast, then fidFirst and fidLast should be the same type.
-        Expected( ( fidFirst <= fidLast ) || ( fidFirst.FTaggedNoneFull() ? fidLast.FTaggedMax() : fTrue ) );
-        Expected( ( fidFirst <= fidLast ) || ( fidFirst.FVarNoneFull() ? fidLast.FVarMax() : fTrue ) );
-        Expected( ( fidFirst <= fidLast ) || ( fidFirst.FFixedNoneFull() ? fidLast.FFixedMax() : fTrue ) );
+        Expected( ( fidFirst <= fidLast ) || ( fidFirst.FTaggedNoneFull() ? fidLast.FTaggedMost() : fTrue ) );
+        Expected( ( fidFirst <= fidLast ) || ( fidFirst.FVarNoneFull() ? fidLast.FVarMost() : fTrue ) );
+        Expected( ( fidFirst <= fidLast ) || ( fidFirst.FFixedNoneFull() ? fidLast.FFixedMost() : fTrue ) );
         Expected( ( fidFirst > fidLast )  || ( fidFirst.Fidtyp() == fidLast.Fidtyp() ) );
         
         m_fidFirst = fidFirst;
@@ -557,75 +648,33 @@ public:
 
 };
 
-const _FID fidFixedLeast     = FID::_fidFixedMinVal;
-const _FID fidVarLeast       = FID::_fidVarMinVal;
-const _FID fidTaggedLeast    = FID::_fidTaggedMinVal;
-const _FID fidFixedMost      = FID::_fidFixedMaxVal;
-const _FID fidVarMost        = FID::_fidVarMaxVal;
-const _FID fidTaggedMost     = FID::_fidTaggedMaxVal;
-
-const _FID fidMin            = 1;
-const _FID fidMax            = fidTaggedMost;
-
-INLINE BOOL FFixedFid( const FID fid )
-{
-    return fid.FFixed();
-}
-
-INLINE BOOL FVarFid( const FID fid )
-{
-    return fid.FVar();
-}
-
-INLINE BOOL FTaggedFid( const FID fid )
-{
-    return fid.FTagged();
-}
-
-INLINE INT IbFromFid ( FID fid )
-{
-    INT ib;
-    if ( FFixedFid( fid ) )
-    {
-        ib = ((fid - fidFixedLeast) % cbitFixed) / 8;
-    }
-    else if ( FVarFid( fid ) )
-    {
-        ib = (((fid - fidVarLeast) % cbitVariable) + cbitFixed) / 8;
-    }
-    else
-    {
-        Assert( FTaggedFid( fid ) );
-        ib = (((fid - fidTaggedLeast) % cbitTagged) + cbitFixedVariable) / 8;
-    }
-    Assert( ib >= 0 && ib < 32 );
-    return ib;
-}
-
-INLINE INT IbitFromFid ( FID fid )
-{
-    INT ibit;
-    if ( FFixedFid( fid ) )
-    {
-        ibit =  1 << ((fid - fidFixedLeast) % 8 );
-    }
-    else if ( FVarFid( fid ) )
-    {
-        ibit =  1 << ((fid - fidVarLeast) % 8);
-    }
-    else
-    {
-        Assert( FTaggedFid( fid ) );
-        ibit =  1 << ((fid - fidTaggedLeast) % 8);
-    }
-    return ibit;
-}
-
 struct TCIB
 {
     FID fidFixedLast;
     FID fidVarLast;
     FID fidTaggedLast;
+
+    TCIB()
+    {
+        fidFixedLast = FID( fidtypFixed, fidlimNone );
+        fidVarLast = FID( fidtypVar, fidlimNone );
+        fidTaggedLast = FID( fidtypTagged, fidlimNone );
+        Assert( fidFixedLast.FFixedNone() );
+        Assert( fidVarLast.FVarNone() );
+        Assert( fidTaggedLast.FTaggedNone() );
+    }
+
+    TCIB(
+        FID FidFixedLast,
+        FID FidVarLast,
+        FID FidTaggedLast
+        ) :
+        fidFixedLast( FidFixedLast ),
+        fidVarLast( FidVarLast ),
+        fidTaggedLast( FidTaggedLast )
+    {
+    }
+    
 };
 
 const BYTE  fIDXSEGTemplateColumn       = 0x80;     //  column exists in the template table
@@ -636,13 +685,18 @@ typedef JET_COLUMNID    COLUMNID;
 
 const COLUMNID      fCOLUMNIDTemplate   = 0x80000000;
 
+INLINE FID FidOfColumnid( const COLUMNID columnid )
+{
+    return (_FID)columnid;
+}
+
 INLINE BOOL FCOLUMNIDValid( const COLUMNID columnid )
 {
     //  only the Template bit of the two high bytes should be used
     if ( ( columnid & ~fCOLUMNIDTemplate ) & 0xFFFF0000 )
         return fFalse;
 
-    if ( (_FID)columnid < fidMin || (_FID)columnid > fidMax )
+    if ( fidtypUnknown == FidOfColumnid( columnid ).Fidtyp() )
         return fFalse;
 
     return fTrue;
@@ -667,19 +721,19 @@ INLINE VOID COLUMNIDResetFTemplateColumn( COLUMNID& columnid )
 INLINE BOOL FCOLUMNIDFixed( const COLUMNID columnid )
 {
     Assert( FCOLUMNIDValid( columnid ) );
-    return FFixedFid( (_FID)columnid );
+    return FidOfColumnid( columnid ).FFixed();
 }
 
 INLINE BOOL FCOLUMNIDVar( const COLUMNID columnid )
 {
     Assert( FCOLUMNIDValid( columnid ) );
-    return FVarFid( (_FID)columnid );
+    return FidOfColumnid( columnid).FVar();
 }
 
 INLINE BOOL FCOLUMNIDTagged( const COLUMNID columnid )
 {
     Assert( FCOLUMNIDValid( columnid ) );
-    return FTaggedFid( (_FID)columnid );
+    return FidOfColumnid( columnid ).FTagged();
 }
 
 INLINE COLUMNID ColumnidOfFid( const FID fid, const BOOL fTemplateColumn )
@@ -691,12 +745,6 @@ INLINE COLUMNID ColumnidOfFid( const FID fid, const BOOL fTemplateColumn )
 
     return columnid;
 }
-
-INLINE FID FidOfColumnid( const COLUMNID columnid )
-{
-    return (_FID)columnid;
-}
-
 
 typedef SHORT IDXSEG_OLD;
 

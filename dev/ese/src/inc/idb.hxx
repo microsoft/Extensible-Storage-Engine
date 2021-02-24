@@ -497,8 +497,8 @@ class IDB
         }
 
         INLINE BYTE *RgbitIdx() const                   { return const_cast<IDB *>( this )->m_rgbitIdx; }
-        INLINE BOOL FColumnIndex( const FID fid ) const { return ( m_rgbitIdx[IbFromFid( fid )] & IbitFromFid( fid ) ); }
-        INLINE VOID SetColumnIndex( const FID fid )     { m_rgbitIdx[IbFromFid( fid )] |= IbitFromFid( fid ); }
+        INLINE BOOL FColumnIndex( const FID fid ) const { return ( m_rgbitIdx[fid.IbHash()] & fid.IbitHash() ); }
+        INLINE VOID SetColumnIndex( const FID fid )     { m_rgbitIdx[fid.IbHash()] |= fid.IbitHash(); }
 
         INLINE IDBFLAG FPersistedFlags() const          { return m_fidbPersisted; }
         INLINE VOID SetPersistedFlags( const IDBFLAG fidb ) { m_fidbPersisted = fidb; m_fidbNonPersisted = 0; }

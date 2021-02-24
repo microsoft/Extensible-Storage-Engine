@@ -83,43 +83,43 @@ const ULONG iMSO_LVChunkMax             = 27;
 const ULONG idataMSOMax                 = 28;
 
 
-const FID   fidMSO_ObjidTable           = fidFixedLeast;
-const FID   fidMSO_Type                 = fidFixedLeast+1;
-const FID   fidMSO_Id                   = fidFixedLeast+2;
-const FID   fidMSO_Coltyp               = fidFixedLeast+3;  // overloaded
-const FID   fidMSO_PgnoFDP              = fidFixedLeast+3;  // overloaded
-const FID   fidMSO_SpaceUsage           = fidFixedLeast+4;
-const FID   fidMSO_Flags                = fidFixedLeast+5;
-const FID   fidMSO_Pages                = fidFixedLeast+6;  // overloaded
-const FID   fidMSO_Localization         = fidFixedLeast+6;  // overloaded
-const FID   fidMSO_RootFlag             = fidFixedLeast+7;
-const FID   fidMSO_RecordOffset         = fidFixedLeast+8;  // overloaded
-const FID   fidMSO_LCMapFlags           = fidFixedLeast+9;
-const FID   fidMSO_KeyMost              = fidFixedLeast+10;
-const FID   fidMSO_LVChunkMax           = fidFixedLeast+11;
+const FID   fidMSO_ObjidTable           = FID( fidtypFixed, 0 );
+const FID   fidMSO_Type                 = FID( fidtypFixed, 1 );
+const FID   fidMSO_Id                   = FID( fidtypFixed, 2 );
+const FID   fidMSO_Coltyp               = FID( fidtypFixed, 3 );  // overloaded
+const FID   fidMSO_PgnoFDP              = FID( fidtypFixed, 3 );  // overloaded
+const FID   fidMSO_SpaceUsage           = FID( fidtypFixed, 4 );
+const FID   fidMSO_Flags                = FID( fidtypFixed, 5 );
+const FID   fidMSO_Pages                = FID( fidtypFixed, 6 );  // overloaded
+const FID   fidMSO_Localization         = FID( fidtypFixed, 6 );  // overloaded
+const FID   fidMSO_RootFlag             = FID( fidtypFixed, 7 );
+const FID   fidMSO_RecordOffset         = FID( fidtypFixed, 8 );
+const FID   fidMSO_LCMapFlags           = FID( fidtypFixed, 9 );
+const FID   fidMSO_KeyMost              = FID( fidtypFixed, 10 );
+const FID   fidMSO_LVChunkMax           = FID( fidtypFixed, 11 );
 
 const FID   fidMSO_FixedLast            = fidMSO_LVChunkMax;
 
-const FID   fidMSO_Name                 = fidVarLeast;
-const FID   fidMSO_Stats                = fidVarLeast+1;
-const FID   fidMSO_TemplateTable        = fidVarLeast+2;    // overloaded
-const FID   fidMSO_Callback             = fidVarLeast+2;    // overloaded
-const FID   fidMSO_DefaultValue         = fidVarLeast+3;
-const FID   fidMSO_KeyFldIDs            = fidVarLeast+4;
-const FID   fidMSO_VarSegMac            = fidVarLeast+5;
-const FID   fidMSO_ConditionalColumns   = fidVarLeast+6;
-const FID   fidMSO_TupleLimits          = fidVarLeast+7;
-const FID   fidMSO_Version              = fidVarLeast+8;
-const FID   fidMSO_SortID               = fidVarLeast+9;
+const FID   fidMSO_Name                 = FID( fidtypVar, 0 );
+const FID   fidMSO_Stats                = FID( fidtypVar, 1 );
+const FID   fidMSO_TemplateTable        = FID( fidtypVar, 2 );    // overloaded
+const FID   fidMSO_Callback             = FID( fidtypVar, 2 );    // overloaded
+const FID   fidMSO_DefaultValue         = FID( fidtypVar, 3 );
+const FID   fidMSO_KeyFldIDs            = FID( fidtypVar, 4 );
+const FID   fidMSO_VarSegMac            = FID( fidtypVar, 5 );
+const FID   fidMSO_ConditionalColumns   = FID( fidtypVar, 6 );
+const FID   fidMSO_TupleLimits          = FID( fidtypVar, 7 );
+const FID   fidMSO_Version              = FID( fidtypVar, 8 );
+const FID   fidMSO_SortID               = FID( fidtypVar, 9 );
 
 const FID   fidMSO_VarLast              = fidMSO_SortID;
 
-const FID   fidMSO_CallbackData         = fidTaggedLeast;
-const FID   fidMSO_CallbackDependencies = fidTaggedLeast+1;
-const FID   fidMSO_SeparateLVThreshold  = fidTaggedLeast+2;
-const FID   fidMSO_SpaceHints           = fidTaggedLeast+3;
-const FID   fidMSO_SpaceLVDeferredHints = fidTaggedLeast+4;
-const FID   fidMSO_LocaleName           = fidTaggedLeast+5;
+const FID   fidMSO_CallbackData         = FID( fidtypTagged, 0 );
+const FID   fidMSO_CallbackDependencies = FID( fidtypTagged, 1 );
+const FID   fidMSO_SeparateLVThreshold  = FID( fidtypTagged, 2 );
+const FID   fidMSO_SpaceHints           = FID( fidtypTagged, 3 );
+const FID   fidMSO_SpaceLVDeferredHints = FID( fidtypTagged, 4 );
+const FID   fidMSO_LocaleName           = FID( fidtypTagged, 5 );
 
 const FID   fidMSO_TaggedLast           = fidMSO_LocaleName;
 

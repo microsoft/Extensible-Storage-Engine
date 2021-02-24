@@ -1536,13 +1536,13 @@ INLINE VOID FUCBResetColumnSet( FUCB *pfucb )
 
 INLINE VOID FUCBSetColumnSet( FUCB * pfucb, FID fid )
 {
-    pfucb->rgbitSet[IbFromFid( fid )] |= IbitFromFid( fid );
+    pfucb->rgbitSet[ fid.IbHash()] |= fid.IbitHash();
     pfucb->fAnyColumnSet = fTrue;
 }
 
 INLINE BOOL FFUCBColumnSet( const FUCB * pfucb, FID fid )
 {
-    return (pfucb->rgbitSet[IbFromFid( fid )] & IbitFromFid( fid ));
+    return (pfucb->rgbitSet[fid.IbHash()] & fid.IbitHash());
 }
 
 INLINE BOOL FFUCBAnyColumnSet( const FUCB * pfucb )

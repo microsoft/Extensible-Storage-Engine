@@ -93,12 +93,12 @@ ERR ErrRECIAccessColumn( FUCB *pfucb, COLUMNID columnid, FIELD * const pfieldFix
         FID     fidFirst;
         FID     fidLast;
 
-        if ( FTaggedFid( fid ) )
+        if ( fid.FTagged() )
         {
             fidFirst = ptdb->FidTaggedFirst();
             fidLast = ptdb->FidTaggedLast();
         }
-        else if ( FFixedFid( fid ) )
+        else if ( fid.FFixed() )
         {
             fidFirst = ptdb->FidFixedFirst();
             fidLast = ptdb->FidFixedLast();
@@ -107,7 +107,7 @@ ERR ErrRECIAccessColumn( FUCB *pfucb, COLUMNID columnid, FIELD * const pfieldFix
         }
         else
         {
-            Assert( FVarFid( fid ) );
+            Assert( fid.FVar() );
             fidFirst = ptdb->FidVarFirst();
             fidLast = ptdb->FidVarLast();
         }
@@ -148,7 +148,7 @@ ERR ErrRECIAccessColumn( FUCB *pfucb, COLUMNID columnid, FIELD * const pfieldFix
     BOOL        fUseDMLLatch    = fFalse;
     FIELDFLAG   ffield;
 
-    if ( FTaggedFid( fid ) )
+    if ( fid.FTagged() )
     {
         if ( fid > ptdb->FidTaggedLastInitial() )
         {
@@ -167,7 +167,7 @@ ERR ErrRECIAccessColumn( FUCB *pfucb, COLUMNID columnid, FIELD * const pfieldFix
 
         ffield = ptdb->PfieldTagged( columnid )->ffield;
     }
-    else if ( FFixedFid( fid ) )
+    else if ( fid.FFixed() )
     {
         if ( fid > ptdb->FidFixedLastInitial() )
         {
@@ -198,7 +198,7 @@ ERR ErrRECIAccessColumn( FUCB *pfucb, COLUMNID columnid, FIELD * const pfieldFix
             ffield = pfieldT->ffield;
         }
     }
-    else if ( FVarFid( fid ) )
+    else if ( fid.FVar() )
     {
         if ( fid > ptdb->FidVarLastInitial() )
         {
@@ -3115,7 +3115,7 @@ LOCAL ERR ErrRECIBuildTaggedColumnList(
 
     //  if necessary, advance to starting column
 
-    if ( FTaggedFid( (WORD)columnidStart ) )     //  can't use FCOLUMNIDTagged() because it assumes a valid columnid
+    if ( FidOfColumnid( columnidStart ).FTagged() )
     {
         if ( precordIterator )
         {

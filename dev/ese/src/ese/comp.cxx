@@ -920,7 +920,7 @@ LOCAL ERR ErrCMPCreateTableColumnIndex(
     // tagged columnid map.
     if ( cTagged > 0 )
     {
-        Assert( FTaggedFid( fidTaggedHighest ) );
+        Assert( fidTaggedHighest.FTagged() );
         cbAllocate = sizeof(JET_COLUMNID) * ( fidTaggedHighest + 1 - fidTaggedLeast );
         Alloc( mpcolumnidcolumnidTagged = static_cast<JET_COLUMNID *>( PvOSMemoryHeapAlloc( cbAllocate ) ) );
         memset( (BYTE *)mpcolumnidcolumnidTagged, 0, cbAllocate );
@@ -1440,7 +1440,7 @@ LOCAL ERR ErrCMPCopySelectedTables(
         BOOL        fProceedWithCopy    = fTrue;
         ULONG       ulFlags;
 
-        Assert( FFixedFid( fidMSO_Flags ) );
+        Assert( fidMSO_Flags.FFixed() );
         Call( ErrRECIRetrieveFixedColumn(
                         pfcbNil,
                         pfucbCatalog->u.pfcb->Ptdb(),
@@ -1474,7 +1474,7 @@ LOCAL ERR ErrCMPCopySelectedTables(
 
 #ifdef DEBUG
             //  verify this is a column
-            Assert( FFixedFid( fidMSO_Type ) );
+            Assert( fidMSO_Type.FFixed() );
             Call( ErrRECIRetrieveFixedColumn(
                         pfcbNil,
                         pfucbCatalog->u.pfcb->Ptdb(),
@@ -1486,7 +1486,7 @@ LOCAL ERR ErrCMPCopySelectedTables(
             Assert( sysobjTable == *( (UnalignedLittleEndian< SYSOBJ > *)dataField.Pv() ) );
 #endif
 
-            Assert( FVarFid( fidMSO_Name ) );
+            Assert( fidMSO_Name.FVar() );
             Call( ErrRECIRetrieveVarColumn(
                             pfcbNil,
                             pfucbCatalog->u.pfcb->Ptdb(),

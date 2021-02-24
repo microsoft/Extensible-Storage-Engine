@@ -1152,7 +1152,7 @@ LOCAL ERR ErrFILEIAddColumns(
     JET_COLUMNCREATE_A  *pcolcreate;
     JET_COLUMNCREATE_A  *plastcolcreate;
     BOOL                fSetColumnError     = fFalse;
-    TCIB                tcib                = { fidFixedLeast-1, fidVarLeast-1, fidTaggedLeast-1 };
+    TCIB                tcib;
     USHORT              ibNextFixedOffset   = ibRECStartFixedColumns;
     FID                 fidVersion          = 0;
     FID                 fidAutoInc          = 0;
@@ -1359,7 +1359,7 @@ LOCAL ERR ErrFILEIAddColumns(
             Assert( !FFIELDVersion( field.ffield ) );
             Assert( !FFIELDAutoincrement( field.ffield ) );
             Assert( field.coltyp == JET_coltypLong || field.coltyp == JET_coltypLongLong );
-            Assert( FFixedFid( (WORD)pcolcreate->columnid ) );
+            Assert( FidOfColumnid( pcolcreate->columnid ).FFixed() );
         }
         else if ( FFIELDUserDefinedDefault( field.ffield ) )
         {
@@ -3045,13 +3045,13 @@ ERR ErrFILEGetNextColumnid(
 
     if ( ( grbit & JET_bitColumnTagged ) || FRECLongValue( coltyp ) )
     {
-        Assert( fidTaggedLeast-1 == ptcib->fidTaggedLast || FTaggedFid( ptcib->fidTaggedLast ) );
+        Assert( ptcib->fidTaggedLast.FTaggedNone() || ptcib->fidTaggedLast.FTagged() );
         fid = ++(ptcib->fidTaggedLast);
         fidMost = fidTaggedMost;
     }
     else if ( ( grbit & JET_bitColumnFixed ) || FCOLTYPFixedLength( coltyp ) )
     {
-        Assert( fidFixedLeast-1 == ptcib->fidFixedLast || FFixedFid( ptcib->fidFixedLast ) );
+        Assert( ptcib->fidFixedLast.FFixedNone() || ptcib->fidFixedLast.FFixed() );
         fid = ++(ptcib->fidFixedLast);
         fidMost = fidFixedMost;
     }
@@ -3060,7 +3060,7 @@ ERR ErrFILEGetNextColumnid(
         Assert( !( grbit & JET_bitColumnTagged ) );
         Assert( !( grbit & JET_bitColumnFixed ) );
         Assert( JET_coltypText == coltyp || JET_coltypBinary == coltyp );
-        Assert( fidVarLeast-1 == ptcib->fidVarLast || FVarFid( ptcib->fidVarLast ) );
+        Assert( ptcib->fidVarLast.FVarNone() || ptcib->fidVarLast.FVar() );
         fid = ++(ptcib->fidVarLast);
         fidMost = fidVarMost;
     }
@@ -3603,7 +3603,7 @@ ERR VTAPI ErrIsamAddColumn(
     {
         Assert( FidOfColumnid( columnid ) == ptdb->FidFixedLast() + 1 );
         ptdb->IncrementFidFixedLast();
-        Assert( FFixedFid( ptdb->FidFixedLast() ) );
+        Assert( ptdb->FidFixedLast().FFixed() );
         pfieldNew = ptdb->PfieldFixed( columnid );
 
         //  Adjust the location of the FIELD structures for tagged and variable
@@ -3634,7 +3634,7 @@ ERR VTAPI ErrIsamAddColumn(
             // Append the new FIELD structure to the end of the tagged column
             // FIELD structures.
             ptdb->IncrementFidTaggedLast();
-            Assert( FTaggedFid( ptdb->FidTaggedLast() ) );
+            Assert( ptdb->FidTaggedLast().FTagged() );
             pfieldNew = ptdb->PfieldTagged( columnid );
         }
         else
@@ -3644,7 +3644,7 @@ ERR VTAPI ErrIsamAddColumn(
             Assert( FCOLUMNIDVar( columnid ) );
             Assert( FidOfColumnid( columnid ) == ptdb->FidVarLast() + 1 );
             ptdb->IncrementFidVarLast();
-            Assert( FVarFid( ptdb->FidVarLast() ) );
+            Assert( ptdb->FidVarLast().FVar() );
             pfieldNew = ptdb->PfieldVar( columnid );
 
             //  adjust the location of the FIELD structures for tagged columns to
