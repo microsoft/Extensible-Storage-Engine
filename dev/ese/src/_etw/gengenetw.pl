@@ -910,6 +910,7 @@ __ESEETWPARSERFORCPRPROLOG__
 	#    /// Level = Informational
 	#    /// Keyword(s): BF DataWorkingSet 
 	#    /// </summary>
+	#    [System.CodeDom.Compiler.GeneratedCode("gengenetw.pl", "1")]
 	#    public sealed class CacheFirstDirtyPage
 	#    {
 	#        public int tick { get { return (int)traceEvent.PayloadValue(0); } }
@@ -945,6 +946,7 @@ for $iEvt ( 0 ... $#rgsEventsCheck ){
 			"    /// Keyword(s): $rgsEvents[$iEvt]{Keywords}\n" .
 			"    /// </summary>\n";
 	
+		$szEseEtwParserTypeDef = $szEseEtwParserTypeDef . "    [System.CodeDom.Compiler.GeneratedCode(\"gengenetw.pl\", \"1\")]\n";
 		$szEseEtwParserTypeDef = $szEseEtwParserTypeDef . "    public sealed class $szTraceName" . "TraceParser\n";
 		$szEseEtwParserTypeDef = $szEseEtwParserTypeDef . "    {\n";
 	
