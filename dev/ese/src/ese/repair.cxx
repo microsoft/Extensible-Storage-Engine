@@ -4289,7 +4289,7 @@ LOCAL ERR ErrREPAIRStartCheckAllTables(
         Call( ErrDIRGet( pfucbCatalog ) );
 
         CHAR szTable[JET_cbNameMost+1];
-        Assert( FVarFid( fidMSO_Name ) );
+        Assert( fidMSO_Name.FVar() );
         Call( ErrRECIRetrieveVarColumn(
                     pfcbNil,
                     pfucbCatalog->u.pfcb->Ptdb(),
@@ -4392,7 +4392,7 @@ LOCAL ERR ErrREPAIRPostTableTask(
     PGNO pgnoFDP;
     CPG  cpgExtent;
 
-    Assert( FFixedFid( fidMSO_PgnoFDP ) );
+    Assert( fidMSO_PgnoFDP.FFixed() );
     Call( ErrRECIRetrieveFixedColumn(
                 pfcbNil,
                 pfucbCatalog->u.pfcb->Ptdb(),
@@ -4422,7 +4422,7 @@ LOCAL ERR ErrREPAIRPostTableTask(
     }
 
 
-    Assert( FFixedFid( fidMSO_Pages ) );
+    Assert( fidMSO_Pages.FFixed() );
     Call( ErrRECIRetrieveFixedColumn(
                 pfcbNil,
                 pfucbCatalog->u.pfcb->Ptdb(),
@@ -4444,7 +4444,7 @@ LOCAL ERR ErrREPAIRPostTableTask(
         *pfCorrupted = fTrue;
         goto HandleError;
     }
-    Assert( FFixedFid( fidMSO_Type ) );
+    Assert( fidMSO_Type.FFixed() );
     Call( ErrRECIRetrieveFixedColumn(
                 pfcbNil,
                 pfucbCatalog->u.pfcb->Ptdb(),
@@ -4468,7 +4468,7 @@ LOCAL ERR ErrREPAIRPostTableTask(
     }
 
 #ifdef DEBUG
-    Assert( FVarFid( fidMSO_Name ) );
+    Assert( fidMSO_Name.FVar() );
     Call( ErrRECIRetrieveVarColumn(
                 pfcbNil,
                 pfucbCatalog->u.pfcb->Ptdb(),
@@ -4480,7 +4480,7 @@ LOCAL ERR ErrREPAIRPostTableTask(
 #endif  //  DEBUG
 
     OBJID objidTable;
-    Assert( FFixedFid( fidMSO_Id ) );
+    Assert( fidMSO_Id.FFixed() );
     Call( ErrRECIRetrieveFixedColumn(
                 pfcbNil,
                 pfucbCatalog->u.pfcb->Ptdb(),
@@ -10585,7 +10585,7 @@ LOCAL ERR ErrREPAIRInsertDummyRecordsToCatalog(
                 Assert( !Pcsr( pfucbCatalog )->FLatched() );
                 Call( ErrDIRGet( pfucbCatalog ) );
 
-                Assert( FFixedFid( fidMSO_Coltyp ) );
+                Assert( fidMSO_Coltyp.FFixed() );
                 Call( ErrRECIRetrieveFixedColumn(
                             pfcbNil,
                             pfucbCatalog->u.pfcb->Ptdb(),
@@ -10595,7 +10595,7 @@ LOCAL ERR ErrREPAIRInsertDummyRecordsToCatalog(
                 Assert( dataField.Cb() == sizeof(JET_COLTYP) );
                 colTypeLastOld = *( UnalignedLittleEndian< JET_COLTYP > *)dataField.Pv();
 
-                Assert( FFixedFid( fidMSO_SpaceUsage ) );
+                Assert( fidMSO_SpaceUsage.FFixed() );
                 Call( ErrRECIRetrieveFixedColumn(
                             pfcbNil,
                             pfucbCatalog->u.pfcb->Ptdb(),
@@ -10606,7 +10606,7 @@ LOCAL ERR ErrREPAIRInsertDummyRecordsToCatalog(
                 cbFixedLastOld = *(UnalignedLittleEndian< ULONG > *) dataField.Pv();
                 Assert( 0 != cbFixedLastOld );
 
-                Assert( FFixedFid( fidMSO_RecordOffset ) );
+                Assert( fidMSO_RecordOffset.FFixed() );
                 Call( ErrRECIRetrieveFixedColumn(
                             pfcbNil,
                             pfucbCatalog->u.pfcb->Ptdb(),

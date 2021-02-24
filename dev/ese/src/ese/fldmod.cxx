@@ -1969,7 +1969,7 @@ LOCAL ERR ErrRECISetIFixedColumn(
 {
     const FID       fid         = FidOfColumnid( columnid );
 
-    Assert( FFixedFid( fid ) );
+    Assert( fid.FFixed() );
 
     Assert( ( ( pfucb != pfucbNil ) && ( &( pfucb->dataWorkBuf ) == pdataWorkBuf ) ) ||
             ( ( pfucb == pfucbNil ) && ( pdataWorkBuf != NULL ) ) );
@@ -2437,7 +2437,7 @@ ERR ErrRECISetVarColumn(
     ERR             err             = JET_errSuccess;
     const FID       fid             = FidOfColumnid( columnid );
 
-    Assert( FVarFid( fid ) );
+    Assert( fid.FVar() );
 
     Assert( pfucbNil != pfucb );
     Assert( FFUCBIndex( pfucb ) || FFUCBSort( pfucb ) );

@@ -1123,7 +1123,7 @@ LOCAL ERR ErrSCRUBGetObjidsFromCatalog(
         
         Call( ErrDIRGet( pfucbCatalog ) );
 
-        Assert( FFixedFid( fidMSO_Type ) );
+        Assert( fidMSO_Type.FFixed() );
         Call( ErrRECIRetrieveFixedColumn(
                     pfcbNil,
                     pfucbCatalog->u.pfcb->Ptdb(),
@@ -1148,7 +1148,7 @@ LOCAL ERR ErrSCRUBGetObjidsFromCatalog(
                 //  Obtain their objids and pgnoFDPs
                 fBtree = fTrue;
                 
-                Assert( FFixedFid( fidMSO_Id ) );
+                Assert( fidMSO_Id.FFixed() );
                 Call( ErrRECIRetrieveFixedColumn(
                             pfcbNil,
                             pfucbCatalog->u.pfcb->Ptdb(),
@@ -1159,7 +1159,7 @@ LOCAL ERR ErrSCRUBGetObjidsFromCatalog(
 
                 objidFDP = (OBJID)(*( reinterpret_cast<UnalignedLittleEndian< OBJID > *>( data.Pv() ) ));
 
-                Assert( FFixedFid( fidMSO_PgnoFDP ) );
+                Assert( fidMSO_PgnoFDP.FFixed() );
                 Call( ErrRECIRetrieveFixedColumn(
                             pfcbNil,
                             pfucbCatalog->u.pfcb->Ptdb(),
@@ -1183,7 +1183,7 @@ LOCAL ERR ErrSCRUBGetObjidsFromCatalog(
         if( sysobjIndex == sysobj )
         {
             IDBFLAG idbflag;
-            Assert( FFixedFid( fidMSO_Flags ) );
+            Assert( fidMSO_Flags.FFixed() );
             Call( ErrRECIRetrieveFixedColumn(
                         pfcbNil,
                         pfucbCatalog->u.pfcb->Ptdb(),

@@ -3,7 +3,7 @@
 
 //  If null bit is 1, then column is null.
 //  Note that the fid passed in should already be converted to an
-//  index (ie. should subtract fidFixedLeast first).
+//  index.
 #define FixedNullBit( ifid )    ( 1 << ( (ifid) % 8 ) )
 INLINE BOOL FFixedNullBit( const BYTE *pbitNullity, const UINT ifid )
 {
@@ -453,8 +453,16 @@ class REC
 INLINE REC::REC()
 {
     Assert( sizeof(REC) == cbRecordMin );
-    m_rechdr.fidFixedLastInRec = fidFixedLeast-1;
-    m_rechdr.fidVarLastInRec = fidVarLeast-1;
+    m_rechdr.fidFixedLastInRec = (BYTE)( FID( fidtypFixed, fidlimNone ) );
+    m_rechdr.fidVarLastInRec = (BYTE)( FID( fidtypVar, fidlimNone ) );
+
+    //
+    // Because these are and have been persisted, they are magic and must not ever change.
+    // Assert that they hold their magic, persisted values.
+    //
+    Assert( 0   == m_rechdr.fidFixedLastInRec );
+    Assert( 127 == m_rechdr.fidVarLastInRec );
+    
     m_rechdr.ibEndOfFixedData = cbRecordMin;
 }
 
@@ -471,40 +479,34 @@ INLINE VOID REC::SetMinimumRecord( DATA& data )
 INLINE FID REC::FidFixedLastInRec() const
 {
     const FID   fidFixed = (FID)m_rechdr.fidFixedLastInRec;
-    Assert( fidFixed >= fidFixedLeast-1 );
-    Assert( fidFixed <= fidFixedMost );
+    Assert( fidFixed.FFixedNone() || fidFixed.FFixed() );
     return fidFixed;
 }
 INLINE VOID REC::SetFidFixedLastInRec( const FID fid )
 {
-    Assert( fid >= fidFixedLeast-1 );
-    Assert( fid <= fidFixedMost );
+    Assert( fid.FFixedNone() || fid.FFixed() );
     m_rechdr.fidFixedLastInRec = (BYTE)fid;
 }
 
 INLINE FID REC::FidVarLastInRec() const
 {
     const FID   fidVar = (FID)m_rechdr.fidVarLastInRec;
-    Assert( fidVar >= fidVarLeast-1 );
-    Assert( fidVar <= fidVarMost );
+    Assert( fidVar.FVarNone() || fidVar.FVar() );
     return fidVar;
 }
 INLINE VOID REC::SetFidVarLastInRec( const FID fid )
 {
-    Assert( fid >= fidVarLeast-1 );
-    Assert( fid <= fidVarMost );
+    Assert( fid.FVarNone() || fid.FVar() );
     m_rechdr.fidVarLastInRec = (BYTE)fid;
 }
 
 INLINE ULONG REC::CFixedColumns() const
 {
-    Assert( FidFixedLastInRec() + 1 >= fidFixedLeast );
-    return ( FidFixedLastInRec() + 1 - fidFixedLeast );
+    return FidFixedLastInRec().CountOf( fidtypFixed );
 }
 INLINE ULONG REC::CVarColumns() const
 {
-    Assert( FidVarLastInRec() + 1 >= fidVarLeast );
-    return ( FidVarLastInRec() + 1 - fidVarLeast );
+    return FidVarLastInRec().CountOf( fidtypVar );
 }
 
 INLINE REC::RECOFFSET REC::IbEndOfFixedData() const
@@ -540,27 +542,27 @@ INLINE ULONG REC::CbFixedRecordOverhead() const
 
 INLINE UnalignedLittleEndian<REC::VAROFFSET> *REC::PibVarOffsets() const
 {
-    Assert( FidVarLastInRec() >= fidVarLeast-1 );
+    Assert( FidVarLastInRec().FVarNone() ||  FidVarLastInRec().FVar() );
     return (UnalignedLittleEndian<VAROFFSET> *)( ( (BYTE *)this ) + IbEndOfFixedData() );
 }
 
 INLINE REC::VAROFFSET REC::IbVarOffsetStart( const FID fidVar ) const
 {
-    Assert( fidVar >= fidVarLeast );
+    Assert( fidVar.FVar() );
     Assert( fidVar <= (FID)m_rechdr.fidVarLastInRec );
 
     //  The beginning of the desired column is equivalent to the
     //  the end of the previous column.
-    return ( fidVarLeast == fidVar ?
+    return ( fidVar.FVarLeast() ?
                 (REC::VAROFFSET)0 :
-                IbVarOffset( PibVarOffsets()[fidVar-fidVarLeast-1] ) );
+                IbVarOffset( PibVarOffsets()[ fidVar.IndexOf( fidtypVar ) - 1 ] ) );
 }
 
 INLINE REC::VAROFFSET REC::IbVarOffsetEnd( const FID fidVar ) const
 {
-    Assert( fidVar >= fidVarLeast );
+    Assert( fidVar.FVar() );
     Assert( fidVar <= (FID)m_rechdr.fidVarLastInRec );
-    return ( IbVarOffset( PibVarOffsets()[fidVar-fidVarLeast] ) );
+    return ( IbVarOffset( PibVarOffsets()[ fidVar.IndexOf( fidtypVar ) ] ) );
 }
 
 INLINE BYTE *REC::PbVarData() const
@@ -573,10 +575,10 @@ INLINE BYTE *REC::PbVarData() const
 
 INLINE REC::VAROFFSET REC::IbEndOfVarData() const
 {
-    if ( FidVarLastInRec() == fidVarLeast-1 )
+    if ( FidVarLastInRec().FVarNone() )
         return 0;       // no variable data
 
-    return IbVarOffset( PibVarOffsets()[FidVarLastInRec()-fidVarLeast] );
+    return IbVarOffset( PibVarOffsets()[ FidVarLastInRec().IndexOf( fidtypVar ) ] );
 }
 
 INLINE ULONG REC::CbVarUserData() const
@@ -1476,8 +1478,7 @@ INLINE ERR ErrRECIFixedColumnInRecord(
 
     const REC   *prec = (REC *)dataRec.Pv();
 
-    Assert( prec->FidFixedLastInRec() >= fidFixedLeast-1 );
-    Assert( prec->FidFixedLastInRec() <= fidFixedMost );
+    Assert( prec->FidFixedLastInRec().FFixedNone() || prec->FidFixedLastInRec().FFixed() );
 
     // RECIAccessColumn() should have already been called to verify FID.
 #ifdef DEBUG
@@ -1505,9 +1506,9 @@ INLINE ERR ErrRECIFixedColumnInRecord(
     }
     else
     {
-        Assert( prec->FidFixedLastInRec() >= fidFixedLeast );
+        Assert( prec->FidFixedLastInRec().FFixed() );
 
-        const UINT  ifid            = FidOfColumnid( columnid ) - fidFixedLeast;
+        const UINT  ifid            = FidOfColumnid( columnid ).IndexOf( fidtypFixed );
         const BYTE  * prgbitNullity = prec->PbFixedNullBitMap() + ifid/8;
 
         if ( FFixedNullBit( prgbitNullity, ifid ) )
@@ -1537,8 +1538,7 @@ INLINE ERR ErrRECIVarColumnInRecord(
 
     const REC   *prec = (REC *)dataRec.Pv();
 
-    Assert( prec->FidVarLastInRec() >= fidVarLeast-1 );
-    Assert( prec->FidVarLastInRec() <= fidVarMost );
+    Assert( prec->FidVarLastInRec().FVarNone() || prec->FidVarLastInRec().FVar() );
 
     // RECIAccessColumn() should have already been called to verify FID.
 #ifdef DEBUG
@@ -1565,19 +1565,19 @@ INLINE ERR ErrRECIVarColumnInRecord(
 
         UnalignedLittleEndian<REC::VAROFFSET>   *pibVarOffs = prec->PibVarOffsets();
 
-        Assert( prec->FidVarLastInRec() >= fidVarLeast );
-        Assert( prec->PbVarData() + IbVarOffset( pibVarOffs[prec->FidVarLastInRec()-fidVarLeast] )
+        Assert( prec->FidVarLastInRec().FVar() );
+        Assert( prec->PbVarData() + IbVarOffset( pibVarOffs[prec->FidVarLastInRec().IndexOf( fidtypVar ) ] )
                 <= (BYTE *)dataRec.Pv() + dataRec.Cb() );
 
         //  adjust fid to an index
         //
-        const UINT  ifid    = FidOfColumnid( columnid ) - fidVarLeast;
+        const UINT  ifid    = FidOfColumnid( columnid ).IndexOf( fidtypVar );
 
         if ( FVarNullBit( pibVarOffs[ifid] ) )
         {
 #ifdef DEBUG
             //  beginning of current column is end of previous column
-            const WORD  ibVarOffset = ( fidVarLeast == FidOfColumnid( columnid ) ?
+            const WORD  ibVarOffset = ( FidOfColumnid( columnid ).FVarLeast() ?
                                             WORD( 0 ) :
                                             IbVarOffset( pibVarOffs[ifid-1] ) );
             Assert( IbVarOffset( pibVarOffs[ifid] ) - ibVarOffset == 0 );

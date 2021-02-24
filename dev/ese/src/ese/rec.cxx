@@ -458,17 +458,17 @@ ERR ErrRECIValidateOneMoveFilter(
         //
         fUseDMLLatch = fFalse;
     }
-    else if ( FFixedFid( fid ) )
+    else if ( fid.FFixed() )
     {
         fUseDMLLatch = ( fid > ptdb->FidFixedLastInitial() );
     }
-    else if ( FVarFid( fid ) )
+    else if ( fid.FVar() )
     {
         fUseDMLLatch = ( fid > ptdb->FidVarLastInitial() );
     }
     else
     {
-        Assert( FTaggedFid( fid ) );
+        Assert( fid.FTagged() );
         fUseDMLLatch = ( fid > ptdb->FidTaggedLastInitial() );
     }
 

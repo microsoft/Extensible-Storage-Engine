@@ -2031,9 +2031,9 @@ LOCAL ERR ErrInfoGetTableColumnInfoList(
         ptdb->AssertValidDerivedTable();
         Assert( !fTemplateTable );
 
-        const FID   fidTemplateFixedFirst   = FID( fidtypFixed, fidlimMin );
-        const FID   fidTemplateVarFirst     = FID( fidtypVar, fidlimMin );
-        const FID   fidTemplateTaggedFirst  = FID( fidtypTagged, fidlimMin );
+        const FID   fidTemplateFixedFirst   = FID( fidtypFixed, fidlimLeast );
+        const FID   fidTemplateVarFirst     = FID( fidtypVar, fidlimLeast );
+        const FID   fidTemplateTaggedFirst  = FID( fidtypTagged, fidlimLeast );
         
         const FID   fidTemplateFixedLast    = ptdb->PfcbTemplateTable()->Ptdb()->FidFixedLast();
         const FID   fidTemplateVarLast      = ptdb->PfcbTemplateTable()->Ptdb()->FidVarLast();

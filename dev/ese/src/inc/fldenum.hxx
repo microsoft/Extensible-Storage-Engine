@@ -144,7 +144,7 @@ ErrGetWorstCaseColumnCount( size_t* const pcColumn ) const
         Error( ErrERRCheck( JET_errNotInitialized ) );
     }
     
-    *pcColumn = m_prec->FidFixedLastInRec() - fidFixedLeast + 1;
+    *pcColumn = m_prec->FidFixedLastInRec().CountOf( fidtypFixed );
 
 HandleError:
     return err;
@@ -171,7 +171,7 @@ HandleError:
 INLINE ERR CFixedColumnIter::
 ErrMoveBeforeFirst()
 {
-    m_columnidCurr  = fidFixedLeast - 1;
+    m_columnidCurr  = FID( fidtypFixed, fidlimNone );
     m_errCurr       = errRECNoCurrentColumnValue;
     memset( &m_fieldCurr, 0, sizeof( m_fieldCurr ) );
     return JET_errSuccess;
@@ -291,7 +291,7 @@ ErrGetWorstCaseColumnCount( size_t* const pcColumn ) const
         Error( ErrERRCheck( JET_errNotInitialized ) );
     }
     
-    *pcColumn = m_prec->FidVarLastInRec() - fidVarLeast + 1;
+    *pcColumn = m_prec->FidVarLastInRec().CountOf( fidtypVar );
 
 HandleError:
     return err;
@@ -318,7 +318,7 @@ HandleError:
 INLINE ERR CVariableColumnIter::
 ErrMoveBeforeFirst()
 {
-    m_columnidCurr  = fidVarLeast - 1;
+    m_columnidCurr  = FID( fidtypVar, fidlimNone );
     m_errCurr       = errRECNoCurrentColumnValue;
     return JET_errSuccess;
 }

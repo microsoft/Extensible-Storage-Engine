@@ -1285,9 +1285,9 @@ LOCAL ERR ErrDBUTLDumpOneColumn( PIB * ppib, FUCB * pfucbCatalog, VOID * pfnCall
     columndef.cbDefaultValue    = rgretrievecolumn[iretrievecolumn-1].cbActual;
     columndef.cbCallbackData    = rgretrievecolumn[iretrievecolumn-2].cbActual;
 
-    columndef.fFixed            = !!FFixedFid( FidOfColumnid( columndef.columnid ) );
-    columndef.fVariable         = !!FVarFid( FidOfColumnid( columndef.columnid ) );
-    columndef.fTagged           = !!FTaggedFid( FidOfColumnid( columndef.columnid ) );
+    columndef.fFixed            = !!FidOfColumnid( columndef.columnid ).FFixed();
+    columndef.fVariable         = !!FidOfColumnid( columndef.columnid ).FVar();
+    columndef.fTagged           = !!FidOfColumnid( columndef.columnid ).FTagged();
 
     const FIELDFLAG ffield      = FIELDFLAG( columndef.fFlags );
     columndef.fVersion          = !!FFIELDVersion( ffield );

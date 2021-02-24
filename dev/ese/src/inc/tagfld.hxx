@@ -295,13 +295,13 @@ INLINE COLUMNID TAGFLD::Columnid( const TDB * const ptdb ) const
 
 INLINE BOOL TAGFLD::FIsEqual( const FID fid, const BOOL fDerived ) const
 {
-    Assert( FTaggedFid( fid ) );
+    Assert( fid.FTagged() );
     return ( Fid() == fid
         && ( ( FDerived() && fDerived ) || ( !FDerived() && !fDerived ) ) );
 }
 INLINE BOOL TAGFLD::FIsLessThan( const FID fid, const BOOL fDerived ) const
 {
-    Assert( FTaggedFid( fid ) );
+    Assert( fid.FTagged() );
     if ( FDerived() )
     {
         return ( fDerived ?
@@ -317,7 +317,7 @@ INLINE BOOL TAGFLD::FIsLessThan( const FID fid, const BOOL fDerived ) const
 }
 INLINE BOOL TAGFLD::FIsLessThanOrEqual( const FID fid, const BOOL fDerived ) const
 {
-    Assert( FTaggedFid( fid ) );
+    Assert( fid.FTagged() );
     if ( FDerived() )
     {
         return ( fDerived ?
@@ -333,7 +333,7 @@ INLINE BOOL TAGFLD::FIsLessThanOrEqual( const FID fid, const BOOL fDerived ) con
 }
 INLINE BOOL TAGFLD::FIsGreaterThan( const FID fid, const BOOL fDerived ) const
 {
-    Assert( FTaggedFid( fid ) );
+    Assert( fid.FTagged() );
     if ( FDerived() )
     {
         return ( fDerived ?
@@ -349,7 +349,7 @@ INLINE BOOL TAGFLD::FIsGreaterThan( const FID fid, const BOOL fDerived ) const
 }
 INLINE BOOL TAGFLD::FIsGreaterThanOrEqual( const FID fid, const BOOL fDerived ) const
 {
-    Assert( FTaggedFid( fid ) );
+    Assert( fid.FTagged() );
     if ( FDerived() )
     {
         return ( fDerived ?
@@ -928,8 +928,8 @@ INLINE INT CmpFid(
             const FID fid1, const BOOL fDerived1,
             const FID fid2, const BOOL fDerived2 )
 {
-    Assert( FTaggedFid( fid1 ) );
-    Assert( FTaggedFid( fid2 ) );
+    Assert( fid1.FTagged() );
+    Assert( fid2.FTagged() );
 
     INT cmp = 0;
     
@@ -1464,7 +1464,7 @@ INLINE VOID TAGFIELDS::AssertValid( const TDB * const ptdb ) const
     for ( ULONG itagfld = 0; itagfld < CTaggedColumns(); itagfld++ )
     {
         const FID   fid     = Ptagfld( itagfld )->Fid();
-        Assert( FTaggedFid( fid ) );
+        Assert( fid.FTagged() );
 
         if ( Ptagfld( itagfld )->FDerived() )
         {
@@ -1590,7 +1590,7 @@ class TAGFLD_OLD
 INLINE TAGFLD_OLD::TAGFLD_OLD( const FID fid, const BOOL fLongValue, const BOOL fDerived ) :
     m_fid( fid )
 {
-    Assert( FTaggedFid( fid ) );
+    Assert( fid.FTagged() );
     
     if ( fLongValue || fDerived )
     {
@@ -1610,7 +1610,7 @@ INLINE TAGFLD_OLD::~TAGFLD_OLD()
 
 INLINE FID TAGFLD_OLD::Fid() const
 {
-    Assert( FTaggedFid( m_fid ) );
+    Assert( ((FID)m_fid).FTagged() );
     return m_fid;
 }
 
@@ -1655,7 +1655,7 @@ INLINE const BYTE *TAGFLD_OLD::Rgb() const
 
 INLINE VOID TAGFLD_OLD::SetFid( const FID fid )
 {
-    Assert( FTaggedFid( m_fid ) );
+    Assert( ((FID)(m_fid)).FTagged() );
     m_fid = fid;
 }
 
@@ -1734,13 +1734,13 @@ INLINE COLUMNID TAGFLD_OLD::Columnid( const TDB * const ptdb ) const
 
 INLINE BOOL TAGFLD_OLD::FIsEqual( const FID fid, const BOOL fDerived ) const
 {
-    Assert( FTaggedFid( fid ) );
+    Assert( fid.FTagged() );
     return ( Fid() == fid
         && ( ( FDerived() && fDerived ) || ( !FDerived() && !fDerived ) ) );
 }
 INLINE BOOL TAGFLD_OLD::FIsLessThan( const FID fid, const BOOL fDerived ) const
 {
-    Assert( FTaggedFid( fid ) );
+    Assert( fid.FTagged() );
     if ( FDerived() )
     {
         if ( fDerived )
@@ -1770,7 +1770,7 @@ INLINE BOOL TAGFLD_OLD::FIsLessThan( const FID fid, const BOOL fDerived ) const
 }
 INLINE BOOL TAGFLD_OLD::FIsLessThanOrEqual( const FID fid, const BOOL fDerived ) const
 {
-    Assert( FTaggedFid( fid ) );
+    Assert( fid.FTagged() );
     if ( FDerived() )
     {
         if ( fDerived )
@@ -1800,7 +1800,7 @@ INLINE BOOL TAGFLD_OLD::FIsLessThanOrEqual( const FID fid, const BOOL fDerived )
 }
 INLINE BOOL TAGFLD_OLD::FIsGreaterThan( const FID fid, const BOOL fDerived ) const
 {
-    Assert( FTaggedFid( fid ) );
+    Assert( fid.FTagged() );
     if ( FDerived() )
     {
         if ( fDerived )
@@ -1830,7 +1830,7 @@ INLINE BOOL TAGFLD_OLD::FIsGreaterThan( const FID fid, const BOOL fDerived ) con
 }
 INLINE BOOL TAGFLD_OLD::FIsGreaterThanOrEqual( const FID fid, const BOOL fDerived ) const
 {
-    Assert( FTaggedFid( fid ) );
+    Assert( fid.FTagged() );
     if ( FDerived() )
     {
         if ( fDerived )
@@ -1883,7 +1883,7 @@ INLINE BOOL TAGFLD_OLD::FIsGreaterThanOrEqual( const COLUMNID columnid, const TD
 INLINE VOID TAGFLD_OLD::AssertValid( const TDB * const ptdb ) const
 {
 #ifdef DEBUG
-    Assert( FTaggedFid( Fid() ) );
+    Assert( Fid().FTagged() );
     if ( FDerived() )
     {
         if ( ptdb->FTemplateTable() )
