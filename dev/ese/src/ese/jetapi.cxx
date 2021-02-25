@@ -3367,6 +3367,7 @@ class CInstanceFileSystemConfiguration : public CDefaultFileSystemConfiguration
 
 CInstanceFileSystemConfiguration g_fsconfigGlobal( pinstNil );
 IFileSystemConfiguration* const g_pfsconfigGlobal = &g_fsconfigGlobal;
+CReaderWriterLock g_rwlOSUInit( CLockBasicInfo( CSyncBasicInfo( szOSUInit ), rankOSUInit, 0 ) );
 
 //  Does a lot of stuff:
 //      Does OSU Init
@@ -3407,7 +3408,12 @@ ERR ErrNewInst(
 
     if ( 0 == g_cpinstInit )
     {
-        Call( ErrOSUInit() );
+        // OSUInit's done my misc APIs may not have been done with the correct global params,
+        // so make sure they are done and have ErrNewInst do its own OSU init.
+        g_rwlOSUInit.EnterAsWriter();
+        err = ErrOSUInit();
+        g_rwlOSUInit.LeaveAsWriter();
+        Call( err );
         fOSUInit = fTrue;
         isdlSysTimings.Trigger( eInitOslayerDone );
 
@@ -12794,6 +12800,7 @@ LOCAL JET_ERR JetGetDatabaseFileInfoEx(
     QWORD           cbFileSize          = 0;
     QWORD           cbFileSizeOnDisk    = 0;
     DBFILEHDR*      pdbfilehdr          = NULL;
+    BOOL            fOSUInitCalled      = fFalse;
 
     OSTrace(
         JET_tracetagAPI,
@@ -12806,7 +12813,9 @@ LOCAL JET_ERR JetGetDatabaseFileInfoEx(
             cbMax,
             InfoLevel ) );
 
-    CallR( ErrOSUInit() );
+    g_rwlOSUInit.EnterAsReader();
+    Call( ErrOSUInit() );
+    fOSUInitCalled = fTrue;
 
     Call( ErrOSFSCreate( g_pfsconfigGlobal, &pfsapi ) );
     Call( pfsapi->ErrFileFind( wszDatabaseName, &pffapi ) );
@@ -13089,7 +13098,11 @@ HandleError:
     delete pffapi;
     delete pfsapi;
 
-    OSUTerm();
+    if ( fOSUInitCalled )
+    {
+        OSUTerm();
+    }
+    g_rwlOSUInit.LeaveAsReader();
 
     return err;
 }
@@ -13133,6 +13146,7 @@ LOCAL JET_ERR JetRemoveLogfileExW(
 
     Assert( fFalse == fOSUInitCalled );
 
+    g_rwlOSUInit.EnterAsReader();
     Call( ErrOSUInit() );
     fOSUInitCalled = fTrue;
     Call( ErrOSFSCreate( g_pfsconfigGlobal, &pfsapi ) );
@@ -13147,6 +13161,7 @@ HandleError:
     {
         OSUTerm();
     }
+    g_rwlOSUInit.LeaveAsReader();
     return err;
 }
 
@@ -13444,6 +13459,7 @@ LOCAL JET_ERR JetGetLogFileInfoEx(
     LGFILEHDR *         plgfilehdr          = NULL;
     IFileSystemAPI *    pfsapi              = NULL;
     IFileAPI *          pfapi               = NULL;
+    BOOL                fOSUInitCalled      = fFalse;
 
     OSTrace(
         JET_tracetagAPI,
@@ -13458,7 +13474,9 @@ LOCAL JET_ERR JetGetLogFileInfoEx(
 
     //  initialize the OSU layer if necessary
     //
-    CallR( ErrOSUInit() );
+    g_rwlOSUInit.EnterAsReader();
+    Call( ErrOSUInit() );
+    fOSUInitCalled = fTrue;
 
     //  open the file
     //
@@ -13510,7 +13528,11 @@ HandleError:
     delete pfapi;
     delete pfsapi;
 
-    OSUTerm();
+    if ( fOSUInitCalled )
+    {
+        OSUTerm();
+    }
+    g_rwlOSUInit.LeaveAsReader();
 
     return err;
 }
@@ -19571,16 +19593,23 @@ CAutoDBUTILW::~CAutoDBUTILW()
 LOCAL JET_ERR ErrUpdateHeaderFromTrailer( const wchar_t * const szDatabase, BOOL fSkipMinLogChecks )
 {
     ERR     err             = JET_errSuccess;
+    BOOL    fOSUInitCalled  = fFalse;
 
     // Initialize necessary subsystems
 
-    CallR( ErrOSUInit() );
+    g_rwlOSUInit.EnterAsReader();
+    Call( ErrOSUInit() );
+    fOSUInitCalled = fTrue;
 
     Call( ErrDBUpdateHeaderFromTrailer( szDatabase, fSkipMinLogChecks ) );
 
 HandleError:
 
-    OSUTerm();
+    if ( fOSUInitCalled )
+    {
+        OSUTerm();
+    }
+    g_rwlOSUInit.LeaveAsReader();
 
     return err;
 }
@@ -23123,12 +23152,15 @@ HandleError:
         OSMemoryPageFree( pbPageImage );
     }
 
-    (void)ErrUtilFlushFileBuffers( pfapi, iofrUtility );
-    delete pfapi;
+    if ( pfapi )
+    {
+        (void)ErrUtilFlushFileBuffers( pfapi, iofrUtility );
+        delete pfapi;
+    }
     delete pfsapi;
 
     OSUTerm();
-    
+
     return err;
 }
 
@@ -23144,8 +23176,8 @@ JET_ERR ErrTESTHOOKAlterDatabaseFileHeader( const JET_TESTHOOKALTERDBFILEHDR * c
 
     Assert( palterdbfilehdr->szDatabase );
 
-    AllocR( pdbfilehdr = (DBFILEHDR*)PvOSMemoryPageAlloc( g_cbPageMax, NULL ) );
     CallR( ErrOSUInit() );
+    Alloc( pdbfilehdr = (DBFILEHDR*)PvOSMemoryPageAlloc( g_cbPageMax, NULL ) );
     Call( ErrOSFSCreate( g_pfsconfigGlobal, &pfsapi ) );
 
     Call( pfsapi->ErrFileOpen( palterdbfilehdr->szDatabase, IFileAPI::fmfNone, &pfapiDatabase ) );
@@ -23199,7 +23231,10 @@ HandleError:
     FNegTestUnset( fCorruptingDbHeaders );
     FNegTestUnset( fInvalidUsage );
 
-    (void)ErrUtilFlushFileBuffers( pfapiDatabase, iofrUtility ); // test only, no error handling necessary
+    if ( pfapiDatabase )
+    {
+        (void)ErrUtilFlushFileBuffers( pfapiDatabase, iofrUtility ); // test only, no error handling necessary
+    }
     OSMemoryPageFree( pdbfilehdr );
     delete pfm;
     delete pfapiDatabase;
@@ -24214,6 +24249,7 @@ LOCAL JET_ERR JetGetRBSFileInfoEx(
     RBSFILEHDR*     prbsfilehdr         = NULL;
     IFileSystemAPI* pfsapi              = NULL;
     IFileAPI*       pfapi               = NULL;
+    BOOL            fOSUInitCalled      = fFalse;
 
     OSTrace(
         JET_tracetagAPI,
@@ -24226,7 +24262,9 @@ LOCAL JET_ERR JetGetRBSFileInfoEx(
             cbMax,
             InfoLevel ) );
 
-    CallR( ErrOSUInit() );
+    g_rwlOSUInit.EnterAsReader();
+    Call( ErrOSUInit() );
+    fOSUInitCalled = fTrue;
 
     Call( ErrOSFSCreate( g_pfsconfigGlobal, &pfsapi ) );
     Call( pfsapi->ErrFileOpen( wszRBSFileName, ( BoolParam( JET_paramEnableFileCache ) ? IFileAPI::fmfCached : IFileAPI::fmfNone ) | IFileAPI::fmfReadOnly, &pfapi ) );
@@ -24256,7 +24294,11 @@ HandleError:
     delete pfapi;
     delete pfsapi;
 
-    OSUTerm();
+    if ( fOSUInitCalled )
+    {
+        OSUTerm();
+    }
+    g_rwlOSUInit.LeaveAsReader();
 
     return err;
 }

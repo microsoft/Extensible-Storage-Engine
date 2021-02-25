@@ -331,6 +331,7 @@ const INT rankFMPGlobal                 = 80;
 const INT rankSysParamFixup             = 85;
 const INT rankPIBGlobal                 = 90;
 const INT rankRCEChain                  = 100;
+const INT rankOSUInit                   = 100;
 
 const INT rankBFLatch               = 1000;
 const INT rankBFCacheSizeResize     = 1000;
@@ -427,6 +428,7 @@ const char szCompact[]              = "JetCompact";
 const char szRBSBuf[]               = "RBSBuffer";
 const char szRBSWrite[]             = "RBSWrite";
 const char szRBSFirstValidGen[]     = "RBSFirstValidGen";
+const char szOSUInit[]              = "OSUInit";
 
 //  Internal user IDs for OPERATION_CONTEXT (required to set identifiable context on internal PIBs)
 const DWORD OCUSER_UNINIT           = ( OC_bitInternalUser );
