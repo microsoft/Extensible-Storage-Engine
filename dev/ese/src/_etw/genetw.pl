@@ -28,18 +28,20 @@ if( uc( $ARGV[0] ) eq uc("ESENT") ) {
 # $#ARGV is the index of the last element.
 if ( $#ARGV < 5 )
 {
-   die "Usage: genetw.pl [Microsoft-ETW-ESE.mc] [path-to-jethdr.w] [path-to-_jet.hxx] [path-to-tcconst.hxx] [output-file]";
+   die "Usage: genetw.pl [Microsoft-ETW-ESE.mc] [path-to-jethdr.w] [path-to-_jet.hxx] [path-to-tcconst.hxx] [path-to-logapi.hxx] [output-file]";
 }
 my $inputFile = $ARGV[1];
 my $jethdrwFile = $ARGV[2];
 my $apilistFile = $ARGV[3];
 my $tcconstFile = $ARGV[4];
-my $outputFile = $ARGV[5];
+my $lrtypFile = $ARGV[5];
+my $outputFile = $ARGV[6];
 
 open( ETWDATA, "<$inputFile" ) or die "Cannot open the ESE ETW data file ($inputFile).";
 open( JETHDR, "<$jethdrwFile" ) or die "Cannot open the jethdr.w data file ($jethdrwFile).";
 open( JETAPILIST, "<$apilistFile" ) or die "Cannot open the _jet.hxx data file ($apilistFile).";
 open( TCCONST, "<$tcconstFile" ) or die "Cannot open the tcconst.hxx data file ($tcconstFile).";
+open( LRTYP, "<$lrtypFile" ) or die "Cannot open the logapi.hxx data file ($lrtypFile).";
 open( OUTPUTFILE, ">$outputFile" ) or die "Cannot open the destination file ($outputFile).";
 
 while($line = <ETWDATA>) {
@@ -299,7 +301,31 @@ while($line = <ETWDATA>) {
 				if( $iorsValue =~ /,/ ){
 					$iorsValue = substr($iorsValue, 0, -1);
 				}
+				if ($iorsName =~ /iorsLRNOP/)
+				{
+					$iorsLRNOP = $iorsValue;
+				}
 				print OUTPUTFILE "              <map value=\"$iorsValue\" message=\"\$(string.IorsMap.$iorsName)\"/>\n";
+			}
+		}
+		while($lrtypline = <LRTYP>) {
+			if( $lrtypline =~ /^\s*const\s+LRTYP\s+lrtyp/ ){
+
+				chomp $lrtypline;
+				($const, $lrtypType, $lrtypName, $equals, $lrtypValue) = split(' ', $lrtypline);
+				$iorsName = substr($lrtypName, length("lrtyp"));
+				$iorsName = "iorsLR$iorsName";
+				if( $lrtypValue =~ /;/ ){
+					if (!defined $iorsLRNOP)
+					{
+						die "iorsLRNOP not found, cannot compute iorsLR* literal values";
+					}
+					$iorsValue = substr($lrtypValue, 0, -1) + $iorsLRNOP;
+				}
+				if (!($lrtypName =~ /lrtypMax/) && !($lrtypName =~ /lrtypIgnored/) && !($iorsName =~ /iorsLRNOP/))
+				{
+					print OUTPUTFILE "              <map value=\"$iorsValue\" message=\"\$(string.IorsMap.$iorsName)\"/>\n";
+				}
 			}
 		}
 		print OUTPUTFILE "            </valueMap>\n";
@@ -314,6 +340,20 @@ while($line = <ETWDATA>) {
 				chomp $tcconstline;
 				($iorsName) = split(' ', $tcconstline);
 				print OUTPUTFILE "        <string id=\"IorsMap.$iorsName\" value=\"$iorsName\"/>\n";
+			}
+		}
+		seek(LRTYP, 0, 0 );
+		while($lrtypline = <LRTYP>) {
+			if( $lrtypline =~ /^\s*const\s+LRTYP\s+lrtyp/ ){
+
+				chomp $lrtypline;
+				($const, $lrtypType, $lrtypName, $equals, $lrtypValue) = split(' ', $lrtypline);
+				$iorsName = substr($lrtypName, length("lrtyp"));
+				$iorsName = "iorsLR$iorsName";
+				if (!($lrtypName =~ /lrtypMax/) && !($lrtypName =~ /lrtypIgnored/) && !($iorsName =~ /iorsLRNOP/))
+				{
+					print OUTPUTFILE "        <string id=\"IorsMap.$iorsName\" value=\"$iorsName\"/>\n";
+				}
 			}
 		}
 	}
