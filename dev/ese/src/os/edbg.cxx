@@ -20486,8 +20486,8 @@ VOID DumpOneIOREQ(
     dprintf( "}\n" );
 
     dprintf( FORMAT_( IOREQ, pioreq, m_tc.etc.iorReason, dwOffset ) );
-    dprintf( "0x%0X = { iorp = %hs(%d), iors = %d, iort = %d, ioru = %d (JetOp), iorf = 0x%x }\n",
-                ( pioreq->m_tc.etc.iorReason.DwIor() ),
+    dprintf( "0x%0I64X = { iorp = %hs(%d), iors = %d, iort = %d, ioru = %d (JetOp), iorf = 0x%x }\n",
+                ( pioreq->m_tc.etc.iorReason.QwIor() ),
                 SzIOIorp( pioreq->m_tc.etc.iorReason.Iorp() ), pioreq->m_tc.etc.iorReason.Iorp(),
                 pioreq->m_tc.etc.iorReason.Iors(),
                 pioreq->m_tc.etc.iorReason.Iort(),

@@ -184,8 +184,11 @@ enum IOREASONSECONDARY : BYTE
     iorsBTRefresh = 14,
     iorsBTPreread = 15,
     iorsBTMax = 16,
+
+    // Defined by LG as iorsLRNOP + lrtyp, reserved through iorsLRMax
+    iorsLRNOP = 128,
+    iorsLRMax = 255,
 };
-static_assert( iorsBTMax <= 16, "IOREASONSECONDARY overflow" );
 
 enum IOREASONTERTIARY : BYTE
 {
@@ -206,9 +209,10 @@ enum IOREASONTERTIARY : BYTE
     iortRepair = 13,
     iortFreeExtSnapshot = 14,
     iortRecTask = 15,
-    iortMax = 16,
+    iortRecoveryRedo = 16,
+    iortRecoveryUndo = 17,
+    iortMax = 18,
 };
-static_assert(iortMax <= 16, "IOREASONTERTIARY overflow");
 
 enum IOREASONUSER : BYTE
 {

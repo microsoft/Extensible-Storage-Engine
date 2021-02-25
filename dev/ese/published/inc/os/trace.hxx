@@ -1088,12 +1088,12 @@ private:
         struct
         {
             IOREASONPRIMARY     m_iorp : 8;
-            IOREASONSECONDARY   m_iors : 4;
-            IOREASONTERTIARY    m_iort : 4;
+            IOREASONSECONDARY   m_iors : 8;
+            IOREASONTERTIARY    m_iort : 8;
             IOREASONUSER        m_ioru : 8;
             IOREASONFLAGS       m_iorf : 8;
         };
-        DWORD m_ior;
+        QWORD m_ior;
     };
 
 public:
@@ -1138,7 +1138,7 @@ public:
         return m_iorf;
     }
 
-    DWORD DwIor() const
+    QWORD QwIor() const
     {
         return m_ior;
     }
@@ -1151,13 +1151,13 @@ public:
 
     void SetIors( IOREASONSECONDARY iors )
     {
-        Assert( iors <= 0x0f );
+        Assert( iors <= 0xff );
         m_iors = iors;
     }
 
     void SetIort( IOREASONTERTIARY iort )
     {
-        Assert( iort <= 0x0f );
+        Assert( iort <= 0xff );
         m_iort = iort;
     }
 
@@ -1285,7 +1285,7 @@ public:
     }
 };
 
-static_assert( sizeof( IOREASON ) == 4, "IOREASON should be 4-bytes" );
+static_assert( sizeof( IOREASON ) == 8, "IOREASON should be 8 bytes" );
 
 struct OPERATION_CONTEXT
 {

@@ -1786,9 +1786,7 @@ ERR ErrLGICheckDatabaseFileSize( PIB *ppib, IFMP ifmp )
             if ( fAdjSize )
             {
                 //  set file size to what the FMP (and OwnExt) says it should be.
-                PIBTraceContextScope tcScope = ppib->InitTraceContextScope();
-                tcScope->iorReason.SetIort( iortRecovery );
-                err = ErrIONewSize( ifmp, *tcScope, pfmp->PgnoLast(), 0, JET_bitNil );
+                err = ErrIONewSize( ifmp, TcCurr(), pfmp->PgnoLast(), 0, JET_bitNil );
             }
         }
     }
@@ -9151,11 +9149,8 @@ ERR LOG::ErrLGRIRedoPagePatch( const LRPAGEPATCHREQUEST * const plrpagepatchrequ
     }
 
     BFLatch bfl;
-    TraceContextScope tcScope( iortPagePatching );
-    // LOG doesn't know TCE during replay;  will pollute stats for activated passive's cache
-    tcScope->nParentObjectClass = tceNone;
 
-    err = ErrBFWriteLatchPage( &bfl, ifmp, pgno, bflfUninitPageOk, BfpriBFMake( PctFMPCachePriority( ifmp ), (BFTEMPOSFILEQOS)qosIODispatchImmediate ), *tcScope );
+    err = ErrBFWriteLatchPage( &bfl, ifmp, pgno, bflfUninitPageOk, BfpriBFMake( PctFMPCachePriority( ifmp ), (BFTEMPOSFILEQOS)qosIODispatchImmediate ), TcCurr() );
     if ( err == JET_errPageNotInitialized )
     {
         // empty pages cannot be patched, just ignore - other than dbscan,
@@ -9337,10 +9332,6 @@ ERR LOG::ErrLGRIRedoScanCheck( const LRSCANCHECK2 * const plrscancheck, BOOL* co
 
     BFLatch bfl = { 0 };
     BOOL fLockedNLoaded = fFalse;   // have latch, AND loaded page ...
-    Assert( fDbScan || fDbShrink ); // Handle client type to set trace context below.
-    TraceContextScope tcScope( fDbScan ? iortDbScan : ( fDbShrink ? iortDbShrink : iortRecovery ) );
-    // LOG doesn't know TCE during replay;  will pollute stats for activated passive's cache
-    tcScope->nParentObjectClass = tceNone;
 
     C_ASSERT( pgnoSysMax < pgnoScanLastSentinel );
 
@@ -9376,7 +9367,7 @@ ERR LOG::ErrLGRIRedoScanCheck( const LRSCANCHECK2 * const plrscancheck, BOOL* co
                     bflfExtensiveChecks |
                     ( fDbScan ? bflfDBScan : bflfNone ) ),
                 BfpriBFMake( PctFMPCachePriority( ifmp ), (BFTEMPOSFILEQOS)qosIODispatchImmediate ),
-                *tcScope );
+                TcCurr() );
 
         if ( err >= JET_errSuccess )
         {
@@ -10972,7 +10963,6 @@ ERR LOG::ErrLGRIRedoShrinkDBPageReset( const IFMP ifmp, const PGNO pgnoShrinkFir
     PGNO pgnoPrereadWaypoint = pgnoShrinkFirstReset, pgnoPrereadNext = pgnoShrinkFirstReset;
     PGNO pgnoWriteMin = pgnoShrinkLastReset + 1, pgnoWriteMax = pgnoShrinkFirstReset - 1;
     const BFPriority bfprio = BfpriBFMake( PctFMPCachePriority( ifmp ), (BFTEMPOSFILEQOS)qosIODispatchImmediate );
-    TraceContextScope tcScope( iortDbShrink );
 
     Assert( pfmp->FShrinkIsActive() );
     Assert( ( pgnoShrinkFirstReset != pgnoNull ) && ( pgnoShrinkLastReset != pgnoNull ) );
@@ -10991,7 +10981,7 @@ ERR LOG::ErrLGRIRedoShrinkDBPageReset( const IFMP ifmp, const PGNO pgnoShrinkFir
                                 cpgPrereadCurrent,
                                 bfprfDefault,
                                 bfprio,
-                                *tcScope );
+                                TcCurr() );
             pgnoPrereadNext += cpgPrereadCurrent;
             pgnoPrereadWaypoint = pgnoPrereadNext - ( cpgPrereadCurrent / 2 );
         }
@@ -11003,7 +10993,7 @@ ERR LOG::ErrLGRIRedoShrinkDBPageReset( const IFMP ifmp, const PGNO pgnoShrinkFir
                 pgno,
                 BFLatchFlags( bflfNoTouch | bflfNoFaultFail | bflfUninitPageOk | bflfExtensiveChecks ),
                 bfprio,
-                *tcScope ) );
+                TcCurr() ) );
         fPageLatched = fTrue;
         const ERR errPageStatus = ErrBFLatchStatus( &bfl );
         const BOOL fPageUninit = ( errPageStatus == JET_errPageNotInitialized );
@@ -11022,7 +11012,7 @@ ERR LOG::ErrLGRIRedoShrinkDBPageReset( const IFMP ifmp, const PGNO pgnoShrinkFir
              ( cpageCheck.Dbtime() < dbtimeShrink ) )
         {
             // Reset it.
-            BFDirty( &bfl, bfdfDirty, *tcScope );
+            BFDirty( &bfl, bfdfDirty, TcCurr() );
             CPAGE cpageWrite;
             cpageWrite.GetShrunkPage( ifmp, pgno, bfl.pv, g_cbPage );
             cpageWrite.UnloadPage();
@@ -11064,7 +11054,6 @@ ERR LOG::ErrLGRIRedoShrinkDBFileTruncation( const IFMP ifmp, const PGNO pgnoDbLa
 {
     ERR err = JET_errSuccess;
     FMP* const pfmp = &g_rgfmp[ ifmp ];
-    TraceContextScope tcScope( iorpDatabaseShrink );
 
     Assert( pfmp->FShrinkIsActive() );
     Assert( pgnoDbLastNew != pgnoNull );
@@ -11086,7 +11075,7 @@ ERR LOG::ErrLGRIRedoShrinkDBFileTruncation( const IFMP ifmp, const PGNO pgnoDbLa
     Call( ErrIOResizeUpdateDbHdrCount( ifmp, fFalse /* fExtend */ ) );
 
     pfmp->SetOwnedFileSize( CbFileSizeOfPgnoLast( pgnoDbLastNew ) );
-    Call( ErrIONewSize( ifmp, *tcScope, pgnoDbLastNew, 0, JET_bitResizeDatabaseOnlyShrink ) );
+    Call( ErrIONewSize( ifmp, TcCurr(), pgnoDbLastNew, 0, JET_bitResizeDatabaseOnlyShrink ) );
     pfmp->ResetPgnoMaxTracking( pgnoDbLastNew );
 
     if ( pfmp->ErrDBFormatFeatureEnabled( JET_efvLgposLastResize ) == JET_errSuccess )
@@ -11217,14 +11206,12 @@ ERR LOG::ErrLGRIRedoExtentFreed( const LREXTENTFREED * const plrextentfreed )
     const CPG cpgExtent     = plrextentfreed->CpgExtent();
 
     Assert( m_fRecoveringMode == fRecoveringRedo );
-    TraceContextScope tcScope( iortRecovery );
-    tcScope->nParentObjectClass = tceNone;
 
     for( int i = 0; i < cpgExtent; ++i )
     {
         BFLatch bfl;
 
-        err = ErrBFWriteLatchPage( &bfl, ifmp, pgnoFirst + i, bflfUninitPageOk, BfpriBFMake( PctFMPCachePriority( ifmp ), (BFTEMPOSFILEQOS)qosIODispatchImmediate ), *tcScope );
+        err = ErrBFWriteLatchPage( &bfl, ifmp, pgnoFirst + i, bflfUninitPageOk, BfpriBFMake( PctFMPCachePriority( ifmp ), (BFTEMPOSFILEQOS)qosIODispatchImmediate ), TcCurr() );
         if ( err == JET_errPageNotInitialized )
         {
             // pre image for empty pages cannot be captured, just ignore
@@ -11510,7 +11497,8 @@ ERR LOG::ErrLGRIRedoOperations(
     BYTE *pbAttach,
     BOOL fKeepDbAttached,
     BOOL* const pfRcvCleanlyDetachedDbs,
-    LGSTATUSINFO *plgstat )
+    LGSTATUSINFO *plgstat,
+    TraceContextScope& tcScope )
 {
     ERR                 err                     = JET_errSuccess;
     ERR                 errT                    = JET_errSuccess;
@@ -11531,9 +11519,6 @@ ERR LOG::ErrLGRIRedoOperations(
     ZeroMemory( cLRs, sizeof(cLRs) );
 
     *pfRcvCleanlyDetachedDbs = fTrue;
-
-    TraceContextScope tcScope( iortRecovery );
-    tcScope->nParentObjectClass = tceNone;
 
     OSTrace( JET_tracetagInitTerm, OSFormat( "[Recovery] Begin redo operations. [pinst=%p, fKeep=%d]", m_pinst, fKeepDbAttached ) );
 
@@ -11948,6 +11933,8 @@ ProcessNextRec:
             LGAddUsage( CbLGSizeOfRec( plr ) );
             cLRs[ plr->lrtyp ]++;
         }
+
+        tcScope->iorReason.SetIors( IorsFromLr( plr ) );
 
 #ifdef MINIMAL_FUNCTIONALITY
 #else  //  !MINIMAL_FUNCTIONALITY
@@ -12878,6 +12865,8 @@ ProcessNextRec:
         } /* outer default */
     } /* outer switch */
 
+    tcScope->iorReason.SetIors( iorsNone );
+
 #ifdef DEBUG
         m_fDBGNoLog = fFalse;
 #endif
@@ -13600,6 +13589,9 @@ ERR LOG::ErrLGRRedo( BOOL fKeepDbAttached, CHECKPOINT *pcheckpoint, LGSTATUSINFO
     BOOL    fSkipUndo               = fFalse;   // default is to perform undo
     BOOL    fRcvCleanlyDetachedDbs  = fTrue;
 
+    TraceContextScope tcScope( iortRecoveryRedo );
+    tcScope->nParentObjectClass = tceNone;
+
     //  set flag to suppress logging
     //
     m_fRecovering = fTrue;
@@ -13677,7 +13669,8 @@ ERR LOG::ErrLGRRedo( BOOL fKeepDbAttached, CHECKPOINT *pcheckpoint, LGSTATUSINFO
                     pcheckpoint->rgbAttach,
                     fKeepDbAttached,
                     &fRcvCleanlyDetachedDbs,
-                    plgstat );
+                    plgstat,
+                    tcScope );
     //  remember the error code from ErrLGRIRedoOperations() which may have a corruption warning
     //      from ErrLGCheckReadLastLogRecordFF() which it may eventually call
     errRedo = err;
@@ -13913,6 +13906,8 @@ ERR LOG::ErrLGRRedo( BOOL fKeepDbAttached, CHECKPOINT *pcheckpoint, LGSTATUSINFO
 
 
     //  switch to undo mode
+
+    tcScope->iorReason.SetIort( iortRecoveryUndo );
 
     m_fRecoveringMode = fRecoveringUndo;
 

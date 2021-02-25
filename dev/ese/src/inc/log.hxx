@@ -539,7 +539,7 @@ public:
     VOID LGPDBDisable( const DBID dbid );
     BOOL FLGPEnabled() const;
     BOOL FLGPDBEnabled( const DBID dbid ) const;
-    ERR ErrLGPAddPgnoRef( const DBID dbid, const PGNO pgno );
+    ERR ErrLGPAddPgnoRef( const DBID dbid, const PGNO pgno, const LR* const plr = NULL );
     VOID LGPSortPages();
     ERR ErrLGPPrereadExtendedPageRange( const DBID dbid, const PGNO pgno, CPG* const pcpgPreread, const BFPreReadFlags bfprf = bfprfDefault );
     size_t IpgLGPGetSorted( const DBID dbid, const PGNO pgno ) const;
@@ -548,18 +548,39 @@ public:
 protected:
     size_t CpgLGPIGetArrayPgnosSize( const DBID dbid ) const;
     size_t IpgLGPIGetUnsorted( const DBID dbid, const PGNO pgno ) const;
-    ERR ErrLGPISetEntry( const DBID dbid, const size_t ipg, const PGNO pgno );
+    ERR ErrLGPISetEntry( const DBID dbid, const size_t ipg, const PGNO pgno, const IOREASONSECONDARY iors = iorsNone );
     PGNO PgnoLGPIGetEntry( const DBID dbid, const size_t ipg ) const;
+    IOREASONSECONDARY IorsLGPIGetEntry( const DBID dbid, const size_t ipg ) const;
+
+private:
+
+    struct PageRef
+    {
+        PageRef()
+        {
+            pgno = pgnoNull;
+            iors = iorsNone;
+        }
+
+        PageRef( PGNO pgnoIn, IOREASONSECONDARY iorsIn = iorsNone )
+        {
+            pgno = pgnoIn;
+            iors = iorsIn;
+        }
+
+        PGNO                pgno;
+        IOREASONSECONDARY   iors;
+    };
 
     //  Private methods.
 private:
-    static INT __cdecl ILGPICmpPgno( const PGNO* ppgno1, const PGNO* ppgno2 );
+    static INT __cdecl ILGPICmpPagerefs( const PageRef* ppageref1, const PageRef* ppageref2 );
 
     //  Private state.
 private:
     DBID m_dbidMaxUsed;
     CPG m_cpgGrowth;
-    CArray<PGNO>* m_rgArrayPgnos;
+    CArray<PageRef>* m_rgArrayPagerefs;
 };
 
 //  Helper test class for log pre-reading during recovery.
@@ -1850,7 +1871,7 @@ private:
     ERR ErrLGCheckDBGensRequired( const LONG lGenCurrent );
     ERR ErrLGCheckGenMaxRequired();
 
-    ERR ErrLGRIRedoOperations( const LE_LGPOS *ple_lgposRedoFrom, BYTE *pbAttach, BOOL fKeepDbAttached, BOOL* const pfRcvCleanlyDetachedDbs, LGSTATUSINFO *plgstat );
+    ERR ErrLGRIRedoOperations( const LE_LGPOS *ple_lgposRedoFrom, BYTE *pbAttach, BOOL fKeepDbAttached, BOOL* const pfRcvCleanlyDetachedDbs, LGSTATUSINFO *plgstat, TraceContextScope& tcScope );
     ERR ErrLGIVerifyRedoMaps();
     ERR ErrLGIVerifyRedoMapForIfmp( const IFMP ifmp );
     VOID LGITermRedoMaps();

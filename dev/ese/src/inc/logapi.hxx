@@ -108,169 +108,169 @@ typedef BYTE LRTYP;
 
 //  Physical logging log record type
 
-const LRTYP lrtypNOP                        = 0;    //  NOP null operation
-const LRTYP lrtypInit                       = 1;
-const LRTYP lrtypTerm                       = 2;
-const LRTYP lrtypMS                         = 3;    //  mutilsec flush
-const LRTYP lrtypEnd                        = 4;    //  end of log generation
+const LRTYP lrtypNOP                            = 0;    //  NOP null operation
+const LRTYP lrtypInit                           = 1;
+const LRTYP lrtypTerm                           = 2;
+const LRTYP lrtypMS                             = 3;    //  mutilsec flush
+const LRTYP lrtypEnd                            = 4;    //  end of log generation
 
 //  Logical logging log record type
 
-const LRTYP lrtypBegin                      = 5;
-const LRTYP lrtypCommit                     = 6;
-const LRTYP lrtypRollback                   = 7;
-const LRTYP lrtypBegin0                     = 8;
-const LRTYP lrtypCommit0                    = 9;
-const LRTYP lrtypRefresh                    = 10;
-const LRTYP lrtypMacroBegin                 = 11;
-const LRTYP lrtypMacroCommit                = 12;
-const LRTYP lrtypMacroAbort                 = 13;
+const LRTYP lrtypBegin                          = 5;
+const LRTYP lrtypCommit                         = 6;
+const LRTYP lrtypRollback                       = 7;
+const LRTYP lrtypBegin0                         = 8;
+const LRTYP lrtypCommit0                        = 9;
+const LRTYP lrtypRefresh                        = 10;
+const LRTYP lrtypMacroBegin                     = 11;
+const LRTYP lrtypMacroCommit                    = 12;
+const LRTYP lrtypMacroAbort                     = 13;
 
-const LRTYP lrtypCreateDB                   = 14;
-const LRTYP lrtypAttachDB                   = 15;
-const LRTYP lrtypDetachDB                   = 16;
+const LRTYP lrtypCreateDB                       = 14;
+const LRTYP lrtypAttachDB                       = 15;
+const LRTYP lrtypDetachDB                       = 16;
 
 //  debug log records
 //
-const LRTYP lrtypRecoveryUndo               = 17;
-const LRTYP lrtypRecoveryQuit               = 18;
+const LRTYP lrtypRecoveryUndo                   = 17;
+const LRTYP lrtypRecoveryQuit                   = 18;
 
-const LRTYP lrtypFullBackup                 = 19;
-const LRTYP lrtypIncBackup                  = 20;
+const LRTYP lrtypFullBackup                     = 19;
+const LRTYP lrtypIncBackup                      = 20;
 
-const LRTYP lrtypJetOp                      = 21;
-const LRTYP lrtypTrace                      = 22;
+const LRTYP lrtypJetOp                          = 21;
+const LRTYP lrtypTrace                          = 22;
 
-const LRTYP lrtypShutDownMark               = 23;
+const LRTYP lrtypShutDownMark                   = 23;
 
 //  multi-page updaters
 //
-const LRTYP lrtypCreateMultipleExtentFDP    = 24;
-const LRTYP lrtypCreateSingleExtentFDP      = 25;
-const LRTYP lrtypConvertFDP                 = 26;
+const LRTYP lrtypCreateMultipleExtentFDP        = 24;
+const LRTYP lrtypCreateSingleExtentFDP          = 25;
+const LRTYP lrtypConvertFDP                     = 26;
 
-const LRTYP lrtypSplit                      = 27;
-const LRTYP lrtypMerge                      = 28;
+const LRTYP lrtypSplit                          = 27;
+const LRTYP lrtypMerge                          = 28;
 
 //  single-page updaters
 //
-const LRTYP lrtypInsert                     = 29;
-const LRTYP lrtypFlagInsert                 = 30;
-const LRTYP lrtypFlagInsertAndReplaceData   = 31;
-const LRTYP lrtypFlagDelete                 = 32;
-const LRTYP lrtypReplace                    = 33;   //  replace with full after image
-const LRTYP lrtypReplaceD                   = 34;   //  replace with delta'ed after image
-const LRTYP lrtypDelete                     = 35;
+const LRTYP lrtypInsert                         = 29;
+const LRTYP lrtypFlagInsert                     = 30;
+const LRTYP lrtypFlagInsertAndReplaceData       = 31;
+const LRTYP lrtypFlagDelete                     = 32;
+const LRTYP lrtypReplace                        = 33;   //  replace with full after image
+const LRTYP lrtypReplaceD                       = 34;   //  replace with delta'ed after image
+const LRTYP lrtypDelete                         = 35;
 
-const LRTYP lrtypUndoInfo                   = 36;   //  deferred before image
+const LRTYP lrtypUndoInfo                       = 36;   //  deferred before image
 
-const LRTYP lrtypDelta                      = 37;
+const LRTYP lrtypDelta                          = 37;
 
-const LRTYP lrtypSetExternalHeader          = 38;
-const LRTYP lrtypUndo                       = 39;
+const LRTYP lrtypSetExternalHeader              = 38;
+const LRTYP lrtypUndo                           = 39;
 
 //  SLV support (obsolete)
 //
-const LRTYP lrtypSLVPageAppendOBSOLETE      = 40;   //  write a new SLV file page or append
-                                                    //      in an existing one
-const LRTYP lrtypSLVSpaceOBSOLETE           = 41;   //  SLV space operation
+const LRTYP lrtypSLVPageAppendOBSOLETE          = 40;   //  write a new SLV file page or append
+                                                        //      in an existing one
+const LRTYP lrtypSLVSpaceOBSOLETE               = 41;   //  SLV space operation
 
 //  Fast single I/O log flush support
 //
-const LRTYP lrtypChecksum                   = 42;
+const LRTYP lrtypChecksum                       = 42;
 
-const LRTYP lrtypSLVPageMoveOBSOLETE        = 43;   //  DEFUNCT: OLDSLV: moving data in the SLV file
+const LRTYP lrtypSLVPageMoveOBSOLETE            = 43;   //  DEFUNCT: OLDSLV: moving data in the SLV file
 
 
-const LRTYP lrtypForceDetachDBOBSOLETE      = 44;   //  DEFUNCT: force detaching a database
-const LRTYP lrtypExtRestore                 = 45;   // Instance is a TargetInstance in a external restore
-                                                    // it's also used to start a new log generation
+const LRTYP lrtypForceDetachDBOBSOLETE          = 44;   //  DEFUNCT: force detaching a database
+const LRTYP lrtypExtRestore                     = 45;   // Instance is a TargetInstance in a external restore
+                                                        // it's also used to start a new log generation
 
-const LRTYP lrtypBackup                     = 46;
+const LRTYP lrtypBackup                         = 46;
 
-const LRTYP lrtypEmptyTree                  = 48;
+const LRTYP lrtypEmptyTree                      = 48;
 
 //  only difference between the following LR types and the original types
 //  is that the "2" versions add a date/time stamp
-const LRTYP lrtypInit2                      = 49;
-const LRTYP lrtypTerm2                      = 50;
-const LRTYP lrtypRecoveryUndo2              = 51;
-const LRTYP lrtypRecoveryQuit2              = 52;
+const LRTYP lrtypInit2                          = 49;
+const LRTYP lrtypTerm2                          = 50;
+const LRTYP lrtypRecoveryUndo2                  = 51;
+const LRTYP lrtypRecoveryQuit2                  = 52;
 
-const LRTYP lrtypBeginDT                    = 53;
-const LRTYP lrtypPrepCommit                 = 54;
-const LRTYP lrtypPrepRollback               = 55;
+const LRTYP lrtypBeginDT                        = 53;
+const LRTYP lrtypPrepCommit                     = 54;
+const LRTYP lrtypPrepRollback                   = 55;
 
 // unused
-// const LRTYP lrtypDbList                  = 56;
-const LRTYP lrtypForceWriteLog              = 57;
+// const LRTYP lrtypDbList                      = 56;
+const LRTYP lrtypForceWriteLog                  = 57;
 
-const LRTYP lrtypConvertFDP2                = 58;
+const LRTYP lrtypConvertFDP2                    = 58;
 
-const LRTYP lrtypExtRestore2                = 59;
-const LRTYP lrtypBackup2                    = 60;
+const LRTYP lrtypExtRestore2                    = 59;
+const LRTYP lrtypBackup2                        = 60;
 
-const LRTYP lrtypForceLogRollover           = 61;
+const LRTYP lrtypForceLogRollover               = 61;
 
-const LRTYP lrtypSplit2                     = 62;
-const LRTYP lrtypMerge2                     = 63;
+const LRTYP lrtypSplit2                         = 62;
+const LRTYP lrtypMerge2                         = 63;
 
-const LRTYP lrtypScrub                      = 64;
+const LRTYP lrtypScrub                          = 64;
 
-const LRTYP lrtypPageMove                   = 65;
+const LRTYP lrtypPageMove                       = 65;
 
-const LRTYP lrtypPagePatchRequest           = 66;
+const LRTYP lrtypPagePatchRequest               = 66;
 
 // Reserved for adding backwards compatible log records that
 // older versions can skip over. 
-const LRTYP lrtypMacroInfo                  = 67; // lrtypIgnored1
-const LRTYP lrtypExtendDB                   = 68; // lrtypIgnored2
-const LRTYP lrtypCommitCtx                  = 69; // lrtypIgnored3
-const LRTYP lrtypScanCheck                  = 70; // lrtypIgnored4
-const LRTYP lrtypNOP2                       = 71; // lrtypIgnored5
-const LRTYP lrtypReAttach                   = 72; // lrtypIgnored6
+const LRTYP lrtypMacroInfo                      = 67; // lrtypIgnored1
+const LRTYP lrtypExtendDB                       = 68; // lrtypIgnored2
+const LRTYP lrtypCommitCtx                      = 69; // lrtypIgnored3
+const LRTYP lrtypScanCheck                      = 70; // lrtypIgnored4
+const LRTYP lrtypNOP2                           = 71; // lrtypIgnored5
+const LRTYP lrtypReAttach                       = 72; // lrtypIgnored6
 
-const LRTYP lrtypMacroInfo2                 = 73; // lrtypIgnored7
-const LRTYP lrtypFreeFDP                    = 74; // lrtypIgnored8
-const LRTYP lrtypIgnored9                   = 75;
+const LRTYP lrtypMacroInfo2                     = 73; // lrtypIgnored7
+const LRTYP lrtypFreeFDP                        = 74; // lrtypIgnored8
+const LRTYP lrtypIgnored9                       = 75;
 
-const LRTYP lrtypFragmentBegin              = 76;
-const LRTYP lrtypFragment                   = 77;
+const LRTYP lrtypFragmentBegin                  = 76;
+const LRTYP lrtypFragment                       = 77;
 
-const LRTYP lrtypShrinkDB                   = 78;
+const LRTYP lrtypShrinkDB                       = 78;
 
-const LRTYP lrtypCreateDBFinish             = 79;
+const LRTYP lrtypCreateDBFinish                 = 79;
 
-const LRTYP lrtypRecoveryQuitKeepAttachments= 80;
+const LRTYP lrtypRecoveryQuitKeepAttachments    = 80;
 
-const LRTYP lrtypTrimDB                     = 81;
+const LRTYP lrtypTrimDB                         = 81;
 
 // Reserved for adding backwards compatible log records that
 // older versions can skip over.
-const LRTYP lrtypIgnored10                  = 82;
-const LRTYP lrtypIgnored11                  = 83;
-const LRTYP lrtypIgnored12                  = 84;
-const LRTYP lrtypIgnored13                  = 85;
-const LRTYP lrtypIgnored14                  = 86;
-const LRTYP lrtypIgnored15                  = 87;
-const LRTYP lrtypIgnored16                  = 88;
-const LRTYP lrtypIgnored17                  = 89;
-const LRTYP lrtypIgnored18                  = 90;
-const LRTYP lrtypIgnored19                  = 91;
+const LRTYP lrtypIgnored10                      = 82;
+const LRTYP lrtypIgnored11                      = 83;
+const LRTYP lrtypIgnored12                      = 84;
+const LRTYP lrtypIgnored13                      = 85;
+const LRTYP lrtypIgnored14                      = 86;
+const LRTYP lrtypIgnored15                      = 87;
+const LRTYP lrtypIgnored16                      = 88;
+const LRTYP lrtypIgnored17                      = 89;
+const LRTYP lrtypIgnored18                      = 90;
+const LRTYP lrtypIgnored19                      = 91;
 
-const LRTYP lrtypSetDbVersion               = 92;
-const LRTYP lrtypDelta64                    = 93;
-const LRTYP lrtypShrinkDB2                  = 94;
-const LRTYP lrtypNewPage                    = 95;
-const LRTYP lrtypRootPageMove               = 96;
-const LRTYP lrtypSignalAttachDb             = 97;
-const LRTYP lrtypScanCheck2                 = 98;
-const LRTYP lrtypShrinkDB3                  = 99;
-const LRTYP lrtypExtentFreed                = 100;
+const LRTYP lrtypSetDbVersion                   = 92;
+const LRTYP lrtypDelta64                        = 93;
+const LRTYP lrtypShrinkDB2                      = 94;
+const LRTYP lrtypNewPage                        = 95;
+const LRTYP lrtypRootPageMove                   = 96;
+const LRTYP lrtypSignalAttachDb                 = 97;
+const LRTYP lrtypScanCheck2                     = 98;
+const LRTYP lrtypShrinkDB3                      = 99;
+const LRTYP lrtypExtentFreed                    = 100;
 
-const LRTYP lrtypMax                        = 101;
+const LRTYP lrtypMax                            = 101;
 
-const LRTYP lrtypMaxMax                     = 128;
+const LRTYP lrtypMaxMax                         = 128;
 C_ASSERT( lrtypMax < lrtypMaxMax ); // You are using the high bit of LRTYPE!!! Time to expand to 2 bytes?!?!?!
 
 //  When adding a new lrtyp, please see comment above
@@ -292,6 +292,11 @@ class LR
     public:
         UnalignedLittleEndian< LRTYP >  lrtyp;
 };
+
+INLINE IOREASONSECONDARY IorsFromLr( _In_ const LR* const plr )
+{
+    return plr ? (IOREASONSECONDARY)( iorsLRNOP + plr->lrtyp ) : iorsNone;
+}
 
 PERSISTED
 class LRSHUTDOWNMARK
