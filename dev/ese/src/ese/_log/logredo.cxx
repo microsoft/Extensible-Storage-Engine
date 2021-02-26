@@ -589,7 +589,7 @@ VOID LGIReportBadRevertedPage( const INST* pinst, const IFMP ifmp, const PGNO pg
 //
 //  On success, the page is latched with latchRIW.
 //  On failure, the page is not latched.
-//  errSkipLogRedoOperation: the page is not latched, and the Pagetrim State is pagetrimTrimmed.
+//  errSkipLogRedoOperation: the page is not latched, and the Pagetrim State is pagetrimTrimmed unless fSkipSetRedoMapDbtimeRevert is set and dbtime of page is dbtimeRevert.
 //
 INLINE ERR LOG::ErrLGIAccessPage(
     PIB             *ppib,
@@ -597,7 +597,8 @@ INLINE ERR LOG::ErrLGIAccessPage(
     const IFMP      ifmp,
     const PGNO      pgno,
     const OBJID     objid,
-    const BOOL      fUninitPageOk )
+    const BOOL      fUninitPageOk,
+    const BOOL      fSkipSetRedoMapDbtimeRevert )
 {
     ERR err = JET_errSuccess, errPage = JET_errSuccess;
     DBTIME dbtime = 0;
@@ -608,6 +609,9 @@ INLINE ERR LOG::ErrLGIAccessPage(
     Assert( pgnoNull != pgno );
     Assert( NULL != ppib );
     Assert( !pcsr->FLatched() );
+
+    // Both fUninitPageOk and fSkipSetRedoMapDbtimeRevert shouldn't be true.
+    Assert( !( fUninitPageOk && fSkipSetRedoMapDbtimeRevert ) );
 
     //  right off the bat, if the pgno for this redo operation is already
     //  tracked by the log redo map, we should just skip it instead of
@@ -662,6 +666,15 @@ INLINE ERR LOG::ErrLGIAccessPage(
         if ( errPage >= JET_errSuccess )
         {
             pcsr->ReleasePage();
+        }
+
+        // The only LR which passes fSkipSetRedoMapDbtimeRevert as true currently is the scrub LR for an unused page.
+        // For that LR, we will skip redo operation if the dbtime of the page is set to dbtimeRevert.
+        // We don't want to add it to redomap as nothing is going to remove it as it was freed earlier.
+        //
+        if ( fRevertedNewPage && fSkipSetRedoMapDbtimeRevert )
+        {
+            Error( ErrERRCheck( errSkipLogRedoOperation ) );
         }
 
 
@@ -3729,7 +3742,7 @@ ERR LOG::ErrLGRIRedoScrub( const LRSCRUB * const plrscrub )
     if ( !fSkip )
     {
         const IFMP ifmp = m_pinst->m_mpdbidifmp[ plrscrub->dbid ];
-        Call( ErrLGIAccessPage( ppib, &csr, ifmp, plrscrub->le_pgno, plrscrub->le_objidFDP, fFalse ) );
+        Call( ErrLGIAccessPage( ppib, &csr, ifmp, plrscrub->le_pgno, plrscrub->le_objidFDP, fFalse, plrscrub->FUnusedPage() ) );
         const BOOL fRedo = FLGNeedRedoCheckDbtimeBefore( ifmp, csr, plrscrub->le_dbtime, plrscrub->le_dbtimeBefore, &err );
         Call( err );
         if( fRedo )

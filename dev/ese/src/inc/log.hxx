@@ -1882,7 +1882,8 @@ private:
         const IFMP      ifmp,
         const PGNO      pgno,
         const OBJID     objid,
-        const BOOL      fUninitPageOk );
+        const BOOL      fUninitPageOk,
+        const BOOL      fSkipSetRedoMapDbtimeRevert = false );
     
     ERR ErrLGIAccessPageCheckDbtimes(
         __in    PIB             * const ppib,
