@@ -539,7 +539,7 @@ public:
     VOID LGPDBDisable( const DBID dbid );
     BOOL FLGPEnabled() const;
     BOOL FLGPDBEnabled( const DBID dbid ) const;
-    ERR ErrLGPAddPgnoRef( const DBID dbid, const PGNO pgno, const LR* const plr = NULL );
+    ERR ErrLGPAddPgnoRef( const DBID dbid, const PGNO pgno, const OBJID objid = objidNil, const LR* const plr = NULL );
     VOID LGPSortPages();
     ERR ErrLGPPrereadExtendedPageRange( const DBID dbid, const PGNO pgno, CPG* const pcpgPreread, const BFPreReadFlags bfprf = bfprfDefault );
     size_t IpgLGPGetSorted( const DBID dbid, const PGNO pgno ) const;
@@ -548,8 +548,9 @@ public:
 protected:
     size_t CpgLGPIGetArrayPgnosSize( const DBID dbid ) const;
     size_t IpgLGPIGetUnsorted( const DBID dbid, const PGNO pgno ) const;
-    ERR ErrLGPISetEntry( const DBID dbid, const size_t ipg, const PGNO pgno, const IOREASONSECONDARY iors = iorsNone );
+    ERR ErrLGPISetEntry( const DBID dbid, const size_t ipg, const PGNO pgno, const OBJID objid = objidNil, const IOREASONSECONDARY iors = iorsNone );
     PGNO PgnoLGPIGetEntry( const DBID dbid, const size_t ipg ) const;
+    OBJID ObjidLGPIGetEntry( const DBID dbid, const size_t ipg ) const;
     IOREASONSECONDARY IorsLGPIGetEntry( const DBID dbid, const size_t ipg ) const;
 
 private:
@@ -559,16 +560,19 @@ private:
         PageRef()
         {
             pgno = pgnoNull;
+            objid = objidNil;
             iors = iorsNone;
         }
 
-        PageRef( PGNO pgnoIn, IOREASONSECONDARY iorsIn = iorsNone )
+        PageRef( _In_ const PGNO pgnoIn, _In_ const OBJID objidIn = objidNil, _In_ const IOREASONSECONDARY iorsIn = iorsNone )
         {
             pgno = pgnoIn;
+            objid = objidIn;
             iors = iorsIn;
         }
 
         PGNO                pgno;
+        OBJID               objid;
         IOREASONSECONDARY   iors;
     };
 
@@ -1927,7 +1931,6 @@ private:
     VOID LGIPrereadPage(
         const DBID      dbid,
         const PGNO      pgno,
-        const OBJID     objid,
         BOOL *          pfPrereadIssued,
         BOOL * const        pfPrereadFailure,
         const BFPreReadFlags    bfprf = bfprfDefault
