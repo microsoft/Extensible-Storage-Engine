@@ -1760,6 +1760,39 @@ HandleError:
 #endif // XPRESS9_COMPRESSION
 
 #ifdef XPRESS10_COMPRESSION
+PCWSTR ReasonToString[] =
+{
+    L"UnknownFailure",
+
+    L"MemoryAllocationFailure",
+    L"CorsicaLibraryInitializeFailed",
+    L"CorsicaDeviceEnumeratorCreateFailed",
+    L"CorsicaDeviceEnumeratorGetCountFailed",
+    L"TooManyOrTooFewCorsicaDevicesDetected",
+    L"CorsicaDeviceEnumeratorGetItemFailed",
+    L"CorsicaDeviceOpenFailed",
+    L"CorsicaDeviceQueryInformationFailed",
+    L"CorsicaDeviceIsInMaintenanceMode",
+    L"CorsicaDeviceQueryUserResourcesFailed",
+    L"TooManyOrTooFewQueueGroupsDetected",
+    L"CorsicaChannelCreateFailed",
+    L"CorsicaChannelAddResourceFailed",
+    L"CorsicaChannelFinalizeFailed",
+
+    L"CorsicaRequestQueryAuxiliaryBufferSizeFailed",
+    L"EngineAuxBufferNotInExpectedFormat",
+    L"UserAuxBufferSizeNotInExpectedFormat",
+    L"CorsicaRequestGetBackingBufferSizeFailed",
+    L"RequestContextSizeTooBig",
+    L"CorsicaRequestInitializeFailed",
+    L"CorsicaRequestGetResponsePointerFailed",
+    L"CorsicaRequestSetBuffersFailed",
+    L"CorsicaRequestExecuteFailed",
+    L"EngineExecutionError",
+};
+
+C_ASSERT( _countof(ReasonToString) == CorsicaFailureReasonMax );
+
 //  ================================================================
 // This function decompresses data compressed with xpress10 to prove that
 // xpress10 compression isn't introducing data corruption.
@@ -1838,7 +1871,44 @@ HandleError:
 
 // Software Xpress10 compression is only for unit-test
 BOOL g_fAllowXpress10SoftwareCompression = fFalse;
-CInitOnce< ERR, decltype(&ErrXpress10CorsicaInit) > g_CorsicaInitOnce;
+CInitOnce< HRESULT, decltype(&Xpress10CorsicaInit), CORSICA_FAILURE_REASON * > g_CorsicaInitOnce;
+LOCAL VOID InitOnceCorsica()
+{
+    CORSICA_FAILURE_REASON reason = CorsicaFailureReasonMax;
+    HRESULT status = g_CorsicaInitOnce.Init( Xpress10CorsicaInit, &reason );
+    if ( FAILED(status) && reason != CorsicaFailureReasonMax )
+    {
+        PCWSTR rgwsz[2];
+        WCHAR wszStatus[16];
+        OSStrCbFormatW( wszStatus, sizeof(wszStatus), L"0x%x", status );
+        rgwsz[0] = wszStatus;
+        rgwsz[1] = ReasonToString[ reason ];
+        UtilReportEvent(
+            eventWarning,
+            GENERAL_CATEGORY,
+            CORSICA_INIT_FAILED_ID,
+            _countof(rgwsz),
+            rgwsz );
+    }
+}
+
+VOID LogCorsicaRequestFailure( HRESULT status, USHORT EngineErrorCode, CORSICA_FAILURE_REASON reason, BOOL fCompression )
+{
+    PCWSTR rgwsz[4];
+    WCHAR wszStatus[16], wszEngineStatus[16];
+    OSStrCbFormatW( wszStatus, sizeof(wszStatus), L"0x%x", status );
+    rgwsz[0] = wszStatus;
+    OSStrCbFormatW( wszEngineStatus, sizeof(wszEngineStatus), L"%hd", EngineErrorCode );
+    rgwsz[1] = wszEngineStatus;
+    rgwsz[2] = ReasonToString[ reason ];
+    rgwsz[3] = fCompression ? L"Compress" : L"Decompress";
+    UtilReportEvent(
+        eventWarning,
+        GENERAL_CATEGORY,
+        CORSICA_REQUEST_FAILED_ID,
+        _countof(rgwsz),
+        rgwsz );
+}
 
 //  ================================================================
 ERR CDataCompressor::ErrCompressXpress10_(
@@ -1850,9 +1920,9 @@ ERR CDataCompressor::ErrCompressXpress10_(
 //  ================================================================
 {
     PERFOptDeclare( const HRT hrtStart = HrtHRTCount() );
-    ERR err;
+    ERR err = JET_errSuccess;
 
-    (VOID)g_CorsicaInitOnce.Init( ErrXpress10CorsicaInit );
+    InitOnceCorsica();
 
     Assert( data.Cb() <= wMax );
 
@@ -1862,16 +1932,30 @@ ERR CDataCompressor::ErrCompressXpress10_(
     ULONGLONG ullCompressedCrc;
     HRT dhrtHardwareLatency;
 
-    if ( FXpress10CorsicaHealthy() )
+    if ( IsXpress10CorsicaHealthy() )
     {
-        err = ErrXpress10CorsicaCompress(
+        CORSICA_FAILURE_REASON reason;
+        USHORT EngineErrorCode;
+        err = JET_errSuccess;
+        HRESULT status = Xpress10CorsicaCompress(
                 (PBYTE)data.Pv(),
                 data.Cb(),
                 pbDataCompressed + cbReserved,
                 cbDataCompressedMax - cbReserved,
                 (PULONG)pcbDataCompressedActual,
                 &ullCompressedCrc,
-                &dhrtHardwareLatency );
+                &dhrtHardwareLatency,
+                &reason,
+                &EngineErrorCode );
+        if ( FAILED(status) )
+        {
+            err = ErrERRCheck( errRECCannotCompress );
+            // compression can report buffer overrun for uncompressible input, no need to event for that.
+            if ( status != HRESULT_FROM_WIN32( ERROR_INSUFFICIENT_BUFFER ) )
+            {
+                LogCorsicaRequestFailure( status, EngineErrorCode, reason, fTrue );
+            }
+        }
 
         if ( err == JET_errSuccess )
         {
@@ -1884,13 +1968,17 @@ ERR CDataCompressor::ErrCompressXpress10_(
     }
     else if ( g_fAllowXpress10SoftwareCompression )
     {
-        err = ErrXpress10SoftwareCompress(
+        err = JET_errSuccess;
+        if ( FAILED( Xpress10SoftwareCompress(
                 (PBYTE)data.Pv(),
                 data.Cb(),
                 pbDataCompressed + cbReserved,
                 cbDataCompressedMax - cbReserved,
                 (PULONG)pcbDataCompressedActual,
-                &ullCompressedCrc );
+                &ullCompressedCrc ) ) )
+        {
+            err = ErrERRCheck( errRECCannotCompress );
+        }
     }
     else
     {
@@ -2300,7 +2388,7 @@ ERR CDataCompressor::ErrDecompressXpress10_(
     ERR err = JET_errSuccess;
     BYTE *pbAlloc = NULL;
 
-    (VOID)g_CorsicaInitOnce.Init( ErrXpress10CorsicaInit );
+    InitOnceCorsica();
 
     PERFOptDeclare( const HRT hrtStart = HrtHRTCount() );
     HRT dhrtHardwareLatency;
@@ -2345,16 +2433,27 @@ ERR CDataCompressor::ErrDecompressXpress10_(
         }
     }
 
-    if ( FXpress10CorsicaHealthy() && !fForceSoftwareDecompression )
+    if ( IsXpress10CorsicaHealthy() && !fForceSoftwareDecompression )
     {
-        err = ErrXpress10CorsicaDecompress(
+        CORSICA_FAILURE_REASON reason;
+        USHORT EngineErrorCode;
+        err = JET_errSuccess;
+        HRESULT status = Xpress10CorsicaDecompress(
                 pbAlloc ? pbAlloc : pbData,
                 pbAlloc ? cbUncompressed : cbDataMax,
                 (BYTE *)dataCompressed.Pv() + cbReserved,
                 cbCompressedData,
                 pHdr->mle_ullCompressedChecksum,
                 (PULONG)pcbDataActual,
-                &dhrtHardwareLatency );
+                &dhrtHardwareLatency,
+                &reason,
+                &EngineErrorCode );
+        if ( FAILED(status) )
+        {
+            err = ErrERRCheck( JET_errDeviceFailure );
+            LogCorsicaRequestFailure( status, EngineErrorCode, reason, fFalse );
+        }
+
         if ( err == JET_errSuccess )
         {
             Assert( cbUncompressed == *pcbDataActual );
@@ -2373,13 +2472,29 @@ ERR CDataCompressor::ErrDecompressXpress10_(
 
     if ( err < JET_errSuccess )
     {
-        err = ErrXpress10SoftwareDecompress(
+        err = JET_errSuccess;
+        HRESULT status = Xpress10SoftwareDecompress(
                 pbAlloc ? pbAlloc : pbData,
                 pbAlloc ? cbUncompressed : cbDataMax,
                 (BYTE *)dataCompressed.Pv() + cbReserved,
                 cbCompressedData,
                 pHdr->mle_ullCompressedChecksum,
                 (PULONG)pcbDataActual );
+        if ( FAILED(status) )
+        {
+            if ( status == HRESULT_FROM_WIN32( ERROR_DATA_CHECKSUM_ERROR ) )
+            {
+                err = ErrERRCheck( JET_errCompressionIntegrityCheckFailed );
+            }
+            else if ( status == HRESULT_FROM_WIN32( ERROR_NOT_ENOUGH_MEMORY ) )
+            {
+                err = ErrERRCheck( JET_errOutOfMemory );
+            }
+            else
+            {
+                err = ErrERRCheck( JET_errDecompressionFailed );
+            }
+        }
         if ( err == JET_errSuccess )
         {
             Assert( cbUncompressed == *pcbDataActual );

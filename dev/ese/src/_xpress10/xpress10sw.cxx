@@ -27,16 +27,13 @@
 
 #include "xp10.h"
 
-#include "osu.hxx"
-#include "jet.h"
-
 #define UNCOMPRESSED_CHUNK_SIZE 4096
 
 #define STATUS_SUCCESS                  ((NTSTATUS)0x00000000L)
 
 // CRC64 implementation compatible with what Corsica generates
 #define CORSICA_CRC64_POLY 0x9a6c9329ac4bc9b5ULL
-LOCAL ULONGLONG
+static ULONGLONG
 UtilGenCorsicaCrc64(
     _In_reads_bytes_(BufferLength) const BYTE * Buffer,
     _In_ ULONGLONG BufferLength
@@ -61,7 +58,7 @@ UtilGenCorsicaCrc64(
     return (crc ^ 0xFFFFFFFFFFFFFFFFULL);
 }
 
-ERR ErrXpress10SoftwareCompress(
+HRESULT Xpress10SoftwareCompress(
     _In_reads_bytes_(UncompressedBufferSize) const BYTE * UncompressedBuffer,
     _In_ ULONG UncompressedBufferSize,
     _Out_writes_bytes_to_(CompressedBufferSize, *FinalCompressedSize) BYTE * CompressedBuffer,
@@ -70,7 +67,6 @@ ERR ErrXpress10SoftwareCompress(
 	_Out_ ULONGLONG *pCrc
 )
 {
-    ERR err = JET_errSuccess;
     ULONG cbCompressionWorkspaceSize, cbDecompressionWorkspaceSize;
 
     RtlCompressWorkSpaceSizeXp10(
@@ -78,8 +74,11 @@ ERR ErrXpress10SoftwareCompress(
             &cbCompressionWorkspaceSize,
             &cbDecompressionWorkspaceSize );
 
-    BYTE *workspace = NULL;
-    AllocR( workspace = (BYTE *)PvOSMemoryHeapAlloc( cbCompressionWorkspaceSize ));
+    BYTE *workspace = new BYTE[cbCompressionWorkspaceSize];
+    if ( workspace == NULL )
+    {
+        return HRESULT_FROM_WIN32( ERROR_NOT_ENOUGH_MEMORY );
+    }
 
     NTSTATUS status = RtlCompressBufferXp10(
                             COMPRESSION_ENGINE_STANDARD,
@@ -90,30 +89,28 @@ ERR ErrXpress10SoftwareCompress(
                             UNCOMPRESSED_CHUNK_SIZE,
                             FinalCompressedSize,
                             workspace );
-    if ( status != STATUS_SUCCESS )
+    if ( status == STATUS_SUCCESS )
     {
-        err = ErrERRCheck( errRECCannotCompress );
-    }
-    else
-    {
-        Assert( *FinalCompressedSize <= CompressedBufferSize );
         *pCrc = UtilGenCorsicaCrc64( CompressedBuffer, *FinalCompressedSize );
     }
 
-    OSMemoryHeapFree( workspace );
-    return err;
+    delete[] workspace;
+    return status;
 }
 
-ERR ErrXpress10SoftwareDecompress(
+HRESULT Xpress10SoftwareDecompress(
     _Out_writes_bytes_to_(UncompressedBufferSize, *FinalUncompressedSize) BYTE * UncompressedBuffer,
     _In_ ULONG UncompressedBufferSize,
     _In_reads_bytes_(CompressedBufferSize) const BYTE * CompressedBuffer,
     _In_ ULONG CompressedBufferSize,
+#ifdef DEBUG
     _In_ ULONGLONG Crc,
+#else
+    _In_ ULONGLONG,
+#endif
     _Out_ PULONG FinalUncompressedSize
 )
 {
-    ERR err = JET_errSuccess;
     ULONG cbCompressionWorkspaceSize, cbDecompressionWorkspaceSize;
 
 #ifdef DEBUG
@@ -121,7 +118,7 @@ ERR ErrXpress10SoftwareDecompress(
     // data's CRC, no need to verify compressed data's CRC. Just leave it in for debug.
     if ( Crc != UtilGenCorsicaCrc64( CompressedBuffer, CompressedBufferSize ) )
     {
-        return ErrERRCheck( JET_errCompressionIntegrityCheckFailed );
+        return HRESULT_FROM_WIN32( ERROR_DATA_CHECKSUM_ERROR );
     }
 #endif
 
@@ -130,8 +127,11 @@ ERR ErrXpress10SoftwareDecompress(
             &cbCompressionWorkspaceSize,
             &cbDecompressionWorkspaceSize );
 
-    BYTE *workspace = NULL;
-    AllocR( workspace = (BYTE *)PvOSMemoryHeapAlloc( cbDecompressionWorkspaceSize ));
+    BYTE *workspace = new BYTE[cbDecompressionWorkspaceSize];
+    if ( workspace == NULL )
+    {
+        return HRESULT_FROM_WIN32( ERROR_NOT_ENOUGH_MEMORY );
+    }
 
     NTSTATUS status = RtlDecompressBufferXp10(
                         UncompressedBuffer,
@@ -141,16 +141,8 @@ ERR ErrXpress10SoftwareDecompress(
                         UNCOMPRESSED_CHUNK_SIZE,
                         FinalUncompressedSize,
                         workspace );
-    if ( status != STATUS_SUCCESS )
-    {
-        err = ErrERRCheck( JET_errDecompressionFailed );
-    }
-    else
-    {
-        Assert( *FinalUncompressedSize <= UncompressedBufferSize );
-    }
 
-    OSMemoryHeapFree( workspace );
-    return err;
+    delete[] workspace;
+    return status;
 }
 
