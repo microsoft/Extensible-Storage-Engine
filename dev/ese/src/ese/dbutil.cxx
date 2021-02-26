@@ -3162,6 +3162,7 @@ LOCAL ERR ErrDBUTLGetSpaceTreeInfo(
                 (BYTE *)rgcpgExtent,
                 sizeof(rgcpgExtent),
                 fSPOwnedExtent | fSPAvailExtent | fSPReservedExtent | fSPShelvedExtent,
+                gci::Allow,
                 pcprintf ) );
 
     pbtsSpaceTree->cpgOwned = rgcpgExtent[0];

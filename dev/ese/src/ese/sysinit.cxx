@@ -189,6 +189,62 @@ ERR ErrITSetConstants( INST * pinst )
 
     g_fPeriodicTrimEnabled = (BOOL) UlConfigOverrideInjection( 35632, fPeriodicTrimEnabledDefault );
 
+
+    WCHAR       wszBuf[ 3 ];
+
+    if ( FOSConfigGet( wszDEBUGRoot, L"ExtentPageCountCacheTrackOnCreate", wszBuf, sizeof( wszBuf ) ) &&
+         wszBuf[ 0 ] )
+    {
+        // If true, add an entry to the ExtentPageCountCache every time a new FCB with its attendant space is created.
+        // Default is to only add entries to the ExtentPageCountCache when someone calls JetGetTableInfo to read
+        // the size values and the values are not yet cached (i.e. FCBs are tracked on-demand).
+        g_fSPExtentPageCountCacheTrackOnCreate = !!_wtol( wszBuf );
+        if ( g_fSPExtentPageCountCacheTrackOnCreate )
+        {
+            UtilReportEvent(
+                eventWarning,
+                SPACE_MANAGER_CATEGORY,
+                EXTENT_PAGE_COUNT_CACHE_TRACK_ON_CREATE_ENABLED_ID,
+                0,
+                NULL,
+                0,
+                NULL,
+                pinst );
+        }
+    }
+    else
+    {
+        g_fSPExtentPageCountCacheTrackOnCreate = fFalse;
+    }
+
+#ifdef DEBUG
+    if ( FOSConfigGet( wszDEBUGRoot, L"ExtentPageCountCacheValidation", wszBuf, sizeof( wszBuf ) ) &&
+         wszBuf[ 0 ] )
+    {
+        // If true, sporadically during space operations validate the value stored in the ExtentPageCountCache
+        // is correct.  This is quite expensive, and potentially causes deadlocks; it's only for testing, although
+        // it works in a retail binary.
+        // Default is to not do this.
+        g_fSPExtentPageCountCacheValidation = !!_wtol( wszBuf );
+        if ( g_fSPExtentPageCountCacheValidation )
+        {
+            UtilReportEvent(
+                eventWarning,
+                SPACE_MANAGER_CATEGORY,
+                EXTENT_PAGE_COUNT_CACHE_EXTENSIVE_VALIDATION_ENABLED_ID,
+                0,
+                NULL,
+                0,
+                NULL,
+                pinst );
+        }
+    }
+    else
+    {
+        g_fSPExtentPageCountCacheValidation = fFalse;
+    }
+#endif
+    
     return JET_errSuccess;
 }
 

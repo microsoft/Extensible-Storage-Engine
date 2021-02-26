@@ -1718,7 +1718,7 @@ ERR VTAPI ErrIsamRetrieveColumn(
 
     CallR( ErrPIBCheck( ppib ) );
     CheckFUCB( ppib, pfucb );
-    AssertDIRNoLatch( ppib );
+    AssertDIRMaybeNoLatch( ppib, pfucb );
 
     //  set ptdb.  ptdb is same for indexes and for sorts.
     //
@@ -1757,7 +1757,7 @@ ERR VTAPI ErrIsamRetrieveColumn(
         fTransactionStarted = fTrue;
     }
 
-    AssertDIRNoLatch( ppib );
+    AssertDIRMaybeNoLatch( ppib, pfucb );
 
     Assert( FFUCBSort( pfucb ) || FFUCBIndex( pfucb ) );
 
@@ -1880,7 +1880,7 @@ ERR VTAPI ErrIsamRetrieveColumn(
         }
     }
 
-    AssertDIRNoLatch( ppib );
+    AssertDIRMaybeNoLatch( ppib, pfucb );
 
     fieldFixed.ffield = 0;
     fieldFixed.ibRecordOffset = 0;
@@ -1893,7 +1893,7 @@ ERR VTAPI ErrIsamRetrieveColumn(
         {
             Error( ErrERRCheck( JET_errColumnNoEncryptionKey ) );
         }
-        AssertDIRNoLatch( ppib );
+        AssertDIRMaybeNoLatch( ppib, pfucb );
     }
     else
     {
@@ -2282,7 +2282,7 @@ HandleError:
         CallS( ErrDIRCommitTransaction( ppib, NO_GRBIT ) );
     }
     
-    AssertDIRNoLatch( ppib );
+    AssertDIRMaybeNoLatch( ppib, pfucb );
     return err;
 }
 
@@ -2402,7 +2402,7 @@ LOCAL ERR ErrRECRetrieveColumns(
     //
     Assert( pfucb->u.pfcb->Ptdb() == pfucb->u.pscb->fcb.Ptdb() );
     Assert( pfucb->u.pfcb->Ptdb() != ptdbNil );
-    AssertDIRNoLatch( pfucb->ppib );
+    AssertDIRMaybeNoLatch( pfucb->ppib, pfucb );
 
     *pfBufferTruncated = fFalse;
 
@@ -2974,7 +2974,7 @@ HandleError:
         CallS( ErrDIRRelease( pfucb ) );
     }
 
-    AssertDIRNoLatch( pfucb->ppib );
+    AssertDIRMaybeNoLatch( pfucb->ppib, pfucb );
 
     return err;
 }
@@ -2993,7 +2993,7 @@ ERR VTAPI ErrIsamRetrieveColumns(
 
     CallR( ErrPIBCheck( ppib ) );
     CheckFUCB( ppib, pfucb );
-    AssertDIRNoLatch( ppib );
+    AssertDIRMaybeNoLatch( ppib, pfucb );
 
     if ( 0 == ppib->Level() )
     {
@@ -3003,7 +3003,7 @@ ERR VTAPI ErrIsamRetrieveColumns(
         fTransactionStarted = fTrue;
     }
 
-    AssertDIRNoLatch( ppib );
+    AssertDIRMaybeNoLatch( ppib, pfucb );
     Assert( FFUCBSort( pfucb ) || FFUCBIndex( pfucb ) );
 
     Call( ErrRECRetrieveColumns(
@@ -3020,7 +3020,7 @@ HandleError:
         //  No updates performed, so force success.
         CallS( ErrDIRCommitTransaction( ppib, NO_GRBIT ) );
     }
-    AssertDIRNoLatch( ppib );
+    AssertDIRMaybeNoLatch( ppib, pfucb );
 
     return err;
 }

@@ -4587,7 +4587,8 @@ ERR LOG::ErrLGRISetupFMPFromAttach(
                 &dtickShrinkDatabaseTimeQuota,  // JET_dbparamShrinkDatabaseTimeQuota.
                 &cpgShrinkDatabaseSizeLimit,    // JET_dbparamShrinkDatabaseSizeLimit.
                 &fLeakReclaimerEnabled,         // JET_dbparamLeakReclaimerEnabled.
-                &dtickLeakReclaimerTimeQuota    // JET_dbparamLeakReclaimerTimeQuota.
+                &dtickLeakReclaimerTimeQuota,   // JET_dbparamLeakReclaimerTimeQuota.
+                NULL                            // JET_dbparamMaintainExtentPageCountCache (not used here).
                 ) );
 
     //  Get one free fmp entry

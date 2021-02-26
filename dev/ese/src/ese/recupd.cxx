@@ -673,7 +673,7 @@ ERR VTAPI ErrIsamUpdate(
     ERR         err;
 
     CallR( ErrPIBCheck( ppib ) );
-    AssertDIRNoLatch( ppib );
+    AssertDIRMaybeNoLatch( ppib, pfucb );
     CheckTable( ppib, pfucb );
     CheckSecondary( pfucb );
 
@@ -716,7 +716,7 @@ ERR VTAPI ErrIsamUpdate(
         RECIFreeCopyBuffer( pfucb );
     }
 
-    AssertDIRNoLatch( ppib );
+    AssertDIRMaybeNoLatch( ppib, pfucb );
     Assert( err != JET_errNoCurrentRecord );
     return err;
 }
@@ -1285,6 +1285,7 @@ LOCAL ERR ErrRECIInsert(
     FUCB *          pfucbT                  = pfucbNil;
     BOOL            fUpdatingLatchSet       = fFalse;
     ULONG           iidxsegT;
+    BOOL            fInNewTransaction       = fFalse;
 
     //  if table itself created in same transaction then allow application
     //  to update table without creating separate versions for each update.
@@ -1297,7 +1298,7 @@ LOCAL ERR ErrRECIInsert(
     FID     fidVersion;
 
     CheckPIB( ppib );
-    AssertDIRNoLatch( ppib );
+    AssertDIRMaybeNoLatch( ppib, pfucb );
     CheckTable( ppib, pfucb );
     CheckSecondary( pfucb );
 
@@ -1316,22 +1317,44 @@ LOCAL ERR ErrRECIInsert(
 
     //  if necessary, begin transaction
     //
-    CallR( ErrDIRBeginTransaction( ppib, 52005, NO_GRBIT ) );
-
-    //  insert unversioned if requested, and if table uncommitted.
-    //  Any error should result in client application rolling backt transaction
-    //  which created table, since table may be left inconsistent.
-    //
-    if ( ( 0 != (grbit & JET_bitUpdateNoVersion) ) )
+    if ( pfcbTable->FVersioningOffForExtentPageCountCache() )
     {
-        if ( pfcbTable->FUncommitted() )
+        // We only expect this on the ExtentPageCountCache table.
+        Expected( g_rgfmp[ pfucb->ifmp ].PgnoExtentPageCountCacheFDP() == pfcbTable->PgnoFDP() );
+
+        // And we always expect the appropriate grbit.
+        Expected( 0 != (grbit & JET_bitUpdateNoVersion ) );
+
+        if ( ( 0 == (grbit & JET_bitUpdateNoVersion) ) )
         {
-            Assert( ppib->Level() > 0 );
-            fDIRFlags = fDIRNoVersion;
+            Error( ErrERRCheck( JET_errInvalidParameter ) );
         }
-        else
+
+        fDIRFlags = fDIRNoVersion;
+    }
+    else
+    {
+        // We never expect this on the ExtentPageCountCache table.
+        Expected( g_rgfmp[ pfucb->ifmp ].PgnoExtentPageCountCacheFDP() != pfcbTable->PgnoFDP() );
+
+        CallR( ErrDIRBeginTransaction( ppib, 52005, NO_GRBIT ) );
+        fInNewTransaction = fTrue;
+        
+        //  insert unversioned if requested, and if table uncommitted.
+        //  Any error should result in client application rolling backt transaction
+        //  which created table, since table may be left inconsistent.
+        //
+        if ( ( 0 != (grbit & JET_bitUpdateNoVersion) ) )
         {
-            Error( ErrERRCheck( JET_errUpdateMustVersion ) );
+            if ( pfcbTable->FUncommitted() )
+            {
+                Assert( ppib->Level() > 0 );
+                fDIRFlags = fDIRNoVersion;
+            }
+            else
+            {
+                Error( ErrERRCheck( JET_errUpdateMustVersion ) );
+            }
         }
     }
 
@@ -1557,7 +1580,7 @@ LOCAL ERR ErrRECIInsert(
 
     //  return bookmark of inserted record
     //
-    AssertDIRNoLatch( ppib );
+    AssertDIRMaybeNoLatch( ppib, pfucb );
     Assert( !pfucbT->bmCurr.key.FNull() && pfucbT->bmCurr.key.Cb() == keyToAdd.Cb() );
     Assert( pfucbT->bmCurr.data.Cb() == 0 );
 
@@ -1630,14 +1653,18 @@ LOCAL ERR ErrRECIInsert(
 
     //  if no error, commit transaction
     //
-    Call( ErrDIRCommitTransaction( ppib, NO_GRBIT ) );
+    if ( fInNewTransaction )
+    {
+        Call( ErrDIRCommitTransaction( ppib, NO_GRBIT ) );
+        fInNewTransaction = fFalse;
+    }
 
     FUCBResetUpdateFlags( pfucb );
 
     // Do the AfterInsert callback
     CallS( ErrRECCallback( ppib, pfucb, JET_cbtypAfterInsert, 0, NULL, NULL, 0 ) );
 
-    AssertDIRNoLatch( ppib );
+    AssertDIRMaybeNoLatch( ppib, pfucb );
 
     RESKEY.Free( pbKey );
 
@@ -1661,7 +1688,10 @@ HandleError:
 
     /*  rollback all changes on error
     /**/
-    CallSx( ErrDIRRollback( ppib ), JET_errRollbackError );
+    if ( fInNewTransaction )
+    {
+        CallSx( ErrDIRRollback( ppib ), JET_errRollbackError );
+    }
 
     //  if no version update failed then table may be corrupt.
     //  Session must roll back to level 0 to delete table.
@@ -1915,6 +1945,7 @@ ERR VTAPI ErrIsamDelete(
     FCB         * pfcbTable;                    // table FCB
     FCB         * pfcbIdx;                      // loop variable for each index on file
     BOOL        fUpdatingLatchSet   = fFalse;
+    BOOL        fBeganTransaction   = fFalse;
 
     CallR( ErrPIBCheck( ppib ) );
 
@@ -1957,7 +1988,20 @@ ERR VTAPI ErrIsamDelete(
                 CallR( ErrIsamPrepareUpdate( ppib, pfucb, JET_prepCancel ) );
             }
         }
-        CallR( ErrDIRBeginTransaction( ppib, 45861, NO_GRBIT ) );
+        if ( pfcbTable->FVersioningOffForExtentPageCountCache() )
+        {
+            // We only expect this on the ExtentPageCountCache table.
+            Expected( g_rgfmp[ pfucb->ifmp ].PgnoExtentPageCountCacheFDP() == pfcbTable->PgnoFDP() );
+        }
+        else
+        {
+            // We'll probably cause problems if this is on the ExtentPageCountCache table, which has
+            // unique restrictions on the transactions in use.
+            Assert( g_rgfmp[ pfucb->ifmp ].PgnoExtentPageCountCacheFDP() != pfcbTable->PgnoFDP() );
+
+            CallR( ErrDIRBeginTransaction( ppib, 45861, NO_GRBIT ) );
+            fBeganTransaction = fTrue;
+        }
     }
 
     //  if InsertCopyDeleteOriginal, transaction is started in ErrRECIInsert()
@@ -2016,7 +2060,19 @@ ERR VTAPI ErrIsamDelete(
 
     //  delete record
     //
-    err = ErrDIRDelete( pfucb, fDIRNull );
+    if ( pfcbTable->FVersioningOffForExtentPageCountCache() )
+    {
+        // We only expect this on the ExtentPageCountCache table.
+        Expected( g_rgfmp[ pfucb->ifmp ].PgnoExtentPageCountCacheFDP() == pfcbTable->PgnoFDP() );
+        err = ErrDIRDelete( pfucb, fDIRNoVersion );
+    }
+    else
+    {
+        // We never expect this on the ExtentPageCountCache table.
+        Expected( g_rgfmp[ pfucb->ifmp ].PgnoExtentPageCountCacheFDP() != pfcbTable->PgnoFDP() );
+
+        err = ErrDIRDelete( pfucb, fDIRNull );
+    }
     AssertDIRNoLatch( ppib );
 
     Assert( fLogIsDone == ( !PinstFromPpib( ppib )->m_plog->FLogDisabled() && !PinstFromPpib( ppib )->m_plog->FRecovering() && g_rgfmp[pfucb->ifmp].FLogOn() ) );
@@ -2046,7 +2102,10 @@ ERR VTAPI ErrIsamDelete(
     //  if InsertCopyDeleteOriginal, commit will be performed in ErrRECIInsert()
     if ( !FFUCBUpdateForInsertCopyDeleteOriginal( pfucb ) )
     {
-        Call( ErrDIRCommitTransaction( ppib, NO_GRBIT ) );
+        if ( fBeganTransaction )
+        {
+            Call( ErrDIRCommitTransaction( ppib, NO_GRBIT ) );
+        }
     }
 
     AssertDIRNoLatch( ppib );
@@ -2075,7 +2134,10 @@ HandleError:
     //  if InsertCopyDeleteOriginal, rollback will be performed in ErrRECIInsert()
     if ( !FFUCBUpdateForInsertCopyDeleteOriginal( pfucb ) )
     {
-        CallSx( ErrDIRRollback( ppib ), JET_errRollbackError );
+        if ( fBeganTransaction )
+        {
+            CallSx( ErrDIRRollback( ppib ), JET_errRollbackError );
+        }
     }
 
     return err;
@@ -2467,9 +2529,10 @@ LOCAL ERR ErrRECIReplace( FUCB *pfucb, const JET_GRBIT grbit )
     FID     fidVersion;
     BOOL    fUpdateIndex;
     BOOL    fUpdatingLatchSet   = fFalse;
+    BOOL    fBeganTransaction = fFalse;
 
     CheckPIB( ppib );
-    AssertDIRNoLatch( ppib );
+    AssertDIRMaybeNoLatch( ppib, pfucb );
     CheckTable( ppib, pfucb );
     CheckSecondary( pfucb );
 
@@ -2490,13 +2553,33 @@ LOCAL ERR ErrRECIReplace( FUCB *pfucb, const JET_GRBIT grbit )
     //
     Assert( !pfucb->dataWorkBuf.FNull() );
 
-    CallR( ErrDIRBeginTransaction( ppib, 62245, NO_GRBIT ) );
-
-    //  NoVersion replace operations are not yet supported.
-    //
-    if ( ( 0 != (grbit & JET_bitUpdateNoVersion) ) )
+    if ( pfcbTable->FVersioningOffForExtentPageCountCache() )
     {
-        Error( ErrERRCheck( JET_errUpdateMustVersion ) );
+        // We only expect this on the ExtentPageCountCache table.
+        Expected( g_rgfmp[ pfucb->ifmp ].PgnoExtentPageCountCacheFDP() == pfcbTable->PgnoFDP() );
+
+        // And we always expect the appropriate grbit.
+        Expected( 0 != (grbit & JET_bitUpdateNoVersion ) );
+
+        if ( ( 0 == (grbit & JET_bitUpdateNoVersion) ) )
+        {
+            Error( ErrERRCheck( JET_errInvalidParameter ) );
+        }
+    }
+    else
+    {
+        // We never expect this on the ExtentPageCountCache table.
+        Expected( g_rgfmp[ pfucb->ifmp ].PgnoExtentPageCountCacheFDP() != pfcbTable->PgnoFDP() );
+
+        CallR( ErrDIRBeginTransaction( ppib, 62245, NO_GRBIT ) );
+        fBeganTransaction = fTrue;
+        
+        //  NoVersion replace operations are not yet supported.
+        //
+        if ( ( 0 != (grbit & JET_bitUpdateNoVersion) ) )
+        {
+            Error( ErrERRCheck( JET_errUpdateMustVersion ) );
+        }
     }
 
     //  optimistic locking, ensure that record has
@@ -2733,7 +2816,12 @@ LOCAL ERR ErrRECIReplace( FUCB *pfucb, const JET_GRBIT grbit )
 
     //  do the replace
     //
-    err = ErrDIRReplace( pfucb, pfucb->dataWorkBuf, fDIRLogColumnDiffs );
+    DIRFLAG dirflag = fDIRLogColumnDiffs;
+    if ( ( 0 != (grbit & JET_bitUpdateNoVersion) ) )
+    {
+        dirflag |= fDIRNoVersion;
+    }
+    err = ErrDIRReplace( pfucb, pfucb->dataWorkBuf, dirflag );
 
     pfcbTable->ResetUpdating();
     fUpdatingLatchSet = fFalse;
@@ -2758,21 +2846,24 @@ LOCAL ERR ErrRECIReplace( FUCB *pfucb, const JET_GRBIT grbit )
 Done:
     //  if no error, commit transaction
     //
-    Call( ErrDIRCommitTransaction( ppib, NO_GRBIT ) );
+    if ( fBeganTransaction )
+    {
+        Call( ErrDIRCommitTransaction( ppib, NO_GRBIT ) );
+    }
 
     FUCBResetUpdateFlags( pfucb );
 
     // Do the AfterReplace callback
     CallS( ErrRECCallback( ppib, pfucb, JET_cbtypAfterReplace, 0, NULL, NULL, 0 ) );
 
-    AssertDIRNoLatch( ppib );
+    AssertDIRMaybeNoLatch( ppib, pfucb );
 
     return err;
 
 
 HandleError:
     Assert( err < 0 );
-    AssertDIRNoLatch( ppib );
+    AssertDIRMaybeNoLatch( ppib, pfucb );
 
     if ( fUpdatingLatchSet )
     {
@@ -2782,7 +2873,10 @@ HandleError:
 
     //  rollback all changes on error
     //
-    CallSx( ErrDIRRollback( ppib ), JET_errRollbackError );
+    if ( fBeganTransaction )
+    {
+        CallSx( ErrDIRRollback( ppib ), JET_errRollbackError );
+    }
 
     return err;
 }

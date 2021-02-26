@@ -1091,7 +1091,14 @@ LOCAL ERR ErrInfoGetTableAvailSpace(
 
     //  first, the table
     //
-    Call( ErrSPGetInfo( ppib, pfucb->ifmp, pfucb, (BYTE *)&cpgT, sizeof( cpgT ), fSPAvailExtent ) );
+    Call( ErrSPGetInfo(
+              ppib, pfucb->ifmp,
+              pfucb,
+              (BYTE *)&cpgT,
+              sizeof( cpgT ),
+              fSPAvailExtent,
+              gci::Allow ) );
+              
     *pcpg += cpgT;
     
     //  then, the secondary indices of the table
@@ -1126,7 +1133,14 @@ LOCAL ERR ErrInfoGetTableAvailSpace(
             //  open the index and get its space info
             //
             Call( ErrDIROpen( ppib, pfcbT, &pfucbT ) );
-            Call( ErrSPGetInfo( ppib, pfucbT->ifmp, pfucbT, (BYTE *)&cpgT, sizeof( cpgT ), fSPAvailExtent ) );
+            Call( ErrSPGetInfo(
+                      ppib,
+                      pfucbT->ifmp,
+                      pfucbT,
+                      (BYTE *)&cpgT,
+                      sizeof( cpgT ),
+                      fSPAvailExtent,
+                      gci::Allow ) );
             *pcpg += cpgT;
             DIRClose( pfucbT );
             pfucbT = pfucbNil;
@@ -1152,7 +1166,14 @@ LOCAL ERR ErrInfoGetTableAvailSpace(
     {
         //  the LV tree exists
         //
-        Call( ErrSPGetInfo( ppib, pfucbT->ifmp, pfucbT, (BYTE *)&cpgT, sizeof( cpgT ), fSPAvailExtent ) );
+        Call( ErrSPGetInfo(
+                  ppib,
+                  pfucbT->ifmp,
+                  pfucbT,
+                  (BYTE *)&cpgT,
+                  sizeof( cpgT ),
+                  fSPAvailExtent,
+                  gci::Allow ) );
         *pcpg += cpgT;
         DIRClose( pfucbT );
         pfucbT = pfucbNil;
@@ -1293,7 +1314,8 @@ ERR VTAPI ErrIsamGetTableInfo(
                         pfucb,
                         static_cast<BYTE *>( pvResult ),
                         cbMax,
-                        fSPExtents );
+                        fSPExtents,
+                        gci::Allow );
             return err;
         }
 
@@ -1304,7 +1326,8 @@ ERR VTAPI ErrIsamGetTableInfo(
                         pfucb,
                         static_cast<BYTE *>( pvResult ),
                         cbMax,
-                        fSPOwnedExtent );
+                        fSPOwnedExtent,
+                        gci::Allow );
             return err;
 
         case JET_TblInfoSpaceAvailable:
@@ -3981,23 +4004,25 @@ ERR VDBAPI ErrIsamGetDatabaseInfo(
             if ( cbMax != sizeof(ULONG) )
                 return ErrERRCheck( JET_errInvalidBufferSize );
 
-            err = ErrSPGetDatabaseInfo(
+            err = ErrSPGetInfo(
                         ppib,
                         ifmp,
+                        pfucbNil,
                         static_cast<BYTE *>( pvResult ),
                         cbMax,
                         fSPOwnedExtent,
-                        fUseCachedResult );
+                        fUseCachedResult ? gci::Require : gci::Forbid );
             return err;
 
         case JET_DbInfoSpaceAvailable:
-            err = ErrSPGetDatabaseInfo(
+            err = ErrSPGetInfo(
                         ppib,
                         ifmp,
+                        pfucbNil,
                         static_cast<BYTE *>( pvResult ),
                         cbMax,
                         fSPAvailExtent,
-                        fUseCachedResult );
+                        fUseCachedResult ? gci::Require : gci::Forbid );
             return err;
 
         case dbInfoSpaceShelved:
@@ -4011,13 +4036,14 @@ ERR VDBAPI ErrIsamGetDatabaseInfo(
                 return ErrERRCheck( JET_errInvalidBufferSize );
             }
 
-            err = ErrSPGetDatabaseInfo(
+            err = ErrSPGetInfo(
                         ppib,
                         ifmp,
+                        pfucbNil,
                         (BYTE*)rgcpg,
                         sizeof(rgcpg),
-                        fSPAvailExtent | fSPShelvedExtent,  // need fSPAvailExtent to retrive fSPShelvedExtent
-                        fFalse );
+                        fSPAvailExtent | fSPShelvedExtent,  
+                        fUseCachedResult ? gci::Require : gci::Forbid );
             *( (ULONG*)pvResult ) = rgcpg[1];
             return err;
         }

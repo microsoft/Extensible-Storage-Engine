@@ -42,6 +42,17 @@
 //      Page 24: pgnoFDPMSOShadow            - The ESE Shadow Catalog FDP
 //
 
+//
+//
+// Threading
+//
+//
+//   Updates to space trees are not versioned and do not participate in transactions.
+//   They cannot be rolled back.  They are done immediately and are visible to all threads.
+//   A write or riw latch on the root page of the tree that owns a space tree is used to
+//   make space tree operations thread safe.  For example, for a table, before you
+//   update the AE tree for the table, you must have a write latch on the root page
+//   of the table.
 
 //
 //
@@ -202,6 +213,10 @@ LONG LSPDeletedTreeFreedExtentsCEFLPv( LONG iInstance, VOID *pvBuf )
 
 #include "_bt.hxx"
 
+BOOL g_fSPExtentPageCountCacheTrackOnCreate = fFalse;
+#ifdef DEBUG
+BOOL g_fSPExtentPageCountCacheValidation = fFalse;
+#endif
 
 const CHAR * SzNameOfTable( const FUCB * const pfucb )
 {
@@ -222,18 +237,19 @@ const CHAR * SzNameOfTable( const FUCB * const pfucb )
     }
     return "";
 }
+
 const CHAR * SzSpaceTreeType( const FUCB * const pfucb )
 {
     if ( pfucb->fAvailExt )
     {
-        return " AE";
+        return "AE";
     }
     else if ( pfucb->fOwnExt )
     {
-        return " OE";
+        return "OE";
     }
     //else
-    return " !!";
+    return "!!";
 }
 
 #ifdef DEBUG
@@ -253,47 +269,62 @@ const CHAR * SzSpaceTreeType( const FUCB * const pfucb )
 //
 class CSPExtentInfo;
 
-LOCAL ERR ErrSPIAddFreedExtent( FUCB *pfucb, FUCB *pfucbAE, const PGNO pgnoLast, const CPG cpgSize );
+LOCAL ERR ErrSPIAddFreedExtent(
+    FUCB *pfucb,
+    FUCB *pfucbAE,
+    const PGNO pgnoLast,
+    const CPG cpgSize );
 
 LOCAL ERR ErrSPISeekRootAE(
-    __in FUCB* const pfucbAE,
-    __in const PGNO pgno,
-    __in const SpacePool sppAvailPool,
+    __in FUCB* const           pfucbAE,
+    __in const PGNO            pgno,
+    __in const SpacePool       sppAvailPool,
     __out CSPExtentInfo* const pspeiAE );
 
 LOCAL ERR ErrSPIGetSparseInfoRange(
     _In_ FMP* const pfmp,
     _In_ const PGNO pgnoStart,
     _In_ const PGNO pgnoEnd,
-    _Out_ CPG* pcpgSparse );
+    _Out_ CPG*      pcpgSparse );
 
 LOCAL ERR FSPIParentIsFs( FUCB * const pfucb );
+
 LOCAL ERR ErrSPIGetFsSe(
-    FUCB * const    pfucb,
-    FUCB * const    pfucbAE,
-    const CPG   cpgReq,
-    const CPG   cpgMin,
-    const ULONG fSPFlags,
-    const BOOL fExact = fFalse,
-    const BOOL fPermitAsyncExtension = fTrue,
-    const BOOL fMayViolateMaxSize = fFalse );
+    FUCB * const pfucb,
+    FUCB * const pfucbAE,
+    const CPG    cpgReq,
+    const CPG    cpgMin,
+    const ULONG  fSPFlags,
+    const BOOL   fExact = fFalse,
+    const BOOL   fPermitAsyncExtension = fTrue,
+    const BOOL   fMayViolateMaxSize = fFalse );
+
 LOCAL ERR ErrSPIGetSe(
     FUCB * const    pfucb,
     FUCB * const    pfucbAE,
-    const CPG   cpgReq,
-    const CPG   cpgMin,
-    const ULONG fSPFlags,
+    const CPG       cpgReq,
+    const CPG       cpgMin,
+    const ULONG     fSPFlags,
     const SpacePool sppPool,
-    const BOOL fMayViolateMaxSize = fFalse );
-LOCAL ERR ErrSPIWasAlloc( FUCB *pfucb, PGNO pgnoFirst, CPG cpgSize );
-LOCAL ERR ErrSPIValidFDP( PIB *ppib, IFMP ifmp, PGNO pgnoFDP );
+    const BOOL      MayViolateMaxSize = fFalse );
+
+LOCAL ERR ErrSPIWasAlloc(
+    FUCB *pfucb,
+    PGNO pgnoFirst,
+    CPG cpgSize );
+
+LOCAL ERR ErrSPIValidFDP(
+    PIB *ppib,
+    IFMP ifmp,
+    PGNO pgnoFDP );
 
 LOCAL ERR ErrSPIReserveSPBufPages(
     FUCB* const pfucb,
     FUCB* const pfucbParent,
-    const CPG cpgAddlReserveOE = 0,
-    const CPG cpgAddlReserveAE = 0,
-    const PGNO pgnoReplace = pgnoNull );
+    const CPG   cpgAddlReserveOE = 0,
+    const CPG   cpgAddlReserveAE = 0,
+    const PGNO  pgnoReplace = pgnoNull );
+
 LOCAL ERR ErrSPIAddToAvailExt(
     __in    FUCB *      pfucbAE,
     __in    const PGNO  pgnoAELast,
@@ -301,7 +332,182 @@ LOCAL ERR ErrSPIAddToAvailExt(
     __in    SpacePool   sppPool );
 
 
-LOCAL ERR ErrSPIUnshelvePagesInRange( FUCB* const pfucbRoot, const PGNO pgnoFirst, const PGNO pgnoLast );
+LOCAL ERR ErrSPIUnshelvePagesInRange(
+    FUCB* const pfucbRoot,
+    const PGNO pgnoFirst,
+    const PGNO pgnoLast );
+
+LOCAL ERR ErrSPIGetInfo(
+    FUCB        *pfucb,
+    CPG         *pcpgTotal,
+    CPG         *pcpgReserved,
+    CPG         *pcpgShelved,
+    INT         *piext,
+    INT         cext,
+    EXTENTINFO  *rgext,
+    INT         *pcextSentinelsRemaining,
+    CPRINTF     * const pcprintf );
+
+#ifdef DEBUG
+LOCAL VOID SPIValidateCpgOwnedAndAvail(
+    FUCB * pfucb,
+    BOOL fPrint = fFalse
+    );
+#else
+#define SPIValidateCpgOwnedAndAvail( X )
+#endif
+
+//
+// Wrappers around updates on space trees to force you to think about the
+// ExtentPageCountCache.
+//
+VOID
+SPIWrappedNDInsert(
+    _Inout_ FUCB * const pfucb,
+    _Inout_ CSR * const pcsr,
+    _In_ const KEYDATAFLAGS * const pkdf,
+    _In_ const CPG cpgDeltaOE = 0,
+    _In_ const CPG cpgDeltaAE = 0
+    )
+{
+    ERR err;
+    BOOL fUpdateCache = ( ( cpgDeltaOE != 0 ) || ( cpgDeltaAE != 0 ) );
+
+    if ( fUpdateCache )
+    {
+        err = ErrCATAdjustExtentPageCountsPrepare( pfucb );
+        if ( JET_errSuccess > err )
+        {
+            // Most unfortunate.  We failed to prepare to update the cache, but we're in
+            // a code path that is not allowed to fail.  The best we can do is log this.
+            // We're going to need to fix this cache element later.  We can't trust that
+            // the Adjust call later will fix things, either.  A crash where the node update
+            // we're about to do makes it into a log file on disk while the Adjust call
+            // doesn't make it to disk leaves the cache inconsistent.
+            AssertTrack( fFalse, "AdjustExtentPageCountsPrepareFailedInNoFailurePath" );
+
+            WCHAR rgrgw[3][16];
+            const WCHAR * rgwsz[] = { PfmpFromIfmp( pfucb->ifmp )->WszDatabaseName(), rgrgw[0], rgrgw[1], rgrgw[2] };
+            OSStrCbFormatW( rgrgw[0], sizeof(rgrgw[0]), L"%d", ObjidFDP( pfucb ) );
+            OSStrCbFormatW( rgrgw[1], sizeof(rgrgw[1]), L"%d", PgnoFDP( pfucb ) );
+            OSStrCbFormatW( rgrgw[2], sizeof(rgrgw[2]), L"%d", err );
+
+            UtilReportEvent(
+                eventError,
+                SPACE_MANAGER_CATEGORY,
+                EXTENT_PAGE_COUNT_CACHE_PREPARE_FAILED_ID,
+                _countof( rgwsz ),
+                rgwsz,
+                0,
+                PinstFromPfucb( pfucb ) );
+        }
+    }
+
+    NDInsert( pfucb, pcsr, pkdf );
+
+    // Go ahead and try to update, even if we failed to prepare.  There's a chance that it will
+    // work out.  No guarantee, but a chance.
+    if ( fUpdateCache ) CATAdjustExtentPageCounts( pfucb, cpgDeltaOE, cpgDeltaAE );
+}
+#define NDInsert _USE_SPI_NODE_INSERT_SPACE_TREE
+
+ERR
+ErrSPIWrappedNDSetExternalHeader(
+    _Inout_ FUCB * const pfucb,
+    _In_ CSR *pcsr,
+    _In_ const DATA * const pData,
+    _In_ const DIRFLAG fDIRFlag,
+    _In_ NodeRootField noderf,
+    _In_ const CPG cpgDeltaOE = 0,
+    _In_ const CPG cpgDeltaAE = 0
+    )
+{
+    ERR err;
+    BOOL fUpdateCache = ( ( cpgDeltaOE != 0 ) || ( cpgDeltaAE != 0 ) );
+
+    if ( fUpdateCache ) CallR( ErrCATAdjustExtentPageCountsPrepare( pfucb ) );
+    CallR( ErrNDSetExternalHeader(
+               pfucb,
+               pcsr,
+               pData,
+               fDIRFlag,
+               noderf ) );
+    if ( fUpdateCache ) CATAdjustExtentPageCounts( pfucb, cpgDeltaOE, cpgDeltaAE );
+
+    return err;
+}
+#define ErrNDSetExternalHeader _USE_ERR_SPI_NODE_SET_EXTERNAL_HEADER_SPACE_TREE_
+
+ERR
+ErrSPIWrappedBTFlagDelete(
+    _Inout_ FUCB * const pfucb,
+    _In_ const DIRFLAG fDIRFlag,
+    _In_ const CPG cpgDeltaOE,
+    _In_ const CPG cpgDeltaAE
+    )
+{
+    ERR err;
+    BOOL fUpdateCache = ( ( cpgDeltaOE != 0 ) || ( cpgDeltaAE != 0 ) );
+
+    if ( fUpdateCache ) CallR( ErrCATAdjustExtentPageCountsPrepare( pfucb ) );
+    CallR( ErrBTFlagDelete(      // UNDONE: Synchronously remove the node
+               pfucb,
+               fDIRFlag ) );
+
+    if ( fUpdateCache ) CATAdjustExtentPageCounts( pfucb, cpgDeltaOE, cpgDeltaAE );
+
+    return err;
+}
+#define ErrBTFlagDelete _USE_ERR_SPI_FLAG_DELETE_SPACE_TREE_
+
+ERR
+ErrSPIWrappedBTReplace(
+    _Inout_ FUCB * const pfucb,
+    _In_ const DATA &Data,
+    _In_ const DIRFLAG fDIRFlag,
+    _In_ const CPG cpgDeltaOE,
+    _In_ const CPG cpgDeltaAE
+    )
+{
+    ERR err;
+    BOOL fUpdateCache = ( ( cpgDeltaOE != 0 ) || ( cpgDeltaAE != 0 ) );
+
+    if ( fUpdateCache ) CallR( ErrCATAdjustExtentPageCountsPrepare( pfucb ) );
+    CallR( ErrBTReplace(
+              pfucb,
+              Data,
+              fDIRFlag ) );
+    if ( fUpdateCache ) CATAdjustExtentPageCounts( pfucb, cpgDeltaOE, cpgDeltaAE );
+
+    return err;
+}
+#define ErrBTReplace _USE_ERR_SPI_BT_REPLACE_SPACE_TREE_
+
+ERR
+ErrSPIWrappedBTInsert(
+    _Inout_ FUCB * const pfucb,
+    _In_ const KEY &Key,
+    _In_ const DATA &Data,
+    _In_ const DIRFLAG fDIRFlag,
+    _In_ const CPG cpgDeltaOE,
+    _In_ const CPG cpgDeltaAE
+    )
+{
+    ERR err;
+    BOOL fUpdateCache = ( ( cpgDeltaOE != 0 ) || ( cpgDeltaAE != 0 ) );
+
+    if ( fUpdateCache ) CallR( ErrCATAdjustExtentPageCountsPrepare( pfucb ) );
+    CallR( ErrBTInsert(
+                pfucb,
+                Key,
+                Data,
+                fDIRFlag ) );
+    if ( fUpdateCache ) CATAdjustExtentPageCounts( pfucb, cpgDeltaOE, cpgDeltaAE );
+
+    return err;
+}
+#define ErrBTInsert _USE_ERR_SPI_BT_INSERT_SPACE_TREE_
+
 
 //  Init / Term
 
@@ -483,7 +689,7 @@ class SPEXTKEY {
                 BYTE            bExtFlags;
                 BYTE            mbe_pgnoLastAfterFlags[sizeof(PGNO)];   // 4 bytes
             };
-            
+
         };
 
         BOOL _FNewSpaceKey() const
@@ -670,7 +876,7 @@ class SPEXTKEY {
             {
                 return fFalse;
             }
-            
+
             //  On non-search keys we can do stronger validations, i.e. such as 
             //  those that came from the a database itself.
             if ( fValidateData == fValidateType )
@@ -909,7 +1115,7 @@ class CSPExtentInfo {
 
         VOID Set( __in const FUCB * pfucb )
         {
-            m_fCorruptData = fFalse;    // innocdent until proven guilty
+            m_fCorruptData = fFalse;    // innocent until proven guilty
 
             Assert( FFUCBSpace( pfucb ) );
             Assert( Pcsr( pfucb )->FLatched() );
@@ -942,7 +1148,7 @@ class CSPExtentInfo {
         //
         BOOL FOwnedExt() const  { ASSERT_VALID( this ); return _FOwnedExt(); }
         BOOL FAvailExt() const  { ASSERT_VALID( this ); return _FAvailExt(); }
-        
+
         //  Accessors (of actual data) - will insist on non-corrupted data.
         //
         BOOL FValidExtent( ) const      { ASSERT_VALID( this ); return ErrCheckCorrupted( fFalse ) >= JET_errSuccess; }
@@ -1027,7 +1233,7 @@ class CSPExtentInfo {
         ERR ErrCheckCorrupted( BOOL fSilentOperation = fFalse ) const
         {
             //  We check that the data read from the FUCB / KDF made sense before 
-            //  trying to interprit our member variables based on it (set in Set()).
+            //  trying to interpret our member variables based on it (set in Set()).
             if( m_fCorruptData )
             {
                 AssertSz( fSilentOperation, "Ext Node corrupted at TAG level" );
@@ -1090,6 +1296,8 @@ class CSPExtentInfo {
             //  to go off ... it would be a single extent larger than 128 GBs,
             //  and on a chk build none-the-less, so if this happens, we probably
             //  have a bug.
+            //  We divide by g_cbPage where we do in order to avoid LONG overflow
+            //  problems.
             Assert( m_cpgExtent < 128 * 1024 / g_cbPage * 1024 * 1024 );
 
             return JET_errSuccess;
@@ -1381,28 +1589,34 @@ class CSPExtentNodeKDF {
 
         BOOKMARK GetBm( FUCB * pfucb ) const
         {
+            // pfucb may or may not be a space tree.  We only use it to
+            // pass along for the PPIB to read.
             BOOKMARK bm;
-            // pfucb is only used for getting uniqueness, if SP trees are always unique,
-            //  which I suspect is the case, we could drop to the other form of this call,
-            //  and not pass the FUCB*.
             Assert( pgnoBadNews != m_spextkey.PgnoLast() );
-            Assert( FFUCBUnique( pfucb ) );
             // no check for CPG.
             NDGetBookmarkFromKDF( pfucb, Kdf(), &bm );
 
             ASSERT_VALID( this );
             return bm;
         }
+
         const KEY& GetKey( ) const
         {
             ASSERT_VALID( this );
             return Kdf().key;
         }
+
         DATA GetData( ) const
         {
             ASSERT_VALID( this );
             Assert( !m_fShouldDeleteNode );
             return Kdf().data;
+        }
+
+        SpacePool SppPool( ) const
+        {
+            ASSERT_VALID( this );
+            return m_spextkey.SppPool();
         }
 
 };
@@ -1549,7 +1763,7 @@ LOCAL VOID SPIUpgradeToWriteLatch( FUCB *pfucb )
         //  latch upgrades only work on root
         //
         Assert( Pcsr( pfucb ) == pfucb->pcsrRoot );
-        Assert( Pcsr(pfucb)->Pgno() == PgnoFDP( pfucb ) );
+        Assert( Pcsr( pfucb )->Pgno() == PgnoFDP( pfucb ) );
         pcsrT = &pfucb->csr;
     }
 
@@ -1656,6 +1870,9 @@ ERR ErrSPGetLastExtent( _Inout_ PIB * ppib, _In_ const IFMP ifmp, _Out_ EXTENTIN
 
     if ( PinstFromPpib( ppib )->FRecovering() && !pfucb->u.pfcb->FSpaceInitialized() )
     {
+        Assert( PinstFromPpib( ppib )->FRecovering() );
+        Assert( pfucb->u.pfcb->FInitedForRecovery() );
+
         //  pgnoOE and pgnoAE need to be obtained
         //
         Call( ErrSPInitFCB( pfucb ) );
@@ -1665,6 +1882,7 @@ ERR ErrSPGetLastExtent( _Inout_ PIB * ppib, _In_ const IFMP ifmp, _Out_ EXTENTIN
         pfucb->u.pfcb->Unlock();
     }
     Assert( pfucb->u.pfcb->FSpaceInitialized() );
+    Assert( pfucb->u.pfcb->PgnoOE() != pgnoNull );
 
     Call( ErrSPIOpenOwnExt( ppib, pfucb->u.pfcb, &pfucbOE ) );
 
@@ -1687,9 +1905,15 @@ ERR ErrSPGetLastExtent( _Inout_ PIB * ppib, _In_ const IFMP ifmp, _Out_ EXTENTIN
     Assert( spLastOE.FIsSet() && ( spLastOE.CpgExtent() > 0 ) );
     pextinfo->pgnoLastInExtent = spLastOE.PgnoLast();
     pextinfo->cpgExtent = spLastOE.CpgExtent();
-    OSTraceFMP( ifmp, JET_tracetagSpaceInternal,
-             OSFormat( "%hs: ifmp=%d now has pgnoLast=%lu, cpgExtent=%ld",
-                       __FUNCTION__, ifmp, pextinfo->PgnoLast(), pextinfo->CpgExtent() ) );
+    OSTraceFMP(
+        ifmp,
+        JET_tracetagSpaceInternal,
+        OSFormat(
+            "%hs: ifmp=%d now has pgnoLast=%lu, cpgExtent=%ld",
+            __FUNCTION__,
+            ifmp,
+            pextinfo->PgnoLast(),
+            pextinfo->CpgExtent() ) );
     }
 
 HandleError:
@@ -1708,7 +1932,7 @@ HandleError:
 //  Validate I have not unintentionally changed SPACE_HEADER size.
 C_ASSERT( sizeof(SPACE_HEADER) == 16 );
 
-LOCAL VOID SPIInitFCB( FUCB *pfucb, const BOOL fDeferredInit )
+LOCAL VOID SPIInitFCB( FUCB * pfucb, const BOOL fDeferredInit )
 {
     CSR             * pcsr  = ( fDeferredInit ? pfucb->pcsrRoot : Pcsr( pfucb ) );
     FCB             * pfcb  = pfucb->u.pfcb;
@@ -1744,20 +1968,11 @@ LOCAL VOID SPIInitFCB( FUCB *pfucb, const BOOL fDeferredInit )
             if ( psph->FNonUnique() )
                 pfcb->SetNonUnique();
         }
+        Assert( !!psph->FNonUnique() == !pfcb->FUnique() );
 
         pfcb->SetSpaceInitialized();
 
-        #ifdef DEBUG
-        if( psph->FSingleExtent() )
-        {
-            Assert( FSPIIsSmall( pfcb ) );
-        }
-        else
-        {
-            Assert( !FSPIIsSmall( pfcb ) );
-        }
-        #endif
-
+        Assert( !!psph->FSingleExtent() == !!FSPIIsSmall( pfcb ) );
     }
 
     pfcb->Unlock();
@@ -1844,6 +2059,8 @@ ERR ErrSPDeferredInitFCB( _Inout_ FUCB * const pfucb )
         SPIInitFCB( pfucbT, fTrue );
     }
 
+    SPIValidateCpgOwnedAndAvail( pfucbT );
+
     pfucbT->pcsrRoot->ReleasePage();
     pfucbT->pcsrRoot = pcsrNil;
 
@@ -1895,13 +2112,17 @@ INLINE SPLIT_BUFFER *PspbufSPISpaceTreeRootPage( FUCB *pfucb, CSR *pcsr )
 
 INLINE VOID SPITraceSplitBufferMsg( const FUCB * const pfucb, const CHAR * const szMsg )
 {
-    OSTraceFMP( pfucb->ifmp, JET_tracetagSpaceInternal, OSFormat(
-                        "Database '%ws'[ifmp=0x%x]: %s SplitBuffer for a Btree (objidFDP %u, pgnoFDP %u).",
-                        g_rgfmp[pfucb->ifmp].WszDatabaseName(),
-                        pfucb->ifmp,
-                        szMsg,
-                        pfucb->u.pfcb->ObjidFDP(),
-                        pfucb->u.pfcb->PgnoFDP() ) );
+    OSTraceFMP(
+        pfucb->ifmp,
+        JET_tracetagSpaceInternal,
+        OSFormat(
+            "%hs: Database '%ws': %s SplitBuffer for a Btree [0x%x:0x%x:%lu].",
+            __FUNCTION__,
+            PfmpFromIfmp( pfucb->ifmp )->WszDatabaseName(),
+            szMsg,
+            pfucb->ifmp,
+            ObjidFDP( pfucb ),
+            PgnoFDP( pfucb ) ) );
 }
 
 LOCAL ERR ErrSPIFixSpaceTreeRootPage( FUCB *pfucb, SPLIT_BUFFER **ppspbuf )
@@ -1951,8 +2172,10 @@ LOCAL ERR ErrSPIFixSpaceTreeRootPage( FUCB *pfucb, SPLIT_BUFFER **ppspbuf )
         data.SetCb( sizeof(spbuf) );
 
         Pcsr( pfucb )->UpgradeFromRIWLatch();
-        err = ErrNDSetExternalHeader(
+        AssertSz( fFalse, "SOMEONE: not validated for space update." );
+        err = ErrSPIWrappedNDSetExternalHeader(
                     pfucb,
+                    Pcsr( pfucb ),
                     &data,
                     ( pfucb->u.pfcb->FDontLogSpaceOps() ? fDIRNoLog : fDIRNull ),
                     noderfWhole );
@@ -2024,6 +2247,7 @@ ERR ErrSPIGetSPBufUnlatched( __inout FUCB * pfucbSpace, __out_bcount(sizeof(SPLI
     }
 
     BTUp( pfucbSpace );
+    Assert( !Pcsr( pfucbSpace )->FLatched() );
 
     return err;
 }
@@ -2082,7 +2306,7 @@ INLINE VOID SPIDirtyAndSetMaxDbtime( CSR *pcsr1, CSR *pcsr2, CSR *pcsr3 )
     // 1 and above as CPAGE::ErrGetNewPreInitPage() is called to produce new pages
     // during an implicit create DB redo operation.
     const BOOL fRedoImplicitCreateDb = ( PinstFromIfmp( ifmp )->m_plog->FRecoveringMode() == fRecoveringRedo ) &&
-                                  g_rgfmp[ifmp].FCreatingDB() &&
+                                  g_rgfmp[ ifmp ].FCreatingDB() &&
                                   !FFMPIsTempDB( ifmp );
     const DBTIME dbtimeMaxBefore = max( max( pcsr1->Dbtime(), pcsr2->Dbtime() ), pcsr3->Dbtime() );
     if ( fRedoImplicitCreateDb )
@@ -2149,19 +2373,43 @@ INLINE VOID SPIInitSplitBuffer( FUCB *pfucb, CSR *pcsr )
     Assert( FBTIUpdatablePage( *pcsr ) );       //  check is already performed by caller
     Assert( latchWrite == pcsr->Latch() );
     Assert( pcsr->FDirty() );
-    Assert( pgnoNull != PgnoAE( pfucb ) || g_fRepair );
-    Assert( pgnoNull != PgnoOE( pfucb ) || g_fRepair );
-    Assert( ( FFUCBAvailExt( pfucb ) && pcsr->Pgno() == PgnoAE( pfucb ) )
-        || ( FFUCBOwnExt( pfucb ) && pcsr->Pgno() == PgnoOE( pfucb ) )
-        || g_fRepair );
+#ifdef DEBUG
+    if ( g_fRepair )
+    {
+        // In repair, it's normal that we're initializing
+        // a split buffer for a new space tree, but we're
+        // being called with an FUCB for the parent of the
+        // FCB being created or repaired, not the FUCB for
+        // the space tree being created or the owner of the
+        // space tree being created.  We only use the FUCB
+        // to get at the PIB (all writing is done to the
+        // CSR passed in), so this is OK, but untidy and
+        // we avoid it EXCEPT during repair.
+    }
+    else
+    {
+        // The root pages of the space trees have been set on the FCB.
+        Assert( pgnoNull != PgnoAE( pfucb ) );
+        Assert( pgnoNull != PgnoOE( pfucb ) );
+
+        // And the CSR passed in is for the root of one of the space trees.
+        Assert( pcsr->Pgno() == PgnoAE( pfucb ) ||  pcsr->Pgno() == PgnoOE( pfucb ) );
+    }
+#endif
 
     data.SetPv( (VOID *)&spbuf );
     data.SetCb( sizeof(spbuf) );
     NDSetExternalHeader( pfucb, pcsr, noderfWhole, &data );
 }
 
-//  creates extent tree for either owned or available extents.
+//  Creates extent tree for either owned or available extents.
+//  Note that the pfucb passed in here is probably for the parent
+//  of a new FCB being created.  pcsr is the page for the root of the
+//  new extent tree and PgnoAE( pfcub ) and PgnoOE( pfucb ) are NOT
+//  being written to.  We only use pfucb to pass on and in the end
+//  only use it to get the ppib.
 //
+
 VOID SPICreateExtentTree( FUCB *pfucb, CSR *pcsr, PGNO pgnoLast, CPG cpgExtent, BOOL fAvail )
 {
     if ( !FBTIUpdatablePage( *pcsr ) )
@@ -2180,16 +2428,9 @@ VOID SPICreateExtentTree( FUCB *pfucb, CSR *pcsr, PGNO pgnoLast, CPG cpgExtent, 
     Assert( latchWrite == pcsr->Latch() );
     Assert( pcsr->FDirty() );
 
-    if ( fAvail )
-    {
-        FUCBSetAvailExt( pfucb );
-    }
-    else
-    {
-        FUCBSetOwnExt( pfucb );
-    }
     Assert( pcsr->FDirty() );
 
+    // Writing is done to pcsr, not to pfucb currency.
     SPIInitSplitBuffer( pfucb, pcsr );
 
     Assert( 0 == pcsr->Cpage().Clines() );
@@ -2210,6 +2451,9 @@ VOID SPICreateExtentTree( FUCB *pfucb, CSR *pcsr, PGNO pgnoLast, CPG cpgExtent, 
         //  as such if we don't have a specific pool or purpose to associate these 
         //  with then we put them in the general (aka legacy) pool.
         //
+        //  Note that we're inserting nodes into the root page of a new space tree,
+        //  but not tracking that space in any FCB.  We'll do that later.
+        //
         const CSPExtentNodeKDF      spextnode( fAvail ?
                                                     SPEXTKEY::fSPExtentTypeAE :
                                                     SPEXTKEY::fSPExtentTypeOE,
@@ -2220,22 +2464,19 @@ VOID SPICreateExtentTree( FUCB *pfucb, CSR *pcsr, PGNO pgnoLast, CPG cpgExtent, 
         //  the pgnoSystemRoot before this, but its not an NDInsert(), but
         //  space owns that too.
         //  Space is so cool.
-        NDInsert( pfucb, pcsr, spextnode.Pkdf() );
+        //  Note that we don't update the page count cache here.  This is only called
+        //  under a stack that is creating a new tree, so there IS no entry to update
+        //  yet.  Up above, we'll create an appropriate initial entry.
+        SPIWrappedNDInsert(
+            pfucb,
+            pcsr,
+            spextnode.Pkdf() );
     }
     else
     {
         //  avail has already been set up as an empty tree
         //
-        Assert( FFUCBAvailExt( pfucb ) );
-    }
-
-    if ( fAvail )
-    {
-        FUCBResetAvailExt( pfucb );
-    }
-    else
-    {
-        FUCBResetOwnExt( pfucb );
+        Assert( fAvail );
     }
 
     return;
@@ -2297,9 +2538,12 @@ ERR ErrSPIImproveLastAlloc( FUCB * pfucb, const SPACE_HEADER * const psph, CPG c
     }
     Assert( pfucb->pcsrRoot->Latch() == latchWrite );
 
-    CallR( ErrNDSetExternalHeader( pfucb, pfucb->pcsrRoot, &data,
-                                    ( pfucb->u.pfcb->FDontLogSpaceOps() ? fDIRNoLog : fDIRNull ),
-                                    noderfSpaceHeader ) );
+    CallR( ErrSPIWrappedNDSetExternalHeader(
+               pfucb,
+               pfucb->pcsrRoot,
+               &data,
+               ( pfucb->u.pfcb->FDontLogSpaceOps() ? fDIRNoLog : fDIRNull ),
+               noderfSpaceHeader ) );
 
     return err;
 }
@@ -2327,7 +2571,7 @@ VOID SPIPerformCreateMultiple( FUCB *pfucb, CSR *pcsrFDP, CSR *pcsrOE, CSR *pcsr
 
     //  add extent minus pages allocated to AvailExt
     //
-    SPICreateExtentTree( pfucb, pcsrAE, pgnoLast, cpgPrimary - 1 - 1 - 1, fTrue );
+    SPICreateExtentTree( pfucb, pcsrAE, pgnoLast, cpgPrimary - cpgMultipleExtentMin, fTrue );
 
     return;
 }
@@ -2369,7 +2613,7 @@ ERR ErrSPCreateMultiple(
     Assert( !( fPageFlags & CPAGE::fPagePreInit ) );
     Assert( !( fPageFlags & CPAGE::fPageSpaceTree) );
 
-    const BOOL fLogging = g_rgfmp[pfucb->ifmp].FLogOn();
+    const BOOL fLogging = g_rgfmp[ pfucb->ifmp ].FLogOn();
 
     //  init space trees and root page
     //
@@ -2418,7 +2662,7 @@ ERR ErrSPCreateMultiple(
 
     // This only runs during REDO during create DB.
     Assert( ( PinstFromPfucb( pfucb )->m_plog->FRecoveringMode() != fRecoveringRedo ) ||
-            ( !g_rgfmp[pfucb->ifmp].FLogOn() && g_rgfmp[pfucb->ifmp].FCreatingDB() ) );
+            ( !g_rgfmp[ pfucb->ifmp ].FLogOn() && g_rgfmp[ pfucb->ifmp ].FCreatingDB() ) );
 
     //  log operation
     //
@@ -2487,7 +2731,7 @@ ERR ErrSPICreateSingle(
     // This function might be invoked during redo with dbtimeNil during create DB. 
     Assert( ( !fRedo && ( dbtime == dbtimeNil ) ) ||
             ( fRedo && ( dbtime != dbtimeNil ) ) ||
-            ( fRedo && ( dbtime == dbtimeNil ) && g_rgfmp[pfucb->ifmp].FCreatingDB() && !g_rgfmp[pfucb->ifmp].FLogOn() ) );
+            ( fRedo && ( dbtime == dbtimeNil ) && g_rgfmp[ pfucb->ifmp ].FCreatingDB() && !g_rgfmp[ pfucb->ifmp ].FLogOn() ) );
 
     //  copy space information into external header
     //
@@ -2534,7 +2778,7 @@ ERR ErrSPICreateSingle(
             pfucb->ifmp,
             pgnoFDP,
             objidFDP,
-            !fRedo && g_rgfmp[pfucb->ifmp].FLogOn() ) );
+            !fRedo && g_rgfmp[ pfucb->ifmp ].FLogOn() ) );
         pcsr->ConsumePreInitPage( fInitPageFlags );
 
         if ( !fRedo )
@@ -2578,7 +2822,9 @@ ERR ErrSPCreate(
     const CPG       cpgPrimary,
     const ULONG     fSPFlags,
     const ULONG     fPageFlags,
-    OBJID           *pobjidFDP )
+    OBJID           *pobjidFDP,
+    CPG             *pcpgOEFDP,
+    CPG             *pcpgAEFDP )
 {
     ERR             err;
     FUCB            *pfucb = pfucbNil;
@@ -2594,9 +2840,12 @@ ERR ErrSPCreate(
     Assert( !( fPageFlags & CPAGE::fPageEmpty ) );
     Assert( !( fPageFlags & CPAGE::fPageSpaceTree ) );
 
+    *pcpgOEFDP = 0;
+    *pcpgAEFDP = 0;
+
     if ( pgnoFDP == pgnoSystemRoot &&
             pgnoParent == pgnoNull &&
-            g_rgfmp[ifmp].FLogOn() &&
+            g_rgfmp[ ifmp ].FLogOn() &&
             //  This is a proxy for !( grbit & bitCreateDbImplicitly ), and once we
             //  definitely don't have to play such old logs, we could move this into
             //  the if body as Assert( !PinstFromIfmp( ifmp )->m_plogFRecovering() ).
@@ -2614,7 +2863,7 @@ ERR ErrSPCreate(
         //  lrtypCreateDB.
 #ifdef DEBUG
         QWORD cbSize = 0;
-        if ( g_rgfmp[ifmp].Pfapi()->ErrSize( &cbSize, IFileAPI::filesizeLogical ) >= JET_errSuccess )
+        if ( g_rgfmp[ ifmp ].Pfapi()->ErrSize( &cbSize, IFileAPI::filesizeLogical ) >= JET_errSuccess )
         {
             Assert( ( cbSize / g_cbPage - cpgDBReserved ) == cpgPrimary );
         }
@@ -2709,6 +2958,10 @@ ERR ErrSPCreate(
                     cpgPrimary,
                     fPageFlags,
                     fUnique );
+
+        Assert( pfcb->ObjidFDP() == *pobjidFDP );
+        *pcpgOEFDP = cpgPrimary;
+        *pcpgAEFDP = cpgPrimary - cpgMultipleExtentMin;
     }
     else
     {
@@ -2725,6 +2978,10 @@ ERR ErrSPCreate(
                     fUnique,
                     fPageFlags,
                     dbtimeNil );
+
+        Assert( pfcb->ObjidFDP() == *pobjidFDP );
+        *pcpgOEFDP = cpgPrimary;
+        *pcpgAEFDP = cpgPrimary - cpgSingleExtentMin;
     }
 
     Assert( !FFUCBSpace( pfucb ) );
@@ -2833,7 +3090,6 @@ VOID SPIConvertCalcExtents(
     *pcext = iextMac;
 }
 
-
 //  update OwnExt root page for a convert
 //
 LOCAL VOID SPIConvertUpdateOE( FUCB *pfucb, CSR *pcsrOE, const SPACE_HEADER& sph, PGNO pgnoSecondaryFirst, CPG cpgSecondary )
@@ -2845,9 +3101,9 @@ LOCAL VOID SPIConvertUpdateOE( FUCB *pfucb, CSR *pcsrOE, const SPACE_HEADER& sph
     }
 
     Assert( pcsrOE->Latch() == latchWrite );
-    Assert( !FFUCBOwnExt( pfucb ) );
-    FUCBSetOwnExt( pfucb );
+    Assert( !FFUCBSpace( pfucb ) );
 
+    // Writing is done to pcsr, not to pfucb currency.
     SPIInitSplitBuffer( pfucb, pcsrOE );
 
     Assert( 0 == pcsrOE->Cpage().Clines() );
@@ -2858,8 +3114,14 @@ LOCAL VOID SPIConvertUpdateOE( FUCB *pfucb, CSR *pcsrOE, const SPACE_HEADER& sph
     //
     //  We can use raw extent node, because we always want to insert
     //  a regular format ext nodes here, b/c its the OE.
+
     const CSPExtentNodeKDF      spextSecondary( SPEXTKEY::fSPExtentTypeOE, pgnoSecondaryFirst + cpgSecondary - 1, cpgSecondary );
-    NDInsert( pfucb, pcsrOE, spextSecondary.Pkdf() );
+    SPIWrappedNDInsert(
+        pfucb,
+        pcsrOE,
+        spextSecondary.Pkdf(),
+        cpgSecondary,
+        0 );
 
     const CSPExtentNodeKDF      spextPrimary( SPEXTKEY::fSPExtentTypeOE, PgnoFDP( pfucb ) + sph.CpgPrimary() - 1, sph.CpgPrimary() );
     const BOOKMARK          bm = spextPrimary.GetBm( pfucb );
@@ -2870,9 +3132,10 @@ LOCAL VOID SPIConvertUpdateOE( FUCB *pfucb, CSR *pcsrOE, const SPACE_HEADER& sph
         Assert( pcsrOE->Cpage().Clines() - 1 == pcsrOE->ILine() );
         pcsrOE->IncrementILine();
     }
-    NDInsert( pfucb, pcsrOE, spextPrimary.Pkdf() );
-
-    FUCBResetOwnExt( pfucb );
+    SPIWrappedNDInsert(
+        pfucb,
+        pcsrOE,
+        spextPrimary.Pkdf() );
 }
 
 
@@ -2891,7 +3154,7 @@ LOCAL VOID SPIConvertUpdateAE(
     }
 
     //  we should never encounter an AE with > 2G extents
-    
+
     Assert( iextMac >= 0 );
     if ( iextMac < 0 )
     {
@@ -2901,26 +3164,31 @@ LOCAL VOID SPIConvertUpdateAE(
     //  create available extent tree and insert avail extents
     //
     Assert( pcsrAE->Latch() == latchWrite );
-    Assert( !FFUCBAvailExt( pfucb ) );
-    FUCBSetAvailExt( pfucb );
+    Assert( !FFUCBSpace( pfucb ) );
 
+    // Writing is done to pcsr, not to pfucb currency.
     SPIInitSplitBuffer( pfucb, pcsrAE );
 
     Assert( cpgSecondary >= 2 );
     Assert( 0 == pcsrAE->Cpage().Clines() );
     pcsrAE->SetILine( 0 );
 
-    //  insert secondary extent in AvailExt
+    //
+    // Adding a secondary extent, but using 1 page each for the new space trees
     //
     CPG     cpgExtent = cpgSecondary - 1 - 1;
     PGNO    pgnoLast = pgnoSecondaryFirst + cpgSecondary - 1;
     if ( cpgExtent != 0 )
     {
-
         //  We can use raw extent node, because we always want to insert
         //  a legacy format AE nodes here.
         const CSPExtentNodeKDF      spavailextSecondary( SPEXTKEY::fSPExtentTypeAE, pgnoLast, cpgExtent );
-        NDInsert( pfucb, pcsrAE, spavailextSecondary.Pkdf() );
+        SPIWrappedNDInsert(
+            pfucb,
+            pcsrAE,
+            spavailextSecondary.Pkdf(),
+            0,
+            cpgExtent );
     }
 
     Assert( latchWrite == pcsrAE->Latch() );
@@ -2964,10 +3232,12 @@ LOCAL VOID SPIConvertUpdateAE(
                 pcsrAE->IncrementILine();
         }
 
-        NDInsert( pfucb, pcsrAE, spavailextCurr.Pkdf() );
+        SPIWrappedNDInsert(
+            pfucb,
+            pcsrAE,
+            spavailextCurr.Pkdf() );
     }
 
-    FUCBResetAvailExt( pfucb );
     Assert( pcsrAE->Latch() == latchWrite );
 }
 
@@ -3079,8 +3349,16 @@ LOCAL ERR ErrSPIConvertToMultipleExtent( FUCB *pfucb, CPG cpgReq, CPG cpgMin, BO
     SPIConvertGetExtentinfo( pfucb, pcsrRoot, &sph, rgextT, &iextMac );
     Assert( sph.FSingleExtent() );
 
-    OSTraceFMP( pfucb->ifmp, JET_tracetagSpaceInternal,
-                OSFormat( "ConvertSMALLToMultiExt(%d.%d)-> ", pfucb->u.pfcb->PgnoFDP(), sph.CpgPrimary() ) );
+    OSTraceFMP(
+        pfucb->ifmp,
+        JET_tracetagSpaceInternal,
+        OSFormat(
+            "%hs: ConvertSMALLToMultiExt [0x%x:0x%x:%lu] %lu",
+            __FUNCTION__,
+            pfucb->ifmp,
+            ObjidFDP( pfucb ),
+            PgnoFDP( pfucb ),
+            sph.CpgPrimary() ) );
 
     //  save off avail bitmap so we can log it below
     //
@@ -3106,7 +3384,7 @@ LOCAL ERR ErrSPIConvertToMultipleExtent( FUCB *pfucb, CPG cpgReq, CPG cpgMin, BO
     //  database always uses multiple extent
     //
     Assert( sph.PgnoParent() != pgnoNull );
-    Call( ErrSPGetExt( pfucbT, sph.PgnoParent(), &cpgReq, cpgMin, &pgnoSecondaryFirst ) );
+    Call( ErrSPGetExt(pfucbT, sph.PgnoParent(), &cpgReq, cpgMin, &pgnoSecondaryFirst ) );
     Assert( cpgReq >= cpgMin );
     Assert( pgnoSecondaryFirst != pgnoNull );
 
@@ -3126,7 +3404,7 @@ LOCAL ERR ErrSPIConvertToMultipleExtent( FUCB *pfucb, CPG cpgReq, CPG cpgMin, BO
     Assert( !FFUCBVersioned( pfucbT ) );
     Assert( !FFUCBSpace( pfucbT ) );
 
-    const BOOL fLogging = !pfucb->u.pfcb->FDontLogSpaceOps() && g_rgfmp[pfucb->ifmp].FLogOn();
+    const BOOL fLogging = !pfucb->u.pfcb->FDontLogSpaceOps() && g_rgfmp[ pfucb->ifmp ].FLogOn();
 
     //  get pgnoOE and depend on pgnoRoot
     //
@@ -4424,7 +4702,7 @@ ERR ErrSPGetSpaceCategory(
         if ( sysobjHint != sysobjNil )
         {
             Assert( objidHintParent != objidNil );
-            
+
             // If the hint is for a non-root object, try that first (parent will be done later).
             if ( objidHint != objidHintParent )
             {
@@ -4529,7 +4807,7 @@ ERR ErrSPGetSpaceCategory(
             if ( sysobjHint != sysobjNil )
             {
                 Assert( objidHintPageParent != objidNil );
-                
+
                 // If the hint is for a non-root object, try that first (parent will be done later).
                 if ( objidHintPage != objidHintPageParent )
                 {
@@ -4714,7 +4992,7 @@ HandleError:
         if ( pSpCatCtx != NULL )
         {
             Assert( !FSPSpaceCatIndeterminate( spcatf ) );
-            
+
             // Object FUCB must always be initialized.
             Assert( pSpCatCtx->pfucb != pfucbNil );
             Assert( pSpCatCtx->pfucb->u.pfcb->PgnoFDP() != pgnoNull );
@@ -4974,12 +5252,15 @@ ERR ErrSPISmallGetExt(
                 data.SetPv( &sph );
                 data.SetCb( sizeof(sph) );
                 Assert( errSPNoSpaceForYou == err );
-                CallR( ErrNDSetExternalHeader(
-                                pfucbParent,
-                                pfucbParent->pcsrRoot,
-                                &data,
-                                ( pfcb->FDontLogSpaceOps() ? fDIRNoLog : fDIRNull ),
-                                noderfSpaceHeader ) );
+
+                Call( ErrSPIWrappedNDSetExternalHeader(
+                          pfucbParent,
+                          pfucbParent->pcsrRoot,
+                          &data,
+                          ( pfcb->FDontLogSpaceOps() ? fDIRNoLog : fDIRNull ),
+                          noderfSpaceHeader,
+                          0,
+                          -( cpgMin ) ) );
 
                 //  set up allocated extent as FDP if requested
                 //
@@ -5018,7 +5299,7 @@ ERR ErrSPIAEFindExt(
     BOOL        fFoundNextAvailSE       = fFalse;
     FCB* const  pfcb = pfucbAE->u.pfcb;
 
-    Assert( FFUCBSpace( pfucbAE ) );
+    Assert( FFUCBAvailExt( pfucbAE ) );
     Assert( !FSPIIsSmall( pfcb ) );
 
     //  begin search for first extent with size greater than request.
@@ -5050,8 +5331,13 @@ ERR ErrSPIAEFindExt(
             //
             Error( ErrERRCheck( errSPNoSpaceForYou ) );
         }
-        OSTraceFMP( pfucbAE->ifmp, JET_tracetagSpaceInternal,
-                    OSFormat( "ErrSPGetExt could not down into available extent tree. [ifmp=0x%x]\n", pfucbAE->ifmp ) );
+        OSTraceFMP(
+            pfucbAE->ifmp,
+            JET_tracetagSpaceInternal,
+            OSFormat(
+                "%hs: could not down into available extent tree. [ifmp=0x%x].",
+                __FUNCTION__,
+                pfucbAE->ifmp ) );
         Call( err );
     }
 
@@ -5077,6 +5363,7 @@ ERR ErrSPIAEFindExt(
             Call( ErrBTFlagDelete(      // UNDONE: Synchronously remove the node
                         pfucbAE,
                         fDIRNoVersion | ( pfcb->FDontLogSpaceOps() ? fDIRNoLog : fDIRNull ) ) );
+            // Zero pages, so no need to call pfucbAE->u.pfcb->AddCpgAE()
             Pcsr( pfucbAE )->Downgrade( latchReadTouch );
         }
 #endif
@@ -5122,8 +5409,13 @@ ERR ErrSPIAEFindExt(
 
     if ( err != JET_errNoCurrentRecord )
     {
-        OSTraceFMP( pfucbAE->ifmp, JET_tracetagSpaceInternal,
-                    OSFormat( "ErrSPGetExt could not scan available extent tree. [ifmp=0x%x]\n", pfucbAE->ifmp ) );
+        OSTraceFMP(
+            pfucbAE->ifmp,
+            JET_tracetagSpaceInternal,
+            OSFormat(
+                "%hs: Could not scan available extent tree. [ifmp=0x%x].",
+                __FUNCTION__,
+                pfucbAE->ifmp ) );
         Assert( err < 0 );
         goto HandleError;
     }
@@ -5177,17 +5469,20 @@ HandleError:
 //  cpgMin is minimum neeeded
 //  *ppgnoFirst input gives locality of extent needed
 //              output is first page of allocated extent
-//
+//  pobjidFDP, pcpgOEFDP, pcpgAEFDP returns data on newly created FDPs.
+//            not optional if ( fSPFlags & fSPNewFDP )
 LOCAL ERR ErrSPIGetExt(
-    FCB         *pfcbDstTracingOnly,
-    FUCB        *pfucbSrc,
-    CPG         *pcpgReq,
-    CPG         cpgMin,
-    PGNO        *ppgnoFirst,
-    ULONG       fSPFlags = 0,
-    UINT        fPageFlags = 0,
-    OBJID       *pobjidFDP = NULL,
-    const BOOL  fMayViolateMaxSize = fFalse )
+    _In_ FCB        *pfcbDstTracingOnly,
+    _Inout_ FUCB    *pfucbSrc,
+    _Inout_ CPG     *pcpgReq,
+    _In_ CPG        cpgMin,
+    _Out_ PGNO      *ppgnoFirst,
+    _In_ ULONG      fSPFlags = 0,
+    _In_ UINT       fPageFlags = 0,
+    _Out_opt_ OBJID *pobjidFDP = NULL,
+    _Out_opt_ CPG   *pcpgOEFDP = NULL,
+    _Out_opt_ CPG   *pcpgAEFDP = NULL,
+    _In_ const BOOL fMayViolateMaxSize = fFalse )
 {
     ERR         err;
     PIB         * const ppib            = pfucbSrc->ppib;
@@ -5201,7 +5496,10 @@ LOCAL ERR ErrSPIGetExt(
     //  check parameters.  If setting up new FDP, increment requested number of
     //  pages to account for consumption of first page to make FDP.
     //
-    Assert( *pcpgReq > 0 || ( (fSPFlags & fSPNewFDP) && *pcpgReq == 0 ) );
+    Assert( ( fSPFlags & fSPNewFDP ) ? ( NULL != pobjidFDP ) : fTrue );
+    Assert( ( fSPFlags & fSPNewFDP ) ? ( NULL != pcpgOEFDP ) : fTrue );
+    Assert( ( fSPFlags & fSPNewFDP ) ? ( NULL != pcpgAEFDP ) : fTrue );
+    Assert( ( fSPFlags & fSPNewFDP ) ? ( 0 <= *pcpgReq ) : ( 0 < *pcpgReq ) );
     Assert( *pcpgReq >= cpgMin );
     Assert( !FFUCBSpace( pfucbSrc ) );
     AssertSPIPfucbOnRoot( pfucbSrc );
@@ -5211,6 +5509,36 @@ LOCAL ERR ErrSPIGetExt(
     Assert( !( ErrSPIValidFDP( ppib, pfucbParent->ifmp, PgnoFDP( pfucbParent ) ) < 0 ) );
 #endif
 
+    OSTraceFMP(
+        pfucbSrc->ifmp,
+        JET_tracetagSpaceManagement,
+        OSFormat(
+            "%hs: Getting %hs Req(%d) Min(%d) Flags(0x%x) from [0x%x:0x%x:%lu] for [0x%x:0x%x:%lu].",
+            __FUNCTION__,
+            fSPFlags & fSPNewFDP ? "NewExtFDP" : "AddlExt",
+            *pcpgReq,
+            cpgMin,
+            fSPFlags,
+            pfucbSrc->ifmp,
+            ObjidFDP( pfucbSrc ),
+            PgnoFDP( pfucbSrc ),
+            pfucbSrc->ifmp,
+            pfcbDstTracingOnly->ObjidFDP(),
+            pfcbDstTracingOnly->PgnoFDP()
+            ) );
+
+    if ( NULL != pobjidFDP )
+    {
+        *pobjidFDP = objidNil;
+    }
+    if ( NULL != pcpgOEFDP )
+    {
+        *pcpgOEFDP = 0;
+    }
+    if ( NULL != pcpgAEFDP )
+    {
+        *pcpgAEFDP = 0;
+    }
     //  if a new FDP is requested, increment request count by FDP overhead,
     //  unless the count was smaller than the FDP overhead, in which case
     //  just allocate enough to satisfy the overhead (because the FDP will
@@ -5225,7 +5553,6 @@ LOCAL ERR ErrSPIGetExt(
         cpgMin = max( cpgMin, cpgFDPMin );
         *pcpgReq = max( *pcpgReq, cpgMin );
 
-        Assert( NULL != pobjidFDP );
     }
 
     Assert( cpgMin > 0 );
@@ -5234,6 +5561,11 @@ LOCAL ERR ErrSPIGetExt(
     {
         SPIInitFCB( pfucbSrc, fTrue );
     }
+
+    //
+    // Make sure the values are correct before we start
+    //
+    SPIValidateCpgOwnedAndAvail( pfucbSrc );
 
     //  if single extent optimization, then try to allocate from
     //  root page space map.  If cannot satisfy allocation, convert
@@ -5268,6 +5600,8 @@ LOCAL ERR ErrSPIGetExt(
     CallR( ErrSPIOpenAvailExt( ppib, pfcb, &pfucbAE ) );
     Assert( pfcb == pfucbAE->u.pfcb );
 
+    SPIValidateCpgOwnedAndAvail( pfucbSrc );
+
     if ( pfcb->FUtilizeParentSpace() ||
         //  Make sure we search the first level if we are self-reserving.
         fSelfReserving ||
@@ -5276,7 +5610,7 @@ LOCAL ERR ErrSPIGetExt(
         FCATBaseSystemFDP( pfcb->PgnoFDP() ) )
     {
         //  If we are self-reserving, we do not want to end up adding or deleting nodes from our own
-        //  space trees. Therefore, we are going to make sure we are guarenteed not to consume the entire
+        //  space trees. Therefore, we are going to make sure we are guaranteed not to consume the entire
         //  extent returned, so we'll request/reserve one extra page, but only allocate/consume exactly
         //  cpgMin afterwards.
         const CPG cpgMinT = fSelfReserving ? ( cpgMin + 1 ) : cpgMin;
@@ -5363,14 +5697,21 @@ LOCAL ERR ErrSPIGetExt(
 
     *ppgnoFirst = cspaei.PgnoFirst();
 
-    const CPG cpgDb = (CPG)g_rgfmp[pfucbAE->ifmp].PgnoLast();
+    const CPG cpgDb = (CPG)g_rgfmp[ pfucbAE->ifmp ].PgnoLast();
 
     if ( pfcb->PgnoFDP() == pgnoSystemRoot )
     {
-        OSTraceFMP( pfucbSrc->ifmp, JET_tracetagSpaceInternal,
-                        OSFormat( "found root space for alloc: %lu at %lu ... %d, %d\n",
-                        cspaei.CpgExtent(), cspaei.PgnoFirst(),
-                        (LONG)UlParam( PinstFromPpib( ppib ), JET_paramPageFragment ), cpgDb ) );
+        OSTraceFMP(
+            pfucbSrc->ifmp,
+            JET_tracetagSpaceInternal,
+            OSFormat(
+                "%hs: RootSpace E(%lu + %lu) PageFragment(%d) cpgDb(%d) R:%d.",
+                __FUNCTION__,
+                cspaei.PgnoFirst(),
+                cspaei.CpgExtent(), 
+                (LONG)UlParam( PinstFromPpib( ppib ), JET_paramPageFragment ),
+                cpgDb,
+                pgnoSystemRoot) );
     }
 
     Assert( *pcpgReq >= cpgMin );
@@ -5393,9 +5734,12 @@ LOCAL ERR ErrSPIGetExt(
         // Assert( *pcpgReq >= cpgMin );
         Assert( cspaei.CpgExtent() > 0 );
 
-        Call( ErrBTFlagDelete(      // UNDONE: Synchronously remove the node
+        Call( ErrSPIWrappedBTFlagDelete(      // UNDONE: Synchronously remove the node
                     pfucbAE,
-                    fDIRNoVersion | ( pfcb->FDontLogSpaceOps() ? fDIRNoLog : fDIRNull ) ) );
+                    fDIRNoVersion | ( pfcb->FDontLogSpaceOps() ? fDIRNoLog : fDIRNull ),
+                    0,
+                    -( *pcpgReq ) ) );
+
     }
     else
     {
@@ -5411,23 +5755,22 @@ LOCAL ERR ErrSPIGetExt(
         Assert( spAdjustedSize.CpgExtent() > 0 );
         Assert( pgnoLastBefore == cspaei.PgnoLast() );
 
-        Call( ErrBTReplace(
+        Call( ErrSPIWrappedBTReplace(
                     pfucbAE,
                     spAdjustedSize.GetData( ),
-                    fDIRNoVersion | ( pfcb->FDontLogSpaceOps() ? fDIRNoLog : fDIRNull ) ) );
-        CallS( err );       // do we need the following stmt?
+                    fDIRNoVersion | ( pfcb->FDontLogSpaceOps() ? fDIRNoLog : fDIRNull ),
+                    0,
+                    -( *pcpgReq ) ) );
+
         err = JET_errSuccess;
     }
 
     BTUp( pfucbAE );
 
-    //  if allocating from database then adjust avail cache
     //
-    if ( ( pgnoSystemRoot == pfucbAE->u.pfcb->PgnoFDP() )
-        && g_rgfmp[pfucbAE->u.pfcb->Ifmp()].FCacheAvail() )
-    {
-        g_rgfmp[pfucbAE->u.pfcb->Ifmp()].AdjustCpgAvail( -(*pcpgReq) );
-    }
+    // Make sure the values are correct after we're done.
+    //
+    SPIValidateCpgOwnedAndAvail( pfucbSrc );
 
 NewFDP:
     //  initialize extent as new tree, including support for
@@ -5435,19 +5778,14 @@ NewFDP:
     //
     if ( fSPFlags & fSPNewFDP )
     {
-        Assert( PgnoFDP( pfucbSrc ) != *ppgnoFirst );
-        if ( fSPFlags & fSPMultipleExtent )
-        {
-            Assert( *pcpgReq >= cpgMultipleExtentMin );
-        }
-        else
-        {
-            Assert( *pcpgReq >= cpgSingleExtentMin );
-        }
-
         //  database root is allocated by DBInitDatabase
         //
         Assert( pgnoSystemRoot != *ppgnoFirst );
+        Assert( PgnoFDP( pfucbSrc ) != *ppgnoFirst );
+        Assert( PgnoFDP( pfucbSrc ) != pgnoNull );
+        Assert( ( fSPFlags & fSPMultipleExtent ) ? ( *pcpgReq >= cpgMultipleExtentMin ) : ( *pcpgReq >= cpgSingleExtentMin ) );
+        Assert( ( 0 != ppib->Level() ) || ( fSPFlags & fSPUnversionedExtent ) );
+        Assert( ( 0 != ppib->Level() ) || g_rgfmp[ pfucbSrc->ifmp ].FIsTempDB() || g_rgfmp[ pfucbSrc->ifmp ].FCreatingDB() );
 
         VEREXT  verext;
         verext.pgnoFDP = PgnoFDP( pfucbSrc );
@@ -5461,8 +5799,6 @@ NewFDP:
             Call( pver->ErrVERFlag( pfucbSrc, operAllocExt, &verext, sizeof(verext) ) );
         }
 
-        Assert( PgnoFDP( pfucbSrc ) != pgnoNull );
-        Assert( *ppgnoFirst != pgnoSystemRoot );
         Call( ErrSPCreate(
                     ppib,
                     pfucbSrc->ifmp,
@@ -5471,7 +5807,10 @@ NewFDP:
                     *pcpgReq,
                     fSPFlags,
                     fPageFlags,
-                    pobjidFDP ) );
+                    pobjidFDP,
+                    pcpgOEFDP,
+                    pcpgAEFDP ) );
+
         Assert( *pobjidFDP > objidSystemRoot );
 
         //  reduce *pcpgReq by pages allocated for tree root
@@ -5485,14 +5824,7 @@ NewFDP:
             (*pcpgReq) -= cpgSingleExtentMin;
         }
 
-#ifdef DEBUG
-        if ( 0 == ppib->Level() )
-        {
-            FMP     *pfmp   = &g_rgfmp[pfucbSrc->ifmp];
-            Assert( fSPFlags & fSPUnversionedExtent );
-            Assert( pfmp->FIsTempDB() || pfmp->FCreatingDB() );
-        }
-#endif
+        SPIValidateCpgOwnedAndAvail( pfucbSrc );
     }
 
 
@@ -5500,22 +5832,42 @@ NewFDP:
     //
     err = JET_errSuccess;
 
-    CPG cpgExt = *pcpgReq + ( (fSPFlags & fSPNewFDP) ?
-                                ( fSPFlags & fSPMultipleExtent ? cpgMultipleExtentMin : cpgSingleExtentMin ):
-                                0
-                            );
+    CPG cpgExt = *pcpgReq;
+
+    if ( fSPFlags & fSPNewFDP)
+    {
+        if ( fSPFlags & fSPMultipleExtent )
+        {
+            cpgExt += cpgMultipleExtentMin;
+        }
+        else
+        {
+            cpgExt += cpgSingleExtentMin;
+        }
+    }
+
+    SPIValidateCpgOwnedAndAvail( pfucbSrc );
+
     const PGNO pgnoParentFDP = PgnoFDP( pfucbSrc );
     const PGNO pgnoFDP = pfcbDstTracingOnly->PgnoFDP();
     ETSpaceAllocExt( pfucbSrc->ifmp, pgnoFDP, *ppgnoFirst, cpgExt, pfcbDstTracingOnly->ObjidFDP(), pfcbDstTracingOnly->TCE() );
-    OSTraceFMP( pfucbSrc->ifmp, JET_tracetagSpaceManagement,
-                    OSFormat( "ErrSPIGetExt: %hs from %d.%lu for %lu at %lu for %lu pages (0x%x)\n",
-                        fSPFlags & fSPNewFDP ? "NewExtFDP" : "AddlExt",
-                        pfucbSrc->ifmp,
-                        pgnoParentFDP,
-                        pgnoFDP,
-                        *ppgnoFirst,
-                        cpgExt,
-                        fSPFlags ) );
+    OSTraceFMP(
+        pfucbSrc->ifmp,
+        JET_tracetagSpaceManagement,
+        OSFormat(
+            "%hs: Got %hs E(%lu + %lu) Flags(0x%x) from [0x%x:0x%x:%lu] to [0x%x:0x%x:%lu].",
+            __FUNCTION__,
+            fSPFlags & fSPNewFDP ? "NewExtFDP" : "AddlExt",
+            *ppgnoFirst,
+            cpgExt,
+            fSPFlags,
+            pfucbSrc->ifmp,
+            ObjidFDP( pfucbSrc ),
+            PgnoFDP( pfucbSrc ),
+            pfucbSrc->ifmp,
+            pfcbDstTracingOnly->ObjidFDP(),
+            pfcbDstTracingOnly->PgnoFDP()
+            ) );
 
     //  Just putting this in for awhile, to ensure I did the above calc correctly to 
     //  match existing code here.
@@ -5539,19 +5891,20 @@ HandleError:
     return err;
 }
 
-
 ERR ErrSPGetExt(
-    FUCB    *pfucb,
-    PGNO    pgnoParentFDP,
-    CPG     *pcpgReq,
-    CPG     cpgMin,
-    PGNO    *ppgnoFirst,
-    ULONG   fSPFlags,
-    UINT    fPageFlags,
-    OBJID   *pobjidFDP )
+    FUCB        *pfucb,
+    PGNO        pgnoParentFDP,
+    CPG         *pcpgReq,
+    CPG         cpgMin,
+    PGNO        *ppgnoFirst,
+    ULONG       fSPFlags,
+    UINT        fPageFlags,
+    OBJID       *pobjidFDP )
 {
     ERR     err;
     FUCB    *pfucbParent = pfucbNil;
+    CPG     cpgOEFDP;
+    CPG     cpgAEFDP;
 
     PIBTraceContextScope tcScope = pfucb->ppib->InitTraceContextScope();
     tcScope->nParentObjectClass = TceFromFUCB( pfucb );
@@ -5564,11 +5917,28 @@ ERR ErrSPGetExt(
 
     //  open cursor on Parent and RIW latch root page
     //
-    CallR( ErrBTIOpenAndGotoRoot( pfucb->ppib, pgnoParentFDP, pfucb->ifmp, &pfucbParent ) );
+    Call( ErrBTIOpenAndGotoRoot( pfucb->ppib, pgnoParentFDP, pfucb->ifmp, &pfucbParent ) );
 
     //  allocate an extent
-    //
-    err = ErrSPIGetExt( pfucb->u.pfcb, pfucbParent, pcpgReq, cpgMin, ppgnoFirst, fSPFlags, fPageFlags, pobjidFDP );
+    //  Note: We get back info on OE and AE so we can add the value to the cpg cache
+    //  AFTER we've released the root.  This is because adding a value to the cpg cache
+    //  may cause a split in the cpg cache table, and that means we'd need to get space
+    //  from the DBRoot.  If pgnoParentFDP happens to be systemRoot, that results in
+    //  trying to latch the page twice, one in ErrBTIOpenAndGotoRoot and one several
+    //  levels lower in the callstack.
+
+    err = ErrSPIGetExt(
+              pfucb->u.pfcb,
+              pfucbParent,
+              pcpgReq,
+              cpgMin,
+              ppgnoFirst,
+              fSPFlags,
+              fPageFlags,
+              pobjidFDP,
+              &cpgOEFDP,
+              &cpgAEFDP );
+
     Assert( Pcsr( pfucbParent ) == pfucbParent->pcsrRoot );
 
     //  latch may have been upgraded to write latch
@@ -5578,9 +5948,37 @@ ERR ErrSPGetExt(
         || pfucbParent->pcsrRoot->Latch() == latchWrite );
     pfucbParent->pcsrRoot->ReleasePage();
     pfucbParent->pcsrRoot = pcsrNil;
+    Call( err );
 
-    Assert( pfucbParent != pfucbNil );
-    BTClose( pfucbParent );
+    if ( fSPFlags & fSPNewFDP )
+    {
+        Assert( NULL != pobjidFDP );
+        Assert( objidNil != *pobjidFDP );
+
+        if ( g_fSPExtentPageCountCacheTrackOnCreate )
+        {
+            // For now, we don't track FCBs at creation, we start tracking an FCB only after
+            // you've asked for size (see ErrSPGetDatabaseInfo).  This override for testing
+            // starts tracking on creation.
+            CATSetExtentPageCounts(
+                pfucb->ppib,
+                pfucb->ifmp,
+                *pobjidFDP,
+                cpgOEFDP,
+                cpgAEFDP
+                );
+        }
+    }
+    else
+    {
+        Assert( ( cpgOEFDP == 0 ) && ( cpgAEFDP == 0 ) );
+    }
+
+HandleError:
+    if ( pfucbParent != pfucbNil ) {
+        BTClose( pfucbParent );
+    }
+
     return err;
 }
 
@@ -5598,8 +5996,9 @@ ERR ErrSPISPGetPage(
     Assert( FFUCBSpace( pfucb ) );
     Assert( ppgnoAlloc );
     Assert( pgnoNull == *ppgnoAlloc );
-    AssertSPIPfucbOnSpaceTreeRoot( pfucb, pfucb->pcsrRoot );
 
+
+    // Pages in the split buffers are not counted in the Extent Page Count Cache.
     if ( NULL == pfucb->u.pfcb->Psplitbuf( fAvailExt ) )
     {
         CSR             *pcsrRoot   = pfucb->pcsrRoot;
@@ -5615,7 +6014,7 @@ ERR ErrSPISPGetPage(
 
         data.SetPv( &spbuf );
         data.SetCb( sizeof(spbuf) );
-        err = ErrNDSetExternalHeader(
+        err = ErrSPIWrappedNDSetExternalHeader(
                     pfucb,
                     pcsrRoot,
                     &data,
@@ -5662,6 +6061,8 @@ ERR ErrSPISmallGetPage(
 
     AssertSPIPfucbOnRoot( pfucb );
 
+    SPIValidateCpgOwnedAndAvail( pfucb );
+
     //  if any chance in satisfying request from extent
     //  then try to allcate requested extent, or minimum
     //  extent from first available extent.  Only try to
@@ -5700,12 +6101,15 @@ ERR ErrSPISmallGetPage(
             sph.SetRgbitAvail( sph.RgbitAvail() ^ rgbitT );
             data.SetPv( &sph );
             data.SetCb( sizeof(sph) );
-            CallR( ErrNDSetExternalHeader(
+
+            CallR( ErrSPIWrappedNDSetExternalHeader(
                         pfucb,
                         pfucb->pcsrRoot,
                         &data,
                         ( pfcb->FDontLogSpaceOps() ? fDIRNoLog : fDIRNull ),
-                        noderfSpaceHeader ) );
+                        noderfSpaceHeader,
+                        0,
+                        -1 ) );
 
             //  at this point, we should have moved small extents out of the shrink range
             //  if we are shrinking.
@@ -5722,8 +6126,16 @@ ERR ErrSPISmallGetPage(
             SPCheckPgnoAllocTrap( *ppgnoAlloc );
 
             ETSpaceAllocPage( pfucb->ifmp, pgnoFDP, *ppgnoAlloc, pfucb->u.pfcb->ObjidFDP(), TceFromFUCB( pfucb ) );
-            OSTraceFMP( pfucb->ifmp, JET_tracetagSpace,
-                            OSFormat( "get page 1 at %lu from %d.%lu\n", *ppgnoAlloc, pfucb->ifmp, PgnoFDP( pfucb ) ) );
+            OSTraceFMP(
+                pfucb->ifmp,
+                JET_tracetagSpace,
+                OSFormat(
+                    "%hs: get page 1 at %lu from [0x%x:0x%x:%lu].",
+                    __FUNCTION__,
+                    *ppgnoAlloc,
+                    pfucb->ifmp,
+                    ObjidFDP( pfucb ),
+                    PgnoFDP( pfucb ) ) );
 
             return JET_errSuccess;
         }
@@ -5767,7 +6179,7 @@ ERR ErrSPIAEFindPage(
 
     Assert( pfucbAE );
     Assert( pspaeiAlloc );
-    Assert( FFUCBSpace( pfucbAE ) );
+    Assert( FFUCBAvailExt( pfucbAE ) );
     Assert( !FSPIIsSmall( pfcb ) );
 
     pspaeiAlloc->Unset();   // invalidate
@@ -5796,8 +6208,15 @@ ERR ErrSPIAEFindPage(
         default:
             Assert( err < JET_errSuccess );
             Assert( err != JET_errNoCurrentRecord );
-            OSTraceFMP( pfucbAE->ifmp, JET_tracetagSpaceInternal,
-                        OSFormat( "ErrSPGetPage could not go down into available extent tree. [ifmp=0x%x]\n", pfucbAE->ifmp ) );
+            OSTraceFMP(
+                pfucbAE->ifmp,
+                JET_tracetagSpaceInternal,
+                OSFormat(
+                    "%hs: could not go down into available extent tree. [0x%x:0x%x:%lu].",
+                    __FUNCTION__,
+                    pfucbAE->ifmp,
+                    ObjidFDP( pfucbAE ),
+                    PgnoFDP( pfucbAE ) ) );
             Call( err );
             break;
 
@@ -5924,6 +6343,7 @@ ERR ErrSPIAEFindPage(
                     Call( ErrBTFlagDelete(      // UNDONE: Synchronously remove the node
                                 pfucbAE,
                                 fDIRNoVersion | ( pfcb->FDontLogSpaceOps() ? fDIRNoLog : fDIRNull ) ) );
+                    // Zero pages, so no need to call pfucbAE->u.pfcb->AddCpgAE()
                     BTUp( pfucbAE );
                     goto FindPage;
                 }
@@ -6084,9 +6504,11 @@ ERR ErrSPIAEGetContinuousPage(
 
         //  Delete the insertion region marker.
         //
-        err = ErrBTFlagDelete(      // UNDONE: Synchronously remove the node
+        err = ErrSPIWrappedBTFlagDelete(      // UNDONE: Synchronously remove the node
                     pfucbAE,
-                    fDIRNoVersion | ( pfcb->FDontLogSpaceOps() ? fDIRNoLog : fDIRNull ) );
+                    fDIRNoVersion | ( pfcb->FDontLogSpaceOps() ? fDIRNoLog : fDIRNull ),
+                    0,      // This is just a region marker, not actual pages, so no need to adjust the cache.
+                    0 );
 
         BTUp( pfucbAE );
 
@@ -6126,7 +6548,7 @@ ERR ErrSPIAEGetContinuousPage(
                 cpgEscalatingRequest = CpgSPIGetNextAlloc( pfcb->Pfcbspacehints(), cpgEscalatingRequest );
             }
         }
-        
+
         if ( fHardReserve &&
                 cpgReserve != 0 &&
                 cpgReserve != cpgEscalatingRequest )
@@ -6145,11 +6567,13 @@ ERR ErrSPIAEGetContinuousPage(
 
         //  Note: we don't want ErrSPIGetSe() to resize our request, we've already decided 
         //  on a good size, so don't pass fSPOriginatingRequest.
-        Call( ErrSPIAEGetExtentAndPage( pfucb, pfucbAE,
-                            spp::ContinuousPool,
-                            cpgEscalatingRequest,
-                            fSPSplitting,
-                            pspaeiAlloc ) );
+        Call( ErrSPIAEGetExtentAndPage(
+                  pfucb,
+                  pfucbAE,
+                  spp::ContinuousPool,
+                  cpgEscalatingRequest,
+                  fSPSplitting,
+                  pspaeiAlloc ) );
 
     }
 
@@ -6256,6 +6680,11 @@ ERR ErrSPIAEGetPage(
     //
     AssertSPIPfucbOnRoot( pfucb );
 
+    //
+    // Make sure the values are correct before we start
+    //
+    SPIValidateCpgOwnedAndAvail( pfucb );
+
     CallR( ErrSPIOpenAvailExt( pfucb->ppib, pfcb, &pfucbAE ) );
     Assert( pfcb == pfucbAE->u.pfcb );
     Assert( pfucb->ppib == pfucbAE->ppib );
@@ -6313,31 +6742,32 @@ ERR ErrSPIAEGetPage(
 
     if ( spAdjustedAvail.FDelete() )
     {
-        Call( ErrBTFlagDelete(      // UNDONE: Synchronously remove the node
+        Call( ErrSPIWrappedBTFlagDelete(      // UNDONE: Synchronously remove the node
                     pfucbAE,
-                    fDIRNoVersion | ( pfcb->FDontLogSpaceOps() ? fDIRNoLog : fDIRNull ) ) );
+                    fDIRNoVersion | ( pfcb->FDontLogSpaceOps() ? fDIRNoLog : fDIRNull ),
+                    0,
+                    -1 ) );
     }
     else
     {
         Assert( FKeysEqual( pfucbAE->kdfCurr.key, spAdjustedAvail.GetKey() ) );
 
-        Call( ErrBTReplace(
+        Call( ErrSPIWrappedBTReplace(
                     pfucbAE,
                     spAdjustedAvail.GetData( ),
-                    fDIRNoVersion | ( pfcb->FDontLogSpaceOps() ? fDIRNoLog : fDIRNull ) ) );
+                    fDIRNoVersion | ( pfcb->FDontLogSpaceOps() ? fDIRNoLog : fDIRNull ),
+                    0,
+                    -1 ) );
     }
     }
 
     BTUp( pfucbAE );
     err = JET_errSuccess;
-    
-    //  if allocating from database then adjust avail cache
+
     //
-    if ( ( pgnoSystemRoot == pfucbAE->u.pfcb->PgnoFDP() )
-        && g_rgfmp[pfucbAE->u.pfcb->Ifmp()].FCacheAvail() )
-    {
-        g_rgfmp[pfucbAE->u.pfcb->Ifmp()].AdjustCpgAvail( -1 );
-    }
+    // Make sure the values are correct after we're done
+    //
+    SPIValidateCpgOwnedAndAvail( pfucb );
 
 HandleError:
 
@@ -6445,6 +6875,11 @@ ERR ErrSPGetPage(
             SPIInitFCB( pfucb, fTrue );
         }
 
+        //
+        // Make sure the values are correct before we start
+        //
+        SPIValidateCpgOwnedAndAvail( pfucb );
+
         //  if single extent optimization, then try to allocate from
         //  root page space map.  If cannot satisfy allocation, convert
         //  to multiple extent representation.
@@ -6475,10 +6910,23 @@ ERR ErrSPGetPage(
 
 HandleError:
 
+    //
+    // Make sure the values are correct after we're done
+    //
+    SPIValidateCpgOwnedAndAvail( pfucb );
+
     if ( err < JET_errSuccess )
     {
-        OSTraceFMP( pfucb->ifmp, JET_tracetagSpaceInternal,
-                        OSFormat( "Failed to get page from %d.%lu\n", pfucb->ifmp, PgnoFDP( pfucb ) ) );
+        OSTraceFMP(
+            pfucb->ifmp,
+            JET_tracetagSpaceInternal,
+            OSFormat(
+                "%hs: Failed to get page from [0x%x:0x%x:%lu].",
+                __FUNCTION__,
+                pfucb->ifmp,
+                ObjidFDP( pfucb ),
+                PgnoFDP( pfucb ) ) );
+
         if ( errSPNoSpaceForYou == err ||
                 errCodeInconsistency == err )
         {
@@ -6492,8 +6940,16 @@ HandleError:
 
         const PGNO pgnoFDP = PgnoFDP( pfucb );
         ETSpaceAllocPage( pfucb->ifmp, pgnoFDP, *ppgnoAlloc, pfucb->u.pfcb->ObjidFDP(), TceFromFUCB( pfucb ) );
-        OSTraceFMP( pfucb->ifmp, JET_tracetagSpace,
-                        OSFormat( "get page 1 at %lu from %d.%lu\n", *ppgnoAlloc, pfucb->ifmp, PgnoFDP( pfucb ) ) );
+        OSTraceFMP(
+            pfucb->ifmp,
+            JET_tracetagSpace,
+            OSFormat(
+                "%hs: get page 1 at %lu from [0x%x:0x%x:%lu].",
+                __FUNCTION__,
+                *ppgnoAlloc,
+                pfucb->ifmp,
+                ObjidFDP( pfucb ),
+                PgnoFDP( pfucb ) ) );
     }
 
     return err;
@@ -6519,6 +6975,10 @@ LOCAL ERR ErrSPIFreeSEToParent(
     Assert( pfcbNil != pfcb );
     AssertSPIPfucbOnRoot( pfucb );
     AssertSPIPfucbOnRootOrNull( pfucbParent );
+
+    // Can't do this because pfucbAE and pfucbOE have their root pages locked, and
+    // we would need to BTDown() in those trees deeper in the stack.
+    // SPIValidateCpgOwnedAndAvail( pfucb );
 
     //  get parentFDP's root pgno
     //  cursor passed in should be at root of tree
@@ -6562,9 +7022,13 @@ LOCAL ERR ErrSPIFreeSEToParent(
 
         //  delete available extent node
         //
-        Call( ErrBTFlagDelete(      // UNDONE: Synchronously remove the node
+        Assert( pfucb->u.pfcb == pfucbAE->u.pfcb );
+        Call( ErrSPIWrappedBTFlagDelete(      // UNDONE: Synchronously remove the node
                     pfucbAE,
-                    fDIRNoVersion | ( pfcb->FDontLogSpaceOps() ? fDIRNoLog : fDIRNull ) ) );
+                    fDIRNoVersion | ( pfcb->FDontLogSpaceOps() ? fDIRNoLog : fDIRNull ),
+                    0,
+                    -( cpgSize ) ) );
+
         BTUp( pfucbAE );
     }
 
@@ -6575,9 +7039,13 @@ LOCAL ERR ErrSPIFreeSEToParent(
     dib.dirflag = fDIRNull;
     Call( ErrBTDown( pfucbOE, &dib, latchReadTouch ) );
 
-    Call( ErrBTFlagDelete(      // UNDONE: Synchronously remove the node
+    Assert( pfucb->u.pfcb == pfucbOE->u.pfcb );
+    Call( ErrSPIWrappedBTFlagDelete(      // UNDONE: Synchronously remove the node
                 pfucbOE,
-                fDIRNoVersion | ( pfcb->FDontLogSpaceOps() ? fDIRNoLog : fDIRNull ) ) );
+                fDIRNoVersion | ( pfcb->FDontLogSpaceOps() ? fDIRNoLog : fDIRNull ),
+                -( cpgSize ),
+                0 ) );
+
     BTUp( pfucbOE );
 
     //  free extent to parent FDP
@@ -6617,7 +7085,6 @@ HandleError:
 
     return err;
 }
-
 
 LOCAL_BROKEN VOID SPIReportLostPages(
     const IFMP  ifmp,
@@ -6675,7 +7142,8 @@ ERR ErrSPISPFreeExt( __inout FUCB * pfucb, __in const PGNO pgnoFirst, __in const
 
         data.SetPv( &spbuf );
         data.SetCb( sizeof(spbuf) );
-        err = ErrNDSetExternalHeader(
+        AssertSz( fFalse, "SOMEONE: not validated for space update." );
+        err = ErrSPIWrappedNDSetExternalHeader(
                     pfucb,
                     pcsrRoot,
                     &data,
@@ -6711,7 +7179,7 @@ ERR ErrSPISmallFreeExt( __inout FUCB * pfucb, __in const PGNO pgnoFirst, __in co
     Assert( pgnoFirst > PgnoFDP( pfucb ) );                             //  can't be equal, because then you'd be freeing root page to itself
     Assert( pgnoFirst - PgnoFDP( pfucb ) <= cpgSmallSpaceAvailMost );   //  extent must start and end within single-extent range
     Assert( ( pgnoFirst + cpgSize - 1 - PgnoFDP( pfucb ) ) <= cpgSmallSpaceAvailMost );
-    Assert( ( pgnoFirst + cpgSize - 1 ) <= g_rgfmp[pfucb->ifmp].PgnoLast() );
+    Assert( ( pgnoFirst + cpgSize - 1 ) <= g_rgfmp[ pfucb->ifmp ].PgnoLast() );
 
     //  write latch page before update
     //
@@ -6739,12 +7207,16 @@ ERR ErrSPISmallFreeExt( __inout FUCB * pfucb, __in const PGNO pgnoFirst, __in co
     sph.SetRgbitAvail( sph.RgbitAvail() | rgbitT );
     data.SetPv( &sph );
     data.SetCb( sizeof(sph) );
-    Call( ErrNDSetExternalHeader(
+
+    Call( ErrSPIWrappedNDSetExternalHeader(
                 pfucb,
                 pfucb->pcsrRoot,
                 &data,
                 ( pfucb->u.pfcb->FDontLogSpaceOps() ? fDIRNoLog : fDIRNull ),
-                noderfSpaceHeader ) );
+                noderfSpaceHeader,
+                0,
+                cpgSize ) );
+
 HandleError:
 
     return err;
@@ -6822,8 +7294,15 @@ ERR ErrSPIAERemoveInsertionRegion(
     }
     if ( err < 0 )
     {
-        OSTraceFMP( pfucbAE->ifmp, JET_tracetagSpaceInternal,
-                    OSFormat( "ErrSPIAERemoveInsertionRegion could not go down into nonempty available extent tree. [ifmp=0x%x]\n", pfucbAE->ifmp ) );
+        OSTraceFMP(
+            pfucbAE->ifmp,
+            JET_tracetagSpaceInternal,
+            OSFormat(
+                "%hs: could not go down into nonempty available extent tree. [0x%x:0x%x:%lu].",
+                __FUNCTION__,
+                pfucbAE->ifmp,
+                ObjidFDP( pfucbAE ),
+                PgnoFDP( pfucbAE ) ) );
     }
     Call( err );
 
@@ -6984,7 +7463,7 @@ ERR ErrSPIAERemoveInsertionRegion(
             //      owned extent nodes
             fDeleteInsertionRegion = fTrue;
         }
-        
+
     }
 
     if ( fDeleteInsertionRegion )
@@ -7008,10 +7487,13 @@ ERR ErrSPIAERemoveInsertionRegion(
             *pcpgSizeToFree = *pcpgSizeToFree + cspaei.CpgExtent();
 
         }
-        
-        Call( ErrBTFlagDelete(      // UNDONE: Synchronously remove the node
+
+        Call( ErrSPIWrappedBTFlagDelete(      // UNDONE: Synchronously remove the node
                     pfucbAE,
-                    fDIRNoVersion | ( pfcb->FDontLogSpaceOps() ? fDIRNoLog : fDIRNull ) ) );
+                    fDIRNoVersion | ( pfcb->FDontLogSpaceOps() ? fDIRNoLog : fDIRNull ),
+                    0,
+                    -( cspaei.CpgExtent() ) ) );
+
         Assert( Pcsr( pfucbAE )->FLatched() );
 
         err = cspaei.FEmptyExtent() ? JET_errSuccess : wrnSPReservedPages;
@@ -7065,7 +7547,11 @@ LOCAL VOID SPIReportSpaceLeak( __in const FUCB* const pfucb, __in const ERR err,
     OSTraceResumeGC();
 }
 
-LOCAL ERR ErrSPIAEFreeExt( __inout FUCB * pfucb, __in PGNO pgnoFirst, __in CPG cpgSize, __in FUCB * const pfucbParent = pfucbNil )
+LOCAL ERR ErrSPIAEFreeExt(
+    __inout FUCB * pfucb,
+    __in PGNO pgnoFirst,
+    __in CPG cpgSize,
+    __in FUCB * const pfucbParent = pfucbNil )
 {
     ERR         err                 = errCodeInconsistency;
     PIB         * const ppib        = pfucb->ppib;
@@ -7084,7 +7570,7 @@ LOCAL ERR ErrSPIAEFreeExt( __inout FUCB * pfucb, __in PGNO pgnoFirst, __in CPG c
     CSPExtentInfo           cspaei;
     CSPExtentKeyBM          cspextkeyAE;
     DIB         dibAE;
- 
+
     // owned extent and avail extent variables
     //
     FUCB        *pfucbAE        = pfucbNil;
@@ -7107,21 +7593,21 @@ LOCAL ERR ErrSPIAEFreeExt( __inout FUCB * pfucb, __in PGNO pgnoFirst, __in CPG c
     //  has now trickled up to the root so we unshelve that space to allow it to be reused when
     //  the database re-grows.
     //
-    if ( ( pgnoLast > g_rgfmp[pfcb->Ifmp()].PgnoLast() ) && ( pfcb->PgnoFDP() == pgnoSystemRoot ) )
+    if ( ( pgnoLast > g_rgfmp[ pfcb->Ifmp() ].PgnoLast() ) && ( pfcb->PgnoFDP() == pgnoSystemRoot ) )
     {
         Assert( pfucbParent == pfucbNil );
-        Assert( !g_rgfmp[pfcb->Ifmp()].FIsTempDB() );
+        Assert( !g_rgfmp[ pfcb->Ifmp() ].FIsTempDB() );
 
         // Remove shelved pages from the shelf.
-        const PGNO pgnoFirstUnshelve = max( pgnoFirst, g_rgfmp[pfcb->Ifmp()].PgnoLast() + 1 );
+        const PGNO pgnoFirstUnshelve = max( pgnoFirst, g_rgfmp[ pfcb->Ifmp() ].PgnoLast() + 1 );
         Call( ErrSPIUnshelvePagesInRange( pfucb, pgnoFirstUnshelve, pgnoLast ) );
 
-        if ( pgnoFirst > g_rgfmp[pfcb->Ifmp()].PgnoLast() )
+        if ( pgnoFirst > g_rgfmp[ pfcb->Ifmp() ].PgnoLast() )
         {
             goto HandleError;
         }
 
-        pgnoLast = min( pgnoLast, g_rgfmp[pfcb->Ifmp()].PgnoLast() );
+        pgnoLast = min( pgnoLast, g_rgfmp[ pfcb->Ifmp() ].PgnoLast() );
         Assert( pgnoLast >= pgnoFirst );
         cpgSize = pgnoLast - pgnoFirst + 1;
     }
@@ -7199,8 +7685,15 @@ CoallesceWithNeighbors:
 
         if ( err < 0 )
         {
-            OSTraceFMP( pfucbAE->ifmp, JET_tracetagSpaceInternal,
-                        OSFormat( "ErrSPFreeExt could not go down into nonempty available extent tree. [ifmp=0x%x]\n", pfucbAE->ifmp ) );
+            OSTraceFMP(
+                pfucbAE->ifmp,
+                JET_tracetagSpaceInternal,
+                OSFormat(
+                    "%hs: could not go down into nonempty available extent tree. [0x%x:0x%x:%lu].",
+                    __FUNCTION__,
+                    pfucbAE->ifmp,
+                    ObjidFDP( pfucbAE ),
+                    PgnoFDP( pfucbAE ) ) );
         }
         Call( err );
 
@@ -7226,6 +7719,7 @@ CoallesceWithNeighbors:
             Call( ErrBTFlagDelete(      // UNDONE: Synchronously remove the node
                         pfucbAE,
                         fDIRNoVersion | ( pfcb->FDontLogSpaceOps() ? fDIRNoLog : fDIRNull ) ) );
+            // Zero pages, so no need to call pfucbAE->u.pfcb->AddCpgAE()
             BTUp( pfucbAE );
             goto CoallesceWithNeighbors;
         }
@@ -7277,16 +7771,31 @@ CoallesceWithNeighbors:
                 #endif
                 Assert( cspaei.PgnoLast() == pgnoFirst - 1 );
 
+                OSTraceFMP(
+                    pfucb->ifmp,
+                    JET_tracetagSpaceInternal,
+                    OSFormat(
+                        "%hs: Merging left E(%lu + %lu) with E(%lu + %lu) [0x%x:0x%x:%lu].",
+                        __FUNCTION__,
+                        cspaei.PgnoFirst(),
+                        cspaei.CpgExtent(),
+                        pgnoFirst,
+                        cpgSizeAdj,
+                        pfucb->ifmp,
+                        ObjidFDP( pfucb ),
+                        PgnoFDP( pfucb ) ) );
+
                 cpgSizeAdj += cspaei.CpgExtent();
                 pgnoFirst -= cspaei.CpgExtent();
                 Assert( pgnoLast == pgnoFirst + cpgSizeAdj - 1 );
-                Call( ErrBTFlagDelete(      // UNDONE: Synchronously remove the node
-                            pfucbAE,
-                            fDIRNoVersion | ( pfcb->FDontLogSpaceOps() ? fDIRNoLog : fDIRNull ) ) );
 
-                //  successfully coalesced on the left, now
-                //  attempt coalescing on the right
-                //  if we haven't formed a full extent
+                Call( ErrSPIWrappedBTFlagDelete(      // UNDONE: Synchronously remove the node
+                            pfucbAE,
+                            fDIRNoVersion | ( pfcb->FDontLogSpaceOps() ? fDIRNoLog : fDIRNull ),
+                            0,
+                            -(cspaei.CpgExtent() ) ) );
+
+                //  Now, we can attempt coalescing on the right if we haven't formed a full extent
                 Assert( !fOnNextExtent );
                 if ( pgnoLast == cspoeContaining.PgnoLast()
                     && cpgSizeAdj == cspoeContaining.CpgExtent() )
@@ -7354,14 +7863,34 @@ CoallesceWithNeighbors:
                         //      owned extent nodes
                         //
                         CSPExtentNodeKDF spAdjustedSize( SPEXTKEY::fSPExtentTypeAE, cspaei.PgnoLast(), cspaei.CpgExtent(), sppAvailGeneralPool );
+                        // Remember the actual number of pages we're adding to the node we're coalescing with.
+                        CPG cpgAdded = cpgSizeAdj;
+
+                        // Put the pages we're freeing into the node we're coalescing with.
                         spAdjustedSize.ErrUnconsumeSpace( cpgSizeAdj );
                         cpgSizeAdj += cspaei.CpgExtent();
 
-                        Call( ErrBTReplace(
+                        Call( ErrSPIWrappedBTReplace(
                                     pfucbAE,
                                     spAdjustedSize.GetData( ),
-                                    fDIRNoVersion | ( pfcb->FDontLogSpaceOps() ? fDIRNoLog : fDIRNull ) ) );
+                                    fDIRNoVersion | ( pfcb->FDontLogSpaceOps() ? fDIRNoLog : fDIRNull ),
+                                    0,
+                                    cpgAdded ) );
                         Assert( Pcsr( pfucbAE )->FLatched() );
+
+                        OSTraceFMP(
+                            pfucb->ifmp,
+                            JET_tracetagSpaceInternal,
+                            OSFormat(
+                                "%hs: Merged E(%lu + %lu) with right E(%lu + %lu) [0x%x:0x%x:%lu].",
+                                __FUNCTION__,
+                                pgnoFirst,
+                                cpgAdded,
+                                cspaei.PgnoFirst(),
+                                cspaei.CpgExtent(),
+                                pfucb->ifmp,
+                                ObjidFDP( pfucb ),
+                                PgnoFDP( pfucb ) ) );
 
                         pgnoLast = cspaei.PgnoLast();
                         fCoalesced = fTrue;
@@ -7404,7 +7933,7 @@ InsertExtent:
 
             Assert( cspoeContaining.FContains( pgnoLast ) );    // shouldn't have offended this.
             Assert( cspoeContaining.FContains( pgnoFirst ) );
-            
+
             goto CoallesceWithNeighbors;
         }
 
@@ -7417,16 +7946,6 @@ InsertExtent:
                     cpgSizeAdj ) );
     }
     Assert( Pcsr( pfucbAE )->FLatched() );
-
-    //  if allocating from database then adjust avail cache
-    //
-    if ( ( pgnoSystemRoot == pfucbAE->u.pfcb->PgnoFDP() )
-        && g_rgfmp[pfucbAE->u.pfcb->Ifmp()].FCacheAvail() )
-    {
-        //  adjust cpgAvail cache with original cpgSize not the adjusted size
-        //
-        g_rgfmp[pfucbAE->u.pfcb->Ifmp()].AdjustCpgAvail( cpgSize );
-    }
 
     //  if extent freed coalesced with available extents
     //  form a complete secondary extent, remove the secondary extent
@@ -7578,6 +8097,18 @@ ERR ErrSPFreeExt( FUCB* const pfucb, const PGNO pgnoFirst, const CPG cpgSize, co
     tcScope->SetDwEngineObjid( ObjidFDP( pfucb ) );
     tcScope->iorReason.SetIort( iortSpace );
 
+    OSTraceFMP(
+        pfucb->ifmp,
+        JET_tracetagSpaceInternal,
+        OSFormat(
+            "%hs: About to free E(%lu + %lu) to [0x%x:0x%x:%lu].",
+            __FUNCTION__,
+            pgnoFirst,
+            cpgSize,
+            pfucb->ifmp,
+            ObjidFDP( pfucb ),
+            PgnoFDP( pfucb ) ) );
+
     // check for valid input
     //
     Assert( cpgSize > 0 );
@@ -7620,6 +8151,11 @@ ERR ErrSPFreeExt( FUCB* const pfucb, const PGNO pgnoFirst, const CPG cpgSize, co
             SPIInitFCB( pfucb, fTrue );
         }
 
+        //
+        // Make sure the values are correct before we start
+        //
+        SPIValidateCpgOwnedAndAvail( pfucb );
+
 #ifdef SPACECHECK
         CallS( ErrSPIWasAlloc( pfucb, pgnoFirst, cpgSize ) );
 #endif
@@ -7637,16 +8173,32 @@ ERR ErrSPFreeExt( FUCB* const pfucb, const PGNO pgnoFirst, const CPG cpgSize, co
         {
             Call( ErrSPIAEFreeExt( pfucb, pgnoFirst, cpgSize ) );
         }
+
+        //
+        // Make sure the values are correct after we're done
+        //
+        SPIValidateCpgOwnedAndAvail( pfucb );
     }
 
     CallS( err );   // can warning happen?
-    
+
 HandleError:
 
     if( err < JET_errSuccess )
     {
-        OSTraceFMP( pfucb->ifmp, JET_tracetagSpaceInternal,
-                        OSFormat( "Failed to free space %lu at %lu to FDP %d.%lu\n", cpgSize, pgnoFirst, pfucb->ifmp, PgnoFDP( pfucb ) ) );
+        OSTraceFMP(
+            pfucb->ifmp,
+            JET_tracetagSpaceInternal,
+            OSFormat(
+                "%hs: Failed to free E(%lu + %lu) to [0x%x:0x%x:%lu] err=(%d:0x%08X)",
+                __FUNCTION__,
+                pgnoFirst,
+                cpgSize,
+                pfucb->ifmp,
+                ObjidFDP( pfucb ),
+                PgnoFDP( pfucb ),
+                err,
+                err ) );
 
         SPIReportSpaceLeak( pfucb, err, pgnoFirst, cpgSize, szTag );
     }
@@ -7656,15 +8208,23 @@ HandleError:
         if ( cpgSize > 1 )
         {
             ETSpaceFreeExt( pfucb->ifmp, pgnoFDP, pgnoFirst, cpgSize, pfucb->u.pfcb->ObjidFDP(), TceFromFUCB( pfucb ) );
-            OSTraceFMP( pfucb->ifmp, JET_tracetagSpaceManagement,
-                            OSFormat( "Free space %lu at %lu to FDP %d.%lu\n", cpgSize, pgnoFirst, pfucb->ifmp, PgnoFDP( pfucb ) ) );
         }
         else
         {
             ETSpaceFreePage( pfucb->ifmp, pgnoFDP, pgnoFirst, pfucb->u.pfcb->ObjidFDP(), TceFromFUCB( pfucb ) );
-            OSTraceFMP( pfucb->ifmp, JET_tracetagSpaceManagement,
-                            OSFormat( "Free page at %lu to FDP %d.%lu\n", pgnoFirst, pfucb->ifmp, PgnoFDP( pfucb ) ) );
         }
+
+        OSTraceFMP(
+            pfucb->ifmp,
+            JET_tracetagSpaceManagement,
+            OSFormat(
+                "%hs: Freed E(%lu + %lu) to [0x%x:0x%x:%lu].",
+                __FUNCTION__,
+                pgnoFirst,
+                cpgSize,
+                pfucb->ifmp,
+                ObjidFDP( pfucb ),
+                PgnoFDP( pfucb ) ) );
     }
 
     if ( fRootLatched )
@@ -7737,6 +8297,8 @@ ERR ErrSPTryCoalesceAndFreeAvailExt( FUCB* const pfucb, const PGNO pgnoInExtent,
     // "Lock" the root of the tree.
     Call( ErrBTIGotoRoot( pfucb, latchRIW ) );
     pfucb->pcsrRoot = Pcsr( pfucb );
+
+    SPIValidateCpgOwnedAndAvail( pfucb );
 
     // Open cursors to space trees.
     Call( ErrSPIOpenOwnExt( ppib, pfcb, &pfucbOE ) );
@@ -7845,7 +8407,7 @@ ERR ErrSPTryCoalesceAndFreeAvailExt( FUCB* const pfucb, const PGNO pgnoInExtent,
     // We're more likely to short-circuit early if we check both ends in alternation under shrink, which is
     // currently the only consumer of this function. Consider a more optimal lookup method than the bitmap
     // we're using if this is used in the main code line.
-    Expected( g_rgfmp[pfucb->ifmp].FShrinkIsRunning() );
+    Expected( g_rgfmp[ pfucb->ifmp ].FShrinkIsRunning() );
     for ( PGNO ipgno = 0; ipgno < (PGNO)cpgOwnExtent; ipgno++ )
     {
         const size_t i = ( ( ipgno % 2 ) == 0 ) ? ( ipgno / 2 ) : ( (PGNO)cpgOwnExtent - 1 - ( ipgno / 2 ) );
@@ -7904,10 +8466,15 @@ ERR ErrSPTryCoalesceAndFreeAvailExt( FUCB* const pfucb, const PGNO pgnoInExtent,
             pgno = speiAE.PgnoFirst();
 
             // Delete the AE node.
-            Call( ErrBTFlagDelete(      // UNDONE: Synchronously remove the node
+            Call( ErrSPIWrappedBTFlagDelete(      // UNDONE: Synchronously remove the node
                         pfucbAE,
-                        fDIRNoVersion | ( pfcb->FDontLogSpaceOps() ? fDIRNoLog : fDIRNull ) ) );
+                        fDIRNoVersion | ( pfcb->FDontLogSpaceOps() ? fDIRNoLog : fDIRNull ),
+                        0,
+                        -( speiAE.CpgExtent() ) ) );
+
             BTUp( pfucbAE );
+
+            SPIValidateCpgOwnedAndAvail( pfucb );
 
             // Just so we can check afterwards.
             while ( pgno <= speiAE.PgnoLast() )
@@ -7944,6 +8511,8 @@ ERR ErrSPTryCoalesceAndFreeAvailExt( FUCB* const pfucb, const PGNO pgnoInExtent,
             cpgOwnExtent ) );
 
     *pfCoalesced = fTrue;
+
+    SPIValidateCpgOwnedAndAvail( pfucb );
 
 HandleError:
     if ( pfucbAE != pfucbNil )
@@ -8158,7 +8727,13 @@ ERR ErrSPIUnshelvePagesInRange( FUCB* const pfucbRoot, const PGNO pgnoFirst, con
         }
 
         // Delete the AE node (i.e., actually unshelve the page).
-        Call( ErrBTFlagDelete( pfucbAE, fDIRNoVersion | ( pfucbRoot->u.pfcb->FDontLogSpaceOps() ? fDIRNoLog : fDIRNull ) ) );
+        // These shelved pages aren't counted in pfucbRoot->u.pfcb->CpgAE(), so no need to adjust cache.
+        Call( ErrSPIWrappedBTFlagDelete(
+                  pfucbAE,
+                  fDIRNoVersion | ( pfucbRoot->u.pfcb->FDontLogSpaceOps() ? fDIRNoLog : fDIRNull ),
+                  0,
+                  0 ) );
+
         BTUp( pfucbAE );
 
         pgno = speiAE.PgnoLast() + 1;
@@ -9325,9 +9900,21 @@ LOCAL ERR ErrSPIFreeAllOwnedExtents( FUCB *pfucbParent, FCB *pfcb, const BOOL fP
     }
     while ( err >= 0 );
 
-    OSTraceFMP( pfucbOE->ifmp, JET_tracetagSpaceInternal,
-                OSFormat( "Free FDP with %08d owned pages and %08d owned extents [objid:0x%x,pgnoFDP:0x%x,ifmp=0x%x]\n",
-                            cpgOwned, cExtents, pfcb->ObjidFDP(), pfcb->PgnoFDP(), pfucbOE->ifmp ) );
+    OSTraceFMP(
+        pfucbOE->ifmp,
+        JET_tracetagSpaceInternal,
+        OSFormat(
+            "%hs: freeing all space %sowned_pages=%08d owned_extents=%08d from [0x%x:0x%x:%lu] to [0x%x:0x%x:%lu].",
+            __FUNCTION__,
+            fPreservePrimaryExtent ? "but primary " : "",
+            cpgOwned,
+            cExtents,
+            pfucbOE->ifmp,
+            ObjidFDP( pfucbOE ),
+            PgnoFDP( pfucbOE ),
+            pfucbParent->ifmp,
+            ObjidFDP( pfucbParent ),
+            PgnoFDP( pfucbParent ) ) );
 
     //  Close the pfucbOE right away to release any latch on the pages that
     //  are going to be freed and used by others.
@@ -9409,9 +9996,15 @@ LOCAL ERR ErrSPIReportAEsFreedWithFDP( PIB * const ppib, FCB * const pfcb )
     if ( err == JET_errRecordNotFound )
     {
         //  This is not a big deal, its possible to have an empty AE tree even for the temp DB.
-        OSTraceFMP( pfucbAE->ifmp, JET_tracetagSpaceInternal,
-                        OSFormat( "Free FDP with 0 avail pages [objid:0x%x,pgnoFDP:0x%x,ifmp=0x%x]\n",
-                                pfcb->ObjidFDP(), pfcb->PgnoFDP(), pfucbAE->ifmp ) );
+        OSTraceFMP(
+            pfucbAE->ifmp,
+            JET_tracetagSpaceInternal,
+            OSFormat(
+                "%hs: Free FDP with 0 avail pages [0x%x:0x%x:%lu].",
+                __FUNCTION__,
+                pfucbAE->ifmp,
+                ObjidFDP( pfucbAE ),
+                PgnoFDP( pfucbAE ) ) );
         err = JET_errSuccess;
         goto HandleError;
     }
@@ -9431,9 +10024,17 @@ LOCAL ERR ErrSPIReportAEsFreedWithFDP( PIB * const ppib, FCB * const pfcb )
 
     err = JET_errSuccess;
 
-    OSTraceFMP( pfucbAE->ifmp, JET_tracetagSpaceInternal,
-                    OSFormat( "Free FDP with %08d avail pages and %08u avail extents [objid:0x%x,pgnoFDP:0x%x,ifmp=0x%x]\n",
-                            cpgFree, cExtents, pfcb->ObjidFDP(), pfcb->PgnoFDP(), pfucbAE->ifmp ) );
+    OSTraceFMP(
+        pfucbAE->ifmp,
+        JET_tracetagSpaceInternal,
+        OSFormat(
+            "%hs: Free FDP with %08d avail pages and %08u avail extents [0x%x:0x%x:%lu].",
+            __FUNCTION__,
+            cpgFree,
+            cExtents,
+            pfucbAE->ifmp,
+            ObjidFDP( pfucbAE ),
+            PgnoFDP( pfucbAE ) ) );
 
 HandleError:
     Assert( pfucbNil != pfucbAE );
@@ -9494,8 +10095,19 @@ ERR ErrSPFreeFDP(
     CallS( ErrSPIValidFDP( ppib, pfucbParent->ifmp, pgnoFDPFree ) );
 #endif
 
-    OSTraceFMP( pfucbParent->ifmp, JET_tracetagSpaceManagement,
-                    OSFormat( "free space FDP at %d.%lu\n", pfucbParent->ifmp, pgnoFDPFree ) );
+    OSTraceFMP(
+        pfucbParent->ifmp,
+        JET_tracetagSpaceManagement,
+        OSFormat(
+            "%hs: freeing all space %sfrom [0x%x:0x%x:%lu] to [0x%x:0x%x:%lu].",
+            __FUNCTION__,
+            fPreservePrimaryExtent ? "but primary " : "",
+            pfucbParent->ifmp,
+            pfcbFDPToFree->ObjidFDP(),
+            pfcbFDPToFree->PgnoFDP(),
+            pfucbParent->ifmp,
+            ObjidFDP( pfucbParent ),
+            PgnoFDP( pfucbParent ) ) );
 
     //  get temporary FUCB
     //
@@ -9521,6 +10133,9 @@ ERR ErrSPFreeFDP(
     {
         SPIInitFCB( pfucb, fTrue );
     }
+
+    // We expect this to fail to find the FCB in the cache if we're deleting it.
+    Assert( fPreservePrimaryExtent || !FCATExtentPageCountsCached( pfucb ) );
 
     //  if single extent format, then free extent in external header
     //
@@ -9575,6 +10190,7 @@ ERR ErrSPFreeFDP(
         Call( ErrSPIFreeAllOwnedExtents( pfucbParent, pfcb, fPreservePrimaryExtent ) );
         Assert( !Pcsr( pfucbParent )->FLatched() );
     }
+
     PERFOpt( cSPDeletedTrees.Inc( PinstFromPfucb( pfucbParent ) ) );
 
 HandleError:
@@ -9619,10 +10235,16 @@ INLINE ERR ErrSPIAddExtent(
     __in const CSPExtentNodeKDF * const pcspextnode )
 {
     ERR         err;
+    CPG         cpgOEDelta;
+    CPG         cpgAEDelta;
 
     Assert( FFUCBSpace( pfucb ) );
     Assert( !Pcsr( pfucb )->FLatched() );
     Assert( pcspextnode->CpgExtent() > 0 );
+
+    // We ensure we're the only one wrtiting to the space tree by holding a latch on the FDP.
+    Assert( FBFWriteLatched( pfucb->ifmp, pfucb->u.pfcb->PgnoFDP() ) ||
+            FBFRDWLatched( pfucb->ifmp, pfucb->u.pfcb->PgnoFDP() )      );
 
     //  Insist valid data before we insert it into the DB.
     Assert( pcspextnode->FValid() );
@@ -9631,21 +10253,48 @@ INLINE ERR ErrSPIAddExtent(
     const DATA  data    = pcspextnode->GetData();
 
     BTUp( pfucb );
-    Call( ErrBTInsert(
+
+    if ( pcspextnode->SppPool() == spp::ShelvedPool )
+    {
+        // We don't count shelved extents, although we could.
+        cpgOEDelta = 0;
+        cpgAEDelta = 0;
+    }
+    else if ( pfucb->fOwnExt )
+    {
+        cpgOEDelta = pcspextnode->CpgExtent();
+        cpgAEDelta = 0;
+    }
+    else
+    {
+        Assert( pfucb->fAvailExt );
+        cpgOEDelta = 0;
+        cpgAEDelta = pcspextnode->CpgExtent();
+    }
+
+    Call( ErrSPIWrappedBTInsert(
                 pfucb,
                 key,
                 data,
-                fDIRNoVersion | ( pfucb->u.pfcb->FDontLogSpaceOps() ? fDIRNoLog : fDIRNull ) ) );
+                fDIRNoVersion | ( pfucb->u.pfcb->FDontLogSpaceOps() ? fDIRNoLog : fDIRNull ),
+                cpgOEDelta,
+                cpgAEDelta ) );
+
     Assert( Pcsr( pfucb )->FLatched() );
 
-    Assert( pfucb->fOwnExt || pfucb->fAvailExt );
-    OSTraceFMP( pfucb->ifmp, JET_tracetagSpaceManagement,
-        OSFormat( "ErrSPIAddExtent: Add %lu + %d pages to 0x%x.%lu %hs.",
-                pcspextnode->PgnoFirst(),
-                pcspextnode->CpgExtent(),
-                pfucb->ifmp,
-                PgnoFDP( pfucb ),
-                pfucb->fOwnExt ? "OE" : "AE" ) );
+    OSTraceFMP(
+        pfucb->ifmp,
+        JET_tracetagSpaceManagement,
+        OSFormat(
+            "%hs: Added %hs E(%lu + %lu) P(%ws) to [0x%x:0x%x:%lu].",
+            __FUNCTION__,
+            SzSpaceTreeType( pfucb ),
+            pcspextnode->PgnoFirst(),
+            pcspextnode->CpgExtent(),
+            WszPoolName( pcspextnode->SppPool() ),
+            pfucb->ifmp,
+            ObjidFDP( pfucb ),
+            PgnoFDP( pfucb ) ) );
 
 HandleError:
     Assert( errSPOutOfOwnExtCacheSpace != err );
@@ -9756,11 +10405,14 @@ LOCAL ERR ErrSPIAddToOwnExt(
                 OSUHAEmitFailureTag( PinstFromPfucb( pfucbOE ), HaDbFailureTagCorruption, L"4441dbd5-f6ff-4314-9315-efe96362f0a2" );
             }
             Call( err );
-            
+
             Assert( spextToCoallesce.CpgExtent() > 0 );
-            Call( ErrBTFlagDelete(      // UNDONE: Synchronously remove the node
+
+            Call( ErrSPIWrappedBTFlagDelete(      // UNDONE: Synchronously remove the node
                         pfucbOE,
-                        fDIRNoVersion | ( pfucbOE->u.pfcb->FDontLogSpaceOps() ? fDIRNoLog : fDIRNull ) ) );
+                        fDIRNoVersion | ( pfucbOE->u.pfcb->FDontLogSpaceOps() ? fDIRNoLog : fDIRNull ),
+                        -( spextToCoallesce.CpgExtent() ),
+                        0 ) );
 
             Assert( NULL != pcpgCoalesced );
             *pcpgCoalesced = spextToCoallesce.CpgExtent();
@@ -9778,7 +10430,7 @@ LOCAL ERR ErrSPIAddToOwnExt(
     if( pgnoSystemRoot == pfucb->u.pfcb->PgnoFDP() )
     {
         QWORD cbFsFileSize = 0;
-        if ( g_rgfmp[pfucb->ifmp].Pfapi()->ErrSize( &cbFsFileSize, IFileAPI::filesizeLogical ) >= JET_errSuccess )
+        if ( g_rgfmp[ pfucb->ifmp ].Pfapi()->ErrSize( &cbFsFileSize, IFileAPI::filesizeLogical ) >= JET_errSuccess )
         {
             AssertTrack( CbFileSizeOfPgnoLast( pgnoOELast ) <= cbFsFileSize, "RootPgnoOeLastBeyondEof" );
         }
@@ -9849,9 +10501,11 @@ LOCAL ERR ErrSPICoalesceAvailExt(
 
         *pcpgCoalesce = spavailext.CpgExtent();
 
-        err = ErrBTFlagDelete(      // UNDONE: Synchronously remove the node
+        Call( ErrSPIWrappedBTFlagDelete(      // UNDONE: Synchronously remove the node
                     pfucbAE,
-                    fDIRNoVersion | ( pfucbAE->u.pfcb->FDontLogSpaceOps() ? fDIRNoLog : fDIRNull ) );
+                    fDIRNoVersion | ( pfucbAE->u.pfcb->FDontLogSpaceOps() ? fDIRNoLog : fDIRNull ),
+                    0,
+                    -(*pcpgCoalesce) ) );
     }
 
 HandleError:
@@ -9892,7 +10546,7 @@ LOCAL ERR ErrSPIAddSecondaryExtent(
     Assert( ( parreiReleased == NULL ) || ( parreiReleased->Size() == 0 ) ||
             ( fRootDB && ( cpgNewSpace > cpgAvailable ) ) );
     Assert( ( cpgNewSpace == cpgAvailable ) ||
-            ( ( cpgNewSpace > cpgAvailable ) && !g_rgfmp[pfucb->ifmp].FIsTempDB() ) );
+            ( ( cpgNewSpace > cpgAvailable ) && !g_rgfmp[ pfucb->ifmp ].FIsTempDB() ) );
 
     Assert( sppPool != spp::ShelvedPool );
 
@@ -9911,7 +10565,7 @@ LOCAL ERR ErrSPIAddSecondaryExtent(
 
     if ( fRootDB )
     {
-        g_rgfmp[pfucb->ifmp].SetOwnedFileSize( CbFileSizeOfPgnoLast( pgnoLast ) );
+        g_rgfmp[ pfucb->ifmp ].SetOwnedFileSize( CbFileSizeOfPgnoLast( pgnoLast ) );
     }
 
     //  We shouldn't even try coalescing AvailExt if no coalescing of OwnExt was done
@@ -9923,7 +10577,7 @@ LOCAL ERR ErrSPIAddSecondaryExtent(
         // as special cases, so if this assert goes off some day, you'll need to make
         // a decision about how coalescing is supposed to be handled for that specific
         // pool (and possibly pass the pool to ErrSPICoalesceAvailExt() below).
-        Assert( g_rgfmp[pfucb->ifmp].Dbid() == dbidTemp );
+        Assert( g_rgfmp[ pfucb->ifmp ].Dbid() == dbidTemp );
         Expected( sppPool == spp::AvailExtLegacyGeneralPool );
         if ( sppPool == spp::AvailExtLegacyGeneralPool )
         {
@@ -9965,7 +10619,7 @@ LOCAL ERR ErrSPIAddSecondaryExtent(
     //
     if ( fRootDB && ( cpgNewSpace > cpgAvailable ) )
     {
-        Assert( !g_rgfmp[pfucb->ifmp].FIsTempDB() );
+        Assert( !g_rgfmp[ pfucb->ifmp ].FIsTempDB() );
         Assert( !Pcsr( pfucbAE )->FLatched() );
 
         Call( ErrSPIUnshelvePagesInRange(
@@ -10075,9 +10729,9 @@ LOCAL ERR ErrSPINewSize(
     BOOL fUpdateLgposResizeHdr = fFalse;
     LGPOS lgposResize = lgposMin;
 
-    OnDebug( g_rgfmp[ifmp].AssertSafeToChangeOwnedSize() );
-    Assert( ( cpgReq <= 0 ) || !g_rgfmp[ifmp].FBeyondPgnoShrinkTarget( pgnoLastCurr + 1, cpgReq ) );
-    Assert( ( cpgReq <= 0 ) || ( pgnoLastCurr <= g_rgfmp[ifmp].PgnoLast() ) );
+    OnDebug( g_rgfmp[ ifmp ].AssertSafeToChangeOwnedSize() );
+    Assert( ( cpgReq <= 0 ) || !g_rgfmp[ ifmp ].FBeyondPgnoShrinkTarget( pgnoLastCurr + 1, cpgReq ) );
+    Assert( ( cpgReq <= 0 ) || ( pgnoLastCurr <= g_rgfmp[ ifmp ].PgnoLast() ) );
     Expected( cpgAsyncExtension >= 0 );
 
     //  If this is a shrink operation, a few extra steps are necessary.
@@ -10089,7 +10743,7 @@ LOCAL ERR ErrSPINewSize(
 
     //  Log the operation to indicate that resizing the database file is about to be attempted.
 
-    if ( g_rgfmp[ifmp].FLogOn() )
+    if ( g_rgfmp[ ifmp ].FLogOn() )
     {
         LOG* const plog = PinstFromIfmp( ifmp )->m_plog;
         if ( cpgReq >= 0 )
@@ -10107,7 +10761,7 @@ LOCAL ERR ErrSPINewSize(
             Call( ErrLGShrinkDatabase( plog, ifmp, pgnoLastCurr + cpgReq, -1 * cpgReq, &lgposResize ) );
         }
 
-        fUpdateLgposResizeHdr = ( g_rgfmp[ifmp].ErrDBFormatFeatureEnabled( JET_efvLgposLastResize ) == JET_errSuccess );
+        fUpdateLgposResizeHdr = ( g_rgfmp[ ifmp ].ErrDBFormatFeatureEnabled( JET_efvLgposLastResize ) == JET_errSuccess );
     }
 
     Call( ErrIOResizeUpdateDbHdrCount( ifmp, ( cpgReq >= 0 ) /* fExtend */ ) );
@@ -10138,8 +10792,9 @@ HandleError:
         ifmp,
         JET_tracetagSpaceManagement,
         OSFormat(
-            "Request to resize database=['%ws':0x%x] by %I64d bytes to %I64u bytes (and an additional %I64d bytes asynchronously) completed with error %d (0x%x)",
-            g_rgfmp[ifmp].WszDatabaseName(),
+            "%hs: Request to resize database=['%ws':0x%x] by %I64d bytes to %I64u bytes (and an additional %I64d bytes asynchronously) completed with error %d (0x%x)",
+            __FUNCTION__,
+            g_rgfmp[ ifmp ].WszDatabaseName(),
             ifmp,
             (__int64)cpgReq * g_cbPage,
             QWORD( pgnoLastCurr + cpgReq ) * g_cbPage,
@@ -10181,8 +10836,12 @@ LOCAL ERR ErrSPIWriteZeroesDatabase(
         ifmp,
         JET_tracetagSpaceManagement,
         OSFormat(
-            "%hs: Zeroing %I64d k at %#I64x (pages %lu through %lu).\n",
-             __FUNCTION__, cbZeroes / 1024, ibOffsetStart, pgnoStart, pgnoEnd ) );
+            "%hs: Zeroing %I64d k at %#I64x (pages %lu through %lu).",
+            __FUNCTION__,
+            cbZeroes / 1024,
+            ibOffsetStart,
+            pgnoStart,
+            pgnoEnd ) );
 
 
     CPG cpgZeroOptimal = CpgBFGetOptimalLockPageRangeSizeForExternalZeroing( ifmp );
@@ -10218,7 +10877,7 @@ HandleError:
 ERR ErrSPITrimUpdateDatabaseHeader( const IFMP ifmp )
 {
     ERR err     = JET_errSuccess;
-    FMP *pfmp   = &g_rgfmp[ifmp];
+    FMP *pfmp   = &g_rgfmp[ ifmp ];
 
     Assert( pfmp->Pdbfilehdr() );
 
@@ -10281,7 +10940,7 @@ LOCAL ERR ErrSPIExtendDB(
     Assert( cpgSEReq >= cpgSEMin );
     Assert( parreiReleased != NULL );
     Assert( pgnoSystemRoot == pfucbRoot->u.pfcb->PgnoFDP() );
-    Assert( !g_rgfmp[pfucbRoot->ifmp].FReadOnlyAttach() );
+    Assert( !g_rgfmp[ pfucbRoot->ifmp ].FReadOnlyAttach() );
 
     // This effectively acts as a lock on this DB extending path..
     AssertSPIPfucbOnRoot( pfucbRoot );
@@ -10312,9 +10971,9 @@ LOCAL ERR ErrSPIExtendDB(
     BTUp( pfucbOE );
 
     pgnoSEMaxAdj = pgnoSysMax;
-    if ( g_rgfmp[pfucbRoot->ifmp].CpgDatabaseSizeMax() > 0 )
+    if ( g_rgfmp[ pfucbRoot->ifmp ].CpgDatabaseSizeMax() > 0 )
     {
-        pgnoSEMaxAdj = min( pgnoSEMaxAdj, (PGNO)g_rgfmp[pfucbRoot->ifmp].CpgDatabaseSizeMax() );
+        pgnoSEMaxAdj = min( pgnoSEMaxAdj, (PGNO)g_rgfmp[ pfucbRoot->ifmp ].CpgDatabaseSizeMax() );
     }
 
     if ( pgnoSEMaxAdj >= pgnoSELast )
@@ -10333,7 +10992,7 @@ LOCAL ERR ErrSPIExtendDB(
     //
     Call( ErrSPIOpenAvailExt( pfucbRoot->ppib, pfucbRoot->u.pfcb, &pfucbAE ) );
     Call( ErrSPISeekRootAE( pfucbAE, pgnoSELastAdj + 1, spp::ShelvedPool, &speiAEShelved ) );
-    Assert( !speiAEShelved.FIsSet() || !g_rgfmp[pfucbRoot->ifmp].FIsTempDB() );
+    Assert( !speiAEShelved.FIsSet() || !g_rgfmp[ pfucbRoot->ifmp ].FIsTempDB() );
     while ( ( ( pgnoSELastAdj + cpgSEMin ) <= pgnoSysMax ) && speiAEShelved.FIsSet() )
     {
         Assert( speiAEShelved.PgnoFirst() > pgnoSELastAdj );
@@ -10399,7 +11058,7 @@ LOCAL ERR ErrSPIExtendDB(
     AssertTrack( !speiAEShelved.FIsSet() ||
                  ( ( speiAEShelved.PgnoFirst() > pgnoSELastAdj ) &&
                    ( (CPG)( speiAEShelved.PgnoFirst() - pgnoSELastAdj - 1 ) >= cpgSEMin ) ), "ExtendDbUnprocessedShelvedExt" );
-    
+
     Assert( cpgSEMaxAdj >= 0 );
     Assert( cpgAdj >= 0 );
 
@@ -10505,7 +11164,7 @@ ERR ErrSPExtendDB(
     BTUp( pfucbAE );
 
 HandleError:
-    
+
     if ( pfucbNil != pfucbAE )
     {
         BTClose( pfucbAE );
@@ -10661,7 +11320,8 @@ ERR ErrSPShrinkTruncateLastExtent(
     fInTransaction = fTrue;
 
     // Open space trees.
-    Call( ErrBTIOpen( ppib, ifmp, pgnoSystemRoot, objidNil, openNormal, &pfucbRoot, fFalse ) );
+    Call( ErrBTIOpenAndGotoRoot( ppib, pgnoSystemRoot, ifmp, &pfucbRoot ) );
+
     Call( ErrSPIOpenOwnExt( pfucbRoot->ppib, pfucbRoot->u.pfcb, &pfucbOE ) );
     Call( ErrSPIOpenAvailExt( pfucbRoot->ppib, pfucbRoot->u.pfcb, &pfucbAE ) );
 
@@ -10851,9 +11511,14 @@ ERR ErrSPShrinkTruncateLastExtent(
             }
 
             Expected( !pfucbAE->u.pfcb->FDontLogSpaceOps() );
-            Call( ErrBTFlagDelete(
+
+            Assert( pfucbRoot->u.pfcb == pfucbAE->u.pfcb );
+            Call( ErrSPIWrappedBTFlagDelete(
                     pfucbAE,
-                    fDIRNoVersion | ( pfucbAE->u.pfcb->FDontLogSpaceOps() ? fDIRNoLog : fDIRNull ) ) );
+                    fDIRNoVersion | ( pfucbAE->u.pfcb->FDontLogSpaceOps() ? fDIRNoLog : fDIRNull ),
+                    0,
+                    -( speiAE.CpgExtent() ) ) );
+
             Assert( latchWrite == Pcsr( pfucbAE )->Latch() );
             Pcsr( pfucbAE )->Downgrade( latchReadTouch );
             cAeExtDeleted++;
@@ -10942,14 +11607,20 @@ ERR ErrSPShrinkTruncateLastExtent(
 
     // Now, delete the OE node.
     Expected( !pfucbOE->u.pfcb->FDontLogSpaceOps() );
-    err = ErrBTFlagDelete(
+
+    Assert( pfucbRoot->u.pfcb == pfucbOE->u.pfcb );
+    err = ErrSPIWrappedBTFlagDelete(
             pfucbOE,
-            fDIRNoVersion | ( pfucbOE->u.pfcb->FDontLogSpaceOps() ? fDIRNoLog : fDIRNull ) );
+            fDIRNoVersion | ( pfucbOE->u.pfcb->FDontLogSpaceOps() ? fDIRNoLog : fDIRNull ),
+            -( speiLastAfterOE.CpgExtent() ),
+            0 );
     if ( err < JET_errSuccess )
     {
         pfmp->SetOwnedFileSize( cbOwnedFileSizeBefore );
     }
     Call( err );
+
+
     Assert( latchWrite == Pcsr( pfucbOE )->Latch() );
     BTUp( pfucbOE );
     (*pcprintfShrinkTraceRaw)( "ShrinkTruncate[%I32u:%I32u]\r\n", speiLastAfterOE.PgnoFirst(), speiLastAfterOE.PgnoLast() );
@@ -10999,6 +11670,8 @@ ERR ErrSPShrinkTruncateLastExtent(
     pfucbAE = pfucbNil;
     BTClose( pfucbOE );
     pfucbOE = pfucbNil;
+    pfucbRoot->pcsrRoot->ReleasePage();
+    pfucbRoot->pcsrRoot = pcsrNil;
     BTClose( pfucbRoot );
     pfucbRoot = pfucbNil;
 
@@ -11449,7 +12122,10 @@ LOCAL ERR ErrSPIReserveSPBufPagesForSpaceTree(
                             0,
                             0,
                             NULL,
+                            NULL,
+                            NULL,
                             fMayViolateMaxSize );
+
                 AssertSPIPfucbOnRoot( pfucb );
                 AssertSPIPfucbOnRoot( pfucbParent );
                 AssertSPIPfucbOnSpaceTreeRoot( pfucbSpace, Pcsr( pfucbSpace ) );
@@ -11517,7 +12193,7 @@ LOCAL ERR ErrSPIReserveSPBufPagesForSpaceTree(
             pspbuf = NULL;
 
             Call( errFaultAddToOe );
-            Call( ErrSPIAddToOwnExt( pfucbSpace, pgnoLast, cpgNewSpace, NULL ) );
+            Call( ErrSPIAddToOwnExt( pfucb, pgnoLast, cpgNewSpace, NULL ) );
             fAddedToOwnExt = fTrue;
 
             if ( fUpdatingDbRoot )
@@ -11542,6 +12218,7 @@ LOCAL ERR ErrSPIReserveSPBufPagesForSpaceTree(
         AssertSPIPfucbOnSpaceTreeRoot( pfucbSpace, Pcsr( pfucbSpace ) );
 
         // Refill split buffer.
+        // Space in the split buffer is not counted in pfcb->CpgAE()
         BYTE ispbuf = 0;
         if ( NULL == pfucbSpace->u.pfcb->Psplitbuf( fAvailExt ) )
         {
@@ -11564,8 +12241,9 @@ LOCAL ERR ErrSPIReserveSPBufPagesForSpaceTree(
             Assert( ( ispbufReplace == 0 ) || ( ispbuf == ispbufReplace ) );
             data.SetPv( &spbuf );
             data.SetCb( sizeof(spbuf) );
-            Call( ErrNDSetExternalHeader(
+            Call( ErrSPIWrappedNDSetExternalHeader(
                         pfucbSpace,
+                        Pcsr( pfucbSpace ),
                         &data,
                         ( pfucbSpace->u.pfcb->FDontLogSpaceOps() ? fDIRNoLog : fDIRNull ),
                         noderfWhole ) );
@@ -12064,6 +12742,20 @@ LOCAL ERR ErrSPIGetSe(
     FMP             *pfmp                   = &g_rgfmp[ pfucb->ifmp ];
     const BOOL      fSplitting              = BoolSetFlag( fSPFlags, fSPSplitting );
 
+    OSTraceFMP(
+        pfucb->ifmp,
+        JET_tracetagSpaceInternal,
+        OSFormat(
+            "%hs: Getting Req(%d) Min(%d) Flags(0x%x) P(%ws) from [<parent>] for  [0x%x:0x%x:%lu].",
+            __FUNCTION__,
+            cpgReq,
+            cpgMin,
+            fSPFlags,
+            WszPoolName( sppPool ),
+            pfucb->ifmp,
+            ObjidFDP( pfucb ),
+            PgnoFDP( pfucb ) ) );
+
     //  check validity of input parameters
     //
     AssertSPIPfucbOnRoot( pfucb );
@@ -12079,6 +12771,8 @@ LOCAL ERR ErrSPIGetSe(
     const SPACE_HEADER * const psph = PsphSPIRootPage( pfucb );
     const PGNO pgnoParentFDP = psph->PgnoParent();
     Assert( pgnoNull != pgnoParentFDP );
+
+    SPIValidateCpgOwnedAndAvail( pfucb );
 
     //  pages of allocated extent may be used to split Owned extents and
     //  AVAILEXT trees.  If this happens, then subsequent added
@@ -12197,6 +12891,11 @@ LOCAL ERR ErrSPIGetSe(
     //
     Call( ErrBTIOpenAndGotoRoot( pfucb->ppib, pgnoParentFDP, pfucb->ifmp, &pfucbParent ) );
 
+    if ( pfucbParent->u.pfcb->FSpaceInitialized() )
+    {
+        SPIValidateCpgOwnedAndAvail( pfucbParent );
+    }
+
     Call( ErrSPIReserveSPBufPages( pfucb, pfucbParent ) );
 
     //  allocate extent
@@ -12210,10 +12909,14 @@ LOCAL ERR ErrSPIGetSe(
                 fSPFlags & ( fSplitting | fSPExactExtent ),
                 0,
                 NULL,
+                NULL,
+                NULL,
                 fMayViolateMaxSize );
     AssertSPIPfucbOnRoot( pfucbParent );
     AssertSPIPfucbOnRoot( pfucb );
     Call( err );
+
+    SPIValidateCpgOwnedAndAvail( pfucb );
 
     Assert( cpgSEReq >= cpgSEMin );
     pgnoSELast = pgnoSEFirst + cpgSEReq - 1;
@@ -12227,8 +12930,15 @@ LOCAL ERR ErrSPIGetSe(
         if ( pfmp->Pdbfilehdr()->le_ulTrimCount > 0 )
         {
             //  We have pulled an extent from the DB root, we want to "re-commit" it from the FS (in sparse mode).
-            OSTraceFMP( pfucb->ifmp, JET_tracetagSpaceInternal,
-                        OSFormat( "Allocating Root Extent( %d - %d, %d )\n", pgnoSEFirst, pgnoSELast, cpgSEReq ) );
+            OSTraceFMP(
+                pfucb->ifmp,
+                JET_tracetagSpaceInternal,
+                OSFormat(
+                    "%hs: Allocating Root Extent( %lu - %lu, %lu ).",
+                    __FUNCTION__,
+                    pgnoSEFirst,
+                    pgnoSELast,
+                    cpgSEReq ) );
 
             // This is synchronous. Might be nice way to do it via dirty BFs async.
             PIBTraceContextScope tcScope = pfucb->ppib->InitTraceContextScope();
@@ -12264,6 +12974,16 @@ HandleError:
         Assert( !Pcsr( pfucbParent )->FLatched() );
         BTClose( pfucbParent );
     }
+
+    OSTraceFMP(
+        pfucb->ifmp,
+        JET_tracetagSpaceInternal,
+        OSFormat(
+            "%hs: %s from [<parent>] for [0x%x:0x%x:%lu].",
+            __FUNCTION__,
+            ( err >= JET_errSuccess) ? "Got" : "Failed to get",
+            ObjidFDP( pfucb ),
+            PgnoFDP( pfucb ) ) );
 
     return err;
 }
@@ -12356,9 +13076,18 @@ LOCAL ERR ErrSPIGetFsSe(
 
         cpgSEReq = max( cpgSEReq, psph->Fv1() ? ( psph->CpgPrimary() / cSecFrac ) : psph->CpgLastAlloc() );
 
-        OSTraceFMP( pfucb->ifmp, JET_tracetagSpaceInternal, OSFormat( "GetFsSe[%d] - %d ? %d : %d,  %d -> %d",
-                        (ULONG)pfucb->ifmp, psph->Fv1(), psph->Fv1() ? ( psph->CpgPrimary() / cSecFrac ) : -1,
-                        psph->Fv1() ? -1 : psph->CpgLastAlloc(), cpgSEMin, cpgSEReq ) );
+        OSTraceFMP(
+            pfucb->ifmp,
+            JET_tracetagSpaceInternal,
+            OSFormat(
+                "%hs: [%d] - %d ? %d : %d,  %d -> %d",
+                __FUNCTION__,
+                (ULONG)pfucb->ifmp,
+                psph->Fv1(),
+                psph->Fv1() ? ( psph->CpgPrimary() / cSecFrac ) : -1,
+                psph->Fv1() ? -1 : psph->CpgLastAlloc(),
+                cpgSEMin,
+                cpgSEReq ) );
 
         if ( !pfmp->FIsTempDB() )
         {
@@ -12377,14 +13106,14 @@ LOCAL ERR ErrSPIGetFsSe(
             //  hope we have the DB root space locked.
             Expected( FBFLatched( pfucb->ifmp, pgnoSystemRoot ) );
             //  this is only for rounding out allocation, we could make this optional if needed.
-            pgnoPreLast = g_rgfmp[pfucb->ifmp].PgnoLast();
+            pgnoPreLast = g_rgfmp[ pfucb->ifmp ].PgnoLast();
             const CPG cpgLogicalFileSize = pgnoPreLast + cpgDBReserved;
 
             //  cpg of database should be reasonable
             Enforce( pgnoPreLast < 0x100000000 );
 
             //  this includes the DB headers in this cpg size, not cpg of database.
-            Enforce( g_rgfmp[pfucb->ifmp].CbOwnedFileSize() / g_cbPage < 0x100000000 );
+            Enforce( g_rgfmp[ pfucb->ifmp ].CbOwnedFileSize() / g_cbPage < 0x100000000 );
 
 #ifdef DEBUG
             {
@@ -12394,14 +13123,22 @@ LOCAL ERR ErrSPIGetFsSe(
                 Assert( pgnoPreLastCheck == pgnoPreLast || g_fRepair );
             }
 
-            const CPG cpgFullFileSize =  pfmp->CpgOfCb( g_rgfmp[pfucb->ifmp].CbOwnedFileSize() );
-            //  I am asserting that are offset is rounded b/c our extension will be truly off the 
+            const CPG cpgFullFileSize =  pfmp->CpgOfCb( g_rgfmp[ pfucb->ifmp ].CbOwnedFileSize() );
+            //  I am asserting that our offset is rounded b/c our extension will be truly off the 
             //  pgnoPreLast ... so just making sure I understand this.
             //  Given the dicey situation of the DB size during recovery, it would not surprise me
             //  if this hits during recovery at some point.
             const CPG cpgDbExt = (CPG)UlParam( PinstFromPfucb( pfucb ), JET_paramDbExtensionSize );
 
-            OSTraceFMP( pfucb->ifmp, JET_tracetagSpaceInternal, OSFormat( "( %d + 2 [ + %d ] == %d )\n", pgnoPreLast, cpgDbExt, cpgFullFileSize ) );
+            OSTraceFMP(
+                pfucb->ifmp,
+                JET_tracetagSpaceInternal,
+                OSFormat(
+                    "%hs: ( %d + 2 [ + %d ] == %d ).",
+                    __FUNCTION__,
+                    pgnoPreLast,
+                    cpgDbExt,
+                    cpgFullFileSize ) );
 
 
             //  I am leaving this for the hope in the future I can perfect it, as this is defending that
@@ -12460,13 +13197,17 @@ LOCAL ERR ErrSPIGetFsSe(
     Assert( !Ptls()->fNoExtendingDuringCreateDB );
 
     Call( ErrSPIReserveSPBufPages( pfucb, pfucbNil ) );
-    Assert( pgnoPreLast <= g_rgfmp[pfucb->ifmp].PgnoLast() || g_fRepair );
+    Assert( pgnoPreLast <= g_rgfmp[ pfucb->ifmp ].PgnoLast() || g_fRepair );
 
-    OSTraceFMP( pfucb->ifmp, JET_tracetagSpaceInternal,
-            OSFormat( "Pre-extend stats: %I64u bytes (pgnoLast %I32u) ... %d unaligned overage",
-                g_rgfmp[pfucb->ifmp].CbOwnedFileSize(),
-                g_rgfmp[pfucb->ifmp].PgnoLast(),
-                g_rgfmp[pfucb->ifmp].CpgOfCb( g_rgfmp[pfucb->ifmp].CbOwnedFileSize() ) % cpgDbExtensionSize  ) );
+    OSTraceFMP(
+        pfucb->ifmp,
+        JET_tracetagSpaceInternal,
+        OSFormat(
+            "%hs: Pre-extend stats: %I64u bytes (pgnoLast %I32u) ... %d unaligned overage",
+            __FUNCTION__,
+            g_rgfmp[ pfucb->ifmp ].CbOwnedFileSize(),
+            g_rgfmp[ pfucb->ifmp ].PgnoLast(),
+            g_rgfmp[ pfucb->ifmp ].CpgOfCb( g_rgfmp[ pfucb->ifmp ].CbOwnedFileSize() ) % cpgDbExtensionSize  ) );
 
     Assert( cpgSEMin >= cpgMin );
     Assert( cpgSEReq >= cpgSEMin );
@@ -12480,7 +13221,7 @@ LOCAL ERR ErrSPIGetFsSe(
             fMayViolateMaxSize,
             &arreiReleased,
             &cpgSEAvail ) );
-    Assert( pgnoPreLast <= g_rgfmp[pfucb->ifmp].PgnoLast() || g_fRepair );
+    Assert( pgnoPreLast <= g_rgfmp[ pfucb->ifmp ].PgnoLast() || g_fRepair );
 
     //  Check the ESE DB grows to even DB extension sizes, so that subsequent allocations
     //  are aligned nicely.
@@ -12497,14 +13238,18 @@ LOCAL ERR ErrSPIGetFsSe(
     Assert( errSPOutOfOwnExtCacheSpace != err );
     Assert( errSPOutOfAvailExtCacheSpace != err );
     Call( err );
-    Assert( pgnoPreLast < g_rgfmp[pfucb->ifmp].PgnoLast() || g_fRepair );
+    Assert( pgnoPreLast < g_rgfmp[ pfucb->ifmp ].PgnoLast() || g_fRepair );
     Assert( arreiReleased.Size() == 0 );
 
-    OSTraceFMP( pfucb->ifmp, JET_tracetagSpaceInternal,
-            OSFormat( "Post-extend stats: %I64u bytes (pgnoLast %I32u) ... %d unaligned overage",
-                g_rgfmp[pfucb->ifmp].CbOwnedFileSize(),
-                g_rgfmp[pfucb->ifmp].PgnoLast(),
-                g_rgfmp[pfucb->ifmp].CpgOfCb( g_rgfmp[pfucb->ifmp].CbOwnedFileSize() ) % cpgDbExtensionSize  ) );
+    OSTraceFMP(
+        pfucb->ifmp,
+        JET_tracetagSpaceInternal,
+        OSFormat(
+            "%hs: Post-extend stats: %I64u bytes (pgnoLast %I32u) ... %d unaligned overage",
+            __FUNCTION__,
+            g_rgfmp[ pfucb->ifmp ].CbOwnedFileSize(),
+            g_rgfmp[ pfucb->ifmp ].PgnoLast(),
+            g_rgfmp[ pfucb->ifmp ].CpgOfCb( g_rgfmp[ pfucb->ifmp ].CbOwnedFileSize() ) % cpgDbExtensionSize  ) );
 
 #ifdef DEBUG
     //  Check the ESE DB grows to even DB extension sizes, so that subsequent allocations
@@ -12512,13 +13257,6 @@ LOCAL ERR ErrSPIGetFsSe(
     Assert( FBFLatched( pfucb->ifmp, pgnoSystemRoot ) );
 
 #endif
-
-    //  Cache database owned and available space.
-    //
-    if ( pfmp->FCacheAvail() )
-    {
-        pfmp->AdjustCpgAvail( cpgSEAvail );
-    }
 
     AssertSPIPfucbOnRoot( pfucb );
     Assert( Pcsr( pfucbAE )->FLatched() );
@@ -12651,8 +13389,14 @@ LOCAL ERR ErrSPITrimRegion(
         // -A 1019 when replaying the scrub record since page is trimmed on disk.
         // -RedoMaps won't save you since trim is in the past.
 
-        OSTraceFMP( ifmp, JET_tracetagSpaceInternal,
-                OSFormat( "Skipping Trim for ifmp %d because either LLR or DBScan is on (cpgRequested=%d).", ifmp, cpgRequestedToTrim ) );
+        OSTraceFMP(
+            ifmp,
+            JET_tracetagSpaceInternal,
+            OSFormat(
+                "%hs: Skipping Trim for ifmp %d because either LLR and/or DBScan is on (cpgRequested=%d).",
+                __FUNCTION__,
+                ifmp,
+                cpgRequestedToTrim ) );
 
         err = JET_errSuccess;
         goto HandleError;
@@ -12691,9 +13435,15 @@ LOCAL ERR ErrSPITrimRegion(
 
         if ( *pcpgSparseBeforeThisExtent >= cpgZeroesAligned )
         {
-            OSTraceFMP( ifmp, JET_tracetagSpaceInternal,
-                        OSFormat( "Trimming ifmp %d for [start=%d,cpg=%d] is skipped because the region is already trimmed.",
-                                  ifmp, pgnoStartZeroesAligned, cpgZeroesAligned ) );
+            OSTraceFMP(
+                ifmp,
+                JET_tracetagSpaceInternal,
+                OSFormat(
+                    "%hs: Trimming ifmp %d for [start=%d,cpg=%d] is skipped because the region is already trimmed.",
+                    __FUNCTION__,
+                    ifmp,
+                    pgnoStartZeroesAligned,
+                    cpgZeroesAligned ) );
         }
         else
         {
@@ -12728,7 +13478,7 @@ LOCAL ERR ErrSPITrimRegion(
             Call( err );
 
             CallS( err );
-    
+
             const ERR errT = ErrSPIGetSparseInfoRange( &g_rgfmp[ ifmp ], pgnoStartZeroesAligned, pgnoEndRegionAligned, pcpgSparseAfterThisExtent );
 
             // What sorts of failure modes does it have?
@@ -12986,7 +13736,7 @@ LOCAL ERR ErrSPIGetInfo(
 {
     ERR         err;
     DIB         dib;
-    INT         iext            = *piext;
+    INT         iext;
     const BOOL  fExtentList     = ( cext > 0 );
 
     PGNO        pgnoLastSeen    = pgnoNull;
@@ -12994,7 +13744,19 @@ LOCAL ERR ErrSPIGetInfo(
     ULONG       cRecords        = 0;
     ULONG       cRecordsDeleted = 0;
 
-    Assert( !fExtentList || NULL != pcextSentinelsRemaining );
+    Assert( FFUCBSpace( pfucb ) );
+
+    if ( fExtentList )
+    {
+        Assert( NULL != pcextSentinelsRemaining );
+        Assert( NULL != piext ) ;
+        Assert( NULL != rgext );
+        iext = *piext;
+    }
+    else
+    {
+        iext = 0;
+    }
 
     *pcpgTotal = 0;
     if ( pcpgReserved )
@@ -13012,7 +13774,7 @@ LOCAL ERR ErrSPIGetInfo(
 
     dib.dirflag = fDIRNull;
     dib.pos = posFirst;
-    Assert( FFUCBSpace( pfucb ) );
+
     err = ErrBTDown( pfucb, &dib, latchReadNoTouch );
 
     if ( err != JET_errRecordNotFound )
@@ -13135,10 +13897,10 @@ LOCAL ERR ErrSPIGetInfo(
         Assert( NULL != pcextSentinelsRemaining );
         Assert( *pcextSentinelsRemaining > 0 );
         (*pcextSentinelsRemaining)--;
-    }
 
-    *piext = iext;
-    Assert( *piext + *pcextSentinelsRemaining <= cext );
+        *piext = iext;
+        Assert( *piext + *pcextSentinelsRemaining <= cext );
+    }
 
     if( pcprintf )
     {
@@ -13193,156 +13955,121 @@ VOID SPDumpSplitBufExtent(
 }
 
 
-//  gets owned and avail space info for database.  Speed repeated calls by caching data in FMP and maintaining this information from space.
-//
-ERR ErrSPGetDatabaseInfo(
-    PIB         *ppib,
-    const IFMP  ifmp,
-    __out_bcount(cbMax) BYTE        *pbResult,
-    const ULONG cbMax,
-    const ULONG fSPExtents,
-    bool fUseCachedResult,
-    CPRINTF * const pcprintf )
-{
-    ERR             err = JET_errSuccess;
-    CPG             *pcpgT = (CPG *)pbResult;
-    ULONG           cbMaxReq = 0;
-
-    PIBTraceContextScope tcScope = ppib->InitTraceContextScope();
-    tcScope->iorReason.SetIort( iortSpace );
-
-    //  we need to specify at least one of these supported options
-    //  
-    if ( ( fSPExtents & ( fSPOwnedExtent | fSPAvailExtent | fSPShelvedExtent ) ) == 0 )
-    {
-        return ErrERRCheck( JET_errInvalidParameter );
-    }
-
-    //  we can't specify anything outside of these supported options
-    //
-    if ( ( fSPExtents & ~( fSPOwnedExtent | fSPAvailExtent | fSPShelvedExtent ) ) != 0 )
-    {
-        return ErrERRCheck( JET_errInvalidParameter );
-    }
-
-    Assert( FSPOwnedExtent( fSPExtents ) || FSPAvailExtent( fSPExtents ) || FSPShelvedExtent( fSPExtents ) );
-
-    //  getting shelved space is currently only used internally by utilities so we expect it
-    //  to be queried along with avilable space (contract imposed by ErrSPGetInfo() below) and
-    //  without caching
-    //
-    if ( FSPShelvedExtent( fSPExtents ) )
-    {
-        Assert( FSPAvailExtent( fSPExtents ) );
-        if ( fUseCachedResult )
-        {
-            return ErrERRCheck( JET_errInvalidParameter );
-        }
-    }
-
-    //  buffer size checks
-    //
-    if ( FSPOwnedExtent( fSPExtents ) )
-    {
-        cbMaxReq += sizeof( CPG );
-    }
-    if ( FSPAvailExtent( fSPExtents ) )
-    {
-        cbMaxReq += sizeof( CPG );
-    }
-    if ( FSPShelvedExtent( fSPExtents ) )
-    {
-        cbMaxReq += sizeof( CPG );
-    }
-
-    if ( cbMax < cbMaxReq )
-    {
-        AssertSz( fFalse, "Called without the necessary buffer allocated for extents." );
-        return ErrERRCheck( JET_errInvalidParameter );
-    }
-    
-    //  check inputs
-    //
-    CallR( ErrSPCheckInfoBuf( cbMax, fSPExtents ) );
-    memset( pbResult, 0, cbMax );
-
-    int ipg = 0;
-    const int ipgOwned = FSPOwnedExtent( fSPExtents ) ? ipg++ : -1;
-    const int ipgAvail = FSPAvailExtent( fSPExtents ) ? ipg++ : -1;
-    const int ipgShelved = FSPShelvedExtent( fSPExtents ) ? ipg++ : -1;
-
-    if ( !fUseCachedResult ||
-         ( FSPAvailExtent( fSPExtents ) && !g_rgfmp[ifmp].FCacheAvail() ) )
-    {
-        Call( ErrSPGetInfo( ppib, ifmp, pfucbNil, pbResult, cbMax, fSPExtents, pcprintf ) );
-
-        if ( FSPAvailExtent( fSPExtents ) )
-        {
-            Assert( ipgAvail >= 0 );
-            g_rgfmp[ifmp].SetCpgAvail( *( pcpgT + ipgAvail ) );
-        }
-    }
-    else
-    {
-        if ( ipgOwned >= 0 )
-        {
-            *( pcpgT + ipgOwned ) = g_rgfmp[ifmp].PgnoLast();
-        }
-        if ( ipgAvail >= 0 )
-        {
-            *( pcpgT + ipgAvail ) = g_rgfmp[ifmp].CpgAvail();
-        }
-        Assert( ipgShelved < 0 );
-    }
-
-HandleError:
-    return err;
-}
-
 //  Retrieves space info, like the owned # of pages, avail # of pages.
 
 ERR ErrSPGetInfo(
-    PIB         *ppib,
-    const IFMP  ifmp,
-    FUCB        *pfucb,
-    __out_bcount(cbMax) BYTE        *pbResult,
-    const ULONG cbMax,
-    const ULONG fSPExtents,
-    CPRINTF * const pcprintf )
+    PIB                       *ppib,
+    const IFMP                ifmp,
+    FUCB                      *pfucb,
+    __out_bcount(cbMax) BYTE  *pbResult,
+    const ULONG               cbMax,
+    const ULONG               fSPExtents,
+    const GET_CACHED_INFO     gciType,
+    CPRINTF * const           pcprintf )
 {
-    ERR         err;
-    CPG         *pcpgOwnExtTotal;
-    CPG         *pcpgAvailExtTotal;
-    CPG         *pcpgReservedExtTotal;
-    CPG         *pcpgShelvedExtTotal;
-    EXTENTINFO  *rgext;
-    FUCB        *pfucbT             = pfucbNil;
-    INT         iext;
-    SPLIT_BUFFER    spbufOnOE;
-    SPLIT_BUFFER    spbufOnAE;
-    ULONG cbMaxReq = 0;
+    ERR           err;
+    CPG           *pcpgOwnExtTotal;
+    CPG           *pcpgAvailExtTotal;
+    CPG           *pcpgReservedExtTotal;
+    CPG           *pcpgShelvedExtTotal;
+    CPG           cpgAvailExtAdjustForSplitBuffers = 0;
+    EXTENTINFO    *rgext;
+    FUCB          *pfucbT = pfucbNil;
+    INT           iext;
+    SPLIT_BUFFER  spbufOnOE;
+    SPLIT_BUFFER  spbufOnAE;
+    ULONG         cbMaxReq = 0;
+    BOOL          fReadCachedValue;
+    BOOL          fSetCachedValue = fFalse;
 
     PIBTraceContextScope tcScope = ppib->InitTraceContextScope();
     tcScope->iorReason.SetIort( iortSpace );
 
-    Assert( ( fSPExtents & fSPExtentList ) == 0 );
+    // Can only specify things we know.
+    if ( ( fSPExtents & ~( fSPOwnedExtent | fSPAvailExtent | fSPShelvedExtent | fSPReservedExtent | fSPExtentList ) ) != 0 )
+    {
+        return ErrERRCheck( JET_errInvalidParameter );
+    }
 
-    //  must specify either owned extent or available extent (or both) to retrieve
+    //  Must specify either owned extent or available extent (or both) to retrieve anything.
     //
     if ( !( FSPOwnedExtent( fSPExtents ) || FSPAvailExtent( fSPExtents ) ) )
     {
         return ErrERRCheck( JET_errInvalidParameter );
     }
-    if ( FSPReservedExtent( fSPExtents ) && !FSPAvailExtent( fSPExtents ) )
+
+    if ( FSPExtentList( fSPExtents ) )
     {
-        ExpectedSz( fFalse, "initially we won't support getting reserved w/o avail." );
-        return ErrERRCheck( JET_errInvalidParameter );
+        AssertSz( fFalse, "This is painfully limited, let's see if we can deprecate it.");
+
+        if ( pfucbNil == pfucb )
+        {
+            ExpectedSz( fFalse, "This is the DBRoot.  It doesn't support getting extent list." );
+            return ErrERRCheck( JET_errInvalidParameter );
+        }
     }
-    if ( FSPShelvedExtent( fSPExtents ) && !FSPAvailExtent( fSPExtents ) )
+
+    if ( FSPReservedExtent( fSPExtents ) )
     {
-        ExpectedSz( fFalse, "initially we won't support getting shelved w/o avail." );
-        return ErrERRCheck( JET_errInvalidParameter );
+        if ( pfucbNil == pfucb )
+        {
+            ExpectedSz( fFalse, "This is the DBRoot.  It doesn't support getting reserved." );
+            return ErrERRCheck( JET_errInvalidParameter );
+        }
+
+        if ( !FSPAvailExtent( fSPExtents ) )
+        {
+            ExpectedSz( fFalse, "initially we won't support getting reserved w/o avail." );
+            return ErrERRCheck( JET_errInvalidParameter );
+        }
     }
+
+    if ( FSPShelvedExtent( fSPExtents ) )
+    {
+        if ( !FSPAvailExtent( fSPExtents ) )
+        {
+            ExpectedSz( fFalse, "initially we won't support getting shelved w/o avail." );
+            return ErrERRCheck( JET_errInvalidParameter );
+        }
+    }
+
+    switch ( gciType )
+    {
+        case gci::Forbid:
+            fReadCachedValue = fFalse;
+            break;
+
+        case gci::Allow:
+            //
+            // Only Owned and Available are in the cache.  If you want anything else, we must walk
+            // through the appropriate space tree.
+            //
+            if ( !FSPReservedExtent( fSPExtents ) && !FSPShelvedExtent( fSPExtents ) && !FSPExtentList( fSPExtents ) )
+            {
+                fReadCachedValue = fTrue;
+            }
+            else
+            {
+                fReadCachedValue = fFalse;
+            }
+            break;
+
+        case gci::Require:
+            if ( !FSPReservedExtent( fSPExtents ) && !FSPShelvedExtent( fSPExtents ) && !FSPExtentList( fSPExtents ) )
+            {
+                fReadCachedValue = fTrue;
+            }
+            else
+            {
+                return ErrERRCheck( JET_errInvalidParameter );
+            }
+            break;
+
+        default:
+            AssertSz( fFalse, "Unexpected case in switch.");
+            return ErrERRCheck( JET_errInvalidParameter );
+    }
+
     if ( FSPOwnedExtent( fSPExtents ) )
     {
         cbMaxReq += sizeof( CPG );
@@ -13362,7 +14089,6 @@ ERR ErrSPGetInfo(
 
     if ( cbMax < cbMaxReq )
     {
-
         AssertSz( fFalse, "Called without the necessary buffer allocated for extents." );
         return ErrERRCheck( JET_errInvalidParameter );
     }
@@ -13450,13 +14176,62 @@ ERR ErrSPGetInfo(
     tcScope->nParentObjectClass = TceFromFUCB( pfucbT );
     tcScope->SetDwEngineObjid( ObjidFDP( pfucbT ) );
 
+    if ( fReadCachedValue )
+    {
+        CPG cpgOECached;
+        CPG cpgAECached;
+
+        Assert( FSPOwnedExtent( fSPExtents ) || FSPAvailExtent( fSPExtents ) );
+
+        err = ErrCATGetExtentPageCounts(
+            ppib,
+            ifmp,
+            pfucbT->u.pfcb->ObjidFDP(),
+            &cpgOECached,
+            &cpgAECached );
+
+        switch ( err )
+        {
+            case JET_errSuccess:
+                if ( FSPOwnedExtent( fSPExtents ) )
+                {
+                    *pcpgOwnExtTotal = cpgOECached;
+                }
+                if ( FSPAvailExtent( fSPExtents ) )
+                {
+                    *pcpgAvailExtTotal = cpgAECached;
+                }
+                goto HandleError;
+
+            case JET_errRecordNotFound:
+                // This objid is a value that COULD be cached, but isn't.
+                if ( FSPOwnedExtent( fSPExtents ) && FSPAvailExtent( fSPExtents ) )
+                {
+                    // We only ever set both values in the cache, not one or the other.
+                    fSetCachedValue = fTrue;
+                }
+                // Now go read the slow way.
+                break;
+
+            case JET_errNotInitialized:
+                // This objid is a value that CAN NOT be cached at this time, perhaps not ever.
+                // Now go read the slow way.
+                break;
+
+            default:
+                Call( err );
+                break;
+        }
+    }
+
+
     Call( ErrBTIGotoRoot( pfucbT, latchReadTouch ) );
     Assert( pcsrNil == pfucbT->pcsrRoot );
     pfucbT->pcsrRoot = Pcsr( pfucbT );
 
     if ( !pfucbT->u.pfcb->FSpaceInitialized() )
     {
-        //  UNDONE: Are there cuncurrency issues with updating the FCB
+        //  UNDONE: Are there concurrency issues with updating the FCB
         //  while we only have a read latch?
         SPIInitFCB( pfucbT, fTrue );
         if( !FSPIIsSmall( pfucbT->u.pfcb ) )
@@ -13745,9 +14520,10 @@ ERR ErrSPGetInfo(
                 //  Now process the info from the space tree split buffers collected above ...
 
                 const CPG cpgSplitBufferReserved = spbufOnOE.CpgBuffer1() +
-                                                    spbufOnOE.CpgBuffer2() +
-                                                    spbufOnAE.CpgBuffer1() +
-                                                    spbufOnAE.CpgBuffer2();
+                    spbufOnOE.CpgBuffer2() +
+                    spbufOnAE.CpgBuffer1() +
+                    spbufOnAE.CpgBuffer2();
+                cpgAvailExtAdjustForSplitBuffers = cpgSplitBufferReserved;
 
                 if ( FSPAvailExtent( fSPExtents ) )
                 {
@@ -13776,6 +14552,44 @@ ERR ErrSPGetInfo(
 
     Assert( 0 == cextSentinelsRemaining );
 
+    if ( fSetCachedValue )
+    {
+        Assert( FSPOwnedExtent( fSPExtents ) );
+        Assert( FSPAvailExtent( fSPExtents ) );
+        Assert( !FSPReservedExtent( fSPExtents ) );
+        Assert( !FSPShelvedExtent( fSPExtents ) );
+        Assert( !FSPExtentList( fSPExtents ) );
+        Assert( pcpgOwnExtTotal );
+        Assert( pcpgAvailExtTotal );
+        BOOL fStartedTransaction = fFalse;
+
+        // We may or may not already be in a transaction, but CATSetExtentPageCounts expects
+        // to be in one.
+        if ( ppib->Level() == 0 )
+        {
+            Call( ErrDIRBeginTransaction( ppib, 12345, NO_GRBIT ) ); // SOMEONE faked transaction ID, get a new one.
+            fStartedTransaction = fTrue;
+        }
+
+        // This is not quite threadsafe.  We're not holding a write lock on the FDP of the FCB,
+        // so someone else may be updating ExtentPageCountCache right this very moment.
+        //
+        // Note that we're removing any pages that were in the split buffers but were added
+        // to Avail.  This means that if you get the page count from the cache, it will
+        // NOT include those pages, which gives you a different answer from the cache than
+        // what you get by calculating the answer from the tree.
+        CATSetExtentPageCounts(
+            ppib,
+            ifmp,
+            pfucbT->u.pfcb->ObjidFDP(),
+            *pcpgOwnExtTotal,
+            (*pcpgAvailExtTotal - cpgAvailExtAdjustForSplitBuffers) );
+
+        if ( fStartedTransaction )
+        {
+            Call( ErrDIRCommitTransaction( ppib, NO_GRBIT ) );
+        }
+    }
 
 HandleError:
 
@@ -13789,6 +14603,363 @@ HandleError:
 
     return err;
 }
+
+#ifdef DEBUG
+ERR ErrSPIGetCpgOwnedAndAvail(
+    FUCB        *pfucb,
+    CPG         *pcpgOwnExtTotal,
+    CPG         *pcpgAvailExtTotal,
+    CPRINTF * const pcprintf 
+    )
+{
+    Assert( NULL != pcpgOwnExtTotal );
+    Assert( NULL != pcpgAvailExtTotal );
+
+    Assert( !FFUCBSpace( pfucb ) );
+    Assert( pfucb->u.pfcb->FSpaceInitialized() );
+
+    ERR             err = JET_errSuccess;
+    FUCB            *pfucbOE = pfucbNil;
+    FUCB            *pfucbAE = pfucbNil;
+
+    *pcpgOwnExtTotal = 0;
+    *pcpgAvailExtTotal = 0;
+
+    //  if single extent format, then free extent in external header
+    //
+    if ( FSPIIsSmall( pfucb->u.pfcb ) )
+    {
+        SPACE_HEADER    *psph;
+
+        Assert( pfucb->pcsrRoot != pcsrNil );
+        Assert( pfucb->pcsrRoot->Pgno() == PgnoFDP( pfucb ) );
+        Assert( pfucb->pcsrRoot->FLatched() );
+
+        //  get external header
+        //
+        NDGetExternalHeader( pfucb, pfucb->pcsrRoot, noderfSpaceHeader );
+        Assert( sizeof( SPACE_HEADER ) == pfucb->kdfCurr.data.Cb() );
+        psph = reinterpret_cast <SPACE_HEADER *> ( pfucb->kdfCurr.data.Pv() );
+
+        // Get Owned Extent info
+        *pcpgOwnExtTotal = psph->CpgPrimary();
+
+        // Get Avail Extent info
+        *pcpgAvailExtTotal = 0;
+
+        //  continue through rgbitAvail finding all available extents
+        //
+        PGNO    pgnoT           = PgnoFDP( pfucb ) + 1;
+        CPG     cpgPrimarySeen  = 1;        //  account for pgnoFDP
+        UINT    rgbitT;
+
+        for ( rgbitT = 0x00000001;
+              rgbitT != 0 && cpgPrimarySeen < psph->CpgPrimary();
+              cpgPrimarySeen++, pgnoT++, rgbitT <<= 1 )
+        {
+            Assert( pgnoT <= PgnoFDP( pfucb ) + cpgSmallSpaceAvailMost );
+
+            if ( rgbitT & psph->RgbitAvail() )
+            {
+                (*pcpgAvailExtTotal)++;
+            }
+        }
+
+        //  must also account for any pages that were not present in
+        //  the space bitmap
+        if ( psph->CpgPrimary() > cpgSmallSpaceAvailMost + 1 )
+        {
+            Assert( cpgSmallSpaceAvailMost + 1 == cpgPrimarySeen );
+            const CPG   cpgRemaining        = psph->CpgPrimary() - ( cpgSmallSpaceAvailMost + 1 );
+
+            (*pcpgAvailExtTotal) += cpgRemaining;
+        }
+    }
+    else
+    {
+        Assert( pfucb->u.pfcb->FInitialized() );
+        SPLIT_BUFFER    spbufOnOE;
+        SPLIT_BUFFER    spbufOnAE;
+
+        memset( (void*)&spbufOnOE, 0, sizeof(spbufOnOE) );
+        memset( (void*)&spbufOnAE, 0, sizeof(spbufOnAE) );
+
+        Call( ErrSPIOpenOwnExt( pfucb->ppib, pfucb->u.pfcb, &pfucbOE ) );
+
+        Call( ErrSPIOpenAvailExt( pfucb->ppib, pfucb->u.pfcb, &pfucbAE ) );
+
+        Call( ErrSPIGetInfo(
+                  pfucbOE,
+                  pcpgOwnExtTotal,
+                  NULL,
+                  NULL,
+                  NULL,
+                  0,
+                  NULL,
+                  NULL,
+                  NULL ) );
+
+        Call( ErrSPIGetInfo(
+                  pfucbAE,
+                  pcpgAvailExtTotal,
+                  NULL,
+                  NULL,
+                  NULL,
+                  0,
+                  NULL,
+                  NULL,
+                  pcprintf ) );
+
+    }
+
+HandleError:
+    if (pfucbNil != pfucbAE)
+    {
+        BTClose( pfucbAE );
+    }
+
+    if (pfucbNil != pfucbOE)
+    {
+        BTClose( pfucbOE );
+    }
+
+    return err;
+}
+
+
+LOCAL VOID SPIValidateCpgOwnedAndAvail(
+    FUCB * pfucb,
+    BOOL fPrint
+    )
+{
+    ERR err;
+    CPG cpgOEFromTree;
+    CPG cpgAEFromTree;
+    CPG cpgOEFromCache;
+    CPG cpgAEFromCache;
+
+    
+    if ( !g_fSPExtentPageCountCacheValidation )
+    {
+        // This is expensive and we aren't configured to do this; see ErrITSetConstants();
+        return;
+    }
+
+    if ( pfucb->ppib->FUpdatingExtentPageCountCache() || pfucb->ppib->FBatchIndexCreation() )
+    {
+        //
+        // If we're currently updating the cache, we can't call back into the cache to read it
+        // because we already latched some pages we would need to relatch, and we don't handle
+        // that.
+        //
+        return;
+    }
+
+    if( FFUCBSpace( pfucb ) )
+    {
+        // This can happen when we're dealing with allocating pages to
+        // a space tree during splits.  When we're doing this, the space
+        // tree is not in a condition to walk to get an accurate countc
+        // of pages, so we can't validate anything.
+        return;
+    }
+
+    // We expect to be called from places that are modifying space trees.
+    // This asserts that we're in a place that's safe to do so.  Part of this
+    // is an assertion that we have the FDP of the FCB locked Write or RIW,
+    // so we're single threaded.
+    AssertSPIPfucbOnRoot( pfucb );
+
+    if ( !pfucb->u.pfcb->FSpaceInitialized() )
+    {
+        // Valid at least in this call stack:
+        // 0000003e`1edff2f0 00007ffe`6225ccb2 ESE!SPIValidateCpgOwnedAndAvail_Dbg+0x4f0
+        // 0000003e`1edff3c0 00007ffe`622abfd3 ESE!ErrSPFreeFDP+0x572
+        // 0000003e`1edff4b0 00007ffe`622ac960 ESE!VER::ErrVERICleanOneRCE+0xce3
+        // 0000003e`1edff640 00007ffe`622ad475 ESE!RCE::ErrPrepareToDeallocate+0x1b0
+        // 0000003e`1edff6e0 00007ffe`622a3104 ESE!VER::ErrVERIRCEClean+0x815
+        // 0000003e`1edff790 00007ffe`6243cb7e ESE!VER::VERIRCECleanProc+0x34
+        // 0000003e`1edff7d0 00007ffe`c3692de3 ESE!CGPTaskManager::TMIDispatchGP+0xee
+        OSTraceFMP(
+            pfucb->ifmp,
+            JET_tracetagSpaceInternal,
+            OSFormat(
+                "%hs: Can't validate if !FSpaceInitialized [0x%x:0x%x:%lu].",
+                __FUNCTION__,
+                pfucb->ifmp,
+                ObjidFDP( pfucb ),
+                PgnoFDP( pfucb ) ) );
+        return;
+    }
+
+    CPRINTF * const pcprintf =  CPRINTFSTDOUT::PcprintfInstance();
+    err = ErrSPIGetCpgOwnedAndAvail(
+               pfucb,
+               &cpgOEFromTree,
+               &cpgAEFromTree,
+               fPrint ? pcprintf : NULL );
+
+    if ( JET_errSuccess > err )
+    {
+        OSTraceFMP(
+            pfucb->ifmp,
+            JET_tracetagSpaceInternal,
+            OSFormat(
+                "%hs: Can't read space tree err(%d) [0x%x:0x%x:%lu].",
+                __FUNCTION__,
+                err,
+                pfucb->ifmp,
+                ObjidFDP( pfucb ),
+                PgnoFDP( pfucb ) ) );
+        AssertSz( fFalse, "Failed to read space tree CPGs." );
+        return;
+    }
+
+    Assert( cpgAEFromTree >= 0 );
+    Assert( cpgOEFromTree > 0 );
+
+
+    err = ErrCATGetExtentPageCounts(
+        pfucb->ppib,
+        pfucb->ifmp,
+        pfucb->u.pfcb->ObjidFDP(),
+        &cpgOEFromCache,
+        &cpgAEFromCache );
+
+    switch ( err )
+    {
+        case JET_errSuccess:
+            Assert( cpgAEFromCache >= 0 );
+            Assert( cpgOEFromCache > 0 );
+            break;
+
+        case JET_errRecordNotFound:
+            // We don't have a stored value for this objid.
+            OSTraceFMP(
+                pfucb->ifmp,
+                JET_tracetagSpaceInternal,
+                OSFormat(
+                    "%hs: Not found in cache [0x%x:0x%x:%lu].",
+                    __FUNCTION__,
+                    pfucb->ifmp,
+                    ObjidFDP( pfucb ),
+                    PgnoFDP( pfucb ) ) );
+            if ( pfucb->ppib->Level() > 0 )
+            {
+                // We can store this value now, if we're not at transaction level 0.
+                //
+                // We can be here at transaction level 0 in this stack:
+                //
+                // 000000dc`1363e9c0 00007ff8`ce1733f9 ese!SPIValidateCpgOwnedAndAvail+0x652
+                // 000000dc`1363ea80 00007ff8`ce0ee8aa ese!ErrSPDeferredInitFCB+0x289
+                // 000000dc`1363eb00 00007ff8`ce0f0031 ese!ErrOLDIExplicitDefragOneTable+0x8ea
+                // 000000dc`1363ecf0 00007ff8`ce0f27ed ese!ErrOLDIExplicitDefragTables+0x801
+                // 000000dc`1363ee00 00007ff8`ce313a39 ese!OLDDefragDb+0xe1d
+                // 000000dc`1363f750 00007ff9`43916fd4 ese!UtilThreadIThreadBase+0x49
+                //
+                // If we're at transaction level 0 it's not safe to write the
+                // new value, since ErrCATSetExtentPageCounts makes use of ambient transaction.
+                //
+
+                // The value doesn't exist in the cache.  Go ahead and try to set it.
+                CATSetExtentPageCounts(
+                    pfucb->ppib,
+                    pfucb->ifmp,
+                    ObjidFDP( pfucb ),
+                    cpgOEFromTree,
+                    cpgAEFromTree );
+
+            }
+            return;
+
+        case JET_errNotInitialized:
+            // It's not (currently?) possible to store a value for this objid.
+            OSTraceFMP(
+                pfucb->ifmp,
+                JET_tracetagSpaceInternal,
+                OSFormat(
+                    "%hs: Uninitialized in cache [0x%x:0x%x:%lu].",
+                    __FUNCTION__,
+                    pfucb->ifmp,
+                    ObjidFDP( pfucb ),
+                    PgnoFDP( pfucb ) ) );
+            return;
+
+        default:
+            OSTraceFMP(
+                pfucb->ifmp,
+                JET_tracetagSpaceInternal,
+                OSFormat(
+                    "%hs: Can't read cache, unexpected err(%d) [0x%x:0x%x:%lu].",
+                    __FUNCTION__,
+                    err,
+                    pfucb->ifmp,
+                    ObjidFDP( pfucb ),
+                    PgnoFDP( pfucb ) ) );
+            AssertSz( fFalse, "Failed to find in cache in unexpected way." );
+            return;
+    }
+
+    if ( ( cpgAEFromCache != cpgAEFromTree ) || ( cpgOEFromCache != cpgOEFromTree ) )
+    {
+        if ( !fPrint )
+        {
+            // Recurse one time, printing out info on extents.
+            SPIValidateCpgOwnedAndAvail( pfucb, fTrue );
+        }
+        else
+        {
+            WCHAR rgrgw[6][16];
+            const WCHAR * rgwsz[] = { rgrgw[0], rgrgw[1], rgrgw[2], rgrgw[3], rgrgw[4], rgrgw[5] };
+            OSStrCbFormatW( rgrgw[0], sizeof(rgrgw[0]), L"%d", ObjidFDP( pfucb ) );
+            OSStrCbFormatW( rgrgw[1], sizeof(rgrgw[1]), L"%d", PgnoFDP( pfucb ) );
+            OSStrCbFormatW( rgrgw[2], sizeof(rgrgw[2]), L"%d", cpgOEFromTree );
+            OSStrCbFormatW( rgrgw[3], sizeof(rgrgw[3]), L"%d", cpgAEFromTree );
+            OSStrCbFormatW( rgrgw[4], sizeof(rgrgw[4]), L"%d", cpgOEFromCache );
+            OSStrCbFormatW( rgrgw[5], sizeof(rgrgw[5]), L"%d", cpgOEFromCache );
+
+            OSTraceFMP(
+                pfucb->ifmp,
+                JET_tracetagSpaceInternal,
+                OSFormat(
+                    "%hs: Size mismatch: TC{%d:%d} CC{%d:%d} [0x%x:0x%x:%lu].",
+                    __FUNCTION__,
+                    cpgOEFromTree,
+                    cpgAEFromTree,
+                    cpgOEFromCache,
+                    cpgAEFromCache,
+                    pfucb->ifmp,
+                    ObjidFDP( pfucb ),
+                    PgnoFDP( pfucb ) ) );
+
+            UtilReportEvent(
+                eventError,
+                SPACE_MANAGER_CATEGORY,
+                EXTENT_PAGE_COUNT_CACHE_EXTENSIVE_VALIDATION_FAILED_ID,
+                _countof( rgwsz ),
+                rgwsz,
+                0,
+                PinstFromPfucb( pfucb ) );
+
+            AssertSz( fFalse, "Size mismatch OE and/or AE." );
+        }
+    }
+    else
+    {
+        OSTraceFMP(
+            pfucb->ifmp,
+            JET_tracetagSpaceInternal,
+            OSFormat(
+                "%hs: Validated C{%d:%d} [0x%x:0x%x:%lu]",
+                __FUNCTION__,
+                cpgOEFromCache,
+                cpgAEFromCache,
+                pfucb->ifmp,
+                ObjidFDP( pfucb ),
+                PgnoFDP( pfucb ) ) );
+    }
+}
+#endif
 
 //  Retrieves 
 //  The pprgExtentList is allocated with new[].
@@ -13901,7 +15072,7 @@ ERR ErrSPGetExtentInfo(
 
         memset( (void*)&spbufOnOE, 0, sizeof(spbufOnOE) );
         memset( (void*)&spbufOnAE, 0, sizeof(spbufOnAE) );
-        
+
         //  if single extent format, then free extent in external header
         //
         if ( FSPIIsSmall( pfucbT->u.pfcb ) )
@@ -14097,7 +15268,7 @@ LOCAL ERR ErrSPITrimOneAvailableExtent(
 
     dib.dirflag = fDIRNull;
     dib.pos = posFirst;
-    Assert( FFUCBSpace( pfucb ) );
+    Assert( FFUCBAvailExt( pfucb ) );
     err = ErrBTDown( pfucb, &dib, latchReadNoTouch );
 
     if ( err != JET_errRecordNotFound )
@@ -14331,7 +15502,12 @@ ERR ErrSPDummyUpdate( FUCB * pfucb )
     //
     data.SetPv( &sph );
     data.SetCb( sizeof(sph) );
-    err = ErrNDSetExternalHeader( pfucb, &data, fDIRNull, noderfSpaceHeader );
+    err = ErrSPIWrappedNDSetExternalHeader(
+        pfucb,
+        Pcsr( pfucb ),
+        &data,
+        fDIRNull,
+        noderfSpaceHeader );
 
     //  release latch regardless of error
     //
@@ -14650,7 +15826,7 @@ static const TICK               g_dtickTrimDBPeriod             = 1000 * 60 * 60
 #else
 static const TICK               g_dtickTrimDBPeriod             = 1 * 1000; // 1 second
 #endif
-    
+
 static TICK             g_tickLastPeriodicTrimDB        = 0;    //  last time a Trim task was executed
 static BOOL             g_fSPTrimDBTaskScheduled        = fFalse;
 
@@ -14669,10 +15845,13 @@ LOCAL ERR ErrSPITrimDBITaskPerIFMP( const IFMP ifmp )
     static BOOL s_fLoggedStopNoActionEvent = fFalse;
 #endif
 
-    OSTraceFMP( ifmp, JET_tracetagSpaceInternal, __FUNCTION__ );
-
-    OSTraceFMP( ifmp, JET_tracetagSpaceInternal,
-                OSFormat( "Running trim task for ifmp %d.", ifmp ) );
+    OSTraceFMP(
+        ifmp,
+        JET_tracetagSpaceInternal,
+        OSFormat(
+            "%hs: Running trim task for ifmp %d.",
+            __FUNCTION__,
+            ifmp ) );
 
     AssertSz( g_fPeriodicTrimEnabled, "Trim Task should never be run if the test hook wasn't enabled." );
     AssertSz( !g_fRepair, "Trim Task should never be run during Repair." );
@@ -14681,8 +15860,12 @@ LOCAL ERR ErrSPITrimDBITaskPerIFMP( const IFMP ifmp )
 
     if ( PinstFromIfmp( ifmp )->FRecovering() )
     {
-        OSTraceFMP( ifmp, JET_tracetagSpaceInternal,
-                    OSFormat( "Periodic trim will not run an in-recovery database." ) );
+        OSTraceFMP(
+            ifmp,
+            JET_tracetagSpaceInternal,
+            OSFormat(
+                "%hs: Periodic trim will not run an in-recovery database.",
+                __FUNCTION__ ) );
 
         err = JET_errSuccess;
         goto HandleError;
@@ -14694,8 +15877,12 @@ LOCAL ERR ErrSPITrimDBITaskPerIFMP( const IFMP ifmp )
         ( dbstate == JET_dbstateRevertInProgress ) )
     {
         AssertSz( fFalse, "Periodic trim should not take place during incremental reseed or revert." );
-        OSTraceFMP( ifmp, JET_tracetagSpaceInternal,
-                    OSFormat( "Periodic trim will not run for a database in inc reseed or revert or dirty and patched shutdown status." ) );
+        OSTraceFMP(
+            ifmp,
+            JET_tracetagSpaceInternal,
+            OSFormat(
+                "%hs: Periodic trim will not run for a database in inc reseed or revert or dirty and patched shutdown status.",
+                __FUNCTION__ ) );
 
         err = JET_errSuccess;
         goto HandleError;
@@ -14720,8 +15907,12 @@ LOCAL ERR ErrSPITrimDBITaskPerIFMP( const IFMP ifmp )
 
     if ( PinstFromIfmp( ifmp )->m_pbackup->FBKBackupInProgress() )
     {
-        OSTraceFMP( ifmp, JET_tracetagSpaceInternal,
-                    OSFormat( "Periodic trim will not run when there is backup in progress." ) );
+        OSTraceFMP(
+            ifmp,
+            JET_tracetagSpaceInternal,
+            OSFormat(
+                "%hs: Periodic trim will not run when there is backup in progress.",
+                __FUNCTION__ ) );
 
         Error( ErrERRCheck( JET_errBackupInProgress ) );
     }
@@ -14736,8 +15927,15 @@ LOCAL ERR ErrSPITrimDBITaskPerIFMP( const IFMP ifmp )
 
 HandleError:
 
-    OSTraceFMP( ifmp, JET_tracetagSpaceInternal,
-                OSFormat( "Trim task for ifmp %d finished with result %d (0x%x).", ifmp, err, err ) );
+    OSTraceFMP(
+        ifmp,
+        JET_tracetagSpaceInternal,
+        OSFormat(
+            "%hs: Trim task for ifmp %d finished with result %d (0x%x).",
+            __FUNCTION__,
+            ifmp,
+            err,
+            err ) );
 
     if ( ppibNil != ppib )
     {
@@ -14805,17 +16003,18 @@ LOCAL VOID SPITrimDBITask( VOID*, VOID* )
     Assert( g_fSPTrimDBTaskScheduled );
 
     OSTrace( JET_tracetagSpaceInternal, __FUNCTION__ );
-    
+
     g_tickLastPeriodicTrimDB = TickOSTimeCurrent();
 
-    // Altough we block running on repair, it is possible to get into repair "mode" by
+    // Although we block running on repair, it is possible to get into repair "mode" by
     // running JetDBUtilities. So we should bail trimming if we encounter such case. We
     // shouldn't turn off trim altogether as at some point the repair should end and
     // "regular" usage should continue.
     if ( g_fRepair )
     {
-        OSTrace( JET_tracetagSpaceInternal,
-                    OSFormat( "We're in repair - JetDBUtilities is being executed. Aborting trim." ) );
+        OSTrace(
+            JET_tracetagSpaceInternal,
+            OSFormat( "We're in repair - JetDBUtilities is being executed. Aborting trim." ) );
 
         goto FinishTask;
     }
@@ -14826,7 +16025,7 @@ LOCAL VOID SPITrimDBITask( VOID*, VOID* )
 
     for ( IFMP ifmp = FMP::IfmpMinInUse(); ifmp <= FMP::IfmpMacInUse(); ifmp++ )
     {
-        if ( FFMPIsTempDB( ifmp ) || !g_rgfmp[ifmp].FInUse() )
+        if ( FFMPIsTempDB( ifmp ) || !g_rgfmp[ ifmp ].FInUse() )
         {
             continue;
         }
@@ -14837,8 +16036,12 @@ LOCAL VOID SPITrimDBITask( VOID*, VOID* )
 
         if ( !g_rgfmp[ ifmp ].FScheduledPeriodicTrim() || g_rgfmp[ ifmp ].FDontStartTrimTask() )
         {
-            OSTraceFMP( ifmp, JET_tracetagSpaceInternal,
-                        OSFormat( "Periodic trimming is off for this IFMP. Skipping." ) );
+            OSTraceFMP(
+                ifmp,
+                JET_tracetagSpaceInternal,
+                OSFormat(
+                    "%hs: Periodic trimming is off for this IFMP. Skipping.",
+                    __FUNCTION__ ) );
 
             g_rgfmp[ ifmp ].ReleasePeriodicTrimmingDBLatch();
 
@@ -14883,13 +16086,13 @@ VOID SPTrimDBTaskStop( INST * pinst, const WCHAR * cwszDatabaseFullName )
     {
         const IFMP ifmp = pinst->m_mpdbidifmp[ dbid ];
         if ( ifmp >= g_ifmpMax ||
-            !g_rgfmp[ifmp].FInUse() )
+            !g_rgfmp[ ifmp ].FInUse() )
         {
             continue;
         }
 
         if ( NULL != cwszDatabaseFullName &&
-            ( g_rgfmp[ifmp].Pinst() != pinst || UtilCmpFileName( cwszDatabaseFullName, g_rgfmp[ifmp].WszDatabaseName() ) != 0 ) )
+            ( g_rgfmp[ ifmp ].Pinst() != pinst || UtilCmpFileName( cwszDatabaseFullName, g_rgfmp[ ifmp ].WszDatabaseName() ) != 0 ) )
         {
             continue;
         }
@@ -14898,10 +16101,10 @@ VOID SPTrimDBTaskStop( INST * pinst, const WCHAR * cwszDatabaseFullName )
 
         //  reset the periodic trimming under the trimming DB latch to
         //  ensure that any outstanding trims will be done for.
-        g_rgfmp[ifmp].GetPeriodicTrimmingDBLatch();
-        g_rgfmp[ifmp].SetFDontStartTrimTask();
-        g_rgfmp[ifmp].ResetScheduledPeriodicTrim();
-        g_rgfmp[ifmp].ReleasePeriodicTrimmingDBLatch();
+        g_rgfmp[ ifmp ].GetPeriodicTrimmingDBLatch();
+        g_rgfmp[ ifmp ].SetFDontStartTrimTask();
+        g_rgfmp[ ifmp ].ResetScheduledPeriodicTrim();
+        g_rgfmp[ ifmp ].ReleasePeriodicTrimmingDBLatch();
 
         FMP::EnterFMPPoolAsWriter();
     }
@@ -14926,11 +16129,15 @@ ERR ErrSPTrimDBTaskInit( const IFMP ifmp )
         AssertSz( fFalse, "Periodic trim should not be set up for a database in repair or for the temp db." );
         Error( ErrERRCheck( JET_errInvalidDatabaseId ) );
     }
-    
+
     if ( ( GrbitParam( g_rgfmp[ ifmp ].Pinst(), JET_paramEnableShrinkDatabase ) & JET_bitShrinkDatabasePeriodically ) == 0 )
     {
-        OSTraceFMP( ifmp, JET_tracetagSpaceInternal,
-                    OSFormat( "Periodic trim is not enabled. Will not schedule the trim task." ) );
+        OSTraceFMP(
+            ifmp,
+            JET_tracetagSpaceInternal,
+            OSFormat(
+                "%hs: Periodic trim is not enabled. Will not schedule the trim task.",
+                __FUNCTION__ ) );
 
         err = JET_errSuccess;
         goto HandleError;
@@ -14938,8 +16145,12 @@ ERR ErrSPTrimDBTaskInit( const IFMP ifmp )
 
     if ( BoolParam( JET_paramEnableViewCache ) )
     {
-        OSTraceFMP( ifmp, JET_tracetagSpaceInternal,
-                    OSFormat( "Periodic trimming cannot be enabled for view cache. Will not schedule the trimming task." ) );
+        OSTraceFMP(
+            ifmp,
+            JET_tracetagSpaceInternal,
+            OSFormat(
+                "%hs: Periodic trimming cannot be enabled for view cache. Will not schedule the trimming task.",
+                __FUNCTION__ ) );
 
         err = JET_errSuccess;
         goto HandleError;
@@ -14952,8 +16163,12 @@ ERR ErrSPTrimDBTaskInit( const IFMP ifmp )
 
     if ( g_rgfmp[ ifmp ].FDontStartTrimTask() )
     {
-        OSTraceFMP( ifmp, JET_tracetagSpaceInternal,
-                    OSFormat( "Periodic trimming is set so it should not start. Will not schedule the trim task." ) );
+        OSTraceFMP(
+            ifmp,
+            JET_tracetagSpaceInternal,
+            OSFormat(
+                "%hs: Periodic trimming is set so it should not start. Will not schedule the trim task.",
+                __FUNCTION__ ) );
 
         err = JET_errSuccess;
         g_rgfmp[ ifmp ].ReleasePeriodicTrimmingDBLatch();

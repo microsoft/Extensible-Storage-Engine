@@ -1831,7 +1831,7 @@ INLINE VOID RECDeferMoveFirst( PIB *ppib, FUCB *pfucb )
     CheckTable( ppib, pfucb );
     CheckSecondary( pfucb );
     Assert( !FFUCBUpdatePrepared( pfucb ) );
-    AssertDIRNoLatch( ppib );
+    AssertDIRMaybeNoLatch( ppib, pfucb );
 
     if ( pfucb->pfucbCurIndex != pfucbNil )
     {

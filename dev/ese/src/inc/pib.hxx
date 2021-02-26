@@ -27,6 +27,12 @@ public:
     // Pop an entry off the top of the stack (end a transaction)
     void Pop();
 
+    // Return the trxid on the top of the stack ( doesn't begin or end a transaction )
+    TRXID Peek() const;
+
+    // Return the trxid on the bottom of the stack ( doesn't begin or end a transaction )
+    TRXID Peek0() const;
+
     // Clear all entries on the stack
     void Clear();
 
@@ -235,6 +241,9 @@ private:
             FLAG32      m_fOLD2:1;                          //    session is for OLD2
             FLAG32      m_fMustRollbackToLevel0:1;          //    session must rollback to level 0 before being able to commit
             FLAG32      m_fDBScan:1;                        //    session is for DBSCAN
+#ifdef DEBUG
+            FLAG32      m_fUpdatingExtentPageCountCache:1;  //    session is currently updating the cached CPG values in the catalog
+#endif
         };
     };
 
@@ -428,6 +437,13 @@ public:
     BOOL                FReadOnlyTrx() const                                { return m_fReadOnlyTrx; }
     VOID                SetFReadOnlyTrx()                                   { m_fReadOnlyTrx = fTrue; }
     VOID                ResetFReadOnlyTrx()                                 { m_fReadOnlyTrx = fFalse; }
+
+#ifdef DEBUG
+    // Debug only marker that we're currently updating the cache.  Used only in asserts.
+    BOOL                FUpdatingExtentPageCountCache() const               { return m_fUpdatingExtentPageCountCache; }
+    VOID                SetFUpdatingExtentPageCountCache()                  { m_fUpdatingExtentPageCountCache = fTrue;  }
+    VOID                ResetFUpdatingExtentPageCountCache()                { m_fUpdatingExtentPageCountCache = fFalse; }
+#endif
 
     BOOL                FBatchIndexCreation() const                         { return m_fBatchIndexCreation; }
     VOID                SetFBatchIndexCreation()                            { m_fBatchIndexCreation = fTrue; }

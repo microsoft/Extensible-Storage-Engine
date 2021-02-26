@@ -2395,7 +2395,7 @@ LOCAL ERR ErrOLDIExplicitDefragOneTable(
     CallS( ErrDIRRelease( pfucbCatalog ) );
     fLatchedCatalog = fFalse;
 
-    err = ErrFILEOpenTable( ppib, ifmp, &pfucb, szTable, JET_bitTableTryPurgeOnClose );
+    err = ErrFILEOpenTable( ppib, ifmp, &pfucb, szTable, ( JET_bitTableTryPurgeOnClose | JET_bitTableAllowSensitiveOperation ) );
     if ( err < 0 )
     {
         Assert( pfucbNil == pfucb );

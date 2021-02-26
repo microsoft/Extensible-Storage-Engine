@@ -1328,6 +1328,19 @@ LOCAL ERR ErrSHKICreateRootMove( ROOTMOVE* const prm, FUCB* const pfucb, const O
     // we'll need to update their external headers with the new pgnoParent.
     //
 
+    // Allocate 3 new contiguous pages (root + OE + AE).
+    //
+
+    // Alocate pages.
+    CPG cpgReq = 3;
+    PGNO pgnoNewFDP = pgnoNull;
+    Assert( FBFNotLatched( ifmp, pgnoFDPMSO ) );
+    Call( ErrSPGetExt( pfucb, prm->pgnoFDP, &cpgReq, cpgReq, &pgnoNewFDP ) );
+    Assert( cpgReq >= 3 );
+    prm->pgnoNewFDP = pgnoNewFDP;
+    prm->pgnoNewOE = pgnoNewFDP + 1;
+    prm->pgnoNewAE = pgnoNewFDP + 2;
+    
     if ( fRootObject )
     {
         // Go through each child object.
@@ -1493,17 +1506,6 @@ LOCAL ERR ErrSHKICreateRootMove( ROOTMOVE* const prm, FUCB* const pfucb, const O
     Assert( ( ( prm->pgnoCatClustIdx[0] == pgnoNull ) && ( prm->pgnoCatClustIdx[1] == pgnoNull ) ) ||
             ( prm->pgnoCatClustIdx[0] != prm->pgnoCatClustIdx[1] ) );
 
-    // Allocate 3 new contiguous pages (root + OE + AE).
-    //
-
-    // Alocate pages.
-    CPG cpgReq = 3;
-    PGNO pgnoNewFDP = pgnoNull;
-    Call( ErrSPGetExt( pfucb, prm->pgnoFDP, &cpgReq, cpgReq, &pgnoNewFDP ) );
-    Assert( cpgReq >= 3 );
-    prm->pgnoNewFDP = pgnoNewFDP;
-    prm->pgnoNewOE = pgnoNewFDP + 1;
-    prm->pgnoNewAE = pgnoNewFDP + 2;
 
     // Latch root, OA and AE pages (current and new).
     //
@@ -2009,6 +2011,7 @@ ERR ErrSHKRootPageMove(
     BOOL fMovePerformed = fFalse;
     BOOL fFullyInitCursor = fFalse;
     ROOTMOVE rm;
+    PGNO pgnoExtentPageCountCacheFDP = pgnoNull;
 
     Assert( pgnoFDP != pgnoNull );
     Assert( !FCATBaseSystemFDP( pgnoFDP ) );
@@ -2043,6 +2046,24 @@ ERR ErrSHKRootPageMove(
     BTClose( pfucb );
     pfucb = pfucbNil;
     pfcb = pfcbNil;
+
+    if ( objid == pfmp->ObjidExtentPageCountCacheFDP() )
+    {
+        Enforce( pgnoFDP == pfmp->PgnoExtentPageCountCacheFDP() );
+        // We're moving the root of the Extent Page Count Cache table.  The pgnoFDP for that is
+        // cached in the FMP, so we need to update that.  The data in the FMP is used as a signal
+        // that we're tracking info in the cache, which triggers updating the cache (even during
+        // shrink), further using the cached data.  So, it needs to be accurate during shrink so
+        // we get the cache correct.
+        //
+        // HOWEVER.
+        //
+        // The cache doesn't track itself, and we know we're the only ones who are messing with pages
+        // right now, so we can just unset the data in the FMP, move the root, then reset it to the
+        // new value.
+        pgnoExtentPageCountCacheFDP = pfmp->PgnoExtentPageCountCacheFDP();
+        pfmp->SetExtentPageCountCacheTableInfo( pgnoNull, objidNil );
+    }
 
     // Open/initialize full-fledged cursor.
     Assert( objid != objidSystemRoot );
@@ -2138,6 +2159,13 @@ ERR ErrSHKRootPageMove(
 
     fMovePerformed = fTrue;
 
+    if ( pgnoNull != pgnoExtentPageCountCacheFDP )
+    {
+        // Save the current value as the one to rewrite into the FMP.
+        Enforce( pgnoNull != rm.pgnoNewFDP );
+        pgnoExtentPageCountCacheFDP = rm.pgnoNewFDP;
+    }
+
     // Release latches
     SHKIRootMoveReleaseLatches( &rm );
 
@@ -2201,6 +2229,13 @@ HandleError:
     Assert( fMoveLogged || ( err < JET_errSuccess ) );
     Assert( fMovePerformed || ( err < JET_errSuccess ) );
     Expected( !fFullyInitCursor || ( err < JET_errSuccess ) );
+
+    if ( pgnoNull != pgnoExtentPageCountCacheFDP )
+    {
+        Assert( objidNil == pfmp->ObjidExtentPageCountCacheFDP() );
+        Assert( pgnoNull == pfmp->PgnoExtentPageCountCacheFDP() );
+        pfmp->SetExtentPageCountCacheTableInfo( pgnoExtentPageCountCacheFDP, objid );
+    }
 
     // Revert DB times in case of failure.
     if ( !fMoveLogged )

@@ -217,28 +217,52 @@ INLINE ERR ErrCMPOpenDB(
     IFileSystemAPI  *pfsapiDest,
     const WCHAR     *wszDatabaseDest )
 {
-    ERR         err;
-    JET_GRBIT   grbitCreateForDefrag    = JET_bitDbRecoveryOff|JET_bitDbVersioningOff;
-
+    ERR            err;
+    BOOL           fDBOpen = fFalse;
+    ULONG          ulParamVal = 1;
+    JET_SETDBPARAM setdbparam = { JET_dbparamMaintainExtentPageCountCache, &ulParamVal, sizeof(ulParamVal) };
+    JET_SETDBPARAM *psetdbparam = NULL;
+    ULONG          csetdbparam = 0;
+    JET_GRBIT      grbitCreateForDefrag    = JET_bitDbRecoveryOff|JET_bitDbVersioningOff;
     //  open the source DB Exclusive and ReadOnly
     //  UNDONE: JET_bitDbReadOnly currently unsupported
     //  by OpenDatabase (must be specified with AttachDb)
-    CallR( ErrDBOpenDatabase(
+    Call( ErrDBOpenDatabase(
                 pcompactinfo->ppib,
                 wszDatabaseSrc,
                 &pcompactinfo->ifmpSrc,
                 JET_bitDbExclusive|JET_bitDbReadOnly ) );
+    fDBOpen = fTrue;
 
     if ( g_rgfmp[pcompactinfo->ifmpSrc].FShadowingOff() )
     {
         grbitCreateForDefrag |= JET_bitDbShadowingOff;
     }
 
+    // Look up the ExtentPageCountCache table.  If it exists in the original DB, we need to create
+    // it in the new DB.
+    err = ErrCATSeekTable( pcompactinfo->ppib, pcompactinfo->ifmpSrc, szMSExtentPageCountCache, NULL, NULL );
+    switch ( err )
+    {
+        case JET_errSuccess:
+            csetdbparam = 1;
+            psetdbparam = &setdbparam;
+            break;
+
+        case JET_errObjectNotFound:
+            break;
+
+        default:
+            AssertSz( fFalse, "Unexpected case in switch.");
+            Call( err );
+            break;
+    }
+
     //  Create and then open the destination database.
     //  CONSIDER: Should the destination database be deleted
     //  if it already exists?
     Assert( NULL != pfsapiDest );
-    err = ErrDBCreateDatabase(
+    Call( ErrDBCreateDatabase(
                 pcompactinfo->ppib,
                 pfsapiDest,
                 wszDatabaseDest,
@@ -247,12 +271,13 @@ INLINE ERR ErrCMPOpenDB(
                 CpgDBDatabaseMinMin(),  //  using min-min minimizes DB size, and provides good testing.
                 fFalse, // fSparseEnabledFile
                 NULL,
-                NULL,
-                0,
-                grbitCreateForDefrag );
+                psetdbparam,
+                csetdbparam,
+                grbitCreateForDefrag ) );
+    Assert( JET_errSuccess == err );     // No warnings.
 
-    Assert( err <= 0 );     // No warnings.
-    if ( err < 0 )
+HandleError:
+    if ( ( err < JET_errSuccess ) && fDBOpen )
     {
         (VOID)ErrDBCloseDatabase(
                         pcompactinfo->ppib,
@@ -1516,6 +1541,7 @@ LOCAL ERR ErrCMPCopySelectedTables(
                 && !FOLDSystemTable( szTableName )
                 && !FSCANSystemTable( szTableName )
                 && !FCATObjidsTable( szTableName )
+                && !FCATExtentPageCountCacheTable( szTableName )
                 && !FCATLocalesTable( szTableName ) // rebuilt by catalog updates
                 && !MSysDBM::FIsSystemTable( szTableName ) )
             {

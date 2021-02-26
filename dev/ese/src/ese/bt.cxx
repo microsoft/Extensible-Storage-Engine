@@ -5020,7 +5020,7 @@ ERR ErrBTLock( FUCB *pfucb, DIRLOCK dirlock )
     Assert( dirlock == writeLock
             || dirlock == readLock );
 
-    const BOOL  fVersion = !g_rgfmp[pfucb->ifmp].FVersioningOff();
+    const BOOL  fVersion = !g_rgfmp[pfucb->ifmp].FVersioningOff() && !pfucb->u.pfcb->FVersioningOffForExtentPageCountCache();
     Assert( !fVersion || !PinstFromIfmp( pfucb->ifmp )->m_plog->FRecovering() );
 
     ERR     err = JET_errSuccess;

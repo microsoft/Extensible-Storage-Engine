@@ -1515,6 +1515,7 @@ ERR FMP::ErrInitializeOneFmp(
     pfmp->SetPfapi( NULL );
     pfmp->m_cbOwnedFileSize = 0; // not using the setter to avoid asserts.
     pfmp->AcquireIOSizeChangeLatch();
+    pfmp->SetExtentPageCountCacheTableInfo( pgnoNull, objidNil );
     pfmp->SetPgnoSnapBackupMost( pgnoNull );
     pfmp->SetFsFileSizeAsyncTarget( 0 );
     pfmp->ReleaseIOSizeChangeLatch();

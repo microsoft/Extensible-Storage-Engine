@@ -12,49 +12,50 @@ const BYTE tableclassMin    = 0;
 const BYTE tableclassNone   = 0;
 
 //  Begin Reserved Range
-const BYTE tableclassReservedMin    = 1;
-const BYTE tableclassCatalog        = tableclassReservedMin;    // Reserved1
-const BYTE tableclassShadowCatalog  = 2;    // Reserved2
-const BYTE tableclassReservedMost   = tableclassShadowCatalog;
+const BYTE tableclassReservedMin          = 1;
+const BYTE tableclassCatalog              = tableclassReservedMin; // Reserved1
+const BYTE tableclassShadowCatalog        = 2;                     // Reserved2
+const BYTE tableclassExtentPageCountCache = 3;                     // Reserved3
+const BYTE tableclassReservedMost         = tableclassExtentPageCountCache;
 //  End Reserved Range
 
 //  Begin Public Range
-const BYTE tableClassPublic = tableclassReservedMost + 1;   // 3
-const BYTE tableclass1      = tableClassPublic;             // 3
-const BYTE tableclass2      = tableClassPublic + 1;         // 4
-const BYTE tableclass3      = tableClassPublic + 2;         // 5
-const BYTE tableclass4      = tableClassPublic + 3;         // 6
-const BYTE tableclass5      = tableClassPublic + 4;         // 7
-const BYTE tableclass6      = tableClassPublic + 5;         // 8
-const BYTE tableclass7      = tableClassPublic + 6;         // 9
-const BYTE tableclass8      = tableClassPublic + 7;         // 10
-const BYTE tableclass9      = tableClassPublic + 8;         // 11
-const BYTE tableclass10     = tableClassPublic + 9;         // 12
-const BYTE tableclass11     = tableClassPublic + 10;        // 13
-const BYTE tableclass12     = tableClassPublic + 11;        // 14
-const BYTE tableclass13     = tableClassPublic + 12;        // 15
-const BYTE tableclass14     = tableClassPublic + 13;        // 16
-const BYTE tableclass15     = tableClassPublic + 14;        // 17
-const BYTE tableclass16     = tableClassPublic + 15;        // 18
-const BYTE tableclass17     = tableClassPublic + 16;        // 19
-const BYTE tableclass18     = tableClassPublic + 17;        // 20
-const BYTE tableclass19     = tableClassPublic + 18;        // 21
-const BYTE tableclass20     = tableClassPublic + 19;        // 22
-const BYTE tableclass21     = tableClassPublic + 20;        // 23
-const BYTE tableclass22     = tableClassPublic + 21;        // 24
-const BYTE tableclass23     = tableClassPublic + 22;        // 25
-const BYTE tableclass24     = tableClassPublic + 23;        // 26
-const BYTE tableclass25     = tableClassPublic + 24;        // 27
-const BYTE tableclass26     = tableClassPublic + 25;        // 28
-const BYTE tableclass27     = tableClassPublic + 26;        // 29
-const BYTE tableclass28     = tableClassPublic + 27;        // 30
-const BYTE tableclass29     = tableClassPublic + 28;        // 31
-const BYTE tableclass30     = tableClassPublic + 29;        // 32
-const BYTE tableclass31     = tableClassPublic + 30;        // 33
+const BYTE tableClassPublic = tableclassReservedMost + 1;   // 4
+const BYTE tableclass1      = tableClassPublic;             // 4
+const BYTE tableclass2      = tableClassPublic + 1;         // 5
+const BYTE tableclass3      = tableClassPublic + 2;         // 6
+const BYTE tableclass4      = tableClassPublic + 3;         // 7
+const BYTE tableclass5      = tableClassPublic + 4;         // 8
+const BYTE tableclass6      = tableClassPublic + 5;         // 9
+const BYTE tableclass7      = tableClassPublic + 6;         // 10
+const BYTE tableclass8      = tableClassPublic + 7;         // 11
+const BYTE tableclass9      = tableClassPublic + 8;         // 12
+const BYTE tableclass10     = tableClassPublic + 9;         // 13
+const BYTE tableclass11     = tableClassPublic + 10;        // 14
+const BYTE tableclass12     = tableClassPublic + 11;        // 15
+const BYTE tableclass13     = tableClassPublic + 12;        // 16
+const BYTE tableclass14     = tableClassPublic + 13;        // 17
+const BYTE tableclass15     = tableClassPublic + 14;        // 18
+const BYTE tableclass16     = tableClassPublic + 15;        // 19
+const BYTE tableclass17     = tableClassPublic + 16;        // 20
+const BYTE tableclass18     = tableClassPublic + 17;        // 21
+const BYTE tableclass19     = tableClassPublic + 18;        // 22
+const BYTE tableclass20     = tableClassPublic + 19;        // 23
+const BYTE tableclass21     = tableClassPublic + 20;        // 24
+const BYTE tableclass22     = tableClassPublic + 21;        // 25
+const BYTE tableclass23     = tableClassPublic + 22;        // 26
+const BYTE tableclass24     = tableClassPublic + 23;        // 27
+const BYTE tableclass25     = tableClassPublic + 24;        // 28
+const BYTE tableclass26     = tableClassPublic + 25;        // 29
+const BYTE tableclass27     = tableClassPublic + 26;        // 30
+const BYTE tableclass28     = tableClassPublic + 27;        // 31
+const BYTE tableclass29     = tableClassPublic + 28;        // 32
+const BYTE tableclass30     = tableClassPublic + 29;        // 33
+const BYTE tableclass31     = tableClassPublic + 30;        // 34
 //  End Public Range
 
-const BYTE tableclassMost   = tableclass31;                 // 33
-const BYTE tableclassMax    = tableclassMost + 1;           // 34
+const BYTE tableclassMost   = tableclass31;                 // 34
+const BYTE tableclassMax    = tableclassMost + 1;           // 35
 
 //  TCE (TableClassEx) is used internally to collect and display perfmon data per tableclass.
 //  It expands the "space" of tableclass in 2 ways.
@@ -159,6 +160,11 @@ INLINE TABLECLASS TableClassFromSysTable( BOOL fShadowSystemTable )
     }
 
     return tableclassCatalog;
+}
+
+INLINE TABLECLASS TableClassFromExtentPageCountCache()
+{
+    return tableclassExtentPageCountCache;
 }
 
 INLINE TABLECLASS TableClassFromTableClassOffset( const ULONG tableClassOffset )

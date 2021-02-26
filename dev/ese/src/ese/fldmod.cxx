@@ -592,7 +592,7 @@ ERR ErrRECSessionWriteConflict( FUCB *pfucb )
 {
     FUCB    *pfucbT;
 
-    AssertDIRNoLatch( pfucb->ppib );
+    AssertDIRMaybeNoLatch( pfucb->ppib, pfucb );
     for ( pfucbT = pfucb->ppib->pfucbOfSession; pfucbT != pfucbNil; pfucbT = pfucbT->pfucbNextOfSession )
     {
         //  all cursors in the list should be owned by the same session
@@ -667,7 +667,7 @@ ERR VTAPI ErrIsamPrepareUpdate( JET_SESID sesid, JET_VTID vtid, ULONG grbit )
     CallR( ErrPIBCheck( ppib ) );
     CheckFUCB( ppib, pfucb );
     Assert( ppib->Level() < levelMax );
-    AssertDIRNoLatch( ppib );
+    AssertDIRMaybeNoLatch( ppib, pfucb );
 
     OSTraceFMP(
         pfucb->ifmp,
@@ -1164,7 +1164,7 @@ ReplaceNoLock:
     }
 
     CallS( err );
-    AssertDIRNoLatch( ppib );
+    AssertDIRMaybeNoLatch( ppib, pfucb );
     return err;
 
 HandleError:
@@ -1701,7 +1701,7 @@ LOCAL ERR ErrFLDSetOneColumn(
     }
 
 HandleError:
-    AssertDIRNoLatch( pfucb->ppib );
+    AssertDIRMaybeNoLatch( pfucb->ppib, pfucb );
     return err;
 }
 
@@ -1788,7 +1788,7 @@ ERR VTAPI ErrIsamSetColumn(
 
     CallR( ErrPIBCheck( ppib ) );
     CheckFUCB( ppib, pfucb );
-    AssertDIRNoLatch( ppib );
+    AssertDIRMaybeNoLatch( ppib, pfucb );
 
     if ( cbData > JET_cbLVColumnMost )
         return ErrERRCheck( JET_errInvalidParameter );
@@ -1831,7 +1831,7 @@ ERR VTAPI ErrIsamSetColumn(
 
 HandleError:
     PIBSetUpdateid( ppib, updateidSave );
-    AssertDIRNoLatch( ppib );
+    AssertDIRMaybeNoLatch( ppib, pfucb );
     return err;
 }
 
@@ -1858,7 +1858,7 @@ ERR VTAPI ErrIsamSetColumns(
     }
 
     CallR( ErrPIBCheck( ppib ) );
-    AssertDIRNoLatch( ppib );
+    AssertDIRMaybeNoLatch( ppib, pfucb );
     CheckFUCB( ppib, pfucb );
 
     if ( !FFUCBSetPrepared( pfucb ) )
@@ -1894,7 +1894,7 @@ ERR VTAPI ErrIsamSetColumns(
 HandleError:
     PIBSetUpdateid( ppib, updateidSave );
 
-    AssertDIRNoLatch( ppib );
+    AssertDIRMaybeNoLatch( ppib, pfucb );
     return err;
 }
 

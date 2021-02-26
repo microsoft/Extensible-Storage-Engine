@@ -666,6 +666,7 @@ typedef void (JET_API *JET_SPCATCALLBACK)( _In_ const unsigned long pgno, _In_ c
 #define JET_efvXpress10Compression                          9340    //  Adds support for compressing/decompressing data using Xpress10.
 #define JET_efvRevertSnapshot                               9360    //  Added revert snapshot flush signature to database header and added lrtypExtentFreed, which logs details about the extent freed to allow for revert snapshot to capture the pages of the freed extent.
 #define JET_efvApplyRevertSnapshot                          9380    //  Added le_lgposCommitBeforeRevert to the database header which captures the last commit lgpos before revert was done and is used to ignore JET_errDbTimeTooOld errors on pasive copies.
+#define JET_efvExtentPageCountCache                         9400    //  Adds support for the ExtentPageCountCache table.
 
 // Special format specifiers here
 #define JET_efvUseEngineDefault             (0x40000001)    //  Instructs the engine to use the maximal default supported Engine Format Version. (default)
@@ -4665,6 +4666,7 @@ typedef struct
 #define JET_bitTableSequential          0x00008000  /*  assume the table will be scanned sequentially */
 // end_PubEsent
 #define JET_bitTableTryPurgeOnClose     0x01000000  /*  INTERNAL USE ONLY: attempt to cleanup resources when table is closed */
+#define JET_bitTableAllowSensitiveOperation 0x08000000 /*  INTERNAL USE ONLY */
 #define JET_bitTableDelete              0x10000000  /*  INTERNAL USE ONLY */
 #define JET_bitTableCreate              0x20000000  /*  INTERNAL USE ONLY */
 #define bitTableUpdatableDuringRecovery 0x40000000  /*  INTERNAL USE ONLY */
@@ -7128,8 +7130,8 @@ JET_ERR JET_API
 JetGetSessionInfo(
     _In_ JET_SESID                  sesid,
     _Out_writes_bytes_( cbMax ) void *  pvResult,
-    _In_ const unsigned long        cbMax,
-    _In_ const unsigned long        ulInfoLevel );
+     _In_ const unsigned long        cbMax,
+      _In_ const unsigned long        ulInfoLevel );
 
 #endif /* WINAPI_FAMILY_PARTITION(WINAPI_PARTITION_DESKTOP) */
 #pragma endregion
@@ -7160,30 +7162,34 @@ JetIdle(
 
 //  Database parameters
 //
-//      JET_dbparamBase                     8192    //  All JET_dbparams designed to be distinct from system / JET_params and JET_sesparams for code defense.
+//      JET_dbparamBase                     8192     //  All JET_dbparams designed to be distinct from system / JET_params and JET_sesparams for code defense.
 
-#define JET_dbparamDbSizeMaxPages           8193    //  This is equivalent to the cpgDatabaseSizeMax parameter passed into JetAttachDatabase2 and
-                                                    //  JetCreateDatabase2, i.e., it determines the maximum size of the database in number of pages.
+#define JET_dbparamDbSizeMaxPages           8193     //  This is equivalent to the cpgDatabaseSizeMax parameter passed into JetAttachDatabase2 and
+                                                     //  JetCreateDatabase2, i.e., it determines the maximum size of the database in number of pages.
 
-#define JET_dbparamCachePriority            8194    //  Cache priority to be assigned to database pages from a specific database.
-                                                    //  See comment next to JET_paramCachePriority for how JET_sesparamCachePriority,
-                                                    //  JET_dbparamCachePriority and JET_paramCachePriority interact.
+#define JET_dbparamCachePriority            8194     //  Cache priority to be assigned to database pages from a specific database.
+                                                     //  See comment next to JET_paramCachePriority for how JET_sesparamCachePriority,
+                                                     //  JET_dbparamCachePriority and JET_paramCachePriority interact.
 
-#define JET_dbparamShrinkDatabaseOptions    8195    //  Options for database shrink. The default value is 0 (no options set).
+#define JET_dbparamShrinkDatabaseOptions    8195     //  Options for database shrink. The default value is 0 (no options set).
 
-#define JET_dbparamShrinkDatabaseTimeQuota  8196    //  Time quota (in msec) allocated to database shrink. -1 means "unlimited".
-                                                    //  Valid range is 0 - 7 days, in addition to -1. The default value is -1.
+#define JET_dbparamShrinkDatabaseTimeQuota  8196     //  Time quota (in msec) allocated to database shrink. -1 means "unlimited".
+                                                     //  Valid range is 0 - 7 days, in addition to -1. The default value is -1.
 
-#define JET_dbparamShrinkDatabaseSizeLimit  8197    //  Size below which the engine should stop attempting to shrink a database during attach, in pages.
-                                                    //  The default value is 0 (i.e., shrink until it times out or there is no available space to move
-                                                    //  data into).
+#define JET_dbparamShrinkDatabaseSizeLimit  8197     //  Size below which the engine should stop attempting to shrink a database during attach, in pages.
+                                                     //  The default value is 0 (i.e., shrink until it times out or there is no available space to move
+                                                     //  data into).
 
 #define JET_dbparamLeakReclaimerEnabled     8198    //  Enable reclaiming leaks during database attachment.
 
 #define JET_dbparamLeakReclaimerTimeQuota   8199    //  Time quota (in msec) allocated to database leak reclaimer. -1 means "unlimited".
                                                     //  Valid range is 0 - 7 days, in addition to -1. The default value is -1.
 
-#define JET_dbparamMaxValueInvalid          8200    //  This is not a valid database parameter. It can change from release to release!
+#define JET_dbparamMaintainExtentPageCountCache 8200 //  If non-zero, the ExtentPageCountCache table will be created and maintained.
+                                                     //  If zero, the ExtentPageCountCache table will be removed, if it exists.
+                                                     //  The default value is 0 (i.e. remove unless explicitly told to keep).
+
+#define JET_dbparamMaxValueInvalid          8201     //  This is not a valid database parameter. It can change from release to release!
 
 
 // Values for JET_dbparamShrinkDatabaseOptions.
