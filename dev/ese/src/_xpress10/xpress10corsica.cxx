@@ -25,8 +25,7 @@
 
 #include "CorsicaApi.h"
 
-#include "osu.hxx"
-#include "jet.h"
+#include "xpress10corsica.h"
 
 // Number of compression-encrytion and decompression-decryption queues that the current hardware
 // revision supports. Given that our payloads are at most 8k, unclear if we actually need 8 queues
@@ -34,11 +33,12 @@
 constexpr ULONGLONG NUM_CE_QUEUES = 8;
 constexpr ULONGLONG NUM_DD_QUEUES = 8;
 
-struct CORSICA_WRAPPER : public CZeroInit
+struct CORSICA_WRAPPER
 {
     CORSICA_WRAPPER()
-      : CZeroInit( sizeof( CORSICA_WRAPPER ) )
-    {}
+    {
+        ZeroMemory(this, sizeof(CORSICA_WRAPPER));
+    }
 
     ~CORSICA_WRAPPER()
     {
@@ -69,69 +69,7 @@ struct CORSICA_WRAPPER : public CZeroInit
 
 CORSICA_WRAPPER *g_pWrapper = NULL;
 
-enum CORSICA_FAILURE_REASON
-{
-    FailureReasonUnknown = 0,
-
-    MemoryAllocationFailure,
-    CorsicaLibraryInitializeFailed,
-    CorsicaDeviceEnumeratorCreateFailed,
-    CorsicaDeviceEnumeratorGetCountFailed,
-    TooManyOrTooFewCorsicaDevicesDetected,
-    CorsicaDeviceEnumeratorGetItemFailed,
-    CorsicaDeviceOpenFailed,
-    CorsicaDeviceQueryInformationFailed,
-    CorsicaDeviceIsInMaintenanceMode,
-    CorsicaDeviceQueryUserResourcesFailed,
-    TooManyOrTooFewQueueGroupsDetected,
-    CorsicaChannelCreateFailed,
-    CorsicaChannelAddResourceFailed,
-    CorsicaChannelFinalizeFailed,
-
-    CorsicaRequestQueryAuxiliaryBufferSizeFailed,
-    EngineAuxBufferNotInExpectedFormat,
-    UserAuxBufferSizeNotInExpectedFormat,
-    CorsicaRequestGetBackingBufferSizeFailed,
-    RequestContextSizeTooBig,
-    CorsicaRequestInitializeFailed,
-    CorsicaRequestGetResponsePointerFailed,
-    CorsicaRequestSetBuffersFailed,
-    CorsicaRequestExecuteFailed,
-    EngineExecutionError,
-};
-
-PCWSTR ReasonToString[] =
-{
-    L"UnknownFailure",
-
-    L"MemoryAllocationFailure",
-    L"CorsicaLibraryInitializeFailed",
-    L"CorsicaDeviceEnumeratorCreateFailed",
-    L"CorsicaDeviceEnumeratorGetCountFailed",
-    L"TooManyOrTooFewCorsicaDevicesDetected",
-    L"CorsicaDeviceEnumeratorGetItemFailed",
-    L"CorsicaDeviceOpenFailed",
-    L"CorsicaDeviceQueryInformationFailed",
-    L"CorsicaDeviceIsInMaintenanceMode",
-    L"CorsicaDeviceQueryUserResourcesFailed",
-    L"TooManyOrTooFewQueueGroupsDetected",
-    L"CorsicaChannelCreateFailed",
-    L"CorsicaChannelAddResourceFailed",
-    L"CorsicaChannelFinalizeFailed",
-
-    L"CorsicaRequestQueryAuxiliaryBufferSizeFailed",
-    L"EngineAuxBufferNotInExpectedFormat",
-    L"UserAuxBufferSizeNotInExpectedFormat",
-    L"CorsicaRequestGetBackingBufferSizeFailed",
-    L"RequestContextSizeTooBig",
-    L"CorsicaRequestInitializeFailed",
-    L"CorsicaRequestGetResponsePointerFailed",
-    L"CorsicaRequestSetBuffersFailed",
-    L"CorsicaRequestExecuteFailed",
-    L"EngineExecutionError",
-};
-
-BOOL FXpress10CorsicaHealthy()
+BOOL IsXpress10CorsicaHealthy()
 {
     return g_pWrapper != NULL && g_pWrapper->m_fHealthy;
 }
@@ -142,9 +80,8 @@ VOID Xpress10CorsicaTerm()
     g_pWrapper = NULL;
 }
 
-ERR ErrXpress10CorsicaInit()
+HRESULT Xpress10CorsicaInit( _Out_ CORSICA_FAILURE_REASON *pReason )
 {
-    ERR err = ErrERRCheck( JET_errDeviceFailure );
     CORSICA_STATUS status = 0;
     CORSICA_FAILURE_REASON reason = FailureReasonUnknown;
     ULONG count;
@@ -159,6 +96,7 @@ ERR ErrXpress10CorsicaInit()
     g_pWrapper = new CORSICA_WRAPPER;
     if ( g_pWrapper == NULL )
     {
+        status = HRESULT_FROM_WIN32( ERROR_NOT_ENOUGH_MEMORY );
         reason = MemoryAllocationFailure;
         goto HandleError;
     }
@@ -196,6 +134,7 @@ ERR ErrXpress10CorsicaInit()
 
     if ( count != 1 )
     {
+        status = HRESULT_FROM_WIN32( ERROR_DEV_NOT_EXIST );
         reason = TooManyOrTooFewCorsicaDevicesDetected;
         goto HandleError;
     }
@@ -225,6 +164,7 @@ ERR ErrXpress10CorsicaInit()
 
     if ( deviceInformation.Flags.MaintenanceMode == TRUE )
     {
+        status = HRESULT_FROM_WIN32( ERROR_DEVICE_IN_MAINTENANCE );
         reason = CorsicaDeviceIsInMaintenanceMode;
         goto HandleError;
     }
@@ -239,6 +179,7 @@ ERR ErrXpress10CorsicaInit()
 
     if ( userResources.QueueGroupCount <= 1 )
     {
+        status = HRESULT_FROM_WIN32( ERROR_DEVICE_NO_RESOURCES );
         reason = TooManyOrTooFewQueueGroupsDetected;
         goto HandleError;
     }
@@ -291,8 +232,7 @@ ERR ErrXpress10CorsicaInit()
         goto HandleError;
     }
 
-    g_pWrapper->m_fHealthy = fTrue;
-    err = JET_errSuccess;
+    g_pWrapper->m_fHealthy = true;
 
 HandleError:
     if ( hDeviceEnum != NULL )
@@ -307,36 +247,27 @@ HandleError:
         hLibrary = NULL;
     }
 
-    if ( err < JET_errSuccess )
+    *pReason = reason;
+    if (FAILED(status))
     {
-        WCHAR wszStatus[16];
-        PCWSTR rgwsz[2];
-        OSStrCbFormatW( wszStatus, sizeof(wszStatus), L"%d", status );
-        rgwsz[0] = wszStatus;
-        rgwsz[1] = ReasonToString[ reason ];
-        UtilReportEvent(
-            eventWarning,
-            GENERAL_CATEGORY,
-            CORSICA_INIT_FAILED_ID,
-            2,
-            rgwsz );
-
         Xpress10CorsicaTerm();
     }
-    return err;
+    return status;
 }
 
 // Temp: error code for when output buffer is not big enough to hold the output
 // Adding until Corsica folks add it to their redist header
 #define CORSICA_BUFFER_OVERRUN 192
 
-LOCAL ERR InternalCorsicaRequest(
+static CORSICA_STATUS InternalCorsicaRequest(
     CORSICA_REQUEST_PARAMETERS* pRequestParameters,
     CORSICA_REQUEST_BUFFERS* pRequestBuffers,
     ULONG* pEngineOutputCb,
-    QWORD* pdhrtHardwareLatency )
+    ULONGLONG* pdhrtHardwareLatency,
+    CORSICA_FAILURE_REASON *pReason,
+    USHORT *pEngineErrorCode
+)
 {
-    ERR err = ErrERRCheck( JET_errDeviceFailure );
     CORSICA_FAILURE_REASON reason = FailureReasonUnknown;
     CORSICA_STATUS status = -1;
     CORSICA_HANDLE hRequest = (CORSICA_HANDLE)-1;
@@ -357,12 +288,14 @@ LOCAL ERR InternalCorsicaRequest(
 
     if ( engineAuxBufferSize != sizeof(CORSICA_AUX_FRAME_DATA_IN_PLACE_SHORT_IM) )
     {
+        status = HRESULT_FROM_WIN32( ERROR_INCORRECT_SIZE );
         reason = EngineAuxBufferNotInExpectedFormat;
         goto HandleError;
     }
 
     if ( userAuxBufferSize != 0 )
     {
+        status = HRESULT_FROM_WIN32( ERROR_INCORRECT_SIZE );
         reason = UserAuxBufferSizeNotInExpectedFormat;
         goto HandleError;
     }
@@ -376,6 +309,7 @@ LOCAL ERR InternalCorsicaRequest(
 
     if ( uRequestContextSize > sizeof(requestContext) )
     {
+        status = HRESULT_FROM_WIN32( ERROR_INCORRECT_SIZE );
         reason = RequestContextSizeTooBig;
         goto HandleError;
     }
@@ -410,15 +344,20 @@ LOCAL ERR InternalCorsicaRequest(
 
     if ( pEngineResponsePointer->StatusCode != CORSICA_REQUEST_STATUS_SUCCESS )
     {
-        status = pEngineResponsePointer->StatusCode;
+        if ( pEngineResponsePointer->StatusCode == CORSICA_BUFFER_OVERRUN )
+        {
+            status = HRESULT_FROM_WIN32( ERROR_INSUFFICIENT_BUFFER );
+        }
+        else
+        {
+            status = HRESULT_FROM_WIN32( pEngineResponsePointer->StatusCode );
+        }
         reason = EngineExecutionError;
         goto HandleError;
     }
 
     *pEngineOutputCb = pEngineResponsePointer->OutputDataCb;
     *pdhrtHardwareLatency = pEngineResponsePointer->Latency;
-
-    err = JET_errSuccess;
 
  HandleError:
     if ( hRequest != NULL )
@@ -427,51 +366,34 @@ LOCAL ERR InternalCorsicaRequest(
         hRequest = NULL;
     }
 
-    if ( err < JET_errSuccess &&
-         // compression can report buffer overrun for uncompressible input, no need to event for that.
-         ( status != CORSICA_BUFFER_OVERRUN || pRequestParameters->DecryptDecompress ) )
-    {
-        if ( reason == EngineExecutionError && pEngineResponsePointer->EngineErrorCode != 0 )
-        {
-            g_pWrapper->m_fHealthy = fFalse;
-        }
+    *pReason = reason;
+    *pEngineErrorCode = pEngineResponsePointer ? pEngineResponsePointer->EngineErrorCode : -1;
 
-        WCHAR wszStatus[16], wszEngineStatus[16];
-        PCWSTR rgwsz[4];
-        OSStrCbFormatW( wszStatus, sizeof(wszStatus), L"%d", status );
-        rgwsz[0] = wszStatus;
-        OSStrCbFormatW( wszEngineStatus, sizeof(wszEngineStatus), L"%d", pEngineResponsePointer ? pEngineResponsePointer->EngineErrorCode : -1 );
-        rgwsz[1] = wszEngineStatus;
-        rgwsz[2] = ReasonToString[ reason ];
-        rgwsz[3] = pRequestParameters->DecryptDecompress ? L"Decompress" : L"Compress";
-        UtilReportEvent(
-            eventWarning,
-            GENERAL_CATEGORY,
-            CORSICA_REQUEST_FAILED_ID,
-            _countof(rgwsz),
-            rgwsz );
+    if ( FAILED(status) && reason == EngineExecutionError && pEngineResponsePointer->EngineErrorCode != 0 )
+    {
+        g_pWrapper->m_fHealthy = false;
     }
 
-    return err;
+    return status;
 }
 
-ERR ErrXpress10CorsicaCompress(
+HRESULT Xpress10CorsicaCompress(
     _In_reads_bytes_(UncompressedBufferSize) const BYTE * UncompressedBuffer,
     _In_ ULONG UncompressedBufferSize,
     _Out_writes_bytes_to_(CompressedBufferSize, *FinalCompressedSize) BYTE * CompressedBuffer,
     _In_ ULONG CompressedBufferSize,
     _Out_ PULONG FinalCompressedSize,
     _Out_ PULONGLONG pCrc,
-    _Out_ QWORD *pdhrtHardwareLatency
+    _Out_ ULONGLONG *pdhrtHardwareLatency,
+    _Out_ CORSICA_FAILURE_REASON *pReason,
+    _Out_ USHORT *pEngineErrorCode
 )
 {
-    ERR err = JET_errSuccess;
-
     CORSICA_REQUEST_PARAMETERS requestParameters;
     CORSICA_REQUEST_PARAMETERS_INIT(&requestParameters);
     // Just round-robin the queues rather than keeping track and trying to find an empty queue.
     // Maybe if we started compressing/decompressing larger payload, we may need a different allocation mechanism.
-    requestParameters.QueueId = g_pWrapper->m_rgusDefaultCeQueueId[ AtomicIncrement( &g_pWrapper->m_lLastUsedCeQueueId ) % NUM_CE_QUEUES ];
+    requestParameters.QueueId = g_pWrapper->m_rgusDefaultCeQueueId[ InterlockedIncrement( &g_pWrapper->m_lLastUsedCeQueueId ) % NUM_CE_QUEUES ];
     requestParameters.DecryptDecompress = false;
     requestParameters.FrameParameters.FrameType = CorsicaFrameTypeNone;
 
@@ -507,38 +429,36 @@ ERR ErrXpress10CorsicaCompress(
     requestBuffers.DestinationAuxFrameBufferList = &destinationAuxBufferElement;
     requestBuffers.DestinationAuxFrameBufferListCount = 1;
 
-    Call( InternalCorsicaRequest(
+    CORSICA_STATUS status =
+        InternalCorsicaRequest(
                 &requestParameters,
                 &requestBuffers,
                 FinalCompressedSize,
-                pdhrtHardwareLatency ) );
+                pdhrtHardwareLatency,
+                pReason,
+                pEngineErrorCode);
     *pCrc = auxFrame.CipherDataChecksum;
 
-HandleError:
-    if ( err < JET_errSuccess )
-    {
-        err = errRECCannotCompress;
-    }
-    return err;
+    return status;
 }
 
-ERR ErrXpress10CorsicaDecompress(
+HRESULT Xpress10CorsicaDecompress(
     _Out_writes_bytes_to_(UncompressedBufferSize, *FinalUncompressedSize) BYTE * UncompressedBuffer,
     _In_ ULONG UncompressedBufferSize,
     _In_reads_bytes_(CompressedBufferSize) const BYTE * CompressedBuffer,
     _In_ ULONG CompressedBufferSize,
     _In_ ULONGLONG Crc,
     _Out_ PULONG FinalUncompressedSize,
-    _Out_ QWORD *pdhrtHardwareLatency
+    _Out_ ULONGLONG *pdhrtHardwareLatency,
+    _Out_ CORSICA_FAILURE_REASON *pReason,
+    _Out_ USHORT *pEngineErrorCode
 )
 {
-    ERR err = JET_errSuccess;
-
     CORSICA_REQUEST_PARAMETERS requestParameters;
     CORSICA_REQUEST_PARAMETERS_INIT(&requestParameters);
     // Just round-robin the queues rather than keeping track and trying to find an empty queue.
     // Maybe if we started compressing/decompressing larger payload, we may need a different allocation mechanism.
-    requestParameters.QueueId = g_pWrapper->m_rgusDefaultDdQueueId[ AtomicIncrement( &g_pWrapper->m_lLastUsedDdQueueId ) % NUM_DD_QUEUES ];
+    requestParameters.QueueId = g_pWrapper->m_rgusDefaultDdQueueId[ InterlockedIncrement( &g_pWrapper->m_lLastUsedDdQueueId ) % NUM_DD_QUEUES ];
     requestParameters.DecryptDecompress = true;
     requestParameters.FrameParameters.FrameType = CorsicaFrameTypeNone;
 
@@ -577,12 +497,12 @@ ERR ErrXpress10CorsicaDecompress(
 
     requestBuffers.DestinationAuxFrameBufferListCount = 0;
 
-    err = InternalCorsicaRequest(
+    return InternalCorsicaRequest(
             &requestParameters,
             &requestBuffers,
             FinalUncompressedSize,
-            pdhrtHardwareLatency );
-
-    return err;
+            pdhrtHardwareLatency,
+            pReason,
+            pEngineErrorCode);
 }
 
