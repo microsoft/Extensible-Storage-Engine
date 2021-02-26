@@ -13,6 +13,7 @@ const CHAR  szMSONameIndex[]        = "Name";
 const CHAR  szMSORootObjectsIndex[] = "RootObjects";
 
 const CHAR  szMSObjids[]            = "MSysObjids";
+const CHAR  szMSExtentPageCountCache[] = "MSysExtentPageCountCache";
 
 const CHAR  szMSLocales[]           = "MSysLocales";
 const WCHAR wszMSLocales[]          = L"MSysLocales";   // MUST match

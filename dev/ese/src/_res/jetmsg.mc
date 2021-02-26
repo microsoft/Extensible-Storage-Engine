@@ -2004,6 +2004,78 @@ Language=English
 %1 (%2) %3The revert snapshot file at "%4" is corrupt with reason '%5' at offset %6, segment %7. The expected checksum was %8 and the actual checksum was %9.
 .
 
+MessageId=647
+SymbolicName=EXTENT_PAGE_COUNT_CACHE_IN_USE_ID
+Language=English
+%1 (%2) %3The Extent Page Count Cache is enabled in database %4 for reason %5.
+.
+
+MessageId=648
+SymbolicName=EXTENT_PAGE_COUNT_CACHE_NOT_IN_USE_ID
+Language=English
+%1 (%2) %3The Extent Page Count Cache is disabled in database %4 for reason %5.
+.
+
+MessageId=649
+SymbolicName=EXTENT_PAGE_COUNT_CACHE_CREATED_ID
+Language=English
+%1 (%2) %3The Extent Page Count Cache table was created in database %4 for reason %5.
+.
+
+MessageId=650
+SymbolicName=EXTENT_PAGE_COUNT_CACHE_DELETED_ID
+Language=English
+%1 (%2) %3The Extent Page Count Cache table was deleted in database %4 for reason %5.
+.
+
+MessageId=651
+SymbolicName=EXTENT_PAGE_COUNT_CACHE_TRACK_ON_CREATE_ENABLED_ID
+Language=English
+%1 (%2) %3Newly created tables will be tracked immediately by the Extent Page Count Cache.
+.
+
+MessageId=652
+SymbolicName=EXTENT_PAGE_COUNT_CACHE_EXTENSIVE_VALIDATION_ENABLED_ID
+Language=English
+%1 (%2) %3Extra validation of the Extent Page Count Cache table is enabled.  This is resource intensive and will adversely affect performance.
+.
+
+MessageId=653
+SymbolicName=EXTENT_PAGE_COUNT_CACHE_OPERATION_FAILED_ID
+Language=English
+%1 (%2) %3An operation in the Extent Page Count Cache table failed.%n
+Database: %4%n
+Operation: %5%n
+Note: %6%n
+Err: %7%n
+ObjidFDP: %8%n
+PgnoFDP: %9%n
+.
+
+MessageId=654
+SymbolicName=EXTENT_PAGE_COUNT_CACHE_PREPARE_FAILED_ID
+Language=English
+%1 (%2) %3Preparing a row in the Extent Page Count Cache table failed.  The cached value may be incorrect.%n
+Database: %4%n
+Objid: %5%n
+PgnoFDP: %6%n
+Err: %7%n
+.
+
+MessageId=655
+SymbolicName=EXTENT_PAGE_COUNT_CACHE_EXTENSIVE_VALIDATION_FAILED_ID
+Language=English
+%1 (%2) %3Extra validation of the Extent Page Count Cache table failed.%n
+Database: %4%n
+Objid: %5%n
+PgnoFDP: %6%n
+Counted CpgOE: %7%n
+Counted CpgAE: %8%n
+Cached CpgOE: %9%n
+Cached CpgAE: %10%n
+.
+
+
 ;// !!! ARE YOU SURE you're adding this in the right place !!! ???
 
 

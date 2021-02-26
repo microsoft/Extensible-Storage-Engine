@@ -172,7 +172,7 @@ ERR ErrSTATSRetrieveTableStats(
     FUCB        * pfucb;
     SR          sr;
 
-    CallR( ErrFILEOpenTable( ppib, ifmp, &pfucb, szTable ) );
+    CallR( ErrFILEOpenTable( ppib, ifmp, &pfucb, szTable, JET_bitTableReadOnly ) );
 
     Call( ErrCATStats(
                 pfucb->ppib,

@@ -228,15 +228,73 @@ ERR ErrDIRSetRootField( _In_ FUCB* const pfucb, _In_ const NodeRootField noderf,
 INLINE VOID AssertDIRNoLatch( PIB *ppib )
 {
 #ifdef DEBUG
-    if ( !ppib->FBatchIndexCreation() )
+    if ( ppib->FBatchIndexCreation() )
     {
-        for ( FUCB * pfucb = ppib->pfucbOfSession; pfucb != pfucbNil; pfucb = pfucb->pfucbNextOfSession )
-        {
-            Assert( !Pcsr( pfucb )->FLatched() );
-        }
+        // Multiple threads are using this PIB, so it's possible to have random pages latched.
+        return;
+    }
+
+    for ( FUCB * pfucb = ppib->pfucbOfSession; pfucb != pfucbNil; pfucb = pfucb->pfucbNextOfSession )
+    {
+        Assert( !Pcsr( pfucb )->FLatched() );
     }
 #endif  //  DEBUG
 }
+
+INLINE VOID AssertDIRMaybeNoLatch( PIB *ppib, FUCB *pfucb )
+{
+#ifdef DEBUG
+    // This routine is only called from code paths that may validly be working on updating the Cpg cache.
+
+    if ( pfucbNil == pfucb ) {
+        AssertSz( fFalse, "Don't call this routine without providing an FUCB*" );
+        return;
+    }
+
+    Assert( pfucb->ppib == ppib );
+
+    if ( ppib->FUpdatingExtentPageCountCache() )
+    {
+        // We're in the process of updating the Cpg cache.
+
+        // In that case, we EXPECT various pages to be latched.  For example, the root page of the object
+        // whose update is causing the update to the Cpg Cache must be latched, various other pages belonging
+        // to that object may be latched, and there can be root pages latched in ancestor objects of that object
+        // if we had to get new extents from parents.  Unfortunately, it's non-trivial to locate all
+        // the objects and pages that may be latched in that case, making Assertions prohibitive.
+        //
+        // Obviously, we have to be very careful to only need latches in the Cache table at this point lest
+        // we deadlock on attempting to acquire latches.
+        //
+
+        // We only expect to be here in limited conditions.
+        if ( PfmpFromIfmp( pfucb->ifmp )->ObjidExtentPageCountCacheFDP() == pfucb->u.pfcb->ObjidFDP() )
+        {
+            // We're in the process of updating the Cpg cache AND we're actually working on the CpgCache table.
+            return;
+        }
+
+        // defined in cat.hxx, which is generally not included until after this file.
+        extern const OBJID  objidFDPMSO;
+        if ( objidFDPMSO == pfucb->u.pfcb->ObjidFDP() )
+        {
+            // We're in the process of updating the Cpg cache AND we're working with the catalog.  This happens
+            // normally when we we're opening the CpgCache table and we need to look up info about the table in
+            // the catalog.
+            return;
+        }
+
+        Assert( fFalse );
+
+    }
+    else
+    {
+        AssertDIRNoLatch( ppib );
+    }
+    
+#endif
+}
+
 
 INLINE VOID AssertDIRGet( FUCB *pfucb )
 {
@@ -247,7 +305,7 @@ INLINE VOID AssertDIRGet( FUCB *pfucb )
     AssertBTGet( pfucb );
 #endif  //  DEBUG
 }
-    
+
 
 //  ***********************************************
 //  INLINE ROUTINES

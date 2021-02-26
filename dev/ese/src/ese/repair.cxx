@@ -1590,9 +1590,12 @@ ERR ErrDBUTLRepair( JET_SESID sesid, const JET_DBUTIL_W *pdbutil, CPRINTF* const
 
             if ( fGlobalSpaceCorrupt )
             {
-                (*popts->pcprintfError)( "Global space tree is too small (has %d pages, file is %d pages) and there objects which own space beyond the logical size of the file. "
-                                         "The space tree will be rebuilt\r\n",
-                                        pgnoLastLogical, pgnoLastPhysical );
+                (*popts->pcprintfError)(
+                    "Global space tree is too small (has %d pages, file is %d pages) and "
+                    "there are objects which own space beyond the logical size of the file. "
+                    "The space tree will be rebuilt\r\n",
+                    pgnoLastLogical,
+                    pgnoLastPhysical );
             }
         }
     }
@@ -8191,16 +8194,25 @@ LOCAL ERR ErrREPAIRRepairGlobalSpace(
     (*popts->pcprintfVerbose)( "repairing database root\r\n" );
 
     OBJID           objidFDP;
+    CPG             cpgOEFDP;
+    CPG             cpgAEFDP;
+
     Call( ErrSPCreate(
                 ppib,
                 ifmp,
                 pgnoNull,
                 pgnoSystemRoot,
-                3,
+                cpgMultipleExtentMin,
                 fSPMultipleExtent,
                 (ULONG)CPAGE::fPagePrimary,
-                &objidFDP ) );
+                &objidFDP,
+                &cpgOEFDP,
+                &cpgAEFDP ) );
     Assert( objidSystemRoot == objidFDP );
+
+    // We're in the middle of repairing and the ExtentPageCountCache largely doesn't survive that.
+    // So, don't bother adding the (objidFDP, cpgOEFDP, cpgAEFDP) triplet to the
+    // cache.
 
     Call( ErrDIROpen( ppib, pgnoSystemRoot, ifmp, &pfucb ) );
 
@@ -8543,7 +8555,7 @@ LOCAL ERR ErrREPAIRRepairCatalogs(
             pgnoFDPMSO+1,
             pgnoFDPMSO+2,
             pgnoFDPMSO+2,
-            3,
+            cpgMultipleExtentMin,
             fTrue,
             CPAGE::fPagePrimary ) );
 
@@ -8559,6 +8571,10 @@ LOCAL ERR ErrREPAIRRepairCatalogs(
             pfucbCatalog->u.pfcb->Lock();
             pfucbCatalog->u.pfcb->SetSpaceInitialized();
             pfucbCatalog->u.pfcb->Unlock();
+            // If we tracked ExtentPageCountCache for this sort of table, we'd call:
+            // pfucbCatalog->u.pfcb->SetCpgAE( 0 );
+            // pfucbCatalog->u.pfcb->SetCpgOE( cpgMultipleExtentMin );
+            // But, we don't track Cpg for sort tables.
         }
         Call( ErrSPIOpenOwnExt( ppib, pfucbCatalog->u.pfcb, &pfucbSpace ) );
 #ifdef REPAIR_DEBUG_VERBOSE_SPACE
@@ -8976,7 +8992,7 @@ LOCAL ERR ErrREPAIRCopyTempTableToCatalog(
         pgnoFDPMSO+1,
         pgnoFDPMSO+2,
         pgnoFDPMSO+2,
-        3,
+        cpgMultipleExtentMin,
         fTrue,
         CPAGE::fPagePrimary ) );
 
@@ -8992,6 +9008,10 @@ LOCAL ERR ErrREPAIRCopyTempTableToCatalog(
         pfucbCatalog->u.pfcb->Lock();
         pfucbCatalog->u.pfcb->SetSpaceInitialized();
         pfucbCatalog->u.pfcb->Unlock();
+        // If we tracked ExtentPageCountCache for this sort of table, we'd call:
+        // pfucbCatalog->u.pfcb->SetCpgAE( 0 );
+        // pfucbCatalog->u.pfcb->SetCpgOE( cpgMultipleExtentMin );
+        // But, we don't track Cpg for sort tables.
     }
     Call( ErrSPIOpenOwnExt( ppib, pfucbCatalog->u.pfcb, &pfucbSpace ) );
 #ifdef REPAIR_DEBUG_VERBOSE_SPACE
@@ -9086,7 +9106,8 @@ LOCAL ERR ErrREPAIRRepairDatabase(
     Assert( pfAttached );
 
     ERR err = JET_errSuccess;
-
+    BOOL fDeleteExtentPageCountCache = fFalse;
+    
     const JET_SESID sesid = (JET_SESID)ppib;
 
     REPAIRTT repairtt;
@@ -9104,6 +9125,11 @@ LOCAL ERR ErrREPAIRRepairDatabase(
 
     INT             cTablesToRepair         = 0;
 
+    ULONG           ulParamVal = 1;
+    JET_SETDBPARAM  setdbparam = { JET_dbparamMaintainExtentPageCountCache, &ulParamVal, sizeof( ulParamVal ) };
+    JET_SETDBPARAM  *psetdbparam = NULL;
+    ULONG           csetdbparam = 0;
+    
     OBJIDLIST   objidlist;
 
     //  get a list of objids we'll be repairing
@@ -9157,9 +9183,12 @@ LOCAL ERR ErrREPAIRRepairDatabase(
 
     if ( pgnoLastOESeen > pgnoLastOE )
     {
-        (*popts->pcprintfError)( "Global space tree is too small (has %d pages, seen %d pages) and there pages beyond the logical size of the file which appear to contain valid data. "
-                                 "The space tree will be rebuilt\r\n",
-                                 pgnoLastOE, pgnoLastOESeen );
+        (*popts->pcprintfError)(
+            "Global space tree is too small (has %d pages, seen %d pages) and there "
+            "are pages beyond the logical size of the file which appear to contain "
+            "valid data. The space tree will be rebuilt\r\n",
+            pgnoLastOE,
+            pgnoLastOESeen );
         fRepairGlobalSpace = fTrue;
     }
 
@@ -9182,16 +9211,18 @@ LOCAL ERR ErrREPAIRRepairDatabase(
             objidFDPLast,
             popts ) );
 
+    
     // Check new catalog and add system table entries if they did not exist
     if ( fRepairedCatalog )
     {
+        fDeleteExtentPageCountCache = fTrue;
         Call( ErrREPAIRInsertMSOEntriesToCatalog( ppib, *pifmp, popts ) );
     }
 
     (*popts->pcprintf)( "\r\nRepairing damaged tables.\r\n"  );
     (VOID)popts->pfnStatus( sesid, JET_snpRepair, JET_sntBegin, NULL );
 
-    //  for the progress baruse the number of things we are going to repair
+    //  for the progress bar use the number of things we are going to repair
     //  (a really bad approximation, but better than nothing)
 
     popts->psnprog->cunitTotal  = 0;
@@ -9200,11 +9231,10 @@ LOCAL ERR ErrREPAIRRepairDatabase(
 
     if ( fRepairGlobalSpace )
     {
-        ++(popts->psnprog->cunitTotal);
-    }
+        fDeleteExtentPageCountCache = fTrue;
 
-    if ( fRepairGlobalSpace )
-    {
+        ++(popts->psnprog->cunitTotal);
+
         Assert( 0 == popts->psnprog->cunitDone );
         Call( ErrREPAIRRepairGlobalSpace( ppib, *pifmp, popts ) );
         ++(popts->psnprog->cunitDone);
@@ -9214,15 +9244,19 @@ LOCAL ERR ErrREPAIRRepairDatabase(
 
     if ( prepairtable )
     {
+        fDeleteExtentPageCountCache = fTrue;
+        
         //  delete the unicode fixup table (MSU) and reset the fixup flag on all indexes
         (*popts->pcprintfVerbose)( "\r\nDeleting unicode fixup table.\r\n"  );
         Call( ErrCATDeleteMSU( ppib, *pifmp ) );
     }
-
+    
     const BOOL fMsoDependentsOutOfDate = ( prepairtable || fRepairedCatalog || fRepairGlobalSpace );
 
     if ( fMsoDependentsOutOfDate || fRepairMSObjids )
     {
+        fDeleteExtentPageCountCache = fTrue;
+        
         //  delete the MSObjids table. the below attach will rebuild it
         (*popts->pcprintfVerbose)( "\r\nDeleting MSObjids.\r\n"  );
         Call( ErrCATDeleteMSObjids( ppib, *pifmp ) );
@@ -9230,6 +9264,8 @@ LOCAL ERR ErrREPAIRRepairDatabase(
 
     if ( fMsoDependentsOutOfDate || fRepairMSLocales )
     {
+        fDeleteExtentPageCountCache = fTrue;
+        
         //  Delete the MSysLocales table. the below attach will rebuild it.
         (*popts->pcprintfVerbose)( "\r\nDeleting MSysLocales.\r\n"  );
         CATTermMSLocales( &(g_rgfmp[*pifmp]) );
@@ -9259,6 +9295,8 @@ LOCAL ERR ErrREPAIRRepairDatabase(
             FCB::PurgeDatabase( *pifmp, fFalse /* fTerminating */ );
             Call( ErrREPAIRRepairTable( ppib, *pifmp, &repairtt, prepairtableT, popts ) );
 
+            fDeleteExtentPageCountCache = fTrue;
+            
             //  Flush the entire database so that if we crash here we don't have to repair this
             //  table again
 
@@ -9276,6 +9314,19 @@ LOCAL ERR ErrREPAIRRepairDatabase(
     //  here in repair than on the first attach, which may be in the critical path to getting
     //  a service restored.  ALSO the cache will be more likely to have Catalog data pages here.
 
+    if ( fDeleteExtentPageCountCache )
+    {
+        BOOL fTableExisted;
+        //  Delete the MSExtentPageCountCache table, if it exists. The below attach will rebuild it if necessary.
+        (*popts->pcprintfVerbose)( "\r\nDeleting MSExtentPageCountCache.\r\n"  );
+        Call( ErrCATDeleteMSExtentPageCountCache( ppib, *pifmp, EXTENT_CACHE_DELETE_REASON::Repair, &fTableExisted ) );
+        if ( fTableExisted )
+        {
+            psetdbparam = &setdbparam;
+            csetdbparam = 1;
+        }
+    }
+    
     if ( fMsoDependentsOutOfDate || fRepairMSObjids || fRepairMSLocales )
     {
         //  The JET_sntComplete callback prints the final dot of the primary repair status bar,
@@ -9295,7 +9346,7 @@ LOCAL ERR ErrREPAIRRepairDatabase(
 
             (*popts->pcprintfVerbose)( "Reattaching database (for MSO dependent table fixups).\r\n" );
 
-            Call( ErrIsamAttachDatabase( sesid, wszDatabase, fFalse, NULL, 0, JET_bitDbRecoveryOff ) );
+            Call( ErrIsamAttachDatabase( sesid, wszDatabase, fFalse, psetdbparam, csetdbparam, JET_bitDbRecoveryOff ) );
             Assert( JET_wrnDatabaseAttached != err );
 
             // Then it turns g_fRepair back on, and then the database detaches.
@@ -9309,7 +9360,7 @@ LOCAL ERR ErrREPAIRRepairDatabase(
             Call( ErrIsamDetachDatabase( sesid, NULL, wszDatabase ) );
 
             g_fRepair = fTrue;  //  reset it back to true
-            Call( ErrIsamAttachDatabase( sesid, wszDatabase, fFalse, NULL, 0, JET_bitDbRecoveryOff ) );
+            Call( ErrIsamAttachDatabase( sesid, wszDatabase, fFalse, psetdbparam, csetdbparam, JET_bitDbRecoveryOff ) );
             Assert( JET_wrnDatabaseAttached != err );
 
             CallS( ErrIsamOpenDatabase( sesid, wszDatabase, NULL, (JET_DBID*)pifmp, JET_bitDbRecoveryOff ) );   // probably won't fail
@@ -9333,6 +9384,7 @@ LOCAL ERR ErrREPAIRRepairDatabase(
 
     (VOID)popts->pfnStatus( sesid, JET_snpRepair, JET_sntComplete, NULL );
 
+    
 HandleError:
 
     if ( JET_tableidNil != repairtt.tableidBadPages )
@@ -9570,7 +9622,7 @@ LOCAL ERR ErrREPAIRCreateEmptyFDP(
 
     FUCB * pfucb = pfucbNil;
 
-    //  the fucb is just used to get the pib so we open it on the parent
+    //  the fucb is used to get an extent from the parent
     Call( ErrDIROpen( ppib, pgnoParent, ifmp, &pfucb ) );
     if ( pgnoNull == *ppgnoFDPNew )
     {
@@ -9786,10 +9838,13 @@ LOCAL ERR ErrREPAIRRebuildSpace(
     {
         pfucb->u.pfcb->SetPgnoOE( pfucb->u.pfcb->PgnoFDP()+1 );
         pfucb->u.pfcb->SetPgnoAE( pfucb->u.pfcb->PgnoFDP()+2 );
-
         pfucb->u.pfcb->Lock();
         pfucb->u.pfcb->SetSpaceInitialized();
         pfucb->u.pfcb->Unlock();
+        // If we tracked ExtentPageCountCache for this sort of table, we'd call:
+        // pfucbCatalog->u.pfcb->SetCpgAE( 0 );
+        // pfucbCatalog->u.pfcb->SetCpgOE( cpgMultipleExtentMin );
+        // But, we don't track Cpg for sort tables.
     }
 
     Call( repairrunOwnedExt.ErrREPAIRRUNInit() );
@@ -9880,7 +9935,19 @@ LOCAL ERR ErrREPAIRInsertRunIntoSpaceTree(
     data.SetPv( &le_cpgRun );
     data.SetCb( sizeof(cpgRun) );
 
+    Call( ErrCATAdjustExtentPageCountsPrepare( pfucb ) );
     Call( ErrBTInsert( pfucb, key, data, fDIRNoVersion | fDIRNoLog ) );
+
+    if ( pfucb->fOwnExt )
+    {
+        CATAdjustExtentPageCounts( pfucb, cpgRun, 0 );
+    }
+    else
+    {
+        Assert( pfucb->fAvailExt );
+        CATAdjustExtentPageCounts( pfucb, 0, cpgRun );
+    }
+
     BTUp( pfucb );
 
 HandleError:

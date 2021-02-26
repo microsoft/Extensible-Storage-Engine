@@ -2731,9 +2731,19 @@ inline BOOL FLogFormatUnifiedMinorUpdateVersion( const ULONG ulMajor, const ULON
 #define attribDb    0
 // #define  attribSLV   1 // Obsolete
 
+// m_rgbDbFlags[0] - flags for first byte
+//
 const BYTE  fDbShadowingDisabled    = 0x01;
 const BYTE  fDbUpgradeDb            = 0x02;
 // const BYTE   fDbSLVExists        = 0x04; // Obsolete
+
+// m_rgbDbFlags[3] - flags for third byte (of flags)
+//
+//  Note: We only add the DbBuild flags, we do not remove ... so it is a accretion of all variants of ESE that have attached.
+const BYTE  fDbBuildEsentAttached   = 0x01;
+const BYTE  fDbBuildEseAttached     = 0x02;
+const BYTE  fDbBuildPrivate         = 0x04;
+const BYTE  fDbExternalExtentCacheBuildOption  = 0x08;
 
 //  typedef struct _dbfilehdr_fixed
 //  IMPORTANT: This CZeroInit() is NOT a replacement for the actual memset( pdbfilehdr, 0, g_cbPage ) in db.cxx, because 
@@ -2995,6 +3005,9 @@ struct DBFILEHDR : public CZeroInit
     VOID    SetDbstate( const ULONG dbstate, const LONG lGenMin, const LONG lGenMax, const LOGTIME * plogtimeCurrent = NULL, const bool fLogged = fFalse );
     VOID    SetDbstate( const ULONG dbstate, const LONG lGenCurrent = 0, const LOGTIME * plogtimeCurrent = NULL, const bool fLogged = fFalse );
 
+    VOID    SetBuildState();
+    PCSTR   SzBuildFlags() const;
+
     BOOL    FShadowingDisabled( ) const     { return m_rgbDbFlags[0] & fDbShadowingDisabled; }
     VOID    SetShadowingDisabled()          { m_rgbDbFlags[0] |= fDbShadowingDisabled; }
 
@@ -3196,6 +3209,8 @@ INLINE VOID DBFILEHDR::SetDbstate( const ULONG dbstate, const LONG lGenMin, cons
         memset( &logtimeGenMaxCreate, '\0', sizeof( LOGTIME ) );
         memset( &logtimeGenMaxRequired, '\0', sizeof( LOGTIME ) );
     }
+
+    SetBuildState();
 }
 
 INLINE VOID DBFILEHDR::SetDbstate( const ULONG dbstate, const LONG lGenCurrent, const LOGTIME * const plogtimeCurrent, const bool fLogged )
@@ -3251,7 +3266,7 @@ INLINE ERR DBFILEHDR::DumpLite( CPRINTF* pcprintf, const char * const szNewLine,
     (*pcprintf)( "         Checksum: 0x%x%s", (ULONG) le_ulChecksum, szNewLine );
     (*pcprintf)( "   Format ulMagic: 0x%x%s", (ULONG) le_ulMagic, szNewLine );
     (*pcprintf)( "   Engine ulMagic: 0x%x%s", ulDAEMagic, szNewLine );
-    (*pcprintf)( " Format ulVersion: %d.%d.%d  (attached by %d)%s", (ULONG) le_ulVersion, (ULONG) le_ulDaeUpdateMajor, (ULONG) le_ulDaeUpdateMinor, (ULONG) le_efvMaxBinAttachDiagnostic, szNewLine );
+    (*pcprintf)( " Format ulVersion: %d.%d.%d  (attached by %d%hs)%s", (ULONG) le_ulVersion, (ULONG) le_ulDaeUpdateMajor, (ULONG) le_ulDaeUpdateMinor, (ULONG) le_efvMaxBinAttachDiagnostic, SzBuildFlags(), szNewLine );
     (*pcprintf)( " Engine ulVersion: %d.%d.%d%s", ulDAEVersionMax, ulDAEUpdateMajorMax, ulDAEUpdateMinorMax, szNewLine );
     (*pcprintf)( "Created ulVersion: %d.%d%s", (ULONG) le_ulCreateVersion, (ULONG) le_ulCreateUpdate, szNewLine );
     (*pcprintf)( "     DB Signature: " );

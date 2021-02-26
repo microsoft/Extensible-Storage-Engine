@@ -2672,6 +2672,7 @@ PM_ICF_PROC LTableClassNamesICFLPwszPpb;
 const WCHAR * const g_wszUnknown    = L"_Unknown";
 const WCHAR * const g_wszCatalog    = L"_Catalog";
 const WCHAR * const g_wszShadowCatalog  = L"_ShadowCatalog";
+const WCHAR * const g_wszExtentPageCountCache = L"_ExtentPageCountCache";
 const WCHAR * const g_wszPrimary    = L" (Primary)";
 const WCHAR * const g_wszLV     = L" (LV)";
 const WCHAR * const g_wszIndex  = L" (Indices)";
@@ -2795,6 +2796,10 @@ VOID InitTableClassNames()
                 wszParam = g_wszShadowCatalog;
                 break;
 
+            case tableclassExtentPageCountCache:
+                wszParam = g_wszExtentPageCountCache;
+                break;
+                
             default:
             {
                 Assert( tableclass >= tableClassPublic );

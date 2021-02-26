@@ -253,6 +253,7 @@ MSINTERNAL enum class MJET_GRBIT
     TableAllowOutOfDate = 0x00000100, // allow opening with indexes using out-of-date (but valid) sort versions
     TableSequential = 0x00008000, // assume the table will be scanned sequentially
     TableTryPurgeOnClose = 0x01000000, // INTERNAL USE ONLY: attempt to cleanup resources when table is closed
+    TableAllowSensitiveOperation = 0x08000000, // INTERNAL USE ONLY
     TableDelete = 0x10000000, // INTERNAL USE ONLY
     TableCreate = 0x20000000, // INTERNAL USE ONLY
     TableClassMask = 0x001F0000, // table stats class mask

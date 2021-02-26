@@ -1403,19 +1403,18 @@ ERR ErrFILEOpenTable(
 // SEE ALSO     ErrFILECloseTable
 //-
 ERR ErrFILEIOpenTable(
-    _In_ PIB            *ppib,
-    _In_ IFMP       ifmp,
-    _Out_ FUCB      **ppfucb,
-    _In_ const CHAR *szName,
-    _In_ ULONG      grbit,
-    _In_opt_ FDPINFO        *pfdpinfo )
+    _In_ PIB         *ppib,
+    _In_ IFMP        ifmp,
+    _Out_ FUCB       **ppfucb,
+    _In_ const CHAR  *szName,
+    _In_ ULONG       grbit,
+    _In_opt_ FDPINFO *pfdpinfo )
 {
     ERR         err;
     ERR         wrnSurvives             = JET_errSuccess;
     FUCB        *pfucb                  = pfucbNil;
     FCB         *pfcb;
     CHAR        szTable[JET_cbNameMost+1];
-    BOOL        fOpeningSys;
     PGNO        pgnoFDP                 = pgnoNull;
     OBJID       objidTable              = objidNil;
     BOOL        fInTransaction          = fFalse;
@@ -1425,6 +1424,14 @@ ERR ErrFILEIOpenTable(
     Assert( ppib != ppibNil );
     Assert( ppfucb != NULL );
     FMP::AssertVALIDIFMP( ifmp );
+
+    typedef enum class TABLE_TYPE {
+        System,
+        ExtentPageCountCache,
+        Temp,
+        Normal } tt;
+
+    TABLE_TYPE ttSubject;
 
     //  initialize return value to Nil
     //
@@ -1451,39 +1458,106 @@ ERR ErrFILEIOpenTable(
             (ULONG)ifmp,
             grbit ) );
 
-    fOpeningSys = FCATSystemTable( szTable );
-
-    if ( NULL == pfdpinfo )
+    if ( FCATSystemTable( szTable ) )
     {
-        if ( FFMPIsTempDB( ifmp ) )
+        ttSubject = tt::System;
+        Assert( !FFMPIsTempDB( ifmp ) );
+    }
+    else if ( FCATExtentPageCountCacheTable( szTable ) )
+    {
+        // The Extent Page Count Cache doesn't always exist, but when it exists we cache the
+        // objidFDP and pgnoFDP on the FMP, so if the values are there, use them and do
+        // more specific processing based on them.
+        if ( pgnoNull != g_rgfmp[ ifmp ].PgnoExtentPageCountCacheFDP() &&
+             objidNil != g_rgfmp[ ifmp ].ObjidExtentPageCountCacheFDP()   )
         {
-            // Temp tables should pass in PgnoFDP.
-            AssertSz( fFalse, "Illegal dbid" );
-            return ErrERRCheck( JET_errInvalidDatabaseId );
-        }
-
-        if ( fOpeningSys )
-        {
-            if ( grbit & JET_bitTableDelete )
-            {
-                return ErrERRCheck( JET_errCannotDeleteSystemTable );
-            }
-            pgnoFDP     = PgnoCATTableFDP( szTable );
-            objidTable  = ObjidCATTable( szTable );
+            ttSubject = tt::ExtentPageCountCache;
         }
         else
         {
-            if ( 0 == ppib->Level() )
-            {
-                CallR( ErrDIRBeginTransaction( ppib, 35109, JET_bitTransactionReadOnly ) );
-                fInTransaction = fTrue;
-            }
+            ttSubject = tt::Normal;
+        }
+        Assert( !FFMPIsTempDB( ifmp ) );
+    }
+    else if ( !FFMPIsTempDB( ifmp ) )
+    {
+        ttSubject = tt::Normal;
+    }
+    else
+    {
+        ttSubject = tt::Temp;
+    }
 
-            //  lookup the table in the catalog hash before seeking
-            if ( !FCATHashLookup( ifmp, szTable, &pgnoFDP, &objidTable ) )
-            {
-                Call( ErrCATSeekTable( ppib, ifmp, szTable, &pgnoFDP, &objidTable ) );
-            }
+    if ( NULL == pfdpinfo )
+    {
+        switch ( ttSubject )
+        {
+            case tt::Temp:
+                // Temp tables should pass in PgnoFDP.
+                AssertSz( fFalse, "Illegal dbid" );
+                return ErrERRCheck( JET_errInvalidDatabaseId );
+
+            case tt::System:
+                if ( grbit & JET_bitTableDelete )
+                {
+                    return ErrERRCheck( JET_errCannotDeleteSystemTable );
+                }
+                pgnoFDP     = PgnoCATTableFDP( szTable );
+                objidTable  = ObjidCATTable( szTable );
+                break;
+
+            case tt::ExtentPageCountCache:
+                if ( 0 == ( grbit & JET_bitTableAllowSensitiveOperation ) )
+                {
+                    // We require callers who didn't explicitly specify they want to work on
+                    // a sensitive table to meet extra restrictions.  This is to block end users
+                    // from deleting the table or opening the table updatably and then doing
+                    // nasty things to it.
+                    switch ( grbit & ( JET_bitTableReadOnly | JET_bitTableDelete ) )
+                    {
+                        case JET_bitTableReadOnly:
+                            // Allowably opening read only.
+                            break;
+
+                        case JET_bitTableDelete:
+                            // Trying to delete without stating you are OK with a sensitive table delete.
+                            return ErrERRCheck( JET_errCannotDeleteSystemTable );
+
+                        case 0:
+                            // Trying to just open the table, allowing updates.
+                            return ErrERRCheck( JET_errTableLocked );
+
+                        default:
+                            // Unexpected combination of grbits. Never seen this during normal operation.
+                            Expected( fFalse );
+                            return ErrERRCheck( JET_errInvalidGrbit );
+                    }
+                }
+                pgnoFDP = g_rgfmp[ ifmp ].PgnoExtentPageCountCacheFDP();
+                objidTable = g_rgfmp[ ifmp ].ObjidExtentPageCountCacheFDP();
+
+                // I don't think this needs any synchronization, but these asserts might
+                // catch a case that shows we DO.
+                Assert( pgnoNull != pgnoFDP );
+                Assert( objidNil != objidTable );
+                break;
+
+            case tt::Normal:
+                if ( 0 == ppib->Level() )
+                {
+                    CallR( ErrDIRBeginTransaction( ppib, 35109, JET_bitTransactionReadOnly ) );
+                    fInTransaction = fTrue;
+                }
+
+                //  lookup the table in the catalog hash before seeking
+                if ( !FCATHashLookup( ifmp, szTable, &pgnoFDP, &objidTable ) )
+                {
+                    Call( ErrCATSeekTable( ppib, ifmp, szTable, &pgnoFDP, &objidTable ) );
+                }
+                break;
+
+            default:
+                Enforce( fFalse );
         }
     }
     else
@@ -1494,24 +1568,39 @@ ERR ErrFILEIOpenTable(
         objidTable = pfdpinfo->objidFDP;
 
 #ifdef DEBUG
-        if( fOpeningSys )
+        switch ( ttSubject )
         {
-            Assert( PgnoCATTableFDP( szTable ) == pgnoFDP );
-            Assert( ObjidCATTable( szTable ) == objidTable );
-        }
-        else if ( !FFMPIsTempDB( ifmp ) )
-        {
-            PGNO    pgnoT;
-            OBJID   objidT;
+            case tt::Temp:
+                // No verification.
+                break;
 
-            //  lookup the table in the catalog hash before seeking
-            if ( !FCATHashLookup( ifmp, szTable, &pgnoT, &objidT ) )
+            case tt::System:
+                Assert( PgnoCATTableFDP( szTable ) == pgnoFDP );
+                Assert( ObjidCATTable( szTable ) == objidTable );
+                break;
+
+            case tt::ExtentPageCountCache:
+                Assert( g_rgfmp[ ifmp ].PgnoExtentPageCountCacheFDP() == pgnoFDP );
+                Assert( g_rgfmp[ ifmp ].ObjidExtentPageCountCacheFDP() == objidTable );
+                break;
+
+            case tt::Normal:
             {
-                CallR( ErrCATSeekTable( ppib, ifmp, szTable, &pgnoT, &objidT ) );
-            }
+                PGNO    pgnoT;
+                OBJID   objidT;
+                
+                //  lookup the table in the catalog hash before seeking
+                if ( !FCATHashLookup( ifmp, szTable, &pgnoT, &objidT ) )
+                {
+                    CallR( ErrCATSeekTable( ppib, ifmp, szTable, &pgnoT, &objidT ) );
+                }
 
-            Assert( pgnoT == pgnoFDP );
-            Assert( objidT == objidTable );
+                Assert( pgnoT == pgnoFDP );
+                Assert( objidT == objidTable );
+                break;
+            }
+            default:
+                Enforce( fFalse );
         }
 #endif  //  DEBUG
     }
@@ -1530,24 +1619,38 @@ ERR ErrFILEIOpenTable(
 
     FUCBSetIndex( pfucb );
 
-    if ( fOpeningSys )
+    switch ( ttSubject )
     {
-        tableclass = TableClassFromSysTable( FCATShadowSystemTable( szTable ) );
-    }
-    else
-    {
-        const ULONG tableClassOffset = ( grbit & JET_bitTableClassMask ) / JET_bitTableClass1;
-        if ( tableClassOffset != tableclassNone )
+        case tt::System:
+            tableclass = TableClassFromSysTable( FCATShadowSystemTable( szTable ) );
+            break;
+
+        case tt::ExtentPageCountCache:
+            tableclass = TableClassFromExtentPageCountCache();
+            break;
+
+        case tt::Temp:
+        case tt::Normal:
         {
-            //  Pointless if that table class has not been set.
-            const ULONG paramid = ( tableClassOffset >= 16 ) ?
-                ( ( JET_paramTableClass16Name - 1 ) + ( tableClassOffset - 15 ) ) :
-                ( ( JET_paramTableClass1Name - 1 ) + tableClassOffset );
-            if ( !FDefaultParam( paramid ) )
+            // Note the inclusion of temp and normal tables in this branch of the switch.
+            
+            const ULONG tableClassOffset = ( grbit & JET_bitTableClassMask ) / JET_bitTableClass1;
+            if ( tableClassOffset != tableclassNone )
             {
-                tableclass = TableClassFromTableClassOffset( tableClassOffset );
+                //  Pointless if that table class has not been set.
+                const ULONG paramid = ( tableClassOffset >= 16 ) ?
+                    ( ( JET_paramTableClass16Name - 1 ) + ( tableClassOffset - 15 ) ) :
+                    ( ( JET_paramTableClass1Name - 1 ) + tableClassOffset );
+                if ( !FDefaultParam( paramid ) )
+                {
+                    tableclass = TableClassFromTableClassOffset( tableClassOffset );
+                }
             }
+            break;
         }
+
+        default:
+            Enforce( fFalse );
     }
     
     if( grbit & JET_bitTablePreread
@@ -1580,49 +1683,59 @@ ERR ErrFILEIOpenTable(
             fInTransaction = fFalse;
         }
 
-        if ( fOpeningSys )
+        switch ( ttSubject )
         {
-            Call( ErrCATInitCatalogFCB( pfucb ) );
-        }
-        else if ( FFMPIsTempDB( ifmp ) )
-        {
-            Assert( !( grbit & JET_bitTableDelete ) );
-            Call( ErrCATInitTempFCB( pfucb ) );
-        }
-        else
-        {
-            const ULONG cPageReadBefore = Ptls()->threadstats.cPageRead;
-            const ULONG cPagePrereadBefore = Ptls()->threadstats.cPagePreread;
+            case tt::System:
+                Call( ErrCATInitCatalogFCB( pfucb ) );
+                break;
 
-            //  initialize the table's FCB
-            //
-            Call( ErrCATInitFCB( pfucb, objidTable ) );
+            case tt::Temp:
+                Assert( !( grbit & JET_bitTableDelete ) );
+                Call( ErrCATInitTempFCB( pfucb ) );
+                break;
 
-            const ULONG cPageReadAfter = Ptls()->threadstats.cPageRead;
-            const ULONG cPagePrereadAfter = Ptls()->threadstats.cPagePreread;
-
-            Assert( cPageReadAfter >= cPageReadBefore );
-            PERFOpt( cTableOpenPagesRead.Add( PinstFromPpib( ppib )->m_iInstance, pfcb->TCE(), cPageReadAfter - cPageReadBefore ) );
-
-            Assert( cPagePrereadAfter >= cPagePrereadBefore );
-            PERFOpt( cTableOpenPagesPreread.Add( PinstFromPpib( ppib )->m_iInstance, pfcb->TCE(), cPagePrereadAfter - cPagePrereadBefore ) );
-
-            Assert( pfcb->FTypeTable() );
-            //  If out-of-date index checking has been deferred to OpenTable() time, this is the function
-            //  that evaluates it.
-            wrnSurvives = ErrFILEICheckLocalizedIndexesInTable( ppib, ifmp, pfcb, szTable, grbit );
-            Call( wrnSurvives );
-
-            //  cache the table name in the catalog hash after it gets initialized
-            if ( !( grbit & ( JET_bitTableCreate|JET_bitTableDelete) ) )
+            case tt::ExtentPageCountCache:
+            case tt::Normal:
             {
-                CATHashInsert( pfcb, pfcb->Ptdb()->SzTableName() );
+                const ULONG cPageReadBefore = Ptls()->threadstats.cPageRead;
+                const ULONG cPagePrereadBefore = Ptls()->threadstats.cPagePreread;
+                
+                //  initialize the table's FCB
+                //
+                Call( ErrCATInitFCB( pfucb, objidTable ) );
+                
+                const ULONG cPageReadAfter = Ptls()->threadstats.cPageRead;
+                const ULONG cPagePrereadAfter = Ptls()->threadstats.cPagePreread;
+                
+                Assert( cPageReadAfter >= cPageReadBefore );
+                PERFOpt( cTableOpenPagesRead.Add( PinstFromPpib( ppib )->m_iInstance, pfcb->TCE(), cPageReadAfter - cPageReadBefore ) );
+                
+                Assert( cPagePrereadAfter >= cPagePrereadBefore );
+                PERFOpt( cTableOpenPagesPreread.Add( PinstFromPpib( ppib )->m_iInstance, pfcb->TCE(), cPagePrereadAfter - cPagePrereadBefore ) );
+                
+                Assert( pfcb->FTypeTable() );
+                //  If out-of-date index checking has been deferred to OpenTable() time, this is the function
+                //  that evaluates it.
+                wrnSurvives = ErrFILEICheckLocalizedIndexesInTable( ppib, ifmp, pfcb, szTable, grbit );
+                Call( wrnSurvives );
+                
+                //  cache the table name in the catalog hash after it gets initialized
+                if ( !( grbit & ( JET_bitTableCreate|JET_bitTableDelete) ) )
+                {
+                    CATHashInsert( pfcb, pfcb->Ptdb()->SzTableName() );
+                }
+                
+                //  only count "regular" table opens
+                //
+                if ( ttSubject == tt::Normal )
+                {
+                    PERFOpt( cTableOpenCacheMisses.Inc( PinstFromPpib( ppib ) ) );
+                    PERFOpt( cTablesOpen.Inc( PinstFromPpib( ppib ) ) );
+                }
+                break;
             }
-
-            //  only count "regular" table opens
-            //
-            PERFOpt( cTableOpenCacheMisses.Inc( PinstFromPpib( ppib ) ) );
-            PERFOpt( cTablesOpen.Inc( PinstFromPpib( ppib ) ) );
+            default:
+                Enforce( fFalse );
         }
 
         Assert( pfcb->Ptdb() != ptdbNil );
@@ -1686,9 +1799,8 @@ ERR ErrFILEIOpenTable(
     }
     else
     {
-        if ( !fOpeningSys
-            && !FFMPIsTempDB( ifmp )
-            && !( grbit & JET_bitTableDelete ) )
+        if ( ttSubject == tt::Normal 
+             && !( grbit & JET_bitTableDelete ) )
         {
             //  only count "regular" table opens
             PERFOpt( cTableOpenCacheHits.Inc( PinstFromPpib( ppib ) ) );
@@ -1701,8 +1813,7 @@ ERR ErrFILEIOpenTable(
         //  Check if the OS sort order has changed for localized indices..
         Assert( JET_errSuccess == wrnSurvives );
 
-        if ( !fOpeningSys
-             && !FFMPIsTempDB( ifmp ) )
+        if ( ttSubject == tt::Normal )
         {
             Assert( pfcb->FTypeTable() );
             //  If out-of-date index checking has been deferred to OpenTable() time, this is the function
@@ -1819,7 +1930,7 @@ ERR ErrFILEIOpenTable(
 #endif
 
     Assert( !fInTransaction );
-    AssertDIRNoLatch( ppib );
+    AssertDIRMaybeNoLatch( ppib, pfucb );
     *ppfucb = pfucb;
     
     //  Be sure to return the error from ErrFILEICheckAndSetMode()

@@ -76,7 +76,7 @@ ERR ErrFILEIInitializeFCB(
     __out FCB * pfcbTemplate );
 
 VOID FILESetAllIndexMask( FCB *pfcbTable );
-ERR ErrFILEDeleteTable( PIB *ppib, IFMP ifmp, const CHAR *szTable );
+ERR ErrFILEDeleteTable( PIB *ppib, IFMP ifmp, const CHAR *szTable, BOOL fAllowTableDeleteSensitive = fFalse );
 
 FIELD *PfieldFCBFromColumnName( FCB *pfcb, __in PCSTR szColumnName );
     
@@ -88,7 +88,7 @@ struct FDPINFO
     OBJID   objidFDP;
 };
 
-ERR ErrFILECreateTable( PIB *ppib, IFMP ifmp, JET_TABLECREATE5_A *ptablecreate );
+ERR ErrFILECreateTable( PIB *ppib, IFMP ifmp, JET_TABLECREATE5_A *ptablecreate, UINT fSPFlags = 0 );
 
 enum CATCheckIndicesFlags;
 

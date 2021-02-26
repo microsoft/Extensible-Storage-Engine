@@ -291,7 +291,11 @@ ERR ErrIsamGetSysTableColumnInfo( JET_SESID vsesid, JET_DBID vdbid,
 
 ERR ErrIsamCreateTable( JET_SESID vsesid, JET_DBID vdbid, JET_TABLECREATE5_A *ptablecreate );
 
-ERR ErrIsamDeleteTable( JET_SESID vsesid, JET_DBID vdbid, const CHAR *szName );
+ERR ErrIsamDeleteTable(
+    JET_SESID vsesid,
+    JET_DBID vdbid,
+    const CHAR *szName,
+    BOOL fAllowTableDeleteSensitive = fFalse );
 
 ERR ErrIsamRenameTable( JET_SESID vsesid, JET_DBID vdbid,
     const CHAR *szName, const CHAR *szNameNew );

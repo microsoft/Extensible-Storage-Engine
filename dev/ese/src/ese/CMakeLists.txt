@@ -33,6 +33,7 @@ set(ESE_SOURCES
     ${ESE_DEV}/src/ese/cresmgr.cxx
     ${ESE_DEV}/src/ese/dataserializer.cxx
     ${ESE_DEV}/src/ese/db.cxx
+    ${ESE_DEV}/src/ese/dbbld.cxx
     ${ESE_DEV}/src/ese/dbdump.cxx
     ${ESE_DEV}/src/ese/dbscan.cxx
     ${ESE_DEV}/src/ese/dbshrink.cxx

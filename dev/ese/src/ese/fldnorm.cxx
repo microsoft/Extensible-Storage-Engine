@@ -2475,7 +2475,7 @@ ERR VTAPI ErrIsamMakeKey(
 
     CallR( ErrPIBCheck( ppib ) );
     CheckFUCB( ppib, pfucbTable );
-    AssertDIRNoLatch( ppib );
+    AssertDIRMaybeNoLatch( ppib, pfucbTable );
 
     if ( pfucbNil != pfucbTable->pfucbCurIndex )
     {
@@ -2901,7 +2901,7 @@ ERR VTAPI ErrIsamMakeKey(
         lineNormSeg.Cb() );
     pfucb->dataSearchKey.DeltaCb( lineNormSeg.Cb() );
     KSSetPrepare( pfucb );
-    AssertDIRNoLatch( ppib );
+    AssertDIRMaybeNoLatch( ppib, pfucbTable );
 
     CallS( err );
 

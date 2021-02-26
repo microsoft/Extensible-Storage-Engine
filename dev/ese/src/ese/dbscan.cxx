@@ -4117,7 +4117,7 @@ ERR DBMScanObserverCleanup::ErrOpenTableGetFucb_( const OBJID objid, BOOL* const
     {
         if ( err >= JET_errSuccess )
         {
-            err = ErrFILEOpenTable( m_ppib, m_ifmp, ppfucbTable, szTableName );
+            err = ErrFILEOpenTable( m_ppib, m_ifmp, ppfucbTable, szTableName, JET_bitTableAllowSensitiveOperation );
         }
     }
 

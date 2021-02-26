@@ -1195,7 +1195,7 @@ ERR VTAPI ErrIsamSeek( JET_SESID sesid, JET_VTID vtid, JET_GRBIT grbit )
     CallR( ErrPIBCheck( ppib ) );
     CheckTable( ppib, pfucbTable );
     CheckSecondary( pfucbTable );
-    AssertDIRNoLatch( ppib );
+    AssertDIRMaybeNoLatch( ppib, pfucbTable );
 
     if( 0 == ( grbit & bitSeekAll ) )
     {
@@ -1890,7 +1890,7 @@ AdjustPositionAfterFoundLess:
         }
 
         KSReset( pfucbSeek );
-        AssertDIRNoLatch( ppib );
+        AssertDIRMaybeNoLatch( ppib, pfucbTable );
         return err;
     }
 
@@ -1926,7 +1926,7 @@ Release:
             err ) );
 
     KSReset( pfucbSeek );
-    AssertDIRNoLatch( ppib );
+    AssertDIRMaybeNoLatch( ppib, pfucbTable );
     return err;
 
 HandleError:
@@ -3718,7 +3718,7 @@ ERR VTAPI ErrIsamSetIndexRange( JET_SESID sesid, JET_VTID vtid, JET_GRBIT grbit 
 
     /*  ppib is not used in this function
     /**/
-    AssertDIRNoLatch( ppib );
+    AssertDIRMaybeNoLatch( ppib, pfucbTable );
 
     /*  if instant duration index range, then reset index range.
     /**/
@@ -3813,7 +3813,7 @@ ERR VTAPI ErrIsamSetIndexRange( JET_SESID sesid, JET_VTID vtid, JET_GRBIT grbit 
     }
 
 HandleError:
-    AssertDIRNoLatch( ppib );
+    AssertDIRMaybeNoLatch( ppib, pfucbTable );
     return err;
 }
 

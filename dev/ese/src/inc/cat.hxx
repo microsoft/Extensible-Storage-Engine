@@ -15,6 +15,8 @@ extern const CHAR   szMSORootObjectsIndex[];
 //  which functions like a secondary index on the catalog.
 extern const CHAR   szMSObjids[];
 
+extern const CHAR   szMSExtentPageCountCache[];
+
 extern const CHAR   szMSLocales[];
 
 
@@ -247,6 +249,11 @@ INLINE BOOL FCATUnicodeFixupTable( IN const CHAR * const szTableName )
 {
     return (    0 == UtilCmpName( szTableName, szMSU ) ||
                 0 == UtilCmpName( szTableName, szMSU1 ) );
+}
+
+INLINE BOOL FCATExtentPageCountCacheTable( const CHAR * const szTableName )
+{
+    return ( 0 == UtilCmpName( szTableName, szMSExtentPageCountCache ) );
 }
 
 INLINE BOOL FCATObjidsTable( const CHAR * const szTableName )
@@ -1212,6 +1219,59 @@ ERR ErrCATDeleteMSU(
         IN PIB * const ppib,
         IN const IFMP ifmp );
 
+VOID CATSetExtentPageCounts(
+    PIB * const ppib,
+    const IFMP ifmp,
+    const OBJID objid,
+    const CPG cpgOE,
+    const CPG cpgAE );
+
+VOID CATResetExtentPageCounts(
+    PIB * const ppib,
+    const IFMP ifmp,
+    const OBJID objid );
+
+#define ErrCATAdjustExtentPageCountsPrepare(X) _ErrCATAdjustExtentPageCountsPrepare( (X), __LINE__)
+ERR _ErrCATAdjustExtentPageCountsPrepare(
+    const FUCB * const pfucb,
+    ULONG ulLine
+    );
+
+VOID CATAdjustExtentPageCounts(
+    const FUCB * const pfucb,
+    const CPG lAddCpgOE,
+    const CPG lAddCpgAE );
+
+ERR ErrCATGetExtentPageCounts(
+    PIB * const ppib,
+    const IFMP ifmp,
+    const OBJID objid,
+    CPG * const pcpgOE,
+    CPG * const pcpgAE );
+
+INLINE BOOL FCATExtentPageCountsCached( const FUCB * const pfucb )
+{
+    switch ( ErrCATGetExtentPageCounts(
+                 pfucb->ppib,
+                 pfucb->ifmp,
+                 pfucb->u.pfcb->ObjidFDP(),
+                 NULL,
+                 NULL ) )
+
+    {
+        case JET_errRecordNotFound:
+        case JET_errNotInitialized:
+            return fFalse;
+
+        case JET_errSuccess:
+            return fTrue;
+
+        default:
+            AssertSz( fFalse, "Failed to find object in cache in unepxected way.");
+            return fFalse;
+    }
+}
+
 ERR ErrCATCheckMSObjidsReady(
         __in PIB * const ppib,
         const IFMP ifmp,
@@ -1219,7 +1279,9 @@ ERR ErrCATCheckMSObjidsReady(
 
 ERR ErrCATCreateMSObjids(
         __in PIB * const ppib,
-        const IFMP ifmp );
+        const IFMP ifmp,
+        PGNO * const ppgnoFDP = NULL,
+        OBJID * const pobjidFDP = NULL );
 
 ERR ErrCATDeleteMSObjids(
         _In_ PIB * const ppib,
@@ -1256,6 +1318,24 @@ ERR ErrCATVerifyMSObjids(
         const IFMP ifmp,
               CPRINTF * const pcprintfError );
 
+ERR ErrCATCreateMSExtentPageCountCache(
+        __in PIB * const ppib,
+        const IFMP ifmp,
+        PGNO *ppgnoFDP,
+        OBJID *pobjidFDP );
+
+enum class EXTENT_CACHE_DELETE_REASON {
+    FeatureOff = 0,
+    Repair     = 1,
+};
+
+ERR ErrCATDeleteMSExtentPageCountCache(
+        _In_ PIB * const ppib,
+        _In_ const IFMP ifmp,
+        _In_ const EXTENT_CACHE_DELETE_REASON ecdrReason,
+        _Out_opt_ BOOL *pfTableExisted = NULL
+    );
+    
 ERR ErrCATCreateMSLocales(
         __in PIB * const ppib,
         const IFMP ifmp );

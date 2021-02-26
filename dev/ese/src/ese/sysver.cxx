@@ -76,6 +76,7 @@ const FormatVersions g_rgfmtversEngine[] = {
     { JET_efvXpress10Compression, /* 9340 */            { 1568,170,380 }, { 8,80,180 }, { 3,0,0 } }, // [2020/05/05]
     { JET_efvRevertSnapshot, /* 9360 */                 { 1568,180,400 }, { 8,90,200 }, { 3,0,0 } }, // [2020/09/23]
     { JET_efvApplyRevertSnapshot, /* 9380 */            { 1568,190,420 }, { 8,90,200 }, { 3,0,0 } }, // [2020/12/01]
+    { JET_efvExtentPageCountCache, /* 9400 */           { 1568,200,440 }, { 8,90,200 }, { 3,0,0 } }, // [2021/01/15]
 };
 
 const INT g_cfmtversEngine = _countof( g_rgfmtversEngine );

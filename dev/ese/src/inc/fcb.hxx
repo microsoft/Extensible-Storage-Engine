@@ -651,6 +651,8 @@ private:
         static const ULONG mskFCBNoMoreTasks = 0x800000;
         // Have we checked for valid NLS locales?
         static const ULONG mskFCBValidatedValidLocales = 0x1000000;
+        // Do we always allow IsamUpdate( JET_bitNoVersion ). Used by ExtentPageCountCache.
+        static const ULONG mskFCBVersioningOff = 0x2000000;
 
 
         TABLECLASS  m_tableclass;
@@ -868,6 +870,13 @@ private:
         BOOL FInitedForRecovery() const;
         VOID SetInitedForRecovery();
         VOID ResetInitedForRecovery();
+
+        // This controls whether an RCE is created during updates to a table.  Note,
+        // however, that its use is currently tailored to the ExtentPageCountCache table and is not
+        // guaranteed to be generally functional for all tables.
+        BOOL FVersioningOffForExtentPageCountCache() const;
+        VOID SetVersioningOffForExtentPageCountCache();
+        VOID ResetVersioningOffForExtentPageCountCache();
 
         BOOL FDoingAdditionalInitializationDuringRecovery() const;
         VOID SetDoingAdditionalInitializationDuringRecovery();
@@ -1540,6 +1549,10 @@ INLINE VOID FCB::SetInitialIndex()              { Assert( IsLocked() ); AtomicEx
 INLINE BOOL FCB::FInitialized() const           { return !!(m_ulFCBFlags & mskFCBInitialized ); }
 INLINE VOID FCB::SetInitialized_()              { Assert( IsLocked() ); AtomicExchangeSet( &m_ulFCBFlags, mskFCBInitialized ); }
 INLINE VOID FCB::ResetInitialized_()            { Assert( IsLocked() ); AtomicExchangeReset( &m_ulFCBFlags, mskFCBInitialized ); }
+
+INLINE BOOL FCB::FVersioningOffForExtentPageCountCache() const { return !!(m_ulFCBFlags & mskFCBVersioningOff ); }
+INLINE VOID FCB::SetVersioningOffForExtentPageCountCache()     { AtomicExchangeSet( &m_ulFCBFlags, mskFCBVersioningOff ); }
+INLINE VOID FCB::ResetVersioningOffForExtentPageCountCache()   { AtomicExchangeReset( &m_ulFCBFlags, mskFCBVersioningOff ); }
 
 INLINE BOOL FCB::FInitedForRecovery() const     { return !!(m_ulFCBFlags & mskFCBInitedForRecovery ); }
 INLINE VOID FCB::SetInitedForRecovery()         { Assert( IsLocked() ); AtomicExchangeSet( &m_ulFCBFlags, mskFCBInitedForRecovery ); }
