@@ -395,7 +395,6 @@ class ATCHCHK
 #define fLGCreateNewGen         0x00000001
 #define fLGStopOnNewGen         0x00000004  //  currently, CANNOT be used concurrently and MUST be used with fLGCreateNewGen - stops after the new gen has been created
 #define fLGFillPartialSector    0x00000008  //  not logging a real log record, just filling any current partial sector
-#define fLGMacroGoing           0x00000010  //  In a macro, loosen transaction size limits
 
 //  flags for ErrLGNewLogFile()
 #define fLGOldLogExists             0x00000001

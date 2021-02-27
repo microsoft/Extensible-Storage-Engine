@@ -1222,9 +1222,7 @@ LOG_WRITE_BUFFER::ErrLGLogRec(
             //  precision for the BFOB0 approximate index
             //
             if ( lgenOutstanding > ( lgenTooDeepLimit - lgenCheckpointTooDeepMin / 2 ) ||
-                 // We do not know how to rollback split macros completely at do-time, so do not apply tigher limit
-                 // to macros. Space operations will still prevent split only operations from going unfettered.
-                 ( lgenTrxOutstanding > lgenTooDeepLimit / 2 && !( fLGFlags & fLGMacroGoing ) ) )
+                 lgenTrxOutstanding > lgenTooDeepLimit / 2 )
             {
                 switch ( lrtyp )
                 {

@@ -371,7 +371,7 @@ ERR ErrLGInsert( const FUCB             * const pfucb,
     rgdata[3].SetPv( kdf.data.Pv() );
     rgdata[3].SetCb( kdf.data.Cb() );
 
-    err = plog->ErrLGLogRec( rgdata, 4, fDirtyCSR ? 0 : fLGMacroGoing, ppib->lgposStart.lGeneration, plgpos );
+    err = plog->ErrLGLogRec( rgdata, 4, 0, ppib->lgposStart.lGeneration, plgpos );
 
     // on error, return to before dirty dbtime on page
     if ( JET_errSuccess > err && fDirtyCSR )
@@ -490,7 +490,7 @@ ERR ErrLGFlagInsertAndReplaceData( const FUCB           * const pfucb,
     rgdata[3].SetPv( kdf.data.Pv() );
     rgdata[3].SetCb( kdf.data.Cb() );
 
-    err = plog->ErrLGLogRec( rgdata, 4, fDirtyCSR ? 0 : fLGMacroGoing, ppib->lgposStart.lGeneration, plgpos );
+    err = plog->ErrLGLogRec( rgdata, 4, 0, ppib->lgposStart.lGeneration, plgpos );
 
     // on error, return to before dirty dbtime on page
     if ( JET_errSuccess > err && fDirtyCSR )
@@ -606,7 +606,7 @@ ERR ErrLGFlagInsert( const FUCB             * const pfucb,
     rgdata[3].SetPv( kdf.data.Pv() );
     rgdata[3].SetCb( kdf.data.Cb() );
 
-    err = plog->ErrLGLogRec( rgdata, 4, fDirtyCSR ? 0 : fLGMacroGoing, ppib->lgposStart.lGeneration, plgpos );
+    err = plog->ErrLGLogRec( rgdata, 4, 0, ppib->lgposStart.lGeneration, plgpos );
 
     // on error, return to before dirty dbtime on page
     if ( JET_errSuccess > err && fDirtyCSR )
@@ -698,7 +698,7 @@ LOCAL INLINE ERR ErrLGISetExternalHeader(
     rgdata[1].SetPv( data.Pv() );
     rgdata[1].SetCb( data.Cb() );
 
-    err = plog->ErrLGLogRec( rgdata, 2, fDirtyCSR ? 0 : fLGMacroGoing, ppib->lgposStart.lGeneration, plgpos );
+    err = plog->ErrLGLogRec( rgdata, 2, 0, ppib->lgposStart.lGeneration, plgpos );
 
     // on error, return to before dirty dbtime on page
     if ( JET_errSuccess > err && fDirtyCSR )
@@ -1160,7 +1160,7 @@ LOCAL INLINE ERR ErrLGIPageMove(
     idata++;
     Assert( _countof(rgdata) == idata );
 
-    Call( plog->ErrLGLogRec( rgdata, idata, lrpagemove.FPageMoveRoot() ? fLGMacroGoing : 0, ppib->lgposStart.lGeneration, plgpos ) );
+    Call( plog->ErrLGLogRec( rgdata, idata, 0, ppib->lgposStart.lGeneration, plgpos ) );
 
 HandleError:
     return err;
@@ -1471,7 +1471,7 @@ LOCAL INLINE ERR ErrLGIReplace(
         rgdata[1].SetPv( dataNew.Pv() );
     }
 
-    err = plog->ErrLGLogRec( rgdata, 2, fDirtyCSR ? 0 : fLGMacroGoing, ppib->lgposStart.lGeneration, plgpos );
+    err = plog->ErrLGLogRec( rgdata, 2, 0, ppib->lgposStart.lGeneration, plgpos );
 
     // on error, return to before dirty dbtime on page
     if ( JET_errSuccess > err && fDirtyCSR )
@@ -1607,7 +1607,7 @@ ERR ErrLGRootPageMove(
     data.SetPv( &lrrpm );
     data.SetCb( sizeof( lrrpm ) );
 
-    Call( plog->ErrLGLogRec( &data, 1, fLGMacroGoing, ppib->lgposStart.lGeneration, &lgposThrowAway ) );
+    Call( plog->ErrLGLogRec( &data, 1, 0, ppib->lgposStart.lGeneration, &lgposThrowAway ) );
     }
 
     // Log move of the root, OE and AE.
@@ -1993,7 +1993,7 @@ ERR ErrLGFlagDelete( const FUCB * const pfucb,
     rgdata[0].SetPv( (BYTE *)&lrflagdelete );
     rgdata[0].SetCb( sizeof(LRFLAGDELETE) );
 
-    err = plog->ErrLGLogRec( rgdata, 1, fDirtyCSR ? 0 : fLGMacroGoing, ppib->lgposStart.lGeneration, plgpos );
+    err = plog->ErrLGLogRec( rgdata, 1, 0, ppib->lgposStart.lGeneration, plgpos );
 
     // on error, return to before dirty dbtime on page
     if ( JET_errSuccess > err && fDirtyCSR )
@@ -2078,7 +2078,7 @@ ERR ErrLGDelete(    const FUCB      *pfucb,
     rgdata[0].SetPv( (BYTE *)&lrdelete );
     rgdata[0].SetCb( sizeof(LRDELETE) );
 
-    err = plog->ErrLGLogRec( rgdata, 1, fDirtyCSR ? 0 : fLGMacroGoing, ppib->lgposStart.lGeneration, plgpos );
+    err = plog->ErrLGLogRec( rgdata, 1, 0, ppib->lgposStart.lGeneration, plgpos );
 
     // on error, return to before dirty dbtime on page
     if ( JET_errSuccess > err && fDirtyCSR )
@@ -2194,7 +2194,7 @@ ERR ErrLGUndo(  RCE             *prce,
     rgdata[2].SetCb( bm.data.Cb() );
     Assert( !lrundo.FUnique() || bm.data.FNull() );
 
-    Call( plog->ErrLGLogRec( rgdata, 3, fDirtyCSR ? 0 : fLGMacroGoing, ppib->lgposStart.lGeneration, &lgpos ) );
+    Call( plog->ErrLGLogRec( rgdata, 3, 0, ppib->lgposStart.lGeneration, &lgpos ) );
     CallS( err );
     Assert( pcsr->Latch() == latchWrite );
 
@@ -2311,7 +2311,7 @@ ERR ErrLGDelta( const FUCB      *pfucb,
     rgdata[3].SetPv( bm.data.Pv() );
     rgdata[3].SetCb( bm.data.Cb() );
 
-    err = plog->ErrLGLogRec( rgdata, 4, fDirtyCSR ? 0 : fLGMacroGoing, ppib->lgposStart.lGeneration, plgpos );
+    err = plog->ErrLGLogRec( rgdata, 4, 0, ppib->lgposStart.lGeneration, plgpos );
 
     // on error, return to before dirty dbtime on page
     if ( JET_errSuccess > err && fDirtyCSR )
@@ -3633,7 +3633,7 @@ ERR ErrLGSplit( const FUCB          * const pfucb,
             }
         }
 
-        Call( plog->ErrLGLogRec( rgdata, idata, fLGMacroGoing, ppib->lgposStart.lGeneration, plgpos ) );
+        Call( plog->ErrLGLogRec( rgdata, idata, 0, ppib->lgposStart.lGeneration, plgpos ) );
 
         //  remember the pages that were touched in this macro; only
         //  pgno, pgnoNew, and pgnoRight are accessed by BTISplitSetLgpos.
@@ -3921,7 +3921,7 @@ ERR ErrLGMerge( const FUCB *pfucb, MERGEPATH *pmergePathLeaf, LGPOS *plgpos )
             Assert( lrmerge.CbPageBeforeImage() == 0 );
         }
 
-        Call( plog->ErrLGLogRec( rgdata, idata, fLGMacroGoing, pfucb->ppib->lgposStart.lGeneration, plgpos ) );
+        Call( plog->ErrLGLogRec( rgdata, idata, 0, pfucb->ppib->lgposStart.lGeneration, plgpos ) );
 
         //  remember the pages that were touched in this macro; only
         //  pgno, pgnoLeft, pgnoRight and pgnoNew are accessed by BTIMergeSetLgpos. 
@@ -4346,7 +4346,7 @@ ERR ErrLGIMacroBegin( PIB *ppib, DBTIME dbtime )
     rgdata[0].SetPv( (BYTE *)&lrMacroBegin );
     rgdata[0].SetCb( sizeof(lrMacroBegin) );
 
-    err = plog->ErrLGLogRec( rgdata, 1, fLGMacroGoing, ppib->lgposStart.lGeneration, pNil );
+    err = plog->ErrLGLogRec( rgdata, 1, 0, ppib->lgposStart.lGeneration, pNil );
 
     return err;
 }
@@ -4440,7 +4440,7 @@ ERR ErrLGIMacroEnd( PIB *ppib, DBTIME dbtime, LRTYP lrtyp, const IFMP ifmp, cons
     Assert( cdata <= _countof( rgdata ) );
     err = plog->ErrLGLogRec( rgdata,        // data
                              cdata,         // count of elements
-                             fLGMacroGoing, // flags
+                             0,             // flags
                              ppib->lgposStart.lGeneration, // lgenBegin0
                              plgpos );      // returned lgpos
 
