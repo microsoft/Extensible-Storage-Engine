@@ -301,7 +301,7 @@ while($line = <ETWDATA>) {
 				if( $iorsValue =~ /,/ ){
 					$iorsValue = substr($iorsValue, 0, -1);
 				}
-				if ($iorsName =~ /iorsLRNOP/)
+				if ($iorsName eq "iorsLRNOP")
 				{
 					$iorsLRNOP = $iorsValue;
 				}
@@ -322,7 +322,7 @@ while($line = <ETWDATA>) {
 					}
 					$iorsValue = substr($lrtypValue, 0, -1) + $iorsLRNOP;
 				}
-				if (!($lrtypName =~ /lrtypMax/) && !($lrtypName =~ /lrtypIgnored/) && !($iorsName =~ /iorsLRNOP/))
+				if (!($lrtypName =~ /lrtypMax/) && !($lrtypName =~ /lrtypIgnored/) && !($iorsName eq "iorsLRNOP"))
 				{
 					print OUTPUTFILE "              <map value=\"$iorsValue\" message=\"\$(string.IorsMap.$iorsName)\"/>\n";
 				}
@@ -350,7 +350,7 @@ while($line = <ETWDATA>) {
 				($const, $lrtypType, $lrtypName, $equals, $lrtypValue) = split(' ', $lrtypline);
 				$iorsName = substr($lrtypName, length("lrtyp"));
 				$iorsName = "iorsLR$iorsName";
-				if (!($lrtypName =~ /lrtypMax/) && !($lrtypName =~ /lrtypIgnored/) && !($iorsName =~ /iorsLRNOP/))
+				if (!($lrtypName =~ /lrtypMax/) && !($lrtypName =~ /lrtypIgnored/) && !($iorsName eq "iorsLRNOP"))
 				{
 					print OUTPUTFILE "        <string id=\"IorsMap.$iorsName\" value=\"$iorsName\"/>\n";
 				}
