@@ -1235,6 +1235,7 @@ ERR ErrOLD2Resume( __in PIB * const ppib, const IFMP ifmp )
 
     err = ErrIsamMove( ppib, pfucb, JET_MoveFirst, NO_GRBIT );
     size_t cResumesAttempted = 0;
+    INT cTasksInTable = 0, cTasksNotStarted = 0;
 
     while( JET_errSuccess == err )
     {
@@ -1243,6 +1244,23 @@ ERR ErrOLD2Resume( __in PIB * const ppib, const IFMP ifmp )
         Call( OLD2_STATUS::ErrGetObjids( ppib, pfucb, &objidTable, &objidFDP ) );
         Assert( objidNil != objidTable );
         Assert( objidNil != objidFDP );
+
+        // Load the rest of the status fields
+        OLD2_STATUS oldStatus = OLD2_STATUS( objidTable, objidFDP );
+        err = OLD2_STATUS::ErrLoad( ppib, pfucb, oldStatus );
+
+        // JET_errRecordNotFound means there was no bookmark,
+        // i.e. it hadn't started this task
+        if ( JET_errRecordNotFound == err  )
+        {
+            cTasksNotStarted++;
+        }
+        else
+        {
+            Call( err );
+        }
+
+        cTasksInTable++;
 
         // First try as a 'dry run', to flush out potential errors.
         err = ErrOLD2ResumeOneTree( ppib, ifmp, objidTable, objidFDP, fTrue );
@@ -1271,6 +1289,30 @@ ERR ErrOLD2Resume( __in PIB * const ppib, const IFMP ifmp )
         Call( err );
         err = ErrIsamMove( ppib, pfucb, JET_MoveNext, NO_GRBIT );
     }
+
+    // Report on the number of outstanding tasks
+    const INT  cszArgs = 3;
+    const WCHAR* rgszT[cszArgs];
+
+    WCHAR szTasksInTable[16];
+    OSStrCbFormatW( szTasksInTable, sizeof(szTasksInTable), L"%d", cTasksInTable );
+    rgszT[0] = szTasksInTable;
+
+    rgszT[1] = g_rgfmp[ifmp].WszDatabaseName();
+
+    WCHAR szTasksNotStarted[16];
+    OSStrCbFormatW( szTasksNotStarted, sizeof( szTasksNotStarted ), L"%d", cTasksNotStarted );
+    rgszT[2] = szTasksNotStarted;
+
+    UtilReportEvent(
+        eventInformation,
+        ONLINE_DEFRAG_CATEGORY,
+        OLD2_TABLE_STATUS,
+        cszArgs,
+        rgszT,
+        0,
+        NULL,
+        PinstFromIfmp( ifmp ));
 
     // If the ErrIsamMove() reached the end of the MSysOld2 table, that's actually a success.
     if( JET_errNoCurrentRecord == err )
