@@ -120,6 +120,10 @@ private:
         // be a valid pointer to a naturally aligned CObject where CObject is bigger
         // than 1 byte.
         //
+        // We use the high bit for a marker set when we don't expect the object to become
+        // uninitialized.  This is a debugging facility that triggers asserts, but is not
+        // otherwise enforced.
+        //
     public:
 
         //  ctor / dtor
@@ -127,11 +131,14 @@ private:
         CMarkedIndex( ) : m_ulpMarkedIndex( 0 ) {}; // Starts out uninitialized.
         ~CMarkedIndex() {}
 
+        // static const for highest bit of member variable to use as a flag.
+        static const ULONG_PTR m_ulpProtectedFlag = ( (ULONG_PTR)1 << ( sizeof(ULONG_PTR) * 8 - 1 ) );
+
         VOID operator = ( const ULONG &ulRealIndex )
         {
             // We can be setting a new value into an uninitialized CMarkedIndex, or we
             // can be overwriting an existing value, so we can't assert on anything.
-            m_ulpMarkedIndex = ( ( ulRealIndex << 1 ) | 1 );
+            m_ulpMarkedIndex = ( ( ulRealIndex << 1 ) | 1 ) & ~m_ulpProtectedFlag;
         };
 
         operator ULONG() const
@@ -140,11 +147,47 @@ private:
             // was stored, which will corrupt the set.
             COLLEnforce( FInitialized() );
 
-            return ( ULONG )( m_ulpMarkedIndex >> 1 );
+            return ( ULONG )( ( ~m_ulpProtectedFlag & m_ulpMarkedIndex ) >> 1 );
         };
 
-        BOOL FInitialized() const { return ( m_ulpMarkedIndex & 1 ); }
-        VOID Uninitialize() { COLLEnforce( FInitialized() ); m_ulpMarkedIndex = 0; };
+        VOID Uninitialize()
+        {
+            COLLEnforce( FInitialized() );
+            COLLAssertTrack( !FProtected() );
+            m_ulpMarkedIndex = 0;
+        };
+
+        BOOL FInitialized() const { return !!( m_ulpMarkedIndex & 1 ); }
+
+        // Set a bit saying we don't expect an uninitialize call to happen.  Only triggers AssertTrack()s.
+        // Note that we're thread-safe here in that we're using atomic set/reset to make
+        // sure we get clean control of that bit, but NOT threadsafe in that we're checking
+        // FInitialized, FProtected, and the value of m_ulpMarkedIndex in AssertTrack without any sort
+        // of lock to protect against simultaneous modifications.
+        VOID SetProtected()
+        {
+            COLLAssertTrack( FInitialized() );
+            COLLAssertTrack( !FProtected() );
+            AtomicExchangeSet( &m_ulpMarkedIndex, m_ulpProtectedFlag );
+            // We don't expect any close races here.
+            COLLAssertTrack( FProtected() );
+        };
+
+        VOID ResetProtected()
+        {
+            COLLAssertTrack( FInitialized() );
+            COLLAssertTrack( FProtected() );
+            AtomicExchangeReset( &m_ulpMarkedIndex, m_ulpProtectedFlag );
+            // We don't expect any close races here.
+            COLLAssertTrack( !FProtected() );
+        };
+
+        BOOL FProtected() const
+        {
+            COLLAssert( FInitialized() || m_ulpMarkedIndex == 0 );
+
+            return !!( m_ulpMarkedIndex & m_ulpProtectedFlag );
+        }
 
     private:
         ULONG_PTR m_ulpMarkedIndex;
@@ -166,11 +209,11 @@ private:
             // the array in a Set, and we set that NULL pointer via the method Uninitialize(), not
             // via simple assignment.
             COLLAssertTrack( nullptr != pObject );
-            
+
             // We can only ever be overwriting an index in the free list, not a pointer.  Overwriting
             // a pointer would mean we're losing a value from the set.
             COLLAssertTrack( m_miNextFree.FInitialized() );
-            
+
             m_pObject = pObject;
         }
 
@@ -224,13 +267,13 @@ private:
             // Only used to set the 0th slot of the array in a Set to a constant NULL pointer.
             m_pObject = nullptr;
         }
-        
+
         BOOL FInitialized() const
         {
             // This should only be true for the array_value that is the 0th slot of the array in the Set.
             return ( nullptr != m_pObject );
         }
-        
+
     private:
         //  This union is diffentiated as follows:
         //  * 0 shouldn't happen.  That's either a null pointer or an uninitialized MarkedIndex.
@@ -291,6 +334,10 @@ public:
 
         BOOL FUninitialized() const { return !m_miArrayIndex.FInitialized(); }
 
+        VOID SetProtected()     { m_miArrayIndex.SetProtected(); }
+        VOID ResetProtected()   { m_miArrayIndex.ResetProtected(); }
+        BOOL FProtected() const { return m_miArrayIndex.FProtected(); }
+
     private:
 
         CElement& operator=( CElement& );  //  disallowed
@@ -299,7 +346,15 @@ public:
 
         VOID _Uninitialize() { m_miArrayIndex.Uninitialize(); }
 
-        VOID _SetArrayIndex( const ULONG &ulArrayIndex ) { m_miArrayIndex = ulArrayIndex; }
+        VOID _SetArrayIndex( const ULONG ulArrayIndex )
+        {
+            BOOL fProtect = !FUninitialized() && FProtected();
+            m_miArrayIndex = ulArrayIndex;
+            if ( fProtect )
+            {
+                SetProtected();
+            }
+        }
 
         ULONG _GetArrayIndex() { return m_miArrayIndex; }
 
@@ -350,7 +405,7 @@ private:
     // Static variables to control validation behavior, modified by tests.  Since they are static variables, they
     // affect all instances of the class.    Not implemented as normal dynamic member variables because we want
     // to keep the class small for (indirect) perf reasons.
-    
+
     // Control how aggressive AssertValid_ is for all instances of the class. Defaults to false.
     static BOOL fDoExtensiveValidation;
 
@@ -524,7 +579,7 @@ inline VOID CInvasiveConcurrentModSet< CObject, OffsetOfIAE >::AssertValid_( VAL
     {
         return;
     }
-    
+
     //
     // All validations are only accurate if we're locked.
     // Some validations are only accurate if we're enum locked.
@@ -1030,7 +1085,10 @@ inline typename CInvasiveConcurrentModSet< CObject, OffsetOfIAE>::ERR CInvasiveC
 
     //  Object should not already be in an array.
     COLLAssertTrack( _PiaeFromPobj( pObject )->FUninitialized() );
-
+    
+    // Since this is supposed to be inserting a new item, the item shouldn't already be protected.
+    COLLAssert( !( _PiaeFromPobj( pObject )->FProtected() ) );
+    
     // We expect well-behaved clients to never have multiple threads simultaneously manipulating the set membership of
     // a given object.  We do not guard against this, but a client that does so will eventually (and probably
     // sooner rather than later) get unpredictable failures.
@@ -2479,7 +2537,7 @@ ErrInit(    const CKey      dkeyPrecision,
     }
 
     //  the uncertainty must be able to cover the worst case bucket hash
-    
+
     if ( m_shfKeyUncertainty < shfBucketHashMax )
     {
         return ERR::errInvalidParameter;
@@ -2714,7 +2772,7 @@ ErrRetrieveEntry( CLock* const plock, CEntry** const ppentry ) const
     }
 
     *ppentry = plock->m_pentry;
-    
+
     return *ppentry ? ERR::errSuccess : ERR::errEntryNotFound;
 }
 
@@ -4319,7 +4377,7 @@ _PvMEMAlloc( const size_t cbSize, const size_t cbAlign )
         COLLAssertSz( fFalse, "Size request too big to fit w/ alignment, this is odd" );
         return NULL;
     }
-    
+
     void* const pv = new BYTE[ cbSize + cbAlign ];
     if ( pv )
     {
@@ -4392,10 +4450,10 @@ class CArray
         ERR ErrSetCapacity( const size_t centryMax );
         void SetCapacityGrowth( const size_t centryGrowth );
         void SetEntryDefault( const CEntry& entry );
-        
+
         ERR ErrSetEntry( const size_t ientry, const CEntry& entry );
         void SetEntry( const CEntry* const pentry, const CEntry& entry );
-        
+
         size_t Size() const;
         size_t Capacity() const;
         const CEntry& Entry( const size_t ientry ) const;
@@ -4506,7 +4564,7 @@ ErrSetSize( const size_t centry )
     {
 
         //  rounding up to the next bucket of growth.
-        
+
         size_t centryT = m_centryMax + ( ( centry - m_centryMax - 1 ) / m_centryGrowth ) * m_centryGrowth;
         if ( centryT <= ( SIZE_MAX - m_centryGrowth ) )
         {
@@ -4544,7 +4602,7 @@ SetCapacityGrowth( const size_t centryGrowth )
 {
     m_centryGrowth = ( centryGrowth == 0 ) ? 1 : centryGrowth;
 }
-    
+
 //  sets the capacity (max. size) of the array
 //  asking for a size of zero entries causes the underlying memory backing up
 //  the array to be deallocated
@@ -4772,7 +4830,7 @@ inline size_t CArray< CEntry >::
 SearchBinary( const CEntry* const pentrySearch, PfnCompare pfnCompare )
 {
     CEntry* pEntryFound = NULL;
-    
+
     if ( m_rgentry != NULL )
     {
         pEntryFound = (CEntry*)bsearch( pentrySearch, m_rgentry, m_centry, sizeof( CEntry ), (PfnCompareCRT) pfnCompare );
@@ -5500,7 +5558,7 @@ inline CStupidQueue::ERR CStupidQueue::ErrAdjustSize( void )
 
 HandleError:
     AssertValid();
-    
+
     return err;
 }
 
@@ -5582,7 +5640,7 @@ inline CStupidQueue::ERR CStupidQueue::ErrPeek( void * pvEntry )
     {
         return ERR::wrnEmptyQueue;
     }
- 
+
     DWORD iPeek = ( m_iHead + 1 ) % m_cAlloc;
     memcpy( pvEntry, PvElement( iPeek ), m_cbElement );
 
@@ -5652,7 +5710,7 @@ bool FCachePtr( P ptr, P * const array, const INT arraySize )
 {
     C_ASSERT( sizeof( void* ) == sizeof( P ) );
     COLLAssert( 0 != ptr );
-    
+
     const INT startIndex = OSSyncGetCurrentProcessor() % arraySize;
     INT index = startIndex;
     do
@@ -5677,7 +5735,7 @@ class ObjectPool
 public:
     ObjectPool();
     ~ObjectPool();
-    
+
     Object * Allocate();
     void Free( Object * pobject );
 
@@ -5686,7 +5744,7 @@ public:
 private:
     Object * NewObject();
     void DeleteObject( Object * pobject );
-    
+
 private:
     Object * m_rgpobjects[NumObjectsInPool];
     LONG m_cobjectsAllocated;
@@ -6513,7 +6571,7 @@ InvasiveRedBlackTree<KEY, CObject, OffsetOfILE>::Delete_( Node * const pnode, co
             pnodeT->SetRight( Delete_( pnodeT->PnodeRight(), key, ppnodeDeleted ) );
         }
     }
-    
+
     COLLAssert( *ppnodeDeleted != NULL );
     return Fixup_( pnodeT );
 }
@@ -6647,7 +6705,7 @@ void InvasiveRedBlackTree<KEY, CObject, OffsetOfILE>::PrintNode_( INT cLevel, co
     {
         PrintNode_( cLevel, pic->PnodeLeft() );
     }
-    
+
     CHAR szKeyT[100];
     wprintf( L"\t%*c picThis  = %p (%hs) / pnode = \t  { %hs }\n", 4 * ( cLevel + 1 ), L'.',
                 pic, ( pic->Color() == Red ) ? "Red" : "Blk", pic->Key().Sz( sizeof( szKeyT ), szKeyT ) );
