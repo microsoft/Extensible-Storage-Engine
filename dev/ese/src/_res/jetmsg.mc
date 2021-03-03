@@ -2483,6 +2483,13 @@ Shelved page count: %16 page(s).%n
 Shelved page number range: %17 - %18%n
 .
 
+MessageId=752
+SymbolicName=OLD2_TABLE_STATUS
+Language=English
+%1 (%2) %3There are %4 outstanding tasks in the online defragmentation table for database %5.%n
+%6 of those outstanding tasks have not started.%n
+.
+
 
 ;// !!! ARE YOU SURE you're adding this in the right place !!! ???
 

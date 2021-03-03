@@ -1589,7 +1589,7 @@ rgeseversionbuildtoreleaseEse[] = {
 PRIVATE
 EseVersionBuildToRelease
 rgeseversionbuildtoreleaseEsent[] = {
-    { 3939, 5, 0, 0 },  // 2000 (built out of Exchange, need to fix it up later)
+//    { 3939, 5, 0, 0 },  // 2000 (built out of Exchange)
     { 2600, 5, 1, 0 },  // XP
     { 3790, 5, 2, 0 },  // 2003
 };
@@ -1864,17 +1864,6 @@ EsetestEseVersionToParts(
     *pverMajor  = (HIWORD( li.HighPart ) & 0xfff);
     *pverMinor  = LOWORD( li.HighPart );
     Call( EsetestFillInSpAndBuild( pflavour, *pverMajor, *pverMinor, li.LowPart, pverSp, pverBuild ) );
-
-    // win2000 fixup
-    if ( 3939 == *pverBuild )
-    {
-        AssertM( 6 == *pverMajor );
-        AssertM( 0 == *pverMinor );
-
-        *pverMajor = 5;
-        *pverMinor = 0;
-        *pverBuild = 2195;
-    }
 
 Cleanup:
     return err;
