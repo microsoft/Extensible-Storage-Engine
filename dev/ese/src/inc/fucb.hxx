@@ -231,7 +231,7 @@ struct FUCB
             //  ********************************************
             //  WARNING! WARNING! WARNING! WARNING! WARNING!
             //  ********************************************
-            //  31 bits of this bitfield have now been used
+            //  32 bits of this bitfield have now been used
             //  up. If more bitfields are required, use the
             //  usFlags variable below
             //  ********************************************

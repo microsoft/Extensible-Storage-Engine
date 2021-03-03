@@ -4203,6 +4203,11 @@ void DBMObjectCache::CacheObjectFucb( FUCB * const pfucb, const OBJID objid )
         Assert( m_rgstate[index].pfucb == pfucbNil );
     }
 
+#ifndef ENABLE_JET_UNIT_TEST
+    // There are tests that get here with a NULL pointer.
+    pfucb->m_iae.SetProtected();
+#endif
+
     m_rgstate[index].objid = objid;
     m_rgstate[index].ois = ois::Valid;
     m_rgstate[index].pfucb = pfucb;
@@ -4312,7 +4317,11 @@ void DBMObjectCache::CloseObjectAt_( const INT index )
     if ( pfucbNil != m_rgstate[index].pfucb )
     {
         Assert( ois::Valid == m_rgstate[index].ois );
+
 #ifndef ENABLE_JET_UNIT_TEST
+        Assert( m_rgstate[index].pfucb->m_iae.FProtected() );
+        m_rgstate[index].pfucb->m_iae.ResetProtected();
+        
         if ( m_rgstate[index].pfucb->u.pfcb->FTypeLV() )
         {
             DIRClose( m_rgstate[index].pfucb );

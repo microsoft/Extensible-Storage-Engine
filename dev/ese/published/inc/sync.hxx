@@ -321,6 +321,11 @@ extern BOOL g_fSyncProcessAbort;
 
 //  returns fTrue if the given data is properly aligned for atomic modification
 
+inline const BOOL IsAtomicallyModifiable( ULONG_PTR* pulpTarget )
+{
+    return ULONG_PTR( pulpTarget ) % sizeof( ULONG_PTR ) == 0;
+}
+
 inline const BOOL IsAtomicallyModifiable( LONG* plTarget )
 {
     return ULONG_PTR( plTarget ) % sizeof( LONG ) == 0;
@@ -609,6 +614,52 @@ inline ULONG AtomicExchangeReset( ULONG* const pulTarget, const ULONG ulMask )
     }
 
     return (ULONG)lOld;
+}
+
+//  atomically set the bits from the mask in the target, returning the original.  the
+//  target must be aligned to a ULONG_PTR boundary
+
+inline ULONG_PTR AtomicExchangeSet( ULONG_PTR* const pulpTarget, const ULONG_PTR ulpMask )
+{
+    OSSYNCAssert( IsAtomicallyModifiable( pulpTarget ) );
+
+    ULONG_PTR ulpOld;
+    OSSYNC_FOREVER
+    {
+        ulpOld                    = AtomicRead( pulpTarget );
+        const ULONG_PTR ulpWanted = ( ulpOld | ulpMask );
+        const ULONG_PTR ulpFinal  = AtomicCompareExchange( pulpTarget, ulpOld, ulpWanted );
+
+        if( ulpFinal == ulpOld )
+        {
+            break;
+        }
+    }
+
+    return ulpOld;
+}
+
+//  atomically resets the bits from the mask in the target, returning the original.  the
+//  target must be aligned to a natural ULONG_PTR boundary
+
+inline ULONG_PTR AtomicExchangeReset( ULONG_PTR* const pulpTarget, const ULONG_PTR ulpMask )
+{
+    OSSYNCAssert( IsAtomicallyModifiable( pulpTarget ) );
+
+    ULONG_PTR ulpOld;
+    OSSYNC_FOREVER
+    {
+        ulpOld                     = AtomicRead( pulpTarget );
+        const ULONG_PTR ulpWanted  = ( ulpOld & ~ulpMask );
+        const ULONG_PTR ulpFinal   = AtomicCompareExchange( pulpTarget, ulpOld, ulpWanted );
+
+        if( ulpFinal == ulpOld )
+        {
+            break;
+        }
+    }
+
+    return ulpOld;
 }
 
 //  atomically compares the target against the specified value and replaces
