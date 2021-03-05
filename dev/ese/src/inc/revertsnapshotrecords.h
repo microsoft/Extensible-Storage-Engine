@@ -16,7 +16,8 @@
 #define     rbsrectypeFragBegin         4
 #define     rbsrectypeFragContinue      5
 #define     rbsrectypeDbNewPage         6
-#define     rbsrectypeMax               7
+#define     rbsrectypeDbEmptyPages      7
+#define     rbsrectypeMax               8
 
 PERSISTED
 struct RBSRecord
@@ -58,6 +59,14 @@ struct RBSDbNewPageRecord : public RBSRecord
     UnalignedLittleEndian<PGNO>     m_pgno;
 };
 
+PERSISTED
+struct RBSDbEmptyPagesRecord : public RBSRecord
+{
+    UnalignedLittleEndian<DBID>     m_dbid;
+    UnalignedLittleEndian<PGNO>     m_pgnoFirst;
+    UnalignedLittleEndian<CPG>      m_cpg;
+};
+
 ERR ErrRBSDecompressPreimage(
     DATA &data,
     const LONG cbPage,
@@ -93,6 +102,8 @@ CbRBSRecFixed( BYTE bRecType )
             return sizeof( RBSFragContinue );
         case rbsrectypeDbNewPage:
             return sizeof( RBSDbNewPageRecord );
+        case rbsrectypeDbEmptyPages:
+            return sizeof( RBSDbEmptyPagesRecord );
         default:
            Assert( fFalse );
         case rbsrectypeNOP:

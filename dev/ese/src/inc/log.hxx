@@ -2062,7 +2062,7 @@ private:
     ERR ErrLGRIRedoExtendDB( const LREXTENDDB * const plrextenddb );
     ERR ErrLGRIRedoShrinkDB( const LRSHRINKDB3 * const plrshrinkdb );
     ERR ErrLGRIRedoShrinkDBPageReset( const IFMP ifmp, const PGNO pgnoShrinkFirstReset, const PGNO pgnoShrinkLastReset, const DBTIME dbtimeShrink );
-    ERR ErrLGRIRedoShrinkDBFileTruncation( const IFMP ifmp, const PGNO pgnoDbLastNew );
+    ERR ErrLGRIRedoShrinkDBFileTruncation( const IFMP ifmp, const PGNO pgnoDbLastNew, const CPG cpgShrunkLR );
     ERR ErrLGRIRedoTrimDB( _In_ const LRTRIMDB * const plrtrimdb );
     ERR ErrLGIRedoFDPPage( CTableHash *pctablehash, PIB *ppib, const LRCREATESEFDP *plrcreatesefdp );
     ERR ErrLGIRedoFDPPage( CTableHash *pctablehash, PIB *ppib, const LRCREATEMEFDP *plrcreatemefdp );

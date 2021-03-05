@@ -1956,6 +1956,31 @@ ERR CRevertSnapshot::ErrCaptureNewPage(
     return ErrCaptureRec( &dbRec, &dataDummy, prbsposRecord );
 }
 
+ERR CRevertSnapshot::ErrCaptureEmptyPages(
+    DBID dbid,
+    PGNO pgnoFirst,
+    CPG  cpg )
+{
+    Assert( m_fInitialized );
+    Assert( !m_fInvalid );
+    Assert( pgnoFirst > 0 );
+    Assert( dbid != dbidTemp );
+    Assert( cpg > 0 );
+
+    RBS_POS rbspos;
+    DATA dataDummy;
+    dataDummy.Nullify();
+
+    RBSDbEmptyPagesRecord dbRec;
+    dbRec.m_bRecType    = rbsrectypeDbEmptyPages;
+    dbRec.m_usRecLength = sizeof( RBSDbEmptyPagesRecord );
+    dbRec.m_dbid        = dbid;
+    dbRec.m_pgnoFirst   = pgnoFirst;
+    dbRec.m_cpg         = cpg;
+
+    return ErrCaptureRec( &dbRec, &dataDummy, &rbspos );
+}
+
 ERR CRevertSnapshot::ErrCaptureDbHeader( FMP * const pfmp )
 {
     RBS_POS dummy;
@@ -4033,7 +4058,7 @@ ERR CRBSRevertContext::ErrComputeRBSRangeToApply( LOGTIME ltRevertExpected, LOGT
     Assert( m_lRBSMinGenToApply > 0 );
 
 HandleError:
-    if ( err == JET_errReadVerifyFailure )
+    if ( err == JET_errReadVerifyFailure || err == JET_errFileInvalidType || err == JET_errBadRBSVersion || err == JET_errRBSInvalidSign )
     {
         ErrERRCheck( JET_errRBSRCInvalidRBS );
     }
@@ -4281,6 +4306,58 @@ BOOL CRBSRevertContext::FPageAlreadyCaptured( DBID dbid, PGNO pgno )
     return m_rgprbsdbrcAttached[ m_mpdbidirbsdbrc[ dbid ] ]->FPageAlreadyCaptured( pgno );
 }
 
+// Adds the given pgno as a reverted new page to the list of pages to reverted for the given database.
+//
+ERR CRBSRevertContext::ErrAddRevertedNewPage( DBID dbid, PGNO pgnoRevertNew )
+{
+    ERR err         = JET_errSuccess;
+    void*   pvPage  = NULL;
+
+    if ( !FPageAlreadyCaptured( dbid, pgnoRevertNew ) )
+    {
+        pvPage = PvOSMemoryPageAlloc( m_cbDbPageSize, NULL );
+        Alloc( pvPage );
+
+        CPAGE cpage;
+        cpage.GetRevertedNewPage( pgnoRevertNew, pvPage, m_cbDbPageSize );
+        Assert( cpage.Pgft() == CPAGE::PageFlushType::pgftUnknown );
+
+        // For new page/multi new page record type, we don't store the preimage of the page since it indicates that it was a new page before it was updated.
+        // We will just write out an empty page for such a page.
+        Call( ErrAddPageRecord( pvPage, dbid, pgnoRevertNew ) );
+    }
+
+HandleError:
+    if ( err < JET_errSuccess && pvPage )
+    {
+        OSMemoryPageFree( pvPage );
+    }
+
+    return err;
+}
+
+// Checks whether we continue applying RBS, taking any required actions.
+//
+ERR CRBSRevertContext::ErrCheckApplyRBSContinuation()
+{
+    ERR err = JET_errSuccess;
+
+    // Flush the cached pages if full.
+    if ( m_cpgCached >= m_cpgCacheMax )
+    {
+        Call( ErrFlushPages( fFalse ) );
+    }
+
+    // Cancel revert if requested.
+    if ( m_fRevertCancelled )
+    {
+        Error( ErrERRCheck( JET_errRBSRCRevertCancelled ) );
+    }
+
+HandleError:
+    return err;
+}
+
 // Apply the given RBS record to the databases.
 //
 // fDbHeaderOnly - We will go through the just to capture the database header. fDbHeaderOnly should be passed only for the lowest RBS gen we applied.
@@ -4423,19 +4500,24 @@ ERR CRBSRevertContext::ErrApplyRBSRecord( RBSRecord* prbsrec, BOOL fCaptureDbHdr
             }
 
             RBSDbNewPageRecord* prbsdbnewpgrec = ( RBSDbNewPageRecord* ) prbsrec;
+            Call( ErrAddRevertedNewPage( prbsdbnewpgrec->m_dbid, prbsdbnewpgrec->m_pgno ) );
+            break;
+        }
 
-            if ( !FPageAlreadyCaptured( prbsdbnewpgrec->m_dbid, prbsdbnewpgrec->m_pgno ) )
+        case rbsrectypeDbEmptyPages:
+        {
+            if ( fDbHeaderOnly )
             {
-                pvPage = PvOSMemoryPageAlloc( m_cbDbPageSize, NULL );
-                Alloc( pvPage );
+                return JET_errSuccess;
+            }
 
-                CPAGE cpage;
-                cpage.GetRevertedNewPage( prbsdbnewpgrec->m_pgno, pvPage, m_cbDbPageSize );
-                Assert( cpage.Pgft() == CPAGE::PageFlushType::pgftUnknown );
+            RBSDbEmptyPagesRecord* prbsdbemptypgrec = ( RBSDbEmptyPagesRecord* ) prbsrec;
+            PGNO pgnoLast = prbsdbemptypgrec->m_pgnoFirst + prbsdbemptypgrec->m_cpg - 1;
 
-                // For new page record type, we don't store the preimage of the page since it indicates that it was a new page before it was updated.
-                // We will just write out an empty page for such a page.
-                Call( ErrAddPageRecord( pvPage, prbsdbnewpgrec->m_dbid, prbsdbnewpgrec->m_pgno ) );
+            for ( PGNO pgno = prbsdbemptypgrec->m_pgnoFirst; pgno <= pgnoLast; ++pgno )
+            {
+                Call( ErrAddRevertedNewPage( prbsdbemptypgrec->m_dbid, pgno ) );
+                Call( ErrCheckApplyRBSContinuation() );
             }
 
             break;
@@ -4525,16 +4607,7 @@ ERR CRBSRevertContext::ErrRBSGenApply( LONG lRBSGen, BOOL fDbHeaderOnly )
     while ( err != JET_wrnNoMoreRecords && err == JET_errSuccess )
     {
         Call( ErrApplyRBSRecord( prbsRecord, lRBSGen == m_lRBSMinGenToApply, fDbHeaderOnly, &fGivenDbfilehdrCaptured ) );
-
-        if ( m_cpgCached >= m_cpgCacheMax )
-        {
-            Call( ErrFlushPages( fFalse ) );
-        }
-
-        if ( m_fRevertCancelled )
-        {
-            Error( ErrERRCheck( JET_errRBSRCRevertCancelled ) );
-        }
+        Call( ErrCheckApplyRBSContinuation() );
 
         // We just want to go through the RBS till we capture the database header for all the databases attached.
         // If the current record was db file header record and was captured, we will check if we are done and break out of the loop.

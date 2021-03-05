@@ -10755,6 +10755,9 @@ LOCAL ERR ErrSPINewSize(
             // Write out any snapshot for pages about to be shrunk
             if ( g_rgfmp[ifmp].FRBSOn() )
             {
+                // Capture all shrunk pages as if they need to be reverted to empty pages when RBS is applied.
+                // If we already captured a preimage for one of those shrunk pages, the revert to an empty page will be ignored for that page when we apply the snapshot.
+                Call( g_rgfmp[ ifmp ].PRBS()->ErrCaptureEmptyPages( g_rgfmp[ ifmp ].Dbid(), pgnoLastCurr + cpgReq + 1, -1 * cpgReq ) );
                 Call( g_rgfmp[ifmp].PRBS()->ErrFlushAll() );
             }
 
