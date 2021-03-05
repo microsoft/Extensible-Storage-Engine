@@ -1,0 +1,2 @@
+add_subdirectory(BookStoreSample)
+add_subdirectory(SvcInitSample)

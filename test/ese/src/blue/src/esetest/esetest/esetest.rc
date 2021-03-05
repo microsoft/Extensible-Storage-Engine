@@ -1,0 +1,6 @@
+#define VER_FILEDESCRIPTION_STR         "ESE/ESENT test utility library"
+#define VER_INTERNALNAME_STR            "esetest.lib"
+#define VER_ORIGINALFILENAME_STR        "esetest.lib"
+
+#include "exver.rcv"
+

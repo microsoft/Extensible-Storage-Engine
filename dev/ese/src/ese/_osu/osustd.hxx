@@ -2,6 +2,8 @@
 // Licensed under the MIT License.
 
 
+#pragma once
+
 #include <stdlib.h>
 #include <string.h>
 #pragma prefast(push)

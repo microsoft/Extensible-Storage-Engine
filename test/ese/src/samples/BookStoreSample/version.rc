@@ -1,0 +1,12 @@
+// ---------------------------------------------------------------------------
+// <copyright file="eseutil.rc" company="Microsoft">
+//     Copyright (c) Microsoft Corporation.  All rights reserved.
+// </copyright>
+// ---------------------------------------------------------------------------
+
+#define RC_VERSION_FILE_DESCRIPTION 	"Microsoft(R) Exchange Server Database Storage Engine Utilities\0"
+#define RC_VERSION_INTERNAL_NAME		"BookStoreSample\0"
+#define RC_VERSION_ORIGINAL_FILE_NAME	"BookStoreSample.exe\0"
+
+#include "bldver.rc"
+

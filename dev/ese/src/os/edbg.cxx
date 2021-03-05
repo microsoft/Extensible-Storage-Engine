@@ -7,10 +7,12 @@
 
 
 
-#ifdef ESENT
+#if defined(ESENT)
 #include "ntverp.h"
-#else
+#elif defined(ESEEX)
 #include "bldver.h"
+#elif !( defined(PRODUCT_MAJOR) && defined(PRODUCT_MINOR) && defined(BUILD_MAJOR) && defined(BUILD_MINOR) )
+#error "Please define PRODUCT_MAJOR, PRODUCT_MINOR, BUILD_MAJOR, and BUILD_MINOR in the build environment"
 #endif
 
 
@@ -18571,7 +18573,7 @@ void COSDisk::Dump( CPRINTF* pcprintf, DWORD_PTR dwOffset ) const
         }
         else
         {
-            (*pcprintf)( "                                     g_cioConcurrentMetedOps <              ,   >:  %d  // max concurrent meted ops allowed\n", cioConcurrentMetedOpsMax );
+            (*pcprintf)( "                                     g_cioConcurrentMetedOps <              ,   >:  %d  (max concurrent meted ops allowed)\n", cioConcurrentMetedOpsMax );
             (*pcprintf)( "                                      g_cioLowQueueThreshold <              ,   >:  %d\n", cioLowQueueThreshold );
             (*pcprintf)( "                              g_dtickStarvedMetedOpThreshold <              ,   >:  %d\n", dtickStarvedMetedOpThreshold );
             FlightConcurrentMetedOps( cioConcurrentMetedOpsMax, cioLowQueueThreshold, dtickStarvedMetedOpThreshold );

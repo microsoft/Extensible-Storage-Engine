@@ -3,10 +3,6 @@
 
 #pragma once
 
-#if !defined( ESENT ) && !defined( MINIMAL_FUNCTIONALITY )
-#define USE_HAPUBLISH_API
-#endif
-
 #if defined( USE_HAPUBLISH_API )
 #include <guiddef.h>
 #include <ExDbFailureItem.h>

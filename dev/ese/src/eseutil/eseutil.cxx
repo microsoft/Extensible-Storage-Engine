@@ -28,7 +28,9 @@
 #include <esebcli2.h>
 #define ESEBCLI2_DLL_NAME   L"ESEBCLI2.DLL"
 
+#ifdef USE_WATSON_API
 #include <NativeWatson.h>
+#endif
 
 #define ESEBACK2_DLL_NAME   L"ESEBACK2.DLL"
 
@@ -5147,7 +5149,7 @@ INT __cdecl wmain( INT argc, __in_ecount(argc) LPWSTR argv[] )
     timer = TickOSTimeCurrent();
 
 
-#ifndef ESENT
+#ifdef USE_WATSON_API
     RegisterWatson();
 #endif
 

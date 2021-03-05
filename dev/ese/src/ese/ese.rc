@@ -1,0 +1,13 @@
+// Copyright (c) Microsoft Corporation.
+// Licensed under the MIT License.
+
+#define RC_VERSION_FILE_DESCRIPTION     "Microsoft(R) Exchange Server Database Storage Engine\0"
+#define RC_VERSION_INTERNAL_NAME        "ESE\0"
+#define RC_VERSION_ORIGINAL_FILE_NAME   "ESE.DLL\0"
+
+#ifdef ESEEX
+// Exchange-only common .rc file
+#include "bldver.rc"
+#endif
+
+#include "jetmsgex.rc"

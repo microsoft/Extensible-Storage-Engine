@@ -1,0 +1,925 @@
+// Copyright (c) Microsoft Corporation.
+// Licensed under the MIT License.
+
+// NO_DEF_ALIAS is defined when building the X86 lib we want
+// to publish. ALIAS1/ALIAS2 should only be used to add the aliases
+// needed for backward compat.
+// ALIAS3 is used for direct substitutions (e.g. JetFooA = JetFoo).
+
+// This def file generates the def for both ESE and ESENT
+
+#define ESENT_DEF_HASH #
+#define ESENT_DEF_ECHO(x) x
+
+#if !defined(_M_IX86) || defined(NO_DEF_ALIAS)
+#  define ALIAS1(x,y) x
+#  define ALIAS2(x,y)
+#  define ALIAS3(x,y) x=y
+#  define ALIASDATA(x) x DATA
+#else
+#  define ALIAS1(x,y) x
+#if defined _M_HYBRID_X86_ARM64
+#  define ALIAS2(x,y) x@##y=ESENT_DEF_ECHO(ESENT_DEF_HASH)x@##y
+#else
+#  define ALIAS2(x,y) x@##y=_##x@##y
+#endif
+#  define ALIAS3(x,y) x=y
+#  define ALIASDATA(x) x DATA
+#endif
+
+LIBRARY LIBNAME
+
+EXPORTS
+
+	ALIAS1(ese,8)
+	ALIAS2(ese,8)
+
+    ALIAS1(DllRegisterServer,0) PRIVATE
+
+	ALIAS1(DebugExtensionInitialize,8)
+	ALIAS2(DebugExtensionInitialize,8)
+	ALIAS1(DebugExtensionUninitialize,0)
+	ALIAS2(DebugExtensionUninitialize,0)
+	ALIAS1(DebugExtensionNotify,12)
+	ALIAS2(DebugExtensionNotify,12)
+
+	ALIAS1(JetAddColumnA,28)
+	ALIAS2(JetAddColumnA,28)
+	ALIAS1(JetAddColumnW,28)
+	ALIAS2(JetAddColumnW,28)
+	ALIAS3(JetAddColumn,JetAddColumnA)
+
+	ALIAS1(JetAttachDatabaseA,12)
+	ALIAS2(JetAttachDatabaseA,12)
+	ALIAS1(JetAttachDatabaseW,12)
+	ALIAS2(JetAttachDatabaseW,12)
+	ALIAS3(JetAttachDatabase,JetAttachDatabaseA)
+
+	ALIAS1(JetAttachDatabase2A,16)
+	ALIAS2(JetAttachDatabase2A,16)
+	ALIAS1(JetAttachDatabase2W,16)
+	ALIAS2(JetAttachDatabase2W,16)
+	ALIAS3(JetAttachDatabase2,JetAttachDatabase2A)
+
+	ALIAS1(JetAttachDatabase3A,20)
+	ALIAS2(JetAttachDatabase3A,20)
+	ALIAS1(JetAttachDatabase3W,20)
+	ALIAS2(JetAttachDatabase3W,20)
+	ALIAS3(JetAttachDatabase3,JetAttachDatabase3A)
+
+	ALIAS1(JetAttachDatabaseWithStreamingA,24)
+	ALIAS2(JetAttachDatabaseWithStreamingA,24)
+	ALIAS1(JetAttachDatabaseWithStreamingW,24)
+	ALIAS2(JetAttachDatabaseWithStreamingW,24)
+	ALIAS3(JetAttachDatabaseWithStreaming,JetAttachDatabaseWithStreamingA)
+
+	ALIAS1(JetBackupA,12)
+	ALIAS2(JetBackupA,12)
+	ALIAS1(JetBackupW,12)
+	ALIAS2(JetBackupW,12)
+	ALIAS3(JetBackup,JetBackupA)
+
+	ALIAS1(JetBackupInstanceA,16)
+	ALIAS2(JetBackupInstanceA,16)
+	ALIAS1(JetBackupInstanceW,16)
+	ALIAS2(JetBackupInstanceW,16)
+	ALIAS3(JetBackupInstance,JetBackupInstanceA)
+
+	ALIAS1(JetBeginDatabaseIncrementalReseedA,12)
+	ALIAS2(JetBeginDatabaseIncrementalReseedA,12)
+	ALIAS1(JetBeginDatabaseIncrementalReseedW,12)
+	ALIAS2(JetBeginDatabaseIncrementalReseedW,12)
+	ALIAS3(JetBeginDatabaseIncrementalReseed, JetBeginDatabaseIncrementalReseedA)
+
+	ALIAS1(JetBeginExternalBackup,4)
+	ALIAS2(JetBeginExternalBackup,4)
+
+	ALIAS1(JetBeginExternalBackupInstance,8)
+	ALIAS2(JetBeginExternalBackupInstance,8)
+
+	ALIAS1(JetBeginSessionA,16)
+	ALIAS2(JetBeginSessionA,16)
+	ALIAS1(JetBeginSessionW,16)
+	ALIAS2(JetBeginSessionW,16)
+	ALIAS3(JetBeginSession, JetBeginSessionA)
+
+	ALIAS1(JetBeginSurrogateBackup,16)
+	ALIAS2(JetBeginSurrogateBackup,16)
+
+	ALIAS1(JetBeginTransaction,4)
+	ALIAS2(JetBeginTransaction,4)
+
+	ALIAS1(JetBeginTransaction2,8)
+	ALIAS2(JetBeginTransaction2,8)
+
+	ALIAS1(JetBeginTransaction3,16)
+	ALIAS2(JetBeginTransaction3,16)
+
+	ALIAS1(JetCloseDatabase,12)
+	ALIAS2(JetCloseDatabase,12)
+
+	ALIAS1(JetCloseFile,4)
+	ALIAS2(JetCloseFile,4)
+
+	ALIAS1(JetCloseFileInstance,8)
+	ALIAS2(JetCloseFileInstance,8)
+
+	ALIAS1(JetCloseTable,8)
+	ALIAS2(JetCloseTable,8)
+
+	ALIAS1(JetCommitTransaction,8)
+	ALIAS2(JetCommitTransaction,8)
+
+	ALIAS1(JetCommitTransaction2,16)
+	ALIAS2(JetCommitTransaction2,16)
+
+	ALIAS1(JetCompactA,24)
+	ALIAS2(JetCompactA,24)
+	ALIAS1(JetCompactW,24)
+	ALIAS2(JetCompactW,24)
+	ALIAS3(JetCompact,JetCompactA)
+
+	ALIAS1(JetComputeStats,8)
+	ALIAS2(JetComputeStats,8)
+
+	ALIAS1(JetConfigureProcessForCrashDump,4)
+	ALIAS2(JetConfigureProcessForCrashDump,4)
+
+	ALIAS1(JetConsumeLogData,20)
+	ALIAS2(JetConsumeLogData,20)
+
+	ALIAS1(JetConvertDDLA,20)
+	ALIAS2(JetConvertDDLA,20)
+	ALIAS1(JetConvertDDLW,20)
+	ALIAS2(JetConvertDDLW,20)
+	ALIAS3(JetConvertDDL, JetConvertDDLA)
+
+	ALIAS1(JetCreateDatabaseA,20)
+	ALIAS2(JetCreateDatabaseA,20)
+	ALIAS1(JetCreateDatabaseW,20)
+	ALIAS2(JetCreateDatabaseW,20)
+	ALIAS3(JetCreateDatabase,JetCreateDatabaseA)
+
+	ALIAS1(JetCreateDatabase2A,20)
+	ALIAS2(JetCreateDatabase2A,20)
+	ALIAS1(JetCreateDatabase2W,20)
+	ALIAS2(JetCreateDatabase2W,20)
+	ALIAS3(JetCreateDatabase2,JetCreateDatabase2A)
+
+	ALIAS1(JetCreateDatabase3A,24)
+	ALIAS2(JetCreateDatabase3A,24)
+	ALIAS1(JetCreateDatabase3W,24)
+	ALIAS2(JetCreateDatabase3W,24)
+	ALIAS3(JetCreateDatabase3,JetCreateDatabase3A)
+
+	ALIAS1(JetCreateDatabaseWithStreamingA,28)
+	ALIAS2(JetCreateDatabaseWithStreamingA,28)
+	ALIAS1(JetCreateDatabaseWithStreamingW,28)
+	ALIAS2(JetCreateDatabaseWithStreamingW,28)
+	ALIAS3(JetCreateDatabaseWithStreaming,JetCreateDatabaseWithStreamingA)
+
+	ALIAS1(JetCreateEncryptionKey,16)
+	ALIAS2(JetCreateEncryptionKey,16)
+
+	ALIAS1(JetCreateIndexA,28)
+	ALIAS2(JetCreateIndexA,28)
+	ALIAS1(JetCreateIndexW,28)
+	ALIAS2(JetCreateIndexW,28)
+	ALIAS3(JetCreateIndex,JetCreateIndexA)
+
+	ALIAS1(JetCreateIndex2A,16)
+	ALIAS2(JetCreateIndex2A,16)
+	ALIAS1(JetCreateIndex2W,16)
+	ALIAS2(JetCreateIndex2W,16)
+	ALIAS3(JetCreateIndex2,JetCreateIndex2A)
+
+	ALIAS1(JetCreateIndex3A,16)
+	ALIAS1(JetCreateIndex3W,16)
+
+	ALIAS1(JetCreateIndex4A,16)
+	ALIAS1(JetCreateIndex4W,16)
+
+	ALIAS1(JetCreateInstanceA,8)
+	ALIAS2(JetCreateInstanceA,8)
+	ALIAS1(JetCreateInstanceW,8)
+	ALIAS2(JetCreateInstanceW,8)
+	ALIAS3(JetCreateInstance,JetCreateInstanceA)
+
+	ALIAS1(JetCreateInstance2A,16)
+	ALIAS2(JetCreateInstance2A,16)
+	ALIAS1(JetCreateInstance2W,16)
+	ALIAS2(JetCreateInstance2W,16)
+	ALIAS3(JetCreateInstance2,JetCreateInstance2A)
+
+	ALIAS1(JetCreateTableA,24)
+	ALIAS2(JetCreateTableA,24)
+	ALIAS1(JetCreateTableW,24)
+	ALIAS2(JetCreateTableW,24)
+	ALIAS3(JetCreateTable,JetCreateTableA)
+
+	ALIAS1(JetCreateTableColumnIndexA,12)
+	ALIAS2(JetCreateTableColumnIndexA,12)
+	ALIAS1(JetCreateTableColumnIndexW,12)
+	ALIAS2(JetCreateTableColumnIndexW,12)
+	ALIAS3(JetCreateTableColumnIndex,JetCreateTableColumnIndexA)
+
+	ALIAS1(JetCreateTableColumnIndex2A,12)
+	ALIAS2(JetCreateTableColumnIndex2A,12)
+	ALIAS1(JetCreateTableColumnIndex2W,12)
+	ALIAS2(JetCreateTableColumnIndex2W,12)
+	ALIAS3(JetCreateTableColumnIndex2,JetCreateTableColumnIndex2A)
+
+	ALIAS1(JetCreateTableColumnIndex3A,12)
+	ALIAS2(JetCreateTableColumnIndex3A,12)
+	ALIAS1(JetCreateTableColumnIndex3W,12)
+	ALIAS2(JetCreateTableColumnIndex3W,12)
+
+	ALIAS1(JetCreateTableColumnIndex4A,12)
+	ALIAS2(JetCreateTableColumnIndex4A,12)
+	ALIAS1(JetCreateTableColumnIndex4W,12)
+	ALIAS2(JetCreateTableColumnIndex4W,12)
+
+	ALIAS1(JetCreateTableColumnIndex5A,12)
+	ALIAS2(JetCreateTableColumnIndex5A,12)
+	ALIAS1(JetCreateTableColumnIndex5W,12)
+	ALIAS2(JetCreateTableColumnIndex5W,12)
+
+	ALIAS1(JetDatabaseScan,24)
+	ALIAS2(JetDatabaseScan,24)
+
+	ALIAS1(JetDBUtilitiesA,4)
+	ALIAS2(JetDBUtilitiesA,4)
+	ALIAS1(JetDBUtilitiesW,4)
+	ALIAS2(JetDBUtilitiesW,4)
+	ALIAS3(JetDBUtilities,JetDBUtilitiesA)
+
+	ALIAS1(JetDefragmentA,24)
+	ALIAS2(JetDefragmentA,24)
+	ALIAS1(JetDefragmentW,24)
+	ALIAS2(JetDefragmentW,24)
+	ALIAS3(JetDefragment,JetDefragmentA)
+
+	ALIAS1(JetDefragment2A,28)
+	ALIAS2(JetDefragment2A,28)
+	ALIAS1(JetDefragment2W,28)
+	ALIAS2(JetDefragment2W,28)
+	ALIAS3(JetDefragment2,JetDefragment2A)
+
+	ALIAS1(JetDefragment3A,32)
+	ALIAS2(JetDefragment3A,32)
+	ALIAS1(JetDefragment3W,32)
+	ALIAS2(JetDefragment3W,32)
+	ALIAS3(JetDefragment3,JetDefragment3A)
+
+	ALIAS1(JetDelete,8)
+	ALIAS2(JetDelete,8)
+
+	ALIAS1(JetDeleteColumnA,12)
+	ALIAS2(JetDeleteColumnA,12)
+	ALIAS1(JetDeleteColumnW,12)
+	ALIAS2(JetDeleteColumnW,12)
+	ALIAS3(JetDeleteColumn,JetDeleteColumnA)
+
+	ALIAS1(JetDeleteColumn2A,16)
+	ALIAS2(JetDeleteColumn2A,16)
+	ALIAS1(JetDeleteColumn2W,16)
+	ALIAS2(JetDeleteColumn2W,16)
+	ALIAS3(JetDeleteColumn2,JetDeleteColumn2A)
+
+	ALIAS1(JetDeleteIndexA,12)
+	ALIAS2(JetDeleteIndexA,12)
+	ALIAS1(JetDeleteIndexW,12)
+	ALIAS2(JetDeleteIndexW,12)
+	ALIAS3(JetDeleteIndex,JetDeleteIndexA)
+
+	ALIAS1(JetDeleteTableA,12)
+	ALIAS2(JetDeleteTableA,12)
+	ALIAS1(JetDeleteTableW,12)
+	ALIAS2(JetDeleteTableW,12)
+	ALIAS3(JetDeleteTable,JetDeleteTableA)
+
+	ALIAS1(JetDetachDatabaseA,8)
+	ALIAS2(JetDetachDatabaseA,8)
+	ALIAS1(JetDetachDatabaseW,8)
+	ALIAS2(JetDetachDatabaseW,8)
+	ALIAS3(JetDetachDatabase,JetDetachDatabaseA)
+
+	ALIAS1(JetDetachDatabase2A,12)
+	ALIAS2(JetDetachDatabase2A,12)
+	ALIAS1(JetDetachDatabase2W,12)
+	ALIAS2(JetDetachDatabase2W,12)
+	ALIAS3(JetDetachDatabase2,JetDetachDatabase2A)
+
+	ALIAS1(JetDupCursor,16)
+	ALIAS2(JetDupCursor,16)
+
+	ALIAS1(JetDupSession,8)
+	ALIAS2(JetDupSession,8)
+
+	ALIAS1(JetEnableMultiInstanceA,12)
+	ALIAS2(JetEnableMultiInstanceA,12)
+	ALIAS1(JetEnableMultiInstanceW,12)
+	ALIAS2(JetEnableMultiInstanceW,12)
+	ALIAS3(JetEnableMultiInstance,JetEnableMultiInstanceA)
+
+	ALIAS1(JetEndDatabaseIncrementalReseedA,24)
+	ALIAS2(JetEndDatabaseIncrementalReseedA,24)
+	ALIAS1(JetEndDatabaseIncrementalReseedW,24)
+	ALIAS2(JetEndDatabaseIncrementalReseedW,24)
+	ALIAS3(JetEndDatabaseIncrementalReseed, JetEndDatabaseIncrementalReseedA)
+
+	ALIAS1(JetEndExternalBackup,0)
+	ALIAS2(JetEndExternalBackup,0)
+
+	ALIAS1(JetEndExternalBackupInstance,4)
+	ALIAS2(JetEndExternalBackupInstance,4)
+
+	ALIAS1(JetEndExternalBackupInstance2,8)
+	ALIAS2(JetEndExternalBackupInstance2,8)
+
+	ALIAS1(JetEndSession,8)
+	ALIAS2(JetEndSession,8)
+
+	ALIAS1(JetEndSurrogateBackup,8)
+	ALIAS2(JetEndSurrogateBackup,8)
+
+	ALIAS1(JetEnumerateColumns,40)
+	ALIAS2(JetEnumerateColumns,40)
+
+	ALIAS1(JetEscrowUpdate,36)
+	ALIAS2(JetEscrowUpdate,36)
+
+	ALIAS1(JetExternalRestoreA,32)
+	ALIAS2(JetExternalRestoreA,32)
+	ALIAS1(JetExternalRestoreW,32)
+	ALIAS2(JetExternalRestoreW,32)
+	ALIAS3(JetExternalRestore,JetExternalRestoreA)
+
+	ALIAS1(JetExternalRestore2A,40)
+	ALIAS2(JetExternalRestore2A,40)
+	ALIAS1(JetExternalRestore2W,40)
+	ALIAS2(JetExternalRestore2W,40)
+	ALIAS3(JetExternalRestore2,JetExternalRestore2A)
+
+	ALIAS1(JetFreeBuffer,4)
+	ALIAS2(JetFreeBuffer,4)
+
+	ALIAS1(JetGetAttachInfoA,12)
+	ALIAS2(JetGetAttachInfoA,12)
+	ALIAS1(JetGetAttachInfoW,12)
+	ALIAS2(JetGetAttachInfoW,12)
+	ALIAS3(JetGetAttachInfo,JetGetAttachInfoA)
+
+	ALIAS1(JetGetAttachInfoInstanceA,16)
+	ALIAS2(JetGetAttachInfoInstanceA,16)
+	ALIAS1(JetGetAttachInfoInstanceW,16)
+	ALIAS2(JetGetAttachInfoInstanceW,16)
+	ALIAS3(JetGetAttachInfoInstance,JetGetAttachInfoInstanceA)
+
+	ALIAS1(JetGetBookmark,20)
+	ALIAS2(JetGetBookmark,20)
+
+	ALIAS1(JetGetColumnInfoA,28)
+	ALIAS2(JetGetColumnInfoA,28)
+	ALIAS1(JetGetColumnInfoW,28)
+	ALIAS2(JetGetColumnInfoW,28)
+	ALIAS3(JetGetColumnInfo,JetGetColumnInfoA)
+
+	ALIAS1(JetGetCounter,12)
+	ALIAS2(JetGetCounter,12)
+
+	ALIAS1(JetGetThreadStats,8)
+	ALIAS2(JetGetThreadStats,8)
+
+	ALIAS1(JetGetCurrentIndexA,16)
+	ALIAS2(JetGetCurrentIndexA,16)
+	ALIAS1(JetGetCurrentIndexW,16)
+	ALIAS2(JetGetCurrentIndexW,16)
+	ALIAS3(JetGetCurrentIndex,JetGetCurrentIndexA)
+
+	ALIAS1(JetGetCursorInfo,20)
+	ALIAS2(JetGetCursorInfo,20)
+
+	ALIAS1(JetGetDatabaseFileInfoA,16)
+	ALIAS2(JetGetDatabaseFileInfoA,16)
+	ALIAS1(JetGetDatabaseFileInfoW,16)
+	ALIAS2(JetGetDatabaseFileInfoW,16)
+	ALIAS3(JetGetDatabaseFileInfo,JetGetDatabaseFileInfoA)
+
+	ALIAS1(JetGetDatabaseInfoA,20)
+	ALIAS2(JetGetDatabaseInfoA,20)
+	ALIAS1(JetGetDatabaseInfoW,20)
+	ALIAS2(JetGetDatabaseInfoW,20)
+	ALIAS3(JetGetDatabaseInfo,JetGetDatabaseInfoA)
+
+	ALIAS1(JetGetDatabasePages,32)
+	ALIAS2(JetGetDatabasePages,32)
+
+	ALIAS1(JetGetErrorInfoW,20)
+	ALIAS2(JetGetErrorInfoW,20)
+
+	ALIAS1(JetGetPageInfo,24)
+	ALIAS2(JetGetPageInfo,24)
+
+	ALIAS1(JetGetPageInfo2,24)
+	ALIAS2(JetGetPageInfo2,24)
+
+	ALIAS1(JetRemoveLogfileA,12)
+	ALIAS2(JetRemoveLogfileA,12)
+	ALIAS1(JetRemoveLogfileW,12)
+	ALIAS2(JetRemoveLogfileW,12)
+
+	ALIAS1(JetGetIndexInfoA,28)
+	ALIAS2(JetGetIndexInfoA,28)
+	ALIAS1(JetGetIndexInfoW,28)
+	ALIAS2(JetGetIndexInfoW,28)
+	ALIAS3(JetGetIndexInfo,JetGetIndexInfoA)
+
+	ALIAS1(JetGetInstanceInfoA,8)
+	ALIAS2(JetGetInstanceInfoA,8)
+	ALIAS1(JetGetInstanceInfoW,8)
+	ALIAS2(JetGetInstanceInfoW,8)
+	ALIAS3(JetGetInstanceInfo,JetGetInstanceInfoA)
+
+	ALIAS1(JetGetInstanceMiscInfo,16)
+	ALIAS2(JetGetInstanceMiscInfo,16)
+
+	ALIAS1(JetGetLock,12)
+	ALIAS2(JetGetLock,12)
+
+	ALIAS1(JetGetLogFileInfoA,16)
+	ALIAS2(JetGetLogFileInfoA,16)
+	ALIAS1(JetGetLogFileInfoW,16)
+	ALIAS2(JetGetLogFileInfoW,16)
+	ALIAS3(JetGetLogFileInfo,JetGetLogFileInfoA)
+
+	ALIAS1(JetGetLogInfoA,12)
+	ALIAS2(JetGetLogInfoA,12)
+	ALIAS1(JetGetLogInfoW,12)
+	ALIAS2(JetGetLogInfoW,12)
+	ALIAS3(JetGetLogInfo,JetGetLogInfoA)
+
+	ALIAS1(JetGetLogInfoInstanceA,16)
+	ALIAS2(JetGetLogInfoInstanceA,16)
+	ALIAS1(JetGetLogInfoInstanceW,16)
+	ALIAS2(JetGetLogInfoInstanceW,16)
+	ALIAS3(JetGetLogInfoInstance,JetGetLogInfoInstanceA)
+
+	ALIAS1(JetGetLogInfoInstance2A,20)
+	ALIAS2(JetGetLogInfoInstance2A,20)
+	ALIAS1(JetGetLogInfoInstance2W,20)
+	ALIAS2(JetGetLogInfoInstance2W,20)
+	ALIAS3(JetGetLogInfoInstance2,JetGetLogInfoInstance2A)
+
+	ALIAS1(JetGetLS,16)
+	ALIAS2(JetGetLS,16)
+
+	ALIAS1(JetGetMaxDatabaseSize,16)
+	ALIAS2(JetGetMaxDatabaseSize,16)
+
+	ALIAS1(JetGetObjectInfoA,32)
+	ALIAS2(JetGetObjectInfoA,32)
+	ALIAS1(JetGetObjectInfoW,32)
+	ALIAS2(JetGetObjectInfoW,32)
+	ALIAS3(JetGetObjectInfo,JetGetObjectInfoA)
+
+	ALIAS1(JetGetRecordPosition,16)
+	ALIAS2(JetGetRecordPosition,16)
+
+	ALIAS1(JetGetRecordSize,16)
+	ALIAS2(JetGetRecordSize,16)
+	ALIAS1(JetGetRecordSize2,16)
+	ALIAS2(JetGetRecordSize2,16)
+	ALIAS1(JetGetRecordSize3,16)
+	ALIAS2(JetGetRecordSize3,16)
+
+	ALIAS1(JetGetResourceParam,16)
+	ALIAS2(JetGetResourceParam,16)
+
+	ALIAS1(JetGetSecondaryIndexBookmark,36)
+	ALIAS2(JetGetSecondaryIndexBookmark,36)
+
+	ALIAS1(JetGetSystemParameterA,24)
+	ALIAS2(JetGetSystemParameterA,24)
+	ALIAS1(JetGetSystemParameterW,24)
+	ALIAS2(JetGetSystemParameterW,24)
+	ALIAS3(JetGetSystemParameter,JetGetSystemParameterA)
+
+	ALIAS1(JetGetSessionInfo,16)
+	ALIAS2(JetGetSessionInfo,16)
+
+	ALIAS1(JetGetSessionParameter,20)
+	ALIAS2(JetGetSessionParameter,20)
+
+	ALIAS1(JetGetTableColumnInfoA,24)
+	ALIAS2(JetGetTableColumnInfoA,24)
+	ALIAS1(JetGetTableColumnInfoW,24)
+	ALIAS2(JetGetTableColumnInfoW,24)
+	ALIAS3(JetGetTableColumnInfo,JetGetTableColumnInfoA)
+
+	ALIAS1(JetGetTableIndexInfoA,24)
+	ALIAS2(JetGetTableIndexInfoA,24)
+	ALIAS1(JetGetTableIndexInfoW,24)
+	ALIAS2(JetGetTableIndexInfoW,24)
+	ALIAS3(JetGetTableIndexInfo,JetGetTableIndexInfoA)
+
+	ALIAS1(JetGetTableInfoA,20)
+	ALIAS2(JetGetTableInfoA,20)
+	ALIAS1(JetGetTableInfoW,20)
+	ALIAS2(JetGetTableInfoW,20)
+	ALIAS3(JetGetTableInfo,JetGetTableInfoA)
+
+	ALIAS1(JetGetTruncateLogInfoInstanceA,16)
+	ALIAS2(JetGetTruncateLogInfoInstanceA,16)
+	ALIAS1(JetGetTruncateLogInfoInstanceW,16)
+	ALIAS2(JetGetTruncateLogInfoInstanceW,16)
+	ALIAS3(JetGetTruncateLogInfoInstance,JetGetTruncateLogInfoInstanceA)
+
+	ALIAS1(JetGetVersion,8)
+	ALIAS2(JetGetVersion,8)
+
+	ALIAS1(JetGotoBookmark,16)
+	ALIAS2(JetGotoBookmark,16)
+
+	ALIAS1(JetGotoPosition,12)
+	ALIAS2(JetGotoPosition,12)
+
+	ALIAS1(JetGotoSecondaryIndexBookmark,28)
+	ALIAS2(JetGotoSecondaryIndexBookmark,28)
+
+	ALIAS1(JetGrowDatabase,16)
+	ALIAS2(JetGrowDatabase,16)
+
+	ALIAS1(JetIdle,8)
+	ALIAS2(JetIdle,8)
+
+	ALIAS1(JetIndexRecordCount,16)
+	ALIAS2(JetIndexRecordCount,16)
+
+	ALIAS1(JetIndexRecordCount2,20)
+	ALIAS2(JetIndexRecordCount2,20)
+
+	ALIAS1(JetInit,4)
+	ALIAS2(JetInit,4)
+
+	ALIAS1(JetInit2,8)
+	ALIAS2(JetInit2,8)
+
+	ALIAS1(JetInit3A,12)
+	ALIAS2(JetInit3A,12)
+	ALIAS1(JetInit3W,12)
+	ALIAS2(JetInit3W,12)
+	ALIAS3(JetInit3,JetInit3A)
+
+	ALIAS1(JetInit4A,12)
+	ALIAS2(JetInit4A,12)
+	ALIAS1(JetInit4W,12)
+	ALIAS2(JetInit4W,12)
+	ALIAS3(JetInit4,JetInit4A)
+	
+	ALIAS1(JetIntersectIndexes,20)
+	ALIAS2(JetIntersectIndexes,20)
+
+	ALIAS1(JetMakeKey,20)
+	ALIAS2(JetMakeKey,20)
+
+	ALIAS1(JetMove,16)
+	ALIAS2(JetMove,16)
+
+	ALIAS1(JetOnlinePatchDatabasePage,32)
+	ALIAS2(JetOnlinePatchDatabasePage,32)
+
+	ALIAS1(JetOpenDatabaseA,20)
+	ALIAS2(JetOpenDatabaseA,20)
+	ALIAS1(JetOpenDatabaseW,20)
+	ALIAS2(JetOpenDatabaseW,20)
+	ALIAS3(JetOpenDatabase,JetOpenDatabaseA)
+
+	ALIAS1(JetOpenFileA,16)
+	ALIAS2(JetOpenFileA,16)
+	ALIAS1(JetOpenFileW,16)
+	ALIAS2(JetOpenFileW,16)
+	ALIAS3(JetOpenFile,JetOpenFileA)
+
+	ALIAS1(JetOpenFileInstanceA,20)
+	ALIAS2(JetOpenFileInstanceA,20)
+	ALIAS1(JetOpenFileInstanceW,20)
+	ALIAS2(JetOpenFileInstanceW,20)
+	ALIAS3(JetOpenFileInstance,JetOpenFileInstanceA)
+
+	ALIAS1(JetOpenFileSectionInstanceA,36)
+	ALIAS2(JetOpenFileSectionInstanceA,36)
+	ALIAS1(JetOpenFileSectionInstanceW,36)
+	ALIAS2(JetOpenFileSectionInstanceW,36)
+	ALIAS3(JetOpenFileSectionInstance,JetOpenFileSectionInstanceA)
+
+	ALIAS1(JetOpenTableA,28)
+	ALIAS2(JetOpenTableA,28)
+	ALIAS1(JetOpenTableW,28)
+	ALIAS2(JetOpenTableW,28)
+	ALIAS3(JetOpenTable,JetOpenTableA)
+
+	ALIAS1(JetOpenTemporaryTable,8)
+	ALIAS2(JetOpenTemporaryTable,8)
+
+	ALIAS1(JetOpenTemporaryTable2,8)
+	ALIAS2(JetOpenTemporaryTable2,8)
+
+	ALIAS1(JetOpenTempTable,24)
+	ALIAS2(JetOpenTempTable,24)
+
+	ALIAS1(JetOpenTempTable2,28)
+	ALIAS2(JetOpenTempTable2,28)
+
+	ALIAS1(JetOpenTempTable3,28)
+	ALIAS2(JetOpenTempTable3,28)
+
+	ALIAS1(JetOSSnapshotAbort,8)
+	ALIAS2(JetOSSnapshotAbort,8)
+
+	ALIAS1(JetOSSnapshotEnd,8)
+	ALIAS2(JetOSSnapshotEnd,8)
+
+	ALIAS1(JetOSSnapshotFreezeA,16)
+	ALIAS2(JetOSSnapshotFreezeA,16)
+	ALIAS1(JetOSSnapshotFreezeW,16)
+	ALIAS2(JetOSSnapshotFreezeW,16)
+	ALIAS3(JetOSSnapshotFreeze,JetOSSnapshotFreezeA)
+
+	ALIAS1(JetOSSnapshotGetFreezeInfoA,16)
+	ALIAS2(JetOSSnapshotGetFreezeInfoA,16)
+	ALIAS1(JetOSSnapshotGetFreezeInfoW,16)
+	ALIAS2(JetOSSnapshotGetFreezeInfoW,16)
+	ALIAS3(JetOSSnapshotGetFreezeInfo,JetOSSnapshotGetFreezeInfoA)
+
+	ALIAS1(JetOSSnapshotPrepare,8)
+	ALIAS2(JetOSSnapshotPrepare,8)
+
+	ALIAS1(JetOSSnapshotPrepareInstance,12)
+	ALIAS2(JetOSSnapshotPrepareInstance,12)
+
+	ALIAS1(JetOSSnapshotThaw,8)
+	ALIAS2(JetOSSnapshotThaw,8)
+
+	ALIAS1(JetOSSnapshotTruncateLog,8)
+	ALIAS2(JetOSSnapshotTruncateLog,8)
+
+	ALIAS1(JetOSSnapshotTruncateLogInstance,12)
+	ALIAS2(JetOSSnapshotTruncateLogInstance,12)
+
+	ALIAS1(JetPatchDatabasePagesA,28)
+	ALIAS2(JetPatchDatabasePagesA,28)
+	ALIAS1(JetPatchDatabasePagesW,28)
+	ALIAS2(JetPatchDatabasePagesW,28)
+	ALIAS3(JetPatchDatabasePages, JetPatchDatabasePagesA)
+
+	ALIAS1(JetPrepareToCommitTransaction,16)
+	ALIAS2(JetPrepareToCommitTransaction,16)
+
+	ALIAS1(JetPrepareUpdate,12)
+	ALIAS2(JetPrepareUpdate,12)
+	
+	ALIAS1(JetPrereadColumnsByReference,36)
+	ALIAS2(JetPrereadColumnsByReference,36)
+	
+	ALIAS1(JetPrereadIndexRange,28)
+	ALIAS2(JetPrereadIndexRange,28)
+
+	ALIAS1(JetPrereadIndexRanges,32)
+	ALIAS2(JetPrereadIndexRanges,32)
+
+	ALIAS1(JetPrereadKeys,28)
+	ALIAS2(JetPrereadKeys,28)
+
+	ALIAS1(JetPrereadTablesW,20)
+	ALIAS2(JetPrereadTablesW,20)
+
+	ALIAS1(JetReadFile,16)
+	ALIAS2(JetReadFile,16)
+
+	ALIAS1(JetReadFileInstance,20)
+	ALIAS2(JetReadFileInstance,20)
+
+	ALIAS1(JetRegisterCallback,24)
+	ALIAS2(JetRegisterCallback,24)
+
+	ALIAS1(JetRenameColumnA,20)
+	ALIAS2(JetRenameColumnA,20)
+	ALIAS1(JetRenameColumnW,20)
+	ALIAS2(JetRenameColumnW,20)
+	ALIAS3(JetRenameColumn, JetRenameColumnA)
+
+	ALIAS1(JetRenameTableA,16)
+	ALIAS2(JetRenameTableA,16)
+	ALIAS1(JetRenameTableW,16)
+	ALIAS2(JetRenameTableW,16)
+	ALIAS3(JetRenameTable, JetRenameTableA)
+
+	ALIAS1(JetResetCounter,8)
+	ALIAS2(JetResetCounter,8)
+
+	ALIAS1(JetResetSessionContext,4)
+	ALIAS2(JetResetSessionContext,4)
+
+	ALIAS1(JetResetTableSequential,12)
+	ALIAS2(JetResetTableSequential,12)
+
+	ALIAS1(JetResizeDatabase,20)
+	ALIAS2(JetResizeDatabase,20)
+
+	ALIAS1(JetRestoreA,8)
+	ALIAS2(JetRestoreA,8)
+	ALIAS1(JetRestoreW,8)
+	ALIAS2(JetRestoreW,8)
+	ALIAS3(JetRestore,JetRestoreA)
+
+	ALIAS1(JetRestore2A,12)
+	ALIAS2(JetRestore2A,12)
+	ALIAS1(JetRestore2W,12)
+	ALIAS2(JetRestore2W,12)
+	ALIAS3(JetRestore2,JetRestore2A)
+
+	ALIAS1(JetRestoreInstanceA,16)
+	ALIAS2(JetRestoreInstanceA,16)
+	ALIAS1(JetRestoreInstanceW,16)
+	ALIAS2(JetRestoreInstanceW,16)
+	ALIAS3(JetRestoreInstance,JetRestoreInstanceA)
+
+	ALIAS1(JetRetrieveColumn,32)
+	ALIAS2(JetRetrieveColumn,32)
+
+	ALIAS1(JetRetrieveColumnByReference,36)
+	ALIAS2(JetRetrieveColumnByReference,36)
+
+	ALIAS1(JetRetrieveColumnFromRecordStream,28)
+	ALIAS2(JetRetrieveColumnFromRecordStream,28)
+
+	ALIAS1(JetRetrieveColumns,16)
+	ALIAS2(JetRetrieveColumns,16)
+
+	ALIAS1(JetRetrieveKey,24)
+	ALIAS2(JetRetrieveKey,24)
+
+	ALIAS1(JetRetrieveTaggedColumnList,28)
+	ALIAS2(JetRetrieveTaggedColumnList,28)
+
+	ALIAS1(JetRollback,8)
+	ALIAS2(JetRollback,8)
+
+	ALIAS1(JetSeek,12)
+	ALIAS2(JetSeek,12)
+
+	ALIAS1(JetSetColumn,28)
+	ALIAS2(JetSetColumn,28)
+
+	ALIAS1(JetSetColumnDefaultValueA,28)
+	ALIAS2(JetSetColumnDefaultValueA,28)
+	ALIAS1(JetSetColumnDefaultValueW,28)
+	ALIAS2(JetSetColumnDefaultValueW,28)
+	ALIAS3(JetSetColumnDefaultValue,JetSetColumnDefaultValueA)
+
+	ALIAS1(JetSetColumns,16)
+	ALIAS2(JetSetColumns,16)
+
+	ALIAS1(JetSetCursorFilter,20)
+	ALIAS2(JetSetCursorFilter,20)
+
+	ALIAS1(JetSetCurrentIndexA,12)
+	ALIAS2(JetSetCurrentIndexA,12)
+	ALIAS1(JetSetCurrentIndexW,12)
+	ALIAS2(JetSetCurrentIndexW,12)
+	ALIAS3(JetSetCurrentIndex,JetSetCurrentIndexA)
+
+	ALIAS1(JetSetCurrentIndex2A,16)
+	ALIAS2(JetSetCurrentIndex2A,16)
+	ALIAS1(JetSetCurrentIndex2W,16)
+	ALIAS2(JetSetCurrentIndex2W,16)
+	ALIAS3(JetSetCurrentIndex2,JetSetCurrentIndex2A)
+
+	ALIAS1(JetSetCurrentIndex3A,20)
+	ALIAS2(JetSetCurrentIndex3A,20)
+	ALIAS1(JetSetCurrentIndex3W,20)
+	ALIAS2(JetSetCurrentIndex3W,20)
+	ALIAS3(JetSetCurrentIndex3,JetSetCurrentIndex3A)
+
+	ALIAS1(JetSetCurrentIndex4A,24)
+	ALIAS2(JetSetCurrentIndex4A,24)
+	ALIAS1(JetSetCurrentIndex4W,24)
+	ALIAS2(JetSetCurrentIndex4W,24)
+	ALIAS3(JetSetCurrentIndex4,JetSetCurrentIndex4A)
+
+	ALIAS1(JetSetDatabaseSizeA,16)
+	ALIAS2(JetSetDatabaseSizeA,16)
+	ALIAS1(JetSetDatabaseSizeW,16)
+	ALIAS2(JetSetDatabaseSizeW,16)
+	ALIAS3(JetSetDatabaseSize,JetSetDatabaseSizeA)
+
+	ALIAS1(JetSetIndexRange,12)
+	ALIAS2(JetSetIndexRange,12)
+
+	ALIAS1(JetSetLS,16)
+	ALIAS2(JetSetLS,16)
+
+	ALIAS1(JetSetMaxDatabaseSize,16)
+	ALIAS2(JetSetMaxDatabaseSize,16)
+
+	ALIAS1(JetSetResourceParam,16)
+	ALIAS2(JetSetResourceParam,16)
+
+	ALIAS1(JetSetSessionContext,8)
+	ALIAS2(JetSetSessionContext,8)
+
+	ALIAS1(JetSetSessionParameter,16)
+	ALIAS2(JetSetSessionParameter,16)
+
+	ALIAS1(JetSetSystemParameterA,20)
+	ALIAS2(JetSetSystemParameterA,20)
+	ALIAS1(JetSetSystemParameterW,20)
+	ALIAS2(JetSetSystemParameterW,20)
+	ALIAS3(JetSetSystemParameter,JetSetSystemParameterA)
+
+	ALIAS1(JetSetTableInfoA,20)
+	ALIAS2(JetSetTableInfoA,20)
+	ALIAS3(JetSetTableInfo,JetSetTableInfoA)
+	ALIAS3(JetSetTableInfoW,JetSetTableInfoA)
+
+	ALIAS1(JetSetTableSequential,12)
+	ALIAS2(JetSetTableSequential,12)
+
+	ALIAS1(JetSnapshotStartA,12)
+	ALIAS2(JetSnapshotStartA,12)
+	ALIAS1(JetSnapshotStartW,12)
+	ALIAS2(JetSnapshotStartW,12)
+	ALIAS3(JetSnapshotStart,JetSnapshotStartA)
+
+	ALIAS1(JetSnapshotStop,8)
+	ALIAS2(JetSnapshotStop,8)
+
+	ALIAS1(JetStopBackup,0)
+	ALIAS2(JetStopBackup,0)
+
+	ALIAS1(JetStopBackupInstance,4)
+	ALIAS2(JetStopBackupInstance,4)
+
+	ALIAS1(JetStopService,0)
+	ALIAS2(JetStopService,0)
+
+	ALIAS1(JetStopServiceInstance,4)
+	ALIAS2(JetStopServiceInstance,4)
+
+	ALIAS1(JetStopServiceInstance2,8)
+	ALIAS2(JetStopServiceInstance2,8)
+	
+	ALIAS1(JetStreamRecords,32)
+	ALIAS2(JetStreamRecords,32)
+
+	ALIAS1(JetTerm,4)
+	ALIAS2(JetTerm,4)
+
+	ALIAS1(JetTerm2,8)
+	ALIAS2(JetTerm2,8)
+
+	ALIAS1(JetTestHook,8)
+	ALIAS2(JetTestHook,8)
+
+	ALIAS1(JetTracing,12)
+	ALIAS2(JetTracing,12)
+
+	ALIAS1(JetTruncateLog,0)
+	ALIAS2(JetTruncateLog,0)
+
+	ALIAS1(JetTruncateLogInstance,4)
+	ALIAS2(JetTruncateLogInstance,4)
+
+	ALIAS1(JetUnregisterCallback,16)
+	ALIAS2(JetUnregisterCallback,16)
+
+	ALIAS1(JetUpdate,20)
+	ALIAS2(JetUpdate,20)
+
+	ALIAS1(JetUpdate2,24)
+	ALIAS2(JetUpdate2,24)
+
+	ALIAS1(JetUpgradeDatabaseA,16)
+	ALIAS2(JetUpgradeDatabaseA,16)
+	ALIAS1(JetUpgradeDatabaseW,16)
+	ALIAS2(JetUpgradeDatabaseW,16)
+	ALIAS3(JetUpgradeDatabase,JetUpgradeDatabaseA)
+
+    ALIAS1(JetGetRBSFileInfoA, 16)
+    ALIAS2(JetGetRBSFileInfoA, 16)
+    ALIAS1(JetGetRBSFileInfoW, 16)
+    ALIAS2(JetGetRBSFileInfoW, 16)
+
+	ALIAS1(JetRBSPrepareRevert, 24)
+    ALIAS2(JetRBSPrepareRevert, 24)
+	ALIAS1(JetRBSExecuteRevert, 12)
+    ALIAS2(JetRBSExecuteRevert, 12)
+	ALIAS1(JetRBSCancelRevert, 4)
+    ALIAS2(JetRBSCancelRevert, 4)
+
+#ifdef DEBUGGER_EXTENSION
+	// This is a data symbol, and therefore has no size.
+	ALIASDATA(rgEDBGGlobals)
+#endif
+

@@ -8121,7 +8121,7 @@ ERR LOG::ErrLGRIRedoScanCheck( const LRSCANCHECK2 * const plrscancheck, BOOL* co
             {
                 MessageId msgid = INTERNAL_TRACE_ID;
                 PCWSTR wszDumpType = L"DbDivDbTimeMismatchUnexpected";
-#ifndef ESENT
+#ifdef USE_HAPUBLISH_API
                 MessageId haMsgid = INTERNAL_TRACE_ID;
                 HaDbFailureTag failureTag = HaDbFailureTagNoOp;
 #endif
@@ -8131,7 +8131,7 @@ ERR LOG::ErrLGRIRedoScanCheck( const LRSCANCHECK2 * const plrscancheck, BOOL* co
                     err = ErrERRCheck( JET_errDbTimeCorrupted );
                     msgid = DBTIME_CHECK_PASSIVE_CORRUPTED_ID;
                     wszDumpType = L"DbDivDbTimeCorruptedPassive";
-#ifndef ESENT
+#ifdef USE_HAPUBLISH_API
                     haMsgid = HA_DBTIME_CHECK_PASSIVE_CORRUPTED_ID;
                     failureTag = HaDbFailureTagCorruption;
 #endif
@@ -8146,7 +8146,7 @@ ERR LOG::ErrLGRIRedoScanCheck( const LRSCANCHECK2 * const plrscancheck, BOOL* co
                     if ( !fInitDbtimePageInLogRec )
                     {
                         msgid = DB_DIVERGENCE_UNINIT_PAGE_ACTIVE_DB_ID;
-#ifndef ESENT
+#ifdef USE_HAPUBLISH_API
                         haMsgid = HA_DB_DIVERGENCE_UNINIT_PAGE_ACTIVE_DB_ID;
                         failureTag = HaDbFailureTagReplicaDivergenceDbTimeTooNew;
 #endif
@@ -8156,7 +8156,7 @@ ERR LOG::ErrLGRIRedoScanCheck( const LRSCANCHECK2 * const plrscancheck, BOOL* co
                     {
 
                         msgid = DB_DIVERGENCE_UNINIT_PAGE_PASSIVE_DB_ID;
-#ifndef ESENT
+#ifdef USE_HAPUBLISH_API
                         haMsgid = HA_DB_DIVERGENCE_UNINIT_PAGE_PASSIVE_DB_ID;
                         failureTag = HaDbFailureTagReplicaDivergenceDbTimeTooOld;
 #endif
@@ -8171,7 +8171,7 @@ ERR LOG::ErrLGRIRedoScanCheck( const LRSCANCHECK2 * const plrscancheck, BOOL* co
                         err = ErrERRCheck( JET_errDbTimeTooNew );
                         msgid = DBTIME_CHECK_MISMATCH_ACTIVE_DB_BEHIND_ID;
                         wszDumpType = L"DbDivDbTimeMismatchTooNew";
-#ifndef ESENT
+#ifdef USE_HAPUBLISH_API
                         haMsgid = HA_DBTIME_CHECK_MISMATCH_ACTIVE_DB_BEHIND_ID;
                         failureTag = HaDbFailureTagReplicaDivergenceDbTimeTooNew;
 #endif
@@ -8182,7 +8182,7 @@ ERR LOG::ErrLGRIRedoScanCheck( const LRSCANCHECK2 * const plrscancheck, BOOL* co
                         err = ErrERRCheck( JET_errDbTimeTooOld );
                         msgid = DBTIME_CHECK_MISMATCH_PASSIVE_DB_BEHIND_ID;
                         wszDumpType = L"DbDivDbTimeMismatchTooOld";
-#ifndef ESENT
+#ifdef USE_HAPUBLISH_API
                         haMsgid = HA_DBTIME_CHECK_MISMATCH_PASSIVE_DB_BEHIND_ID;
                         failureTag = HaDbFailureTagReplicaDivergenceDbTimeTooOld;
 #endif

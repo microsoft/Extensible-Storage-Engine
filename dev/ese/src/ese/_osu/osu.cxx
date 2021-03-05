@@ -4,7 +4,7 @@
 #include "osustd.hxx"
 #include "esestd.hxx"
 
-#ifndef ESENT
+#ifdef USE_WATSON_API
 #include <NativeWatson.h>
 #endif
 
@@ -587,7 +587,7 @@ const ERR ErrOSUInit()
     }
     Assert( CInitTermLock::ERR::errInitBegun == errInit );
 
-#ifndef ESENT
+#ifdef USE_WATSON_API
     RegisterWatson();
 #endif
 
@@ -661,7 +661,7 @@ void OSUTerm_()
 
     OSUTermPerfmonStorage();
 
-#ifndef ESENT
+#ifdef USE_WATSON_API
     UnregisterWatson();
 #endif
 }

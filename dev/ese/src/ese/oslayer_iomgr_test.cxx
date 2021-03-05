@@ -93,7 +93,7 @@ void InitIoreq( IOREQ * const pioreq, _OSFILE& _osf, const BOOL fWrite, const QW
     pioreq->m_tc.etc.iorReason.SetIorp( (IOREASONPRIMARY)0x44 );
 
     pioreq->pbData = (BYTE*)( rand () * 4096
-#ifdef WIN64
+#ifdef _WIN64
                         | 0xC000420000000000
 #else
                         | 0xC0000000 

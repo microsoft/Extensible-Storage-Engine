@@ -1,0 +1,7 @@
+#define RC_VERSION_FILE_DESCRIPTION 	"Microsoft(R) ESE Predicate Iterator Query Unit Test\0"
+#define RC_VERSION_INTERNAL_NAME	"IterQueryUnit\0"
+#define RC_VERSION_ORIGINAL_FILE_NAME	"IterQueryUnit.exe\0"
+
+#ifndef ESENT
+#include "bldver.rc"
+#endif

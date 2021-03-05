@@ -1,0 +1,9 @@
+// Copyright (c) Microsoft Corporation.
+// Licensed under the MIT License.
+
+#define RC_VERSION_FILE_DESCRIPTION     "Microsoft(R) Exchange Server Database Storage Engine Utilities\0"
+#define RC_VERSION_INTERNAL_NAME        "ESEUTIL\0"
+#define RC_VERSION_ORIGINAL_FILE_NAME   "ESEUTIL.EXE\0"
+
+#include "bldver.rc"
+

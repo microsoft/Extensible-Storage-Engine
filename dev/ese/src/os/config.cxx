@@ -127,7 +127,7 @@ const BOOL FOSConfigSet_( const WCHAR* const wszPath, const WCHAR* const wszName
 
     WCHAR wszRelPath[_MAX_PATH];
     OSStrCbCopyW( wszRelPath, sizeof(wszRelPath), wszPath );
-
+    
     INT itch;
     for ( itch = 0; itch < _MAX_PATH && wszPath[itch]; itch++ )
     {
@@ -310,7 +310,7 @@ public:
     };
 
 private:
-
+    
     typedef struct _ConfigStoreSubStore
     {
         WCHAR *                     m_wszSubValuePath;
@@ -319,7 +319,7 @@ private:
         ConfigStoreReadFlags        m_csrf;
         ConfigStorePopulateFlags    m_cspf;
     } ConfigStoreSubStore;
-
+    
     DWORD               m_errorInit;
 
     ConfigStoreSubStore m_rgcsss[csspMax];
@@ -401,7 +401,7 @@ public:
         Assert( wszStoreRelPath[0] == L'\\' );
         wszStoreRelPath++;
         m_errorInit = g_pfnRegOpenKeyExW( nthkeyRoot, wszStoreRelPath, 0, KEY_READ, &(m_rgcsss[csspTop].m_nthkeySubStore) );
-
+        
 
         if ( m_errorInit != ERROR_SUCCESS )
         {
@@ -410,7 +410,7 @@ public:
         }
 
 HandleError:
-
+    
         return err;
     }
 
@@ -652,7 +652,7 @@ ERR ErrOSConfigStoreInit( _In_z_ const WCHAR * const wszPath, _Outptr_ CConfigSt
 
     Assert( wszStorePath[0] == L':' );
     wszStorePath++;
-
+    
 
     Assert( 0 == _wcsicmp( L"reg", wszStore ) );
     Call( CConfigStore::ErrConfigStoreCreate( wszStorePath, &pcs ) );

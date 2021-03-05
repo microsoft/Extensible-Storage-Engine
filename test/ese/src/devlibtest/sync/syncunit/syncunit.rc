@@ -1,0 +1,7 @@
+#define RC_VERSION_FILE_DESCRIPTION 	"Microsoft(R) ESE Synchronization Static Library Unit Test\0"
+#define RC_VERSION_INTERNAL_NAME	"SYNCUNIT\0"
+#define RC_VERSION_ORIGINAL_FILE_NAME	"SYNCUNIT.EXE\0"
+
+#include "bldver.rc"
+
+
