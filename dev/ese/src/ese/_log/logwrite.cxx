@@ -2750,8 +2750,17 @@ ERR LOG_WRITE_BUFFER::ErrLGIWriteFullSectors(
     {
         (VOID) m_pLog->ErrLGUpdateCheckpointFile( fFalse );
 
-        Call( m_pLogStream->ErrLGNewLogFile( m_pLogStream->GetCurrentFileGen(), fLGOldLogExists ) );
-
+        err = m_pLogStream->ErrLGNewLogFile( m_pLogStream->GetCurrentFileGen(), fLGOldLogExists );
+        // We do not allow log roll after end-of-log-stream has been emitted, do not treat that as a failure here
+        if ( err == JET_errLogWriteFail )
+        {
+            ERR errT;
+            if ( m_pLog->FNoMoreLogWrite( &errT ) && errT == errLogServiceStopped && m_pLogStream->FLogEndEmitted() )
+            {
+                err = JET_errSuccess;
+            }
+        }
+        Call( err );
     }
 
 HandleError:
@@ -3093,6 +3102,16 @@ Repeat:
         (VOID)FWakeWaitingQueue( &lgposToWriteT );
 
         Call( ErrERRCheck( JET_errLogWriteFail ) );
+    }
+
+    if ( m_pLogStream->FLogEndEmitted() )
+    {
+        Assert( m_pLog->FNoMoreLogWrite( &err ) && err == errLogServiceStopped );
+        AssertTrack( m_pbWrite == m_pbEntry, "LogBufferNonEmptyAfterLogEndEmitted" );
+        Assert( m_pbLGFileEnd == NULL || m_pbLGFileEnd == m_pbWrite );
+        m_critLGBuf.Leave();
+        err = JET_errSuccess;
+        goto HandleError;
     }
 
     if ( !m_pLogStream->FLGFileOpened() )
