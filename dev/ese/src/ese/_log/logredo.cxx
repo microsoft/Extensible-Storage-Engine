@@ -10950,7 +10950,7 @@ ERR LOG::ErrLGRIRedoShrinkDB( const LRSHRINKDB3 * const plrdbshrink )
                     OSFormat( "%hs: Shrinking (truncating) to pgno=%lu",
                               __FUNCTION__, pgnoDbLastNew ) );
 
-        Call( ErrLGRIRedoShrinkDBFileTruncation( ifmp, pgnoDbLastNew ) );
+        Call( ErrLGRIRedoShrinkDBFileTruncation( ifmp, pgnoDbLastNew, cpgShrunkLR ) );
     }
     }
 
@@ -11064,7 +11064,7 @@ HandleError:
     return err;
 }
 
-ERR LOG::ErrLGRIRedoShrinkDBFileTruncation( const IFMP ifmp, const PGNO pgnoDbLastNew )
+ERR LOG::ErrLGRIRedoShrinkDBFileTruncation( const IFMP ifmp, const PGNO pgnoDbLastNew, const CPG cpgShrunkLR )
 {
     ERR err = JET_errSuccess;
     FMP* const pfmp = &g_rgfmp[ ifmp ];
@@ -11081,6 +11081,9 @@ ERR LOG::ErrLGRIRedoShrinkDBFileTruncation( const IFMP ifmp, const PGNO pgnoDbLa
     // Write out any snapshot for pages about to be shrunk
     if ( pfmp->FRBSOn() )
     {
+        // Capture all shrunk pages as if they need to be reverted to empty pages when RBS is applied.
+        // If we already captured a preimage for one of those shrunk pages, the revert to an empty page will be ignored for that page when we apply the snapshot.
+        Call( pfmp->PRBS()->ErrCaptureEmptyPages( pfmp->Dbid(), pgnoDbLastNew + 1, cpgShrunkLR ) );
         Call( pfmp->PRBS()->ErrFlushAll() );
     }
 

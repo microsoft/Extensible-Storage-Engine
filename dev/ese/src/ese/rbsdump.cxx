@@ -157,6 +157,8 @@ const char * const szDbPage             = "DbPage";
 
 const char * const szNewPage            = "NewPage";
 
+const char* const szEmptyPages          = "EmptyPages";
+
 const char * szRBSRecUnknown            = "*UNKNOWN*";
 
 const INT   cbRBSRecBuf = 1024 + cbFormattedDataMax;
@@ -170,6 +172,7 @@ const char * SzRBSRec( BYTE bRBSRecType )
         case rbsrectypeDbAttach:        return szDbAttach;
         case rbsrectypeDbPage:          return szDbPage;
         case rbsrectypeDbNewPage:       return szNewPage;
+        case rbsrectypeDbEmptyPages:    return szEmptyPages;
         default:                        return szRBSRecUnknown;
     }
 }
@@ -257,6 +260,17 @@ VOID RBSRecToSz( const RBSRecord *prbsrec, __out_bcount(cbRBSRec) PSTR szRBSRec,
             OSStrCbFormatA( rgchBuf, sizeof(rgchBuf), " [%u:%lu]",
                 (DBID)  prbsdbpgrec->m_dbid,
                 (ULONG) prbsdbpgrec->m_pgno );
+            OSStrCbAppendA( szRBSRec, cbRBSRec, rgchBuf );
+            break;
+        }
+        case rbsrectypeDbEmptyPages:
+        {
+            RBSDbEmptyPagesRecord* prbsdbpgrec = ( RBSDbEmptyPagesRecord* ) prbsrec;
+
+            OSStrCbFormatA( rgchBuf, sizeof(rgchBuf), " [%u:%lu:%lu]",
+                (DBID)  prbsdbpgrec->m_dbid,
+                (ULONG) prbsdbpgrec->m_pgnoFirst,
+                (CPG)   prbsdbpgrec->m_cpg );
             OSStrCbAppendA( szRBSRec, cbRBSRec, rgchBuf );
             break;
         }

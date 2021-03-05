@@ -186,7 +186,7 @@ INLINE ULONG IbRBSSegmentOffsetFromFullOffset( DWORD ib )   { return ib & cbRBSS
 #include "revertsnapshotrecords.h"
 
 const ULONG ulRBSVersionMajor         = 1;
-const ULONG ulRBSVersionMinor         = 2;
+const ULONG ulRBSVersionMinor         = 3;
 
 class CRevertSnapshot;
 
@@ -658,6 +658,11 @@ class CRevertSnapshot : public CZeroInit
             PGNO pgno,
             RBS_POS *prbsposRecord );
 
+    ERR ErrCaptureEmptyPages(
+            DBID dbid,
+            PGNO pgnoFirst,
+            CPG  cpg );
+
     RBS_POS RbsposFlushPoint() const
     {
         RBS_POS pos;
@@ -1011,6 +1016,8 @@ private:
     ERR ErrComputeRBSRangeToApply( LOGTIME ltRevertExpected, LOGTIME* pltRevertActual );
     ERR ErrRBSGenApply( LONG lRBSGen, BOOL fDbHeaderOnly );
     ERR ErrApplyRBSRecord( RBSRecord* prbsrec, BOOL fCaptureDBHdrFromRBS, BOOL fDbHeaderOnly, BOOL* pfGivenDbfilehdrCaptured );
+    ERR ErrCheckApplyRBSContinuation();
+    ERR ErrAddRevertedNewPage( DBID dbid, PGNO pgnoRevertNew );
 
     ERR ErrRevertCheckpointInit();
     ERR ErrRevertCheckpointCleanup();
