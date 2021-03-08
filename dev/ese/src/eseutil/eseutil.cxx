@@ -209,7 +209,7 @@ LOCAL VOID EDBUTLPrintLogo( void )
     wprintf( L"Extensible Storage Engine Utilities for Microsoft(R) Exchange Server%c", wchNewLine );
 #endif
     wprintf( L"Version %s%c", wszVersion, wchNewLine );
-    wprintf( L"Copyright (C) Microsoft Corporation. All Rights Reserved.%c", wchNewLine );
+    wprintf( L"Copyright (c) Microsoft Corporation.\nLicensed under the MIT License.%c", wchNewLine );
     wprintf( L"%c", wchNewLine );
 }
 

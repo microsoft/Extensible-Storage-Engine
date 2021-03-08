@@ -769,7 +769,7 @@ sub ParseEseApi( $ )
 
 	
 
-	# added by yingzhan
+	# added by SOMEONE
 	# I need to make sure FEsetestWidenParameters never returns
 	# widen for the narrow case.  Therefore, we create a new API, which is actually (unfortunately )
 	# not related to Jet, FEsetestAlwaysNarrow(), in loadnarrow.cxx and loadwiden.cxx.
