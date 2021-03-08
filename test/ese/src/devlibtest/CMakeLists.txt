@@ -1,3 +1,6 @@
+# Copyright (c) Microsoft Corporation.
+# Licensed under the MIT License.
+
 add_subdirectory(bf)
 add_subdirectory(cclayer)
 add_subdirectory(collection)

@@ -1,3 +1,6 @@
+# Copyright (c) Microsoft Corporation.
+# Licensed under the MIT License.
+
 add_library(_esefile STATIC
     checksum.cxx
     copyfile.cxx

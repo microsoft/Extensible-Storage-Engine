@@ -1,3 +1,6 @@
+# Copyright (c) Microsoft Corporation.
+# Licensed under the MIT License.
+
 # This library is `ese` + tests. See ENABLE_JET_UNIT_TEST being defined below
 # used throughout the code base
 

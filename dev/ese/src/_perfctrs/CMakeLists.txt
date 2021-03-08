@@ -1,3 +1,6 @@
+# Copyright (c) Microsoft Corporation.
+# Licensed under the MIT License.
+
 add_custom_command(
     OUTPUT
         ${GEN_OUTPUT_DIRECTORY}/_perfctrs/eseperf.hxx

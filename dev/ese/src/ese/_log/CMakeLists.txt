@@ -1,3 +1,6 @@
+# Copyright (c) Microsoft Corporation.
+# Licensed under the MIT License.
+
 add_library(_log STATIC
     logstd.cxx
     log.cxx

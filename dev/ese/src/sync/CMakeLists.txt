@@ -1,3 +1,6 @@
+# Copyright (c) Microsoft Corporation.
+# Licensed under the MIT License.
+
 add_compile_definitions(_MBCS)
 
 add_library(sync STATIC

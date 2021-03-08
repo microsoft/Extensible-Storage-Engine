@@ -1,3 +1,6 @@
+# Copyright (c) Microsoft Corporation.
+# Licensed under the MIT License.
+
 add_custom_command(
     OUTPUT ${GEN_OUTPUT_DIRECTORY}/_etw/Microsoft-ETW-ESE.man
     COMMAND perl ${CMAKE_CURRENT_SOURCE_DIR}/genetw.pl ESE_OSS ${CMAKE_CURRENT_SOURCE_DIR}/Microsoft-ETW-ESE.mc ${ESE_DEV}/published/inc/jethdr.w ${ESE_DEV}/src/inc/_jet.hxx ${ESE_DEV}/published/inc/tcconst.hxx ${GEN_OUTPUT_DIRECTORY}/_etw/Microsoft-ETW-ESE.man

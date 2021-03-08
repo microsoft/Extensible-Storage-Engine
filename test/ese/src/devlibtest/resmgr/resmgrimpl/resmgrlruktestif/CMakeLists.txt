@@ -1,3 +1,6 @@
+# Copyright (c) Microsoft Corporation.
+# Licensed under the MIT License.
+
 add_library(RESMGRLRUKTESTIF STATIC
     resmgrlruktestif.cxx
 )

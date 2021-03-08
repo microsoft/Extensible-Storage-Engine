@@ -1,3 +1,6 @@
+# Copyright (c) Microsoft Corporation.
+# Licensed under the MIT License.
+
 # This order is not the actual order of building of subdirectories
 # (which is based on dependency order). Therefore, it's better to keep to
 # the alphabetized order.

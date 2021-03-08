@@ -1,3 +1,6 @@
+# Copyright (c) Microsoft Corporation.
+# Licensed under the MIT License.
+
 # Workaround for CMake's directory scoping
 add_library(esetestlib
     dev.cxx

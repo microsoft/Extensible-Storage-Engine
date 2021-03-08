@@ -1,3 +1,6 @@
+# Copyright (c) Microsoft Corporation.
+# Licensed under the MIT License.
+
 # E.g., pthreads
 find_package (Threads REQUIRED)
 

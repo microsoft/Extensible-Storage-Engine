@@ -1,3 +1,6 @@
+# Copyright (c) Microsoft Corporation.
+# Licensed under the MIT License.
+
 add_custom_command(
     OUTPUT ${GEN_OUTPUT_DIRECTORY}/_res/jetmsgex.mc
     COMMAND perl ${CMAKE_CURRENT_SOURCE_DIR}/fixmc.pl ${CMAKE_CURRENT_SOURCE_DIR}/jetmsg.mc ${GEN_OUTPUT_DIRECTORY}/_res/jetmsgex.mc

@@ -1,3 +1,6 @@
+# Copyright (c) Microsoft Corporation.
+# Licensed under the MIT License.
+
 configure_file(bf/bfftl.hxx ${INC_OUTPUT_DIRECTORY}/bfftl.hxx COPYONLY)
 configure_file(bf/_bfconst.hxx ${INC_OUTPUT_DIRECTORY}/_bfconst.hxx COPYONLY)
 configure_file(cc.hxx ${INC_OUTPUT_DIRECTORY}/cc.hxx COPYONLY)

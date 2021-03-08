@@ -1,3 +1,6 @@
+# Copyright (c) Microsoft Corporation.
+# Licensed under the MIT License.
+
 if (CMAKE_CXX_COMPILER_ID STREQUAL "MSVC")
     add_compile_options(
         /wd4477

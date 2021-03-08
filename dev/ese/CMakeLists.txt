@@ -1,3 +1,6 @@
+# Copyright (c) Microsoft Corporation.
+# Licensed under the MIT License.
+
 set(MSVC_ESE_LINK_OPTIONS
     # Incremental link option is incompatible with the `/DEBUGTYPE:CV,PDATA,FIXUP` option below
     /INCREMENTAL:NO

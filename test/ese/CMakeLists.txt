@@ -1,3 +1,6 @@
+# Copyright (c) Microsoft Corporation.
+# Licensed under the MIT License.
+
 # Test-specific compiler options
 if (CMAKE_CXX_COMPILER_ID STREQUAL "MSVC")
     # Using Visual C++
