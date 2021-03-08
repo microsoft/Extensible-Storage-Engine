@@ -1751,7 +1751,7 @@ ERR COSFile::ErrMMRevert(
     {
         const DWORD error = GetLastError();
         err = ErrOSFileIGetLastError();
-        AssertSz( error == ERROR_INVALID_PARAMETER, "This is promised not to fail due to OOM via Landy/Pavel, so what else could be wrong?!?  error: %u (0x%x) / %d", error, error, err );
+        AssertSz( error == ERROR_INVALID_PARAMETER, "This is promised not to fail due to OOM via our favorite OS MM dev, so what else could be wrong?!?  error: %u (0x%x) / %d", error, error, err );
         Call( err );
     }
     Assert( FOSMemoryFileMapped( pvMap, size_t( cbSize ) ) );
