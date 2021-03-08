@@ -71,6 +71,6 @@ cmake --build c:/Extensible-Storage-Engine/build --config Debug --target ALL_BUI
 # Visual Studio Code
 
 If you would like to use [Visual Studio Code](https://code.visualstudio.com/) to build ESE, here's a list of helpful extensions:
-- [CMake Tools](https://marketplace.visualstudio.com/items?itemName=ms-vscode.cmake-tools) - for building using CMake from withing Visual Studio Code
+- [CMake Tools](https://marketplace.visualstudio.com/items?itemName=ms-vscode.cmake-tools) - for building using CMake from within Visual Studio Code
 - [CMake language support](https://marketplace.visualstudio.com/items?itemName=twxs.cmake) - for editing of CMake files (autocomplete, documentation, syntax highlighting, etc.)
 - [C/C++](https://marketplace.visualstudio.com/items?itemName=ms-vscode.cpptools) - you will get language services (go-to-definition, etc.) once you build the code with CMake
