@@ -2,7 +2,7 @@
 # Licensed under the MIT License.
 
 if (CMAKE_CXX_COMPILER_ID STREQUAL "MSVC")
-    # Using Visual C++
+    # Using Microsoft Visual C++
 
     # Suppress certain warnings by number
     add_compile_options(

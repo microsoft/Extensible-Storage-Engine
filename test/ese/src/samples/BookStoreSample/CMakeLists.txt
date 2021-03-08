@@ -2,7 +2,7 @@
 # Licensed under the MIT License.
 
 if (CMAKE_CXX_COMPILER_ID STREQUAL "MSVC")
-    # Using Visual C++
+    # Using Microsoft Visual C++
 
     add_compile_options(
         /wd4214 # function not inlined - TODO: add it back

@@ -90,7 +90,7 @@ if (CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
     # This can be removed once GCC build is fully working
     add_compile_options(-fmax-errors=1)
 elseif (CMAKE_CXX_COMPILER_ID STREQUAL "MSVC")
-    # Using Visual C++
+    # Using Microsoft Visual C++
 
     add_compile_options(
         /W4 # Show level-4 lint-like informational warnings
@@ -141,7 +141,7 @@ link_libraries(
 )
 
 if (CMAKE_CXX_COMPILER_ID STREQUAL "MSVC")
-    # Using Visual C++
+    # Using Microsoft Visual C++
     add_compile_options(
         /Oi # generate intrinsic functions
         /Ot

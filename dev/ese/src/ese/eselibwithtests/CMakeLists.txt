@@ -24,7 +24,7 @@ add_custom_command(
 )
 
 if (CMAKE_CXX_COMPILER_ID STREQUAL "MSVC")
-    # Using Visual C++
+    # Using Microsoft Visual C++
 
     # See documentation for C2712
     string(REPLACE "/EHsc" "/EHs-c-" CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS}")
@@ -59,7 +59,7 @@ target_compile_definitions(eselibwithtests PRIVATE
 )
 
 if (CMAKE_CXX_COMPILER_ID STREQUAL "MSVC")
-    # Using Visual C++
+    # Using Microsoft Visual C++
     target_link_options(eselibwithtests PRIVATE
         /ENTRY:"DLLEntryPoint"
         ${MSVC_ESE_LINK_OPTIONS}

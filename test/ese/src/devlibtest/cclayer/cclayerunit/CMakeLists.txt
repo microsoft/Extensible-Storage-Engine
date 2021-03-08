@@ -2,7 +2,7 @@
 # Licensed under the MIT License.
 
 if (CMAKE_CXX_COMPILER_ID STREQUAL "MSVC")
-    # Using Visual C++
+    # Using Microsoft Visual C++
 
     # cctypessuite intentionally tests variable use before initialization,
     # which triggers a run-time check that pops up a dialog.
