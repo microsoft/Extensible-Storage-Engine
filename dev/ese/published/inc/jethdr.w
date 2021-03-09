@@ -3936,7 +3936,7 @@ typedef enum
 #define JET_paramBackupChunkSize                66  //  backup read size in pages
 #define JET_paramBackupOutstandingReads         67  //  backup maximum reads outstanding
 
-// #define JET_paramSLVProviderEnable               68  //  Enable SLV Provider
+#define JET_paramFlight_CheckRedoNeededBeyondRequiredRange 68 //  Check to make sure that all updates beyond required range need to be applied during redo (i.e. are not already written out to the database)
 // begin_PubEsent
 #define JET_paramLogFileCreateAsynch            69  //  prepares next log file while logging to the current one to smooth response time
 #endif // JET_VERSION >= 0x0501
