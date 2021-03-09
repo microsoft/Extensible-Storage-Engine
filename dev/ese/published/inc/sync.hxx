@@ -16,8 +16,6 @@
 #define SYNC_VALIDATE_IRKSEM_USAGE
 #endif
 
-#include "cc.hxx"
-
 #ifdef _MSC_VER
 #include <intrin.h>
 #endif

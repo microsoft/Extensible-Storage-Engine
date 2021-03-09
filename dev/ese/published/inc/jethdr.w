@@ -1593,7 +1593,6 @@ typedef struct tagJET_TABLECREATE2_W
 #endif // JET_VERSION >= 0x0501
 
 
-// end_PubEsent
 #if ( JET_VERSION >= 0x0601 )
 typedef struct tagJET_TABLECREATE3_A
 {
@@ -5310,11 +5309,7 @@ typedef JET_ERR (JET_API * JET_PFNEMITLOGDATA)(
 
 #define JET_dbstateJustCreated                  1
 #define JET_dbstateDirtyShutdown                2
-// end_PubEsent
 #define JET_dbstateCleanShutdown                3
-// end_PubEsent
-//#define JET_dbstateConsistent                 JET_dbstateCleanShutdown
-// begin_PubEsent
 #define JET_dbstateBeingConverted               4
 #if ( JET_VERSION >= 0x0501 )
 #define JET_dbstateForceDetach                  5
@@ -6517,7 +6512,8 @@ typedef JET_ERR (JET_API * JET_PFNEMITLOGDATA)(
 #define JET_errFlushMapDatabaseMismatch     -1919 /* The persisted flush map and the database do not match. */
 #define JET_errFlushMapUnrecoverable        -1920 /* The persisted flush map cannot be reconstructed. */
 
-#define JET_errRBSFileCorrupt               -1921  /* RBS file is corrupt */ // TODO SOMEONE: Why are there gaps between the used ids? Is it a range for each module? 
+// end_PubEsent
+#define JET_errRBSFileCorrupt               -1921  /* RBS file is corrupt */
 #define JET_errRBSHeaderCorrupt             -1922  /* RBS header is corrupt */
 #define JET_errRBSDbMismatch                -1923  /* RBS is out of sync with the database file */
 #define errRBSAttachInfoNotFound            -1924  /* Couldn't find the RBS attach info we wanted */
@@ -6536,6 +6532,7 @@ typedef JET_ERR (JET_API * JET_PFNEMITLOGDATA)(
 #define JET_errRBSRCInvalidDbFormatVersion  -1937  /* The database format version for the databases to be reverted doesn't support applying the revert snapshot. */
 #define JET_errRBSCannotDetermineDivergence -1938  /* The required logs for the revert snapshot are missing in log directory and hence we cannot determine if those logs are diverged with the logs in snapshot directory. */
 #define errRBSRequiredRangeTooLarge         -1939  /* RBS was not created as the required range was too large and we don't want to start revert snapshot from such a state. */
+// begin_PubEsent
 
 #define JET_wrnDefragAlreadyRunning          2000 /* Online defrag already running on specified database */
 #define JET_wrnDefragNotRunning              2001 /* Online defrag not running on specified database */
@@ -8671,7 +8668,6 @@ JetGetDatabaseFileInfoW(
 
 // end_PubEsent
 #if ( JET_VERSION >= 0x0600 )
-
 
 #pragma region Desktop Family
 #if WINAPI_FAMILY_PARTITION(WINAPI_PARTITION_DESKTOP)
