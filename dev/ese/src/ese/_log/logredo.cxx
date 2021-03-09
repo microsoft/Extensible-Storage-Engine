@@ -421,17 +421,18 @@ INLINE BOOL FLGNeedRedoCheckDbtimeBefore(
     if ( !fRedoNeeded && !g_rgfmp[ ifmp ].FContainsDataFromFutureLogs() && *perr >= JET_errSuccess )
     {
         AssertTrack( fFalse, "RedoNotNeededBeyondRequiredRange" );
-        /* Temporarily commented out until we prove it is not hitting a lot
-        *perr = ErrLGRIReportDbtimeMismatch(
-            g_rgfmp[ ifmp ].Pinst(),
-            ifmp,
-            csr.Pgno(),
-            dbtimeBefore,
-            csr.Dbtime(),
-            dbtimeAfter,
-            g_rgfmp[ ifmp ].Pinst()->m_plog->LgposLGLogTipNoLock(),
-            1 );
-        */
+        if ( BoolParam( g_rgfmp[ ifmp ].Pinst(), JET_paramFlight_CheckRedoNeededBeyondRequiredRange ) )
+        {
+            *perr = ErrLGRIReportDbtimeMismatch(
+                g_rgfmp[ ifmp ].Pinst(),
+                ifmp,
+                csr.Pgno(),
+                dbtimeBefore,
+                csr.Dbtime(),
+                dbtimeAfter,
+                g_rgfmp[ ifmp ].Pinst()->m_plog->LgposLGLogTipNoLock(),
+                1 );
+        }
     }
 
     return fRedoNeeded;
