@@ -414,7 +414,7 @@ HandleError:
 
 
     m_pLogWriteBuffer->LGTasksTerm();
-    
+
     LGDisableCheckpoint();
     LGICheckpointTerm();
 
@@ -679,7 +679,7 @@ bool FLGIsLVChunkSizeCompatible(
 
     return true;
 }
-    
+
 #endif
 
 ERR ErrLGICheckVersionCompatibility( const INST * const pinst, const LGFILEHDR* const plgfilehdr );
@@ -765,7 +765,7 @@ enum eLogVersionCompatibility{
 };
 
 #define COMPARE_LOG_VERSION(a, b) ((a) == (b) ? eLogVersionCompatible : ((a) < (b) ? eLogVersionTooOld : eLogVersionTooNew) )
-    
+
 ERR ErrLGICheckVersionCompatibility( const INST * const pinst, const LGFILEHDR* const plgfilehdr )
 {
     ERR err = JET_errSuccess;
@@ -797,10 +797,10 @@ ERR ErrLGICheckVersionCompatibility( const INST * const pinst, const LGFILEHDR* 
             result = eLogVersionCompatible;
         }
     }
-    
+
     if( eLogVersionCompatible == result )
     {
-        
+
         if( !FLGIsLVChunkSizeCompatible(
                 g_cbPage,
                 plgfilehdr->lgfilehdr.le_ulMajor,
@@ -829,7 +829,7 @@ ERR ErrLGICheckVersionCompatibility( const INST * const pinst, const LGFILEHDR* 
             OSStrCbFormatW( wszLogGeneration, _cbrg( wszLogGeneration ), L"0x%x", (LONG)plgfilehdr->lgfilehdr.le_lGeneration );
             OSStrCbFormatW( wszLogVersion, _cbrg( wszLogVersion ), L"%d.%d.%d.%d", (ULONG)plgfilehdr->lgfilehdr.le_ulMajor, (ULONG)plgfilehdr->lgfilehdr.le_ulMinor, (ULONG)plgfilehdr->lgfilehdr.le_ulUpdateMajor, (ULONG)plgfilehdr->lgfilehdr.le_ulUpdateMinor );
             OSStrCbFormatW( wszEngineVersion, _cbrg( wszEngineVersion ), L"%d.%d.%d", lgvEngineMax.ulLGVersionMajor, lgvEngineMax.ulLGVersionUpdateMajor, lgvEngineMax.ulLGVersionUpdateMinor );
-            
+
             UtilReportEvent( eventError,
                     GENERAL_CATEGORY,
                     LOG_VERSION_TOO_LOW_FOR_ENGINE_ID,
@@ -845,7 +845,7 @@ ERR ErrLGICheckVersionCompatibility( const INST * const pinst, const LGFILEHDR* 
             WCHAR wszLogVersion[50];
             WCHAR wszEngineVersion[50];
             const WCHAR * rgszT[3] = { wszLogGeneration, wszLogVersion, wszEngineVersion };
-            
+
             const LogVersion lgvEngineMax = PfmtversEngineMax()->lgv;
             OSStrCbFormatW( wszLogGeneration, _cbrg( wszLogGeneration ), L"0x%x", (LONG)plgfilehdr->lgfilehdr.le_lGeneration );
             if ( plgfilehdr->lgfilehdr.le_ulMinor != ulLGVersionMinorFinalDeprecatedValue &&
@@ -861,7 +861,7 @@ ERR ErrLGICheckVersionCompatibility( const INST * const pinst, const LGFILEHDR* 
             }
 
             OSStrCbFormatW( wszEngineVersion, _cbrg( wszEngineVersion ), L"%d.%d.%d", lgvEngineMax.ulLGVersionMajor, lgvEngineMax.ulLGVersionUpdateMajor, lgvEngineMax.ulLGVersionUpdateMinor );
-            
+
             UtilReportEvent( eventError,
                     GENERAL_CATEGORY,
                     LOG_VERSION_TOO_HIGH_FOR_ENGINE_ID,
@@ -925,7 +925,7 @@ ERR ErrLGICheckVersionCompatibility( const INST * const pinst, const LGFILEHDR* 
         OSStrCbFormatW( wszLogVersion, _cbrg( wszLogVersion ), L"%d.%d.%d", lgvLgfilehdr.ulLGVersionMajor, lgvLgfilehdr.ulLGVersionUpdateMajor, lgvLgfilehdr.ulLGVersionUpdateMinor );
         OSStrCbFormatW( wszParamVersion, _cbrg( wszParamVersion ), L"%d.%d.%d", pfmtversAllowed->lgv.ulLGVersionMajor, pfmtversAllowed->lgv.ulLGVersionUpdateMajor, pfmtversAllowed->lgv.ulLGVersionUpdateMinor );
         FormatEfvSetting( (JET_ENGINEFORMATVERSION)UlParam( pinst, JET_paramEngineFormatVersion ), wszParamEfv, sizeof(wszParamEfv) );
-        
+
         UtilReportEvent( eventError,
                 GENERAL_CATEGORY,
                 LOG_VERSION_TOO_HIGH_FOR_PARAM_ID,
@@ -935,14 +935,14 @@ ERR ErrLGICheckVersionCompatibility( const INST * const pinst, const LGFILEHDR* 
                 NULL,
                 pinst );
 
-        
+
         if( pinst == NULL )
         {
             FireWall( "CheckingLogVerWithoutInst" );
             err = JET_errSuccess;
             goto HandleError;
         }
-        
+
         Call( ErrERRCheck( JET_errEngineFormatVersionSpecifiedTooLowForLogVersion ) );
     }
 
@@ -1014,7 +1014,7 @@ VOID LGIGetDateTime( LOGTIME *plogtm )
     plogtm->SetMilliseconds( tm.millisecond );
     Assert( plogtm->Milliseconds() == tm.millisecond );
 }
-    
+
 ERR ErrSetUserDbHeaderInfos(
     INST *              pinst,
     ULONG *     pcbinfomisc,
@@ -1372,7 +1372,7 @@ ERR LOG::ErrLGOpenPagePatchRequestCallback(
     const void * const pvPage ) const
 {
     ERR err;
-    
+
     Assert(pgnoNull != pgno);
     Assert(dbtimeInvalid != pgno);
     Assert(NULL != pvPage);
@@ -1421,7 +1421,7 @@ ERR LOG::ErrLGOpenPagePatchRequestCallback(
             ErrERRCheck( err );
         }
     }
-    
+
     return JET_errSuccess;
 }
 
@@ -1602,7 +1602,7 @@ ERR LOG::ErrLGUpdateGenRequired(
 
         pfmpT->RwlDetaching().EnterAsReader();
 
-        
+
         Assert( ( !pfmpT->FSkippedAttach() && !pfmpT->FDeferredAttach() ) || !pfmpT->FAttached() );
 
         if (   m_pinst->m_mpdbidifmp[ dbidT ] >= g_ifmpMax
@@ -1802,7 +1802,7 @@ ERR LOG::ErrLGUpdateGenRequired(
                         ( fHeaderUpdateMaxRequired ? iofrDbHdrUpdMaxRequired : 0 ) );
                 err = ErrIOFlushDatabaseFileBuffers( ifmp, iofr );
             }
-            
+
             PdbfilehdrReadOnly pdbfilehdr = pfmpT->Pdbfilehdr();
             const LE_LGPOS * ple_lgposGreater = ( CmpLgpos( pdbfilehdr->le_lgposAttach, pdbfilehdr->le_lgposLastReAttach ) > 0 ) ?
                                                     &pdbfilehdr->le_lgposAttach : &pdbfilehdr->le_lgposLastReAttach;
@@ -2140,7 +2140,7 @@ ERR LOG::ErrLGReadCheckpoint( __in PCWSTR wszCheckpointFile, CHECKPOINT *pcheckp
             sizeof(CHECKPOINT),
             -1,
             UtilReadHeaderFlags( ( fReadOnly ? urhfReadOnly : urhfNone ) | urhfNoAutoDetectPageSize ) );
-    
+
     if ( err < JET_errSuccess )
     {
         
@@ -2186,7 +2186,7 @@ ERR LOG::ErrLGReadCheckpoint( __in PCWSTR wszCheckpointFile, CHECKPOINT *pcheckp
     PERFOpt( ibLGCheckpoint.Set( m_pinst, m_pLogStream->CbOffsetLgpos( pcheckpoint->checkpoint.le_lgposCheckpoint, lgposMin ) ) );
     PERFOpt( ibLGDbConsistency.Set( m_pinst, m_pLogStream->CbOffsetLgpos( pcheckpoint->checkpoint.le_lgposDbConsistency, lgposMin ) ) );
     PERFOpt( cbLGCheckpointDepthMax.Set( m_pinst, UlParam( m_pinst, JET_paramCheckpointDepthMax ) ) );
-    
+
 HandleError:
     m_critCheckpoint.Leave();
     return err;
@@ -2298,8 +2298,8 @@ VOID LOG::LGIUpdateCheckpoint( CHECKPOINT *pcheckpoint )
             const LONG dlgenTattleThreshold = (LONG)UlParam( m_pinst, JET_paramCheckpointTooDeep ) / 4;
             const LONG lgenStart = *(volatile LONG *)( &ppibT->lgposStart.lGeneration );
             const LONG dlgenTransactionLength = lgposWrittenTip.lGeneration - lgenStart;
-            if ( !m_pinst->m_plog->FRecovering() && 
-                   ppibT->FBegin0Logged() && 
+            if ( !m_pinst->m_plog->FRecovering() &&
+                   ppibT->FBegin0Logged() &&
                    lgenStart != lGenerationInvalid &&
                    dlgenTransactionLength > dlgenTattleThreshold &&
                    ppibT->FCheckSetLoggedCheckpointGettingDeep() )
@@ -2320,8 +2320,8 @@ VOID LOG::LGIUpdateCheckpoint( CHECKPOINT *pcheckpoint )
                     OSStrCbFormatW( wszTrxLgens, sizeof( wszTrxLgens ), L"%d (0x%x)", dlgenTransactionLength, dlgenTransactionLength );
                     CallS( ppibT->TrxidStack().ErrDump( wszTrxIdTimeStack, _countof( wszTrxIdTimeStack ), L", " ) );
                     const UserTraceContext * const putc = ppibT->Putc();
-                    OSStrCbFormatW( wszTrxCtxInfo, sizeof( wszTrxCtxInfo ), L"%d.%d.%d - %d(0x%x) - 0x%x", 
-                                    (DWORD)putc->context.nClientType, (DWORD)putc->context.nOperationType, (DWORD)putc->context.nOperationID, 
+                    OSStrCbFormatW( wszTrxCtxInfo, sizeof( wszTrxCtxInfo ), L"%d.%d.%d - %d(0x%x) - 0x%x",
+                                    (DWORD)putc->context.nClientType, (DWORD)putc->context.nOperationType, (DWORD)putc->context.nOperationID,
                                     putc->context.dwUserID, putc->context.dwUserID,
                                     (DWORD)putc->context.fFlags );
 
@@ -2417,7 +2417,7 @@ VOID LOG::LGIUpdateCheckpoint( CHECKPOINT *pcheckpoint )
                 lgposFmMinRequiredT.lGeneration = pfm->LGetFmGenMinRequired();
             }
 
-    
+
             LGPOS lgposExistingCheckpointT = pcheckpoint->checkpoint.le_lgposCheckpoint;
             LGPOS lgposExistingDbConsistencyT = pcheckpoint->checkpoint.le_lgposDbConsistency;
 
@@ -2738,7 +2738,7 @@ ERR LOG::ErrLGUpdateCheckpointFile( const BOOL fForceUpdate )
 {
     ERR             err             = JET_errSuccess;
     CHECKPOINT *    pcheckpointT;
-    
+
     AllocR( pcheckpointT = (CHECKPOINT *)PvOSMemoryPageAlloc(  sizeof( CHECKPOINT ), NULL ) );
 
     m_critCheckpoint.Enter();
@@ -2996,7 +2996,7 @@ VOID LOG::LGSetFlushTipWithLock( const LGPOS &lgpos )
 #ifdef DEBUG
     Assert( m_pLogWriteBuffer->FOwnsBufferLock() );
 
-    Assert( ( m_fRecovering && ( m_fRecoveringMode == fRecoveringRedo ) ) || 
+    Assert( ( m_fRecovering && ( m_fRecoveringMode == fRecoveringRedo ) ) ||
             ( CmpLgpos( lgpos, m_pLogWriteBuffer->LgposWriteTip() ) <= 0 ) );
 #endif
 

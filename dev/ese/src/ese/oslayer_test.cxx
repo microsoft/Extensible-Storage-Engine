@@ -98,7 +98,7 @@ class PatrolDogSynchronizer
 JETUNITTEST( PatrolDogSynchronizer, SizeOfEnforcement )
 {
     PatrolDogSynchronizer pds;
-    
+
     CHECK( sizeof( pds ) == pds.CbSizeOf() );
 }
 
@@ -116,7 +116,7 @@ DWORD RetrievingPvContextThread( DWORD_PTR dwContext )
     const PatrolDogSynchronizer* const ppds = (PatrolDogSynchronizer*)dwContext;
 
     Enforce( *(DWORD*)( ppds->PvContext() ) == g_dwContextTest );
-    
+
     return 0;
 }
 
@@ -133,7 +133,7 @@ DWORD RetrievingDwContextThread( DWORD_PTR dwContext )
     const PatrolDogSynchronizer* const ppds = (PatrolDogSynchronizer*)dwContext;
 
     Enforce( (DWORD)(BOOL)( ppds->PvContext() == (void*)dwContext ) );
-    
+
     return 0;
 }
 
@@ -184,7 +184,7 @@ DWORD BasicEnterLeaveThread( DWORD_PTR dwContext )
             g_cLoop++;
         }
     }
-    
+
     return 0;
 }
 
@@ -205,7 +205,7 @@ JETUNITTEST( PatrolDogSynchronizer, NoEnter )
 
 JETUNITTEST( PatrolDogSynchronizer, NoLeave )
 {
-    
+
 #ifndef DEBUG
     PatrolDogSynchronizer pds;
     const DWORD dwTimeout = INT_MAX;
@@ -230,29 +230,29 @@ JETUNITTEST( PatrolDogSynchronizer, ProperTiming )
     CHECK( pds.ErrInitPatrolDog( BasicEnterLeaveThread, priorityNormal, (void*)&dwTimeout ) == JET_errSuccess );
     UtilSleep( 500 );
     CHECK( g_cLoop == 0 );
-    
+
     pds.EnterPerimeter();
     UtilSleep( 1000 );
     pds.LeavePerimeter();
-    
+
     DWORD cLoop1 = g_cLoop;
     CHECK( cLoop1 > 0 && cLoop1 <= 15 );
-    
+
     UtilSleep( 500 );
     DWORD cLoop2 = g_cLoop;
     CHECK( ( cLoop2 >= cLoop1 ) && ( cLoop2 <= cLoop1 + 1 ) );
     g_cLoop = 0;
-    
+
     pds.EnterPerimeter();
     UtilSleep( 1000 );
-    
+
     cLoop1 = g_cLoop;
     CHECK( cLoop1 > 0 && cLoop1 <= 15 );
     g_cLoop = 0;
 
     pds.EnterPerimeter();
     UtilSleep( 1000 );
-    
+
     cLoop1 = g_cLoop;
     CHECK( cLoop1 > 0 && cLoop1 <= 15 );
     g_cLoop = 0;
@@ -265,7 +265,7 @@ JETUNITTEST( PatrolDogSynchronizer, ProperTiming )
 
     cLoop1 = g_cLoop;
     CHECK( cLoop1 > 0 && cLoop1 <= 15 );
-    
+
     UtilSleep( 500 );
     cLoop2 = g_cLoop;
     CHECK( ( cLoop2 >= cLoop1 ) && ( cLoop2 <= cLoop1 + 1 ) );

@@ -35,7 +35,7 @@ ERR ErrBFInit( __in const LONG cbPageSizeMax )
     g_dblBFHashLoadFactor     = 5.0;
     g_dblBFHashUniformity     = 1.0;
     g_csecBFLRUKUncertainty   = 1.0;
- 
+
 
     CallJ( ErrBFIFTLInit(), Validate );
 
@@ -182,7 +182,7 @@ void BFTerm()
     BFITraceResMgrTerm();
     g_bfavail.Term();
     g_bfquiesced.Empty();
-    
+
     OSMemoryPageFree( g_rgbBFTemp );
     g_rgbBFTemp = NULL;
 
@@ -223,7 +223,7 @@ ERR ErrBFGetCacheSize( ULONG_PTR* const pcpg )
 ERR ErrBFIStartCacheTasks()
 {
     ERR err = JET_errSuccess;
-    
+
     if ( g_fBFInitialized )
     {
         BFICacheSetTarget( OnDebug( -1 ) );
@@ -238,7 +238,7 @@ HandleError:
 ERR ErrBFSetCacheSize( const ULONG_PTR cpg )
 {
     ERR err = JET_errSuccess;
-    
+
 
     g_critCacheSizeSetTarget.Enter();
 
@@ -1512,12 +1512,12 @@ void BFReadUnlatch( BFLatch* pbfl )
 
 void BFMarkAsSuperCold( IFMP ifmp, PGNO pgno, const BFLatchFlags bflf )
 {
-    
+
     TraceContextScope tcScope;
     tcScope->nParentObjectClass = tceNone;
 
     BFLatch bfl;
-    ERR err = ErrBFRDWLatchPage( 
+    ERR err = ErrBFRDWLatchPage(
                     &bfl,
                     ifmp,
                     pgno,
@@ -1528,12 +1528,12 @@ void BFMarkAsSuperCold( IFMP ifmp, PGNO pgno, const BFLatchFlags bflf )
     if ( err >= JET_errSuccess )
     {
         const ERR errBFLatchStatus = ErrBFLatchStatus( &bfl );
-        
+
         if( ( errBFLatchStatus >= JET_errSuccess ) || ( errBFLatchStatus == JET_errPageNotInitialized ) )
         {
 
             Expected( !PagePatching::FIsPatchableError( errBFLatchStatus ) );
-            
+
             BFMarkAsSuperCold( &bfl );
         }
 
@@ -1547,7 +1547,7 @@ void BFMarkAsSuperCold( BFLatch *pbfl )
 
 
     const PBF pbf = PbfBFILatchContext( pbfl->dwContext );
-    
+
     BFIMarkAsSuperCold( pbf, fTrue );
 }
 
@@ -2182,7 +2182,7 @@ void BFGetBestPossibleWaypoint(
         lgposPreferredWaypoint.lGeneration = plog->LGGetCurrentFileGenWithLock();
     }
 
-    
+
     lgposPreferredWaypoint.isec = lgposMax.isec;
     lgposPreferredWaypoint.ib = lgposMax.ib;
 
@@ -2448,7 +2448,7 @@ void BFPrereadPageRange( IFMP ifmp, const PGNO pgnoFirst, CPG cpg, CPG* pcpgActu
     {
         AssertPREFIX( pgnoFirst - lDir > pgnoFirst );
     }
-    
+
     if ( rgfPageWasCached )
     {
         for ( INT ipg = 0; ipg < cpg; ipg++ )
@@ -2505,7 +2505,7 @@ void BFPrereadPageRange( IFMP ifmp, const PGNO pgnoFirst, CPG cpg, CPG* pcpgActu
         }
     }
 
-    
+
     if ( cbfPreread )
     {
         CallS( g_rgfmp[ ifmp ].Pfapi()->ErrIOIssue() );
@@ -2598,8 +2598,8 @@ void BFPrereadPageList( IFMP ifmp, PGNO* prgpgno, CPG* pcpgActual, const BFPreRe
             break;
         }
     }
-    
-    
+
+
     if ( cbfPreread )
     {
         CallS( g_rgfmp[ ifmp ].Pfapi()->ErrIOIssue() );
@@ -2777,7 +2777,7 @@ void BFAlloc( __in_range( bfasMin, bfasMax - 1 ) const BFAllocState bfas, void**
     }
     else
     {
-        
+
         BFIAlloc( bfas, ppv, g_icbCacheMax );
     }
 }
@@ -3238,7 +3238,7 @@ void BFPurge( IFMP ifmp, PGNO pgno, CPG cpg )
     PGNO    pgnoFirst   = ( pgnoNull == pgno ) ? PgnoOfOffset( cpgDBReserved * g_rgcbPageSize[g_icbCacheMax] ) : pgno;
     PGNO    pgnoLast    = ( pgnoNull == pgno ) ? PgnoOfOffset( 0 ) : ( pgno + cpg - 1 );
     BOOL    fUnlock     = fFalse;
-    
+
     OSTraceWriteRefLog( ostrlSystemFixed, sysosrtlBfPurge|sysosrtlContextFmp, pfmp, &ifmp, sizeof(ifmp) );
 
 
@@ -3248,7 +3248,7 @@ void BFPurge( IFMP ifmp, PGNO pgno, CPG cpg )
     }
 
     const TICK tickStartPurge = TickOSTimeCurrent();
-    
+
 
 
     Expected( DtickDelta( tickStartPurge, TickOSTimeCurrent() ) <= 5 * 60 * 1000 );
@@ -3311,10 +3311,10 @@ void BFPurge( IFMP ifmp, PGNO pgno, CPG cpg )
 
     (void)CBFIssueList::ErrSync();
 
-    
+
 
     pfmp->WaitForAsyncIOForViewCache();
-    
+
 }
 
 BOOL CmpPgno( __in const PGNO& pgno1, __in const PGNO& pgno2 )
@@ -3653,7 +3653,7 @@ ERR ErrBFFlush( IFMP ifmp, const OBJID objidFDP, const PGNO pgnoFirst, const PGN
         if ( fRetryFlush )
         {
             LOG * plog = PinstFromIfmp( ifmp )->m_plog;
-            
+
             OSTraceFMP(
                 ifmp,
                 JET_tracetagBufferManager,
@@ -3708,7 +3708,7 @@ ERR ErrBFFlush( IFMP ifmp, const OBJID objidFDP, const PGNO pgnoFirst, const PGN
     while ( fRetryFlush );
 
     const ERR errBfFlushLoop = err;
-    
+
     OSTraceFMP(
         ifmp,
         JET_tracetagBufferManager,
@@ -3911,7 +3911,7 @@ ERR ErrBFFlushSync( IFMP ifmp )
             OSTrace(
                 JET_tracetagBufferManager,
                 OSFormat( "ErrBFIPrepareFlushPage: pgno=%u:%u errPrepareFlush=%d", (ULONG)pbf->ifmp, pbf->pgno, errPrepareFlush ) );
-            
+
             if ( errPrepareFlush == JET_errOutOfMemory || errPrepareFlush == JET_errOutOfBuffers )
             {
                 Error( errPrepareFlush );
@@ -3923,7 +3923,7 @@ ERR ErrBFFlushSync( IFMP ifmp )
         }
         Assert( !bfil.FEmpty() );
 
-        
+
         TraceContextScope tcScope( iorpBFDatabaseFlush );
         err = ErrBFISyncWrite( pbf, bfltExclusive, qosIODispatchImmediate, *tcScope );
         pbf->sxwl.ReleaseExclusiveLatch();
@@ -4115,7 +4115,7 @@ inline INT CReferencedPages::CKeyEntry:: Cmp( const CReferencedPages::CKeyEntry&
 
 void BFIBuildReferencedPageListForCrashDump( CReferencedPages * ptableReferencedPages )
 {
-    
+
     CArray< CPagePointer >  arrayReferencedPages;
 
     TRY
@@ -4125,7 +4125,7 @@ void BFIBuildReferencedPageListForCrashDump( CReferencedPages * ptableReferenced
         for ( size_t ipinst = 0; ipinst < g_cpinstMax; ipinst++ )
         {
             const INST * const pinst    = g_rgpinst[ ipinst ];
-        
+
             if ( pinstNil != pinst )
             {
 
@@ -4133,7 +4133,7 @@ void BFIBuildReferencedPageListForCrashDump( CReferencedPages * ptableReferenced
                 for ( PIB * ppib = pinst->m_ppibGlobal; ppibNil != ppib; ppib = ppib->ppibNext )
                 {
 
-                    
+
                     for ( FUCB * pfucb = ppib->pfucbOfSession; pfucbNil != pfucb; pfucb = pfucb->pfucbNextOfSession )
                     {
                         void * const    pvPage  = pfucb->csr.PvBufferForCrashDump();
@@ -4316,19 +4316,19 @@ ERR ErrBFConfigureProcessForCrashDump( const JET_GRBIT grbit )
     CReferencedPages    tableReferencedPages;
 
 
-    
+
     UINT aaOriginal = COSLayerPreInit::SetAssertAction( JET_AssertSkipAll );
 
     if ( grbit & JET_bitDumpUnitTest )
     {
-        
+
         Assert( 0 );
     }
-    
+
 
     g_tickBFPreparingCrashDump = TickOSTimeCurrent();
 
-    
+
     if ( !( grbit & JET_bitDumpUnitTest ) && !BoolParam( JET_paramEnableViewCache ) )
     {
 
@@ -4343,12 +4343,12 @@ ERR ErrBFConfigureProcessForCrashDump( const JET_GRBIT grbit )
             Error( JET_errSuccess );
         }
 
-        
+
         if ( cbfInit < ( 100 * 1024 * 1024 ) / g_cbPageMax )
         {
             Error( JET_errSuccess );
         }
-    
+
     }
 
 
@@ -4492,7 +4492,7 @@ void BFSetBFFMPContextAttached( IFMP ifmp )
     for ( IBF ibf = 0; ibf < cbfInit; ibf++ )
     {
         PBF pbf = PbfBFICacheIbf( ibf );
-    
+
         if ( pbf->ifmp != ifmp )
         {
             continue;
@@ -4517,7 +4517,7 @@ void BFResetBFFMPContextAttached( IFMP ifmp )
     for ( IBF ibf = 0; ibf < cbfInit; ibf++ )
     {
         PBF pbf = PbfBFICacheIbf( ibf );
-    
+
         if ( pbf->ifmp != ifmp )
         {
             continue;
@@ -4532,7 +4532,7 @@ void BFResetBFFMPContextAttached( IFMP ifmp )
         PERFOpt( g_cbCacheUnattached += g_rgcbPageSize[pbf->icbBuffer] );
     }
 #endif
-    
+
     pfmp->EnterBFContextAsWriter();
 
     BFFMPContext* pbffmp = ( BFFMPContext* )pfmp->DwBFContext();
@@ -4637,7 +4637,7 @@ ERR ErrBFPatchPage(
 
 
     AssertRTL( FBFICurrentPage( pbf, ifmp, pgno ) );
-    
+
 
     g_bflruk.LockResourceForEvict( pbf, &lockLRUK );
     fLockedLRUK = true;
@@ -4759,7 +4759,7 @@ ERR ErrBFTestEvictPage( _In_ const IFMP ifmp, _In_ const PGNO pgno )
                     iIter--;
                 }
 
-                
+
                 err = ErrERRCheck( JET_errDatabaseInUse );
             }
 
@@ -5083,7 +5083,7 @@ INLINE void BFITraceEvictPage(
     const ULONG bfef )
 {
     const ULONG pctPriority = 0;
-    
+
 #ifdef ENABLE_BFFTL_TRACING
     (void)ErrBFIFTLEvict( ifmp, pgno, fCurrentVersion, errBF, bfef, pctPriority );
 #endif
@@ -5280,7 +5280,7 @@ void BFIOB0UnitTest( const ULONG cSec, const ULONG cbSec )
                     bfob0.UnlockKeyPtr( &lock );
                     Assert( errOB0Insert4 == BFOB0::ERR::errKeyRangeExceeded ||
                             errOB0Insert4 == BFOB0::ERR::errOutOfMemory );
-                    
+
                     LGPOS lgpos5;
                     lgpos5.SetByIbOffset( lgpos1.IbOffset( cSec, cbSec ) + 3 * lgposPrecision.IbOffset( cSec, cbSec ) / 4, cSec, cbSec );
                     BF bf5;
@@ -5289,7 +5289,7 @@ void BFIOB0UnitTest( const ULONG cSec, const ULONG cbSec )
                     bfob0.UnlockKeyPtr( &lock );
                     Assert( errOB0Insert5 == BFOB0::ERR::errKeyRangeExceeded ||
                             errOB0Insert5 == BFOB0::ERR::errOutOfMemory );
-                    
+
                     LGPOS lgpos6;
                     lgpos6.SetByIbOffset( lgpos1.IbOffset( cSec, cbSec ) + 4 * lgposPrecision.IbOffset( cSec, cbSec ) / 4 - 2 * lgposUncertainty.IbOffset( cSec, cbSec ), cSec, cbSec );
                     BF bf6;
@@ -5298,13 +5298,13 @@ void BFIOB0UnitTest( const ULONG cSec, const ULONG cbSec )
                     bfob0.UnlockKeyPtr( &lock );
                     Assert( errOB0Insert6 == BFOB0::ERR::errKeyRangeExceeded ||
                             errOB0Insert6 == BFOB0::ERR::errOutOfMemory );
-                    
+
                     bfob0.LockKeyPtr( lgpos3.IbOffset( cSec, cbSec ), &bf3, &lock );
                     BFOB0::ERR errOB0Delete3 = bfob0.ErrDeleteEntry( &lock );
                     Assert( errOB0Delete3 == BFOB0::ERR::errSuccess );
                     bfob0.UnlockKeyPtr( &lock );
                 }
-                
+
                 bfob0.LockKeyPtr( lgpos2.IbOffset( cSec, cbSec ), &bf2, &lock );
                 BFOB0::ERR errOB0Delete2 = bfob0.ErrDeleteEntry( &lock );
                 Assert( errOB0Delete2 == BFOB0::ERR::errSuccess );
@@ -5375,7 +5375,7 @@ INLINE LGPOS BFIOB0Lgpos( const IFMP ifmp, LGPOS lgpos, const BOOL fNextBucket )
         lgpos.isec = 0;
         lgpos.ib = 0;
     }
-    
+
     return lgpos;
 }
 
@@ -5911,7 +5911,7 @@ void BFIReportCacheStatisticsChanges(
 
     const INT pctCacheResidentLowThreshold = 80;
     const INT pctCacheResidentDropThreshold = 30;
-    
+
     const INT pctCacheResident = (INT)( ( (__int64)cbfCacheResidentCurrent * 100 ) / cbfCacheCurrent );
     const INT pctCacheResidentLast = (INT)( ( (__int64)pstatsBFCacheResidency->cbfResidentLast * 100 ) / pstatsBFCacheResidency->cbfCacheLast );
     const INT pctCacheResidentDelta = pctCacheResident - pctCacheResidentLast;
@@ -6072,7 +6072,7 @@ JETUNITTEST( BF, BFICacheUpdateStatisticsIReportGreenStats )
     BFIReportCacheStatisticsChanges( &statsBFCacheResidency, 200000000LL, 85000, 100000 );
     CHECK( statsBFCacheResidency.eResidentCurrentEventType == eResidentCacheStatusRestore );
     CHECK( statsBFCacheResidency.csecLastEventDelta == 10 );
-    
+
     BFIReportCacheStatisticsChanges( &statsBFCacheResidency, 200000000LL, 95000, 100000 );
     CHECK( statsBFCacheResidency.eResidentCurrentEventType == eResidentCacheStatusNoChange );
 
@@ -6081,19 +6081,19 @@ JETUNITTEST( BF, BFICacheUpdateStatisticsIReportGreenStats )
     BFIReportCacheStatisticsChanges( &statsBFCacheResidency, 300000000LL, 79000, 100000 );
     CHECK( statsBFCacheResidency.eResidentCurrentEventType == eResidentCacheStatusDrop );
     CHECK( statsBFCacheResidency.csecLastEventDelta == 10 );
-    
+
     BFIReportCacheStatisticsChanges( &statsBFCacheResidency, 300000000LL, 82000, 100000 );
     CHECK( statsBFCacheResidency.eResidentCurrentEventType == eResidentCacheStatusNoChange );
-    
+
     BFIReportCacheStatisticsChanges( &statsBFCacheResidency, 300000000LL, 84000, 100000 );
     CHECK( statsBFCacheResidency.eResidentCurrentEventType == eResidentCacheStatusNoChange );
-    
+
     CHECK( statsBFCacheResidency.cbfResidentLast == 79000 );
     CHECK( statsBFCacheResidency.cbfCacheLast == 100000 );
     BFIReportCacheStatisticsChanges( &statsBFCacheResidency, 400000000LL, 85000, 100000 );
     CHECK( statsBFCacheResidency.eResidentCurrentEventType == eResidentCacheStatusRestore );
     CHECK( statsBFCacheResidency.csecLastEventDelta == 10 );
-    
+
     CHECK( statsBFCacheResidency.cbfResidentLast == 85000 );
     CHECK( statsBFCacheResidency.cbfCacheLast == 100000 );
     BFIReportCacheStatisticsChanges( &statsBFCacheResidency, 500000000LL, 74000, 100000 );
@@ -6383,7 +6383,7 @@ BOOL FBFITriggerCacheOverMemoryInDepthProtection(
     Expected( cbCommittedCacheSize >= 0 );
 
     const BOOL fOverCommitRAM = ( cbTotalPhysicalMemory == 0 ) || ( 100 * cbCommittedCacheSize / cbTotalPhysicalMemory >= pctCommitDefenseRAM );
-    
+
     return fOverCommitRAM;
 }
 
@@ -6644,7 +6644,7 @@ ERR ErrBFICacheUpdateStatistics()
 
                             if ( ( cbVMPage * ( immpgBF + 1 ) ) <= (size_t)g_rgcbPageSize[pbf->icbBuffer] )
                             {
-                                
+
                                 (void)BfrsBFIUpdateResidentState( pbf, bfrsNotResident, bfrsResident );
                             }
                         }
@@ -6682,7 +6682,7 @@ ERR ErrBFICacheUpdateStatistics()
                         if ( ( cbVMPage * ( immpgBF + 1 ) ) > (size_t)g_rgcbPageSize[icbBuffer] )
                         {
 
-                        
+
                             if ( ibf > (size_t)cbfCacheAddressable )
                             {
                                 g_cbfHighUnintendedResidentPagesLastPass++;
@@ -6977,7 +6977,7 @@ ERR ErrBFICacheISetDataSize( const LONG_PTR cpgCacheStart, const LONG_PTR cpgCac
         for ( LONG_PTR ipgChunkFree = ipgChunkNew + 1; ipgChunkFree <= ipgChunkStart; ipgChunkFree++ )
         {
             void* const pvChunkFree = g_rgpvChunk[ ipgChunkFree ];
-            
+
             g_rgpvChunk[ ipgChunkFree ] = NULL;
             const size_t cbChunkFree = g_cpgChunk * g_rgcbPageSize[g_icbCacheMax];
             OSMemoryPageDecommit( pvChunkFree, cbChunkFree );
@@ -7192,7 +7192,7 @@ ERR ErrBFICacheISetSize( const LONG_PTR cbfCacheAddressableNew )
 
     const LONG_PTR cbfCacheAddressableStart = cbfCacheAddressable;
 
-    
+
     if ( cbfCacheAddressableStart < 0 )
     {
         AssertSz( fFalse, "At some point we had a negative cache size!!!?" );
@@ -7217,7 +7217,7 @@ ERR ErrBFICacheISetSize( const LONG_PTR cbfCacheAddressableNew )
         for ( LONG_PTR ibfInit = cbfCacheAddressableStart; ibfInit < cbfInit; ibfInit++ )
         {
             PBF pbf = PbfBFICacheIbf( ibfInit );
-        
+
             Assert( pbf->fQuiesced );
         }
 #endif
@@ -7354,7 +7354,7 @@ ERR ErrBFICacheISetSize( const LONG_PTR cbfCacheAddressableNew )
     }
 
 HandleError:
-    
+
     return err;
 }
 
@@ -7369,13 +7369,13 @@ LOCAL BOOL FBFICacheApproximatelyEqual( const ULONG_PTR cbfTarget, const ULONG_P
 {
     if ( cbfCurrent > 0 )
     {
-        
+
         if ( absdiff( cbfTarget, cbfCurrent ) == 1 )
         {
             return fTrue;
         }
 
-        
+
         const double fracCbfCache = (double)absdiff( cbfTarget, cbfCurrent ) / (double)cbfCurrent;
 
         if ( fracCbfCache <= fracMaintCacheSensitivity )
@@ -7402,7 +7402,7 @@ JETUNITTEST( BF, TestCbfSameWithinSensitivity )
     const ULONG_PTR dcbfWithinRangeSmall = (ULONG_PTR)( cbfCurrentSmall * fracMaintCacheSensitivity );
     const ULONG_PTR dcbfOutsideRangeSmall = 1;
 
-    
+
     CHECK( dcbfWithinRange < cbfCurrent );
     CHECK( cbfCurrent != 0 );
     CHECK( dcbfWithinRange != 0 );
@@ -7412,12 +7412,12 @@ JETUNITTEST( BF, TestCbfSameWithinSensitivity )
     CHECK( cbfCurrentSmall != 0 );
     CHECK( dcbfOutsideRangeSmall != 0 );
 
-    
+
     CHECK( FBFICacheApproximatelyEqual( 0, 0 ) );
     CHECK( !FBFICacheApproximatelyEqual( 1, 0 ) );
     CHECK( !FBFICacheApproximatelyEqual( 1000, 0 ) );
 
-    
+
     CHECK( FBFICacheApproximatelyEqual( cbfCurrentSmall, cbfCurrentSmall ) );
     CHECK( FBFICacheApproximatelyEqual( cbfCurrentSmall - dcbfWithinRangeSmall, cbfCurrentSmall ) );
     CHECK( FBFICacheApproximatelyEqual( cbfCurrentSmall + dcbfWithinRangeSmall, cbfCurrentSmall ) );
@@ -7426,7 +7426,7 @@ JETUNITTEST( BF, TestCbfSameWithinSensitivity )
     CHECK( !FBFICacheApproximatelyEqual( cbfCurrentSmall - dcbfOutsideRangeSmall - 1, cbfCurrentSmall ) );
     CHECK( !FBFICacheApproximatelyEqual( cbfCurrentSmall + dcbfOutsideRangeSmall + 1, cbfCurrentSmall ) );
 
-    
+
     CHECK( FBFICacheApproximatelyEqual( cbfCurrent, cbfCurrent ) );
     CHECK( FBFICacheApproximatelyEqual( cbfCurrent - dcbfWithinRange, cbfCurrent ) );
     CHECK( FBFICacheApproximatelyEqual( cbfCurrent + dcbfWithinRange, cbfCurrent ) );
@@ -7503,7 +7503,7 @@ inline size_t CCacheRAM::TotalPhysicalMemoryEvicted()
     m_cpgEvictNorm      += (DWORD)( ( m_cpgEvictCurr - m_cpgEvictLast ) * fracQuota + 0.5 );
     m_cpgEvictLast      = m_cpgEvictCurr;
 
-    
+
     const DWORD cpgPhysicalMemoryEvicted = m_cpgEvictNorm + m_cpgReclaimNorm;
     m_cbTotalPhysicalMemoryEvicted += ( cpgPhysicalMemoryEvicted - m_cpgPhysicalMemoryEvictedLast ) * (size_t)OSMemoryPageCommitGranularity();
     m_cpgPhysicalMemoryEvictedLast = cpgPhysicalMemoryEvicted;
@@ -7619,12 +7619,12 @@ inline void CCacheRAM::SetOptimalResourcePoolSize()
     {
         if ( !FBFICacheApproximatelyEqual( (ULONG_PTR)cbfCacheNew, (ULONG_PTR)m_cbfCacheNewDiscrete ) )
         {
-            
+
             m_cbfCacheNewDiscrete = cbfCacheNew;
         }
         else
         {
-            
+
             cbfCacheNew = m_cbfCacheNewDiscrete;
         }
 
@@ -8369,7 +8369,7 @@ __int64             g_cbCacheBoosted = 0;
 INLINE ULONG UlBFIMaintScavengeAvailPoolSev( const BFScavengeStats& stats )
 {
     Assert( stats.cbfAvailPoolTarget >= stats.cbfAvailPoolLow );
-    
+
     if ( stats.cbfAvail < stats.cbfAvailPoolLow )
     {
         return ulMaintScavengeSevMax;
@@ -8864,7 +8864,7 @@ ERR ErrBFIMaintScavengeIScavengePages( const char* const szContextTraceOnly, con
             {
                 g_modeExtraScavengingRuns = ( ( rand() % 4 ) == 3 ) ? 2  : 1 ;
             }
-            
+
         }
         if ( ( statsCurrRun.cbfAvail > 0 ) &&
             ( statsCurrRun.dtickShrinkDuration <= ( dtickMaintScavengeShrinkMax / 10 ) ) &&
@@ -9766,7 +9766,7 @@ void BFIMaintCheckpointDepthIFlushPages( TICK * pdtickNextSchedule )
 #endif
             }
 
-            
+
             ipinstCheckpointUpdate = IpinstFromPinst( PinstFromIfmp( ifmp ) );
             Assert( PinstFromIfmp( ifmp ) == g_rgpinst[ipinstCheckpointUpdate] );
         }
@@ -9782,7 +9782,7 @@ void BFIMaintCheckpointDepthIFlushPages( TICK * pdtickNextSchedule )
 
         if ( err == errDiskTilt )
         {
-            
+
             errLastCheckpointMaint = err;
             break;
         }
@@ -10274,7 +10274,7 @@ ERR ErrBFIMaintCheckpointDepthIFlushPagesByIFMP( const IFMP ifmp, BOOL * const p
 
 
     memset( &(pbffmp->ChkAdvData), 0, sizeof(pbffmp->ChkAdvData) );
-    
+
 
     LOG* const  plog        = pfmp->Pinst()->m_plog;
     const LGPOS lgposNewest = plog->LgposLGLogTipNoLock();
@@ -10516,7 +10516,7 @@ ERR ErrBFIMaintCheckpointDepthIFlushPagesByIFMP( const IFMP ifmp, BOOL * const p
 
 
         const BOOL fEmptyOB0 = CmpLgpos( lgposMin, lgposCheckpointOB0 ) == 0;
-        
+
         if ( fEmptyOB0 ||
              ( CmpLgpos( lgposCheckpoint, lgposCheckpointOB0 ) < 0 ) )
         {
@@ -11088,7 +11088,7 @@ INLINE __int64 CbBFICacheUsed( const BOOL fFullyHydrated )
     INT icbPage = icbPageSmallest;
     INT icbCacheMaxT = g_icbCacheMax;
 
-    
+
     INT& icbPageT = fFullyHydrated ? icbCacheMaxT : icbPage;
 
     for( ;icbPage <= g_icbCacheMax; icbPage++ )
@@ -11137,7 +11137,7 @@ INLINE CBF CbfBFICacheCommitted()
     {
         return 0;
     }
-    
+
     return cbfCommittedT;
 }
 
@@ -11170,7 +11170,7 @@ __int64 CbBFIAveResourceSize()
     {
         const __int64 cbCacheSizeUsedDehydrated = CbBFICacheSizeUsedDehydrated();
         const CBF cbfCacheSizeUsed = CbfBFICacheUsed();
-        
+
 
         if ( cbCacheSizeUsedDehydrated > 0 && cbfCacheSizeUsed > 0 && cbCacheSizeUsedDehydrated >= cbfCacheSizeUsed )
         {
@@ -11193,7 +11193,7 @@ LONG_PTR CbfBFICredit()
         const __int64 cbCacheSizeUsedHydrated = CbBFICacheISizeUsedHydrated();
         const __int64 cbCacheSizeUsedDehydrated = CbBFICacheSizeUsedDehydrated();
 
-        
+
         if ( cbCacheSizeUsedHydrated > cbCacheSizeUsedDehydrated )
         {
             return (LONG_PTR)( ( cbCacheSizeUsedHydrated - cbCacheSizeUsedDehydrated ) / g_rgcbPageSize[g_icbCacheMax] );
@@ -11220,7 +11220,7 @@ BOOL FBFIMaintCacheSizeQuiescedInSensitivityRange()
     ULONG_PTR cbfCacheStableNew = 0;
     const ULONG_PTR cbfBFIAveCredit = (ULONG_PTR)CbfBFIAveCredit();
     const ULONG_PTR cbfBFICredit = (ULONG_PTR)CbfBFICredit();
-    
+
     if ( FBFICacheSizeFixed() )
     {
         const ULONG_PTR cbfCacheTargetEffective = g_cbfCacheUserOverride ? g_cbfCacheUserOverride : UlParam( JET_paramCacheSizeMin );
@@ -11306,7 +11306,7 @@ void BFICacheSizeBoost()
 
 
     const BOOL fCleanUpStateSaved = FOSSetCleanupState( fFalse );
-    
+
     (void)ErrBFIMaintCacheSizeRequest( OnDebug( &fAcquiredSemaphore ) );
 
 
@@ -11388,14 +11388,14 @@ LOCAL LONG_PTR CbfBFIMaintIdleCacheStatsWithdrawal(
             break;
         }
     }
-    
+
     return cbfTargetCacheSizeNew;
 }
 
 void BFIMaintIdleCacheStatsITask( VOID *pvGroupContext, VOID * )
 {
     OSTrace( JET_tracetagBufferManagerMaintTasks, __FUNCTION__ );
-    
+
 
     if ( FBFIMaintCacheSizeQuiescedInSensitivityRange() && FBFICacheSizeFixed() )
     {
@@ -11403,7 +11403,7 @@ void BFIMaintIdleCacheStatsITask( VOID *pvGroupContext, VOID * )
         return;
     }
 
-    
+
     if ( !FJetConfigLowMemory() && !FJetConfigLowPower() )
     {
         if ( FBFIMaintCacheStatsTryAcquire() )
@@ -11479,7 +11479,7 @@ void BFIMaintIdleCacheStatsITask( VOID *pvGroupContext, VOID * )
 
 
     const BOOL fCleanUpStateSaved = FOSSetCleanupState( fFalse );
-    
+
     (void)ErrBFIMaintCacheSizeRequest( OnDebug( &fAcquiredSemaphore ) );
 
 
@@ -11700,7 +11700,7 @@ INLINE ERR ErrBFIMaintCacheStatsRequest( const BFIMaintCacheStatsRequestType bfm
     if ( FBFIMaintCacheStatsTryAcquire() )
     {
         fReleaseSemaphore = fTrue;
-        
+
         g_tickLastMaintCacheSizeRequestSuccess = TickOSTimeCurrent();
 
 
@@ -11776,7 +11776,7 @@ INLINE ERR ErrBFIMaintCacheSizeRequest( OnDebug( BOOL* const pfAcquiredSemaphore
     if ( cbfCacheTargetT > cbfCacheSize )
     {
         OnNonRTM( g_tickMaintCacheSizeRequestSyncLastAttempt = TickOSTimeCurrent() );
-        
+
 
         if ( ErrBFICacheGrow() < JET_errSuccess )
         {
@@ -11946,7 +11946,7 @@ void BFIReleaseBuffer( PBF pbf )
     pbf->fAvailable = fFalse;
     pbf->fQuiesced = fTrue;
     g_bfquiesced.InsertAsNextMost( pbf );
-    
+
 
 
     Assert( ( pbf->icbBuffer == icbPage0 ) || ( (DWORD)g_rgcbPageSize[pbf->icbBuffer] >= OSMemoryPageCommitGranularity() ) );
@@ -12029,7 +12029,7 @@ INLINE ERR ErrBFIMaintCacheSizeReleaseAndRescheduleIfPending()
         g_tickMaintCacheSizeStartedLast = TickOSTimeCurrent();
         g_cbfMaintCacheSizeStartedLast = cbfCacheSize;
         OnNonRTM( g_tickMaintCacheSizeRescheduleLastAttempt = g_tickMaintCacheSizeStartedLast );
-        
+
 
         err = ErrBFIMaintScheduleTask(  g_posttBFIMaintCacheSizeITask,
                                         NULL,
@@ -12090,12 +12090,12 @@ void BFIMaintIdleDatabaseRequest( PBF pbf )
 
     FMP* const  pfmp            = &g_rgfmp[ pbf->ifmp ];
     const LGPOS lgposWaypoint   = pfmp->LgposWaypoint();
-    
+
     if (    CmpLgpos( &pbf->lgposModify, &lgposMin ) != 0 &&
             CmpLgpos( &lgposWaypoint, &lgposMin ) != 0 &&
             CmpLgpos( &pbf->lgposModify, &lgposWaypoint ) >= 0 )
     {
-        
+
 
         Assert( pfmp->FNotBFContextWriter() );
         CLockDeadlockDetectionInfo::DisableOwnershipTracking();
@@ -12129,7 +12129,7 @@ void BFIMaintIdleDatabaseRequest( PBF pbf )
         CLockDeadlockDetectionInfo::EnableDeadlockDetection();
         CLockDeadlockDetectionInfo::EnableOwnershipTracking();
     }
-    
+
 
     BOOL fAcquiredAsync = g_semMaintIdleDatabaseRequest.FTryAcquire();
 
@@ -12181,7 +12181,7 @@ BOOL FBFIMaintIdleDatabaseIDatabaseHasPinnedPages( const INST * const pinst, con
     FMP* const  pfmp    = &g_rgfmp[ ifmp ];
 
     BOOL fPinnedPages = fFalse;
-    
+
     if ( ifmp >= g_ifmpMax || !pfmp->FAttached() )
     {
         fPinnedPages = fFalse;
@@ -12190,11 +12190,11 @@ BOOL FBFIMaintIdleDatabaseIDatabaseHasPinnedPages( const INST * const pinst, con
     {
 
         pfmp->EnterBFContextAsReader();
-        
+
         const BFFMPContext* const pbffmp = (BFFMPContext*)pfmp->DwBFContext();
-        
+
         const LGPOS lgposNewestModify = ( pbffmp && pbffmp->fCurrentlyAttached ) ? pbffmp->lgposNewestModify : lgposMin;
-        
+
         pfmp->LeaveBFContextAsReader();
 
 
@@ -12220,7 +12220,7 @@ BOOL FBFIMaintIdleDatabaseIDatabaseHasPinnedPages( const INST * const pinst, con
 
 void BFIMaintIdleDatabaseIRollLogs( INST * const pinst )
 {
-    
+
     BOOL fPinnedPages = fFalse;
     for ( DBID dbid = dbidMin; dbid < dbidMax; dbid++ )
     {
@@ -12270,7 +12270,7 @@ void BFIMaintIdleDatabaseIRollLogs( INST * const pinst )
         }
     }
 }
-    
+
 void BFIMaintIdleDatabaseIRollLogs()
 {
     OSTrace(    JET_tracetagBufferManagerMaintTasks,
@@ -12285,7 +12285,7 @@ void BFIMaintIdleDatabaseIRollLogs()
         pcritInst->Enter();
 
         INST * const pinst = g_rgpinst[ ipinst ];
-        
+
         if ( pinstNil == pinst )
         {
             pcritInst->Leave();
@@ -12306,7 +12306,7 @@ void BFIMaintIdleDatabaseIRollLogs()
             }
         }
     }
-    
+
     OSTrace(    JET_tracetagBufferManagerMaintTasks,
                 OSFormat(   "%s:  Ending Idle Database Maintenance",
                             __FUNCTION__ ) );
@@ -12391,7 +12391,7 @@ INLINE void BFIMaintCacheResidencyRequest()
 void BFIMaintCacheResidencyITask( void*, void* )
 {
     OSTrace( JET_tracetagBufferManagerMaintTasks, __FUNCTION__ );
-    
+
     Assert( !g_fUpdateStatisticsMayRequest );
 
     (void)ErrBFICacheUpdateStatistics();
@@ -12420,7 +12420,7 @@ INLINE void BFIUpdateResidencyStatsAfterResidencyFlag( const BFResidenceState bf
 
     Expected( bfrsOld != bfrsMax );
     Expected( bfrsNew != bfrsMax );
-    
+
 
     Expected( !( bfrsOld == bfrsNotCommitted && bfrsNew == bfrsNotResident ) );
     Expected( !( bfrsOld == bfrsNewlyCommitted && bfrsNew == bfrsNewlyCommitted ) );
@@ -12443,7 +12443,7 @@ INLINE void BFIUpdateResidencyStatsAfterResidencyFlag( const BFResidenceState bf
     }
     else if ( bfrsOld == bfrsNotCommitted )
     {
- 
+
         AtomicIncrement( (LONG*)&g_cbfCommitted );
     }
 
@@ -12477,7 +12477,7 @@ INLINE BFResidenceState BfrsBFIUpdateResidentState( PBF const pbf, const BFResid
     const BFResidenceState bfrsOld = (BFResidenceState)AtomicExchange( (LONG*)&pbf->bfrs, (LONG)bfrsNew );
 
     BFIUpdateResidencyStatsAfterResidencyFlag( bfrsOld, bfrsNew );
-    
+
     return bfrsOld;
 }
 
@@ -12489,7 +12489,7 @@ INLINE BFResidenceState BfrsBFIUpdateResidentState( PBF const pbf, const BFResid
     {
         BFIUpdateResidencyStatsAfterResidencyFlag( bfrsOld, bfrsNew );
     }
-    
+
     return bfrsOld;
 }
 
@@ -12500,7 +12500,7 @@ JETUNITTEST( BF, BFIUpdateResidencyStatsAfterResidencyFlag )
     const DWORD cbfCommittedInit = 50;
     const DWORD cbfNewlyCommittedInit = 10;
     const LONG cbfCacheResidentInit = 20;
-    
+
 
     g_cbfCommitted = cbfCommittedInit;
     g_cbfNewlyCommitted = cbfNewlyCommittedInit;
@@ -12598,7 +12598,7 @@ JETUNITTEST( BF, BfrsBFISwitchBFResidencyFlagForced )
     const DWORD cbfCommittedInit = 50;
     const DWORD cbfNewlyCommittedInit = 10;
     const LONG cbfCacheResidentInit = 20;
-    
+
     bf.bfrs = bfrsNotCommitted;
     g_cbfCommitted = cbfCommittedInit;
     g_cbfNewlyCommitted = cbfNewlyCommittedInit;
@@ -12620,7 +12620,7 @@ JETUNITTEST( BF, BfrsBFISwitchBFResidencyFlagConditional )
     const DWORD cbfNewlyCommittedInit = 10;
     const LONG cbfCacheResidentInit = 20;
 
-    
+
     bf.bfrs = bfrsNewlyCommitted;
     g_cbfCommitted = cbfCommittedInit;
     g_cbfNewlyCommitted = cbfNewlyCommittedInit;
@@ -12684,7 +12684,7 @@ void BFIMaintTelemetryITask( VOID *, VOID * pvContext )
     {
         PBF pbf = PbfBFICacheIbf( ibf );
 
-        
+
         if ( pbf->sxwl.ErrTryAcquireSharedLatch() != CSXWLatch::ERR::errSuccess )
         {
             continue;
@@ -13035,7 +13035,7 @@ HandleError:
 ERR ErrBFISetBufferSize( __inout PBF pbf, __in const ICBPage icbNewSize, __in const BOOL fWait )
 {
     ERR err = JET_errSuccess;
-    
+
     Enforce( icbPageInvalid != icbNewSize );
 
     Assert( pbf->sxwl.FOwnWriteLatch() );
@@ -13274,7 +13274,7 @@ ERR ErrBFIAllocPage( PBF* const ppbf, __in const ICBPage icbBufferSize, const BO
                 {
                     FireWall( "AvailPoolMaintStalled" );
                 }
-                
+
                 return errAvailPoolRequest;
             }
             else
@@ -13438,7 +13438,7 @@ BOOL FBFICacheViewCacheDerefIo( const BF * const pbf )
 {
     Assert( pbf->bfat != bfatNone );
 
-    
+
     return ( pbf->bfat == bfatViewMapped || pbf->bfat == bfatPageAlloc );
 }
 
@@ -13507,7 +13507,7 @@ ERR ErrBFICacheIMapPage( BF * const pbf, const BOOL fNewPage )
     {
         Assert( pbf->bfat != bfatViewMapped );
         Assert( pbf->bfat == bfatNone );
-    
+
         if ( !( pbf->pv = PvOSMemoryPageAlloc( cb, NULL ) ) )
         {
             Call( ErrERRCheck( JET_errOutOfMemory ) );
@@ -13664,7 +13664,7 @@ void BFIFreePage( PBF pbf, const BOOL fMRU, const BFFreePageFlags bffpfDangerous
                 Assert( !pbf->fInOB0OL && pbf->ob0ic.FUninitialized() );
                 g_bfquiesced.Remove( pbf );
             }
-            
+
             AtomicIncrement( (LONG*)&g_cbfCacheClean );
             cbfCacheSize++;
             Assert( cbfCacheSize > 0 );
@@ -13957,7 +13957,7 @@ void BFIOpportunisticallyFlushPage( PBF pbf, IOREASONPRIMARY iorp )
 
     const BOOL fCleanUpStateSaved = FOSSetCleanupState( fFalse );
 
-     
+
     const ERR errT = ErrBFIFlushPage( pbf,
                                         IOR( iorp, iorfForeground ),
                                         qosIODispatchWriteMeted | qosIODispatchImmediate,
@@ -14191,7 +14191,7 @@ BOOL FBFIMaintNeedsOpportunisticFlushing( PBF pbf )
     if ( pbf->bfdf > bfdfClean &&
          CmpLgpos( &pbf->lgposOldestBegin0, &lgposMax ) )
     {
-        
+
 
         const BOOL  fHotPage    = plog->CbLGOffsetLgposForOB0( plog->LgposLGLogTipNoLock(), pbf->lgposOldestBegin0 ) > cbCheckpointDepthPreferred &&
                                     ( pbf->sxwl.CWaitExclusiveLatch() || pbf->sxwl.CWaitWriteLatch() ) ;
@@ -14274,10 +14274,10 @@ ERR ErrBFIVersionPage( PBF pbf, PBF* ppbfOld, const BOOL fWait )
 
     Assert( ( pbf->err >= JET_errSuccess ) || ( pbf->bfdf > bfdfClean ) );
 
-    
+
     const ICBPage icbNewOrigBuffer = (ICBPage)pbf->icbBuffer;
 
-    
+
     Expected( pbf->icbBuffer == pbf->icbPage );
 
 
@@ -14289,7 +14289,7 @@ ERR ErrBFIVersionPage( PBF pbf, PBF* ppbfOld, const BOOL fWait )
     if ( BoolParam( JET_paramEnableViewCache ) )
     {
         const size_t cbAlloc = g_rgcbPageSize[icbNewOrigBuffer];
-        
+
         if ( !( (*ppbfOld)->pv = PvOSMemoryPageAlloc( cbAlloc, NULL ) ) )
         {
 
@@ -14489,7 +14489,7 @@ ERR ErrBFIVersionCopyPage( PBF pbfOrigOld, PBF* ppbfNewCurr, const BOOL fWait, _
     if ( BoolParam( JET_paramEnableViewCache ) )
     {
         const size_t cbAlloc = g_rgcbPageSize[icbNewCurrBuffer];
-    
+
 
         const BOOL fCleanUpStateSaved = FOSSetCleanupState( fFalse );
 
@@ -14641,7 +14641,7 @@ ERR ErrBFIVersionCopyPage( PBF pbfOrigOld, PBF* ppbfNewCurr, const BOOL fWait, _
 
 
 
-    
+
     Assert( 0 == CmpLgpos( &((*ppbfNewCurr)->lgposOldestBegin0), &lgposMax ) );
     BFIResetLgposOldestBegin0( *ppbfNewCurr );
     if ( pbfOrigOld->bfdf == bfdfClean )
@@ -14649,7 +14649,7 @@ ERR ErrBFIVersionCopyPage( PBF pbfOrigOld, PBF* ppbfNewCurr, const BOOL fWait, _
         BFIResetLgposOldestBegin0( pbfOrigOld );
     }
 
-    
+
     Assert( 0 == CmpLgpos( &((*ppbfNewCurr)->lgposModify), &lgposMin ) );
     BFIResetLgposModify( *ppbfNewCurr );
     if ( pbfOrigOld->bfdf == bfdfClean )
@@ -14718,7 +14718,7 @@ OSFILEQOS QosBFIMergeInstUserDispPri( const INST * const pinst, const BFTEMPOSFI
     }
     Expected( ( ( qosIoUser & qosIODispatchMask ) == qosIODispatchImmediate ) || ( ( qosIoUser & qosIODispatchMask ) == qosIODispatchBackground ) );
 
-    const OSFILEQOS qosIoUserDispatch = qosIoUser | 
+    const OSFILEQOS qosIoUserDispatch = qosIoUser |
                                         ( ( qosIoUser & qosIODispatchMask ) ?
                                             ( ~qosIODispatchMask & QosSyncDefault( pinst ) ) :
                                             QosSyncDefault( pinst ) );
@@ -15067,7 +15067,7 @@ ERR ErrBFIValidatePageSlowly( PBF pbf, const BFLatchType bflt, const CPageEvents
                         Assert( pbf->sxwl.FOwnExclusiveLatch() );
                         errTryW = pbf->sxwl.ErrTryUpgradeExclusiveLatchToWriteLatch();
                     }
-        
+
 
                     if ( CSXWLatch::ERR::errSuccess == errTryW )
                     {
@@ -15142,11 +15142,11 @@ ERR ErrBFIValidatePageSlowly( PBF pbf, const BFLatchType bflt, const CPageEvents
                 UtilSleep( dtickFastRetry );
                 continue;
             }
-            
+
             ERR errValidate = JET_errSuccess;
 
             Assert( pbf->icbPage == pbf->icbBuffer );
-            
+
 
             if ( pbf->bfat == bfatViewMapped )
             {
@@ -15252,7 +15252,7 @@ void BFIPatchRequestIORange( PBF pbf, const CPageEvents cpe, const TraceContext&
         {
             continue;
         }
-        
+
 
         g_bfhash.ReadLockKey( IFMPPGNO( ifmp, pgnoCurr ), &lock );
         errHash = g_bfhash.ErrRetrieveEntry( &lock, &pgnopbf );
@@ -15405,7 +15405,7 @@ ERR ErrBFIVerifyPage( const PBF pbf, const CPageEvents cpe, const BOOL fFixError
     }
 
     cpage.UnloadPage();
-    
+
     return err;
 }
 
@@ -15664,7 +15664,7 @@ bool FBFIDestructiveSoftFaultPage( PBF pbf, __in const BOOL fNewPage )
 
     if ( FBFIDatabasePage( pbf ) && !fPageTrashed && pbf->err >= JET_errSuccess )
     {
-        
+
         CPAGE cpageCheck;
         const BFLatch bfl = { pbf->pv, (DWORD_PTR)pbf };
         cpageCheck.ReBufferPage( bfl, pbf->ifmp, pbf->pgno, pbf->pv, g_rgcbPageSize[pbf->icbPage] );
@@ -15779,7 +15779,7 @@ void BFIReclaimPageFromOS(
 #endif
                 }
                 break;
-                
+
             case bfltWrite:
                 break;
 
@@ -15894,7 +15894,7 @@ void BFIReclaimPageFromOS(
 
     if ( bfltAchieved >= bfltExclusive && FBFIDatabasePage( pbf ) && pbf->err >= JET_errSuccess && !fNewPage )
     {
-        
+
         CPAGE cpageCheck;
         const BFLatch bfl = { pbf->pv, (DWORD_PTR)pbf };
         cpageCheck.ReBufferPage( bfl, pbf->ifmp, pbf->pgno, pbf->pv, g_rgcbPageSize[pbf->icbPage] );
@@ -16418,7 +16418,7 @@ ERR ErrBFILatchPage(    _Out_ BFLatch* const    pbfl,
 
                 if ( err < JET_errSuccess )
                 {
-                    
+
                     BFIReleaseSXWL( pgnopbf.pbf, bfltReq );
                     bfltHave = bfltNone;
 
@@ -16452,7 +16452,7 @@ ERR ErrBFILatchPage(    _Out_ BFLatch* const    pbfl,
                 {
                     *pfCachedNewPage = fTrue;
                 }
-                
+
 
                 err = JET_errSuccess;
             }
@@ -16637,7 +16637,7 @@ ERR ErrBFILatchPage(    _Out_ BFLatch* const    pbfl,
                         return err;
                     }
 
-                    
+
                     Assert( err >= JET_errSuccess || ( bflfT & bflfNoFaultFail ) );
 
                     if ( err < JET_errSuccess )
@@ -16657,7 +16657,7 @@ ERR ErrBFILatchPage(    _Out_ BFLatch* const    pbfl,
                 {
                     if ( FBFIDatabasePage( pgnopbf.pbf ) )
                     {
-                        
+
                         GetCurrUserTraceContext getutc;
 
                         CPAGE::PGHDR * ppghdr = (CPAGE::PGHDR *)pgnopbf.pbf->pv;
@@ -17167,7 +17167,7 @@ ERR ErrBFIPrepareFlushPage(
 
     if ( FIOThread() )
     {
-        AssertSz( fFalse, "We have changed the Buffer Manager so this should never happen.  Please tell SOMEONE if it does." );
+        AssertSz( fFalse, "We have changed the Buffer Manager so this should never happen.  Please tell esedev if it does." );
         Call( ErrERRCheck( errBFIPageFlushDisallowedOnIOThread ) );
     }
 
@@ -17396,7 +17396,7 @@ ERR ErrBFIPrepareFlushPage(
 
                 Call( ErrERRCheck( errBFLatchConflict ) );
             }
-            
+
             Assert( CSXWLatch::ERR::errSuccess == errTryW );
         }
 
@@ -17579,7 +17579,7 @@ ERR ErrBFIAcquireExclusiveLatchForFlush( PBF pbf, __in const BOOL fUnencumberedP
             {
                 err = ErrBFIFlushPendingStatus( pbf );
                 Assert( err < JET_errSuccess );
-                
+
 
                 pbf->sxwl.ReleaseExclusiveLatch();
 
@@ -17612,7 +17612,7 @@ HandleError:
 
     Assert( JET_errSuccess == err || pbf->sxwl.FNotOwner() );
     Assert( JET_errSuccess != err || pbf->sxwl.FOwnExclusiveLatch() );
-    
+
     return err;
 }
 
@@ -18046,8 +18046,8 @@ ERR ErrBFIFlushPage(    __inout const PBF       pbf,
     }
     else
     {
-        Expected( iorBase.Iorp() != iorpBFImpedingWriteCleanDoubleIo || 
-                     ( pbf->bfdf >= bfdfUntidy && pbf->err < JET_errSuccess ) ); 
+        Expected( iorBase.Iorp() != iorpBFImpedingWriteCleanDoubleIo ||
+                     ( pbf->bfdf >= bfdfUntidy && pbf->err < JET_errSuccess ) );
 
 
         if( ( err = ErrBFIPrepareFlushPage( pbf, bfltExclusive, iorBase, qos, !fOpportune, pfPermanentErr ) ) < JET_errSuccess )
@@ -18238,7 +18238,7 @@ ERR ErrBFIEvictPage( PBF pbf, BFLRUK::CLock* plockLRUK, const BFEvictFlags bfefD
 
     if ( pbf->sxwl.ErrTryAcquireWriteLatch() != CSXWLatch::ERR::errSuccess )
     {
-        
+
 
         if ( pbf->err == errBFIPageFaultPending )
         {
@@ -18260,7 +18260,7 @@ ERR ErrBFIEvictPage( PBF pbf, BFLRUK::CLock* plockLRUK, const BFEvictFlags bfefD
     {
         OnDebug( cCompleteFlushAttempts++ );
         Expected( cCompleteFlushAttempts <= 10 );
-        
+
 
         Assert( !fEvictDirty );
 
@@ -18425,7 +18425,7 @@ ERR ErrBFIEvictPage( PBF pbf, BFLRUK::CLock* plockLRUK, const BFEvictFlags bfefD
 
         if ( pbf->bfrs == bfrsNotResident )
         {
-            
+
             PERFOpt( AtomicIncrement( (LONG*)&g_cbfNonResidentEvicted ) );
         }
 
@@ -18505,9 +18505,9 @@ ERR ErrBFIEvictPage( PBF pbf, BFLRUK::CLock* plockLRUK, const BFEvictFlags bfefD
     }
 #endif
 
-    
+
     BFICacheIUnmapPage( pbf );
-    
+
     Assert( pbf->bfat == bfatNone || !UlParam( JET_paramEnableViewCache ) );
 
 
@@ -18523,7 +18523,7 @@ HandleError:
 
     if ( fOwnsHash )
     {
-        
+
         g_bfhash.WriteUnlockKey( &lockHash );
         fOwnsHash = fFalse;
     }
@@ -18901,7 +18901,7 @@ void BFICleanVersion( PBF pbf, BOOL fTearDownFMP )
     Assert( g_critBFDepend.FOwner() );
     Assert( pbf->sxwl.FOwnExclusiveLatch() || pbf->sxwl.FOwnWriteLatch() );
 
-    
+
     Assert( !pbf->fOlderVersion || !pbf->fCurrentVersion );
 
     if (    pbf->pbfTimeDepChainPrev != pbfNil ||
@@ -19154,7 +19154,7 @@ void BFIRehydratePage( PBF pbf )
 
     if ( pbf->icbBuffer == pbf->icbPage )
     {
-        
+
         return;
     }
 
@@ -19164,7 +19164,7 @@ void BFIRehydratePage( PBF pbf )
 
     Assert( FBFIDatabasePage( pbf ) );
 
-    
+
     const BFLatch bfl = { pbf->pv, (DWORD_PTR)pbf };
 
     CPAGE cpage;
@@ -19374,7 +19374,7 @@ void BFIPrepareWritePage( PBF pbf )
     Assert( pbf->sxwl.FOwnExclusiveLatch() || pbf->sxwl.FOwnWriteLatch() );
 
     EnforceSz( !pbf->fAbandoned, "PrepWriteAbandonedBf" );
-    
+
 
     Enforce( pbf->err != errBFIPageFaultPending );
     Enforce( pbf->err != wrnBFPageFlushPending );
@@ -19550,7 +19550,7 @@ ERR ErrBFIAsyncRead( PBF pbf, OSFILEQOS qos, VOID * pioreq, const TraceContext& 
     const QWORD     ibOffset    =   OffsetOfPgno( pbf->pgno );
     const DWORD     cbData      =   CbBFIPageSize( pbf );
     BYTE* const     pbData      =   (BYTE*)pbf->pv;
-    
+
     Assert( qosIODispatchImmediate == ( qosIODispatchMask & qos ) ||
             qosIODispatchBackground == ( qosIODispatchMask & qos ) );
 
@@ -19565,12 +19565,12 @@ ERR ErrBFIAsyncRead( PBF pbf, OSFILEQOS qos, VOID * pioreq, const TraceContext& 
 
     if ( pbf->bfat == bfatViewMapped && FOSMemoryPageResident( pbData, cbData ) )
     {
-        
+
         Assert( BoolParam( JET_paramEnableViewCache ) );
         BFIAsyncReleaseUnusedIOREQ( pbf->ifmp, pioreq );
         pioreq = NULL;
         OSTraceFMP( pbf->ifmp, JET_tracetagBufferManager, OSFormat( "OS File Cache preread skipped for page=[0x%x:0x%x]", (ULONG)pbf->ifmp, pbf->pgno ) );
-        
+
         FullTraceContext ftc;
         ftc.DeepCopy( GetCurrUserTraceContext().Utc(), tc );
         BFIAsyncReadHandoff( JET_errSuccess, pfapi, ftc, qos, ibOffset, cbData, pbData, pbf, NULL );
@@ -19603,7 +19603,7 @@ ERR ErrBFIAsyncRead( PBF pbf, OSFILEQOS qos, VOID * pioreq, const TraceContext& 
 
         goto HandleError;
     }
-    
+
 
     if ( err >= JET_errSuccess )
     {
@@ -19793,7 +19793,7 @@ void BFISyncWriteComplete(  const ERR           err,
 {
 
     BFIResetIOContext( pbf );
-    
+
 
     BFITraceWritePage( pbf, tc );
 
@@ -19941,7 +19941,7 @@ ERR ErrBFIAsyncWrite( PBF pbf, OSFILEQOS qos, const TraceContext& tc )
                                     IFileAPI::PfnIOHandoff( BFIAsyncWriteHandoff ) );
     CallSx( err, errDiskTilt );
 
-    
+
     if ( errDiskTilt == err )
     {
         Assert( SHORT( wrnBFPageFlushPending ) == pbf->err );
@@ -20241,7 +20241,7 @@ BOOL FBFICacheRemapPage( __inout PBF pbf, IFileAPI* const pfapi )
                     "These should be equal, we _just_ set them: %I64x == %I64x",
                     pulpBlock[rgiulpOsMmPageMarkers[iosmmpage]], rgulpOsMmPageMarkers[iosmmpage] );
     }
-    
+
 #ifdef DEBUG
     void * pvPageImageCheckPre = NULL;
     if ( FIOThread() )
@@ -20377,7 +20377,7 @@ BOOL FBFICacheRemapPage( __inout PBF pbf, IFileAPI* const pfapi )
         if ( errCheckPage >= JET_errSuccess || !fRemappedRet )
         {
 
-            
+
             Enforce( xechkCheckPre == ppghdrPost->checksum );
             Enforce( dbtimeCheckPre == ppghdrPost->dbtimeDirtied );
             Enforce( pgnoCheckPre == pgnoCheckPost );
@@ -20474,7 +20474,7 @@ void BFIAsyncWriteComplete( const ERR           err,
     if ( err >= JET_errSuccess &&
             ( pbf->bfat == bfatViewMapped || pbf->bfat == bfatPageAlloc ) )
     {
-        
+
         OnDebug( AtomicAdd( &g_cRemapsConsidered, 1 ) );
 
         if ( pbf->sxwl.ErrTryAcquireWriteLatch() == CSXWLatch::ERR::errSuccess )
@@ -20674,7 +20674,7 @@ CCriticalSection    g_critBFDepend( CLockBasicInfo( CSyncBasicInfo( szBFDepend )
 void BFISetLgposOldestBegin0( PBF pbf, LGPOS lgpos, const TraceContext& tc )
 {
     LGPOS lgposOldestBegin0Last = lgposMax;
-    
+
     Assert( pbf->sxwl.FOwnWriteLatch() ||
             ( pbf->sxwl.FOwnExclusiveLatch() && pbf->fWARLatch ) );
     Assert( pbf->bfdf >= bfdfDirty );
@@ -20745,7 +20745,7 @@ void BFISetLgposOldestBegin0( PBF pbf, LGPOS lgpos, const TraceContext& tc )
 
     if ( CmpLgpos( lgposOldestBegin0Last, lgposMax ) )
     {
-        
+
         LOG* const      plog                    = pfmp->Pinst()->m_plog;
         const LGPOS     lgposNewest             = plog->LgposLGLogTipNoLock();
 
@@ -20928,7 +20928,7 @@ BFReserveAvailPages::BFReserveAvailPages( const CPG cpgWanted )
 {
     const LONG cbfAvail = (LONG)g_bfavail.Cobject();
     const LONG cpgReserved = s_cpgReservedTotal;
-    
+
     m_cpgReserved = min( max( ( cbfAvail - cpgReserved ) / 2 , 0 ), cpgWanted );
     Assert( m_cpgReserved <= cpgWanted );
     Assert( m_cpgReserved >= 0 );
@@ -21750,7 +21750,7 @@ LONG LBFCacheSizeCategorizedCEFLPv( LONG iInstance, void* pvBuf )
 
     return 0;
 }
-    
+
 LONG LBFCacheSizeMinCEFLPv( LONG iInstance, void* pvBuf )
 {
     if ( pvBuf )
@@ -22267,7 +22267,7 @@ JETUNITTEST( BF, BFPriorityBasicUserTagPriority )
 JETUNITTEST( BF, BFPriorityMaxEdgeCases )
 {
     BFTEMPOSFILEQOS qosWorst = (BFTEMPOSFILEQOS)( 0x4F000000 | qosIODispatchMask | qosIOOSLowPriority );
-    wprintf( L"\n\t\t BfpriBFMake( 1000%%, qosWorst = 0x%I64x ) -> bfpri = 0x%x ( bfpriFaultIoPriorityMask = 0x%x ).\n", 
+    wprintf( L"\n\t\t BfpriBFMake( 1000%%, qosWorst = 0x%I64x ) -> bfpri = 0x%x ( bfpriFaultIoPriorityMask = 0x%x ).\n",
                 (QWORD)qosWorst, BfpriBFMake( 1000, qosWorst ), bfpriFaultIoPriorityMask );
     CHECK( 1000     == PctBFCachePri(     BfpriBFMake( 1000, qosWorst ) ) );
     CHECK( qosWorst == QosBFUserAndIoPri( BfpriBFMake( 1000, qosWorst ) ) );
