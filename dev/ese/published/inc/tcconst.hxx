@@ -211,7 +211,8 @@ enum IOREASONTERTIARY : BYTE
     iortRecTask = 15,
     iortRecoveryRedo = 16,
     iortRecoveryUndo = 17,
-    iortMax = 18,
+    iortRecoveryRedoNewLogs = 18,
+    iortMax = 19,
 };
 
 enum IOREASONUSER : BYTE

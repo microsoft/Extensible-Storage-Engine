@@ -11880,6 +11880,27 @@ ERR LOG::ErrLGRIRedoOperations(
 
                     OnNonRTM( m_lgposRedoPreviousLog = m_lgposRedo );
 
+                    // set the recovery redo mode to new logs if we are out of the required range
+
+                    {
+                        // No locking needed since this is recovery thread
+                        BOOL fContainsDataFromFutureLogs = fFalse;
+                        for ( DBID dbidT = dbidUserLeast; dbidT < dbidMax; dbidT++ )
+                        {
+                            const IFMP ifmpT = m_pinst->m_mpdbidifmp[dbidT];
+                            if ( ifmpT < g_ifmpMax && g_rgfmp[ifmpT].FContainsDataFromFutureLogs() )
+                            {
+                                fContainsDataFromFutureLogs = fTrue;
+                                break;
+                            }
+                        }
+
+                        if ( tcScope->iorReason.Iort() == iortRecoveryRedo && !fContainsDataFromFutureLogs )
+                        {
+                            tcScope->iorReason.SetIort( iortRecoveryRedoNewLogs );
+                        }
+                    }
+
                     // we will get the current lgpos right here
                     // so we can compare it with the m_lgposRecoveryStop
                     // before doing the EventLog
