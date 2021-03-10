@@ -512,7 +512,8 @@ class CDataCompressor
             IDataCompressorStats * const pstats,
             _Out_writes_bytes_to_opt_( cbDataMax, min( cbDataMax, *pcbDataActual ) ) BYTE * const pbData,
             const INT cbDataMax,
-            _Out_ INT * const pcbDataActual );
+            _Out_ INT * const pcbDataActual,
+            BOOL fDontUseCorsica = fFalse );
 
         ERR ErrScrub(
             DATA& data,
@@ -2388,7 +2389,10 @@ ERR CDataCompressor::ErrDecompressXpress10_(
     ERR err = JET_errSuccess;
     BYTE *pbAlloc = NULL;
 
-    InitOnceCorsica();
+    if ( !fForceSoftwareDecompression )
+    {
+        InitOnceCorsica();
+    }
 
     PERFOptDeclare( const HRT hrtStart = HrtHRTCount() );
     HRT dhrtHardwareLatency;
@@ -2433,7 +2437,7 @@ ERR CDataCompressor::ErrDecompressXpress10_(
         }
     }
 
-    if ( IsXpress10CorsicaHealthy() && !fForceSoftwareDecompression )
+    if ( !fForceSoftwareDecompression && IsXpress10CorsicaHealthy() )
     {
         CORSICA_FAILURE_REASON reason;
         USHORT EngineErrorCode;
@@ -2655,7 +2659,8 @@ ERR CDataCompressor::ErrDecompress(
     IDataCompressorStats * const pstats,
     _Out_writes_bytes_to_opt_( cbDataMax, min( cbDataMax, *pcbDataActual ) ) BYTE * const pbData,
     const INT cbDataMax,
-    _Out_ INT * const pcbDataActual )
+    _Out_ INT * const pcbDataActual,
+    BOOL fDontUseCorsica )
 //  ================================================================
 {
     ERR err = JET_errSuccess;
@@ -2690,7 +2695,7 @@ ERR CDataCompressor::ErrDecompress(
 #endif
 #ifdef XPRESS10_COMPRESSION
         case COMPRESS_XPRESS10:
-            Call( ErrDecompressXpress10_( dataCompressed, pbData, cbDataMax, pcbDataActual, pstats, fFalse, &fUnused ) );
+            Call( ErrDecompressXpress10_( dataCompressed, pbData, cbDataMax, pcbDataActual, pstats, fDontUseCorsica, &fUnused ) );
             break;
 #endif
         default:
@@ -2845,7 +2850,7 @@ ERR ErrPKIDecompressData(
 //  ================================================================
 {
     CDataCompressorPerfCounters perfcounters( pinst ? pinst->m_iInstance : 0 );
-    return g_dataCompressor.ErrDecompress( dataCompressed, &perfcounters, pbData, cbDataMax, pcbDataActual );
+    return g_dataCompressor.ErrDecompress( dataCompressed, &perfcounters, pbData, cbDataMax, pcbDataActual, (pinst != NULL) && !BoolParam( pinst, JET_paramFlight_EnableXpress10Compression ) );
 }
 
 //  ================================================================
