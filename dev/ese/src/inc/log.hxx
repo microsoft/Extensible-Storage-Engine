@@ -539,7 +539,7 @@ public:
     BOOL FLGPEnabled() const;
     BOOL FLGPDBEnabled( const DBID dbid ) const;
     BOOL FLGPContainsPgnoRef( const DBID dbid, const PGNO pgno ) const;
-    ERR ErrLGPAddPgnoRef( const DBID dbid, const PGNO pgno, const OBJID objid = objidNil, const LR* const plr = NULL );
+    ERR ErrLGPAddPgnoRef( const DBID dbid, const PGNO pgno, const OBJID objid = objidNil, const LR* const plr = NULL, const IOREASONFLAGS iorf = iorfNone );
     VOID LGPSortPages();
     ERR ErrLGPPrereadExtendedPageRange( const DBID dbid, const PGNO pgno, CPG* const pcpgPreread, const BFPreReadFlags bfprf = bfprfDefault );
     size_t IpgLGPGetSorted( const DBID dbid, const PGNO pgno ) const;
@@ -548,7 +548,7 @@ public:
 protected:
     size_t CpgLGPIGetArrayPgnosSize( const DBID dbid ) const;
     size_t IpgLGPIGetUnsorted( const DBID dbid, const PGNO pgno ) const;
-    ERR ErrLGPISetEntry( const DBID dbid, const size_t ipg, const PGNO pgno, const OBJID objid = objidNil, const IOREASONSECONDARY iors = iorsNone );
+    ERR ErrLGPISetEntry( const DBID dbid, const size_t ipg, const PGNO pgno, const OBJID objid = objidNil, const IOREASONSECONDARY iors = iorsNone, const IOREASONFLAGS iorf = iorfNone );
     PGNO PgnoLGPIGetEntry( const DBID dbid, const size_t ipg ) const;
     OBJID ObjidLGPIGetEntry( const DBID dbid, const size_t ipg ) const;
     IOREASONSECONDARY IorsLGPIGetEntry( const DBID dbid, const size_t ipg ) const;
@@ -562,18 +562,21 @@ private:
             pgno = pgnoNull;
             objid = objidNil;
             iors = iorsNone;
+            iorf = iorfNone;
         }
 
-        PageRef( _In_ const PGNO pgnoIn, _In_ const OBJID objidIn = objidNil, _In_ const IOREASONSECONDARY iorsIn = iorsNone )
+        PageRef( _In_ const PGNO pgnoIn, _In_ const OBJID objidIn = objidNil, _In_ const IOREASONSECONDARY iorsIn = iorsNone, _In_ const IOREASONFLAGS iorfIn = iorfNone )
         {
             pgno = pgnoIn;
             objid = objidIn;
             iors = iorsIn;
+            iorf = iorfIn;
         }
 
         PGNO                pgno;
         OBJID               objid;
         IOREASONSECONDARY   iors;
+        IOREASONFLAGS       iorf;
     };
 
     //  Private methods.
@@ -1938,13 +1941,30 @@ private:
         const BFPreReadFlags    bfprf = bfprfDefault
         );
     VOID LGIPrereadPageRef(
+        const BOOL              fPgnosOnly,
+        const BOOL              fSuppressable,
+        const DBID              dbid,
+        const PGNO              pgno,
+        const OBJID             objid,
+        const LR* const         plr,
+        const IOREASONFLAGS     iorf = iorfNone );
+    VOID LGIPrereadPageRef(
         const BOOL              fPgnosOnly, 
         const BOOL              fSuppressable, 
         const DBID              dbid, 
         const PGNO              pgno, 
         const OBJID             objid, 
         const LR* const         plr,
-        const BFPreReadFlags    bfprf = bfprfDefault );
+        const BFPreReadFlags    bfprf );
+    VOID LGIPrereadPageRef(
+        const BOOL              fPgnosOnly, 
+        const BOOL              fSuppressable, 
+        const DBID              dbid, 
+        const PGNO              pgno, 
+        const OBJID             objid, 
+        const LR* const         plr,
+        const IOREASONFLAGS     iorf,
+        const BFPreReadFlags    bfprf );
     ERR ErrLGIPrereadExecute(
         const BOOL fPgnosOnly
         );
