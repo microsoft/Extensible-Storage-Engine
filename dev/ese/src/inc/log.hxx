@@ -538,6 +538,7 @@ public:
     VOID LGPDBDisable( const DBID dbid );
     BOOL FLGPEnabled() const;
     BOOL FLGPDBEnabled( const DBID dbid ) const;
+    BOOL FLGPContainsPgnoRef( const DBID dbid, const PGNO pgno ) const;
     ERR ErrLGPAddPgnoRef( const DBID dbid, const PGNO pgno, const OBJID objid = objidNil, const LR* const plr = NULL );
     VOID LGPSortPages();
     ERR ErrLGPPrereadExtendedPageRange( const DBID dbid, const PGNO pgno, CPG* const pcpgPreread, const BFPreReadFlags bfprf = bfprfDefault );
@@ -1662,6 +1663,8 @@ private:
     BOOL                            m_fPreread;
     LogPrereader*                   m_plpreread;
     LogPrereaderDummy*              m_plprereadSuppress;
+    BOOL                            m_fPrereadFailure;
+    BOOL                            m_rgfPrereadIssued[dbidMax];
     BOOL            m_fIODuringRecovery;
 
     BOOL            m_fAbruptEnd;
@@ -1934,6 +1937,14 @@ private:
         BOOL * const        pfPrereadFailure,
         const BFPreReadFlags    bfprf = bfprfDefault
         );
+    VOID LGIPrereadPageRef(
+        const BOOL              fPgnosOnly, 
+        const BOOL              fSuppressable, 
+        const DBID              dbid, 
+        const PGNO              pgno, 
+        const OBJID             objid, 
+        const LR* const         plr,
+        const BFPreReadFlags    bfprf = bfprfDefault );
     ERR ErrLGIPrereadExecute(
         const BOOL fPgnosOnly
         );

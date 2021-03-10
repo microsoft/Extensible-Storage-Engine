@@ -680,6 +680,11 @@ INLINE BOOL LogPrereaderBase::FLGPDBEnabled( const DBID dbid ) const
     return m_rgArrayPagerefs[ dbid ].Capacity() > 0;
 }
 
+BOOL LogPrereaderBase::FLGPContainsPgnoRef( const DBID dbid, const PGNO pgno ) const
+{
+    return IpgLGPIGetUnsorted( dbid, pgno ) != CArray<PGNO>::iEntryNotFound;
+}
+
 ERR LogPrereaderBase::ErrLGPAddPgnoRef( const DBID dbid, const PGNO pgno, const OBJID objid, const LR* const plr )
 {
     ERR err = JET_errSuccess;
@@ -863,7 +868,10 @@ INLINE size_t LogPrereaderBase::IpgLGPGetSorted( const DBID dbid, const PGNO pgn
 
 size_t LogPrereaderBase::IpgLGPIGetUnsorted( const DBID dbid, const PGNO pgno ) const
 {
-    Assert( FLGPDBEnabled( dbid ) );
+    if ( !FLGPDBEnabled( dbid ) )
+    {
+        return CArray<PGNO>::iEntryNotFound;
+    }
 
     return m_rgArrayPagerefs[ dbid ].SearchLinear( PageRef( pgno ), LogPrereaderBase::ILGPICmpPagerefs );
 }
@@ -2519,6 +2527,44 @@ LOG::LGPrereadExecute(
 #endif  //  MINIMAL_FUNCTIONALITY
 }
 
+VOID LOG::LGIPrereadPageRef(
+    const BOOL              fPgnosOnly, 
+    const BOOL              fSuppressable,
+    const DBID              dbid,
+    const PGNO              pgno,
+    const OBJID             objid,
+    const LR* const         plr,
+    const BFPreReadFlags    bfprf)
+{
+    if ( fPgnosOnly )
+    {
+        const BOOL fContainsDataFromFutureLogs =    dbid < dbidMax &&
+                                                    m_pinst->m_mpdbidifmp[dbid] < g_ifmpMax &&
+                                                    g_rgfmp[m_pinst->m_mpdbidifmp[dbid]].FContainsDataFromFutureLogs();
+
+        if ( fSuppressable && !fContainsDataFromFutureLogs )
+        {
+            const BOOL fAlreadyReferenced = m_plpreread->FLGPContainsPgnoRef( dbid, pgno );
+
+            if ( !fAlreadyReferenced )
+            {
+                (void)m_plprereadSuppress->ErrLGPAddPgnoRef( dbid, pgno, objid, plr );
+            }
+        }
+        else
+        {
+            if ( m_plpreread->ErrLGPAddPgnoRef( dbid, pgno, objid, plr ) < JET_errSuccess )
+            {
+                m_plpreread->LGPDBDisable( dbid );
+            }
+        }
+    }
+    else
+    {
+        LGIPrereadPage( dbid, pgno, m_rgfPrereadIssued + dbid, &m_fPrereadFailure, bfprf );
+    }
+}
+
 //  Look forward in log records and ask buffer manager to preread pages.
 //  fPgnosOnly indicates that we want to collect page number references only (first
 //  phase of the pre-reading mechanism), as opoposed to actually issuing pre-reads (second
@@ -2532,8 +2578,6 @@ ERR LOG::ErrLGIPrereadExecute( const BOOL fPgnosOnly )
 #ifdef MINIMAL_FUNCTIONALITY
 #else //  !MINIMAL_FUNCTIONALITY
     const LR *  plr                     = pNil;
-    BOOL        fPrereadFailure         = fFalse;
-    BOOL        rgfPrereadIssued[dbidMax];
     const UINT  cRangesToPrereadMax = (UINT)UlParam( m_pinst, JET_paramPrereadIOMax );
 
     //  If we are only parsing/collecting page numbers, we want to go through the entire log file.
@@ -2541,13 +2585,14 @@ ERR LOG::ErrLGIPrereadExecute( const BOOL fPgnosOnly )
     //  JET_paramPrereadIOMax is zero).
     BOOL fBypassCpgCountCheck   = fPgnosOnly && cRangesToPrereadMax > 0;
 
-    memset( rgfPrereadIssued, 0, sizeof(rgfPrereadIssued) );
+    memset( m_rgfPrereadIssued, 0, _cbrg( m_rgfPrereadIssued ) );
+    m_fPrereadFailure = fFalse;
 
     // Notice that we remove consecutive duplicates (and pgnoNull) from our preread
     // list, but that we count duplicates and null's to keep our bookkeeping simple.
 
     while ( ( m_pPrereadWatermarks->CElements() < cRangesToPrereadMax || fBypassCpgCountCheck ) &&
-            !fPrereadFailure &&
+            !m_fPrereadFailure &&
             // Do not advance to next record if we have decided to exit the loop, otherwise we will skip that record
             // on the next iteration
             JET_errSuccess == ( err = m_pLogReadBuffer->ErrLGGetNextRecFF( (BYTE **) &plr, fTrue ) ) )
@@ -2573,21 +2618,7 @@ ERR LOG::ErrLGIPrereadExecute( const BOOL fPgnosOnly )
                 Assert( dbid > dbidTemp );
                 Assert( dbid < dbidMax );
 
-                if ( fPgnosOnly )
-                {
-                    if ( m_plpreread->ErrLGPAddPgnoRef( dbid, plrpage->le_pgno, ( (LRNODE_*)plr )->le_objidFDP, plr ) < JET_errSuccess )
-                    {
-                        m_plpreread->LGPDBDisable( dbid );
-                    }
-                }
-                else
-                {
-                    LGIPrereadPage(
-                            dbid,
-                            plrpage->le_pgno,
-                            rgfPrereadIssued + dbid,
-                            &fPrereadFailure );
-                }
+                LGIPrereadPageRef( fPgnosOnly, fFalse, dbid, plrpage->le_pgno, ( (LRNODE_*)plr )->le_objidFDP, plr );
 
                 break;
             }
@@ -2601,51 +2632,10 @@ ERR LOG::ErrLGIPrereadExecute( const BOOL fPgnosOnly )
                 Assert( dbid > dbidTemp );
                 Assert( dbid < dbidMax );
 
-                if ( fPgnosOnly )
-                {
-                    if ( m_plpreread->ErrLGPAddPgnoRef( dbid, plrsplit->le_pgno, plrsplit->le_objidFDP, plr ) != JET_errSuccess ||
-                            m_plpreread->ErrLGPAddPgnoRef( dbid, plrsplit->le_pgnoParent, plrsplit->le_objidFDP, plr ) != JET_errSuccess ||
-                            m_plpreread->ErrLGPAddPgnoRef( dbid, plrsplit->le_pgnoRight, plrsplit->le_objidFDP, plr ) != JET_errSuccess )
-                    {
-                        m_plpreread->LGPDBDisable( dbid );
-                    }
-                    if ( dbid < dbidMax &&
-                         m_pinst->m_mpdbidifmp[ dbid ] < g_ifmpMax &&
-                         g_rgfmp[ m_pinst->m_mpdbidifmp[ dbid ] ].FContainsDataFromFutureLogs() )
-                    {
-                        if ( m_plpreread->ErrLGPAddPgnoRef( dbid, plrsplit->le_pgnoNew, plrsplit->le_objidFDP, plr ) != JET_errSuccess )
-                        {
-                            m_plpreread->LGPDBDisable( dbid );
-                        }
-                    }
-                    else
-                    {
-                        (void)m_plprereadSuppress->ErrLGPAddPgnoRef( dbid, plrsplit->le_pgnoNew, plrsplit->le_objidFDP, plr );
-                    }
-                }
-                else
-                {
-                    LGIPrereadPage(
-                            dbid,
-                            plrsplit->le_pgno,
-                            rgfPrereadIssued + dbid,
-                            &fPrereadFailure );
-                    LGIPrereadPage(
-                            dbid,
-                            plrsplit->le_pgnoNew,
-                            rgfPrereadIssued + dbid,
-                            &fPrereadFailure );
-                    LGIPrereadPage(
-                            dbid,
-                            plrsplit->le_pgnoParent,
-                            rgfPrereadIssued + dbid,
-                            &fPrereadFailure );
-                    LGIPrereadPage(
-                            dbid,
-                            plrsplit->le_pgnoRight,
-                            rgfPrereadIssued + dbid,
-                            &fPrereadFailure );
-                }
+                LGIPrereadPageRef( fPgnosOnly, fFalse, dbid, plrsplit->le_pgno, plrsplit->le_objidFDP, plr );
+                LGIPrereadPageRef( fPgnosOnly, fFalse, dbid, plrsplit->le_pgnoParent, plrsplit->le_objidFDP, plr );
+                LGIPrereadPageRef( fPgnosOnly, fFalse, dbid, plrsplit->le_pgnoRight, plrsplit->le_objidFDP, plr );
+                LGIPrereadPageRef( fPgnosOnly, fTrue, dbid, plrsplit->le_pgnoNew, plrsplit->le_objidFDP, plr );
 
                 break;
             }
@@ -2659,39 +2649,10 @@ ERR LOG::ErrLGIPrereadExecute( const BOOL fPgnosOnly )
                 Assert( dbid > dbidTemp );
                 Assert( dbid < dbidMax );
 
-                if ( fPgnosOnly )
-                {
-                    if ( m_plpreread->ErrLGPAddPgnoRef( dbid, plrmerge->le_pgno, plrmerge->le_objidFDP, plr ) != JET_errSuccess ||
-                            m_plpreread->ErrLGPAddPgnoRef( dbid, plrmerge->le_pgnoRight, plrmerge->le_objidFDP, plr ) != JET_errSuccess ||
-                            m_plpreread->ErrLGPAddPgnoRef( dbid, plrmerge->le_pgnoLeft, plrmerge->le_objidFDP, plr ) != JET_errSuccess ||
-                            m_plpreread->ErrLGPAddPgnoRef( dbid, plrmerge->le_pgnoParent, plrmerge->le_objidFDP, plr ) != JET_errSuccess )
-                    {
-                        m_plpreread->LGPDBDisable( dbid );
-                    }
-                }
-                else
-                {
-                    LGIPrereadPage(
-                            dbid,
-                            plrmerge->le_pgno,
-                            rgfPrereadIssued + dbid,
-                            &fPrereadFailure );
-                    LGIPrereadPage(
-                            dbid,
-                            plrmerge->le_pgnoRight,
-                            rgfPrereadIssued + dbid,
-                            &fPrereadFailure );
-                    LGIPrereadPage(
-                            dbid,
-                            plrmerge->le_pgnoLeft,
-                            rgfPrereadIssued + dbid,
-                            &fPrereadFailure );
-                    LGIPrereadPage(
-                            dbid,
-                            plrmerge->le_pgnoParent,
-                            rgfPrereadIssued + dbid,
-                            &fPrereadFailure );
-                }
+                LGIPrereadPageRef( fPgnosOnly, fFalse, dbid, plrmerge->le_pgno, plrmerge->le_objidFDP, plr );
+                LGIPrereadPageRef( fPgnosOnly, fFalse, dbid, plrmerge->le_pgnoRight, plrmerge->le_objidFDP, plr );
+                LGIPrereadPageRef( fPgnosOnly, fFalse, dbid, plrmerge->le_pgnoLeft, plrmerge->le_objidFDP, plr );
+                LGIPrereadPageRef( fPgnosOnly, fFalse, dbid, plrmerge->le_pgnoParent, plrmerge->le_objidFDP, plr );
 
                 break;
             }
@@ -2704,57 +2665,11 @@ ERR LOG::ErrLGIPrereadExecute( const BOOL fPgnosOnly )
                 Assert( dbid > dbidTemp );
                 Assert( dbid < dbidMax );
 
-                if ( fPgnosOnly )
-                {
-                    if ( m_plpreread->ErrLGPAddPgnoRef( dbid, plrpagemove->PgnoSource(), plrpagemove->ObjidFDP(), plr ) != JET_errSuccess ||
-                            m_plpreread->ErrLGPAddPgnoRef( dbid, plrpagemove->PgnoParent(), plrpagemove->ObjidFDP(), plr ) != JET_errSuccess ||
-                            m_plpreread->ErrLGPAddPgnoRef( dbid, plrpagemove->PgnoLeft(), plrpagemove->ObjidFDP(), plr ) != JET_errSuccess ||
-                            m_plpreread->ErrLGPAddPgnoRef( dbid, plrpagemove->PgnoRight(), plrpagemove->ObjidFDP(), plr ) != JET_errSuccess )
-                    {
-                        m_plpreread->LGPDBDisable( dbid );
-                    }
-                    if ( dbid < dbidMax &&
-                         m_pinst->m_mpdbidifmp[ dbid ] < g_ifmpMax &&
-                         g_rgfmp[ m_pinst->m_mpdbidifmp[ dbid ] ].FContainsDataFromFutureLogs() )
-                    {
-                        if ( m_plpreread->ErrLGPAddPgnoRef( dbid, plrpagemove->PgnoDest(), plrpagemove->ObjidFDP(), plr ) != JET_errSuccess )
-                        {
-                            m_plpreread->LGPDBDisable( dbid );
-                        }
-                    }
-                    else
-                    {
-                        (void)m_plprereadSuppress->ErrLGPAddPgnoRef( dbid, plrpagemove->PgnoDest(), plrpagemove->ObjidFDP(), plr );
-                    }
-                }
-                else
-                {
-                    LGIPrereadPage(
-                            dbid,
-                            plrpagemove->PgnoSource(),
-                            rgfPrereadIssued + dbid,
-                            &fPrereadFailure );
-                    LGIPrereadPage(
-                            dbid,
-                            plrpagemove->PgnoDest(),
-                            rgfPrereadIssued + dbid,
-                            &fPrereadFailure );
-                    LGIPrereadPage(
-                            dbid,
-                            plrpagemove->PgnoParent(),
-                            rgfPrereadIssued + dbid,
-                            &fPrereadFailure );
-                    LGIPrereadPage(
-                            dbid,
-                            plrpagemove->PgnoLeft(),
-                            rgfPrereadIssued + dbid,
-                            &fPrereadFailure );
-                    LGIPrereadPage(
-                            dbid,
-                            plrpagemove->PgnoRight(),
-                            rgfPrereadIssued + dbid,
-                            &fPrereadFailure );
-                }
+                LGIPrereadPageRef( fPgnosOnly, fFalse, dbid, plrpagemove->PgnoSource(), plrpagemove->ObjidFDP(), plr );
+                LGIPrereadPageRef( fPgnosOnly, fFalse, dbid, plrpagemove->PgnoParent(), plrpagemove->ObjidFDP(), plr );
+                LGIPrereadPageRef( fPgnosOnly, fFalse, dbid, plrpagemove->PgnoLeft(), plrpagemove->ObjidFDP(), plr );
+                LGIPrereadPageRef( fPgnosOnly, fFalse, dbid, plrpagemove->PgnoRight(), plrpagemove->ObjidFDP(), plr );
+                LGIPrereadPageRef( fPgnosOnly, fTrue, dbid, plrpagemove->PgnoDest(), plrpagemove->ObjidFDP(), plr );
 
                 break;
             }
@@ -2768,47 +2683,9 @@ ERR LOG::ErrLGIPrereadExecute( const BOOL fPgnosOnly )
                 Assert( dbid > dbidTemp );
                 Assert( dbid < dbidMax );
 
-                if ( fPgnosOnly )
-                {
-                    if ( m_plpreread->ErrLGPAddPgnoRef( dbid, plrconvfdp->le_pgno, plrconvfdp->le_objidFDP, plr ) != JET_errSuccess )
-                    {
-                        m_plpreread->LGPDBDisable( dbid );
-                    }
-
-                    if ( dbid < dbidMax &&
-                         m_pinst->m_mpdbidifmp[ dbid ] < g_ifmpMax &&
-                         g_rgfmp[ m_pinst->m_mpdbidifmp[ dbid ] ].FContainsDataFromFutureLogs() )
-                    {
-                        if ( m_plpreread->ErrLGPAddPgnoRef( dbid, plrconvfdp->le_pgnoOE, plrconvfdp->le_objidFDP, plr ) != JET_errSuccess ||
-                             m_plpreread->ErrLGPAddPgnoRef( dbid, plrconvfdp->le_pgnoAE, plrconvfdp->le_objidFDP, plr ) != JET_errSuccess )
-                        {
-                            m_plpreread->LGPDBDisable( dbid );
-                        }
-                    }
-                    else
-                    {
-                        (void)m_plprereadSuppress->ErrLGPAddPgnoRef( dbid, plrconvfdp->le_pgnoOE, plrconvfdp->le_objidFDP, plr );
-                        (void)m_plprereadSuppress->ErrLGPAddPgnoRef( dbid, plrconvfdp->le_pgnoAE, plrconvfdp->le_objidFDP, plr );
-                    }
-                }
-                else
-                {
-                    LGIPrereadPage(
-                            dbid,
-                            plrconvfdp->le_pgno,
-                            rgfPrereadIssued + dbid,
-                            &fPrereadFailure );
-                    LGIPrereadPage(
-                            dbid,
-                            plrconvfdp->le_pgnoOE,
-                            rgfPrereadIssued + dbid,
-                            &fPrereadFailure );
-                    LGIPrereadPage(
-                            dbid,
-                            plrconvfdp->le_pgnoAE,
-                            rgfPrereadIssued + dbid,
-                            &fPrereadFailure );
-                }
+                LGIPrereadPageRef( fPgnosOnly, fFalse, dbid, plrconvfdp->le_pgno, plrconvfdp->le_objidFDP, plr );
+                LGIPrereadPageRef( fPgnosOnly, fTrue, dbid, plrconvfdp->le_pgnoOE, plrconvfdp->le_objidFDP, plr );
+                LGIPrereadPageRef( fPgnosOnly, fTrue, dbid, plrconvfdp->le_pgnoAE, plrconvfdp->le_objidFDP, plr );
 
                 break;
             }
@@ -2821,30 +2698,7 @@ ERR LOG::ErrLGIPrereadExecute( const BOOL fPgnosOnly )
                 Assert( dbid > dbidTemp );
                 Assert( dbid < dbidMax );
 
-                if ( fPgnosOnly )
-                {
-                    if ( dbid < dbidMax &&
-                         m_pinst->m_mpdbidifmp[ dbid ] < g_ifmpMax &&
-                         g_rgfmp[ m_pinst->m_mpdbidifmp[ dbid ] ].FContainsDataFromFutureLogs() )
-                    {
-                        if ( m_plpreread->ErrLGPAddPgnoRef( dbid, plrcreatesefdp->le_pgno, plrcreatesefdp->le_objidFDP, plr ) != JET_errSuccess )
-                        {
-                            m_plpreread->LGPDBDisable( dbid );
-                        }
-                    }
-                    else
-                    {
-                        (void)m_plprereadSuppress->ErrLGPAddPgnoRef( dbid, plrcreatesefdp->le_pgno, plrcreatesefdp->le_objidFDP, plr );
-                    }
-                }
-                else
-                {
-                    LGIPrereadPage(
-                            dbid,
-                            plrcreatesefdp->le_pgno,
-                            rgfPrereadIssued + dbid,
-                            &fPrereadFailure );
-                }
+                LGIPrereadPageRef( fPgnosOnly, fTrue, dbid, plrcreatesefdp->le_pgno, plrcreatesefdp->le_objidFDP, plr );
 
                 break;
             }
@@ -2857,44 +2711,9 @@ ERR LOG::ErrLGIPrereadExecute( const BOOL fPgnosOnly )
                 Assert( dbid > dbidTemp );
                 Assert( dbid < dbidMax );
 
-                if ( fPgnosOnly )
-                {
-                    if ( dbid < dbidMax &&
-                         m_pinst->m_mpdbidifmp[ dbid ] < g_ifmpMax &&
-                         g_rgfmp[ m_pinst->m_mpdbidifmp[ dbid ] ].FContainsDataFromFutureLogs() )
-                    {
-                        if ( m_plpreread->ErrLGPAddPgnoRef( dbid, plrcreatemefdp->le_pgnoFDPParent, plrcreatemefdp->le_objidFDP, plr ) != JET_errSuccess ||
-                             m_plpreread->ErrLGPAddPgnoRef( dbid, plrcreatemefdp->le_pgnoOE, plrcreatemefdp->le_objidFDP, plr ) != JET_errSuccess ||
-                             m_plpreread->ErrLGPAddPgnoRef( dbid, plrcreatemefdp->le_pgnoAE, plrcreatemefdp->le_objidFDP, plr ) != JET_errSuccess )
-                        {
-                            m_plpreread->LGPDBDisable( dbid );
-                        }
-                    }
-                    else
-                    {
-                        (void)m_plprereadSuppress->ErrLGPAddPgnoRef( dbid, plrcreatemefdp->le_pgnoFDPParent, plrcreatemefdp->le_objidFDP, plr );
-                        (void)m_plprereadSuppress->ErrLGPAddPgnoRef( dbid, plrcreatemefdp->le_pgnoOE, plrcreatemefdp->le_objidFDP, plr );
-                        (void)m_plprereadSuppress->ErrLGPAddPgnoRef( dbid, plrcreatemefdp->le_pgnoAE, plrcreatemefdp->le_objidFDP, plr );
-                    }
-                }
-                else
-                {
-                    LGIPrereadPage(
-                            dbid,
-                            plrcreatemefdp->le_pgnoFDPParent,
-                            rgfPrereadIssued + dbid,
-                            &fPrereadFailure );
-                    LGIPrereadPage(
-                            dbid,
-                            plrcreatemefdp->le_pgnoOE,
-                            rgfPrereadIssued + dbid,
-                            &fPrereadFailure );
-                    LGIPrereadPage(
-                            dbid,
-                            plrcreatemefdp->le_pgnoAE,
-                            rgfPrereadIssued + dbid,
-                            &fPrereadFailure );
-                }
+                LGIPrereadPageRef( fPgnosOnly, fTrue, dbid, plrcreatemefdp->le_pgnoFDPParent, plrcreatemefdp->le_objidFDP, plr );
+                LGIPrereadPageRef( fPgnosOnly, fTrue, dbid, plrcreatemefdp->le_pgnoOE, plrcreatemefdp->le_objidFDP, plr );
+                LGIPrereadPageRef( fPgnosOnly, fTrue, dbid, plrcreatemefdp->le_pgnoAE, plrcreatemefdp->le_objidFDP, plr );
 
                 break;
             }
@@ -2919,26 +2738,12 @@ ERR LOG::ErrLGIPrereadExecute( const BOOL fPgnosOnly )
                 // Always add to preread-list even if dbscan is not enabled as it can get enabled in
                 // the middle of the log and we assert if we try to preread something we did not
                 // first add to the list.
-                if ( fPgnosOnly )
+                if ( FLGRICheckRedoScanCheck( &lrscancheck, fTrue /* fEvaluatePrereadLogic */ ) || fPgnosOnly )
                 {
-                    if ( m_plpreread->ErrLGPAddPgnoRef( dbid, pgno, objidNil, plr ) != JET_errSuccess )
-                    {
-                        m_plpreread->LGPDBDisable( dbid );
-                    }
+                    const BFPreReadFlags bfprf = ( lrscancheck.BSource() == scsDbScan ) ? bfprfDBScan : bfprfNone;
+                    LGIPrereadPageRef( fPgnosOnly, fFalse, dbid, pgno, objidNil, plr, bfprf );
                 }
-                else if ( FLGRICheckRedoScanCheck( &lrscancheck, fTrue /* fEvaluatePrereadLogic */ ) )
-                {
-                    const BOOL fDbScan = ( lrscancheck.BSource() == scsDbScan );
-                    ExpectedSz( ( lrscancheck.BSource() == scsDbScan ) ||
-                                ( lrscancheck.BSource() == scsDbShrink ),
-                                "Select the appropriate preread flag for this new ScanCheck source." );
-                    LGIPrereadPage(
-                        dbid,
-                        pgno,
-                        rgfPrereadIssued + dbid,
-                        &fPrereadFailure,
-                        fDbScan ? bfprfDBScan : bfprfNone );
-                }
+
                 break;
             }
 
@@ -2950,21 +2755,7 @@ ERR LOG::ErrLGIPrereadExecute( const BOOL fPgnosOnly )
                 Assert( dbid > dbidTemp );
                 Assert( dbid < dbidMax );
 
-                if ( fPgnosOnly )
-                {
-                    if ( m_plpreread->ErrLGPAddPgnoRef( dbid, plrpatch->Pgno(), objidNil, plr ) < JET_errSuccess )
-                    {
-                        m_plpreread->LGPDBDisable( dbid );
-                    }
-                }
-                else
-                {
-                    LGIPrereadPage(
-                            dbid,
-                            plrpatch->Pgno(),
-                            rgfPrereadIssued + dbid,
-                            &fPrereadFailure );
-                }
+                LGIPrereadPageRef( fPgnosOnly, fFalse, dbid, plrpatch->Pgno(), objidNil, plr );
 
                 break;
             }
@@ -2977,30 +2768,7 @@ ERR LOG::ErrLGIPrereadExecute( const BOOL fPgnosOnly )
                 Assert( dbid > dbidTemp );
                 Assert( dbid < dbidMax );
 
-                if ( fPgnosOnly )
-                {
-                    if ( dbid < dbidMax &&
-                         m_pinst->m_mpdbidifmp[ dbid ] < g_ifmpMax &&
-                         g_rgfmp[ m_pinst->m_mpdbidifmp[ dbid ] ].FContainsDataFromFutureLogs() )
-                    {
-                        if ( m_plpreread->ErrLGPAddPgnoRef( dbid, plrnewpage->Pgno(), plrnewpage->Objid(), plr ) != JET_errSuccess )
-                        {
-                            m_plpreread->LGPDBDisable( dbid );
-                        }
-                    }
-                    else
-                    {
-                        (void)m_plprereadSuppress->ErrLGPAddPgnoRef( dbid, plrnewpage->Pgno(), plrnewpage->Objid(), plr );
-                    }
-                }
-                else
-                {
-                    LGIPrereadPage(
-                            dbid,
-                            plrnewpage->Pgno(),
-                            rgfPrereadIssued + dbid,
-                            &fPrereadFailure );
-                }
+                LGIPrereadPageRef( fPgnosOnly, fTrue, dbid, plrnewpage->Pgno(), plrnewpage->Objid(), plr );
 
                 break;
             }
@@ -3025,35 +2793,12 @@ ERR LOG::ErrLGIPrereadExecute( const BOOL fPgnosOnly )
                 Assert( dbid > dbidTemp );
                 Assert( dbid < dbidMax );
 
-                if ( fPgnosOnly )
+                // Add all pages in the extent freed to be preread 
+                for( INT i = 0; i < cpgextent; ++i )
                 {
-                    // Add all pages in the extent freed to be preread 
-                    for( INT i = 0; i < cpgextent; ++i )
-                    {
-                        if( m_plpreread->ErrLGPAddPgnoRef( dbid, pgnofirst + i, objidNil, plr ) != JET_errSuccess )
-                        {
-                            m_plpreread->LGPDBDisable( dbid );
-                            break;
-                        }
-                    }
+                    LGIPrereadPageRef( fPgnosOnly, fFalse, dbid, pgnofirst + i, objidNil, plr );
                 }
-                else
-                {
-                    // Preread all pages in the extent. 
-                    for( INT i = 0; i < cpgextent; ++i )
-                    {
-                        LGIPrereadPage(
-                            dbid,
-                            pgnofirst + i,
-                            rgfPrereadIssued + dbid,
-                            &fPrereadFailure );
 
-                        if( fPrereadFailure )
-                        {
-                            break;
-                        }
-                    }
-                }
                 break;
             }
 
@@ -3076,7 +2821,7 @@ ERR LOG::ErrLGIPrereadExecute( const BOOL fPgnosOnly )
 
     for ( DBID dbid = dbidUserLeast; dbid < dbidMax; dbid++ )
     {
-        if ( rgfPrereadIssued[ dbid ] )
+        if ( m_rgfPrereadIssued[ dbid ] )
         {
             const IFMP ifmp = m_pinst->m_mpdbidifmp[ dbid ];
 
