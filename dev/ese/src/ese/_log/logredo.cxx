@@ -10258,7 +10258,14 @@ ERR LOG::ErrLGIRedoRootMoveStructures( PIB* const ppib, const DBTIME dbtime, ROO
                     Assert( ( pcsrNew->PagetrimState() == pagetrimTrimmed ) ||
                             ( pcsrNew->Latch() == latchRIW ) );
                 }
+
+                // Remove the source page from dbtimerevert redo map as it is freed now.
+                if ( g_rgfmp[ ifmp ].PLogRedoMapDbtimeRevert() )
+                {
+                    g_rgfmp[ ifmp ].PLogRedoMapDbtimeRevert()->ClearPgno( plrpm->PgnoSource() );
+                }
             }
+
             break;
 
             // We expect N of these LRs, one for each "child" object (secondary index, LV).
