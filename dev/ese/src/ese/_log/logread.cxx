@@ -685,7 +685,7 @@ BOOL LogPrereaderBase::FLGPContainsPgnoRef( const DBID dbid, const PGNO pgno ) c
     return IpgLGPIGetUnsorted( dbid, pgno ) != CArray<PGNO>::iEntryNotFound;
 }
 
-ERR LogPrereaderBase::ErrLGPAddPgnoRef( const DBID dbid, const PGNO pgno, const OBJID objid, const LR* const plr )
+ERR LogPrereaderBase::ErrLGPAddPgnoRef( const DBID dbid, const PGNO pgno, const OBJID objid, const LR* const plr, const IOREASONFLAGS iorf )
 {
     ERR err = JET_errSuccess;
 
@@ -695,7 +695,7 @@ ERR LogPrereaderBase::ErrLGPAddPgnoRef( const DBID dbid, const PGNO pgno, const 
     }
 
     //  Add even if it exists already. We'll sort and remove duplicates later.
-    Call( ErrLGPISetEntry( dbid, CpgLGPIGetArrayPgnosSize( dbid ), pgno, objid, IorsFromLr( plr ) ) );
+    Call( ErrLGPISetEntry( dbid, CpgLGPIGetArrayPgnosSize( dbid ), pgno, objid, IorsFromLr( plr ), iorf ) );
 
 HandleError:
 
@@ -876,13 +876,13 @@ size_t LogPrereaderBase::IpgLGPIGetUnsorted( const DBID dbid, const PGNO pgno ) 
     return m_rgArrayPagerefs[ dbid ].SearchLinear( PageRef( pgno ), LogPrereaderBase::ILGPICmpPagerefs );
 }
 
-ERR LogPrereaderBase::ErrLGPISetEntry( const DBID dbid, const size_t ipg, const PGNO pgno, const OBJID objid, const IOREASONSECONDARY iors )
+ERR LogPrereaderBase::ErrLGPISetEntry( const DBID dbid, const size_t ipg, const PGNO pgno, const OBJID objid, const IOREASONSECONDARY iors, const IOREASONFLAGS iorf )
 {
     Assert( FLGPDBEnabled( dbid ) );
 
     ERR err;
 
-    const CArray<PageRef>::ERR errT = m_rgArrayPagerefs[ dbid ].ErrSetEntry( ipg, PageRef( pgno, objid, iors ) );
+    const CArray<PageRef>::ERR errT = m_rgArrayPagerefs[ dbid ].ErrSetEntry( ipg, PageRef( pgno, objid, iors, iorf ) );
 
     switch ( errT )
     {
@@ -2528,12 +2528,37 @@ LOG::LGPrereadExecute(
 }
 
 VOID LOG::LGIPrereadPageRef(
+    const BOOL              fPgnosOnly,
+    const BOOL              fSuppressable,
+    const DBID              dbid,
+    const PGNO              pgno,
+    const OBJID             objid,
+    const LR* const         plr,
+    const IOREASONFLAGS     iorf )
+{
+    LGIPrereadPageRef( fPgnosOnly, fSuppressable, dbid, pgno, objid, plr, iorf, bfprfDefault );
+}
+
+VOID LOG::LGIPrereadPageRef(
+    const BOOL              fPgnosOnly,
+    const BOOL              fSuppressable,
+    const DBID              dbid,
+    const PGNO              pgno,
+    const OBJID             objid,
+    const LR* const         plr,
+    const BFPreReadFlags    bfprf )
+{
+    LGIPrereadPageRef( fPgnosOnly, fSuppressable, dbid, pgno, objid, plr, iorfNone, bfprf );
+}
+
+VOID LOG::LGIPrereadPageRef(
     const BOOL              fPgnosOnly, 
     const BOOL              fSuppressable,
     const DBID              dbid,
     const PGNO              pgno,
     const OBJID             objid,
     const LR* const         plr,
+    const IOREASONFLAGS     iorf,
     const BFPreReadFlags    bfprf)
 {
     if ( fPgnosOnly )
@@ -2548,12 +2573,12 @@ VOID LOG::LGIPrereadPageRef(
 
             if ( !fAlreadyReferenced )
             {
-                (void)m_plprereadSuppress->ErrLGPAddPgnoRef( dbid, pgno, objid, plr );
+                (void)m_plprereadSuppress->ErrLGPAddPgnoRef( dbid, pgno );
             }
         }
         else
         {
-            if ( m_plpreread->ErrLGPAddPgnoRef( dbid, pgno, objid, plr ) < JET_errSuccess )
+            if ( m_plpreread->ErrLGPAddPgnoRef( dbid, pgno, objid, plr, iorf ) < JET_errSuccess )
             {
                 m_plpreread->LGPDBDisable( dbid );
             }
@@ -2629,10 +2654,13 @@ ERR LOG::ErrLGIPrereadExecute( const BOOL fPgnosOnly )
                 const LRSPLIT_ * const  plrsplit    = (LRSPLIT_ *)plr;
                 const DBID              dbid        = plrsplit->dbid;
 
+                // flag reads we could avoid by using the page image in LR
+                const IOREASONFLAGS     iorf        = CbPageBeforeImage( plrsplit ) > 0 ? iorfFill : iorfNone;
+
                 Assert( dbid > dbidTemp );
                 Assert( dbid < dbidMax );
 
-                LGIPrereadPageRef( fPgnosOnly, fFalse, dbid, plrsplit->le_pgno, plrsplit->le_objidFDP, plr );
+                LGIPrereadPageRef( fPgnosOnly, fFalse, dbid, plrsplit->le_pgno, plrsplit->le_objidFDP, plr, iorf );
                 LGIPrereadPageRef( fPgnosOnly, fFalse, dbid, plrsplit->le_pgnoParent, plrsplit->le_objidFDP, plr );
                 LGIPrereadPageRef( fPgnosOnly, fFalse, dbid, plrsplit->le_pgnoRight, plrsplit->le_objidFDP, plr );
                 LGIPrereadPageRef( fPgnosOnly, fTrue, dbid, plrsplit->le_pgnoNew, plrsplit->le_objidFDP, plr );
@@ -2646,10 +2674,13 @@ ERR LOG::ErrLGIPrereadExecute( const BOOL fPgnosOnly )
                 const LRMERGE_ * const  plrmerge    = (LRMERGE_ *)plr;
                 const DBID              dbid        = plrmerge->dbid;
 
+                // flag reads we could avoid by using the page image in LR
+                const IOREASONFLAGS     iorf        = CbPageBeforeImage( plrmerge ) > 0 ? iorfFill : iorfNone;
+
                 Assert( dbid > dbidTemp );
                 Assert( dbid < dbidMax );
 
-                LGIPrereadPageRef( fPgnosOnly, fFalse, dbid, plrmerge->le_pgno, plrmerge->le_objidFDP, plr );
+                LGIPrereadPageRef( fPgnosOnly, fFalse, dbid, plrmerge->le_pgno, plrmerge->le_objidFDP, plr, iorf );
                 LGIPrereadPageRef( fPgnosOnly, fFalse, dbid, plrmerge->le_pgnoRight, plrmerge->le_objidFDP, plr );
                 LGIPrereadPageRef( fPgnosOnly, fFalse, dbid, plrmerge->le_pgnoLeft, plrmerge->le_objidFDP, plr );
                 LGIPrereadPageRef( fPgnosOnly, fFalse, dbid, plrmerge->le_pgnoParent, plrmerge->le_objidFDP, plr );
@@ -2662,10 +2693,13 @@ ERR LOG::ErrLGIPrereadExecute( const BOOL fPgnosOnly )
                 const LRPAGEMOVE * const plrpagemove    = LRPAGEMOVE::PlrpagemoveFromLr( plr );
                 const DBID              dbid            = plrpagemove->Dbid();
 
+                // flag reads we could avoid by using the page image in LR
+                const IOREASONFLAGS     iorf            = iorfFill;
+
                 Assert( dbid > dbidTemp );
                 Assert( dbid < dbidMax );
 
-                LGIPrereadPageRef( fPgnosOnly, fFalse, dbid, plrpagemove->PgnoSource(), plrpagemove->ObjidFDP(), plr );
+                LGIPrereadPageRef( fPgnosOnly, fFalse, dbid, plrpagemove->PgnoSource(), plrpagemove->ObjidFDP(), plr, iorf );
                 LGIPrereadPageRef( fPgnosOnly, fFalse, dbid, plrpagemove->PgnoParent(), plrpagemove->ObjidFDP(), plr );
                 LGIPrereadPageRef( fPgnosOnly, fFalse, dbid, plrpagemove->PgnoLeft(), plrpagemove->ObjidFDP(), plr );
                 LGIPrereadPageRef( fPgnosOnly, fFalse, dbid, plrpagemove->PgnoRight(), plrpagemove->ObjidFDP(), plr );
