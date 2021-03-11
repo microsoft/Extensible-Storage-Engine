@@ -1,0 +1,781 @@
+// Copyright (c) Microsoft Corporation.
+// Licensed under the MIT License.
+
+#include "ese_common.hxx"
+#include "eseloadlibrary.hxx"
+#include <process.h>
+#include <stdlib.h>
+
+#define ESETEST_ELHELPER_STRING_BUFFER_SIZE     1024
+#define ESETEST_ELHELPER_MAXIMUM_WAIT_TIME      1
+
+#define wszAdvapi32             L"advapi32.dll"
+const wchar_t * const g_mwszzAdvapi32CoreSystemBroken       = wszAdvapi32 L"\0";
+
+typedef struct{
+    PFNEVENTLOGGING pfnCallback;
+    HANDLE              hEventLog;
+    PWSTR*              pwszEventSources;
+    size_t              cEventSources;
+    DWORD               dwTimeMin;
+    DWORD               dwTimeMax;
+    PWORD               pEventTypes;
+    size_t              cEventTypes;
+    PWORD               pEventCategories;
+    size_t              cEventCategories;
+    PDWORD              pEventIds;  
+    size_t              cEventIds;  
+    HANDLE              hFile;
+    PVOID               pUserData;
+    PBYTE               pBuffer;
+    DWORD               cbBufferSize;
+    HANDLE              hObjects[ 2 ];
+
+    PWSTR               wszEventLog;
+    SYSTEMTIME          stTimeMin;
+    SYSTEMTIME          stTimeMax;
+    PWSTR               wszLogFile;
+    BOOL                fThreadActive;
+} EseEventLoggingQuery;
+
+#ifndef BUILD_ENV_IS_WPHONE 
+
+
+NTOSFuncPtr( g_pfnOpenEventLogW, g_mwszzAdvapi32CoreSystemBroken, OpenEventLogW, oslfExpectedOnWin5x | oslfNotExpectedOnCoreSystem );
+NTOSFuncStd( g_pfnReadEventLogW, g_mwszzAdvapi32CoreSystemBroken, ReadEventLogW, oslfExpectedOnWin5x | oslfNotExpectedOnCoreSystem );
+NTOSFuncStd( g_pfnCloseEventLog, g_mwszzAdvapi32CoreSystemBroken, CloseEventLog, oslfExpectedOnWin5x | oslfNotExpectedOnCoreSystem );
+NTOSFuncStd( g_pfnNotifyChangeEventLog, g_mwszzAdvapi32CoreSystemBroken, NotifyChangeEventLog, oslfExpectedOnWin5x | oslfNotExpectedOnCoreSystem );
+
+
+
+VOID
+IEventLoggingPrintToFile(
+    __in HANDLE hFile,
+    __in PSTR   szString
+)
+{
+    DWORD dw;
+    if ( !WriteFile( hFile, szString, ( DWORD )strlen( szString ), &dw, NULL ) ){
+        OutputWarning( "%s(): failed to write to file!" CRLF, __FUNCTION__ );
+    }
+}
+
+BOOL
+IEventLoggingProcessEvents(
+    EseEventLoggingQuery* hQuery
+)
+{
+    DWORD dwLastError = ERROR_SUCCESS;
+    BOOL fReturn;
+    DWORD cbRead;
+    DWORD cbNeed;   
+    PBYTE pBufferAux, pBuffer2;
+    EVENTLOGRECORD* pelg;
+    PWSTR wszEventSource;
+    DWORD dwTimeGenerated;
+    WORD wEventType;
+    WORD wEventCategory;
+    DWORD dwEventId;
+    WORD cStrings;
+    DWORD cbRawData;        
+    PWSTR* rgpwszStrings = NULL;
+    PWSTR rgpwszStringsBuffer;
+    PVOID pvRawData;
+    SYSTEMTIME stTimeGenerated;
+    BOOL fResult = FALSE;
+    HMODULE hModule;
+
+    JET_ERR err = g_pfnReadEventLogW.ErrIsPresent();
+    if ( err < 0 )
+    {
+        OutputWarning( "%s(): ReadEventLogW() is not present on this system: %d" CRLF, __FUNCTION__, err );
+        goto Cleanup;
+    }
+
+    while ( ERROR_HANDLE_EOF != dwLastError ){
+        for ( DWORD iRetry = 0 ; iRetry < 10 ; iRetry++ ){
+            fReturn = g_pfnReadEventLogW( hQuery->hEventLog,
+                                        EVENTLOG_SEQUENTIAL_READ | EVENTLOG_FORWARDS_READ,
+                                        0,
+                                        hQuery->pBuffer,
+                                        hQuery->cbBufferSize,
+                                        &cbRead,
+                                        &cbNeed );
+            if ( fReturn || GetLastError() != ERROR_ACCESS_DENIED ){
+                break;
+            }
+            Sleep( 1000 );
+        }
+        
+        if ( fReturn ){
+            pBufferAux = hQuery->pBuffer;
+
+            while ( ( ( DWORD )( pBufferAux - hQuery->pBuffer ) ) < cbRead ){
+                pelg = ( EVENTLOGRECORD* )pBufferAux;
+                wszEventSource = ( WCHAR* )( pelg + 1 );
+                dwTimeGenerated = pelg->TimeGenerated;
+                wEventType = pelg->EventType;
+                wEventCategory = pelg->EventCategory;
+                dwEventId = (pelg->EventID & 0x0000FFFF);
+
+                if ( hQuery->pEventIds ){
+                    BOOL fFound = FALSE;
+                    for ( size_t i = 0 ; i < hQuery->cEventIds ; i++ ){
+                        if ( hQuery->pEventIds[ i ] == dwEventId ){ 
+                            fFound = TRUE;
+                            break;
+                        }
+                    }
+                    if ( !fFound ){
+                        goto NextEvent;
+                    }
+                }
+                
+                if ( ! (( dwTimeGenerated >= hQuery->dwTimeMin ) &&
+                        ( dwTimeGenerated <= hQuery->dwTimeMax ) ) ){
+                        goto NextEvent;
+                }
+
+                if ( hQuery->pwszEventSources ){
+                    BOOL fFound = FALSE;
+                    for ( size_t i = 0 ; i < hQuery->cEventSources ; i++ ){
+                        if ( !wcscmp( wszEventSource, hQuery->pwszEventSources[ i ] ) ){
+                            fFound = TRUE;
+                            break;
+                        }
+                    }
+                    if ( !fFound ){
+                        goto NextEvent;
+                    }
+                }
+
+                if ( hQuery->pEventTypes ){
+                    BOOL fFound = FALSE;
+                    for ( size_t i = 0 ; i < hQuery->cEventTypes ; i++ ){
+                        if ( hQuery->pEventTypes[ i ] == wEventType ){
+                            fFound = TRUE;
+                            break;
+                        }
+                    }
+                    if ( !fFound ){
+                        goto NextEvent;
+                    }
+                }
+
+                if ( hQuery->pEventCategories ){
+                    BOOL fFound = FALSE;
+                    for ( size_t i = 0 ; i < hQuery->cEventCategories ; i++ ){
+                        if ( hQuery->pEventCategories[ i ] == wEventCategory ){
+                            fFound = TRUE;
+                            break;
+                        }
+                    }
+                    if ( !fFound ){
+                        goto NextEvent;
+                    }
+                }
+
+                cStrings = pelg->NumStrings;
+                rgpwszStrings = NULL;
+                if ( cStrings ){
+                    rgpwszStrings = new PWSTR[ cStrings ];                  
+                    if ( rgpwszStrings ){
+                        rgpwszStrings[ 0 ] = ( WCHAR* )( pBufferAux + pelg->StringOffset );
+                        for ( WORD i = 1 ; i < cStrings ; i++ ){
+                            rgpwszStringsBuffer = rgpwszStrings[ i - 1 ];
+                            rgpwszStrings[ i ] = rgpwszStringsBuffer + wcslen( rgpwszStringsBuffer ) + 1;
+                        }                   
+                    }
+                    else{
+                        OutputError( "%s(): failed to allocate buffer for rgpwszStrings!" CRLF, __FUNCTION__ );
+                        goto Cleanup;
+                    }
+                }
+                cbRawData = pelg->DataLength;
+                pvRawData = cbRawData ? ( pBufferAux + pelg->DataOffset ) : NULL;
+
+                SecondsSince1970ToSystemTime( dwTimeGenerated, &stTimeGenerated );
+
+                if ( hQuery->pfnCallback ){
+                    hQuery->pfnCallback( hQuery->wszEventLog,
+                                            wszEventSource,
+                                            &stTimeGenerated,
+                                            wEventType,
+                                            wEventCategory,
+                                            dwEventId,
+                                            rgpwszStrings,
+                                            cStrings,
+                                            pvRawData,
+                                            cbRawData,
+                                            hQuery->pUserData );
+                }
+
+                if ( INVALID_HANDLE_VALUE != hQuery->hFile ){
+                    CHAR szBuffer[ ESETEST_ELHELPER_STRING_BUFFER_SIZE ];
+                    IEventLoggingPrintToFile( hQuery->hFile, CRLF );
+                    sprintf_s( szBuffer,
+                                ESETEST_ELHELPER_STRING_BUFFER_SIZE,
+                                "Event log: %S" CRLF, hQuery->wszEventLog );
+                    IEventLoggingPrintToFile( hQuery->hFile, szBuffer );
+                    sprintf_s( szBuffer,
+                                ESETEST_ELHELPER_STRING_BUFFER_SIZE,
+                                "Event source: %S" CRLF, wszEventSource );
+                    IEventLoggingPrintToFile( hQuery->hFile, szBuffer );
+                    sprintf_s( szBuffer,
+                                ESETEST_ELHELPER_STRING_BUFFER_SIZE,
+                                "Time generated: %04u/%02u/%02u %02u:%02u:%02u" CRLF,
+                                stTimeGenerated.wYear, stTimeGenerated.wMonth, stTimeGenerated.wDay,
+                                stTimeGenerated.wHour, stTimeGenerated.wMinute, stTimeGenerated.wSecond );
+                    IEventLoggingPrintToFile( hQuery->hFile, szBuffer );
+                    sprintf_s( szBuffer,
+                                ESETEST_ELHELPER_STRING_BUFFER_SIZE,
+                                "Event type: %u" CRLF, wEventType );
+                    IEventLoggingPrintToFile( hQuery->hFile, szBuffer );
+                    sprintf_s( szBuffer,
+                                ESETEST_ELHELPER_STRING_BUFFER_SIZE,
+                                "Event category: %u" CRLF, wEventCategory );
+                    IEventLoggingPrintToFile( hQuery->hFile, szBuffer );
+                    sprintf_s( szBuffer,
+                                ESETEST_ELHELPER_STRING_BUFFER_SIZE,
+                                "Event ID: %u" CRLF, ( WORD )dwEventId );
+                    IEventLoggingPrintToFile( hQuery->hFile, szBuffer );
+                    sprintf_s( szBuffer,
+                                ESETEST_ELHELPER_STRING_BUFFER_SIZE,
+                                "Raw data size: %lu" CRLF, cbRawData );
+                    IEventLoggingPrintToFile( hQuery->hFile, szBuffer );
+                    sprintf_s( szBuffer,
+                                ESETEST_ELHELPER_STRING_BUFFER_SIZE,
+                                "Number of strings: %u" CRLF, cStrings );
+                    IEventLoggingPrintToFile( hQuery->hFile, szBuffer );
+                    for ( WORD i = 0 ; i < cStrings ; i++ ){
+                        sprintf_s( szBuffer,
+                                    ESETEST_ELHELPER_STRING_BUFFER_SIZE,
+                                    "\tString[ %u ]: %S" CRLF, i + 1, rgpwszStrings[ i ] );
+                        IEventLoggingPrintToFile( hQuery->hFile, szBuffer );                    
+                    }
+                    hModule = EventLoggingModuleFromEventSource( wszEventSource );
+                    if ( hModule ){
+                        PWSTR wszFormattedMsg = EventLoggingFormatMessage( hModule,
+                                                                            dwEventId,
+                                                                            GetSystemDefaultLCID(),
+                                                                            rgpwszStrings );
+                        if ( wszFormattedMsg ){
+                            sprintf_s( szBuffer,
+                                        ESETEST_ELHELPER_STRING_BUFFER_SIZE,
+                                        "Formatted message: %S" CRLF, wszFormattedMsg );
+                            IEventLoggingPrintToFile( hQuery->hFile, szBuffer );
+                            if ( NULL != LocalFree( wszFormattedMsg ) ){
+                                OutputWarning( "%s(): LocalFree() failed" CRLF, __FUNCTION__ );
+                            }
+                        }
+                    }
+                    IEventLoggingPrintToFile( hQuery->hFile, CRLF );
+                }
+
+            NextEvent:
+                delete []rgpwszStrings;
+                rgpwszStrings = NULL;
+                pBufferAux += pelg->Length;
+            }           
+        }
+        else{
+            dwLastError = GetLastError();           
+            switch ( dwLastError ){
+                case ERROR_INSUFFICIENT_BUFFER:
+                    pBuffer2 = new BYTE[ cbNeed ];
+                    if ( NULL == pBuffer2 ){
+                        OutputError( "%s(): failed to allocate buffer for pBuffer2!" CRLF, __FUNCTION__ );
+                        goto Cleanup;
+                    }
+                    delete []hQuery->pBuffer;
+                    hQuery->pBuffer = pBuffer2;
+                    hQuery->cbBufferSize = cbNeed;
+                    break;
+
+                case ERROR_HANDLE_EOF:
+                    break;
+
+                default:
+                    OutputError( "%s(): ReadEventLogW() failed with %lu!" CRLF,
+                                    __FUNCTION__, dwLastError );
+                    goto Cleanup;
+                    break;
+            }
+        }
+    }
+
+    fResult = TRUE;
+    
+Cleanup:
+    delete []rgpwszStrings;
+    return fResult;
+}
+
+VOID __cdecl
+IEventLoggingBackgroundListening(
+    __in_opt PVOID  hQuery
+)
+{
+    EseEventLoggingQuery* elq = ( EseEventLoggingQuery* )hQuery;
+    DWORD dwTime, dwDeltaTime, dwReturn;
+
+    dwTime = GetTickCount();
+    while ( 1 ){
+        dwDeltaTime = GetTickCount() - dwTime;
+        if ( !IEventLoggingProcessEvents( elq ) ){
+            OutputError( "%s(): IEventLoggingProcessEvents() failed!" CRLF, __FUNCTION__ );
+        }
+        dwReturn = WaitForMultipleObjects( 2, elq->hObjects, FALSE,
+                                            ( dwDeltaTime >= ESETEST_ELHELPER_MAXIMUM_WAIT_TIME ) ?
+                                                0 :
+                                                ( ESETEST_ELHELPER_MAXIMUM_WAIT_TIME - dwDeltaTime ) );
+        dwTime = GetTickCount();
+        if ( ( WAIT_TIMEOUT == dwReturn ) || ( ( dwReturn - WAIT_OBJECT_0 ) == 1 ) ){
+            if ( !IEventLoggingProcessEvents( elq ) ){
+                OutputError( "%s(): IEventLoggingProcessEvents() failed!" CRLF, __FUNCTION__ );
+            }
+        }
+        else{
+            break;
+        }       
+    }
+
+    ResetEvent( elq->hObjects[ 0 ] );   
+    _endthread();
+}
+
+HANDLE
+EventLoggingCreateQuery(
+    __in_opt PFNEVENTLOGGING                        pfnCallback,
+    __in_opt PCWSTR                             wszEventLog,
+    __in_ecount_opt( cEventSources ) PCWSTR*    pwszEventSources,
+    __in size_t                                 cEventSources,
+    __in_opt PSYSTEMTIME                            pTimeMin,
+    __in_opt PSYSTEMTIME                            pTimeMax,
+    __in_ecount_opt( cEventTypes ) PWORD        pEventTypes,
+    __in size_t                                 cEventTypes,
+    __in_ecount_opt( cEventCategories ) PWORD   pEventCategories,
+    __in size_t                                 cEventCategories,
+    __in_ecount_opt( cEventIds ) PDWORD         pEventIds,
+    __in size_t                                 cEventIds,
+    __in_opt PCWSTR                             wszLogFile,
+    __in_opt PVOID                              pUserData
+)
+{
+    BOOL fSuccess = FALSE;
+
+    EseEventLoggingQuery* hQuery = new EseEventLoggingQuery;
+    if ( NULL == hQuery ){
+        OutputError( "%s(): failed to allocate new query object" CRLF, __FUNCTION__ );
+        goto Cleanup;
+    }
+
+    hQuery->pfnCallback                 = pfnCallback;
+    hQuery->hEventLog                   = NULL;
+    hQuery->pwszEventSources            = NULL;
+    hQuery->cEventSources               = 0;
+    hQuery->dwTimeMin                   = 0;
+    hQuery->dwTimeMax                   = ULONG_MAX;
+    hQuery->pEventTypes                 = NULL;
+    hQuery->cEventTypes                 = 0;
+    hQuery->pEventCategories            = NULL;
+    hQuery->cEventCategories            = 0;
+    hQuery->pEventIds                   = NULL;
+    hQuery->cEventIds                   = 0;
+    hQuery->hFile                       = INVALID_HANDLE_VALUE;
+    hQuery->pUserData                   = pUserData;
+    hQuery->pBuffer                     = NULL;
+    hQuery->cbBufferSize                = 0;
+    hQuery->wszEventLog                 = NULL;
+    hQuery->wszLogFile                  = NULL;
+    hQuery->fThreadActive               = FALSE;
+
+
+    JET_ERR err = g_pfnOpenEventLogW.ErrIsPresent();
+    if ( err < 0 )
+    {
+        OutputWarning( "%s(): OpenEventLogW() is not present on this system: %d" CRLF, __FUNCTION__, err );
+        goto Cleanup;
+    }
+
+    err = g_pfnNotifyChangeEventLog.ErrIsPresent();
+    if ( err < 0 )
+    {
+        OutputWarning( "%s(): NotifyChangeEventLog() is not present on this system: %d" CRLF, __FUNCTION__, err );
+        goto Cleanup;
+    }
+
+
+    if ( NULL == wszEventLog ){
+        hQuery->wszEventLog                 = EsetestCopyWideString( __FUNCTION__, L"Application" );
+    }
+    else{
+        hQuery->wszEventLog                 = EsetestCopyWideString( __FUNCTION__, wszEventLog );
+    }
+    if ( NULL == hQuery->wszEventLog ){
+        OutputError( "%s(): failed to allocate hQuery->wszEventLog!" CRLF, __FUNCTION__ );
+        goto Cleanup;
+    }
+    hQuery->hEventLog = g_pfnOpenEventLogW( NULL, hQuery->wszEventLog );
+    if ( NULL == hQuery->hEventLog ){
+        OutputError( "%s(): OpenEventLogW() failed with %lu!" CRLF, __FUNCTION__, GetLastError() );
+        goto Cleanup;
+    }
+
+    if ( NULL != pwszEventSources ){
+        if ( cEventSources ){
+            hQuery->pwszEventSources = new PWSTR[ cEventSources ];
+            if ( NULL == hQuery->pwszEventSources ){
+                OutputError( "%s(): failed to allocate hQuery->pwszEventSources!" CRLF, __FUNCTION__ );
+                goto Cleanup;
+            }
+            for ( size_t i = 0 ; i < cEventSources ; i++ ){
+                if ( NULL ==
+                    ( hQuery->pwszEventSources[ i ] = EsetestCopyWideString( __FUNCTION__,
+                                                                            pwszEventSources[ i ] ) ) ){
+                    OutputError( "%s(): failed to allocate hQuery->pwszEventSources[ %lu ]!" CRLF, __FUNCTION__, i );
+                    goto Cleanup;
+                }
+            }
+            hQuery->cEventSources = cEventSources;
+        }
+    }
+
+    if ( NULL != pTimeMin ){
+        hQuery->dwTimeMin = SystemTimeToSecondsSince1970( pTimeMin );
+    }
+    SecondsSince1970ToSystemTime( hQuery->dwTimeMin, &hQuery->stTimeMin );
+    if ( NULL != pTimeMax ){
+        hQuery->dwTimeMax = SystemTimeToSecondsSince1970( pTimeMax );
+    }
+    SecondsSince1970ToSystemTime( hQuery->dwTimeMax, &hQuery->stTimeMax );
+
+    if ( NULL != pEventTypes ){
+        if ( cEventTypes ){
+            hQuery->pEventTypes = new WORD[ cEventTypes ];
+            if ( NULL == hQuery->pEventTypes ){
+                OutputError( "%s(): failed to allocate hQuery->pEventTypes!" CRLF, __FUNCTION__ );
+                goto Cleanup;
+            }
+            memcpy( hQuery->pEventTypes, pEventTypes, sizeof( WORD ) * ( cEventTypes ) );
+            hQuery->cEventTypes = cEventTypes;
+        }
+    }
+
+    if ( NULL != pEventCategories ){
+        if ( cEventCategories ){
+            hQuery->pEventCategories = new WORD[ cEventCategories ];
+            if ( NULL == hQuery->pEventCategories ){
+                OutputError( "%s(): failed to allocate hQuery->pEventCategories!" CRLF, __FUNCTION__ );
+                goto Cleanup;
+            }
+            memcpy( hQuery->pEventCategories, pEventCategories, sizeof( WORD ) * ( cEventCategories ) );
+            hQuery->cEventCategories = cEventCategories;
+        }
+    }
+
+    if ( NULL != pEventIds ){
+        if ( cEventIds ){
+            hQuery->pEventIds = new DWORD[ cEventIds ];
+            if ( NULL == hQuery->pEventIds ){
+                OutputError( "%s(): failed to allocate hQuery->pEventIds!" CRLF, __FUNCTION__ );
+                goto Cleanup;
+            }
+            memcpy( hQuery->pEventIds, pEventIds, sizeof( DWORD ) * ( cEventIds ) );
+            hQuery->cEventIds = cEventIds;
+        }
+    }
+
+    if ( wszLogFile ){
+        hQuery->wszLogFile = EsetestCopyWideString( __FUNCTION__, wszLogFile );
+        if ( NULL == hQuery->wszLogFile ){
+            OutputError( "%s(): failed to allocate hQuery->wszLogFile!" CRLF, __FUNCTION__ );
+            goto Cleanup;
+        }
+        hQuery->hFile = CreateFileW( wszLogFile,
+                                        GENERIC_WRITE,
+                                        FILE_SHARE_READ,
+                                        NULL,
+                                        OPEN_ALWAYS,
+                                        FILE_ATTRIBUTE_NORMAL,
+                                        NULL );
+        if( INVALID_HANDLE_VALUE != hQuery->hFile ){
+            if( INVALID_SET_FILE_POINTER == SetFilePointer( hQuery->hFile, 0, NULL, FILE_END ) ) {
+                OutputWarning( "%s(): failed to seek to the end of the file!" CRLF, __FUNCTION__ );
+                CloseHandleP( &hQuery->hFile );
+                hQuery->hFile = INVALID_HANDLE_VALUE;
+            }
+        }
+        else{
+            OutputWarning( "%s(): failed to open file!" CRLF, __FUNCTION__ );
+        }
+    }
+
+    hQuery->pBuffer = new BYTE[ sizeof( EVENTLOGRECORD ) ];
+    if ( NULL == hQuery->pBuffer ){
+        OutputError( "%s(): failed to allocate hQuery->pBuffer!" CRLF, __FUNCTION__ );
+        goto Cleanup;
+    }
+    hQuery->cbBufferSize = sizeof( EVENTLOGRECORD );
+
+    hQuery->hObjects[ 0 ] = CreateEventW( NULL, TRUE, FALSE, NULL );
+    hQuery->hObjects[ 1 ] = CreateEventW( NULL, TRUE, FALSE, NULL );
+    if ( ( NULL == hQuery->hObjects[ 0 ] ) || ( NULL == hQuery->hObjects[ 1 ] ) ){
+        OutputError( "%s(): CreateEventW() failed!" CRLF, __FUNCTION__ );
+        goto Cleanup;
+    }
+    else{
+        if ( !g_pfnNotifyChangeEventLog( hQuery->hEventLog, hQuery->hObjects[ 1 ] ) ){
+            OutputError( "%s(): NotifyChangeEventLog() failed!" CRLF, __FUNCTION__ );
+            goto Cleanup;
+        }
+    }
+
+    if ( !IEventLoggingProcessEvents( hQuery ) ){
+        OutputError( "%s(): IEventLoggingProcessEvents() failed!" CRLF, __FUNCTION__ );
+        goto Cleanup;
+    }
+
+    if ( -1L == _beginthread( IEventLoggingBackgroundListening, 0, hQuery ) ){
+        OutputError( "%s(): failed to start background listening thread!" CRLF, __FUNCTION__ );
+        goto Cleanup;
+    }
+    hQuery->fThreadActive = TRUE;
+
+    fSuccess = TRUE;
+
+Cleanup:
+    if ( !fSuccess && ( NULL != hQuery ) ){
+        EventLoggingDestroyQuery( ( HANDLE )hQuery );
+        hQuery = NULL;
+    }
+    return ( HANDLE )hQuery;
+}
+
+BOOL
+EventLoggingDestroyQuery(
+    __in HANDLE hQuery
+)
+{
+    if ( !hQuery ){
+        OutputError( "%s(): invalid query!" CRLF, __FUNCTION__ );
+        return FALSE;
+    }
+    JET_ERR err = g_pfnCloseEventLog.ErrIsPresent();
+    if ( err < 0 )
+    {
+        OutputWarning( "%s(): CloseEventLog() is not present on this system: %d" CRLF, __FUNCTION__, err );
+        return FALSE;
+    }
+
+    EseEventLoggingQuery* elq = ( EseEventLoggingQuery* )hQuery;
+
+    if ( elq->fThreadActive ){
+        SetEvent( elq->hObjects[ 0 ] );
+        while ( WAIT_TIMEOUT != WaitForSingleObject( elq->hObjects[ 0 ], 1 ) );
+        elq->fThreadActive = FALSE;
+    }
+
+
+    if ( NULL != elq->hEventLog ){
+        (void) g_pfnCloseEventLog( elq->hEventLog );
+    }
+
+    for ( size_t i = 0 ; i < elq->cEventSources ; i++ ){
+        delete []elq->pwszEventSources[ i ];
+    }
+    delete []elq->pwszEventSources;
+
+    delete []elq->pEventTypes;
+
+    delete []elq->pEventCategories; 
+
+    delete []elq->pEventIds;
+
+    CloseHandleP( &elq->hFile );
+
+    delete []elq->pBuffer;
+
+    CloseHandleP( &elq->hObjects[ 0 ] );
+    CloseHandleP( &elq->hObjects[ 1 ] );
+
+    delete []elq->wszEventLog;
+    delete []elq->wszLogFile;
+
+    delete elq;
+    
+    return TRUE;
+}
+
+PWSTR
+EventLoggingFormatMessage(
+    __in HMODULE        hModule,
+    __in DWORD          dwEventId,
+    __in LCID           dwLandIg,
+    __in_opt PWSTR*     pwszStrings
+)
+{
+    DWORD dwReturn;
+    PWSTR wszFormattedMsg;
+    DWORD fIgnoreInserts = 0;
+
+IfExcept:
+    __try{
+        dwReturn = FormatMessageW( FORMAT_MESSAGE_ALLOCATE_BUFFER |
+                                    FORMAT_MESSAGE_ARGUMENT_ARRAY |
+                                    FORMAT_MESSAGE_FROM_HMODULE |
+                                    FORMAT_MESSAGE_FROM_SYSTEM | 
+                                    fIgnoreInserts,
+                                    hModule,
+                                    dwEventId,
+                                    dwLandIg,
+                                    ( LPWSTR )&wszFormattedMsg,
+                                    0,
+                                    ( va_list* )pwszStrings );
+        if ( dwReturn ){
+            return wszFormattedMsg;
+        }
+        else{
+            OutputError( "%s(): FormatMessageW() failed with %lu" CRLF,
+                            __FUNCTION__, GetLastError() );
+            return NULL;
+        }
+    }
+     __except ( ( GetExceptionCode() == EXCEPTION_ACCESS_VIOLATION )  ? 
+                EXCEPTION_EXECUTE_HANDLER : EXCEPTION_CONTINUE_SEARCH ){
+        if ( !fIgnoreInserts ){
+            fIgnoreInserts = FORMAT_MESSAGE_IGNORE_INSERTS;
+            goto IfExcept; 
+        }
+        else{
+            return NULL;
+        }
+    }
+}
+
+HMODULE
+EventLoggingModuleFromEventSource(
+    __in PCWSTR     wszEventSource
+)
+{
+    if ( !wcscmp( WszEsetestEseEventSource(), wszEventSource ) ){
+        return HmodEsetestEseDll();
+    }
+    else if ( !wcscmp( WszEsetestEsebackEventSource(), wszEventSource ) ){
+        return HmodEsetestEsebackDll();
+    }
+    return NULL;    
+}
+
+VOID
+EventLoggingPrintEvent(
+    __in PCWSTR                         wszEventLog,
+    __in PCWSTR                         wszEventSource,
+    __in PSYSTEMTIME                        pTimeGenerated,
+    __in WORD                           wEventType,
+    __in WORD                           wEventCategory,
+    __in DWORD                          dwEventId,
+    __in DWORD                          dwLangId,
+    __in_ecount_opt( cStrings ) PWSTR*  pwszStrings,
+    __in WORD                           cStrings,
+    __in_bcount_opt( cbRawData ) PVOID  pRawData,
+    __in DWORD                          cbRawData
+)
+{
+    HMODULE hModule;
+    PWSTR wszFormattedMsg;
+        
+    tprintf( CRLF );
+    tprintf( "Event log: %S" CRLF, wszEventLog );   
+    tprintf( "Event source: %S" CRLF, wszEventSource );
+    tprintf( "Time generated: %04u/%02u/%02u %02u:%02u:%02u" CRLF,
+                pTimeGenerated->wYear, pTimeGenerated->wMonth, pTimeGenerated->wDay,
+                pTimeGenerated->wHour, pTimeGenerated->wMinute, pTimeGenerated->wSecond );
+    tprintf( "Event type: %u" CRLF, wEventType );
+    tprintf( "Event category: %u" CRLF, wEventCategory );
+    tprintf( "Event ID: %u" CRLF, ( WORD )dwEventId );
+    tprintf( "Raw data size: %lu" CRLF, cbRawData );
+    tprintf( "Number of strings: %u" CRLF, cStrings );
+    for ( WORD i = 0 ; i < cStrings ; i++ ){
+        tprintf( "\tString[ %u ]: %S" CRLF, i + 1, pwszStrings[ i ] );
+    }
+    hModule = EventLoggingModuleFromEventSource( wszEventSource );
+    if ( hModule ){
+        wszFormattedMsg = EventLoggingFormatMessage( hModule, dwEventId, dwLangId, pwszStrings );
+        if ( wszFormattedMsg ){
+            tprintf( "Formatted message: %S" CRLF, wszFormattedMsg );
+            if ( NULL != LocalFree( wszFormattedMsg ) ){
+                OutputWarning( "%s(): LocalFree() failed" CRLF, __FUNCTION__ );
+            }
+        }
+    }
+    tprintf( CRLF );
+}
+
+#else
+HANDLE
+EventLoggingCreateQuery(
+    __in_opt PFNEVENTLOGGING                        pfnCallback,
+    __in_opt PCWSTR                             wszEventLog,
+    __in_ecount_opt( cEventSources ) PCWSTR*    pwszEventSources,
+    __in size_t                                 cEventSources,
+    __in_opt PSYSTEMTIME                            pTimeMin,
+    __in_opt PSYSTEMTIME                            pTimeMax,
+    __in_ecount_opt( cEventTypes ) PWORD        pEventTypes,
+    __in size_t                                 cEventTypes,
+    __in_ecount_opt( cEventCategories ) PWORD   pEventCategories,
+    __in size_t                                 cEventCategories,
+    __in_ecount_opt( cEventIds ) PDWORD         pEventIds,
+    __in size_t                                 cEventIds,
+    __in_opt PCWSTR                             wszLogFile,
+    __in_opt PVOID                              pUserData
+)
+{
+    return NULL;
+}
+
+BOOL
+EventLoggingDestroyQuery(
+    __in HANDLE hQuery
+)
+{
+    return FALSE;
+}
+
+PWSTR
+EventLoggingFormatMessage(
+    __in HMODULE        hModule,
+    __in DWORD          dwEventId,
+    __in LCID           dwLandIg,
+    __in_opt PWSTR*     pwszStrings
+)
+{
+    return NULL;
+}
+
+HMODULE
+EventLoggingModuleFromEventSource(
+    __in PCWSTR     wszEventSource
+)
+{   
+    return NULL;    
+}
+
+VOID
+EventLoggingPrintEvent(
+    __in PCWSTR                         wszEventLog,
+    __in PCWSTR                         wszEventSource,
+    __in PSYSTEMTIME                        pTimeGenerated,
+    __in WORD                           wEventType,
+    __in WORD                           wEventCategory,
+    __in DWORD                          dwEventId,
+    __in DWORD                          dwLangId,
+    __in_ecount_opt( cStrings ) PWSTR*  pwszStrings,
+    __in WORD                           cStrings,
+    __in_bcount_opt( cbRawData ) PVOID  pRawData,
+    __in DWORD                          cbRawData
+)
+{   
+}
+
+#endif

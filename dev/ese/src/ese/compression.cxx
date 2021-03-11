@@ -2168,6 +2168,7 @@ ERR CDataCompressor::ErrDecompress(
             break;
 #endif
         default:
+            Unused( fUnused );
             *pcbDataActual = 0;
             Call( ErrERRCheck( JET_errDecompressionFailed ) );
             break;

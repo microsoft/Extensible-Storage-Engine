@@ -1,0 +1,6 @@
+#define RC_VERSION_FILE_DESCRIPTION 	"ESENT Test Utility: esetestdll abstraction. Loads esent.dll.\0"
+#define RC_VERSION_INTERNAL_NAME		"esetestdll.dll\0"
+#define RC_VERSION_ORIGINAL_FILE_NAME	"esetestdll.dll\0"
+
+#include "bldver.rc"
+

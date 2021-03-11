@@ -4574,8 +4574,7 @@ LOCAL JET_ERR ErrInit(  INST        *pinst,
 
         if ( 2 == UlParam( pinst, JET_paramEnableHaPublish ) )
         {
-#ifdef MINIMAL_FUNCTIONALITY
-#else
+#ifdef USE_HAPUBLISH_API
             const WCHAR* rgwsz[] = { L"Ha Publishing started for this database.", };
 #endif
 

@@ -1,0 +1,7 @@
+#define RC_VERSION_FILE_DESCRIPTION     "Microsoft(R) Exchange Server Database Storage Engine Test embeddedunittest\0"
+#define RC_VERSION_INTERNAL_NAME    "embeddedunittest\0"
+#define RC_VERSION_ORIGINAL_FILE_NAME   "embeddedunittest.exe\0"
+
+#include "bldver.rc"
+
+

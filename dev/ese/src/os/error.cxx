@@ -4,9 +4,10 @@
 #include "osstd.hxx"
 #include "trace.hxx"
 
-#ifndef ESENT
+#ifdef USE_WATSON_API
 #include <NativeWatson.h>
 #endif
+
 #include <werapi.h>
 
 #ifndef WIDEN
@@ -251,7 +252,7 @@ static void TryRaiseFailFastException(
     const DWORD dwFlags)
 {
 #ifdef OS_LAYER_VIOLATIONS
-#ifndef ESENT
+#ifdef USE_WATSON_API
     EXCEPTION_POINTERS exceptionPointers;
     exceptionPointers.ExceptionRecord = pExceptionRecord;
     exceptionPointers.ContextRecord = pContextRecord;

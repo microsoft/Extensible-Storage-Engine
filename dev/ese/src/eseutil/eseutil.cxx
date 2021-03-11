@@ -28,7 +28,9 @@
 #include <esebcli2.h>
 #define ESEBCLI2_DLL_NAME   L"ESEBCLI2.DLL"
 
+#ifdef USE_WATSON_API
 #include <NativeWatson.h>
+#endif
 
 #define ESEBACK2_DLL_NAME   L"ESEBACK2.DLL"
 
@@ -207,7 +209,7 @@ LOCAL VOID EDBUTLPrintLogo( void )
     wprintf( L"Extensible Storage Engine Utilities for Microsoft(R) Exchange Server%c", wchNewLine );
 #endif
     wprintf( L"Version %s%c", wszVersion, wchNewLine );
-    wprintf( L"Copyright (C) Microsoft Corporation. All Rights Reserved.%c", wchNewLine );
+    wprintf( L"Copyright (c) Microsoft Corporation.\nLicensed under the MIT License.%c", wchNewLine );
     wprintf( L"%c", wchNewLine );
 }
 
@@ -5147,7 +5149,7 @@ INT __cdecl wmain( INT argc, __in_ecount(argc) LPWSTR argv[] )
     timer = TickOSTimeCurrent();
 
 
-#ifndef ESENT
+#ifdef USE_WATSON_API
     RegisterWatson();
 #endif
 

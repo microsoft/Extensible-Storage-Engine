@@ -30,3 +30,6 @@
 *.exe
 *.out
 *.app
+
+# For out-of-source CMake builds
+build/

@@ -11,11 +11,7 @@
 #include <vswriter.h>
 #pragma prefast(pop)
 
-#ifdef ESENT
-#include "esent_x.h"
-#else
-#include "jet.h"
-#endif
+#include "_jethdr.h"
 
 #pragma prefast(push)
 #pragma prefast(disable:28196, "Do not bother us with strsafe, someone else owns that.")

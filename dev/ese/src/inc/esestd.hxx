@@ -2,6 +2,8 @@
 // Licensed under the MIT License.
 
 
+#pragma once
+
 #define _CRT_RAND_S
 #include <stdlib.h>
 #include <string.h>

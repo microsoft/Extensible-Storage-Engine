@@ -2422,7 +2422,7 @@ VOID LOG::LGIUpdateCheckpoint( CHECKPOINT *pcheckpoint )
             LGPOS lgposExistingDbConsistencyT = pcheckpoint->checkpoint.le_lgposDbConsistency;
 
             OSTraceFMP( ifmp, JET_tracetagBufferManagerMaintTasks,
-                    OSFormat(   "CPUPD:////////////////////////////////////////\r\n"
+                    OSFormat(   "CPUPD:========================================\r\n"
                                 "CPUPD:                ifmp=%s\r\n"
                                 "CPUPD:                dbid=%s\r\n"
                                 "CPUPD:      existing chkpt=%s\r\n"
@@ -2433,7 +2433,7 @@ VOID LOG::LGIUpdateCheckpoint( CHECKPOINT *pcheckpoint )
                                 "CPUPD:       lgposWaypoint=%s\r\n"
                                 "CPUPD:      m_lgposToFlush=%s\r\n"
                                 "CPUPD:       m_lgposLogRec=%s\r\n"
-                                "CPUPD:////////////////////////////////////////\r\n",
+                                "CPUPD:========================================\r\n",
                                 OSFormatUnsigned( ifmp ),
                                 OSFormatUnsigned( dbid ),
                                 OSFormatLgpos( lgposExistingCheckpointT ),

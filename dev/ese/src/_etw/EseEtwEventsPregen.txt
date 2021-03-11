@@ -1,0 +1,770 @@
+// Copyright (c) Microsoft Corporation.
+// Licensed under the MIT License.
+//
+//	This file is processed by gengenetw.pl.
+//
+//	Instructions for adding new Reguar ETW Event Traces:
+//
+//		1. Add a trace entry to bottom of START_TRACE_LIST
+//			A) BaseTraceName - Ideally it should have both an ESE sub-component in front, and basic and short name.
+//			B) Pick the next event number in order for this 2nd field.
+//			C) Event verbosity level from ETW schema, such as: win:Information, win:Error, etc.
+//			D) Quoted list of keywords (must match a keyword sepcified at top of Microsoft-ETW-ESE.mc file).
+//
+//			Note: Traces ending in _Start or _Stop are treated specially to mark the event as opcode:"win:Start/Stop".
+//
+//		2. Add a definition at end of START_TRACE_DEFNS (should be matched / in-order with entry for step 1).
+//			A) Line that is "Define: BaseTraceName" to indicate start of trace field rows.
+//			B) A list of fields / arguments for the trace, which are merged into the .mc file.
+//				Note: If you add a new inType= that the gengenetw.pl script doesn't undersand, you may have
+//				to modify the gengenetw.pl perl script as well.
+//
+//			IMPORTANT NOTE: Keep list #1 and #2 in same order.
+//
+//		3. Run gengen.bat
+//
+//		4. Add a call in target code to the function generated into EseEventTrace.g.hxx, it will be the BaseTraceName
+//			you used for 1.A, prepended with "TR".  So CacheFirstDirtyPage becomes TRCacheFirstDirtyPage().
+//
+
+
+// Note: First three traces aren't used anywhere, so I(SOMEONE) am not sure what they're are or were even for.  But we want all
+// traces in order (as well as deprecated ones) so they all get auto-generated to enum and we can use them as fixed indexes into
+// arrays for fast processing / actions.
+
+START_TRACE_LIST:
+
+    TraceBaseId,                 100,  win:Verbose,        "Trace",
+    BF,                          101,  win:Verbose,        "Trace",
+    Block,                       102,  win:Verbose,        "BF"
+    CacheNewPage,                103,  win:Informational,  "BF Performance DataWorkingSet",
+    CacheReadPage,               104,  win:Informational,  "BF Performance DataWorkingSet",
+    CachePrereadPage,            105,  win:Informational,  "BF Performance DataWorkingSet",
+    CacheWritePage,              106,  win:Informational,  "BF BFRESMGR Performance DataWorkingSet",
+    CacheEvictPage,              107,  win:Informational,  "BF BFRESMGR DataWorkingSet",
+    CacheRequestPage,            108,  win:Verbose,        "BF BFRESMGR"
+    LatchPageDeprecated,         109,  win:Informational,  "BF BFRESMGR Performance",     fDeprecated
+    CacheDirtyPage,              110,  win:Verbose,        "BF BFRESMGR Performance"
+    TransactionBegin,            111,  win:Verbose,        "Transaction"
+    TransactionCommit,           112,  win:Verbose,        "Transaction"
+    TransactionRollback,         113,  win:Verbose,        "Transaction"
+    SpaceAllocExt,               114,  win:Verbose,        "Space",
+    SpaceFreeExt,                115,  win:Verbose,        "Space",
+    SpaceAllocPage,              116,  win:Verbose,        "Space DataWorkingSet",
+    SpaceFreePage,               117,  win:Verbose,        "Space DataWorkingSet",
+    IorunEnqueue,                118,  win:Informational,  "IO",                          fIODiagnoseChannel
+    IorunDequeue,                119,  win:Informational,  "IO",                          fIODiagnoseChannel
+    IOCompletion,                120,  win:Informational,  "IO",                          fIODiagnoseChannel
+    LogStall,                    121,  win:Warning,        "LOG StallLatencies"
+    LogWrite,                    122,  win:Informational,  "LOG"
+    EventLogInfo,                123,  win:Informational,  "Trace",                       fOpChannel
+    EventLogWarn,                124,  win:Warning,        "Trace",                       fOpChannel
+    EventLogError,               125,  win:Error,          "Trace",                       fOpChannel
+    TimerQueueScheduleDeprecated,126,  win:Verbose,        "Task",                        fDeprecated
+    TimerQueueRunDeprecated,     127,  win:Verbose,        "Task",                        fDeprecated
+    TimerQueueCancelDeprecated,  128,  win:Verbose,        "Task",                        fDeprecated
+    TimerTaskSchedule,           129,  win:Verbose,        "Task",
+    TimerTaskRun,                130,  win:Verbose,        "Task",
+    TimerTaskCancel,             131,  win:Verbose,        "Task",
+    TaskManagerPost,             132,  win:Verbose,        "Task",
+    TaskManagerRun,              133,  win:Verbose,        "Task",
+    GPTaskManagerPost,           134,  win:Verbose,        "Task",
+    GPTaskManagerRun,            135,  win:Verbose,        "Task",
+    TestMarker,                  136,  win:Informational,  "Test",
+    ThreadCreate,                137,  win:Informational,  "Task",
+    ThreadStart,                 138,  win:Informational,  "Task",
+    CacheVersionPage,            139,  win:Informational,  "BF Performance",
+    CacheVersionCopyPage,        140,  win:Informational,  "BF Performance",
+    CacheResize,                 141,  win:Informational,  "BF Performance",
+    CacheLimitResize,            142,  win:Informational,  "BF Performance",
+    CacheScavengeProgress,       143,  win:Informational,  "BF Performance",
+    ApiCall_Start,               144,  win:Informational,  "Performance",
+    ApiCall_Stop,                145,  win:Informational,  "Performance",                fStopCodeNoTask
+    ResMgrInit,                  146,  win:Informational,  "BFRESMGR",
+    ResMgrTerm,                  147,  win:Informational,  "BFRESMGR",
+    CacheCachePage,              148,  win:Verbose,        "BF BFRESMGR",
+    MarkPageAsSuperCold,         149,  win:Verbose,        "BF BFRESMGR",
+    CacheMissLatency,            150,  win:Informational,  "BF StallLatencies",
+    BTreePrereadPageRequest,     151,  win:Informational,  "Performance",
+    DiskFlushFileBuffers,        152,  win:Informational,  "IO",
+    DiskFlushFileBuffersBegin,   153,  win:Informational,  "IO",
+    CacheFirstDirtyPage,         154,  win:Informational,  "BF DataWorkingSet",
+    SysStationId,                155,  win:Informational,  "StationId",
+    InstStationId,               156,  win:Informational,  "StationId",
+    FmpStationId,                157,  win:Informational,  "StationId",
+    DiskStationId,               158,  win:Informational,  "StationId",
+    FileStationId,               159,  win:Informational,  "StationId",
+    IsamDbfilehdrInfo,           160,  win:Informational,  "StationId",
+    DiskOsDiskCacheInfo,         161,  win:Informational,  "StationId",
+    DiskOsStorageWriteCacheProp, 162,  win:Informational,  "StationId",
+    DiskOsDeviceSeekPenaltyDesc, 163,  win:Informational,  "StationId",
+    DirtyPage2Deprecated,        164,  win:Informational,  "",                            fDeprecated
+    IOCompletion2,               165,  win:Informational,  "IOEX",
+    FCBPurgeFailure,             166,  win:Informational,  "",
+    IOLatencySpikeNotice,        167,  win:Informational,  "StallLatencies",
+    IOCompletion2Sess,           168,  win:Informational,  "IOSESS",
+    IOIssueThreadPost,           169,  win:Informational,  "IO"
+    IOIssueThreadPosted,         170,  win:Informational,  "IO"
+    IOThreadIssueStart,          171,  win:Informational,  "IO"
+    IOThreadIssuedDisk,          172,  win:Informational,  "IO"
+    IOThreadIssueProcessedIO,    173,  win:Informational,  "IO"
+    IOIoreqCompletion,           174,  win:Informational,  "IO StallLatencies"
+    CacheMemoryUsage,            175,  win:Informational,  "SubstrateTelemetry"
+    CacheSetLgposModify,         176,  win:Verbose,        "BF BFRESMGR"
+
+START_TRACE_DEFNS:
+
+    Define: TraceBaseId
+
+    Define: BF
+
+    Define: Block
+
+    Define: CacheNewPage
+            <data  inType="win:UInt32"              name="ifmp"               />
+            <data  inType="win:UInt32"              name="pgno"               />
+            <data  inType="win:UInt32"              name="LatchFlags"         outType="win:HexInt32"             />
+            <data  inType="win:UInt32"              name="objid"              />
+            <data  inType="win:UInt32"              name="PageFlags"          outType="win:HexInt32"             map="ESE_PageFlagsMap"  />
+            <data  inType="win:UInt32"              name="UserId"             outType="win:HexInt32"             />
+            <data  inType="win:UInt8"               name="OperationId"        />
+            <data  inType="win:UInt8"               name="OperationType"      />
+            <data  inType="win:UInt8"               name="ClientType"         />
+            <data  inType="win:UInt8"               name="Flags"              outType="win:HexInt8"              />
+            <data  inType="win:UInt32"              name="CorrelationId"      outType="win:HexInt32"             />
+            <data  inType="win:UInt8"               name="Iorp"               map="ESE_IorpMap"                  />
+            <data  inType="win:UInt8"               name="Iors"               map="ESE_IorsMap"                  />
+            <data  inType="win:UInt8"               name="Iort"               map="ESE_IortMap"                  />
+            <data  inType="win:UInt8"               name="Ioru"               />
+            <data  inType="win:UInt8"               name="Iorf"               outType="win:HexInt8"              map="ESE_IorfMap"  />
+            <data  inType="win:UInt8"               name="ParentObjectClass"  />
+            <data  inType="win:UInt64"              name="dbtimeDirtied"      />
+            <data  inType="win:UInt16"              name="itagMicFree"        />
+            <data  inType="win:UInt16"              name="cbFree"             />
+
+    Define: CacheReadPage
+            <data  inType="win:UInt32"              name="ifmp"               />
+            <data  inType="win:UInt32"              name="pgno"               />
+            <data  inType="win:UInt32"              name="LatchFlags"         outType="win:HexInt32"             />
+            <data  inType="win:UInt32"              name="objid"              />
+            <data  inType="win:UInt32"              name="PageFlags"          outType="win:HexInt32"             map="ESE_PageFlagsMap"  />
+            <data  inType="win:UInt32"              name="UserId"             outType="win:HexInt32"             />
+            <data  inType="win:UInt8"               name="OperationId"        />
+            <data  inType="win:UInt8"               name="OperationType"      />
+            <data  inType="win:UInt8"               name="ClientType"         />
+            <data  inType="win:UInt8"               name="Flags"              outType="win:HexInt8"              />
+            <data  inType="win:UInt32"              name="CorrelationId"      outType="win:HexInt32"             />
+            <data  inType="win:UInt8"               name="Iorp"               map="ESE_IorpMap"                  />
+            <data  inType="win:UInt8"               name="Iors"               map="ESE_IorsMap"                  />
+            <data  inType="win:UInt8"               name="Iort"               map="ESE_IortMap"                  />
+            <data  inType="win:UInt8"               name="Ioru"               />
+            <data  inType="win:UInt8"               name="Iorf"               outType="win:HexInt8"              map="ESE_IorfMap"  />
+            <data  inType="win:UInt8"               name="ParentObjectClass"  />
+            <data  inType="win:UInt64"              name="dbtimeDirtied"      />
+            <data  inType="win:UInt16"              name="itagMicFree"        />
+            <data  inType="win:UInt16"              name="cbFree"             />
+
+    Define: CachePrereadPage
+            <data  inType="win:UInt32"              name="ifmp"               />
+            <data  inType="win:UInt32"              name="pgno"               />
+            <data  inType="win:UInt32"              name="UserId"             outType="win:HexInt32"             />
+            <data  inType="win:UInt8"               name="OperationId"        />
+            <data  inType="win:UInt8"               name="OperationType"      />
+            <data  inType="win:UInt8"               name="ClientType"         />
+            <data  inType="win:UInt8"               name="Flags"              outType="win:HexInt8"              />
+            <data  inType="win:UInt32"              name="CorrelationId"      outType="win:HexInt32"             />
+            <data  inType="win:UInt8"               name="Iorp"               map="ESE_IorpMap"                  />
+            <data  inType="win:UInt8"               name="Iors"               map="ESE_IorsMap"                  />
+            <data  inType="win:UInt8"               name="Iort"               map="ESE_IortMap"                  />
+            <data  inType="win:UInt8"               name="Ioru"               />
+            <data  inType="win:UInt8"               name="Iorf"               outType="win:HexInt8"              map="ESE_IorfMap"  />
+            <data  inType="win:UInt8"               name="ParentObjectClass"  />
+
+    Define: CacheWritePage
+            <data  inType="win:UInt32"              name="tick"               />
+            <data  inType="win:UInt32"              name="ifmp"               />
+            <data  inType="win:UInt32"              name="pgno"               />
+            <data  inType="win:UInt32"              name="objid"              />
+            <data  inType="win:UInt32"              name="PageFlags"          outType="win:HexInt32"             map="ESE_PageFlagsMap"  />
+            <data  inType="win:UInt32"              name="DirtyLevel"         map="ESE_DirtyLevelMap"            />
+            <data  inType="win:UInt32"              name="UserId"             outType="win:HexInt32"             />
+            <data  inType="win:UInt8"               name="OperationId"        />
+            <data  inType="win:UInt8"               name="OperationType"      />
+            <data  inType="win:UInt8"               name="ClientType"         />
+            <data  inType="win:UInt8"               name="Flags"              outType="win:HexInt8"              />
+            <data  inType="win:UInt32"              name="CorrelationId"      outType="win:HexInt32"             />
+            <data  inType="win:UInt8"               name="Iorp"               map="ESE_IorpMap"                  />
+            <data  inType="win:UInt8"               name="Iors"               map="ESE_IorsMap"                  />
+            <data  inType="win:UInt8"               name="Iort"               map="ESE_IortMap"                  />
+            <data  inType="win:UInt8"               name="Ioru"               />
+            <data  inType="win:UInt8"               name="Iorf"               outType="win:HexInt8"              map="ESE_IorfMap"  />
+            <data  inType="win:UInt8"               name="ParentObjectClass"  />
+
+    Define: CacheEvictPage
+            <data  inType="win:UInt32"              name="tick"               />
+            <data  inType="win:UInt32"              name="ifmp"               />
+            <data  inType="win:UInt32"              name="pgno"               />
+            <data  inType="win:UInt32"              name="fCurrentVersion"    />
+            <data  inType="win:Int32"               name="errBF"              />
+            <data  inType="win:UInt32"              name="bfef"               outType="win:HexInt32"             />
+            <data  inType="win:UInt32"              name="pctPriority"        />
+
+    Define: CacheRequestPage
+            <data  inType="win:UInt32"              name="tick"               />
+            <data  inType="win:UInt32"              name="ifmp"               />
+            <data  inType="win:UInt32"              name="pgno"               />
+            <data  inType="win:UInt32"              name="bflf"               outType="win:HexInt32"             />
+            <data  inType="win:UInt32"              name="objid"              />
+            <data  inType="win:UInt32"              name="PageFlags"          outType="win:HexInt32"             map="ESE_PageFlagsMap"  />
+            <data  inType="win:UInt32"              name="bflt"               />
+            <data  inType="win:UInt32"              name="pctPriority"        />
+            <data  inType="win:UInt32"              name="bfrtf"              />
+            <data  inType="win:UInt8"               name="ClientType"         />
+
+    Define: LatchPageDeprecated
+            // No fields - means no template for this trace, but there will be a structure.
+
+    Define: CacheDirtyPage
+            <data  inType="win:UInt32"              name="tick"               />
+            <data  inType="win:UInt32"              name="ifmp"               />
+            <data  inType="win:UInt32"              name="pgno"               />
+            <data  inType="win:UInt32"              name="objid"              />
+            <data  inType="win:UInt32"              name="PageFlags"          outType="win:HexInt32"             map="ESE_PageFlagsMap"  />
+            <data  inType="win:UInt32"              name="DirtyLevel"         map="ESE_DirtyLevelMap"            />
+            <data  inType="win:UInt64"              name="LgposModify"        outType="win:HexInt64"             />
+            <data  inType="win:UInt32"              name="UserId"             outType="win:HexInt32"             />
+            <data  inType="win:UInt8"               name="OperationId"        />
+            <data  inType="win:UInt8"               name="OperationType"      />
+            <data  inType="win:UInt8"               name="ClientType"         />
+            <data  inType="win:UInt8"               name="Flags"              outType="win:HexInt8"              />
+            <data  inType="win:UInt32"              name="CorrelationId"      outType="win:HexInt32"             />
+            <data  inType="win:UInt8"               name="Iorp"               map="ESE_IorpMap"                  />
+            <data  inType="win:UInt8"               name="Iors"               map="ESE_IorsMap"                  />
+            <data  inType="win:UInt8"               name="Iort"               map="ESE_IortMap"                  />
+            <data  inType="win:UInt8"               name="Ioru"               />
+            <data  inType="win:UInt8"               name="Iorf"               outType="win:HexInt8"              map="ESE_IorfMap"  />
+            <data  inType="win:UInt8"               name="ParentObjectClass"  />
+
+    Define: TransactionBegin
+            <data  inType="win:Pointer"             name="SessionNumber"      />
+            <data  inType="win:Pointer"             name="TransactionNumber"  />
+            <data  inType="win:UInt8"               name="TransactionLevel"   />
+
+    Define: TransactionCommit
+            <data  inType="win:Pointer"             name="SessionNumber"      />
+            <data  inType="win:Pointer"             name="TransactionNumber"  />
+            <data  inType="win:UInt8"               name="TransactionLevel"   />
+
+    Define: TransactionRollback
+            <data  inType="win:Pointer"             name="SessionNumber"      />
+            <data  inType="win:Pointer"             name="TransactionNumber"  />
+            <data  inType="win:UInt8"               name="TransactionLevel"   />
+
+    Define: SpaceAllocExt
+            <data  inType="win:UInt32"              name="ifmp"               />
+            <data  inType="win:UInt32"              name="pgnoFDP"            />
+            <data  inType="win:UInt32"              name="pgnoFirst"          />
+            <data  inType="win:UInt32"              name="cpg"                />
+            <data  inType="win:UInt32"              name="objidFDP"           />
+            <data  inType="win:UInt8"               name="tce"                />
+
+    Define: SpaceFreeExt
+            <data  inType="win:UInt32"              name="ifmp"               />
+            <data  inType="win:UInt32"              name="pgnoFDP"            />
+            <data  inType="win:UInt32"              name="pgnoFirst"          />
+            <data  inType="win:UInt32"              name="cpg"                />
+            <data  inType="win:UInt32"              name="objidFDP"           />
+            <data  inType="win:UInt8"               name="tce"                />
+
+    Define: SpaceAllocPage
+            <data  inType="win:UInt32"              name="ifmp"               />
+            <data  inType="win:UInt32"              name="pgnoFDP"            />
+            <data  inType="win:UInt32"              name="pgnoAlloc"          />
+            <data  inType="win:UInt32"              name="objidFDP"           />
+            <data  inType="win:UInt8"               name="tce"                />
+
+    Define: SpaceFreePage
+            <data  inType="win:UInt32"              name="ifmp"               />
+            <data  inType="win:UInt32"              name="pgnoFDP"            />
+            <data  inType="win:UInt32"              name="pgnoFree"           />
+            <data  inType="win:UInt32"              name="objidFDP"           />
+            <data  inType="win:UInt8"               name="tce"                />
+
+    Define: IorunEnqueue
+            <data  inType="win:UInt64"              name="iFile"              />
+            <data  inType="win:UInt64"              name="ibOffset"           />
+            <data  inType="win:UInt32"              name="cbData"             />
+            <data  inType="win:UInt32"              name="tidAlloc"           />
+            <data  inType="win:UInt32"              name="fHeapA"             />
+            <data  inType="win:UInt32"              name="fWrite"             />
+            <data  inType="win:UInt32"              name="EngineFileType"     map="ESE_IofileMap"                />
+            <data  inType="win:UInt64"              name="EngineFileId"       />
+            <data  inType="win:UInt32"              name="cusecEnqueueLatency" />
+
+    Define: IorunDequeue
+            <data  inType="win:UInt64"              name="iFile"              />
+            <data  inType="win:UInt64"              name="ibOffset"           />
+            <data  inType="win:UInt32"              name="cbData"             />
+            <data  inType="win:UInt32"              name="tidAlloc"           />
+            <data  inType="win:UInt32"              name="fHeapA"             />
+            <data  inType="win:UInt32"              name="fWrite"             />
+            <data  inType="win:UInt32"              name="Iorp"               map="ESE_IorpMap"                  />
+            <data  inType="win:UInt32"              name="Iors"               map="ESE_IorsMap"                  />
+            <data  inType="win:UInt32"              name="Ioru"               />
+            <data  inType="win:UInt32"              name="Iorf"               outType="win:HexInt32"             map="ESE_IorfMap"                />
+            <data  inType="win:UInt32"              name="grbitQos"           outType="win:HexInt32"             />
+            <data  inType="win:UInt64"              name="cmsecTimeInQueue"   />
+            <data  inType="win:UInt32"              name="EngineFileType"     map="ESE_IofileMap"                />
+            <data  inType="win:UInt64"              name="EngineFileId"       />
+            <data  inType="win:UInt64"              name="cDispatchPass"      />
+            <data  inType="win:UInt16"              name="cIorunCombined"     />
+            <data  inType="win:UInt32"              name="cusecDequeueLatency"  />
+
+    Define: IOCompletion
+            <data  inType="win:UInt64"              name="iFile"              />
+            <data  inType="win:UInt32"              name="fMultiIor"          />
+            <data  inType="win:UInt8"               name="fWrite"             />
+            <data  inType="win:UInt32"              name="UserId"             outType="win:HexInt32"             />
+            <data  inType="win:UInt8"               name="OperationId"        />
+            <data  inType="win:UInt8"               name="OperationType"      />
+            <data  inType="win:UInt8"               name="ClientType"         />
+            <data  inType="win:UInt8"               name="Flags"              outType="win:HexInt8"              />
+            <data  inType="win:UInt32"              name="CorrelationId"      outType="win:HexInt32"             />
+            <data  inType="win:UInt8"               name="Iorp"               map="ESE_IorpMap"                  />
+            <data  inType="win:UInt8"               name="Iors"               map="ESE_IorsMap"                  />
+            <data  inType="win:UInt8"               name="Iort"               map="ESE_IortMap"                  />
+            <data  inType="win:UInt8"               name="Ioru"               />
+            <data  inType="win:UInt8"               name="Iorf"               outType="win:HexInt8"              map="ESE_IorfMap"                />
+            <data  inType="win:UInt8"               name="ParentObjectClass"  />
+            <data  inType="win:UInt64"              name="ibOffset"           />
+            <data  inType="win:UInt32"              name="cbTransfer"         />
+            <data  inType="win:UInt32"              name="error"              />
+            <data  inType="win:UInt32"              name="qosHighestFirst"    outType="win:HexInt32"             />
+            <data  inType="win:UInt64"              name="cmsecIOElapsed"     />
+            <data  inType="win:UInt32"              name="dtickQueueDelay"    />
+            <data  inType="win:UInt32"              name="tidAlloc"           />
+            <data  inType="win:UInt32"              name="EngineFileType"     map="ESE_IofileMap"                />
+            <data  inType="win:UInt64"              name="EngineFileId"       />
+            <data  inType="win:UInt32"              name="fmfFile"            />
+            <data  inType="win:UInt32"              name="DiskNumber"         />
+            <data  inType="win:UInt32"              name="dwEngineObjid"      />
+            <data  inType="win:UInt64"              name="qosIOComplete"      />
+
+    Define: LogStall
+
+    Define: LogWrite
+            <data  inType="win:Int32"               name="lgenData"           />
+            <data  inType="win:UInt32"              name="ibLogData"          />
+            <data  inType="win:UInt32"              name="cbLogData"          />
+
+    Define: EventLogInfo
+            <data  inType="win:UnicodeString"       name="szTrace"            />
+
+    Define: EventLogWarn
+            <data  inType="win:UnicodeString"       name="szTrace"            />
+
+    Define: EventLogError
+            <data  inType="win:UnicodeString"       name="szTrace"            />
+
+    Define: TimerQueueScheduleDeprecated
+            // No fields - means no template for this trace, but there will be a structure.
+
+    Define: TimerQueueRunDeprecated
+            // No fields - means no template for this trace, but there will be a structure.
+
+    Define: TimerQueueCancelDeprecated
+            // No fields - means no template for this trace, but there will be a structure.
+
+    Define: TimerTaskSchedule
+            <data  inType="win:Pointer"             name="posttTimerHandle"   />
+            <data  inType="win:Pointer"             name="pfnTask"            />
+            <data  inType="win:Pointer"             name="pvTaskGroupContext" />
+            <data  inType="win:Pointer"             name="pvRuntimeContext"   />
+            <data  inType="win:UInt32"              name="dtickMinDelay"      />
+            <data  inType="win:UInt32"              name="dtickSlopDelay"     />
+
+    Define: TimerTaskRun
+            <data  inType="win:Pointer"             name="posttTimerHandle"   />
+            <data  inType="win:Pointer"             name="pfnTask"            />
+            <data  inType="win:Pointer"             name="pvTaskGroupContext" />
+            <data  inType="win:Pointer"             name="pvRuntimeContext"   />
+            <data  inType="win:UInt64"              name="cRuns"              />
+
+    Define: TimerTaskCancel
+            <data  inType="win:Pointer"             name="posttTimerHandle"   />
+            <data  inType="win:Pointer"             name="pfnTask"            />
+            <data  inType="win:Pointer"             name="pvTaskGroupContext" />
+
+    Define: TaskManagerPost
+            <data  inType="win:Pointer"             name="ptm"                />
+            <data  inType="win:Pointer"             name="pfnCompletion"      />
+            <data  inType="win:UInt32"              name="dwCompletionKey1"   />
+            <data  inType="win:Pointer"             name="dwCompletionKey2"   />
+
+    Define: TaskManagerRun
+            <data  inType="win:Pointer"             name="ptm"                />
+            <data  inType="win:Pointer"             name="pfnCompletion"      />
+            <data  inType="win:UInt32"              name="dwCompletionKey1"   />
+            <data  inType="win:Pointer"             name="dwCompletionKey2"   />
+            <data  inType="win:UInt32"              name="gle"                />
+            <data  inType="win:Pointer"             name="dwThreadContext"    />
+
+    Define: GPTaskManagerPost
+            <data  inType="win:Pointer"             name="pgptm"              />
+            <data  inType="win:Pointer"             name="pfnCompletion"      />
+            <data  inType="win:Pointer"             name="pvParam"            />
+            <data  inType="win:Pointer"             name="pTaskInfo"          />
+
+    Define: GPTaskManagerRun
+            <data  inType="win:Pointer"             name="pgptm"              />
+            <data  inType="win:Pointer"             name="pfnCompletion"      />
+            <data  inType="win:Pointer"             name="pvParam"            />
+            <data  inType="win:Pointer"             name="pTaskInfo"          />
+
+    Define: TestMarker
+            <data  inType="win:UInt64"              name="qwMarkerID"         />
+            <data  inType="win:AnsiString"          name="szAnnotation"       />
+
+    Define: ThreadCreate
+            <data  inType="win:Pointer"             name="Thread"             />
+            <data  inType="win:Pointer"             name="pfnStart"           />
+            <data  inType="win:Pointer"             name="dwParam"            />
+
+    Define: ThreadStart
+            <data  inType="win:Pointer"             name="Thread"             />
+            <data  inType="win:Pointer"             name="pfnStart"           />
+            <data  inType="win:Pointer"             name="dwParam"            />
+
+    Define: CacheVersionPage
+            <data  inType="win:UInt32"              name="ifmp"               />
+            <data  inType="win:UInt32"              name="pgno"               />
+
+    Define: CacheVersionCopyPage
+            <data  inType="win:UInt32"              name="ifmp"               />
+            <data  inType="win:UInt32"              name="pgno"               />
+
+    Define: CacheResize
+            <data  inType="win:Int64"               name="cbfCacheAddressableInitial" />
+            <data  inType="win:Int64"               name="cbfCacheSizeInitial" />
+            <data  inType="win:Int64"               name="cbfCacheAddressableFinal" />
+            <data  inType="win:Int64"               name="cbfCacheSizeFinal"  />
+
+    Define: CacheLimitResize
+            <data  inType="win:Int64"               name="cbfCacheSizeLimitInitial" />
+            <data  inType="win:Int64"               name="cbfCacheSizeLimitFinal" />
+
+    Define: CacheScavengeProgress
+            <data  inType="win:Int64"               name="iRun"               />
+            <data  inType="win:Int32"               name="cbfVisited"         />
+            <data  inType="win:Int32"               name="cbfCacheSize"       />
+            <data  inType="win:Int32"               name="cbfCacheTarget"     />
+            <data  inType="win:Int32"               name="cbfCacheSizeStartShrink" />
+            <data  inType="win:UInt32"              name="dtickShrinkDuration" />
+            <data  inType="win:Int32"               name="cbfAvail"           />
+            <data  inType="win:Int32"               name="cbfAvailPoolLow"    />
+            <data  inType="win:Int32"               name="cbfAvailPoolHigh"   />
+            <data  inType="win:Int32"               name="cbfFlushPending"    />
+            <data  inType="win:Int32"               name="cbfFlushPendingSlow" />
+            <data  inType="win:Int32"               name="cbfFlushPendingHung" />
+            <data  inType="win:Int32"               name="cbfOutOfMemory"     />
+            <data  inType="win:Int32"               name="cbfPermanentErrs"   />
+            <data  inType="win:Int32"               name="eStopReason"        />
+            <data  inType="win:Int32"               name="errRun"             />
+
+    Define: ApiCall_Start
+            <data  inType="win:UInt32"              name="opApi"              map="ESE_ApiCallNameMap"           />
+
+    Define: ApiCall_Stop
+            <data  inType="win:UInt32"              name="opApi"              map="ESE_ApiCallNameMap"           />
+            <data  inType="win:Int32"               name="err"                />
+
+    Define: ResMgrInit
+            <data  inType="win:UInt32"              name="tick"               />
+            <data  inType="win:Int32"               name="K"                  />
+            <data  inType="win:Double"              name="csecCorrelatedTouch" />
+            <data  inType="win:Double"              name="csecTimeout"        />
+            <data  inType="win:Double"              name="csecUncertainty"    />
+            <data  inType="win:Double"              name="dblHashLoadFactor"  />
+            <data  inType="win:Double"              name="dblHashUniformity"  />
+            <data  inType="win:Double"              name="dblSpeedSizeTradeoff" />
+
+    Define: ResMgrTerm
+            <data  inType="win:UInt32"              name="tick"               />
+
+    Define: CacheCachePage
+            <data  inType="win:UInt32"              name="tick"               />
+            <data  inType="win:UInt32"              name="ifmp"               />
+            <data  inType="win:UInt32"              name="pgno"               />
+            <data  inType="win:UInt32"              name="bflf"               outType="win:HexInt32"             />
+            <data  inType="win:UInt32"              name="bflt"               />
+            <data  inType="win:UInt32"              name="pctPriority"        />
+            <data  inType="win:UInt32"              name="bfrtf"              />
+            <data  inType="win:UInt8"               name="ClientType"         />
+
+    Define: MarkPageAsSuperCold
+            <data  inType="win:UInt32"              name="tick"               />
+            <data  inType="win:UInt32"              name="ifmp"               />
+            <data  inType="win:UInt32"              name="pgno"               />
+
+    Define: CacheMissLatency
+            <data  inType="win:UInt32"              name="ifmp"               />
+            <data  inType="win:UInt32"              name="pgno"               />
+            <data  inType="win:UInt32"              name="dwUserId"           outType="win:HexInt32"             />
+            <data  inType="win:UInt8"               name="bOperationId"       />
+            <data  inType="win:UInt8"               name="bOperationType"     />
+            <data  inType="win:UInt8"               name="bClientType"        />
+            <data  inType="win:UInt8"               name="bFlags"             outType="win:HexInt8"              />
+            <data  inType="win:UInt32"              name="dwCorrelationId"    outType="win:HexInt32"             />
+            <data  inType="win:UInt8"               name="iorp"               map="ESE_IorpMap"                  />
+            <data  inType="win:UInt8"               name="iors"               map="ESE_IorsMap"                  />
+            <data  inType="win:UInt8"               name="iort"               map="ESE_IortMap"                  />
+            <data  inType="win:UInt8"               name="ioru"               />
+            <data  inType="win:UInt8"               name="iorf"               outType="win:HexInt8"              map="ESE_IorfMap"  />
+            <data  inType="win:UInt8"               name="tce"                />
+            <data  inType="win:UInt64"              name="usecsWait"          />
+            <data  inType="win:UInt8"               name="bftcmr"             />
+            <data  inType="win:UInt8"               name="bUserPriorityTag"   />
+
+    Define: BTreePrereadPageRequest
+            <data  inType="win:UInt32"              name="ifmp"               />
+            <data  inType="win:UInt32"              name="pgno"               />
+            <data  inType="win:UInt32"              name="dwUserId"           outType="win:HexInt32"             />
+            <data  inType="win:UInt8"               name="bOperationId"       />
+            <data  inType="win:UInt8"               name="bOperationType"     />
+            <data  inType="win:UInt8"               name="bClientType"        />
+            <data  inType="win:UInt8"               name="bFlags"             outType="win:HexInt8"              />
+            <data  inType="win:UInt32"              name="dwCorrelationId"    outType="win:HexInt32"             />
+            <data  inType="win:UInt8"               name="iorp"               map="ESE_IorpMap"                  />
+            <data  inType="win:UInt8"               name="iors"               map="ESE_IorsMap"                  />
+            <data  inType="win:UInt8"               name="iort"               map="ESE_IortMap"                  />
+            <data  inType="win:UInt8"               name="ioru"               />
+            <data  inType="win:UInt8"               name="iorf"               outType="win:HexInt8"              map="ESE_IorfMap"  />
+            <data  inType="win:UInt8"               name="tce"                />
+            <data  inType="win:UInt8"               name="fOpFlags"           />
+
+    Define: DiskFlushFileBuffers
+            <data  inType="win:UInt32"              name="Disk"               />
+            <data  inType="win:UnicodeString"       name="wszFileName"        />
+            <data  inType="win:UInt32"              name="iofr"               map="ESE_IofrMap"                  />
+            <data  inType="win:UInt64"              name="cioreqFileFlushing" />
+            <data  inType="win:UInt64"              name="usFfb"              />
+            <data  inType="win:UInt32"              name="error"              />
+
+    Define: DiskFlushFileBuffersBegin
+            <data  inType="win:UInt32"              name="dwDisk"             />
+            <data  inType="win:UInt64"              name="hFile"              />
+            <data  inType="win:UInt32"              name="iofr"               map="ESE_IofrMap"                  />
+
+    Define: CacheFirstDirtyPage
+            <data  inType="win:UInt32"              name="tick"               />
+            <data  inType="win:UInt32"              name="ifmp"               />
+            <data  inType="win:UInt32"              name="pgno"               />
+            <data  inType="win:UInt32"              name="objid"              />
+            <data  inType="win:UInt32"              name="fFlags"             outType="win:HexInt32"             map="ESE_PageFlagsMap"  />
+            <data  inType="win:UInt32"              name="bfdfNew"            map="ESE_DirtyLevelMap"            />
+            <data  inType="win:UInt64"              name="lgposModify"        outType="win:HexInt64"             />
+            <data  inType="win:UInt32"              name="dwUserId"           outType="win:HexInt32"             />
+            <data  inType="win:UInt8"               name="bOperationId"       />
+            <data  inType="win:UInt8"               name="bOperationType"     />
+            <data  inType="win:UInt8"               name="bClientType"        />
+            <data  inType="win:UInt8"               name="bFlags"             outType="win:HexInt8"              />
+            <data  inType="win:UInt32"              name="dwCorrelationId"    outType="win:HexInt32"             />
+            <data  inType="win:UInt8"               name="iorp"               map="ESE_IorpMap"                  />
+            <data  inType="win:UInt8"               name="iors"               map="ESE_IorsMap"                  />
+            <data  inType="win:UInt8"               name="iort"               map="ESE_IortMap"                  />
+            <data  inType="win:UInt8"               name="ioru"               />
+            <data  inType="win:UInt8"               name="iorf"               outType="win:HexInt8"              map="ESE_IorfMap"  />
+            <data  inType="win:UInt8"               name="tce"                />
+
+    Define: SysStationId
+            <data  inType="win:UInt8"               name="tsidr"              />
+            <data  inType="win:UInt32"              name="dwImageVerMajor"    />
+            <data  inType="win:UInt32"              name="dwImageVerMinor"    />
+            <data  inType="win:UInt32"              name="dwImageBuildMajor"  />
+            <data  inType="win:UInt32"              name="dwImageBuildMinor"  />
+            <data  inType="win:UnicodeString"       name="wszDisplayName"     />
+
+    Define: InstStationId
+            <data  inType="win:UInt8"               name="tsidr"              />
+            <data  inType="win:UInt32"              name="iInstance"          />
+            <data  inType="win:UInt8"               name="perfstatusEvent"    />
+            <data  inType="win:UnicodeString"       name="wszInstanceName"    />
+            <data  inType="win:UnicodeString"       name="wszDisplayName"     />
+
+    Define: FmpStationId
+            <data  inType="win:UInt8"               name="tsidr"              />
+            <data  inType="win:UInt32"              name="ifmp"               />
+            <data  inType="win:UInt32"              name="iInstance"          />
+            <data  inType="win:UInt8"               name="dbid"               />
+            <data  inType="win:UnicodeString"       name="wszDatabaseName"    />
+
+    Define: DiskStationId
+            <data  inType="win:UInt8"               name="tsidr"              />
+            <data  inType="win:UInt32"              name="dwDiskNumber"       />
+            <data  inType="win:UnicodeString"       name="wszDiskPathId"      />
+            <data  inType="win:AnsiString"          name="szDiskModel"        />
+            <data  inType="win:AnsiString"          name="szDiskFirmwareRev"  />
+            <data  inType="win:AnsiString"          name="szDiskSerialNumber" />
+
+    Define: FileStationId
+            <data  inType="win:UInt8"               name="tsidr"              />
+            <data  inType="win:UInt64"              name="hFile"              />
+            <data  inType="win:UInt32"              name="dwDiskNumber"       />
+            <data  inType="win:UInt32"              name="dwEngineFileType"   map="ESE_IofileMap"                />
+            <data  inType="win:UInt64"              name="qwEngineFileId"     />
+            <data  inType="win:UInt32"              name="fmf"                />
+            <data  inType="win:UInt64"              name="cbFileSize"         />
+            <data  inType="win:UnicodeString"       name="wszAbsPath"         />
+
+    Define: IsamDbfilehdrInfo
+            <data  inType="win:UInt8"               name="tsidr"              />
+            <data  inType="win:UInt32"              name="ifmp"               />
+            <data  inType="win:UInt32"              name="filetype"           />
+            <data  inType="win:UInt32"              name="ulMagic"            />
+            <data  inType="win:UInt32"              name="ulChecksum"         />
+            <data  inType="win:UInt32"              name="cbPageSize"         />
+            <data  inType="win:UInt32"              name="ulDbFlags"          />
+            <data  inType="win:Binary" length="28"  name="psignDb"            />
+
+    Define: DiskOsDiskCacheInfo
+            <data  inType="win:UInt8"               name="tsidr"              />
+            <data  inType="win:Binary" length="24"  name="posdci"             />
+
+    Define: DiskOsStorageWriteCacheProp
+            <data  inType="win:UInt8"               name="tsidr"              />
+            <data  inType="win:Binary" length="28"  name="posswcp"            />
+
+    Define: DiskOsDeviceSeekPenaltyDesc
+            <data  inType="win:UInt8"               name="tsidr"              />
+            <data  inType="win:Binary" length="12"  name="posdspd"            />
+
+    Define: DirtyPage2Deprecated
+
+    Define: IOCompletion2
+            <data  inType="win:UnicodeString"       name="wszFilename"        />
+            <data  inType="win:UInt32"              name="fMultiIor"          />
+            <data  inType="win:UInt8"               name="fWrite"             />
+            <data  inType="win:UInt32"              name="dwUserId"           outType="win:HexInt32"             />
+            <data  inType="win:UInt8"               name="bOperationId"       />
+            <data  inType="win:UInt8"               name="bOperationType"     />
+            <data  inType="win:UInt8"               name="bClientType"        />
+            <data  inType="win:UInt8"               name="bFlags"             outType="win:HexInt8"              />
+            <data  inType="win:UInt32"              name="dwCorrelationId"    outType="win:HexInt32"             />
+            <data  inType="win:UInt8"               name="iorp"               map="ESE_IorpMap"                  />
+            <data  inType="win:UInt8"               name="iors"               map="ESE_IorsMap"                  />
+            <data  inType="win:UInt8"               name="iort"               map="ESE_IortMap"                  />
+            <data  inType="win:UInt8"               name="ioru"               />
+            <data  inType="win:UInt8"               name="iorf"               outType="win:HexInt8"              map="ESE_IorfMap"                  />
+            <data  inType="win:UInt8"               name="tce"                />
+            <data  inType="win:AnsiString"          name="szClientComponent"  />
+            <data  inType="win:AnsiString"          name="szClientAction"     />
+            <data  inType="win:AnsiString"          name="szClientActionContext"/>
+            <data  inType="win:GUID"                name="guidActivityId"     />
+            <data  inType="win:UInt64"              name="ibOffset"           />
+            <data  inType="win:UInt32"              name="cbTransfer"         />
+            <data  inType="win:UInt32"              name="dwError"            />
+            <data  inType="win:UInt32"              name="qosHighestFirst"    outType="win:HexInt32"             />
+            <data  inType="win:UInt64"              name="cmsecIOElapsed"     />
+            <data  inType="win:UInt32"              name="dtickQueueDelay"    />
+            <data  inType="win:UInt32"              name="tidAlloc"           />
+            <data  inType="win:UInt32"              name="dwEngineFileType"   map="ESE_IofileMap"                />
+            <data  inType="win:UInt64"              name="dwEngineFileId"     />
+            <data  inType="win:UInt32"              name="fmfFile"            />
+            <data  inType="win:UInt32"              name="dwDiskNumber"       />
+            <data  inType="win:UInt32"              name="dwEngineObjid"      />
+
+    Define: FCBPurgeFailure
+            <data  inType="win:UInt32"              name="iInstance"          />
+            <data  inType="win:UInt8"               name="grbitPurgeFlags"    />
+            <data  inType="win:UInt8"               name="fcbpfr"             />
+            <data  inType="win:UInt8"               name="tce"                />
+
+    Define: IOLatencySpikeNotice
+            <data  inType="win:UInt32"              name="dwDiskNumber"       />
+            <data  inType="win:UInt32"              name="dtickSpikeLength"   />
+
+    Define: IOCompletion2Sess
+            <data  inType="win:UnicodeString"       name="wszFilename"        />
+            <data  inType="win:UInt32"              name="fMultiIor"          />
+            <data  inType="win:UInt8"               name="fWrite"             />
+            <data  inType="win:UInt32"              name="dwUserId"           outType="win:HexInt32"             />
+            <data  inType="win:UInt8"               name="bOperationId"       />
+            <data  inType="win:UInt8"               name="bOperationType"     />
+            <data  inType="win:UInt8"               name="bClientType"        />
+            <data  inType="win:UInt8"               name="bFlags"             outType="win:HexInt8"              />
+            <data  inType="win:UInt32"              name="dwCorrelationId"    outType="win:HexInt32"             />
+            <data  inType="win:UInt8"               name="iorp"               map="ESE_IorpMap"                  />
+            <data  inType="win:UInt8"               name="iors"               map="ESE_IorsMap"                  />
+            <data  inType="win:UInt8"               name="iort"               map="ESE_IortMap"                  />
+            <data  inType="win:UInt8"               name="ioru"               />
+            <data  inType="win:UInt8"               name="iorf"               outType="win:HexInt8"              map="ESE_IorfMap"                  />
+            <data  inType="win:UInt8"               name="tce"                />
+            <data  inType="win:AnsiString"          name="szClientComponent"  />
+            <data  inType="win:AnsiString"          name="szClientAction"     />
+            <data  inType="win:AnsiString"          name="szClientActionContext"/>
+            <data  inType="win:GUID"                name="guidActivityId"     />
+            <data  inType="win:UInt64"              name="ibOffset"           />
+            <data  inType="win:UInt32"              name="cbTransfer"         />
+            <data  inType="win:UInt32"              name="dwError"            />
+            <data  inType="win:UInt32"              name="qosHighestFirst"    outType="win:HexInt32"             />
+            <data  inType="win:UInt64"              name="cmsecIOElapsed"     />
+            <data  inType="win:UInt32"              name="dtickQueueDelay"    />
+            <data  inType="win:UInt32"              name="tidAlloc"           />
+            <data  inType="win:UInt32"              name="dwEngineFileType"   map="ESE_IofileMap"                />
+            <data  inType="win:UInt64"              name="dwEngineFileId"     />
+            <data  inType="win:UInt32"              name="fmfFile"            />
+            <data  inType="win:UInt32"              name="dwDiskNumber"       />
+            <data  inType="win:UInt32"              name="dwEngineObjid"      />
+
+    Define: IOIssueThreadPost
+            <data  inType="win:Pointer"             name="p_osf"              />
+            <data  inType="win:UInt32"              name="cioDiskEnqueued"    />
+
+    Define: IOIssueThreadPosted
+            <data  inType="win:Pointer"             name="p_osf"              />
+            <data  inType="win:UInt32"              name="cDispatchAttempts"  />
+            <data  inType="win:UInt64"              name="usPosted"           />
+
+    Define: IOThreadIssueStart
+
+    Define: IOThreadIssuedDisk
+            <data  inType="win:UInt32"              name="dwDiskId"           />
+            <data  inType="win:UInt8"               name="fFromCompletion"    />
+            <data  inType="win:Int64"               name="ipass"              />
+            <data  inType="win:Int32"               name="err"                />
+            <data  inType="win:UInt32"              name="cioProcessed"       />
+            <data  inType="win:UInt64"              name="usRuntime"          />
+
+    Define: IOThreadIssueProcessedIO
+            <data  inType="win:Int32"               name="err"                />
+            <data  inType="win:UInt32"              name="cDisksProcessed"    />
+            <data  inType="win:UInt64"              name="usRuntime"          />
+
+    Define: IOIoreqCompletion
+            <data  inType="win:UInt8"               name="fWrite"             />
+            <data  inType="win:UInt64"              name="iFile"              />
+            <data  inType="win:UInt64"              name="ibOffset"           />
+            <data  inType="win:UInt32"              name="cbData"             />
+            <data  inType="win:UInt32"              name="dwDiskNumber"       />
+            <data  inType="win:UInt32"              name="tidAlloc"           />
+            <data  inType="win:UInt64"              name="qos"                outType="win:HexInt64"             />
+            <data  inType="win:UInt32"              name="iIoreq"             />
+            <data  inType="win:UInt32"              name="err"                />
+            <data  inType="win:UInt64"              name="usCompletionDelay"  />
+
+    Define: CacheMemoryUsage
+            <data  inType="win:UnicodeString"       name="wszFilename"        />
+            <data  inType="win:UInt8"               name="tce"                />
+            <data  inType="win:UInt32"              name="dwEngineFileType"   map="ESE_IofileMap"                />
+            <data  inType="win:UInt64"              name="dwEngineFileId"     />
+            <data  inType="win:UInt64"              name="cbMemory"           />
+            <data  inType="win:UInt32"              name="cmsecReferenceIntervalMax" />
+
+    Define: CacheSetLgposModify
+            <data  inType="win:UInt32"              name="tick"               />
+            <data  inType="win:UInt32"              name="ifmp"               />
+            <data  inType="win:UInt32"              name="pgno"               />
+            <data  inType="win:UInt64"              name="lgposModify"        outType="win:HexInt64"             />
+
+    Define: InvalidEndDefinitionsMarker
+    //	Ignore this last one - insert all event trace definitions before this one.

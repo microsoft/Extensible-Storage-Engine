@@ -1,0 +1,7 @@
+#define RC_VERSION_FILE_DESCRIPTION 	"Microsoft(R) ESE ERR Validation Unit Test\0"
+#define RC_VERSION_INTERNAL_NAME	"ERRVALIDATOR\0"
+#define RC_VERSION_ORIGINAL_FILE_NAME	"ERRVALIDATOR.EXE\0"
+
+#include "bldver.rc"
+
+

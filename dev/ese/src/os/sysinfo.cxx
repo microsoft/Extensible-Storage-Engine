@@ -3,11 +3,13 @@
 
 #include "osstd.hxx"
 
-#ifdef ESENT
+#if defined(ESENT)
 #include <slc.h>
 #include <slerror.h>
-#else
+#elif defined(ESEEX)
 #include "bldver.h"
+#elif !( defined(PRODUCT_MAJOR) && defined(PRODUCT_MINOR) && defined(BUILD_MAJOR) && defined(BUILD_MINOR) )
+#error "Please define PRODUCT_MAJOR, PRODUCT_MINOR, BUILD_MAJOR, and BUILD_MINOR in the build environment"
 #endif
 
 #ifndef RTM

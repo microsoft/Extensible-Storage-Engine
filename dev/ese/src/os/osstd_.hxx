@@ -1,6 +1,7 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
+#pragma once
 
 
 #define _CRT_RAND_S
@@ -214,11 +215,7 @@ VOID UtilReportEvent(
     const INST *        pinst = NULL,
     const LONG          lEventLoggingLevel = 1 );
 
-#ifdef ESENT
-#include "jetmsg.h"
-#else
-#include "jetmsgex.h"
-#endif
+#include "_jetmsg.h"
 
 
 

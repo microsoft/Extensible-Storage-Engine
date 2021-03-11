@@ -43,11 +43,7 @@ void OSEventReportEvent(
 #ifdef OS_LAYER_VIOLATIONS
 #include "eventu.hxx"
 
-#ifdef ESENT
-#include "jetmsg.h"
-#else
-#include "jetmsgex.h"
-#endif
+#include "_jetmsg.h"
 
 #endif
 

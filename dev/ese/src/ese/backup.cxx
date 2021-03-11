@@ -1921,7 +1921,6 @@ ERR BACKUP_CONTEXT::ErrBKOpenFile(
     if ( ibRead > 0 )
     {
         pgnoRead = PgnoOfOffset( ibRead );
-        
         if ( pgnoRead < 2 )
         {
             return ErrERRCheck( JET_errInvalidParameter );
