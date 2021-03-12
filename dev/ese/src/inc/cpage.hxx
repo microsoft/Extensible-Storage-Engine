@@ -655,6 +655,9 @@ class CPAGE
                 pgftScissorsWrite = 3,
                 pgftMax
         };
+        // The previous line needs to be "enum PageFlushType : ULONG;" to be explicit for some
+        // compilers, but let's compile this way for now to prove that it actually IS a ULONG.
+        C_ASSERT( sizeof( PageFlushType ) == sizeof( ULONG ) );
 
         INLINE static PageFlushType PgftGetNextFlushType( const PageFlushType pgft )
         {

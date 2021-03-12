@@ -2803,7 +2803,7 @@ DWORD_PTR CbVERISize( BOOL fLowMemory, BOOL fMediumMemory, DWORD_PTR cbVerStoreM
         cbVER = max( cbVER, OSMemoryPageReserveGranularity() );
     }
 
-#if DEBUG
+#ifdef DEBUG
     // reduce store size on debug to increase chance of hash collision
     cbVER = cbVER / 30;
 #endif
@@ -2817,7 +2817,7 @@ DWORD_PTR CbVERISize( BOOL fLowMemory, BOOL fMediumMemory, DWORD_PTR cbVerStoreM
 JETUNITTEST( VER, CheckVerSizing )
 //  ================================================================
 {
-#if DEBUG
+#ifdef DEBUG
     CHECK( OSMemoryPageCommitGranularity() == CbVERISize( fTrue, fFalse, 0 ) );
     CHECK( OSMemoryPageCommitGranularity() == CbVERISize( fTrue, fFalse, INT_MAX ) );
 

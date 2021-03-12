@@ -1846,7 +1846,7 @@ VOID LOG::LGIGetEffectiveWaypoint(
 
     Assert( plgposEffWaypoint );
 
-#if DEBUG
+#ifdef DEBUG
     // for debugging
     LGPOS lgposCurrentWaypoint;
     lgposCurrentWaypoint = g_rgfmp[ ifmp ].LgposWaypoint();

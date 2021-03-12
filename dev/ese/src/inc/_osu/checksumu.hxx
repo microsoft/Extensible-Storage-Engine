@@ -23,9 +23,9 @@ struct PAGECHECKSUM
     XECHECKSUM rgChecksum[ cxeChecksumPerPage ];
 
 public:
-    PAGECHECKSUM::PAGECHECKSUM( void ) { Init( 0, 0, 0, 0 ); }
-    PAGECHECKSUM::PAGECHECKSUM( XECHECKSUM xe ) { Init( xe, 0, 0, 0 ); }
-    PAGECHECKSUM::PAGECHECKSUM( XECHECKSUM xe0, XECHECKSUM xe1, XECHECKSUM xe2, XECHECKSUM xe3 ) { Init( xe0, xe1, xe2, xe3 ); }
+    PAGECHECKSUM( void ) { Init( 0, 0, 0, 0 ); }
+    PAGECHECKSUM( XECHECKSUM xe ) { Init( xe, 0, 0, 0 ); }
+    PAGECHECKSUM( XECHECKSUM xe0, XECHECKSUM xe1, XECHECKSUM xe2, XECHECKSUM xe3 ) { Init( xe0, xe1, xe2, xe3 ); }
 
 private:
     void Init( XECHECKSUM xe0, XECHECKSUM xe1, XECHECKSUM xe2, XECHECKSUM xe3 )

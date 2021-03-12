@@ -91,7 +91,7 @@ VOID DBUTLSprintHex(
 INLINE const CHAR * SzColumnType( const JET_COLTYP coltyp )
 //  ================================================================
 {
-    CHAR * szType;
+    const CHAR * szType;
 
     switch ( coltyp )
     {

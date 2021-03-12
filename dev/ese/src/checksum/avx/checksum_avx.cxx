@@ -20,7 +20,7 @@ inline XECHECKSUM MakeChecksumFromECCXORAndPgno(
     return ( high | low );
 }
 
-#if ( defined _AMD64_ || defined _X86_ ) && !defined _CHPE_X86_ARM64_
+#if ( defined _M_AMD64 || defined _M_IX86 ) && !defined _CHPE_X86_ARM64_
 
 #include <intrin.h>
 #include <emmintrin.h>
@@ -83,7 +83,7 @@ inline LONG lParityMaskAVX( const __m256i qq )
     const __m128i dq3 = _mm_shuffle_epi32( dq2, 0x4e);
     const __m128i dq4 = dq3 ^ dq2;  // reduce to 64-bits
 
-#if ( defined _X86_ )
+#if ( defined _M_IX86  )
     // reduce to 32-bits
     const __m128i dq5 = _mm_shuffle_epi32( dq4, 0x1b );
     const __m128i dq6 = dq5 ^ dq4;

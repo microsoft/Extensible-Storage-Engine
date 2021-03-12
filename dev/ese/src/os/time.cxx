@@ -342,7 +342,7 @@ HRT HrtHRTCount()
     //  prevent hot update of the global
 
 
-#ifdef _X86_
+#ifndef _WIN64
 
     //  given that we don't want to pay synchronization costs here, we will do
     //  a dirty compare-and-set, but for 32-bit processors, this may lead to
@@ -354,14 +354,14 @@ HRT HrtHRTCount()
         AtomicExchange( (__int64*)&g_hrtLastGiven, (__int64)hrt );
     }
 
-#else   //   !_X86_
+#else
 
     if ( ( hrt - g_hrtLastGiven ) > g_dhrtLastGivenUpdTimeout )
     {
         g_hrtLastGiven = hrt;
     }
 
-#endif  //   _X86_
+#endif
 
     return hrt;
 }
@@ -631,7 +631,7 @@ BOOL FOSTimePreinit()
 
     //  set the update rate for the hrt last given variable
 
-#ifdef _X86_
+#ifdef _M_IX86
 
     g_dhrtLastGivenUpdTimeout = max( 1, DhrtHRTFromCmsec( 1 ) );
 
@@ -639,7 +639,7 @@ BOOL FOSTimePreinit()
 
     g_dhrtLastGivenUpdTimeout = (DWORD)min( g_dhrtLastGivenUpdTimeout, ( ~(DWORD)0 ) / 2 );
 
-#endif  //   _X86_
+#endif  //   _M_IX86
 
     //  for this to hold we need to time term ... 
 

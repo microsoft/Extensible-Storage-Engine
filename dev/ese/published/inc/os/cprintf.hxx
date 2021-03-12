@@ -112,7 +112,7 @@ class CPRINTINTRINBUF : public CPRINTF
         CHAR                m_rgchBuffer[ s_cchBuffer ];
         QWORD               m_cyichAppendMax;  // CYclic Index count CHaracaters ... as in the real index is % buffer size.
 
-        void CPRINTINTRINBUF::Append_( const CHAR * const szPrint );
+        void Append_( const CHAR * const szPrint );
 
         ULONG IchAppendNext_() const
         {

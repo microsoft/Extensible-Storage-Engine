@@ -1238,7 +1238,7 @@ INLINE INT ISORTICmpPspairPspair( const SCB * pscb, const SPAIR * pspair1, const
     Assert( cbKeyPrefix == 14 );
     Assert( OffsetOf( SPAIR, irec ) == 0 );
 
-#ifdef _X86_
+#ifndef _WIN64
 
     //  bytes 15 - 12
     if ( *( (DWORD *) ( rgb1 + 12 ) ) < *( (DWORD *) ( rgb2 + 12 ) ) )
@@ -1264,7 +1264,7 @@ INLINE INT ISORTICmpPspairPspair( const SCB * pscb, const SPAIR * pspair1, const
     if ( *( (USHORT *) ( rgb1 + 2 ) ) > *( (USHORT *) ( rgb2 + 2 ) ) )
         return 1;
 
-#else  //  !_X86_
+#else
 
     //  bytes 15 - 8
     if ( *( (LittleEndian<QWORD> *) ( rgb1 + 8 ) ) < *( (LittleEndian<QWORD> *) ( rgb2 + 8 ) ) )
@@ -1280,7 +1280,7 @@ INLINE INT ISORTICmpPspairPspair( const SCB * pscb, const SPAIR * pspair1, const
             ( *( (LittleEndian<QWORD> *) ( rgb2 + 0 ) ) & 0xFFFFFFFFFFFF0000 ) )
         return 1;
 
-#endif  //  _X86_
+#endif
 
     //  perform secondary comparison and return result if prefixes identical
 

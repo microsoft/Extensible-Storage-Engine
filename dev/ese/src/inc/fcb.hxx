@@ -24,7 +24,7 @@ struct EXTENTINFO
     UnalignedLittleEndian< PGNO >       pgnoLastInExtent;
     UnalignedLittleEndian< CPG >        cpgExtent;
 
-    EXTENTINFO::EXTENTINFO()
+    EXTENTINFO()
     {
         Reset();
     }

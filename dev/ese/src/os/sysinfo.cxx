@@ -543,7 +543,7 @@ BOOL FAVXEnabled()
 
 BOOL FDeterminePopcntCapabilities()
 {
-#if ( defined _AMD64_ || defined _X86_ )
+#if ( defined _M_AMD64 || defined _M_IX86 )
         INT cpuidInfo[4];
         __cpuid(cpuidInfo, 1);
         return !!( cpuidInfo[2] & (1 << 23) );  // check bit 23 of CX
@@ -555,7 +555,7 @@ BOOL FDeterminePopcntCapabilities()
 
 BOOL FDetermineAVXCapabilities()
 {
-#if ( defined _AMD64_ || defined _X86_ )
+#if ( defined _M_AMD64 || defined _M_IX86 )
         INT cpuidInfo[4];
         __cpuid(cpuidInfo, 1);
         bool fAvxEnabled = false;
@@ -1085,14 +1085,17 @@ enum UtilSystemBetaSiteMode //  usbsm
     usbsmExFeatLast,
     usbsmExFeatureMask                              = 0xFF00002A
 };
+// The previous line needs to be "enum UtilSystemBetaSiteMode : ULONG;" to be explicit for some
+// compilers, but let's compile this way for now to prove that it actually IS a ULONG.
+C_ASSERT( sizeof( UtilSystemBetaSiteMode ) == sizeof( ULONG ) );
 
 DEFINE_ENUM_FLAG_OPERATORS_BASIC( UtilSystemBetaSiteMode );
 
-INT usbsmPrimaryEnvironments    = ( usbsmTestEnvAll | usbsmSelfhostAll | usbsmProdAll );
-INT usbsmExFeatures             = usbsmExFeatureMask;
+UtilSystemBetaSiteMode usbsmPrimaryEnvironments    = ( usbsmTestEnvAll | usbsmSelfhostAll | usbsmProdAll );
+UtilSystemBetaSiteMode usbsmExFeatures             = usbsmExFeatureMask;
 #ifdef DEBUG    // used for unit tests
-INT usbsmExFeatureMin           = usbsmExFeatRiskyFeatTest;
-INT usbsmExFeatureMax           = usbsmExFeatLast;
+UtilSystemBetaSiteMode usbsmExFeatureMin           = usbsmExFeatRiskyFeatTest;
+UtilSystemBetaSiteMode usbsmExFeatureMax           = usbsmExFeatLast;
 #endif
 
 C_ASSERT( JET_bitStageTestEnvLocalMode == usbsmTestEnvLocalMode );

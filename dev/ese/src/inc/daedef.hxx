@@ -33,7 +33,7 @@
 //  xpress9/xpress10 compression
 #ifdef USE_XPRESS_9_10_COMPRESSION
 #define XPRESS9_COMPRESSION
-#ifdef _AMD64_
+#ifdef _M_AMD64
 #define XPRESS10_COMPRESSION
 #endif
 #endif

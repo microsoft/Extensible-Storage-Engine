@@ -848,9 +848,7 @@ IBitmapAPI::ERR CSparseBitmap::ErrGet( _In_ const size_t iBit, _Out_ BOOL* const
 
 NTOSFuncStd( g_pfnQueryWorkingSetEx, g_mwszzWorkingSetLibs, QueryWorkingSetEx, oslfExpectedOnWin6 );
 
-#if _MSC_VER >= 1200
 #pragma warning(push)
-#endif
 #pragma warning(disable:4201)       // unnamed struct
 
 typedef enum _MEMORY_WORKING_SET_EX_LOCATION {
@@ -892,11 +890,7 @@ typedef struct _MEMORY_WORKING_SET_EX_BLOCK {
 } DUMMYUNIONNAME;
 } MEMORY_WORKING_SET_EX_BLOCK, *PMEMORY_WORKING_SET_EX_BLOCK;
 
-#if _MSC_VER >= 1200
 #pragma warning(pop)
-#else
-#pragma warning( default : 4201 ) /* nonstandard extension used : nameless struct/union */
-#endif
 
 typedef struct _MEMORY_WORKING_SET_EX_INFORMATION {
     PVOID VirtualAddress;

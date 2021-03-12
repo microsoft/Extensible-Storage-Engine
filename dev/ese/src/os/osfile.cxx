@@ -1595,7 +1595,7 @@ ERR ErrIORetrieveSparseSegmentsInRegion(    IFileAPI* const                     
 
 HandleError:
 
-#if DEBUG
+#ifdef DEBUG
     for ( size_t isparseseg = 0; isparseseg < parrsparseseg->Size(); isparseseg++ )
     {
         const SparseFileSegment& sparseseg = (*parrsparseseg)[isparseseg];

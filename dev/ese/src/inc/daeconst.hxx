@@ -192,9 +192,9 @@ const ULONG cmsecWaitWriteLatch         = 10;
 const ULONG cmsecWaitLogWrite           = 2;
 #ifdef RFS2
 const ULONG cmsecWaitLogWriteMax        = 1000;         // 1 sec
-#else  RFS2
+#else  // RFS2
 const ULONG cmsecWaitLogWriteMax        = 300000;       // 5 min
-#endif RFS2
+#endif // RFS2
 const ULONG cmsecWaitIOComplete         = 10;
 const ULONG cmsecAsyncBackgroundCleanup = 60000;        //  1 min
 const ULONG cmsecWaitForBackup          = 300000;       //  5 min

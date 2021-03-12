@@ -125,7 +125,7 @@ typedef LONG (PM_CEF_PROC) ( LONG cef, void* pvBuf );
 
 //  Calculate the true size of a counter, accounting for DWORD padding
 
-#define PerfOffsetOf( s, m )    (DWORD_PTR)&(((s *)0)->m)
+#define PerfOffsetOf( s, m )    (DWORD_PTR)OffsetOf(s, m)
 #define PerfSize( _x )          ( ( _x ) & 0x300 )
 #define QWORD_MULTIPLE( _x )    roundup( _x, sizeof( unsigned __int64 ) )
 #define CntrSize( _a, _b )      ( PerfSize( _a ) == 0x000 ? 4                   \

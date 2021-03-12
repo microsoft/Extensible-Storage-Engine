@@ -74,7 +74,7 @@ static BOOL FOSThreadITlsRegister( _TLS* ptls )
             Assert( NULL == g_ptlsGlobal );
 
             const BOOL  fTLSFreed   = TlsFree( g_dwTlsIndex );
-#if !defined(_AMD64_)
+#if !defined(_M_AMD64)
             Assert( fTLSFreed );        //  leak the TLS entry if we fail
 #else
             Assert( fTLSFreed || g_fProcessExit );      //  leak the TLS entry if we fail
@@ -163,7 +163,7 @@ static void OSThreadITlsUnregister( _TLS* ptls )
         Assert( dwTlsInvalid != g_dwTlsIndex );
 
         const BOOL  fTLSFreed = TlsFree( g_dwTlsIndex );
-#if !defined(_AMD64_)
+#if !defined(_M_AMD64)
             Assert( fTLSFreed );        //  leak the TLS entry if we fail
 #else
             Assert( fTLSFreed || g_fProcessExit );      //  leak the TLS entry if we fail

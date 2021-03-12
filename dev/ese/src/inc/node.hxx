@@ -33,7 +33,7 @@
 //  already been reserved, be cautious when use them.
 
 PERSISTED
-const enum NodeRootField {
+enum NodeRootField {
         noderfWhole         = 0, // implicitly old external header format
         noderfSpaceHeader   = 1,
         noderfIsamAutoInc   = 2,

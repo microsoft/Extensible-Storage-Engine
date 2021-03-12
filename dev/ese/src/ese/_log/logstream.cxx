@@ -2644,7 +2644,7 @@ ERR LOG_STREAM::ErrLGIStartNewLogFile(
         m_plgfilehdrT->lgfilehdr.le_ulUpdateMinor   = max( m_plgfilehdrT->lgfilehdr.le_ulUpdateMinor, m_plgfilehdr->lgfilehdr.le_ulUpdateMinor );
     }
 
-#if DEBUG
+#ifdef DEBUG
     // m_plgfilehdrT->lgfilehdr.le_lGeneration increases in the normal case.
     // But in the case of cleaning up mismatched log files, it is possible to
     // go backwards!
@@ -3788,7 +3788,7 @@ ERR LOG_STREAM::ErrLGRICleanupMismatchedLogFiles( BOOL fExtCleanup )
     m_pLog->ResetCheckpoint();
     m_pLog->ResetLgenLogtimeMapping();
 
-#if DEBUG
+#ifdef DEBUG
     //  Allow the log file stream to go backwards.
     m_fResettingLogStream = fTrue;
 #endif
@@ -3800,7 +3800,7 @@ ERR LOG_STREAM::ErrLGRICleanupMismatchedLogFiles( BOOL fExtCleanup )
     delete pfapiNewLog;
     pfapiNewLog = NULL;
 
-#if DEBUG
+#ifdef DEBUG
     //  The log file stream should be consistent at this point.
     m_fResettingLogStream = fFalse;
 #endif

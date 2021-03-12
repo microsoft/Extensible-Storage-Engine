@@ -59,9 +59,9 @@ class DIFFHDR2
         BOOL FUseTwoBytesForDataLength( void ) const    { return m_flags & fUseTwoBytesForDataLength; }
 
         VOID SetIb( WORD ib )                           { m_ib = ib; }
-        BOOL SetFReplaceWithSameLength( void )      { m_flags |= ( BYTE )fReplaceWithSameLength; }
-        BOOL SetFInsert( void )                         { m_flags |= ( BYTE )fInsert; }
-        BOOL SetFUseTwoBytesForDataLength( void )   { m_flags |= ( BYTE )fUseTwoBytesForDataLength; }
+        VOID SetFReplaceWithSameLength( void )      { m_flags |= ( BYTE )fReplaceWithSameLength; }
+        VOID SetFInsert( void )                         { m_flags |= ( BYTE )fInsert; }
+        VOID SetFUseTwoBytesForDataLength( void )   { m_flags |= ( BYTE )fUseTwoBytesForDataLength; }
 };
 
 VOID LGDumpDiff( const LOG* const plog, const LR * const plr, CPRINTF * const pcprintf, const ULONG cbIndent );
@@ -2893,7 +2893,7 @@ INLINE INT CmpLgpos( const LGPOS& lgpos1, const LGPOS& lgpos2 )
     BYTE    *rgb2   = (BYTE *) &lgpos2;
 
     //  perform comparison on LGPOS as if it were a 64 bit integer
-#ifdef _X86_
+#ifndef _WIN64
     //  bytes 7 - 4
     if ( *( (DWORD*) ( rgb1 + 4 ) ) < *( (DWORD*) ( rgb2 + 4 ) ) )
         return -1;

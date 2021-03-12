@@ -39,7 +39,7 @@ enum OSDiskIoQueueManagement // dioqm
 
 DEFINE_ENUM_FLAG_OPERATORS_BASIC( OSDiskIoQueueManagement )
 
-inline CHAR * SzOSDiskMapQueueType( _In_ const DWORD dioqm )
+inline const CHAR * SzOSDiskMapQueueType( _In_ const DWORD dioqm )
 {
     switch( dioqm & mskQueueType )
     {
