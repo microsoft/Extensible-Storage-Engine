@@ -816,6 +816,9 @@ enum CATCheckIndicesFlags  //  catcif
     catcifForceDeleteIndices = 0x10,                // Force delete the localized text index unconditionally.
     catcifAllowValidOutOfDateVersions = 0x20,       // Allow indices with sort versions which are out-of-date but valid
 };
+// The previous line needs to be "enum CATCheckIndicesFlags : ULONG;" to be explicit for some
+// compilers, but let's compile this way for now to prove that it actually IS a ULONG.
+C_ASSERT( sizeof( CATCheckIndicesFlags ) == sizeof( ULONG ) );
 
 DEFINE_ENUM_FLAG_OPERATORS_BASIC( CATCheckIndicesFlags )
 

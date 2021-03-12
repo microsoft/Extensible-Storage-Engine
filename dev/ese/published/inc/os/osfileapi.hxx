@@ -259,6 +259,9 @@ class IFilePerfAPI
 //  "integer" types that must be defined by the client library linking to the
 //  OS File IO APIs.
 enum IOFLUSHREASON;
+// The previous line needs to be "enum IOFLUSHREASON : ULONG;" to be explicit for some
+// compilers, but let's compile this way for now to prove that it actually IS a ULONG.
+C_ASSERT( sizeof( IOFLUSHREASON ) == sizeof( ULONG ) );
 
 //  This is logged with the begin FFB trace call to indicate we would have
 //  begun a flush at this point if the file was opened in WriteBack mode.

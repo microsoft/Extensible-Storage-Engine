@@ -75,8 +75,8 @@ static const ULONG dwCRC32_LOOKUP_TABLE [256] =
 
 BOOL g_fProcessorSupportsCRC32 = fFalse;
 
-#if defined (_AMD64_) || defined (_X86_)
-#if defined (_AMD64_)
+#if defined (_M_AMD64) || defined (_M_IX86)
+#if defined (_M_AMD64)
 #define COMPUTE_CRC_SIZE 8
 #else
 #define COMPUTE_CRC_SIZE 4
@@ -99,7 +99,7 @@ ProcessorComputeCRC32(
     endBytes = Length % COMPUTE_CRC_SIZE;
     for ( i=0; i<Length/COMPUTE_CRC_SIZE; i++ )
     {
-#if defined (_AMD64_)
+#if defined (_M_AMD64)
         crc = (ULONG) _mm_crc32_u64((unsigned __int64)crc, *(const unsigned __int64 UNALIGNED *)Buffer);
 #else
         crc = _mm_crc32_u32(crc, *(const UINT UNALIGNED *)Buffer);
@@ -116,14 +116,14 @@ ProcessorComputeCRC32(
 
     return crc;
 }
-#endif // #if defined (_AMD64_) || defined (_X86_)
+#endif // #if defined (_M_AMD64) || defined (_M_IX86)
 
 void
 OSInitializeProcessorSupportsCRC32()
 {
     g_fProcessorSupportsCRC32 = fFalse;
 
-#if defined (_AMD64_) || defined (_X86_)
+#if defined (_M_AMD64) || defined (_M_IX86)
     INT CPUInfo[4] = { 0, 0, 0, 0 };
 
     //
@@ -151,7 +151,7 @@ Crc32Checksum(
 {
     ULONG crcProcessor = 0;
 
-#if defined (_AMD64_) || defined (_X86_)
+#if defined (_M_AMD64) || defined (_M_IX86)
     if ( g_fProcessorSupportsCRC32 )
     {
         //

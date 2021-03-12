@@ -7030,7 +7030,7 @@ LOCAL ERR ErrCATIInitIDB(
         // catalog, but that is pre-Source Depot, and I don't know how to look up the SLM logs.)
 
         Assert( pidb->FLocalizedText() );
-#if DEBUG
+#ifdef DEBUG
         // Not sure if this is a valid assumption or not: Maybe a zeroed-out version
         // and sort ID are valid.
         Assert( 0 != qwVersionCreated );
@@ -12053,7 +12053,7 @@ ERR ErrCATScanTableIndices(
         Assert( dataField.Cb() == sizeof( sysobjFound ) );
         UtilMemCpy( &sysobjFound, dataField.Pv(), sizeof( sysobjFound ) );
 
-#if DEBUG
+#ifdef DEBUG
         if ( JET_errSuccess == errSeek )
         {
             Assert( objidTable == objidTableFound );
@@ -16794,7 +16794,7 @@ ERR ErrCATVerifyMSLocales(
     ERR err = JET_errSuccess;
     CKVPStore::CKVPSCursor * pkvpscursorMSysLocalesTable = NULL;
     CLocaleNameInfoArray    arrayLocalesInDB;
-#if DEBUG
+#ifdef DEBUG
     BOOL fInvariantLocaleSeen = fFalse;
 #endif
 
@@ -16820,7 +16820,7 @@ ERR ErrCATVerifyMSLocales(
 
     for ( ULONG i = 0; i < arrayLocalesInDB.Size(); i++ )
     {
-#if DEBUG
+#ifdef DEBUG
         LOCALENAMEINFO liFromMSysObjects = arrayLocalesInDB.Entry( i );
         if ( fInvariantLocaleSeen )
         {

@@ -951,11 +951,7 @@ JETUNITTESTEX( CPAGE, PageHydrationBasic32KB, JetSimpleUnitTest::dwBufferManager
 
     cbBuffer = roundup( cbNextSize, OSMemoryPageCommitGranularity() );
 
-#ifdef _IA64_
-    CHECK( cbBuffer == 16 * 1024 );
-#else
     CHECK( cbBuffer == 12 * 1024 );
-#endif // _IA64_
 
     const PAGECHECKSUM pgchk = cpage.LoggedDataChecksum();
 
@@ -964,11 +960,7 @@ JETUNITTESTEX( CPAGE, PageHydrationBasic32KB, JetSimpleUnitTest::dwBufferManager
     cpage.DehydratePage( cbBuffer, fFalse );
 
 #ifdef DEBUG
-#ifdef _IA64_
-    CHECK( cpage.CbBuffer() == 16 * 1024 );
-#else
     CHECK( cpage.CbBuffer() == 12 * 1024 );
-#endif // _IA64_
 #endif
     CHECK( JET_errSuccess == cpage.ErrCheckPage( CPRINTFDBGOUT::PcprintfInstance(), CPAGE::OnErrorReturnError, CPAGE::CheckTagsNonOverlapping ) );
     CHECK( !cpage.FPageIsDehydratable( &cbNextSize ) );
@@ -1221,17 +1213,9 @@ JETUNITTESTEX( CPAGE, PageHydrationBasic8KB, JetSimpleUnitTest::dwBufferManager 
 
     CHECK( JET_errSuccess == cpage.ErrCheckPage( CPRINTFDBGOUT::PcprintfInstance(), CPAGE::OnErrorReturnError, CPAGE::CheckTagsNonOverlapping ) );
 
-#ifdef _IA64_
-    // In IA64, the commit page is 8KB, so we still cannot dehydrate it.
-    CHECK( !cpage.FPageIsDehydratable( &cbNextSize ) );
-
-    // We're done with tests for IA64.
-    return;
-#else
     CHECK( cpage.FPageIsDehydratable( &cbNextSize ) );
     CHECK( cbNextSize <= 4 * 1024 );
     cbBuffer = 4 * 1024;
-#endif // _IA64_
 
     const PAGECHECKSUM pgchk = cpage.LoggedDataChecksum();
 
@@ -1422,11 +1406,7 @@ JETUNITTESTEX( CPAGE, DirtyPageDehydration, JetSimpleUnitTest::dwBufferManager )
     cpage.DehydratePage( cbNextSize, fFalse );
 
 #ifdef DEBUG
-#ifdef _IA64_
-    CHECK( cpage.CbBuffer() == 16 * 1024 );
-#else
     CHECK( cpage.CbBuffer() == 12 * 1024 );
-#endif // _IA64_
 #endif
     CHECK( JET_errSuccess == cpage.ErrCheckPage( CPRINTFDBGOUT::PcprintfInstance(), CPAGE::OnErrorReturnError, CPAGE::CheckTagsNonOverlapping ) );
     CHECK( !cpage.FPageIsDehydratable( &cbNextSize ) );
@@ -1529,8 +1509,6 @@ JETUNITTESTEX( CPAGE, PageHydrationReorganizationBasic32KB, JetSimpleUnitTest::d
 
     //  Page is only 12k full, should be dehydratable
 
-    //  NOTE: This will shamelessly break on Itanium.  IA64 has 16 KB commit granularity,
-    //  so it could be made to work.  Cross that when we get there.
     CHECK( cpage.FPageIsDehydratable( &cbNextSize ) );
     cbBuffer = roundup( cbNextSize, 4096 );
     CHECK( cbBuffer == 12 * 1024 );

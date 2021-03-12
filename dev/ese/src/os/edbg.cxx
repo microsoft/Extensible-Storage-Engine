@@ -15730,7 +15730,7 @@ DEBUG_EXT( EDBGParam )
             case JetParam::typeBlockSize:
             case JetParam::typeInteger:
 
-#ifdef _X86_
+#ifndef _WIN64
                 dprintf( "=%20d  (%d,%d,%d)\n", rgparam[iParam].m_valueCurrent,
 #else
                 dprintf( "=%20I64d  (%d,%d,%d)\n", rgparam[iParam].m_valueCurrent,

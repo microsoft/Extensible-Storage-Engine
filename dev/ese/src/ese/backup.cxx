@@ -1733,7 +1733,7 @@ ERR BACKUP_CONTEXT::ErrBKBeginExternalBackup( JET_GRBIT grbit, ULONG lgenFirst, 
     m_fBackupIsInternal = fInternalCopyBackup;
     m_critBackupInProgress.Leave();
 
-#if DEBUG
+#ifdef DEBUG
     if ( fSurrogateBackup )
     {
         Assert( !BoolParam( m_pinst, JET_paramCircularLog ) );

@@ -322,8 +322,6 @@ void Test##component##test::Run_()
 #define JETUNITTESTDB(component,test,facilities)    VOID DisabledTest##component##test( const IFMP ifmpTest, const WCHAR * const wszTable, JET_SESID * const psesid, JET_DBID * const pdbid, JET_TABLEID * pcursor )
 #define IfmpTest()                  ((IFMP)ifmpNil)
 
-#define CHECK( expr )
-
 #endif // !ENABLE_JET_UNIT_TEST
 
 #endif // JETTEST_HXX_INCLUDED

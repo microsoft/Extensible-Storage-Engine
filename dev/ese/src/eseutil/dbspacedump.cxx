@@ -1571,7 +1571,7 @@ void PrintSpaceDumpHelp(
     wprintf( L"%c", wchNewLine );
     wprintf( L"%wsSPACE USAGE OPTIONS:%c", wszTab1, wchNewLine );
 
-#if DEBUG
+#ifdef DEBUG
     // 'Detailed' sounds a little bit vague...
     wprintf( L"%ws%ws     /d[<n>]       - Prints more detailed information on trees.%c", wszTab1, wszTab2, wchNewLine );
     wprintf( L"%ws%ws                      /d1 - Prints space trees (default).%c", wszTab1, wszTab2, wchNewLine );
@@ -3376,7 +3376,7 @@ JET_ERR JetLegacyDBSpaceDump( JET_DBUTIL_W * pdbutilW )
     return err;
 }
 
-#if DEBUG
+#ifdef DEBUG
 // Calls EseutilCalculateLastAvailableDbLogicalExtentRange and verifies that the returned
 // result is correct.
 void EseutilITestDbspacedump(
@@ -3408,7 +3408,7 @@ void EseutilITestDbspacedump(
 // Set up some fake AE/OE arrays, and call EseutilITestDbspacedump.
 void EseutilDbspacedumpUnitTest()
 {
-#if DEBUG
+#ifdef DEBUG
     BTREE_SPACE_EXTENT_INFO rgOETwoExtent[] =
     {
         { ulsppAvailExtLegacyGeneralPool, 8, 8, 1 },

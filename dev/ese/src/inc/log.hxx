@@ -57,7 +57,7 @@ extern CCriticalSection     g_critDBGPrint;
 
 
 // Only build v7 recovery compat for full functionality
-#if !defined(MINIMAL_FUNCTIONALITY) && !defined(ARM)
+#if !defined(MINIMAL_FUNCTIONALITY) && !defined(_M_ARM)
 #define ENABLE_LOG_V7_RECOVERY_COMPAT
 #endif
 

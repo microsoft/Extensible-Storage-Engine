@@ -4312,7 +4312,7 @@ ERR ISAMAPI ErrIsamAttachDatabase(
             pfmp->Pfapi()->UpdateIFilePerfAPIEngineFileTypeId( iofileDbAttached, pfmp->Ifmp() );
             IOResetFmpIoLatencyStats( pfmp->Ifmp() );
 
-#if DEBUG
+#ifdef DEBUG
             BYTE rgbSigZeroes[ sizeof( SIGNATURE ) ] = { 0 };
             Assert( 0 == memcmp( rgbSigZeroes, pfmp->Pdbfilehdr()->rgbReservedSignSLV, sizeof( rgbSigZeroes ) ) );
 #endif

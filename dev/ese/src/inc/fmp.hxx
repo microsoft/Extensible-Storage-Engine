@@ -1367,7 +1367,7 @@ INLINE DWORD_PTR FMP::DwBFContext()
 
 INLINE BOOL FMP::FBFContext() const
 {
-    return NULL != m_dwBFContext;
+    return ( ( NULL != m_dwBFContext ) ? fTrue : fFalse );
 }
 
 INLINE const DATA& FMP::DataHeaderSignature() const { return m_dataHdrSig; }

@@ -15824,7 +15824,7 @@ void SPCheckPrintMaxNumAllocs( const LONG cbPageSize )
 ////////////////
 //  Periodic Trim
 
-#if ( ESENT || !DEBUG )
+#if defined( ESENT ) || !defined( DEBUG )
 static const TICK               g_dtickTrimDBPeriod             = 1000 * 60 * 60 * 24; // 1 day
 #else
 static const TICK               g_dtickTrimDBPeriod             = 1 * 1000; // 1 second
@@ -15842,7 +15842,7 @@ LOCAL ERR ErrSPITrimDBITaskPerIFMP( const IFMP ifmp )
     WCHAR wsz[32];
     const WCHAR* rgcwsz[]       = { wsz };
     CPG cpgTrimmed              = 0;
-#if DEBUG
+#ifdef DEBUG
     // On debug builds we start the task every second. This ends up spamming the event log.
     static BOOL s_fLoggedStartEvent = fFalse;
     static BOOL s_fLoggedStopNoActionEvent = fFalse;
@@ -15891,7 +15891,7 @@ LOCAL ERR ErrSPITrimDBITaskPerIFMP( const IFMP ifmp )
         goto HandleError;
     }
 
-#if DEBUG
+#ifdef DEBUG
     if ( !s_fLoggedStartEvent )
 #endif
     {
@@ -15977,7 +15977,7 @@ HandleError:
         }
         else
         {
-#if DEBUG
+#ifdef DEBUG
             if ( !s_fLoggedStopNoActionEvent )
 #endif
             {

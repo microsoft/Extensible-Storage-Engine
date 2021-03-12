@@ -476,7 +476,7 @@ JETUNITTEST( SYSINFO, BetaFeaturesShouldHaveMatchingIndexAndFeatureIdValue )
     }
 }
 
-extern INT usbsmPrimaryEnvironments;
+extern UtilSystemBetaSiteMode usbsmPrimaryEnvironments;
 JETUNITTEST( SYSINFO, BetaFeaturesShouldHaveOneStandardMode )
 {
     for( ULONG featureid = 0; featureid < EseFeatureMax; featureid++ )
@@ -486,10 +486,10 @@ JETUNITTEST( SYSINFO, BetaFeaturesShouldHaveOneStandardMode )
     }
 }
 
-extern INT usbsmExFeatures;
+extern UtilSystemBetaSiteMode usbsmExFeatures;
 JETUNITTEST( SYSINFO, BetaFeaturesShouldNotReuseOtherFeaturesUsbsmExFeatEnum )
 {
-    INT rgusbsmExFeatureFlags[EseFeatureMax] = { 0 };
+    UtilSystemBetaSiteMode rgusbsmExFeatureFlags[EseFeatureMax] = { 0 };
 
     for( ULONG featureid = 0; featureid < EseFeatureMax; featureid++ )
     {
@@ -501,7 +501,7 @@ JETUNITTEST( SYSINFO, BetaFeaturesShouldNotReuseOtherFeaturesUsbsmExFeatEnum )
                 CHECK( rgusbsmExFeatureFlags[featureidCompare] != ( g_rgbetaconfigs[featureid].usbsm & usbsmExFeatures ) );
             }
             //  Add this flag to set of seen usbsmExFeat* flags.
-            rgusbsmExFeatureFlags[featureid] = ( g_rgbetaconfigs[featureid].usbsm & usbsmExFeatures );
+            rgusbsmExFeatureFlags[featureid] = (UtilSystemBetaSiteMode)( g_rgbetaconfigs[featureid].usbsm & usbsmExFeatures );
         }
         else
         {
@@ -511,13 +511,15 @@ JETUNITTEST( SYSINFO, BetaFeaturesShouldNotReuseOtherFeaturesUsbsmExFeatEnum )
 }
 
 #ifdef DEBUG
-extern INT usbsmExFeatureMin;
-extern INT usbsmExFeatureMax;
+extern UtilSystemBetaSiteMode usbsmExFeatureMin;
+extern UtilSystemBetaSiteMode usbsmExFeatureMax;
 JETUNITTEST( SYSINFO, BetaFeaturesExFeatEnumShouldBeListedInOneFeatureLine )
 {
-    INT rgusbsmExFeatureFlags[EseFeatureMax];
+    UtilSystemBetaSiteMode rgusbsmExFeatureFlags[EseFeatureMax];
 
-    for( INT usbsmCheck = usbsmExFeatureMin; usbsmCheck < usbsmExFeatureMax; usbsmCheck += 0x01000000 /* increment only top BYTE */ )
+    for( UtilSystemBetaSiteMode usbsmCheck = usbsmExFeatureMin;
+         usbsmCheck < usbsmExFeatureMax;
+         usbsmCheck = (UtilSystemBetaSiteMode)(usbsmCheck + 0x01000000) /* increment only top BYTE */ )
     {
         // if we did our increment right, we shouldn't have altered anything outside the usbsmExFeatureMask
         Assert( ( usbsmCheck & ~usbsmExFeatures ) == 0 );
@@ -525,13 +527,14 @@ JETUNITTEST( SYSINFO, BetaFeaturesExFeatEnumShouldBeListedInOneFeatureLine )
         BOOL fFoundFeature = fFalse;
         for( ULONG featureid = 0; featureid < EseFeatureMax; featureid++ )
         {
-            if ( usbsmCheck == ( g_rgbetaconfigs[featureid].usbsm & usbsmExFeatures ) )
+            if ( usbsmCheck == (UtilSystemBetaSiteMode)( g_rgbetaconfigs[featureid].usbsm & usbsmExFeatures ) )
             {
                 //  Yeah we found a feature with it!
                 fFoundFeature = fTrue;
                 break;
             }
         }
+
         //  Every feature should be listed in a feature line ... well except for negative test
         //  cases and if we deprecate features out of order  Not quite sure how to do this best.
         CHECK( fFoundFeature

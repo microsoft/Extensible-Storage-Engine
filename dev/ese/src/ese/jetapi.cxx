@@ -7349,7 +7349,7 @@ const
 #define JET_paramDisablePerfmon_DEFAULT     fTrue
 #endif
 
-#if ( DEBUG && !ESENT )
+#if defined( DEBUG ) && !defined( ESENT )
 // Default to 1 (Enabled) on Exchange-Debug only.
 #define JET_paramEnableShrinkDatabase_DEFAULT       ( JET_bitShrinkDatabaseOn | JET_bitShrinkDatabaseRealtime | JET_bitShrinkDatabasePeriodically )
 #else

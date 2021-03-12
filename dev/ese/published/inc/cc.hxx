@@ -1,8 +1,6 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
-#ifdef _MSC_VER
 #pragma once
-#endif // _MSC_VER
 
 #ifndef _CC_HXX
 #define _CC_HXX 1
@@ -56,10 +54,10 @@
 
 #include <sal.h>
 
+#endif // !_MSC_VER
+
 #define IN
 #define OUT
-
-#endif // !_MSC_VER
 
 //  Like SAL this produces a compile-time assert ...
 #define C_ASSERT(e) typedef char __C_ASSERT__[(e)?1:-1]
@@ -261,7 +259,12 @@ const QWORD     qwMax   = 0xFFFFFFFFFFFFFFFF;
 //      Basic "C operators"
 //
 
+#ifdef _MSC_VER
 #define OffsetOf(s,m)   (SIZE_T)&(((s *)0)->m)
+#else
+#define OffsetOf(s,m)    __builtin_offsetof( s, m )
+#endif
+
 #define CONTAINING_RECORD(address, type, field) ((type *)( \
                                                   (PCHAR)(address) - \
                                                   (ULONG_PTR)(&((type *)0)->field)))

@@ -292,11 +292,9 @@ COSThreadTable      g_threadtable;
 // rlanser:  01/30/2001: VisualStudio7#206324; NTBUG#301132
 //#if defined(_M_IX86) && (_MSC_FULL_VER <= 13009037)
 //#pragma optimize("g",off)
-//#elif defined(_M_IA64) && (_MSC_FULL_VER <= 13009076)
-//#pragma optimize("t",on)
 //#endif
 // rlanser:  01/31/2001:  less aggressive fix for the above problem
-#if (defined(_M_IX86) && (_MSC_FULL_VER <= 13009037)) || (defined(_M_IA64) && (_MSC_FULL_VER <= 13009076))
+#if (defined(_M_IX86) && (_MSC_FULL_VER <= 13009037))
 #pragma inline_recursion(off)
 #endif
 

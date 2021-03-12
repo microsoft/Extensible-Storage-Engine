@@ -1556,9 +1556,9 @@ public:
         m_ptcCurr = tfnGetEtc();
         m_tcSaved = *m_ptcCurr; // save a copy to restore back
 
-        iorp != iorpNone ? m_ptcCurr->iorReason.SetIorp( iorp ) : 0;
-        iors != iorsNone ? m_ptcCurr->iorReason.SetIors( iors ) : 0;
-        iort != iortNone ? m_ptcCurr->iorReason.SetIort( iort ) : 0;
+        ( iorp != iorpNone ) ? m_ptcCurr->iorReason.SetIorp( iorp ) : (VOID)NULL;
+        ( iors != iorsNone ) ? m_ptcCurr->iorReason.SetIors( iors ) : (VOID)NULL;
+        ( iort != iortNone ) ? m_ptcCurr->iorReason.SetIort( iort ) : (VOID)NULL;
         m_ptcCurr->iorReason.AddFlag( iorf );
     }
 
@@ -1567,8 +1567,8 @@ public:
         m_ptcCurr = tfnGetEtc();
         m_tcSaved = *m_ptcCurr; // save a copy to restore back
 
-        iors != iorsNone ? m_ptcCurr->iorReason.SetIors( iors ) : 0;
-        iort != iortNone ? m_ptcCurr->iorReason.SetIort( iort ) : 0;
+        ( iors != iorsNone ) ? m_ptcCurr->iorReason.SetIors( iors ) : (VOID)NULL;
+        ( iort != iortNone ) ? m_ptcCurr->iorReason.SetIort( iort ) : (VOID)NULL;
         m_ptcCurr->iorReason.AddFlag( iorf );
     }
 
@@ -1577,7 +1577,7 @@ public:
         m_ptcCurr = tfnGetEtc();
         m_tcSaved = *m_ptcCurr; // save a copy to restore back
 
-        iort != iortNone ? m_ptcCurr->iorReason.SetIort( iort ) : 0;
+        ( iort != iortNone ) ? m_ptcCurr->iorReason.SetIort( iort ) : (VOID)NULL;
         m_ptcCurr->iorReason.AddFlag( iorf );
     }
 

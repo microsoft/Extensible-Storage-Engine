@@ -13,7 +13,7 @@
 #if 1
 
 #include <intrin.h>
-#if ( defined _AMD64_ || defined _X86_ )
+#if ( defined _M_AMD64 || defined _M_IX86  )
 #include <emmintrin.h>
 #endif
 
@@ -55,7 +55,7 @@ typedef ULONG   (*PFNCHECKSUMOLDFORMAT)( const unsigned char * const, const ULON
 inline void CachePrefetch( const void * const p )
 //  ================================================================
 {
-#ifdef _X86_
+#ifdef _M_IX86 
     _asm
     {
         mov eax,p
@@ -93,7 +93,7 @@ ULONG ChecksumOldFormatSSE( const unsigned char * const pb, const ULONG cb )
 
     while ( ( cbT -= cbStep ) >= 0 )
     {
-#if (defined _AMD64_ || defined _X86_ )
+#if (defined _M_AMD64 || defined _M_IX86  )
 #if 1
         _mm_prefetch ( (char *)(pdw + 16), _MM_HINT_NTA );
 #else
@@ -129,7 +129,7 @@ ULONG ChecksumOldFormatSSE2( const unsigned char * const pb, const ULONG cb )
 
     Unused( pfn );
 
-#if (defined _AMD64_ || defined _X86_ )
+#if (defined _M_AMD64 || defined _M_IX86  )
 
     __m128i owChecksum              = _mm_setzero_si128();
     const   __m128i * pow           = (__m128i *)pb;
@@ -862,7 +862,7 @@ XECHECKSUM ChecksumNewFormatSSE( const unsigned char * const pb, const ULONG cb,
             pT1 = pdw[ i + 1 ];
 Start:
 
-#if (defined _AMD64_ || defined _X86_ )
+#if (defined _M_AMD64 || defined _M_IX86  )
 #if 1
             _mm_prefetch( ( char *)&( pdw[ i + 32 ] ), _MM_HINT_NTA );
 #else
@@ -982,7 +982,7 @@ enum ChecksumParityMaskFunc
     ParityMaskFuncPopcnt,
 };
 
-#if ( defined _AMD64_ || defined _X86_ ) && !defined _CHPE_X86_ARM64_
+#if ( defined _M_AMD64 || defined _M_IX86  ) && !defined _CHPE_X86_ARM64_
 
 //  ================================================================
 inline __m128i operator^( const __m128i dq0, const __m128i dq1 )
@@ -1026,7 +1026,7 @@ inline LONG lParityMaskPopcnt( const __m128i dq )
     const __m128i dq1 = _mm_shuffle_epi32( dq, 0x4e);
     const __m128i dq2 = dq ^ dq1;
 
-#if ( defined _X86_ )
+#if ( defined _M_IX86  )
     // reduce to 32-bits
     const __m128i dq3 = _mm_shuffle_epi32( dq2, 0x1b );
     const __m128i dq4 = dq2 ^ dq3;

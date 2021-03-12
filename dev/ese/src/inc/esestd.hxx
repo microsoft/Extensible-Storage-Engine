@@ -32,9 +32,7 @@ typedef __nullterminated const wchar_t* PCWSTR;
 #include <algorithm>
 #include <functional>
 #include <memory>
-#if _MSC_VER >= 1100
 using namespace std;
-#endif
 
 #pragma prefast(push)
 #pragma prefast(disable:28196, "Do not bother us with strsafe, someone else owns that.")

@@ -49,20 +49,6 @@ deal with that.
 
 #include "checksumstd.hxx"
 
-#ifdef _IA64_
-
-extern "C" {
-    void __lfetch( INT Level,void const *Address );
-    #pragma intrinsic( __lfetch )
-} // extern "C"
-
-#define MD_LFHINT_NONE  0x00
-#define MD_LFHINT_NT1   0x01
-#define MD_LFHINT_NT2   0x02
-#define MD_LFHINT_NTA   0x03
-
-#endif
-
 //  ****************************************************************
 //  XOR checksum routines
 //  ****************************************************************
@@ -139,14 +125,13 @@ ULONG ChecksumSelectOldFormat( const unsigned char * const pb, const ULONG cb )
 //  P2/P3       : ChecksumOldFormatSSE
 //  P4          : ChecksumOldFormatSSE2
 //  AMD64       : ChecksumOldFormatSSE2
-//  IA64        : ChecksumOldFormat64Bit
 //  Cyrix etc.  : ChecksumOldFormatSlowly
 //
 //-
 {
     PFNCHECKSUMOLDFORMAT pfn = ChecksumSelectOldFormat;
 
-#if defined _X86_ && defined _CHPE_X86_ARM64_
+#if defined _M_IX86  && defined _CHPE_X86_ARM64_
     pfn = ChecksumOldFormatSlowly;
 #else
     if( FSSEInstructionsAvailable() )
@@ -240,9 +225,6 @@ ULONG ChecksumOldFormat64Bit( const unsigned char * const pb, const ULONG cb )
 
     while ( ( cbT -= cbStep ) >= 0 )
     {
-#ifdef _IA64_
-        __lfetch( MD_LFHINT_NTA, (unsigned char *)(pqw + 4) );
-#endif
         qwChecksum ^= pqw[0];
         qwChecksum ^= pqw[1];
         qwChecksum ^= pqw[2];
@@ -279,14 +261,13 @@ XECHECKSUM ChecksumSelectNewFormat( const unsigned char * const pb, const ULONG 
 //  AMD64                       : ChecksumNewFormatSSE2<ParityMaskFuncDefault>
 //    - Nehalem/Barcelona       : ChecksumNewFormatSSE2<ParityMaskFuncPopcnt>
 //    - SandyBridge/Bulldozer   : ChecksumNewFormatAVX
-//  IA64                        : ChecksumNewFormat64Bit
 //  Cyrix etc.                  : ChecksumNewFormatSlowly
 //
 //-
 {
     PFNCHECKSUMNEWFORMAT pfn = ChecksumSelectNewFormat;
 
-#if defined _X86_ && defined _CHPE_X86_ARM64_
+#if defined _M_IX86  && defined _CHPE_X86_ARM64_
     pfn = ChecksumNewFormatSlowly;
 #else
     if( FAVXEnabled() && FPopcntAvailable() )

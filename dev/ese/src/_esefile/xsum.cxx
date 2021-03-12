@@ -56,20 +56,6 @@ deal with that.
 
 #include <intrin.h>
 
-#ifdef _IA64_
-
-extern "C" {
-    void __lfetch( INT Level,void const *Address );
-    #pragma intrinsic( __lfetch )
-} // extern "C"
-
-#define MD_LFHINT_NONE  0x00
-#define MD_LFHINT_NT1   0x01
-#define MD_LFHINT_NT2   0x02
-#define MD_LFHINT_NTA   0x03
-
-#endif  //  _IA64_
-
 //  ****************************************************************
 //  page checksum routines
 //  ****************************************************************
@@ -171,7 +157,6 @@ static ULONG ChecksumSelectOldFormat( const unsigned char * const pb, const ULON
 //  P2/P3       : ChecksumOldFormatSSE
 //  P4          : ChecksumOldFormatSSE2
 //  AMD64       : ChecksumOldFormatSSE2
-//  IA64        : ChecksumOldFormat64Bit
 //  Cyrix etc.  : ChecksumOldFormat
 //
 //-
@@ -263,9 +248,6 @@ static ULONG ChecksumOldFormat64Bit( const unsigned char * const pb, const ULONG
 
     do
     {
-#ifdef _IA64_
-        __lfetch( MD_LFHINT_NTA, (unsigned char *)(pqw + 4) );
-#endif
         qwChecksum ^= pqw[0];
         qwChecksum ^= pqw[1];
         qwChecksum ^= pqw[2];
@@ -286,7 +268,7 @@ static ULONG ChecksumOldFormat64Bit( const unsigned char * const pb, const ULONG
 inline void CachePrefetch( const void * const p )
 //  ================================================================
 {
-#ifdef _X86_
+#ifdef _M_IX86
     _asm
     {
         mov eax,p
@@ -321,7 +303,7 @@ static ULONG ChecksumOldFormatSSE( const unsigned char * const pb, const ULONG c
 
     do
     {
-#if (defined _AMD64_ || defined _X86_ )
+#if (defined _M_AMD64 || defined _M_IX86 )
 #if 1
         _mm_prefetch ( (char *)(pdw + 16), _MM_HINT_NTA );
 #else
@@ -358,7 +340,7 @@ static ULONG ChecksumOldFormatSSE2( const unsigned char * const pb, const ULONG 
 
     Unused( pfn );
 
-#if (defined _AMD64_ || defined _X86_ )
+#if (defined _M_AMD64 || defined _M_IX86 )
 
     __m128i owChecksum              = _mm_setzero_si128();
     const   __m128i * pow           = (__m128i *)pb;
@@ -589,7 +571,6 @@ static XECHECKSUM ChecksumSelectNewFormat( const unsigned char * const pb, const
 //  P2/P3       : ChecksumNewFormatSSE
 //  P4          : ChecksumNewFormatSSE2
 //  AMD64       : ChecksumNewFormatSSE2
-//  IA64        : ChecksumNewFormat64Bit
 //  Cyrix etc.  : ChecksumNewFormat
 //
 //-
@@ -1132,7 +1113,7 @@ static XECHECKSUM ChecksumNewFormatSSE( const unsigned char * const pb, const UL
             pT1 = pdw[ i + 1 ];
 Start:
 
-#if (defined _AMD64_ || defined _X86_ )
+#if (defined _M_AMD64 || defined _M_IX86 )
 #if 1
             _mm_prefetch( ( char *)&( pdw[ i + 32 ] ), _MM_HINT_NTA );
 #else
@@ -1245,7 +1226,7 @@ Start:
 
 
 #if 1
-#if (defined _AMD64_ || defined _X86_ )
+#if (defined _M_AMD64 || defined _M_IX86 )
 
 //  ================================================================
 inline __m128i operator^( const __m128i dq0, const __m128i dq1 )

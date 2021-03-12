@@ -125,7 +125,7 @@ LOCAL ERR ErrReplacePageImage(
 
     if ( pagetrimTrimmed == csr.PagetrimState() )
     {
-#if DEBUG
+#ifdef DEBUG
         Assert( g_rgfmp[ ifmp ].FPgnoInZeroedOrRevertedMaps( pgno ) );
 #endif
     }

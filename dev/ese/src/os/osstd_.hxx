@@ -27,9 +27,7 @@
 
 #include <algorithm>
 #include <functional>
-#if _MSC_VER >= 1100
 using namespace std;
-#endif
 
 #define Unused( var ) ( var )
 

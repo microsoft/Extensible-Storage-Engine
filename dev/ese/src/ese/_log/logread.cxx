@@ -196,7 +196,7 @@ ERR LOG_READ_BUFFER::ErrLReaderTerm()
 
 VOID LOG_READ_BUFFER::LReaderReset()
 {
-#if DEBUG
+#ifdef DEBUG
     //
     // save the last log buffer for debugging purposes (the logging code
     // re-reads the same file currently, so try not to overwrite the
