@@ -5452,6 +5452,17 @@ VOID CTableDefragment::LogCompletionEvent_() const
     rgszT[isz++] = szPagesMoved;
     Assert( isz == cszMax );
     
+#ifdef ENABLE_MICROSOFT_MANAGED_DATACENTER_LEVEL_OPTICS
+    UtilReportEvent(
+        eventInformation,
+        ONLINE_DEFRAG_CATEGORY,
+        OLD2_COMPLETE_PASS_ID,
+        isz,
+        rgszT,
+        0,
+        NULL,
+        pinst );
+#else
     UtilReportEvent(
         eventInformation,
         ONLINE_DEFRAG_CATEGORY,
@@ -5462,6 +5473,7 @@ VOID CTableDefragment::LogCompletionEvent_() const
         NULL,
         pinst,
         JET_EventLoggingLevelHigh );
+#endif
 
 HandleError:
     delete[] szPassStartDateTime;
