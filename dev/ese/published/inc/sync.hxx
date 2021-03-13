@@ -320,10 +320,9 @@ extern BOOL g_fSyncProcessAbort;
 //  Atomic Memory Manipulations
 
 //  returns fTrue if the given data is properly aligned for atomic modification
-
-inline const BOOL IsAtomicallyModifiable( ULONG_PTR* pulpTarget )
+inline const BOOL IsAtomicallyModifiable( LONGLONG* pllTarget )
 {
-    return ULONG_PTR( pulpTarget ) % sizeof( ULONG_PTR ) == 0;
+    return ULONG_PTR( pllTarget ) % sizeof( LONGLONG ) == 0;
 }
 
 inline const BOOL IsAtomicallyModifiable( LONG* plTarget )
@@ -617,49 +616,59 @@ inline ULONG AtomicExchangeReset( ULONG* const pulTarget, const ULONG ulMask )
 }
 
 //  atomically set the bits from the mask in the target, returning the original.  the
-//  target must be aligned to a ULONG_PTR boundary
+//  target must be aligned to an eight byte boundary
 
-inline ULONG_PTR AtomicExchangeSet( ULONG_PTR* const pulpTarget, const ULONG_PTR ulpMask )
+inline LONGLONG AtomicExchangeSet( LONGLONG* const pllTarget, const LONGLONG llMask )
 {
-    OSSYNCAssert( IsAtomicallyModifiable( pulpTarget ) );
+    OSSYNCAssert( IsAtomicallyModifiable( pllTarget ) );
 
-    ULONG_PTR ulpOld;
+    LONGLONG llOld;
     OSSYNC_FOREVER
     {
-        ulpOld                    = AtomicRead( pulpTarget );
-        const ULONG_PTR ulpWanted = ( ulpOld | ulpMask );
-        const ULONG_PTR ulpFinal  = AtomicCompareExchange( pulpTarget, ulpOld, ulpWanted );
+        llOld                   = AtomicRead( pllTarget );
+        const LONGLONG llWanted = ( llOld | llMask );
+        const LONGLONG llFinal  = AtomicCompareExchange( pllTarget, llOld, llWanted );
 
-        if( ulpFinal == ulpOld )
+        if( llFinal == llOld )
         {
             break;
         }
     }
 
-    return ulpOld;
+    return llOld;
 }
 
 //  atomically resets the bits from the mask in the target, returning the original.  the
-//  target must be aligned to a natural ULONG_PTR boundary
+//  target must be aligned to an eight byte boundary
 
-inline ULONG_PTR AtomicExchangeReset( ULONG_PTR* const pulpTarget, const ULONG_PTR ulpMask )
+inline LONGLONG AtomicExchangeReset( LONGLONG* const pllTarget, const LONGLONG llMask )
 {
-    OSSYNCAssert( IsAtomicallyModifiable( pulpTarget ) );
+    OSSYNCAssert( IsAtomicallyModifiable( pllTarget ) );
 
-    ULONG_PTR ulpOld;
+    LONGLONG llOld;
     OSSYNC_FOREVER
     {
-        ulpOld                     = AtomicRead( pulpTarget );
-        const ULONG_PTR ulpWanted  = ( ulpOld & ~ulpMask );
-        const ULONG_PTR ulpFinal   = AtomicCompareExchange( pulpTarget, ulpOld, ulpWanted );
+        llOld                   = AtomicRead( pllTarget );
+        const LONGLONG llWanted = ( llOld & ~llMask );
+        const LONGLONG llFinal  = AtomicCompareExchange( pllTarget, llOld, llWanted );
 
-        if( ulpFinal == ulpOld )
+        if( llFinal == llOld )
         {
             break;
         }
     }
 
-    return ulpOld;
+    return llOld;
+}
+
+inline ULONGLONG AtomicExchangeSet( ULONGLONG* const pullTarget, const ULONGLONG ullMask )
+{
+    return (ULONGLONG) AtomicExchangeSet( ( LONGLONG * )pullTarget, ( LONGLONG )ullMask );
+}
+
+inline ULONGLONG AtomicExchangeReset( ULONGLONG* const pullTarget, const ULONGLONG ullMask )
+{
+    return (ULONGLONG) AtomicExchangeReset( ( LONGLONG * )pullTarget, ( LONGLONG )ullMask );
 }
 
 //  atomically compares the target against the specified value and replaces

@@ -110,25 +110,30 @@ typedef char                CHAR;
 //  Basic integer types
 //
 
-typedef short               SHORT;
-typedef unsigned short      USHORT;
-
 #ifdef _MSC_VER
+    typedef short               SHORT;
+    typedef unsigned short      USHORT;
     typedef int                 INT;
     typedef unsigned int        UINT;
     typedef long                LONG;
     typedef unsigned long       ULONG;
+    typedef long long           LONGLONG;
+    typedef unsigned long long  ULONGLONG;
 #else
     // On most other platforms, int and long are 64-bit on 64-bit platforms, but the ESE format
     // is dependent upon LONG being 32-bits.
+    typedef int16_t             SHORT;
+    typedef uint16_t            USHORT;
     typedef int32_t             INT;
     typedef uint32_t            UINT;
     typedef int32_t             LONG;
     typedef uint32_t            ULONG;
+    typedef int64_t             LONGLONG;
+    typedef uint64_t            ULONGLONG;
 #endif
 
-typedef long long           LONG64;
-typedef unsigned long long  ULONG64;
+typedef LONGLONG            LONG64;
+typedef ULONGLONG           ULONG64;
 
 //  Machine word types
 //
@@ -136,7 +141,7 @@ typedef unsigned long long  ULONG64;
 typedef unsigned char       BYTE;
 typedef USHORT              WORD;
 typedef ULONG               DWORD;
-typedef ULONG64             QWORD;
+typedef ULONGLONG           QWORD;
 
 //  Pointer types
 //
