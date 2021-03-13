@@ -11690,12 +11690,11 @@ ERR ErrSPShrinkTruncateLastExtent(
 
     // Finally, truncate the file.
     {
-    PIBTraceContextScope tcScopeT = ppib->InitTraceContextScope();
-    tcScopeT->iorReason.SetIorp( iorpDatabaseShrink );
+    PIBTraceContextScope tcScopeT( ppib, iorpDatabaseShrink );
 
     Call( ErrFaultInjection( 40200 ) );
 
-    Call( ErrSPINewSize( TcCurr(), ifmp, pgnoLastFileSystem, -1 * cpgShrunk, 0 ) );
+    Call( ErrSPINewSize( *tcScopeT, ifmp, pgnoLastFileSystem, -1 * cpgShrunk, 0 ) );
     }
 
     pfmp->ResetPgnoMaxTracking( speiLastAfterOE.PgnoLast() );

@@ -1359,7 +1359,6 @@ ERR ErrIONewSize(
 
                     //  synchronously shrink db
                     //
-                    tcScope->iorReason.SetIorp( iorpDatabaseShrink );
 
                     if ( !pfmp->FIsTempDB() )
                     {
@@ -1381,8 +1380,10 @@ ERR ErrIONewSize(
 
                     if ( err >= JET_errSuccess )
                     {
+                        TraceContextScope tcScopeT( iorpDatabaseShrink );
+                        
                         // Even with shrink disabled, logical file-size can go down (because it starts out too high at beginning of recovery).
-                        err = pfmp->Pfapi()->ErrSetSize( *tcScope, cbNewSizePartial, fFalse, QosSyncDefault( pinst ) );
+                        err = pfmp->Pfapi()->ErrSetSize( *tcScopeT, cbNewSizePartial, fFalse, QosSyncDefault( pinst ) );
                         Expected( err <= JET_errSuccess ); // warnings not expected
 
                         Assert( !BoolParam( JET_paramEnableViewCache ) || ( err >= JET_errSuccess ) );
@@ -1425,10 +1426,10 @@ ERR ErrIONewSize(
                     //
                     PERFOpt( cIODatabaseFileExtensionStall.Inc( pinst ) );
 
-                    tcScope->iorReason.SetIorp( iorpDatabaseExtension );
-                    tcScope->SetDwEngineObjid( objidSystemRoot );
+                    TraceContextScope tcScopeT( iorpDatabaseExtension );
+                    tcScopeT->SetDwEngineObjid( objidSystemRoot );
 
-                    err = pfmp->Pfapi()->ErrSetSize( *tcScope, cbNewSize, fTrue, QosSyncDefault( pinst ) );
+                    err = pfmp->Pfapi()->ErrSetSize( *tcScopeT, cbNewSize, fTrue, QosSyncDefault( pinst ) );
                     Expected( err <= JET_errSuccess ); // warnings not expected
                     if ( err >= JET_errSuccess )
                     {

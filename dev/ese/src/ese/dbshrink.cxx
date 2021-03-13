@@ -534,9 +534,8 @@ LOCAL ERR ErrSHKIMoveLastExtent(
                 // We'll archive the data if requested.
                 if ( BoolParam( pfmp->Pinst(), JET_paramFlight_EnableShrinkArchiving ) )
                 {
-                    tcScope->iorReason.SetIorp( iorpDatabaseShrink );
-                    Call( ErrIOArchiveShrunkPages( ifmp, *tcScope, pgnoCurrent, 1 ) );
-                    tcScope->iorReason.SetIorp( iorpNone );
+                    TraceContextScope tcScopeT( iorpDatabaseShrink );
+                    Call( ErrIOArchiveShrunkPages( ifmp, *tcScopeT, pgnoCurrent, 1 ) );
                 }
 
                 // Leaked-page handling.
