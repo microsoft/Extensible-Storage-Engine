@@ -6660,7 +6660,9 @@ bool FBTICpgFragmentedRange(
             INT ipgnoContiguousRunStart = ipgno;
 
             // Advance pgno until it points to a non-contiguous page
-            for( ipgno++; ipgno < cpg && rgpgno[ipgno-1] + 1 == rgpgno[ipgno]; ++ipgno )
+            for(    ipgno++; ipgno < cpg &&
+                    ( rgpgno[ipgno - 1] + 1 == rgpgno[ipgno] || rgpgno[ipgno - 1] - 1 == rgpgno[ipgno] );
+                    ++ipgno )
             {
             }
 
@@ -6671,8 +6673,8 @@ bool FBTICpgFragmentedRange(
 
             Assert( cpgContiguous > 0 );
             Assert( ipgnoContiguousRunEnd >= ipgnoContiguousRunStart );
-            Assert( (PGNO)(ipgnoContiguousRunEnd - ipgnoContiguousRunStart)
-                    == rgpgno[ipgnoContiguousRunEnd] - rgpgno[ipgnoContiguousRunStart] );
+            Assert( ipgnoContiguousRunEnd - ipgnoContiguousRunStart
+                    == abs( (INT)( rgpgno[ipgnoContiguousRunEnd] - rgpgno[ipgnoContiguousRunStart] ) ) );
             
             // This run of pages is long enough that we don't want to defrag it.
             // See if we have a previous set of fragmented pages that should be defragged
@@ -6738,12 +6740,24 @@ bool FBTICpgFragmentedRange(
 
 #ifdef ENABLE_JET_UNIT_TEST
 
+void Reverse( _In_ PGNO* const rgpgno, const INT cpgno )
+{
+    for ( INT ipgno = 0; ipgno < cpgno / 2; ipgno++ )
+    {
+        PGNO pgnoT = rgpgno[ipgno];
+        rgpgno[ipgno] = rgpgno[cpgno - ipgno - 1];
+        rgpgno[cpgno - ipgno - 1] = pgnoT;
+    }
+}
+
 JETUNITTEST( FBTICpgFragmentedRange, RunTooShort )
 {
     PGNO rgpgno[] = { 10, 20, 30, 40, 50, 60, 70, 80 };
     INT ignored1;
     INT ignored2;
     CHECK( false == FBTICpgFragmentedRange( rgpgno, _countof(rgpgno), 8, &ignored1, &ignored2 ) );
+    Reverse( rgpgno, _countof( rgpgno ) );
+    CHECK( false == FBTICpgFragmentedRange( rgpgno, _countof( rgpgno ), 8, &ignored1, &ignored2 ) );
 }
 
 JETUNITTEST( FBTICpgFragmentedRange, ContiguousRun )
@@ -6752,6 +6766,8 @@ JETUNITTEST( FBTICpgFragmentedRange, ContiguousRun )
     INT ignored1;
     INT ignored2;
     CHECK( false == FBTICpgFragmentedRange( rgpgno, _countof(rgpgno), 8, &ignored1, &ignored2 ) );
+    Reverse( rgpgno, _countof( rgpgno ) );
+    CHECK( false == FBTICpgFragmentedRange( rgpgno, _countof( rgpgno ), 8, &ignored1, &ignored2 ) );
 }
 
 JETUNITTEST( FBTICpgFragmentedRange, ContiguousRuns )
@@ -6760,6 +6776,8 @@ JETUNITTEST( FBTICpgFragmentedRange, ContiguousRuns )
     INT ignored1;
     INT ignored2;
     CHECK( false == FBTICpgFragmentedRange( rgpgno, _countof(rgpgno), 8, &ignored1, &ignored2 ) );
+    Reverse( rgpgno, _countof( rgpgno ) );
+    CHECK( false == FBTICpgFragmentedRange( rgpgno, _countof( rgpgno ), 8, &ignored1, &ignored2 ) );
 }
 
 JETUNITTEST( FBTICpgFragmentedRange, MinRangeSizeIsRespected )
@@ -6769,6 +6787,9 @@ JETUNITTEST( FBTICpgFragmentedRange, MinRangeSizeIsRespected )
     INT ignored2;
     CHECK( false == FBTICpgFragmentedRange( rgpgno, _countof(rgpgno), 10, &ignored1, &ignored2 ) );
     CHECK( true == FBTICpgFragmentedRange( rgpgno, _countof(rgpgno), 11, &ignored1, &ignored2 ) );
+    Reverse( rgpgno, _countof( rgpgno ) );
+    CHECK( false == FBTICpgFragmentedRange( rgpgno, _countof( rgpgno ), 10, &ignored1, &ignored2 ) );
+    CHECK( true == FBTICpgFragmentedRange( rgpgno, _countof( rgpgno ), 11, &ignored1, &ignored2 ) );
 }
 
 // We can make FBTICpgFragmentedRange less sensitive by decreasing the range size
@@ -6779,6 +6800,9 @@ JETUNITTEST( FBTICpgFragmentedRange, SmallerRangeSizeTriggersLessOften )
     INT ignored2;
     CHECK( false == FBTICpgFragmentedRange( rgpgno, _countof(rgpgno), 4, &ignored1, &ignored2 ) );
     CHECK( true == FBTICpgFragmentedRange( rgpgno, _countof(rgpgno), 8, &ignored1, &ignored2 ) );
+    Reverse( rgpgno, _countof( rgpgno ) );
+    CHECK( false == FBTICpgFragmentedRange( rgpgno, _countof( rgpgno ), 4, &ignored1, &ignored2 ) );
+    CHECK( true == FBTICpgFragmentedRange( rgpgno, _countof( rgpgno ), 8, &ignored1, &ignored2 ) );
 }
 
 JETUNITTEST( FBTICpgFragmentedRange, FragmentedRuns )
@@ -6817,7 +6841,7 @@ JETUNITTEST( FBTICpgFragmentedRange, UnfragmentedThenFragmentedThenUnfragmented 
         20, 21, 22, 23, 24, 25, 26, 27, 28,
         1, 2, 3, /*4*/ 5, 6, 7, 8, 9, 10,
         100, 101, 102, 103, 104, 105, 106, 107, 108, 109, 110
-};
+    };
     INT start;
     INT end;
     CHECK( true == FBTICpgFragmentedRange( rgpgno, _countof(rgpgno), 8, &start, &end ) );
@@ -6832,7 +6856,7 @@ JETUNITTEST( FBTICpgFragmentedRange, UnfragmentedThenFragmentedThenShortThenUnfr
         1, 2, 3, /*4*/ 5, 6, 7, 8, 9, 10,
         500, 501, 502, 503, 504, 505,
         100, 101, 102, 103, 104, 105, 106, 107, 108, 109, 110
-};
+    };
     INT start;
     INT end;
     CHECK( true == FBTICpgFragmentedRange( rgpgno, _countof(rgpgno), 8, &start, &end ) );
@@ -6846,10 +6870,12 @@ JETUNITTEST( FBTICpgFragmentedRange, SmallFragmentedRanges )
         20, 22, 34, 44,
         50, 51, 52, 53, 54, 55, 56, 57, 58, 59, 60,
         70, 74, 77
-};
+    };
     INT start;
     INT end;
     CHECK( false == FBTICpgFragmentedRange( rgpgno, _countof(rgpgno), 8, &start, &end ) );
+    Reverse( rgpgno, _countof( rgpgno ) );
+    CHECK( false == FBTICpgFragmentedRange( rgpgno, _countof( rgpgno ), 8, &start, &end ) );
 }
 
 #endif // ENABLE_JET_UNIT_TEST
@@ -6887,6 +6913,8 @@ JETUNITTEST( FBTICpgFragmentedRangeTrigger, NotEnoughPagesToDefragAllFragmented 
 {
     PGNO rgpgno[] = { 10, 20, 30, 40, 50, 60, 70, };
     CHECK( false == FBTICpgFragmentedRangeTrigger( rgpgno, _countof(rgpgno), 4, 8 ) );
+    Reverse( rgpgno, _countof( rgpgno ) );
+    CHECK( false == FBTICpgFragmentedRangeTrigger( rgpgno, _countof( rgpgno ), 4, 8 ) );
 }
 
 JETUNITTEST( FBTICpgFragmentedRangeTrigger, NotEnoughPagesToDefragUnfragmentedThenFragmented )
@@ -6894,6 +6922,8 @@ JETUNITTEST( FBTICpgFragmentedRangeTrigger, NotEnoughPagesToDefragUnfragmentedTh
     PGNO rgpgno[] = { 1, 2, 3, 4, 5, 6, 7, 8, 9,
                         100, 110, 120, 130, 140, };
     CHECK( false == FBTICpgFragmentedRangeTrigger( rgpgno, _countof(rgpgno), 4, 8 ) );
+    Reverse( rgpgno, _countof( rgpgno ) );
+    CHECK( false == FBTICpgFragmentedRangeTrigger( rgpgno, _countof( rgpgno ), 4, 8 ) );
 }
 
 JETUNITTEST( FBTICpgFragmentedRangeTrigger, NotEnoughPagesToDefragFragmentedThenUnfragmented )
@@ -6901,12 +6931,16 @@ JETUNITTEST( FBTICpgFragmentedRangeTrigger, NotEnoughPagesToDefragFragmentedThen
     PGNO rgpgno[] = { 10, 20, 30, 40, 50,
                         60, 61, 62, 63, 64, 65, 66, 67, 68, };
     CHECK( false == FBTICpgFragmentedRangeTrigger( rgpgno, _countof(rgpgno), 4, 8 ) );
+    Reverse( rgpgno, _countof( rgpgno ) );
+    CHECK( false == FBTICpgFragmentedRangeTrigger( rgpgno, _countof( rgpgno ), 4, 8 ) );
 }
 
 JETUNITTEST( FBTICpgFragmentedRangeTrigger, EnoughPagesToDefragButDoesNotMeetTrigger )
 {
     PGNO rgpgno[] = { 1, 2, 3, 4, 5, /*6*/ 7, 8, 9, 10, 11, };
     CHECK( false == FBTICpgFragmentedRangeTrigger( rgpgno, _countof(rgpgno), 4, 8 ) );
+    Reverse( rgpgno, _countof( rgpgno ) );
+    CHECK( false == FBTICpgFragmentedRangeTrigger( rgpgno, _countof( rgpgno ), 4, 8 ) );
 }
 
 JETUNITTEST( FBTICpgFragmentedRangeTrigger, EnoughPagesToDefragButContiguous )
@@ -6915,12 +6949,16 @@ JETUNITTEST( FBTICpgFragmentedRangeTrigger, EnoughPagesToDefragButContiguous )
                         /*10*/
                         11, 12, 13, 14, 15, 16, 17, 18, 19, };
     CHECK( false == FBTICpgFragmentedRangeTrigger( rgpgno, _countof(rgpgno), 4, 8 ) );
+    Reverse( rgpgno, _countof( rgpgno ) );
+    CHECK( false == FBTICpgFragmentedRangeTrigger( rgpgno, _countof( rgpgno ), 4, 8 ) );
 }
 
 JETUNITTEST( FBTICpgFragmentedRangeTrigger, EnoughPagesToDefragAllFragmented )
 {
     PGNO rgpgno[] = { 10, 20, 30, 40, 50, 60, 70, 80, 90, };
     CHECK( true == FBTICpgFragmentedRangeTrigger( rgpgno, _countof(rgpgno), 4, 8 ) );
+    Reverse( rgpgno, _countof( rgpgno ) );
+    CHECK( true == FBTICpgFragmentedRangeTrigger( rgpgno, _countof( rgpgno ), 4, 8 ) );
 }
 
 JETUNITTEST( FBTICpgFragmentedRangeTrigger, EnoughPagesToDefragUnfragmentedThenFragmented )
@@ -6928,6 +6966,8 @@ JETUNITTEST( FBTICpgFragmentedRangeTrigger, EnoughPagesToDefragUnfragmentedThenF
     PGNO rgpgno[] = { 1, 2, 3, 4, 5, 6, 7, 8, 9,
                         100, 110, 120, 130, 140, 150, 160, 170, 180, };
     CHECK( true == FBTICpgFragmentedRangeTrigger( rgpgno, _countof(rgpgno), 4, 8 ) );
+    Reverse( rgpgno, _countof( rgpgno ) );
+    CHECK( true == FBTICpgFragmentedRangeTrigger( rgpgno, _countof( rgpgno ), 4, 8 ) );
 }
 
 JETUNITTEST( FBTICpgFragmentedRangeTrigger, EnoughPagesToDefragFragmentedThenUnfragmented )
@@ -6935,6 +6975,8 @@ JETUNITTEST( FBTICpgFragmentedRangeTrigger, EnoughPagesToDefragFragmentedThenUnf
     PGNO rgpgno[] = { 10, 20, 30, 40, 50, 60, 70, 80, 90,
                         100, 101, 102, 103, 104, 105, 106, 107, 108, 109, };
     CHECK( true == FBTICpgFragmentedRangeTrigger( rgpgno, _countof(rgpgno), 4, 8 ) );
+    Reverse( rgpgno, _countof( rgpgno ) );
+    CHECK( true == FBTICpgFragmentedRangeTrigger( rgpgno, _countof( rgpgno ), 4, 8 ) );
 }
 
 JETUNITTEST( FBTICpgFragmentedRangeTrigger, EnoughPagesToDefragUnfragmentedThenFragmentedThenUnfragmented )
@@ -6943,6 +6985,8 @@ JETUNITTEST( FBTICpgFragmentedRangeTrigger, EnoughPagesToDefragUnfragmentedThenF
                         100, 110, 120, 130, 140, 150, 160, 170, 180,
                         191, 192, 193, 194, 195, 196, 197, 198, 199, };
     CHECK( true == FBTICpgFragmentedRangeTrigger( rgpgno, _countof(rgpgno), 4, 8 ) );
+    Reverse( rgpgno, _countof( rgpgno ) );
+    CHECK( true == FBTICpgFragmentedRangeTrigger( rgpgno, _countof( rgpgno ), 4, 8 ) );
 }
 
 JETUNITTEST( FBTICpgFragmentedRangeTrigger, EnoughPagesToDefragFragmentedThenUnfragmentedThenFragmented )
@@ -6951,6 +6995,8 @@ JETUNITTEST( FBTICpgFragmentedRangeTrigger, EnoughPagesToDefragFragmentedThenUnf
                         100, 101, 102, 103, 104, 105, 106, 107, 108,
                         200, 210, 220, 230, 240, 250, 260, 270, 280 };
     CHECK( true == FBTICpgFragmentedRangeTrigger( rgpgno, _countof(rgpgno), 4, 8 ) );
+    Reverse( rgpgno, _countof( rgpgno ) );
+    CHECK( true == FBTICpgFragmentedRangeTrigger( rgpgno, _countof( rgpgno ), 4, 8 ) );
 }
 
 #endif // ENABLE_JET_UNIT_TEST
