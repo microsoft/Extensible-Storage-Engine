@@ -1414,6 +1414,36 @@ private:
 };
 
 
+// Using TraceContext, TraceContextScope, PIBTraceContextScope: 
+// 1. What are these things: 
+//    a. TraceContext is a container for holding tracing info for an IO. e.g. it holds objid, IORs for categorizing the IO. 
+//    b. TraceContextScope is a helper class that creates a scope for a particular context. This particular context is defined by 
+//       the callstack of the current thread, starting from the JETAPI call. These scopes are hierarchical. 
+//       Each function that wants to create a new scope, declares an object of TraceContextScope on the stack and modifies one of its properties. 
+//       All the functions called from this function will see this context. 
+//    c. PIBTraceContextScope does exactly what TraceContextScope does, but needs a PIB* to access the TLS (reduces CPU cost of accessing the TLS). 
+// 
+// 2. Usage: 
+//    a. If you want to modify an IOR or any of the TraceContext properties, declare a new scope: 
+//       TraceContextScope tsScopeT( _some_ior ); 
+//    b. If you have a PIB available in the function, use the more performant version: 
+//       PIBTraceContextScope( ppib, _some_ior ); 
+//    c. If a function performs multiple distinct IO actions, that need separate scopes, create as many tcScopes as you want, enclosed by a c++ scope, to get rid of them appropriately. 
+//       { 
+//          TraceContextScope tcScopeT( _some_ior ); 
+//          Call( ErrSomeFunc() ); 
+//       }  // scope reverted 
+//
+//       Scopes are hierarchical, you will inherit everything from previous active scopes. 
+//
+//    d. If a function takes a TraceContext& arg, then it doesn't look at the TLS to get its context. You can pass in a TraceContext explicitly. 
+//       TraceContextScope tcScopeT( _some_ior_ ); 
+//       Call( ErrSomeFunc( *tcScopeT ) ); 
+//    e. If you are in a function that takes a TraceContext& as an arg, then you are in lower layers that don't look at TLS for context. 
+//       You shouldn't use TraceContextScope here because it will have no effect on called functions, but incur CPU cost of accessing the TLS. 
+//       With the assumption that called functions will also take TraceContext as a param, if they want it. 
+//       This assumption may have been violated in some rare cases. 
+ 
 const ULONG dwEngineObjidNone = 0xFFFFFFFF;
  
 //  Holds mutable tracing information related to an IO
