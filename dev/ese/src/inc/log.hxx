@@ -550,8 +550,13 @@ protected:
     size_t IpgLGPIGetUnsorted( const DBID dbid, const PGNO pgno ) const;
     ERR ErrLGPISetEntry( const DBID dbid, const size_t ipg, const PGNO pgno, const OBJID objid = objidNil, const IOREASONSECONDARY iors = iorsNone, const IOREASONFLAGS iorf = iorfNone );
     PGNO PgnoLGPIGetEntry( const DBID dbid, const size_t ipg ) const;
-    OBJID ObjidLGPIGetEntry( const DBID dbid, const size_t ipg ) const;
-    IOREASONSECONDARY IorsLGPIGetEntry( const DBID dbid, const size_t ipg ) const;
+    VOID LGPIGetEntry(
+        _In_    const DBID                  dbid,
+        _In_    const size_t                ipg,
+        _Out_   PGNO* const                 ppgno,
+        _Out_   OBJID* const                pobjid,
+        _Out_   IOREASONSECONDARY* const    piors,
+        _Out_   IOREASONFLAGS* const        piorf ) const;
 
 private:
 

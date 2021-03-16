@@ -762,18 +762,23 @@ ERR LogPrereaderBase::ErrLGPPrereadExtendedPageRange( const DBID dbid, const PGN
     do
     {
         Assert( ipg >= 0 && ipg < ipgMax );
-        
+
+        PGNO pgnoThisPass;
+        OBJID objid;
+        IOREASONSECONDARY iors;
+        IOREASONFLAGS iorf;
+        LGPIGetEntry( dbid, (size_t)ipg, &pgnoThisPass, &objid, &iors, &iorf );
+
+        Expected( pgnoThisPass != pgnoNull );
+
         //  First time, we don't want to use bfprfCombinableOnly because we want to start
         //  a brand new I/O run in the TLS and issue whatever is pending to the heap.
         const BFPreReadFlags bfprfCombinable = ( ipg == ipgInitial ) ? bfprfDefault : bfprfCombinableOnly;
 
-        const PGNO pgnoThisPass = PgnoLGPIGetEntry( dbid, (size_t)ipg );
-
-        Expected( pgnoThisPass != pgnoNull );
-
         TraceContextScope tcScope;
-        tcScope->SetDwEngineObjid( ObjidLGPIGetEntry( dbid, (size_t)ipg ) );
-        tcScope->iorReason.SetIors( IorsLGPIGetEntry( dbid, (size_t)ipg ) );
+        tcScope->SetDwEngineObjid( objid );
+        tcScope->iorReason.SetIors( iors);
+        tcScope->iorReason.AddFlag( iorf );
 
         err = ErrLGPIPrereadPage( dbid, pgnoThisPass, BFPreReadFlags( bfprfNoIssue | bfprfCombinable | bfprf ) );
 
@@ -905,20 +910,30 @@ ERR LogPrereaderBase::ErrLGPISetEntry( const DBID dbid, const size_t ipg, const 
 
 PGNO LogPrereaderBase::PgnoLGPIGetEntry( const DBID dbid, const size_t ipg ) const
 {
-    Assert( FLGPDBEnabled( dbid ) );
-    return m_rgArrayPagerefs[ dbid ].Entry( ipg ).pgno;
+    PGNO pgno;
+    OBJID objidT;
+    IOREASONSECONDARY iorsT;
+    IOREASONFLAGS iorfT;
+    LGPIGetEntry( dbid, ipg, &pgno, &objidT, &iorsT, &iorfT );
+    return pgno;
 }
 
-OBJID LogPrereaderBase::ObjidLGPIGetEntry( const DBID dbid, const size_t ipg ) const
+VOID LogPrereaderBase::LGPIGetEntry(
+    _In_    const DBID                  dbid,
+    _In_    const size_t                ipg,
+    _Out_   PGNO* const                 ppgno,
+    _Out_   OBJID* const                pobjid,
+    _Out_   IOREASONSECONDARY* const    piors,
+    _Out_   IOREASONFLAGS* const        piorf ) const
 {
     Assert( FLGPDBEnabled( dbid ) );
-    return m_rgArrayPagerefs[dbid].Entry( ipg ).objid;
-}
 
-IOREASONSECONDARY LogPrereaderBase::IorsLGPIGetEntry( const DBID dbid, const size_t ipg ) const
-{
-    Assert( FLGPDBEnabled( dbid ) );
-    return m_rgArrayPagerefs[dbid].Entry( ipg ).iors;
+    PageRef pageref = m_rgArrayPagerefs[dbid].Entry( ipg );
+
+    *ppgno = pageref.pgno;
+    *pobjid = pageref.objid;
+    *piors = pageref.iors;
+    *piorf = pageref.iorf;
 }
 
 INLINE INT __cdecl LogPrereaderBase::ILGPICmpPagerefs(  const LogPrereaderBase::PageRef*    ppageref1,
