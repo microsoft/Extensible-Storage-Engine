@@ -6795,7 +6795,9 @@ ERR LOG::ErrLGRIRedoOperation( LR *plr )
 #endif
                 break;
             }
+
             case JET_errOutOfMemory:
+            case JET_errOutOfCursors:
                 break;
 
             default:
