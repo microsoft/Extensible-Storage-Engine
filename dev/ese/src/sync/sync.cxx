@@ -319,341 +319,6 @@ CSemaphore::~CSemaphore()
 }
 
 
-void CSemaphore::ReleaseAllWaiters()
-{
-
-    OSSYNC_FOREVER
-    {
-
-        const CSemaphoreState stateCur = State();
-
-
-        if ( stateCur.FNoWait() )
-        {
-
-            return;
-        }
-
-
-        else
-        {
-            OSSYNCAssert( stateCur.FWait() );
-
-
-            if ( State().FChange( stateCur, CSemaphoreState( 0 ) ) )
-            {
-
-                g_ksempoolGlobal.Ksem( stateCur.Irksem(), this ).Release( stateCur.CWait() );
-
-
-                return;
-            }
-        }
-    }
-}
-
-
-const BOOL CSemaphore::_FAcquire( const INT cmsecTimeout )
-{
-
-    INT cSpin = g_cSpinMax;
-
-
-    CKernelSemaphorePool::IRKSEM irksemAlloc = CKernelSemaphorePool::irksemNil;
-
-
-    OSSYNC_FOREVER
-    {
-
-        const CSemaphoreState stateCur = (CSemaphoreState&) State();
-
-
-        if ( stateCur.FAvail() )
-        {
-
-            if ( State().FChange( stateCur, CSemaphoreState( stateCur.CAvail() - 1 ) ) )
-            {
-
-                if ( irksemAlloc != CKernelSemaphorePool::irksemNil )
-                {
-                    g_ksempoolGlobal.Unreference( irksemAlloc );
-                }
-
-
-                State().SetAcquire();
-                return fTrue;
-            }
-        }
-
-
-        else if ( cSpin )
-        {
-
-            cSpin--;
-            continue;
-        }
-
-
-        else if ( stateCur.FNoWaitAndNoAvail() )
-        {
-
-            if ( irksemAlloc == CKernelSemaphorePool::irksemNil )
-            {
-                irksemAlloc = g_ksempoolGlobal.Allocate( this );
-            }
-
-
-            if ( State().FChange( stateCur, CSemaphoreState( 1, irksemAlloc ) ) )
-            {
-
-                State().StartWait();
-                const BOOL fCompleted = g_ksempoolGlobal.Ksem( irksemAlloc, this ).FAcquire( cmsecTimeout );
-                State().StopWait();
-
-
-                if ( fCompleted )
-                {
-
-                    g_ksempoolGlobal.Unreference( irksemAlloc );
-
-
-                    State().SetAcquire();
-                    return fTrue;
-                }
-
-
-                else
-                {
-
-                    OSSYNC_INNER_FOREVER
-                    {
-
-                        const CSemaphoreState stateAfterWait = (CSemaphoreState&) State();
-
-
-                        if ( stateAfterWait.FNoWait() || stateAfterWait.Irksem() != irksemAlloc )
-                        {
-
-
-                            g_ksempoolGlobal.Ksem( irksemAlloc, this ).Acquire();
-
-
-                            g_ksempoolGlobal.Unreference( irksemAlloc );
-
-
-                            return fTrue;
-                        }
-
-
-                        else if ( stateAfterWait.CWait() == 1 )
-                        {
-                            OSSYNCAssert( stateAfterWait.FWait() );
-                            OSSYNCAssert( stateAfterWait.Irksem() == irksemAlloc );
-
-
-                            if ( State().FChange( stateAfterWait, CSemaphoreState( 0 ) ) )
-                            {
-
-                                g_ksempoolGlobal.Unreference( irksemAlloc );
-
-
-                                return fFalse;
-                            }
-                        }
-
-
-                        else
-                        {
-                            OSSYNCAssert( stateAfterWait.CWait() > 1 );
-                            OSSYNCAssert( stateAfterWait.FWait() );
-                            OSSYNCAssert( stateAfterWait.Irksem() == irksemAlloc );
-
-
-                            if ( State().FChange( stateAfterWait, CSemaphoreState( stateAfterWait.CWait() - 1, stateAfterWait.Irksem() ) ) )
-                            {
-
-                                g_ksempoolGlobal.Unreference( irksemAlloc );
-
-
-                                return fFalse;
-                            }
-                        }
-                    }
-                }
-            }
-        }
-
-
-        else
-        {
-            OSSYNCAssert( stateCur.FWait() );
-
-
-            g_ksempoolGlobal.Reference( stateCur.Irksem() );
-
-
-            if ( State().FChange( stateCur, CSemaphoreState( stateCur.CWait() + 1, stateCur.Irksem() ) ) )
-            {
-
-                if ( irksemAlloc != CKernelSemaphorePool::irksemNil )
-                {
-                    g_ksempoolGlobal.Unreference( irksemAlloc );
-                }
-
-
-                State().StartWait();
-                const BOOL fCompleted = g_ksempoolGlobal.Ksem( stateCur.Irksem(), this ).FAcquire( cmsecTimeout );
-                State().StopWait();
-
-
-                if ( fCompleted )
-                {
-
-                    g_ksempoolGlobal.Unreference( stateCur.Irksem() );
-
-
-                    State().SetAcquire();
-                    return fTrue;
-                }
-
-
-                else
-                {
-
-                    OSSYNC_INNER_FOREVER
-                    {
-
-                        const CSemaphoreState stateAfterWait = (CSemaphoreState&) State();
-
-
-                        if ( stateAfterWait.FNoWait() || stateAfterWait.Irksem() != stateCur.Irksem() )
-                        {
-
-
-                            g_ksempoolGlobal.Ksem( stateCur.Irksem(), this ).Acquire();
-
-
-                            g_ksempoolGlobal.Unreference( stateCur.Irksem() );
-
-
-                            return fTrue;
-                        }
-
-
-                        else if ( stateAfterWait.CWait() == 1 )
-                        {
-                            OSSYNCAssert( stateAfterWait.FWait() );
-                            OSSYNCAssert( stateAfterWait.Irksem() == stateCur.Irksem() );
-
-
-                            if ( State().FChange( stateAfterWait, CSemaphoreState( 0 ) ) )
-                            {
-
-                                g_ksempoolGlobal.Unreference( stateCur.Irksem() );
-
-
-                                return fFalse;
-                            }
-                        }
-
-
-                        else
-                        {
-                            OSSYNCAssert( stateAfterWait.CWait() > 1 );
-                            OSSYNCAssert( stateAfterWait.FWait() );
-                            OSSYNCAssert( stateAfterWait.Irksem() == stateCur.Irksem() );
-
-
-                            if ( State().FChange( stateAfterWait, CSemaphoreState( stateAfterWait.CWait() - 1, stateAfterWait.Irksem() ) ) )
-                            {
-
-                                g_ksempoolGlobal.Unreference( stateCur.Irksem() );
-
-
-                                return fFalse;
-                            }
-                        }
-                    }
-                }
-            }
-
-
-            g_ksempoolGlobal.Unreference( stateCur.Irksem() );
-        }
-    }
-}
-
-
-const BOOL CSemaphore::_FWait( const INT cmsecTimeout )
-{
-    if ( _FAcquire( cmsecTimeout ) )
-    {
-        Release();
-        return fTrue;
-    }
-
-    return fFalse;
-}
-
-
-void CSemaphore::_Release( const INT cToRelease )
-{
-
-    OSSYNC_FOREVER
-    {
-
-        const CSemaphoreState stateCur = State();
-
-
-        if ( stateCur.FNoWait() )
-        {
-
-            if ( State().FChange( stateCur, CSemaphoreState( stateCur.CAvail() + cToRelease ) ) )
-            {
-
-                return;
-            }
-        }
-
-
-        else
-        {
-            OSSYNCAssert( stateCur.FWait() );
-
-
-            if ( stateCur.CWait() <= cToRelease )
-            {
-
-                if ( State().FChange( stateCur, CSemaphoreState( cToRelease - stateCur.CWait() ) ) )
-                {
-
-                    g_ksempoolGlobal.Ksem( stateCur.Irksem(), this ).Release( stateCur.CWait() );
-
-
-                    return;
-                }
-            }
-
-
-            else
-            {
-                OSSYNCAssert( stateCur.CWait() > cToRelease );
-
-
-                if ( State().FChange( stateCur, CSemaphoreState( stateCur.CWait() - cToRelease, stateCur.Irksem() ) ) )
-                {
-
-                    g_ksempoolGlobal.Ksem( stateCur.Irksem(), this ).Release( cToRelease );
-
-
-                    return;
-                }
-            }
-        }
-    }
-}
-
-
 
 
 CAutoResetSignal::CAutoResetSignal( const CSyncBasicInfo& sbi )
@@ -3479,6 +3144,221 @@ void CKernelSemaphore::Release( const INT cToRelease )
 
 
 
+const DWORD CSemaphore::_DwOSTimeout( const INT cmsecTimeout )
+{
+    if ( cmsecTimeout == cmsecInfinite || cmsecTimeout == cmsecInfiniteNoDeadlock )
+    {
+        return INFINITE;
+    }
+    else if ( cmsecTimeout >= 0 )
+    {
+        return cmsecTimeout;
+    }
+    else
+    {
+        return 0;
+    }
+}
+
+
+const BOOL CSemaphore::_FAcquire( const DWORD dwTimeout )
+{
+    const DWORD dwStart = DwOSSyncITickTime();
+    DWORD dwRemaining = dwTimeout;
+
+    State().IncWait();
+    OSSYNC_FOREVER
+    {
+        CSemaphoreState state( syncstateNull );
+        BOOL fTimedOut = fFalse;
+
+        while ( fTrue )
+        {
+            state = State();
+            if ( state.CAvail() > 0 )
+            {
+                break;
+            }
+
+            if ( dwRemaining == 0 )
+            {
+                fTimedOut = fTrue;
+                break;
+            }
+
+            if ( !_FWait( state.CAvail(), dwRemaining ) )
+            {
+                fTimedOut = fTrue;
+                break;
+            }
+
+            const DWORD dwElapsed = DwOSSyncITickTime() - dwStart;
+            if ( dwElapsed > dwTimeout )
+            {
+                fTimedOut = fTrue;
+                break;
+            }
+
+            dwRemaining = dwTimeout - dwElapsed;
+        }
+
+        if ( fTimedOut )
+        {
+            State().DecWait();
+            return fFalse;
+        }
+
+        OSSYNCAssert( state.CAvail() > 0 );
+        OSSYNCAssert( state.CWait() > 0 );
+
+        // Atomically acquire the semaphore and decrement the waiting counter.
+        const CSemaphoreState stateNew( state.CAvail() - 1, state.CWait() - 1 );
+        if ( State().FChange( state, stateNew ) )
+        {
+            return fTrue;
+        }
+    }
+}
+
+
+void CSemaphore::ReleaseAllWaiters()
+{
+    OSSYNC_FOREVER
+    {
+        const CSemaphoreState state = State();
+
+        if ( state.CAvail() > 0 && state.CWait() > 0 )
+        {
+            // The existing waiters are in transition.
+            continue;
+        }
+        else
+        {
+            const CSemaphoreState stateNew( state.CWait(), state.CWait() );
+            if ( State().FChange(state, stateNew ) )
+            {
+                volatile void *pv = State().PAvail();
+
+                WakeByAddressAll( (void*)pv );
+
+                return;
+            }
+        }
+    }
+}
+
+
+void CSemaphore::_Release( const INT cToRelease )
+{
+    if ( cToRelease <= 0 )
+    {
+        return;
+    }
+
+    State().IncAvail( cToRelease );
+
+    LONG cWait = State().CWait();
+    if ( cWait == 0 )
+    {
+        // No one is waiting.
+    }
+    else if ( cWait <= cToRelease )
+    {
+        volatile void *pv = State().PAvail();
+        // No more waiting threads than `cToRelease`, wake everyone.
+        WakeByAddressAll( (void*)pv );
+    }
+    else
+    {
+        volatile void *pv = State().PAvail();
+        // Wake at most `cToRelease` threads.  The benefit from not waking unnecessary
+        // threads is expected to be greater than the loss on extra calls below.
+        for ( INT i = 0; i < cToRelease; i++ )
+        {
+            WakeByAddressSingle( (void*)pv );
+        }
+    }
+}
+
+
+const BOOL CSemaphore::_FWait( const INT cAvail, const DWORD dwTimeout )
+{
+    PERFOpt( AtomicIncrement( (LONG*)&g_cOSSYNCThreadBlock ) );
+    State().StartWait();
+
+    BOOL fSuccess;
+
+#ifdef SYNC_DEADLOCK_DETECTION
+    if (dwTimeout > cmsecDeadlock )
+    {
+        fSuccess = _FOSWait( cAvail, cmsecDeadlock );
+        if ( !fSuccess )
+        {
+#ifdef DEBUG
+            SYNCDeadLockTimeOutState sdltosStatePre = sdltosEnabled;
+            OSSYNC_FOREVER
+            {
+                C_ASSERT( sizeof(g_sdltosState) == sizeof(LONG) );
+                sdltosStatePre = (SYNCDeadLockTimeOutState)AtomicCompareExchange( (LONG*)&g_sdltosState, sdltosEnabled, sdltosCheckInProgress );
+                if ( sdltosStatePre != sdltosCheckInProgress )
+                {
+                    break;
+                }
+                Sleep( 16 );
+            }
+#else
+            SYNCDeadLockTimeOutState sdltosStatePre = sdltosEnabled;
+#endif
+
+            OSSYNCAssertSzRTL( fSuccess  || sdltosStatePre == sdltosDisabled, "Potential Deadlock Detected (Timeout);  FYI ed [dll]!OSSYNC::g_sdltosState to 0 to disable." );
+
+#ifdef DEBUG
+            if ( sdltosStatePre != sdltosDisabled )
+            {
+                OSSYNCAssert( sdltosStatePre != sdltosCheckInProgress );
+
+
+                const SYNCDeadLockTimeOutState sdltosCheck = (SYNCDeadLockTimeOutState)AtomicCompareExchange( (LONG*)&g_sdltosState, sdltosCheckInProgress, sdltosEnabled );
+                OSSYNCAssertSzRTL( sdltosCheck != sdltosDisabled, "Devs, the debugger used to set g_sdltosState to 0 and disables further timeout detection asserts!?  Just an FYI.  If you did not, then code is confused." );
+            }
+#endif
+
+            DWORD dwNewTimeout = dwTimeout;
+
+            if ( dwNewTimeout < INFINITE )
+            {
+                dwNewTimeout -= cmsecDeadlock;
+            }
+
+            fSuccess = _FOSWait( cAvail, dwNewTimeout );
+        }
+    }
+    else
+#endif
+    {
+        fSuccess = _FOSWait( cAvail, dwTimeout );
+    }
+
+    State().StopWait();
+    PERFOpt( AtomicIncrement( (LONG*)&g_cOSSYNCThreadResume ) );
+
+    return fSuccess;
+}
+
+
+const BOOL CSemaphore::_FOSWait( const INT cAvail, const DWORD dwTimeout )
+{
+    volatile void *pv = State().PAvail();
+
+    OnThreadWaitBegin();
+    BOOL fSuccess = WaitOnAddress( pv, (PVOID)&cAvail, sizeof(cAvail), dwTimeout );
+    OnThreadWaitEnd();
+
+    return fSuccess;
+}
+
+
+
 #include<stdarg.h>
 #include<stdio.h>
 #include<tchar.h>
@@ -4821,15 +4701,8 @@ void CKernelSemaphore::Dump( const CDumpContext& dc ) const
 
 void CSemaphoreState::Dump( const CDumpContext& dc ) const
 {
-    if ( FNoWait() )
-    {
-        DumpMember( dc, m_cAvail );
-    }
-    else
-    {
-        DumpMember( dc, m_irksem );
-        DumpMember( dc, m_cWaitNeg );
-    }
+    DumpMember( dc, m_cAvail );
+    DumpMember( dc, m_cWait );
 }
 
 void CSemaphoreInfo::Dump( const CDumpContext& dc ) const

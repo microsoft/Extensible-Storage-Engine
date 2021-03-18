@@ -432,7 +432,7 @@ class TDB
 #ifdef _AMD64_
         BYTE                m_bReserved2[8];
 #else
-        BYTE                m_bReserved2[4];
+
 #endif
 
 

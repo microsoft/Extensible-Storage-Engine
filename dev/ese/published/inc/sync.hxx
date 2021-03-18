@@ -256,6 +256,9 @@ extern const INT cbCacheLine;
 extern BOOL g_fSyncProcessAbort;
 
 
+extern INT g_cSpinMax;
+
+
 
 
 inline const BOOL IsAtomicallyModifiable( LONG* plTarget )
@@ -1572,36 +1575,24 @@ class CSemaphoreState
     public:
 
 
-
-        CSemaphoreState( const CSyncStateInitNull& null ) : m_cAvail( 0 ) {}
-        CSemaphoreState( const INT cAvail );
-        CSemaphoreState( const INT cWait, const INT irksem );
-        CSemaphoreState( const CSemaphoreState& state )
-        {
-            C_ASSERT( OffsetOf( CSemaphoreState, m_irksem ) == OffsetOf( CSemaphoreState, m_cAvail ) );
-            C_ASSERT( OffsetOf( CSemaphoreState, m_cWaitNeg ) > OffsetOf( CSemaphoreState, m_cAvail ) );
-            C_ASSERT( ( OffsetOf( CSemaphoreState, m_cWaitNeg ) + sizeof ( m_cWaitNeg ) ) <= ( OffsetOf( CSemaphoreState, m_cAvail ) + sizeof ( m_cAvail ) ) );
-            m_cAvail = state.m_cAvail;
-        }
+        CSemaphoreState( const CSyncStateInitNull& null ) : m_cAvail( 0 ), m_cWait( 0 ) {}
+        CSemaphoreState( const INT cAvail, const INT cWait ) : m_cAvail( cAvail ), m_cWait( cWait ) {}
+        CSemaphoreState( const CSemaphoreState& state ) : m_qwState( AtomicRead( (QWORD*)&state.m_qwState ) ) {}
         ~CSemaphoreState() {}
 
 
-        CSemaphoreState& operator=( CSemaphoreState& state ) { m_cAvail = state.m_cAvail;  return *this; }
+        CSemaphoreState& operator=( CSemaphoreState& state ) { m_qwState = AtomicRead( (QWORD*)&state.m_qwState );  return *this; }
 
 
         const BOOL FChange( const CSemaphoreState& stateCur, const CSemaphoreState& stateNew );
-        const BOOL FIncAvail( const INT cToInc );
+        void IncAvail( const INT cToInc );
         const BOOL FDecAvail();
+        void IncWait();
+        void DecWait();
 
-
-        const BOOL FNoWait() const { return m_cAvail >= 0; }
-        const BOOL FWait() const { return m_cAvail < 0; }
-        const BOOL FAvail() const { return m_cAvail > 0; }
-        const BOOL FNoWaitAndNoAvail() const { return m_cAvail == 0; }
-
-        const INT CAvail() const { OSSYNCAssert( FNoWait() ); return m_cAvail; }
-        const INT CWait() const { OSSYNCAssert( FWait() ); return -m_cWaitNeg; }
-        const CKernelSemaphorePool::IRKSEM Irksem() const { OSSYNCAssert( FWait() ); return CKernelSemaphorePool::IRKSEM( m_irksem ); }
+        const INT CAvail() const { return (INT)m_cAvail; }
+        const INT CWait() const { return (INT)m_cWait; }
+        volatile void * PAvail() { return &m_cAvail; }
 
 
         void Dump( const CDumpContext& dc ) const;
@@ -1613,96 +1604,27 @@ class CSemaphoreState
         union
         {
 
-            volatile LONG       m_cAvail;
+            volatile QWORD      m_qwState;
 
 
             struct
             {
-                volatile USHORT m_irksem;
-                volatile SHORT  m_cWaitNeg;
+                volatile DWORD  m_cAvail;
+                volatile DWORD  m_cWait;
             };
         };
 };
 
 
-inline CSemaphoreState::CSemaphoreState( const INT cAvail )
-{
-
-    OSSYNCAssert( cAvail >= 0 );
-    OSSYNCAssert( cAvail <= 0x7FFFFFFF );
-
-
-    m_cAvail = LONG( cAvail );
-}
-
-
-inline CSemaphoreState::CSemaphoreState( const INT cWait, const INT irksem )
-{
-
-    OSSYNCAssert( cWait > 0 );
-    OSSYNCAssert( cWait <= 0x7FFF );
-    OSSYNCAssert( irksem >= 0 );
-    OSSYNCAssert( irksem <= 0xFFFE );
-
-
-    m_cWaitNeg = SHORT( -cWait );
-
-
-    m_irksem = (USHORT) irksem;
-}
-
-
 inline const BOOL CSemaphoreState::FChange( const CSemaphoreState& stateCur, const CSemaphoreState& stateNew )
 {
-    return AtomicCompareExchange( (LONG*)&m_cAvail, stateCur.m_cAvail, stateNew.m_cAvail ) == stateCur.m_cAvail;
+    return AtomicCompareExchange( (QWORD*)&m_qwState, stateCur.m_qwState, stateNew.m_qwState ) == stateCur.m_qwState;
 }
 
 
-__forceinline const BOOL CSemaphoreState::FIncAvail( const INT cToInc )
+__forceinline void CSemaphoreState::IncAvail( const INT cToInc )
 {
-
-    OSSYNC_FOREVER
-    {
-
-        const LONG cAvail = m_cAvail;
-
-
-        const LONG cAvailStart = cAvail & 0x7FFFFFFF;
-
-
-        const LONG cAvailEnd = cAvailStart + cToInc;
-
-
-        OSSYNCAssert( cAvail < 0 || ( cAvailStart >= 0 && cAvailEnd <= 0x7FFFFFFF && cAvailEnd == cAvailStart + cToInc ) );
-
-
-        const LONG cAvailOld = AtomicCompareExchange( (LONG*)&m_cAvail, cAvailStart, cAvailEnd );
-
-
-        if ( cAvailOld == cAvailStart )
-        {
-
-            return fTrue;
-        }
-
-
-        else
-        {
-
-            if ( cAvailOld >= 0 )
-            {
-
-                continue;
-            }
-
-
-            else
-            {
-
-                return fFalse;
-            }
-        }
-    }
+    AtomicExchangeAdd( (LONG*)&m_cAvail, cToInc );
 }
 
 
@@ -1714,46 +1636,27 @@ __forceinline const BOOL CSemaphoreState::FDecAvail()
 
         const LONG cAvail = m_cAvail;
 
-
-        OSSYNCAssert( cAvail != 0x80000000 );
-
-
-        const LONG cAvailEnd = ( cAvail - 1 ) & 0x7FFFFFFF;
-
-
-        const LONG cAvailStart = cAvailEnd + 1;
-
-
-        OSSYNCAssert( cAvail <= 0 || ( cAvailStart > 0 && cAvailEnd >= 0 && cAvailEnd == cAvail - 1 ) );
-
-
-        const LONG cAvailOld = AtomicCompareExchange( (LONG*)&m_cAvail, cAvailStart, cAvailEnd );
-
-
-        if ( cAvailOld == cAvailStart )
+        if ( cAvail == 0 )
         {
-
+            return fFalse;
+        }
+        else if ( AtomicCompareExchange( (LONG*)&m_cAvail, cAvail, cAvail - 1 ) == cAvail )
+        {
             return fTrue;
         }
-
-
-        else
-        {
-
-            if ( cAvailOld > 0 )
-            {
-
-                continue;
-            }
-
-
-            else
-            {
-
-                return fFalse;
-            }
-        }
     }
+}
+
+
+__forceinline void CSemaphoreState::IncWait( )
+{
+    AtomicIncrement( (LONG*)&m_cWait );
+}
+
+
+__forceinline void CSemaphoreState::DecWait( )
+{
+    AtomicDecrement( (LONG*)&m_cWait );
 }
 
 
@@ -1791,10 +1694,20 @@ class CSemaphore
 
         CSemaphore& operator=( CSemaphore& ) = delete;
 
+        // Resolves the internal timeout value to an OS level timeout.
+        static const DWORD _DwOSTimeout( const INT cmsecTimeout );
 
-        const BOOL _FAcquire( const INT cmsecTimeout );
-        const BOOL _FWait( const INT cmsecTimeout );
+        const BOOL _FTryAcquire( const INT cSpin );
+        const BOOL _FAcquire( const DWORD dwTimeout );
         void _Release( const INT cToRelease );
+
+        // Waits until the semaphore counter value changes.
+        // This method has the same semantics as the WaitOnAddress() function and is
+        // guaranteed to return when the address is signaled, but it is also allowed
+        // to return for other reasons.  The caller should compare the new value with
+        // the original.
+        const BOOL _FWait( const INT cAvail, const DWORD dwTimeout );
+        const BOOL _FOSWait( const INT cAvail, const DWORD dwTimeout );
 };
 
 
@@ -1816,69 +1729,104 @@ inline void CSemaphore::Wait()
 
 inline const BOOL CSemaphore::FTryAcquire()
 {
-
-    const BOOL fAcquire = State().FDecAvail();
-
-
-    if ( !fAcquire )
+    if ( _FTryAcquire( 0 ) )
     {
-
-        State().SetContend();
+        State().SetAcquire();
+        return fTrue;
     }
-
-
     else
     {
-
-        State().SetAcquire();
+        State().SetContend();
+        return fFalse;
     }
-
-    return fAcquire;
 }
 
 
 inline const BOOL CSemaphore::FAcquire( const INT cmsecTimeout )
 {
-
-    return FTryAcquire() || _FAcquire( cmsecTimeout );
+    if ( _FTryAcquire( g_cSpinMax ) || _FAcquire( _DwOSTimeout( cmsecTimeout ) ) )
+    {
+        State().SetAcquire();
+        return fTrue;
+    }
+    else
+    {
+        State().SetContend();
+        return fFalse;
+    }
 }
 
 
 inline const BOOL CSemaphore::FWait( const INT cmsecTimeout )
 {
-
-    return ( CAvail() > 0 ) || _FWait( cmsecTimeout );
+    if ( _FTryAcquire( 0 ) || _FAcquire( _DwOSTimeout( cmsecTimeout ) ) )
+    {
+        _Release( 1 );
+        State().SetAcquire();
+        return fTrue;
+    }
+    else
+    {
+        State().SetContend();
+        return fFalse;
+    }
 }
 
 
 inline void CSemaphore::Release( const INT cToRelease )
 {
-
-    if ( !State().FIncAvail( cToRelease ) )
-    {
-
-        _Release( cToRelease );
-    }
+    _Release( cToRelease );
 }
 
 
 inline const INT CSemaphore::CWait() const
 {
+    OSSYNC_FOREVER
+    {
+        const CSemaphoreState state = State();
 
-    const CSemaphoreState stateCur = (CSemaphoreState&) State();
-
-
-    return stateCur.FWait() ? stateCur.CWait() : 0;
+        if ( state.CAvail() > 0 && state.CWait() > 0 )
+        {
+            // The existing waiters are in transition.
+            continue;
+        }
+        else
+        {
+            return state.CWait();
+        }
+    }
 }
 
 
 inline const INT CSemaphore::CAvail() const
 {
+    return State().CAvail();
+}
 
-    const CSemaphoreState stateCur = (CSemaphoreState&) State();
 
+inline const BOOL CSemaphore::_FTryAcquire( const INT cSpin )
+{
+    INT cSpinCount = cSpin;
 
-    return stateCur.FNoWait() ? stateCur.CAvail() : 0;
+    OSSYNC_FOREVER
+    {
+        if ( State().CAvail() == 0 )
+        {
+            if ( cSpinCount )
+            {
+                cSpinCount--;
+                continue;
+            }
+            else
+            {
+                return fFalse;
+            }
+        }
+        else if ( State().FDecAvail() )
+        {
+            return fTrue;
+        }
+    }
 }
 
 
