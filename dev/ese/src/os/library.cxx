@@ -35,7 +35,7 @@ BOOL FUtilLoadLibrary( const WCHAR* wszLibrary, LIBRARY* plibrary, const BOOL fP
             L"Unable to find the callback library %ws (or one of its dependencies).\r\n"
                 L"Copy in the file and hit OK to retry, or hit Cancel to abort.\r\n",
             wszLibrary );
-        Assert( wcslen( szMessage ) < _countof( szMessage ) );
+        Assert( LOSStrLengthW( szMessage ) < _countof( szMessage ) );
 
         const INT id = UtilMessageBoxW(
                             szMessage,
@@ -300,7 +300,7 @@ ERR ErrMultiLoadPfn(
         }
 
         //  increment to the next DLL in the multi-string
-        ichDll = ichDll + (SHORT)wcslen( &(mwszzDlls[ichDll]) ) + 1;
+        ichDll = ichDll + (SHORT)LOSStrLengthW( &(mwszzDlls[ichDll]) ) + 1;
     }
 
     if ( NULL == *ppfn )
@@ -335,7 +335,7 @@ ERR ErrMultiLoadPfn(
 VOID FreeLoadedModule(
     const WCHAR * const wszDll )
 {
-    Assert( wszDll && wcslen( wszDll ) );
+    Assert( wszDll && LOSStrLengthW( wszDll ) );
     HMODULE hmodule = GetModuleHandleW( wszDll );
 
     if ( hmodule )  // just in case

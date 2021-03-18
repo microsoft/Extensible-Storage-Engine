@@ -1891,7 +1891,7 @@ ERR LGFileHelper::ErrLGGetGeneration( IFileSystemAPI* const pfsapi, __in PCWSTR 
 
     /* if has not the current base name
     /**/
-    if ( _wcsnicmp( wszFNameT, wszBaseName, wcslen( wszBaseName ) ) )
+    if ( _wcsnicmp( wszFNameT, wszBaseName, LOSStrLengthW( wszBaseName ) ) )
     {
         Call( ErrERRCheck( JET_errInvalidParameter ) );
     }
@@ -1901,23 +1901,23 @@ ERR LGFileHelper::ErrLGGetGeneration( IFileSystemAPI* const pfsapi, __in PCWSTR 
 
     // if length of a numbered log file name
     ULONG cLogDigits = LOSStrLengthW( wszFNameT );
-    if ( cLogDigits < wcslen( wszBaseName ) )
+    if ( cLogDigits < (ULONG)LOSStrLengthW( wszBaseName ) )
     {
         Call( ErrERRCheck( JET_errInvalidParameter ) );
     }
-    cLogDigits -= wcslen( wszBaseName ); // subtract base name digits
+    cLogDigits -= LOSStrLengthW( wszBaseName ); // subtract base name digits
     if ( ( cLogDigits != cLogDigitsSmall &&
           cLogDigits != cLogDigitsBig ) )
     {
         Call( ErrERRCheck( JET_errInvalidParameter ) );
     }
-    const INT   ibMax = (cLogDigits + wcslen( wszBaseName ));
+    const INT   ibMax = (cLogDigits + LOSStrLengthW( wszBaseName ));
 
     // finally try to pull out the log generation ...
     INT         ib;
     LONG        lGen = 0;
 
-    for (ib = wcslen( wszBaseName ); ib < ibMax; ib++ )
+    for (ib = LOSStrLengthW( wszBaseName ); ib < ibMax; ib++ )
     {
         WCHAR   b = wszFNameT[ib];
 

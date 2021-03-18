@@ -922,7 +922,7 @@ LOCAL ERR ErrInfoGetObjectInfoList(
                     tableid,
                     rgcolumnid[iContainerName],
                     fUnicodeNames ? (VOID *)wszTcObject : (VOID *)szTcObject,
-                    (ULONG)( fUnicodeNames ? ( wcslen(wszTcObject) * sizeof( WCHAR ) ) : strlen(szTcObject) ),
+                    (ULONG)( fUnicodeNames ? ( LOSStrLengthW(wszTcObject) * sizeof( WCHAR ) ) : strlen(szTcObject) ),
                     NO_GRBIT,
                     NULL ) );
                     
@@ -947,7 +947,7 @@ LOCAL ERR ErrInfoGetObjectInfoList(
                         tableid,
                         rgcolumnid[iObjectName],
                         wszObjectName,
-                        (ULONG) ( sizeof(WCHAR) * wcslen(wszObjectName) ),
+                        (ULONG) ( sizeof(WCHAR) * LOSStrLengthW(wszObjectName) ),
                         NO_GRBIT,
                         NULL ) );
         }
@@ -1800,7 +1800,7 @@ LOCAL ERR ErrINFOSetTableColumnInfoList(
                     tableid,
                     rgcolumnid[iColumnName],
                     wszName,
-                    (ULONG)( sizeof( WCHAR ) * wcslen( wszName ) ),
+                    (ULONG)( sizeof( WCHAR ) * LOSStrLengthW( wszName ) ),
                     NO_GRBIT,
                     NULL ) );
 
@@ -1907,7 +1907,7 @@ LOCAL ERR ErrINFOSetTableColumnInfoList(
                         tableid,
                         rgcolumnid[iColumnTableName],
                         wszName,
-                        (ULONG)( sizeof( WCHAR ) * ( wcslen( wszName ) ) ),
+                        (ULONG)( sizeof( WCHAR ) * ( LOSStrLengthW( wszName ) ) ),
                         NO_GRBIT,
                         NULL ) );
 
@@ -1918,7 +1918,7 @@ LOCAL ERR ErrINFOSetTableColumnInfoList(
                         tableid,
                         rgcolumnid[iColumnColumnName],
                         wszName,
-                        (ULONG)( sizeof( WCHAR ) * ( wcslen( wszName ) ) ),
+                        (ULONG)( sizeof( WCHAR ) * ( LOSStrLengthW( wszName ) ) ),
                         NO_GRBIT,
                         NULL ) );
 
@@ -2759,7 +2759,7 @@ LOCAL ERR ErrINFOGetTableIndexInfo(
                             tableid,
                             rgcolumnid[iIndexName],
                             wszName,
-                            (ULONG)( sizeof(WCHAR) * wcslen( wszName ) ),
+                            (ULONG)( sizeof(WCHAR) * LOSStrLengthW( wszName ) ),
                             NO_GRBIT,
                             NULL ) );
             }
@@ -2974,7 +2974,7 @@ LOCAL ERR ErrINFOGetTableIndexInfo(
                             tableid,
                             rgcolumnid[iIndexColName],
                             wszName,
-                            (ULONG)( sizeof(WCHAR) * wcslen( wszName ) ),
+                            (ULONG)( sizeof(WCHAR) * LOSStrLengthW( wszName ) ),
                             NO_GRBIT,
                             NULL ) );
             }
@@ -3464,7 +3464,7 @@ ERR ErrINFOIBuildIndexCreateVX(
 
         Assert( NULL != *pszLocaleName );
 
-        const ULONG_PTR cbLocaleName = ( wcslen( *pszLocaleName ) + 1 ) * sizeof(WCHAR);
+        const ULONG_PTR cbLocaleName = ( LOSStrLengthW( *pszLocaleName ) + 1 ) * sizeof(WCHAR);
 
         //  advance buffer pointer to tuple limits
         //
@@ -3789,7 +3789,7 @@ LOCAL ERR ErrINFOGetTableIndexInfoForCreateIndex(
 
 
             Assert( szLocaleName > pvResult );
-            const ULONG_PTR cbLocaleName = ( wcslen( szLocaleName ) + 1 ) * sizeof(WCHAR);
+            const ULONG_PTR cbLocaleName = ( LOSStrLengthW( szLocaleName ) + 1 ) * sizeof(WCHAR);
             Assert( ((BYTE*)szLocaleName) + cbLocaleName <= ((BYTE*)pvResult) + cbMax );
             ((JET_INDEXCREATE3_W*)pvResult)->pidxunicode->szLocaleName = szLocaleName;
             

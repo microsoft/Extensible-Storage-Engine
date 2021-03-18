@@ -3,6 +3,14 @@
 
 #include "osstd.hxx"
 
+// Undefine these tokens.  They are defined such that you get an error
+// when you try to use certain APIs, but this file implements the
+// indirect APIs you should use instead, and thus needs access to the
+// native APIs.
+#ifdef wcslen
+#undef wcslen
+#endif
+
 ERR ErrFromStrsafeHr ( HRESULT hr)
 {
     ERR err = (hr == SEC_E_OK) ?

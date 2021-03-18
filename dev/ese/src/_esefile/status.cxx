@@ -28,7 +28,7 @@ void PrintWindowsError( const wchar_t * const szMessage )
 
 void InitStatus( const wchar_t * const szOperation )
 {
-    const SIZE_T    cbOper      = wcslen( szOperation );
+    const SIZE_T    cbOper      = LOSStrLengthW( szOperation );
     const SIZE_T    cbPadding   = ( 51 - cbOper ) / 2;
 
     wprintf( L"          %*ls\r\n\r\n", (INT)(cbPadding+cbOper), szOperation );

@@ -11,9 +11,12 @@
 #define RESMGRBELADYSAssert Assert
 #endif  //  RESMGRBELADYSAssert
 
+#pragma push_macro("wcslen")
+#undef wcslen
 #include <unordered_map>
 #include <vector>
 #include <map>
+#pragma pop_macro("wcslen")
 
 //  Implementation of the Bélády's (a.k.a. Clairvoyant, a.k.a. OPT) algorithm.
 //

@@ -88,7 +88,7 @@ LOCAL INLINE const WCHAR* WszPERFGetProcessFileName()
 
 LOCAL INLINE DWORD CbPERFGetProcessFileNameDataSize()
 {
-    return QWORD_MULTIPLE( ( wcslen( WszPERFGetProcessFileName() ) + 1 ) * sizeof( WCHAR ) );
+    return QWORD_MULTIPLE( ( LOSStrLengthW( WszPERFGetProcessFileName() ) + 1 ) * sizeof( WCHAR ) );
 }
 
 LOCAL INLINE DWORD CbPERFGetHeaderDataSize()
@@ -721,7 +721,7 @@ DWORD UtilPerfThread( DWORD_PTR parm )
                 cchName = min( cchNameCapacity - 1, cchName );
                 wszName[cchName] = L'\0';
                 ppidInstanceDest->NameLength = (ULONG)( ( cchName + 1 ) * sizeof( wchar_t ) );
-                lpwszInstName += ( wcslen( lpwszInstName ) + 1 );
+                lpwszInstName += ( LOSStrLengthW( lpwszInstName ) + 1 );
 
                 //  collect counter data for this instance
 

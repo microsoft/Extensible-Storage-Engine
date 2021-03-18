@@ -1500,9 +1500,9 @@ ERR ErrIOIGetJsaPathFromDbPath(
 
     // ErrPathBuild throws a CRT exception if we pass in invalid parameters. Avoid calling that function
     // if we know we won't have enough capacity to hold the JSA path.
-    cchDbPath = (DWORD)wcslen( pfmp->WszDatabaseName() );
-    cchDbExtension = (DWORD)wcslen( wszDbExtension );
-    cchJsaExtension = (DWORD)wcslen( wszShrinkArchiveExt );
+    cchDbPath = (DWORD)LOSStrLengthW( pfmp->WszDatabaseName() );
+    cchDbExtension = (DWORD)LOSStrLengthW( wszDbExtension );
+    cchJsaExtension = (DWORD)LOSStrLengthW( wszShrinkArchiveExt );
     if ( ( cchDbPath - cchDbExtension + cchDbExtension  // folder, name and extension
         + 3         // dashes
         + 14        // timestamp (8 date + 6 time)
@@ -1546,9 +1546,9 @@ ERR ErrIOIGetJsaWildcardPathFromDbPath( WCHAR* const wszJsaWildcardPath, const F
 
     // ErrPathBuild throws a CRT exception if we pass in invalid parameters. Avoid calling that function
     // if we know we won't have enough capacity to hold the JSA path.
-    cchDbPath = (DWORD)wcslen( pfmp->WszDatabaseName() );
-    cchDbExtension = (DWORD)wcslen( wszDbExtension );
-    cchJsaExtension = (DWORD)wcslen( wszShrinkArchiveExt );
+    cchDbPath = (DWORD)LOSStrLengthW( pfmp->WszDatabaseName() );
+    cchDbExtension = (DWORD)LOSStrLengthW( wszDbExtension );
+    cchJsaExtension = (DWORD)LOSStrLengthW( wszShrinkArchiveExt );
     if ( ( cchDbPath - cchDbExtension + cchDbExtension  // folder, name and extension
         + 1         // dash
         + 1         // asterisk

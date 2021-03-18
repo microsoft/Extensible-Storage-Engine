@@ -821,7 +821,7 @@ JET_ERR ErrPrintField(
             if ( eField == eSPFieldNameFull )
             {
                 // This is the whole point of eSPFieldNameFull, lets assert we're achieving our goal.
-                assert( rgSpaceFields[eField].cchFieldSize >= ( cchFieldAdjust + wcslen(pBTStats->pBasicCatalog->rgName) ) );
+                assert( rgSpaceFields[eField].cchFieldSize >= ( cchFieldAdjust + LOSStrLengthW(pBTStats->pBasicCatalog->rgName) ) );
             }
 
             wprintf(L"%-*.*ws", rgSpaceFields[eField].cchFieldSize-cchFieldAdjust,
@@ -833,7 +833,7 @@ JET_ERR ErrPrintField(
         {
             assert( pBTStats->pBasicCatalog );
             // check for truncation
-            assert( rgSpaceFields[eField].cchFieldSize >= wcslen(WszTableOfStats( pBTStats )) );
+            assert( rgSpaceFields[eField].cchFieldSize >= (ULONG)LOSStrLengthW(WszTableOfStats( pBTStats )) );
 
             wprintf(L"%-*.*ws", rgSpaceFields[eField].cchFieldSize,
                             rgSpaceFields[eField].cchFieldSize,
@@ -1397,8 +1397,8 @@ JET_ERR ErrPrintField(
                 WCHAR wszSpaceHintsGrbits[12];
                 const JET_ERR err = ErrOSStrCbFormatW( wszSpaceHintsGrbits, sizeof(wszSpaceHintsGrbits), L"0x%x", pBTStats->pBasicCatalog->pSpaceHints->grbit );
                 assert( JET_errSuccess == err );
-                assert( rgSpaceFields[eField].cchFieldSize >= wcslen( wszSpaceHintsGrbits ) );
-                wprintf( L"%ws%ws", WszFillBuffer( L' ', rgSpaceFields[eField].cchFieldSize - wcslen( wszSpaceHintsGrbits ) ), wszSpaceHintsGrbits );
+                assert( rgSpaceFields[eField].cchFieldSize >= (ULONG)LOSStrLengthW( wszSpaceHintsGrbits ) );
+                wprintf( L"%ws%ws", WszFillBuffer( L' ', rgSpaceFields[eField].cchFieldSize - LOSStrLengthW( wszSpaceHintsGrbits ) ), wszSpaceHintsGrbits );
             }
             else
             {
@@ -1584,7 +1584,7 @@ void PrintSpaceDumpHelp(
     wprintf( L"%ws%ws     - Space info fields to print. Sets of fields%c", wszTab1, wszTab2, wchNewLine );
 
     wprintf( L"%ws%ws       Sets of fields:%c", wszTab1, wszTab2, wchNewLine );
-    assert( 29 == wcslen(wszTab1) + wcslen(wszTab2) );  // text will need re-calibration
+    assert( 29 == LOSStrLengthW(wszTab1) + LOSStrLengthW(wszTab2) );  // text will need re-calibration
     wprintf( L"%ws%ws         /f#spacehints - Prints the spacehint settings%c", wszTab1, wszTab2, wchNewLine );
     wprintf( L"%ws%ws                         for the object.%c", wszTab1, wszTab2, wchNewLine );
     wprintf( L"%ws%ws         /f#default    - Produces default output.%c", wszTab1, wszTab2, wchNewLine );
@@ -1605,7 +1605,7 @@ void PrintSpaceDumpHelp(
     wprintf( L"%ws%ws       Independent fields:%c", wszTab1, wszTab2, wchNewLine );
 
     ULONG cchUsed = 0;
-    const ULONG cchTab = (ULONG) ( wcslen(wszTab1) + wcslen(wszTab2) + 4 );
+    const ULONG cchTab = (ULONG) ( LOSStrLengthW(wszTab1) + LOSStrLengthW(wszTab2) + 4 );
 
     for( ULONG eField = 1; eField < _countof(rgSpaceFields); eField++ )
     {
@@ -1618,10 +1618,10 @@ void PrintSpaceDumpHelp(
 
         const WCHAR * wszDelimator = FLastField(eField) ? L"" : L", ";
         if ( ( cchTab == cchUsed ) || // first check ensures 1 field printed ...
-            ( ( wcslen(wszDelimator) + cchUsed + wcslen(rgSpaceFields[eField].wszField) ) < cchLineWidth ) )
+            ( ( LOSStrLengthW(wszDelimator) + cchUsed + LOSStrLengthW(rgSpaceFields[eField].wszField) ) < cchLineWidth ) )
         {
             wprintf( L"%ws%ws", rgSpaceFields[eField].wszField, wszDelimator );
-            cchUsed += (ULONG) ( wcslen(rgSpaceFields[eField].wszField) + wcslen(wszDelimator) );
+            cchUsed += (ULONG) ( LOSStrLengthW(rgSpaceFields[eField].wszField) + LOSStrLengthW(wszDelimator) );
         }
         else
         {
@@ -1667,7 +1667,7 @@ JET_ERR ErrSpaceDumpCtxSetFields(
     for( ULONG eField = 0; eField < sizeof(rgSpaceFields)/sizeof(rgSpaceFields[0]); eField++ )
     {
         assert( eField == (ULONG)rgSpaceFields[eField].eField );
-        assert( (ULONG)wcslen(rgSpaceFields[eField].wszField) <= rgSpaceFields[eField].cchFieldSize );  // field header larger than field width.
+        assert( (ULONG)LOSStrLengthW(rgSpaceFields[eField].wszField) <= rgSpaceFields[eField].cchFieldSize );  // field header larger than field width.
     }
 #endif
 
@@ -1706,7 +1706,7 @@ JET_ERR ErrSpaceDumpCtxSetFields(
         ULONG cb = sizeof(WCHAR);   // for NUL
         for( ULONG eField = 1; eField < sizeof(rgSpaceFields)/sizeof(rgSpaceFields[0]); eField++ )
         {
-            cb += (ULONG)( sizeof(WCHAR) * ( 1 + wcslen(rgSpaceFields[eField].wszField) ) );
+            cb += (ULONG)( sizeof(WCHAR) * ( 1 + LOSStrLengthW(rgSpaceFields[eField].wszField) ) );
         }
         WCHAR * wszTemp;
         Alloc( wszTemp = (WCHAR*)malloc( cb ) );
@@ -1731,7 +1731,7 @@ JET_ERR ErrSpaceDumpCtxSetFields(
     }
 
     //  If the last character was a comma, we have over allocated.
-    ULONG cchFields = (ULONG) ( wszFields ? wcslen(wszFields) : 0 );
+    ULONG cchFields = (ULONG) ( wszFields ? LOSStrLengthW(wszFields) : 0 );
     if ( cchFields && wszFields[cchFields-1] == L',' )
     {
         assert( cb >= sizeof(E_SP_FIELD) );
@@ -1771,7 +1771,7 @@ JET_ERR ErrSpaceDumpCtxSetFields(
         }
         else
         {
-            wszField = wszField + wcslen(wszField);
+            wszField = wszField + LOSStrLengthW(wszField);
         }
     }
     assert( wszField == NULL || wszField[0] == L'\0' );
@@ -1967,10 +1967,10 @@ JET_ERR EseutilSpaceDumpPrintHeadersAndDbRoot(
     wprintf( L"        PageSize: %d\n\n", pespCtx->cbPageSize );
 
     WCHAR * wszSpaceDump = L"******************************** SPACE DUMP *******";
-    ULONG cchTableWidth = (ULONG) max( wcslen( wszSpaceDump ), EseutilSpaceDumpTableWidth( pespCtx ) );
+    ULONG cchTableWidth = (ULONG) max( (ULONG)LOSStrLengthW( wszSpaceDump ), EseutilSpaceDumpTableWidth( pespCtx ) );
     ULONG cchTableLeft = cchTableWidth;
     wprintf( L"%ws", wszSpaceDump );
-    cchTableLeft -= (ULONG) wcslen( wszSpaceDump );
+    cchTableLeft -= (ULONG) LOSStrLengthW( wszSpaceDump );
     for( ULONG ieField = 0; cchTableLeft && ieField < pespCtx->cFields; ieField++ )
     {
         ULONG cchField = rgSpaceFields[pespCtx->rgeFields[ieField]].cchFieldSize + 1;
@@ -1996,7 +1996,7 @@ JET_ERR EseutilSpaceDumpPrintHeadersAndDbRoot(
         {
             wprintf( L"%ws%ws",
                         rgSpaceFields[pespCtx->rgeFields[ieField]].wszField,
-                        WszFillBuffer( L' ', rgSpaceFields[pespCtx->rgeFields[ieField]].cchFieldSize - wcslen( rgSpaceFields[pespCtx->rgeFields[ieField]].wszField ) ) );
+                        WszFillBuffer( L' ', rgSpaceFields[pespCtx->rgeFields[ieField]].cchFieldSize - LOSStrLengthW( rgSpaceFields[pespCtx->rgeFields[ieField]].wszField ) ) );
         }
         else
         {
@@ -2006,14 +2006,14 @@ JET_ERR EseutilSpaceDumpPrintHeadersAndDbRoot(
             {
                 // In CSV mode, we must keep the right number of CSV fields, or we won't be "CSV compliant"
                 wprintf( L"%ws%ws%ws",
-                        WszFillBuffer( L' ', rgSpaceFields[pespCtx->rgeFields[ieField]].cchFieldSize - wcslen( rgSpaceFields[pespCtx->rgeFields[ieField]].wszField ) - cExtraDelimitters ),
+                        WszFillBuffer( L' ', rgSpaceFields[pespCtx->rgeFields[ieField]].cchFieldSize - LOSStrLengthW( rgSpaceFields[pespCtx->rgeFields[ieField]].wszField ) - cExtraDelimitters ),
                         WszFillBuffer( L',', cExtraDelimitters  ),
                         rgSpaceFields[pespCtx->rgeFields[ieField]].wszField );
             }
             else
             {
                 wprintf( L"%ws%ws",
-                        WszFillBuffer( L' ', rgSpaceFields[pespCtx->rgeFields[ieField]].cchFieldSize - wcslen( rgSpaceFields[pespCtx->rgeFields[ieField]].wszField ) ),
+                        WszFillBuffer( L' ', rgSpaceFields[pespCtx->rgeFields[ieField]].cchFieldSize - LOSStrLengthW( rgSpaceFields[pespCtx->rgeFields[ieField]].wszField ) ),
                         rgSpaceFields[pespCtx->rgeFields[ieField]].wszField );
             }
         }

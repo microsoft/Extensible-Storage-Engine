@@ -804,7 +804,7 @@ const WCHAR* OSFormatW_( __format_string const WCHAR* const wszFormat, __in va_l
             }
             else
             {
-                cchRaw += wcslen( wszRaw + cchRaw );
+                cchRaw += LOSStrLengthW( wszRaw + cchRaw );
             }
 
             if ( cchRaw == cchRawMax )
@@ -950,7 +950,7 @@ const char* SzOSFormatStringLossyW( const WCHAR* wsz )
         char * szCurr;
         if ( wsz )
         {
-            szFormatted = OSAllocInfoString( sizeof(char)*wcslen(wsz)+3 );
+            szFormatted = OSAllocInfoString( sizeof(char)*LOSStrLengthW(wsz)+3 );
         }
         if ( szFormatted  )
         {
@@ -1215,7 +1215,7 @@ BOOL FOSTracePreinit()
         const INT       cchBuf          = 256;
         WCHAR           wszBuf[ cchBuf ];
 
-        Assert( wcslen(g_rgwszTraceDesc[ itag ]) * sizeof( WCHAR ) < JET_tracetagDescCbMax );
+        Assert( LOSStrLengthW(g_rgwszTraceDesc[ itag ]) * sizeof( WCHAR ) < JET_tracetagDescCbMax );
 
         if (    FOSConfigGet( L"DEBUG/Tracing", g_rgwszTraceDesc[ itag ], wszBuf, sizeof(wszBuf) ) &&
                 wszBuf[ 0 ] )

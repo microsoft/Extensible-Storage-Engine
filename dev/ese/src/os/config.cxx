@@ -435,8 +435,8 @@ private:
 
         for( ULONG irootkey = 0; irootkey < _countof(_rootkeys); irootkey++ )
         {
-            if ( ( _rootkeys[irootkey].wszHkeyShort[0] != L'\\' && 0 == _wcsnicmp( wszStorePath, _rootkeys[irootkey].wszHkeyShort, wcslen(_rootkeys[irootkey].wszHkeyShort) ) ) ||
-                    0 == _wcsnicmp( wszStorePath, _rootkeys[irootkey].wszHkeyLong, wcslen(_rootkeys[irootkey].wszHkeyLong) ) )
+            if ( ( _rootkeys[irootkey].wszHkeyShort[0] != L'\\' && 0 == _wcsnicmp( wszStorePath, _rootkeys[irootkey].wszHkeyShort, LOSStrLengthW(_rootkeys[irootkey].wszHkeyShort) ) ) ||
+                    0 == _wcsnicmp( wszStorePath, _rootkeys[irootkey].wszHkeyLong, LOSStrLengthW(_rootkeys[irootkey].wszHkeyLong) ) )
             {
                 Assert( NULL != _rootkeys[irootkey].hkey );
                 return _rootkeys[irootkey].hkey;
@@ -692,7 +692,7 @@ ERR CConfigStore::ErrConfigStoreCreate( _In_z_ const WCHAR * const wszStorePath,
 
     Assert( ( sizeof(CConfigStore) % sizeof(WCHAR) ) == 0 );    //  or alignment problem later ...
 
-    const ULONG cbConfigStore = sizeof(CConfigStore) + wcslen(wszStorePath) * sizeof(WCHAR) + sizeof(WCHAR) /* NUL term */;
+    const ULONG cbConfigStore = sizeof(CConfigStore) + LOSStrLengthW(wszStorePath) * sizeof(WCHAR) + sizeof(WCHAR) /* NUL term */;
 
     CConfigStore * pcs;
     AllocR( pcs = (CConfigStore*)( PvOSMemoryHeapAlloc( cbConfigStore ) ) );
@@ -700,18 +700,18 @@ ERR CConfigStore::ErrConfigStoreCreate( _In_z_ const WCHAR * const wszStorePath,
 
     Assert( (ULONG_PTR)pcs->m_wszStorePath % sizeof(WCHAR) == 0 );
     const ULONG cbStorePath = cbConfigStore - sizeof(*pcs);
-    Assert( cbStorePath >= ( wcslen(wszStorePath) * sizeof(WCHAR) + sizeof(WCHAR) ) );
+    Assert( cbStorePath >= ( LOSStrLengthW(wszStorePath) * sizeof(WCHAR) + sizeof(WCHAR) ) );
     Assert( FBounded( pcs->m_wszStorePath, pcs->m_wszStorePath, cbStorePath ) );
-    Assert( FBounded( pcs->m_wszStorePath + wcslen(wszStorePath), pcs->m_wszStorePath, cbStorePath ) );
+    Assert( FBounded( pcs->m_wszStorePath + LOSStrLengthW(wszStorePath), pcs->m_wszStorePath, cbStorePath ) );
     Assert( FBounded( pcs->m_wszStorePath, pcs, cbConfigStore ) );
-    Assert( FBounded( pcs->m_wszStorePath + wcslen(wszStorePath), pcs, cbConfigStore ) );
+    Assert( FBounded( pcs->m_wszStorePath + LOSStrLengthW(wszStorePath), pcs, cbConfigStore ) );
 
     new(pcs) CConfigStore();
     OSStrCbCopyW( pcs->m_wszStorePath, cbStorePath, wszStorePath );
 
     //  wether we copy str or .ctor first, ensure both elements seem intact.
-    Assert( wcslen(pcs->m_wszStorePath) == wcslen(wszStorePath) &&
-            0 == memcmp( pcs->m_wszStorePath, wszStorePath, wcslen(pcs->m_wszStorePath) * sizeof(WCHAR) + sizeof(WCHAR) ) );
+    Assert( LOSStrLengthW(pcs->m_wszStorePath) == LOSStrLengthW(wszStorePath) &&
+            0 == memcmp( pcs->m_wszStorePath, wszStorePath, LOSStrLengthW(pcs->m_wszStorePath) * sizeof(WCHAR) + sizeof(WCHAR) ) );
     Assert( pcs->m_qwReserved == 0 );
 
     return JET_errSuccess;

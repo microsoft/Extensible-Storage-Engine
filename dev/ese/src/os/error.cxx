@@ -169,7 +169,7 @@ void UserDebugBreakPoint()
                 memset( &si, 0, sizeof( si ) );
 
                 OSStrCbFormatW( szCmd, sizeof(szCmd), szCmdFormat, GetCurrentProcessId(), hEvent );
-                Assert( wcslen( szCmd ) < _countof(szCmd) );
+                Assert( LOSStrLengthW( szCmd ) < _countof(szCmd) );
 
                 si.cb           = sizeof( si );
                 si.lpDesktop    = L"Winsta0\\Default";
@@ -730,7 +730,7 @@ void __stdcall AssertFail( char const *szMessageFormat, char const *szFilename, 
 
         //  append the debugger message
 
-        cchOffset = wcslen( g_wszAssertText );
+        cchOffset = LOSStrLengthW( g_wszAssertText );
 
         OSStrCbFormatW( g_wszAssertText+cchOffset, _countof(g_wszAssertText) - cchOffset,
                 L"%hs%hs" L"%ws",
@@ -738,7 +738,7 @@ void __stdcall AssertFail( char const *szMessageFormat, char const *szFilename, 
                 IsDebuggerAttachable() || IsDebuggerAttached() ? wszAssertPrompt : wszAssertPrompt2
                  );
 
-        cchOffset += wcslen( g_wszAssertText + cchOffset );
+        cchOffset += LOSStrLengthW( g_wszAssertText + cchOffset );
 
         id = UtilMessageBoxW(   g_wszAssertText,
                                 wszAssertCaption,
@@ -1033,7 +1033,7 @@ LOCAL_BROKEN BOOL ExceptionDialog( const WCHAR wszException[] )
         IsDebuggerAttachable() || IsDebuggerAttached() ? wszExceptionPrompt : wszExceptionPrompt2
         );
 
-    Assert( wcslen( wszMessage ) < _countof( wszMessage ) );
+    Assert( LOSStrLengthW( wszMessage ) < _countof( wszMessage ) );
     const INT id = UtilMessageBoxW(
                         wszMessage,
                         wszExceptionCaption,
@@ -1195,7 +1195,7 @@ EExceptionFilterAction _ExceptionFail( const CHAR* szMessage, EXCEPTION exceptio
                 (QWORD)pexr,
                 (DWORD)sizeof( LONG_PTR ) * 2,
                 (QWORD)pcxr );
-    Assert( wcslen( szT ) < _countof(szT) );
+    Assert( LOSStrLengthW( szT ) < _countof(szT) );
 
     BOOL fDebug = ExceptionDialog( szT );
 

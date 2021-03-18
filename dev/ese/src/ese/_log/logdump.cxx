@@ -468,7 +468,7 @@ LOCAL VOID LGIReportLogfilesMissing(
 
     //  compose fully-pathed logfile name
     //
-    Assert( wcslen( wszPathedBaseName ) + wcslen( wszGenBegin ) + wcslen( wszLogExt ) < sizeof(wszPathedLogfileBegin) );
+    Assert( LOSStrLengthW( wszPathedBaseName ) + LOSStrLengthW( wszGenBegin ) + LOSStrLengthW( wszLogExt ) < sizeof(wszPathedLogfileBegin) );
     OSStrCbCopyW( wszPathedLogfileBegin, sizeof(wszPathedLogfileBegin), wszPathedBaseName );
     OSStrCbAppendW( wszPathedLogfileBegin, sizeof(wszPathedLogfileBegin), wszGenBegin );
     OSStrCbAppendW( wszPathedLogfileBegin, sizeof(wszPathedLogfileBegin), wszLogExt );
@@ -478,7 +478,7 @@ LOCAL VOID LGIReportLogfilesMissing(
     {
         //  compose fully-pathed logfile name
         //
-        Assert( wcslen( wszPathedBaseName ) + wcslen( wszGenEnd ) + wcslen( wszLogExt ) < sizeof(wszPathedLogfileEnd) );
+        Assert( LOSStrLengthW( wszPathedBaseName ) + LOSStrLengthW( wszGenEnd ) + LOSStrLengthW( wszLogExt ) < sizeof(wszPathedLogfileEnd) );
         OSStrCbCopyW( wszPathedLogfileEnd, sizeof(wszPathedLogfileEnd), wszPathedBaseName );
         OSStrCbAppendW( wszPathedLogfileEnd, sizeof(wszPathedLogfileEnd), wszGenEnd );
         OSStrCbAppendW( wszPathedLogfileEnd, sizeof(wszPathedLogfileEnd), wszLogExt );

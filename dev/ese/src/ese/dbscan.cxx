@@ -1735,14 +1735,14 @@ VOID DBMScanFormatOpticalTime_( const __int64 ft, __out_ecount( cchLastFullCompl
     {
         size_t cwchRequired;
         CallS( ErrUtilFormatFileTimeAsDate( ft, wszLastFullCompletionTime, cchLastFullCompletionTime, &cwchRequired ) );
-        ULONG ichCurr = wcslen( wszLastFullCompletionTime );
+        ULONG ichCurr = LOSStrLengthW( wszLastFullCompletionTime );
         if ( ichCurr < cchLastFullCompletionTime - 2 )  // should always be true
         {
             wszLastFullCompletionTime[ichCurr] = L' ';
             wszLastFullCompletionTime[ichCurr+1] = L'\0';
             ichCurr++;
         }
-        Assert( ichCurr == wcslen( wszLastFullCompletionTime ) );
+        Assert( ichCurr == (size_t)LOSStrLengthW( wszLastFullCompletionTime ) );
         CallS( ErrUtilFormatFileTimeAsTimeWithSeconds( ft,
                         wszLastFullCompletionTime + ichCurr,
                         cchLastFullCompletionTime - ichCurr,

@@ -235,7 +235,7 @@ void __cdecl CWPRINTFFILE::operator()( const WCHAR* wszFormat, ... )
             DWORD cbWritten;
             const LARGE_INTEGER ibOffset = { 0, 0 };
             if (   (!SetFilePointerEx( HANDLE( m_hFile ), ibOffset, NULL, FILE_END ))
-                || (!WriteFile( HANDLE( m_hFile ), rgwchBuf, (ULONG)(wcslen( rgwchBuf ) * sizeof( WCHAR )), &cbWritten, NULL )))
+                || (!WriteFile( HANDLE( m_hFile ), rgwchBuf, (ULONG)(LOSStrLengthW( rgwchBuf ) * sizeof( WCHAR )), &cbWritten, NULL )))
             {
                 // Stop writing after first error
                 m_errLast = ErrOSErrFromWin32Err(GetLastError());

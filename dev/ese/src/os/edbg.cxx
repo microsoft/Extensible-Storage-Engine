@@ -3565,8 +3565,8 @@ BOOL FReadAsIndexArg( _In_z_ const CHAR * const szArg, _Out_ ULONG * pul )
 
 LOCAL BOOL FEqualIW( const WCHAR * const wszArg1, const WCHAR * const wszArg2 )
 {
-    const BOOL fMatch = ( ( wcslen( wszArg1 ) == wcslen( wszArg2 ) )
-            && !( _wcsnicmp( wszArg1, wszArg2, wcslen( wszArg2 ) ) ) );
+    const BOOL fMatch = ( ( LOSStrLengthW( wszArg1 ) == LOSStrLengthW( wszArg2 ) )
+            && !( _wcsnicmp( wszArg1, wszArg2, LOSStrLengthW( wszArg2 ) ) ) );
     return fMatch;
 }
 
@@ -3590,8 +3590,8 @@ LOCAL BOOL FMatchISuffixA( const CHAR * const szSuffix, const CHAR * const szStr
 
 LOCAL BOOL FMatchISuffixW( const WCHAR * const wszSuffix, const WCHAR * const wszString )
 {
-    const size_t cchString = wcslen( wszString );
-    const size_t cchSuffix = wcslen( wszSuffix );
+    const size_t cchString = LOSStrLengthW( wszString );
+    const size_t cchSuffix = LOSStrLengthW( wszSuffix );
     if ( cchSuffix > cchString )
     {
         return fFalse;
@@ -10806,14 +10806,14 @@ LOCAL VOID DumpInstFCBs(
         WCHAR wszDefaultTableClassName[cwchDefaultTableClassName];
         swprintf_s( wszDefaultTableClassName, cwchDefaultTableClassName, L"%d", iTce );
 
-        const SIZE_T cwchTableClassName = wcslen( wszTableClassName );
+        const SIZE_T cwchTableClassName = LOSStrLengthW( wszTableClassName );
         if ( !FIsSpace( (TCE)iTce ) && ( cwchTableClassName || rgcFCBsByTCE[iTce] ) )
         {
             EDBGPrintfDmlW( L"              TCE %32.32s:%10ld\n",
                             cwchTableClassName ? wszTableClassName : wszDefaultTableClassName,
                             rgcFCBsByTCE[iTce] );
         }
-        wszTableClassName = wszTableClassName + ( cwchTableClassName ? wcslen( wszTableClassName ) + 1 : 0 );
+        wszTableClassName = wszTableClassName + ( cwchTableClassName ? LOSStrLengthW( wszTableClassName ) + 1 : 0 );
     }
     EDBGPrintfDmlW( L"\n\n");
     EDBGPrintfDmlW( L"      (*estimation only, may differ from actual runtime)\n\n" );
@@ -15750,7 +15750,7 @@ DEBUG_EXT( EDBGParam )
                 }
                 else if ( FFetchSz( (WCHAR*)rgparam[iParam].m_valueCurrent, &wszStrParam ) )
                 {
-                    dprintf( "=  0x%N =%d:\"%mu\"  ", rgparam[iParam].m_valueCurrent, wcslen(wszStrParam), rgparam[iParam].m_valueCurrent );
+                    dprintf( "=  0x%N =%d:\"%mu\"  ", rgparam[iParam].m_valueCurrent, LOSStrLengthW(wszStrParam), rgparam[iParam].m_valueCurrent );
                     Unfetch( wszStrParam );
                     dprintf( "(def=\"%mu\")\n", rgparam[iParam].m_valueDefault[configLegacy] );
                 }

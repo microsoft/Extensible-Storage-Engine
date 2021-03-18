@@ -356,7 +356,7 @@ LOCAL VOID RBSSzIdAppend( __inout_bcount_z( cbFName ) PWSTR wszRBSFileName, size
 
     Assert( wszRBSFileName );
 
-    ichBase = wcslen( wszRBSFileName ); // wcslen(wszLogFileName) for log base name or res log base size
+    ichBase = LOSStrLengthW( wszRBSFileName ); // LOSStrLengthW(wszLogFileName) for log base name or res log base size
 
     Assert( cbFName >= ( ( ichBase+cchRBSDigits+1 )*sizeof(WCHAR) ) );
 
@@ -466,7 +466,7 @@ LOCAL ERR ErrRBSInitAttachInfo(
     UtilMemCpy( &prbsattachinfo->signDb, &signDb, sizeof( SIGNATURE ) );
     UtilMemCpy( &prbsattachinfo->signDbHdrFlush, &signDbHdrFlush, sizeof( SIGNATURE ) );
 
-    DWORD cbDatabaseName = (wcslen(wszDatabaseName) + 1)*sizeof(WCHAR);
+    DWORD cbDatabaseName = (LOSStrLengthW(wszDatabaseName) + 1)*sizeof(WCHAR);
     if ( cbDatabaseName > sizeof(prbsattachinfo->wszDatabaseName) )
     {
         return ErrERRCheck( JET_errBufferTooSmall );
@@ -2002,7 +2002,7 @@ ERR CRevertSnapshot::ErrCaptureDbAttach( FMP * const pfmp )
 
     DATA dataRec;
     dataRec.SetPv( pfmp->WszDatabaseName() );
-    dataRec.SetCb( ( wcslen( pfmp->WszDatabaseName() ) + 1 ) * sizeof(WCHAR) );
+    dataRec.SetCb( ( LOSStrLengthW( pfmp->WszDatabaseName() ) + 1 ) * sizeof(WCHAR) );
 
     RBSDbAttachRecord dbRec;
     dbRec.m_bRecType = rbsrectypeDbAttach;

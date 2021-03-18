@@ -1976,7 +1976,7 @@ ERR ErrDBUTLGetIfmpFucbOfPage( _Inout_ JET_SESID sesid, PCWSTR wszDatabase, _In_
 
         if ( wszObjName )
         {
-            Assert( ( cbDbutlObjNameMost - JET_cbNameMost ) > ( wcslen( L"::LV::[Space Tree]" /* worst case from below */ ) * 2 /* sizeof(WCHAR) */ ) );
+            Assert( ( cbDbutlObjNameMost - JET_cbNameMost ) > ( LOSStrLengthW( L"::LV::[Space Tree]" /* worst case from below */ ) * 2 /* sizeof(WCHAR) */ ) );
 
             OSStrCbFormatW( wszObjName, cbObjName, L"%hs", szObjName );
             if ( (*ppfucbObj)->u.pfcb->FTypeLV() )

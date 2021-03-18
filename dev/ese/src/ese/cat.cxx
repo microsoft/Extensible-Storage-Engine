@@ -8788,7 +8788,7 @@ LOCAL ERR ErrCATIUpgradeLocaleForOneIndex(
 
         if (0 == lcid)
         {
-            Assert( ( NULL != pidb->WszLocaleName() ) && ( 0 == wcslen( pidb->WszLocaleName() ) ) );
+            Assert( ( NULL != pidb->WszLocaleName() ) && ( 0 == LOSStrLengthW( pidb->WszLocaleName() ) ) );
         }
         else
         {
@@ -8889,7 +8889,7 @@ LOCAL ERR ErrCATIUpgradeLocaleForOneIndex(
     fInUpdate = fTrue;
 
     // There may or may not be a locale name. Store it just in case! Also stamp the new Version and Sort ID (GUID).
-    Call( ErrIsamSetColumn( ppib, pfucbCatalog, fidMSO_LocaleName, pidb->WszLocaleName(), wcslen( pidb->WszLocaleName() ) * sizeof( *pidb->WszLocaleName() ), JET_bitNil, NULL ) );
+    Call( ErrIsamSetColumn( ppib, pfucbCatalog, fidMSO_LocaleName, pidb->WszLocaleName(), LOSStrLengthW( pidb->WszLocaleName() ) * sizeof( *pidb->WszLocaleName() ), JET_bitNil, NULL ) );
     Call( ErrIsamSetColumn( ppib, pfucbCatalog, fidMSO_Version, &qwSortVersionToStore, sizeof( qwSortVersionToStore ), NO_GRBIT, NULL ) );
     Call( ErrIsamSetColumn( ppib, pfucbCatalog, fidMSO_SortID, &sortidCurrentOS, sizeof( sortidCurrentOS ), NO_GRBIT, NULL ) );
 

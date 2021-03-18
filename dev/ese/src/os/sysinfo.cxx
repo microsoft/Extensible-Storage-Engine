@@ -127,7 +127,7 @@ HandleError:
         _In_ PCWSTR wszNewValue )
     {
         Assert( m_fAllocationAttempted );
-        return ErrStrDupLocalAlloc( &m_wszProcessName, wszNewValue, wcslen( wszNewValue ) );
+        return ErrStrDupLocalAlloc( &m_wszProcessName, wszNewValue, LOSStrLengthW( wszNewValue ) );
     }
 
 
@@ -140,7 +140,7 @@ HandleError:
         _In_ PCWSTR wszNewValue )
     {
         Assert( m_fAllocationAttempted );
-        return ErrStrDupLocalAlloc( &m_wszProcessFileName, wszNewValue, wcslen( wszNewValue ) );
+        return ErrStrDupLocalAlloc( &m_wszProcessFileName, wszNewValue, LOSStrLengthW( wszNewValue ) );
     }
 
 
@@ -153,7 +153,7 @@ HandleError:
         _In_ PCWSTR wszNewValue )
     {
         Assert( m_fAllocationAttempted );
-        return ErrStrDupLocalAlloc( &m_wszProcessPath, wszNewValue, wcslen( wszNewValue ) );
+        return ErrStrDupLocalAlloc( &m_wszProcessPath, wszNewValue, LOSStrLengthW( wszNewValue ) );
     }
 
     const WCHAR* WszImageName() const
@@ -165,7 +165,7 @@ HandleError:
         _In_ PCWSTR wszNewValue )
     {
         Assert( m_fAllocationAttempted );
-        return ErrStrDupLocalAlloc( &m_wszImageName, wszNewValue, wcslen( wszNewValue ) );
+        return ErrStrDupLocalAlloc( &m_wszImageName, wszNewValue, LOSStrLengthW( wszNewValue ) );
     }
 
     const WCHAR* WszImagePath() const
@@ -177,7 +177,7 @@ HandleError:
         _In_ PCWSTR wszNewValue )
     {
         Assert( m_fAllocationAttempted );
-        return ErrStrDupLocalAlloc( &m_wszImagePath, wszNewValue, wcslen( wszNewValue ) );
+        return ErrStrDupLocalAlloc( &m_wszImagePath, wszNewValue, LOSStrLengthW( wszNewValue ) );
     }
 
     const WCHAR* WszUtilImageBuildClass() const
@@ -189,7 +189,7 @@ HandleError:
         _In_ PCWSTR wszNewValue )
     {
         Assert( m_fAllocationAttempted );
-        return ErrStrDupLocalAlloc( &m_wszImageBuildClass, wszNewValue, wcslen( wszNewValue ) );
+        return ErrStrDupLocalAlloc( &m_wszImageBuildClass, wszNewValue, LOSStrLengthW( wszNewValue ) );
     }
 
 
@@ -230,7 +230,7 @@ private:
             }
             Call( ErrOSStrCbCopyW( *pwszDestination, cbAlloc, wszNewValue ) );
 
-            Assert( wcslen( *pwszDestination ) == wcslen( wszNewValue ) );
+            Assert( LOSStrLengthW( *pwszDestination ) == LOSStrLengthW( wszNewValue ) );
         }
 
 HandleError:
@@ -816,7 +816,7 @@ HandleError:
 VOID COSLayerPreInit::SetProcessFriendlyName( const WCHAR* const wszProcessFriendlyNameNew )
 {
     const WCHAR* wszProcessFriendlyNameT = wszProcessFriendlyNameNew;
-    if ( wszProcessFriendlyNameT == NULL || wcslen( wszProcessFriendlyNameT ) == 0 )
+    if ( wszProcessFriendlyNameT == NULL || LOSStrLengthW( wszProcessFriendlyNameT ) == 0 )
     {
         wszProcessFriendlyNameT = WszUtilProcessName();
     }

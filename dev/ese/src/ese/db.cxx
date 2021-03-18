@@ -411,9 +411,9 @@ VOID DBReportTachmentEvent( const INST * const pinst, const IFMP ifmp, const Mes
 
     if ( msgidTachment == CREATE_DATABASE_DONE_ID || msgidTachment == ATTACH_DATABASE_DONE_ID )
     {
-        INT ich = wcslen( wszAddlFixedData );
+        INT ich = LOSStrLengthW( wszAddlFixedData );
         OSStrCbFormatW( wszAddlFixedData + ich, _cbrg( wszAddlFixedData ) - ich * sizeof(WCHAR), L",\ndbv = " );
-        ich = wcslen( wszAddlFixedData );
+        ich = LOSStrLengthW( wszAddlFixedData );
         FormatDbvEfvMapping( ifmp, wszAddlFixedData + ich, _cbrg( wszAddlFixedData ) - ich * sizeof(WCHAR) );
     }
 
