@@ -222,7 +222,7 @@ ERR TestSimpleWszPathFileNameParseFunctionSuite::ErrTest()
     WCHAR * wszFumBar = L"C:\\users\\TheHistorian\\FumBar.edb";
     const WCHAR * wszFumBarFn = pfsapi->WszPathFileName( wszFumBar );
     OSTestCheck( ( (QWORD)wszFumBarFn > (QWORD)wszFumBar ) &&
-                    ( (QWORD)wszFumBarFn < ( ((QWORD)wszFumBarFn) + ( wcslen(wszFumBar) * sizeof(WCHAR) ) ) ) );
+                    ( (QWORD)wszFumBarFn < ( ((QWORD)wszFumBarFn) + ( LOSStrLengthW(wszFumBar) * sizeof(WCHAR) ) ) ) );
     OSTestCheck( 0 == wcscmp( L"FumBar.edb", wszFumBarFn ) ); // oh and should've worked!
 
 HandleError:

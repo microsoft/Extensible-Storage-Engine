@@ -43,7 +43,7 @@ static bool FIsGUID( const WCHAR* wsz )
     Assert( 0 <= s_i0 && s_i0 < s_i1 && s_i1 < s_i2 && s_i2 < s_i3 && s_i3 < s_cch );
     Assert( '-' == sz[ s_i0 ] && '-' == sz[ s_i1 ] && '-' == sz[ s_i2 ] && '-' == sz[ s_i3 ] );
 
-    if ( fRet = wsz && s_cch <= wcslen( wsz ) )
+    if ( fRet = wsz && s_cch <= LOSStrLengthW( wsz ) )
     {
         for ( INT i = 0; i < s_cch && fRet; ++i )
         {

@@ -256,6 +256,8 @@ BOOL FOSLayerUp();
 //  Turns on FFB/StorageWriteBack mode always.
 //#define FORCE_STORAGE_WRITEBACK       1
 
+// Turn off some APIs that we don't want directly supported
+#define wcslen __USE_LOSSTRLENGTHW__
 
 #endif  //  _OS_HXX_INCLUDED
 

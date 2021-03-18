@@ -780,7 +780,7 @@ VOID LGFileHelper::LGSzLogIdAppend( __inout_bcount_z( cbFName ) PWSTR wszLogFile
     Assert( cchLogDigits == 0 || cchLogDigits == 5 || cchLogDigits == 8 );
     Assert( cchLogDigits != 5 || lGeneration <= 0xFFFFF );
 
-    ichBase = wcslen(wszLogFileName); // wcslen(wszLogFileName) for log base name or res log base size
+    ichBase = LOSStrLengthW(wszLogFileName); // LOSStrLengthW(wszLogFileName) for log base name or res log base size
     Assert( ichBase == 3 || (ichBase == 6 && 0 == wcscmp(&(wszLogFileName[3]), wszLogRes)) );
     Assert( cbFName >= ((ichBase+cchLogDigits+1)*sizeof(WCHAR)) );
 

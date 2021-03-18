@@ -1449,14 +1449,14 @@ VOID PERFSetInstanceNames()
     OSStrCbCopyW( szT, cbT, L"_Total" );
     g_rgbInstanceAggregationIDs[ 0 ] = bInstanceNameAggregationID;  //  Only the "_Total" instance needs aggregation.
 
-    if ( sizeof( WCHAR ) * ( wcslen( szT ) + 1 ) > g_cchInstanceNames * sizeof( WCHAR ) )
+    if ( sizeof( WCHAR ) * ( LOSStrLengthW( szT ) + 1 ) > g_cchInstanceNames * sizeof( WCHAR ) )
     {
         Assert( fFalse );
         g_critInstanceNames.Leave();
         return;
     }
-    cbT -= sizeof( WCHAR ) * ( wcslen( szT ) + 1 );
-    szT += wcslen( szT ) + 1;
+    cbT -= sizeof( WCHAR ) * ( LOSStrLengthW( szT ) + 1 );
+    szT += LOSStrLengthW( szT ) + 1;
 
     INT ipinstLastUsed = 0;
     for ( ipinstLastUsed = g_cpinstMax - 1; ipinstLastUsed > 0; ipinstLastUsed-- )
@@ -1487,8 +1487,8 @@ VOID PERFSetInstanceNames()
         {
             OSStrCbFormatW( szT, cbT, L"_Unused%d", ipinst );
         }
-        cbT -= sizeof( WCHAR ) * ( wcslen( szT ) + 1 );
-        szT += wcslen( szT ) + 1;
+        cbT -= sizeof( WCHAR ) * ( LOSStrLengthW( szT ) + 1 );
+        szT += LOSStrLengthW( szT ) + 1;
     }
 
     //  set new current
@@ -1536,8 +1536,8 @@ VOID PERFSetDatabaseNames( IFileSystemAPI* const pfsapi )
             OSStrCbFormatW( szT, cbT, L"_Unused%u", ifmp );
         }
 
-        cbT -= sizeof( WCHAR ) * ( wcslen( szT ) + 1 );
-        szT += wcslen( szT ) + 1;
+        cbT -= sizeof( WCHAR ) * ( LOSStrLengthW( szT ) + 1 );
+        szT += LOSStrLengthW( szT ) + 1;
     }
 
     //  set new current
@@ -1831,7 +1831,7 @@ void CIsamSequenceDiagLog::SprintFixedData( _Out_writes_bytes_(cbFixedData) WCHA
                     FixedData().sInitData.lgposRecoveryForwardLogs.lGeneration, FixedData().sInitData.lgposRecoveryForwardLogs.isec, FixedData().sInitData.lgposRecoveryForwardLogs.ib
                     );
             }
-            cchUsed = wcslen( pwszCurr );
+            cchUsed = LOSStrLengthW( pwszCurr );
             pwszCurr += cchUsed;
             cbCurrLeft -= ( cchUsed * 2 );
             //  worst case: ~ 24 + 5 [lgposes] * 22 char = 134 update
@@ -1854,7 +1854,7 @@ void CIsamSequenceDiagLog::SprintFixedData( _Out_writes_bytes_(cbFixedData) WCHA
                     s_iDumpVersion,
                     DblHRTDelta( m_rgDiagInfo[eForwardLogBaselineStep].hrtEnd, FixedData().sInitData.hrtRecoveryForwardLogs ),
                     clogs );
-                cchUsed = wcslen( pwszCurr );
+                cchUsed = LOSStrLengthW( pwszCurr );
                 pwszCurr += cchUsed;
                 cbCurrLeft -= ( cchUsed * 2 );
 
@@ -1865,7 +1865,7 @@ void CIsamSequenceDiagLog::SprintFixedData( _Out_writes_bytes_(cbFixedData) WCHA
             {
                 OSStrCbFormatW( pwszCurr, cbCurrLeft, L"cReInits = %d\n", FixedData().sInitData.cReInits );
             }
-            cchUsed = wcslen( pwszCurr );
+            cchUsed = LOSStrLengthW( pwszCurr );
             pwszCurr += cchUsed;
             cbCurrLeft -= ( cchUsed * 2 );
             //  worst case: +25 chars
@@ -1940,7 +1940,7 @@ void CIsamSequenceDiagLog::SprintTimings( _Out_writes_bytes_(cbTimeSeq) WCHAR * 
 
 #ifdef DEBUG
     OSStrCbFormatW( pwszCurr, cbCurrLeft, L"%dV%d", m_isdltype, s_iDumpVersion );
-    cchUsed = wcslen( pwszCurr );
+    cchUsed = LOSStrLengthW( pwszCurr );
     pwszCurr += cchUsed;
     cbCurrLeft -= ( cchUsed * 2 );
     // Worst case: 4
@@ -1957,7 +1957,7 @@ void CIsamSequenceDiagLog::SprintTimings( _Out_writes_bytes_(cbTimeSeq) WCHAR * 
                                 ErrOSStrCbAppendW( pwszCurr, cbCurrLeft, L"\n" ) :
                                 ErrOSStrCbAppendW( pwszCurr, cbCurrLeft, L", " );
             Assert( 0 == errT );
-            cchUsed = wcslen( pwszCurr );
+            cchUsed = LOSStrLengthW( pwszCurr );
             pwszCurr += cchUsed;
             cbCurrLeft -= ( cchUsed * 2 );
             // Worst case: 2
@@ -1996,7 +1996,7 @@ void CIsamSequenceDiagLog::SprintTimings( _Out_writes_bytes_(cbTimeSeq) WCHAR * 
 
             if ( m_rgDiagInfo[seq].thstat.cusecPageCacheMiss - m_rgDiagInfo[seqBefore].thstat.cusecPageCacheMiss )
             {
-                cchUsed = wcslen( pwszCurr );
+                cchUsed = LOSStrLengthW( pwszCurr );
                 pwszCurr += cchUsed;
                 cbCurrLeft -= ( cchUsed * 2 );
 
@@ -2006,7 +2006,7 @@ void CIsamSequenceDiagLog::SprintTimings( _Out_writes_bytes_(cbTimeSeq) WCHAR * 
             }
             if ( m_rgDiagInfo[seq].secInCallback != 0.0 )
             {
-                cchUsed = wcslen( pwszCurr );
+                cchUsed = LOSStrLengthW( pwszCurr );
                 pwszCurr += cchUsed;
                 cbCurrLeft -= ( cchUsed * 2 );
 
@@ -2014,7 +2014,7 @@ void CIsamSequenceDiagLog::SprintTimings( _Out_writes_bytes_(cbTimeSeq) WCHAR * 
             }
             if ( m_rgDiagInfo[seq].secThrottled != 0.0 )
             {
-                cchUsed = wcslen( pwszCurr );
+                cchUsed = LOSStrLengthW( pwszCurr );
                 pwszCurr += cchUsed;
                 cbCurrLeft -= ( cchUsed * 2 );
 
@@ -2022,7 +2022,7 @@ void CIsamSequenceDiagLog::SprintTimings( _Out_writes_bytes_(cbTimeSeq) WCHAR * 
             }
             if ( m_rgDiagInfo[seq].thstat.cusecWait - m_rgDiagInfo[seqBefore].thstat.cusecWait )
             {
-                cchUsed = wcslen( pwszCurr );
+                cchUsed = LOSStrLengthW( pwszCurr );
                 pwszCurr += cchUsed;
                 cbCurrLeft -= ( cchUsed * 2 );
 
@@ -2032,7 +2032,7 @@ void CIsamSequenceDiagLog::SprintTimings( _Out_writes_bytes_(cbTimeSeq) WCHAR * 
             }
         }
         //  from above formats ...
-        cchUsed = wcslen( pwszCurr );
+        cchUsed = LOSStrLengthW( pwszCurr );
         pwszCurr += cchUsed;
         cbCurrLeft -= ( cchUsed * 2 );
         // Worst case: ~26 chars (assuming 2-digit seq num)
@@ -2078,7 +2078,7 @@ void CIsamSequenceDiagLog::SprintTimings( _Out_writes_bytes_(cbTimeSeq) WCHAR * 
                                     m_rgDiagInfo[seq].thstat.cbLogRecord - m_rgDiagInfo[seqBefore].thstat.cbLogRecord,
                                     m_rgDiagInfo[seq].thstat.cLogRecord - m_rgDiagInfo[seqBefore].thstat.cLogRecord
                                     );
-                cchUsed = wcslen( pwszCurr );
+                cchUsed = LOSStrLengthW( pwszCurr );
                 pwszCurr += cchUsed;
                 cbCurrLeft -= ( cchUsed * 2 );
                 // Worst case: ~130
@@ -2087,7 +2087,7 @@ void CIsamSequenceDiagLog::SprintTimings( _Out_writes_bytes_(cbTimeSeq) WCHAR * 
             {
                 // indicate nothing
                 OSStrCbFormatW( pwszCurr, cbCurrLeft, L" +J(0)" );
-                cchUsed = wcslen( pwszCurr );
+                cchUsed = LOSStrLengthW( pwszCurr );
                 pwszCurr += cchUsed;
                 cbCurrLeft -= ( cchUsed * 2 );
             }
@@ -2121,7 +2121,7 @@ void CIsamSequenceDiagLog::SprintTimings( _Out_writes_bytes_(cbTimeSeq) WCHAR * 
                                     dckbPagefileUsage,
                                     dckbPagefileUsagePeak,
                                     dckbPrivateUsage );
-                cchUsed = wcslen( pwszCurr );
+                cchUsed = LOSStrLengthW( pwszCurr );
                 pwszCurr += cchUsed;
                 cbCurrLeft -= ( cchUsed * 2 );
                 // Worst case: ~75
@@ -2156,7 +2156,7 @@ void CIsamSequenceDiagLog::SprintTimings( _Out_writes_bytes_(cbTimeSeq) WCHAR * 
                 if ( clogs )
                 {
                     OSStrCbFormatW( pwszCurr, cbCurrLeft, L" + %d lgens", clogs );
-                    cchUsed = wcslen( pwszCurr );
+                    cchUsed = LOSStrLengthW( pwszCurr );
                     pwszCurr += cchUsed;
                     cbCurrLeft -= ( cchUsed * 2 );
                     // Worst case: ~21
@@ -2432,7 +2432,7 @@ VOID INST::RestoreDBMSParams( DBMS_PARAM *pdbms_param )
 
 BOOL INST::FSetInstanceName( PCWSTR wszInstanceName )
 {
-    ULONG newSize = wszInstanceName ? ULONG( wcslen(wszInstanceName) ) : 0;
+    ULONG newSize = wszInstanceName ? ULONG( LOSStrLengthW(wszInstanceName) ) : 0;
 
     if (m_wszInstanceName)
     {
@@ -2462,7 +2462,7 @@ BOOL INST::FSetInstanceName( PCWSTR wszInstanceName )
 
 BOOL INST::FSetDisplayName( PCWSTR wszDisplayName )
 {
-    ULONG newSize = wszDisplayName ? ULONG( wcslen(wszDisplayName) ) : 0;
+    ULONG newSize = wszDisplayName ? ULONG( LOSStrLengthW(wszDisplayName) ) : 0;
 
     if (m_wszDisplayName)
     {
@@ -2759,7 +2759,7 @@ VOID InitTableClassNames()
     //  Always return the "_Unknown" Instance
     OSStrCbFormatW( wszT, ( wszTEnd - wszT ) * sizeof( WCHAR ), L"%ws\0" , g_wszUnknown );
 
-    wszT += wcslen( wszT ) + 1;
+    wszT += LOSStrLengthW( wszT ) + 1;
 
     for ( TCE tce = tceMin; tce < cTCEObjects; ++tce )
     {
@@ -2815,7 +2815,7 @@ VOID InitTableClassNames()
 
         OSStrCbFormatW( wszT, (wszTEnd - wszT) * sizeof( WCHAR ), L"%s%ws\0" , wszParam,  wszSuffix );
 
-        wszT += wcslen( wszT ) + 1;
+        wszT += LOSStrLengthW( wszT ) + 1;
     }
     
     //  Remember the count, for future early-outs
@@ -5522,7 +5522,7 @@ ERR CJetParam::ValidateSet(
     }
     else
     {
-        const size_t cchParam = wszParam ? wcslen( wszParam ) : 0;
+        const size_t cchParam = wszParam ? LOSStrLengthW( wszParam ) : 0;
         if ( cchParam < pjetparam->m_rangeLow || cchParam > pjetparam->m_rangeHigh )
         {
             return ErrERRCheck( JET_errInvalidParameter );
@@ -5599,7 +5599,7 @@ ERR CJetParam::SetString(
 
     Call( ValidateSet( pjetparam, pinst, ppib, ulParam, wszParam, fTrue ) );
 
-    cchParam = wszParam ? wcslen( wszParam ) : 0;
+    cchParam = wszParam ? LOSStrLengthW( wszParam ) : 0;
     if ( cchParam > 10000 )
     {
         Assert( fFalse );
@@ -5766,7 +5766,7 @@ ERR CJetParam::CloneString(     CJetParam* const    pjetparamSrc,
     {
         // This assert is trying to ensure that we're only talking about strings here.
         Assert( pjetparamSrc->m_type == typeString || pjetparamSrc->m_type == typeFolder || pjetparamSrc->m_type == typePath );
-        cchValue = wcslen( (WCHAR*)pjetparamSrc->m_valueCurrent );
+        cchValue = LOSStrLengthW( (WCHAR*)pjetparamSrc->m_valueCurrent );
 
         Alloc( wszNewValue = new WCHAR[ cchValue + 1 ] );
         memcpy( wszNewValue, (void*)pjetparamSrc->m_valueCurrent, (cchValue + 1)*sizeof(WCHAR) );
@@ -18306,7 +18306,7 @@ LOCAL JET_ERR JetExternalRestoreEx(
     CCriticalSection *pcritInst = NULL;
 
     WCHAR * wszTargetDisplayName = NULL;
-    SIZE_T cchTargetDisplayName = 0;
+    ULONG cchTargetDisplayName = 0;
     const WCHAR * wszRestoreInstanceNameUsed = wszRestoreInstanceName;
 
     OSTrace(
@@ -18436,7 +18436,7 @@ LOCAL JET_ERR JetExternalRestoreEx(
 
         if ( wszTargetDisplayName )
         {
-            cchTargetDisplayName = ( wcslen(wszTargetDisplayName) + 1 );
+            cchTargetDisplayName = ( LOSStrLengthW(wszTargetDisplayName) + 1 );
             wszRestoreInstanceNameUsed = wszRestoreInstanceNamePrefix;
         }
         else
@@ -18446,7 +18446,7 @@ LOCAL JET_ERR JetExternalRestoreEx(
         }
     }
 
-    ULONG cchNewInstanceName = cchTargetDisplayName + wcslen(wszRestoreInstanceNameUsed) + 4 + 1;
+    ULONG cchNewInstanceName = cchTargetDisplayName + LOSStrLengthW(wszRestoreInstanceNameUsed) + 4 + 1;
     Alloc( wszNewInstanceName = new WCHAR[ cchNewInstanceName ] );
     OSStrCbFormatW( wszNewInstanceName, cchNewInstanceName*sizeof(WCHAR), L"%-*s%s%04lu", (ULONG)cchTargetDisplayName, wszTargetDisplayName ? wszTargetDisplayName : L"",
             wszRestoreInstanceNameUsed, AtomicIncrement( (LONG*)&g_cRestoreInstance ) % 10000L );

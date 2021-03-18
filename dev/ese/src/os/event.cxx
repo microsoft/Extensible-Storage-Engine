@@ -189,7 +189,7 @@ void OSEventReportEvent(    const WCHAR*        szSourceEventKey,
                         (va_list *)rgpszString ) )
     {
         const WCHAR * wszLogStrFormatter = L"EventLog[ID=%d(0x%x)@%I64d]:  %ws";
-        const INT cchLogStr = wcslen( wszLogStrFormatter ) + 10 /* %d */ + 8 /* %x */ + 20 /* %I64d */ + wcslen( wszEvent ) + 1 /* NUL term */;
+        const INT cchLogStr = LOSStrLengthW( wszLogStrFormatter ) + 10 /* %d */ + 8 /* %x */ + 20 /* %I64d */ + LOSStrLengthW( wszEvent ) + 1 /* NUL term */;
         WCHAR * wszLogStr = (WCHAR*)LocalAlloc( LMEM_FIXED, cchLogStr * sizeof(WCHAR) );
         if ( wszLogStr )
         {
@@ -624,14 +624,14 @@ VOID OSEventRegister()
                                             &cbData ) != ERROR_SUCCESS ||
                     dwType != REG_EXPAND_SZ ||
                     wcscmp( rgbData, WszUtilImagePath() ) ||
-                    cbData != ( wcslen( WszUtilImagePath() ) + 1 ) * sizeof( WCHAR ) )
+                    cbData != ( LOSStrLengthW( WszUtilImagePath() ) + 1 ) * sizeof( WCHAR ) )
             {
                 error = pfnRegSetValueExW(  hkeyImage,
                                             L"EventMessageFile",
                                             0,
                                             REG_EXPAND_SZ,
                                             LPBYTE( WszUtilImagePath() ),
-                                            (ULONG)( ( wcslen( WszUtilImagePath() ) + 1 ) * sizeof( WCHAR ) ) );
+                                            (ULONG)( ( LOSStrLengthW( WszUtilImagePath() ) + 1 ) * sizeof( WCHAR ) ) );
                 Assert( error == ERROR_SUCCESS );
             }
             cbData = cbDataMax;
@@ -643,14 +643,14 @@ VOID OSEventRegister()
                                             &cbData ) != ERROR_SUCCESS ||
                     dwType != REG_EXPAND_SZ ||
                     wcscmp( rgbData, WszUtilImagePath() ) ||
-                    cbData != ( wcslen( WszUtilImagePath() ) + 1 ) * sizeof( WCHAR ) )
+                    cbData != ( LOSStrLengthW( WszUtilImagePath() ) + 1 ) * sizeof( WCHAR ) )
             {
                 error = pfnRegSetValueExW(  hkeyImage,
                                                 L"CategoryMessageFile",
                                                 0,
                                                 REG_EXPAND_SZ,
                                                 LPBYTE( WszUtilImagePath() ),
-                                                (ULONG)( ( wcslen( WszUtilImagePath() ) + 1 ) * sizeof( WCHAR ) ) );
+                                                (ULONG)( ( LOSStrLengthW( WszUtilImagePath() ) + 1 ) * sizeof( WCHAR ) ) );
                 Assert( error == ERROR_SUCCESS );
             }
             Data = MAC_CATEGORY - 1;

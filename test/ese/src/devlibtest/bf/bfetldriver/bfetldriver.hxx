@@ -13,9 +13,12 @@
 #include "bfftl.hxx"        // BF trace data and IDs
 #include "EtwCollection.hxx"
 
+#pragma push_macro("wcslen")
+#undef wcslen
 #include <set>
 #include <list>
 #include <unordered_map>
+#pragma pop_macro("wcslen")
 
 typedef struct _BFTraceStats
 {

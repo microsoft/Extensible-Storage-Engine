@@ -139,7 +139,7 @@ ERR ErrBFFTLInit( __in const void * const pvTraceDataLog, __in const DWORD grbit
 
             const WCHAR * const wszTraceLogFileBegin = wszTraceLogFiles;
             wszTraceLogFiles = wcsstr( wszTraceLogFiles, L"," );
-            const WCHAR * const wszTraceLogFileEnd = ( wszTraceLogFiles == NULL ) ? ( wszTraceLogFileBegin + wcslen( wszTraceLogFileBegin ) ) : wszTraceLogFiles;
+            const WCHAR * const wszTraceLogFileEnd = ( wszTraceLogFiles == NULL ) ? ( wszTraceLogFileBegin + LOSStrLengthW( wszTraceLogFileBegin ) ) : wszTraceLogFiles;
 
             const ULONG cchTraceLogFile = (ULONG)( wszTraceLogFileEnd - wszTraceLogFileBegin );
             Alloc( pbfftlc->wszTraceLogFiles[iTraceLogFile] = new WCHAR[cchTraceLogFile + 1] );

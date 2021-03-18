@@ -113,9 +113,9 @@ ERR CFlushMap::ErrGetFmPathFromDbPath(
 
     // ErrPathBuild throws a CRT exception if we pass in invalid parameters. Avoid calling that function
     // if we know we won't have enough capacity to hold the flush map path.
-    cchDbPath = (DWORD)wcslen( wszDbPath );
-    cchDbExtension = (DWORD)wcslen( wszDbExtension );
-    cchFmExtension = (DWORD)wcslen( s_wszFmFileExtension );
+    cchDbPath = (DWORD)LOSStrLengthW( wszDbPath );
+    cchDbExtension = (DWORD)LOSStrLengthW( wszDbExtension );
+    cchFmExtension = (DWORD)LOSStrLengthW( s_wszFmFileExtension );
     if ( ( cchDbPath - cchDbExtension + cchFmExtension + 1 ) > IFileSystemAPI::cchPathMax )
     {
         Error( ErrERRCheck( JET_errInvalidPath ) );

@@ -11,8 +11,11 @@
 #define RESMGRLRUKTESTAssert    Assert
 #endif  //  RESMGRLRUKTESTAssert
 
+#pragma push_macro("wcslen")
+#undef wcslen
 #include <unordered_map>
 #include <map>
+#pragma pop_macro("wcslen")
 
 //  Implementation of the classic LRU-K algorithm described in
 //  http://www.cs.cmu.edu/~christos/courses/721-resources/p297-o_neil.pdf

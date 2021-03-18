@@ -415,9 +415,9 @@ ERR COSFileSystem::ErrPathRoot( const WCHAR* const  wszPath,
 
             const WCHAR* const wszPrefix = L"\\\\?\\";
             DWORD cwchOffset = 0;
-            if ( wcsncmp( wszAbsPathT, wszPrefix, wcslen( wszPrefix ) ) == 0 )
+            if ( wcsncmp( wszAbsPathT, wszPrefix, LOSStrLengthW( wszPrefix ) ) == 0 )
             {
-                cwchOffset += wcslen( wszPrefix );
+                cwchOffset += LOSStrLengthW( wszPrefix );
             }
 
             if ( wmemmove_s( wszAbsPath, _countof( wszAbsPath ), wszAbsPathT + cwchOffset, cwchAbsPathT - cwchOffset ) )
@@ -748,7 +748,7 @@ ERR COSFileSystem::ErrOSFSGetDeviceHandle(
     ERR     err     = JET_errSuccess;
     DWORD   error   = ERROR_SUCCESS;
     const WCHAR wszDevPrefix [] = L"\\\\.\\";
-    WCHAR   wszDeviceName[ IFileSystemAPI::cchPathMax + 4 ]; // 4 = wcslen( wszDevPrefix )
+    WCHAR   wszDeviceName[ IFileSystemAPI::cchPathMax + 4 ]; // 4 = LOSStrLengthW( wszDevPrefix )
     wszDeviceName[0] = L'\0';
 
     Assert( phDevice );
@@ -804,11 +804,11 @@ ERR COSFileSystem::ErrOSFSGetDeviceHandle(
 
     //  Whether calculated w/ GetVolumeNameForVolumeMountPoint() or manually, CreatFileW()
     //  expects the trailing backslash to be removed.
-    ULONG cchDeviceName = wcslen(wszDeviceName);
+    ULONG cchDeviceName = LOSStrLengthW(wszDeviceName);
     if ( wszDeviceName[cchDeviceName-1] == L'\\' )
     {
         wszDeviceName[cchDeviceName-1] = L'\0';
-        Assert( wszDeviceName[wcslen(wszDeviceName)-1] != L'\\' );
+        Assert( wszDeviceName[LOSStrLengthW(wszDeviceName)-1] != L'\\' );
     }
 
     //
@@ -1231,7 +1231,7 @@ const WCHAR * const COSFileSystem::WszPathFileName( _In_z_ const WCHAR * const w
     {
         return wszOptionalFullPath;
     }
-    if ( wszLastDelimiter + 1 >= wszOptionalFullPath + wcslen( wszOptionalFullPath ) )
+    if ( wszLastDelimiter + 1 >= wszOptionalFullPath + LOSStrLengthW( wszOptionalFullPath ) )
     {
         ExpectedSz( FNegTest( fInvalidUsage ), "Path with delimiter at very end of string." );
         return L"UNKNOWN.PTH";
@@ -1266,7 +1266,7 @@ ERR COSFileSystem::ErrPathFolderNorm(   __inout_bcount(cbSize) PWSTR const  wszF
                                                              DWORD          cbSize )
 {
     ERR err = JET_errSuccess;
-    DWORD cch = wcslen(wszFolder);
+    DWORD cch = LOSStrLengthW(wszFolder);
 
     OSTrapPath( wszFolder );
 
@@ -2282,7 +2282,7 @@ ERR COSFileSystem::ErrDiskId(   const WCHAR* const wszVolumeCanonicalPath,
     WCHAR wszVolumeCanonicalPathT[ IFileSystemAPI::cchPathMax ];
     OSStrCbCopyW( wszVolumeCanonicalPathT, sizeof( wszVolumeCanonicalPathT ), wszVolumeCanonicalPath );
 
-    const size_t cchVolumePathT = wcslen( wszVolumeCanonicalPathT );
+    const size_t cchVolumePathT = LOSStrLengthW( wszVolumeCanonicalPathT );
     Assert( cchVolumePathT > 0 );
 
     if ( cchVolumePathT == 0 )
@@ -3023,8 +3023,8 @@ COSVolume::~COSVolume()
 
 ERR COSVolume::ErrInitVolume( __in_z const WCHAR * const wszVolPath, __in_z const WCHAR * const wszVolCanonicalPath )
 {
-    if ( ( ( 1 + wcslen( wszVolPath ) ) * 2 ) >= sizeof( m_wszVolPath ) ||
-            ( ( 1 + wcslen( wszVolCanonicalPath ) ) * 2 ) >= sizeof( m_wszVolCanonicalPath ) )
+    if ( ( ( 1 + LOSStrLengthW( wszVolPath ) ) * 2 ) >= sizeof( m_wszVolPath ) ||
+            ( ( 1 + LOSStrLengthW( wszVolCanonicalPath ) ) * 2 ) >= sizeof( m_wszVolCanonicalPath ) )
     {
         AssertSz( fFalse, "We expect this to be protected by the out lying layer, but protect anyway" );
         return ErrERRCheck( JET_errInvalidParameter );

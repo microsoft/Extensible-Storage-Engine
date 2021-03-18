@@ -234,7 +234,7 @@ void __cdecl OSStrCbAppendFormatW ( __inout_bcount(cbBuffer) PWSTR wszBuffer, si
 {
     va_list alist;
     va_start( alist, cwszFormat );
-    const size_t cbUsed = wcslen( wszBuffer ) * sizeof(WCHAR);
+    const size_t cbUsed = LOSStrLengthW( wszBuffer ) * sizeof(WCHAR);
     Assert( cbUsed < cbBuffer );    // did someone pass in an unit buffer?
     Assert( ( cbUsed % sizeof(WCHAR) ) == 0 );
     HRESULT hr = StringCbVPrintfW( wszBuffer + ( cbUsed / sizeof(WCHAR) ), cbBuffer - cbUsed, cwszFormat, alist );

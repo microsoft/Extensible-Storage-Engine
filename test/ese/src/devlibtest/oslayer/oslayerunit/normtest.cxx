@@ -304,7 +304,7 @@ ERR NORMTESTS::ErrTest()
     wprintf( L"\tTesting Unicode normalization functionality ...\n");
 
     const WCHAR* szData = L"The rain in Brazil falls mainly in GRU.";
-    const size_t cbData = ( wcslen( szData ) + 1 ) * sizeof( szData[0] );
+    const size_t cbData = ( LOSStrLengthW( szData ) + 1 ) * sizeof( szData[0] );
 
     for ( size_t i = 0; i < _countof( rgnormalizations ); ++i )
     {

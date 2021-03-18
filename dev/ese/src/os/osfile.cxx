@@ -1044,7 +1044,7 @@ ERR COSFile::ErrRename( const WCHAR* const  wszAbsPathDest,
     // No one calls this on memory-mapped files today. It should work but we didn't test this.
     Expected( m_rghFileMap[ 0 ] == NULL && m_rghFileMap[ 1 ] == NULL );
     
-    const size_t cchPathDest = wcslen( wszAbsPathDest );
+    const size_t cchPathDest = LOSStrLengthW( wszAbsPathDest );
     const size_t cbPathDest = ( cchPathDest + 1 ) * sizeof( WCHAR );
     const DWORD cbBuffer = sizeof( FILE_RENAME_INFO ) + cbPathDest;
     FILE_RENAME_INFO* const pRenameInfo = (FILE_RENAME_INFO*) alloca( cbBuffer );

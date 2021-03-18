@@ -811,9 +811,9 @@ LOCAL JET_ERR __stdcall PrintStatus( JET_SESID sesid, JET_SNP snp, JET_SNT snt, 
 
                     // Center the status message above the status bar.
                     // Formula is: ( length of status bar - length of message ) / 2
-                    cchOper = wcslen( wszOperation );
-                    assert( cchOper + (ULONG)wcslen( wszStatusMsg ) <= 51 );
-                    cchPadding = ( 51 - ( cchOper + (ULONG)wcslen( wszStatusMsg ) ) ) / 2;
+                    cchOper = LOSStrLengthW( wszOperation );
+                    assert( cchOper + (ULONG)LOSStrLengthW( wszStatusMsg ) <= 51 );
+                    cchPadding = ( 51 - ( cchOper + (ULONG)LOSStrLengthW( wszStatusMsg ) ) ) / 2;
 
                     wprintf( L"          %*s%s%c%c", (INT)(cchPadding+cchOper), wszOperation, wszStatusMsg, wchNewLine, wchNewLine );
                     wprintf( L"          0    10   20   30   40   50   60   70   80   90  100\n" );
@@ -1359,7 +1359,7 @@ LOCAL BOOL FEDBUTLParseDoublePath(  __in PCWSTR                 arg,
         assert( *pwszParam1 );
 
         *pwszParam2 = NULL;
-        if ( wcslen( *pwszParam1 ) >= 2 )
+        if ( LOSStrLengthW( *pwszParam1 ) >= 2 )
         {
             // we start to look for the ":" with the 3rd position (it might be \0 but that's ok)
             WCHAR * wszDelim = wcschr( (*pwszParam1) + 2, L':' );
@@ -1705,7 +1705,7 @@ LOCAL BOOL FEDBUTLParseRecovery( __in PCWSTR arg, UTILOPTS *popts )
             //
             lgposStop = lgposMax;
 
-            assert( wcslen(arg) >= 2 );
+            assert( LOSStrLengthW(arg) >= 2 );
 
             if ( arg[2] == L'\0' )
             {
@@ -2116,7 +2116,7 @@ LOCAL BOOL FEDBUTLBaseNameOnly( const WCHAR * const wszName )
         return fFalse;
 
     _wsplitpath_s( wszName, NULL, 0, NULL, 0, wszFileT, sizeof( wszFileT ) / sizeof( wszFileT[0] ), wszExtT, sizeof( wszExtT ) / sizeof( wszExtT[0] ) );
-    return ( 3 == wcslen( wszFileT ) && 0 == wcslen( wszExtT ) );
+    return ( 3 == LOSStrLengthW( wszFileT ) && 0 == LOSStrLengthW( wszExtT ) );
 }
 
 LOCAL BOOL FEDBUTLParseDump( __in PCWSTR arg, UTILOPTS *popts )
@@ -2228,7 +2228,7 @@ LOCAL BOOL FEDBUTLParseDump( __in PCWSTR arg, UTILOPTS *popts )
                 pdbutil->op = opDBUTILDumpPage;
             }
 
-            assert( wcslen(arg) >= 2 );
+            assert( LOSStrLengthW(arg) >= 2 );
 
             fResult = fTrue;
             if ( pdbutil->op != opDBUTILDumpSpaceCategory && pdbutil->op != opDBUTILDumpRBSHeader ) 
@@ -2251,7 +2251,7 @@ LOCAL BOOL FEDBUTLParseDump( __in PCWSTR arg, UTILOPTS *popts )
                 fResult = fFalse;
                 
                 // opDBUTILDumpSpaceCategory can take a range.
-                const SIZE_T cchArg = wcslen( arg + 2 );
+                const SIZE_T cchArg = LOSStrLengthW( arg + 2 );
                 LONG pgnoFirst, pgnoLast;
 
                 if ( arg[2] == '*' )
@@ -2288,7 +2288,7 @@ LOCAL BOOL FEDBUTLParseDump( __in PCWSTR arg, UTILOPTS *popts )
                  fResult = fFalse;
                 
                 // opDBUTILDumpSpaceCategory can take a range.
-                const SIZE_T cchArg = wcslen( arg + 2 );
+                const SIZE_T cchArg = LOSStrLengthW( arg + 2 );
                 LONG pgnoFirst, pgnoLast;
                 if ( wcsstr( arg + 2, L":max" ) != NULL )
                 {
@@ -3068,9 +3068,9 @@ LOCAL BOOL FEDBUTLParseOptions(
             }
         }
 #endif
-        else if ( 0 == _wcsnicmp( &(arg[1]), wszConfigArgPrefix, wcslen( wszConfigArgPrefix ) ) )   // /config -config /config: -config:
+        else if ( 0 == _wcsnicmp( &(arg[1]), wszConfigArgPrefix, LOSStrLengthW( wszConfigArgPrefix ) ) )   // /config -config /config: -config:
         {
-            const WCHAR * wszConfigSpec = &( arg[ 1 + wcslen( wszConfigArgPrefix ) ] );
+            const WCHAR * wszConfigSpec = &( arg[ 1 + LOSStrLengthW( wszConfigArgPrefix ) ] );
             if ( wszConfigSpec[0] == L':' )
             {
                 //  inline arg, increment past ":"
@@ -3649,7 +3649,7 @@ ERR ErrPrintESEBCLI2Error ( HRESULT hr, HRESULT hrGLE, HMODULE hESEBCLI2 )
 
     if ( hr == hrErrorFromESECall || hr == hrErrorFromCallbackCall )
     {
-        size_t cbFinalMsg = sizeof( WCHAR ) * ( wcslen( (WCHAR *)lpMsgBuf ) + 1 ) + 32;
+        size_t cbFinalMsg = sizeof( WCHAR ) * ( LOSStrLengthW( (WCHAR *)lpMsgBuf ) + 1 ) + 32;
         wszFinalMsg = (WCHAR *) LocalAlloc( LMEM_FIXED | LMEM_ZEROINIT, cbFinalMsg );
         if ( wszFinalMsg )
         {
@@ -3723,7 +3723,7 @@ WCHAR * WszCopy( const WCHAR *  wsz )
     LONG cb;
 
     assert ( wsz );
-    cb = sizeof(WCHAR) * ((ULONG)wcslen( wsz ) + 1);
+    cb = sizeof(WCHAR) * ((ULONG)LOSStrLengthW( wsz ) + 1);
 
     if ( ( wszCopy = (WCHAR *) LocalAlloc( LMEM_FIXED | LMEM_ZEROINIT, cb ) ) == NULL )
         return(NULL);
@@ -3933,7 +3933,7 @@ LOCAL VOID DBUTLIDumpRestoreEnv( RESTORE_ENVIRONMENT * pREnv, INT   cDesc = 0 )
         while ( L'\0' != wszStreams[0] )
         {
             wprintf( L"%s ", wszStreams );
-            wszStreams += wcslen( wszStreams ) + 1;
+            wszStreams += LOSStrLengthW( wszStreams ) + 1;
         }
         wprintf( L"\n" );
         wszStreams = pREnv->m_wszDatabaseStreamsD[iDb];
@@ -3941,7 +3941,7 @@ LOCAL VOID DBUTLIDumpRestoreEnv( RESTORE_ENVIRONMENT * pREnv, INT   cDesc = 0 )
         while ( L'\0' != wszStreams[0] )
         {
             wprintf( L"%s ", wszStreams );
-            wszStreams += wcslen( wszStreams ) + 1;
+            wszStreams += LOSStrLengthW( wszStreams ) + 1;
         }
         PrintField( L"", cDesc, NULL );
         PrintField( L"", cDesc, NULL );
@@ -5120,7 +5120,7 @@ LOCAL JET_ERR ErrFileSystemDump( const WCHAR* const wszFilename, const BOOL fVer
 
     wprintf( L"File Information:%c", wchNewLine );
     wprintf( L"  File Name: %s%c", wszFilename, wchNewLine );
-    wprintf( L"  Volume Name: %s%c", 0 == wcslen( wszVolumeName ) ? wszVolumeRoot : wszVolumeName, wchNewLine );
+    wprintf( L"  Volume Name: %s%c", 0 == LOSStrLengthW( wszVolumeName ) ? wszVolumeRoot : wszVolumeName, wchNewLine );
     wprintf( L"  File System: %s%c", wszFSName, wchNewLine );
     wprintf( L"  Cluster Size: %u bytes%c", cbCluster, wchNewLine );
 
@@ -5362,7 +5362,7 @@ void PushEseutilArgTrace( INT argc, __in_ecount(argc) LPWSTR argv[] )
     size_t cbAllArgs = 0;
     for( INT iarg = 0; iarg < argc; iarg++ )
     {
-        cbAllArgs += sizeof(WCHAR) * ( wcslen( argv[iarg] ) + 2 /* one for space, one more because of .... ahhhh<fell off SOMEONE> */ );
+        cbAllArgs += sizeof(WCHAR) * ( LOSStrLengthW( argv[iarg] ) + 2 /* one for space, one more because of .... ahhhh<fell off SOMEONE> */ );
     }
     cbAllArgs += sizeof(WCHAR) + 783; // + NUL terminator space + Buffer for potential MBCS expansion (of 3 full paths) ... at top of stack, so 783 is fine.
     CHAR * szEseutilCmd = (CHAR*)alloca( cbAllArgs );
@@ -6802,7 +6802,7 @@ Usage:
     SetCurArgID( 0 );
     assert( GetCurArgID() == 0 );
 
-    _wcsupr_s( GetCurArg(), wcslen( GetCurArg() ) + 1 );
+    _wcsupr_s( GetCurArg(), LOSStrLengthW( GetCurArg() ) + 1 );
     EDBUTLHelp( GetCurArg() );
     
     OSTerm();

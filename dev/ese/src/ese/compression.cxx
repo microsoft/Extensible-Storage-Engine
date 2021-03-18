@@ -3158,14 +3158,14 @@ JETUNITTEST( CDataCompressor, 7BitUnicode )
     // data that is too small to compress
     sz = L"f";
     data.SetPv( sz );
-    data.SetCb( wcslen(sz) );
+    data.SetCb( LOSStrLengthW(sz) );
     err = compressor.ErrCompress( data, compress7Bit, &stats, rgbBuf1, cbBuf, &cbDataActual );
     CHECK( errRECCannotCompress == err );
 
     // data that is just big enough to compress
     sz = L"12";
     data.SetPv( sz );
-    data.SetCb( wcslen(sz)*sizeof(sz[0]) );
+    data.SetCb( LOSStrLengthW(sz)*sizeof(sz[0]) );
     err = compressor.ErrCompress( data, compress7Bit, &stats, rgbBuf1, cbBuf, &cbDataActual );
     CHECK( JET_errSuccess == err );
     CHECK( 3 == cbDataActual );

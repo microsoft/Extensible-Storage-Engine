@@ -3395,7 +3395,7 @@ HandleError:
                 pwchT = wszzLogs;
 
                 do {
-                    if ( wcslen( pwchT ) != 0 )
+                    if ( LOSStrLengthW( pwchT ) != 0 )
                     {
                         CAutoSZ lszTemp;
                         if ( lszTemp.ErrSet( pwchT ) )
@@ -3409,7 +3409,7 @@ HandleError:
                         }
                         Assert( strlen( sz ) <= sizeof( sz ) - 1 );
                         DBGBRTrace( sz );
-                        pwchT += wcslen( pwchT );
+                        pwchT += LOSStrLengthW( pwchT );
                     }
                     pwchT++;
                 } while ( *pwchT );
