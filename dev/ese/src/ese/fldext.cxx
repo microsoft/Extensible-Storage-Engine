@@ -316,8 +316,7 @@ ERR ErrRECIRetrieveFixedColumn(
     
     const REC   *prec = (REC *)dataRec.Pv();
 
-    Assert( prec->FidFixedLastInRec() >= fidFixedLeast-1 );
-    Assert( prec->FidFixedLastInRec() <= fidFixedMost );
+    Assert( prec->FidFixedLastInRec().FFixedNone() || prec->FidFixedLastInRec().FFixed() );
 
 #ifdef DEBUG
     const BOOL  fUseDMLLatchDBG     = ( pfcbNil != pfcb && fid > ptdb->FidFixedLastInitial() );
@@ -372,12 +371,12 @@ ERR ErrRECIRetrieveFixedColumn(
         return err;
     }
 
-    Assert( prec->FidFixedLastInRec() >= fidFixedLeast );
+    Assert( prec->FidFixedLastInRec().FFixed() );
     Assert( ptdb->PfieldFixed( columnid )->ibRecordOffset < prec->IbEndOfFixedData() );
 
     // check nullity
 
-    const UINT  ifid            = fid - fidFixedLeast;
+    const UINT  ifid            = fid.IndexOf( fidtypFixed );
     const BYTE  *prgbitNullity  = prec->PbFixedNullBitMap() + ifid/8;
 
     //  bit is not set: column is NULL
@@ -444,8 +443,7 @@ ERR ErrRECIRetrieveVarColumn(
 
     const REC   *prec = (REC *)dataRec.Pv();
 
-    Assert( prec->FidVarLastInRec() >= fidVarLeast-1 );
-    Assert( prec->FidVarLastInRec() <= fidVarMost );
+    Assert( prec->FidVarLastInRec().FVarNone() || prec->FidVarLastInRec().FVar() );
 
 #ifdef DEBUG
     const BOOL  fUseDMLLatchDBG     = ( pfcbNil != pfcb && fid > ptdb->FidVarLastInitial() );
@@ -498,13 +496,13 @@ ERR ErrRECIRetrieveVarColumn(
     if ( fUseDMLLatchDBG )
         pfcb->LeaveDML();
 
-    Assert( prec->FidVarLastInRec() >= fidVarLeast );
+    Assert( prec->FidVarLastInRec().FVar() );
 
     UnalignedLittleEndian<REC::VAROFFSET>   *pibVarOffs     = prec->PibVarOffsets();
 
     //  adjust fid to an index
     //
-    const UINT              ifid            = fid - fidVarLeast;
+    const UINT              ifid            = fid.IndexOf( fidtypVar );
 
     //  beginning of current column is end of previous column
     const REC::VAROFFSET    ibStartOfColumn = prec->IbVarOffsetStart( fid );
@@ -535,7 +533,7 @@ ERR ErrRECIRetrieveVarColumn(
         //  set output parameter: column address
         //
         BYTE    *pbVarData = prec->PbVarData();
-        Assert( pbVarData + IbVarOffset( pibVarOffs[prec->FidVarLastInRec()-fidVarLeast] )
+        Assert( pbVarData + IbVarOffset( pibVarOffs[ prec->FidVarLastInRec().IndexOf( fidtypVar ) ] )
                     <= (BYTE *)dataRec.Pv() + dataRec.Cb() );
         pdataField->SetPv( pbVarData + ibStartOfColumn );
         Assert( pdataField->Pv() >= (BYTE *)prec );
@@ -798,12 +796,13 @@ COLUMNID ColumnidRECFirstTaggedForScanOfDerivedTable( const TDB * const ptdb )
         //  since no ESE97 tagged columns in template, template and derived tables
         //  must both start numbering at same place
         Assert( ptdbTemplate->FidTaggedFirst() == ptdb->FidTaggedFirst() );
-        if ( ptdbTemplate->FidTaggedLast() >= fidTaggedLeast )
+        if ( ptdbTemplate->FidTaggedLast().FTagged() )
         {
             columnidT = ColumnidOfFid( ptdbTemplate->FidTaggedFirst(), fTrue );
         }
         else
         {
+            Assert(  ptdbTemplate->FidTaggedLast().FTaggedNone() );
             //  no template columns, go to derived columns
             columnidT = ColumnidOfFid( ptdb->FidTaggedFirst(), fFalse );
         }
@@ -1587,7 +1586,7 @@ INLINE ERR ErrRECIGetIntrinsicAvail(
         //  columnid should already have been validated
         Assert( fidT >= ptdbT->FidFixedFirst() );
         Assert( fidT <= ptdbT->FidFixedLast() );
-        Assert( precT->FidFixedLastInRec() >= fidFixedLeast );
+        Assert( precT->FidFixedLastInRec().FFixed() );
         pfieldT = ptdbT->PfieldFixed( columnid );
         //  if setting fixed field does not require any space, or if the space required is available then return the full size of the fixed column.
         //  Otherwise, return 0.  With fixed columns, its all or nothing.

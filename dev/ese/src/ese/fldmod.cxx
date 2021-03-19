@@ -783,7 +783,7 @@ ERR VTAPI ErrIsamPrepareUpdate( JET_SESID sesid, JET_VTID vtid, ULONG grbit )
                 // If they are versioned, there's a risk they might
                 // be rolled back from underneath us.
                 fBurstDefaultRecord = fTrue;
-                if ( precDefault->FidFixedLastInRec() >= fidFixedLeast )
+                if ( precDefault->FidFixedLastInRec().FFixed() )
                 {
                     const FID   fid             = precDefault->FidFixedLastInRec();
                     const BOOL  fTemplateColumn = ptdbT->FFixedTemplateColumn( fid );
@@ -797,7 +797,12 @@ ERR VTAPI ErrIsamPrepareUpdate( JET_SESID sesid, JET_VTID vtid, ULONG grbit )
                         || ( FFIELDDeleted( pfield->ffield ) && fid > ptdbT->FidFixedLastInitial() ) )
                         fBurstDefaultRecord = fFalse;
                 }
-                if ( precDefault->FidVarLastInRec() >= fidVarLeast )
+                else
+                {
+                    Assert( precDefault->FidFixedLastInRec().FFixedNone() );
+                }
+
+                if ( precDefault->FidVarLastInRec().FVar() )
                 {
                     const FID   fid             = precDefault->FidVarLastInRec();
                     const BOOL  fTemplateColumn = ptdbT->FVarTemplateColumn( fid );
@@ -810,6 +815,10 @@ ERR VTAPI ErrIsamPrepareUpdate( JET_SESID sesid, JET_VTID vtid, ULONG grbit )
                     if ( FFIELDVersioned( pfield->ffield )
                         || ( FFIELDDeleted( pfield->ffield ) && fid > ptdbT->FidVarLastInitial() ) )
                         fBurstDefaultRecord = fFalse;
+                }
+                else
+                {
+                    Assert ( precDefault->FidVarLastInRec().FVarNone() );
                 }
 
                 if ( fBurstDefaultRecord )
@@ -844,8 +853,8 @@ ERR VTAPI ErrIsamPrepareUpdate( JET_SESID sesid, JET_VTID vtid, ULONG grbit )
 
                     FID fidBurst;
                     for ( fidBurst = precDefault->FidFixedLastInRec();
-                        fidBurst >= fidFixedLeast;
-                        fidBurst-- )
+                          fidBurst.FFixed();
+                          fidBurst-- )
                     {
                         const BOOL  fTemplateColumn = ptdbT->FFixedTemplateColumn( fidBurst );
                         const FIELD *pfield         = ptdbT->PfieldFixed( ColumnidOfFid( fidBurst, fTemplateColumn ) );
@@ -855,14 +864,14 @@ ERR VTAPI ErrIsamPrepareUpdate( JET_SESID sesid, JET_VTID vtid, ULONG grbit )
                             break;
                         }
                     }
-                    if ( fidBurst >= fidFixedLeast )
+                    if ( fidBurst.FFixed() )
                     {
                         BYTE    *pbRec  = (BYTE *)pfucb->dataWorkBuf.Pv();
                         REC     *prec   = (REC *)pbRec;
 
                         //  there is at least one non-versioned column. burst it
-                        Assert( fidBurst <= fidFixedMost );
-                        const INT   cFixedColumnsToBurst = fidBurst - fidFixedLeast + 1;
+                        Assert( fidBurst.FFixed() );
+                        const INT   cFixedColumnsToBurst = fidBurst.CountOf( fidtypFixed );
                         Assert( cFixedColumnsToBurst > 0 );
 
                         //  get the starting offset of the column ahead of this one
@@ -893,7 +902,7 @@ ERR VTAPI ErrIsamPrepareUpdate( JET_SESID sesid, JET_VTID vtid, ULONG grbit )
                         UtilMemCpy( pbRec, (BYTE *)precDefault, cbFixedBurst );
 
                         prec->SetFidFixedLastInRec( fidBurst );
-                        prec->SetFidVarLastInRec( fidVarLeast-1 );
+                        prec->SetFidVarLastInRec( FID( fidtypVar, fidlimNone ) );
                         prec->SetIbEndOfFixedData( (USHORT)cbFixedBurst );
 
                         //  set the fixed column bitmap
@@ -905,11 +914,11 @@ ERR VTAPI ErrIsamPrepareUpdate( JET_SESID sesid, JET_VTID vtid, ULONG grbit )
 
                         //  must nullify bits for columns not in this record
                         BYTE    *pbitNullity = pbRec + cbFixedBurst - 1;
-                        Assert( pbitNullity == pbRec + ibFixEnd + ( ( fidBurst - fidFixedLeast ) / 8 ) );
+                        Assert( pbitNullity == pbRec + ibFixEnd + ( fidBurst.IndexOf( fidtypFixed ) / 8 ) );
 
                         for ( FID fidT = FID( fidBurst + 1 ); ; fidT++ )
                         {
-                            const UINT  ifid = fidT - fidFixedLeast;
+                            const UINT  ifid = fidT.IndexOf( fidtypFixed );
 
                             if ( ( pbRec + ibFixEnd + ifid/8 ) != pbitNullity )
                             {
@@ -2063,7 +2072,7 @@ LOCAL ERR ErrRECISetIFixedColumn(
         //  }
 
         const WORD  ibNewFixEnd     = WORD( pfield->ibRecordOffset + pfield->cbMaxLen );
-        const INT   cbNewBitMap     = ( ( fid - fidFixedLeast + 1 ) + 7 ) / 8;
+        const INT   cbNewBitMap     = ( fid.CountOf( fidtypFixed ) + 7 ) / 8;
         const WORD  ibNewBitMapEnd  = WORD( ibNewFixEnd + cbNewBitMap );
         const INT   cbShift         = ibNewBitMapEnd - ibOldBitMapEnd;
         Assert( ibNewFixEnd == ptdb->IbOffsetOfNextColumn( fid ) );
@@ -2109,15 +2118,15 @@ LOCAL ERR ErrRECISetIFixedColumn(
         // find the nullity bit for the last fixed column and clear the
         // rest of the bits in that byte.
         BYTE    *prgbitNullity;
-        if ( fidFixedLastInRec >= fidFixedLeast )
+        if ( fidFixedLastInRec.FFixed() )
         {
-            UINT    ifid    = fidFixedLastInRec - fidFixedLeast;    // Fid converted to an index.
+            UINT    ifid    = fidFixedLastInRec.IndexOf( fidtypFixed );    // Fid converted to an index.
 
             prgbitNullity = pbRec + ibNewFixEnd + ifid/8;
 
             for ( fidT = FID( fidFixedLastInRec + 1 ); fidT <= fid; fidT++ )
             {
-                ifid = fidT - fidFixedLeast;
+                ifid = fidT.IndexOf( fidtypFixed );
                 if ( ( pbRec + ibNewFixEnd + ifid/8 ) != prgbitNullity )
                 {
                     Assert( ( pbRec + ibNewFixEnd + ifid/8 ) == ( prgbitNullity + 1 ) );
@@ -2131,6 +2140,7 @@ LOCAL ERR ErrRECISetIFixedColumn(
         }
         else
         {
+            Assert( fidFixedLastInRec.FFixedNone() );
             prgbitNullity = pbRec + ibNewFixEnd;
             Assert( prgbitNullity < pbRec + ibNewBitMapEnd );
         }
@@ -2163,10 +2173,9 @@ LOCAL ERR ErrRECISetIFixedColumn(
         }
 
         fidLastDefaultToBurst = ( NULL != precDefault ?
-                                        precDefault->FidFixedLastInRec() :
-                                        FID( fidFixedLeast - 1 ) );
-        Assert( fidLastDefaultToBurst >= fidFixedLeast-1 );
-        Assert( fidLastDefaultToBurst <= ptdb->FidFixedLast() );
+                                  precDefault->FidFixedLastInRec() :
+                                  FID( fidtypFixed, fidlimNone ) );
+        Assert( fidLastDefaultToBurst.FFixedNone() || fidLastDefaultToBurst.FFixed() );
 
         if ( fidLastDefaultToBurst > fidFixedLastInRec )
         {
@@ -2184,7 +2193,7 @@ LOCAL ERR ErrRECISetIFixedColumn(
                 if ( FFIELDDefault( pfieldFixed->ffield )
                     && !FFIELDCommittedDelete( pfieldFixed->ffield ) )
                 {
-                    UINT    ifid    = fidT - fidFixedLeast;
+                    UINT    ifid    = fidT.IndexOf( fidtypFixed );
 
                     Assert( pfieldFixed->coltyp != JET_coltypNil );
 
@@ -2224,7 +2233,7 @@ LOCAL ERR ErrRECISetIFixedColumn(
 
     //  adjust fid to an index
     //
-    const UINT  ifid            = fid - fidFixedLeast;
+    const UINT  ifid            = fid.IndexOf( fidtypFixed );
 
     //  byte containing bit representing column's nullity
     //
@@ -2378,10 +2387,9 @@ INLINE ULONG CbBurstVarDefaults( TDB *ptdb, FUCB *pfucb, FID fidVarLastInRec, FI
     }
 
     *pfidLastDefault = ( NULL != precDefault ?
-                            precDefault->FidVarLastInRec() :
-                            FID( fidVarLeast - 1 ) );
-    Assert( *pfidLastDefault >= fidVarLeast-1 );
-    Assert( *pfidLastDefault <= ptdb->FidVarLast() );
+                         precDefault->FidVarLastInRec() :
+                         FID( fidtypVar, fidlimNone ) );
+    Assert( pfidLastDefault->FVarNone() || pfidLastDefault->FVar() );
 
     if ( *pfidLastDefault > fidVarLastInRec )
     {
@@ -2398,14 +2406,14 @@ INLINE ULONG CbBurstVarDefaults( TDB *ptdb, FUCB *pfucb, FID fidVarLastInRec, FI
             if ( FFIELDDefault( pfieldVar->ffield )
                 && !FFIELDCommittedDelete( pfieldVar->ffield ) )
             {
-                const UINT  ifid = fidT - fidVarLeast;
+                const UINT  ifid = fidT.IndexOf( fidtypVar );
                 Assert( pfieldVar->coltyp != JET_coltypNil );
 
                 // Don't currently support NULL default values.
                 Assert( !FVarNullBit( pibDefaultVarOffs[ifid] ) );
 
                 //  beginning of current column is end of previous column
-                const WORD  ibVarOffset = ( fidVarLeast == fidT ?
+                const WORD  ibVarOffset = ( fidT.FVarLeast() ?
                                                 (WORD)0 :
                                                 IbVarOffset( pibDefaultVarOffs[ifid-1] ) );
 
@@ -2558,18 +2566,18 @@ ERR ErrRECISetVarColumn(
         //  set new var offsets to tag offset, making them NULL
         //
         pib = (UnalignedLittleEndian<REC::VAROFFSET> *)pbVarOffsEnd;
-        pibLast = pibVarOffs + ( fid - fidVarLeast );
+        pibLast = pibVarOffs + fid.IndexOf( fidtypVar );
 
         WORD            ibTagFields = prec->IbEndOfVarData();
         SetVarNullBit( ibTagFields );
 
-        Assert( pib == pibVarOffs + ( fidVarLastInRec+1-fidVarLeast ) );
+        Assert( pib == pibVarOffs + fidVarLastInRec.CountOf( fidtypVar ) );
         Assert( prec->PbVarData() + IbVarOffset( ibTagFields ) - pbRec <= cbRec );
         Assert( pib <= pibLast );
         Assert( SIZE_T( pibLast - pib + 1 ) == cbNeed / sizeof(REC::VAROFFSET) );
         while( pib <= pibLast )
             *pib++ = ibTagFields;
-        Assert( pib == pibVarOffs + ( fid+1-fidVarLeast ) );
+        Assert( pib == pibVarOffs + fid.CountOf( fidtypVar ) );
 
         //  increase record size to reflect addition of entries in the
         //  variable offsets table.
@@ -2580,7 +2588,7 @@ ERR ErrRECISetVarColumn(
         cbRec += cbNeed;
 
         Assert( prec->PibVarOffsets() == pibVarOffs );
-        Assert( pibVarOffs[fid-fidVarLeast] == ibTagFields );   // Includes null-bit comparison.
+        Assert( pibVarOffs[ fid.IndexOf( fidtypVar ) ] == ibTagFields );   // Includes null-bit comparison.
 
         // Burst default values if required.
         Assert( cbBurstDefaults == 0
@@ -2614,15 +2622,15 @@ ERR ErrRECISetVarColumn(
 
             Assert( fidVarLastInRec < fidLastDefault );
 
-            Assert( fidVarLastInRec == fidVarLeast-1
-                || IbVarOffset( pibDefaultVarOffs[fidVarLastInRec-fidVarLeast] )
-                        < IbVarOffset( pibDefaultVarOffs[fidLastDefault-fidVarLeast] ) );
-            Assert( pbVarDataDefault + IbVarOffset( pibDefaultVarOffs[fidLastDefault-fidVarLeast] ) - (BYTE *)precDefault
+            Assert( fidVarLastInRec.FVarNone()
+                    || ( IbVarOffset( pibDefaultVarOffs[ fidVarLastInRec.IndexOf( fidtypVar ) ] )
+                         < IbVarOffset( pibDefaultVarOffs[ fidLastDefault.IndexOf( fidtypVar ) ] ) ) );
+            Assert( pbVarDataDefault + IbVarOffset( pibDefaultVarOffs[ fidLastDefault.IndexOf( fidtypVar ) ] ) - (BYTE *)precDefault
                     <= ptdb->PdataDefaultRecord()->Cb() );
 
-            pib = pibVarOffs + ( fidVarLastInRec + 1 - fidVarLeast );
+            pib = pibVarOffs + fidVarLastInRec.CountOf( fidtypVar );
             Assert( *pib == ibTagFields );  // Null bit also compared.
-            pibDefault = pibDefaultVarOffs + ( fidVarLastInRec + 1 - fidVarLeast );
+            pibDefault = pibDefaultVarOffs + fidVarLastInRec.CountOf( fidtypVar );
 
 #ifdef DEBUG
             ULONG   cbBurstSoFar        = 0;
@@ -2647,7 +2655,7 @@ ERR ErrRECISetVarColumn(
                     // Update offset entry in preparation for the default value.
                     Assert( !FVarNullBit( *pibDefault ) );
 
-                    if ( fidVarLeast == fidT )
+                    if ( fidT.FVarLeast() )
                     {
                         Assert( IbVarOffset( *pibDefault ) > 0 );
                         const USHORT    cb  = IbVarOffset( *pibDefault );
@@ -2676,7 +2684,7 @@ ERR ErrRECISetVarColumn(
 //                  ResetVarNullBit( *pib );
                     Assert( !FVarNullBit( *pib ) );
                 }
-                else if ( fidT > fidVarLeast )
+                else if ( !fidT.FVarLeast() )
                 {
                     *pib = IbVarOffset( *(pib-1) );
 
@@ -2686,7 +2694,7 @@ ERR ErrRECISetVarColumn(
                 }
                 else
                 {
-                    Assert( fidT == fidVarLeast );
+                    Assert( fidT.FVarLeast() );
                     Assert( FVarNullBit( *pib ) );
                     Assert( 0 == IbVarOffset( *pib ) );
                 }
@@ -2695,23 +2703,24 @@ ERR ErrRECISetVarColumn(
             Assert( (ULONG)cbBurstDefaults == cbBurstSoFar );
             Assert( FVarNullBit( *pib ) );
             Assert( *pib == ibTagFields );
-            if ( fidVarLastInRec >= fidVarLeast )
+            if ( fidVarLastInRec.FVar() )
             {
-                Assert( IbVarOffset( pibVarOffs[fidVarLastInRec-fidVarLeast] )
+                Assert( IbVarOffset( pibVarOffs[ fidVarLastInRec.IndexOf( fidtypVar ) ] )
                     == IbVarOffset( ibTagFields ) );
                 Assert( IbVarOffset( *(pib-1) ) -
-                        IbVarOffset( pibVarOffs[fidVarLastInRec-fidVarLeast] )
+                        IbVarOffset( pibVarOffs[ fidVarLastInRec.IndexOf( fidtypVar ) ] )
                     == (WORD)cbBurstDefaults );
             }
             else
             {
+                Assert( fidVarLastInRec.FVarNone() );
                 Assert( IbVarOffset( *(pib-1) ) == (WORD)cbBurstDefaults );
             }
 
             // Offset entries up to the last default have been set.
             // Update the entries between the last default and the
             // column being set.
-            pibLast = pibVarOffs + ( fid - fidVarLeast );
+            pibLast = pibVarOffs + fid.IndexOf( fidtypVar );
             for ( ; pib <= pibLast; pib++ )
             {
                 Assert( FVarNullBit( *pib ) );
@@ -2722,18 +2731,18 @@ ERR ErrRECISetVarColumn(
 
 #ifdef DEBUG
             // Verify null bits vs. offsets.
-            pibLast = pibVarOffs + ( fid - fidVarLeast );
+            pibLast = pibVarOffs + fid.IndexOf( fidtypVar );
             for ( pib = pibVarOffs+1; pib <= pibLast; pib++ )
             {
                 Assert( IbVarOffset( *pib ) >= IbVarOffset( *(pib-1) ) );
                 if ( FVarNullBit( *pib ) )
                 {
-                    Assert( pib != pibVarOffs + ( fidLastDefault - fidVarLeast ) );
+                    Assert( pib != pibVarOffs + fidLastDefault.IndexOf( fidtypVar ) );
                     Assert( IbVarOffset( *pib ) == IbVarOffset( *(pib-1) ) );
                 }
                 else
                 {
-                    Assert( pib <= pibVarOffs + ( fidLastDefault - fidVarLeast ) );
+                    Assert( pib <= pibVarOffs + fidLastDefault.IndexOf( fidtypVar ) );
                     Assert( IbVarOffset( *pib ) > IbVarOffset( *(pib-1) ) );
                 }
             }
@@ -2758,11 +2767,11 @@ ERR ErrRECISetVarColumn(
     //  compute change in column size and value of null-bit in offset
     //
     pibVarOffs = prec->PibVarOffsets();
-    pib = pibVarOffs + ( fid - fidVarLeast );
+    pib = pibVarOffs + fid.IndexOf( fidtypVar );
 
     // Calculate size change of column data
     REC::VAROFFSET  ibStartOfColumn;
-    if( fidVarLeast == fid )
+    if( fid.FVarLeast() )
     {
         ibStartOfColumn = 0;
     }
@@ -2806,15 +2815,15 @@ ERR ErrRECISetVarColumn(
         //  bump affected var column offsets
         //
         Assert( fid <= prec->FidVarLastInRec() );
-        Assert( prec->FidVarLastInRec() >= fidVarLeast );
-        pibLast = pibVarOffs + ( prec->FidVarLastInRec() - fidVarLeast );
-        for ( pib = pibVarOffs + ( fid - fidVarLeast ); pib <= pibLast; pib++ )
+        Assert( prec->FidVarLastInRec().FVar() );
+        pibLast = pibVarOffs + prec->FidVarLastInRec().IndexOf( fidtypVar );
+        for ( pib = pibVarOffs + fid.IndexOf( fidtypVar ); pib <= pibLast; pib++ )
         {
             *pib = WORD( *pib + dbFieldData );
         }
 
         // Reset for setting of null bit below.
-        pib = pibVarOffs + ( fid - fidVarLeast );
+        pib = pibVarOffs + fid.IndexOf( fidtypVar );
     }
 
     //  data shift complete, if any;  copy new column value in

@@ -62,9 +62,9 @@ ErrSeek( const COLUMNID columnid )
 
     fid = FidOfColumnid( columnid );
 
-    if ( fid < fidFixedLeast )
+    if ( fid.FFixedNone() )
     {
-        m_columnidCurr  = fidFixedLeast - 1;
+        m_columnidCurr  = FID( fidtypFixed, fidlimNone );
         m_errCurr       = errRECNoCurrentColumnValue;
 
         Error( errRECColumnNotFound );
@@ -107,7 +107,7 @@ ErrGetColumnValueCount( size_t* const pcColumnValue ) const
 
     Call( m_errCurr );
 
-    ifid            = FidOfColumnid( m_columnidCurr ) - fidFixedLeast;
+    ifid            = FidOfColumnid( m_columnidCurr ).IndexOf( fidtypFixed );
     prgbitNullity   = m_prec->PbFixedNullBitMap() + ifid / 8;
 
     *pcColumnValue = FFixedNullBit( prgbitNullity, ifid ) ? 0 : 1;
@@ -206,10 +206,11 @@ ErrSeek( const COLUMNID columnid )
     }
 
     fid = FidOfColumnid( columnid );
+    Assert( fid.FVarNone() || fid.FVar() );
 
-    if ( fid < fidVarLeast )
+    if ( fid.FVarNone() )
     {
-        m_columnidCurr  = fidVarLeast - 1;
+        m_columnidCurr  = FID( fidtypVar, fidlimNone );
         m_errCurr       = errRECNoCurrentColumnValue;
 
         Error( errRECColumnNotFound );
@@ -242,7 +243,7 @@ ErrGetColumnValueCount( size_t* const pcColumnValue ) const
 
     Call( m_errCurr );
 
-    ifid        = FidOfColumnid( m_columnidCurr ) - fidVarLeast;
+    ifid        = FidOfColumnid( m_columnidCurr ).IndexOf( fidtypVar );
     pibVarOffs  = m_prec->PibVarOffsets();
 
     *pcColumnValue = FVarNullBit( pibVarOffs[ ifid ] ) ? 0 : 1;
@@ -261,7 +262,7 @@ ErrGetColumnSize( FUCB* const pfucb, JET_RECSIZE3* const precsize, const JET_GRB
 
     Call( m_errCurr );
 
-    ifid            = FidOfColumnid( m_columnidCurr ) - fidVarLeast;
+    ifid            = FidOfColumnid( m_columnidCurr ).IndexOf( fidtypVar );
     pibVarOffs      = m_prec->PibVarOffsets();
     ibStartOfColumn = m_prec->IbVarOffsetStart( FidOfColumnid( m_columnidCurr ) );
 
@@ -295,7 +296,7 @@ ErrGetColumnValue(  const size_t    iColumnValue,
         Error( ErrERRCheck( JET_errBadItagSequence ) );
     }
 
-    ifid            = FidOfColumnid( m_columnidCurr ) - fidVarLeast;
+    ifid            = FidOfColumnid( m_columnidCurr ).IndexOf( fidtypVar );
     pibVarOffs      = m_prec->PibVarOffsets();
     ibStartOfColumn = m_prec->IbVarOffsetStart( FidOfColumnid( m_columnidCurr ) );
 
@@ -3738,10 +3739,32 @@ LOCAL ERR ErrRECIStreamRecordsOnPrimaryIndexIGetColumnMetaData(
     TDB * const ptdb = FCOLUMNIDTemplateColumn( columnid ) ? pcontext->ptdbTemplate : pcontext->ptdb;
 
     FID fid = FidOfColumnid( columnid );
-    ULONG icolumnmetadata = fid;
-    icolumnmetadata -= fid >= fidTaggedLeast ? fidVarMost - ptdb->FidVarLast() : 0;
-    icolumnmetadata -= fid >= fidVarLeast ? fidFixedMost - ptdb->FidFixedLast() : 0;
-    icolumnmetadata -= fid >= fidFixedLeast ? fidFixedLeast : 0;
+    ULONG icolumnmetadata;
+
+    switch ( fid.Fidtyp() )
+    {
+        case fidtypFixed:
+            // Just some fixed.
+            icolumnmetadata = fid.IndexOf( fidtypFixed );
+            break;
+
+        case fidtypVar:
+            // Some var, all fixed.
+            icolumnmetadata = fid.IndexOf( fidtypVar );
+            icolumnmetadata += ptdb->FidFixedLast().CountOf( fidtypFixed );
+            break;
+
+        case fidtypTagged:
+            // Some tagged, all var, all fixed.
+            icolumnmetadata = fid.IndexOf( fidtypTagged );
+            icolumnmetadata += ptdb->FidVarLast().CountOf( fidtypVar );
+            icolumnmetadata += ptdb->FidFixedLast().CountOf( fidtypFixed );
+            break;
+
+        default:
+            return ErrERRCheck( JET_errBadColumnId );
+    }
+    
     icolumnmetadata += FCOLUMNIDTemplateColumn( columnid ) ? pcontext->ptdb->CColumns() : 0;
     icolumnmetadata = icolumnmetadata & ( pcontext->ccolumnmetadata - 1 );
 
@@ -4260,9 +4283,9 @@ LOCAL ERR ErrIsamStreamRecordsOnPrimaryIndex(
         ULONG ccolumnidUsed = 0;
         for ( TDB* ptdbT = ptdb; ptdbT != ptdbNil; ptdbT = ptdbT == ptdbTemplate ? ptdbNil : ptdbTemplate )
         {
-            ccolumnidUsed += ptdbT->FidFixedLast() - fidFixedLeast + 1;
-            ccolumnidUsed += ptdbT->FidVarLast() - fidVarLeast + 1;
-            ccolumnidUsed += ptdbT->FidTaggedLast() - fidTaggedLeast + 1;
+            ccolumnidUsed += ptdbT->FidFixedLast().CountOf( fidtypFixed );
+            ccolumnidUsed += ptdbT->FidVarLast().CountOf( fidtypVar );
+            ccolumnidUsed += ptdbT->FidTaggedLast().CountOf( fidtypTagged );
         }
 
         if ( ccolumnidUsed < ccolumnidPreprocessMax )

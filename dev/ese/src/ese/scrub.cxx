@@ -249,11 +249,11 @@ LOCAL COLUMNID ColumnidFromMSysScanColumnName( const CHAR * const szColumn )
         if( szColumn == rgszMSysScanColumns[iColumn] ||
             0 == UtilCmpName( szColumn, rgszMSysScanColumns[iColumn] ) )
         {
-            return fidFixedLeast+iColumn;
+            return FID( fidtypFixed, (WORD)iColumn );
         }
     }
     AssertSz( fFalse, "Didn't find MSysScanColumn" );
-    return fidTaggedMost;
+    return FID( fidtypTagged, fidlimMost );
 }
 
 
@@ -447,7 +447,7 @@ LOCAL_BROKEN ERR ErrSCANCreateMSysScan( _In_ PIB * const ppib, const IFMP ifmp )
     // make sure the columnids were assigned correctly
     for( INT iColumn = 0; iColumn < ccolMsysScan; ++iColumn )
     {
-        const COLUMNID columnid = fidFixedLeast+iColumn;
+        const COLUMNID columnid = FID( fidtypFixed, (WORD)iColumn );
         Assert( columnid == rgjccMSysScan[iColumn].columnid );
         Assert( columnid == ColumnidFromMSysScanColumnName( rgszMSysScanColumns[iColumn] ) );
     }

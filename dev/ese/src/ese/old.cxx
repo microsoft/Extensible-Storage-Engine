@@ -604,23 +604,23 @@ LOCAL const CHAR        szOLD[]                         = "MSysDefrag2";
 
 LOCAL __int64 zero = 0;
 
-LOCAL const FID         fidOLDObjidFDP                  = fidFixedLeast;
-LOCAL const FID         fidOLDStatus                    = fidFixedLeast+1;
-LOCAL const FID         fidOLDPassStartDateTime         = fidFixedLeast+2;
-LOCAL const FID         fidOLDPassElapsedSeconds        = fidFixedLeast+3;
-LOCAL const FID         fidOLDPassInvocations           = fidFixedLeast+4;
-LOCAL const FID         fidOLDPassPagesVisited          = fidFixedLeast+5;
-LOCAL const FID         fidOLDPassPagesFreed            = fidFixedLeast+6;
-LOCAL const FID         fidOLDPassPartialMerges         = fidFixedLeast+7;
-LOCAL const FID         fidOLDTotalPasses               = fidFixedLeast+8;
-LOCAL const FID         fidOLDTotalElapsedSeconds       = fidFixedLeast+9;
-LOCAL const FID         fidOLDTotalInvocations          = fidFixedLeast+10;
-LOCAL const FID         fidOLDTotalDefragDays           = fidFixedLeast+11;
-LOCAL const FID         fidOLDTotalPagesVisited         = fidFixedLeast+12;
-LOCAL const FID         fidOLDTotalPagesFreed           = fidFixedLeast+13;
-LOCAL const FID         fidOLDTotalPartialMerges        = fidFixedLeast+14;
+LOCAL const FID         fidOLDObjidFDP                  = FID( fidtypFixed, 0 );
+LOCAL const FID         fidOLDStatus                    = FID( fidtypFixed, 1 );
+LOCAL const FID         fidOLDPassStartDateTime         = FID( fidtypFixed, 2 );
+LOCAL const FID         fidOLDPassElapsedSeconds        = FID( fidtypFixed, 3 );
+LOCAL const FID         fidOLDPassInvocations           = FID( fidtypFixed, 4 );
+LOCAL const FID         fidOLDPassPagesVisited          = FID( fidtypFixed, 5 );
+LOCAL const FID         fidOLDPassPagesFreed            = FID( fidtypFixed, 6 );
+LOCAL const FID         fidOLDPassPartialMerges         = FID( fidtypFixed, 7 );
+LOCAL const FID         fidOLDTotalPasses               = FID( fidtypFixed, 8 );
+LOCAL const FID         fidOLDTotalElapsedSeconds       = FID( fidtypFixed, 9 );
+LOCAL const FID         fidOLDTotalInvocations          = FID( fidtypFixed, 10 );
+LOCAL const FID         fidOLDTotalDefragDays           = FID( fidtypFixed, 11 );
+LOCAL const FID         fidOLDTotalPagesVisited         = FID( fidtypFixed, 12 );
+LOCAL const FID         fidOLDTotalPagesFreed           = FID( fidtypFixed, 13 );
+LOCAL const FID         fidOLDTotalPartialMerges        = FID( fidtypFixed, 14 );
 
-LOCAL const FID         fidOLDCurrentKey                = fidTaggedLeast;
+LOCAL const FID         fidOLDCurrentKey                = FID( fidtypTagged, 0 );
 
 LOCAL const CPG         cpgOLDUpdateBookmarkThreshold   = 500;      // number of pages to clean before updating catalog
 
@@ -1043,7 +1043,7 @@ ERR RECCHECKFINALIZE<TDelta>::operator()( const KEYDATAFLAGS& kdf, const PGNO pg
     }
 
     //  NULL bit is not set: column is NULL
-    const UINT  ifid            = m_fid - fidFixedLeast;
+    const UINT  ifid            = m_fid.IndexOf( fidtypFixed );
     const BYTE  *prgbitNullity  = prec->PbFixedNullBitMap() + ifid/8;
     if ( FFixedNullBit( prgbitNullity, ifid ) )
     {
@@ -2266,7 +2266,7 @@ LOCAL ERR ErrOLDCheckForFinalize(
         //  in a table, OLD will only look at the first one
         //
         const FID   fidLast = ptdb->FidFixedLast();
-        for( FID fid = fidFixedLeast; fid <= fidLast; ++fid )
+        for( FID fid = FID( fidtypFixed, fidlimLeast ); fid <= fidLast; ++fid )
         {
             const BOOL          fTemplateColumn = ptdb->FFixedTemplateColumn( fid );
             const FIELD * const pfield          = ptdb->PfieldFixed( ColumnidOfFid( fid, fTemplateColumn ) );
@@ -4432,17 +4432,17 @@ HandleError:
 
 const CHAR OLD2_STATUS::s_szOLD2[] = "MSysOLD2";
 
-const FID   OLD2_STATUS::s_fidOLD2ObjidTable    = fidFixedLeast;
-const FID   OLD2_STATUS::s_fidOLD2ObjidFDP      = fidFixedLeast+1;
-const FID   OLD2_STATUS::s_fidOLD2StartDateTime = fidFixedLeast+2;
-const FID   OLD2_STATUS::s_fidOLD2PagesVisited  = fidFixedLeast+3;
-const FID   OLD2_STATUS::s_fidOLD2PagesFreed    = fidFixedLeast+4;
-const FID   OLD2_STATUS::s_fidOLD2PartialMerges = fidFixedLeast+5;
-const FID   OLD2_STATUS::s_fidOLD2PageMoves     = fidFixedLeast+6;
-const FID   OLD2_STATUS::s_fidOLD2UpdateTime    = fidFixedLeast+7;
+const FID   OLD2_STATUS::s_fidOLD2ObjidTable    = FID( fidtypFixed, 0 );
+const FID   OLD2_STATUS::s_fidOLD2ObjidFDP      = FID( fidtypFixed, 1 );
+const FID   OLD2_STATUS::s_fidOLD2StartDateTime = FID( fidtypFixed, 2 );
+const FID   OLD2_STATUS::s_fidOLD2PagesVisited  = FID( fidtypFixed, 3 );
+const FID   OLD2_STATUS::s_fidOLD2PagesFreed    = FID( fidtypFixed, 4 );
+const FID   OLD2_STATUS::s_fidOLD2PartialMerges = FID( fidtypFixed, 5 );
+const FID   OLD2_STATUS::s_fidOLD2PageMoves     = FID( fidtypFixed, 6 );
+const FID   OLD2_STATUS::s_fidOLD2UpdateTime    = FID( fidtypFixed, 7 );
 
-const FID   OLD2_STATUS::s_fidOLD2BookmarkKey   = fidTaggedLeast;
-const FID   OLD2_STATUS::s_fidOLD2BookmarkData  = fidTaggedLeast+1;
+const FID   OLD2_STATUS::s_fidOLD2BookmarkKey   = FID( fidtypTagged, 0 );
+const FID   OLD2_STATUS::s_fidOLD2BookmarkData  = FID( fidtypTagged, 1 );
 
 #ifndef RTM
 //  ================================================================
