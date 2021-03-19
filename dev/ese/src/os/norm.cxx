@@ -301,9 +301,9 @@ LOCAL VOID UnloadNORMFunctions()
 
 //  ================================================================
 LOCAL_BROKEN BOOL WINAPI GetNLSNotSupported(
-    IN  NLS_FUNCTION     Function,
-    IN  LCID             Locale,
-    OUT LPNLSVERSIONINFO lpVersionInformation )
+    _In_ NLS_FUNCTION       Function,
+    _In_ LCID               Locale,
+    _Out_ LPNLSVERSIONINFO  lpVersionInformation )
 //  ================================================================
 {
     Assert( NULL != lpVersionInformation );
@@ -328,9 +328,9 @@ LOCAL_BROKEN BOOL WINAPI GetNLSNotSupported(
 
 //  ================================================================
 LOCAL_BROKEN BOOL WINAPI GetNLSExNotSupported(
-    IN  NLS_FUNCTION        Function,
-    IN  LPCWSTR             LocaleName,
-    OUT LPNLSVERSIONINFOEX  lpVersionInformation )
+    _In_ NLS_FUNCTION           Function,
+    _In_ LPCWSTR                LocaleName,
+    _Out_ LPNLSVERSIONINFOEX    lpVersionInformation )
 //  ================================================================
 {
     Assert( NULL != lpVersionInformation );
@@ -356,7 +356,7 @@ LOCAL_BROKEN BOOL WINAPI GetNLSExNotSupported(
 }
 
 //  ================================================================
-ERR ErrNORMCheckLocaleName( __in INST * const pinst, __in_z PCWSTR const wszLocaleName )
+ERR ErrNORMCheckLocaleName( _In_ INST * const pinst, __in_z PCWSTR const wszLocaleName )
 //  ================================================================
 //  +
 //  Calls GetNLSVersionEx() on the locale name, to verify that it is a valid locale.
@@ -449,7 +449,7 @@ HandleError:
 
 
 //  ================================================================
-ERR ErrNORMGetSortVersion( __in_z PCWSTR wszLocaleName, __out QWORD * const pqwVersion, __out_opt SORTID * const psortID, __in const BOOL fErrorOnInvalidId )
+ERR ErrNORMGetSortVersion( __in_z PCWSTR wszLocaleName, _Out_ QWORD * const pqwVersion, __out_opt SORTID * const psortID, _In_ const BOOL fErrorOnInvalidId )
 //  ================================================================
 //
 //-
@@ -1134,9 +1134,9 @@ HandleError:
 }
 
 ERR ErrNORMLcidToLocale(
-    __in const LCID lcid,
+    _In_ const LCID lcid,
     __out_ecount( cchLocale ) PWSTR wszLocale,
-    __in ULONG cchLocale )
+    _In_ ULONG cchLocale )
 {
     ERR err = JET_errSuccess;
     DWORD errSystem = S_OK;
@@ -1239,7 +1239,7 @@ BOOL FNORMEqualsLocaleName( PCWSTR const wszLocale1, PCWSTR const wszLocale2 )
 
 ERR ErrNORMLocaleToLcid(
     __in_z PCWSTR wszLocale,
-    __out LCID *plcid )
+    _Out_ LCID *plcid )
 {
     ERR err = JET_errSuccess;
     DWORD errSystem = S_OK;

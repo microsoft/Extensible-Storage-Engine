@@ -4268,14 +4268,14 @@ HandleError:
 
 ERR
 ErrIsamGetDatabasePages(
-    __in JET_SESID                              vsesid,
-    __in JET_DBID                               vdbid,
-    __in ULONG                          pgnoStart,
-    __in ULONG                          cpg,
+    _In_ JET_SESID                              vsesid,
+    _In_ JET_DBID                               vdbid,
+    _In_ ULONG                                  pgnoStart,
+    _In_ ULONG                                  cpg,
     __out_bcount_part( cb, *pcbActual ) void *  pv,
-    __in ULONG                          cb,
-    __out ULONG *                       pcbActual,
-    __in JET_GRBIT                              grbit )
+    _In_ ULONG                                  cb,
+    _Out_ ULONG *                               pcbActual,
+    _In_ JET_GRBIT                              grbit )
 {
     ERR                 err         = JET_errSuccess;
     PIB *               ppib        = (PIB *)vsesid;
@@ -4353,14 +4353,14 @@ HandleError:
 
 // Patch a page in an online database
 ERR ErrIsamOnlinePatchDatabasePage(
-    __in JET_SESID                              vsesid,
-    __in JET_DBID                               vdbid,
-    __in ULONG                          pgno,
+    _In_ JET_SESID                              vsesid,
+    _In_ JET_DBID                               vdbid,
+    _In_ ULONG                                  pgno,
     __in_bcount(cbData) const void *            pvToken,
-    __in ULONG                          cbToken,
+    _In_ ULONG                                  cbToken,
     __in_bcount(cbData) const void *            pvData,
-    __in ULONG                          cbData,
-    __in JET_GRBIT                              grbit )
+    _In_ ULONG                                  cbData,
+    _In_ JET_GRBIT                              grbit )
 {
     ERR                 err         = JET_errSuccess;
     PIB *               ppib        = (PIB *)vsesid;
@@ -4476,8 +4476,8 @@ JETUNITTEST( IO, ErrValidateHeaderForIncrementalReseed )
 #define ENABLE_INC_RESEED_TRACING 1
 
 ERR ErrMakeIncReseedTracingNames(
-    __in IFileSystemAPI* pfsapi,
-    __in JET_PCWSTR szDatabase,
+    _In_ IFileSystemAPI* pfsapi,
+    _In_ JET_PCWSTR szDatabase,
     __in_range(cbOSFSAPI_MAX_PATHW, cbOSFSAPI_MAX_PATHW) ULONG cbIrsRawPath,
     __out_bcount_z(cbIrsRawPath) WCHAR * wszIrsRawPath,
     __in_range(cbOSFSAPI_MAX_PATHW, cbOSFSAPI_MAX_PATHW) ULONG cbIrsRawBackupPath,
@@ -5150,9 +5150,9 @@ void IRSCleanUpAllIrsResources( _In_ INST * const pinst )
 //  today it doesn't seem to be a long pole for anybody.
 
 ERR ErrIsamBeginDatabaseIncrementalReseed(
-    __in JET_INSTANCE   jinst,
-    __in JET_PCWSTR     szDatabase,
-    __in JET_GRBIT      grbit )
+    _In_ JET_INSTANCE   jinst,
+    _In_ JET_PCWSTR     szDatabase,
+    _In_ JET_GRBIT      grbit )
 {
     ERR                     err             = JET_errSuccess;
     INST* const             pinst           = (INST *)jinst;
@@ -5245,11 +5245,11 @@ HandleError:
 }
 
 LOCAL ERR ErrReadLogFileHeader(
-    __in INST*              pinst,
-    __in const TraceContext&    tc,
-    __in ULONG      gen,
-    __out IFileAPI** const  ppfapi,
-    __out LGFILEHDR** const pplgfilehdr )
+    _In_ INST*                  pinst,
+    _In_ const TraceContext&    tc,
+    _In_ ULONG                  gen,
+    _Out_ IFileAPI** const      ppfapi,
+    _Out_ LGFILEHDR** const     pplgfilehdr )
 {
     ERR                     err                                     = JET_errSuccess;
     IFileSystemAPI* const   pfsapi                                  = pinst->m_pfsapi;
@@ -5315,7 +5315,7 @@ ERR ErrIncrementalReseedFindValidAttachInfo(
     CIrsOpContext * const       pirs,
     const LGFILEHDR * const     plgfilehdr,
     const DBFILEHDR * const     pdbfilehdr,
-    __in ULONG          genFirstDivergedLog,
+    _In_ ULONG                  genFirstDivergedLog,
     ATTACHINFO * const          pattachinfoOut
     )
 {
@@ -5367,12 +5367,12 @@ HandleError:
 }
 
 ERR ErrIsamEndDatabaseIncrementalReseed(
-    __in JET_INSTANCE   jinst,
-    __in JET_PCWSTR     szDatabase,
-    __in ULONG  genMinRequired,
-    __in ULONG  genFirstDivergedLog,
-    __in ULONG  genMaxRequired,
-    __in JET_GRBIT      grbit )
+    _In_ JET_INSTANCE   jinst,
+    _In_ JET_PCWSTR     szDatabase,
+    _In_ ULONG          genMinRequired,
+    _In_ ULONG          genFirstDivergedLog,
+    _In_ ULONG          genMaxRequired,
+    _In_ JET_GRBIT      grbit )
 {
     ERR                     err                                             = JET_errSuccess;
     INST* const             pinst                                           = (INST *)jinst;
@@ -5996,13 +5996,13 @@ HandleError:
 
 ERR
 ErrIsamPatchDatabasePages(
-    __in JET_INSTANCE               jinst,
-    __in JET_PCWSTR                 szDatabase,
-    __in ULONG              pgnoStart,
-    __in ULONG              cpg,
+    _In_ JET_INSTANCE               jinst,
+    _In_ JET_PCWSTR                 szDatabase,
+    _In_ ULONG                      pgnoStart,
+    _In_ ULONG                      cpg,
     __in_bcount( cb ) const void *  pv,
-    __in ULONG              cb,
-    __in JET_GRBIT                  grbit )
+    _In_ ULONG                      cb,
+    _In_ JET_GRBIT                  grbit )
 {
     ERR                     err             = JET_errSuccess;
     INST * const            pinst           = (INST *)jinst;
@@ -6275,7 +6275,7 @@ HandleError:
 //  Zero out a BKINFO if its mark is in the specified generation
 LOCAL VOID PossiblyZeroBkinfo(
     __inout BKINFO * const pbkinfo,
-    __out LittleEndian<DBFILEHDR::BKINFOTYPE> * const pbkinfotype,
+    _Out_ LittleEndian<DBFILEHDR::BKINFOTYPE> * const pbkinfotype,
     const LONG lGeneration )
 {
     Assert( lGeneration >= pbkinfo->le_lgposMark.le_lGeneration );
@@ -6470,10 +6470,10 @@ HandleError:
 }
 
 ERR ErrIsamRBSPrepareRevert(
-    __in    JET_INSTANCE    jinst,
-    __in    JET_LOGTIME     jltRevertExpected,
-    __in    CPG             cpgCache,
-    __in    JET_GRBIT       grbit,
+    _In_    JET_INSTANCE    jinst,
+    _In_    JET_LOGTIME     jltRevertExpected,
+    _In_    CPG             cpgCache,
+    _In_    JET_GRBIT       grbit,
     _Out_   JET_LOGTIME*    pjltRevertActual )
 {
     ERR             err = JET_errSuccess;
@@ -6503,8 +6503,8 @@ HandleError:
 }
 
 ERR ErrIsamRBSExecuteRevert(
-    __in    JET_INSTANCE            jinst,
-    __in    JET_GRBIT               grbit,
+    _In_    JET_INSTANCE            jinst,
+    _In_    JET_GRBIT               grbit,
     _Out_   JET_RBSREVERTINFOMISC*  prbsrevertinfo)
 {
     ERR             err     = JET_errSuccess;
@@ -6523,7 +6523,7 @@ HandleError:
 }
 
 ERR ErrIsamRBSCancelRevert(
-    __in    JET_INSTANCE   jinst )
+    _In_    JET_INSTANCE   jinst )
 {
     INST* const     pinst   = (INST*) jinst;
 

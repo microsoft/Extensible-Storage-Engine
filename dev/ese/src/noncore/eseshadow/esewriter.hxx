@@ -103,10 +103,10 @@ public:
 
     HRESULT
     RecoverEseDatabase(
-        __in PCWSTR szOldDbName,
-        __in PCWSTR szNewDbName,
-        __in PCWSTR szLogPath,
-        __in PCWSTR szSystemPath
+        _In_ PCWSTR szOldDbName,
+        _In_ PCWSTR szNewDbName,
+        _In_ PCWSTR szLogPath,
+        _In_ PCWSTR szSystemPath
     );
 
     static EseRecoveryWriter*   m_pExWriter;                    //  singleton impelmentation.

@@ -321,19 +321,19 @@ ERR ErrBTIMultipageCleanup(
         __inout_opt PrereadInfo * const pPrereadInfo = NULL );
 
 ERR ErrBTPageMove(
-    __in FUCB * const pfucb,
-    __in const BOOKMARK& bm,
-    __in const PGNO pgnoSource,
-    __in const BOOL fLeafPage,
-    __in const ULONG fSPAllocFlags,
+    _In_ FUCB * const pfucb,
+    _In_ const BOOKMARK& bm,
+    _In_ const PGNO pgnoSource,
+    _In_ const BOOL fLeafPage,
+    _In_ const ULONG fSPAllocFlags,
     __inout BOOKMARK * const pbmNext );
-VOID BTPerformPageMove( __in MERGEPATH * const pmergePath );
+VOID BTPerformPageMove( _In_ MERGEPATH * const pmergePath );
 
 ERR ErrBTFindFragmentedRange(
-    __in FUCB * const pfucb,
-    __in const BOOKMARK& bmStart,
-    __out BOOKMARK * const pbmStart,
-    __out BOOKMARK * const pbmEnd);
+    _In_ FUCB * const pfucb,
+    _In_ const BOOKMARK& bmStart,
+    _Out_ BOOKMARK * const pbmStart,
+    _Out_ BOOKMARK * const pbmEnd);
 
 //  **************************************
 //  PREREAD FUNCTIONS
@@ -351,9 +351,9 @@ ERR ErrBTPrereadKeys(
     PIB * const                                     ppib,
     FUCB * const                                    pfucb,
     __in_ecount(ckeys) const void * const * const   rgpvKeys,
-    __in_ecount(ckeys) const ULONG * const  rgcbKeys,
+    __in_ecount(ckeys) const ULONG * const          rgcbKeys,
     const LONG                                      ckeys,
-    __out LONG * const                              pckeysPreread,
+    _Out_ LONG * const                              pckeysPreread,
     const JET_GRBIT                                 grbit );
 
 ERR ErrBTPrereadBookmarks(
@@ -361,22 +361,22 @@ ERR ErrBTPrereadBookmarks(
     FUCB * const                                    pfucb,
     __in_ecount(cbm) const BOOKMARK * const         rgbm,
     const LONG                                      cbm,
-    __out LONG * const                              pcbmPreread,
+    _Out_ LONG * const                              pcbmPreread,
     const JET_GRBIT                                 grbit );
 
 ERR ErrBTPrereadKeyRanges(
     PIB * const                                     ppib,
     FUCB * const                                    pfucb,
     __in_ecount(ckeys) const void * const * const   rgpvKeysStart,
-    __in_ecount(ckeys) const ULONG * const  rgcbKeysStart,
+    __in_ecount(ckeys) const ULONG * const          rgcbKeysStart,
     __in_ecount(ckeys) const void * const * const   rgpvKeysEnd,
-    __in_ecount(ckeys) const ULONG * const  rgcbKeysEnd,
+    __in_ecount(ckeys) const ULONG * const          rgcbKeysEnd,
     const LONG                                      ckeys,
     __deref_out_range( 0, ckeys ) LONG * const      pcRangesPreread,
-    __in const ULONG                        cPageCacheMin,
-    __in const ULONG                        cPageCacheMax,
+    _In_ const ULONG                                cPageCacheMin,
+    _In_ const ULONG                                cPageCacheMax,
     const JET_GRBIT                                 grbit,
-    __out_opt ULONG * const                 pcPageCacheActual );
+    __out_opt ULONG * const                         pcPageCacheActual );
 
 //  **************************************
 //  Tree Root Field Operations

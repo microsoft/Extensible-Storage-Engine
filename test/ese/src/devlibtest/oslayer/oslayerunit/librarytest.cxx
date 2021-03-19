@@ -374,8 +374,8 @@ HANDLE
 NTAPI
 NtCreateEvent(
     __in_opt LPSECURITY_ATTRIBUTES lpEventAttributes,
-    __in     BOOL bManualReset,
-    __in     BOOL bInitialState,
+    _In_     BOOL bManualReset,
+    _In_     BOOL bInitialState,
     __in_opt LPCWSTR lpName
     );
 

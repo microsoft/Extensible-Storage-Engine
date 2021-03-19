@@ -12,7 +12,7 @@
 
 //  Init / Term
 
-ERR ErrBFInit( __in const LONG cbPageSizeMax );
+ERR ErrBFInit( _In_ const LONG cbPageSizeMax );
 void BFTerm();
 
 //  System Parameters
@@ -60,9 +60,9 @@ void BFPurge( IFMP ifmp, PGNO pgnoFirst = pgnoNull, CPG cpg = 0 );
 //  Context - Logging / Recovery Support
 
 void BFGetBestPossibleWaypoint(
-    __in    IFMP        ifmp,
-    __in    const LONG  lgenCommitted,
-    __out   LGPOS *     plgposBestWaypoint );
+    _In_    IFMP        ifmp,
+    _In_    const LONG  lgenCommitted,
+    _Out_   LGPOS *     plgposBestWaypoint );
 void BFGetLgposOldestBegin0( IFMP ifmp, LGPOS* plgpos, LGPOS lgposOldestTrx );
 
 
@@ -338,7 +338,7 @@ LONG CbBFGetBufferSize( const LONG cbSize );
 //      cached, the other is the (potentially) dehydrated size.
 LONG CbBFBufferSize( const BFLatch* pbfl );
 LONG CbBFPageSize( const BFLatch* pbfl );
-void BFSetBufferSize( __inout BFLatch* pbfl, __in const INT cbNewSize );
+void BFSetBufferSize( __inout BFLatch* pbfl, _In_ const INT cbNewSize );
 
 //  Logging / Recovery
 
@@ -365,12 +365,12 @@ void BFRemoveUndoInfo( RCE* const prce, const LGPOS lgposModify = lgposMin );
 //  Page Patching
 
 ERR ErrBFPatchPage(
-    __in                        const IFMP      ifmp,
-    __in                        const PGNO      pgno,
+    _In_                        const IFMP      ifmp,
+    _In_                        const PGNO      pgno,
     __in_bcount( cbToken )      const void *    pvToken,
-    __in                        const INT       cbToken,
+    _In_                        const INT       cbToken,
     __in_bcount( cbPageImage )  const void *    pvPageImage,
-    __in                        const INT       cbPageImage );
+    _In_                        const INT       cbPageImage );
 
 
 // -----------------------------------------------------------------------------------------------

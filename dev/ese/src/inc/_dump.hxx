@@ -193,12 +193,12 @@ VOID DUMPPrintSig( const SIGNATURE * const psig );
 
 ERR ErrESEDUMPData( JET_SESID, JET_DBUTIL_W *pdbutil );
 
-ERR ErrDUMPHeader( INST *pinst, __in PCWSTR wszDatabase, const BOOL fVerbose );
-ERR ErrDUMPFixupHeader( INST *pinst, __in PCWSTR wszDatabase, const BOOL fVerbose );
+ERR ErrDUMPHeader( INST *pinst, _In_ PCWSTR wszDatabase, const BOOL fVerbose );
+ERR ErrDUMPFixupHeader( INST *pinst, _In_ PCWSTR wszDatabase, const BOOL fVerbose );
 
-ERR ErrDUMPCheckpoint( INST *pinst, __in PCWSTR wszCheckpoint );
-ERR ErrDUMPLog( INST *pinst, __in PCWSTR wszLog, const LONG lgenStart, const LONG lgenEnd, JET_GRBIT grbit, __in PCWSTR wszCsvDataFile );
-ERR ErrDUMPLogFromMemory( INST *pinst, __in PCWSTR wszLog, __in_bcount( cbBuffer ) void *pvBuffer, ULONG cbBuffer );
+ERR ErrDUMPCheckpoint( INST *pinst, _In_ PCWSTR wszCheckpoint );
+ERR ErrDUMPLog( INST *pinst, _In_ PCWSTR wszLog, const LONG lgenStart, const LONG lgenEnd, JET_GRBIT grbit, _In_ PCWSTR wszCsvDataFile );
+ERR ErrDUMPLogFromMemory( INST *pinst, _In_ PCWSTR wszLog, __in_bcount( cbBuffer ) void *pvBuffer, ULONG cbBuffer );
 
-ERR ErrDUMPRBSHeader( INST *pinst, __in PCWSTR wszRBS, const BOOL fVerbose );
-ERR ErrDUMPRBSPage( INST *pinst,  __in PCWSTR wszRBS, PGNO pgnoFirst, PGNO pgnoLast, const BOOL fVerbose );
+ERR ErrDUMPRBSHeader( INST *pinst, _In_ PCWSTR wszRBS, const BOOL fVerbose );
+ERR ErrDUMPRBSPage( INST *pinst,  _In_ PCWSTR wszRBS, PGNO pgnoFirst, PGNO pgnoLast, const BOOL fVerbose );

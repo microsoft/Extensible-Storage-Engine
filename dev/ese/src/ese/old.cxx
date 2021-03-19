@@ -170,29 +170,29 @@ class OLD2_STATUS
         static const CHAR * SzTableName();
 
         static ERR ErrOpenTable(
-            __in PIB * const        ppib,
+            _In_ PIB * const        ppib,
             const IFMP              ifmp,
-            __out FUCB ** const     ppfucb );
+            _Out_ FUCB ** const     ppfucb );
 
         static ERR ErrOpenOrCreateTable(
-            __in PIB * const        ppib,
+            _In_ PIB * const        ppib,
             const IFMP              ifmp,
-            __out FUCB ** const     ppfucb );
+            _Out_ FUCB ** const     ppfucb );
 
         static ERR ErrGetObjids(
-            __in PIB * const        ppib,
-            __in FUCB * const       pfucb,
-            __out OBJID * const     pobjidTable,
-            __out OBJID * const     pobjidFDP );
+            _In_ PIB * const        ppib,
+            _In_ FUCB * const       pfucb,
+            _Out_ OBJID * const     pobjidTable,
+            _Out_ OBJID * const     pobjidFDP );
 
         static ERR ErrDumpTable(
-            __in PIB * const        ppib,
+            _In_ PIB * const        ppib,
             const IFMP              ifmp );
         
         static ERR ErrSave(
-            __in PIB * const        ppib,
-            __in FUCB * const       pfucbDefrag,
-            __in const OLD2_STATUS& old2status );
+            _In_ PIB * const        ppib,
+            _In_ FUCB * const       pfucbDefrag,
+            _In_ const OLD2_STATUS& old2status );
 
         static ERR ErrInsertNewRecord(
             _In_ PIB * const        ppib,
@@ -200,14 +200,14 @@ class OLD2_STATUS
             _In_ const OLD2_STATUS& old2status );
 
         static ERR ErrLoad(
-            __in PIB * const        ppib,
-            __in FUCB * const       pfucbDefrag,
-            __in OLD2_STATUS&       old2status );
+            _In_ PIB * const        ppib,
+            _In_ FUCB * const       pfucbDefrag,
+            _In_ OLD2_STATUS&       old2status );
 
         static ERR ErrDelete(
-            __in PIB * const        ppib,
-            __in FUCB * const       pfucbDefrag,
-            __in const OLD2_STATUS& old2status );
+            _In_ PIB * const        ppib,
+            _In_ FUCB * const       pfucbDefrag,
+            _In_ const OLD2_STATUS& old2status );
 
     public:
         CPG CpgVisited() const      { return m_cpgVisited; }
@@ -269,34 +269,34 @@ class OLD2_STATUS
         
     private:
         static ERR ErrDumpOneRecord_(
-            __in PIB * const ppib,
-            __in FUCB * const pfucb );
+            _In_ PIB * const ppib,
+            _In_ FUCB * const pfucb );
         
         static ERR ErrCreateTable_(
-            __in PIB * const ppib,
+            _In_ PIB * const ppib,
             const IFMP ifmp );
         
         static ERR ErrSetLongLong_(
-            __in PIB * const ppib,
-            __in FUCB * const pfucb,
+            _In_ PIB * const ppib,
+            _In_ FUCB * const pfucb,
             const FID fid,
             const __int64 qwValue );
         static ERR ErrGetLongLong_(
-            __in PIB * const ppib,
-            __in FUCB * const pfucb,
+            _In_ PIB * const ppib,
+            _In_ FUCB * const pfucb,
             const FID fid,
-            __out __int64 * const pqwValue );
+            _Out_ __int64 * const pqwValue );
         
         static ERR ErrSetLong_(
-            __in PIB * const ppib,
-            __in FUCB * const pfucb,
+            _In_ PIB * const ppib,
+            _In_ FUCB * const pfucb,
             const FID fid,
             const LONG lValue );
         static ERR ErrGetLong_(
-            __in PIB * const ppib,
-            __in FUCB * const pfucb,
+            _In_ PIB * const ppib,
+            _In_ FUCB * const pfucb,
             const FID fid,
-            __out LONG * const plValue );
+            _Out_ LONG * const plValue );
         
         static ERR ErrSeek_(
             _In_ PIB * const        ppib,
@@ -304,15 +304,15 @@ class OLD2_STATUS
             _In_ const OLD2_STATUS& old2status );
 
         static ERR ErrCheckCurrency_(
-            __in PIB * const        ppib,
-            __in FUCB * const       pfucbDefrag,
-            __in const OLD2_STATUS& old2status );
+            _In_ PIB * const        ppib,
+            _In_ FUCB * const       pfucbDefrag,
+            _In_ const OLD2_STATUS& old2status );
 
 #ifndef RTM
     private:
         static VOID Test();
-        static ERR ErrLoadAndCheck( __in PIB * const ppib, __in FUCB * const pfucb, const OLD2_STATUS& old2status );
-        static ERR ErrTestTable( __in PIB * const ppib, __in FUCB * const pfucb );
+        static ERR ErrLoadAndCheck( _In_ PIB * const ppib, _In_ FUCB * const pfucb, const OLD2_STATUS& old2status );
+        static ERR ErrTestTable( _In_ PIB * const ppib, _In_ FUCB * const pfucb );
 #endif
 };
 
@@ -645,10 +645,10 @@ LOCAL VOID OLDAssertLongLongColumn( const FID fid )
 
 //  ================================================================
 LOCAL ERR ErrOLDRetrieveLongLongColumn(
-    __in PIB * const ppib,
-    __in FUCB * const pfucb,
+    _In_ PIB * const ppib,
+    _In_ FUCB * const pfucb,
     const FID fid,
-    __out __int64 * const pValue)
+    _Out_ __int64 * const pValue)
 //  ================================================================
 {
     OLDAssertLongLongColumn( fid );
@@ -676,10 +676,10 @@ HandleError:
 
 //  ================================================================
 LOCAL ERR ErrOLDSetLongLongColumn(
-    __in PIB * const ppib,
-    __in FUCB * const pfucb,
+    _In_ PIB * const ppib,
+    _In_ FUCB * const pfucb,
     const FID fid,
-    __in __int64 value)
+    _In_ __int64 value)
 //  ================================================================
 //
 // NOTE: this function does NOT call IsamPrepareUpdate. The cursor
@@ -708,8 +708,8 @@ HandleError:
 
 //  ================================================================
 LOCAL ERR ErrOLDIncrementLongLongColumn(
-    __in PIB * const ppib,
-    __in FUCB * const pfucb,
+    _In_ PIB * const ppib,
+    _In_ FUCB * const pfucb,
     const FID fid,
     const __int64 delta)
 //  ================================================================
@@ -747,8 +747,8 @@ const INT cchColumnNameOLDDump = 20;
 
 //  ================================================================
 ERR ErrOLDDumpLongColumn(
-    __in PIB * const ppib,
-    __in FUCB * const pfucb,
+    _In_ PIB * const ppib,
+    _In_ FUCB * const pfucb,
     const FID fid,
     const WCHAR * const szColumn)
 //  ================================================================
@@ -775,8 +775,8 @@ HandleError:
 
 //  ================================================================
 ERR ErrOLDDumpLongLongColumn(
-    __in PIB * const ppib,
-    __in FUCB * const pfucb,
+    _In_ PIB * const ppib,
+    _In_ FUCB * const pfucb,
     const FID fid,
     const WCHAR * const szColumn)
 //  ================================================================
@@ -797,8 +797,8 @@ HandleError:
 
 //  ================================================================
 ERR ErrOLDDumpFileTimeColumn(
-    __in PIB * const ppib,
-    __in FUCB * const pfucb,
+    _In_ PIB * const ppib,
+    _In_ FUCB * const pfucb,
     const FID fid,
     const WCHAR * const szColumn)
 //  ================================================================
@@ -860,7 +860,7 @@ HandleError:
 }
 
 //  ================================================================
-ERR ErrOLDDumpMSysDefrag( __in PIB * const ppib, const IFMP ifmp )
+ERR ErrOLDDumpMSysDefrag( _In_ PIB * const ppib, const IFMP ifmp )
 //  ================================================================
 {
     ERR err;
@@ -1158,7 +1158,7 @@ ERR RECCHECKDELETELV::operator()( const KEYDATAFLAGS& kdf, const PGNO pgno )
 //  restart OLD2 for the tree with the given objidFDP
 
 ERR ErrOLD2ResumeOneTree(
-    __in PIB * const ppib,
+    _In_ PIB * const ppib,
     const IFMP ifmp,
     const OBJID objidTable,
     const OBJID objidFDP,
@@ -1208,7 +1208,7 @@ HandleError:
 
 //  look through MSysOLD2 and restart OLD2 for any tables found in there
 
-ERR ErrOLD2Resume( __in PIB * const ppib, const IFMP ifmp )
+ERR ErrOLD2Resume( _In_ PIB * const ppib, const IFMP ifmp )
 {
     ERR err;
     FUCB * pfucb = pfucbNil;
@@ -1475,9 +1475,9 @@ INLINE BOOL FOLDContinueTree( const FUCB * pfucb )
 
 //  ================================================================
 LOCAL ERR ErrOLDStatusUpdate(
-    __in PIB * const                    ppib,
-    __in FUCB * const               pfucbDefrag,
-    __in DEFRAG_STATUS&             defragstat )
+    _In_ PIB * const                    ppib,
+    _In_ FUCB * const               pfucbDefrag,
+    _In_ DEFRAG_STATUS&             defragstat )
 //  ================================================================
 {
     ERR                         err;
@@ -1566,8 +1566,8 @@ HandleError:
 
 //  ================================================================
 LOCAL ERR ErrOLDLogResumeEvent(
-    __in PIB * const                ppib,
-    __in FUCB * const               pfucbDefrag)
+    _In_ PIB * const                ppib,
+    _In_ FUCB * const               pfucbDefrag)
 //  ================================================================
 {
     ERR err;
@@ -1633,9 +1633,9 @@ HandleError:
 
 //  ================================================================
 LOCAL ERR ErrOLDStatusResumePass(
-    __in PIB * const                ppib,
-    __in FUCB * const               pfucbDefrag,
-    __in DEFRAG_STATUS&             defragstat )
+    _In_ PIB * const                ppib,
+    _In_ FUCB * const               pfucbDefrag,
+    _In_ DEFRAG_STATUS&             defragstat )
 //  ================================================================
 {
     ERR                         err;
@@ -1679,9 +1679,9 @@ HandleError:
 
 //  ================================================================
 LOCAL ERR ErrOLDStatusNewPass(
-    __in PIB * const                ppib,
-    __in FUCB * const               pfucbDefrag,
-    __in DEFRAG_STATUS&             defragstat )
+    _In_ PIB * const                ppib,
+    _In_ FUCB * const               pfucbDefrag,
+    _In_ DEFRAG_STATUS&             defragstat )
 //  ================================================================
 {
     ERR                         err;
@@ -1740,8 +1740,8 @@ HandleError:
 
 //  ================================================================
 LOCAL ERR ErrOLDLogCompletionEvent(
-    __in PIB * const                    ppib,
-    __in FUCB * const               pfucbDefrag,
+    _In_ PIB * const                    ppib,
+    _In_ FUCB * const               pfucbDefrag,
     const MessageId             messageId)
 //  ================================================================
 {
@@ -1836,9 +1836,9 @@ HandleError:
 
 //  ================================================================
 LOCAL ERR ErrOLDStatusCompletedPass(
-    __in PIB * const                ppib,
-    __in FUCB * const               pfucbDefrag,
-    __in DEFRAG_STATUS&             defragstat )
+    _In_ PIB * const                ppib,
+    _In_ FUCB * const               pfucbDefrag,
+    _In_ DEFRAG_STATUS&             defragstat )
 //  ================================================================
 {
     ERR                         err;
@@ -3756,8 +3756,8 @@ VOID OLD2_STATUS::SetBookmark( const BOOKMARK& bm )
 
 //  ================================================================
 ERR OLD2_STATUS::ErrSetLongLong_(
-    __in PIB * const ppib,
-    __in FUCB * const pfucb,
+    _In_ PIB * const ppib,
+    _In_ FUCB * const pfucb,
     const FID fid,
     const __int64 qwValue )
 //  ================================================================
@@ -3786,10 +3786,10 @@ HandleError:
 
 //  ================================================================
 ERR OLD2_STATUS::ErrGetLongLong_(
-    __in PIB * const ppib,
-    __in FUCB * const pfucb,
+    _In_ PIB * const ppib,
+    _In_ FUCB * const pfucb,
     const FID fid,
-    __out __int64 * const pqwValue )
+    _Out_ __int64 * const pqwValue )
 //  ================================================================
 {
     ERR err;
@@ -3815,8 +3815,8 @@ HandleError:
 
 //  ================================================================
 ERR OLD2_STATUS::ErrSetLong_(
-    __in PIB * const ppib,
-    __in FUCB * const pfucb,
+    _In_ PIB * const ppib,
+    _In_ FUCB * const pfucb,
     const FID fid,
     const LONG lValue )
 //  ================================================================
@@ -3845,10 +3845,10 @@ HandleError:
 
 //  ================================================================
 ERR OLD2_STATUS::ErrGetLong_(
-    __in PIB * const ppib,
-    __in FUCB * const pfucb,
+    _In_ PIB * const ppib,
+    _In_ FUCB * const pfucb,
     const FID fid,
-    __out LONG * const plValue )
+    _Out_ LONG * const plValue )
 //  ================================================================
 {
     ERR err;
@@ -3874,9 +3874,9 @@ HandleError:
 
 //  ================================================================
 ERR OLD2_STATUS::ErrSeek_(
-    __in PIB * const            ppib,
-    __in FUCB * const           pfucbDefrag,
-    __in const OLD2_STATUS&     old2status )
+    _In_ PIB * const            ppib,
+    _In_ FUCB * const           pfucbDefrag,
+    _In_ const OLD2_STATUS&     old2status )
 //  ================================================================
 //
 //  Find the appropriate record in MSysDefrag for the given old2status.
@@ -3910,9 +3910,9 @@ HandleError:
 
 //  ================================================================
 ERR OLD2_STATUS::ErrCheckCurrency_(
-    __in PIB * const        ppib,
-    __in FUCB * const       pfucbDefrag,
-    __in const OLD2_STATUS& old2status )
+    _In_ PIB * const        ppib,
+    _In_ FUCB * const       pfucbDefrag,
+    _In_ const OLD2_STATUS& old2status )
 //  ================================================================
 //
 //  Make sure that pfucbDefrag is located on the record associated
@@ -3939,7 +3939,7 @@ HandleError:
 
 //  ================================================================
 ERR OLD2_STATUS::ErrCreateTable_(
-    __in PIB * const ppib,
+    _In_ PIB * const ppib,
     const IFMP ifmp )
 //  ================================================================
 {
@@ -4029,7 +4029,7 @@ HandleError:
 }
 
 //  ================================================================
-ERR OLD2_STATUS::ErrDumpOneRecord_( __in PIB * const ppib, __in FUCB * const pfucb )
+ERR OLD2_STATUS::ErrDumpOneRecord_( _In_ PIB * const ppib, _In_ FUCB * const pfucb )
 //  ================================================================
 {
     ERR err;
@@ -4054,9 +4054,9 @@ HandleError:
 
 //  ================================================================
 ERR OLD2_STATUS::ErrLoad(
-    __in PIB * const    ppib,
-    __in FUCB * const   pfucbDefrag,
-    __in OLD2_STATUS&   old2status )
+    _In_ PIB * const    ppib,
+    _In_ FUCB * const   pfucbDefrag,
+    _In_ OLD2_STATUS&   old2status )
 //  ================================================================
 //
 //  Load the OLD2_STATUS fields from the table.
@@ -4138,9 +4138,9 @@ const CHAR * OLD2_STATUS::SzTableName()
 
 //  ================================================================
 ERR OLD2_STATUS::ErrOpenTable(
-    __in PIB * const        ppib,
+    _In_ PIB * const        ppib,
     const IFMP              ifmp,
-    __out FUCB ** const     ppfucb )
+    _Out_ FUCB ** const     ppfucb )
 //  ================================================================
 {
     ERR err;
@@ -4153,9 +4153,9 @@ HandleError:
 
 //  ================================================================
 ERR OLD2_STATUS::ErrOpenOrCreateTable(
-    __in PIB * const        ppib,
+    _In_ PIB * const        ppib,
     const IFMP              ifmp,
-    __out FUCB ** const     ppfucb )
+    _Out_ FUCB ** const     ppfucb )
 //  ================================================================
 {
     ERR err;
@@ -4183,10 +4183,10 @@ HandleError:
 
 //  ================================================================
 ERR OLD2_STATUS::ErrGetObjids(
-    __in PIB * const        ppib,
-    __in FUCB * const       pfucb,
-    __out OBJID * const     pobjidTable,
-    __out OBJID * const     pobjidFDP )
+    _In_ PIB * const        ppib,
+    _In_ FUCB * const       pfucb,
+    _Out_ OBJID * const     pobjidTable,
+    _Out_ OBJID * const     pobjidFDP )
 //  ================================================================
 //
 //  Given an FUCB positioned on MSysOLD2 return the objids of the
@@ -4206,9 +4206,9 @@ HandleError:
     
 //  ================================================================
 ERR OLD2_STATUS::ErrSave(
-    __in PIB * const    ppib,
-    __in FUCB * const   pfucbDefrag,
-    __in const OLD2_STATUS& old2status )
+    _In_ PIB * const    ppib,
+    _In_ FUCB * const   pfucbDefrag,
+    _In_ const OLD2_STATUS& old2status )
 //  ================================================================
 //
 //  Store the OLD2_STATUS fields in the table.
@@ -4358,9 +4358,9 @@ HandleError:
 
 //  ================================================================
 ERR OLD2_STATUS::ErrDelete(
-    __in PIB * const        ppib,
-    __in FUCB * const       pfucbDefrag,
-    __in const OLD2_STATUS& old2status )
+    _In_ PIB * const        ppib,
+    _In_ FUCB * const       pfucbDefrag,
+    _In_ const OLD2_STATUS& old2status )
 //  ================================================================
 //
 //  Delete the record for the given OLD2_STATUS
@@ -4390,7 +4390,7 @@ HandleError:
 }
 
 //  ================================================================
-ERR OLD2_STATUS::ErrDumpTable( __in PIB * const ppib, const IFMP ifmp )
+ERR OLD2_STATUS::ErrDumpTable( _In_ PIB * const ppib, const IFMP ifmp )
 //  ================================================================
 {
     ERR err;
@@ -4509,7 +4509,7 @@ VOID OLD2_STATUS::Test()
 }
 
 //  ================================================================
-ERR OLD2_STATUS::ErrLoadAndCheck( __in PIB * const ppib, __in FUCB * const pfucb, const OLD2_STATUS& old2status )
+ERR OLD2_STATUS::ErrLoadAndCheck( _In_ PIB * const ppib, _In_ FUCB * const pfucb, const OLD2_STATUS& old2status )
 //  ================================================================
 {
     ERR err;
@@ -4533,7 +4533,7 @@ HandleError:
 }
 
 //  ================================================================
-ERR OLD2_STATUS::ErrTestTable( __in PIB * const ppib, __in FUCB * const pfucb )
+ERR OLD2_STATUS::ErrTestTable( _In_ PIB * const ppib, _In_ FUCB * const pfucb )
 //  ================================================================
 {
     static bool fTested = false;

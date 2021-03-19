@@ -54,7 +54,7 @@ VOID DUMPIAttachInfo( const ATTACHINFO * const pattachinfo )
 }
 
 
-ERR ErrDUMPCheckpoint( INST *pinst, __in PCWSTR wszCheckpoint )
+ERR ErrDUMPCheckpoint( INST *pinst, _In_ PCWSTR wszCheckpoint )
 {
     Assert( pinst->m_plog );
     Assert( pinst->m_pver );
@@ -64,7 +64,7 @@ ERR ErrDUMPCheckpoint( INST *pinst, __in PCWSTR wszCheckpoint )
     return err;
 }
 
-ERR LOG::ErrLGDumpCheckpoint( __in PCWSTR wszCheckpoint )
+ERR LOG::ErrLGDumpCheckpoint( _In_ PCWSTR wszCheckpoint )
 {
     ERR         err;
     LGPOS       lgpos;
@@ -263,8 +263,8 @@ HandleError:
 LOCAL ERR ErrFindNextGen(
         INST *pinst,
         const DIRLOGGENERATIONINFO * const pDirLogGenInfo,
-        __in PCWSTR wszLogDir,
-        __in PCWSTR wszLogExt,
+        _In_ PCWSTR wszLogDir,
+        _In_ PCWSTR wszLogExt,
         LONG* plgen,
         ULONG *pcLogDigits,
         __out_bcount(cbLogFile) PWSTR wszLogFile,
@@ -501,7 +501,7 @@ LOCAL VOID LGIReportLogfilesMissing(
 }
 
 
-ERR ErrDUMPLogFromMemory( INST *pinst, __in PCWSTR wszLog, __in_bcount( cbBuffer ) void *pvBuffer, ULONG cbBuffer )
+ERR ErrDUMPLogFromMemory( INST *pinst, _In_ PCWSTR wszLog, __in_bcount( cbBuffer ) void *pvBuffer, ULONG cbBuffer )
 {
     ERR err;
     LOG::LOGDUMP_OP logdumpOp = { 0 };
@@ -523,7 +523,7 @@ ERR ErrDUMPLogFromMemory( INST *pinst, __in PCWSTR wszLog, __in_bcount( cbBuffer
 }
 
 
-ERR ErrDUMPLog( INST *pinst, __in PCWSTR wszLog, const LONG lgenStart, const LONG lgenEnd, JET_GRBIT grbit, __in PCWSTR wszCsvDataFile )
+ERR ErrDUMPLog( INST *pinst, _In_ PCWSTR wszLog, const LONG lgenStart, const LONG lgenEnd, JET_GRBIT grbit, _In_ PCWSTR wszCsvDataFile )
 {
     ERR             err             = JET_errSuccess;
     ERR             errDump         = JET_errSuccess;
@@ -934,7 +934,7 @@ HandleError:
 
 extern const char * szUnknown;
 
-ERR LOG::ErrLGDumpLog( __in PCWSTR wszLog, LOGDUMP_OP * const plogdumpOp, LGFILEHDR * const plgfilehdr, XECHECKSUM *pLastSegChecksum )
+ERR LOG::ErrLGDumpLog( _In_ PCWSTR wszLog, LOGDUMP_OP * const plogdumpOp, LGFILEHDR * const plgfilehdr, XECHECKSUM *pLastSegChecksum )
 {
     ERR                 err;
     WCHAR               wszPathJetChkLog[ IFileSystemAPI::cchPathMax ];

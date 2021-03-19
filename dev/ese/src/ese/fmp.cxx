@@ -2431,7 +2431,7 @@ PdbfilehdrReadWrite FMP::PdbfilehdrUpdateable()
     return m_dbfilehdrLock.GetRWHeader();
 }
 
-ERR FMP::ErrSetPdbfilehdr( DBFILEHDR_FIX * pdbfilehdr, __out DBFILEHDR ** ppdbfilehdr )
+ERR FMP::ErrSetPdbfilehdr( DBFILEHDR_FIX * pdbfilehdr, _Out_ DBFILEHDR ** ppdbfilehdr )
 {
     ERR err = JET_errSuccess;
 

@@ -13,14 +13,14 @@ namespace PagePatching
     void TryPatchFromCopy( const IFMP ifmp, const PGNO pgno, void *pv, SHORT *perr );
 
     ERR ErrDoPatch(
-        __in const IFMP                     ifmp,
-        __in const PGNO                     pgno,
+        _In_ const IFMP                     ifmp,
+        _In_ const PGNO                     pgno,
         __inout BFLatch * const             pbfl,
         __in_bcount(cbToken) const void *   pvToken,
-        __in ULONG                  cbToken,
+        _In_ ULONG                          cbToken,
         __in_bcount(cbData) const void *    pvData,
-        __in ULONG                  cbData,
-        __out BOOL *                        pfPatched);
+        _In_ ULONG                          cbData,
+        _Out_ BOOL *                        pfPatched);
 
     ERR ErrPRLInit(
         _In_ INST* pinst );

@@ -686,7 +686,7 @@ void OSTraceResumeGC_()
 
 //  Trace Formatting
 
-const char* OSFormat_( __format_string const char* const szFormat, __in va_list arglist )
+const char* OSFormat_( __format_string const char* const szFormat, _In_ va_list arglist )
 {
     const size_t    cchLocalMax                 = 256;
     char            szLocal[ cchLocalMax ];
@@ -771,7 +771,7 @@ const char* OSFormat_( __format_string const char* const szFormat, __in va_list 
     return szInfoString;
 }
 
-const WCHAR* OSFormatW_( __format_string const WCHAR* const wszFormat, __in va_list arglist )
+const WCHAR* OSFormatW_( __format_string const WCHAR* const wszFormat, _In_ va_list arglist )
 {
     const size_t    cchLocalMax                 = 256;
     WCHAR           wszLocal[ cchLocalMax ];
@@ -1562,7 +1562,7 @@ const BYTE * CFastTraceLogBuffer::s_pbPrev;
 //  needs the TICK base / tickBase for the buffer.  tickBase and ptick (out parameter) are optional as
 //  perhaps consumer just needs to move past TICK info / data.
 
-const BYTE * CFastTraceLogBuffer::PbFTLBParseTraceTick( __in const BYTE fTickInfo, const BYTE * pbTrace, __in const TICK tickBase, __out TICK * const ptick )
+const BYTE * CFastTraceLogBuffer::PbFTLBParseTraceTick( _In_ const BYTE fTickInfo, const BYTE * pbTrace, _In_ const TICK tickBase, _Out_ TICK * const ptick )
 {
     TICK tickTrace = 0;
 
@@ -1602,7 +1602,7 @@ const BYTE * CFastTraceLogBuffer::PbFTLBParseTraceTick( __in const BYTE fTickInf
 //  This parses the header, returning the FTL Trace ID / pftltid, and the TICK time of the
 //  trace.
 
-ERR CFastTraceLogBuffer::ErrFTLBParseTraceHeader( const BYTE * pbTrace, __out FTLTID * const pftltid, __in const TICK tickBase, __out TICK * const ptick )
+ERR CFastTraceLogBuffer::ErrFTLBParseTraceHeader( const BYTE * pbTrace, _Out_ FTLTID * const pftltid, _In_ const TICK tickBase, _Out_ TICK * const ptick )
 {
 #ifdef DEBUG
     //  not strictly safe to trust (b/c if you init two readers at once, they'll intermingle 
@@ -1662,7 +1662,7 @@ ERR CFastTraceLogBuffer::ErrFTLBParseTraceHeader( const BYTE * pbTrace, __out FT
 
 //  This parses out the User Data from the trace.
 
-ERR CFastTraceLogBuffer::ErrFTLBParseTraceData( const BYTE * pbTrace, __in const FTLTID ftltid, __in const FTLTDESC ftltdesc, __out ULONG * pcbTraceData, __out const BYTE ** ppbTraceData )
+ERR CFastTraceLogBuffer::ErrFTLBParseTraceData( const BYTE * pbTrace, _In_ const FTLTID ftltid, _In_ const FTLTDESC ftltdesc, _Out_ ULONG * pcbTraceData, _Out_ const BYTE ** ppbTraceData )
 {
     Assert( 0 == ( ~( mskHeaderShortTraceID | mskHeaderTick ) & pbTrace[0] ) );
 
@@ -1888,7 +1888,7 @@ ERR CFastTraceLog::ErrFTLICheckVersions()
 
 //  Initializes the FTL for writing.
 
-ERR CFastTraceLog::ErrFTLInitWriter( __in_z const WCHAR * wszTraceLogFile, IOREASON * pior, __in const FTLInitFlags ftlif )
+ERR CFastTraceLog::ErrFTLInitWriter( __in_z const WCHAR * wszTraceLogFile, IOREASON * pior, _In_ const FTLInitFlags ftlif )
 {
     ERR err = JET_errSuccess;
     TraceContextScope tcFtl;
@@ -2087,7 +2087,7 @@ HandleError:
 //  the FTL trace files header, and enumerating through the trace records.  Note this object does not need to be
 //  deleted, simply calling CFastTraceLog::FTLTerm() cleans up and invalidates this object.
 
-ERR CFastTraceLog::ErrFTLInitReader( __in_z const WCHAR * wszTraceLogFile, IOREASON * pior, __in const FTLInitFlags ftlif, __out CFTLReader ** ppftlr )
+ERR CFastTraceLog::ErrFTLInitReader( __in_z const WCHAR * wszTraceLogFile, IOREASON * pior, _In_ const FTLInitFlags ftlif, _Out_ CFTLReader ** ppftlr )
 {
     ERR err = JET_errSuccess;
     TraceContextScope tcFtl;
@@ -2372,7 +2372,7 @@ void CFastTraceLog::FTLFlushBufferComplete( const ERR           err,
     pftl->m_semBuffersInUse.Release();
 }
 
-ERR CFastTraceLog::ErrFTLIFlushBuffer( __in_bcount(cbBuffer) const BYTE * rgbBuffer, __in const INT cbBuffer, const BOOL fTermForceFlush )
+ERR CFastTraceLog::ErrFTLIFlushBuffer( __in_bcount(cbBuffer) const BYTE * rgbBuffer, _In_ const INT cbBuffer, const BOOL fTermForceFlush )
 {
 
 Retry:
@@ -2581,14 +2581,14 @@ Retry:
 }
 
 
-ERR CFastTraceLog::ErrFTLFlushBuffer( __inout void * const pvFlushBufferContext, __in_bcount(cbBuffer) const BYTE * const rgbBuffer, __in const ULONG cbBuffer )
+ERR CFastTraceLog::ErrFTLFlushBuffer( __inout void * const pvFlushBufferContext, __in_bcount(cbBuffer) const BYTE * const rgbBuffer, _In_ const ULONG cbBuffer )
 {
     CFastTraceLog * pftl = (CFastTraceLog*)pvFlushBufferContext;
 
     return pftl->ErrFTLIFlushBuffer( rgbBuffer, cbBuffer, pftl->m_fTerminating );
 }
 
-INLINE FTLTDESC CFastTraceLog::FtltdescFTLIGetDescriptor( __in const FTLTID ftltid ) const
+INLINE FTLTDESC CFastTraceLog::FtltdescFTLIGetDescriptor( _In_ const FTLTID ftltid ) const
 {
     Assert( FFTLValidFTLTID( ftltid ) );
 
@@ -2608,7 +2608,7 @@ INLINE FTLTDESC CFastTraceLog::FtltdescFTLIGetDescriptor( __in const FTLTID ftlt
     return ftltdescDefaultDescriptor;
 }
 
-ERR CFastTraceLog::ErrFTLTrace( __in const FTLTID ftltid, __in_bcount(cbTrace) const BYTE * pbTrace, __in const ULONG cbTrace, __in const TICK tickTrace )
+ERR CFastTraceLog::ErrFTLTrace( _In_ const FTLTID ftltid, __in_bcount(cbTrace) const BYTE * pbTrace, _In_ const ULONG cbTrace, _In_ const TICK tickTrace )
 {
     ERR err = JET_errSuccess;
 
@@ -2621,7 +2621,7 @@ ERR CFastTraceLog::ErrFTLTrace( __in const FTLTID ftltid, __in_bcount(cbTrace) c
     return err;
 }
 
-ERR CFastTraceLog::ErrFTLIReadBuffer( __out_bcount(cbBuffer) void * pvBuffer, __in QWORD ibOffset, __in ULONG cbBuffer )
+ERR CFastTraceLog::ErrFTLIReadBuffer( __out_bcount(cbBuffer) void * pvBuffer, _In_ QWORD ibOffset, _In_ ULONG cbBuffer )
 {
     ERR err = JET_errSuccess;
     QWORD cbFileSize = 0;
@@ -2678,7 +2678,7 @@ CFastTraceLog::CFTLReader::~CFTLReader(  )
     }
 }
 
-ERR CFastTraceLog::CFTLReader::ErrFTLIFillBuffer( __in const QWORD ibBookmarkRead )
+ERR CFastTraceLog::CFTLReader::ErrFTLIFillBuffer( _In_ const QWORD ibBookmarkRead )
 {
     ERR err = JET_errSuccess;
 

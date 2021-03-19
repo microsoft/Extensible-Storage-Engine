@@ -1358,8 +1358,8 @@ void
 MemoryFillPtr (
 #if _MSC_VER >= 1500
   __out_ecount(n)   const void **p,
-  __in const void  *d,
-  __in int          n
+  _In_ const void  *d,
+  _In_ int          n
 #else
   const void **p,
   const void  *d,

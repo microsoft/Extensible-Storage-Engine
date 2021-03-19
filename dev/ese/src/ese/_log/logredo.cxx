@@ -195,7 +195,7 @@ LOCAL VOID RebuildPageImageHeaderTrailer(
                                 const INT cbHeader,
     __in_bcount( cbTrailer )    const VOID * const pvTrailer,
                                 const INT cbTrailer,
-    __out                       VOID * const pvDest )
+    _Out_                       VOID * const pvDest )
 {
     Assert( ( cbHeader + cbTrailer ) <= g_cbPage );
 
@@ -757,14 +757,14 @@ HandleError:
 
 //  ================================================================
 ERR LOG::ErrLGIAccessPageCheckDbtimes(
-    __in    PIB             * const ppib,
-    __in    CSR             * const pcsr,
+    _In_    PIB             * const ppib,
+    _In_    CSR             * const pcsr,
             const IFMP      ifmp,
             const PGNO      pgno,
             const OBJID     objid,
             const DBTIME    dbtimeBefore,
             const DBTIME    dbtimeAfter,
-    __out   BOOL * const    pfRedoRequired )
+    _Out_   BOOL * const    pfRedoRequired )
 //  ================================================================
 //
 // Given a page and its dbtimeBefore/After latch the page and determine
@@ -3775,8 +3775,8 @@ HandleError:
 //  If the user does allow data loss, it will fix the log stream such
 //  that recovery can continue to create a clean / consistent database.
 ERR LOG::ErrLGEvaluateDestructiveCorrectiveLogOptions(
-    __in const LONG lgenBad,
-    __in const ERR errCondition     // Note: we expect ErrERRCheck() was already called on this param.
+    _In_ const LONG lgenBad,
+    _In_ const ERR errCondition     // Note: we expect ErrERRCheck() was already called on this param.
     )
 {
     ERR     err = errCondition;
@@ -8930,7 +8930,7 @@ HandleError:
 }
 
 //  ================================================================
-ERR LOG::ErrLGRIIRedoPageMove( __in PIB * const ppib, const LRPAGEMOVE * const plrpagemove )
+ERR LOG::ErrLGRIIRedoPageMove( _In_ PIB * const ppib, const LRPAGEMOVE * const plrpagemove )
 //  ================================================================
 {
     Assert( ppib );
@@ -11277,7 +11277,7 @@ ERR LOG::ErrLGRIRedoExtentFreed( const LREXTENTFREED * const plrextentfreed )
 ERR LOG::ErrLGIUpdateGenRecovering(
     const LONG              lGenRecovering,
     __out_ecount_part( dbidMax, *pcifmpsAttached ) IFMP *rgifmpsAttached,
-    __out ULONG *           pcifmpsAttached )
+    _Out_ ULONG *           pcifmpsAttached )
 {
     ERR err = JET_errSuccess;
 
@@ -14353,8 +14353,8 @@ VOID LGFakeCheckpointToLogFile( CHECKPOINT * const pcheckpointT, const LGFILEHDR
 }
 
 ERR LOG::ErrLGICheckClosedNormallyInPreviousLog(
-    __in const LONG         lGenPrevious,
-    __out BOOL *            pfCloseNormally
+    _In_ const LONG         lGenPrevious,
+    _Out_ BOOL *            pfCloseNormally
     )
 {
     ERR err = JET_errSuccess;

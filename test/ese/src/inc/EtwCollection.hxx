@@ -322,7 +322,7 @@ typedef struct _EseBfPrereadPage : EventHeader
 // NULL if the function fails. Call GetlastError() to get specifics about the error.
 //
 
-HANDLE EtwOpenTraceFile( __in PCWSTR wszFilePath );
+HANDLE EtwOpenTraceFile( _In_ PCWSTR wszFilePath );
 
 
 // EtwGetNextEvent
@@ -336,7 +336,7 @@ HANDLE EtwOpenTraceFile( __in PCWSTR wszFilePath );
 // there are no more events to be returned.
 //
 
-EtwEvent* EtwGetNextEvent( __in HANDLE handle );
+EtwEvent* EtwGetNextEvent( _In_ HANDLE handle );
 
 
 // EtwFreeEvent
@@ -346,7 +346,7 @@ EtwEvent* EtwGetNextEvent( __in HANDLE handle );
 // pEtwEvt: pointer to the event.
 //
 
-VOID EtwFreeEvent( __in EtwEvent* const pEtwEvt );
+VOID EtwFreeEvent( _In_ EtwEvent* const pEtwEvt );
 
 
 // EtwCloseTraceFile
@@ -356,6 +356,6 @@ VOID EtwFreeEvent( __in EtwEvent* const pEtwEvt );
 // handle: opaque handle returned by EtwOpenTraceFile.
 //
 
-VOID EtwCloseTraceFile( __in HANDLE handle );
+VOID EtwCloseTraceFile( _In_ HANDLE handle );
 
 #endif _ETWCOLLECTION_HXX_INCLUDED

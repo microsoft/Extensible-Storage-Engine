@@ -15,14 +15,14 @@ extern "C" {
 // apartment model.
 HRESULT __stdcall
 EseShadowInit(
-    __out EseShadowContext* pcontext
+    _Out_ EseShadowContext* pcontext
 )
 ;
 
 // Tears down the ESE shadow subsystem.
 HRESULT __stdcall
 EseShadowTerm(
-    __in EseShadowContext context
+    _In_ EseShadowContext context
 )
 ;
 
@@ -47,13 +47,13 @@ EseShadowTerm(
 //  Allows recovery to proceed in case there are missing log files.
 HRESULT __stdcall
 EseShadowCreateShadow(
-    __in EseShadowContext context,
-    __in PCWSTR szDatabaseFile,
+    _In_ EseShadowContext context,
+    _In_ PCWSTR szDatabaseFile,
     __in_opt PCWSTR szLogDirectory,
     __in_opt PCWSTR szSystemDirectory,
     __in_opt PCWSTR szEseBaseName,
-    __in BOOL fIgnoreMissingDb,
-    __in BOOL fIgnoreLostLogs
+    _In_ BOOL fIgnoreMissingDb,
+    _In_ BOOL fIgnoreLostLogs
 )
 ;
 
@@ -65,8 +65,8 @@ EseShadowCreateShadow(
 // szArbitraryFile
 HRESULT __stdcall
 EseShadowCreateSimpleShadow(
-    __in EseShadowContext context,
-    __in PCWSTR szArbitraryFile
+    _In_ EseShadowContext context,
+    _In_ PCWSTR szArbitraryFile
 )
 ;
 
@@ -78,7 +78,7 @@ EseShadowCreateSimpleShadow(
 // as d:\snapshot-nnnn.
 HRESULT __stdcall
 EseShadowMountShadow(
-    __in EseShadowContext context,
+    _In_ EseShadowContext context,
     __out_ecount( cchOutDatabasePath ) PWSTR szOutDatabasePath,
     DWORD cchOutDatabasePath,
     __out_ecount( cchOutLogPath ) PWSTR szOutLogPath,
@@ -102,13 +102,13 @@ EseShadowMountSimpleShadow(
 // Cleans up the assosicated volume shadow copies.
 HRESULT __stdcall
 EseShadowPurgeShadow(
-    __in EseShadowContext context
+    _In_ EseShadowContext context
 )
 ;
 
 // Converts a GUID to a string.
 HRESULT VssIdToString(
-    __in const VSS_ID& vssId,
+    _In_ const VSS_ID& vssId,
     __out_ecount(cch) PWSTR szStr,
     DWORD cch
 )
@@ -158,7 +158,7 @@ extern PfnVssIdToString g_pfnVssIdToString;
 #define hrEseSnapshotFuncNotPresent     (-3)
 
 inline HRESULT __stdcall DelayLoadEseShadowInit(
-    __out EseShadowContext* pcontext
+    _Out_ EseShadowContext* pcontext
 )
 {
     g_hEseShadowLib = LoadLibraryExW(
@@ -194,7 +194,7 @@ inline HRESULT __stdcall DelayLoadEseShadowInit(
 }
 
 inline HRESULT __stdcall DelayLoadEseShadowTerm(
-    __in EseShadowContext context
+    _In_ EseShadowContext context
 )
 {
     if ( g_pfnEseShadowTerm )
@@ -205,13 +205,13 @@ inline HRESULT __stdcall DelayLoadEseShadowTerm(
 }
 
 inline HRESULT __stdcall DelayLoadEseShadowCreateShadow(
-    __in EseShadowContext context,
-    __in PCWSTR szDatabaseFile,
+    _In_ EseShadowContext context,
+    _In_ PCWSTR szDatabaseFile,
     __in_opt PCWSTR szLogDirectory,
     __in_opt PCWSTR szSystemDirectory,
     __in_opt PCWSTR szEseBaseName,
-    __in BOOL fIgnoreMissingDb,
-    __in BOOL fIgnoreLostLogs
+    _In_ BOOL fIgnoreMissingDb,
+    _In_ BOOL fIgnoreLostLogs
 )
 {
     if ( g_pfnEseShadowCreateShadow )
@@ -222,8 +222,8 @@ inline HRESULT __stdcall DelayLoadEseShadowCreateShadow(
 }
 
 inline HRESULT __stdcall DelayLoadEseShadowCreateSimpleShadow(
-    __in EseShadowContext context,
-    __in PCWSTR szArbitraryFile
+    _In_ EseShadowContext context,
+    _In_ PCWSTR szArbitraryFile
 )
 {
     if ( g_pfnEseShadowCreateSimpleShadow )
@@ -236,7 +236,7 @@ inline HRESULT __stdcall DelayLoadEseShadowCreateSimpleShadow(
 // Mounts the specified shadow to the file system.
 // This flavour replays log files to provide a clean database.
 inline HRESULT __stdcall DelayLoadEseShadowMountShadow(
-    __in EseShadowContext context,
+    _In_ EseShadowContext context,
     __out_ecount( cchOutDatabasePath ) PWSTR szOutDatabasePath,
     DWORD cchOutDatabasePath,
     __out_ecount( cchOutLogPath ) PWSTR szOutLogPath,
@@ -268,7 +268,7 @@ inline HRESULT __stdcall DelayLoadEseShadowMountSimpleShadow(
 }
 
 inline HRESULT __stdcall DelayLoadEseShadowPurgeShadow(
-    __in EseShadowContext context
+    _In_ EseShadowContext context
 )
 {
     if ( g_pfnEseShadowPurgeShadow )
@@ -279,7 +279,7 @@ inline HRESULT __stdcall DelayLoadEseShadowPurgeShadow(
 }
 
 inline HRESULT DelayLoadVssIdToString(
-    __in const VSS_ID& vssId,
+    _In_ const VSS_ID& vssId,
     __out_ecount(cch) PWSTR szStr,
     DWORD cch
 )

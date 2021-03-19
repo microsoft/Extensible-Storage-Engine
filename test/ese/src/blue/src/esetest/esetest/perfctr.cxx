@@ -307,12 +307,12 @@ Cleanup:
 
 BOOL
 IPerfCountersAddCounter(
-    __in EsePerfCounterQuery*   pcq,
-    __in PCWSTR                 wszComputerName,
-    __in PCWSTR                 wszPerfObject,
-    __in PCWSTR                 wszPerfCounter,
-    __in PCWSTR                 wszInstance,
-    __in BOOL                   fLangNeutral
+    _In_ EsePerfCounterQuery*   pcq,
+    _In_ PCWSTR                 wszComputerName,
+    _In_ PCWSTR                 wszPerfObject,
+    _In_ PCWSTR                 wszPerfCounter,
+    _In_ PCWSTR                 wszInstance,
+    _In_ BOOL                   fLangNeutral
 )
 {
     if ( !pcq || pcq->fCollecting ){
@@ -415,11 +415,11 @@ Cleanup:
 
 BOOL
 PerfCountersAddLnCounterA(
-    __in HANDLE     hQuery,
+    _In_ HANDLE     hQuery,
     __in_opt PCSTR  szComputerName,
-    __in PCSTR      szPerfObject,
-    __in PCSTR      szPerfCounter,
-    __in PCSTR      szInstance
+    _In_ PCSTR      szPerfObject,
+    _In_ PCSTR      szPerfCounter,
+    _In_ PCSTR      szInstance
 )
 {
     WCHAR* wszComputerName      = EsetestWidenString( __FUNCTION__, szComputerName );
@@ -441,11 +441,11 @@ PerfCountersAddLnCounterA(
 
 BOOL
 PerfCountersAddLnCounterW(
-    __in HANDLE     hQuery,
+    _In_ HANDLE     hQuery,
     __in_opt PCWSTR wszComputerName,
-    __in PCWSTR     wszPerfObject,
-    __in PCWSTR     wszPerfCounter,
-    __in PCWSTR     wszInstance
+    _In_ PCWSTR     wszPerfObject,
+    _In_ PCWSTR     wszPerfCounter,
+    _In_ PCWSTR     wszInstance
 )
 {
     return IPerfCountersAddCounter( ( EsePerfCounterQuery* )hQuery,
@@ -458,11 +458,11 @@ PerfCountersAddLnCounterW(
 
 BOOL
 PerfCountersAddCounterA(
-    __in HANDLE     hQuery,
+    _In_ HANDLE     hQuery,
     __in_opt PCSTR  szComputerName,
-    __in PCSTR      szPerfObject,
-    __in PCSTR      szPerfCounter,
-    __in PCSTR      szInstance
+    _In_ PCSTR      szPerfObject,
+    _In_ PCSTR      szPerfCounter,
+    _In_ PCSTR      szInstance
 )
 {
     WCHAR* wszComputerName      = EsetestWidenString( __FUNCTION__, szComputerName );
@@ -484,11 +484,11 @@ PerfCountersAddCounterA(
 
 BOOL
 PerfCountersAddCounterW(
-    __in HANDLE     hQuery,
+    _In_ HANDLE     hQuery,
     __in_opt PCWSTR wszComputerName,
-    __in PCWSTR     wszPerfObject,
-    __in PCWSTR     wszPerfCounter,
-    __in PCWSTR     wszInstance
+    _In_ PCWSTR     wszPerfObject,
+    _In_ PCWSTR     wszPerfCounter,
+    _In_ PCWSTR     wszInstance
 )
 {
     return IPerfCountersAddCounter( ( EsePerfCounterQuery* )hQuery,
@@ -501,9 +501,9 @@ PerfCountersAddCounterW(
 
 BOOL
 IPerfCountersGetCounterValues(
-    __in EsePerfCounterQuery*   pcq,
+    _In_ EsePerfCounterQuery*   pcq,
     __out_opt double*           pData,
-    __in BOOL                   fRetry
+    _In_ BOOL                   fRetry
 )
 {
     BOOL fSuccess                           = FALSE;
@@ -564,7 +564,7 @@ Cleanup:
 
 BOOL
 IPerfCountersGetCounterValuesRaw(
-    __in EsePerfCounterQuery*   pcq,
+    _In_ EsePerfCounterQuery*   pcq,
     __out_opt ULONG64*          pData1,
     __out_opt ULONG64*          pData2
 )
@@ -623,7 +623,7 @@ Cleanup:
 
 BOOL
 PerfCountersGetCounterValues(
-    __in HANDLE         hQuery,
+    _In_ HANDLE         hQuery,
     __out_opt double*   pData
 )
 {
@@ -653,7 +653,7 @@ Cleanup:
 
 BOOL
 PerfCountersGetCounterValuesRaw(
-    __in HANDLE         hQuery,
+    _In_ HANDLE         hQuery,
     __out_opt ULONG64*  pData1,
     __out_opt ULONG64*  pData2
 )
@@ -815,8 +815,8 @@ Collect:
 
 BOOL
 PerfCountersStartCollectingStatsA(
-    __in HANDLE             hQuery,
-    __in DWORD              dwPeriod,
+    _In_ HANDLE             hQuery,
+    _In_ DWORD              dwPeriod,
     __in_opt JET_GRBIT*     pgrbitStats,
     __in_opt PCSTR          szLogFile
 )
@@ -830,8 +830,8 @@ PerfCountersStartCollectingStatsA(
 
 BOOL
 PerfCountersStartCollectingStatsW(
-    __in HANDLE             hQuery,
-    __in DWORD              dwPeriod,
+    _In_ HANDLE             hQuery,
+    _In_ DWORD              dwPeriod,
     __in_opt JET_GRBIT*     pgrbitStats,
     __in_opt PCWSTR         wszLogFile
 )
@@ -933,7 +933,7 @@ Cleanup:
 
 BOOL
 PerfCountersRetrieveStats(
-    __in HANDLE         hQuery,
+    _In_ HANDLE         hQuery,
     __out_opt double*   pMostRecent,
     __out_opt double*   pDataMin,
     __out_opt double*   pTimeMin,
@@ -994,7 +994,7 @@ Cleanup:
 
 BOOL
 PerfCountersStopCollectingStats(
-    __in HANDLE hQuery
+    _In_ HANDLE hQuery
 )
 {
     BOOL fSuccess       = FALSE;
@@ -1034,7 +1034,7 @@ Cleanup:
 
 BOOL
 PerfCountersDestroyQuery(
-    __in HANDLE hQuery
+    _In_ HANDLE hQuery
 )
 {   
     if ( !hQuery ){
@@ -1125,11 +1125,11 @@ PerfCountersCreateQuery()
 
 BOOL
 PerfCountersAddLnCounterA(
-    __in HANDLE     hQuery,
+    _In_ HANDLE     hQuery,
     __in_opt PCSTR  szComputerName,
-    __in PCSTR      szPerfObject,
-    __in PCSTR      szPerfCounter,
-    __in PCSTR      szInstance
+    _In_ PCSTR      szPerfObject,
+    _In_ PCSTR      szPerfCounter,
+    _In_ PCSTR      szInstance
 )
 {
     return FALSE;
@@ -1137,11 +1137,11 @@ PerfCountersAddLnCounterA(
 
 BOOL
 PerfCountersAddLnCounterW(
-    __in HANDLE     hQuery,
+    _In_ HANDLE     hQuery,
     __in_opt PCWSTR wszComputerName,
-    __in PCWSTR     wszPerfObject,
-    __in PCWSTR     wszPerfCounter,
-    __in PCWSTR     wszInstance
+    _In_ PCWSTR     wszPerfObject,
+    _In_ PCWSTR     wszPerfCounter,
+    _In_ PCWSTR     wszInstance
 )
 {
     return FALSE;
@@ -1149,11 +1149,11 @@ PerfCountersAddLnCounterW(
 
 BOOL
 PerfCountersAddCounterA(
-    __in HANDLE     hQuery,
+    _In_ HANDLE     hQuery,
     __in_opt PCSTR  szComputerName,
-    __in PCSTR      szPerfObject,
-    __in PCSTR      szPerfCounter,
-    __in PCSTR      szInstance
+    _In_ PCSTR      szPerfObject,
+    _In_ PCSTR      szPerfCounter,
+    _In_ PCSTR      szInstance
 )
 {
     return FALSE;
@@ -1161,11 +1161,11 @@ PerfCountersAddCounterA(
 
 BOOL
 PerfCountersAddCounterW(
-    __in HANDLE     hQuery,
+    _In_ HANDLE     hQuery,
     __in_opt PCWSTR wszComputerName,
-    __in PCWSTR     wszPerfObject,
-    __in PCWSTR     wszPerfCounter,
-    __in PCWSTR     wszInstance
+    _In_ PCWSTR     wszPerfObject,
+    _In_ PCWSTR     wszPerfCounter,
+    _In_ PCWSTR     wszInstance
 )
 {
     return FALSE;
@@ -1173,7 +1173,7 @@ PerfCountersAddCounterW(
 
 BOOL
 PerfCountersGetCounterValues(
-    __in HANDLE         hQuery,
+    _In_ HANDLE         hQuery,
     __out_opt double*   pData
 )
 {
@@ -1182,7 +1182,7 @@ PerfCountersGetCounterValues(
 
 BOOL
 PerfCountersGetCounterValuesRaw(
-    __in HANDLE         hQuery,
+    _In_ HANDLE         hQuery,
     __out_opt ULONG64*  pData1,
     __out_opt ULONG64*  pData2
 )
@@ -1192,8 +1192,8 @@ PerfCountersGetCounterValuesRaw(
 
 BOOL
 PerfCountersStartCollectingStatsA(
-    __in HANDLE             hQuery,
-    __in DWORD              dwPeriod,
+    _In_ HANDLE             hQuery,
+    _In_ DWORD              dwPeriod,
     __in_opt JET_GRBIT*     pgrbitStats,
     __in_opt PCSTR          szLogFile
 )
@@ -1203,8 +1203,8 @@ PerfCountersStartCollectingStatsA(
 
 BOOL
 PerfCountersStartCollectingStatsW(
-    __in HANDLE             hQuery,
-    __in DWORD              dwPeriod,
+    _In_ HANDLE             hQuery,
+    _In_ DWORD              dwPeriod,
     __in_opt JET_GRBIT*     pgrbitStats,
     __in_opt PCWSTR         wszLogFile
 )
@@ -1214,7 +1214,7 @@ PerfCountersStartCollectingStatsW(
 
 BOOL
 PerfCountersRetrieveStats(
-    __in HANDLE         hQuery,
+    _In_ HANDLE         hQuery,
     __out_opt double*   pMostRecent,
     __out_opt double*   pDataMin,
     __out_opt double*   pTimeMin,
@@ -1230,7 +1230,7 @@ PerfCountersRetrieveStats(
 
 BOOL
 PerfCountersStopCollectingStats(
-    __in HANDLE hQuery
+    _In_ HANDLE hQuery
 )
 {
     return FALSE;
@@ -1238,7 +1238,7 @@ PerfCountersStopCollectingStats(
 
 BOOL
 PerfCountersDestroyQuery(
-    __in HANDLE hQuery
+    _In_ HANDLE hQuery
 )
 {
     return FALSE;

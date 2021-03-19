@@ -3612,7 +3612,7 @@ BOOL IsRDTSCAvailable()
         return fRDTSCAvailable;
     }
 
-    typedef WINBASEAPI BOOL WINAPI PFNIsProcessorFeaturePresent( IN DWORD ProcessorFeature );
+    typedef WINBASEAPI BOOL WINAPI PFNIsProcessorFeaturePresent( _In_ DWORD ProcessorFeature );
 
     HMODULE                         hmodProcessThreads                  = NULL;
     PFNIsProcessorFeaturePresent*   pfnIsProcessorFeaturePresent    = NULL;
@@ -4576,7 +4576,7 @@ HandleError:
 //  ================================================================
 HRESULT
 EDBGPrintf(
-    __in PCSTR szFormat,
+    _In_ PCSTR szFormat,
     ...
 )
 //  ================================================================
@@ -4601,7 +4601,7 @@ EDBGPrintf(
 //  ================================================================
 HRESULT
 EDBGPrintfDml(
-    __in PCSTR szFormat,
+    _In_ PCSTR szFormat,
     ...
 )
 //  ================================================================
@@ -4643,7 +4643,7 @@ EDBGPrintfDml(
 //  ================================================================
 ULONG64
 GetExpression(
-    __in PCSTR  szExpression
+    _In_ PCSTR  szExpression
 )
 //  ================================================================
 {
@@ -4668,8 +4668,8 @@ BOOL
 FEDBGMemoryRead(
     ULONG64                         ulAddressInDebuggee,
     __out_bcount(cbBuffer) PVOID    pbBuffer,
-    __in ULONG                      cbBuffer,
-    __out PULONG                    pcbRead
+    _In_ ULONG                      cbBuffer,
+    _Out_ PULONG                    pcbRead
 )
 //  ================================================================
 {

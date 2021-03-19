@@ -136,7 +136,7 @@ class RECTASK : public DBTASK
 
         PGNO PgnoFDP() const { return m_pgnoFDP; }
         IFMP Ifmp() const { return m_ifmp; }
-        VOID GetBookmark( __out BOOKMARK * const pbookmark ) const;
+        VOID GetBookmark( _Out_ BOOKMARK * const pbookmark ) const;
 
         // used when the BATCHRECTASK sorts RECTASKs by bookmark
         static bool FBookmarkIsLessThan( const RECTASK * ptask1, const RECTASK * ptask2 );
@@ -307,7 +307,7 @@ class BATCHRECTASK : public DBTASK
 
         // preread the bookmarks in the tasks. returns the number of
         // tasks that had their bookmarks preread
-        VOID PrereadTaskBookmarks( PIB * const ppib, const INT itaskStart, __out LONG * pctasksPreread );
+        VOID PrereadTaskBookmarks( PIB * const ppib, const INT itaskStart, _Out_ LONG * pctasksPreread );
 
     protected:
         // the pgnoFDP of the b-tree we are batching operations for

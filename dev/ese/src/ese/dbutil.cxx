@@ -1463,9 +1463,9 @@ LOCAL INT PrintCallback( const CALLBACKDEF * pcallbackdef, void * )
 
 //  ================================================================
 LOCAL VOID PrintSpaceHintMetaData(
-    __in const CHAR * const szIndent,
-    __in const CHAR * const szObjectType,
-    __in const JET_SPACEHINTS * const pSpaceHints )
+    _In_ const CHAR * const szIndent,
+    _In_ const CHAR * const szObjectType,
+    _In_ const JET_SPACEHINTS * const pSpaceHints )
 //  ================================================================
 {
     printf( "%s%s Space Hints:       cbStruct: %d, grbit=0x%x\n", szIndent, szObjectType,
@@ -3323,9 +3323,9 @@ ERR EvalInternalPageNodes(
 
 
 ERR ErrDBUTLGetParentOfLeaf(
-    __in  const IFMP                    ifmp,
-    __in  const PGNO                    pgnoFDP,
-    __out BTREE_STATS_PARENT_OF_LEAF *  pParentOfLeaf
+    _In_  const IFMP                    ifmp,
+    _In_  const PGNO                    pgnoFDP,
+    _Out_ BTREE_STATS_PARENT_OF_LEAF *  pParentOfLeaf
     )
 {
     ERR err = JET_errSuccess;
@@ -3913,7 +3913,7 @@ LOCAL INT PrintTableBareMetaData( const TABLEDEF * ptabledef, void * pv )
 }
 
 //  ================================================================
-LOCAL VOID DBUTLDumpDefaultSpaceHints( __inout JET_SPACEHINTS * const pSpacehints, __in const CPG cpgInitial, __in const BOOL fTable )
+LOCAL VOID DBUTLDumpDefaultSpaceHints( __inout JET_SPACEHINTS * const pSpacehints, _In_ const CPG cpgInitial, _In_ const BOOL fTable )
 //  ================================================================
 {
     if ( 0 == pSpacehints->cbInitial )
@@ -3963,13 +3963,13 @@ LOCAL VOID DBUTLDumpDefaultSpaceHints( __inout JET_SPACEHINTS * const pSpacehint
 }
 
 ERR ErrCATIUnmarshallExtendedSpaceHints(
-    __in INST * const           pinst,
-    __in const SYSOBJ           sysobj,
-    __in const BOOL             fDeferredLongValueHints,
-    __in const BYTE * const     pBuffer,
-    __in const ULONG            cbBuffer,
-    __in const LONG             cbPageSize,
-    __out JET_SPACEHINTS *      pSpacehints
+    _In_ INST * const           pinst,
+    _In_ const SYSOBJ           sysobj,
+    _In_ const BOOL             fDeferredLongValueHints,
+    _In_ const BYTE * const     pBuffer,
+    _In_ const ULONG            cbBuffer,
+    _In_ const LONG             cbPageSize,
+    _Out_ JET_SPACEHINTS *      pSpacehints
     );
 
 
@@ -4501,7 +4501,7 @@ HandleError:
 }
 
 //  ================================================================
-LOCAL ERR ErrDBUTLDumpTables( PIB * ppib, IFMP ifmp, __in PCWSTR wszTableName, PFNTABLE pfntable, VOID * pvCallback )
+LOCAL ERR ErrDBUTLDumpTables( PIB * ppib, IFMP ifmp, _In_ PCWSTR wszTableName, PFNTABLE pfntable, VOID * pvCallback )
 //  ================================================================
 {
     ERR     err;

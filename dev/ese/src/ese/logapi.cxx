@@ -798,13 +798,13 @@ LOCAL size_t CbPaddingForLrScrub( INST * const pinst )
 }
 
 ERR ErrLGScrub(
-    __in                        PIB * const             ppib,
-    __in                        const IFMP              ifmp,
-    __in                        CSR * const             pcsr,
-    __in                        const BOOL              fUnusedPage,
+    _In_                        PIB * const             ppib,
+    _In_                        const IFMP              ifmp,
+    _In_                        CSR * const             pcsr,
+    _In_                        const BOOL              fUnusedPage,
     __in_ecount_opt(cscrubOper) const SCRUBOPER * const rgscrubOper,
-    __in                        const INT               cscrubOper,
-    __out                       LGPOS * const           plgpos )
+    _In_                        const INT               cscrubOper,
+    _Out_                       LGPOS * const           plgpos )
 {
     ERR         err;
     LRSCRUB     lrscrub;
@@ -905,12 +905,12 @@ ERR ErrLGScrub(
 }
 
 ERR ErrLGNewPage(
-    __in    PIB * const     ppib,
-    __in    const IFMP      ifmp,
-    __in    const PGNO      pgno,
-    __in    const OBJID     objid,
-    __in    const DBTIME    dbtime,
-    __out   LGPOS * const   plgpos )
+    _In_    PIB * const     ppib,
+    _In_    const IFMP      ifmp,
+    _In_    const PGNO      pgno,
+    _In_    const OBJID     objid,
+    _In_    const DBTIME    dbtime,
+    _Out_   LGPOS * const   plgpos )
 {
 
     ERR err = JET_errSuccess;
@@ -947,14 +947,14 @@ HandleError:
 }
 
 ERR ErrLGScanCheck(
-    __in    const IFMP      ifmp,
-    __in    const PGNO      pgno,
-    __in    const BYTE      bSource,
-    __in    const DBTIME    dbtimePage,
-    __in    const DBTIME    dbtimeCurrent,
-    __in    const ULONG     ulChecksum,
-    __in    const BOOL      fScanCheck2Supported,
-    __in    LGPOS* const    plgposLogRec )
+    _In_    const IFMP      ifmp,
+    _In_    const PGNO      pgno,
+    _In_    const BYTE      bSource,
+    _In_    const DBTIME    dbtimePage,
+    _In_    const DBTIME    dbtimeCurrent,
+    _In_    const ULONG     ulChecksum,
+    _In_    const BOOL      fScanCheck2Supported,
+    _In_    LGPOS* const    plgposLogRec )
 {
     INST * const pinst = PinstFromIfmp( ifmp );
     LOG * const plog = pinst->m_plog;
@@ -1040,23 +1040,23 @@ ERR ErrLGScanCheck(
 }
 
 LOCAL INLINE ERR ErrLGIPageMove(
-    __in    PIB * const     ppib,
-    __in    const IFMP      ifmp,
-    __in    const PGNO      pgnoFDP,
-    __in    const OBJID     objidFDP,
-    __in    CSR* const      pcsrSource,
-    __in    const PGNO      pgnoDest,
-    __in    const PGNO      pgnoParent,
-    __in    const INT       ilineParent,
-    __in    const PGNO      pgnoLeft,
-    __in    const PGNO      pgnoRight,
-    __in    const DBTIME    dbtimeSourceBefore,
-    __in    const DBTIME    dbtimeParentBefore,
-    __in    const DBTIME    dbtimeLeftBefore,
-    __in    const DBTIME    dbtimeRightBefore,
-    __in    const DBTIME    dbtimeAfter,
-    __in    const ULONG     fMoveFlags,
-    __out   LGPOS * const   plgpos )
+    _In_    PIB * const     ppib,
+    _In_    const IFMP      ifmp,
+    _In_    const PGNO      pgnoFDP,
+    _In_    const OBJID     objidFDP,
+    _In_    CSR* const      pcsrSource,
+    _In_    const PGNO      pgnoDest,
+    _In_    const PGNO      pgnoParent,
+    _In_    const INT       ilineParent,
+    _In_    const PGNO      pgnoLeft,
+    _In_    const PGNO      pgnoRight,
+    _In_    const DBTIME    dbtimeSourceBefore,
+    _In_    const DBTIME    dbtimeParentBefore,
+    _In_    const DBTIME    dbtimeLeftBefore,
+    _In_    const DBTIME    dbtimeRightBefore,
+    _In_    const DBTIME    dbtimeAfter,
+    _In_    const ULONG     fMoveFlags,
+    _Out_   LGPOS * const   plgpos )
 {
     Assert( pcsrSource );
     Assert( pcsrSource->Latch() == latchWrite );
@@ -1167,9 +1167,9 @@ HandleError:
 }
 
 ERR ErrLGPageMove(
-    __in    const FUCB * const  pfucb,
-    __in    MERGEPATH * const   pmergePath,
-    __out   LGPOS * const       plgpos )
+    _In_    const FUCB * const  pfucb,
+    _In_    MERGEPATH * const   pmergePath,
+    _Out_   LGPOS * const       plgpos )
 {
     Assert( pfucb );
     Assert( pmergePath );
@@ -1201,23 +1201,23 @@ ERR ErrLGPageMove(
 // want an open FUCB on the very table we're moving the root of.
 
 LOCAL ERR ErrLGIPageMoveNoTableInMacro(
-    __in    PIB * const     ppib,
-    __in    const IFMP      ifmp,
-    __in    const PGNO      pgnoFDP,
-    __in    const OBJID     objidFDP,
-    __in    CSR* const      pcsrSource,
-    __in    const PGNO      pgnoDest,
-    __in    const PGNO      pgnoParent,
-    __in    const INT       ilineParent,
-    __in    const PGNO      pgnoLeft,
-    __in    const PGNO      pgnoRight,
-    __in    const DBTIME    dbtimeSourceBefore,
-    __in    const DBTIME    dbtimeParentBefore,
-    __in    const DBTIME    dbtimeLeftBefore,
-    __in    const DBTIME    dbtimeRightBefore,
-    __in    const DBTIME    dbtimeAfter,
-    __in    const ULONG     fMoveFlags,
-    __out   LGPOS * const   plgpos )
+    _In_    PIB * const     ppib,
+    _In_    const IFMP      ifmp,
+    _In_    const PGNO      pgnoFDP,
+    _In_    const OBJID     objidFDP,
+    _In_    CSR* const      pcsrSource,
+    _In_    const PGNO      pgnoDest,
+    _In_    const PGNO      pgnoParent,
+    _In_    const INT       ilineParent,
+    _In_    const PGNO      pgnoLeft,
+    _In_    const PGNO      pgnoRight,
+    _In_    const DBTIME    dbtimeSourceBefore,
+    _In_    const DBTIME    dbtimeParentBefore,
+    _In_    const DBTIME    dbtimeLeftBefore,
+    _In_    const DBTIME    dbtimeRightBefore,
+    _In_    const DBTIME    dbtimeAfter,
+    _In_    const ULONG     fMoveFlags,
+    _Out_   LGPOS * const   plgpos )
 {
     return ErrLGIPageMove(
              ppib,
@@ -1243,10 +1243,10 @@ LOCAL ERR ErrLGIPageMoveNoTableInMacro(
 // want an open FUCB on the very table we're moving the root of.
 
 LOCAL ERR ErrLGIPageMoveRootsInMacro(
-    __in    PIB * const         ppib,
-    __in    const IFMP          ifmp,
-    __in    ROOTMOVE * const    prm,
-    __out   LGPOS * const       plgpos )
+    _In_    PIB * const         ppib,
+    _In_    const IFMP          ifmp,
+    _In_    ROOTMOVE * const    prm,
+    _Out_   LGPOS * const       plgpos )
 {
     ERR err = JET_errSuccess;
 
@@ -1526,10 +1526,10 @@ LOCAL ERR ErrLGIReplaceNoTableInMacro(
 }
 
 ERR ErrLGRootPageMove(
-    __in    PIB * const         ppib,
-    __in    const IFMP          ifmp,
-    __in    ROOTMOVE * const    prm,
-    __out   LGPOS * const       plgpos )
+    _In_    PIB * const         ppib,
+    _In_    const IFMP          ifmp,
+    _In_    ROOTMOVE * const    prm,
+    _Out_   LGPOS * const       plgpos )
 {
     ERR err = JET_errSuccess;
     FMP* const pfmp = g_rgfmp + ifmp;
@@ -3037,7 +3037,7 @@ ERR ErrLGForceWriteLog( PIB * ppib )
 
 ERR ErrLGForceLogRollover(
     PIB * const         ppib,
-    __in PSTR           szTrace,    //  UNDONE: better to make this PCSTR, but may be impossible b/c we pass it to Data::SetPv()
+    _In_ PSTR           szTrace,    //  UNDONE: better to make this PCSTR, but may be impossible b/c we pass it to Data::SetPv()
     LGPOS* const        plgposLogRec )
 {
     INST * const        pinst       = PinstFromPpib( ppib );

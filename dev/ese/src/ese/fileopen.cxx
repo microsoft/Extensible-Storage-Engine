@@ -902,7 +902,7 @@ ERR VTAPI ErrIsamOpenTable(
     JET_SESID           vsesid,
     JET_DBID            vdbid,
     JET_TABLEID         *ptableid,
-    __in const PCSTR    szPath,
+    _In_ const PCSTR    szPath,
     JET_GRBIT           grbit )
 {
     ERR         err;
@@ -1985,7 +1985,7 @@ HandleError:
 //  This routine takes multiple table names and issues prefetches for all the pgnoFDPs of all
 //  the tables. It crushes part of my soul to write this API instead of DT (Deferred Tables).
 
-ERR ErrIsamPrereadTables( __in JET_SESID sesid, __in JET_DBID vdbid, __in_ecount( cwszTables ) PCWSTR * rgwszTables, __in INT cwszTables, JET_GRBIT grbit )
+ERR ErrIsamPrereadTables( _In_ JET_SESID sesid, _In_ JET_DBID vdbid, __in_ecount( cwszTables ) PCWSTR * rgwszTables, _In_ INT cwszTables, JET_GRBIT grbit )
 {
     ERR err = JET_errSuccess;
     PIB * const ppib = (PIB*)sesid;
@@ -2286,8 +2286,8 @@ ERR ErrFILEIInitializeFCB(
     IDB         *pidb,
     BOOL        fPrimary,
     PGNO        pgnoFDP,
-    __in const JET_SPACEHINTS * const pjsph,
-    __out FCB * pfcbTemplateIndex )
+    _In_ const JET_SPACEHINTS * const pjsph,
+    _Out_ FCB * pfcbTemplateIndex )
 {
     ERR     err = JET_errSuccess;
 

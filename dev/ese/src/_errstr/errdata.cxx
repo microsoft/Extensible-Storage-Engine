@@ -36,7 +36,7 @@ static ErrData rgerrdata [] =
 
 //  Looks up the ErrData via an index value.  If index is beyond table size, NULL is returned.
 
-const ErrData * PerrdataEntryI( __in const INT iEntry )
+const ErrData * PerrdataEntryI( _In_ const INT iEntry )
 {
     if ( iEntry >= _countof(rgerrdata) )
     {
@@ -48,7 +48,7 @@ const ErrData * PerrdataEntryI( __in const INT iEntry )
 
 //  Looks up the ErrData entry via an JET_ERR.
 
-const ErrData * PerrdataLookupErrValue( __in const JET_ERR errLookup )
+const ErrData * PerrdataLookupErrValue( _In_ const JET_ERR errLookup )
 {
     for ( INT iEntry = 0; iEntry < _countof(rgerrdata); iEntry++ )
     {

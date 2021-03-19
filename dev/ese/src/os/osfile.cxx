@@ -413,7 +413,7 @@ COSFile::COSFile() :
 
 ERR COSFile::ErrInitFile(   COSFileSystem* const                posfs,
                             COSVolume * const                   posv,
-                            __in PCWSTR const                   wszAbsPath,
+                            _In_ PCWSTR const                   wszAbsPath,
                             const HANDLE                        hFile,
                             const QWORD                         cbFileSize,
                             const FileModeFlags                 fmf,

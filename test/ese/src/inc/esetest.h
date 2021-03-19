@@ -77,17 +77,17 @@ extern "C" {
 #ifndef JetRemoveLogfile
 JET_ERR JET_API
 JetRemoveLogfileA(
-    __in JET_PCSTR szDatabase,
-    __in JET_PCSTR szLogfile,
-    __in JET_GRBIT grbit );
+    _In_ JET_PCSTR szDatabase,
+    _In_ JET_PCSTR szLogfile,
+    _In_ JET_GRBIT grbit );
 
 #if ( JET_VERSION >= 0x0600 )
 
 JET_ERR JET_API
 JetRemoveLogfileW(
-    __in wchar_t* szDatabase,
-    __in wchar_t* szLogfile,
-    __in JET_GRBIT grbit );
+    _In_ wchar_t* szDatabase,
+    _In_ wchar_t* szLogfile,
+    _In_ JET_GRBIT grbit );
 
 #ifdef JET_UNICODE
 #define JetRemoveLogfile JetRemoveLogfileW
@@ -325,61 +325,61 @@ WszEsetestGetStartDotChk();
 const char*
 SzEsetestGetChkptName(
     __out_ecount( cch ) char*   szBuffer,
-    __in size_t                 cch
+    _In_ size_t                 cch
 );
 
 const wchar_t*
 WszEsetestGetChkptName(
     __out_ecount( cch ) wchar_t*    wszBuffer,
-    __in size_t                     cch
+    _In_ size_t                     cch
 );
 
 char*
 SzEsetestGetLogNameTemp(
     __out_ecount( cch ) char*   szBuffer,
-    __in size_t                 cch
+    _In_ size_t                 cch
 );
 
 wchar_t*
 WszEsetestGetLogNameTemp(
     __out_ecount( cch ) wchar_t*    wszBuffer,
-    __in size_t                     cch
+    _In_ size_t                     cch
 );
 
 char*
 SzEsetestGetLogNameLast(
     __out_ecount( cch ) char*   szBuffer,
-    __in size_t                 cch
+    _In_ size_t                 cch
 );
 
 wchar_t*
 WszEsetestGetLogNameLast(
     __out_ecount( cch ) wchar_t*    wszBuffer,
-    __in size_t                     cch
+    _In_ size_t                     cch
 );
 
 char*
 SzEsetestGetLogNameFromGen(
     __out_ecount( cch ) char*   szBuffer,
-    __in size_t                 cch,
-    __in unsigned long          ulGen
+    _In_ size_t                 cch,
+    _In_ unsigned long          ulGen
 );
 
 wchar_t*
 WszEsetestGetLogNameFromGen(
     __out_ecount( cch ) wchar_t*    wszBuffer,
-    __in size_t                     cch,
-    __in unsigned long              ulGen
+    _In_ size_t                     cch,
+    _In_ unsigned long              ulGen
 );
 
 long
 EsetestGetLogGenFromNameA(
-    __in const char* szLogName
+    _In_ const char* szLogName
 );
 
 long
 EsetestGetLogGenFromNameW(
-    __in const wchar_t* wszLogName
+    _In_ const wchar_t* wszLogName
 );
 
 #ifdef _UNICODE
@@ -427,7 +427,7 @@ EsetestSetVerboseInternalLogging(
 // allocations.
 void
 EsetestSetRunningStress(
-    __in const bool fRunningStress
+    _In_ const bool fRunningStress
 )
 ;
 
@@ -538,7 +538,7 @@ enum EseFeaturePresent {
 
 bool
 FEsetestFeaturePresent(
-    __in const EseFeaturePresent    feature
+    _In_ const EseFeaturePresent    feature
 )
 ;
 
@@ -666,23 +666,23 @@ rgKnownVersions [] = {
 */
 JET_ERR
 EsetestEseVersionToParts(
-    __in EsetestEseVersion      version,
-    __out EsetestEseFlavour*    pexornt,
-    __out PUINT                 pmajor,
-    __out PUINT                 pminor,
-    __out PUINT                 pspnumber,
-    __out PUINT                 pbuildno
+    _In_ EsetestEseVersion      version,
+    _Out_ EsetestEseFlavour*    pexornt,
+    _Out_ PUINT                 pmajor,
+    _Out_ PUINT                 pminor,
+    _Out_ PUINT                 pspnumber,
+    _Out_ PUINT                 pbuildno
 )
 ;
 
 JET_ERR
 EsetestEseFileVersionToParts(
-    __in EsetestEseVersion      version,
-    __out EsetestEseFlavour*    pexornt,
-    __out PUINT                 pmajor,
-    __out PUINT                 pminor,
-    __out PUINT                 pbuildno,
-    __out PUINT                 pprivateno
+    _In_ EsetestEseVersion      version,
+    _Out_ EsetestEseFlavour*    pexornt,
+    _Out_ PUINT                 pmajor,
+    _Out_ PUINT                 pminor,
+    _Out_ PUINT                 pbuildno,
+    _Out_ PUINT                 pprivateno
 )
 ;
 
@@ -692,48 +692,48 @@ EsetestGetEseFlavour()
 
 JET_ERR
 EsetestGetEseVersion(
-    __out EsetestEseFlavour*    pflavour,
-    __out EsetestEseVersion*    peseversion,
-    __out bool*                 pfChecked
+    _Out_ EsetestEseFlavour*    pflavour,
+    _Out_ EsetestEseVersion*    peseversion,
+    _Out_ bool*                 pfChecked
 )
 ;
 
 JET_ERR
 EsetestGetEseVersionParts(
-    __out   EsetestEseFlavour*  pflavour,
-    __out   PUINT               pverMajor,
-    __out   PUINT               pverMinor,
-    __out   PUINT               pverSp,
-    __out   PUINT               pverBuild,
-    __out   bool*               pfChecked
+    _Out_   EsetestEseFlavour*  pflavour,
+    _Out_   PUINT               pverMajor,
+    _Out_   PUINT               pverMinor,
+    _Out_   PUINT               pverSp,
+    _Out_   PUINT               pverBuild,
+    _Out_   bool*               pfChecked
 )
 ;
 
 JET_ERR
 EsetestGetEseFileVersionParts(
-    __out   EsetestEseFlavour*  pflavour,
-    __out   PUINT               pverMajor,
-    __out   PUINT               pverMinor,
-    __out   PUINT               pverBuild,
-    __out   PUINT               pverPrivate,
-    __out   bool*               pfChecked
+    _Out_   EsetestEseFlavour*  pflavour,
+    _Out_   PUINT               pverMajor,
+    _Out_   PUINT               pverMinor,
+    _Out_   PUINT               pverBuild,
+    _Out_   PUINT               pverPrivate,
+    _Out_   bool*               pfChecked
 )
 ;
 
 bool
 FEsetestIsBugFixed(
-    __in    UINT                bugnumberEse,
-    __in    UINT                bugnumberEsent
+    _In_    UINT                bugnumberEse,
+    _In_    UINT                bugnumberEsent
 )
 ;
 
 bool
 FEsetestVerifyVersion(
-    __in    EsetestEseFlavour   flavour,
-    __in    UINT                verMajor,
-    __in    UINT                verMinor,
-    __in    UINT                verSp,
-    __in    UINT                verBuild        // can be zero
+    _In_    EsetestEseFlavour   flavour,
+    _In_    UINT                verMajor,
+    _In_    UINT                verMinor,
+    _In_    UINT                verSp,
+    _In_    UINT                verBuild        // can be zero
 )
 // Returns whether the current version of ESE meets the minimum required.
 ;
@@ -812,13 +812,13 @@ typedef struct              /* Status Notification Message */
 extern "C" {
 #endif
 JET_ERR JET_API JetBeginSurrogateBackup(
-    __in    JET_INSTANCE    instance,
-    __in        unsigned long       lgenFirst,
-    __in        unsigned long       lgenLast,
-    __in        JET_GRBIT       grbit );
+    _In_    JET_INSTANCE    instance,
+    _In_        unsigned long       lgenFirst,
+    _In_        unsigned long       lgenLast,
+    _In_        JET_GRBIT       grbit );
 JET_ERR JET_API JetEndSurrogateBackup(
-    __in    JET_INSTANCE    instance,
-    __in        JET_GRBIT       grbit );
+    _In_    JET_INSTANCE    instance,
+    _In_        JET_GRBIT       grbit );
 
 #ifdef  __cplusplus
 }
@@ -849,7 +849,7 @@ void FormatSpecificError(
 
 void*
 PvMemoryHeapAlloc(
-    __in const size_t   cbSize
+    _In_ const size_t   cbSize
 )
 ;
 void
@@ -903,13 +903,13 @@ inline void __cdecl operator delete[]( void* const pv )
 
 void
 EsetestSetResultsTxt(
-    __in const char*    szResultsTxt
+    _In_ const char*    szResultsTxt
 )
 ;
 
 void
 EsetestSetResultsLog(
-    __in const char*    szResultsLog
+    _In_ const char*    szResultsLog
 )
 ;
 
@@ -928,8 +928,8 @@ BOOL EsetestDisableWritingToResultsTxt();
 int
 InitTest(
     __in_opt const char *szCommand = NULL,
-    __in BOOL fLogToDisk = TRUE,
-    __in BOOL fWriteFailed = TRUE
+    _In_ BOOL fLogToDisk = TRUE,
+    _In_ BOOL fWriteFailed = TRUE
     );
 int InitTestArgv(
     const int argc,
@@ -959,8 +959,8 @@ int tprintfnothid(
 // Currently internal, but could easily be made external.
 int tprintfSpecifyTargets(
     __in_opt const char*            szLogFile,          // if NULL, will log to results.log
-    __in const JET_GRBIT level,
-    __in _Printf_format_string_ const char* szFormat,
+    _In_ const JET_GRBIT level,
+    _In_ _Printf_format_string_ const char* szFormat,
     ...
 )
 ;
@@ -999,9 +999,9 @@ int tcprintf(
 //int EsetestVprintf( EsetestLogLevel level, const char* szFormat, va_list ap );
 int EsetestVprintf(
     __in_opt const char*                szLogFile,          // if NULL, will log to results.log
-    __in const JET_GRBIT            level,
-    __in _Printf_format_string_ const char*             szFormat,
-    __in va_list                    ap
+    _In_ const JET_GRBIT            level,
+    _In_ _Printf_format_string_ const char*             szFormat,
+    _In_ va_list                    ap
     )
 ;
 
@@ -1118,7 +1118,7 @@ const WCHAR g_wszRegKeyAdvancedPerfCtrs[]   = L"Show Advanced Counters";
 // Registry functions:
 
 LONG EsetestRegGetValueA(
-    __in         HKEY hkey,
+    _In_         HKEY hkey,
     __in_opt     LPCTSTR pszSubKey,
     __in_opt     LPCTSTR pszValue,
     __in_opt     DWORD dwFlags,
@@ -1131,36 +1131,36 @@ LONG EsetestRegGetValueA(
 // Generic registry wrappers
 JET_ERR
 ErrEsetestWriteRegistry(
-    IN const HKEY           hkeyHive,
-    __in const TCHAR*       szKeyPath,
-    __in const TCHAR*       szKeyName,
-    __in const TCHAR*       szValue
+    _In_ const HKEY         hkeyHive,
+    _In_ const TCHAR*       szKeyPath,
+    _In_ const TCHAR*       szKeyName,
+    _In_ const TCHAR*       szValue
     )
 ;
 
 JET_ERR
 ErrEsetestReadRegistry(
-    IN const HKEY       hkeyHive,
-    __in const TCHAR*   szKeyPath,
-    __in const TCHAR*   szKeyName,
+    _In_ const HKEY     hkeyHive,
+    _In_ const TCHAR*   szKeyPath,
+    _In_ const TCHAR*   szKeyName,
     __out_bcount_part( *pcbValue, *pcbValue ) TCHAR* const  szValue,        // Must point to valid buffer
-    IN OUT  PDWORD      pcbValue        // How big the buffer is going in; how many bytes written
+    _Inout_  PDWORD     pcbValue        // How big the buffer is going in; how many bytes written
     )
 ;
 
 // These default to write into hklm\software\microsoft\ese\global or hklm\software\microsoft\esent\global, as appropriate.
 JET_ERR
 ErrEsetestWriteConfigToEsentGlobal(
-    __in const TCHAR* szKeyPath,
-    __in const TCHAR* szKeyName,
-    __in const TCHAR* szValue
+    _In_ const TCHAR* szKeyPath,
+    _In_ const TCHAR* szKeyName,
+    _In_ const TCHAR* szValue
     )
 ;
 
 JET_ERR
 ErrEsetestReadConfigToEsentGlobal(
-    __in const TCHAR*   szKeyPath,
-    __in const TCHAR*   szKeyName,
+    _In_ const TCHAR*   szKeyPath,
+    _In_ const TCHAR*   szKeyName,
     __out_bcount_part( *pcbValue, *pcbValue ) TCHAR* const  szValue,        // Must point to valid buffer
     __inout PDWORD      pcbValue        // How big the buffer is going in; how many bytes written
     )
@@ -1168,10 +1168,10 @@ ErrEsetestReadConfigToEsentGlobal(
 
 JET_ERR
 ErrEsetestCopyKey(
-    __in const WCHAR*   wszKeySrc,
-    __in const WCHAR*   wszKeyDst,
-    __in BOOL           fDelSrc,
-    __in BOOL           fDelDst
+    _In_ const WCHAR*   wszKeySrc,
+    _In_ const WCHAR*   wszKeyDst,
+    _In_ BOOL           fDelSrc,
+    _In_ BOOL           fDelDst
     )
 ;
 
@@ -1179,13 +1179,13 @@ ErrEsetestCopyKey(
 //*******************************************************************
 // This is stolen from DBUTLSprintHex().
 VOID SprintHex(
-    __out CHAR * const      szDest,
+    _Out_ CHAR * const      szDest,
     __in_bcount( cbSrc ) const BYTE * const rgbSrc,
-    __in const INT          cbSrc,
-    __in const INT          cbWidth     = 16,
-    __in const INT          cbChunk     = 4,
-    __in const INT          cbAddress   = 8,
-    __in const INT          cbStart     = 0
+    _In_ const INT          cbSrc,
+    _In_ const INT          cbWidth     = 16,
+    _In_ const INT          cbChunk     = 4,
+    _In_ const INT          cbAddress   = 8,
+    _In_ const INT          cbStart     = 0
 )
 ;
 
@@ -1196,7 +1196,7 @@ VOID SprintHex(
 // =============================================================================
 void
 EsetestWaitForAllObjectsInfinitely(
-    __in DWORD cCount,
+    _In_ DWORD cCount,
     __in_ecount( cCount ) const HANDLE* rgHandles
 )
 ;
@@ -1207,39 +1207,39 @@ EsetestWaitForAllObjectsInfinitely(
 //
 BOOL
 EsetestCreateDirectoryA(
-    __in PCSTR      szName
+    _In_ PCSTR      szName
 )
 ;
 
 BOOL
 EsetestCreateDirectoryW(
-    __in PCWSTR     wszName
+    _In_ PCWSTR     wszName
 )
 ;
 
 BOOL
 EsetestRemoveDirectoryA(
-    __in PCSTR      szName
+    _In_ PCSTR      szName
 )
 ;
 
 BOOL
 EsetestRemoveDirectoryW(
-    __in PCWSTR     wszName
+    _In_ PCWSTR     wszName
 )
 ;
 
 BOOL
 EsetestCopyDirectoryA(
-    __in PCSTR      szNameSrc,
-    __in PCSTR      szNamedst
+    _In_ PCSTR      szNameSrc,
+    _In_ PCSTR      szNamedst
 )
 ;
 
 BOOL
 EsetestCopyDirectoryW(
-    __in PCWSTR     wszNameSrc,
-    __in PCWSTR     wszNameDst
+    _In_ PCWSTR     wszNameSrc,
+    _In_ PCWSTR     wszNameDst
 )
 ;
 
@@ -1257,37 +1257,37 @@ EsetestEnsureFullPathW(
 
 BOOL
 EsetestEnsureFullPathExistsA(
-    __in PCSTR      szPath
+    _In_ PCSTR      szPath
 )
 ;
 
 BOOL
 EsetestEnsureFullPathExistsW(
-    __in PCWSTR     wszPath
+    _In_ PCWSTR     wszPath
 )
 ;
 
 PSTR
 EsetestGetFilePathA(
-    __in PCSTR      szFile
+    _In_ PCSTR      szFile
 )
 ;
 
 PWSTR
 EsetestGetFilePathW(
-    __in PCWSTR     wszFile
+    _In_ PCWSTR     wszFile
 )
 ;
 
 LONGLONG
 EsetestGetFileSizeA(
-    __in PCSTR      szFile
+    _In_ PCSTR      szFile
 )
 ;
 
 LONGLONG
 EsetestGetFileSizeW(
-    __in PCWSTR     wszFile
+    _In_ PCWSTR     wszFile
 )
 ;
 
@@ -1301,7 +1301,7 @@ EsetestGetFileSizeW(
 // Return value: self-descriptive.
 DWORD
 SystemTimeToSecondsSince1970(
-    __in const PSYSTEMTIME  pSystemTime
+    _In_ const PSYSTEMTIME  pSystemTime
 )
 ;
 
@@ -1310,8 +1310,8 @@ SystemTimeToSecondsSince1970(
 // pSystemTime: self-descriptive.
 VOID
 SecondsSince1970ToSystemTime(
-    __in DWORD          dwSecondsSince1970,
-    __in PSYSTEMTIME        pSystemTime
+    _In_ DWORD          dwSecondsSince1970,
+    _In_ PSYSTEMTIME        pSystemTime
 )
 ;
 
@@ -1321,13 +1321,13 @@ SecondsSince1970ToSystemTime(
 //
 
 DWORD GetAttributeListSizeA(
-    __in PCSTR const szFilename,
-    __out ULONG64* const pcbAttributeList
+    _In_ PCSTR const szFilename,
+    _Out_ ULONG64* const pcbAttributeList
 );
 
 DWORD GetAttributeListSizeW(
-    __in PCWSTR const wszFilename,
-    __out ULONG64* const pcbAttributeList
+    _In_ PCWSTR const wszFilename,
+    _Out_ ULONG64* const pcbAttributeList
 );
 
 #ifdef _UNICODE
@@ -1337,13 +1337,13 @@ DWORD GetAttributeListSizeW(
 #endif
 
 DWORD GetExtentCountA(
-    __in PCSTR const szFilename,
-    __out DWORD* const pcExtent
+    _In_ PCSTR const szFilename,
+    _Out_ DWORD* const pcExtent
 );
 
 DWORD GetExtentCountW(
-    __in PCWSTR const wszFilename,
-    __out DWORD* const pcExtent
+    _In_ PCWSTR const wszFilename,
+    _Out_ DWORD* const pcExtent
 );
 
 #ifdef _UNICODE
@@ -1353,68 +1353,68 @@ DWORD GetExtentCountW(
 #endif
 
 DISK_GEOMETRY* GetDiskGeometry(
-    __in unsigned long ulDisk
+    _In_ unsigned long ulDisk
 );
 
 DISK_CACHE_INFORMATION* GetDiskCacheInfo(
-    __in unsigned long ulDisk
+    _In_ unsigned long ulDisk
 );
 
 BOOL SetDiskCacheInfo(
-    __in const DISK_CACHE_INFORMATION* const pdc,
-    __in unsigned long ulDisk
+    _In_ const DISK_CACHE_INFORMATION* const pdc,
+    _In_ unsigned long ulDisk
 );
 
 BOOL GetDiskReadCache(
-    __in unsigned long ulDisk,
-    __out BOOLEAN* pfOn
+    _In_ unsigned long ulDisk,
+    _Out_ BOOLEAN* pfOn
 );
 
 BOOL SetDiskReadCache(
-    __in unsigned long ulDisk,
-    __in BOOLEAN fOn
+    _In_ unsigned long ulDisk,
+    _In_ BOOLEAN fOn
 );
 
 BOOL GetDiskWriteCache(
-    __in unsigned long ulDisk,
-    __out BOOLEAN* pfOn
+    _In_ unsigned long ulDisk,
+    _Out_ BOOLEAN* pfOn
 );
 
 BOOL SetDiskWriteCache(
-    __in unsigned long ulDisk,
-    __in BOOLEAN fOn
+    _In_ unsigned long ulDisk,
+    _In_ BOOLEAN fOn
 );
 
 BOOL GetAdvancedDiskWriteCache(
-    __in unsigned long ulDisk,
-    __out BOOLEAN* pfOn
+    _In_ unsigned long ulDisk,
+    _Out_ BOOLEAN* pfOn
 );
 
 BOOL SetAdvancedDiskWriteCache(
-    __in unsigned long ulDisk,
-    __in BOOLEAN fOn
+    _In_ unsigned long ulDisk,
+    _In_ BOOLEAN fOn
 );
 
 BOOL CreateVirtualDisk(
-    __in PCWSTR const wszVhdFilePath,
-    __in const ULONG cmbSize,
-    __in const WCHAR* const wszMountPoint
+    _In_ PCWSTR const wszVhdFilePath,
+    _In_ const ULONG cmbSize,
+    _In_ const WCHAR* const wszMountPoint
 );
 
 BOOL DestroyVirtualDisk(
-    __in PCWSTR const wszVhdFilePath
+    _In_ PCWSTR const wszVhdFilePath
 );
 
 VOLUME_DISK_EXTENTS* GetVolumeExtents(
-    __in WCHAR** pwszLogicalVolume
+    _In_ WCHAR** pwszLogicalVolume
 );
 
 BOOL DefragmentVolumeA(
-    __in PCSTR const szVolumeName
+    _In_ PCSTR const szVolumeName
 );
 
 BOOL DefragmentVolumeW(
-    __in PCWSTR const wszVolumeName
+    _In_ PCWSTR const wszVolumeName
 );
 
 #ifdef _UNICODE
@@ -1424,30 +1424,30 @@ BOOL DefragmentVolumeW(
 #endif
 
 DRIVE_LAYOUT_INFORMATION_EX* GetDiskPartitions(
-    __in unsigned long ulDisk
+    _In_ unsigned long ulDisk
 );
 
 BOOL OnlineDisk(
-    __in unsigned long ulDisk
+    _In_ unsigned long ulDisk
 );
 
 BOOL DeleteDiskPartition(
-    __in unsigned long ulDisk,
-    __in unsigned long ulPartition
+    _In_ unsigned long ulDisk,
+    _In_ unsigned long ulPartition
 );
 
 BOOL DeleteDiskPartitions(
-    __in unsigned long ulDisk
+    _In_ unsigned long ulDisk
 );
 
 BOOL CreateFormatDiskPartition(
-    __in unsigned long  ulDisk,
-    __in ULONGLONG      cmbDiskSize,
-    __in char           chLetter    
+    _In_ unsigned long  ulDisk,
+    _In_ ULONGLONG      cmbDiskSize,
+    _In_ char           chLetter    
 );
 
 BOOL FormatVolume(
-    __in char   chLetter
+    _In_ char   chLetter
 );
 
 
@@ -1533,21 +1533,21 @@ PerfCountersCreateQuery()
 // Return value: TRUE if it succeeds, FALSE, otherwise.
 BOOL
 PerfCountersAddLnCounterA(
-    __in HANDLE     hQuery,
+    _In_ HANDLE     hQuery,
     __in_opt PCSTR  szComputerName,
-    __in PCSTR      szPerfObject,
-    __in PCSTR      szPerfCounter,
-    __in PCSTR      szInstance
+    _In_ PCSTR      szPerfObject,
+    _In_ PCSTR      szPerfCounter,
+    _In_ PCSTR      szInstance
 )
 ;
 
 BOOL
 PerfCountersAddLnCounterW(
-    __in HANDLE     hQuery,
+    _In_ HANDLE     hQuery,
     __in_opt PCWSTR wszComputerName,
-    __in PCWSTR     wszPerfObject,
-    __in PCWSTR     wszPerfCounter,
-    __in PCWSTR     wszInstance
+    _In_ PCWSTR     wszPerfObject,
+    _In_ PCWSTR     wszPerfCounter,
+    _In_ PCWSTR     wszInstance
 )
 ;
 
@@ -1561,21 +1561,21 @@ PerfCountersAddLnCounterW(
 //  non-robust in terms of localization, but allows us to test for perf counter localization.
 BOOL
 PerfCountersAddCounterA(
-    __in HANDLE     hQuery,
+    _In_ HANDLE     hQuery,
     __in_opt PCSTR  szComputerName,
-    __in PCSTR      szPerfObject,
-    __in PCSTR      szPerfCounter,
-    __in PCSTR      szInstance
+    _In_ PCSTR      szPerfObject,
+    _In_ PCSTR      szPerfCounter,
+    _In_ PCSTR      szInstance
 )
 ;
 
 BOOL
 PerfCountersAddCounterW(
-    __in HANDLE     hQuery,
+    _In_ HANDLE     hQuery,
     __in_opt PCWSTR wszComputerName,
-    __in PCWSTR     wszPerfObject,
-    __in PCWSTR     wszPerfCounter,
-    __in PCWSTR     wszInstance
+    _In_ PCWSTR     wszPerfObject,
+    _In_ PCWSTR     wszPerfCounter,
+    _In_ PCWSTR     wszInstance
 )
 ;
 
@@ -1594,7 +1594,7 @@ PerfCountersAddCounterW(
 //  can't be retrived. That particular element won't be changed in pData.
 BOOL
 PerfCountersGetCounterValues(
-    __in HANDLE         hQuery,
+    _In_ HANDLE         hQuery,
     __out_opt double*   pData
 )
 ;
@@ -1608,7 +1608,7 @@ PerfCountersGetCounterValues(
 //  can't be retrived. That particular element won't be changed in pData.
 BOOL
 PerfCountersGetCounterValuesRaw(
-    __in HANDLE         hQuery,
+    _In_ HANDLE         hQuery,
     __out_opt ULONG64*  pData1,
     __out_opt ULONG64*  pData2
 )
@@ -1625,8 +1625,8 @@ PerfCountersGetCounterValuesRaw(
 // Return value: TRUE if it succeeds, FALSE, otherwise.
 BOOL
 PerfCountersStartCollectingStatsA(
-    __in HANDLE             hQuery,
-    __in DWORD              dwPeriod,
+    _In_ HANDLE             hQuery,
+    _In_ DWORD              dwPeriod,
     __in_opt JET_GRBIT*     pgrbitStats,
     __in_opt PCSTR          szLogFile
 )
@@ -1634,8 +1634,8 @@ PerfCountersStartCollectingStatsA(
 
 BOOL
 PerfCountersStartCollectingStatsW(
-    __in HANDLE             hQuery,
-    __in DWORD              dwPeriod,
+    _In_ HANDLE             hQuery,
+    _In_ DWORD              dwPeriod,
     __in_opt JET_GRBIT*     pgrbitStats,
     __in_opt PCWSTR         wszLogFile
 )
@@ -1662,7 +1662,7 @@ PerfCountersStartCollectingStatsW(
 // Return value: TRUE if it succeeds, FALSE, otherwise.
 BOOL
 PerfCountersRetrieveStats(
-    __in HANDLE         hQuery,
+    _In_ HANDLE         hQuery,
     __out_opt double*   pMostRecent,
     __out_opt double*   pDataMin,
     __out_opt double*   pTimeMin,
@@ -1679,7 +1679,7 @@ PerfCountersRetrieveStats(
 // Return value: TRUE if it succeeds, FALSE, otherwise.
 BOOL
 PerfCountersStopCollectingStats(
-    __in HANDLE hQuery
+    _In_ HANDLE hQuery
 )
 ;
 
@@ -1687,15 +1687,15 @@ PerfCountersStopCollectingStats(
 // Return value: TRUE if it succeeds, FALSE, otherwise.
 BOOL
 PerfCountersDestroyQuery(
-    __in HANDLE hQuery
+    _In_ HANDLE hQuery
 )
 ;
 
 inline VOID
 DoubleArraySet(
     __in_ecount( cSize ) double*    pArray,
-    __in size_t                     cSize,
-    __in double                     dValue
+    _In_ size_t                     cSize,
+    _In_ double                     dValue
 )
 {
     while ( cSize-- ) pArray[ cSize ] = dValue;
@@ -1705,7 +1705,7 @@ inline VOID
 DoubleArrayCopy(
     __in_ecount( cSize ) double*    pDst,
     __in_ecount( cSize ) double*    pSrc,
-    __in size_t                     cSize
+    _In_ size_t                     cSize
 )
 {
     while ( cSize-- ) pDst[ cSize ] = pSrc[ cSize ];
@@ -1720,13 +1720,13 @@ DoubleArrayCopy(
 // Return value: a handle to be used in subsequent calls that requires a perf reporting handle. INVALID_HANDLE_VALUE if it fails.
 HANDLE
 PerfReportingCreateFileA(
-    __in PCSTR szFile
+    _In_ PCSTR szFile
 )
 ;
 
 HANDLE
 PerfReportingCreateFileW(
-    __in PCWSTR wszFile
+    _In_ PCWSTR wszFile
 )
 ;
 
@@ -1746,23 +1746,23 @@ PerfReportingCreateFileW(
 // Return value: TRUE if it succeeds, FALSE, otherwise.
 BOOL
 PerfReportingReportValueA(
-    __in HANDLE     hPerfReporting,
-    __in PCSTR      szCounterName,
-    __in PCSTR      szCounterUnit,
-    __in PCSTR      szPrintfFormat,
-    __in BOOL       fHigherIsBetter,
-    __in double     dblValue
+    _In_ HANDLE     hPerfReporting,
+    _In_ PCSTR      szCounterName,
+    _In_ PCSTR      szCounterUnit,
+    _In_ PCSTR      szPrintfFormat,
+    _In_ BOOL       fHigherIsBetter,
+    _In_ double     dblValue
 )
 ;
 
 BOOL
 PerfReportingReportValueW(
-    __in HANDLE     hPerfReporting,
-    __in PCWSTR     wszCounterName,
-    __in PCWSTR     wszCounterUnit,
-    __in PCWSTR     wszPrintfFormat,
-    __in BOOL       fHigherIsBetter,
-    __in double     dblValue
+    _In_ HANDLE     hPerfReporting,
+    _In_ PCWSTR     wszCounterName,
+    _In_ PCWSTR     wszCounterUnit,
+    _In_ PCWSTR     wszPrintfFormat,
+    _In_ BOOL       fHigherIsBetter,
+    _In_ double     dblValue
 )
 ;
 
@@ -1777,7 +1777,7 @@ PerfReportingReportValueW(
 // Return value: TRUE if it succeeds, FALSE, otherwise.
 BOOL
 PerfReportingCloseFile(
-    __in HANDLE hPerfReporting
+    _In_ HANDLE hPerfReporting
 )
 ;
 
@@ -1884,15 +1884,15 @@ EventLoggingCreateQuery(
     __in_opt PFNEVENTLOGGING                    pfnCallback,
     __in_opt PCWSTR                             wszEventLog,
     __in_ecount_opt( cEventSources ) PCWSTR*    pwszEventSources,
-    __in size_t                                 cEventSources,
+    _In_ size_t                                 cEventSources,
     __in_opt PSYSTEMTIME                        pTimeMin,
     __in_opt PSYSTEMTIME                        pTimeMax,
     __in_ecount_opt( cEventTypes ) PWORD        pEventTypes,
-    __in size_t                                 cEventTypes,
+    _In_ size_t                                 cEventTypes,
     __in_ecount_opt( cEventCategories ) PWORD   pEventCategories,
-    __in size_t                                 cEventCategories,
+    _In_ size_t                                 cEventCategories,
     __in_ecount_opt( cEventIds ) PDWORD         pEventIds,
-    __in size_t                                 cEventIds,
+    _In_ size_t                                 cEventIds,
     __in_opt PCWSTR                             wszLogFile,
     __in_opt PVOID                              pUserData
 )
@@ -1905,7 +1905,7 @@ EventLoggingCreateQuery(
 // Return value: TRUE if it succeeds, FALSE, otherwise.
 BOOL
 EventLoggingDestroyQuery(
-    __in HANDLE hQuery
+    _In_ HANDLE hQuery
 )
 ;
 
@@ -1920,9 +1920,9 @@ EventLoggingDestroyQuery(
 //  be freed used LocalFree().
 PWSTR
 EventLoggingFormatMessage(
-    __in HMODULE        hModule,
-    __in DWORD          dwEventId,
-    __in LCID           dwLandIg,
+    _In_ HMODULE        hModule,
+    _In_ DWORD          dwEventId,
+    _In_ LCID           dwLandIg,
     __in_opt PWSTR*     pwszStrings
 )
 ;
@@ -1937,7 +1937,7 @@ EventLoggingFormatMessage(
 // Return value: handle to the module, as explained above. NULL if it fails.
 HMODULE
 EventLoggingModuleFromEventSource(
-    __in PCWSTR     wszEventSource
+    _In_ PCWSTR     wszEventSource
 )
 ;
 
@@ -1946,17 +1946,17 @@ EventLoggingModuleFromEventSource(
 // Return value: handle to the module, as explained above. NULL if it fails.
 VOID
 EventLoggingPrintEvent(
-    __in PCWSTR                         wszEventLog,
-    __in PCWSTR                         wszEventSource,
-    __in PSYSTEMTIME                    pTimeGenerated,
-    __in WORD                           wEventType,
-    __in WORD                           wEventCategory,
-    __in DWORD                          dwEventId,
-    __in DWORD                          dwLangId,
+    _In_ PCWSTR                         wszEventLog,
+    _In_ PCWSTR                         wszEventSource,
+    _In_ PSYSTEMTIME                    pTimeGenerated,
+    _In_ WORD                           wEventType,
+    _In_ WORD                           wEventCategory,
+    _In_ DWORD                          dwEventId,
+    _In_ DWORD                          dwLangId,
     __in_ecount_opt( cStrings ) PWSTR*  pwszStrings,
-    __in WORD                           cStrings,
+    _In_ WORD                           cStrings,
     __in_bcount_opt( cbRawData ) PVOID  pRawData,
-    __in DWORD                          cbRawData
+    _In_ DWORD                          cbRawData
 )
 ;
 
@@ -1993,8 +1993,8 @@ PearsonCorrelationReset(
 double
 PearsonCorrelationNewSample(
     __in_opt HANDLE     h,
-    __in const double   x,
-    __in const double   y
+    _In_ const double   x,
+    _In_ const double   y
 );
 
 //  Description: starts sampling performance counters and computing the pearson
@@ -2014,14 +2014,14 @@ bool
 PearsonCorrelationStartSampling(
     __in_opt HANDLE     h,
     __in_opt PCSTR      szComputerNameX,
-    __in PCSTR          szPerfObjectX,
-    __in PCSTR          szPerfCounterX,
-    __in PCSTR          szInstanceX,
+    _In_ PCSTR          szPerfObjectX,
+    _In_ PCSTR          szPerfCounterX,
+    _In_ PCSTR          szInstanceX,
     __in_opt PCSTR      szComputerNameY,
-    __in PCSTR          szPerfObjectY,
-    __in PCSTR          szPerfCounterY,
-    __in PCSTR          szInstanceY,
-    __in DWORD          dwPeriod
+    _In_ PCSTR          szPerfObjectY,
+    _In_ PCSTR          szPerfCounterY,
+    _In_ PCSTR          szInstanceY,
+    _In_ DWORD          dwPeriod
 );
 
 //  Description: stops sampling performance counters.
@@ -2087,21 +2087,21 @@ void __stdcall EsetestAssertFail( const char * const szMessageFormat, char const
 // if ( NULL==string or 0 == oldChar ) { don't touch string, return 0; }
 //================================================================
 size_t strxchg(
-    __in CHAR *string,
-    __in const CHAR oldChar,
-    __in const CHAR newChar
+    _In_ CHAR *string,
+    _In_ const CHAR oldChar,
+    _In_ const CHAR newChar
 );
 
 size_t wcsxchg(
-    __in WCHAR *string,
-    __in const WCHAR oldChar,
-    __in const WCHAR newChar
+    _In_ WCHAR *string,
+    _In_ const WCHAR oldChar,
+    _In_ const WCHAR newChar
 );
 
 size_t _tcsxchg(
-    __in TCHAR *string,
-    __in const TCHAR oldChar,
-    __in const TCHAR newChar
+    _In_ TCHAR *string,
+    _In_ const TCHAR oldChar,
+    _In_ const TCHAR newChar
 );
 
 //================================================================
@@ -2109,7 +2109,7 @@ size_t _tcsxchg(
 inline
 char*
 EsetestStrDup(
-    __in const char*    sz
+    _In_ const char*    sz
 )
 {
     const size_t    cchLen  = strlen( sz ) + 1;
@@ -2161,46 +2161,46 @@ BOOL CloseHandleP( HANDLE* pH );
 
 char*
 EsetestCopyString(
-    __in PSTR           szFunction,
-    __in PCSTR      szToCopy
+    _In_ PSTR           szFunction,
+    _In_ PCSTR      szToCopy
 )
 ;
 
 wchar_t*
 EsetestCopyWideString(
-    __in PSTR           szFunction,
-    __in PCWSTR     wszToCopy
+    _In_ PSTR           szFunction,
+    _In_ PCWSTR     wszToCopy
 )
 ;
 
 
 wchar_t*
 EsetestWidenString(
-    __in PSTR   szFunction,
-    __in PCSTR  sz
+    _In_ PSTR   szFunction,
+    _In_ PCSTR  sz
 )
 ;
 
 char*
 EsetestUnwidenStringAlloc(
-    __in PSTR   szFunction,
-    __in PCWSTR wsz
+    _In_ PSTR   szFunction,
+    _In_ PCWSTR wsz
 )
 ;
 
 JET_ERR
 EsetestUnwidenString(
-    __in PSTR   szFunction,
-    __in PWSTR  wsz,
+    _In_ PSTR   szFunction,
+    _In_ PWSTR  wsz,
     __inout PSTR    sz
 )
 ;
 
 JET_ERR
 EsetestCleanupWidenString(
-    __in PSTR   szFunction,
+    _In_ PSTR   szFunction,
     __inout PWSTR   wsz,
-    __in PCSTR  sz
+    _In_ PCSTR  sz
 )
 ;
 

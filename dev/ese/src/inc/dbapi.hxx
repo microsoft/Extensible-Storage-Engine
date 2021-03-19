@@ -3,7 +3,7 @@
 
 extern BOOL g_fExtentPageCountCacheCreateOverride;
 
-ERR ErrDBOpenDatabase( PIB *ppib, __in PCWSTR wszDatabaseName, IFMP *pifmp, ULONG grbit );
+ERR ErrDBOpenDatabase( PIB *ppib, _In_ PCWSTR wszDatabaseName, IFMP *pifmp, ULONG grbit );
 ERR ErrDBCloseDatabase( PIB *ppib, IFMP ifmp, ULONG grbit );
 ERR ErrUtilWriteAttachedDatabaseHeaders(    const INST* const           pinst,
                                             IFileSystemAPI *const       pfsapi,

@@ -11352,21 +11352,21 @@ JetGetRBSFileInfoW(
 
 JET_ERR JET_API 
 JetRBSPrepareRevert(
-    __in    JET_INSTANCE    instance,
-    __in    JET_LOGTIME     jltRevertExpected,
-    __in    long            cpgCache,
-    __in    JET_GRBIT       grbit,
+    _In_    JET_INSTANCE    instance,
+    _In_    JET_LOGTIME     jltRevertExpected,
+    _In_    long            cpgCache,
+    _In_    JET_GRBIT       grbit,
     _Out_   JET_LOGTIME*    pjltRevertActual );
 
 JET_ERR JET_API 
 JetRBSExecuteRevert(
-    __in    JET_INSTANCE    instance,
-    __in    JET_GRBIT       grbit,
+    _In_    JET_INSTANCE    instance,
+    _In_    JET_GRBIT       grbit,
     _Out_   JET_RBSREVERTINFOMISC*  prbsrevertinfomisc );
 
 JET_ERR JET_API
 JetRBSCancelRevert(
-    __in    JET_INSTANCE    instance );
+    _In_    JET_INSTANCE    instance );
 
 #endif // JET_VERSION >= 0x0A01
 

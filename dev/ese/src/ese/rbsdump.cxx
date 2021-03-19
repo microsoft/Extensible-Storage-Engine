@@ -36,7 +36,7 @@ VOID DUMPIRBSAttachInfo( const RBSATTACHINFO * const prbsattachinfo )
 
 LOCAL USHORT g_cbPageFromSnapshot = 0;
 
-VOID LOCAL DUMPRBSHeaderStandard( INST *pinst, __in const DB_HEADER_READER* const pdbHdrReader )
+VOID LOCAL DUMPRBSHeaderStandard( INST *pinst, _In_ const DB_HEADER_READER* const pdbHdrReader )
 {
     RBSFILEHDR* const    prbsfilehdr    = reinterpret_cast<RBSFILEHDR* const>( pdbHdrReader->pbHeader );
 
@@ -86,7 +86,7 @@ VOID LOCAL DUMPRBSHeaderStandard( INST *pinst, __in const DB_HEADER_READER* cons
 
 #if defined( DEBUGGER_EXTENSION ) && defined ( DEBUG )
 
-ERR LOCAL ErrDUMPRBSHeaderStandardDebug( __in const DB_HEADER_READER* const pdbHdrReader )
+ERR LOCAL ErrDUMPRBSHeaderStandardDebug( _In_ const DB_HEADER_READER* const pdbHdrReader )
 {
     ERR err                           = JET_errSuccess;
     const RBSFILEHDR* const prbsfilehdr = reinterpret_cast<RBSFILEHDR* const>( pdbHdrReader->pbHeader );
@@ -119,7 +119,7 @@ HandleError:
 
 #endif  // defined( DEBUGGER_EXTENSION ) && defined ( DEBUG )
 
-ERR LOCAL ErrDUMPRBSHeaderHex( INST *pinst, __in const DB_HEADER_READER* const pdbHdrReader )
+ERR LOCAL ErrDUMPRBSHeaderHex( INST *pinst, _In_ const DB_HEADER_READER* const pdbHdrReader )
 {
 #if defined( DEBUGGER_EXTENSION ) && defined ( DEBUG )
     return ErrDUMPRBSHeaderStandardDebug( pdbHdrReader );
@@ -129,7 +129,7 @@ ERR LOCAL ErrDUMPRBSHeaderHex( INST *pinst, __in const DB_HEADER_READER* const p
 #endif
 }
 
-ERR LOCAL ErrDUMPRBSHeaderFormat( INST *pinst, __in const DB_HEADER_READER* const pdbHdrReader, const BOOL fVerbose )
+ERR LOCAL ErrDUMPRBSHeaderFormat( INST *pinst, _In_ const DB_HEADER_READER* const pdbHdrReader, const BOOL fVerbose )
 {
     DUMPPrintF( "Checksum Information:\n" );
     DUMPPrintF( "Expected Checksum: 0x%08I64x\n", pdbHdrReader->checksumExpected.rgChecksum[ 0 ] );
@@ -365,7 +365,7 @@ ERR LOCAL ErrDUMPRBSPageFormat( CRevertSnapshot* prbs, PGNO pgnoLast )
     return err;
 }
 
-ERR ErrDUMPRBSHeader( INST *pinst, __in PCWSTR wszRBS, const BOOL fVerbose )
+ERR ErrDUMPRBSHeader( INST *pinst, _In_ PCWSTR wszRBS, const BOOL fVerbose )
 {
     ERR              err                    = JET_errSuccess;
     RBSFILEHDR      *prbsfilehdrPrimary      = NULL;
@@ -498,7 +498,7 @@ HandleError:
     return err;
 }
 
-ERR ErrDUMPRBSPage( INST *pinst, __in PCWSTR wszRBS, PGNO pgnoFirst, PGNO pgnoLast, const BOOL fVerbose )
+ERR ErrDUMPRBSPage( INST *pinst, _In_ PCWSTR wszRBS, PGNO pgnoFirst, PGNO pgnoLast, const BOOL fVerbose )
 {
     WCHAR wszRBSAbs[ cbOSFSAPI_MAX_PATHW ];
     QWORD pgStartOffset         = IbRBSFileOffsetOfSegment( pgnoFirst );

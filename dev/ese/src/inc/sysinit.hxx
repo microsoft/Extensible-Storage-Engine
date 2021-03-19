@@ -30,7 +30,7 @@ const WCHAR wszDEBUGRoot[]          = L"DEBUG";
 #endif
 
 #ifdef DEBUG
-WCHAR* GetDebugEnvValue( __in PCWSTR wszEnvVar );
+WCHAR* GetDebugEnvValue( _In_ PCWSTR wszEnvVar );
 
 #endif
 

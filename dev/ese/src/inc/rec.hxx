@@ -1242,11 +1242,11 @@ enum LVOP
 };
 
 ERR ErrRECSeparateLV(
-    __in FUCB               * const pfucb,
-    __in const DATA         * const pdataField,
-    __in const CompressFlags  compressFlags,
-    __in const BOOL         fEncrypted,
-    __out LvId              * const plid,
+    _In_ FUCB               * const pfucb,
+    _In_ const DATA         * const pdataField,
+    _In_ const CompressFlags  compressFlags,
+    _In_ const BOOL         fEncrypted,
+    _Out_ LvId              * const plid,
     __in_opt FUCB           **ppfucb,
     __in_opt LVROOT2        *plvrootInit = NULL );
 

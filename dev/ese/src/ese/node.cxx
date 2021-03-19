@@ -2617,7 +2617,7 @@ VOID NDSetExternalHeader( _In_ const IFMP ifmp, _In_ CSR* const pcsr, _In_range_
 
 //  ================================================================
 LOCAL VOID NDScrubOneUsedPage(
-        __in CSR * const pcsr,
+        _In_ CSR * const pcsr,
         __in_ecount(cscrubOper) const SCRUBOPER * const rgscrubOper,
         const INT cscrubOper)
 //  ================================================================
@@ -2667,9 +2667,9 @@ LOCAL VOID NDScrubOneUsedPage(
 
 //  ================================================================
 ERR ErrNDScrubOneUsedPage(
-        __in PIB * const ppib,
+        _In_ PIB * const ppib,
         const IFMP ifmp,
-        __in CSR * const pcsr,
+        _In_ CSR * const pcsr,
         __in_ecount(cscrubOper) const SCRUBOPER * const rgscrubOper,
         const INT cscrubOper,
         const DIRFLAG dirflag)
@@ -2703,7 +2703,7 @@ HandleError:
 
 
 //  ================================================================
-LOCAL VOID NDScrubOneUnusedPage( __in CSR * const pcsr )
+LOCAL VOID NDScrubOneUnusedPage( _In_ CSR * const pcsr )
 //  ================================================================
 {
     Assert( pcsr->Cpage().FAssertWriteLatch( ) );
@@ -2724,9 +2724,9 @@ LOCAL VOID NDScrubOneUnusedPage( __in CSR * const pcsr )
 
 //  ================================================================
 ERR ErrNDScrubOneUnusedPage(
-        __in PIB * const ppib,
+        _In_ PIB * const ppib,
         const IFMP ifmp,
-        __in CSR * const pcsr,
+        _In_ CSR * const pcsr,
         const DIRFLAG dirflag)
 //  ================================================================
 {

@@ -64,10 +64,10 @@ public:
 
     void PathVolumeCanonicalAndDiskId(  const WCHAR* const                                  wszVolumePath,
                                         __out_ecount(cchVolumeCanonicalPath) WCHAR* const   wszVolumeCanonicalPath,
-                                        __in const DWORD                                    cchVolumeCanonicalPath,
+                                        _In_ const DWORD                                    cchVolumeCanonicalPath,
                                         __out_ecount(cchDiskId) WCHAR* const                wszDiskId,
-                                        __in const DWORD                                    cchDiskId,
-                                        __out DWORD *                                       pdwDiskNumber ) override
+                                        _In_ const DWORD                                    cchDiskId,
+                                        _Out_ DWORD *                                       pdwDiskNumber ) override
     {
         AssertRTL( fFalse && "Not implemented" );
     }

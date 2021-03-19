@@ -132,7 +132,7 @@ void  JetErrorToString( JET_ERR err, const char **szError, const char **szErrorT
 
 //	returns the ERRORMSGDATA struct for the index value, returns NULL if no more entries
 
-const ERRORMSGDATA * PerrorEntryI( __in int iEntry )
+const ERRORMSGDATA * PerrorEntryI( _In_ int iEntry )
 	{
 	if ( iEntry < _countof(rgerror) )
 		{

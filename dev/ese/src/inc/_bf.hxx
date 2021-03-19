@@ -860,7 +860,7 @@ extern LONG_PTR                 g_cbfChunk;
 extern BF**                     g_rgpbfChunk;
 
 
-ERR ErrBFICacheInit( __in const LONG cbPageSizeMax );
+ERR ErrBFICacheInit( _In_ const LONG cbPageSizeMax );
 void BFICacheTerm();
 
 enum eResidentCacheStatusChange
@@ -922,7 +922,7 @@ class CCacheRAM
         DWORD CpgEvict()    { return m_cpgEvictNorm; }
 
         virtual void UpdateStatistics();
-        virtual void ConsumeResourceAdjustments( __out double * const pdcbTotalResource, __in const double cbResourceSize );
+        virtual void ConsumeResourceAdjustments( _Out_ double * const pdcbTotalResource, _In_ const double cbResourceSize );
         void OverrideResourceAdjustments( double const dcbRource );
 
         virtual size_t  TotalPhysicalMemory();
@@ -1279,19 +1279,19 @@ TICK DtickBFIMaintCacheSizeDuration();
 
     //  Buffer Size and Management
 
-void BFIFaultInBuffer( __inout void * pv, __in LONG cb );
+void BFIFaultInBuffer( __inout void * pv, _In_ LONG cb );
 void BFIFaultInBuffer( const PBF pbf );
 
-ICBPage IcbBFIBufferSize( __in const INT cbSize );
+ICBPage IcbBFIBufferSize( _In_ const INT cbSize );
 LONG CbBFIBufferSize( const PBF pbf );
-inline _Ret_range_( icbPageInvalid, icbPageBiggest ) ICBPage IcbBFIPageSize( __in const INT cbSize );
+inline _Ret_range_( icbPageInvalid, icbPageBiggest ) ICBPage IcbBFIPageSize( _In_ const INT cbSize );
 LONG CbBFIPageSize( const PBF pbf );
 
-ERR ErrBFISetBufferSize( __inout PBF pbf, __in const ICBPage icbNewSize, __in const BOOL fWait );
-void BFIGrowBuffer( __inout PBF pbf, __in const ICBPage icbNewSize );
-void BFIShrinkBuffer( __inout PBF pbf, __in const ICBPage icbNewSize );
+ERR ErrBFISetBufferSize( __inout PBF pbf, _In_ const ICBPage icbNewSize, _In_ const BOOL fWait );
+void BFIGrowBuffer( __inout PBF pbf, _In_ const ICBPage icbNewSize );
+void BFIShrinkBuffer( __inout PBF pbf, _In_ const ICBPage icbNewSize );
 
-void BFIDehydratePage( PBF pbf, __in const BOOL fAllowReorg );
+void BFIDehydratePage( PBF pbf, _In_ const BOOL fAllowReorg );
 void BFIRehydratePage( PBF pbf );
 
 
@@ -1346,7 +1346,7 @@ ERR ErrBFISetupBFFMPContext( IFMP ifmp );
     //  Page Manipulation
 
 void BFIAssertNewlyAllocatedPage( const PBF pbfNew, const BOOL fAvailPoolAdd = fFalse );
-ERR ErrBFIAllocPage( PBF* const ppbf, __in const ICBPage icbBufferSize, const BOOL fWait = fTrue, const BOOL fMRU = fTrue );
+ERR ErrBFIAllocPage( PBF* const ppbf, _In_ const ICBPage icbBufferSize, const BOOL fWait = fTrue, const BOOL fMRU = fTrue );
 void BFIReleaseBuffer( PBF pbf );
 void BFIFreePage( PBF pbf, const BOOL fMRU = fTrue, const BFFreePageFlags bffpfDangerousOptions = bffpfNone );
 
@@ -1373,30 +1373,30 @@ void BFIOpportunisticallyFlushPage( PBF pbf, IOREASONPRIMARY iorp );
 //  can only be used in places where the current/newer version of the page can be moved
 //  to a newer buffer.
 void BFIMaintImpedingPage( PBF pbf );
-ERR ErrBFIMaintImpedingPageLatch( PBF pbf, __in const BOOL fOwnsWrite, BFLatch* pbfl );
+ERR ErrBFIMaintImpedingPageLatch( PBF pbf, _In_ const BOOL fOwnsWrite, BFLatch* pbfl );
 
 //  While the name claims it is for versioning pages, the truth is these are only used
 //  to unload a hot or behind the checkpoint page.
 void BFIOpportunisticallyVersionPage( PBF pbf, PBF * ppbfOpportunisticCheckpointAdv );
-void BFIOpportunisticallyVersionCopyPage( PBF pbf, PBF * ppbfNew, __in const BOOL fOwnsWrite );
+void BFIOpportunisticallyVersionCopyPage( PBF pbf, PBF * ppbfNew, _In_ const BOOL fOwnsWrite );
 
 //  Versioning a page can happen in two directions, one where the newly allocated buffer
 //  is the "older" version (ErrBFIVersionPage()) and one where the newly allocated
 //  buffer is the "current" version of the page (ErrBFIVersionCopyPage()).
 ERR ErrBFIVersionPage( PBF pbf, PBF* ppbfOld, const BOOL fWait = fTrue );
-ERR ErrBFIVersionCopyPage( PBF pbfOrigOld, PBF* ppbfNewCurr, const BOOL fWait, __in const BOOL fOwnsWrite );
+ERR ErrBFIVersionCopyPage( PBF pbfOrigOld, PBF* ppbfNewCurr, const BOOL fWait, _In_ const BOOL fOwnsWrite );
 void BFICleanVersion( PBF pbf, BOOL fTearDownFMP );
 
-BOOL CmpPgno( __in const PGNO& pgno1, __in const PGNO& pgno2 );
+BOOL CmpPgno( _In_ const PGNO& pgno1, _In_ const PGNO& pgno2 );
 ERR ErrBFIPrereadPage( IFMP ifmp, PGNO pgno, const BFPreReadFlags bfprf, const BFPriority bfpri, const TraceContext& tc );
 INLINE void BFIMarkAsSuperCold( PBF pbf, const BOOL fUser );
 INLINE void BFITouchResource(
-    __in const PBF                  pbf,
-    __in const BFLatchType          bfltTraceOnly,
-    __in const BFLatchFlags         bflfTraceOnly,
-    __in const BOOL                 fTouch,
-    __in const ULONG_PTR            pctCachePriority,
-    __in const TraceContext&        tc );
+    _In_ const PBF                  pbf,
+    _In_ const BFLatchType          bfltTraceOnly,
+    _In_ const BFLatchFlags         bflfTraceOnly,
+    _In_ const BOOL                 fTouch,
+    _In_ const ULONG_PTR            pctCachePriority,
+    _In_ const TraceContext&        tc );
 
 INLINE BOOL FBFIDatabasePage( const PBF pbf );
 LOCAL BOOL FBFIBufferIsZeroed( const PBF pbf );
@@ -1415,11 +1415,11 @@ void BFIValidatePageUsed( const PBF pbf );
 
 ERR ErrBFIVerifyPage( const PBF pbf, const CPageEvents cpe, const BOOL fFixErrors );
 
-bool FBFICurrentPage( __in const PBF pbf, __in const IFMP ifmp, __in const PGNO pgno );
-bool FBFIUpdatablePage( __in const PBF pbf );
+bool FBFICurrentPage( _In_ const PBF pbf, _In_ const IFMP ifmp, _In_ const PGNO pgno );
+bool FBFIUpdatablePage( _In_ const PBF pbf );
 
 BOOL FBFIOwnsLatchType( const PBF pbf, const BFLatchType bfltHave );
-void BFIInitialize( __in PBF pbf, const TraceContext& tc );
+void BFIInitialize( _In_ PBF pbf, const TraceContext& tc );
 ERR ErrBFILatchPage(    _Out_ BFLatch* const    pbfl,
                         const IFMP              ifmp,
                         const PGNO              pgno,
@@ -1429,11 +1429,11 @@ ERR ErrBFILatchPage(    _Out_ BFLatch* const    pbfl,
                         const TraceContext&     tc,
                         _Out_ BOOL* const       pfCachedNewPage = NULL );
 void BFIReleaseSXWL( __inout PBF const pbf, const BFLatchType bfltHave );
-void BFIUnlatchMaintPage( __inout PBF const pbf, __in const BFLatchType bfltHave );
+void BFIUnlatchMaintPage( __inout PBF const pbf, _In_ const BFLatchType bfltHave );
 
 PBF PbfBFIGetFlushOrderLeaf( const PBF pbf, const BOOL fFlagCheckpointImpeders );
 
-void BFIAssertReadyForWrite( __in const PBF pbf );
+void BFIAssertReadyForWrite( _In_ const PBF pbf );
 ERR ErrBFITryPrepareFlushPage(
     _Inout_ const PBF           pbf,
     _In_ const BFLatchType  bfltHave,
@@ -1448,16 +1448,16 @@ ERR ErrBFIPrepareFlushPage(
                         _In_ const BOOL         fRemoveDependencies = fTrue,
                         _Out_opt_ BOOL * const  pfPermanentErr      = NULL );
 BOOL FBFITryAcquireExclusiveLatchForMaint( const PBF pbf );
-ERR ErrBFIAcquireExclusiveLatchForFlush( PBF pbf, __in const BOOL fUnencumberedPath );
+ERR ErrBFIAcquireExclusiveLatchForFlush( PBF pbf, _In_ const BOOL fUnencumberedPath );
 ERR ErrBFIFlushExclusiveLatchedAndPreparedBF(   __inout const PBF       pbf,
-                                    __in const IOREASON     iorBase,
-                                    __in const OSFILEQOS    qos,
-                                    __in const BOOL         fOpportune );
+                                    _In_ const IOREASON     iorBase,
+                                    _In_ const OSFILEQOS    qos,
+                                    _In_ const BOOL         fOpportune );
 ERR ErrBFIFlushPage(    __inout const PBF       pbf,
-                        __in const IOREASON     iorBase,
-                        __in const OSFILEQOS    qos,
-                        __in const BFDirtyFlags bfdfFlushMin    = bfdfDirty,
-                        __in const BOOL         fOpportune      = fFalse,
+                        _In_ const IOREASON     iorBase,
+                        _In_ const OSFILEQOS    qos,
+                        _In_ const BFDirtyFlags bfdfFlushMin    = bfdfDirty,
+                        _In_ const BOOL         fOpportune      = fFalse,
                         __out_opt BOOL * const  pfPermanentErr  = NULL );
 bool FBFICompleteFlushPage( _Inout_ PBF pbf, _In_ const BFLatchType bflt, _In_ const BOOL fUnencumberedPath = fFalse, _In_ const BOOL fCompleteRemapReVerify = fTrue, _In_ const BOOL fAllowTearDownClean = fFalse );
 
@@ -1472,7 +1472,7 @@ void BFIRenouncePage( _Inout_ PBF pbf, _In_ const BOOL fRenounceDirty );
 
 extern const CHAR mpbfdfsz[ bfdfMax - bfdfMin ][ 16 ];
 void BFIDirtyPage( PBF pbf, BFDirtyFlags bfdf, const TraceContext& tc );
-void BFICleanPage( __inout PBF pbf, __in const BFLatchType bfltHave, __in const BFCleanFlags bfcf = bfcfNone );
+void BFICleanPage( __inout PBF pbf, _In_ const BFLatchType bfltHave, _In_ const BFCleanFlags bfcf = bfcfNone );
 
     //  Range-locking for external zeroing.
 
@@ -1526,8 +1526,8 @@ struct BFIPageRangeLock
 
     //  Log I/O
 
-ERR ErrBFIWriteLog( __in const IFMP ifmp, __in const BOOL fSync );
-ERR ErrBFIFlushLog( __in const IFMP ifmp, __in const IOFLUSHREASON iofr, const BOOL fMayOwnBFLatch = fFalse );
+ERR ErrBFIWriteLog( _In_ const IFMP ifmp, _In_ const BOOL fSync );
+ERR ErrBFIFlushLog( _In_ const IFMP ifmp, _In_ const IOFLUSHREASON iofr, const BOOL fMayOwnBFLatch = fFalse );
 
 
     //  I/O

@@ -144,7 +144,7 @@ public:
     virtual void FreeBuffer( BFLatch * const ) const = 0;
     virtual ULONG CbBuffer( const BFLatch& ) const = 0;
     virtual ULONG CbPage( const BFLatch& ) const = 0;
-    virtual void SetBufferSize( BFLatch * const, __in ULONG cbNewSize ) const = 0;
+    virtual void SetBufferSize( BFLatch * const, _In_ ULONG cbNewSize ) const = 0;
     virtual void MarkAsSuperCold( BFLatch * const ) const = 0;
 
     // latching functions
@@ -241,7 +241,7 @@ public:
     virtual void FreeBuffer( BFLatch * const ) const { Fail_(); }
     virtual ULONG CbBuffer( const BFLatch& ) const { Fail_(); return 0; }
     virtual ULONG CbPage( const BFLatch& ) const { Fail_(); return 0; }
-    virtual void SetBufferSize( BFLatch * const, __in ULONG cbNewSize ) const { Fail_(); }
+    virtual void SetBufferSize( BFLatch * const, _In_ ULONG cbNewSize ) const { Fail_(); }
     virtual void MarkAsSuperCold( BFLatch * const ) const { Fail_(); }
 
     // latching functions
@@ -375,7 +375,7 @@ public:
 
         return cbPage;
     }
-    virtual void SetBufferSize( BFLatch * const pbfl, __in ULONG cbNewSize ) const
+    virtual void SetBufferSize( BFLatch * const pbfl, _In_ ULONG cbNewSize ) const
     {
         BFSetBufferSize( pbfl, cbNewSize );
 
@@ -504,7 +504,7 @@ public:
 
     // buffer management
 protected:
-    void SetBufferSizeInfo( BFLatch * const pbfl, __in ULONG cbNewSize ) const
+    void SetBufferSizeInfo( BFLatch * const pbfl, _In_ ULONG cbNewSize ) const
     {
 #ifdef DEBUG
         ULONG cbPageOrig = CbPage( *pbfl );
@@ -570,7 +570,7 @@ public:
     }
 #pragma warning ( default : 4481 )
 public:
-    virtual void SetBufferSize( BFLatch * const pbfl, __in ULONG cbNewSize ) const
+    virtual void SetBufferSize( BFLatch * const pbfl, _In_ ULONG cbNewSize ) const
     {
 #ifdef DEBUG
         ULONG cbPageOrig = CbPage( *pbfl );
@@ -698,7 +698,7 @@ public:
         pbfl->dwContext = NULL;
     }
 
-    virtual void SetBufferSize( BFLatch * const pbfl, __in ULONG cbNewSize ) const
+    virtual void SetBufferSize( BFLatch * const pbfl, _In_ ULONG cbNewSize ) const
     {
 #ifdef DEBUG
         ULONG cbPageOrig = CbPage( *pbfl );
@@ -748,14 +748,14 @@ CTestLatchManager g_testPageLatchManager;
 //
 
 //  =================================================================
-BOOL CmpPtagIbSmall( __in const CPAGE::TAG * const ptag1, __in const CPAGE::TAG * const ptag2 )
+BOOL CmpPtagIbSmall( _In_ const CPAGE::TAG * const ptag1, _In_ const CPAGE::TAG * const ptag2 )
 //  =================================================================
 {
     return ptag1->Ib( fTrue /* fSmallFormat */ ) < ptag2->Ib( fTrue /* fSmallFormat */ );
 }
 
 //  =================================================================
-BOOL CmpPtagIbLarge( __in const CPAGE::TAG * const ptag1, __in const CPAGE::TAG * const ptag2 )
+BOOL CmpPtagIbLarge( _In_ const CPAGE::TAG * const ptag1, _In_ const CPAGE::TAG * const ptag2 )
 //  =================================================================
 {
     return ptag1->Ib( fFalse /* fSmallFormat */ ) < ptag2->Ib( fFalse /* fSmallFormat */ );
@@ -769,7 +769,7 @@ CPAGE::PfnCmpTAG CPAGE::PfnCmpPtagIb( const BOOL fSmallFormat )
 }
 
 //  =================================================================
-CPAGE::PfnCmpTAG CPAGE::PfnCmpPtagIb( __in ULONG cbPage )
+CPAGE::PfnCmpTAG CPAGE::PfnCmpPtagIb( _In_ ULONG cbPage )
 //  =================================================================
 {
     return CPAGE::PfnCmpPtagIb( FIsSmallPage( cbPage ) );
@@ -1177,7 +1177,7 @@ VOID CPageValidationLogEvent::ReportLostFlush_(
 //  Return the cb of a TAG, masking out the flags stored in the high
 //  order bits.
 //
-INLINE USHORT CPAGE::TAG::Cb( __in const BOOL fSmallFormat ) const
+INLINE USHORT CPAGE::TAG::Cb( _In_ const BOOL fSmallFormat ) const
 {
     if ( fSmallFormat )
     {
@@ -1193,7 +1193,7 @@ INLINE USHORT CPAGE::TAG::Cb( __in const BOOL fSmallFormat ) const
 //  Return the ib of a TAG, masking out the flags stored in the high
 //  order bits.
 //
-INLINE USHORT CPAGE::TAG::Ib( __in const BOOL fSmallFormat ) const
+INLINE USHORT CPAGE::TAG::Ib( _In_ const BOOL fSmallFormat ) const
 {
     if ( fSmallFormat )
     {
@@ -1209,7 +1209,7 @@ INLINE USHORT CPAGE::TAG::Ib( __in const BOOL fSmallFormat ) const
 //  Gets the flags stored in a TAG. They are extracted and put in the
 //  lower bits of a USHORT
 //
-INLINE USHORT CPAGE::TAG::FFlags( __in const CPAGE * const pPage, __in const BOOL fSmallFormat ) const
+INLINE USHORT CPAGE::TAG::FFlags( _In_ const CPAGE * const pPage, _In_ const BOOL fSmallFormat ) const
 {
     Assert( fSmallFormat == pPage->FSmallPageFormat() );
 
@@ -1237,7 +1237,7 @@ INLINE USHORT CPAGE::TAG::FFlags( __in const CPAGE * const pPage, __in const BOO
 //
 //  This sets the ib in a tag. The flags are left unchanged
 //
-INLINE VOID CPAGE::TAG::SetIb( __in CPAGE * const pPage, __in USHORT ib )
+INLINE VOID CPAGE::TAG::SetIb( _In_ CPAGE * const pPage, _In_ USHORT ib )
 {
     const BOOL fSmallFormat = pPage->FSmallPageFormat();
 
@@ -1271,7 +1271,7 @@ INLINE VOID CPAGE::TAG::SetIb( __in CPAGE * const pPage, __in USHORT ib )
 //
 //  Sets the cb in a tag. The flags are left unchanged
 //
-INLINE VOID CPAGE::TAG::SetCb( __in CPAGE * const pPage, __in USHORT cb )
+INLINE VOID CPAGE::TAG::SetCb( _In_ CPAGE * const pPage, _In_ USHORT cb )
 {
     const BOOL fSmallFormat = pPage->FSmallPageFormat();
 
@@ -1306,7 +1306,7 @@ INLINE VOID CPAGE::TAG::SetCb( __in CPAGE * const pPage, __in USHORT cb )
 //
 //  Sets the flags in a TAG. The cb and ib are not changed.
 //
-INLINE VOID CPAGE::TAG::SetFlags( __in CPAGE * const pPage, __in USHORT fFlags )
+INLINE VOID CPAGE::TAG::SetFlags( _In_ CPAGE * const pPage, _In_ USHORT fFlags )
 {
     Assert( 0 == ( fFlags & ~0x7 ) );   // only 3 valid flags
 
@@ -1717,7 +1717,7 @@ USHORT CPAGE::CbPageFree ( ) const
 
 
 //  ================================================================
-INLINE VOID CPAGE::FreeSpace_( __in const INT cb )
+INLINE VOID CPAGE::FreeSpace_( _In_ const INT cb )
 //  ================================================================
 //
 //  Creates the amount of contigous free space passed to it,
@@ -2563,7 +2563,7 @@ VOID CPAGE::LoadNewPage(
 
 #ifdef ENABLE_JET_UNIT_TEST
 //  ================================================================
-VOID CPAGE::LoadNewTestPage( __in const ULONG cb, __in const IFMP ifmp )
+VOID CPAGE::LoadNewTestPage( _In_ const ULONG cb, _In_ const IFMP ifmp )
 //  ================================================================
 {
     Assert( 0 != cb );
@@ -2701,7 +2701,7 @@ VOID CPAGE::GetRevertedNewPage(
 }
 
 //  ================================================================
-VOID CPAGE::ReBufferPage( __in const BFLatch& bfl, const IFMP ifmp, const PGNO pgno, VOID * const pv, const ULONG cb )
+VOID CPAGE::ReBufferPage( _In_ const BFLatch& bfl, const IFMP ifmp, const PGNO pgno, VOID * const pv, const ULONG cb )
 //  ================================================================
 //
 //  Loads a CPAGE from an arbitrary chunk of memory
@@ -3494,7 +3494,7 @@ BOOL CPAGE::FLastNodeHasNullKey() const
 
 
 //  ================================================================
-BOOL CPAGE::FPageIsInitialized( __in const void* const pv, __in ULONG cb )
+BOOL CPAGE::FPageIsInitialized( _In_ const void* const pv, _In_ ULONG cb )
 //  ================================================================
 {
     Assert ( pv != NULL );
@@ -3689,10 +3689,10 @@ VOID CPAGE::OverwriteUnusedSpace( const CHAR chZero )
 
 //  ================================================================
 VOID CPAGE::ReorganizePage(
-    __out const VOID ** pvHeader,
-    __out size_t * const  pcbHeader,
-    __out const VOID ** pvTrailer,
-    __out size_t * const pcbTrailer)
+    _Out_ const VOID ** pvHeader,
+    _Out_ size_t * const  pcbHeader,
+    _Out_ const VOID ** pvTrailer,
+    _Out_ size_t * const pcbTrailer)
 //  ================================================================
 {
     ASSERT_VALID( this );
@@ -3998,7 +3998,7 @@ VOID CPAGE::ReportReadLostFlushVerifyFailure_(
 }
 
 //  ================================================================
-VOID CPAGE::SetFlushType_( __in const CPAGE::PageFlushType pgft )
+VOID CPAGE::SetFlushType_( _In_ const CPAGE::PageFlushType pgft )
 //  ================================================================
 {
     ((PGHDR*)m_bfl.pv)->fFlags = ( ((PGHDR*)m_bfl.pv)->fFlags & ~maskFlushType ) | ( (ULONG)pgft << 15 );
@@ -4006,9 +4006,9 @@ VOID CPAGE::SetFlushType_( __in const CPAGE::PageFlushType pgft )
 
 //  ================================================================
 ERR CPAGE::ErrValidatePage(
-    __in const PAGEValidationFlags pgvf,
-    __in IPageValidationAction * const pvalidationaction,
-    __in CFlushMap* pflushmap )
+    _In_ const PAGEValidationFlags pgvf,
+    _In_ IPageValidationAction * const pvalidationaction,
+    _In_ CFlushMap* pflushmap )
 //  ================================================================
 {
     Assert( pgvf < pgvfMax );
@@ -4809,9 +4809,9 @@ HandleError:
 
 //  ================================================================
 VOID CPAGE::PreparePageForWrite( 
-    __in const CPAGE::PageFlushType pgft,
-    __in const BOOL fSkipSetFlushType,  // default = fFalse
-    __in const BOOL fSkipFMPCheck )     // default = fFalse
+    _In_ const CPAGE::PageFlushType pgft,
+    _In_ const BOOL fSkipSetFlushType,  // default = fFalse
+    _In_ const BOOL fSkipFMPCheck )     // default = fFalse
 //  ================================================================
 {
     Assert( FIsNormalSized() );
@@ -5304,7 +5304,7 @@ ULONG CPAGE::CbReorganizedDehydrateRequired_() const
 
 
 //  ================================================================
-BOOL CPAGE::FPageIsDehydratable( __out ULONG * pcbMinimumSize, __in const BOOL fAllowReorg ) const
+BOOL CPAGE::FPageIsDehydratable( _Out_ ULONG * pcbMinimumSize, _In_ const BOOL fAllowReorg ) const
 //  ================================================================
 //
 //  returns if it is worth it to compress / dehydrate this page, and
@@ -5398,7 +5398,7 @@ VOID CPAGE::OptimizeInternalFragmentation()
 
 
 //  ================================================================
-VOID CPAGE::DehydratePageUnadjusted_( __in const ULONG cbNewSize )
+VOID CPAGE::DehydratePageUnadjusted_( _In_ const ULONG cbNewSize )
 //  ================================================================
 //
 //  Takes a new size (which should be at least as large as the value
@@ -5480,7 +5480,7 @@ VOID CPAGE::DehydratePageUnadjusted_( __in const ULONG cbNewSize )
 
 
 //  ================================================================
-VOID CPAGE::DehydratePage( __in const ULONG cbNewSize, __in const BOOL fAllowReorg )
+VOID CPAGE::DehydratePage( _In_ const ULONG cbNewSize, _In_ const BOOL fAllowReorg )
 //  ================================================================
 //
 //  Takes a new size (which should be at least as large as the value
@@ -5812,7 +5812,7 @@ CPAGE::TAG::TAG() : cb_( 0 ), ib_( 0 )
 //------------------------------------------------------------------
 
 //  ================================================================
-VOID CPAGE::TAG::ErrTest( __in VOID * const pvBuffer, ULONG cbPageSize )
+VOID CPAGE::TAG::ErrTest( _In_ VOID * const pvBuffer, ULONG cbPageSize )
 //  ================================================================
 {
     PGHDR* ppgHdr = ( PGHDR* )pvBuffer;
@@ -5890,7 +5890,7 @@ VOID CPAGE::TAG::ErrTest( __in VOID * const pvBuffer, ULONG cbPageSize )
 
 
 //  ================================================================
-ERR CPAGE::ErrTest( __in const ULONG cbPageSize )
+ERR CPAGE::ErrTest( _In_ const ULONG cbPageSize )
 //  ================================================================
 {
     //  Check the constants

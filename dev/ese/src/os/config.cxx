@@ -97,7 +97,7 @@ LOCAL WCHAR g_wszConfigProcess[_MAX_PATH];
 //
 //  NOTE:  either '/' or '\\' is a valid path separator
 
-const BOOL FOSConfigISet( __in PCWSTR const wszPath, __in PCWSTR const wszName, __in PCWSTR const wszValue )
+const BOOL FOSConfigISet( _In_ PCWSTR const wszPath, _In_ PCWSTR const wszName, _In_ PCWSTR const wszValue )
 {
 
     //  create the path, returning fFalse on any failures
@@ -183,7 +183,7 @@ const BOOL FOSConfigSet_( const WCHAR* const wszPath, const WCHAR* const wszName
 //
 //  NOTE:  either '/' or '\\' is a valid path separator
 
-const BOOL FOSConfigIGet( __in PCWSTR const wszPath, const WCHAR* const wszName, __out_bcount(cbBuf) WCHAR* const wszBuf, const LONG cbBuf )
+const BOOL FOSConfigIGet( _In_ PCWSTR const wszPath, const WCHAR* const wszName, __out_bcount(cbBuf) WCHAR* const wszBuf, const LONG cbBuf )
 {
     //  open registry key with this path
 

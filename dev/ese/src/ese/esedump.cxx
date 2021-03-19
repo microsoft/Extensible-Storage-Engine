@@ -32,9 +32,9 @@ const BYTE mpbb[] = {'0', '1', '2', '3', '4', '5', '6', '7', '8',
 
 typedef char * (*PfnFormatNodeInfo)( KEYDATAFLAGS * pNode );
 
-LOCAL ERR ErrESEDUMPOneTable(FUCB *, __in PCSTR, JET_GRBIT);
+LOCAL ERR ErrESEDUMPOneTable(FUCB *, _In_ PCSTR, JET_GRBIT);
 LOCAL ERR ErrESEDUMPNodesForOneTree(FUCB *pfucbTable, JET_GRBIT grbitESEDUMPMode, PfnFormatNodeInfo pfnFormat = NULL);
-LOCAL ERR ErrESEDUMPTables( JET_SESID , JET_DBID , __in PCWSTR, JET_GRBIT);
+LOCAL ERR ErrESEDUMPTables( JET_SESID , JET_DBID , _In_ PCWSTR, JET_GRBIT);
 LOCAL ERR ErrESEDUMPIndexForOneTable(FUCB *, JET_GRBIT);
 LOCAL ERR ErrESEDUMPCheckAndDumpSpaceInfo(FUCB *, JET_GRBIT);
 LOCAL ERR ErrESEDUMPDatabaseInfo(PIB *, IFMP , JET_GRBIT);
@@ -106,7 +106,7 @@ HandleError:
 // Dumps all the tables with nodes, space info, indexes, LV's
 // It makes a loop into the Catalog and
 // for each table call a DumpOneTable function
-LOCAL ERR ErrESEDUMPTables( JET_SESID sesid, JET_DBID ifmp, __in PCWSTR wszTable, JET_GRBIT grbitESEDUMPMode )
+LOCAL ERR ErrESEDUMPTables( JET_SESID sesid, JET_DBID ifmp, _In_ PCWSTR wszTable, JET_GRBIT grbitESEDUMPMode )
 {
     ERR         err;
     FUCB        *pfucbCatalog =     pfucbNil;
@@ -230,7 +230,7 @@ HandleError:
 // dumps one table with nodes, space info, indexes, LV's
 // szTableName - is the table name
 // pfucbCatalob - get the session and database
-LOCAL ERR ErrESEDUMPOneTable(FUCB *pfucbCatalog, __in PCSTR szTableName, JET_GRBIT grbitESEDUMPMode)
+LOCAL ERR ErrESEDUMPOneTable(FUCB *pfucbCatalog, _In_ PCSTR szTableName, JET_GRBIT grbitESEDUMPMode)
 {
     ERR err =           JET_errSuccess;
     FUCB *pfucbTable =  pfucbNil;

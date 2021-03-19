@@ -503,12 +503,12 @@ INLINE BOOL FCB::FCBCheckAvailList_( const BOOL fShouldBeInList, const BOOL fPur
 }
 #endif  //  DEBUG
 
-VOID FCB::RefreshPreferredPerfCounter( __in INST * const pinst )
+VOID FCB::RefreshPreferredPerfCounter( _In_ INST * const pinst )
 {
     PERFOpt( cFCBCachePreferred.Set( pinst, (LONG)UlParam( pinst, JET_paramCachedClosedTables ) ) );
 }
 
-VOID FCB::ResetPerfCounters( __in INST * const pinst, BOOL fTerminating )
+VOID FCB::ResetPerfCounters( _In_ INST * const pinst, BOOL fTerminating )
 {
     PERFOpt( cFCBSyncPurge.Clear( pinst ) );
     PERFOpt( cFCBSyncPurgeStalls.Clear( pinst ) );
@@ -1134,8 +1134,8 @@ VOID FCB::CreateComplete_( ERR err, PCSTR szFile, const LONG lLine )
 //  Scans and purges the LRU available list for FCBs.
 
 BOOL FCB::FScanAndPurge_(
-    __in INST * pinst,
-    __in PIB * ppib,
+    _In_ INST * pinst,
+    _In_ PIB * ppib,
     const BOOL fThreshold )
 {
     ULONG   cFCBInspected                   = 0;
@@ -1404,8 +1404,8 @@ enum FCBPurgeFailReason : BYTE // fcbpfr
 //          etc... (everything that makes it free), we can purge the FCB
 
 BOOL FCB::FCheckFreeAndPurge_(
-    __in PIB *ppib,
-    __in const BOOL fThreshold )
+    _In_ PIB *ppib,
+    _In_ const BOOL fThreshold )
 {
     INST            *pinst = PinstFromPpib( ppib );
 

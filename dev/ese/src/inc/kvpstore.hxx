@@ -188,7 +188,7 @@ public:
     //  user version control
     //
 
-    ERR ErrKVPGetUserVersion( __out DWORD * pdwMinorVersion, __out DWORD * pwUpdateVersion );
+    ERR ErrKVPGetUserVersion( _Out_ DWORD * pdwMinorVersion, _Out_ DWORD * pwUpdateVersion );
     ERR ErrKVPSetUserVersion( const DWORD dwMinorVersion, const DWORD dwUpdateVersion );
 
     //  key limitations
@@ -211,10 +211,10 @@ public:
     //  getting values
     //
     
-    ERR ErrKVPGetValue( const WCHAR * const wszKey, __out INT * piValue );
+    ERR ErrKVPGetValue( const WCHAR * const wszKey, _Out_ INT * piValue );
 #ifdef FUTURE_SUPPORT_MORE_VALUE_TYPES
-    ERR ErrKVPGetValue( const WCHAR * const wszKey, __out INT64 * pi64Value );
-    ERR ErrKVPGetValue( const WCHAR * const wszKey, __out BYTE * const pbValue, const ULONG cbValue );
+    ERR ErrKVPGetValue( const WCHAR * const wszKey, _Out_ INT64 * pi64Value );
+    ERR ErrKVPGetValue( const WCHAR * const wszKey, _Out_ BYTE * const pbValue, const ULONG cbValue );
 #endif
 
     //  debugging
@@ -299,7 +299,7 @@ public:
         //
 
         const WCHAR * WszKVPSCursorCurrKey() const;
-        ERR ErrKVPSCursorGetValue( __out INT * piValue );
+        ERR ErrKVPSCursorGetValue( _Out_ INT * piValue );
     protected:
         // something to get the type for Dump().
         ERR ErrKVPSCursorIGetType( CKVPStore::KVPIValueType * const pkvpvt );
@@ -309,7 +309,7 @@ public:
         //  updating properties
         //
 
-        ERR ErrKVPSCursorUpdValue( __in INT iValue );
+        ERR ErrKVPSCursorUpdValue( _In_ INT iValue );
 
     };
 

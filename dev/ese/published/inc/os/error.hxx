@@ -12,7 +12,7 @@
 //  Forward Declarations
 //
 
-INT UtilMessageBoxW( IN const WCHAR * const wszText, IN const WCHAR * const wszCaption, IN const UINT uType );
+INT UtilMessageBoxW( _In_ const WCHAR * const wszText, _In_ const WCHAR * const wszCaption, _In_ const UINT uType );
 void KernelDebugBreakPoint();
 
 const CHAR * SzSourceFileName( const CHAR * szFilePath );
@@ -499,7 +499,7 @@ private:
     INT                         m_err;              //  err for the error frame
 
 public:
-    INLINE void Set( __in const CHAR* szFile, __in const LONG lLine, __in const ERR err )
+    INLINE void Set( _In_ const CHAR* szFile, _In_ const LONG lLine, _In_ const ERR err )
     {
         m_szFile = szFile;
         m_ulLine = lLine;
@@ -527,7 +527,7 @@ public:
 
 __forceinline CErrFrameSimple * PefLastThrow();
 
-__forceinline ERR ErrERRSetLastThrow( __in const CHAR* szFile, __in const LONG lLine, __in const ERR err )
+__forceinline ERR ErrERRSetLastThrow( _In_ const CHAR* szFile, _In_ const LONG lLine, _In_ const ERR err )
 {
     PefLastThrow()->Set( szFile, lLine, err );
     AssertRTL( err > -65536 && err < 65536 );
@@ -571,7 +571,7 @@ ERR ErrERRCheck_( const ERR err, const CHAR* szFile, const LONG lLine );
 
 #define ErrERRCheck( err )  ErrERRCheck_( err, __FILE__, __LINE__ )
 
-__forceinline ERR ErrERRCheck_( __in const ERR err, __in const CHAR* szFile, __in const LONG lLine )
+__forceinline ERR ErrERRCheck_( _In_ const ERR err, _In_ const CHAR* szFile, _In_ const LONG lLine )
 {
     extern ERR g_errTrap;
     PefLastThrow()->Set( szFile, lLine, err );
@@ -589,7 +589,7 @@ __forceinline ERR ErrERRCheck_( __in const ERR err, __in const CHAR* szFile, __i
 
 
 #ifdef DEBUG
-void ERRSetLastCall( __in const CHAR * szFile, __in const LONG lLine, __in const ERR err );
+void ERRSetLastCall( _In_ const CHAR * szFile, _In_ const LONG lLine, _In_ const ERR err );
 #else
 #define ERRSetLastCall( szFile, lLine, err )
 #endif

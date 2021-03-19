@@ -993,11 +993,11 @@ Cleanup:
 
 JET_ERR
 BounceJetExternalRestore(
-    __in JET_PSTR   szCheckpointFilePath,
-    __in JET_PSTR   szLogPath,
+    _In_ JET_PSTR   szCheckpointFilePath,
+    _In_ JET_PSTR   szLogPath,
     JET_RSTMAP *    rgrstmap,
     long        crstfilemap,
-    __in JET_PSTR   szBackupLogPath,
+    _In_ JET_PSTR   szBackupLogPath,
     long        genLow,
     long        genHigh,
     JET_PFNSTATUS   pfn
@@ -1006,11 +1006,11 @@ BounceJetExternalRestore(
     JET_ERR     err = JET_errSuccess;
 
     typedef JET_ERR ( __stdcall *PFN_JetExternalRestore ) (
-    __in JET_PSTR   szCheckpointFilePath,
-    __in JET_PSTR   szLogPath,
+    _In_ JET_PSTR   szCheckpointFilePath,
+    _In_ JET_PSTR   szLogPath,
     JET_RSTMAP *    rgrstmap,
     long        crstfilemap,
-    __in JET_PSTR   szBackupLogPath,
+    _In_ JET_PSTR   szBackupLogPath,
     long        genLow,
     long        genHigh,
     JET_PFNSTATUS   pfn  );
@@ -1018,11 +1018,11 @@ BounceJetExternalRestore(
     static PFN_JetExternalRestore pfnJetExternalRestore = NULL;
 
     typedef JET_ERR ( __stdcall *PFN_JetExternalRestoreA ) (
-    __in JET_PSTR   szCheckpointFilePath,
-    __in JET_PSTR   szLogPath,
+    _In_ JET_PSTR   szCheckpointFilePath,
+    _In_ JET_PSTR   szLogPath,
     JET_RSTMAP *    rgrstmap,
     long        crstfilemap,
-    __in JET_PSTR   szBackupLogPath,
+    _In_ JET_PSTR   szBackupLogPath,
     long        genLow,
     long        genHigh,
     JET_PFNSTATUS   pfn  );
@@ -1030,11 +1030,11 @@ BounceJetExternalRestore(
     static PFN_JetExternalRestoreA pfnJetExternalRestoreA = NULL;
 
     typedef JET_ERR ( __stdcall *PFN_JetExternalRestoreW ) (
-    __in JET_PWSTR  wszCheckpointFilePath,
-    __in JET_PWSTR  wszLogPath,
+    _In_ JET_PWSTR  wszCheckpointFilePath,
+    _In_ JET_PWSTR  wszLogPath,
     JET_RSTMAP_W *  rgrstmap,
     long        crstfilemap,
-    __in JET_PWSTR  wszBackupLogPath,
+    _In_ JET_PWSTR  wszBackupLogPath,
     long        genLow,
     long        genHigh,
     JET_PFNSTATUS   pfn  );
@@ -1240,58 +1240,58 @@ Cleanup:
 
 JET_ERR
 BounceJetExternalRestore2(
-    __in JET_PSTR   szCheckpointFilePath,
-    __in JET_PSTR   szLogPath,
+    _In_ JET_PSTR   szCheckpointFilePath,
+    _In_ JET_PSTR   szLogPath,
     JET_RSTMAP *    rgrstmap,
     long        crstfilemap,
-    __in JET_PSTR   szBackupLogPath,
+    _In_ JET_PSTR   szBackupLogPath,
     JET_LOGINFO *   pLogInfo,
-    __in JET_PSTR   szTargetInstanceName,
-    __in JET_PSTR   szTargetInstanceLogPath,
-    __in JET_PSTR   szTargetInstanceCheckpointPath,
+    _In_ JET_PSTR   szTargetInstanceName,
+    _In_ JET_PSTR   szTargetInstanceLogPath,
+    _In_ JET_PSTR   szTargetInstanceCheckpointPath,
     JET_PFNSTATUS pfn
 )
 {
     JET_ERR     err = JET_errSuccess;
 
     typedef JET_ERR ( __stdcall *PFN_JetExternalRestore2 ) (
-    __in JET_PSTR   szCheckpointFilePath,
-    __in JET_PSTR   szLogPath,
+    _In_ JET_PSTR   szCheckpointFilePath,
+    _In_ JET_PSTR   szLogPath,
     JET_RSTMAP *    rgrstmap,
     long        crstfilemap,
-    __in JET_PSTR   szBackupLogPath,
+    _In_ JET_PSTR   szBackupLogPath,
     JET_LOGINFO *   pLogInfo,
-    __in JET_PSTR   szTargetInstanceName,
-    __in JET_PSTR   szTargetInstanceLogPath,
-    __in JET_PSTR   szTargetInstanceCheckpointPath,
+    _In_ JET_PSTR   szTargetInstanceName,
+    _In_ JET_PSTR   szTargetInstanceLogPath,
+    _In_ JET_PSTR   szTargetInstanceCheckpointPath,
     JET_PFNSTATUS pfn  );
 
     static PFN_JetExternalRestore2 pfnJetExternalRestore2 = NULL;
 
     typedef JET_ERR ( __stdcall *PFN_JetExternalRestore2A ) (
-    __in JET_PSTR   szCheckpointFilePath,
-    __in JET_PSTR   szLogPath,
+    _In_ JET_PSTR   szCheckpointFilePath,
+    _In_ JET_PSTR   szLogPath,
     JET_RSTMAP *    rgrstmap,
     long        crstfilemap,
-    __in JET_PSTR   szBackupLogPath,
+    _In_ JET_PSTR   szBackupLogPath,
     JET_LOGINFO *   pLogInfo,
-    __in JET_PSTR   szTargetInstanceName,
-    __in JET_PSTR   szTargetInstanceLogPath,
-    __in JET_PSTR   szTargetInstanceCheckpointPath,
+    _In_ JET_PSTR   szTargetInstanceName,
+    _In_ JET_PSTR   szTargetInstanceLogPath,
+    _In_ JET_PSTR   szTargetInstanceCheckpointPath,
     JET_PFNSTATUS pfn  );
 
     static PFN_JetExternalRestore2A pfnJetExternalRestore2A = NULL;
 
     typedef JET_ERR ( __stdcall *PFN_JetExternalRestore2W ) (
-    __in JET_PWSTR  wszCheckpointFilePath,
-    __in JET_PWSTR  wszLogPath,
+    _In_ JET_PWSTR  wszCheckpointFilePath,
+    _In_ JET_PWSTR  wszLogPath,
     JET_RSTMAP_W *  rgrstmap,
     long        crstfilemap,
-    __in JET_PWSTR  wszBackupLogPath,
+    _In_ JET_PWSTR  wszBackupLogPath,
     JET_LOGINFO_W * pLogInfo,
-    __in JET_PWSTR  wszTargetInstanceName,
-    __in JET_PWSTR  wszTargetInstanceLogPath,
-    __in JET_PWSTR  wszTargetInstanceCheckpointPath,
+    _In_ JET_PWSTR  wszTargetInstanceName,
+    _In_ JET_PWSTR  wszTargetInstanceLogPath,
+    _In_ JET_PWSTR  wszTargetInstanceCheckpointPath,
     JET_PFNSTATUS pfn  );
 
     static PFN_JetExternalRestore2W pfnJetExternalRestore2W = NULL;
@@ -2220,7 +2220,7 @@ JET_ERR
 BounceJetCreateIndex(
     JET_SESID       sesid,
     JET_TABLEID     tableid,
-    __in JET_PCSTR  szIndexName,
+    _In_ JET_PCSTR  szIndexName,
     JET_GRBIT       grbit,
     const char      *szKey,
     unsigned long   cbKey,
@@ -2232,7 +2232,7 @@ BounceJetCreateIndex(
     typedef JET_ERR ( __stdcall *PFN_JetCreateIndex ) ( 
     JET_SESID       sesid,
     JET_TABLEID     tableid,
-    __in JET_PCSTR  szIndexName,
+    _In_ JET_PCSTR  szIndexName,
     JET_GRBIT       grbit,
     const char      *szKey,
     unsigned long   cbKey,
@@ -2243,7 +2243,7 @@ BounceJetCreateIndex(
     typedef JET_ERR ( __stdcall *PFN_JetCreateIndexA ) ( 
     JET_SESID       sesid,
     JET_TABLEID     tableid,
-    __in JET_PCSTR  szIndexName,
+    _In_ JET_PCSTR  szIndexName,
     JET_GRBIT       grbit,
     const char      *szKey,
     unsigned long   cbKey,
@@ -2254,7 +2254,7 @@ BounceJetCreateIndex(
     typedef JET_ERR ( __stdcall *PFN_JetCreateIndexW ) ( 
     JET_SESID       sesid,
     JET_TABLEID     tableid,
-    __in JET_PCWSTR  wszIndexName,
+    _In_ JET_PCWSTR  wszIndexName,
     JET_GRBIT       grbit,
     const WCHAR     *wszKey,
     unsigned long   cbKey,
@@ -2718,24 +2718,24 @@ Cleanup:
 
 JET_ERR
 BounceJetRemoveLogfile(
-    __in JET_PCSTR szDatabase,
-    __in JET_PCSTR szLogfile,
-    __in JET_GRBIT grbit
+    _In_ JET_PCSTR szDatabase,
+    _In_ JET_PCSTR szLogfile,
+    _In_ JET_GRBIT grbit
 )
 {
     JET_ERR     err = JET_errSuccess;
 
     typedef JET_ERR ( __stdcall *PFN_JetRemoveLogfileA ) ( 
-    __in JET_PCSTR szDatabase,
-    __in JET_PCSTR szLogfile,
-    __in JET_GRBIT grbit  );
+    _In_ JET_PCSTR szDatabase,
+    _In_ JET_PCSTR szLogfile,
+    _In_ JET_GRBIT grbit  );
 
     static PFN_JetRemoveLogfileA pfnJetRemoveLogfileA = NULL;
 
     typedef JET_ERR ( __stdcall *PFN_JetRemoveLogfileW ) ( 
-    __in JET_PCWSTR wszDatabase,
-    __in JET_PCWSTR wszLogfile,
-    __in JET_GRBIT grbit  );
+    _In_ JET_PCWSTR wszDatabase,
+    _In_ JET_PCWSTR wszLogfile,
+    _In_ JET_GRBIT grbit  );
 
     static PFN_JetRemoveLogfileW pfnJetRemoveLogfileW = NULL;
     // Should we widen the parameter?
@@ -2860,39 +2860,39 @@ Cleanup:
 
 JET_ERR
 BounceJetGetDatabasePages(
-    __in JET_SESID                              sesid,
-    __in JET_DBID                               dbid,
-    __in unsigned long                          pgnoStart,
-    __in unsigned long                          cpg,
+    _In_ JET_SESID                              sesid,
+    _In_ JET_DBID                               dbid,
+    _In_ unsigned long                          pgnoStart,
+    _In_ unsigned long                          cpg,
     __out_bcount_part( cb,
     *pcbActual ) void * pv,
-    __in unsigned long                          cb,
-    __out unsigned long *                       pcbActual,
-    __in JET_GRBIT                              grbit
+    _In_ unsigned long                          cb,
+    _Out_ unsigned long *                       pcbActual,
+    _In_ JET_GRBIT                              grbit
 )
 {
     JET_ERR     err = JET_errSuccess;
 
     typedef JET_ERR ( __stdcall *PFN_JetGetDatabasePages ) ( 
-    __in JET_SESID                              sesid,
-    __in JET_DBID                               dbid,
-    __in unsigned long                          pgno,
+    _In_ JET_SESID                              sesid,
+    _In_ JET_DBID                               dbid,
+    _In_ unsigned long                          pgno,
     __out_bcount_part( cb, *pcbActual ) void *  pv,
-    __in unsigned long                          cb,
-    __out unsigned long *                       pcb,
-    __in JET_GRBIT                              grbit  );
+    _In_ unsigned long                          cb,
+    _Out_ unsigned long *                       pcb,
+    _In_ JET_GRBIT                              grbit  );
 
     static PFN_JetGetDatabasePages pfnJetGetDatabasePages = NULL;
 
     typedef JET_ERR ( __stdcall *PFN_JetGetDatabasePages_2 ) ( 
-    __in JET_SESID                              sesid,
-    __in JET_DBID                               dbid,
-    __in unsigned long                          pgnoStart,
-    __in unsigned long                          cpg,
+    _In_ JET_SESID                              sesid,
+    _In_ JET_DBID                               dbid,
+    _In_ unsigned long                          pgnoStart,
+    _In_ unsigned long                          cpg,
     __out_bcount_part( cb, *pcbActual ) void *  pv,
-    __in unsigned long                          cb,
-    __out unsigned long *                       pcbActual,
-    __in JET_GRBIT                              grbit  );
+    _In_ unsigned long                          cb,
+    _Out_ unsigned long *                       pcbActual,
+    _In_ JET_GRBIT                              grbit  );
 
     static PFN_JetGetDatabasePages_2 pfnJetGetDatabasePages_2 = NULL;
 

@@ -183,12 +183,12 @@ ERR ErrRECAOSeparateLV(
     const LVOP          lvop );
 
 ERR ErrRECICreateLvRootAndChunks(
-    __in FUCB                   * const pfucb,
-    __in const DATA             * const pdataField,
-    __in const CompressFlags    compressFlags,
-    __in const BOOL             fEncrypted,
-    __in CPG *                  pcpgLvSpaceRequired,
-    __out LvId                  * const plid,
+    _In_ FUCB                   * const pfucb,
+    _In_ const DATA             * const pdataField,
+    _In_ const CompressFlags    compressFlags,
+    _In_ const BOOL             fEncrypted,
+    _In_ CPG *                  pcpgLvSpaceRequired,
+    _Out_ LvId                  * const plid,
     __in_opt FUCB               **ppfucb,
     __in_opt LVROOT2            *plvrootInit = NULL );
 
@@ -956,7 +956,7 @@ ERR ErrDIRDownLVDataPreread(
 
 //  comparison function for LIDs for preread ordering
 //
-BOOL CmpLid( __in const LvId& lid1, __in const LvId& lid2 )
+BOOL CmpLid( _In_ const LvId& lid1, _In_ const LvId& lid2 )
 {
     return lid1 < lid2;
 }
@@ -1344,8 +1344,8 @@ LOCAL ERR ErrLVITryCompress(
     const CompressFlags compressFlags,
     const BOOL fEncrypted,
     FUCB *pfucbTable,
-    __out DATA *pdataToSet,
-    __out BYTE ** pbAlloc )
+    _Out_ DATA *pdataToSet,
+    _Out_ BYTE ** pbAlloc )
 //  ================================================================
 //
 //  Returns the data to be set in the LV tree. Compression is tried,
@@ -1569,7 +1569,7 @@ LOCAL ERR ErrLVIDecompressAndCompare(
     const INT ibOffset,
     __in_bcount( cbData ) const BYTE * const pbData,
     const INT cbData,
-    __out bool * pfIdentical )
+    _Out_ bool * pfIdentical )
 //  ================================================================
 //
 //  Decompress data, and compare with the passed in data
@@ -1768,7 +1768,7 @@ LOCAL ERR ErrLVCompare(
     const INT ibOffset,
     _In_reads_( *pcb ) const BYTE * const pb,
     ULONG *pcb,
-    __out bool * const pfIdentical )
+    _Out_ bool * const pfIdentical )
 //  ================================================================
 //
 //  Compares data to the provided buffer, decompressing if necessary
@@ -1865,7 +1865,7 @@ LOCAL ERR ErrLVIGetDataSize(
     const DATA& data,
     const BOOL fEncrypted,
     const ULONG ulLVSize,
-    __out ULONG * const pulActual,
+    _Out_ ULONG * const pulActual,
     const LONG cbLVChunkMostOverride = 0 )
 //  ================================================================
 //
@@ -2105,13 +2105,13 @@ INLINE ERR ErrLVOpFromGrbit(
 
 //  ================================================================
 LOCAL ERR ErrRECIOverwriteSeparateLV(
-    __in FUCB * const pfucb,
-    __in const DATA * const pdataInRecord,
+    _In_ FUCB * const pfucb,
+    _In_ const DATA * const pdataInRecord,
     __inout DATA * const pdataNew,
-    __in const CompressFlags compressFlags,
-    __in const BOOL fEncrypted,
+    _In_ const CompressFlags compressFlags,
+    _In_ const BOOL fEncrypted,
     __inout ULONG * const pibLongValue,
-    __out LvId * const plid )
+    _Out_ LvId * const plid )
 //  ================================================================
 {
     Assert( pfucb );
@@ -2226,12 +2226,12 @@ HandleError:
     
 //  ================================================================
 LOCAL ERR ErrRECIAppendSeparateLV(
-    __in FUCB * const pfucb,
-    __in const DATA * const pdataInRecord,
+    _In_ FUCB * const pfucb,
+    _In_ const DATA * const pdataInRecord,
     __inout DATA * const pdataNew,
-    __in const CompressFlags compressFlags,
-    __in const BOOL fEncrypted,
-    __out LvId * const plid )
+    _In_ const CompressFlags compressFlags,
+    _In_ const BOOL fEncrypted,
+    _Out_ LvId * const plid )
 //  ================================================================
 {
     ULONG ibLongValue = pdataInRecord->Cb();
@@ -2274,16 +2274,16 @@ JETUNITTEST( LV, TestLvToCpgRequirements )
 
 //  ================================================================
 LOCAL ERR ErrRECISeparateLV(
-    __in FUCB * const pfucb,
-    __in const DATA dataInRecord,
-    __in DATA dataNew,
-    __in const CompressFlags compressFlags,
-    __in const BOOL fEncrypted,
-    __in BOOL fContiguousLv,
-    __in ULONG ibLongValue,
-    __out LvId * const plid,
-    __in const ULONG ulColMax,
-    __in const LVOP lvop )
+    _In_ FUCB * const pfucb,
+    _In_ const DATA dataInRecord,
+    _In_ DATA dataNew,
+    _In_ const CompressFlags compressFlags,
+    _In_ const BOOL fEncrypted,
+    _In_ BOOL fContiguousLv,
+    _In_ ULONG ibLongValue,
+    _Out_ LvId * const plid,
+    _In_ const ULONG ulColMax,
+    _In_ const LVOP lvop )
 //  ================================================================
 //
 //  When bursting an intrinsic LV into a separated LV we want to avoid
@@ -5272,7 +5272,7 @@ HandleError:
 }
 
 //  ================================================================
-LOCAL ERR ErrLVIGetMaxLidInTree( FUCB * pfucb, FUCB * pfucbLV, __out LvId* const plid )
+LOCAL ERR ErrLVIGetMaxLidInTree( FUCB * pfucb, FUCB * pfucbLV, _Out_ LvId* const plid )
 //  ================================================================
 //
 //  Seek to the end of the LV tree passed in and return the highest LID found.
@@ -5315,7 +5315,7 @@ LOCAL ERR ErrLVIGetMaxLidInTree( FUCB * pfucb, FUCB * pfucbLV, __out LvId* const
 }
 
 //  ================================================================
-LOCAL ERR ErrLVIGetNextLID( __in FUCB * const pfucb, __in FUCB * const pfucbLV, __out LvId * const plid )
+LOCAL ERR ErrLVIGetNextLID( _In_ FUCB * const pfucb, _In_ FUCB * const pfucbLV, _Out_ LvId * const plid )
 //  ================================================================
 {
     ASSERT_VALID( pfucb );
@@ -5407,7 +5407,7 @@ HandleError:
 }
 
 //  ================================================================
-LOCAL ERR ErrLVIInsertLVROOT( __in FUCB * const pfucbLV, __in const LvId lid, __in const LVROOT2 * const plvroot )
+LOCAL ERR ErrLVIInsertLVROOT( _In_ FUCB * const pfucbLV, _In_ const LvId lid, _In_ const LVROOT2 * const plvroot )
 //  ================================================================
 {
     ASSERT_VALID( pfucbLV );
@@ -5435,10 +5435,10 @@ HandleError:
 
 //  ================================================================
 LOCAL ERR ErrLVIInsertLVData(
-    __in FUCB * const pfucbLV,
+    _In_ FUCB * const pfucbLV,
     const LvId lid,
     const ULONG ulOffset,
-    __in const DATA * const pdata,
+    _In_ const DATA * const pdata,
     const CompressFlags compressFlags,
     const BOOL fEncrypted,
     FUCB *pfucbTable )
@@ -5477,12 +5477,12 @@ HandleError:
 
 //  ================================================================
 ERR ErrRECICreateLvRootAndChunks(
-    __in FUCB                   * const pfucb,
-    __in const DATA             * const pdataField,
-    __in const CompressFlags    compressFlags,
-    __in const BOOL             fEncrypted,
-    __in CPG *                  pcpgLvSpaceRequired,
-    __out LvId                  * const plid,
+    _In_ FUCB                   * const pfucb,
+    _In_ const DATA             * const pdataField,
+    _In_ const CompressFlags    compressFlags,
+    _In_ const BOOL             fEncrypted,
+    _In_ CPG *                  pcpgLvSpaceRequired,
+    _Out_ LvId                  * const plid,
     __in_opt FUCB               **ppfucb,
     __in_opt LVROOT2            *plvrootInit )
 //  ================================================================
@@ -5702,11 +5702,11 @@ HandleError:
 
 //  ================================================================
 ERR ErrRECSeparateLV(
-    __in FUCB                   * const pfucb,
-    __in const DATA             * const pdataField,
-    __in const CompressFlags    compressFlags,
-    __in const BOOL             fEncrypted,
-    __out LvId                  * const plid,
+    _In_ FUCB                   * const pfucb,
+    _In_ const DATA             * const pdataField,
+    _In_ const CompressFlags    compressFlags,
+    _In_ const BOOL             fEncrypted,
+    _Out_ LvId                  * const plid,
     __in_opt FUCB               **ppfucb,
     __in_opt LVROOT2            *plvrootInit )
 //  ================================================================

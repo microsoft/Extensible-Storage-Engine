@@ -89,21 +89,21 @@ bool FJetGlueExternalBackupRestore(
 )
 ;
 void JetGlueSetExternalBackupRestore(
-    __in const bool fExternal
+    _In_ const bool fExternal
 )
 ;
 bool FJetGlueAtomicBackupRestore(
 )
 ;
 void JetGlueSetAtomicBackupRestore(
-    __in const bool fAtomic
+    _In_ const bool fAtomic
 )
 ;
 void JetGlueActivateLongvalue();
 void JetGlueActivateiLongvalue();
 void JetGlueThrow(
-    __in const char* szErr,
-    __in JET_ERR    err = JET_errSuccess
+    _In_ const char* szErr,
+    _In_ JET_ERR    err = JET_errSuccess
 )
 ;
 void JetGlueSetErrorHandlerAction(BOOL fAssertOnError=TRUE);
@@ -119,12 +119,12 @@ szRandom(
     long flags
 );
 void rgRandom( __out_bcount( cb ) void* pv, unsigned long cb);
-void FillJCDRandom( __out JET_COLUMNDEF *);
+void FillJCDRandom( _Out_ JET_COLUMNDEF *);
 void FixupJCDBasedOnColtyp(
     __inout JET_COLUMNDEF * const pcolumndef
 )
 ;
-void FillJCCRandom( __out JET_COLUMNCREATE*);
+void FillJCCRandom( _Out_ JET_COLUMNCREATE*);
 void FillJTC3Random(JET_TABLECREATE3 *, char*, char* =0, unsigned long = 0, JET_SPACEHINTS * pjsphTable = NULL, JET_SPACEHINTS * pjsphLV = NULL, unsigned long ulSeparateLV = 0 );
 void ColDataRandom(JET_COLUMNDEF *, unsigned long*, void*);
 void FillColSz(JET_COLTYP, char *, char *, unsigned long);
@@ -147,14 +147,14 @@ JET_GRBIT JCGrBitsFromTokenSz(char** psz);
 
 void
 JTraceOp2Sz(
-    __in const JET_TRACEOP  val,
-    __out char*             sz
+    _In_ const JET_TRACEOP  val,
+    _Out_ char*             sz
 )
 ;
 void
 JTraceTag2Sz(
-    __in const JET_TRACETAG val,
-    __out char*             sz
+    _In_ const JET_TRACETAG val,
+    _Out_ char*             sz
 )
 ;
 
@@ -171,7 +171,7 @@ JET_ERR JGSetSystemParameter(JET_SESID sesid, unsigned long paramid, DWORD_PTR l
 JET_ERR JGInit(JET_INSTANCE *pinstance = 0);
 JET_ERR JGTerm(JET_INSTANCE instance = 0);
 JET_ERR JGTerm2(JET_INSTANCE instance, JET_GRBIT grbit);
-JET_ERR JGBackup(__in const DWORD grbitTestOptions, const char *szBackupPath, JET_GRBIT grbit, JET_PFNSTATUS pfnStatus );
+JET_ERR JGBackup(_In_ const DWORD grbitTestOptions, const char *szBackupPath, JET_GRBIT grbit, JET_PFNSTATUS pfnStatus );
 JET_ERR JGRestore(const char *szPath);
 JET_ERR JGBeginSession(JET_SESID *pjsi, const char* name, const char* password);
 JET_ERR JGGetVersion(JET_SESID pjsi, unsigned long* ver);
@@ -777,7 +777,7 @@ protected:
     static const size_t cchName     = 256;
     char szName[cchName];
 
-    HANDLE WINAPI MyOpenSemaphore(__in  DWORD dwDesiredAccess,  __in  BOOL bInheritHandle,  __in  char* cszName)
+    HANDLE WINAPI MyOpenSemaphore(_In_  DWORD dwDesiredAccess,  _In_  BOOL bInheritHandle,  _In_  char* cszName)
     {
         wchar_t* wszName;
         size_t convertedChars = 0;

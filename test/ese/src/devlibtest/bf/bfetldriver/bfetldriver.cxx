@@ -23,7 +23,7 @@
 
 //  Gets the size of a file. Returns -1 if any error occurs.
 
-static __int64 CbGetFileSize( __in const WCHAR* const wszFilePath )
+static __int64 CbGetFileSize( _In_ const WCHAR* const wszFilePath )
 {
     __int64 cbFileSize = -1;
     DWORD cbFileSizeHigh = 0;
@@ -55,7 +55,7 @@ HandleError:
 
 //  Calculates the recommended buffer size for the ETL driver.
 
-static ERR ErrGetOptimalETLDriverBufferSize( __in const WCHAR* const wszEtlFilePath, __out DWORD* const pcEventsBufferedMax )
+static ERR ErrGetOptimalETLDriverBufferSize( _In_ const WCHAR* const wszEtlFilePath, _Out_ DWORD* const pcEventsBufferedMax )
 {
     const __int64 cbGetFileSize = CbGetFileSize( wszEtlFilePath );
 
@@ -75,7 +75,7 @@ static ERR ErrGetOptimalETLDriverBufferSize( __in const WCHAR* const wszEtlFileP
 
 //  Gets the BFRESMGR event from the raw ETW event.
 
-static inline const EseBfResMgrEvent* GetEseBFResMgrEventFromEtwEvent( __in const EtwEvent* const pEtwEvent )
+static inline const EseBfResMgrEvent* GetEseBFResMgrEventFromEtwEvent( _In_ const EtwEvent* const pEtwEvent )
 {
     const EventHeader* pEventHeader = (EventHeader*)( (BYTE*)pEtwEvent + pEtwEvent->ibExtraData );
 
@@ -104,11 +104,11 @@ CFastTraceLog::BFFTLFilePostProcessHeader& BFETLContext::bfftlPostProcHdr() cons
 //  Initializes the BF trace driver's handle / context.
 
 ERR ErrBFETLInit(
-    __in const void* pvTraceProvider,
-    __in const std::set<DWORD>& pids,
-    __in DWORD cEventsBufferedMax,
-    __in const DWORD grbit,
-    __out BFETLContext** const ppbfetlc )
+    _In_ const void* pvTraceProvider,
+    _In_ const std::set<DWORD>& pids,
+    _In_ DWORD cEventsBufferedMax,
+    _In_ const DWORD grbit,
+    _Out_ BFETLContext** const ppbfetlc )
 {
     ERR err = JET_errSuccess;
     BFETLContext* pbfetlc = NULL;
@@ -185,11 +185,11 @@ HandleError:
 //  Same functionality as above, but it takes a single PID.
 
 ERR ErrBFETLInit(
-    __in const void* pvTraceProvider,
-    __in const DWORD dwPID,
-    __in DWORD cEventsBufferedMax,
-    __in const DWORD grbit,
-    __out BFETLContext** const ppbfetlc )
+    _In_ const void* pvTraceProvider,
+    _In_ const DWORD dwPID,
+    _In_ DWORD cEventsBufferedMax,
+    _In_ const DWORD grbit,
+    _Out_ BFETLContext** const ppbfetlc )
 {
     std::set<DWORD> pids;
     pids.insert( dwPID );
@@ -200,7 +200,7 @@ ERR ErrBFETLInit(
 
 //  Shuts down and frees the BF trace drivers context.
 
-void BFETLTerm( __in BFETLContext* const pbfetlc )
+void BFETLTerm( _In_ BFETLContext* const pbfetlc )
 {
     //  Nothing to de-allocate.
 
@@ -276,7 +276,7 @@ void BFETLTerm( __in BFETLContext* const pbfetlc )
 //  able to get the trace, errNotFound if we're done with the trace file, and an JET_errInternalError
 //  in case of an unexpected error.
 
-ERR ErrBFETLGetNext( __in BFETLContext* const pbfetlc, __out BFTRACE* const pbftrace, __out DWORD* const pdwPID )
+ERR ErrBFETLGetNext( _In_ BFETLContext* const pbfetlc, _Out_ BFTRACE* const pbftrace, _Out_ DWORD* const pdwPID )
 {
     ERR err = JET_errSuccess;
 
@@ -721,7 +721,7 @@ HandleError:
 
 //  Overload of the function above that does not return a PID.
 
-ERR ErrBFETLGetNext( __in BFETLContext* const pbfetlc, __out BFTRACE* const pbftrace )
+ERR ErrBFETLGetNext( _In_ BFETLContext* const pbfetlc, _Out_ BFTRACE* const pbftrace )
 {
     return ErrBFETLGetNext( pbfetlc, pbftrace, NULL );
 }
@@ -729,7 +729,7 @@ ERR ErrBFETLGetNext( __in BFETLContext* const pbfetlc, __out BFTRACE* const pbft
 
 //  Gets BFTraceStats specific to a process ID.
 
-const BFTraceStats* PbftsBFETLStatsByPID( __in const BFETLContext* const pbfetlc, __inout DWORD* const pdwPID )
+const BFTraceStats* PbftsBFETLStatsByPID( _In_ const BFETLContext* const pbfetlc, __inout DWORD* const pdwPID )
 {
     const DWORD iPIDSearch = *pdwPID;
 
@@ -781,9 +781,9 @@ public:
 //  Converts an ETL file into an FTL post-processed file.
 
 ERR ErrBFETLConvertToFTL(
-    __in const WCHAR* const wszEtlFilePath,
-    __in const WCHAR* const wszFtlFilePath,
-    __in const std::set<DWORD>& pids )
+    _In_ const WCHAR* const wszEtlFilePath,
+    _In_ const WCHAR* const wszFtlFilePath,
+    _In_ const std::set<DWORD>& pids )
 {
     ERR err = JET_errSuccess;
     BFETLContext* pbfetlc = NULL;
@@ -971,11 +971,11 @@ HandleError:
 //  Compares an ETL against an FTL file. Returns JET_errDatabaseCorrupted if they are not the same.
 
 ERR ErrBFETLFTLCmp(
-    __in const void* pvTraceProviderEtl,
-    __in const void* pvTraceProviderFtl,
-    __in const DWORD dwPID,
-    __in const BOOL fTestMode,
-    __out __int64* const pcTracesProcessed )
+    _In_ const void* pvTraceProviderEtl,
+    _In_ const void* pvTraceProviderFtl,
+    _In_ const DWORD dwPID,
+    _In_ const BOOL fTestMode,
+    _Out_ __int64* const pcTracesProcessed )
 {
     ERR err = JET_errSuccess;
     ERR errCmp = JET_errSuccess;
@@ -1103,7 +1103,7 @@ HandleError:
 
 //  Dump stats related to the ETL file.
 
-ERR ErrBFETLDumpStats( __in const BFETLContext* const pbfetlc, __in const DWORD grbit )
+ERR ErrBFETLDumpStats( _In_ const BFETLContext* const pbfetlc, _In_ const DWORD grbit )
 {
     //  Dump general stats.
 

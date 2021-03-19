@@ -14,7 +14,7 @@ BOOL    g_fDBGPerfOutput = fFalse;
 
 #ifdef DEBUG
 
-WCHAR* GetDebugEnvValue( __in PCWSTR cwszEnvVar )
+WCHAR* GetDebugEnvValue( _In_ PCWSTR cwszEnvVar )
 {
     WCHAR   wszBufTemp[ DEBUG_ENV_VALUE_LEN ];
 

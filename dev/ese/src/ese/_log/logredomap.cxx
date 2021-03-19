@@ -15,11 +15,11 @@ RedoMapEntry::RedoMapEntry()
 }
 
 RedoMapEntry::RedoMapEntry(
-            __in const LGPOS& lgposNew,
-            __in const ERR errNew,
-            __in const DBTIME dbtimeBeforeNew,
-            __in const DBTIME dbtimePageNew,
-            __in const DBTIME dbtimeAfterNew )
+            _In_ const LGPOS& lgposNew,
+            _In_ const ERR errNew,
+            _In_ const DBTIME dbtimeBeforeNew,
+            _In_ const DBTIME dbtimePageNew,
+            _In_ const DBTIME dbtimeAfterNew )
 {
     lgpos = lgposNew;
     err = errNew;
@@ -31,7 +31,7 @@ RedoMapEntry::RedoMapEntry(
 
 // =============================== CLogRedoMap
 
-ERR CLogRedoMap::ErrToErr( __in const RedoMapTree::ERR err )
+ERR CLogRedoMap::ErrToErr( _In_ const RedoMapTree::ERR err )
 {
     switch( err )
     {
@@ -95,7 +95,7 @@ BOOL CLogRedoMap::FLogRedoMapEnabled() const
     return ( m_rmt != NULL );
 }
 
-BOOL CLogRedoMap::FPgnoSet( __in const PGNO pgno ) const
+BOOL CLogRedoMap::FPgnoSet( _In_ const PGNO pgno ) const
 {
     ERR err = JET_errSuccess;
     BOOL fSet = fFalse;
@@ -142,18 +142,18 @@ HandleError:
     return fSet;
 }
 
-ERR CLogRedoMap::ErrSetPgno( __in const PGNO pgno, __in const LGPOS& lgpos )
+ERR CLogRedoMap::ErrSetPgno( _In_ const PGNO pgno, _In_ const LGPOS& lgpos )
 {
     return ErrSetPgno( pgno, lgpos, JET_errSuccess, dbtimeNil, dbtimeNil, dbtimeNil );
 }
 
 ERR CLogRedoMap::ErrSetPgno(
-    __in const PGNO pgno,
-    __in const LGPOS& lgpos,
-    __in const ERR errNew,
-    __in const DBTIME dbtimeBefore,
-    __in const DBTIME dbtimePage,
-    __in const DBTIME dbtimeAfter )
+    _In_ const PGNO pgno,
+    _In_ const LGPOS& lgpos,
+    _In_ const ERR errNew,
+    _In_ const DBTIME dbtimeBefore,
+    _In_ const DBTIME dbtimePage,
+    _In_ const DBTIME dbtimeAfter )
 {
     ERR err = JET_errSuccess;
     RedoMapEntry rme( lgpos, errNew, dbtimeBefore, dbtimePage, dbtimeAfter );
@@ -183,7 +183,7 @@ HandleError:
     return err;
 }
 
-VOID CLogRedoMap::ClearPgno(  __in PGNO pgnoStart, __in PGNO pgnoEnd )
+VOID CLogRedoMap::ClearPgno(  _In_ PGNO pgnoStart, _In_ PGNO pgnoEnd )
 {
     ERR err = JET_errSuccess;
     Assert( pgnoStart <= pgnoEnd );
@@ -219,12 +219,12 @@ HandleError:
     CallSx( err, JET_errOutOfMemory );
 }
 
-VOID CLogRedoMap::ClearPgno( __in PGNO pgno )
+VOID CLogRedoMap::ClearPgno( _In_ PGNO pgno )
 {
     ClearPgno( pgno, pgno );
 }
 
-VOID CLogRedoMap::GetOldestLgposEntry( __out PGNO* const ppgno, __out RedoMapEntry* const prme, __out CPG* const pcpg ) const
+VOID CLogRedoMap::GetOldestLgposEntry( _Out_ PGNO* const ppgno, _Out_ RedoMapEntry* const prme, _Out_ CPG* const pcpg ) const
 {
     Assert( FAnyPgnoSet() );
 

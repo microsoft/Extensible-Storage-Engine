@@ -91,8 +91,8 @@ class FIND_ERRCAT
 
 // Fetches the error category.
 bool FERRLookupErrorCategory(
-    __in const JET_ERR errLookup,
-    __out JET_ERRCAT* perrortype
+    _In_ const JET_ERR errLookup,
+    _Out_ JET_ERRCAT* perrortype
 )
 {
     // perrortype is mandatory.
@@ -157,7 +157,7 @@ C_ASSERT( JET_errcatMax == _countof( rgerrorHierarchies ) );
 
 // Translates the error category to its proper spot in the hierarchy.
 bool FERRLookupErrorHierarchy(
-    __in JET_ERRCAT             errortype,
+    _In_ JET_ERRCAT             errortype,
     __out_bcount(8) BYTE* const pbHierarchy
 )
 {

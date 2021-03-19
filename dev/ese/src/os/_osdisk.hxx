@@ -336,7 +336,7 @@ class IOREQ : MemCopyable<IOREQ>
 
         //  The Hung IO Patrol Dog functions must be friends.
 
-        friend ERR ErrIOMgrPatrolDogICheckOutIOREQ( __in ULONG ichunk, __in ULONG iioreq, __in IOREQ * pioreq, void * pctx );
+        friend ERR ErrIOMgrPatrolDogICheckOutIOREQ( _In_ ULONG ichunk, _In_ ULONG iioreq, _In_ IOREQ * pioreq, void * pctx );
         friend DWORD IOMgrIOPatrolDogThread( DWORD_PTR dwContext );
 
     public:
@@ -435,7 +435,7 @@ class COSDisk : public CZeroInit
 
     public:
         COSDisk();
-        ERR ErrInitDisk( __in_z const WCHAR * const wszDiskPathId, __in const DWORD dwDiskNumber );
+        ERR ErrInitDisk( __in_z const WCHAR * const wszDiskPathId, _In_ const DWORD dwDiskNumber );
         ~COSDisk();
 
         enum OSDiskState {
@@ -472,7 +472,7 @@ class COSDisk : public CZeroInit
         #define         cchMaxEseNoLoadSmartData    ( 10 + 2 /* for 1st %d */ + 12 + 1 + 2 /* safety */ )
         enum { eSmartLoadDiskOpenFailed = 1, eSmartLoadDiskOpenRoFailed = 2, eSmartLoadDevIoCtrlGetVerFailed = 3, eSmartLoadSmartVersionUnexpected = 4,
                 eSmartLoadSmartRevisionUnexpected = 5, eSmartLoadSmartCmdCapabilityNotSet = 6, eSmartLoadDevIoCtrlRcvDriveDataFailed = 7 };
-        void SetSmartEseNoLoadFailed( __in const ULONG iStep, __in const DWORD error, __out_bcount_z(cbIdentifier) CHAR * szIdentifier, __in const ULONG cbIdentifier );
+        void SetSmartEseNoLoadFailed( _In_ const ULONG iStep, _In_ const DWORD error, __out_bcount_z(cbIdentifier) CHAR * szIdentifier, _In_ const ULONG cbIdentifier );
 
         typedef struct OSDiskInfo_
         {
@@ -518,7 +518,7 @@ class COSDisk : public CZeroInit
 
         OSDiskInfo      m_osdi;
 
-        void LoadDiskInfo_( __in_z PCWSTR wszDiskPath, __in const DWORD dwDiskNumber );
+        void LoadDiskInfo_( __in_z PCWSTR wszDiskPath, _In_ const DWORD dwDiskNumber );
         void LoadCachePerf_( HANDLE hDisk );
 
     //
@@ -604,11 +604,11 @@ class COSDisk : public CZeroInit
                 void SetIOREQType( const IOREQ::IOREQTYPE ioreqtypeNext );
 
                 void PrepareForIssue(
-                            __in const IOREQ::IOMETHOD              iomethod,
-                            __out DWORD * const                     pcbRun,
-                            __out BOOL * const                      pfIOOSLowPriority,
+                            _In_ const IOREQ::IOMETHOD              iomethod,
+                            _Out_ DWORD * const                     pcbRun,
+                            _Out_ BOOL * const                      pfIOOSLowPriority,
                             __inout PFILE_SEGMENT_ELEMENT const     rgfse,
-                            __in const DWORD                        cfse );
+                            _In_ const DWORD                        cfse );
                 IOREQ * PioreqGetRun();             // destructive version of PioreqHead()
                 
         };  // end of IORun
@@ -790,18 +790,18 @@ class COSDisk : public CZeroInit
         //  We must have the alloc take the QOS grbit, because this also reserves the right
         //  to enqueue or issue an IO at that QOS ... then EnqueueIORun() is guaranteed to
         //  succeed.
-        ERR ErrReserveQueueSpace( __in OSFILEQOS grbitQOS, __inout IOREQ * pioreq );
-        ERR ErrAllocIOREQ( __in OSFILEQOS grbitQOS, __in const _OSFILE * p_osf, __in const BOOL fWrite, __in QWORD ibOffsetCombine, __in DWORD cbDataCombine, __out IOREQ ** ppioreq );
-        VOID FreeIOREQ( __in IOREQ * pioreq );
-        void EnqueueIORun( __in IOREQ * pioreqHead );
+        ERR ErrReserveQueueSpace( _In_ OSFILEQOS grbitQOS, __inout IOREQ * pioreq );
+        ERR ErrAllocIOREQ( _In_ OSFILEQOS grbitQOS, _In_ const _OSFILE * p_osf, _In_ const BOOL fWrite, _In_ QWORD ibOffsetCombine, _In_ DWORD cbDataCombine, _Out_ IOREQ ** ppioreq );
+        VOID FreeIOREQ( _In_ IOREQ * pioreq );
+        void EnqueueIORun( _In_ IOREQ * pioreqHead );
         static void EnqueueDeferredIORun( _In_ const _OSFILE * const p_osf );
-        void EnqueueIOREQ( __in IOREQ * pioreq );
+        void EnqueueIOREQ( _In_ IOREQ * pioreq );
         ERR ErrDequeueIORun( __inout COSDisk::QueueOp * pqop );
         void IncCioDispatching( void );
         void DecCioDispatching( void );
         void IncCioAsyncDispatching( _In_ const BOOL fWrite );
-        void QueueCompleteIORun( __in IOREQ * pioreqHead );
-        BOOL FQueueCompleteIOREQ( __in IOREQ * const pioreq );
+        void QueueCompleteIORun( _In_ IOREQ * pioreqHead );
+        BOOL FQueueCompleteIOREQ( _In_ IOREQ * const pioreq );
         ERR ErrRemoveDeferredIoOp( _In_ TraceContext& tc, _In_ const QWORD ibOffsetMatch, _In_ const DWORD cbDataMatch, _In_ const IOREQ * const pioreqMatch, _Out_ IOREQ ** ppioreqHead );
 
 #ifdef DEBUG
@@ -929,11 +929,11 @@ class COSDisk : public CZeroInit
             //
             public:
                 IOQueue( CCriticalSection * pcritController );
-                ERR ErrIOQueueInit( __in LONG cIOEnqueuedMax, __in LONG cIOBackgroundMax, __in LONG cIOUrgentBackgroundMax );
+                ERR ErrIOQueueInit( _In_ LONG cIOEnqueuedMax, _In_ LONG cIOBackgroundMax, _In_ LONG cIOUrgentBackgroundMax );
                 ~IOQueue();
             private:
                 void IOQueueTerm();
-                ERR _ErrIOHeapInit( __in LONG cIOEnqueuedMax );
+                ERR _ErrIOHeapInit( _In_ LONG cIOEnqueuedMax );
                 void _IOHeapTerm();
 
                 void TrackIorunEnqueue( _In_ const IOREQ * const pioreqHead, _In_ const DWORD cbRun, _In_ HRT hrtEnqueueBegin, _In_ OSDiskIoQueueManagement dioqm ) const;
@@ -946,7 +946,7 @@ class COSDisk : public CZeroInit
 
                 __int64 IpassBeginDispatchPass();
                 __int64 IpassContinuingDispatchPass();
-                ERR ErrReserveQueueSpace( __in OSFILEQOS grbitQOS, __inout IOREQ * pioreq );
+                ERR ErrReserveQueueSpace( _In_ OSFILEQOS grbitQOS, __inout IOREQ * pioreq );
                 BOOL FReleaseQueueSpace( __inout IOREQ * pioreq );
                 void InsertOp( __inout COSDisk::QueueOp * pqop );
                 void ExtractOp( _In_ const COSDisk * const posd, _Inout_ COSDisk::QueueOp * pqop );
@@ -971,7 +971,7 @@ class COSDisk : public CZeroInit
 
                 class IOHeapA
                 {
-                    friend ERR COSDisk::IOQueue::_ErrIOHeapInit( __in LONG cIOEnqueuedMax );
+                    friend ERR COSDisk::IOQueue::_ErrIOHeapInit( _In_ LONG cIOEnqueuedMax );
 
                     private:
                         IOREQ* volatile *           rgpioreqIOAHeap;
@@ -992,7 +992,7 @@ class COSDisk : public CZeroInit
                             ipioreqIOAHeapMac( 0 )
                         {
                         }
-                        ERR ErrHeapAInit( __in LONG cIOEnqueuedMax );
+                        ERR ErrHeapAInit( _In_ LONG cIOEnqueuedMax );
                         ~IOHeapA()              { _HeapATerm(); }
 
                     public:
@@ -1204,11 +1204,11 @@ class COSDisk : public CZeroInit
 
 //      Returns an initialized / ref-counted interface to the OS Disk System
 
-ERR ErrOSDiskConnect( __in_z const WCHAR * const wszDiskPathId, __in const DWORD dwDiskNumber, __out IDiskAPI ** ppdiskapi );
+ERR ErrOSDiskConnect( __in_z const WCHAR * const wszDiskPathId, _In_ const DWORD dwDiskNumber, _Out_ IDiskAPI ** ppdiskapi );
 
 //      Disconnects the IO context from the OS Disk System, and deinitializes if necessary.
 
-void OSDiskDisconnect( __inout IDiskAPI * pdiskapi, __in const _OSFILE * p_osf );
+void OSDiskDisconnect( __inout IDiskAPI * pdiskapi, _In_ const _OSFILE * p_osf );
 
 
 ////////////////////////////////////////

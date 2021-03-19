@@ -4166,15 +4166,15 @@ public:
 
     ERR ErrBKGetLogInfo(
             __out_bcount_part_opt(cbMax, *pcbActual) PWSTR wszzLogs,
-            __in ULONG                  cbMax,
-            __out ULONG                 *pcbActual,
+            _In_ ULONG                  cbMax,
+            _Out_ ULONG                 *pcbActual,
             JET_LOGINFO_W               *pLogInfo,
             const BOOL                  fIncludePatch );
 
     ERR ErrBKGetTruncateLogInfo(
             __out_bcount_part_opt(cbMax, *pcbActual) PWSTR wszzLogs,
-            __in ULONG                  cbMax,
-            __out ULONG                 *pcbActual );
+            _In_ ULONG                  cbMax,
+            _Out_ ULONG                 *pcbActual );
 
     ERR ErrBKTruncateLog();
 
@@ -4373,9 +4373,9 @@ private:
 
     ERR ErrBKIPrepareLogFiles(
             JET_GRBIT                   grbit,
-            __in PCWSTR                  wszLogFilePath,
+            _In_ PCWSTR                 wszLogFilePath,
             __out_bcount(OSFSAPI_MAX_PATH*sizeof(WCHAR)) PWSTR   wszPathJetChkLog,
-            __in PCWSTR                  wszBackupPath );
+            _In_ PCWSTR                 wszBackupPath );
 
     ERR ErrBKIReadPages(
                 RHF *prhf,
@@ -4394,9 +4394,9 @@ private:
         JET_PFNINITCALLBACK pfnStatus,
         void * pvStatusContext,
         const BOOL   fOverwriteExisting = fFalse );
-    ERR ErrBKIPrepareDirectory( __in PCWSTR wszBackup, __out_bcount(cbBackupPath) PWSTR wszBackupPath, const size_t cbBackupPath, JET_GRBIT grbit );
-    ERR ErrBKIPromoteDirectory( __in PCWSTR wszBackup, __out_bcount(OSFSAPI_MAX_PATH * sizeof(WCHAR)) PWSTR wszBackupPath, JET_GRBIT grbit );
-    ERR ErrBKICleanupDirectory( __in PCWSTR wszBackup, __out_bcount(cbBackupPath) PWSTR wszBackupPath, size_t cbBackupPath );
+    ERR ErrBKIPrepareDirectory( _In_ PCWSTR wszBackup, __out_bcount(cbBackupPath) PWSTR wszBackupPath, const size_t cbBackupPath, JET_GRBIT grbit );
+    ERR ErrBKIPromoteDirectory( _In_ PCWSTR wszBackup, __out_bcount(OSFSAPI_MAX_PATH * sizeof(WCHAR)) PWSTR wszBackupPath, JET_GRBIT grbit );
+    ERR ErrBKICleanupDirectory( _In_ PCWSTR wszBackup, __out_bcount(cbBackupPath) PWSTR wszBackupPath, size_t cbBackupPath );
 
     ERR ErrBKIPrepareLogInfo();
 
@@ -4405,14 +4405,14 @@ private:
             const ULONG                 ulGenHigh,
             const BOOL                  fIncludePatch,
             __out_bcount_part_opt(cbMax, *pcbActual) PWSTR wszzLogs,
-            __in ULONG                  cbMax,
+            _In_ ULONG                  cbMax,
             __out_opt ULONG             *pcbActual,
             JET_LOGINFO_W               *pLogInfo );
 
     VOID BKIMakeDbTrailer(const IFMP ifmp,  BYTE *pvPage);
     ERR ErrBKICheckLogsForIncrementalBackup( LONG lGenMinExisting );
 
-    VOID BKIGetPatchName( __out_bcount(OSFSAPI_MAX_PATH*sizeof(WCHAR)) PWSTR wszPatch, PCWSTR wszDatabaseName, __in PCWSTR wszDirectory = NULL );
+    VOID BKIGetPatchName( __out_bcount(OSFSAPI_MAX_PATH*sizeof(WCHAR)) PWSTR wszPatch, PCWSTR wszDatabaseName, _In_ PCWSTR wszDirectory = NULL );
 
 };
 
@@ -5513,7 +5513,7 @@ inline ERR SetParam(
             PIB* const          ppib,
             const ULONG paramid,
             const ULONG_PTR     ulParam,
-            __in PCWSTR         wszParam )
+            _In_ PCWSTR         wszParam )
 {
     return Param_( pinst, paramid )->Set( pinst, ppib, ulParam, wszParam );
 }
@@ -5731,7 +5731,7 @@ INLINE CPG CpgEnclosingCb( ULONG cbPage, QWORD cb )   { return (CPG) ( ( cb / cb
     case JET_errFileSystemCorruption:           \
     case JET_errReadPgnoVerifyFailure
 
-inline bool FErrIsDbCorruption( __in const ERR err )
+inline bool FErrIsDbCorruption( _In_ const ERR err )
 {
     switch( err )
     {
@@ -5743,7 +5743,7 @@ inline bool FErrIsDbCorruption( __in const ERR err )
     return false;
 }
 
-inline bool FErrIsDbHeaderCorruption( __in const ERR err )
+inline bool FErrIsDbHeaderCorruption( _In_ const ERR err )
 {
     return ( JET_errReadVerifyFailure == err ) || ( JET_errDiskReadVerificationFailure == err );
 }

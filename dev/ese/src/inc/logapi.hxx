@@ -2646,42 +2646,42 @@ ERR ErrLGSetExternalHeader(
     const DBTIME dbtimeBefore = dbtimeNil );
 
 ERR ErrLGScrub(
-    __in                        PIB * const             ppib,
-    __in                        const IFMP              ifmp,
-    __in                        CSR * const             pcsr,
-    __in                        const BOOL              fUnusedPage,
+    _In_                        PIB * const             ppib,
+    _In_                        const IFMP              ifmp,
+    _In_                        CSR * const             pcsr,
+    _In_                        const BOOL              fUnusedPage,
     __in_ecount_opt(cscrubOper) const SCRUBOPER * const rgscrubOper,
-    __in                        const INT               cscrubOper,
-    __out                       LGPOS * const           plgpos );
+    _In_                        const INT               cscrubOper,
+    _Out_                       LGPOS * const           plgpos );
 
 ERR ErrLGNewPage(
-    __in    PIB * const     ppib,
-    __in    const IFMP      ifmp,
-    __in    const PGNO      pgno,
-    __in    const OBJID     objid,
-    __in    const DBTIME    dbtime,
-    __out   LGPOS * const   plgpos );
+    _In_    PIB * const     ppib,
+    _In_    const IFMP      ifmp,
+    _In_    const PGNO      pgno,
+    _In_    const OBJID     objid,
+    _In_    const DBTIME    dbtime,
+    _Out_   LGPOS * const   plgpos );
 
 ERR ErrLGScanCheck(
-    __in    const IFMP      ifmp,
-    __in    const PGNO      pgno,
-    __in    const BYTE      bSource,
-    __in    const DBTIME    dbtimePage,
-    __in    const DBTIME    dbtimeCurrent,
-    __in    const ULONG     ulChecksum,
-    __in    const BOOL      fScanCheck2Supported,
-    __in    LGPOS* const    plgposLogRec = NULL );
+    _In_    const IFMP      ifmp,
+    _In_    const PGNO      pgno,
+    _In_    const BYTE      bSource,
+    _In_    const DBTIME    dbtimePage,
+    _In_    const DBTIME    dbtimeCurrent,
+    _In_    const ULONG     ulChecksum,
+    _In_    const BOOL      fScanCheck2Supported,
+    _In_    LGPOS* const    plgposLogRec = NULL );
 
 ERR ErrLGPageMove(
-    __in    const FUCB * const  pfucb,
-    __in    MERGEPATH * const   pmergePath,
-    __out   LGPOS * const       plgpos );
+    _In_    const FUCB * const  pfucb,
+    _In_    MERGEPATH * const   pmergePath,
+    _Out_   LGPOS * const       plgpos );
 
 ERR ErrLGRootPageMove(
-    __in    PIB * const         ppib,
-    __in    const IFMP          ifmp,
-    __in    ROOTMOVE * const    prm,
-    __out   LGPOS * const       plgpos );
+    _In_    PIB * const         ppib,
+    _In_    const IFMP          ifmp,
+    _In_    ROOTMOVE * const    prm,
+    _Out_   LGPOS * const       plgpos );
 
 ERR ErrLGDelete(    const FUCB      *pfucb,
                     CSR             *pcsr,
@@ -2742,12 +2742,12 @@ ERR ErrLGForceWriteLog(
 
 ERR ErrLGForceLogRollover(
     PIB * const         ppib,
-    __in PSTR           szTrace,
+    _In_ PSTR           szTrace,
     LGPOS* const        plgposLogRec    = NULL );
 
 inline ERR ErrLGForceLogRollover(
     INST * const        pinst,
-    __in PSTR           szTrace,
+    _In_ PSTR           szTrace,
     LGPOS* const        plgposLogRec    = NULL )
 {
     PIB pibFake;

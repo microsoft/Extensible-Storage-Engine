@@ -11,8 +11,8 @@
 
 // =============================================================================
 DWORD GetAttributeListSizeA(
-    __in PCSTR const szFilename,
-    __out ULONG64* const pcbAttributeList
+    _In_ PCSTR const szFilename,
+    _Out_ ULONG64* const pcbAttributeList
 )
 // =============================================================================
 {
@@ -25,8 +25,8 @@ DWORD GetAttributeListSizeA(
 
 // =============================================================================
 DWORD GetAttributeListSizeW(
-    __in PCWSTR const wszFilename,
-    __out ULONG64* const pcbAttributeList
+    _In_ PCWSTR const wszFilename,
+    _Out_ ULONG64* const pcbAttributeList
 )
 // =============================================================================
 {
@@ -65,8 +65,8 @@ Cleanup:
 
 // =============================================================================
 DWORD GetExtentCountA(
-    __in PCSTR const szFilename,
-    __out DWORD* const pcExtent
+    _In_ PCSTR const szFilename,
+    _Out_ DWORD* const pcExtent
 )
 // =============================================================================
 {
@@ -79,8 +79,8 @@ DWORD GetExtentCountA(
 
 // =============================================================================
 DWORD GetExtentCountW(
-    __in PCWSTR const wszFilename,
-    __out DWORD* const pcExtent
+    _In_ PCWSTR const wszFilename,
+    _Out_ DWORD* const pcExtent
 )
 // =============================================================================
 {
@@ -152,7 +152,7 @@ Cleanup:
 
 // =============================================================================
 DISK_GEOMETRY* GetDiskGeometry(
-    __in unsigned long ulDisk
+    _In_ unsigned long ulDisk
 )
 // =============================================================================
 {
@@ -197,7 +197,7 @@ Cleanup:
 
 // =============================================================================
 DISK_CACHE_INFORMATION* GetDiskCacheInfo(
-    __in unsigned long ulDisk
+    _In_ unsigned long ulDisk
 )
 // =============================================================================
 {
@@ -242,8 +242,8 @@ Cleanup:
 
 // =============================================================================
 BOOL SetDiskCacheInfo(
-    __in const DISK_CACHE_INFORMATION* const pdc,
-    __in unsigned long ulDisk
+    _In_ const DISK_CACHE_INFORMATION* const pdc,
+    _In_ unsigned long ulDisk
 )
 // =============================================================================
 {
@@ -281,8 +281,8 @@ Cleanup:
 
 // =============================================================================
 BOOL GetDiskReadCache(
-    __in unsigned long ulDisk,
-    __out BOOLEAN* pfOn
+    _In_ unsigned long ulDisk,
+    _Out_ BOOLEAN* pfOn
 )
 // =============================================================================
 {
@@ -302,8 +302,8 @@ Cleanup:
 
 // =============================================================================
 BOOL SetDiskReadCache(
-    __in unsigned long ulDisk,
-    __in BOOLEAN fOn
+    _In_ unsigned long ulDisk,
+    _In_ BOOLEAN fOn
 )
 // =============================================================================
 {
@@ -326,8 +326,8 @@ Cleanup:
 
 // =============================================================================
 BOOL GetDiskWriteCache(
-    __in unsigned long ulDisk,
-    __out BOOLEAN* pfOn
+    _In_ unsigned long ulDisk,
+    _Out_ BOOLEAN* pfOn
 )
 // =============================================================================
 {
@@ -347,8 +347,8 @@ Cleanup:
 
 // =============================================================================
 BOOL SetDiskWriteCache(
-    __in unsigned long ulDisk,
-    __in BOOLEAN fOn
+    _In_ unsigned long ulDisk,
+    _In_ BOOLEAN fOn
 )
 // =============================================================================
 {
@@ -392,7 +392,7 @@ typedef struct _DISK_CACHE_INFORMATION_ADVANCED {
 
 // =============================================================================
 static DISK_CACHE_INFORMATION_ADVANCED* IGetAdvancedDiskCacheInfo(
-    __in unsigned long ulDisk
+    _In_ unsigned long ulDisk
 )
 // =============================================================================
 {
@@ -437,8 +437,8 @@ Cleanup:
 
 // =============================================================================
 static BOOL ISetAdvancedDiskCacheInfo(
-    __in const DISK_CACHE_INFORMATION_ADVANCED* const pdca,
-    __in unsigned long ulDisk
+    _In_ const DISK_CACHE_INFORMATION_ADVANCED* const pdca,
+    _In_ unsigned long ulDisk
 )
 // =============================================================================
 {
@@ -476,8 +476,8 @@ Cleanup:
 
 // =============================================================================
 BOOL GetAdvancedDiskWriteCache(
-    __in unsigned long ulDisk,
-    __out BOOLEAN* pfOn
+    _In_ unsigned long ulDisk,
+    _Out_ BOOLEAN* pfOn
 )
 // =============================================================================
 {
@@ -497,8 +497,8 @@ Cleanup:
 
 // =============================================================================
 BOOL SetAdvancedDiskWriteCache(
-    __in unsigned long ulDisk,
-    __in BOOLEAN fOn
+    _In_ unsigned long ulDisk,
+    _In_ BOOLEAN fOn
 )
 // =============================================================================
 {
@@ -522,7 +522,7 @@ Cleanup:
 
 // =============================================================================
 BOOL RunDiskPart(
-    __in PCSTR const szDiskPartScript
+    _In_ PCSTR const szDiskPartScript
 )
 // =============================================================================
 {
@@ -580,9 +580,9 @@ BOOL RunDiskPart(
 
 // =============================================================================
 BOOL CreateVirtualDisk(
-    __in PCWSTR const wszVhdFilePath,
-    __in const ULONG cmbSize,
-    __in const WCHAR* const wszMountPoint
+    _In_ PCWSTR const wszVhdFilePath,
+    _In_ const ULONG cmbSize,
+    _In_ const WCHAR* const wszMountPoint
 )
 // =============================================================================
 {
@@ -625,7 +625,7 @@ Cleanup:
 
 // =============================================================================
 BOOL DestroyVirtualDisk(
-    __in PCWSTR const wszVhdFilePath
+    _In_ PCWSTR const wszVhdFilePath
 )
 // =============================================================================
 {
@@ -664,7 +664,7 @@ Cleanup:
 
 // =============================================================================
 VOLUME_DISK_EXTENTS* GetVolumeExtents(
-    __in WCHAR** pwszLogicalVolume
+    _In_ WCHAR** pwszLogicalVolume
 )
 // =============================================================================
 {
@@ -731,7 +731,7 @@ Cleanup:
 
 // =============================================================================
 BOOL DefragmentVolumeA(
-    __in PCSTR const szVolumeName
+    _In_ PCSTR const szVolumeName
 )
 // =============================================================================
 {
@@ -744,7 +744,7 @@ BOOL DefragmentVolumeA(
 
 // =============================================================================
 BOOL DefragmentVolumeW(
-    __in PCWSTR const wszVolumeName
+    _In_ PCWSTR const wszVolumeName
 )
 // =============================================================================
 {
@@ -783,7 +783,7 @@ Cleanup:
 
 // =============================================================================
 DRIVE_LAYOUT_INFORMATION_EX* GetDiskPartitions(
-    __in unsigned long ulDisk
+    _In_ unsigned long ulDisk
 )
 // =============================================================================
 {
@@ -841,7 +841,7 @@ Cleanup:
 
 // =============================================================================
 BOOL OnlineDisk(
-    __in unsigned long ulDisk
+    _In_ unsigned long ulDisk
 )
 // =============================================================================
 {
@@ -888,8 +888,8 @@ Cleanup:
 
 // =============================================================================
 BOOL DeleteDiskPartition(
-    __in unsigned long ulDisk,
-    __in unsigned long ulPartition
+    _In_ unsigned long ulDisk,
+    _In_ unsigned long ulPartition
 )
 // =============================================================================
 {
@@ -925,7 +925,7 @@ Cleanup:
 
 // =============================================================================
 BOOL DeleteDiskPartitions(
-    __in unsigned long ulDisk
+    _In_ unsigned long ulDisk
 )
 // =============================================================================
 {
@@ -953,9 +953,9 @@ BOOL DeleteDiskPartitions(
 
 // =============================================================================
 BOOL CreateFormatDiskPartition(
-    __in unsigned long  ulDisk,
-    __in ULONGLONG      cmbDiskSize,
-    __in char           chLetter    
+    _In_ unsigned long  ulDisk,
+    _In_ ULONGLONG      cmbDiskSize,
+    _In_ char           chLetter    
 )
 // =============================================================================
 {
@@ -1026,7 +1026,7 @@ Cleanup:
 
 // =============================================================================
 BOOL FormatVolume(
-    __in char   chLetter
+    _In_ char   chLetter
 )
 // =============================================================================
 {

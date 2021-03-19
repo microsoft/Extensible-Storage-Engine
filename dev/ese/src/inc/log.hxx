@@ -741,17 +741,17 @@ private:
     ~LGFileHelper();
 
 public:
-    static ERR ErrLGGetGeneration( IFileSystemAPI* const pfsapi, __in PCWSTR wszFName, __in PCWSTR wszBaseName, LONG* plgen, __in PCWSTR const wszLogExt, ULONG * pcchLogDigits );
+    static ERR ErrLGGetGeneration( IFileSystemAPI* const pfsapi, _In_ PCWSTR wszFName, _In_ PCWSTR wszBaseName, LONG* plgen, _In_ PCWSTR const wszLogExt, ULONG * pcchLogDigits );
     static VOID LGSzLogIdAppend( __inout_bcount_z(cbFName) PWSTR wszLogFileName, size_t cbFName, LONG lgen, ULONG cchLogDigits = 0 );
     static ERR ErrLGMakeLogNameBaselessEx(
         __out_bcount(cbLogName) PWSTR wszLogName,
         __in_range(sizeof(WCHAR), cbOSFSAPI_MAX_PATHW) ULONG cbLogName,
         IFileSystemAPI *const       pfsapi,
-        __in PCWSTR                 wszLogFolder,
-        __in PCWSTR                 wszBaseName,
+        _In_ PCWSTR                 wszLogFolder,
+        _In_ PCWSTR                 wszBaseName,
         const enum eLGFileNameSpec eLogType,
         LONG                    lGen,
-        __in PCWSTR                 wszLogExt,
+        _In_ PCWSTR                 wszLogExt,
         ULONG                   cLogDigits );
 };
 
@@ -1173,10 +1173,10 @@ public:
 
     // used by backup
     ERR ErrLGGetGenerationRange(
-            __in PCWSTR wszFindPath,
+            _In_ PCWSTR wszFindPath,
             LONG* plgenLow,
             LONG* plgenHigh,
-            __in BOOL fLooseExt = fFalse,
+            _In_ BOOL fLooseExt = fFalse,
             __out_opt BOOL * pfDefaultExt = NULL );
 
     //  used by backup & restore
@@ -1197,7 +1197,7 @@ public:
     VOID LGFullLogNameFromLogId(
         __out_ecount(OSFSAPI_MAX_PATH) PWSTR wszFullLogFileName,
         LONG lGeneration,
-        __in PCWSTR wszDirectory );
+        _In_ PCWSTR wszDirectory );
 
     VOID LGMakeLogName(
         __out_bcount(cbLogName) PWSTR wszLogName,
@@ -1209,7 +1209,7 @@ public:
         __out_bcount(cbLogName)
         PWSTR wszLogName,
         ULONG cbLogName,
-        __in PCWSTR wszLogFolder,
+        _In_ PCWSTR wszLogFolder,
         const enum eLGFileNameSpec eLogType,
         LONG lGen,
         __in_opt PCWSTR wszLogExt = NULL ) const;
@@ -1252,14 +1252,14 @@ public:
         m_lgposStart = LgposLGLogTipNoLock();
     }
 
-    ERR ErrLGTrace( PIB *ppib, __in PSTR sz );
+    ERR ErrLGTrace( PIB *ppib, _In_ PSTR sz );
 
     //  ================================================================
     //      waypoint?  log control?  log management
     //
 
-    ERR ErrLGUpdateWaypointIFMP( IFileSystemAPI *const pfsapi, __in const IFMP ifmpTarget = ifmpNil );
-    ERR ErrLGQuiesceWaypointLatencyIFMP( __in const IFMP ifmpTarget );
+    ERR ErrLGUpdateWaypointIFMP( IFileSystemAPI *const pfsapi, _In_ const IFMP ifmpTarget = ifmpNil );
+    ERR ErrLGQuiesceWaypointLatencyIFMP( _In_ const IFMP ifmpTarget );
     LONG LLGElasticWaypointLatency() const;
     BOOL FWaypointLatencyEnabled() const;
 
@@ -1350,8 +1350,8 @@ public:
     //
 
     ERR ErrLGRestore(
-            __in PCWSTR wszBackup,
-            __in PCWSTR wszDest,
+            _In_ PCWSTR wszBackup,
+            _In_ PCWSTR wszDest,
             JET_PFNINITCALLBACK pfn,
             void * pvContext );
 
@@ -1362,14 +1362,14 @@ public:
     }
 
     ERR ErrLGRSTExternalRestore(
-            __in PCWSTR                 wszCheckpointFilePath,
-            __in PCWSTR                 wszNewLogPath,
+            _In_ PCWSTR                 wszCheckpointFilePath,
+            _In_ PCWSTR                 wszNewLogPath,
             JET_RSTMAP_W                *rgjrstmap,
             INT                         cjrstmap,
-            __in PCWSTR                 wszBackupLogPath,
+            _In_ PCWSTR                 wszBackupLogPath,
             LONG                        lgenLow,
             LONG                        lgenHigh,
-            __in PCWSTR                 wszTargetLogPath,
+            _In_ PCWSTR                 wszTargetLogPath,
             LONG                        lGenHighTarget,
             JET_PFNINITCALLBACK         pfn,
             void *                      pvContext);
@@ -1403,9 +1403,9 @@ public:
     ERR ErrLGUpdateCheckpointFile( const BOOL fForceUpdate );
     LGPOS LgposLGCurrentCheckpointMayFail() /* would be const, but m_critCheckpoint.Enter() "modifies state" :P */;
     LGPOS LgposLGCurrentDbConsistencyMayFail() /* would be const, but m_critCheckpoint.Enter() "modifies state" :P */;
-    ERR ErrLGDumpCheckpoint( __in PCWSTR wszCheckpoint );
+    ERR ErrLGDumpCheckpoint( _In_ PCWSTR wszCheckpoint );
     VOID LGFullNameCheckpoint( __out_bcount(OSFSAPI_MAX_PATH*sizeof(WCHAR)) PWSTR wszFullName );
-    ERR ErrLGReadCheckpoint( __in PCWSTR wszCheckpointFile, CHECKPOINT *pcheckpoint, const BOOL fReadOnly );
+    ERR ErrLGReadCheckpoint( _In_ PCWSTR wszCheckpointFile, CHECKPOINT *pcheckpoint, const BOOL fReadOnly );
 
     VOID LGDisableCheckpoint( VOID )
     {
@@ -1527,7 +1527,7 @@ public:
     ERR ErrLGIDumpOneAttachment( const ATTACHINFO * const pattachinfo, const LOGDUMP_OP * const plogdumpOp ) const;
     ERR ErrLGIDumpAttachments( const LOGDUMP_OP * const plogdumpOp ) const;
 
-    ERR ErrLGDumpLog( __in PCWSTR wszLog, LOGDUMP_OP * const plogdumpOp, LGFILEHDR * const plgfilehdr = NULL, XECHECKSUM *pLastSegChecksum = NULL );
+    ERR ErrLGDumpLog( _In_ PCWSTR wszLog, LOGDUMP_OP * const plogdumpOp, LGFILEHDR * const plgfilehdr = NULL, XECHECKSUM *pLastSegChecksum = NULL );
     ERR ErrLGDumpLog( IFileAPI *const pfapi, LOGDUMP_OP * const plogdumpOp, LGFILEHDR * const plgfilehdr = NULL, XECHECKSUM *pLastSegChecksum = NULL, const LGPOS * const plgposCheckpoint = NULL );
 
     VOID    IncNOP() { m_cNOP++; }
@@ -1621,10 +1621,10 @@ private:
     //  checkpoint implementation functions
 
     ERR ErrLGIUpdateCheckpointFile( const BOOL fForceUpdate, CHECKPOINT * pcheckpointT );
-    void LGISetInitialGen( __in const LONG lgenStart );
+    void LGISetInitialGen( _In_ const LONG lgenStart );
     ERR ErrLGICheckpointInit( BOOL *pfNewCheckpointFile );
     VOID LGICheckpointTerm( VOID );
-    ERR ErrLGIWriteCheckpoint( __in PCWSTR wszCheckpointFile, const IOFLUSHREASON iofr, CHECKPOINT *pcheckpoint );
+    ERR ErrLGIWriteCheckpoint( _In_ PCWSTR wszCheckpointFile, const IOFLUSHREASON iofr, CHECKPOINT *pcheckpoint );
     ERR ErrLGIUpdateCheckpointLgposForTerm( const LGPOS& lgposCheckpoint );
     VOID LGIUpdateCheckpoint( CHECKPOINT *pcheckpoint );
 
@@ -1750,19 +1750,19 @@ private:
 
     ERR ErrLGISetQuitWithoutUndo( const ERR errBeginUndo );
     BOOL FLGILgenHighAtRedoStillHolds();
-    ERR ErrLGIBeginUndoCallback_( __in const CHAR * szFile, const ULONG lLine );
+    ERR ErrLGIBeginUndoCallback_( _In_ const CHAR * szFile, const ULONG lLine );
 
     ERR ErrLGOpenPagePatchRequestCallback( const IFMP ifmp, const PGNO pgno, const DBTIME dbtime, const void * const pvPage ) const;
 
     ERR ErrLGEvaluateDestructiveCorrectiveLogOptions(
-            __in const LONG lgenBad,
-            __in const ERR errCondition );
+            _In_ const LONG lgenBad,
+            _In_ const ERR errCondition );
 
     //  ---------------------------------------------------------
     //      (Do)Logging Support
     //
 
-    ERR ErrLGITrace( PIB *ppib, __in PSTR sz, BOOL fInternal );
+    ERR ErrLGITrace( PIB *ppib, _In_ PSTR sz, BOOL fInternal );
 
     //  ---------------------------------------------------------
     //      inter-file / format management
@@ -1771,16 +1771,16 @@ private:
     ERR ErrLGIUpdateGenRecovering(
         const LONG              lGenRecovering,
         __out_ecount_part( dbidMax, *pcifmpsAttached ) IFMP *rgifmpsAttached,
-        __out ULONG *           pcifmpsAttached );
+        _Out_ ULONG *           pcifmpsAttached );
     
     ERR ErrLGIUpdatePatchedDbstate(
         const LONG              lGenSwitchingTo );
 
-    BOOL FLGIUpdatableWaypoint( __in const LONG lGenCommitted, __in const IFMP ifmpTarget = ifmpNil );
+    BOOL FLGIUpdatableWaypoint( _In_ const LONG lGenCommitted, _In_ const IFMP ifmpTarget = ifmpNil );
     VOID LGIGetEffectiveWaypoint(
-        __in    IFMP    ifmp,
-        __in    LONG    lGenCommitted,
-        __out   LGPOS * plgposEffWaypoint );
+        _In_    IFMP    ifmp,
+        _In_    LONG    lGenCommitted,
+        _Out_   LGPOS * plgposEffWaypoint );
 
 
     //  ---------------------------------------------------------
@@ -1788,8 +1788,8 @@ private:
     //
 
     ERR ErrLGIRSTInitPath(
-            __in PCWSTR wszBackupPath,
-            __in PCWSTR wszNewLogPath,
+            _In_ PCWSTR wszBackupPath,
+            _In_ PCWSTR wszNewLogPath,
             __out_bcount(cbOSFSAPI_MAX_PATHW) PWSTR wszRestorePath,
             __in_range(sizeof(WCHAR), cbOSFSAPI_MAX_PATHW) const ULONG cbRestorePath,
             __out_bcount(cbOSFSAPI_MAX_PATHW) PWSTR wszLogDirPath,
@@ -1803,11 +1803,11 @@ private:
     ERR ErrLGIRSTSetupCheckpoint(
         LONG lgenLow,
         LONG lgenHigh,
-        __in PCWSTR wszCurCheckpoint );
+        _In_ PCWSTR wszCurCheckpoint );
 
     ERR ErrLGIRSTCheckSignaturesLogSequence(
-                __in PCWSTR  wszRestorePath,
-                __in PCWSTR  wszLogFilePath,
+                _In_ PCWSTR  wszRestorePath,
+                _In_ PCWSTR  wszLogFilePath,
                 INT genLow,
                 INT genHigh,
                 __in_opt PCWSTR  wszTargetInstanceFilePath,
@@ -1833,8 +1833,8 @@ private:
     ERR ErrLGRRedo( BOOL fKeepDbAttached, CHECKPOINT *pcheckpoint, LGSTATUSINFO *plgstat );
 
     ERR ErrLGICheckClosedNormallyInPreviousLog(
-        __in const LONG         lGenPrevious,
-        __out BOOL *            pfCloseNormally
+        _In_ const LONG         lGenPrevious,
+        _Out_ BOOL *            pfCloseNormally
         );
 
     ERR ErrLGMoveToRunningState( ERR errFromErrLGRRedo, BOOL * pfJetLogGeneratedDuringSoftStart  );
@@ -1900,14 +1900,14 @@ private:
         const BOOL      fSkipSetRedoMapDbtimeRevert = false );
     
     ERR ErrLGIAccessPageCheckDbtimes(
-        __in    PIB             * const ppib,
-        __in    CSR             * const pcsr,
+        _In_    PIB             * const ppib,
+        _In_    CSR             * const pcsr,
                 const IFMP      ifmp,
                 const PGNO      pgno,
                 const OBJID     objid,
                 const DBTIME    dbtimeBefore,
                 const DBTIME    dbtimeAfter,
-        __out   BOOL * const    pfRedoRequired );
+        _Out_   BOOL * const    pfRedoRequired );
 
     //      Recovery::Redo Internal Management
     //
@@ -2088,7 +2088,7 @@ private:
     ERR ErrLGRIRedoNodeOperation( const LRNODE_ *plrnode, ERR *perr );
     ERR ErrLGRIRedoScrub( const LRSCRUB * const plrscrub );
     ERR ErrLGRIRedoNewPage( const LRNEWPAGE * const plrnewpage );
-    ERR ErrLGRIIRedoPageMove( __in PIB * const ppib, const LRPAGEMOVE * const plrpagemove );
+    ERR ErrLGRIIRedoPageMove( _In_ PIB * const ppib, const LRPAGEMOVE * const plrpagemove );
     ERR ErrLGRIRedoPageMove( const LRPAGEMOVE * const plrpagemove );
     ERR ErrLGIRedoRootMoveStructures( PIB* const ppib, const DBTIME dbtime, ROOTMOVE* const prm );
     VOID LGIRedoRootMoveUpdateDbtime( ROOTMOVE* const prm );
@@ -2129,7 +2129,7 @@ private:
 };  // end of class LOG
 
 VOID LGSzFromLogId( INST *pinst, __out_bcount( cbFName ) PWSTR wszLogFileName, size_t cbFName, LONG lGeneration );
-VOID LGMakeName( IFileSystemAPI *const pfsapi, __out_bcount(OSFSAPI_MAX_PATH*sizeof(WCHAR)) PWSTR wszName, __in PCWSTR wszPath, __in PCWSTR wszFName, __in PCWSTR wszExt );
+VOID LGMakeName( IFileSystemAPI *const pfsapi, __out_bcount(OSFSAPI_MAX_PATH*sizeof(WCHAR)) PWSTR wszName, _In_ PCWSTR wszPath, _In_ PCWSTR wszFName, _In_ PCWSTR wszExt );
 
 IOREASONPRIMARY IorpLogRead( LOG * plog );
 

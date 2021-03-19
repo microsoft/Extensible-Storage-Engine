@@ -518,7 +518,7 @@ VOID ISAMAPI IsamSystemTerm()
 //  The contract is that if the function wishes to alter behavior it will set
 //  *perr and return fTrue, otherwise return fFalse for no interest.
 
-BOOL FEnsureLogStreamMustExist( const JET_SNT snt, const JET_RECOVERYCONTROL * const pRecCtrl, __out JET_ERR * const perr )
+BOOL FEnsureLogStreamMustExist( const JET_SNT snt, const JET_RECOVERYCONTROL * const pRecCtrl, _Out_ JET_ERR * const perr )
 {
     if ( snt == JET_sntMissingLog &&
             pRecCtrl->MissingLog.eNextAction == JET_MissingLogCreateNewLogStream )
@@ -534,7 +534,7 @@ BOOL FEnsureLogStreamMustExist( const JET_SNT snt, const JET_RECOVERYCONTROL * c
     return fFalse;
 }
 
-BOOL FAllowMissingCurrentLog( const JET_SNT snt, const JET_RECOVERYCONTROL * const pRecCtrl, __out JET_ERR * const perr )
+BOOL FAllowMissingCurrentLog( const JET_SNT snt, const JET_RECOVERYCONTROL * const pRecCtrl, _Out_ JET_ERR * const perr )
 {
     if ( snt == JET_sntMissingLog )
     {
@@ -558,7 +558,7 @@ BOOL FAllowMissingCurrentLog( const JET_SNT snt, const JET_RECOVERYCONTROL * con
     return fFalse;
 }
 
-BOOL FReplayIgnoreLostLogs( const JET_SNT snt, const JET_RECOVERYCONTROL * const pRecCtrl, __out JET_ERR * const perr )
+BOOL FReplayIgnoreLostLogs( const JET_SNT snt, const JET_RECOVERYCONTROL * const pRecCtrl, _Out_ JET_ERR * const perr )
 {
     if ( snt == JET_sntMissingLog )
     {
@@ -588,7 +588,7 @@ BOOL FReplayIgnoreLostLogs( const JET_SNT snt, const JET_RECOVERYCONTROL * const
     return fFalse;
 }
 
-BOOL FAllowSoftRecoveryOnBackup( const JET_SNT snt, const JET_RECOVERYCONTROL * const pRecCtrl, __out JET_ERR * const perr )
+BOOL FAllowSoftRecoveryOnBackup( const JET_SNT snt, const JET_RECOVERYCONTROL * const pRecCtrl, _Out_ JET_ERR * const perr )
 {
     if ( snt == JET_sntSignalErrorCondition &&
             pRecCtrl->errDefault == JET_errSoftRecoveryOnBackupDatabase )
@@ -601,7 +601,7 @@ BOOL FAllowSoftRecoveryOnBackup( const JET_SNT snt, const JET_RECOVERYCONTROL * 
     return fFalse;
 }
 
-BOOL FSkipLostLogsEvent( const JET_SNT snt, const JET_RECOVERYCONTROL * const pRecCtrl, __out JET_ERR * const perr )
+BOOL FSkipLostLogsEvent( const JET_SNT snt, const JET_RECOVERYCONTROL * const pRecCtrl, _Out_ JET_ERR * const perr )
 {
     if ( snt == JET_sntSignalErrorCondition &&
             pRecCtrl->errDefault == JET_errCommittedLogFilesMissing )
@@ -633,8 +633,8 @@ struct TM_REC_CTRL_DEFAULT
 };
 
 JET_ERR ErrRecoveryControlDefaultCallback(
-    __in JET_SNP    snp,
-    __in JET_SNT    snt,
+    _In_ JET_SNP    snp,
+    _In_ JET_SNT    snt,
     __in_opt void * pvData,             // depends on the snp, snt
     __in_opt void * pvContext )
 {

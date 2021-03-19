@@ -1126,10 +1126,10 @@ C_ASSERT( (sizeof(IOREQ)%4) == 0 );                 // check minimum alignment
 //  handle, but immediately before actually freeing the memory.  But we couldn't say for
 //  example ASSERT_VALID( pioreq ) on each.
 
-typedef ERR (*PfnErrProcessIOREQ)( __in ULONG ichunk, __in ULONG iioreq, __in IOREQ * pioreq, void * pctx );
-typedef ERR (*PfnErrEnumerateIOREQ)( __in ULONG ichunk, __in ULONG iioreq, __in const IOREQ * pioreq, void * pctx );
+typedef ERR (*PfnErrProcessIOREQ)( _In_ ULONG ichunk, _In_ ULONG iioreq, _In_ IOREQ * pioreq, void * pctx );
+typedef ERR (*PfnErrEnumerateIOREQ)( _In_ ULONG ichunk, _In_ ULONG iioreq, _In_ const IOREQ * pioreq, void * pctx );
 
-ERR ErrProcessIOREQs( __in PfnErrProcessIOREQ pfnErrProcessIOREQ, void * pvCtx )
+ERR ErrProcessIOREQs( _In_ PfnErrProcessIOREQ pfnErrProcessIOREQ, void * pvCtx )
 {
     ERR err = JET_errSuccess;
 
@@ -1154,7 +1154,7 @@ HandleError:
     return err;
 }
 
-ERR ErrEnumerateIOREQs( __in PfnErrEnumerateIOREQ pfnErrEnumerateIOREQ, void * pvCtx )
+ERR ErrEnumerateIOREQs( _In_ PfnErrEnumerateIOREQ pfnErrEnumerateIOREQ, void * pvCtx )
 {
     return ErrProcessIOREQs( (PfnErrProcessIOREQ) pfnErrEnumerateIOREQ, pvCtx );
 }
@@ -1164,14 +1164,14 @@ ERR ErrEnumerateIOREQs( __in PfnErrEnumerateIOREQ pfnErrEnumerateIOREQ, void * p
 
 //  a callback for ErrEnumerateIOREQs() that prints all IOREQs and thier current state.
 
-ERR ErrEnumerateIOREQsPrint( __in ULONG ichunk, __in ULONG iioreq, __in const IOREQ * pioreq, void * pvCtx )
+ERR ErrEnumerateIOREQsPrint( _In_ ULONG ichunk, _In_ ULONG iioreq, _In_ const IOREQ * pioreq, void * pvCtx )
 {
     wprintf(L"IOREQ[%d.%d] = %p, state = %d\n", ichunk, iioreq, pioreq, pioreq->Ioreqtype() );
     return JET_errSuccess;
 }
 
 
-ERR ErrEnumerateIOREQsAssertValid( __in ULONG ichunk, __in ULONG iioreq, __in const IOREQ * pioreq, void * pvCtx )
+ERR ErrEnumerateIOREQsAssertValid( _In_ ULONG ichunk, _In_ ULONG iioreq, _In_ const IOREQ * pioreq, void * pvCtx )
 {
     ASSERT_VALID( pioreq );
     return JET_errSuccess;
@@ -1730,7 +1730,7 @@ VOID IOREQ::IncrementIOTime()
 }
 
 
-ERR ErrIOMgrPatrolDogICheckOutIOREQ( __in ULONG ichunk, __in ULONG iioreq, __in IOREQ * pioreq, void * pctx )
+ERR ErrIOMgrPatrolDogICheckOutIOREQ( _In_ ULONG ichunk, _In_ ULONG iioreq, _In_ IOREQ * pioreq, void * pctx )
 {
     //  Only update stats and detect hung I/Os for head IOREQs (in practice, one real I/O).
     //
@@ -2100,7 +2100,7 @@ BOOL FOSDiskPreinit()
 }
 
 //  fwd decl.
-void AssertIoContextQuiesced( __in const _OSFILE * p_osf );
+void AssertIoContextQuiesced( _In_ const _OSFILE * p_osf );
 
 //  terminate IO/disk subsystem
 
@@ -2457,9 +2457,9 @@ BOOL COSDisk::FSeekPenalty() const
            m_osdi.m_osdspd.IncursSeekPenalty;
 }
 
-ERR ErrValidateNotUsingIoContext( __in ULONG ichunk, __in ULONG iioreq, __in const IOREQ * pioreq, void * pvCtx )
+ERR ErrValidateNotUsingIoContext( _In_ ULONG ichunk, _In_ ULONG iioreq, _In_ const IOREQ * pioreq, void * pvCtx )
 {
-    __in const _OSFILE * p_osf = (_OSFILE *)pvCtx;
+    _In_ const _OSFILE * p_osf = (_OSFILE *)pvCtx;
 
     if ( p_osf )
     {
@@ -2478,14 +2478,14 @@ ERR ErrValidateNotUsingIoContext( __in ULONG ichunk, __in ULONG iioreq, __in con
 //  If p_osf is NULL we validate there is no active IO in the system
 //  If p_osf is non-NULL we validate there is no active IO in the system matching this IO Context / p_osf.
 
-void AssertIoContextQuiesced( __in const _OSFILE * p_osf )
+void AssertIoContextQuiesced( _In_ const _OSFILE * p_osf )
 {
     (void)ErrEnumerateIOREQs( ErrValidateNotUsingIoContext, (void*)p_osf );
 }
 
 //  Consolidated the calculation for urgent outstanding max, to create a single point of truth
 
-ULONG CioDefaultUrgentOutstandingIOMax( __in const ULONG cioOutstandingMax )
+ULONG CioDefaultUrgentOutstandingIOMax( _In_ const ULONG cioOutstandingMax )
 {
     return cioOutstandingMax / 2;
 }
@@ -2571,7 +2571,7 @@ VOID ConvertSmartDriverString( BYTE * sSmartDriverString, INT cbSmartDriverStrin
     OSStrCbCopyA( szProperString, cbProperString, szStart );
 }
 
-void COSDisk::SetSmartEseNoLoadFailed( __in const ULONG iStep, __in const DWORD error, __out_bcount_z(cbIdentifier) CHAR * szIdentifier, __in const ULONG cbIdentifier )
+void COSDisk::SetSmartEseNoLoadFailed( _In_ const ULONG iStep, _In_ const DWORD error, __out_bcount_z(cbIdentifier) CHAR * szIdentifier, _In_ const ULONG cbIdentifier )
 {
     OSStrCbFormatA( szIdentifier, cbIdentifier, szEseNoLoadSmartData, iStep, error );
 
@@ -2585,7 +2585,7 @@ void COSDisk::SetSmartEseNoLoadFailed( __in const ULONG iStep, __in const DWORD 
 
 //  Load optional and extra disk identity and performance configuration.
 //  This function may fail, but will always initialize m_wszModelNumber/SerialNumber/FirmwareRev
-void COSDisk::LoadDiskInfo_( __in_z PCWSTR wszDiskPath, __in const DWORD dwDiskNumber )
+void COSDisk::LoadDiskInfo_( __in_z PCWSTR wszDiskPath, _In_ const DWORD dwDiskNumber )
 {
     BOOL fSuccess;
     DWORD cbRet;
@@ -2981,7 +2981,7 @@ void COSDisk::LoadCachePerf_( HANDLE hDisk )
 
 //  Initialize the DISK.
 
-ERR COSDisk::ErrInitDisk( __in_z const WCHAR * const wszDiskPathId, __in const DWORD dwDiskNumber )
+ERR COSDisk::ErrInitDisk( __in_z const WCHAR * const wszDiskPathId, _In_ const DWORD dwDiskNumber )
 {
     ERR         err     = JET_errSuccess;
     const INT       cchBuf      = 256;
@@ -3071,7 +3071,7 @@ HandleError:
 //  OS Disk Global Connect / Disconnect
 //
 
-ERR ErrOSDiskICreate( __in_z const WCHAR * const wszDiskPathId, const DWORD dwDiskNumber, __out COSDisk ** pposd )
+ERR ErrOSDiskICreate( __in_z const WCHAR * const wszDiskPathId, const DWORD dwDiskNumber, _Out_ COSDisk ** pposd )
 {
     ERR         err     = JET_errSuccess;
     COSDisk *   posd    = NULL;
@@ -3127,7 +3127,7 @@ HandleError:
     return err;
 }
 
-ERR ErrOSDiskIFind( __in_z const WCHAR * const wszDiskPath, __out COSDisk ** pposd )
+ERR ErrOSDiskIFind( __in_z const WCHAR * const wszDiskPath, _Out_ COSDisk ** pposd )
 {
     ERR         err     = errNotFound;
 
@@ -3239,7 +3239,7 @@ class OSDiskEnumerator
 
 };
 
-ERR ErrOSDiskConnect( __in_z const WCHAR * const wszDiskPathId, __in const DWORD dwDiskNumber, __out IDiskAPI ** ppdiskapi )
+ERR ErrOSDiskConnect( __in_z const WCHAR * const wszDiskPathId, _In_ const DWORD dwDiskNumber, _Out_ IDiskAPI ** ppdiskapi )
 {
     ERR         err     = JET_errSuccess;
     COSDisk *   posd    = NULL;
@@ -3312,7 +3312,7 @@ void OSDiskConnect( _Inout_ COSDisk * posd )
 
 void OSDiskDisconnect(
     __inout IDiskAPI *          pdiskapi,
-    __in    const _OSFILE *     p_osf )
+    _In_    const _OSFILE *     p_osf )
 {
 
     g_sxwlOSDisk.AcquireExclusiveLatch();
@@ -3344,7 +3344,7 @@ void OSDiskDisconnect(
 
 //  initializes the I/O Heap A, or returns JET_errOutOfMemory
 
-ERR COSDisk::IOQueue::IOHeapA::ErrHeapAInit( __in LONG cIOEnqueuedMax )
+ERR COSDisk::IOQueue::IOHeapA::ErrHeapAInit( _In_ LONG cIOEnqueuedMax )
 {
     ERR err;
 
@@ -4150,7 +4150,7 @@ void COSDisk::IOQueue::IOQueueTerm()
 
 //  This initializes the Queue Quotas and IO Heap.
 
-ERR COSDisk::IOQueue::ErrIOQueueInit( __in LONG cIOEnqueuedMax, __in LONG cIOBackgroundMax, __in LONG cIOUrgentBackgroundMax )
+ERR COSDisk::IOQueue::ErrIOQueueInit( _In_ LONG cIOEnqueuedMax, _In_ LONG cIOBackgroundMax, _In_ LONG cIOUrgentBackgroundMax )
 {
     ERR err = JET_errSuccess;
 
@@ -4190,7 +4190,7 @@ void COSDisk::IOQueue::_IOHeapTerm()
 
 //  initializes the I/O Heap, or returns JET_errOutOfMemory
 
-ERR COSDisk::IOQueue::_ErrIOHeapInit( __in LONG cIOEnqueuedMax )
+ERR COSDisk::IOQueue::_ErrIOHeapInit( _In_ LONG cIOEnqueuedMax )
 {
     ERR err = JET_errSuccess;
     COSDisk::IOQueue::IOHeapA * pIOHeapA = NULL;
@@ -4481,7 +4481,7 @@ INLINE BOOL FOSDiskIFileSGIOCapable( const _OSFILE * const p_osf )
 
 //  returns fTrue if the specified IOREQ data can be processed using SGIO
 
-INLINE BOOL FOSDiskIDataSGIOCapable( __in const BYTE * pbData, __in const DWORD cbData )
+INLINE BOOL FOSDiskIDataSGIOCapable( _In_ const BYTE * pbData, _In_ const DWORD cbData )
 {
     return  cbData % OSMemoryPageCommitGranularity() == 0 &&                //  data is vmem page sized
             DWORD_PTR( pbData ) % OSMemoryPageCommitGranularity() == 0;     //  data is vmem page aligned
@@ -4491,14 +4491,14 @@ INLINE BOOL FOSDiskIDataSGIOCapable( __in const BYTE * pbData, __in const DWORD 
 
 INLINE void OSDiskIGetRunBound(
     const IOREQ *   pioreqRun,
-    __out QWORD *   pibOffsetStart,
-    __out QWORD *   pibOffsetEnd,
+    _Out_ QWORD *   pibOffsetStart,
+    _Out_ QWORD *   pibOffsetEnd,
     bool            fAlwaysIncreasing = true );
 
 INLINE void OSDiskIGetRunBound(
     const IOREQ *   pioreqRun,
-    __out QWORD *   pibOffsetStart,
-    __out QWORD *   pibOffsetEnd,
+    _Out_ QWORD *   pibOffsetStart,
+    _Out_ QWORD *   pibOffsetEnd,
     bool            fAlwaysIncreasing )
 {
     Assert( pibOffsetStart );
@@ -4595,13 +4595,13 @@ INLINE bool FOSDiskIOverlappingRuns( const IOREQ * pioreqRun1, const IOREQ * pio
 //  returns true if the second IO run can be appended to the first IO run without offending our max IO limits.
 
 INLINE bool FOSDiskICanAppendRun(
-    __in const _OSFILE *    p_osf,
-    __in const BOOL         fWrite,
-    __in const BOOL         fOverrideIOMax,
-    __in const QWORD        ibOffsetRunBefore,
-    __in const DWORD        cbDataRunBefore,
-    __in const QWORD        ibOffsetRunAfter,
-    __in const DWORD        cbDataRunAfter
+    _In_ const _OSFILE *    p_osf,
+    _In_ const BOOL         fWrite,
+    _In_ const BOOL         fOverrideIOMax,
+    _In_ const QWORD        ibOffsetRunBefore,
+    _In_ const DWORD        cbDataRunBefore,
+    _In_ const QWORD        ibOffsetRunAfter,
+    _In_ const DWORD        cbDataRunAfter
     )
 {
     Assert( cbDataRunBefore && cbDataRunAfter );
@@ -4620,7 +4620,7 @@ INLINE bool FOSDiskICanAppendRun(
 
 bool FOSDiskICompatibleRuns(
     __inout const COSDisk::IORun * const    piorun,
-    __in const IOREQ *                      pioreq
+    _In_ const IOREQ *                      pioreq
     )
 {
     Assert( piorun );
@@ -4647,11 +4647,11 @@ bool FOSDiskIMergeRuns( COSDisk::IORun * const piorunBase, COSDisk::IORun * cons
 
 INLINE bool FOSDiskICanAddToRun(
     __inout COSDisk::IORun * const  piorun,
-    __in const _OSFILE *            p_osf,
-    __in const BOOL                 fWrite,
-    __in const QWORD                ibOffsetCombine,
-    __in const DWORD                cbDataCombine,
-    __in const BOOL                 fOverrideIOMax
+    _In_ const _OSFILE *            p_osf,
+    _In_ const BOOL                 fWrite,
+    _In_ const QWORD                ibOffsetCombine,
+    _In_ const DWORD                cbDataCombine,
+    _In_ const BOOL                 fOverrideIOMax
     )
 {
     Assert( piorun );
@@ -4724,7 +4724,7 @@ INLINE bool FOSDiskICanAddToRun(
 
 INLINE bool FOSDiskICanAddToRun(
     __inout COSDisk::IORun * const  piorun,
-    __in const IOREQ *              pioreq
+    _In_ const IOREQ *              pioreq
     )
 {
     if ( !FOSDiskICompatibleRuns( piorun, pioreq ) )
@@ -5471,7 +5471,7 @@ IOREQ * COSDisk::QueueOp::PioreqGetRun()
 //  This converts a "urgent level" (see qosIODispatchUrgentBackground* arguments) to a QOS for 
 //  consumption by the API.
 
-OSFILEQOS QosOSFileFromUrgentLevel( __in const ULONG iUrgentLevel )
+OSFILEQOS QosOSFileFromUrgentLevel( _In_ const ULONG iUrgentLevel )
 {
     Assert( iUrgentLevel >= 1 );
     Assert( iUrgentLevel <= qosIODispatchUrgentBackgroundLevelMax );
@@ -5503,7 +5503,7 @@ ULONG IOSDiskIUrgentLevelFromQOS( _In_ const OSFILEQOS grbitQOS )
 //  function is different from it's predecesors in that it starts out very gentle, rising only an outstanding IO or 
 //  two or three for a while, and then starts ramping up more powerfully as the urgent level increases.
 
-LONG CioOSDiskIFromUrgentLevelSmoothish( __in const ULONG iUrgentLevel, __in const DWORD cioUrgentMaxMax )
+LONG CioOSDiskIFromUrgentLevelSmoothish( _In_ const ULONG iUrgentLevel, _In_ const DWORD cioUrgentMaxMax )
 {
     Assert( iUrgentLevel >= 1 );
     Assert( iUrgentLevel <= qosIODispatchUrgentBackgroundLevelMax );
@@ -5578,7 +5578,7 @@ LONG CioOSDiskIFromUrgentLevelSmoothish( __in const ULONG iUrgentLevel, __in con
     return cioOutstanding;
 }
 
-LONG CioOSDiskIFromUrgentLevelBiLinear( __in const ULONG iUrgentLevel, __in const DWORD cioUrgentMaxMax )
+LONG CioOSDiskIFromUrgentLevelBiLinear( _In_ const ULONG iUrgentLevel, _In_ const DWORD cioUrgentMaxMax )
 {
     Assert( iUrgentLevel >= 1 );
     Assert( iUrgentLevel <= qosIODispatchUrgentBackgroundLevelMax );
@@ -5613,7 +5613,7 @@ LONG CioOSDiskIFromUrgentLevelBiLinear( __in const ULONG iUrgentLevel, __in cons
 }
 
 
-LONG CioOSDiskIFromUrgentLevelLinear( __in const ULONG iUrgentLevel, __in const DWORD cioUrgentMaxMax )
+LONG CioOSDiskIFromUrgentLevelLinear( _In_ const ULONG iUrgentLevel, _In_ const DWORD cioUrgentMaxMax )
 {
     Assert( iUrgentLevel >= 1 );
     Assert( iUrgentLevel <= qosIODispatchUrgentBackgroundLevelMax );
@@ -5684,7 +5684,7 @@ ULONG CbSumRun( const IOREQ * pioreq )
 }
 
 
-ERR COSDisk::IOQueue::ErrReserveQueueSpace( __in OSFILEQOS grbitQOS, __inout IOREQ * pioreq )
+ERR COSDisk::IOQueue::ErrReserveQueueSpace( _In_ OSFILEQOS grbitQOS, __inout IOREQ * pioreq )
 {
     ERR err = JET_errSuccess;
 
@@ -6300,8 +6300,8 @@ DWORD OSDiskIFillFSEAddress(
     const BYTE*                     pbData,
     DWORD                           cbData,
     bool                                fRepeat,        // use pbData repeatedly
-    __in const DWORD                    cfse,
-    __out PFILE_SEGMENT_ELEMENT const   rgfse )
+    _In_ const DWORD                    cfse,
+    _Out_ PFILE_SEGMENT_ELEMENT const   rgfse )
 {
     DWORD cbDelta = fRepeat ? 0 : OSMemoryPageCommitGranularity();
     DWORD cospage = 0;
@@ -6327,11 +6327,11 @@ DWORD OSDiskIFillFSEAddress(
 //  the appropriate rgfse, and gets the highest IO priority.
 
 void OSDiskIIOPrepareScatterGatherIO(
-    __in IOREQ * const                  pioreqHead,
-    __in const DWORD                    cbRun,
-    __in const DWORD                    cfse,
-    __out PFILE_SEGMENT_ELEMENT const   rgfse,
-    __out BOOL *                        pfIOOSLowPriority
+    _In_ IOREQ * const                  pioreqHead,
+    _In_ const DWORD                    cbRun,
+    _In_ const DWORD                    cfse,
+    _Out_ PFILE_SEGMENT_ELEMENT const   rgfse,
+    _Out_ BOOL *                        pfIOOSLowPriority
     )
 {
     Assert( pioreqHead );
@@ -6431,13 +6431,13 @@ BOOL GetOverlappedResult_(  HANDLE          hFile,
 // Note: This function returns a Win32 Error, not a JET error.
 
 DWORD ErrorIOMgrIssueIO(
-    __in COSDisk::IORun*                    piorun,
-    __in const IOREQ::IOMETHOD              iomethod,
+    _In_ COSDisk::IORun*                    piorun,
+    _In_ const IOREQ::IOMETHOD              iomethod,
     __inout const PFILE_SEGMENT_ELEMENT     rgfse,
-    __in const DWORD                        cfse,
-    __out BOOL *                            pfIOCompleted,
-    __out DWORD *                           pcbTransfer,
-    __out IOREQ **                          ppioreqHead = NULL
+    _In_ const DWORD                        cfse,
+    _Out_ BOOL *                            pfIOCompleted,
+    _Out_ DWORD *                           pcbTransfer,
+    _Out_ IOREQ **                          ppioreqHead = NULL
     )
 {
     DWORD error = ERROR_SUCCESS;
@@ -6966,7 +6966,7 @@ INT COSDisk::CIoRunPool::Cioruns() const
 #endif  //  DEBUG
 
 
-ERR COSDisk::ErrReserveQueueSpace( __in OSFILEQOS grbitQOS, __inout IOREQ * pioreq )
+ERR COSDisk::ErrReserveQueueSpace( _In_ OSFILEQOS grbitQOS, __inout IOREQ * pioreq )
 {
     const ERR errReserve = m_pIOQueue->ErrReserveQueueSpace( grbitQOS, pioreq );
 
@@ -6986,12 +6986,12 @@ ERR COSDisk::ErrReserveQueueSpace( __in OSFILEQOS grbitQOS, __inout IOREQ * pior
 //          pass 0,0 if it can not be combined.
 //
 ERR COSDisk::ErrAllocIOREQ(
-    __in OSFILEQOS          grbitQOS,
-    __in const _OSFILE *    p_osf,
-    __in const BOOL         fWrite,
-    __in const QWORD        ibOffsetCombine,
-    __in const DWORD        cbDataCombine,
-    __out IOREQ **          ppioreq )
+    _In_ OSFILEQOS          grbitQOS,
+    _In_ const _OSFILE *    p_osf,
+    _In_ const BOOL         fWrite,
+    _In_ const QWORD        ibOffsetCombine,
+    _In_ const DWORD        cbDataCombine,
+    _Out_ IOREQ **          ppioreq )
 {
     ERR err = JET_errSuccess;
 
@@ -7062,7 +7062,7 @@ HandleError:
 }
 
 VOID COSDisk::FreeIOREQ(
-    __in IOREQ * const  pioreq
+    _In_ IOREQ * const  pioreq
     )
 {
     //  Release the Queue reservations
@@ -7087,7 +7087,7 @@ VOID COSDisk::FreeIOREQ(
 
 //  This takes an IO Run and enqueues it / inserts it into the heap
 
-void COSDisk::EnqueueIORun( __in IOREQ * pioreqHead )
+void COSDisk::EnqueueIORun( _In_ IOREQ * pioreqHead )
 {
     Assert( pioreqHead );
     Assert( pioreqHead->p_osf->m_posd == this );
@@ -7155,7 +7155,7 @@ void COSDisk::EnqueueIORun( __in IOREQ * pioreqHead )
 //  This takes an IOREQ and enqueues it either in the TLS or inserts it into the heap,
 //  depending ...
 
-void COSDisk::EnqueueIOREQ( __in IOREQ * pioreq )
+void COSDisk::EnqueueIOREQ( _In_ IOREQ * pioreq )
 {
     Assert( pioreq );
     Assert( NULL == pioreq->pioreqIorunNext );
@@ -7462,7 +7462,7 @@ void COSDisk::IncCioAsyncDispatching( _In_ const BOOL fWrite )
     }
 }
 
-void COSDisk::QueueCompleteIORun( __in IOREQ * const pioreqHead )
+void COSDisk::QueueCompleteIORun( _In_ IOREQ * const pioreqHead )
 {
     Assert( pioreqHead );
 
@@ -7518,7 +7518,7 @@ void COSDisk::QueueCompleteIORun( __in IOREQ * const pioreqHead )
 }
 
 BOOL COSDisk::FQueueCompleteIOREQ(
-    __in IOREQ * const  pioreq
+    _In_ IOREQ * const  pioreq
     )
 {
     //  Release the Queue reservations
@@ -7687,11 +7687,11 @@ INLINE DWORD COSDisk::CioOsQueueDepth()
 //  IO priority, sets the scatter/gather list pointers, etc.
 
 void COSDisk::IORun::PrepareForIssue(
-    __in const IOREQ::IOMETHOD              iomethod,
-    __out DWORD * const                     pcbRun,
-    __out BOOL * const                      pfIOOSLowPriority,
+    _In_ const IOREQ::IOMETHOD              iomethod,
+    _Out_ DWORD * const                     pcbRun,
+    _Out_ BOOL * const                      pfIOOSLowPriority,
     __inout PFILE_SEGMENT_ELEMENT const     rgfse,
-    __in const DWORD                        cfse
+    _In_ const DWORD                        cfse
     )
 {
     IOREQ * const pioreqHead    = m_storage.Head();
@@ -7743,9 +7743,9 @@ INLINE bool FIOTemporaryResourceIssue( ERR errIO )
 //  Determines if this I/O method does not work on this file
 
 INLINE bool FIOMethodTooComplex(
-    __in const IOREQ::IOMETHOD      iomethodCurrentFile,
-    __in const IOREQ::IOMETHOD      iomethodIO,
-    __in const ERR                  errIO )
+    _In_ const IOREQ::IOMETHOD      iomethodCurrentFile,
+    _In_ const IOREQ::IOMETHOD      iomethodIO,
+    _In_ const ERR                  errIO )
 {
     return iomethodCurrentFile >= iomethodIO &&     // current IO method is the one used or better
             iomethodIO > IOREQ::iomethodSync && // IO method is still degradable
@@ -7756,11 +7756,11 @@ INLINE bool FIOMethodTooComplex(
 //  Returns true if too many IOs and we need start servicing completions
 
 BOOL FIOMgrHandleIOResult(
-    __in const IOREQ::IOMETHOD      iomethod,
+    _In_ const IOREQ::IOMETHOD      iomethod,
     __inout IOREQ *                 pioreqHead,
-    __in BOOL                       fIOCompleted,
-    __in DWORD                      error,
-    __in DWORD                      cbTransfer
+    _In_ BOOL                       fIOCompleted,
+    _In_ DWORD                      error,
+    _In_ DWORD                      cbTransfer
     )
 {
     BOOL fReIssue = fFalse;
@@ -7857,7 +7857,7 @@ BOOL FIOMgrHandleIOResult(
 QWORD g_cSplitAndIssueRunning = fFalse;
 
 BOOL FIOMgrSplitAndIssue(
-    __in const IOREQ::IOMETHOD              iomethod,
+    _In_ const IOREQ::IOMETHOD              iomethod,
     __inout COSDisk::IORun *                piorun
     )
 {
@@ -7985,7 +7985,7 @@ BOOL FIOMgrSplitAndIssue(
 }
 
 BOOL FIOMgrIssueIORunRegular(
-    __in const IOREQ::IOMETHOD          iomethod,
+    _In_ const IOREQ::IOMETHOD          iomethod,
     __inout COSDisk::IORun *            piorun
     )
 {

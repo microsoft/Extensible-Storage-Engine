@@ -146,7 +146,7 @@ LOCAL void OSUConfigLoadParameterOverrides()
                     JET_SESID       sesid,
                     ULONG   paramid,
                     ULONG_PTR       ulParam,
-                    __in PCWSTR     wszParam,
+                    _In_ PCWSTR     wszParam,
                     const BOOL      fEnterCritInst = fTrue );
 
                 (VOID)ErrSetSystemParameter(

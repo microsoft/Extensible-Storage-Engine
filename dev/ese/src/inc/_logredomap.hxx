@@ -36,18 +36,18 @@ struct RedoMapEntry
 
         // Ctr.
         RedoMapEntry(
-            __in const LGPOS& lgposNew,
-            __in const ERR errNew,
-            __in const DBTIME dbtimeBeforeNew,
-            __in const DBTIME dbtimePageNew,
-            __in const DBTIME dbtimeAfterNew );
+            _In_ const LGPOS& lgposNew,
+            _In_ const ERR errNew,
+            _In_ const DBTIME dbtimeBeforeNew,
+            _In_ const DBTIME dbtimePageNew,
+            _In_ const DBTIME dbtimeAfterNew );
 };
 
 class CLogRedoMap
 {
     private:
         typedef CRedBlackTree< PGNO, RedoMapEntry > RedoMapTree;
-        static ERR ErrToErr( __in const RedoMapTree::ERR err );
+        static ERR ErrToErr( _In_ const RedoMapTree::ERR err );
 
     private:
         RedoMapTree*    m_rmt;
@@ -62,18 +62,18 @@ class CLogRedoMap
         VOID TermLogRedoMap();
         BOOL FLogRedoMapEnabled() const;
 
-        BOOL FPgnoSet( __in const PGNO pgno ) const;
+        BOOL FPgnoSet( _In_ const PGNO pgno ) const;
         BOOL FAnyPgnoSet() const;
-        ERR ErrSetPgno( __in const PGNO pgno );
-        ERR ErrSetPgno( __in const PGNO pgno, __in const LGPOS& lgpos );
+        ERR ErrSetPgno( _In_ const PGNO pgno );
+        ERR ErrSetPgno( _In_ const PGNO pgno, _In_ const LGPOS& lgpos );
         ERR ErrSetPgno(
-            __in const PGNO pgno,
-            __in const LGPOS& lgpos,
-            __in const ERR errNew,
-            __in const DBTIME dbtimeBefore,
-            __in const DBTIME dbtimePage,
-            __in const DBTIME dbtimeAfter );
-        VOID ClearPgno( __in PGNO pgnoStart, __in PGNO pgnoEnd );
-        VOID ClearPgno( __in PGNO pgno );
-        VOID GetOldestLgposEntry( __out PGNO* const ppgno, __out RedoMapEntry* const prme, __out CPG* const pcpg ) const;
+            _In_ const PGNO pgno,
+            _In_ const LGPOS& lgpos,
+            _In_ const ERR errNew,
+            _In_ const DBTIME dbtimeBefore,
+            _In_ const DBTIME dbtimePage,
+            _In_ const DBTIME dbtimeAfter );
+        VOID ClearPgno( _In_ PGNO pgnoStart, _In_ PGNO pgnoEnd );
+        VOID ClearPgno( _In_ PGNO pgno );
+        VOID GetOldestLgposEntry( _Out_ PGNO* const ppgno, _Out_ RedoMapEntry* const prme, _Out_ CPG* const pcpg ) const;
 };

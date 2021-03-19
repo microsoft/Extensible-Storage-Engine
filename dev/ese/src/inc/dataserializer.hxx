@@ -22,7 +22,7 @@ public:
 
     // Get the contents of the bound variable as a pv/cb pair,
     // suitable for storage
-    virtual void GetPvCb(__out const void ** ppv, __out size_t * pcb) const = 0;
+    virtual void GetPvCb(_Out_ const void ** ppv, _Out_ size_t * pcb) const = 0;
 
     // Set the bound variable from a stored pv/cb pair
     virtual ERR ErrSetFromPvCb(const void * const pv, const size_t cb) = 0;
@@ -69,7 +69,7 @@ public:
     // this is the default column type, it can be specialized
     virtual JET_COLTYP Coltyp() const { return JET_coltypLongBinary; }
 
-    virtual void GetPvCb(__out const void ** ppv, __out size_t * pcb) const
+    virtual void GetPvCb(_Out_ const void ** ppv, _Out_ size_t * pcb) const
     {
         Assert(ppv);
         Assert(pcb);
@@ -153,7 +153,7 @@ public:
     
     virtual JET_COLTYP Coltyp() const { return JET_coltypLongText; }
 
-    virtual void GetPvCb(__out const void ** ppv, __out size_t * pcb) const
+    virtual void GetPvCb(_Out_ const void ** ppv, _Out_ size_t * pcb) const
     {
         Assert(ppv);
         Assert(pcb);
@@ -228,8 +228,8 @@ public:
     // DDL
     virtual ERR ErrColumnExists(
         const char * const szColumn,
-        __out bool * const pfExists,
-        __out JET_COLTYP * const pcoltyp) const = 0;
+        _Out_ bool * const pfExists,
+        _Out_ JET_COLTYP * const pcoltyp) const = 0;
     virtual ERR ErrCreateColumn(const char * const szColumn, const JET_COLTYP coltyp) = 0;
 
     // DML
@@ -237,8 +237,8 @@ public:
     // Get the column data. Returns JET_wrnColumnNull if the column isn't present or has no data
     virtual ERR ErrLoadDataFromColumn(
         const char * const szColumn,
-        __out void * pv,
-        __out size_t * const pcbActual,
+        _Out_ void * pv,
+        _Out_ size_t * const pcbActual,
         const size_t cbMax) const = 0;
     virtual ERR ErrStoreDataToColumn(const char * const szColumn, const void * const pv, const size_t cb) = 0;
 
@@ -328,13 +328,13 @@ public:
 
     ERR ErrColumnExists(
         const char * const szColumn,
-        __out bool * const pfExists,
-        __out JET_COLTYP * const pcoltyp) const;
+        _Out_ bool * const pfExists,
+        _Out_ JET_COLTYP * const pcoltyp) const;
     ERR ErrCreateColumn(const char * const szColumn, const JET_COLTYP coltyp);
 
     ERR ErrLoadDataFromColumn(
         const char * const szColumn,
-        __out void * pv, __out size_t * const pcbActual,
+        _Out_ void * pv, _Out_ size_t * const pcbActual,
         const size_t cbMax) const;
 
     ERR ErrPrepareUpdate();

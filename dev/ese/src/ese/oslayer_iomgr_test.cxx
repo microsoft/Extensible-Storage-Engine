@@ -149,11 +149,11 @@ JETUNITTEST( IoRunOffsetCmp, TestCmpIOREQOffsetBasicComparesWork )
             BOOL fDontCare;
 
 void OSDiskIIOPrepareScatterGatherIO(
-    __in IOREQ * const                  pioreqHead,
-    __in const DWORD                    cbRun,
-    __in const DWORD                    cfse,
-    __out PFILE_SEGMENT_ELEMENT const   rgfse,
-    __out BOOL *                        pfIOOSLowPriority
+    _In_ IOREQ * const                  pioreqHead,
+    _In_ const DWORD                    cbRun,
+    _In_ const DWORD                    cfse,
+    _Out_ PFILE_SEGMENT_ELEMENT const   rgfse,
+    _Out_ BOOL *                        pfIOOSLowPriority
     );
 
 JETUNITTEST( IoRunQopSgio, TestReadCombiningProducesSgioPreparableIorun )
@@ -840,8 +840,8 @@ RetryRaceToAvoidStarved:
 
 
 // Needed to perform COSDisk Queue testing ...
-ERR ErrOSDiskConnect( __in_z const WCHAR * const wszDiskPathId, __in const DWORD dwDiskNumber, __out IDiskAPI ** ppdiskapi );
-void OSDiskDisconnect( __inout IDiskAPI * pdiskapi, __in const _OSFILE * p_osf );
+ERR ErrOSDiskConnect( __in_z const WCHAR * const wszDiskPathId, _In_ const DWORD dwDiskNumber, _Out_ IDiskAPI ** ppdiskapi );
+void OSDiskDisconnect( __inout IDiskAPI * pdiskapi, _In_ const _OSFILE * p_osf );
 extern COSFilePerfDummy g_cosfileperfDefault;
 
 extern LONG g_cioConcurrentMetedOpsMax;

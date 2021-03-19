@@ -34,10 +34,10 @@ long        g_lRefEseWriter = 0;
 
 
 ULONG_PTR GetLogFileSizeAndExtensionFromDirectoryAndBaseName(
-    __in PCWSTR szLogPath,
-    __in PCWSTR szEseBaseName,
+    _In_ PCWSTR szLogPath,
+    _In_ PCWSTR szEseBaseName,
     __out_ecount(cchMax) PWSTR const szLogExtension,
-    __in const DWORD cchMax
+    _In_ const DWORD cchMax
 )
 {
     ULONG_PTR cbFile = 0;
@@ -509,10 +509,10 @@ bool STDMETHODCALLTYPE EseRecoveryWriter::OnPostRestore(
 
 HRESULT
 EseRecoveryWriter::RecoverEseDatabase(
-    __in PCWSTR szOldDbName,
-    __in PCWSTR szNewDbName,
-    __in PCWSTR szLogPath,
-    __in PCWSTR szSystemPath
+    _In_ PCWSTR szOldDbName,
+    _In_ PCWSTR szNewDbName,
+    _In_ PCWSTR szLogPath,
+    _In_ PCWSTR szSystemPath
 )
 {
     DBGV( wprintf( L"Entering %hs.\n", __FUNCTION__ ) );

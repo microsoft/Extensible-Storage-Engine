@@ -188,14 +188,14 @@ BOOL FBTISPCCheckMergeable( FUCB *pfucb, CSR *pcsrDest, LINEINFO *rglineinfo );
 bool FBTICpgFragmentedRange(
     __in_ecount(cpg) const PGNO * const rgpgno,
     const CPG cpg,
-    __in const CPG cpgFragmentedRangeMin,
-    __out INT * const pipgnoStart,
-    __out INT * const pipgnoEnd );
+    _In_ const CPG cpgFragmentedRangeMin,
+    _Out_ INT * const pipgnoStart,
+    _Out_ INT * const pipgnoEnd );
 bool FBTICpgFragmentedRangeTrigger(
     __in_ecount(cpg) const PGNO * const rgpgno,
     const CPG cpg,
-    __in const CPG cpgFragmentedRangeTrigger,
-    __in const CPG cpgFragmentedRangeMin );
+    _In_ const CPG cpgFragmentedRangeTrigger,
+    _In_ const CPG cpgFragmentedRangeMin );
 LOCAL BOOL FBTIEligibleForOLD2( FUCB * const pfucb );
 LOCAL ERR ErrBTIRegisterForOLD2( FUCB * const pfucb );
 
@@ -2488,16 +2488,16 @@ public:
         __in_ecount(ckeys) const void * const * const   rgpvKeys,
         __in_ecount(ckeys) const ULONG * const  rgcbKeys,
         const LONG                                      ckeys,
-        __out LONG * const                              pckeysPreread,
+        _Out_ LONG * const                              pckeysPreread,
         const JET_GRBIT                                 grbit );
 
     ERR ErrPrereadBookmarkRanges(
         __in_ecount(cbm) const BOOKMARK * const rgbmStart,
         __in_ecount(cbm) const BOOKMARK * const rgbmEnd,
         const LONG                              cbm,
-        __out LONG * const                      pcbmRangesPreread,
-        __in const ULONG                        cPageCacheMin,
-        __in const ULONG                        cPageCacheMax,
+        _Out_ LONG * const                      pcbmRangesPreread,
+        _In_ const ULONG                        cPageCacheMin,
+        _In_ const ULONG                        cPageCacheMax,
         const JET_GRBIT                         grbit,
         __out_opt ULONG * const                 pcPageCacheActual );
 
@@ -2508,8 +2508,8 @@ public:
         __in_ecount(cRanges) const ULONG * const    rgcbKeysEnd,
         const LONG                                          cRanges,
         __deref_out_range( 0, cRanges ) LONG * const        pcKeyRangesPreread,
-        __in const ULONG                            cPageCacheMin,
-        __in const ULONG                            cPageCacheMax,
+        _In_ const ULONG                            cPageCacheMin,
+        _In_ const ULONG                            cPageCacheMax,
         const JET_GRBIT                                     grbit,
         __out_opt ULONG * const                     pcPageCacheActual );
 
@@ -2552,14 +2552,14 @@ private:
         __in_ecount(cbm) const BOOKMARK * const         rgbmStart,
         __in_ecount(cbm) const BOOKMARK * const         rgbmEnd,
         const LONG                                      cbm,
-        __out LONG * const                              pcbmRangesPreread );
+        _Out_ LONG * const                              pcbmRangesPreread );
 
     ERR ErrPrereadRangesBackward(
         const CSR&                                      csr,
         __in_ecount(cbm) const BOOKMARK * const         rgbmStart,
         __in_ecount(cbm) const BOOKMARK * const         rgbmEnd,
         const LONG                                      cbm,
-        __out LONG * const                              pcbmRangesPreread );
+        _Out_ LONG * const                              pcbmRangesPreread );
 
     ERR ErrAddPrereadCandidate( const PGNO pgno );
 
@@ -2736,7 +2736,7 @@ ERR PrereadContext::ErrPrereadRangesForward(
     __in_ecount(cbm) const BOOKMARK * const         rgbmStart,
     __in_ecount(cbm) const BOOKMARK * const         rgbmEnd,
     const LONG                                      cbm,
-    __out LONG * const                              pcbmRangesPreread )
+    _Out_ LONG * const                              pcbmRangesPreread )
 //  ================================================================
 //
 //  Preread all the leaf pages containing the given bookmarks
@@ -2976,7 +2976,7 @@ ERR PrereadContext::ErrPrereadRangesBackward(
     __in_ecount(cbm) const BOOKMARK * const         rgbmStart,
     __in_ecount(cbm) const BOOKMARK * const         rgbmEnd,
     const LONG                                      cbm,
-    __out LONG * const                              pcbmRangesPreread )
+    _Out_ LONG * const                              pcbmRangesPreread )
 //  ================================================================
 //
 //  Preread all the leaf pages containing the given bookmarks
@@ -3246,7 +3246,7 @@ ERR PrereadContext::ErrPrereadKeys(
     __in_ecount(ckeys) const void * const * const   rgpvKeys,
     __in_ecount(ckeys) const ULONG * const  rgcbKeys,
     const LONG                                      ckeys,
-    __out LONG * const                              pckeysPreread,
+    _Out_ LONG * const                              pckeysPreread,
     const JET_GRBIT                                 grbit )
 //  ================================================================
 //
@@ -3289,7 +3289,7 @@ ERR ErrBTPrereadKeys(
     __in_ecount(ckeys) const void * const * const   rgpvKeys,
     __in_ecount(ckeys) const ULONG * const  rgcbKeys,
     const LONG                                      ckeys,
-    __out LONG * const                              pckeysPreread,
+    _Out_ LONG * const                              pckeysPreread,
     const JET_GRBIT                                 grbit )
 //  ================================================================
 {
@@ -3311,7 +3311,7 @@ ERR  ErrBTPrereadBookmarks(
     FUCB * const                                    pfucb,
     __in_ecount(cbm) const BOOKMARK * const         rgbm,
     const LONG                                      cbm,
-    __out LONG * const                              pcbmPreread,
+    _Out_ LONG * const                              pcbmPreread,
     const JET_GRBIT                                 grbit )
 //  ================================================================
 {
@@ -3335,11 +3335,11 @@ ERR PrereadContext::ErrPrereadBookmarkRanges(
     __in_ecount(cbm) const BOOKMARK * const         rgbmStart,
     __in_ecount(cbm) const BOOKMARK * const         rgbmEnd,
     const LONG                                      cbm,
-    __out LONG * const                              pcbmRangesPreread,
-    __in const ULONG                        cPageCacheMin,
-    __in const ULONG                        cPageCacheMax,
+    _Out_ LONG * const                              pcbmRangesPreread,
+    _In_ const ULONG                                cPageCacheMin,
+    _In_ const ULONG                                cPageCacheMax,
     const JET_GRBIT                                 grbit,
-    __out_opt ULONG * const                 pcPageCacheActual )
+    __out_opt ULONG * const                         pcPageCacheActual )
 //  ================================================================
 //
 //  Preread all the leaf pages containing the given bookmarks
@@ -3496,15 +3496,15 @@ HandleError:
 //  ================================================================
 ERR PrereadContext::ErrPrereadKeyRanges(
     __in_ecount(cRanges) const void *   const * const   rgpvKeysStart,
-    __in_ecount(cRanges) const ULONG * const    rgcbKeysStart,
+    __in_ecount(cRanges) const ULONG * const            rgcbKeysStart,
     __in_ecount(cRanges) const void *   const * const   rgpvKeysEnd,
-    __in_ecount(cRanges) const ULONG * const    rgcbKeysEnd,
+    __in_ecount(cRanges) const ULONG * const            rgcbKeysEnd,
     const LONG                                          cRanges,
     __deref_out_range( 0, cRanges ) LONG * const        pcRangesPreread,
-    __in const ULONG                            cPageCacheMin,
-    __in const ULONG                            cPageCacheMax,
+    _In_ const ULONG                                    cPageCacheMin,
+    _In_ const ULONG                                    cPageCacheMax,
     const JET_GRBIT                                     grbit,
-    __out_opt ULONG * const                     pcPageCacheActual )
+    __out_opt ULONG * const                             pcPageCacheActual )
 //  ================================================================
 //
 //  Preread all the leaf pages containing the given keys
@@ -3552,15 +3552,15 @@ ERR ErrBTPrereadKeyRanges(
     PIB * const                                     ppib,
     FUCB * const                                    pfucb,
     __in_ecount(ckeys) const void * const * const   rgpvKeysStart,
-    __in_ecount(ckeys) const ULONG * const  rgcbKeysStart,
+    __in_ecount(ckeys) const ULONG * const          rgcbKeysStart,
     __in_ecount(ckeys) const void * const * const   rgpvKeysEnd,
-    __in_ecount(ckeys) const ULONG * const  rgcbKeysEnd,
+    __in_ecount(ckeys) const ULONG * const          rgcbKeysEnd,
     const LONG                                      ckeys,
     __deref_out_range( 0, ckeys ) LONG * const      pcRangesPreread,
-    __in const ULONG                        cPageCacheMin,
-    __in const ULONG                        cPageCacheMax,
+    _In_ const ULONG                                cPageCacheMin,
+    _In_ const ULONG                                cPageCacheMax,
     const JET_GRBIT                                 grbit,
-    __out_opt ULONG * const                 pcPageCacheActual )
+    __out_opt ULONG * const                         pcPageCacheActual )
 //  ================================================================
 {
     PIBTraceContextScope tcScope = TcBTICreateCtxScope( pfucb, iorsBTPreread);
@@ -6617,9 +6617,9 @@ HandleError:
 bool FBTICpgFragmentedRange(
     __in_ecount(cpg) const PGNO * const rgpgno,
     const CPG cpg,
-    __in const CPG cpgFragmentedRangeMin,
-    __out INT * const pipgnoStart,
-    __out INT * const pipgnoEnd )
+    _In_ const CPG cpgFragmentedRangeMin,
+    _Out_ INT * const pipgnoStart,
+    _Out_ INT * const pipgnoEnd )
 //  ================================================================
 //
 // Given an array of page numbers, determine which of them should be included in
@@ -6884,8 +6884,8 @@ JETUNITTEST( FBTICpgFragmentedRange, SmallFragmentedRanges )
 bool FBTICpgFragmentedRangeTrigger(
     __in_ecount(cpg) const PGNO * const rgpgno,
     const CPG cpg,
-    __in const CPG cpgFragmentedRangeTrigger,
-    __in const CPG cpgFragmentedRangeMin )
+    _In_ const CPG cpgFragmentedRangeTrigger,
+    _In_ const CPG cpgFragmentedRangeMin )
 //  ================================================================
 //
 // Uses FBTICpgFragmentedRange() to determine if the array of page
@@ -7003,10 +7003,10 @@ JETUNITTEST( FBTICpgFragmentedRangeTrigger, EnoughPagesToDefragFragmentedThenUnf
 
 //  ================================================================
 ERR ErrBTIGetBookmarkFromPage(
-    __in FUCB * const pfucb,
-    __in CSR * const pcsr,
+    _In_ FUCB * const pfucb,
+    _In_ CSR * const pcsr,
     const INT iline,
-    __out BOOKMARK * const pbm )
+    _Out_ BOOKMARK * const pbm )
 //  ================================================================
 //
 //  Given a CSR which points to a child page, get the first bookmark
@@ -7059,11 +7059,11 @@ HandleError:
 
 //  ================================================================
 ERR ErrBTIFindFragmentedRangeInParentOfLeafPage(
-    __in FUCB * const pfucb,
-    __in CSR * const pcsr,
-    __in const CPG cpgFragmentedRangeMin,
-    __out BOOKMARK * const pbmRangeStart,
-    __out BOOKMARK * const pbmRangeEnd)
+    _In_ FUCB * const pfucb,
+    _In_ CSR * const pcsr,
+    _In_ const CPG cpgFragmentedRangeMin,
+    _Out_ BOOKMARK * const pbmRangeStart,
+    _Out_ BOOKMARK * const pbmRangeEnd)
 //  ================================================================
 //
 //  Look for a fragmented range which occurs after the current iline.
@@ -7136,11 +7136,11 @@ HandleError:
 
 //  ================================================================
 ERR ErrBTIFindFragmentedRange(
-    __in FUCB * const pfucb,
-    __in CSR * const pcsr,
-    __in const BOOKMARK& bmStart,
-    __out BOOKMARK * const pbmRangeStart,
-    __out BOOKMARK * const pbmRangeEnd)
+    _In_ FUCB * const pfucb,
+    _In_ CSR * const pcsr,
+    _In_ const BOOKMARK& bmStart,
+    _Out_ BOOKMARK * const pbmRangeStart,
+    _Out_ BOOKMARK * const pbmRangeEnd)
 //  ================================================================
 //
 //  Recursively move down the tree looking for a fragmented range 
@@ -7237,10 +7237,10 @@ HandleError:
 
 //  ================================================================
 ERR ErrBTFindFragmentedRange(
-    __in FUCB * const pfucb,
-    __in const BOOKMARK& bmStart,
-    __out BOOKMARK * const pbmRangeStart,
-    __out BOOKMARK * const pbmRangeEnd)
+    _In_ FUCB * const pfucb,
+    _In_ const BOOKMARK& bmStart,
+    _Out_ BOOKMARK * const pbmRangeStart,
+    _Out_ BOOKMARK * const pbmRangeEnd)
 //  ================================================================
 //
 // Find the first fragmented range of the b-tree after the given bookmark
@@ -9348,7 +9348,7 @@ VOID BTISelectAppend( SPLIT *psplit, FUCB *pfucb )
 
 
 //  ================================================================
-LOCAL BOOL FBTISplitAppendLeaf( IN const SPLIT * const psplit )
+LOCAL BOOL FBTISplitAppendLeaf( _In_ const SPLIT * const psplit )
 //  ================================================================
 //
 //  Determines if we are splitting an internal page whose (eventual)
@@ -9380,7 +9380,7 @@ LOCAL BOOL FBTISplitAppendLeaf( IN const SPLIT * const psplit )
 
 
 //  ================================================================
-LOCAL BOOL FBTIPrependSplit( IN const SPLIT * const psplit )
+LOCAL BOOL FBTIPrependSplit( _In_ const SPLIT * const psplit )
 //  ================================================================
 //
 //  This function looks for the case where we are doing a prepend
@@ -9408,7 +9408,7 @@ LOCAL BOOL FBTIPrependSplit( IN const SPLIT * const psplit )
 
 
 //  ================================================================
-LOCAL VOID BTISelectHotPointSplit( IN SPLIT * const psplit, IN FUCB * pfucb )
+LOCAL VOID BTISelectHotPointSplit( _In_ SPLIT * const psplit, _In_ FUCB * pfucb )
 //  ================================================================
 //
 //  Called for a hotpoint split
@@ -9463,10 +9463,10 @@ LOCAL VOID BTISelectHotPointSplit( IN SPLIT * const psplit, IN FUCB * pfucb )
 
 //  ================================================================
 LOCAL VOID BTISelectPrependLeafSplit(
-    IN SPLIT * const psplit,
-    OUT INT * const pilineCandidate,
-    OUT PREFIXINFO * const pprefixinfoSplitCandidate,
-    OUT PREFIXINFO * const pprefixinfoNewCandidate )
+    _In_ SPLIT * const psplit,
+    _Out_ INT * const pilineCandidate,
+    _Out_ PREFIXINFO * const pprefixinfoSplitCandidate,
+    _Out_ PREFIXINFO * const pprefixinfoNewCandidate )
 //  ================================================================
 {
     Assert( psplit->prefixinfoSplit.FNull() );
@@ -9502,10 +9502,10 @@ LOCAL VOID BTISelectPrependLeafSplit(
 
 //  ================================================================
 LOCAL VOID BTISelectAppendLeafSplit(
-    IN SPLIT * const psplit,
-    OUT INT * const pilineCandidate,
-    OUT PREFIXINFO * const pprefixinfoSplitCandidate,
-    OUT PREFIXINFO * const pprefixinfoNewCandidate )
+    _In_ SPLIT * const psplit,
+    _Out_ INT * const pilineCandidate,
+    _Out_ PREFIXINFO * const pprefixinfoSplitCandidate,
+    _Out_ PREFIXINFO * const pprefixinfoNewCandidate )
 //  ================================================================
 //
 //  Called if we are an internal page whose (eventual) child leaf page
@@ -9555,9 +9555,9 @@ LOCAL VOID BTISelectAppendLeafSplit(
 
 //  ================================================================
 LOCAL VOID BTIRecalculatePrefix(
-    IN SPLIT * const psplit,
-    IN const INT ilinePrev,
-    IN const INT ilineNew )
+    _In_ SPLIT * const psplit,
+    _In_ const INT ilinePrev,
+    _In_ const INT ilineNew )
 //  ================================================================
 //
 //  Called by BTISelectEvenSplit when the splitpoint has changed (by
@@ -9659,8 +9659,8 @@ LOCAL VOID BTIRecalculatePrefix(
 
 //  ================================================================
 LOCAL VOID BTISelectEvenSplitWithoutCheckingOverflows(
-    IN const SPLIT * const psplit,
-    OUT INT * const pilineCandidate )
+    _In_ const SPLIT * const psplit,
+    _Out_ INT * const pilineCandidate )
 //  ================================================================
 //
 //  Find the split point that has the "best" distribution of data
@@ -9809,10 +9809,10 @@ LOCAL VOID BTISelectEvenSplitWithoutCheckingOverflows(
 #ifdef DEBUG
 //  ================================================================
 LOCAL VOID BTISelectEvenSplitDebug(
-    IN SPLIT * const psplit,
-    OUT INT * const pilineCandidate,
-    OUT PREFIXINFO * const pprefixinfoSplitCandidate,
-    OUT PREFIXINFO * const pprefixinfoNewCandidate )
+    _In_ SPLIT * const psplit,
+    _Out_ INT * const pilineCandidate,
+    _Out_ PREFIXINFO * const pprefixinfoSplitCandidate,
+    _Out_ PREFIXINFO * const pprefixinfoNewCandidate )
 //  ================================================================
 //
 //  A copy of the split code as it was prior to 06/2003, used to make
@@ -9882,10 +9882,10 @@ LOCAL VOID BTISelectEvenSplitDebug(
 
 //  ================================================================
 LOCAL VOID BTISelectEvenSplit(
-    IN SPLIT * const psplit,
-    OUT INT * const pilineCandidate,
-    OUT PREFIXINFO * const pprefixinfoSplitCandidate,
-    OUT PREFIXINFO * const pprefixinfoNewCandidate )
+    _In_ SPLIT * const psplit,
+    _Out_ INT * const pilineCandidate,
+    _Out_ PREFIXINFO * const pprefixinfoSplitCandidate,
+    _Out_ PREFIXINFO * const pprefixinfoNewCandidate )
 //  ================================================================
 //
 //  we want to find a split point that splits the data between the two new pages
@@ -13567,10 +13567,10 @@ LOCAL BOOL FBTICheckSibling(const FUCB * const pfucb, const INT pctFull, const P
 }
 
 LOCAL ERR ErrBTICheckForMultipageOLC(
-    __in FUCB * const pfucb,
+    _In_ FUCB * const pfucb,
     const INT pctFull,
-    __in LINEINFO * const rglineinfo,
-    __out BOOL * const pfMultipageOLC)
+    _In_ LINEINFO * const rglineinfo,
+    _Out_ BOOL * const pfMultipageOLC)
 {
     Assert( pfucb );
     Assert( rglineinfo );
@@ -15489,8 +15489,8 @@ ERR ErrBTIMergeOrEmptyPage( FUCB *pfucb, MERGEPATH *pmergePathLeaf )
 
 //  ================================================================
 LOCAL VOID BTICheckPagePointer(
-    __in const CSR& csr,
-    __in const PGNO pgno )
+    _In_ const CSR& csr,
+    _In_ const PGNO pgno )
 //  ================================================================
 //
 // given an internal page make sure the node pointed to by the current
@@ -15511,8 +15511,8 @@ LOCAL VOID BTICheckPagePointer(
 
 //  ================================================================
 LOCAL VOID BTIUpdatePagePointer(
-    __in CSR * const pcsr,
-    __in const PGNO pgnoNew )
+    _In_ CSR * const pcsr,
+    _In_ const PGNO pgnoNew )
 //  ================================================================
 //
 // given an internal page change the node pointed to by the current
@@ -15534,8 +15534,8 @@ LOCAL VOID BTIUpdatePagePointer(
 
 //  ================================================================
 LOCAL VOID BTIMovePageCopyNextBookmark(
-            __in        const FUCB * const pfucb,
-            __in        const MERGEPATH * const pmergePath,
+            _In_        const FUCB * const pfucb,
+            _In_        const MERGEPATH * const pmergePath,
             __inout     BOOKMARK * const pbmNext )
 //  ================================================================
 //
@@ -15585,8 +15585,8 @@ LOCAL VOID BTIMovePageCopyNextBookmark(
 
 //  ================================================================
 LOCAL VOID BTIMergeSetPcsrRoot(
-    __in FUCB * const pfucb,
-    __in MERGEPATH * const pmergePathTip )
+    _In_ FUCB * const pfucb,
+    _In_ MERGEPATH * const pmergePathTip )
 //  ================================================================
 {
     Assert( pfucb );
@@ -15606,10 +15606,10 @@ LOCAL VOID BTIMergeSetPcsrRoot(
 
 //  ================================================================
 LOCAL ERR ErrBTIPageMoveAllocatePage(
-    __in        FUCB * const        pfucb,
-    __in        MERGEPATH * const   pmergePath,
-    __in        ULONG               fSPAllocFlags,
-    __in        const DIRFLAG       dirflag )
+    _In_        FUCB * const        pfucb,
+    _In_        MERGEPATH * const   pmergePath,
+    _In_        ULONG               fSPAllocFlags,
+    _In_        const DIRFLAG       dirflag )
 //  ================================================================
 {
     Assert( pfucb );
@@ -15739,7 +15739,7 @@ LOCAL VOID BTICheckPageMove(
 }
 
 //  ================================================================
-VOID BTPerformPageMove( __in MERGEPATH * const pmergePath )
+VOID BTPerformPageMove( _In_ MERGEPATH * const pmergePath )
 //  ================================================================
 //
 // the operation is logged and the pages are dirtied. all that remains is to do the move
@@ -15804,10 +15804,10 @@ VOID BTPerformPageMove( __in MERGEPATH * const pmergePath )
 
 //  ================================================================
 LOCAL ERR ErrBTIPageMove(
-    __in FUCB * const       pfucb,
-    __in MERGEPATH * const  pmergePath,
-    __in const DIRFLAG      dirflag,
-    __in const ULONG        fSPAllocFlags )
+    _In_ FUCB * const       pfucb,
+    _In_ MERGEPATH * const  pmergePath,
+    _In_ const DIRFLAG      dirflag,
+    _In_ const ULONG        fSPAllocFlags )
 //  ================================================================
 //
 // This function takes a mergePath and performs the merge.
@@ -15905,11 +15905,11 @@ HandleError:
 
 //  ================================================================
 ERR ErrBTPageMove(
-    __in FUCB * const pfucb,
-    __in const BOOKMARK& bm,
-    __in const PGNO pgnoSource,
-    __in const BOOL fLeafPage,
-    __in const ULONG fSPAllocFlags,
+    _In_ FUCB * const pfucb,
+    _In_ const BOOKMARK& bm,
+    _In_ const PGNO pgnoSource,
+    _In_ const BOOL fLeafPage,
+    _In_ const ULONG fSPAllocFlags,
     __inout BOOKMARK * const pbmNext )
 //  ================================================================
 {
@@ -17187,7 +17187,7 @@ class CBTAcrossQueue {
 
     ULONG           m_cPages;
 
-    CStupidQueue::ERR ErrEnqueuePage( __in const PGNO pgno )
+    CStupidQueue::ERR ErrEnqueuePage( _In_ const PGNO pgno )
     {
         Assert( m_pQ );
         if ( m_rgpgnoLevelLeftStart[m_iNextLevel] == 0x0 )
@@ -17242,7 +17242,7 @@ class CBTAcrossQueue {
 
 public:
 
-    CBTAcrossQueue( __in const PGNO pgnoFDP ) :
+    CBTAcrossQueue( _In_ const PGNO pgnoFDP ) :
         m_pgnoFDP( pgnoFDP )
     {
         memset( m_rgpgnoLevelLeftStart, 0, sizeof(m_rgpgnoLevelLeftStart) );    // set all pgnoLevelLeftStarts to 0x0
@@ -17259,7 +17259,7 @@ public:
         }
     }
 
-    CStupidQueue::ERR ErrDequeuePage( __out PGNO * ppgnoNext, __out ULONG * piLevel )
+    CStupidQueue::ERR ErrDequeuePage( _Out_ PGNO * ppgnoNext, _Out_ ULONG * piLevel )
     {
         //  This is essentially a queue so we steal the require queue's error space.
         CStupidQueue::ERR errQueue = CStupidQueue::ERR::errSuccess;
@@ -17310,7 +17310,7 @@ public:
         return errQueue;
     }
 
-    ERR ErrEnqueueNextLevel( __in const PGNO pgno, __in const CPAGE * const pcpage )
+    ERR ErrEnqueueNextLevel( _In_ const PGNO pgno, _In_ const CPAGE * const pcpage )
     {
         ERR err;
 

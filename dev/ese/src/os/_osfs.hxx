@@ -81,10 +81,10 @@ class COSFileSystem  //  osfs
 
         void PathVolumeCanonicalAndDiskId(  const WCHAR* const wszAbsRootPath,
                                             __out_ecount(cchVolumeCanonicalPath) WCHAR* const wszVolumeCanonicalPath,
-                                            __in const DWORD cchVolumeCanonicalPath,
+                                            _In_ const DWORD cchVolumeCanonicalPath,
                                             __out_ecount(cchDiskId) WCHAR* const wszDiskId,
-                                            __in const DWORD cchDiskId,
-                                            __out DWORD *pdwDiskNumber );
+                                            _In_ const DWORD cchDiskId,
+                                            _Out_ DWORD *pdwDiskNumber );
 
         //  Commit all changes to the File System
 
@@ -92,7 +92,7 @@ class COSFileSystem  //  osfs
 
         //  Get device handle for a specific file
 
-        ERR ErrOSFSGetDeviceHandle( __in PCWSTR wszAbsVolumeRootPath, __out HANDLE* phDevice );
+        ERR ErrOSFSGetDeviceHandle( _In_ PCWSTR wszAbsVolumeRootPath, _Out_ HANDLE* phDevice );
 
         //  debugging support
 
@@ -202,7 +202,7 @@ class COSFileSystem  //  osfs
 
         ERR ErrPathVolumeCanonical( const WCHAR* const wszAbsRootPath,
                                     __out_ecount(cchVolumeCanonicalPath) WCHAR* const wszVolumeCanonicalPath,
-                                    __in const DWORD cchVolumeCanonicalPath );
+                                    _In_ const DWORD cchVolumeCanonicalPath );
 
         //  This function returns a path in the form of "<PartitionStyle>:<ID>", which is NOT a valid path
         //  from the OS' perspective. It is used merely to identify our disks internally as strings.
@@ -219,8 +219,8 @@ class COSFileSystem  //  osfs
 
         ERR ErrDiskId(  const WCHAR* const wszVolumeCanonicalPath,
                         __out_ecount(cchDiskId) WCHAR* const wszDiskId,
-                        __in const DWORD cchDiskId,
-                        __out DWORD *pdwDiskNumber );
+                        _In_ const DWORD cchDiskId,
+                        _Out_ DWORD *pdwDiskNumber );
 
     private:
 
@@ -228,13 +228,13 @@ class COSFileSystem  //  osfs
         typedef WINBASEAPI BOOL WINAPI PfnGetVolumeNameForVolumeMountPoint( LPCWSTR, LPWSTR, DWORD );
 
         class CVolumePathCacheEntry;
-        CVolumePathCacheEntry * GetVolInfoCacheEntry( __in PCWSTR wszTargetPath );
+        CVolumePathCacheEntry * GetVolInfoCacheEntry( _In_ PCWSTR wszTargetPath );
 
         class CVolumePathCacheEntry
         {
             public:
 
-                CVolumePathCacheEntry( __in PCWSTR wszPathKey )
+                CVolumePathCacheEntry( _In_ PCWSTR wszPathKey )
                 {
                     OSStrCbCopyW( m_wszKeyPath, sizeof( m_wszKeyPath ), wszPathKey );
                     ResetCaches();
@@ -294,7 +294,7 @@ class COSFileSystem  //  osfs
                     return fTrue;
                 }
 
-                BOOL FGetSecSize( __out ULONG * pcbSecSize )
+                BOOL FGetSecSize( _Out_ ULONG * pcbSecSize )
                 {
                     Assert( pcbSecSize );
                     if ( FVPCEStale() || m_cbVolSecSize == 0 )
@@ -307,7 +307,7 @@ class COSFileSystem  //  osfs
 
                 DWORD DwDiskNumber() const { return m_dwDiskNumber; }
 
-                void SetVolPath( __in PCWSTR wszVolumePath )
+                void SetVolPath( _In_ PCWSTR wszVolumePath )
                 {
                     Assert( wszVolumePath );
                     if( FVPCEStale() )
@@ -317,7 +317,7 @@ class COSFileSystem  //  osfs
                     OSStrCbCopyW( m_wszVolumePath, sizeof( m_wszVolumePath ), wszVolumePath );
                 }
 
-                void SetVolCanonicalPath( __in PCWSTR wszVolumeCanonicalPath )
+                void SetVolCanonicalPath( _In_ PCWSTR wszVolumeCanonicalPath )
                 {
                     Assert( wszVolumeCanonicalPath );
                     if( FVPCEStale() )
@@ -327,7 +327,7 @@ class COSFileSystem  //  osfs
                     OSStrCbCopyW( m_wszVolumeCanonicalPath, sizeof( m_wszVolumeCanonicalPath ), wszVolumeCanonicalPath );
                 }
 
-                void SetDiskId( __in PCWSTR wszDiskId )
+                void SetDiskId( _In_ PCWSTR wszDiskId )
                 {
                     Assert( wszDiskId );
                     if( FVPCEStale() )
@@ -337,7 +337,7 @@ class COSFileSystem  //  osfs
                     OSStrCbCopyW( m_wszDiskId, sizeof( m_wszDiskId ), wszDiskId );
                 }
 
-                void SetSecSize( __in DWORD cbSecSize )
+                void SetSecSize( _In_ DWORD cbSecSize )
                 {
                     Assert( ( cbSecSize >= 512 ) && FPowerOf2( cbSecSize ) );
                     if( FVPCEStale() )
@@ -347,7 +347,7 @@ class COSFileSystem  //  osfs
                     m_cbVolSecSize = cbSecSize;
                 }
 
-                void SetDiskNumber( __in const DWORD dwDiskNumber )
+                void SetDiskNumber( _In_ const DWORD dwDiskNumber )
                 {
                     m_dwDiskNumber = dwDiskNumber;
                 }
@@ -372,7 +372,7 @@ class COSFileSystem  //  osfs
                 DWORD   m_cbVolSecSize;
                 DWORD   m_dwDiskNumber;
 
-            friend CVolumePathCacheEntry * COSFileSystem::GetVolInfoCacheEntry( __in PCWSTR wszTargetPath );
+            friend CVolumePathCacheEntry * COSFileSystem::GetVolInfoCacheEntry( _In_ PCWSTR wszTargetPath );
 
         };
 
@@ -557,9 +557,9 @@ class COSVolume //  osdiskapi
     //  We give these 2 access, allows them to play with m_posd.
 
     friend ERR ErrOSVolumeConnect(
-            __in COSFileSystem * const      posfs,
+            _In_ COSFileSystem * const      posfs,
             __in_z const WCHAR * const      wszFilePath,
-            __out IVolumeAPI **             ppvolapi );
+            _Out_ IVolumeAPI **             ppvolapi );
     friend void OSVolumeDisconnect(
             __inout IVolumeAPI *            pvolapi );
 
@@ -590,9 +590,9 @@ class OSFSRETRY
 //  Volume Connect / Disconnect APIs
 
 ERR ErrOSVolumeConnect(
-    __in COSFileSystem * const      posfs,
+    _In_ COSFileSystem * const      posfs,
     __in_z const WCHAR * const      wszFilePath,
-    __out IVolumeAPI **             ppvolapi
+    _Out_ IVolumeAPI **             ppvolapi
     );
 
 void OSVolumeDisconnect(

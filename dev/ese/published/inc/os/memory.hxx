@@ -166,7 +166,7 @@ class CSparseBitmap  //  sbm
 //    ScanStop()  - cleans up any allocated memory, including the bitmap returned
 //                  by XxxRetrieve().  Do not use bitmap after this func.
 
-ERR ErrOSMemoryPageResidenceMapScanStart( const size_t cbMax, __out DWORD * const pdwUpdateId );
+ERR ErrOSMemoryPageResidenceMapScanStart( const size_t cbMax, _Out_ DWORD * const pdwUpdateId );
 ERR ErrOSMemoryPageResidenceMapRetrieve( void* const pv, const size_t cb, IBitmapAPI** const ppbmapi );
 VOID OSMemoryPageResidenceMapScanStop();
 
@@ -490,8 +490,8 @@ __forceinline void UtilMemMove( __out_bcount(cb) void * const pvDest, __in_bcoun
     memmove( (BYTE*)pvDest, (BYTE*)pvSrc, cb );
 }
 
-BOOL FUtilZeroed( __in_bcount(cbData) const BYTE * pbData, __in const size_t cbData );
-size_t IbUtilLastNonZeroed( __in_bcount(cbData) const BYTE * pbData, __in const size_t cbData );
+BOOL FUtilZeroed( __in_bcount(cbData) const BYTE * pbData, _In_ const size_t cbData );
+size_t IbUtilLastNonZeroed( __in_bcount(cbData) const BYTE * pbData, _In_ const size_t cbData );
 
 #if defined( MEM_CHECK ) && !defined( DEBUG )
 #error "MEM_CHECK can be enabled only in DEBUG mode"

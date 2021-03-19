@@ -4,7 +4,7 @@
 #include "osstd.hxx"
 
 //  ================================================================
-CFileFromMemory::CFileFromMemory( __in_bcount( cbData ) BYTE *pbData, QWORD cbData, __in PCWSTR wszPath ) :
+CFileFromMemory::CFileFromMemory( __in_bcount( cbData ) BYTE *pbData, QWORD cbData, _In_ PCWSTR wszPath ) :
 //  ================================================================
     m_pbBuffer( pbData ),
     m_cbBuffer( cbData ),

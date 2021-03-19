@@ -60,7 +60,7 @@ class PatchRequest
 {
 public:
     // Create a new patch request, filling in the output parameter if the request is logged successfully
-    static ERR ErrCreateRequest( const IFMP ifmp, const PGNO pgno, __out PatchRequest * const prequest );
+    static ERR ErrCreateRequest( const IFMP ifmp, const PGNO pgno, _Out_ PatchRequest * const prequest );
 
     // True if the request is currently active
     bool FRequestIsActive() const { return m_fRequestIsActive; }
@@ -263,7 +263,7 @@ bool operator!= ( const PatchRequestId& id1, const PatchRequestId& id2 )
 }
 
 //  ================================================================
-ERR PatchRequest::ErrCreateRequest( const IFMP ifmp, const PGNO pgno, __out PatchRequest * const prequest )
+ERR PatchRequest::ErrCreateRequest( const IFMP ifmp, const PGNO pgno, _Out_ PatchRequest * const prequest )
 //  ================================================================
 //
 //  Create a new patch request. If the request creation succeeds then
@@ -932,14 +932,14 @@ void PagePatching::TermInst( INST * const pinst )
 
 //  ================================================================
 ERR PagePatching::ErrDoPatch(
-    __in const IFMP                     ifmp,
-    __in const PGNO                     pgno,
+    _In_ const IFMP                     ifmp,
+    _In_ const PGNO                     pgno,
     __inout BFLatch * const             pbfl,
     __in_bcount(cbToken) const void *   pvToken,
-    __in ULONG                  cbToken,
+    _In_ ULONG                          cbToken,
     __in_bcount(cbData) const void *    pvData,
-    __in ULONG                  cbData,
-    __out BOOL *                        pfPatched )
+    _In_ ULONG                          cbData,
+    _Out_ BOOL *                        pfPatched )
 //  ================================================================
 {
     ERR err = JET_errSuccess;

@@ -63,11 +63,11 @@ __kernel_entry NTSYSCALLAPI
 NTSTATUS
 NTAPI
 NtQueryVolumeInformationFile (
-    __in HANDLE FileHandle,
-    __out PIO_STATUS_BLOCK IoStatusBlock,
+    _In_ HANDLE FileHandle,
+    _Out_ PIO_STATUS_BLOCK IoStatusBlock,
     __out_bcount(Length) PVOID FsInformation,
-    __in ULONG Length,
-    __in FS_INFORMATION_CLASS FsInformationClass
+    _In_ ULONG Length,
+    _In_ FS_INFORMATION_CLASS FsInformationClass
     );
 
 
@@ -337,7 +337,7 @@ ERR COSFileSystem::ErrGetLastError( const DWORD error )
     return ErrOSErrFromWin32Err( error, JET_errDiskIO );
 }
 
-COSFileSystem::CVolumePathCacheEntry * COSFileSystem::GetVolInfoCacheEntry( __in PCWSTR wszTargetPath )
+COSFileSystem::CVolumePathCacheEntry * COSFileSystem::GetVolInfoCacheEntry( _In_ PCWSTR wszTargetPath )
 {
     CVolumePathCacheEntry*  pvpce       = NULL;
 
@@ -506,10 +506,10 @@ HandleError:
 
 void COSFileSystem::PathVolumeCanonicalAndDiskId(   const WCHAR* const wszAbsRootPath,
                                                     __out_ecount(cchVolumeCanonicalPath) WCHAR* const wszVolumeCanonicalPath,
-                                                    __in const DWORD cchVolumeCanonicalPath,
+                                                    _In_ const DWORD cchVolumeCanonicalPath,
                                                     __out_ecount(cchDiskId) WCHAR* const wszDiskId,
-                                                    __in const DWORD cchDiskId,
-                                                    __out DWORD *pdwDiskNumber )
+                                                    _In_ const DWORD cchDiskId,
+                                                    _Out_ DWORD *pdwDiskNumber )
 {
     Assert( wszAbsRootPath != NULL );
 
@@ -742,8 +742,8 @@ HandleError:
 }
 
 ERR COSFileSystem::ErrOSFSGetDeviceHandle(
-    __in    PCWSTR  wszAbsVolumeRootPath,
-    __out   HANDLE* phDevice )
+    _In_    PCWSTR  wszAbsVolumeRootPath,
+    _Out_   HANDLE* phDevice )
 {
     ERR     err     = JET_errSuccess;
     DWORD   error   = ERROR_SUCCESS;
@@ -2256,7 +2256,7 @@ HandleError:
 
 ERR COSFileSystem::ErrPathVolumeCanonical(   const WCHAR* const wszVolumePath,
                                             __out_ecount(cchVolumeCanonicalPath) WCHAR* const wszVolumeCanonicalPath,
-                                            __in const DWORD cchVolumeCanonicalPath )
+                                            _In_ const DWORD cchVolumeCanonicalPath )
 {
     if ( GetVolumeNameForVolumeMountPointW( wszVolumePath, wszVolumeCanonicalPath, cchVolumeCanonicalPath ) == 0 )
     {
@@ -2268,8 +2268,8 @@ ERR COSFileSystem::ErrPathVolumeCanonical(   const WCHAR* const wszVolumePath,
 
 ERR COSFileSystem::ErrDiskId(   const WCHAR* const wszVolumeCanonicalPath,
                                 __out_ecount(cchDiskId) WCHAR* const wszDiskId,
-                                __in const DWORD cchDiskId,
-                                __out DWORD *pdwDiskNumber )
+                                _In_ const DWORD cchDiskId,
+                                _Out_ DWORD *pdwDiskNumber )
 {
     ERR err                 = JET_errSuccess;
     HANDLE hVolume          = INVALID_HANDLE_VALUE;
@@ -2930,13 +2930,13 @@ CFileIdentification g_fident;
 CCacheTelemetry g_ctm;
 CCacheRepository g_crep( &g_fident, &g_ctm );
 
-ERR ErrOSFSCreate( __out IFileSystemAPI** const ppfsapi )
+ERR ErrOSFSCreate( _Out_ IFileSystemAPI** const ppfsapi )
 {
     return ErrOSFSCreate( NULL, ppfsapi );
 }
 
-ERR ErrOSFSCreate(  __in IFileSystemConfiguration * const   pfsconfig,
-                    __out IFileSystemAPI** const            ppfsapi )
+ERR ErrOSFSCreate(  _In_ IFileSystemConfiguration * const   pfsconfig,
+                    _Out_ IFileSystemAPI** const            ppfsapi )
 {
     ERR                             err         = JET_errSuccess;
     IFileSystemConfiguration* const pfsconfigT  = pfsconfig ? pfsconfig : &g_fsconfigDefault;
@@ -3224,7 +3224,7 @@ ERR COSVolume::ErrGetDisk( COSDisk ** pposd )
 ERR ErrOSVolumeICreate(
     __in_z const WCHAR * const  wszVolPath,
     __in_z const WCHAR * const  wszVolCanonicalPath,
-    __out COSVolume **          pposv,
+    _Out_ COSVolume **          pposv,
     __in_opt IDiskAPI * const   pdiskapi
     )
 {
@@ -3271,7 +3271,7 @@ HandleError:
     return err;
 }
 
-ERR ErrOSVolumeIRetrieve( __in PCWSTR wszVolPath, __out COSVolume ** pposv )
+ERR ErrOSVolumeIRetrieve( _In_ PCWSTR wszVolPath, _Out_ COSVolume ** pposv )
 {
     COSVolume * posv = NULL;
 
@@ -3292,9 +3292,9 @@ ERR ErrOSVolumeIRetrieve( __in PCWSTR wszVolPath, __out COSVolume ** pposv )
 }
 
 ERR ErrOSVolumeConnect(
-    __in COSFileSystem * const      posfs,
+    _In_ COSFileSystem * const      posfs,
     __in_z const WCHAR * const      wszFilePath,
-    __out IVolumeAPI **             ppvolapi
+    _Out_ IVolumeAPI **             ppvolapi
     )
 {
     ERR err                                 = JET_errSuccess;

@@ -863,8 +863,8 @@ JET_ERR
 BounceJetRenameColumn(
     JET_SESID       sesid,
     JET_TABLEID     tableid,
-    __in JET_PCSTR  szName,
-    __in JET_PCSTR  szNameNew,
+    _In_ JET_PCSTR  szName,
+    _In_ JET_PCSTR  szNameNew,
     JET_GRBIT       grbit
 )
 {
@@ -873,8 +873,8 @@ BounceJetRenameColumn(
     typedef JET_ERR ( __stdcall *PFN_JetRenameColumn ) ( 
     JET_SESID       sesid,
     JET_TABLEID     tableid,
-    __in JET_PCSTR  szName,
-    __in JET_PCSTR  szNameNew,
+    _In_ JET_PCSTR  szName,
+    _In_ JET_PCSTR  szNameNew,
     JET_GRBIT       grbit  );
 
     static PFN_JetRenameColumn pfnJetRenameColumn = NULL;
@@ -912,8 +912,8 @@ JET_ERR
 BounceJetSetColumnDefaultValue(
     JET_SESID           sesid,
     JET_DBID            dbid,
-    __in JET_PCSTR      szTableName,
-    __in JET_PCSTR      szColumnName,
+    _In_ JET_PCSTR      szTableName,
+    _In_ JET_PCSTR      szColumnName,
     __in_bcount(cbData) const void          *pvData,
     const unsigned long cbData,
     const JET_GRBIT     grbit
@@ -924,8 +924,8 @@ BounceJetSetColumnDefaultValue(
     typedef JET_ERR ( __stdcall *PFN_JetSetColumnDefaultValue ) ( 
     JET_SESID           sesid,
     JET_DBID            dbid,
-    __in JET_PCSTR      szTableName,
-    __in JET_PCSTR      szColumnName,
+    _In_ JET_PCSTR      szTableName,
+    _In_ JET_PCSTR      szColumnName,
     __in_bcount(cbData) const void          *pvData,
     const unsigned long cbData,
     const JET_GRBIT     grbit  );
@@ -965,7 +965,7 @@ JET_ERR
 BounceJetDeleteIndex(
     JET_SESID       sesid,
     JET_TABLEID     tableid,
-    __in JET_PCSTR  szIndexName
+    _In_ JET_PCSTR  szIndexName
 )
 {
     JET_ERR     err = JET_errSuccess;
@@ -973,7 +973,7 @@ BounceJetDeleteIndex(
     typedef JET_ERR ( __stdcall *PFN_JetDeleteIndex ) ( 
     JET_SESID       sesid,
     JET_TABLEID     tableid,
-    __in JET_PCSTR  szIndexName  );
+    _In_ JET_PCSTR  szIndexName  );
 
     static PFN_JetDeleteIndex pfnJetDeleteIndex = NULL;
 
@@ -1695,14 +1695,14 @@ Cleanup:
 
 JET_ERR
 BounceJetRestore(
-    __in JET_PCSTR      sz,
+    _In_ JET_PCSTR      sz,
     JET_PFNSTATUS       pfn
 )
 {
     JET_ERR     err = JET_errSuccess;
 
     typedef JET_ERR ( __stdcall *PFN_JetRestore ) ( 
-    __in JET_PCSTR      sz,
+    _In_ JET_PCSTR      sz,
     JET_PFNSTATUS       pfn  );
 
     static PFN_JetRestore pfnJetRestore = NULL;
@@ -1925,7 +1925,7 @@ Cleanup:
 JET_ERR
 BounceJetOpenFileSectionInstance(
     JET_INSTANCE    instance,
-    __in JET_PSTR   szFile,
+    _In_ JET_PSTR   szFile,
     JET_HANDLE *    phFile,
     long        iSection,
     long        cSections,
@@ -1937,7 +1937,7 @@ BounceJetOpenFileSectionInstance(
 
     typedef JET_ERR ( __stdcall *PFN_JetOpenFileSectionInstance ) ( 
     JET_INSTANCE    instance,
-    __in JET_PSTR   szFile,
+    _In_ JET_PSTR   szFile,
     JET_HANDLE *    phFile,
     long        iSection,
     long        cSections,

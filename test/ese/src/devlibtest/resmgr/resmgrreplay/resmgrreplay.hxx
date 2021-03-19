@@ -89,8 +89,8 @@ const TICK g_dtickLifetimeHistoResDefault       = 10 * 1000;
 //  Prototypes.
 //
 
-ERR ErrResMgrAccumFtlStats( __in BFFTLContext * const pbfftlc, __in const BOOL fDump );
-ERR ErrResMgrAccumEtlStats( __in BFETLContext * const pbfetlc );
+ERR ErrResMgrAccumFtlStats( _In_ BFFTLContext * const pbfftlc, _In_ const BOOL fDump );
+ERR ErrResMgrAccumEtlStats( _In_ BFETLContext * const pbfetlc );
 
 #endif  //  _RESMGRREPLAY_HXX_INCLUDED
 

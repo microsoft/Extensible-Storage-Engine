@@ -60,8 +60,8 @@ Instructions for adding a JET param
   */
 
 JET_ERR ErrERRLookupErrorCategory(
-    __in const JET_ERR errLookup,
-    __out JET_ERRCAT* perrortype
+    _In_ const JET_ERR errLookup,
+    _Out_ JET_ERRCAT* perrortype
     )
 {
     if ( !FERRLookupErrorCategory( errLookup, perrortype ) )
@@ -72,7 +72,7 @@ JET_ERR ErrERRLookupErrorCategory(
 }
 
 JET_ERR ErrERRLookupErrorHierarchy(
-    __in JET_ERRCAT             errortype,
+    _In_ JET_ERRCAT             errortype,
     __out_bcount(8) BYTE* const pbHierarchy
     )
 {
@@ -4759,7 +4759,7 @@ LONG LDatabaseNamesICFLPwszPpb( _In_ LONG icf, _Inout_opt_ void* const pvParam1,
 
 CCriticalSection critDBGPrint( CLockBasicInfo( CSyncBasicInfo( szDBGPrint ), rankDBGPrint, 0 ) );
 
-VOID JET_API DBGFPrintF( __in PCSTR sz )
+VOID JET_API DBGFPrintF( _In_ PCSTR sz )
 {
     WCHAR wszJetTxt[ 8 ];
 
@@ -7545,7 +7545,7 @@ inline ERR ErrSetSystemParameter(
     JET_SESID       sesid,
     ULONG   paramid,
     ULONG_PTR       ulParam,
-    __in PCWSTR     wszParam,
+    _In_ PCWSTR     wszParam,
     const BOOL      fEnterCritInst  = fTrue )
 {
     ERR                 err         = JET_errSuccess;
@@ -8777,7 +8777,7 @@ Errors/Warnings:
   JET_wrnNoIdleActivity no idle processing occurred
 =================================================================*/
 
-LOCAL JET_ERR JetIdleEx( __in JET_SESID sesid, __in JET_GRBIT grbit )
+LOCAL JET_ERR JetIdleEx( _In_ JET_SESID sesid, _In_ JET_GRBIT grbit )
 {
     APICALL_SESID   apicall( opIdle );
 
@@ -8796,7 +8796,7 @@ LOCAL JET_ERR JetIdleEx( __in JET_SESID sesid, __in JET_GRBIT grbit )
 
     return apicall.ErrResult();
 }
-JET_ERR JET_API JetIdle( __in JET_SESID sesid, __in JET_GRBIT grbit )
+JET_ERR JET_API JetIdle( _In_ JET_SESID sesid, _In_ JET_GRBIT grbit )
 {
     JET_VALIDATE_SESID( sesid );
     JET_TRY( opIdle, JetIdleEx( sesid, grbit ) );
@@ -8804,13 +8804,13 @@ JET_ERR JET_API JetIdle( __in JET_SESID sesid, __in JET_GRBIT grbit )
 
 
 LOCAL JET_ERR JetGetTableIndexInfoEx(
-    __in JET_SESID                  sesid,
-    __in JET_TABLEID                tableid,
+    _In_ JET_SESID                  sesid,
+    _In_ JET_TABLEID                tableid,
     __in_opt JET_PCSTR              szIndexName,
     __out_bcount( cbResult ) void * pvResult,
-    __in ULONG              cbResult,
-    __in ULONG              InfoLevel,
-    __in const BOOL                 fUnicodeNames )
+    _In_ ULONG              cbResult,
+    _In_ ULONG              InfoLevel,
+    _In_ const BOOL                 fUnicodeNames )
 {
     ERR             err;
     ULONG           cbMin;
@@ -8909,12 +8909,12 @@ HandleError:
 }
 
 LOCAL JET_ERR JetGetTableIndexInfoExW(
-    __in JET_SESID                  sesid,
-    __in JET_TABLEID                tableid,
+    _In_ JET_SESID                  sesid,
+    _In_ JET_TABLEID                tableid,
     __in_opt JET_PCWSTR             wszIndexName,
     __out_bcount( cbResult ) void * pvResult,
-    __in ULONG              cbResult,
-    __in ULONG              InfoLevel )
+    _In_ ULONG              cbResult,
+    _In_ ULONG              InfoLevel )
 {
     ERR         err             = JET_errSuccess;
     CAutoSZDDL  lszIndexName;
@@ -8925,24 +8925,24 @@ LOCAL JET_ERR JetGetTableIndexInfoExW(
 }
 
 JET_ERR JET_API JetGetTableIndexInfoA(
-    __in JET_SESID                  sesid,
-    __in JET_TABLEID                tableid,
+    _In_ JET_SESID                  sesid,
+    _In_ JET_TABLEID                tableid,
     __in_opt JET_PCSTR              szIndexName,
     __out_bcount( cbResult ) void * pvResult,
-    __in ULONG              cbResult,
-    __in ULONG              InfoLevel )
+    _In_ ULONG              cbResult,
+    _In_ ULONG              InfoLevel )
 {
     JET_VALIDATE_SESID_TABLEID( sesid, tableid );
     JET_TRY( opGetTableIndexInfo, JetGetTableIndexInfoEx( sesid, tableid, szIndexName, pvResult, cbResult, InfoLevel, fFalse ) );
 }
 
 JET_ERR JET_API JetGetTableIndexInfoW(
-    __in JET_SESID                  sesid,
-    __in JET_TABLEID                tableid,
+    _In_ JET_SESID                  sesid,
+    _In_ JET_TABLEID                tableid,
     __in_opt JET_PCWSTR             wszIndexName,
     __out_bcount( cbResult ) void * pvResult,
-    __in ULONG              cbResult,
-    __in ULONG              InfoLevel )
+    _In_ ULONG              cbResult,
+    _In_ ULONG              InfoLevel )
 {
     JET_VALIDATE_SESID_TABLEID( sesid, tableid );
     JET_TRY( opGetTableIndexInfo, JetGetTableIndexInfoExW( sesid, tableid, wszIndexName, pvResult, cbResult, InfoLevel ) );
@@ -8950,14 +8950,14 @@ JET_ERR JET_API JetGetTableIndexInfoW(
 
 
 LOCAL JET_ERR JetGetIndexInfoEx(
-    __in JET_SESID                  sesid,
-    __in JET_DBID                   dbid,
-    __in JET_PCSTR                  szTableName,
+    _In_ JET_SESID                  sesid,
+    _In_ JET_DBID                   dbid,
+    _In_ JET_PCSTR                  szTableName,
     __in_opt JET_PCSTR              szIndexName,
     __out_bcount( cbResult ) void * pvResult,
-    __in ULONG              cbResult,
-    __in ULONG              InfoLevel,
-    __in const BOOL                 fUnicodeNames )
+    _In_ ULONG              cbResult,
+    _In_ ULONG              InfoLevel,
+    _In_ const BOOL                 fUnicodeNames )
 {
     ERR             err;
     ULONG           cbMin;
@@ -9055,13 +9055,13 @@ HandleError:
 }
 
 LOCAL JET_ERR JetGetIndexInfoExW(
-    __in JET_SESID                  sesid,
-    __in JET_DBID                   dbid,
-    __in JET_PCWSTR                 wszTableName,
+    _In_ JET_SESID                  sesid,
+    _In_ JET_DBID                   dbid,
+    _In_ JET_PCWSTR                 wszTableName,
     __in_opt JET_PCWSTR             wszIndexName,
     __out_bcount( cbResult ) void * pvResult,
-    __in ULONG              cbResult,
-    __in ULONG              InfoLevel )
+    _In_ ULONG              cbResult,
+    _In_ ULONG              InfoLevel )
 {
     ERR         err         = JET_errSuccess;
     CAutoSZDDL  lszTableName;
@@ -9074,41 +9074,41 @@ LOCAL JET_ERR JetGetIndexInfoExW(
 }
 
 JET_ERR JET_API JetGetIndexInfo(
-    __in JET_SESID                  sesid,
-    __in JET_DBID                   dbid,
-    __in JET_PCSTR                  szTableName,
+    _In_ JET_SESID                  sesid,
+    _In_ JET_DBID                   dbid,
+    _In_ JET_PCSTR                  szTableName,
     __in_opt JET_PCSTR              szIndexName,
     __out_bcount( cbResult ) void * pvResult,
-    __in ULONG              cbResult,
-    __in ULONG              InfoLevel )
+    _In_ ULONG              cbResult,
+    _In_ ULONG              InfoLevel )
 {
     JET_VALIDATE_SESID( sesid );
     JET_TRY( opGetIndexInfo, JetGetIndexInfoEx( sesid, dbid, szTableName, szIndexName, pvResult, cbResult, InfoLevel, fFalse ) );
 }
 
 JET_ERR JET_API JetGetIndexInfoW(
-    __in JET_SESID                  sesid,
-    __in JET_DBID                   dbid,
-    __in JET_PCWSTR                 wszTableName,
+    _In_ JET_SESID                  sesid,
+    _In_ JET_DBID                   dbid,
+    _In_ JET_PCWSTR                 wszTableName,
     __in_opt JET_PCWSTR             wszIndexName,
     __out_bcount( cbResult ) void * pvResult,
-    __in ULONG              cbResult,
-    __in ULONG              InfoLevel )
+    _In_ ULONG              cbResult,
+    _In_ ULONG              InfoLevel )
 {
     JET_VALIDATE_SESID( sesid );
     JET_TRY( opGetIndexInfo, JetGetIndexInfoExW( sesid, dbid, wszTableName, wszIndexName, pvResult, cbResult, InfoLevel ) );
 }
 
 LOCAL JET_ERR JetGetObjectInfoEx(
-    __in JET_SESID                  sesid,
-    __in JET_DBID                   dbid,
-    __in JET_OBJTYP                 objtyp,
-    __in JET_PCSTR                  szContainerName,
+    _In_ JET_SESID                  sesid,
+    _In_ JET_DBID                   dbid,
+    _In_ JET_OBJTYP                 objtyp,
+    _In_ JET_PCSTR                  szContainerName,
     __in_opt JET_PCSTR              szObjectName,
     _Out_writes_bytes_( cbMax ) void *  pvResult,
-    __in ULONG              cbMax,
-    __in ULONG              InfoLevel,
-    __in const BOOL                 fUnicodeNames )
+    _In_ ULONG              cbMax,
+    _In_ ULONG              InfoLevel,
+    _In_ const BOOL                 fUnicodeNames )
 {
     ERR             err;
     ULONG           cbMin;
@@ -9182,14 +9182,14 @@ HandleError:
 }
 
 LOCAL JET_ERR JetGetObjectInfoExW(
-    __in JET_SESID                  sesid,
-    __in JET_DBID                   dbid,
-    __in JET_OBJTYP                 objtyp,
+    _In_ JET_SESID                  sesid,
+    _In_ JET_DBID                   dbid,
+    _In_ JET_OBJTYP                 objtyp,
     __in_opt JET_PCWSTR             wszContainerName,
     __in_opt JET_PCWSTR             wszObjectName,
     __out_bcount( cbMax ) void *    pvResult,
-    __in ULONG              cbMax,
-    __in ULONG              InfoLevel )
+    _In_ ULONG              cbMax,
+    _In_ ULONG              InfoLevel )
 {
     ERR         err                 = JET_errSuccess;
     CAutoSZDDL  lszContainerName;
@@ -9202,28 +9202,28 @@ LOCAL JET_ERR JetGetObjectInfoExW(
 }
 
 JET_ERR JET_API JetGetObjectInfoA(
-    __in JET_SESID                  sesid,
-    __in JET_DBID                   dbid,
-    __in JET_OBJTYP                 objtyp,
+    _In_ JET_SESID                  sesid,
+    _In_ JET_DBID                   dbid,
+    _In_ JET_OBJTYP                 objtyp,
     __in_opt JET_PCSTR              szContainerName,
     __in_opt JET_PCSTR              szObjectName,
     __out_bcount( cbMax ) void *    pvResult,
-    __in ULONG              cbMax,
-    __in ULONG              InfoLevel )
+    _In_ ULONG              cbMax,
+    _In_ ULONG              InfoLevel )
 {
     JET_VALIDATE_SESID( sesid );
     JET_TRY( opGetObjectInfo, JetGetObjectInfoEx( sesid, dbid, objtyp, szContainerName, szObjectName, (void*) pvResult, cbMax, InfoLevel, fFalse ) );
 }
 
 JET_ERR JET_API JetGetObjectInfoW(
-    __in JET_SESID                  sesid,
-    __in JET_DBID                   dbid,
-    __in JET_OBJTYP                 objtyp,
+    _In_ JET_SESID                  sesid,
+    _In_ JET_DBID                   dbid,
+    _In_ JET_OBJTYP                 objtyp,
     __in_opt JET_PCWSTR             wszContainerName,
     __in_opt JET_PCWSTR             wszObjectName,
     __out_bcount( cbMax ) void *    pvResult,
-    __in ULONG              cbMax,
-    __in ULONG              InfoLevel )
+    _In_ ULONG              cbMax,
+    _In_ ULONG              InfoLevel )
 {
     JET_VALIDATE_SESID( sesid );
     JET_TRY( opGetObjectInfo, JetGetObjectInfoExW( sesid, dbid, objtyp, wszContainerName, wszObjectName, (void*) pvResult, cbMax, InfoLevel ) );
@@ -9265,11 +9265,11 @@ LOCAL JET_ERR JetGetTableInfoEx(
 }
 
 LOCAL JET_ERR JetGetTableInfoExW(
-    __in JET_SESID                  sesid,
-    __in JET_TABLEID                tableid,
+    _In_ JET_SESID                  sesid,
+    _In_ JET_TABLEID                tableid,
     __out_bcount( cbMax ) void *    pvResult,
-    __in ULONG              cbMax,
-    __in ULONG              InfoLevel )
+    _In_ ULONG              cbMax,
+    _In_ ULONG              InfoLevel )
 {
     ERR             err = JET_errSuccess;
     void *          pv  = NULL;
@@ -9312,22 +9312,22 @@ LOCAL JET_ERR JetGetTableInfoExW(
 }
 
 JET_ERR JET_API JetGetTableInfoA(
-    __in JET_SESID                  sesid,
-    __in JET_TABLEID                tableid,
+    _In_ JET_SESID                  sesid,
+    _In_ JET_TABLEID                tableid,
     __out_bcount( cbMax ) void *    pvResult,
-    __in ULONG              cbMax,
-    __in ULONG              InfoLevel )
+    _In_ ULONG              cbMax,
+    _In_ ULONG              InfoLevel )
 {
     JET_VALIDATE_SESID_TABLEID( sesid, tableid );
     JET_TRY( opGetTableInfo, JetGetTableInfoEx( sesid, tableid, pvResult, cbMax, InfoLevel ) );
 }
 
 JET_ERR JET_API JetGetTableInfoW(
-    __in JET_SESID                  sesid,
-    __in JET_TABLEID                tableid,
+    _In_ JET_SESID                  sesid,
+    _In_ JET_TABLEID                tableid,
     __out_bcount( cbMax ) void *    pvResult,
-    __in ULONG              cbMax,
-    __in ULONG              InfoLevel )
+    _In_ ULONG              cbMax,
+    _In_ ULONG              InfoLevel )
 {
     JET_VALIDATE_SESID_TABLEID( sesid, tableid );
     JET_TRY( opGetTableInfo, JetGetTableInfoExW( sesid, tableid, pvResult, cbMax, InfoLevel ) );
@@ -9401,7 +9401,7 @@ JET_ERR JET_API JetCreateEncryptionKey(
     JET_TRY( opCreateEncryptionKey, JetCreateEncryptionKeyEx( encryptionAlgorithm, pvKey, cbKey, pcbActual ) );
 }
 
-LOCAL JET_ERR JetBeginTransactionEx( __in JET_SESID sesid, __in TRXID trxid, __in JET_GRBIT grbit )
+LOCAL JET_ERR JetBeginTransactionEx( _In_ JET_SESID sesid, _In_ TRXID trxid, _In_ JET_GRBIT grbit )
 {
     APICALL_SESID   apicall( opBeginTransaction );
 
@@ -9420,17 +9420,17 @@ LOCAL JET_ERR JetBeginTransactionEx( __in JET_SESID sesid, __in TRXID trxid, __i
 
     return apicall.ErrResult();
 }
-JET_ERR JET_API JetBeginTransaction( __in JET_SESID sesid )
+JET_ERR JET_API JetBeginTransaction( _In_ JET_SESID sesid )
 {
     JET_VALIDATE_SESID( sesid );
     JET_TRY( opBeginTransaction, JetBeginTransactionEx( sesid, 57573, NO_GRBIT ) );
 }
-JET_ERR JET_API JetBeginTransaction2( __in JET_SESID sesid, __in JET_GRBIT grbit )
+JET_ERR JET_API JetBeginTransaction2( _In_ JET_SESID sesid, _In_ JET_GRBIT grbit )
 {
     JET_VALIDATE_SESID( sesid );
     JET_TRY( opBeginTransaction, JetBeginTransactionEx( sesid, 32997, grbit ) );
 }
-JET_ERR JET_API JetBeginTransaction3( __in JET_SESID sesid, __in __int64 trxid, __in JET_GRBIT grbit )
+JET_ERR JET_API JetBeginTransaction3( _In_ JET_SESID sesid, _In_ __int64 trxid, _In_ JET_GRBIT grbit )
 {
     JET_VALIDATE_SESID( sesid );
     JET_TRY( opBeginTransaction, JetBeginTransactionEx( sesid, trxid, grbit ) );
@@ -9438,10 +9438,10 @@ JET_ERR JET_API JetBeginTransaction3( __in JET_SESID sesid, __in __int64 trxid, 
 
 
 LOCAL JET_ERR JetPrepareToCommitTransactionEx(
-    __in JET_SESID                      sesid,
+    _In_ JET_SESID                      sesid,
     __in_bcount( cbData ) const void *  pvData,
-    __in ULONG                  cbData,
-    __in JET_GRBIT                      grbit )
+    _In_ ULONG                  cbData,
+    _In_ JET_GRBIT                      grbit )
 {
     APICALL_SESID   apicall( opPrepareToCommitTransaction );
 
@@ -9463,17 +9463,17 @@ LOCAL JET_ERR JetPrepareToCommitTransactionEx(
     return apicall.ErrResult();
 }
 JET_ERR JET_API JetPrepareToCommitTransaction(
-    __in JET_SESID                      sesid,
+    _In_ JET_SESID                      sesid,
     __in_bcount( cbData ) const void *  pvData,
-    __in ULONG                  cbData,
-    __in JET_GRBIT                      grbit )
+    _In_ ULONG                  cbData,
+    _In_ JET_GRBIT                      grbit )
 {
     JET_VALIDATE_SESID( sesid );
     JET_TRY( opPrepareToCommitTransaction, JetPrepareToCommitTransactionEx( sesid, pvData, cbData, grbit ) );
 }
 
 
-LOCAL JET_ERR JetCommitTransactionEx( __in JET_SESID sesid, __in JET_GRBIT grbit, __in DWORD cmsecDurableCommit, __out_opt JET_COMMIT_ID *pCommitId )
+LOCAL JET_ERR JetCommitTransactionEx( _In_ JET_SESID sesid, _In_ JET_GRBIT grbit, _In_ DWORD cmsecDurableCommit, __out_opt JET_COMMIT_ID *pCommitId )
 {
     APICALL_SESID   apicall( opCommitTransaction );
 
@@ -9493,7 +9493,7 @@ LOCAL JET_ERR JetCommitTransactionEx( __in JET_SESID sesid, __in JET_GRBIT grbit
     return apicall.ErrResult();
 }
 
-JET_ERR JET_API JetCommitTransaction( __in JET_SESID sesid, __in JET_GRBIT grbit )
+JET_ERR JET_API JetCommitTransaction( _In_ JET_SESID sesid, _In_ JET_GRBIT grbit )
 {
     JET_VALIDATE_SESID( sesid );
     JET_TRY( opCommitTransaction, JetCommitTransactionEx( sesid, grbit, 0, NULL ) );
@@ -9511,7 +9511,7 @@ JetCommitTransaction2(
 }
 
 
-LOCAL JET_ERR JetRollbackEx( __in JET_SESID sesid, __in JET_GRBIT grbit )
+LOCAL JET_ERR JetRollbackEx( _In_ JET_SESID sesid, _In_ JET_GRBIT grbit )
 {
     APICALL_SESID   apicall( opRollback );
 
@@ -9532,7 +9532,7 @@ LOCAL JET_ERR JetRollbackEx( __in JET_SESID sesid, __in JET_GRBIT grbit )
 
     return apicall.ErrResult();
 }
-JET_ERR JET_API JetRollback( __in JET_SESID sesid, __in JET_GRBIT grbit )
+JET_ERR JET_API JetRollback( _In_ JET_SESID sesid, _In_ JET_GRBIT grbit )
 {
     JET_VALIDATE_SESID( sesid );
     JET_TRY( opRollback, JetRollbackEx( sesid, grbit ) );
@@ -9555,10 +9555,10 @@ LOCAL JET_ERR JetGetSessionInfoEx(
     return apicall.ErrResult();
 }
 JET_ERR JET_API JetGetSessionInfo(
-    __in JET_SESID                  sesid,
+    _In_ JET_SESID                  sesid,
     __out_bcount( cbMax ) void *    pvResult,
-    __in const ULONG        cbMax,
-    __in const ULONG        ulInfoLevel )
+    _In_ const ULONG        cbMax,
+    _In_ const ULONG        ulInfoLevel )
 {
     JET_VALIDATE_SESID( sesid );
     JET_TRY( opGetSessionInfo, JetGetSessionInfoEx( sesid, (void*) pvResult, cbMax, ulInfoLevel ) );
@@ -9566,13 +9566,13 @@ JET_ERR JET_API JetGetSessionInfo(
 
 
 LOCAL JET_ERR JetOpenTableEx(
-    __in JET_SESID                                  sesid,
-    __in JET_DBID                                   dbid,
-    __in JET_PCSTR                                  szTableName,
+    _In_ JET_SESID                                  sesid,
+    _In_ JET_DBID                                   dbid,
+    _In_ JET_PCSTR                                  szTableName,
     __in_bcount_opt( cbParameters ) const void *    pvParameters,
-    __in ULONG                              cbParameters,
-    __in JET_GRBIT                                  grbit,
-    __out JET_TABLEID *                             ptableid )
+    _In_ ULONG                              cbParameters,
+    _In_ JET_GRBIT                                  grbit,
+    _Out_ JET_TABLEID *                             ptableid )
 {
     APICALL_SESID   apicall( opOpenTable );
 
@@ -9605,13 +9605,13 @@ LOCAL JET_ERR JetOpenTableEx(
 
 
 LOCAL JET_ERR JetOpenTableExW(
-    __in JET_SESID                                  sesid,
-    __in JET_DBID                                   dbid,
-    __in JET_PCWSTR                                 wszTableName,
+    _In_ JET_SESID                                  sesid,
+    _In_ JET_DBID                                   dbid,
+    _In_ JET_PCWSTR                                 wszTableName,
     __in_bcount_opt( cbParameters ) const void *    pvParameters,
-    __in ULONG                              cbParameters,
-    __in JET_GRBIT                                  grbit,
-    __out JET_TABLEID *                             ptableid )
+    _In_ ULONG                              cbParameters,
+    _In_ JET_GRBIT                                  grbit,
+    _Out_ JET_TABLEID *                             ptableid )
 {
     ERR     err;
     CAutoSZDDL lszTableName;
@@ -9622,13 +9622,13 @@ LOCAL JET_ERR JetOpenTableExW(
 }
 
 JET_ERR JET_API JetOpenTableA(
-    __in JET_SESID                                  sesid,
-    __in JET_DBID                                   dbid,
-    __in JET_PCSTR                                  szTableName,
+    _In_ JET_SESID                                  sesid,
+    _In_ JET_DBID                                   dbid,
+    _In_ JET_PCSTR                                  szTableName,
     __in_bcount_opt( cbParameters ) const void *    pvParameters,
-    __in ULONG                              cbParameters,
-    __in JET_GRBIT                                  grbit,
-    __out JET_TABLEID *                             ptableid )
+    _In_ ULONG                              cbParameters,
+    _In_ JET_GRBIT                                  grbit,
+    _Out_ JET_TABLEID *                             ptableid )
 {
     JET_VALIDATE_SESID( sesid );
     JET_TRY( opOpenTable, JetOpenTableEx( sesid, dbid, szTableName, pvParameters, cbParameters, grbit, ptableid ) );
@@ -9636,13 +9636,13 @@ JET_ERR JET_API JetOpenTableA(
 
 
 JET_ERR JET_API JetOpenTableW(
-    __in JET_SESID                                  sesid,
-    __in JET_DBID                                   dbid,
-    __in JET_PCWSTR                                 wszTableName,
+    _In_ JET_SESID                                  sesid,
+    _In_ JET_DBID                                   dbid,
+    _In_ JET_PCWSTR                                 wszTableName,
     __in_bcount_opt( cbParameters ) const void *    pvParameters,
-    __in ULONG                              cbParameters,
-    __in JET_GRBIT                                  grbit,
-    __out JET_TABLEID *                             ptableid )
+    _In_ ULONG                              cbParameters,
+    _In_ JET_GRBIT                                  grbit,
+    _Out_ JET_TABLEID *                             ptableid )
 {
     JET_VALIDATE_SESID( sesid );
     JET_TRY( opOpenTable, JetOpenTableExW( sesid, dbid, wszTableName, pvParameters, cbParameters, grbit, ptableid ) );
@@ -9650,9 +9650,9 @@ JET_ERR JET_API JetOpenTableW(
 
 //  ================================================================
 LOCAL JET_ERR JetSetTableSequentialEx(
-    __in const JET_SESID    sesid,
-    __in const JET_TABLEID  tableid,
-    __in const JET_GRBIT    grbit )
+    _In_ const JET_SESID    sesid,
+    _In_ const JET_TABLEID  tableid,
+    _In_ const JET_GRBIT    grbit )
 //  ================================================================
 {
     APICALL_SESID       apicall( opSetTableSequential );
@@ -9675,9 +9675,9 @@ LOCAL JET_ERR JetSetTableSequentialEx(
 }
 //  ================================================================
 JET_ERR JET_API JetSetTableSequential(
-    __in JET_SESID      sesid,
-    __in JET_TABLEID    tableid,
-    __in JET_GRBIT      grbit )
+    _In_ JET_SESID      sesid,
+    _In_ JET_TABLEID    tableid,
+    _In_ JET_GRBIT      grbit )
 //  ================================================================
 {
     JET_VALIDATE_SESID_TABLEID( sesid, tableid );
@@ -9687,9 +9687,9 @@ JET_ERR JET_API JetSetTableSequential(
 
 //  ================================================================
 LOCAL JET_ERR JetResetTableSequentialEx(
-    __in JET_SESID      sesid,
-    __in JET_TABLEID        tableid,
-    __in JET_GRBIT      grbit )
+    _In_ JET_SESID      sesid,
+    _In_ JET_TABLEID        tableid,
+    _In_ JET_GRBIT      grbit )
 //  ================================================================
 {
     APICALL_SESID   apicall( opResetTableSequential );
@@ -9712,9 +9712,9 @@ LOCAL JET_ERR JetResetTableSequentialEx(
 }
 //  ================================================================
 JET_ERR JET_API JetResetTableSequential(
-    __in JET_SESID      sesid,
-    __in JET_TABLEID    tableid,
-    __in JET_GRBIT      grbit )
+    _In_ JET_SESID      sesid,
+    _In_ JET_TABLEID    tableid,
+    _In_ JET_GRBIT      grbit )
 //  ================================================================
 {
     JET_VALIDATE_SESID_TABLEID( sesid, tableid );
@@ -9722,12 +9722,12 @@ JET_ERR JET_API JetResetTableSequential(
 }
 
 LOCAL JET_ERR JetRegisterCallbackEx(
-    __in JET_SESID      sesid,
-    __in JET_TABLEID    tableid,
-    __in JET_CBTYP      cbtyp,
-    __in JET_CALLBACK   pCallback,
+    _In_ JET_SESID      sesid,
+    _In_ JET_TABLEID    tableid,
+    _In_ JET_CBTYP      cbtyp,
+    _In_ JET_CALLBACK   pCallback,
     __in_opt void *     pvContext,
-    __in JET_HANDLE *   phCallbackId )
+    _In_ JET_HANDLE *   phCallbackId )
 {
     APICALL_SESID   apicall( opRegisterCallback );
 
@@ -9757,12 +9757,12 @@ LOCAL JET_ERR JetRegisterCallbackEx(
     return apicall.ErrResult();
 }
 JET_ERR JET_API JetRegisterCallback(
-    __in JET_SESID      sesid,
-    __in JET_TABLEID    tableid,
-    __in JET_CBTYP      cbtyp,
-    __in JET_CALLBACK   pCallback,
+    _In_ JET_SESID      sesid,
+    _In_ JET_TABLEID    tableid,
+    _In_ JET_CBTYP      cbtyp,
+    _In_ JET_CALLBACK   pCallback,
     __in_opt void *     pvContext,
-    __in JET_HANDLE *   phCallbackId )
+    _In_ JET_HANDLE *   phCallbackId )
 {
     JET_VALIDATE_SESID_TABLEID( sesid, tableid );
     JET_TRY( opRegisterCallback, JetRegisterCallbackEx( sesid, tableid, cbtyp, pCallback, pvContext, phCallbackId ) );
@@ -9770,10 +9770,10 @@ JET_ERR JET_API JetRegisterCallback(
 
 
 LOCAL JET_ERR JetUnregisterCallbackEx(
-    __in JET_SESID      sesid,
-    __in JET_TABLEID    tableid,
-    __in JET_CBTYP      cbtyp,
-    __in JET_HANDLE     hCallbackId )
+    _In_ JET_SESID      sesid,
+    _In_ JET_TABLEID    tableid,
+    _In_ JET_CBTYP      cbtyp,
+    _In_ JET_HANDLE     hCallbackId )
 {
     APICALL_SESID   apicall( opUnregisterCallback );
 
@@ -9799,10 +9799,10 @@ LOCAL JET_ERR JetUnregisterCallbackEx(
     return apicall.ErrResult();
 }
 JET_ERR JET_API JetUnregisterCallback(
-    __in JET_SESID      sesid,
-    __in JET_TABLEID    tableid,
-    __in JET_CBTYP      cbtyp,
-    __in JET_HANDLE     hCallbackId )
+    _In_ JET_SESID      sesid,
+    _In_ JET_TABLEID    tableid,
+    _In_ JET_CBTYP      cbtyp,
+    _In_ JET_HANDLE     hCallbackId )
 {
     JET_VALIDATE_SESID_TABLEID( sesid, tableid );
     JET_TRY( opUnregisterCallback, JetUnregisterCallbackEx( sesid, tableid, cbtyp, hCallbackId ) );
@@ -9810,10 +9810,10 @@ JET_ERR JET_API JetUnregisterCallback(
 
 
 LOCAL JET_ERR JetSetLSEx(
-    __in JET_SESID      sesid,
-    __in JET_TABLEID    tableid,
-    __in JET_LS         ls,
-    __in JET_GRBIT      grbit )
+    _In_ JET_SESID      sesid,
+    _In_ JET_TABLEID    tableid,
+    _In_ JET_LS         ls,
+    _In_ JET_GRBIT      grbit )
 {
     APICALL_SESID   apicall( opSetLS );
 
@@ -9835,10 +9835,10 @@ LOCAL JET_ERR JetSetLSEx(
     return apicall.ErrResult();
 }
 JET_ERR JET_API JetSetLS(
-    __in JET_SESID      sesid,
-    __in JET_TABLEID    tableid,
-    __in JET_LS         ls,
-    __in JET_GRBIT      grbit )
+    _In_ JET_SESID      sesid,
+    _In_ JET_TABLEID    tableid,
+    _In_ JET_LS         ls,
+    _In_ JET_GRBIT      grbit )
 {
     JET_VALIDATE_SESID_TABLEID( sesid, tableid );
     JET_TRY( opSetLS, JetSetLSEx( sesid, tableid, ls, grbit ) );
@@ -9846,10 +9846,10 @@ JET_ERR JET_API JetSetLS(
 
 
 LOCAL JET_ERR JetGetLSEx(
-    __in JET_SESID      sesid,
-    __in JET_TABLEID    tableid,
-    __out JET_LS *      pls,
-    __in JET_GRBIT      grbit )
+    _In_ JET_SESID      sesid,
+    _In_ JET_TABLEID    tableid,
+    _Out_ JET_LS *      pls,
+    _In_ JET_GRBIT      grbit )
 {
     APICALL_SESID   apicall( opGetLS );
 
@@ -9871,19 +9871,19 @@ LOCAL JET_ERR JetGetLSEx(
     return apicall.ErrResult();
 }
 JET_ERR JET_API JetGetLS(
-    __in JET_SESID      sesid,
-    __in JET_TABLEID    tableid,
-    __out JET_LS *      pls,
-    __in JET_GRBIT      grbit )
+    _In_ JET_SESID      sesid,
+    _In_ JET_TABLEID    tableid,
+    _Out_ JET_LS *      pls,
+    _In_ JET_GRBIT      grbit )
 {
     JET_VALIDATE_SESID_TABLEID( sesid, tableid );
     JET_TRY( opGetLS, JetGetLSEx( sesid, tableid, pls, grbit ) );
 }
 
 LOCAL JET_ERR JetTracingEx(
-    __in const JET_TRACEOP  traceop,
-    __in const JET_TRACETAG tracetag,
-    __in const JET_API_PTR  ul )
+    _In_ const JET_TRACEOP  traceop,
+    _In_ const JET_TRACETAG tracetag,
+    _In_ const JET_API_PTR  ul )
 {
     JET_ERR             err     = JET_errSuccess;
 
@@ -10017,19 +10017,19 @@ HandleError:
     return err;
 }
 JET_ERR JET_API JetTracing(
-    __in const JET_TRACEOP  traceop,
-    __in const JET_TRACETAG tracetag,
-    __in const JET_API_PTR  ul )
+    _In_ const JET_TRACEOP  traceop,
+    _In_ const JET_TRACETAG tracetag,
+    _In_ const JET_API_PTR  ul )
 {
     JET_TRY( opTracing, JetTracingEx( traceop, tracetag, ul ) );
 }
 
 
 LOCAL JET_ERR JetDupCursorEx(
-    __in JET_SESID      sesid,
-    __in JET_TABLEID    tableid,
-    __out JET_TABLEID * ptableid,
-    __in JET_GRBIT      grbit )
+    _In_ JET_SESID      sesid,
+    _In_ JET_TABLEID    tableid,
+    _Out_ JET_TABLEID * ptableid,
+    _In_ JET_GRBIT      grbit )
 {
     APICALL_SESID   apicall( opDupCursor );
 
@@ -10051,17 +10051,17 @@ LOCAL JET_ERR JetDupCursorEx(
     return apicall.ErrResult();
 }
 JET_ERR JET_API JetDupCursor(
-    __in JET_SESID      sesid,
-    __in JET_TABLEID    tableid,
-    __out JET_TABLEID * ptableid,
-    __in JET_GRBIT      grbit )
+    _In_ JET_SESID      sesid,
+    _In_ JET_TABLEID    tableid,
+    _Out_ JET_TABLEID * ptableid,
+    _In_ JET_GRBIT      grbit )
 {
     JET_VALIDATE_SESID_TABLEID( sesid, tableid );
     JET_TRY( opDupCursor, JetDupCursorEx( sesid, tableid, ptableid, grbit ) );
 }
 
 
-LOCAL JET_ERR JetCloseTableEx( __in JET_SESID sesid, __in JET_TABLEID tableid )
+LOCAL JET_ERR JetCloseTableEx( _In_ JET_SESID sesid, _In_ JET_TABLEID tableid )
 {
     APICALL_SESID   apicall( opCloseTable );
 
@@ -10080,7 +10080,7 @@ LOCAL JET_ERR JetCloseTableEx( __in JET_SESID sesid, __in JET_TABLEID tableid )
 
     return apicall.ErrResult();
 }
-JET_ERR JET_API JetCloseTable( __in JET_SESID sesid, __in JET_TABLEID tableid )
+JET_ERR JET_API JetCloseTable( _In_ JET_SESID sesid, _In_ JET_TABLEID tableid )
 {
     JET_VALIDATE_SESID_TABLEID( sesid, tableid );
     JET_TRY( opCloseTable, JetCloseTableEx( sesid, tableid ) );
@@ -10091,13 +10091,13 @@ const ULONG     maskGetColumInfoLevelBase   = ~maskGetColumInfoGrbits;
 
 
 LOCAL JET_ERR JetGetTableColumnInfoEx(
-    __in JET_SESID                  sesid,
-    __in JET_TABLEID                tableid,
+    _In_ JET_SESID                  sesid,
+    _In_ JET_TABLEID                tableid,
     __in_opt JET_PCSTR              pColumnNameOrId,
     __out_bcount( cbMax ) void *    pvResult,
-    __in ULONG              cbMax,
-    __in ULONG              InfoLevel,
-    __in const BOOL                 fUnicodeNames )
+    _In_ ULONG              cbMax,
+    _In_ ULONG              InfoLevel,
+    _In_ const BOOL                 fUnicodeNames )
 {
     ERR             err;
     ULONG           cbMin;
@@ -10261,12 +10261,12 @@ CAutoCOLUMNBASEA::~CAutoCOLUMNBASEA()
 }
 
 LOCAL JET_ERR JetGetTableColumnInfoExW(
-    __in JET_SESID                  sesid,
-    __in JET_TABLEID                tableid,
+    _In_ JET_SESID                  sesid,
+    _In_ JET_TABLEID                tableid,
     __in_opt JET_PCWSTR             pColumnNameOrId,
     __out_bcount( cbMax ) void *    pvResult,
-    __in ULONG              cbMax,
-    __in ULONG              InfoLevel )
+    _In_ ULONG              cbMax,
+    _In_ ULONG              InfoLevel )
 {
     ERR                 err         = JET_errSuccess;
     CAutoSZDDL          lcolumnName;
@@ -10332,38 +10332,38 @@ LOCAL JET_ERR JetGetTableColumnInfoExW(
 }
 
 JET_ERR JET_API JetGetTableColumnInfoA(
-    __in JET_SESID                  sesid,
-    __in JET_TABLEID                tableid,
+    _In_ JET_SESID                  sesid,
+    _In_ JET_TABLEID                tableid,
     __in_opt JET_PCSTR              szColumnName,
     __out_bcount( cbMax ) void *    pvResult,
-    __in ULONG              cbMax,
-    __in ULONG              InfoLevel )
+    _In_ ULONG              cbMax,
+    _In_ ULONG              InfoLevel )
 {
     JET_VALIDATE_SESID_TABLEID( sesid, tableid );
     JET_TRY( opGetTableColumnInfo, JetGetTableColumnInfoEx( sesid, tableid, szColumnName, (void*) pvResult, cbMax, InfoLevel, fFalse ) );
 }
 
 JET_ERR JET_API JetGetTableColumnInfoW(
-    __in JET_SESID                  sesid,
-    __in JET_TABLEID                tableid,
+    _In_ JET_SESID                  sesid,
+    _In_ JET_TABLEID                tableid,
     __in_opt JET_PCWSTR             wszColumnName,
     __out_bcount( cbMax ) void *    pvResult,
-    __in ULONG              cbMax,
-    __in ULONG              InfoLevel )
+    _In_ ULONG              cbMax,
+    _In_ ULONG              InfoLevel )
 {
     JET_VALIDATE_SESID_TABLEID( sesid, tableid );
     JET_TRY( opGetTableColumnInfo, JetGetTableColumnInfoExW( sesid, tableid, wszColumnName, (void*) pvResult, cbMax, InfoLevel ) );
 }
 
 LOCAL JET_ERR JetGetColumnInfoEx(
-    __in JET_SESID                  sesid,
-    __in JET_DBID                   dbid,
-    __in JET_PCSTR                  szTableName,
+    _In_ JET_SESID                  sesid,
+    _In_ JET_DBID                   dbid,
+    _In_ JET_PCSTR                  szTableName,
     __in_opt JET_PCSTR              pColumnNameOrId,
     __out_bcount( cbMax ) void *    pvResult,
-    __in ULONG              cbMax,
-    __in ULONG              InfoLevel,
-    __in const BOOL                 fUnicodeNames )
+    _In_ ULONG              cbMax,
+    _In_ ULONG              InfoLevel,
+    _In_ const BOOL                 fUnicodeNames )
 {
     ERR             err;
     ULONG           cbMin;
@@ -10457,13 +10457,13 @@ HandleError:
 }
 
 JET_ERR JET_API JetGetColumnInfoExW(
-    __in JET_SESID                  sesid,
-    __in JET_DBID                   dbid,
-    __in JET_PCWSTR                 wszTableName,
+    _In_ JET_SESID                  sesid,
+    _In_ JET_DBID                   dbid,
+    _In_ JET_PCWSTR                 wszTableName,
     __in_opt JET_PCWSTR             pwColumnNameOrId,
     __out_bcount( cbMax ) void *    pvResult,
-    __in ULONG              cbMax,
-    __in ULONG              InfoLevel )
+    _In_ ULONG              cbMax,
+    _In_ ULONG              InfoLevel )
 {
     ERR         err             = JET_errSuccess;
     CAutoSZDDL  lszTableName;
@@ -10530,39 +10530,39 @@ JET_ERR JET_API JetGetColumnInfoExW(
 }
 
 JET_ERR JET_API JetGetColumnInfoA(
-    __in JET_SESID                  sesid,
-    __in JET_DBID                   dbid,
-    __in JET_PCSTR                  szTableName,
+    _In_ JET_SESID                  sesid,
+    _In_ JET_DBID                   dbid,
+    _In_ JET_PCSTR                  szTableName,
     __in_opt JET_PCSTR              pColumnNameOrId,
     __out_bcount( cbMax ) void *    pvResult,
-    __in ULONG              cbMax,
-    __in ULONG              InfoLevel )
+    _In_ ULONG              cbMax,
+    _In_ ULONG              InfoLevel )
 {
     JET_VALIDATE_SESID( sesid );
     JET_TRY( opGetColumnInfo, JetGetColumnInfoEx( sesid, dbid, szTableName, pColumnNameOrId, pvResult, cbMax, InfoLevel, fFalse ) );
 }
 
 JET_ERR JET_API JetGetColumnInfoW(
-    __in JET_SESID                  sesid,
-    __in JET_DBID                   dbid,
-    __in JET_PCWSTR                 wszTableName,
+    _In_ JET_SESID                  sesid,
+    _In_ JET_DBID                   dbid,
+    _In_ JET_PCWSTR                 wszTableName,
     __in_opt JET_PCWSTR             pwColumnNameOrId,
     __out_bcount( cbMax ) void *    pvResult,
-    __in ULONG              cbMax,
-    __in ULONG              InfoLevel )
+    _In_ ULONG              cbMax,
+    _In_ ULONG              InfoLevel )
 {
     JET_VALIDATE_SESID( sesid );
     JET_TRY( opGetColumnInfo, JetGetColumnInfoExW( sesid, dbid, wszTableName, pwColumnNameOrId, pvResult, cbMax, InfoLevel ) );
 }
 
 LOCAL JET_ERR JetRetrieveColumnEx(
-    __in JET_SESID                                      sesid,
-    __in JET_TABLEID                                    tableid,
-    __in JET_COLUMNID                                   columnid,
+    _In_ JET_SESID                                      sesid,
+    _In_ JET_TABLEID                                    tableid,
+    _In_ JET_COLUMNID                                   columnid,
     __out_bcount_part_opt( cbData, min( cbData, *pcbActual ) ) void *   pvData,
-    __in ULONG                                  cbData,
+    _In_ ULONG                                  cbData,
     __out_opt ULONG *                           pcbActual,
-    __in JET_GRBIT                                      grbit,
+    _In_ JET_GRBIT                                      grbit,
     __inout_opt JET_RETINFO *                           pretinfo )
 {
     APICALL_SESID   apicall( opRetrieveColumn );
@@ -10615,10 +10615,10 @@ JET_ERR JET_API JetRetrieveColumn(
 
 
 LOCAL JET_ERR JetRetrieveColumnsEx(
-    __in JET_SESID                                              sesid,
-    __in JET_TABLEID                                            tableid,
+    _In_ JET_SESID                                              sesid,
+    _In_ JET_TABLEID                                            tableid,
     __inout_ecount_opt( cretrievecolumn ) JET_RETRIEVECOLUMN *  pretrievecolumn,
-    __in ULONG                                          cretrievecolumn )
+    _In_ ULONG                                          cretrievecolumn )
 {
     APICALL_SESID       apicall( opRetrieveColumns );
 
@@ -10729,13 +10729,13 @@ JET_ERR JET_API JetEnumerateColumns(
 
 
 LOCAL JET_ERR JetRetrieveTaggedColumnListEx(
-    __in JET_SESID                                                                              sesid,
-    __in JET_TABLEID                                                                            tableid,
-    __out ULONG *                                                                       pcColumns,
+    _In_ JET_SESID                                                                              sesid,
+    _In_ JET_TABLEID                                                                            tableid,
+    _Out_ ULONG *                                                                       pcColumns,
     __out_xcount_part_opt( cbData, *pcColumns * sizeof( JET_RETRIEVEMULTIVALUECOUNT ) ) void *  pvData,
-    __in ULONG                                                                          cbData,
-    __in JET_COLUMNID                                                                           columnidStart,
-    __in JET_GRBIT                                                                              grbit )
+    _In_ ULONG                                                                          cbData,
+    _In_ JET_COLUMNID                                                                           columnidStart,
+    _In_ JET_GRBIT                                                                              grbit )
 {
     APICALL_SESID   apicall( opRetrieveTaggedColumnList );
 
@@ -10781,10 +10781,10 @@ JET_ERR JET_API JetRetrieveTaggedColumnList(
 }
 
 LOCAL JET_ERR JetGetRecordSize3Ex(
-    __in JET_SESID          sesid,
-    __in JET_TABLEID        tableid,
+    _In_ JET_SESID          sesid,
+    _In_ JET_TABLEID        tableid,
     __inout JET_RECSIZE3 *  precsize,
-    __in const JET_GRBIT    grbit )
+    _In_ const JET_GRBIT    grbit )
 {
     APICALL_SESID       apicall( opGetRecordSize );
 
@@ -10803,20 +10803,20 @@ LOCAL JET_ERR JetGetRecordSize3Ex(
 }
 
 JET_ERR JET_API JetGetRecordSize3(
-    __in JET_SESID          sesid,
-    __in JET_TABLEID        tableid,
+    _In_ JET_SESID          sesid,
+    _In_ JET_TABLEID        tableid,
     __inout JET_RECSIZE3 *  precsize,
-    __in const JET_GRBIT    grbit )
+    _In_ const JET_GRBIT    grbit )
 {
     JET_VALIDATE_SESID_TABLEID( sesid, tableid );
     JET_TRY( opGetRecordSize, JetGetRecordSize3Ex( sesid, tableid, precsize, grbit ) );
 }
 
 LOCAL JET_ERR JetGetRecordSize2Ex(
-    __in JET_SESID          sesid,
-    __in JET_TABLEID        tableid,
+    _In_ JET_SESID          sesid,
+    _In_ JET_TABLEID        tableid,
     __inout JET_RECSIZE2 *  precsize,
-    __in const JET_GRBIT    grbit )
+    _In_ const JET_GRBIT    grbit )
 {
     JET_RECSIZE3 recsize3;
 
@@ -10830,20 +10830,20 @@ LOCAL JET_ERR JetGetRecordSize2Ex(
     return err;
 }
 JET_ERR JET_API JetGetRecordSize2(
-    __in JET_SESID          sesid,
-    __in JET_TABLEID        tableid,
+    _In_ JET_SESID          sesid,
+    _In_ JET_TABLEID        tableid,
     __inout JET_RECSIZE2 *  precsize,
-    __in const JET_GRBIT    grbit )
+    _In_ const JET_GRBIT    grbit )
 {
     JET_VALIDATE_SESID_TABLEID( sesid, tableid );
     JET_TRY( opGetRecordSize, JetGetRecordSize2Ex( sesid, tableid, precsize, grbit ) );
 }
 
 LOCAL JET_ERR JetGetRecordSizeEx(
-    __in JET_SESID          sesid,
-    __in JET_TABLEID        tableid,
+    _In_ JET_SESID          sesid,
+    _In_ JET_TABLEID        tableid,
     __inout JET_RECSIZE *   precsize,
-    __in const JET_GRBIT    grbit )
+    _In_ const JET_GRBIT    grbit )
 {
     JET_RECSIZE3 recsize3;
 
@@ -10857,10 +10857,10 @@ LOCAL JET_ERR JetGetRecordSizeEx(
     return err;
 }
 JET_ERR JET_API JetGetRecordSize(
-    __in JET_SESID          sesid,
-    __in JET_TABLEID        tableid,
+    _In_ JET_SESID          sesid,
+    _In_ JET_TABLEID        tableid,
     __inout JET_RECSIZE *   precsize,
-    __in const JET_GRBIT    grbit )
+    _In_ const JET_GRBIT    grbit )
 {
     JET_VALIDATE_SESID_TABLEID( sesid, tableid );
     JET_TRY( opGetRecordSize, JetGetRecordSizeEx( sesid, tableid, precsize, grbit ) );
@@ -10868,12 +10868,12 @@ JET_ERR JET_API JetGetRecordSize(
 
 
 LOCAL JET_ERR JetSetColumnEx(
-    __in JET_SESID                          sesid,
-    __in JET_TABLEID                        tableid,
-    __in JET_COLUMNID                       columnid,
+    _In_ JET_SESID                          sesid,
+    _In_ JET_TABLEID                        tableid,
+    _In_ JET_COLUMNID                       columnid,
     __in_bcount_opt( cbData ) const void *  pvData,
-    __in ULONG                      cbData,
-    __in JET_GRBIT                          grbit,
+    _In_ ULONG                      cbData,
+    _In_ JET_GRBIT                          grbit,
     __in_opt JET_SETINFO *                  psetinfo )
 {
     APICALL_SESID   apicall( opSetColumn );
@@ -10908,12 +10908,12 @@ LOCAL JET_ERR JetSetColumnEx(
     return apicall.ErrResult();
 }
 JET_ERR JET_API JetSetColumn(
-    __in JET_SESID                          sesid,
-    __in JET_TABLEID                        tableid,
-    __in JET_COLUMNID                       columnid,
+    _In_ JET_SESID                          sesid,
+    _In_ JET_TABLEID                        tableid,
+    _In_ JET_COLUMNID                       columnid,
     __in_bcount_opt( cbData ) const void *  pvData,
-    __in ULONG                      cbData,
-    __in JET_GRBIT                          grbit,
+    _In_ ULONG                      cbData,
+    _In_ JET_GRBIT                          grbit,
     __in_opt JET_SETINFO *                  psetinfo )
 {
     JET_VALIDATE_SESID_TABLEID( sesid, tableid );
@@ -10922,10 +10922,10 @@ JET_ERR JET_API JetSetColumn(
 
 
 LOCAL JET_ERR JetSetColumnsEx(
-    __in JET_SESID                                  sesid,
-    __in JET_TABLEID                                tableid,
+    _In_ JET_SESID                                  sesid,
+    _In_ JET_TABLEID                                tableid,
     __in_ecount_opt( csetcolumn ) JET_SETCOLUMN *   psetcolumn,
-    __in ULONG                              csetcolumn )
+    _In_ ULONG                              csetcolumn )
 {
     APICALL_SESID   apicall( opSetColumns );
 
@@ -10951,10 +10951,10 @@ LOCAL JET_ERR JetSetColumnsEx(
     return apicall.ErrResult();
 }
 JET_ERR JET_API JetSetColumns(
-    __in JET_SESID                                  sesid,
-    __in JET_TABLEID                                tableid,
+    _In_ JET_SESID                                  sesid,
+    _In_ JET_TABLEID                                tableid,
     __in_ecount_opt( csetcolumn ) JET_SETCOLUMN *   psetcolumn,
-    __in ULONG                              csetcolumn )
+    _In_ ULONG                              csetcolumn )
 {
     JET_VALIDATE_SESID_TABLEID( sesid, tableid );
     JET_TRY( opSetColumns, JetSetColumnsEx( sesid, tableid, psetcolumn, csetcolumn ) );
@@ -10962,9 +10962,9 @@ JET_ERR JET_API JetSetColumns(
 
 
 LOCAL JET_ERR JetPrepareUpdateEx(
-    __in JET_SESID      sesid,
-    __in JET_TABLEID    tableid,
-    __in ULONG  prep )
+    _In_ JET_SESID      sesid,
+    _In_ JET_TABLEID    tableid,
+    _In_ ULONG  prep )
 {
     APICALL_SESID   apicall( opPrepareUpdate );
 
@@ -10985,9 +10985,9 @@ LOCAL JET_ERR JetPrepareUpdateEx(
     return apicall.ErrResult();
 }
 JET_ERR JET_API JetPrepareUpdate(
-    __in JET_SESID      sesid,
-    __in JET_TABLEID    tableid,
-    __in ULONG  prep )
+    _In_ JET_SESID      sesid,
+    _In_ JET_TABLEID    tableid,
+    _In_ ULONG  prep )
 {
     JET_VALIDATE_SESID_TABLEID( sesid, tableid );
     JET_TRY( opPrepareUpdate, JetPrepareUpdateEx( sesid, tableid, prep ) );
@@ -10995,12 +10995,12 @@ JET_ERR JET_API JetPrepareUpdate(
 
 
 LOCAL JET_ERR JetUpdateEx(
-    __in JET_SESID                                          sesid,
-    __in JET_TABLEID                                        tableid,
+    _In_ JET_SESID                                          sesid,
+    _In_ JET_TABLEID                                        tableid,
     __out_bcount_part_opt( cbBookmark, *pcbActual ) void *  pvBookmark,
-    __in ULONG                                      cbBookmark,
+    _In_ ULONG                                      cbBookmark,
     __out_opt ULONG *                               pcbActual,
-    __in const JET_GRBIT                                    grbit )
+    _In_ const JET_GRBIT                                    grbit )
 {
     APICALL_SESID   apicall( opUpdate );
 
@@ -11053,15 +11053,15 @@ JET_ERR JET_API JetUpdate2(
 
 
 LOCAL JET_ERR JetEscrowUpdateEx(
-    __in JET_SESID                                          sesid,
-    __in JET_TABLEID                                        tableid,
-    __in JET_COLUMNID                                       columnid,
+    _In_ JET_SESID                                          sesid,
+    _In_ JET_TABLEID                                        tableid,
+    _In_ JET_COLUMNID                                       columnid,
     __in_bcount( cbMax ) void *                             pv,
-    __in ULONG                                      cbMax,
+    _In_ ULONG                                      cbMax,
     __out_bcount_part_opt( cbOldMax, *pcbOldActual ) void * pvOld,
-    __in ULONG                                      cbOldMax,
+    _In_ ULONG                                      cbOldMax,
     __out_opt ULONG *                               pcbOldActual,
-    __in JET_GRBIT                                          grbit )
+    _In_ JET_GRBIT                                          grbit )
 {
     APICALL_SESID   apicall( opEscrowUpdate );
 
@@ -11113,7 +11113,7 @@ JET_ERR JET_API JetEscrowUpdate(
 }
 
 
-LOCAL JET_ERR JetDeleteEx( __in JET_SESID sesid, __in JET_TABLEID tableid )
+LOCAL JET_ERR JetDeleteEx( _In_ JET_SESID sesid, _In_ JET_TABLEID tableid )
 {
     APICALL_SESID   apicall( opDelete );
 
@@ -11132,7 +11132,7 @@ LOCAL JET_ERR JetDeleteEx( __in JET_SESID sesid, __in JET_TABLEID tableid )
 
     return apicall.ErrResult();
 }
-JET_ERR JET_API JetDelete( __in JET_SESID sesid, __in JET_TABLEID tableid )
+JET_ERR JET_API JetDelete( _In_ JET_SESID sesid, _In_ JET_TABLEID tableid )
 {
     JET_VALIDATE_SESID_TABLEID( sesid, tableid );
     JET_TRY( opDelete, JetDeleteEx( sesid, tableid ) );
@@ -11140,11 +11140,11 @@ JET_ERR JET_API JetDelete( __in JET_SESID sesid, __in JET_TABLEID tableid )
 
 
 LOCAL JET_ERR JetGetCursorInfoEx(
-    __in JET_SESID                  sesid,
-    __in JET_TABLEID                tableid,
+    _In_ JET_SESID                  sesid,
+    _In_ JET_TABLEID                tableid,
     __out_bcount( cbMax ) void *    pvResult,
-    __in ULONG              cbMax,
-    __in ULONG              InfoLevel )
+    _In_ ULONG              cbMax,
+    _In_ ULONG              InfoLevel )
 {
     APICALL_SESID   apicall( opGetCursorInfo );
 
@@ -11172,11 +11172,11 @@ LOCAL JET_ERR JetGetCursorInfoEx(
     return apicall.ErrResult();
 }
 JET_ERR JET_API JetGetCursorInfo(
-    __in JET_SESID                  sesid,
-    __in JET_TABLEID                tableid,
+    _In_ JET_SESID                  sesid,
+    _In_ JET_TABLEID                tableid,
     __out_bcount( cbMax ) void *    pvResult,
-    __in ULONG              cbMax,
-    __in ULONG              InfoLevel )
+    _In_ ULONG              cbMax,
+    _In_ ULONG              InfoLevel )
 {
     JET_VALIDATE_SESID_TABLEID( sesid, tableid );
     JET_TRY( opGetCursorInfo, JetGetCursorInfoEx( sesid, tableid, pvResult, cbMax, InfoLevel ) );
@@ -11184,10 +11184,10 @@ JET_ERR JET_API JetGetCursorInfo(
 
 
 LOCAL JET_ERR JetGetCurrentIndexEx(
-    __in JET_SESID                          sesid,
-    __in JET_TABLEID                        tableid,
+    _In_ JET_SESID                          sesid,
+    _In_ JET_TABLEID                        tableid,
     _Out_z_bytecap_( cbIndexName ) JET_PSTR szIndexName,
-    __in ULONG                      cbIndexName )
+    _In_ ULONG                      cbIndexName )
 {
     APICALL_SESID   apicall( opGetCurrentIndex );
 
@@ -11215,10 +11215,10 @@ LOCAL JET_ERR JetGetCurrentIndexEx(
 }
 
 LOCAL JET_ERR JetGetCurrentIndexExW(
-    __in JET_SESID                          sesid,
-    __in JET_TABLEID                        tableid,
+    _In_ JET_SESID                          sesid,
+    _In_ JET_TABLEID                        tableid,
     _Out_z_bytecap_( cbIndexName ) JET_PWSTR    szIndexName,
-    __in ULONG                      cbIndexName )
+    _In_ ULONG                      cbIndexName )
 {
     ERR         err     = JET_errSuccess;
     CAutoSZDDL  lszIndexName;
@@ -11231,32 +11231,32 @@ LOCAL JET_ERR JetGetCurrentIndexExW(
 }
 
 JET_ERR JET_API JetGetCurrentIndexA(
-    __in JET_SESID                          sesid,
-    __in JET_TABLEID                        tableid,
+    _In_ JET_SESID                          sesid,
+    _In_ JET_TABLEID                        tableid,
     __out_bcount( cbIndexName ) JET_PSTR    szIndexName,
-    __in ULONG                      cbIndexName )
+    _In_ ULONG                      cbIndexName )
 {
     JET_VALIDATE_SESID_TABLEID( sesid, tableid );
     JET_TRY( opGetCurrentIndex, JetGetCurrentIndexEx( sesid, tableid, szIndexName, cbIndexName ) );
 }
 
 JET_ERR JET_API JetGetCurrentIndexW(
-    __in JET_SESID                          sesid,
-    __in JET_TABLEID                        tableid,
+    _In_ JET_SESID                          sesid,
+    _In_ JET_TABLEID                        tableid,
     __out_bcount( cbIndexName ) JET_PWSTR   szIndexName,
-    __in ULONG                      cbIndexName )
+    _In_ ULONG                      cbIndexName )
 {
     JET_VALIDATE_SESID_TABLEID( sesid, tableid );
     JET_TRY( opGetCurrentIndex, JetGetCurrentIndexExW( sesid, tableid, szIndexName, cbIndexName ) );
 }
 
 LOCAL JET_ERR JetSetCurrentIndexEx(
-    __in JET_SESID          sesid,
-    __in JET_TABLEID        tableid,
+    _In_ JET_SESID          sesid,
+    _In_ JET_TABLEID        tableid,
     __in_opt JET_PCSTR      szIndexName,
     __in_opt JET_INDEXID *  pindexid,
-    __in JET_GRBIT          grbit,
-    __in ULONG      itagSequence )
+    _In_ JET_GRBIT          grbit,
+    _In_ ULONG      itagSequence )
 {
     APICALL_SESID       apicall( opSetCurrentIndex );
 
@@ -11290,12 +11290,12 @@ LOCAL JET_ERR JetSetCurrentIndexEx(
 }
 
 LOCAL JET_ERR JetSetCurrentIndexExW(
-    __in JET_SESID          sesid,
-    __in JET_TABLEID        tableid,
+    _In_ JET_SESID          sesid,
+    _In_ JET_TABLEID        tableid,
     __in_opt JET_PCWSTR     wszIndexName,
     __in_opt JET_INDEXID *  pindexid,
-    __in JET_GRBIT          grbit,
-    __in ULONG      itagSequence )
+    _In_ JET_GRBIT          grbit,
+    _In_ ULONG      itagSequence )
 {
     ERR         err;
     CAutoSZDDL  lszIndexName;
@@ -11306,8 +11306,8 @@ LOCAL JET_ERR JetSetCurrentIndexExW(
 }
 
 JET_ERR JET_API JetSetCurrentIndexA(
-    __in JET_SESID      sesid,
-    __in JET_TABLEID    tableid,
+    _In_ JET_SESID      sesid,
+    _In_ JET_TABLEID    tableid,
     __in_opt JET_PCSTR  szIndexName )
 {
     JET_VALIDATE_SESID_TABLEID( sesid, tableid );
@@ -11315,70 +11315,70 @@ JET_ERR JET_API JetSetCurrentIndexA(
 }
 
 JET_ERR JET_API JetSetCurrentIndexW(
-    __in JET_SESID      sesid,
-    __in JET_TABLEID    tableid,
+    _In_ JET_SESID      sesid,
+    _In_ JET_TABLEID    tableid,
     __in_opt JET_PCWSTR wszIndexName )
 {
     JET_VALIDATE_SESID_TABLEID( sesid, tableid );
     JET_TRY( opSetCurrentIndex, JetSetCurrentIndexExW( sesid, tableid, wszIndexName, NULL, JET_bitMoveFirst, 1 ) );
 }
 JET_ERR JET_API JetSetCurrentIndex2A(
-    __in JET_SESID      sesid,
-    __in JET_TABLEID    tableid,
+    _In_ JET_SESID      sesid,
+    _In_ JET_TABLEID    tableid,
     __in_opt JET_PCSTR  szIndexName,
-    __in JET_GRBIT      grbit )
+    _In_ JET_GRBIT      grbit )
 {
     JET_VALIDATE_SESID_TABLEID( sesid, tableid );
     JET_TRY( opSetCurrentIndex, JetSetCurrentIndexEx( sesid, tableid, szIndexName, NULL, grbit, 1 ) );
 }
 JET_ERR JET_API JetSetCurrentIndex2W(
-    __in JET_SESID      sesid,
-    __in JET_TABLEID    tableid,
+    _In_ JET_SESID      sesid,
+    _In_ JET_TABLEID    tableid,
     __in_opt JET_PCWSTR wszIndexName,
-    __in JET_GRBIT      grbit )
+    _In_ JET_GRBIT      grbit )
 {
     JET_VALIDATE_SESID_TABLEID( sesid, tableid );
     JET_TRY( opSetCurrentIndex, JetSetCurrentIndexExW( sesid, tableid, wszIndexName, NULL, grbit, 1 ) );
 }
 
 JET_ERR JET_API JetSetCurrentIndex3A(
-    __in JET_SESID      sesid,
-    __in JET_TABLEID    tableid,
+    _In_ JET_SESID      sesid,
+    _In_ JET_TABLEID    tableid,
     __in_opt JET_PCSTR  szIndexName,
-    __in JET_GRBIT      grbit,
-    __in ULONG  itagSequence )
+    _In_ JET_GRBIT      grbit,
+    _In_ ULONG  itagSequence )
 {
     JET_VALIDATE_SESID_TABLEID( sesid, tableid );
     JET_TRY( opSetCurrentIndex, JetSetCurrentIndexEx( sesid, tableid, szIndexName, NULL, grbit, itagSequence ) );
 }
 JET_ERR JET_API JetSetCurrentIndex3W(
-    __in JET_SESID      sesid,
-    __in JET_TABLEID    tableid,
+    _In_ JET_SESID      sesid,
+    _In_ JET_TABLEID    tableid,
     __in_opt JET_PCWSTR wszIndexName,
-    __in JET_GRBIT      grbit,
-    __in ULONG  itagSequence )
+    _In_ JET_GRBIT      grbit,
+    _In_ ULONG  itagSequence )
 {
     JET_VALIDATE_SESID_TABLEID( sesid, tableid );
     JET_TRY( opSetCurrentIndex, JetSetCurrentIndexExW( sesid, tableid, wszIndexName, NULL, grbit, itagSequence ) );
 }
 JET_ERR JET_API JetSetCurrentIndex4A(
-    __in JET_SESID          sesid,
-    __in JET_TABLEID        tableid,
+    _In_ JET_SESID          sesid,
+    _In_ JET_TABLEID        tableid,
     __in_opt JET_PCSTR      szIndexName,
     __in_opt JET_INDEXID *  pindexid,
-    __in JET_GRBIT          grbit,
-    __in ULONG      itagSequence )
+    _In_ JET_GRBIT          grbit,
+    _In_ ULONG      itagSequence )
 {
     JET_VALIDATE_SESID_TABLEID( sesid, tableid );
     JET_TRY( opSetCurrentIndex, JetSetCurrentIndexEx( sesid, tableid, szIndexName, pindexid, grbit, itagSequence ) );
 }
 JET_ERR JET_API JetSetCurrentIndex4W(
-    __in JET_SESID          sesid,
-    __in JET_TABLEID        tableid,
+    _In_ JET_SESID          sesid,
+    _In_ JET_TABLEID        tableid,
     __in_opt JET_PCWSTR     wszIndexName,
     __in_opt JET_INDEXID *  pindexid,
-    __in JET_GRBIT          grbit,
-    __in ULONG      itagSequence )
+    _In_ JET_GRBIT          grbit,
+    _In_ ULONG      itagSequence )
 {
     JET_VALIDATE_SESID_TABLEID( sesid, tableid );
     JET_TRY( opSetCurrentIndex, JetSetCurrentIndexExW( sesid, tableid, wszIndexName, pindexid, grbit, itagSequence ) );
@@ -11386,10 +11386,10 @@ JET_ERR JET_API JetSetCurrentIndex4W(
 
 
 LOCAL JET_ERR JetMoveEx(
-    __in JET_SESID          sesid,
-    __in JET_TABLEID        tableid,
-    __in LONG               cRow,
-    __in JET_GRBIT          grbit )
+    _In_ JET_SESID          sesid,
+    _In_ JET_TABLEID        tableid,
+    _In_ LONG               cRow,
+    _In_ JET_GRBIT          grbit )
 {
     APICALL_SESID           apicall( opMove );
 
@@ -11411,21 +11411,21 @@ LOCAL JET_ERR JetMoveEx(
     return apicall.ErrResult();
 }
 JET_ERR JET_API JetMove(
-    __in JET_SESID      sesid,
-    __in JET_TABLEID    tableid,
-    __in LONG           cRow,
-    __in JET_GRBIT      grbit )
+    _In_ JET_SESID      sesid,
+    _In_ JET_TABLEID    tableid,
+    _In_ LONG           cRow,
+    _In_ JET_GRBIT      grbit )
 {
     JET_VALIDATE_SESID_TABLEID( sesid, tableid );
     JET_TRY( opMove, JetMoveEx( sesid, tableid, cRow, grbit ) );
 }
 
 LOCAL JET_ERR JetSetCursorFilterEx(
-    __in JET_SESID          sesid,
-    __in JET_TABLEID        tableid,
+    _In_ JET_SESID          sesid,
+    _In_ JET_TABLEID        tableid,
     __in_ecount(cFilters) JET_INDEX_COLUMN *rgFilters,
-    __in DWORD              cFilters,
-    __in JET_GRBIT          grbit )
+    _In_ DWORD              cFilters,
+    _In_ JET_GRBIT          grbit )
 {
     APICALL_SESID           apicall( opSetCursorFilter );
 
@@ -11448,22 +11448,22 @@ LOCAL JET_ERR JetSetCursorFilterEx(
     return apicall.ErrResult();
 }
 JET_ERR JET_API JetSetCursorFilter(
-    __in JET_SESID          sesid,
-    __in JET_TABLEID        tableid,
+    _In_ JET_SESID          sesid,
+    _In_ JET_TABLEID        tableid,
     __in_ecount(cFilters) JET_INDEX_COLUMN *rgFilters,
-    __in DWORD              cFilters,
-    __in JET_GRBIT          grbit )
+    _In_ DWORD              cFilters,
+    _In_ JET_GRBIT          grbit )
 {
     JET_VALIDATE_SESID_TABLEID( sesid, tableid );
     JET_TRY( opSetCursorFilter, JetSetCursorFilterEx( sesid, tableid, rgFilters, cFilters, grbit ) );
 }
 
 LOCAL JET_ERR JetMakeKeyEx(
-    __in JET_SESID                          sesid,
-    __in JET_TABLEID                        tableid,
+    _In_ JET_SESID                          sesid,
+    _In_ JET_TABLEID                        tableid,
     __in_bcount_opt( cbData ) const void *  pvData,
-    __in ULONG                      cbData,
-    __in JET_GRBIT                          grbit )
+    _In_ ULONG                      cbData,
+    _In_ JET_GRBIT                          grbit )
 {
     APICALL_SESID   apicall( opMakeKey );
 
@@ -11492,18 +11492,18 @@ LOCAL JET_ERR JetMakeKeyEx(
     return apicall.ErrResult();
 }
 JET_ERR JET_API JetMakeKey(
-    __in JET_SESID                          sesid,
-    __in JET_TABLEID                        tableid,
+    _In_ JET_SESID                          sesid,
+    _In_ JET_TABLEID                        tableid,
     __in_bcount_opt( cbData ) const void *  pvData,
-    __in ULONG                      cbData,
-    __in JET_GRBIT                          grbit )
+    _In_ ULONG                      cbData,
+    _In_ JET_GRBIT                          grbit )
 {
     JET_VALIDATE_SESID_TABLEID( sesid, tableid );
     JET_TRY( opMakeKey, JetMakeKeyEx( sesid, tableid, pvData, cbData, grbit ) );
 }
 
 
-LOCAL JET_ERR JetSeekEx( __in JET_SESID sesid, __in JET_TABLEID tableid, __in JET_GRBIT grbit )
+LOCAL JET_ERR JetSeekEx( _In_ JET_SESID sesid, _In_ JET_TABLEID tableid, _In_ JET_GRBIT grbit )
 {
     APICALL_SESID   apicall( opSeek );
 
@@ -11523,7 +11523,7 @@ LOCAL JET_ERR JetSeekEx( __in JET_SESID sesid, __in JET_TABLEID tableid, __in JE
 
     return apicall.ErrResult();
 }
-JET_ERR JET_API JetSeek( __in JET_SESID sesid, __in JET_TABLEID tableid, __in JET_GRBIT grbit )
+JET_ERR JET_API JetSeek( _In_ JET_SESID sesid, _In_ JET_TABLEID tableid, _In_ JET_GRBIT grbit )
 {
     JET_VALIDATE_SESID_TABLEID( sesid, tableid );
     JET_TRY( opSeek, JetSeekEx( sesid, tableid, grbit ) );
@@ -11531,13 +11531,13 @@ JET_ERR JET_API JetSeek( __in JET_SESID sesid, __in JET_TABLEID tableid, __in JE
 
 
 LOCAL JET_ERR JetPrereadKeysEx(
-    __in const JET_SESID                                sesid,
-    __in const JET_TABLEID                              tableid,
+    _In_ const JET_SESID                                sesid,
+    _In_ const JET_TABLEID                              tableid,
     __in_ecount(ckeys) const void * const * const       rgpvKeys,
     __in_ecount(ckeys) const ULONG * const      rgcbKeys,
-    __in const LONG                                     ckeys,
+    _In_ const LONG                                     ckeys,
     __out_opt LONG * const                              pckeysPreread,
-    __in const JET_GRBIT                                grbit )
+    _In_ const JET_GRBIT                                grbit )
 {
     APICALL_SESID   apicall( opPrereadKeys );
 
@@ -11563,27 +11563,27 @@ LOCAL JET_ERR JetPrereadKeysEx(
 }
 
 JET_ERR JET_API JetPrereadKeys(
-    __in JET_SESID                                      sesid,
-    __in JET_TABLEID                                    tableid,
+    _In_ JET_SESID                                      sesid,
+    _In_ JET_TABLEID                                    tableid,
     __in_ecount(ckeys) const void **                    rgpvKeys,
     __in_ecount(ckeys) const ULONG *            rgcbKeys,
-    __in LONG                                           ckeys,
+    _In_ LONG                                           ckeys,
     __out_opt LONG *                                    pckeysPreread,
-    __in JET_GRBIT                                      grbit )
+    _In_ JET_GRBIT                                      grbit )
 {
     JET_VALIDATE_SESID_TABLEID( sesid, tableid );
     JET_TRY( opPrereadKeys, JetPrereadKeysEx( sesid, tableid, rgpvKeys, rgcbKeys, ckeys, pckeysPreread, grbit ) );
 }
 
 LOCAL JET_ERR JetPrereadIndexRangesEx(
-    __in const JET_SESID                                sesid,
-    __in const JET_TABLEID                              tableid,
+    _In_ const JET_SESID                                sesid,
+    _In_ const JET_TABLEID                              tableid,
     __in_ecount(cIndexRanges) const JET_INDEX_RANGE * const rgIndexRanges,
-    __in const ULONG                            cIndexRanges,
+    _In_ const ULONG                            cIndexRanges,
     __out_opt ULONG * const                     pcRangesPreread,
     __in_ecount(ccolumnidPreread) const JET_COLUMNID * const rgcolumnidPreread,
-    __in const ULONG                            ccolumnidPreread,
-    __in const JET_GRBIT                                grbit )
+    _In_ const ULONG                            ccolumnidPreread,
+    _In_ const JET_GRBIT                                grbit )
 {
     APICALL_SESID   apicall( opPrereadIndexRanges );
 
@@ -11608,24 +11608,24 @@ LOCAL JET_ERR JetPrereadIndexRangesEx(
 }
 
 JET_ERR JetPrereadIndexRanges(
-    __in const JET_SESID                                sesid,
-    __in const JET_TABLEID                              tableid,
+    _In_ const JET_SESID                                sesid,
+    _In_ const JET_TABLEID                              tableid,
     __in_ecount(cIndexRanges) const JET_INDEX_RANGE * const rgIndexRanges,
-    __in const ULONG                            cIndexRanges,
+    _In_ const ULONG                            cIndexRanges,
     __out_opt ULONG * const                     pcRangesPreread,
     __in_ecount(ccolumnidPreread) const JET_COLUMNID * const rgcolumnidPreread,
-    __in const ULONG                            ccolumnidPreread,
-    __in const JET_GRBIT                                grbit )
+    _In_ const ULONG                            ccolumnidPreread,
+    _In_ const JET_GRBIT                                grbit )
 {
     JET_VALIDATE_SESID_TABLEID( sesid, tableid );
     JET_TRY( opPrereadIndexRanges, JetPrereadIndexRangesEx( sesid, tableid, rgIndexRanges, cIndexRanges, pcRangesPreread, rgcolumnidPreread, ccolumnidPreread, grbit ) );
 }
 
 LOCAL JET_ERR JetGetBookmarkEx(
-    __in JET_SESID                                      sesid,
-    __in JET_TABLEID                                    tableid,
+    _In_ JET_SESID                                      sesid,
+    _In_ JET_TABLEID                                    tableid,
     __out_bcount_part_opt( cbMax, *pcbActual ) void *   pvBookmark,
-    __in ULONG                                  cbMax,
+    _In_ ULONG                                  cbMax,
     __out_opt ULONG *                           pcbActual )
 {
     APICALL_SESID   apicall( opGetBookmark );
@@ -11665,13 +11665,13 @@ JET_ERR JET_API JetGetBookmark(
 }
 
 JET_ERR JET_API JetGetSecondaryIndexBookmarkEx(
-    __in JET_SESID                                                                  sesid,
-    __in JET_TABLEID                                                                tableid,
+    _In_ JET_SESID                                                                  sesid,
+    _In_ JET_TABLEID                                                                tableid,
     __out_bcount_part_opt( cbSecondaryKeyMax, *pcbSecondaryKeyActual ) void *       pvSecondaryKey,
-    __in ULONG                                                              cbSecondaryKeyMax,
+    _In_ ULONG                                                              cbSecondaryKeyMax,
     __out_opt ULONG *                                                       pcbSecondaryKeyActual,
     __out_bcount_part_opt( cbPrimaryBookmarkMax, *pcbPrimaryBookmarkActual ) void * pvPrimaryBookmark,
-    __in ULONG                                                              cbPrimaryBookmarkMax,
+    _In_ ULONG                                                              cbPrimaryBookmarkMax,
     __out_opt ULONG *                                                       pcbPrimaryBookmarkActual )
 {
     APICALL_SESID   apicall( opGetBookmark );
@@ -11731,10 +11731,10 @@ JET_ERR JET_API JetGetSecondaryIndexBookmark(
 
 
 LOCAL JET_ERR JetGotoBookmarkEx(
-    __in JET_SESID                      sesid,
-    __in JET_TABLEID                    tableid,
+    _In_ JET_SESID                      sesid,
+    _In_ JET_TABLEID                    tableid,
     __in_bcount( cbBookmark ) void *    pvBookmark,
-    __in ULONG                  cbBookmark )
+    _In_ ULONG                  cbBookmark )
 {
     APICALL_SESID   apicall( opGotoBookmark );
 
@@ -11761,23 +11761,23 @@ LOCAL JET_ERR JetGotoBookmarkEx(
     return apicall.ErrResult();
 }
 JET_ERR JET_API JetGotoBookmark(
-    __in JET_SESID                      sesid,
-    __in JET_TABLEID                    tableid,
+    _In_ JET_SESID                      sesid,
+    _In_ JET_TABLEID                    tableid,
     __in_bcount( cbBookmark ) void *    pvBookmark,
-    __in ULONG                  cbBookmark )
+    _In_ ULONG                  cbBookmark )
 {
     JET_VALIDATE_SESID_TABLEID( sesid, tableid );
     JET_TRY( opGotoBookmark, JetGotoBookmarkEx( sesid, tableid, pvBookmark, cbBookmark ) );
 }
 
 JET_ERR JET_API JetGotoSecondaryIndexBookmarkEx(
-    __in JET_SESID                              sesid,
-    __in JET_TABLEID                            tableid,
+    _In_ JET_SESID                              sesid,
+    _In_ JET_TABLEID                            tableid,
     __in_bcount( cbSecondaryKey ) void *        pvSecondaryKey,
-    __in ULONG                          cbSecondaryKey,
+    _In_ ULONG                          cbSecondaryKey,
     __in_bcount_opt( cbPrimaryBookmark ) void * pvPrimaryBookmark,
-    __in ULONG                          cbPrimaryBookmark,
-    __in const JET_GRBIT                        grbit )
+    _In_ ULONG                          cbPrimaryBookmark,
+    _In_ const JET_GRBIT                        grbit )
 {
     APICALL_SESID   apicall( opGotoBookmark );
 
@@ -11811,13 +11811,13 @@ JET_ERR JET_API JetGotoSecondaryIndexBookmarkEx(
     return apicall.ErrResult();
 }
 JET_ERR JET_API JetGotoSecondaryIndexBookmark(
-    __in JET_SESID                              sesid,
-    __in JET_TABLEID                            tableid,
+    _In_ JET_SESID                              sesid,
+    _In_ JET_TABLEID                            tableid,
     __in_bcount( cbSecondaryKey ) void *        pvSecondaryKey,
-    __in ULONG                          cbSecondaryKey,
+    _In_ ULONG                          cbSecondaryKey,
     __in_bcount_opt( cbPrimaryBookmark ) void * pvPrimaryBookmark,
-    __in ULONG                          cbPrimaryBookmark,
-    __in const JET_GRBIT                        grbit )
+    _In_ ULONG                          cbPrimaryBookmark,
+    _In_ const JET_GRBIT                        grbit )
 {
     JET_VALIDATE_SESID_TABLEID( sesid, tableid );
     JET_TRY( opGetBookmark,
@@ -11833,11 +11833,11 @@ JET_ERR JET_API JetGotoSecondaryIndexBookmark(
 
 
 JET_ERR JET_API JetIntersectIndexesEx(
-    __in JET_SESID                              sesid,
+    _In_ JET_SESID                              sesid,
     __in_ecount( cindexrange ) JET_INDEXRANGE * rgindexrange,
-    __in ULONG                          cindexrange,
+    _In_ ULONG                          cindexrange,
     __inout JET_RECORDLIST *                    precordlist,
-    __in JET_GRBIT                              grbit )
+    _In_ JET_GRBIT                              grbit )
 {
     APICALL_SESID       apicall( opIntersectIndexes );
 
@@ -11866,11 +11866,11 @@ JET_ERR JET_API JetIntersectIndexesEx(
     return apicall.ErrResult();
 }
 JET_ERR JET_API JetIntersectIndexes(
-    __in JET_SESID                              sesid,
+    _In_ JET_SESID                              sesid,
     __in_ecount( cindexrange ) JET_INDEXRANGE * rgindexrange,
-    __in ULONG                          cindexrange,
+    _In_ ULONG                          cindexrange,
     __inout JET_RECORDLIST *                    precordlist,
-    __in JET_GRBIT                              grbit )
+    _In_ JET_GRBIT                              grbit )
 {
     JET_VALIDATE_SESID( sesid );
     //  UNDONE:  validate tableids inside JET_INDEXRANGE array
@@ -11879,10 +11879,10 @@ JET_ERR JET_API JetIntersectIndexes(
 
 
 LOCAL JET_ERR JetGetRecordPositionEx(
-    __in JET_SESID                          sesid,
-    __in JET_TABLEID                        tableid,
+    _In_ JET_SESID                          sesid,
+    _In_ JET_TABLEID                        tableid,
     __out_bcount( cbRecpos ) JET_RECPOS *   precpos,
-    __in ULONG                      cbRecpos )
+    _In_ ULONG                      cbRecpos )
 {
     APICALL_SESID   apicall( opGetRecordPosition );
 
@@ -11908,10 +11908,10 @@ LOCAL JET_ERR JetGetRecordPositionEx(
     return apicall.ErrResult();
 }
 JET_ERR JET_API JetGetRecordPosition(
-    __in JET_SESID                          sesid,
-    __in JET_TABLEID                        tableid,
+    _In_ JET_SESID                          sesid,
+    _In_ JET_TABLEID                        tableid,
     __out_bcount( cbRecpos ) JET_RECPOS *   precpos,
-    __in ULONG                      cbRecpos )
+    _In_ ULONG                      cbRecpos )
 {
     JET_VALIDATE_SESID_TABLEID( sesid, tableid );
     JET_TRY( opGetRecordPosition, JetGetRecordPositionEx( sesid, tableid, precpos, cbRecpos ) );
@@ -11919,9 +11919,9 @@ JET_ERR JET_API JetGetRecordPosition(
 
 
 LOCAL JET_ERR JetGotoPositionEx(
-    __in JET_SESID      sesid,
-    __in JET_TABLEID    tableid,
-    __in JET_RECPOS *   precpos )
+    _In_ JET_SESID      sesid,
+    _In_ JET_TABLEID    tableid,
+    _In_ JET_RECPOS *   precpos )
 {
     APICALL_SESID   apicall( opGotoPosition );
 
@@ -11946,9 +11946,9 @@ LOCAL JET_ERR JetGotoPositionEx(
     return apicall.ErrResult();
 }
 JET_ERR JET_API JetGotoPosition(
-    __in JET_SESID      sesid,
-    __in JET_TABLEID    tableid,
-    __in JET_RECPOS *   precpos )
+    _In_ JET_SESID      sesid,
+    _In_ JET_TABLEID    tableid,
+    _In_ JET_RECPOS *   precpos )
 {
     JET_VALIDATE_SESID_TABLEID( sesid, tableid );
     JET_TRY( opGotoPosition, JetGotoPositionEx( sesid, tableid, precpos ) );
@@ -11956,12 +11956,12 @@ JET_ERR JET_API JetGotoPosition(
 
 
 LOCAL JET_ERR JetRetrieveKeyEx(
-    __in JET_SESID                                      sesid,
-    __in JET_TABLEID                                    tableid,
+    _In_ JET_SESID                                      sesid,
+    _In_ JET_TABLEID                                    tableid,
     __out_bcount_part_opt( cbMax, *pcbActual ) void *   pvKey,
-    __in ULONG                                  cbMax,
+    _In_ ULONG                                  cbMax,
     __out_opt ULONG *                           pcbActual,
-    __in JET_GRBIT                                      grbit )
+    _In_ JET_GRBIT                                      grbit )
 {
     APICALL_SESID   apicall( opRetrieveKey );
 
@@ -12003,7 +12003,7 @@ JET_ERR JET_API JetRetrieveKey(
 }
 
 
-LOCAL JET_ERR JetGetLockEx( __in JET_SESID sesid, __in JET_TABLEID tableid, __in JET_GRBIT grbit )
+LOCAL JET_ERR JetGetLockEx( _In_ JET_SESID sesid, _In_ JET_TABLEID tableid, _In_ JET_GRBIT grbit )
 {
     APICALL_SESID   apicall( opGetLock );
 
@@ -12023,13 +12023,13 @@ LOCAL JET_ERR JetGetLockEx( __in JET_SESID sesid, __in JET_TABLEID tableid, __in
 
     return apicall.ErrResult();
 }
-JET_ERR JET_API JetGetLock( __in JET_SESID sesid, __in JET_TABLEID tableid, __in JET_GRBIT grbit )
+JET_ERR JET_API JetGetLock( _In_ JET_SESID sesid, _In_ JET_TABLEID tableid, _In_ JET_GRBIT grbit )
 {
     JET_VALIDATE_SESID_TABLEID( sesid, tableid );
     JET_TRY( opGetLock, JetGetLockEx( sesid, tableid, grbit ) );
 }
 
-LOCAL JET_ERR JetGetVersionEx( __in JET_SESID sesid, __out ULONG  *pVersion )
+LOCAL JET_ERR JetGetVersionEx( _In_ JET_SESID sesid, _Out_ ULONG  *pVersion )
 {
     APICALL_SESID   apicall( opGetVersion );
 
@@ -12102,7 +12102,7 @@ LOCAL JET_ERR JetGetVersionEx( __in JET_SESID sesid, __out ULONG  *pVersion )
     return apicall.ErrResult();
 }
 
-JET_ERR JET_API JetGetVersion( __in JET_SESID sesid, __out ULONG  *pVersion )
+JET_ERR JET_API JetGetVersion( _In_ JET_SESID sesid, _Out_ ULONG  *pVersion )
 {
     JET_VALIDATE_SESID( sesid );
     JET_TRY( opGetVersion, JetGetVersionEx( sesid, pVersion ) );
@@ -12137,12 +12137,12 @@ Side Effects:
   None.
 =================================================================*/
 LOCAL JET_ERR JetGetSystemParameterEx(
-    __in JET_INSTANCE                   instance,
-    __in JET_SESID                      sesid,
-    __in ULONG                  paramid,
+    _In_ JET_INSTANCE                   instance,
+    _In_ JET_SESID                      sesid,
+    _In_ ULONG                  paramid,
     __out_opt JET_API_PTR *             plParam,
     _Out_opt_z_bytecap_( cbMax ) JET_PWSTR  wszParam,
-    __in ULONG                  cbMax )
+    _In_ ULONG                  cbMax )
 {
     APICALL_INST    apicall( opGetSystemParameter );
     INST*           pinst   = NULL;
@@ -12228,12 +12228,12 @@ LOCAL JET_ERR JetGetSystemParameterEx(
 #pragma warning( default : 4509 )
 
 LOCAL JET_ERR JetGetSystemParameterExA(
-    __in JET_INSTANCE                   instance,
-    __in JET_SESID                      sesid,
-    __in ULONG                  paramid,
+    _In_ JET_INSTANCE                   instance,
+    _In_ JET_SESID                      sesid,
+    _In_ ULONG                  paramid,
     __out_opt JET_API_PTR *             plParam,
     _Out_opt_z_bytecap_( cbMax ) JET_PSTR   szParam,
-    __in ULONG                  cbMax )
+    _In_ ULONG                  cbMax )
 {
     ERR         err     = JET_errSuccess;
     ULONG       cbMaxT  = cbMax;
@@ -12258,23 +12258,23 @@ LOCAL JET_ERR JetGetSystemParameterExA(
 
 
 JET_ERR JET_API JetGetSystemParameterA(
-    __in JET_INSTANCE                   instance,
+    _In_ JET_INSTANCE                   instance,
     __in_opt JET_SESID                  sesid,
-    __in ULONG                  paramid,
+    _In_ ULONG                  paramid,
     __out_opt JET_API_PTR *             plParam,
     __out_bcount_opt( cbMax ) JET_PSTR  szParam,
-    __in ULONG                  cbMax )
+    _In_ ULONG                  cbMax )
 {
     JET_TRY( opGetSystemParameter, JetGetSystemParameterExA( instance, sesid, paramid, plParam, szParam, cbMax ) );
 }
 
 JET_ERR JET_API JetGetSystemParameterW(
-    __in JET_INSTANCE                   instance,
+    _In_ JET_INSTANCE                   instance,
     __in_opt JET_SESID                  sesid,
-    __in ULONG                  paramid,
+    _In_ ULONG                  paramid,
     __out_opt JET_API_PTR *             plParam,
     __out_bcount_opt( cbMax ) JET_PWSTR szParam,
-    __in ULONG                  cbMax )
+    _In_ ULONG                  cbMax )
 {
     JET_TRY( opGetSystemParameter, JetGetSystemParameterEx( instance, sesid, paramid, plParam, szParam, cbMax ) );
 }
@@ -12310,8 +12310,8 @@ Side Effects:
 =================================================================*/
 
 LOCAL JET_ERR JetBeginSessionEx(
-    __in JET_INSTANCE   instance,
-    __out JET_SESID *   psesid,
+    _In_ JET_INSTANCE   instance,
+    _Out_ JET_SESID *   psesid,
     __in_opt JET_PCSTR  szUserName,
     __in_opt JET_PCSTR  szPassword )
 {
@@ -12342,8 +12342,8 @@ LOCAL JET_ERR JetBeginSessionEx(
 
 
 LOCAL JET_ERR JetBeginSessionExW(
-    __in JET_INSTANCE   instance,
-    __out JET_SESID *   psesid,
+    _In_ JET_INSTANCE   instance,
+    _Out_ JET_SESID *   psesid,
     __in_opt JET_PCWSTR wszUserName,
     __in_opt JET_PCWSTR wszPassword )
 {
@@ -12359,8 +12359,8 @@ LOCAL JET_ERR JetBeginSessionExW(
 
 
 JET_ERR JET_API JetBeginSessionA(
-    __in JET_INSTANCE   instance,
-    __out JET_SESID *   psesid,
+    _In_ JET_INSTANCE   instance,
+    _Out_ JET_SESID *   psesid,
     __in_opt JET_PCSTR  szUserName,
     __in_opt JET_PCSTR  szPassword )
 {
@@ -12369,8 +12369,8 @@ JET_ERR JET_API JetBeginSessionA(
 }
 
 JET_ERR JET_API JetBeginSessionW(
-    __in JET_INSTANCE   instance,
-    __out JET_SESID *   psesid,
+    _In_ JET_INSTANCE   instance,
+    _Out_ JET_SESID *   psesid,
     __in_opt JET_PCWSTR wszUserName,
     __in_opt JET_PCWSTR wszPassword )
 {
@@ -12378,7 +12378,7 @@ JET_ERR JET_API JetBeginSessionW(
     JET_TRY( opBeginSession, JetBeginSessionExW( instance, psesid, wszUserName, wszPassword ) );
 }
 
-LOCAL JET_ERR JetDupSessionEx( __in JET_SESID sesid, __out JET_SESID *psesid )
+LOCAL JET_ERR JetDupSessionEx( _In_ JET_SESID sesid, _Out_ JET_SESID *psesid )
 {
     APICALL_SESID   apicall( opDupSession );
 
@@ -12399,7 +12399,7 @@ LOCAL JET_ERR JetDupSessionEx( __in JET_SESID sesid, __out JET_SESID *psesid )
 
     return apicall.ErrResult();
 }
-JET_ERR JET_API JetDupSession( __in JET_SESID sesid, __out JET_SESID *psesid )
+JET_ERR JET_API JetDupSession( _In_ JET_SESID sesid, _Out_ JET_SESID *psesid )
 {
     JET_VALIDATE_SESID( sesid );
     JET_TRY( opDupSession, JetDupSessionEx( sesid, psesid ) );
@@ -12424,7 +12424,7 @@ Errors/Warnings:
 
 Side Effects:
 =================================================================*/
-LOCAL JET_ERR JetEndSessionEx( __in JET_SESID sesid, __in JET_GRBIT grbit )
+LOCAL JET_ERR JetEndSessionEx( _In_ JET_SESID sesid, _In_ JET_GRBIT grbit )
 {
     APICALL_SESID   apicall( opEndSession );
 
@@ -12447,16 +12447,16 @@ LOCAL JET_ERR JetEndSessionEx( __in JET_SESID sesid, __in JET_GRBIT grbit )
 
     return apicall.ErrResult();
 }
-JET_ERR JET_API JetEndSession( __in JET_SESID sesid, __in JET_GRBIT grbit )
+JET_ERR JET_API JetEndSession( _In_ JET_SESID sesid, _In_ JET_GRBIT grbit )
 {
     JET_VALIDATE_SESID( sesid );
     JET_TRY( opEndSession, JetEndSessionEx( sesid, grbit ) );
 }
 
 LOCAL JET_ERR JetCreateDatabaseEx(
-    __in JET_SESID                                              sesid,
-    __in JET_PCWSTR                                             wszDbFileName,
-    __out JET_DBID *                                            pdbid,
+    _In_ JET_SESID                                              sesid,
+    _In_ JET_PCWSTR                                             wszDbFileName,
+    _Out_ JET_DBID *                                            pdbid,
     _In_reads_opt_( csetdbparam ) const JET_SETDBPARAM * const  rgsetdbparam,
     _In_ const ULONG                                    csetdbparam,
     _In_ const JET_GRBIT                                        grbit )
@@ -12487,9 +12487,9 @@ LOCAL JET_ERR JetCreateDatabaseEx(
 }
 
 LOCAL JET_ERR JetCreateDatabaseExA(
-    __in JET_SESID                                              sesid,
-    __in JET_PCSTR                                              szDbFileName,
-    __out JET_DBID *                                            pdbid,
+    _In_ JET_SESID                                              sesid,
+    _In_ JET_PCSTR                                              szDbFileName,
+    _Out_ JET_DBID *                                            pdbid,
     _In_reads_opt_( csetdbparam ) const JET_SETDBPARAM * const  rgsetdbparam,
     _In_ const ULONG                                    csetdbparam,
     _In_ const JET_GRBIT                                        grbit )
@@ -12503,33 +12503,33 @@ LOCAL JET_ERR JetCreateDatabaseExA(
 }
 
 JET_ERR JET_API JetCreateDatabaseA(
-    __in JET_SESID      sesid,
-    __in JET_PCSTR      szFilename,
+    _In_ JET_SESID      sesid,
+    _In_ JET_PCSTR      szFilename,
     __in_opt JET_PCSTR  szConnect,
-    __out JET_DBID *    pdbid,
-    __in JET_GRBIT      grbit )
+    _Out_ JET_DBID *    pdbid,
+    _In_ JET_GRBIT      grbit )
 {
     JET_VALIDATE_SESID( sesid );
     JET_TRY( opCreateDatabase, JetCreateDatabaseExA( sesid, szFilename, pdbid, NULL, 0, grbit ) );
 }
 
 JET_ERR JET_API JetCreateDatabaseW(
-    __in JET_SESID      sesid,
-    __in JET_PCWSTR     wszFilename,
+    _In_ JET_SESID      sesid,
+    _In_ JET_PCWSTR     wszFilename,
     __in_opt JET_PCWSTR wszConnect,
-    __out JET_DBID *    pdbid,
-    __in JET_GRBIT      grbit )
+    _Out_ JET_DBID *    pdbid,
+    _In_ JET_GRBIT      grbit )
 {
     JET_VALIDATE_SESID( sesid );
     JET_TRY( opCreateDatabase, JetCreateDatabaseEx( sesid, wszFilename, pdbid, NULL, 0, grbit ) );
 }
 
 JET_ERR JET_API JetCreateDatabase2A(
-    __in JET_SESID              sesid,
-    __in JET_PCSTR              szFilename,
-    __in ULONG          cpgDatabaseSizeMax,
-    __out JET_DBID *            pdbid,
-    __in JET_GRBIT              grbit )
+    _In_ JET_SESID              sesid,
+    _In_ JET_PCSTR              szFilename,
+    _In_ ULONG          cpgDatabaseSizeMax,
+    _Out_ JET_DBID *            pdbid,
+    _In_ JET_GRBIT              grbit )
 {
     JET_VALIDATE_SESID( sesid );
     const JET_SETDBPARAM rgsetdbparam[] =
@@ -12540,11 +12540,11 @@ JET_ERR JET_API JetCreateDatabase2A(
 }
 
 JET_ERR JET_API JetCreateDatabase2W(
-    __in JET_SESID              sesid,
-    __in JET_PCWSTR             wszFilename,
-    __in ULONG          cpgDatabaseSizeMax,
-    __out JET_DBID *            pdbid,
-    __in JET_GRBIT              grbit )
+    _In_ JET_SESID              sesid,
+    _In_ JET_PCWSTR             wszFilename,
+    _In_ ULONG          cpgDatabaseSizeMax,
+    _Out_ JET_DBID *            pdbid,
+    _In_ JET_GRBIT              grbit )
 {
     JET_VALIDATE_SESID( sesid );
     const JET_SETDBPARAM rgsetdbparam[] =
@@ -12579,33 +12579,33 @@ JET_ERR JET_API JetCreateDatabase3W(
 }
 
 JET_ERR JET_API JetCreateDatabaseWithStreamingA(
-    __in JET_SESID              sesid,
-    __in JET_PCSTR              szDbFileName,
+    _In_ JET_SESID              sesid,
+    _In_ JET_PCSTR              szDbFileName,
     _Reserved_ JET_PCSTR        szSLVFileName,
     _Reserved_ JET_PCSTR        szSLVRootName,
-    __in const ULONG    cpgDatabaseSizeMax,
-    __out JET_DBID *            pdbid,
-    __in JET_GRBIT              grbit )
+    _In_ const ULONG    cpgDatabaseSizeMax,
+    _Out_ JET_DBID *            pdbid,
+    _In_ JET_GRBIT              grbit )
 {
     return ErrERRCheck( JET_errFeatureNotAvailable );
 }
 
 JET_ERR JET_API JetCreateDatabaseWithStreamingW(
-    __in JET_SESID              sesid,
-    __in JET_PCWSTR             wszDbFileName,
+    _In_ JET_SESID              sesid,
+    _In_ JET_PCWSTR             wszDbFileName,
     _Reserved_ JET_PCWSTR           wszSLVFileName,
     _Reserved_ JET_PCWSTR           wszSLVRootName,
-    __in const ULONG    cpgDatabaseSizeMax,
-    __out JET_DBID *            pdbid,
-    __in JET_GRBIT              grbit )
+    _In_ const ULONG    cpgDatabaseSizeMax,
+    _Out_ JET_DBID *            pdbid,
+    _In_ JET_GRBIT              grbit )
 {
     return ErrERRCheck( JET_errFeatureNotAvailable );
 }
 
 LOCAL JET_ERR JetOpenDatabaseEx(
     JET_SESID       sesid,
-    __in PCWSTR     wszDatabase,
-    __in PCWSTR     wszConnect,
+    _In_ PCWSTR     wszDatabase,
+    _In_ PCWSTR     wszConnect,
     JET_DBID *      pdbid,
     JET_GRBIT       grbit )
 {
@@ -12640,11 +12640,11 @@ LOCAL JET_ERR JetOpenDatabaseEx(
 }
 
 LOCAL JET_ERR JetOpenDatabaseExA(
-    __in JET_SESID      sesid,
-    __in JET_PCSTR      szFilename,
+    _In_ JET_SESID      sesid,
+    _In_ JET_PCSTR      szFilename,
     __in_opt JET_PCSTR  szConnect,
-    __out JET_DBID*     pdbid,
-    __in JET_GRBIT      grbit )
+    _Out_ JET_DBID*     pdbid,
+    _In_ JET_GRBIT      grbit )
 {
     ERR             err;
     CAutoWSZPATH    lwszDatabase;
@@ -12657,28 +12657,28 @@ LOCAL JET_ERR JetOpenDatabaseExA(
 }
 
 JET_ERR JET_API JetOpenDatabaseA(
-    __in JET_SESID      sesid,
-    __in JET_PCSTR      szFilename,
+    _In_ JET_SESID      sesid,
+    _In_ JET_PCSTR      szFilename,
     __in_opt JET_PCSTR  szConnect,
-    __out JET_DBID*     pdbid,
-    __in JET_GRBIT      grbit )
+    _Out_ JET_DBID*     pdbid,
+    _In_ JET_GRBIT      grbit )
 {
     JET_VALIDATE_SESID( sesid );
     JET_TRY( opOpenDatabase, JetOpenDatabaseExA( sesid, szFilename, szConnect, pdbid, grbit ) );
 }
 
 JET_ERR JET_API JetOpenDatabaseW(
-    __in JET_SESID      sesid,
-    __in JET_PCWSTR     wszFilename,
+    _In_ JET_SESID      sesid,
+    _In_ JET_PCWSTR     wszFilename,
     __in_opt JET_PCWSTR wszConnect,
-    __out JET_DBID*     pdbid,
-    __in JET_GRBIT      grbit )
+    _Out_ JET_DBID*     pdbid,
+    _In_ JET_GRBIT      grbit )
 {
     JET_VALIDATE_SESID( sesid );
     JET_TRY( opOpenDatabase, JetOpenDatabaseEx( sesid, wszFilename, wszConnect, pdbid, grbit ) );
 }
 
-LOCAL JET_ERR JetCloseDatabaseEx(  __in JET_SESID sesid,  __in JET_DBID dbid, __in JET_GRBIT grbit )
+LOCAL JET_ERR JetCloseDatabaseEx(  _In_ JET_SESID sesid,  _In_ JET_DBID dbid, _In_ JET_GRBIT grbit )
 {
     APICALL_SESID   apicall( opCloseDatabase );
 
@@ -12701,7 +12701,7 @@ LOCAL JET_ERR JetCloseDatabaseEx(  __in JET_SESID sesid,  __in JET_DBID dbid, __
 
     return apicall.ErrResult();
 }
-JET_ERR JET_API JetCloseDatabase( __in JET_SESID sesid, __in JET_DBID dbid, __in JET_GRBIT grbit )
+JET_ERR JET_API JetCloseDatabase( _In_ JET_SESID sesid, _In_ JET_DBID dbid, _In_ JET_GRBIT grbit )
 {
     JET_VALIDATE_SESID( sesid );
     JET_TRY( opCloseDatabase, JetCloseDatabaseEx( sesid, dbid, grbit ) );
@@ -12709,11 +12709,11 @@ JET_ERR JET_API JetCloseDatabase( __in JET_SESID sesid, __in JET_DBID dbid, __in
 
 
 LOCAL JET_ERR JetGetDatabaseInfoEx(
-    __in JET_SESID                  sesid,
-    __in JET_DBID                   dbid,
+    _In_ JET_SESID                  sesid,
+    _In_ JET_DBID                   dbid,
     __out_bcount( cbMax ) void *    pvResult,
-    __in ULONG              cbMax,
-    __in ULONG              InfoLevel )
+    _In_ ULONG              cbMax,
+    _In_ ULONG              InfoLevel )
 {
     APICALL_SESID   apicall( opGetDatabaseInfo );
 
@@ -12743,11 +12743,11 @@ LOCAL JET_ERR JetGetDatabaseInfoEx(
 }
 
 LOCAL JET_ERR JetGetDatabaseInfoExA(
-    __in JET_SESID                  sesid,
-    __in JET_DBID                   dbid,
+    _In_ JET_SESID                  sesid,
+    _In_ JET_DBID                   dbid,
     __out_bcount( cbMax ) void *    pvResult,
-    __in ULONG              cbMax,
-    __in ULONG              InfoLevel )
+    _In_ ULONG              cbMax,
+    _In_ ULONG              InfoLevel )
 {
     ERR         err     = JET_errSuccess;
     CAutoWSZFixedConversion lwsz;
@@ -12771,32 +12771,32 @@ LOCAL JET_ERR JetGetDatabaseInfoExA(
 }
 
 JET_ERR JET_API JetGetDatabaseInfoA(
-    __in JET_SESID                  sesid,
-    __in JET_DBID                   dbid,
+    _In_ JET_SESID                  sesid,
+    _In_ JET_DBID                   dbid,
     __out_bcount( cbMax ) void *    pvResult,
-    __in ULONG              cbMax,
-    __in ULONG              InfoLevel )
+    _In_ ULONG              cbMax,
+    _In_ ULONG              InfoLevel )
 {
     JET_VALIDATE_SESID( sesid );
     JET_TRY( opGetDatabaseInfo, JetGetDatabaseInfoExA( sesid, dbid, pvResult, cbMax, InfoLevel ) );
 }
 
 JET_ERR JET_API JetGetDatabaseInfoW(
-    __in JET_SESID                  sesid,
-    __in JET_DBID                   dbid,
+    _In_ JET_SESID                  sesid,
+    _In_ JET_DBID                   dbid,
     __out_bcount( cbMax ) void *    pvResult,
-    __in ULONG              cbMax,
-    __in ULONG              InfoLevel )
+    _In_ ULONG              cbMax,
+    _In_ ULONG              InfoLevel )
 {
     JET_VALIDATE_SESID( sesid );
     JET_TRY( opGetDatabaseInfo, JetGetDatabaseInfoEx( sesid, dbid, pvResult, cbMax, InfoLevel ) );
 }
 
 LOCAL JET_ERR JetGetDatabaseFileInfoEx(
-    __in JET_PCWSTR                 wszDatabaseName,
+    _In_ JET_PCWSTR                 wszDatabaseName,
     __out_bcount( cbMax ) void *    pvResult,
-    __in ULONG              cbMax,
-    __in ULONG              InfoLevel )
+    _In_ ULONG              cbMax,
+    _In_ ULONG              InfoLevel )
 {
     ERR             err                 = JET_errSuccess;
     IFileSystemAPI* pfsapi              = NULL;
@@ -13113,10 +13113,10 @@ HandleError:
 }
 
 LOCAL JET_ERR JetGetDatabaseFileInfoExA(
-    __in JET_PCSTR                  szDatabaseName,
+    _In_ JET_PCSTR                  szDatabaseName,
     __out_bcount( cbMax ) void *    pvResult,
-    __in ULONG              cbMax,
-    __in ULONG              InfoLevel )
+    _In_ ULONG              cbMax,
+    _In_ ULONG              InfoLevel )
 {
     ERR             err;
     CAutoWSZPATH    lszDatabaseName;
@@ -13205,9 +13205,9 @@ JET_ERR JET_API JetRemoveLogfileA(
 LOCAL
 JET_ERR
 JetBeginDatabaseIncrementalReseedEx(
-    __in JET_INSTANCE   instance,
-    __in JET_PCWSTR     wszDatabase,
-    __in JET_GRBIT      grbit )
+    _In_ JET_INSTANCE   instance,
+    _In_ JET_PCWSTR     wszDatabase,
+    _In_ JET_GRBIT      grbit )
 {
     APICALL_INST    apicall( opBeginDatabaseIncrementalReseed );
 
@@ -13232,9 +13232,9 @@ JetBeginDatabaseIncrementalReseedEx(
 JET_ERR
 JET_API
 JetBeginDatabaseIncrementalReseedW(
-    __in JET_INSTANCE   instance,
-    __in JET_PCWSTR     wszDatabase,
-    __in JET_GRBIT      grbit )
+    _In_ JET_INSTANCE   instance,
+    _In_ JET_PCWSTR     wszDatabase,
+    _In_ JET_GRBIT      grbit )
 {
     JET_VALIDATE_INSTANCE( instance );
     JET_TRY( opBeginDatabaseIncrementalReseed, JetBeginDatabaseIncrementalReseedEx( instance, wszDatabase, grbit ) );
@@ -13243,9 +13243,9 @@ JetBeginDatabaseIncrementalReseedW(
 LOCAL
 JET_ERR
 JetBeginDatabaseIncrementalReseedExA(
-    __in JET_INSTANCE   instance,
-    __in JET_PCSTR      szDatabase,
-    __in JET_GRBIT      grbit )
+    _In_ JET_INSTANCE   instance,
+    _In_ JET_PCSTR      szDatabase,
+    _In_ JET_GRBIT      grbit )
 {
     ERR             err             = JET_errSuccess;
     CAutoWSZPATH    lwszDatabase;
@@ -13258,9 +13258,9 @@ JetBeginDatabaseIncrementalReseedExA(
 JET_ERR
 JET_API
 JetBeginDatabaseIncrementalReseedA(
-    __in JET_INSTANCE   instance,
-    __in JET_PCSTR      szDatabase,
-    __in JET_GRBIT      grbit )
+    _In_ JET_INSTANCE   instance,
+    _In_ JET_PCSTR      szDatabase,
+    _In_ JET_GRBIT      grbit )
 {
     JET_VALIDATE_INSTANCE( instance );
     JET_TRY( opBeginDatabaseIncrementalReseed, JetBeginDatabaseIncrementalReseedExA( instance, szDatabase, grbit ) );
@@ -13269,12 +13269,12 @@ JetBeginDatabaseIncrementalReseedA(
 LOCAL
 JET_ERR
 JetEndDatabaseIncrementalReseedEx(
-    __in JET_INSTANCE   instance,
-    __in JET_PCWSTR     wszDatabase,
-    __in ULONG  genMinRequired,
-    __in ULONG  genFirstDivergedLog,
-    __in ULONG  genMaxRequired,
-    __in JET_GRBIT      grbit )
+    _In_ JET_INSTANCE   instance,
+    _In_ JET_PCWSTR     wszDatabase,
+    _In_ ULONG  genMinRequired,
+    _In_ ULONG  genFirstDivergedLog,
+    _In_ ULONG  genMaxRequired,
+    _In_ JET_GRBIT      grbit )
 {
     APICALL_INST    apicall( opEndDatabaseIncrementalReseed );
 
@@ -13301,12 +13301,12 @@ JetEndDatabaseIncrementalReseedEx(
 JET_ERR
 JET_API
 JetEndDatabaseIncrementalReseedW(
-    __in JET_INSTANCE   instance,
-    __in JET_PCWSTR     wszDatabase,
-    __in ULONG  genMinRequired,
-    __in ULONG  genFirstDivergedLog,
-    __in ULONG  genMaxRequired,
-    __in JET_GRBIT      grbit )
+    _In_ JET_INSTANCE   instance,
+    _In_ JET_PCWSTR     wszDatabase,
+    _In_ ULONG  genMinRequired,
+    _In_ ULONG  genFirstDivergedLog,
+    _In_ ULONG  genMaxRequired,
+    _In_ JET_GRBIT      grbit )
 {
     JET_VALIDATE_INSTANCE( instance );
     JET_TRY( opEndDatabaseIncrementalReseed, JetEndDatabaseIncrementalReseedEx( instance, wszDatabase, genMinRequired, genFirstDivergedLog, genMaxRequired, grbit ) );
@@ -13315,12 +13315,12 @@ JetEndDatabaseIncrementalReseedW(
 LOCAL
 JET_ERR
 JetEndDatabaseIncrementalReseedExA(
-    __in JET_INSTANCE   instance,
-    __in JET_PCSTR      szDatabase,
-    __in ULONG  genMinRequired,
-    __in ULONG  genFirstDivergedLog,
-    __in ULONG  genMaxRequired,
-    __in JET_GRBIT      grbit )
+    _In_ JET_INSTANCE   instance,
+    _In_ JET_PCSTR      szDatabase,
+    _In_ ULONG  genMinRequired,
+    _In_ ULONG  genFirstDivergedLog,
+    _In_ ULONG  genMaxRequired,
+    _In_ JET_GRBIT      grbit )
 {
     ERR             err             = JET_errSuccess;
     CAutoWSZPATH    lwszDatabase;
@@ -13333,12 +13333,12 @@ JetEndDatabaseIncrementalReseedExA(
 JET_ERR
 JET_API
 JetEndDatabaseIncrementalReseedA(
-    __in JET_INSTANCE   instance,
-    __in JET_PCSTR      szDatabase,
-    __in ULONG  genMinRequired,
-    __in ULONG  genFirstDivergedLog,
-    __in ULONG  genMaxRequired,
-    __in JET_GRBIT      grbit )
+    _In_ JET_INSTANCE   instance,
+    _In_ JET_PCSTR      szDatabase,
+    _In_ ULONG  genMinRequired,
+    _In_ ULONG  genFirstDivergedLog,
+    _In_ ULONG  genMaxRequired,
+    _In_ JET_GRBIT      grbit )
 {
     JET_VALIDATE_INSTANCE( instance );
     JET_TRY( opEndDatabaseIncrementalReseed, JetEndDatabaseIncrementalReseedExA( instance, szDatabase, genMinRequired, genFirstDivergedLog, genMaxRequired, grbit ) );
@@ -13348,13 +13348,13 @@ JetEndDatabaseIncrementalReseedA(
 LOCAL
 JET_ERR
 JetPatchDatabasePagesEx(
-    __in JET_INSTANCE               instance,
-    __in JET_PCWSTR                 wszDatabase,
-    __in ULONG              pgnoStart,
-    __in ULONG              cpg,
+    _In_ JET_INSTANCE               instance,
+    _In_ JET_PCWSTR                 wszDatabase,
+    _In_ ULONG              pgnoStart,
+    _In_ ULONG              cpg,
     __in_bcount( cb ) const void *  pv,
-    __in ULONG              cb,
-    __in JET_GRBIT                  grbit )
+    _In_ ULONG              cb,
+    _In_ JET_GRBIT                  grbit )
 {
     APICALL_INST    apicall( opPatchDatabasePages );
 
@@ -13389,13 +13389,13 @@ JetPatchDatabasePagesEx(
 JET_ERR
 JET_API
 JetPatchDatabasePagesW(
-    __in JET_INSTANCE               instance,
-    __in JET_PCWSTR                 wszDatabase,
-    __in ULONG              pgnoStart,
-    __in ULONG              cpg,
+    _In_ JET_INSTANCE               instance,
+    _In_ JET_PCWSTR                 wszDatabase,
+    _In_ ULONG              pgnoStart,
+    _In_ ULONG              cpg,
     __in_bcount( cb ) const void *  pv,
-    __in ULONG              cb,
-    __in JET_GRBIT                  grbit )
+    _In_ ULONG              cb,
+    _In_ JET_GRBIT                  grbit )
 {
     JET_VALIDATE_INSTANCE( instance );
     JET_TRY( opPatchDatabasePages, JetPatchDatabasePagesEx( instance, wszDatabase, pgnoStart, cpg, pv, cb, grbit ) );
@@ -13404,13 +13404,13 @@ JetPatchDatabasePagesW(
 LOCAL
 JET_ERR
 JetPatchDatabasePagesExA(
-    __in JET_INSTANCE               instance,
-    __in JET_PCSTR                  szDatabase,
-    __in ULONG              pgnoStart,
-    __in ULONG              cpg,
+    _In_ JET_INSTANCE               instance,
+    _In_ JET_PCSTR                  szDatabase,
+    _In_ ULONG              pgnoStart,
+    _In_ ULONG              cpg,
     __in_bcount( cb ) const void *  pv,
-    __in ULONG              cb,
-    __in JET_GRBIT                  grbit )
+    _In_ ULONG              cb,
+    _In_ JET_GRBIT                  grbit )
 {
     ERR             err             = JET_errSuccess;
     CAutoWSZPATH    lwszDatabase;
@@ -13423,13 +13423,13 @@ JetPatchDatabasePagesExA(
 JET_ERR
 JET_API
 JetPatchDatabasePagesA(
-    __in JET_INSTANCE               instance,
-    __in JET_PCSTR                  szDatabase,
-    __in ULONG              pgnoStart,
-    __in ULONG              cpg,
+    _In_ JET_INSTANCE               instance,
+    _In_ JET_PCSTR                  szDatabase,
+    _In_ ULONG              pgnoStart,
+    _In_ ULONG              cpg,
     __in_bcount( cb ) const void *  pv,
-    __in ULONG              cb,
-    __in JET_GRBIT                  grbit )
+    _In_ ULONG              cb,
+    _In_ JET_GRBIT                  grbit )
 {
     JET_VALIDATE_INSTANCE( instance );
     JET_TRY( opPatchDatabasePages, JetPatchDatabasePagesExA( instance, szDatabase, pgnoStart, cpg, pv, cb, grbit ) );
@@ -13437,28 +13437,28 @@ JetPatchDatabasePagesA(
 
 
 JET_ERR JET_API JetGetDatabaseFileInfoA(
-    __in JET_PCSTR                  szDatabaseName,
+    _In_ JET_PCSTR                  szDatabaseName,
     __out_bcount( cbMax ) void *    pvResult,
-    __in ULONG              cbMax,
-    __in ULONG              InfoLevel )
+    _In_ ULONG              cbMax,
+    _In_ ULONG              InfoLevel )
 {
     JET_TRY( opGetDatabaseFileInfo, JetGetDatabaseFileInfoExA( szDatabaseName, pvResult, cbMax, InfoLevel ) );
 }
 
 JET_ERR JET_API JetGetDatabaseFileInfoW(
-    __in JET_PCWSTR                 wszDatabaseName,
+    _In_ JET_PCWSTR                 wszDatabaseName,
     __out_bcount( cbMax ) void *    pvResult,
-    __in ULONG              cbMax,
-    __in ULONG              InfoLevel )
+    _In_ ULONG              cbMax,
+    _In_ ULONG              InfoLevel )
 {
     JET_TRY( opGetDatabaseFileInfo, JetGetDatabaseFileInfoEx( wszDatabaseName, pvResult, cbMax, InfoLevel ) );
 }
 
 LOCAL JET_ERR JetGetLogFileInfoEx(
-    __in JET_PCWSTR                 wszLog,
+    _In_ JET_PCWSTR                 wszLog,
     __out_bcount( cbMax ) void *    pvResult,
-    __in const ULONG        cbMax,
-    __in const ULONG        InfoLevel )
+    _In_ const ULONG        cbMax,
+    _In_ const ULONG        InfoLevel )
 {
     ERR                 err                 = JET_errSuccess;
     LGFILEHDR *         plgfilehdr          = NULL;
@@ -13543,10 +13543,10 @@ HandleError:
 }
 
 JET_ERR JET_API JetGetLogFileInfoExA(
-    __in JET_PCSTR                  szLog,
+    _In_ JET_PCSTR                  szLog,
     __out_bcount( cbMax ) void *    pvResult,
-    __in const ULONG        cbMax,
-    __in const ULONG        InfoLevel )
+    _In_ const ULONG        cbMax,
+    _In_ const ULONG        InfoLevel )
 {
         ERR err = JET_errSuccess;
     CAutoWSZPATH    lwszLogFileName;
@@ -13557,19 +13557,19 @@ JET_ERR JET_API JetGetLogFileInfoExA(
 }
 
 JET_ERR JET_API JetGetLogFileInfoA(
-    __in JET_PCSTR                  szLog,
+    _In_ JET_PCSTR                  szLog,
     __out_bcount( cbMax ) void *    pvResult,
-    __in const ULONG        cbMax,
-    __in const ULONG        InfoLevel )
+    _In_ const ULONG        cbMax,
+    _In_ const ULONG        InfoLevel )
 {
     JET_TRY( opGetLogFileInfo, JetGetLogFileInfoExA( szLog, pvResult, cbMax, InfoLevel ) );
 }
 
 JET_ERR JET_API JetGetLogFileInfoW(
-    __in JET_PCWSTR                 wszLog,
+    _In_ JET_PCWSTR                 wszLog,
     __out_bcount( cbMax ) void *    pvResult,
-    __in const ULONG        cbMax,
-    __in const ULONG        InfoLevel )
+    _In_ const ULONG        cbMax,
+    _In_ const ULONG        InfoLevel )
 {
     JET_TRY( opGetLogFileInfo, JetGetLogFileInfoEx( wszLog, pvResult, cbMax, InfoLevel ) );
 }
@@ -13768,11 +13768,11 @@ HandleError:
 
 JET_ERR JET_API JetGetPageInfo(
     __in_bcount( cbData ) void * const          pvPages,        //  raw page data
-    __in ULONG                          cbData,         //  size of raw page data
+    _In_ ULONG                          cbData,         //  size of raw page data
     __inout_bcount( cbPageInfo ) JET_PAGEINFO * rgPageInfo,     //  array of pageinfo structures
-    __in ULONG                          cbPageInfo,     //  length of buffer for pageinfo array
-    __in JET_GRBIT                              grbit,          //  options
-    __in ULONG                          ulInfoLevel )   //  info level
+    _In_ ULONG                          cbPageInfo,     //  length of buffer for pageinfo array
+    _In_ JET_GRBIT                              grbit,          //  options
+    _In_ ULONG                          ulInfoLevel )   //  info level
 {
     // only support JET_PageInfo, use JetGetPageInfo2() for more levels
     if ( JET_PageInfo != ulInfoLevel )
@@ -13785,11 +13785,11 @@ JET_ERR JET_API JetGetPageInfo(
 
 JET_ERR JET_API JetGetPageInfo2(
     __in_bcount( cbData ) void * const          pvPages,        //  raw page data
-    __in ULONG                          cbData,         //  size of raw page data
+    _In_ ULONG                          cbData,         //  size of raw page data
     __inout_bcount( cbPageInfo ) void * const   rgPageInfo,     //  array of pageinfo structures
-    __in ULONG                          cbPageInfo,     //  length of buffer for pageinfo array
-    __in JET_GRBIT                              grbit,          //  options
-    __in ULONG                          ulInfoLevel )   //  info level
+    _In_ ULONG                          cbPageInfo,     //  length of buffer for pageinfo array
+    _In_ JET_GRBIT                              grbit,          //  options
+    _In_ ULONG                          ulInfoLevel )   //  info level
 {
     JET_TRY( opGetPageInfo, JetGetPageInfoEx( pvPages, cbData, rgPageInfo, cbPageInfo, grbit, ulInfoLevel ) );
 }
@@ -13797,14 +13797,14 @@ JET_ERR JET_API JetGetPageInfo2(
 LOCAL
 JET_ERR
 JetGetDatabasePagesEx(
-    __in JET_SESID                              sesid,
-    __in JET_DBID                               dbid,
-    __in ULONG                          pgnoStart,
-    __in ULONG                          cpg,
+    _In_ JET_SESID                              sesid,
+    _In_ JET_DBID                               dbid,
+    _In_ ULONG                          pgnoStart,
+    _In_ ULONG                          cpg,
     __out_bcount_part( cb, *pcbActual ) void *  pv,
-    __in ULONG                          cb,
-    __out ULONG *                       pcbActual,
-    __in JET_GRBIT                              grbit )
+    _In_ ULONG                          cb,
+    _Out_ ULONG *                       pcbActual,
+    _In_ JET_GRBIT                              grbit )
 {
     APICALL_SESID   apicall( opGetDatabasePages );
 
@@ -13842,14 +13842,14 @@ JetGetDatabasePagesEx(
 JET_ERR
 JET_API
 JetGetDatabasePages(
-    __in JET_SESID                              sesid,
-    __in JET_DBID                               dbid,
-    __in ULONG                          pgnoStart,
-    __in ULONG                          cpg,
+    _In_ JET_SESID                              sesid,
+    _In_ JET_DBID                               dbid,
+    _In_ ULONG                          pgnoStart,
+    _In_ ULONG                          cpg,
     __out_bcount_part( cb, *pcbActual ) void *  pv,
-    __in ULONG                          cb,
-    __out ULONG *                       pcbActual,
-    __in JET_GRBIT                              grbit )
+    _In_ ULONG                          cb,
+    _Out_ ULONG *                       pcbActual,
+    _In_ JET_GRBIT                              grbit )
 {
     JET_VALIDATE_SESID( sesid );
     JET_TRY( opGetDatabasePages, JetGetDatabasePagesEx( sesid, dbid, pgnoStart, cpg, pv, cb, pcbActual, grbit ) );
@@ -13858,14 +13858,14 @@ JetGetDatabasePages(
 JET_ERR
 JET_API
 JetOnlinePatchDatabasePageEx(
-    __in JET_SESID                              sesid,
-    __in JET_DBID                               dbid,
-    __in ULONG                          pgno,
+    _In_ JET_SESID                              sesid,
+    _In_ JET_DBID                               dbid,
+    _In_ ULONG                          pgno,
     __in_bcount(cbToken)    const void *        pvToken,
-    __in ULONG                          cbToken,
+    _In_ ULONG                          cbToken,
     __in_bcount(cbData) const void *            pvData,
-    __in ULONG                          cbData,
-    __in JET_GRBIT                              grbit )
+    _In_ ULONG                          cbData,
+    _In_ JET_GRBIT                              grbit )
 {
     APICALL_SESID   apicall( opOnlinePatchDatabasePage );
 
@@ -13902,14 +13902,14 @@ JetOnlinePatchDatabasePageEx(
 JET_ERR
 JET_API
 JetOnlinePatchDatabasePage(
-    __in JET_SESID                              sesid,
-    __in JET_DBID                               dbid,
-    __in ULONG                          pgno,
+    _In_ JET_SESID                              sesid,
+    _In_ JET_DBID                               dbid,
+    _In_ ULONG                          pgno,
     __in_bcount(cbToken)    const void *        pvToken,
-    __in ULONG                          cbToken,
+    _In_ ULONG                          cbToken,
     __in_bcount(cbData) const void *            pvData,
-    __in ULONG                          cbData,
-    __in JET_GRBIT                              grbit )
+    _In_ ULONG                          cbData,
+    _In_ JET_GRBIT                              grbit )
 {
     JET_VALIDATE_SESID( sesid );
     JET_TRY( opOnlinePatchDatabasePage, JetOnlinePatchDatabasePageEx( sesid, dbid, pgno, pvToken, cbToken, pvData, cbData, grbit ) );
@@ -13917,12 +13917,12 @@ JetOnlinePatchDatabasePage(
 
 
 LOCAL JET_ERR JetCreateTableEx(
-    __in JET_SESID      sesid,
-    __in JET_DBID       dbid,
-    __in JET_PCSTR      szTableName,
-    __in ULONG  lPages,
-    __in ULONG  lDensity,
-    __out JET_TABLEID * ptableid )
+    _In_ JET_SESID      sesid,
+    _In_ JET_DBID       dbid,
+    _In_ JET_PCSTR      szTableName,
+    _In_ ULONG  lPages,
+    _In_ ULONG  lDensity,
+    _Out_ JET_TABLEID * ptableid )
 {
     APICALL_SESID       apicall( opCreateTable );
     JET_TABLECREATE5_A  tablecreate =
@@ -13977,12 +13977,12 @@ LOCAL JET_ERR JetCreateTableEx(
 }
 
 LOCAL JET_ERR JetCreateTableExW(
-    __in JET_SESID      sesid,
-    __in JET_DBID       dbid,
-    __in JET_PCWSTR     wszTableName,
-    __in ULONG  lPages,
-    __in ULONG  lDensity,
-    __out JET_TABLEID * ptableid )
+    _In_ JET_SESID      sesid,
+    _In_ JET_DBID       dbid,
+    _In_ JET_PCWSTR     wszTableName,
+    _In_ ULONG  lPages,
+    _In_ ULONG  lDensity,
+    _Out_ JET_TABLEID * ptableid )
 {
     ERR             err             = JET_errSuccess;
     CAutoSZDDL      lszTableName;
@@ -13993,24 +13993,24 @@ LOCAL JET_ERR JetCreateTableExW(
 }
 
 JET_ERR JET_API JetCreateTableA(
-    __in JET_SESID      sesid,
-    __in JET_DBID       dbid,
-    __in JET_PCSTR      szTableName,
-    __in ULONG  lPages,
-    __in ULONG  lDensity,
-    __out JET_TABLEID * ptableid )
+    _In_ JET_SESID      sesid,
+    _In_ JET_DBID       dbid,
+    _In_ JET_PCSTR      szTableName,
+    _In_ ULONG  lPages,
+    _In_ ULONG  lDensity,
+    _Out_ JET_TABLEID * ptableid )
 {
     JET_VALIDATE_SESID( sesid );
     JET_TRY( opCreateTable, JetCreateTableEx( sesid, dbid, szTableName, lPages, lDensity, ptableid ) );
 }
 
 JET_ERR JET_API JetCreateTableW(
-    __in JET_SESID      sesid,
-    __in JET_DBID       dbid,
-    __in JET_PCWSTR     wszTableName,
-    __in ULONG  lPages,
-    __in ULONG  lDensity,
-    __out JET_TABLEID * ptableid )
+    _In_ JET_SESID      sesid,
+    _In_ JET_DBID       dbid,
+    _In_ JET_PCWSTR     wszTableName,
+    _In_ ULONG  lPages,
+    _In_ ULONG  lDensity,
+    _Out_ JET_TABLEID * ptableid )
 {
     JET_VALIDATE_SESID( sesid );
     JET_TRY( opCreateTable, JetCreateTableExW( sesid, dbid, wszTableName, lPages, lDensity, ptableid ) );
@@ -14833,8 +14833,8 @@ C_ASSERT( sizeof(JET_TABLECREATE2_A) != sizeof(JET_TABLECREATE3_W) );
 C_ASSERT( sizeof(JET_TABLECREATE2_W) != sizeof(JET_TABLECREATE3_A) );
 
 LOCAL JET_ERR JetCreateTableColumnIndexEx(
-    __in JET_SESID                  sesid,
-    __in JET_DBID                   dbid,
+    _In_ JET_SESID                  sesid,
+    _In_ JET_DBID                   dbid,
     __inout JET_TABLECREATE5_A *    ptablecreate )
 {
     JET_ERR err;
@@ -14883,8 +14883,8 @@ HandleError:
 }
 
 LOCAL JET_ERR JetCreateTableColumnIndexEx4(
-    __in JET_SESID                  sesid,
-    __in JET_DBID                   dbid,
+    _In_ JET_SESID                  sesid,
+    _In_ JET_DBID                   dbid,
     __inout JET_TABLECREATE4_A *    ptablecreate )
 {
     ERR err = JET_errSuccess;
@@ -14901,8 +14901,8 @@ LOCAL JET_ERR JetCreateTableColumnIndexEx4(
 }
 
 LOCAL JET_ERR JetCreateTableColumnIndexEx3(
-    __in JET_SESID                  sesid,
-    __in JET_DBID                   dbid,
+    _In_ JET_SESID                  sesid,
+    _In_ JET_DBID                   dbid,
     __inout JET_TABLECREATE3_A *    ptablecreate )
 {
     ERR err = JET_errSuccess;
@@ -14919,8 +14919,8 @@ LOCAL JET_ERR JetCreateTableColumnIndexEx3(
 }
 
 LOCAL JET_ERR JetCreateTableColumnIndexEx2(
-    __in JET_SESID                  sesid,
-    __in JET_DBID                   dbid,
+    _In_ JET_SESID                  sesid,
+    _In_ JET_DBID                   dbid,
     __inout JET_TABLECREATE2_A *    ptablecreate )
 {
     ERR err = JET_errSuccess;
@@ -14937,8 +14937,8 @@ LOCAL JET_ERR JetCreateTableColumnIndexEx2(
 }
 
 LOCAL JET_ERR JetCreateTableColumnIndexExOLD(
-    __in JET_SESID              sesid,
-    __in JET_DBID               dbid,
+    _In_ JET_SESID              sesid,
+    _In_ JET_DBID               dbid,
     __inout JET_TABLECREATE_A * ptablecreate )
 {
     Assert( ptablecreate );
@@ -14977,14 +14977,14 @@ LOCAL JET_ERR JetCreateTableColumnIndexExOLD(
 }
 
 LOCAL JET_ERR JetCreateTableColumnIndexEx2W(
-    __in JET_SESID              sesid,
-    __in JET_DBID               dbid,
+    _In_ JET_SESID              sesid,
+    _In_ JET_DBID               dbid,
     __inout JET_TABLECREATE2_W *    ptablecreate );
 
 
 LOCAL JET_ERR JetCreateTableColumnIndexExW(
-    __in JET_SESID              sesid,
-    __in JET_DBID               dbid,
+    _In_ JET_SESID              sesid,
+    _In_ JET_DBID               dbid,
     __inout JET_TABLECREATE_W * ptablecreate )
 {
     Assert( ptablecreate );
@@ -15023,8 +15023,8 @@ LOCAL JET_ERR JetCreateTableColumnIndexExW(
 }
 
 JET_ERR JET_API JetCreateTableColumnIndexA(
-    __in JET_SESID              sesid,
-    __in JET_DBID               dbid,
+    _In_ JET_SESID              sesid,
+    _In_ JET_DBID               dbid,
     __inout JET_TABLECREATE_A * ptablecreate )
 {
     JET_VALIDATE_SESID( sesid );
@@ -15032,8 +15032,8 @@ JET_ERR JET_API JetCreateTableColumnIndexA(
 }
 
 JET_ERR JET_API JetCreateTableColumnIndexW(
-    __in JET_SESID              sesid,
-    __in JET_DBID               dbid,
+    _In_ JET_SESID              sesid,
+    _In_ JET_DBID               dbid,
     __inout JET_TABLECREATE_W * ptablecreate )
 {
     JET_VALIDATE_SESID( sesid );
@@ -15553,14 +15553,14 @@ CAutoTABLECREATE5::~CAutoTABLECREATE5()
 }
 
 JET_ERR JET_API JetCreateTableColumnIndexEx3W(
-    __in JET_SESID              sesid,
-    __in JET_DBID               dbid,
+    _In_ JET_SESID              sesid,
+    _In_ JET_DBID               dbid,
     __inout JET_TABLECREATE3_W *    ptablecreate );
 
 
 LOCAL JET_ERR JetCreateTableColumnIndexEx2W(
-    __in JET_SESID              sesid,
-    __in JET_DBID               dbid,
+    _In_ JET_SESID              sesid,
+    _In_ JET_DBID               dbid,
     __inout JET_TABLECREATE2_W *    ptablecreate )
 {
     ERR                 err             = JET_errSuccess;
@@ -15576,8 +15576,8 @@ LOCAL JET_ERR JetCreateTableColumnIndexEx2W(
 }
 
 JET_ERR JET_API JetCreateTableColumnIndex2(
-    __in JET_SESID                  sesid,
-    __in JET_DBID                   dbid,
+    _In_ JET_SESID                  sesid,
+    _In_ JET_DBID                   dbid,
     __inout JET_TABLECREATE2_A *    ptablecreate )
 {
     JET_VALIDATE_SESID( sesid );
@@ -15585,8 +15585,8 @@ JET_ERR JET_API JetCreateTableColumnIndex2(
 }
 
 JET_ERR JET_API JetCreateTableColumnIndex2W(
-    __in JET_SESID                  sesid,
-    __in JET_DBID                   dbid,
+    _In_ JET_SESID                  sesid,
+    _In_ JET_DBID                   dbid,
     __inout JET_TABLECREATE2_W *    ptablecreate )
 {
     JET_VALIDATE_SESID( sesid );
@@ -15594,8 +15594,8 @@ JET_ERR JET_API JetCreateTableColumnIndex2W(
 }
 
 JET_ERR JET_API JetCreateTableColumnIndex3A(
-    __in JET_SESID                  sesid,
-    __in JET_DBID                   dbid,
+    _In_ JET_SESID                  sesid,
+    _In_ JET_DBID                   dbid,
     __inout JET_TABLECREATE3_A *    ptablecreate )
 {
     JET_VALIDATE_SESID( sesid );
@@ -15603,8 +15603,8 @@ JET_ERR JET_API JetCreateTableColumnIndex3A(
 }
 
 JET_ERR JET_API JetCreateTableColumnIndexEx3W(
-    __in JET_SESID                  sesid,
-    __in JET_DBID                   dbid,
+    _In_ JET_SESID                  sesid,
+    _In_ JET_DBID                   dbid,
     __inout JET_TABLECREATE3_W *    ptablecreate )
 {
     ERR                 err             = JET_errSuccess;
@@ -15621,8 +15621,8 @@ HandleError:
 }
 
 JET_ERR JET_API JetCreateTableColumnIndex3W(
-    __in JET_SESID              sesid,
-    __in JET_DBID               dbid,
+    _In_ JET_SESID              sesid,
+    _In_ JET_DBID               dbid,
     __inout JET_TABLECREATE3_W *    ptablecreate )
 {
     JET_VALIDATE_SESID( sesid );
@@ -15630,8 +15630,8 @@ JET_ERR JET_API JetCreateTableColumnIndex3W(
 }
 
 JET_ERR JET_API JetCreateTableColumnIndex4A(
-    __in JET_SESID                  sesid,
-    __in JET_DBID                   dbid,
+    _In_ JET_SESID                  sesid,
+    _In_ JET_DBID                   dbid,
     __inout JET_TABLECREATE4_A *    ptablecreate )
 {
     JET_VALIDATE_SESID( sesid );
@@ -15639,8 +15639,8 @@ JET_ERR JET_API JetCreateTableColumnIndex4A(
 }
 
 LOCAL JET_ERR JetCreateTableColumnIndexEx4W(
-    __in JET_SESID              sesid,
-    __in JET_DBID               dbid,
+    _In_ JET_SESID              sesid,
+    _In_ JET_DBID               dbid,
     __inout JET_TABLECREATE4_W *    ptablecreate )
 {
     ERR                 err             = JET_errSuccess;
@@ -15657,8 +15657,8 @@ HandleError:
 }
 
 JET_ERR JET_API JetCreateTableColumnIndex4W(
-    __in JET_SESID                  sesid,
-    __in JET_DBID                   dbid,
+    _In_ JET_SESID                  sesid,
+    _In_ JET_DBID                   dbid,
     __inout JET_TABLECREATE4_W *    ptablecreate )
 {
     JET_VALIDATE_SESID( sesid );
@@ -15666,8 +15666,8 @@ JET_ERR JET_API JetCreateTableColumnIndex4W(
 }
 
 JET_ERR JET_API JetCreateTableColumnIndex5A(
-    __in JET_SESID                  sesid,
-    __in JET_DBID                   dbid,
+    _In_ JET_SESID                  sesid,
+    _In_ JET_DBID                   dbid,
     __inout JET_TABLECREATE5_A *    ptablecreate )
 {
     JET_VALIDATE_SESID( sesid );
@@ -15675,8 +15675,8 @@ JET_ERR JET_API JetCreateTableColumnIndex5A(
 }
 
 LOCAL JET_ERR JetCreateTableColumnIndexEx5W(
-    __in JET_SESID              sesid,
-    __in JET_DBID               dbid,
+    _In_ JET_SESID              sesid,
+    _In_ JET_DBID               dbid,
     __inout JET_TABLECREATE5_W *    ptablecreate )
 {
     ERR                 err             = JET_errSuccess;
@@ -15693,15 +15693,15 @@ HandleError:
 }
 
 JET_ERR JET_API JetCreateTableColumnIndex5W(
-    __in JET_SESID                  sesid,
-    __in JET_DBID                   dbid,
+    _In_ JET_SESID                  sesid,
+    _In_ JET_DBID                   dbid,
     __inout JET_TABLECREATE5_W *    ptablecreate )
 {
     JET_VALIDATE_SESID( sesid );
     JET_TRY( opCreateTableColumnIndex, JetCreateTableColumnIndexEx5W( sesid, dbid, ptablecreate ) );
 }
 
-LOCAL JET_ERR JetDeleteTableEx( __in JET_SESID sesid, __in JET_DBID dbid, __in JET_PCSTR szName )
+LOCAL JET_ERR JetDeleteTableEx( _In_ JET_SESID sesid, _In_ JET_DBID dbid, _In_ JET_PCSTR szName )
 {
     APICALL_SESID   apicall( opDeleteTable );
 
@@ -15726,7 +15726,7 @@ LOCAL JET_ERR JetDeleteTableEx( __in JET_SESID sesid, __in JET_DBID dbid, __in J
     return apicall.ErrResult();
 }
 
-LOCAL JET_ERR JetDeleteTableExW( __in JET_SESID sesid, __in JET_DBID dbid, __in JET_PCWSTR wszName )
+LOCAL JET_ERR JetDeleteTableExW( _In_ JET_SESID sesid, _In_ JET_DBID dbid, _In_ JET_PCWSTR wszName )
 {
     ERR         err             = JET_errSuccess;
     CAutoSZDDL  lszName;
@@ -15736,23 +15736,23 @@ LOCAL JET_ERR JetDeleteTableExW( __in JET_SESID sesid, __in JET_DBID dbid, __in 
     return JetDeleteTableEx( sesid, dbid, lszName );
 }
 
-JET_ERR JET_API JetDeleteTableA( __in JET_SESID sesid, __in JET_DBID dbid, __in JET_PCSTR szName )
+JET_ERR JET_API JetDeleteTableA( _In_ JET_SESID sesid, _In_ JET_DBID dbid, _In_ JET_PCSTR szName )
 {
     JET_VALIDATE_SESID( sesid );
     JET_TRY( opDeleteTable, JetDeleteTableEx( sesid, dbid, szName ) );
 }
 
-JET_ERR JET_API JetDeleteTableW( __in JET_SESID sesid, __in JET_DBID dbid, __in JET_PCWSTR wszName )
+JET_ERR JET_API JetDeleteTableW( _In_ JET_SESID sesid, _In_ JET_DBID dbid, _In_ JET_PCWSTR wszName )
 {
     JET_VALIDATE_SESID( sesid );
     JET_TRY( opDeleteTable, JetDeleteTableExW( sesid, dbid, wszName ) );
 }
 
 LOCAL JET_ERR JetRenameTableEx(
-    __in JET_SESID  sesid,
-    __in JET_DBID   dbid,
-    __in JET_PCSTR  szName,
-    __in JET_PCSTR  szNameNew )
+    _In_ JET_SESID  sesid,
+    _In_ JET_DBID   dbid,
+    _In_ JET_PCSTR  szName,
+    _In_ JET_PCSTR  szNameNew )
 {
     APICALL_SESID   apicall( opRenameTable );
 
@@ -15781,10 +15781,10 @@ LOCAL JET_ERR JetRenameTableEx(
 }
 
 LOCAL JET_ERR JetRenameTableExW(
-    __in JET_SESID  sesid,
-    __in JET_DBID   dbid,
-    __in JET_PCWSTR wszName,
-    __in JET_PCWSTR wszNameNew )
+    _In_ JET_SESID  sesid,
+    _In_ JET_DBID   dbid,
+    _In_ JET_PCWSTR wszName,
+    _In_ JET_PCWSTR wszNameNew )
 {
     ERR         err;
     CAutoSZDDL  lszName;
@@ -15797,20 +15797,20 @@ LOCAL JET_ERR JetRenameTableExW(
 }
 
 JET_ERR JET_API JetRenameTableA(
-    __in JET_SESID  sesid,
-    __in JET_DBID   dbid,
-    __in JET_PCSTR  szName,
-    __in JET_PCSTR  szNameNew )
+    _In_ JET_SESID  sesid,
+    _In_ JET_DBID   dbid,
+    _In_ JET_PCSTR  szName,
+    _In_ JET_PCSTR  szNameNew )
 {
     JET_VALIDATE_SESID( sesid );
     JET_TRY( opRenameTable, JetRenameTableEx( sesid, dbid, szName, szNameNew ) );
 }
 
 JET_ERR JET_API JetRenameTableW(
-    __in JET_SESID  sesid,
-    __in JET_DBID   dbid,
-    __in JET_PCWSTR wszName,
-    __in JET_PCWSTR wszNameNew )
+    _In_ JET_SESID  sesid,
+    _In_ JET_DBID   dbid,
+    _In_ JET_PCWSTR wszName,
+    _In_ JET_PCWSTR wszNameNew )
 {
     JET_VALIDATE_SESID( sesid );
     JET_TRY( opRenameTable, JetRenameTableExW( sesid, dbid, wszName, wszNameNew ) );
@@ -15818,11 +15818,11 @@ JET_ERR JET_API JetRenameTableW(
 
 
 LOCAL JET_ERR JetRenameColumnEx(
-    __in JET_SESID      sesid,
-    __in JET_TABLEID    tableid,
-    __in JET_PCSTR      szName,
-    __in JET_PCSTR      szNameNew,
-    __in JET_GRBIT      grbit )
+    _In_ JET_SESID      sesid,
+    _In_ JET_TABLEID    tableid,
+    _In_ JET_PCSTR      szName,
+    _In_ JET_PCSTR      szNameNew,
+    _In_ JET_GRBIT      grbit )
 {
     APICALL_SESID       apicall( opRenameColumn );
 
@@ -15853,11 +15853,11 @@ LOCAL JET_ERR JetRenameColumnEx(
 }
 
 LOCAL JET_ERR JetRenameColumnExW(
-    __in JET_SESID      sesid,
-    __in JET_TABLEID    tableid,
-    __in JET_PCWSTR     wszName,
-    __in JET_PCWSTR     wszNameNew,
-    __in JET_GRBIT      grbit )
+    _In_ JET_SESID      sesid,
+    _In_ JET_TABLEID    tableid,
+    _In_ JET_PCWSTR     wszName,
+    _In_ JET_PCWSTR     wszNameNew,
+    _In_ JET_GRBIT      grbit )
 {
 
     ERR         err;
@@ -15871,22 +15871,22 @@ LOCAL JET_ERR JetRenameColumnExW(
 }
 
 JET_ERR JET_API JetRenameColumnA(
-    __in JET_SESID      sesid,
-    __in JET_TABLEID    tableid,
-    __in JET_PCSTR      szName,
-    __in JET_PCSTR      szNameNew,
-    __in JET_GRBIT      grbit )
+    _In_ JET_SESID      sesid,
+    _In_ JET_TABLEID    tableid,
+    _In_ JET_PCSTR      szName,
+    _In_ JET_PCSTR      szNameNew,
+    _In_ JET_GRBIT      grbit )
 {
     JET_VALIDATE_SESID_TABLEID( sesid, tableid );
     JET_TRY( opRenameColumn, JetRenameColumnEx( sesid, tableid, szName, szNameNew, grbit ) );
 }
 
 JET_ERR JET_API JetRenameColumnW(
-    __in JET_SESID      sesid,
-    __in JET_TABLEID    tableid,
-    __in JET_PCWSTR     wszName,
-    __in JET_PCWSTR     wszNameNew,
-    __in JET_GRBIT      grbit )
+    _In_ JET_SESID      sesid,
+    _In_ JET_TABLEID    tableid,
+    _In_ JET_PCWSTR     wszName,
+    _In_ JET_PCWSTR     wszNameNew,
+    _In_ JET_GRBIT      grbit )
 {
     JET_VALIDATE_SESID_TABLEID( sesid, tableid );
     JET_TRY( opRenameColumn, JetRenameColumnExW( sesid, tableid, wszName, wszNameNew, grbit ) );
@@ -15894,12 +15894,12 @@ JET_ERR JET_API JetRenameColumnW(
 
 
 LOCAL JET_ERR JetAddColumnEx(
-    __in JET_SESID                              sesid,
-    __in JET_TABLEID                            tableid,
-    __in JET_PCSTR                              szColumnName,
-    __in const JET_COLUMNDEF *                  pcolumndef,
+    _In_ JET_SESID                              sesid,
+    _In_ JET_TABLEID                            tableid,
+    _In_ JET_PCSTR                              szColumnName,
+    _In_ const JET_COLUMNDEF *                  pcolumndef,
     __in_bcount_opt( cbDefault ) const void *   pvDefault,
-    __in ULONG                          cbDefault,
+    _In_ ULONG                          cbDefault,
     __out_opt JET_COLUMNID *                    pcolumnid )
 {
     APICALL_SESID       apicall( opAddColumn );
@@ -15942,12 +15942,12 @@ LOCAL JET_ERR JetAddColumnEx(
 }
 
 LOCAL JET_ERR JetAddColumnExW(
-    __in JET_SESID                              sesid,
-    __in JET_TABLEID                            tableid,
-    __in JET_PCWSTR                             wszColumnName,
-    __in const JET_COLUMNDEF *                  pcolumndef,
+    _In_ JET_SESID                              sesid,
+    _In_ JET_TABLEID                            tableid,
+    _In_ JET_PCWSTR                             wszColumnName,
+    _In_ const JET_COLUMNDEF *                  pcolumndef,
     __in_bcount_opt( cbDefault ) const void *   pvDefault,
-    __in ULONG                          cbDefault,
+    _In_ ULONG                          cbDefault,
     __out_opt JET_COLUMNID *                    pcolumnid )
 {
     ERR         err;
@@ -15959,12 +15959,12 @@ LOCAL JET_ERR JetAddColumnExW(
 }
 
 JET_ERR JET_API JetAddColumnA(
-    __in JET_SESID                              sesid,
-    __in JET_TABLEID                            tableid,
-    __in JET_PCSTR                              szColumnName,
-    __in const JET_COLUMNDEF *                  pcolumndef,
+    _In_ JET_SESID                              sesid,
+    _In_ JET_TABLEID                            tableid,
+    _In_ JET_PCSTR                              szColumnName,
+    _In_ const JET_COLUMNDEF *                  pcolumndef,
     __in_bcount_opt( cbDefault ) const void *   pvDefault,
-    __in ULONG                          cbDefault,
+    _In_ ULONG                          cbDefault,
     __out_opt JET_COLUMNID *                    pcolumnid )
 {
     JET_VALIDATE_SESID_TABLEID( sesid, tableid );
@@ -15972,12 +15972,12 @@ JET_ERR JET_API JetAddColumnA(
 }
 
 JET_ERR JET_API JetAddColumnW(
-    __in JET_SESID                              sesid,
-    __in JET_TABLEID                            tableid,
-    __in JET_PCWSTR                             wszColumnName,
-    __in const JET_COLUMNDEF *                  pcolumndef,
+    _In_ JET_SESID                              sesid,
+    _In_ JET_TABLEID                            tableid,
+    _In_ JET_PCWSTR                             wszColumnName,
+    _In_ const JET_COLUMNDEF *                  pcolumndef,
     __in_bcount_opt( cbDefault ) const void *   pvDefault,
-    __in ULONG                          cbDefault,
+    _In_ ULONG                          cbDefault,
     __out_opt JET_COLUMNID *                    pcolumnid )
 {
     JET_VALIDATE_SESID_TABLEID( sesid, tableid );
@@ -15986,10 +15986,10 @@ JET_ERR JET_API JetAddColumnW(
 
 
 LOCAL JET_ERR JetDeleteColumnEx(
-    __in JET_SESID          sesid,
-    __in JET_TABLEID        tableid,
-    __in JET_PCSTR          szColumnName,
-    __in const JET_GRBIT    grbit )
+    _In_ JET_SESID          sesid,
+    _In_ JET_TABLEID        tableid,
+    _In_ JET_PCSTR          szColumnName,
+    _In_ const JET_GRBIT    grbit )
 {
     APICALL_SESID   apicall( opDeleteColumn );
 
@@ -16017,10 +16017,10 @@ LOCAL JET_ERR JetDeleteColumnEx(
 }
 
 LOCAL JET_ERR JetDeleteColumnExW(
-    __in JET_SESID          sesid,
-    __in JET_TABLEID        tableid,
-    __in JET_PCWSTR         wszColumnName,
-    __in const JET_GRBIT    grbit )
+    _In_ JET_SESID          sesid,
+    _In_ JET_TABLEID        tableid,
+    _In_ JET_PCWSTR         wszColumnName,
+    _In_ const JET_GRBIT    grbit )
 {
     ERR         err             = JET_errSuccess;
     CAutoSZDDL  lszColumnName;
@@ -16031,48 +16031,48 @@ LOCAL JET_ERR JetDeleteColumnExW(
 }
 
 JET_ERR JET_API JetDeleteColumnA(
-    __in JET_SESID      sesid,
-    __in JET_TABLEID    tableid,
-    __in JET_PCSTR      szColumnName )
+    _In_ JET_SESID      sesid,
+    _In_ JET_TABLEID    tableid,
+    _In_ JET_PCSTR      szColumnName )
 {
     JET_VALIDATE_SESID_TABLEID( sesid, tableid );
     JET_TRY( opDeleteColumn, JetDeleteColumnEx( sesid, tableid, szColumnName, NO_GRBIT ) );
 }
 JET_ERR JET_API JetDeleteColumnW(
-    __in JET_SESID      sesid,
-    __in JET_TABLEID    tableid,
-    __in JET_PCWSTR     wszColumnName )
+    _In_ JET_SESID      sesid,
+    _In_ JET_TABLEID    tableid,
+    _In_ JET_PCWSTR     wszColumnName )
 {
     JET_VALIDATE_SESID_TABLEID( sesid, tableid );
     JET_TRY( opDeleteColumn, JetDeleteColumnExW( sesid, tableid, wszColumnName, NO_GRBIT ) );
 }
 JET_ERR JET_API JetDeleteColumn2A(
-    __in JET_SESID          sesid,
-    __in JET_TABLEID        tableid,
-    __in JET_PCSTR          szColumnName,
-    __in const JET_GRBIT    grbit )
+    _In_ JET_SESID          sesid,
+    _In_ JET_TABLEID        tableid,
+    _In_ JET_PCSTR          szColumnName,
+    _In_ const JET_GRBIT    grbit )
 {
     JET_VALIDATE_SESID_TABLEID( sesid, tableid );
     JET_TRY( opDeleteColumn, JetDeleteColumnEx( sesid, tableid, szColumnName, grbit ) );
 }
 JET_ERR JET_API JetDeleteColumn2W(
-    __in JET_SESID          sesid,
-    __in JET_TABLEID        tableid,
-    __in JET_PCWSTR         wszColumnName,
-    __in const JET_GRBIT    grbit )
+    _In_ JET_SESID          sesid,
+    _In_ JET_TABLEID        tableid,
+    _In_ JET_PCWSTR         wszColumnName,
+    _In_ const JET_GRBIT    grbit )
 {
     JET_VALIDATE_SESID_TABLEID( sesid, tableid );
     JET_TRY( opDeleteColumn, JetDeleteColumnExW( sesid, tableid, wszColumnName, grbit ) );
 }
 
 LOCAL JET_ERR JetSetColumnDefaultValueEx(
-    __in JET_SESID                      sesid,
-    __in JET_DBID                       dbid,
-    __in JET_PCSTR                      szTableName,
-    __in JET_PCSTR                      szColumnName,
+    _In_ JET_SESID                      sesid,
+    _In_ JET_DBID                       dbid,
+    _In_ JET_PCSTR                      szTableName,
+    _In_ JET_PCSTR                      szColumnName,
     __in_bcount( cbData ) const void *  pvData,
-    __in const ULONG            cbData,
-    __in const JET_GRBIT                grbit )
+    _In_ const ULONG            cbData,
+    _In_ const JET_GRBIT                grbit )
 {
     APICALL_SESID       apicall( opSetColumnDefaultValue );
 
@@ -16107,13 +16107,13 @@ LOCAL JET_ERR JetSetColumnDefaultValueEx(
 }
 
 LOCAL JET_ERR JetSetColumnDefaultValueExW(
-    __in JET_SESID                      sesid,
-    __in JET_DBID                       dbid,
-    __in JET_PCWSTR                     wszTableName,
-    __in JET_PCWSTR                     wszColumnName,
+    _In_ JET_SESID                      sesid,
+    _In_ JET_DBID                       dbid,
+    _In_ JET_PCWSTR                     wszTableName,
+    _In_ JET_PCWSTR                     wszColumnName,
     __in_bcount( cbData ) const void *  pvData,
-    __in const ULONG            cbData,
-    __in const JET_GRBIT                grbit )
+    _In_ const ULONG            cbData,
+    _In_ const JET_GRBIT                grbit )
 {
     ERR         err             = JET_errSuccess;
     CAutoSZDDL  lszTableName;
@@ -16126,36 +16126,36 @@ LOCAL JET_ERR JetSetColumnDefaultValueExW(
 }
 
 JET_ERR JET_API JetSetColumnDefaultValueA(
-    __in JET_SESID                      sesid,
-    __in JET_DBID                       dbid,
-    __in JET_PCSTR                      szTableName,
-    __in JET_PCSTR                      szColumnName,
+    _In_ JET_SESID                      sesid,
+    _In_ JET_DBID                       dbid,
+    _In_ JET_PCSTR                      szTableName,
+    _In_ JET_PCSTR                      szColumnName,
     __in_bcount( cbData ) const void *  pvData,
-    __in const ULONG            cbData,
-    __in const JET_GRBIT                grbit )
+    _In_ const ULONG            cbData,
+    _In_ const JET_GRBIT                grbit )
 {
     JET_VALIDATE_SESID( sesid );
     JET_TRY( opSetColumnDefaultValue, JetSetColumnDefaultValueEx( sesid, dbid, szTableName, szColumnName, pvData, cbData, grbit ) );
 }
 
 JET_ERR JET_API JetSetColumnDefaultValueW(
-    __in JET_SESID                      sesid,
-    __in JET_DBID                       dbid,
-    __in JET_PCWSTR                     wszTableName,
-    __in JET_PCWSTR                     wszColumnName,
+    _In_ JET_SESID                      sesid,
+    _In_ JET_DBID                       dbid,
+    _In_ JET_PCWSTR                     wszTableName,
+    _In_ JET_PCWSTR                     wszColumnName,
     __in_bcount( cbData ) const void *  pvData,
-    __in const ULONG            cbData,
-    __in const JET_GRBIT                grbit )
+    _In_ const ULONG            cbData,
+    _In_ const JET_GRBIT                grbit )
 {
     JET_VALIDATE_SESID( sesid );
     JET_TRY( opSetColumnDefaultValue, JetSetColumnDefaultValueExW( sesid, dbid, wszTableName, wszColumnName, pvData, cbData, grbit ) );
 }
 
 LOCAL JET_ERR JetCreateIndexEx(
-    __in JET_SESID                                   sesid,
-    __in JET_TABLEID                                 tableid,
+    _In_ JET_SESID                                   sesid,
+    _In_ JET_TABLEID                                 tableid,
     __in_ecount( cIndexCreate ) JET_INDEXCREATE3_A * pindexcreate,
-    __in ULONG                               cIndexCreate )
+    _In_ ULONG                               cIndexCreate )
 {
     APICALL_SESID   apicall( opCreateIndex );
 
@@ -16196,10 +16196,10 @@ HandleError:
 }
 
 LOCAL JET_ERR JetCreateIndexEx2(
-    __in JET_SESID                                   sesid,
-    __in JET_TABLEID                                 tableid,
+    _In_ JET_SESID                                   sesid,
+    _In_ JET_TABLEID                                 tableid,
     __in_ecount( cIndexCreate ) JET_INDEXCREATE2_A * pindexcreate,
-    __in ULONG                               cIndexCreate )
+    _In_ ULONG                               cIndexCreate )
 {
     ERR err = JET_errSuccess;
 
@@ -16217,10 +16217,10 @@ HandleError:
 }
 
 LOCAL JET_ERR JetCreateIndexEx2W(
-    __in JET_SESID                                  sesid,
-    __in JET_TABLEID                                tableid,
+    _In_ JET_SESID                                  sesid,
+    _In_ JET_TABLEID                                tableid,
     __in_ecount( cIndexCreate ) JET_INDEXCREATE2_W *    pindexcreate,
-    __in ULONG                              cIndexCreate )
+    _In_ ULONG                              cIndexCreate )
 {
     ERR                   err               = JET_errSuccess;
     JET_INDEXCREATE2_A  * rgindexcreateEngine       = NULL;
@@ -16264,10 +16264,10 @@ HandleError:
 
 
 JET_ERR JetCreateIndexEx1(
-    __in JET_SESID                                  sesid,
-    __in JET_TABLEID                                tableid,
+    _In_ JET_SESID                                  sesid,
+    _In_ JET_TABLEID                                tableid,
     __in_ecount( cIndexCreate ) JET_INDEXCREATE_A * pindexcreate,
-    __in ULONG                              cIndexCreate )
+    _In_ ULONG                              cIndexCreate )
 {
     ERR err = JET_errSuccess;
 
@@ -16286,10 +16286,10 @@ HandleError:
 
 
 LOCAL JET_ERR JetCreateIndexEx1W(
-    __in JET_SESID                                  sesid,
-    __in JET_TABLEID                                tableid,
+    _In_ JET_SESID                                  sesid,
+    _In_ JET_TABLEID                                tableid,
     __in_ecount( cIndexCreate ) JET_INDEXCREATE_W * pindexcreate,
-    __in ULONG                              cIndexCreate )
+    _In_ ULONG                              cIndexCreate )
 {
     ERR                   err               = JET_errSuccess;
     JET_INDEXCREATE2_A  * rgindexcreateEngine       = NULL;
@@ -16332,10 +16332,10 @@ HandleError:
 }
 
 LOCAL JET_ERR JetCreateIndexEx3W(
-    __in JET_SESID                                  sesid,
-    __in JET_TABLEID                                tableid,
+    _In_ JET_SESID                                  sesid,
+    _In_ JET_TABLEID                                tableid,
     __in_ecount( cIndexCreate ) JET_INDEXCREATE3_W *pindexcreate,
-    __in ULONG                              cIndexCreate )
+    _In_ ULONG                              cIndexCreate )
 {
     ERR                   err               = JET_errSuccess;
     JET_INDEXCREATE3_A  * rgindexcreateEngine       = NULL;
@@ -16380,13 +16380,13 @@ HandleError:
 }
 
 JET_ERR JET_API JetCreateIndexA(
-    __in JET_SESID                      sesid,
-    __in JET_TABLEID                    tableid,
-    __in JET_PCSTR                      szIndexName,
-    __in JET_GRBIT                      grbit,
+    _In_ JET_SESID                      sesid,
+    _In_ JET_TABLEID                    tableid,
+    _In_ JET_PCSTR                      szIndexName,
+    _In_ JET_GRBIT                      grbit,
     __in_bcount( cbKey ) const char *   szKey,
-    __in ULONG                  cbKey,
-    __in ULONG                  lDensity )
+    _In_ ULONG                  cbKey,
+    _In_ ULONG                  lDensity )
 {
     JET_INDEXCREATE2_A  idxcreate;
     JET_SPACEHINTS      idxjsh;
@@ -16415,13 +16415,13 @@ JET_ERR JET_API JetCreateIndexA(
 }
 
 JET_ERR JET_API JetCreateIndexW(
-    __in JET_SESID                      sesid,
-    __in JET_TABLEID                    tableid,
-    __in JET_PCWSTR                     wszIndexName,
-    __in JET_GRBIT                      grbit,
+    _In_ JET_SESID                      sesid,
+    _In_ JET_TABLEID                    tableid,
+    _In_ JET_PCWSTR                     wszIndexName,
+    _In_ JET_GRBIT                      grbit,
     __in_bcount( cbKey ) const WCHAR *  wszKey,
-    __in ULONG                  cbKey,
-    __in ULONG                  lDensity )
+    _In_ ULONG                  cbKey,
+    _In_ ULONG                  lDensity )
 {
     JET_INDEXCREATE_W   idxcreate;
 
@@ -16443,40 +16443,40 @@ JET_ERR JET_API JetCreateIndexW(
 }
 
 JET_ERR JET_API JetCreateIndex2A(
-    __in JET_SESID                                  sesid,
-    __in JET_TABLEID                                tableid,
+    _In_ JET_SESID                                  sesid,
+    _In_ JET_TABLEID                                tableid,
     __in_ecount( cIndexCreate ) JET_INDEXCREATE_A * pindexcreate,
-    __in ULONG                              cIndexCreate )
+    _In_ ULONG                              cIndexCreate )
 {
     JET_VALIDATE_SESID_TABLEID( sesid, tableid );
     JET_TRY( opCreateIndex, JetCreateIndexEx1( sesid, tableid, pindexcreate, cIndexCreate ) );
 }
 
 JET_ERR JET_API JetCreateIndex2W(
-    __in JET_SESID                                  sesid,
-    __in JET_TABLEID                                tableid,
+    _In_ JET_SESID                                  sesid,
+    _In_ JET_TABLEID                                tableid,
     __in_ecount( cIndexCreate ) JET_INDEXCREATE_W * pindexcreate,
-    __in ULONG                              cIndexCreate )
+    _In_ ULONG                              cIndexCreate )
 {
     JET_VALIDATE_SESID_TABLEID( sesid, tableid );
     JET_TRY( opCreateIndex, JetCreateIndexEx1W( sesid, tableid, pindexcreate, cIndexCreate ) );
 }
 
 JET_ERR JET_API JetCreateIndex3A(
-    __in JET_SESID                                  sesid,
-    __in JET_TABLEID                                tableid,
+    _In_ JET_SESID                                  sesid,
+    _In_ JET_TABLEID                                tableid,
     __in_ecount( cIndexCreate ) JET_INDEXCREATE2_A *pindexcreate,
-    __in ULONG                              cIndexCreate )
+    _In_ ULONG                              cIndexCreate )
 {
     JET_VALIDATE_SESID_TABLEID( sesid, tableid );
     JET_TRY( opCreateIndex, JetCreateIndexEx2( sesid, tableid, pindexcreate, cIndexCreate ) );
 }
 
 JET_ERR JET_API JetCreateIndex3W(
-    __in JET_SESID                                  sesid,
-    __in JET_TABLEID                                tableid,
+    _In_ JET_SESID                                  sesid,
+    _In_ JET_TABLEID                                tableid,
     __in_ecount( cIndexCreate ) JET_INDEXCREATE2_W *pindexcreate,
-    __in ULONG                              cIndexCreate )
+    _In_ ULONG                              cIndexCreate )
 {
     JET_VALIDATE_SESID_TABLEID( sesid, tableid );
     JET_TRY( opCreateIndex, JetCreateIndexEx2W( sesid, tableid, pindexcreate, cIndexCreate ) );
@@ -16484,20 +16484,20 @@ JET_ERR JET_API JetCreateIndex3W(
 
 
 JET_ERR JET_API JetCreateIndex4A(
-    __in JET_SESID                                  sesid,
-    __in JET_TABLEID                                tableid,
+    _In_ JET_SESID                                  sesid,
+    _In_ JET_TABLEID                                tableid,
     __in_ecount( cIndexCreate ) JET_INDEXCREATE3_A *pindexcreate,
-    __in ULONG                              cIndexCreate )
+    _In_ ULONG                              cIndexCreate )
 {
     JET_VALIDATE_SESID_TABLEID( sesid, tableid );
     JET_TRY( opCreateIndex, JetCreateIndexEx( sesid, tableid, pindexcreate, cIndexCreate ) );
 }
 
 JET_ERR JET_API JetCreateIndex4W(
-    __in JET_SESID                                  sesid,
-    __in JET_TABLEID                                tableid,
+    _In_ JET_SESID                                  sesid,
+    _In_ JET_TABLEID                                tableid,
     __in_ecount( cIndexCreate ) JET_INDEXCREATE3_W *pindexcreate,
-    __in ULONG                              cIndexCreate )
+    _In_ ULONG                              cIndexCreate )
 {
     JET_VALIDATE_SESID_TABLEID( sesid, tableid );
     JET_TRY( opCreateIndex, JetCreateIndexEx3W( sesid, tableid, pindexcreate, cIndexCreate ) );
@@ -16505,9 +16505,9 @@ JET_ERR JET_API JetCreateIndex4W(
 
 
 LOCAL JET_ERR JetDeleteIndexEx(
-    __in JET_SESID      sesid,
-    __in JET_TABLEID    tableid,
-    __in JET_PCSTR      szIndexName )
+    _In_ JET_SESID      sesid,
+    _In_ JET_TABLEID    tableid,
+    _In_ JET_PCSTR      szIndexName )
 {
     APICALL_SESID   apicall( opDeleteIndex );
 
@@ -16533,9 +16533,9 @@ LOCAL JET_ERR JetDeleteIndexEx(
 }
 
 LOCAL JET_ERR JetDeleteIndexExW(
-    __in JET_SESID      sesid,
-    __in JET_TABLEID    tableid,
-    __in JET_PCWSTR     wszIndexName )
+    _In_ JET_SESID      sesid,
+    _In_ JET_TABLEID    tableid,
+    _In_ JET_PCWSTR     wszIndexName )
 {
     ERR         err;
     CAutoSZDDL  lszIndexName;
@@ -16546,9 +16546,9 @@ LOCAL JET_ERR JetDeleteIndexExW(
 }
 
 JET_ERR JET_API JetDeleteIndexA(
-    __in JET_SESID      sesid,
-    __in JET_TABLEID    tableid,
-    __in JET_PCSTR      szIndexName )
+    _In_ JET_SESID      sesid,
+    _In_ JET_TABLEID    tableid,
+    _In_ JET_PCSTR      szIndexName )
 {
     JET_VALIDATE_SESID_TABLEID( sesid, tableid );
     JET_TRY( opDeleteIndex, JetDeleteIndexEx( sesid, tableid, szIndexName ) );
@@ -16556,15 +16556,15 @@ JET_ERR JET_API JetDeleteIndexA(
 
 
 JET_ERR JET_API JetDeleteIndexW(
-    __in JET_SESID      sesid,
-    __in JET_TABLEID    tableid,
-    __in JET_PCWSTR     wszIndexName )
+    _In_ JET_SESID      sesid,
+    _In_ JET_TABLEID    tableid,
+    _In_ JET_PCWSTR     wszIndexName )
 {
     JET_VALIDATE_SESID_TABLEID( sesid, tableid );
     JET_TRY( opDeleteIndex, JetDeleteIndexExW( sesid, tableid, wszIndexName ) );
 }
 
-LOCAL JET_ERR JetComputeStatsEx( __in JET_SESID sesid, __in JET_TABLEID tableid )
+LOCAL JET_ERR JetComputeStatsEx( _In_ JET_SESID sesid, _In_ JET_TABLEID tableid )
 {
     APICALL_SESID   apicall( opComputeStats );
 
@@ -16584,7 +16584,7 @@ LOCAL JET_ERR JetComputeStatsEx( __in JET_SESID sesid, __in JET_TABLEID tableid 
     return apicall.ErrResult();
 }
 
-JET_ERR JET_API JetComputeStats( __in JET_SESID sesid, __in JET_TABLEID tableid )
+JET_ERR JET_API JetComputeStats( _In_ JET_SESID sesid, _In_ JET_TABLEID tableid )
 {
     JET_VALIDATE_SESID_TABLEID( sesid, tableid );
     JET_TRY( opComputeStats, JetComputeStatsEx( sesid, tableid ) );
@@ -16592,8 +16592,8 @@ JET_ERR JET_API JetComputeStats( __in JET_SESID sesid, __in JET_TABLEID tableid 
 
 
 LOCAL JET_ERR JetAttachDatabaseEx(
-    __in JET_SESID                                              sesid,
-    __in JET_PCWSTR                                             wszDbFileName,
+    _In_ JET_SESID                                              sesid,
+    _In_ JET_PCWSTR                                             wszDbFileName,
     _In_reads_opt_( csetdbparam ) const JET_SETDBPARAM * const  rgsetdbparam,
     _In_ const ULONG                                    csetdbparam,
     _In_ const JET_GRBIT                                        grbit )
@@ -16621,8 +16621,8 @@ LOCAL JET_ERR JetAttachDatabaseEx(
 }
 
 LOCAL JET_ERR JetAttachDatabaseExA(
-    __in JET_SESID                                              sesid,
-    __in JET_PCSTR                                              szDbFileName,
+    _In_ JET_SESID                                              sesid,
+    _In_ JET_PCSTR                                              szDbFileName,
     _In_reads_opt_( csetdbparam ) const JET_SETDBPARAM * const  rgsetdbparam,
     _In_ const ULONG                                    csetdbparam,
     _In_ const JET_GRBIT                                        grbit )
@@ -16636,28 +16636,28 @@ LOCAL JET_ERR JetAttachDatabaseExA(
 }
 
 JET_ERR JET_API JetAttachDatabaseA(
-    __in JET_SESID  sesid,
-    __in JET_PCSTR  szFilename,
-    __in JET_GRBIT  grbit )
+    _In_ JET_SESID  sesid,
+    _In_ JET_PCSTR  szFilename,
+    _In_ JET_GRBIT  grbit )
 {
     JET_VALIDATE_SESID( sesid );
     JET_TRY( opAttachDatabase, JetAttachDatabaseExA( sesid, szFilename, NULL, 0, grbit ) );
 }
 
 JET_ERR JET_API JetAttachDatabaseW(
-    __in JET_SESID  sesid,
-    __in JET_PCWSTR wszFilename,
-    __in JET_GRBIT  grbit )
+    _In_ JET_SESID  sesid,
+    _In_ JET_PCWSTR wszFilename,
+    _In_ JET_GRBIT  grbit )
 {
     JET_VALIDATE_SESID( sesid );
     JET_TRY( opAttachDatabase, JetAttachDatabaseEx( sesid, wszFilename, NULL, 0, grbit ) );
 }
 
 JET_ERR JET_API JetAttachDatabase2A(
-    __in JET_SESID              sesid,
-    __in JET_PCSTR              szFilename,
-    __in const ULONG    cpgDatabaseSizeMax,
-    __in JET_GRBIT              grbit )
+    _In_ JET_SESID              sesid,
+    _In_ JET_PCSTR              szFilename,
+    _In_ const ULONG    cpgDatabaseSizeMax,
+    _In_ JET_GRBIT              grbit )
 {
     JET_VALIDATE_SESID( sesid );
     const JET_SETDBPARAM rgsetdbparam[] =
@@ -16668,10 +16668,10 @@ JET_ERR JET_API JetAttachDatabase2A(
 }
 
 JET_ERR JET_API JetAttachDatabase2W(
-    __in JET_SESID              sesid,
-    __in JET_PCWSTR             wszFilename,
-    __in const ULONG    cpgDatabaseSizeMax,
-    __in JET_GRBIT              grbit )
+    _In_ JET_SESID              sesid,
+    _In_ JET_PCWSTR             wszFilename,
+    _In_ const ULONG    cpgDatabaseSizeMax,
+    _In_ JET_GRBIT              grbit )
 {
     JET_VALIDATE_SESID( sesid );
     const JET_SETDBPARAM rgsetdbparam[] =
@@ -16704,33 +16704,33 @@ JET_ERR JET_API JetAttachDatabase3W(
 }
 
 JET_ERR JET_API JetAttachDatabaseWithStreamingA(
-    __in JET_SESID              sesid,
-    __in JET_PCSTR              szDbFileName,
+    _In_ JET_SESID              sesid,
+    _In_ JET_PCSTR              szDbFileName,
     _Reserved_ JET_PCSTR        szSLVFileName,
     _Reserved_ JET_PCSTR        szSLVRootName,
-    __in const ULONG    cpgDatabaseSizeMax,
-    __in JET_GRBIT              grbit )
+    _In_ const ULONG    cpgDatabaseSizeMax,
+    _In_ JET_GRBIT              grbit )
 {
     JET_VALIDATE_SESID( sesid );
     return ErrERRCheck( JET_errFeatureNotAvailable );
 }
 
 JET_ERR JET_API JetAttachDatabaseWithStreamingW(
-    __in JET_SESID              sesid,
-    __in JET_PCWSTR             wszDbFileName,
+    _In_ JET_SESID              sesid,
+    _In_ JET_PCWSTR             wszDbFileName,
     _Reserved_ JET_PCWSTR       wszSLVFileName,
     _Reserved_ JET_PCWSTR       wszSLVRootName,
-    __in const ULONG    cpgDatabaseSizeMax,
-    __in JET_GRBIT              grbit )
+    _In_ const ULONG    cpgDatabaseSizeMax,
+    _In_ JET_GRBIT              grbit )
 {
     JET_VALIDATE_SESID( sesid );
     return ErrERRCheck( JET_errFeatureNotAvailable );
 }
 
 LOCAL JET_ERR JetDetachDatabaseEx(
-    __in JET_SESID  sesid,
+    _In_ JET_SESID  sesid,
     __in_opt JET_PCWSTR wszFilename,
-    __in JET_GRBIT  grbit)
+    _In_ JET_GRBIT  grbit)
 {
     APICALL_SESID   apicall( opDetachDatabase );
 
@@ -16761,9 +16761,9 @@ LOCAL JET_ERR JetDetachDatabaseEx(
 }
 
 LOCAL JET_ERR JetDetachDatabaseExA(
-    __in JET_SESID  sesid,
+    _In_ JET_SESID  sesid,
     __in_opt JET_PCSTR  szFilename,
-    __in JET_GRBIT  grbit)
+    _In_ JET_GRBIT  grbit)
 {
     ERR             err;
     CAutoWSZPATH    lwszFilename;
@@ -16774,7 +16774,7 @@ LOCAL JET_ERR JetDetachDatabaseExA(
 }
 
 JET_ERR JET_API JetDetachDatabaseA(
-    __in JET_SESID  sesid,
+    _In_ JET_SESID  sesid,
     __in_opt JET_PCSTR  szFilename )
 {
     JET_VALIDATE_SESID( sesid );
@@ -16782,7 +16782,7 @@ JET_ERR JET_API JetDetachDatabaseA(
 }
 
 JET_ERR JET_API JetDetachDatabaseW(
-    __in JET_SESID  sesid,
+    _In_ JET_SESID  sesid,
     __in_opt JET_PCWSTR wszFilename )
 {
     JET_VALIDATE_SESID( sesid );
@@ -16790,18 +16790,18 @@ JET_ERR JET_API JetDetachDatabaseW(
 }
 
 JET_ERR JET_API JetDetachDatabase2A(
-    __in JET_SESID  sesid,
+    _In_ JET_SESID  sesid,
     __in_opt JET_PCSTR  szFilename,
-    __in JET_GRBIT  grbit)
+    _In_ JET_GRBIT  grbit)
 {
     JET_VALIDATE_SESID( sesid );
     JET_TRY( opDetachDatabase, JetDetachDatabaseExA( sesid, szFilename, grbit ) );
 }
 
 JET_ERR JET_API JetDetachDatabase2W(
-    __in JET_SESID  sesid,
+    _In_ JET_SESID  sesid,
     __in_opt JET_PCWSTR wszFilename,
-    __in JET_GRBIT  grbit)
+    _In_ JET_GRBIT  grbit)
 {
     JET_VALIDATE_SESID( sesid );
     JET_TRY( opDetachDatabase, JetDetachDatabaseEx( sesid, wszFilename, grbit ) );
@@ -16810,7 +16810,7 @@ JET_ERR JET_API JetDetachDatabase2W(
 
 LOCAL JET_ERR JetBackupInstanceEx(
     JET_INSTANCE    instance,
-    __in PCWSTR     wszBackupPath,
+    _In_ PCWSTR     wszBackupPath,
     JET_GRBIT       grbit,
     JET_PFNSTATUS   pfnStatus )
 {
@@ -16839,9 +16839,9 @@ LOCAL JET_ERR JetBackupInstanceEx(
 }
 
 LOCAL JET_ERR JetBackupInstanceExA(
-    __in JET_INSTANCE   instance,
-    __in JET_PCSTR      szBackupPath,
-    __in JET_GRBIT      grbit,
+    _In_ JET_INSTANCE   instance,
+    _In_ JET_PCSTR      szBackupPath,
+    _In_ JET_GRBIT      grbit,
     __in_opt JET_PFNSTATUS  pfnStatus )
 {
     ERR             err;
@@ -16853,9 +16853,9 @@ LOCAL JET_ERR JetBackupInstanceExA(
 }
 
 JET_ERR JET_API JetBackupInstanceA(
-    __in JET_INSTANCE   instance,
-    __in JET_PCSTR      szBackupPath,
-    __in JET_GRBIT      grbit,
+    _In_ JET_INSTANCE   instance,
+    _In_ JET_PCSTR      szBackupPath,
+    _In_ JET_GRBIT      grbit,
     __in_opt JET_PFNSTATUS  pfnStatus )
 {
     JET_VALIDATE_INSTANCE( instance );
@@ -16863,9 +16863,9 @@ JET_ERR JET_API JetBackupInstanceA(
 }
 
 JET_ERR JET_API JetBackupInstanceW(
-    __in JET_INSTANCE   instance,
-    __in JET_PCWSTR     wszBackupPath,
-    __in JET_GRBIT      grbit,
+    _In_ JET_INSTANCE   instance,
+    _In_ JET_PCWSTR     wszBackupPath,
+    _In_ JET_GRBIT      grbit,
     __in_opt JET_PFNSTATUS  pfnStatus )
 {
     JET_VALIDATE_INSTANCE( instance );
@@ -16873,8 +16873,8 @@ JET_ERR JET_API JetBackupInstanceW(
 }
 
 JET_ERR JET_API JetBackupA(
-    __in JET_PCSTR      szBackupPath,
-    __in JET_GRBIT      grbit,
+    _In_ JET_PCSTR      szBackupPath,
+    _In_ JET_GRBIT      grbit,
     __in_opt JET_PFNSTATUS  pfnStatus )
 {
     ERR             err;
@@ -16885,8 +16885,8 @@ JET_ERR JET_API JetBackupA(
 }
 
 JET_ERR JET_API JetBackupW(
-    __in JET_PCWSTR     wszBackupPath,
-    __in JET_GRBIT      grbit,
+    _In_ JET_PCWSTR     wszBackupPath,
+    _In_ JET_GRBIT      grbit,
     __in_opt JET_PFNSTATUS  pfnStatus )
 {
     ERR             err;
@@ -16896,7 +16896,7 @@ JET_ERR JET_API JetBackupW(
     return JetBackupInstanceW( (JET_INSTANCE)g_rgpinst[0], wszBackupPath, grbit, pfnStatus );
 }
 
-JET_ERR JET_API JetRestoreA(    __in JET_PCSTR szSource, __in_opt JET_PFNSTATUS pfn )
+JET_ERR JET_API JetRestoreA(    _In_ JET_PCSTR szSource, __in_opt JET_PFNSTATUS pfn )
 {
     ERR     err;
 
@@ -16915,7 +16915,7 @@ JET_ERR JET_API JetRestoreA(    __in JET_PCSTR szSource, __in_opt JET_PFNSTATUS 
 
     return err;
 }
-JET_ERR JET_API JetRestoreW(    __in JET_PCWSTR wszSource, __in_opt JET_PFNSTATUS pfn )
+JET_ERR JET_API JetRestoreW(    _In_ JET_PCWSTR wszSource, __in_opt JET_PFNSTATUS pfn )
 {
     ERR     err;
 
@@ -16935,7 +16935,7 @@ JET_ERR JET_API JetRestoreW(    __in JET_PCWSTR wszSource, __in_opt JET_PFNSTATU
     return err;
 }
 
-JET_ERR JET_API JetRestore2A( __in JET_PCSTR sz, __in_opt JET_PCSTR szDest, __in_opt JET_PFNSTATUS pfn )
+JET_ERR JET_API JetRestore2A( _In_ JET_PCSTR sz, __in_opt JET_PCSTR szDest, __in_opt JET_PFNSTATUS pfn )
 {
     ERR     err;
 
@@ -16955,7 +16955,7 @@ JET_ERR JET_API JetRestore2A( __in JET_PCSTR sz, __in_opt JET_PCSTR szDest, __in
     return err;
 }
 
-JET_ERR JET_API JetRestore2W(__in JET_PCWSTR wsz, __in_opt JET_PCWSTR wszDest, __in_opt JET_PFNSTATUS pfn )
+JET_ERR JET_API JetRestore2W(_In_ JET_PCWSTR wsz, __in_opt JET_PCWSTR wszDest, __in_opt JET_PFNSTATUS pfn )
 {
     ERR     err;
 
@@ -16977,15 +16977,15 @@ JET_ERR JET_API JetRestore2W(__in JET_PCWSTR wsz, __in_opt JET_PCWSTR wszDest, _
 
 
 LOCAL JET_ERR JetOpenTempTableEx(
-    __in JET_SESID                                  sesid,
+    _In_ JET_SESID                                  sesid,
     __in_ecount( ccolumn ) const JET_COLUMNDEF *    prgcolumndef,
-    __in ULONG                              ccolumn,
+    _In_ ULONG                              ccolumn,
     __in_opt JET_UNICODEINDEX2 *                    pidxunicode,
-    __in JET_GRBIT                                  grbit,
-    __out JET_TABLEID *                             ptableid,
+    _In_ JET_GRBIT                                  grbit,
+    _Out_ JET_TABLEID *                             ptableid,
     __out_ecount( ccolumn ) JET_COLUMNID *          prgcolumnid,
-    __in ULONG                              cbKeyMost       = 0,
-    __in ULONG                              cbVarSegMax     = 0 )
+    _In_ ULONG                              cbKeyMost       = 0,
+    _In_ ULONG                              cbVarSegMax     = 0 )
 {
     APICALL_SESID       apicall( opOpenTempTable );
 
@@ -17020,15 +17020,15 @@ LOCAL JET_ERR JetOpenTempTableEx(
 }
 
 LOCAL JET_ERR JetOpenTempTableEx1(
-    __in JET_SESID                                  sesid,
+    _In_ JET_SESID                                  sesid,
     __in_ecount( ccolumn ) const JET_COLUMNDEF *    prgcolumndef,
-    __in ULONG                              ccolumn,
+    _In_ ULONG                              ccolumn,
     __in_opt JET_UNICODEINDEX *                     pidxunicode,
-    __in JET_GRBIT                                  grbit,
-    __out JET_TABLEID *                             ptableid,
+    _In_ JET_GRBIT                                  grbit,
+    _Out_ JET_TABLEID *                             ptableid,
     __out_ecount( ccolumn ) JET_COLUMNID *          prgcolumnid,
-    __in ULONG                              cbKeyMost       = 0,
-    __in ULONG                              cbVarSegMax     = 0 )
+    _In_ ULONG                              cbKeyMost       = 0,
+    _In_ ULONG                              cbVarSegMax     = 0 )
 {
     ERR err;
     JET_UNICODEINDEX2 idxunicode;
@@ -17053,23 +17053,23 @@ LOCAL JET_ERR JetOpenTempTableEx1(
 }
 
 JET_ERR JET_API JetOpenTempTable(
-    __in JET_SESID                                  sesid,
+    _In_ JET_SESID                                  sesid,
     __in_ecount( ccolumn ) const JET_COLUMNDEF *    prgcolumndef,
-    __in ULONG                              ccolumn,
-    __in JET_GRBIT                                  grbit,
-    __out JET_TABLEID *                             ptableid,
+    _In_ ULONG                              ccolumn,
+    _In_ JET_GRBIT                                  grbit,
+    _Out_ JET_TABLEID *                             ptableid,
     __out_ecount( ccolumn ) JET_COLUMNID *          prgcolumnid )
 {
     JET_VALIDATE_SESID( sesid );
     JET_TRY( opOpenTempTable, JetOpenTempTableEx1( sesid, prgcolumndef, ccolumn, NULL, grbit, ptableid, prgcolumnid ) );
 }
 JET_ERR JET_API JetOpenTempTable2(
-    __in JET_SESID                                  sesid,
+    _In_ JET_SESID                                  sesid,
     __in_ecount( ccolumn ) const JET_COLUMNDEF *    prgcolumndef,
-    __in ULONG                              ccolumn,
-    __in ULONG                              lcid,
-    __in JET_GRBIT                                  grbit,
-    __out JET_TABLEID *                             ptableid,
+    _In_ ULONG                              ccolumn,
+    _In_ ULONG                              lcid,
+    _In_ JET_GRBIT                                  grbit,
+    _Out_ JET_TABLEID *                             ptableid,
     __out_ecount( ccolumn ) JET_COLUMNID *          prgcolumnid )
 {
     INST * const        pinst       = PinstFromSesid( sesid );
@@ -17094,12 +17094,12 @@ JET_ERR JET_API JetOpenTempTable2(
     JET_TRY( opOpenTempTable, JetOpenTempTableEx( sesid, prgcolumndef, ccolumn, &idxunicode, grbit, ptableid, prgcolumnid ) );
 }
 JET_ERR JET_API JetOpenTempTable3(
-    __in JET_SESID                                  sesid,
+    _In_ JET_SESID                                  sesid,
     __in_ecount( ccolumn ) const JET_COLUMNDEF *    prgcolumndef,
-    __in ULONG                              ccolumn,
+    _In_ ULONG                              ccolumn,
     __in_opt JET_UNICODEINDEX *                     pidxunicode,
-    __in JET_GRBIT                                  grbit,
-    __out JET_TABLEID *                             ptableid,
+    _In_ JET_GRBIT                                  grbit,
+    _Out_ JET_TABLEID *                             ptableid,
     __out_ecount( ccolumn ) JET_COLUMNID *          prgcolumnid )
 {
     JET_VALIDATE_SESID( sesid );
@@ -17107,8 +17107,8 @@ JET_ERR JET_API JetOpenTempTable3(
 }
 
 JET_ERR JET_API JetOpenTemporaryTable(
-    __in JET_SESID                  sesid,
-    __in JET_OPENTEMPORARYTABLE *   popentemporarytable )
+    _In_ JET_SESID                  sesid,
+    _In_ JET_OPENTEMPORARYTABLE *   popentemporarytable )
 {
     JET_VALIDATE_SESID( sesid );
 
@@ -17131,8 +17131,8 @@ JET_ERR JET_API JetOpenTemporaryTable(
 }
 
 JET_ERR JET_API JetOpenTemporaryTable2(
-    __in JET_SESID                  sesid,
-    __in JET_OPENTEMPORARYTABLE2 *   popentemporarytable )
+    _In_ JET_SESID                  sesid,
+    _In_ JET_OPENTEMPORARYTABLE2 *   popentemporarytable )
 {
     JET_VALIDATE_SESID( sesid );
 
@@ -17155,9 +17155,9 @@ JET_ERR JET_API JetOpenTemporaryTable2(
 }
 
 LOCAL JET_ERR JetSetIndexRangeEx(
-    __in JET_SESID      sesid,
-    __in JET_TABLEID    tableid,
-    __in JET_GRBIT      grbit )
+    _In_ JET_SESID      sesid,
+    _In_ JET_TABLEID    tableid,
+    _In_ JET_GRBIT      grbit )
 {
     APICALL_SESID   apicall( opSetIndexRange );
 
@@ -17181,19 +17181,19 @@ LOCAL JET_ERR JetSetIndexRangeEx(
     return apicall.ErrResult();
 }
 JET_ERR JET_API JetSetIndexRange(
-    __in JET_SESID      sesid,
-    __in JET_TABLEID    tableid,
-    __in JET_GRBIT      grbit )
+    _In_ JET_SESID      sesid,
+    _In_ JET_TABLEID    tableid,
+    _In_ JET_GRBIT      grbit )
 {
     JET_VALIDATE_SESID_TABLEID( sesid, tableid );
     JET_TRY( opSetIndexRange, JetSetIndexRangeEx( sesid, tableid, grbit ) );
 }
 
 LOCAL JET_ERR JetIndexRecordCountEx(
-    __in JET_SESID          sesid,
-    __in JET_TABLEID        tableid,
-    __out ULONG64 *         pcrec,
-    __in ULONG64            crecMax )
+    _In_ JET_SESID          sesid,
+    _In_ JET_TABLEID        tableid,
+    _Out_ ULONG64 *         pcrec,
+    _In_ ULONG64            crecMax )
 {
     APICALL_SESID   apicall( opIndexRecordCount );
 
@@ -17220,10 +17220,10 @@ LOCAL JET_ERR JetIndexRecordCountEx(
 }
 
 LOCAL JET_ERR JetIndexRecordCountEx32Bit(
-    __in JET_SESID          sesid,
-    __in JET_TABLEID        tableid,
-    __out ULONG *           pcrec,
-    __in ULONG              crecMax )
+    _In_ JET_SESID          sesid,
+    _In_ JET_TABLEID        tableid,
+    _Out_ ULONG *           pcrec,
+    _In_ ULONG              crecMax )
 {
     ERR err = JET_errSuccess;
     ULONG64 crec = 0;
@@ -17248,20 +17248,20 @@ LOCAL JET_ERR JetIndexRecordCountEx32Bit(
 }
 
 JET_ERR JET_API JetIndexRecordCount(
-    __in JET_SESID          sesid,
-    __in JET_TABLEID        tableid,
-    __out ULONG *   pcrec,
-    __in ULONG      crecMax )
+    _In_ JET_SESID          sesid,
+    _In_ JET_TABLEID        tableid,
+    _Out_ ULONG *   pcrec,
+    _In_ ULONG      crecMax )
 {
     JET_VALIDATE_SESID_TABLEID( sesid, tableid );
     JET_TRY( opIndexRecordCount, JetIndexRecordCountEx32Bit( sesid, tableid, pcrec, crecMax ) );
 }
 
 JET_ERR JET_API JetIndexRecordCount2(
-    __in JET_SESID          sesid,
-    __in JET_TABLEID        tableid,
-    __out ULONG64 *         pcrec,
-    __in ULONG64            crecMax )
+    _In_ JET_SESID          sesid,
+    _In_ JET_TABLEID        tableid,
+    _Out_ ULONG64 *         pcrec,
+    _In_ ULONG64            crecMax )
 {
     JET_VALIDATE_SESID_TABLEID( sesid, tableid );
     JET_TRY( opIndexRecordCount, JetIndexRecordCountEx( sesid, tableid, pcrec, crecMax ) );
@@ -17270,7 +17270,7 @@ JET_ERR JET_API JetIndexRecordCount2(
 /***********************************************************
 /************* EXTERNAL BACKUP JET API *********************
 /*****/
-LOCAL JET_ERR JetBeginExternalBackupInstanceEx( __in JET_INSTANCE instance, __in JET_GRBIT grbit )
+LOCAL JET_ERR JetBeginExternalBackupInstanceEx( _In_ JET_INSTANCE instance, _In_ JET_GRBIT grbit )
 {
     APICALL_INST    apicall( opBeginExternalBackupInstance );
 
@@ -17294,12 +17294,12 @@ LOCAL JET_ERR JetBeginExternalBackupInstanceEx( __in JET_INSTANCE instance, __in
 
     return apicall.ErrResult();
 }
-JET_ERR JET_API JetBeginExternalBackupInstance( __in JET_INSTANCE instance, __in JET_GRBIT grbit )
+JET_ERR JET_API JetBeginExternalBackupInstance( _In_ JET_INSTANCE instance, _In_ JET_GRBIT grbit )
 {
     JET_VALIDATE_INSTANCE( instance );
     JET_TRY( opBeginExternalBackupInstance, JetBeginExternalBackupInstanceEx( instance, grbit ) );
 }
-JET_ERR JET_API JetBeginExternalBackup( __in JET_GRBIT grbit )
+JET_ERR JET_API JetBeginExternalBackup( _In_ JET_GRBIT grbit )
 {
     ERR     err;
 
@@ -17310,9 +17310,9 @@ JET_ERR JET_API JetBeginExternalBackup( __in JET_GRBIT grbit )
 
 
 LOCAL JET_ERR JetGetAttachInfoInstanceEx(
-    __in JET_INSTANCE                                       instance,
+    _In_ JET_INSTANCE                                       instance,
     __out_bcount_part_opt( cbMax, *pcbActual ) JET_PWSTR    wszzDatabases,
-    __in ULONG                                      cbMax,
+    _In_ ULONG                                      cbMax,
     __out_opt ULONG *                               pcbActual )
 {
     APICALL_INST    apicall( opGetAttachInfoInstance );
@@ -17340,9 +17340,9 @@ LOCAL JET_ERR JetGetAttachInfoInstanceEx(
 }
 
 LOCAL JET_ERR JetGetAttachInfoInstanceExA(
-    __in JET_INSTANCE                                   instance,
+    _In_ JET_INSTANCE                                   instance,
     __out_bcount_part_opt( cbMax, *pcbActual ) JET_PSTR szzDatabases,
-    __in ULONG                                  cbMax,
+    _In_ ULONG                                  cbMax,
     __out_opt ULONG *                           pcbActual )
 {
     ERR             err         = JET_errSuccess;
@@ -17416,12 +17416,12 @@ JET_ERR JET_API JetGetAttachInfoW(
 
 
 LOCAL JET_ERR JetOpenFileInstanceEx(
-    __in JET_INSTANCE       instance,
-    __in JET_PCWSTR         wszFileName,
-    __out JET_HANDLE *      phfFile,
-    __in ULONG64            ibRead,
-    __out ULONG *   pulFileSizeLow,
-    __out ULONG *   pulFileSizeHigh )
+    _In_ JET_INSTANCE       instance,
+    _In_ JET_PCWSTR         wszFileName,
+    _Out_ JET_HANDLE *      phfFile,
+    _In_ ULONG64            ibRead,
+    _Out_ ULONG *   pulFileSizeLow,
+    _Out_ ULONG *   pulFileSizeHigh )
 {
     APICALL_INST    apicall( opOpenFileInstance );
 
@@ -17452,12 +17452,12 @@ LOCAL JET_ERR JetOpenFileInstanceEx(
 }
 
 LOCAL JET_ERR JetOpenFileInstanceExA(
-    __in JET_INSTANCE       instance,
-    __in JET_PCSTR          szFileName,
-    __out JET_HANDLE *      phfFile,
-    __in ULONG64            ibRead,
-    __out ULONG *   pulFileSizeLow,
-    __out ULONG *   pulFileSizeHigh )
+    _In_ JET_INSTANCE       instance,
+    _In_ JET_PCSTR          szFileName,
+    _Out_ JET_HANDLE *      phfFile,
+    _In_ ULONG64            ibRead,
+    _Out_ ULONG *   pulFileSizeLow,
+    _Out_ ULONG *   pulFileSizeHigh )
 {
     ERR             err         = JET_errSuccess;
     CAutoWSZPATH    lwszFileName;
@@ -17468,34 +17468,34 @@ LOCAL JET_ERR JetOpenFileInstanceExA(
 }
 
 JET_ERR JET_API JetOpenFileInstanceA(
-    __in JET_INSTANCE       instance,
-    __in JET_PCSTR          szFileName,
-    __out JET_HANDLE *      phfFile,
-    __out ULONG *   pulFileSizeLow,
-    __out ULONG *   pulFileSizeHigh )
+    _In_ JET_INSTANCE       instance,
+    _In_ JET_PCSTR          szFileName,
+    _Out_ JET_HANDLE *      phfFile,
+    _Out_ ULONG *   pulFileSizeLow,
+    _Out_ ULONG *   pulFileSizeHigh )
 {
     JET_VALIDATE_INSTANCE( instance );
     JET_TRY( opOpenFileInstance, JetOpenFileInstanceExA( instance, szFileName, phfFile, 0, pulFileSizeLow, pulFileSizeHigh ) );
 }
 
 JET_ERR JET_API JetOpenFileInstanceW(
-    __in JET_INSTANCE       instance,
-    __in JET_PCWSTR         wszFileName,
-    __out JET_HANDLE *      phfFile,
-    __out ULONG *   pulFileSizeLow,
-    __out ULONG *   pulFileSizeHigh )
+    _In_ JET_INSTANCE       instance,
+    _In_ JET_PCWSTR         wszFileName,
+    _Out_ JET_HANDLE *      phfFile,
+    _Out_ ULONG *   pulFileSizeLow,
+    _Out_ ULONG *   pulFileSizeHigh )
 {
     JET_VALIDATE_INSTANCE( instance );
     JET_TRY( opOpenFileInstance, JetOpenFileInstanceEx( instance, wszFileName, phfFile, 0, pulFileSizeLow, pulFileSizeHigh ) );
 }
 
 LOCAL JET_ERR JET_API JetOpenFileSectionInstanceExA(
-    __in JET_INSTANCE       instance,
-    __in JET_PCSTR          szFileName,
-    __out JET_HANDLE *      phfFile,
-    __in ULONG64            ibRead,
-    __out ULONG *   pulFileSizeLow,
-    __out ULONG *   pulFileSizeHigh )
+    _In_ JET_INSTANCE       instance,
+    _In_ JET_PCSTR          szFileName,
+    _Out_ JET_HANDLE *      phfFile,
+    _In_ ULONG64            ibRead,
+    _Out_ ULONG *   pulFileSizeLow,
+    _Out_ ULONG *   pulFileSizeHigh )
 {
     ERR             err = JET_errSuccess;
     CAutoWSZPATH    lwszFileName;
@@ -17506,14 +17506,14 @@ LOCAL JET_ERR JET_API JetOpenFileSectionInstanceExA(
 }
 
 JET_ERR JET_API JetOpenFileSectionInstanceA(
-    __in JET_INSTANCE       instance,
-    __in JET_PSTR           szFileName,
-    __out JET_HANDLE *      phFile,
-    __in LONG               iSection,
-    __in LONG               cSections,
-    __in ULONG64            ibRead,
-    __out ULONG *   pulSectionSizeLow,
-    __out LONG *            plSectionSizeHigh )
+    _In_ JET_INSTANCE       instance,
+    _In_ JET_PSTR           szFileName,
+    _Out_ JET_HANDLE *      phFile,
+    _In_ LONG               iSection,
+    _In_ LONG               cSections,
+    _In_ ULONG64            ibRead,
+    _Out_ ULONG *   pulSectionSizeLow,
+    _Out_ LONG *            plSectionSizeHigh )
 {
     if ( cSections > 1 )
     {
@@ -17526,14 +17526,14 @@ JET_ERR JET_API JetOpenFileSectionInstanceA(
 };
 
 JET_ERR JET_API JetOpenFileSectionInstanceW(
-    __in JET_INSTANCE       instance,
-    __in JET_PWSTR          wszFileName,
-    __out JET_HANDLE *      phFile,
-    __in LONG               iSection,
-    __in LONG               cSections,
-    __in ULONG64            ibRead,
-    __out ULONG *   pulSectionSizeLow,
-    __out LONG *            plSectionSizeHigh )
+    _In_ JET_INSTANCE       instance,
+    _In_ JET_PWSTR          wszFileName,
+    _Out_ JET_HANDLE *      phFile,
+    _In_ LONG               iSection,
+    _In_ LONG               cSections,
+    _In_ ULONG64            ibRead,
+    _Out_ ULONG *   pulSectionSizeLow,
+    _Out_ LONG *            plSectionSizeHigh )
 {
 
     if ( cSections > 1 )
@@ -17547,10 +17547,10 @@ JET_ERR JET_API JetOpenFileSectionInstanceW(
 
 
 JET_ERR JET_API JetOpenFileA(
-    __in JET_PCSTR          szFileName,
-    __out JET_HANDLE *      phfFile,
-    __out ULONG *   pulFileSizeLow,
-    __out ULONG *   pulFileSizeHigh )
+    _In_ JET_PCSTR          szFileName,
+    _Out_ JET_HANDLE *      phfFile,
+    _Out_ ULONG *   pulFileSizeLow,
+    _Out_ ULONG *   pulFileSizeHigh )
 {
     ERR             err;
 
@@ -17560,10 +17560,10 @@ JET_ERR JET_API JetOpenFileA(
 }
 
 JET_ERR JET_API JetOpenFileW(
-    __in JET_PCWSTR         wszFileName,
-    __out JET_HANDLE *      phfFile,
-    __out ULONG *   pulFileSizeLow,
-    __out ULONG *   pulFileSizeHigh )
+    _In_ JET_PCWSTR         wszFileName,
+    _Out_ JET_HANDLE *      phfFile,
+    _Out_ ULONG *   pulFileSizeLow,
+    _Out_ ULONG *   pulFileSizeHigh )
 {
     ERR             err;
 
@@ -17574,10 +17574,10 @@ JET_ERR JET_API JetOpenFileW(
 
 
 LOCAL JET_ERR JetReadFileInstanceEx(
-    __in JET_INSTANCE                           instance,
-    __in JET_HANDLE                             hfFile,
+    _In_ JET_INSTANCE                           instance,
+    _In_ JET_HANDLE                             hfFile,
     __out_bcount_part( cb, *pcbActual ) void *  pv,
-    __in ULONG                          cb,
+    _In_ ULONG                          cb,
     __out_opt ULONG *                   pcbActual )
 {
     APICALL_INST    apicall( opReadFileInstance );
@@ -17606,19 +17606,19 @@ LOCAL JET_ERR JetReadFileInstanceEx(
     return apicall.ErrResult();
 }
 JET_ERR JET_API JetReadFileInstance(
-    __in JET_INSTANCE                           instance,
-    __in JET_HANDLE                             hfFile,
+    _In_ JET_INSTANCE                           instance,
+    _In_ JET_HANDLE                             hfFile,
     __out_bcount_part( cb, *pcbActual ) void *  pv,
-    __in ULONG                          cb,
+    _In_ ULONG                          cb,
     __out_opt ULONG *                   pcbActual )
 {
     JET_VALIDATE_INSTANCE( instance );
     JET_TRY( opReadFileInstance, JetReadFileInstanceEx( instance, hfFile, pv, cb, pcbActual ) );
 }
 JET_ERR JET_API JetReadFile(
-    __in JET_HANDLE                             hfFile,
+    _In_ JET_HANDLE                             hfFile,
     __out_bcount_part( cb, *pcbActual ) void *  pv,
-    __in ULONG                          cb,
+    _In_ ULONG                          cb,
     __out_opt ULONG *                   pcbActual )
 {
     ERR             err;
@@ -17628,7 +17628,7 @@ JET_ERR JET_API JetReadFile(
     return JetReadFileInstance( (JET_INSTANCE)g_rgpinst[0], hfFile, pv, cb, pcbActual );
 }
 
-LOCAL JET_ERR JetCloseFileInstanceEx( __in JET_INSTANCE instance, __in JET_HANDLE hfFile )
+LOCAL JET_ERR JetCloseFileInstanceEx( _In_ JET_INSTANCE instance, _In_ JET_HANDLE hfFile )
 {
     APICALL_INST    apicall( opCloseFileInstance );
 
@@ -17649,12 +17649,12 @@ LOCAL JET_ERR JetCloseFileInstanceEx( __in JET_INSTANCE instance, __in JET_HANDL
 
     return apicall.ErrResult();
 }
-JET_ERR JET_API JetCloseFileInstance( __in JET_INSTANCE instance, __in JET_HANDLE hfFile )
+JET_ERR JET_API JetCloseFileInstance( _In_ JET_INSTANCE instance, _In_ JET_HANDLE hfFile )
 {
     JET_VALIDATE_INSTANCE( instance );
     JET_TRY( opCloseFileInstance, JetCloseFileInstanceEx( instance, hfFile ) );
 }
-JET_ERR JET_API JetCloseFile( __in JET_HANDLE hfFile )
+JET_ERR JET_API JetCloseFile( _In_ JET_HANDLE hfFile )
 {
     ERR     err;
 
@@ -17728,9 +17728,9 @@ CAutoLOGINFOW::~CAutoLOGINFOW()
 }
 
 LOCAL JET_ERR JetGetLogInfoInstanceEx(
-    __in JET_INSTANCE                                       instance,
+    _In_ JET_INSTANCE                                       instance,
     __out_bcount_part_opt( cbMax, *pcbActual ) JET_PWSTR    wszzLogs,
-    __in ULONG                                      cbMax,
+    _In_ ULONG                                      cbMax,
     __out_opt ULONG *                               pcbActual,
     __inout_opt JET_LOGINFO_W *                             pLogInfo )
 {
@@ -17761,9 +17761,9 @@ LOCAL JET_ERR JetGetLogInfoInstanceEx(
 }
 
 LOCAL JET_ERR JetGetLogInfoInstanceExA(
-    __in JET_INSTANCE                                   instance,
+    _In_ JET_INSTANCE                                   instance,
     __out_bcount_part_opt( cbMax, *pcbActual ) JET_PSTR szzLogs,
-    __in ULONG                                  cbMax,
+    _In_ ULONG                                  cbMax,
     __out_opt ULONG *                           pcbActual,
     __inout_opt JET_LOGINFO_A *                         pLogInfo )
 {
@@ -17875,9 +17875,9 @@ JET_ERR JET_API JetGetLogInfoW(
 }
 
 LOCAL JET_ERR JetGetTruncateLogInfoInstanceEx(
-    __in JET_INSTANCE                                       instance,
+    _In_ JET_INSTANCE                                       instance,
     __out_bcount_part_opt( cbMax, *pcbActual ) JET_PWSTR    wszzLogs,
-    __in ULONG                                      cbMax,
+    _In_ ULONG                                      cbMax,
     __out_opt ULONG *                               pcbActual )
 {
     APICALL_INST    apicall( opGetTruncateLogInfoInstance );
@@ -17905,9 +17905,9 @@ LOCAL JET_ERR JetGetTruncateLogInfoInstanceEx(
 }
 
 LOCAL JET_ERR JetGetTruncateLogInfoInstanceExA(
-    __in JET_INSTANCE                                   instance,
+    _In_ JET_INSTANCE                                   instance,
     __out_bcount_part_opt( cbMax, *pcbActual ) JET_PSTR szzLogs,
-    __in ULONG                                  cbMax,
+    _In_ ULONG                                  cbMax,
     __out_opt ULONG *                           pcbActual )
 {
     ERR             err         = JET_errSuccess;
@@ -17955,7 +17955,7 @@ JET_ERR JET_API JetGetTruncateLogInfoInstanceW(
     JET_TRY( opGetTruncateLogInfoInstance, JetGetTruncateLogInfoInstanceEx( instance, wszzLogs, cbMax, pcbActual ) );
 }
 
-LOCAL JET_ERR JetTruncateLogInstanceEx( __in JET_INSTANCE instance )
+LOCAL JET_ERR JetTruncateLogInstanceEx( _In_ JET_INSTANCE instance )
 {
     APICALL_INST    apicall( opTruncateLogInstance );
 
@@ -17968,7 +17968,7 @@ LOCAL JET_ERR JetTruncateLogInstanceEx( __in JET_INSTANCE instance )
 
     return apicall.ErrResult();
 }
-JET_ERR JET_API JetTruncateLogInstance( __in JET_INSTANCE instance )
+JET_ERR JET_API JetTruncateLogInstance( _In_ JET_INSTANCE instance )
 {
     JET_VALIDATE_INSTANCE( instance );
     JET_TRY( opTruncateLogInstance, JetTruncateLogInstanceEx( instance ) );
@@ -17983,7 +17983,7 @@ JET_ERR JET_API JetTruncateLog( void )
 }
 
 
-LOCAL JET_ERR JetEndExternalBackupInstanceEx( __in JET_INSTANCE instance, __in JET_GRBIT grbit )
+LOCAL JET_ERR JetEndExternalBackupInstanceEx( _In_ JET_INSTANCE instance, _In_ JET_GRBIT grbit )
 {
     APICALL_INST    apicall( opEndExternalBackupInstance );
 
@@ -18005,14 +18005,14 @@ LOCAL JET_ERR JetEndExternalBackupInstanceEx( __in JET_INSTANCE instance, __in J
     return apicall.ErrResult();
 }
 
-JET_ERR JET_API JetEndExternalBackupInstance2( __in JET_INSTANCE instance, __in JET_GRBIT grbit )
+JET_ERR JET_API JetEndExternalBackupInstance2( _In_ JET_INSTANCE instance, _In_ JET_GRBIT grbit )
 {
     JET_VALIDATE_INSTANCE( instance );
     JET_TRY( opEndExternalBackupInstance, JetEndExternalBackupInstanceEx( instance, grbit ) );
 }
 
 
-JET_ERR JET_API JetEndExternalBackupInstance( __in JET_INSTANCE instance )
+JET_ERR JET_API JetEndExternalBackupInstance( _In_ JET_INSTANCE instance )
 {
     // we had no flag to specify from the client side how the backup ended
     //and we assumed success until now.
@@ -18029,10 +18029,10 @@ JET_ERR JET_API JetEndExternalBackup( void )
 }
 
 LOCAL JET_ERR JetBeginSurrogateBackupEx(
-    __in    JET_INSTANCE    instance,
-    __in    ULONG   lgenFirst,
-    __in    ULONG   lgenLast,
-    __in    JET_GRBIT   grbit )
+    _In_    JET_INSTANCE    instance,
+    _In_    ULONG   lgenFirst,
+    _In_    ULONG   lgenLast,
+    _In_    JET_GRBIT   grbit )
 {
     APICALL_INST    apicall( opBeginSurrogateBackup );
 
@@ -18057,18 +18057,18 @@ LOCAL JET_ERR JetBeginSurrogateBackupEx(
 }
 
 JET_ERR JET_API JetBeginSurrogateBackup(
-    __in        JET_INSTANCE    instance,
-    __in        ULONG       lgenFirst,
-    __in        ULONG       lgenLast,
-    __in        JET_GRBIT       grbit )
+    _In_        JET_INSTANCE    instance,
+    _In_        ULONG       lgenFirst,
+    _In_        ULONG       lgenLast,
+    _In_        JET_GRBIT       grbit )
 {
     JET_VALIDATE_INSTANCE( instance );
     JET_TRY( opBeginSurrogateBackup, JetBeginSurrogateBackupEx( instance, lgenFirst, lgenLast, grbit ) );
 }
 
 LOCAL JET_ERR JetEndSurrogateBackupEx(
-    __in    JET_INSTANCE    instance,
-    __in        JET_GRBIT       grbit )
+    _In_    JET_INSTANCE    instance,
+    _In_        JET_GRBIT       grbit )
 {
     APICALL_INST    apicall( opEndSurrogateBackup );
 
@@ -18091,8 +18091,8 @@ LOCAL JET_ERR JetEndSurrogateBackupEx(
 }
 
 JET_ERR JET_API JetEndSurrogateBackup(
-    __in    JET_INSTANCE    instance,
-    __in        JET_GRBIT       grbit )
+    _In_    JET_INSTANCE    instance,
+    _In_        JET_GRBIT       grbit )
 {
     JET_VALIDATE_INSTANCE( instance );
     JET_TRY( opEndSurrogateBackup, JetEndSurrogateBackupEx( instance, grbit ) );
@@ -18106,7 +18106,7 @@ ERR ErrINSTPrepareTargetInstance(
     INST * pinstTarget,
     __out_bcount(cbTargetInstanceLogPath) PWSTR wszTargetInstanceLogPath,
     __in_range(sizeof(WCHAR), cbOSFSAPI_MAX_PATHW) ULONG    cbTargetInstanceLogPath,
-    __in PCWSTR wszRestoreLogBaseName,
+    _In_ PCWSTR wszRestoreLogBaseName,
     LONG * plGenHighTargetInstance  )
 {
     ERR             err = JET_errSuccess;
@@ -18268,18 +18268,18 @@ CAutoRSTMAPW::~CAutoRSTMAPW()
 }
 
 LOCAL JET_ERR JetExternalRestoreEx(
-    __in JET_PWSTR                                  wszCheckpointFilePath,
-    __in JET_PWSTR                                  wszLogPath,
+    _In_ JET_PWSTR                                  wszCheckpointFilePath,
+    _In_ JET_PWSTR                                  wszLogPath,
     __in_ecount_opt( crstfilemap ) JET_RSTMAP_W *   rgrstmap,
-    __in LONG                                       crstfilemap,
-    __in JET_PWSTR                                  wszBackupLogPath,
-    __in LONG                                       genLow,
-    __in LONG                                       genHigh,
-    __in JET_PWSTR                                  wszLogBaseName,
+    _In_ LONG                                       crstfilemap,
+    _In_ JET_PWSTR                                  wszBackupLogPath,
+    _In_ LONG                                       genLow,
+    _In_ LONG                                       genHigh,
+    _In_ JET_PWSTR                                  wszLogBaseName,
     __in_opt JET_PCWSTR                             wszTargetInstanceName,
     __in_opt JET_PCWSTR                             wszTargetInstanceCheckpointPath,
     __in_opt JET_PCWSTR                             wszTargetInstanceLogPath,
-    __in JET_PFNSTATUS                              pfn )
+    _In_ JET_PFNSTATUS                              pfn )
 {
     APICALL_INST    apicall( opInit );
     INST *          pinst = NULL;
@@ -18594,18 +18594,18 @@ HandleError:
 }
 
 LOCAL JET_ERR JetExternalRestoreExA(
-    __in JET_PSTR                                   szCheckpointFilePath,
-    __in JET_PSTR                                   szLogPath,
+    _In_ JET_PSTR                                   szCheckpointFilePath,
+    _In_ JET_PSTR                                   szLogPath,
     __in_ecount_opt( crstfilemap ) JET_RSTMAP *     rgrstmap,
-    __in LONG                                       crstfilemap,
-    __in JET_PSTR                                   szBackupLogPath,
-    __in LONG                                       genLow,
-    __in LONG                                       genHigh,
-    __in JET_PSTR                                   szLogBaseName,
+    _In_ LONG                                       crstfilemap,
+    _In_ JET_PSTR                                   szBackupLogPath,
+    _In_ LONG                                       genLow,
+    _In_ LONG                                       genHigh,
+    _In_ JET_PSTR                                   szLogBaseName,
     __in_opt JET_PCSTR                              szTargetInstanceName,
     __in_opt JET_PCSTR                              szTargetInstanceCheckpointPath,
     __in_opt JET_PCSTR                              szTargetInstanceLogPath,
-    __in JET_PFNSTATUS                              pfn )
+    _In_ JET_PFNSTATUS                              pfn )
 {
     ERR             err         = JET_errSuccess;
     CAutoRSTMAPW    lwrstmap;
@@ -18644,16 +18644,16 @@ LOCAL JET_ERR JetExternalRestoreExA(
 }
 
 LOCAL JET_ERR JetExternalRestore2ExA(
-    __in JET_PSTR                                   szCheckpointFilePath,
-    __in JET_PSTR                                   szLogPath,
+    _In_ JET_PSTR                                   szCheckpointFilePath,
+    _In_ JET_PSTR                                   szLogPath,
     __in_ecount_opt( crstfilemap ) JET_RSTMAP_A *   rgrstmap,
-    __in LONG                                       crstfilemap,
-    __in JET_PSTR                                   szBackupLogPath,
+    _In_ LONG                                       crstfilemap,
+    _In_ JET_PSTR                                   szBackupLogPath,
     __inout JET_LOGINFO_A *                         pLogInfo,
     __in_opt JET_PCSTR                              szTargetInstanceName,
     __in_opt JET_PCSTR                              szTargetInstanceLogPath,
     __in_opt JET_PCSTR                              szTargetInstanceCheckpointPath,
-    __in JET_PFNSTATUS                              pfn )
+    _In_ JET_PFNSTATUS                              pfn )
 {
 
     if ( !pLogInfo || pLogInfo->cbSize != sizeof(JET_LOGINFO_A) )
@@ -18677,16 +18677,16 @@ LOCAL JET_ERR JetExternalRestore2ExA(
 }
 
 LOCAL JET_ERR JetExternalRestore2Ex(
-    __in JET_PWSTR                                  wszCheckpointFilePath,
-    __in JET_PWSTR                                  wszLogPath,
+    _In_ JET_PWSTR                                  wszCheckpointFilePath,
+    _In_ JET_PWSTR                                  wszLogPath,
     __in_ecount_opt( crstfilemap ) JET_RSTMAP_W *   rgrstmap,
-    __in LONG                                       crstfilemap,
-    __in JET_PWSTR                                  wszBackupLogPath,
+    _In_ LONG                                       crstfilemap,
+    _In_ JET_PWSTR                                  wszBackupLogPath,
     __inout JET_LOGINFO_W *                         pLogInfo,
     __in_opt JET_PCWSTR                             wszTargetInstanceName,
     __in_opt JET_PCWSTR                             wszTargetInstanceLogPath,
     __in_opt JET_PCWSTR                             wszTargetInstanceCheckpointPath,
-    __in JET_PFNSTATUS                              pfn )
+    _In_ JET_PFNSTATUS                              pfn )
 {
 
     if ( !pLogInfo || pLogInfo->cbSize != sizeof(JET_LOGINFO_W) )
@@ -18711,65 +18711,65 @@ LOCAL JET_ERR JetExternalRestore2Ex(
 
 
 JET_ERR JET_API JetExternalRestoreA(
-    __in JET_PSTR                                   szCheckpointFilePath,
-    __in JET_PSTR                                   szLogPath,
+    _In_ JET_PSTR                                   szCheckpointFilePath,
+    _In_ JET_PSTR                                   szLogPath,
     __in_ecount_opt( crstfilemap ) JET_RSTMAP_A *   rgrstmap,
-    __in LONG                                       crstfilemap,
-    __in JET_PSTR                                   szBackupLogPath,
-    __in LONG                                       genLow,
-    __in LONG                                       genHigh,
-    __in JET_PFNSTATUS                              pfn )
+    _In_ LONG                                       crstfilemap,
+    _In_ JET_PSTR                                   szBackupLogPath,
+    _In_ LONG                                       genLow,
+    _In_ LONG                                       genHigh,
+    _In_ JET_PFNSTATUS                              pfn )
 {
     JET_TRY( opInit, JetExternalRestoreExA( szCheckpointFilePath, szLogPath, rgrstmap, crstfilemap, szBackupLogPath, genLow, genHigh, NULL, NULL, NULL, NULL, pfn ) );
 }
 
 JET_ERR JET_API JetExternalRestoreW(
-    __in JET_PWSTR                                  wszCheckpointFilePath,
-    __in JET_PWSTR                                  wszLogPath,
+    _In_ JET_PWSTR                                  wszCheckpointFilePath,
+    _In_ JET_PWSTR                                  wszLogPath,
     __in_ecount_opt( crstfilemap ) JET_RSTMAP_W *   rgrstmap,
-    __in LONG                                       crstfilemap,
-    __in JET_PWSTR                                  wszBackupLogPath,
-    __in LONG                                       genLow,
-    __in LONG                                       genHigh,
-    __in JET_PFNSTATUS                              pfn )
+    _In_ LONG                                       crstfilemap,
+    _In_ JET_PWSTR                                  wszBackupLogPath,
+    _In_ LONG                                       genLow,
+    _In_ LONG                                       genHigh,
+    _In_ JET_PFNSTATUS                              pfn )
 {
     JET_TRY( opInit, JetExternalRestoreEx( wszCheckpointFilePath, wszLogPath, rgrstmap, crstfilemap, wszBackupLogPath, genLow, genHigh, NULL, NULL, NULL, NULL, pfn ) );
 }
 
 JET_ERR JET_API JetExternalRestore2A(
-    __in JET_PSTR                                   szCheckpointFilePath,
-    __in JET_PSTR                                   szLogPath,
+    _In_ JET_PSTR                                   szCheckpointFilePath,
+    _In_ JET_PSTR                                   szLogPath,
     __in_ecount_opt( crstfilemap ) JET_RSTMAP_A *   rgrstmap,
-    __in LONG                                       crstfilemap,
-    __in JET_PSTR                                   szBackupLogPath,
+    _In_ LONG                                       crstfilemap,
+    _In_ JET_PSTR                                   szBackupLogPath,
     __inout JET_LOGINFO_A *                         pLogInfo,
     __in_opt JET_PSTR                               szTargetInstanceName,
     __in_opt JET_PSTR                               szTargetInstanceLogPath,
     __in_opt JET_PSTR                               szTargetInstanceCheckpointPath,
-    __in JET_PFNSTATUS                              pfn )
+    _In_ JET_PFNSTATUS                              pfn )
 {
     JET_TRY( opInit, JetExternalRestore2ExA( szCheckpointFilePath, szLogPath, rgrstmap, crstfilemap, szBackupLogPath, pLogInfo, szTargetInstanceName, szTargetInstanceCheckpointPath, szTargetInstanceLogPath, pfn ) );
 }
 
 JET_ERR JET_API JetExternalRestore2W(
-    __in JET_PWSTR                                  wszCheckpointFilePath,
-    __in JET_PWSTR                                  wszLogPath,
+    _In_ JET_PWSTR                                  wszCheckpointFilePath,
+    _In_ JET_PWSTR                                  wszLogPath,
     __in_ecount_opt( crstfilemap ) JET_RSTMAP_W *   rgrstmap,
-    __in LONG                                       crstfilemap,
-    __in JET_PWSTR                                  wszBackupLogPath,
+    _In_ LONG                                       crstfilemap,
+    _In_ JET_PWSTR                                  wszBackupLogPath,
     __inout JET_LOGINFO_W *                         pLogInfo,
     __in_opt JET_PWSTR                              wszTargetInstanceName,
     __in_opt JET_PWSTR                              wszTargetInstanceLogPath,
     __in_opt JET_PWSTR                              wszTargetInstanceCheckpointPath,
-    __in JET_PFNSTATUS                              pfn )
+    _In_ JET_PFNSTATUS                              pfn )
 {
     JET_TRY( opInit, JetExternalRestore2Ex( wszCheckpointFilePath, wszLogPath, rgrstmap, crstfilemap, wszBackupLogPath, pLogInfo, wszTargetInstanceName, wszTargetInstanceCheckpointPath, wszTargetInstanceLogPath, pfn ) );
 }
 
 JET_ERR JET_API JetSnapshotStartA(
-    __in JET_INSTANCE   instance,
-    __in JET_PSTR       szDatabases,
-    __in JET_GRBIT      grbit )
+    _In_ JET_INSTANCE   instance,
+    _In_ JET_PSTR       szDatabases,
+    _In_ JET_GRBIT      grbit )
 {
     //  OBSOLETE: never finished, VSS used instead
     //
@@ -18777,9 +18777,9 @@ JET_ERR JET_API JetSnapshotStartA(
 }
 
 JET_ERR JET_API JetSnapshotStartW(
-    __in JET_INSTANCE   instance,
-    __in JET_PWSTR      szDatabases,
-    __in JET_GRBIT      grbit )
+    _In_ JET_INSTANCE   instance,
+    _In_ JET_PWSTR      szDatabases,
+    _In_ JET_GRBIT      grbit )
 {
     //  OBSOLETE: never finished, VSS used instead
     //
@@ -18787,8 +18787,8 @@ JET_ERR JET_API JetSnapshotStartW(
 }
 
 JET_ERR JET_API JetSnapshotStop(
-    __in JET_INSTANCE   instance,
-    __in JET_GRBIT      grbit)
+    _In_ JET_INSTANCE   instance,
+    _In_ JET_GRBIT      grbit)
 {
     //  OBSOLETE: never finished, VSS used instead
     //
@@ -18796,7 +18796,7 @@ JET_ERR JET_API JetSnapshotStop(
 }
 
 
-LOCAL JET_ERR JetResetCounterEx( __in JET_SESID sesid, __in LONG CounterType )
+LOCAL JET_ERR JetResetCounterEx( _In_ JET_SESID sesid, _In_ LONG CounterType )
 {
     APICALL_SESID   apicall( opResetCounter );
 
@@ -18815,14 +18815,14 @@ LOCAL JET_ERR JetResetCounterEx( __in JET_SESID sesid, __in LONG CounterType )
 
     return apicall.ErrResult();
 }
-JET_ERR JET_API JetResetCounter( __in JET_SESID sesid, __in LONG CounterType )
+JET_ERR JET_API JetResetCounter( _In_ JET_SESID sesid, _In_ LONG CounterType )
 {
     JET_VALIDATE_SESID( sesid );
     JET_TRY( opResetCounter, JetResetCounterEx( sesid, CounterType ) );
 }
 
 
-LOCAL JET_ERR JetGetCounterEx( __in JET_SESID sesid, __in LONG CounterType, __out LONG *plValue )
+LOCAL JET_ERR JetGetCounterEx( _In_ JET_SESID sesid, _In_ LONG CounterType, _Out_ LONG *plValue )
 {
     APICALL_SESID   apicall( opGetCounter );
 
@@ -18845,7 +18845,7 @@ LOCAL JET_ERR JetGetCounterEx( __in JET_SESID sesid, __in LONG CounterType, __ou
 
     return apicall.ErrResult();
 }
-JET_ERR JET_API JetGetCounter( __in JET_SESID sesid, __in LONG CounterType, __out LONG *plValue )
+JET_ERR JET_API JetGetCounter( _In_ JET_SESID sesid, _In_ LONG CounterType, _Out_ LONG *plValue )
 {
     JET_VALIDATE_SESID( sesid );
     JET_TRY( opGetCounter, JetGetCounterEx( sesid, CounterType, plValue ) );
@@ -18853,7 +18853,7 @@ JET_ERR JET_API JetGetCounter( __in JET_SESID sesid, __in LONG CounterType, __ou
 
 LOCAL JET_ERR JetGetThreadStatsEx(
     __out_bcount( cbMax ) void *    pvResult,
-    __in ULONG              cbMax )
+    _In_ ULONG              cbMax )
 {
     ProbeClientBuffer( pvResult, cbMax );
 
@@ -18881,7 +18881,7 @@ LOCAL JET_ERR JetGetThreadStatsEx(
 
 JET_ERR JET_API JetGetThreadStats(
     __out_bcount( cbMax ) void *    pvResult,
-    __in ULONG              cbMax )
+    _In_ ULONG              cbMax )
 {
     JET_TRY( opGetThreadStats, JetGetThreadStatsEx( (void*)pvResult, cbMax ) );
 }
@@ -18939,12 +18939,12 @@ CAutoCONVERTW::~CAutoCONVERTW()
 }
 
 LOCAL JET_ERR JetCompactEx(
-    __in JET_SESID              sesid,
-    __in JET_PCWSTR             wszDatabaseSrc,
-    __in JET_PCWSTR             wszDatabaseDest,
-    __in JET_PFNSTATUS          pfnStatus,
+    _In_ JET_SESID              sesid,
+    _In_ JET_PCWSTR             wszDatabaseSrc,
+    _In_ JET_PCWSTR             wszDatabaseDest,
+    _In_ JET_PFNSTATUS          pfnStatus,
     __in_opt JET_CONVERT_W *    pconvert,
-    __in JET_GRBIT              grbit )
+    _In_ JET_GRBIT              grbit )
 {
     APICALL_SESID   apicall( opCompact );
 
@@ -18978,12 +18978,12 @@ LOCAL JET_ERR JetCompactEx(
 }
 
 LOCAL JET_ERR JetCompactExA(
-    __in JET_SESID              sesid,
-    __in JET_PCSTR              szDatabaseSrc,
-    __in JET_PCSTR              szDatabaseDest,
-    __in JET_PFNSTATUS          pfnStatus,
+    _In_ JET_SESID              sesid,
+    _In_ JET_PCSTR              szDatabaseSrc,
+    _In_ JET_PCSTR              szDatabaseDest,
+    _In_ JET_PFNSTATUS          pfnStatus,
     __in_opt JET_CONVERT_A *    pconvert,
-    __in JET_GRBIT              grbit )
+    _In_ JET_GRBIT              grbit )
 {
     ERR                 err = JET_errSuccess;
     CAutoCONVERTW       lconvertW;
@@ -18998,35 +18998,35 @@ LOCAL JET_ERR JetCompactExA(
 }
 
 JET_ERR JET_API JetCompactA(
-    __in JET_SESID              sesid,
-    __in JET_PCSTR              szDatabaseSrc,
-    __in JET_PCSTR              szDatabaseDest,
-    __in JET_PFNSTATUS          pfnStatus,
+    _In_ JET_SESID              sesid,
+    _In_ JET_PCSTR              szDatabaseSrc,
+    _In_ JET_PCSTR              szDatabaseDest,
+    _In_ JET_PFNSTATUS          pfnStatus,
     __in_opt JET_CONVERT_A *    pconvert,
-    __in JET_GRBIT              grbit )
+    _In_ JET_GRBIT              grbit )
 {
     JET_VALIDATE_SESID( sesid );
     JET_TRY( opCompact, JetCompactExA( sesid, szDatabaseSrc, szDatabaseDest, pfnStatus, pconvert, grbit ) );
 }
 
 JET_ERR JET_API JetCompactW(
-    __in JET_SESID              sesid,
-    __in JET_PCWSTR             wszDatabaseSrc,
-    __in JET_PCWSTR             wszDatabaseDest,
-    __in JET_PFNSTATUS          pfnStatus,
+    _In_ JET_SESID              sesid,
+    _In_ JET_PCWSTR             wszDatabaseSrc,
+    _In_ JET_PCWSTR             wszDatabaseDest,
+    _In_ JET_PFNSTATUS          pfnStatus,
     __in_opt JET_CONVERT_W *    pconvert,
-    __in JET_GRBIT              grbit )
+    _In_ JET_GRBIT              grbit )
 {
     JET_VALIDATE_SESID( sesid );
     JET_TRY( opCompact, JetCompactEx( sesid, wszDatabaseSrc, wszDatabaseDest, pfnStatus, pconvert, grbit ) );
 }
 
 LOCAL JET_ERR JetConvertDDLEx(
-    __in JET_SESID                  sesid,
-    __in JET_DBID                   dbid,
-    __in JET_OPDDLCONV              convtyp,
+    _In_ JET_SESID                  sesid,
+    _In_ JET_DBID                   dbid,
+    _In_ JET_OPDDLCONV              convtyp,
     __out_bcount( cbData ) void *   pvData,
-    __in ULONG              cbData )
+    _In_ ULONG              cbData )
 {
     ERR             err;
     APICALL_SESID   apicall( opConvertDDL );
@@ -19182,11 +19182,11 @@ HandleError:
 }
 
 LOCAL JET_ERR JetConvertDDLExW(
-    __in JET_SESID                  sesid,
-    __in JET_DBID                   dbid,
-    __in JET_OPDDLCONV              convtyp,
+    _In_ JET_SESID                  sesid,
+    _In_ JET_DBID                   dbid,
+    _In_ JET_OPDDLCONV              convtyp,
     __out_bcount( cbData ) void *   pvData,
-    __in ULONG              cbData )
+    _In_ ULONG              cbData )
 {
     ERR             err         = JET_errSuccess;
     void *          lpvData     = NULL;
@@ -19373,31 +19373,31 @@ HandleError:
 }
 
 JET_ERR JET_API JetConvertDDLA(
-    __in JET_SESID                  sesid,
-    __in JET_DBID                   dbid,
-    __in JET_OPDDLCONV              convtyp,
+    _In_ JET_SESID                  sesid,
+    _In_ JET_DBID                   dbid,
+    _In_ JET_OPDDLCONV              convtyp,
     __out_bcount( cbData ) void *   pvData,
-    __in ULONG              cbData )
+    _In_ ULONG              cbData )
 {
     JET_VALIDATE_SESID( sesid );
     JET_TRY( opConvertDDL, JetConvertDDLEx( sesid, dbid, convtyp, pvData, cbData ) );
 }
 
 JET_ERR JET_API JetConvertDDLW(
-    __in JET_SESID                  sesid,
-    __in JET_DBID                   dbid,
-    __in JET_OPDDLCONV              convtyp,
+    _In_ JET_SESID                  sesid,
+    _In_ JET_DBID                   dbid,
+    _In_ JET_OPDDLCONV              convtyp,
     __out_bcount( cbData ) void *   pvData,
-    __in ULONG              cbData )
+    _In_ ULONG              cbData )
 {
     JET_VALIDATE_SESID( sesid );
     JET_TRY( opConvertDDL, JetConvertDDLExW( sesid, dbid, convtyp, pvData, cbData ) );
 }
 
 LOCAL JET_ERR JetUpgradeDatabaseEx(
-    __in JET_SESID          sesid,
-    __in JET_PCWSTR         wszDbFileName,
-    __in const JET_GRBIT    grbit )
+    _In_ JET_SESID          sesid,
+    _In_ JET_PCWSTR         wszDbFileName,
+    _In_ const JET_GRBIT    grbit )
 {
     APICALL_SESID   apicall( opUpgradeDatabase );
 
@@ -19423,9 +19423,9 @@ LOCAL JET_ERR JetUpgradeDatabaseEx(
 }
 
 LOCAL JET_ERR JetUpgradeDatabaseExA(
-    __in JET_SESID          sesid,
-    __in JET_PCSTR          szDbFileName,
-    __in const JET_GRBIT    grbit )
+    _In_ JET_SESID          sesid,
+    _In_ JET_PCSTR          szDbFileName,
+    _In_ const JET_GRBIT    grbit )
 {
     ERR             err             = JET_errSuccess;
     CAutoWSZPATH    lwszDbFileName;
@@ -19436,20 +19436,20 @@ LOCAL JET_ERR JetUpgradeDatabaseExA(
 }
 
 JET_ERR JET_API JetUpgradeDatabaseA(
-    __in JET_SESID          sesid,
-    __in JET_PCSTR          szDbFileName,
+    _In_ JET_SESID          sesid,
+    _In_ JET_PCSTR          szDbFileName,
     _Reserved_ JET_PCSTR    szSLVFileName,
-    __in const JET_GRBIT    grbit )
+    _In_ const JET_GRBIT    grbit )
 {
     JET_VALIDATE_SESID( sesid );
     JET_TRY( opUpgradeDatabase, JetUpgradeDatabaseExA( sesid, szDbFileName, grbit ) );
 }
 
 JET_ERR JET_API JetUpgradeDatabaseW(
-    __in JET_SESID          sesid,
-    __in JET_PCWSTR         wszDbFileName,
+    _In_ JET_SESID          sesid,
+    _In_ JET_PCWSTR         wszDbFileName,
     _Reserved_ JET_PCWSTR   wszSLVFileName,
-    __in const JET_GRBIT    grbit )
+    _In_ const JET_GRBIT    grbit )
 {
     JET_VALIDATE_SESID( sesid );
     JET_TRY( opUpgradeDatabase, JetUpgradeDatabaseEx( sesid, wszDbFileName, grbit ) );
@@ -19469,7 +19469,7 @@ INLINE JET_ERR JetIUtilities( JET_SESID sesid, JET_DBUTIL_W *pdbutil )
 
 LOCAL JET_ERR JetInitEx(    __inout_opt JET_INSTANCE    *pinstance,
                                     __in_opt JET_RSTINFO2_W     *prstInfo,
-                                    __in JET_GRBIT      grbit );
+                                    _In_ JET_GRBIT      grbit );
 class CAutoDBUTILW
 {
     public:
@@ -19915,12 +19915,12 @@ JET_ERR JET_API JetDefragment3W(
 }
 
 LOCAL JET_ERR JetDatabaseScanEx(
-    __in JET_SESID      sesid,
-    __in JET_DBID       dbid,
+    _In_ JET_SESID      sesid,
+    _In_ JET_DBID       dbid,
     __inout_opt ULONG * const pcSeconds,
-    __in ULONG  cmsecSleep,
-    __in JET_CALLBACK   pfnCallback,
-    __in JET_GRBIT      grbit )
+    _In_ ULONG  cmsecSleep,
+    _In_ JET_CALLBACK   pfnCallback,
+    _In_ JET_GRBIT      grbit )
 {
     APICALL_SESID   apicall( opDatabaseScan );
 
@@ -19952,22 +19952,22 @@ LOCAL JET_ERR JetDatabaseScanEx(
 }
 
 JET_ERR JET_API JetDatabaseScan(
-    __in JET_SESID      sesid,
-    __in JET_DBID       dbid,
+    _In_ JET_SESID      sesid,
+    _In_ JET_DBID       dbid,
     __inout_opt ULONG * pcSeconds,
-    __in ULONG  cmsecSleep,
-    __in JET_CALLBACK   pfnCallback,
-    __in JET_GRBIT      grbit )
+    _In_ ULONG  cmsecSleep,
+    _In_ JET_CALLBACK   pfnCallback,
+    _In_ JET_GRBIT      grbit )
 {
     JET_VALIDATE_SESID( sesid );
     JET_TRY( opDatabaseScan, JetDatabaseScanEx( sesid, dbid, pcSeconds, cmsecSleep, pfnCallback, grbit ) );
 }
 
 LOCAL JET_ERR JetSetMaxDatabaseSizeEx(
-    __in JET_SESID      sesid,
-    __in JET_DBID       dbid,
-    __in ULONG  cpg,
-    __in JET_GRBIT      grbit )
+    _In_ JET_SESID      sesid,
+    _In_ JET_DBID       dbid,
+    _In_ ULONG  cpg,
+    _In_ JET_GRBIT      grbit )
 {
     APICALL_SESID       apicall( opSetDatabaseSize );
 
@@ -19994,10 +19994,10 @@ LOCAL JET_ERR JetSetMaxDatabaseSizeEx(
 }
 
 JET_ERR JET_API JetSetMaxDatabaseSize(
-    __in JET_SESID      sesid,
-    __in JET_DBID       dbid,
-    __in ULONG  cpg,
-    __in JET_GRBIT      grbit )
+    _In_ JET_SESID      sesid,
+    _In_ JET_DBID       dbid,
+    _In_ ULONG  cpg,
+    _In_ JET_GRBIT      grbit )
 {
     JET_VALIDATE_SESID( sesid );
     JET_TRY( opSetDatabaseSize, JetSetMaxDatabaseSizeEx( sesid, dbid, cpg, grbit ) );
@@ -20005,10 +20005,10 @@ JET_ERR JET_API JetSetMaxDatabaseSize(
 
 
 LOCAL JET_ERR JetGetMaxDatabaseSizeEx(
-    __in JET_SESID          sesid,
-    __in JET_DBID           dbid,
-    __out ULONG *   pcpg,
-    __in JET_GRBIT          grbit )
+    _In_ JET_SESID          sesid,
+    _In_ JET_DBID           dbid,
+    _Out_ ULONG *   pcpg,
+    _In_ JET_GRBIT          grbit )
 {
     APICALL_SESID       apicall( opGetDatabaseSize );
 
@@ -20035,10 +20035,10 @@ LOCAL JET_ERR JetGetMaxDatabaseSizeEx(
 }
 
 JET_ERR JET_API JetGetMaxDatabaseSize(
-    __in JET_SESID          sesid,
-    __in JET_DBID           dbid,
-    __out ULONG *   pcpg,
-    __in JET_GRBIT          grbit )
+    _In_ JET_SESID          sesid,
+    _In_ JET_DBID           dbid,
+    _Out_ ULONG *   pcpg,
+    _In_ JET_GRBIT          grbit )
 {
     JET_VALIDATE_SESID( sesid );
     JET_TRY( opGetDatabaseSize, JetGetMaxDatabaseSizeEx( sesid, dbid, pcpg, grbit ) );
@@ -20046,10 +20046,10 @@ JET_ERR JET_API JetGetMaxDatabaseSize(
 
 
 LOCAL JET_ERR JetSetDatabaseSizeEx(
-    __in JET_SESID          sesid,
-    __in JET_PCWSTR         wszDatabaseName,
-    __in ULONG      cpg,
-    __out ULONG *   pcpgReal )
+    _In_ JET_SESID          sesid,
+    _In_ JET_PCWSTR         wszDatabaseName,
+    _In_ ULONG      cpg,
+    _Out_ ULONG *   pcpgReal )
 {
     APICALL_SESID   apicall( opSetDatabaseSize );
 
@@ -20077,10 +20077,10 @@ LOCAL JET_ERR JetSetDatabaseSizeEx(
 }
 
 LOCAL JET_ERR JetSetDatabaseSizeExA(
-    __in JET_SESID          sesid,
-    __in JET_PCSTR          szDatabaseName,
-    __in ULONG      cpg,
-    __out ULONG *   pcpgReal )
+    _In_ JET_SESID          sesid,
+    _In_ JET_PCSTR          szDatabaseName,
+    _In_ ULONG      cpg,
+    _Out_ ULONG *   pcpgReal )
 {
     ERR             err             = JET_errSuccess;
     CAutoWSZPATH    lwszDatabaseName;
@@ -20092,30 +20092,30 @@ LOCAL JET_ERR JetSetDatabaseSizeExA(
 }
 
 JET_ERR JET_API JetSetDatabaseSizeA(
-    __in JET_SESID          sesid,
-    __in JET_PCSTR          szDatabaseName,
-    __in ULONG      cpg,
-    __out ULONG *   pcpgReal )
+    _In_ JET_SESID          sesid,
+    _In_ JET_PCSTR          szDatabaseName,
+    _In_ ULONG      cpg,
+    _Out_ ULONG *   pcpgReal )
 {
     JET_VALIDATE_SESID( sesid );
     JET_TRY( opSetDatabaseSize, JetSetDatabaseSizeExA( sesid, szDatabaseName, cpg, pcpgReal ) );
 }
 
 JET_ERR JET_API JetSetDatabaseSizeW(
-    __in JET_SESID          sesid,
-    __in JET_PCWSTR         wszDatabaseName,
-    __in ULONG      cpg,
-    __out ULONG *   pcpgReal )
+    _In_ JET_SESID          sesid,
+    _In_ JET_PCWSTR         wszDatabaseName,
+    _In_ ULONG      cpg,
+    _Out_ ULONG *   pcpgReal )
 {
     JET_VALIDATE_SESID( sesid );
     JET_TRY( opSetDatabaseSize, JetSetDatabaseSizeEx( sesid, wszDatabaseName, cpg, pcpgReal ) );
 }
 
 LOCAL JET_ERR JetGrowDatabaseEx(
-    __in JET_SESID          sesid,
-    __in JET_DBID           dbid,
-    __in ULONG      cpg,
-    __in ULONG *    pcpgReal )
+    _In_ JET_SESID          sesid,
+    _In_ JET_DBID           dbid,
+    _In_ ULONG      cpg,
+    _In_ ULONG *    pcpgReal )
 {
     APICALL_SESID   apicall( opGrowDatabase );
 
@@ -20142,21 +20142,21 @@ LOCAL JET_ERR JetGrowDatabaseEx(
     return apicall.ErrResult();
 }
 JET_ERR JET_API JetGrowDatabase(
-    __in JET_SESID          sesid,
-    __in JET_DBID           dbid,
-    __in ULONG      cpg,
-    __in ULONG *    pcpgReal )
+    _In_ JET_SESID          sesid,
+    _In_ JET_DBID           dbid,
+    _In_ ULONG      cpg,
+    _In_ ULONG *    pcpgReal )
 {
     JET_VALIDATE_SESID( sesid );
     JET_TRY( opGrowDatabase, JetGrowDatabaseEx( sesid, dbid, cpg, pcpgReal ) );
 }
 
 LOCAL JET_ERR JetResizeDatabaseEx(
-    __in JET_SESID          sesid,
-    __in JET_DBID           dbid,
-    __in ULONG      cpg,
-    __out ULONG *   pcpgActual,
-    __in const JET_GRBIT    grbit )
+    _In_ JET_SESID          sesid,
+    _In_ JET_DBID           dbid,
+    _In_ ULONG      cpg,
+    _Out_ ULONG *   pcpgActual,
+    _In_ const JET_GRBIT    grbit )
 {
     APICALL_SESID   apicall( opResizeDatabase );
 
@@ -20184,17 +20184,17 @@ LOCAL JET_ERR JetResizeDatabaseEx(
     return apicall.ErrResult();
 }
 JET_ERR JET_API JetResizeDatabase(
-    __in JET_SESID          sesid,
-    __in JET_DBID           dbid,
-    __in ULONG      cpg,
-    __out ULONG *   pcpgActual,
-    __in const JET_GRBIT    grbit )
+    _In_ JET_SESID          sesid,
+    _In_ JET_DBID           dbid,
+    _In_ ULONG      cpg,
+    _Out_ ULONG *   pcpgActual,
+    _In_ const JET_GRBIT    grbit )
 {
     JET_VALIDATE_SESID( sesid );
     JET_TRY( opResizeDatabase, JetResizeDatabaseEx( sesid, dbid, cpg, pcpgActual, grbit ) );
 }
 
-LOCAL JET_ERR JetSetSessionContextEx( __in JET_SESID sesid, __in ULONG_PTR ulContext )
+LOCAL JET_ERR JetSetSessionContextEx( _In_ JET_SESID sesid, _In_ ULONG_PTR ulContext )
 {
     APICALL_SESID   apicall( opSetSessionContext );
 
@@ -20213,13 +20213,13 @@ LOCAL JET_ERR JetSetSessionContextEx( __in JET_SESID sesid, __in ULONG_PTR ulCon
 
     return apicall.ErrResult();
 }
-JET_ERR JET_API JetSetSessionContext( __in JET_SESID vsesid, __in ULONG_PTR ulContext )
+JET_ERR JET_API JetSetSessionContext( _In_ JET_SESID vsesid, _In_ ULONG_PTR ulContext )
 {
     JET_VALIDATE_SESID( vsesid );
     JET_TRY( opSetSessionContext, JetSetSessionContextEx( vsesid, ulContext ) );
 }
 
-LOCAL JET_ERR JetResetSessionContextEx( __in JET_SESID sesid )
+LOCAL JET_ERR JetResetSessionContextEx( _In_ JET_SESID sesid )
 {
     APICALL_SESID   apicall( opResetSessionContext );
 
@@ -20232,7 +20232,7 @@ LOCAL JET_ERR JetResetSessionContextEx( __in JET_SESID sesid )
 
     return apicall.ErrResult();
 }
-JET_ERR JET_API JetResetSessionContext( __in JET_SESID sesid )
+JET_ERR JET_API JetResetSessionContext( _In_ JET_SESID sesid )
 {
     JET_VALIDATE_SESID( sesid );
     JET_TRY( opResetSessionContext, JetResetSessionContextEx( sesid ) );
@@ -20272,7 +20272,7 @@ Side Effects:
 LOCAL JET_ERR JetSetSystemParameterEx(
     __inout_opt JET_INSTANCE *  pinstance,
     __in_opt JET_SESID          sesid,
-    __in ULONG          paramid,
+    _In_ ULONG          paramid,
     __in_opt JET_API_PTR        lParam,
     __in_opt JET_PCWSTR         wszParam )
 {
@@ -20373,7 +20373,7 @@ LOCAL JET_ERR JetSetSystemParameterEx(
 LOCAL JET_ERR JetSetSystemParameterExA(
     __inout_opt JET_INSTANCE *  pinstance,
     __in_opt JET_SESID          sesid,
-    __in ULONG          paramid,
+    _In_ ULONG          paramid,
     __in_opt JET_API_PTR        lParam,
     __in_opt JET_PCSTR          szParam )
 {
@@ -20388,7 +20388,7 @@ LOCAL JET_ERR JetSetSystemParameterExA(
 JET_ERR JET_API JetSetSystemParameterA(
     __inout_opt JET_INSTANCE *  pinstance,
     __in_opt JET_SESID          sesid,
-    __in ULONG          paramid,
+    _In_ ULONG          paramid,
     __in_opt JET_API_PTR        lParam,
     __in_opt JET_PCSTR          szParam )
 {
@@ -20398,7 +20398,7 @@ JET_ERR JET_API JetSetSystemParameterA(
 JET_ERR JET_API JetSetSystemParameterW(
     __inout_opt JET_INSTANCE *  pinstance,
     __in_opt JET_SESID          sesid,
-    __in ULONG          paramid,
+    _In_ ULONG          paramid,
     __in_opt JET_API_PTR        lParam,
     __in_opt JET_PCWSTR         wszParam )
 {
@@ -20406,10 +20406,10 @@ JET_ERR JET_API JetSetSystemParameterW(
 }
 
 JET_ERR JetGetResourceParamEx(
-    __in JET_INSTANCE   instance,
-    __in JET_RESOPER    resoper,
-    __in JET_RESID      resid,
-    __out JET_API_PTR*  pulParam )
+    _In_ JET_INSTANCE   instance,
+    _In_ JET_RESOPER    resoper,
+    _In_ JET_RESID      resid,
+    _Out_ JET_API_PTR*  pulParam )
 {
     APICALL_INST    apicall( opGetResourceParam );
     INST            *pinst;
@@ -20441,10 +20441,10 @@ JET_ERR JetGetResourceParamEx(
 }
 
 JET_ERR JET_API JetGetResourceParam(
-    __in JET_INSTANCE   instance,
-    __in JET_RESOPER    resoper,
-    __in JET_RESID      resid,
-    __out JET_API_PTR*  pulParam )
+    _In_ JET_INSTANCE   instance,
+    _In_ JET_RESOPER    resoper,
+    _In_ JET_RESID      resid,
+    _Out_ JET_API_PTR*  pulParam )
 {
     JET_VALIDATE_INSTANCE( instance );
     JET_TRY( opGetResourceParam, JetGetResourceParamEx( instance, resoper, resid, pulParam ) );
@@ -20452,10 +20452,10 @@ JET_ERR JET_API JetGetResourceParam(
 
 
 JET_ERR JetSetResourceParamEx(
-    __in JET_INSTANCE   instance,
-    __in JET_RESOPER    resoper,
-    __in JET_RESID      resid,
-    __in JET_API_PTR    ulParam )
+    _In_ JET_INSTANCE   instance,
+    _In_ JET_RESOPER    resoper,
+    _In_ JET_RESID      resid,
+    _In_ JET_API_PTR    ulParam )
 {
     //  atomically apply to all resources via a recursive call
     //
@@ -20569,10 +20569,10 @@ JET_ERR JetSetResourceParamEx(
 }
 
 JET_ERR JET_API JetSetResourceParam(
-    __in JET_INSTANCE   instance,
-    __in JET_RESOPER    resoper,
-    __in JET_RESID      resid,
-    __in JET_API_PTR    ulParam )
+    _In_ JET_INSTANCE   instance,
+    _In_ JET_RESOPER    resoper,
+    _In_ JET_RESID      resid,
+    _In_ JET_API_PTR    ulParam )
 {
     JET_VALIDATE_INSTANCE( instance );
     JET_TRY( opSetResourceParam, JetSetResourceParamEx( instance, resoper, resid, ulParam ) );
@@ -20969,7 +20969,7 @@ Obs:
 */
 LOCAL JET_ERR JetEnableMultiInstanceEx(
     __in_ecount_opt( csetsysparam ) JET_SETSYSPARAM_W * psetsysparam,
-    __in ULONG                                  csetsysparam,
+    _In_ ULONG                                  csetsysparam,
     __out_opt ULONG *                           pcsetsucceed )
 {
     ERR             err         = JET_errSuccess;
@@ -21154,7 +21154,7 @@ HandleError:
 
 LOCAL JET_ERR JetEnableMultiInstanceExA(
     __in_ecount_opt( csetsysparam ) JET_SETSYSPARAM_A * psetsysparam,
-    __in ULONG                                  csetsysparam,
+    _In_ ULONG                                  csetsysparam,
     __out_opt ULONG *                           pcsetsucceed )
 {
     ERR                 err             = JET_errSuccess;
@@ -21172,7 +21172,7 @@ LOCAL JET_ERR JetEnableMultiInstanceExA(
 
 JET_ERR JET_API JetEnableMultiInstanceA(
     __in_ecount_opt( csetsysparam ) JET_SETSYSPARAM_A * psetsysparam,
-    __in ULONG                                  csetsysparam,
+    _In_ ULONG                                  csetsysparam,
     __out_opt ULONG *                           pcsetsucceed )
 {
     JET_TRY( opEnableMultiInstance, JetEnableMultiInstanceExA( psetsysparam, csetsysparam, pcsetsucceed ) );
@@ -21180,7 +21180,7 @@ JET_ERR JET_API JetEnableMultiInstanceA(
 
 JET_ERR JET_API JetEnableMultiInstanceW(
     __in_ecount_opt( csetsysparam ) JET_SETSYSPARAM_W * psetsysparam,
-    __in ULONG                                  csetsysparam,
+    _In_ ULONG                                  csetsysparam,
     __out_opt ULONG *                           pcsetsucceed )
 {
     JET_TRY( opEnableMultiInstance, JetEnableMultiInstanceEx( psetsysparam, csetsysparam, pcsetsucceed ) );
@@ -21189,7 +21189,7 @@ JET_ERR JET_API JetEnableMultiInstanceW(
 LOCAL JET_ERR JetInitEx(
     __inout_opt JET_INSTANCE *  pinstance,
     __in_opt JET_RSTINFO2_W *   prstInfo,
-    __in JET_GRBIT              grbit )
+    _In_ JET_GRBIT              grbit )
 {
     ERR             err                 = JET_errSuccess;
     BOOL            fAllocateInstance   = ( NULL == pinstance || FINSTInvalid( *pinstance ) );
@@ -21667,7 +21667,7 @@ JET_ERR JET_API JetInit( __inout_opt JET_INSTANCE *pinstance )
     return JetInit2( pinstance, NO_GRBIT );
 }
 
-JET_ERR JET_API JetInit2( __inout_opt JET_INSTANCE *pinstance, __in JET_GRBIT grbit )
+JET_ERR JET_API JetInit2( __inout_opt JET_INSTANCE *pinstance, _In_ JET_GRBIT grbit )
 {
     return JetInit3A( pinstance, NULL, grbit | JET_bitReplayMissingMapEntryDB );
 }
@@ -21675,7 +21675,7 @@ JET_ERR JET_API JetInit2( __inout_opt JET_INSTANCE *pinstance, __in JET_GRBIT gr
 JET_ERR JET_API JetInit3A(
     __inout_opt JET_INSTANCE *  pinstance,
     __in_opt JET_RSTINFO_A *    prstInfo,
-    __in JET_GRBIT              grbit )
+    _In_ JET_GRBIT              grbit )
 {
     ERR             err;
     CAutoRSTINFOW   lrstInfoW;
@@ -21688,7 +21688,7 @@ JET_ERR JET_API JetInit3A(
 JET_ERR JET_API JetInit3W(
     __inout_opt JET_INSTANCE *  pinstance,
     __in_opt JET_RSTINFO_W *    prstInfo,
-    __in JET_GRBIT              grbit )
+    _In_ JET_GRBIT              grbit )
 {
     ERR             err;
     CAutoRSTINFOW   lrstInfoW;
@@ -21701,7 +21701,7 @@ JET_ERR JET_API JetInit3W(
 JET_ERR JET_API JetInit4A(
     __inout_opt JET_INSTANCE *  pinstance,
     __in_opt JET_RSTINFO2_A *   prstInfo,
-    __in JET_GRBIT              grbit )
+    _In_ JET_GRBIT              grbit )
 {
     ERR             err;
     CAutoRSTINFOW   lrstInfoW;
@@ -21714,7 +21714,7 @@ JET_ERR JET_API JetInit4A(
 JET_ERR JET_API JetInit4W(
     __inout_opt JET_INSTANCE *  pinstance,
     __in_opt JET_RSTINFO2_W *   prstInfo,
-    __in JET_GRBIT              grbit )
+    _In_ JET_GRBIT              grbit )
 {
     //  UNDONE:  validate instance
     JET_TRY( opInit, JetInitEx( pinstance, prstInfo, grbit ) );
@@ -21726,7 +21726,7 @@ the instance parameters before calling JetInit for that instance.
 The system params for this instance are set to the global ones
 */
 LOCAL JET_ERR JetCreateInstanceEx(
-    __out JET_INSTANCE *    pinstance,
+    _Out_ JET_INSTANCE *    pinstance,
     __in_opt JET_PCWSTR     wszInstanceName,
     __in_opt JET_PCWSTR     wszDisplayName )
 {
@@ -21786,7 +21786,7 @@ LOCAL JET_ERR JetCreateInstanceEx(
 }
 
 LOCAL JET_ERR JetCreateInstanceExA(
-    __out JET_INSTANCE *    pinstance,
+    _Out_ JET_INSTANCE *    pinstance,
     __in_opt JET_PCSTR      szInstanceName,
     __in_opt JET_PCSTR      szDisplayName )
 {
@@ -21801,14 +21801,14 @@ LOCAL JET_ERR JetCreateInstanceExA(
 }
 
 JET_ERR JET_API JetCreateInstanceA(
-    __out JET_INSTANCE *    pinstance,
+    _Out_ JET_INSTANCE *    pinstance,
     __in_opt JET_PCSTR      szInstanceName )
 {
     return JetCreateInstance2A( pinstance, szInstanceName, NULL, NO_GRBIT );
 }
 
 JET_ERR JET_API JetCreateInstanceW(
-    __out JET_INSTANCE *    pinstance,
+    _Out_ JET_INSTANCE *    pinstance,
     __in_opt JET_PCWSTR     wszInstanceName )
 {
     return JetCreateInstance2W( pinstance, wszInstanceName, NULL, NO_GRBIT );
@@ -21817,28 +21817,28 @@ JET_ERR JET_API JetCreateInstanceW(
 
 // Note: grbit is currently unused
 JET_ERR JET_API JetCreateInstance2A(
-    __out JET_INSTANCE *    pinstance,
+    _Out_ JET_INSTANCE *    pinstance,
     __in_opt JET_PCSTR      szInstanceName,
     __in_opt JET_PCSTR      szDisplayName,
-    __in JET_GRBIT          grbit )
+    _In_ JET_GRBIT          grbit )
 {
     JET_TRY( opCreateInstance, JetCreateInstanceExA( pinstance, szInstanceName, szDisplayName ) );
 }
 
 JET_ERR JET_API JetCreateInstance2W(
-    __out JET_INSTANCE *    pinstance,
+    _Out_ JET_INSTANCE *    pinstance,
     __in_opt JET_PCWSTR     wszInstanceName,
     __in_opt JET_PCWSTR     wszDisplayName,
-    __in JET_GRBIT          grbit )
+    _In_ JET_GRBIT          grbit )
 {
     JET_TRY( opCreateInstance, JetCreateInstanceEx( pinstance, wszInstanceName, wszDisplayName ) );
 }
 
 LOCAL JET_ERR JET_API JetGetInstanceMiscInfoEx(
-    __in JET_INSTANCE               instance,
+    _In_ JET_INSTANCE               instance,
     __out_bcount( cbMax ) void *    pvResult,
-    __in ULONG              cbMax,
-    __in ULONG              InfoLevel )
+    _In_ ULONG              cbMax,
+    _In_ ULONG              InfoLevel )
 {
     ERR             err;
     ULONG           cbMin;
@@ -21942,10 +21942,10 @@ HandleError:
 }
 
 JET_ERR JET_API JetGetInstanceMiscInfo(
-    __in JET_INSTANCE               instance,
+    _In_ JET_INSTANCE               instance,
     __out_bcount( cbMax ) void *    pvResult,
-    __in ULONG              cbMax,
-    __in ULONG              InfoLevel )
+    _In_ ULONG              cbMax,
+    _In_ ULONG              InfoLevel )
 {
     JET_VALIDATE_INSTANCE( instance );
     JET_TRY( opGetInstanceMiscInfo, JetGetInstanceMiscInfoEx( instance, pvResult, cbMax, InfoLevel ) );
@@ -21953,8 +21953,8 @@ JET_ERR JET_API JetGetInstanceMiscInfo(
 
 
 LOCAL JET_ERR JetRestoreInstanceEx(
-    __in JET_INSTANCE   instance,
-    __in JET_PCWSTR     wsz,
+    _In_ JET_INSTANCE   instance,
+    _In_ JET_PCWSTR     wsz,
     __in_opt JET_PCWSTR wszDest,
     __in_opt JET_PFNSTATUS  pfn )
 {
@@ -22055,8 +22055,8 @@ LOCAL JET_ERR JetRestoreInstanceEx(
 }
 
 LOCAL JET_ERR JetRestoreInstanceExA(
-    __in JET_INSTANCE   instance,
-    __in JET_PCSTR      sz,
+    _In_ JET_INSTANCE   instance,
+    _In_ JET_PCSTR      sz,
     __in_opt JET_PCSTR  szDest,
     __in_opt JET_PFNSTATUS  pfn )
 {
@@ -22070,8 +22070,8 @@ LOCAL JET_ERR JetRestoreInstanceExA(
 }
 
 JET_ERR JET_API JetRestoreInstanceA(
-    __in JET_INSTANCE   instance,
-    __in JET_PCSTR      sz,
+    _In_ JET_INSTANCE   instance,
+    _In_ JET_PCSTR      sz,
     __in_opt JET_PCSTR  szDest,
     __in_opt JET_PFNSTATUS  pfn )
 {
@@ -22080,8 +22080,8 @@ JET_ERR JET_API JetRestoreInstanceA(
 }
 
 JET_ERR JET_API JetRestoreInstanceW(
-    __in JET_INSTANCE   instance,
-    __in JET_PCWSTR     wsz,
+    _In_ JET_INSTANCE   instance,
+    _In_ JET_PCWSTR     wsz,
     __in_opt JET_PCWSTR wszDest,
     __in_opt JET_PFNSTATUS  pfn )
 {
@@ -22089,7 +22089,7 @@ JET_ERR JET_API JetRestoreInstanceW(
     JET_TRY( opRestoreInstance, JetRestoreInstanceEx( instance, wsz, wszDest, pfn ) );
 }
 
-LOCAL JET_ERR JetTermEx( __in JET_INSTANCE instance, __in JET_GRBIT grbit )
+LOCAL JET_ERR JetTermEx( _In_ JET_INSTANCE instance, _In_ JET_GRBIT grbit )
 {
     OSTrace( JET_tracetagAPI, OSFormat( "Start %s(0x%Ix,0x%x)", __FUNCTION__, instance, grbit ) );
     COSTraceTrackErrors trackerrors( __FUNCTION__ );
@@ -22097,18 +22097,18 @@ LOCAL JET_ERR JetTermEx( __in JET_INSTANCE instance, __in JET_GRBIT grbit )
     return err;
 }
 
-JET_ERR JET_API JetTerm( __in JET_INSTANCE instance )
+JET_ERR JET_API JetTerm( _In_ JET_INSTANCE instance )
 {
     JET_VALIDATE_INSTANCE( instance );
     JET_TRY( opTerm, JetTermEx( instance, JET_bitTermAbrupt ) );
 }
-JET_ERR JET_API JetTerm2( __in JET_INSTANCE instance, __in JET_GRBIT grbit )
+JET_ERR JET_API JetTerm2( _In_ JET_INSTANCE instance, _In_ JET_GRBIT grbit )
 {
     JET_VALIDATE_INSTANCE( instance );
     JET_TRY( opTerm, JetTermEx( instance, grbit ) );
 }
 
-JET_ERR JET_API JetStopServiceInstanceExOld( __in JET_INSTANCE instance )
+JET_ERR JET_API JetStopServiceInstanceExOld( _In_ JET_INSTANCE instance )
 {
     ERR     err;
     INST    *pinst;
@@ -22145,7 +22145,7 @@ JET_ERR JET_API JetStopServiceInstanceExOld( __in JET_INSTANCE instance )
 }
 
 
-JET_ERR JET_API JetStopServiceInstanceEx( __in JET_INSTANCE instance, _In_ JET_GRBIT grbit )
+JET_ERR JET_API JetStopServiceInstanceEx( _In_ JET_INSTANCE instance, _In_ JET_GRBIT grbit )
 {
     ERR     err = JET_errSuccess;
     INST *  pinst;
@@ -22426,7 +22426,7 @@ HandleError:
     return err;
 }
 
-JET_ERR JET_API JetStopServiceInstance( __in JET_INSTANCE instance )
+JET_ERR JET_API JetStopServiceInstance( _In_ JET_INSTANCE instance )
 {
     JET_VALIDATE_INSTANCE( instance );
     JET_TRY( opStopServiceInstance, JetStopServiceInstanceExOld( instance ) );
@@ -22448,7 +22448,7 @@ JET_ERR JET_API JetStopService()
 }
 
 
-LOCAL JET_ERR JetStopBackupInstanceEx( __in JET_INSTANCE instance )
+LOCAL JET_ERR JetStopBackupInstanceEx( _In_ JET_INSTANCE instance )
 {
     ERR     err;
     INST    *pinst;
@@ -22464,7 +22464,7 @@ LOCAL JET_ERR JetStopBackupInstanceEx( __in JET_INSTANCE instance )
 
     return JET_errSuccess;
 }
-JET_ERR JET_API JetStopBackupInstance( __in JET_INSTANCE instance )
+JET_ERR JET_API JetStopBackupInstance( _In_ JET_INSTANCE instance )
 {
     JET_VALIDATE_INSTANCE( instance );
     JET_TRY( opStopBackupInstance, JetStopBackupInstanceEx( instance ) );
@@ -22497,7 +22497,7 @@ JET_ERR JET_API JetFreeBuffer(
 
 
 LOCAL JET_ERR JetGetInstanceInfoEx(
-    __out ULONG *                                           pcInstanceInfo,
+    _Out_ ULONG *                                           pcInstanceInfo,
     __deref_out_ecount( *pcInstanceInfo ) JET_INSTANCE_INFO_W **    paInstanceInfo )
 {
     OSTrace(
@@ -22712,7 +22712,7 @@ CAutoINSTANCE_INFOW::~CAutoINSTANCE_INFOW()
 
 
 LOCAL JET_ERR JetGetInstanceInfoExA(
-    __out ULONG *                                           pcInstanceInfo,
+    _Out_ ULONG *                                           pcInstanceInfo,
     __deref_out_ecount( *pcInstanceInfo ) JET_INSTANCE_INFO_A **    paInstanceInfo )
 {
     ERR                     err             = JET_errSuccess;
@@ -22741,22 +22741,22 @@ HandleError:
 }
 
 JET_ERR JET_API JetGetInstanceInfoA(
-    __out ULONG *                                           pcInstanceInfo,
+    _Out_ ULONG *                                           pcInstanceInfo,
     __deref_out_ecount( *pcInstanceInfo ) JET_INSTANCE_INFO_A **    paInstanceInfo )
 {
     JET_TRY( opGetInstanceInfo, JetGetInstanceInfoExA( pcInstanceInfo, paInstanceInfo ) );
 }
 
 JET_ERR JET_API JetGetInstanceInfoW(
-    __out ULONG *                                           pcInstanceInfo,
+    _Out_ ULONG *                                           pcInstanceInfo,
     __deref_out_ecount( *pcInstanceInfo ) JET_INSTANCE_INFO_W **    paInstanceInfo )
 {
     JET_TRY( opGetInstanceInfo, JetGetInstanceInfoEx( pcInstanceInfo, paInstanceInfo ) );
 }
 
 LOCAL JET_ERR JetOSSnapshotPrepareEx(
-    __out JET_OSSNAPID *    psnapId,
-    __in const JET_GRBIT    grbit )
+    _Out_ JET_OSSNAPID *    psnapId,
+    _In_ const JET_GRBIT    grbit )
 {
     OSTrace(
         JET_tracetagAPI,
@@ -22769,18 +22769,18 @@ LOCAL JET_ERR JetOSSnapshotPrepareEx(
 }
 
 JET_ERR JET_API JetOSSnapshotPrepare(
-    __out JET_OSSNAPID *    psnapId,
-    __in const JET_GRBIT    grbit )
+    _Out_ JET_OSSNAPID *    psnapId,
+    _In_ const JET_GRBIT    grbit )
 {
     JET_TRY( opOSSnapshotPrepare, JetOSSnapshotPrepareEx( psnapId, grbit ) );
 }
 
 
 LOCAL JET_ERR JetOSSnapshotFreezeEx(
-    __in const JET_OSSNAPID                                         snapId,
-    __out ULONG *                                           pcInstanceInfo,
+    _In_ const JET_OSSNAPID                                         snapId,
+    _Out_ ULONG *                                           pcInstanceInfo,
     __deref_out_ecount( *pcInstanceInfo ) JET_INSTANCE_INFO_W **    paInstanceInfo,
-    __in const JET_GRBIT                                            grbit )
+    _In_ const JET_GRBIT                                            grbit )
 {
     OSTrace(
         JET_tracetagAPI,
@@ -22795,10 +22795,10 @@ LOCAL JET_ERR JetOSSnapshotFreezeEx(
 }
 
 LOCAL JET_ERR JetOSSnapshotFreezeExA(
-    __in const JET_OSSNAPID                                         snapId,
-    __out ULONG *                                           pcInstanceInfo,
+    _In_ const JET_OSSNAPID                                         snapId,
+    _Out_ ULONG *                                           pcInstanceInfo,
     __deref_out_ecount( *pcInstanceInfo ) JET_INSTANCE_INFO_A **    paInstanceInfo,
-    __in const JET_GRBIT                                            grbit )
+    _In_ const JET_GRBIT                                            grbit )
 {
     ERR                     err             = JET_errSuccess;
     JET_INSTANCE_INFO_W *   laInstanceInfoW     = NULL;
@@ -22831,24 +22831,24 @@ HandleError:
 }
 
 JET_ERR JET_API JetOSSnapshotFreezeA(
-    __in const JET_OSSNAPID                                         snapId,
-    __out ULONG *                                           pcInstanceInfo,
+    _In_ const JET_OSSNAPID                                         snapId,
+    _Out_ ULONG *                                           pcInstanceInfo,
     __deref_out_ecount( *pcInstanceInfo ) JET_INSTANCE_INFO_A **    paInstanceInfo,
-    __in const JET_GRBIT                                            grbit )
+    _In_ const JET_GRBIT                                            grbit )
 {
     JET_TRY( opOSSnapshotFreeze, JetOSSnapshotFreezeExA( snapId, pcInstanceInfo, paInstanceInfo, grbit ) );
 }
 
 JET_ERR JET_API JetOSSnapshotFreezeW(
-    __in const JET_OSSNAPID                                         snapId,
-    __out ULONG *                                           pcInstanceInfo,
+    _In_ const JET_OSSNAPID                                         snapId,
+    _Out_ ULONG *                                           pcInstanceInfo,
     __deref_out_ecount( *pcInstanceInfo ) JET_INSTANCE_INFO_W **    paInstanceInfo,
-    __in const JET_GRBIT                                            grbit )
+    _In_ const JET_GRBIT                                            grbit )
 {
     JET_TRY( opOSSnapshotFreeze, JetOSSnapshotFreezeEx( snapId, pcInstanceInfo, paInstanceInfo, grbit ) );
 }
 
-LOCAL JET_ERR JetOSSnapshotThawEx( __in const JET_OSSNAPID snapId, __in const JET_GRBIT grbit )
+LOCAL JET_ERR JetOSSnapshotThawEx( _In_ const JET_OSSNAPID snapId, _In_ const JET_GRBIT grbit )
 {
     OSTrace(
         JET_tracetagAPI,
@@ -22860,13 +22860,13 @@ LOCAL JET_ERR JetOSSnapshotThawEx( __in const JET_OSSNAPID snapId, __in const JE
     return ErrIsamOSSnapshotThaw( snapId, grbit );
 }
 
-JET_ERR JET_API JetOSSnapshotThaw( __in const JET_OSSNAPID snapId, __in const JET_GRBIT grbit )
+JET_ERR JET_API JetOSSnapshotThaw( _In_ const JET_OSSNAPID snapId, _In_ const JET_GRBIT grbit )
 {
     JET_TRY( opOSSnapshotThaw, JetOSSnapshotThawEx( snapId, grbit ) );
 }
 
 
-LOCAL JET_ERR JetOSSnapshotAbortEx( __in const JET_OSSNAPID snapId, __in const JET_GRBIT grbit )
+LOCAL JET_ERR JetOSSnapshotAbortEx( _In_ const JET_OSSNAPID snapId, _In_ const JET_GRBIT grbit )
 {
     OSTrace(
         JET_tracetagAPI,
@@ -22878,12 +22878,12 @@ LOCAL JET_ERR JetOSSnapshotAbortEx( __in const JET_OSSNAPID snapId, __in const J
     return ErrIsamOSSnapshotAbort( snapId, grbit );
 }
 
-JET_ERR JET_API JetOSSnapshotAbort( __in const JET_OSSNAPID snapId, __in const JET_GRBIT grbit )
+JET_ERR JET_API JetOSSnapshotAbort( _In_ const JET_OSSNAPID snapId, _In_ const JET_GRBIT grbit )
 {
     JET_TRY( opOSSnapshotAbort, JetOSSnapshotAbortEx( snapId, grbit ) );
 }
 
-INLINE JET_ERR JetOSSnapshotPrepareInstanceEx( __in JET_OSSNAPID snapId, __in const JET_INSTANCE instance, __in const JET_GRBIT grbit )
+INLINE JET_ERR JetOSSnapshotPrepareInstanceEx( _In_ JET_OSSNAPID snapId, _In_ const JET_INSTANCE instance, _In_ const JET_GRBIT grbit )
 {
     APICALL_INST    apicall( opOSSnapPrepareInstance );
 
@@ -22904,7 +22904,7 @@ INLINE JET_ERR JetOSSnapshotPrepareInstanceEx( __in JET_OSSNAPID snapId, __in co
     return apicall.ErrResult();
 }
 
-JET_ERR JET_API JetOSSnapshotPrepareInstance( __in JET_OSSNAPID snapId, __in const JET_INSTANCE instance, __in const JET_GRBIT grbit )
+JET_ERR JET_API JetOSSnapshotPrepareInstance( _In_ JET_OSSNAPID snapId, _In_ const JET_INSTANCE instance, _In_ const JET_GRBIT grbit )
 {
     JET_VALIDATE_INSTANCE( instance );
     JET_TRY( opOSSnapPrepareInstance, JetOSSnapshotPrepareInstanceEx( snapId, instance, grbit ) );
@@ -22912,7 +22912,7 @@ JET_ERR JET_API JetOSSnapshotPrepareInstance( __in JET_OSSNAPID snapId, __in con
 
 
 
-INLINE JET_ERR JetOSSnapshotTruncateLogEx( __in const JET_OSSNAPID snapId, __in const JET_GRBIT grbit )
+INLINE JET_ERR JetOSSnapshotTruncateLogEx( _In_ const JET_OSSNAPID snapId, _In_ const JET_GRBIT grbit )
 {
     OSTrace(
         JET_tracetagAPI,
@@ -22924,12 +22924,12 @@ INLINE JET_ERR JetOSSnapshotTruncateLogEx( __in const JET_OSSNAPID snapId, __in 
     return ErrIsamOSSnapshotTruncateLog( snapId, NULL, grbit );
 }
 
-JET_ERR JET_API JetOSSnapshotTruncateLog( __in const JET_OSSNAPID snapId, __in const JET_GRBIT grbit )
+JET_ERR JET_API JetOSSnapshotTruncateLog( _In_ const JET_OSSNAPID snapId, _In_ const JET_GRBIT grbit )
 {
     JET_TRY( opOSSnapshotTruncateLog, JetOSSnapshotTruncateLogEx( snapId, grbit ) );
 }
 
-INLINE JET_ERR JetOSSnapshotTruncateLogInstanceEx( __in const JET_OSSNAPID snapId, __in const JET_INSTANCE instance, __in const JET_GRBIT grbit )
+INLINE JET_ERR JetOSSnapshotTruncateLogInstanceEx( _In_ const JET_OSSNAPID snapId, _In_ const JET_INSTANCE instance, _In_ const JET_GRBIT grbit )
 {
     APICALL_INST    apicall( opOSSnapTruncateLogInstance );
 
@@ -22950,17 +22950,17 @@ INLINE JET_ERR JetOSSnapshotTruncateLogInstanceEx( __in const JET_OSSNAPID snapI
     return apicall.ErrResult();
 }
 
-JET_ERR JET_API JetOSSnapshotTruncateLogInstance( __in const JET_OSSNAPID snapId, __in const JET_INSTANCE instance, __in const JET_GRBIT grbit )
+JET_ERR JET_API JetOSSnapshotTruncateLogInstance( _In_ const JET_OSSNAPID snapId, _In_ const JET_INSTANCE instance, _In_ const JET_GRBIT grbit )
 {
     JET_VALIDATE_INSTANCE( instance );
     JET_TRY( opOSSnapTruncateLogInstance, JetOSSnapshotTruncateLogInstanceEx( snapId, instance, grbit ) );
 }
 
 INLINE JET_ERR JetOSSnapshotGetFreezeInfoEx(
-    __in const JET_OSSNAPID                                         snapId,
-    __out ULONG *                                           pcInstanceInfo,
+    _In_ const JET_OSSNAPID                                         snapId,
+    _Out_ ULONG *                                           pcInstanceInfo,
     __deref_out_ecount( *pcInstanceInfo ) JET_INSTANCE_INFO_W **    paInstanceInfo,
-    __in const JET_GRBIT                                            grbit )
+    _In_ const JET_GRBIT                                            grbit )
 {
     OSTrace(
         JET_tracetagAPI,
@@ -22975,10 +22975,10 @@ INLINE JET_ERR JetOSSnapshotGetFreezeInfoEx(
 }
 
 LOCAL JET_ERR JetOSSnapshotGetFreezeInfoExA(
-    __in const JET_OSSNAPID                                         snapId,
-    __out ULONG *                                           pcInstanceInfo,
+    _In_ const JET_OSSNAPID                                         snapId,
+    _Out_ ULONG *                                           pcInstanceInfo,
     __deref_out_ecount( *pcInstanceInfo ) JET_INSTANCE_INFO_A **    paInstanceInfo,
-    __in const JET_GRBIT                                            grbit )
+    _In_ const JET_GRBIT                                            grbit )
 {
     ERR                     err             = JET_errSuccess;
     JET_INSTANCE_INFO_W *   laInstanceInfoW     = NULL;
@@ -23007,25 +23007,25 @@ HandleError:
 
 
 JET_ERR JET_API JetOSSnapshotGetFreezeInfoA(
-    __in const JET_OSSNAPID                                         snapId,
-    __out ULONG *                                           pcInstanceInfo,
+    _In_ const JET_OSSNAPID                                         snapId,
+    _Out_ ULONG *                                           pcInstanceInfo,
     __deref_out_ecount( *pcInstanceInfo ) JET_INSTANCE_INFO_A **    paInstanceInfo,
-    __in const JET_GRBIT                                            grbit )
+    _In_ const JET_GRBIT                                            grbit )
 {
     JET_TRY( opOSSnapshotGetFreezeInfo, JetOSSnapshotGetFreezeInfoExA( snapId, pcInstanceInfo, paInstanceInfo, grbit ) );
 }
 
 JET_ERR JET_API JetOSSnapshotGetFreezeInfoW(
-    __in const JET_OSSNAPID                                         snapId,
-    __out ULONG *                                           pcInstanceInfo,
+    _In_ const JET_OSSNAPID                                         snapId,
+    _Out_ ULONG *                                           pcInstanceInfo,
     __deref_out_ecount( *pcInstanceInfo ) JET_INSTANCE_INFO_W **    paInstanceInfo,
-    __in const JET_GRBIT                                            grbit )
+    _In_ const JET_GRBIT                                            grbit )
 {
     JET_TRY( opOSSnapshotGetFreezeInfo, JetOSSnapshotGetFreezeInfoEx( snapId, pcInstanceInfo, paInstanceInfo, grbit ) );
 }
 
 
-INLINE JET_ERR JetOSSnapshotEndEx( __in const JET_OSSNAPID snapId, __in const JET_GRBIT grbit )
+INLINE JET_ERR JetOSSnapshotEndEx( _In_ const JET_OSSNAPID snapId, _In_ const JET_GRBIT grbit )
 {
     OSTrace(
         JET_tracetagAPI,
@@ -23038,13 +23038,13 @@ INLINE JET_ERR JetOSSnapshotEndEx( __in const JET_OSSNAPID snapId, __in const JE
     return ErrIsamOSSnapshotEnd( snapId, grbit );
 }
 
-JET_ERR JET_API JetOSSnapshotEnd( __in const JET_OSSNAPID snapId, __in const JET_GRBIT grbit )
+JET_ERR JET_API JetOSSnapshotEnd( _In_ const JET_OSSNAPID snapId, _In_ const JET_GRBIT grbit )
 {
     JET_TRY( opOSSnapshotEnd, JetOSSnapshotEndEx( snapId, grbit ) );
 }
 
 
-JET_ERR JetConfigureProcessForCrashDumpEx( __in const JET_GRBIT grbit )
+JET_ERR JetConfigureProcessForCrashDumpEx( _In_ const JET_GRBIT grbit )
 {
     JET_ERR err = JET_errSuccess;
 
@@ -23083,7 +23083,7 @@ HandleError:
     return err;
 }
 
-JET_ERR JET_API JetConfigureProcessForCrashDump( __in const JET_GRBIT grbit )
+JET_ERR JET_API JetConfigureProcessForCrashDump( _In_ const JET_GRBIT grbit )
 {
     JET_ERR err = JET_errSuccess;
 
@@ -23250,7 +23250,7 @@ HandleError:
 }
 
 JET_ERR JET_API JetTestHook(
-    __in        const TESTHOOK_OP   opcode,
+    _In_        const TESTHOOK_OP   opcode,
     __inout_opt void * const        pv )
 {
     ERR err =   JET_errSuccess;
@@ -23707,11 +23707,11 @@ HandleError:
 }
 
 LOCAL JET_ERR JetConsumeLogDataEx(
-    __in    JET_INSTANCE        instance,
-    __in    JET_EMITDATACTX *   pEmitLogDataCtx,
-    __in    void *              pvLogData,
-    __in    ULONG       cbLogData,
-    __in    JET_GRBIT           grbits  )
+    _In_    JET_INSTANCE        instance,
+    _In_    JET_EMITDATACTX *   pEmitLogDataCtx,
+    _In_    void *              pvLogData,
+    _In_    ULONG       cbLogData,
+    _In_    JET_GRBIT           grbits  )
 {
     APICALL_INST    apicall( opConsumeLogData );
 
@@ -23777,11 +23777,11 @@ LOCAL JET_ERR JetConsumeLogDataEx(
 }
 
 JET_ERR JET_API JetConsumeLogData(
-    __in    JET_INSTANCE        instance,
-    __in    JET_EMITDATACTX *   pEmitLogDataCtx,
-    __in    void *              pvLogData,
-    __in    ULONG       cbLogData,
-    __in    JET_GRBIT           grbits  )
+    _In_    JET_INSTANCE        instance,
+    _In_    JET_EMITDATACTX *   pEmitLogDataCtx,
+    _In_    void *              pvLogData,
+    _In_    ULONG       cbLogData,
+    _In_    JET_GRBIT           grbits  )
 {
     JET_VALIDATE_INSTANCE( instance );
     JET_TRY( opConsumeLogData, JetConsumeLogDataEx( instance, pEmitLogDataCtx, pvLogData, cbLogData, grbits ) );
@@ -23792,9 +23792,9 @@ JET_ERR JET_API JetConsumeLogData(
 LOCAL JET_ERR JET_API JetGetErrorInfoExW(
     __in_opt void *                 pvContext,
     __out_bcount( cbMax ) void *    pvResult,
-    __in ULONG              cbMax,
-    __in ULONG              InfoLevel,
-    __in JET_GRBIT                  grbit )
+    _In_ ULONG              cbMax,
+    _In_ ULONG              InfoLevel,
+    _In_ JET_GRBIT                  grbit )
 {
     ERR                 err;
     ULONG               cbMin;
@@ -23879,17 +23879,17 @@ HandleError:
 JET_ERR JET_API JetGetErrorInfoA(
     __in_opt void *                 pvContext,
     __out_bcount( cbMax ) void *    pvResult,
-    __in ULONG              cbMax,
-    __in ULONG              ulInfoLevel,
-    __in JET_GRBIT                  grbit );
+    _In_ ULONG              cbMax,
+    _In_ ULONG              ulInfoLevel,
+    _In_ JET_GRBIT                  grbit );
 #endif
 
 JET_ERR JET_API JetGetErrorInfoW(
     __in_opt void *                 pvContext,
     __out_bcount( cbMax ) void *    pvResult,
-    __in ULONG              cbMax,
-    __in ULONG              InfoLevel,
-    __in JET_GRBIT                  grbit )
+    _In_ ULONG              cbMax,
+    _In_ ULONG              InfoLevel,
+    _In_ JET_GRBIT                  grbit )
 {
     JET_TRY( opGetErrorInfo, JetGetErrorInfoExW( pvContext, pvResult, cbMax, InfoLevel, grbit ) );
 }
@@ -23975,11 +23975,11 @@ JetGetSessionParameter(
 }
 
 ERR JetPrereadTablesEx(
-    __in JET_SESID                          sesid,
-    __in JET_DBID                           dbid,
+    _In_ JET_SESID                          sesid,
+    _In_ JET_DBID                           dbid,
     __in_ecount( cwszTables ) PCWSTR *      rgwszTables,
-    __in INT                                cwszTables,
-    __in JET_GRBIT                          grbit )
+    _In_ INT                                cwszTables,
+    _In_ JET_GRBIT                          grbit )
 {
     APICALL_SESID   apicall( opPrereadTables );
 
@@ -24003,23 +24003,23 @@ ERR JetPrereadTablesEx(
 }
 
 JET_ERR JET_API JetPrereadTablesW(
-    __in JET_SESID                          sesid,
-    __in JET_DBID                           dbid,
+    _In_ JET_SESID                          sesid,
+    _In_ JET_DBID                           dbid,
     __in_ecount( cwszTables ) JET_PCWSTR *  rgwszTables,
-    __in LONG                               cwszTables,
-    __in JET_GRBIT                          grbit )
+    _In_ LONG                               cwszTables,
+    _In_ JET_GRBIT                          grbit )
 {
     JET_VALIDATE_SESID( sesid );
     JET_TRY( opPrereadTables, JetPrereadTablesEx( sesid, dbid, rgwszTables, cwszTables, grbit ) );
 }
 
 LOCAL JET_ERR JetPrereadIndexRangeEx(
-    __in const JET_SESID                sesid,
-    __in const JET_TABLEID              tableid,
-    __in const JET_INDEX_RANGE * const  pIndexRange,
-    __in const ULONG            cPageCacheMin,
-    __in const ULONG            cPageCacheMax,
-    __in const JET_GRBIT                grbit,
+    _In_ const JET_SESID                sesid,
+    _In_ const JET_TABLEID              tableid,
+    _In_ const JET_INDEX_RANGE * const  pIndexRange,
+    _In_ const ULONG            cPageCacheMin,
+    _In_ const ULONG            cPageCacheMax,
+    _In_ const JET_GRBIT                grbit,
     __out_opt ULONG * const     pcPageCacheActual )
 {
     APICALL_SESID   apicall( opPrereadIndexRange );
@@ -24045,12 +24045,12 @@ LOCAL JET_ERR JetPrereadIndexRangeEx(
 }
 
 JET_ERR JetPrereadIndexRange(
-    __in const JET_SESID                sesid,
-    __in const JET_TABLEID              tableid,
-    __in const JET_INDEX_RANGE * const  pIndexRange,
-    __in const ULONG            cPageCacheMin,
-    __in const ULONG            cPageCacheMax,
-    __in const JET_GRBIT                grbit,
+    _In_ const JET_SESID                sesid,
+    _In_ const JET_TABLEID              tableid,
+    _In_ const JET_INDEX_RANGE * const  pIndexRange,
+    _In_ const ULONG            cPageCacheMin,
+    _In_ const ULONG            cPageCacheMax,
+    _In_ const JET_GRBIT                grbit,
     __out_opt ULONG * const     pcPageCacheActual )
 {
     JET_VALIDATE_SESID_TABLEID( sesid, tableid );
@@ -24245,10 +24245,10 @@ JET_ERR JET_API JetRetrieveColumnFromRecordStream(
 }
 
 LOCAL JET_ERR JetGetRBSFileInfoEx(
-    __in JET_PCWSTR                 wszRBSFileName,
+    _In_ JET_PCWSTR                 wszRBSFileName,
     __out_bcount( cbMax ) void *    pvResult,
-    __in ULONG                      cbMax,
-    __in ULONG                      InfoLevel )
+    _In_ ULONG                      cbMax,
+    _In_ ULONG                      InfoLevel )
 {
     ERR             err                 = JET_errSuccess;
     RBSFILEHDR*     prbsfilehdr         = NULL;
@@ -24311,10 +24311,10 @@ HandleError:
 } // extern "C"
 
 LOCAL JET_ERR JetGetRBSFileInfoExA(
-    __in JET_PCSTR                  szRBSFileName,
+    _In_ JET_PCSTR                  szRBSFileName,
     __out_bcount( cbMax ) void *    pvResult,
-    __in ULONG              cbMax,
-    __in ULONG              InfoLevel )
+    _In_ ULONG              cbMax,
+    _In_ ULONG              InfoLevel )
 {
     ERR             err;
     CAutoWSZPATH    lszRBSFileName;
@@ -24325,19 +24325,19 @@ LOCAL JET_ERR JetGetRBSFileInfoExA(
 }
 
 JET_ERR JET_API JetGetRBSFileInfoA(
-    __in JET_PCSTR                  szRBSFileName,
+    _In_ JET_PCSTR                  szRBSFileName,
     __out_bcount( cbMax ) void *    pvResult,
-    __in ULONG              cbMax,
-    __in ULONG              InfoLevel )
+    _In_ ULONG              cbMax,
+    _In_ ULONG              InfoLevel )
 {
     JET_TRY( opGetDatabaseFileInfo, JetGetRBSFileInfoExA( szRBSFileName, pvResult, cbMax, InfoLevel ) );
 }
 
 JET_ERR JET_API JetGetRBSFileInfoW(
-    __in JET_PCWSTR                 wszRBSFileName,
+    _In_ JET_PCWSTR                 wszRBSFileName,
     __out_bcount( cbMax ) void *    pvResult,
-    __in ULONG              cbMax,
-    __in ULONG              InfoLevel )
+    _In_ ULONG              cbMax,
+    _In_ ULONG              InfoLevel )
 {
     JET_TRY( opGetDatabaseFileInfo, JetGetRBSFileInfoEx( wszRBSFileName, pvResult, cbMax, InfoLevel ) );
 }
@@ -24345,10 +24345,10 @@ JET_ERR JET_API JetGetRBSFileInfoW(
 LOCAL
 JET_ERR
 JetRBSPrepareRevertEx(
-    __in    JET_INSTANCE    instance,
-    __in    JET_LOGTIME     jltRevertExpected,
-    __in    CPG             cpgCache,
-    __in    JET_GRBIT       grbit,
+    _In_    JET_INSTANCE    instance,
+    _In_    JET_LOGTIME     jltRevertExpected,
+    _In_    CPG             cpgCache,
+    _In_    JET_GRBIT       grbit,
     _Out_   JET_LOGTIME*    pjltRevertActual )
 {
     APICALL_INST    apicall( opRBSPrepareRevert );
@@ -24376,10 +24376,10 @@ JetRBSPrepareRevertEx(
 }
 
 JET_ERR JET_API JetRBSPrepareRevert(
-    __in    JET_INSTANCE    instance,
-    __in    JET_LOGTIME     jltRevertExpected,
-    __in    CPG             cpgCache,
-    __in    JET_GRBIT       grbit,
+    _In_    JET_INSTANCE    instance,
+    _In_    JET_LOGTIME     jltRevertExpected,
+    _In_    CPG             cpgCache,
+    _In_    JET_GRBIT       grbit,
     _Out_   JET_LOGTIME*    pjltRevertActual )
 {
     JET_TRY( opRBSPrepareRevert, JetRBSPrepareRevertEx( instance, jltRevertExpected, cpgCache, grbit, pjltRevertActual ) );
@@ -24388,8 +24388,8 @@ JET_ERR JET_API JetRBSPrepareRevert(
 LOCAL
 JET_ERR
 JetRBSExecuteRevertEx(
-    __in    JET_INSTANCE            instance,
-    __in    JET_GRBIT               grbit,
+    _In_    JET_INSTANCE            instance,
+    _In_    JET_GRBIT               grbit,
     _Out_   JET_RBSREVERTINFOMISC*  prbsrevertinfomisc )
 {
     APICALL_INST    apicall( opRBSExecuteRevert );
@@ -24409,8 +24409,8 @@ JetRBSExecuteRevertEx(
 }
 
 JET_ERR JET_API JetRBSExecuteRevert(
-    __in    JET_INSTANCE            instance,
-    __in    JET_GRBIT               grbit,
+    _In_    JET_INSTANCE            instance,
+    _In_    JET_GRBIT               grbit,
     _Out_   JET_RBSREVERTINFOMISC*  prbsrevertinfomisc )
 {
     JET_TRY( opRBSExecuteRevert, JetRBSExecuteRevertEx( instance, grbit, prbsrevertinfomisc ) );
@@ -24419,7 +24419,7 @@ JET_ERR JET_API JetRBSExecuteRevert(
 LOCAL
 JET_ERR
 JetRBSCancelRevertEx(
-    __in    JET_INSTANCE    instance )
+    _In_    JET_INSTANCE    instance )
 {
     APICALL_INST    apicall( opRBSCancelRevert );
 
@@ -24437,7 +24437,7 @@ JetRBSCancelRevertEx(
 }
 
 JET_ERR JET_API JetRBSCancelRevert(
-    __in    JET_INSTANCE    instance )
+    _In_    JET_INSTANCE    instance )
 {
     JET_TRY( opRBSCancelRevert, JetRBSCancelRevertEx( instance ) );
 }
@@ -24572,7 +24572,7 @@ JETUNITTEST( JetApi, CAutoINDEXCREATE1To2 )
 // Defined in fcreate.cxx
 ERR ErrIDXCheckUnicodeFlagAndDefn(
     __in_ecount( cIndexCreate ) JET_INDEXCREATE3_A * pindexcreate,
-    __in ULONG                               cIndexCreate );
+    _In_ ULONG                               cIndexCreate );
 
 JETUNITTEST( JetApi, CAutoINDEXCREATE2To3 )
 {

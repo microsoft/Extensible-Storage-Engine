@@ -27,7 +27,7 @@ JETUNITTEST( CmpRbspos, Test )
 }
 #endif
 
-LOCAL ERR ErrAllocAndSetStr( __in PCWSTR wszName, __out WCHAR** pwszResult )
+LOCAL ERR ErrAllocAndSetStr( _In_ PCWSTR wszName, _Out_ WCHAR** pwszResult )
 {
     Assert( wszName );
     ERR err = JET_errSuccess;
@@ -70,7 +70,7 @@ HandleError:
     return err;
 }
 
-LOCAL ERR ErrRBSInitPaths_( INST* pinst, __out WCHAR** wszRBSAbsRootDir, __out WCHAR** wszRBSBaseName )
+LOCAL ERR ErrRBSInitPaths_( INST* pinst, _Out_ WCHAR** wszRBSAbsRootDir, _Out_ WCHAR** wszRBSBaseName )
 {
     Assert( pinst );
     Assert( wszRBSAbsRootDir );
@@ -273,8 +273,8 @@ HandleError:
 
 LOCAL ERR ErrRBSGetLowestAndHighestGen_( 
     IFileSystemAPI *const pfsapi, 
-    __in const PCWSTR wszRBSDirRootPath, 
-    __in const PCWSTR wszLogBaseName,  
+    _In_ const PCWSTR wszRBSDirRootPath, 
+    _In_ const PCWSTR wszLogBaseName,  
     LONG *rbsGenMin,
     LONG *rbsGenMax )
 {
@@ -384,7 +384,7 @@ LOCAL VOID RBSSzIdAppend( __inout_bcount_z( cbFName ) PWSTR wszRBSFileName, size
 LOCAL ERR ErrRBSFilePathForGen_( 
     PCWSTR cwszPath,
     PCWSTR cwszRBSBaseName,
-    __in IFileSystemAPI* const pfsapi,
+    _In_ IFileSystemAPI* const pfsapi,
     __out_bcount ( cbDirPath ) WCHAR* wszRBSDirPath,
     LONG cbDirPath,
     __out_bcount ( cbFilePath ) WCHAR* wszRBSFilePath,
@@ -1037,7 +1037,7 @@ VOID *CSnapshotBuffer::s_pReserveBuffer = NULL;
 //                  CRevertSnapshot
 //  ================================================================
 
-CRevertSnapshot::CRevertSnapshot( __in INST* const pinst )
+CRevertSnapshot::CRevertSnapshot( _In_ INST* const pinst )
     : CZeroInit( sizeof( CRevertSnapshot ) ),
     m_pinst ( pinst ),
     m_cresRBSBuf( pinst ),
@@ -1082,7 +1082,7 @@ HandleError:
     return err;
 }
 
-VOID CRevertSnapshot::EnterDbHeaderFlush( CRevertSnapshot* prbs, __out SIGNATURE* const psignRBSHdrFlush )
+VOID CRevertSnapshot::EnterDbHeaderFlush( CRevertSnapshot* prbs, _Out_ SIGNATURE* const psignRBSHdrFlush )
 {
     if ( prbs != NULL && prbs->m_fInitialized && !prbs->m_fInvalid )
     {
@@ -1123,7 +1123,7 @@ ERR CRevertSnapshot::ErrSetDbtimeForFmp( FMP *pfmp, DBTIME dbtime )
 }
 
 // Used to set file api for dumping snapshot
-ERR CRevertSnapshot::ErrSetRBSFileApi( __in IFileAPI *pfapiRBS )
+ERR CRevertSnapshot::ErrSetRBSFileApi( _In_ IFileAPI *pfapiRBS )
 {
     // Make sure it hasn't already been initialized to something else.
     Assert( !m_fInitialized );
@@ -1367,7 +1367,7 @@ VOID CRevertSnapshot::RBSLogSpaceUsage()
         m_pinst );
 }
 
-ERR CRevertSnapshot::ErrRBSRecordDbAttach( __in FMP* const pfmp )
+ERR CRevertSnapshot::ErrRBSRecordDbAttach( _In_ FMP* const pfmp )
 {
     ERR err                     = JET_errSuccess;
 
@@ -1445,7 +1445,7 @@ HandleError:
     return err;
 }
 
-ERR CRevertSnapshot::ErrRBSInitDBFromRstmap( __in const RSTMAP* const prstmap, LONG lgenLow, LONG lgenHigh )
+ERR CRevertSnapshot::ErrRBSInitDBFromRstmap( _In_ const RSTMAP* const prstmap, LONG lgenLow, LONG lgenHigh )
 {
     Assert( prstmap );
     Assert( m_fInitialized );
@@ -2763,7 +2763,7 @@ BOOL CRevertSnapshot::FRollSnapshot()
 
 // Create a cleaner object for automatic cleanup of RBS.
 // This doesn't start the cleaner thread.
-ERR RBSCleanerFactory::ErrRBSCleanerCreate( INST*  pinst, __out RBSCleaner ** prbscleaner)
+ERR RBSCleanerFactory::ErrRBSCleanerCreate( INST*  pinst, _Out_ RBSCleaner ** prbscleaner)
 {
      ERR err = JET_errSuccess;
 
@@ -3177,7 +3177,7 @@ VOID RBSCleaner::TermCleaner()
 //                  CRBSDatabaseRevertContext
 //  ================================================================
 
-CRBSDatabaseRevertContext::CRBSDatabaseRevertContext( __in INST* const pinst )
+CRBSDatabaseRevertContext::CRBSDatabaseRevertContext( _In_ INST* const pinst )
     : CZeroInit( sizeof( CRBSDatabaseRevertContext ) ),
     m_pinst ( pinst ),
     m_dbidCurrent ( dbidMax ),
@@ -3694,7 +3694,7 @@ ERR CRBSDatabaseRevertContext::ErrBeginTracingToIRS()
 //                  CRBSRevertContext
 //  ================================================================
 
-CRBSRevertContext::CRBSRevertContext( __in INST* const pinst )
+CRBSRevertContext::CRBSRevertContext( _In_ INST* const pinst )
     : CZeroInit( sizeof( CRBSRevertContext ) ),
     m_pinst ( pinst )
 {
@@ -3754,7 +3754,7 @@ CRBSRevertContext::~CRBSRevertContext()
 }
 
 ERR CRBSRevertContext::ErrMakeRevertTracingNames(
-    __in IFileSystemAPI* pfsapi,
+    _In_ IFileSystemAPI* pfsapi,
     __in_range( cbOSFSAPI_MAX_PATHW, cbOSFSAPI_MAX_PATHW ) ULONG cbRBSRCRawPath,
     __out_bcount_z( cbRBSRCRawPath ) WCHAR* wszRBSRCRawPath,
     __in_range( cbOSFSAPI_MAX_PATHW, cbOSFSAPI_MAX_PATHW ) ULONG cbRBSRCRawBackupPath,
@@ -4252,9 +4252,9 @@ HandleError:
 //
 ERR CRBSRevertContext::ErrRBSRevertContextInit( 
                 INST*       pinst, 
-        __in    LOGTIME     ltRevertExpected,
-        __in    CPG         cpgCache,
-        __in    JET_GRBIT   grbit,
+        _In_    LOGTIME     ltRevertExpected,
+        _In_    CPG         cpgCache,
+        _In_    JET_GRBIT   grbit,
         _Out_   LOGTIME*    pltRevertActual,
         _Out_   CRBSRevertContext**    pprbsrc )
 {

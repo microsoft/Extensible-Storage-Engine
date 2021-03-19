@@ -521,7 +521,7 @@ ERR ErrUtilFormatFileTimeAsDate(
     const __int64 time,
     __out_ecount(cwchOut) PWSTR const pwszOut,
     const size_t cwchOut,
-    __out size_t * const pcwchRequired)
+    _Out_ size_t * const pcwchRequired)
 //  ================================================================
 {
     SYSTEMTIME systemtime = ConvertFileTimeToLocalSystemTime( time );
@@ -546,7 +546,7 @@ ERR ErrUtilFormatFileTime(
     const DWORD dwFlags,
     __out_ecount(cwchOut) PWSTR const pwszOut,
     const size_t cwchOut,
-    __out size_t * const pcwchRequired)
+    _Out_ size_t * const pcwchRequired)
 //  ================================================================
 {
     SYSTEMTIME systemtime = ConvertFileTimeToLocalSystemTime( time );
@@ -570,7 +570,7 @@ ERR ErrUtilFormatFileTimeAsTime(
     const __int64 time,
     __out_ecount(cwchOut) PWSTR const pwszOut,
     const size_t cwchOut,
-    __out size_t * const pcwchRequired)
+    _Out_ size_t * const pcwchRequired)
 //  ================================================================
 {
     return ErrUtilFormatFileTime( time, TIME_NOSECONDS, pwszOut, cwchOut, pcwchRequired );
@@ -581,7 +581,7 @@ ERR ErrUtilFormatFileTimeAsTimeWithSeconds(
     const __int64 time,
     __out_ecount(cwchOut) PWSTR const pwszOut,
     const size_t cwchOut,
-    __out size_t * const pcwchRequired)
+    _Out_ size_t * const pcwchRequired)
 //  ================================================================
 {
     return ErrUtilFormatFileTime( time, 0, pwszOut, cwchOut, pcwchRequired );

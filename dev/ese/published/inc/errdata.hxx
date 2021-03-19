@@ -20,8 +20,8 @@ struct ErrData
     JET_ERRCAT  errorCategory;
 };
 
-const ErrData * PerrdataEntryI( __in const INT iEntry );
-const ErrData * PerrdataLookupErrValue( __in const JET_ERR errLookup );
+const ErrData * PerrdataEntryI( _In_ const INT iEntry );
+const ErrData * PerrdataLookupErrValue( _In_ const JET_ERR errLookup );
 
 //  Access to the error message table
 //
@@ -33,7 +33,7 @@ struct ERRORMSGDATA
     const char * szErrorText;
 };
 
-const ERRORMSGDATA * PerrorEntryI( __in INT iEntry );
+const ERRORMSGDATA * PerrorEntryI( _In_ INT iEntry );
 
 bool FErrStringToJetError( const char * szError, JET_ERR * perr );
 #ifndef MINIMAL_FUNCTIONALITY
@@ -47,13 +47,13 @@ const char szUnknownError[]             = "Unknown Error";
 //
 
 bool FERRLookupErrorHierarchy(
-    __in JET_ERRCAT             errortype,
+    _In_ JET_ERRCAT             errortype,
     __out_bcount(8) BYTE* const pbHierarchy
 );
 
 bool FERRLookupErrorCategory(
-    __in const JET_ERR errLookup,
-    __out JET_ERRCAT* perrortype
+    _In_ const JET_ERR errLookup,
+    _Out_ JET_ERRCAT* perrortype
 );
 
 

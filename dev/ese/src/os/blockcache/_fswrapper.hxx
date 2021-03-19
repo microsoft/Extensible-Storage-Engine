@@ -39,10 +39,10 @@ class TFileSystemWrapper  //  fsw
 
         void PathVolumeCanonicalAndDiskId(  const WCHAR* const                                  wszVolumePath,
                                             __out_ecount( cchVolumeCanonicalPath ) WCHAR* const wszVolumeCanonicalPath,
-                                            __in const DWORD                                    cchVolumeCanonicalPath,
+                                            _In_ const DWORD                                    cchVolumeCanonicalPath,
                                             __out_ecount( cchDiskId ) WCHAR* const              wszDiskId,
-                                            __in const DWORD                                    cchDiskId,
-                                            __out DWORD *                                       pdwDiskNumber );
+                                            _In_ const DWORD                                    cchDiskId,
+                                            _Out_ DWORD *                                       pdwDiskNumber );
 
         ERR ErrPathComplete(    _In_z_ const WCHAR* const                           wszPath,
                                 _Out_bytecap_c_(cbOSFSAPI_MAX_PATHW) WCHAR* const   wszAbsPath );
@@ -152,10 +152,10 @@ ERR TFileSystemWrapper<I>::ErrPathRoot( const WCHAR* const                      
 template< class I >
 void TFileSystemWrapper<I>::PathVolumeCanonicalAndDiskId(   const WCHAR* const                                  wszVolumePath,
                                                             __out_ecount( cchVolumeCanonicalPath ) WCHAR* const wszVolumeCanonicalPath,
-                                                            __in const DWORD                                    cchVolumeCanonicalPath,
+                                                            _In_ const DWORD                                    cchVolumeCanonicalPath,
                                                             __out_ecount( cchDiskId ) WCHAR* const              wszDiskId,
-                                                            __in const DWORD                                    cchDiskId,
-                                                            __out DWORD *                                       pdwDiskNumber )
+                                                            _In_ const DWORD                                    cchDiskId,
+                                                            _Out_ DWORD *                                       pdwDiskNumber )
 {
     m_piInner->PathVolumeCanonicalAndDiskId( wszVolumePath, wszVolumeCanonicalPath, cchVolumeCanonicalPath, wszDiskId, cchDiskId, pdwDiskNumber );
 }

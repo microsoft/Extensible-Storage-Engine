@@ -244,15 +244,15 @@ QWEsetestQueryPerformanceCounter()
 // Implementation of the abstraction layer (NOT exported in the DLL!)
 wchar_t*
 EsetestWidenString(
-    __in PSTR   szFunction,
-    __in PCSTR  sz
+    _In_ PSTR   szFunction,
+    _In_ PCSTR  sz
 )
 ;
 
 JET_ERR
 EsetestUnwidenString(
-    __in PSTR   szFunction,
-    __in PWSTR  wsz,
+    _In_ PSTR   szFunction,
+    _In_ PWSTR  wsz,
     __inout PSTR    sz
 )
 ;
@@ -260,26 +260,26 @@ EsetestUnwidenString(
 
 JET_ERR
 EsetestCleanupWidenString(
-    __in PSTR   szFunction,
+    _In_ PSTR   szFunction,
     __inout PWSTR   wsz,
-    __in PCSTR  sz
+    _In_ PCSTR  sz
 )
 ;
 
 //----------------StringWithLength
 wchar_t*
 EsetestWidenStringWithLength(
-    __in PSTR   szFunction,
-    __in PCSTR  sz,
-    __in const unsigned long cchsz
+    _In_ PSTR   szFunction,
+    _In_ PCSTR  sz,
+    _In_ const unsigned long cchsz
 )
 ;
 
 JET_ERR
 EsetestUnwidenStringWithLength(
-    __in PSTR   szFunction,
-    __in PWSTR  wsz,
-    __in const unsigned long cchsz,
+    _In_ PSTR   szFunction,
+    _In_ PWSTR  wsz,
+    _In_ const unsigned long cchsz,
     __inout PSTR    sz
 )
 ;
@@ -287,17 +287,17 @@ EsetestUnwidenStringWithLength(
 //----------------CbString
 wchar_t*
 EsetestWidenCbString(
-    __in PSTR   szFunction,
-    __in PCSTR  sz,
-    __in const unsigned long cchsz
+    _In_ PSTR   szFunction,
+    _In_ PCSTR  sz,
+    _In_ const unsigned long cchsz
 )
 ;
 
 JET_ERR
 EsetestUnwidenCbString(
-    __in PSTR   szFunction,
-    __in PWSTR  wsz,
-    __in const unsigned long cchsz,
+    _In_ PSTR   szFunction,
+    _In_ PWSTR  wsz,
+    _In_ const unsigned long cchsz,
     __inout PCSTR   sz
 )
 ;
@@ -305,17 +305,17 @@ EsetestUnwidenCbString(
 //----------------
 JET_RSTMAP_W*
 EsetestWidenJET_RSTMAP(
-    __in PSTR   szFunction,
+    _In_ PSTR   szFunction,
     __in_ecount( crstfilemap ) const JET_RSTMAP*    rgstmap,
-    __in const long         crstfilemap
+    _In_ const long         crstfilemap
 )
 ;
 
 JET_ERR
 EsetestUnwidenJET_RSTMAP(
-    __in PSTR   szFunction,
+    _In_ PSTR   szFunction,
     __in_ecount( crstfilemap ) JET_RSTMAP_W*        wrgstmap,
-    __in const long crstfilemap,
+    _In_ const long crstfilemap,
     __in_ecount( crstfilemap ) JET_RSTMAP* rgstmap
 )
 ;
@@ -323,15 +323,15 @@ EsetestUnwidenJET_RSTMAP(
 //----------------
 JET_RSTINFO_W*
 EsetestWidenJET_RSTINFO(
-    __in PSTR   szFunction,
-    __in const JET_RSTINFO*     prstInfo
+    _In_ PSTR   szFunction,
+    _In_ const JET_RSTINFO*     prstInfo
 )
 ;
 
 JET_ERR
 EsetestUnwidenJET_RSTINFO(
-    __in PSTR   szFunction,
-    __in JET_RSTINFO_W*     wrgstinfo,
+    _In_ PSTR   szFunction,
+    _In_ JET_RSTINFO_W*     wrgstinfo,
     __inout JET_RSTINFO*    rgstinfo
 )
 ;
@@ -339,15 +339,15 @@ EsetestUnwidenJET_RSTINFO(
 //----------------
 JET_RSTINFO2_W*
 EsetestWidenJET_RSTINFO2(
-    __in PSTR   szFunction,
-    __in const JET_RSTINFO2*    prstInfo
+    _In_ PSTR   szFunction,
+    _In_ const JET_RSTINFO2*    prstInfo
 )
 ;
 
 JET_ERR
 EsetestUnwidenJET_RSTINFO2(
-    __in PSTR   szFunction,
-    __in JET_RSTINFO2_W*        wrgstinfo,
+    _In_ PSTR   szFunction,
+    _In_ JET_RSTINFO2_W*        wrgstinfo,
     __inout JET_RSTINFO2*       rgstinfo
 )
 ;
@@ -355,17 +355,17 @@ EsetestUnwidenJET_RSTINFO2(
 //----------------
 JET_SETSYSPARAM_W*
 EsetestWidenJET_SETSYSPARAM(
-    __in PSTR   szFunction,
+    _In_ PSTR   szFunction,
     __in_ecount( crstfilemap ) const JET_SETSYSPARAM*   rgstmap,
-    __in const long         crstfilemap
+    _In_ const long         crstfilemap
 )
 ;
 
 JET_ERR
 EsetestUnwidenJET_SETSYSPARAM(
-    __in PSTR   szFunction,
+    _In_ PSTR   szFunction,
     __in_ecount( crstfilemap ) JET_SETSYSPARAM_W*       wrgstmap,
-    __in const long         crstfilemap,
+    _In_ const long         crstfilemap,
     __inout_ecount( crstfilemap ) JET_SETSYSPARAM*      rgstmap
 )
 ;
@@ -374,15 +374,15 @@ EsetestUnwidenJET_SETSYSPARAM(
 //----------------
 JET_TABLECREATE_W*
 EsetestWidenJET_TABLECREATE(
-    __in PSTR   szFunction,
-    __in const JET_TABLECREATE* ptablecreate
+    _In_ PSTR   szFunction,
+    _In_ const JET_TABLECREATE* ptablecreate
 )
 ;
 
 JET_ERR
 EsetestUnwidenJET_TABLECREATE(
-    __in PSTR   szFunction,
-    __in const JET_TABLECREATE_W*   wptablecreate,
+    _In_ PSTR   szFunction,
+    _In_ const JET_TABLECREATE_W*   wptablecreate,
     __inout JET_TABLECREATE* const  ptablecreate
 )
 ;
@@ -390,15 +390,15 @@ EsetestUnwidenJET_TABLECREATE(
 //----------------
 JET_TABLECREATE2_W*
 EsetestWidenJET_TABLECREATE2(
-    __in PSTR   szFunction,
-    __in const JET_TABLECREATE2*    ptablecreate2
+    _In_ PSTR   szFunction,
+    _In_ const JET_TABLECREATE2*    ptablecreate2
 )
 ;
 
 JET_ERR
 EsetestUnwidenJET_TABLECREATE2(
-    __in PSTR   szFunction,
-    __in const JET_TABLECREATE2_W*  wptablecreate,
+    _In_ PSTR   szFunction,
+    _In_ const JET_TABLECREATE2_W*  wptablecreate,
     __inout JET_TABLECREATE2* const ptablecreate
 )
 ;
@@ -406,15 +406,15 @@ EsetestUnwidenJET_TABLECREATE2(
 //----------------
 JET_TABLECREATE3_W*
 EsetestWidenJET_TABLECREATE3(
-    __in PSTR   szFunction,
-    __in const JET_TABLECREATE3*    ptablecreate3
+    _In_ PSTR   szFunction,
+    _In_ const JET_TABLECREATE3*    ptablecreate3
 )
 ;
 
 JET_ERR
 EsetestUnwidenJET_TABLECREATE3(
-    __in PSTR   szFunction,
-    __in const JET_TABLECREATE3_W*  wptablecreate,
+    _In_ PSTR   szFunction,
+    _In_ const JET_TABLECREATE3_W*  wptablecreate,
     __inout JET_TABLECREATE3* const ptablecreate
 )
 ;
@@ -422,15 +422,15 @@ EsetestUnwidenJET_TABLECREATE3(
 //----------------
 JET_TABLECREATE5_W*
 EsetestWidenJET_TABLECREATE5(
-    __in PSTR   szFunction,
-    __in const JET_TABLECREATE5*    ptablecreate5
+    _In_ PSTR   szFunction,
+    _In_ const JET_TABLECREATE5*    ptablecreate5
 )
 ;
 
 JET_ERR
 EsetestUnwidenJET_TABLECREATE5(
-    __in PSTR   szFunction,
-    __in const JET_TABLECREATE5_W*  wptablecreate,
+    _In_ PSTR   szFunction,
+    _In_ const JET_TABLECREATE5_W*  wptablecreate,
     __inout JET_TABLECREATE5* const ptablecreate
 )
 ;
@@ -438,17 +438,17 @@ EsetestUnwidenJET_TABLECREATE5(
 //----------------
 JET_INDEXCREATE_W*
 EsetestWidenJET_INDEXCREATE(
-    __in PSTR   szFunction,
+    _In_ PSTR   szFunction,
     __in_ecount( crstfilemap ) const JET_INDEXCREATE*   rgstmap,
-    __in const long         crstfilemap
+    _In_ const long         crstfilemap
 )
 ;
 
 JET_ERR
 EsetestUnwidenJET_INDEXCREATE(
-    __in PSTR   szFunction,
+    _In_ PSTR   szFunction,
     __in_ecount( crstfilemap ) JET_INDEXCREATE_W*       wrgindexcreate,
-    __in const long         crstfilemap,
+    _In_ const long         crstfilemap,
     __inout_ecount( crstfilemap ) JET_INDEXCREATE* const    rgindexcreate
 )
 ;
@@ -456,17 +456,17 @@ EsetestUnwidenJET_INDEXCREATE(
 //----------------
 JET_INDEXCREATE2_W*
 EsetestWidenJET_INDEXCREATE2(
-    __in PSTR   szFunction,
+    _In_ PSTR   szFunction,
     __in_ecount( crstfilemap ) const JET_INDEXCREATE2*  rgstmap,
-    __in const long         crstfilemap
+    _In_ const long         crstfilemap
 )
 ;
 
 JET_ERR
 EsetestUnwidenJET_INDEXCREATE2(
-    __in PSTR   szFunction,
+    _In_ PSTR   szFunction,
     __in_ecount( crstfilemap ) JET_INDEXCREATE2_W*      wrgindexcreate2,
-    __in const long         crstfilemap,
+    _In_ const long         crstfilemap,
     __inout_ecount( crstfilemap ) JET_INDEXCREATE2* const   rgindexcreate2
 )
 ;
@@ -474,17 +474,17 @@ EsetestUnwidenJET_INDEXCREATE2(
 //----------------
 JET_INDEXCREATE3_W*
 EsetestWidenJET_INDEXCREATE3(
-    __in PSTR   szFunction,
+    _In_ PSTR   szFunction,
     __in_ecount( crstfilemap ) const JET_INDEXCREATE3*  rgstmap,
-    __in const long         crstfilemap
+    _In_ const long         crstfilemap
 )
 ;
 
 JET_ERR
 EsetestUnwidenJET_INDEXCREATE3(
-    __in PSTR   szFunction,
+    _In_ PSTR   szFunction,
     __in_ecount( crstfilemap ) JET_INDEXCREATE3_W*      wrgindexcreate3,
-    __in const long         crstfilemap,
+    _In_ const long         crstfilemap,
     __inout_ecount( crstfilemap ) JET_INDEXCREATE3* const   rgindexcreate3
 )
 ;
@@ -492,15 +492,15 @@ EsetestUnwidenJET_INDEXCREATE3(
 //----------------
 JET_CONVERT_W*
 EsetestWidenJET_CONVERT(
-    __in PSTR   szFunction,
-    __in const JET_CONVERT* pconvert
+    _In_ PSTR   szFunction,
+    _In_ const JET_CONVERT* pconvert
 )
 ;
 
 JET_ERR
 EsetestUnwidenJET_CONVERT(
-    __in PSTR   szFunction,
-    __in JET_CONVERT_W*     wpconvert,
+    _In_ PSTR   szFunction,
+    _In_ JET_CONVERT_W*     wpconvert,
     __inout JET_CONVERT* const  pconvert
 )
 ;
@@ -508,17 +508,17 @@ EsetestUnwidenJET_CONVERT(
 //----------------
 JET_CONDITIONALCOLUMN_W*
 EsetestWidenJET_CONDITIONALCOLUMN(
-    __in PSTR   szFunction,
+    _In_ PSTR   szFunction,
     __in_ecount( ccolumns ) const JET_CONDITIONALCOLUMN* rgconditionalcolumn,
-    __in const long     ccolumns    
+    _In_ const long     ccolumns    
 )
 ;
 
 JET_ERR
 EsetestUnwidenJET_CONDITIONALCOLUMN(
-    __in PSTR   szFunction,
-    __in JET_CONDITIONALCOLUMN_W*   wrgconditionalcolumn,
-    __in const long         ccolumns,
+    _In_ PSTR   szFunction,
+    _In_ JET_CONDITIONALCOLUMN_W*   wrgconditionalcolumn,
+    _In_ const long         ccolumns,
     __inout JET_CONDITIONALCOLUMN* const    rgconditionalcolumn
 )
 ;
@@ -526,30 +526,30 @@ EsetestUnwidenJET_CONDITIONALCOLUMN(
 //----------------
 JET_COLUMNCREATE_W*
 EsetestWidenJET_COLUMNCREATE(
-    __in PSTR   szFunction,
+    _In_ PSTR   szFunction,
     __in_ecount( ccolumns ) const JET_COLUMNCREATE* rgcolumncreate,
-    __in const long     ccolumns    
+    _In_ const long     ccolumns    
 )
 ;
 
 JET_ERR
 EsetestUnwidenJET_COLUMNCREATE(
-    __in PSTR   szFunction,
-    __in JET_COLUMNCREATE_W*        wrgcolumncreate,
-    __in const long         ccolumns,
+    _In_ PSTR   szFunction,
+    _In_ JET_COLUMNCREATE_W*        wrgcolumncreate,
+    _In_ const long         ccolumns,
     __inout JET_COLUMNCREATE* const rgcolumncreate
 )
 ;
 JET_LOGINFO_W*
 EsetestWidenJET_LOGINFO(
-    __in PSTR   szFunction,
-    __in const JET_LOGINFO*     pLogInfo
+    _In_ PSTR   szFunction,
+    _In_ const JET_LOGINFO*     pLogInfo
 )
 ;
 JET_ERR
 EsetestUnwidenJET_LOGINFO(
-    __in PSTR   szFunction,
-    __in JET_LOGINFO_W* wpLogInfo,
+    _In_ PSTR   szFunction,
+    _In_ JET_LOGINFO_W* wpLogInfo,
     __inout JET_LOGINFO* const  pLogInfo
 )
 ;
@@ -565,11 +565,11 @@ EsetestUnwidenJET_LOGINFO(
 // false: pindexcreateInUnknownFormat was acceptable; pindexcreate is NULL.
 JET_ERR
 EsetestAdaptJET_INDEXCREATE(
-    __in PSTR   szFunction,
+    _In_ PSTR   szFunction,
     __in_ecount_opt( cIndexCreate ) JET_INDEXCREATE*    rgindexcreateInUnknownFormat,
     unsigned long   cIndexCreate,
     __deref_out_ecount( cIndexCreate ) JET_INDEXCREATE**    prgindexcreate,
-    __out bool*     pfAdapted
+    _Out_ bool*     pfAdapted
 )
 ;
 
@@ -577,7 +577,7 @@ EsetestAdaptJET_INDEXCREATE(
 // pindexcreate will be deleted.
 JET_ERR
 EsetestUnadaptJET_INDEXCREATE(
-    __in PSTR   szFunction,
+    _In_ PSTR   szFunction,
     __inout_ecount( cIndexCreate ) JET_INDEXCREATE* rgindexcreateInUnknownFormat,
     unsigned long   cIndexCreate,
     __inout_ecount( cIndexCreate ) JET_INDEXCREATE**    prgindexcreate
@@ -590,10 +590,10 @@ EsetestUnadaptJET_INDEXCREATE(
 // false: pindexcreateInUnknownFormat was acceptable; pindexcreate is NULL.
 JET_ERR
 EsetestAdaptJET_TABLECREATE(
-    __in PSTR   szFunction,
-    __in JET_TABLECREATE*   ptablecreateInNewFormat,
+    _In_ PSTR   szFunction,
+    _In_ JET_TABLECREATE*   ptablecreateInNewFormat,
     __deref_out JET_TABLECREATE**   pptablecreate,
-    __out bool*     pfAdapted
+    _Out_ bool*     pfAdapted
 )
 ;
 
@@ -601,7 +601,7 @@ EsetestAdaptJET_TABLECREATE(
 // ptablecreate will be deleted.
 JET_ERR
 EsetestUnadaptJET_TABLECREATE(
-    __in PSTR   szFunction,
+    _In_ PSTR   szFunction,
     __inout JET_TABLECREATE*    ptablecreateInNewFormat,
     __inout JET_TABLECREATE**   pptablecreate
 )
@@ -614,10 +614,10 @@ EsetestUnadaptJET_TABLECREATE(
 // false: pindexcreateInUnknownFormat was acceptable; pindexcreate is NULL.
 JET_ERR
 EsetestAdaptJET_TABLECREATE2(
-    __in PSTR   szFunction,
-    __in JET_TABLECREATE2*  ptablecreateInNewFormat,
+    _In_ PSTR   szFunction,
+    _In_ JET_TABLECREATE2*  ptablecreateInNewFormat,
     __deref_out JET_TABLECREATE2**  pptablecreate,
-    __out bool*     pfAdapted
+    _Out_ bool*     pfAdapted
 )
 ;
 
@@ -625,7 +625,7 @@ EsetestAdaptJET_TABLECREATE2(
 // ptablecreate will be deleted.
 JET_ERR
 EsetestUnadaptJET_TABLECREATE2(
-    __in PSTR   szFunction,
+    _In_ PSTR   szFunction,
     __inout JET_TABLECREATE2*   ptablecreateInNewFormat,
     __inout JET_TABLECREATE2**  pptablecreate
 )
@@ -637,8 +637,8 @@ EsetestUnadaptJET_TABLECREATE2(
 // based on the compression percentage defined in the environment.
 JET_COLUMNDEF*
 EsetestCompressJET_COLUMNDEF(
-    __in const JET_COLUMNDEF*   pcolumndef,
-    __out bool*                 pfAllocated
+    _In_ const JET_COLUMNDEF*   pcolumndef,
+    _Out_ bool*                 pfAllocated
 )
 ;
 
@@ -646,7 +646,7 @@ JET_COLUMNCREATE*
 EsetestCompressJET_COLUMNCREATE(
     __in_ecount_opt(cColumns) const JET_COLUMNCREATE*   pcolumncreate,
     unsigned long                                       cColumns,
-    __out bool*                                         pfAllocated
+    _Out_ bool*                                         pfAllocated
 )
 ;
 
@@ -654,7 +654,7 @@ JET_SETCOLUMN*
 EsetestCompressJET_SETCOLUMN(
     __in_ecount_opt(csetcolumn) const JET_SETCOLUMN*    psetcolumn,
     unsigned long                                       csetcolumn,
-    __out bool*                                         pfAllocated
+    _Out_ bool*                                         pfAllocated
 )
 ;
 

@@ -139,24 +139,24 @@ ERR ErrSPIOpenOwnExt(
     FUCB    **ppfucbOE );
 
 ERR ErrSPIGetExtentInfo(
-    __in const FUCB             *pfucb,
-    __out PGNO                  *ppgnoLast,
-    __out CPG                   *pcpgSize,
-    __out SpacePool             *psppPool );
+    _In_ const FUCB             *pfucb,
+    _Out_ PGNO                  *ppgnoLast,
+    _Out_ CPG                   *pcpgSize,
+    _Out_ SpacePool             *psppPool );
 
 ERR ErrSPIGetExtentInfo(
-    __in const KEYDATAFLAGS     *pkdf,
-    __out PGNO                  *ppgnoLast,
-    __out CPG                   *pcpgSize,
-    __out SpacePool             *psppPool );
+    _In_ const KEYDATAFLAGS     *pkdf,
+    _Out_ PGNO                  *ppgnoLast,
+    _Out_ CPG                   *pcpgSize,
+    _Out_ SpacePool             *psppPool );
 
 ERR ErrSPITrimUpdateDatabaseHeader( const IFMP ifmp );
 
 ERR ErrSPIREPAIRValidateSpaceNode(
-    __in const  KEYDATAFLAGS * pkdf,
-    __out       PGNO *          ppgnoLast,
-    __out       CPG *           pcpgExtent,
-    __out       SpacePool *     sppPool );
+    _In_ const  KEYDATAFLAGS * pkdf,
+    _Out_       PGNO *          ppgnoLast,
+    _Out_       CPG *           pcpgExtent,
+    _Out_       SpacePool *     sppPool );
 
 const CPG   cpgSmallFDP                 = 16;   //  count of owned pages below which an FDP
 const CPG   cpgSmallGrow                = 4;    //  minimum count of pages to grow a small FDP

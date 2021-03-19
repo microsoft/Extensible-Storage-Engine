@@ -30,7 +30,7 @@ class DATABASESCANNER
 
 #else
 
-ERR ErrSCANDumpMSysScan( __in PIB * const ppib, const IFMP ifmp );
+ERR ErrSCANDumpMSysScan( _In_ PIB * const ppib, const IFMP ifmp );
 
 //  ================================================================
 struct OBJIDINFO

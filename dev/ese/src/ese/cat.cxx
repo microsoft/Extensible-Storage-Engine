@@ -36,8 +36,8 @@ CATHash g_cathash( rankCATHash );
 #endif  //  MINIMAL_FUNCTIONALITY
 
 LOCAL ERR ErrCATIClearUnicodeFixupFlags(
-        IN PIB * const ppib,
-        IN const IFMP ifmp );
+        _In_ PIB * const ppib,
+        _In_ const IFMP ifmp );
 
 //  cat.hxx:iMSO_ list + cat.hxx:idataMSOMax and _cat.cxx:rgcdescMSO array
 //  are out of sync.
@@ -45,8 +45,8 @@ C_ASSERT( idataMSOMax == cColumnsMSO );
 
 //  ================================================================
 LOCAL INLINE BOOL FSortIDEquals(
-    __in const SORTID * psortID1,
-    __in const SORTID * psortID2 )
+    _In_ const SORTID * psortID1,
+    _In_ const SORTID * psortID2 )
 //  ================================================================
 // bg-*, ky-*, mn-*, ru-*, tg-*, uz-Cyrl-*, are all currently {0000004A-57EE-1E5C-00B4-D0000BB1E11E}
 // zh-CN_phoneb and zh-SG_phoneb are currently {0000004B-57EE-1E5C-00B4-D0000BB1E11E} - That's new, so no backward compat version
@@ -76,9 +76,9 @@ LOCAL INLINE BOOL FSortIDEquals(
 //  ================================================================
 //  ================================================================
 INLINE VOID WszCATFormatSortID(
-    __in const SORTID & sortID,
+    _In_ const SORTID & sortID,
     __out_ecount( cch ) WCHAR * wsz,
-    __in INT cch )
+    _In_ INT cch )
 //  ================================================================
 //
 //  Encodes a SORTID as a string.
@@ -109,7 +109,7 @@ INLINE VOID WszCATFormatSortID(
 //  ================================================================
 LOCAL INLINE VOID SortIDWsz(
     __in_z WCHAR * wsz,
-    __out SORTID * psortID )
+    _Out_ SORTID * psortID )
 //  ================================================================
 //
 //  Decodes a SORTID from a string.
@@ -224,7 +224,7 @@ void CATTerm()
 
 BOOL FCATHashILookup(
     IFMP            ifmp,
-    __in PCSTR const    szTableName,
+    _In_ PCSTR const    szTableName,
     PGNO* const     ppgnoTableFDP,
     OBJID* const    pobjidTable )
 {
@@ -268,7 +268,7 @@ BOOL FCATHashILookup(
 //                       at worst, we will get out-of-memory and the user will just have
 //                           to incur the penalty for seeking every time
 
-VOID CATHashIInsert( FCB *pfcb, __in PCSTR const szTable )
+VOID CATHashIInsert( FCB *pfcb, _In_ PCSTR const szTable )
 {
 
     //  try to add the new pgnoFDP / objidFDP to the
@@ -319,7 +319,7 @@ VOID CATHashIInsert( FCB *pfcb, __in PCSTR const szTable )
 //  ignore the results -- at best, we will delete it
 //                        at worst, it will already be gone
 
-VOID CATHashIDelete( FCB *pfcb, __in PCSTR const szTable )
+VOID CATHashIDelete( FCB *pfcb, _In_ PCSTR const szTable )
 {
 
     //  try to add the new pgnoFDP / objidFDP to the
@@ -1135,10 +1135,10 @@ HandleError:
 }
 
 ULONG * PulCATIGetExtendedHintsStart(
-    __in const SYSOBJ                   sysobj,
-    __in const BOOL                     fDeferredLongValueHints,
-    __in const JET_SPACEHINTS * const   pSpacehints,
-    __out ULONG *                       pcTotalHints
+    _In_ const SYSOBJ                   sysobj,
+    _In_ const BOOL                     fDeferredLongValueHints,
+    _In_ const JET_SPACEHINTS * const   pSpacehints,
+    _Out_ ULONG *                       pcTotalHints
     )
 {
     Assert( pcTotalHints );
@@ -1189,13 +1189,13 @@ ULONG * PulCATIGetExtendedHintsStart(
 }
 
 LOCAL ERR ErrCATIMarshallExtendedSpaceHints(
-    __in const IFMP                     ifmp,
-    __in const SYSOBJ                   sysobj,
-    __in const BOOL                     fDeferredLongValueHints,
-    __in const JET_SPACEHINTS * const   pSpacehints,
-    __out BYTE * const                  pBuffer,
-    __in const ULONG                    cbBuffer,
-    __out ULONG *                       pcbSetBuffer
+    _In_ const IFMP                     ifmp,
+    _In_ const SYSOBJ                   sysobj,
+    _In_ const BOOL                     fDeferredLongValueHints,
+    _In_ const JET_SPACEHINTS * const   pSpacehints,
+    _Out_ BYTE * const                  pBuffer,
+    _In_ const ULONG                    cbBuffer,
+    _Out_ ULONG *                       pcbSetBuffer
     )
 {
     ERR err = JET_errSuccess;
@@ -1260,13 +1260,13 @@ HandleError:
 const LONG cbSpaceHintsTestPageSize = 4096;
 
 ERR ErrCATIUnmarshallExtendedSpaceHints(
-    __in INST * const           pinst,
-    __in const SYSOBJ           sysobj,
-    __in const BOOL             fDeferredLongValueHints,
-    __in const BYTE * const     pBuffer,
-    __in const ULONG            cbBuffer,
-    __in const LONG             cbPageSize,
-    __out JET_SPACEHINTS *      pSpacehints
+    _In_ INST * const           pinst,
+    _In_ const SYSOBJ           sysobj,
+    _In_ const BOOL             fDeferredLongValueHints,
+    _In_ const BYTE * const     pBuffer,
+    _In_ const ULONG            cbBuffer,
+    _In_ const LONG             cbPageSize,
+    _Out_ JET_SPACEHINTS *      pSpacehints
     )
 {
     ERR err = JET_errSuccess;
@@ -1720,15 +1720,15 @@ JETUNITTEST( CATSpaceHints, BasicDefLvSpaceHintsMarshallUnmarshall )
 #endif // ENABLE_JET_UNIT_TEST
 
 ERR ErrCATISetSpaceHints(
-    __in FUCB* const                    pfucbCatalog,
-    __in const SYSOBJ                   sysobj,
-    __in const BOOL                     fDeferredLongValueHints,
-    __in const JET_SPACEHINTS * const   pSpacehints,
-    __in const CPG * const              pcpgInitialInPages,
-    __out BYTE *                        pbBuffer,
-    __in const ULONG                    cbBuffer,
-    __out DATA                          rgdata[],
-    __in const ULONG                    cdata
+    _In_ FUCB* const                    pfucbCatalog,
+    _In_ const SYSOBJ                   sysobj,
+    _In_ const BOOL                     fDeferredLongValueHints,
+    _In_ const JET_SPACEHINTS * const   pSpacehints,
+    _In_ const CPG * const              pcpgInitialInPages,
+    _Out_ BYTE *                        pbBuffer,
+    _In_ const ULONG                    cbBuffer,
+    _Out_ DATA                          rgdata[],
+    _In_ const ULONG                    cdata
     )
 {
     ERR     err = JET_errSuccess;
@@ -1820,11 +1820,11 @@ HandleError:
 
 ERR ErrCATIRetrieveSpaceHints(
     __inout FUCB * const            pfucbCatalog,
-    __in const TDB * const          ptdbCatalog,
-    __in const DATA&                dataRec,
-    __in const BOOL                 fDeferredLongValueHints,
-    __in const JET_SPACEHINTS * const   pTemplateSpaceHints,
-    __out JET_SPACEHINTS * const    pSpacehints
+    _In_ const TDB * const          ptdbCatalog,
+    _In_ const DATA&                dataRec,
+    _In_ const BOOL                 fDeferredLongValueHints,
+    _In_ const JET_SPACEHINTS * const   pTemplateSpaceHints,
+    _Out_ JET_SPACEHINTS * const    pSpacehints
     )
 {
     ERR     err = JET_errSuccess;
@@ -1977,7 +1977,7 @@ LOCAL BYTE CfieldCATKeyString( _In_ _NullNull_terminated_ PCSTR szKey, IDXSEG* r
 }
 
 //  This function checks if the column ID is part of MSO before the CreateDB V1 log record.
-LOCAL INLINE BOOL FColumnIDOldMSO( __in const COLUMNID columnID )
+LOCAL INLINE BOOL FColumnIDOldMSO( _In_ const COLUMNID columnID )
 {
     for ( INT i = 0; i < _countof( rgcolumnidOldMSO ); ++i )
     {
@@ -3280,12 +3280,12 @@ HandleError:
 
 //  ================================================================
 ERR ErrCATSeekTableByObjid(
-    IN PIB          * const ppib,
-    IN const IFMP   ifmp,
-    IN const OBJID  objidTable,
+    _In_ PIB          * const ppib,
+    _In_ const IFMP   ifmp,
+    _In_ const OBJID  objidTable,
     __out_ecount_z( cchTableName ) PSTR const szTableName,
-    IN const INT    cchTableName,
-    OUT PGNO        * const ppgnoTableFDP )
+    _In_ const INT    cchTableName,
+    _Out_ PGNO        * const ppgnoTableFDP )
 //  ================================================================
 {
     ERR err = JET_errSuccess;
@@ -6661,11 +6661,11 @@ enum INDEX_UNICODE_STATE
 
 //  ================================================================
 LOCAL ERR ErrIndexUnicodeState(
-    IN const PCWSTR wszLocaleName,
-    IN const QWORD  qwVersionCreated,
-    IN const SORTID * psortID,
-    IN const DWORD dwNormalizationFlags,
-    OUT INDEX_UNICODE_STATE * const pState )
+    _In_ const PCWSTR wszLocaleName,
+    _In_ const QWORD  qwVersionCreated,
+    _In_ const SORTID * psortID,
+    _In_ const DWORD dwNormalizationFlags,
+    _Out_ INDEX_UNICODE_STATE * const pState )
 //  ================================================================
 {
     ERR err = JET_errSuccess;
@@ -9298,12 +9298,12 @@ HandleError:
 
 //  ================================================================
 LOCAL ERR ErrCATIDeleteOrUpdateLocalizedIndexesInTableByName(
-    IN PIB          * const ppib,
-    IN const IFMP   ifmp,
-    IN const CHAR   * const szTableName,
-    IN CATCheckIndicesFlags catcifFlags,
-    OUT BOOL        * const pfIndexesUpdated,
-    OUT BOOL        * const pfIndexesDeleted )
+    _In_ PIB          * const ppib,
+    _In_ const IFMP   ifmp,
+    _In_ const CHAR   * const szTableName,
+    _In_ CATCheckIndicesFlags catcifFlags,
+    _Out_ BOOL        * const pfIndexesUpdated,
+    _Out_ BOOL        * const pfIndexesDeleted )
 //  ================================================================
 // This function is intended to be used at Attach Time, when
 // iterating over every table in the database.
@@ -9392,11 +9392,11 @@ HandleError:
 
 //  ================================================================
 ERR ErrCATDeleteOrUpdateOutOfDateLocalizedIndexes(
-        IN PIB * const ppib,
-        IN const IFMP ifmp,
-        IN CATCheckIndicesFlags catcifFlags,
-        OUT BOOL * const pfIndexesUpdated,
-        OUT BOOL * const pfIndexesDeleted)
+        _In_ PIB * const ppib,
+        _In_ const IFMP ifmp,
+        _In_ CATCheckIndicesFlags catcifFlags,
+        _Out_ BOOL * const pfIndexesUpdated,
+        _Out_ BOOL * const pfIndexesDeleted)
 //  ================================================================
 //
 //  Check all the localized indexes in the catalog
@@ -11686,8 +11686,8 @@ HandleError:
 
 //  ================================================================
 LOCAL ERR ErrCATIDeleteMSUTable(
-        IN PIB * const ppib,
-        IN const IFMP ifmp )
+        _In_ PIB * const ppib,
+        _In_ const IFMP ifmp )
 //  ================================================================
 {
     ERR     err             = JET_errSuccess;
@@ -11736,9 +11736,9 @@ HandleError:
 
 //  ================================================================
 LOCAL ERR ErrCATIClearUnicodeFixupFlagsOnOneRecord(
-        IN PIB * const ppib,
-        IN FUCB * const pfucbCatalog,
-        OUT BOOL * const pfReset )
+        _In_ PIB * const ppib,
+        _In_ FUCB * const pfucbCatalog,
+        _Out_ BOOL * const pfReset )
 //  ================================================================
 {
     Assert( FHostIsLittleEndian() );
@@ -11813,9 +11813,9 @@ HandleError:
 
 //  ================================================================
 LOCAL ERR ErrCATIClearUnicodeFixupFlagsOnAllIndexes(
-        IN PIB * const ppib,
-        IN FUCB * const pfucbCatalog,
-        OUT QWORD * const pqwIndexesChanged )
+        _In_ PIB * const ppib,
+        _In_ FUCB * const pfucbCatalog,
+        _Out_ QWORD * const pqwIndexesChanged )
 //  ================================================================
 {
     ERR err = JET_errSuccess;
@@ -11855,8 +11855,8 @@ LOCAL ERR ErrCATIClearUnicodeFixupFlagsOnAllIndexes(
 
 //  ================================================================
 LOCAL ERR ErrCATIClearUnicodeFixupFlags(
-        IN PIB * const ppib,
-        IN const IFMP ifmp )
+        _In_ PIB * const ppib,
+        _In_ const IFMP ifmp )
 //  ================================================================
 {
     ERR     err             = JET_errSuccess;
@@ -11914,8 +11914,8 @@ HandleError:
 
 //  ================================================================
 ERR ErrCATDeleteMSU(
-        IN PIB * const ppib,
-        IN const IFMP ifmp )
+        _In_ PIB * const ppib,
+        _In_ const IFMP ifmp )
 //  ================================================================
 //
 //  This removes the MSU table and resets the unicode-fixup-enabled
@@ -12292,7 +12292,7 @@ struct MSObjidInfo
 ERR ErrCATIOpenMSObjids(
         const JET_SESID sesid,
         const JET_DBID dbid,
-        __out MSObjidInfo * const pmsoInfo )
+        _Out_ MSObjidInfo * const pmsoInfo )
 //  ================================================================
 {
     ERR err;
@@ -12420,7 +12420,7 @@ HandleError:
 ERR ErrCATIIsBTree(
         const JET_SESID sesid,
         const JET_TABLEID tableidCatalog,
-        __out bool * const pfIsBTree )
+        _Out_ bool * const pfIsBTree )
 //  ================================================================
 //
 //  Determine if the current catalog record is a b-tree
@@ -12561,9 +12561,9 @@ HandleError:
 ERR ErrCATIRetrieveMSObjidRecord(
         const JET_SESID sesid,
         const MSObjidInfo& msoInfo,
-        __out OBJID * pobjid,
-        __out OBJID * pobjidTable,
-        __out SYSOBJ * psysobj )
+        _Out_ OBJID * pobjid,
+        _Out_ OBJID * pobjidTable,
+        _Out_ SYSOBJ * psysobj )
 //  ================================================================
 {
     ERR err;
@@ -12680,9 +12680,9 @@ HandleError:
 
 //  ================================================================
 ERR ErrCATCheckMSObjidsReady(
-        __in PIB * const ppib,
+        _In_ PIB * const ppib,
         const IFMP ifmp,
-        __out BOOL * const pfReady )
+        _Out_ BOOL * const pfReady )
 //  ================================================================
 {
     Assert( !g_fRepair );
@@ -12743,7 +12743,7 @@ HandleError:
 
 //  ================================================================
 ERR ErrCATCreateMSObjids(
-        __in PIB * const ppib,
+        _In_ PIB * const ppib,
         const IFMP ifmp,
         PGNO * const ppgnoFDP,
         OBJID * const pobjidFDP )
@@ -12908,7 +12908,7 @@ HandleError:
 
 //  ================================================================
 ERR ErrCATPopulateMSObjids(
-        __in PIB * const ppib,
+        _In_ PIB * const ppib,
         const IFMP ifmp )
 //  ================================================================
 //
@@ -12989,7 +12989,7 @@ HandleError:
 
 //  ================================================================
 ERR ErrCATInsertMSObjidsRecord(
-        __in PIB * const ppib,
+        _In_ PIB * const ppib,
         const IFMP ifmp,
         const OBJID objid,
         const OBJID objidTable,
@@ -13016,7 +13016,7 @@ HandleError:
 
 //  ================================================================
 ERR ErrCATDeleteMSObjidsRecord(
-    __in PIB * const ppib,
+    _In_ PIB * const ppib,
     const IFMP ifmp,
     const OBJID objid )
 //  ================================================================
@@ -13042,7 +13042,7 @@ HandleError:
 
 //  ================================================================
 ERR ErrCATPossiblyDeleteMSObjidsRecord(
-        __in PIB * const ppib,
+        _In_ PIB * const ppib,
         FUCB * const pfucbCatalog )
 //  ================================================================
 //
@@ -14365,7 +14365,7 @@ HandleError:
 
 //  ================================================================
 ERR ErrCATCreateMSExtentPageCountCache(
-        __in PIB * const ppib,
+        _In_ PIB * const ppib,
         const IFMP ifmp,
         PGNO *ppgnoFDP = NULL,
         OBJID *pobjidFDP = NULL
@@ -15190,10 +15190,10 @@ VOID CATFreeCursorsFromObjid( _In_ FUCB* const pfucb, _In_ FUCB* const pfucbPare
 
 //  ================================================================
 ERR ErrCATMSObjidsRecordExists(
-        __in PIB * const ppib,
+        _In_ PIB * const ppib,
         const IFMP ifmp,
         const OBJID objid,
-        __out bool * const pfExists)
+        _Out_ bool * const pfExists)
 //  ================================================================
 {
     ERR err;
@@ -15220,7 +15220,7 @@ HandleError:
 
 //  ================================================================
 ERR ErrCATVerifyMSObjids(
-        __in PIB * const ppib,
+        _In_ PIB * const ppib,
         const IFMP ifmp,
               CPRINTF * const pcprintfError )
 //  ================================================================
@@ -15367,7 +15367,7 @@ C_ASSERT( _countof( g_wszMSLocalesConsistencyMarkerKey ) <= g_cchLocaleNameSortI
 
 //  Internal function prototypes.
 
-ERR ErrCATIPopulateMSLocales( __in PIB * const ppib, const IFMP ifmp );
+ERR ErrCATIPopulateMSLocales( _In_ PIB * const ppib, const IFMP ifmp );
 
 //  Functions for MSLocales / MSysLocales support ...
 
@@ -15396,7 +15396,7 @@ JETUNITTEST( CATMSysLocales, TestFCATIsMSLocalesConsistencyMarker )
 //  Init's MSLocales facility (and creates the table if necessary).
 
 ERR ErrCATICreateMSLocales(
-    __in PIB * const ppib,
+    _In_ PIB * const ppib,
     const IFMP ifmp )
 {
     ERR err = JET_errSuccess;
@@ -15439,8 +15439,8 @@ HandleError:
 
 //  ================================================================
 ERR ErrCATDeleteMSLocales(
-        __in PIB * const ppibProvided,
-        __in const IFMP ifmp )
+        _In_ PIB * const ppibProvided,
+        _In_ const IFMP ifmp )
 //  ================================================================
 {
     ERR     err             = JET_errSuccess;
@@ -15508,7 +15508,7 @@ HandleError:
 
 //  ================================================================
 ERR ErrCATIFlagMSLocalesConsistent(
-    __in PIB * const ppib,
+    _In_ PIB * const ppib,
     const IFMP ifmp
 //  ================================================================
     )
@@ -15538,8 +15538,8 @@ HandleError:
 
 //  ================================================================
 ERR ErrCATICheckForMSLocalesConsistencyMarker(
-    __in CKVPStore * const pkvpMSysLocales,
-    __out BOOL * const pfMSLocalesConsistencyMarker )
+    _In_ CKVPStore * const pkvpMSysLocales,
+    _Out_ BOOL * const pfMSLocalesConsistencyMarker )
 //  ================================================================
 {
     ERR err = JET_errSuccess;
@@ -15577,9 +15577,9 @@ HandleError:
 
 //  ================================================================
 ERR ErrCATICheckForMSLocalesConsistencyMarker(
-    __in PIB * const ppib,
+    _In_ PIB * const ppib,
     const IFMP ifmp,
-    __out BOOL * const pfMSLocalesConsistencyMarker )
+    _Out_ BOOL * const pfMSLocalesConsistencyMarker )
 //  ================================================================
 {
     ERR err = JET_errSuccess;
@@ -15663,8 +15663,8 @@ INT __cdecl PfnCmpLocaleNameInfo( const LOCALENAMEINFO * pentry1, const LOCALENA
 // code was a little complex and non-obvious to change.
 
 ERR ErrCATIAccumulateIndexLocales(
-    __in PIB * const ppib,
-    __in const IFMP ifmp,
+    _In_ PIB * const ppib,
+    _In_ const IFMP ifmp,
     __inout CLocaleNameInfoArray * const parrayLocales
     )
 {
@@ -15851,7 +15851,7 @@ HandleError:
 
 //  ================================================================
 ERR ErrCATCreateMSLocales(
-        __in PIB * const ppib,
+        _In_ PIB * const ppib,
         const IFMP ifmp )
 //  ================================================================
 {
@@ -15877,7 +15877,7 @@ HandleError:
 
 //  ================================================================
 ERR ErrCATCreateOrUpgradeMSLocales(
-        __in PIB * const ppib,
+        _In_ PIB * const ppib,
         const IFMP ifmp )
 //  ================================================================
 {
@@ -16132,10 +16132,10 @@ JETUNITTEST( CATMSysLocales, TestCLocaleNameInfoArrayWillWorkAsRequiredForMSysLo
 #endif // ENABLE_JET_UNIT_TEST
 
 INLINE ERR ErrCATIParseLocaleNameInfo(
-    __in const PCWSTR wszLocaleEntryKey,
+    _In_ const PCWSTR wszLocaleEntryKey,
     __out_ecount(NORM_LOCALE_NAME_MAX_LENGTH) WCHAR * wszLocaleName,
-    __out QWORD * pqwSortedVersion,
-    __out SORTID * psortID )
+    _Out_ QWORD * pqwSortedVersion,
+    _Out_ SORTID * psortID )
 {
     PCWSTR wszCurr;
     WCHAR wszSortID[PERSISTED_SORTID_MAX_LENGTH];
@@ -16260,7 +16260,7 @@ INLINE ERR ErrCATIParseLocaleNameInfo(
 //  Enumerates all the indices and populates MSysLocales.
 
 ERR ErrCATIPopulateMSLocales(
-    __in PIB * const ppib,
+    _In_ PIB * const ppib,
     const IFMP ifmp
     )
 {
@@ -16315,7 +16315,7 @@ HandleError:
 //  Note: this function only loads LCID information. ErrCATIGetLocaleNameInfo will load
 //  the locale name information or punt to this function in case it's a legacy LCID entry.
 LOCAL ERR ErrCATIGetLocaleInfo(
-    __in CKVPStore::CKVPSCursor * const pkvpscursor,
+    _In_ CKVPStore::CKVPSCursor * const pkvpscursor,
     __inout LOCALEINFO * plocaleinfo
     )
 {
@@ -16629,7 +16629,7 @@ HandleError:
 
 ERR ErrCATCheckForOutOfDateLocales(
         const IFMP ifmp,
-        __out BOOL * const pfOutOfDateNLSVersion )
+        _Out_ BOOL * const pfOutOfDateNLSVersion )
 {
     ERR err = JET_errSuccess;
     CKVPStore kvpsMSysLocales( ifmp, wszMSLocales );
@@ -16786,9 +16786,9 @@ HandleError:
 
 
 ERR ErrCATVerifyMSLocales(
-    __in PIB * const ppib,
-    __in const IFMP ifmp,
-    __in const BOOL fFixupMSysLocales
+    _In_ PIB * const ppib,
+    _In_ const IFMP ifmp,
+    _In_ const BOOL fFixupMSysLocales
     )
 {
     ERR err = JET_errSuccess;

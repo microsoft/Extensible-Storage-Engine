@@ -110,7 +110,7 @@ public:
 #ifdef MEM_CHECK
             #define PvRESAlloc() PvAlloc_( __FILE__, __LINE__ )
             #define PvRESAlloc_( szFile, lLine ) PvAlloc_( szFile, lLine )
-            VOID    *PvAlloc_( __in PCSTR szFile, LONG lLine );
+            VOID    *PvAlloc_( _In_ PCSTR szFile, LONG lLine );
 #else  //  !MEM_CHECK
             #define PvRESAlloc() PvAlloc_()
             #define PvRESAlloc_( szFile, lLine ) PvAlloc_()

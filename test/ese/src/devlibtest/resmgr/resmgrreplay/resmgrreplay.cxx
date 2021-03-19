@@ -16,7 +16,7 @@ const WCHAR * WszLatchType( BFLatchType bflt )
 
 //  Accumulates stats about (and optionally dumps) all the BF FTL traces.
 
-ERR ErrResMgrAccumFtlStats( __in BFFTLContext * const pbfftlc, __in const BOOL fDump )
+ERR ErrResMgrAccumFtlStats( _In_ BFFTLContext * const pbfftlc, _In_ const BOOL fDump )
 {
     ERR err = JET_errSuccess;
 
@@ -131,7 +131,7 @@ HandleError:
 
 //  Accumulates stats about all the BF ETL traces.
 
-ERR ErrResMgrAccumEtlStats( __in BFETLContext * const pbfetlc )
+ERR ErrResMgrAccumEtlStats( _In_ BFETLContext * const pbfetlc )
 {
     ERR err = JET_errSuccess;
     __int64 cTraces = 0;

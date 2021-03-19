@@ -47,8 +47,8 @@ static WCHAR g_rgCommas []  = L",,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,
 
 INLINE const WCHAR * WszFillBuffer_(
     __in_ecount_z( cchPatternBuffer ) const WCHAR * wszPatternBuffer,
-    __in SIZE_T         cchPatternBuffer,
-    __in SIZE_T         cchDesiredLength
+    _In_ SIZE_T         cchPatternBuffer,
+    _In_ SIZE_T         cchDesiredLength
     )
 {
     assert( cchPatternBuffer >= 1 );
@@ -63,8 +63,8 @@ INLINE const WCHAR * WszFillBuffer_(
 }
 
 INLINE const WCHAR * WszFillBuffer(
-    __in const WCHAR    wchPattern,
-    __in SIZE_T         cchDesiredLength
+    _In_ const WCHAR    wchPattern,
+    _In_ SIZE_T         cchDesiredLength
     )
 {
     switch ( wchPattern )
@@ -93,7 +93,7 @@ INLINE const WCHAR * WszFillBuffer(
 
 INLINE ULONG CchCountOfChar(
     __in_z const WCHAR * const  wszString,
-    __in const WCHAR        wchChar
+    _In_ const WCHAR        wchChar
     )
 {
     ULONG   cchChar = 0;
@@ -586,7 +586,7 @@ VOID PrintCA(
 
 VOID PrintA(
     _In_ const ULONG        eField,
-    __in const JET_HISTO *  phisto
+    _In_ const JET_HISTO *  phisto
     )
 {
     CStats * pStats = CStatsFromPv( phisto );
@@ -603,8 +603,8 @@ VOID PrintA(
 VOID PrintHisto(
     _In_ const ULONG            eField,
     _In_reads_(cDivisions) const STAT::SAMPLE * rgDivisions,
-    __in const size_t           cDivisions,
-    __in const JET_HISTO *      phisto
+    _In_ const size_t           cDivisions,
+    _In_ const JET_HISTO *      phisto
     )
 {
     CStats * pStats = CStatsFromPv( phisto );
@@ -636,8 +636,8 @@ VOID PrintHisto(
                                             ))
 
 void PrintFieldSep (
-    __in const ESEUTIL_SPACE_DUMP_CTX * const   pespCtx,
-    __in ULONG ieField
+    _In_ const ESEUTIL_SPACE_DUMP_CTX * const   pespCtx,
+    _In_ ULONG ieField
     )
 {
     wprintf( L"%ws", ( ieField != (pespCtx->cFields - 1) ) ? pespCtx->rgwchSep : L"\n" );
@@ -645,8 +645,8 @@ void PrintFieldSep (
 
 
 void PrintNullField(
-    __in const ESEUTIL_SPACE_DUMP_CTX * const   pespCtx,
-    __in ULONG eField
+    _In_ const ESEUTIL_SPACE_DUMP_CTX * const   pespCtx,
+    _In_ ULONG eField
     )
 {
     ULONG cSep = CchCountOfChar( rgSpaceFields[eField].wszSubFields, L',' );
@@ -796,8 +796,8 @@ ULONG PgnoMaxOwned( const BTREE_STATS_SPACE_TREES * const pSpaceTrees )
 
 
 JET_ERR ErrPrintField(
-    __in const ESEUTIL_SPACE_DUMP_CTX * const           pespCtx,
-    __in const BTREE_STATS * const                      pBTStats,
+    _In_ const ESEUTIL_SPACE_DUMP_CTX * const           pespCtx,
+    _In_ const BTREE_STATS * const                      pBTStats,
     _In_ const BTREE_POST_COMPUTED_SPACE_STATS * const  pComputedStats,
     _In_ const ULONG                                    eField
     )
@@ -1465,7 +1465,7 @@ JET_ERR ErrPrintField(
 //  Space dump context processing...
 //
 
-JET_ERR ErrSpaceDumpCtxInit( __out void ** ppvContext )
+JET_ERR ErrSpaceDumpCtxInit( _Out_ void ** ppvContext )
 {
     JET_ERR err = JET_errSuccess;
 
@@ -1500,7 +1500,7 @@ JET_ERR ErrSpaceDumpCtxInit( __out void ** ppvContext )
 
 JET_ERR ErrSpaceDumpCtxGetGRBIT(
     __inout void *                      pvContext,
-    __out JET_GRBIT *                   pgrbit )
+    _Out_ JET_GRBIT *                   pgrbit )
 {
     JET_ERR err = JET_errSuccess;
     ESEUTIL_SPACE_DUMP_CTX * pespCtx = (ESEUTIL_SPACE_DUMP_CTX*)pvContext;
@@ -1562,8 +1562,8 @@ WCHAR wszAllFieldsCmd [] = L"#all";
 
     
 void PrintSpaceDumpHelp(
-    __in const ULONG                    cchLineWidth,
-    __in const WCHAR                    wchNewLine,
+    _In_ const ULONG                    cchLineWidth,
+    _In_ const WCHAR                    wchNewLine,
     __in_z const WCHAR *                wszTab1,
     __in_z const WCHAR *                wszTab2 )
 {
@@ -1799,7 +1799,7 @@ JET_ERR ErrSpaceDumpCtxSetOptions(
     __in_opt const ULONG *              pcbPageSize,
     __in_opt const JET_GRBIT *          pgrbitAdditional,
     __in_z_opt const PWSTR              wszSeparator,
-    __in const SPDUMPOPTS               fSPDumpOpts
+    _In_ const SPDUMPOPTS               fSPDumpOpts
     )
 {
     JET_ERR err = JET_errSuccess;
@@ -1864,8 +1864,8 @@ JET_ERR ErrSpaceDumpCtxSetOptions(
 }
 
 ULONG CpgSpaceDumpGetOwnedNonShelved(
-    __in const ESEUTIL_SPACE_DUMP_CTX * const pespCtx,
-    __in const BTREE_SPACE_EXTENT_INFO * const pextOwned )
+    _In_ const ESEUTIL_SPACE_DUMP_CTX * const pespCtx,
+    _In_ const BTREE_SPACE_EXTENT_INFO * const pextOwned )
 {
     if ( pextOwned->pgnoLast <= pespCtx->pgnoLast )
     {
@@ -1920,9 +1920,9 @@ ULONG CpgSpaceDumpGetOwnedNonShelved(
 }
 
 ULONG CpgSpaceDumpGetExtPagesEof(
-    __in const ESEUTIL_SPACE_DUMP_CTX * const pespCtx,
-    __in const BTREE_SPACE_EXTENT_INFO * const prgext,
-    __in const ULONG cext )
+    _In_ const ESEUTIL_SPACE_DUMP_CTX * const pespCtx,
+    _In_ const BTREE_SPACE_EXTENT_INFO * const prgext,
+    _In_ const ULONG cext )
 {
     ULONG cpgEof = 0;
 
@@ -1939,7 +1939,7 @@ ULONG CpgSpaceDumpGetExtPagesEof(
 
 
 ULONG /* cch */ EseutilSpaceDumpTableWidth(
-    __in const ESEUTIL_SPACE_DUMP_CTX * const       pespCtx
+    _In_ const ESEUTIL_SPACE_DUMP_CTX * const       pespCtx
     )
 {
     ULONG cchTableWidth = 0;
@@ -1951,8 +1951,8 @@ ULONG /* cch */ EseutilSpaceDumpTableWidth(
 }
 
 JET_ERR EseutilSpaceDumpPrintHeadersAndDbRoot(
-    __in const BTREE_STATS * const      pDbRoot,
-    __in ESEUTIL_SPACE_DUMP_CTX *       pespCtx )
+    _In_ const BTREE_STATS * const      pDbRoot,
+    _In_ ESEUTIL_SPACE_DUMP_CTX *       pespCtx )
 {
     JET_ERR err = JET_errSuccess;
 
@@ -2066,8 +2066,8 @@ HandleError:
 }
 
 JET_ERR EseutilPrintSpecifiedSpaceFields(
-    __in const ESEUTIL_SPACE_DUMP_CTX * const   pespCtx,
-    __in const BTREE_STATS * const              pBTreeStats
+    _In_ const ESEUTIL_SPACE_DUMP_CTX * const   pespCtx,
+    _In_ const BTREE_STATS * const              pBTreeStats
     )
 {
     JET_ERR err = JET_errSuccess;
@@ -2331,7 +2331,7 @@ JET_ERR EseutilPrintSpaceTrees(
 
 
 
-BOOL FChildOfDbRoot( __in const BTREE_STATS * const pBTreeStats )
+BOOL FChildOfDbRoot( _In_ const BTREE_STATS * const pBTreeStats )
 {
     if ( pBTreeStats->pParent == NULL )
         return fFalse;
@@ -2339,7 +2339,7 @@ BOOL FChildOfDbRoot( __in const BTREE_STATS * const pBTreeStats )
         return fFalse;
     return fTrue;
 }
-BOOL FChildOfTable( __in const BTREE_STATS * const pBTreeStats )
+BOOL FChildOfTable( _In_ const BTREE_STATS * const pBTreeStats )
 {
     if ( pBTreeStats->pParent == NULL )
         return fFalse;
@@ -2347,7 +2347,7 @@ BOOL FChildOfTable( __in const BTREE_STATS * const pBTreeStats )
         return fFalse;
     return fTrue;
 }
-BOOL FChildOfLV( __in const BTREE_STATS * const pBTreeStats )
+BOOL FChildOfLV( _In_ const BTREE_STATS * const pBTreeStats )
 {
     if ( pBTreeStats->pParent == NULL )
         return fFalse;
@@ -2355,7 +2355,7 @@ BOOL FChildOfLV( __in const BTREE_STATS * const pBTreeStats )
         return fFalse;
     return fTrue;
 }
-BOOL FChildOfSecIdx( __in const BTREE_STATS * const pBTreeStats )
+BOOL FChildOfSecIdx( _In_ const BTREE_STATS * const pBTreeStats )
 {
     if ( pBTreeStats->pParent == NULL )
         return fFalse;
@@ -2450,8 +2450,8 @@ void EseutilCalculateLastAvailableDbLogicalExtentRange(
 
 void EseutilTrackSpace(
     __inout ESEUTIL_SPACE_DUMP_CTX * const  pespCtx,
-    __in const BTREE_STATS * const          pBTreeStats,
-    __in const JET_BTREETYPE                eBTType
+    _In_ const BTREE_STATS * const          pBTreeStats,
+    _In_ const JET_BTREETYPE                eBTType
     )
 {
     if ( !( pBTreeStats->pSpaceTrees && pBTreeStats->pParentOfLeaf ) )
@@ -2675,8 +2675,8 @@ void EseutilTrackSpace(
 }
 
 JET_ERR EseutilEvalBTreeData(
-    __in const BTREE_STATS * const      pBTreeStats,
-    __in JET_API_PTR                    pvContext )
+    _In_ const BTREE_STATS * const      pBTreeStats,
+    _In_ JET_API_PTR                    pvContext )
 {
     ESEUTIL_SPACE_DUMP_CTX * pespCtx = (ESEUTIL_SPACE_DUMP_CTX *)pvContext;
     JET_ERR err = JET_errSuccess;
@@ -2961,7 +2961,7 @@ void EseutilTrackSpaceComplete(
     
 JET_ERR ErrSpaceDumpCtxComplete(
     __inout void *          pvContext,
-    __in JET_ERR            err )
+    _In_ JET_ERR            err )
 {
     ESEUTIL_SPACE_DUMP_CTX * pespCtx = (ESEUTIL_SPACE_DUMP_CTX *)pvContext;
 
@@ -3248,8 +3248,8 @@ LOCAL VOID DBUTLPrintfIntN( INT iValue, INT ichMax )
 }
 
 JET_ERR ErrLegacySpaceDumpEvalBTreeData(
-    __in const BTREE_STATS * const      pBTreeStats,
-    __in JET_API_PTR                    pvContext )
+    _In_ const BTREE_STATS * const      pBTreeStats,
+    _In_ JET_API_PTR                    pvContext )
 {
     ULONG * pcpgAvailTotal = (ULONG*)pvContext;
 

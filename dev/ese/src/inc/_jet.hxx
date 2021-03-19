@@ -1709,13 +1709,13 @@ __forceinline ERR VTAPI ErrDispSeek(
 }
 
 __forceinline ERR VTAPI ErrDispPrereadKeys(
-    __in const JET_SESID                                sesid,
-    __in const JET_TABLEID                              tableid,
+    _In_ const JET_SESID                                sesid,
+    _In_ const JET_TABLEID                              tableid,
     __in_ecount(ckeys) const void * const * const       rgpvKeys,
     __in_ecount(ckeys) const ULONG * const      rgcbKeys,
-    __in const LONG                                     ckeys,
+    _In_ const LONG                                     ckeys,
     __out_opt LONG * const                              pckeysPreread,
-    __in const JET_GRBIT                                grbit )
+    _In_ const JET_GRBIT                                grbit )
 {
     ValidateTableid( sesid, tableid );
 
@@ -1726,14 +1726,14 @@ __forceinline ERR VTAPI ErrDispPrereadKeys(
 }
 
 __forceinline ERR VTAPI ErrDispPrereadIndexRanges(
-    __in const JET_SESID                                sesid,
-    __in const JET_TABLEID                              tableid,
+    _In_ const JET_SESID                                sesid,
+    _In_ const JET_TABLEID                              tableid,
     __in_ecount(cIndexRanges) const JET_INDEX_RANGE * const rgIndexRanges,
-    __in const ULONG                            cIndexRanges,
-    __out_opt ULONG * const                     pcRangesPreread,
+    _In_ const ULONG                                    cIndexRanges,
+    __out_opt ULONG * const                             pcRangesPreread,
     __in_ecount(ccolumnidPreread) const JET_COLUMNID * const rgcolumnidPreread,
-    __in const ULONG                            ccolumnidPreread,
-    __in const JET_GRBIT                                grbit )
+    _In_ const ULONG                                    ccolumnidPreread,
+    _In_ const JET_GRBIT                                grbit )
 {
     ValidateTableid( sesid, tableid );
 
@@ -2056,13 +2056,13 @@ __forceinline ERR VTAPI ErrDispResetTableSequential(
 }
 
 __forceinline ERR VTAPI ErrDispPrereadIndexRange(
-    __in const JET_SESID                sesid,
-    __in const JET_TABLEID              tableid,
-    __in const JET_INDEX_RANGE * const  pIndexRange,
-    __in const ULONG            cPageCacheMin,
-    __in const ULONG            cPageCacheMax,
-    __in const JET_GRBIT                grbit,
-    __out_opt ULONG * const     pcPageCacheActual )
+    _In_ const JET_SESID                sesid,
+    _In_ const JET_TABLEID              tableid,
+    _In_ const JET_INDEX_RANGE * const  pIndexRange,
+    _In_ const ULONG                    cPageCacheMin,
+    _In_ const ULONG                    cPageCacheMax,
+    _In_ const JET_GRBIT                grbit,
+    __out_opt ULONG * const             pcPageCacheActual )
 {
     ValidateTableid( sesid, tableid );
 

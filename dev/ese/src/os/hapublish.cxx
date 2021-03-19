@@ -12,7 +12,7 @@
 #define HAPUBLISHFUNC       "HaPublishDbFailureItem"
 
 HMODULE g_hmodHaPublish;
-typedef UINT WINAPI FNHAPUBLISHDBFAILUREITEM( __in HaDbFailureItem* fi );
+typedef UINT WINAPI FNHAPUBLISHDBFAILUREITEM( _In_ HaDbFailureItem* fi );
 FNHAPUBLISHDBFAILUREITEM* g_pfnHaPublishDbFailureItem;
 
 static CRITICAL_SECTION g_csHaPublish;

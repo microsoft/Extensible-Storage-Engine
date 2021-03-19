@@ -197,21 +197,21 @@ public:
     //  Retrieves the distinct sample values the collector mechanism was able
     //  to track, i.e. the "native" sample values the collector knows of.
     //
-    virtual ERR ErrGetSampleValues( __out SAMPLE * pSamples ) = 0;
+    virtual ERR ErrGetSampleValues( _Out_ SAMPLE * pSamples ) = 0;
 
     //  Retieves number of samples equal to or less than this value, compared 
     //  to the previous call.  This function should not assume that the sample
     //  values requested match those ErrGetSampleValues() gives back, the user
     //  may break the histogram up into exact chunks of a 100, or something.
     //
-    virtual ERR ErrGetSampleHits( __in const SAMPLE qwSample, __out CHITS * pcHits ) = 0;
+    virtual ERR ErrGetSampleHits( _In_ const SAMPLE qwSample, _Out_ CHITS * pcHits ) = 0;
 
     //  Gets the sample value at the nth percentile.  This is just more convienent
     //  way of calling ErrGetSampleValues()/ErrGetSampleHits() in a loop to count
     //  up to the nth percentile.  Note also the Median() is just this function,
     //  passing cPercentile = 50.
     //
-    virtual ERR ErrGetPercentileHits( __inout ULONG * pPercentile, __out SAMPLE * pSample ) = 0;
+    virtual ERR ErrGetPercentileHits( __inout ULONG * pPercentile, _Out_ SAMPLE * pSample ) = 0;
 
     //  These are a set of useful statistical functions.  Not all of them may
     //  give precisely true values, depending upon the base kind of CStats
@@ -326,15 +326,15 @@ public:
     {
         return CStats::ERR::errFuncNotSupported;
     }
-    CStats::ERR ErrGetSampleValues( __out SAMPLE * pSamples )
+    CStats::ERR ErrGetSampleValues( _Out_ SAMPLE * pSamples )
     {
         return CStats::ERR::errFuncNotSupported;
     }
-    CStats::ERR ErrGetSampleHits( __in const SAMPLE qwSample, __out CHITS * pcHits )
+    CStats::ERR ErrGetSampleHits( _In_ const SAMPLE qwSample, _Out_ CHITS * pcHits )
     {
         return CStats::ERR::errFuncNotSupported;
     }
-    CStats::ERR ErrGetPercentileHits( __inout ULONG * pPercentile, __out SAMPLE * pSample )
+    CStats::ERR ErrGetPercentileHits( __inout ULONG * pPercentile, _Out_ SAMPLE * pSample )
     {
         return CStats::ERR::errFuncNotSupported;
     }
@@ -403,7 +403,7 @@ private:
 
     BOOL FValidIndex( __int64 i ) { return i >= 0 && i < m_cValues; }
 
-    BOOL FFindSampleBucket( __in const SAMPLE qwSample, __out ULONG * piVal )
+    BOOL FFindSampleBucket( _In_ const SAMPLE qwSample, _Out_ ULONG * piVal )
     {
         STATAssert( m_rwlGrowing.FReader() || m_rwlGrowing.FWriter() );
         STATAssert( piVal );
@@ -645,7 +645,7 @@ public:
         return ERR::errSuccess;
     }
 
-    CStats::ERR ErrGetSampleValues( __out SAMPLE * pSamples )
+    CStats::ERR ErrGetSampleValues( _Out_ SAMPLE * pSamples )
     {
         if ( !m_fInReadValues )
         {
@@ -675,7 +675,7 @@ public:
         return CStats::ERR::errSuccess;
     }
 
-    CStats::ERR ErrGetSampleHits( __in const SAMPLE qwValue, __out CHITS * pcHits )
+    CStats::ERR ErrGetSampleHits( _In_ const SAMPLE qwValue, _Out_ CHITS * pcHits )
     {
         CHITS cHits = 0;
 
@@ -720,7 +720,7 @@ public:
         return ERR::errSuccess;
     }
 
-    CStats::ERR ErrGetPercentileHits( __inout ULONG * pPercentile, __out SAMPLE * pSample )
+    CStats::ERR ErrGetPercentileHits( __inout ULONG * pPercentile, _Out_ SAMPLE * pSample )
     {
         CHITS cHits;
         CHITS cTotHits;
@@ -922,17 +922,17 @@ public:
         return m_stats.ErrReset( hgcrf );
     }
 
-    CStats::ERR ErrGetSampleValues( __out SAMPLE * pSamples )
+    CStats::ERR ErrGetSampleValues( _Out_ SAMPLE * pSamples )
     {
         return m_stats.ErrGetSampleValues( pSamples );
     }
 
-    CStats::ERR ErrGetSampleHits( __in const SAMPLE qwValue, __out CHITS * pcHits )
+    CStats::ERR ErrGetSampleHits( _In_ const SAMPLE qwValue, _Out_ CHITS * pcHits )
     {
         return m_stats.ErrGetSampleHits( qwValue, pcHits );
     }
 
-    CStats::ERR ErrGetPercentileHits( __inout ULONG * pPercentile, __out SAMPLE * pSample )
+    CStats::ERR ErrGetPercentileHits( __inout ULONG * pPercentile, _Out_ SAMPLE * pSample )
     {
         return m_stats.ErrGetPercentileHits( pPercentile, pSample );
     }
@@ -981,7 +981,7 @@ class CSegmentedHistogram : public CStats {
             return i >= 0 && i < m_cValues;
         }
 
-        BOOL FFindSampleBucket_( __in const SAMPLE qwSample, __out ULONG * piVal ) const
+        BOOL FFindSampleBucket_( _In_ const SAMPLE qwSample, _Out_ ULONG * piVal ) const
         {
             STATAssert( piVal );
 
@@ -1130,7 +1130,7 @@ class CSegmentedHistogram : public CStats {
             return ERR::errSuccess;
         }
 
-        CStats::ERR ErrGetSampleValues( __out SAMPLE * pSamples )
+        CStats::ERR ErrGetSampleValues( _Out_ SAMPLE * pSamples )
         {
             AssertValid();
 
@@ -1183,7 +1183,7 @@ class CSegmentedHistogram : public CStats {
             return ERR::errSuccess;
         }
 
-        CStats::ERR ErrGetSampleHits( __in const SAMPLE qwValue, __out CHITS * pcHits )
+        CStats::ERR ErrGetSampleHits( _In_ const SAMPLE qwValue, _Out_ CHITS * pcHits )
         {
             CHITS cHits = 0;
 
@@ -1224,7 +1224,7 @@ class CSegmentedHistogram : public CStats {
             return ERR::errSuccess;
         }
 
-        CStats::ERR ErrGetPercentileHits( __inout ULONG * pPercentile, __out SAMPLE * pSample )
+        CStats::ERR ErrGetPercentileHits( __inout ULONG * pPercentile, _Out_ SAMPLE * pSample )
         {
             return ERR::errInvalidParameter;
         }
@@ -1550,7 +1550,7 @@ public:
         return CStats::ERR::errSuccess;
     }
 
-    CStats::ERR ErrGetSampleValues( __out SAMPLE * psample )
+    CStats::ERR ErrGetSampleValues( _Out_ SAMPLE * psample )
     {
         //  Must move to next bucket
         m_iSampleValueNext++;
@@ -1572,7 +1572,7 @@ public:
         return CStats::ERR::errSuccess;
     }
 
-    CStats::ERR ErrGetSampleHits( __in const SAMPLE qwValue, __out CHITS * pcHits )
+    CStats::ERR ErrGetSampleHits( _In_ const SAMPLE qwValue, _Out_ CHITS * pcHits )
     {
         CHITS cHitsTotal = 0;
 
@@ -1612,7 +1612,7 @@ public:
         return CStats::ERR::errSuccess;
     }
 
-    CStats::ERR ErrGetPercentileHits( __inout ULONG * pPercentile, __out SAMPLE * pSample )
+    CStats::ERR ErrGetPercentileHits( __inout ULONG * pPercentile, _Out_ SAMPLE * pSample )
     {
         STATAssertSz( fFalse, "Not yet implemented" );
         return CStats::ERR::errFuncNotSupported;
@@ -1863,7 +1863,7 @@ class CCompoundHistogram : public CStats {
             }
         }
 
-        CStats::ERR ErrGetSampleValues( __out SAMPLE * pSamples )
+        CStats::ERR ErrGetSampleValues( _Out_ SAMPLE * pSamples )
         {
             AssertValid();
 
@@ -1905,7 +1905,7 @@ class CCompoundHistogram : public CStats {
             return errGet;
         }
 
-        CStats::ERR ErrGetSampleHits( __in const SAMPLE qwValue, __out CHITS * pcHits )
+        CStats::ERR ErrGetSampleHits( _In_ const SAMPLE qwValue, _Out_ CHITS * pcHits )
         {
             *pcHits = 0;
 
@@ -1977,7 +1977,7 @@ class CCompoundHistogram : public CStats {
         SAMPLE  m_qwSampleLast;
         CHITS   m_cHitsTotalPctStart;
 
-        CStats::ERR ErrGetPercentileHits( __inout ULONG * pulPercentile, __out SAMPLE * pqwSample )
+        CStats::ERR ErrGetPercentileHits( __inout ULONG * pulPercentile, _Out_ SAMPLE * pqwSample )
         {
             if ( m_cSegmentMac == 0 )
             {

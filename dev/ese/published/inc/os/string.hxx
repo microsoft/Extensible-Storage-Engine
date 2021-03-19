@@ -39,10 +39,10 @@ typedef _Return_type_success_(return >= 0) LONG HRESULT; // required b/c we defi
 //  get the length of the string
 ERR ErrFromStrsafeHr ( HRESULT hr );
 
-LONG LOSStrLengthA( __in PCSTR const sz );
-LONG LOSStrLengthW( __in PCWSTR const wsz );
-LONG LOSStrLengthUnalignedW( __in const UnalignedLittleEndian< WCHAR > * wsz );
-LONG LOSStrLengthMW( __in PCWSTR const wsz );
+LONG LOSStrLengthA( _In_ PCSTR const sz );
+LONG LOSStrLengthW( _In_ PCWSTR const wsz );
+LONG LOSStrLengthUnalignedW( _In_ const UnalignedLittleEndian< WCHAR > * wsz );
+LONG LOSStrLengthMW( _In_ PCWSTR const wsz );
 
 //  copy a string
 
@@ -72,8 +72,8 @@ LONG LOSStrLengthMW( __in PCWSTR const wsz );
 //  is "less than" the second string, -1 is returned.  if the strings are "equal",
 //  0 is returned.  if the first string is "greater than" the second string, +1 is returned.
 
-LONG LOSStrCompareA( __in PCSTR const pszStr1, __in PCSTR const pszStr2, __in const ULONG cchMax = ~ULONG( 0 ) );
-LONG LOSStrCompareW( __in PCWSTR const pwszStr1, __in PCWSTR const pwszStr2, __in const ULONG cchMax = ~ULONG( 0 ) );
+LONG LOSStrCompareA( _In_ PCSTR const pszStr1, _In_ PCSTR const pszStr2, _In_ const ULONG cchMax = ~ULONG( 0 ) );
+LONG LOSStrCompareW( _In_ PCWSTR const pwszStr1, _In_ PCWSTR const pwszStr2, _In_ const ULONG cchMax = ~ULONG( 0 ) );
 
 
 //  create a formatted string in a given buffer
@@ -105,8 +105,8 @@ VOID OSStrCharFindReverseW( _In_ PCWSTR const wszStr, const wchar_t wch, _Outptr
 
 //  check for a trailing path-delimeter
 
-BOOL FOSSTRTrailingPathDelimiterA( __in PCSTR const pszPath );
-BOOL FOSSTRTrailingPathDelimiterW( __in PCWSTR const pwszPath );
+BOOL FOSSTRTrailingPathDelimiterA( _In_ PCSTR const pszPath );
+BOOL FOSSTRTrailingPathDelimiterW( _In_ PCWSTR const pwszPath );
 
 //  convert with a fixed conversion code page (1252 / Windows English) or use a context dependant
 //  conversion (CP_ACP).
@@ -176,8 +176,8 @@ ERR ErrOSSTRUnicodeToTchar( const wchar_t *const    pwszIn,
 #endif  //  UNICODE
 
 
-ERR ErrOSSTRAsciiToUnicodeM( __in PCSTR const szzMultiIn, __out_ecount_z(cchMax) WCHAR * wszNew, ULONG cchMax, size_t * const pcchActual, const OSSTR_CONVERSION osstrConversion = OSSTR_CONTEXT_DEPENDENT_CONVERSION );
-ERR ErrOSSTRUnicodeToAsciiM( __in PCWSTR const wszzMultiIn, __out_ecount_z(cchMax) char * szNew, ULONG cchMax, size_t * const pcchActual, const OSSTR_CONVERSION osstrConversion = OSSTR_CONTEXT_DEPENDENT_CONVERSION );
+ERR ErrOSSTRAsciiToUnicodeM( _In_ PCSTR const szzMultiIn, __out_ecount_z(cchMax) WCHAR * wszNew, ULONG cchMax, size_t * const pcchActual, const OSSTR_CONVERSION osstrConversion = OSSTR_CONTEXT_DEPENDENT_CONVERSION );
+ERR ErrOSSTRUnicodeToAsciiM( _In_ PCWSTR const wszzMultiIn, __out_ecount_z(cchMax) char * szNew, ULONG cchMax, size_t * const pcchActual, const OSSTR_CONVERSION osstrConversion = OSSTR_CONTEXT_DEPENDENT_CONVERSION );
 
 #endif  //  __OS_STRING_HXX_INCLUDED
 

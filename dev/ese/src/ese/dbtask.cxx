@@ -330,7 +330,7 @@ HandleError:
     return err;
 }
 
-VOID RECTASK::GetBookmark( __out BOOKMARK * const pbookmark ) const
+VOID RECTASK::GetBookmark( _Out_ BOOKMARK * const pbookmark ) const
 {
     pbookmark->key.Nullify();
     pbookmark->key.suffix.SetPv( const_cast<BYTE *>( m_rgbBookmarkKey ) );
@@ -1082,7 +1082,7 @@ VOID BATCHRECTASK::SortTasksByBookmark()
 
 //  preread bookmarks of the tasks, starting at itaskStart. the number of tasks that had their bookmarks
 //  preread is stored in *pctasksPreread
-VOID BATCHRECTASK::PrereadTaskBookmarks( PIB * const ppib, const INT itaskStart, __out LONG * pctasksPreread )
+VOID BATCHRECTASK::PrereadTaskBookmarks( PIB * const ppib, const INT itaskStart, _Out_ LONG * pctasksPreread )
 {
     *pctasksPreread = 0;
 
