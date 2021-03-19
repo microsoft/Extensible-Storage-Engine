@@ -52,14 +52,14 @@ ERR ErrSTATSComputeIndexStats( PIB *ppib, FCB *pfcbIdx, FUCB *pfucb );
 ERR ErrSTATSRetrieveTableStats(
     PIB         *ppib,
     const IFMP  ifmp,
-    __in PCSTR  szTable,
+    _In_ PCSTR  szTable,
     LONG        *pcRecord,
     LONG        *pcKey,
     LONG        *pcPage );
 
 ERR ErrSTATSRetrieveIndexStats(
     FUCB        *pfucbTable,
-    __in PCSTR  szIndex,
+    _In_ PCSTR  szIndex,
     BOOL        fPrimary,
     LONG        *pcItem,
     LONG        *pcKey,

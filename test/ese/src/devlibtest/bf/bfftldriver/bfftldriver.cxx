@@ -20,7 +20,7 @@ IOREASON g_iorThunk( (IOREASONPRIMARY) 1 );
 
 //  Terminates the FTL reader.
 
-void BFFTLITermFTLReader( __in BFFTLContext * const pbfftlc )
+void BFFTLITermFTLReader( _In_ BFFTLContext * const pbfftlc )
 {
     Assert( !pbfftlc->pftlr || pbfftlc->pftl );
 
@@ -51,7 +51,7 @@ class CFileSystemConfiguration : public CDefaultFileSystemConfiguration
 
 //  Initializes the FTL reader.
 
-ERR ErrBFFTLIInitFTLReader( __in BFFTLContext * const pbfftlc, __in const WCHAR * const wszTraceLogFile )
+ERR ErrBFFTLIInitFTLReader( _In_ BFFTLContext * const pbfftlc, _In_ const WCHAR * const wszTraceLogFile )
 {
     ERR err = JET_errSuccess;
 
@@ -76,7 +76,7 @@ HandleError:
 
 //  Initializes the BF trace driver's handle / context
 
-ERR ErrBFFTLInit( __in const void * const pvTraceDataLog, __in const DWORD grbit, __out BFFTLContext ** ppbfftlc )
+ERR ErrBFFTLInit( _In_ const void * const pvTraceDataLog, _In_ const DWORD grbit, _Out_ BFFTLContext ** ppbfftlc )
 {
     ERR err = JET_errSuccess;
 
@@ -211,7 +211,7 @@ HandleError:
 
 //  Shuts down and frees resources maintained by the BFFTLContext.
 
-void BFFTLTerm( __out BFFTLContext * pbfftlc )
+void BFFTLTerm( _Out_ BFFTLContext * pbfftlc )
 {
     if ( !pbfftlc )
     {
@@ -245,7 +245,7 @@ void BFFTLTerm( __out BFFTLContext * pbfftlc )
 /*
 
 
-BOOL FBFFTLPostProcessed( __in const CFastTraceLog * pftl, const ULONG ulPostProcessVersionMajor )
+BOOL FBFFTLPostProcessed( _In_ const CFastTraceLog * pftl, const ULONG ulPostProcessVersionMajor )
 {
     AssertSz( fFalse, "FBFFTLPostProcessed() NYI!" );
 
@@ -261,7 +261,7 @@ ERR ErrBFFTLPostProcess( __inout CFastTraceLog * pftl )
     return err;
 }
 
-PGNO CpgBFFTLHighPgnoRef( __in const IFMP ifmp )
+PGNO CpgBFFTLHighPgnoRef( _In_ const IFMP ifmp )
 {
     AssertSz( fFalse, "CpgBFFTLHighPgnoRef() NYI!" );
 
@@ -270,7 +270,7 @@ PGNO CpgBFFTLHighPgnoRef( __in const IFMP ifmp )
 
 */  
 
-ERR ErrBFFTLIUpdIfmpCpgStats( __inout BFFTLContext * pbfftlc, __in const IFMP ifmp, __in const PGNO pgno )
+ERR ErrBFFTLIUpdIfmpCpgStats( __inout BFFTLContext * pbfftlc, _In_ const IFMP ifmp, _In_ const PGNO pgno )
 {
     if ( ifmp >= _countof( pbfftlc->rgpgnoMax ) )
     {
@@ -287,7 +287,7 @@ ERR ErrBFFTLIUpdIfmpCpgStats( __inout BFFTLContext * pbfftlc, __in const IFMP if
     return JET_errSuccess;
 }
 
-ERR ErrBFFTLIAddSample( __inout BFFTLContext * pbfftlc, __out BFTRACE * pbftrace )
+ERR ErrBFFTLIAddSample( __inout BFFTLContext * pbfftlc, _Out_ BFTRACE * pbftrace )
 {
     ERR err = JET_errSuccess;
 
@@ -355,7 +355,7 @@ ERR ErrBFFTLIAddSample( __inout BFFTLContext * pbfftlc, __out BFTRACE * pbftrace
 //  able to get the trace, errNotFound if we're done with the trace file, and an a specific error in
 //  any case.
 
-ERR ErrBFFTLGetNext( __inout BFFTLContext * pbfftlc, __out BFTRACE * pbftrace )
+ERR ErrBFFTLGetNext( __inout BFFTLContext * pbfftlc, _Out_ BFTRACE * pbftrace )
 {
     ERR err = JET_errSuccess;
 
@@ -429,7 +429,7 @@ HandleError:
     return err;
 }
 
-QWORD IbBFFTLBookmark( __out const BFFTLContext * pbfftlc )
+QWORD IbBFFTLBookmark( _Out_ const BFFTLContext * pbfftlc )
 {
     Assert( pbfftlc );
     if ( pbfftlc == NULL )
@@ -439,7 +439,7 @@ QWORD IbBFFTLBookmark( __out const BFFTLContext * pbfftlc )
     return pbfftlc->ftltraceCurrent.ibBookmark;
 }
 
-ERR ErrBFFTLPostProcess( __in const BFFTLContext * pbfftlc )
+ERR ErrBFFTLPostProcess( _In_ const BFFTLContext * pbfftlc )
 {
     ERR err = JET_errSuccess;
 
@@ -465,7 +465,7 @@ ERR ErrBFFTLPostProcess( __in const BFFTLContext * pbfftlc )
 #define DblPct( numerator, denominator )        ( ((double)numerator)/((double)denominator)*100.0 )
 //  Dumps stats about the trace file processed
     
-ERR ErrBFFTLDumpStats( __in const BFFTLContext * pbfftlc, __in const DWORD grbit )
+ERR ErrBFFTLDumpStats( _In_ const BFFTLContext * pbfftlc, _In_ const DWORD grbit )
 {
     wprintf( L"Dumping pbfftlc = %p with grbit = 0x%x\n", pbfftlc, grbit );
     wprintf( L"\n" );

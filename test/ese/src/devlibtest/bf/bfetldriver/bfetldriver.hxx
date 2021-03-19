@@ -111,14 +111,14 @@ typedef struct _BFETLContext
 
     //  Friend functions.
     friend ERR ErrBFETLInit(
-        __in const void * const pvTraceProvider,
-        __in const std::set<DWORD>& pids,
-        __in DWORD cEventsBufferedMax,
-        __in const DWORD grbit,
-        __out BFETLContext** const ppbfetlc );
-    friend void BFETLTerm( __in BFETLContext* const pbfetlc );
-    friend ERR ErrBFETLGetNext( __in BFETLContext* const pbfetlc, __out BFTRACE* const pbftrace, __out DWORD* const pdwPID );
-    friend const BFTraceStats* PbftsBFETLStatsByPID( __in const BFETLContext* const pbfetlc, __inout DWORD* const pdwPID );
+        _In_ const void * const pvTraceProvider,
+        _In_ const std::set<DWORD>& pids,
+        _In_ DWORD cEventsBufferedMax,
+        _In_ const DWORD grbit,
+        _Out_ BFETLContext** const ppbfetlc );
+    friend void BFETLTerm( _In_ BFETLContext* const pbfetlc );
+    friend ERR ErrBFETLGetNext( _In_ BFETLContext* const pbfetlc, _Out_ BFTRACE* const pbftrace, _Out_ DWORD* const pdwPID );
+    friend const BFTraceStats* PbftsBFETLStatsByPID( _In_ const BFETLContext* const pbfetlc, __inout DWORD* const pdwPID );
 } BFETLContext;
 
 
@@ -131,28 +131,28 @@ typedef struct _BFETLContext
 //  Inits BFETL driver of a trace file and driver options.
 
 ERR ErrBFETLInit(
-    __in const void * const pvTraceProvider,
-    __in const std::set<DWORD>& pids,
-    __in DWORD cEventsBufferedMax,
-    __in const DWORD grbit,
-    __out BFETLContext** const ppbfetlc );
+    _In_ const void * const pvTraceProvider,
+    _In_ const std::set<DWORD>& pids,
+    _In_ DWORD cEventsBufferedMax,
+    _In_ const DWORD grbit,
+    _Out_ BFETLContext** const ppbfetlc );
 ERR ErrBFETLInit(
-    __in const void * const pvTraceProvider,
-    __in const DWORD dwPID,
-    __in DWORD cEventsBufferedMax,
-    __in const DWORD grbit,
-    __out BFETLContext** const ppbfetlc );
+    _In_ const void * const pvTraceProvider,
+    _In_ const DWORD dwPID,
+    _In_ DWORD cEventsBufferedMax,
+    _In_ const DWORD grbit,
+    _Out_ BFETLContext** const ppbfetlc );
 
 
 //  Terms and cleanups up the driver handle / allocations.
 
-void BFETLTerm( __in BFETLContext* const pbfetlc );
+void BFETLTerm( _In_ BFETLContext* const pbfetlc );
 
 
 //  Gets the next trace in the trace file (or in the test traces).
 
-ERR ErrBFETLGetNext( __in BFETLContext* const pbfetlc, __out BFTRACE * const pbftrace );
-ERR ErrBFETLGetNext( __in BFETLContext* const pbfetlc, __out BFTRACE * const pbftrace, __out DWORD* const pdwPID );
+ERR ErrBFETLGetNext( _In_ BFETLContext* const pbfetlc, _Out_ BFTRACE * const pbftrace );
+ERR ErrBFETLGetNext( _In_ BFETLContext* const pbfetlc, _Out_ BFTRACE * const pbftrace, _Out_ DWORD* const pdwPID );
 
 
 //  Gets BFTraceStats specific to a process ID. pdwPID is an in/out parameter: the input is an iterator
@@ -160,30 +160,30 @@ ERR ErrBFETLGetNext( __in BFETLContext* const pbfetlc, __out BFTRACE * const pbf
 //  If "i" is beyond the number of processes for which we have traces for, the output PID will be zero
 //  and the returned pointer will be NULL.
 
-const BFTraceStats* PbftsBFETLStatsByPID( __in const BFETLContext* const pbfetlc, __inout DWORD* const pdwPID );
+const BFTraceStats* PbftsBFETLStatsByPID( _In_ const BFETLContext* const pbfetlc, __inout DWORD* const pdwPID );
 
 
 //  Converts an ETL file into an FTL post-processed file.
 
 ERR ErrBFETLConvertToFTL(
-    __in const WCHAR* const wszEtlFilePath,
-    __in const WCHAR* const wszFtlFilePath,
-    __in const std::set<DWORD>& pids );
+    _In_ const WCHAR* const wszEtlFilePath,
+    _In_ const WCHAR* const wszFtlFilePath,
+    _In_ const std::set<DWORD>& pids );
 
 
 //  Compares an ETL against an FTL file. Returns JET_errDatabaseCorrupted if they are not the same.
 
 ERR ErrBFETLFTLCmp(
-    __in const void* pvTraceProviderEtl,
-    __in const void* pvTraceProviderFtl,
-    __in const DWORD dwPID,
-    __in const BOOL fTestMode = fFalse,
-    __out __int64* const pcTracesProcessed = NULL );
+    _In_ const void* pvTraceProviderEtl,
+    _In_ const void* pvTraceProviderFtl,
+    _In_ const DWORD dwPID,
+    _In_ const BOOL fTestMode = fFalse,
+    _Out_ __int64* const pcTracesProcessed = NULL );
 
 
 //  Dump stats related to the ETL file.
 
-ERR ErrBFETLDumpStats( __in const BFETLContext* const pbfetlc, __in const DWORD grbit );
+ERR ErrBFETLDumpStats( _In_ const BFETLContext* const pbfetlc, _In_ const DWORD grbit );
 
 #endif _BFETLDRIVER_HXX_INCLUDED
 

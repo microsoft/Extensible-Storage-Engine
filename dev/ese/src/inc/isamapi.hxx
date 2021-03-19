@@ -82,7 +82,7 @@ ERR ErrIsamIdle( JET_SESID sesid, JET_GRBIT grbit );
 
 ERR ErrIsamAttachDatabase(
     JET_SESID                   sesid,
-    __in PCWSTR                 wszDatabaseName,
+    _In_ PCWSTR                 wszDatabaseName,
     const BOOL                  fAllowTrimDBTask,
     const JET_SETDBPARAM* const rgsetdbparam,
     const ULONG                 csetdbparam,
@@ -109,7 +109,7 @@ ERR ErrIsamOpenDatabase(
     JET_DBID        *pdbid,
     JET_GRBIT       grbit );
 
-ERR ErrIsamPrereadTables( __in JET_SESID sesid, __in JET_DBID vdbid, __in_ecount( cwszTables ) PCWSTR * rgwszTables, __in INT cwszTables, JET_GRBIT grbit );
+ERR ErrIsamPrereadTables( _In_ JET_SESID sesid, _In_ JET_DBID vdbid, __in_ecount( cwszTables ) PCWSTR * rgwszTables, _In_ INT cwszTables, JET_GRBIT grbit );
 
 ERR ErrIsamCloseDatabase( JET_SESID sesid, JET_DBID vdbid, JET_GRBIT grbit );
 
@@ -150,8 +150,8 @@ ERR ErrIsamBackup(
 
 ERR ErrIsamRestore(
     JET_INSTANCE jinst,
-    __in JET_PCWSTR wszRestoreFromPath,
-    __in JET_PCWSTR wszDestPath,
+    _In_ JET_PCWSTR wszRestoreFromPath,
+    _In_ JET_PCWSTR wszDestPath,
     JET_PFNINITCALLBACK pfnStatus,
     void * pvStatusContext );
 
@@ -159,9 +159,9 @@ ERR ErrIsamBeginExternalBackup( JET_INSTANCE jinst, JET_GRBIT grbit );
 
 ERR ErrIsamEndExternalBackup(  JET_INSTANCE jinst, JET_GRBIT grbit );
 
-ERR ErrIsamBeginSurrogateBackup( __in JET_INSTANCE jinst, __in ULONG lgenFirst, __in ULONG lgenLast, __in JET_GRBIT grbit );
+ERR ErrIsamBeginSurrogateBackup( _In_ JET_INSTANCE jinst, _In_ ULONG lgenFirst, _In_ ULONG lgenLast, _In_ JET_GRBIT grbit );
 
-ERR ErrIsamEndSurrogateBackup( __inout JET_INSTANCE jinst, __in JET_GRBIT grbit );
+ERR ErrIsamEndSurrogateBackup( __inout JET_INSTANCE jinst, _In_ JET_GRBIT grbit );
 
 ERR ErrIsamGetLogInfo(  JET_INSTANCE jinst, __out_bcount_part_opt(cbMax, *pcbActual) PWSTR wszzLogs, ULONG cbMax, ULONG *pcbActual, JET_LOGINFO_W *pLogInfo );
 
@@ -180,14 +180,14 @@ ERR ErrIsamTruncateLog(  JET_INSTANCE jinst );
 
 ERR ErrIsamExternalRestore(
     JET_INSTANCE jinst,
-    __in JET_PCWSTR wszCheckpointFilePath,
-    __in JET_PCWSTR wszLogPath,
+    _In_ JET_PCWSTR wszCheckpointFilePath,
+    _In_ JET_PCWSTR wszLogPath,
     __in_ecount_opt(crstfilemap) JET_RSTMAP_W *rgstmap,
     INT crstfilemap,
-    __in JET_PCWSTR wszBackupLogPath,
+    _In_ JET_PCWSTR wszBackupLogPath,
     LONG genLow,
     LONG genHigh,
-    __in JET_PCWSTR wszTargetLogPath,
+    _In_ JET_PCWSTR wszTargetLogPath,
     LONG lGenHighTarget,
     JET_PFNINITCALLBACK pfn,
     void * pvContext );
@@ -225,50 +225,50 @@ ERR ErrIsamGetDatabaseInfo(
 
 ERR
 ErrIsamGetDatabasePages(
-    __in JET_SESID                              vsesid,
-    __in JET_DBID                               vdbid,
-    __in ULONG                          pgnoStart,
-    __in ULONG                          cpg,
+    _In_ JET_SESID                              vsesid,
+    _In_ JET_DBID                               vdbid,
+    _In_ ULONG                                  pgnoStart,
+    _In_ ULONG                                  cpg,
     __out_bcount_part( cb, *pcbActual ) void *  pv,
-    __in ULONG                          cb,
-    __out ULONG *                       pcbActual,
-    __in JET_GRBIT                              grbit );
+    _In_ ULONG                                  cb,
+    _Out_ ULONG *                               pcbActual,
+    _In_ JET_GRBIT                              grbit );
 
 ERR
 ErrIsamOnlinePatchDatabasePage(
-    __in JET_SESID                              vsesid,
-    __in JET_DBID                               vdbid,
-    __in ULONG                          pgno,
+    _In_ JET_SESID                              vsesid,
+    _In_ JET_DBID                               vdbid,
+    _In_ ULONG                                  pgno,
     __in_bcount(cbData) const void *            pvToken,
-    __in ULONG                          cbToken,
+    _In_ ULONG                                  cbToken,
     __in_bcount(cbData) const void *            pvData,
-    __in ULONG                          cbData,
-    __in JET_GRBIT                              grbit );
+    _In_ ULONG                                  cbData,
+    _In_ JET_GRBIT                              grbit );
 
 ERR
 ErrIsamBeginDatabaseIncrementalReseed(
-    __in JET_INSTANCE   jinst,
-    __in JET_PCWSTR     szDatabase,
-    __in JET_GRBIT      grbit );
+    _In_ JET_INSTANCE   jinst,
+    _In_ JET_PCWSTR     szDatabase,
+    _In_ JET_GRBIT      grbit );
 
 ERR
 ErrIsamEndDatabaseIncrementalReseed(
-    __in JET_INSTANCE   jinst,
-    __in JET_PCWSTR     szDatabase,
-    __in ULONG  genMinRequired,
-    __in ULONG  genFirstDivergedLog,
-    __in ULONG  genMaxRequired,
-    __in JET_GRBIT      grbit );
+    _In_ JET_INSTANCE   jinst,
+    _In_ JET_PCWSTR     szDatabase,
+    _In_ ULONG  genMinRequired,
+    _In_ ULONG  genFirstDivergedLog,
+    _In_ ULONG  genMaxRequired,
+    _In_ JET_GRBIT      grbit );
 
 ERR
 ErrIsamPatchDatabasePages(
-    __in JET_INSTANCE               jinst,
-    __in JET_PCWSTR                 szDatabase,
-    __in ULONG              pgnoStart,
-    __in ULONG              cpg,
+    _In_ JET_INSTANCE               jinst,
+    _In_ JET_PCWSTR                 szDatabase,
+    _In_ ULONG                      pgnoStart,
+    _In_ ULONG                      cpg,
     __in_bcount( cb ) const void *  pv,
-    __in ULONG              cb,
-    __in JET_GRBIT                  grbit );
+    _In_ ULONG                      cb,
+    _In_ JET_GRBIT                  grbit );
 
 ERR ErrIsamRemoveLogfile(
     _In_ IFileSystemAPI * const     pfsapi,
@@ -287,7 +287,7 @@ ERR ErrIsamGetIndexInfo( JET_SESID vsesid, JET_DBID vdbid, const char *szTable,
     const char *szIndexName, VOID *pv, ULONG cbMax, ULONG lInfoLevel, const BOOL fUnicodeNames );
 
 ERR ErrIsamGetSysTableColumnInfo( JET_SESID vsesid, JET_DBID vdbid,
-    __in JET_PCSTR szColumnName, VOID *pv, ULONG cbMax, LONG lInfoLevel );
+    _In_ JET_PCSTR szColumnName, VOID *pv, ULONG cbMax, LONG lInfoLevel );
 
 ERR ErrIsamCreateTable( JET_SESID vsesid, JET_DBID vdbid, JET_TABLECREATE5_A *ptablecreate );
 
@@ -301,7 +301,7 @@ ERR ErrIsamRenameTable( JET_SESID vsesid, JET_DBID vdbid,
     const CHAR *szName, const CHAR *szNameNew );
 
 ERR VTAPI ErrIsamOpenTable( JET_SESID vsesid, JET_DBID vdbid,
-    JET_TABLEID *ptableid, __in const JET_PCSTR szPath, JET_GRBIT grbit );
+    JET_TABLEID *ptableid, _In_ const JET_PCSTR szPath, JET_GRBIT grbit );
 
 ERR ErrIsamOpenTempTable(
     JET_SESID           sesid,
@@ -418,11 +418,11 @@ ERR ErrIsamSetDatabaseSize(
     DWORD           *pcpgReal );
 
 ERR ISAMAPI ErrIsamResizeDatabase(
-    __in JET_SESID      vsesid,
-    __in JET_DBID       vdbid,
-    __in ULONG  cpg,
+    _In_ JET_SESID      vsesid,
+    _In_ JET_DBID       vdbid,
+    _In_ ULONG  cpg,
     _Out_opt_ ULONG *pcpgActual,
-    __in JET_GRBIT      grbit );
+    _In_ JET_GRBIT      grbit );
 
 ERR ErrIsamSetColumnDefaultValue(
     JET_SESID       vsesid,
@@ -434,19 +434,19 @@ ERR ErrIsamSetColumnDefaultValue(
     const ULONG     grbit );
 
 ERR ErrIsamRBSPrepareRevert(
-    __in    JET_INSTANCE    jinst,
-    __in    JET_LOGTIME     jltRevertExpected,
-    __in    LONG            cpgCache,
-    __in    JET_GRBIT       grbit,
+    _In_    JET_INSTANCE    jinst,
+    _In_    JET_LOGTIME     jltRevertExpected,
+    _In_    LONG            cpgCache,
+    _In_    JET_GRBIT       grbit,
     _Out_   JET_LOGTIME*    pjltRevertActual );
 
 ERR ErrIsamRBSExecuteRevert(
-    __in    JET_INSTANCE            jinst,
-    __in    JET_GRBIT               grbit,
+    _In_    JET_INSTANCE            jinst,
+    _In_    JET_GRBIT               grbit,
     _Out_   JET_RBSREVERTINFOMISC*  prbsrevertinfo );
 
 ERR ErrIsamRBSCancelRevert(
-    __in    JET_INSTANCE   jinst );
+    _In_    JET_INSTANCE   jinst );
 
 } // extern "C"
 
@@ -470,7 +470,7 @@ ERR VTAPI ErrIsamPrereadIndexRanges(
     const JET_SESID                                 sesid,
     const JET_VTID                                  vtid,
     __in_ecount(cIndexRanges) const JET_INDEX_RANGE * const rgIndexRanges,
-    __in const ULONG                        cIndexRanges,
+    _In_ const ULONG                        cIndexRanges,
     __out_opt ULONG * const                 pcRangesPreread,
     __in_ecount(ccolumnidPreread) const JET_COLUMNID * const rgcolumnidPreread,
     const ULONG                                     ccolumnidPreread,

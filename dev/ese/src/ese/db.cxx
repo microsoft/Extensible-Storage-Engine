@@ -12,7 +12,7 @@
 //      JET_errDatabaseCorrupted
 //
 
-LOCAL ERR ErrDBICheck200And400( INST *const pinst, IFileSystemAPI *const pfsapi, __in PCWSTR wszDatabaseName )
+LOCAL ERR ErrDBICheck200And400( INST *const pinst, IFileSystemAPI *const pfsapi, _In_ PCWSTR wszDatabaseName )
 {
     /* persistent database data, in database root node
     /**/
@@ -3132,7 +3132,7 @@ VOID DBISetHeaderAfterAttach(
 
 //  ================================================================
 ERR ErrDBTryCreateSystemTable(
-    __in PIB * const ppib,
+    _In_ PIB * const ppib,
     const IFMP ifmp,
     const CHAR * const szTableName,
     ERR (*pfnCreate)(PIB * const, const IFMP, PGNO *, OBJID *),
@@ -4025,7 +4025,7 @@ HandleError:
 
 ERR ISAMAPI ErrIsamAttachDatabase(
     JET_SESID                   sesid,
-    __in PCWSTR                 wszDatabaseName,
+    _In_ PCWSTR                 wszDatabaseName,
     const BOOL                  fAllowTrimDBTask,
     const JET_SETDBPARAM* const rgsetdbparam,
     const ULONG                 csetdbparam,
@@ -6029,7 +6029,7 @@ ERR ISAMAPI ErrIsamOpenDatabase(
 
 ERR ErrDBOpenDatabase(
     PIB *ppib,
-    __in PCWSTR wszDatabaseName,
+    _In_ PCWSTR wszDatabaseName,
     IFMP *pifmp,
     ULONG grbit )
 {
@@ -6282,11 +6282,11 @@ HandleError:
 }
 
 ERR ISAMAPI ErrIsamResizeDatabase(
-    __in JET_SESID      vsesid,
-    __in JET_DBID       vdbid,
-    __in ULONG  cpgTarget,
+    _In_ JET_SESID      vsesid,
+    _In_ JET_DBID       vdbid,
+    _In_ ULONG  cpgTarget,
     _Out_opt_ ULONG *pcpgActual,
-    __in JET_GRBIT      grbit )
+    _In_ JET_GRBIT      grbit )
 {
     ERR     err                     = JET_errSuccess;
     PIB*    ppib                    = (PIB *)vsesid;

@@ -1558,7 +1558,7 @@ VOID *CResourceManager::PvAlloc_(
 //      object referense from its RCI.
 //  (5) Allocates a new chunk and aquires
 #ifdef MEM_CHECK
-    __in PCSTR szFile,
+    _In_ PCSTR szFile,
     LONG lLine
 #endif  //  MEM_CHECK
     )
@@ -1789,7 +1789,7 @@ VOID CResourceManager::MarkAsAllocated__(
 #ifdef MEM_CHECK
     ,
     LONG            option,
-    __in PCSTR      szFile,
+    _In_ PCSTR      szFile,
     LONG            lLine
 #endif  //  MEM_CHECK
     )
@@ -2176,7 +2176,7 @@ VOID CResource::Free( VOID * const pv )
 //======================================
 VOID *CResource::PvAlloc_(
 #ifdef MEM_CHECK
-    __in PCSTR szFile,
+    _In_ PCSTR szFile,
     LONG lLine
 #endif  //  MEM_CHECK
     )

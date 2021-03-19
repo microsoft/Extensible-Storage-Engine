@@ -267,11 +267,11 @@ ERR LGFileHelper::ErrLGMakeLogNameBaselessEx(
     __out_bcount(cbLogName) PWSTR wszLogName,
     __in_range(sizeof(WCHAR), cbOSFSAPI_MAX_PATHW) ULONG cbLogName,
     IFileSystemAPI *const   pfsapi,
-    __in PCWSTR wszLogFolder,
-    __in PCWSTR wszBaseName,
+    _In_ PCWSTR wszLogFolder,
+    _In_ PCWSTR wszBaseName,
     const enum eLGFileNameSpec eLogType,
     LONG lGen,
-    __in PCWSTR wszLogExt,
+    _In_ PCWSTR wszLogExt,
     ULONG cLogDigits )
 {
     ERR err = JET_errSuccess;
@@ -355,7 +355,7 @@ void LOG_STREAM::LGSetLogExt(
 ERR LOG_STREAM::ErrLGMakeLogNameBaseless(
     __out_bcount(cbLogName) PWSTR wszLogName,
     ULONG cbLogName,
-    __in PCWSTR wszLogFolder,
+    _In_ PCWSTR wszLogFolder,
     const enum eLGFileNameSpec eLogType,
     LONG lGen,
     __in_opt PCWSTR wszLogExt ) const
@@ -3282,7 +3282,7 @@ VOID LOG_STREAM::LGSzFromLogId( __out_bcount( cbFName ) PWSTR wszLogFileName, si
     return;
 }
 
-VOID LGMakeName( IFileSystemAPI *const pfsapi, __out_bcount(OSFSAPI_MAX_PATH*sizeof(WCHAR)) PWSTR wszName, __in PCWSTR wszPath, __in PCWSTR wszFName, __in PCWSTR wszExt )
+VOID LGMakeName( IFileSystemAPI *const pfsapi, __out_bcount(OSFSAPI_MAX_PATH*sizeof(WCHAR)) PWSTR wszName, _In_ PCWSTR wszPath, _In_ PCWSTR wszFName, _In_ PCWSTR wszExt )
 {
     WCHAR   wszDirT[IFileSystemAPI::cchPathMax];
     WCHAR   wszFNameT[IFileSystemAPI::cchPathMax];
@@ -3292,7 +3292,7 @@ VOID LGMakeName( IFileSystemAPI *const pfsapi, __out_bcount(OSFSAPI_MAX_PATH*siz
     CallS( pfsapi->ErrPathBuild( wszDirT, wszFName, wszExt, wszName ) );
 }
 
-VOID LOG_STREAM::LGFullLogNameFromLogId( __out_ecount(OSFSAPI_MAX_PATH) PWSTR wszFullLogFileName, LONG lGeneration, __in PCWSTR wszDirectory )
+VOID LOG_STREAM::LGFullLogNameFromLogId( __out_ecount(OSFSAPI_MAX_PATH) PWSTR wszFullLogFileName, LONG lGeneration, _In_ PCWSTR wszDirectory )
 {
     WCHAR   wszFullPathT[IFileSystemAPI::cchPathMax];
 
@@ -3306,7 +3306,7 @@ VOID LOG_STREAM::LGFullLogNameFromLogId( __out_ecount(OSFSAPI_MAX_PATH) PWSTR ws
 }
 
 ERR LOG_STREAM::ErrLGRSTOpenLogFile(
-    __in PCWSTR         wszLogFolder,
+    _In_ PCWSTR         wszLogFolder,
     INT                 gen,
     IFileAPI **const    ppfapi,
     __in_opt PCWSTR     wszLogExt
@@ -3335,7 +3335,7 @@ ERR LOG_STREAM::ErrLGRSTOpenLogFile(
 }
 
 
-VOID LOG_STREAM::LGRSTDeleteLogs( __in PCWSTR wszLogFolder, INT genLow, INT genHigh, BOOL fIncludeJetLog )
+VOID LOG_STREAM::LGRSTDeleteLogs( _In_ PCWSTR wszLogFolder, INT genLow, INT genHigh, BOOL fIncludeJetLog )
 {
     INT     gen;
     WCHAR   wszPath[IFileSystemAPI::cchPathMax];
@@ -3359,7 +3359,7 @@ VOID LOG_STREAM::LGRSTDeleteLogs( __in PCWSTR wszLogFolder, INT genLow, INT genH
 
 // returns JET_errSuccess even if not found (then lgen will be 0)
 //
-ERR LOG_STREAM::ErrLGGetGenerationRange( __in PCWSTR wszFindPath, LONG* plgenLow, LONG* plgenHigh, __in BOOL fLooseExt, __out_opt BOOL * pfDefaultExt )
+ERR LOG_STREAM::ErrLGGetGenerationRange( _In_ PCWSTR wszFindPath, LONG* plgenLow, LONG* plgenHigh, _In_ BOOL fLooseExt, __out_opt BOOL * pfDefaultExt )
 {
     ERR         err         = JET_errSuccess;
     BOOL        fDefaultExt     = fTrue;
@@ -3383,7 +3383,7 @@ ERR LOG_STREAM::ErrLGGetGenerationRange( __in PCWSTR wszFindPath, LONG* plgenLow
 }
 
 // Try not to use this one ...
-ERR LOG_STREAM::ErrLGGetGenerationRangeExt( __in PCWSTR wszFindPath, LONG* plgenLow, LONG* plgenHigh, __in PCWSTR wszLogExt  )
+ERR LOG_STREAM::ErrLGGetGenerationRangeExt( _In_ PCWSTR wszFindPath, LONG* plgenLow, LONG* plgenHigh, _In_ PCWSTR wszLogExt  )
 {
     ERR             err         = JET_errSuccess;
     WCHAR           wszFind[ IFileSystemAPI::cchPathMax ];
@@ -3477,7 +3477,7 @@ HandleError:
     return err;
 }
 
-ERR LOG_STREAM::ErrLGRemoveCommittedLogs( __in LONG lGenToDeleteFrom )
+ERR LOG_STREAM::ErrLGRemoveCommittedLogs( _In_ LONG lGenToDeleteFrom )
 {
     ERR     err = JET_errSuccess;
     ERR     errT = JET_errSuccess;
@@ -3561,7 +3561,7 @@ ERR LOG_STREAM::ErrLGRemoveCommittedLogs( __in LONG lGenToDeleteFrom )
 
 
 ERR LOG_STREAM::ErrLGRStartNewLog(
-    __in const LONG lgenToCreate
+    _In_ const LONG lgenToCreate
     )
 {
     ERR err = JET_errSuccess;
@@ -3596,8 +3596,8 @@ HandleError:
 //  This deletes the current log and sets up LOG to create a new log file at
 //  at the expected generation.
 ERR LOG_STREAM::ErrLGRRestartLOGAtLogGen(
-    __in const LONG lgenToStartAt,
-    __in const BOOL fLogEvent
+    _In_ const LONG lgenToStartAt,
+    _In_ const BOOL fLogEvent
     )
 {
     WCHAR   wszPath[IFileSystemAPI::cchPathMax];
@@ -4132,7 +4132,7 @@ VOID LOG_STREAM::LGTruncateLogsAfterRecovery()
     }
 }
 
-VOID DBGBRTrace( __in PCSTR sz );
+VOID DBGBRTrace( _In_ PCSTR sz );
 
 ERR LOG_STREAM::ErrLGTruncateLog(
     const LONG lgenMic,

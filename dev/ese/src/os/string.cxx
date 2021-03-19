@@ -27,7 +27,7 @@ ERR ErrFromStrsafeHr ( HRESULT hr)
 
 //  get the length of the string
 
-LONG LOSStrLengthA( __in PCSTR const sz )
+LONG LOSStrLengthA( _In_ PCSTR const sz )
 {
     // According to Windows OACR, strlen cannot handle NULL.
     if ( NULL == sz )
@@ -37,7 +37,7 @@ LONG LOSStrLengthA( __in PCSTR const sz )
 
     return strlen( sz );
 }
-LONG LOSStrLengthW( __in PCWSTR const wsz )
+LONG LOSStrLengthW( _In_ PCWSTR const wsz )
 {
     // According to Windows OACR, wcslen cannot handle NULL.
     if ( NULL == wsz )
@@ -48,7 +48,7 @@ LONG LOSStrLengthW( __in PCWSTR const wsz )
     return wcslen( wsz );
 }
 
-LONG LOSStrLengthUnalignedW( __in const UnalignedLittleEndian< WCHAR > * wsz )
+LONG LOSStrLengthUnalignedW( _In_ const UnalignedLittleEndian< WCHAR > * wsz )
 {
     LONG                                    cchCurrent  = 0;
     const UnalignedLittleEndian< WCHAR > *  wszCurrent  = wsz;
@@ -61,7 +61,7 @@ LONG LOSStrLengthUnalignedW( __in const UnalignedLittleEndian< WCHAR > * wsz )
     return cchCurrent;
 }
 
-LONG LOSStrLengthMW( __in PCWSTR const wsz )
+LONG LOSStrLengthMW( _In_ PCWSTR const wsz )
 {
     LONG        cchCurrent  = 0;
     PCWSTR      wszCurrent  = wsz;
@@ -80,7 +80,7 @@ LONG LOSStrLengthMW( __in PCWSTR const wsz )
 //  is "less than" the second string, -1 is returned.  if the strings are "equal",
 //  0 is returned.  if the first string is "greater than" the second string, +1 is returned.
 
-LONG LOSStrCompareA( __in PCSTR const szStr1, __in PCSTR const szStr2, __in const ULONG cchMax )
+LONG LOSStrCompareA( _In_ PCSTR const szStr1, _In_ PCSTR const szStr2, _In_ const ULONG cchMax )
 {
     ULONG cch1 = ( NULL == szStr1 ) ? 0 : strlen( szStr1 );
     ULONG cch2 = ( NULL == szStr2 ) ? 0 : strlen( szStr2 );
@@ -131,7 +131,7 @@ LONG LOSStrCompareA( __in PCSTR const szStr1, __in PCSTR const szStr2, __in cons
 }
 
 
-LONG LOSStrCompareW( __in PCWSTR const wszStr1, __in PCWSTR const wszStr2, __in const ULONG cchMax )
+LONG LOSStrCompareW( _In_ PCWSTR const wszStr1, _In_ PCWSTR const wszStr2, _In_ const ULONG cchMax )
 {
     ULONG cch1 = ( NULL == wszStr1 ) ? 0 : wcslen( wszStr1 );
     ULONG cch2 = ( NULL == wszStr2 ) ? 0 : wcslen( wszStr2 );
@@ -314,7 +314,7 @@ VOID OSStrCharFindReverseW( _In_ PCWSTR const wszStr, const wchar_t wch, _Outptr
 
 //  check for a trailing path-delimeter
 
-BOOL FOSSTRTrailingPathDelimiterA( __in PCSTR const pszPath )
+BOOL FOSSTRTrailingPathDelimiterA( _In_ PCSTR const pszPath )
 {
     const DWORD cchPath = ( NULL == pszPath ) ? 0 : strlen( pszPath );
 
@@ -324,7 +324,7 @@ BOOL FOSSTRTrailingPathDelimiterA( __in PCSTR const pszPath )
     }
     return fFalse;
 }
-BOOL FOSSTRTrailingPathDelimiterW( __in PCWSTR const pwszPath )
+BOOL FOSSTRTrailingPathDelimiterW( _In_ PCWSTR const pwszPath )
 {
     const DWORD cchPath = ( NULL == pwszPath ) ? 0 : wcslen( pwszPath );
 
@@ -466,7 +466,7 @@ ERR ErrOSSTRAsciiToUnicode( _In_ PCSTR const    pszIn,
 
 //  convert a wide-char string to a byte string
 
-ERR ErrOSSTRUnicodeToAscii( __in PCWSTR const       pwszIn,
+ERR ErrOSSTRUnicodeToAscii( _In_ PCWSTR const       pwszIn,
                             _Out_opt_z_cap_post_count_(cchOut, *pcchRequired) PSTR const                pszOut,
                             const size_t                cchOut,     //  pass in 0 to only return output buffer size in pcchRequired, JET_errBufferTooSmall will be returned.
                             size_t * const              pcchRequired,
@@ -620,7 +620,7 @@ ERR ErrOSSTRUnicodeToTchar( const wchar_t *const    pwszIn,
 // if there is no buffer, we will return the needed size
 // if there is a buffer but not enough space, we will return error and NOT the actual size
 //
-ERR ErrOSSTRAsciiToUnicodeM( __in PCSTR const szzMultiIn,
+ERR ErrOSSTRAsciiToUnicodeM( _In_ PCSTR const szzMultiIn,
     // UNDONE: Exchange prefix continued to complain, to make this right I might need like __success on the return value?
     //                          __out_ecount_part_z(cchMax, *pcchActual) PSTR const             pszOut,
     __out_ecount_z(cchMax) WCHAR * wszNew,
@@ -708,7 +708,7 @@ ERR ErrOSSTRAsciiToUnicodeM( __in PCSTR const szzMultiIn,
 // if there is no buffer, we will return the needed size
 // if there is a buffer but not enough space, we will return error and NOT the actual size
 //
-ERR ErrOSSTRUnicodeToAsciiM( __in PCWSTR const wszzMultiIn,
+ERR ErrOSSTRUnicodeToAsciiM( _In_ PCWSTR const wszzMultiIn,
     // UNDONE: Exchange prefix continued to complain, to make this right I might need like __success on the return value?
     //                          __out_ecount_part_z(cchMax, *pcchActual) PSTR const             pszOut,
     __out_ecount_z(cchMax) char * szNew,

@@ -596,9 +596,9 @@ HandleError:
  */
 ERR BACKUP_CONTEXT::ErrBKIPrepareLogFiles(
     JET_GRBIT                   grbit,
-    __in PCWSTR                 wszLogFilePath,
+    _In_ PCWSTR                 wszLogFilePath,
     __out_bcount(OSFSAPI_MAX_PATH*sizeof(WCHAR)) PWSTR   wszPathJetChkLog,
-    __in PCWSTR                  wszBackupPath )
+    _In_ PCWSTR                 wszBackupPath )
 {
     ERR         err;
     CHECKPOINT  *pcheckpointT = NULL;
@@ -942,7 +942,7 @@ ERR ErrLGIRemoveTempDir(
     IFileSystemAPI *const pfsapi,
     __out_bcount(cbResultPath) PWSTR wszResultPath,
     ULONG cbResultPath,
-    __in PWSTR wszBackupPath,
+    _In_ PWSTR wszBackupPath,
     const WCHAR *wszTempDirIn )
 {
     ERR err;
@@ -1114,7 +1114,7 @@ HandleError:
 }
 
 ERR BACKUP_CONTEXT::ErrBKIPrepareDirectory(
-    __in PCWSTR wszBackup,
+    _In_ PCWSTR wszBackup,
     __out_bcount(cbBackupPath) PWSTR wszBackupPath,
     const size_t cbBackupPath,
     JET_GRBIT grbit )
@@ -1244,7 +1244,7 @@ ERR BACKUP_CONTEXT::ErrBKIPrepareDirectory(
 
 
 ERR BACKUP_CONTEXT::ErrBKIPromoteDirectory(
-    __in PCWSTR wszBackup,
+    _In_ PCWSTR wszBackup,
     __out_bcount(OSFSAPI_MAX_PATH * sizeof(WCHAR)) PWSTR wszBackupPath,
     JET_GRBIT grbit )
 {
@@ -1319,7 +1319,7 @@ ERR BACKUP_CONTEXT::ErrBKIPromoteDirectory(
 }
 
 ERR BACKUP_CONTEXT::ErrBKICleanupDirectory(
-    __in PCWSTR wszBackup,
+    _In_ PCWSTR wszBackup,
     __out_bcount(cbBackupPath) PWSTR wszBackupPath,
     size_t cbBackupPath )
 {
@@ -1534,7 +1534,7 @@ HandleError:
 
 
 #ifdef DEBUG
-VOID DBGBRTrace( __in PCSTR sz )
+VOID DBGBRTrace( _In_ PCSTR sz )
 {
     DBGprintf( "%s", sz );
 }
@@ -1545,10 +1545,10 @@ VOID DBGBRTrace( __in PCSTR sz )
 /******************* SURROGATE BACKUP *********************/
 
 ERR ISAMAPI ErrIsamBeginSurrogateBackup(
-    __in        JET_INSTANCE    jinst,
-    __in        ULONG       lgenFirst,
-    __in        ULONG       lgenLast,
-    __in        JET_GRBIT       grbit )
+    _In_        JET_INSTANCE    jinst,
+    _In_        ULONG           lgenFirst,
+    _In_        ULONG           lgenLast,
+    _In_        JET_GRBIT       grbit )
 {
     INST *  pinst = (INST *)jinst;
     ERR     err;
@@ -1578,7 +1578,7 @@ ERR ISAMAPI ErrIsamBeginSurrogateBackup(
 
 ERR ISAMAPI ErrIsamEndSurrogateBackup(
     __inout JET_INSTANCE    jinst,
-    __in        JET_GRBIT       grbit )
+    _In_        JET_GRBIT       grbit )
 {
     INST *  pinst = (INST *)jinst;
     BOOL    fNormalTermination = grbit & JET_bitBackupEndNormal;
@@ -3200,7 +3200,7 @@ ERR BACKUP_CONTEXT::ErrBKIGetLogInfo(
     const ULONG                 ulGenHigh,
     const BOOL                  fIncludePatch,
     __out_bcount_part_opt(cbMax, *pcbActual) PWSTR wszzLogs,
-    __in ULONG                  cbMax,
+    _In_ ULONG                  cbMax,
     __out_opt ULONG             *pcbActual,
     JET_LOGINFO_W               *pLogInfo )
 {
@@ -3456,8 +3456,8 @@ ERR ISAMAPI ErrIsamGetLogInfo( JET_INSTANCE jinst,  __out_bcount_part_opt(cbMax,
 
 ERR BACKUP_CONTEXT::ErrBKGetLogInfo(
     __out_bcount_part_opt(cbMax, *pcbActual) PWSTR wszzLogs,
-    __in ULONG                  cbMax,
-    __out ULONG                 *pcbActual,
+    _In_ ULONG                  cbMax,
+    _Out_ ULONG                 *pcbActual,
     JET_LOGINFO_W               *pLogInfo,
     const BOOL                  fIncludePatch )
 {
@@ -3480,8 +3480,8 @@ ERR ISAMAPI ErrIsamGetTruncateLogInfo( JET_INSTANCE jinst,  __out_bcount_part_op
 
 ERR BACKUP_CONTEXT::ErrBKGetTruncateLogInfo(
     __out_bcount_part_opt(cbMax, *pcbActual) PWSTR wszzLogs,
-    __in ULONG                  cbMax,
-    __out ULONG                 *pcbActual )
+    _In_ ULONG                  cbMax,
+    _Out_ ULONG                 *pcbActual )
 {
     ERR     err = JET_errSuccess;
 
@@ -4580,7 +4580,7 @@ ERR BACKUP_CONTEXT::ErrBKExternalBackupCleanUp( ERR error, const JET_GRBIT grbit
 // build in szFindPath the patch file full name for a database
 // in a certain directory. If directory is NULL, build in the
 // database directory (patch file during backup)
-VOID BACKUP_CONTEXT::BKIGetPatchName( __out_bcount(OSFSAPI_MAX_PATH * sizeof(WCHAR)) PWSTR wszPatch, PCWSTR wszDatabaseName, __in PCWSTR wszDirectory)
+VOID BACKUP_CONTEXT::BKIGetPatchName( __out_bcount(OSFSAPI_MAX_PATH * sizeof(WCHAR)) PWSTR wszPatch, PCWSTR wszDatabaseName, _In_ PCWSTR wszDirectory)
 {
     Assert ( wszDatabaseName );
 

@@ -6,7 +6,7 @@ extern "C" {
 //  Performs a CacheQuery of the local process you are running in.
 
 ERR ErrEDBGCacheQueryLocal(
-        __in const INT argc,
+        _In_ const INT argc,
         __in_ecount(argc) const CHAR * const argv[],
         __inout void * pvResult );
 
@@ -40,7 +40,7 @@ extern const EDBGGlobals * rgEDBGGlobalsArray;
 
 HRESULT
 EDBGPrintf(
-    __in PCSTR szFormat,
+    _In_ PCSTR szFormat,
     ...
 )
 ;

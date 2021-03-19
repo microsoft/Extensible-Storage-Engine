@@ -200,12 +200,12 @@ ERR ErrCATCheckJetSpaceHints(
     );
 
 ULONG * PulCATIGetExtendedHintsStart(
-    __in const SYSOBJ                   sysobj,
-    __in const BOOL                     fDeferredLongValueHints,
-    __in const JET_SPACEHINTS * const   pSpacehints,
-    __out ULONG *                       pcTotalHints );
+    _In_ const SYSOBJ                   sysobj,
+    _In_ const BOOL                     fDeferredLongValueHints,
+    _In_ const JET_SPACEHINTS * const   pSpacehints,
+    _Out_ ULONG *                       pcTotalHints );
 
-INLINE BOOL FCATHasExtendedHints(  __in const SYSOBJ sysobj, const JET_SPACEHINTS * pjsph )
+INLINE BOOL FCATHasExtendedHints(  _In_ const SYSOBJ sysobj, const JET_SPACEHINTS * pjsph )
 {
     ULONG cTotalHints;
     ULONG * pulHints =  PulCATIGetExtendedHintsStart( sysobj, fFalse, pjsph, &cTotalHints );
@@ -245,7 +245,7 @@ extern const JET_SPACEHINTS g_jsphSystemDefaults[ eJSPHDefaultMax ];
 
 //  we don't know the pgnoFDP for MSU as its created dynamically
 
-INLINE BOOL FCATUnicodeFixupTable( IN const CHAR * const szTableName )
+INLINE BOOL FCATUnicodeFixupTable( _In_ const CHAR * const szTableName )
 {
     return (    0 == UtilCmpName( szTableName, szMSU ) ||
                 0 == UtilCmpName( szTableName, szMSU1 ) );
@@ -610,12 +610,12 @@ ERR ErrCATSeekTable(
     _Out_opt_ OBJID         *pobjidTable = NULL );
 
 ERR ErrCATSeekTableByObjid(
-    IN PIB          * const ppib,
-    IN const IFMP   ifmp,
-    IN const OBJID  objidTable,
+    _In_ PIB          * const ppib,
+    _In_ const IFMP   ifmp,
+    _In_ const OBJID  objidTable,
     __out_ecount_z( cchTableName ) PSTR const szTableName,
-    IN const INT    cchTableName,
-    OUT PGNO        * const ppgnoTableFDP );
+    _In_ const INT    cchTableName,
+    _Out_ PGNO        * const ppgnoTableFDP );
 
 ERR ErrCATGetObjidMetadata(
     _In_ PIB* const     ppib,
@@ -841,11 +841,11 @@ ERR ErrCATChangeColumnDefaultValue(
     const DATA& dataDefault );
 
 ERR ErrCATDeleteOrUpdateOutOfDateLocalizedIndexes(
-        IN PIB * const ppib,
-        IN const IFMP ifmp,
-        IN CATCheckIndicesFlags catcifFlags,
-        OUT BOOL * const pfIndexesUpdated,
-        OUT BOOL * const pfIndexesDeleted);
+        _In_ PIB * const ppib,
+        _In_ const IFMP ifmp,
+        _In_ CATCheckIndicesFlags catcifFlags,
+        _Out_ BOOL * const pfIndexesUpdated,
+        _Out_ BOOL * const pfIndexesDeleted);
 
 ERR ErrCATRenameTable(
     PIB         * const ppib,
@@ -976,7 +976,7 @@ class CATHashKey
         {
         }
 
-        CATHashKey( IFMP ifmpIn, __in PCSTR const szNameIn )
+        CATHashKey( IFMP ifmpIn, _In_ PCSTR const szNameIn )
         {
             m_uiHashIfmpName = UiHashIfmpName( ifmpIn, szNameIn );
             m_ifmp = ifmpIn;
@@ -1145,17 +1145,17 @@ VOID CATHashAssertClean();
 
 BOOL FCATHashILookup(
     IFMP            ifmp,
-    __in PCSTR const    szTableName,
+    _In_ PCSTR const    szTableName,
     PGNO            *ppgnoTableFDP,
     OBJID           *pobjidTable );
 
 //  insert an entry into the catalog hash (called by CATHashInsert)
 
-VOID CATHashIInsert( FCB *pfcb, __in PCSTR const szTable );
+VOID CATHashIInsert( FCB *pfcb, _In_ PCSTR const szTable );
 
 //  delete an entry from the catalog hash (called by CATHashDelete)
 
-VOID CATHashIDelete( FCB *pfcb, __in PCSTR const szTable );
+VOID CATHashIDelete( FCB *pfcb, _In_ PCSTR const szTable );
 
 
 //  returns fTrue when catalog hash is "active"
@@ -1178,7 +1178,7 @@ INLINE BOOL FCATHashActive( INST *pinst )
 
 INLINE BOOL FCATHashLookup(
     IFMP            ifmp,
-    __in PCSTR const    szTableName,
+    _In_ PCSTR const    szTableName,
     PGNO* const     ppgnoTableFDP,
     OBJID* const    pobjidTable )
 {
@@ -1193,7 +1193,7 @@ INLINE BOOL FCATHashLookup(
 
 //  wrapper for the real insert function
 
-INLINE VOID CATHashInsert( FCB *pfcb, __in PCSTR const szTable )
+INLINE VOID CATHashInsert( FCB *pfcb, _In_ PCSTR const szTable )
 {
     Assert( pfcbNil != pfcb );
     Assert( ptdbNil != pfcb->Ptdb() );
@@ -1207,7 +1207,7 @@ INLINE VOID CATHashInsert( FCB *pfcb, __in PCSTR const szTable )
 
 //  wrapper for the real delete function
 
-INLINE VOID CATHashDelete( FCB *pfcb, __in PCSTR const szTable )
+INLINE VOID CATHashDelete( FCB *pfcb, _In_ PCSTR const szTable )
 {
     Assert( pfcbNil != pfcb );
     Assert( ptdbNil != pfcb->Ptdb() );
@@ -1219,8 +1219,8 @@ INLINE VOID CATHashDelete( FCB *pfcb, __in PCSTR const szTable )
 }
 
 ERR ErrCATDeleteMSU(
-        IN PIB * const ppib,
-        IN const IFMP ifmp );
+        _In_ PIB * const ppib,
+        _In_ const IFMP ifmp );
 
 VOID CATSetExtentPageCounts(
     PIB * const ppib,
@@ -1276,12 +1276,12 @@ INLINE BOOL FCATExtentPageCountsCached( const FUCB * const pfucb )
 }
 
 ERR ErrCATCheckMSObjidsReady(
-        __in PIB * const ppib,
+        _In_ PIB * const ppib,
         const IFMP ifmp,
-        __out BOOL * const pfReady );
+        _Out_ BOOL * const pfReady );
 
 ERR ErrCATCreateMSObjids(
-        __in PIB * const ppib,
+        _In_ PIB * const ppib,
         const IFMP ifmp,
         PGNO * const ppgnoFDP = NULL,
         OBJID * const pobjidFDP = NULL );
@@ -1291,38 +1291,38 @@ ERR ErrCATDeleteMSObjids(
         _In_ const IFMP ifmp );
 
 ERR ErrCATPopulateMSObjids(
-        __in PIB * const ppib,
+        _In_ PIB * const ppib,
         const IFMP ifmp );
 
 ERR ErrCATInsertMSObjidsRecord(
-        __in PIB * const ppib,
+        _In_ PIB * const ppib,
         const IFMP ifmp,
         const OBJID objid,
         const OBJID objidTable,
         const SYSOBJ sysobj );
 
 ERR ErrCATMSObjidsRecordExists(
-        __in PIB * const ppib,
+        _In_ PIB * const ppib,
         const IFMP ifmp,
         const OBJID objid,
-        __out bool * const pfExists );
+        _Out_ bool * const pfExists );
 
 ERR ErrCATDeleteMSObjidsRecord(
-        __in PIB * const ppib,
+        _In_ PIB * const ppib,
         const IFMP ifmp,
         const OBJID objid );
 
 ERR ErrCATPossiblyDeleteMSObjidsRecord(
-        __in PIB * const ppib,
+        _In_ PIB * const ppib,
         FUCB * const pfucbCatalog );
 
 ERR ErrCATVerifyMSObjids(
-        __in PIB * const ppib,
+        _In_ PIB * const ppib,
         const IFMP ifmp,
               CPRINTF * const pcprintfError );
 
 ERR ErrCATCreateMSExtentPageCountCache(
-        __in PIB * const ppib,
+        _In_ PIB * const ppib,
         const IFMP ifmp,
         PGNO *ppgnoFDP,
         OBJID *pobjidFDP );
@@ -1340,28 +1340,28 @@ ERR ErrCATDeleteMSExtentPageCountCache(
     );
     
 ERR ErrCATCreateMSLocales(
-        __in PIB * const ppib,
+        _In_ PIB * const ppib,
         const IFMP ifmp );
 
 ERR ErrCATCreateOrUpgradeMSLocales(
-        __in PIB * const ppib,
+        _In_ PIB * const ppib,
         const IFMP ifmp );
 
 ERR ErrCATDeleteMSLocales(
-        __in PIB * const ppib,
-        __in const IFMP ifmp );
+        _In_ PIB * const ppib,
+        _In_ const IFMP ifmp );
 
 VOID CATTermMSLocales(
         FMP * const pfmp );
 
 ERR ErrCATCheckForOutOfDateLocales(
         const IFMP ifmp,
-        __out BOOL * const pfOutOfDateNLSVersion );
+        _Out_ BOOL * const pfOutOfDateNLSVersion );
 
 ERR ErrCATVerifyMSLocales(
-    __in PIB * const ppib,
-    __in const IFMP ifmp,
-    __in const BOOL fFixupMSysLocales );
+    _In_ PIB * const ppib,
+    _In_ const IFMP ifmp,
+    _In_ const BOOL fFixupMSysLocales );
 
 ERR ErrCATDumpMSLocales(
         JET_SESID sesid,
@@ -1395,7 +1395,7 @@ ERR ErrCATISeekTableType(
 #define PERSISTED_SORTID_MAX_LENGTH 37
 
 INLINE VOID WszCATFormatSortID(
-    __in const SORTID & sortID,
+    _In_ const SORTID & sortID,
     __out_ecount( cch ) WCHAR * wsz,
-    __in INT cch );
+    _In_ INT cch );
 

@@ -87,7 +87,7 @@ public:
 
 HRESULT __stdcall
 EseShadowInit(
-    __out EseShadowContext* pcontext
+    _Out_ EseShadowContext* pcontext
 )
 {
     DBGV( wprintf( L"Entering %hs.\n", __FUNCTION__ ) );
@@ -132,7 +132,7 @@ Cleanup:
 
 HRESULT __stdcall
 EseShadowTerm(
-    __in EseShadowContext context
+    _In_ EseShadowContext context
 )
 {
     DBGV( wprintf( L"Entering %hs.\n", __FUNCTION__ ) );
@@ -160,7 +160,7 @@ EseShadowTerm(
 }
 
 HRESULT VssIdToString(
-    __in VSS_ID const& vssId,
+    _In_ VSS_ID const& vssId,
     __out_ecount(cch) LPWSTR szStr,
     DWORD cch
 )
@@ -181,7 +181,7 @@ Cleanup:
 }
 
 static PWSTR WcsDupNew(
-    __in PCWSTR szOld
+    _In_ PCWSTR szOld
 )
 {
     const size_t cchOld = wcslen( szOld ) + 1;
@@ -202,9 +202,9 @@ Cleanup:
 // exists.
 static HRESULT __stdcall
 EseShadowIMountShadow(
-    __in IVssBackupComponents* pvbc,
-    __in const VSS_ID   vssIdVolume,
-    __in PCWSTR     fileName,
+    _In_ IVssBackupComponents* pvbc,
+    _In_ const VSS_ID   vssIdVolume,
+    _In_ PCWSTR     fileName,
     __out_ecount( cchOutPath ) PWSTR szOutPath,
     DWORD cchOutPath
 )
@@ -284,7 +284,7 @@ Cleanup:
 
 HRESULT __stdcall
 EseShadowMountShadow(
-    __in EseShadowContext context,
+    _In_ EseShadowContext context,
     __out_ecount( cchOutDatabasePath ) PWSTR szOutDatabasePath,
     DWORD cchOutDatabasePath,
     __out_ecount( cchOutLogPath ) PWSTR szOutLogPath,
@@ -371,12 +371,12 @@ Cleanup:
 
 HRESULT __stdcall
 EseShadowICreateShadow(
-    __in IVssBackupComponents* pvbc,
-    __in PCWSTR szDatabaseFile,
+    _In_ IVssBackupComponents* pvbc,
+    _In_ PCWSTR szDatabaseFile,
     __in_opt PCWSTR szLogDirectory,
     __in_opt PCWSTR szSystemDirectory,
-    __out VSS_ID* pvssIdSnapshotSet,
-    __out VSS_ID* pvssIdDbSnapshot,
+    _Out_ VSS_ID* pvssIdSnapshotSet,
+    _Out_ VSS_ID* pvssIdDbSnapshot,
     __out_opt VSS_ID* pvssIdLogSnapshot,
     __out_opt VSS_ID* pvssIdSystemSnapshot
 )
@@ -611,13 +611,13 @@ Cleanup:
 
 HRESULT __stdcall
 EseShadowCreateShadow(
-    __in EseShadowContext context,
-    __in PCWSTR szDatabaseFile,
+    _In_ EseShadowContext context,
+    _In_ PCWSTR szDatabaseFile,
     __in_opt PCWSTR szLogDirectory,
     __in_opt PCWSTR szSystemDirectory,
     __in_opt PCWSTR szEseBaseName,
-    __in BOOL fIgnoreMissingDb,
-    __in BOOL fIgnoreLostLogs
+    _In_ BOOL fIgnoreMissingDb,
+    _In_ BOOL fIgnoreLostLogs
 )
 {
     DBGV( wprintf( L"Entering %hs.\n", __FUNCTION__ ) );
@@ -760,8 +760,8 @@ Cleanup:
 
 HRESULT __stdcall
 EseShadowCreateSimpleShadow(
-    __in EseShadowContext context,
-    __in PCWSTR szArbitraryFile
+    _In_ EseShadowContext context,
+    _In_ PCWSTR szArbitraryFile
 )
 {
     DBGV( wprintf( L"Entering %hs.\n", __FUNCTION__ ) );
@@ -861,7 +861,7 @@ Cleanup:
 
 HRESULT __stdcall
 EseShadowPurgeShadow(
-    __in EseShadowContext pcontext
+    _In_ EseShadowContext pcontext
 )
 {
     DBGV( wprintf( L"Entering %hs.\n", __FUNCTION__ ) );

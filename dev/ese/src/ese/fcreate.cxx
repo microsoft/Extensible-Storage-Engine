@@ -390,7 +390,7 @@ BOOL FFILEIIndicesHasSystemSpaceHints( __in_ecount(cIndexes) const JET_INDEXCREA
     return fFalse;
 }
 
-BOOL FFILEITableHasSystemSpaceHints( __in const JET_TABLECREATE5_A * const ptablecreate )
+BOOL FFILEITableHasSystemSpaceHints( _In_ const JET_TABLECREATE5_A * const ptablecreate )
 {
     if ( FIsSystemSpaceHint( ptablecreate->pSeqSpacehints ) )
     {
@@ -405,7 +405,7 @@ BOOL FFILEITableHasSystemSpaceHints( __in const JET_TABLECREATE5_A * const ptabl
 
 ERR ErrIDXCheckUnicodeFlagAndDefn(
     __in_ecount( cIndexCreate ) JET_INDEXCREATE3_A * pindexcreate,
-    __in ULONG                               cIndexCreate )
+    _In_ ULONG                               cIndexCreate )
 {
     JET_INDEXCREATE3_A * pidxCurr = pindexcreate;
     JET_INDEXCREATE3_A * pidxNext = NULL;
@@ -1806,8 +1806,8 @@ LOCAL ERR ErrFILEIValidateCreateIndex(
 }
 
 JET_SPACEHINTS * PjsphFromDensity(
-    __out JET_SPACEHINTS * pjsphPreAlloc,
-    __in const JET_SPACEHINTS * const pjsphTemplateOrTable )
+    _Out_ JET_SPACEHINTS * pjsphPreAlloc,
+    _In_ const JET_SPACEHINTS * const pjsphTemplateOrTable )
 {
     Assert( pjsphPreAlloc );
 

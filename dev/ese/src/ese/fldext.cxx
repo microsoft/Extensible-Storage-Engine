@@ -1484,7 +1484,7 @@ LOCAL ERR ErrRECIDecompressDataForRetrieve(
     const INT ibOffset,
     __out_bcount_part_opt( cbDataMax, *pcbDataActual ) BYTE * const pbData,
     const INT cbDataMax,
-    __out INT * const pcbDataActual )
+    _Out_ INT * const pcbDataActual )
 //  ================================================================
 //
 //  Decompress data, dealing with the ibOffset

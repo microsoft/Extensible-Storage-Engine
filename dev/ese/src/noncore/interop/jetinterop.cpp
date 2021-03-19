@@ -2290,7 +2290,7 @@ namespace Isam
 
         /// <summary>
         /// </summary>
-        virtual void FreeUnmanagedOpenTemporaryTable(__in __drv_freesMem(object) ::JET_OPENTEMPORARYTABLE _opentemporarytable)
+        virtual void FreeUnmanagedOpenTemporaryTable(_In_ __drv_freesMem(object) ::JET_OPENTEMPORARYTABLE _opentemporarytable)
         {
             FreeUnmanagedColumndefs( (::JET_COLUMNDEF*)_opentemporarytable.prgcolumndef, _opentemporarytable.ccolumn );
             delete _opentemporarytable.pidxunicode;
@@ -8272,7 +8272,7 @@ namespace Isam
             return Marshal::PtrToStringAnsi( (IntPtr) const_cast<char *>(_sz) );
         }
 
-        inline static String^ MakeManagedStringA(__in_ecount(len) const char *_sz, __in int len)
+        inline static String^ MakeManagedStringA(__in_ecount(len) const char *_sz, _In_ int len)
         {
             return Marshal::PtrToStringAnsi( (IntPtr) const_cast<char *>(_sz), len );
         }
@@ -8302,7 +8302,7 @@ namespace Isam
             return Marshal::PtrToStringUni( (IntPtr) const_cast<wchar_t *>(_sz) );
         }
 
-        inline static String^ MakeManagedStringW(__in_ecount(len) const wchar_t *_sz, __in int len)
+        inline static String^ MakeManagedStringW(__in_ecount(len) const wchar_t *_sz, _In_ int len)
         {
             return Marshal::PtrToStringUni( (IntPtr) const_cast<wchar_t *>(_sz), len );
         }
@@ -8326,7 +8326,7 @@ namespace Isam
         __success( *_ppv != 0 ) void GetAlignedUnmanagedBytes(
             array<Byte>^ bytes,
             __deref_out_bcount(*_pcb) void ** _ppv,
-            __out int * _pcb)
+            _Out_ int * _pcb)
         {
             *_ppv = 0;
             *_pcb = 0;
@@ -8352,7 +8352,7 @@ namespace Isam
 
         /// <summary>
         /// </summary>
-        static void FreeAlignedUnmanagedBytes(__in void * _pv)
+        static void FreeAlignedUnmanagedBytes(_In_ void * _pv)
         {
             if ( _pv != NULL )
             {
@@ -8772,7 +8772,7 @@ namespace Isam
 
         /// <summary>
         /// </summary>
-        static void FreeUnmanagedIndexCreate(__in __drv_freesMem(object) ::JET_INDEXCREATE2 _indexcreate)
+        static void FreeUnmanagedIndexCreate(_In_ __drv_freesMem(object) ::JET_INDEXCREATE2 _indexcreate)
         {
             FreeUnmanagedString( _indexcreate.szIndexName );
             FreeUnmanagedString( _indexcreate.szKey );
@@ -9262,7 +9262,7 @@ namespace Isam
 #endif
 
         /// ================================================================
-        static unsigned long CalculateHeaderChecksum(__in_bcount(cbHeader) const void * const pvHeader, __in const int cbHeader)
+        static unsigned long CalculateHeaderChecksum(__in_bcount(cbHeader) const void * const pvHeader, _In_ const int cbHeader)
             /// ================================================================
             //
             /// Plain old unrolled-loop checksum that should work on any processor.
@@ -9294,7 +9294,7 @@ namespace Isam
         }
 
         /// ================================================================
-        static JET_ERR ErrFromWin32Err(__in const DWORD dwWinError, __in const JET_ERR errDefault)
+        static JET_ERR ErrFromWin32Err(_In_ const DWORD dwWinError, _In_ const JET_ERR errDefault)
             /// ================================================================
         {
             switch ( dwWinError )
@@ -9348,7 +9348,7 @@ namespace Isam
 
         /// ================================================================
         static JET_ERR ErrReadFileHeader(
-            __in const wchar_t * const szFile,
+            _In_ const wchar_t * const szFile,
             __out_bcount_full(cbHeader) void * const pvHeader,
             const DWORD cbHeader,
             const __int64 ibOffset)
@@ -9399,7 +9399,7 @@ HandleError:
         }
 
         /// ================================================================
-        static JET_ERR ErrVerifyCheckpoint(__in_bcount(cbHeader) const void * const pvHeader, __in const int cbHeader)
+        static JET_ERR ErrVerifyCheckpoint(__in_bcount(cbHeader) const void * const pvHeader, _In_ const int cbHeader)
             /// ================================================================
             //
             /// Make sure this data is actually a checkpoint header.
@@ -9424,7 +9424,7 @@ HandleError:
         }
 
         /// ================================================================
-        static JET_ERR ErrGetCheckpointGeneration(__in const wchar_t * const szCheckpoint, __out unsigned long * pulGeneration)
+        static JET_ERR ErrGetCheckpointGeneration(_In_ const wchar_t * const szCheckpoint, _Out_ unsigned long * pulGeneration)
             /// ================================================================
         {
             JET_ERR err = JET_errInternalError;

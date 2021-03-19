@@ -431,7 +431,7 @@ static void encode_pass1 (prs *PrsPtr)
 {
 
 #define PRS     edx
-#define OUT ebx
+#define OUT     ebx
 #define TAG     ebp
 #define TAGW    bp
 

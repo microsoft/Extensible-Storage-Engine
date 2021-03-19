@@ -1472,7 +1472,7 @@ IQERR ErrIQConsumePredicateArgs(
         IEntryDescriptor *      pied,
         const char **           prgArg,
         ULONG *                 pcArg,
-        __out CIterQuery **     ppiq )
+        _Out_ CIterQuery **     ppiq )
 //  ================================================================
 {
     IQERR          err = IQERR::errSuccess;
@@ -1905,7 +1905,7 @@ ERR ErrIQCreateIterQuery(
         IEntryDescriptor * pied,
         const INT argc,
         const CHAR * const argv[],
-        __out CIterQuery ** ppiq )
+        _Out_ CIterQuery ** ppiq )
 {
     IQERR            err = IQERR::errSuccess;
     const char **   prgArg = NULL;
@@ -1971,7 +1971,7 @@ ERR ErrIQCreateIterQueryCount(
         const INT            argc,
         const CHAR * const   argv[],
         void *               pvResult,
-        __out CIterQuery **  ppiq )
+        _Out_ CIterQuery **  ppiq )
 {
     IQERR              err = IQERR::errSuccess;
     const char **   prgArg = NULL;

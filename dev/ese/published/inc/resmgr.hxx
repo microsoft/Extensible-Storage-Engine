@@ -130,7 +130,7 @@ class CDBAResourceAllocationManager
 
         virtual void    ResetStatistics();
         virtual void    UpdateStatistics();
-        virtual void    ConsumeResourceAdjustments( __out double * const pdcbTotalResource, __in const double cbResourceSize );
+        virtual void    ConsumeResourceAdjustments( _Out_ double * const pdcbTotalResource, _In_ const double cbResourceSize );
 
     protected:
 
@@ -348,7 +348,7 @@ inline void CDBAResourceAllocationManager< m_cAvgDepth >::UpdateStatistics()
 //  one thread will be calling into this function at any given time.
 
 template< size_t m_cAvgDepth >
-inline void CDBAResourceAllocationManager< m_cAvgDepth >::ConsumeResourceAdjustments( __out double * const pdcbTotalResource, __in const double cbResourceSize )
+inline void CDBAResourceAllocationManager< m_cAvgDepth >::ConsumeResourceAdjustments( _Out_ double * const pdcbTotalResource, _In_ const double cbResourceSize )
 {
     const __int64 dcbTotalResource = (__int64)m_dcbTotalResource;
     *pdcbTotalResource = (double)rounddn( dcbTotalResource, (__int64)cbResourceSize );
@@ -510,7 +510,7 @@ class CLRUKResourceUtilityManager
         };
 
         // Note: These externalized APIs must be passed an externalized tick count as it is immediately adjusted, so the default value must be TickRESMGRTimeCurrent().
-        ERR ErrCacheResource( const CKey& key, CResource* const pres, __in TICK tickNowExternal, const ULONG_PTR pctCachePriorityExternal, const BOOL fUseHistory = fTrue, __out_opt BOOL * pfInHistory = NULL, const CResource* const presHistoryProvided = NULL );
+        ERR ErrCacheResource( const CKey& key, CResource* const pres, _In_ TICK tickNowExternal, const ULONG_PTR pctCachePriorityExternal, const BOOL fUseHistory = fTrue, __out_opt BOOL * pfInHistory = NULL, const CResource* const presHistoryProvided = NULL );
         ResMgrTouchFlags RmtfTouchResource( CResource* const pres, const ULONG_PTR pctCachePriorityExternal, const TICK tickNowExternal = TickRESMGRTimeCurrent() );
         void PuntResource( CResource* const pres, const TICK dtick );
         BOOL FRecentlyTouched( CResource* const pres, const TICK dtickRecent );
@@ -1424,7 +1424,7 @@ Term()
 
 template< INT m_Kmax, class CResource, PfnOffsetOf OffsetOfIC, class CKey >
 inline typename CLRUKResourceUtilityManager< m_Kmax, CResource, OffsetOfIC, CKey >::ERR CLRUKResourceUtilityManager< m_Kmax, CResource, OffsetOfIC, CKey >::
-ErrCacheResource( const CKey& key, CResource* const pres, __in TICK tickNowExternal, const ULONG_PTR pctCachePriorityExternal, const BOOL fUseHistory, __out_opt BOOL * pfInHistory, const CResource* const presHistoryProvided )
+ErrCacheResource( const CKey& key, CResource* const pres, _In_ TICK tickNowExternal, const ULONG_PTR pctCachePriorityExternal, const BOOL fUseHistory, __out_opt BOOL * pfInHistory, const CResource* const presHistoryProvided )
 {
     CLock lock;
     CResourceLRUK::ERR errLRUK;

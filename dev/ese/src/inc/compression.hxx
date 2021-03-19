@@ -43,7 +43,7 @@ ERR ErrPKAllocAndDecompressData(
     const DATA& dataCompressed,
     const FUCB* const pfucb,
     __deref_out_bcount( *pcbDataActual ) BYTE ** const ppbData,
-    __out INT * const pcbDataActual );
+    _Out_ INT * const pcbDataActual );
 
 //  Compression may cache some information. Call this termination function to free it
 ERR ErrPKInitCompression( const INT cbPage, const INT cbCompressMin, const INT cbCompressMax );

@@ -279,13 +279,13 @@ class CPAGE
                                         const ULONG cb );
 
 #ifdef ENABLE_JET_UNIT_TEST
-        VOID LoadNewTestPage( __in const ULONG cb, __in const IFMP ifmp = ifmpNil );
+        VOID LoadNewTestPage( _In_ const ULONG cb, _In_ const IFMP ifmp = ifmpNil );
 #endif // ENABLE_JET_UNIT_TEST
 
         VOID LoadPage( const IFMP ifmp, const PGNO pgno, VOID * const pv, const ULONG cb );
         VOID LoadDehydratedPage( const IFMP ifmp, const PGNO pgno, VOID * const pv, const ULONG cb, const ULONG cbPage );
         VOID LoadPage( VOID * const pv, const ULONG cb );
-        VOID ReBufferPage( __in const BFLatch& bfl, const IFMP ifmp, const PGNO pgno, VOID * const pv, const ULONG cb );
+        VOID ReBufferPage( _In_ const BFLatch& bfl, const IFMP ifmp, const PGNO pgno, VOID * const pv, const ULONG cb );
         
         VOID UnloadPage( );
         VOID MarkAsSuperCold( );
@@ -426,10 +426,10 @@ class CPAGE
         //  pointers. As the page may be reorganized the page cannot be
         //  read-only
         VOID    ReorganizePage(
-                    __out const VOID ** pvHeader,
-                    __out size_t * const  pcbHeader,
-                    __out const VOID ** pvTrailer,
-                    __out size_t * const pcbTrailer);
+                    _Out_ const VOID ** pvHeader,
+                    _Out_ size_t * const  pcbHeader,
+                    _Out_ const VOID ** pvTrailer,
+                    _Out_ size_t * const pcbTrailer);
 
         //  Used to validate if a pointer [and cb] is completely on the page
         BOOL        FOnPage( const void * pv, const INT cb ) const
@@ -474,22 +474,22 @@ class CPAGE
 
         ULONG   CbContiguousDehydrateRequired_() const;
         ULONG   CbReorganizedDehydrateRequired_() const;
-        VOID    DehydratePageUnadjusted_( __in const ULONG cbNewSize );
+        VOID    DehydratePageUnadjusted_( _In_ const ULONG cbNewSize );
     public:
         VOID    OptimizeInternalFragmentation();
-        BOOL    FPageIsDehydratable( __out ULONG * pcbMinimumSize, __in const BOOL fAllowReorg = fTrue ) const;
-        VOID    DehydratePage( __in const ULONG cbNewSize, __in const BOOL fAllowReorg );
+        BOOL    FPageIsDehydratable( _Out_ ULONG * pcbMinimumSize, _In_ const BOOL fAllowReorg = fTrue ) const;
+        VOID    DehydratePage( _In_ const ULONG cbNewSize, _In_ const BOOL fAllowReorg );
         VOID    RehydratePage();
         
         //  Returns true if the page is zeroed
 
-        static BOOL FPageIsInitialized( __in const void* const pv, __in ULONG cb );
+        static BOOL FPageIsInitialized( _In_ const void* const pv, _In_ ULONG cb );
         BOOL    FPageIsInitialized() const;
 
         ERR     ErrValidatePage(
-            __in const PAGEValidationFlags pgvf,
-            __in IPageValidationAction * const pvalidationaction,
-            __in CFlushMap* pflushmap = NULL );
+            _In_ const PAGEValidationFlags pgvf,
+            _In_ IPageValidationAction * const pvalidationaction,
+            _In_ CFlushMap* pflushmap = NULL );
 
         //  integrity check
         enum CheckPageMode
@@ -516,9 +516,9 @@ class CPAGE
 
         //  prepares a page to be written, setting checksum, flush type, etc.
 
-        VOID    PreparePageForWrite( __in const CPAGE::PageFlushType pgft, 
-                                     __in const BOOL fSkipFlushType = fFalse,
-                                     __in const BOOL fSkipFMPCheck = fFalse );
+        VOID    PreparePageForWrite( _In_ const CPAGE::PageFlushType pgft, 
+                                     _In_ const BOOL fSkipFlushType = fFalse,
+                                     _In_ const BOOL fSkipFMPCheck = fFalse );
 
         //  debugging methods
 #if defined( DEBUG ) || defined( ENABLE_JET_UNIT_TEST )
@@ -577,7 +577,7 @@ class CPAGE
 #endif  //  DEBUGGER_EXTENSION
 
         //  internal test routine
-        ERR     ErrTest         ( __in const ULONG cbPageSize );
+        ERR     ErrTest         ( _In_ const ULONG cbPageSize );
 
         //  Page Hint Cache
 
@@ -727,7 +727,7 @@ class CPAGE
 
         BYTE *  PbFromIb_       ( USHORT ib ) const;
 
-        VOID    FreeSpace_      ( __in const INT cb );
+        VOID    FreeSpace_      ( _In_ const INT cb );
 
         //  scrubbing flags
         VOID    SetFScrubbedValue_  ( const BOOL fValue );
@@ -748,7 +748,7 @@ class CPAGE
 
         //  sets the flush type on the page
 
-        VOID    SetFlushType_( __in const CPAGE::PageFlushType pgft );
+        VOID    SetFlushType_( _In_ const CPAGE::PageFlushType pgft );
 
         //  data checksumming help
         
@@ -848,14 +848,14 @@ class CPAGE
             public:
                 TAG();
 
-                static VOID ErrTest( __in VOID * const pvBuffer, ULONG cbPageSize );
+                static VOID ErrTest( _In_ VOID * const pvBuffer, ULONG cbPageSize );
 
-                INLINE USHORT Cb( __in const BOOL fSmallFormat ) const;
-                INLINE USHORT Ib( __in const BOOL fSmallFormat ) const;
-                INLINE USHORT FFlags( __in const CPAGE * const pPage, __in const BOOL fSmallFormat ) const;
-                INLINE VOID SetIb( __in CPAGE * const pPage, __in USHORT ib );
-                INLINE VOID SetCb( __in CPAGE * const pPage, __in USHORT cb );
-                INLINE VOID SetFlags( __in CPAGE * const pPage, __in USHORT fFlags );
+                INLINE USHORT Cb( _In_ const BOOL fSmallFormat ) const;
+                INLINE USHORT Ib( _In_ const BOOL fSmallFormat ) const;
+                INLINE USHORT FFlags( _In_ const CPAGE * const pPage, _In_ const BOOL fSmallFormat ) const;
+                INLINE VOID SetIb( _In_ CPAGE * const pPage, _In_ USHORT ib );
+                INLINE VOID SetCb( _In_ CPAGE * const pPage, _In_ USHORT cb );
+                INLINE VOID SetFlags( _In_ CPAGE * const pPage, _In_ USHORT fFlags );
 
             private:
                 LittleEndian<volatile USHORT>   cb_;
@@ -881,10 +881,10 @@ class CPAGE
         //  TAG comparitors
         //
 
-        typedef BOOL (*PfnCmpTAG)( __in const CPAGE::TAG * ptag1, __in const CPAGE::TAG * ptag2 );
+        typedef BOOL (*PfnCmpTAG)( _In_ const CPAGE::TAG * ptag1, _In_ const CPAGE::TAG * ptag2 );
 
         static CPAGE::PfnCmpTAG PfnCmpPtagIb( const BOOL fSmallFormat );
-        static CPAGE::PfnCmpTAG PfnCmpPtagIb( __in ULONG cbPage );
+        static CPAGE::PfnCmpTAG PfnCmpPtagIb( _In_ ULONG cbPage );
         CPAGE::PfnCmpTAG PfnCmpPtagIb() const;
 
     public:

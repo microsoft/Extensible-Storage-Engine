@@ -194,17 +194,17 @@ ERR ErrUtilFormatFileTimeAsDate(
     const __int64 time,
     __out_ecount(cwchOut) wchar_t * const pwszOut,
     const size_t cwchOut,
-    __out size_t * const pcwchRequired);
+    _Out_ size_t * const pcwchRequired);
 ERR ErrUtilFormatFileTimeAsTime(
     const __int64 time,
     __out_ecount(cwchOut) wchar_t * const pwszOut,
     const size_t cwchOut,
-    __out size_t * const pcwchRequired);
+    _Out_ size_t * const pcwchRequired);
 ERR ErrUtilFormatFileTimeAsTimeWithSeconds(
     const __int64 time,
     __out_ecount(cwchOut) wchar_t * const pwszOut,
     const size_t cwchOut,
-    __out size_t * const pcwchRequired);
+    _Out_ size_t * const pcwchRequired);
 
     
 #endif  //  _OS_TIME_HXX_INCLUDED

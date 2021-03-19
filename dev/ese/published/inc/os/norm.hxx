@@ -28,7 +28,7 @@ extern const DWORD  dwLCMapFlagsDefaultOBSOLETE;
 extern const DWORD  dwLCMapFlagsDefault;
 
 
-ERR ErrNORMCheckLocaleName( __in INST * const pinst, __in_z const PCWSTR wszLocaleName );
+ERR ErrNORMCheckLocaleName( _In_ INST * const pinst, __in_z const PCWSTR wszLocaleName );
 ERR ErrNORMCheckLCMapFlags( _In_ INST * const pinst, _In_ const DWORD dwLCMapFlags, _In_ const BOOL fUppercaseTextNormalization );
 ERR ErrNORMCheckLCMapFlags( _In_ INST * const pinst, _Inout_ DWORD * const pdwLCMapFlags, _In_ const BOOL fUppercaseTextNormalization );
 
@@ -44,7 +44,7 @@ BOOL FNORMGetNLSExIsSupported();
 //                      set of characters changes
 //
 
-ERR ErrNORMGetSortVersion( __in_z PCWSTR wszLocaleName, __out QWORD * const pqwVersion, __out_opt SORTID * const psortID, __in const BOOL fErrorOnInvalidId = fTrue );
+ERR ErrNORMGetSortVersion( __in_z PCWSTR wszLocaleName, _Out_ QWORD * const pqwVersion, __out_opt SORTID * const psortID, _In_ const BOOL fErrorOnInvalidId = fTrue );
 
 INLINE QWORD QwSortVersionFromNLSDefined( const DWORD dwNLSVersion, const DWORD dwDefinedVersion )
 {
@@ -115,13 +115,13 @@ ERR ErrNORMMapString(
     _Out_ INT * const               pcbSeg );
 
 ERR ErrNORMLcidToLocale(
-    __in const LCID lcid,
+    _In_ const LCID lcid,
     __out_ecount( cchLocale ) PWSTR wszLocale,
-    __in ULONG cchLocale );
+    _In_ ULONG cchLocale );
 
 ERR ErrNORMLocaleToLcid(
     __in_z PCWSTR wszLocale,
-    __out LCID *plcid );
+    _Out_ LCID *plcid );
 
 INT NORMCompareLocaleName( PCWSTR const wszLocale1, PCWSTR const wszLocale2 );
 

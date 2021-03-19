@@ -376,7 +376,7 @@ JETUNITTEST( NORM, NormCompareBasic )
 
 //  Helpers for the NORMCompareLocaleName() tests
 
-WCHAR WchLimitedChar( __in const WCHAR wchHint )
+WCHAR WchLimitedChar( _In_ const WCHAR wchHint )
 {
     #define __wide_toupper(c)      ( (((c) >= L'a') && ((c) <= L'z')) ? ((c) - L'a' + L'A') : (c) )
 
@@ -420,7 +420,7 @@ WCHAR WchLimitedChar( __in const WCHAR wchHint )
     return wch;
 }
 
-VOID MakeLimitedCharStrings( __out_ecount(cch) WCHAR * wszStr1, __out_ecount(cch) WCHAR * wszStr2, __in const INT cch )
+VOID MakeLimitedCharStrings( __out_ecount(cch) WCHAR * wszStr1, __out_ecount(cch) WCHAR * wszStr2, _In_ const INT cch )
 {
     for ( INT ich = 0; ich < cch - 1; ich++ )
     {
@@ -432,7 +432,7 @@ VOID MakeLimitedCharStrings( __out_ecount(cch) WCHAR * wszStr1, __out_ecount(cch
 }
 
 // kind of sign equal ... consider 0 a separate "3rd sign" for comparison
-BOOL FCmpSignEqual( __in const INT i1, __in const INT i2 )
+BOOL FCmpSignEqual( _In_ const INT i1, _In_ const INT i2 )
 {
     if ( i1 < 0 )
     {

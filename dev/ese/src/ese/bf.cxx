@@ -41,7 +41,7 @@ CSmallLookasideCache* g_pBFAllocLookasideList;
 //  of the buffer manager.  Currently this is the page size ESE is configured 
 //  for ... someday we might have no max page size.
 
-ERR ErrBFInit( __in const LONG cbPageSizeMax )
+ERR ErrBFInit( _In_ const LONG cbPageSizeMax )
 {
     ERR err = JET_errSuccess;
 
@@ -2535,7 +2535,7 @@ LONG CbBFPageSize( const BFLatch* pbfl )
 //      if growing ( cbNewSize > CbBFBufferSize() ), the new buffer will be allocated /
 //          extended and referencable at the end of the call.
 
-void BFSetBufferSize( __inout BFLatch* pbfl, __in const INT cbNewSize )
+void BFSetBufferSize( __inout BFLatch* pbfl, _In_ const INT cbNewSize )
 {
     Assert( FBFWriteLatched( pbfl ) );
     Assert( CbBFISize( IcbBFIBufferSize( cbNewSize ) ) == cbNewSize );
@@ -2590,9 +2590,9 @@ void BFSetBufferSize( __inout BFLatch* pbfl, __in const INT cbNewSize )
 //
 
 void BFGetBestPossibleWaypoint(
-    __in    IFMP        ifmp,
-    __in    const LONG  lgenCommitted,
-    __out   LGPOS *     plgposBestWaypoint )
+    _In_    IFMP        ifmp,
+    _In_    const LONG  lgenCommitted,
+    _Out_   LGPOS *     plgposBestWaypoint )
 {
     FMP* pfmp = &g_rgfmp[ ifmp  ];
     LOG * plog = PinstFromIfmp( ifmp )->m_plog;
@@ -2724,7 +2724,7 @@ void BFGetBestPossibleWaypoint(
 }
 
 void BFIMaintWaypointRequest(
-    __in    IFMP    ifmp )
+    _In_    IFMP    ifmp )
 {
     FMP* pfmp = &g_rgfmp[ ifmp ];
     LGPOS lgposCurrentWaypoint;
@@ -4124,7 +4124,7 @@ void BFPurge( IFMP ifmp, PGNO pgno, CPG cpg )
     
 }
 
-BOOL CmpPgno( __in const PGNO& pgno1, __in const PGNO& pgno2 )
+BOOL CmpPgno( _In_ const PGNO& pgno1, _In_ const PGNO& pgno2 )
 {
     return pgno1 < pgno2;
 }
@@ -4136,7 +4136,7 @@ LOCAL BOOL CmpPgnoPbf( const PGNOPBF& pgnopbf1, const PGNOPBF& pgnopbf2 )
 
 CAutoResetSignal g_asigBFFlush( CSyncBasicInfo( "g_asigBFFlush" ) );
 
-void BFIPreFlushOrdered( __in const IFMP ifmp, __in const PGNO pgnoFirst, __in const PGNO pgnoLast )
+void BFIPreFlushOrdered( _In_ const IFMP ifmp, _In_ const PGNO pgnoFirst, _In_ const PGNO pgnoLast )
 {
     LOG * plog = PinstFromIfmp( ifmp )->m_plog;
 
@@ -5652,12 +5652,12 @@ void BFResetBFFMPContextAttached( IFMP ifmp )
 //  This API is also used to force good data onto disk, removing database corruption.
 
 ERR ErrBFPatchPage(
-    __in                        const IFMP      ifmp,
-    __in                        const PGNO      pgno,
+    _In_                        const IFMP      ifmp,
+    _In_                        const PGNO      pgno,
     __in_bcount(cbToken)        const void *    pvToken,
-    __in                        const INT       cbToken,
+    _In_                        const INT       cbToken,
     __in_bcount(cbPageImage)    const void *    pvPageImage,
-    __in                        const INT       cbPageImage )
+    _In_                        const INT       cbPageImage )
 {
     ERR             err = JET_errSuccess;
     BFLatch         bfl;
@@ -6760,7 +6760,7 @@ BF**            g_rgpbfChunk;
 
 //  initializes the cache, or returns JET_errOutOfMemory
 
-ERR ErrBFICacheInit( __in const LONG cbPageSizeMax )
+ERR ErrBFICacheInit( _In_ const LONG cbPageSizeMax )
 {
     ERR     err = JET_errSuccess;
 
@@ -7242,23 +7242,23 @@ void BFICacheINotifyCacheSizeChanges(
 
 void BFIReportCacheStatisticsChanges(
     __inout BFCacheStatsChanges* const pstatsBFCacheResidency,
-    __in const __int64 ftNow,
-    __in const INT cbfCacheResidentCurrent,
-    __in const INT cbfCacheCurrent,
+    _In_ const __int64 ftNow,
+    _In_ const INT cbfCacheResidentCurrent,
+    _In_ const INT cbfCacheCurrent,
     //  Additional parameters do not affect logic, so zero'ing out by default to avoid a whole bunch
     //  of unit test fixing.
-    __in const __int64 cbCommittedCacheSize = 0,
-    __in const __int64 cbCommitCacheTarget = 0,
-    __in const __int64 cbTotalPhysicalMemory = 0 );
+    _In_ const __int64 cbCommittedCacheSize = 0,
+    _In_ const __int64 cbCommitCacheTarget = 0,
+    _In_ const __int64 cbTotalPhysicalMemory = 0 );
 
 void BFIReportCacheStatisticsChanges(
     __inout BFCacheStatsChanges* const pstatsBFCacheResidency,
-    __in const __int64 ftNow,
-    __in const INT cbfCacheResidentCurrent,
-    __in const INT cbfCacheCurrent,
-    __in const __int64 cbCommittedCacheSize,
-    __in const __int64 cbCommitCacheTarget,
-    __in const __int64 cbTotalPhysicalMemory )
+    _In_ const __int64 ftNow,
+    _In_ const INT cbfCacheResidentCurrent,
+    _In_ const INT cbfCacheCurrent,
+    _In_ const __int64 cbCommittedCacheSize,
+    _In_ const __int64 cbCommitCacheTarget,
+    _In_ const __int64 cbTotalPhysicalMemory )
 {
     Assert ( cbfCacheCurrent >= 0 );
 
@@ -9225,7 +9225,7 @@ void CCacheRAM::UpdateStatistics()
     __super::UpdateStatistics();
 }
 
-void CCacheRAM::ConsumeResourceAdjustments( __out double * const pdcbTotalResource, __in const double cbResourceSize )
+void CCacheRAM::ConsumeResourceAdjustments( _Out_ double * const pdcbTotalResource, _In_ const double cbResourceSize )
 {
     Assert( g_critCacheSizeSetTarget.FOwner() );
 
@@ -12046,10 +12046,10 @@ const static ULONG g_cbCheckpointInterval = 512 * 1024;
 C_ASSERT( g_cbCheckpointInterval >= cbCheckpointTooDeepUncertainty );
 
 INT IUrgentBFIMaintCheckpointPriority(
-    __in const LOG * const      plog,
-    __in const LGPOS&           lgposNewest,
-    __in const QWORD            cbCheckpointDepth,
-    __in const LGPOS            lgposOldestBegin0 )     // no-ref, force copying as this happens w/o latch
+    _In_ const LOG * const      plog,
+    _In_ const LGPOS&           lgposNewest,
+    _In_ const QWORD            cbCheckpointDepth,
+    _In_ const LGPOS            lgposOldestBegin0 )     // no-ref, force copying as this happens w/o latch
 {
     INT     iUrgentLevel;
 
@@ -12097,10 +12097,10 @@ INT IUrgentBFIMaintCheckpointPriority(
 
 
 OSFILEQOS QosBFIMaintCheckpointPriority(
-    __in const INST * const     pinst,
-    __in const LGPOS&           lgposNewest,
-    __in const QWORD            cbCheckpointDepth,
-    __in const LGPOS            lgposOldestBegin0 )     // no-ref, force copying as this happens w/o latch
+    _In_ const INST * const     pinst,
+    _In_ const LGPOS&           lgposNewest,
+    _In_ const QWORD            cbCheckpointDepth,
+    _In_ const LGPOS            lgposOldestBegin0 )     // no-ref, force copying as this happens w/o latch
 {
     OSFILEQOS       qosIO;
 
@@ -12269,8 +12269,8 @@ ERR ErrBFIOB0MaintEntry(
     BFFMPContext *              pbffmp,
     BF *                        pbf,
     BFOB0::CLock *              plockOnOB0,
-    __in const LGPOS&           lgposNewest,
-    __in const QWORD            cbCheckpointDepth,
+    _In_ const LGPOS&           lgposNewest,
+    _In_ const QWORD            cbCheckpointDepth,
     const BFOB0MaintOperations  fOperations
     )
 {
@@ -12420,12 +12420,12 @@ HandleError:
 ERR ErrBFIOB0MaintScan(
     const IFMP                  ifmp,
     BFFMPContext * const        pbffmp,
-    __in const LGPOS&           lgposNewest,
-    __in const QWORD            cbCheckpointDepth,
+    _In_ const LGPOS&           lgposNewest,
+    _In_ const QWORD            cbCheckpointDepth,
     BFOB0::CLock * const        plockOB0,       // we pass the plock only so we can keep the stats across calls run.
     LGPOS                       lgposStartBM,
     __inout LGPOS * const       plgposStopBM,
-    __out LGPOS * const         plgposForwardFlushProgressBM,
+    _Out_ LGPOS * const         plgposForwardFlushProgressBM,
     enum BFOB0MaintOperations   fOperations
     )
 {
@@ -13718,7 +13718,7 @@ CSemaphore      g_semMaintCacheStatsRequest( CSyncBasicInfo( _T( "g_semMaintCach
 CSemaphore      g_semMaintCacheSize( CSyncBasicInfo( _T( "g_semMaintCacheSize" ) ) );
 LONG            g_cMaintCacheSizePending = 0;
 
-inline ICBPage IcbBFIBufferSize( __in const INT cbSize )
+inline ICBPage IcbBFIBufferSize( _In_ const INT cbSize )
 {
     for( ICBPage icbBuffer = icbPageSmallest; icbBuffer < icbPageMax; icbBuffer++ )
     {
@@ -13730,7 +13730,7 @@ inline ICBPage IcbBFIBufferSize( __in const INT cbSize )
     return icbPageInvalid;
 }
 
-inline _Ret_range_( icbPageInvalid, icbPageBiggest ) ICBPage IcbBFIPageSize( __in const INT cbSize )
+inline _Ret_range_( icbPageInvalid, icbPageBiggest ) ICBPage IcbBFIPageSize( _In_ const INT cbSize )
 {
     switch( cbSize )
     {
@@ -16035,7 +16035,7 @@ HandleError:
 
     //  Page Manipulation
 
-ERR ErrBFISetBufferSize( __inout PBF pbf, __in const ICBPage icbNewSize, __in const BOOL fWait )
+ERR ErrBFISetBufferSize( __inout PBF pbf, _In_ const ICBPage icbNewSize, _In_ const BOOL fWait )
 {
     ERR err = JET_errSuccess;
     
@@ -16225,7 +16225,7 @@ INLINE void BFIAssertNewlyAllocatedPage( const PBF pbfNew, const BOOL fAvailPool
 #endif
 
 
-ERR ErrBFIAllocPage( PBF* const ppbf, __in const ICBPage icbBufferSize, const BOOL fWait, const BOOL fMRU )
+ERR ErrBFIAllocPage( PBF* const ppbf, _In_ const ICBPage icbBufferSize, const BOOL fWait, const BOOL fMRU )
 {
     Assert( icbBufferSize > icbPageInvalid );
     Assert( icbBufferSize < icbPageMax );
@@ -17188,7 +17188,7 @@ void BFIOpportunisticallyFlushPage( PBF pbf, IOREASONPRIMARY iorp )
 //  lgposModify, live their life normally on the v1 of the page, get flushed appropriately, 
 //  meanwhile the v2 of the page is free to be hammered upon.
 //
-BOOL FBFIMaintIsImpedingCheckpointMaintenance( __in const PBF pbf, __out BOOL * const pfUrgentMaintReq )
+BOOL FBFIMaintIsImpedingCheckpointMaintenance( _In_ const PBF pbf, _Out_ BOOL * const pfUrgentMaintReq )
 {
     const IFMP  ifmp        = pbf->ifmp;
     INST *      pinst       = PinstFromIfmp( ifmp );
@@ -17318,7 +17318,7 @@ void BFIMaintImpedingPage( PBF pbf )
 //  The first case (for hot/checkpoint) is only optimisic, and a failure to 
 //  version pages there will not fail this API.
 
-ERR ErrBFIMaintImpedingPageLatch( PBF pbf, __in const BOOL fOwnsWrite, BFLatch* pbfl )
+ERR ErrBFIMaintImpedingPageLatch( PBF pbf, _In_ const BOOL fOwnsWrite, BFLatch* pbfl )
 {
     ERR     err                 = JET_errSuccess;
     PBF     pbfVer              = NULL;
@@ -17538,7 +17538,7 @@ void BFIOpportunisticallyVersionPage( PBF pbf, PBF * ppbfOpportunisticCheckpoint
 //  This performs foreground checkpoint maintenance in a way that is compatible
 //  with an un-burdened buffer
 
-void BFIOpportunisticallyVersionCopyPage( PBF pbf, PBF * ppbfNew, __in const BOOL fOwnsWrite )
+void BFIOpportunisticallyVersionCopyPage( PBF pbf, PBF * ppbfNew, _In_ const BOOL fOwnsWrite )
 {
     Assert( pbf->sxwl.FOwnExclusiveLatch() || pbf->sxwl.FOwnWriteLatch() );
     Assert( pbf->bfdf >= bfdfClean );
@@ -17799,7 +17799,7 @@ HandleError:
 //  newer version of the page in a new buffer.
 //
 
-ERR ErrBFIVersionCopyPage( PBF pbfOrigOld, PBF* ppbfNewCurr, const BOOL fWait, __in const BOOL fOwnsWrite )
+ERR ErrBFIVersionCopyPage( PBF pbfOrigOld, PBF* ppbfNewCurr, const BOOL fWait, _In_ const BOOL fOwnsWrite )
 {
     ERR             err     = JET_errSuccess;
     BFLRUK::CLock   lockLRUK;
@@ -19029,9 +19029,9 @@ LOCAL BOOL FBFIBufferIsZeroed( const PBF pbf )
 //  this tells us if the pbf specified is the true buffer for the ifmp:pgno.
 
 bool FBFICurrentPage(
-    __in const PBF          pbf,
-    __in const IFMP     ifmp,
-    __in const PGNO     pgno
+    _In_ const PBF      pbf,
+    _In_ const IFMP     ifmp,
+    _In_ const PGNO     pgno
     )
 {
     //  Must own at least one kind (s, x, or w) of latch to ask this question
@@ -19043,7 +19043,7 @@ bool FBFICurrentPage(
                 pbf->fCurrentVersion );
 }
 
-bool FBFIUpdatablePage( __in const PBF pbf )
+bool FBFIUpdatablePage( _In_ const PBF pbf )
 {
     Assert( pbf->sxwl.FOwnExclusiveLatch() || pbf->sxwl.FOwnWriteLatch() );
 
@@ -19177,7 +19177,7 @@ BOOL FBFICorruptedNodeSizes( const BF * const pbf )
 
 //  Attempt to fault in (hard and/or soft) the page data.
 
-void BFIFaultInBuffer( __inout void * pv, __in LONG cb )
+void BFIFaultInBuffer( __inout void * pv, _In_ LONG cb )
 {
     Assert( 0 != cb );
 
@@ -19273,7 +19273,7 @@ bool FBFIHasEmptyOSPages( const PBF pbf, LONG * pcmmpgReclaimed )
 //  fault the page in without corruption / destruction.  On failure the client should assume that
 //  the page is trashed and will need to be re-read.
 
-bool FBFIDestructiveSoftFaultPage( PBF pbf, __in const BOOL fNewPage )
+bool FBFIDestructiveSoftFaultPage( PBF pbf, _In_ const BOOL fNewPage )
 {
     Assert( pbf->sxwl.FOwnWriteLatch() );   // must have right to write page
     Assert( FBFICurrentPage( pbf, pbf->ifmp, pbf->pgno ) ); // No point is doing a page in of anything but current, policy, not req
@@ -19419,12 +19419,12 @@ bool FBFIDestructiveSoftFaultPage( PBF pbf, __in const BOOL fNewPage )
 
 void BFIReclaimPageFromOS(
     __inout PBF                 pbf,
-    __in    const BFLatchType   bfltHave,
-    __in    const BOOL          fNewPage,
-    __in    const BOOL          fWait,
-    __in    const OSFILEQOS     qos,
-    __in    const CPageEvents   cpe,
-    __in    const TraceContext& tc
+    _In_    const BFLatchType   bfltHave,
+    _In_    const BOOL          fNewPage,
+    _In_    const BOOL          fWait,
+    _In_    const OSFILEQOS     qos,
+    _In_    const CPageEvents   cpe,
+    _In_    const TraceContext& tc
     )
 {
     CSXWLatch::ERR  errSXWL         = CSXWLatch::ERR::errSuccess;
@@ -19751,7 +19751,7 @@ CPageEvents CpeBFICPageEventsFromBflf( const BFLatchFlags bflf )
     return flags;
 }
 
-NOINLINE void BFIAsyncReadWait( __in PBF pbf, __in const BFLatchType bfltWaiting, const BFPriority bfpri, const TraceContext& tc )
+NOINLINE void BFIAsyncReadWait( _In_ PBF pbf, _In_ const BFLatchType bfltWaiting, const BFPriority bfpri, const TraceContext& tc )
 {
     // No Assert( pbf->sxwl.FWaitingForExclusive ); type member that I know of.
 
@@ -19794,7 +19794,7 @@ C_ASSERT( bfltWrite == CSXWLatch::iWriteGroup );
 
 const BFLatchFlags bflfDefaultValue = bflfDefault;
 
-void BFIInitialize( __in PBF pbf, const TraceContext& tc )
+void BFIInitialize( _In_ PBF pbf, const TraceContext& tc )
 {
     Assert( pbf->sxwl.FOwnWriteLatch() );
 
@@ -20796,7 +20796,7 @@ BOOL FBFIFlushPurgeNukeRelease( PBF pbf, IOREASONPRIMARY iorp )
 
 #endif
 
-void BFIUnlatchMaintPage( __inout PBF const pbf, __in const BFLatchType bfltHave )
+void BFIUnlatchMaintPage( __inout PBF const pbf, _In_ const BFLatchType bfltHave )
 {
     PBF     pbfNew = NULL;
 
@@ -20920,7 +20920,7 @@ PBF PbfBFIGetFlushOrderLeaf( const PBF pbf, const BOOL fFlagCheckpointImpeders )
     return pbfT;
 }
 
-void BFIAssertReadyForWrite( __in const PBF pbf )
+void BFIAssertReadyForWrite( _In_ const PBF pbf )
 {
 
     //  ensure the lockless-IO write status state is correct
@@ -21711,7 +21711,7 @@ BOOL FBFITryAcquireExclusiveLatchForMaint( const PBF pbf )
 //  the lockless-IO model, foreground threads may complete the flush by calling
 //  this API during read upgrade to write-latch for example.
 
-ERR ErrBFIAcquireExclusiveLatchForFlush( PBF pbf, __in const BOOL fUnencumberedPath )
+ERR ErrBFIAcquireExclusiveLatchForFlush( PBF pbf, _In_ const BOOL fUnencumberedPath )
 {
     ERR err = JET_errSuccess;
 
@@ -22219,9 +22219,9 @@ void BFIPerformOpportuneWrites( const IFMP ifmp, const PGNO pgno, IOREASON iorBa
 // The PBF that is passed in should be exclusively latched and PREPARED!
 // On errBFIPageFlushed the exlusive latch is lost
 ERR ErrBFIFlushExclusiveLatchedAndPreparedBF(   __inout const PBF       pbf,
-                                    __in const IOREASON     iorBase,
-                                    __in const OSFILEQOS    qos,
-                                    __in const BOOL         fOpportune )
+                                    _In_ const IOREASON     iorBase,
+                                    _In_ const OSFILEQOS    qos,
+                                    _In_ const BOOL         fOpportune )
 {
     ERR err = JET_errSuccess;
 
@@ -22273,10 +22273,10 @@ ERR ErrBFIFlushExclusiveLatchedAndPreparedBF(   __inout const PBF       pbf,
 }
 
 ERR ErrBFIFlushPage(    __inout const PBF       pbf,
-                        __in const IOREASON     iorBase,
-                        __in const OSFILEQOS    qos,
-                        __in const BFDirtyFlags bfdfFlushMin,
-                        __in const BOOL         fOpportune,
+                        _In_ const IOREASON     iorBase,
+                        _In_ const OSFILEQOS    qos,
+                        _In_ const BFDirtyFlags bfdfFlushMin,
+                        _In_ const BOOL         fOpportune,
                         __out_opt BOOL * const  pfPermanentErr )
 {
     ERR err = JET_errSuccess;
@@ -23425,7 +23425,7 @@ void BFICleanVersion( PBF pbf, BOOL fTearDownFMP )
 
 //  cleans a page in the buffer manager
 
-void BFICleanPage( __inout PBF pbf, __in const BFLatchType bfltHave, __in const BFCleanFlags bfcf )
+void BFICleanPage( __inout PBF pbf, _In_ const BFLatchType bfltHave, _In_ const BFCleanFlags bfcf )
 {
     Assert( pbf->sxwl.FOwnExclusiveLatch() || pbf->sxwl.FOwnWriteLatch() );
     Assert( FBFIOwnsLatchType( pbf, bfltHave ) );
@@ -23592,7 +23592,7 @@ void BFICleanPage( __inout PBF pbf, __in const BFLatchType bfltHave, __in const 
 
 //  this function dehydrates the page to the smallest size supported by the database engine / CPAGE.
 
-void BFIDehydratePage( PBF pbf, __in const BOOL fAllowReorg )
+void BFIDehydratePage( PBF pbf, _In_ const BOOL fAllowReorg )
 {
     Assert( pbf->sxwl.FOwnWriteLatch() );
 
@@ -23727,7 +23727,7 @@ void BFIRehydratePage( PBF pbf )
 
 //  this function writes the log
 
-ERR ErrBFIWriteLog( __in const IFMP ifmp, __in const BOOL fSync )
+ERR ErrBFIWriteLog( _In_ const IFMP ifmp, _In_ const BOOL fSync )
 {
     PIB pibFake;
     pibFake.m_pinst = PinstFromIfmp( ifmp );
@@ -23740,7 +23740,7 @@ ERR ErrBFIWriteLog( __in const IFMP ifmp, __in const BOOL fSync )
     return ErrLGWrite( &pibFake );
 }
 
-ERR ErrBFIFlushLog( __in const IFMP ifmp, __in const IOFLUSHREASON iofr, const BOOL fMayOwnBFLatch )
+ERR ErrBFIFlushLog( _In_ const IFMP ifmp, _In_ const IOFLUSHREASON iofr, const BOOL fMayOwnBFLatch )
 {
     return ErrLGFlush( PinstFromIfmp( ifmp )->m_plog, iofr, fMayOwnBFLatch );
 }
@@ -26142,12 +26142,12 @@ INLINE void BFIMarkAsSuperCold( PBF pbf, const BOOL fUser )
 C_ASSERT( sizeof(CPAGE::PGHDR) == 40 );
 
 INLINE void BFITouchResource(
-    __in const PBF                  pbf,
-    __in const BFLatchType          bfltTraceOnly,
-    __in const BFLatchFlags         bflfTraceOnly,
-    __in const BOOL                 fTouchPage,
-    __in const ULONG_PTR            pctCachePriority,
-    __in const TraceContext&        tc )
+    _In_ const PBF                  pbf,
+    _In_ const BFLatchType          bfltTraceOnly,
+    _In_ const BFLatchFlags         bflfTraceOnly,
+    _In_ const BOOL                 fTouchPage,
+    _In_ const ULONG_PTR            pctCachePriority,
+    _In_ const TraceContext&        tc )
 {
     const TICK tickTouch = TickOSTimeCurrent();
     const BOOL fNewPage = ( bflfTraceOnly & ( bflfNew | bflfNewIfUncached ) );

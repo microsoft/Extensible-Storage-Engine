@@ -154,14 +154,14 @@ void DBMLogStartFailure( const IFMP ifmp, const ERR err )
 }
 
 JET_ERR JET_API NullCallback(
-    __in JET_SESID,
-    __in JET_DBID,
-    __in JET_TABLEID,
-    __in JET_CBTYP,
+    _In_ JET_SESID,
+    _In_ JET_DBID,
+    _In_ JET_TABLEID,
+    _In_ JET_CBTYP,
     __inout_opt void *,
     __inout_opt void *,
     __in_opt void *,
-    __in JET_API_PTR)
+    _In_ JET_API_PTR)
 {
     return JET_errSuccess;
 }
@@ -259,8 +259,8 @@ LOCAL COLUMNID ColumnidFromMSysScanColumnName( const CHAR * const szColumn )
 
 //  ================================================================
 LOCAL ERR ErrSCANDumpOneMSysDefragColumn(
-    __in PIB * const ppib,
-    __in FUCB * const pfucb,
+    _In_ PIB * const ppib,
+    _In_ FUCB * const pfucb,
     const CHAR * const szColumn)
 //  ================================================================
 {
@@ -335,8 +335,8 @@ HandleError:
 
 //  ================================================================
 LOCAL ERR ErrSCANDumpMSysDefragColumns(
-    __in PIB * const ppib,
-    __in FUCB * const pfucb )
+    _In_ PIB * const ppib,
+    _In_ FUCB * const pfucb )
 //  ================================================================
 {
     ERR err = JET_errSuccess;
@@ -352,7 +352,7 @@ HandleError:
 
 
 //  ================================================================
-ERR ErrSCANDumpMSysScan( __in PIB * const ppib, const IFMP ifmp )
+ERR ErrSCANDumpMSysScan( _In_ PIB * const ppib, const IFMP ifmp )
 //  ================================================================
 {
     ERR err;
@@ -390,7 +390,7 @@ HandleError:
 
 
 //  ================================================================
-LOCAL_BROKEN ERR ErrSCANCreateMSysScan( __in PIB * const ppib, const IFMP ifmp )
+LOCAL_BROKEN ERR ErrSCANCreateMSysScan( _In_ PIB * const ppib, const IFMP ifmp )
 //  ================================================================
 {
     C_ASSERT( ccolMsysScan == clinesMSysScanColumnNames );

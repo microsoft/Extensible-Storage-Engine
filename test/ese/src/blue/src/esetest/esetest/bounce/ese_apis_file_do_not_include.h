@@ -1,6 +1,6 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
-// FORMAT:
+    // FORMAT:
 // lines beginning with a slash are comments. Comments MUST end with a semi-colon!
 // <type> <API>;
 // where type is one of:
@@ -294,21 +294,21 @@ c
 wchar_t*    szDatabase  EsetestWidenString  EsetestCleanupWidenString
 wchar_t*    szLogfile   EsetestWidenString  EsetestCleanupWidenString
 JET_ERR JET_API JetRemoveLogfile(
-    __in JET_PCSTR szDatabase,
-    __in JET_PCSTR szLogfile,
-    __in JET_GRBIT grbit );
+    _In_ JET_PCSTR szDatabase,
+    _In_ JET_PCSTR szLogfile,
+    _In_ JET_GRBIT grbit );
 
 c
 JET_ERR JET_API
 JetGetDatabasePages(
-    __in JET_SESID                              sesid,
-    __in JET_DBID                               dbid,
-    __in unsigned long                          pgnoStart,
-    __in unsigned long                          cpg,
+    _In_ JET_SESID                              sesid,
+    _In_ JET_DBID                               dbid,
+    _In_ unsigned long                          pgnoStart,
+    _In_ unsigned long                          cpg,
     __out_bcount_part( cb, *pcbActual ) void *  pv,
-    __in unsigned long                          cb,
-    __out unsigned long *                       pcbActual,
-    __in JET_GRBIT                              grbit );
+    _In_ unsigned long                          cb,
+    _Out_ unsigned long *                       pcbActual,
+    _In_ JET_GRBIT                              grbit );
 
 w
 wchar_t*    szTableName EsetestWidenString  EsetestCleanupWidenString
@@ -424,8 +424,8 @@ wchar_t*    szNameNew EsetestWidenString EsetestCleanupWidenString
 JET_ERR JET_API JetRenameColumn(
     JET_SESID       sesid,
     JET_TABLEID     tableid,
-    __in JET_PCSTR  szName,
-    __in JET_PCSTR  szNameNew,
+    _In_ JET_PCSTR  szName,
+    _In_ JET_PCSTR  szNameNew,
     JET_GRBIT       grbit );
 
 w
@@ -434,8 +434,8 @@ wchar_t*    szColumnName EsetestWidenString EsetestCleanupWidenString
 JET_ERR JET_API JetSetColumnDefaultValue(
     JET_SESID           sesid,
     JET_DBID            dbid,
-    __in JET_PCSTR      szTableName,
-    __in JET_PCSTR      szColumnName,
+    _In_ JET_PCSTR      szTableName,
+    _In_ JET_PCSTR      szColumnName,
     __in_bcount(cbData) const void          *pvData,
     const unsigned long cbData,
     const JET_GRBIT     grbit );
@@ -474,7 +474,7 @@ wchar_t*    szKey   EsetestWidenString  EsetestCleanupWidenString
 JET_ERR JET_API JetCreateIndex(
     JET_SESID       sesid,
     JET_TABLEID     tableid,
-    __in JET_PCSTR  szIndexName,
+    _In_ JET_PCSTR  szIndexName,
     JET_GRBIT       grbit,
     const char      *szKey,
     unsigned long   cbKey,
@@ -493,7 +493,7 @@ wchar_t*    szIndexName EsetestWidenString EsetestCleanupWidenString
 JET_ERR JET_API JetDeleteIndex(
     JET_SESID       sesid,
     JET_TABLEID     tableid,
-    __in JET_PCSTR  szIndexName );
+    _In_ JET_PCSTR  szIndexName );
 
 n
 JET_ERR JET_API JetBeginTransaction( JET_SESID sesid );
@@ -998,7 +998,7 @@ JET_ERR JET_API JetBackupInstance(
 w
 wchar_t*    sz  EsetestWidenString  EsetestCleanupWidenString
 JET_ERR JET_API JetRestore(
-    __in JET_PCSTR      sz,
+    _In_ JET_PCSTR      sz,
     JET_PFNSTATUS       pfn );
 
 w
@@ -1072,7 +1072,7 @@ w
 wchar_t*    szFile EsetestWidenString EsetestCleanupWidenString
 JET_ERR JET_API JetOpenFileSectionInstance(
     JET_INSTANCE    instance,
-    __in JET_PSTR   szFile,
+    _In_ JET_PSTR   szFile,
     JET_HANDLE *    phFile,
     long        iSection,
     long        cSections,
@@ -1159,11 +1159,11 @@ wchar_t*    szLogPath               EsetestWidenString EsetestCleanupWidenString
 wchar_t*    szBackupLogPath         EsetestWidenString EsetestCleanupWidenString
 JET_RSTMAP_W*   rgrstmap,crstfilemap            EsetestWidenJET_RSTMAP  EsetestUnwidenJET_RSTMAP
 JET_ERR JET_API JetExternalRestore(
-    __in JET_PSTR   szCheckpointFilePath,
-    __in JET_PSTR   szLogPath,
+    _In_ JET_PSTR   szCheckpointFilePath,
+    _In_ JET_PSTR   szLogPath,
     JET_RSTMAP *    rgrstmap,
     long        crstfilemap,
-    __in JET_PSTR   szBackupLogPath,
+    _In_ JET_PSTR   szBackupLogPath,
     long        genLow,
     long        genHigh,
     JET_PFNSTATUS   pfn );
@@ -1177,22 +1177,22 @@ wchar_t*    szTargetInstanceLogPath             EsetestWidenString EsetestCleanu
 wchar_t*    szTargetInstanceCheckpointPath      EsetestWidenString EsetestCleanupWidenString
 JET_RSTMAP_W*   rgrstmap,crstfilemap            EsetestWidenJET_RSTMAP  EsetestUnwidenJET_RSTMAP
 JET_ERR JET_API JetExternalRestore2(
-    __in JET_PSTR   szCheckpointFilePath,
-    __in JET_PSTR   szLogPath,
+    _In_ JET_PSTR   szCheckpointFilePath,
+    _In_ JET_PSTR   szLogPath,
     JET_RSTMAP *    rgrstmap,
     long        crstfilemap,
-    __in JET_PSTR   szBackupLogPath,
+    _In_ JET_PSTR   szBackupLogPath,
     JET_LOGINFO *   pLogInfo,
-    __in JET_PSTR   szTargetInstanceName,
-    __in JET_PSTR   szTargetInstanceLogPath,
-    __in JET_PSTR   szTargetInstanceCheckpointPath,
+    _In_ JET_PSTR   szTargetInstanceName,
+    _In_ JET_PSTR   szTargetInstanceLogPath,
+    _In_ JET_PSTR   szTargetInstanceCheckpointPath,
     JET_PFNSTATUS pfn );
 
 
 //w
 // deprecated
 //JET_ERR JET_API JetSnapshotStart(         JET_INSTANCE        instance,
-//                                      __in JET_PSTR       szDatabases,
+//                                      _In_ JET_PSTR       szDatabases,
 //                                      JET_GRBIT           grbit);
 
 //n
@@ -1291,24 +1291,24 @@ JET_ERR JET_API JetGetLogFileInfo( char *szLog,
 
 n
 JET_ERR JET_API JetPrereadKeys(
-    __in JET_SESID                              sesid,
-    __in JET_TABLEID                                tableid,
+    _In_ JET_SESID                                  sesid,
+    _In_ JET_TABLEID                                tableid,
     __in_ecount(ckeys) const void **                rgpvKeys,
-    __in_ecount(ckeys) const unsigned long *            rgcbKeys,
-    __in long                                       ckeys,
+    __in_ecount(ckeys) const unsigned long *        rgcbKeys,
+    _In_ long                                       ckeys,
     __out_opt long *                                pckeysPreread,
-    __in JET_GRBIT                              grbit );
+    _In_ JET_GRBIT                                  grbit );
 
 n
 JET_ERR JET_API JetConsumeLogData(
-    __in    JET_INSTANCE        instance,
-    __in    JET_EMITDATACTX *   pEmitLogDataCtx,
-    __in    void *              pvLogData,
-    __in    unsigned long       cbLogData,
-    __in    JET_GRBIT           grbits );
+    _In_    JET_INSTANCE        instance,
+    _In_    JET_EMITDATACTX *   pEmitLogDataCtx,
+    _In_    void *              pvLogData,
+    _In_    unsigned long       cbLogData,
+    _In_    JET_GRBIT           grbits );
 
 n
 JET_ERR JET_API JetTestHook(
-    __in        const TESTHOOK_OP   opcode,
+    _In_        const TESTHOOK_OP   opcode,
     __inout_opt void * const        pv );
 

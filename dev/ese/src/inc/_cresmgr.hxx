@@ -327,7 +327,7 @@ public:
             ERR     ErrInit();
             VOID    Term( BOOL fDuringInit = fFalse );
 #ifdef MEM_CHECK
-            VOID    *PvAlloc_( __in PCSTR szFile, LONG lLine );
+            VOID    *PvAlloc_( _In_ PCSTR szFile, LONG lLine );
             VOID    IDumpAlloc( const WCHAR* szDumpFile );
 #else  //  MEM_CHECK
             VOID    *PvAlloc_();
@@ -364,7 +364,7 @@ private:
 
 #ifdef MEM_CHECK
             #define MarkAsAllocated_( pv, option, szFile, lLine ) MarkAsAllocated__( pv, option, szFile, (LONG)lLine )
-            VOID    MarkAsAllocated__( VOID * const pv, LONG option, __in PCSTR szFile, LONG lLine );
+            VOID    MarkAsAllocated__( VOID * const pv, LONG option, _In_ PCSTR szFile, LONG lLine );
             #define MarkAsFreed_( pv, option ) MarkAsFreed__( pv, option )
             VOID    MarkAsFreed__( VOID * const pv, LONG option );
 #else  //  !MEM_CHECK

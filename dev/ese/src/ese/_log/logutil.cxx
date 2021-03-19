@@ -245,8 +245,8 @@ HandleError:
 
 
 ERR LOG::ErrLGIRSTCheckSignaturesLogSequence(
-    __in PCWSTR   wszRestorePath,
-    __in PCWSTR  wszLogFilePath,
+    _In_ PCWSTR   wszRestorePath,
+    _In_ PCWSTR  wszLogFilePath,
     INT genLow,
     INT genHigh,
     __in_opt PCWSTR  wszTargetInstanceFilePath,
@@ -789,8 +789,8 @@ HandleError:
 /*  initialize log path, restore log path, and check its continuity
 /**/
 ERR LOG::ErrLGIRSTInitPath(
-    __in PCWSTR wszBackupPath,
-    __in PCWSTR wszNewLogPath,
+    _In_ PCWSTR wszBackupPath,
+    _In_ PCWSTR wszNewLogPath,
     __out_bcount(cbOSFSAPI_MAX_PATHW) PWSTR wszRestorePath,
     __in_range(sizeof(WCHAR), cbOSFSAPI_MAX_PATHW) const ULONG cbRestorePath,
     __out_bcount(cbOSFSAPI_MAX_PATHW) PWSTR wszLogDirPath,
@@ -816,7 +816,7 @@ ERR LOG::ErrLGIRSTInitPath(
 ERR LOG::ErrLGIRSTSetupCheckpoint(
     LONG lgenLow,
     LONG lgenHigh,
-    __in PCWSTR wszCurCheckpoint )
+    _In_ PCWSTR wszCurCheckpoint )
 {
     ERR         err;
     WCHAR       wszT[IFileSystemAPI::cchPathMax];
@@ -955,8 +955,8 @@ VOID LOG::LGIRSTPrepareCallback(
 ERR ErrLGCheckDir( IFileSystemAPI *const pfsapi, __inout_bcount(cbDir) const PWSTR wszDir, ULONG cbDir, __in_opt PCWSTR wszSearch );
 
 ERR LOG::ErrLGRestore(
-    __in PCWSTR wszBackup,
-    __in PCWSTR wszDest,
+    _In_ PCWSTR wszBackup,
+    _In_ PCWSTR wszDest,
     JET_PFNINITCALLBACK pfn,
     void * pvContext )
 {
@@ -1294,8 +1294,8 @@ ResetGlobalRepair:
 
 ERR ISAMAPI ErrIsamRestore(
     JET_INSTANCE jinst,
-    __in JET_PCWSTR wszBackup,
-    __in JET_PCWSTR wszDest,
+    _In_ JET_PCWSTR wszBackup,
+    _In_ JET_PCWSTR wszDest,
     JET_PFNINITCALLBACK pfnStatus,
     void * pvStatusContext )
 {
@@ -1311,14 +1311,14 @@ ERR ISAMAPI ErrIsamRestore(
 
 ERR ISAMAPI ErrIsamExternalRestore(
     JET_INSTANCE jinst,
-    __in PCWSTR wszCheckpointFilePath,
-    __in PCWSTR wszNewLogPath,
+    _In_ PCWSTR wszCheckpointFilePath,
+    _In_ PCWSTR wszNewLogPath,
     __in_ecount_opt(cjrstmap) JET_RSTMAP_W *rgjrstmap,
     INT cjrstmap,
-    __in PCWSTR wszBackupLogPath,
+    _In_ PCWSTR wszBackupLogPath,
     LONG lgenLow,
     LONG lgenHigh,
-    __in PCWSTR wszTargetLogPath,
+    _In_ PCWSTR wszTargetLogPath,
     LONG lGenHighTarget,
     JET_PFNINITCALLBACK pfn,
     void * pvContext )
@@ -1360,17 +1360,17 @@ ERR ISAMAPI ErrIsamExternalRestore(
     return err;
 }
 
-VOID DBGBRTrace( __in PCSTR sz );
+VOID DBGBRTrace( _In_ PCSTR sz );
 
 ERR LOG::ErrLGRSTExternalRestore(
-    __in PCWSTR                 wszCheckpointFilePath,
-    __in PCWSTR                 wszNewLogPath,
+    _In_ PCWSTR                 wszCheckpointFilePath,
+    _In_ PCWSTR                 wszNewLogPath,
     JET_RSTMAP_W                *rgjrstmap,
     INT                         cjrstmap,
-    __in PCWSTR                 wszBackupLogPath,
+    _In_ PCWSTR                 wszBackupLogPath,
     LONG                        lgenLow,
     LONG                        lgenHigh,
-    __in PCWSTR                 wszTargetLogPath,
+    _In_ PCWSTR                 wszTargetLogPath,
     LONG                        lGenHighTarget,
     JET_PFNINITCALLBACK         pfn,
     void *                      pvContext )
@@ -1862,7 +1862,7 @@ HandleError:
 }
 
 //  Retrieves the log generation from a file name.
-ERR LGFileHelper::ErrLGGetGeneration( IFileSystemAPI* const pfsapi, __in PCWSTR wszFileName, __in PCWSTR wszBaseName, LONG* plgen, __in PCWSTR const wszLogExt, ULONG * pcchLogDigits )
+ERR LGFileHelper::ErrLGGetGeneration( IFileSystemAPI* const pfsapi, _In_ PCWSTR wszFileName, _In_ PCWSTR wszBaseName, LONG* plgen, _In_ PCWSTR const wszLogExt, ULONG * pcchLogDigits )
 {
     ERR     err = JET_errSuccess;
     WCHAR   wszFNameT[IFileSystemAPI::cchPathMax];

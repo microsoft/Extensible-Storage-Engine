@@ -99,7 +99,7 @@ static_assert( qosIODispatchUrgentBackgroundMin == ( qosIODispatchUrgentBackgrou
 static_assert( qosIODispatchUrgentBackgroundMax == ( qosIODispatchUrgentBackgroundLevelMax << qosIODispatchUrgentBackgroundShft ), "Inconsistent qosIODispatchUrgentBackgroundMax/qosIODispatchUrgentBackgroundLevelMax." );
 
 //  This function allows the client to translate from 127 levels to the UrgentBackground QOS
-OSFILEQOS QosOSFileFromUrgentLevel( __in const ULONG iUrgentLevel );
+OSFILEQOS QosOSFileFromUrgentLevel( _In_ const ULONG iUrgentLevel );
 //  This function only provided for performance counter support, not advised for use by components other than IO manager.
 LONG CioOSDiskPerfCounterIOMaxFromUrgentQOS( _In_ const OSFILEQOS grbitQOS );
 

@@ -15,7 +15,7 @@ class CFileFromMemory : public IFileAPI
 public:
 
     // constructors/destructors
-    CFileFromMemory( __in_bcount( cbData ) BYTE *pbData, QWORD cbData, __in PCWSTR wszPath );
+    CFileFromMemory( __in_bcount( cbData ) BYTE *pbData, QWORD cbData, _In_ PCWSTR wszPath );
     virtual ~CFileFromMemory();
 
     // IFileAPI methods

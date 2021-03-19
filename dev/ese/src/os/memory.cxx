@@ -431,9 +431,9 @@ DWORD_PTR OSMemoryPageWorkingSetPeak()
 //  returns the total number of physical memory pages evicted from the system
 
 NTSTATUS WINAPI NtQuerySystemInformation(
-    __in       SYSTEM_INFORMATION_CLASS SystemInformationClass,
+    _In_       SYSTEM_INFORMATION_CLASS SystemInformationClass,
     __inout    PVOID SystemInformation,
-    __in       ULONG SystemInformationLength,
+    _In_       ULONG SystemInformationLength,
     __out_opt  PULONG ReturnLength
 );
 
@@ -960,7 +960,7 @@ VOID OSMemoryIPageResidenceMapPostterm()
     Assert( g_residencemap.psbm == NULL );
 }
 
-ERR ErrOSMemoryPageResidenceMapScanStart( const size_t cbMax, __out DWORD * const pdwUpdateId )
+ERR ErrOSMemoryPageResidenceMapScanStart( const size_t cbMax, _Out_ DWORD * const pdwUpdateId )
 {
     ERR err = JET_errSuccess;
     DWORD cPageOutputCurrent = 0;
@@ -1649,10 +1649,10 @@ WINBASEAPI
 BOOL
 WINAPI
 PFNHeapSetInformation (
-    IN HANDLE HeapHandle,
-    IN HEAP_INFORMATION_CLASS HeapInformationClass,
-    IN OPTIONAL PVOID HeapInformation,
-    IN OPTIONAL SIZE_T HeapInformationLength
+    _In_ HANDLE HeapHandle,
+    _In_ HEAP_INFORMATION_CLASS HeapInformationClass,
+    _In_ OPTIONAL PVOID HeapInformation,
+    _In_ OPTIONAL SIZE_T HeapInformationLength
     );
 
 //  pre-initialize the memory subsystem
@@ -2004,13 +2004,13 @@ void OSMemoryIDeletePageAlloc( void* pv, const size_t cb )
 //  ================================================================
 VOID SprintHex(
     __out_bcount_z(cbDest) PSTR const       szDest,
-    __in const INT          cbDest,
+    _In_ const INT          cbDest,
     __in_bcount(cbSrc) const BYTE * const   rgbSrc,
-    __in const INT          cbSrc,
-    __in const INT          cbWidth     = 16,
-    __in const INT          cbChunk     = 1,
-    __in const INT          cbAddress   = 2 * sizeof( void* ),
-    __in const INT          cbStart     = 0 )
+    _In_ const INT          cbSrc,
+    _In_ const INT          cbWidth     = 16,
+    _In_ const INT          cbChunk     = 1,
+    _In_ const INT          cbAddress   = 2 * sizeof( void* ),
+    _In_ const INT          cbStart     = 0 )
 //  ================================================================
 {
     static const CHAR rgchConvert[] =   { '0','1','2','3','4','5','6','7','8','9','a','b','c','d','e','f' };
@@ -3973,7 +3973,7 @@ VOID COSMemoryMap::OSMMDumpAlloc( __in_z const WCHAR* szFile )
 
 #endif  //  MEM_CHECK
 
-BOOL FUtilZeroed( __in_bcount(cbData) const BYTE * pbData, __in const size_t cbData )
+BOOL FUtilZeroed( __in_bcount(cbData) const BYTE * pbData, _In_ const size_t cbData )
 {
     Assert( pbData != NULL );
 
@@ -4021,7 +4021,7 @@ BOOL FUtilZeroed( __in_bcount(cbData) const BYTE * pbData, __in const size_t cbD
 }
 
 
-size_t IbUtilLastNonZeroed( __in_bcount(cbData) const BYTE * pbData, __in const size_t cbData )
+size_t IbUtilLastNonZeroed( __in_bcount(cbData) const BYTE * pbData, _In_ const size_t cbData )
 {
     Assert( pbData != NULL );
 

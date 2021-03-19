@@ -133,10 +133,10 @@ class IFileSystemAPI  //  fsapi
 
         virtual void PathVolumeCanonicalAndDiskId(  const WCHAR* const                                  wszVolumePath,
                                                     __out_ecount(cchVolumeCanonicalPath) WCHAR* const   wszVolumeCanonicalPath,
-                                                    __in const DWORD                                    cchVolumeCanonicalPath,
+                                                    _In_ const DWORD                                    cchVolumeCanonicalPath,
                                                     __out_ecount(cchDiskId) WCHAR* const                wszDiskId,
-                                                    __in const DWORD                                    cchDiskId,
-                                                    __out DWORD *                                       pdwDiskNumber ) = 0;
+                                                    _In_ const DWORD                                    cchDiskId,
+                                                    _Out_ DWORD *                                       pdwDiskNumber ) = 0;
 
         //  computes the absolute path of the specified path, returning
         //  JET_errInvalidPath if the path is not found.  the absolute path is
@@ -267,10 +267,10 @@ class IFileSystemAPI  //  fsapi
 
 //  initializes an interface to the OS File System
 
-ERR ErrOSFSCreate( __out IFileSystemAPI** const ppfsapi );
+ERR ErrOSFSCreate( _Out_ IFileSystemAPI** const ppfsapi );
 
-ERR ErrOSFSCreate(  __in IFileSystemConfiguration * const pfsconfig,
-                    __out IFileSystemAPI** const ppfsapi );
+ERR ErrOSFSCreate(  _In_ IFileSystemConfiguration * const pfsconfig,
+                    _Out_ IFileSystemAPI** const ppfsapi );
 
 #endif  //  _OSFSAPI_HXX_INCLUDED
 

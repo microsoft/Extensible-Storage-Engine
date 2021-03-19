@@ -104,12 +104,12 @@ typedef struct _StandardEseEventProcessor
 // Helper functions.
 
 FORCEINLINE EtwEvent* AllocStandardEseEvent(
-    __in const EtwEventType etwEvtType,
-    __in const ULONG cbEseEvent,
-    __in const LONGLONG dftTimestamp,
-    __in const ULONG ulProcessId,
-    __in const ULONG ulThreadId,
-    __in const ULONG cbExtraData )
+    _In_ const EtwEventType etwEvtType,
+    _In_ const ULONG cbEseEvent,
+    _In_ const LONGLONG dftTimestamp,
+    _In_ const ULONG ulProcessId,
+    _In_ const ULONG ulThreadId,
+    _In_ const ULONG cbExtraData )
 {
     const ULONG ibExtraData = sizeof(EtwEvent);
     const ULONG cbExtraUserData = cbEseEvent;
@@ -137,10 +137,10 @@ HandleError:
 }
 
 FORCEINLINE ULONG SafeCopyData(
-    __in BYTE* const pDest,
-    __in const size_t cbDest,
+    _In_ BYTE* const pDest,
+    _In_ const size_t cbDest,
     __in_bcount(cbData) const BYTE* const pbData,
-    __in const size_t cbData,
+    _In_ const size_t cbData,
     __inout size_t* const pibOffset )
 {
     const size_t ibOffset = *pibOffset;
@@ -160,8 +160,8 @@ FORCEINLINE ULONG SafeCopyData(
 
 FORCEINLINE size_t GetSafeStrSize(
     __in_bcount(cbData) const BYTE* const pbData,
-    __in const size_t cbData,
-    __in const size_t ibOffset )
+    _In_ const size_t cbData,
+    _In_ const size_t ibOffset )
 {
     const size_t cbRemaining = ( cbData > ibOffset ) ? ( cbData - ibOffset ) : 0;
     const char* const szData = (char*)( pbData + ibOffset );
@@ -176,9 +176,9 @@ FORCEINLINE size_t GetSafeStrSize(
 }
 
 FORCEINLINE ULONG SafeCopyString(
-    __in char* const szDest,
+    _In_ char* const szDest,
     __in_bcount(cbData) const BYTE* const pbData,
-    __in const size_t cbData,
+    _In_ const size_t cbData,
     __inout size_t* const pibOffset )
 {
     // StringCchCopyN() comes close to what we need from this function, but not quite.
@@ -1254,18 +1254,18 @@ class EtwEventProcessor
 
     public:
         EtwEventProcessor();
-        bool OpenTraceFile( __in PCWSTR wszFilePath );
+        bool OpenTraceFile( _In_ PCWSTR wszFilePath );
         EtwEvent* GetNextEvent();
         void CloseTraceFile();
 
     public:
-        static void FreeEvent( __in EtwEvent* const pEtwEvt );
-        static DWORD WINAPI WaitForEvent( __in LPVOID lpParameter );
-        static void WINAPI ProcessEvent( __in PEVENT_RECORD pEvtRecord );
+        static void FreeEvent( _In_ EtwEvent* const pEtwEvt );
+        static DWORD WINAPI WaitForEvent( _In_ LPVOID lpParameter );
+        static void WINAPI ProcessEvent( _In_ PEVENT_RECORD pEvtRecord );
 };
 
 
-void EtwEventProcessor::CloseHandle_( __in HANDLE* const pHandle )
+void EtwEventProcessor::CloseHandle_( _In_ HANDLE* const pHandle )
 {
     if ( *pHandle != NULL )
     {
@@ -1305,7 +1305,7 @@ EtwEventProcessor::EtwEventProcessor()
 }
 
     
-bool EtwEventProcessor::OpenTraceFile( __in PCWSTR wszFilePath )
+bool EtwEventProcessor::OpenTraceFile( _In_ PCWSTR wszFilePath )
 {
     if ( this->fCollecting || this->fFatalError )
     {
@@ -1484,7 +1484,7 @@ void EtwEventProcessor::CloseTraceFile()
 }
 
 
-void EtwEventProcessor::FreeEvent( __in EtwEvent* const pEtwEvt )
+void EtwEventProcessor::FreeEvent( _In_ EtwEvent* const pEtwEvt )
 {
     if ( pEtwEvt == NULL )
     {
@@ -1495,7 +1495,7 @@ void EtwEventProcessor::FreeEvent( __in EtwEvent* const pEtwEvt )
 }
 
 
-DWORD WINAPI EtwEventProcessor::WaitForEvent( __in LPVOID lpParameter )
+DWORD WINAPI EtwEventProcessor::WaitForEvent( _In_ LPVOID lpParameter )
 {
     EtwEventProcessor* const pEtwEvtProc = (EtwEventProcessor*)lpParameter;
 
@@ -1552,7 +1552,7 @@ DWORD WINAPI EtwEventProcessor::WaitForEvent( __in LPVOID lpParameter )
 }
 
 
-void WINAPI EtwEventProcessor::ProcessEvent( __in PEVENT_RECORD pEvtRecord )
+void WINAPI EtwEventProcessor::ProcessEvent( _In_ PEVENT_RECORD pEvtRecord )
 {
     EtwEventProcessor* const pEtwEvtProc = (EtwEventProcessor*)pEvtRecord->UserContext;
 
@@ -1799,7 +1799,7 @@ HandleError:
 
 // API implementation.
 
-HANDLE EtwOpenTraceFile( __in PCWSTR wszFilePath )
+HANDLE EtwOpenTraceFile( _In_ PCWSTR wszFilePath )
 {
     EtwEventProcessor* pEvtProc = new EtwEventProcessor();
 
@@ -1824,7 +1824,7 @@ HandleError:
 }
 
 
-EtwEvent* EtwGetNextEvent( __in HANDLE handle )
+EtwEvent* EtwGetNextEvent( _In_ HANDLE handle )
 {
     EtwEventProcessor* const pEvtProc = (EtwEventProcessor*)handle;
     EtwEvent* pEtwEvent = NULL;
@@ -1842,13 +1842,13 @@ HandleError:
 }
 
 
-VOID EtwFreeEvent( __in EtwEvent* const pEtwEvt )
+VOID EtwFreeEvent( _In_ EtwEvent* const pEtwEvt )
 {
     EtwEventProcessor::FreeEvent( pEtwEvt );
 }
 
 
-VOID EtwCloseTraceFile( __in HANDLE handle )
+VOID EtwCloseTraceFile( _In_ HANDLE handle )
 {
     EtwEventProcessor* const pEvtProc = (EtwEventProcessor*)handle;
 

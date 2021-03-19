@@ -5298,25 +5298,25 @@ Cleanup:
 
 JET_ERR
 BounceJetPrereadKeys(
-    __in JET_SESID                              sesid,
-    __in JET_TABLEID                                tableid,
+    _In_ JET_SESID                                  sesid,
+    _In_ JET_TABLEID                                tableid,
     __in_ecount(ckeys) const void **                rgpvKeys,
-    __in_ecount(ckeys) const unsigned long *            rgcbKeys,
-    __in long                                       ckeys,
+    __in_ecount(ckeys) const unsigned long *        rgcbKeys,
+    _In_ long                                       ckeys,
     __out_opt long *                                pckeysPreread,
-    __in JET_GRBIT                              grbit
+    _In_ JET_GRBIT                                  grbit
 )
 {
     JET_ERR     err = JET_errSuccess;
 
     typedef JET_ERR ( __stdcall *PFN_JetPrereadKeys ) ( 
-    __in JET_SESID                              sesid,
-    __in JET_TABLEID                                tableid,
+    _In_ JET_SESID                                  sesid,
+    _In_ JET_TABLEID                                tableid,
     __in_ecount(ckeys) const void **                rgpvKeys,
-    __in_ecount(ckeys) const unsigned long *            rgcbKeys,
-    __in long                                       ckeys,
+    __in_ecount(ckeys) const unsigned long *        rgcbKeys,
+    _In_ long                                       ckeys,
     __out_opt long *                                pckeysPreread,
-    __in JET_GRBIT                              grbit  );
+    _In_ JET_GRBIT                                  grbit );
 
     static PFN_JetPrereadKeys pfnJetPrereadKeys = NULL;
 
@@ -5351,21 +5351,21 @@ Cleanup:
 
 JET_ERR
 BounceJetConsumeLogData(
-    __in    JET_INSTANCE        instance,
-    __in    JET_EMITDATACTX *   pEmitLogDataCtx,
-    __in    void *              pvLogData,
-    __in    unsigned long       cbLogData,
-    __in    JET_GRBIT           grbits
+    _In_    JET_INSTANCE        instance,
+    _In_    JET_EMITDATACTX *   pEmitLogDataCtx,
+    _In_    void *              pvLogData,
+    _In_    unsigned long       cbLogData,
+    _In_    JET_GRBIT           grbits
 )
 {
     JET_ERR     err = JET_errSuccess;
 
     typedef JET_ERR ( __stdcall *PFN_JetConsumeLogData ) ( 
-    __in    JET_INSTANCE        instance,
-    __in    JET_EMITDATACTX *   pEmitLogDataCtx,
-    __in    void *              pvLogData,
-    __in    unsigned long       cbLogData,
-    __in    JET_GRBIT           grbits  );
+    _In_    JET_INSTANCE        instance,
+    _In_    JET_EMITDATACTX *   pEmitLogDataCtx,
+    _In_    void *              pvLogData,
+    _In_    unsigned long       cbLogData,
+    _In_    JET_GRBIT           grbits  );
 
     static PFN_JetConsumeLogData pfnJetConsumeLogData = NULL;
 
@@ -5400,14 +5400,14 @@ Cleanup:
 
 JET_ERR
 BounceJetTestHook(
-    __in        const TESTHOOK_OP   opcode,
+    _In_        const TESTHOOK_OP   opcode,
     __inout_opt void * const        pv
 )
 {
     JET_ERR     err = JET_errSuccess;
 
     typedef JET_ERR ( __stdcall *PFN_JetTestHook ) ( 
-    __in        const TESTHOOK_OP   opcode,
+    _In_        const TESTHOOK_OP   opcode,
     __inout_opt void * const        pv  );
 
     static PFN_JetTestHook pfnJetTestHook = NULL;

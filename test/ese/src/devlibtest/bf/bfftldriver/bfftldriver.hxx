@@ -62,27 +62,27 @@ typedef struct
 
 //  Inits BFFTL driver of a trace file and driver options.
 
-ERR ErrBFFTLInit( __in const void * const pvContext, __in const DWORD grbit, __out BFFTLContext ** ppbfftlc );
+ERR ErrBFFTLInit( _In_ const void * const pvContext, _In_ const DWORD grbit, _Out_ BFFTLContext ** ppbfftlc );
 
 //  Terms and cleanups up the driver handle / allocations.
 
-void BFFTLTerm( __out BFFTLContext * pbfftlc );
+void BFFTLTerm( _Out_ BFFTLContext * pbfftlc );
 
 //  Dumps any stats specified by the flags
 
-ERR ErrBFFTLDumpStats( __in const BFFTLContext * pbfftlc, __in const DWORD grbit );
+ERR ErrBFFTLDumpStats( _In_ const BFFTLContext * pbfftlc, _In_ const DWORD grbit );
 
 //  Gets the next trace in the trace file (or in the test traces)
 
-ERR ErrBFFTLGetNext( __inout BFFTLContext * pbfftlc, __out BFTRACE * pbftrace );
+ERR ErrBFFTLGetNext( __inout BFFTLContext * pbfftlc, _Out_ BFTRACE * pbftrace );
 
 //  Gets the bookmark of the last trace retrieved
 
-QWORD IbBFFTLBookmark( __out const BFFTLContext * pbfftlc );
+QWORD IbBFFTLBookmark( _Out_ const BFFTLContext * pbfftlc );
 
 //  After enumerating all the traces, can call this to save # of IFMPs and cpgs for each IFMP
 
-ERR ErrBFFTLPostProcess( __in const BFFTLContext * pbfftlc );
+ERR ErrBFFTLPostProcess( _In_ const BFFTLContext * pbfftlc );
 
 
 #endif _BFFTLDRIVER_HXX_INCLUDED

@@ -2970,14 +2970,14 @@ ERR ErrIsamIPrereadIndexRanges(
     const JET_SESID                                 sesid,
     const JET_VTID                                  vtid,
     __in_ecount(cIndexRanges) const JET_INDEX_RANGE * const rgIndexRanges,
-    __in const ULONG                        cIndexRanges,
-    __out_opt ULONG * const                 pcRangesPreread,
+    _In_ const ULONG                                cIndexRanges,
+    __out_opt ULONG * const                         pcRangesPreread,
     __in_ecount(ccolumnidPreread) const JET_COLUMNID * const rgcolumnidPreread,
     const ULONG                                     ccolumnidPreread,
-    __in const ULONG                        cPageCacheMin,
-    __in const ULONG                        cPageCacheMax,
+    _In_ const ULONG                                cPageCacheMin,
+    _In_ const ULONG                                cPageCacheMax,
     const JET_GRBIT                                 grbit,
-    __out_opt ULONG * const                 pcPageCacheActual )
+    __out_opt ULONG * const                         pcPageCacheActual )
 //  =================================================================
 {
     ERR     err = JET_errSuccess;
@@ -3084,8 +3084,8 @@ ERR VTAPI ErrIsamPrereadIndexRanges(
     const JET_SESID                                             sesid,
     const JET_VTID                                              vtid,
     __in_ecount(cIndexRanges) const JET_INDEX_RANGE * const     rgIndexRanges,
-    __in const ULONG                                    cIndexRanges,
-    __out_opt ULONG * const                             pcRangesPreread,
+    _In_ const ULONG                                            cIndexRanges,
+    __out_opt ULONG * const                                     pcRangesPreread,
     __in_ecount(ccolumnidPreread) const JET_COLUMNID * const    rgcolumnidPreread,
     const ULONG                                                 ccolumnidPreread,
     const JET_GRBIT                                             grbit )

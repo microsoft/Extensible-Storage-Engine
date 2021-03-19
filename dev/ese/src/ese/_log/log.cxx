@@ -743,7 +743,7 @@ ERR LOG::ErrLGTryLogRec(    const DATA* const   rgdata,
 ERR LOG::ErrLGITrace(
     PIB *ppib,
     // UNDONE: Better to make this PCSTR, but may be impossible b/c we pass it to Data::SetPv() :P
-    __in PSTR sz,
+    _In_ PSTR sz,
     BOOL fInternal )
 {
     ERR             err;
@@ -844,7 +844,7 @@ ERR LOG::ErrLGTrace(
     PIB *ppib,
     // UNDONE: Better to make this PCSTR, but may be impossible b/c we pass it to Data::SetPv() :P
     // Can we fix this?  Don't understand the internl ErrLGITrace() it's complicated.
-    __in PSTR sz )
+    _In_ PSTR sz )
 {
     ERR err = ErrLGITrace( ppib, sz, fFalse );
 
@@ -1380,7 +1380,7 @@ ERR LOG::ErrLGISetQuitWithoutUndo( const ERR errBeginUndo )
     return errBeginUndo;
 }
 
-ERR LOG::ErrLGIBeginUndoCallback_( __in const CHAR * szFile, const ULONG lLine )
+ERR LOG::ErrLGIBeginUndoCallback_( _In_ const CHAR * szFile, const ULONG lLine )
 {
     const ERR err = ErrLGRecoveryControlCallback( m_pinst, NULL, NULL, JET_sntBeginUndo, JET_errSuccess, 0, fFalse, 0, szFile, lLine );
     return ErrLGISetQuitWithoutUndo( err );
@@ -1838,9 +1838,9 @@ LONG LOG::LLGElasticWaypointLatency() const
 }
 
 VOID LOG::LGIGetEffectiveWaypoint(
-    __in    IFMP    ifmp,
-    __in    LONG    lGenCommitted,
-    __out   LGPOS * plgposEffWaypoint )
+    _In_    IFMP    ifmp,
+    _In_    LONG    lGenCommitted,
+    _Out_   LGPOS * plgposEffWaypoint )
 {
     LGPOS lgposBestWaypoint;
 
@@ -2433,7 +2433,7 @@ VOID LOG::LGFullNameCheckpoint( __out_bcount(OSFSAPI_MAX_PATH * sizeof(WCHAR) ) 
     CallS( m_pinst->m_pfsapi->ErrPathBuild( SzParam( m_pinst, JET_paramSystemPath ), SzParam( m_pinst, JET_paramBaseName ), m_wszChkExt, wszFullName ) );
 }
 
-void LOG::LGISetInitialGen( __in const LONG lgenStart )
+void LOG::LGISetInitialGen( _In_ const LONG lgenStart )
 {
     Assert( m_pcheckpoint );
     Assert( lgenStart );
@@ -2546,7 +2546,7 @@ VOID LOG::LGICheckpointTerm( VOID )
 
 /*  read checkpoint from file.
 /**/
-ERR LOG::ErrLGReadCheckpoint( __in PCWSTR wszCheckpointFile, CHECKPOINT *pcheckpoint, const BOOL fReadOnly )
+ERR LOG::ErrLGReadCheckpoint( _In_ PCWSTR wszCheckpointFile, CHECKPOINT *pcheckpoint, const BOOL fReadOnly )
 {
     ERR     err;
     BOOL    fReadRealCheckpoint = fFalse;
@@ -2628,7 +2628,7 @@ HandleError:
 
 /*  write checkpoint to file.
 /**/
-ERR LOG::ErrLGIWriteCheckpoint( __in PCWSTR wszCheckpointFile, const IOFLUSHREASON iofr, CHECKPOINT *pcheckpoint )
+ERR LOG::ErrLGIWriteCheckpoint( _In_ PCWSTR wszCheckpointFile, const IOFLUSHREASON iofr, CHECKPOINT *pcheckpoint )
 {
     ERR     err;
 
@@ -3132,7 +3132,7 @@ VOID LOG::LGIUpdateCheckpoint( CHECKPOINT *pcheckpoint )
 //              the default, which means do all databases that
 //              are attached and logged.
 //
-BOOL LOG::FLGIUpdatableWaypoint( __in const LONG lGenCommitted, __in const IFMP ifmpTarget )
+BOOL LOG::FLGIUpdatableWaypoint( _In_ const LONG lGenCommitted, _In_ const IFMP ifmpTarget )
 {
     BOOL    fUpdatableWaypoint = fFalse;
 
@@ -3413,7 +3413,7 @@ LGPOS LOG::LgposLGCurrentDbConsistencyMayFail() /* const, m_critCheckpoint.Enter
  *              the default, which means do all databases that
  *              are attached and logged.
 /**/
-ERR LOG::ErrLGUpdateWaypointIFMP( IFileSystemAPI *const pfsapi, __in const IFMP ifmpTarget )
+ERR LOG::ErrLGUpdateWaypointIFMP( IFileSystemAPI *const pfsapi, _In_ const IFMP ifmpTarget )
 {
     ERR err = JET_errSuccess;
     BOOL fOwnsChkptCritSec = fFalse;
@@ -3511,7 +3511,7 @@ HandleError:
  *  Parameters:
  *      ifmpTarget - The specific database to quiesce the waypoint latency of.
 /**/
-ERR LOG::ErrLGQuiesceWaypointLatencyIFMP( __in const IFMP ifmpTarget )
+ERR LOG::ErrLGQuiesceWaypointLatencyIFMP( _In_ const IFMP ifmpTarget )
 {
     ERR err = JET_errSuccess;
     PIB pibFake;
@@ -3786,7 +3786,7 @@ VOID LOG::LGSetSectorGeometry(
 VOID LOG::LGFullLogNameFromLogId(
     __out_ecount(OSFSAPI_MAX_PATH) PWSTR wszFullLogFileName,
     LONG lGeneration,
-    __in PCWSTR wszDirectory )
+    _In_ PCWSTR wszDirectory )
 {
     m_pLogStream->LGFullLogNameFromLogId( wszFullLogFileName, lGeneration, wszDirectory );
 }
@@ -3804,7 +3804,7 @@ ERR LOG::ErrLGMakeLogNameBaseless(
     __out_bcount(cbLogName)
     PWSTR wszLogName,
     ULONG cbLogName,
-    __in PCWSTR wszLogFolder,
+    _In_ PCWSTR wszLogFolder,
     const enum eLGFileNameSpec eLogType,
     LONG lGen,
     __in_opt PCWSTR wszLogExt ) const
@@ -4079,10 +4079,10 @@ BOOL LOG::FLGFileVersionUpdateNeeded( _In_ const LogVersion& lgvDesired )
 }
 
 ERR LOG::ErrLGGetGenerationRange(
-            __in PCWSTR wszFindPath,
+            _In_ PCWSTR wszFindPath,
             LONG* plgenLow,
             LONG* plgenHigh,
-            __in BOOL fLooseExt,
+            _In_ BOOL fLooseExt,
             __out_opt BOOL * pfDefaultExt )
 {
     return m_pLogStream->ErrLGGetGenerationRange(

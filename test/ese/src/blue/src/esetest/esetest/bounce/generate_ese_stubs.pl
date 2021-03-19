@@ -336,7 +336,7 @@ sub PrintAppVerifierFooter($$)
 #		"//----------------------------------------------\n".
 #		"void\n".
 #		"EsentShimLogApiCall(\n".
-#		"	__in	PCSTR			szApi\n".
+#		"	_In_	PCSTR			szApi\n".
 #		")\n".
 #		"{\n".
 #		"	VLOG( VLOG_LEVEL_INFO,\n".
@@ -349,8 +349,8 @@ sub PrintAppVerifierFooter($$)
 #		"//----------------------------------------------\n".
 #		"void\n".
 #		"EsentShimLogInjectedError(\n".
-#		"	__in	PCSTR			szApi,\n".
-#		"	__in	JET_ERR 		errInjected\n".
+#		"	_In_	PCSTR			szApi,\n".
+#		"	_In_	JET_ERR 		errInjected\n".
 #		")\n".
 #		"{\n".
 #		"	VLOG( VLOG_LEVEL_INFO,\n".

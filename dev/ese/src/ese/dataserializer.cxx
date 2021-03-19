@@ -135,14 +135,14 @@ public:
 
     ERR ErrColumnExists(
         const char * const szColumn,
-        __out bool * const pfExists,
-        __out JET_COLTYP * const pcoltyp ) const;
+        _Out_ bool * const pfExists,
+        _Out_ JET_COLTYP * const pcoltyp ) const;
     ERR ErrCreateColumn( const char * const szColumn, const JET_COLTYP coltyp );
     
     ERR ErrLoadDataFromColumn(
         const char * const szColumn,
-        __out void * pv,
-        __out size_t * const pcbActual,
+        _Out_ void * pv,
+        _Out_ size_t * const pcbActual,
         const size_t cbMax ) const;
 
     ERR ErrPrepareUpdate();
@@ -162,13 +162,13 @@ private: // construction has to be done through the factory class
     TableDataStore( const JET_SESID sesid, const JET_TABLEID tableid );
 
 private:
-    ERR ErrGetColumnid_( const char * const szColumn, __out JET_COLUMNID * const pcolumnid ) const;
+    ERR ErrGetColumnid_( const char * const szColumn, _Out_ JET_COLUMNID * const pcolumnid ) const;
     
     ERR ErrSetColumn_( const JET_COLUMNID columnid, const void * const pv, const size_t cb );
     ERR ErrRetrieveColumn_(
         const JET_COLUMNID columnid,
-        __out void * pv,
-        __out size_t * const pcbActual,
+        _Out_ void * pv,
+        _Out_ size_t * const pcbActual,
         const size_t cbMax ) const;
     
 private:
@@ -218,8 +218,8 @@ ERR TableDataStore::ErrDataStoreUnavailable() const
 
 ERR TableDataStore::ErrColumnExists(
     const char * const szColumn,
-    __out bool * const pfExists,
-    __out JET_COLTYP * const pcoltyp ) const
+    _Out_ bool * const pfExists,
+    _Out_ JET_COLTYP * const pcoltyp ) const
 {
     ERR err;
     *pfExists = false;
@@ -302,8 +302,8 @@ HandleError:
 
 ERR TableDataStore::ErrLoadDataFromColumn(
     const char * const szColumn,
-    __out void * pv,
-    __out size_t * const pcbActual,
+    _Out_ void * pv,
+    _Out_ size_t * const pcbActual,
     const size_t cbMax ) const
 {
     ERR err;
@@ -417,7 +417,7 @@ HandleError:
     return err;
 }
 
-ERR TableDataStore::ErrGetColumnid_( const char * const szColumn, __out JET_COLUMNID * const pcolumnid ) const
+ERR TableDataStore::ErrGetColumnid_( const char * const szColumn, _Out_ JET_COLUMNID * const pcolumnid ) const
 {
     ERR err;
 
@@ -454,8 +454,8 @@ HandleError:
 
 ERR TableDataStore::ErrRetrieveColumn_(
     const JET_COLUMNID columnid,
-    __out void * pv,
-    __out size_t * const pcbActual,
+    _Out_ void * pv,
+    _Out_ size_t * const pcbActual,
     const size_t cbMax ) const
 {
     ERR err;
@@ -833,8 +833,8 @@ MemoryDataStore::~MemoryDataStore()
     
 ERR MemoryDataStore::ErrColumnExists(
     const char * const szColumn,
-    __out bool * const pfExists,
-    __out JET_COLTYP * const pcoltyp ) const
+    _Out_ bool * const pfExists,
+    _Out_ JET_COLTYP * const pcoltyp ) const
 {
     const INT i = IColumn( szColumn );
     if( -1 == i )
@@ -862,8 +862,8 @@ ERR MemoryDataStore::ErrCreateColumn( const char * const szColumn, const JET_COL
 
 ERR MemoryDataStore::ErrLoadDataFromColumn(
     const char * const szColumn,
-    __out void * pv,
-    __out size_t * const pcbActual,
+    _Out_ void * pv,
+    _Out_ size_t * const pcbActual,
     const size_t cbMax ) const
 {
     const INT i = IColumn( szColumn );

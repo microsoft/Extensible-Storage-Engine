@@ -26,14 +26,14 @@
 CFastTraceLogBuffer g_ftlb;
 
 
-ERR __stdcall ErrNullFlushBuffer( __inout void * const pvFlushBufferContext, __in const BYTE * const rgbBuffer, __in const ULONG cbBuffer )
+ERR __stdcall ErrNullFlushBuffer( __inout void * const pvFlushBufferContext, _In_ const BYTE * const rgbBuffer, _In_ const ULONG cbBuffer )
 {
     return JET_errSuccess;
 }
 
 BOOL g_fFlushed = fFalse;
 
-ERR __stdcall ErrSignalFlushBuffer( __inout void * const pvFlushBufferContext, __in const BYTE * const rgbBuffer, __in const ULONG cbBuffer )
+ERR __stdcall ErrSignalFlushBuffer( __inout void * const pvFlushBufferContext, _In_ const BYTE * const rgbBuffer, _In_ const ULONG cbBuffer )
 {
     g_fFlushed = fTrue;
     return JET_errSuccess;

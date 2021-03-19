@@ -561,8 +561,8 @@ class CFlushMap
         ~CFlushMap();
 
         // Configuration functions.
-        void SetPersisted( __in const BOOL fPersisted );
-        void SetCreateNew( __in const BOOL fCreateNew );
+        void SetPersisted( _In_ const BOOL fPersisted );
+        void SetCreateNew( _In_ const BOOL fCreateNew );
 
         // Initializes/terminates the flush map object.
         ERR ErrInitFlushMap();
@@ -575,14 +575,14 @@ class CFlushMap
         ERR ErrFlushMapFlushFileBuffers( _In_ const IOFLUSHREASON iofr );
 
         // Getters/setters of flush types.
-        void SetPgnoFlushType( __in const PGNO pgno, __in const CPAGE::PageFlushType pgft, __in const DBTIME dbtime );
-        void SetPgnoFlushType( __in const PGNO pgno, __in const CPAGE::PageFlushType pgft );
-        void SetRangeFlushType( __in const PGNO pgnoFirst, __in const CPG cpg, __in const CPAGE::PageFlushType pgft );
-        ERR ErrSetPgnoFlushTypeAndWait( __in const PGNO pgno, __in const CPAGE::PageFlushType pgft, __in const DBTIME dbtime );
-        ERR ErrSetRangeFlushTypeAndWait( __in const PGNO pgnoFirst, __in const CPG cpg, __in const CPAGE::PageFlushType pgft );
-        CPAGE::PageFlushType PgftGetPgnoFlushType( __in const PGNO pgno );
-        CPAGE::PageFlushType PgftGetPgnoFlushType( __in const PGNO pgno, __in const DBTIME dbtime, __out BOOL* const pfRuntime );
-        ERR ErrSyncRangeInvalidateFlushType( __in const PGNO pgnoFirst, __in const CPG cpg );
+        void SetPgnoFlushType( _In_ const PGNO pgno, _In_ const CPAGE::PageFlushType pgft, _In_ const DBTIME dbtime );
+        void SetPgnoFlushType( _In_ const PGNO pgno, _In_ const CPAGE::PageFlushType pgft );
+        void SetRangeFlushType( _In_ const PGNO pgnoFirst, _In_ const CPG cpg, _In_ const CPAGE::PageFlushType pgft );
+        ERR ErrSetPgnoFlushTypeAndWait( _In_ const PGNO pgno, _In_ const CPAGE::PageFlushType pgft, _In_ const DBTIME dbtime );
+        ERR ErrSetRangeFlushTypeAndWait( _In_ const PGNO pgnoFirst, _In_ const CPG cpg, _In_ const CPAGE::PageFlushType pgft );
+        CPAGE::PageFlushType PgftGetPgnoFlushType( _In_ const PGNO pgno );
+        CPAGE::PageFlushType PgftGetPgnoFlushType( _In_ const PGNO pgno, _In_ const DBTIME dbtime, _Out_ BOOL* const pfRuntime );
+        ERR ErrSyncRangeInvalidateFlushType( _In_ const PGNO pgnoFirst, _In_ const CPG cpg );
 
         // Gets the minimum log generation required to bring the flush map to a consistent state upon crash.
         LONG LGetFmGenMinRequired();
@@ -591,24 +591,24 @@ class CFlushMap
         BOOL FRecoverable();
 
         // Returns wether or not the layer consuming the flush map should request a map flush.
-        BOOL FRequestFmSectionWrite( __in const QWORD cbLogGenerated, __in const QWORD cbPreferredChktpDepth );
+        BOOL FRequestFmSectionWrite( _In_ const QWORD cbLogGenerated, _In_ const QWORD cbPreferredChktpDepth );
 
         // Issues one asynchronous write against the flush map. The write operation may comprise multiple map pages.
-        void FlushOneSection( __in const QWORD cbLogGenerated );
+        void FlushOneSection( _In_ const QWORD cbLogGenerated );
 
         // Flushes the entire map (skips clean pages for better performance).
-        ERR ErrFlushAllSections( OnDebug( __in const BOOL fMapPatching ) );
+        ERR ErrFlushAllSections( OnDebug( _In_ const BOOL fMapPatching ) );
 
         // Grows the flush map to accomodate a certain number of database pages. If set to a smaller size,
         // the function returns immediately and does not change anything.
-        ERR ErrSetFlushMapCapacity( __in const PGNO pgnoReq );
+        ERR ErrSetFlushMapCapacity( _In_ const PGNO pgnoReq );
 
         // Gets the flush map page number that holds the state for a given database page.
-        INLINE FMPGNO FmpgnoGetFmPgnoFromDbPgno( __in const PGNO pgno );
+        INLINE FMPGNO FmpgnoGetFmPgnoFromDbPgno( _In_ const PGNO pgno );
 
         // DB header flushes must call these to synchronize signatures.
-        static void EnterDbHeaderFlush( __in CFlushMap* const pfm, __out SIGNATURE* const psignDbHdrFlush, __out SIGNATURE* const psignFlushMapHdrFlush );
-        static void LeaveDbHeaderFlush( __in CFlushMap* const pfm );
+        static void EnterDbHeaderFlush( _In_ CFlushMap* const pfm, _Out_ SIGNATURE* const psignDbHdrFlush, _Out_ SIGNATURE* const psignFlushMapHdrFlush );
+        static void LeaveDbHeaderFlush( _In_ CFlushMap* const pfm );
 
         static ERR ErrGetFmPathFromDbPath(
             _Out_writes_z_( OSFSAPI_MAX_PATH ) WCHAR* const wszFmPath,
@@ -677,7 +677,7 @@ class CFlushMapForAttachedDb : public CFlushMap
         CFlushMapForAttachedDb();
         
         // Configuration setters.
-        void SetDbFmp( __in FMP* const pfmp );
+        void SetDbFmp( _In_ FMP* const pfmp );
 };
 
 
@@ -720,17 +720,17 @@ class CFlushMapForUnattachedDb : public CFlushMap
         CFlushMapForUnattachedDb();
 
         // Configuration setters.
-        void SetReadOnly( __in const BOOL fReadOnly );
-        void SetFmFilePath( __in const WCHAR* const wszFmFilePath );
-        void SetRecoverable( __in const BOOL fRecoverable );
-        void SetEseInstance( __in INST* const pinst );
-        void SetFileSystemConfiguration( __in IFileSystemConfiguration* const pfsconfig );
-        void SetDbState( __in const ULONG ulDbState );
-        void SetDbGenMinRequired( __in const LONG lGenDbMinRequired );
-        void SetDbGenMinConsistent( __in const LONG lGenDbMinConsistent );
-        void SetDbHdrFlushSignaturePointerFromDb( __in const SIGNATURE* const psignDbHdrFlushFromDb );
-        void SetFmHdrFlushSignaturePointerFromDb( __in const SIGNATURE* const m_psignFlushMapHdrFlushFromDb_ );
-        void SetDbExtensionSize( __in const CPG cpgDbExtensionSize );
+        void SetReadOnly( _In_ const BOOL fReadOnly );
+        void SetFmFilePath( _In_ const WCHAR* const wszFmFilePath );
+        void SetRecoverable( _In_ const BOOL fRecoverable );
+        void SetEseInstance( _In_ INST* const pinst );
+        void SetFileSystemConfiguration( _In_ IFileSystemConfiguration* const pfsconfig );
+        void SetDbState( _In_ const ULONG ulDbState );
+        void SetDbGenMinRequired( _In_ const LONG lGenDbMinRequired );
+        void SetDbGenMinConsistent( _In_ const LONG lGenDbMinConsistent );
+        void SetDbHdrFlushSignaturePointerFromDb( _In_ const SIGNATURE* const psignDbHdrFlushFromDb );
+        void SetFmHdrFlushSignaturePointerFromDb( _In_ const SIGNATURE* const m_psignFlushMapHdrFlushFromDb_ );
+        void SetDbExtensionSize( _In_ const CPG cpgDbExtensionSize );
 
         // Static helpers.
 
@@ -742,9 +742,9 @@ class CFlushMapForUnattachedDb : public CFlushMap
         // or inconsistent flush map would trigger this condition.
         static ERR ErrGetPersistedFlushMapOrNullObjectIfRuntime(
             _In_z_ const WCHAR* const wszDbFilePath,
-            __in const DBFILEHDR* const pdbHdr,
-            __in INST* const pinst,
-            __out CFlushMapForUnattachedDb** const ppfm );
+            _In_ const DBFILEHDR* const pdbHdr,
+            _In_ INST* const pinst,
+            _Out_ CFlushMapForUnattachedDb** const ppfm );
 };
 
 
@@ -780,8 +780,8 @@ class CFlushMapForDump : public CFlushMap
 
     public:
         // Static helpers.
-        static ERR ErrChecksumFlushMapFile( __in INST* const pinst, __in const WCHAR* const wszFmFilePath, __in_opt IFileSystemConfiguration* pfsconfig = NULL );
-        static ERR ErrDumpFlushMapPage( __in INST* const pinst, __in const WCHAR* const wszFmFilePath, __in const FMPGNO fmpgno, __in const BOOL fDumpFlushStates, __in_opt IFileSystemConfiguration* pfsconfig = NULL );
+        static ERR ErrChecksumFlushMapFile( _In_ INST* const pinst, _In_ const WCHAR* const wszFmFilePath, __in_opt IFileSystemConfiguration* pfsconfig = NULL );
+        static ERR ErrDumpFlushMapPage( _In_ INST* const pinst, _In_ const WCHAR* const wszFmFilePath, _In_ const FMPGNO fmpgno, _In_ const BOOL fDumpFlushStates, __in_opt IFileSystemConfiguration* pfsconfig = NULL );
 
 
     public:
@@ -789,13 +789,13 @@ class CFlushMapForDump : public CFlushMap
         CFlushMapForDump();
 
         // Configuration setters.
-        void SetFmFilePath( __in const WCHAR* const wszFmFilePath );
-        void SetEseInstance( __in INST* const pinst );
-        void SetFileSystemConfiguration( __in IFileSystemConfiguration* const pfsconfig );
+        void SetFmFilePath( _In_ const WCHAR* const wszFmFilePath );
+        void SetEseInstance( _In_ INST* const pinst );
+        void SetFileSystemConfiguration( _In_ IFileSystemConfiguration* const pfsconfig );
 
         // Extended methods.
-        ERR ErrDumpFmPage( __in const FMPGNO fmpgno, __in const BOOL fDumpFlushStates );
-        ERR ErrChecksumFmPage( __in const FMPGNO fmpgno );
+        ERR ErrDumpFmPage( _In_ const FMPGNO fmpgno, _In_ const BOOL fDumpFlushStates );
+        ERR ErrChecksumFmPage( _In_ const FMPGNO fmpgno );
 };
 
 #endif  // !FLUSHMAP_H_INCLUDED

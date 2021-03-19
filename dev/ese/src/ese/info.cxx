@@ -3187,14 +3187,14 @@ LOCAL ERR ErrINFOICopyAsciiName(
 }
 
 INLINE VOID INFOISetKeySegmentDescendingFlag(
-    __in WCHAR * const      pwch,
+    _In_ WCHAR * const      pwch,
     const BOOL          fDescending )
 {
     Assert( NULL != pwch );
     *pwch = ( fDescending ? L'-' : L'+' );
 }
 INLINE VOID INFOISetKeySegmentDescendingFlag(
-    __in CHAR * const       pch,
+    _In_ CHAR * const       pch,
     const BOOL          fDescending )
 {
     Assert( NULL != pch );

@@ -106,7 +106,7 @@ namespace DBMScanFactory
 {
     // create a new scan configured to do multiple passes of the
     // database, using the system parameters
-    ERR ErrPdbmScanCreate(const IFMP ifmp, __out IDBMScan ** pdbmscan);
+    ERR ErrPdbmScanCreate(const IFMP ifmp, _Out_ IDBMScan ** pdbmscan);
 
     // create a new scan configured to do one pass of the database,
     // using the given parameters
@@ -116,7 +116,7 @@ namespace DBMScanFactory
                     const INT csecMax,
                     const INT cmsecSleep,
                     const JET_CALLBACK pfnCallback,
-                    __out IDBMScan ** pdbmscan);
+                    _Out_ IDBMScan ** pdbmscan);
 };
 
 VOID DBMScanStopAllScansForInst( INST * pinst, const BOOL fAllowRestarting = fFalse );

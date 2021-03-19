@@ -276,10 +276,10 @@ LOCAL ERR ErrSPIAddFreedExtent(
     const CPG cpgSize );
 
 LOCAL ERR ErrSPISeekRootAE(
-    __in FUCB* const           pfucbAE,
-    __in const PGNO            pgno,
-    __in const SpacePool       sppAvailPool,
-    __out CSPExtentInfo* const pspeiAE );
+    _In_ FUCB* const           pfucbAE,
+    _In_ const PGNO            pgno,
+    _In_ const SpacePool       sppAvailPool,
+    _Out_ CSPExtentInfo* const pspeiAE );
 
 LOCAL ERR ErrSPIGetSparseInfoRange(
     _In_ FMP* const pfmp,
@@ -326,10 +326,10 @@ LOCAL ERR ErrSPIReserveSPBufPages(
     const PGNO  pgnoReplace = pgnoNull );
 
 LOCAL ERR ErrSPIAddToAvailExt(
-    __in    FUCB *      pfucbAE,
-    __in    const PGNO  pgnoAELast,
-    __in    const CPG   cpgAESize,
-    __in    SpacePool   sppPool );
+    _In_    FUCB *      pfucbAE,
+    _In_    const PGNO  pgnoAELast,
+    _In_    const CPG   cpgAESize,
+    _In_    SpacePool   sppPool );
 
 
 LOCAL ERR ErrSPIUnshelvePagesInRange(
@@ -579,12 +579,12 @@ INLINE VOID AssertSPIPfucbOnSpaceTreeRoot( FUCB *pfucb, CSR *pcsr )
 #endif
 }
 
-INLINE BOOL FSPValidPGNO( __in const PGNO pgno )
+INLINE BOOL FSPValidPGNO( _In_ const PGNO pgno )
 {
     return pgnoNull < pgno && pgnoSysMax > pgno;
 }
 
-INLINE BOOL FSPValidAllocPGNO( __in const PGNO pgno )
+INLINE BOOL FSPValidAllocPGNO( _In_ const PGNO pgno )
 {
     //  All valid pgnos we can allocate are higher than the first 3 bootstrap
     //  FDP pages (pgnoSystemRoot, 2 /* pgno DB OE "FDP" */, 3 /* pgno
@@ -596,7 +596,7 @@ INLINE BOOL FSPValidAllocPGNO( __in const PGNO pgno )
 
 #ifdef DEBUG
 PGNO    g_pgnoAllocTrap = 0;
-INLINE VOID SPCheckPgnoAllocTrap( __in const PGNO pgnoAlloc, __in const CPG cpgAlloc )
+INLINE VOID SPCheckPgnoAllocTrap( _In_ const PGNO pgnoAlloc, _In_ const CPG cpgAlloc )
 {
     if ( g_pgnoAllocTrap == pgnoAlloc ||
             ( g_pgnoAllocTrap > pgnoAlloc && g_pgnoAllocTrap <= pgnoAlloc + cpgAlloc -1 ) )
@@ -605,7 +605,7 @@ INLINE VOID SPCheckPgnoAllocTrap( __in const PGNO pgnoAlloc, __in const CPG cpgA
     }
 }
 #else
-INLINE VOID SPCheckPgnoAllocTrap( __in const PGNO pgnoAlloc, __in const CPG cpgAlloc )
+INLINE VOID SPCheckPgnoAllocTrap( _In_ const PGNO pgnoAlloc, _In_ const CPG cpgAlloc )
 {
     ;   // do nothing
 }
@@ -784,9 +784,9 @@ class SPEXTKEY {
                        "We are using enough bits to safely mask all spp:: values." );
     
         VOID Make(
-            __in const E_SP_EXTENT_TYPE     eExtType,
-            __in const PGNO                 pgnoLast,
-            __in const SpacePool            sppAvailPool )
+            _In_ const E_SP_EXTENT_TYPE     eExtType,
+            _In_ const PGNO                 pgnoLast,
+            _In_ const SpacePool            sppAvailPool )
         {
             //  Check there are no unintended bits.
             Assert( FSPIValidExplicitSpacePool( sppAvailPool ) );
@@ -867,7 +867,7 @@ class SPEXTKEY {
                     fValidateSearch         = 0x02
                 };
 
-        INLINE BOOL FValid( __in const E_SP_EXTENT_TYPE eExtType, __in const E_VALIDATE_TYPE fValidateType ) const
+        INLINE BOOL FValid( _In_ const E_SP_EXTENT_TYPE eExtType, _In_ const E_VALIDATE_TYPE fValidateType ) const
         {
             PGNO pgnoLast = _PgnoLast();
 
@@ -896,7 +896,7 @@ class SPEXTKEY {
             }
             return fTrue;   // let the worthy through ...
         }
-        INLINE BOOL FValid( __in const E_SP_EXTENT_TYPE eExtType, __in const ULONG cb ) const
+        INLINE BOOL FValid( _In_ const E_SP_EXTENT_TYPE eExtType, _In_ const ULONG cb ) const
         {
             return Cb() == cb && FValid( eExtType, fValidateData );
         }
@@ -950,12 +950,12 @@ class SPEXTDATA {
         }
 
     public:
-        SPEXTDATA( __in const CPG cpgExtent )
+        SPEXTDATA( _In_ const CPG cpgExtent )
         {
             Set( cpgExtent );
             Assert( FValid( ) );
         }
-        VOID Set( __in const CPG cpgExtent )
+        VOID Set( _In_ const CPG cpgExtent )
         {
             le_cpgExtent = cpgExtent;
             Assert( FValid( ) );
@@ -1006,7 +1006,7 @@ class CSPExtentInfo {
         BOOL _FAvailExt() const     { return m_eSpExtType == SPEXTKEY::fSPExtentTypeAE; }
 
 
-        VOID _Set( __in const SPEXTKEY::E_SP_EXTENT_TYPE eSpExtType, __in const KEYDATAFLAGS& kdfCurr )
+        VOID _Set( _In_ const SPEXTKEY::E_SP_EXTENT_TYPE eSpExtType, _In_ const KEYDATAFLAGS& kdfCurr )
         {
             m_fCorruptData = fFalse;    // innocdent until proven guilty
 
@@ -1113,7 +1113,7 @@ class CSPExtentInfo {
             Assert( cpgBadNews != CpgExtent() );
         }
 
-        VOID Set( __in const FUCB * pfucb )
+        VOID Set( _In_ const FUCB * pfucb )
         {
             m_fCorruptData = fFalse;    // innocent until proven guilty
 
@@ -1155,7 +1155,7 @@ class CSPExtentInfo {
         PGNO PgnoLast() const           { ASSERT_VALID( this ); Assert( FValidExtent( ) ); return m_pgnoLast; }
         CPG  CpgExtent() const          { ASSERT_VALID( this ); Assert( FValidExtent( ) ); return m_cpgExtent; }
         PGNO PgnoFirst() const          { ASSERT_VALID( this ); Assert( FValidExtent( ) ); Assert( m_cpgExtent != 0 ); return _PgnoFirst(); }
-        BOOL FContains( __in const PGNO pgnoIn ) const
+        BOOL FContains( _In_ const PGNO pgnoIn ) const
         {
             ASSERT_VALID( this );
             #ifdef DEBUG
@@ -1193,7 +1193,7 @@ class CSPExtentInfo {
 
 
         enum    FValidationStrength { fStrong = 0x0, fZeroLengthOK = 0x1, fZeroFirstPgnoOK = 0x2 };
-        INLINE static BOOL FValidExtent( __in const PGNO pgnoLast, __in const CPG cpg, __in const FValidationStrength fStrength = fStrong )
+        INLINE static BOOL FValidExtent( _In_ const PGNO pgnoLast, _In_ const CPG cpg, _In_ const FValidationStrength fStrength = fStrong )
         {
             //  A variety of bad values and/or signs could be troublesome for future math.
 
@@ -1343,9 +1343,9 @@ class CSPExtentKeyBM {
 
         //  A constructor so people can declare const versions
         CSPExtentKeyBM(
-            __in const  SPEXTKEY::E_SP_EXTENT_TYPE  eExtType,
-            __in const  PGNO                        pgno,
-            __in const  SpacePool                   sppAvailPool = spp::AvailExtLegacyGeneralPool
+            _In_ const  SPEXTKEY::E_SP_EXTENT_TYPE  eExtType,
+            _In_ const  PGNO                        pgno,
+            _In_ const  SpacePool                   sppAvailPool = spp::AvailExtLegacyGeneralPool
             )
         {
             m_fBookmarkSet = fFalse;
@@ -1357,9 +1357,9 @@ class CSPExtentKeyBM {
         }
 
         VOID SPExtentMakeKeyBM(
-            __in const  SPEXTKEY::E_SP_EXTENT_TYPE  eExtType,
-            __in const  PGNO                        pgno,
-            __in const  SpacePool                   sppAvailPool = spp::AvailExtLegacyGeneralPool
+            _In_ const  SPEXTKEY::E_SP_EXTENT_TYPE  eExtType,
+            _In_ const  PGNO                        pgno,
+            _In_ const  SpacePool                   sppAvailPool = spp::AvailExtLegacyGeneralPool
             )
         {
             m_eSpExtType = eExtType;
@@ -1471,10 +1471,10 @@ class CSPExtentNodeKDF {
 
         //  So we can have const versions.
         CSPExtentNodeKDF(
-            __in const  SPEXTKEY::E_SP_EXTENT_TYPE  eExtType,
-            __in const  PGNO                        pgnoLast,
-            __in const  CPG                         cpgExtent,
-            __in const  SpacePool                   sppAvailPool = spp::AvailExtLegacyGeneralPool )
+            _In_ const  SPEXTKEY::E_SP_EXTENT_TYPE  eExtType,
+            _In_ const  PGNO                        pgnoLast,
+            _In_ const  CPG                         cpgExtent,
+            _In_ const  SpacePool                   sppAvailPool = spp::AvailExtLegacyGeneralPool )
         {
             Invalidate();
 
@@ -1498,7 +1498,7 @@ class CSPExtentNodeKDF {
 
         class CSPExtentInfo;
 
-        ERR ErrConsumeSpace( __in const PGNO pgnoConsume, __in const CPG cpgConsume = 1 )
+        ERR ErrConsumeSpace( _In_ const PGNO pgnoConsume, _In_ const CPG cpgConsume = 1 )
         {
             ASSERT_VALID( this );
 
@@ -1534,7 +1534,7 @@ class CSPExtentNodeKDF {
             return JET_errSuccess;
         }
 
-        ERR ErrUnconsumeSpace( __in const CPG cpgConsume )
+        ERR ErrUnconsumeSpace( _In_ const CPG cpgConsume )
         {
             ASSERT_VALID( this );
 
@@ -1622,7 +1622,7 @@ class CSPExtentNodeKDF {
 };
 
 
-ERR ErrSPIExtentLastPgno( __in const FUCB * pfucb, __out PGNO * ppgnoLast )
+ERR ErrSPIExtentLastPgno( _In_ const FUCB * pfucb, _Out_ PGNO * ppgnoLast )
 {
     const CSPExtentInfo spext( pfucb );
     CallS( spext.ErrCheckCorrupted() );
@@ -1630,7 +1630,7 @@ ERR ErrSPIExtentLastPgno( __in const FUCB * pfucb, __out PGNO * ppgnoLast )
     return JET_errSuccess;
 }
 
-ERR ErrSPIExtentFirstPgno( __in const FUCB * pfucb, __out PGNO * ppgnoFirst )
+ERR ErrSPIExtentFirstPgno( _In_ const FUCB * pfucb, _Out_ PGNO * ppgnoFirst )
 {
     const CSPExtentInfo spext( pfucb );
     CallS( spext.ErrCheckCorrupted() );
@@ -1638,7 +1638,7 @@ ERR ErrSPIExtentFirstPgno( __in const FUCB * pfucb, __out PGNO * ppgnoFirst )
     return JET_errSuccess;
 }
 
-ERR ErrSPIExtentCpg( __in const FUCB * pfucb, __out CPG * pcpgSize )
+ERR ErrSPIExtentCpg( _In_ const FUCB * pfucb, _Out_ CPG * pcpgSize )
 {
     const CSPExtentInfo spext( pfucb );
     CallS( spext.ErrCheckCorrupted() );
@@ -1646,7 +1646,7 @@ ERR ErrSPIExtentCpg( __in const FUCB * pfucb, __out CPG * pcpgSize )
     return JET_errSuccess;
 }
 
-ERR ErrSPIGetExtentInfo( __in const FUCB * pfucb, __out PGNO * ppgnoLast, __out CPG * pcpgSize, __out SpacePool * psppPool )
+ERR ErrSPIGetExtentInfo( _In_ const FUCB * pfucb, _Out_ PGNO * ppgnoLast, _Out_ CPG * pcpgSize, _Out_ SpacePool * psppPool )
 {
     const CSPExtentInfo spext( pfucb );
     CallS( spext.ErrCheckCorrupted() );
@@ -1656,7 +1656,7 @@ ERR ErrSPIGetExtentInfo( __in const FUCB * pfucb, __out PGNO * ppgnoLast, __out 
     return JET_errSuccess;
 }
 
-ERR ErrSPIGetExtentInfo( __in const KEYDATAFLAGS * pkdf, __out PGNO * ppgnoLast, __out CPG * pcpgSize, __out SpacePool * psppPool )
+ERR ErrSPIGetExtentInfo( _In_ const KEYDATAFLAGS * pkdf, _Out_ PGNO * ppgnoLast, _Out_ CPG * pcpgSize, _Out_ SpacePool * psppPool )
 {
     const CSPExtentInfo spext( pkdf );
     CallS( spext.ErrCheckCorrupted() );
@@ -1668,10 +1668,10 @@ ERR ErrSPIGetExtentInfo( __in const KEYDATAFLAGS * pkdf, __out PGNO * ppgnoLast,
 
 
 ERR ErrSPREPAIRValidateSpaceNode(
-    __in const  KEYDATAFLAGS * pkdf,
-    __out       PGNO *          ppgnoLast,
-    __out       CPG *           pcpgExtent,
-    __out       PCWSTR *        pwszPoolName )
+    _In_ const  KEYDATAFLAGS * pkdf,
+    _Out_       PGNO *          ppgnoLast,
+    _Out_       CPG *           pcpgExtent,
+    _Out_       PCWSTR *        pwszPoolName )
 {
     SpacePool spp;
 
@@ -1691,10 +1691,10 @@ ERR ErrSPREPAIRValidateSpaceNode(
 }
 
 ERR ErrSPIREPAIRValidateSpaceNode(
-    __in const  KEYDATAFLAGS * pkdf,
-    __out       PGNO *          ppgnoLast,
-    __out       CPG *           pcpgExtent,
-    __out       SpacePool *     psppPool )
+    _In_ const  KEYDATAFLAGS * pkdf,
+    _Out_       PGNO *          ppgnoLast,
+    _Out_       CPG *           pcpgExtent,
+    _Out_       SpacePool *     psppPool )
 {
     ERR err = JET_errSuccess;
     // I've created a constructor for the rare case we don't have the pfucb to 
@@ -3594,10 +3594,10 @@ INLINE BOOL FSPIAllocateAllAvail(
 
 LOCAL INLINE ERR ErrSPIFindExt(
     __inout     FUCB * pfucb,
-    __in const  PGNO pgno,
-    __in const  SpacePool sppAvailPool,
-    __in const  SPEXTKEY::E_SP_EXTENT_TYPE eExtType,
-    __out       CSPExtentInfo * pspei )
+    _In_ const  PGNO pgno,
+    _In_ const  SpacePool sppAvailPool,
+    _In_ const  SPEXTKEY::E_SP_EXTENT_TYPE eExtType,
+    _Out_       CSPExtentInfo * pspei )
 {
     Assert( ( eExtType == SPEXTKEY::fSPExtentTypeOE ) || ( eExtType == SPEXTKEY::fSPExtentTypeAE ) );
 
@@ -3652,8 +3652,8 @@ HandleError:
 
 LOCAL ERR ErrSPIFindExtOE(
     __inout     FUCB * pfucbOE,
-    __in const  PGNO pgnoFirst,
-    __out       CSPExtentInfo * pcspoext
+    _In_ const  PGNO pgnoFirst,
+    _Out_       CSPExtentInfo * pcspoext
     )
 {
     return ErrSPIFindExt( pfucbOE, pgnoFirst, spp::AvailExtLegacyGeneralPool, SPEXTKEY::fSPExtentTypeOE, pcspoext );
@@ -3662,9 +3662,9 @@ LOCAL ERR ErrSPIFindExtOE(
 
 LOCAL ERR ErrSPIFindExtAE(
     __inout     FUCB * pfucbAE,
-    __in const  PGNO pgnoFirst,
-    __in const  SpacePool sppAvailPool,
-    __out       CSPExtentInfo * pcspaext
+    _In_ const  PGNO pgnoFirst,
+    _In_ const  SpacePool sppAvailPool,
+    _Out_       CSPExtentInfo * pcspaext
     )
 {
     Expected( ( sppAvailPool != spp::ShelvedPool ) || ( pfucbAE->u.pfcb->PgnoFDP() == pgnoSystemRoot ) );
@@ -3674,9 +3674,9 @@ LOCAL ERR ErrSPIFindExtAE(
 
 LOCAL INLINE ERR ErrSPIFindExtOE(
     __inout     PIB *           ppib,
-    __in        FCB *           pfcb,
-    __in const  PGNO            pgnoFirst,
-    __out       CSPExtentInfo * pcspoext )
+    _In_        FCB *           pfcb,
+    _In_ const  PGNO            pgnoFirst,
+    _Out_       CSPExtentInfo * pcspoext )
 {
     ERR         err = JET_errSuccess;
     FUCB        *pfucbOE;
@@ -3696,10 +3696,10 @@ HandleError:
 
 LOCAL INLINE ERR ErrSPIFindExtAE(
     __inout     PIB *           ppib,
-    __in        FCB *           pfcb,
-    __in const  PGNO            pgnoFirst,
-    __in const  SpacePool       sppAvailPool,
-    __out       CSPExtentInfo * pcspaext )
+    _In_        FCB *           pfcb,
+    _In_ const  PGNO            pgnoFirst,
+    _In_ const  SpacePool       sppAvailPool,
+    _Out_       CSPExtentInfo * pcspaext )
 {
     ERR         err = JET_errSuccess;
     FUCB        *pfucbAE;
@@ -5290,9 +5290,9 @@ HandleError:
 //  pfucb only passed for asserts and to maintain NextSE cache (via pfcb).
 ERR ErrSPIAEFindExt(
     __inout FUCB * const    pfucbAE,
-    __in    const CPG       cpgMin,
-    __in    const SpacePool sppAvailPool,
-    __out   CSPExtentInfo * pcspaei )
+    _In_    const CPG       cpgMin,
+    _In_    const SpacePool sppAvailPool,
+    _Out_   CSPExtentInfo * pcspaei )
 {
     ERR         err = JET_errSuccess;
     DIB         dib;
@@ -5988,7 +5988,7 @@ HandleError:
 //
 ERR ErrSPISPGetPage(
     __inout FUCB *          pfucb,
-    __out   PGNO *          ppgnoAlloc )
+    _Out_   PGNO *          ppgnoAlloc )
 {
     ERR         err = JET_errSuccess;
     const BOOL  fAvailExt   = FFUCBAvailExt( pfucb );
@@ -6042,8 +6042,8 @@ ERR ErrSPISPGetPage(
 //
 ERR ErrSPISmallGetPage(
     __inout FUCB *      pfucb,
-    __in    PGNO        pgnoLast,
-    __out   PGNO *      ppgnoAlloc )
+    _In_    PGNO        pgnoLast,
+    _Out_   PGNO *      ppgnoAlloc )
 {
     ERR             err = JET_errSuccess;
     SPACE_HEADER    sph;
@@ -6166,11 +6166,11 @@ enum SPFindFlags {
 
 ERR ErrSPIAEFindPage(
     __inout FUCB * const        pfucbAE,
-    __in    const SPFindFlags   fSPFindFlags,
-    __in    const SpacePool     sppAvailPool,
-    __in    const PGNO          pgnoLast,
-    __out   CSPExtentInfo *     pspaeiAlloc,
-    __out   CPG *               pcpgFindInsertionRegionMarker
+    _In_    const SPFindFlags   fSPFindFlags,
+    _In_    const SpacePool     sppAvailPool,
+    _In_    const PGNO          pgnoLast,
+    _Out_   CSPExtentInfo *     pspaeiAlloc,
+    _Out_   CPG *               pcpgFindInsertionRegionMarker
     )
 {
     ERR             err             = JET_errSuccess;
@@ -6426,10 +6426,10 @@ HandleError:
 ERR ErrSPIAEGetExtentAndPage(
     __inout FUCB * const        pfucb,
     __inout FUCB * const        pfucbAE,
-    __in    const SpacePool     sppAvailPool,
-    __in    const CPG           cpgRequest,
-    __in    const ULONG         fSPFlags,
-    __out   CSPExtentInfo *     pspaeiAlloc
+    _In_    const SpacePool     sppAvailPool,
+    _In_    const CPG           cpgRequest,
+    _In_    const ULONG         fSPFlags,
+    _Out_   CSPExtentInfo *     pspaeiAlloc
     )
 {
     ERR             err             = JET_errSuccess;
@@ -6469,10 +6469,10 @@ HandleError:
 ERR ErrSPIAEGetContinuousPage(
     __inout FUCB * const        pfucb,  // needed for ErrSPIAEGetExtentAndPage()
     __inout FUCB * const        pfucbAE,
-    __in    const PGNO          pgnoLast,
-    __in    const CPG           cpgReserve,
-    __in    const BOOL          fHardReserve,   // ensure reserve, even if next contiguous page is available.
-    __out   CSPExtentInfo *     pspaeiAlloc
+    _In_    const PGNO          pgnoLast,
+    _In_    const CPG           cpgReserve,
+    _In_    const BOOL          fHardReserve,   // ensure reserve, even if next contiguous page is available.
+    _Out_   CSPExtentInfo *     pspaeiAlloc
     )
 {
     ERR             err             = JET_errSuccess;
@@ -6602,9 +6602,9 @@ HandleError:
 ERR ErrSPIAEGetAnyPage(
     __inout FUCB * const        pfucb,  // needed for ErrSPIAEGetExtentAndPage()
     __inout FUCB * const        pfucbAE,
-    __in    const PGNO          pgnoLastHint,
-    __in    const BOOL          fSPAllocFlags,
-    __out   CSPExtentInfo *     pspaeiAlloc
+    _In_    const PGNO          pgnoLastHint,
+    _In_    const BOOL          fSPAllocFlags,
+    _Out_   CSPExtentInfo *     pspaeiAlloc
     )
 {
     ERR             err             = JET_errSuccess;
@@ -6663,10 +6663,10 @@ HandleError:
 
 ERR ErrSPIAEGetPage(
     __inout FUCB *      pfucb,
-    __in    PGNO        pgnoLast,
+    _In_    PGNO        pgnoLast,
     __inout PGNO *      ppgnoAlloc,
-    __in    const BOOL  fSPAllocFlags,
-    __in    const CPG   cpgReserve
+    _In_    const BOOL  fSPAllocFlags,
+    _In_    const CPG   cpgReserve
     )
 {
     ERR             err             = JET_errSuccess;
@@ -6822,9 +6822,9 @@ CPG CpgSPIConsumeActiveSpaceRequestReserve( FUCB * const pfucb )
 //-
 ERR ErrSPGetPage(
     __inout FUCB *          pfucb,
-    __in    const PGNO      pgnoLast,
-    __in    const ULONG     fSPAllocFlags,
-    __out   PGNO *          ppgnoAlloc
+    _In_    const PGNO      pgnoLast,
+    _In_    const ULONG     fSPAllocFlags,
+    _Out_   PGNO *          ppgnoAlloc
     )
 {
     ERR         err = errCodeInconsistency;
@@ -7117,7 +7117,7 @@ LOCAL_BROKEN VOID SPIReportLostPages(
             PinstFromIfmp( ifmp ) );
 }
 
-ERR ErrSPISPFreeExt( __inout FUCB * pfucb, __in const PGNO pgnoFirst, __in const CPG cpgSize )
+ERR ErrSPISPFreeExt( __inout FUCB * pfucb, _In_ const PGNO pgnoFirst, _In_ const CPG cpgSize )
 {
     ERR         err         = JET_errSuccess;
     const BOOL  fAvailExt   = FFUCBAvailExt( pfucb );
@@ -7163,7 +7163,7 @@ ERR ErrSPISPFreeExt( __inout FUCB * pfucb, __in const PGNO pgnoFirst, __in const
     return err;
 }
 
-ERR ErrSPISmallFreeExt( __inout FUCB * pfucb, __in const PGNO pgnoFirst, __in const CPG cpgSize )
+ERR ErrSPISmallFreeExt( __inout FUCB * pfucb, _In_ const PGNO pgnoFirst, _In_ const CPG cpgSize )
 {
     ERR             err = JET_errSuccess;
     SPACE_HEADER    sph;
@@ -7255,10 +7255,10 @@ HandleError:
 //          Fatal error, out of log space, disk write failure, etc.
 //
 ERR ErrSPIAERemoveInsertionRegion(
-    __in    const FCB * const               pfcb,
+    _In_    const FCB * const               pfcb,
     __inout FUCB * const                    pfucbAE,
-    __in    const CSPExtentInfo * const     pcspoeContaining,
-    __in    const PGNO                      pgnoFirstToFree,
+    _In_    const CSPExtentInfo * const     pcspoeContaining,
+    _In_    const PGNO                      pgnoFirstToFree,
     __inout CPG * const                     pcpgSizeToFree
     )
 {
@@ -7513,7 +7513,7 @@ HandleError:
     return err;
 }
 
-LOCAL VOID SPIReportSpaceLeak( __in const FUCB* const pfucb, __in const ERR err, __in const PGNO pgnoFirst, __in const CPG cpg, __in_z const CHAR* const szTag )
+LOCAL VOID SPIReportSpaceLeak( _In_ const FUCB* const pfucb, _In_ const ERR err, _In_ const PGNO pgnoFirst, _In_ const CPG cpg, __in_z const CHAR* const szTag )
 {
     Assert( pfucb != NULL );
     Expected( err < JET_errSuccess );
@@ -7549,9 +7549,9 @@ LOCAL VOID SPIReportSpaceLeak( __in const FUCB* const pfucb, __in const ERR err,
 
 LOCAL ERR ErrSPIAEFreeExt(
     __inout FUCB * pfucb,
-    __in PGNO pgnoFirst,
-    __in CPG cpgSize,
-    __in FUCB * const pfucbParent = pfucbNil )
+    _In_ PGNO pgnoFirst,
+    _In_ CPG cpgSize,
+    _In_ FUCB * const pfucbParent = pfucbNil )
 {
     ERR         err                 = errCodeInconsistency;
     PIB         * const ppib        = pfucb->ppib;
@@ -10232,7 +10232,7 @@ HandleError:
 
 INLINE ERR ErrSPIAddExtent(
     __inout FUCB *pfucb,
-    __in const CSPExtentNodeKDF * const pcspextnode )
+    _In_ const CSPExtentNodeKDF * const pcspextnode )
 {
     ERR         err;
     CPG         cpgOEDelta;
@@ -10303,10 +10303,10 @@ HandleError:
 }
 
 LOCAL ERR ErrSPIAddToAvailExt(
-    __in    FUCB *      pfucbAE,
-    __in    const PGNO  pgnoAELast,
-    __in    const CPG   cpgAESize,
-    __in    SpacePool   sppPool )
+    _In_    FUCB *      pfucbAE,
+    _In_    const PGNO  pgnoAELast,
+    _In_    const CPG   cpgAESize,
+    _In_    SpacePool   sppPool )
 {
     ERR         err;
     FCB         * const pfcb    = pfucbAE->u.pfcb;
@@ -10524,13 +10524,13 @@ HandleError:
 //      added available extent node
 //
 LOCAL ERR ErrSPIAddSecondaryExtent(
-    __in FUCB* const     pfucb,
-    __in FUCB* const     pfucbAE,
-    __in const PGNO      pgnoLast,
-    __in CPG             cpgNewSpace,
-    __in CPG             cpgAvailable,
-    __in CArray<EXTENTINFO>* const parreiReleased,
-    __in const SpacePool sppPool )
+    _In_ FUCB* const     pfucb,
+    _In_ FUCB* const     pfucbAE,
+    _In_ const PGNO      pgnoLast,
+    _In_ CPG             cpgNewSpace,
+    _In_ CPG             cpgAvailable,
+    _In_ CArray<EXTENTINFO>* const parreiReleased,
+    _In_ const SpacePool sppPool )
 {
     ERR err;
     CPG cpgOECoalesced  = 0;
@@ -11182,7 +11182,7 @@ HandleError:
 }
 
 // Seek to the last node of the root OE and returns the extent information.
-LOCAL ERR ErrSPISeekRootOELast( __in FUCB* const pfucbOE, __out CSPExtentInfo* const pspeiOE )
+LOCAL ERR ErrSPISeekRootOELast( _In_ FUCB* const pfucbOE, _Out_ CSPExtentInfo* const pspeiOE )
 {
     ERR err = JET_errSuccess;
     DIB dib;
@@ -11220,10 +11220,10 @@ HandleError:
 
 // Seek to the node of the root AE whose pgnoLast is >= to the page being passed in and returns the extent information.
 LOCAL ERR ErrSPISeekRootAE(
-    __in FUCB* const pfucbAE,
-    __in const PGNO pgno,
-    __in const SpacePool sppAvailPool,
-    __out CSPExtentInfo* const pspeiAE )
+    _In_ FUCB* const pfucbAE,
+    _In_ const PGNO pgno,
+    _In_ const SpacePool sppAvailPool,
+    _Out_ CSPExtentInfo* const pspeiAE )
 {
     ERR err = JET_errSuccess;
 
@@ -11256,7 +11256,7 @@ HandleError:
     return err;
 }
 
-LOCAL ERR ErrSPICheckOEAELastConsistency( __in const CSPExtentInfo& speiLastOE, __in const CSPExtentInfo& speiLastAE )
+LOCAL ERR ErrSPICheckOEAELastConsistency( _In_ const CSPExtentInfo& speiLastOE, _In_ const CSPExtentInfo& speiLastAE )
 {
     ERR err = JET_errSuccess;
 
@@ -13923,10 +13923,10 @@ HandleError:
 
 VOID SPDumpSplitBufExtent(
     CPRINTF * const             pcprintf,
-    __in const CHAR *           szTable,
-    __in const CHAR *           szSpaceTree,
-    __in const PGNO             pgnoSpaceFDP,
-    __in const SPLIT_BUFFER *   pspbuf
+    _In_ const CHAR *           szTable,
+    _In_ const CHAR *           szSpaceTree,
+    _In_ const PGNO             pgnoSpaceFDP,
+    _In_ const SPLIT_BUFFER *   pspbuf
     )
 {
     if ( pcprintf )
@@ -15716,8 +15716,8 @@ HandleError:
 const ULONG pctDoublingGrowth  = 200;
 
 CPG CpgSPIGetNextAlloc(
-    __in const FCB_SPACE_HINTS * const  pfcbsh,
-    __in const CPG                      cpgPrevious
+    _In_ const FCB_SPACE_HINTS * const  pfcbsh,
+    _In_ const CPG                      cpgPrevious
     )
 {
 

@@ -54,10 +54,19 @@
 
 #include <sal.h>
 
-#endif // !_MSC_VER
+// These conflict with definitions in headers such as <algorithm> on non-Windows platforms.
+// _In_ and _Out_ should be used instead anyway, according to Microsoft's SAL documentation.
+//
+// Unfortunately, can't easily redefine __in and __out because these old-style annotations
+// crept back into the Windows headers ntsecapi.h and dbgeng.h, which we include
+//
+// #undef __in
+// #undef __out
+//
+// #define __in Use_In_instead_of__in
+// #define __out Use_Out_instead_of__out
 
-#define IN
-#define OUT
+#endif // !_MSC_VER
 
 //  Like SAL this produces a compile-time assert ...
 #define C_ASSERT(e) typedef char __C_ASSERT__[(e)?1:-1]

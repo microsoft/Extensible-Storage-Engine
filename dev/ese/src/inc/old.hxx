@@ -489,7 +489,7 @@ VOID    OLDTermFmp( const IFMP ifmp );
 
 BOOL    FOLDRunning( const IFMP ifmp );
 
-ERR     ErrOLD2Resume( __in PIB * const ppib, const IFMP ifmp );
+ERR     ErrOLD2Resume( _In_ PIB * const ppib, const IFMP ifmp );
 VOID    OLD2TermFmp( const IFMP ifmp );
 VOID    OLD2TermInst( INST * const pinst );
 ERR     ErrOLDRegisterObjectForOLD2(
@@ -499,7 +499,7 @@ ERR     ErrOLDRegisterObjectForOLD2(
     _In_ DEFRAGTYPE defragtype );
 
 BOOL    FOLDSystemTable( const CHAR * const szTableName );
-ERR     ErrOLDDumpMSysDefrag( __in PIB * const ppib, const IFMP ifmp );
+ERR     ErrOLDDumpMSysDefrag( _In_ PIB * const ppib, const IFMP ifmp );
 ERR     ErrOLDDefragment(
             const IFMP  ifmp,
             const CHAR  *szTableName,

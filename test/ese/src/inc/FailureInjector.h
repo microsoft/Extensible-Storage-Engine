@@ -133,43 +133,43 @@ namespace FailureInjector
     };
 
     bool FAILUREINJECTOR_API InitIOFailureInjector(
-        __in HMODULE hModuleToHook,
-        __in bool bEnableHooksOnRuntimeLinking,
+        _In_ HMODULE hModuleToHook,
+        _In_ bool bEnableHooksOnRuntimeLinking,
         __inout LPDWORD pFuncsToHook = NULL);
 
     bool FAILUREINJECTOR_API DisposeIOFailureInjector();
     
     IOFAILURE_FILTER_ID FAILUREINJECTOR_API AddIOFailureFilter(
-        __in const IOFailureFilter &filter);
+        _In_ const IOFailureFilter &filter);
 
     IOFAILURE_FILTER_ID FAILUREINJECTOR_API InsertIOFailureFilter(
-        __in IOFAILURE_FILTER_ID idAfter,
-        __in const IOFailureFilter &filter);
+        _In_ IOFAILURE_FILTER_ID idAfter,
+        _In_ const IOFailureFilter &filter);
     
     void FAILUREINJECTOR_API ModifyIOFailureFilter(
-        __in IOFAILURE_FILTER_ID id,
-        __in const IOFailureFilter &filter);
+        _In_ IOFAILURE_FILTER_ID id,
+        _In_ const IOFailureFilter &filter);
 
     bool FAILUREINJECTOR_API DelIOFailureFilter(
-        __in IOFAILURE_FILTER_ID filterID);
+        _In_ IOFAILURE_FILTER_ID filterID);
 
     typedef BOOL (CALLBACK *IO_CALLBACK_PROC)(
-        __in const IOFailureFilter &filter,
-        __in IOFuncs callbackAPI,
-        __in const IOCallbackArgs &callbackArgs,
+        _In_ const IOFailureFilter &filter,
+        _In_ IOFuncs callbackAPI,
+        _In_ const IOCallbackArgs &callbackArgs,
         __inout DWORD *pErrAction);
 
     bool FAILUREINJECTOR_API EnableHooksOnRuntimeLinking(
-        __in HMODULE hModule);
+        _In_ HMODULE hModule);
     
     LPVOID FAILUREINJECTOR_API InstallAPIHook(
-        __in HMODULE hTargetModule,
+        _In_ HMODULE hTargetModule,
         __in_z LPCSTR lpAPIModule,
         __in_z LPCSTR lpProcName,
-        __in LPVOID pHook);
+        _In_ LPVOID pHook);
 
     LPVOID FAILUREINJECTOR_API UninstallAPIHook(
-        __in HMODULE hTargetModule,
+        _In_ HMODULE hTargetModule,
         __in_z LPCSTR lpAPIModule,
         __in_z LPCSTR lpProcName);
 
@@ -178,12 +178,12 @@ namespace FailureInjector
     typedef int (CALLBACK *INIT_PROC)(LPVOID pData);
 
     HANDLE FAILUREINJECTOR_API InjectCode(
-        __in DWORD dwProcessID,
+        _In_ DWORD dwProcessID,
         __in_z LPCSTR szDllToInject,
         __in_z LPCSTR szInitMethod, 
         __in_bcount(cbData) LPVOID pInitData,
-        __in DWORD cbData,
-        __in bool bWaitForRemoteThread);
+        _In_ DWORD cbData,
+        _In_ bool bWaitForRemoteThread);
 }
 
 #pragma pack(pop)

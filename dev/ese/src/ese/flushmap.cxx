@@ -2608,12 +2608,12 @@ CFlushMap::~CFlushMap()
     TermFlushMap_();
 }
 
-void CFlushMap::SetPersisted( __in const BOOL fPersisted )
+void CFlushMap::SetPersisted( _In_ const BOOL fPersisted )
 {
     m_fPersisted_ = fPersisted;
 }
 
-void CFlushMap::SetCreateNew( __in const BOOL fCreateNew )
+void CFlushMap::SetCreateNew( _In_ const BOOL fCreateNew )
 {
     m_fCreateNew_ = fCreateNew;
 }
@@ -2824,37 +2824,37 @@ ERR CFlushMap::ErrFlushMapFlushFileBuffers( _In_ const IOFLUSHREASON iofr )
     return ErrUtilFlushFileBuffers( m_pfapi, iofr );
 }
 
-void CFlushMap::SetPgnoFlushType( __in const PGNO pgno, __in const CPAGE::PageFlushType pgft, __in const DBTIME dbtime )
+void CFlushMap::SetPgnoFlushType( _In_ const PGNO pgno, _In_ const CPAGE::PageFlushType pgft, _In_ const DBTIME dbtime )
 {
     (void)ErrSetRangePgnoFlushType_( pgno, 1, pgft, dbtime, fFalse );
 }
 
-void CFlushMap::SetPgnoFlushType( __in const PGNO pgno, __in const CPAGE::PageFlushType pgft )
+void CFlushMap::SetPgnoFlushType( _In_ const PGNO pgno, _In_ const CPAGE::PageFlushType pgft )
 {
     SetPgnoFlushType( pgno, pgft, dbtimeNil );
 }
 
-void CFlushMap::SetRangeFlushType( __in const PGNO pgnoFirst, __in const CPG cpg, __in const CPAGE::PageFlushType pgft )
+void CFlushMap::SetRangeFlushType( _In_ const PGNO pgnoFirst, _In_ const CPG cpg, _In_ const CPAGE::PageFlushType pgft )
 {
     (void)ErrSetRangePgnoFlushType_( pgnoFirst, cpg, pgft, dbtimeNil, fFalse );
 }
 
-ERR CFlushMap::ErrSetPgnoFlushTypeAndWait( __in const PGNO pgno, __in const CPAGE::PageFlushType pgft, __in const DBTIME dbtime )
+ERR CFlushMap::ErrSetPgnoFlushTypeAndWait( _In_ const PGNO pgno, _In_ const CPAGE::PageFlushType pgft, _In_ const DBTIME dbtime )
 {
     return ErrSetRangePgnoFlushType_( pgno, 1, pgft, dbtime, fTrue );
 }
 
-ERR CFlushMap::ErrSetRangeFlushTypeAndWait( __in const PGNO pgnoFirst, __in const CPG cpg, __in const CPAGE::PageFlushType pgft )
+ERR CFlushMap::ErrSetRangeFlushTypeAndWait( _In_ const PGNO pgnoFirst, _In_ const CPG cpg, _In_ const CPAGE::PageFlushType pgft )
 {
     return ErrSetRangePgnoFlushType_( pgnoFirst, cpg, pgft, dbtimeNil, fTrue );
 }
 
-CPAGE::PageFlushType CFlushMap::PgftGetPgnoFlushType( __in const PGNO pgno )
+CPAGE::PageFlushType CFlushMap::PgftGetPgnoFlushType( _In_ const PGNO pgno )
 {
     return PgftGetPgnoFlushType( pgno, dbtimeNil, NULL );
 }
 
-CPAGE::PageFlushType CFlushMap::PgftGetPgnoFlushType( __in const PGNO pgno, __in const DBTIME dbtime, __out BOOL* const pfRuntime )
+CPAGE::PageFlushType CFlushMap::PgftGetPgnoFlushType( _In_ const PGNO pgno, _In_ const DBTIME dbtime, _Out_ BOOL* const pfRuntime )
 {
     ERR err = JET_errSuccess;
     FlushMapPageDescriptor* pfmd = NULL;
@@ -2920,7 +2920,7 @@ HandleError:
     return pgft;
 }
 
-ERR CFlushMap::ErrSyncRangeInvalidateFlushType( __in const PGNO pgnoFirst, __in const CPG cpg )
+ERR CFlushMap::ErrSyncRangeInvalidateFlushType( _In_ const PGNO pgnoFirst, _In_ const CPG cpg )
 {
     ERR err = JET_errSuccess;
 
@@ -2984,7 +2984,7 @@ BOOL CFlushMap::FRecoverable()
 // transient state that does not warrant adding complexity to the algorithm below. Especially because the flush map is expected
 // to be mostly or completely clean so a complete write of the map only incurs its header writes.
 
-BOOL CFlushMap::FRequestFmSectionWrite( __in const QWORD cbLogGenerated, __in const QWORD cbPreferredChkptDepth )
+BOOL CFlushMap::FRequestFmSectionWrite( _In_ const QWORD cbLogGenerated, _In_ const QWORD cbPreferredChkptDepth )
 {
     BOOL fRequest = fFalse;
     BOOL fOwnLatch = fFalse;
@@ -3059,7 +3059,7 @@ HandleError:
     return fRequest;
 }
 
-ERR CFlushMap::ErrFlushAllSections( OnDebug( __in const BOOL fMapPatching ) )
+ERR CFlushMap::ErrFlushAllSections( OnDebug( _In_ const BOOL fMapPatching ) )
 {
     ERR err = JET_errSuccess;
 
@@ -3082,7 +3082,7 @@ HandleError:
     return err;
 }
 
-void CFlushMap::FlushOneSection( __in const QWORD cbLogGenerated )
+void CFlushMap::FlushOneSection( _In_ const QWORD cbLogGenerated )
 {
     BOOL fOwnLatch = fFalse;
 
@@ -3120,7 +3120,7 @@ HandleError:
     Assert( m_sxwlSectionFlush.FNotOwner() );
 }
 
-ERR CFlushMap::ErrSetFlushMapCapacity( __in const PGNO pgnoReq )
+ERR CFlushMap::ErrSetFlushMapCapacity( _In_ const PGNO pgnoReq )
 {
     JET_ERR err = JET_errSuccess;
     BOOL fInCritSec = fFalse;
@@ -3171,7 +3171,7 @@ HandleError:
     return err;
 }
 
-INLINE FMPGNO CFlushMap::FmpgnoGetFmPgnoFromDbPgno( __in const PGNO pgno )
+INLINE FMPGNO CFlushMap::FmpgnoGetFmPgnoFromDbPgno( _In_ const PGNO pgno )
 {
     Assert( pgno <= pgnoSysMax );
 
@@ -3182,7 +3182,7 @@ INLINE FMPGNO CFlushMap::FmpgnoGetFmPgnoFromDbPgno( __in const PGNO pgno )
     return ( pgno / m_cDbPagesPerFlushMapPage );
 }
 
-void CFlushMap::EnterDbHeaderFlush( __in CFlushMap* const pfm, __out SIGNATURE* const psignDbHdrFlush, __out SIGNATURE* const psignFlushMapHdrFlush )
+void CFlushMap::EnterDbHeaderFlush( _In_ CFlushMap* const pfm, _Out_ SIGNATURE* const psignDbHdrFlush, _Out_ SIGNATURE* const psignFlushMapHdrFlush )
 {
     if ( ( pfm != NULL ) && pfm->m_fInitialized )
     {
@@ -3195,7 +3195,7 @@ void CFlushMap::EnterDbHeaderFlush( __in CFlushMap* const pfm, __out SIGNATURE* 
     }
 }
 
-void CFlushMap::LeaveDbHeaderFlush( __in CFlushMap* const pfm )
+void CFlushMap::LeaveDbHeaderFlush( _In_ CFlushMap* const pfm )
 {
     if ( ( pfm != NULL ) && pfm->m_fInitialized )
     {
@@ -3288,7 +3288,7 @@ CFlushMapForAttachedDb::CFlushMapForAttachedDb() :
 {
 }
 
-void CFlushMapForAttachedDb::SetDbFmp( __in FMP* const pfmp )
+void CFlushMapForAttachedDb::SetDbFmp( _In_ FMP* const pfmp )
 {
     Assert( !m_fInitialized );
     Assert( m_pfmp == NULL );
@@ -3393,66 +3393,66 @@ CFlushMapForUnattachedDb::CFlushMapForUnattachedDb() :
     m_fCreateNew_ = fFalse;
 }
 
-void CFlushMapForUnattachedDb::SetReadOnly( __in const BOOL fReadOnly )
+void CFlushMapForUnattachedDb::SetReadOnly( _In_ const BOOL fReadOnly )
 {
     m_fReadOnly_ = fReadOnly;
 }
 
-void CFlushMapForUnattachedDb::SetFmFilePath( __in const WCHAR* const wszFmFilePath )
+void CFlushMapForUnattachedDb::SetFmFilePath( _In_ const WCHAR* const wszFmFilePath )
 {
     m_wszFmFilePath_ = wszFmFilePath;
 }
 
-void CFlushMapForUnattachedDb::SetRecoverable( __in const BOOL fRecoverable )
+void CFlushMapForUnattachedDb::SetRecoverable( _In_ const BOOL fRecoverable )
 {
     m_fRecoverable_ = fRecoverable;
 }
 
-void CFlushMapForUnattachedDb::SetEseInstance( __in INST* const pinst )
+void CFlushMapForUnattachedDb::SetEseInstance( _In_ INST* const pinst )
 {
     m_pinst_ = pinst;
 }
 
-void CFlushMapForUnattachedDb::SetFileSystemConfiguration( __in IFileSystemConfiguration* const pfsconfig )
+void CFlushMapForUnattachedDb::SetFileSystemConfiguration( _In_ IFileSystemConfiguration* const pfsconfig )
 {
     m_pfsconfig_ = pfsconfig;
 }
 
-void CFlushMapForUnattachedDb::SetDbState( __in const ULONG ulDbState )
+void CFlushMapForUnattachedDb::SetDbState( _In_ const ULONG ulDbState )
 {
     m_ulDbState_ = ulDbState;
 }
 
-void CFlushMapForUnattachedDb::SetDbGenMinRequired( __in const LONG lGenDbMinRequired )
+void CFlushMapForUnattachedDb::SetDbGenMinRequired( _In_ const LONG lGenDbMinRequired )
 {
     m_lGenDbMinRequired_ = lGenDbMinRequired;
 }
 
-void CFlushMapForUnattachedDb::SetDbGenMinConsistent( __in const LONG lGenDbMinConsistent )
+void CFlushMapForUnattachedDb::SetDbGenMinConsistent( _In_ const LONG lGenDbMinConsistent )
 {
     m_lGenDbMinConsistent_ = lGenDbMinConsistent;
 }
 
-void CFlushMapForUnattachedDb::SetDbHdrFlushSignaturePointerFromDb( __in const SIGNATURE* const psignDbHdrFlushFromDb )
+void CFlushMapForUnattachedDb::SetDbHdrFlushSignaturePointerFromDb( _In_ const SIGNATURE* const psignDbHdrFlushFromDb )
 {
     m_psignDbHdrFlushFromDb_ = psignDbHdrFlushFromDb;
 }
 
-void CFlushMapForUnattachedDb::SetFmHdrFlushSignaturePointerFromDb( __in const SIGNATURE* const psignFlushMapHdrFlushFromDb )
+void CFlushMapForUnattachedDb::SetFmHdrFlushSignaturePointerFromDb( _In_ const SIGNATURE* const psignFlushMapHdrFlushFromDb )
 {
     m_psignFlushMapHdrFlushFromDb_ = psignFlushMapHdrFlushFromDb;
 }
 
-void CFlushMapForUnattachedDb::SetDbExtensionSize( __in const CPG cpgDbExtensionSize )
+void CFlushMapForUnattachedDb::SetDbExtensionSize( _In_ const CPG cpgDbExtensionSize )
 {
     m_cpgDbExtensionSize_ = cpgDbExtensionSize;
 }
 
 ERR CFlushMapForUnattachedDb::ErrGetPersistedFlushMapOrNullObjectIfRuntime(
     _In_z_ const WCHAR* const wszDbFilePath,
-    __in const DBFILEHDR* const pdbHdr,
-    __in INST* const pinst,
-    __out CFlushMapForUnattachedDb** const ppfm )
+    _In_ const DBFILEHDR* const pdbHdr,
+    _In_ INST* const pinst,
+    _Out_ CFlushMapForUnattachedDb** const ppfm )
 {
     ERR err = JET_errSuccess;
     CFlushMapForUnattachedDb* pfm = NULL;
@@ -3687,7 +3687,7 @@ CPG CFlushMapForDump::CpgGetDbExtensionSize_()
     return 0;
 }
 
-ERR CFlushMapForDump::ErrChecksumFlushMapFile( __in INST* const pinst, __in const WCHAR* const wszFmFilePath, __in_opt IFileSystemConfiguration* pfsconfig )
+ERR CFlushMapForDump::ErrChecksumFlushMapFile( _In_ INST* const pinst, _In_ const WCHAR* const wszFmFilePath, __in_opt IFileSystemConfiguration* pfsconfig )
 {
     ERR err = JET_errSuccess;
     FMPGNO fmpgno = s_fmpgnoHdr;
@@ -3785,7 +3785,7 @@ HandleError:
     return err;
 }
 
-ERR CFlushMapForDump::ErrDumpFlushMapPage( __in INST* const pinst, __in const WCHAR* const wszFmFilePath, __in const FMPGNO fmpgno, __in const BOOL fDumpFlushStates, __in_opt IFileSystemConfiguration* pfsconfig )
+ERR CFlushMapForDump::ErrDumpFlushMapPage( _In_ INST* const pinst, _In_ const WCHAR* const wszFmFilePath, _In_ const FMPGNO fmpgno, _In_ const BOOL fDumpFlushStates, __in_opt IFileSystemConfiguration* pfsconfig )
 {
     ERR err = JET_errSuccess;
     CFlushMapForDump flushmap;
@@ -3815,22 +3815,22 @@ CFlushMapForDump::CFlushMapForDump() :
     m_fDumpMode = fTrue;
 }
 
-void CFlushMapForDump::SetFmFilePath( __in const WCHAR* const wszFmFilePath )
+void CFlushMapForDump::SetFmFilePath( _In_ const WCHAR* const wszFmFilePath )
 {
     m_wszFmFilePath_ = wszFmFilePath;
 }
 
-void CFlushMapForDump::SetEseInstance( __in INST* const pinst )
+void CFlushMapForDump::SetEseInstance( _In_ INST* const pinst )
 {
     m_pinst_ = pinst;
 }
 
-void CFlushMapForDump::SetFileSystemConfiguration( __in IFileSystemConfiguration* const pfsconfig )
+void CFlushMapForDump::SetFileSystemConfiguration( _In_ IFileSystemConfiguration* const pfsconfig )
 {
     m_pfsconfig_ = pfsconfig;
 }
 
-ERR CFlushMapForDump::ErrDumpFmPage( __in const FMPGNO fmpgno, __in const BOOL fDumpFlushStates )
+ERR CFlushMapForDump::ErrDumpFmPage( _In_ const FMPGNO fmpgno, _In_ const BOOL fDumpFlushStates )
 {
     ERR err = JET_errSuccess;
     FlushMapPageDescriptor* pfmd = NULL;
@@ -3872,7 +3872,7 @@ HandleError:
     return err;
 }
 
-ERR CFlushMapForDump::ErrChecksumFmPage( __in const FMPGNO fmpgno )
+ERR CFlushMapForDump::ErrChecksumFmPage( _In_ const FMPGNO fmpgno )
 {
     ERR err = JET_errSuccess;
     FlushMapPageDescriptor* pfmd = NULL;

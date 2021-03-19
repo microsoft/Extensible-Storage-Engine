@@ -693,7 +693,7 @@ public:
     // Member manipulation.
     public:
 
-        VOID SetWszDatabaseName( __in PWSTR wsz );
+        VOID SetWszDatabaseName( _In_ PWSTR wsz );
         VOID IncCPin();
         VOID DecCPin();
         VOID SetCPin( INT c );
@@ -716,7 +716,7 @@ public:
         VOID InitializeDbtimeOldest();
         VOID UpdateDbtimeOldest();
         VOID SetTrxNewestWhenDiscardsLastReported( const TRX trx );
-        ERR ErrSetPdbfilehdr( DBFILEHDR_FIX * pdbfilehdr, __out DBFILEHDR ** ppdbfilehdr );
+        ERR ErrSetPdbfilehdr( DBFILEHDR_FIX * pdbfilehdr, _Out_ DBFILEHDR ** ppdbfilehdr );
         VOID SetPpatchhdr( PATCH_HEADER_PAGE * ppatchhdr );
         VOID SetPpibExclusiveOpen( PIB * ppib);
         VOID SetExtentPageCountCacheTableInfo( PGNO pgno, OBJID objid );
@@ -1546,7 +1546,7 @@ INLINE LONG FMP::DtickLeakReclaimerTimeQuota() const
 // =====================================================================
 // Member manipulation.
 
-INLINE VOID FMP::SetWszDatabaseName( __in PWSTR wsz )
+INLINE VOID FMP::SetWszDatabaseName( _In_ PWSTR wsz )
 {
     Assert( FMP::FWriterFMPPool() );
     m_wszDatabaseName = wsz;

@@ -775,7 +775,7 @@ private:
     //  this function compresses the m_us (set in CompEndianLowSpLos16b( us ) .ctor) into the pb provided, the
     //  opposite / correlated function is unobviously
 
-    INLINE VOID CopyTo_( __out_bcount( cbBufferMax ) BYTE * const pb, __in const ULONG cbBufferMax )
+    INLINE VOID CopyTo_( __out_bcount( cbBufferMax ) BYTE * const pb, _In_ const ULONG cbBufferMax )
     {
         TYPESAssert( Cb() <= cbBufferMax );
         if ( Cb() == 1 )
@@ -878,7 +878,7 @@ public:
 
     //  this function compresses the m_us (set in CompEndianLowSpLos16b( us ) .ctor) into the pb provided
 
-    INLINE VOID CopyTo( BYTE * pb, __in const ULONG cbBufferMax )
+    INLINE VOID CopyTo( BYTE * pb, _In_ const ULONG cbBufferMax )
     {
         CopyTo_( pb, cbBufferMax );
 

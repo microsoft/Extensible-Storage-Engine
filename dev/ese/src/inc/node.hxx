@@ -162,16 +162,16 @@ const SCRUBOPER scrubOperScrubData          = 0x1;
 const SCRUBOPER scrubOperScrubLVData        = 0x2;
 
 ERR ErrNDScrubOneUsedPage(
-        __in PIB * const ppib,
+        _In_ PIB * const ppib,
         const IFMP ifmp,
-        __in CSR * const pcsr,
+        _In_ CSR * const pcsr,
         __in_ecount(cscrubOper) const SCRUBOPER * const rgscrubOper,
         const INT cscrubOper,
         const DIRFLAG dirflag);
 ERR ErrNDScrubOneUnusedPage(
-        __in PIB * const pfucb,
+        _In_ PIB * const pfucb,
         const IFMP ifmp,
-        __in CSR * const pcsr,
+        _In_ CSR * const pcsr,
         const DIRFLAG dirflag);
 
 //  currency routines

@@ -293,7 +293,7 @@ void __cdecl CPRINTFTLSPREFIX::operator()( const CHAR* szFormat, ... )
     (*m_pcprintf)( "%s", rgchBuf );
 }
 
-void CPRINTF::SetThreadPrintfPrefix( __in const _TCHAR * szPrefix )
+void CPRINTF::SetThreadPrintfPrefix( _In_ const _TCHAR * szPrefix )
 {
     Postls()->szCprintfPrefix = szPrefix;
 }

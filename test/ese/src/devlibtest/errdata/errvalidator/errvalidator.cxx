@@ -60,7 +60,7 @@ DWORD DWGetTickCount()
 #include "errdata.hxx"
 
 
-JET_ERR ErrCheckErrorSpaceConsistent( __in const INT cerrData, __in const INT cerrStr )
+JET_ERR ErrCheckErrorSpaceConsistent( _In_ const INT cerrData, _In_ const INT cerrStr )
 {
     wprintf( L"Testing the entire -64k to 64k error space against errdata.txt and error string tables ..." );
 
@@ -122,7 +122,7 @@ JET_ERR ErrCheckErrorSpaceConsistent( __in const INT cerrData, __in const INT ce
     return JET_errSuccess;
 }
 
-JET_ERR ErrCheckErrorDataSelfConsistent( __in const INT cerr )
+JET_ERR ErrCheckErrorDataSelfConsistent( _In_ const INT cerr )
 {
     wprintf( L"Testing there no internal errdata self-inconsistencies ..." );
 
@@ -191,7 +191,7 @@ JET_ERR ErrCheckErrorDataSelfConsistent( __in const INT cerr )
 }
 
 
-JET_ERR ErrCheckErrDataErrorsAreInOrder( __in const INT cerr )
+JET_ERR ErrCheckErrDataErrorsAreInOrder( _In_ const INT cerr )
 {
     wprintf( L"Testing all errors are in-order on the errdata.txt ..." );
 
@@ -211,7 +211,7 @@ JET_ERR ErrCheckErrDataErrorsAreInOrder( __in const INT cerr )
     return JET_errSuccess;
 }
 
-JET_ERR ErrCheckNoAbsValueDups( __in const INT cerr )
+JET_ERR ErrCheckNoAbsValueDups( _In_ const INT cerr )
 {
     wprintf( L"Testing there no absolute value duplicates ..." );
 
@@ -247,7 +247,7 @@ JET_ERR ErrCheckNoAbsValueDups( __in const INT cerr )
     return JET_errSuccess;
 }
 
-JET_ERR ErrCheckExtErrorsInStrTable( __in const INT cerr )
+JET_ERR ErrCheckExtErrorsInStrTable( _In_ const INT cerr )
 {
     wprintf( L"Testing all externally marked errors have valid string table entries ..." );
 
@@ -309,7 +309,7 @@ JET_ERR ErrCheckExtErrorsInStrTable( __in const INT cerr )
     return JET_errSuccess;
 }
 
-JET_ERR ErrCheckAllExtErrsHaveValidCategories( __in const INT cerr )
+JET_ERR ErrCheckAllExtErrsHaveValidCategories( _In_ const INT cerr )
 {
     wprintf( L"Testing all external errors have valid categories ..." );
 
@@ -340,7 +340,7 @@ JET_ERR ErrCheckAllExtErrsHaveValidCategories( __in const INT cerr )
     return JET_errSuccess;
 }
 
-JET_ERR ErrCheckExtErrorsInCatTable( __in const INT cerr )
+JET_ERR ErrCheckExtErrorsInCatTable( _In_ const INT cerr )
 {
     wprintf( L"Testing all externally marked errors have valid category table entries ..." );
 

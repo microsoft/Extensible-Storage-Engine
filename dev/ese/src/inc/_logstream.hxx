@@ -74,7 +74,7 @@ public:
     //  ErrLGSoftStart supporting functions
     virtual ERR ErrLGCreateNewLogStream( BOOL * const pfJetLogGeneratedDuringSoftStart ) = 0;
 
-    virtual VOID LGFullLogNameFromLogId( __out_ecount(OSFSAPI_MAX_PATH) PWSTR wszFullLogFileName, LONG lGeneration, __in PCWSTR wszDirectory ) = 0;
+    virtual VOID LGFullLogNameFromLogId( __out_ecount(OSFSAPI_MAX_PATH) PWSTR wszFullLogFileName, LONG lGeneration, _In_ PCWSTR wszDirectory ) = 0;
 
     // presumes an active LOG object.
     virtual VOID LGMakeLogName( const enum eLGFileNameSpec eLogType, LONG lGen = 0, BOOL fUseDefaultFolder = fFalse ) = 0;
@@ -157,10 +157,10 @@ public:
         ) = 0;
 
     virtual ERR ErrLGRStartNewLog(
-            __in const LONG lgenToCreate ) = 0;
+            _In_ const LONG lgenToCreate ) = 0;
     virtual ERR ErrLGRRestartLOGAtLogGen(
-            __in const LONG lgenToStartAt,
-            __in const BOOL fLogEvent ) = 0;
+            _In_ const LONG lgenToStartAt,
+            _In_ const BOOL fLogEvent ) = 0;
     virtual ERR ErrLGDeleteOutOfRangeLogFiles() = 0;
 
     virtual ERR ErrLGTryOpenJetLog(
@@ -225,35 +225,35 @@ public:
     virtual ERR ErrLGCheckState() = 0;
 
     virtual ERR ErrLGRemoveCommittedLogs(
-            __in LONG lGenToDeleteFrom ) = 0;
+            _In_ LONG lGenToDeleteFrom ) = 0;
 
     virtual ERR ErrLGMakeLogNameBaseless(
         __out_bcount(cbLogName) PWSTR wszLogName,
         ULONG cbLogName,
-        __in PCWSTR wszLogFolder,
+        _In_ PCWSTR wszLogFolder,
         const enum eLGFileNameSpec eLogType,
         LONG lGen,
         __in_opt PCWSTR wszLogExt = NULL ) const = 0;
 
     virtual ERR ErrLGGetGenerationRange(
-            __in PCWSTR wszFindPath,
+            _In_ PCWSTR wszFindPath,
             LONG* plgenLow,
             LONG* plgenHigh,
-            __in BOOL fLooseExt = fFalse,
+            _In_ BOOL fLooseExt = fFalse,
             __out_opt BOOL * pfDefaultExt = NULL ) = 0;
     virtual ERR ErrLGGetGenerationRangeExt(
-            __in PCWSTR wszFindPath,
+            _In_ PCWSTR wszFindPath,
             LONG* plgenLow,
             LONG* plgenHigh,
-            __in PCWSTR wszLogExt ) = 0;
+            _In_ PCWSTR wszLogExt ) = 0;
 
     virtual ERR ErrLGRSTOpenLogFile(
-            __in PCWSTR             wszLogFolder,
+            _In_ PCWSTR             wszLogFolder,
             INT                     gen,
             IFileAPI **const        ppfapi,
             __in_opt PCWSTR         wszLogExt = NULL ) = 0;
     virtual VOID LGRSTDeleteLogs(
-            __in PCWSTR wszLog, INT genLow,
+            _In_ PCWSTR wszLog, INT genLow,
             INT genHigh,
             BOOL fIncludeJetLog ) = 0;
 
@@ -444,7 +444,7 @@ public:
     //  ErrLGSoftStart supporting functions
     ERR ErrLGCreateNewLogStream( BOOL * const pfJetLogGeneratedDuringSoftStart );
 
-    VOID LGFullLogNameFromLogId( __out_ecount(OSFSAPI_MAX_PATH) PWSTR wszFullLogFileName, LONG lGeneration, __in PCWSTR wszDirectory );
+    VOID LGFullLogNameFromLogId( __out_ecount(OSFSAPI_MAX_PATH) PWSTR wszFullLogFileName, LONG lGeneration, _In_ PCWSTR wszDirectory );
 
     void LGSetLogExt( BOOL fLegacy, BOOL fReset );
 
@@ -681,8 +681,8 @@ public:
         __out_bcount( cbLogData ) BYTE *    pbLogData   // buffer
         );
 
-    ERR ErrLGRStartNewLog( __in const LONG lgenToCreate );
-    ERR ErrLGRRestartLOGAtLogGen( __in const LONG lgenToStartAt, __in const BOOL fLogEvent );
+    ERR ErrLGRStartNewLog( _In_ const LONG lgenToCreate );
+    ERR ErrLGRRestartLOGAtLogGen( _In_ const LONG lgenToStartAt, _In_ const BOOL fLogEvent );
     ERR ErrLGDeleteOutOfRangeLogFiles();
 
     ERR ErrLGTryOpenJetLog( const ULONG eOpenReason, const LONG lGenNext, BOOL fPickLogExt = fFalse );
@@ -737,18 +737,18 @@ public:
 
     ERR ErrLGRICleanupMismatchedLogFiles( BOOL fExtCleanup );
 
-    ERR ErrLGRemoveCommittedLogs( __in LONG lGenToDeleteFrom );
+    ERR ErrLGRemoveCommittedLogs( _In_ LONG lGenToDeleteFrom );
 
     ERR ErrLGMakeLogNameBaseless(
         __out_bcount(cbLogName) PWSTR wszLogName,
         ULONG cbLogName,
-        __in PCWSTR wszLogFolder,
+        _In_ PCWSTR wszLogFolder,
         const enum eLGFileNameSpec eLogType,
         LONG lGen,
         __in_opt PCWSTR wszLogExt = NULL ) const;
 
-    ERR ErrLGGetGenerationRange( __in PCWSTR wszFindPath, LONG* plgenLow, LONG* plgenHigh, __in BOOL fLooseExt = fFalse, __out_opt BOOL * pfDefaultExt = NULL );
-    ERR ErrLGGetGenerationRangeExt( __in PCWSTR wszFindPath, LONG* plgenLow, LONG* plgenHigh, __in PCWSTR wszLogExt );
+    ERR ErrLGGetGenerationRange( _In_ PCWSTR wszFindPath, LONG* plgenLow, LONG* plgenHigh, _In_ BOOL fLooseExt = fFalse, __out_opt BOOL * pfDefaultExt = NULL );
+    ERR ErrLGGetGenerationRangeExt( _In_ PCWSTR wszFindPath, LONG* plgenLow, LONG* plgenHigh, _In_ PCWSTR wszLogExt );
 
     BOOL FCreatedNewLogFileDuringRedo()
     {
@@ -781,11 +781,11 @@ public:
 
 private:
     ERR ErrLGRSTOpenLogFile(
-        __in PCWSTR             wszLogFolder,
+        _In_ PCWSTR             wszLogFolder,
         INT                         gen,
         IFileAPI **const        ppfapi,
         __in_opt PCWSTR         wszLogExt = NULL );
-    VOID LGRSTDeleteLogs( __in PCWSTR wszLog, INT genLow, INT genHigh, BOOL fIncludeJetLog );
+    VOID LGRSTDeleteLogs( _In_ PCWSTR wszLog, INT genLow, INT genHigh, BOOL fIncludeJetLog );
 
 
 private:

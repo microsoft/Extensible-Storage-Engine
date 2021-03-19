@@ -190,9 +190,9 @@ ERR ErrSPGetExt(
 
 ERR ErrSPGetPage(
     __inout FUCB *          pfucb,
-    __in    const PGNO      pgnoLast,
-    __in    const ULONG     fSPAllocFlags,
-    __out   PGNO *          ppgnoAlloc
+    _In_    const PGNO      pgnoLast,
+    _In_    const ULONG     fSPAllocFlags,
+    _Out_   PGNO *          ppgnoAlloc
     );
 
 ERR ErrSPCaptureSnapshot(
@@ -372,8 +372,8 @@ ERR ErrSPDummyUpdate( FUCB * pfucb );
 
 // used by cat to verify JetSpaceHints.
 CPG CpgSPIGetNextAlloc(
-    __in const FCB_SPACE_HINTS * const  pfcbsh,
-    __in const CPG                      cpgPrevious
+    _In_ const FCB_SPACE_HINTS * const  pfcbsh,
+    _In_ const CPG                      cpgPrevious
     );
 
 ERR ErrSPExtendDB(
@@ -384,10 +384,10 @@ ERR ErrSPExtendDB(
     const BOOL  fPermitAsyncExtension );
 
 ERR ErrSPREPAIRValidateSpaceNode(
-    __in const  KEYDATAFLAGS * pkdf,
-    __out       PGNO *          ppgnoLast,
-    __out       CPG *           pcpgExtent,
-    __out       PCWSTR *        pwszPoolName );
+    _In_ const  KEYDATAFLAGS * pkdf,
+    _Out_       PGNO *          ppgnoLast,
+    _Out_       CPG *           pcpgExtent,
+    _Out_       PCWSTR *        pwszPoolName );
 
 ERR ErrSPTrimDBTaskInit( const IFMP ifmp );
 VOID SPTrimDBTaskStop( INST * pinst, const WCHAR * wszDatabaseFullName = NULL );

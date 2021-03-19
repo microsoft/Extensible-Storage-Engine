@@ -885,7 +885,7 @@ JETUNITTESTEX( CPAGE, ConcurrentMultiPageSizedUsage, JetSimpleUnitTest::dwBuffer
 
 //  returns true if all chars are the target ch
 
-BOOL memchk( __in const void * pv, __in char ch, __in const ULONG cb )
+BOOL memchk( _In_ const void * pv, _In_ char ch, _In_ const ULONG cb )
 {
     const char * pb = (const char *)pv;
     ULONG ib = 0;

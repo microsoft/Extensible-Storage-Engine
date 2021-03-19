@@ -13,8 +13,8 @@
 
 static BOOL
 ILogToXml(
-    __in HANDLE h,
-    __in const char* szFormat,
+    _In_ HANDLE h,
+    _In_ const char* szFormat,
     ...
 )
 {
@@ -36,9 +36,9 @@ Cleanup:
 
 static BOOL
 IReadTagFromXml(
-    __in HANDLE h,
-    __out char* szBuffer,
-    __out BOOL* fMoreToRead
+    _In_ HANDLE h,
+    _Out_ char* szBuffer,
+    _Out_ BOOL* fMoreToRead
 )
 {
     JET_ERR err     = JET_errSuccess;
@@ -94,7 +94,7 @@ Cleanup:
 
 static BOOL
 IIntializeXmlFilePointer(
-    __in HANDLE h
+    _In_ HANDLE h
 )
 {
     JET_ERR err             = JET_errSuccess;
@@ -152,7 +152,7 @@ Cleanup:
 
 static BOOL
 IFinalizeXmlFilePointer(
-    __in HANDLE h
+    _In_ HANDLE h
 )
 {
     JET_ERR err     = JET_errSuccess;
@@ -167,7 +167,7 @@ Cleanup:
 
 HANDLE
 PerfReportingCreateFileA(
-    __in PCSTR szFile
+    _In_ PCSTR szFile
 )
 {
     WCHAR* wszFile  = EsetestWidenString( __FUNCTION__, szFile );
@@ -179,7 +179,7 @@ PerfReportingCreateFileA(
 
 HANDLE
 PerfReportingCreateFileW(
-    __in PCWSTR wszFile
+    _In_ PCWSTR wszFile
 )
 {
     JET_ERR err     = JET_errSuccess;
@@ -208,12 +208,12 @@ Cleanup:
 
 BOOL
 PerfReportingReportValueA(
-    __in HANDLE     hPerfReporting,
-    __in PCSTR      szCounterName,
-    __in PCSTR      szCounterUnit,
-    __in PCSTR      szPrintfFormat,
-    __in BOOL       fHigherIsBetter,
-    __in double     dblValue
+    _In_ HANDLE     hPerfReporting,
+    _In_ PCSTR      szCounterName,
+    _In_ PCSTR      szCounterUnit,
+    _In_ PCSTR      szPrintfFormat,
+    _In_ BOOL       fHigherIsBetter,
+    _In_ double     dblValue
 )
 {
     WCHAR* wszCounterName   = EsetestWidenString( __FUNCTION__, szCounterName );
@@ -235,12 +235,12 @@ PerfReportingReportValueA(
 
 BOOL
 PerfReportingReportValueW(
-    __in HANDLE     hPerfReporting,
-    __in PCWSTR     wszCounterName,
-    __in PCWSTR     wszCounterUnit,
-    __in PCWSTR     wszPrintfFormat,
-    __in BOOL       fHigherIsBetter,
-    __in double     dblValue
+    _In_ HANDLE     hPerfReporting,
+    _In_ PCWSTR     wszCounterName,
+    _In_ PCWSTR     wszCounterUnit,
+    _In_ PCWSTR     wszPrintfFormat,
+    _In_ BOOL       fHigherIsBetter,
+    _In_ double     dblValue
 )
 {
     JET_ERR err             = JET_errSuccess;
@@ -269,7 +269,7 @@ Cleanup:
 
 BOOL
 PerfReportingCloseFile(
-    __in HANDLE hPerfReporting
+    _In_ HANDLE hPerfReporting
 )
 {
     JET_ERR err     = JET_errSuccess;

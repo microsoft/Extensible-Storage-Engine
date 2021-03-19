@@ -67,7 +67,7 @@ struct EXTENTINFO
     }
 };
 
-INLINE VOID SPCheckPgnoAllocTrap( __in const PGNO pgnoAlloc, __in const CPG cpgAlloc = 1 );
+INLINE VOID SPCheckPgnoAllocTrap( _In_ const PGNO pgnoAlloc, _In_ const CPG cpgAlloc = 1 );
 
 PERSISTED
 class SPLIT_BUFFER
@@ -249,7 +249,7 @@ class FCB_SPACE_HINTS
 {
 
     friend class FCB;           //  only callable by FCB
-    friend CPG CpgSPIGetNextAlloc( __in const FCB_SPACE_HINTS * const pfcbsh, __in const CPG cpgPrevious    );
+    friend CPG CpgSPIGetNextAlloc( _In_ const FCB_SPACE_HINTS * const pfcbsh, _In_ const CPG cpgPrevious    );
     friend ERR ErrCATCheckJetSpaceHints( _In_ const LONG cbPageSize, _Inout_ JET_SPACEHINTS * pSpaceHints, _In_ BOOL fAllowCorrection );
 
 private:
@@ -766,7 +766,7 @@ private:
         PIB* PpibDomainDenyRead() const;
         CCriticalSection& CritRCEList();
         ERR ErrErrInit() const;
-        VOID GetAPISpaceHints( __out JET_SPACEHINTS * pjsph ) const;
+        VOID GetAPISpaceHints( _Out_ JET_SPACEHINTS * pjsph ) const;
         const FCB_SPACE_HINTS * Pfcbspacehints() const;
 
 #ifdef DEBUGGER_EXTENSION
@@ -1020,10 +1020,10 @@ private:
         static VOID Term( INST *pinst );
         BOOL FValid() const;
 
-        static VOID RefreshPreferredPerfCounter( __in INST * const pinst );
+        static VOID RefreshPreferredPerfCounter( _In_ INST * const pinst );
 
     private:
-        static VOID ResetPerfCounters( __in INST * const pinst, BOOL fTerminating );
+        static VOID ResetPerfCounters( _In_ INST * const pinst, BOOL fTerminating );
         
     // =====================================================================
 
@@ -1043,10 +1043,10 @@ private:
 
     private:
         static ERR ErrAlloc_( PIB *ppib, IFMP ifmp, PGNO pgnoFDP, FCB **ppfcb );
-        static BOOL FScanAndPurge_( __in INST * pinst, __in PIB * ppib, const BOOL fThreshold );
+        static BOOL FScanAndPurge_( _In_ INST * pinst, _In_ PIB * ppib, const BOOL fThreshold );
         static BOOL FCloseToQuota_( INST * pinst ) { return pinst->m_cresFCB.FCloseToQuota(); };
         static VOID PurgeObjects_( INST* const pinst, const IFMP ifmp, const PGNO pgnoFDP, const BOOL fTerminating );
-        BOOL FCheckFreeAndPurge_( __in PIB *ppib, __in const BOOL fThreshold );
+        BOOL FCheckFreeAndPurge_( _In_ PIB *ppib, _In_ const BOOL fThreshold );
         VOID CloseAllCursorsOnFCB_( const BOOL fTerminating );
         VOID Delete_( INST *pinst );
         BOOL FHasCallbacks_( INST *pinst );
@@ -1420,7 +1420,7 @@ INLINE USHORT FCB::CrefDomainDenyWrite() const  { return m_crefDomainDenyWrite; 
 INLINE PIB* FCB::PpibDomainDenyRead() const     { return m_ppibDomainDenyRead; }
 INLINE CCriticalSection& FCB::CritRCEList()     { return m_critRCEList; }
 INLINE ERR FCB::ErrErrInit() const              { return m_errInit; }
-INLINE VOID FCB::GetAPISpaceHints( __out JET_SPACEHINTS * pjsph ) const 
+INLINE VOID FCB::GetAPISpaceHints( _Out_ JET_SPACEHINTS * pjsph ) const 
 {
     Assert( m_ifmp != ifmpNil );
     Assert( g_rgfmp[ m_ifmp ].CbPage() != 0 );

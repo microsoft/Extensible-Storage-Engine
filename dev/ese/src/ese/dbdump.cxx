@@ -113,7 +113,7 @@ INLINE LOCAL VOID DUMPPrintBkinfo( BKINFO *pbkinfo, DBFILEHDR::BKINFOTYPE bkinfo
     DUMPPrintF( "\n" );
 }
 
-ERR LOCAL ErrDUMPHeaderStandard( INST *pinst, __in const DB_HEADER_READER* const pdbHdrReader )
+ERR LOCAL ErrDUMPHeaderStandard( INST *pinst, _In_ const DB_HEADER_READER* const pdbHdrReader )
 {
     ERR                     err        = JET_errSuccess;
     LGPOS                   lgpos;
@@ -444,7 +444,7 @@ HandleError:
 
 #if defined( DEBUGGER_EXTENSION ) && defined ( DEBUG )
 
-ERR LOCAL ErrDUMPHeaderStandardDebug( __in const DB_HEADER_READER* const pdbHdrReader )
+ERR LOCAL ErrDUMPHeaderStandardDebug( _In_ const DB_HEADER_READER* const pdbHdrReader )
 {
     ERR err                           = JET_errSuccess;
     const DBFILEHDR* const pdbfilehdr = reinterpret_cast<DBFILEHDR* const>( pdbHdrReader->pbHeader );
@@ -477,7 +477,7 @@ HandleError:
 
 #endif  // defined( DEBUGGER_EXTENSION ) && defined ( DEBUG )
 
-ERR LOCAL ErrDUMPHeaderHex( INST *pinst, __in const DB_HEADER_READER* const pdbHdrReader )
+ERR LOCAL ErrDUMPHeaderHex( INST *pinst, _In_ const DB_HEADER_READER* const pdbHdrReader )
 {
     ERR             err     = JET_errSuccess;
 
@@ -491,7 +491,7 @@ HandleError:
     return err;
 }
 
-ERR LOCAL ErrDUMPHeaderFormat( INST *pinst, __in const DB_HEADER_READER* const pdbHdrReader, const BOOL fVerbose )
+ERR LOCAL ErrDUMPHeaderFormat( INST *pinst, _In_ const DB_HEADER_READER* const pdbHdrReader, const BOOL fVerbose )
 {
     ERR             err     = JET_errSuccess;
 
@@ -512,7 +512,7 @@ HandleError:
     return err;
 }
 
-ERR ErrDUMPHeader( INST *pinst, __in PCWSTR wszDatabase, const BOOL fVerbose )
+ERR ErrDUMPHeader( INST *pinst, _In_ PCWSTR wszDatabase, const BOOL fVerbose )
 {
     ERR             err             = JET_errSuccess;
     DBFILEHDR_FIX   *pdbfilehdrPrimary    = NULL;
@@ -665,7 +665,7 @@ HandleError:
     return err;
 }
 
-ERR ErrDUMPFixupHeader( INST *pinst, __in PCWSTR wszDatabase, const BOOL fVerbose )
+ERR ErrDUMPFixupHeader( INST *pinst, _In_ PCWSTR wszDatabase, const BOOL fVerbose )
 {
     ERR             err             = JET_errSuccess;
     DBFILEHDR_FIX   *pdbfilehdrPrimary    = NULL;

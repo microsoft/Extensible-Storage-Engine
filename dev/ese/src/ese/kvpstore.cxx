@@ -746,7 +746,7 @@ VOID CKVPStore::KVPTermStore()
 //  Version Handling
 //  ================================================================
 
-ERR CKVPStore::ErrKVPGetUserVersion( __out DWORD * pdwMinorVersion, __out DWORD * pwUpdateVersion )
+ERR CKVPStore::ErrKVPGetUserVersion( _Out_ DWORD * pdwMinorVersion, _Out_ DWORD * pwUpdateVersion )
 {
     ERR err = JET_errSuccess;
 
@@ -1401,18 +1401,18 @@ ERR CKVPStore::ErrKVPAdjValue( const WCHAR * const wszKey, const INT iAdjustment
     return ErrKVPAdjValue( ppibNil, wszKey, iAdjustment );
 }
 
-ERR CKVPStore::ErrKVPGetValue( const WCHAR * const wszKey, __out INT * piValue )
+ERR CKVPStore::ErrKVPGetValue( const WCHAR * const wszKey, _Out_ INT * piValue )
 {
     return ErrKVPIGetValue( eNewTrx, wszKey, kvpvtIntValueType, (BYTE*)piValue, sizeof( *piValue ) );
 }
 
 #ifdef FUTURE_SUPPORT_MORE_VALUE_TYPES
-ERR CKVPStore::ErrKVPGetValue( const WCHAR * const wszKey, __out INT64 * pi64Value )
+ERR CKVPStore::ErrKVPGetValue( const WCHAR * const wszKey, _Out_ INT64 * pi64Value )
 {
     return ErrKVPIGetValue( eNewTrx, wszKey, kvpvtQwordValueType, (BYTE*)pi64Value, sizeof( *pi64Value ) );
 }
 
-ERR CKVPStore::ErrKVPGetValue( const WCHAR * const wszKey, __out BYTE * const pbValue, const ULONG cbValue )
+ERR CKVPStore::ErrKVPGetValue( const WCHAR * const wszKey, _Out_ BYTE * const pbValue, const ULONG cbValue )
 {
     return ErrKVPIGetValue( eNewTrx, wszKey, kvpvtBlobValueType, (BYTE*)pbValue, cbValue );
 }
@@ -1631,7 +1631,7 @@ const WCHAR * CKVPStore::CKVPSCursor::WszKVPSCursorCurrKey() const
 
 //  not a fan that I had to duplicate this, consider another way of getting around
 //  the locking problem, probably a 2nd session for the cursor object.
-ERR CKVPStore::CKVPSCursor::ErrKVPSCursorGetValue( __out INT * piValue )
+ERR CKVPStore::CKVPSCursor::ErrKVPSCursorGetValue( _Out_ INT * piValue )
 {
     ERR err = JET_errSuccess;
 
@@ -1656,7 +1656,7 @@ ERR CKVPStore::CKVPSCursor::ErrKVPSCursorGetValue( __out INT * piValue )
 
 //  not a fan that I had to duplicate this, consider another way of getting around
 //  the locking problem, probably a 2nd session for the cursor object.
-ERR CKVPStore::CKVPSCursor::ErrKVPSCursorUpdValue( __in INT iValue )
+ERR CKVPStore::CKVPSCursor::ErrKVPSCursorUpdValue( _In_ INT iValue )
 {
     ERR err = JET_errSuccess;
 

@@ -22,7 +22,7 @@ REF_TRACE_LOG * PrtlOSTraceRefLogIGetFixedLog( POSTRACEREFLOG ptracelog )
     return (REF_TRACE_LOG*)ptracelog;
 }
 
-ERR ErrOSTraceCreateRefLog( IN ULONG cLogSize, IN ULONG cbExtraBytes, OUT POSTRACEREFLOG *ppTraceLog )
+ERR ErrOSTraceCreateRefLog( _In_ ULONG cLogSize, _In_ ULONG cbExtraBytes, _Out_ POSTRACEREFLOG *ppTraceLog )
 /*++
 
 Routine Description:
@@ -96,7 +96,7 @@ HandleError:
     return err;
 }   // ErrOSTraceCreateRefTraceLog
 
-VOID OSTraceDestroyRefLog( IN POSTRACEREFLOG pLog )
+VOID OSTraceDestroyRefLog( _In_ POSTRACEREFLOG pLog )
 /*++
 
 Routine Description:
@@ -133,11 +133,11 @@ Arguments:
 BEGIN_PRAGMA_OPTIMIZE_DISABLE( "y", 6520702, "FPO Must be disabled for stack-traces to work." );
 
 VOID __cdecl OSTraceWriteRefLog(
-    IN POSTRACEREFLOG pLog,
-    IN LONG NewRefCount,
-    IN void * pContext,
-    __in_bcount(cbExtraInformation) IN void * pExtraInformation,
-    IN LONG cbExtraInformation
+    _In_ POSTRACEREFLOG pLog,
+    _In_ LONG NewRefCount,
+    _In_ void * pContext,
+    __in_bcount(cbExtraInformation) void * pExtraInformation,
+    _In_ LONG cbExtraInformation
     )
 /*++
 

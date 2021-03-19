@@ -57,8 +57,8 @@ NTOSFuncStd( g_pfnNotifyChangeEventLog, g_mwszzAdvapi32CoreSystemBroken, NotifyC
 
 VOID
 IEventLoggingPrintToFile(
-    __in HANDLE hFile,
-    __in PSTR   szString
+    _In_ HANDLE hFile,
+    _In_ PSTR   szString
 )
 {
     DWORD dw;
@@ -375,15 +375,15 @@ EventLoggingCreateQuery(
     __in_opt PFNEVENTLOGGING                        pfnCallback,
     __in_opt PCWSTR                             wszEventLog,
     __in_ecount_opt( cEventSources ) PCWSTR*    pwszEventSources,
-    __in size_t                                 cEventSources,
+    _In_ size_t                                 cEventSources,
     __in_opt PSYSTEMTIME                            pTimeMin,
     __in_opt PSYSTEMTIME                            pTimeMax,
     __in_ecount_opt( cEventTypes ) PWORD        pEventTypes,
-    __in size_t                                 cEventTypes,
+    _In_ size_t                                 cEventTypes,
     __in_ecount_opt( cEventCategories ) PWORD   pEventCategories,
-    __in size_t                                 cEventCategories,
+    _In_ size_t                                 cEventCategories,
     __in_ecount_opt( cEventIds ) PDWORD         pEventIds,
-    __in size_t                                 cEventIds,
+    _In_ size_t                                 cEventIds,
     __in_opt PCWSTR                             wszLogFile,
     __in_opt PVOID                              pUserData
 )
@@ -596,7 +596,7 @@ Cleanup:
 
 BOOL
 EventLoggingDestroyQuery(
-    __in HANDLE hQuery
+    _In_ HANDLE hQuery
 )
 {
     if ( !hQuery ){
@@ -663,9 +663,9 @@ EventLoggingDestroyQuery(
 
 PWSTR
 EventLoggingFormatMessage(
-    __in HMODULE        hModule,
-    __in DWORD          dwEventId,
-    __in LCID           dwLandIg,
+    _In_ HMODULE        hModule,
+    _In_ DWORD          dwEventId,
+    _In_ LCID           dwLandIg,
     __in_opt PWSTR*     pwszStrings
 )
 {
@@ -711,7 +711,7 @@ IfExcept:
 
 HMODULE
 EventLoggingModuleFromEventSource(
-    __in PCWSTR     wszEventSource
+    _In_ PCWSTR     wszEventSource
 )
 {
     // Try to match with one of the supported modules.
@@ -726,17 +726,17 @@ EventLoggingModuleFromEventSource(
 
 VOID
 EventLoggingPrintEvent(
-    __in PCWSTR                         wszEventLog,
-    __in PCWSTR                         wszEventSource,
-    __in PSYSTEMTIME                        pTimeGenerated,
-    __in WORD                           wEventType,
-    __in WORD                           wEventCategory,
-    __in DWORD                          dwEventId,
-    __in DWORD                          dwLangId,
+    _In_ PCWSTR                         wszEventLog,
+    _In_ PCWSTR                         wszEventSource,
+    _In_ PSYSTEMTIME                    pTimeGenerated,
+    _In_ WORD                           wEventType,
+    _In_ WORD                           wEventCategory,
+    _In_ DWORD                          dwEventId,
+    _In_ DWORD                          dwLangId,
     __in_ecount_opt( cStrings ) PWSTR*  pwszStrings,
-    __in WORD                           cStrings,
+    _In_ WORD                           cStrings,
     __in_bcount_opt( cbRawData ) PVOID  pRawData,
-    __in DWORD                          cbRawData
+    _In_ DWORD                          cbRawData
 )
 {
     HMODULE hModule;
@@ -776,15 +776,15 @@ EventLoggingCreateQuery(
     __in_opt PFNEVENTLOGGING                        pfnCallback,
     __in_opt PCWSTR                             wszEventLog,
     __in_ecount_opt( cEventSources ) PCWSTR*    pwszEventSources,
-    __in size_t                                 cEventSources,
+    _In_ size_t                                 cEventSources,
     __in_opt PSYSTEMTIME                            pTimeMin,
     __in_opt PSYSTEMTIME                            pTimeMax,
     __in_ecount_opt( cEventTypes ) PWORD        pEventTypes,
-    __in size_t                                 cEventTypes,
+    _In_ size_t                                 cEventTypes,
     __in_ecount_opt( cEventCategories ) PWORD   pEventCategories,
-    __in size_t                                 cEventCategories,
+    _In_ size_t                                 cEventCategories,
     __in_ecount_opt( cEventIds ) PDWORD         pEventIds,
-    __in size_t                                 cEventIds,
+    _In_ size_t                                 cEventIds,
     __in_opt PCWSTR                             wszLogFile,
     __in_opt PVOID                              pUserData
 )
@@ -794,7 +794,7 @@ EventLoggingCreateQuery(
 
 BOOL
 EventLoggingDestroyQuery(
-    __in HANDLE hQuery
+    _In_ HANDLE hQuery
 )
 {
     return FALSE;
@@ -802,9 +802,9 @@ EventLoggingDestroyQuery(
 
 PWSTR
 EventLoggingFormatMessage(
-    __in HMODULE        hModule,
-    __in DWORD          dwEventId,
-    __in LCID           dwLandIg,
+    _In_ HMODULE        hModule,
+    _In_ DWORD          dwEventId,
+    _In_ LCID           dwLandIg,
     __in_opt PWSTR*     pwszStrings
 )
 {
@@ -813,7 +813,7 @@ EventLoggingFormatMessage(
 
 HMODULE
 EventLoggingModuleFromEventSource(
-    __in PCWSTR     wszEventSource
+    _In_ PCWSTR     wszEventSource
 )
 {   
     return NULL;    
@@ -821,17 +821,17 @@ EventLoggingModuleFromEventSource(
 
 VOID
 EventLoggingPrintEvent(
-    __in PCWSTR                         wszEventLog,
-    __in PCWSTR                         wszEventSource,
-    __in PSYSTEMTIME                        pTimeGenerated,
-    __in WORD                           wEventType,
-    __in WORD                           wEventCategory,
-    __in DWORD                          dwEventId,
-    __in DWORD                          dwLangId,
+    _In_ PCWSTR                         wszEventLog,
+    _In_ PCWSTR                         wszEventSource,
+    _In_ PSYSTEMTIME                    pTimeGenerated,
+    _In_ WORD                           wEventType,
+    _In_ WORD                           wEventCategory,
+    _In_ DWORD                          dwEventId,
+    _In_ DWORD                          dwLangId,
     __in_ecount_opt( cStrings ) PWSTR*  pwszStrings,
-    __in WORD                           cStrings,
+    _In_ WORD                           cStrings,
     __in_bcount_opt( cbRawData ) PVOID  pRawData,
-    __in DWORD                          cbRawData
+    _In_ DWORD                          cbRawData
 )
 {   
 }

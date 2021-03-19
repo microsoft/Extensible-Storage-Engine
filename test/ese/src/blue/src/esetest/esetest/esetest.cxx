@@ -37,26 +37,26 @@ typedef
 HRESULT
 (WINAPI *PFNWTTLogCreateLogDevice)
         (
-        IN  LPWSTR   pwszDevStr,
-        OUT LONG*    phDevice
+        _In_  LPWSTR pwszDevStr,
+        _Out_ LONG*  phDevice
         );
 
 typedef
 HRESULT
 (WINAPI *PFNWTTLogStartTest)
         (
-        IN LONG     hDevice,
-        IN LPWSTR   pwszTestName
+        _In_ LONG   hDevice,
+        _In_ LPWSTR pwszTestName
         );
 
 typedef
 HRESULT
 (WINAPI *PFNWTTLogEndTest)
         (
-        IN  LONG     hDevice,
-        IN  LPWSTR   pwszTestName, // Name of the test case
-        IN  DWORD    dwResult,     // test result
-        IN  LPWSTR   pwszRepro     // repro line
+        _In_  LONG   hDevice,
+        _In_  LPWSTR pwszTestName, // Name of the test case
+        _In_  DWORD  dwResult,     // test result
+        _In_  LPWSTR pwszRepro     // repro line
         );
 
 
@@ -64,8 +64,8 @@ typedef
 HRESULT
 (WINAPI *PFNWTTLogTrace)
         (
-        IN LONG      hDevice,
-        IN DWORD     dwTraceLvl,
+        _In_ LONG    hDevice,
+        _In_ DWORD   dwTraceLvl,
         ...
         );
 
@@ -73,8 +73,8 @@ typedef
 HRESULT
 (WINAPI *PFNWTTLogCloseLogDevice)
         (
-        IN LONG     hDevice,
-        IN LPWSTR   pwszDeviceName
+        _In_ LONG    hDevice,
+        _In_ LPWSTR  pwszDeviceName
         );
 
 typedef
@@ -160,21 +160,21 @@ DynLoadJetSetSystemParameter(
 static
 JET_ERR
 DynLoadJetConsumeLogData(
-    __in    JET_INSTANCE        instance,
-    __in    JET_EMITDATACTX *   pEmitLogDataCtx,
-    __in    void *              pvLogData,
-    __in    unsigned long       cbLogData,
-    __in    JET_GRBIT           grbits
+    _In_    JET_INSTANCE        instance,
+    _In_    JET_EMITDATACTX *   pEmitLogDataCtx,
+    _In_    void *              pvLogData,
+    _In_    unsigned long       cbLogData,
+    _In_    JET_GRBIT           grbits
 );
 
 static
 bool
 FEnvironmentVariableSet(
-    __in const char* const  szEnvVariable
+    _In_ const char* const  szEnvVariable
 )
 ;
 
-static int IEnvironmentVariableSet(__in const char* const   szEnvVariable);
+static int IEnvironmentVariableSet(_In_ const char* const   szEnvVariable);
 
 
 static char RESULTS_TXT[MAX_PATH] = "results.txt";
@@ -617,7 +617,7 @@ WszEsetestGetStartDotChk()
 const char*
 SzEsetestGetChkptName(
     __out_ecount( cch ) char*   szBuffer,
-    __in size_t                 cch
+    _In_ size_t                 cch
 )
 {
     char szBase[ JET_BASE_NAME_LENGTH + 1 ];
@@ -633,7 +633,7 @@ SzEsetestGetChkptName(
 const wchar_t*
 WszEsetestGetChkptName(
     __out_ecount( cch ) wchar_t*    wszBuffer,
-    __in size_t                     cch
+    _In_ size_t                     cch
 )
 {
     char* szBuffer = new char[ cch ];
@@ -647,7 +647,7 @@ WszEsetestGetChkptName(
 char*
 SzEsetestGetLogNameTemp(
     __out_ecount( cch ) char*   szBuffer,
-    __in size_t                 cch
+    _In_ size_t                 cch
 )
 {
     char szBase[ JET_BASE_NAME_LENGTH + 1 ];
@@ -663,7 +663,7 @@ SzEsetestGetLogNameTemp(
 wchar_t*
 WszEsetestGetLogNameTemp(
     __out_ecount( cch ) wchar_t*    wszBuffer,
-    __in size_t                     cch
+    _In_ size_t                     cch
 )
 {
     char* szBuffer = new char[ cch ];
@@ -677,7 +677,7 @@ WszEsetestGetLogNameTemp(
 char*
 SzEsetestGetLogNameLast(
     __out_ecount( cch ) char*   szBuffer,
-    __in size_t                 cch
+    _In_ size_t                 cch
 )
 {
     char szBase[ JET_BASE_NAME_LENGTH + 1 ];
@@ -693,7 +693,7 @@ SzEsetestGetLogNameLast(
 wchar_t*
 WszEsetestGetLogNameLast(
     __out_ecount( cch ) wchar_t*    wszBuffer,
-    __in size_t                     cch
+    _In_ size_t                     cch
 )
 {
     char* szBuffer = new char[ cch ];
@@ -707,8 +707,8 @@ WszEsetestGetLogNameLast(
 char*
 SzEsetestGetLogNameFromGen(
     __out_ecount( cch ) char*   szBuffer,
-    __in size_t                 cch,
-    __in unsigned long          ulGen
+    _In_ size_t                 cch,
+    _In_ unsigned long          ulGen
 )
 {
     char szBase[ JET_BASE_NAME_LENGTH + 1 ];
@@ -728,8 +728,8 @@ SzEsetestGetLogNameFromGen(
 wchar_t*
 WszEsetestGetLogNameFromGen(
     __out_ecount( cch ) wchar_t*    wszBuffer,
-    __in size_t                     cch,
-    __in unsigned long              ulGen
+    _In_ size_t                     cch,
+    _In_ unsigned long              ulGen
 )
 {
     char* szBuffer = new char[ cch ];
@@ -744,7 +744,7 @@ WszEsetestGetLogNameFromGen(
 #define STRINGIZE(arg) STRINGIZE_(arg)
 long
 EsetestGetLogGenFromNameA(
-    __in const char* szLogName
+    _In_ const char* szLogName
 )
 {
     char szLogNameWithoutExt[MAX_PATH];
@@ -771,7 +771,7 @@ EsetestGetLogGenFromNameA(
 #define STRINGIZE_(arg) L#arg
 long
 EsetestGetLogGenFromNameW(
-    __in const wchar_t* wszLogName
+    _In_ const wchar_t* wszLogName
 )
 {
     wchar_t wszLogNameWithoutExt[MAX_PATH];
@@ -1028,7 +1028,7 @@ EsetestSetVerboseInternalLogging(
 
 void
 EsetestSetRunningStress(
-    __in const bool fRunningStress
+    _In_ const bool fRunningStress
 )
 {
     g_esetestconfig.m_fRunningStress = fRunningStress;
@@ -1117,7 +1117,7 @@ FEsetestTracingSupported()
 
 bool
 FEsetestFeaturePresent(
-    __in const EseFeaturePresent    feature
+    _In_ const EseFeaturePresent    feature
 )
 {
     bool    fRet = false;
@@ -1506,7 +1506,7 @@ EsetestGetEseFlavour()
 
 bool
 FEsetestValidVersion(
-    __in EsetestEseVersion  eseversion
+    _In_ EsetestEseVersion  eseversion
 )
 {
     // TODO:
@@ -1533,7 +1533,7 @@ FEsetestValidVersion(
 /*
 JET_ERR
 EsetestGetEseVersion(
-    __out   EsetestEseVersion*  peseversion
+    _Out_   EsetestEseVersion*  peseversion
 )
 {
     JET_ERR     err     = JET_errSuccess;
@@ -1597,12 +1597,12 @@ rgeseversionbuildtoreleaseEsent[] = {
 
 JET_ERR
 EsetestFillInSpAndBuild(
-    __out   EsetestEseFlavour*  pflavour,
-    __in    UINT                fileversionHighMajor,
-    __in    UINT                fileversionHighMinor,
-    __in    UINT                fileversionLow,
-    __out   PUINT               pverSp,
-    __out   PUINT               pverBuild
+    _Out_   EsetestEseFlavour*  pflavour,
+    _In_    UINT                fileversionHighMajor,
+    _In_    UINT                fileversionHighMinor,
+    _In_    UINT                fileversionLow,
+    _Out_   PUINT               pverSp,
+    _Out_   PUINT               pverBuild
 )
 {
     JET_ERR     err     = JET_errSuccess;
@@ -1677,9 +1677,9 @@ Cleanup:
 
 JET_ERR
 EsetestGetEseVersion(
-    __out EsetestEseFlavour*    pflavour,
-    __out EsetestEseVersion*    peseversion,
-    __out bool*                 pfChecked
+    _Out_ EsetestEseFlavour*    pflavour,
+    _Out_ EsetestEseVersion*    peseversion,
+    _Out_ bool*                 pfChecked
 )
 {
     JET_ERR     err     = JET_errSuccess;
@@ -1769,12 +1769,12 @@ Cleanup:
 
 JET_ERR
 EsetestGetEseVersionParts(
-    __out   EsetestEseFlavour*  pflavour,
-    __out   PUINT               pverMajor,
-    __out   PUINT               pverMinor,
-    __out   PUINT               pverSp,
-    __out   PUINT               pverBuild,
-    __out   bool*               pfChecked
+    _Out_   EsetestEseFlavour*  pflavour,
+    _Out_   PUINT               pverMajor,
+    _Out_   PUINT               pverMinor,
+    _Out_   PUINT               pverSp,
+    _Out_   PUINT               pverBuild,
+    _Out_   bool*               pfChecked
 )
 {
     JET_ERR     err     = JET_errSuccess;
@@ -1808,12 +1808,12 @@ Cleanup:
 
 JET_ERR
 EsetestGetEseFileVersionParts(
-    __out   EsetestEseFlavour*  pflavour,
-    __out   PUINT               pverMajor,
-    __out   PUINT               pverMinor,
-    __out   PUINT               pverBuild,
-    __out   PUINT               pverPrivate,
-    __out   bool*               pfChecked
+    _Out_   EsetestEseFlavour*  pflavour,
+    _Out_   PUINT               pverMajor,
+    _Out_   PUINT               pverMinor,
+    _Out_   PUINT               pverBuild,
+    _Out_   PUINT               pverPrivate,
+    _Out_   bool*               pfChecked
 )
 {
     JET_ERR     err     = JET_errSuccess;
@@ -1847,12 +1847,12 @@ Cleanup:
 
 JET_ERR
 EsetestEseVersionToParts(
-    __in EsetestEseVersion      version,
-    __out EsetestEseFlavour*    pflavour,
-    __out PUINT                 pverMajor,
-    __out PUINT                 pverMinor,
-    __out PUINT                 pverSp,
-    __out PUINT                 pverBuild
+    _In_ EsetestEseVersion      version,
+    _Out_ EsetestEseFlavour*    pflavour,
+    _Out_ PUINT                 pverMajor,
+    _Out_ PUINT                 pverMinor,
+    _Out_ PUINT                 pverSp,
+    _Out_ PUINT                 pverBuild
 )
 {
     JET_ERR     err     = JET_errSuccess;
@@ -1871,12 +1871,12 @@ Cleanup:
 
 JET_ERR
 EsetestEseFileVersionToParts(
-    __in EsetestEseVersion      version,
-    __out EsetestEseFlavour*    pflavour,
-    __out PUINT                 pverMajor,
-    __out PUINT                 pverMinor,
-    __out PUINT                 pverBuild,
-    __out PUINT                 pverPrivate
+    _In_ EsetestEseVersion      version,
+    _Out_ EsetestEseFlavour*    pflavour,
+    _Out_ PUINT                 pverMajor,
+    _Out_ PUINT                 pverMinor,
+    _Out_ PUINT                 pverBuild,
+    _Out_ PUINT                 pverPrivate
 )
 {
     JET_ERR     err     = JET_errSuccess;
@@ -1895,8 +1895,8 @@ EsetestEseFileVersionToParts(
 
 bool
 FEsetestIsBugFixed(
-    __in    UINT                bugnumberEse,       // Can be 0
-    __in    UINT                bugnumberEsent      // Can be 0
+    _In_    UINT                bugnumberEse,       // Can be 0
+    _In_    UINT                bugnumberEsent      // Can be 0
 )
 // Sometimes a bug is filed in either ESE or ESENT, but it will eventually be fixed in both.
 // Therefore we must allow the caller to specify a bug number of zero.
@@ -2024,11 +2024,11 @@ Cleanup:
 
 bool
 FEsetestVerifyVersion(
-    __in    EsetestEseFlavour   flavour,
-    __in    UINT                verMajor,
-    __in    UINT                verMinor,
-    __in    UINT                verSp,
-    __in    UINT                verBuild        // can be zero
+    _In_    EsetestEseFlavour   flavour,
+    _In_    UINT                verMajor,
+    _In_    UINT                verMinor,
+    _In_    UINT                verSp,
+    _In_    UINT                verBuild        // can be zero
 )
 // Returns whether the current version of ESE meets the minimum required.
 {
@@ -2390,7 +2390,7 @@ static HANDLE   g_hHeap = NULL;
 
 void*
 PvMemoryHeapAlloc(
-    __in const size_t   cbSize
+    _In_ const size_t   cbSize
 )
 {
     if ( !g_hHeap )
@@ -2489,7 +2489,7 @@ BOOL WINAPI DllMainEsetest( HANDLE hinstDLL, DWORD dwReason, LPVOID lpvReserved 
 
 void
 EsetestSetResultsTxt(
-    __in const char*    szResultsTxt
+    _In_ const char*    szResultsTxt
 )
 {
     const size_t    cchResultsTxt   = sizeof( RESULTS_TXT ) / sizeof( RESULTS_TXT[ 0 ] );
@@ -2499,7 +2499,7 @@ EsetestSetResultsTxt(
 
 void
 EsetestSetResultsLog(
-    __in const char*    szResultsLog
+    _In_ const char*    szResultsLog
 )
 {
     const size_t    cchResultsLog   = sizeof( RESULTS_LOG ) / sizeof( RESULTS_LOG[ 0 ] );
@@ -2574,7 +2574,7 @@ void InitLogging( BOOL fLogToDisk /* = TRUE */ )
             L"file=\"results_esetest.xml\"" // File name. By default, this will be the name of the EXE file with .WTL extension. If you want to specify the full path name, you need to escape the file name with double-quote. For example: file="c:\temp\myxmllog.xml"
             L",Shared=true"         // Specifies whether the log file is shared between more than one process. This option introduces a minor performance degradation. The log file is always open/created with shared access level in the OS. Default = false
             L",Compressed=false"    // Specifies whether the log file is compressed. Default = true if the file is created on an NTFS volume.
-            L",CRC=true"            // Specifies whether the log file needs to be CRCÆd at the end. Default = false
+            L",CRC=true"            // Specifies whether the log file needs to be CRC'd at the end. Default = false
             L",writemode=append"    // How the log file should be opened. Default = overwrite
             L",Nofscache=true"      // Specifies whether the file system cache needs to be turned off. Default = false Warning: if this option is specified, logging will become extremely slow.
             L";$Console)",
@@ -2657,7 +2657,7 @@ PRIVATE
 int
 EsetestWttVprintf(
     _In_ _Printf_format_string_ const char*         szFormat,
-    __in va_list                ap
+    _In_ va_list                ap
 )
 {
     int         nRC         = 0;
@@ -2688,9 +2688,9 @@ EsetestWttVprintf(
 
 int EsetestVprintf(
     __in_opt const char*            szLogFile,          // if NULL, will log to results.log
-    __in const JET_GRBIT        level,
+    _In_ const JET_GRBIT        level,
     _In_ _Printf_format_string_ const char*         szFormat,
-    __in va_list                ap
+    _In_ va_list                ap
 )
 {
 #ifdef ESE_FLAVOUR_IS_ESE
@@ -2871,9 +2871,9 @@ int EsetestVprintf(
 }
 
 int EsetestVcprintf(
-    __in DWORD                              dwColor,
+    _In_ DWORD                              dwColor,
     _In_ _Printf_format_string_ const char*     szFormat,
-    __in va_list                            ap
+    _In_ va_list                            ap
 )
 {
     int nRC = 0;
@@ -2952,8 +2952,8 @@ int tprintfnothid(
 
 int tprintfSpecifyTargets(
     __in_opt const char*            szLogFile,          // if NULL, will log to results.log
-    __in const JET_GRBIT level,
-    __in _Printf_format_string_ const char* szFormat,
+    _In_ const JET_GRBIT level,
+    _In_ _Printf_format_string_ const char* szFormat,
     ...
 )
 /*++ level: one of
@@ -2976,9 +2976,9 @@ Esetest_bitLogToDiskAndScreen
 
 int tprintfSpecifyTargetsV(
     __in_opt const char*            szLogFile,          // if NULL, will log to results.log
-    __in const JET_GRBIT level,
-    __in _Printf_format_string_ const char* szFormat,
-    __in va_list        valst
+    _In_ const JET_GRBIT level,
+    _In_ _Printf_format_string_ const char* szFormat,
+    _In_ va_list        valst
 )
 /*++ level: one of
 Esetest_bitLogDoNotLog
@@ -3378,21 +3378,21 @@ Cleanup:
 PRIVATE
 JET_ERR
 DynLoadJetConsumeLogData(
-    __in    JET_INSTANCE        instance,
-    __in    JET_EMITDATACTX *   pEmitLogDataCtx,
-    __in    void *              pvLogData,
-    __in    unsigned long       cbLogData,
-    __in    JET_GRBIT           grbits
+    _In_    JET_INSTANCE        instance,
+    _In_    JET_EMITDATACTX *   pEmitLogDataCtx,
+    _In_    void *              pvLogData,
+    _In_    unsigned long       cbLogData,
+    _In_    JET_GRBIT           grbits
 )
 {
     JET_ERR     err = JET_errSuccess;
 
     typedef JET_ERR ( __stdcall *PFN_JetConsumeLogData ) ( 
-    __in    JET_INSTANCE        instance,
-    __in    JET_EMITDATACTX *   pEmitLogDataCtx,
-    __in    void *              pvLogData,
-    __in    unsigned long       cbLogData,
-    __in    JET_GRBIT           grbits  );
+    _In_    JET_INSTANCE        instance,
+    _In_    JET_EMITDATACTX *   pEmitLogDataCtx,
+    _In_    void *              pvLogData,
+    _In_    unsigned long       cbLogData,
+    _In_    JET_GRBIT           grbits  );
 
     static PFN_JetConsumeLogData pfnJetConsumeLogData = NULL;
 
@@ -3669,7 +3669,7 @@ __inline void ZeroDataOnFailure(DWORD dwFlags, __in_bcount_opt(cbDataBuffer) voi
 
 // =============================================================================
 LONG EsetestRegGetValueA(
-    __in         HKEY hkey,
+    _In_         HKEY hkey,
     __in_opt     LPCTSTR pszSubKey,
     __in_opt     LPCTSTR pszValue,
     __in_opt     DWORD dwFlags,
@@ -3709,9 +3709,9 @@ LOCAL const TCHAR tszEsentGlobalPath[]          =   _T( "SOFTWARE\\Microsoft\\" 
 
 JET_ERR
 ErrEsetestWriteConfigToEsentGlobal(
-    __in const TCHAR*   szKeyPath,
-    __in const TCHAR*   szKeyName,
-    __in const TCHAR*   szValue
+    _In_ const TCHAR*   szKeyPath,
+    _In_ const TCHAR*   szKeyName,
+    _In_ const TCHAR*   szValue
     )
 {
     const size_t    cchKeyFqPath    = MAX_PATH;
@@ -3725,10 +3725,10 @@ ErrEsetestWriteConfigToEsentGlobal(
 
 JET_ERR
 ErrEsetestWriteRegistry(
-    __in const HKEY     hkeyHive,
-    __in const TCHAR*       szKeyPath,
-    __in const TCHAR*       szKeyName,
-    __in const TCHAR*       szValue
+    _In_ const HKEY         hkeyHive,
+    _In_ const TCHAR*       szKeyPath,
+    _In_ const TCHAR*       szKeyName,
+    _In_ const TCHAR*       szValue
     )
 {
     JET_ERR err = JET_errSuccess;
@@ -3802,8 +3802,8 @@ HandleError:
 
 JET_ERR
 ErrEsetestReadConfigToEsentGlobal(
-    __in const TCHAR*   szKeyPath,
-    __in const TCHAR*   szKeyName,
+    _In_ const TCHAR*   szKeyPath,
+    _In_ const TCHAR*   szKeyName,
     __out_bcount_part( *pcbValue, *pcbValue ) TCHAR* const  szValue,        // Must point to valid buffer
     __inout PDWORD      pcbValue        // How big the buffer is going in; how many bytes written
     )
@@ -3820,10 +3820,10 @@ ErrEsetestReadConfigToEsentGlobal(
 
 JET_ERR
 ErrEsetestReadRegistry(
-    __in const HKEY     hkeyHive,
-    __in const TCHAR*   szKeyPath,
-    __in const TCHAR*   szKeyName,
-    __out TCHAR* const  szValue,        // Must point to valid buffer
+    _In_ const HKEY     hkeyHive,
+    _In_ const TCHAR*   szKeyPath,
+    _In_ const TCHAR*   szKeyName,
+    _Out_ TCHAR* const  szValue,        // Must point to valid buffer
     __inout PDWORD      pcbValue        // How big the buffer is going in; how many bytes written
     )
 {
@@ -3929,10 +3929,10 @@ HandleError:
 
 JET_ERR
 ErrEsetestCopyKey(
-    __in const WCHAR*   wszKeySrc,
-    __in const WCHAR*   wszKeyDst,
-    __in BOOL           fDelSrc,
-    __in BOOL           fDelDst
+    _In_ const WCHAR*   wszKeySrc,
+    _In_ const WCHAR*   wszKeyDst,
+    _In_ BOOL           fDelSrc,
+    _In_ BOOL           fDelDst
 )
 {
     JET_ERR err     = JET_errSuccess;
@@ -4028,7 +4028,7 @@ Cleanup:
 
 JET_ERR
 ErrEnableSystemPibFailures(
-    __in TCHAR* tszEnvVar
+    _In_ TCHAR* tszEnvVar
 )
 {
     return ErrEsetestWriteConfigToEsentGlobal( g_tszRegPathDebug, g_tszRegKeyPibFailures, tszEnvVar );
@@ -4044,7 +4044,7 @@ ErrDisableSystemPibFailures(
 PRIVATE
 int
 IEnvironmentVariableSet(
-    __in const char* const  szEnvVariable
+    _In_ const char* const  szEnvVariable
 )
 // IEnvironmentVariableSet() looks up the specified environment variable
 // and returns the numeric value of it.
@@ -4078,7 +4078,7 @@ IEnvironmentVariableSet(
 PRIVATE
 bool
 FEnvironmentVariableSet(
-    __in const char* const  szEnvVariable
+    _In_ const char* const  szEnvVariable
 )
 // FEnvironmentVariableSet() looks up the specified environment variable
 // and returns true if the variable exists and is non-zero.
@@ -4093,7 +4093,7 @@ FEnvironmentVariableSet(
 PRIVATE
 bool
 FEnvironmentVariableDefined(
-    __in const char* const  szEnvVariable
+    _In_ const char* const  szEnvVariable
 )
 // FEnvironmentVariableDefined() looks up the specified environment variable
 // and returns true if the variable exists.
@@ -4183,11 +4183,11 @@ extern "C" {
 
 PRIVATE
 JET_ERR EsetestShadowLogData(
-    __in    JET_INSTANCE        inst,
-    __in    JET_EMITDATACTX *   pEmitLogDataCtx,
-    __in    void *              pvLogData,
-    __in    unsigned long           cbLogData,
-    __in    void *              pvCallBackCtx )
+    _In_    JET_INSTANCE        inst,
+    _In_    JET_EMITDATACTX *   pEmitLogDataCtx,
+    _In_    void *              pvLogData,
+    _In_    unsigned long       cbLogData,
+    _In_    void *              pvCallBackCtx )
 
 {
     JET_PFNEMITLOGDATA pfn = EsetestShadowLogData;  // ensure this function matches callback defn
@@ -5066,13 +5066,13 @@ int ReportErr( JET_ERR err, ULONG ulLine, const char *szFileName,  const char *s
 // This is stolen from DBUTLSprintHex().
 // The resultant buffer ends with a newline.
 VOID SprintHex(
-    __out CHAR * const      szDest,
+    _Out_ CHAR * const      szDest,
     __in_bcount( cbSrc ) const BYTE * const rgbSrc,
-    __in const INT          cbSrc,
-    __in const INT          cbWidth     /* = 16 */,
-    __in const INT          cbChunk     /* = 4 */,
-    __in const INT          cbAddress   /* = 8 */,
-    __in const INT          cbStart     /* = 0 */
+    _In_ const INT          cbSrc,
+    _In_ const INT          cbWidth     /* = 16 */,
+    _In_ const INT          cbChunk     /* = 4 */,
+    _In_ const INT          cbAddress   /* = 8 */,
+    _In_ const INT          cbStart     /* = 0 */
 )
 //  ================================================================
 {
@@ -5116,7 +5116,7 @@ VOID SprintHex(
 //
 // =============================================================================
 void EsetestWaitForAllObjectsInfinitely(
-    __in DWORD cCount,
+    _In_ DWORD cCount,
     __in_ecount( cCount ) const HANDLE* rgHandles
 )
 // =============================================================================
@@ -5135,7 +5135,7 @@ void EsetestWaitForAllObjectsInfinitely(
 //
 BOOL
 EsetestCreateDirectoryA(
-    __in PCSTR      szName
+    _In_ PCSTR      szName
 )
 {
     WCHAR* wszName      = EsetestWidenString( __FUNCTION__, szName );
@@ -5147,7 +5147,7 @@ EsetestCreateDirectoryA(
 
 BOOL
 EsetestCreateDirectoryW(
-    __in PCWSTR     wszName
+    _In_ PCWSTR     wszName
 )
 {
     const wchar_t* wcLastIndex;
@@ -5193,7 +5193,7 @@ EsetestCreateDirectoryW(
 
 BOOL
 EsetestRemoveDirectoryA(
-    __in PCSTR      szName
+    _In_ PCSTR      szName
 )
 {
     WCHAR* wszName      = EsetestWidenString( __FUNCTION__, szName );
@@ -5205,7 +5205,7 @@ EsetestRemoveDirectoryA(
 
 BOOL
 EsetestRemoveDirectoryW(
-    __in PCWSTR     wszName
+    _In_ PCWSTR     wszName
 )
 {
     BOOL fReturn = TRUE;
@@ -5287,8 +5287,8 @@ EsetestRemoveDirectoryW(
 
 BOOL
 EsetestCopyDirectoryA(
-    __in PCSTR      szNameSrc,
-    __in PCSTR      szNameDst
+    _In_ PCSTR      szNameSrc,
+    _In_ PCSTR      szNameDst
 )
 {
     WCHAR* wszNameSrc   = EsetestWidenString( __FUNCTION__, szNameSrc );
@@ -5302,8 +5302,8 @@ EsetestCopyDirectoryA(
 
 BOOL
 EsetestCopyDirectoryW(
-    __in PCWSTR     wszNameSrc,
-    __in PCWSTR     wszNameDst
+    _In_ PCWSTR     wszNameSrc,
+    _In_ PCWSTR     wszNameDst
 )
 {
     BOOL fReturn = TRUE;
@@ -5449,7 +5449,7 @@ HandleError:
 
 BOOL
 EsetestEnsureFullPathExistsA(
-    __in PCSTR      szPath
+    _In_ PCSTR      szPath
 )
 {
     WCHAR* wszPath      = EsetestWidenString( __FUNCTION__, szPath );
@@ -5461,7 +5461,7 @@ EsetestEnsureFullPathExistsA(
 
 BOOL
 EsetestEnsureFullPathExistsW(
-    __in PCWSTR     wszPath
+    _In_ PCWSTR     wszPath
 )
 {
     BOOL fReturn = FALSE;
@@ -5498,7 +5498,7 @@ HandleError:
 
 PSTR
 EsetestGetFilePathA(
-    __in PCSTR      szFile
+    _In_ PCSTR      szFile
 )
 {
     WCHAR* wszFile      = EsetestWidenString( __FUNCTION__, szFile );
@@ -5512,7 +5512,7 @@ EsetestGetFilePathA(
 
 PWSTR
 EsetestGetFilePathW(
-    __in PCWSTR     wszFile
+    _In_ PCWSTR     wszFile
 )
 {
     size_t cch = wszFile ? wcslen( wszFile ) + 1 : 0;
@@ -5533,7 +5533,7 @@ HandleError:
 
 LONGLONG
 EsetestGetFileSizeA(
-    __in PCSTR      szFile
+    _In_ PCSTR      szFile
 )
 {
     WCHAR* wszFile      = EsetestWidenString( __FUNCTION__, szFile );
@@ -5545,7 +5545,7 @@ EsetestGetFileSizeA(
 
 LONGLONG
 EsetestGetFileSizeW(
-    __in PCWSTR     wszFile
+    _In_ PCWSTR     wszFile
 )
 {
     LONGLONG cbFileSize = -1;
@@ -5569,7 +5569,7 @@ static const ULONGLONG qw100NanoSecSince1601in1970 = 0x19db1ded53e8000;
 
 DWORD
 SystemTimeToSecondsSince1970(
-    __in const PSYSTEMTIME  pSystemTime
+    _In_ const PSYSTEMTIME  pSystemTime
 )
 {
     FILETIME ft, ftBuffer;
@@ -5597,8 +5597,8 @@ SystemTimeToSecondsSince1970(
 
 VOID
 SecondsSince1970ToSystemTime(
-    __in DWORD          dwSecondsSince1970,
-    __in PSYSTEMTIME    pSystemTime
+    _In_ DWORD          dwSecondsSince1970,
+    _In_ PSYSTEMTIME    pSystemTime
 )
 {
     FILETIME ftBuffer, ft;
@@ -5635,7 +5635,7 @@ SecondsSince1970ToSystemTime(
 //
 
 PRIVATE
-int UtilMessageBoxW( IN const WCHAR * const wszText, IN const WCHAR * const wszCaption, IN const UINT uType )
+int UtilMessageBoxW( _In_ const WCHAR * const wszText, _In_ const WCHAR * const wszCaption, _In_ const UINT uType )
     {
     typedef decltype(MessageBoxW) PFNMessageBox;
     const char * const szFunction = "MessageBoxW";
@@ -6009,9 +6009,9 @@ void __stdcall EsetestAssertFail( const char * const szMessageFormat, char const
 #pragma warning( default : 4509 )
 
 size_t strxchg(
-    __in CHAR *string,
-    __in const CHAR oldChar,
-    __in const CHAR newChar
+    _In_ CHAR *string,
+    _In_ const CHAR oldChar,
+    _In_ const CHAR newChar
 )
 {
     if ( NULL == string || 0 == oldChar ) return 0;
@@ -6022,9 +6022,9 @@ size_t strxchg(
 }
 
 size_t wcsxchg(
-    __in WCHAR *string,
-    __in const WCHAR oldChar,
-    __in const WCHAR newChar
+    _In_ WCHAR *string,
+    _In_ const WCHAR oldChar,
+    _In_ const WCHAR newChar
 )
 {
     if ( NULL == string || 0 == oldChar ) return 0;
@@ -6035,9 +6035,9 @@ size_t wcsxchg(
 }
 
 size_t _tcsxchg(
-    __in TCHAR *string,
-    __in const TCHAR oldChar,
-    __in const TCHAR newChar
+    _In_ TCHAR *string,
+    _In_ const TCHAR oldChar,
+    _In_ const TCHAR newChar
 )
 {
 #ifdef _UNICODE
@@ -6130,9 +6130,9 @@ BOOL CloseHandleP( HANDLE* pH )
 // calling MultiByteToWideChar().
 wchar_t*
 EsetestWidenCbString(
-    __in PSTR   szFunction,
-    __in PCSTR  sz,
-    __in const unsigned long    cchsz
+    _In_ PSTR   szFunction,
+    _In_ PCSTR  sz,
+    _In_ const unsigned long    cchsz
 )
 {
     wchar_t* wsz    = NULL;
@@ -6170,9 +6170,9 @@ Cleanup:
 
 JET_ERR
 EsetestUnwidenCbString(
-    __in PSTR   szFunction,
-    __in PWSTR  wsz,
-    __in const unsigned long    cchsz,
+    _In_ PSTR   szFunction,
+    _In_ PWSTR  wsz,
+    _In_ const unsigned long    cchsz,
     __inout PSTR    sz
 )
 {
@@ -6196,7 +6196,7 @@ Cleanup:
 
 // If this is the defined special string, I am going to use a real unicode string
 bool IfMySpecialString (
-    __in PCSTR  sz
+    _In_ PCSTR  sz
 )
 {
     char mystring[20] = "letusgotodisney.mdb";
@@ -6220,8 +6220,8 @@ bool IfMySpecialString (
 // --------------
 char*
 EsetestCopyString(
-    __in PSTR   szFunction,
-    __in PCSTR  szToCopy
+    _In_ PSTR   szFunction,
+    _In_ PCSTR  szToCopy
 )
 {
     char*       sz      = NULL;
@@ -6255,8 +6255,8 @@ Cleanup:
 // --------------
 wchar_t*
 EsetestCopyWideString(
-    __in PSTR   szFunction,
-    __in PCWSTR wszToCopy
+    _In_ PSTR   szFunction,
+    _In_ PCWSTR wszToCopy
 )
 {
     wchar_t*        wsz     = NULL;
@@ -6289,8 +6289,8 @@ Cleanup:
 
 wchar_t*
 EsetestWidenString(
-    __in PSTR   szFunction,
-    __in PCSTR  sz
+    _In_ PSTR   szFunction,
+    _In_ PCSTR  sz
 )
 {
     wchar_t*        wsz     = NULL;
@@ -6354,8 +6354,8 @@ Cleanup:
 
 char*
 EsetestUnwidenStringAlloc(
-    __in PSTR   szFunction,
-    __in PCWSTR wsz
+    _In_ PSTR   szFunction,
+    _In_ PCWSTR wsz
 )
 {
     char*       sz      = NULL;
@@ -6394,8 +6394,8 @@ Cleanup:
 
 JET_ERR
 EsetestUnwidenString(
-    __in PSTR   szFunction,
-    __in PWSTR  wsz,
+    _In_ PSTR   szFunction,
+    _In_ PWSTR  wsz,
     __inout PSTR    sz
 )
 {
@@ -6430,9 +6430,9 @@ Cleanup:
 // EsetestUnwidenString()
 JET_ERR
 EsetestCleanupWidenString(
-    __in PSTR   szFunction,
+    _In_ PSTR   szFunction,
     __inout PWSTR   wsz,
-    __in PCSTR  sz
+    _In_ PCSTR  sz
 )
 {
     
@@ -6445,9 +6445,9 @@ EsetestCleanupWidenString(
 //----------------StringWithLength
 wchar_t*
 EsetestWidenStringWithLength(
-    __in PSTR   szFunction,
-    __in PCSTR  sz,
-    __in const unsigned long cchsz
+    _In_ PSTR   szFunction,
+    _In_ PCSTR  sz,
+    _In_ const unsigned long cchsz
 )
 {
     wchar_t*        wsz     = NULL;
@@ -6472,9 +6472,9 @@ Cleanup:
 
 JET_ERR
 EsetestUnwidenStringWithLength(
-    __in PSTR   szFunction,
-    __in PWSTR  wsz,
-    __in const unsigned long cchsz,
+    _In_ PSTR   szFunction,
+    _In_ PWSTR  wsz,
+    _In_ const unsigned long cchsz,
     __inout PSTR    sz
 )
 {
@@ -6506,9 +6506,9 @@ Cleanup:
 // --------------DONE
 JET_RSTMAP_W*
 EsetestWidenJET_RSTMAP(
-    __in PSTR   szFunction,
+    _In_ PSTR   szFunction,
     __in_ecount( crstfilemap ) const JET_RSTMAP*    rgstmap,
-    __in const long         crstfilemap
+    _In_ const long         crstfilemap
 )
 {
     JET_RSTMAP_W*   wrgstmap        = NULL;
@@ -6572,9 +6572,9 @@ Cleanup:
 
 JET_RSTMAP2_W*
 EsetestWidenJET_RSTMAP2(
-    __in PSTR   szFunction,
+    _In_ PSTR   szFunction,
     __in_ecount( crstfilemap ) const JET_RSTMAP2*   rgstmap,
-    __in const long         crstfilemap
+    _In_ const long         crstfilemap
 )
 {
     JET_RSTMAP2_W*  wrgstmap        = NULL;
@@ -6644,9 +6644,9 @@ Cleanup:
 
 JET_ERR
 EsetestUnwidenJET_RSTMAP(
-    __in PSTR   szFunction,
+    _In_ PSTR   szFunction,
     __in_ecount( crstfilemap ) JET_RSTMAP_W* wrgstmap,
-    __in const long         crstfilemap,
+    _In_ const long         crstfilemap,
     __inout_ecount( crstfilemap ) JET_RSTMAP*   rgstmap
 )
 {
@@ -6710,9 +6710,9 @@ Cleanup:
 
 JET_ERR
 EsetestUnwidenJET_RSTMAP2(
-    __in PSTR   szFunction,
+    _In_ PSTR   szFunction,
     __in_ecount( crstfilemap ) JET_RSTMAP2_W* wrgstmap,
-    __in const long         crstfilemap,
+    _In_ const long         crstfilemap,
     __inout_ecount( crstfilemap ) JET_RSTMAP2*  rgstmap
 )
 {
@@ -6783,8 +6783,8 @@ Cleanup:
 //------------DONE
 JET_RSTINFO_W*
 EsetestWidenJET_RSTINFO(
-    __in PSTR   szFunction,
-    __in const JET_RSTINFO *prstInfo
+    _In_ PSTR   szFunction,
+    _In_ const JET_RSTINFO *prstInfo
 )
 {
     JET_RSTINFO_W* wprstInfo = NULL;
@@ -6828,8 +6828,8 @@ Cleanup:
 
 JET_ERR
 EsetestUnwidenJET_RSTINFO(
-    __in PSTR   szFunction,
-    __in JET_RSTINFO_W* wrgstinfo,
+    _In_ PSTR   szFunction,
+    _In_ JET_RSTINFO_W* wrgstinfo,
     __inout JET_RSTINFO*    rgstinfo
 )
 {
@@ -6870,8 +6870,8 @@ Cleanup:
 //------------DONE
 JET_RSTINFO2_W*
 EsetestWidenJET_RSTINFO2(
-    __in PSTR   szFunction,
-    __in const JET_RSTINFO2 *prstInfo
+    _In_ PSTR   szFunction,
+    _In_ const JET_RSTINFO2 *prstInfo
 )
 {
     JET_RSTINFO2_W* wprstInfo = NULL;
@@ -6916,8 +6916,8 @@ Cleanup:
 
 JET_ERR
 EsetestUnwidenJET_RSTINFO2(
-    __in PSTR   szFunction,
-    __in JET_RSTINFO2_W*    wrgstinfo,
+    _In_ PSTR   szFunction,
+    _In_ JET_RSTINFO2_W*    wrgstinfo,
     __inout JET_RSTINFO2*   rgstinfo
 )
 {
@@ -6958,9 +6958,9 @@ Cleanup:
 //----------------DONE
 JET_SETSYSPARAM_W*
 EsetestWidenJET_SETSYSPARAM(
-    __in PSTR   szFunction,
+    _In_ PSTR   szFunction,
     __in_ecount( csetsysparam ) const JET_SETSYSPARAM*  psetsysparam,
-    __in const long         csetsysparam
+    _In_ const long         csetsysparam
 )
 {
     JET_SETSYSPARAM_W* wpsetsysparam = NULL;
@@ -7005,9 +7005,9 @@ Cleanup:
 
 JET_ERR
 EsetestUnwidenJET_SETSYSPARAM(
-    __in PSTR   szFunction,
+    _In_ PSTR   szFunction,
     __in_ecount( crstfilemap ) JET_SETSYSPARAM_W*       wpsetsysparam,
-    __in const long         crstfilemap,
+    _In_ const long         crstfilemap,
     __inout_ecount( crstfilemap ) JET_SETSYSPARAM*      psetsysparam
 )
 {
@@ -7061,8 +7061,8 @@ EsetestUnwidenJET_SETSYSPARAM(
 //----------------DONE
 JET_TABLECREATE_W*
 EsetestWidenJET_TABLECREATE(
-    __in PSTR   szFunction,
-    __in const JET_TABLECREATE* ptablecreate
+    _In_ PSTR   szFunction,
+    _In_ const JET_TABLECREATE* ptablecreate
 )
 {
     JET_TABLECREATE_W* wptablecreate = NULL;
@@ -7161,8 +7161,8 @@ Cleanup:
 
 JET_ERR
 EsetestUnwidenJET_TABLECREATE(
-    __in PSTR   szFunction,
-    __in const JET_TABLECREATE_W*   wptablecreate,
+    _In_ PSTR   szFunction,
+    _In_ const JET_TABLECREATE_W*   wptablecreate,
     __inout JET_TABLECREATE*  ptablecreate
 )
 {
@@ -7245,8 +7245,8 @@ Cleanup:
 //----------------
 JET_TABLECREATE2_W*
 EsetestWidenJET_TABLECREATE2(
-    __in PSTR   szFunction,
-    __in const JET_TABLECREATE2*    ptablecreate2
+    _In_ PSTR   szFunction,
+    _In_ const JET_TABLECREATE2*    ptablecreate2
 )
 {
 
@@ -7361,8 +7361,8 @@ Cleanup:
 
 JET_ERR
 EsetestUnwidenJET_TABLECREATE2(
-    __in PSTR   szFunction,
-    __in const JET_TABLECREATE2_W*  wptablecreate2,
+    _In_ PSTR   szFunction,
+    _In_ const JET_TABLECREATE2_W*  wptablecreate2,
     __inout JET_TABLECREATE2* const ptablecreate2
 )
 {
@@ -7459,8 +7459,8 @@ Cleanup:
 //----------------
 JET_TABLECREATE3_W*
 EsetestWidenJET_TABLECREATE3(
-    __in PSTR   szFunction,
-    __in const JET_TABLECREATE3*    ptablecreate3
+    _In_ PSTR   szFunction,
+    _In_ const JET_TABLECREATE3*    ptablecreate3
 )
 {
 
@@ -7578,8 +7578,8 @@ Cleanup:
 
 JET_ERR
 EsetestUnwidenJET_TABLECREATE3(
-    __in PSTR   szFunction,
-    __in const JET_TABLECREATE3_W*  wptablecreate3,
+    _In_ PSTR   szFunction,
+    _In_ const JET_TABLECREATE3_W*  wptablecreate3,
     __inout JET_TABLECREATE3* const ptablecreate3
 )
 {
@@ -7679,8 +7679,8 @@ Cleanup:
 //----------------
 JET_TABLECREATE5_W*
 EsetestWidenJET_TABLECREATE5(
-    __in PSTR   szFunction,
-    __in const JET_TABLECREATE5*    ptablecreate5
+    _In_ PSTR   szFunction,
+    _In_ const JET_TABLECREATE5*    ptablecreate5
 )
 {
 
@@ -7799,8 +7799,8 @@ Cleanup:
 
 JET_ERR
 EsetestUnwidenJET_TABLECREATE5(
-    __in PSTR   szFunction,
-    __in const JET_TABLECREATE5_W*  wptablecreate5,
+    _In_ PSTR   szFunction,
+    _In_ const JET_TABLECREATE5_W*  wptablecreate5,
     __inout JET_TABLECREATE5* const ptablecreate5
 )
 {
@@ -7901,9 +7901,9 @@ Cleanup:
 //----------------
 JET_INDEXCREATE_W*
 EsetestWidenJET_INDEXCREATE(
-    __in PSTR   szFunction,
+    _In_ PSTR   szFunction,
     __in_ecount( cindexes ) const JET_INDEXCREATE*  pindexcreate,
-    __in const long     cindexes    
+    _In_ const long     cindexes    
 )
 {
     JET_INDEXCREATE_W* wpindexcreate = NULL;
@@ -7994,9 +7994,9 @@ Cleanup:
 
 JET_ERR
 EsetestUnwidenJET_INDEXCREATE(
-    __in PSTR   szFunction,
+    _In_ PSTR   szFunction,
     __in_ecount( cindexes ) JET_INDEXCREATE_W*      wpindexcreate,
-    __in const long         cindexes,
+    _In_ const long         cindexes,
     __inout_ecount( cindexes ) JET_INDEXCREATE* const   pindexcreate
 )
 {
@@ -8069,9 +8069,9 @@ Cleanup:
 //----------------
 JET_INDEXCREATE2_W*
 EsetestWidenJET_INDEXCREATE2(
-    __in PSTR   szFunction,
+    _In_ PSTR   szFunction,
     __in_ecount( cindexes ) const JET_INDEXCREATE2* pindexcreate2,
-    __in const long     cindexes    
+    _In_ const long     cindexes    
 )
 {
     JET_INDEXCREATE2_W* wpindexcreate2 = NULL;
@@ -8158,9 +8158,9 @@ Cleanup:
 
 JET_ERR
 EsetestUnwidenJET_INDEXCREATE2(
-    __in PSTR   szFunction,
+    _In_ PSTR   szFunction,
     __in_ecount( cindexes ) JET_INDEXCREATE2_W*     wpindexcreate2,
-    __in const long         cindexes,
+    _In_ const long         cindexes,
     __inout_ecount( cindexes ) JET_INDEXCREATE2* const  pindexcreate2
 )
 {
@@ -8228,9 +8228,9 @@ Cleanup:
 //----------------
 JET_INDEXCREATE3_W*
 EsetestWidenJET_INDEXCREATE3(
-    __in PSTR   szFunction,
+    _In_ PSTR   szFunction,
     __in_ecount( cindexes ) const JET_INDEXCREATE3* pindexcreate3,
-    __in const long     cindexes    
+    _In_ const long     cindexes    
 )
 {
     JET_INDEXCREATE3_W* wpindexcreate3 = NULL;
@@ -8317,9 +8317,9 @@ Cleanup:
 
 JET_ERR
 EsetestUnwidenJET_INDEXCREATE3(
-    __in PSTR   szFunction,
+    _In_ PSTR   szFunction,
     __in_ecount( cindexes ) JET_INDEXCREATE3_W*     wpindexcreate3,
-    __in const long         cindexes,
+    _In_ const long         cindexes,
     __inout_ecount( cindexes ) JET_INDEXCREATE3* const  pindexcreate3
 )
 {
@@ -8387,8 +8387,8 @@ Cleanup:
 //----------------DONE
 JET_CONVERT_W*
 EsetestWidenJET_CONVERT(
-    __in PSTR   szFunction,
-    __in const JET_CONVERT* pconvert
+    _In_ PSTR   szFunction,
+    _In_ const JET_CONVERT* pconvert
 )
 {
     JET_CONVERT_W* wpconvert = NULL;
@@ -8420,8 +8420,8 @@ Cleanup:
 
 JET_ERR
 EsetestUnwidenJET_CONVERT(
-    __in PSTR   szFunction,
-    __in JET_CONVERT_W*     wpconvert,
+    _In_ PSTR   szFunction,
+    _In_ JET_CONVERT_W*     wpconvert,
     __inout JET_CONVERT* const  pconvert
 )
 {
@@ -8445,9 +8445,9 @@ Cleanup:
 //----------------DONE
 JET_CONDITIONALCOLUMN_W*
 EsetestWidenJET_CONDITIONALCOLUMN(
-    __in PSTR   szFunction,
+    _In_ PSTR   szFunction,
     __in_ecount( ccolumns) const JET_CONDITIONALCOLUMN* rgconditionalcolumn,
-    __in const long         ccolumns
+    _In_ const long         ccolumns
 )
 {
     JET_CONDITIONALCOLUMN_W*    wrgconditionalcolumn;
@@ -8486,9 +8486,9 @@ Cleanup:
 
 JET_ERR
 EsetestUnwidenJET_CONDITIONALCOLUMN(
-    __in PSTR   szFunction,
-    __in JET_CONDITIONALCOLUMN_W*       wrgconditionalcolumn,
-    __in const long         ccolumns,
+    _In_ PSTR   szFunction,
+    _In_ JET_CONDITIONALCOLUMN_W*       wrgconditionalcolumn,
+    _In_ const long         ccolumns,
     __inout JET_CONDITIONALCOLUMN* const    rgconditionalcolumn
 )
 {
@@ -8519,9 +8519,9 @@ Cleanup:
 //----------------DONE
 JET_COLUMNCREATE_W*
 EsetestWidenJET_COLUMNCREATE(
-    __in PSTR   szFunction,
+    _In_ PSTR   szFunction,
     __in_ecount( ccolumns) const JET_COLUMNCREATE*  rgcolumncreate,
-    __in const long         ccolumns
+    _In_ const long         ccolumns
 )
 {
     JET_COLUMNCREATE_W* wrgcolumncreate;
@@ -8565,9 +8565,9 @@ Cleanup:
 
 JET_ERR
 EsetestUnwidenJET_COLUMNCREATE(
-    __in PSTR   szFunction,
-    __in JET_COLUMNCREATE_W*        wrgcolumncreate,
-    __in const long         ccolumns,
+    _In_ PSTR   szFunction,
+    _In_ JET_COLUMNCREATE_W*        wrgcolumncreate,
+    _In_ const long         ccolumns,
     __inout JET_COLUMNCREATE* const rgcolumncreate
 )
 {
@@ -8606,8 +8606,8 @@ Cleanup:
 // not done yet
 JET_LOGINFO_W*
 EsetestWidenJET_LOGINFO(
-    __in PSTR   szFunction,
-    __in const JET_LOGINFO*     pLogInfo
+    _In_ PSTR   szFunction,
+    _In_ const JET_LOGINFO*     pLogInfo
 )
 {
 
@@ -8644,8 +8644,8 @@ Cleanup:
 
 JET_ERR
 EsetestUnwidenJET_LOGINFO(
-    __in PSTR   szFunction,
-    __in JET_LOGINFO_W* wpLogInfo,
+    _In_ PSTR   szFunction,
+    _In_ JET_LOGINFO_W* wpLogInfo,
     __inout JET_LOGINFO* const  pLogInfo
 )
 {
@@ -8675,11 +8675,11 @@ Cleanup:
 // false: pindexcreateInUnknownFormat was acceptable; pindexcreate is NULL.
 JET_ERR
 EsetestAdaptJET_INDEXCREATE(
-    __in PSTR   szFunction,
+    _In_ PSTR   szFunction,
     __in_ecount_opt( cIndexCreate ) JET_INDEXCREATE*    rgindexcreateInUnknownFormat,
     unsigned long   cIndexCreate,
     __deref_out_ecount( cIndexCreate ) JET_INDEXCREATE**    prgindexcreate,
-    __out bool*     pfAdapted
+    _Out_ bool*     pfAdapted
 )
 {
     JET_ERR err = JET_errSuccess;
@@ -8751,7 +8751,7 @@ Cleanup:
 // pindexcreate will be deleted.
 JET_ERR
 EsetestUnadaptJET_INDEXCREATE(
-    __in PSTR   szFunction,
+    _In_ PSTR   szFunction,
     __inout_ecount( cIndexCreate ) JET_INDEXCREATE*     pindexcreateNewFormat,      // the user buffer
     unsigned long   cIndexCreate,
     __inout_ecount( cIndexCreate ) JET_INDEXCREATE**    prgindexcreateOldFormat     // has the new data, will get deleted
@@ -8791,10 +8791,10 @@ EsetestUnadaptJET_INDEXCREATE(
 // false: pindexcreateInUnknownFormat was acceptable; pindexcreate is NULL.
 JET_ERR
 EsetestAdaptJET_TABLECREATE(
-    __in PSTR   szFunction,
-    __in JET_TABLECREATE*   ptablecreateInNewFormat,
+    _In_ PSTR   szFunction,
+    _In_ JET_TABLECREATE*   ptablecreateInNewFormat,
     __deref_out JET_TABLECREATE**   pptablecreate,
-    __out bool*     pfAdapted
+    _Out_ bool*     pfAdapted
 )
 {
     JET_ERR     err     = JET_errSuccess;
@@ -8851,7 +8851,7 @@ Cleanup:
 // ptablecreate will be deleted.
 JET_ERR
 EsetestUnadaptJET_TABLECREATE(
-    __in PSTR   szFunction,
+    _In_ PSTR   szFunction,
     __inout JET_TABLECREATE*    ptablecreateInNewFormat,        // the user buffer
     __inout JET_TABLECREATE**   pptablecreate                   // has the new data, will get deleted
 )
@@ -8901,10 +8901,10 @@ Cleanup:
 // false: pindexcreateInUnknownFormat was acceptable; pindexcreate is NULL.
 JET_ERR
 EsetestAdaptJET_TABLECREATE2(
-    __in PSTR   szFunction,
-    __in JET_TABLECREATE2*  ptablecreateInNewFormat,
+    _In_ PSTR   szFunction,
+    _In_ JET_TABLECREATE2*  ptablecreateInNewFormat,
     __deref_out JET_TABLECREATE2**  pptablecreate,
-    __out bool*     pfAdapted
+    _Out_ bool*     pfAdapted
 )
 {
     JET_ERR     err     = JET_errSuccess;
@@ -8961,7 +8961,7 @@ Cleanup:
 // ptablecreate will be deleted.
 JET_ERR
 EsetestUnadaptJET_TABLECREATE2(
-    __in PSTR   szFunction,
+    _In_ PSTR   szFunction,
     __inout JET_TABLECREATE2*   ptablecreateInNewFormat,        // the user buffer
     __inout JET_TABLECREATE2**  pptablecreate                   // has the new data, will get deleted
 )
@@ -9007,8 +9007,8 @@ Cleanup:
 
 JET_COLUMNDEF*
 EsetestCompressJET_COLUMNDEF(
-    __in const JET_COLUMNDEF*   pcolumndef,
-    __out bool*                 pfAllocated
+    _In_ const JET_COLUMNDEF*   pcolumndef,
+    _Out_ bool*                 pfAllocated
 )
 {
     JET_COLUMNDEF* pcolumndefReturn = NULL;
@@ -9036,7 +9036,7 @@ JET_COLUMNCREATE*
 EsetestCompressJET_COLUMNCREATE(
     __in_ecount_opt(cColumns) const JET_COLUMNCREATE*   pcolumncreate,
     unsigned long                                       cColumns,
-    __out bool*                                         pfAllocated
+    _Out_ bool*                                         pfAllocated
 )
 {
     JET_COLUMNCREATE* pcolumncreateReturn = NULL;
@@ -9067,7 +9067,7 @@ JET_SETCOLUMN*
 EsetestCompressJET_SETCOLUMN(
     __in_ecount_opt(csetcolumn) const JET_SETCOLUMN*    psetcolumn,
     unsigned long                                       csetcolumn,
-    __out bool*                                         pfAllocated
+    _Out_ bool*                                         pfAllocated
 )
 {
     JET_SETCOLUMN* psetcolumnReturn = NULL;
@@ -9263,14 +9263,14 @@ bool
 PearsonCorrelationStartSampling(
     __in_opt HANDLE     h,
     __in_opt PCSTR      szComputerNameX,
-    __in PCSTR          szPerfObjectX,
-    __in PCSTR          szPerfCounterX,
-    __in PCSTR          szInstanceX,
+    _In_ PCSTR          szPerfObjectX,
+    _In_ PCSTR          szPerfCounterX,
+    _In_ PCSTR          szInstanceX,
     __in_opt PCSTR      szComputerNameY,
-    __in PCSTR          szPerfObjectY,
-    __in PCSTR          szPerfCounterY,
-    __in PCSTR          szInstanceY,
-    __in DWORD          dwPeriod
+    _In_ PCSTR          szPerfObjectY,
+    _In_ PCSTR          szPerfCounterY,
+    _In_ PCSTR          szInstanceY,
+    _In_ DWORD          dwPeriod
 )
 {
     EsePerfPearsonCorrelation* pPCor = (EsePerfPearsonCorrelation*)h;

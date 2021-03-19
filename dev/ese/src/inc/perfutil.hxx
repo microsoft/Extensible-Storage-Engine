@@ -23,7 +23,7 @@ extern DWORD DwPerfUtilRegCreateKeyEx( HKEY hkeyRoot, LPCWSTR lpszSubKey, PHKEY 
 extern DWORD DwPerfUtilRegDeleteKeyEx( HKEY hkeyRoot, LPCWSTR lpszSubKey );
 extern DWORD DwPerfUtilRegDeleteValueEx( HKEY hkey, LPCWSTR lpszValue );
 extern DWORD DwPerfUtilRegSetValueEx( HKEY hkey, LPCWSTR lpszValue, DWORD fdwType, CONST BYTE *lpbData, DWORD cbData );
-extern DWORD DwPerfUtilRegQueryValueEx( HKEY hkey, __in LPCWSTR lpszValue, LPDWORD lpdwType, LPBYTE *lplpbData );
+extern DWORD DwPerfUtilRegQueryValueEx( HKEY hkey, _In_ LPCWSTR lpszValue, LPDWORD lpdwType, LPBYTE *lplpbData );
 
 
 //  Init/Term

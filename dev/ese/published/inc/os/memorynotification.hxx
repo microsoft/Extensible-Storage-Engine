@@ -11,14 +11,14 @@ typedef void (*PfnMemNotification)( const DWORD_PTR dwContext );
 ERR ErrOSCreateLowMemoryNotification(
     PfnMemNotification const            pfnCallback,
     DWORD_PTR const                     dwContext,
-    __out HMEMORY_NOTIFICATION * const  ppNotification );
+    _Out_ HMEMORY_NOTIFICATION * const  ppNotification );
 
 ERR ErrOSRegisterMemoryNotification(
-    __in HMEMORY_NOTIFICATION           pvNotification );
+    _In_ HMEMORY_NOTIFICATION           pvNotification );
 
 ERR ErrOSQueryMemoryNotification(
     HMEMORY_NOTIFICATION const  pvNotification,
-    __out BOOL * const          pfLowMemory );
+    _Out_ BOOL * const          pfLowMemory );
 
 VOID OSUnregisterAndDestroyMemoryNotification(
     HMEMORY_NOTIFICATION const  pvNotification );

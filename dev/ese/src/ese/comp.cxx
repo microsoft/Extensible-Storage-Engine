@@ -297,7 +297,7 @@ LOCAL VOID CMPCopyOneIndex(
     size_t                  cbIdxCreateKeys,
     JET_TUPLELIMITS         *ptuplelimits,
     JET_CONDITIONALCOLUMN_A *pconditionalcolumn,
-    __out JET_SPACEHINTS *  pjsph )
+    _Out_ JET_SPACEHINTS *  pjsph )
 {
     TDB                     *ptdb = pfcbSrc->Ptdb();
     IDB                     *pidb = pfcbIndex->Pidb();

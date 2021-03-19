@@ -102,7 +102,7 @@ private:
 class TaskInfoGenericStats
 {
 public:
-    TaskInfoGenericStats (__in PCSTR szTaskType, DWORD msMaxDispatch = dtickTaskMaxDispatchDefault, DWORD msMaxExecute = dtickTaskMaxExecuteDefault):
+    TaskInfoGenericStats (_In_ PCSTR szTaskType, DWORD msMaxDispatch = dtickTaskMaxDispatchDefault, DWORD msMaxExecute = dtickTaskMaxExecuteDefault):
         m_szTaskType( szTaskType ),
         m_msMaxDispatch( msMaxDispatch ),
         m_msMaxExecute( msMaxExecute ),

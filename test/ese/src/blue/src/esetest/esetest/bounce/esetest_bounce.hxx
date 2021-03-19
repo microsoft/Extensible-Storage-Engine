@@ -329,22 +329,22 @@ BounceJetGetPageInfo2(
 
 JET_ERR
 BounceJetRemoveLogfile(
-    __in JET_PCSTR szDatabase,
-    __in JET_PCSTR szLogfile,
-    __in JET_GRBIT grbit
+    _In_ JET_PCSTR szDatabase,
+    _In_ JET_PCSTR szLogfile,
+    _In_ JET_GRBIT grbit
 );
 
 JET_ERR
 BounceJetGetDatabasePages(
-    __in JET_SESID                              sesid,
-    __in JET_DBID                               dbid,
-    __in unsigned long                          pgnoStart,
-    __in unsigned long                          cpg,
+    _In_ JET_SESID                              sesid,
+    _In_ JET_DBID                               dbid,
+    _In_ unsigned long                          pgnoStart,
+    _In_ unsigned long                          cpg,
     __out_bcount_part( cb,
     *pcbActual ) void * pv,
-    __in unsigned long                          cb,
-    __out unsigned long *                       pcbActual,
-    __in JET_GRBIT                              grbit
+    _In_ unsigned long                          cb,
+    _Out_ unsigned long *                       pcbActual,
+    _In_ JET_GRBIT                              grbit
 );
 
 JET_ERR
@@ -451,8 +451,8 @@ JET_ERR
 BounceJetRenameColumn(
     JET_SESID       sesid,
     JET_TABLEID     tableid,
-    __in JET_PCSTR  szName,
-    __in JET_PCSTR  szNameNew,
+    _In_ JET_PCSTR  szName,
+    _In_ JET_PCSTR  szNameNew,
     JET_GRBIT       grbit
 );
 
@@ -460,8 +460,8 @@ JET_ERR
 BounceJetSetColumnDefaultValue(
     JET_SESID           sesid,
     JET_DBID            dbid,
-    __in JET_PCSTR      szTableName,
-    __in JET_PCSTR      szColumnName,
+    _In_ JET_PCSTR      szTableName,
+    _In_ JET_PCSTR      szColumnName,
     __in_bcount(cbData) const void          *pvData,
     const unsigned long cbData,
     const JET_GRBIT     grbit
@@ -492,7 +492,7 @@ JET_ERR
 BounceJetCreateIndex(
     JET_SESID       sesid,
     JET_TABLEID     tableid,
-    __in JET_PCSTR  szIndexName,
+    _In_ JET_PCSTR  szIndexName,
     JET_GRBIT       grbit,
     const char      *szKey,
     unsigned long   cbKey,
@@ -511,7 +511,7 @@ JET_ERR
 BounceJetDeleteIndex(
     JET_SESID       sesid,
     JET_TABLEID     tableid,
-    __in JET_PCSTR  szIndexName
+    _In_ JET_PCSTR  szIndexName
 );
 
 JET_ERR
@@ -1081,7 +1081,7 @@ BounceJetBackupInstance(
 
 JET_ERR
 BounceJetRestore(
-    __in JET_PCSTR      sz,
+    _In_ JET_PCSTR      sz,
     JET_PFNSTATUS       pfn
 );
 
@@ -1174,7 +1174,7 @@ BounceJetOpenFileInstance(
 JET_ERR
 BounceJetOpenFileSectionInstance(
     JET_INSTANCE    instance,
-    __in JET_PSTR   szFile,
+    _In_ JET_PSTR   szFile,
     JET_HANDLE *    phFile,
     long        iSection,
     long        cSections,
@@ -1276,11 +1276,11 @@ BounceJetEndExternalBackupInstance2(
 
 JET_ERR
 BounceJetExternalRestore(
-    __in JET_PSTR   szCheckpointFilePath,
-    __in JET_PSTR   szLogPath,
+    _In_ JET_PSTR   szCheckpointFilePath,
+    _In_ JET_PSTR   szLogPath,
     JET_RSTMAP *    rgrstmap,
     long        crstfilemap,
-    __in JET_PSTR   szBackupLogPath,
+    _In_ JET_PSTR   szBackupLogPath,
     long        genLow,
     long        genHigh,
     JET_PFNSTATUS   pfn
@@ -1288,15 +1288,15 @@ BounceJetExternalRestore(
 
 JET_ERR
 BounceJetExternalRestore2(
-    __in JET_PSTR   szCheckpointFilePath,
-    __in JET_PSTR   szLogPath,
+    _In_ JET_PSTR   szCheckpointFilePath,
+    _In_ JET_PSTR   szLogPath,
     JET_RSTMAP *    rgrstmap,
     long        crstfilemap,
-    __in JET_PSTR   szBackupLogPath,
+    _In_ JET_PSTR   szBackupLogPath,
     JET_LOGINFO *   pLogInfo,
-    __in JET_PSTR   szTargetInstanceName,
-    __in JET_PSTR   szTargetInstanceLogPath,
-    __in JET_PSTR   szTargetInstanceCheckpointPath,
+    _In_ JET_PSTR   szTargetInstanceName,
+    _In_ JET_PSTR   szTargetInstanceLogPath,
+    _In_ JET_PSTR   szTargetInstanceCheckpointPath,
     JET_PFNSTATUS pfn
 );
 
@@ -1436,27 +1436,27 @@ BounceJetGetLogFileInfo(
 
 JET_ERR
 BounceJetPrereadKeys(
-    __in JET_SESID                              sesid,
-    __in JET_TABLEID                                tableid,
+    _In_ JET_SESID                                  sesid,
+    _In_ JET_TABLEID                                tableid,
     __in_ecount(ckeys) const void **                rgpvKeys,
-    __in_ecount(ckeys) const unsigned long *            rgcbKeys,
-    __in long                                       ckeys,
+    __in_ecount(ckeys) const unsigned long *        rgcbKeys,
+    _In_ long                                       ckeys,
     __out_opt long *                                pckeysPreread,
-    __in JET_GRBIT                              grbit
+    _In_ JET_GRBIT                                  grbit
 );
 
 JET_ERR
 BounceJetConsumeLogData(
-    __in    JET_INSTANCE        instance,
-    __in    JET_EMITDATACTX *   pEmitLogDataCtx,
-    __in    void *              pvLogData,
-    __in    unsigned long       cbLogData,
-    __in    JET_GRBIT           grbits
+    _In_    JET_INSTANCE        instance,
+    _In_    JET_EMITDATACTX *   pEmitLogDataCtx,
+    _In_    void *              pvLogData,
+    _In_    unsigned long       cbLogData,
+    _In_    JET_GRBIT           grbits
 );
 
 JET_ERR
 BounceJetTestHook(
-    __in        const TESTHOOK_OP   opcode,
+    _In_        const TESTHOOK_OP   opcode,
     __inout_opt void * const        pv
 );
 
