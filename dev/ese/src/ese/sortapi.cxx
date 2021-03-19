@@ -113,7 +113,8 @@ LOCAL ERR ErrSORTTableOpen(
         if ( ( pcolumndef->grbit & JET_bitColumnTagged )
             || FRECLongValue( pcolumndef->coltyp ) )
         {
-            if ( ( *pcolumnid = ++tcib.fidTaggedLast ) > fidTaggedMost )
+            *pcolumnid = ++tcib.fidTaggedLast;
+            if ( !FidOfColumnid( *pcolumnid ).FTagged() )
             {
                 Error( ErrERRCheck( JET_errTooManyColumns ) );
             }
@@ -133,14 +134,19 @@ LOCAL ERR ErrSORTTableOpen(
             pcolumndef->coltyp == JET_coltypGUID ||
             ( pcolumndef->grbit & JET_bitColumnFixed ) )
         {
-            if ( ( *pcolumnid = ++tcib.fidFixedLast ) > fidFixedMost )
+            *pcolumnid = ++tcib.fidFixedLast;
+            if ( !FidOfColumnid( *pcolumnid ).FFixed() )
             {
                 Error( ErrERRCheck( JET_errTooManyColumns ) );
             }
         }
-        else if ( ( *pcolumnid = ++tcib.fidVarLast ) > fidVarMost )
+        else
         {
-            Error( ErrERRCheck( JET_errTooManyColumns ) );
+            *pcolumnid = ++tcib.fidVarLast;
+            if ( !FidOfColumnid( *pcolumnid ).FVar() )
+            {
+                Error( ErrERRCheck( JET_errTooManyColumns ) );
+            }
         }
     }
 
@@ -1086,7 +1092,7 @@ INLINE SIZE_T CbSORTCopyFixedVarColumns(
     // Need some space for the null-bit array.  Use the space after the
     // theoretical maximum space for fixed columns (ie. if all fixed columns
     // were set).  Assert that the null-bit array will fit in the pathological case.
-    const INT   cFixedColumnsDest = ( ptdbDest->FidFixedLast() - fidFixedLeast + 1 );
+    const INT   cFixedColumnsDest = ptdbDest->FidFixedLast().CountOf( fidtypFixed );
     Assert( ptdbSrc->IbEndFixedColumns() < REC::CbRecordMostWithGlobalPageSize() );
     Assert( ptdbDest->IbEndFixedColumns() <= ptdbSrc->IbEndFixedColumns() );
     Assert( ptdbDest->IbEndFixedColumns() + ( ( cFixedColumnsDest + 7 ) / 8 )
@@ -1104,8 +1110,8 @@ INLINE SIZE_T CbSORTCopyFixedVarColumns(
 
     Assert( !ptdbSrc->FInitialisingDefaultRecord() );
 
-    fidFixedLastDest = fidFixedLeast-1;
-    for ( fidT = fidFixedLeast; fidT <= fidFixedLastSrc; fidT++ )
+    fidFixedLastDest = FID( fidtypFixed, fidlimNone );
+    for ( fidT = FID( fidtypFixed, fidlimLeast ); fidT <= fidFixedLastSrc; fidT++ )
     {
         const BOOL  fTemplateColumn = ptdbSrc->FFixedTemplateColumn( fidT );
         const WORD  ibNextOffset    = ptdbSrc->IbOffsetOfNextColumn( fidT );
@@ -1165,7 +1171,7 @@ INLINE SIZE_T CbSORTCopyFixedVarColumns(
 
             // If the source field is null, assert that the destination column
             // has also been flagged as such.
-            const UINT  ifid    = fidT - fidFixedLeast;
+            const UINT  ifid    = fidT.IndexOf( fidtypFixed );
 
             Assert( FFixedNullBit( prgbitNullSrc + ( ifid/8 ), ifid )
                 || !FFixedNullBit( prgbitNullT + ( fidFixedLastDest / 8 ), fidFixedLastDest ) );
@@ -1233,8 +1239,8 @@ INLINE SIZE_T CbSORTCopyFixedVarColumns(
     pibVarOffsDest = (UnalignedLittleEndian<REC::VAROFFSET> *)(
                         prgbitNullDest + ( ( fidFixedLastDest + 7 ) / 8 ) );
 
-    fidVarLastDest = fidVarLeast-1;
-    for ( fidT = fidVarLeast; fidT <= fidVarLastSrc; fidT++ )
+    fidVarLastDest = FID( fidtypVar, fidlimNone );
+    for ( fidT = FID( fidtypVar, fidlimLeast ); fidT <= fidVarLastSrc; fidT++ )
     {
         const COLUMNID  columnidVarSrc          = ColumnidOfFid( fidT, ptdbSrc->FVarTemplateColumn( fidT ) );
         const FIELD     * const pfieldVarSrc    = ptdbSrc->PfieldVar( columnidVarSrc );
@@ -1281,21 +1287,21 @@ INLINE SIZE_T CbSORTCopyFixedVarColumns(
 
     // The second iteration through the variable columns, we copy the column data
     // and update the offsets and nullity.
-    pbChunkSrc = (BYTE *)( pibVarOffsSrc + ( fidVarLastSrc - fidVarLeast + 1 ) );
+    pbChunkSrc = (BYTE *)( pibVarOffsSrc + fidVarLastSrc.CountOf( fidtypVar ) );
     Assert( pbChunkSrc == precSrc->PbVarData() );
-    pbChunkDest = (BYTE *)( pibVarOffsDest + ( fidVarLastDest - fidVarLeast + 1 ) );
+    pbChunkDest = (BYTE *)( pibVarOffsDest + fidVarLastDest.CountOf( fidtypVar ) );
     cbChunk = 0;
 
 #ifdef DEBUG
     const FID   fidVarLastSave = fidVarLastDest;
 #endif
 
-    fidVarLastDest = fidVarLeast-1;
-    for ( fidT = fidVarLeast; fidT <= fidVarLastSrc; fidT++ )
+    fidVarLastDest = FID( fidtypVar, fidlimNone );
+    for ( fidT = FID( fidtypVar, fidlimLeast ); fidT <= fidVarLastSrc; fidT++ )
     {
         const COLUMNID  columnidVarSrc          = ColumnidOfFid( fidT, ptdbSrc->FVarTemplateColumn( fidT ) );
         const FIELD     * const pfieldVarSrc    = ptdbSrc->PfieldVar( columnidVarSrc );
-        const UINT      ifid                    = fidT - fidVarLeast;
+        const UINT      ifid                    = fidT.IndexOf( fidtypVar );
 
         // Only care about undeleted columns
         Assert( pfieldVarSrc->coltyp != JET_coltypNil
@@ -1313,16 +1319,16 @@ INLINE SIZE_T CbSORTCopyFixedVarColumns(
         }
         else
         {
-            const REC::VAROFFSET    ibStart = ( fidVarLeast-1 == fidVarLastDest ?
-                                                    REC::VAROFFSET( 0 ) :
-                                                    IbVarOffset( pibVarOffsDest[fidVarLastDest-fidVarLeast] ) );
+            const REC::VAROFFSET    ibStart = ( fidVarLastDest.FVarNone() ?
+                                                REC::VAROFFSET( 0 ) :
+                                                IbVarOffset( pibVarOffsDest[ fidVarLastDest.IndexOf( fidtypVar ) ] ) );
             INT cb;
 
             fidVarLastDest++;
             if ( FVarNullBit( pibVarOffsSrc[ifid] ) )
             {
-                pibVarOffsDest[fidVarLastDest-fidVarLeast] = ibStart;
-                SetVarNullBit( *( UnalignedLittleEndian< WORD >*)(&pibVarOffsDest[fidVarLastDest-fidVarLeast]) );
+                pibVarOffsDest[ fidVarLastDest.IndexOf( fidtypVar ) ] = ibStart;
+                SetVarNullBit( *( UnalignedLittleEndian< WORD >*)( &pibVarOffsDest[ fidVarLastDest.IndexOf( fidtypVar ) ] ) );
                 cb = 0;
             }
             else
@@ -1340,8 +1346,8 @@ INLINE SIZE_T CbSORTCopyFixedVarColumns(
                     cb = IbVarOffset( pibVarOffsSrc[ifid] );
                 }
 
-                pibVarOffsDest[fidVarLastDest-fidVarLeast] = REC::VAROFFSET( ibStart + cb );
-                Assert( !FVarNullBit( pibVarOffsDest[fidVarLastDest-fidVarLeast] ) );
+                pibVarOffsDest[ fidVarLastDest.IndexOf( fidtypVar ) ] = REC::VAROFFSET( ibStart + cb );
+                Assert( !FVarNullBit( pibVarOffsDest[ fidVarLastDest.IndexOf( fidtypVar ) ] ) );
             }
 
             cbChunk += cb;
@@ -1385,35 +1391,35 @@ INLINE VOID SORTCheckVarTaggedCols( const REC *prec, const ULONG cbRec, const TD
 
     Assert( (BYTE *)pibVarOffs <= pbRecMax );
 
-    Assert( !FVarNullBit( pibVarOffs[fidVarLastInRec+1-fidVarLeast] ) );
-    Assert( ibVarOffset( pibVarOffs[fidVarLastInRec+1-fidVarLeast] ) ==
-        pibVarOffs[fidVarLastInRec+1-fidVarLeast] );
-    Assert( pibVarOffs[fidVarLastInRec+1-fidVarLeast] > sizeof(RECHDR) );
-    Assert( pibVarOffs[fidVarLastInRec+1-fidVarLeast] <= cbRec );
+    Assert( !FVarNullBit( pibVarOffs[ fidVarLastInRec.IndexOf( fidtypVar ) + 1 ] ) );
+    Assert( ibVarOffset( pibVarOffs[ fidVarLastInRec.IndexOf( fidtypVar ) + 1 ] ) ==
+        pibVarOffs[ fidVarLastInRec.IndexOf( fidtypVar ) + 1 ] );
+    Assert( pibVarOffs[ fidVarLastInRec.IndexOf( fidtypVar ) + 1 ] > sizeof(RECHDR) );
+    Assert( pibVarOffs[ fidVarLastInRec.IndexOf( fidtypVar ) + 1 ] <= cbRec );
 
-    for ( fid = fidVarLeast; fid <= fidVarLastInRec; fid++ )
+    for ( fid = FID( fidtypVar, fidlimLeast ); fid <= fidVarLastInRec; fid++ )
     {
         WORD    db;
-        Assert( ibVarOffset( pibVarOffs[fid-fidVarLeast] ) > sizeof(RECHDR) );
-        Assert( (ULONG)ibVarOffset( pibVarOffs[fid-fidVarLeast] ) <= cbRec );
-        Assert( ibVarOffset( pibVarOffs[fid+1-fidVarLeast] ) > sizeof(RECHDR) );
-        Assert( (ULONG)ibVarOffset( pibVarOffs[fid+1-fidVarLeast] ) <= cbRec );
-        Assert( ibVarOffset( pibVarOffs[fid-fidVarLeast] ) <= ibVarOffset( pibVarOffs[fid+1-fidVarLeast] ) );
+        Assert( ibVarOffset( pibVarOffs[ fid.IndexOf( fidtypVar ) ] ) > sizeof(RECHDR) );
+        Assert( (ULONG)ibVarOffset( pibVarOffs[ fid.IndexOf( fidtypVar ) ] ) <= cbRec );
+        Assert( ibVarOffset( pibVarOffs[ fid.IndexOf( fidtypVar ) + 1 ] ) > sizeof(RECHDR) );
+        Assert( (ULONG)ibVarOffset( pibVarOffs[ fid.IndexOf( fidtypVar ) + 1 ] ) <= cbRec );
+        Assert( ibVarOffset( pibVarOffs[ fid.IndexOf( fidtypVar ) ] ) <= ibVarOffset( pibVarOffs[ fid.IndexOf( fidtypVar ) + 1 ] ) );
 
-        db = ibVarOffset( pibVarOffs[fid+1-fidVarLeast] ) - ibVarOffset( pibVarOffs[ fid-fidVarLeast] );
+        db = ibVarOffset( pibVarOffs[ fid.IndexOf( fidtypVar ) + 1 ] ) - ibVarOffset( pibVarOffs[ fid.IndexOf( fidtypVar ) ] );
         Assert( db >= 0 );
-        if ( db > JET_cbColumnMost && ( pibVarOffs[fid+1-fidVarLeast] & wCorruptBit ) )
+        if ( db > JET_cbColumnMost && ( pibVarOffs[ fid.IndexOf( fidtypVar) + 1 ] & wCorruptBit ) )
         {
-            pibVarOffs[fid+1-fidVarLeast] &= ~wCorruptBit;
-            db = ibVarOffset( pibVarOffs[fid+1-fidVarLeast] ) - ibVarOffset( pibVarOffs [fid-fidVarLeast] );
+            pibVarOffs[ fid.IndexOf( fidtypVar ) + 1 ] &= ~wCorruptBit;
+            db = ibVarOffset( pibVarOffs[ fid.IndexOf( fidtypVar ) + 1 ] ) - ibVarOffset( pibVarOffs [ fid.IndexOf( fidtypVar ) ] );
             printf( "\nReset corrupt bit in VarOffset entry." );
         }
         Assert( db <= JET_cbColumnMost );
     }
 
 CheckTagged:
-    ptagfldPrev = (TAGFLD*)( pbRec + pibVarOffs[fidVarLastInRec+1-fidVarLeast] );
-    for ( ptagfld = (TAGFLD*)( pbRec + pibVarOffs[fidVarLastInRec+1-fidVarLeast] );
+    ptagfldPrev = (TAGFLD*)( pbRec + pibVarOffs[ fidVarLastInRec.IndexOf( fidtypVar ) + 1 ] );
+    for ( ptagfld = (TAGFLD*)( pbRec + pibVarOffs[ fidVarLastInRec.IndexOf( fidtypVar ) + 1 ] );
         (BYTE *)ptagfld < pbRecMax;
         ptagfld = PtagfldNext( ptagfld ) )
     {
@@ -1644,16 +1650,16 @@ InsertRecord:
         const FID   fidFixedLast    = ( (REC *)pbRecDest )->FidFixedLastInRec();
         const FID   fidVarLast      = ( (REC *)pbRecDest )->FidVarLastInRec();
 
-        Assert( fidFixedLast >= fidFixedLeast-1 );
+        Assert( fidFixedLast.FFixedNone() || fidFixedLast.FFixed() );
         Assert( fidFixedLast <= pfucbDest->u.pfcb->Ptdb()->FidFixedLast() );
-        Assert( fidVarLast >= fidVarLeast-1 );
+        Assert( fidVarLast.FVarNone() || fidVarLast.FVar() );
         Assert( fidVarLast <= pfucbDest->u.pfcb->Ptdb()->FidVarLast() );
 
         // Do not count record header.
         const INT   cbOverhead =
-                        ibRECStartFixedColumns                              // Record header + offset to tagged fields
-                        + ( ( fidFixedLast + 1 - fidFixedLeast ) + 7 ) / 8  // Null array for fixed columns
-                        + ( fidVarLast + 1 - fidVarLeast ) * sizeof(WORD);  // Variable offsets array
+            ibRECStartFixedColumns                                 // Record header + offset to tagged fields
+            + ( fidFixedLast.CountOf( fidtypFixed ) + 7 ) / 8      // Null array for fixed columns
+            + ( fidVarLast.CountOf( fidtypVar ) ) * sizeof(WORD);  // Variable offsets array
         Assert( cbRecDestFixedVar >= (SIZE_T)cbOverhead );
 
         // Do not count offsets tables or null arrays.
@@ -1801,8 +1807,8 @@ INLINE VOID SORTAssertColumnidMaps(
             const FIELD *pfieldTagged = ptdb->PfieldTagged( ColumnidOfFid( fidT, fTemplateTable ) );
             if ( pfieldTagged->coltyp != JET_coltypNil )
             {
-                Assert( FCOLUMNIDTagged( mpcolumnidcolumnidTagged[fidT-fidTaggedLeast] ) );
-                Assert( FidOfColumnid( mpcolumnidcolumnidTagged[fidT-fidTaggedLeast] ) <= fidT );
+                Assert( FCOLUMNIDTagged( mpcolumnidcolumnidTagged[ fidT.IndexOf( fidtypTagged ) ] ) );
+                Assert( FidOfColumnid( mpcolumnidcolumnidTagged[ fidT.IndexOf( fidtypTagged ) ] ) <= fidT );
             }
         }
     }
@@ -1814,10 +1820,10 @@ INLINE VOID SORTAssertColumnidMaps(
             Assert( ptdb->PfieldTagged( ColumnidOfFid( fidT, fTemplateTable ) )->coltyp != JET_coltypNil );
             if ( fidT > ptdb->FidTaggedFirst() )
             {
-                Assert( mpcolumnidcolumnidTagged[fidT-fidTaggedLeast]
-                        == mpcolumnidcolumnidTagged[fidT-fidTaggedLeast-1] + 1 );
+                Assert( mpcolumnidcolumnidTagged[ fidT.IndexOf( fidtypTagged ) ]
+                        == mpcolumnidcolumnidTagged[ fidT.IndexOf( fidTaggedLeast ) - 1 ] + 1 );
             }
-            Assert( FidOfColumnid( mpcolumnidcolumnidTagged[fidT-fidTaggedLeast] ) == fidT );
+            Assert( FidOfColumnid( mpcolumnidcolumnidTagged[ fidT.IndexOf( fidtypTagged ) ] ) == fidT );
         }
     }
 
@@ -1917,7 +1923,7 @@ ERR ErrSORTCopyRecords(
     //
     if ( ptdb->FTableHasDeleteOnZeroColumn() )
     {
-        for ( FID fid = fidFixedLeast; fid <= ptdb->FidFixedLast(); ++fid )
+        for ( FID fid = FID( fidtypFixed, fidlimLeast ); fid <= ptdb->FidFixedLast(); ++fid )
         {
             const BOOL          fTemplateColumn = ptdb->FFixedTemplateColumn( fid );
             const COLUMNID      columnid        = ColumnidOfFid( fid, fTemplateColumn );
@@ -2531,9 +2537,9 @@ LOCAL ERR ErrIsamSortMaterialize( PIB * const ppib, FUCB * const pfucbSort, cons
     Assert( ptdbSort->PfcbTemplateTable() == pfcbNil );
     Assert( ptdbSort->IbEndFixedColumns() >= ibRECStartFixedColumns );
     Assert( ptdbTable != ptdbNil );
-    Assert( ptdbTable->FidFixedLast() == fidFixedLeast-1 );
-    Assert( ptdbTable->FidVarLast() == fidVarLeast-1 );
-    Assert( ptdbTable->FidTaggedLast() == fidTaggedLeast-1 );
+    Assert( ptdbTable->FidFixedLast().FFixedNone() );
+    Assert( ptdbTable->FidVarLast().FVarNone() );
+    Assert( ptdbTable->FidTaggedLast().FTaggedNone() );
     Assert( ptdbTable->IbEndFixedColumns() == ibRECStartFixedColumns );
     Assert( ptdbTable->FidVersion() == 0 );
     Assert( ptdbTable->FidAutoincrement() == 0 );

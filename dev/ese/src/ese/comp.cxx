@@ -946,7 +946,7 @@ LOCAL ERR ErrCMPCreateTableColumnIndex(
     if ( cTagged > 0 )
     {
         Assert( fidTaggedHighest.FTagged() );
-        cbAllocate = sizeof(JET_COLUMNID) * ( fidTaggedHighest + 1 - fidTaggedLeast );
+        cbAllocate = sizeof(JET_COLUMNID) * ( fidTaggedHighest.CountOf( fidtypTagged ) );
         Alloc( mpcolumnidcolumnidTagged = static_cast<JET_COLUMNID *>( PvOSMemoryHeapAlloc( cbAllocate ) ) );
         memset( (BYTE *)mpcolumnidcolumnidTagged, 0, cbAllocate );
     }
@@ -978,8 +978,8 @@ LOCAL ERR ErrCMPCreateTableColumnIndex(
             Assert( FCOLUMNIDTagged( pcolcreateCurr->columnid ) );
             Assert( FidOfColumnid( *pcolumnidSrc ) <= fidTaggedHighest );
             Assert( mpcolumnidcolumnidTagged != NULL );
-            Assert( mpcolumnidcolumnidTagged[FidOfColumnid( *pcolumnidSrc ) - fidTaggedLeast] == 0 );
-            mpcolumnidcolumnidTagged[FidOfColumnid( *pcolumnidSrc ) - fidTaggedLeast] = pcolcreateCurr->columnid;
+            Assert( mpcolumnidcolumnidTagged[ FidOfColumnid( *pcolumnidSrc ).IndexOf( fidtypTagged ) ] == 0 );
+            mpcolumnidcolumnidTagged[ FidOfColumnid( *pcolumnidSrc ).IndexOf( fidtypTagged ) ] = pcolcreateCurr->columnid;
         }
         else
         {
@@ -1256,9 +1256,9 @@ LOCAL ERR ErrCMPCopyTable(
 
             const TDB   * const ptdbT = pfucbDest->u.pfcb->Ptdb();
             Assert( ptdbNil != ptdbT );
-            const INT   cColumns = ( ptdbT->FidFixedLast() + 1 - fidFixedLeast )
-                                    + ( ptdbT->FidVarLast() + 1 - fidVarLeast )
-                                    + ( ptdbT->FidTaggedLast() + 1 - fidTaggedLeast );
+            const INT   cColumns = ( ptdbT->FidFixedLast().CountOf( fidtypFixed ) )
+                + ( ptdbT->FidVarLast().CountOf( fidtypVar ) )
+                + ( ptdbT->FidTaggedLast().CountOf( fidtypTagged ) );
 
             if ( cColumns > INT( pstatus->cTableFixedVarColumns + pstatus->cTableTaggedColumns ) )
             {

@@ -143,7 +143,7 @@ VOID DBUTLDumpRec( const LONG cbPage, const FUCB * const pfucbTable, const VOID 
 
     FID fid;
     
-    const FID fidFixedFirst = fidFixedLeast;
+    const FID fidFixedFirst = FID( fidtypFixed, fidlimLeast );
     const FID fidFixedLast  = prec->FidFixedLastInRec();
     const INT cColumnsFixed = max( 0, fidFixedLast - fidFixedFirst + 1 );
     
@@ -151,7 +151,7 @@ VOID DBUTLDumpRec( const LONG cbPage, const FUCB * const pfucbTable, const VOID 
     (*pcprintf)( "=================\n" );
     for( fid = fidFixedFirst; fid <= fidFixedLast; ++fid )
     {
-        const UINT  ifid                    = fid - fidFixedLeast;
+        const UINT  ifid                    = fid.IndexOf( fidtypFixed );
         const BYTE  * const prgbitNullity   = prec->PbFixedNullBitMap() + ifid/8;
 
         // Get the COLUMNID from FID.
@@ -213,7 +213,7 @@ VOID DBUTLDumpRec( const LONG cbPage, const FUCB * const pfucbTable, const VOID 
 
     (*pcprintf)( "\n" );
     
-    const FID fidVariableFirst = fidVarLeast ;
+    const FID fidVariableFirst = FID( fidtypVar, fidlimLeast );
     const FID fidVariableLast  = prec->FidVarLastInRec();
     const INT cColumnsVariable = max( 0, fidVariableLast - fidVariableFirst + 1 );
     (*pcprintf)( "Variable Columns:  %d\n", cColumnsVariable );
@@ -222,7 +222,7 @@ VOID DBUTLDumpRec( const LONG cbPage, const FUCB * const pfucbTable, const VOID 
     const UnalignedLittleEndian<REC::VAROFFSET> * const pibVarOffs      = ( const UnalignedLittleEndian<REC::VAROFFSET> * const )prec->PibVarOffsets();
     for( fid = fidVariableFirst; fid <= fidVariableLast; ++fid )
     {
-        const UINT              ifid            = fid - fidVarLeast;
+        const UINT              ifid            = fid.IndexOf( fidtypVar );
         const REC::VAROFFSET    ibStartOfColumn = prec->IbVarOffsetStart( fid );
         const REC::VAROFFSET    ibEndOfColumn   = IbVarOffset( pibVarOffs[ifid] );
 

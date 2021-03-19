@@ -492,7 +492,7 @@ VOID LGSetColumnDiffs(
     pfcb->EnterDML();
 
     Assert( fidFixedLastInRecOld <= fidFixedLastInRecNew );     //  can't shrink record
-    for ( fid = fidFixedLeast; fid <= fidFixedLastInRecOld; fid++ )
+    for ( fid = FID( fidtypFixed, fidlimLeast ); fid <= fidFixedLastInRecOld; fid++ )
     {
         //  if this column is not set, skip
         //
@@ -511,7 +511,7 @@ VOID LGSetColumnDiffs(
         //
 
         //  convert fid to an offset
-        const UINT  ifid            = fid - fidFixedLeast;
+        const UINT  ifid            = fid.IndexOf( fidtypFixed );
         const BOOL  fFieldNullOld   = FFixedNullBit( pbFixedNullBitMapOld + ifid/8, ifid );
         const BOOL  fFieldNullNew   = FFixedNullBit( pbFixedNullBitMapNew + ifid/8, ifid );
 
@@ -552,7 +552,7 @@ VOID LGSetColumnDiffs(
     if ( fidFixedLastInRecOld < fidFixedLastInRecNew )
     {
         //  Log extended fixed columns.
-        Assert( fidFixedLastInRecNew >= fidFixedLeast );
+        Assert( fidFixedLastInRecNew.FFixed() );
 
         //  we extend fixed field. Null array is resized. Log it.
         //
@@ -611,9 +611,9 @@ VOID LGSetColumnDiffs(
     //  Find first set var field whose offset entry has changed, either
     //  because the offset has changed or because the null flag has changed.
     Assert( fidVarLastInRecOld <= fidVarLastInRecNew );
-    for ( fid = fidVarLeast; fid <= fidVarLastInRecOld; fid++ )
+    for ( fid = FID( fidtypVar, fidlimLeast ); fid <= fidVarLastInRecOld; fid++ )
     {
-        const UINT  ifid    = fid - fidVarLeast;
+        const UINT  ifid    = fid.IndexOf( fidtypVar );
         if ( pibVarOffsOld[ifid] != pibVarOffsNew[ifid] )
         {
             break;
@@ -623,7 +623,7 @@ VOID LGSetColumnDiffs(
     Assert( fid <= fidVarLastInRecNew || fidVarLastInRecOld == fidVarLastInRecNew );
     if ( fid <= fidVarLastInRecNew )
     {
-        const UINT  ifid    = fid - fidVarLeast;
+        const UINT  ifid    = fid.IndexOf( fidtypVar );
 
         //  we need to log the offset between fid and fidVarLastInRecNew
         //
@@ -643,7 +643,7 @@ VOID LGSetColumnDiffs(
 
     //  scan through each variable length field up to old last fid and log its replace image.
     //
-    for ( fid = fidVarLeast; fid <= fidVarLastInRecOld; fid++ )
+    for ( fid = FID( fidtypVar, fidlimLeast ); fid <= fidVarLastInRecOld; fid++ )
     {
         //  if this column is not set, skip
         //

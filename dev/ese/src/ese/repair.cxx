@@ -7378,7 +7378,7 @@ LOCAL ERR ErrREPAIRICheckRecord(
 //  ================================================================
 {
     ERR     err = JET_errSuccess;
-    const FIDLASTINTDB fidLastInTDB = { fidFixedMost, fidVarMost, fidTaggedMost };
+    const FIDLASTINTDB fidLastInTDB = { FID( fidtypFixed, fidlimMost ), FID( fidtypVar, fidlimMost ), FID( fidtypTagged, fidlimMost ) };
 
     RECCHECKTABLE   reccheck( objidNil, pfucbNil, fidLastInTDB, NULL, popts );
 
@@ -11561,7 +11561,7 @@ ERR RECCHECKTABLE::ErrCheckVariableFields_( const KEYDATAFLAGS& kdf )
     const REC * const prec = reinterpret_cast<REC *>( kdf.data.Pv() );
     const BYTE * const pbRecMax = reinterpret_cast<BYTE *>( kdf.data.Pv() ) + kdf.data.Cb();
 
-    const FID fidVariableFirst = fidVarLeast ;
+    const FID fidVariableFirst = FID( fidtypVar, fidlimLeast );
     const FID fidVariableLast  = prec->FidVarLastInRec();
     const UnalignedLittleEndian<REC::VAROFFSET> * const pibVarOffs      = prec->PibVarOffsets();
 
@@ -11574,7 +11574,7 @@ ERR RECCHECKTABLE::ErrCheckVariableFields_( const KEYDATAFLAGS& kdf )
 
     for( fid = fidVariableFirst; fid <= fidVariableLast; ++fid )
     {
-        const UINT              ifid            = fid - fidVarLeast;
+        const UINT              ifid            = fid.IndexOf( fidtypVar );
         const REC::VAROFFSET    ibStartOfColumn = prec->IbVarOffsetStart( fid );
         const REC::VAROFFSET    ibEndOfColumn   = IbVarOffset( pibVarOffs[ifid] );
 
@@ -11770,7 +11770,7 @@ ERR RECCHECKTABLE::ErrCheckTaggedFields_( const KEYDATAFLAGS& kdf )
     }
 
 
-    FID     fidTaggedLast       = fidTaggedLeast - 1;
+    FID     fidTaggedLast       = FID( fidtypTagged, fidlimNone );
     VOID *  pvWorkBuf;
 
     BFAlloc( bfasTemporary, &pvWorkBuf );

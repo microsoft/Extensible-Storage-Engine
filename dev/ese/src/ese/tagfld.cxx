@@ -2936,10 +2936,10 @@ VOID TAGFIELDS::CopyTaggedColumns(
 
                 if ( !FCOLUMNIDTemplateColumn( columnid ) )
                 {
-                    Assert( FCOLUMNIDTagged( mpcolumnidcolumnidTagged[fidSrc-fidTaggedLeast] ) );
-                    Assert( !FCOLUMNIDTemplateColumn( mpcolumnidcolumnidTagged[fidSrc-fidTaggedLeast] ) );
-                    Assert( mpcolumnidcolumnidTagged[fidSrc-fidTaggedLeast] <= pfucbDest->u.pfcb->Ptdb()->FidTaggedLast() );
-                    Assert( mpcolumnidcolumnidTagged[fidSrc-fidTaggedLeast] <= fidSrc );
+                    Assert( FCOLUMNIDTagged( mpcolumnidcolumnidTagged[ fidSrc.IndexOf( fidtypTagged ) ] ) );
+                    Assert( !FCOLUMNIDTemplateColumn( mpcolumnidcolumnidTagged[ fidSrc.IndexOf( fidtypTagged ) ] ) );
+                    Assert( mpcolumnidcolumnidTagged[ fidSrc.IndexOf( fidtypTagged ) ] <= pfucbDest->u.pfcb->Ptdb()->FidTaggedLast() );
+                    Assert( mpcolumnidcolumnidTagged[ fidSrc.IndexOf( fidtypTagged ) ] <= fidSrc );
                     Assert( !ptagfld->FDerived() );
 
                     //  hit the non-derived columns, so should be no more derived columns left
@@ -3006,11 +3006,11 @@ VOID TAGFIELDS::CopyTaggedColumns(
 
             if ( !FCOLUMNIDTemplateColumn( columnid ) )
             {
-                Assert( FCOLUMNIDTagged( mpcolumnidcolumnidTagged[fidSrc-fidTaggedLeast] ) );
-                Assert( !FCOLUMNIDTemplateColumn( mpcolumnidcolumnidTagged[fidSrc-fidTaggedLeast] ) );
-                Assert( mpcolumnidcolumnidTagged[fidSrc-fidTaggedLeast] <= pfucbDest->u.pfcb->Ptdb()->FidTaggedLast() );
-                Assert( mpcolumnidcolumnidTagged[fidSrc-fidTaggedLeast] <= fidSrc );
-                fidDest = FidOfColumnid( mpcolumnidcolumnidTagged[fidSrc-fidTaggedLeast] );
+                Assert( FCOLUMNIDTagged( mpcolumnidcolumnidTagged[ fidSrc.IndexOf( fidtypTagged ) ] ) );
+                Assert( !FCOLUMNIDTemplateColumn( mpcolumnidcolumnidTagged[ fidSrc.IndexOf( fidtypTagged ) ] ) );
+                Assert( mpcolumnidcolumnidTagged[ fidSrc.IndexOf( fidtypTagged ) ] <= pfucbDest->u.pfcb->Ptdb()->FidTaggedLast() );
+                Assert( mpcolumnidcolumnidTagged[ fidSrc.IndexOf( fidtypTagged ) ] <= fidSrc );
+                fidDest = FidOfColumnid( mpcolumnidcolumnidTagged[ fidSrc.IndexOf( fidtypTagged ) ] );
 
                 Assert( !ptagfld->FDerived() );
             }

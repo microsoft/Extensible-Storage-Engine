@@ -226,7 +226,7 @@ Parameters: pfucb               pointer to FUCB for table containing columns
             szColumnName        column name or NULL for next column
             pcolumndef          output buffer containing column info
 
-Return Value: Column id of column found ( fidTaggedMost if none )
+Return Value: Column id of column found ( FID( fidtypTaggeed, fidlimMost ) if none )
 
 Errors/Warnings:
 

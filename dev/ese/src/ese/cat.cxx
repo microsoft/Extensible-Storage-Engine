@@ -5397,9 +5397,9 @@ LOCAL ERR ErrCATIFindHighestColumnid(
     DATA                dataField;
     BOOL                fLatched    = fFalse;
 
-    Assert( *pcolumnidMost == fidFixedMost
-        || *pcolumnidMost == fidVarMost
-        || *pcolumnidMost == fidTaggedMost );
+    Assert( FidOfColumnid( *pcolumnidMost ).FFixedMost()
+            || FidOfColumnid( *pcolumnidMost ).FVarMost()
+            || FidOfColumnid( *pcolumnidMost ).FTaggedMost() );
 
     //  should be on primary index
     Assert( pfucbNil == pfucbCatalog->pfucbCurIndex );
@@ -5528,38 +5528,35 @@ LOCAL ERR ErrCATIFindAllHighestColumnids(
     Assert( pfucbCatalogDupe->pvtfndef == &vtfndefIsam );
     pfucbCatalogDupe->pvtfndef = &vtfndefInvalidTableid;
 
-    columnidMost = fidFixedMost;
+    columnidMost = FID( fidtypFixed, fidlimMost );
     Call( ErrCATIFindHighestColumnid(
                 ppib,
                 pfucbCatalogDupe,
                 objidTable,
-                fidFixedLeast,
+                FID( fidtypFixed, fidlimLeast ),
                 &columnidMost ) );
     ptcib->fidFixedLast = FidOfColumnid( columnidMost );
-    Assert( ptcib->fidFixedLast == fidFixedLeast-1
-        || ptcib->fidFixedLast.FFixed() );
+    Assert( ptcib->fidFixedLast.FFixedNone() || ptcib->fidFixedLast.FFixed() );
 
-    columnidMost = fidVarMost;
+    columnidMost = FID( fidtypVar, fidlimMost );
     Call( ErrCATIFindHighestColumnid(
                 ppib,
                 pfucbCatalogDupe,
                 objidTable,
-                fidVarLeast,
+                FID( fidtypVar, fidlimLeast ),
                 &columnidMost ) );
     ptcib->fidVarLast = FidOfColumnid( columnidMost );
-    Assert( ptcib->fidVarLast == fidVarLeast-1
-        || ptcib->fidVarLast.FVar() );
+    Assert( ptcib->fidVarLast.FVarNone() || ptcib->fidVarLast.FVar() );
 
-    columnidMost = fidTaggedMost;
+    columnidMost = FID( fidtypTagged, fidlimMost );
     Call( ErrCATIFindHighestColumnid(
                 ppib,
                 pfucbCatalogDupe,
                 objidTable,
-                fidTaggedLeast,
+                FID( fidtypTagged, fidlimLeast ),
                 &columnidMost ) );
     ptcib->fidTaggedLast = FidOfColumnid( columnidMost );
-    Assert( ptcib->fidTaggedLast == fidTaggedLeast-1
-        || ptcib->fidTaggedLast.FTagged() );
+    Assert( ptcib->fidTaggedLast.FTaggedNone() || ptcib->fidTaggedLast.FTagged() );
 
 
 HandleError:
@@ -5581,9 +5578,9 @@ LOCAL ERR ErrCATIFindLowestColumnid(
     DATA                dataField;
     BOOL                fLatched    = fFalse;
 
-    Assert( *pcolumnidLeast == fidFixedLeast
-        || *pcolumnidLeast == fidVarLeast
-        || *pcolumnidLeast == fidTaggedLeast );
+    Assert( FidOfColumnid( *pcolumnidLeast ).FFixedLeast()
+            || FidOfColumnid( *pcolumnidLeast ).FVarLeast()
+            || FidOfColumnid( *pcolumnidLeast ).FTaggedLeast() );
 
     //  should be on primary index
     Assert( pfucbNil == pfucbCatalog->pfucbCurIndex );
@@ -8301,9 +8298,9 @@ ERR ErrCATInitTempFCB( FUCB *pfucbTable )
     /*  for temporary tables, could only get here from
     /*  create table which means table should currently be empty
     /**/
-    Assert( ptdb->FidFixedLast() == fidFixedLeast - 1 );
-    Assert( ptdb->FidVarLast() == fidVarLeast - 1 );
-    Assert( ptdb->FidTaggedLast() == fidTaggedLeast - 1 );
+    Assert( ptdb->FidFixedLast().FFixedNone() );
+    Assert( ptdb->FidVarLast().FVarNone() );
+    Assert( ptdb->FidTaggedLast().FTaggedNone() );
     Assert( ptdb->DbkMost() == 0 );
     Assert( ptdb->Ui64LidLast() == 0 );
 
@@ -11478,35 +11475,51 @@ ERR ErrCATAddConditionalColumnsToAllIndexes(
         Call( ErrCATSeekTable( ppib, ifmp, szTemplateTable, NULL, &objidTemplateTable ) );
         Assert( objidNil != objidTemplateTable );
 
-        columnidLeast = fidFixedLeast;
+        columnidLeast = FID( fidtypFixed, fidlimLeast );
         CallR( ErrCATIFindLowestColumnid(
                     ppib,
                     pfucbCatalog,
                     objidTable,
                     &columnidLeast ) );
-        tcibTemplateTable.fidFixedLast = FID( FidOfColumnid( columnidLeast ).FFixed() ? //  use FID:FFixed() to avoid valid columnid check
-                                            FidOfColumnid( columnidLeast ) - 1 :
-                                            fidFixedLeast - 1 );
+        // use FFixedFid() to avoid valid columnid check
+        if ( FidOfColumnid( columnidLeast ).FFixed() )
+        {
+            tcibTemplateTable.fidFixedLast = FidOfColumnid( columnidLeast ) - 1;
+        }
+        else
+        {
+            tcibTemplateTable.fidFixedLast = FID( fidtypFixed, fidlimNone );
+        }
+        
+        columnidLeast = FID( fidtypVar, fidlimLeast );
+        CallR( ErrCATIFindLowestColumnid(
+                    ppib,
+                    pfucbCatalog,
+                    objidTable,
+                    &columnidLeast ) );
+        if ( FidOfColumnid( columnidLeast ).FVar() )
+        {
+            tcibTemplateTable.fidVarLast = FidOfColumnid( columnidLeast ) - 1;
+        }
+        else
+        {
+            tcibTemplateTable.fidVarLast = FID( fidtypVar, fidlimNone );
+        }
 
-        columnidLeast = fidVarLeast;
+        columnidLeast = FID( fidtypTagged, fidlimLeast );
         CallR( ErrCATIFindLowestColumnid(
                     ppib,
                     pfucbCatalog,
                     objidTable,
                     &columnidLeast ) );
-        tcibTemplateTable.fidVarLast = FID( FCOLUMNIDVar( columnidLeast ) ?
-                                            FidOfColumnid( columnidLeast ) - 1 :
-                                            fidVarLeast - 1 );
-
-        columnidLeast = fidTaggedLeast;
-        CallR( ErrCATIFindLowestColumnid(
-                    ppib,
-                    pfucbCatalog,
-                    objidTable,
-                    &columnidLeast ) );
-        tcibTemplateTable.fidTaggedLast = FID( FCOLUMNIDTagged( columnidLeast ) ?
-                                            FidOfColumnid( columnidLeast ) - 1 :
-                                            fidTaggedLeast - 1 );
+        if ( FidOfColumnid( columnidLeast ).FTagged() )
+        {
+            tcibTemplateTable.fidTaggedLast = FidOfColumnid( columnidLeast ) - 1;
+        }
+        else
+        {
+            tcibTemplateTable.fidTaggedLast = FID( fidtypTagged, fidlimNone );
+        }
     }
     else
     {
@@ -12268,9 +12281,9 @@ HandleError:
     return err;
 }
 
-static const JET_COLUMNID columnidMSObjids_objid        = fidTaggedLeast;
-static const JET_COLUMNID columnidMSObjids_objidTable   = fidTaggedLeast + 1;
-static const JET_COLUMNID columnidMSObjids_type         = fidTaggedLeast + 2;
+static const JET_COLUMNID columnidMSObjids_objid        = FID( fidtypTagged, 0 );
+static const JET_COLUMNID columnidMSObjids_objidTable   = FID( fidtypTagged, 1 );
+static const JET_COLUMNID columnidMSObjids_type         = FID( fidtypTagged, 2 );
 
 static const CHAR szMSObjidIndex[]      = "primary";
 static const CHAR szMSObjidIndexKey[]   = "+objid\0";

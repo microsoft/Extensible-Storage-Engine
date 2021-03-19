@@ -81,11 +81,11 @@ HandleError:
 // PARAMETERS
 //              pptdb           receives new TDB
 //              fidFixedLast    last fixed field id to be used
-//                              (should be fidFixedLeast-1 if none)
+//                              (should be FFixedNone() if none)
 //              fidVarLast      last var field id to be used
-//                              (should be fidVarLeast-1 if none)
+//                              (should be FVarNone() if none)
 //              fidTaggedLast   last tagged field id to be used
-//                              (should be fidTaggedLeast-1 if none)
+//                              (should be FTaggedNone() if none)
 // RETURNS      Error code, one of:
 //                   JET_errSuccess             Everything worked.
 //                  -JET_errOutOfMemory Failed to allocate memory.
@@ -115,41 +115,48 @@ ERR ErrTDBCreate(
     WORD    ibEndFixedColumns;
 
     Assert( pptdb != NULL );
-    Assert( ptcib->fidFixedLast <= fidFixedMost );
-    Assert( ptcib->fidVarLast >= fidVarLeast-1 && ptcib->fidVarLast <= fidVarMost );
-    Assert( ptcib->fidTaggedLast >= fidTaggedLeast-1 && ptcib->fidTaggedLast <= fidTaggedMost );
+    Assert( ptcib->fidFixedLast.FFixedNone() || ptcib->fidFixedLast.FFixed() );
+    Assert( ptcib->fidVarLast.FVarNone() || ptcib->fidVarLast.FVar() );
+    Assert( ptcib->fidTaggedLast.FTaggedNone() || ptcib->fidTaggedLast.FTagged() );
 
     if ( pfcbNil == pfcbTemplateTable )
     {
-        fidFixedFirst = fidFixedLeast;
-        fidVarFirst = fidVarLeast;
-        fidTaggedFirst = fidTaggedLeast;
+        fidFixedFirst = FID( fidtypFixed, fidlimLeast );
+        fidVarFirst = FID( fidtypVar, fidlimLeast );
+        fidTaggedFirst = FID( fidtypTagged, fidlimLeast );
         ibEndFixedColumns = ibRECStartFixedColumns;
     }
     else
     {
         fidFixedFirst = FID( pfcbTemplateTable->Ptdb()->FidFixedLast() + 1 );
-        if ( fidFixedLeast-1 == ptcib->fidFixedLast )
+        if ( ptcib->fidFixedLast.FFixedNone() )
         {
             ptcib->fidFixedLast = FID( fidFixedFirst - 1 );
         }
         Assert( ptcib->fidFixedLast >= fidFixedFirst-1 );
 
         fidVarFirst = FID( pfcbTemplateTable->Ptdb()->FidVarLast() + 1 );
-        if ( fidVarLeast-1 == ptcib->fidVarLast )
+        if ( ptcib->fidVarLast.FVarNone() )
         {
             ptcib->fidVarLast = FID( fidVarFirst - 1 );
         }
         Assert( ptcib->fidVarLast >= fidVarFirst-1 );
 
-        fidTaggedFirst = ( 0 != pfcbTemplateTable->Ptdb()->FidTaggedLastOfESE97Template() ?
-                            FID( pfcbTemplateTable->Ptdb()->FidTaggedLastOfESE97Template() + 1 ) :
-                            fidTaggedLeast );
-        if ( fidTaggedLeast-1 == ptcib->fidTaggedLast )
+        if ( pfcbTemplateTable->Ptdb()->FidTaggedLastOfESE97Template().FFixed() )
         {
-            ptcib->fidTaggedLast = FID( fidTaggedFirst - 1 );
+            fidTaggedFirst = FID( pfcbTemplateTable->Ptdb()->FidTaggedLastOfESE97Template() + 1 );
         }
-        Assert( ptcib->fidTaggedLast >= fidTaggedFirst-1 );
+        else
+        {
+            Assert( pfcbTemplateTable->Ptdb()->FidTaggedLastOfESE97Template().FFixedNone() );
+            fidTaggedFirst = FID( fidtypTagged, fidlimLeast );
+        }
+
+        if ( ptcib->fidTaggedLast.FTaggedNone() )
+        {
+            ptcib->fidTaggedLast = FID( fidtypTagged, fidlimNone );
+        }
+        Assert( ptcib->fidTaggedLast.FTaggedNone() || ptcib->fidTaggedLast.FTagged() );
 
         ibEndFixedColumns = pfcbTemplateTable->Ptdb()->IbEndFixedColumns();
     }
@@ -2751,20 +2758,20 @@ VOID SetIdxSegFromOldFormat(
             //  table and hence the column must belong to the template
             if ( fid.FTagged() )
             {
-                if ( fidTaggedLeast-1 == ptcibTemplateTable->fidTaggedLast
+                if ( ptcibTemplateTable->fidTaggedLast.FTaggedNone()
                     || fid <= ptcibTemplateTable->fidTaggedLast )
                     rgidxseg[iidxseg].SetFTemplateColumn();
             }
             else if ( fid.FFixed() )
             {
-                if ( fidFixedLeast-1 == ptcibTemplateTable->fidFixedLast
+                if ( ptcibTemplateTable->fidFixedLast.FFixedNone()
                     || fid <= ptcibTemplateTable->fidFixedLast )
                     rgidxseg[iidxseg].SetFTemplateColumn();
             }
             else
             {
                 Assert( fid.FVar() );
-                if ( fidVarLeast-1 == ptcibTemplateTable->fidVarLast
+                if ( ptcibTemplateTable->fidVarLast.FVarNone()
                     || fid <= ptcibTemplateTable->fidVarLast )
                     rgidxseg[iidxseg].SetFTemplateColumn();
             }

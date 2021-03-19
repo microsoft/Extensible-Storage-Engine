@@ -954,7 +954,7 @@ INLINE VOID TDB::SetFidAutoincrement( FID fid, BOOL f8BytesAutoInc )
     Assert( m_fidAutoincrement.FFixedNone() );
     Assert( fid.FFixedNone() || fid.FFixed() );     //  UNDONE: Not sure if this is ever called with fidFixedNone, but relax the assert to allow it
     m_fidAutoincrement = fid;
-    m_f8BytesAutoInc = (USHORT)( !fid.FFixedNone() ? f8BytesAutoInc : fFalse );
+    m_f8BytesAutoInc = (USHORT)( fid.FFixed() ? f8BytesAutoInc : fFalse );
 }
 
 INLINE VOID TDB::InitAutoincrement( QWORD qw )
@@ -1390,7 +1390,7 @@ INLINE WORD TDB::IbOffsetOfNextColumn( const FID fid ) const
         //  (and not deleted), so we can compute the offset
         //  of the next column by using the offset/length of
         //  this column
-        if ( !fid.FFixedNone() )
+        if ( fid.FFixed() )
         {
             const BOOL      fTemplateColumn     = FFixedTemplateColumn( fid );
             const COLUMNID  columnid            = ColumnidOfFid( fid, fTemplateColumn );
@@ -1399,6 +1399,7 @@ INLINE WORD TDB::IbOffsetOfNextColumn( const FID fid ) const
         }
         else
         {
+            Assert( fid.FFixedNone() );
             ib = ibRECStartFixedColumns;
         }
     }
@@ -1417,7 +1418,7 @@ INLINE WORD TDB::IbOffsetOfNextColumn( const FID fid ) const
         Assert( ib <= IbEndFixedColumns() );
 
         // Last fixed column always has cbMaxLen set, even if deleted.
-        if ( !fid.FFixedNone() )
+        if ( fid.FFixed() )
         {
             const COLUMNID  columnid    = ColumnidOfFid( fid, FFixedTemplateColumn( fid ) );
             Assert( ib > ibRECStartFixedColumns );
@@ -1426,6 +1427,7 @@ INLINE WORD TDB::IbOffsetOfNextColumn( const FID fid ) const
         }
         else
         {
+            Assert( fid.FFixedNone() );
             Assert( ibRECStartFixedColumns == ib );
         }
     }
@@ -1433,7 +1435,7 @@ INLINE WORD TDB::IbOffsetOfNextColumn( const FID fid ) const
     {
         Assert( ib < IbEndFixedColumns() );
 
-        if ( !fid.FFixedNone() )
+        if ( fid.FFixed() )
         {
             const COLUMNID  columnid    = ColumnidOfFid( fid, FFixedTemplateColumn( fid ) );
             if ( !FFIELDCommittedDelete( PfieldFixed( columnid )->ffield ) )
@@ -1445,6 +1447,7 @@ INLINE WORD TDB::IbOffsetOfNextColumn( const FID fid ) const
         }
         else
         {
+            Assert( fid.FFixedNone() );
             Assert( ibRECStartFixedColumns == ib );
         }
     }

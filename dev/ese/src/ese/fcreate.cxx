@@ -1230,7 +1230,7 @@ LOCAL ERR ErrFILEIAddColumns(
         ibNextFixedOffset = ptdbTemplateTable->IbEndFixedColumns();
     }
 
-    Assert( fidTaggedLeast-1 == tcib.fidTaggedLast );
+    Assert( tcib.fidTaggedLast.FTaggedNone() );
 
     CallR( ErrCATOpen( ppib, ifmp, &pfucbCatalog ) );
     Assert( pfucbNil != pfucbCatalog );
@@ -1289,7 +1289,7 @@ LOCAL ERR ErrFILEIAddColumns(
 
         //  for fixed-length columns, make sure record not too big
         //
-        Assert( tcib.fidFixedLast >= fidFixedLeast ?
+        Assert( tcib.fidFixedLast.FFixed() ?
             ibNextFixedOffset > ibRECStartFixedColumns :
             ibNextFixedOffset == ibRECStartFixedColumns );
         if ( ( ( pcolcreate->grbit & JET_bitColumnFixed ) || FCOLTYPFixedLength( field.coltyp ) )
@@ -3049,13 +3049,13 @@ ERR ErrFILEGetNextColumnid(
     {
         Assert( ptcib->fidTaggedLast.FTaggedNone() || ptcib->fidTaggedLast.FTagged() );
         fid = ++(ptcib->fidTaggedLast);
-        fidMost = fidTaggedMost;
+        fidMost = FID( fidtypTagged, fidlimMost );
     }
     else if ( ( grbit & JET_bitColumnFixed ) || FCOLTYPFixedLength( coltyp ) )
     {
         Assert( ptcib->fidFixedLast.FFixedNone() || ptcib->fidFixedLast.FFixed() );
         fid = ++(ptcib->fidFixedLast);
-        fidMost = fidFixedMost;
+        fidMost = FID( fidtypFixed, fidlimMost );
     }
     else
     {
@@ -3064,7 +3064,7 @@ ERR ErrFILEGetNextColumnid(
         Assert( JET_coltypText == coltyp || JET_coltypBinary == coltyp );
         Assert( ptcib->fidVarLast.FVarNone() || ptcib->fidVarLast.FVar() );
         fid = ++(ptcib->fidVarLast);
-        fidMost = fidVarMost;
+        fidMost = FID( fidtypVar, fidlimMost );
     }
     if ( fid > fidMost )
     {
@@ -3468,7 +3468,7 @@ ERR VTAPI ErrIsamAddColumn(
 
     //  for fixed-length columns, make sure record not too big
     //
-    Assert( ptdb->FidFixedLast() >= fidFixedLeast ?
+    Assert( ptdb->FidFixedLast().FFixed() ?
         ptdb->IbEndFixedColumns() > ibRECStartFixedColumns :
         ptdb->IbEndFixedColumns() == ibRECStartFixedColumns );
     if ( ( ( pcolumndef->grbit & JET_bitColumnFixed ) || FCOLTYPFixedLength( field.coltyp ) )
