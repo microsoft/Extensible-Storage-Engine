@@ -3633,15 +3633,31 @@ VOID FCB::RemoveList_()
             pinst->m_pfcbList->PfcbPrevList() == pfcbNil );
 }
 
-//  returns true if OLD2 should be run against this btree
+//  returns true if OLD2 may be run against this btree
 
 BOOL FCB::FUseOLD2()
 {
-    if( FTypeTable()
-        && ( FRetrieveHintTableScanForward() || FRetrieveHintTableScanBackward() ) )
+    //  we currently only allow defrag of the clustered index
+
+    if ( !FTypeTable() )
     {
-        return fTrue;
+        return fFalse;
     }
-    return fFalse;
+
+    //  efficient sequential scan must be configured
+
+    if ( !FRetrieveHintTableScanForward() && !FRetrieveHintTableScanBackward() )
+    {
+        return fFalse;
+    }
+
+    //  contiguous append must be configured
+
+    if ( !FContiguousAppend() && !FContiguousHotpoint() )
+    {
+        return fFalse;
+    }
+
+    return fTrue;
 }
 
