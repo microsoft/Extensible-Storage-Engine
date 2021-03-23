@@ -1379,7 +1379,7 @@ ERR COSFileSystem::ErrPathFolderDefault(
     // If the process is packaged, then the directory shouldn't be the current
     // working directory.
 
-    Assert( FUtilProcessIsPackaged() || 0 == wcscmp( wszFolder, L".\\" ) );
+    Assert( FUtilProcessIsPackaged() || 0 == LOSStrCompareW( wszFolder, L".\\" ) );
 
 HandleError:
     return err;

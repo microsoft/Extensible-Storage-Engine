@@ -3450,7 +3450,7 @@ ERR ErrNewInst(
         }
         if ( NULL != wszInstanceName &&
              NULL != g_rgpinst[ ipinst ]->m_wszInstanceName &&
-             0 == wcscmp( wszInstanceName, g_rgpinst[ ipinst ]->m_wszInstanceName ) )
+             0 == LOSStrCompareW( wszInstanceName, g_rgpinst[ ipinst ]->m_wszInstanceName ) )
         {
             Error( ErrERRCheck( JET_errInstanceNameInUse ) );
         }
@@ -21059,7 +21059,7 @@ LOCAL JET_ERR JetEnableMultiInstanceEx(
             case JetParam::typePath:
                 //  We're using strict string comparison to start with, as it should be plausible for two 
                 //  apps to set this to something they specifically agree on.
-                fMatches = ( 0 == wcscmp( (WCHAR*)(g_rgparam[iparamid].Value()), psetsysparam[iset].sz ) );
+                fMatches = ( 0 == LOSStrCompareW( (WCHAR*)(g_rgparam[iparamid].Value()), psetsysparam[iset].sz ) );
                 break;
             case JetParam::typePointer:
             case JetParam::typeUserDefined:
@@ -24641,10 +24641,10 @@ JETUNITTEST( JetApi, CAutoINDEXCREATE2To3 )
 
     CHECK( nullptr == rgindexcreatenew[0].pidxunicode );
 
-    CHECK( 0 == wcscmp( rgindexcreatenew[1].pidxunicode->szLocaleName, L"fr-CA" ) );
+    CHECK( 0 == LOSStrCompareW( rgindexcreatenew[1].pidxunicode->szLocaleName, L"fr-CA" ) );
     CHECK( 0x10004 == rgindexcreatenew[1].pidxunicode->dwMapFlags );
 
-    CHECK( 0 == wcscmp( rgindexcreatenew[2].pidxunicode->szLocaleName, L"fr-CA" ) );
+    CHECK( 0 == LOSStrCompareW( rgindexcreatenew[2].pidxunicode->szLocaleName, L"fr-CA" ) );
     CHECK( 0x0 == rgindexcreatenew[2].pidxunicode->dwMapFlags );
 
     CHECK( JET_errSuccess == ErrIDXCheckUnicodeFlagAndDefn( rgindexcreatenew, cindexes ) );

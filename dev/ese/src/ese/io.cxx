@@ -4737,7 +4737,7 @@ public:
             Error( ErrERRCheck( JET_errInvalidParameter ) );
         }
 
-        if ( 0 != wcscmp( m_wszOriginalDatabasePath, wszOriginalDatabasePath ) )
+        if ( 0 != LOSStrCompareW( m_wszOriginalDatabasePath, wszOriginalDatabasePath ) )
         {
             //  We do not log this, because we could be searching through all pinst->m_rgpirs[]s for the
             //  context matching the specified DB path.
@@ -4825,7 +4825,7 @@ public:
     typedef enum { eIrsDetachClean, eIrsDetachError } IRS_DETACH_STATE;
     void CloseIrsContext( _In_ const INST * const pinst, _In_ PCWSTR wszOriginalDatabasePath, _In_ const IRS_DETACH_STATE eStopState )
     {
-        Assert( 0 == wcscmp( m_wszOriginalDatabasePath, wszOriginalDatabasePath ) );
+        Assert( 0 == LOSStrCompareW( m_wszOriginalDatabasePath, wszOriginalDatabasePath ) );
 
         Assert( m_pfapiDb->CioNonFlushed() == 0 );  // client should have flushed.
 

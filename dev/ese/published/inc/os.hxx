@@ -257,6 +257,7 @@ BOOL FOSLayerUp();
 //#define FORCE_STORAGE_WRITEBACK       1
 
 // Turn off some APIs that we don't want directly supported
+#define wcscmp __USE_LOSSTRCOMPAREW__
 // ISSUE[SOMEONE] - Github side of build cannot handle this due to stdlib includes in rmemulator.hxx.  Some day figure this out for real.
 //#define wcslen __USE_LOSSTRLENGTHW__
 

@@ -185,7 +185,7 @@ ERR RBSCleanerTestIOOperator::ErrGetDirSize( PCWSTR wszDirPath, _Out_ QWORD* pcb
 {
     if ( m_errGetDirSize == JET_errSuccess )
     {
-        if ( wcscmp( wszDirPath, L"" ) == 0 )
+        if ( LOSStrCompareW( wszDirPath, L"" ) == 0 )
         {
             *pcbSize = m_cbDirSize * ( m_lRBSGenMax - m_lRBSGenMin + 1 );
         }

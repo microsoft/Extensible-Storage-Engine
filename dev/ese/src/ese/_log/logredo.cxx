@@ -4233,7 +4233,7 @@ AbruptEnd:
             #ifdef DEBUG
             WCHAR   wszNameDebug[IFileSystemAPI::cchPathMax];
             m_pLogStream->LGMakeLogName( wszNameDebug, sizeof(wszNameDebug), eArchiveLog );
-            Assert( 0 == wcscmp( wszNameDebug, m_pLogStream->LogName() ) );
+            Assert( 0 == LOSStrCompareW( wszNameDebug, m_pLogStream->LogName() ) );
             #endif
 
             CallR( m_pLogStream->ErrLGRRestartLOGAtLogGen( lgen, fTrue ) );

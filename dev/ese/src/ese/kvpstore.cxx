@@ -1517,7 +1517,7 @@ BOOL CKVPStore::CKVPSCursor::FKVPSCursorIMatches() const
             //  do exact match - kind of not point in this as they could've just
             //  called CKVPStore::ErrKVPGetValue()
 
-            return 0 == wcscmp( m_wszWildKey, pwszKey );
+            return 0 == LOSStrCompareW( m_wszWildKey, pwszKey );
         }
     }
 }

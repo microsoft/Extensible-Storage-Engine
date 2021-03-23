@@ -1080,7 +1080,10 @@ ERR TFileSystemFilter<I>::ErrLockFiles( _In_z_                                  
     Call( ErrGetFilePath( wszPathSrc, wszAbsPathSrc, wszKeyPathSrc ) );
     Call( ErrGetFilePath( wszPathDest, wszAbsPathDest, wszKeyPathDest ) );
 
-    if ( LOSStrCompareW( wszKeyPathSrc, wszKeyPathDest ) > 0 )
+    // We use an unusual comparison where longer strings compare as greater than
+    // shorter strings and only compare actual bits when lengths are the same.
+    if ( ( LOSStrLengthW( wszKeyPathSrc ) > LOSStrLengthW( wszKeyPathDest ) ) ||
+         ( LOSStrCompareW( wszKeyPathSrc, wszKeyPathDest ) > 0 )       )
     {
         pwszKeyPath1 = wszKeyPathDest;
         ppfpte1 = ppfpteDest;

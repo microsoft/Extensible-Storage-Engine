@@ -623,7 +623,7 @@ VOID OSEventRegister()
                                             LPBYTE(rgbData),
                                             &cbData ) != ERROR_SUCCESS ||
                     dwType != REG_EXPAND_SZ ||
-                    wcscmp( rgbData, WszUtilImagePath() ) ||
+                    LOSStrCompareW( rgbData, WszUtilImagePath() ) ||
                     cbData != ( LOSStrLengthW( WszUtilImagePath() ) + 1 ) * sizeof( WCHAR ) )
             {
                 error = pfnRegSetValueExW(  hkeyImage,
@@ -642,7 +642,7 @@ VOID OSEventRegister()
                                             LPBYTE(rgbData),
                                             &cbData ) != ERROR_SUCCESS ||
                     dwType != REG_EXPAND_SZ ||
-                    wcscmp( rgbData, WszUtilImagePath() ) ||
+                    LOSStrCompareW( rgbData, WszUtilImagePath() ) ||
                     cbData != ( LOSStrLengthW( WszUtilImagePath() ) + 1 ) * sizeof( WCHAR ) )
             {
                 error = pfnRegSetValueExW(  hkeyImage,
