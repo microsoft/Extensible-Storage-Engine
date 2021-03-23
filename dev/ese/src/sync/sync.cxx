@@ -3244,7 +3244,7 @@ void CSemaphore::_Release( const INT cToRelease )
 
     State().IncAvail( cToRelease );
 
-    LONG cWait = State().CWait();
+    const INT cWait = State().CWait();
     if ( cWait == 0 )
     {
         // No one is waiting.
