@@ -776,6 +776,7 @@ ERR LogPrereaderBase::ErrLGPPrereadExtendedPageRange( const DBID dbid, const PGN
         const BFPreReadFlags bfprfCombinable = ( ipg == ipgInitial ) ? bfprfDefault : bfprfCombinableOnly;
 
         TraceContextScope tcScope;
+        //Assert( tcScope->iorReason.Iort() == iortRecoveryRedo || tcScope->iorReason.Iort() == iortRecoveryRedoNewLogs );
         tcScope->SetDwEngineObjid( objid );
         tcScope->iorReason.SetIors( iors);
         tcScope->iorReason.AddFlag( iorf );
@@ -2613,7 +2614,6 @@ VOID LOG::LGIPrereadPageRef(
 ERR LOG::ErrLGIPrereadExecute( const BOOL fPgnosOnly )
 {
     ERR         err                     = JET_errSuccess;
-    TraceContextScope tcScope( iortRecoveryRedo );
 
 #ifdef MINIMAL_FUNCTIONALITY
 #else //  !MINIMAL_FUNCTIONALITY
