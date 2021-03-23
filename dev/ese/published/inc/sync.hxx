@@ -1648,13 +1648,13 @@ __forceinline const BOOL CSemaphoreState::FDecAvail()
 }
 
 
-__forceinline void CSemaphoreState::IncWait( )
+__forceinline void CSemaphoreState::IncWait()
 {
     AtomicIncrement( (LONG*)&m_cWait );
 }
 
 
-__forceinline void CSemaphoreState::DecWait( )
+__forceinline void CSemaphoreState::DecWait()
 {
     AtomicDecrement( (LONG*)&m_cWait );
 }
