@@ -3169,55 +3169,42 @@ const BOOL CSemaphore::_FAcquire( const DWORD dwTimeout )
     State().IncWait();
     OSSYNC_FOREVER
     {
-        CSemaphoreState state( syncstateNull );
-        BOOL fTimedOut = fFalse;
+        CSemaphoreState state = State();
 
-        while ( fTrue )
+        if ( state.CAvail() > 0 )
         {
-            state = State();
-            if ( state.CAvail() > 0 )
-            {
-                break;
-            }
+            OSSYNCAssert( state.CWait() > 0 );
 
-            if ( dwRemaining == 0 )
+            // Atomically acquire the semaphore and decrement the waiting counter.
+            const CSemaphoreState stateNew( state.CAvail() - 1, state.CWait() - 1 );
+            if ( State().FChange( state, stateNew ) )
             {
-                fTimedOut = fTrue;
-                break;
+                return fTrue;
             }
-
-            if ( !_FWait( state.CAvail(), dwRemaining ) )
-            {
-                fTimedOut = fTrue;
-                break;
-            }
-
+        }
+        else if ( dwRemaining == 0 )
+        {
+            break;
+        }
+        else
+        {
             const DWORD dwElapsed = DwOSSyncITickTime() - dwStart;
             if ( dwElapsed > dwTimeout )
             {
-                fTimedOut = fTrue;
                 break;
             }
 
             dwRemaining = dwTimeout - dwElapsed;
-        }
 
-        if ( fTimedOut )
-        {
-            State().DecWait();
-            return fFalse;
-        }
-
-        OSSYNCAssert( state.CAvail() > 0 );
-        OSSYNCAssert( state.CWait() > 0 );
-
-        // Atomically acquire the semaphore and decrement the waiting counter.
-        const CSemaphoreState stateNew( state.CAvail() - 1, state.CWait() - 1 );
-        if ( State().FChange( state, stateNew ) )
-        {
-            return fTrue;
+            if ( !_FWait( state.CAvail(), dwRemaining ) )
+            {
+                break;
+            }
         }
     }
+    State().DecWait();
+
+    return fFalse;
 }
 
 
