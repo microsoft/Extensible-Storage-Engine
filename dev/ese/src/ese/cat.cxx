@@ -8789,7 +8789,7 @@ LOCAL ERR ErrCATIUpgradeLocaleForOneIndex(
         }
         else
         {
-            Assert( 0 == wcscmp( pidb->WszLocaleName(), wszLocaleNameFromLcid ) );
+            Assert( 0 == LOSStrCompareW( pidb->WszLocaleName(), wszLocaleNameFromLcid ) );
         }
     }
     else
@@ -8808,7 +8808,7 @@ LOCAL ERR ErrCATIUpgradeLocaleForOneIndex(
         UtilMemCpy( wszLocaleNameT, dataField.Pv(), cbDataField );
         wszLocaleNameT[min( cbDataField / sizeof(WCHAR), _countof(wszLocaleNameT) - 1 )] = 0;
 
-        Assert( 0 == wcscmp( pidb->WszLocaleName(), wszLocaleNameT ) );
+        Assert( 0 == LOSStrCompareW( pidb->WszLocaleName(), wszLocaleNameT ) );
     }
 
     // The Sort Version should be the same as in the IDB.
@@ -15389,7 +15389,7 @@ ERR ErrCATIPopulateMSLocales( _In_ PIB * const ppib, const IFMP ifmp );
 INLINE BOOL FCATIIsMSLocalesConsistencyMarker( const WCHAR * const wszMSLocalesKey, const INT cMSLocalesValue )
 {
     if ( ( wszMSLocalesKey != NULL ) &&
-            ( wcscmp( wszMSLocalesKey, g_wszMSLocalesConsistencyMarkerKey ) == 0 )&&
+            ( LOSStrCompareW( wszMSLocalesKey, g_wszMSLocalesConsistencyMarkerKey ) == 0 )&&
             ( cMSLocalesValue == g_cMSLocalesConsistencyMarkerValue ) )
     {
         return fTrue;

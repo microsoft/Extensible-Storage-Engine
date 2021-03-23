@@ -136,8 +136,8 @@ LOCAL ERR ErrRBSGetDirSize( IFileSystemAPI *pfsapi, PCWSTR wszDirPath, _Out_ QWO
         wszDirT[0] = 0;
         Call( pfsapi->ErrPathBuild( wszDirT, wszFileT, wszExtT, wszFileNameT ) );
 
-         if ( wcscmp( wszFileNameT, L"." ) == 0 ||
-             wcscmp( wszFileNameT, L".." ) == 0 )
+         if ( LOSStrCompareW( wszFileNameT, L"." ) == 0 ||
+             LOSStrCompareW( wszFileNameT, L".." ) == 0 )
          {
              continue;
          }
@@ -215,8 +215,8 @@ LOCAL ERR ErrRBSDeleteAllFiles( IFileSystemAPI *const pfsapi, PCWSTR wszDir, PCW
 
         /* not . , and .. and not temp
         /**/
-        if (    wcscmp( wszFileNameT, L"." ) != 0 &&
-                wcscmp( wszFileNameT, L".." ) != 0 )
+        if (    LOSStrCompareW( wszFileNameT, L"." ) != 0 &&
+                LOSStrCompareW( wszFileNameT, L".." ) != 0 )
         {
             if ( !fFolder )
             {

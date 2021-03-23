@@ -438,7 +438,7 @@ struct ENTRYINFO
              strcmp( szTemplateTblORCallback, other.szTemplateTblORCallback ) == 0  &&
              ibRecordOffset                 == other.ibRecordOffset     &&
              memcmp( rgbIdxseg, other.rgbIdxseg, sizeof(rgbIdxseg) ) == 0 &&
-             wcscmp( wszLocaleName, other.wszLocaleName ) == 0          &&
+             LOSStrCompareW( wszLocaleName, other.wszLocaleName ) == 0  &&
              sortid                         == other.sortid             &&
              qwSortVersion                  == other.qwSortVersion )
         {
@@ -3809,7 +3809,7 @@ LOCAL ERR ErrREPAIRCompareCatalogs(
         {
             if ( entryinfo.sortid != entryinfoShadow.sortid ||
                  entryinfo.qwSortVersion != entryinfoShadow.qwSortVersion ||
-                 ( 0 == wcscmp( entryinfo.wszLocaleName, entryinfoShadow.wszLocaleName ) ) )
+                 ( 0 == LOSStrCompareW( entryinfo.wszLocaleName, entryinfoShadow.wszLocaleName ) ) )
             {
                 WCHAR wszSortIDCatalog[PERSISTED_SORTID_MAX_LENGTH] = L"";
                 WCHAR wszSortIDCatalogShadow[PERSISTED_SORTID_MAX_LENGTH] = L"";

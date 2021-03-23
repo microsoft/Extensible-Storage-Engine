@@ -86,9 +86,9 @@ ERR ErrLoadTreatableAsPointer()
     }
 
     OSTestCheck( szDlls != pfnCreateSemaphoreTest.SzDllLoaded() );  // first should not be returned DLL
-    OSTestCheck( 0 != wcscmp( pfnCreateSemaphoreTest.SzDllLoaded(), L"NonExistantDll.dll" ) );
-    OSTestCheck( 0 == wcscmp( pfnCreateSemaphoreTest.SzDllLoaded(), L"kernel32.dll" ) ||
-                 0 == wcscmp( pfnCreateSemaphoreTest.SzDllLoaded(), L"api-ms-win-core-synch-l1-1-1.dll" ) );
+    OSTestCheck( 0 != LOSStrCompareW( pfnCreateSemaphoreTest.SzDllLoaded(), L"NonExistantDll.dll" ) );
+    OSTestCheck( 0 == LOSStrCompareW( pfnCreateSemaphoreTest.SzDllLoaded(), L"kernel32.dll" ) ||
+                 0 == LOSStrCompareW( pfnCreateSemaphoreTest.SzDllLoaded(), L"api-ms-win-core-synch-l1-1-1.dll" ) );
     OSTestCheck( pfnCreateSemaphoreTest.ErrIsPresent() == JET_errSuccess );
 
     OSTestCheck( NULL != pfnCreateSemaphoreTest );
@@ -114,9 +114,9 @@ ERR ErrLoadSkipsNonExistantDlls()
     OSTestCheck( hValid );
 
     OSTestCheck( szDlls != pfnCreateSemaphoreTest.SzDllLoaded() );  // first should not be returned DLL
-    OSTestCheck( 0 != wcscmp( pfnCreateSemaphoreTest.SzDllLoaded(), L"NonExistantDll.dll" ) );
-    OSTestCheck( 0 == wcscmp( pfnCreateSemaphoreTest.SzDllLoaded(), L"kernel32.dll" ) ||
-                 0 == wcscmp( pfnCreateSemaphoreTest.SzDllLoaded(), L"api-ms-win-core-synch-l1-1-1.dll" ) );
+    OSTestCheck( 0 != LOSStrCompareW( pfnCreateSemaphoreTest.SzDllLoaded(), L"NonExistantDll.dll" ) );
+    OSTestCheck( 0 == LOSStrCompareW( pfnCreateSemaphoreTest.SzDllLoaded(), L"kernel32.dll" ) ||
+                 0 == LOSStrCompareW( pfnCreateSemaphoreTest.SzDllLoaded(), L"api-ms-win-core-synch-l1-1-1.dll" ) );
     OSTestCheck( pfnCreateSemaphoreTest.ErrIsPresent() == JET_errSuccess );
 
     hValid = pfnCreateSemaphoreTest( 0, 1, 100, L"test2", 0, SYNCHRONIZE | DELETE );
@@ -226,14 +226,14 @@ ERR ErrLoadTestSpecificDllIsLoaded()
     //
 
     OSTestCheck( fTrue == pfnGetVersionExWFirstControl( &osvi ) );  // call to trigger loading of DLL
-    OSTestCheck( 0 == wcscmp( pfnGetVersionExWFirstControl.SzDllLoaded(), L"kernel32.dll" ) ||
-                 0 == wcscmp( pfnGetVersionExWFirstControl.SzDllLoaded(), L"api-ms-win-core-sysinfo-l1-1-1.dll" ) );
+    OSTestCheck( 0 == LOSStrCompareW( pfnGetVersionExWFirstControl.SzDllLoaded(), L"kernel32.dll" ) ||
+                 0 == LOSStrCompareW( pfnGetVersionExWFirstControl.SzDllLoaded(), L"api-ms-win-core-sysinfo-l1-1-1.dll" ) );
     OSTestCheck( fTrue == pfnGetVersionExWFromLastDll( &osvi ) );   // call to trigger loading of DLL
-    OSTestCheck( 0 == wcscmp( pfnGetVersionExWFromLastDll.SzDllLoaded(), L"kernel32.dll" ) ||
-                 0 == wcscmp( pfnGetVersionExWFromLastDll.SzDllLoaded(), L"api-ms-win-core-sysinfo-l1-1-1.dll" ) );
+    OSTestCheck( 0 == LOSStrCompareW( pfnGetVersionExWFromLastDll.SzDllLoaded(), L"kernel32.dll" ) ||
+                 0 == LOSStrCompareW( pfnGetVersionExWFromLastDll.SzDllLoaded(), L"api-ms-win-core-sysinfo-l1-1-1.dll" ) );
     OSTestCheck( szDllListGetVersionExWFromLastDll != pfnGetVersionExWFromLastDll.SzDllLoaded() );
-    OSTestCheck( 0 == wcscmp( pfnGetVersionExWFromLastDll.SzDllLoaded(), L"kernel32.dll" ) ||
-                 0 == wcscmp( pfnGetVersionExWFromLastDll.SzDllLoaded(), L"api-ms-win-core-sysinfo-l1-1-1.dll" ) );
+    OSTestCheck( 0 == LOSStrCompareW( pfnGetVersionExWFromLastDll.SzDllLoaded(), L"kernel32.dll" ) ||
+                 0 == LOSStrCompareW( pfnGetVersionExWFromLastDll.SzDllLoaded(), L"api-ms-win-core-sysinfo-l1-1-1.dll" ) );
 
     OSTestCheck( osvi.dwMajorVersion > 0 );
     OSTestCheck( osvi.dwBuildNumber > 0 );
@@ -242,8 +242,8 @@ ERR ErrLoadTestSpecificDllIsLoaded()
     //
 
     OSTestCheck( fTrue == pfnGetVersionExWGood( &osvi ) );  // check control
-    OSTestCheck( 0 == wcscmp( pfnGetVersionExWGood.SzDllLoaded(), L"kernel32.dll" ) ||
-                 0 == wcscmp( pfnGetVersionExWGood.SzDllLoaded(), L"api-ms-win-core-sysinfo-l1-1-1.dll" ) );
+    OSTestCheck( 0 == LOSStrCompareW( pfnGetVersionExWGood.SzDllLoaded(), L"kernel32.dll" ) ||
+                 0 == LOSStrCompareW( pfnGetVersionExWGood.SzDllLoaded(), L"api-ms-win-core-sysinfo-l1-1-1.dll" ) );
     OSTestCheck( fFalse == pfnGetVersionExWBad( &osvi ) );
     OSTestCheck( ERROR_CALL_NOT_IMPLEMENTED == GetLastError() );
     OSTestCheck( pfnGetVersionExWBad.SzDllLoaded() == NULL );
@@ -269,9 +269,9 @@ ERR ErrLoadCheckValidHandleReturn()
     OSTestCheck( ERROR_SUCCESS == dwGle || ERROR_ALREADY_EXISTS == dwGle );
     OSTestCheck( hValid != NULL && hValid != INVALID_HANDLE_VALUE );
 
-    OSTestCheck( 0 != wcscmp( pfnCreateSemaphoreTest.SzDllLoaded(), L"NonExistantDll.dll" ) );
-    OSTestCheck( 0 == wcscmp( pfnCreateSemaphoreTest.SzDllLoaded(), L"kernel32.dll" ) ||
-                 0 == wcscmp( pfnCreateSemaphoreTest.SzDllLoaded(), L"api-ms-win-core-synch-l1-1-1.dll" ) );
+    OSTestCheck( 0 != LOSStrCompareW( pfnCreateSemaphoreTest.SzDllLoaded(), L"NonExistantDll.dll" ) );
+    OSTestCheck( 0 == LOSStrCompareW( pfnCreateSemaphoreTest.SzDllLoaded(), L"kernel32.dll" ) ||
+                 0 == LOSStrCompareW( pfnCreateSemaphoreTest.SzDllLoaded(), L"api-ms-win-core-synch-l1-1-1.dll" ) );
     
     HANDLE hDup = pfnCreateSemaphoreTest( 0, 1, 100, L"TestHandleReturn", 0, SYNCHRONIZE | DELETE );
 
@@ -332,8 +332,8 @@ ERR ErrLoadCheckValidBoolReturn()
 
     OSTestCheck( fCheck );
 
-    OSTestCheck( 0 == wcscmp( pfnGetVersionExWTest.SzDllLoaded(), L"kernel32.dll" ) ||
-                 0 == wcscmp( pfnGetVersionExWTest.SzDllLoaded(), L"api-ms-win-core-sysinfo-l1-1-1.dll" ) );
+    OSTestCheck( 0 == LOSStrCompareW( pfnGetVersionExWTest.SzDllLoaded(), L"kernel32.dll" ) ||
+                 0 == LOSStrCompareW( pfnGetVersionExWTest.SzDllLoaded(), L"api-ms-win-core-sysinfo-l1-1-1.dll" ) );
 
     OSTestCheck( osvi.dwMajorVersion > 0 );
 

@@ -60,8 +60,8 @@ LOCAL ERR ErrLGDeleteAllFiles( IFileSystemAPI *const pfsapi, __inout_bcount(cbDi
 
         /* not . , and .. and not temp
         /**/
-        if (    wcscmp( wszFileNameT, L"." ) &&
-                wcscmp( wszFileNameT, L".." ) &&
+        if (    LOSStrCompareW( wszFileNameT, L"." ) &&
+                LOSStrCompareW( wszFileNameT, L".." ) &&
                 UtilCmpFileName( wszFileNameT, wszTemp ) )
         {
             err = pfsapi->ErrFileDelete( wszFileName );
@@ -117,8 +117,8 @@ ERR ErrLGCheckDir( IFileSystemAPI *const pfsapi, __inout_bcount(cbDir) const PWS
 
         /* not . , and .. and not szSearch
         /**/
-        if (    wcscmp( wszFileNameT, L"." ) &&
-                wcscmp( wszFileNameT, L".." ) &&
+        if (    LOSStrCompareW( wszFileNameT, L"." ) &&
+                LOSStrCompareW( wszFileNameT, L".." ) &&
                 ( !wszSearch || !UtilCmpFileName( wszFileNameT, wszSearch ) ) )
         {
             Call( ErrERRCheck( JET_errBackupDirectoryNotEmpty ) );

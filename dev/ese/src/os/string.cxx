@@ -11,6 +11,14 @@
 #undef wcslen
 #endif
 
+#ifdef wcscmp
+#undef wcscmp
+#endif
+
+#ifdef wcsncmp
+#undef wcsncmp
+#endif
+
 ERR ErrFromStrsafeHr ( HRESULT hr)
 {
     ERR err = (hr == SEC_E_OK) ?
@@ -44,7 +52,7 @@ LONG LOSStrLengthW( _In_ PCWSTR const wsz )
     {
         return 0;
     }
-    
+
     return wcslen( wsz );
 }
 
@@ -53,6 +61,18 @@ LONG LOSStrLengthUnalignedW( _In_ const UnalignedLittleEndian< WCHAR > * wsz )
     LONG                                    cchCurrent  = 0;
     const UnalignedLittleEndian< WCHAR > *  wszCurrent  = wsz;
 
+    if ( NULL == wsz )
+    {
+        return 0;
+    }
+
+    // Could we do
+    // if ( 0 == ( wsz % sizeof(WCHAR) ) )
+    //   or
+    // if ( isAligned( wsz, WCHAR ) )
+    // {
+    //    return wcslen( wsz );
+    // }
     while ( wszCurrent[ cchCurrent ] != L'\0' )
     {
         cchCurrent++;
@@ -66,6 +86,10 @@ LONG LOSStrLengthMW( _In_ PCWSTR const wsz )
     LONG        cchCurrent  = 0;
     PCWSTR      wszCurrent  = wsz;
 
+    if ( NULL == wsz )
+    {
+        return 0;
+    }
 
     while ( wszCurrent[ cchCurrent ] != L'\0' )
     {
@@ -76,109 +100,125 @@ LONG LOSStrLengthMW( _In_ PCWSTR const wsz )
 }
 
 
-//  compare the strings (up to the given maximum length).  if the first string
-//  is "less than" the second string, -1 is returned.  if the strings are "equal",
-//  0 is returned.  if the first string is "greater than" the second string, +1 is returned.
-
+//  Compare the strings (up to the given maximum length).  Does ordinal, not lexical compare.
+//  That means byte for byte equality.  If the first string is "less than" the second string, -1
+//  is returned.  If the strings are "equal", 0 is returned.  If the first string is "greater than"
+//  the second string, +1 is returned.
 LONG LOSStrCompareA( _In_ PCSTR const szStr1, _In_ PCSTR const szStr2, _In_ const ULONG cchMax )
 {
-    ULONG cch1 = ( NULL == szStr1 ) ? 0 : strlen( szStr1 );
-    ULONG cch2 = ( NULL == szStr2 ) ? 0 : strlen( szStr2 );
-    ULONG ich;
-
-    //  limit the lengths
-
-    if ( cch1 > cchMax )
+    LONG lCmp;
+    if ( 0 == cchMax )
     {
-        cch1 = cchMax;
-    }
-    if ( cch2 > cchMax )
-    {
-        cch2 = cchMax;
+        // Why are you doing this?
+        return 0;
     }
 
-    //  compare the lengths
-
-    if ( cch1 < cch2 )
+    if ( ( NULL == szStr1 ) || ( NULL == szStr2 ) )
     {
-        return -1;
-    }
-    else if ( cch1 > cch2 )
-    {
-        return +1;
-    }
+        // strcmp, strlen, and strncmp don't play well with NULLs.
+        // NULLs are treated as 0 length strings, and we're sure that
+        // cchmax is greater than 0, so a non-NULL string is longer.
+        LONG_PTR lpCmp = (LONG_PTR)szStr1 - (LONG_PTR)szStr2;
 
-    //  compare the strings
-
-    ich = 0;
-    while ( ich < cch1 )
-    {
-        if ( szStr1[ich] == szStr2[ich] )
+        if ( lpCmp > 0 )
         {
-            ich++;
+            lCmp = +1;
         }
-        else if ( szStr1[ich] < szStr2[ich] )
+        else if ( lpCmp < 0 )
         {
-            return -1;
+            lCmp = -1;
         }
         else
         {
-            return +1;
+            lCmp = 0;
+        }
+    }
+    else if (~ULONG(0) == cchMax )
+    {
+        // Simple path when caller doesn't supply a character count limit.
+        // We don't have to get the string lengths.
+        lCmp = strcmp( szStr1, szStr2 );
+    }
+    else
+    {
+        ULONG cch1 = strlen( szStr1 );
+        ULONG cch2 = strlen( szStr2 );
+
+        ULONG cchToCompare = min( max( cch1, cch2 ), cchMax );
+
+        if ( cchToCompare < cchMax )
+        {
+            // Semi-simple path when the provided strings are both shorter than supplied max.
+            lCmp = strcmp( szStr1, szStr2 );
+        }
+        else
+        {
+            lCmp = strncmp( szStr1, szStr2, cchToCompare );
         }
     }
 
-    return 0;
+    return lCmp;
 }
 
 
+//  Compare the strings (up to the given maximum length).  Does ordinal, not lexical compare.
+//  That means byte for byte equality.  If the first string is "less than" the second string, -1
+//  is returned.  If the strings are "equal", 0 is returned.  If the first string is "greater than"
+//  the second string, +1 is returned.
 LONG LOSStrCompareW( _In_ PCWSTR const wszStr1, _In_ PCWSTR const wszStr2, _In_ const ULONG cchMax )
 {
-    ULONG cch1 = ( NULL == wszStr1 ) ? 0 : wcslen( wszStr1 );
-    ULONG cch2 = ( NULL == wszStr2 ) ? 0 : wcslen( wszStr2 );
-    ULONG ich;
-
-    //  limit the lengths
-
-    if ( cch1 > cchMax )
+    LONG lCmp;
+    if ( 0 == cchMax )
     {
-        cch1 = cchMax;
-    }
-    if ( cch2 > cchMax )
-    {
-        cch2 = cchMax;
+        // Why are you doing this?
+        return 0;
     }
 
-    //  compare the lengths
-
-    if ( cch1 < cch2 )
+    if ( ( NULL == wszStr1 ) || ( NULL == wszStr2 ) )
     {
-        return -1;
-    }
-    else if ( cch1 > cch2 )
-    {
-        return +1;
-    }
+        // wcscmp, wcslen, and wcsncmp don't play well with NULLs.
+        // NULLs are treated as 0 length strings, and we're sure that
+        // cchmax is greater than 0, so a non-NULL string is longer.
+        LONG_PTR lpCmp = (LONG_PTR)wszStr1 - (LONG_PTR)wszStr2;
 
-    //  compare the strings
-
-    ich = 0;
-    while ( ich < cch1 )
-    {
-        if ( wszStr1[ich] == wszStr2[ich] )
+        if ( lpCmp > 0 )
         {
-            ich++;
+            lCmp = 1;
         }
-        else if ( wszStr1[ich] < wszStr2[ich] )
+        else if ( lpCmp < 0 )
         {
-            return -1;
+            lCmp = -1;
         }
         else
         {
-            return +1;
+            lCmp = 0;
+        }
+    }
+    else if (~ULONG(0) == cchMax )
+    {
+        // Simple path when caller doesn't supply a character count limit.
+        // We don't have to get the string lengths.
+        lCmp = wcscmp( wszStr1, wszStr2 );
+    }
+    else
+    {
+        ULONG cch1 = wcslen( wszStr1 );
+        ULONG cch2 = wcslen( wszStr2 );
+
+        ULONG cchToCompare = min( max( cch1, cch2 ), cchMax );
+
+        if ( cchToCompare < cchMax )
+        {
+            // Semi-simple path when the provided strings are both shorter than supplied max.
+            lCmp = wcscmp( wszStr1, wszStr2 );
+        }
+        else
+        {
+            lCmp = wcsncmp( wszStr1, wszStr2, cchToCompare );
         }
     }
 
-    return 0;
+    return lCmp;
 }
 
 
@@ -429,7 +469,7 @@ ERR ErrOSSTRAsciiToUnicode( _In_ PCSTR const    pszIn,
     {
         pwszOut[0] = L'\0';
     }
-    
+
     if ( ERROR_INVALID_PARAMETER == dwError )
     {
         return ErrERRCheck( JET_errInvalidParameter );

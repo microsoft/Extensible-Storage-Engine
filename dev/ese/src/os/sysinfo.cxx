@@ -1160,7 +1160,7 @@ ERR ErrUtilSystemSlConfiguration(
     Assert( pdwValue );
     ERR err = JET_errSuccess;
 
-    ExpectedSz( 0 == wcscmp( pszValueName, L"ExtensibleStorageEngine-ISAM-ParamConfiguration" ),
+    ExpectedSz( 0 == LOSStrCompareW( pszValueName, L"ExtensibleStorageEngine-ISAM-ParamConfiguration" ),
                 "You are passing an unknown value (%ws) name into here, the single 55564 config override below may mess things up.", pszValueName );
 
 #if defined(ESENT) && defined(OS_LAYER_VIOLATIONS)

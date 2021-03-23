@@ -2319,7 +2319,7 @@ INLINE INST * INST::GetInstanceByName( PCWSTR wszInstanceName )
             continue;
         }
 
-        if ( wcscmp( pinst->m_wszInstanceName, wszInstanceName) )
+        if ( LOSStrCompareW( pinst->m_wszInstanceName, wszInstanceName) )
         {
             continue;
         }
