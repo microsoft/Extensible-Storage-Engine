@@ -1810,7 +1810,9 @@ inline const BOOL CSemaphore::_FTryAcquire( const INT cSpin )
 
     OSSYNC_FOREVER
     {
-        if ( State().CAvail() == 0 )
+        // Do not acquire the semaphore with waiting threads to avoid inadvertently
+        // stealing it from those waiting threads themselves.
+        if ( State().CAvail() == 0 || State().CWait() > 0 )
         {
             if ( cSpinCount )
             {
