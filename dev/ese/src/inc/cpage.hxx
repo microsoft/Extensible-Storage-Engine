@@ -373,7 +373,7 @@ class CPAGE
         BOOL        FRevertedNewPage    ( ) const;
         static BOOL FRevertedNewPage    ( const DBTIME dbtime ) { return dbtimeRevert == dbtime; }
 
-        enum PageFlushType;
+    enum PageFlushType : ULONG;
         PageFlushType Pgft      ( ) const;
 
         IFMP    Ifmp            ( ) const;
@@ -647,7 +647,7 @@ class CPAGE
         //   - for the flush map it is Unknown or one of the known types above.
         //  A known page state is not considered a mismatch with an unknown flush map state.
 
-        enum PageFlushType
+        enum PageFlushType : ULONG
         {
                 pgftUnknown = 0,
                 pgftRockWrite = 1,

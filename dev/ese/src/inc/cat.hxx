@@ -807,7 +807,7 @@ ERR ErrCATInitCatalogFCB( FUCB *pfucbTable );
 ERR ErrCATInitTempFCB( FUCB *pfucbTable );
 ERR ErrCATInitFCB( FUCB *pfucbTable, OBJID objidTable );
 
-enum CATCheckIndicesFlags  //  catcif
+enum CATCheckIndicesFlags : ULONG  //  catcif
 {
     catcifReadOnly = 0x1,                           // Use defaults: Look for out-of-date indices, returning error if any were found.
     catcifDeleteOutOfDateSecondaryIndices = 0x2,    // Attempt to delete out-of-date indices (default is to return an error).
