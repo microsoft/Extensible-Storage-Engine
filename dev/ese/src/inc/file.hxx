@@ -90,10 +90,7 @@ struct FDPINFO
 
 ERR ErrFILECreateTable( PIB *ppib, IFMP ifmp, JET_TABLECREATE5_A *ptablecreate, UINT fSPFlags = 0 );
 
-enum CATCheckIndicesFlags;
-// The previous line needs to be "enum CATCheckIndicesFlags : ULONG;" to be explicit for some
-// compilers, but let's compile this way for now to prove that it actually IS a ULONG.
-C_ASSERT( sizeof( CATCheckIndicesFlags ) == sizeof( ULONG ) );
+enum CATCheckIndicesFlags : ULONG;
 
 ERR ErrFILEOpenTable(
     _In_ PIB            *ppib,

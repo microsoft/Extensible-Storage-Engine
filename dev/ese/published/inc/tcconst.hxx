@@ -234,7 +234,7 @@ enum IOREASONFLAGS : BYTE
     iorfSuperColdOrLowPriority   = 0x40,
 };
 
-enum IOFLUSHREASON
+enum IOFLUSHREASON : ULONG
 {
     iofrInvalid                     = 0x0,
 

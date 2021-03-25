@@ -1019,7 +1019,7 @@ const BOOL FUtilIProcessIsWow64()
 //  Private Staging (for alpha, beta, and test in production staging) of features.
 //
 
-enum UtilSystemBetaSiteMode //  usbsm
+enum UtilSystemBetaSiteMode : ULONG //  usbsm
 {
     //  You can _NOT_ change these constants b/c some of them are extruded out the JET API, and so
     //  I have picked values that leave room in the middle for expansion - though technically the

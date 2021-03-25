@@ -143,10 +143,7 @@ void OSSysTraceStationId( const DWORD /* TraceStationIdentificationReason */ tsi
 
 //  helpers for private feature staging checks (FUtilSystemBetaFeatureEnabled)
 
-enum UtilSystemBetaSiteMode;    //  usbsm
-// The previous line needs to be "enum UtilSystemBetaSiteMode : ULONG;" to be explicit for some
-// compilers, but let's compile this way for now to prove that it actually IS a ULONG.
-C_ASSERT( sizeof( UtilSystemBetaSiteMode ) == sizeof( ULONG ) );
+enum UtilSystemBetaSiteMode : ULONG;    //  usbsm
 
 // stored in .fStaticFeature (normally just use a bool, but want to make sure it can't
 // get confused with the real values of true/false we pass back).
