@@ -1439,7 +1439,7 @@ ERR ErrDBParseDbParams(
 
     if ( pfcMaintainExtentPageCountCache )
     {
-        *pfcMaintainExtentPageCountCache = FEATURECONTROL::fcNotSpecified;
+        *pfcMaintainExtentPageCountCache = fc::NotSpecified;
     }
 
     //
@@ -1593,46 +1593,12 @@ ERR ErrDBParseDbParams(
             if ( ulRawMaintainExtentPageCountCache )
             {
                 // Non-zero raw value means enable.
-                *pfcMaintainExtentPageCountCache = FEATURECONTROL::fcEnableFromParam;
+                *pfcMaintainExtentPageCountCache = fc::Enable;
             }
             else
             {
-                *pfcMaintainExtentPageCountCache = FEATURECONTROL::fcDisableFromParam;
+                *pfcMaintainExtentPageCountCache = fc::Disable;
             }
-        }
-
-        //
-        // Allow registry based override of value. We differentiate between the override and the param
-        // so when we try to create the table, if the efv doesn't support it but the param requested it,
-        // we return an error, but if it's the override, we quietly do nothing.
-        //
-        WCHAR       wszBufExtentPageCountCache[ 2 ];
-        if ( FOSConfigGet( wszDEBUGRoot, L"ExtentPageCountCacheCreateOverride", wszBufExtentPageCountCache, sizeof(wszBufExtentPageCountCache) ) )
-        {
-            switch ( wszBufExtentPageCountCache[0] )
-            {
-                case 0:
-                    // No override specified.
-                    break;
-
-                case L'0':
-                    if ( FEATURECONTROL::fcDisableFromParam != *pfcMaintainExtentPageCountCache)
-                    {
-                        // Force-disable the feature. Useful for tests or as an emergency control to
-                        // turn off the feature regardless of client intent.
-                        *pfcMaintainExtentPageCountCache = FEATURECONTROL::fcDisableFromOverride;
-                    }
-                    break;
-
-                default:
-                    if ( FEATURECONTROL::fcEnableFromParam != *pfcMaintainExtentPageCountCache)
-                    {
-                        // Force-enable the feature.
-                        *pfcMaintainExtentPageCountCache = FEATURECONTROL::fcEnableFromOverride;
-                    }
-                    break;
-            }
-
         }
     }
 
@@ -2160,47 +2126,36 @@ ERR ErrDBCreateDatabase(
         const WCHAR * rgwsz[] = { pfmp->WszDatabaseName(), NULL };
 
         MessageId evtId = PLAIN_TEXT_ID;                   // No-logging marker value.
-        FEATURECONTROL fcT = FEATURECONTROL::fcNotSpecified; // Assume nothing to do.
+        FEATURECONTROL fcT = fc::NotSpecified; // Assume nothing to do.
 
         pgnoFDP = pgnoNull;
         objidFDP = objidNil;
 
         switch ( fcMaintainExtentPageCountCache )
         {
-            case FEATURECONTROL::fcNotSpecified:
+            case fc::NotSpecified:
                 // On DB create, since you didn't specify you wanted the table, we just won't make it.
                 // We also don't log that.
                 break;
 
-            case FEATURECONTROL::fcDisableFromParam:
+            case fc::Disable:
                 evtId = EXTENT_PAGE_COUNT_CACHE_NOT_IN_USE_ID;
                 rgwsz[1] = L"REQUEST_PARAM";
                 break;
 
-            case FEATURECONTROL::fcDisableFromOverride:
-                evtId = EXTENT_PAGE_COUNT_CACHE_NOT_IN_USE_ID;
-                rgwsz[1] = L"OVERRIDE_PARAM";
-                break;
-
-            case FEATURECONTROL::fcEnableFromParam:
-                evtId = EXTENT_PAGE_COUNT_CACHE_IN_USE_ID;
-                fcT = FEATURECONTROL::fcEnableFromParam;
-                rgwsz[1] = L"REQUEST_PARAM";
-                break;
-
-            case FEATURECONTROL::fcEnableFromOverride:
+            case fc::Enable:
                 if ( pfmp->FEfvSupported( JET_efvExtentPageCountCache ) )
                 {
-                    // Go ahead, honor the override.
+                    // Go ahead, turn the feature on.
                     evtId = EXTENT_PAGE_COUNT_CACHE_IN_USE_ID;
-                    fcT = FEATURECONTROL::fcEnableFromParam;
-                    rgwsz[1] = L"OVERRIDE_PARAM";
+                    fcT = fc::Enable;
+                    rgwsz[1] = L"REQUEST_PARAM";
                 }
                 else
                 {
-                    // Ignore the override if the efv doesn't support it.
-                    evtId = EXTENT_PAGE_COUNT_CACHE_NOT_IN_USE_ID,
-                    rgwsz[1] = L"UNSUPPORTED_OVERRIDE_PARAM";
+                    // Ignore the request if the efv doesn't support it.
+                    evtId = EXTENT_PAGE_COUNT_CACHE_NOT_IN_USE_ID;
+                    rgwsz[1] = L"UNSUPPORTED_REQUEST_PARAM";
                 }
                 break;
 
@@ -2224,14 +2179,14 @@ ERR ErrDBCreateDatabase(
         
         switch ( fcT )
         {
-            case FEATURECONTROL::fcEnableFromParam:
+            case fc::Enable:
                 Assert( objidNil == objidFDP );
                 Call( ErrCATCreateMSExtentPageCountCache( ppib, ifmp, &pgnoFDP, &objidFDP ) );
                 Assert( objidNil != objidFDP );
                 break;
 
             default:
-                Assert( FEATURECONTROL::fcNotSpecified == fcT );
+                Assert( fc::NotSpecified == fcT );
                 break;
         }
 
@@ -4871,10 +4826,10 @@ PostAttachTasks:
         Assert( ( pgnoFDP == pgnoNull ) == ( objidFDP == objidNil ) );
 
         MessageId evtId = PLAIN_TEXT_ID;                   // No-logging marker value.
-        FEATURECONTROL fcT = FEATURECONTROL::fcNotSpecified; // Assume nothing to do.
+        FEATURECONTROL fcT = fc::NotSpecified; // Assume nothing to do.
         switch ( fcMaintainExtentPageCountCache )
         {
-            case FEATURECONTROL::fcNotSpecified:
+            case fc::NotSpecified:
                 // Caller didn't say anything about the cache, so we're going to look it up and use it if
                 // it's there, but do nothing if it's not.
                 if ( objidFDP != objidNil )
@@ -4884,11 +4839,11 @@ PostAttachTasks:
                 }
                 break;
                 
-            case FEATURECONTROL::fcDisableFromParam:
+            case fc::Disable:
                 evtId = EXTENT_PAGE_COUNT_CACHE_NOT_IN_USE_ID;
                 if ( objidFDP != objidNil )
                 {
-                    fcT = FEATURECONTROL::fcDisableFromParam;
+                    fcT = fc::Disable;
                     rgwsz[1] = L"REQUEST_PARAM";
                 }
                 else
@@ -4897,57 +4852,30 @@ PostAttachTasks:
                 }
                 break;
  
-            case FEATURECONTROL::fcDisableFromOverride:
-                evtId = EXTENT_PAGE_COUNT_CACHE_NOT_IN_USE_ID;
-                if ( objidFDP != objidNil )
+            case fc::Enable:
+                if ( !pfmp->FEfvSupported( JET_efvExtentPageCountCache ) )
                 {
-                    fcT = FEATURECONTROL::fcDisableFromParam;
-                    rgwsz[1] = L"OVERRIDE_PARAM";
+                    // The feature is not supported, so we don't need to do
+                    // anything.
+                    Assert( objidFDP == objidNil );
+                    evtId = EXTENT_PAGE_COUNT_CACHE_NOT_IN_USE_ID;
+                    fcT = fc::NotSpecified;
+                    rgwsz[1] = L"UNSUPPORTED_REQUEST_PARAM";
                 }
-                else
+                else if ( objidFDP != objidNil )
                 {
-                    rgwsz[1] = L"OVERRIDE_PARAM_MATCHES_STATE";
-                }
-                break;
-
-            case FEATURECONTROL::fcEnableFromParam:
-                evtId = EXTENT_PAGE_COUNT_CACHE_IN_USE_ID;
-                if ( objidFDP == objidNil )
-                {
-                    fcT = FEATURECONTROL::fcEnableFromParam;
-                    rgwsz[1] = L"REQUEST_PARAM";
-                }
-                else
-                {
+                    evtId = EXTENT_PAGE_COUNT_CACHE_IN_USE_ID;
+                    fcT = fc::NotSpecified;
                     rgwsz[1] = L"REQUEST_PARAM_MATCHES_STATE";
+                }
+                else 
+                {
+                    evtId = EXTENT_PAGE_COUNT_CACHE_IN_USE_ID;
+                    fcT = fc::Enable;
+                    rgwsz[1] = L"REQUEST_PARAM";
                 }
                 break;
                 
-            case FEATURECONTROL::fcEnableFromOverride:
-                // We're only here if the dbparams were NotSpecified or DisableFromParam, but were
-                // overridden by the registry.  We check the EFV before we try to create the table.
-                // We ignore the override if the EFV doesn't support it (as opposed to trying
-                // to create the table and generating an error).  A little confusing, but this
-                // allows us to pass explicit EFV tests with the override set.
-                if ( objidFDP != objidNil )
-                {
-                    Assert( pfmp->FEfvSupported( JET_efvExtentPageCountCache ) );
-                    evtId = EXTENT_PAGE_COUNT_CACHE_IN_USE_ID;
-                    rgwsz[1] = L"OVERRIDE_PARAM_MATCHES_STATE";
-                }
-                else if ( pfmp->FEfvSupported( JET_efvExtentPageCountCache ) )
-                {
-                    evtId = EXTENT_PAGE_COUNT_CACHE_IN_USE_ID;
-                    fcT = FEATURECONTROL::fcEnableFromParam;
-                    rgwsz[1] = L"OVERRIDE_PARAM";
-                }
-                else
-                {
-                    rgwsz[1] = L"OVERRIDE_PARAM_UNSUPPORTED";
-                    evtId = EXTENT_PAGE_COUNT_CACHE_NOT_IN_USE_ID;
-                }
-                break;
-
             default:
                 AssertSz( fFalse, "Unexpected case in switch.");
                 CallJ( ErrERRCheck( JET_errInvalidParameter ), Detach );
@@ -4968,7 +4896,7 @@ PostAttachTasks:
 
         switch ( fcT )
         {
-            case FEATURECONTROL::fcEnableFromParam:
+            case fc::Enable:
                 Assert( objidNil == objidFDP );
                 CallJ(
                     ErrDBTryCreateSystemTable(
@@ -4984,7 +4912,7 @@ PostAttachTasks:
                 Assert( objidNil != objidFDP );
                 break;
 
-            case FEATURECONTROL::fcDisableFromParam:
+            case fc::Disable:
                 Assert( objidNil != objidFDP );
                 CallJ(
                     ErrCATDeleteMSExtentPageCountCache(
@@ -4998,7 +4926,7 @@ PostAttachTasks:
                 break;
 
             default:
-                Assert( FEATURECONTROL::fcNotSpecified == fcT );
+                Assert( fc::NotSpecified == fcT );
                 // Nothing.
                 break;
         }

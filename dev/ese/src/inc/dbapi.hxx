@@ -32,13 +32,11 @@ CPG CpgDBDatabaseMinMin();
 #endif
 
 
-enum class FEATURECONTROL {
-    fcNotSpecified = 0,
-    fcDisableFromParam,
-    fcEnableFromParam,
-    fcDisableFromOverride,
-    fcEnableFromOverride,
-};
+typedef enum class FEATURECONTROL {
+    NotSpecified = 0,
+    Disable,
+    Enable
+} fc;
 
 ERR ErrDBParseDbParams(
     _In_reads_opt_( csetdbparam )const JET_SETDBPARAM* const    rgsetdbparam,
