@@ -153,7 +153,7 @@ private:
         VOID Uninitialize()
         {
             COLLEnforce( FInitialized() );
-            COLLAssertTrack( !FProtected() );
+            COLLEnforce( !FProtected() );
             m_ulpMarkedIndex = 0;
         };
 
