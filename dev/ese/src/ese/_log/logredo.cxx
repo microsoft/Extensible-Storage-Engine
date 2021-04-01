@@ -9792,7 +9792,13 @@ ERR LOG::ErrLGRIRedoScanCheck( const LRSCANCHECK2 * const plrscancheck, BOOL* co
             {
                 //  since the page was not previously cached, we should super cold it
 
-                BFMarkAsSuperCold( ifmp, plrscancheck->Pgno(), bflfDBScan );
+                if ( m_arrayPagerefSupercold.Capacity() <= m_arrayPagerefSupercold.Size() )
+                {
+                    (void)m_arrayPagerefSupercold.ErrSetCapacity( LNextPowerOf2( m_arrayPagerefSupercold.Size() + 1 ) );
+                }
+
+                (void)m_arrayPagerefSupercold.ErrSetEntry(  m_arrayPagerefSupercold.Size(),
+                                                            PageRef( plrscancheck->Dbid(), plrscancheck->Pgno() ) );
             }
 
             //  Ideally, we should check for the error returned when latching the page to filter out cases where
@@ -11702,6 +11708,22 @@ ERR LOG::ErrLGRIRedoOperations(
         if ( errLGNoMoreRecords == err )
         {
             INT fNSNextStep;
+
+            // super cold any pages we don't expect to see again
+            for ( size_t i = 0; i < m_arrayPagerefSupercold.Size(); i++ )
+            {
+                const PageRef& pageref = m_arrayPagerefSupercold.Entry( i );
+                const IFMP ifmpT = m_pinst->m_mpdbidifmp[ pageref.dbid ];
+                const PGNO pgnoT = pageref.pgno;
+
+                if ( ifmpT < g_ifmpMax && pgnoT != pgnoNull && pgnoT <= g_rgfmp[ifmpT].PgnoLast() )
+                {
+                    BFMarkAsSuperCold( ifmpT, pgnoT, bflfDBScan );
+                }
+            }
+
+            const CArray<PageRef>::ERR errArray = m_arrayPagerefSupercold.ErrSetSize( 0 );
+            Assert( errArray == CArray<PageRef>::ERR::errSuccess );
 
             // we report the progress either if this log took too long to replay (at least 5 seconds) or
             // if the control callback says so ...
