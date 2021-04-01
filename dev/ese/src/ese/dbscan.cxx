@@ -338,6 +338,7 @@ private:
     void BadChecksum_( const PGNO pgno );
     void PassReadPage_( const PGNO pgno );
     void DoOnePass_();
+    void PrereadDone_( _In_ const PGNO pgnoFirst, _In_ const CPG cpgScan );
     void WaitForMinPassTime_();
 
     // The status methods (ResumePass_, StartNewPass_, etc.) all have to call a member function of all
@@ -4601,13 +4602,15 @@ void DBMScan::DoOnePass_()
                 if ( cpgScan > 0 )
                 {
                     m_pscanreader->PrereadPages( pgnoFirst, cpgScan );
-                    for ( PGNO pgno = pgnoFirst; pgno < pgnoFirst + cpgScan; ++pgno )
+                    PGNO pgno = pgnoNull;
+                    for ( pgno = pgnoFirst; pgno < pgnoFirst + cpgScan; ++pgno )
                     {
                         const ERR err = m_pscanreader->ErrReadPage( pgno );
                         switch ( err )
                         {
                             case JET_errFileIOBeyondEOF:
                                 Expected( fFalse );   // Unexpected because we're not reading past the last page above.
+                                PrereadDone_( pgnoFirst, pgno - pgnoFirst );
                                 FinishPass_();
                                 goto Finished;
 
@@ -4620,8 +4623,8 @@ void DBMScan::DoOnePass_()
                                 break;
                         }
                         PassReadPage_( pgno );
-                        m_pscanreader->DoneWithPreread( pgno );
                     }
+                    PrereadDone_( pgnoFirst, pgno - pgnoFirst );
                 }
                 else
                 {
@@ -4659,6 +4662,16 @@ Finished:
     }
 
     return;
+}
+
+void DBMScan::PrereadDone_( _In_ const PGNO pgnoFirst, _In_ const CPG cpgScan )
+{
+    // mark all the pages as done at once to mark them all super cold at once to maximize the chance that scrubbed
+    // pages will be written out in one IO
+    for ( PGNO pgno = pgnoFirst; pgno < pgnoFirst + cpgScan; ++pgno )
+    {
+        m_pscanreader->DoneWithPreread( pgno );
+    }
 }
 
 // we are resuming a pass if the state tells us that we have scanned
@@ -6815,7 +6828,7 @@ void TestDBMScanReader::DoneWithPreread( const PGNO pgno )
     {
         m_fInError = fTrue;
     }
-    if ( pgno != m_pgnoLastRead )
+    if ( pgno != m_pgnoLastRead - m_cpgReadTotal + m_cpgDoneTotal + 1 )
     {
         m_fInError = fTrue;
     }

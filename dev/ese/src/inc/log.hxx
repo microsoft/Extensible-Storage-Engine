@@ -1704,6 +1704,8 @@ private:
 
     LGEN_LOGTIME_MAP m_MaxRequiredMap;
 
+    CArray<PageRef> m_arrayPagerefSupercold;
+
     // ****************** members for restore ******************
 
     BOOL            m_fExternalRestore;
