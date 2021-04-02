@@ -772,7 +772,7 @@ HandleError:
     return fSuccess;
 }
 
-CUnitTest( OSTimerTaskTestPeriodicEmulation, 0, "Tests that a timer task that regularly reschedules gets approximate periodic callbacks of right frequency." );
+CUnitTest( OSTimerTaskTestPeriodicEmulation, bitExplicitOnly, "Tests that a timer task that regularly reschedules gets approximate periodic callbacks of right frequency." );
 ERR OSTimerTaskTestPeriodicEmulation::ErrTest()
 {
     CSemaphore semTimerShot( CSyncBasicInfo( "PeriodicTimer" ) );
@@ -805,7 +805,7 @@ HandleError:
     return err;
 }
 
-CUnitTest( OSTimerTaskTestPeriodicEmulationWithInitial, 0, "Tests that a timer task that regularly reschedules gets approximate periodic callbacks of right frequency, and with an initial backoff." );
+CUnitTest( OSTimerTaskTestPeriodicEmulationWithInitial, bitExplicitOnly, "Tests that a timer task that regularly reschedules gets approximate periodic callbacks of right frequency, and with an initial backoff." );
 ERR OSTimerTaskTestPeriodicEmulationWithInitial::ErrTest()
 {
     CSemaphore semTimerShot( CSyncBasicInfo( "PeriodicTimer" ) );
@@ -838,7 +838,7 @@ HandleError:
     return err;
 }
 
-CUnitTest( OSTimerTaskTestOneShotWithExternalReschedule, 0, "Tests that a one-shot timer that gets repeatedly rescheduled (but not cancelled) only runs once after the last reschedule." );
+CUnitTest( OSTimerTaskTestOneShotWithExternalReschedule, bitExplicitOnly, "Tests that a one-shot timer that gets repeatedly rescheduled (but not cancelled) only runs once after the last reschedule." );
 ERR OSTimerTaskTestOneShotWithExternalReschedule::ErrTest()
 {
     CSemaphore semTimerShot( CSyncBasicInfo( "OneShotTimer" ) );
@@ -1718,7 +1718,7 @@ HandleError:
     return err;
 }
 
-CUnitTest( OSTimerTaskSchedulingTimerStress, 0, "SchedulingTimerStress." );
+CUnitTest( OSTimerTaskSchedulingTimerStress, bitExplicitOnly, "SchedulingTimerStress." );
 ERR OSTimerTaskSchedulingTimerStress::ErrTest()
 {
     printf( "\t%s\n", __FUNCTION__ );
@@ -1731,7 +1731,7 @@ ERR OSTimerTaskSchedulingTimerStress::ErrTest()
     return err;
 }
 
-CUnitTest( OSTimerTaskSelfSchedulingTimerStress, 0, "OSTimerTaskSelfSchedulingTimerStress." );
+CUnitTest( OSTimerTaskSelfSchedulingTimerStress, bitExplicitOnly, "OSTimerTaskSelfSchedulingTimerStress." );
 ERR OSTimerTaskSelfSchedulingTimerStress::ErrTest()
 {
     printf( "\t%s\n", __FUNCTION__ );

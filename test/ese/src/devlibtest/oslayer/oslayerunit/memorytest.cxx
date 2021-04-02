@@ -1391,7 +1391,7 @@ HandleError:
 //  Need to be deleted at the end
 extern CSparseBitmap*   psbm;
 
-CUnitTest( OSLayerResidentMapPerf, 0, "Tests performance of OSLayer residence map scan APIs" );
+CUnitTest( OSLayerResidentMapPerf, bitExplicitOnly, "Tests performance of OSLayer residence map scan APIs" );
 ERR OSLayerResidentMapPerf::ErrTest()
 {
     ERR err = JET_errSuccess;

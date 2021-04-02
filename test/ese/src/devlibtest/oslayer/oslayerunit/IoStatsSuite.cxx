@@ -43,7 +43,7 @@ void PrintStatsBasicPercentages_( _In_ CIoStats * piostats, CHAR * szPiostatsNam
 //
 
 //  ================================================================
-CUnitTest( IoStatsBasicAcceptsAllValues, 0x0, "Tests that Io latency histograms can accept all values" );
+CUnitTest( IoStatsBasicAcceptsAllValues, bitExplicitOnly, "Tests that Io latency histograms can accept all values" );
 ERR IoStatsBasicAcceptsAllValues::ErrTest()
 //  ================================================================
 {

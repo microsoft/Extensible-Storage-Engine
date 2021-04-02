@@ -89,7 +89,7 @@ HandleError:
     return err;
 }
 
-CUnitTest( OslayerHrtCheckPerfErrHrtHRTCountPerf, 0, "Loop to check ErrHrtHRTCount() perf." );
+CUnitTest( OslayerHrtCheckPerfErrHrtHRTCountPerf, bitExplicitOnly, "Loop to check ErrHrtHRTCount() perf." );
 ERR OslayerHrtCheckPerfErrHrtHRTCountPerf::ErrTest()
 {
     JET_ERR err = JET_errSuccess;
