@@ -8,6 +8,14 @@
 #ifdef ESEEX
 // Exchange-only common .rc file
 #include "bldver.rc"
+
+#define LZ4_COPYRIGHT 1
+
+STRINGTABLE
+{
+    // Include LZ4 copyright in the binary
+    LZ4_COPYRIGHT, "LZ4 Library\r\nCopyright (c) 2011-2020, Yann Collet\r\nAll rights reserved.\r\n\r\nRedistribution and use in source and binary forms, with or without modification,\r\nare permitted provided that the following conditions are met:\r\n\r\n* Redistributions of source code must retain the above copyright notice, this\r\n  list of conditions and the following disclaimer.\r\n\r\n* Redistributions in binary form must reproduce the above copyright notice, this\r\n  list of conditions and the following disclaimer in the documentation and/or\r\n  other materials provided with the distribution.\r\n\r\nTHIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS AS IS AND\r\nANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED\r\nWARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE\r\nDISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE LIABLE FOR\r\nANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES\r\n(INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES;\r\nLOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON\r\nANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT\r\n(INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS\r\nSOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.\r\n"
+}
 #endif
 
 #include "jetmsgex.rc"

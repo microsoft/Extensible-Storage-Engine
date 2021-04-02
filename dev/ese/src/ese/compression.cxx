@@ -10,6 +10,9 @@
 #include "xpress10sw.h"
 #include "xpress10corsica.h"
 #endif
+#ifdef LZ4_COMPRESSION
+#include "lz4.h"
+#endif
 
 #include "PageSizeClean.hxx"
 
@@ -32,10 +35,6 @@ class IDataCompressorStats
         virtual void AddDecompressionBytes( const INT cb ) = 0;
         virtual void IncDecompressionCalls() = 0;
         virtual void AddDecompressionDhrts( const QWORD dhrts ) = 0;
-
-        virtual void AddCpuXpress9DecompressionBytes( const INT cb ) = 0;
-        virtual void IncCpuXpress9DecompressionCalls() = 0;
-        virtual void AddCpuXpress9DecompressionDhrts( const QWORD dhrts ) = 0;
 
         virtual void AddXpress10SoftwareDecompressionBytes( const INT cb ) = 0;
         virtual void IncXpress10SoftwareDecompressionCalls() = 0;
@@ -77,10 +76,6 @@ class CDataCompressorPerfCounters : public IDataCompressorStats
         void IncDecompressionCalls();
         void AddDecompressionDhrts( const QWORD dhrts );
 
-        void AddCpuXpress9DecompressionBytes( const INT cb )        { PERFOpt( CHECK_INST( s_cbCpuXpress9DecompressionBytes.Add( m_iInstance, cb ) ) ); }
-        void IncCpuXpress9DecompressionCalls()                      { PERFOpt( CHECK_INST( s_cCpuXpress9DecompressionCalls.Inc( m_iInstance ) ) ); }
-        void AddCpuXpress9DecompressionDhrts( const QWORD dhrts )   { PERFOpt( CHECK_INST( s_cCpuXpress9DecompressionTotalDhrts.Add( m_iInstance, dhrts ) ) ); }
-
         void AddXpress10SoftwareDecompressionBytes( const INT cb )        { PERFOpt( CHECK_INST( s_cbXpress10SoftwareDecompressionBytes.Add( m_iInstance, cb ) ) ); }
         void IncXpress10SoftwareDecompressionCalls()                      { PERFOpt( CHECK_INST( s_cXpress10SoftwareDecompressionCalls.Inc( m_iInstance ) ) ); }
         void AddXpress10SoftwareDecompressionDhrts( const QWORD dhrts )   { PERFOpt( CHECK_INST( s_cXpress10SoftwareDecompressionTotalDhrts.Add( m_iInstance, dhrts ) ) ); }
@@ -107,10 +102,6 @@ class CDataCompressorPerfCounters : public IDataCompressorStats
         static PERFInstanceLiveTotal<> s_cDecompressionCalls;
         static PERFInstanceLiveTotal<QWORD> s_cDecompressionTotalDhrts;
 
-        static PERFInstanceLiveTotal<> s_cbCpuXpress9DecompressionBytes;
-        static PERFInstanceLiveTotal<> s_cCpuXpress9DecompressionCalls;
-        static PERFInstanceLiveTotal<QWORD> s_cCpuXpress9DecompressionTotalDhrts;
-
         static PERFInstanceLiveTotal<> s_cbXpress10SoftwareDecompressionBytes;
         static PERFInstanceLiveTotal<> s_cXpress10SoftwareDecompressionCalls;
         static PERFInstanceLiveTotal<QWORD> s_cXpress10SoftwareDecompressionTotalDhrts;
@@ -133,10 +124,6 @@ PERFInstanceLiveTotal<QWORD> CDataCompressorPerfCounters::s_cCompressionTotalDhr
 PERFInstanceLiveTotal<> CDataCompressorPerfCounters::s_cbDecompressionBytes;
 PERFInstanceLiveTotal<> CDataCompressorPerfCounters::s_cDecompressionCalls;
 PERFInstanceLiveTotal<QWORD> CDataCompressorPerfCounters::s_cDecompressionTotalDhrts;
-
-PERFInstanceLiveTotal<> CDataCompressorPerfCounters::s_cbCpuXpress9DecompressionBytes;
-PERFInstanceLiveTotal<> CDataCompressorPerfCounters::s_cCpuXpress9DecompressionCalls;
-PERFInstanceLiveTotal<QWORD> CDataCompressorPerfCounters::s_cCpuXpress9DecompressionTotalDhrts;
 
 PERFInstanceLiveTotal<> CDataCompressorPerfCounters::s_cbXpress10SoftwareDecompressionBytes;
 PERFInstanceLiveTotal<> CDataCompressorPerfCounters::s_cXpress10SoftwareDecompressionCalls;
@@ -263,27 +250,6 @@ LONG LDecompressionLatencyCEFLPv( LONG iInstance, VOID * pvBuf )
     if ( pvBuf != NULL )
     {
         *(QWORD*) pvBuf = CusecHRTFromDhrt( CDataCompressorPerfCounters::s_cDecompressionTotalDhrts.Get( iInstance ) );
-    }
-    return 0;
-}
-
-LONG LCpuXpress9DecompressionBytesCEFLPv( LONG iInstance, void *pvBuf )
-{
-    CDataCompressorPerfCounters::s_cbCpuXpress9DecompressionBytes.PassTo( iInstance, pvBuf );
-    return 0;
-}
-
-LONG LCpuXpress9DecompressionCEFLPv( LONG iInstance, void *pvBuf )
-{
-    CDataCompressorPerfCounters::s_cCpuXpress9DecompressionCalls.PassTo( iInstance, pvBuf );
-    return 0;
-}
-
-LONG LCpuXpress9DecompressionLatencyCEFLPv( LONG iInstance, VOID * pvBuf )
-{
-    if ( pvBuf != NULL )
-    {
-        *(QWORD*) pvBuf = CusecHRTFromDhrt( CDataCompressorPerfCounters::s_cCpuXpress9DecompressionTotalDhrts.Get( iInstance ) );
     }
     return 0;
 }
@@ -530,6 +496,7 @@ class CDataCompressor
                 COMPRESS_SCRUB = 0x4,
                 COMPRESS_XPRESS9 = 0x5,
                 COMPRESS_XPRESS10 = 0x6,
+                COMPRESS_LZ4 = 0x7,
                 COMPRESS_MAXIMUM = 0x1f, // We only have 5 bits due to 3 bits used by 7 bit compression
             };
 
@@ -550,6 +517,13 @@ class CDataCompressor
             UnalignedLittleEndian<ULONG>        mle_ulUncompressedChecksum;
             // Corsica compatible CRC of the compressed data
             UnalignedLittleEndian<ULONGLONG>    mle_ullCompressedChecksum;
+        };
+
+        PERSISTED
+        struct Lz4Header
+        {
+            BYTE                                m_fCompressScheme;
+            UnalignedLittleEndian<WORD>         mle_cbUncompressed;
         };
 #include <poppack.h>
 
@@ -660,6 +634,20 @@ class CDataCompressor
             IDataCompressorStats * const pstats );
 #endif
 
+#ifdef LZ4_COMPRESSION
+        ERR ErrCompressLz4_(
+            const DATA& data,
+            _Out_writes_bytes_to_( cbDataCompressedMax, *pcbDataCompressedActual ) BYTE * const pbDataCompressed,
+            const INT cbDataCompressedMax,
+            _Out_ INT * const pcbDataCompressedActual,
+            IDataCompressorStats * const pstats );
+        ERR ErrVerifyCompressLz4_(
+            _In_reads_bytes_( cbDataCompressed ) const BYTE * const pbDataCompressed,
+            const INT cbDataCompressed,
+            const INT cbDataUncompressed,
+            IDataCompressorStats * const pstats );
+#endif
+
         ERR ErrDecompress7BitAscii_(
             const DATA& dataCompressed,
             _Out_writes_bytes_to_opt_( cbDataMax, *pcbDataActual ) BYTE * const pbData,
@@ -695,6 +683,15 @@ class CDataCompressor
             IDataCompressorStats * const pstats,
             const BOOL fForceSoftwareDecompression,
             BOOL * pfUsedCorsica );
+#endif
+
+#ifdef LZ4_COMPRESSION
+        ERR ErrDecompressLz4_(
+            const DATA& dataCompressed,
+            _Out_writes_bytes_to_opt_( cbDataMax, min( cbDataMax, *pcbDataActual ) ) BYTE * const pbData,
+            const INT cbDataMax,
+            _Out_ INT * const pcbDataActual,
+            IDataCompressorStats * const pstats );
 #endif
 
 private:
@@ -1948,11 +1945,13 @@ ERR CDataCompressor::ErrCompressXpress10_(
                 &dhrtHardwareLatency,
                 &reason,
                 &EngineErrorCode );
-        if ( FAILED(status) )
+        if ( FAILED(status) ||
+             // Fail compression if size does not decrease. Upper layers do not like it.
+             ( *pcbDataCompressedActual + cbReserved ) >= data.Cb() )
         {
             err = ErrERRCheck( errRECCannotCompress );
             // compression can report buffer overrun for uncompressible input, no need to event for that.
-            if ( status != HRESULT_FROM_WIN32( ERROR_INSUFFICIENT_BUFFER ) )
+            if ( FAILED(status) && status != HRESULT_FROM_WIN32( ERROR_INSUFFICIENT_BUFFER ) )
             {
                 LogCorsicaRequestFailure( status, EngineErrorCode, reason, fTrue );
             }
@@ -1976,7 +1975,8 @@ ERR CDataCompressor::ErrCompressXpress10_(
                 pbDataCompressed + cbReserved,
                 cbDataCompressedMax - cbReserved,
                 (PULONG)pcbDataCompressedActual,
-                &ullCompressedCrc ) ) )
+                &ullCompressedCrc ) ) ||
+             ( *pcbDataCompressedActual + cbReserved ) >= data.Cb() )
         {
             err = ErrERRCheck( errRECCannotCompress );
         }
@@ -1999,7 +1999,105 @@ ERR CDataCompressor::ErrCompressXpress10_(
 }
 #endif // XPRESS10_COMPRESSION
 
- //  ================================================================
+#ifdef LZ4_COMPRESSION
+//  ================================================================
+ERR CDataCompressor::ErrVerifyCompressLz4_(
+    _In_reads_bytes_( cbDataCompressed ) const BYTE * const pbDataCompressed,
+    const INT cbDataCompressed,
+    const INT cbDataUncompressed,
+    IDataCompressorStats * const pstats )
+//  ================================================================
+{
+    ERR err = JET_errSuccess;
+    DATA dataCompressed;
+    dataCompressed.SetPv( const_cast<BYTE*>( pbDataCompressed ) );
+    dataCompressed.SetCb( cbDataCompressed );
+
+    BYTE* pbDecompress;
+    INT cbDataDecompressed = 0;
+
+    if ( g_compressionBufferCache.CbBufferSize() != 0 )
+    {
+        Assert( g_compressionBufferCache.CbBufferSize() >= cbDataUncompressed );
+        Alloc( pbDecompress = g_compressionBufferCache.PbAlloc() );
+    }
+    else
+    {
+        // Only allowed if running unit tests with uninitialized caches
+        Alloc( pbDecompress = new BYTE[ cbDataUncompressed ] );
+    }
+
+    // This is probably cheap enough that we can leave this in forever for peace of mind.
+    err = ErrDecompressLz4_( dataCompressed, pbDecompress, cbDataUncompressed, &cbDataDecompressed, pstats );
+    if ( ( err == JET_errSuccess && cbDataUncompressed != cbDataDecompressed ) ||
+         ( err != JET_errSuccess && err != JET_errOutOfMemory ) )
+    {
+        // We have caught a potential data corruption issue in our compress/decompress pipeline !
+        // Crash and diagnose.
+        // If we couldn't decompress because of OOM, do nothing. Verification is an optional step.
+
+        FireWall( "Lz4CompressionVerificationFailed" );
+        err = ErrERRCheck( errRECCannotCompress );
+    }
+
+    if ( g_compressionBufferCache.CbBufferSize() != 0 )
+    {
+        g_compressionBufferCache.Free( pbDecompress );
+    }
+    else
+    {
+        // Only allowed if running unit tests with uninitialized caches
+        delete[] pbDecompress;
+    }
+
+HandleError:
+    return err;
+}
+
+//  ================================================================
+ERR CDataCompressor::ErrCompressLz4_(
+    const DATA& data,
+    _Out_writes_bytes_to_( cbDataCompressedMax, *pcbDataCompressedActual ) BYTE * const pbDataCompressed,
+    const INT cbDataCompressedMax,
+    _Out_ INT * const pcbDataCompressedActual,
+    IDataCompressorStats * const pstats )
+//  ================================================================
+{
+    PERFOptDeclare( const HRT hrtStart = HrtHRTCount() );
+
+    Assert( data.Cb() <= wMax );
+
+    // Reserve 3 BYTE for signature
+    C_ASSERT( sizeof( Lz4Header ) == 3 );
+    const INT cbReserved = sizeof( Lz4Header );
+    int cbCompressedActual = LZ4_compress_default(
+            (char *)data.Pv(),
+            (char *)pbDataCompressed + cbReserved,
+            data.Cb(),
+            cbDataCompressedMax - cbReserved );
+    if ( cbCompressedActual == 0 ||
+         // Fail compression if size does not decrease. Upper layers do not like it.
+         ( cbCompressedActual + cbReserved ) >= data.Cb() )
+    {
+        return ErrERRCheck( errRECCannotCompress );
+    }
+    Assert( cbCompressedActual <= cbDataCompressedMax - cbReserved );
+
+    PERFOpt( pstats->AddUncompressedBytes( data.Cb() ) );
+    PERFOpt( pstats->AddCompressedBytes( *pcbDataCompressedActual ) );
+    PERFOpt( pstats->IncCompressionCalls() );
+    PERFOpt( pstats->AddCompressionDhrts( HrtHRTCount() - hrtStart ) );
+
+    Lz4Header * const pHdr = (Lz4Header *)pbDataCompressed;
+    pHdr->m_fCompressScheme = ( COMPRESS_LZ4 << 3 );
+    pHdr->mle_cbUncompressed  = (WORD)data.Cb();
+    *pcbDataCompressedActual = cbCompressedActual + cbReserved;
+
+    return JET_errSuccess;
+}
+#endif
+
+//  ================================================================
 ERR CDataCompressor::ErrDecompress7BitAscii_(
     const DATA& dataCompressed,
     _Out_writes_bytes_to_opt_( cbDataMax, *pcbDataActual ) BYTE * const pbData,
@@ -2291,7 +2389,6 @@ ERR CDataCompressor::ErrDecompressXpress9_(
 //  ================================================================
 {
     ERR err = JET_errSuccess;
-    PERFOptDeclare( const HRT hrtStart = HrtHRTCount() );
 
     XPRESS9_STATUS status = { 0 };
     XPRESS9_DECODER decode = 0;
@@ -2361,13 +2458,6 @@ HandleError:
     {
         Xpress9DecoderDetach( &status, decode, pbCompressedData, (unsigned)cbCompressedData );
         Xpress9DecodeClose_( decode );
-    }
-
-    if ( err >= JET_errSuccess )
-    {
-        PERFOpt( pstats->AddCpuXpress9DecompressionBytes( cbDecompressed ) );
-        PERFOpt( pstats->IncCpuXpress9DecompressionCalls() );
-        PERFOpt( pstats->AddCpuXpress9DecompressionDhrts( HrtHRTCount() - hrtStart ) );
     }
 
     return err;
@@ -2536,6 +2626,67 @@ ERR CDataCompressor::ErrDecompressXpress10_(
 }
 #endif // XPRESS10_COMPRESSION
 
+#ifdef LZ4_COMPRESSION
+//  ================================================================
+ERR CDataCompressor::ErrDecompressLz4_(
+    const DATA& dataCompressed,
+    _Out_writes_bytes_to_opt_( cbDataMax, min( cbDataMax, *pcbDataActual ) ) BYTE * const pbData,
+    const INT cbDataMax,
+    _Out_ INT * const pcbDataActual,
+    IDataCompressorStats * const pstats )
+//  ================================================================
+{
+    PERFOptDeclare( const HRT hrtStart = HrtHRTCount() );
+
+    // Reserved 3 BYTE (for the signature)
+    C_ASSERT( sizeof( Lz4Header ) == 3 );
+    const INT cbReserved = sizeof( Lz4Header );
+    const INT cbCompressedData = dataCompressed.Cb() - cbReserved;
+    if ( cbCompressedData < 0 )
+    {
+        return ErrERRCheck( JET_errDecompressionFailed );
+    }
+
+    // Verify the header flags
+    const Lz4Header * const pHdr = (Lz4Header *)dataCompressed.Pv();
+    if ( ( pHdr->m_fCompressScheme >> 3 ) != COMPRESS_LZ4 )
+    {
+        return ErrERRCheck( JET_errDecompressionFailed );
+    }
+    // first calculate the final length
+    const INT cbUncompressed = pHdr->mle_cbUncompressed;
+    *pcbDataActual = cbUncompressed;
+    if ( NULL == pbData || 0 == cbDataMax )
+    {
+        // no data, just the size
+        return ErrERRCheck( JET_wrnBufferTruncated );
+    }
+
+    int cbDataActual = LZ4_decompress_safe_partial(
+            (char *)dataCompressed.Pv() + cbReserved,
+            (char *)pbData,
+            cbCompressedData,
+            cbDataMax,
+            cbDataMax );
+    if ( cbDataActual == 0 )
+    {
+        return ErrERRCheck( JET_errDecompressionFailed );
+    }
+    Assert( cbDataActual == min( cbDataMax, cbUncompressed ) );
+
+    PERFOpt( pstats->AddDecompressionBytes( cbDataActual ) );
+    PERFOpt( pstats->AddDecompressionDhrts( HrtHRTCount() - hrtStart ) );
+    PERFOpt( pstats->IncDecompressionCalls() );
+
+    if ( cbDataMax < cbUncompressed )
+    {
+        return ErrERRCheck( JET_wrnBufferTruncated );
+    }
+
+    return JET_errSuccess;
+}
+#endif
+
 //  ================================================================
 ERR CDataCompressor::ErrCompress(
     const DATA& data,
@@ -2555,7 +2706,7 @@ ERR CDataCompressor::ErrCompress(
     {
         // try the advanced compression algorithms in priority order (highest compression potential first)
 #ifdef XPRESS10_COMPRESSION
-        if ( ( compressFlags & compressXpress10 ) && data.Cb() <= wMax )
+        if ( !fCompressed && ( compressFlags & compressXpress10 ) && data.Cb() <= wMax )
         {
             CallJ( ErrCompressXpress10_(
                 data,
@@ -2581,19 +2732,38 @@ TryXpress9Compression:
                 pbDataCompressed,
                 cbDataCompressedMax,
                 pcbDataCompressedActual ),
-                TryXpressCompression );
+                TryLz4Compression );
 
             // Verify that compressed data is decompressible.
             // Just to be on the safe side, we consider OOM during verify a failure to compress
             // (not a verification failure which would indicate a serious corruption bug).
 
-            CallJ( ErrVerifyCompressXpress9_( pbDataCompressed, *pcbDataCompressedActual, cbDataCompressedMax, pstats ), TryXpressCompression );
+            CallJ( ErrVerifyCompressXpress9_( pbDataCompressed, *pcbDataCompressedActual, cbDataCompressedMax, pstats ), TryLz4Compression );
+
+            fCompressed = fTrue;
+        }
+
+TryLz4Compression:
+#endif // XPRESS9_COMPRESSION
+#ifdef LZ4_COMPRESSION
+        if ( !fCompressed && ( compressFlags & compressLz4 ) && data.Cb() <= wMax )
+        {
+            CallJ( ErrCompressLz4_(
+                data,
+                pbDataCompressed,
+                cbDataCompressedMax,
+                pcbDataCompressedActual,
+                pstats ),
+                TryXpressCompression );
+
+            // Verify that compressed data is decompressible, otherwise a firmware bug/hardware issue with Corsica can result in replicated corruption.
+            CallJ( ErrVerifyCompressLz4_( pbDataCompressed, *pcbDataCompressedActual, data.Cb(), pstats ), TryXpressCompression );
 
             fCompressed = fTrue;
         }
 
 TryXpressCompression:
-#endif // XPRESS9_COMPRESSION
+#endif
         if ( !fCompressed && ( compressFlags & compressXpress ) )
         {
             CallJ( ErrCompressXpress_(
@@ -2698,6 +2868,12 @@ ERR CDataCompressor::ErrDecompress(
             Call( ErrDecompressXpress10_( dataCompressed, pbData, cbDataMax, pcbDataActual, pstats, fDontUseCorsica, &fUnused ) );
             break;
 #endif
+#ifdef LZ4_COMPRESSION
+        case COMPRESS_LZ4:
+            Call( ErrDecompressLz4_( dataCompressed, pbData, cbDataMax, pcbDataActual, pstats ) );
+            break;
+#endif
+
         default:
             // fUnused *is* used in the conditionally compiled XPRESS10_COMPRESSION above,
             // but if XPRESS10_COMPRESSION is not defined, we get a compiler warning, so
@@ -3060,10 +3236,6 @@ class TestCompressorStats : public IDataCompressorStats
         void IncDecompressionCalls() { m_cDecompressionCalls++; }
         void AddDecompressionDhrts( const QWORD dhrts ) { m_dhrtsDecompression = dhrts; }
 
-        void AddCpuXpress9DecompressionBytes( const INT cb ) { m_cbDecompression = cb; }
-        void IncCpuXpress9DecompressionCalls() { m_cDecompressionCalls++; }
-        void AddCpuXpress9DecompressionDhrts( const QWORD dhrts ) { m_dhrtsDecompression = dhrts; }
-
         void AddXpress10SoftwareDecompressionBytes( const INT cb ) { m_cbDecompression = cb; }
         void IncXpress10SoftwareDecompressionCalls() { m_cDecompressionCalls++; }
         void AddXpress10SoftwareDecompressionDhrts( const QWORD dhrts ) { m_dhrtsDecompression = dhrts; }
@@ -3289,6 +3461,18 @@ JETUNITTEST( CDataCompressor, Xpress10FallbackXpress )
 }
 #endif
 
+#ifdef LZ4_COMPRESSION
+//  ================================================================
+JETUNITTEST( CDataCompressor, Lz4 )
+//  ================================================================
+{
+    CHECK( JET_errSuccess == ErrPKInitCompression( 32*1024, 1024, 32*1024 ) );
+    DataCompressorBasic( compressLz4 );
+    DataCompressorBasic( compressLz4, NULL, 8150 );
+    PKTermCompression();
+}
+#endif
+
 //  ================================================================
 JETUNITTEST( CDataCompressor, XpressThreshold )
 //  ================================================================
@@ -3392,6 +3576,7 @@ void DataCompressorEfficiencyCases( const CompressFlags compressFlags )
     const INT cbBuf = 4096;
     BYTE rgbBuf1[cbBuf];
     BYTE rgbBuf2[cbBuf];
+    BYTE rgbBuf3[2*cbBuf];
     INT cbDataActual;
     DATA data;
 
@@ -3424,6 +3609,10 @@ void DataCompressorEfficiencyCases( const CompressFlags compressFlags )
     data.SetPv( rgbBuf1 );
     data.SetCb( cbBuf );
     err = compressor.ErrCompress( data, compressFlags, &stats, rgbBuf2, cbBuf, &cbDataActual );
+    CHECK( errRECCannotCompress == err );
+
+    // Now make sure that even if we give it a big enough buffer to compress (larger than input) compression scheme will still return errRECCannotCompress
+    err = compressor.ErrCompress( data, compressFlags, &stats, rgbBuf3, 2*cbBuf, &cbDataActual );
     CHECK( errRECCannotCompress == err );
 
     // data that compresses poorly
@@ -3466,6 +3655,17 @@ JETUNITTEST( CDataCompressor, Xpress10EfficiencyCases )
     g_fAllowXpress10SoftwareCompression = fTrue;
     DataCompressorEfficiencyCases( compressXpress10 );
     g_fAllowXpress10SoftwareCompression = fFalse;
+    PKTermCompression();
+}
+#endif
+
+#ifdef LZ4_COMPRESSION
+//  ================================================================
+JETUNITTEST( CDataCompressor, Lz4EfficiencyCases )
+//  ================================================================
+{
+    CHECK( JET_errSuccess == ErrPKInitCompression( 32*1024, 1024, 32*1024 ) );
+    DataCompressorEfficiencyCases( compressLz4 );
     PKTermCompression();
 }
 #endif

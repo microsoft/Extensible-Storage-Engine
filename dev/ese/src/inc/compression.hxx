@@ -13,7 +13,8 @@ enum CompressFlags
 #ifndef ESENT
     compressXpress9 = 0x0010,
 #endif
-    compressXpress10 = 0x0020,
+    compressXpress10 = 0x0020,  // Xpress10 (Corsica hardware) compression
+    compressLz4 = 0x0040,  // Lz4 compression
 };
 
 ERR ErrPKCompressData(
