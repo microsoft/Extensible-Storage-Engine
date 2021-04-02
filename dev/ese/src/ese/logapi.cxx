@@ -3208,6 +3208,12 @@ VOID LGICompressPreImage(
     {
         compressFlags = CompressFlags( compressFlags | compressXpress10 );
     }
+    // If lz4 is enabled, use that.
+    if ( BoolParam( pinst, JET_paramFlight_EnableLz4Compression ) &&
+         pinst->m_plog->ErrLGFormatFeatureEnabled( JET_efvLz4Compression ) >= JET_errSuccess )
+    {
+        compressFlags = CompressFlags( compressFlags | compressLz4 );
+    }
 
     // Now try xpress compression on (the possibly dehydrated) page
     if ( ErrPKCompressData( dataToSet, compressFlags, pinst, pbDataCompressed, cbPage, &cbDataCompressedActual ) >= JET_errSuccess &&

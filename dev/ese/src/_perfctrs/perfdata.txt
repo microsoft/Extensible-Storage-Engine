@@ -141,11 +141,12 @@
 ;	299 - 2020/04/17 - Remove Redundant replace counter.
 ;	300 - 2010/05/01 - Add Xpress10 corsica compression related counters.
 ;	301 - 2010/09/23 - Add Snapshot related counters.
+;	302 - 2011/03/26 - Remove Xpress9 counters.
 
 
 [ModuleInfo]
 MaxInstNameSize=64
-SchemaVersion=301
+SchemaVersion=302
 ; we will subst later $PerformanceObjectName$ with either ESE or ESENT version
 PerformanceObjectName_ESE=MSExchange Database
 PerformanceObjectName_ESENT=Database
@@ -10270,46 +10271,6 @@ DetailLevel=PERF_DETAIL_DEVONLY | PERF_DETAIL_DEFAULT
 DefaultScale=0
 CounterType=PERF_AVERAGE_BASE
 EvaluationFunction=LDecompressionCEFLPv
-009_Name=
-009_Help=
-
-[ICpuXpress9DecompressionBytesPerSec]
-Type=Counter
-Object=Instances
-DetailLevel=PERF_DETAIL_DEVONLY | PERF_DETAIL_DEFAULT
-DefaultScale=-5
-CounterType=PERF_COUNTER_COUNTER
-EvaluationFunction=LCpuXpress9DecompressionBytesCEFLPv
-009_Name=Cpu Xpress9 Decompressed Bytes/sec
-009_Help=Cpu Xpress9 Decompressed Bytes/sec is the number of bytes per second that were decompressed during DML operations using Xpress9 on the system cpu.  [Dev Only]
-
-[ICpuXpress9DecompressionOpsPerSec]
-Type=Counter
-Object=Instances
-DetailLevel=PERF_DETAIL_DEVONLY | PERF_DETAIL_DEFAULT
-DefaultScale=0
-CounterType=PERF_COUNTER_COUNTER
-EvaluationFunction=LCpuXpress9DecompressionCEFLPv
-009_Name=Cpu Xpress9 Decompression Ops/sec
-009_Help=Cpu Xpress9 Decompression Ops/sec is the number of decompression operations per second that were performed during DML operations using Xpress9 on the system cpu.  [Dev Only]
-
-[ICpuXpress9DecompressionAvgLatency]
-Type=Counter
-Object=Instances
-DetailLevel=PERF_DETAIL_DEVONLY | PERF_DETAIL_DEFAULT
-DefaultScale=0
-CounterType=PERF_AVERAGE_BULK
-EvaluationFunction=LCpuXpress9DecompressionLatencyCEFLPv
-009_Name=Cpu Xpress9 Decompression average latency (us)
-009_Help=Cpu Xpress9 Average latency per decompression operation in microseconds.  [Dev Only]
-
-[ICpuXpress9DecompressionBase]
-Type=Counter
-Object=Instances
-DetailLevel=PERF_DETAIL_DEVONLY | PERF_DETAIL_DEFAULT
-DefaultScale=0
-CounterType=PERF_AVERAGE_BASE
-EvaluationFunction=LCpuXpress9DecompressionCEFLPv
 009_Name=
 009_Help=
 

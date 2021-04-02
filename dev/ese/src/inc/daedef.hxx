@@ -30,14 +30,6 @@
 #define PARALLEL_BATCH_INDEX_BUILD
 #define DONT_LOG_BATCH_INDEX_BUILD
 
-//  xpress9/xpress10 compression
-#ifdef USE_XPRESS_9_10_COMPRESSION
-#define XPRESS9_COMPRESSION
-#ifdef _M_AMD64
-#define XPRESS10_COMPRESSION
-#endif
-#endif
-
 //  ****************************************************
 //  global test hook / diagnostics macros
 //

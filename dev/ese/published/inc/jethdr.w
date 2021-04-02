@@ -665,6 +665,7 @@ typedef void (JET_API *JET_SPCATCALLBACK)( _In_ const unsigned long pgno, _In_ c
 #define JET_efvRevertSnapshot                               9360    //  Added revert snapshot flush signature to database header and added lrtypExtentFreed, which logs details about the extent freed to allow for revert snapshot to capture the pages of the freed extent.
 #define JET_efvApplyRevertSnapshot                          9380    //  Added le_lgposCommitBeforeRevert to the database header which captures the last commit lgpos before revert was done and is used to ignore JET_errDbTimeTooOld errors on pasive copies.
 #define JET_efvExtentPageCountCache                         9400    //  Adds support for the ExtentPageCountCache table.
+#define JET_efvLz4Compression                               9420    //  Adds support for compressing/decompressing data using Lz4.
 
 // Special format specifiers here
 #define JET_efvUseEngineDefault             (0x40000001)    //  Instructs the engine to use the maximal default supported Engine Format Version. (default)
@@ -3949,6 +3950,7 @@ typedef enum
 // end_PubEsent
 #define JET_paramFlight_EnableReattachRaceBugFix 74 //  Enable bug fix for race between dirty-cache-keep-alive database reattach and checkpoint update
 // #define JET_paramSLVDefragFreeThreshold      74  //  chunks whose free % is > this will be allocated from
+#define JET_paramFlight_EnableLz4Compression    75 //  Enable Lz4 compression
 // #define JET_paramSLVDefragMoveThreshold      75  //  chunks whose free % is > this will be relocated
 #define JET_paramEnableSortedRetrieveColumns    76  //  internally sort (in a dynamically allocated parallel array) JET_RETRIEVECOLUMN structures passed to JetRetrieveColumns()
 // begin_PubEsent

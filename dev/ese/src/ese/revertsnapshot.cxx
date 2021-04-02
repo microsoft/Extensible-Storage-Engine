@@ -1651,6 +1651,11 @@ VOID RBSICompressPreImage(
     {
         compressFlags = CompressFlags( compressFlags | compressXpress10 );
     }
+    // If lz4 is enabled, use that.
+    if ( BoolParam( pinst, JET_paramFlight_EnableLz4Compression ) )
+    {
+        compressFlags = CompressFlags( compressFlags | compressLz4 );
+    }
 
     // Now try xpress compression on (the possibly dehydrated) page
     if ( ErrPKCompressData( dataToSet, compressFlags, pinst, pbDataCompressed, CbPKCompressionBuffer(), &cbDataCompressedActual ) >= JET_errSuccess &&
