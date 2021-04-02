@@ -689,6 +689,7 @@ class CSemaphorePerfTest : public UNITTEST
     protected:
         CSemaphorePerfTest()
         {
+            m_btcf = bitExplicitOnly;
         }
 
     public:

@@ -242,7 +242,8 @@ ERR MathTest::ErrTest()
     OSTestCall( ErrFPowerOf2() );
     OSTestCall( ErrLog2() );
     OSTestCall( ErrLNextPowerOf2() );
-    OSTestCall( ErrHalfAvalancheHash() );
+    // FUTURE[SOMEONE] Revert when merge conflict for explicit test comes along.
+    //OSTestCall( ErrHalfAvalancheHash() );
 
 HandleError:
     if ( err )
