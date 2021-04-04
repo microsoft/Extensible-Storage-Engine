@@ -17,7 +17,7 @@ add_custom_command(
         ${GEN_OUTPUT_DIRECTORY}/_etw/Microsoft-ETW-ESE.h
         ${GEN_OUTPUT_DIRECTORY}/_etw/Microsoft-ETW-ESE.rc
     COMMAND ${CMAKE_MESSAGE_COMPILER} -um ${GEN_OUTPUT_DIRECTORY}/_etw/Microsoft-ETW-ESE.man -h ${GEN_OUTPUT_DIRECTORY}/_etw -r ${GEN_OUTPUT_DIRECTORY}/_etw
-    DEPENDS ${MC_INPUT}
+    DEPENDS ${GEN_OUTPUT_DIRECTORY}/_etw/Microsoft-ETW-ESE.man
 )
 
 add_custom_target(gen_etw
