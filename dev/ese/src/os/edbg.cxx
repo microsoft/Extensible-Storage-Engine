@@ -112,8 +112,9 @@ extern IOREQCHUNK *     g_pioreqchunkRoot;
 
 namespace OSSYNC
 {
-    extern VOID *       g_rgPLS[];
-    extern DWORD        g_cProcessorMax;
+    extern VOID **      g_rgPLS;
+    extern USHORT       g_cProcessorsPerGroup;
+    extern USHORT       g_cProcessorGroups;
 }
 
 extern TableClassNamesLifetimeManager g_tableclassnames;
@@ -173,7 +174,8 @@ const EDBGGlobals rgEDBGGlobals[] =
     EDBGAddGlobal( RESLRUKHIST, NULL ),
     EDBGAddGlobal( g_cbPlsMemRequiredPerPerfInstance, NULL ),
     EDBGAddGlobal( OSSYNC::g_rgPLS, NULL ),
-    EDBGAddGlobal( OSSYNC::g_cProcessorMax, NULL ),
+    EDBGAddGlobal( OSSYNC::g_cProcessorsPerGroup, NULL ),
+    EDBGAddGlobal( OSSYNC::g_cProcessorGroups, NULL ),
     EDBGAddGlobal( PLS::s_pbPerfCounters, NULL ),
     EDBGAddGlobal( PLS::s_cbPerfCounters, NULL ),
     EDBGAddGlobal( g_fMemCheck, NULL ),
@@ -9550,12 +9552,14 @@ DEBUG_EXT( EDBGDumpPerfctr )
     ULONG   cInstanceMax            = 0;
     VOID *  pvPerfInstance          = NULL;
     ULONG   ulOffset                = 0;
+    PLS **  rgPLSDebuggee           = NULL;
     PLS **  rgPLS                   = NULL;
     PLS *   pplsT                   = NULL;
     SIZE_T  cbPLS;
     ULONG   cpinstMaxT;
     ULONG   ifmpMaxT;
-    ULONG   cProcsT;
+    USHORT  cProcsPreGroupT;
+    USHORT  cGroupsT;
     LONG    cbPlsMemRequiredPerPerfInstanceT;
     BOOL    fValidUsage             = fTrue;
     BYTE*   pbPerfCountersDebuggee;
@@ -9590,8 +9594,10 @@ DEBUG_EXT( EDBGDumpPerfctr )
 
     if ( !FReadGlobal( "g_cpinstMax", &cpinstMaxT )
         || !FReadGlobal( "g_ifmpMax", &ifmpMaxT )
-        || !FReadGlobal( "OSSYNC::g_cProcessorMax", &cProcsT )
-        || !FFetchGlobal( "OSSYNC::g_rgPLS", &rgPLS, cProcsT )
+        || !FReadGlobal( "OSSYNC::g_cProcessorsPerGroup", &cProcsPreGroupT )
+        || !FReadGlobal( "OSSYNC::g_cProcessorGroups", &cGroupsT )
+        || !FFetchGlobal( "OSSYNC::g_rgPLS", &rgPLSDebuggee )
+        || !FFetchVariable( rgPLSDebuggee, &rgPLS, cProcsPreGroupT * cGroupsT )
         || !FReadGlobal( "PLS::s_pbPerfCounters", &pbPerfCountersDebuggee )
         || !FReadGlobal( "PLS::s_cbPerfCounters", &cbPerfCountersT )
         || !FReadGlobal( "g_cbPlsMemRequiredPerPerfInstance", &cbPlsMemRequiredPerPerfInstanceT ) )
@@ -9642,6 +9648,7 @@ DEBUG_EXT( EDBGDumpPerfctr )
     {
         QWORD   qwCounter   = 0;
         DWORD   dwCounter   = 0;
+        ULONG   cProcsT = cProcsPreGroupT * cGroupsT;
 
         for ( ULONG iproc = 0; iproc < cProcsT; iproc++ )
         {
