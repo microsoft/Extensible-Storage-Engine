@@ -244,11 +244,6 @@ INT OSSYNCAPI OSSyncGetProcessorCount();
 
 INT OSSYNCAPI OSSyncGetCurrentProcessor();
 
-//  sets the processor number returned by OSSyncGetCurrentProcessor()
-
-void OSSYNCAPI OSSyncSetCurrentProcessor( const INT iProc );
-
-
 //  Processor Local Storage
 
 //  configures the size of processor local storage

@@ -3133,9 +3133,7 @@ DWORD g_cclsSyncGlobal;
 //      CRTInit, which would subsequently re-initialise the variable
 //      with the value specified here
 //DWORD g_dwClsSyncIndex      = dwClsInvalid;
-//DWORD g_dwClsProcIndex      = dwClsInvalid;
 DWORD       g_dwClsSyncIndex;
-DWORD       g_dwClsProcIndex;
 
 const DWORD dwClsInvalid            = 0xFFFFFFFF;       //  this is the value returned by TlsAlloc() on error
 
@@ -3169,26 +3167,10 @@ BOOL FOSSyncIClsRegister( _CLS* pcls )
             return fFalse;
         }
 
-        g_dwClsProcIndex = TlsAlloc();
-        if ( dwClsInvalid == g_dwClsProcIndex )
-        {
-            const BOOL  fTLSFreed   = TlsFree( g_dwClsSyncIndex );
-#if !defined(_M_AMD64)
-            OSSYNCAssert( fTLSFreed );      //  leak the TLS entries if we fail
-#else // !_M_AMD64
-            Unused( fTLSFreed );
-#endif // _M_AMD64
-            g_dwClsSyncIndex = dwClsInvalid;
-
-            LeaveCriticalSection( &g_csClsSyncGlobal );
-            return fFalse;
-        }
-
         fAllocatedCls = fTrue;
     }
 
     OSSYNCAssert( dwClsInvalid != g_dwClsSyncIndex );
-    OSSYNCAssert( dwClsInvalid != g_dwClsProcIndex );
 
     //  save the pointer to the given CLS
 
@@ -3199,19 +3181,15 @@ BOOL FOSSyncIClsRegister( _CLS* pcls )
         {
             OSSYNCAssert( NULL == g_pclsSyncGlobal );
 
-            const BOOL  fTLSFreed1  = TlsFree( g_dwClsSyncIndex );
-            const BOOL  fTLSFreed2  = TlsFree( g_dwClsProcIndex );
+            const BOOL  fTLSFreed  = TlsFree( g_dwClsSyncIndex );
 
 #if !defined(_M_AMD64)
-            OSSYNCAssert( fTLSFreed1 );     //  leak the TLS entries if we fail
-            OSSYNCAssert( fTLSFreed2 );
+            OSSYNCAssert( fTLSFreed );     //  leak the TLS entries if we fail
 #else // !_M_AMD64
-            Unused( fTLSFreed1 );
-            Unused( fTLSFreed2 );
+            Unused( fTLSFreed );
 #endif // _M_AMD64
 
             g_dwClsSyncIndex = dwClsInvalid;
-            g_dwClsProcIndex = dwClsInvalid;
         }
 
         LeaveCriticalSection( &g_csClsSyncGlobal );
@@ -3295,21 +3273,16 @@ void OSSyncIClsUnregister( _CLS* pcls )
         //  deallocate CLS entries
 
         OSSYNCAssert( dwClsInvalid != g_dwClsSyncIndex );
-        OSSYNCAssert( dwClsInvalid != g_dwClsProcIndex );
 
-        const BOOL  fTLSFreed1  = TlsFree( g_dwClsSyncIndex );
-        const BOOL  fTLSFreed2  = TlsFree( g_dwClsProcIndex );
+        const BOOL  fTLSFreed = TlsFree( g_dwClsSyncIndex );
 
 #if !defined(_M_AMD64)
-        OSSYNCAssert( fTLSFreed1 );     //  leak the TLS entries if we fail
-        OSSYNCAssert( fTLSFreed2 );
+        OSSYNCAssert( fTLSFreed );     //  leak the TLS entries if we fail
 #else // !_M_AMD64
-        Unused( fTLSFreed1 );
-        Unused( fTLSFreed2 );
+        Unused( fTLSFreed );
 #endif // _M_AMD64
 
         g_dwClsSyncIndex = dwClsInvalid;
-        g_dwClsProcIndex = dwClsInvalid;
     }
 
     LeaveCriticalSection( &g_csClsSyncGlobal );
@@ -3361,10 +3334,6 @@ static BOOL OSSYNCAPI FOSSyncIClsAlloc()
             LocalFree( (void*) pcls );
             return fFalse;
         }
-
-        //  set our initial processor number to be defer init
-
-        OSSyncSetCurrentProcessor( -1 );
     }
 
     return fTrue;
@@ -3427,7 +3396,8 @@ CLS* const OSSYNCAPI Pcls()
 
 //  returns the maximum number of processors this process can utilize
 
-DWORD g_cProcessorMax;
+USHORT g_cProcessorsPerGroup;
+USHORT g_cProcessorGroups;
 
 INT OSSYNCAPI OSSyncGetProcessorCountMax()
 {
@@ -3438,12 +3408,10 @@ INT OSSYNCAPI OSSyncGetProcessorCountMax()
     //  processors "inefficiently" until we next refresh this count
     //
     
-    return g_cProcessorMax;
+    return g_cProcessorsPerGroup * g_cProcessorGroups;
 }
 
 //  returns the current number of processors this process can utilize
-
-DWORD g_cProcessor;
 
 INT OSSYNCAPI OSSyncGetProcessorCount()
 {
@@ -3455,29 +3423,15 @@ INT OSSYNCAPI OSSyncGetProcessorCount()
 //
 //  NOTE:  the current context may change processors at any time
 
-//  SKU specific get current processor implmentation
-INT IprocOSSyncIGetCurrentProcessor();
-
 INT OSSYNCAPI OSSyncGetCurrentProcessor()
 {
     INT iProc = 0;
 
     //  get the current processor number via the favored method
     
-    iProc = IprocOSSyncIGetCurrentProcessor();
-
-    //  one of those previous methods should have worked to give us a preferred CPU, but 
-    //  we used to have a fallback using SetThreadIdealProcessor() / *AffinityMask APIs
-    //  to set a TLS variable.  This fallback was removed in Windows DS Depot, sdv 378819.
-
-    OSSYNCAssert( iProc != -1 );
-
-    //  we don't know what number to return yet
-
-    if ( iProc == -1 )
-    {
-        iProc = 0;          // fall back to single threaded
-    }
+    PROCESSOR_NUMBER Proc;                                 
+    GetCurrentProcessorNumberEx( &Proc );
+    iProc = Proc.Group * g_cProcessorsPerGroup + Proc.Number;
 
     //  ensure that the processor number we will return is within the valid
     //  range indicated by OSSyncGetProcessorCountMax().  this handles the
@@ -3496,18 +3450,9 @@ INT OSSYNCAPI OSSyncGetCurrentProcessor()
     return iProc;
 }
 
-//  sets the processor number returned by OSSyncGetCurrentProcessor()
-
-void OSSYNCAPI OSSyncSetCurrentProcessor( const INT iProc )
-{
-    OSSYNCAssert( dwClsInvalid != g_dwClsProcIndex );
-    TlsSetValue( g_dwClsProcIndex, (void*) INT_PTR( iProc == -1 ? -1 : iProc % OSSyncGetProcessorCount() ) );
-}
-
-
 //  Processor Local Storage
 
-void* g_rgPLS[ MAXIMUM_PROCESSORS ];
+void** g_rgPLS = NULL;
 
 //  configures the size of processor local storage
 
@@ -3520,21 +3465,31 @@ BOOL OSSYNCAPI FOSSyncConfigureProcessorLocalStorage( const size_t cbPLS )
 
     //  if PLS already exists then release it
 
-    if ( g_rgPLS[ 0 ] )
+    if ( g_rgPLS )
     {
-        VirtualFree( g_rgPLS[ 0 ], 0, MEM_RELEASE );
-        memset( g_rgPLS, 0, sizeof( g_rgPLS ) );
+        if ( g_rgPLS[ 0 ] )
+        {
+            VirtualFree( g_rgPLS[ 0 ], 0, MEM_RELEASE );
+        }
+        LocalFree( g_rgPLS );
+        g_rgPLS = NULL;
     }
 
     //  allocate room for the new PLS, if requested
 
     if ( cbPLS )
     {
-        g_rgPLS[ 0 ] = VirtualAlloc( NULL, g_cProcessorMax * cbPLSAlign, MEM_COMMIT, PAGE_READWRITE );
+        g_rgPLS = (VOID **)LocalAlloc( 0, sizeof(VOID *) * OSSyncGetProcessorCountMax() );
+        if ( g_rgPLS == NULL )
+        {
+            return fFalse;
+        }
+
+        g_rgPLS[ 0 ] = VirtualAlloc( NULL, OSSyncGetProcessorCountMax() * cbPLSAlign, MEM_COMMIT, PAGE_READWRITE );
         
         if ( g_rgPLS[ 0 ] )
         {
-            for ( size_t iPLS = 1; iPLS < g_cProcessorMax; iPLS++ )
+            for ( size_t iPLS = 1; iPLS < OSSyncGetProcessorCountMax(); iPLS++ )
             {
                 g_rgPLS[ iPLS ] = (BYTE*)g_rgPLS[ 0 ] + cbPLSAlign * iPLS;
             }
@@ -3555,7 +3510,7 @@ void* OSSYNCAPI OSSyncGetProcessorLocalStorage()
 
 void* OSSYNCAPI OSSyncGetProcessorLocalStorage( const size_t iProc )
 {
-    return iProc < g_cProcessorMax ? g_rgPLS[ iProc ] : NULL;
+    return iProc < OSSyncGetProcessorCountMax() ? g_rgPLS[ iProc ] : NULL;
 }
 
 #ifdef SYNC_ANALYZE_PERFORMANCE // only OSSYNC should depend upon this function, isolate to catch
@@ -6243,7 +6198,6 @@ static BOOL FOSSyncIInit()
         g_pclsSyncCleanGlobal = NULL;
         g_cclsSyncGlobal      = 0;
         g_dwClsSyncIndex      = dwClsInvalid;
-        g_dwClsProcIndex      = dwClsInvalid;
 
         const BOOL fCreateSemaphorePfns = FKernelSemaphoreICreateILoad();
         OSSYNCAssert( fCreateSemaphorePfns );
@@ -6285,36 +6239,26 @@ static BOOL FOSSyncIInit()
             goto HandleError;
         }
 
-        //  cache the processor count
+        //  cache the processor/group count
 
-#ifdef MINIMAL_FUNCTIONALITY
-        g_cProcessor = 1;
-        g_cProcessorMax = 1;
-#else
-        DWORD_PTR maskProcess;
-        DWORD_PTR maskSystem;
-        BOOL fGotAffinityMask;
-        fGotAffinityMask = GetProcessAffinityMask(  GetCurrentProcess(),
-                                                    &maskProcess,
-                                                    &maskSystem );
-        OSSYNCAssert( fGotAffinityMask );
-
-        for ( g_cProcessor = 0; maskProcess != 0; maskProcess >>= 1 )
+        SYSTEM_LOGICAL_PROCESSOR_INFORMATION_EX *pBuffer = NULL;
+        DWORD BufferSize = 0;
+        BOOL fResult;
+        fResult = GetLogicalProcessorInformationEx( RelationGroup,
+                                                    pBuffer,
+                                                    &BufferSize );
+        OSSYNCAssert( !fResult && GetLastError() == ERROR_INSUFFICIENT_BUFFER );
+        pBuffer = (SYSTEM_LOGICAL_PROCESSOR_INFORMATION_EX *)_alloca( BufferSize );
+        fResult = GetLogicalProcessorInformationEx( RelationGroup,
+                                                    pBuffer,
+                                                    &BufferSize );
+        OSSYNCAssert( fResult );
+        g_cProcessorGroups = pBuffer->Group.ActiveGroupCount;
+        g_cProcessorsPerGroup = 1;
+        for ( int i=0; i < g_cProcessorGroups; i++ )
         {
-            if ( maskProcess & 1 )
-            {
-                g_cProcessor++;
-            }
+            g_cProcessorsPerGroup = max( g_cProcessorsPerGroup, pBuffer->Group.GroupInfo[i].ActiveProcessorCount );
         }
-
-        for ( g_cProcessorMax = 0; maskSystem != 0; maskSystem >>= 1 )
-        {
-            if ( maskSystem & 1 )
-            {
-                g_cProcessorMax++;
-            }
-        }
-#endif
 
         //  cache system max spin count
         //
@@ -6322,7 +6266,7 @@ static BOOL FOSSyncIInit()
         //
         //  CONSIDER:  get spin count from persistent configuration
 
-        g_cSpinMax = g_cProcessor == 1 ? 0 : 256;
+        g_cSpinMax = ( g_cProcessorGroups * g_cProcessorsPerGroup ) == 1 ? 0 : 256;
 
 #ifdef SYNC_DUMP_PERF_DATA
 
