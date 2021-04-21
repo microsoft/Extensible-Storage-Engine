@@ -3430,7 +3430,7 @@ INT OSSYNCAPI OSSyncGetCurrentProcessor()
     //  get the current processor number via the favored method
     
     PROCESSOR_NUMBER Proc;                                 
-    GetCurrentProcessorNumberEx( &Proc );
+    GetThreadIdealProcessorEx( GetCurrentThread(), &Proc );
     iProc = Proc.Group * g_cProcessorsPerGroup + Proc.Number;
 
     //  ensure that the processor number we will return is within the valid
