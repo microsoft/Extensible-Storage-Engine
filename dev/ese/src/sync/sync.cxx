@@ -3503,14 +3503,14 @@ BOOL OSSYNCAPI FOSSyncConfigureProcessorLocalStorage( const size_t cbPLS )
 
 void* OSSYNCAPI OSSyncGetProcessorLocalStorage()
 {
-    return g_rgPLS[ OSSyncGetCurrentProcessor() ];
+    return OSSyncGetProcessorLocalStorage( OSSyncGetCurrentProcessor() );
 }
 
 //  retrieves a pointer to a given processor's local storage
 
 void* OSSYNCAPI OSSyncGetProcessorLocalStorage( const size_t iProc )
 {
-    return iProc < OSSyncGetProcessorCountMax() ? g_rgPLS[ iProc ] : NULL;
+    return ( iProc < OSSyncGetProcessorCountMax() && g_rgPLS != NULL ) ? g_rgPLS[ iProc ] : NULL;
 }
 
 #ifdef SYNC_ANALYZE_PERFORMANCE // only OSSYNC should depend upon this function, isolate to catch
