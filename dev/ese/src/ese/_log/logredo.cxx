@@ -9277,13 +9277,26 @@ BOOL LOG::FLGRICheckRedoScanCheck( const LRSCANCHECK2 * const plrscancheck, BOOL
             CDBMScanFollower::SkippedDBMScanCheckRecord( pfmp, pgno );
         }
 
-        // Special-case pgno=1, it should fall through and return true
+        // Special-case pgno=1, it should return true
         // because the header will get reset and it will be considered
         // a page that needs scanning
         if ( pgno != 1 )
         {
             return fFalse;
         }
+        else
+        {
+            return fTrue;
+        }
+    }
+
+    // if we have already played this scan check once then there is no need to do it again
+    //
+    // NOTE:  to avoid gaps due to crashes we will always replay from the max log generation
+    // we have ever replayed because we can't guarantee we replayed all those records
+    if ( m_lgposRedo.lGeneration < pfmp->Pdbfilehdr()->le_lGenRecovering )
+    {
+        return fFalse;
     }
 
     // We've made it this far, which means scanning is on and we haven't seen this page before
