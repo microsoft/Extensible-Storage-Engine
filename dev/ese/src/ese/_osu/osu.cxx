@@ -83,8 +83,6 @@ static ERR ErrOSUInitProcessorLocalStorage()
         if ( !PLS::FEnsurePerfCounterBuffer( cPerfinstMinReqT * g_cbPlsMemRequiredPerPerfInstance ) )
         {
             OSUTermProcessorLocalStorage();
-            OnDebug( const BOOL fFreePls = )FOSSyncConfigureProcessorLocalStorage( 0 );
-            Assert( fFreePls );
             return ErrERRCheck( JET_errOutOfMemory );
         }
     }
@@ -112,6 +110,8 @@ static VOID OSUTermProcessorLocalStorage()
             ppls->~PLS();
         }
     }
+    OnDebug( const BOOL fFreePls = )FOSSyncConfigureProcessorLocalStorage( 0 );
+    Assert( fFreePls );
 
     PLS::FreePerfCountersMemory();
 }
