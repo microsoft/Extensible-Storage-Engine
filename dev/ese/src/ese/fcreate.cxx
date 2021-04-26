@@ -8153,6 +8153,7 @@ ERR ErrFILEDeleteTable( PIB *ppib, IFMP ifmp, const CHAR *szName, BOOL fAllowTab
     OBJID   objidTable;
     CHAR    szTable[JET_cbNameMost+1];
     BOOL    fInUseBySystem;
+    BOOL    fInUseBySystemOrig;
     VER     *pver;
 
     CheckPIB( ppib );
@@ -8197,7 +8198,7 @@ ERR ErrFILEDeleteTable( PIB *ppib, IFMP ifmp, const CHAR *szName, BOOL fAllowTab
                 &pfucb,
                 szName,
                 grbit ) );
-    fInUseBySystem = ( JET_wrnTableInUseBySystem == err );
+    fInUseBySystemOrig = ( JET_wrnTableInUseBySystem == err );
     }
 
     // We should now have exclusive use of the table.
@@ -8270,7 +8271,6 @@ ERR ErrFILEDeleteTable( PIB *ppib, IFMP ifmp, const CHAR *szName, BOOL fAllowTab
     else
     {
         FireWall( "DeprecatedSentinelFcbDeleteTable" ); // Sentinel FCBs are believed deprecated
-        Assert( !fInUseBySystem );
         Assert( pfcbNil == pfcb->PfcbNextIndex() );
 
         pfcb->Lock();
@@ -8279,7 +8279,8 @@ ERR ErrFILEDeleteTable( PIB *ppib, IFMP ifmp, const CHAR *szName, BOOL fAllowTab
     }
 
 
-    while ( fInUseBySystem )
+    // Look at all the existing FUCBs to verify that the table is not currently in use by the system.
+    do
     {
         pfcb->Lock();
         pfcb->FucbList().LockForEnumeration();
@@ -8299,6 +8300,8 @@ ERR ErrFILEDeleteTable( PIB *ppib, IFMP ifmp, const CHAR *szName, BOOL fAllowTab
                     //  the DeletePending flag for this table has now been set, forcing
                     //  OLD2/DBSCAN to exit at its earliest convenience. Wait for it.
                     fInUseBySystem = fTrue;
+
+                    AssertTrack( fInUseBySystemOrig, "FCBInUseBySystemMiscalculated" );
                     break;
                 }
             }
@@ -8322,6 +8325,7 @@ ERR ErrFILEDeleteTable( PIB *ppib, IFMP ifmp, const CHAR *szName, BOOL fAllowTab
             UtilSleep( 500 );
         }
     }
+    while ( fInUseBySystem );
 
 #ifdef DEBUG
     if ( pfcb->Ptdb() == ptdbNil )
