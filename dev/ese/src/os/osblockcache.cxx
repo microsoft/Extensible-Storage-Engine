@@ -435,8 +435,6 @@ ERR ErrOSBCDumpCacheFile(   _In_z_  const WCHAR* const  wszFilePath,
 
     Call( pfsf->ErrFileOpen( wszFilePath, IFileAPI::fmfNone, (IFileAPI**)&pff ) );
 
-    Call( CCacheHeader::ErrDump( &fsconfig, &g_fident, pff, CPRINTFSTDOUT::PcprintfInstance() ) );
-
     Call( CCacheFactory::ErrDump( pfsf, &g_fident, &fsconfig, &pcconfig, &g_ctm, &pff, CPRINTFSTDOUT::PcprintfInstance() ) );
 
 HandleError:

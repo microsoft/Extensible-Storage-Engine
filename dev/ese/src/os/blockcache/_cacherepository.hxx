@@ -80,7 +80,7 @@ class TCacheRepository  //  crep
         {
             public:
 
-                CCachePathTableEntry( _Inout_z_ const WCHAR** const pwszKeyPath );
+                CCachePathTableEntry( _Deref_out_opt_z_ const WCHAR** const pwszKeyPath );
 
                 ~CCachePathTableEntry();
 
@@ -384,7 +384,7 @@ HandleError:
 }
 
 template< class I >
-INLINE TCacheRepository<I>::CCachePathTableEntry::CCachePathTableEntry( _Inout_z_ const WCHAR** const pwszKeyPath )
+INLINE TCacheRepository<I>::CCachePathTableEntry::CCachePathTableEntry( _Deref_out_opt_z_ const WCHAR** const pwszKeyPath )
     :   m_wszKeyPath( *pwszKeyPath ),
         m_uiHash( UiHash( *pwszKeyPath ) ),
         m_cref( 0 ),
@@ -569,6 +569,7 @@ ERR TCacheRepository<I>::ErrLockCache(  _In_z_  const WCHAR* const              
 
     pcpteExisting->AddRef();
     fRemove = fFalse;
+    pcpteNew = NULL;
 
     m_critCachePathTableEntries.Leave();
     fLeave = fFalse;
@@ -580,8 +581,8 @@ HandleError:
     if ( fRemove )
     {
         m_ilCachePathTableEntries.Remove( pcpteNew );
-        delete pcpteNew;
     }
+    delete pcpteNew;
     if ( fLeave )
     {
         m_critCachePathTableEntries.Leave();

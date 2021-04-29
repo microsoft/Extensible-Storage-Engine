@@ -211,6 +211,10 @@ INLINE ERR CCacheFactory::ErrDump(  _In_    IFileSystemFilter* const        pfsf
 
     Call( CCacheHeader::ErrLoad( pfsconfig, *ppffCaching, &pch ) );
 
+    //  dump the header
+
+    Call( pch->ErrDump( pfsconfig, pfident, *ppffCaching, pcprintf ) );
+
     //  determine the type of cache to mount
 
     Call( ErrGetFactory( pch->RgbCacheType(), &pfnFactory ) );

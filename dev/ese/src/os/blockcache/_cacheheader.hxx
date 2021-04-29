@@ -125,7 +125,7 @@ INLINE ERR CCacheHeader::ErrLoad(   _In_    IFileSystemConfiguration* const pfsc
 
     *ppch = NULL;
 
-    Call( ErrLoadHeader( pff, &pch ) );
+    Call( ErrLoadHeader( pff, 0, &pch ) );
 
     Call( pch->ErrValidate( JET_errReadVerifyFailure, pfsconfig, pff ) );
 
@@ -154,7 +154,7 @@ INLINE ERR CCacheHeader::ErrDump(   _In_ IFileSystemConfiguration* const    pfsc
     FileId          fileid                          = fileidInvalid;
     FileSerial      fileserial                      = fileserialInvalid;
 
-    Call( ErrLoadHeader( pff, &pch ) );
+    Call( ErrLoadHeader( pff, 0, &pch ) );
 
     Call( pch->ErrValidate( JET_errFileInvalidType, pfsconfig ) );
 
@@ -203,6 +203,7 @@ INLINE ERR CCacheHeader::ErrDump(   _In_ IFileSystemConfiguration* const    pfsc
                     *((BYTE*)&pch->m_rgbCacheType[ 13 ]),
                     *((BYTE*)&pch->m_rgbCacheType[ 14 ]),
                     *((BYTE*)&pch->m_rgbCacheType[ 15 ]) );
+    (*pcprintf)(    "           File Type:  %d\n", LONG( pch->m_le_filetype ) );
     (*pcprintf)(    "\n" );
     (*pcprintf)(    "Current File Properties:\n" );
     (*pcprintf)(    "                 Path:  %S\n", wszAbsPath );

@@ -234,6 +234,9 @@ class ICache  //  c
 
         //  Reads a block of data of the specified size from the given cached file at the specified offset and places
         //  it into the specified buffer.
+        //
+        //  If asynchronous completion is requested by providing a completion function then there is no guarantee that
+        //  completion will occur until ErrIssue() is called.
 
         virtual ERR ErrRead(    _In_                    const TraceContext&         tc,
                                 _In_                    const VolumeId              volumeid,
@@ -249,6 +252,9 @@ class ICache  //  c
 
         //  Writes a block of data of the specified size from the specified buffer at the specified offset and places
         //  it into the given cached file.
+        //
+        //  If asynchronous completion is requested by providing a completion function then there is no guarantee that
+        //  completion will occur until ErrIssue() is called.
 
         virtual ERR ErrWrite(   _In_                    const TraceContext&         tc,
                                 _In_                    const VolumeId              volumeid,
@@ -261,6 +267,12 @@ class ICache  //  c
                                 _In_                    const ICache::CachingPolicy cp,
                                 _In_opt_                const ICache::PfnComplete   pfnComplete,
                                 _In_                    const DWORD_PTR             keyComplete ) = 0;
+
+        //  Causes any previously requested asynchronous cache reads or writes to be executed eventually.
+
+        virtual ERR ErrIssue(   _In_ const VolumeId     volumeid,
+                                _In_ const FileId       fileid,
+                                _In_ const FileSerial   fileserial ) = 0;
 };
 
 constexpr ICache::CachingPolicy cpDontCache = ICache::CachingPolicy::cpDontCache;
@@ -319,7 +331,13 @@ class ICacheTelemetry  //  ctm
 };
 
 constexpr ICacheTelemetry::FileNumber filenumberInvalid = ICacheTelemetry::FileNumber::filenumberInvalid;
+
 constexpr ICacheTelemetry::BlockNumber blocknumberInvalid = ICacheTelemetry::BlockNumber::blocknumberInvalid;
+
+INLINE ICacheTelemetry::BlockNumber operator+( ICacheTelemetry::BlockNumber blocknumber, LONG i )
+{ 
+    return ( ICacheTelemetry::BlockNumber )( (LONG)blocknumber + i );
+}
 
 //  Cache Repository
 
@@ -374,6 +392,7 @@ enum class RegionPosition : QWORD  //  rpos
 constexpr RegionPosition rposInvalid = RegionPosition::rposInvalid;
 
 INLINE RegionPosition operator+( RegionPosition rpos, LONG64 i ) { return (RegionPosition)( (LONG64)rpos + i ); }
+INLINE RegionPosition operator-( RegionPosition rpos, LONG64 i ) { return (RegionPosition)( (LONG64)rpos - i ); }
 INLINE LONG64 operator-( RegionPosition rposA, RegionPosition rposB ) { return (LONG64)rposA - (LONG64)rposB; }
 
 //  Journal Buffer
@@ -456,7 +475,7 @@ class IJournalSegment  //  js
 
         //  Closes the segment to further appends and writes it to storage.
 
-        virtual ERR ErrSeal( _In_opt_ IJournalSegment::PfnSealed pfnSealed, _In_ const DWORD_PTR keySealed ) = 0;
+        virtual ERR ErrSeal( _In_opt_ const IJournalSegment::PfnSealed pfnSealed, _In_ const DWORD_PTR keySealed ) = 0;
 };
 
 //  Journal Segment Manager
@@ -548,6 +567,7 @@ class IJournal  //  j
         //  The callback must return true to continue visiting more entries.
 
         typedef BOOL (*PfnVisitEntry)(  _In_ const JournalPosition  jpos,
+                                        _In_ const JournalPosition  jposEnd,
                                         _In_ const CJournalBuffer   jb,
                                         _In_ const DWORD_PTR        keyVisitEntry );
 
@@ -558,10 +578,12 @@ class IJournal  //  j
 
         //  Indicates that all journal entries newer than the specified entry are invalid and should be overwritten.
         //
-        //  Note that any entries in the same segment as the invalidated entry and later will be invalidated as well as
-        //  any entry that is truncated by the invalidation of this segment.
+        //  The repair may invalidate a limited number of journal entries prior to the invalidate position due to the
+        //  internal format of the journal.  This includes the possibility of losing a journal entry due to truncation.
+        //  The actual journal position invalidated will be returned.
 
-        virtual ERR ErrRepair( _In_ const JournalPosition jposInvalidate ) = 0;
+        virtual ERR ErrRepair(  _In_    const JournalPosition   jposInvalidate,
+                                _Out_   JournalPosition* const  pjposInvalidated ) = 0;
 
         //  Attempts to append an entry to the journal with the provided payload.
         //
@@ -570,7 +592,8 @@ class IJournal  //  j
 
         virtual ERR ErrAppendEntry( _In_                const size_t            cjb,
                                     _In_reads_( cjb )   CJournalBuffer* const   rgjb,
-                                    _Out_               JournalPosition* const  pjpos ) = 0;
+                                    _Out_               JournalPosition* const  pjpos,
+                                    _Out_               JournalPosition* const  pjposEnd ) = 0;
 
         //  Causes all previously appended entries to become durable.
         //

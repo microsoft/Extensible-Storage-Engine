@@ -37,10 +37,12 @@ namespace Internal
                     /// Delegate used to visit an entry in the journal.
                     /// </summary>
                     /// <param name="journalPosition">The position of the entry to visit.</param>
+                    /// <param name="journalPositionEnd">The last position occupied by the entry to visit.</param>
                     /// <param name="entry">The payload of the entry to visit.</param>
                     /// <returns>True to continue visiting more entries.</returns>
                     delegate bool VisitEntry(
                         JournalPosition journalPosition,
+                        JournalPosition journalPositionEnd,
                         ArraySegment<byte> entry );
 
                     /// <summary>
@@ -54,11 +56,13 @@ namespace Internal
                     /// overwritten.
                     /// </summary>
                     /// <remarks>
-                    /// Note that any entries in the same segment as the invalidated entry and later will be
-                    /// invalidated as well as any entry that is truncated by the invalidation of this segment.
+                    /// The repair may invalidate a limited number of journal entries prior to the invalidate position
+                    /// due to the internal format of the journal.  This includes the possibility of losing a journal
+                    /// entry due to truncation.  The actual journal position invalidated will be returned.
                     /// </remarks>
                     /// <param name="journalPositionInvalidate">The journal position of the first invalid entry.</param>
-                    void Repair( JournalPosition journalPositionInvalidate );
+                    /// <returns>The actual journal position invalidated.</returns>
+                    JournalPosition Repair( JournalPosition journalPositionInvalidate );
 
                     /// <summary>
                     /// Attempts to append an entry to the journal with the provided payload.
@@ -68,8 +72,11 @@ namespace Internal
                     /// situation.
                     /// </remarks>
                     /// <param name="payload">The payload as an array of byte arrays.</param>
-                    /// <param name="journalPosition">The position of the entry appended.</param>
-                    JournalPosition AppendEntry( array<ArraySegment<byte>>^ payload );
+                    /// <param name="journalPositionEnd">The last position occupied by the entry.</param>
+                    /// <returns>The position of the entry appended.</returns>
+                    JournalPosition AppendEntry(
+                        array<ArraySegment<byte>>^ payload,
+                        [Out] JournalPosition% journalPositionEnd );
 
                     /// <summary>
                     /// Causes all previously appended entries to become durable.

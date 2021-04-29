@@ -29,11 +29,13 @@ class TJournal  //  j
         ERR ErrVisitEntries(    _In_ const IJournal::PfnVisitEntry  pfnVisitEntry,
                                 _In_ const DWORD_PTR                keyVisitEntry ) override;
 
-        ERR ErrRepair( _In_ const JournalPosition jposLast ) override;
+        ERR ErrRepair(  _In_    const JournalPosition   jposInvalidate,
+                        _Out_   JournalPosition* const  pjposInvalidated ) override;
 
         ERR ErrAppendEntry( _In_                const size_t            cjb,
                             _In_reads_( cjb )   CJournalBuffer* const   rgjb,
-                            _Out_               JournalPosition* const  pjpos ) override;
+                            _Out_               JournalPosition* const  pjpos,
+                            _Out_               JournalPosition* const  pjposEnd ) override;
 
         ERR ErrFlush() override;
 
@@ -135,7 +137,7 @@ class TJournal  //  j
 
                 ~CEntryVisitor()
                 {
-                    delete m_jb.Rgb();
+                    delete[] m_jb.Rgb();
                 }
 
                 ERR ErrVisitEntries();
@@ -369,11 +371,14 @@ HandleError:
 }
 
 template< class I  >
-INLINE ERR TJournal<I>::ErrRepair( _In_ const JournalPosition jposInvalidate )
+INLINE ERR TJournal<I>::ErrRepair(  _In_    const JournalPosition   jposInvalidate,
+                                    _Out_   JournalPosition* const  pjposInvalidated )
 {
     ERR             err             = JET_errSuccess;
     BOOL            fLocked         = fFalse;
     SegmentPosition sposInvalidate  = (SegmentPosition)( rounddn( (QWORD)jposInvalidate, cbSegment ) );
+
+    *pjposInvalidated = jposInvalid;
 
     //  protect our state
 
@@ -408,10 +413,18 @@ INLINE ERR TJournal<I>::ErrRepair( _In_ const JournalPosition jposInvalidate )
     m_sposSealed = sposInvalidate - cbSegment;
     m_sposAppend = m_sposSealed;
 
+    //  return the actual invalidation position
+
+    *pjposInvalidated = (JournalPosition)sposInvalidate;
+
 HandleError:
     if ( fLocked )
     {
         m_crit.Leave();
+    }
+    if ( err < JET_errSuccess )
+    {
+        *pjposInvalidated = jposInvalid;
     }
     return err;
 }
@@ -422,7 +435,8 @@ HandleError:
 template< class I  >
 INLINE ERR TJournal<I>::ErrAppendEntry( _In_                const size_t            cjb,
                                         _In_reads_( cjb )   CJournalBuffer* const   rgjb,
-                                        _Out_               JournalPosition* const  pjpos )
+                                        _Out_               JournalPosition* const  pjpos,
+                                        _Out_               JournalPosition* const  pjposEnd )
 {
     ERR                     err                 = JET_errSuccess;
     const size_t            cjbT                = cjb + 1;
@@ -444,6 +458,7 @@ INLINE ERR TJournal<I>::ErrAppendEntry( _In_                const size_t        
     CWaiter*                pwaiterNextSealer   = NULL;
 
     *pjpos = jposInvalid;
+    *pjposEnd = jposInvalid;
 
     //  setup the buffer we will use to append regions
 
@@ -517,6 +532,7 @@ INLINE ERR TJournal<I>::ErrAppendEntry( _In_                const size_t        
     //  return the journal position of the entry that was appended
 
     *pjpos = jpos;
+    *pjposEnd = (JournalPosition)( rpos + cbEntryAppended - 1 );
 
 HandleError:
     if ( fLocked )
@@ -535,6 +551,7 @@ HandleError:
     if ( err < JET_errSuccess )
     {
         *pjpos = jposInvalid;
+        *pjposEnd = jposInvalid;
     }
     return err;
 }
@@ -821,7 +838,7 @@ INLINE BOOL TJournal<I>::CEntryVisitor::FVisitRegion(   _In_ const RegionPositio
     {
         Alloc( rgb = new BYTE[ cb ] );
 
-        delete m_jb.Rgb();
+        delete[] m_jb.Rgb();
         m_jb = CJournalBuffer( cb, rgb );
         rgb = NULL;
     }
@@ -837,7 +854,10 @@ INLINE BOOL TJournal<I>::CEntryVisitor::FVisitRegion(   _In_ const RegionPositio
 
     if ( m_cbEntryRem == 0 )
     {
-        m_pfnVisitEntry( m_jpos, CJournalBuffer( m_cbEntry, m_jb.Rgb() ), m_keyVisitEntry );
+        m_pfnVisitEntry(    m_jpos, 
+                            (JournalPosition)( rpos + cbFragment - 1 ),
+                            CJournalBuffer( m_cbEntry, m_jb.Rgb() ),
+                            m_keyVisitEntry );
     }
 
 HandleError:

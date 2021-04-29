@@ -130,7 +130,7 @@ class TFileWrapper  //  fw
                                 const BYTE* const               pbData,
                                 const IFileAPI::PfnIOComplete   pfnIOComplete,
                                 const IFileAPI::PfnIOHandoff    pfnIOHandoff,
-                                const DWORD_PTR                 keyIOComplete)
+                                const DWORD_PTR                 keyIOComplete )
                     :   m_fIsHeapAlloc( fIsHeapAlloc ),
                         m_pfapi( pfapi ),
                         m_ibOffset( ibOffset ),
@@ -334,7 +334,7 @@ class TFileWrapper  //  fw
 
                         m_fIOHandoffCalled = fTrue;
 
-                        AddRef();
+                        AddRefInternal();
                     }
                 }
 
@@ -366,12 +366,14 @@ class TFileWrapper  //  fw
                 BOOL FIOHandoff() const { return !m_fIOHandoffCalled; }
                 BOOL FIOComplete() const { return !m_fIOCompleteCalled; }
 
-                void AddRef() { AtomicIncrement( (LONG*)&m_cref ); }
-                BOOL FRelease() { return AtomicDecrement( (LONG*)&m_cref ) == 0; }
+                void AddRefInternal()
+                { 
+                    AtomicIncrement( (LONG*)&m_cref );
+                }
 
                 void ReleaseInternal()
                 {
-                    if ( FRelease() )
+                    if ( AtomicDecrement( (LONG*)&m_cref ) == 0 )
                     {
                         if ( m_fIsHeapAlloc )
                         {
@@ -612,9 +614,9 @@ ERR TFileWrapper<I>::ErrIORead( const TraceContext&                 tc,
                                 cbData,
                                 pbData,
                                 grbitQOS,
-                                pfnIOComplete ? (IFileAPI::PfnIOComplete)CIOComplete::IOComplete_ : NULL,
+                                pfnIOComplete ? CIOComplete::IOComplete_ : NULL,
                                 DWORD_PTR( piocomplete ),
-                                piocomplete ? (IFileAPI::PfnIOHandoff)CIOComplete::IOHandoff_ : NULL,
+                                piocomplete ? CIOComplete::IOHandoff_ : NULL,
                                 pioreq ) );
 
 HandleError:
@@ -681,9 +683,9 @@ ERR TFileWrapper<I>::ErrIOWrite(    const TraceContext&             tc,
                                     cbData,
                                     pbData,
                                     grbitQOS, 
-                                    pfnIOComplete ? (IFileAPI::PfnIOComplete)CIOComplete::IOComplete_ : NULL,
+                                    pfnIOComplete ? CIOComplete::IOComplete_ : NULL,
                                     DWORD_PTR( piocomplete ),
-                                    piocomplete ? (IFileAPI::PfnIOHandoff)CIOComplete::IOHandoff_ : NULL ) );
+                                    piocomplete ? CIOComplete::IOHandoff_ : NULL ) );
 
 HandleError:
     if ( piocomplete )
@@ -827,6 +829,8 @@ ERR TFileWrapper<I>::HandleReservedIOREQ(   _In_                    const TraceC
         //  indicate a failure by accepting the IO and then by completing it with an error.  this IO completion cannot
         //  accept transient errors like errDiskTilt (which we shouldn't see anyway) or JET_errOutOfMemory.  we will
         //  transform these errors into a fatal IO error (JET_errDiskIO)
+        //
+        //  CONSIDER:  JET_errDiskIO is patchable so perhaps we should use another error
 
         Enforce( err != errDiskTilt );
 

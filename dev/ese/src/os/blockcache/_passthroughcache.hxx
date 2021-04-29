@@ -58,6 +58,10 @@ class TPassThroughCache
                         _In_                    const ICache::PfnComplete   pfnComplete,
                         _In_                    const DWORD_PTR             keyComplete ) override;
 
+        ERR ErrIssue(   _In_ const VolumeId     volumeid,
+                        _In_ const FileId       fileid,
+                        _In_ const FileSerial   fileserial ) override;
+
     protected:
         
         TPassThroughCache(  _In_    IFileSystemFilter* const            pfsf,
@@ -113,9 +117,18 @@ ERR TPassThroughCache<I>::ErrFlush( _In_ const VolumeId     volumeid,
                                     _In_ const FileId       fileid,
                                     _In_ const FileSerial   fileserial )
 {
+    ERR                                 err     = JET_errSuccess;
+    CPassThroughCachedFileTableEntry*   pcfte   = NULL;
+
+    //  get the cached file
+
+    Call( ErrGetCachedFile( volumeid, fileid, fileserial, fFalse, &pcfte ) );
+
     //  trivial implementation:  nothing to do
 
-    return JET_errSuccess;
+HandleError:
+    ReleaseCachedFile( pcfte );
+    return err;
 }
 
 template< class I >
@@ -134,15 +147,15 @@ ERR TPassThroughCache<I>::ErrInvalidate(    _In_ const VolumeId     volumeid,
 
     //  trivial implementation:  invalidate the displaced data
    
-    //  get the cached file.  note that we do not release this reference to leave the cached file open
+    //  get the cached file
 
     Call( ErrGetCachedFile( volumeid, fileid, fileserial, fFalse, &pcfte ) );
 
     //  if we are invalidating the data displaced by the header then explicitly clear the displaced data
 
-    if ( offsets.FOverlaps( s_offsetsCachedFileHeader ) && offsets.Cb() > 0 )
+    if ( offsets.FOverlaps( s_offsetsCachedFileHeader ) && cbData > 0 )
     {
-        cbHeaderInvalidated = (DWORD)min( offsets.Cb(), s_offsetsCachedFileHeader.IbEnd() - offsets.IbStart() + 1 );
+        cbHeaderInvalidated = (DWORD)min( cbData, s_offsetsCachedFileHeader.IbEnd() - offsets.IbStart() + 1 );
 
         Alloc( rgbZero = (BYTE*)PvOSMemoryPageAlloc( roundup( cbHeaderInvalidated, OSMemoryPageCommitGranularity() ), NULL ) );
         Call( pcfte->PffDisplacedData()->ErrIOWrite(    *tcScope,
@@ -156,6 +169,7 @@ ERR TPassThroughCache<I>::ErrInvalidate(    _In_ const VolumeId     volumeid,
 
 HandleError:
     OSMemoryPageFree( rgbZero );
+    ReleaseCachedFile( pcfte );
     return err;
 }
 
@@ -176,73 +190,75 @@ ERR TPassThroughCache<I>::ErrRead(  _In_                    const TraceContext& 
     CPassThroughCachedFileTableEntry*   pcfte           = NULL;
     const COffsets                      offsets         = COffsets( ibOffset, ibOffset + cbData - 1 );
     DWORD                               cbHeaderRead    = 0;
-    CComplete*                          pcomplete       = NULL;
+    const BOOL                          fAsync          = pfnComplete != NULL;
+    CRequest*                           prequest        = NULL;
 
-    if ( pfnComplete )
-    {
-        Alloc( pcomplete = new CComplete(   volumeid,
-                                            fileid,
-                                            fileserial,
-                                            ibOffset, 
-                                            cbData,
-                                            pbData,
-                                            pfnComplete, 
-                                            keyComplete ) );
-    }
-
-    //  get the cached file.  note that we do not release this reference to leave the cached file open
+    //  get the cached file
 
     Call( ErrGetCachedFile( volumeid, fileid, fileserial, fFalse, &pcfte ) );
+
+    //  create our request context
+
+    Alloc( prequest = new( fAsync ? new Buffer<CRequest>() : _alloca( sizeof( CRequest ) ) )
+           CRequest(   fAsync,
+                        fTrue,
+                        this,
+                        tc,
+                        &pcfte,
+                        ibOffset, 
+                        cbData,
+                        pbData,
+                        grbitQOS,
+                        cp,
+                        pfnComplete, 
+                        keyComplete ) );
 
     //  trivial implementation:  simply pass the IO on to the cached file as a cache miss, except the displaced header
 
     //  telemetry
 
-    ReportMiss( pcfte, ibOffset, cbData, fTrue, cp != cpDontCache );
+    ReportMiss( prequest->Pcfte(), ibOffset, cbData, fTrue, cp != cpDontCache );
 
     //  if this read is accessing the data displaced by the header then redirect that portion of the IO to the
     //  displaced data
 
     if ( offsets.FOverlaps( s_offsetsCachedFileHeader ) )
     {
-        cbHeaderRead = (DWORD)min( offsets.Cb(), s_offsetsCachedFileHeader.IbEnd() - offsets.IbStart() + 1 );
+        cbHeaderRead = (DWORD)min( cbData, s_offsetsCachedFileHeader.IbEnd() - offsets.IbStart() + 1 );
     }
 
     if ( cbHeaderRead > 0 )
     {
-        Call( pcfte->PffDisplacedData()->ErrIORead( tc,
-                                                    offsets.IbStart(),
-                                                    cbHeaderRead,
-                                                    pbData, 
-                                                    grbitQOS,
-                                                    pcomplete ? (IFileAPI::PfnIOComplete)CComplete::IOComplete_ : NULL,
-                                                    DWORD_PTR( pcomplete ),
-                                                    pcomplete ? (IFileAPI::PfnIOHandoff)CComplete::IOHandoff_ : NULL ) );
-        CallS( pcfte->PffDisplacedData()->ErrIOIssue() );
+        Call( prequest->ErrRead(    prequest->Pcfte()->PffDisplacedData(),
+                                    offsets.IbStart(),
+                                    cbHeaderRead,
+                                    pbData, 
+                                    iomEngine ) );
+
+        if ( fAsync )
+        {
+            CallS( prequest->Pcfte()->PffDisplacedData()->ErrIOIssue() );
+        }
     }
 
     //  perform the original read less whatever displaced header was read
 
     if ( cbHeaderRead < cbData )
     {
-        Call( pcfte->Pff()->ErrRead(    tc,
-                                        ibOffset + cbHeaderRead,
-                                        cbData - cbHeaderRead,
-                                        pbData + cbHeaderRead,
-                                        grbitQOS,
-                                        iomCacheMiss,
-                                        pcomplete ? (IFileAPI::PfnIOComplete)CComplete::IOComplete_ : NULL, 
-                                        DWORD_PTR( pcomplete ),
-                                        pcomplete ? (IFileAPI::PfnIOHandoff)CComplete::IOHandoff_ : NULL,
-                                        NULL ) );
+        Call( prequest->ErrRead(    prequest->Pcfte()->Pff(),
+                                    ibOffset + cbHeaderRead,
+                                    cbData - cbHeaderRead,
+                                    pbData + cbHeaderRead,
+                                    iomCacheMiss ) );
     }
 
 HandleError:
-    if ( pcomplete )
+    if ( prequest )
     {
-        pcomplete->Release( err, tc, grbitQOS );
+        prequest->Release( err );
     }
-    return pcomplete ? JET_errSuccess : err;
+    ReleaseCachedFile( pcfte );
+    return fAsync && prequest ? JET_errSuccess : err;
 }
 
 template< class I >
@@ -262,75 +278,98 @@ ERR TPassThroughCache<I>::ErrWrite( _In_                    const TraceContext& 
     CPassThroughCachedFileTableEntry*   pcfte           = NULL;
     const COffsets                      offsets         = COffsets( ibOffset, ibOffset + cbData - 1 );
     DWORD                               cbHeaderWritten = 0;
-    CComplete*                          pcomplete       = NULL;
-    
-    if ( pfnComplete )
-    {
-        Alloc( pcomplete = new CComplete(   volumeid,
-                                            fileid,
-                                            fileserial,
-                                            ibOffset, 
-                                            cbData,
-                                            pbData,
-                                            pfnComplete, 
-                                            keyComplete ) );
-    }
-
-    //  get the cached file.  note that we do not release this reference to leave the cached file open
+    const BOOL                          fAsync          = pfnComplete != NULL;
+    CRequest*                           prequest        = NULL;
+ 
+    //  get the cached file
 
     Call( ErrGetCachedFile( volumeid, fileid, fileserial, fFalse, &pcfte ) );
+
+    //  create our request context
+
+    Alloc( prequest = new( fAsync ? new Buffer<CRequest>() : _alloca( sizeof( CRequest ) ) )
+           CRequest(   fAsync,
+                        fFalse,
+                        this,
+                        tc,
+                        &pcfte,
+                        ibOffset, 
+                        cbData,
+                        pbData,
+                        grbitQOS,
+                        cp,
+                        pfnComplete, 
+                        keyComplete ) );
 
     //  trivial implementation:  simply pass the IO on to the cached file as a write through, except the displaced header
 
     //  telemetry
   
-    ReportMiss( pcfte, ibOffset, cbData, fFalse, cp != cpDontCache );
-    ReportUpdate( pcfte, ibOffset, cbData );
-    ReportWrite( pcfte, ibOffset, cbData, fTrue );
+    ReportMiss( prequest->Pcfte(), ibOffset, cbData, fFalse, cp != cpDontCache );
+    ReportUpdate( prequest->Pcfte(), ibOffset, cbData );
+    ReportWrite( prequest->Pcfte(), ibOffset, cbData, fTrue );
 
     //  if the write is accessing the data displaced by the header then redirect that portion of the IO to the
     //  displaced data
 
     if ( offsets.FOverlaps( s_offsetsCachedFileHeader ) )
     {
-        cbHeaderWritten = (DWORD)min( offsets.Cb(), s_offsetsCachedFileHeader.IbEnd() - offsets.IbStart() + 1 );
+        cbHeaderWritten = (DWORD)min( cbData, s_offsetsCachedFileHeader.IbEnd() - offsets.IbStart() + 1 );
     }
 
     if ( cbHeaderWritten > 0 )
     {
-        Call( pcfte->PffDisplacedData()->ErrIOWrite(    tc,
-                                                        offsets.IbStart(), 
-                                                        cbHeaderWritten, 
-                                                        pbData, 
-                                                        qosIONormal,
-                                                        pcomplete ? (IFileAPI::PfnIOComplete)CComplete::IOComplete_ : NULL, 
-                                                        DWORD_PTR( pcomplete ),
-                                                        pcomplete ? (IFileAPI::PfnIOHandoff)CComplete::IOHandoff_ : NULL ) );
-        CallS( pcfte->PffDisplacedData()->ErrIOIssue() );
-        pcfte->PffDisplacedData()->SetNoFlushNeeded();
+        Call( prequest->ErrWrite(   prequest->Pcfte()->PffDisplacedData(),
+                                    offsets.IbStart(),
+                                    cbHeaderWritten,
+                                    pbData,
+                                    iomEngine ) );
+
+        if ( fAsync )
+        {
+            CallS( prequest->Pcfte()->PffDisplacedData()->ErrIOIssue() );
+        }
+
+        prequest->Pcfte()->PffDisplacedData()->SetNoFlushNeeded();
     }
 
     //  perform the original write less whatever displaced header was written
 
     if ( cbHeaderWritten < cbData )
     {
-        Call( pcfte->Pff()->ErrWrite(   tc,
-                                        ibOffset + cbHeaderWritten,
-                                        cbData - cbHeaderWritten,
-                                        pbData + cbHeaderWritten,
-                                        qosIONormal,
-                                        iomCacheWriteThrough,
-                                        pcomplete ? (IFileAPI::PfnIOComplete)CComplete::IOComplete_ : NULL, 
-                                        DWORD_PTR( pcomplete ),
-                                        pcomplete ? (IFileAPI::PfnIOHandoff)CComplete::IOHandoff_ : NULL ) );
+        Call( prequest->ErrWrite(   prequest->Pcfte()->Pff(),
+                                    ibOffset + cbHeaderWritten,
+                                    cbData - cbHeaderWritten,
+                                    pbData + cbHeaderWritten,
+                                    iomCacheWriteThrough ) );
     }
 
 HandleError:
-    if ( pcomplete )
+    if ( prequest )
     {
-        pcomplete->Release( err, tc, grbitQOS );
+        prequest->Release( err );
     }
-    return pcomplete ? JET_errSuccess : err;
+    ReleaseCachedFile( pcfte );
+    return fAsync && prequest ? JET_errSuccess : err;
+}
+
+template<class I>
+inline ERR TPassThroughCache<I>::ErrIssue(  _In_ const VolumeId     volumeid,
+                                            _In_ const FileId       fileid,
+                                            _In_ const FileSerial   fileserial)
+{
+    ERR                                 err     = JET_errSuccess;
+    CPassThroughCachedFileTableEntry*   pcfte   = NULL;
+
+    //  get the cached file
+
+    Call( ErrGetCachedFile( volumeid, fileid, fileserial, fFalse, &pcfte ) );
+
+    //  trivial implementation:  nothing to do
+
+HandleError:
+    ReleaseCachedFile( pcfte );
+    return err;
 }
 
 //  CPassThroughCache:  concrete TPassThroughCache<ICache>

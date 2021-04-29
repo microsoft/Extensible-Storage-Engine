@@ -31,9 +31,11 @@ namespace Internal
 
                         virtual void VisitEntries( IJournal::VisitEntry^ visitEntry );
 
-                        virtual void Repair( JournalPosition journalPositionInvalidate );
+                        virtual JournalPosition Repair( JournalPosition journalPositionInvalidate );
 
-                        virtual JournalPosition AppendEntry( array<ArraySegment<byte>>^ payload );
+                        virtual JournalPosition AppendEntry(
+                            array<ArraySegment<byte>>^ payload,
+                            [Out] JournalPosition% journalPositionEnd );
 
                         virtual void Flush();
 
@@ -90,25 +92,31 @@ namespace Internal
                 }
 
                 template<class TM, class TN, class TW>
-                inline void JournalBase<TM, TN, TW>::Repair( JournalPosition journalPositionInvalidate )
+                inline JournalPosition JournalBase<TM, TN, TW>::Repair( JournalPosition journalPositionInvalidate )
                 {
-                    ERR err = JET_errSuccess;
+                    ERR                 err             = JET_errSuccess;
+                    ::JournalPosition   jposInvalidated = ::jposInvalid;
 
-                    Call( Pi->ErrRepair( (::JournalPosition)journalPositionInvalidate ) );
+                    Call( Pi->ErrRepair( (::JournalPosition)journalPositionInvalidate, &jposInvalidated ) );
 
-                    return;
+                    return (JournalPosition)jposInvalidated;
 
                 HandleError:
                     throw EseException( err );
                 }
 
                 template<class TM, class TN, class TW>
-                inline JournalPosition JournalBase<TM, TN, TW>::AppendEntry( array<ArraySegment<byte>>^ payload )
+                inline JournalPosition JournalBase<TM, TN, TW>::AppendEntry( 
+                    array<ArraySegment<byte>>^ payload,
+                    [Out] JournalPosition% journalPositionEnd )
                 {
-                    ERR                 err         = JET_errSuccess;
-                    const size_t        cjb         = payload == nullptr ? 0 : payload->Length;
-                    CJournalBuffer*     rgjb        = NULL;
-                    ::JournalPosition   jpos        = ::jposInvalid;
+                    ERR                 err     = JET_errSuccess;
+                    const size_t        cjb     = payload == nullptr ? 0 : payload->Length;
+                    CJournalBuffer*     rgjb    = NULL;
+                    ::JournalPosition   jpos    = ::jposInvalid;
+                    ::JournalPosition   jposEnd = ::jposInvalid;
+
+                    journalPositionEnd = JournalPosition::Invalid;
 
                     if ( payload != nullptr )
                     {
@@ -134,7 +142,9 @@ namespace Internal
                         }
                     }
 
-                    Call( Pi->ErrAppendEntry( cjb, rgjb, &jpos ) );
+                    Call( Pi->ErrAppendEntry( cjb, rgjb, &jpos, &jposEnd ) );
+
+                    journalPositionEnd = (JournalPosition)jposEnd;
                     
                 HandleError:
                     if ( rgjb != NULL )
@@ -147,6 +157,7 @@ namespace Internal
                     delete[] rgjb;
                     if ( err < JET_errSuccess )
                     {
+                        journalPositionEnd = JournalPosition::Invalid;
                         throw EseException( err );
                     }
                     return (JournalPosition)jpos;

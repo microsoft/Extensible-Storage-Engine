@@ -29,11 +29,13 @@ namespace Internal
                         ERR ErrVisitEntries(    _In_ const ::IJournal::PfnVisitEntry    pfnVisitEntry,
                                                 _In_ const DWORD_PTR                    keyVisitEntry ) override;
 
-                        ERR ErrRepair( _In_ const ::JournalPosition jposLast ) override;
+                        ERR ErrRepair(  _In_    const ::JournalPosition     jposInvalidate,
+                                        _Out_   ::JournalPosition* const    pjposInvalidated ) override;
 
                         ERR ErrAppendEntry( _In_                const size_t                cjb,
                                             _In_reads_( cjb )   CJournalBuffer* const       rgjb,
-                                            _Out_               ::JournalPosition* const    pjpos ) override;
+                                            _Out_               ::JournalPosition* const    pjpos,
+                                            _Out_               ::JournalPosition* const    pjposEnd ) override;
 
                         ERR ErrFlush() override;
 
@@ -113,26 +115,39 @@ namespace Internal
                 }
 
                 template<class TM, class TN>
-                inline ERR CJournalWrapper<TM, TN>::ErrRepair( _In_ const ::JournalPosition jposLast )
+                inline ERR CJournalWrapper<TM, TN>::ErrRepair(  _In_    const ::JournalPosition     jposInvalidate,
+                                                                _Out_   ::JournalPosition* const    pjposInvalidated )
                 {
                     ERR err = JET_errSuccess;
+                    JournalPosition journalPositionInvalidated = JournalPosition::Invalid;
 
-                    ExCall( I()->Repair( (JournalPosition)jposLast ) );
+                    *pjposInvalidated = ::jposInvalid;
+
+                    ExCall( journalPositionInvalidated = I()->Repair( (JournalPosition)jposInvalidate ) );
+
+                    *pjposInvalidated = (::JournalPosition)journalPositionInvalidated;
 
                 HandleError:
+                    if ( err < JET_errSuccess )
+                    {
+                        *pjposInvalidated = ::jposInvalid;
+                    }
                     return err;
                 }
 
                 template<class TM, class TN>
                 inline ERR CJournalWrapper<TM, TN>::ErrAppendEntry( _In_                const size_t                cjb,
                                                                     _In_reads_( cjb )   CJournalBuffer* const       rgjb,
-                                                                    _Out_               ::JournalPosition* const    pjpos )
+                                                                    _Out_               ::JournalPosition* const    pjpos,
+                                                                    _Out_               ::JournalPosition* const    pjposEnd )
                 {
-                    ERR                         err             = JET_errSuccess;
-                    array<ArraySegment<byte>>^  payload         = rgjb ? gcnew array<ArraySegment<byte>>( cjb ) : nullptr;
-                    JournalPosition             journalPosition = JournalPosition::Invalid;
+                    ERR                         err                 = JET_errSuccess;
+                    array<ArraySegment<byte>>^  payload             = rgjb ? gcnew array<ArraySegment<byte>>( cjb ) : nullptr;
+                    JournalPosition             journalPosition     = JournalPosition::Invalid;
+                    JournalPosition             journalPositionEnd  = JournalPosition::Invalid;
 
                     *pjpos = ::jposInvalid;
+                    *pjposEnd = ::jposInvalid;
 
                     for ( int ijb = 0; ijb < cjb; ijb++ )
                     {
@@ -149,14 +164,16 @@ namespace Internal
                         }
                     }
 
-                    ExCall( journalPosition = I()->AppendEntry( payload ) );
+                    ExCall( journalPosition = I()->AppendEntry( payload, journalPositionEnd ) );
 
                     *pjpos = (::JournalPosition)journalPosition;
+                    *pjposEnd = (::JournalPosition)journalPositionEnd;
 
                 HandleError:
                     if ( err < JET_errSuccess )
                     {
                         *pjpos = ::jposInvalid;
+                        *pjposEnd = ::jposInvalid;
                     }
                     return err;
                 }

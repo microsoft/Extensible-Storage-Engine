@@ -80,7 +80,7 @@ class TJournalSegment  //  js
                                 _Out_               RegionPosition* const   prpos,
                                 _Out_               DWORD* const            pcbActual ) override;
 
-        ERR ErrSeal( _In_opt_ IJournalSegment::PfnSealed pfnSealed, _In_ const DWORD_PTR keySealed ) override;
+        ERR ErrSeal( _In_opt_ const IJournalSegment::PfnSealed pfnSealed, _In_ const DWORD_PTR keySealed ) override;
 
     protected:
 
@@ -309,7 +309,7 @@ HandleError:
 #pragma warning (pop)
 
 template< class I  >
-INLINE ERR TJournalSegment<I>::ErrSeal( _In_opt_ IJournalSegment::PfnSealed pfnSealed, _In_ const DWORD_PTR keySealed )
+INLINE ERR TJournalSegment<I>::ErrSeal( _In_opt_ const IJournalSegment::PfnSealed pfnSealed, _In_ const DWORD_PTR keySealed )
 {
     ERR                 err     = JET_errSuccess;
     BOOL                fLocked = fFalse;
@@ -365,9 +365,9 @@ INLINE ERR TJournalSegment<I>::ErrSeal( _In_opt_ IJournalSegment::PfnSealed pfnS
                             cbSegment,
                             (const BYTE*)m_pjsh,
                             qosIONormal, 
-                            (IFileAPI::PfnIOComplete)IOComplete_, 
+                            IOComplete_, 
                             (DWORD_PTR)this,
-                            (IFileAPI::PfnIOHandoff)IOHandoff_ ) );
+                            IOHandoff_ ) );
     Call( pff->ErrIOIssue() );
     pff->SetNoFlushNeeded();
 

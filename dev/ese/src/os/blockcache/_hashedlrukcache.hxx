@@ -13,9 +13,7 @@ class THashedLRUKCache
 {
     public:
 
-        ~THashedLRUKCache()
-        {
-        }
+        ~THashedLRUKCache();
 
     public:  //  ICache
 
@@ -59,6 +57,10 @@ class THashedLRUKCache
                         _In_                    const ICache::PfnComplete   pfnComplete,
                         _In_                    const DWORD_PTR             keyComplete ) override;
 
+        ERR ErrIssue(   _In_ const VolumeId     volumeid,
+                        _In_ const FileId       fileid,
+                        _In_ const FileSerial   fileserial ) override;
+
     protected:
         
         THashedLRUKCache(   _In_    IFileSystemFilter* const            pfsf,
@@ -68,17 +70,7 @@ class THashedLRUKCache
                             _Inout_ ICacheConfiguration** const         ppcconfig,
                             _In_    ICacheTelemetry* const              pctm,
                             _Inout_ IFileFilter** const                 ppffCaching,
-                            _Inout_ CCacheHeader** const                ppch )
-            : TCacheBase<I, CHashedLRUKCachedFileTableEntry>(   pfsf,
-                                                                pfident, 
-                                                                pfsconfig, 
-                                                                ppbcconfig, 
-                                                                ppcconfig, 
-                                                                pctm, 
-                                                                ppffCaching, 
-                                                                ppch )
-        {
-        }
+                            _Inout_ CCacheHeader** const                ppch );
 
     private:
 
@@ -86,25 +78,35 @@ class THashedLRUKCache
 };
 
 template< class I >
+THashedLRUKCache<I>::~THashedLRUKCache()
+{
+    delete m_pch;
+}
+
+template< class I >
 ERR THashedLRUKCache<I>::ErrCreate()
 {
-    ERR                     err     = JET_errSuccess;
-    CHashedLRUKCacheHeader* pch     = NULL;
+    ERR                     err                 = JET_errSuccess;
+    const QWORD             cbCachingFileMax    = Pcconfig()->CbMaximumSize();
+    QWORD                   cbCachingFile       = cbCachingFileMax;
+    QWORD                   ibHeader            = 0;
+    DWORD                   cbHeader            = 0;
     TraceContextScope       tcScope( iorpBlockCache );
+    CHashedLRUKCacheHeader* pch                 = NULL;
 
     //  initialize the caching file header
 
     Call( CHashedLRUKCacheHeader::ErrCreate( &pch ) );
 
-    //  set the initial caching file size
+    //  set the caching file size
 
-    Call( PffCaching()->ErrSetSize( *tcScope, Pcconfig()->CbMaximumSize(), fFalse, qosIONormal ) );
+    Call( PffCaching()->ErrSetSize( *tcScope, cbCachingFile, fFalse, qosIONormal ) );
 
     //  write the caching file header
 
     Call( PffCaching()->ErrIOWrite( *tcScope,
-                                    sizeof( CCacheHeader ),
-                                    sizeof( *pch ),
+                                    ibHeader,
+                                    cbHeader,
                                     (const BYTE*)pch,
                                     qosIONormal, 
                                     NULL, 
@@ -128,7 +130,7 @@ ERR THashedLRUKCache<I>::ErrMount()
 
     //  read the header
 
-    Call( CHashedLRUKCacheHeader::ErrLoad( Pfsconfig(), PffCaching(), &pch ) );
+    Call( CHashedLRUKCacheHeader::ErrLoad( Pfsconfig(), PffCaching(), sizeof( CCacheHeader ), &pch ) );
 
     //  save the caching file header
 
@@ -163,13 +165,14 @@ ERR THashedLRUKCache<I>::ErrFlush(  _In_ const VolumeId     volumeid,
     ERR                                 err     = JET_errSuccess;
     CHashedLRUKCachedFileTableEntry*    pcfte   = NULL;
    
-    //  get the cached file.  note that we do not release this reference to leave the cached file open
+    //  get the cached file
 
     Call( ErrGetCachedFile( volumeid, fileid, fileserial, fFalse, &pcfte ) );
 
     //  AEG
 
 HandleError:
+    ReleaseCachedFile( pcfte );
     return err;
 }
 
@@ -183,13 +186,14 @@ ERR THashedLRUKCache<I>::ErrInvalidate( _In_ const VolumeId     volumeid,
     ERR                                 err     = JET_errSuccess;
     CHashedLRUKCachedFileTableEntry*    pcfte   = NULL;
    
-    //  get the cached file.  note that we do not release this reference to leave the cached file open
+    //  get the cached file
 
     Call( ErrGetCachedFile( volumeid, fileid, fileserial, fFalse, &pcfte ) );
 
     //  AEG
 
 HandleError:
+    ReleaseCachedFile( pcfte );
     return err;
 }
 
@@ -206,34 +210,40 @@ ERR THashedLRUKCache<I>::ErrRead(   _In_                    const TraceContext& 
                                     _In_opt_                const ICache::PfnComplete   pfnComplete,
                                     _In_                    const DWORD_PTR             keyComplete )
 {
-    ERR                                 err             = JET_errSuccess;
-    CHashedLRUKCachedFileTableEntry*    pcfte           = NULL;
-    CComplete*                          pcomplete       = NULL;
+    ERR                                 err         = JET_errSuccess;
+    CHashedLRUKCachedFileTableEntry*    pcfte       = NULL;
+    const BOOL                          fAsync      = pfnComplete != NULL;
+    CRequest*                           prequest    = NULL;
 
-    if ( pfnComplete )
-    {
-        Alloc( pcomplete = new CComplete(   volumeid,
-                                            fileid,
-                                            fileserial,
-                                            ibOffset, 
-                                            cbData,
-                                            pbData,
-                                            pfnComplete, 
-                                            keyComplete ) );
-    }
-
-    //  get the cached file.  note that we do not release this reference to leave the cached file open
+    //  get the cached file
 
     Call( ErrGetCachedFile( volumeid, fileid, fileserial, fFalse, &pcfte ) );
+
+    //  create our request context
+
+    Alloc( prequest = new( fAsync ? new Buffer<CRequest>() : _alloca( sizeof( CRequest ) ) )
+           CRequest(    fAsync,
+                        fTrue,
+                        this,
+                        tc,
+                        &pcfte,
+                        ibOffset, 
+                        cbData,
+                        pbData,
+                        grbitQOS,
+                        cp,
+                        pfnComplete, 
+                        keyComplete ) );
 
     //  AEG
 
 HandleError:
-    if ( pcomplete )
+    if ( prequest )
     {
-        pcomplete->Release( err, tc, grbitQOS );
+        prequest->Release( err );
     }
-    return pcomplete ? JET_errSuccess : err;
+    ReleaseCachedFile( pcfte );
+    return fAsync ? JET_errSuccess : err;
 }
 
 template< class I >
@@ -249,34 +259,80 @@ ERR THashedLRUKCache<I>::ErrWrite(  _In_                    const TraceContext& 
                                     _In_opt_                const ICache::PfnComplete   pfnComplete,
                                     _In_                    const DWORD_PTR             keyComplete )
 {
-    ERR                                 err             = JET_errSuccess;
-    CHashedLRUKCachedFileTableEntry*    pcfte           = NULL;
-    CComplete*                          pcomplete       = NULL;
+    ERR                                 err         = JET_errSuccess;
+    CHashedLRUKCachedFileTableEntry*    pcfte       = NULL;
+    const BOOL                          fAsync      = pfnComplete != NULL;
+    CRequest*                           prequest    = NULL;
     
-    if ( pfnComplete )
-    {
-        Alloc( pcomplete = new CComplete(   volumeid,
-                                            fileid,
-                                            fileserial,
-                                            ibOffset, 
-                                            cbData,
-                                            pbData,
-                                            pfnComplete, 
-                                            keyComplete ) );
-    }
+    //  get the cached file
 
-    //  get the cached file.  note that we do not release this reference to leave the cached file open
+    Call( ErrGetCachedFile( volumeid, fileid, fileserial, fFalse, &pcfte ) );
+
+    //  create our request context
+
+    Alloc( prequest = new( fAsync ? new Buffer<CRequest>() : _alloca( sizeof( CRequest ) ) )
+           CRequest(    fAsync,
+                        fFalse,
+                        this,
+                        tc,
+                        &pcfte,
+                        ibOffset, 
+                        cbData,
+                        pbData,
+                        grbitQOS,
+                        cp,
+                        pfnComplete, 
+                        keyComplete ) );
+
+    //  AEG
+
+HandleError:
+    if ( prequest )
+    {
+        prequest->Release( err );
+    }
+    ReleaseCachedFile( pcfte );
+    return fAsync ? JET_errSuccess : err;
+}
+
+template<class I>
+inline ERR THashedLRUKCache<I>::ErrIssue(   _In_ const VolumeId     volumeid,
+                                            _In_ const FileId       fileid,
+                                            _In_ const FileSerial   fileserial )
+{
+    ERR                                 err     = JET_errSuccess;
+    CHashedLRUKCachedFileTableEntry*    pcfte   = NULL;
+   
+    //  get the cached file
 
     Call( ErrGetCachedFile( volumeid, fileid, fileserial, fFalse, &pcfte ) );
 
     //  AEG
 
 HandleError:
-    if ( pcomplete )
-    {
-        pcomplete->Release( err, tc, grbitQOS );
-    }
-    return pcomplete ? JET_errSuccess : err;
+    ReleaseCachedFile( pcfte );
+    return err;
+}
+
+template< class I >
+THashedLRUKCache<I>::THashedLRUKCache(  _In_    IFileSystemFilter* const            pfsf,
+                                        _In_    IFileIdentification* const          pfident,
+                                        _In_    IFileSystemConfiguration* const     pfsconfig, 
+                                        _Inout_ IBlockCacheConfiguration** const    ppbcconfig,
+                                        _Inout_ ICacheConfiguration** const         ppcconfig,
+                                        _In_    ICacheTelemetry* const              pctm,
+                                        _Inout_ IFileFilter** const                 ppffCaching,
+                                        _Inout_ CCacheHeader** const                ppch )
+            :   TCacheBase<I, CHashedLRUKCachedFileTableEntry>( pfsf,
+                                                                pfident, 
+                                                                pfsconfig, 
+                                                                ppbcconfig, 
+                                                                ppcconfig, 
+                                                                pctm, 
+                                                                ppffCaching, 
+                                                                ppch ),
+                m_pch( NULL )
+{
 }
 
 //  CHashedLRUKCache:  concrete THashedLRUKCache<ICache>

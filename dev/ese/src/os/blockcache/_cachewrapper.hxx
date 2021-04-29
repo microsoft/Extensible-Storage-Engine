@@ -67,6 +67,10 @@ class TCacheWrapper  //  cw
                         _In_                    const ICache::CachingPolicy cp,
                         _In_opt_                const ICache::PfnComplete   pfnComplete,
                         _In_                    const DWORD_PTR             keyComplete ) override;
+        
+        ERR ErrIssue(   _In_ const VolumeId     volumeid,
+                        _In_ const FileId       fileid,
+                        _In_ const FileSerial   fileserial ) override;
 
     protected:
 
@@ -187,6 +191,14 @@ ERR TCacheWrapper<I>::ErrWrite( _In_                    const TraceContext&     
                                 _In_                    const DWORD_PTR             keyComplete )
 {
     return m_piInner->ErrWrite( tc, volumeid, fileid, fileserial, ibOffset, cbData, pbData, grbitQOS, cp, pfnComplete, keyComplete );
+}
+
+template<class I>
+ERR TCacheWrapper<I>::ErrIssue( _In_ const VolumeId     volumeid,
+                                _In_ const FileId       fileid,
+                                _In_ const FileSerial   fileserial )
+{
+    return m_piInner->ErrIssue( volumeid, fileid, fileserial );
 }
 
 //  CCacheWrapper:  concrete TCacheWrapper<ICache>.

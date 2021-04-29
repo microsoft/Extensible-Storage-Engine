@@ -24,6 +24,7 @@ class CJournalSegmentHeader : CBlockCacheHeaderHelpers  // jsh
                             _In_    const QWORD                     ib,
                             _Out_   CJournalSegmentHeader** const   ppjsh );
         static ERR ErrDump( _In_ IFileFilter* const pff,
+                            _In_ const QWORD        ib,
                             _In_ CPRINTF* const     pcprintf );
 
         ERR ErrFinalize();
@@ -162,12 +163,13 @@ HandleError:
 }
 
 INLINE ERR CJournalSegmentHeader::ErrDump(  _In_ IFileFilter* const pff,
+                                            _In_ const QWORD        ib,
                                             _In_ CPRINTF* const     pcprintf )
 {
     ERR                     err     = JET_errSuccess;
     CJournalSegmentHeader*  pjsh    = NULL;
 
-    Call( ErrLoadHeader( pff, &pjsh ) );
+    Call( ErrLoadHeader( pff, ib, &pjsh ) );
 
     Call( pjsh->ErrValidate() );
 
