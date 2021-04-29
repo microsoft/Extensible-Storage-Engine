@@ -376,6 +376,12 @@ void UpdateCachedTrxOldest( INST * const pinst )
 //
 //-
 {
+    ENTERCRITICALSECTION critTrxOldest( pinst->CritTrxOldestCached() );
+    if ( !pinst->FTrxOldestCachedMayBeStale() )
+    {
+        return;
+    }
+
     TRX             trxOldest   = trxMax;
     TICK            tickOldestTransaction = TickOSTimeCurrent();
     size_t          iProc;

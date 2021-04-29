@@ -1157,6 +1157,11 @@ INLINE VOID PIBSetTrxBegin0( PIB * const ppib )
     PIB* const ppibTrxOldest = ppls->m_ilTrxOldest.PrevMost();
     Assert ( !ppibTrxOldest || ( INT( ppibTrxOldest->trxBegin0 - ppib->trxBegin0 ) <= 0 ) );
 #endif
+    // Oldest transaction can only change if this is the first transaction
+    if ( ppls->m_ilTrxOldest.PrevMost() == NULL )
+    {
+        pinst->SetTrxOldestCachedMayBeStale();
+    }
     ppls->m_ilTrxOldest.InsertAsNextMost( ppib );
     ppls->m_rwlPIBTrxOldest.LeaveAsWriter();
 
@@ -1178,6 +1183,11 @@ INLINE VOID PIBResetTrxBegin0( PIB * const ppib )
     if ( ppls != NULL )
     {
         ppls->m_rwlPIBTrxOldest.EnterAsWriter();
+        // Oldest transaction can only change if this is the first transaction
+        if ( ppls->m_ilTrxOldest.PrevMost() == ppib )
+        {
+            PinstFromPpib( ppib )->SetTrxOldestCachedMayBeStale();
+        }
         ppls->m_ilTrxOldest.Remove( ppib );
         ppls->m_rwlPIBTrxOldest.LeaveAsWriter();
     }
