@@ -5,6 +5,8 @@
 
 //  Block Cache Lock Ranks
 
+const INT rankFilePathHash = 0;
+const INT rankCachedFileHash = 0;
 const INT rankCacheRepository = 0;
 const INT rankFileFilter = 0;
 const INT rankFileIdentification = 0;
@@ -46,4 +48,15 @@ class COffsets
 
         QWORD  m_ibStart;
         QWORD  m_ibEnd;
+};
+
+
+//  Buffer of the same size as another type.
+
+template< class T >
+class Buffer
+{
+    private:
+
+        BYTE    m_rgb[sizeof( T )];
 };

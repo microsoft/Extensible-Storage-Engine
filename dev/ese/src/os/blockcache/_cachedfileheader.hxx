@@ -24,13 +24,13 @@ class CCachedFileHeader : CBlockCacheHeaderHelpers  //  cfh
         static ERR ErrLoad( _In_    IFileSystemConfiguration* const pfsconfig, 
                             _In_    IFileFilter* const              pff,
                             _Out_   CCachedFileHeader** const       ppcfh );
-        static ERR ErrLoad( _In_    IFileSystemConfiguration* const pfsconfig, 
-                            _In_    const BYTE* const               pbHeader, 
-                            _In_    const DWORD                     cbHeader,
-                            _Out_   CCachedFileHeader** const       ppcfh );
-        static BOOL FValid( _In_    IFileSystemConfiguration* const pfsconfig, 
-                            _In_    const BYTE* const               pbHeader,
-                            _In_    const DWORD                     cbHeader );
+        static ERR ErrLoad( _In_                    IFileSystemConfiguration* const pfsconfig, 
+                            _In_reads_( cbHeader )  const BYTE* const               pbHeader, 
+                            _In_                    const DWORD                     cbHeader,
+                            _Out_                   CCachedFileHeader** const       ppcfh );
+        static BOOL FValid( _In_                    IFileSystemConfiguration* const pfsconfig, 
+                            _In_reads_( cbHeader )  const BYTE* const               pbHeader,
+                            _In_                    const DWORD                     cbHeader );
         static ERR ErrDump( _In_ IFileSystemConfiguration* const    pfsconfig,
                             _In_ IFileIdentification* const         pfident, 
                             _In_ IFileFilter* const                 pff,
@@ -154,7 +154,7 @@ INLINE ERR CCachedFileHeader::ErrLoad(  _In_    IFileSystemConfiguration* const 
 
     *ppcfh = NULL;
 
-    Call( ErrLoadHeader( pff, &pcfh ) );
+    Call( ErrLoadHeader( pff, 0, &pcfh ) );
 
     Call( pcfh->ErrValidate( JET_errReadVerifyFailure, pfsconfig, pff ) );
 
@@ -171,10 +171,10 @@ HandleError:
     return err;
 }
 
-INLINE ERR CCachedFileHeader::ErrLoad(  _In_    IFileSystemConfiguration* const pfsconfig, 
-                                        _In_    const BYTE* const               pbHeader, 
-                                        _In_    const DWORD                     cbHeader,
-                                        _Out_   CCachedFileHeader** const       ppcfh )
+INLINE ERR CCachedFileHeader::ErrLoad(  _In_                    IFileSystemConfiguration* const pfsconfig, 
+                                        _In_reads_( cbHeader )  const BYTE* const               pbHeader, 
+                                        _In_                    const DWORD                     cbHeader,
+                                        _Out_                   CCachedFileHeader** const       ppcfh )
 {
     ERR                 err     = JET_errSuccess;
     CCachedFileHeader*  pcfh    = NULL;
@@ -198,9 +198,9 @@ HandleError:
     return err;
 }
 
-INLINE BOOL CCachedFileHeader::FValid(  _In_    IFileSystemConfiguration* const pfsconfig, 
-                                        _In_    const BYTE* const               pbHeader,
-                                        _In_    const DWORD                     cbHeader )
+INLINE BOOL CCachedFileHeader::FValid(  _In_                    IFileSystemConfiguration* const pfsconfig, 
+                                        _In_reads_( cbHeader )  const BYTE* const               pbHeader,
+                                        _In_                    const DWORD                     cbHeader )
 {
     ERR                 err                     = JET_errSuccess;
     BOOL                fCleanUpStateSaved      = fFalse;
@@ -240,7 +240,7 @@ INLINE ERR CCachedFileHeader::ErrDump(  _In_ IFileSystemConfiguration* const    
     FileId              fileid                              = fileidInvalid;
     FileSerial          fileserial                          = fileserialInvalid;
 
-    Call( ErrLoadHeader( pff, &pcfh ) );
+    Call( ErrLoadHeader( pff, 0, &pcfh ) );
 
     Call( pcfh->ErrValidate( JET_errFileInvalidType, pfsconfig ) );
 
@@ -295,6 +295,7 @@ INLINE ERR CCachedFileHeader::ErrDump(  _In_ IFileSystemConfiguration* const    
                     *((BYTE*)&pcfh->m_rgbUniqueIdCache[ 13 ]),
                     *((BYTE*)&pcfh->m_rgbUniqueIdCache[ 14 ]),
                     *((BYTE*)&pcfh->m_rgbUniqueIdCache[ 15 ]) );
+    (*pcprintf)(    "           File Type:  %d\n", LONG( pcfh->m_le_filetype ) );
     (*pcprintf)(    "\n" );
     (*pcprintf)(    "Current File Properties:\n" );
     (*pcprintf)(    "              Path:  %S\n", wszAbsPath );

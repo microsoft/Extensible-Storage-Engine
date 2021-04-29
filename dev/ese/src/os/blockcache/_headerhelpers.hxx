@@ -20,7 +20,7 @@ class CBlockCacheHeaderHelpers
             checksumDefault = checksumLegacy,
         };
 
-    public:
+    protected:
 
         static ERR ErrGetFileId(    _In_    IFileFilter* const              pff, 
                                     _Out_   LittleEndian<VolumeId>* const   pvolumeid, 
@@ -44,12 +44,6 @@ class CBlockCacheHeaderHelpers
         static ULONG GenerateChecksum( _In_ const T* const pt );
 
         template< class T >
-        static ERR ErrLoadHeader( _In_ IFileFilter* const pff, _Out_ T** const ppt )
-        {
-            return ErrLoadHeader( pff, 0, ppt );
-        }
-
-        template< class T >
         static ERR ErrLoadHeader( _In_ IFileFilter* const pff, _In_ const QWORD ib, _Out_ T** const ppt );
 
         template< class T >
@@ -57,14 +51,14 @@ class CBlockCacheHeaderHelpers
                                     _In_                    const DWORD         cbHeader,
                                     _Out_                   T** const           ppt );
 
+        template< class T >
+        static ERR ErrValidateHeader( _In_ const T* const pt );
+
     private:
 
         template< ChecksumType CT >
         static ULONG GenerateChecksum(  _In_reads_bytes_( cbData )  const VOID* const   pvData,
                                         _In_                        const DWORD         cbData );
-
-        template< class T >
-        static ERR ErrValidateHeader( _In_ const T* const pt );
 
         template< class T >
         static ERR ErrRepairHeader( _In_ const T* const pt,
@@ -205,12 +199,6 @@ INLINE VOID CBlockCacheHeaderHelpers::GenerateUniqueId( _Out_writes_( cbGuid )  
 }
 
 template< class T >
-INLINE ULONG CBlockCacheHeaderHelpers::GenerateChecksum( _In_ const T* const pt )
-{
-    return GenerateChecksum<CBlockCacheHeaderTraits<T>::checksumType>( (const BYTE*)pt, sizeof( T ) );
-}
-
-template< class T >
 INLINE ERR CBlockCacheHeaderHelpers::ErrLoadHeader( _In_    IFileFilter* const  pff,
                                                     _In_    const QWORD         ib,
                                                     _Out_   T** const           ppt )
@@ -223,7 +211,7 @@ INLINE ERR CBlockCacheHeaderHelpers::ErrLoadHeader( _In_    IFileFilter* const  
     *ppt = NULL;
 
     Call( pff->ErrSize( &cbSize, IFileAPI::filesizeLogical ) );
-    if ( ib + sizeof( T ) > cbSize )
+    if ( ib + cbSize < sizeof( T ) )
     {
         Error( ErrERRCheck( JET_errReadVerifyFailure ) );
     }
@@ -247,6 +235,12 @@ HandleError:
         *ppt = NULL;
     }
     return err;
+}
+
+template< class T >
+INLINE ULONG CBlockCacheHeaderHelpers::GenerateChecksum( _In_ const T* const pt )
+{
+    return GenerateChecksum<CBlockCacheHeaderTraits<T>::checksumType>( (const BYTE*)pt, sizeof( T ) );
 }
 
 template< class T >

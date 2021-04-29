@@ -62,6 +62,11 @@ namespace Internal
                             FileQOS fileQOS,
                             CachingPolicy cachingPolicy,
                             ICache::Complete^ complete );
+
+                        virtual void Issue(
+                            VolumeId volumeid,
+                            FileId fileid,
+                            FileSerial fileserial );
                 };
 
                 template< class TM, class TN, class TW >
@@ -319,6 +324,26 @@ namespace Internal
                     {
                         OSMemoryPageFree( pvBuffer );
                     }
+                    if ( err >= JET_errSuccess )
+                    {
+                        return;
+                    }
+                    throw EseException( err );
+                }
+
+                template< class TM, class TN, class TW >
+                inline void CacheBase<TM, TN, TW>::Issue(
+                    VolumeId volumeid,
+                    FileId fileid,
+                    FileSerial fileserial )
+                {
+                    ERR                 err             = JET_errSuccess;
+
+                    Call( Pi->ErrIssue( (::VolumeId)volumeid,
+                                        (::FileId)fileid,
+                                        (::FileSerial)fileserial ) );
+
+                HandleError:
                     if ( err >= JET_errSuccess )
                     {
                         return;

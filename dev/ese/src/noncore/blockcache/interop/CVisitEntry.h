@@ -37,6 +37,7 @@ namespace Internal
                     public:
 
                         static BOOL VisitEntry_(    _In_ const ::JournalPosition    jpos,
+                                                    _In_ const ::JournalPosition    jposEnd,
                                                     _In_ const CJournalBuffer       jb,
                                                     _In_ const DWORD_PTR            keyVisitEntry )
                         {
@@ -50,6 +51,7 @@ namespace Internal
                             UtilMemCpy( (BYTE*)rgbData, jb.Rgb(), jb.Cb() );
 
                             bool result = pvisitentry->m_visitentry.get()(  (JournalPosition)jpos,
+                                                                            (JournalPosition)jposEnd,
                                                                              ArraySegment<byte>( buffer ) );
 
                             return result ? fTrue : fFalse;

@@ -25,6 +25,8 @@ class CPassThroughCachedFileTableEntry  //  cfte
 
         IFileFilter* PffDisplacedData() const { return m_pffDisplacedData; }
 
+    protected:
+
         ERR ErrOpenCachedFile(  _In_ IFileSystemFilter* const           pfsf,
                                 _In_ IFileIdentification* const         pfident,
                                 _In_ IBlockCacheConfiguration* const    pbcconfig,

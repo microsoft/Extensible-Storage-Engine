@@ -292,12 +292,16 @@ class TFileFilter  //  ff
                 static void IOComplete_(    _In_                    const ERR                   err,
                                             _In_                    IFileAPI* const             pfapi,
                                             _In_                    const FullTraceContext&     tc,
-                                            _In_                    OSFILEQOS                   grbitQOS,
+                                            _In_                    const OSFILEQOS             grbitQOS,
                                             _In_                    const QWORD                 ibOffset,
                                             _In_                    const DWORD                 cbData,
-                                            _In_reads_( cbData )    BYTE* const                 pbData,
-                                            _In_                    CWriteBackComplete* const   pwriteBackComplete )
+                                            _In_reads_( cbData )    const BYTE* const           pbData,
+                                            _In_                    const DWORD_PTR             keyIOComplete )
                 {
+                    IFileAPI::PfnIOComplete pfnIOComplete = IOComplete_;
+                    Unused( pfnIOComplete );
+
+                    CWriteBackComplete* const pwriteBackComplete = (CWriteBackComplete*)keyIOComplete;
                     pwriteBackComplete->m_errComplete = err;
                     pwriteBackComplete->m_sigComplete.Set();
                 }
@@ -309,9 +313,13 @@ class TFileFilter  //  ff
                                         _In_                    const QWORD                 ibOffset,
                                         _In_                    const DWORD                 cbData,
                                         _In_reads_( cbData )    const BYTE* const           pbData,
-                                        _In_                    CWriteBackComplete* const   pwriteBackComplete,
+                                        _In_                    const DWORD_PTR             keyIOComplete,
                                         _In_                    void* const                 pvIOContext )
                 {
+                    IFileAPI::PfnIOHandoff pfnIOHandoff = IOHandoff_;
+                    Unused( pfnIOHandoff );
+
+                    CWriteBackComplete* const pwriteBackComplete = (CWriteBackComplete*)keyIOComplete;
                     if ( pwriteBackComplete->m_pfnIOHandoff )
                     {
                         pwriteBackComplete->m_pfnIOHandoff( err,
@@ -498,6 +506,7 @@ class TFileFilter  //  ff
         LONG                                                        m_cCacheMissForIssue;
         LONG                                                        m_cCacheWriteThroughForIssue;
         LONG                                                        m_cCacheWriteBackForIssue;
+        LONG                                                        m_cCacheAsyncRequest;
         CInitOnceAttach                                             m_initOnceAttach;
         CSemaphore                                                  m_semCachedFileHeader;
 
@@ -653,6 +662,7 @@ TFileFilter<I>::TFileFilter(    _Inout_     IFileAPI** const                    
         m_cCacheMissForIssue( 0 ),
         m_cCacheWriteThroughForIssue( 0 ),
         m_cCacheWriteBackForIssue( 0 ),
+        m_cCacheAsyncRequest( 0 ),
         m_semCachedFileHeader( CSyncBasicInfo( "TFileFilter<I>::m_semCachedFileHeader" ) )
 {
     SetCacheParameters();
@@ -833,7 +843,7 @@ ERR TFileFilter<I>::ErrIORead(  _In_                    const TraceContext&     
                                 _In_                    const IFileAPI::PfnIOHandoff        pfnIOHandoff,
                                 _In_                    const VOID *                        pioreq )
 {
-    return ErrRead( tc, ibOffset, cbData, pbData, grbitQOS, IOMode::iomEngine, pfnIOComplete, keyIOComplete, pfnIOHandoff, pioreq );
+    return ErrRead( tc, ibOffset, cbData, pbData, grbitQOS, iomEngine, pfnIOComplete, keyIOComplete, pfnIOHandoff, pioreq );
 }
 
 template< class I >
@@ -846,13 +856,13 @@ ERR TFileFilter<I>::ErrIOWrite( _In_                    const TraceContext&     
                                 _In_                    const DWORD_PTR                 keyIOComplete,
                                 _In_                    const IFileAPI::PfnIOHandoff    pfnIOHandoff )
 {
-    return ErrWrite( tc, ibOffset, cbData, pbData, grbitQOS, IOMode::iomEngine, pfnIOComplete, keyIOComplete, pfnIOHandoff );
+    return ErrWrite( tc, ibOffset, cbData, pbData, grbitQOS, iomEngine, pfnIOComplete, keyIOComplete, pfnIOHandoff );
 }
 
 template< class I >
 ERR TFileFilter<I>::ErrIOIssue()
 {
-    return ErrIssue( IOMode::iomEngine );
+    return ErrIssue( iomEngine );
 }
 
 template< class I >
@@ -874,7 +884,7 @@ ERR TFileFilter<I>::ErrRead(    _In_                    const TraceContext&     
     CSemaphore*             psem        = NULL;
 
     Assert( cbData > 0 );  //  underlying impl also asserts no zero length IO
-    Assert( iom == IOMode::iomRaw || iom == IOMode::iomEngine || iom == IOMode::iomCacheMiss );
+    Assert( iom == iomRaw || iom == iomEngine || iom == iomCacheMiss );
 
     //  if this read is from the engine and not the cache then we need to protect this offset range in the file from
     //  colliding with cache write back.  if the read is from the cache then it is the cache doing a read inside
@@ -882,13 +892,13 @@ ERR TFileFilter<I>::ErrRead(    _In_                    const TraceContext&     
     //  outside of the original scope (e.g. a prefetch read of additional offsets) without a potential deadlock in this
     //  locking model.  we check for such requests and fail them
 
-    if ( iom == IOMode::iomEngine )
+    if ( iom == iomEngine )
     {
         Call( ErrBeginAccess( offsets, fFalse, &group, &psem ) );
         fIOREQUsed = fTrue;
         Call( ErrCacheRead( tc, ibOffset, cbData, pbData, grbitQOS, pfnIOComplete, keyIOComplete, pfnIOHandoff, pioreq, &group, &psem ) );
     }
-    else if ( iom == IOMode::iomCacheMiss )
+    else if ( iom == iomCacheMiss )
     {
         Call( ErrVerifyAccess( offsets ) );
         fIOREQUsed = fTrue;
@@ -944,10 +954,10 @@ ERR TFileFilter<I>::ErrWrite(   _In_                    const TraceContext&     
     CSemaphore*             psem    = NULL;
 
     Assert( cbData > 0 );  //  underlying impl also asserts no zero length IO
-    Assert( iom == IOMode::iomRaw ||
-            iom == IOMode::iomEngine || 
-            iom == IOMode::iomCacheWriteThrough || 
-            iom == IOMode::iomCacheWriteBack );
+    Assert( iom == iomRaw ||
+            iom == iomEngine || 
+            iom == iomCacheWriteThrough || 
+            iom == iomCacheWriteBack );
 
     OSTrace(    JET_tracetagBlockCache,
                 OSFormat(   "%s ErrIOWrite ib=%llu cb=%u fZeroed=%s fCachedFileHeader=%s iom=%d", 
@@ -965,18 +975,18 @@ ERR TFileFilter<I>::ErrWrite(   _In_                    const TraceContext&     
     //  if this is a cache write back then we need to wait until any engine IOs to this offset range are complete
     //  before proceeding
 
-    if ( iom == IOMode::iomEngine )
+    if ( iom == iomEngine )
     {
         Call( ErrBeginAccess( offsets, fTrue, &group, &psem ) );
         Call( ErrCacheWrite( tc, ibOffset, cbData, pbData, grbitQOS, pfnIOComplete, keyIOComplete, pfnIOHandoff, &group, &psem ) );
     }
-    else if ( iom == IOMode::iomCacheWriteThrough )
+    else if ( iom == iomCacheWriteThrough )
     {
         Call( ErrVerifyAccess( offsets ) );
         Call( ErrWriteThrough( tc, ibOffset, cbData, pbData, grbitQOS, pfnIOComplete, keyIOComplete, pfnIOHandoff, &group, &psem ) );
         AtomicIncrement( &m_cCacheWriteThroughForIssue );
     }
-    else if ( iom == IOMode::iomCacheWriteBack )
+    else if ( iom == iomCacheWriteBack )
     {
         Call( ErrTryEnqueueWriteBack( tc, ibOffset, cbData, pbData, grbitQOS, pfnIOComplete, keyIOComplete, pfnIOHandoff ) );
     }
@@ -996,43 +1006,50 @@ HandleError:
 template< class I >
 ERR TFileFilter<I>::ErrIssue( _In_ const IFileFilter::IOMode iom )
 {
-    ERR     err     = JET_errSuccess;
-    BOOL    fIssue  = fFalse;
+    ERR     err         = JET_errSuccess;
+    BOOL    fIssue      = fFalse;
+    BOOL    fIssueCache = fFalse;
 
-    Assert( iom == IOMode::iomRaw ||
-            iom == IOMode::iomEngine ||
-            iom == IOMode::iomCacheMiss ||
-            iom == IOMode::iomCacheWriteThrough ||
-            iom == IOMode::iomCacheWriteBack );
+    Assert( iom == iomRaw ||
+            iom == iomEngine ||
+            iom == iomCacheMiss ||
+            iom == iomCacheWriteThrough ||
+            iom == iomCacheWriteBack );
 
     OSTrace( JET_tracetagBlockCache, OSFormat( "%s ErrIOIssue iom=%u", OSFormat( this ), iom ) );
 
     switch ( iom )
     {
-        case IOMode::iomRaw:
+        case iomRaw:
             fIssue = fTrue;
             break;
 
-        case IOMode::iomEngine:
+        case iomEngine:
             fIssue = fTrue;
             AtomicExchange( &m_cCacheMissForIssue, 0 );
             AtomicExchange( &m_cCacheWriteThroughForIssue, 0 );
+            fIssueCache = AtomicExchange( &m_cCacheAsyncRequest, 0 ) > 0;
             break;
 
-        case IOMode::iomCacheMiss:
+        case iomCacheMiss:
             fIssue = AtomicExchange( &m_cCacheMissForIssue, 0 ) > 0;
             break;
 
-        case IOMode::iomCacheWriteThrough:
+        case iomCacheWriteThrough:
             fIssue = AtomicExchange( &m_cCacheWriteThroughForIssue, 0 ) > 0;
             break;
 
-        case IOMode::iomCacheWriteBack:
+        case iomCacheWriteBack:
             if ( AtomicExchange( &m_cCacheWriteBackForIssue, 0 ) > 0 )
             {
                 IssueWriteBacks();
             }
             break;
+    }
+
+    if ( fIssueCache )
+    {
+        Call( m_pc->ErrIssue( m_volumeid, m_fileid, m_fileserial ) );
     }
 
     if ( fIssue )
@@ -1403,9 +1420,9 @@ ERR TFileFilter<I>::ErrTryEnqueueWriteBack( _In_                    const TraceC
                                         cbData,
                                         pbData,
                                         grbitQOS,
-                                        pfnIOComplete ? pfnIOComplete : (IFileAPI::PfnIOComplete)CWriteBackComplete::IOComplete_,
+                                        pfnIOComplete ? pfnIOComplete : CWriteBackComplete::IOComplete_,
                                         pfnIOComplete ? keyIOComplete : (DWORD_PTR)&writeBackComplete,
-                                        pfnIOComplete ? pfnIOHandoff : (IFileAPI::PfnIOHandoff)CWriteBackComplete::IOHandoff_ ) );
+                                        pfnIOComplete ? pfnIOHandoff : CWriteBackComplete::IOHandoff_ ) );
     m_ilQueuedWriteBacks.InsertAsNextMost( pwriteback );
 
     AtomicIncrement( &m_cCacheWriteBackForIssue );
@@ -1421,7 +1438,7 @@ HandleError:
     }
     if ( err >= JET_errSuccess && pwriteback && !pfnIOComplete )
     {
-        CallS( ErrIssue( IOMode::iomCacheWriteBack ) );
+        CallS( ErrIssue( iomCacheWriteBack ) );
         err = writeBackComplete.ErrComplete();
     }
     return err;
@@ -1688,9 +1705,10 @@ ERR TFileFilter<I>::ErrCacheRead(   _In_                    const TraceContext& 
                                     _Inout_                 CMeteredSection::Group* const   pgroup,
                                     _Inout_                 CSemaphore** const              ppsem )
 {
-    ERR             err         = JET_errSuccess;
-    BOOL            fIOREQUsed  = fFalse;
-    CIOComplete*    piocomplete = NULL;
+    ERR             err             = JET_errSuccess;
+    BOOL            fIOREQUsed      = fFalse;
+    CIOComplete*    piocomplete     = NULL;
+    OSFILEQOS       grbitQOSActual  = grbitQOS;
 
     //  determine the caching policy for this read
 
@@ -1744,19 +1762,44 @@ ERR TFileFilter<I>::ErrCacheRead(   _In_                    const TraceContext& 
             ReleaseUnusedIOREQ( (void*)pioreq );
         }
 
-        //  ask the cache for this data
+        //  AEG  handle the cases where a read request can be rejected which have not already been granted by the
+        //       reserved pioreq:  qosIOOptimizeCombinable
+        //       -  note that we must intercept ErrReserveIOREQ and handle it there as well!
 
-        Call( m_pc->ErrRead(    tc,
+        //  strip any grbitQOS bits that can result in the rejection of the read request that we have handled.  if we
+        //  missed any then that will be caught by the below assert that we never see errDiskTilt
+        //
+        //  NOTE:  we allow qosIODispatchBackground because this indicates IO smoothing and won't result in rejection
+
+        grbitQOSActual &= ~qosIOOptimizeCombinable;
+
+        //  ask the cache for this data
+        //
+        //  NOTE:  the handoff reference to the io completion context occurs in the Release call on exit
+
+        err = m_pc->ErrRead(    tc,
                                 m_volumeid,
                                 m_fileid, 
                                 m_fileserial,
                                 ibOffset, 
                                 cbData, 
                                 pbData, 
-                                grbitQOS,
+                                grbitQOSActual,
                                 cp, 
-                                pfnIOComplete ? (ICache::PfnComplete)CIOComplete::Complete_ : NULL,
-                                DWORD_PTR( piocomplete ) ) );
+                                pfnIOComplete ? CIOComplete::Complete_ : NULL,
+                                DWORD_PTR( piocomplete ) );
+
+        //  reject on request due to grbitQOS should not happen in the cache.  that should be handled here
+
+        Assert( err != errDiskTilt );
+        Call( err );
+
+        //  if this was an async cache request then note that
+
+        if ( pfnIOComplete )
+        {
+            AtomicIncrement( &m_cCacheAsyncRequest );
+        }
     }
     else
     {
@@ -1767,7 +1810,7 @@ ERR TFileFilter<I>::ErrCacheRead(   _In_                    const TraceContext& 
         const ICacheTelemetry::BlockNumber blocknumberMax = Blocknumber( ibOffset + cbData + CbBlockSize() - 1 );
         for (   ICacheTelemetry::BlockNumber blocknumber = Blocknumber( ibOffset );
                 blocknumber < blocknumberMax;
-                blocknumber = (ICacheTelemetry::BlockNumber)( (QWORD)blocknumber + 1 ) )
+                blocknumber++ )
         {
             m_pctm->Miss( filenumber, blocknumber, fTrue, fCacheIfPossible );
         }
@@ -1854,9 +1897,9 @@ ERR TFileFilter<I>::ErrCacheMiss(   _In_                    const TraceContext& 
                     pbData,
                     grbitQOS, 
                     iomRaw,
-                    pfnIOComplete ? (IFileAPI::PfnIOComplete)CIOComplete::IOComplete_ : NULL,
+                    pfnIOComplete ? CIOComplete::IOComplete_ : NULL,
                     DWORD_PTR( piocomplete ),
-                    piocomplete ? (IFileAPI::PfnIOHandoff)CIOComplete::IOHandoff_ : NULL,
+                    piocomplete ? CIOComplete::IOHandoff_ : NULL,
                     pioreq ) );
 
 HandleError:
@@ -1891,8 +1934,9 @@ ERR TFileFilter<I>::ErrCacheWrite(  _In_                    const TraceContext& 
                                     _Inout_                 CMeteredSection::Group* const   pgroup,
                                     _Inout_                 CSemaphore** const              ppsem )
 {
-    ERR             err         = JET_errSuccess;
-    CIOComplete*    piocomplete = NULL;
+    ERR             err             = JET_errSuccess;
+    CIOComplete*    piocomplete     = NULL;
+    OSFILEQOS       grbitQOSActual  = grbitQOS;
 
     //  determine the caching policy for this write
 
@@ -1938,23 +1982,59 @@ ERR TFileFilter<I>::ErrCacheWrite(  _In_                    const TraceContext& 
             }
         }
 
-        Call( m_pc->ErrWrite(   tc,
+        //  AEG  handle the cases where a write request can be rejected:  qosIOOptimizeCombinable,
+        //       qosIODispatchBackground and qosIODispatchUrgentBackgroundMask
+
+        //  strip any grbitQOS bits that can result in the rejection of the write request that we have handled.  if we
+        //  missed any then that will be caught by the below assert that we never see errDiskTilt
+
+        grbitQOSActual &= ~qosIOOptimizeCombinable;
+        grbitQOSActual &= ~qosIODispatchBackground;
+        grbitQOSActual &= ~qosIODispatchUrgentBackgroundMask;
+
+        //  if we don't have a dispatch mode then specify dispatch immediate
+
+        if ( ( grbitQOSActual & qosIODispatchMask ) == 0 )
+        {
+            grbitQOSActual |= qosIODispatchImmediate;
+        }
+
+        //  send this data to the cache
+        //
+        //  NOTE:  the handoff reference to the io completion context occurs in the Release call on exit
+
+        err = m_pc->ErrWrite(   tc,
                                 m_volumeid, 
                                 m_fileid, 
                                 m_fileserial,
                                 ibOffset, 
                                 cbData, 
                                 pbData, 
-                                grbitQOS,
+                                grbitQOSActual,
                                 cp,
-                                pfnIOComplete ? (ICache::PfnComplete)CIOComplete::Complete_ : NULL,
-                                DWORD_PTR( piocomplete ) ) );
+                                pfnIOComplete ? CIOComplete::Complete_ : NULL,
+                                DWORD_PTR( piocomplete ) );
+
+        //  reject on request due to grbitQOS should not happen in the cache.  that should be handled here
+
+        Assert( err != errDiskTilt );
+        Call( err );
+
+        //  if this was an async cache request then note that
+
+        if ( pfnIOComplete )
+        {
+            AtomicIncrement( &m_cCacheAsyncRequest );
+        }
 
         //  if the file is configured for write through then immediately flush the cache.  otherwise, remember to flush
         //  the cache later
 
         if ( ( Fmf() & fmfStorageWriteBack ) == 0 )
         {
+            //  AEG  cache flush must support async and be tied to io completion
+            //       this requires that CIOComplete be modified to support multiple IOs just like in TCacheBase
+            //       another option is to have ErrWrite detect this case and do this in the write completion
             Call( m_pc->ErrFlush( m_volumeid, m_fileid, m_fileserial ) );
         }
         else
@@ -1971,7 +2051,7 @@ ERR TFileFilter<I>::ErrCacheWrite(  _In_                    const TraceContext& 
         const ICacheTelemetry::BlockNumber blocknumberMax = Blocknumber( ibOffset + cbData + CbBlockSize() - 1 );
         for (   ICacheTelemetry::BlockNumber blocknumber = Blocknumber( ibOffset );
                 blocknumber < blocknumberMax;
-                blocknumber = (ICacheTelemetry::BlockNumber)( (QWORD)blocknumber + 1 ) )
+                blocknumber++ )
         {
             m_pctm->Miss( filenumber, blocknumber, fFalse, fCacheIfPossible );
             m_pctm->Update( filenumber, blocknumber );
@@ -2074,9 +2154,9 @@ ERR TFileFilter<I>::ErrWriteCommon( _In_                    const TraceContext& 
                     pbData,
                     grbitQOS, 
                     iomRaw,
-                    pfnIOComplete ? (IFileAPI::PfnIOComplete)CIOComplete::IOComplete_ : NULL,
+                    pfnIOComplete ? CIOComplete::IOComplete_ : NULL,
                     DWORD_PTR( piocomplete ),
-                    piocomplete ? (IFileAPI::PfnIOHandoff)CIOComplete::IOHandoff_ : NULL ) );
+                    piocomplete ? CIOComplete::IOHandoff_ : NULL ) );
 
 HandleError:
     if ( piocomplete )

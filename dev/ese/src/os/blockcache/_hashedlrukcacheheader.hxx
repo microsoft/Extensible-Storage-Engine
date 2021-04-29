@@ -19,10 +19,12 @@ class CHashedLRUKCacheHeader : CBlockCacheHeaderHelpers  // ch
     public:
 
         static ERR ErrCreate( _Out_ CHashedLRUKCacheHeader** const ppch );
-        static ERR ErrLoad( _In_    IFileSystemConfiguration* const pfsconfig, 
+        static ERR ErrLoad( _In_    IFileSystemConfiguration* const pfsconfig,
                             _In_    IFileFilter* const              pff,
+                            _In_    const QWORD                     ib,
                             _Out_   CHashedLRUKCacheHeader** const  ppch );
         static ERR ErrDump( _In_ IFileFilter* const pff,
+                            _In_ const QWORD        ib,
                             _In_ CPRINTF* const     pcprintf );
 
         void operator delete( _In_ void* const pv );
@@ -88,6 +90,7 @@ HandleError:
 
 INLINE ERR CHashedLRUKCacheHeader::ErrLoad( _In_    IFileSystemConfiguration* const pfsconfig,
                                             _In_    IFileFilter* const              pff,
+                                            _In_    const QWORD                     ib,
                                             _Out_   CHashedLRUKCacheHeader** const  ppch )
 {
     ERR                     err = JET_errSuccess;
@@ -95,7 +98,7 @@ INLINE ERR CHashedLRUKCacheHeader::ErrLoad( _In_    IFileSystemConfiguration* co
 
     *ppch = NULL;
 
-    Call( ErrLoadHeader( pff, &pch ) );
+    Call( ErrLoadHeader( pff, ib, &pch ) );
 
     Call( pch->ErrValidate( JET_errReadVerifyFailure ) );
 
@@ -113,12 +116,13 @@ HandleError:
 }
 
 INLINE ERR CHashedLRUKCacheHeader::ErrDump( _In_ IFileFilter* const pff,
+                                            _In_ const QWORD        ib,
                                             _In_ CPRINTF* const     pcprintf )
 {
     ERR                     err = JET_errSuccess;
     CHashedLRUKCacheHeader* pch = NULL;
 
-    Call( ErrLoadHeader( pff, &pch ) );
+    Call( ErrLoadHeader( pff, ib, &pch ) );
 
     Call( pch->ErrValidate( JET_errFileInvalidType ) );
 
@@ -139,8 +143,8 @@ INLINE ERR CHashedLRUKCacheHeader::ErrDump( _In_ CPRINTF* const pcprintf )
     (*pcprintf)(    "HASHED LRUK CACHE HEADER:\n" );
     (*pcprintf)(    "\n" );
     (*pcprintf)(    "Fields:\n" );
-    (*pcprintf)(    "             Checksum:  0x%08lx\n", LONG( m_le_ulChecksum ) );
-    (*pcprintf)(    "                 Type:  %08lx-%04hx-%04hx-%02hx%02hx-%02hx%02hx%02hx%02hx%02hx%02hx\n",
+    (*pcprintf)(    "                                      Checksum:  0x%08lx\n", LONG( m_le_ulChecksum ) );
+    (*pcprintf)(    "                                          Type:  %08lx-%04hx-%04hx-%02hx%02hx-%02hx%02hx%02hx%02hx%02hx%02hx\n",
                     *((DWORD*)&m_rgbHeaderType[ 0 ]),
                     *((WORD*)&m_rgbHeaderType[ 4 ]),
                     *((WORD*)&m_rgbHeaderType[ 6 ]),

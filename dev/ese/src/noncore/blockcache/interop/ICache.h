@@ -115,6 +115,9 @@ namespace Internal
                     /// completion function will be called when the I/O has completed.  If
                     /// an error occurs, that error will be returned via the completion
                     /// function.
+                    /// 
+                    /// If asynchronous completion is requested by providing a completion function then there is no
+                    /// guarantee that completion will occur until Issue() is called.
                     /// </remarks>
                     /// <param name="volumeid">The volume id of the cached file.</param>
                     /// <param name="fileid">The file id of the cached file.</param>
@@ -150,6 +153,9 @@ namespace Internal
                     /// completion function will be called when the I/O has completed.  If
                     /// an error occurs, that error will be returned via the completion
                     /// function.
+                    /// 
+                    /// If asynchronous completion is requested by providing a completion function then there is no
+                    /// guarantee that completion will occur until Issue() is called.
                     /// </remarks>
                     /// <param name="volumeid">The volume id of the cached file.</param>
                     /// <param name="fileid">The file id of the cached file.</param>
@@ -168,6 +174,17 @@ namespace Internal
                         FileQOS fileQOS,
                         CachingPolicy cachingPolicy,
                         Complete^ complete );
+
+                    /// <summary>
+                    /// Causes any previously requested asynchronous cache reads or writes to be executed eventually.
+                    /// </summary>
+                    /// <param name="volumeid">The volume id of the cached file.</param>
+                    /// <param name="fileid">The file id of the cached file.</param>
+                    /// <param name="fileserial">The serial number of the cached file.</param>
+                    void Issue(
+                        VolumeId volumeid,
+                        FileId fileid,
+                        FileSerial fileserial );
                 };
             }
         }

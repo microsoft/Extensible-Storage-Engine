@@ -27,6 +27,7 @@
 #include "blockcache\_journalsegment.hxx"
 #include "blockcache\_journalsegmentmanager.hxx"
 #include "blockcache\_journalentryfragment.hxx"
+#include "blockcache\_journalentry.hxx"
 #include "blockcache\_journal.hxx"
 #include "blockcache\_hashedlrukcacheheader.hxx"
 #include "blockcache\_hashedlrukcachedfiletableentry.hxx"

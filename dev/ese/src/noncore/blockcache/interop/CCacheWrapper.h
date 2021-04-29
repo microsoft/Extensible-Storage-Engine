@@ -71,6 +71,10 @@ namespace Internal
                                         _In_                    const ::ICache::CachingPolicy   cp,
                                         _In_opt_                const ::ICache::PfnComplete     pfnComplete,
                                         _In_                    const DWORD_PTR                 keyComplete ) override;
+
+                        ERR ErrIssue(   _In_                    const ::VolumeId                volumeid,
+                                        _In_                    const ::FileId                  fileid,
+                                        _In_                    const ::FileSerial              fileserial ) override;
                 };
 
                 template< class TM, class TN >
@@ -272,6 +276,19 @@ namespace Internal
                                         pfnComplete ?
                                             gcnew Internal::Ese::BlockCache::Interop::ICache::Complete( complete, &Complete::Complete_ ) :
                                             nullptr ) );
+
+                HandleError:
+                    return err;
+                }
+
+                template< class TM, class TN >
+                inline ERR CCacheWrapper<TM, TN>::ErrIssue( _In_                    const ::VolumeId                volumeid,
+                                                            _In_                    const ::FileId                  fileid,
+                                                            _In_                    const ::FileSerial              fileserial )
+                {
+                    ERR err = JET_errSuccess;
+
+                    ExCall( I()->Issue( (VolumeId)volumeid, (FileId)fileid, (FileSerial)fileserial ) );
 
                 HandleError:
                     return err;

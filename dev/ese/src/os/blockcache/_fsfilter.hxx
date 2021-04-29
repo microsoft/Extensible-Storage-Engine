@@ -560,7 +560,7 @@ TFileSystemFilter<I>::TFileSystemFilter(    _In_    IFileSystemConfiguration* co
         m_pfident( pfident ),
         m_pctm( pctm ),
         m_pcrep( pcrep ),
-        m_filePathHash( 0 ),
+        m_filePathHash( rankFilePathHash ),
         m_pbcconfig( NULL )
 {
 }
@@ -1150,6 +1150,7 @@ ERR TFileSystemFilter<I>::ErrLockFile(  _In_z_  const WCHAR* const          wszK
 
     pfpteExisting->AddRef();
     fRemove = fFalse;
+    pfpteNew = NULL;
 
     m_filePathHash.WriteUnlockKey( &lock );
     fLocked = fFalse;
@@ -1162,8 +1163,8 @@ HandleError:
     {
         errFilePathHash = m_filePathHash.ErrDeleteEntry( &lock );
         Assert( errFilePathHash == CFilePathHash::ERR::errSuccess );
-        delete pfpteNew;
     }
+    delete pfpteNew;
     if ( fLocked )
     {
         m_filePathHash.WriteUnlockKey( &lock );
@@ -1760,7 +1761,7 @@ class CFileFilterReference : public CFileFilterWrapper
                                 _In_ CFilePathTableEntry::COpenFile* const          pof,
                                 _In_ const IFileAPI::FileModeFlags                  fmf,
                                 _In_ const BOOL                                     fCacheOpen )
-            :   CFileFilterWrapper( pof->Pff(), fCacheOpen ? IOMode::iomRaw : IOMode::iomEngine ),
+            :   CFileFilterWrapper( pof->Pff(), fCacheOpen ? iomRaw : iomEngine ),
                 m_pfsf( pfsf ),
                 m_pof( pof ),
                 m_fmf( fmf ),

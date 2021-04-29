@@ -574,7 +574,7 @@ HandleError:
     {
         CloseHandle( hVolume );
     }
-    delete wszPath;
+    delete[] wszPath;
     if ( hFindVolume && hFindVolume != INVALID_HANDLE_VALUE )
     {
         FindVolumeClose( hFindVolume );
