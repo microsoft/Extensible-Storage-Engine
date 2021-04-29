@@ -4983,6 +4983,8 @@ public:
 
 private:
     volatile TRX        m_trxOldestCached;      // may be out-of-date
+    BOOL                m_fTrxOldestCachedMayBeStale;
+    CCriticalSection    m_critTrxOldestCached;
 public:
     
     //  FCB Pool
@@ -5216,6 +5218,9 @@ public:
 
     TRX TrxOldestCached() const { return m_trxOldestCached; }
     void SetTrxOldestCached(const TRX trx) { m_trxOldestCached = trx; }
+    BOOL FTrxOldestCachedMayBeStale() { return AtomicExchange( (LONG *)&m_fTrxOldestCachedMayBeStale, 0 ); }
+    VOID SetTrxOldestCachedMayBeStale() { AtomicExchange( (LONG *)&m_fTrxOldestCachedMayBeStale, 1 ); }
+    CCriticalSection *CritTrxOldestCached() { return &m_critTrxOldestCached; }
     
     ERR ErrReserveIOREQ();
     VOID UnreserveIOREQ();
