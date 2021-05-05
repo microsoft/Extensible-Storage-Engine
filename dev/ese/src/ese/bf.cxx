@@ -4833,6 +4833,10 @@ ERR ErrBFFlushSync( IFMP ifmp )
         //  write this BF to the database
         
         TraceContextScope tcScope( iorpBFDatabaseFlush );
+        if ( pbf->fFlushed )
+        {
+            tcScope->iorReason.AddFlag( iorfRepeatedWrite );
+        }
         err = ErrBFISyncWrite( pbf, bfltExclusive, qosIODispatchImmediate, *tcScope );
         pbf->sxwl.ReleaseExclusiveLatch();
 
@@ -22243,6 +22247,10 @@ ERR ErrBFIFlushExclusiveLatchedAndPreparedBF(   __inout const PBF       pbf,
     {
         tcFlush->iorReason.AddFlag( iorfSuperColdOrLowPriority );
     }
+    if ( pbf->fFlushed )
+    {
+        tcFlush->iorReason.AddFlag( iorfRepeatedWrite );
+    }
 
     if ( FBFIDatabasePage( pbf ) )
     {
@@ -24377,7 +24385,7 @@ ERR ErrBFISyncWrite( PBF pbf, const BFLatchType bfltHave, OSFILEQOS qos, const T
 
     //  issue sync write
 
-    err = pfapi->ErrIOWrite( tc,
+    err = pfapi->ErrIOWrite(    tc,
                                 ibOffset,
                                 cbData,
                                 pbData,
@@ -24579,13 +24587,13 @@ ERR ErrBFIAsyncWrite( PBF pbf, OSFILEQOS qos, const TraceContext& tc )
     IFileAPI * const pfapi = g_rgfmp[pbf->ifmp].Pfapi();
 
     const ERR err = pfapi->ErrIOWrite(  tc,
-                                    OffsetOfPgno( pbf->pgno ),
-                                    CbBFIPageSize( pbf ),
-                                    (BYTE*)pbf->pv,
-                                    qos,
-                                    IFileAPI::PfnIOComplete( BFIAsyncWriteComplete ),
-                                    DWORD_PTR( pbf ),
-                                    IFileAPI::PfnIOHandoff( BFIAsyncWriteHandoff ) );
+                                        OffsetOfPgno( pbf->pgno ),
+                                        CbBFIPageSize( pbf ),
+                                        (BYTE*)pbf->pv,
+                                        qos,
+                                        IFileAPI::PfnIOComplete( BFIAsyncWriteComplete ),
+                                        DWORD_PTR( pbf ),
+                                        IFileAPI::PfnIOHandoff( BFIAsyncWriteHandoff ) );
     CallSx( err, errDiskTilt );
 
     //  deal with disk over quota / tilted
