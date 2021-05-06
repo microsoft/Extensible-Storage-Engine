@@ -450,7 +450,6 @@ const ULONG cbSecondaryExtentMost = ( 100 * 1024 * 1024 );  // 100 MB ... we cou
 
 // space Manager global variables
 
-extern BOOL g_fSPExtentPageCountCacheTrackOnCreate; // Controls whether or not to add a value to ExtentPageCountCache on every space tree creation.
 #ifdef DEBUG
 extern BOOL g_fSPExtentPageCountCacheValidation;    // Controls whether or not we do validation of ExtentPageCountCache values.
 #endif

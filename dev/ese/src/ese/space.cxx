@@ -213,7 +213,6 @@ LONG LSPDeletedTreeFreedExtentsCEFLPv( LONG iInstance, VOID *pvBuf )
 
 #include "_bt.hxx"
 
-BOOL g_fSPExtentPageCountCacheTrackOnCreate = fFalse;
 #ifdef DEBUG
 BOOL g_fSPExtentPageCountCacheValidation = fFalse;
 #endif
@@ -5955,19 +5954,15 @@ ERR ErrSPGetExt(
         Assert( NULL != pobjidFDP );
         Assert( objidNil != *pobjidFDP );
 
-        if ( g_fSPExtentPageCountCacheTrackOnCreate )
-        {
-            // For now, we don't track FCBs at creation, we start tracking an FCB only after
-            // you've asked for size (see ErrSPGetDatabaseInfo).  This override for testing
-            // starts tracking on creation.
-            CATSetExtentPageCounts(
-                pfucb->ppib,
-                pfucb->ifmp,
-                *pobjidFDP,
-                cpgOEFDP,
-                cpgAEFDP
-                );
-        }
+        // Track FCBs at creation.  We also have a mechanism to add them on-demand for
+        // tables that predate the feature being on.
+        CATSetExtentPageCounts(
+            pfucb->ppib,
+            pfucb->ifmp,
+            *pobjidFDP,
+            cpgOEFDP,
+            cpgAEFDP
+            );
     }
     else
     {
