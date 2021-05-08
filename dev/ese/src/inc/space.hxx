@@ -448,8 +448,3 @@ const CPG   cpgTableMin             = cpgSingleExtentMin * 2;
 //  largest extent of growth ESE will allow.
 const ULONG cbSecondaryExtentMost = ( 100 * 1024 * 1024 );  // 100 MB ... we could go up to 1 GB.
 
-// space Manager global variables
-
-#ifdef DEBUG
-extern BOOL g_fSPExtentPageCountCacheValidation;    // Controls whether or not we do validation of ExtentPageCountCache values.
-#endif

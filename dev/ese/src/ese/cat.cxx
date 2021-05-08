@@ -13669,8 +13669,8 @@ VOID CATResetExtentPageCounts(
     ERR                 err;
     FMP                 *pfmp = PfmpFromIfmp( ifmp );
     FUCB                *pfucbExtentPageCountCache = pfucbNil;
-    CPG                 cpgOEBefore    = -1;
-    CPG                 cpgAEBefore    = -1;
+    CPG                 cpgOEBefore    = cpgNil;
+    CPG                 cpgAEBefore    = cpgNil;
     PCWSTR              wszNote;
     FDPINFO             fdpinfo;
     JET_RETRIEVECOLUMN  rgretrievecolumn[] =
@@ -14034,10 +14034,10 @@ VOID CATAdjustExtentPageCounts(
     OBJID               objid          = ObjidFDP( pfucb );
     PIB                 *ppib          = pfucb->ppib;
     IFMP                ifmp           = pfucb->ifmp;
-    CPG                 cpgAEBefore    = -1;
-    CPG                 cpgAEAfter     = -1;
-    CPG                 cpgOEBefore    = -1;
-    CPG                 cpgOEAfter     = -1;
+    CPG                 cpgAEBefore    = cpgNil;
+    CPG                 cpgAEAfter     = cpgNil;
+    CPG                 cpgOEBefore    = cpgNil;
+    CPG                 cpgOEAfter     = cpgNil;
     PCWSTR              wszNote;
     FDPINFO             fdpinfo;
     BYTE                bFlag;

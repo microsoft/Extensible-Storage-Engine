@@ -189,35 +189,6 @@ ERR ErrITSetConstants( INST * pinst )
 
     g_fPeriodicTrimEnabled = (BOOL) UlConfigOverrideInjection( 35632, fPeriodicTrimEnabledDefault );
 
-#ifdef DEBUG
-    WCHAR       wszBuf[ 3 ];
-    if ( FOSConfigGet( wszDEBUGRoot, L"ExtentPageCountCacheValidation", wszBuf, sizeof( wszBuf ) ) &&
-         wszBuf[ 0 ] )
-    {
-        // If true, sporadically during space operations validate the value stored in the ExtentPageCountCache
-        // is correct.  This is quite expensive, and potentially causes deadlocks; it's only for testing, although
-        // it works in a retail binary.
-        // Default is to not do this.
-        g_fSPExtentPageCountCacheValidation = !!_wtol( wszBuf );
-        if ( g_fSPExtentPageCountCacheValidation )
-        {
-            UtilReportEvent(
-                eventWarning,
-                SPACE_MANAGER_CATEGORY,
-                EXTENT_PAGE_COUNT_CACHE_EXTENSIVE_VALIDATION_ENABLED_ID,
-                0,
-                NULL,
-                0,
-                NULL,
-                pinst );
-        }
-    }
-    else
-    {
-        g_fSPExtentPageCountCacheValidation = fFalse;
-    }
-#endif
-    
     return JET_errSuccess;
 }
 

@@ -2075,6 +2075,16 @@ Cached CpgOE: %9%n
 Cached CpgAE: %10%n
 .
 
+MessageId=656
+SymbolicName=BEGIN_TRANSACTION_FOR_EXTENT_PAGE_COUNT_CACHE_PREPARE_FAILED_ID
+Language=English
+%1 (%2) %3Beginning a transaction to prepare a row in the Extent Page Count Cache table failed.  The cached value is now incorrect.%n
+Database: %4%n
+Objid: %5%n
+PgnoFDP: %6%n
+Err: %7%n
+.
+
 
 ;// !!! ARE YOU SURE you're adding this in the right place !!! ???
 

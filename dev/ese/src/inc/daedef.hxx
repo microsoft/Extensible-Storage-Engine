@@ -123,6 +123,7 @@ PERSISTED const PGNO    pgnoScanLastSentinel    = (PGNO)-2;
 //  lrtypScanCheck.
 
 typedef LONG            CPG;                // count of pages
+const CPG cpgNil        = CPG(-1);
 
 typedef LONG FMPGNO;    // flush map page number. fmpgno 0 is the first data page, i.e., the header is fmpgno -1.
 typedef FMPGNO CFMPG;   // flush map page count.
