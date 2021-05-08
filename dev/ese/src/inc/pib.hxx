@@ -241,7 +241,7 @@ private:
             FLAG32      m_fOLD2:1;                          //    session is for OLD2
             FLAG32      m_fMustRollbackToLevel0:1;          //    session must rollback to level 0 before being able to commit
             FLAG32      m_fDBScan:1;                        //    session is for DBSCAN
-#ifdef DEBUG
+#if defined(DEBUG) || defined(EXPENSIVE_INLINE_EXTENT_PAGE_COUNT_CACHE_VALIDATION)
             FLAG32      m_fUpdatingExtentPageCountCache:1;  //    session is currently updating the cached CPG values in the catalog
 #endif
         };
@@ -438,8 +438,8 @@ public:
     VOID                SetFReadOnlyTrx()                                   { m_fReadOnlyTrx = fTrue; }
     VOID                ResetFReadOnlyTrx()                                 { m_fReadOnlyTrx = fFalse; }
 
-#ifdef DEBUG
-    // Debug only marker that we're currently updating the cache.  Used only in asserts.
+#if defined(DEBUG) || defined(EXPENSIVE_INLINE_EXTENT_PAGE_COUNT_CACHE_VALIDATION)
+    // Marker that we're currently updating the cache.  Used in asserts and certain optional validation code.
     BOOL                FUpdatingExtentPageCountCache() const               { return m_fUpdatingExtentPageCountCache; }
     VOID                SetFUpdatingExtentPageCountCache()                  { m_fUpdatingExtentPageCountCache = fTrue;  }
     VOID                ResetFUpdatingExtentPageCountCache()                { m_fUpdatingExtentPageCountCache = fFalse; }

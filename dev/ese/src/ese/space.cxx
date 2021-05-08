@@ -213,10 +213,6 @@ LONG LSPDeletedTreeFreedExtentsCEFLPv( LONG iInstance, VOID *pvBuf )
 
 #include "_bt.hxx"
 
-#ifdef DEBUG
-BOOL g_fSPExtentPageCountCacheValidation = fFalse;
-#endif
-
 const CHAR * SzNameOfTable( const FUCB * const pfucb )
 {
     if( pfucb->u.pfcb->FTypeTable() )
@@ -347,10 +343,19 @@ LOCAL ERR ErrSPIGetInfo(
     INT         *pcextSentinelsRemaining,
     CPRINTF     * const pcprintf );
 
-#ifdef DEBUG
+#ifdef EXPENSIVE_INLINE_EXTENT_PAGE_COUNT_CACHE_VALIDATION
+// This function does very expensive validation of the value in the Extent Page
+// Count Cache by counting space tree pages inline with other space operations.
+// It's very good at finding incorrect values as soon as possible after they've
+// gone bad but it is also VERY expensive, doing a lot of unnecessary IO in the
+// middle of otherwise unrelated operations.
+//
+// It was instrumental during development of the cache, but not so useful after
+// the feature was finished.  It's here to use if we need to debug an incorrect
+// value later.
+
 LOCAL VOID SPIValidateCpgOwnedAndAvail(
-    FUCB * pfucb,
-    BOOL fPrint = fFalse
+    FUCB * pfucb
     );
 #else
 #define SPIValidateCpgOwnedAndAvail( X )
@@ -370,27 +375,80 @@ SPIWrappedNDInsert(
     )
 {
     ERR err;
+    PIB  *ppib = pfucb->ppib;
+    BOOL fOpenedTransaction = fFalse;
     BOOL fUpdateCache = ( ( cpgDeltaOE != 0 ) || ( cpgDeltaAE != 0 ) );
+
+    // This routine is in a code path that is not allowed to fail.  The actual
+    // call to NDInsert can't fail, so that's good.  But the calls to the begin
+    // and end a transaction and the call to prepare the Extent Page Count Cache
+    // for an update CAN fail.  Unfortunately if those calls fail, the best we
+    // can do is log that we couldn't update the cache and we'll have to fix it
+    // somehow later.
+    
+    if ( fUpdateCache && ( 0 == ppib->Level() ) )
+    {
+        // ErrCATAdjustExtentPageCountsPrepare and CATAdjustExtentPageCounts expect
+        // to be in a transaction, and while we're normally in a transaction here,
+        // we might not be (e.g. we may be under ErrIsamCompact() called by eseutil)
+        // Begin and end a transaction here if we need to.  Note that the cache update
+        // is unversioned, so we don't do much (or anything) with the transaction,
+        // but at the very least we'll trigger all sorts of downstream Asserts() if
+        // we don't have one.
+
+        err =  ErrDIRBeginTransaction( ppib, 35734, NO_GRBIT );
+        if ( JET_errSuccess > err )
+        {
+            OSTraceSuspendGC();
+            const WCHAR * rgwsz[] = {
+                PfmpFromIfmp( pfucb->ifmp )->WszDatabaseName(),
+                OSFormatW( L"%d", ObjidFDP( pfucb ) ),
+                OSFormatW( L"%d", PgnoFDP( pfucb ) ),
+                OSFormatW( L"%d", err )
+            };
+            
+            UtilReportEvent(
+                eventError,
+                SPACE_MANAGER_CATEGORY,
+                BEGIN_TRANSACTION_FOR_EXTENT_PAGE_COUNT_CACHE_PREPARE_FAILED_ID,
+                _countof( rgwsz ),
+                rgwsz,
+                0,
+                PinstFromPfucb( pfucb ) );
+            OSTraceResumeGC();
+            
+            // We can't trust any further calls to the cache here, since we don't have that transaction.
+            fUpdateCache = fFalse;
+        }
+        else
+        {
+            fOpenedTransaction = fTrue;
+
+            // Beginning this new transaction shouldn't have done anything.
+            Assert( prceNil == ppib->prceNewest );
+            Assert( 1 == ppib->Level() );
+            Assert( !ppib->FBegin0Logged() );
+            Assert( !FFUCBUpdatePrepared( pfucb ) );
+        }
+    }
 
     if ( fUpdateCache )
     {
+        // We either successfully opened a transaction or we were already in one, a necessary
+        // preliminary for ErrCATAdjustExtentPageCountsPrepare.
+        Assert( 0 != ppib->Level() );
+
         err = ErrCATAdjustExtentPageCountsPrepare( pfucb );
         if ( JET_errSuccess > err )
         {
-            // Most unfortunate.  We failed to prepare to update the cache, but we're in
-            // a code path that is not allowed to fail.  The best we can do is log this.
-            // We're going to need to fix this cache element later.  We can't trust that
-            // the Adjust call later will fix things, either.  A crash where the node update
-            // we're about to do makes it into a log file on disk while the Adjust call
-            // doesn't make it to disk leaves the cache inconsistent.
-            AssertTrack( fFalse, "AdjustExtentPageCountsPrepareFailedInNoFailurePath" );
-
-            WCHAR rgrgw[3][16];
-            const WCHAR * rgwsz[] = { PfmpFromIfmp( pfucb->ifmp )->WszDatabaseName(), rgrgw[0], rgrgw[1], rgrgw[2] };
-            OSStrCbFormatW( rgrgw[0], sizeof(rgrgw[0]), L"%d", ObjidFDP( pfucb ) );
-            OSStrCbFormatW( rgrgw[1], sizeof(rgrgw[1]), L"%d", PgnoFDP( pfucb ) );
-            OSStrCbFormatW( rgrgw[2], sizeof(rgrgw[2]), L"%d", err );
-
+            OSTraceSuspendGC();
+            const WCHAR * rgwsz[] = {
+                PfmpFromIfmp( pfucb->ifmp )->WszDatabaseName(),
+                OSFormatW( L"%d", ObjidFDP( pfucb ) ),
+                OSFormatW( L"%d", PgnoFDP( pfucb ) ),
+                OSFormatW( L"%d", err )
+            };
+            
             UtilReportEvent(
                 eventError,
                 SPACE_MANAGER_CATEGORY,
@@ -399,14 +457,34 @@ SPIWrappedNDInsert(
                 rgwsz,
                 0,
                 PinstFromPfucb( pfucb ) );
+            OSTraceResumeGC();
         }
+
+        // Note that we don't unset fUpdateCache.  We might be able to make a successful
+        // call to CATAdjustExtentPageCounts() later and end up with no problem.  No
+        // guarantees, but it's possible.
     }
-
+    
     NDInsert( pfucb, pcsr, pkdf );
+    
+    if ( fUpdateCache )
+    {
+        CATAdjustExtentPageCounts( pfucb, cpgDeltaOE, cpgDeltaAE );
+    }
+    
+    
+    if ( fOpenedTransaction )
+    {
+        // Operations on this new transaction shoulnd't have done anything, so we shouldn't
+        // have logged a BeginTransaction0.
+        Assert( prceNil == ppib->prceNewest );
+        Assert( 1 == ppib->Level() );
+        Assert( !ppib->FBegin0Logged() );
+        Assert( !FFUCBUpdatePrepared( pfucb ) );
 
-    // Go ahead and try to update, even if we failed to prepare.  There's a chance that it will
-    // work out.  No guarantee, but a chance.
-    if ( fUpdateCache ) CATAdjustExtentPageCounts( pfucb, cpgDeltaOE, cpgDeltaAE );
+        // Since we didn't create any RCEs and didn't log anything, there should be no way for commit to fail.
+        CallS( ErrDIRCommitTransaction( ppib, NO_GRBIT ) );
+    }
 }
 #define NDInsert _USE_SPI_NODE_INSERT_SPACE_TREE
 
@@ -422,16 +500,60 @@ ErrSPIWrappedNDSetExternalHeader(
     )
 {
     ERR err;
+    PIB  *ppib = pfucb->ppib;
+    BOOL fOpenedTransaction = fFalse;
     BOOL fUpdateCache = ( ( cpgDeltaOE != 0 ) || ( cpgDeltaAE != 0 ) );
 
-    if ( fUpdateCache ) CallR( ErrCATAdjustExtentPageCountsPrepare( pfucb ) );
-    CallR( ErrNDSetExternalHeader(
+    if ( fUpdateCache )
+    {
+        if ( 0 == ppib->Level() )
+        {
+            // ErrCATAdjustExtentPageCountsPrepare and CATAdjustExtentPageCounts expect
+            // to be in a transaction, and while we're normally in a transaction here,
+            // we might not be (e.g. we may be under ErrIsamCompact() called by eseutil)
+            // Begin and end a transaction here if we need to.  Note that the cache update
+            // is unversioned, so we don't do much (or anything) with the transaction,
+            // but at the very least we'll trigger all sorts of downstream Asserts() if
+            // we don't have one.
+
+            Call( ErrDIRBeginTransaction( ppib, 41878, NO_GRBIT ) );
+            fOpenedTransaction = fTrue;
+
+            // Beginning this new transaction shouldn't have done anything.
+            Assert( prceNil == ppib->prceNewest );
+            Assert( 1 == ppib->Level() );
+            Assert( !ppib->FBegin0Logged() );
+            Assert( !FFUCBUpdatePrepared( pfucb ) );
+        }
+        
+        Call( ErrCATAdjustExtentPageCountsPrepare( pfucb ) );
+    }
+
+    Call( ErrNDSetExternalHeader(
                pfucb,
                pcsr,
                pData,
                fDIRFlag,
                noderf ) );
-    if ( fUpdateCache ) CATAdjustExtentPageCounts( pfucb, cpgDeltaOE, cpgDeltaAE );
+
+    if ( fUpdateCache )
+    {
+        CATAdjustExtentPageCounts( pfucb, cpgDeltaOE, cpgDeltaAE );
+    }
+
+HandleError:
+    if ( fOpenedTransaction )
+    {
+        // Operations on this new transaction shoulnd't have done anything, so we shouldn't
+        // have logged a BeginTransaction0.
+        Assert( prceNil == ppib->prceNewest );
+        Assert( 1 == ppib->Level() );
+        Assert( !ppib->FBegin0Logged() );
+        Assert( !FFUCBUpdatePrepared( pfucb ) );
+
+        // Since we didn't create any RCEs and didn't log anything, there should be no way for commit to fail.
+        CallS( ErrDIRCommitTransaction( ppib, NO_GRBIT ) );
+    }
 
     return err;
 }
@@ -445,15 +567,60 @@ ErrSPIWrappedBTFlagDelete(
     _In_ const CPG cpgDeltaAE
     )
 {
-    ERR err;
+    ERR  err;
+    PIB  *ppib = pfucb->ppib;
+    BOOL fOpenedTransaction = fFalse;
     BOOL fUpdateCache = ( ( cpgDeltaOE != 0 ) || ( cpgDeltaAE != 0 ) );
 
-    if ( fUpdateCache ) CallR( ErrCATAdjustExtentPageCountsPrepare( pfucb ) );
-    CallR( ErrBTFlagDelete(      // UNDONE: Synchronously remove the node
+    Assert( fDIRNoVersion & fDIRFlag );
+
+    if ( fUpdateCache )
+    {
+        if ( 0 == ppib->Level() )
+        {
+            // ErrCATAdjustExtentPageCountsPrepare and CATAdjustExtentPageCounts expect
+            // to be in a transaction, and while we're normally in a transaction here,
+            // we might not be (e.g. we may be under ErrIsamCompact() called by eseutil)
+            // Begin and end a transaction here if we need to.  Note that the cache update
+            // is unversioned, so we don't do much (or anything) with the transaction,
+            // but at the very least we'll trigger all sorts of downstream Asserts() if
+            // we don't have one.
+
+            Call( ErrDIRBeginTransaction( ppib, 58262, NO_GRBIT ) );
+            fOpenedTransaction = fTrue;
+
+            // Beginning this new transaction shouldn't have done anything.
+            Assert( prceNil == ppib->prceNewest );
+            Assert( 1 == ppib->Level() );
+            Assert( !ppib->FBegin0Logged() );
+            Assert( !FFUCBUpdatePrepared( pfucb ) );
+        }
+        
+        Call( ErrCATAdjustExtentPageCountsPrepare( pfucb ) );
+    }
+
+    Call( ErrBTFlagDelete(      // UNDONE: Synchronously remove the node
                pfucb,
                fDIRFlag ) );
 
-    if ( fUpdateCache ) CATAdjustExtentPageCounts( pfucb, cpgDeltaOE, cpgDeltaAE );
+    if ( fUpdateCache )
+    {
+        CATAdjustExtentPageCounts( pfucb, cpgDeltaOE, cpgDeltaAE );
+    }
+
+HandleError:
+    if ( fOpenedTransaction )
+    {
+        // Operations on this new transaction shoulnd't have done anything, so we shouldn't
+        // have logged a BeginTransaction0.
+        Assert( prceNil == ppib->prceNewest );
+        Assert( 1 == ppib->Level() );
+        Assert( !ppib->FBegin0Logged() );
+        Assert( !FFUCBUpdatePrepared( pfucb ) );
+
+        // Since we didn't create any RCEs and didn't log anything, there should be no way for commit to fail.
+        CallS( ErrDIRCommitTransaction( ppib, NO_GRBIT ) );
+    }
 
     return err;
 }
@@ -468,15 +635,61 @@ ErrSPIWrappedBTReplace(
     _In_ const CPG cpgDeltaAE
     )
 {
-    ERR err;
+    ERR  err;
+    PIB  *ppib = pfucb->ppib;
+    BOOL fOpenedTransaction = fFalse;
     BOOL fUpdateCache = ( ( cpgDeltaOE != 0 ) || ( cpgDeltaAE != 0 ) );
 
-    if ( fUpdateCache ) CallR( ErrCATAdjustExtentPageCountsPrepare( pfucb ) );
-    CallR( ErrBTReplace(
+    Assert( fDIRNoVersion & fDIRFlag );
+
+    if ( fUpdateCache )
+    {
+        if ( 0 == ppib->Level() )
+        {
+            // ErrCATAdjustExtentPageCountsPrepare and CATAdjustExtentPageCounts expect
+            // to be in a transaction, and while we're normally in a transaction here,
+            // we might not be (e.g. we may be under ErrIsamCompact() called by eseutil)
+            // Begin and end a transaction here if we need to.  Note that the cache update
+            // is unversioned, so we don't do much (or anything) with the transaction,
+            // but at the very least we'll trigger all sorts of downstream Asserts() if
+            // we don't have one.
+
+            Call( ErrDIRBeginTransaction( ppib, 33686, NO_GRBIT ) );
+            fOpenedTransaction = fTrue;
+
+            // Beginning this new transaction shouldn't have done anything.
+            Assert( prceNil == ppib->prceNewest );
+            Assert( 1 == ppib->Level() );
+            Assert( !ppib->FBegin0Logged() );
+            Assert( !FFUCBUpdatePrepared( pfucb ) );
+        }
+        
+        Call( ErrCATAdjustExtentPageCountsPrepare( pfucb ) );
+    }
+
+    Call( ErrBTReplace(
               pfucb,
               Data,
               fDIRFlag ) );
-    if ( fUpdateCache ) CATAdjustExtentPageCounts( pfucb, cpgDeltaOE, cpgDeltaAE );
+
+    if ( fUpdateCache )
+    {
+        CATAdjustExtentPageCounts( pfucb, cpgDeltaOE, cpgDeltaAE );
+    }
+
+HandleError:
+    if ( fOpenedTransaction )
+    {
+        // Operations on this new transaction shoulnd't have done anything, so we shouldn't
+        // have logged a BeginTransaction0.
+        Assert( prceNil == ppib->prceNewest );
+        Assert( 1 == ppib->Level() );
+        Assert( !ppib->FBegin0Logged() );
+        Assert( !FFUCBUpdatePrepared( pfucb ) );
+
+        // Since we didn't create any RCEs and didn't log anything, there should be no way for commit to fail.
+        CallS( ErrDIRCommitTransaction( ppib, NO_GRBIT ) );
+    }
 
     return err;
 }
@@ -492,17 +705,64 @@ ErrSPIWrappedBTInsert(
     _In_ const CPG cpgDeltaAE
     )
 {
-    ERR err;
+    ERR  err;
+    PIB  *ppib = pfucb->ppib;
+    BOOL fOpenedTransaction = fFalse;
     BOOL fUpdateCache = ( ( cpgDeltaOE != 0 ) || ( cpgDeltaAE != 0 ) );
 
-    if ( fUpdateCache ) CallR( ErrCATAdjustExtentPageCountsPrepare( pfucb ) );
-    CallR( ErrBTInsert(
-                pfucb,
-                Key,
-                Data,
-                fDIRFlag ) );
-    if ( fUpdateCache ) CATAdjustExtentPageCounts( pfucb, cpgDeltaOE, cpgDeltaAE );
+    Assert( fDIRNoVersion & fDIRFlag );
 
+    if ( fUpdateCache )
+    {
+        if ( 0 == ppib->Level() )
+        {
+            // ErrCATAdjustExtentPageCountsPrepare and CATAdjustExtentPageCounts expect
+            // to be in a transaction, and while we're normally in a transaction here,
+            // we might not be (e.g. we may be under ErrIsamCompact() called by eseutil)
+            // Begin and end a transaction here if we need to.  Note that the cache update
+            // is unversioned, so we don't do much (or anything) with the transaction,
+            // but at the very least we'll trigger all sorts of downstream Asserts() if
+            // we don't have one.
+
+            Call( ErrDIRBeginTransaction( ppib, 50070, NO_GRBIT ) );
+            fOpenedTransaction = fTrue;
+
+            // Beginning this new transaction shouldn't have done anything.
+            Assert( prceNil == ppib->prceNewest );
+            Assert( 1 == ppib->Level() );
+            Assert( !ppib->FBegin0Logged() );
+            Assert( !FFUCBUpdatePrepared( pfucb ) );
+        }
+        
+        Call( ErrCATAdjustExtentPageCountsPrepare( pfucb ) );
+    }
+    
+    Call( ErrBTInsert(
+              pfucb,
+              Key,
+              Data,
+              fDIRFlag ) );
+
+    if ( fUpdateCache )
+    {
+        CATAdjustExtentPageCounts( pfucb, cpgDeltaOE, cpgDeltaAE );
+        
+    }
+
+HandleError:
+    if ( fOpenedTransaction )
+    {
+        // Operations on this new transaction shoulnd't have done anything, so we shouldn't
+        // have logged a BeginTransaction0.
+        Assert( prceNil == ppib->prceNewest );
+        Assert( 1 == ppib->Level() );
+        Assert( !ppib->FBegin0Logged() );
+        Assert( !FFUCBUpdatePrepared( pfucb ) );
+
+        // Since we didn't create any RCEs and didn't log anything, there should be no way for commit to fail.
+        CallS( ErrDIRCommitTransaction( ppib, NO_GRBIT ) );
+    }
+    
     return err;
 }
 #define ErrBTInsert _USE_ERR_SPI_BT_INSERT_SPACE_TREE_
@@ -2171,7 +2431,6 @@ LOCAL ERR ErrSPIFixSpaceTreeRootPage( FUCB *pfucb, SPLIT_BUFFER **ppspbuf )
         data.SetCb( sizeof(spbuf) );
 
         Pcsr( pfucb )->UpgradeFromRIWLatch();
-        AssertSz( fFalse, "SOMEONE: not validated for space update." );
         err = ErrSPIWrappedNDSetExternalHeader(
                     pfucb,
                     Pcsr( pfucb ),
@@ -13951,6 +14210,89 @@ VOID SPDumpSplitBufExtent(
     }
 }
 
+LOCAL VOID SPIReportAnyExtentCacheError(
+    FUCB *pfucb,
+    CPG cpgOECached,
+    CPG cpgAECached,
+    CPG cpgOECounted,
+    CPG cpgAECounted
+    )
+{
+    BOOL fOESizeMismatch = fFalse;
+    BOOL fAESizeMismatch = fFalse;
+
+    // cpgNil on input is used to represent "Don't know"
+
+    if ( ( cpgOECached != cpgOECounted ) && ( cpgOECached != cpgNil ) && ( cpgOECounted != cpgNil ) )
+    {
+        // We know the OE values, and they don't match.
+        fOESizeMismatch = fTrue;
+    }
+
+    if ( ( cpgAECached != cpgAECounted ) && ( cpgAECached != cpgNil ) && ( cpgAECounted != cpgNil ) )
+    {
+        // We know the AE values, and they don't match.
+        fAESizeMismatch = fTrue;
+    }
+
+    if ( fAESizeMismatch || fOESizeMismatch )
+    {
+        // We have values to compare, and they showed a discrepency.  Report it.
+        
+        OSTraceSuspendGC();
+        const WCHAR * rgwsz[] = { 
+            OSFormatW( L"%d", ObjidFDP( pfucb ) ),
+            OSFormatW( L"%d", PgnoFDP( pfucb ) ),
+            OSFormatW( L"%d", cpgOECounted ),
+            OSFormatW( L"%d", cpgAECounted ),
+            OSFormatW( L"%d", cpgOECached ),
+            OSFormatW( L"%d", cpgOECached )
+        };
+
+        // TC == Tree count, CC == Cache count.
+        OSTraceFMP(
+            pfucb->ifmp,
+            JET_tracetagSpaceInternal,
+            OSFormat(
+                "%hs: Size mismatch: TC{%d:%d} CC{%d:%d} [0x%x:0x%x:%lu].",
+                __FUNCTION__,
+                cpgOECounted,
+                cpgAECounted,
+                cpgOECached,
+                cpgAECached,
+                pfucb->ifmp,
+                ObjidFDP( pfucb ),
+                PgnoFDP( pfucb ) ) );
+
+        UtilReportEvent(
+            eventError,
+            SPACE_MANAGER_CATEGORY,
+            EXTENT_PAGE_COUNT_CACHE_EXTENSIVE_VALIDATION_FAILED_ID,
+            _countof( rgwsz ),
+            rgwsz,
+            0,
+            PinstFromPfucb( pfucb ) );
+        OSTraceResumeGC();
+
+        AssertTrack( fFalse, "Size mismatch OE and/or AE." );
+    }
+    else
+    {
+        // No detected error to report.
+        OSTraceFMP(
+            pfucb->ifmp,
+            JET_tracetagSpaceInternal,
+            OSFormat(
+                "%hs: Validated C{%d:%d} [0x%x:0x%x:%lu]",
+                __FUNCTION__,
+                cpgOECached,
+                cpgAECached,
+                pfucb->ifmp,
+                ObjidFDP( pfucb ),
+                PgnoFDP( pfucb ) ) );
+    }
+}
+
 
 //  Retrieves space info, like the owned # of pages, avail # of pages.
 
@@ -13978,6 +14320,8 @@ ERR ErrSPGetInfo(
     ULONG         cbMaxReq = 0;
     BOOL          fReadCachedValue;
     BOOL          fSetCachedValue = fFalse;
+    CPG           cpgOECached = cpgNil;
+    CPG           cpgAECached = cpgNil;
 
     PIBTraceContextScope tcScope = ppib->InitTraceContextScope();
     tcScope->iorReason.SetIort( iortSpace );
@@ -14175,9 +14519,6 @@ ERR ErrSPGetInfo(
 
     if ( fReadCachedValue )
     {
-        CPG cpgOECached;
-        CPG cpgAECached;
-
         Assert( FSPOwnedExtent( fSPExtents ) || FSPAvailExtent( fSPExtents ) );
 
         err = ErrCATGetExtentPageCounts(
@@ -14190,6 +14531,10 @@ ERR ErrSPGetInfo(
         switch ( err )
         {
             case JET_errSuccess:
+#ifdef USE_EXTENT_PAGE_COUNT_CACHE_RATHER_THAN_VERIFY_IT
+                // We're not compiled to actually return the value from the cache,
+                // but rather to compare the cached value against the the normally
+                // counted value and report any difference.
                 if ( FSPOwnedExtent( fSPExtents ) )
                 {
                     *pcpgOwnExtTotal = cpgOECached;
@@ -14199,6 +14544,8 @@ ERR ErrSPGetInfo(
                     *pcpgAvailExtTotal = cpgAECached;
                 }
                 goto HandleError;
+#endif
+                break;
 
             case JET_errRecordNotFound:
                 // This objid is a value that COULD be cached, but isn't.
@@ -14549,6 +14896,40 @@ ERR ErrSPGetInfo(
 
     Assert( 0 == cextSentinelsRemaining );
 
+    // cpgNil indicates no value was read.
+    if ( ( cpgOECached != cpgNil ) || ( cpgAECached != cpgNil ) )
+    {
+        // Can't think of a reason why one would be -1 but not the other.
+        Assert( ( cpgOECached != cpgNil ) && ( cpgAECached != cpgNil ) );
+
+        // We have values from the cache and haven't already returned them.
+        // Compare them against any counted values and report any errors.
+
+        CPG cpgOECounted = cpgNil;
+        CPG cpgAECounted = cpgNil;
+
+        if ( pcpgOwnExtTotal )
+        {
+            cpgOECounted = *pcpgOwnExtTotal;
+        }
+
+        if ( pcpgAvailExtTotal )
+        {
+            // The counted value for AE includes the split buffers, the cached
+            // value doesn't.
+            cpgAECounted = *pcpgAvailExtTotal - cpgAvailExtAdjustForSplitBuffers;
+        }
+
+        SPIReportAnyExtentCacheError(
+            pfucb,
+            cpgOECached,
+            cpgAECached,
+            cpgOECounted,
+            cpgAECounted
+            );
+
+    }
+
     if ( fSetCachedValue )
     {
         Assert( FSPOwnedExtent( fSPExtents ) );
@@ -14564,7 +14945,7 @@ ERR ErrSPGetInfo(
         // to be in one.
         if ( ppib->Level() == 0 )
         {
-            Call( ErrDIRBeginTransaction( ppib, 12345, NO_GRBIT ) ); // SOMEONE faked transaction ID, get a new one.
+            Call( ErrDIRBeginTransaction( ppib, 54166, NO_GRBIT ) );
             fStartedTransaction = fTrue;
         }
 
@@ -14601,14 +14982,14 @@ HandleError:
     return err;
 }
 
-#ifdef DEBUG
+#ifdef EXPENSIVE_INLINE_EXTENT_PAGE_COUNT_CACHE_VALIDATION
 ERR ErrSPIGetCpgOwnedAndAvail(
     FUCB        *pfucb,
     CPG         *pcpgOwnExtTotal,
-    CPG         *pcpgAvailExtTotal,
-    CPRINTF * const pcprintf 
+    CPG         *pcpgAvailExtTotal
     )
 {
+    // This duplicates the code in ErrSPGetInfo, although significantly simplified.
     Assert( NULL != pcpgOwnExtTotal );
     Assert( NULL != pcpgAvailExtTotal );
 
@@ -14705,7 +15086,7 @@ ERR ErrSPIGetCpgOwnedAndAvail(
                   0,
                   NULL,
                   NULL,
-                  pcprintf ) );
+                  NULL ) );
 
     }
 
@@ -14725,8 +15106,7 @@ HandleError:
 
 
 LOCAL VOID SPIValidateCpgOwnedAndAvail(
-    FUCB * pfucb,
-    BOOL fPrint
+    FUCB * pfucb
     )
 {
     ERR err;
@@ -14734,13 +15114,6 @@ LOCAL VOID SPIValidateCpgOwnedAndAvail(
     CPG cpgAEFromTree;
     CPG cpgOEFromCache;
     CPG cpgAEFromCache;
-
-    
-    if ( !g_fSPExtentPageCountCacheValidation )
-    {
-        // This is expensive and we aren't configured to do this; see ErrITSetConstants();
-        return;
-    }
 
     if ( pfucb->ppib->FUpdatingExtentPageCountCache() || pfucb->ppib->FBatchIndexCreation() )
     {
@@ -14789,12 +15162,10 @@ LOCAL VOID SPIValidateCpgOwnedAndAvail(
         return;
     }
 
-    CPRINTF * const pcprintf =  CPRINTFSTDOUT::PcprintfInstance();
     err = ErrSPIGetCpgOwnedAndAvail(
                pfucb,
                &cpgOEFromTree,
-               &cpgAEFromTree,
-               fPrint ? pcprintf : NULL );
+               &cpgAEFromTree );
 
     if ( JET_errSuccess > err )
     {
@@ -14897,64 +15268,13 @@ LOCAL VOID SPIValidateCpgOwnedAndAvail(
             return;
     }
 
-    if ( ( cpgAEFromCache != cpgAEFromTree ) || ( cpgOEFromCache != cpgOEFromTree ) )
-    {
-        if ( !fPrint )
-        {
-            // Recurse one time, printing out info on extents.
-            SPIValidateCpgOwnedAndAvail( pfucb, fTrue );
-        }
-        else
-        {
-            WCHAR rgrgw[6][16];
-            const WCHAR * rgwsz[] = { rgrgw[0], rgrgw[1], rgrgw[2], rgrgw[3], rgrgw[4], rgrgw[5] };
-            OSStrCbFormatW( rgrgw[0], sizeof(rgrgw[0]), L"%d", ObjidFDP( pfucb ) );
-            OSStrCbFormatW( rgrgw[1], sizeof(rgrgw[1]), L"%d", PgnoFDP( pfucb ) );
-            OSStrCbFormatW( rgrgw[2], sizeof(rgrgw[2]), L"%d", cpgOEFromTree );
-            OSStrCbFormatW( rgrgw[3], sizeof(rgrgw[3]), L"%d", cpgAEFromTree );
-            OSStrCbFormatW( rgrgw[4], sizeof(rgrgw[4]), L"%d", cpgOEFromCache );
-            OSStrCbFormatW( rgrgw[5], sizeof(rgrgw[5]), L"%d", cpgOEFromCache );
+    SPIReportAnyExtentCacheError(
+        pfucb,
+        cpgOEFromCache,
+        cpgAEFromCache,
+        cpgOEFromTree,
+        cpgAEFromTree);
 
-            OSTraceFMP(
-                pfucb->ifmp,
-                JET_tracetagSpaceInternal,
-                OSFormat(
-                    "%hs: Size mismatch: TC{%d:%d} CC{%d:%d} [0x%x:0x%x:%lu].",
-                    __FUNCTION__,
-                    cpgOEFromTree,
-                    cpgAEFromTree,
-                    cpgOEFromCache,
-                    cpgAEFromCache,
-                    pfucb->ifmp,
-                    ObjidFDP( pfucb ),
-                    PgnoFDP( pfucb ) ) );
-
-            UtilReportEvent(
-                eventError,
-                SPACE_MANAGER_CATEGORY,
-                EXTENT_PAGE_COUNT_CACHE_EXTENSIVE_VALIDATION_FAILED_ID,
-                _countof( rgwsz ),
-                rgwsz,
-                0,
-                PinstFromPfucb( pfucb ) );
-
-            AssertSz( fFalse, "Size mismatch OE and/or AE." );
-        }
-    }
-    else
-    {
-        OSTraceFMP(
-            pfucb->ifmp,
-            JET_tracetagSpaceInternal,
-            OSFormat(
-                "%hs: Validated C{%d:%d} [0x%x:0x%x:%lu]",
-                __FUNCTION__,
-                cpgOEFromCache,
-                cpgAEFromCache,
-                pfucb->ifmp,
-                ObjidFDP( pfucb ),
-                PgnoFDP( pfucb ) ) );
-    }
 }
 #endif
 
