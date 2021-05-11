@@ -2077,8 +2077,6 @@ class LREXTENDDB
 // This LR class accompanies the Commit0 LR and associates with this PIB's procid any client context
 // that the client wants us to log to be able to do later log analysis.
 
-const INT cbCommitCtxExpected = 100;    // must make sure this high enough for max client context and doesn't overrun FullDataToSz( ... rgchBuf )
-
 PERSISTED
 class LRCOMMITCTXOLD
     : protected LRIGNORED
@@ -2123,8 +2121,9 @@ class LRCOMMITCTXOLD
 };
 
 PERSISTED
-#define fCommitCtxCallbackNeeded        0x1
-#define fCommitCtxContainsCustomerData  0x2
+#define fCommitCtxCallbackNeeded            0x1
+#define fCommitCtxContainsCustomerData      0x2
+#define fCommitCtxPreCommitCallbackNeeded   0x4
 
 PERSISTED
 class LRCOMMITCTX
@@ -2181,6 +2180,15 @@ class LRCOMMITCTX
             {
                 m_fCtxFlags = ( m_fCtxFlags & ~fCommitCtxContainsCustomerData );
             }
+        }
+
+        BOOL FPreCommitCallbackNeeded() const
+        {
+            return !!( m_fCtxFlags & fCommitCtxPreCommitCallbackNeeded );
+        }
+        VOID SetFPreCommitCallbackNeeded()
+        {
+            m_fCtxFlags = ( m_fCtxFlags | fCommitCtxPreCommitCallbackNeeded );
         }
 
         INT CbCommitCtx() const

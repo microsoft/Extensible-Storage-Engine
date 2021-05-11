@@ -2846,9 +2846,14 @@ typedef struct
             unsigned long       cbStruct;       /* size of this structure */
             const void *        pbCommitCtx;    /* commit context */
             unsigned long       cbCommitCtx;    /* size of commit context */
+            unsigned long       fCallbackType;  /* type of callback */
         } CommitCtx;
     };
 } JET_RECOVERYCONTROL;
+
+#define fCommitCtxLegacyCommitCallback  1
+#define fCommitCtxPreCommitCallback     2
+#define fCommitCtxPostCommitCallback    3
 #endif // JET_VERSION >= 0x0A00
 
 #if ( JET_VERSION >= 0x0600 )
@@ -4211,10 +4216,11 @@ typedef enum
 #define JET_sesparamIOPriority              4108    //  Specifies IO Priority flags to use (see JET_IOPriority* flags)
 
 #define JET_sesparamCommitContextContainsCustomerData   4109    //  Boolean value specifying whether the value specified with JET_sesparamCommitGenericContext contains customer data.
+#define JET_sesparamCommitContextNeedPreCommitCallback  4110    //  Boolean value specifying whether the application wants pre/post commit callbacks with the generic context.
 #endif // JET_VERSION >= 0x0A01
 
 // begin_PubEsent
-#define JET_sesparamMaxValueInvalid         4110    //  This is not a valid session parameter. It can change from release to release!
+#define JET_sesparamMaxValueInvalid         4111    //  This is not a valid session parameter. It can change from release to release!
 
 typedef struct
 {

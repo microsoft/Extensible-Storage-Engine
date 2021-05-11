@@ -1519,6 +1519,7 @@ ERR ErrLGRecoveryControlCallback(
             recctrl.CommitCtx.cbStruct = sizeof( recctrl.CommitCtx );
             recctrl.CommitCtx.pbCommitCtx = (BYTE *)wszLogName;
             recctrl.CommitCtx.cbCommitCtx = lgen;
+            recctrl.CommitCtx.fCallbackType = fCurrentLog;
             break;
 
         default:
