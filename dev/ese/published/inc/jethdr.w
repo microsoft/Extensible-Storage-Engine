@@ -3970,7 +3970,7 @@ typedef enum
 //                                              81  //  JET_paramGlobalMinVerPages defined above
 #define JET_paramOSSnapshotTimeout              82  //  timeout for the freeze period in msec
 // end_PubEsent
-//                                              83  //  OBSOLETE: Was JET_paramUnicodeIndexLibrary.
+#define JET_paramFlight_SkipDbHeaderWriteForLgenCommittedUpdate 83  //  Skip database header write only for lgenCommitted update (lgenMinRequired and lgenMaxRequired updates would still trigger the write)
 
 #if ( JET_VERSION >= 0x0A01 )
 

@@ -153,6 +153,7 @@ MSINTERNAL enum class MJET_PARAM
     RecoveryCurrentLogfile = 79, // which generation is currently being replayed (read only)
     ReplayingReplicatedLogfiles = 80, // if a logfile doesn't exist, wait for it to be created
     OSSnapshotTimeout = 82, // timeout for the freeze period in msec
+    Flight_SkipDbHeaderWriteForLgenCommittedUpdate = 83, // Skip database header write only for lgenCommitted update (lgenMinRequired and lgenMaxRequired updates would still trigger the write)
     Flight_NewQueueOptions = 84, // Controls options for new Meted IO Queue
     Flight_ConcurrentMetedOps = 85, // Controls how many IOs we leave out at once for the new Meted IO Queue.
     Flight_LowMetedOpsThreshold = 86, // Controls the transition from 1 meted op to JET_paramFlight_ConcurrentMetedOps (which is the max).

@@ -7368,11 +7368,10 @@ const
 #endif
 
 // Elastic waypoint latency enabled by default on debug, retail enabled selectively via flighting
-#ifdef DEBUG
-#define JET_paramFlight_ElasticWaypointLatency_DEFAULT 2
-#else
-#define JET_paramFlight_ElasticWaypointLatency_DEFAULT 0
-#endif
+#define JET_paramFlight_ElasticWaypointLatency_DEFAULT      OnDebugOrRetail( 1, 0 )
+
+// SkipDbHeaderWriteForLgenCommittedUpdate enabled by default on debug, retail enabled selectively via flighting
+#define JET_paramFlight_SkipDbHeaderWriteForLgenCommittedUpdate_DEFAULT     OnDebugOrRetail( fTrue, fFalse )
 
 // Allow flighting of some features to windows independent of exchange flighting
 #ifdef ESENT
