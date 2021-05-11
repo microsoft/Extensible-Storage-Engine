@@ -1868,6 +1868,8 @@ LOCAL VOID LGICleanupTransactionToLevel0( PIB * const ppib, CTableHash * pctable
     //  empty the list of RCEs
     ppib->RemoveAllDeferredRceid();
     ppib->RemoveAllRceid();
+    ppib->ErrSetClientCommitContextGeneric( NULL, 0 );
+    ppib->SetFCommitContextNeedPreCommitCallback( fFalse );
 }
 
 ERR LOG::ErrLGEndAllSessionsMacro( BOOL fLogEndMacro )
@@ -6934,6 +6936,11 @@ ERR LOG::ErrLGRIRedoOperation( LR *plr )
             if ( 1 == ppib->Level() )
             {
                 Assert( lrtypCommit0 == plr->lrtyp );
+                if ( ppib->CbClientCommitContextGeneric() )
+                {
+                    Assert( ppib->FCommitContextNeedPreCommitCallback() );
+                    CallR( ErrLGCommitCtxCallback( m_pinst, ppib->PvClientCommitContextGeneric(), ppib->CbClientCommitContextGeneric(), fCommitCtxPreCommitCallback ) );
+                }
                 ppib->trxCommit0 = plrcommit0->le_trxCommit0;
                 if ( !m_pinst->m_fTrxNewestSetByRecovery ||
                      TrxCmp( ppib->trxCommit0, m_pinst->m_trxNewest ) > 0 )
@@ -6945,6 +6952,11 @@ ERR LOG::ErrLGRIRedoOperation( LR *plr )
                 LGAddLgpos( &lgposCurrent, sizeof( LRCOMMIT0 ) - 1 );
                 ppib->lgposCommit0 = lgposCurrent;
                 VERCommitTransaction( ppib );
+                if ( ppib->CbClientCommitContextGeneric() )
+                {
+                    Assert( ppib->FCommitContextNeedPreCommitCallback() );
+                    CallR( ErrLGCommitCtxCallback( m_pinst, ppib->PvClientCommitContextGeneric(), ppib->CbClientCommitContextGeneric(), fCommitCtxPostCommitCallback ) );
+                }
                 LGICleanupTransactionToLevel0( ppib, m_pctablehash );
             }
             else
@@ -7433,9 +7445,21 @@ ERR LOG::ErrLGRIRedoOperation( LR *plr )
     case lrtypCommitCtx:    // originally lrtypIgnored3
     {
         const LRCOMMITCTX * const plrCommitC = (LRCOMMITCTX *)plr;
-        if ( plrCommitC->FCallbackNeeded() )
+        if ( plrCommitC->FPreCommitCallbackNeeded() )
         {
-            CallR( ErrLGCommitCtxCallback( m_pinst, plrCommitC->PbCommitCtx(), plrCommitC->CbCommitCtx() ) );
+            // If client wants pre/post commit callback, just store the commit context and do the callback when the commit happens
+            PIB *ppib;
+            CallR( ErrLGRIPpibFromProcid( plrCommitC->ProcID(), &ppib ) );
+            if ( ppib->FAfterFirstBT() )
+            {
+                Assert( ppib->Level() > 0 );
+                CallR( ppib->ErrSetClientCommitContextGeneric( plrCommitC->PbCommitCtx(), plrCommitC->CbCommitCtx() ) );
+                ppib->SetFCommitContextNeedPreCommitCallback( fTrue );
+            }
+        }
+        else if ( plrCommitC->FCallbackNeeded() )
+        {
+            CallR( ErrLGCommitCtxCallback( m_pinst, plrCommitC->PbCommitCtx(), plrCommitC->CbCommitCtx(), fCommitCtxLegacyCommitCallback ) );
         }
         break;
     }

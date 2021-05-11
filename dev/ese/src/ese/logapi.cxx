@@ -2504,21 +2504,38 @@ ERR ErrLGCommitTransaction( PIB *ppib, const LEVEL levelCommitTo, BOOL fFireRedo
     lrcommit0.le_procid = (USHORT) ppib->procid;
     lrcommit0.levelCommitTo = levelCommitTo;
 
-    rgdata[0].SetPv( (BYTE *)&lrcommit0 );
-    cdata = 1;
 
     if ( levelCommitTo == 0 )
     {
-        lrcommit0.lrtyp = lrtypCommit0;
+        // if client specified a commit context and desires pre-commit callback, log it before the commit0 LR
 
+        if ( ppib->CbClientCommitContextGeneric() && ppib->FCommitContextNeedPreCommitCallback() )
+        {
+            Assert( lrcommitC.CbCommitCtx() == ppib->CbClientCommitContextGeneric() );
+
+            lrcommitC.SetProcID( ppib->procid );
+            lrcommitC.SetFPreCommitCallbackNeeded();
+            lrcommitC.SetContainsCustomerData( ppib->FCommitContextContainsCustomerData() );
+
+            rgdata[0].SetPv( &lrcommitC );
+            rgdata[0].SetCb( sizeof(LRCOMMITCTX) );
+            rgdata[1].SetPv( const_cast<VOID*>( ppib->PvClientCommitContextGeneric() ) );
+            rgdata[1].SetCb( ppib->CbClientCommitContextGeneric() );
+
+            // Cannot log in same call as lrCommit0 because we would not get the lgpos of the commit0 LR in that case.
+            CallR( plog->ErrLGLogRec( rgdata, 2, 0, ppib->lgposStart.lGeneration, NULL ) );
+        }
+
+        lrcommit0.lrtyp = lrtypCommit0;
+        rgdata[0].SetPv( (BYTE *)&lrcommit0 );
         rgdata[0].SetCb( sizeof(LRCOMMIT0) );
+        cdata = 1;
 
         // if client specified a commit context, add it after the commit0 LR
 
-        if ( ppib->CbClientCommitContextGeneric() )
+        if ( ppib->CbClientCommitContextGeneric() && !ppib->FCommitContextNeedPreCommitCallback() )
         {
             Assert( lrcommitC.CbCommitCtx() == ppib->CbClientCommitContextGeneric() );
-            Expected( lrcommitC.CbCommitCtx() <= cbCommitCtxExpected );
 
             // Note: While we log the procid so the lrtypCommitCtx log record is separable at
             // anytime form the lrtypCommit0 LR, we log them together so the two LRs will be
@@ -2541,7 +2558,9 @@ ERR ErrLGCommitTransaction( PIB *ppib, const LEVEL levelCommitTo, BOOL fFireRedo
     else
     {
         lrcommit0.lrtyp = lrtypCommit;
+        rgdata[0].SetPv( (BYTE *)&lrcommit0 );
         rgdata[0].SetCb( sizeof(LRCOMMIT) );
+        cdata = 1;
     }
 
     err = plog->ErrLGLogRec( rgdata, cdata, 0, ppib->lgposStart.lGeneration, plgposRec );
@@ -2592,12 +2611,13 @@ ERR ErrLGRollback( PIB *ppib, LEVEL levelsRollback, BOOL fRollbackToLevel0, BOOL
     rgdata[0].SetCb( sizeof(LRROLLBACK) );
     cdata = 1;
 
-    // if client specified a commit context, add it after the commit0 LR
+    // if client specified a commit context, add it after the Rollback LR
+    // Note that even if the client asks for pre/post-commit callback, we just log the context
+    // after the rollback LR, since there is no point of raising pre/post-callbacks for rollbacks.
 
     if ( fRollbackToLevel0 && ppib->CbClientCommitContextGeneric() )
     {
         Assert( lrcommitC.CbCommitCtx() == ppib->CbClientCommitContextGeneric() );
-        Expected( lrcommitC.CbCommitCtx() <= cbCommitCtxExpected );
 
         // Note: While we log the procid so the lrtypCommitCtx log record is separable at
         // anytime form the lrtypCommit0 LR, we log them together so the two LRs will be
@@ -8433,10 +8453,9 @@ VOID LrToSz(
             if ( !plog || FLGVersionNewCommitCtx( &plog->m_pLogStream->GetCurrentFileHdr()->lgfilehdr ) )
             {
                 const LRCOMMITCTX * const plrcommitctx = (LRCOMMITCTX *) plr;
-                OSStrCbFormatA( rgchBuf, sizeof(rgchBuf), " (%x) [%s%s]", plrcommitctx->ProcID(), plrcommitctx->FCallbackNeeded() ? "C" : "", plrcommitctx->FContainsCustomerData() ? "P" : "" );
+                OSStrCbFormatA( rgchBuf, sizeof(rgchBuf), " (%x) [%s%s%s]", plrcommitctx->ProcID(), plrcommitctx->FCallbackNeeded() ? "C" : "", plrcommitctx->FPreCommitCallbackNeeded() ? "R" : "", plrcommitctx->FContainsCustomerData() ? "P" : "" );
                 OSStrCbAppendA( szLR, cbLR, rgchBuf );
-                Assert( plrcommitctx->CbCommitCtx() <= cbCommitCtxExpected );   // should be enough space for this much
-                FullDataToSz( plrcommitctx->PbCommitCtx(), plrcommitctx->CbCommitCtx(), cbCommitCtxExpected, plrcommitctx->FContainsCustomerData() ? plog->IDumpVerbosityLevel() : LOG::ldvlData, rgchBuf, cbLRBuf );
+                DataToSz( plrcommitctx->PbCommitCtx(), plrcommitctx->CbCommitCtx(), plrcommitctx->FContainsCustomerData() ? plog->IDumpVerbosityLevel() : LOG::ldvlData, rgchBuf, cbLRBuf );
                 OSStrCbAppendA( szLR, cbLR, rgchBuf );
             }
             else
@@ -8444,8 +8463,7 @@ VOID LrToSz(
                 const LRCOMMITCTXOLD * const plrcommitctx = (LRCOMMITCTXOLD *) plr;
                 OSStrCbFormatA( rgchBuf, sizeof(rgchBuf), " (%x) ", plrcommitctx->ProcID() );
                 OSStrCbAppendA( szLR, cbLR, rgchBuf );
-                Assert( plrcommitctx->CbCommitCtx() <= cbCommitCtxExpected );   // should be enough space for this much
-                FullDataToSz( plrcommitctx->PbCommitCtx(), plrcommitctx->CbCommitCtx(), cbCommitCtxExpected, plog->IDumpVerbosityLevel(), rgchBuf, cbLRBuf );
+                DataToSz( plrcommitctx->PbCommitCtx(), plrcommitctx->CbCommitCtx(), plog->IDumpVerbosityLevel(), rgchBuf, cbLRBuf );
                 OSStrCbAppendA( szLR, cbLR, rgchBuf );
             }
             break;

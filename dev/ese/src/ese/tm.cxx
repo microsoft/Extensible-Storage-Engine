@@ -1372,6 +1372,14 @@ ERR ErrIsamSetSessionParameter(
     case JET_sesparamCommitContextContainsCustomerData:
         return ppib->ErrSetCommitContextContainsCustomerData( pvParam, cbParam );
 
+    case JET_sesparamCommitContextNeedPreCommitCallback:
+        if ( cbParam != sizeof( DWORD ) )
+        {
+            return ErrERRCheck( JET_errInvalidBufferSize );
+        }
+        ppib->SetFCommitContextNeedPreCommitCallback( *(DWORD *)pvParam );
+        break;
+
     default:
         Expected( ( sesparamid >= JET_sesparamCommitDefault ) /* min value */ && ( sesparamid < ( JET_sesparamCommitDefault + 1024 ) ) );   // or they're passing a sysparam or dbparam?
         return ErrERRCheck( JET_errInvalidSesparamId );
@@ -1653,6 +1661,24 @@ ERR ErrIsamGetSessionParameter(
         if ( pvParam )
         {
             *(DWORD *)pvParam = ppib->FCommitContextContainsCustomerData();
+        }
+        break;
+    }
+
+    case JET_sesparamCommitContextNeedPreCommitCallback:
+    {
+        const DWORD cbParamActual = sizeof( DWORD );
+        if ( pcbParamActual )
+        {
+            *pcbParamActual = cbParamActual;
+        }
+        if ( pvParam && cbParamMax < cbParamActual )
+        {
+            return ErrERRCheck( JET_errInvalidBufferSize );
+        }
+        if ( pvParam )
+        {
+            *(DWORD *)pvParam = ppib->FCommitContextNeedPreCommitCallback();
         }
         break;
     }
