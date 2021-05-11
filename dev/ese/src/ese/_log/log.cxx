@@ -2186,16 +2186,18 @@ ERR LOG::ErrLGUpdateGenRequired(
 
         //  Note: If we're updating fHeaderUpdateMaxRequired, we should have already flushed the respective log
 
-        if ( err >= JET_errSuccess )
+        if ( err >= JET_errSuccess &&
+             // Either we are not skipping lgenCommitted only updates, or min/max Required got updated, or this call did not even pass in a lgenCommitted (special call from backup)
+             ( !BoolParam( m_pinst, JET_paramFlight_SkipDbHeaderWriteForLgenCommittedUpdate ) || fHeaderUpdateMinRequired || fHeaderUpdateMaxRequired || lGenCommitted == 0 ) )
         {
             err = ErrUtilWriteAttachedDatabaseHeaders( m_pinst, pfsapi, pfmpT->WszDatabaseName(), pfmpT, pfmpT->Pfapi() );
 
-            if ( err >= JET_errSuccess && ( fHeaderUpdateMinRequired || fHeaderUpdateMaxRequired ) )
+            if ( err >= JET_errSuccess && ( fHeaderUpdateMinRequired || fHeaderUpdateMaxRequired || lGenCommitted == 0 ) )
             {
                 const IOFLUSHREASON iofr =
                     IOFLUSHREASON(
                         ( fHeaderUpdateMinRequired ? iofrDbHdrUpdMinRequired : 0 ) |
-                        ( fHeaderUpdateMaxRequired ? iofrDbHdrUpdMaxRequired : 0 ) );
+                        ( ( fHeaderUpdateMaxRequired || lGenCommitted == 0 ) ? iofrDbHdrUpdMaxRequired : 0 ) );
                 err = ErrIOFlushDatabaseFileBuffers( ifmp, iofr );
             }
             

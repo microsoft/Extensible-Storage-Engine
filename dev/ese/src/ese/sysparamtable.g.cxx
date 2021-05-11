@@ -96,7 +96,7 @@ JetParam g_rgparamRaw[] =
     ILLEGAL_PARAM(80),  // NORMAL_PARAM(    JET_paramReplayingReplicatedLogfiles,   CJetParam::typeBoolean,     0,  0,  0,  0,  0,      -1,         0 ),
     NORMAL_PARAM2(JET_paramGlobalMinVerPages, CJetParam::typeInteger, 1,  1,  1, 1, 1, 2147483647, 1, 64),
     NORMAL_PARAM(JET_paramOSSnapshotTimeout, CJetParam::typeInteger, 0,  1,  0, 0, 0, 2147483647, 70000),
-    ILLEGAL_PARAM(83),  // Obsolete: was JET_paramUnicodeIndexLibrary
+    NORMAL_PARAM(JET_paramFlight_SkipDbHeaderWriteForLgenCommittedUpdate, CJetParam::typeBoolean, 1,  0,  0, 0, 0, -1, JET_paramFlight_SkipDbHeaderWriteForLgenCommittedUpdate_DEFAULT),
     NORMAL_PARAM(JET_paramFlight_NewQueueOptions, CJetParam::typeInteger, 0,  0,  0, 0, 0, bitNewQueueOptionsMask, grbitEseSkuQueueOptionDefault),
     NORMAL_PARAM(JET_paramFlight_ConcurrentMetedOps, CJetParam::typeInteger, 0,  0,  0, 1, 0, 1024, 2),
     NORMAL_PARAM(JET_paramFlight_LowMetedOpsThreshold, CJetParam::typeInteger, 0,  0,  0, 1, 0, 1024, 40),
@@ -325,7 +325,7 @@ static_assert( JET_paramRecoveryCurrentLogfile == 79, "The order of defintion fo
 static_assert( 80 == 80, "The order of defintion for 80 in sysparam.xml must follow the numerical ordering of its value (as defined in jethdr.w)." );
 static_assert( JET_paramGlobalMinVerPages == 81, "The order of defintion for JET_paramGlobalMinVerPages in sysparam.xml must follow the numerical ordering of its value (as defined in jethdr.w)." );
 static_assert( JET_paramOSSnapshotTimeout == 82, "The order of defintion for JET_paramOSSnapshotTimeout in sysparam.xml must follow the numerical ordering of its value (as defined in jethdr.w)." );
-static_assert( 83 == 83, "The order of defintion for 83 in sysparam.xml must follow the numerical ordering of its value (as defined in jethdr.w)." );
+static_assert( JET_paramFlight_SkipDbHeaderWriteForLgenCommittedUpdate == 83, "The order of defintion for JET_paramFlight_SkipDbHeaderWriteForLgenCommittedUpdate in sysparam.xml must follow the numerical ordering of its value (as defined in jethdr.w)." );
 static_assert( JET_paramFlight_NewQueueOptions == 84, "The order of defintion for JET_paramFlight_NewQueueOptions in sysparam.xml must follow the numerical ordering of its value (as defined in jethdr.w)." );
 static_assert( JET_paramFlight_ConcurrentMetedOps == 85, "The order of defintion for JET_paramFlight_ConcurrentMetedOps in sysparam.xml must follow the numerical ordering of its value (as defined in jethdr.w)." );
 static_assert( JET_paramFlight_LowMetedOpsThreshold == 86, "The order of defintion for JET_paramFlight_LowMetedOpsThreshold in sysparam.xml must follow the numerical ordering of its value (as defined in jethdr.w)." );
