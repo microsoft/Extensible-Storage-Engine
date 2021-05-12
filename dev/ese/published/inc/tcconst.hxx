@@ -232,7 +232,7 @@ enum IOREASONFLAGS : BYTE
     iorfDependantOrVersion      = 0x10,
     iorfReclaimPageFromOS       = 0x20,
     iorfSuperColdOrLowPriority  = 0x40,
-    iorfRepeatedWrite           = 0x80,
+    iorfRepeated                = 0x80,
 };
 
 enum IOFLUSHREASON : ULONG

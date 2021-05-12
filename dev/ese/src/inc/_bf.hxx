@@ -1359,7 +1359,8 @@ ERR ErrBFICachePage(    PBF* const ppbf,
                         const ULONG_PTR pctCachePriority,
                         const TraceContext& tc,
                         const BFLatchType bfltTraceOnly,
-                        const BFLatchFlags bflfTraceOnly );
+                        const BFLatchFlags bflfTraceOnly,
+                        BOOL* const pfRepeatedRead );
 
 INLINE BOOL FBFICacheViewFresh( const PBF pbf );
 

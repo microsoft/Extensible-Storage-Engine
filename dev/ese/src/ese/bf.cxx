@@ -4835,7 +4835,7 @@ ERR ErrBFFlushSync( IFMP ifmp )
         TraceContextScope tcScope( iorpBFDatabaseFlush );
         if ( pbf->fFlushed )
         {
-            tcScope->iorReason.AddFlag( iorfRepeatedWrite );
+            tcScope->iorReason.AddFlag( iorfRepeated );
         }
         err = ErrBFISyncWrite( pbf, bfltExclusive, qosIODispatchImmediate, *tcScope );
         pbf->sxwl.ReleaseExclusiveLatch();
@@ -16798,7 +16798,8 @@ ERR ErrBFICachePage(    PBF* const ppbf,
                         const ULONG_PTR pctCachePriority,
                         const TraceContext& tc,
                         const BFLatchType bfltTraceOnly,
-                        const BFLatchFlags bflfTraceOnly )
+                        const BFLatchFlags bflfTraceOnly,
+                        BOOL* const pfRepeatedRead )
 {
     ERR             err;
     PGNOPBF         pgnopbf;
@@ -16808,6 +16809,8 @@ ERR ErrBFICachePage(    PBF* const ppbf,
     const TCE       tce = (TCE)tc.nParentObjectClass;
 
     Assert( pgno >= 1 );
+
+    *pfRepeatedRead = fFalse;
 
     // use pre-allocated BF if provided (we own freeing it in case of error)
     pgnopbf.pbf = *ppbf;
@@ -17035,6 +17038,8 @@ ERR ErrBFICachePage(    PBF* const ppbf,
                             pgnopbf.pbf,
                             pgnopbf.pbf->pv,
                             pgnopbf.pbf->tce ) );
+
+    *pfRepeatedRead = fRepeatedlyRead;
 
     return JET_errSuccess;
 
@@ -18201,6 +18206,7 @@ ERR ErrBFIPrereadPage( IFMP ifmp, PGNO pgno, const BFPreReadFlags bfprf, const B
         //  technically this is a write latch, but we will use bfltMax as a sentinel to indicate 
         //  we're pre-reading a page, not latching.
 
+        BOOL fRepeatedRead;
         err = ErrBFICachePage( &pbf,
                                 ifmp,
                                 pgno,
@@ -18210,7 +18216,8 @@ ERR ErrBFIPrereadPage( IFMP ifmp, PGNO pgno, const BFPreReadFlags bfprf, const B
                                 PctBFCachePri( bfpri ),                                 // pctCachePriority
                                 tc,                                                     // tc
                                 bfltMax,                                                // bfltTraceOnly
-                                ( bfprf & bfprfDBScan ) ? bflfDBScan : bflfNone );      // bflfTraceOnly
+                                ( bfprf & bfprfDBScan ) ? bflfDBScan : bflfNone,        // bflfTraceOnly
+                                &fRepeatedRead );
         fBFOwned = fFalse;
         Call( err );
 
@@ -18220,6 +18227,10 @@ ERR ErrBFIPrereadPage( IFMP ifmp, PGNO pgno, const BFPreReadFlags bfprf, const B
         //  manipulation of the BF will be done in BFIAsyncReadComplete()
 
         TraceContextScope tcPreread( iorpBFPreread );
+        if ( fRepeatedRead )
+        {
+            tcPreread->iorReason.AddFlag( iorfRepeated );
+        }
         CallS( ErrBFIAsyncRead( pbf, qos, pioreqReserved, *tcPreread ) );
         pioreqReserved = NULL;
 
@@ -20464,6 +20475,7 @@ ERR ErrBFILatchPage(    _Out_ BFLatch* const    pbfl,
             //  try to add this page to the cache
 
             pgnopbf.pbf = NULL;
+            BOOL fRepeatedRead;
             err = ErrBFICachePage(  &pgnopbf.pbf,
                                     ifmp,
                                     pgno,
@@ -20473,7 +20485,8 @@ ERR ErrBFILatchPage(    _Out_ BFLatch* const    pbfl,
                                     PctBFCachePri( bfpri ),             // pctCachePriority
                                     tc,                                 // tc
                                     bfltReq,                            // bfltTraceOnly
-                                    bflfT );                            // bflfTraceOnly
+                                    bflfT,                              // bflfTraceOnly
+                                    &fRepeatedRead );
             AssertRTL( err > -65536 && err < 65536 );
             AssertTrack( ( err != JET_errFileIOBeyondEOF ) || !fNewPage, "BFILatchEofUncached" );
 
@@ -20509,6 +20522,10 @@ ERR ErrBFILatchPage(    _Out_ BFLatch* const    pbfl,
                     //  read the page image from disk
 
                     pgnopbf.pbf->fSyncRead = fTrue; // note: not doing this in BFISyncRead() may cause bug some day, but don't want to mark pages re-read due to OS paged out
+                    if ( fRepeatedRead )
+                    {
+                        tcBFLatch->iorReason.AddFlag( iorfRepeated );
+                    }
                     BFISyncRead( pgnopbf.pbf, QosBFIMergeInstUserDispPri( PinstFromIfmp( ifmp ), QosBFUserAndIoPri( bfpri ) ), *tcBFLatch );
                     OSTraceFMP(
                         ifmp,
@@ -22249,7 +22266,7 @@ ERR ErrBFIFlushExclusiveLatchedAndPreparedBF(   __inout const PBF       pbf,
     }
     if ( pbf->fFlushed )
     {
-        tcFlush->iorReason.AddFlag( iorfRepeatedWrite );
+        tcFlush->iorReason.AddFlag( iorfRepeated );
     }
 
     if ( FBFIDatabasePage( pbf ) )

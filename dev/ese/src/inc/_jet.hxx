@@ -709,7 +709,9 @@ INLINE BOOL FAlignedForThisPlatform( const VOID * const pv )
 #define opRBSPrepareRevert                  158
 #define opRBSExecuteRevert                  159
 #define opRBSCancelRevert                   160
-#define opMax                               161
+#define opGetSecondaryIndexBookmark         161
+#define opGotoSecondaryIndexBookmark        162
+#define opMax                               163
 
 
 /* Typedefs for dispatched functions that use tableid(pfucb). */
