@@ -11675,7 +11675,7 @@ JET_ERR JET_API JetGetSecondaryIndexBookmarkEx(
     _In_ ULONG                                                              cbPrimaryBookmarkMax,
     __out_opt ULONG *                                                       pcbPrimaryBookmarkActual )
 {
-    APICALL_SESID   apicall( opGetBookmark );
+    APICALL_SESID   apicall( opGetSecondaryIndexBookmark );
 
     OSTrace(
         JET_tracetagAPI,
@@ -11718,7 +11718,7 @@ JET_ERR JET_API JetGetSecondaryIndexBookmark(
     _In_ const JET_GRBIT                                                            grbit )
 {
     JET_VALIDATE_SESID_TABLEID( sesid, tableid );
-    JET_TRY( opGetBookmark,
+    JET_TRY( opGetSecondaryIndexBookmark,
         JetGetSecondaryIndexBookmarkEx(
                         sesid,
                         tableid,
@@ -11780,7 +11780,7 @@ JET_ERR JET_API JetGotoSecondaryIndexBookmarkEx(
     _In_ ULONG                          cbPrimaryBookmark,
     _In_ const JET_GRBIT                        grbit )
 {
-    APICALL_SESID   apicall( opGotoBookmark );
+    APICALL_SESID   apicall( opGotoSecondaryIndexBookmark );
 
     OSTrace(
         JET_tracetagAPI,
@@ -11821,7 +11821,7 @@ JET_ERR JET_API JetGotoSecondaryIndexBookmark(
     _In_ const JET_GRBIT                        grbit )
 {
     JET_VALIDATE_SESID_TABLEID( sesid, tableid );
-    JET_TRY( opGetBookmark,
+    JET_TRY( opGetSecondaryIndexBookmark,
         JetGotoSecondaryIndexBookmarkEx(
                         sesid,
                         tableid,
