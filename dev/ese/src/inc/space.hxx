@@ -220,6 +220,15 @@ ERR ErrSPFreeFDP(
     const PGNO  pgnoFDPParent,
     const BOOL  fPreservePrimaryExtent = fFalse );
 
+ERR ErrSPGetDatabaseInfo(
+    PIB         *ppib,
+    const IFMP  ifmp,
+    __out_bcount(cbMax) BYTE        *pbResult,
+    const ULONG cbMax,
+    const ULONG fSPExtents,
+    bool fUseCachedResult,
+    CPRINTF * const pcprintf = NULL );
+
 typedef enum class GET_CACHED_INFO {
     Allow,
     Require,

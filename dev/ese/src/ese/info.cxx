@@ -4004,25 +4004,23 @@ ERR VDBAPI ErrIsamGetDatabaseInfo(
             if ( cbMax != sizeof(ULONG) )
                 return ErrERRCheck( JET_errInvalidBufferSize );
 
-            err = ErrSPGetInfo(
+            err = ErrSPGetDatabaseInfo(
                         ppib,
                         ifmp,
-                        pfucbNil,
                         static_cast<BYTE *>( pvResult ),
                         cbMax,
                         fSPOwnedExtent,
-                        fUseCachedResult ? gci::Require : gci::Forbid );
+                        fUseCachedResult );
             return err;
 
         case JET_DbInfoSpaceAvailable:
-            err = ErrSPGetInfo(
+            err = ErrSPGetDatabaseInfo(
                         ppib,
                         ifmp,
-                        pfucbNil,
                         static_cast<BYTE *>( pvResult ),
                         cbMax,
                         fSPAvailExtent,
-                        fUseCachedResult ? gci::Require : gci::Forbid );
+                        fUseCachedResult );
             return err;
 
         case dbInfoSpaceShelved:
@@ -4036,14 +4034,13 @@ ERR VDBAPI ErrIsamGetDatabaseInfo(
                 return ErrERRCheck( JET_errInvalidBufferSize );
             }
 
-            err = ErrSPGetInfo(
+            err = ErrSPGetDatabaseInfo(
                         ppib,
                         ifmp,
-                        pfucbNil,
                         (BYTE*)rgcpg,
                         sizeof(rgcpg),
-                        fSPAvailExtent | fSPShelvedExtent,  
-                        fUseCachedResult ? gci::Require : gci::Forbid );
+                        fSPAvailExtent | fSPShelvedExtent,  // need fSPAvailExtent to retrive fSPShelvedExtent
+                        fFalse );
             *( (ULONG*)pvResult ) = rgcpg[1];
             return err;
         }

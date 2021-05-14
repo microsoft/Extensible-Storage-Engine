@@ -14294,6 +14294,120 @@ LOCAL VOID SPIReportAnyExtentCacheError(
 }
 
 
+//  gets owned and avail space info for database.  Speed repeated calls by caching data in FMP and maintaining this information from space.
+//
+ERR ErrSPGetDatabaseInfo(
+    PIB         *ppib,
+    const IFMP  ifmp,
+    __out_bcount(cbMax) BYTE        *pbResult,
+    const ULONG cbMax,
+    const ULONG fSPExtents,
+    bool fUseCachedResult,
+    CPRINTF * const pcprintf )
+{
+    ERR             err = JET_errSuccess;
+    CPG             *pcpgT = (CPG *)pbResult;
+    ULONG           cbMaxReq = 0;
+
+    PIBTraceContextScope tcScope = ppib->InitTraceContextScope();
+    tcScope->iorReason.SetIort( iortSpace );
+
+    //  we need to specify at least one of these supported options
+    //  
+    if ( ( fSPExtents & ( fSPOwnedExtent | fSPAvailExtent | fSPShelvedExtent ) ) == 0 )
+    {
+        return ErrERRCheck( JET_errInvalidParameter );
+    }
+
+    //  we can't specify anything outside of these supported options
+    //
+    if ( ( fSPExtents & ~( fSPOwnedExtent | fSPAvailExtent | fSPShelvedExtent ) ) != 0 )
+    {
+        return ErrERRCheck( JET_errInvalidParameter );
+    }
+
+    Assert( FSPOwnedExtent( fSPExtents ) || FSPAvailExtent( fSPExtents ) || FSPShelvedExtent( fSPExtents ) );
+
+    //  getting shelved space is currently only used internally by utilities so we expect it
+    //  to be queried along with avilable space (contract imposed by ErrSPGetInfo() below) and
+    //  without caching
+    //
+    if ( FSPShelvedExtent( fSPExtents ) )
+    {
+        Assert( FSPAvailExtent( fSPExtents ) );
+        if ( fUseCachedResult )
+        {
+            return ErrERRCheck( JET_errInvalidParameter );
+        }
+    }
+
+    //  buffer size checks
+    //
+    if ( FSPOwnedExtent( fSPExtents ) )
+    {
+        cbMaxReq += sizeof( CPG );
+    }
+    if ( FSPAvailExtent( fSPExtents ) )
+    {
+        cbMaxReq += sizeof( CPG );
+    }
+    if ( FSPShelvedExtent( fSPExtents ) )
+    {
+        cbMaxReq += sizeof( CPG );
+    }
+
+    if ( cbMax < cbMaxReq )
+    {
+        AssertSz( fFalse, "Called without the necessary buffer allocated for extents." );
+        return ErrERRCheck( JET_errInvalidParameter );
+    }
+    
+    //  check inputs
+    //
+    CallR( ErrSPCheckInfoBuf( cbMax, fSPExtents ) );
+    memset( pbResult, 0, cbMax );
+
+    int ipg = 0;
+    const int ipgOwned = FSPOwnedExtent( fSPExtents ) ? ipg++ : -1;
+    const int ipgAvail = FSPAvailExtent( fSPExtents ) ? ipg++ : -1;
+    const int ipgShelved = FSPShelvedExtent( fSPExtents ) ? ipg++ : -1;
+
+    if ( !fUseCachedResult ||
+         ( FSPAvailExtent( fSPExtents ) && !g_rgfmp[ifmp].FCacheAvail() ) )
+    {
+        Call( ErrSPGetInfo( ppib,
+                            ifmp, 
+                            pfucbNil, 
+                            pbResult, 
+                            cbMax, 
+                            fSPExtents, 
+                            fUseCachedResult ? gci::Require : gci::Forbid, 
+                            pcprintf ) );
+
+        if ( FSPAvailExtent( fSPExtents ) )
+        {
+            Assert( ipgAvail >= 0 );
+            g_rgfmp[ifmp].SetCpgAvail( *( pcpgT + ipgAvail ) );
+        }
+    }
+    else
+    {
+        if ( ipgOwned >= 0 )
+        {
+            *( pcpgT + ipgOwned ) = g_rgfmp[ifmp].PgnoLast();
+        }
+        if ( ipgAvail >= 0 )
+        {
+            *( pcpgT + ipgAvail ) = g_rgfmp[ifmp].CpgAvail();
+        }
+        Assert( ipgShelved < 0 );
+    }
+
+HandleError:
+    return err;
+}
+
+
 //  Retrieves space info, like the owned # of pages, avail # of pages.
 
 ERR ErrSPGetInfo(
