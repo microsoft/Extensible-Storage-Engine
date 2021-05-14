@@ -11,6 +11,7 @@
 #define cRBSSegmentMax                  0x7fff0000
 #define cbRBSSegmentsInBuffer           (cbRBSBufferSize/cbRBSSegmentSize)
 #define csecSpaceUsagePeriodicLog       3600
+#define cbMaxRBSSizeAllowed             100LL*1024*1024*1024
 
 C_ASSERT( cbRBSSegmentSizeMask == cbRBSSegmentSize - 1 );
 
@@ -436,6 +437,9 @@ public:
     // Low disk space at which we will start cleaning up RBS aggressively.
     virtual QWORD CbLowDiskSpaceThreshold() = 0;
 
+    // Low disk space at which we will decide to raise failure item to disable RBS provided there is only one RBS.
+    virtual QWORD CbLowDiskSpaceDisableRBSThreshold() = 0;
+
     // Max alloted space for revert snapshots when the disk space is low.
     virtual QWORD CbMaxSpaceForRBSWhenLowDiskSpace() = 0;
 
@@ -466,6 +470,7 @@ public:
     INT CPassesMax() { return INT_MAX; }
     BOOL FEnableCleanup();
     QWORD CbLowDiskSpaceThreshold();
+    QWORD CbLowDiskSpaceDisableRBSThreshold();
     QWORD CbMaxSpaceForRBSWhenLowDiskSpace();
     INT CSecRBSMaxTimeSpan();
     INT CSecMinCleanupIntervalTime();
@@ -481,6 +486,14 @@ INLINE BOOL RBSCleanerConfig::FEnableCleanup()
 INLINE QWORD RBSCleanerConfig::CbLowDiskSpaceThreshold()
 {
     return ( (QWORD) UlParam( m_pinst, JET_paramFlight_RBSLowDiskSpaceThresholdGb ) ) * 1024 * 1024 * 1024;
+}
+
+INLINE QWORD RBSCleanerConfig::CbLowDiskSpaceDisableRBSThreshold()
+{
+    // We will raise a failure item to let HA disable RBS in case of low disk space and there are no older RBS to cleanup.
+    // We don't want to reuse the same low disk space threshold since we want to give rbs cleaner a chance to cleanup older RBS, 
+    // so we will lower the threshold by further 25GB to disable RBS.
+    return ( (QWORD) min( UlParam( m_pinst, JET_paramFlight_RBSLowDiskSpaceThresholdGb ) - 25, 0 ) ) * 1024 * 1024 * 1024;
 }
 
 INLINE QWORD RBSCleanerConfig::CbMaxSpaceForRBSWhenLowDiskSpace()
@@ -755,7 +768,8 @@ class CRevertSnapshot : public CZeroInit
     ERR ErrFlush();
 
     ERR ErrRBSInvalidate();
-    VOID RBSLogSpaceUsage();
+    VOID RBSCheckSpaceUsage();
+    BOOL FRBSRaiseFailureItemIfNeeded();
 
     ERR ErrResetHdr( );
     VOID FreeFileApi( );

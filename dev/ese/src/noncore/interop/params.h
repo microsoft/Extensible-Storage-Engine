@@ -151,9 +151,9 @@ MSINTERNAL enum class MJET_PARAM
     CleanupMismatchedLogFiles = 77, // instead of erroring out after a successful recovery with JET_errLogFileSizeMismatchDatabasesConsistent, ESE will silently delete the old log files and checkpoint file and continue operations
     RecordUpgradeDirtyLevel = 78, // how aggresively should pages with their record format converted be flushed (0-3)
     RecoveryCurrentLogfile = 79, // which generation is currently being replayed (read only)
-    ReplayingReplicatedLogfiles = 80, // if a logfile doesn't exist, wait for it to be created
     OSSnapshotTimeout = 82, // timeout for the freeze period in msec
     Flight_SkipDbHeaderWriteForLgenCommittedUpdate = 83, // Skip database header write only for lgenCommitted update (lgenMinRequired and lgenMaxRequired updates would still trigger the write)
+    Flight_RBSForceRollIntervalSec = 80, // Time after which we should force roll into new revert snapshot by raising failure item and letting HA remount. This is temporary till we have live roll.
     Flight_NewQueueOptions = 84, // Controls options for new Meted IO Queue
     Flight_ConcurrentMetedOps = 85, // Controls how many IOs we leave out at once for the new Meted IO Queue.
     Flight_LowMetedOpsThreshold = 86, // Controls the transition from 1 meted op to JET_paramFlight_ConcurrentMetedOps (which is the max).

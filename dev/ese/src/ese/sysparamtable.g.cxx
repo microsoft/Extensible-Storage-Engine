@@ -93,7 +93,7 @@ JetParam g_rgparamRaw[] =
     NORMAL_PARAM(JET_paramCleanupMismatchedLogFiles, CJetParam::typeBoolean, 0,  0,  0, 1, 0, -1, 0),
     NORMAL_PARAM(JET_paramRecordUpgradeDirtyLevel, CJetParam::typeGrbit, 1,  1,  0, 0, 0, 3, 1),
     CUSTOM_PARAM(JET_paramRecoveryCurrentLogfile, CJetParam::typeInteger, 0,  0,  0, 0, GetRecoveryCurrentLogfile, CJetParam::IllegalSet, CJetParam::CloneDefault),
-    ILLEGAL_PARAM(80),  // NORMAL_PARAM(    JET_paramReplayingReplicatedLogfiles,   CJetParam::typeBoolean,     0,  0,  0,  0,  0,      -1,         0 ),
+    NORMAL_PARAM(JET_paramFlight_RBSForceRollIntervalSec, CJetParam::typeInteger, 1,  0,  0, 0, 0, 2147483647, 172800),
     NORMAL_PARAM2(JET_paramGlobalMinVerPages, CJetParam::typeInteger, 1,  1,  1, 1, 1, 2147483647, 1, 64),
     NORMAL_PARAM(JET_paramOSSnapshotTimeout, CJetParam::typeInteger, 0,  1,  0, 0, 0, 2147483647, 70000),
     NORMAL_PARAM(JET_paramFlight_SkipDbHeaderWriteForLgenCommittedUpdate, CJetParam::typeBoolean, 1,  0,  0, 0, 0, -1, JET_paramFlight_SkipDbHeaderWriteForLgenCommittedUpdate_DEFAULT),
@@ -322,7 +322,7 @@ static_assert( JET_paramEnableSortedRetrieveColumns == 76, "The order of definti
 static_assert( JET_paramCleanupMismatchedLogFiles == 77, "The order of defintion for JET_paramCleanupMismatchedLogFiles in sysparam.xml must follow the numerical ordering of its value (as defined in jethdr.w)." );
 static_assert( JET_paramRecordUpgradeDirtyLevel == 78, "The order of defintion for JET_paramRecordUpgradeDirtyLevel in sysparam.xml must follow the numerical ordering of its value (as defined in jethdr.w)." );
 static_assert( JET_paramRecoveryCurrentLogfile == 79, "The order of defintion for JET_paramRecoveryCurrentLogfile in sysparam.xml must follow the numerical ordering of its value (as defined in jethdr.w)." );
-static_assert( 80 == 80, "The order of defintion for 80 in sysparam.xml must follow the numerical ordering of its value (as defined in jethdr.w)." );
+static_assert( JET_paramFlight_RBSForceRollIntervalSec == 80, "The order of defintion for JET_paramFlight_RBSForceRollIntervalSec in sysparam.xml must follow the numerical ordering of its value (as defined in jethdr.w)." );
 static_assert( JET_paramGlobalMinVerPages == 81, "The order of defintion for JET_paramGlobalMinVerPages in sysparam.xml must follow the numerical ordering of its value (as defined in jethdr.w)." );
 static_assert( JET_paramOSSnapshotTimeout == 82, "The order of defintion for JET_paramOSSnapshotTimeout in sysparam.xml must follow the numerical ordering of its value (as defined in jethdr.w)." );
 static_assert( JET_paramFlight_SkipDbHeaderWriteForLgenCommittedUpdate == 83, "The order of defintion for JET_paramFlight_SkipDbHeaderWriteForLgenCommittedUpdate in sysparam.xml must follow the numerical ordering of its value (as defined in jethdr.w)." );

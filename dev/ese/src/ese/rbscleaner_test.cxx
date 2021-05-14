@@ -41,6 +41,9 @@ public:
     QWORD CbLowDiskSpaceThreshold() { return m_cbLowDiskSpaceThreshold; }
     VOID SetCbLowDiskSpaceThreshold( QWORD cbLowDiskSpaceThreshold ) { m_cbLowDiskSpaceThreshold = cbLowDiskSpaceThreshold; }
 
+    QWORD CbLowDiskSpaceDisableRBSThreshold() { return m_cbLowDiskSpaceDisableRBSThreshold; }
+    VOID SetCbLowDiskSpaceDisableRBSThreshold( QWORD cbLowDiskSpaceDisableRBSThreshold ) { m_cbLowDiskSpaceDisableRBSThreshold = cbLowDiskSpaceDisableRBSThreshold; }
+
     QWORD CbMaxSpaceForRBSWhenLowDiskSpace() { return m_cbMaxSpaceForRBSWhenLowDiskSpace; }
     VOID SetCbMaxSpaceForRBSWhenLowDiskSpace( QWORD cbMaxSpaceForRBSWhenLowDiskSpace ) { m_cbMaxSpaceForRBSWhenLowDiskSpace = cbMaxSpaceForRBSWhenLowDiskSpace; }
 
@@ -62,12 +65,14 @@ public:
         m_cSecRBSMaxTimeSpan = 300; // 5mins
         m_cSecMinCleanupIntervalTime = 1; // every 1sec
         m_lFirstValidRBSGen = 1;
+        m_cbLowDiskSpaceDisableRBSThreshold = 0;
     }
 
 private:
     INT     m_cPassesMax;
     BOOL    m_fEnableCleanup;
     QWORD   m_cbLowDiskSpaceThreshold;
+    QWORD   m_cbLowDiskSpaceDisableRBSThreshold;
     QWORD   m_cbMaxSpaceForRBSWhenLowDiskSpace;
     INT     m_cSecRBSMaxTimeSpan;
     INT     m_cSecMinCleanupIntervalTime;
