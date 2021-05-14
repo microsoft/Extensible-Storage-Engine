@@ -2936,7 +2936,12 @@ SymbolicName=CATALOGRESEED_FAILURE_TAG_ID
 Language=English
 .
 
-MessageId=3015
+MessageId=3071
+SymbolicName=RBSROLLREQUIRED_FAILURE_TAG_ID
+Language=English
+.
+
+MessageId=3072
 SymbolicName=MAX_FAILURE_TAG_ID
 Language=English
 .

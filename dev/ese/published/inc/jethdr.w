@@ -3965,7 +3965,6 @@ typedef enum
 #define JET_paramRecordUpgradeDirtyLevel        78  //  how aggresively should pages with their record format converted be flushed (0-3)
 // end_PubEsent
 #define JET_paramRecoveryCurrentLogfile         79  //  which generation is currently being replayed (read only)
-#define JET_paramReplayingReplicatedLogfiles    80  //  if a logfile doesn't exist, wait for it to be created
 // begin_PubEsent
 //                                              81  //  JET_paramGlobalMinVerPages defined above
 #define JET_paramOSSnapshotTimeout              82  //  timeout for the freeze period in msec
@@ -3974,6 +3973,7 @@ typedef enum
 
 #if ( JET_VERSION >= 0x0A01 )
 
+#define JET_paramFlight_RBSForceRollIntervalSec                 80  // Time after which we should force roll into new revert snapshot by raising failure item and letting HA remount. This is temporary till we have live roll.
 #define JET_paramFlight_NewQueueOptions                         84  //  Controls options for new Meted IO Queue
 #define JET_paramFlight_ConcurrentMetedOps                      85  //  Controls how many IOs we leave out at once for the new Meted IO Queue.
 #define JET_paramFlight_LowMetedOpsThreshold                    86  //  Controls the transition from 1 meted op to JET_paramFlight_ConcurrentMetedOps (which is the max).

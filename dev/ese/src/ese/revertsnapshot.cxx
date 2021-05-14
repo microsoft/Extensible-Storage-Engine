@@ -1297,13 +1297,31 @@ ERR CRevertSnapshot::ErrRBSInvalidate()
     return ErrUtilWriteRBSHeaders( m_pinst, m_pinst->m_pfsapi, NULL, m_prbsfilehdrCurrent, m_pfapiRBS );
 }
 
-VOID CRevertSnapshot::RBSLogSpaceUsage()
+BOOL CRevertSnapshot::FRBSRaiseFailureItemIfNeeded()
+{
+    _int64 ftCurrent = UtilGetCurrentFileTime();
+
+    // If either RBS file size is greater than what is allowed and enough time has passed to warrant a roll or if the RBS has reached its max allowed time, 
+    // raise a failure item so that HA can take appropriate action to do a roll of the RBS.
+    // Note: This is temporary solution to roll RBS till we have live roll available.
+    if ( ( UtilConvertFileTimeToSeconds( ftCurrent - ConvertLogTimeToFileTime( &m_prbsfilehdrCurrent->rbsfilehdr.tmCreate ) ) > (long long) UlParam( m_pinst, JET_paramFlight_RBSForceRollIntervalSec ) ||
+           m_prbsfilehdrCurrent->rbsfilehdr.le_cbLogicalFileSize > cbMaxRBSSizeAllowed ) && 
+           FRollSnapshot() )
+    {
+        return fTrue;
+    }
+
+    return fFalse;
+}
+
+VOID CRevertSnapshot::RBSCheckSpaceUsage()
 {
     Assert( m_pinst );
     Assert( m_pinst->m_plog );
     Assert( FInitialized() );
 
     WCHAR   wszTimeCreate[32], wszDateCreate[32], wszTimePrevRun[32], wszDatePrevRun[32], wszSizeGrown[32], wszNumLogs[16];
+    BOOL fRBSRaiseFailureItem = fFalse;
 
     {
     ENTERCRITICALSECTION critWrite( &m_critWriteLock );
@@ -1322,6 +1340,8 @@ VOID CRevertSnapshot::RBSLogSpaceUsage()
     // Enough time has passed. Log the space usage stats.
     if ( UtilConvertFileTimeToSeconds( ftCurrent - m_ftSpaceUsageLastLogged ) > csecSpaceUsagePeriodicLog )
     {
+        fRBSRaiseFailureItem = FRBSRaiseFailureItemIfNeeded();
+
         QWORD cbSpaceGrowth = m_prbsfilehdrCurrent->rbsfilehdr.le_cbLogicalFileSize - m_cbFileSizeSpaceUsageLastRun;
         LONG  cLogsGrowth   = lGenCurrent - m_lGenSpaceUsageLastRun;
         __int64 ftCreate    = ConvertLogTimeToFileTime( &m_prbsfilehdrCurrent->rbsfilehdr.tmCreate );
@@ -1345,6 +1365,11 @@ VOID CRevertSnapshot::RBSLogSpaceUsage()
     {
         return;
     }
+    }
+
+    if ( fRBSRaiseFailureItem )
+    {
+        OSUHAEmitFailureTag( m_pinst, HaDbFailureTagRBSRollRequired, L"13aa7a33-59d7-4f1e-bea5-1020fd5a9819" );
     }
 
     const WCHAR* rgcwsz[] =
@@ -2519,7 +2544,7 @@ ERR CRevertSnapshot::ErrWriteBuffers()
 
     if ( fLogSpaceUsage )
     {
-        RBSLogSpaceUsage();
+        RBSCheckSpaceUsage();
     }
 
 HandleError:
@@ -2610,7 +2635,7 @@ ERR CRevertSnapshot::ErrFlushAll()
     Call( ErrFlush() );
     }
 
-    RBSLogSpaceUsage();
+    RBSCheckSpaceUsage();
 
 HandleError:
     return err;
@@ -3062,8 +3087,8 @@ ERR RBSCleaner::ErrDoOneCleanupPass()
             goto HandleError;
         }
 
-        // We will not remove the only snapshot directory we have.
-        if ( lRBSGenMin != lRBSGenMax )
+        // We will not remove the only snapshot directory we have unless RBS is actually disabled.
+        if ( lRBSGenMin != lRBSGenMax || !BoolParam( m_pinst, JET_paramEnableRBS ) )
         {
             fRBSCleanupMinGen = !FGenValid( lRBSGenMin );
             Call( m_prbscleaneriooperator->ErrRBSFilePathForGen( wszRBSAbsDirPath, sizeof( wszRBSAbsDirPath ), wszRBSAbsFilePath, sizeof( wszRBSAbsFilePath ), lRBSGenMin ) );
@@ -3127,6 +3152,11 @@ ERR RBSCleaner::ErrDoOneCleanupPass()
         }
         else
         {
+            if ( cbFreeRBSDisk < m_prbscleanerconfig->CbLowDiskSpaceDisableRBSThreshold() )
+            {
+                OSUHAEmitFailureTag( m_pinst, HaDbFailureTagRBSRollRequired, L"928d9bfa-9dd1-4d7f-ad7b-28a9d8e33b2d" );
+            }
+
             break;
         }
     }
