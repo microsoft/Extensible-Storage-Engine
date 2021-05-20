@@ -241,7 +241,7 @@ ERR ErrSPGetInfo(
     FUCB                      *pfucb,
     __out_bcount(cbMax) BYTE  *pbResult,
     const ULONG               cbMax,
-    const ULONG               fSPExtents,
+    const ULONG               fSPExtentsRequested,
     const GET_CACHED_INFO     gciType,
     CPRINTF * const           pcprintf = NULL );
 
