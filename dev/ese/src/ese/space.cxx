@@ -14416,7 +14416,7 @@ ERR ErrSPGetInfo(
     FUCB                      *pfucb,
     __out_bcount(cbMax) BYTE  *pbResult,
     const ULONG               cbMax,
-    const ULONG               fSPExtents,
+    const ULONG               fSPExtentsRequested,
     const GET_CACHED_INFO     gciType,
     CPRINTF * const           pcprintf )
 {
@@ -14434,6 +14434,9 @@ ERR ErrSPGetInfo(
     ULONG         cbMaxReq = 0;
     BOOL          fReadCachedValue;
     BOOL          fSetCachedValue = fFalse;
+    ULONG         fSPExtents = fSPExtentsRequested; // We might want to read an extent the caller didn't request.
+    CPG           cpgOwnExtTotalDummy;
+    CPG           cpgAvailExtTotalDummy;
     CPG           cpgOECached = cpgNil;
     CPG           cpgAECached = cpgNil;
 
@@ -14662,12 +14665,23 @@ ERR ErrSPGetInfo(
                 break;
 
             case JET_errRecordNotFound:
-                // This objid is a value that COULD be cached, but isn't.
-                if ( FSPOwnedExtent( fSPExtents ) && FSPAvailExtent( fSPExtents ) )
+                // This objid is a value that COULD be cached, but isn't.  Make sure we read both
+                // owned and available (even if the caller only wanted one), in order to initialize
+                // the cached value.
+                if ( !FSPOwnedExtent( fSPExtents ) )
                 {
-                    // We only ever set both values in the cache, not one or the other.
-                    fSetCachedValue = fTrue;
+                    Assert( NULL == pcpgOwnExtTotal );
+                    pcpgOwnExtTotal = &cpgOwnExtTotalDummy;
+                    fSPExtents |= fSPOwnedExtent;
                 }
+                if ( !FSPAvailExtent( fSPExtents ) )
+                {
+                    pcpgAvailExtTotal = &cpgAvailExtTotalDummy;
+                    fSPExtents |= fSPAvailExtent;
+                }
+
+                fSetCachedValue = fTrue;
+
                 // Now go read the slow way.
                 break;
 
