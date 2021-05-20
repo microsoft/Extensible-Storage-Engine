@@ -20,6 +20,7 @@ const WCHAR wszSecLogExt[]              = L".jsl";          //  shadow|secondary
 const WCHAR wszShrinkArchiveExt[]       = L".jsa";          //  shrink archive file extension
 const WCHAR wszRBSExt[]                 = L".rbs";          //  revert snapshot file extension
 const WCHAR wszRBSDirRoot[]             = L"Snapshot";      //  revert snapshot static root directory name
+const WCHAR wszRBSBackupDir[]           = L"Backup";        //  revert snapshot static backup directory name where snapshots are backed up, once applied, for future investigations if needed.
 const WCHAR wszRBSDirBase[]             = L"RBS";           //  revert snapshot directory static base name
 const WCHAR wszRBSLogDir[]             = L"Logs";           //  revert snapshot static log directory base name
 const ULONG cMinReserveLogs             = 2;
