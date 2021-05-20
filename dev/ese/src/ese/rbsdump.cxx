@@ -63,6 +63,9 @@ VOID LOCAL DUMPRBSHeaderStandard( INST *pinst, _In_ const DB_HEADER_READER* cons
     DUMPPrintF( "Snapshot Header Flush Signature: " );
     DUMPPrintSig( &prbsfilehdr->rbsfilehdr.signRBSHdrFlush );
 
+    DUMPPrintF( "Prev Snapshot Header Flush Signature: " );
+    DUMPPrintSig( &prbsfilehdr->rbsfilehdr.signPrevRBSHdrFlush );
+
     g_cbPageFromSnapshot = prbsfilehdr->rbsfilehdr.le_cbDbPageSize;
     DUMPPrintF( "Database page size %u\n", (USHORT)prbsfilehdr->rbsfilehdr.le_cbDbPageSize );
 

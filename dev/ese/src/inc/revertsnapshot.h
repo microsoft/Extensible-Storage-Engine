@@ -79,7 +79,11 @@ struct RBSFILEHDR_FIXED
     BYTE                        bLogsCopied;
     // 81 bytes
 
-    BYTE                        rgbReserved[586];
+    SIGNATURE                   signPrevRBSHdrFlush;    // Signature from the last flush of previous RBS. Used to stamp on database header after we revert to a particular snapshot.
+                                                        // This way, even after a revert, we can further revert back since the snapshots will be considered valid.
+    // 109 bytes
+
+    BYTE                        rgbReserved[558];
     //  667 bytes
 
     //  WARNING: MUST be placed at this offset
@@ -179,6 +183,14 @@ C_ASSERT( offsetof( RBSSEGHDR, fFlags ) == offsetof( CPAGE::PGHDR, fFlags ) );
 
 #include <poppack.h>
 
+struct RBSVersion
+{
+    ULONG   ulMajor;           //  major version number - used to breaking changes
+    ULONG   ulMinor;           //  minor version number - used for backward compat changes (no need for forward compat changes as data is not shipped between servers)
+};
+
+#define JET_rbsfvSignPrevRbsHdrFlush RBSVersion { 1, 4 }  // RBSFormatVersion supporting SignPrevRbsHdrFlush.
+
 INLINE QWORD IbRBSFileOffsetOfSegment( ULONG segment )      { return QWORD( segment + 1 ) << shfRBSSegmentSize; }
 INLINE ULONG IsegRBSSegmentOfFileOffset( QWORD ib )         { return ULONG( ( ib >> shfRBSSegmentSize ) - 1 ); }
 INLINE ULONG CsegRBSCountSegmentOfOffset( DWORD ib )        { return ib >> shfRBSSegmentSize; }
@@ -187,7 +199,7 @@ INLINE ULONG IbRBSSegmentOffsetFromFullOffset( DWORD ib )   { return ib & cbRBSS
 #include "revertsnapshotrecords.h"
 
 const ULONG ulRBSVersionMajor         = 1;
-const ULONG ulRBSVersionMinor         = 3;
+const ULONG ulRBSVersionMinor         = 4;
 
 class CRevertSnapshot;
 
@@ -339,6 +351,7 @@ INLINE VOID RBSFILEHDR::Dump( CPRINTF* pcprintf, DWORD_PTR dwOffset ) const
     (*pcprintf)( FORMAT_UINT( RBSFILEHDR, this, rbsfilehdr.le_ulMinor, dwOffset ) );
     (*pcprintf)( FORMAT_UINT( RBSFILEHDR, this, rbsfilehdr.le_cbLogicalFileSize, dwOffset ) ); 
     (*pcprintf)( FORMAT_VOID( RBSFILEHDR, this, rbsfilehdr.signRBSHdrFlush, dwOffset ) );
+    (*pcprintf)( FORMAT_VOID( RBSFILEHDR, this, rbsfilehdr.signPrevRBSHdrFlush, dwOffset ) );
     (*pcprintf)( FORMAT_INT( RBSFILEHDR, this, rbsfilehdr.le_lGenMinLogCopied, dwOffset ) );
     (*pcprintf)( FORMAT_INT( RBSFILEHDR, this, rbsfilehdr.le_lGenMaxLogCopied, dwOffset ) );
     (*pcprintf)( FORMAT_BOOL( RBSFILEHDR, this, rbsfilehdr.bLogsCopied, dwOffset ) );
@@ -377,10 +390,16 @@ public:
     virtual ERR ErrGetDirSize( PCWSTR wszDirPath, _Out_ QWORD* pcbSize ) = 0;
 
     // calculates the lowest and highest revert snapshot generation in the given path.
-    virtual ERR ErrRBSGetLowestAndHighestGen( LONG* plRBSGenMin, LONG* plRBSGenMax ) = 0;
+    virtual ERR ErrRBSGetLowestAndHighestGen( LONG* plRBSGenMin, LONG* plRBSGenMax, BOOL fBackupDir ) = 0;
 
     // Returns the directory and file path for the given revert snapshot generation.
-    virtual ERR ErrRBSFilePathForGen( __out_bcount ( cbDirPath ) WCHAR* wszRBSDirPath, LONG cbDirPath, __out_bcount ( cbFilePath ) WCHAR* wszRBSFilePath, LONG cbFilePath, LONG lRBSGen ) = 0;
+    virtual ERR ErrRBSFilePathForGen( 
+        __out_bcount ( cbDirPath ) WCHAR* wszRBSDirPath, 
+        LONG cbDirPath, 
+        __out_bcount ( cbFilePath ) WCHAR* wszRBSFilePath, 
+        LONG cbFilePath, 
+        LONG lRBSGen, 
+        BOOL fBackupDir ) = 0;
 
     // Reads file create time from revert snapshot file header.
     virtual ERR ErrRBSFileHeader( PCWSTR wszRBSFilePath,  _Out_ RBSFILEHDR* prbsfilehdr ) = 0;
@@ -388,7 +407,9 @@ public:
     // Delete the given directory and all files/folders within it and logs event.
     virtual ERR ErrRemoveFolder( PCWSTR wszDirPath, PCWSTR wszRBSRemoveReason) = 0;
 
-    virtual PCWSTR WSZRBSAbsRootDirPath() = 0;
+    virtual PCWSTR WszRBSAbsRootDirPath() = 0;
+
+    virtual ERR ErrRBSAbsRootDirPathToUse( __out_bcount( cbDirPath ) WCHAR* wszRBSAbsRootDirPath, LONG cbDirPath, BOOL fBackupDir ) = 0;
 };
 
 class RBSCleanerIOOperator : public IRBSCleanerIOOperator
@@ -400,11 +421,18 @@ public:
     ERR ErrRBSInitPaths();
     ERR ErrRBSDiskSpace( QWORD* pcbFreeForUser );
     ERR ErrGetDirSize( PCWSTR wszDirPath, _Out_ QWORD* pcbSize );
-    ERR ErrRBSGetLowestAndHighestGen( LONG* plRBSGenMin, LONG* plRBSGenMax );
-    ERR ErrRBSFilePathForGen( __out_bcount ( cbDirPath ) WCHAR* wszRBSDirPath, LONG cbDirPath, __out_bcount ( cbFilePath ) WCHAR* wszRBSFilePath, LONG cbFilePath, LONG lRBSGen );
+    ERR ErrRBSGetLowestAndHighestGen( LONG* plRBSGenMin, LONG* plRBSGenMax, BOOL fBackupDir );
+    ERR ErrRBSFilePathForGen( 
+        __out_bcount ( cbDirPath ) WCHAR* wszRBSDirPath, 
+        LONG cbDirPath, 
+        __out_bcount ( cbFilePath ) WCHAR* wszRBSFilePath, 
+        LONG cbFilePath, 
+        LONG lRBSGen, 
+        BOOL fBackupDir );
     ERR ErrRBSFileHeader( PCWSTR wszRBSFilePath, _Out_ RBSFILEHDR* prbsfilehdr );
-    ERR ErrRemoveFolder( PCWSTR wszDirPath, PCWSTR wszRBSRemoveReason);
-    PCWSTR WSZRBSAbsRootDirPath();
+    ERR ErrRemoveFolder( PCWSTR wszDirPath, PCWSTR wszRBSRemoveReason );
+    PCWSTR WszRBSAbsRootDirPath();
+    ERR ErrRBSAbsRootDirPathToUse( __out_bcount( cbDirPath ) WCHAR* wszRBSAbsRootDirPath, LONG cbDirPath, BOOL fBackupDir );
 
 private:
     INST*                           m_pinst;
@@ -413,7 +441,7 @@ private:
     PWSTR                           m_wszRBSBaseName;
 };
 
-INLINE PCWSTR RBSCleanerIOOperator::WSZRBSAbsRootDirPath() { return m_wszRBSAbsRootDirPath; }
+INLINE PCWSTR RBSCleanerIOOperator::WszRBSAbsRootDirPath() { return m_wszRBSAbsRootDirPath; }
 
 //  ================================================================
 class IRBSCleanerConfig
@@ -617,6 +645,8 @@ private:
     ERR     ErrDoOneCleanupPass( );
     BOOL    FMaxPassesReached( ) const;
     BOOL    FGenValid( long lrbsgen );
+
+    ERR ErrRBSCleanupBackup( QWORD* cbFreeRBSDisk, QWORD* cbTotalRBSDiskSpace );
 };
 
 INLINE VOID RBSCleaner::SetFirstValidGen( long lrbsgen )
@@ -781,6 +811,7 @@ class CRevertSnapshot : public CZeroInit
     ERR ErrRBSCreateOrLoadRbsGen(
         long lRBSGen,
         LOGTIME tmPrevGen,
+        _In_ const SIGNATURE signPrevRBSHdrFlush,
         _Out_bytecap_c_(cbOSFSAPI_MAX_PATHW) PWSTR wszRBSAbsFilePath,
         _Out_bytecap_c_(cbOSFSAPI_MAX_PATHW) PWSTR wszRBSAbsLogDirPath );
 
@@ -962,7 +993,7 @@ public:
     ~CRBSDatabaseRevertContext();
     ERR ErrRBSDBRCInit( RBSATTACHINFO* prbsattachinfo, SIGNATURE* psignRBSHdrFlush, CPG cacheSize );
     ERR ErrSetDbstateForRevert( ULONG rbsrchkstate, LOGTIME logtimeRevertTo );
-    ERR ErrSetDbstateAfterRevert( ULONG rbsrchkstate );
+    ERR ErrSetDbstateAfterRevert( SIGNATURE* psignRbsHdrFlush );
     ERR ErrRBSCaptureDbHdrFromRBS( RBSDbHdrRecord* prbsdbhdrrec, BOOL* pfGivenDbfilehdrCaptured );
     ERR ErrAddPage( void* pvPage, PGNO pgno );
     ERR ErrResetSbmDbPages();
@@ -1027,8 +1058,8 @@ private:
     BOOL FRBSDBRC( PCWSTR wszDatabaseName, IRBSDBRC* pirbsdbrc );
 
     ERR ErrRBSDBRCInitFromAttachInfo( const BYTE* pbRBSAttachInfo, SIGNATURE* psignRBSHdrFlush );
-    ERR ErrComputeRBSRangeToApply( LOGTIME ltRevertExpected, LOGTIME* pltRevertActual );
-    ERR ErrRBSGenApply( LONG lRBSGen, BOOL fDbHeaderOnly );
+    ERR ErrComputeRBSRangeToApply( PCWSTR wszRBSAbsRootDirPath, LOGTIME ltRevertExpected, LOGTIME* pltRevertActual );
+    ERR ErrRBSGenApply( LONG lRBSGen, RBSFILEHDR* prbsfilehdr, BOOL fDbHeaderOnly, BOOL fUseBackupDir );
     ERR ErrApplyRBSRecord( RBSRecord* prbsrec, BOOL fCaptureDBHdrFromRBS, BOOL fDbHeaderOnly, BOOL* pfGivenDbfilehdrCaptured );
     ERR ErrCheckApplyRBSContinuation();
     ERR ErrAddRevertedNewPage( DBID dbid, PGNO pgnoRevertNew );
@@ -1039,7 +1070,10 @@ private:
     ERR ErrUpdateRevertTimeFromCheckpoint( LOGTIME *pltRevertExpected );
     ERR ErrUpdateRevertCheckpoint( ULONG revertstate, RBS_POS rbspos, LOGTIME tmCreateCurrentRBSGen, BOOL fUpdateRevertedPageCount );
     ERR ErrManageStateAfterRevert( LONG* pLgenNewMinReq, LONG* pLgenNewMaxReq );
-    ERR ErrUpdateDbStatesAfterRevert();
+    ERR ErrCopyRequiredLogsAfterRevert( LONG lgenMinToCopy, LONG lgenMaxToCopy );
+    ERR ErrBackupRBSAfterRevert();
+    ERR ErrRemoveRBSAfterRevert();
+    ERR ErrUpdateDbStatesAfterRevert( SIGNATURE* psignRbsHdrFlush );
     ERR ErrSetLogExt( PCWSTR wszRBSLogDirPath );
 
     ERR ErrAddPageRecord( void* pvPage, DBID dbid, PGNO pgno );

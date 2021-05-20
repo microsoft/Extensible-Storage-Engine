@@ -123,11 +123,12 @@ public:
 
     ERR ErrRBSDiskSpace( QWORD* pcbFreeForUser );
     ERR ErrGetDirSize( PCWSTR wszDirPath, _Out_ QWORD* pcbSize );
-    ERR ErrRBSGetLowestAndHighestGen( LONG* plRBSGenMin, LONG* plRBSGenMax );
-    ERR ErrRBSFilePathForGen( __out_bcount ( cbDirPath ) WCHAR* wszRBSDirPath, LONG cbDirPath, __out_bcount ( cbFilePath ) WCHAR* wszRBSFilePath, LONG cbFilePath, LONG lRBSGen );
+    ERR ErrRBSGetLowestAndHighestGen( LONG* plRBSGenMin, LONG* plRBSGenMax, BOOL fBackupDir );
+    ERR ErrRBSFilePathForGen( __out_bcount ( cbDirPath ) WCHAR* wszRBSDirPath, LONG cbDirPath, __out_bcount ( cbFilePath ) WCHAR* wszRBSFilePath, LONG cbFilePath, LONG lRBSGen, BOOL fBackupDir );
     ERR ErrRBSFileHeader( PCWSTR wszRBSFilePath, _Out_ RBSFILEHDR* prbsfilehdr );
     ERR ErrRemoveFolder( PCWSTR wszDirPath, PCWSTR wszRBSRemoveReason);
-    PCWSTR WSZRBSAbsRootDirPath() { return L""; }
+    PCWSTR WszRBSAbsRootDirPath() { return L""; }
+    ERR ErrRBSAbsRootDirPathToUse( __out_bcount( cbDirPath ) WCHAR* wszRBSDirPath, LONG cbDirPath, BOOL fBackupDir );
 
     ERR m_errRBSDiskSpace;
     ERR m_errGetDirSize;
@@ -137,13 +138,16 @@ public:
     ERR m_errRemoveFolder;
 
     INT m_cRemoveFolderCalls;
-    INT m_lastRemovedRBSGen;
 
     INT m_cSecBetweenCreateTime;
     INT m_cSecLastCreateTimeFromCurrentTime;
+    INT m_cSecLastBackupCreateTimeFromCurrentTime;
 
     LONG m_lRBSGenMin;
     LONG m_lRBSGenMax;
+
+    LONG m_lRBSGenMinBackup;
+    LONG m_lRBSGenMaxBackup;
 
     QWORD m_cbDirSize;
     QWORD m_cbDiskSize;
@@ -162,12 +166,15 @@ RBSCleanerTestIOOperator::RBSCleanerTestIOOperator()
     m_errRemoveFolder               = JET_errSuccess;
 
     m_cRemoveFolderCalls                = 0;
-    m_lastRemovedRBSGen                 = 0;
     m_cSecBetweenCreateTime             = 300;
     m_cSecLastCreateTimeFromCurrentTime = 300;
+    m_cSecLastBackupCreateTimeFromCurrentTime = 300;
 
     m_lRBSGenMin = 1;
     m_lRBSGenMax = 10;
+
+    m_lRBSGenMinBackup = 0;
+    m_lRBSGenMaxBackup = 0;
 
     m_cbDirSize     = 104857;     // Such that size of 10 snapshots is less than 1MB threshold we setting in config in case of low disk space.
     m_cbDiskSize    = 2147483648; // 2GB, twice the threshold we are setting in config
@@ -180,7 +187,9 @@ ERR RBSCleanerTestIOOperator::ErrRBSDiskSpace( QWORD* pcbFreeForUser )
 {
     if ( m_errRBSDiskSpace == JET_errSuccess )
     {
-        *pcbFreeForUser = m_cbDiskSize - ( m_cbDirSize * ( m_lRBSGenMax - m_lRBSGenMin + 1 ) );
+        LONG cbackupRBS = m_lRBSGenMinBackup == 0 ? 0 : m_lRBSGenMaxBackup - m_lRBSGenMinBackup + 1;
+        LONG crbs       = m_lRBSGenMin == 0 ? 0 : m_lRBSGenMax - m_lRBSGenMin + 1;
+        *pcbFreeForUser = m_cbDiskSize - ( m_cbDirSize * ( crbs + cbackupRBS ) );
     }
 
     return m_errRBSDiskSpace;
@@ -190,9 +199,12 @@ ERR RBSCleanerTestIOOperator::ErrGetDirSize( PCWSTR wszDirPath, _Out_ QWORD* pcb
 {
     if ( m_errGetDirSize == JET_errSuccess )
     {
+        LONG cbackupRBS = m_lRBSGenMinBackup == 0 ? 0 : m_lRBSGenMaxBackup - m_lRBSGenMinBackup + 1;
+        LONG crbs       = m_lRBSGenMin == 0 ? 0 : m_lRBSGenMax - m_lRBSGenMin + 1;
+
         if ( LOSStrCompareW( wszDirPath, L"" ) == 0 )
         {
-            *pcbSize = m_cbDirSize * ( m_lRBSGenMax - m_lRBSGenMin + 1 );
+            *pcbSize = m_cbDirSize * ( cbackupRBS + crbs );
         }
         else
         {
@@ -203,24 +215,40 @@ ERR RBSCleanerTestIOOperator::ErrGetDirSize( PCWSTR wszDirPath, _Out_ QWORD* pcb
     return m_errGetDirSize;
 }
 
-ERR RBSCleanerTestIOOperator::ErrRBSGetLowestAndHighestGen( LONG* plRBSGenMin, LONG* plRBSGenMax )
+ERR RBSCleanerTestIOOperator::ErrRBSGetLowestAndHighestGen( LONG* plRBSGenMin, LONG* plRBSGenMax, BOOL fBackupDir )
 {
     if ( m_errRBSGetLowestAndHighestGen == JET_errSuccess )
     {
-        *plRBSGenMin = m_lRBSGenMin;
-        *plRBSGenMax = m_lRBSGenMax;
+        if ( !fBackupDir )
+        {
+            *plRBSGenMin = m_lRBSGenMin;
+            *plRBSGenMax = m_lRBSGenMax;
+        }
+        else
+        {
+            *plRBSGenMin = m_lRBSGenMinBackup;
+            *plRBSGenMax = m_lRBSGenMaxBackup;
+        }
     }
 
     return m_errRBSGetLowestAndHighestGen;
 }
 
-ERR RBSCleanerTestIOOperator::ErrRBSFilePathForGen( __out_bcount ( cbDirPath ) WCHAR* wszRBSDirPath, LONG cbDirPath, __out_bcount ( cbFilePath ) WCHAR* wszRBSFilePath, LONG cbFilePath, LONG lRBSGen )
+ERR RBSCleanerTestIOOperator::ErrRBSFilePathForGen( __out_bcount ( cbDirPath ) WCHAR* wszRBSDirPath, LONG cbDirPath, __out_bcount ( cbFilePath ) WCHAR* wszRBSFilePath, LONG cbFilePath, LONG lRBSGen, BOOL fBackupDir )
 {
     ERR err = JET_errSuccess;
     if ( m_errRBSFilePathForGen == JET_errSuccess )
     {
         WCHAR wszRBSGen[ cbOSFSAPI_MAX_PATHW ];
-        swprintf_s( wszRBSGen, ARRAYSIZE(wszRBSGen), L"%d", lRBSGen);
+
+        if ( fBackupDir )
+        {
+            swprintf_s( wszRBSGen, ARRAYSIZE(wszRBSGen), L"B%d", lRBSGen);
+        }
+        else
+        {
+            swprintf_s( wszRBSGen, ARRAYSIZE(wszRBSGen), L"%d", lRBSGen);
+        }
 
         Call( ErrOSStrCbCopyW( wszRBSDirPath, cbDirPath, wszRBSGen ) );
         Call( ErrOSStrCbCopyW( wszRBSFilePath, cbDirPath, wszRBSGen ) );
@@ -237,9 +265,29 @@ ERR RBSCleanerTestIOOperator::ErrRBSFileHeader( PCWSTR wszRBSFilePath, _Out_ RBS
     if ( m_errRBSFileHdr == JET_errSuccess )
     {
         Assert( prbsfilehdr );
-        INT     lRBSGen         = wcstol( wszRBSFilePath, NULL, 10 );
-        __int64 cSecBehind      = m_cSecLastCreateTimeFromCurrentTime + ( ( m_lRBSGenMax - lRBSGen ) * m_cSecBetweenCreateTime );
-        __int64 cSecBehindPrev  = m_cSecLastCreateTimeFromCurrentTime + ( ( m_lRBSGenMax - lRBSGen + 1) * m_cSecBetweenCreateTime );
+        BOOL fbackup = fFalse;
+
+        if ( wszRBSFilePath[ 0 ] == 'B' )
+        {
+            fbackup = fTrue;
+        }
+
+        INT     lRBSGen         = 0;
+        __int64 cSecBehind      = 0;
+        __int64 cSecBehindPrev  = 0;
+
+        if ( fbackup )
+        {
+           lRBSGen         = wcstol( wszRBSFilePath + 1, NULL, 10 );
+           cSecBehind      = m_cSecLastBackupCreateTimeFromCurrentTime + ( ( m_lRBSGenMaxBackup - lRBSGen ) * m_cSecBetweenCreateTime );
+           cSecBehindPrev  = m_cSecLastBackupCreateTimeFromCurrentTime + ( ( m_lRBSGenMaxBackup - lRBSGen + 1 ) * m_cSecBetweenCreateTime );
+        }
+        else
+        {
+           lRBSGen         = wcstol( wszRBSFilePath, NULL, 10 );
+           cSecBehind      = m_cSecLastCreateTimeFromCurrentTime + ( ( m_lRBSGenMax - lRBSGen ) * m_cSecBetweenCreateTime );
+           cSecBehindPrev  = m_cSecLastCreateTimeFromCurrentTime + ( ( m_lRBSGenMax - lRBSGen + 1 ) * m_cSecBetweenCreateTime );
+        }
 
         if ( lRBSGen == m_lRBSGenWithInvalidPrevTime )
         {
@@ -256,20 +304,48 @@ ERR RBSCleanerTestIOOperator::ErrRBSFileHeader( PCWSTR wszRBSFilePath, _Out_ RBS
     return m_errRBSFileHdr;
 }
 
-ERR RBSCleanerTestIOOperator::ErrRemoveFolder( PCWSTR wszDirPath, PCWSTR wszRBSRemoveReason)
+ERR RBSCleanerTestIOOperator::ErrRemoveFolder( PCWSTR wszDirPath, PCWSTR wszRBSRemoveReason )
 {
     if ( m_errRemoveFolder == JET_errSuccess )
     {
-        INT     lRBSGen     = wcstol( wszDirPath, NULL, 10 );
+        if ( wszDirPath[ 0 ] == 'B' )
+        {
+            INT     lRBSGen = wcstol( wszDirPath + 1, NULL, 10 );
 
-        Assert( lRBSGen == m_lRBSGenMin );
-        m_lRBSGenMin++;
+            Assert( lRBSGen == m_lRBSGenMinBackup );
+            m_lRBSGenMinBackup++;
+
+            if ( m_lRBSGenMinBackup > m_lRBSGenMaxBackup )
+            {
+                m_lRBSGenMinBackup = 0;
+                m_lRBSGenMaxBackup = 0;
+            }
+        }
+        else
+        {
+            INT     lRBSGen = wcstol( wszDirPath, NULL, 10 );
+
+            Assert( lRBSGen == m_lRBSGenMin );
+            m_lRBSGenMin++;
+
+            if ( m_lRBSGenMin > m_lRBSGenMax )
+            {
+                m_lRBSGenMin = 0;
+                m_lRBSGenMax = 0;
+            }
+        }
 
         m_cRemoveFolderCalls++;
-        m_lastRemovedRBSGen = lRBSGen;
     }
 
     return m_errRemoveFolder;
+}
+
+ERR RBSCleanerTestIOOperator::ErrRBSAbsRootDirPathToUse( __out_bcount( cbDirPath ) WCHAR* wszRBSAbsRootDirPath, LONG cbDirPath, BOOL fBackupDir )
+{
+   // doesn't matter what we return for test here as it doesn't affect the values we return in the current usage.
+   ErrOSStrCbCopyW( wszRBSAbsRootDirPath, sizeof( wszRBSAbsRootDirPath ), wszRBSBackupDir );
+   return JET_errSuccess;
 }
 
 // RBS cleanup is disabled. We shouldn't have executed any pass.
@@ -654,6 +730,126 @@ JETUNITTEST( RBSCleaner, ComputeFirstValidRBSGenSetsInvalidSnapshot )
     CHECK( pstate->FtPrevPassCompletionTime() >= pstate->FtPassStartTime() );
     CHECK( piooperator->m_cRemoveFolderCalls == 6 );
     CHECK( piooperator->m_lRBSGenMin == 7 );
+
+    CHECKCALLS( JetTerm2( (JET_INSTANCE) pinst, JET_bitTermAbrupt ) );
+}
+
+// Low disk space but there is space occupied by backup RBS which could be removed.
+JETUNITTEST( RBSCleaner, LowDiskSpaceBackupRBSRemoved )
+{
+    __int64 ftStartTime = UtilGetCurrentFileTime();
+    unique_ptr<RBSCleanerTestConfig> pconfig( new RBSCleanerTestConfig() );
+    pconfig->SetCSecRBSMaxTimeSpan( 3600 );
+
+    RBSCleanerTestState* pstate             = new RBSCleanerTestState();
+    RBSCleanerTestIOOperator* piooperator   = new RBSCleanerTestIOOperator();
+    piooperator->m_lRBSGenMin = 1;
+    piooperator->m_lRBSGenMax = 10;
+    piooperator->m_lRBSGenMinBackup = 11;
+    piooperator->m_lRBSGenMaxBackup = 15;
+
+    LONG cRBSTotal = piooperator->m_lRBSGenMax - piooperator->m_lRBSGenMin + 1 + piooperator->m_lRBSGenMaxBackup - piooperator->m_lRBSGenMinBackup + 1;
+
+    QWORD cbRBSTotalSize = cRBSTotal * piooperator->m_cbDirSize;
+
+    // Configure low disk space threshold such that we are consuming extra space and backup RBS removal should clear up enough space. 
+    // Even though clearing up  one backup RBS would have been enough spacewise, we should clear all of them since partial RBS chain is not enough to debug.
+    pconfig->SetCbLowDiskSpaceThreshold( piooperator->m_cbDiskSize - cbRBSTotalSize + piooperator->m_cbDirSize );
+
+    // Configure limits such that RBS is consuming lot more space than allowed
+    pconfig->SetCbMaxSpaceForRBSWhenLowDiskSpace( cbRBSTotalSize - ( cbRBSTotalSize/2 ) );
+
+    INST* pinst;
+    CHECKCALLS( JetCreateInstance2W( (JET_INSTANCE*) &pinst, NULL, NULL, JET_bitNil ) );
+    CHECKCALLS( JetSetSystemParameterW( (JET_INSTANCE*) &pinst, JET_sesidNil, JET_paramEnableRBS, 1, NULL ) );
+
+    unique_ptr<RBSCleaner> prbscleaner( new RBSCleaner( pinst, piooperator, pstate, pconfig.release() ) );
+    CHECK( JET_errSuccess == prbscleaner->ErrStartCleaner() );
+
+    SleepTillConditionSatisfied( pstate->CPassesFinished() == 1, 2, MaxTestRunTimeInMSec );
+
+    CHECK( pstate->FtPassStartTime() >= ftStartTime );
+    CHECK( pstate->FtPrevPassCompletionTime() >= pstate->FtPassStartTime() );
+    CHECK( piooperator->m_cRemoveFolderCalls == 5 );
+    CHECK( piooperator->m_lRBSGenMin == 1 );
+
+    CHECKCALLS( JetTerm2( (JET_INSTANCE) pinst, JET_bitTermAbrupt ) );
+}
+
+// Low disk space but there is space occupied by backup RBS which could be removed. But that's not enough and we need to remove one more RBS.
+JETUNITTEST( RBSCleaner, LowDiskSpaceBackupRBSRemovalNotEnough )
+{
+    __int64 ftStartTime = UtilGetCurrentFileTime();
+    unique_ptr<RBSCleanerTestConfig> pconfig( new RBSCleanerTestConfig() );
+    pconfig->SetCSecRBSMaxTimeSpan( 3600 );
+
+    RBSCleanerTestState* pstate             = new RBSCleanerTestState();
+    RBSCleanerTestIOOperator* piooperator   = new RBSCleanerTestIOOperator();
+    piooperator->m_lRBSGenMin = 1;
+    piooperator->m_lRBSGenMax = 10;
+    piooperator->m_lRBSGenMinBackup = 11;
+    piooperator->m_lRBSGenMaxBackup = 15;
+
+    LONG cRBSTotal = piooperator->m_lRBSGenMax - piooperator->m_lRBSGenMin + 1 + piooperator->m_lRBSGenMaxBackup - piooperator->m_lRBSGenMinBackup + 1;
+
+    QWORD cbRBSTotalSize = cRBSTotal * piooperator->m_cbDirSize;
+
+    // Configure low disk space threshold such that we are consuming extra space and backup RBS removal alone shouldn't clear up enough space. 
+    pconfig->SetCbLowDiskSpaceThreshold( piooperator->m_cbDiskSize - cbRBSTotalSize + ( ( piooperator->m_lRBSGenMaxBackup - piooperator->m_lRBSGenMinBackup + 2 ) * piooperator->m_cbDirSize ) );
+
+    // Configure limits such that RBS is consuming lot more space than allowed
+    pconfig->SetCbMaxSpaceForRBSWhenLowDiskSpace( cbRBSTotalSize - ( cbRBSTotalSize/2 ) );
+
+    INST* pinst;
+    CHECKCALLS( JetCreateInstance2W( (JET_INSTANCE*) &pinst, NULL, NULL, JET_bitNil ) );
+    CHECKCALLS( JetSetSystemParameterW( (JET_INSTANCE*) &pinst, JET_sesidNil, JET_paramEnableRBS, 1, NULL ) );
+
+    unique_ptr<RBSCleaner> prbscleaner( new RBSCleaner( pinst, piooperator, pstate, pconfig.release() ) );
+    CHECK( JET_errSuccess == prbscleaner->ErrStartCleaner() );
+
+    SleepTillConditionSatisfied( pstate->CPassesFinished() == 1, 2, MaxTestRunTimeInMSec );
+
+    CHECK( pstate->FtPassStartTime() >= ftStartTime );
+    CHECK( pstate->FtPrevPassCompletionTime() >= pstate->FtPassStartTime() );
+    CHECK( piooperator->m_cRemoveFolderCalls == 6 );
+    CHECK( piooperator->m_lRBSGenMin == 2 );
+
+    CHECKCALLS( JetTerm2( (JET_INSTANCE) pinst, JET_bitTermAbrupt ) );
+}
+
+// Backup RBS expired.
+JETUNITTEST( RBSCleaner, ExpiredBackupSnapshotsRemoved )
+{
+    __int64 ftStartTime = UtilGetCurrentFileTime();
+
+    RBSCleanerTestState* pstate             = new RBSCleanerTestState();
+    RBSCleanerTestIOOperator* piooperator   = new RBSCleanerTestIOOperator();
+    piooperator->m_lRBSGenMin = 6;
+    piooperator->m_lRBSGenMax = 15;
+    piooperator->m_lRBSGenMinBackup = 1;
+    piooperator->m_lRBSGenMaxBackup = 5;
+
+    unique_ptr<RBSCleanerTestConfig> pconfig( new RBSCleanerTestConfig() );
+
+    LONG cRBSTotal = piooperator->m_lRBSGenMax - piooperator->m_lRBSGenMin + 1 + piooperator->m_lRBSGenMaxBackup - piooperator->m_lRBSGenMinBackup + 1;;
+
+    // Set file time such that it is invalid for the 1st backup snapshot.
+    pconfig->SetCSecRBSMaxTimeSpan( piooperator->m_cSecLastCreateTimeFromCurrentTime + ( ( cRBSTotal - 1 ) * piooperator->m_cSecBetweenCreateTime ) - 10 );
+    piooperator->m_cSecLastBackupCreateTimeFromCurrentTime = ( piooperator->m_lRBSGenMax - piooperator->m_lRBSGenMin + 2 ) * piooperator->m_cSecBetweenCreateTime;
+
+    INST* pinst;
+    CHECKCALLS( JetCreateInstance2W( (JET_INSTANCE*) &pinst, NULL, NULL, JET_bitNil ) );
+    CHECKCALLS( JetSetSystemParameterW( (JET_INSTANCE*) &pinst, JET_sesidNil, JET_paramEnableRBS, 1, NULL ) );
+
+    unique_ptr<RBSCleaner> prbscleaner( new RBSCleaner( pinst, piooperator, pstate, pconfig.release() ) );
+    CHECK( JET_errSuccess == prbscleaner->ErrStartCleaner() );
+
+    SleepTillConditionSatisfied( pstate->CPassesFinished() == 1, 2, MaxTestRunTimeInMSec );
+
+    CHECK( pstate->FtPassStartTime() >= ftStartTime );
+    CHECK( pstate->FtPrevPassCompletionTime() >= pstate->FtPassStartTime() );
+    CHECK( piooperator->m_cRemoveFolderCalls == 5 );
+    CHECK( piooperator->m_lRBSGenMin == 6 );
 
     CHECKCALLS( JetTerm2( (JET_INSTANCE) pinst, JET_bitTermAbrupt ) );
 }

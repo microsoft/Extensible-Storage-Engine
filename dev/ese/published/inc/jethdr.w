@@ -5364,7 +5364,8 @@ typedef JET_ERR (JET_API * JET_PFNEMITLOGDATA)(
 #define JET_revertstateNone                 0   // Revert has not yet started/default state.
 #define JET_revertstateInProgress           1   // Revert snapshots are currently being applied to the databases.
 #define JET_revertstateCopingLogs           2   // The required logs to bring databases to a clean state are being copied to the log directory after revert.
-#define JET_revertstateCompleted            3   // Revert snapshots have been finished applying.
+#define JET_revertstateBackupSnapshot       3   // Backs up revert snapshots for investigation purposes.
+#define JET_revertstateRemoveSnapshot       4   // Removes the snapshot which have been applied to the databases and backed up.
 #endif // JET_VERSION >= 0x0A01
 
     /* RBS revert grbits */
