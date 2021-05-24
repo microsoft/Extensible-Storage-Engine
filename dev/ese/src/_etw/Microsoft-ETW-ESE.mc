@@ -1204,6 +1204,7 @@ ESE_PRE_GEN_BASE_FILE:   be pre-processed with eseetw.pl.
             <data  inType="win:UInt64"              name="dwEngineFileId"     />
             <data  inType="win:UInt64"              name="cbMemory"           />
             <data  inType="win:UInt32"              name="cmsecReferenceIntervalMax" />
+            <data  inType="win:UInt64"              name="cbDirty"            />
           </template>
           <template tid="tCacheSetLgposModifyTrace">
             <data  inType="win:UInt32"              name="tick"               />

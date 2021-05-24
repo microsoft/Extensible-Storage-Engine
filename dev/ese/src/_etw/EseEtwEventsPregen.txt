@@ -759,6 +759,7 @@ START_TRACE_DEFNS:
             <data  inType="win:UInt64"              name="dwEngineFileId"     />
             <data  inType="win:UInt64"              name="cbMemory"           />
             <data  inType="win:UInt32"              name="cmsecReferenceIntervalMax" />
+            <data  inType="win:UInt64"              name="cbDirty"            />
 
     Define: CacheSetLgposModify
             <data  inType="win:UInt32"              name="tick"               />

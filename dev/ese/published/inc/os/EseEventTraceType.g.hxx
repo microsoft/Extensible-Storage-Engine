@@ -795,6 +795,7 @@ typedef struct _EseCacheMemoryUsageNative
     QWORD       dwEngineFileId;
     QWORD       cbMemory;
     DWORD       cmsecReferenceIntervalMax;
+    QWORD       cbDirty;
 } EseCacheMemoryUsageNative;
 
 typedef struct _EseCacheSetLgposModifyNative

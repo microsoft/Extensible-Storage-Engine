@@ -2454,7 +2454,8 @@ INLINE void ETCacheMemoryUsage(
     DWORD    dwEngineFileType,
     QWORD    dwEngineFileId,
     QWORD    cbMemory,
-    DWORD    cmsecReferenceIntervalMax )
+    DWORD    cmsecReferenceIntervalMax,
+    QWORD    cbDirty )
 {
 
 #ifdef DEBUG
@@ -2464,19 +2465,21 @@ INLINE void ETCacheMemoryUsage(
         dwEngineFileType,
         dwEngineFileId,
         cbMemory,
-        cmsecReferenceIntervalMax };
+        cmsecReferenceIntervalMax,
+        cbDirty };
     FakeUseTrace( (void*)&ettT );
 #endif // DEBUG
 
     OSEventTrace(
         _etguidCacheMemoryUsage,
-        6,
+        7,
         wszFilename,
         (BYTE *)&tce,
         (DWORD *)&dwEngineFileType,
         (QWORD *)&dwEngineFileId,
         (QWORD *)&cbMemory,
-        (DWORD *)&cmsecReferenceIntervalMax );
+        (DWORD *)&cmsecReferenceIntervalMax,
+        (QWORD *)&cbDirty );
 }
 
 INLINE void ETCacheSetLgposModify(

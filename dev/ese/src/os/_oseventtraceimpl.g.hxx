@@ -880,7 +880,8 @@ void ETW_CacheMemoryUsage_Trace( const MOF_FIELD * rgparg )
         *(DWORD *)rgparg[2].DataPtr,
         *(QWORD *)rgparg[3].DataPtr,
         *(QWORD *)rgparg[4].DataPtr,
-        *(DWORD *)rgparg[5].DataPtr );
+        *(DWORD *)rgparg[5].DataPtr,
+        *(QWORD *)rgparg[6].DataPtr );
 }
 
 void ETW_CacheSetLgposModify_Trace( const MOF_FIELD * rgparg )
@@ -968,7 +969,7 @@ void ETW_CacheSetLgposModify_Trace( const MOF_FIELD * rgparg )
         { 6, &ETW_IOThreadIssuedDisk_Trace }, \
         { 3, &ETW_IOThreadIssueProcessedIO_Trace }, \
         { 10, &ETW_IOIoreqCompletion_Trace }, \
-        { 6, &ETW_CacheMemoryUsage_Trace }, \
+        { 7, &ETW_CacheMemoryUsage_Trace }, \
         { 4, &ETW_CacheSetLgposModify_Trace }, \
 
 
