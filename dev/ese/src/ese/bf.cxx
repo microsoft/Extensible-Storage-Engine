@@ -15623,13 +15623,20 @@ void BFIMaintTelemetryRequest()
 
 void BFIMaintTelemetryITask( VOID *, VOID * pvContext )
 {
+    ERR         err                         = JET_errSuccess;
+    LONGLONG**  rgrgcbCacheByIfmpTce        = NULL;
+    LONGLONG**  rgrgcbCacheDirtyByIfmpTce   = NULL;
+    TICK**      rgrgtickMinByIfmpTce        = NULL;
+
     //  compute the cache footprint by ifmp, tce
 
-    LONGLONG** rgrgcbCacheByIfmpTce = new LONGLONG*[ g_ifmpMax ];
-    TICK** rgrgtickMinByIfmpTce = new TICK*[ g_ifmpMax ];
+    Alloc( rgrgcbCacheByIfmpTce = new LONGLONG*[ g_ifmpMax ] );
+    Alloc( rgrgcbCacheDirtyByIfmpTce = new LONGLONG* [g_ifmpMax] );
+    Alloc( rgrgtickMinByIfmpTce = new TICK*[ g_ifmpMax ] );
     for ( IFMP ifmpT = 0; ifmpT < g_ifmpMax; ifmpT++ )
     {
         rgrgcbCacheByIfmpTce[ ifmpT ] = NULL;
+        rgrgcbCacheDirtyByIfmpTce[ifmpT] = NULL;
         rgrgtickMinByIfmpTce[ ifmpT ] = NULL;
     }
 
@@ -15660,11 +15667,13 @@ void BFIMaintTelemetryITask( VOID *, VOID * pvContext )
 
         if ( rgrgcbCacheByIfmpTce[ ifmp ] == NULL )
         {
-            rgrgcbCacheByIfmpTce[ ifmp ] = new LONGLONG[ tceMax ];
-            rgrgtickMinByIfmpTce[ ifmp ] = new TICK[ tceMax ];
+            Alloc( rgrgcbCacheByIfmpTce[ ifmp ] = new LONGLONG[ tceMax ] );
+            Alloc( rgrgcbCacheDirtyByIfmpTce[ifmp] = new LONGLONG[tceMax] );
+            Alloc( rgrgtickMinByIfmpTce[ ifmp ] = new TICK[ tceMax ] );
             for ( int tceT = 0; tceT < tceMax; tceT++ )
             {
                 rgrgcbCacheByIfmpTce[ ifmp ][ tceT ] = 0;
+                rgrgcbCacheDirtyByIfmpTce[ifmp][tceT] = 0;
                 rgrgtickMinByIfmpTce[ ifmp ][ tceT ] = tickNow;
             }
         }
@@ -15672,6 +15681,13 @@ void BFIMaintTelemetryITask( VOID *, VOID * pvContext )
         //  track the space consumed by ifmp and tce
 
         rgrgcbCacheByIfmpTce[ ifmp ][ pbf->tce ] += g_rgcbPageSize[ pbf->icbBuffer ];
+
+        //  track space consumed by dirty buffers by ifmp and tce
+
+        if ( pbf->bfdf >= bfdfDirty )
+        {
+            rgrgcbCacheDirtyByIfmpTce[ifmp][pbf->tce] += g_rgcbPageSize[pbf->icbBuffer];
+        }
 
         //  only track the last touch time for buffers cached for normal use and that aren't held over for any other
         //  reason (e.g. dirty and cannot be flushed) because we are trying to find the natural reference interval
@@ -15716,7 +15732,8 @@ void BFIMaintTelemetryITask( VOID *, VOID * pvContext )
                     rgrgcbCacheByIfmpTce[ ifmp ][ tce ],
                     TickCmp( tickNow, rgrgtickMinByIfmpTce[ ifmp ][ tce ] ) >= 0 ?
                         DtickDelta( rgrgtickMinByIfmpTce[ ifmp ][ tce ], tickNow ) :
-                        0 );
+                        0,
+                    rgrgcbCacheDirtyByIfmpTce[ifmp][tce] );
             }
         }
 
@@ -15725,16 +15742,29 @@ void BFIMaintTelemetryITask( VOID *, VOID * pvContext )
 
     //  release our resources
 
+HandleError:
     for ( IFMP ifmpT = 0; ifmpT < g_ifmpMax; ifmpT++ )
     {
-        delete[] rgrgcbCacheByIfmpTce[ ifmpT ];
-        delete[] rgrgtickMinByIfmpTce[ ifmpT ];
+        if ( rgrgcbCacheByIfmpTce )
+        {
+            delete[] rgrgcbCacheByIfmpTce[ifmpT];
+        }
+        if ( rgrgcbCacheDirtyByIfmpTce )
+        {
+            delete[] rgrgcbCacheDirtyByIfmpTce[ifmpT];
+        }
+        if ( rgrgtickMinByIfmpTce )
+        {
+            delete[] rgrgtickMinByIfmpTce[ifmpT];
+        }
     }
 
     delete[] rgrgcbCacheByIfmpTce;
+    delete[] rgrgcbCacheDirtyByIfmpTce;
     delete[] rgrgtickMinByIfmpTce;
 
     //  schedule our next telemetry
+
     BFIMaintTelemetryRequest();
 }
 
