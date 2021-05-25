@@ -14274,7 +14274,13 @@ LOCAL VOID SPIReportAnyExtentCacheError(
             PinstFromPfucb( pfucb ) );
         OSTraceResumeGC();
 
-        AssertTrack( fFalse, "Size mismatch OE and/or AE." );
+        // This happens too often under completely normal conditions
+        // to safely Assert anything.  We get here when the amount read
+        // from the cache didn't match what we read by counting a table,
+        // and as there is no locking there, mismatches happen.  Maybe
+        // we can do some kind of assert based on how big the mismatch
+        // is?  Later...
+        //  AssertTrack( fFalse, "Size mismatch OE and/or AE." );
     }
     else
     {
