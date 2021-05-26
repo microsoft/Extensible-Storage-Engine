@@ -11,7 +11,16 @@
 #include <vswriter.h>
 #pragma prefast(pop)
 
+#pragma prefast(push)
+#pragma prefast(disable:26006, "Dont bother us with tchar, someone else owns that.")
+#pragma prefast(disable:26007, "Dont bother us with tchar, someone else owns that.")
+#pragma prefast(disable:28718, "Dont bother us with tchar, someone else owns that.")
+#pragma prefast(disable:28726, "Dont bother us with tchar, someone else owns that.")
+#include <tchar.h>
+#pragma prefast(pop)
+
 #include "_jethdr.h"
+#include "os.hxx"
 
 #pragma prefast(push)
 #pragma prefast(disable:28196, "Do not bother us with strsafe, someone else owns that.")
@@ -334,7 +343,7 @@ EseRecoveryWriter::OnPostSnapshot(
         g_eseRecoveryWriterConfig.m_szLogDirectory,
         g_eseRecoveryWriterConfig.m_szSystemDirectory,
     };
-    WCHAR szOutPaths[ _countof( szInPaths ) ][MAX_PATH];
+    WCHAR szOutPaths[ _countof( szInPaths ) ][ MAX_PATH ];
     WCHAR szRelativePathFromRoot[ _MAX_PATH ];
     WCHAR szLogPath[ _MAX_PATH ];
     WCHAR szSystemPath[ _MAX_PATH ];
@@ -384,7 +393,7 @@ EseRecoveryWriter::OnPostSnapshot(
         }
 
         fRc = GetFinalPathNameByHandleW( hfile, szRelativePathFromRoot, _countof( szRelativePathFromRoot ), VOLUME_NAME_NONE );
-        if (!fRc )
+        if ( !fRc )
         {
             const DWORD dwGle = GetLastError();
             DBGV( wprintf( L"Failed GetFinalPathNameByHandleW( %s ): returned %d.\n", szInPath, dwGle ) );
@@ -427,7 +436,7 @@ EseRecoveryWriter::OnPostSnapshot(
     DBGV( wprintf( L"Snapshot log directory: %s\n", szLogPath ) );
     DBGV( wprintf( L"Snapshot system directory: %s\n", szSystemPath ) );
 
-    if ( wcslen( g_eseRecoveryWriterConfig.m_szEseBaseName ) > 0 )
+    if ( LOSStrLengthW( g_eseRecoveryWriterConfig.m_szEseBaseName ) > 0 )
     {
         hr = RecoverEseDatabase( szInPaths[ 0 ], szOutPaths[ 0 ], szLogPath, szSystemPath );
         if ( FAILED( hr ) )
@@ -447,9 +456,9 @@ Cleanup:
     }
 
     if ( FAILED( hr ) )
-        {
+    {
         __super::SetWriterFailure( hr );
-        }
+    }
 
     DBGV( wprintf( L"Leaving %hs (returning hr=%#x).\n", __FUNCTION__, hr ) );
 
@@ -516,35 +525,24 @@ EseRecoveryWriter::RecoverEseDatabase(
 )
 {
     DBGV( wprintf( L"Entering %hs.\n", __FUNCTION__ ) );
-    DWORD                   dwErr                   = JET_errSuccess;
     JET_ERR                 err                     = JET_errSuccess;
+    IFileSystemAPI*         pfsapi                  = NULL;
+    IFileAPI*               pfapi                   = NULL;
     JET_INSTANCE            instance                = 0;
-    WCHAR                    szDefaultTempDB[MAX_PATH];
-    WCHAR                    szTempPath[MAX_PATH];
+    WCHAR                   wszDefaultTempDB[MAX_PATH];
+    WCHAR                   wszTempPath[MAX_PATH];
 
-    JET_RSTINFO_W           rstInfo = {0};
-    JET_RSTMAP_W            rstMap = {0};
-    HRESULT                 hr = S_OK;
+    JET_RSTINFO_W           rstInfo                 = { 0 };
+    JET_RSTMAP_W            rstMap                  = { 0 };
+    HRESULT                 hr                      = S_OK;
 
-    if ( GetTempPathW(_countof(szTempPath), szTempPath) == 0) {
-        dwErr = GetLastError();
-        DBGV( wprintf( L"GetTempPath() failed with 0x%x\n", dwErr ) );
-        hr = HRESULT_FROM_WIN32( dwErr );
-        __super::SetWriterFailure( hr );
-        goto Cleanup;
-    }
+    CallEse( ErrOSFSCreate( &pfsapi ) );
 
-    if ( GetTempFileNameW( szTempPath, L"ewe", 0, szDefaultTempDB) == 0)
-    {
-        dwErr = GetLastError();
-        DBGV( wprintf( L"GetTempFileName() failed with 0x%x\n", dwErr ) );
-        hr = HRESULT_FROM_WIN32( dwErr );
-        __super::SetWriterFailure( hr );
-        goto Cleanup;
-    }
+    CallEse( pfsapi->ErrGetTempFolder( wszTempPath, _countof( wszTempPath ) ) );
+    CallEse( pfsapi->ErrGetTempFileName( wszTempPath, L"ewe", wszDefaultTempDB ) );
 
     // turn on legacy config if implemented (or use fast config if ever created)
-    JetSetSystemParameterW( &instance, 0, JET_paramTempPath, 0, szDefaultTempDB );
+    JetSetSystemParameterW( &instance, 0, JET_paramTempPath, 0, wszDefaultTempDB );
 
     ULONG cbPage;
     CallEse( JetGetDatabaseFileInfoW( szNewDbName, &cbPage, sizeof( cbPage ), JET_DbInfoPageSize ) );
@@ -577,19 +575,14 @@ EseRecoveryWriter::RecoverEseDatabase(
         {
             WCHAR szTempLogFileName[MAX_PATH] = { L'\0' };
             StringCchPrintfW( szTempLogFileName, _countof( szTempLogFileName ), L"%ls\\%lstmp.%ls", szLogPath, g_eseRecoveryWriterConfig.m_szEseBaseName, szLogExtension );
-            HANDLE hfile = CreateFileW( szTempLogFileName, GENERIC_WRITE, 0, NULL, CREATE_NEW, 0, NULL );
-            if ( hfile == INVALID_HANDLE_VALUE )
+
+            err = pfsapi->ErrFileCreate( szTempLogFileName, IFileAPI::fmfNone, &pfapi );
+            if ( err < JET_errSuccess && err != JET_errFileAlreadyExists )
             {
-                const DWORD dwGle = GetLastError();
-                if ( dwGle != ERROR_FILE_EXISTS )
-                {
-                    DBGV( wprintf( L"Failed to create temporary log file %s: Error %d.\n", szTempLogFileName, dwGle ) );
-                }
+                DBGV( wprintf( L"Failed to create temporary log file %s: Error %d.\n", szTempLogFileName, err ) );
             }
-            else
-            {
-                CloseHandle( hfile );
-            }
+            delete pfapi;
+            pfapi = NULL;
         }
     }
 
@@ -616,15 +609,18 @@ EseRecoveryWriter::RecoverEseDatabase(
     DBGV( wprintf( L"RecoverJetDB successfully replayed the logs.\n" ) );
 
 Cleanup:
-    if (instance != 0)
+    if ( instance != 0 )
     {
         JetTerm2( instance, SUCCEEDED(hr) ? JET_bitTermComplete : JET_bitTermAbrupt );
     }
 
+    delete pfapi;
+    delete pfsapi;
+
     if ( FAILED( hr ) )
-        {
+    {
         __super::SetWriterFailure( hr );
-        }
+    }
 
     return hr;
 }
@@ -704,6 +700,9 @@ EseRecoveryWriter::DestroyWriter()
 //
 //  DLL Main Function
 //
+extern BOOL FOSPreinit();
+extern void OSPostterm();
+
 extern "C" {
 
 BOOL
@@ -725,7 +724,12 @@ DllMain(
             DisableThreadLibraryCalls( hinstDll );
         }
 
-        if ( S_OK != EseRecoveryWriter::CreateWriter() )
+        if ( ! FOSPreinit() )
+        {
+            fReturn = FALSE;
+        }
+
+        if ( fReturn && S_OK != EseRecoveryWriter::CreateWriter() )
         {
             fReturn = FALSE;
         }
@@ -735,6 +739,9 @@ DllMain(
         EseRecoveryWriter::DestroyWriter();
 
         InterlockedDecrement( &g_lRefEseWriter );
+
+        //  terminate OS Layer
+        OSPostterm();
     }
 
     DBGV( wprintf( L"Leaving %hs (returning %d).\n", __FUNCTION__, fReturn ) );

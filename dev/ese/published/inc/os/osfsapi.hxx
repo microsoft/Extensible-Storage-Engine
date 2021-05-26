@@ -202,6 +202,15 @@ class IFileSystemAPI  //  fsapi
                                           _In_ DWORD            cbFolder,
                                           _Out_ BOOL            *pfCanProcessUseRelativePaths ) = 0;
 
+        // Gets the OS' temporary folder.
+        virtual ERR ErrGetTempFolder(   _Out_z_cap_(cchFolder) PWSTR const  wszFolder,
+                                        _In_ const DWORD                    cchFolder ) = 0;
+
+        // Gets a unique, random, temporary file name.
+        virtual ERR ErrGetTempFileName( _In_z_ PWSTR const                          wszFolder,
+                                        _In_z_ PWSTR const                          wszPrefix,
+                                        _Out_z_cap_(OSFSAPI_MAX_PATH) PWSTR const   wszFileName ) = 0;
+
         //  Folder Control
 
         //  creates the specified folder.  if the folder already exists,

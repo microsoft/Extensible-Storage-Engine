@@ -62,6 +62,10 @@ namespace Internal
 
                         virtual String^ PathFolderDefault( [Out] bool% canProcessUseRelativePaths );
 
+                        virtual String^ GetTempFolder();
+
+                        virtual String^ GetTempFileName( String^ folder, String^ prefix );
+
                         virtual void FolderCreate( String^ path );
 
                         virtual void FolderRemove( String^ path );
@@ -339,6 +343,36 @@ namespace Internal
 
                 HandleError:
                     canProcessUseRelativePaths = false;
+                    throw EseException( err );
+                }
+
+                template< class TM, class TN, class TW >
+                inline String^ FileSystemBase<TM,TN,TW>::GetTempFolder()
+                {
+                    ERR         err                             = JET_errSuccess;
+                    WCHAR       wszFolder[ OSFSAPI_MAX_PATH ]   = { 0 };
+
+                    Call( Pi->ErrGetTempFolder( wszFolder, OSFSAPI_MAX_PATH ) );
+
+                    return gcnew String( wszFolder );
+
+                HandleError:
+                    throw EseException( err );
+                }
+
+                template< class TM, class TN, class TW >
+                inline String^ FileSystemBase<TM,TN,TW>::GetTempFileName( String^ folder, String^ prefix )
+                {
+                    ERR         err                             = JET_errSuccess;
+                    WCHAR       wszFileName[ OSFSAPI_MAX_PATH ] = { 0 };
+
+                    pin_ptr<const Char> wszFolder = PtrToStringChars( folder );
+                    pin_ptr<const Char> wszPrefix = PtrToStringChars( prefix );
+                    Call( Pi->ErrGetTempFileName( (const PWSTR)wszFolder, (const PWSTR)wszPrefix, wszFileName ) );
+
+                    return gcnew String( wszFileName );
+
+                HandleError:
                     throw EseException( err );
                 }
 

@@ -141,6 +141,13 @@ class COSFileSystem  //  osfs
                                     _In_ DWORD                          cbSize,
                                     _Out_ BOOL *                        pfCanProcessUseRelativePaths ) override;
 
+        ERR ErrGetTempFolder(   _Out_z_cap_(cchFolder) PWSTR const  wszFolder,
+                                _In_ const DWORD                    cchFolder ) override;
+
+        ERR ErrGetTempFileName( _In_z_ PWSTR const                          wszFolder,
+                                _In_z_ PWSTR const                          wszPrefix,
+                                _Out_z_cap_(OSFSAPI_MAX_PATH) PWSTR const   wszFileName ) override;
+
 
         ERR ErrFolderCreate( const WCHAR* const wszPath ) override;
         ERR ErrFolderRemove( const WCHAR* const wszPath ) override;

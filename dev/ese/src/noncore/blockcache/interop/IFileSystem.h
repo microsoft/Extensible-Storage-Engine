@@ -144,6 +144,20 @@ namespace Internal
                     String^ PathFolderDefault( [Out] bool% canProcessUseRelativePaths );
 
                     /// <summary>
+                    /// Retrieves the default folder for temporary files.
+                    /// </summary>
+                    /// <returns>The default folder for temporary files.</returns>
+                    String^ GetTempFolder();
+
+                    /// <summary>
+                    /// Retrieves a randomly generated temporary file name.
+                    /// </summary>
+                    /// <param name="folder">The folder to be used to return the full path of the file.</param>
+                    /// <param name="prefix">The prefix to the file name.</param>
+                    /// <returns>The randomly generated temporary file name.</returns>
+                    String^ GetTempFileName( String^ folder, String^ prefix );
+
+                    /// <summary>
                     /// Creates the specified folder.
                     /// </summary>
                     /// <remarks>
