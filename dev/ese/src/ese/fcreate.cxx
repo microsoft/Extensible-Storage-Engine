@@ -8301,7 +8301,6 @@ ERR ErrFILEDeleteTable( PIB *ppib, IFMP ifmp, const CHAR *szName, BOOL fAllowTab
                     //  OLD2/DBSCAN to exit at its earliest convenience. Wait for it.
                     fInUseBySystem = fTrue;
 
-                    AssertTrack( fInUseBySystemOrig, "FCBInUseBySystemMiscalculated" );
                     break;
                 }
             }

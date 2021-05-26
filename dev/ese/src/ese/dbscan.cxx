@@ -4206,7 +4206,6 @@ void DBMObjectCache::CacheObjectFucb( FUCB * const pfucb, const OBJID objid )
 
 #ifndef ENABLE_JET_UNIT_TEST
     // There are tests that get here with a NULL pointer.
-    pfucb->m_iae.SetProtected();
 #endif
 
     m_rgstate[index].objid = objid;
@@ -4311,8 +4310,6 @@ void DBMObjectCache::CloseObjectAt_( const INT index )
         Assert( ois::Valid == m_rgstate[index].ois );
 
 #ifndef ENABLE_JET_UNIT_TEST
-        Assert( m_rgstate[index].pfucb->m_iae.FProtected() );
-        m_rgstate[index].pfucb->m_iae.ResetProtected();
         
         if ( m_rgstate[index].pfucb->u.pfcb->FTypeLV() )
         {
