@@ -67,6 +67,12 @@ class TFileSystemWrapper  //  fsw
                                     _In_ DWORD                          cbSize,
                                     _Out_ BOOL *                        pfCanProcessUseRelativePaths );
 
+        ERR ErrGetTempFolder(   _Out_z_cap_(cchFolder) PWSTR const  wszFolder,
+                                _In_ const DWORD                    cchFolder );
+
+        ERR ErrGetTempFileName( _In_z_ PWSTR const                          wszFolder,
+                                _In_z_ PWSTR const                          wszPrefix,
+                                _Out_z_cap_(OSFSAPI_MAX_PATH) PWSTR const   wszFileName );
 
         ERR ErrFolderCreate( const WCHAR* const wszPath );
         ERR ErrFolderRemove( const WCHAR* const wszPath );
@@ -218,6 +224,21 @@ ERR TFileSystemWrapper<I>::ErrPathFolderDefault(    _Out_z_bytecap_(cbFolder) PW
                                                     _Out_ BOOL *                            pfCanProcessUseRelativePaths )
 {
     return m_piInner->ErrPathFolderDefault( wszFolder, cbFolder, pfCanProcessUseRelativePaths );
+}
+
+template< class I >
+ERR TFileSystemWrapper<I>::ErrGetTempFolder(    _Out_z_cap_(cchFolder) PWSTR const  wszFolder,
+                                                _In_ const DWORD                    cchFolder )
+{
+    return m_piInner->ErrGetTempFolder( wszFolder, cchFolder );
+}
+
+template< class I >
+ERR TFileSystemWrapper<I>::ErrGetTempFileName(  _In_z_ PWSTR const                          wszFolder,
+                                                _In_z_ PWSTR const                          wszPrefix,
+                                                _Out_z_cap_(OSFSAPI_MAX_PATH) PWSTR const   wszFileName )
+{
+    return m_piInner->ErrGetTempFileName( wszFolder, wszPrefix, wszFileName );
 }
 
 template< class I >

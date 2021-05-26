@@ -147,7 +147,7 @@ EseShadowTerm(
 
     if ( g_eseRecoveryWriterConfig.m_szDatabasePath != NULL )
     {
-        free( (void*) g_eseRecoveryWriterConfig.m_szDatabasePath );
+        delete[] g_eseRecoveryWriterConfig.m_szDatabasePath;
         g_eseRecoveryWriterConfig.m_szDatabasePath = NULL;
     }
 
@@ -274,7 +274,8 @@ Cleanup:
         CloseHandle( hfile );
         hfile = INVALID_HANDLE_VALUE;
     }
-    if (fFreeProp) {
+    if ( fFreeProp )
+    {
         VssFreeSnapshotProperties(&prop);
     }
 
@@ -786,7 +787,7 @@ EseShadowCreateSimpleShadow(
         pesi->m_databaseFile = new WCHAR[ databasePathLen ];
         if ( pesi->m_databaseFile == NULL )
         {
-            DBGV( wprintf( L"EseShadowCreateShadow ran out of memory!\n" ) );
+            DBGV( wprintf( L"EseShadowCreateSimpleShadow ran out of memory!\n" ) );
             hr = E_OUTOFMEMORY;
             goto Cleanup;
         }
@@ -810,7 +811,6 @@ EseShadowCreateSimpleShadow(
         hr = E_INVALIDARG;
         goto Cleanup;
     }
-
 
     hfile = CreateFileW( pesi->m_databaseFile,
         STANDARD_RIGHTS_READ,

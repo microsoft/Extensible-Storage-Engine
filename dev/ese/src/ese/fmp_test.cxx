@@ -157,6 +157,23 @@ public:
         return JET_errSuccess;
     }
 
+    // Gets the OS' temporary folder.
+    ERR ErrGetTempFolder(   _Out_z_cap_(cchFolder) PWSTR const  wszFolder,
+                            _In_ const DWORD                    cchFolder ) override
+    {
+        AssertRTL( fFalse && "Not implemented" );
+        return JET_errSuccess;
+    }
+
+    // Gets a unique, random, temporary file name.
+    ERR ErrGetTempFileName( _In_z_ PWSTR const                          wszFolder,
+                            _In_z_ PWSTR const                          wszPrefix,
+                            _Out_z_cap_(OSFSAPI_MAX_PATH) PWSTR const   wszFileName ) override
+    {
+        AssertRTL( fFalse && "Not implemented" );
+        return JET_errSuccess;
+    }
+
 
     //  Folder Control
 

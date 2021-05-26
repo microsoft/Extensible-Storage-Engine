@@ -69,6 +69,12 @@ namespace Internal
                                                     _In_ DWORD                          cbSize,
                                                     _Out_ BOOL *                        pfIsDefaultDirectory ) override;
 
+                        ERR ErrGetTempFolder(   _Out_z_cap_(cchFolder) PWSTR const  wszFolder,
+                                                _In_ const DWORD                    cchFolder ) override;
+
+                        ERR ErrGetTempFileName( _In_z_ PWSTR const                          wszFolder,
+                                                _In_z_ PWSTR const                          wszPrefix,
+                                                _Out_z_cap_(OSFSAPI_MAX_PATH) PWSTR const   wszFileName ) override;
 
                         ERR ErrFolderCreate( const WCHAR* const wszPath ) override;
                         ERR ErrFolderRemove( const WCHAR* const wszPath ) override;
@@ -474,6 +480,57 @@ namespace Internal
                             wszFolder[ 0 ] = L'\0';
                         }
                         *pfCanProcessUseRelativePaths = fFalse;
+                    }
+                    return err;
+                }
+
+                template< class TM, class TN >
+                inline ERR CFileSystemWrapper<TM,TN>::ErrGetTempFolder( _Out_z_cap_(cchFolder) PWSTR const  wszFolder,
+                                                                        _In_ const DWORD                    cchFolder )
+                {
+                    ERR     err                         = JET_errSuccess;
+                    String^ folder                      = nullptr;
+
+                    if ( cchFolder )
+                    {
+                        wszFolder[ 0 ] = L'\0';
+                    }
+
+                    ExCall( folder = I()->GetTempFolder() );
+
+                    pin_ptr<const Char> wszFolderT = PtrToStringChars( folder );
+                    Call( ErrOSStrCbCopyW( wszFolder, cchFolder * sizeof( WCHAR ), (STRSAFE_LPCWSTR)wszFolderT ) );
+
+                HandleError:
+                    if ( err < JET_errSuccess )
+                    {
+                        if ( cchFolder )
+                        {
+                            wszFolder[ 0 ] = L'\0';
+                        }
+                    }
+                    return err;
+                }
+
+                template< class TM, class TN >
+                inline ERR CFileSystemWrapper<TM,TN>::ErrGetTempFileName(   _In_z_ PWSTR const                          wszFolder,
+                                                                            _In_z_ PWSTR const                          wszPrefix,
+                                                                            _Out_z_cap_(OSFSAPI_MAX_PATH) PWSTR const   wszFileName )
+                {
+                    ERR     err                         = JET_errSuccess;
+                    String^ filename                    = nullptr;
+
+                    wszFileName[ 0 ] = L'\0';
+
+                    ExCall( filename = I()->GetTempFileName( gcnew String( wszFolder ), gcnew String( wszPrefix ) ) );
+
+                    pin_ptr<const Char> wszFileNameT = PtrToStringChars( filename );
+                    Call( ErrOSStrCbCopyW( wszFileName, OSFSAPI_MAX_PATH * sizeof( WCHAR ), (STRSAFE_LPCWSTR)wszFileNameT ) );
+
+                HandleError:
+                    if ( err < JET_errSuccess )
+                    {
+                         wszFileName[ 0 ] = L'\0';
                     }
                     return err;
                 }

@@ -1385,6 +1385,40 @@ HandleError:
     return err;
 }
 
+#ifndef GetTempPath2
+_Success_( return > 0 && return < BufferLength )
+DWORD
+WINAPI
+GetTempPath2W(  _In_ DWORD BufferLength,
+                _Out_writes_to_opt_( BufferLength, return + 1 ) LPWSTR Buffer
+    );
+#endif
+NTOSFuncCount( g_pfnGetTempPathW, g_mwszzFileLibs, GetTempPathW, oslfExpectedOnWin5x | oslfRequired );
+NTOSFuncCount( g_pfnGetTempPath2W, g_mwszzFileLibs, GetTempPath2W, oslfExpectedOnWin10 );
+ERR COSFileSystem::ErrGetTempFolder(    _Out_z_cap_(cchFolder) PWSTR const  wszFolder,
+                                        _In_ const DWORD                    cchFolder )
+{
+    if ( ( g_pfnGetTempPath2W( cchFolder, wszFolder ) == 0 ) &&
+         ( g_pfnGetTempPathW( cchFolder, wszFolder ) == 0 ) )
+    {
+        return ErrGetLastError( GetLastError() );
+    }
+
+    return JET_errSuccess;
+}
+
+ERR COSFileSystem::ErrGetTempFileName(  _In_z_ PWSTR const                          wszFolder,
+                                        _In_z_ PWSTR const                          wszPrefix,
+                                        _Out_z_cap_(OSFSAPI_MAX_PATH) PWSTR const   wszFileName )
+{
+    if ( GetTempFileNameW( wszFolder, wszPrefix, 0, wszFileName ) == 0 )
+    {
+        return ErrGetLastError( GetLastError() );
+    }
+
+    return JET_errSuccess;
+}
+
 ERR COSFileSystem::ErrFolderCreate( const WCHAR* const wszPath )
 {
     ERR     err     = JET_errSuccess;
