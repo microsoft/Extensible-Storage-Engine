@@ -4294,11 +4294,14 @@ ERR ISAMAPI ErrIsamAttachDatabase(
             OnDebug( PGNO pgnoLastBefore = pfmp->PgnoLast() );
             CallJ( ErrDBSetLastPage( ppib, ifmp ), Detach );
             Assert( pgnoLastBefore >= pfmp->PgnoLast() );
+            pfmp->m_isdlAttach.Trigger( eAttachSetLastOwnedPage );
+
             if ( !BoolParam( JET_paramEnableViewCache ) )
             {
                 OnDebug( pgnoLastBefore = pfmp->PgnoLast() );
                 CallJ( ErrIONewSize( ifmp, *tcScope, pfmp->PgnoLast(), 0, JET_bitNil ), Detach );
                 Assert( pgnoLastBefore == pfmp->PgnoLast() );
+                pfmp->m_isdlAttach.Trigger( eAttachResizeToLastOwnedPage );
             }
 
             //  ensure our database has the expected size.
@@ -4643,6 +4646,8 @@ ERR ISAMAPI ErrIsamAttachDatabase(
     OnDebug( PGNO pgnoLastBefore = pfmp->PgnoLast() );
     CallJ( ErrDBSetLastPage( ppib, ifmp ), MoreAttachedThanDetached );
     Assert( pgnoLastBefore >= pfmp->PgnoLast() );
+    pfmp->m_isdlAttach.Trigger( eAttachSetLastOwnedPage );
+
     if ( !pfmp->FReadOnlyAttach() && !g_fRepair )
     {
         if ( !BoolParam( JET_paramEnableViewCache ) )
@@ -4650,6 +4655,7 @@ ERR ISAMAPI ErrIsamAttachDatabase(
             OnDebug( pgnoLastBefore = pfmp->PgnoLast() );
             CallJ( ErrIONewSize( ifmp, *tcScope, pfmp->PgnoLast(), 0, JET_bitNil ), MoreAttachedThanDetached );
             Assert( pgnoLastBefore == pfmp->PgnoLast() );
+            pfmp->m_isdlAttach.Trigger( eAttachResizeToLastOwnedPage );
         }
     }
 

@@ -4492,6 +4492,8 @@ enum : BYTE     //  for Event ID: 326 / ATTACH_DATABASE_DONE_ID
     eAttachToLogStream,             //  LR
     eAttachIOOpenDatabase,
     eAttachFastReAttachAcquireFmp,
+    eAttachSetLastOwnedPage,
+    eAttachResizeToLastOwnedPage,
     eAttachLeakReclaimerDone,
     eAttachShrinkDone,
     eAttachFastBaseReAttachDone,    //  fast path version of next step, skips next step - goes to upgrades next (e.g. eAttachCreateMSysObjids, etc)
