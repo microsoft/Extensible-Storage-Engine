@@ -10858,7 +10858,7 @@ LOCAL ERR ErrSPIAddSecondaryExtent(
         {
             const EXTENTINFO& extinfoReleased = parreiReleased->Entry( parreiReleased->Size() - 1 );
             Assert( extinfoReleased.FValid() && ( extinfoReleased.CpgExtent() > 0 ) );
-            Call( ErrSPIAEFreeExt( pfucb, extinfoReleased.PgnoFirst(), extinfoReleased.CpgExtent(), pfucbNil ) );
+            Call( ErrSPIAEFreeExt( pfucb, extinfoReleased.PgnoFirst(), extinfoReleased.CpgExtent() ) );
             CallS( ( parreiReleased->ErrSetSize( parreiReleased->Size() - 1 ) == CArray<EXTENTINFO>::ERR::errSuccess ) ?
                                                                                  JET_errSuccess :
                                                                                  ErrERRCheck( JET_errOutOfMemory ) );
@@ -13171,6 +13171,18 @@ LOCAL ERR ErrSPIGetSe(
     AssertSPIPfucbOnRoot( pfucbParent );
     AssertSPIPfucbOnRoot( pfucb );
     Call( err );
+
+    // We've taken an extent from the parent.  Doing so was not versioned; there's no way to undo it.
+    // The parent has a consistent and stable view of its remaining extents, so we can release
+    // the parent; we don't rely on any latches there for the rest of this routine.  Furthermore,
+    // the call to ErrSPIAddSecondaryExtent below may update the Extent Page Count Cache,
+    // and that's not deadlock-safe if the root of the DB is latched, and the parent may
+    // be the root.
+    pfucbParent->pcsrRoot->ReleasePage();
+    pfucbParent->pcsrRoot = pcsrNil;
+    Assert( !Pcsr( pfucbParent )->FLatched() );
+    BTClose( pfucbParent );
+    pfucbParent = pfucbNil;
 
     SPIValidateCpgOwnedAndAvail( pfucb );
 
