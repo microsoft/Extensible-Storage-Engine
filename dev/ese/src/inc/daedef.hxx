@@ -4494,12 +4494,14 @@ enum : BYTE     //  for Event ID: 326 / ATTACH_DATABASE_DONE_ID
     eAttachFastReAttachAcquireFmp,
     eAttachSetLastOwnedPage,
     eAttachResizeToLastOwnedPage,
+    eAttachCheckForExtentPageCountCacheDone,
     eAttachLeakReclaimerDone,
     eAttachShrinkDone,
     eAttachFastBaseReAttachDone,    //  fast path version of next step, skips next step - goes to upgrades next (e.g. eAttachCreateMSysObjids, etc)
     eAttachSlowBaseAttachDone,      //  basic variables set, no "upgrades" processed
     eAttachCreateMSysObjids,
     eAttachCreateMSysLocales,
+    eAttachProcessMSysExtentPageCountCache,
     eAttachDeleteMSysUnicodeFixup,
     eAttachCheckForOutOfDateLocales,
     eAttachDeleteUnicodeIndexes,
