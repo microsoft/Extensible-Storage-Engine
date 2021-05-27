@@ -56,7 +56,9 @@ namespace Isam
         ULONG               cbSGGuid,
         WCHAR *             wszSGGuid,
         ULONG *             pcInfo,
-        LOGSHIP_INFO **     prgInfo);
+        LOGSHIP_INFO **     prgInfo,
+        ULONG               cbSecondaryLogPath,
+        WCHAR *             wszSecondaryLogPath);
     private delegate JET_ERR FreeShipLogInfoDelegate(
         ULONG           pcInfo,
         LOGSHIP_INFO *  prgInfo);
@@ -117,7 +119,8 @@ namespace Isam
             MJET_INSTANCE instance,
             [System::Runtime::InteropServices::OutAttribute] Boolean% isReplicated,
             [System::Runtime::InteropServices::OutAttribute] Guid% guid,
-            [System::Runtime::InteropServices::OutAttribute] array<MLOGSHIP_INFO>^% info);
+            [System::Runtime::InteropServices::OutAttribute] array<MLOGSHIP_INFO>^% info,
+            [System::Runtime::InteropServices::OutAttribute] String^% secondaryLogPath);
         Int32 ServerAccessCheck();
         Int32 Trace(String^ data);
     };
@@ -409,6 +412,8 @@ namespace Isam
             return 0;
         }
 
+        // This is not what's called by Store. It appears to be test only.
+        //
         static JET_ERR IsSGReplicated(
             PESEBACK_CONTEXT    pContext,
             JET_INSTANCE        jetinst,
@@ -416,7 +421,9 @@ namespace Isam
             ULONG               cbSGGuid,
             WCHAR *             wszSGGuid,
             ULONG *             pcInfo,
-            LOGSHIP_INFO **     prgInfo)
+            LOGSHIP_INFO **     prgInfo,
+            ULONG               cbSecondaryLogPath,
+            WCHAR *             wszSecondaryLogPath)
         {
             IntPtr context(pContext);
             MJET_INSTANCE instance;
@@ -424,8 +431,9 @@ namespace Isam
             Boolean isReplicated;
             Guid guid;
             array<MLOGSHIP_INFO>^ infos = nullptr;
+            String^ secondaryLogPath = nullptr;
             
-            JET_ERR err = EsebackCallbacks::ManagedCallbacks->IsSGReplicated(context, instance, isReplicated, guid, infos);
+            JET_ERR err = EsebackCallbacks::ManagedCallbacks->IsSGReplicated(context, instance, isReplicated, guid, infos, secondaryLogPath);
             *pfReplicated = isReplicated;
             if (nullptr != infos)
             {
@@ -451,6 +459,31 @@ namespace Isam
             {
                 *pcInfo = 0;
                 *prgInfo = nullptr;
+            }
+            
+            if (!String::IsNullOrEmpty(secondaryLogPath))
+            {
+                if (cbSecondaryLogPath > 0 && wszSecondaryLogPath != nullptr)
+                {
+                    Int32 bufferSizeInChars = (Int32)cbSecondaryLogPath / sizeof(WCHAR);
+                    if (secondaryLogPath->Length + 1 > bufferSizeInChars)
+                    {
+                        // The path length is too big, so skip it.
+                        err = JET_errInvalidLogDirectory;
+                        return err;
+                    }
+                    
+                    wchar_t * szT = nullptr;
+                    try
+                    {
+                        szT = StructConversion::WszFromString(secondaryLogPath);
+                        wcscpy_s(wszSecondaryLogPath, bufferSizeInChars, szT);
+                    }
+                    __finally
+                    {
+                        StructConversion::FreeWsz(szT);
+                    }
+                }
             }
 
             return err;
