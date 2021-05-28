@@ -13183,7 +13183,15 @@ HandleError:
 static const JET_COLUMNID columnidMSExtentPageCountCache_objid      = fidFixedLeast;
 static const JET_COLUMNID columnidMSExtentPageCountCache_cpgAE      = fidFixedLeast + 1;
 static const JET_COLUMNID columnidMSExtentPageCountCache_cpgOE      = fidFixedLeast + 2;
-static const JET_COLUMNID columnidMSExtentPageCountCache_bFlag      = fidFixedLeast + 3;
+static const JET_COLUMNID columnidMSExtentPageCountCache_epccesFlag = fidFixedLeast + 3;
+
+typedef enum class ExtentPageCountCacheEntryState : BYTE {
+    Valid = 0,       // Normal, valid, usable values are stored.
+    Prepared = 1,    // _ErrCATAdjustExtentPageCountsPrepare() has been called on a Valid
+                     // row, making the stored value temporarily unreliable.
+    FlagDelete = 2   // _ErrCATAdjustExtentPageCountsPrepare() has been called on a Prepared
+                     // row, making the stored value permanently unreliable.
+} epcces;
 
 static const CHAR szMSExtentPageCountCacheIndex[]      = "primary";
 static const CHAR szMSExtentPageCountCacheIndexKey[]   = "+objid\0";
@@ -13478,12 +13486,12 @@ VOID CATSetExtentPageCounts(
     PCWSTR          wszNote;
     FDPINFO         fdpinfo;
     BOOL            fReplace = fFalse;
-    BYTE            bFlag;
+    ExtentPageCountCacheEntryState epccesFlag;
     JET_SETCOLUMN   rgsetcolumn[] =
         {
             { columnidMSExtentPageCountCache_cpgAE, &cpgAE, sizeof( cpgAE ), 0, 1, JET_errSuccess },
             { columnidMSExtentPageCountCache_cpgOE, &cpgOE, sizeof( cpgOE ), 0, 1, JET_errSuccess },
-            { columnidMSExtentPageCountCache_bFlag, &bFlag, sizeof( bFlag ), 0, 1, JET_errSuccess },
+            { columnidMSExtentPageCountCache_epccesFlag, &epccesFlag, sizeof( epccesFlag ), 0, 1, JET_errSuccess },
             { columnidMSExtentPageCountCache_objid, &objid, sizeof( objid ), 0, 1, JET_errSuccess },
         };
     ULONG csetcolumn;
@@ -13554,22 +13562,32 @@ VOID CATSetExtentPageCounts(
             Call( ErrIsamRetrieveColumn(
                       ppib,
                       pfucbExtentPageCountCache,
-                      columnidMSExtentPageCountCache_bFlag,
-                      &bFlag,
-                      sizeof( bFlag ),
+                      columnidMSExtentPageCountCache_epccesFlag,
+                      &epccesFlag,
+                      sizeof( epccesFlag ),
                       NULL,
                       NO_GRBIT,
                       NULL ) );
             Assert( JET_errSuccess == err );
-            if ( bFlag )
+            switch ( epccesFlag )
             {
-                wszNote = L"PREPARED";
-                fReplace = fTrue;
-            }
-            else
-            {
+            case epcces::Valid:
                 wszNote = L"DUPLICATE";
                 Error( ErrERRCheck( JET_errObjectDuplicate ) );
+
+            case epcces::Prepared:
+                wszNote = L"PREPARED";
+                fReplace = fTrue;
+                break;
+
+            case epcces::FlagDelete:
+                wszNote = L"FLAG_DELETE";
+                fReplace = fTrue;
+                break;
+
+            default:
+                AssertSz( fFalse, "Unexpected case in switch.");
+                Error( ErrERRCheck( JET_errInternalError ) );
             }
             break;
 
@@ -13588,7 +13606,7 @@ VOID CATSetExtentPageCounts(
             Call( err );
     }
 
-    bFlag = 0;
+    epccesFlag = epcces::Valid;
 
     if ( fReplace )
     {
@@ -13619,17 +13637,23 @@ VOID CATSetExtentPageCounts(
               JET_bitUpdateNoVersion ) );
 
 HandleError:
-    CATIPossiblyResetUpdatingExtentPageCountCacheFlag( ppib );
-
     if ( pfucbNil != pfucbExtentPageCountCache )
     {
         ERR errT;
 
         errT = ErrFILECloseTable( ppib, pfucbExtentPageCountCache );
         Assert( JET_errSuccess <= errT );
+        pfucbExtentPageCountCache = pfucbNil;
+
+        // If we opened and closed a table, these pages need to still not be latched.
+        Assert ( pgnoNull != pfmp->PgnoExtentPageCountCacheFDP() );
 
         Assert ( FBFNotLatched( ifmp, pfmp->PgnoExtentPageCountCacheFDP() ) );
     }
+
+    CATIPossiblyResetUpdatingExtentPageCountCacheFlag( ppib );
+
+    Assert( pfucbNil == pfucbExtentPageCountCache );
 
     // No RCEs where harmed in the filming of this feature.
     Assert( prceNewest == ppib->prceNewest );
@@ -13698,11 +13722,11 @@ VOID CATResetExtentPageCounts(
         err = JET_errSuccess;
         goto HandleError;
     }
-
+    
     // If we're actually going to do something to the DB, we should be in a transaction.
     Assert( 0 != ppib->Level() );
 
-    // Can't have the system root latched because we may need to split for the insert here
+    // Can't have the system root latched because we may need to adjust space trees
     // and that may require getting an extent from the system root.
     Assert ( FBFNotLatched( ifmp, pgnoSystemRoot ) );
     Assert ( FBFNotLatched( ifmp, pgnoFDPMSO ) );
@@ -13769,17 +13793,23 @@ VOID CATResetExtentPageCounts(
     Call( ErrIsamDelete( ppib, pfucbExtentPageCountCache ) );
 
 HandleError:
-    CATIPossiblyResetUpdatingExtentPageCountCacheFlag( ppib );
-
     if ( pfucbNil != pfucbExtentPageCountCache )
     {
         ERR errT;
 
         errT = ErrFILECloseTable( ppib, pfucbExtentPageCountCache );
         Assert( JET_errSuccess <= errT );
+        pfucbExtentPageCountCache = pfucbNil;
+
+        // If we opened and closed a table, these pages need to still not be latched.
+        Assert ( pgnoNull != pfmp->PgnoExtentPageCountCacheFDP() );
 
         Assert ( FBFNotLatched( ifmp, pfmp->PgnoExtentPageCountCacheFDP() ) );
     }
+
+    CATIPossiblyResetUpdatingExtentPageCountCacheFlag( ppib );
+
+    Assert( pfucbNil == pfucbExtentPageCountCache );
 
     // No RCEs where harmed in the filming of this feature.
     Assert( prceNewest == ppib->prceNewest );
@@ -13824,7 +13854,7 @@ ERR _ErrCATAdjustExtentPageCountsPrepare(
     OBJID           objid             = ObjidFDP( pfucb );
     PIB             *ppib             = pfucb->ppib;
     IFMP            ifmp              = pfucb->ifmp;
-    BYTE            bFlag;
+    ExtentPageCountCacheEntryState epccesFlag;
     PCWSTR          wszNote;
     FDPINFO         fdpinfo;
 
@@ -13864,6 +13894,18 @@ ERR _ErrCATAdjustExtentPageCountsPrepare(
         err = JET_errSuccess;
         goto HandleError;
     }
+
+    // The systemroot page shouldn't be latched.  Consider:
+    // This thread (T1) has the systemroot latched.
+    // Another thread (T2) is doing an insertion into the Cache table and may need to get
+    //  a new secondary extent.  To do so, it takes a latch on the root page of the Cache
+    //  table, then tries to take a latch on the systemroot (needed in order to get an
+    //  extent from the system root).  T1 holds that latch, so T2 blocks.
+    // T1 finds it needs to update an entry on the root page of the Cache table and tries
+    //  to take a latch on that page.  T2 holds that latch, so T1 blocks.
+    //
+    // Turn off temporarily while fixing a known code path that triggers this assert.
+    // Assert ( FBFNotLatched( ifmp, pgnoSystemRoot ) );
 
     // If we're actually going to do something to the DB, we should be in a transaction.
     Assert( 0 != ppib->Level() );
@@ -13927,63 +13969,67 @@ ERR _ErrCATAdjustExtentPageCountsPrepare(
     Call( ErrIsamRetrieveColumn(
               ppib,
               pfucbExtentPageCountCache,
-              columnidMSExtentPageCountCache_bFlag,
-              &bFlag,
-              sizeof( bFlag ),
+              columnidMSExtentPageCountCache_epccesFlag,
+              &epccesFlag,
+              sizeof( epccesFlag ),
               NULL,
               NO_GRBIT,
               NULL ) );
 
-    if ( bFlag )
+    switch ( epccesFlag )
     {
+    case epcces::Valid:
+        // Prepare on a normally valid row, mark it as prepared.
+        wszNote = L"PREPARE";
+        epccesFlag = epcces::Prepared;
+        break;
+
+    case epcces::Prepared:
         // We're being asked to prepare, which usually means to mark as prepared,
         // and then when we update, we re-mark as not-prepared.  Since this is ALREADY
         // prepared, something bad happened.
-        // Delete the existing value and let it get refilled naturally later.
-        wszNote = L"DELETE";
-        Call( ErrIsamDelete( ppib, pfucbExtentPageCountCache ) );
+        // Mark the row as permanently invalid until set().
+        wszNote = L"FLAG_DELETE";
+        epccesFlag = epcces::FlagDelete;
+        break;
+
+    case epcces::FlagDelete:
+        // This entry is permanently invalid until set(), so nothing to do.
+        goto HandleError;
     }
-    else
-    {
-        wszNote = L"REPLACE";
-        bFlag = 1;
-
-        Call( ErrIsamPrepareUpdate(
-                  ppib,
-                  pfucbExtentPageCountCache,
-                  JET_prepReplaceNoLock ) );
-        Assert( JET_errSuccess == err );
-
-        Call( ErrIsamSetColumn(
-                  ppib,
-                  pfucbExtentPageCountCache,
-                  columnidMSExtentPageCountCache_bFlag,
-                  &bFlag,
-                  sizeof( bFlag ),
-                  NO_GRBIT,
-                  NULL ) );
-        Assert( JET_errSuccess == err );
-
-        Call( ErrIsamUpdate(
-                  ppib,
-                  pfucbExtentPageCountCache,
-                  NULL,
-                  0,
-                  NULL,
-                  JET_bitUpdateNoVersion ) );
-        Assert( JET_errSuccess == err );
-
-    }
+    
+    Call( ErrIsamPrepareUpdate(
+              ppib,
+              pfucbExtentPageCountCache,
+              JET_prepReplaceNoLock ) );
+    Assert( JET_errSuccess == err );
+    
+    Call( ErrIsamSetColumn(
+              ppib,
+              pfucbExtentPageCountCache,
+              columnidMSExtentPageCountCache_epccesFlag,
+              &epccesFlag,
+              sizeof( epccesFlag ),
+              NO_GRBIT,
+              NULL ) );
+    Assert( JET_errSuccess == err );
+    
+    Call( ErrIsamUpdate(
+              ppib,
+              pfucbExtentPageCountCache,
+              NULL,
+              0,
+              NULL,
+              JET_bitUpdateNoVersion ) );
+    Assert( JET_errSuccess == err );
 
 HandleError:
-    CATIPossiblyResetUpdatingExtentPageCountCacheFlag( ppib );
-
     if ( pfucbNil != pfucbExtentPageCountCache )
     {
         ERR errT;
 
         errT = ErrFILECloseTable( ppib, pfucbExtentPageCountCache );
-        Assert( JET_errSuccess == errT );
+        Assert( JET_errSuccess <= errT );
         pfucbExtentPageCountCache = pfucbNil;
 
         // If we opened and closed a table, these pages need to still not be latched.
@@ -13991,6 +14037,8 @@ HandleError:
 
         Assert ( FBFNotLatched( ifmp, pfmp->PgnoExtentPageCountCacheFDP() ) );
     }
+
+    CATIPossiblyResetUpdatingExtentPageCountCacheFlag( ppib );
 
     Assert( pfucbNil == pfucbExtentPageCountCache );
 
@@ -14040,19 +14088,20 @@ VOID CATAdjustExtentPageCounts(
     CPG                 cpgOEAfter     = cpgNil;
     PCWSTR              wszNote;
     FDPINFO             fdpinfo;
-    BYTE                bFlag;
+    ExtentPageCountCacheEntryState epccesFlag;
     JET_RETRIEVECOLUMN  rgretrievecolumn[] =
         {
-            { columnidMSExtentPageCountCache_cpgAE, &cpgAEBefore, sizeof( cpgAEBefore ), 0, NO_GRBIT, 0, 1, 0, JET_errSuccess },
-            { columnidMSExtentPageCountCache_cpgOE, &cpgOEBefore, sizeof( cpgOEBefore ), 0, NO_GRBIT, 0, 1, 0, JET_errSuccess },
-            { columnidMSExtentPageCountCache_bFlag, &bFlag,       sizeof( bFlag ),       0, NO_GRBIT, 0, 1, 0, JET_errSuccess },
+            { columnidMSExtentPageCountCache_cpgAE,      &cpgAEBefore, sizeof( cpgAEBefore ), 0, NO_GRBIT, 0, 1, 0, JET_errSuccess },
+            { columnidMSExtentPageCountCache_cpgOE,      &cpgOEBefore, sizeof( cpgOEBefore ), 0, NO_GRBIT, 0, 1, 0, JET_errSuccess },
+            { columnidMSExtentPageCountCache_epccesFlag, &epccesFlag,  sizeof( epccesFlag ),  0, NO_GRBIT, 0, 1, 0, JET_errSuccess },
         };
     JET_SETCOLUMN   rgsetcolumn[] =
         {
-            { columnidMSExtentPageCountCache_cpgAE, &cpgAEAfter, sizeof( cpgAEAfter ), 0, 1, JET_errSuccess },
-            { columnidMSExtentPageCountCache_cpgOE, &cpgOEAfter, sizeof( cpgOEAfter ), 0, 1, JET_errSuccess },
-            { columnidMSExtentPageCountCache_bFlag, &bFlag,      sizeof( bFlag ),      0, 1, JET_errSuccess },
+            { columnidMSExtentPageCountCache_epccesFlag, &epccesFlag,  sizeof( epccesFlag ), 0, 1, JET_errSuccess },
+            { columnidMSExtentPageCountCache_cpgAE,      &cpgAEAfter,  sizeof( cpgAEAfter ), 0, 1, JET_errSuccess },
+            { columnidMSExtentPageCountCache_cpgOE,      &cpgOEAfter,  sizeof( cpgOEAfter ), 0, 1, JET_errSuccess },
         };
+    ULONG cUpdateColumns = _countof( rgsetcolumn );
 
     OnDebug( RCE *prceNewest = ppib->prceNewest );
 
@@ -14085,6 +14134,18 @@ VOID CATAdjustExtentPageCounts(
         err = JET_errSuccess;
         goto HandleError;
     }
+
+    // The systemroot page shouldn't be latched.  Consider:
+    // This thread (T1) has the systemroot latched.
+    // Another thread (T2) is doing an insertion into the Cache table and may need to get
+    //  a new secondary extent.  To do so, it takes a latch on the root page of the Cache
+    //  table, then tries to take a latch on the systemroot (needed in order to get an
+    //  extent from the system root).  T1 holds that latch, so T2 blocks.
+    // T1 finds it needs to update an entry on the root page of the Cache table and tries
+    //  to take a latch on that page.  T2 holds that latch, so T1 blocks.
+    //
+    // Turn off temporarily while fixing a known code path that triggers this assert.
+    // Assert ( FBFNotLatched( ifmp, pgnoSystemRoot ) );
 
     // If we're actually going to do something to the DB, we should be in a transaction.
     Assert( 0 != ppib->Level() );
@@ -14150,25 +14211,42 @@ VOID CATAdjustExtentPageCounts(
               rgretrievecolumn,
               _countof( rgretrievecolumn ) ) );
 
-    Assert( bFlag );
+    switch ( epccesFlag )
+    {
+    case epcces::Valid:
+        // Unexpected.  An update without a prepare.  Set the row to FlagDeleted
+        wszNote = L"FLAG_DELETE";
+        epccesFlag = epcces::FlagDelete;
+        cUpdateColumns = 1;
+        Assert( rgsetcolumn[0].columnid == columnidMSExtentPageCountCache_epccesFlag );
+        break;
 
-    Assert( cpgOEBefore >= cpgAEBefore );
+    case epcces::Prepared:
+        // Expected case.  Set the row to Valid and update the sizes.
+        wszNote = L"REPLACE";
+        epccesFlag = epcces::Valid;
+        Assert( cpgOEBefore >= cpgAEBefore );
+        
+        cpgOEAfter = cpgOEBefore + lAddCpgOE;
+        cpgAEAfter = cpgAEBefore + lAddCpgAE;
+        
+        Assert( cpgOEAfter >= cpgAEAfter );
 
-    cpgOEAfter = cpgOEBefore + lAddCpgOE;
-    cpgAEAfter = cpgAEBefore + lAddCpgAE;
+        break;
 
-    Assert( cpgOEAfter >= cpgAEAfter );
+    case epcces::FlagDelete:
+        // Something's wrong with this entry, leave it alone.
+        wszNote = L"INVALID";
+        goto HandleError;
+    }
 
-    bFlag = 0;
-
-    wszNote = L"REPLACE";
     Call( ErrIsamPrepareUpdate( ppib, pfucbExtentPageCountCache, JET_prepReplaceNoLock ) );
 
     Call( ErrIsamSetColumns(
               (JET_SESID)ppib,
               (JET_VTID)pfucbExtentPageCountCache,
               rgsetcolumn,
-              _countof( rgsetcolumn ) ) );
+              cUpdateColumns ) );
     Assert( JET_errSuccess == err );
 
     Call( ErrIsamUpdate(
@@ -14180,14 +14258,12 @@ VOID CATAdjustExtentPageCounts(
               JET_bitUpdateNoVersion ) );
 
 HandleError:
-    CATIPossiblyResetUpdatingExtentPageCountCacheFlag( ppib );
-
     if ( pfucbNil != pfucbExtentPageCountCache )
     {
         ERR errT;
 
         errT = ErrFILECloseTable( ppib, pfucbExtentPageCountCache );
-        Assert( JET_errSuccess == errT );
+        Assert( JET_errSuccess <= errT );
         pfucbExtentPageCountCache = pfucbNil;
 
         // If we opened and closed a table, these pages need to still not be latched.
@@ -14195,6 +14271,8 @@ HandleError:
 
         Assert ( FBFNotLatched( ifmp, pfmp->PgnoExtentPageCountCacheFDP() ) );
     }
+
+    CATIPossiblyResetUpdatingExtentPageCountCacheFlag( ppib );
 
     Assert( pfucbNil == pfucbExtentPageCountCache );
 
@@ -14248,12 +14326,12 @@ ERR ErrCATGetExtentPageCounts(
     FDPINFO             fdpinfo;
     CPG                 cpgAE;
     CPG                 cpgOE;
-    BYTE                bFlag;
+    ExtentPageCountCacheEntryState epccesFlag;
     JET_RETRIEVECOLUMN  rgretrievecolumn[] =
         {
-            { columnidMSExtentPageCountCache_cpgAE, &cpgAE, sizeof( cpgAE ), 0, NO_GRBIT, 0, 1, 0, JET_errSuccess },
-            { columnidMSExtentPageCountCache_cpgOE, &cpgOE, sizeof( cpgOE ), 0, NO_GRBIT, 0, 1, 0, JET_errSuccess },
-            { columnidMSExtentPageCountCache_bFlag, &bFlag, sizeof( bFlag ), 0, NO_GRBIT, 0, 1, 0, JET_errSuccess },
+            { columnidMSExtentPageCountCache_cpgAE,      &cpgAE,      sizeof( cpgAE ),      0, NO_GRBIT, 0, 1, 0, JET_errSuccess },
+            { columnidMSExtentPageCountCache_cpgOE,      &cpgOE,      sizeof( cpgOE ),      0, NO_GRBIT, 0, 1, 0, JET_errSuccess },
+            { columnidMSExtentPageCountCache_epccesFlag, &epccesFlag, sizeof( epccesFlag ), 0, NO_GRBIT, 0, 1, 0, JET_errSuccess },
         };
 
     if( pgnoNull == pfmp->PgnoExtentPageCountCacheFDP() )
@@ -14335,8 +14413,14 @@ ERR ErrCATGetExtentPageCounts(
               _countof( rgretrievecolumn ) ) );
     Assert( JET_errSuccess == err );
 
-    if ( bFlag )
+    switch ( epccesFlag )
     {
+    case epcces::Valid:
+        // Normal, expected.
+        break;
+
+    case epcces::Prepared:
+    case epcces::FlagDelete:
         OSTraceFMP(
             ifmp,
             JET_tracetagCatalog,
@@ -14346,6 +14430,10 @@ ERR ErrCATGetExtentPageCounts(
                 (ULONG)ifmp,
                 objid) );
         Error( ErrERRCheck( JET_errRecordNotFound ) );
+        break;
+
+    default:
+        Error( ErrERRCheck( JET_errInternalError ) );
     }
 
     Assert( cpgOE >= cpgAE );
@@ -14361,18 +14449,24 @@ ERR ErrCATGetExtentPageCounts(
     }
 
 HandleError:
-    CATIPossiblyResetUpdatingExtentPageCountCacheFlag( ppib );
-
     if ( pfucbNil != pfucbExtentPageCountCache )
     {
-        ERR errT = ErrFILECloseTable( ppib, pfucbExtentPageCountCache );
-        Assert( JET_errSuccess == errT );
+        ERR errT;
+
+        errT = ErrFILECloseTable( ppib, pfucbExtentPageCountCache );
+        Assert( JET_errSuccess <= errT );
+        pfucbExtentPageCountCache = pfucbNil;
 
         // If we opened and closed a table, these pages need to still not be latched.
         Assert ( pgnoNull != pfmp->PgnoExtentPageCountCacheFDP() );
+
         Assert ( FBFNotLatched( ifmp, pfmp->PgnoExtentPageCountCacheFDP() ) );
     }
 
+    CATIPossiblyResetUpdatingExtentPageCountCacheFlag( ppib );
+
+    Assert( pfucbNil == pfucbExtentPageCountCache );
+    
     return err;
 }
 
@@ -14453,10 +14547,10 @@ ERR ErrCATCreateMSExtentPageCountCache(
 
     Call( ErrFILECreateTable( ppib, dbid, &tablecreateMSExtentPageCountCache, fSPMultipleExtent ) );
 
-    Assert( columnidMSExtentPageCountCache_objid == rgcolumncreateMSExtentPageCountCache[0].columnid );
-    Assert( columnidMSExtentPageCountCache_cpgAE == rgcolumncreateMSExtentPageCountCache[1].columnid );
-    Assert( columnidMSExtentPageCountCache_cpgOE == rgcolumncreateMSExtentPageCountCache[2].columnid );
-    Assert( columnidMSExtentPageCountCache_bFlag == rgcolumncreateMSExtentPageCountCache[3].columnid );
+    Assert( columnidMSExtentPageCountCache_objid      == rgcolumncreateMSExtentPageCountCache[0].columnid );
+    Assert( columnidMSExtentPageCountCache_cpgAE      == rgcolumncreateMSExtentPageCountCache[1].columnid );
+    Assert( columnidMSExtentPageCountCache_cpgOE      == rgcolumncreateMSExtentPageCountCache[2].columnid );
+    Assert( columnidMSExtentPageCountCache_epccesFlag == rgcolumncreateMSExtentPageCountCache[3].columnid );
 
     if ( NULL != ppgnoFDP )
     {
