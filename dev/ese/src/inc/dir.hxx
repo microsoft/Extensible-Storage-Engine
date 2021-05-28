@@ -246,12 +246,6 @@ INLINE VOID AssertDIRMaybeNoLatch( PIB *ppib, FUCB *pfucb )
 #ifdef DEBUG
     // This routine is only called from code paths that may validly be working on updating the Cpg cache.
 
-    if ( pfucbNil == pfucb ) {
-        AssertSz( fFalse, "Don't call this routine without providing an FUCB*" );
-        return;
-    }
-
-    Assert( pfucb->ppib == ppib );
 
     if ( ppib->FUpdatingExtentPageCountCache() )
     {
@@ -266,6 +260,16 @@ INLINE VOID AssertDIRMaybeNoLatch( PIB *ppib, FUCB *pfucb )
         // Obviously, we have to be very careful to only need latches in the Cache table at this point lest
         // we deadlock on attempting to acquire latches.
         //
+
+        if ( pfucbNil == pfucb )
+        {
+            // We may be here from an error handler, in which case we might not have a pfucb.  In that case,
+            // we can't verify anything about the objid.
+            return;
+        }
+
+
+        Assert( pfucb->ppib == ppib );
 
         // We only expect to be here in limited conditions.
         if ( PfmpFromIfmp( pfucb->ifmp )->ObjidExtentPageCountCacheFDP() == pfucb->u.pfcb->ObjidFDP() )

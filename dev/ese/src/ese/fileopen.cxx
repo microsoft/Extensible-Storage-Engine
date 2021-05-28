@@ -1984,7 +1984,7 @@ HandleError:
     {
         CallSx( ErrDIRRollback( ppib ), JET_errRollbackError );
     }
-    AssertDIRNoLatch( ppib );
+    AssertDIRMaybeNoLatch( ppib, NULL );
 
     return err;
 }
