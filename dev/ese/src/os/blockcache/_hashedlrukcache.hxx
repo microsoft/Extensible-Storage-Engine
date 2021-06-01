@@ -7,9 +7,14 @@
 //  THashedLRUKCache:  a persistent write back cache implemented as a fixed size hash of chunks each running the LRUK
 //  cache replacement algorithm.  crash resilience is provided by a journal
 
+template< class I > class CHashedLRUKCacheThreadLocalStorage;
+
+template< class I >
+using THashedLRUKCacheBase = TCacheBase<I, CHashedLRUKCachedFileTableEntry, CCacheThreadLocalStorageBase>;
+
 template< class I >
 class THashedLRUKCache
-    :   public TCacheBase<I, CHashedLRUKCachedFileTableEntry>
+    :   public THashedLRUKCacheBase<I>
 {
     public:
 
@@ -172,7 +177,7 @@ ERR THashedLRUKCache<I>::ErrFlush(  _In_ const VolumeId     volumeid,
     //  AEG
 
 HandleError:
-    ReleaseCachedFile( pcfte );
+    ReleaseCachedFile( &pcfte );
     return err;
 }
 
@@ -193,7 +198,7 @@ ERR THashedLRUKCache<I>::ErrInvalidate( _In_ const VolumeId     volumeid,
     //  AEG
 
 HandleError:
-    ReleaseCachedFile( pcfte );
+    ReleaseCachedFile( &pcfte );
     return err;
 }
 
@@ -242,7 +247,7 @@ HandleError:
     {
         prequest->Release( err );
     }
-    ReleaseCachedFile( pcfte );
+    ReleaseCachedFile( &pcfte );
     return fAsync ? JET_errSuccess : err;
 }
 
@@ -291,7 +296,7 @@ HandleError:
     {
         prequest->Release( err );
     }
-    ReleaseCachedFile( pcfte );
+    ReleaseCachedFile( &pcfte );
     return fAsync ? JET_errSuccess : err;
 }
 
@@ -310,7 +315,7 @@ inline ERR THashedLRUKCache<I>::ErrIssue(   _In_ const VolumeId     volumeid,
     //  AEG
 
 HandleError:
-    ReleaseCachedFile( pcfte );
+    ReleaseCachedFile( &pcfte );
     return err;
 }
 
@@ -323,14 +328,14 @@ THashedLRUKCache<I>::THashedLRUKCache(  _In_    IFileSystemFilter* const        
                                         _In_    ICacheTelemetry* const              pctm,
                                         _Inout_ IFileFilter** const                 ppffCaching,
                                         _Inout_ CCacheHeader** const                ppch )
-            :   TCacheBase<I, CHashedLRUKCachedFileTableEntry>( pfsf,
-                                                                pfident, 
-                                                                pfsconfig, 
-                                                                ppbcconfig, 
-                                                                ppcconfig, 
-                                                                pctm, 
-                                                                ppffCaching, 
-                                                                ppch ),
+            :   THashedLRUKCacheBase<I>(    pfsf,
+                                            pfident, 
+                                            pfsconfig, 
+                                            ppbcconfig, 
+                                            ppcconfig, 
+                                            pctm, 
+                                            ppffCaching, 
+                                            ppch ),
                 m_pch( NULL )
 {
 }
