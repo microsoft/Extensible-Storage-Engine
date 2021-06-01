@@ -7,6 +7,7 @@
 
 const INT rankFilePathHash = 0;
 const INT rankCachedFileHash = 0;
+const INT rankCacheThreadLocalStorage = 0;
 const INT rankCacheRepository = 0;
 const INT rankFileFilter = 0;
 const INT rankFileIdentification = 0;

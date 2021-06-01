@@ -7,8 +7,11 @@
 //  TPassThroughCache:  simple pass through cache implementation (all requests become cache miss / write through)
 
 template< class I >
+using TPassThroughCacheBase = TCacheBase<I, CPassThroughCachedFileTableEntry, CCacheThreadLocalStorageBase>;
+
+template< class I >
 class TPassThroughCache
-    :   public TCacheBase<I, CPassThroughCachedFileTableEntry>
+    :   public TPassThroughCacheBase<I>
 {
     public:
 
@@ -72,14 +75,14 @@ class TPassThroughCache
                             _In_    ICacheTelemetry* const              pctm,
                             _Inout_ IFileFilter** const                 ppffCaching,
                             _Inout_ CCacheHeader** const                ppch )
-            : TCacheBase<I, CPassThroughCachedFileTableEntry>(  pfsf,
-                                                                pfident, 
-                                                                pfsconfig, 
-                                                                ppbcconfig, 
-                                                                ppcconfig, 
-                                                                pctm, 
-                                                                ppffCaching, 
-                                                                ppch )
+            :   TPassThroughCacheBase<I>(   pfsf,
+                                            pfident, 
+                                            pfsconfig, 
+                                            ppbcconfig, 
+                                            ppcconfig, 
+                                            pctm, 
+                                            ppffCaching, 
+                                            ppch )
         {
         }
 
@@ -127,7 +130,7 @@ ERR TPassThroughCache<I>::ErrFlush( _In_ const VolumeId     volumeid,
     //  trivial implementation:  nothing to do
 
 HandleError:
-    ReleaseCachedFile( pcfte );
+    ReleaseCachedFile( &pcfte );
     return err;
 }
 
@@ -169,7 +172,7 @@ ERR TPassThroughCache<I>::ErrInvalidate(    _In_ const VolumeId     volumeid,
 
 HandleError:
     OSMemoryPageFree( rgbZero );
-    ReleaseCachedFile( pcfte );
+    ReleaseCachedFile( &pcfte );
     return err;
 }
 
@@ -187,11 +190,19 @@ ERR TPassThroughCache<I>::ErrRead(  _In_                    const TraceContext& 
                                     _In_                    const DWORD_PTR             keyComplete )
 {
     ERR                                 err             = JET_errSuccess;
+    CCacheThreadLocalStorageBase*       pctls           = NULL;
     CPassThroughCachedFileTableEntry*   pcfte           = NULL;
     const COffsets                      offsets         = COffsets( ibOffset, ibOffset + cbData - 1 );
     DWORD                               cbHeaderRead    = 0;
     const BOOL                          fAsync          = pfnComplete != NULL;
     CRequest*                           prequest        = NULL;
+
+    //  get our thread local storage
+
+    if ( fAsync )
+    {
+        Call( ErrGetThreadLocalStorage( &pctls ) );
+    }
 
     //  get the cached file
 
@@ -257,7 +268,8 @@ HandleError:
     {
         prequest->Release( err );
     }
-    ReleaseCachedFile( pcfte );
+    ReleaseCachedFile( &pcfte );
+    CCacheThreadLocalStorageBase::Release( &pctls );
     return fAsync && prequest ? JET_errSuccess : err;
 }
 
@@ -275,12 +287,20 @@ ERR TPassThroughCache<I>::ErrWrite( _In_                    const TraceContext& 
                                     _In_                    const DWORD_PTR             keyComplete )
 {
     ERR                                 err             = JET_errSuccess;
+    CCacheThreadLocalStorageBase*       pctls           = NULL;
     CPassThroughCachedFileTableEntry*   pcfte           = NULL;
     const COffsets                      offsets         = COffsets( ibOffset, ibOffset + cbData - 1 );
     DWORD                               cbHeaderWritten = 0;
     const BOOL                          fAsync          = pfnComplete != NULL;
     CRequest*                           prequest        = NULL;
- 
+
+    //  get our thread local storage
+
+    if ( fAsync )
+    {
+        Call( ErrGetThreadLocalStorage( &pctls ) );
+    }
+
     //  get the cached file
 
     Call( ErrGetCachedFile( volumeid, fileid, fileserial, fFalse, &pcfte ) );
@@ -349,7 +369,8 @@ HandleError:
     {
         prequest->Release( err );
     }
-    ReleaseCachedFile( pcfte );
+    ReleaseCachedFile( &pcfte );
+    CCacheThreadLocalStorageBase::Release( &pctls );
     return fAsync && prequest ? JET_errSuccess : err;
 }
 
@@ -359,7 +380,12 @@ inline ERR TPassThroughCache<I>::ErrIssue(  _In_ const VolumeId     volumeid,
                                             _In_ const FileSerial   fileserial)
 {
     ERR                                 err     = JET_errSuccess;
+    CCacheThreadLocalStorageBase*       pctls   = NULL;
     CPassThroughCachedFileTableEntry*   pcfte   = NULL;
+
+    //  get our thread local storage
+
+    Call( ErrGetThreadLocalStorage( &pctls ) );
 
     //  get the cached file
 
@@ -368,7 +394,8 @@ inline ERR TPassThroughCache<I>::ErrIssue(  _In_ const VolumeId     volumeid,
     //  trivial implementation:  nothing to do
 
 HandleError:
-    ReleaseCachedFile( pcfte );
+    ReleaseCachedFile( &pcfte );
+    CCacheThreadLocalStorageBase::Release( &pctls );
     return err;
 }
 
