@@ -403,6 +403,7 @@ class ATCHCHK
 #define fLGOldLogInBackup           0x00000004
 #define fLGLogAttachments           0x00000008
 #define fLGLogRenameOnly            0x00000010
+#define fLGAssertShouldntNeedRoll   0x10000000
 
 
 #define fCheckLogID             fTrue

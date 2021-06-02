@@ -49,6 +49,7 @@ ERR OSLayerNewCanTrackAllocLine::ErrTest()
     if ( NULL == pul )
     {
         wprintf( L"\t\tFailed new alloc!\n" );
+        err = -64;
         goto HandleError;
     }
 
