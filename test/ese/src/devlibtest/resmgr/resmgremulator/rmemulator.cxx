@@ -1,36 +1,40 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
+//  Headers.
 
 #include <windows.h>
 #include "rmemulator.hxx"
 
+//  Constants.
 
 #ifdef DEBUG
-static const CPG g_cpgChunk                     = 10;
-#else
-static const CPG g_cpgChunk                     = 32 * 1024;
-#endif
+static const CPG g_cpgChunk                     = 10;           //  Number of pages to be allocated for each additional allocated chunk.
+#else   //   DEBUG
+static const CPG g_cpgChunk                     = 32 * 1024;    //  Number of pages to be allocated for each additional allocated chunk.
+#endif  //   DEBUG
 
-static const ULONG g_pctCachePriorityDflt       = 100;
+static const ULONG g_pctCachePriorityDflt       = 100;          //  Default cache priority to use when fReplayCachePriority is false.
 
-static const CPG g_cpgReserved                  = 2;
+static const CPG g_cpgReserved                  = 2;            //  header + shadow header.
 
-static const ULONG g_pctPercentileRes           = 5;
+static const ULONG g_pctPercentileRes           = 5;            //  Percentile resolution for dumping histograms.
 
-static const BYTE g_ifmpInvalid                 = 0xFF;
-static const BYTE g_ifmpCachePriFilter          = g_ifmpInvalid;
-static const ULONG g_pctIfmpCachePriFilter      = 5;
-static const BYTE g_ifmpFilter                  = g_ifmpInvalid;
+static const BYTE g_ifmpInvalid                 = 0xFF;            //  Invalid IFMP to filter on.
+static const BYTE g_ifmpCachePriFilter          = g_ifmpInvalid;   //  IFMP to override cache priority for (leave at g_ifmpInvalid and change it for one-off testing).
+static const ULONG g_pctIfmpCachePriFilter      = 5;               //  Percentage to override cache priority with, in case the IFMP matches the filter.
+static const BYTE g_ifmpFilter                  = g_ifmpInvalid;   //  IFMP to process traces of (leave at g_ifmpInvalid and change it for one-off testing).
 
-static const BYTE g_clientInvalid               = 0xFF;
-static const BYTE g_clientCachePriFilter        = g_clientInvalid;
-static const ULONG g_pctClientCachePriFilter    = 10;
+static const BYTE g_clientInvalid               = 0xFF;            //  Invalid client to filter on.
+static const BYTE g_clientCachePriFilter        = g_clientInvalid; //  Client type to override cache priority for (leave at g_clientInvalid and change it for one-off testing).
+static const ULONG g_pctClientCachePriFilter    = 10;              //  Percentage to override cache priority with, in case the client type matches the filter.
 
+//  Miscellaneous macros.
 
 #define absdiff( x, y ) ( ( (x) > (y) ) ? ( (x) - (y) ) : ( (y) - (x) ) )
 
 
+//  struct LGPOS.   // Originally declared in daedef.hxx (not an exact copy).
 
 LGPOS::LGPOS()
 {
@@ -83,6 +87,7 @@ INT CmpLgpos( const LGPOS& lgpos1, const LGPOS& lgpos2 )
     return 0;
 }
 
+//  struct PAGEENTRY.
 
 PAGEENTRY::PAGEENTRY() :
     ppage( NULL ),
@@ -101,6 +106,7 @@ PAGEENTRY::PAGEENTRY() :
 }
 
 
+//  class IPageEvictionAlgorithmImplementation.
 
 IPageEvictionAlgorithmImplementation::IPageEvictionAlgorithmImplementation()
 {
@@ -126,6 +132,7 @@ ERR IPageEvictionAlgorithmImplementation::ErrResetProcessing()
 }
 
 
+//  class PageEvictionEmulator.
 
 PageEvictionEmulator PageEvictionEmulator::s_singleton;
 
@@ -165,12 +172,14 @@ ERR PageEvictionEmulator::ErrInit( BFFTLContext* const pbfftlContext,
     ERR err = JET_errSuccess;
     SYSTEM_INFO systemInfo = { 0 };
 
+    //  May only call this function if it's currently uninitialized.
 
     if ( m_state != PageEvictionEmulator::peesUninitialized )
     {
         CallR( ErrERRCheck( JET_errTestError ) );
     }
 
+    //  Parameter validation.
 
     if ( pbfftlContext == NULL || pipeaImplementation == NULL )
     {
@@ -184,16 +193,21 @@ ERR PageEvictionEmulator::ErrInit( BFFTLContext* const pbfftlContext,
 
     Enforce( sizeof(PAGE) >= 1 );
 
+    //  Retrieve the page size allocation granularity.
 
     GetSystemInfo( &systemInfo );
 
+    //  Multiple of 64 bytes.
 
     m_cbPage = roundup( pipeaImplementation->CbPageContext(), 64 );
 
+    //  Fit maximum number of pages within multiples of the page granularity.
 
     m_cpgChunk = roundup( m_cbPage * g_cpgChunk, systemInfo.dwPageSize ) / m_cbPage;
 
+    //  Actual pages will be allocated on demand (m_arrayPages).
 
+    //  Pre-allocate memory for stats (m_stats).
 
     CArray<PageEvictionEmulator::STATS>::ERR errStats = m_stats.ErrSetSize( pbfftlContext->cIFMP );
     if ( errStats != CArray<PageEvictionEmulator::STATS>::ERR::errSuccess )
@@ -202,6 +216,7 @@ ERR PageEvictionEmulator::ErrInit( BFFTLContext* const pbfftlContext,
         Error( ErrERRCheck( JET_errOutOfMemory ) );
     }
 
+    //  Pre-allocate memory for all page entries (m_arrayPageEntries).
 
     CArray<CArray<PAGEENTRY>>::ERR errPageEntries = m_arrayPageEntries.ErrSetSize( pbfftlContext->cIFMP );
     if ( errPageEntries != CArray<CArray<PAGEENTRY>>::ERR::errSuccess )
@@ -223,6 +238,7 @@ ERR PageEvictionEmulator::ErrInit( BFFTLContext* const pbfftlContext,
         m_arrayPageEntries[ ifmp ] = pages;
     }
 
+    //  Pre-allocate memory for all dirty-page operation lists.
 
     CArray<std::list<DirtyPageOp>*>::ERR errDirtyPageOps = m_arrayDirtyPageOps.ErrSetSize( pbfftlContext->cIFMP );
     if ( errDirtyPageOps != CArray<std::list<DirtyPageOp>*>::ERR::errSuccess )
@@ -242,10 +258,12 @@ ERR PageEvictionEmulator::ErrInit( BFFTLContext* const pbfftlContext,
         m_arrayDirtyPageOps[ ifmp ] = pDirtyPageOps;
     }
 
+    //  Finally, success.
 
     m_pbfftlContext = pbfftlContext;
     m_pipeaImplementation = pipeaImplementation;
 
+    //  Reset all stats.
 
     for ( size_t ifmp = 0; ifmp <= m_stats.Size(); ifmp++ )
     {
@@ -327,6 +345,7 @@ HandleError:
 
 void PageEvictionEmulator::Term()
 {
+    //  Nothing to do if it's uninitialized.
 
     if ( m_state == PageEvictionEmulator::peesUninitialized )
     {
@@ -335,12 +354,15 @@ void PageEvictionEmulator::Term()
 
     Enforce( m_state != PageEvictionEmulator::peesRunning );
 
+    //  Evict pages currently cached.
 
     PurgeCache_();
 
+    //  No available pages.
 
     m_ilAvailPages.Empty();
 
+    //  Free page chunks.
 
     for ( size_t iChunk = 0; iChunk < m_arrayPages.Size(); iChunk++ )
     {
@@ -354,6 +376,7 @@ void PageEvictionEmulator::Term()
     const CArray<BYTE*>::ERR errSetCapacityPages = m_arrayPages.ErrSetCapacity( 0 );
     Enforce( errSetCapacityPages == CArray<BYTE*>::ERR::errSuccess );
 
+    //  Free page entry arrays and page entries.
 
     for ( size_t ifmp = 0; ifmp < m_arrayPageEntries.Size(); ifmp++ )
     {
@@ -364,6 +387,7 @@ void PageEvictionEmulator::Term()
     const CArray<CArray<PAGEENTRY>>::ERR errSetCapacityPageEntries = m_arrayPageEntries.ErrSetCapacity( 0 );
     Enforce( errSetCapacityPageEntries == CArray<CArray<PAGEENTRY>>::ERR::errSuccess );
 
+    //  Free dirty-page lists.
 
     for ( size_t ifmp = 0; ifmp < m_arrayDirtyPageOps.Size(); ifmp++ )
     {
@@ -380,10 +404,12 @@ void PageEvictionEmulator::Term()
     const CArray<std::list<DirtyPageOp>*>::ERR errSetCapacityDirtyOpsEntries = m_arrayDirtyPageOps.ErrSetCapacity( 0 );
     Enforce( errSetCapacityDirtyOpsEntries == CArray<std::list<DirtyPageOp>*>::ERR::errSuccess );
 
+    //  Free stats.
 
     const CArray<PageEvictionEmulator::STATS>::ERR errSetCapacityStats = m_stats.ErrSetCapacity( 0 );
     Enforce( errSetCapacityStats == CArray<PageEvictionEmulator::STATS>::ERR::errSuccess );
 
+    //  Reset state.
 
     ResetConfig();
     m_state = PageEvictionEmulator::peesUninitialized;
@@ -527,6 +553,7 @@ ERR PageEvictionEmulator::ErrExecute()
     TICK tickPrintNext = 0;
     BFTRACE bftrace;
 
+    //  May only call this function if it's currently initialized.
 
     if ( m_state != PageEvictionEmulator::peesInitialized )
     {
@@ -538,6 +565,7 @@ ERR PageEvictionEmulator::ErrExecute()
 
     printf( "\r\n" );
 
+    //  We are officially running now.
 
     m_state = PageEvictionEmulator::peesRunning;
     ResetGlobalTick();
@@ -549,6 +577,7 @@ ERR PageEvictionEmulator::ErrExecute()
         wprintf( L"tick,cFaults,cFaultsAvoidable,cWrites,cWritesChkpt,cWritesScavenge,cFaults+cWrites,cpgCached,cpgCachedMax\n" );
     }
 
+    //  Loop through all the trace records.
 
     ULONG iTraceLogFileLast = m_pbfftlContext->iTraceLogFile;
     while ( ( ( err = ErrBFFTLGetNext( m_pbfftlContext, &bftrace ) ) >= JET_errSuccess ) || ( err == errNotFound ) )
@@ -566,12 +595,16 @@ ERR PageEvictionEmulator::ErrExecute()
                 m_statsAgg.dtickDurationReal = s_tickCurrent;
             }
 
+            //  If the resource manager is not initialized, fake an initialization trace iff we're no running
+            //  in variable-cache-size mode.
 
             if ( !m_fResMgrInit && ( bftrace.traceid != bftidSysResMgrInit ) && ( m_peecsp != peecspVariable ) )
             {
                 Call( ErrFakeProcessTraceInit_() );
             }
 
+            //  If the resource manager is not known to be initialized, just disregard the trace record,
+            //  unless of course it's an init trace.
 
             if ( m_fResMgrInit || ( bftrace.traceid == bftidSysResMgrInit ) )
             {
@@ -638,6 +671,7 @@ ERR PageEvictionEmulator::ErrExecute()
 
         if ( m_dtickPrintSampleInterval > 0 )
         {
+            // Comment
             const TICK tickPrint = s_tickCurrent - m_statsAgg.dtickDurationReal;
             if ( ( tickPrint >= tickPrintNext ) || fEndOfTrace )
             {
@@ -652,6 +686,7 @@ ERR PageEvictionEmulator::ErrExecute()
                     m_statsAgg.cWritesSimAvailPool += stats.cWritesSimAvailPool;
                 }
 
+                // wprintf( L"tick,cFaults,cFaultsAvoidable,cWrites,cWritesChkpt,cWritesScavenge,cFaults+cWrites,cpgCached,cpgCachedMax\n" );
                 wprintf( L"%I32u,%I64u,%I64u,%I64u,%I64u,%I64u,%I64u,%I32u,%I32u\n",
                          tickPrint,
                          m_statsAgg.cFaultsSim,
@@ -687,6 +722,7 @@ ERR PageEvictionEmulator::ErrExecute()
         }
     }
 
+    //  End of the line?
 
     if ( err == errNotFound )
     {
@@ -695,24 +731,29 @@ ERR PageEvictionEmulator::ErrExecute()
 
 HandleError:
 
+    //  We'll fake a bftidSysResMgrTerm trace if we're exiting with the system initialized.
 
     if ( m_fResMgrInit )
     {
         FakeProcessTraceTerm_();
     }
 
+    //  If it got to the running state and succeeded so far, consolidate statistics and call it done.
 
     if ( ( m_state == PageEvictionEmulator::peesRunning ) && ( err >= JET_errSuccess ) )
     {
+        //  Consolidate statistics.
 
         m_statsAgg.dtickDurationReal = ( s_tickCurrent - m_statsAgg.dtickDurationReal );
         m_statsAgg.dtickDurationSimRun = ( TickOSTimeCurrent() - m_statsAgg.dtickDurationSimRun );
 
+        //  Page-based stats.
 
         for ( size_t ifmp = 0; ifmp < m_arrayPageEntries.Size(); ifmp++ )
         {
             PageEvictionEmulator::STATS& stats = m_stats[ ifmp ];
 
+            //  Accumulate page-base stats.
 
             const CArray<PAGEENTRY>& pages = m_arrayPageEntries[ ifmp ];
             for ( size_t ipg = 0; ipg < pages.Size(); ipg++ )
@@ -720,12 +761,14 @@ HandleError:
                 CStats::ERR errStats = CStats::ERR::errSuccess;
                 const PAGEENTRY* const ppge = pages.PEntry( ipg );
 
+                //  Determine if this page was requested at least once.
 
                 if ( ppge->cRequests > 0 )
                 {
                     stats.cRequestedUnique++;
                 }
 
+                //  Determine if this page was dirtied at least once.
 
                 if ( ppge->cDirties > 0 )
                 {
@@ -734,6 +777,7 @@ HandleError:
 
                 if ( m_fPrintHistograms )
                 {
+                    //  Do not process pages that were never cached.
 
                     if ( ( ppge->cFaultsReal > 0 ) && ( ppge->cFaultsSim > 0 ) )
                     {
@@ -741,10 +785,12 @@ HandleError:
                         const ULONG cFaultsSim = m_cFaultsHistoRes * ( ppge->cFaultsSim / m_cFaultsHistoRes );
                         const TICK dtickLifetimeReal = m_dtickLifetimeHistoRes * ( ppge->dtickCachedReal / m_dtickLifetimeHistoRes );
 
+                        //  Avoid division by zero.
 
                         const TICK dtickCachedSim = ( ppge->dtickCachedSim == 0 ) ? 1 : ppge->dtickCachedSim;
                         const TICK dtickLifetimeSim = m_dtickLifetimeHistoRes * ( dtickCachedSim / m_dtickLifetimeHistoRes );
 
+                        //  IFMP.
 
                         errStats = stats.histoFaultsReal.ErrAddSample( cFaultsReal );
                         if ( errStats != CStats::ERR::errSuccess )
@@ -775,6 +821,7 @@ HandleError:
                             goto HandleHistogramOOM;
                         }
 
+                        //  Aggregated.
 
                         errStats = m_statsAgg.histoFaultsReal.ErrAddSample( cFaultsReal );
                         if ( errStats != CStats::ERR::errSuccess )
@@ -808,6 +855,7 @@ HandleError:
                 }
             }
 
+            //  Aggregate values which aren't aggregated in real-time during the simulation.
 
             m_statsAgg.cRequestedUnique += stats.cRequestedUnique;
             m_statsAgg.cRequested += stats.cRequested;
@@ -848,6 +896,7 @@ HandleError:
             m_statsAgg.cSuperColdedSim += stats.cSuperColdedSim;
         }
 
+        //  Calculated stats.
 
         for ( size_t ifmp = 0; ifmp <= m_stats.Size(); ifmp++ )
         {
@@ -868,6 +917,7 @@ HandleError:
             }
         }
 
+        //  Call it done.
 
         m_state = PageEvictionEmulator::peesDone;
     }
@@ -925,6 +975,7 @@ ERR PageEvictionEmulator::ErrDumpStats( const bool fDumpHistogramDetails )
 
     wprintf( L"Resource manager emulator statistics...\n\n" );
 
+    //  General statistics.
 
     wprintf( L"General statistics...\n" );
     wprintf( L"  cResMgrCycles: %lu\n", m_statsAgg.cResMgrCycles );
@@ -936,10 +987,11 @@ ERR PageEvictionEmulator::ErrDumpStats( const bool fDumpHistogramDetails )
     wprintf( L"  dtickDurationSimRun: %lu\n", m_statsAgg.dtickDurationSimRun );
     wprintf( L"\n\n" );
 
+    //  Per-IFMP statistics.
 
     for ( size_t ifmpT = 0; ifmpT <= m_stats.Size(); ifmpT++ )
     {
-        const bool fAggregated = ( ifmpT == 0 );
+        const bool fAggregated = ( ifmpT == 0 );    //  Print aggregated stats first.
         const size_t ifmp = ifmpT - 1;
         PageEvictionEmulator::STATS& stats = fAggregated ? m_statsAgg : m_stats[ ifmp ];
 
@@ -1025,6 +1077,7 @@ ERR PageEvictionEmulator::ErrDumpStats( const bool fDumpHistogramDetails )
         Enforce( stats.cWritesSim >= ( stats.cWritesSimChkpt + stats.cWritesSimAvailPool + stats.cWritesSimShrink ) );
         Enforce( !m_fReplayNoTouch || ( stats.cTouchesNoTouchDropped == 0 ) );
 
+        //  Calculated stats (real).
 
         if ( stats.pctCacheFaultRateReal >= 0.0 )
         {
@@ -1036,6 +1089,7 @@ ERR PageEvictionEmulator::ErrDumpStats( const bool fDumpHistogramDetails )
             wprintf( L"  Cache fault rate (real, avoidable): %.6f%%\n", stats.pctCacheFaultRateRealAvoidable );
         }
 
+        //  Calculated stats (simulated).
 
         if ( stats.pctCacheSizeRatioSim >= 0.0 )
         {
@@ -1052,6 +1106,7 @@ ERR PageEvictionEmulator::ErrDumpStats( const bool fDumpHistogramDetails )
             wprintf( L"  Cache fault rate (simulated, avoidable): %.6f%%\n", stats.pctCacheFaultRateSimAvoidable );
         }
 
+        //  Warnings and other self-checks.
 
         if ( stats.cCaches != stats.cEvictionsReal )
         {
@@ -1097,6 +1152,7 @@ ERR PageEvictionEmulator::ErrDumpStats( const bool fDumpHistogramDetails )
 
         if ( m_fPrintHistograms )
         {
+            //  Per-page statistics (histograms).
 
             const SAMPLE sampleFaultsMin = min( stats.histoFaultsReal.Min(), stats.histoFaultsSim.Min() );
             const SAMPLE sampleFaultsMax = max( stats.histoFaultsReal.Max(), stats.histoFaultsSim.Max() );
@@ -1135,6 +1191,8 @@ void PageEvictionEmulator::ResetGlobalTick()
 
 void PageEvictionEmulator::SetGlobalTick( const TICK tick, const bool fTimeMayGoBack )
 {
+    //  We are reserving 0 to mean "uninitialized", so we need to make sure it's
+    //  not returned from anywhere.
 
     const TICK tickLastNew = !tick ? 1 : tick;
 
@@ -1145,6 +1203,7 @@ void PageEvictionEmulator::SetGlobalTick( const TICK tick, const bool fTimeMayGo
 
     const TICK tickLastOld = s_tickLast;
 
+    //  Can't go backwards (in most cases).
 
     const TICK dtick = tickLastNew - tickLastOld;
     const bool fTimeGoesBack = ( (LONG)dtick < 0 );
@@ -1188,9 +1247,11 @@ PAGE* PageEvictionEmulator::PpgGetAvailablePage_()
 {
     PAGE* ppage = NULL;
 
+    //  Allocate a new page chunk if there aren't available pages.
 
     if ( m_ilAvailPages.FEmpty() )
     {
+        //  First, try to grow the array of chunks.
 
         CArray<BYTE*>::ERR errPages = m_arrayPages.ErrSetSize( m_arrayPages.Size() + 1 );
 
@@ -1204,6 +1265,7 @@ PAGE* PageEvictionEmulator::PpgGetAvailablePage_()
 
             if ( pbPageChunk != NULL )
             {
+                //  Add the newly allocated pages to the list of available pages.
 
                 for ( size_t ipgChunk = 0; ipgChunk < m_cpgChunk; ipgChunk++ )
                 {
@@ -1217,9 +1279,11 @@ PAGE* PageEvictionEmulator::PpgGetAvailablePage_()
         }
     }
 
+    //  Pull it from the available list.
 
     ppage = m_ilAvailPages.NextMost();
 
+    //  Remove from the available list and reset it.
 
     if ( ppage != NULL )
     {
@@ -1249,6 +1313,7 @@ void PageEvictionEmulator::PurgeCache_()
         {
             PAGEENTRY* const ppge = const_cast<PAGEENTRY*>( pages.PEntry( ipg ) );
 
+            //  If there are outstanding cache traces, accumulate statistics before evicting.
 
             if ( ppge->tickLastCachedReal != 0 )
             {
@@ -1258,9 +1323,11 @@ void PageEvictionEmulator::PurgeCache_()
                 ppge->tickLastCachedReal = 0;
             }
 
+            //  If the page looks cached to us, evict it.
 
             if ( ppge->ppage != NULL )
             {
+                //  Fake eviction.
 
                 BFTRACE::BFEvict_ bfevict = { 0 };
                 bfevict.ifmp = (BYTE)ppge->ppage->ifmppgno.ifmp;
@@ -1269,6 +1336,7 @@ void PageEvictionEmulator::PurgeCache_()
                 const ERR errEvict = m_pipeaImplementation->ErrEvictSpecificPage( ppge->ppage, bfevict );
                 Enforce( errEvict == JET_errSuccess );
 
+                //  Evict from our cache.
 
                 EvictPage_( ppge, iorpBFPurge, lgposNewest );
 
@@ -1328,6 +1396,7 @@ void PageEvictionEmulator::ModifyPage_( const IFMPPGNO& ifmppgno, const LGPOS& l
     m_stats[ ifmp ].lgenMin = min( m_stats[ ifmp ].lgenMin, lgposModify.lgen );
     m_stats[ ifmp ].lgenMax = max( m_stats[ ifmp ].lgenMax, lgposModify.lgen );
 
+    //  If the page is cached, replay the operation.
 
     if ( ppage != NULL )
     {
@@ -1336,6 +1405,7 @@ void PageEvictionEmulator::ModifyPage_( const IFMPPGNO& ifmppgno, const LGPOS& l
         DirtyPage_( ppge );
         InsertDirtyPageOp_( ifmp, pgno, lgposModify );
 
+        //  Clean oldest pages until the checkpoint reaches the threshold.
 
         do
         {
@@ -1343,7 +1413,7 @@ void PageEvictionEmulator::ModifyPage_( const IFMPPGNO& ifmppgno, const LGPOS& l
 
             GetNewestDirtyLgpos_( ifmp, &lgposNewest );
 
-            if ( CmpLgpos( lgposNewest, lgposMin ) == 0 )
+            if ( CmpLgpos( lgposNewest, lgposMin ) == 0 )   //  Empty.
             {
                 break;
             }
@@ -1364,6 +1434,7 @@ void PageEvictionEmulator::ModifyPage_( const IFMPPGNO& ifmppgno, const LGPOS& l
             const IFMPPGNO ifmppgnoToClean( ifmp, pgnoToClean );
             PAGEENTRY* const ppgeToClean = PpgeGetEntry_( ifmppgnoToClean );
 
+            //  Write the page if dirty and not cleaned recently enough.
 
             if ( ( ppgeToClean->ppage != NULL ) && ppgeToClean->fDirty && ( CmpLgpos( ppgeToClean->lgposCleanLast, lgposOldest ) <= 0 ) )
             {
@@ -1379,6 +1450,9 @@ void PageEvictionEmulator::InsertDirtyPageOp_( const IFMP ifmp, const PGNO pgno,
 
     std::list<DirtyPageOp>* const pDirtyPageOps = m_arrayDirtyPageOps[ ifmp ];
 
+    //  Some trace sets may capture redo after a process termination. That means we
+    //  we may see lgpos going backwards, which is very ineffective to process. If we
+    //  detect that case, we'll just insert the operation as if it were the newest.
 
     LGPOS lgposNewest;
     GetNewestDirtyLgpos_( ifmp, &lgposNewest );
@@ -1433,14 +1507,16 @@ ERR PageEvictionEmulator::ErrCachePage_( PAGEENTRY* const ppge, const IFMPPGNO& 
 {
     ERR err = JET_errSuccess;
 
-    Enforce( ppge->ppage == NULL );
+    Enforce( ppge->ppage == NULL ); //  Page must not be currently cached.
     Enforce( !ppge->fDirty );
 
+    //  If we're running with a fixed emulated cache size and we're above the thresold, evict one page first.
 
     if ( ( m_peecsp == peecspFixed ) && ( (DWORD)m_statsAgg.cpgCached >= m_cbfCacheSize ) )
     {
-        Enforce( (DWORD)m_statsAgg.cpgCached == m_cbfCacheSize );
+        Enforce( (DWORD)m_statsAgg.cpgCached == m_cbfCacheSize );   //  Can't go over.
 
+        //  Fake eviction.
 
         BFTRACE::BFEvict_ bfevict = { 0 };
         bfevict.fCurrentVersion = fTrue;
@@ -1466,6 +1542,7 @@ ERR PageEvictionEmulator::ErrCachePage_( PAGEENTRY* const ppge, const IFMPPGNO& 
 
     Alloc( ppage );
 
+    //  Stats (global).
 
     Enforce( m_statsAgg.cpgCached < LONG_MAX );
     m_statsAgg.cpgCached++;
@@ -1474,6 +1551,7 @@ ERR PageEvictionEmulator::ErrCachePage_( PAGEENTRY* const ppge, const IFMPPGNO& 
         m_statsAgg.cpgCachedMax = m_statsAgg.cpgCached;
     }
 
+    //  Stats (IFMP).
 
     Enforce( m_stats[ ifmppgno.ifmp ].cpgCached < LONG_MAX );
     m_stats[ ifmppgno.ifmp ].cpgCached++;
@@ -1482,11 +1560,13 @@ ERR PageEvictionEmulator::ErrCachePage_( PAGEENTRY* const ppge, const IFMPPGNO& 
         m_stats[ ifmppgno.ifmp ].cpgCachedMax = m_stats[ ifmppgno.ifmp ].cpgCached;
     }
 
+    //  A new page does not incur a fault.
 
     if ( !fNewPage )
     {
         m_stats[ ifmppgno.ifmp ].cFaultsSim++;
 
+        //  Do not consider avoidable if it's the first request.
 
         if ( ppge->cRequests > 1 )
         {
@@ -1497,9 +1577,12 @@ ERR PageEvictionEmulator::ErrCachePage_( PAGEENTRY* const ppge, const IFMPPGNO& 
         Enforce( ppge->cFaultsSim > 0 );
     }
 
+    //  For cache-lifetime purposes, we'll store the tick the page was cached, even though
+    //  this is not technically a fault.
 
     ppage->tickLastFaultSim = s_tickCurrent;
 
+    //  Fill out page context.
 
     ppage->ifmppgno = ifmppgno;
     ppge->ppage = ppage;
@@ -1517,6 +1600,7 @@ void PageEvictionEmulator::DumpHistogram_( CPerfectHistogramStats& histogram,
 {
     wprintf( L"    Samples: %I64d\n", histogram.C() );
 
+    //  If no samples, don't bother printing detailed statistics.
 
     if ( histogram.C() == 0 )
     {
@@ -1537,6 +1621,7 @@ void PageEvictionEmulator::DumpHistogram_( CPerfectHistogramStats& histogram,
     SAMPLE sample;
     DWORD cSegments;
 
+    //  Separators for the hits histogram.
 
     sample = min( sampleMin + sampleRes, sampleMax );
     wprintf( L"    Histogram:\n" );
@@ -1551,6 +1636,7 @@ void PageEvictionEmulator::DumpHistogram_( CPerfectHistogramStats& histogram,
     }
     wprintf( L"\n" );
 
+    //  Actual hits histogram now.
 
     errStats = histogram.ErrReset();
     Enforce( errStats == CStats::ERR::errSuccess );
@@ -1575,6 +1661,7 @@ void PageEvictionEmulator::DumpHistogram_( CPerfectHistogramStats& histogram,
     const ULONG percentileRes = g_pctPercentileRes;
     ULONG percentile, percentileT;
 
+    //  Separators for the percentile histograms.
 
     percentile = min( percentileMin + percentileRes, percentileMax );
     wprintf( L"    Percentiles:\n" );
@@ -1589,6 +1676,7 @@ void PageEvictionEmulator::DumpHistogram_( CPerfectHistogramStats& histogram,
     }
     wprintf( L"\n" );
 
+    //  Actual percentile histogram now.
 
     bool fPrintSample = false;
     bool fFoundSample = false;
@@ -1614,6 +1702,7 @@ void PageEvictionEmulator::DumpHistogram_( CPerfectHistogramStats& histogram,
 
             if ( percentileActual > percentile )
             {
+                //  Try and back out a little.
 
                 percentileT--;
                 fPrintSample = percentileT == percentileMin;
@@ -1652,7 +1741,7 @@ void PageEvictionEmulator::DumpHistogram_( CPerfectHistogramStats& histogram,
 
 void PageEvictionEmulator::TouchPage_( PAGEENTRY* const ppge, const BFTRACE::BFTouch_& bftouch )
 {
-    Enforce( ppge->ppage != NULL );
+    Enforce( ppge->ppage != NULL ); //  Page must be cached from our end.
 
     if ( !bftouch.fNewPage )
     {
@@ -1662,14 +1751,14 @@ void PageEvictionEmulator::TouchPage_( PAGEENTRY* const ppge, const BFTRACE::BFT
 
 void PageEvictionEmulator::DirtyPage_( PAGEENTRY* const ppge )
 {
-    Enforce( ppge->ppage != NULL );
+    Enforce( ppge->ppage != NULL ); //  Page must be currently cached.
     ppge->fDirty = true;
     ppge->cDirties++;
 }
 
 void PageEvictionEmulator::WritePage_( PAGEENTRY* const ppge, const IOREASONPRIMARY iorp, const LGPOS& lgposCurrent )
 {
-    Enforce( ppge->ppage != NULL );
+    Enforce( ppge->ppage != NULL ); //  Page must be currently cached.
 
     PageEvictionEmulator::STATS& stats = m_stats[ ppge->ppage->ifmppgno.ifmp ];
     stats.cWritesSim++;
@@ -1693,11 +1782,12 @@ void PageEvictionEmulator::WritePage_( PAGEENTRY* const ppge, const IOREASONPRIM
 
 void PageEvictionEmulator::CleanPage_( PAGEENTRY* const ppge, const LGPOS& lgposClean )
 {
-    Enforce( ppge->ppage != NULL );
+    Enforce( ppge->ppage != NULL ); //  Page must be currently cached.
     Enforce( ppge->fDirty );
     ppge->fDirty = false;
     ppge->lgposCleanLast = lgposClean;
 
+    //  Remove entries from the oldest end of the checkpoint if possible.
 
     const IFMP ifmp = ppge->ppage->ifmppgno.ifmp;
     std::list<DirtyPageOp>* const pDirtyPageOps = m_arrayDirtyPageOps[ ifmp ];
@@ -1720,7 +1810,7 @@ void PageEvictionEmulator::CleanPage_( PAGEENTRY* const ppge, const LGPOS& lgpos
 
 void PageEvictionEmulator::SupercoldPage_( PAGEENTRY* const ppge )
 {
-    Enforce( ppge->ppage != NULL );
+    Enforce( ppge->ppage != NULL ); //  Page must be currently cached.
     Enforce( m_fReplaySuperCold );
     m_stats[ ppge->ppage->ifmppgno.ifmp ].cSuperColdedSim++;
 }
@@ -1729,13 +1819,15 @@ void PageEvictionEmulator::EvictPage_( PAGEENTRY* const ppge, const IOREASONPRIM
 {
     PAGE* const ppage = ppge->ppage;
 
-    Enforce( ppage != NULL );
+    Enforce( ppage != NULL );   //  Page must be currently cached.
 
+    //  Clean it, if necessary.
     if ( ppge->fDirty )
     {
         WritePage_( ppge, iorp, lgposCurrent );
     }
 
+    //  Stats.
     Enforce( m_statsAgg.cpgCached >= 0 );
     m_statsAgg.cpgCached--;
     const IFMP ifmp = ppge->ppage->ifmppgno.ifmp;
@@ -1746,6 +1838,7 @@ void PageEvictionEmulator::EvictPage_( PAGEENTRY* const ppge, const IOREASONPRIM
     ppge->dtickCachedSim += ( s_tickCurrent - ppage->tickLastFaultSim );
     Enforce( ppge->dtickCachedSim >= dtickCachedSim );
 
+    //  Update page context and free it.
 
     Enforce( !ppge->fDirty );
     ppge->ppage = NULL;
@@ -1758,6 +1851,8 @@ ERR PageEvictionEmulator::ErrProcessTraceInit_( const BFTRACE& bftrace )
 
     Enforce( bftrace.traceid == bftidSysResMgrInit );
 
+    //  If it's already initialized, then fake a bftidSysResMgrTerm trace
+    //  so we can start fresh.
 
     if ( m_fResMgrInit )
     {
@@ -1765,6 +1860,7 @@ ERR PageEvictionEmulator::ErrProcessTraceInit_( const BFTRACE& bftrace )
         Enforce( !m_fResMgrInit );
     }
 
+    //  Dirty-page lists must be empty.
 
     for ( size_t ifmp = 0; ifmp < m_arrayDirtyPageOps.Size(); ifmp++ )
     {
@@ -1772,6 +1868,7 @@ ERR PageEvictionEmulator::ErrProcessTraceInit_( const BFTRACE& bftrace )
         Enforce( pDirtyPageOps->empty() );
     }
 
+    //  We may want to override init. parameters.
 
     const BFTRACE::BFSysResMgrInit_* const pbfinit = &bftrace.bfinit;
     BFTRACE::BFSysResMgrInit_ bfinit;
@@ -1779,12 +1876,14 @@ ERR PageEvictionEmulator::ErrProcessTraceInit_( const BFTRACE& bftrace )
     bfinit.csecCorrelatedTouch = m_bfinit.csecCorrelatedTouch >= 0.0 ? m_bfinit.csecCorrelatedTouch : pbfinit->csecCorrelatedTouch;
     bfinit.csecTimeout = m_bfinit.csecTimeout >= 0.0 ? m_bfinit.csecTimeout : pbfinit->csecTimeout;
 
+    //  We don't support overriding these for now.
 
     bfinit.csecUncertainty = pbfinit->csecUncertainty;
     bfinit.dblHashLoadFactor = pbfinit->dblHashLoadFactor;
     bfinit.dblHashUniformity = pbfinit->dblHashUniformity;
     bfinit.dblSpeedSizeTradeoff = pbfinit->dblSpeedSizeTradeoff;
 
+    //  Finally, replay.
 
     Call( m_pipeaImplementation->ErrInit( bfinit ) );
     m_fResMgrInit = true;
@@ -1800,6 +1899,7 @@ ERR PageEvictionEmulator::ErrFakeProcessTraceInit_()
 
     Enforce( m_peecsp != peecspVariable );
 
+    //  Fake trace with default values.
     BFTRACE bftrace = { 0 };
     bftrace.traceid = bftidSysResMgrInit;
     bftrace.tick = s_tickCurrent;
@@ -1873,11 +1973,13 @@ ERR PageEvictionEmulator::ErrProcessTraceCache_( BFTRACE& bftrace )
         }
     }
 
+    //  A new page does not incur a fault.
 
     if ( !bfcache.fNewPage )
     {
         stats.cFaultsReal++;
 
+        //  Do not consider avoidable if it's the first request.
 
         if ( ppge->cRequests > 0 )
         {
@@ -1892,6 +1994,11 @@ ERR PageEvictionEmulator::ErrProcessTraceCache_( BFTRACE& bftrace )
         stats.cCachesNew++;
     }
 
+    //  This normally does not happen because in order for us to be seeing a cache trace
+    //  for this page, the "real" page must not be cached, so tickLastCachedReal should
+    //  have been ZERO. However, in heavily-concurrent scenarios, it's possible that
+    //  caches/evictions might get intermingled within the same tick. Accumulate the
+    //  lifetime.
     if ( ppge->tickLastCachedReal != 0 )
     {
         const TICK dtickCachedReal = ppge->dtickCachedReal;
@@ -1899,12 +2006,15 @@ ERR PageEvictionEmulator::ErrProcessTraceCache_( BFTRACE& bftrace )
         Enforce( ppge->dtickCachedReal >= dtickCachedReal );
     }
 
+    //  For cache-lifetime purposes, we'll store the tick the page was cached, even though
+    //  this is not technically a fault.
     ppge->tickLastCachedReal = s_tickCurrent;
 
     ppge->cRequests++;
     Enforce( ppge->cRequests > 0 );
     stats.cRequested++;
 
+    //  Fixup cache priority.
 
     if ( !m_fReplayCachePriority )
     {
@@ -1933,10 +2043,12 @@ ERR PageEvictionEmulator::ErrProcessTraceCache_( BFTRACE& bftrace )
         }
     }
 
+    //  Does the page look cached to us?
 
     PAGE* const ppage = ppge->ppage;
     if ( ppage != NULL )
     {
+        //  Yes, so just touch it.
 
         BFTRACE::BFTouch_ bftouch = { 0 };
         bftouch.ifmp = bfcache.ifmp;
@@ -1948,6 +2060,7 @@ ERR PageEvictionEmulator::ErrProcessTraceCache_( BFTRACE& bftrace )
         bftouch.fNewPage = bfcache.fNewPage;
         bftouch.fNoTouch = fFalse;
 
+        //  We don't know how to process touches that keep history and are also new pages.
 
         Expected( !!bftouch.fUseHistory == !bftouch.fNewPage );
 
@@ -1962,6 +2075,7 @@ ERR PageEvictionEmulator::ErrProcessTraceCache_( BFTRACE& bftrace )
     }
     else
     {
+        //  No, let's try and add it to our cache.
 
         Call( ErrCachePage_( ppge, ifmppgno, !!bfcache.fNewPage ) );
         Call( m_pipeaImplementation->ErrCachePage( ppge->ppage, bfcache ) );
@@ -2024,6 +2138,7 @@ ERR PageEvictionEmulator::ErrProcessTraceTouch_( BFTRACE& bftrace )
     Enforce( ppge->cRequests > 0 );
     stats.cRequested++;
 
+    //  Fixup cache priority.
 
     if ( !m_fReplayCachePriority )
     {
@@ -2052,10 +2167,14 @@ ERR PageEvictionEmulator::ErrProcessTraceTouch_( BFTRACE& bftrace )
         }
     }
 
+    //  Does the page look cached to us?
 
     PAGE* const ppage = ppge->ppage;
     if ( ppage != NULL )
     {
+        //  Check if the page should actually be touched.
+        //  If the page is not cached, we should still cache it even if fNoTouch
+        //  is set because this would have caused a fault at runtime.
 
         if ( bftouch.fNoTouch && !m_fReplayNoTouch )
         {
@@ -2063,15 +2182,18 @@ ERR PageEvictionEmulator::ErrProcessTraceTouch_( BFTRACE& bftrace )
             goto HandleError;
         }
 
+        //  We don't know how to process touches that keep history and are also new pages.
 
         Expected( !!bftouch.fUseHistory == !bftouch.fNewPage );
 
+        //  Yes, so just touch it.
 
         TouchPage_( ppge, bftouch );
         Call( m_pipeaImplementation->ErrTouchPage( ppage, bftouch ) );
     }
     else
     {
+        //  No, let's try and add it to our cache.
 
         BFTRACE::BFCache_ bfcache = { 0 };
         bfcache.ifmp = bftouch.ifmp;
@@ -2111,6 +2233,7 @@ ERR PageEvictionEmulator::ErrProcessTraceSuperCold_( const BFTRACE& bftrace )
 
     m_stats[ ifmppgno.ifmp ].cSuperColdedReal++;
 
+    //  If the page is cached, maybe replay the operation.
 
     PAGE* const ppage = ppge->ppage;
     if ( ppage != NULL && m_fReplaySuperCold )
@@ -2132,6 +2255,7 @@ ERR PageEvictionEmulator::ErrProcessTraceEvict_( BFTRACE& bftrace )
 
     BFTRACE::BFEvict_& bfevict = bftrace.bfevict;
 
+    //  ESE now traces both current and older versions, keep compatibility with original contract.
     if ( !bfevict.fCurrentVersion )
     {
         return JET_errSuccess;
@@ -2142,6 +2266,11 @@ ERR PageEvictionEmulator::ErrProcessTraceEvict_( BFTRACE& bftrace )
 
     m_stats[ ifmppgno.ifmp ].cEvictionsReal++;
 
+    //  This normally does not happen because in order for us to be seeing an evict trace
+    //  for this page, the "real" page must be cached, so tickLastCachedReal should not
+    //  have been ZERO. However, in heavily-concurrent scenarios, it's possible that
+    //  caches/evictions might get intermingled within the same tick. Don't accumulate
+    //  the lifetime.
     if ( ppgeOriginal->tickLastCachedReal != 0 )
     {
         const TICK dtickCachedReal = ppgeOriginal->dtickCachedReal;
@@ -2150,12 +2279,16 @@ ERR PageEvictionEmulator::ErrProcessTraceEvict_( BFTRACE& bftrace )
         ppgeOriginal->tickLastCachedReal = 0;
     }
 
+    //  If we're not running with a variable emulated cache size, just drop this trace. Evictions
+    //  will happen via cache-size control.
 
     if ( m_peecsp != peecspVariable )
     {
         goto HandleError;
     }
 
+    //  Decide we should evict this specific page or the next targeted according to our algorithm.
+    //  Also evict next resource if this resource can't be found in our simulated cache.
 
     const bool fEvictNext = ( ( bfevict.bfef & bfefReasonMask ) == bfefReasonAvailPool ) ||
                             ( ( ( bfevict.bfef & bfefReasonMask ) == bfefReasonShrink ) && m_fEvictNextOnShrink ) || 
@@ -2165,6 +2298,7 @@ ERR PageEvictionEmulator::ErrProcessTraceEvict_( BFTRACE& bftrace )
                             ( ( ( ( bfevict.bfef & bfefReasonMask ) == bfefReasonPurgeContext ) ||
                                 ( ( bfevict.bfef & bfefReasonMask ) == bfefReasonPurgePage ) ) ? iorpBFPurge : iorpBFDatabaseFlush ) );
 
+    //  Fixup cache priority.
 
     if ( !m_fReplayCachePriority )
     {
@@ -2179,6 +2313,7 @@ ERR PageEvictionEmulator::ErrProcessTraceEvict_( BFTRACE& bftrace )
         }
     }
 
+    //  Type of eviction.
 
     if ( fEvictNext )
     {
@@ -2188,6 +2323,7 @@ ERR PageEvictionEmulator::ErrProcessTraceEvict_( BFTRACE& bftrace )
 
         PAGEENTRY* const ppgeEvict = PpgeGetEntry_( pv, pectyp );
 
+        //  Have we found anything to evict?
 
         if ( ppgeEvict != NULL )
         {
@@ -2204,9 +2340,11 @@ ERR PageEvictionEmulator::ErrProcessTraceEvict_( BFTRACE& bftrace )
     {
         PAGE* const ppage = ppgeOriginal->ppage;
 
+        //  If the page is not cached, just disregard it.
 
         if ( ppage != NULL )
         {
+            //  Yes, now we need to figure out how to evict it.
 
             Call( m_pipeaImplementation->ErrEvictSpecificPage( ppage, bfevict ) );
 
@@ -2225,6 +2363,7 @@ ERR PageEvictionEmulator::ErrProcessTraceDirty_( const BFTRACE& bftrace )
 {
     Enforce( bftrace.traceid == bftidDirty );
 
+    // Dirty operation are processed via SetLgposModify traces.
 
     if ( m_fSetLgposModifySupported )
     {
@@ -2234,6 +2373,12 @@ ERR PageEvictionEmulator::ErrProcessTraceDirty_( const BFTRACE& bftrace )
     LGPOS lgposModify( bftrace.bfdirty.lgenModify, bftrace.bfdirty.isecModify, bftrace.bfdirty.ibModify );
     const IFMPPGNO ifmppgno( bftrace.bfdirty.ifmp, bftrace.bfdirty.pgno );
 
+    //  We had a tracing bug in the engine, in which the lgposModify of the dirty operation
+    //  would be logged as the current lgposModify of the page, prior to it being stamped
+    //  with the new lgposModify associated to that particular dirty operation. Assume the new
+    //  dirty operation will always be more recent than the newest lgpos so that we don't incorrectly
+    //  stamp the wrong lgposModify to the page.
+    //  The more accurate lgposModify now comes from the SetLgposModify trace.
 
     LGPOS lgposNewest;
     GetNewestDirtyLgpos_( ifmppgno.ifmp, &lgposNewest );
@@ -2245,6 +2390,7 @@ ERR PageEvictionEmulator::ErrProcessTraceDirty_( const BFTRACE& bftrace )
         lgposModify.ib = lgposNewest.ib;
     }
 
+    //  Discard traces with an unset lgposModify.
 
     if ( !lgposModify.FIsSet() )
     {
@@ -2288,6 +2434,8 @@ ERR PageEvictionEmulator::ErrProcessTraceWrite_( const BFTRACE& bftrace )
             break;
     }
 
+    //  Replay the operation if applicable. Note that the types of writes predicted by
+    //  the emulator aren't supposed to be replayed.
 
     if ( fReplayTrace && ppge->fDirty )
     {
@@ -2349,18 +2497,21 @@ void PageEvictionEmulator::MaintainAgeBasedCache_()
         const bool fNothingToEvict = ( ppgeNextToEvict == NULL );
         Enforce( fNothingToEvict == ( m_statsAgg.cpgCached == 0 ) );
 
+        // Empty cache.
 
         if ( fNothingToEvict )
         {
             break;
         }
 
+        // Check if it's too old to be in the cache.
 
         if ( (LONG)( s_tickCurrent - ppgeNextToEvict->ppage->tickLastRequestSim ) <= (LONG)m_dtickCacheAge )
         {
             break;
         }
 
+        //  Fake eviction.
 
         BFTRACE::BFEvict_ bfevict = { 0 };
         bfevict.fCurrentVersion = fTrue;
@@ -2383,6 +2534,7 @@ void PageEvictionEmulator::MaintainAgeBasedCache_()
     }
 }
 
+//  class SimulationIterator.
 
 bool SimulationIterator::FSimulationSampleExists( const DWORD dwIterationValue ) const
 {
@@ -2425,6 +2577,7 @@ bool SimulationIterator::FGetSimulationSample(
 }
 
 
+//  class FixedCacheSimulationPresetIterator.
 
 FixedCacheSimulationPresetIterator::FixedCacheSimulationPresetIterator( std::set<DWORD>& cacheSizes )
 {
@@ -2445,9 +2598,21 @@ DWORD FixedCacheSimulationPresetIterator::DwGetNextIterationValue()
 }
 
 
+//  class FixedCacheSimulationIterator.
 
 DWORD FixedCacheSimulationIterator::DwGetNextIterationValue()
 {
+    //  We'll return the value of x (cache size) that is in the middle of x the range
+    //  that produces the largest y (faults) absolute delta. In case of a tie, we'll
+    //  pick the larger x range. In case of a tie again, the first one found will be
+    //  returned.
+    //
+    //  The implementation of this algorithm is such that only functions that are
+    //  monotonic will produce a deterministic output.
+    //
+    //  This function will return -1 (ulMax) when no more ranges can be found. This happens:
+    //    1 - When there are too few samples (less than 2).
+    //    2 - When only x ranges with a delta of 1 are left.
 
     if ( m_samples.size() < 2 )
     {
@@ -2456,6 +2621,7 @@ DWORD FixedCacheSimulationIterator::DwGetNextIterationValue()
 
     bool fFound = false;
 
+    //  Initialize search.
 
     SimulationSamplesIter iter = m_samples.begin();
     DWORD cbfCacheSize1 = 0, cbfCacheSize2 = 0, cbfCacheSize1Found = 0, cbfCacheSize2Found = 0, dcbfCacheSizeFound = 0;
@@ -2464,6 +2630,7 @@ DWORD FixedCacheSimulationIterator::DwGetNextIterationValue()
     cFaults2 = iter->second;
     Enforce( cbfCacheSize2 != ulMax );
 
+    //  Perform lookup.
 
     while ( ++iter != m_samples.end() )
     {
@@ -2474,12 +2641,14 @@ DWORD FixedCacheSimulationIterator::DwGetNextIterationValue()
         Enforce( cbfCacheSize2 != ulMax );
         Enforce( cbfCacheSize1 < cbfCacheSize2 );
 
+        //  Check if range is valid (i.e., larger than 1).
 
         if ( !( cbfCacheSize2 > ( cbfCacheSize1 + 1 ) ) )
         {
             continue;
         }
 
+        //  If it's smaller, don't bother.
 
         const QWORD dcFaults = absdiff( cFaults2, cFaults1 );
 
@@ -2490,6 +2659,8 @@ DWORD FixedCacheSimulationIterator::DwGetNextIterationValue()
 
         const DWORD dcbfCacheSize = cbfCacheSize2 - cbfCacheSize1;
 
+        //  If it's bigger, take it right away. Otherwise, take x range into account too.
+        //  Also, initialize if it hasn't been found yet.
 
         if ( !fFound || ( dcFaults > dcFaultsFound ) || ( dcbfCacheSize > dcbfCacheSizeFound ) )
         {
@@ -2514,6 +2685,7 @@ DWORD FixedCacheSimulationIterator::DwGetNextIterationValue()
 }
 
 
+//  class CacheFaultLookupSimulationIterator.
 
 CacheFaultLookupSimulationIterator::CacheFaultLookupSimulationIterator( const QWORD cFaultsTarget ) :
     m_cFaultsTarget( cFaultsTarget )
@@ -2522,7 +2694,17 @@ CacheFaultLookupSimulationIterator::CacheFaultLookupSimulationIterator( const QW
 
 DWORD CacheFaultLookupSimulationIterator::DwGetNextIterationValue()
 {
+    //  We'll return the value of x (cache size) that matches exactly or is expected
+    //  to match the target fault count.
+    //
+    //  The implementation of this algorithm is such that only functions that are
+    //  monotonic will produce a deterministic output.
+    //
+    //  This function will return -1 (ulMax) when no more ranges can be found. This happens:
+    //    1 - When there are too few samples (less than 2).
+    //    2 - When the faults-target value is not within any of the ranges' fault count.
 
+    //  Initialize search.
 
     SimulationSamplesIter iter = m_samples.begin();
 
@@ -2531,6 +2713,7 @@ DWORD CacheFaultLookupSimulationIterator::DwGetNextIterationValue()
         return ulMax;
     }
 
+    //  Perform lookup.
 
     DWORD cbfCacheSize1 = 0, cbfCacheSize2 = 0;
     QWORD cFaults1 = 0, cFaults2 = 0, cFaultsMin = 0, cFaultsMax = 0;
@@ -2538,6 +2721,7 @@ DWORD CacheFaultLookupSimulationIterator::DwGetNextIterationValue()
     cFaults2 = iter->second;
     Enforce( cbfCacheSize2 != ulMax );
 
+    //  Check if we just found it.
 
     if ( cFaults2 == m_cFaultsTarget )
     {
@@ -2553,6 +2737,7 @@ DWORD CacheFaultLookupSimulationIterator::DwGetNextIterationValue()
         Enforce( cbfCacheSize2 != ulMax );
         Enforce( cbfCacheSize1 < cbfCacheSize2 );
 
+        //  Check if we just found it.
 
         if ( cFaults2 == m_cFaultsTarget )
         {
@@ -2572,6 +2757,7 @@ DWORD CacheFaultLookupSimulationIterator::DwGetNextIterationValue()
 
         Enforce( cFaultsMin <= cFaultsMax );
 
+        //  Check if range is valid.
 
         if ( ( m_cFaultsTarget < cFaultsMin ) || ( m_cFaultsTarget > cFaultsMax ) )
         {
@@ -2589,6 +2775,7 @@ DWORD CacheFaultLookupSimulationIterator::DwGetNextIterationValue()
             cFaultsMax = cFaults1;
         }
 
+        //  The number we're looking for is within this range. Take the middle of the range.
 
         return ( cbfCacheSize1 + ( cbfCacheSize2 - cbfCacheSize1 ) / 2 );
     }
@@ -2596,6 +2783,7 @@ DWORD CacheFaultLookupSimulationIterator::DwGetNextIterationValue()
     return ulMax;
 }
 
+//  class CacheFaultLookupSimulationIterator.
 
 CacheFaultMinSimulationIterator::CacheFaultMinSimulationIterator( const DWORD cIter, const DWORD dtickIterMax ) :
     m_cIter( cIter ),
@@ -2608,6 +2796,7 @@ void CacheFaultMinSimulationIterator::AddSimulationSample( const DWORD dwIterati
 {
     SimulationIterator::AddSimulationSample( dwIterationValue, cFaults );
 
+    //  Calculate multiplication factor if needed.
 
     if ( m_q > 0.0 )
     {
@@ -2634,13 +2823,29 @@ void CacheFaultMinSimulationIterator::AddSimulationSample( const DWORD dwIterati
 
 DWORD CacheFaultMinSimulationIterator::DwGetNextIterationValue()
 {
+    //  We'll return the value of x (correlation interval) that we want to iterate on next.
+    //  The first two values provided (I0 and I1) are special. Only I0 can be zero. I1 will
+    //  be used to effectively start the iteration process. The following values will be
+    //  given by I(i) = I(i-1) * q, where q is the multiplication factor calculated by
+    //  q = ( I(N-1) / I(1) ) ^ ( 1 / ( N - 2 ) ) and N is cIter. Note that I(N-1) is
+    //  the supposedly last iteration value, i.e., dtickIterMax. If the first value provided
+    //  is not zero, then q will be calculated as q = ( I(N-1) / I(0) ) ^ ( 1 / ( N - 1 ) ).
+    //
+    //  The implementation of this algorithm is such that only functions that become less
+    //  "active" as x increases will produce meaningful results.
+    //
+    //  This function will return -1 (ulMax):
+    //    1 - When there are too few samples (less than 2 if first sample is zero, less than 1 otherwise).
+    //    2 - When cIter is reached.
 
+    //  Initialize search.
 
     if ( ( m_q < 0.0 ) || ( m_samples.size() >= m_cIter ) )
     {
         return ulMax;
     }
 
+    //  Retrieve the last (largest) value and apply multiplication factor.
 
     SimulationSamplesIter iter = m_samples.end();
     iter--;
@@ -2649,10 +2854,12 @@ DWORD CacheFaultMinSimulationIterator::DwGetNextIterationValue()
     const DWORD dwNextIter = (DWORD)( m_q * (double)dwLastIter + 0.5 );
     Enforce( dwNextIter >= dwLastIter );
 
+    //  Return at least 16 more, since that is the tick precision.
 
     return ( dwNextIter - dwLastIter < 16 ) ? ( dwLastIter + 16 ) : dwNextIter;
 }
 
+//  class ChkptDepthSimulationIterator.
 
 DWORD ChkptDepthSimulationIterator::DwGetNextIterationValue()
 {

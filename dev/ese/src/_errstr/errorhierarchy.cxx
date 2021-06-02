@@ -5,19 +5,58 @@
 #include "types.hxx"
 #include "error.hxx"
 
-#include "jet.h"
+#include "jet.h"                //  Public JET API definitions
+//#include "os.hxx"             //  Private JET definitions
 #include "types.hxx"
 
 #include <algorithm>
 
 using namespace std;
 
+//  Base error class
+
+//  No exceptions should derive directly from this...
 
 
+// The basic .Isam/.Interop exception hierarchy ...
 
+// JET_errcatError
+//    |
+//    |-- JET_errcatOperation
+//    |     |-- JET_errcatFatal
+//    |     |-- JET_errcatIO            //      bad IO issues, may or may not be transient.
+//    |     |-- JET_errcatResource
+//    |           |-- JET_errcatMemory  //      out of memory (all variants)
+//    |           |-- JET_errcatQuota   
+//    |           |-- JET_errcatDisk        //      out of disk space (all variants)
+//    |-- JET_errcatData
+//    |     |-- JET_errcatCorruption
+//    |     |-- JET_errcatMishandling
+//    |     |-- JET_errcatFragmentation
+//    |-- JET_errcatApi
+//          |-- JET_errcatUsage
+//          |-- JET_errcatState
 
+// The hierarchy is:
+// parentCategory --> childCategory
+// JET_errcatError --> JET_errcatOperation
+// JET_errcatError --> JET_errcatData
+// JET_errcatError --> JET_errcatApi
+// JET_errcatOperation --> JET_errcatFatal
+// JET_errcatOperation --> JET_errcatIO
+// JET_errcatOperation --> JET_errcatResource
+// JET_errcatResource --> JET_errcatMemory
+// JET_errcatResource --> JET_errcatQuota
+// JET_errcatResource --> JET_errcatDisk
+// JET_errcatData --> JET_errcatCorruption
+// JET_errcatData --> JET_errcatMishandling
+// JET_errcatData --> JET_errcatFragmentation
+// JET_errcatApi --> JET_errcatUsage
+// JET_errcatApi --> JET_errcatState
+// JET_errcatApi --> JET_errcatObsolete
 
-
+//  The structure that the table is made out of.
+//
 
 struct ErrorToCategory
 {
@@ -32,6 +71,8 @@ struct ErrorToCategory
 #define OBSOLETE_ERR EXTERNAL_ERR
 #define OBSOLETE_WRN EXTERNAL_ERR
 
+//  Begin the list of actual error classes.
+//
 
 const static ErrorToCategory rgerrorCategories[] =
 {
@@ -48,11 +89,13 @@ class FIND_ERRCAT
         const JET_ERR m_err;
 };
 
+// Fetches the error category.
 bool FERRLookupErrorCategory(
     __in const JET_ERR errLookup,
     __out JET_ERRCAT* perrortype
 )
 {
+    // perrortype is mandatory.
     if ( !perrortype )
     {
         return false;
@@ -86,6 +129,8 @@ struct CategoryToHierarchy
 #define HIERARCHY2( hier1, hier2 ) HIERARCHY3( hier1, hier2, JET_errcatUnknown )
 #define HIERARCHY1( hier1 ) HIERARCHY2( hier1, JET_errcatUnknown )
 
+// This hierarchy corresponds to the one documented in jethdr.w. Both places
+// need to be updated together.
 LOCAL const CategoryToHierarchy rgerrorHierarchies[] =
 {
     { JET_errcatUnknown, HIERARCHY1( JET_errcatUnknown ) },
@@ -107,8 +152,10 @@ LOCAL const CategoryToHierarchy rgerrorHierarchies[] =
             { JET_errcatObsolete, HIERARCHY3( JET_errcatError, JET_errcatApi, JET_errcatObsolete ) },
 };
 
+// The hierarchy must be complete.
 C_ASSERT( JET_errcatMax == _countof( rgerrorHierarchies ) );
 
+// Translates the error category to its proper spot in the hierarchy.
 bool FERRLookupErrorHierarchy(
     __in JET_ERRCAT             errortype,
     __out_bcount(8) BYTE* const pbHierarchy
@@ -136,22 +183,29 @@ JET_ERRCAT ErrcatERRLeastSpecific( const JET_ERR err )
     JET_ERRCAT errCat = JET_errcatUnknown;
     BYTE rgCategoricalHierarchy[8] = { 0 };
 
+    // retrieves the most specific error category
     if ( !FERRLookupErrorCategory( err, &errCat ) )
     {
         AssertSz( fFalse, "Who is passing in an error that we don't understand (%d)", err );
     }
+    // retrieve the whole hierarchy for the error category
     if ( !FERRLookupErrorHierarchy( errCat, rgCategoricalHierarchy ) )
     {
         AssertSz( fFalse, "How are we getting a category we can't lookup (%d)", errCat );
     }
 
+    // while top of the hierarchy, a non-useful entry to return and so we don't use it
     Assert( rgCategoricalHierarchy[0] == JET_errcatError );
     Assert( rgCategoricalHierarchy[1] != JET_errcatError );
 
+    // now grab the (useful) least specific error category
     errCat = (JET_ERRCAT)rgCategoricalHierarchy[1];
 
+    // all errors passed in should be valid and thus have a known errcat.
     Assert( errCat != JET_errcatUnknown );
 
+    // since this is used internally, it's unexpected we'd make an Api mistake (may have to change for first
+    // errcatState type errors we get).
     Expected( errCat != JET_errcatApi );
 
     return errCat;

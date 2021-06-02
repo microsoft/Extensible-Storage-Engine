@@ -6,13 +6,15 @@
 
 #define MAX_CHAIN       9
 
-#define FILL_NULL       0
+#define FILL_NULL       0       // fill q_hash buffer with NULLs or with &orig[0]
 
 
+// Zobrist hashing
 #define Z_HASH_SIZE_LOG    (BUFF_SIZE_LOG - 1)
 #define Z_HASH_SIZE        (1 << Z_HASH_SIZE_LOG)
 #define Z_HASH_SUM(b)      (z_hash_map[0][b[0]] ^ z_hash_map[1][b[1]] ^ z_hash_map[2][b[2]])
 
+// quick hashing
 #define Q_HASH_SH1      3
 #define Q_HASH_SH2      (Q_HASH_SH1 >> 1)
 #define Q_HASH_SUM3(c1,c2,c3) (((c1) << Q_HASH_SH1) + ((c2) << Q_HASH_SH2) + (c3))
@@ -56,7 +58,7 @@ typedef struct
     uxint pointers;
     uxint extra;
     uxint masks;
-#endif 
+#endif /* CODING */
   } stat;
   xint chain;
   xint max_size;
@@ -463,13 +465,13 @@ INLINE uchar *write_ptr (prs *p, uchar *ptr, int offset, int length)
       goto long_len;
     }
   }
-#endif 
+#endif /* CODING */
 
   tag_write (p, ptr, 1);
 
   return (ptr);
 }
-#endif 
+#endif /* i386 */
 
 
 #elif CODING & (CODING_HUFF_LEN | CODING_HUFF_PTR | CODING_HUFF_ALL)
@@ -784,7 +786,7 @@ done:
   assert (src == v.temp.ptr);
 }
 
-#else 
+#else /* !defined (i386) || CODING != CODING_HUFF_ALL */
 
 #define TEMP    eax
 #define TEMPB   al
@@ -812,7 +814,12 @@ static void encode_pass2 (prs *PrsPtr)
         push    ebp
         sub     esp, 12
 
-
+/*
+  uchar *src = v.temp.beg;
+  uchar *ptr = v.comp.ptr;
+  Ptr1 = (ubitmask2 *) ptr; ptr += sizeof (ubitmask2);
+  Ptr2 = (ubitmask2 *) ptr; ptr += sizeof (ubitmask2);
+*/
         mov     PRS, PrsPtr
         mov     PTR1, V.comp.ptr
         mov     SRC, V.temp.beg
@@ -821,14 +828,21 @@ static void encode_pass2 (prs *PrsPtr)
         add     TEMP, 2
         mov     [PTR], TEMP
 
-
+/*
+  Mask = 0;
+  Bits = 8 * sizeof (ubitmask2);
+  bmask = 0;
+*/
         xor     MASK, MASK
         mov     ch, 16
         xor     TAG, TAG
         jmp     ReloadTag
 
 Literal:
-
+/*
+    k = *src++;
+    BIOWR (v.stat.mask[k], v.stat.bits[k]);
+*/
         mov     TEMP, V.stat.mask[TEMP*4]
         shl     MASK, cl
         inc     SRC
@@ -839,7 +853,7 @@ Literal:
         mov     cl, ch
         add     ch, 16
         mov     TEMP, [PTR]
-        rol     MASK, cl
+        rol     MASK, cl                // attention! 286+ masks shift cound mod 32
         mov     [PTR1], MASKW
         mov     PTR1, [PTR2]
         ror     MASK, cl
@@ -856,14 +870,21 @@ BiowrDone_Literal:
         jz      ReloadTag
 
 Pointer:
-
+/*
+  if (src >= v.temp.ptr)
+    goto done;
+*/
         mov     cl, V.stat.bits[TEMP + 256]
         mov     [TAGS], TAG
 
         cmp     SRC, V.temp.ptr
         jae     Done
 
-
+/*
+  k = *src++;
+  assert (k < HUFF_SIZE);
+  BIOWR (v.stat.mask[CODING_ADJUST (k)], v.stat.bits[CODING_ADJUST (k)]);
+*/
 
         shl     MASK, cl
         mov     TAGB, TEMPB
@@ -874,7 +895,7 @@ Pointer:
 
         mov     cl, ch
         add     ch, 16
-        rol     MASK, cl
+        rol     MASK, cl                // attention! 286+ masks shift cound mod 32
         mov     [PTR1], MASKW
         mov     PTR1, [PTR2]
         ror     MASK, cl
@@ -883,16 +904,39 @@ Pointer:
 
 BiowrDone_Pointer:
 
-        mov     cl, TAGB
+        mov     cl, TAGB                // release TEMP for LongLength
         and     TAGB, MAX_LENGTH-1
         shr     cl, MAX_LENGTH_LOG
 
-
+/*
+  if ((k & (MAX_LENGTH - 1)) == MAX_LENGTH - 1)
+  {
+    if ((*ptr++ = *src++) == 255)
+    {
+      ptr[0] = src[0];
+      ptr[1] = src[1];
+      src += 2;
+      ptr += 2;
+    }
+  }
+*/
         cmp     TAGB, MAX_LENGTH-1
         je      LongLength
 LengthWritten:
 
-
+/*
+  k >>= MAX_LENGTH_LOG;
+  {
+    uxint m = src[1];
+    if (k > 8)
+    {
+      m += src[2] << 8;
+      ++src;
+    }
+    BIOWR (m, k);
+  }
+  src += 2;
+*/
         movzx   TAG, byte ptr [SRC + 1]
         shl     MASK, cl
         cmp     cl, 8
@@ -907,7 +951,7 @@ GotOffset:
 
         mov     cl, ch
         add     ch, 16
-        rol     MASK, cl
+        rol     MASK, cl                // attention! 286+ masks shift cound mod 32
         mov     [PTR1], MASKW
         mov     PTR1, [PTR2]
         ror     MASK, cl
@@ -938,11 +982,19 @@ ReloadTag:
         jge     Literal
         jmp     Pointer
 
-
+/*
+    if ((*ptr++ = *++src) == 255)
+    {
+      ptr[0] = src[1];
+      ptr[1] = src[2];
+      src += 2;
+      ptr += 2;
+    }
+*/
 
 #if _MSC_VER >= 1300
-        align   16
-#endif 
+        align   16                      // workaround bug in VC 6.0 back end (incorrect jump offset generation)
+#endif /* _MSC_VER >= 1300 */
 
 LongLength:
         mov     TAGB, [SRC + 1]
@@ -959,7 +1011,9 @@ LongLength:
 
 
 Done:
-
+/*
+  BIOWR (v.stat.mask[CODING_ADJUST(0)], v.stat.bits[CODING_ADJUST(0)]);
+*/
         mov     cl, V.stat.bits[256]
         mov     TEMP, [PTR]
         shl     MASK, cl
@@ -977,7 +1031,11 @@ Done:
         rol     MASK, cl
         mov     TAG, TEMP
         add     TEMP, 2
-
+/*
+  *(__unaligned bitmask2 *)Ptr1 = (ubitmask2) (Mask <<= Bits);
+  *(__unaligned bitmask2 *)Ptr2 = 0;
+  v.comp.ptr = ptr;
+*/
 LastMaskWritten:
         mov     cl, ch
         shl     MASK, cl
@@ -986,7 +1044,9 @@ LastMaskWritten:
         mov     V.comp.ptr, TEMP
 
 #if DEBUG
-
+/*
+  assert (src == v.temp.ptr);
+*/
         cmp     V.temp.ptr, SRC
         je      RetOK
         int     3
@@ -995,7 +1055,7 @@ RetOK:
 
         add     esp, 12
         pop     ebp
-    } 
+    } /* __asm */
 }
 
 
@@ -1013,13 +1073,13 @@ RetOK:
 #undef PTR2
 #undef TAGS
 
-#endif 
+#endif /* !defined (i386) || CODING != CODING_HUFF_ALL */
 
-#endif 
-
-
+#endif /* CODING & (CODING_HUFF_PTR | CODING_HUFF_ALL) */
 
 
+/* ------------------ Create canonical Huffman code ------------------- */
+/*                    -----------------------------                     */
 
 #define MAX_ALPHABET HUFF_SIZE
 static void huffman_create_codes (huff_info *info, uxint *freq, xint n, uxint *mask, uchar *length, uxint maxbits, uchar *encoded, uxint *total)
@@ -1031,17 +1091,17 @@ static void huffman_create_codes (huff_info *info, uxint *freq, xint n, uxint *m
 
   assert ((uxint) (n-1) <= (MAX_ALPHABET-1));
 
-  
-  
+  /* honestly it is easy enough to create Huffman code in-place */
+  /* but the use of explicit data structures makes code simpler */
 
-  
+  /* clean everything up                */
   memset (length, 0, sizeof (length[0]) * n);
   memset (encoded, 0, (n + 1) >> 1);
 
   if (mask != 0 && mask != freq)
     memset (mask, 0, sizeof (mask[0]) * n);
 
-  
+  /* store frequencies */
   p = info->buff;
   for (i = 0; i < n; ++i)
   {
@@ -1053,30 +1113,31 @@ static void huffman_create_codes (huff_info *info, uxint *freq, xint n, uxint *m
     }
   }
 
-  
+  /* handle simple case         */
   *total = 0;
   if (p <= info->buff + 1)
   {
+    // should never happen but we'll do something reasonable here anyways
     assert (0);
-    if (p == info->buff)        
+    if (p == info->buff)        /* if no symbols do nothing */
       return;
-    i = p[-1].ch;               
+    i = p[-1].ch;               /* single symbol code */
     mask[i] = 0;
-    encoded[i >> 1] = 0x11;     
+    encoded[i >> 1] = 0x11;     /* two symbols (i-th and (i^1)-th have 1-bit lengths */
     return;
   }
 
-  first_free = p;       
+  first_free = p;       /* store location of first unused node  */
 
-  p[-1].son[0] = 0;     
-  
-  p = info->buff;             
-  
+  p[-1].son[0] = 0;     /* terminate the list                   */
+  /* radix sort the list by frequency */
+  p = info->buff;             /* head of the list                     */
+  /* initialize */
   for (n = 0; n < 256; ++n)
     *(info->link[n] = info->head + n) = 0;
   for (i = 0; i < (BUFF_SIZE_LOG <= 16 ? 16 : 32); i += 8)
   {
-    
+    /* link node to the end of respective bucket        */
     do
     {
       n = (p->freq >> i) & 0xff;
@@ -1084,7 +1145,7 @@ static void huffman_create_codes (huff_info *info, uxint *freq, xint n, uxint *m
     }
     while ((p = p->son[0]) != 0);
 
-    
+    /* merge buckets into single list                   */
     n = 0;
     while (info->head[n] == 0) ++n;
     p = info->head[n]; info->head[k = n] = 0;
@@ -1096,7 +1157,7 @@ static void huffman_create_codes (huff_info *info, uxint *freq, xint n, uxint *m
     }
     info->link[k][0] = 0; info->link[k] = info->head + k;
   }
-  first_sorted = p;      
+  first_sorted = p;      /* store head of sorted symbol's list   */
 
 restart:
   assert (p == first_sorted);
@@ -1106,7 +1167,7 @@ restart:
   {
     ++r;
 
-    
+    /* select left subtree      */
     assert (q <= r && (p != 0 || q != r));
     if (p == 0 || (q != r && p->freq > q->freq))
     {
@@ -1117,7 +1178,7 @@ restart:
       r->son[0] = p; r->freq = p->freq; p = p->son[0];
     }
 
-    
+    /* select right subtree     */
     assert (q <= r && (p != 0 || q != r));
     if (p == 0 || (q != r && p->freq > q->freq))
     {
@@ -1129,21 +1190,21 @@ restart:
     }
   }
 
-  
-  i = -1;       
-  n = 0;        
-  p = r;        
+  /* evaluate codewords' length         */
+  i = -1;       /* stack pointer        */
+  n = 0;        /* current tree depth   */
+  p = r;        /* current subtree root */
   for (;;)
   {
     while (p->son[1] != 0)
     {
-      
+      /* put right son into stack and set up its depth   */
       (info->head[++i] = p->son[1])->bits = (uint16) (++n);
       (p = p->son[0])->bits = (uint16) n;
     }
     length[p->ch] = (uchar) n;
 
-    if (i < 0) break;   
+    if (i < 0) break;   /* nothing's in stack                   */
     n = (p = info->head[i--])->bits;
   }
 
@@ -1162,13 +1223,13 @@ restart:
     goto restart;
   }
 
-  
-  
+  /* now sort symbols in a stable way by increasing codeword length     */
+  /* initialize */
   memset (info->head, 0, sizeof (info->head[0]) * 32);
   for (n = 0; n < 32; ++n)
     info->link[n] = info->head + n;
 
-  
+  /* link node to the end of respective bucket  */
   p = info->buff;
   do
   {
@@ -1177,7 +1238,7 @@ restart:
   }
   while (++p != first_free);
 
-  
+  /* merge buckets into single list             */
   n = 0;
   while (info->head[n] == 0) ++n;
   p = info->head[n]; k = n;
@@ -1194,17 +1255,17 @@ restart:
     assert (r->bits > q->bits || (r->bits == q->bits && r->ch > q->ch));
 #endif
 
-  
+  /* set up code masks          */
   if (mask == freq)
     memset (mask, 0, sizeof (mask[0]) * n);
 
-  n = 0;        
-  i = 1;        
-  k = 1;        
+  n = 0;        /* mask         */
+  i = 1;        /* bit length   */
+  k = 1;        /* first index  */
   do
   {
-    
-    
+    /* sum a[i] * b[i] may be evaluated without multiplications */
+    /* using O(B) memory and O(N+B) time if 0 <= b[i] < B       */
     *total += freq[p->ch] * p->bits;
     encoded[p->ch >> 1] |= p->bits << (p->ch & 1 ? 4 : 0);
     mask[p->ch] = (n <<= p->bits - i);
@@ -1214,7 +1275,7 @@ restart:
   while ((p = p->son[0]) != 0);
 }
 
-#endif 
+#endif /* CODING */
 
 #define CHAIN 0
 #define encode_pass1 encode0_pass1
@@ -1246,9 +1307,9 @@ typedef void encode_pass1_proc (prs *p);
 static void encode_pass1_progress (
   prs *p,
   encode_pass1_proc *encode_pass1,
-  XpressProgressFn *ProgressFn,
-  void *ProgressContext,
-  int ProgressSize
+  XpressProgressFn *ProgressFn,         // NULL or progress callback
+  void *ProgressContext,                // user-defined context that will be passed to ProgressFn
+  int ProgressSize                      // call ProgressFn each time ProgressSize bytes processed
 )
 {
   xint stop;
@@ -1289,8 +1350,8 @@ static void encode_pass1_progress (
 
 #ifdef _PREFAST_
 #pragma prefast (push)
-#pragma prefast (disable: __WARNING_INCORRECT_VALIDATION)
-#endif 
+#pragma prefast (disable: __WARNING_INCORRECT_VALIDATION)     // bogus "Potential overflow using expression 'p[1]'"
+#endif /* _PREFAST_ */
 
 static
 void
@@ -1303,7 +1364,7 @@ MemoryFillPtr (
   const void **p,
   const void  *d,
   int          n
-#endif 
+#endif /* _MSC_VER >= 1500 */
 )
 {
   const void **e;
@@ -1335,10 +1396,16 @@ MemoryFillPtr (
 
 #ifdef _PREFAST_
 #pragma prefast (pop)
-#endif 
+#endif /* _PREFAST_ */
 
-#endif 
+#endif /* !FILL_NULL */
 
+//
+// returns size of compressed data _and_ number of bytes actually encoded (may be less that OrigSize)
+// if size of compressed data exceeds size of original, size of original data is returned and in this
+// case contents of (*CompAdr) buffer is undefined; caller shall copy (*OrigAdr) to output itself
+// NB: XpressEncodeEx2 is available only if CODING_ALG=1 (i.e. CODING_DIRECT2 encoding is used)
+//
 #if CODING == CODING_DIRECT2
 XPRESS_EXPORT
 int
@@ -1347,18 +1414,18 @@ XPRESS_CALL
 static
 int
 #define XpressEncodeEx2 XpressEncodeEx2Internal
-#endif 
+#endif /* CODING == CODING_DIRECT2 */
 XpressEncodeEx2 (
   __in_opt XpressEncodeStream stream,
   __in_bcount(comp_size) void              *comp,
   int                comp_size,
   __in_bcount(orig_size) const void        *orig,
   int                orig_size,
-  __out_opt int               *pEncodedSize,
-  XpressProgressFn  *ProgressFn,
-  void              *ProgressContext,
-  int                ProgressSize,
-  int                CompressionLevel
+  __out_opt int               *pEncodedSize,      // ptr to location which receives actual # of encoded bytes
+  XpressProgressFn  *ProgressFn,        // NULL or progress callback
+  void              *ProgressContext,   // user-defined context that will be passed to ProgressFn
+  int                ProgressSize,      // call ProgressFn each time ProgressSize bytes processed
+  int                CompressionLevel   // CompressionLevel should not exceed MaxCompressionLevel
 )
 {
 #if CODING & (CODING_HUFF_LEN | CODING_HUFF_PTR | CODING_HUFF_ALL)
@@ -1403,6 +1470,7 @@ XpressEncodeEx2 (
   v.temp.beg = v.temp.ptr = info->temp;
 
 #if CODING & (CODING_HUFF_PTR | CODING_HUFF_ALL) && !defined (i386)
+  // check initialization of static tables (in case somebody messed up with DLLs)
   if (!bitno_table_initialized)
     bitno_init ();
 #endif
@@ -1416,11 +1484,12 @@ XpressEncodeEx2 (
 #else
     #pragma prefast(suppress: 26000, "no buffer overflow, q_last is variable-size array")
     MemoryFillPtr ((const void **) (&p->x.q_last[0]), orig, Q_HASH_SIZE);
-#endif 
+#endif /* FILL_NULL */
   }
 #if MAX_CHAIN >= 1
   else
   {
+    // check initialization of static tables (in case somebody messed up with DLLs)
     if (!z_hash_map_initialized)
       z_hash_map_init ();
 
@@ -1437,13 +1506,13 @@ XpressEncodeEx2 (
 #if MAX_CHAIN >= 3
       if (v.chain >= 3)
         encode_pass1 = encodeN_pass1;
-#endif 
+#endif /* MAX_CHAIN >= 3 */
       memset (p[-1].x.z_hash, 0, sizeof (p[-1].x.z_hash));
       z_hash_insert (p);
     }
-#endif 
+#endif /* MAX_CHAIN >= 2 */
   }
-#endif 
+#endif /* MAX_CHAIN >= 1 */
 
   if (ProgressSize <= 0 || ProgressSize > orig_size)
     ProgressSize = orig_size;
@@ -1487,7 +1556,7 @@ XpressEncodeEx2 (
 no_compression:
   if (pEncodedSize != 0)
     *pEncodedSize = v.orig.pos;
-#endif 
+#endif /* CODING == CODING_DIRECT2 */
   tag_write_finish (p);
 
 #if CODING & (CODING_DIRECT | CODING_DIRECT2 | CODING_BY_BIT)
@@ -1516,13 +1585,13 @@ no_compression:
     c_size -= v.stat.freq[huff_total];
   c_size -= v.stat.masks * sizeof (tag_t);
 #endif
-#endif 
+#endif /* CODING */
 
   if (c_size >= (uxint) comp_size)
   {
 #if CODING != CODING_DIRECT2
   no_compression:
-#endif 
+#endif /* CODING != CODING_DIRECT2 */
     comp_size = orig_size;
   }
   else
@@ -1563,9 +1632,9 @@ XpressEncodeEx
   int                comp_size,
   __in_bcount(orig_size) const void        *orig,
   int                orig_size,
-  XpressProgressFn  *ProgressFn,
-  void              *ProgressContext,
-  int                ProgressSize,
+  XpressProgressFn  *ProgressFn,        // NULL or progress callback
+  void              *ProgressContext,   // user-defined context that will be passed to ProgressFn
+  int                ProgressSize,      // call ProgressFn each time ProgressSize bytes processed
   int                CompressionLevel
 )
 {
@@ -1588,7 +1657,7 @@ XpressEncodeEx
 #if CODING == CODING_DIRECT2
   if (OutputSize != 0 && EncodedSize != orig_size)
     OutputSize = orig_size;
-#endif 
+#endif /* CODING == CODING_DIRECT2 */
 
   return (OutputSize);
 }
@@ -1603,9 +1672,9 @@ XpressEncode
   int                comp_size,
   __in_bcount(orig_size) const void        *orig,
   int                orig_size,
-  XpressProgressFn  *ProgressFn,
-  void              *ProgressContext,
-  int                ProgressSize
+  XpressProgressFn  *ProgressFn,        // NULL or progress callback
+  void              *ProgressContext,   // user-defined context that will be passed to ProgressFn
+  int                ProgressSize       // call ProgressFn each time ProgressSize bytes processed
 )
 {
   int EncodedSize	= -1;
@@ -1631,15 +1700,16 @@ XpressEncode
 #if CODING == CODING_DIRECT2
   if (OutputSize != 0 && EncodedSize != orig_size)
     OutputSize = orig_size;
-#endif 
+#endif /* CODING == CODING_DIRECT2 */
 
   return (OutputSize);
 }
 
 
+/* --------------------------------------- Signatures ---------------------------------- */
 
 
-
+// define signature only for non-CE platforms
 #undef ENCODER_SIGNATURE
 #if (defined (_M_IX86) || defined (_M_AMD64) || defined (_M_IA64)) && (CODING & (CODING_HUFF_ALL | CODING_DIRECT2)) != 0
 #define ENCODER_SIGNATURE 1
@@ -1706,6 +1776,7 @@ XpressEncodeCreate (
 #if MAX_CHAIN >= 2
     if (chain >= 2)
     {
+      // data structures for (chain >= 2) are the same, enable deeper search
       max_chain = MAX_CHAIN;
       alloc_size = sizeof (p->x.z_next[0]) * max_orig_size;
       if (temp_size < sizeof (p[-1].x.z_hash[0]) * Z_HASH_SIZE)
@@ -1719,7 +1790,7 @@ XpressEncodeCreate (
   if ( alloc_size + temp_size + (unsigned)sizeof (*info) + 2*MEM_ALIGN >= alloc_size )
     alloc_size += temp_size + sizeof (*info) + 2*MEM_ALIGN;
   else
-    return (0);
+    return (0); // integer overflow
 
   b = AllocFn (context, alloc_size);
   if (b == 0)
@@ -1733,8 +1804,8 @@ XpressEncodeCreate (
   info->memory = b;
 
 #ifdef ENCODER_SIGNATURE
-  info->signature = XpressEncoderSignature;
-#endif 
+  info->signature = XpressEncoderSignature; // make sure that signature won't be thrown away
+#endif /* ENCODER_SIGNATURE */
 
   b = ALIGNED_PTR (info + 1);
   info->p = p = ((prs *) (b + temp_size));
@@ -1770,11 +1841,12 @@ XpressEncodeClose (
   }
 }
 
+// returns MaxCompressionLevel or (-1) if stream was not initialized properly
 XPRESS_EXPORT
 int
 XPRESS_CALL
 XpressEncodeGetMaxCompressionLevel (
-  __in_opt XpressEncodeStream EncodeStream
+  __in_opt XpressEncodeStream EncodeStream       // encoder's workspace
 )
 {
   xpress_info *info = (xpress_info *) EncodeStream;

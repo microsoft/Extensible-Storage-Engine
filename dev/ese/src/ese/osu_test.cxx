@@ -5,7 +5,7 @@
 
 #ifndef ENABLE_JET_UNIT_TEST
 #error This file should only be compiled with the unit tests!
-#endif
+#endif // ENABLE_JET_UNIT_TEST
 
 #ifdef ENABLE_JET_UNIT_TEST
 
@@ -137,16 +137,18 @@ JETUNITTEST( CLimitedEventSuppressor, CheckMix )
     CHECK( les.FNeedToLog( 0x10002 ) );
     CHECK( !les.FNeedToLog( 0x8C002117 ) );
 
-    CHECK( !les.FNeedToLog( 0x7C002117 ) );
+    //  Full
+    CHECK( !les.FNeedToLog( 0x7C002117 ) ); // subtly different than 0x8C002117
     CHECK( !les.FNeedToLog( 0x20 ) );
     CHECK( !les.FNeedToLog( 1 ) );
     CHECK( !les.FNeedToLog( 2 ) );
 
+    //  More dups
     CHECK( !les.FNeedToLog( 0x52 ) );
     CHECK( !les.FNeedToLog( 0x32 ) );
     CHECK( !les.FNeedToLog( 0x8C002117 ) );
     CHECK( !les.FNeedToLog( 0x10002 ) );
 }
 
-#endif
+#endif // ENABLE_JET_UNIT_TEST
 

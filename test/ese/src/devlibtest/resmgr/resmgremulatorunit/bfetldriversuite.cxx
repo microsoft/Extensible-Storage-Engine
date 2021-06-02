@@ -3,8 +3,11 @@
 
 #include "resmgremulatorunit.hxx"
 
+// Unit test class
 
+//  ================================================================
 class ETLDriverTest : public UNITTEST
+//  ================================================================
 {
     private:
         static ETLDriverTest s_instance;
@@ -68,7 +71,9 @@ bool ETLDriverTest::FRunUnderESENT() const          { return true; }
 bool ETLDriverTest::FRunUnderESE97() const          { return true; }
 
 
+//  ================================================================
 ERR ETLDriverTest::ErrTest()
+//  ================================================================
 {
     ERR err = JET_errSuccess;
     
@@ -100,8 +105,11 @@ HandleError:
     return err;
 }
 
+//  ================================================================
 void ETLDriverTest::SetupTestData_()
+//  ================================================================
 {
+    //  Setup expectations first.
 
     memset( &m_rgBfTrace, 0, sizeof(m_rgBfTrace) );
     TestAssert( _countof( m_rgBfTrace ) == s_cbftrace );
@@ -204,20 +212,21 @@ void ETLDriverTest::SetupTestData_()
     m_rgBfTrace[cbftrace].bftouch.fDBScan = fTrue;
     cbftrace++;
 
-    m_rgBfTrace[cbftrace].traceid = bftidInvalid;
+    m_rgBfTrace[cbftrace].traceid = bftidInvalid;  //  Sentinel.
     cbftrace++;
 
     TestAssert( s_cbftrace == cbftrace );
 
+    //  Setup input traces (intentionally out-of-order, with disacarded events in-between).
 
     size_t cetwevt = 0;
 
     memset( &m_rgpEtwEvt, 0, sizeof(m_rgpEtwEvt) );
     TestAssert( _countof( m_rgpEtwEvt ) == s_cetwevt );
     const size_t ibExtraData = roundup( sizeof(EtwEvent), sizeof(void*) );
-    const size_t cbExtraData = 100;
+    const size_t cbExtraData = 100; //  100 bytes should be enough to accommodate all ETW trace types.
     const size_t cbEtwEvent = ibExtraData + cbExtraData;
-    for ( INT i = 0; i < _countof( m_rgpEtwEvt ) - 1; i++ )
+    for ( INT i = 0; i < _countof( m_rgpEtwEvt ) - 1; i++ ) //  Last one is sentinel.
     {
         m_rgpEtwEvt[i] = (EtwEvent*)( new BYTE[cbEtwEvent] );
         memset( m_rgpEtwEvt[i], 0, cbEtwEvent );
@@ -355,13 +364,15 @@ void ETLDriverTest::SetupTestData_()
 
     TestAssert( ( s_cetwevt - 1 ) == cetwevt );
 
-    for ( INT i = 0; i < _countof( m_rgpEtwEvt ) - 1; i++ )
+    for ( INT i = 0; i < _countof( m_rgpEtwEvt ) - 1; i++ ) //  Last one is sentinel.
     {
         TestAssert( m_rgpEtwEvt[i]->cbExtraData <= cbExtraData );
     }
 }
 
+//  ================================================================
 void ETLDriverTest::CleanupTestData_()
+//  ================================================================
 {
     for ( INT i = 0; i < _countof( m_rgpEtwEvt ); i++ )
     {
@@ -373,7 +384,9 @@ void ETLDriverTest::CleanupTestData_()
     }
 }
 
+//  ================================================================
 ERR ETLDriverTest::ErrInitWithInvalidParamsTest_()
+//  ================================================================
 {
     ERR err = JET_errSuccess;
     BFETLContext* bffetlc = NULL;
@@ -414,7 +427,9 @@ HandleError:
     return err;
 }
 
+//  ================================================================
 ERR ETLDriverTest::ErrTermWithNullPointer_()
+//  ================================================================
 {
     printf( "\t%s\r\n", __FUNCTION__ );
     
@@ -424,7 +439,9 @@ ERR ETLDriverTest::ErrTermWithNullPointer_()
     return JET_errSuccess;
 }
 
+//  ================================================================
 ERR ETLDriverTest::ErrGetNextWithInvalidParamsTest_()
+//  ================================================================
 {
     ERR err = JET_errSuccess;
     BFETLContext* bffetlc = NULL;
@@ -450,7 +467,9 @@ HandleError:
     return err;
 }
 
+//  ================================================================
 ERR ETLDriverTest::ErrBasicInitTermTest_()
+//  ================================================================
 {
     ERR err = JET_errSuccess;
     BFETLContext* bffetlc = NULL;
@@ -482,7 +501,9 @@ HandleError:
     return err;
 }
 
+//  ================================================================
 ERR ETLDriverTest::ErrBasicInitGetTermTest_()
+//  ================================================================
 {
     ERR err = JET_errSuccess;
     BFETLContext* bffetlc = NULL;
@@ -516,7 +537,9 @@ HandleError:
     return err;
 }
 
+//  ================================================================
 ERR ETLDriverTest::ErrBasicInitTermMultiPidTest_()
+//  ================================================================
 {
     ERR err = JET_errSuccess;
     BFETLContext* bffetlc = NULL;
@@ -552,7 +575,9 @@ HandleError:
     return err;
 }
 
+//  ================================================================
 ERR ETLDriverTest::ErrBasicInitGetTermMultiPidTest_()
+//  ================================================================
 {
     ERR err = JET_errSuccess;
     BFETLContext* bffetlc = NULL;
@@ -590,7 +615,9 @@ HandleError:
     return err;
 }
 
+//  ================================================================
 ERR ETLDriverTest::ErrGetNextSmallBufferTest_()
+//  ================================================================
 {
     ERR err = JET_errSuccess;
     BFETLContext* bffetlc = NULL;
@@ -620,7 +647,9 @@ HandleError:
     return err;
 }
 
+//  ================================================================
 ERR ETLDriverTest::ErrGetNextSuccessfulTest_( const DWORD cEventsBufferedMax, const INT iPID )
+//  ================================================================
 {
     ERR err = JET_errSuccess;
     BFETLContext* bffetlc = NULL;
@@ -875,42 +904,54 @@ HandleError:
     return err;
 }
 
+//  ================================================================
 ERR ETLDriverTest::ErrGetNextMediumBufferTest_()
+//  ================================================================
 {
     printf( "\t%s\r\n", __FUNCTION__ );
 
     return ErrGetNextSuccessfulTest_( 4, 333 );
 }
 
+//  ================================================================
 ERR ETLDriverTest::ErrGetNextLargeBufferTest_()
+//  ================================================================
 {
     printf( "\t%s\r\n", __FUNCTION__ );
 
     return ErrGetNextSuccessfulTest_( 9, 333 );
 }
 
+//  ================================================================
 ERR ETLDriverTest::ErrGetNextHugeBufferTest_()
+//  ================================================================
 {
     printf( "\t%s\r\n", __FUNCTION__ );
 
     return ErrGetNextSuccessfulTest_( 13, 333 );
 }
 
+//  ================================================================
 ERR ETLDriverTest::ErrGetNextAllPidsTest_()
+//  ================================================================
 {
     printf( "\t%s\r\n", __FUNCTION__ );
 
     return ErrGetNextSuccessfulTest_( 5, 0 );
 }
 
+//  ================================================================
 ERR ETLDriverTest::ErrGetNextMultiPidsTest_()
+//  ================================================================
 {
     printf( "\t%s\r\n", __FUNCTION__ );
 
     return ErrGetNextSuccessfulTest_( 5, -1 );
 }
 
+//  ================================================================
 ERR ETLDriverTest::ErrCmpEtlTooManyTest_()
+//  ================================================================
 {
     ERR err = JET_errSuccess;
     __int64 cTracesProcessed = 0;
@@ -930,7 +971,9 @@ HandleError:
     return err;
 }
 
+//  ================================================================
 ERR ETLDriverTest::ErrCmpFtlTooManyTest_()
+//  ================================================================
 {
     ERR err = JET_errSuccess;
     __int64 cTracesProcessed = 0;
@@ -951,7 +994,9 @@ HandleError:
     return err;
 }
 
+//  ================================================================
 ERR ETLDriverTest::ErrCmpTraceMismatchTest_()
+//  ================================================================
 {
     ERR err = JET_errSuccess;
     __int64 cTracesProcessed = 0;
@@ -971,7 +1016,9 @@ HandleError:
     return err;
 }
 
+//  ================================================================
 ERR ETLDriverTest::ErrCmpSuccessEmptyTest_()
+//  ================================================================
 {
     ERR err = JET_errSuccess;
     __int64 cTracesProcessed = 0;
@@ -993,7 +1040,9 @@ HandleError:
     return err;
 }
 
+//  ================================================================
 ERR ETLDriverTest::ErrCmpSuccessAllPidsTest_()
+//  ================================================================
 {
     ERR err = JET_errSuccess;
     __int64 cTracesProcessed = 0;
@@ -1012,7 +1061,9 @@ HandleError:
     return err;
 }
 
+//  ================================================================
 ERR ETLDriverTest::ErrCmpSuccessTest_()
+//  ================================================================
 {
     ERR err = JET_errSuccess;
     __int64 cTracesProcessed = 0;
@@ -1032,7 +1083,9 @@ HandleError:
     return err;
 }
 
+//  ================================================================
 ERR ETLDriverTest::ErrStatsByPidAllPidsTest_()
+//  ================================================================
 {
     ERR err = JET_errSuccess;
     BFETLContext* bffetlc = NULL;
@@ -1087,7 +1140,9 @@ HandleError:
     return err;
 }
 
+//  ================================================================
 ERR ETLDriverTest::ErrStatsByPidOnePidTest_()
+//  ================================================================
 {
     ERR err = JET_errSuccess;
     BFETLContext* bffetlc = NULL;
@@ -1131,7 +1186,9 @@ HandleError:
     return err;
 }
 
+//  ================================================================
 ERR ETLDriverTest::ErrStatsByPidInvalidParamsTest_()
+//  ================================================================
 {
     ERR err = JET_errSuccess;
     BFETLContext* bffetlc = NULL;
@@ -1161,7 +1218,9 @@ HandleError:
     return err;
 }
 
+//  ================================================================
 ERR ETLDriverTest::ErrStatsByPidNoStatsTest_()
+//  ================================================================
 {
     ERR err = JET_errSuccess;
     BFETLContext* bffetlc = NULL;

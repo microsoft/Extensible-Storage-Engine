@@ -3,7 +3,9 @@
 
 #include "osunitstd.hxx"
 
+//  ================================================================
 class STRINGTESTS : public UNITTEST
+//  ================================================================
 {
     private:
         static STRINGTESTS s_instance;
@@ -36,12 +38,15 @@ bool STRINGTESTS::FRunUnderESENT() const        { return true; }
 bool STRINGTESTS::FRunUnderESE97() const        { return true; }
 
 
+//  ================================================================
 ERR STRINGTESTS::ErrTest()
+//  ================================================================
 {
     JET_ERR         err = JET_errSuccess;
 
     COSLayerPreInit     oslayer;
 
+    // FOSPreinit()
     if ( !oslayer.FInitd() )
     {
         wprintf( L"Out of memory error during OS Layer pre-init." );
@@ -49,11 +54,15 @@ ERR STRINGTESTS::ErrTest()
         goto HandleError;
     }
 
+// Note: The string functionality requires preinit, but SHOULD work without / before
+// ErrOSInit() is called, this validates this assumption.
+//  OSTestCall( ErrOSInit() );
+// Note: I'm not even 100% sure it requires pre-init?  Probably though due to error TLS stuff.
 
     wprintf( L"\tTesting String functionality ...\n");
 
     WCHAR wszUniString[256] = L"unittestWWW.edb";
-    wszUniString[9]     = (WCHAR)(0x0234);
+    wszUniString[9]     = (WCHAR)(0x0234);  // replaces 2nd W
 
     CHAR szDestString[256];
 
@@ -64,6 +73,7 @@ ERR STRINGTESTS::ErrTest()
 
 HandleError:
 
+//  OSTerm();
 
     return err;
 }

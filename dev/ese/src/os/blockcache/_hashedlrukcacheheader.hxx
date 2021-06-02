@@ -3,7 +3,9 @@
 
 #pragma once
 
+//  Hashed LRUK Caching File Header
 
+//  8a33bc21-ccb0-40ae-bb1c-d231d485eda9
 const BYTE c_rgbHashedLRUKCacheHeaderV1[ CBlockCacheHeaderHelpers::cbGuid ] = { 0x21, 0xBC, 0x33, 0x8A, 0xB0, 0xCC, 0xAE, 0x40, 0xBB, 0x1C, 0xD2, 0x31, 0xD4, 0x85, 0xED, 0xA9 };
 
 #pragma push_macro( "new" )
@@ -11,7 +13,8 @@ const BYTE c_rgbHashedLRUKCacheHeaderV1[ CBlockCacheHeaderHelpers::cbGuid ] = { 
 
 #include <pshpack1.h>
 
-class CHashedLRUKCacheHeader : CBlockCacheHeaderHelpers
+//PERSISTED
+class CHashedLRUKCacheHeader : CBlockCacheHeaderHelpers  // ch
 {
     public:
 
@@ -41,8 +44,8 @@ class CHashedLRUKCacheHeader : CBlockCacheHeaderHelpers
 
     private:
 
-        LittleEndian<ULONG> m_le_ulChecksum;
-        BYTE                m_rgbHeaderType[ cbGuid ];
+        LittleEndian<ULONG> m_le_ulChecksum;            //  offset 0:  checksum
+        BYTE                m_rgbHeaderType[ cbGuid ];  //  header type
 
         BYTE                m_rgbPadding[   cbCacheHeader 
                                             - sizeof( m_le_ulChecksum )
@@ -158,9 +161,9 @@ INLINE void* CHashedLRUKCacheHeader::operator new( _In_ const size_t cb )
 {
 #ifdef MEM_CHECK
     return PvOSMemoryPageAlloc_( cb, NULL, fFalse, SzNewFile(), UlNewLine() );
-#else
+#else  //  !MEM_CHECK
     return PvOSMemoryPageAlloc( cb, NULL );
-#endif
+#endif  //  MEM_CHECK
 }
 
 INLINE void* CHashedLRUKCacheHeader::operator new( _In_ const size_t cb, _In_ const void* const pv )

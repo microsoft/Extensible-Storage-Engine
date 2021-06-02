@@ -3,15 +3,23 @@
 
 #include "osstd.hxx"
 
+//  this is the wrapper layer for LoadLibraryExW() proper.  Only edbg.cxx and
+//  hapublish.cxx have usage of LoadLibrary outside this function.
 #undef LoadLibraryExW
 #undef GetModuleHandleW
 
-extern volatile BOOL g_fDllUp;
+extern volatile BOOL g_fDllUp;      //  for validation in a couple places
 
+//  Dynamically Loaded Libraries
 
+//  loads the library from the specified file, returning fTrue and the library
+//  handle on success.  this should only be used for user specified libraries,
+//  not system libraries (which should use the NTOSFunc*/FunctionLoaders)
 
 BOOL FUtilLoadLibrary( const WCHAR* wszLibrary, LIBRARY* plibrary, const BOOL fPermitDialog )
 {
+    //  This function is for loading only consumer / user specified libraries.  If you are
+    //  loading a subset of OS functionality, please use NTOSFunc*() macros / FunctionLoader<>.
     Expected( NULL == WszDllSubStr( wszLibrary, L"ntdll" ) );
     Expected( NULL == WszDllSubStr( wszLibrary, L"kernel32" ) );
     Expected( NULL == WszDllSubStr( wszLibrary, L"user32" ) );
@@ -44,18 +52,22 @@ BOOL FUtilLoadLibrary( const WCHAR* wszLibrary, LIBRARY* plibrary, const BOOL fP
     return ( NULL != *plibrary );
 }
 
+//  retrieves the function pointer from the specified library or NULL if that
+//  function is not found in the library
 
 PFN PfnUtilGetProcAddress( LIBRARY library, const char* szFunction )
 {
     return (PFN) GetProcAddress( (HMODULE) library, szFunction );
 }
 
+//  unloads the specified library
 
 void UtilFreeLibrary( LIBRARY library )
 {
     FreeLibrary( (HMODULE) library );
 }
 
+// easier than working out how to include the header
 #define STATUS_NOT_IMPLEMENTED           ((INT)0xC0000002L)
 
 INT NtstatusThunkNotSupported()
@@ -70,6 +82,7 @@ DWORD ErrorThunkNotSupported()
 
 #ifdef DEBUG
 
+//  lines in the sand
 
 #pragma push_macro( "GetModuleHandleExW" )
 #ifdef GetModuleHandleExW
@@ -78,16 +91,22 @@ DWORD ErrorThunkNotSupported()
 
 VOID OSLibraryValidateLoaderPolicy( const WCHAR * const mwszzDlls, OSLoadFlags oslf )
 {
+    //  must specify an OS revision you expect this on
 
     Assert( oslf & oslfExpectedOnWin5x || oslf & oslfExpectedOnWin6 || oslf & oslfExpectedOnWin7 || oslf & oslfExpectedOnWin8 || oslf & oslfExpectedOnWin10 );
 
+    //  our minimum OS requirement is Vista / Win6, so we should check for that
 
     Assert( oslf & oslfExpectedOnWin5x || oslf & oslfExpectedOnWin6 || !( oslf & oslfRequired ) );
 
+    // don't validate this in the test harness
     HMODULE hmoduleThis = NULL;
     if ( !GetModuleHandleExW( GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS, (PCWSTR) OSLibraryValidateLoaderPolicy, &hmoduleThis ) )
     {
         DWORD gle = GetLastError();
+        //  What we can't load OUR OWN MODULE?  Well, apparently there is one such case, if you call this
+        //  during DLL unload, you'll get ERROR_MOD_NOT_FOUND ... luckily we'll have set the g_fDllUp to
+        //  false by this time, so we can detect said condition.
         AssertSz( !g_fDllUp && gle == ERROR_MOD_NOT_FOUND, "Why did GetModuleHandleExW() fail? gle = %d.", GetLastError() );
     }
     else
@@ -103,9 +122,12 @@ VOID OSLibraryValidateLoaderPolicy( const WCHAR * const mwszzDlls, OSLoadFlags o
         
         if ( fIsEseDll )
         {
+            //  these are the approved binaries lists
             Assert(
+                    //  the "broken" libraries
                     mwszzDlls == g_mwszzKernel32CoreSystemBroken ||
                     mwszzDlls == g_mwszzAdvapi32CoreSystemBroken ||
+                    //  the approved binaries list
                     mwszzDlls == g_mwszzNtdllLibs ||
                     mwszzDlls == g_mwszzRtlSupportLibs ||
                     mwszzDlls == g_mwszzCpuInfoLibs ||
@@ -131,7 +153,14 @@ VOID OSLibraryValidateLoaderPolicy( const WCHAR * const mwszzDlls, OSLoadFlags o
                     mwszzDlls == g_mwszzEventingProviderLibs
                     );
         
+            //  there are a couple reasons to add a library to the strict free required list
+            //    1. historically the DLL has been freed, we want to keep the same contract
+            //       with the new functional loader
+            //    2. we are trying to move off the DLL so that we can lower our code working
+            //       working set and COW pages for other DLLs caused by ESE
         
+            // NOTE: If this Assert fires, but the strings look just fine, then you may have
+            // compiled with StringPooling (-GF) turned off.        
             Assert( mwszzDlls != g_mwszzKernel32CoreSystemBroken || oslf & oslfStrictFree );
             Assert( mwszzDlls != g_mwszzAdvapi32CoreSystemBroken || oslf & oslfStrictFree );
         }
@@ -145,6 +174,8 @@ VOID OSLibraryValidateLoaderPolicy( const WCHAR * const mwszzDlls, OSLoadFlags o
 }
 #pragma pop_macro( "GetModuleHandleExW" )
 
+//  tracking how many loads and unloads we've had of libraries that we'd like to follow
+//  a strict free model for
 
 LONG g_cKernel32Loads = 0;
 LONG g_cAdvapi32Loads = 0;
@@ -161,7 +192,7 @@ VOID OSLibraryTrackingLoad( const WCHAR * const mwszzDlls )
         c = AtomicIncrement( &g_cAdvapi32Loads );
     }
     Assert( c > 0 );
-    Assert( c < 300 );
+    Assert( c < 300 );  // we're leaking
 }
 
 VOID OSLibraryTrackingFree( const WCHAR * const mwszzDlls )
@@ -178,7 +209,7 @@ VOID OSLibraryTrackingFree( const WCHAR * const mwszzDlls )
     Assert( c >= 0 );
 }
 
-#endif
+#endif  //  DEBUG
 
 ERR ErrMultiLoadPfn(
     const WCHAR * const mwszzDlls,
@@ -190,17 +221,22 @@ ERR ErrMultiLoadPfn(
     ERR err_ = JET_errSuccess;
     LONG lLine = __LINE__;
 
-    Expected( *ppfn == NULL );
+    Expected( *ppfn == NULL );  // if we start using this function concurrently this may one day fail
 
 #if defined( ESENT ) && defined( OS_LAYER_VIOLATIONS )
+    //  We only load a non-system DLL in test code / oslite.lib ... so in oswinnt.lib, we
+    //  can assert we're not trying to load a non-system DLL.
+    // Exchange can also optionally load non-system dlls
     Assert( !fNonSystemDll );
 #else
+    //  Note: The test code is passing L"ese.dll\0\0" or L"esent.dll\0\0"
     Expected( !fNonSystemDll || 0 == _wcsicmp( mwszzDlls, L"ese.dll" ) || 0 == _wcsicmp( mwszzDlls, L"esent.dll" ) );
 #endif
 
     SHORT ichDll = 0;
     BOOL fAtLeastOneFailedLoad = fFalse;
     
+    // Disable missing dll popup, loader will return errors without showing the dialog popup.
     DWORD dwOldThreadErrMode;
     BOOL fThreadErrModeSet = SetThreadErrorMode( SEM_FAILCRITICALERRORS, &dwOldThreadErrMode );
 
@@ -224,16 +260,16 @@ ERR ErrMultiLoadPfn(
             else
             {
                 DWORD errorGetProc = GetLastError();
-                if ( err_ == JET_errSuccess )
+                if ( err_ == JET_errSuccess )   //  protects previous errors
                 {
                     switch( errorGetProc )
                     {
                         case ERROR_PROC_NOT_FOUND:
-                            err_ = JET_errUnloadableOSFunctionality; lLine = __LINE__;
+                            err_ = JET_errUnloadableOSFunctionality; lLine = __LINE__; // fake ErrERRCheck()
                             break;
                         default:
                             AssertSzRTL( fFalse, "Unknown error(%d) loading module\n", errorGetProc );
-                            err_ = JET_errInternalError; lLine = __LINE__;
+                            err_ = JET_errInternalError; lLine = __LINE__; // fake ErrERRCheck()
                     }
                 }
                 PreinitTrace( L"\tLOADERROR[%d]: Could not get proc: %hs (from DLL: %ws), gle=%d\n", __LINE__, szFunction, &(mwszzDlls[ichDll]), GetLastError() );
@@ -247,22 +283,23 @@ ERR ErrMultiLoadPfn(
         else
         {
             DWORD errorLoadDll = GetLastError();
-            if ( err_ == JET_errSuccess )
+            if ( err_ == JET_errSuccess )   //  protects previous errors
             {
                 switch( errorLoadDll )
                 {
                     case ERROR_MOD_NOT_FOUND:
-                        err_ = JET_errUnloadableOSFunctionality; lLine = __LINE__;
+                        err_ = JET_errUnloadableOSFunctionality; lLine = __LINE__; // fake ErrERRCheck()
                         break;
                     default:
                         AssertSz( fFalse, "Unknown error(%d) loading module\n", errorLoadDll );
-                        err_ = JET_errInternalError; lLine = __LINE__;
+                        err_ = JET_errInternalError; lLine = __LINE__; // fake ErrERRCheck()
                 }
             }
             PreinitTrace( L"\tLOADERROR[%d]: Failed to load DLL: %ws (for %hs), gle=%d\n", __LINE__, &(mwszzDlls[ichDll]), szFunction, GetLastError() );
             fAtLeastOneFailedLoad = fTrue;
         }
 
+        //  increment to the next DLL in the multi-string
         ichDll = ichDll + (SHORT)wcslen( &(mwszzDlls[ichDll]) ) + 1;
     }
 
@@ -276,6 +313,7 @@ ERR ErrMultiLoadPfn(
         }
         else
         {
+            // cheap form of fake err trap in lieu of FOSPreinit() having run
             extern ERR g_errTrap;
             Assert( g_errTrap != err_ );
         }
@@ -300,7 +338,7 @@ VOID FreeLoadedModule(
     Assert( wszDll && wcslen( wszDll ) );
     HMODULE hmodule = GetModuleHandleW( wszDll );
 
-    if ( hmodule )
+    if ( hmodule )  // just in case
     {
         PreinitTrace( L"FreeLibrary( %p(%ws) )\n", hmodule, wszDll );
         FreeLibrary( hmodule );
@@ -308,27 +346,34 @@ VOID FreeLoadedModule(
 }
 
 
+//  post-terminate library subsystem
 
 void OSLibraryPostterm()
 {
 }
 
+//  pre-init library subsystem
 
 BOOL FOSLibraryPreinit()
 {
+    //  nop
 
     return fTrue;
 }
 
 
+//  terminate library subsystem
 
 void OSLibraryTerm()
 {
+    //  nop
 }
 
+//  init library subsystem
 
 ERR ErrOSLibraryInit()
 {
+    //  nop
 
     return JET_errSuccess;
 }

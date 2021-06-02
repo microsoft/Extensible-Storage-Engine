@@ -3,7 +3,9 @@
 
 #include "collectionunittest.hxx"
 
+//  ================================================================
 static void PrintHelp( const char * const szApplication )
+//  ================================================================
 {
     fprintf( stderr, "Usage: %s [tests]\r\n", szApplication );
     fprintf( stderr, "\tNo arguments runs all tests.\r\n" );
@@ -12,7 +14,9 @@ static void PrintHelp( const char * const szApplication )
     BstfPrintTests();
 }
 
+//  ================================================================
 INT __cdecl main( INT argc, __in_ecount( argc ) char * argv[] )
+//  ================================================================
 {
     ERR err;
 

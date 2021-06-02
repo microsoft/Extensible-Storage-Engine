@@ -3,7 +3,9 @@
 
 #include "collectionunittest.hxx"
 
+//  ================================================================
 class RRNextPrevTest : public UNITTEST
+//  ================================================================
 {
     private:
         static RRNextPrevTest s_instance;
@@ -31,7 +33,9 @@ bool RRNextPrevTest::FRunUnderESE98() const         { return true; }
 bool RRNextPrevTest::FRunUnderESENT() const         { return true; }
 bool RRNextPrevTest::FRunUnderESE97() const         { return true; }
 
+//  ================================================================
 ERR RRNextPrevTest::ErrTest()
+//  ================================================================
 {
     ERR err = JET_errSuccess;
 
@@ -40,11 +44,13 @@ ERR RRNextPrevTest::ErrTest()
     const DWORD cbFake1 = 3;
     const DWORD cbFake2 = 5;
 
+    //  some explicit tests
 
     TestCheck( IrrNext( 0, cbFake2 ) == 1 );
     TestCheck( IrrNext( 2, cbFake2 ) == 3 );
     TestCheck( IrrNext( 4, cbFake2 ) == 0 );
 
+    //  defines to explore full gamut
 
     #define TestIrrNextAllTypes( input, rrsize, result )                    \
         TestCheck( IrrNext( input, rrsize ) == result );                        \

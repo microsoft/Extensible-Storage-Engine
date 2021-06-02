@@ -4,9 +4,12 @@
 #pragma once
 
 
+//================================================
 #include <windows.h>
 
 
+//================================================
+// STL headers won't compile with warning level 4
 #pragma warning( push, 3 )
 #include <string>
 #include <vector>
@@ -14,27 +17,34 @@
 #include <algorithm>
 #pragma warning( pop )
 
+// Some other STL headers even won't compile with warning level 3
 #pragma warning( push, 2 )
 #include <sstream>
 #pragma warning( pop )
 
 
+//================================================
 #include "ese_common.hxx"
 
 
+//================================================
 #if 0x6000 == eseVersion
+// 0x6000 - ESE98 (Exchange 2000)
 #define JET_API_PTR ULONG_PTR
 
 #elif 0x5600 == eseVersion
+// 0x5600 - ESENT98 (Whistler)
 
 #else
 #error  "ESEWRAPPER class library only support ESE version 0x5600 or 0x6000"
 #endif
 
 
+//================================================
 #define OPFUN       ()
 #define REF( x )        ( void )x
 
+//================================================
 enum {
     CP_NIL = 0,
     CP_ANSI = 1252,
@@ -42,9 +52,13 @@ enum {
 };
 
 
+//================================================
+// Utility functions
+//================================================
 size_t strlen2( const char* szz );
 
 
+//================================================
 class EWInstance;
 class EWSession;
 class EWDatabase;
@@ -54,8 +68,15 @@ class EWColumn;
 class EWColumnGroup;
 
 
+//================================================
+//typedef std::vector< EWSession >      VEC_EWSES;
+//typedef std::vector< EWDatabase >     VEC_EWDB;
+//typedef std::vector< EWTempTable >    VEC_EWTTAB;
+//typedef std::vector< EWTable >            VEC_EWTAB;
 typedef std::vector< EWColumn >     VEC_EWCOL;
 
+//typedef std::map< std::string, EWColumn > MAP_STREWCOL;
+//typedef std::pair< std::string, EWColumn >    PAIR_STREWCOL;
 
 typedef void        ESENIL;
 typedef bool        ESEBIT;
@@ -68,8 +89,14 @@ typedef INT64   ESECURRENCY;
 typedef float       ESESINGLE;
 typedef double  ESEDOUBLE;
 
+//typedef double        ESE_DATETIME;
+//typedef std::string   ESE_BINARY
+//typedef std::string   ESE_TEXT
+//typedef std::string   ESE_LONGBINARY
+//typedef std::string   ESE_LONGTEXT
 
 
+//================================================
 #if 0
 class Data {
 public:
@@ -79,12 +106,14 @@ public:
     Data( const Data& data );
     Data& operator=( const Data& data );
 
+    //================================
     unsigned long cap( void ) const { return m_cbCapacity; }
     void* pv( void ) const  { return m_pvData; }
     unsigned long cb( void ) const  { return m_cbData; }
 
     unsigned long setCb( unsigned long cb ) { return m_cbData = cb; }
 
+    //================================
     operator std::string( void )    { return std::string( ( const char* )pv(), cb() ); }
 
 protected:
@@ -95,6 +124,7 @@ protected:
 #endif
 
 
+//================================================
 class EW {
 public:
     static JET_ERR EnableMultiInstance(
@@ -176,7 +206,9 @@ public:
 };
 
 
+//================================================
 class EWInstance {
+//friend class EWSession;
 public:
     ~EWInstance( void ) { }
     EWInstance( void )
@@ -190,6 +222,7 @@ public:
         *this = rewInst;
     }
 
+    // TODO: obsolete!
     EWInstance(
         JET_GRBIT jGrBit,
         JET_RSTINFO* pjRSTInfo = NULL,
@@ -197,24 +230,30 @@ public:
         const char* szDisp = NULL
     );
 
+    //EWInstance( JSystemParameterVector jSpv );
 
     EWInstance& operator=(
         const EWInstance& rewInst )
     {
         m_jErr = rewInst.jErr();
         m_jInstId = rewInst.jInstId();
+        //m_vewSes = rewInst.vewSes();
 
         return *this;
     }
 
+    //================================
     EWSession BeginSession(
         const char* szUser = NULL,
         const char* szPass = NULL
     );
 
+    //================================
     JET_ERR jErr( void ) const { return m_jErr; }
     JET_INSTANCE jInstId( void ) const { return m_jInstId; }
+    //VEC_EWSES vewSes( void ) const { return m_vewSes; }
 
+    //================================
     bool operator==( const EWInstance& rewInst )
     {
         return jInstId() == rewInst.jInstId();
@@ -324,12 +363,16 @@ protected:
         m_jInstId = JET_instanceNil;
     }
 
+    //void Register( EWSession& rewSes );
+    //void Unregister( EWSession& rewSes );
 
     JET_ERR m_jErr;
     JET_INSTANCE m_jInstId;
+    //VEC_EWSES     m_vewSes;       // EWSessions we hold
 };
 
 
+//================================================
 class EWSession {
 friend class EWInstance;
 public:
@@ -354,6 +397,7 @@ public:
         return *this;
     }
 
+    //================================
     EWSession DupSession( void )
     {
         return EWSession( m_pewInst, jSesId() );
@@ -382,12 +426,14 @@ public:
         JET_GRBIT jGrBit = JET_bitNil
     );
 
+    //================================
     EWInstance* pEWInstance( void ) const { return m_pewInst; }
 
     JET_ERR jErr( void ) const { return m_jErr; }
     JET_SESID jSesId( void ) const { return m_jSesId; }
     JET_INSTANCE jInstId( void ) const { return m_pewInst->jInstId(); }
 
+    //================================
     bool operator==(
         const EWSession& rjSes )
     {
@@ -402,15 +448,18 @@ public:
     {
         return m_jErr = JetAttachDatabase2( jSesId(), szDb, cpgDbMax, jGrBit );
     }
+    //========================
     JET_ERR BeginTransaction( void )
     {
         return m_jErr = JetBeginTransaction( jSesId() );
     }
+    //========================
     JET_ERR CommitTransaction(
         JET_GRBIT jGrBit = JET_bitNil )
     {
         return m_jErr = JetCommitTransaction( jSesId(), jGrBit );
     }
+    //--------------------------------
     JET_ERR Defragment(
         const char* szDatabase,
         const char* szTable,
@@ -479,6 +528,7 @@ public:
     }
 
 protected:
+    // called by EWInstance::BeginSession
     EWSession(
         EWInstance* pjInst,
         const char* szUser = NULL,
@@ -489,6 +539,7 @@ protected:
         m_jErr = JetBeginSession( jInstId(), &m_jSesId, szUser, szPass );
     }
 
+    // called by EWSession::DupSession
     EWSession(
         EWInstance* pjInst,
         JET_SESID jSesId )
@@ -506,11 +557,12 @@ protected:
     }
 
     JET_ERR m_jErr;
-    EWInstance* m_pewInst;
+    EWInstance* m_pewInst;      // Pointer to EWInstance to which we belong
     JET_SESID m_jSesId;
 };
 
 
+//================================================
 class EWDatabase {
 friend class EWSession;
 public:
@@ -536,6 +588,7 @@ public:
         return *this;
     }
 
+    //================================
     EWTable CreateTable(
         const char* szTab,
         unsigned long   ulPages     = 0,
@@ -553,6 +606,7 @@ public:
         JET_TABLECREATE2* pjTabCreate2
     );
 
+    //================================
     EWSession* pEWSession( void ) const { return m_pewSes; }
     EWInstance* pEWInstance( void ) const { return pEWSession()->pEWInstance(); }
 
@@ -561,6 +615,7 @@ public:
     JET_SESID jSesId( void ) const { return m_pewSes->jSesId(); }
     JET_INSTANCE jInstId( void ) const { return m_pewSes->jInstId(); }
 
+    //================================
     bool operator==(
         const EWDatabase& rewDb )
     {
@@ -638,6 +693,7 @@ public:
     }
 
 protected:
+    // called by EWSession::CreateDatabase/CreateDatabase2
     EWDatabase(
         EWSession* pjSes,
         const char* szDb,
@@ -651,6 +707,7 @@ protected:
                     cpgDbMax, &m_jDbId, jGrBit );
     }
 
+    // called by EWSession::OpenDatabase
     EWDatabase(
         EWSession* pjSes,
         const char* szDb,
@@ -671,12 +728,13 @@ protected:
     }
 
     JET_ERR m_jErr;
-    EWSession* m_pewSes;
+    EWSession* m_pewSes;            // Pointer to EWSession to which we belong
     JET_DBID m_jDbId;
     std::string m_strDb;
 };
 
 
+//================================================
 class EWTable {
 friend class EWDatabase;
 public:
@@ -702,6 +760,7 @@ public:
         return *this;
     }
 
+    //================================
     EWColumn operator[](
         const char* szCol
     );
@@ -709,6 +768,7 @@ public:
         const char* szzCols
     );
 
+    //================================
     EWDatabase* pEWDatabase( void ) const { return m_pewDb; }
     virtual EWSession* pEWSession( void ) const { return pEWDatabase()->pEWSession(); }
     virtual EWInstance* pEWInstance( void ) const { return pEWDatabase()->pEWInstance(); }
@@ -719,6 +779,7 @@ public:
     virtual JET_SESID jSesId( void ) const { return m_pewDb->jSesId(); }
     virtual JET_INSTANCE jInstId( void ) const { return m_pewDb->jInstId(); }
 
+    //================================
     bool operator==(
         const EWTable& rewTab )
     {
@@ -726,6 +787,7 @@ public:
             && jInstId() == rewTab.jInstId();
     }
 
+    //================
     JET_ERR AddColumn(
         const char* szCol,
         JET_COLTYP jColTyp,
@@ -733,6 +795,7 @@ public:
         unsigned long cbMax = 0,
         unsigned short usCP = CP_NIL
     );
+    //================
     JET_ERR AddColumn(
         const char* szCol,
         const JET_COLUMNDEF* pjColDef,
@@ -745,12 +808,14 @@ public:
         JET_COLUMNID& jColId = pjColId ? *pjColId : jColIdDefault;
         return m_jErr = JetAddColumn( jSesId(), jTabId(), szCol, pjColDef, pvDefault, cbDefault, &jColId );
     }
+    //================
     JET_ERR DeleteColumn(
         const char* szCol,
         JET_GRBIT jGrBit = JET_bitNil )
     {
         return m_jErr = JetDeleteColumn2( jSesId(), jTabId(), szCol, jGrBit );
     }
+    //================
     JET_ERR CloseTable( void )
     {
         m_jErr = JetCloseTable( jSesId(), jTabId() );
@@ -760,6 +825,7 @@ public:
 
         return jErr();
     }
+    //================
     JET_ERR CreateIndex(
         const char* szIndex,
         const char* szKey,
@@ -773,6 +839,7 @@ public:
         return m_jErr = JetCreateIndex( jSesId(), jTabId(),
                         szIndex, jGrBit, szKey, cbKey, lDensity );
     }
+    //================
     JET_ERR CreateIndex(
         std::string strIndex,
         std::string strKey,
@@ -782,26 +849,31 @@ public:
         return CreateIndex( strIndex.c_str(), strKey.c_str(),
                 jGrBit, lDensity, ( unsigned long )strKey.size() );
     }
+    //================
     JET_ERR CreateIndex2(
         JET_INDEXCREATE* pjIdxCreate,
         unsigned long   cjIdxCreate )
     {
         return m_jErr = JetCreateIndex2( jSesId(), jTabId(), pjIdxCreate, cjIdxCreate );
     }
+    //================
     JET_ERR Delete( void )
     {
         return m_jErr = JetDelete( jSesId(), jTabId() );
     }
+    //================
     JET_ERR DeleteIndex(
         const char* szIndex )
     {
         return m_jErr = JetDeleteIndex( jSesId(), jTabId(), szIndex );
     }
+    //================
     JET_ERR GetLock(
         JET_GRBIT jGrBit )
     {
         return m_jErr = JetGetLock( jSesId(), jTabId(), jGrBit );
     }
+    //================
     JET_ERR GetTableInfo(
         void* pvResult,
         unsigned long cbMax,
@@ -810,6 +882,7 @@ public:
         return m_jErr = JetGetTableInfo( jSesId(), jTabId(),
                         pvResult, cbMax, ulInfoLevel );
     }
+    //================
     JET_ERR GetTableColumnInfo(
         const char* szCol,
         void* pvResult,
@@ -819,6 +892,7 @@ public:
         return m_jErr = JetGetTableColumnInfo( jSesId(), jTabId(),
                         szCol, pvResult, cbMax, ulInfoLevel );
     }
+    //================
     JET_ERR GetTableIndexInfo(
         const char* szIdx,
         void* pvResult,
@@ -828,12 +902,14 @@ public:
         return m_jErr = JetGetTableIndexInfo( jSesId(), jTabId(),
                         szIdx, pvResult, cbMax, ulInfoLevel );
     }
+    //================
     JET_ERR IndexRecordCount(
         unsigned long* pcRec,
         unsigned long cRecMax = UINT_MAX )
     {
         return m_jErr = JetIndexRecordCount( jSesId(), jTabId(), pcRec, cRecMax );
     }
+    //================
     JET_ERR MakeKey(
         void* pvData,
         unsigned long cbData,
@@ -841,23 +917,27 @@ public:
     {
         return m_jErr = JetMakeKey( jSesId(), jTabId(), pvData, cbData, jGrBit );
     }
+    //================
     JET_ERR MakeKey(
         const std::string& strKey,
         JET_GRBIT jGrBit = JET_bitNewKey )
     {
         return MakeKey( ( void* )strKey.c_str(), ( unsigned long )strKey.size(), jGrBit );
     }
+    //================
     JET_ERR Move(
         long cRow = JET_MoveNext,
         JET_GRBIT jGrBit = JET_bitNil )
     {
         return m_jErr = JetMove( jSesId(), jTabId(), cRow, jGrBit );
     }
+    //================
     JET_ERR PrepareUpdate(
         unsigned long ulPrep = JET_prepInsert )
     {
         return m_jErr = JetPrepareUpdate( jSesId(), jTabId(), ulPrep );
     }
+    //================
     JET_ERR RenameColumn(
         const char* szOld,
         const char* szNew,
@@ -865,28 +945,33 @@ public:
     {
         return m_jErr = JetRenameColumn( jSesId(), jTabId(), szOld, szNew, jGrBit );
     }
+    //================
     JET_ERR ResetTableSequential(
         JET_GRBIT jGrBit = JET_bitNil )
     {
         return m_jErr = JetResetTableSequential( jSesId(), jTabId(), jGrBit );
     }
+    //================
     JET_ERR RetrieveColumns(
         JET_RETRIEVECOLUMN* pjRetCol,
         unsigned long   cjRetCol )
     {
         return m_jErr = JetRetrieveColumns( jSesId(), jTabId(), pjRetCol, cjRetCol );
     }
+    //================
     JET_ERR Seek(
         JET_GRBIT jGrBit = JET_bitSeekEQ )
     {
         return m_jErr = JetSeek( jSesId(), jTabId(), jGrBit );
     }
+    //================
     JET_ERR SetColumns(
         JET_SETCOLUMN* pjSetCol,
         unsigned long   cjSetCol )
     {
         return m_jErr = JetSetColumns( jSesId(), jTabId(), pjSetCol, cjSetCol );
     }
+    //================
     JET_ERR SetCurrentIndex(
         const char* szIndex,
         JET_GRBIT jGrBit = JET_bitMoveFirst,
@@ -896,11 +981,13 @@ public:
         return m_jErr = JetSetCurrentIndex4( jSesId(), jTabId(),
                         szIndex, pjIndId, jGrBit, ulTagSeq );
     }
+    //================
     JET_ERR SetTableSequential(
         JET_GRBIT jGrBit = JET_bitNil )
     {
         return m_jErr = JetSetTableSequential( jSesId(), jTabId(), jGrBit );
     }
+    //================
     JET_ERR Update(
         void* pvBookmark = NULL,
         unsigned long cbBookmark = 0,
@@ -911,6 +998,7 @@ public:
     }
 
 protected:
+    // called by EWDatabase::CreateTable
     EWTable(
         EWDatabase* pjDb,
         const char* szTab,
@@ -923,6 +1011,7 @@ protected:
         m_jErr = JetCreateTable( jSesId(), jDbId(), m_strTab.c_str(), ulPages, ulDensity, &m_jTabId );
     }
 
+    // called by EWDatabase::OpenTable
     EWTable(
         EWDatabase* pjDb,
         const char* szTab,
@@ -934,6 +1023,7 @@ protected:
         m_jErr = JetOpenTable( jSesId(), jDbId(), m_strTab.c_str(), NULL, 0, jGrBit, &m_jTabId );
     }
 
+    // called by EWDatabase::CreateTableColumnIndex
     EWTable(
         EWDatabase* pjDb,
         JET_TABLECREATE2* pjTabCreate2 )
@@ -945,6 +1035,7 @@ protected:
         m_jTabId    = pjTabCreate2->tableid;
     }
 
+    // called by EWDatabase::CreateTableColumnIndex2
     EWTable(
         EWDatabase* pjDb,
         JET_TABLECREATE* pjTabCreate )
@@ -964,11 +1055,12 @@ protected:
     }
 
     JET_ERR m_jErr;
-    EWDatabase* m_pewDb;
+    EWDatabase* m_pewDb;        // parent EWDatabase
     JET_TABLEID m_jTabId;
     std::string m_strTab;
 };
 
+//================================================
 class EWTempTable : public EWTable {
 friend class EWSession;
 public:
@@ -1000,16 +1092,21 @@ public:
         return *this;
     }
 
+    //================================
     EWColumn operator[]( size_t cIndex );
+    //EWColumnGroup operator OPFUN( const char* szzCols );
 
+    //================================
     virtual EWSession* pEWSession( void ) const { return m_pewSes; }
     virtual EWInstance* pEWInstance( void ) const { return pEWSession()->pEWInstance(); }
 
     virtual JET_SESID jSesId( void ) const { return m_pewSes->jSesId(); }
     virtual JET_INSTANCE jInstId( void ) const { return m_pewSes->jInstId(); }
 
+    //================================
 
 protected:
+    //called by EWSEssion::OpenTempTable
     EWTempTable(
         EWSession* pewSes,
         JET_COLUMNDEF* pjColDef,
@@ -1018,6 +1115,7 @@ protected:
         JET_UNICODEINDEX* pjUCIndex
     );
 
+    // called by EWSession::OpenTempTable2
     EWTempTable(
         EWSession* pewSes,
         JET_COLUMNDEF* pjColDef,
@@ -1034,20 +1132,23 @@ protected:
         m_cCol = 0;
     }
 
+    // init m_pjColDef with another JET_COLUMNDEF array
     void assign1(
         JET_COLUMNDEF* pjColDef,
         unsigned long cCol
     );
+    // init m_pjColDef->columnid with another JET_COLUMNID array
     void assign2(
         JET_COLUMNID* pjColId,
         unsigned long cCol
     );
 
-    EWSession* m_pewSes;
+    EWSession* m_pewSes;            // Pointer to EWSession to which we belong
     JET_COLUMNDEF* m_pjColDef;
     unsigned long m_cCol;
 };
 
+//================================================
 class EWColumn {
 friend class EWTable;
 friend class EWTempTable;
@@ -1093,6 +1194,7 @@ public:
         return *this;
     }
 
+    //================================
     EWTable* pEWTable( void ) const { return m_pewTab; }
     EWDatabase* pEWDatabase( void ) const { return pEWTable()->pEWDatabase(); }
     EWSession* pEWSession( void ) const { return pEWTable()->pEWSession(); }
@@ -1109,6 +1211,7 @@ public:
     JET_GRBIT jGrBit( void ) const { return m_jColDef.grbit; }
     JET_COLUMNID jColId( void ) const { return m_jColDef.columnid; }
 
+    //================================
     bool operator==(
         const EWColumn& rjCol )
     {
@@ -1116,7 +1219,11 @@ public:
             && jTabId() == rjCol.jTabId()
             && jInstId() == rjCol.jInstId();
     }
+    //operator std::string( JET_GRBIT jGrBit );
+    //operator Data( void );
 
+    //JET_ERR operator=( const Data& data );
+    //JET_ERR operator=( ESECURRENCY eseCurrency );
     JET_ERR operator=(
         ESEUBYTE eseUByte )
     {
@@ -1159,14 +1266,25 @@ public:
         return EscrowUpdate( &eseLongTemp, sizeof( eseLongTemp ) );
     }
 
+    //================
     EWColumn& operator[](
         unsigned long ulTagSeq
     );
+    //================
+    // prepare EWColumn object for JetSetColumn
     EWColumn& operator OPFUN(
         JET_GRBIT jGrBit,
         unsigned long ulTagSeq,
         unsigned long ulOffset
     );
+    // prepare EWColumn object for JetRetrieveColumn
+    //EWColumn& operator OPFUN(
+    //  JET_GRBIT jGrBit,
+    //  unsigned long cbData,
+    //  unsigned long ulTagSeq,
+    //  unsigned long ulOffset
+    //);
+    //================
     JET_ERR SetColumn(
         void* pvData,
         unsigned long cbData,
@@ -1176,6 +1294,7 @@ public:
         return m_jErr = JetSetColumn( jSesId(), jTabId(), jColId(),
                         pvData, cbData, jGrBit, pjSetInfo );
     }
+    //================
     JET_ERR RetrieveColumn(
         void* pvData,
         unsigned long cbData,
@@ -1186,6 +1305,7 @@ public:
         return m_jErr = JetRetrieveColumn( jSesId(), jTabId(), jColId(),
                         pvData, cbData, pcbDataActual, jGrBit, pjRetInfo );
     }
+    //================
     JET_ERR EscrowUpdate(
         void* pvData,
         unsigned long cbData,
@@ -1197,15 +1317,18 @@ public:
         return m_jErr = JetEscrowUpdate( jSesId(), jTabId(), jColId(),
                         pvData, cbData, pvOld, cbOld, pcbOldActual, jGrBit );
     }
+    //================
     void AllocateBuffer(
         unsigned long cbData = 0
     );
+    //================
     void FillRandom(
         long lSeed,
         bool fSave = true
     );
 
 protected:
+    //called by EWTable::operator[], EWTempTable::operator[]
     EWColumn(
         EWTable* pewTab,
         const char* szCol,
@@ -1225,21 +1348,26 @@ protected:
         m_cbActual = 0;
     }
 
-    JET_ERR m_jErr;
-    EWTable* m_pewTab;
-    JET_COLUMNDEF m_jColDef;
-    std::string m_strCol;
+    JET_ERR m_jErr;             // jet error of last operation
+    EWTable* m_pewTab;          // Pointer to EWTable to which we belong
+    JET_COLUMNDEF m_jColDef;    // our column definition
+    std::string m_strCol;           // column name
 
-    JET_GRBIT m_jSetGrBit;
-    JET_SETINFO m_jSetInfo;
+    JET_GRBIT m_jSetGrBit;      // temp var to hold JET_GRBIT used by JetSetColumn()
+    JET_SETINFO m_jSetInfo;     // temp var to hold JET_SETINFO used by JetSetColumn()
 
-    char* m_pbData;
-    unsigned long   m_cbData;
-    unsigned long   m_cbActual;
+    char* m_pbData;             // pointer to internal data buffer
+    unsigned long   m_cbData;       // size of internal data buffer
+    unsigned long   m_cbActual;     // actuall data size
 
+    // TODO:
+    //JET_GRBIT m_jRetGrBit;
+    //unsigned long m_cbRetData;
+    //JET_RETINFO m_jRetInfo;
 };
 
 
+//================================================
 class EWColumnGroup {
 public:
     ~EWColumnGroup( void )
@@ -1264,8 +1392,10 @@ public:
         return *this;
     }
 
+    //================================
     JET_ERR jErr( void ) const { return m_jErr; }
 
+    //================================
     void AddEWColumn(
         const EWColumn& ewCol )
     {
@@ -1293,6 +1423,9 @@ protected:
 };
 
 
+//================================================
+// class in order to facilitate transaction handling
+//================================================
 class EWTransaction {
 friend class EWSession;
 public:
@@ -1317,6 +1450,11 @@ public:
         return *this;
     }
 
+    //================================
+    // TODO: should use EWSession to manufacture EWTransaction?
+    //EWTransaction BeginTransaction(
+    //  JET_GRBIT jGrBit
+    //);
 
     JET_ERR CommitTransaction(
         JET_GRBIT jGrBit = JET_bitNil

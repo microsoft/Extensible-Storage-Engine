@@ -26,28 +26,28 @@ enum ShadowedHeaderRequest
 
 typedef struct tagDbHeaderReader
 {
-    ShadowedHeaderRequest       shadowedHeaderRequest;
-    const WCHAR*                wszFileName;
-    BYTE*                       pbHeader;
-    DWORD                       cbHeader;
-    LONG                        ibPageSize;
-    IFileSystemAPI*             pfsapi;
-    IFileAPI*                   pfapi;
-    BOOL                        fNoAutoDetectPageSize;
-    DWORD                       cbHeaderActual;
-    PAGECHECKSUM                checksumExpected;
-    PAGECHECKSUM                checksumActual;
-    ShadowedHeaderStatus        shadowedHeaderStatus;
+    ShadowedHeaderRequest       shadowedHeaderRequest;      // in
+    const WCHAR*                wszFileName;                // in
+    BYTE*                       pbHeader;                   // in
+    DWORD                       cbHeader;                   // in
+    LONG                        ibPageSize;                 // in
+    IFileSystemAPI*             pfsapi;                     // in
+    IFileAPI*                   pfapi;                      // in
+    BOOL                        fNoAutoDetectPageSize;      // in
+    DWORD                       cbHeaderActual;             // out
+    PAGECHECKSUM                checksumExpected;           // out
+    PAGECHECKSUM                checksumActual;             // out
+    ShadowedHeaderStatus        shadowedHeaderStatus;       // out
 } DB_HEADER_READER;
 
-enum UtilReadHeaderFlags
+enum UtilReadHeaderFlags    // urhf
 {
-    urhfNone                    = 0x00000000,
-    urhfDefault                 = urhfNone,
-    urhfReadOnly                = 0x00000001,
-    urhfNoEventLogging          = 0x00000002,
-    urhfNoFailOnPageMismatch    = 0x00000004,
-    urhfNoAutoDetectPageSize    = 0x00000008,
+    urhfNone                    = 0x00000000,   // no flags
+    urhfDefault                 = urhfNone,     // default
+    urhfReadOnly                = 0x00000001,   // read-only operation, i.e., header will not get fixed up
+    urhfNoEventLogging          = 0x00000002,   // no events are generated in case of errors or warnings
+    urhfNoFailOnPageMismatch    = 0x00000004,   // do not fail if the expected and actual header sizes mismatch
+    urhfNoAutoDetectPageSize    = 0x00000008,   // do not try to auto-detect the page size (use the size provided by the caller)
 };
 
 DEFINE_ENUM_FLAG_OPERATORS_BASIC( UtilReadHeaderFlags );
@@ -84,11 +84,15 @@ ERR ErrUtilCreatePathIfNotExist(
     _Out_opt_bytecap_(cbAbsPath)  WCHAR *const          wszAbsPath,
     _In_range_(0, cbOSFSAPI_MAX_PATHW) ULONG    cbAbsPath );
 
+//  tests if the given path exists.  the full path of the given path is
+//  returned in szAbsPath if that path exists and szAbsPath is not NULL
 
 ERR ErrUtilPathExists(  IFileSystemAPI* const   pfsapi,
                         const WCHAR* const      wszPath,
+                        // UNDONE_BANAPI:
                         __out_bcount_opt(OSFSAPI_MAX_PATH*sizeof(WCHAR)) WCHAR* const           wszAbsPath  = NULL );
 
+//  returns the logical size of the file
 
 ERR ErrUtilGetLogicalFileSize(  IFileSystemAPI* const   pfsapi,
                                 const WCHAR* const      wszPath,
@@ -97,28 +101,37 @@ ERR ErrUtilGetLogicalFileSize(  IFileSystemAPI* const   pfsapi,
 ERR ErrUtilPathComplete(
         IFileSystemAPI      * const pfsapi,
         const WCHAR         * const wszPath,
+        // UNDONE_BANAPI:
         __out_bcount(OSFSAPI_MAX_PATH*sizeof(WCHAR)) WCHAR              * const wszAbsPath,
         const BOOL          fPathMustExist );
 
+//  tests if the given path is read only
 
 ERR ErrUtilPathReadOnly(    IFileSystemAPI* const   pfsapi,
                             const WCHAR* const      wszPath,
                             BOOL* const             pfReadOnly );
 
+//  checks whether or not the specified directory exists
+//  if not, JET_errInvalidPath will be returned.
+//  if so, JET_errSuccess will be returned and szAbsPath
+//  will contain the full path to the directory.
 
 ERR ErrUtilDirectoryValidate(   IFileSystemAPI* const   pfsapi,
                                 const WCHAR* const      wszPath,
+                                // UNDONE_BANAPI:
                                 __out_bcount_opt(OSFSAPI_MAX_PATH*sizeof(WCHAR)) WCHAR* const           wszAbsPath  = NULL );
 
+//  log extend pattern buffer/size
 
 extern ULONG    cbLogExtendPattern;
 
 #ifdef ENABLE_LOG_V7_RECOVERY_COMPAT
 extern BYTE     *rgbLogExtendPattern;
-const BYTE bLOGUnusedFill = 0xDA;
+const BYTE bLOGUnusedFill = 0xDA;   // Used to fill portions of the log that should never be used as data
 #endif
 
 
+//  apply the format from ibFormat up to qwSize
 
 ERR ErrUtilFormatLogFile(
         IFileSystemAPI* const   pfsapi,
@@ -129,6 +142,7 @@ ERR ErrUtilFormatLogFile(
         const BOOL              fPermitTruncate,
         const TraceContext&     tc );
 
+// Write revert snapshot header to the given rbs file.
 
 ERR ErrUtilWriteRBSHeaders( 
         const INST* const           pinst,
@@ -137,6 +151,7 @@ ERR ErrUtilWriteRBSHeaders(
         RBSFILEHDR                  *prbsfilehdr,
         IFileAPI *const             pfapi );
 
+// Write RBS revert checkpoint header to the corresponding checkpoint file.
 ERR ErrUtilWriteRBSRevertCheckpointHeaders(
     const INST* const      pinst,
     IFileSystemAPI* const   pfsapi,
@@ -144,12 +159,14 @@ ERR ErrUtilWriteRBSRevertCheckpointHeaders(
     RBSREVERTCHECKPOINT* prbsrchkHeader,
     IFileAPI* const         pfapi );
 
+//  init file subsystem
 
 ERR ErrOSUFileInit();
 
+//  terminate file subsystem
 
 void OSUFileTerm();
 
 
-#endif
+#endif  //  _OSU_FILE_HXX_INCLUDED
 

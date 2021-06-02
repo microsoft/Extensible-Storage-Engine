@@ -5,6 +5,7 @@ using namespace std;
 
 #include "collectionunittest.hxx"
 
+// node constructor zeroes members and sets the color to red
 CUnitTest( RedBlackTreeINodeConstructor, 0, "" );
 ERR RedBlackTreeINodeConstructor::ErrTest()
 {
@@ -21,6 +22,7 @@ HandleError:
     return err;
 }
 
+// node constructor zeroes members and sets the color to red
 CUnitTest( RedBlackTreeNodeConstructor, 0, "" );
 ERR RedBlackTreeNodeConstructor::ErrTest()
 {
@@ -38,6 +40,7 @@ HandleError:
     return err;
 }
 
+// node members can be set
 CUnitTest( RedBlackTreeSetINodeMembers, 0, "" );
 ERR RedBlackTreeSetINodeMembers::ErrTest()
 {
@@ -47,18 +50,23 @@ ERR RedBlackTreeSetINodeMembers::ErrTest()
     Tree::BaseType::InvasiveContext inode1( 1 );
     Tree::BaseType::InvasiveContext inode2( 2 );
 
+    // (Preserve key ordering when setting nodes)
 
+    // SetRight()
     inode1.SetRight( &inode2 );
     TestCheck( &inode2 == inode1.PnodeRight() );
     inode1.SetRight( NULL );
 
+    // SetLeft()
     inode2.SetLeft( &inode1 );
     TestCheck( &inode1 == inode2.PnodeLeft() );
     inode2.SetLeft( NULL );
 
+    // SetKey
     inode1.SetKey( 10 );
     TestCheck( 10 == inode1.Key() );
 
+    // SetColor
     inode1.SetColor( Black );
     TestCheck( Black == inode1.Color() );
 
@@ -66,6 +74,7 @@ HandleError:
     return err;
 }
 
+// node members can be set
 CUnitTest( RedBlackTreeSetNodeMembers, 0, "" );
 ERR RedBlackTreeSetNodeMembers::ErrTest()
 {
@@ -80,6 +89,7 @@ HandleError:
     return err;
 }
 
+// Node can flip its color
 CUnitTest( RedBlackTreeFlipINodeColor, 0, "" );
 ERR RedBlackTreeFlipINodeColor::ErrTest()
 {
@@ -96,6 +106,7 @@ HandleError:
     return err;
 }
 
+// A new tree has no nodes
 CUnitTest( RedBlackTreeNewTreeIsEmpty, 0, "" );
 ERR RedBlackTreeNewTreeIsEmpty::ErrTest()
 {
@@ -108,6 +119,7 @@ HandleError:
     return err;
 }
 
+// A simple insert of two nodes
 CUnitTest( RedBlackTreeTwoNodeTree, 0, "" );
 ERR RedBlackTreeTwoNodeTree::ErrTest()
 {
@@ -139,6 +151,7 @@ HandleError:
     return err;
 }
 
+// Test the FindNearest() method
 CUnitTest( RedBlackTreeFindNearest, 0, "" );
 ERR RedBlackTreeFindNearest::ErrTest()
 {
@@ -188,6 +201,7 @@ HandleError:
     return err;
 }
 
+// Test the ErrFindGreaterThanOrEqual() method on an empty tree
 CUnitTest( FindGreaterThanOrEqualEmpty, 0, "" );
 ERR FindGreaterThanOrEqualEmpty::ErrTest()
 {
@@ -205,6 +219,7 @@ HandleError:
     return err;
 }
 
+// Test the ErrFindGreaterThanOrEqual() method when elements are inserted in ascending order
 CUnitTest( FindGreaterThanOrEqualAscending, 0, "" );
 ERR FindGreaterThanOrEqualAscending::ErrTest()
 {
@@ -251,6 +266,7 @@ HandleError:
     return err;
 }
 
+// Test the ErrFindGreaterThanOrEqual() method when elements are inserted in descending order
 CUnitTest( FindGreaterThanOrEqualDescending, 0, "" );
 ERR FindGreaterThanOrEqualDescending::ErrTest()
 {
@@ -297,6 +313,7 @@ HandleError:
     return err;
 }
 
+// Test the ErrFindGreaterThanOrEqual() method when elements are inserted in random order
 CUnitTest( FindGreaterThanOrEqualRandom, 0, "" );
 ERR FindGreaterThanOrEqualRandom::ErrTest()
 {
@@ -313,6 +330,7 @@ ERR FindGreaterThanOrEqualRandom::ErrTest()
 
         tree.MakeEmpty();
 
+        // Randomize.
         for (INT i = 0; i < cNodes; i++)
         {
             const INT k = 2 * i + 1;
@@ -326,6 +344,7 @@ ERR FindGreaterThanOrEqualRandom::ErrTest()
             rgk[iswitch] = k;
         }
 
+        // Insert.
         for (INT i = 0; i < cNodes; i++)
         {
             const INT kNew = rgk[i];
@@ -335,15 +354,18 @@ ERR FindGreaterThanOrEqualRandom::ErrTest()
 
         INT k, v;
 
+        // Find.
         for (INT i = 0; i < cNodes; i++)
         {
             const INT kExpected = 2 * i + 1;
             const INT vExpected = 10 * kExpected;
             
+            // Previous element.
             TestCheck(Tree::ERR::errSuccess == tree.ErrFindGreaterThanOrEqual(kExpected - 1, &k, &v));
             TestCheck(kExpected == k);
             TestCheck(vExpected == v);
 
+            // The element.
             TestCheck(Tree::ERR::errSuccess == tree.ErrFindGreaterThanOrEqual(kExpected, &k, &v));
             TestCheck(kExpected == k);
             TestCheck(vExpected == v);
@@ -357,6 +379,7 @@ HandleError:
     return err;
 }
 
+// Insert all the keys from the array into the tree
 ERR ErrInsertAll(CRedBlackTree<INT,INT>& tree, const INT * const rgkeys, INT ckeys)
 {
     ERR err = JET_errSuccess;
@@ -373,6 +396,7 @@ HandleError:
     return err;
 }
 
+// Retrieve all the keys in the array
 ERR ErrRetrieveAll(CRedBlackTree<INT,INT>& tree, const INT * const rgkeys, INT ckeys)
 {
     ERR err = JET_errSuccess;
@@ -389,6 +413,7 @@ HandleError:
     return err;
 }
 
+// Insert all the keys from the array into the invasive tree
 ERR ErrInsertAll( CRedBlackTree<INT, INT>::BaseType& itree, const INT * const rgkeys, INT ckeys, CRedBlackTree<INT, INT>::Node*** pprgNodes )
 {
     ERR err = JET_errSuccess;
@@ -411,6 +436,7 @@ HandleError:
     return err;
 }
 
+// Retrieve all the keys in the invasive array
 ERR ErrRetrieveAll( CRedBlackTree<INT, INT>::BaseType& itree, const INT * const rgkeys, INT ckeys )
 {
     ERR err = JET_errSuccess;
@@ -427,6 +453,7 @@ HandleError:
     return err;
 }
 
+// Delete all the keys from the array from the tree
 ERR ErrDeleteAll(CRedBlackTree<INT,INT>& tree, const INT * const rgkeys, INT ckeys)
 {
     ERR err = JET_errSuccess;
@@ -443,6 +470,7 @@ HandleError:
     return err;
 }
 
+// Insert and delete keys in ascending order
 CUnitTest( RedBlackTreeAscendingInserts, 0, "" );
 ERR RedBlackTreeAscendingInserts::ErrTest()
 {
@@ -464,6 +492,7 @@ HandleError:
     return err;
 }
 
+// Insert and delete keys in descending order
 CUnitTest( RedBlackTreeDescendingInserts, 0, "" );
 ERR RedBlackTreeDescendingInserts::ErrTest()
 {
@@ -485,6 +514,7 @@ HandleError:
     return err; 
 }
 
+// Insert keys in random order, delete in a different random order
 CUnitTest( RedBlackTreeRandomInserts, 0, "" );
 ERR RedBlackTreeRandomInserts::ErrTest()
 {
@@ -511,6 +541,7 @@ HandleError:
     return err;
 }
 
+// Empty out an invasive tree
 CUnitTest( RedBlackTreeInvasiveMakeEmpty, 0, "" );
 ERR RedBlackTreeInvasiveMakeEmpty::ErrTest()
 {
@@ -549,6 +580,7 @@ HandleError:
     return err;
 }
 
+// Empty out a tree
 CUnitTest( RedBlackTreeMakeEmpty, 0, "" );
 ERR RedBlackTreeMakeEmpty::ErrTest()
 {
@@ -573,6 +605,7 @@ HandleError:
     return err;
 }
 
+// Insert random keys, delete 1/2 of the keys and insert more keys
 CUnitTest( RedBlackTreeInsertDeleteInsert, 0, "" );
 ERR RedBlackTreeInsertDeleteInsert::ErrTest()
 {
@@ -608,6 +641,8 @@ struct TESTIFILEIBOFFSET
     DWORD                   m_iFile;
     QWORD                   m_ibOffset;
 
+    //  Set of operators required by [Invasive]RedBlackTree
+    //  
     bool operator==( const TESTIFILEIBOFFSET& rhs ) const
     {
         return ( m_iFile == rhs.m_iFile && m_ibOffset == rhs.m_ibOffset );
@@ -626,6 +661,7 @@ struct TESTIFILEIBOFFSET
                 m_ibOffset > rhs.m_ibOffset );
     }
 
+    // Perhaps we should make this DEBUG only.
     const CHAR * Sz( INT cb, CHAR * szT ) const
     {
         sprintf_s( szT, cb, "0x%04X:0x%016I64x", m_iFile, m_ibOffset );
@@ -655,6 +691,7 @@ public:
         m_icKeyCheck.m_iFile = i + 2;
         m_icKeyCheck.m_ibOffset = i * 0x4000;
         CHAR szT[50];
+        //wprintf( L"    this = %p = { %hs, %d, %d }\n", this, m_icKeyCheck.Sz( sizeof(szT), szT ), m_dwOtherStuff, m_dwStuff );
     }
 
 
@@ -662,15 +699,17 @@ public:
         m_ic()
     {
         m_dwStuff = ib;
-        m_dwOtherStuff = ( 1 + rand() ) * ib;
+        m_dwOtherStuff = ( 1 + rand() ) * ib; // in this variant ... used as the identity ... 
         COLLAssert( m_dwOtherStuff != 0 );
         m_icKeyCheck.m_iFile = iFile;
         m_icKeyCheck.m_ibOffset = ib;
+        //CHAR szT[50];
+        //wprintf( L"    this = %p = { %hs, %d, %d }\n", this, m_icKeyCheck.Sz( sizeof(szT), szT ), m_dwOtherStuff, m_dwStuff );
     }
 
     DWORD                   m_dwStuff;
 
-private:
+private: // ensuring the IC can be private, as only access should be required by the offset function / OffsetOfMyIC
     InvasiveRedBlackTree< TESTIFILEIBOFFSET, TESTIOREQ, OffsetOfMyIC >::InvasiveContext
                             m_ic;
 
@@ -686,6 +725,7 @@ public:
 #endif
 
 
+// Test the a set of keys for basic insert/delete.
 CUnitTest( RedBlackTreeMultiKeyTestBasicInsertDelete, 0, "" );
 ERR RedBlackTreeMultiKeyTestBasicInsertDelete::ErrTest()
 {
@@ -717,6 +757,7 @@ ERR RedBlackTreeMultiKeyTestBasicInsertDelete::ErrTest()
 
     TestCheck( Tree::ERR::errEntryNotFound == irbt.ErrFindNearest( iib, &iibNearest, &pioreq ) );
     TestCheck( pioreq == NULL );
+    // the value is left a whatever it was when not found...
     TestCheck( iibNearest.m_iFile == 0x42 );
     TestCheck( iibNearest.m_ibOffset == 0x424242424242 );
     
@@ -732,10 +773,11 @@ ERR RedBlackTreeMultiKeyTestBasicInsertDelete::ErrTest()
     TestCheck( Tree::ERR::errSuccess == irbt.ErrFind( keySeparate, &pioreq ) );
     TestCheck( pioreq == &ioreq3 );
 
+    // reusing keySeparate
     keySeparate.Sz( sizeof(szKeyT), szKeyT );
     TestCheck( Tree::ERR::errSuccess == irbt.ErrFindNearest( ioreq2.m_icKeyCheck, &keySeparate, &pioreq ) );
     TestCheck( keySeparate == ioreq2.m_icKeyCheck );
-    TestCheck( keySeparate.m_iFile == ioreq2.m_icKeyCheck.m_iFile );
+    TestCheck( keySeparate.m_iFile == ioreq2.m_icKeyCheck.m_iFile );    // Don't tell SOMEONE that I/SOMEONE don't trust C++ operators! ;-)  Haha, he already knows.
     TestCheck( keySeparate.m_ibOffset == ioreq2.m_icKeyCheck.m_ibOffset );
     TestCheck( &ioreq2 == pioreq );
 
@@ -759,6 +801,7 @@ HandleError:
 
 
 
+// Test the insert multi-key ... 
 CUnitTest( RedBlackTreeMultiKeyTestInsertDup, 0, "" );
 ERR RedBlackTreeMultiKeyTestInsertDup::ErrTest()
 {
@@ -786,6 +829,7 @@ ERR RedBlackTreeMultiKeyTestInsertDup::ErrTest()
 
     TestCheck( Tree::ERR::errEntryNotFound == irbt.ErrFindNearest( iib, &iibNearest, &pioreq ) );
     TestCheck( pioreq == NULL );
+    // the value is left a whatever it was when not found...
     TestCheck( iibNearest.m_iFile == 0x42 );
     TestCheck( iibNearest.m_ibOffset == 0x424242424242 );
     
@@ -805,6 +849,7 @@ HandleError:
     return err;
 }
 
+// Test the FindNearest() method for a multi-key
 CUnitTest( RedBlackTreeMultiKeyFindNearest, 0, "" );
 ERR RedBlackTreeMultiKeyFindNearest::ErrTest()
 {
@@ -833,10 +878,11 @@ ERR RedBlackTreeMultiKeyFindNearest::ErrTest()
     TESTIOREQ ioreqBeyond( 100 );
 
     TESTIFILEIBOFFSET keySeparate;
-    TESTIOREQ * rgpioreqValidList [] = { &ioreq6, &ioreq2, &ioreq1, &ioreq8, &ioreq3 };
+    TESTIOREQ * rgpioreqValidList [] = { &ioreq6, &ioreq2, &ioreq1, &ioreq8, &ioreq3 }; // in psuedo-random order
 
     TestCheck( Tree::ERR::errEntryNotFound == irbt.ErrFindNearest( iib, &iibNearest, &pioreq ) );
     TestCheck( pioreq == NULL );
+    // the value is left a whatever it was when not found...
     TestCheck( iibNearest.m_iFile == 0x42 );
     TestCheck( iibNearest.m_ibOffset == 0x424242424242 );
     
@@ -852,22 +898,24 @@ ERR RedBlackTreeMultiKeyFindNearest::ErrTest()
     TestCheck( Tree::ERR::errSuccess == irbt.ErrFind( keySeparate, &pioreq ) );
     TestCheck( pioreq == &ioreq3 );
 
+    // reusing keySeparate
     keySeparate.Sz( sizeof(szKeyT), szKeyT );
     TestCheck( Tree::ERR::errSuccess == irbt.ErrFindNearest( ioreq2.m_icKeyCheck, &keySeparate, &pioreq ) );
     TestCheck( keySeparate == ioreq2.m_icKeyCheck );
-    TestCheck( keySeparate.m_iFile == ioreq2.m_icKeyCheck.m_iFile );
+    TestCheck( keySeparate.m_iFile == ioreq2.m_icKeyCheck.m_iFile );    // Don't tell SOMEONE that I/SOMEONE don't trust C++ operators! ;-)  Haha, he already knows.
     TestCheck( keySeparate.m_ibOffset == ioreq2.m_icKeyCheck.m_ibOffset );
     TestCheck( &ioreq2 == pioreq );
 
+    //  Check that ErrFindNearest finds all entries we know we've already inserted.
     for( ULONG iioreq = 0; iioreq < _countof( rgpioreqValidList ); iioreq++ )
     {
         TESTIFILEIBOFFSET keyFound;
         keySeparate = rgpioreqValidList[iioreq]->m_icKeyCheck;
         TestCheck( Tree::ERR::errSuccess == irbt.ErrFindNearest( keySeparate, &keyFound, &pioreq ) );
-        TestCheck( keySeparate == rgpioreqValidList[iioreq]->m_icKeyCheck );
-        TestCheck( keySeparate == keyFound );
-        TestCheck( keySeparate == pioreq->m_icKeyCheck );
-        TestCheck( rgpioreqValidList[iioreq]->m_icKeyCheck == pioreq->m_icKeyCheck );
+        TestCheck( keySeparate == rgpioreqValidList[iioreq]->m_icKeyCheck ); // search key should not have been altered.
+        TestCheck( keySeparate == keyFound );  // should be exact match
+        TestCheck( keySeparate == pioreq->m_icKeyCheck );   // and target of found entry should match key
+        TestCheck( rgpioreqValidList[iioreq]->m_icKeyCheck == pioreq->m_icKeyCheck ); // not technically necessary
     }
 
     keySeparate = ioreq3.m_icKeyCheck;
@@ -935,6 +983,7 @@ HandleError:
     return err;
 }
 
+// Test the FindNearest() method for a multi-key
 CUnitTest( RedBlackTreeMultiKeyTestMoveOp, 0, "" );
 ERR RedBlackTreeMultiKeyTestMoveOp::ErrTest()
 {
@@ -967,6 +1016,7 @@ ERR RedBlackTreeMultiKeyTestMoveOp::ErrTest()
 
     TestCheck( Tree::ERR::errEntryNotFound == irbt.ErrFindNearest( iib, &iibNearest, &pioreq ) );
     TestCheck( pioreq == NULL );
+    // the value is left a whatever it was when not found...
     TestCheck( iibNearest.m_iFile == 0x42 );
     TestCheck( iibNearest.m_ibOffset == 0x424242424242 );
     
@@ -982,10 +1032,11 @@ ERR RedBlackTreeMultiKeyTestMoveOp::ErrTest()
     TestCheck( Tree::ERR::errSuccess == irbt.ErrFind( keySeparate, &pioreq ) );
     TestCheck( pioreq == &ioreq3 );
 
+    // reusing keySeparate
     keySeparate.Sz( sizeof(szKeyT), szKeyT );
     TestCheck( Tree::ERR::errSuccess == irbt.ErrFindNearest( ioreq2.m_icKeyCheck, &keySeparate, &pioreq ) );
     TestCheck( keySeparate == ioreq2.m_icKeyCheck );
-    TestCheck( keySeparate.m_iFile == ioreq2.m_icKeyCheck.m_iFile );
+    TestCheck( keySeparate.m_iFile == ioreq2.m_icKeyCheck.m_iFile );    // Don't tell SOMEONE that I/SOMEONE don't trust C++ operators! ;-)  Haha, he already knows.
     TestCheck( keySeparate.m_ibOffset == ioreq2.m_icKeyCheck.m_ibOffset );
     TestCheck( &ioreq2 == pioreq );
 
@@ -1019,6 +1070,7 @@ HandleError:
     return err;
 }
 
+//  This should really be pulled from somewhere else.
 LONG PctRand_( const LONG pctLow = 0, const LONG pctHigh = 100 );
 LONG PctRand_( const LONG pctLow, const LONG pctHigh )
 {
@@ -1027,6 +1079,7 @@ LONG PctRand_( const LONG pctLow, const LONG pctHigh )
     return pctLow + ( rand() % dpct );
 }
 
+// Test Ioreq Tree
 typedef InvasiveRedBlackTree< TESTIFILEIBOFFSET, TESTIOREQ, TESTIOREQ::OffsetOfMyIC > TITree;
 
 
@@ -1050,6 +1103,7 @@ public:
         {
             new ( &m_rgioreq[iioreq] )TESTIOREQ( 1 + rand() % 2, 1 + iioreq );
 
+            //  All this expected and depended upon in CheckCmpSetTrees
             COLLAssert( m_rgioreq[iioreq].m_icKeyCheck.m_iFile == 1 || m_rgioreq[iioreq].m_icKeyCheck.m_iFile == 2 );
             COLLAssert( m_rgioreq[iioreq].m_dwOtherStuff % m_rgioreq[iioreq].m_icKeyCheck.m_ibOffset == 0 );
             COLLAssert( m_rgioreq[iioreq].m_dwOtherStuff != 0 );
@@ -1061,6 +1115,7 @@ public:
     void DuplicateSet( CTestIoreqSet * ptisCopyTo ) const
     {
         memcpy( ptisCopyTo->m_rgioreq, m_rgioreq, sizeof( m_rgioreq ) );
+        // Note: rand() COULD select exact same slot
         ULONG iioreqSwap = rand() % _countof( m_rgioreq );
         ULONG iioreqSwapToo = rand() % _countof( m_rgioreq );
         TESTIOREQ tiSwap = ptisCopyTo->m_rgioreq[ iioreqSwap ];
@@ -1070,7 +1125,7 @@ public:
 
     void AddToTree( TITree * const ptit )
     {
-        ERR err = JET_errSuccess;
+        ERR err = JET_errSuccess; // TestCheck() sets it, but also asserts.
 
         for( ULONG iioreq = 0; iioreq < _countof( m_rgioreq ); iioreq++ )
         {
@@ -1082,9 +1137,10 @@ public:
         ;
     }
 
+    //  Note anything between 10 - 90% will guarantee at least one element in both (if there are at least 2 elements) ...
     void RandSplitToTwoTrees( TITree * const ptitHalf, TITree * const ptitOther, const LONG pctInFirstHalf = 50 )
     {
-        ERR err = JET_errSuccess;
+        ERR err = JET_errSuccess; // TestCheck() sets it, but also asserts.
 
         TITree * ptitGuaranteed = ( pctInFirstHalf >= 10 && pctInFirstHalf <= 90 ) ?
                                         ( rand() % 2 ? ptitHalf : ptitOther ) :
@@ -1125,7 +1181,7 @@ public:
 
     static void CheckCmpSetTrees( TITree * const ptitOne, TITree * const ptitTwo )
     {
-        ERR err = JET_errSuccess;
+        ERR err = JET_errSuccess; // TestCheck() sets it, but also asserts.
 
         for ( ULONG ib = 0; ib <= Cioreq; ib++ )
         {
@@ -1140,10 +1196,12 @@ public:
                 TITree::ERR errFindOne = ptitOne->ErrFind( iibNextCheck, &pioreqOne );
                 TITree::ERR errFindTwo = ptitTwo->ErrFind( iibNextCheck, &pioreqTwo );
 
+                //  Agree that they found it or not.
                 TestCheck( errFindOne == errFindTwo );
 
                 if ( errFindOne == TITree::ERR::errSuccess && errFindTwo == TITree::ERR::errSuccess )
                 {
+                    // ... and both found the same if succeeded.
                     TestCheck( !!pioreqOne == !!pioreqTwo );
                 }
 
@@ -1152,23 +1210,28 @@ public:
                     fFound = ( errFindOne == TITree::ERR::errSuccess );
                 }
 
+                //  and if we did find, check same same.
                 if ( pioreqOne )
                 {
+                    //  Almost assuredly will not go off, or ErrFind() is not working.
                     TestCheck( pioreqOne->m_dwStuff == pioreqTwo->m_dwStuff );
                     TestCheck( pioreqOne->m_icKeyCheck.m_iFile == pioreqTwo->m_icKeyCheck.m_iFile );
                     TestCheck( pioreqOne->m_icKeyCheck.m_ibOffset == pioreqTwo->m_icKeyCheck.m_ibOffset );
 
+                    //  Check it is our kind of TESTIOREQ from the 2nd .ctor with two args (see TESTIOREQ class).
                     TestCheck( pioreqOne->m_dwOtherStuff % pioreqOne->m_icKeyCheck.m_ibOffset == 0 );
                     TestCheck( pioreqTwo->m_dwOtherStuff % pioreqOne->m_icKeyCheck.m_ibOffset == 0 );
 
+                    // Full identity check ... pulled identities should be same.
                     TestCheck( pioreqOne->m_dwOtherStuff == pioreqTwo->m_dwOtherStuff );
 
                     TestCheck( pioreqOne != pioreqTwo );
                 }
             }
 
+            //  Every ib above zero is in iFile = 1 or iFile = 2.
             TestCheck( fFound || ib == 0 );
-            TestCheck( ib != 0 || !fFound );
+            TestCheck( ib != 0 || !fFound ); // this entry is always missing, as we start at ib = 1
         }
 
     HandleError:
@@ -1181,6 +1244,7 @@ public:
         TITree::ERR err;
         TESTIFILEIBOFFSET iibSearching;
 
+        //  Start full random ...
         iibSearching.m_iFile = 1 + rand() % 2;
         iibSearching.m_ibOffset = 0 + rand() % 101;
 
@@ -1190,6 +1254,7 @@ public:
             return pioreqRet;
         }
 
+        //  Try ensuring we searching in iFile = 1 (lower file num)
         iibSearching.m_iFile = 1;
         err = ptit->ErrFind( iibSearching, &pioreqRet );
         if ( TITree::ERR::errSuccess == err )
@@ -1197,6 +1262,7 @@ public:
             return pioreqRet;
         }
 
+        //  Do below what we didn't fine
         iibSearching.m_iFile = 1 + rand() % 2;
         iibSearching.m_ibOffset = 0 + rand() % max( iibSearching.m_ibOffset, 1 );
         err = ptit->ErrFind( iibSearching, &pioreqRet );
@@ -1221,7 +1287,7 @@ public:
 
     static INT CmpSetTrees( TITree * const ptitOne, TITree * const ptitTwo )
     {
-        ERR err = JET_errSuccess;
+        ERR err = JET_errSuccess; // TestCheck() sets it, but also asserts.
 
         for ( ULONG ib = 0; ib <= Cioreq; ib++ )
         {
@@ -1236,36 +1302,44 @@ public:
                 TITree::ERR errFindOne = ptitOne->ErrFind( iibNextCheck, &pioreqOne );
                 TITree::ERR errFindTwo = ptitTwo->ErrFind( iibNextCheck, &pioreqTwo );
 
+                //  Agree that they found it or not.
                 if ( errFindOne != errFindTwo )
                 {
                     return -1;
                 }
+                //      and both found, or neither returned item
                 TestCheck( !!pioreqOne == !!pioreqTwo );
                 if ( !fFound )
                 {
                     fFound = ( errFindOne == TITree::ERR::errSuccess );
                 }
 
+                //  and if we did find, check same same.
                 if ( pioreqOne )
                 {
+                    //  Almost assuredly will not go off, or ErrFind() is not working.
                     TestCheck( pioreqOne->m_dwStuff == pioreqTwo->m_dwStuff );
                     TestCheck( pioreqOne->m_icKeyCheck.m_iFile == pioreqTwo->m_icKeyCheck.m_iFile );
                     TestCheck( pioreqOne->m_icKeyCheck.m_ibOffset == pioreqTwo->m_icKeyCheck.m_ibOffset );
 
+                    //  Check it is our kind of TESTIOREQ from the 2nd .ctor with two args (see TESTIOREQ class).
                     TestCheck( pioreqOne->m_dwOtherStuff % pioreqOne->m_icKeyCheck.m_ibOffset == 0 );
                     TestCheck( pioreqTwo->m_dwOtherStuff % pioreqOne->m_icKeyCheck.m_ibOffset == 0 );
 
+                    // Full identity check ... pulled identities should be same.
                     TestCheck( pioreqOne->m_dwOtherStuff == pioreqTwo->m_dwOtherStuff );
 
                     TestCheck( pioreqOne != pioreqTwo );
                 }
             }
 
-            TestCheck( ib != 0 || !fFound );
+            //  Every ib above zero is in iFile = 1 or iFile = 2.
+            TestCheck( ib != 0 || !fFound ); // this entry is always missing, as we start at ib = 1
         }
 
     HandleError:
 
+        //  yay, same!
         return 0;
     }
 
@@ -1326,6 +1400,7 @@ ERR RedBlackTreeMultiKeyTestErrMergeAll::ErrTest()
 
     tisControl.AddToTree( &titControl );
 
+    //const LONG pctInHalf = 3;
     const LONG pctInHalf = PctRand_();
     tisTest.RandSplitToTwoTrees( &titTestHalf, &titOtherHalf, pctInHalf  );
 
@@ -1339,8 +1414,10 @@ ERR RedBlackTreeMultiKeyTestErrMergeAll::ErrTest()
         TestCheck( 0 != CTestIoreqSet::CmpSetTrees( &titControl, &titOtherHalf ) );
     }
 
+    //  The actual ErrMerge
     TestCheck( TITree::ERR::errSuccess == titTestHalf.ErrMerge( &titOtherHalf ) );
 
+    //  Results checks
     TestCheck( titOtherHalf.FEmpty() );
     TestCheck( 0 == CTestIoreqSet::CmpSetTrees( &titControl, &titTestHalf ) );
     CTestIoreqSet::CheckCmpSetTrees( &titControl, &titTestHalf );
@@ -1404,21 +1481,26 @@ ERR RedBlackTreeMultiKeyTestErrMergeMost::ErrTest()
     TestCheck( errI1 == TITree::ERR::errSuccess );
     TestCheck( errI2 == TITree::ERR::errSuccess );
 
+    //  The actual ErrMerge
     TITree::ERR errM = titTestHalf.ErrMerge( &titOtherHalf );
 
+    //  Check the merged tree
     TestCheck( errM == TITree::ERR::errDuplicateEntry );
     TestCheck( !titOtherHalf.FEmpty() );
 
     TestCheck( 0 == CTestIoreqSet::CmpSetTrees( &titControl, &titTestHalf ) );
     CTestIoreqSet::CheckCmpSetTrees( &titControl, &titTestHalf );
 
+    //  Check the left overs.
     TESTIOREQ * pioreqChineseLeftOvers;
     errI1 = titOtherHalf.ErrFind( tiToDupFromHalf.m_icKeyCheck, &pioreqChineseLeftOvers );
     TestCheck( errI1 == TITree::ERR::errSuccess );
+    //      check identity ...
     TestCheck( pioreqChineseLeftOvers->m_dwOtherStuff == tiToDupFromHalf.m_dwOtherStuff || pioreqChineseLeftOvers->m_dwOtherStuff == tiToDupFromOther.m_dwOtherStuff );
     TESTIOREQ * pioreqMexicanLeftOvers;
     errI1 = titOtherHalf.ErrFind( tiToDupFromOther.m_icKeyCheck, &pioreqMexicanLeftOvers );
     TestCheck( errI1 == TITree::ERR::errSuccess );
+    //      check identity ...
     TestCheck( pioreqChineseLeftOvers->m_dwOtherStuff == tiToDupFromHalf.m_dwOtherStuff || pioreqChineseLeftOvers->m_dwOtherStuff == tiToDupFromOther.m_dwOtherStuff );
 
     OnDebug( titTestHalf.Print() );

@@ -1,6 +1,7 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
+// needed for JET errors
 #if defined( BUILD_ENV_IS_NT ) || defined( BUILD_ENV_IS_WPHONE )
 #include <esent_x.h>
 #endif
@@ -18,10 +19,10 @@
 #include "testerr.h"
 #include "bstf.hxx"
 
-#pragma warning ( disable : 4100 )
-#pragma warning ( disable : 4127 )
-#pragma warning ( disable : 4512 )
-#pragma warning ( disable : 4706 )
+#pragma warning ( disable : 4100 )  // unreferenced formal parameter
+#pragma warning ( disable : 4127 )  // conditional expression is constant
+#pragma warning ( disable : 4512 )  // assignment operator could not be generated
+#pragma warning ( disable : 4706 )  // assignment within conditional expression
 
 DWORD DWGetTickCount();
 
@@ -29,6 +30,8 @@ void SetExpectedAsserts( ULONG cExpectedAsserts );
 void ResetExpectedAsserts();
 void AssertExpectedAsserts();
 
+//  ================================================================
+//  sync.hxx required support
 
 #ifdef DEBUG
 #define OSSYNCAssert    CapturableTestAssert

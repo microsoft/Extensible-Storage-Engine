@@ -6,9 +6,19 @@
 
 #include "PageSizeClean.hxx"
 
+// Defining this helps to test the different recovery paths for page move.
+// This is done by flagging some pages as filty so they are flushed agressively.
+// A crash can then test all the different possibilities of flushed/unflushed pages.
 
+///#define TEST_PAGEMOVE_RECOVERY
 
+//  general directives
+//  always correct bmCurr and csr.DBTime on loss of physical currency
+//  unless not needed because of loc in which case, reset bmCurr
 
+//  *****************************************************
+//  internal function prototypes
+//
 ERR ErrBTIIRefresh( FUCB *pfucb, LATCH latch );
 ERR ErrBTDelete( FUCB *pfucb, const BOOKMARK& bm );
 INT CbBTIFreeDensity( const FUCB *pfucb );
@@ -159,6 +169,8 @@ VOID BTICheckMergeInternal( FUCB        *pfucb,
                             MERGEPATH   *pmergePath,
                             MERGE       *pmergeLeaf );
 
+//  single page cleanup routines
+//
 LOCAL ERR ErrBTISinglePageCleanup( FUCB *pfucb, const BOOKMARK& bm );
 LOCAL ERR ErrBTISPCCollectLeafPageInfo(
     FUCB        *pfucb,
@@ -172,6 +184,7 @@ LOCAL ERR ErrBTISPCDeleteNodes( FUCB *pfucb, CSR *pcsr );
 ERR ErrBTISPCSeek( FUCB *pfucb, const BOOKMARK& bm );
 BOOL FBTISPCCheckMergeable( FUCB *pfucb, CSR *pcsrDest, LINEINFO *rglineinfo );
 
+//  OLD2 routines
 bool FBTICpgFragmentedRange(
     __in_ecount(cpg) const PGNO * const rgpgno,
     const CPG cpg,
@@ -186,27 +199,60 @@ bool FBTICpgFragmentedRangeTrigger(
 LOCAL BOOL FBTIEligibleForOLD2( FUCB * const pfucb );
 LOCAL ERR ErrBTIRegisterForOLD2( FUCB * const pfucb );
 
+//  debug routines
+//
 VOID AssertBTIVerifyPgnoSplit( FUCB *pfucb, SPLITPATH *psplitPath );
 VOID AssertBTIBookmarkSaved( const FUCB *pfucb );
 
+//  move to node
+//
 INT CbNDCommonPrefix( FUCB *pfucb, CSR *pcsr, const KEY& key );
 
 
+//  number of non-visible nodes that are skipped or pages
+//  containing such nodes that are visited during lateral node
+//  navigation before we report a warning, and the frequency
+//  (in hours) with which to report the warning
+//
 const ULONG g_cBTINonVisibleNodesSkippedWarningThreshold            = 10000;
 const ULONG g_cBTIPagesVisitedWithNonVisibleNodesWarningThreshold   = 100;
-const __int64 g_cBTIPagesCacheMissedForNonVisibleNodes              = 64;
-const ULONG g_ulBTINonVisibleNodesSkippedWarningFrequency           = 1;
-const double g_pctBTICacheMissLatencyToQualifyForIoLoad             = 0.80;
+const __int64 g_cBTIPagesCacheMissedForNonVisibleNodes              = 64;   //  this would be _at least_ 8 IOs (at current 256 KB max read, but likely much more) of useless work
+const ULONG g_ulBTINonVisibleNodesSkippedWarningFrequency           = 1;    //  unit is in hours (so the event will be reported no more than once per hour per btree)
+const double g_pctBTICacheMissLatencyToQualifyForIoLoad             = 0.80; //  this is 80%
 
-const double g_cmsecBTINavigateProcessingLatencyThreshold           = 100.0;
-const __int64 g_cmsecBTINavigateCacheMissLatencyThreshold           = 10000;
+//  latency limits for CPU load and IO load based event thresholds
+//  respectively
+//
+const double g_cmsecBTINavigateProcessingLatencyThreshold           = 100.0;    //  at only 100 ms, we trim > 99% of pure CPU-based skipped nodes events.
+//  Now 10 seconds may seem like an exceedingly long hang or 
+//  IO time to insist before we log an event ... and it +is+, 
+//  however from datacenter analysis of last 1000 BT skipped
+//  nodes event ... at least at the moment, ~12.3% are > 2 secs,
+//  and 16.7% > 1 second.  Even at 10 seconds, 3.9% of incidents
+//  qualify for eventing about.
+const __int64 g_cmsecBTINavigateCacheMissLatencyThreshold           = 10000; // 10 seconds - length of time cache misses must cumulative exceed to get an event.
 
 
+//  Constants that control defragmentation behaviour
 
+//  This constant controls ranges that will be defragmented when OLD2 runs
+//  any sequence of non-contiguous pages this long will be defragmented
 const CPG cpgFragmentedRangeDefrag = 16;
 
+//  This constant controls when OLD2 will be started. There must be a range
+//  of at least this many non-contiguous pages before OLD2 starts. We want the
+//  trigger to be less sensitive than the cleanup so we make the fragmented
+//  range shorter. That way this sequence:
+//
+//  101 | 102 | 103 | 104 | 106 | 107 | 108 | 109 
+//
+//  will be defragged by OLD2, but will not trigger OLD2
+// 
+//  (at the extreme, a range of 1 will consider all data contiguous)
+//
 const CPG cpgFragmentedRangeDefragTrigger = cpgFragmentedRangeDefrag / 2;
 
+//  HACK:  reference to BF internal
 
 extern TABLECLASS tableclassNameSetMax;
 
@@ -418,8 +464,10 @@ LONG LBTOpportuneReadsCEFLPv( LONG iInstance, VOID *pvBuf )
     return 0;
 }
 
-#endif
+#endif // PERFMON_SUPPORT
 
+//  Creates a standard TC scope for BT functions to use. Sets iors and TCE in the scope
+//  This function relies on being inlined and NRVO to avoid creating unwanted TraceContextScope copies
 INLINE PIBTraceContextScope TcBTICreateCtxScope( FUCB* pfucb, IOREASONSECONDARY iors )
 {
     PIBTraceContextScope tcScope = pfucb->ppib->InitTraceContextScope();
@@ -431,9 +479,20 @@ INLINE PIBTraceContextScope TcBTICreateCtxScope( FUCB* pfucb, IOREASONSECONDARY 
 }
 
 
+//  ******************************************************
+//  BTREE API ROUTINES
+//
 
 
+//  ******************************************************
+//  Open/Close operations
+//
 
+//  opens a cursor on given fcb [BTree]
+//  uses defer-closed cursor, if possible
+//  given FCB must already have conditions that will not allow it
+//    to be closed while this operation is in progress.
+//    lower levels of the stack Assert on this.
 ERR ErrBTOpen( PIB *ppib, FCB *pfcb, FUCB **ppfucb, BOOL fAllowReuse )
 {
     ERR     err;
@@ -442,18 +501,23 @@ ERR ErrBTOpen( PIB *ppib, FCB *pfcb, FUCB **ppfucb, BOOL fAllowReuse )
     Assert( pfcb != pfcbNil );
     Assert( pfcb->FInitialized() );
 
+    // In most cases, we should reuse a deferred-closed FUCB.  The one
+    // time we don't want to is if we're opening a space cursor.
     if ( fAllowReuse )
     {
         ENTERCRITICALSECTION critCursors( &ppib->critCursors, ppib->FBatchIndexCreation() );
 
+        // cannabalize deferred closed cursor
         for ( pfucb = ppib->pfucbOfSession;
             pfucb != pfucbNil;
             pfucb = pfucb->pfucbNextOfSession )
         {
             if ( FFUCBDeferClosed( pfucb ) && !FFUCBNotReuse( pfucb ) )
             {
-                Assert( !FFUCBSpace( pfucb ) );
+                Assert( !FFUCBSpace( pfucb ) );     // Space cursors are never defer-closed.
 
+                // Secondary index FCB may have been deallocated by
+                // rollback of CreateIndex or cleanup of DeleteIndex
                 Assert( pfucb->u.pfcb != pfcbNil || FFUCBSecondary( pfucb ) );
                 if ( pfucb->u.pfcb == pfcb )
                 {
@@ -463,9 +527,14 @@ ERR ErrBTOpen( PIB *ppib, FCB *pfcb, FUCB **ppfucb, BOOL fAllowReuse )
                     Assert( ppib->Level() > 0 );
                     Assert( pfucb->levelOpen <= ppib->Level() );
 
+                    // We are reusing the cursor at this level. This means that
+                    // if we rollback we must then close it if the rollback happens
+                    // at this level or lower. 
                     Assert( 0 == pfucb->levelReuse );
                     pfucb->levelReuse = ppib->Level();
 
+                    //  Reset all used flags. Keep Updatable (fWrite) flag
+                    //
                     FUCBResetFlags( pfucb );
                     Assert( !FFUCBDeferClosed( pfucb ) );
 
@@ -474,7 +543,8 @@ ERR ErrBTOpen( PIB *ppib, FCB *pfcb, FUCB **ppfucb, BOOL fAllowReuse )
                     FUCBResetPreread( pfucb );
                     FUCBResetOpportuneRead( pfucb );
                     
-                    Assert( !FFUCBVersioned( pfucb ) );
+                    //  must persist Versioned flag
+                    Assert( !FFUCBVersioned( pfucb ) );     //  got reset by FUCBResetFlags()
                     if ( fVersioned )
                         FUCBSetVersioned( pfucb );
 
@@ -493,7 +563,7 @@ ERR ErrBTOpen( PIB *ppib, FCB *pfcb, FUCB **ppfucb, BOOL fAllowReuse )
     }
     else
     {
-        pfucb = pfucbNil;
+        pfucb = pfucbNil;       // Initialise for FUCBOpen() below.
     }
 
     Assert( pfucbNil == pfucb );
@@ -514,13 +584,17 @@ HandleError:
         if ( pfcbNil != pfucb->u.pfcb )
         {
             Assert( pfcb == pfucb->u.pfcb );
+            // We managed to link the FUCB to the FCB before we errored.
             pfucb->u.pfcb->Unlink( pfucb );
         }
+        //  close the FUCB
         FUCBClose( pfucb );
     }
     return err;
 }
 
+//  opens a cursor on given FCB on behalf of another thread.
+//  uses defer-closed cursor, if possible
 ERR ErrBTOpenByProxy( PIB *ppib, FCB *pfcb, FUCB **ppfucb, const LEVEL level )
 {
     ERR     err;
@@ -532,12 +606,16 @@ ERR ErrBTOpenByProxy( PIB *ppib, FCB *pfcb, FUCB **ppfucb, const LEVEL level )
     Assert( pfcb != pfcbNil );
     Assert( pfcb->FInitialized() );
 
+    // This routine only called by concurrent create index to obtain a cursor
+    // on a secondary index tree.
     Assert( pfcb->FTypeSecondaryIndex() );
-    Assert( pfcbNil == pfcb->PfcbTable() );
+    Assert( pfcbNil == pfcb->PfcbTable() ); // FCB not yet linked into table's index list
     Assert( !pfcb->FInitialIndex() );
 
+    // We want to make sure the FUCB doesn't disappear out from under us.
     pfcb->Lock();
 
+    // We want to make sure no one modifies the list of FUCBs linked to this FCB while we're doing this.
     pfcb->FucbList().LockForEnumeration();
 
     for ( INT ifucbIndex = 0; ifucbIndex < pfcb->FucbList().Count(); ifucbIndex++ )
@@ -548,6 +626,9 @@ ERR ErrBTOpenByProxy( PIB *ppib, FCB *pfcb, FUCB **ppfucb, const LEVEL level )
         {
             const BOOL  fVersioned  = FFUCBVersioned( pfucb );
 
+            // If there are any cursors on this tree at all for this user, then
+            // it must be deferred closed, because we only use the cursor to
+            // insert into the version store, then close it.
             Assert( FFUCBDeferClosed( pfucb ) );
 
             Assert( !FFUCBNotReuse( pfucb ) );
@@ -558,10 +639,18 @@ ERR ErrBTOpenByProxy( PIB *ppib, FCB *pfcb, FUCB **ppfucb, const LEVEL level )
             Assert( ppib->Level() > 0 );
             Assert( pfucb->levelOpen > 0 );
 
+            // We expect the reuse level to be zero given that the secondary index is still 
+            // being populated and no one other than the populating thread should have 
+            // visibility on it (and thus can't open a cursor on it).
             Assert( 0 == pfucb->levelReuse );
 
+            // Temporarily set levelOpen to 0 to ensure
+            // that ErrIsamRollback() doesn't close the
+            // FUCB on us.
             pfucb->levelOpen = 0;
 
+            // Reset all used flags. Keep Updatable (fWrite) flag
+            //
             FUCBResetFlags( pfucb );
             Assert( !FFUCBDeferClosed( pfucb ) );
 
@@ -570,10 +659,14 @@ ERR ErrBTOpenByProxy( PIB *ppib, FCB *pfcb, FUCB **ppfucb, const LEVEL level )
             FUCBResetPreread( pfucb );
             FUCBResetOpportuneRead( pfucb );
 
-            Assert( !FFUCBVersioned( pfucb ) );
+            //  must persist Versioned flag
+            Assert( !FFUCBVersioned( pfucb ) );     //  got reset by FUCBResetFlags()
             if ( fVersioned )
                 FUCBSetVersioned( pfucb );
 
+            // Set fIndex/fSecondary flags to ensure FUCB
+            // doesn't get closed by ErrIsamRollback(), then
+            // set proper levelOpen.
             FUCBSetIndex( pfucb );
             FUCBSetSecondary( pfucb );
             pfucb->levelOpen = level;
@@ -602,9 +695,13 @@ ERR ErrBTOpenByProxy( PIB *ppib, FCB *pfcb, FUCB **ppfucb, const LEVEL level )
               &pfucb,
               level ) );
 
+    // Must have these flags set BEFORE linking into session list to
+    // ensure ErrIsamRollback() doesn't close the FUCB prematurely.
     Assert( FFUCBIndex( pfucb ) );
     Assert( FFUCBSecondary( pfucb ) );
 
+    //  link FCB
+    //
     Call( pfcb->ErrLink( pfucb ) );
 
     *ppfucb = pfucb;
@@ -618,14 +715,19 @@ HandleError:
         if ( pfcbNil != pfucb->u.pfcb )
         {
             Assert( pfcb == pfucb->u.pfcb );
+            // We managed to link the FUCB to the FCB before we errored.
             pfucb->u.pfcb->Unlink( pfucb );
         }
+        //  close the FUCB
         FUCBClose( pfucb );
     }
     return err;
 }
 
 
+//  closes cursor at BT level
+//  releases BT level resources
+//
 VOID BTClose( FUCB *pfucb )
 {
     INST * const    pinst   = PinstFromPfucb( pfucb );
@@ -633,9 +735,13 @@ VOID BTClose( FUCB *pfucb )
 
     FUCBAssertNoSearchKey( pfucb );
 
+    // Current secondary index should already have been closed.
     Assert( !FFUCBCurrentSecondary( pfucb ) );
+    // Should have been used and/or reset prior to close.
     Assert( pfucb->cpgSpaceRequestReserve == 0 );
 
+    //  release memory used by bookmark buffer
+    //
     BTReleaseBM( pfucb );
 
     if ( Pcsr( pfucb )->FLatched() )
@@ -652,12 +758,18 @@ VOID BTClose( FUCB *pfucb )
     if ( pfucb->fInRecoveryTableHash )
     {
         Assert( plog->FRecovering() );
+        //  delete reference to FUCB from hash table
+        //
         plog->LGRRemoveFucb( pfucb );
     }
 
+    //  if cursor created version,
+    //      defer close until commit to transaction level 0
+    //      since rollback needs cursor
+    //
     if ( pfucb->ppib->Level() > 0 && FFUCBVersioned( pfucb ) )
     {
-        Assert( !FFUCBSpace( pfucb ) );
+        Assert( !FFUCBSpace( pfucb ) );     // Space operations not versioned.
         RECRemoveCursorFilter( pfucb );
         FUCBRemoveEncryptionKey( pfucb );
         FUCBSetDeferClose( pfucb );
@@ -666,6 +778,8 @@ VOID BTClose( FUCB *pfucb )
     {
         FCB *pfcb = pfucb->u.pfcb;
 
+        //  reset FCB flags associated with this cursor
+        //
         if ( FFUCBDenyRead( pfucb ) )
         {
             pfcb->ResetDomainDenyRead();
@@ -678,10 +792,16 @@ VOID BTClose( FUCB *pfucb )
         if ( !pfcb->FInitialized() )
         {
 
+            //  we own the FCB (we're closing because the FCB was created during
+            //      a DIROpen() of a DIRCreateDirectory() or because an error
+            //      occurred during FILEOpenTable())
 
+            //  unlink the FUCB from the FCB without moving the FCB to the
+            //      avail LRU list (this prevents the FCB from being purged)
 
             pfucb->u.pfcb->Unlink( pfucb, fTrue );
 
+            //  synchronously purge the FCB
 
             pfcb->PrepareForPurge();
             pfcb->Purge();
@@ -689,26 +809,54 @@ VOID BTClose( FUCB *pfucb )
         else if ( pfcb->FTypeTable() )
         {
 
+            //  only table FCBs can be moved to the avail-LRU list
 
+            //  unlink the FUCB from the FCB and place the FCB in the avail-LRU
+            //      list so it can be used or purged later
 
             pfucb->u.pfcb->Unlink( pfucb );
         }
         else
         {
 
+            //  all other types of FCBs will not be allowed in the avail-LRU list
+            //
+            //  NOTE: these FCBs must be purged manually!
 
+            //  possible reasons why we are here:
+            //      - we were called from ErrFILECloseTable() and have taken the
+            //          special temp-table path
+            //      - we are closing a sort FCB
+            //      - ???
+            //
+            //  NOTE: database FCBs will never be purged because they are never
+            //          available (PgnoFDP() == pgnoSystemRoot); these FCBs will
+            //          be cleaned up when the database is detached or the instance
+            //          is closed
+            //  NOTE: sentinel FCBs will never be purged because they are never
+            //          available either (FTypeSentinel()); these FCBs will be
+            //          purged by version cleanup
 
             pfucb->u.pfcb->Unlink( pfucb, fTrue );
         }
 
+        //  close the FUCB
 
         FUCBClose( pfucb );
     }
 }
 
 
+//  ******************************************************
+//  retrieve/release operations
+//
 
+//  UNDONE: INLINE the following functions
 
+//  gets node in pfucb->kdfCurr
+//  refreshes currency to point to node
+//  if node is versioned get correct version from the version store
+//
 ERR ErrBTGet( FUCB *pfucb )
 {
     ERR         err;
@@ -732,6 +880,17 @@ ERR ErrBTGet( FUCB *pfucb )
     }
     else
     {
+        //  if this flag was FALSE when we first came into
+        //  this function, it means the bookmark has yet
+        //  to be saved (so leave it to FALSE so that
+        //  BTRelease() will know to save it)
+        //  if this flag was TRUE when we first came into
+        //  this function, it means that we previously
+        //  saved the bookmark already, so no need to
+        //  re-save it (if NDGet() was called in the call
+        //  to ErrBTIRefresh() above, it would have set
+        //  the flag to FALSE, which is why we need to
+        //  set it back to TRUE here)
         pfucb->fBookmarkPreviouslySaved = fBookmarkPreviouslySaved;
     }
 
@@ -741,6 +900,10 @@ HandleError:
 }
 
 
+//  releases physical currency,
+//  save logical currency
+//  then, unlatch page
+//
 ERR ErrBTRelease( FUCB  *pfucb )
 {
     ERR err = JET_errSuccess;
@@ -758,6 +921,7 @@ ERR ErrBTRelease( FUCB  *pfucb )
         pfucb->ulLTCurr = pfucb->ulLTLast;
         pfucb->ulTotalCurr = pfucb->ulTotalLast;
 
+        // release page anyway, return previous error
         Pcsr( pfucb )->ReleasePage( pfucb->u.pfcb->FNoCache() );
         if( NULL != pfucb->pvRCEBuffer )
         {
@@ -766,15 +930,20 @@ ERR ErrBTRelease( FUCB  *pfucb )
         }
     }
 
+    //  We have touched, no longer need to touch again.
+    //
     pfucb->fTouch = fFalse;
 
 #ifdef DEBUG
     pfucb->kdfCurr.Invalidate();
-#endif
+#endif  //  DEBUG
 
     return err;
 }
 
+//  saves given bookmark in cursor
+//  and resets physical currency
+//
 ERR ErrBTDeferGotoBookmark( FUCB *pfucb, const BOOKMARK& bm, BOOL fTouch )
 {
     ERR     err;
@@ -782,6 +951,7 @@ ERR ErrBTDeferGotoBookmark( FUCB *pfucb, const BOOKMARK& bm, BOOL fTouch )
     CallR( ErrBTISaveBookmark( pfucb, bm, fTouch ) );
     BTUp( pfucb );
 
+    //  purge our cached key position
 
     pfucb->ulLTCurr = 0;
     pfucb->ulTotalCurr = 0;
@@ -790,6 +960,17 @@ ERR ErrBTDeferGotoBookmark( FUCB *pfucb, const BOOKMARK& bm, BOOL fTouch )
 }
 
 
+//  saves logical currency -- bookmark only
+//  must be called before releasing physical currency
+//  CONSIDER: change callers to not ask for bookmarks if not needed
+//  CONSIDER: simplify by invalidating currency on resource allocation failure
+//
+//  tries to save primary key [or data] in local cache first
+//  since it has higher chance of fitting
+//  and in many cases we can refresh currency using just the primary key
+//  bookmark save operation should be after all resources are allocated,
+//  so resource failure would still leave previous bm valid
+//
 ERR ErrBTISaveBookmark( FUCB *pfucb, const BOOKMARK& bm, BOOL fTouch )
 {
     ERR         err     = JET_errSuccess;
@@ -802,14 +983,20 @@ ERR ErrBTISaveBookmark( FUCB *pfucb, const BOOKMARK& bm, BOOL fTouch )
     Assert( NULL == bm.key.prefix.Pv() || bm.key.prefix.Pv() != pfucb->bmCurr.key.prefix.Pv() );
     Assert( NULL == bm.data.Pv() || bm.data.Pv() != pfucb->bmCurr.data.Pv() );
 
+    //  if we need more storage then is provided in our local buffer then we
+    //  will use an external buffer
+    //
     if ( !pfucb->pvBMBuffer && ( fUnique ? cbKey : cbKey + cbData ) > cbBMCache )
     {
         Alloc( pfucb->pvBMBuffer = RESBOOKMARK.PvRESAlloc() );
     }
 
+    //  Record if we are going to touch the data page of this bookmark
 
     pfucb->fTouch = fTouch;
 
+    //  copy key
+    //
     pfucb->bmCurr.key.Nullify();
     if ( !pfucb->pvBMBuffer )
     {
@@ -824,8 +1011,12 @@ ERR ErrBTISaveBookmark( FUCB *pfucb, const BOOKMARK& bm, BOOL fTouch )
     pfucb->bmCurr.key.suffix.SetCb( cbKey );
     bm.key.CopyIntoBuffer( pfucb->bmCurr.key.suffix.Pv() );
 
+    //  copy data
+    //
     if ( fUnique )
     {
+        //  bookmark does not need data
+        //
         pfucb->bmCurr.data.Nullify();
     }
     else
@@ -844,6 +1035,7 @@ ERR ErrBTISaveBookmark( FUCB *pfucb, const BOOKMARK& bm, BOOL fTouch )
         bm.data.CopyInto( pfucb->bmCurr.data );
     }
 
+    //  Record that we now have the bookmark saved
 
     pfucb->fBookmarkPreviouslySaved = fTrue;
 
@@ -853,7 +1045,13 @@ HandleError:
 
 
 
+//  ================================================================
 LOCAL BOOL FKeysEqual( const KEY& key1, const BYTE* const pbKey2, const ULONG cbKey )
+//  ================================================================
+//
+//  Compares two keys, using length as a tie-breaker
+//
+//-
 {
     if( (ULONG)key1.Cb() == cbKey )
     {
@@ -872,10 +1070,11 @@ LOCAL ERR ErrBTIReportBadPageLink(
     const ERR   err,
     const PGNO  pgnoComingFrom,
     const PGNO  pgnoGoingTo,
-    const PGNO  pgnoBadLink,
+    const PGNO  pgnoBadLink,    //  may actually be an OBJID if the bad link is due to mismatched objids
     const BOOL  fFatal,
     const CHAR * const szTag )
 {
+    //  only report the error if not repairing
     if ( !g_fRepair )
     {
         OSTraceSuspendGC();
@@ -927,39 +1126,51 @@ __int64 memcnt( const BYTE * const pb, const BYTE bTarget, const size_t cb )
     }
     return cnt;
 }
-#endif
+#endif // DEBUG
 
 struct BTISKIPSTATS
 {
 private:
+    //  Base State (used for defer init)
     ULONG       cNodesSkipped;
 
+    //  Per Node Tracking
+    //
     ULONG       cUnversionedDeletes;
     ULONG       cUncommittedDeletes;
     ULONG       cCommittedDeletes;
     ULONG       cNonVisibleInserts;
     ULONG       cFiltered;
 
+    //  Per Page Tracking
+    //
     ULONG       cPagesVisitedWithSkippedNodes;
     ULONG       cPagesCacheMissBaseline;
     __int64     cusecCacheMissBaseline;
     DBTIME      dbtimeSkippedPagesHigh;
-    DBTIME      dbtimeSkippedPagesAve;
+    DBTIME      dbtimeSkippedPagesAve;  // initially a total, then divided by cPagesVisitedWithSkippedNodes at beginning of BTIReportManyNonVisibleNodesSkipped()
     DBTIME      dbtimeSkippedPagesLow;
 
-    HRT     hrtStart;
+    //  Total Time
+    //
+    HRT     hrtStart;   //  actually of deferred init - close enough
 
+    //  Deferred init
+    //
     OnDebug( BYTE   bFill );
 
 public:
     void BTISkipStatsIDeferredInit()
     {
+        //  <= b/c if bFill == 0, then cNodesSkipped matches the pattern fill too
         Assert( ( sizeof(*this) - sizeof(cNodesSkipped) ) <= memcnt( (BYTE*)this, bFill, sizeof(*this) ) );
         memset( this, 0, sizeof(*this) );
         hrtStart = HrtHRTCount();
     }
 
 public:
+    //  Init
+    //
 
     BTISKIPSTATS()
     {
@@ -967,9 +1178,12 @@ public:
         bFill = rand() % 255;
         memset( this, bFill, sizeof(*this) );
 #endif
+        //  In retail we will only initialize this piece and defer initialize the rest ...
         cNodesSkipped = 0;
     }
 
+    //  Node Skipping Update routines
+    //
     void BTISkipStatsUpdateSkippedNode( const NS ns )
     {
         if ( cNodesSkipped == 0 )
@@ -1013,12 +1227,15 @@ public:
         cFiltered++;
     }
 
+    //  Page Switching Update
+    //
     void BTISkipStatsUpdateSkippedPage( const CPAGE& cpage )
     {
-        Assert( cNodesSkipped != 0 );
+        Assert( cNodesSkipped != 0 );   //
 
         if ( cPagesVisitedWithSkippedNodes == 0 )
         {
+            //  Skipping off a page for first time, get some initial state ...
             cPagesCacheMissBaseline = Ptls()->threadstats.cPageCacheMiss;
             cusecCacheMissBaseline = Ptls()->threadstats.cusecPageCacheMiss;
             dbtimeSkippedPagesLow = 0x7FFFFFFFFFFFFFFF;
@@ -1030,6 +1247,8 @@ public:
         dbtimeSkippedPagesAve += cpage.Dbtime();
     }
 
+    //  Performance Counter Details
+    //
 
     ULONG CNodesSkipped() const
     {
@@ -1045,6 +1264,8 @@ public:
         return cFiltered;
     }
 
+    //  Report Check(s)
+    //
 
     INLINE BOOL FBTIReportManyCacheMissesForSkippedNodes() const
     {
@@ -1059,7 +1280,7 @@ public:
 
         const __int64 cmsecCacheMisses = ( ptls->threadstats.cusecPageCacheMiss - cusecCacheMissBaseline ) / 1000;
         if ( cusecCacheMissBaseline == 0 ||
-                cmsecCacheMisses < g_cmsecBTINavigateCacheMissLatencyThreshold  )
+                cmsecCacheMisses < g_cmsecBTINavigateCacheMissLatencyThreshold /* ~10 secs in ms, at the moment */ )
         {
             return fFalse;
         }
@@ -1067,7 +1288,7 @@ public:
         const double    dblTimeElapsed = DblHRTElapsedTimeFromHrtStart( hrtStart );
         const double    dblFaultWait = double( Ptls()->threadstats.cusecPageCacheMiss - cusecCacheMissBaseline ) / 1000.0;
         if ( dblFaultWait > dblTimeElapsed ||
-                ( dblFaultWait / dblTimeElapsed ) < g_pctBTICacheMissLatencyToQualifyForIoLoad  )
+                ( dblFaultWait / dblTimeElapsed ) < g_pctBTICacheMissLatencyToQualifyForIoLoad /* 80% at the moment */ )
         {
             return fFalse;
         }
@@ -1079,24 +1300,40 @@ public:
     {
         Assert( cNodesSkipped == 0 || cNodesSkipped == cUnversionedDeletes + cUncommittedDeletes + cCommittedDeletes + cNonVisibleInserts + cFiltered );
 
-        C_ASSERT( g_cBTIPagesVisitedWithNonVisibleNodesWarningThreshold > 20 );
+        // Note: The - 1, may cause a curio ... because in ErrBTNext/Prev() we call FBTIReportManyNonVisibleNodesSkipped() before 
+        // we sum up the very last page with BTISkipStatsUpdateSkippedPage() it means we don't have a full page count, so we will
+        // assume there are skipped nodes on this last page (as this is almost assuredly the case), and by subtracting -1 from the 
+        // threshold we use to trigger - but this may lead to a curio of triggering with 1 less page than the threshold.
+        // Note2: The filtered results sets is designed actually to skip a lot of nodes, so we don't want to print a result such
+        // an event unless the skipping is the fault of our ESE non-visible nodes.
+        C_ASSERT( g_cBTIPagesVisitedWithNonVisibleNodesWarningThreshold > 20 ); // let's ensure this curio is < 5% margin
 
+        // because it/g_cmsecBTINavigateProcessingLatencyThreshold is checked first before we call into FBTIReportManyCacheMissesForSkippedNodes
+        // to check g_cmsecBTINavigateCacheMissLatencyThreshold, then the Processing must be smaller than the CacheMiss threshold.
         Assert( (__int64)g_cmsecBTINavigateProcessingLatencyThreshold < g_cmsecBTINavigateCacheMissLatencyThreshold );
 
-        return cNodesSkipped &&
-                ( cNodesSkipped - cFiltered ) &&
-                ( DblHRTElapsedTimeFromHrtStart( hrtStart ) >= g_cmsecBTINavigateProcessingLatencyThreshold ) &&
+        return cNodesSkipped &&             //  some nodes skipped
+                ( cNodesSkipped - cFiltered ) &&    //  and some non-filtered nodes skipped
+                ( DblHRTElapsedTimeFromHrtStart( hrtStart ) >= g_cmsecBTINavigateProcessingLatencyThreshold ) &&    // took at least 100 ms at moment (for either CPU or Disk events)
+                //  And one of the three cases is inefficient enough to care about eventing ...
                 ( ( cNodesSkipped - cFiltered ) > g_cBTINonVisibleNodesSkippedWarningThreshold
                     || cPagesVisitedWithSkippedNodes > ( g_cBTIPagesVisitedWithNonVisibleNodesWarningThreshold - 1 )
                     || FBTIReportManyCacheMissesForSkippedNodes() );
     }
 
+    //  Generate Report
+    //
 
     VOID BTIReportManyNonVisibleNodesSkipped( FUCB * const pfucb )
     {
         Assert( cNodesSkipped == cUnversionedDeletes + cUncommittedDeletes + cCommittedDeletes + cNonVisibleInserts + cFiltered );
         FCB * const     pfcb                        = pfucb->u.pfcb;
 
+        //  finalize some values
+        //
+        //  note: In the future we may want to use something like faulted pages or elapsed time to determine
+        //  if we really should log an event, should be pretty easy to move upto FBTIReportManyNonVisibleNodesSkipped
+        //  at that point.  Take care to do no more compute than necessary for the common case.
         const double    dblTimeElapsed = DblHRTElapsedTimeFromHrtStart( hrtStart );
         const ULONG     cpgFaulted = Ptls()->threadstats.cPageCacheMiss - cPagesCacheMissBaseline;
         const double    dblFaultWait = double( Ptls()->threadstats.cusecPageCacheMiss - cusecCacheMissBaseline ) / 1000.0;
@@ -1105,30 +1342,50 @@ public:
         dbtimeSkippedPagesAve = dbtimeSkippedPagesAve / cPagesVisitedWithSkippedNodes;
         
 
+        //  need to serialise updating of counters
+        //  that are stored in the FCB
+        //
         pfcb->Lock();
 
         const TICK      tickCurr                    = TickOSTimeCurrent();
         const TICK      tickLast                    = pfcb->TickMNVNLastReported();
         const TICK      tickDiff                    = ( 0 == tickLast ? 0 : tickCurr - tickLast );
-        const ULONG     ulHoursSinceLastReported    = tickDiff / ( 1000 * 60 * 60 );
+        const ULONG     ulHoursSinceLastReported    = tickDiff / ( 1000 * 60 * 60 );    //  convert milliseconds to hours
         const ULONG     cPreviousIncidents          = pfcb->CMNVNIncidentsSinceLastReported();
         const ULONG     cPreviousNodesSkipped       = pfcb->CMNVNNodesSkippedSinceLastReported();
         const ULONG     cPreviousPagesVisited       = pfcb->CMNVNPagesVisitedSinceLastReported();
         const BOOL      fInitialReport              = ( 0 == tickLast );
-        const BOOL      fIoLoadIssue                = FBTIReportManyCacheMissesForSkippedNodes();
+        const BOOL      fIoLoadIssue                = FBTIReportManyCacheMissesForSkippedNodes(); // as opposed to all cached pages / mere CPU issue.
 #ifdef ESENT
+        //  disabling this eventlog message because it is too noisy and the
+        //  suggested action (increase maintenance window) may not be possible
+        //  for all uses of the database engine
+        //
+        //  CONSIDER:  move this event to ETW as an advanced perf diagnostic
+        //
         const BOOL      fReportEvent                = fFalse;
 #else
+        //  this event is very useful for identifying potential perf issues, but
+        //  ultimately there is very little actionable by the admin, so report
+        //  this event at a higher logging level
+        //
+        //  thresholds have been tweaked such that this event
+        //  is now only emitted for extremely egregious offenders, so it
+        //  should be okay to emit this event at the lowest logging level
+        //  without fear of excessive eventlog spam
+        //
         const BOOL      lTargetLoggingLevel         = JET_EventLoggingLevelMin;
         const BOOL      fReportEvent                = ( UlParam( PinstFromPfucb( pfucb ), JET_paramEventLoggingLevel ) >= (ULONG_PTR)lTargetLoggingLevel )
                                                         && ( fInitialReport || ulHoursSinceLastReported >= g_ulBTINonVisibleNodesSkippedWarningFrequency )
                                                         && ( fIoLoadIssue ?
                                                                 g_rgfmp[ pfcb->Ifmp() ].FCheckTreeSkippedNodesDisk( pfcb->ObjidFDP() ) :
                                                                 g_rgfmp[ pfcb->Ifmp() ].FCheckTreeSkippedNodesCpu( pfcb->ObjidFDP() ) );
-#endif
+#endif  //  ESENT
 
         if ( fReportEvent )
         {
+            //  event is being reported, so reset counters
+            //
             pfcb->SetTickMNVNLastReported( tickCurr );
             pfcb->ResetCMNVNIncidentsSinceLastReported();
             pfcb->ResetCMNVNNodesSkippedSinceLastReported();
@@ -1136,6 +1393,11 @@ public:
         }
         else
         {
+            //  event is going to be suppressed, so increment counts
+            //  (these counters are only ULONGs, so they may wrap,
+            //  especially the nodes-skipped counter, but they are
+            //  purely informational, so it's not a big deal)
+            //
             if ( fInitialReport )
                 pfcb->SetTickMNVNLastReported( tickCurr );
             pfcb->IncrementCMNVNIncidentsSinceLastReported();
@@ -1199,10 +1461,16 @@ public:
             }
             else
             {
+                //  another FCB type
+                //
                 CallS( szBtreeName.ErrSet( "<null>" ) );
                 CallS( szTableName.ErrSet( "<null>" ) );
             }
 
+            //  event args
+            //
+            //  Note: the isz++ at end; for clarity we attempt to use one line / string - unless it is really long
+            //
             ULONG   cszSkippedSubsequentReportArgs = 0;
             ULONG   isz                     = 0;
             rgsz[ isz ] = g_rgfmp[ pfcb->Ifmp() ].WszDatabaseName(); isz++;
@@ -1239,8 +1507,15 @@ public:
             
             Assert( csz == ( isz + cszSkippedSubsequentReportArgs ) );
 
+            //  we might not have a bookmark if there was no currency before
+            //  the BTNext/Prev (eg. the operation being performed may be
+            //  something like a seek or a MoveFirst/Last)
+            //
             if ( cbKey > 0 )
             {
+                //  try to allocate a buffer so that we can report the
+                //  key of the node we started the move from
+                //
                 pbKey = (BYTE *)RESKEY.PvRESAlloc();
                 if ( NULL != pbKey )
                 {
@@ -1248,6 +1523,9 @@ public:
                 }
                 else
                 {
+                    //  failed allocating buffer for the key, so just don't
+                    //  bother reporting it
+                    //
                     cbKey = 0;
                 }
             }
@@ -1257,6 +1535,7 @@ public:
                 UtilReportEvent(
                         eventWarning,
                         PERFORMANCE_CATEGORY,
+                        // note future comment above ... _AGAIN_ID logging is effectively disabled here.
                         ( fInitialReport ? BT_MOVE_SKIPPED_MANY_NODES_ID : BT_MOVE_SKIPPED_MANY_NODES_AGAIN_ID ),
                         isz,
                         rgsz,
@@ -1269,15 +1548,17 @@ public:
         }
     }
 
-};
+};  //  end struct BTISKIPSTATS
 
 
+// the current node is deleted and committed and has no active versions
 BOOL FBTINodeCommittedDelete( const FUCB * pfucb, const KEYDATAFLAGS& kdf )
 {
     BOOL fDeleted = fFalse;
 
     Assert( pfucb );
     
+    // if the node is deleted ...
     if ( FNDDeleted( kdf ) )
     {
         if ( !FNDVersion( kdf ) )
@@ -1289,6 +1570,7 @@ BOOL FBTINodeCommittedDelete( const FUCB * pfucb, const KEYDATAFLAGS& kdf )
             BOOKMARK bm;
             bm.key = kdf.key;
 
+            // sequential indexes are unique and don't have an IDB set
             if ( FFUCBUnique( pfucb ) )
             {
                 bm.data.Nullify();
@@ -1298,6 +1580,7 @@ BOOL FBTINodeCommittedDelete( const FUCB * pfucb, const KEYDATAFLAGS& kdf )
                 bm.data = kdf.data;
             }
         
+            // but we don't have any active versions
             if( !FVERActive( pfucb->ifmp, pfucb->u.pfcb->PgnoFDP(), bm, TrxOldest( PinstFromPfucb( pfucb ) ) ) )
             {
                 fDeleted = fTrue;
@@ -1308,25 +1591,32 @@ BOOL FBTINodeCommittedDelete( const FUCB * pfucb, const KEYDATAFLAGS& kdf )
     return fDeleted;
 }
 
+// the current node is deleted and committed and has no active versions
 BOOL FBTINodeCommittedDelete( const FUCB * pfucb )
 {
     return FBTINodeCommittedDelete( pfucb, pfucb->kdfCurr );
 }
 
+//  returns true if the FUCB/database attached is in a logically navigable state
+//
 BOOL FBTLogicallyNavigableState( const FUCB * const pfucb )
 {
-    if ( !PinstFromPfucb( pfucb )->m_plog->FRecovering() ||
-         fRecoveringRedo != PinstFromPfucb( pfucb )->m_plog->FRecoveringMode() ||
+    if ( !PinstFromPfucb( pfucb )->m_plog->FRecovering() ||                             //  during do-time we're fine
+         fRecoveringRedo != PinstFromPfucb( pfucb )->m_plog->FRecoveringMode() ||   //  or during undo-time as well
          !g_rgfmp[ pfucb->ifmp ].FContainsDataFromFutureLogs() ||
-         g_rgfmp[ pfucb->ifmp ].m_fCreatingDB )
+         g_rgfmp[ pfucb->ifmp ].m_fCreatingDB )                                       //  and finally during create DB
     {
         return fTrue;
     }
     return fFalse;
 }
 
+//  goto the next line in tree
+//
 ERR ErrBTNext( FUCB *pfucb, DIRFLAG dirflag )
 {
+    // function called with dirflag == fDIRAllNode from eseutil - node dumper
+    // Assert( ! ( dirflag & fDIRAllNode ) );
 
     ERR         err;
     CSR * const pcsr                        = Pcsr( pfucb );
@@ -1337,6 +1627,8 @@ ERR ErrBTNext( FUCB *pfucb, DIRFLAG dirflag )
     BTISKIPSTATS    btskipstats;
     PIBTraceContextScope tcScope        = TcBTICreateCtxScope( pfucb, iorsBTMoveNext );
 
+    // Prevent R/O transactions from proceeding if they are holding up version store cleanup.
+    //
     if ( pfucb->ppib->FReadOnlyTrx() && pfucb->ppib->Level() > 0 )
     {
         CallR( PverFromIfmp( pfucb->ifmp )->ErrVERCheckTransactionSize( pfucb->ppib ) );
@@ -1344,14 +1636,21 @@ ERR ErrBTNext( FUCB *pfucb, DIRFLAG dirflag )
 
     Assert( FBTLogicallyNavigableState( pfucb ) );
 
+    //  if a filter is provided, then we must be navigating a table or secondary index
+    //
     Assert( !pfucb->pmoveFilterContext || pfucb->u.pfcb->FTypeTable() || pfucb->u.pfcb->FTypeSecondaryIndex() );
 
+    //  refresh currency
+    //  places cursor on record to move from
+    //
     CallR( ErrBTIRefresh( pfucb ) );
 
+    //  lidMin is never used, the first lid should be lidMin+1
     
     LvId lid = lidMin;
     if( dirflag & fDIRSameLIDOnly )
     {
+        //  we are on the LV tree, store the LID we currently have
 
         Assert( pfucb->u.pfcb->FTypeLV() );
         LidFromKey( &lid, pfucb->kdfCurr.key );
@@ -1360,17 +1659,26 @@ ERR ErrBTNext( FUCB *pfucb, DIRFLAG dirflag )
     
 Start:
 
+    //  now we have a read latch on page
+    //
     Assert( pcsr->Latch() == latchReadTouch ||
             pcsr->Latch() == latchReadNoTouch ||
             pcsr->Latch() == latchRIW );
     Assert( ( pcsr->Cpage().FLeafPage() ) != 0 );
     AssertNDGet( pfucb );
 
+    //  get next node in page
+    //  if it does not exist, go to next page
+    //
     if ( pcsr->ILine() + 1 < pcsr->Cpage().Clines() )
     {
+        //  get next node
+        //
         pcsr->IncrementILine();
         NDGet( pfucb );
 
+        //  adjust key position
+        //
         if ( pfucb->ulTotalLast )
         {
             pfucb->ulLTLast++;
@@ -1380,17 +1688,26 @@ Start:
     {
         Assert( pcsr->ILine() + 1 == pcsr->Cpage().Clines() );
 
+        //  reset key position
+        //
         pfucb->ulLTLast = 0;
         pfucb->ulTotalLast = 0;
 
+        //  next node not in current page
+        //  get next page and continue
+        //
         if ( pcsr->Cpage().PgnoNext() == pgnoNull )
         {
+            //  past the last node
+            //  callee must set loc to AfterLast
+            //
             Error( ErrERRCheck( JET_errNoCurrentRecord ) );
         }
         else
         {
             const PGNO  pgnoFrom    = pcsr->Pgno();
 
+            //  before we move pages, track any stats from this page
 
             if ( fNodesSkippedOnCurrentPage )
             {
@@ -1398,6 +1715,8 @@ Start:
                 fNodesSkippedOnCurrentPage = fFalse;
             }
 
+            //  access next page [R latched]
+            //
             Call( pcsr->ErrSwitchPage(
                                 pfucb->ppib,
                                 pfucb->ifmp,
@@ -1413,6 +1732,8 @@ Start:
                                                         pcsr->Cpage().PgnoPrev() :
                                                         pcsr->Cpage().ObjidFDP() );
 
+                //  if not repair, assert, otherwise, suppress the assert and
+                //  repair will just naturally err out
                 AssertSz( g_fRepair, "Corrupt B-tree: bad leaf page links detected on MoveNext" );
                 Call( ErrBTIReportBadPageLink(
                         pfucb,
@@ -1432,6 +1753,8 @@ Start:
                                         "BtNextClinesLowInPlace" ) ) ) ) );
             }
 
+            // get first node
+            //
             NDMoveFirstSon( pfucb );
 
             if ( ( FFUCBPreread( pfucb ) &&
@@ -1445,9 +1768,13 @@ Start:
 
                 if ( pfucb->cpgPrereadNotConsumed > 0 )
                 {
+                    //  read one more of preread pages
+                    //
                     pfucb->cpgPrereadNotConsumed--;
                 }
 
+                // Long-value preread is handled in the LV code (because we know the size of the LV there)
+                // All the BT code has to do is the cpgPrereadNotConsumed calculations
                 if ( !FFUCBLongValue( pfucb ) )
                 {
                     if ( 1 == pfucb->cpgPrereadNotConsumed
@@ -1456,11 +1783,15 @@ Start:
                         PIBTraceContextScope tcScopeT = pfucb->ppib->InitTraceContextScope();
                         tcScopeT->iorReason.AddFlag( iorfOpportune );
 
+                        //  preread the next page as it was not originally preread
+                        //  Single page preread is kinda bad, but due to off by 1 error in cpgPrereadNotConsumed.
                         (void)ErrBFPrereadPage( pfucb->ifmp, pcsr->Cpage().PgnoNext(), bfprfDefault, pfucb->ppib->BfpriPriority( pfucb->ifmp ), *tcScopeT );
                     }
 
                     if ( 0 == pfucb->cpgPrereadNotConsumed )
                     {
+                        //  if we need to do neighbour-key check, must save off
+                        //  bookmark
                         if ( ( dirflag & fDIRNeighborKey )
                             && NULL == pbkeySave )
                         {
@@ -1469,6 +1800,11 @@ Start:
                             pfucb->bmCurr.key.CopyIntoBuffer( pbkeySave, cbKeyAlloc );
                         }
 
+                        //  UNDONE: this might cause a bug since there is an assumption
+                        //          that ErrBTNext does not lose latch
+                        //
+                        //  preread more pages
+                        //
                         
 
 
@@ -1479,10 +1815,13 @@ Start:
                         Assert( pcsr->FLatched() );
                         Call( ErrBTRelease( pfucb ) );
                         Assert( !pcsr->FLatched() );
+                        //  Request exact position if key visible to cursor, otherwise, key can disappear
+                        //  when we release the latch and it is ok to get adjacent key.
                         Call( ErrBTGotoBookmark( pfucb, pfucb->bmCurr, latch, fVisible ) );
                         Assert( !fVisible || ( err != wrnNDFoundGreater && err != wrnNDFoundLess ) );
                         if ( wrnNDFoundLess == err )
                         {
+                            //  We went backwards, maybe to a node where we already were. Go to next node.
                             goto Start;
                         }
                     }
@@ -1494,7 +1833,11 @@ Start:
 
     AssertNDGet( pfucb );
 
+    //  but node may not be valid due to dirFlag
+    //
 
+    //  move again if fDIRNeighborKey set and next node has same key
+    //
     if ( dirflag & fDIRNeighborKey )
     {
         const BOOL  fSkip   = ( NULL == pbkeySave ?
@@ -1508,6 +1851,8 @@ Start:
         }
     }
 
+    //  check to see if we have moved to a different LID. if so, pretend we hit the end of the b-tree
+    //  do this check before we check visibility to avoid walking long chains of deleted nodes
     
     if( dirflag & fDIRSameLIDOnly )
     {
@@ -1522,10 +1867,15 @@ Start:
         }
     }
 
+    // function called with dirflag == fDIRAllNode from eseutil - node dumper
+    // Assert( ! ( dirflag & fDIRAllNode ) );
     if ( !( dirflag & fDIRAllNode ) )
     {
         Assert( !( dirflag & fDIRAllNodesNoCommittedDeleted ) );
         
+        //  fDIRAllNode not set
+        //  check version store to see if node is visible to cursor
+        //
         BOOL    fVisible;
         NS      ns;
         Call( ErrNDVisibleToCursor( pfucb, &fVisible, &ns ) );
@@ -1537,6 +1887,13 @@ Start:
                 Assert( err == JET_errSuccess || err == wrnBTNotVisibleRejected || err == wrnBTNotVisibleAccumulated );
                 if ( err > JET_errSuccess )
                 {
+                    //  current node isn't visible to us, but before going to
+                    //  the trouble of finding a visible sibling (which may
+                    //  be potentially extremely expensive and cause us to
+                    //  navigate over tons of non-visible nodes), see if an
+                    //  index range has been imposed on our navigation which
+                    //  may allow us to short-circuit out.
+                    //
                     if ( FFUCBLimstat( pfucb ) && FFUCBUpper( pfucb ) )
                     {
                         Call( ErrFUCBCheckIndexRange( pfucb, pfucb->kdfCurr.key ) );
@@ -1554,14 +1911,28 @@ Start:
         {
             if ( dirflag & fDIRSameLIDOnly )
             {
+                //  if this chunk is not visible to us, it should not
+                //  be possible for subsequent chunks with the same
+                //  lid to be visible
+                //
                 Error( ErrERRCheck( JET_errNoCurrentRecord ) );
             }
 
+            //  current node isn't visible to us, but before going to
+            //  the trouble of finding a visible sibling (which may
+            //  be potentially extremely expensive and cause us to
+            //  navigate over tons of non-visible nodes), see if an
+            //  index range has been imposed on our navigation which
+            //  may allow us to short-circuit out.
+            //
             if ( FFUCBLimstat( pfucb ) && FFUCBUpper( pfucb ) )
             {
                 Call( ErrFUCBCheckIndexRange( pfucb, pfucb->kdfCurr.key ) );
             }
 
+            //  node not visible to cursor
+            //  goto next node
+            //
             btskipstats.BTISkipStatsUpdateSkippedNode( ns );
             fNodesSkippedOnCurrentPage = fTrue;
             goto Start;
@@ -1569,6 +1940,8 @@ Start:
     }
     else
     {
+        // we need to keep going if the node is deleted and 
+        // doesn't have any versions
         if ( dirflag & fDIRAllNodesNoCommittedDeleted )
         {
             if ( FBTINodeCommittedDelete( pfucb ) )
@@ -1585,6 +1958,8 @@ Start:
 
 HandleError:
 
+    //  batch updates to our perf counters
+    //
     PERFOpt( cBTNext.Add( PinstFromPfucb( pfucb )->m_iInstance, (TCE)tcScope->nParentObjectClass, 1 + cNeighbourKeysSkipped + btskipstats.CNodesSkipped() ) );
     if ( btskipstats.CFiltered() > 0 )
     {
@@ -1596,8 +1971,12 @@ HandleError:
         PERFOpt( cBTNextNonVisibleNodesSkipped.Add( PinstFromPfucb( pfucb )->m_iInstance, (TCE)tcScope->nParentObjectClass, cNonVisibleSkipped ) );
     }
 
+    //  if we've skipped lots of non-visible nodes, report a warning
+    //
     if ( btskipstats.FBTIReportManyNonVisibleNodesSkipped() )
     {
+        //  We may have an outstanding page to process ...
+        //  Note: Calling this after btskipstats.FBTIReportManyNonVisibleNodesSkipped means most of the time we require 1 extra page to trigger report.
         if ( fNodesSkippedOnCurrentPage && pcsr->Latch() > latchNone )
         {
             btskipstats.BTISkipStatsUpdateSkippedPage( pcsr->Cpage() );
@@ -1611,8 +1990,12 @@ HandleError:
 }
 
 
+//  goes to previous line in tree
+//
 ERR ErrBTPrev( FUCB *pfucb, DIRFLAG dirflag )
 {
+    // the only way we navigate back on all the nodes
+    // is to search for ErrRECIInitAutoInc
     Assert( !( dirflag & fDIRAllNode ) || (dirflag & fDIRAllNodesNoCommittedDeleted ) );
 
     ERR         err;
@@ -1627,8 +2010,11 @@ ERR ErrBTPrev( FUCB *pfucb, DIRFLAG dirflag )
 
     Assert( FBTLogicallyNavigableState( pfucb ) );
 
+    //  if a filter is provided, then we must be navigating a table or secondary index
+    //
     Assert( !pfucb->pmoveFilterContext || pfucb->u.pfcb->FTypeTable() || pfucb->u.pfcb->FTypeSecondaryIndex() );
 
+    //  this flag only works for ErrBTNext
     
     if( dirflag & fDIRSameLIDOnly )
     {
@@ -1636,27 +2022,41 @@ ERR ErrBTPrev( FUCB *pfucb, DIRFLAG dirflag )
         return ErrERRCheck( JET_errInvalidGrbit );
     }
     
+    // Prevent R/O transactions from proceeding if they are holding up version store cleanup.
+    //
     if ( pfucb->ppib->FReadOnlyTrx() && pfucb->ppib->Level() > 0 )
     {
         CallR( PverFromIfmp( pfucb->ifmp )->ErrVERCheckTransactionSize( pfucb->ppib ) );
     }
 
+    //  refresh currency
+    //  places cursor on record to move from
+    //
 
     CallR( ErrBTIRefresh( pfucb ) );
 
 Start:
 
+    //  now we have a read latch on page
+    //
     Assert( latchReadTouch == pcsr->Latch() ||
             latchReadNoTouch == pcsr->Latch() ||
             latchRIW == pcsr->Latch() );
     Assert( ( pcsr->Cpage().FLeafPage() ) != 0 );
     AssertNDGet( pfucb );
 
+    //  get prev node in page
+    //  if it does not exist, go to prev page
+    //
     if ( pcsr->ILine() > 0 )
     {
+        //  get prev node
+        //
         pcsr->DecrementILine();
         NDGet( pfucb );
 
+        //  adjust key position
+        //
         if ( pfucb->ulTotalLast )
         {
             pfucb->ulLTLast--;
@@ -1666,17 +2066,25 @@ Start:
     {
         Assert( pcsr->ILine() == 0 );
 
+        //  reset key position
+        //
         pfucb->ulLTLast = 0;
         pfucb->ulTotalLast = 0;
 
+        //  prev node not in current page
+        //  get prev page and continue
+        //
         if ( pcsr->Cpage().PgnoPrev() == pgnoNull )
         {
+            //  past the first node
+            //
             Error( ErrERRCheck( JET_errNoCurrentRecord ) );
         }
         else
         {
             const PGNO  pgnoFrom    = pcsr->Pgno();
 
+            //  before we move pages, track any stats from this page
 
             if ( fNodesSkippedOnCurrentPage )
             {
@@ -1684,6 +2092,11 @@ Start:
                 fNodesSkippedOnCurrentPage = fFalse;
             }
 
+            //  access prev page [R latched] without wait
+            //  if conflict, release latches and retry
+            //  else proceed
+            //  the release of current page is done atomically by CSR
+            //
             err = pcsr->ErrSwitchPageNoWait(
                                     pfucb->ppib,
                                     pfucb->ifmp,
@@ -1693,9 +2106,15 @@ Start:
                 cLatchConflicts++;
                 Assert( cLatchConflicts < 1000 );
 
+                //  save bookmark
+                //  release latches
+                //  re-seek
+                //
                 const PGNO      pgnoWait    = pcsr->Cpage().PgnoPrev();
                 const LATCH     latch       = pcsr->Latch();
 
+                //  if we need to do neighbour-key check, must save off
+                //  bookmark
                 if ( ( dirflag & fDIRNeighborKey )
                     && NULL == pbkeySave )
                 {
@@ -1708,12 +2127,19 @@ Start:
                 Call( ErrBTRelease( pfucb ) );
                 Assert( !pcsr->FLatched() );
 
+                //  wait & refresh currency
+                //
+                //  NOTE:  we wait on the page that caused the conflict solely
+                //  as a form of delay.  there is no guarantee that this will
+                //  really be the page we want once we wake up
+                //
                 err = pcsr->ErrGetRIWPage(
                                     pfucb->ppib,
                                     pfucb->ifmp,
                                     pgnoWait );
                 if ( err < JET_errSuccess )
                 {
+                    //  use sleep as a last resort
                     UtilSleep( cmsecWaitGeneric );
                 }
                 else
@@ -1726,6 +2152,8 @@ Start:
                 if ( wrnNDFoundGreater == err ||
                      JET_errSuccess == err )
                 {
+                    //  go to previous node
+                    //
                     goto Start;
                 }
             }
@@ -1742,6 +2170,8 @@ Start:
                                                             pcsr->Cpage().PgnoNext() :
                                                             pcsr->Cpage().ObjidFDP() );
 
+                    //  if not repair, assert, otherwise, suppress the assert and
+                    //  repair will just naturally err out
                     AssertSz( g_fRepair, "Corrupt B-tree: bad leaf page links detected on MovePrev" );
                     Call( ErrBTIReportBadPageLink(
                                 pfucb,
@@ -1761,6 +2191,8 @@ Start:
                                                 "BtPrevClinesLowInPlace" ) ) ) ) );
                 }
 
+                //  get last node in page
+                //
                 NDMoveLastSon( pfucb );
 
                 if( ( FFUCBPreread( pfucb ) &&
@@ -1777,6 +2209,8 @@ Start:
                         pfucb->cpgPrereadNotConsumed--;
                     }
 
+                    // Long-value preread is handled in the LV code (because we know the size of the LV there)
+                    // All the BT code has to do is the cpgPrereadNotConsumed calculations
                     if ( !FFUCBLongValue( pfucb ) )
                     {
                         if ( 1 == pfucb->cpgPrereadNotConsumed
@@ -1785,11 +2219,15 @@ Start:
                             PIBTraceContextScope tcScopeT = pfucb->ppib->InitTraceContextScope();
                             tcScopeT->iorReason.AddFlag( iorfOpportune );
 
+                            //  preread the next page as it was not originally preread
+                            //  Single page preread is kinda bad, but due to off by 1 error in cpgPrereadNotConsumed.
                             (void)ErrBFPrereadPage( pfucb->ifmp, pcsr->Cpage().PgnoPrev(), bfprfDefault, pfucb->ppib->BfpriPriority( pfucb->ifmp ), *tcScopeT );
                         }
 
                         if ( 0 == pfucb->cpgPrereadNotConsumed )
                         {
+                            //  if we need to do neighbour-key check, must save off
+                            //  bookmark
                             if ( ( dirflag & fDIRNeighborKey )
                                 && NULL == pbkeySave )
                             {
@@ -1798,6 +2236,8 @@ Start:
                                 pfucb->bmCurr.key.CopyIntoBuffer( pbkeySave, cbKeyAlloc );
                             }
 
+                            //  preread more pages
+                            //
                             const LATCH latch = pcsr->Latch();
                             BOOL    fVisible;
                             NS      ns;
@@ -1805,10 +2245,13 @@ Start:
                             Assert( pcsr->FLatched() );
                             Call( ErrBTRelease( pfucb ) );
                             Assert( !pcsr->FLatched() );
+                            //  Request exact position if key visible to cursor, otherwise, key can disappear
+                            //  when we release the latch and it is ok to get adjacent key.
                             Call( ErrBTGotoBookmark( pfucb, pfucb->bmCurr, latch, fVisible ) );
                             Assert( !fVisible || ( err != wrnNDFoundGreater && err != wrnNDFoundLess ) );
                             if ( wrnNDFoundGreater == err )
                             {
+                                //  We went forward, maybe to a node where we already were. Go to prev node.
                                 goto Start;
                             }
                         }
@@ -1818,9 +2261,15 @@ Start:
         }
     }
 
+    //  get prev node
+    //
     AssertNDGet( pfucb );
 
+    //  but node may not be valid due to dirFlag
+    //
 
+    //  move again if fDIRNeighborKey set and prev node has same key
+    //
     if ( dirflag & fDIRNeighborKey )
     {
         const BOOL  fSkip   = ( NULL == pbkeySave ?
@@ -1838,6 +2287,9 @@ Start:
     {
         Assert( !( dirflag & fDIRAllNodesNoCommittedDeleted ) );
         
+        //  fDIRAllNode not set
+        //  check version store to see if node is visible to cursor
+        //
         BOOL    fVisible;
         NS      ns;
         Call( ErrNDVisibleToCursor( pfucb, &fVisible, &ns ) );
@@ -1849,6 +2301,13 @@ Start:
                 Assert( err == JET_errSuccess || err == wrnBTNotVisibleRejected || err == wrnBTNotVisibleAccumulated );
                 if ( err > JET_errSuccess )
                 {
+                    //  current node isn't visible to us, but before going to
+                    //  the trouble of finding a visible sibling (which may
+                    //  be potentially extremely expensive and cause us to
+                    //  navigate over tons of non-visible nodes), see if an
+                    //  index range has been imposed on our navigation which
+                    //  may allow us to short-circuit out.
+                    //
                     if ( FFUCBLimstat( pfucb ) && !FFUCBUpper( pfucb ) )
                     {
                         Call( ErrFUCBCheckIndexRange( pfucb, pfucb->kdfCurr.key ) );
@@ -1864,11 +2323,21 @@ Start:
         }
         else
         {
+            //  current node isn't visible to us, but before going to
+            //  the trouble of finding a visible sibling (which may
+            //  be potentially extremely expensive and cause us to
+            //  navigate over tons of non-visible nodes), see if an
+            //  index range has been imposed on our navigation which
+            //  may allow us to short-circuit out.
+            //
             if ( FFUCBLimstat( pfucb ) && !FFUCBUpper( pfucb ) )
             {
                 Call( ErrFUCBCheckIndexRange( pfucb, pfucb->kdfCurr.key ) );
             }
             
+            //  node not visible to cursor
+            //  goto next node
+            //
             btskipstats.BTISkipStatsUpdateSkippedNode( ns );
             fNodesSkippedOnCurrentPage = fTrue;
             goto Start;
@@ -1876,8 +2345,12 @@ Start:
     }
     else
     {
+        // the only way we navigate back on all the nodes
+        // is to search for ErrRECIInitAutoInc
         Assert ( dirflag & fDIRAllNodesNoCommittedDeleted );
         
+        // we need to go back if the node is deleted and 
+        // doesn't have any versions
         if ( dirflag & fDIRAllNodesNoCommittedDeleted )
         {
             if ( FBTINodeCommittedDelete( pfucb ) )
@@ -1894,6 +2367,8 @@ Start:
 
 HandleError:
 
+    //  batch updates to our perf counters
+    //
     PERFOpt( cBTPrev.Add( PinstFromPfucb( pfucb )->m_iInstance, (TCE)tcScope->nParentObjectClass, 1 + cNeighbourKeysSkipped + btskipstats.CNodesSkipped() ) );
     if ( btskipstats.CFiltered() > 0 )
     {
@@ -1905,8 +2380,11 @@ HandleError:
         PERFOpt( cBTPrevNonVisibleNodesSkipped.Add( PinstFromPfucb( pfucb )->m_iInstance, (TCE)tcScope->nParentObjectClass, cNonVisibleSkipped ) );
     }
 
+    //  if we've skipped lots of non-visible nodes, report a warning
+    //
     if ( btskipstats.FBTIReportManyNonVisibleNodesSkipped() )
     {
+        //  We may have an outstanding page to process ...
         if ( fNodesSkippedOnCurrentPage && pcsr->Latch() > latchNone )
         {
             btskipstats.BTISkipStatsUpdateSkippedPage( pcsr->Cpage() );
@@ -1920,14 +2398,22 @@ HandleError:
 }
 
 
+//  ================================================================
 VOID BTPrereadSpaceTree( const FUCB * const pfucb )
+//  ================================================================
+//
+//  Most of the time we will only need the Avail-Extent. Only if it
+//  is empty will we need the Owned-Extent. However, the two pages are together
+//  on disk so they are very cheap to read together.
+//
+//-
 {
     FCB* const pfcb = pfucb->u.pfcb;
     Assert( pfcbNil != pfcb );
 
     INT     ipgno = 0;
-    PGNO    rgpgno[3];
-    if( pgnoNull != pfcb->PgnoOE() )
+    PGNO    rgpgno[3];      // pgnoOE, pgnoAE, pgnoNull
+    if( pgnoNull != pfcb->PgnoOE() )    //  may be single-extent
     {
         Assert( pgnoNull != pfcb->PgnoAE() );
         rgpgno[ipgno++] = pfcb->PgnoOE();
@@ -1945,7 +2431,9 @@ VOID BTPrereadSpaceTree( const FUCB * const pfucb )
 }
 
 
+//  ================================================================
 VOID BTPrereadIndexesOfFCB( FUCB * const pfucb )
+//  ================================================================
 {
     FCB* const pfcb = pfucb->u.pfcb;
     Assert( pfcbNil != pfcb );
@@ -1953,7 +2441,7 @@ VOID BTPrereadIndexesOfFCB( FUCB * const pfucb )
     Assert( ptdbNil != pfcb->Ptdb() );
 
     const INT   cMaxIndexesToPreread    = 16;
-    PGNO        rgpgno[cMaxIndexesToPreread + 1];
+    PGNO        rgpgno[cMaxIndexesToPreread + 1];   //  NULL-terminated
     INT         ipgno                   = 0;
 
     pfcb->EnterDML();
@@ -1966,12 +2454,19 @@ VOID BTPrereadIndexesOfFCB( FUCB * const pfucb )
         if ( !pidbT->FSparseIndex()
             && !pidbT->FSparseConditionalIndex() )
         {
+            //  this index isn't sparse, so odds are it
+            //  will have to be updated, so go ahead
+            //  and preread its pgnoFDP
+            //
             rgpgno[ipgno++] = pfcbT->PgnoFDP();
         }
     }
 
     pfcb->LeaveDML();
 
+    //  NULL-terminate the list of pages to preread,
+    //  then issue the actual preread
+    //
     rgpgno[ipgno] = pgnoNull;
 
     PIBTraceContextScope tcScope = pfucb->ppib->InitTraceContextScope();
@@ -1981,7 +2476,9 @@ VOID BTPrereadIndexesOfFCB( FUCB * const pfucb )
     BFPrereadPageList( pfcb->Ifmp(), rgpgno, bfprfDefault, pfucb->ppib->BfpriPriority( pfcb->Ifmp() ), *tcScope );
 }
 
+//  ================================================================
 class PrereadContext
+//  ================================================================
 {
 public:
     PrereadContext( PIB * const ppib, FUCB * const pfucb );
@@ -2066,12 +2563,14 @@ private:
 
     ERR ErrAddPrereadCandidate( const PGNO pgno );
 
-private:
+private:    // not implemented
     PrereadContext( const PrereadContext& );
     PrereadContext& operator=( const PrereadContext& );
 };
 
+//  ================================================================
 PrereadContext::PrereadContext( PIB * const ppib, FUCB * const pfucb ) :
+//  ================================================================
     m_ppib( ppib ),
     m_pfucb( pfucb ),
     m_ifmp( pfucb->ifmp ),
@@ -2083,12 +2582,16 @@ PrereadContext::PrereadContext( PIB * const ppib, FUCB * const pfucb ) :
 {
 }
 
+//  ================================================================
 PrereadContext::~PrereadContext()
+//  ================================================================
 {
     delete[] m_rgpgnoPreread;
 }
 
+//  ================================================================
 void PrereadContext::CheckSpaceFragmentation( const CSR& csr )
+//  ================================================================
 {
     if (    csr.Cpage().FParentOfLeaf() &&
             FBTIEligibleForOLD2( m_pfucb ) )
@@ -2097,7 +2600,9 @@ void PrereadContext::CheckSpaceFragmentation( const CSR& csr )
     }
 }
 
+//  ================================================================
 void PrereadContext::CheckSpaceFragmentation_( const CSR& csr )
+//  ================================================================
 {
     ERR err;
     PGNO * rgpgno = NULL;
@@ -2113,6 +2618,9 @@ void PrereadContext::CheckSpaceFragmentation_( const CSR& csr )
         rgpgno[iline] = pgnoChild;
     }
 
+    // Sort the pages before checking. if the pages are slightly out of order
+    // then preread will still read them efficiently so we don't want to
+    // trigger OLD2.
     sort( rgpgno, rgpgno + clines );
 
     if( FBTICpgFragmentedRangeTrigger(
@@ -2121,6 +2629,7 @@ void PrereadContext::CheckSpaceFragmentation_( const CSR& csr )
         cpgFragmentedRangeDefragTrigger,
         cpgFragmentedRangeDefrag ) )
     {
+        // remember not to overwrite this value if FBTICpgFragmentedRange return true
         m_fSawFragmentedSpace = true;
     }
 
@@ -2128,6 +2637,7 @@ HandleError:
     delete[] rgpgno;
 }
 
+//  ================================================================
 ERR PrereadContext::ErrProcessSubtreeRangesForward(
     _In_ const BOOKMARK * const                     rgbmStart,
     _In_ const BOOKMARK * const                     rgbmEnd,
@@ -2136,9 +2646,16 @@ ERR PrereadContext::ErrProcessSubtreeRangesForward(
     _In_count_(csubtrees) const LONG * const        rgibmMax,
     const LONG                                      csubtrees,
     _Out_ LONG * const                              pcbmRangesPreread )
+//  ================================================================
 {
     ERR err = JET_errSuccess;
 
+    // Optimization:
+    // we could try to optimize this code by going through the loop twice.
+    // the first time use bflfNoUncached to process pages that are already
+    // in the cache and the second time reading pages that weren't processed
+    // in the first loop. as per-page processing time should be small
+    // compared to I/O latency doing that probably wouldn't help much
     
     CSR csrChild;
     for ( INT isubtree = 0; isubtree < csubtrees && m_cpgPreread < m_cpgPrereadMax; ++isubtree )
@@ -2166,6 +2683,7 @@ HandleError:
     return err;
 }
 
+//  ================================================================
 ERR PrereadContext::ErrProcessSubtreeRangesBackward(
     _In_ const BOOKMARK * const                     rgbmStart,
     _In_ const BOOKMARK * const                     rgbmEnd,
@@ -2174,9 +2692,16 @@ ERR PrereadContext::ErrProcessSubtreeRangesBackward(
     _In_count_(csubtrees) const LONG * const        rgibmMax,
     const LONG                                      csubtrees,
     _Out_ LONG * const                              pcbmRangesPreread )
+//  ================================================================
 {
     ERR err = JET_errSuccess;
 
+    // Optimization:
+    // we could try to optimize this code by going through the loop twice.
+    // the first time use bflfNoUncached to process pages that are already
+    // in the cache and the second time reading pages that weren't processed
+    // in the first loop. as per-page processing time should be small
+    // compared to I/O latency doing that probably wouldn't help much
     
     CSR csrChild;
     for ( INT isubtree = 0; isubtree < csubtrees && m_cpgPreread < m_cpgPrereadMax; ++isubtree )
@@ -2205,17 +2730,24 @@ HandleError:
 }
 
 
+//  ================================================================
 ERR PrereadContext::ErrPrereadRangesForward(
     const CSR&                                      csr,
     __in_ecount(cbm) const BOOKMARK * const         rgbmStart,
     __in_ecount(cbm) const BOOKMARK * const         rgbmEnd,
     const LONG                                      cbm,
     __out LONG * const                              pcbmRangesPreread )
+//  ================================================================
+//
+//  Preread all the leaf pages containing the given bookmarks
+//
+//-
 {
     ERR err = JET_errSuccess;
 
     if( csr.Cpage().FLeafPage() )
     {
+        // this can happen if the tree has a depth of 1
         Assert( csr.Cpage().FFDPPage() );
         *pcbmRangesPreread = cbm;
         return JET_errSuccess;
@@ -2225,9 +2757,17 @@ ERR PrereadContext::ErrPrereadRangesForward(
 
     CheckSpaceFragmentation( csr );
 
+    // if this page isn't a parent-of-leaf page we will need to read the child pages
+    // rather than wait for a synchronous read we issue prereads for those pages and
+    // then go back to process them. these arrays remember which pages needs to be
+    // processed and what arguments to pass to them
+    //
+    // the arguments are stored in this array and then used later
 
+    // with 32kb pages the fanout is so high that a tree with more than 16 parent-of-leaf
+    // pages is normally extremely large    
     const INT csubtreePrereadMax = 16;
-    PGNO rgpgnoSubtree[csubtreePrereadMax+1];
+    PGNO rgpgnoSubtree[csubtreePrereadMax+1];   // need space for a null terminator
     LONG rgibmMin[csubtreePrereadMax];
     LONG rgibmMax[csubtreePrereadMax];
     INT isubtree = 0;
@@ -2235,37 +2775,64 @@ ERR PrereadContext::ErrPrereadRangesForward(
     
     INT ibm = 0;
 
+    // loop until we have looked at all nodes on the page or all bookmarks
+    //
+    // we loop until we find a node whose bookmark is greater than the current bookmark
+    // at that point we increment through the bookmarks until we find a bookmark greater
+    // than the current node. at that point we have the set of bookmarks which belong
+    // on the subtree. We can either recurse onto the subtree (if the child page
+    // is an internal page) or add the page to the preread list (if the child page
+    // is a leaf page)
+    //
+    // Optimization:
+    // linear search is easiest, but we could improve performance by using
+    // binary search here.
+    //
     for(
         INT iline = 0;
         iline < csr.Cpage().Clines() && ibm < cbm && m_cpgPreread < m_cpgPrereadMax;
         ++iline )
     {
-        INT ibmMin = 0;
-        INT ibmMax = 0;
+        // if this iline points to a subtree we want to preread these variables will point
+        // to the bookmark range contained by the subtree
+        INT ibmMin = 0; // the first bookmark to process
+        INT ibmMax = 0; // the first bookmark to ignore
 
         KEYDATAFLAGS kdf;
 
+        //  binary search
+        //      
         if( iline < ( csr.Cpage().Clines() - 1 ) )
         {
             NDIGetKeydataflags( csr.Cpage(), iline, &kdf );
             Assert( kdf.key.Cb() > 0 );
+            //  find first iline with key data greater than rgbmStart[ibm]
+            //
             if( CmpKeyWithKeyData( kdf.key, rgbmStart[ibm] ) <= 0 )
             {
                 INT compareT = 0;
                 INT ilineT = IlineNDISeekGEQInternal( csr.Cpage(), rgbmStart[ibm], &compareT );
                 if ( 0 == compareT && ilineT < ( csr.Cpage().Clines() - 1 ) )
                 {
+                    //  found equal to so move to next line if one exists
+                    //
                     ilineT++;
                 }
 
 #ifdef DEBUG
+                //  assert correct position
+                //
                 KEYDATAFLAGS kdfDebug;
+                //  if on non-last node of page then key should be greater than current start key
+                //
                 if ( ilineT < ( csr.Cpage().Clines() - 1 ) )
                 {
                     NDIGetKeydataflags( csr.Cpage(), ilineT, &kdfDebug );
                     Assert( kdfDebug.key.Cb() > 0 );
                     Assert( CmpKeyWithKeyData( kdfDebug.key, rgbmStart[ibm] ) > 0 );
                 }
+                //  if a previous key then it should be less than or equal to current start key
+                //
                 if ( ilineT > 0 )
                 {
                     NDIGetKeydataflags( csr.Cpage(), ilineT - 1, &kdfDebug );
@@ -2273,6 +2840,8 @@ ERR PrereadContext::ErrPrereadRangesForward(
                     Assert( CmpKeyWithKeyData( kdfDebug.key, rgbmStart[ibm] ) <= 0 );
                 }
 #endif
+                //  should advance
+                //
                 Assert( ilineT > iline );
                 iline = ilineT;
             }
@@ -2280,6 +2849,7 @@ ERR PrereadContext::ErrPrereadRangesForward(
         
         if( ( csr.Cpage().Clines() - 1 ) == iline )
         {
+            // we are at the end of the page so all remaining nodes are found on this subtree
             ibmMin  = ibm;
             ibmMax  = cbm;
             ibm     = cbm;
@@ -2289,10 +2859,14 @@ ERR PrereadContext::ErrPrereadRangesForward(
             NDIGetKeydataflags( csr.Cpage(), iline, &kdf );
             Assert( kdf.key.Cb() > 0 );
 
+            // all nodes with a bookmark less than the page pointer are found on the child page
             if( CmpKeyWithKeyData( kdf.key, rgbmStart[ibm] ) > 0 )
             {
+                // bookmarks are in ascending order so we are on the first bookmark which is less
+                // than the current KDF. Find all bookmarks that are less than the current KDF
+                // as they should all be processed for this sub-tree
                 
-                ibmMin = ibm;
+                ibmMin = ibm;   // the first bookmark to process
                 
                 while( ibm < cbm )
                 {
@@ -2300,14 +2874,16 @@ ERR PrereadContext::ErrPrereadRangesForward(
                     {
                         break;
                     }
+                    // this bookmark is completely processed by this sub-tree
                     ibm++;
                 }
 
-                ibmMax = ibm;
+                ibmMax = ibm;   // the first node to ignore
                 while ( ibmMax < cbm )
                 {
                     if ( CmpKeyWithKeyData( kdf.key, rgbmStart[ibmMax] ) <= 0 )
                     {
+                        // this bookmark doesn't belong on the sub-tree
                         break;
                     }
                     ibmMax++;
@@ -2319,12 +2895,14 @@ ERR PrereadContext::ErrPrereadRangesForward(
 
         if( 0 == ibmMax )
         {
+            // no match. this iline isn't needed
             Assert( 0 == ibmMin );
         }
         else
         {
             Assert( ibmMin < ibmMax );
             
+            // retrieve the pgno of the subtree and process it
             NDIGetKeydataflags( csr.Cpage(), iline, &kdf );
             
             Assert( sizeof( PGNO ) == kdf.data.Cb() );
@@ -2333,11 +2911,14 @@ ERR PrereadContext::ErrPrereadRangesForward(
             
             if( csr.Cpage().FParentOfLeaf() )
             {
+                // this is a parent of leaf page just add the pgno to the preread list
                 Call( ErrAddPrereadCandidate( pgno ) );
                 *pcbmRangesPreread = ibm;
             }
             else
             {
+                // otherwise we have to recurse. we have a child page and know which bookmarks are
+                // found on that page. store the information in the subtree preread list
 
                 DBEnforce( csr.Cpage().Ifmp(), isubtree < _countof( rgibmMin ) );
                 DBEnforce( csr.Cpage().Ifmp(), isubtree < _countof( rgibmMax ) );
@@ -2347,6 +2928,7 @@ ERR PrereadContext::ErrPrereadRangesForward(
                 isubtree++;
 
                 Assert( isubtree <= csubtreePrereadMax );
+                // subtree buffer full, need to process now
                 if( csubtreePrereadMax == isubtree )
                 {
                     rgpgnoSubtree[isubtree] = pgnoNull;
@@ -2366,6 +2948,7 @@ ERR PrereadContext::ErrPrereadRangesForward(
         }
     }
 
+    // process any remaining subtrees
     AssumePREFAST( isubtree < csubtreePrereadMax );
     if( isubtree > 0 )
     {
@@ -2387,17 +2970,24 @@ HandleError:
     return err;
 }
 
+//  ================================================================
 ERR PrereadContext::ErrPrereadRangesBackward(
     const CSR&                                      csr,
     __in_ecount(cbm) const BOOKMARK * const         rgbmStart,
     __in_ecount(cbm) const BOOKMARK * const         rgbmEnd,
     const LONG                                      cbm,
     __out LONG * const                              pcbmRangesPreread )
+//  ================================================================
+//
+//  Preread all the leaf pages containing the given bookmarks
+//
+//-
 {
     ERR err = JET_errSuccess;
     
     if( csr.Cpage().FLeafPage() )
     {
+        // this can happen if the tree has a depth of 1
         Assert( csr.Cpage().FFDPPage() );
         *pcbmRangesPreread = cbm;
         return JET_errSuccess;
@@ -2407,9 +2997,17 @@ ERR PrereadContext::ErrPrereadRangesBackward(
 
     CheckSpaceFragmentation(csr);
 
+    // if this page isn't a parent-of-leaf page we will need to read the child pages
+    // rather than wait for a synchronous read we issue prereads for those pages and
+    // then go back to process them. these arrays remember which pages needs to be
+    // processed and what arguments to pass to them
+    //
+    // the arguments are stored in this array and then used later
 
+    // with 32kb pages the fanout is so high that a tree with more than 16 parent-of-leaf
+    // pages is normally extremely large
     const INT csubtreePrereadMax = 16;
-    PGNO rgpgnoSubtree[csubtreePrereadMax+1];
+    PGNO rgpgnoSubtree[csubtreePrereadMax+1];   // need space for a null terminator
     LONG rgibmMin[csubtreePrereadMax];
     LONG rgibmMax[csubtreePrereadMax];
     INT isubtree = 0;
@@ -2417,38 +3015,65 @@ ERR PrereadContext::ErrPrereadRangesBackward(
     
     INT ibm = 0;
 
+    // loop until we have looked at all nodes on the page or all bookmarks
+    //
+    // We are working from the greatest bookmark to the least. That means we
+    // loop backwards until the previous node has a bookmark which is less than
+    // or equal to the bookmark we are processing. At that point the current node
+    // points to the correct subtree. If we hit the end of the page then
+    // all the remaining bookmarks belong to the first subtree.
+    //
+    // Optimization:
+    // linear search is easiest, but we could improve performance by using
+    // binary search here.
+    //
     for(
         INT iline = csr.Cpage().Clines() - 1;
         iline >= 0 && ibm < cbm && m_cpgPreread < m_cpgPrereadMax;
         --iline )
     {
-        INT ibmMin = 0;
-        INT ibmMax = 0;
+        // if this iline points to a subtree we want to preread these variables will point
+        // to the bookmark range contained by the subtree
+        INT ibmMin = 0; // the first bookmark to process
+        INT ibmMax = 0; // the first bookmark to ignore
 
         KEYDATAFLAGS kdfPrev;
 
+        //  binary search
+        //      
         if( iline > 0 )
         {
             NDIGetKeydataflags( csr.Cpage(), iline-1, &kdfPrev );
             Assert( kdfPrev.key.Cb() > 0 );
             
+            //  find first iline with key data greater than rgbmStart[ibm]
+            //
             if( CmpKeyWithKeyData( kdfPrev.key, rgbmStart[ibm] ) > 0 )
             {
                 INT compareT = 0;
                 INT ilineT = IlineNDISeekGEQInternal( csr.Cpage(), rgbmStart[ibm], &compareT );
                 if ( 0 == compareT && ilineT < ( csr.Cpage().Clines() - 1 ) )
                 {
+                    //  found compare equal to so move to next so prev is equal.
+                    //  If we had found greater then the previous node would be less than.
+                    //
                     ilineT++;
                 }
 
 #ifdef DEBUG
+                //  assert correct position
+                //
                 KEYDATAFLAGS kdfDebug;
+                //  if on non-last node of page then key should be greater than current start key
+                //
                 if ( ilineT < ( csr.Cpage().Clines() - 1 ) )
                 {
                     NDIGetKeydataflags( csr.Cpage(), ilineT, &kdfDebug );
                     Assert( kdfDebug.key.Cb() > 0 );
                     Assert( CmpKeyWithKeyData( kdfDebug.key, rgbmStart[ibm] ) > 0 );
                 }
+                //  if a previous key then it should be less than or equal to current start key
+                //
                 if ( ilineT > 0 )
                 {
                     NDIGetKeydataflags( csr.Cpage(), ilineT - 1, &kdfDebug );
@@ -2456,6 +3081,8 @@ ERR PrereadContext::ErrPrereadRangesBackward(
                     Assert( CmpKeyWithKeyData( kdfDebug.key, rgbmStart[ibm] ) <= 0 );
                 }
 #endif
+                //  should advance (in backward scan)
+                //
                 Assert( ilineT < iline );
                 iline = ilineT;
             }
@@ -2463,6 +3090,7 @@ ERR PrereadContext::ErrPrereadRangesBackward(
         
         if( 0 == iline )
         {
+            // we are at the start of the page so all remaining nodes are found on this subtree
             ibmMin  = ibm;
             ibmMax  = cbm;
             ibm     = cbm;
@@ -2473,6 +3101,10 @@ ERR PrereadContext::ErrPrereadRangesBackward(
             Assert( kdfPrev.key.Cb() > 0 );
             if( CmpKeyWithKeyData( kdfPrev.key, rgbmStart[ibm] ) <= 0 )
             {
+                // the current iline points to the subtree for the current bookmark.
+                // as we are prereading backwards the bookmarks are in descending order.
+                // keep advancing through the bookmarks until we find one which doesn't
+                // belong
                 
                 ibmMin = ibm;
                 
@@ -2482,14 +3114,16 @@ ERR PrereadContext::ErrPrereadRangesBackward(
                     {
                         break;
                     }
+                    // this bookmark is completely processed by this sub-tree
                     ibm++;
                 }
 
-                ibmMax = ibm;
+                ibmMax = ibm;   // the first node to ignore
                 while ( ibmMax < cbm )
                 {
                     if ( CmpKeyWithKeyData( kdfPrev.key, rgbmStart[ibmMax] ) > 0 )
                     {
+                        // this bookmark doesn't belong on the sub-tree
                         break;
                     }
                     ibmMax++;
@@ -2501,12 +3135,14 @@ ERR PrereadContext::ErrPrereadRangesBackward(
         
         if( 0 == ibmMax )
         {
+            // no match. this iline isn't needed
             Assert( 0 == ibmMin );
         }
         else
         {
             Assert( ibmMin < ibmMax );
             
+            // retrieve the pgno of the subtree and process it
             KEYDATAFLAGS kdf;
             NDIGetKeydataflags( csr.Cpage(), iline, &kdf );
             
@@ -2516,11 +3152,14 @@ ERR PrereadContext::ErrPrereadRangesBackward(
             
             if( csr.Cpage().FParentOfLeaf() )
             {
+                // this is a parent of leaf page just add the pgno to the preread list
                 Call( ErrAddPrereadCandidate( pgno ) );
                 *pcbmRangesPreread = ibm;
             }
             else
             {
+                // otherwise we have to recurse. we have a child page and know which bookmarks are
+                // found on that page. store the information in the subtree preread list
 
                 DBEnforce( csr.Cpage().Ifmp(), isubtree < _countof( rgibmMin ) );
                 DBEnforce( csr.Cpage().Ifmp(), isubtree < _countof( rgibmMax ) );
@@ -2530,6 +3169,7 @@ ERR PrereadContext::ErrPrereadRangesBackward(
                 isubtree++;
 
                 Assert( isubtree <= csubtreePrereadMax );
+                // subtree buffer full, need to process now
                 if( csubtreePrereadMax == isubtree )
                 {
                     rgpgnoSubtree[isubtree] = pgnoNull;
@@ -2549,6 +3189,7 @@ ERR PrereadContext::ErrPrereadRangesBackward(
         }
     }
 
+    // process any remaining subtrees
     AssumePREFAST( isubtree < csubtreePrereadMax );
     if( isubtree > 0 )
     {
@@ -2570,10 +3211,13 @@ HandleError:
     return err;
 }
 
+//  ================================================================
 ERR PrereadContext::ErrAddPrereadCandidate( const PGNO pgno )
+//  ================================================================
 {
     ERR err = JET_errSuccess;
 
+    // realloc preread page buffer if it is too small to accept the new page
     const CPG cpgPrereadAllocMin = 128;
     const CPG cpgPrereadNew = m_cpgPreread + 1;
     if ( m_rgpgnoPreread == NULL || m_cpgPrereadAlloc < cpgPrereadNew )
@@ -2590,18 +3234,25 @@ ERR PrereadContext::ErrAddPrereadCandidate( const PGNO pgno )
         m_rgpgnoPreread = rgpgnoPrereadNew;
     }
 
+    // add the new page ref
     m_rgpgnoPreread[m_cpgPreread++] = pgno;
 
 HandleError:
     return err;
 }
 
+//  ================================================================
 ERR PrereadContext::ErrPrereadKeys(
     __in_ecount(ckeys) const void * const * const   rgpvKeys,
     __in_ecount(ckeys) const ULONG * const  rgcbKeys,
     const LONG                                      ckeys,
     __out LONG * const                              pckeysPreread,
     const JET_GRBIT                                 grbit )
+//  ================================================================
+//
+//  Preread all the leaf pages containing the given keys
+//
+//-
 {
     ERR err;
 
@@ -2631,6 +3282,7 @@ HandleError:
     return err;
 }
 
+//  ================================================================
 ERR ErrBTPrereadKeys(
     PIB * const                                     ppib,
     FUCB * const                                    pfucb,
@@ -2639,6 +3291,7 @@ ERR ErrBTPrereadKeys(
     const LONG                                      ckeys,
     __out LONG * const                              pckeysPreread,
     const JET_GRBIT                                 grbit )
+//  ================================================================
 {
     PIBTraceContextScope tcScope = TcBTICreateCtxScope( pfucb, iorsBTPreread );
 
@@ -2652,6 +3305,7 @@ ERR ErrBTPrereadKeys(
 }
 
 
+//  ================================================================
 ERR  ErrBTPrereadBookmarks(
     PIB * const                                     ppib,
     FUCB * const                                    pfucb,
@@ -2659,6 +3313,7 @@ ERR  ErrBTPrereadBookmarks(
     const LONG                                      cbm,
     __out LONG * const                              pcbmPreread,
     const JET_GRBIT                                 grbit )
+//  ================================================================
 {
     PIBTraceContextScope tcScope = TcBTICreateCtxScope( pfucb, iorsBTPreread);
 
@@ -2675,6 +3330,7 @@ ERR  ErrBTPrereadBookmarks(
 }
 
 
+//  ================================================================
 ERR PrereadContext::ErrPrereadBookmarkRanges(
     __in_ecount(cbm) const BOOKMARK * const         rgbmStart,
     __in_ecount(cbm) const BOOKMARK * const         rgbmEnd,
@@ -2684,6 +3340,11 @@ ERR PrereadContext::ErrPrereadBookmarkRanges(
     __in const ULONG                        cPageCacheMax,
     const JET_GRBIT                                 grbit,
     __out_opt ULONG * const                 pcPageCacheActual )
+//  ================================================================
+//
+//  Preread all the leaf pages containing the given bookmarks
+//
+//-
 {
     ERR     err             = JET_errSuccess;
     CSR     csrRoot;
@@ -2692,6 +3353,7 @@ ERR PrereadContext::ErrPrereadBookmarkRanges(
     *pcbmRangesPreread      = 0;
     m_fSawFragmentedSpace   = false;
 
+    //  check parameters
     bool fForward = false;
     if ( grbit & JET_bitPrereadForward )
     {
@@ -2717,6 +3379,7 @@ ERR PrereadContext::ErrPrereadBookmarkRanges(
         Error( ErrERRCheck( JET_errInvalidParameter ) );
     }
 
+    //  compute how many pages we want to preread
     CPG cpgPrereadMax = (CPG)cPageCacheMax;
     if ( grbit & bitPrereadSingletonRanges )
     {
@@ -2724,14 +3387,17 @@ ERR PrereadContext::ErrPrereadBookmarkRanges(
     }
     const CPG cpgPrereadMin = min( (CPG)cPageCacheMin, cpgPrereadMax );
 
+    //  complete empty preread requests
     if ( cpgPrereadMax == 0 )
     {
         *pcbmRangesPreread = 1;
         return JET_errSuccess;
     }
 
+    // set our max preread
     m_cpgPrereadMax = cpgPrereadMax;
 
+    //  open a CSR on the root of the index
     Call( csrRoot.ErrGetReadPage(
             m_ppib,
             m_ifmp,
@@ -2740,6 +3406,7 @@ ERR PrereadContext::ErrPrereadBookmarkRanges(
             PBFLatchHintPgnoRoot( m_pfucb )
             ) );
 
+    //  compute the list of pages to read
     if( fForward )
     {
         Call( ErrPrereadRangesForward(
@@ -2759,17 +3426,21 @@ ERR PrereadContext::ErrPrereadBookmarkRanges(
                 pcbmRangesPreread ) );
     }
 
+    // add a null terminator to the candidate list
     Call( ErrAddPrereadCandidate( pgnoNull ) );
 
 {
+    //  cooperatively throttle this preread request with other requests
     BFReserveAvailPages bfreserveavailpages( m_cpgPreread - 1 );
     CPG cpgPrereadRequested = min( m_cpgPreread - 1, max( cpgPrereadMin, bfreserveavailpages.CpgReserved() ) );
     
+    // save the actual number of pages pre-read
     if ( pcPageCacheActual )
     {
         *pcPageCacheActual = cpgPrereadRequested;
     }
 
+    //  try to preread the selected portion of the list
     PGNO pgnoPrereadSave = m_rgpgnoPreread[cpgPrereadRequested];
     m_rgpgnoPreread[cpgPrereadRequested] = pgnoNull;
 
@@ -2779,8 +3450,10 @@ ERR PrereadContext::ErrPrereadBookmarkRanges(
 
     m_rgpgnoPreread[cpgPrereadRequested] = pgnoPrereadSave;
 
+    //  trace the preread requests and if they were ignored or not
     for ( CPG ipg = 0; ipg < m_cpgPreread - 1; ipg++ )
     {
+        //  use only the least significant bit in case we want to add more flags later
         const BYTE fOpFlags = ipg < cpgPrereadRequested && FBFInCache( m_ifmp, m_rgpgnoPreread[ipg] ) ? 0 : 1;
 
         ETBTreePrereadPageRequest(
@@ -2802,11 +3475,14 @@ ERR PrereadContext::ErrPrereadBookmarkRanges(
     }
 }
 
+    //  if we saw fragmented space while computing the list of pages to preread then
+    //  try to register this index for defragmentation for contiguity
     if( m_fSawFragmentedSpace && fEligibleForOLD2 )
     {
         (void)ErrBTIRegisterForOLD2( m_pfucb );
     }
 
+    //  if the first range was only partially read, call it done
     if ( *pcbmRangesPreread == 0 )
     {
         *pcbmRangesPreread = 1;
@@ -2817,6 +3493,7 @@ HandleError:
     return err;
 }
 
+//  ================================================================
 ERR PrereadContext::ErrPrereadKeyRanges(
     __in_ecount(cRanges) const void *   const * const   rgpvKeysStart,
     __in_ecount(cRanges) const ULONG * const    rgcbKeysStart,
@@ -2828,6 +3505,11 @@ ERR PrereadContext::ErrPrereadKeyRanges(
     __in const ULONG                            cPageCacheMax,
     const JET_GRBIT                                     grbit,
     __out_opt ULONG * const                     pcPageCacheActual )
+//  ================================================================
+//
+//  Preread all the leaf pages containing the given keys
+//
+//-
 {
     ERR err;
 
@@ -2865,6 +3547,7 @@ HandleError:
     return err;
 }
 
+//  ================================================================
 ERR ErrBTPrereadKeyRanges(
     PIB * const                                     ppib,
     FUCB * const                                    pfucb,
@@ -2878,6 +3561,7 @@ ERR ErrBTPrereadKeyRanges(
     __in const ULONG                        cPageCacheMax,
     const JET_GRBIT                                 grbit,
     __out_opt ULONG * const                 pcPageCacheActual )
+//  ================================================================
 {
     PIBTraceContextScope tcScope = TcBTICreateCtxScope( pfucb, iorsBTPreread);
 
@@ -2896,6 +3580,7 @@ ERR ErrBTPrereadKeyRanges(
 }
 
 
+//  ================================================================
 VOID BTIPrereadContiguousPages(
     const IFMP ifmp,
     const CSR& csr,
@@ -2903,6 +3588,17 @@ VOID BTIPrereadContiguousPages(
     const BFPreReadFlags bfprf,
     const BFPriority bfpri,
     const TraceContext &tc )
+//  ================================================================
+//
+//  Given a csr pointing to an internal page, preread all the contiguous
+//  pages from the iline in the CSR on. Up to cpgMax pages are preread
+//  and the number of pages preread is returned in pcpgPreread.
+//
+//  Pages are only preread if they are exactly in order, with no gaps.
+//
+//  We will pre-read even for a single page so that we can correctly fast-evict.
+//
+//-
 {
     Assert( pPrereadInfo );
     Assert( pPrereadInfo->cpgToPreread > 0 );
@@ -2926,6 +3622,7 @@ VOID BTIPrereadContiguousPages(
 
     CPG cpg = 1;
 
+    // count the number of contiguous pages
     while ( ilineStart + cpg < ilineMax )
     {
         const INT iline = ilineStart + cpg;
@@ -2955,17 +3652,20 @@ VOID BTIPrereadContiguousPages(
 
     pPrereadInfo->pgnoPrereadStart = pgnoFirst;
 
+    // New scope not needed, all prereads will be issued under one context
     Assert( FParentObjectClassSet( tc.nParentObjectClass ) );
     BFPrereadPageRange( ifmp, pgnoFirst, cpg, &pPrereadInfo->cpgActuallyPreread, pPrereadInfo->rgfPageWasAlreadyCached, bfprf, bfpri, tc );
 }
 
+//  extracts the list of pages to preread and call BF to preread them
+//
 ERR ErrBTIPreread( FUCB *pfucb, CPG cpg, CPG * pcpgActual )
 {
 #ifdef DEBUG
     const INT   ilineOrig = Pcsr( pfucb )->ILine();
 
     Unused( ilineOrig );
-#endif
+#endif  //  DEBUG
 
     const CPG   cpgPrereadWanted = min( cpg,
                                   FFUCBPrereadForward( pfucb ) ?
@@ -2979,12 +3679,15 @@ ERR ErrBTIPreread( FUCB *pfucb, CPG cpg, CPG * pcpgActual )
 
     if( cpgPreread <= 1 )
     {
+        // we couldn't reserve any pages to preread. no point going any further
         *pcpgActual = 0;
         return JET_errSuccess;
     }
 
+    // Pre-reads on LVs should always have an index range set
     Assert( !FFUCBLongValue( pfucb ) || FFUCBLimstat( pfucb ) );
 
+    //  this buffer is larger than any possible preread list
     Assert( ( cpgPreread + 1 ) * sizeof( PGNO ) <= (size_t)g_rgfmp[ pfucb->ifmp ].CbPage() );
     PGNO * rgpgnoPreread;
     BFAlloc( bfasTemporary, (void**)&rgpgnoPreread );
@@ -2993,6 +3696,10 @@ ERR ErrBTIPreread( FUCB *pfucb, CPG cpg, CPG * pcpgActual )
     BOOL    fOutOfRange = fFalse;
     if( FFUCBLimstat( pfucb ) )
     {
+        //  we don't want to preread pages that aren't part of the index range
+        //  the separator key is greater than any key on the page it points to
+        //  so we always preread a page if the separator key is equal to our
+        //  index limit
 
         if( !pfucb->u.pfcb->FTypeLV() )
         {
@@ -3012,12 +3719,15 @@ ERR ErrBTIPreread( FUCB *pfucb, CPG cpg, CPG * pcpgActual )
         if( FFUCBLimstat( pfucb ) )
         {
 
+            //  we want to preread the first page that is out of range
+            //  so don't break until the top of the loop
 
             if( fOutOfRange )
             {
                 break;
             }
 
+            //  the separator key is suffix compressed so just compare the shortest key
 
             const INT   cmp             = CmpKeyShortest( pfucb->kdfCurr.key, keyLimit );
 
@@ -3031,6 +3741,7 @@ ERR ErrBTIPreread( FUCB *pfucb, CPG cpg, CPG * pcpgActual )
             }
             else
             {
+                //  always preread the page if the separator key is equal
                 fOutOfRange = fFalse;
             }
         }
@@ -3049,6 +3760,10 @@ ERR ErrBTIPreread( FUCB *pfucb, CPG cpg, CPG * pcpgActual )
         }
     }
 
+    // Sort the pages before checking. If we are doing a descending preread the
+    // pages will be in the wrong order. Also, if the pages are slightly out
+    // of order then preread will still read them efficiently so we don't want
+    // to trigger OLD2.
     sort( rgpgnoPreread, rgpgnoPreread + ipgnoPreread );
 
     if ( pfucb->u.pfcb->FUseOLD2() &&
@@ -3064,6 +3779,7 @@ ERR ErrBTIPreread( FUCB *pfucb, CPG cpg, CPG * pcpgActual )
 
     rgpgnoPreread[ipgnoPreread] = pgnoNull;
 
+    // New scope not needed, all prereads will be issued under one context
     auto tc = TcCurr();
     Assert( FParentObjectClassSet( tc.nParentObjectClass ) );
     BFPrereadPageList( pfucb->u.pfcb->Ifmp(), rgpgnoPreread, pcpgActual, bfprfDefault, pfucb->ppib->BfpriPriority( pfucb->u.pfcb->Ifmp() ), tc );
@@ -3072,13 +3788,21 @@ ERR ErrBTIPreread( FUCB *pfucb, CPG cpg, CPG * pcpgActual )
     return JET_errSuccess;
 }
 
+// atmost 8 pages for such opportunistic reading.
 #define  dwPagesMaxOpportuneRead  8
 
+// If the leaf page we are navigating to is not already in the cache then 
+// attempt to preread adjacent pages that are also not in cache. i.e. if there
+// is going to be an IO try to make it a larger IO to get contiguous pages on 
+// either side.
+// pfucb must be at ParentOfLeaf and ILine must be positioned to point to pgnoChild.
 ERR ErrBTIOpportuneRead( FUCB *pfucb, PGNO pgnoChild )
 {
     CSR * const pcsr            = Pcsr( pfucb );
     Assert( pcsr->Cpage().FParentOfLeaf() );
 
+    // Do any Opportune read optimization only if target page is not already in cache. i.e. only if
+    // there is going to be an IO in any case.
     if ( !FBFInCache( pfucb->ifmp, pgnoChild ) )
     {
         BYTE    rgbForward[dwPagesMaxOpportuneRead];
@@ -3086,6 +3810,8 @@ ERR ErrBTIOpportuneRead( FUCB *pfucb, PGNO pgnoChild )
         memset(rgbForward, 0, sizeof(rgbForward));
         memset(rgbBackward, 0, sizeof(rgbBackward));
         
+        // Scan the parent-of-leaf node and check for presence of pages
+        // that are on either side of pgnoChild (upto dwPagesMaxOpportuneRead)
         const INT cline = pcsr->Cpage().Clines();
         for ( INT iline = 0; iline < cline; ++iline )
         {
@@ -3104,17 +3830,20 @@ ERR ErrBTIOpportuneRead( FUCB *pfucb, PGNO pgnoChild )
             }
         }
 
+        // Look in pages on either side of pgnoChild that can be opportunely read
         PGNO    pgnoMin = pgnoChild;
         PGNO    pgnoMost = pgnoChild;
-        DWORD   dwPagesTotal = 1;
+        DWORD   dwPagesTotal = 1;           //count pgnoChild itself as 1
         
         for (PGNO pgnoLoop = pgnoChild + 1;
                 dwPagesTotal < dwPagesMaxOpportuneRead;
                     ++pgnoLoop)
         {
+            // Stop if page is already in cache
             if ( FBFInCache( pfucb->ifmp, pgnoLoop) )
                 break;
 
+            // stop if page is not referenced anywhere in the current ParentOfLeaf
             if ( rgbForward[pgnoLoop - pgnoChild] == 0)
                 break;
 
@@ -3122,13 +3851,16 @@ ERR ErrBTIOpportuneRead( FUCB *pfucb, PGNO pgnoChild )
             ++dwPagesTotal;
         }
         
+        // Similar loop in the other direction to find the Min.
         for (PGNO pgnoLoop = pgnoChild - 1;
                 dwPagesTotal < dwPagesMaxOpportuneRead;
                     --pgnoLoop)
         {
+            // Stop if page is already in cache
             if ( FBFInCache( pfucb->ifmp, pgnoLoop) )
                 break;
 
+            // stop if page is not referenced anywhere in the current ParentOfLeaf
             if ( rgbBackward[pgnoChild - pgnoLoop] == 0)
                 break;
 
@@ -3136,12 +3868,16 @@ ERR ErrBTIOpportuneRead( FUCB *pfucb, PGNO pgnoChild )
             ++dwPagesTotal;
         }
 
+        // Do preread if we have atleast 2 contiguous pages. So if we come here with 1, it will
+        // get sync-read in the regular read codepath.
         if ( dwPagesTotal >= 2 )
         {
             PIBTraceContextScope tcScope = pfucb->ppib->InitTraceContextScope();
             tcScope->iorReason.AddFlag( iorfOpportune );
             Assert( FParentObjectClassSet( tcScope->nParentObjectClass ) );
 
+            // this preread includes pgnoChild, which we have to preread anyway so subtract one from the preread count
+            // to determine to number of extra pages being read
             PERFOpt( cBTOpportuneReads.Add( PinstFromPfucb( pfucb )->m_iInstance, (TCE)tcScope->nParentObjectClass, dwPagesTotal - 1 ) );
 
             BFPrereadPageRange( pfucb->ifmp, pgnoMin, dwPagesTotal, bfprfDefault, pfucb->ppib->BfpriPriority( pfucb->ifmp ), *tcScope );
@@ -3150,6 +3886,7 @@ ERR ErrBTIOpportuneRead( FUCB *pfucb, PGNO pgnoChild )
     return JET_errSuccess;
 }
 
+// stack wrapper for RESKey object
 
 class CAutoKey
 {
@@ -3175,6 +3912,7 @@ public:
             Assert( ((DWORD_PTR)((INT)cbSize)) == cbSize );
             return (INT)cbSize;
         }
+        // not allocated yet ...
         return 0;
     }
 
@@ -3189,7 +3927,7 @@ private:
 JETUNITTEST( BTICAutoKey, SimpleAlloc )
 {
     CAutoKey key;
-    CHECK( key != NULL );
+    CHECK( key != NULL );   // potential OOM failure
     CHECK( key.CbMax() == cbKeyAlloc );
 }
 
@@ -3205,12 +3943,28 @@ JETUNITTEST( BTICAutoKey, DeferredAlloc )
     CAutoKey key( CAutoKey::eDeferAlloc );
     CHECK( key == NULL );
     CHECK( key.CbMax() == 0 );
-    CHECKCALLS( key.ErrAlloc() );
-    CHECK( key != NULL );
+    CHECKCALLS( key.ErrAlloc() );   // potential OOM failure
+    CHECK( key != NULL );   // potential OOM failure
     CHECK( key.CbMax() == cbKeyAlloc );
 }
 
 
+//  seeks to key from root of tree
+//
+//      pdib->pos == posFirst --> seek to first node in tree
+//                   posLast  --> seek to last node in tree
+//                   posDown --> seek to pdib->key in tree
+//                   posFrac --> fractional positioning
+//
+//      pdib->pbm   used for posDown and posFrac
+//
+//      pdib->dirflag == fDIRAllNode --> seek to deleted/versioned nodes too
+//
+//  positions cursor on node if one exists and is visible to cursor
+//  else on next node visible to cursor
+//  if no next node exists that is visible to cursor,
+//      move previous to visible node
+//
 ERR ErrBTDown( FUCB *pfucb, DIB *pdib, LATCH latch )
 {
     ERR         err                         = JET_errSuccess;
@@ -3223,6 +3977,8 @@ ERR ErrBTDown( FUCB *pfucb, DIB *pdib, LATCH latch )
     PIBTraceContextScope tcScope        = TcBTICreateCtxScope( pfucb, iorsBTSeek );
 
 #ifdef CHECK_UNIQUE_KEY_ON_NONUNIQUE_INDEX
+    //  unique-key check can only be done for an exact-match key-only seek on
+    //  a non-unique index
     BOOL        fKeyIsolatedToCurrentPage   = fFalse;
     const BOOL  fCheckUniqueness            = ( ( pdib->dirflag & fDIRCheckUniqueness )
                                                 && ( pdib->dirflag & fDIRExact )
@@ -3232,10 +3988,17 @@ ERR ErrBTDown( FUCB *pfucb, DIB *pdib, LATCH latch )
 #ifdef DEBUG
     ULONG       ulTrack                     = 0x00;
 
+    //  Disable RFS and cleanup checking
+    //  It's not a real failure path because it's debug only code
     const LONG cRFSCountdownOld = RFSThreadDisable( 0 );
     BOOL fNeedReEnableRFS = fTrue;
     const BOOL fCleanUpStateSaved = FOSSetCleanupState( fFalse );
 
+    //  we must save off the key (and possibly data) to make sure we can properly validate our
+    //  resulting position with the desired / seeked key.  We must save it off because if we
+    //  call ErrBTNext() or ErrBTPrev() we may release / save our bookmark / bmCurr.  And this
+    //  might affect pdib->pbm because at least one caller (ErrBTPerformOnSeekBM) passes bmCurr 
+    //  as pdib->pbm.
 
     CAutoKey    keySeekKey( CAutoKey::eDeferAlloc );
     CAutoKey    keySeekData( CAutoKey::eDeferAlloc );
@@ -3258,6 +4021,7 @@ ERR ErrBTDown( FUCB *pfucb, DIB *pdib, LATCH latch )
 
         if ( !( FFUCBUnique( pfucb ) || fSeekOnNonUniqueKeyOnly ) )
         {
+            //  key should be enough, because data should be a bookmark / primary key.
             Call( keySeekData.ErrAlloc() );
             Assert( pdib->pbm->data.Cb() <= keySeekData.CbMax() );
             memcpy( keySeekData, pdib->pbm->data.Pv(), pdib->pbm->data.Cb() );
@@ -3267,18 +4031,26 @@ ERR ErrBTDown( FUCB *pfucb, DIB *pdib, LATCH latch )
         }
     }
     
+    //  Restore RFS and cleanup checking
+    //
     FOSSetCleanupState( fCleanUpStateSaved );
     RFSThreadReEnable( cRFSCountdownOld );
     fNeedReEnableRFS = fFalse;
-#endif
+#endif  //  DEBUG
 
+    // Prevent R/O transactions from proceeding if they are holding up version store cleanup.
+    //
     if ( pfucb->ppib->FReadOnlyTrx() && pfucb->ppib->Level() > 0 )
     {
         Call( PverFromIfmp( pfucb->ifmp )->ErrVERCheckTransactionSize( pfucb->ppib ) );
     }
 
     Assert( FBTLogicallyNavigableState( pfucb ) ||
+                // Special Case: There is one time during redo we allow walking down a B-tree,
+                // during sizing the database which happens at "safe" points during recovery,
+                // and only interacts with the root OE tree.
                 ( FSPIsRootSpaceTree( pfucb ) &&
+                    // except if we are patched, the OE tree may be invalid
                     g_rgfmp[ pfucb->ifmp ].Pdbfilehdr()->Dbstate() != JET_dbstateDirtyAndPatchedShutdown )
             );
 
@@ -3287,12 +4059,18 @@ ERR ErrBTDown( FUCB *pfucb, DIB *pdib, LATCH latch )
     Assert( posDown == pdib->pos
             || 0 == ( pdib->dirflag & (fDIRFavourPrev|fDIRFavourNext|fDIRExact) ) );
 
+    //  no latch should be held by cursor on tree
+    //
     Assert( !pcsr->FLatched() );
 
     PERFOpt( PERFIncCounterTable( cBTSeek, PinstFromPfucb( pfucb ), (TCE)tcScope->nParentObjectClass ) );
 
+    //  go to root
+    //
     Call( ErrBTIGotoRoot( pfucb, latch ) );
 
+    //  if no nodes in root, return
+    //
     if ( 0 == pcsr->Cpage().Clines() )
     {
         BTUp( pfucb );
@@ -3302,26 +4080,46 @@ ERR ErrBTDown( FUCB *pfucb, DIB *pdib, LATCH latch )
     CallS( err );
 
 #ifdef PREREAD_ON_INITIAL_SEEK
+    //  if sequentially scanning, but preread hasn't
+    //  yet been initiated, then initiate preread
+    //  if we're moving to posfirst or posLast
+    //
     if ( FFUCBSequential( pfucb ) && !FFUCBPreread( pfucb ) )
     {
         if ( posFirst == pdib->pos )
         {
+            //  since we're sequentially scanning and moving
+            //  to the first record, presumably we're going
+            //  to be scanning forward
+            //
             FUCBSetPrereadForward( pfucb, cpgPrereadSequential );
         }
         else if ( posLast == pdib->pos )
         {
+            //  since we're sequentially scanning and moving
+            //  to the last record, presumably we're going
+            //  to be scanning backward
+            //
             FUCBSetPrereadBackward( pfucb, cpgPrereadSequential );
         }
     }
-#endif
+#endif  //  PREREAD_ON_INITIAL_SEEK
 
+    //  setup to compute our record position
+    //
     pfucb->ulLTLast = 0;
     pfucb->ulTotalLast = 1;
 
+    //  seek to key
+    //
     for ( ; ; )
     {
+        //  verify page belongs to this btree
+        //
         if ( pcsr->Cpage().ObjidFDP() != pfucb->u.pfcb->ObjidFDP() )
         {
+            //  if not repair, assert, otherwise, suppress the assert and repair will
+            //  just naturally err out
             AssertSz( g_fRepair, "Corrupt B-tree: page does not belong to btree" );
             Call( ErrBTIReportBadPageLink(
                         pfucb,
@@ -3333,8 +4131,12 @@ ERR ErrBTDown( FUCB *pfucb, DIB *pdib, LATCH latch )
                         "BtDownObjid" ) );
         }
 
+        //  verify page is not empty
+        //
         if ( pcsr->Cpage().Clines() <= 0 )
         {
+            //  if not repair, assert, otherwise, suppress the assert and repair will
+            //  just naturally err out
             AssertSz( g_fRepair, "Corrupt B-tree: page found was empty" );
             Call( ErrBTIReportBadPageLink(
                         pfucb,
@@ -3350,6 +4152,12 @@ ERR ErrBTDown( FUCB *pfucb, DIB *pdib, LATCH latch )
                                 "BtDownClinesLowInPlace" ) ) );
         }
 
+        //  for every page level, seek to key
+        //  if internal page,
+        //      get child page
+        //      move cursor to new page
+        //      release parent page
+        //
         switch ( pdib->pos )
         {
             case posDown:
@@ -3376,11 +4184,16 @@ ERR ErrBTDown( FUCB *pfucb, DIB *pdib, LATCH latch )
         const INT   iline   = pcsr->ILine();
         const INT   clines  = pcsr->Cpage().Clines();
 
+        //  adjust number of records and key position
+        //  for this tree level
+        //
         pfucb->ulLTLast = pfucb->ulLTLast * clines + iline;
         pfucb->ulTotalLast = pfucb->ulTotalLast * clines;
 
         if ( pcsr->Cpage().FLeafPage() )
         {
+            //  leaf node reached, exit loop
+            //
             break;
         }
         else
@@ -3395,6 +4208,13 @@ ERR ErrBTDown( FUCB *pfucb, DIB *pdib, LATCH latch )
 
             const BOOL  fPageParentOfLeaf   = pcsr->Cpage().FParentOfLeaf();
 
+            //  if performing a key-only seek on a non-unique tree,
+            //  ErrNDSeek above GUARANTEES that this node's key+data
+            //  is greater than the key being seeked, because of one
+            //  of the following:
+            //      - the node has a NULL key
+            //      - the node's key itself is greater than the key being seeked
+            //      - keys are equal, but the node's data portion forces it greater
             Assert( !fSeekOnNonUniqueKeyOnly
                 || pfucb->kdfCurr.key.FNull()
                 || CmpKeyShortest( pfucb->kdfCurr.key, pdib->pbm->key ) > 0
@@ -3404,36 +4224,55 @@ ERR ErrBTDown( FUCB *pfucb, DIB *pdib, LATCH latch )
 #ifdef CHECK_UNIQUE_KEY_ON_NONUNIQUE_INDEX
             if ( fPageParentOfLeaf && fCheckUniqueness )
             {
+                //  The key being seeked may have dupes if this
+                //  node's key is not strictly greater than the
+                //  key being seeked when we compare up to the
+                //  length of the shortest of the two
+                //
                 fKeyIsolatedToCurrentPage = ( pfucb->kdfCurr.key.FNull()
                                             || CmpKeyShortest( pfucb->kdfCurr.key, pdib->pbm->key ) > 0 );
             }
 #endif
 
+            //  get pgno of child from node
+            //  switch to that page
+            //
             Assert( pfucb->kdfCurr.data.Cb() == sizeof( PGNO ) );
             const PGNO  pgnoChild           = *(UnalignedLittleEndian< PGNO > *) pfucb->kdfCurr.data.Pv();
 
+            // Do smart pre-reading
             if ( fPageParentOfLeaf && FFUCBOpportuneRead( pfucb ) )
             {
+                // Attempt to Opportunely read data by looking for pages on either side of
+                // the target page, i.e. if we are going to be doing an IO then try to do a larger IO.
                 Call( ErrBTIOpportuneRead( pfucb, pgnoChild ) );
             }
 
             if ( FFUCBPreread( pfucb ) )
             {
+                //  NOTE: the preread code below may not restore the kdfCurr
 
                 if ( fPageParentOfLeaf )
                 {
                     if ( 0 == pfucb->cpgPrereadNotConsumed && pfucb->cpgPreread > 1 )
                     {
+                        //  if prereading and have reached the page above the leaf level,
+                        //  extract next set of pages to be preread
                         Call( ErrBTIPreread( pfucb, pfucb->cpgPreread, &pfucb->cpgPrereadNotConsumed) );
                     }
                 }
                 else if ( ( FFUCBSequential( pfucb ) || FFUCBLimstat( pfucb ) )
                         && FFUCBPrereadForward( pfucb ) )
                 {
+                    //  if prereading a sequential table and on an internal page read the next
+                    //  internal child page as well
                     CPG cpgUnused;
                     Call( ErrBTIPreread( pfucb, 2, &cpgUnused ) );
                 }
 
+                //  iline must be restored because ErrBTIPreread may have fiddled
+                //  with it in order to look at other nodes on the page
+                //
                 pcsr->SetILine( iline );
             }
 
@@ -3445,6 +4284,8 @@ ERR ErrBTDown( FUCB *pfucb, DIB *pdib, LATCH latch )
                         pgnoChild,
                         pfucb->u.pfcb->FNoCache()  ) );
 
+            // 05/08/09, SOMEONE: this is a test hack which forces ESE to generate an ignored log
+            // record. We need to make sure that we can skip over ignorable log records during recovery.
             if(JET_errSuccess != ErrFaultInjection(43973))
             {
                 Call(ErrLGIgnoredRecord(
@@ -3459,12 +4300,18 @@ ERR ErrBTDown( FUCB *pfucb, DIB *pdib, LATCH latch )
         }
     }
 
+    //  now, the cursor is on leaf node
+    //
     Assert( pcsr->Cpage().FLeafPage() );
     AssertBTType( pfucb );
     AssertNDGet( pfucb );
 
+    //  if we were going to the first/last page in the tree, check to see that it
+    //  doesn't have a sibling
     if ( posFirst == pdib->pos && pgnoNull != pcsr->Cpage().PgnoPrev() )
     {
+        //  if not repair, assert, otherwise, suppress the assert and repair will
+        //  just naturally err out
         AssertSz( g_fRepair, "Corrupt B-tree: first page has pgnoPrev" );
         Call( ErrBTIReportBadPageLink(
                     pfucb,
@@ -3477,6 +4324,8 @@ ERR ErrBTDown( FUCB *pfucb, DIB *pdib, LATCH latch )
     }
     else if ( posLast == pdib->pos && pgnoNull != pcsr->Cpage().PgnoNext() )
     {
+        //  if not repair, assert, otherwise, suppress the assert and repair will
+        //  just naturally err out
         AssertSz( g_fRepair, "Corrupt B-tree: last page has pgnoNext" );
         Call( ErrBTIReportBadPageLink(
                     pfucb,
@@ -3488,6 +4337,14 @@ ERR ErrBTDown( FUCB *pfucb, DIB *pdib, LATCH latch )
                     "BtDownRightMostPagePgnoNextNonNull" ) );
     }
 
+    //  if node is not visible to cursor,
+    //  move next till a node visible to cursor is found,
+    //      if that leaves end of tree,
+    //          move previous to first node visible to cursor
+    //
+    //  fDIRAllNode flag is used by ErrBTGotoBookmark
+    //  to go to deleted records
+    //
     Assert( !( ( pdib->dirflag & fDIRAllNode ) &&
             JET_errNoCurrentRecord == err ) );
     if ( !( pdib->dirflag & fDIRAllNode ) )
@@ -3514,6 +4371,10 @@ ERR ErrBTDown( FUCB *pfucb, DIB *pdib, LATCH latch )
 
             if ( ( pdib->dirflag & fDIRFavourNext ) || posFirst == pdib->pos )
             {
+                //  fDIRFavourNext is only set if we know we want RecordNotFound
+                //  if there are no nodes greater than or equal to the one we
+                //  want, in which case there's no point going ErrBTPrev().
+                //
                 OnDebug( ulTrack |= 0x08 );
 
                 wrn = wrnNDFoundGreater;
@@ -3523,6 +4384,10 @@ ERR ErrBTDown( FUCB *pfucb, DIB *pdib, LATCH latch )
             {
                 OnDebug( ulTrack |= 0x10 );
 
+                //  if this is a non-unique index then it is possible that
+                //  subsequent nodes could have the same key, in which case
+                //  we should land on them. if those nodes don't exist then
+                //  we will move to the previous node
 
                 bool fFoundExact = false;
                 if ( fSeekOnNonUniqueKeyOnly )
@@ -3534,17 +4399,22 @@ ERR ErrBTDown( FUCB *pfucb, DIB *pdib, LATCH latch )
                     {
                         OnDebug( ulTrack |= 0x2000 );
 
+                        // Here we have moved next and landed on a record with the same key.
+                        // This counts as a successful seek 
                         fFoundExact = true;
                         err = JET_errSuccess;
                     }
                     else if ( JET_errNoCurrentRecord != err )
                     {
+                        // It is possible to move off the end of the tree, but we don't expect
+                        // any other errors
                         Call( err );
                     }
                 }
 
                 if ( !fFoundExact )
                 {
+                    // We were unable to find an exact match. Move to the previous node
                     wrn = wrnNDFoundLess;
                     err = ErrBTPrev( pfucb, fDIRNull );
                 }
@@ -3568,9 +4438,13 @@ ERR ErrBTDown( FUCB *pfucb, DIB *pdib, LATCH latch )
             }
             Call( err );
 
+            //  BTNext/Prev() shouldn't return these warnings
             Assert( wrnNDFoundGreater != err );
             Assert( wrnNDFoundLess != err );
 
+            //  if on a non-unique index and no data portion of the
+            //  bookmark was passed in, may need to do a "just the key"
+            //  comparison
             if ( fSeekOnNonUniqueKeyOnly )
             {
                 OnDebug( ulTrack |= 0x80 );
@@ -3585,13 +4459,15 @@ ERR ErrBTDown( FUCB *pfucb, DIB *pdib, LATCH latch )
                     const INT cmp = CmpKey( pfucb->kdfCurr.key, pdib->pbm->key );
                     Assert( ( cmp < 0 && wrnNDFoundLess == wrn )
                         || ( cmp > 0 && wrnNDFoundGreater == wrn ) );
-#endif
+#endif  //  DEBUG
                 }
             }
         }
     }
     else
     {
+        // we need to continue if the node is deleted and 
+        // doesn't have any versions
         if ( pdib->dirflag & fDIRAllNodesNoCommittedDeleted )
         {
             OnDebug( ulTrack |= 0x100 );
@@ -3604,6 +4480,7 @@ ERR ErrBTDown( FUCB *pfucb, DIB *pdib, LATCH latch )
                     Call( ErrBTNext( pfucb, fDIRAllNodesNoCommittedDeleted | fDIRAllNode ) );
                 }
                 else if ( posLast == pdib->pos )
+                    // posLast == pdib->pos 
                 {
                     OnDebug( ulTrack |= 0x400 );
                     Call( ErrBTPrev( pfucb, fDIRAllNodesNoCommittedDeleted | fDIRAllNode ) );
@@ -3640,41 +4517,62 @@ ERR ErrBTDown( FUCB *pfucb, DIB *pdib, LATCH latch )
             Assert( fSeekOnNonUniqueKeyOnly );
             if ( pcsr->ILine() < pcsr->Cpage().Clines() - 1 )
             {
+                //  we're not on the last node on this page
+                //  so check the key of the next node
+                //
                 cmp     = CmpNDKeyOfNextNode( pcsr, pdib->pbm->key );
                 Assert( cmp >= 0 );
                 if ( cmp > 0 )
                 {
+                    //  these asserts must be commented out because they do not handle the case
+                    //  of a down operation landing on a page with all flag deleted nodes
+                    //  and moving laterally to a page containing the node of interest.
+                    //
+                    //  Assert( fKeyIsolatedToCurrentPage || pgnoNull == pcsr->Cpage().PgnoNext() );
+                    //  Assert( fKeyIsolatedToCurrentPage || pcsr->Cpage().FRootPage() );
                     err = ErrERRCheck( JET_wrnUniqueKey );
                 }
             }
             else
             {
+                //  we're on the last node of the page, so
+                //  best check we can do is to see if it's
+                //  possible that the next page may contain
+                //  the same key
+                //
+                //  if we are on the last page the key is unique
+                //  (we are on the last record in the entire b-tree)
+                //
                 if ( fKeyIsolatedToCurrentPage || pgnoNull == pcsr->Cpage().PgnoNext() )
                 {
                     err = ErrERRCheck( JET_wrnUniqueKey );
                 }
             }
         }
-#endif
+#endif  //  CHECK_UNIQUE_KEY_ON_NONUNIQUE_INDEX
     }
 
 
+    //  now, the cursor is on leaf node
+    //
     Assert( pcsr->Cpage().FLeafPage() );
     AssertBTType( pfucb );
     AssertNDGet( pfucb );
     Assert( err >= 0 );
 
+/// Assert( Pcsr( pfucb )->Latch() == latch );
     return err;
 
 HandleError:
 
 #ifdef  DEBUG
+    // Restore RFS and cleanup checking
     FOSSetCleanupState( fCleanUpStateSaved );
     if ( fNeedReEnableRFS )
     {
         RFSThreadReEnable( cRFSCountdownOld );
     }
-#endif
+#endif  //  DEBUG
 
     Assert( err < 0 );
     BTUp( pfucb );
@@ -3704,6 +4602,8 @@ ERR ErrBTPerformOnSeekBM( FUCB * const pfucb, const DIRFLAG dirflag )
     Assert( JET_errNoCurrentRecord != err );
     if ( JET_errRecordNotFound == err )
     {
+        //  moved past last node
+        //
         pfucb->locLogical = ( fDIRFavourPrev == dirflag ? locBeforeFirst : locAfterLast );
     }
 
@@ -3712,8 +4612,15 @@ ERR ErrBTPerformOnSeekBM( FUCB * const pfucb, const DIRFLAG dirflag )
 }
 
 
+//  *********************************************
+//  direct access routines
+//
 
 
+//  gets position of key by seeking down from root
+//  ulTotal is estimated total number of records in tree
+//  ulLT is estimated number of nodes lesser than given node
+//
 ERR ErrBTGetPosition( FUCB *pfucb, ULONG *pulLT, ULONG *pulTotal )
 {
     ERR     err;
@@ -3721,8 +4628,13 @@ ERR ErrBTGetPosition( FUCB *pfucb, ULONG *pulLT, ULONG *pulTotal )
     UINT    ulTotal = 1;
     PIBTraceContextScope tcScope = TcBTICreateCtxScope( pfucb, iorsBTSeek );
 
+    //  no latch should be held by cursor on tree
+    //
     Assert( !Pcsr( pfucb )->FLatched() );
 
+    //  if we are on locOnSeekBM then purge our cached key position because it
+    //  is incorrect
+    //
     if ( pfucb->locLogical == locOnSeekBM )
     {
         pfucb->ulLTCurr = 0;
@@ -3730,9 +4642,17 @@ ERR ErrBTGetPosition( FUCB *pfucb, ULONG *pulLT, ULONG *pulTotal )
     }
     else
     {
+        //  this function assumes we have a valid bookmark, and
+        //  it is currently only called by ErrDIRGetPosition(),
+        //  which guarantees logical currency is either
+        //  locOnCurBM or locOnSeekBM (and therefore the
+        //  current bookmark is valid)
+        //
         Assert( locOnCurBM == pfucb->locLogical );
     }
 
+    //  if we have a cached key position then return that
+    //
     if ( pfucb->ulTotalCurr )
     {
         *pulLT = pfucb->ulLTCurr;
@@ -3742,23 +4662,37 @@ ERR ErrBTGetPosition( FUCB *pfucb, ULONG *pulLT, ULONG *pulTotal )
 
     PERFOpt( PERFIncCounterTable( cBTSeek, PinstFromPfucb( pfucb ), (TCE)tcScope->nParentObjectClass ) );
 
+    //  go to root
+    //
     CallR( ErrBTIGotoRoot( pfucb, latchReadTouch ) );
 
+    //  seek to bookmark key
+    //
     for ( ; ; )
     {
         INT     clines = Pcsr( pfucb )->Cpage().Clines();
 
+        //  for every page level, seek to bookmark key
+        //
         Call( ErrNDSeek( pfucb, pfucb->bmCurr ) );
 
+        //  adjust number of records and key position
+        //  for this tree level
+        //
         ulLT = ulLT * clines + Pcsr( pfucb )->ILine();
         ulTotal = ulTotal * clines;
 
         if ( !Pcsr( pfucb )->Cpage().FInvisibleSons( ) )
         {
+            //  leaf node reached, exit loop
+            //
             break;
         }
         else
         {
+            //  get pgno of child from node
+            //  switch to that page
+            //
             Assert( pfucb->kdfCurr.data.Cb() == sizeof( PGNO ) );
             Call( Pcsr( pfucb )->ErrSwitchPage(
                                 pfucb->ppib,
@@ -3776,11 +4710,20 @@ ERR ErrBTGetPosition( FUCB *pfucb, ULONG *pulLT, ULONG *pulTotal )
     err = JET_errSuccess;
 
 HandleError:
+    //  unlatch the page
+    //  do not save logical currency
+    //
     BTUp( pfucb );
     return err;
 }
 
 
+//  goes to given bookmark on page [does not check version store]
+//  bookmark must have been obtained on a node
+//  if bookmark does not exist, returns JET_errRecordNotFound
+//  if ExactPos is set, and we can not find node with bookmark == bm
+//      we return error
+//
 ERR ErrBTGotoBookmark( FUCB *pfucb, const BOOKMARK& bm, LATCH latch, BOOL fExactPos )
 {
     ERR         err;
@@ -3794,6 +4737,9 @@ ERR ErrBTGotoBookmark( FUCB *pfucb, const BOOKMARK& bm, LATCH latch, BOOL fExact
     Assert( latchReadTouch == latch || latchReadNoTouch == latch ||
             latchRIW == latch );
 
+    //  similar to BTDown
+    //  goto Root and seek down using bookmark key and data
+    //
     dib.pos     = posDown;
     dib.pbm     = &bmT;
     dib.dirflag = fDIRAllNode | ( fExactPos ? fDIRExact : fDIRNull );
@@ -3806,6 +4752,8 @@ ERR ErrBTGotoBookmark( FUCB *pfucb, const BOOKMARK& bm, LATCH latch, BOOL fExact
             || wrnNDFoundLess == err
             || wrnNDFoundGreater == err ) )
     {
+        //  bookmark does not exist anymore
+        //
         BTUp( pfucb );
         Assert( !Pcsr( pfucb )->FLatched() );
         err = ErrERRCheck( JET_errRecordDeleted );
@@ -3815,6 +4763,12 @@ ERR ErrBTGotoBookmark( FUCB *pfucb, const BOOKMARK& bm, LATCH latch, BOOL fExact
 }
 
 
+//  seeks for bookmark in page
+//  functionality is similar to ErrBTGotoBookmark
+//      looking at all nodes [fDIRAllNode]
+//      and seeking for equal
+//  returns wrnNDNotInPage if bookmark falls outside page boundary
+//
 ERR ErrBTISeekInPage( FUCB *pfucb, const BOOKMARK& bmSearch )
 {
     ERR     err;
@@ -3836,7 +4790,7 @@ ERR ErrBTISeekInPage( FUCB *pfucb, const BOOKMARK& bmSearch )
     Assert( !Pcsr( pfucb )->Cpage().FPreInitPage() );
 
     err = ErrNDSeek( pfucb, bmSearch );
-    AssertRTL( err >= JET_errSuccess );
+    AssertRTL( err >= JET_errSuccess ); //  even in corruption case, should be very hard to hit this for where it is used.
     CallR( err );
 
     if ( wrnNDFoundLess == err &&
@@ -3844,6 +4798,8 @@ ERR ErrBTISeekInPage( FUCB *pfucb, const BOOKMARK& bmSearch )
          wrnNDFoundGreater == err &&
              0 == Pcsr( pfucb )->ILine() )
     {
+        //  node may be elsewhere if it is not in the range of this page
+        //
         err = ErrERRCheck( wrnNDNotFoundInPage );
     }
 
@@ -3851,6 +4807,8 @@ ERR ErrBTISeekInPage( FUCB *pfucb, const BOOKMARK& bmSearch )
 }
 
 
+//  checks if a given tree contains a specific page
+//
 ERR ErrBTContainsPage( FUCB* const pfucb, const BOOKMARK& bm, const PGNO pgno, const BOOL fLeafPage )
 {
     ERR err = JET_errSuccess;
@@ -3866,30 +4824,40 @@ ERR ErrBTContainsPage( FUCB* const pfucb, const BOOKMARK& bm, const PGNO pgno, c
     Assert( !bm.key.FNull() || !fLeafPage );
     Assert( bm.data.FNull() || ( fLeafPage && fNonUniqueKeys ) );
 
+    // Start from the root.
     Call( ErrBTIGotoRoot( pfucb, latchReadTouch ) );
     fLatched = fTrue;
 
+    // The root itself is what we're looking for.
     pgnoRoot = pcsr->Pgno();
     pgnoCurrent = pgnoRoot;
     if ( pgnoCurrent == pgno )
     {
-        Expected( fFalse );
+        Expected( fFalse ); // We currently do not have any cases where we look for a root.
         goto HandleError;
     }
 
+    // No nodes in the root, done.
     if ( pcsr->Cpage().Clines() == 0 )
     {
         Error( ErrERRCheck( JET_errRecordNotFound ) );
     }
 
+    // Search for references to pgno in the tree.
+    // Because we are only testing for presence, we don't need to actually navigate
+    // to the page or a specific node or even latch the page. Therefore, we only
+    // need to search the nodes of the parent of the level we're looking for.
     while ( fTrue )
     {
+        // If the current page is a leaf or a parent of leaf and we don't need to search the leaf level,
+        // we're done.
         if ( pcsr->Cpage().FLeafPage() ||
             ( pcsr->Cpage().FParentOfLeaf() && !fLeafPage ) )
         {
             Error( ErrERRCheck( JET_errRecordNotFound ) );
         }
 
+        // Make sure that the page belongs to the expected object.
         if ( pcsr->Cpage().ObjidFDP() != pfucb->u.pfcb->ObjidFDP() )
         {
             Error( ErrBTIReportBadPageLink(
@@ -3902,6 +4870,7 @@ ERR ErrBTContainsPage( FUCB* const pfucb, const BOOKMARK& bm, const PGNO pgno, c
                         "BtContainsObjid" ) );
         }
 
+        // Make sure the page is not empty.
         if ( pcsr->Cpage().Clines() <= 0 )
         {
             Error( ErrBTIReportBadPageLink(
@@ -3918,12 +4887,35 @@ ERR ErrBTContainsPage( FUCB* const pfucb, const BOOKMARK& bm, const PGNO pgno, c
                                 "BtContainsClinesLowInPlace" ) ) );
         }
 
+        // Seek using the bookmark/hint provided.
+        //
+        // IMPORTANT: this lookup code differs from regular BTDown in a few significant ways, due
+        // to the fact that the provided bookmark is a key/data pair which is actually present
+        // in the page (thus it can be viewed as a hint), as opposed to a leaf-level key/data
+        // search key which we want to navigate to. However, note that the provided bookmark may
+        // be equivalent to a BTDown-like search key, in the case where we're looking for a leaf page.
+        //
+        //   1- We'll never get to the actual leaf level of the tree. Because we're looking for
+        //      a reference to the page, we would have found a match as we come across its parent.
+        //
+        //   2- When looking for the next page to navigate to, the direction of navigation differs
+        //      from a regular BTDown if we're looking for an internal page, w.r.t. exact matches.
+        //      2.1- If we're looking for a leaf page, an exact match demands navigating to the
+        //           next right child because the delimiter in an internal page is greater than all
+        //           nodes in its subtree. In this case, we'll run the the regular ErrNDSeek() also
+        //           used by BTDown.
+        //      2.2- If we're looking for an internal page, an exact match demands navigating to the
+        //           child pointed to by the node that was exactly matched. In this case, we'll use
+        //           ErrNDSeekInternal().
+        //
         if ( fLeafPage )
         {
             err = ErrNDSeek( pfucb, bm );
         }
         else
         {
+            // If our hint is a null key, we must be going all the way to the right-most
+            // branch of the tree.
             if ( bm.key.FNull() )
             {
                 KEYDATAFLAGS kdf;
@@ -3953,6 +4945,7 @@ ERR ErrBTContainsPage( FUCB* const pfucb, const BOOKMARK& bm, const PGNO pgno, c
         Call( err );
         err = JET_errSuccess;
 
+        // Make sure it points to what appears to be a page.
         if ( pfucb->kdfCurr.data.Cb() != sizeof( PGNO ) )
         {
             Error( ErrBTIReportBadPageLink(
@@ -3967,6 +4960,8 @@ ERR ErrBTContainsPage( FUCB* const pfucb, const BOOKMARK& bm, const PGNO pgno, c
 
         const PGNO pgnoChild = *(UnalignedLittleEndian<PGNO>*) pfucb->kdfCurr.data.Pv();
 
+        // Make sure the page doesn't point to itself, back to its parent or the root, or
+        // pgnoNull.
         if ( ( pgnoChild == pgnoRoot ) ||
             ( pgnoChild == pgnoParent ) ||
             ( pgnoChild == pgnoCurrent ) ||
@@ -3982,6 +4977,7 @@ ERR ErrBTContainsPage( FUCB* const pfucb, const BOOKMARK& bm, const PGNO pgno, c
                         "BtContainsBadPgnoChild" ) );
         }
 
+        // Check if we found the page.
         if ( pgnoChild == pgno )
         {
             goto HandleError;
@@ -4009,7 +5005,16 @@ HandleError:
 }
 
 
+//  ******************************************************
+//  UPDATE OPERATIONS
+//
 
+//  lock record. this does not lock anything, we do not set
+//  the version bit and the page is not write latched
+//
+//  UNDONE: we don't need to latch the page at all. just create
+//          the version using the bookmark in the FUCB
+//
 ERR ErrBTLock( FUCB *pfucb, DIRLOCK dirlock )
 {
     Assert( dirlock == writeLock
@@ -4020,6 +5025,7 @@ ERR ErrBTLock( FUCB *pfucb, DIRLOCK dirlock )
 
     ERR     err = JET_errSuccess;
 
+    // UNDONE: If versioning is disabled, so is locking.
     if ( fVersion )
     {
         OPER oper = 0;
@@ -4055,11 +5061,15 @@ HandleError:
     return err;
 }
 
+//  if all prefix-compressed nodes have been removed set the prefix to NULL
+//  if there is only one record left and it is compressed, then shrink the prefix to give
+//  room in the page for that one record to grow to the maximum size.
 
 LOCAL ERR ErrBTIResetPrefixIfUnused( FUCB * const pfucb, CSR * const pcsr )
 {
     ERR err = JET_errSuccess;
 
+    // root pages aren't prefix compressed
     if ( pcsr->Cpage().FRootPage() )
     {
         return JET_errSuccess;
@@ -4082,6 +5092,7 @@ LOCAL ERR ErrBTIResetPrefixIfUnused( FUCB * const pfucb, CSR * const pcsr )
             Assert( FNDCompressed( kdf ) );
             Assert( kdf.key.prefix.Cb() <= kdfPrefix.data.Cb() );
 
+            //  truncate the prefix of unneeded bytes
             if ( kdf.key.prefix.Cb() < kdfPrefix.data.Cb() )
             {
                 DATA dataShrunkenPrefix;
@@ -4094,6 +5105,8 @@ LOCAL ERR ErrBTIResetPrefixIfUnused( FUCB * const pfucb, CSR * const pcsr )
     }
     else if ( fPageHasPrefix )
     {
+        // There aren't any prefix-compressed nodes, but the page does have 
+        // a prefix. Remove it.
         DATA dataNull;
         dataNull.Nullify();
         Call( ErrNDSetExternalHeader( pfucb, pcsr, &dataNull, fDIRNull, noderfWhole ) );
@@ -4103,6 +5116,10 @@ HandleError:
     return err;
 }
 
+//  replace data of current node with given data
+//      if necessary, split before replace
+//  doesn't take a proxy because it isn't used by concurrent create index
+//
 ERR ErrBTReplace( FUCB * const pfucb, const DATA& data, const DIRFLAG dirflag )
 {
     Assert( !FFUCBSpace( pfucb ) || fDIRNoVersion & dirflag );
@@ -4116,6 +5133,8 @@ ERR ErrBTReplace( FUCB * const pfucb, const DATA& data, const DIRFLAG dirflag )
 
     PERFOpt( PERFIncCounterTable( cBTReplace, PinstFromPfucb( pfucb ), (TCE)tcScope->nParentObjectClass ) );
 
+    //  save bookmark
+    //
     if ( Pcsr( pfucb )->FLatched() )
     {
         CallR( ErrBTISaveBookmark( pfucb ) );
@@ -4123,11 +5142,16 @@ ERR ErrBTReplace( FUCB * const pfucb, const DATA& data, const DIRFLAG dirflag )
 
 #ifdef DEBUG
 
+    //  Disable RFS and cleanup checking
+    //  It's not a real failure path because it's debug only code
+    //
     const LONG cRFSCountdownOld = RFSThreadDisable( 0 );
     const BOOL fCleanUpStateSaved = FOSSetCleanupState( fFalse );
 
     CAutoKey Key, Data, Key2;
     
+    //  Restore RFS and cleanup checking
+    //
     FOSSetCleanupState( fCleanUpStateSaved );
     RFSThreadReEnable( cRFSCountdownOld );
     
@@ -4155,15 +5179,20 @@ Start:
     CallR( ErrBTIRefresh( pfucb, latch ) );
     AssertNDGet( pfucb );
 
+    //  non-unique trees have nodes in key-data order
+    //  so to replace data, we need to delete and re-insert
+    //
     Assert( FFUCBUnique( pfucb ) );
 
 #ifdef DEBUG
     if ( ( latchReadTouch == latch || latchReadNoTouch == latch )
         && ( latchReadTouch == Pcsr( pfucb )->Latch() || latchReadNoTouch == Pcsr( pfucb )->Latch() ) )
     {
+        //  fine!
     }
     else if ( latch == Pcsr( pfucb )->Latch() )
     {
+        //  fine!
     }
     else
     {
@@ -4185,6 +5214,8 @@ Start:
 
     if ( latchWrite != Pcsr( pfucb )->Latch() )
     {
+        //  upgrade latch
+        //
 
         err = Pcsr( pfucb )->ErrUpgrade();
 
@@ -4214,8 +5245,13 @@ Start:
     cbUncFreeDBG = Pcsr( pfucb )->Cpage().CbUncommittedFree();
 #endif
 
+    //  try to replace node data with new data
+    //
     cbDataOld = pfucb->kdfCurr.data.Cb();
     err = ErrNDReplace( pfucb, &data, dirflag, rceidReplace, prceReplace );
+    // someone left prefix behind even though there was only a single node
+    // clean it up
+    //
     if ( errPMOutOfPageSpace == err &&
          Pcsr( pfucb )->Cpage().Clines() == 1 )
     {
@@ -4232,6 +5268,8 @@ Start:
 
         KEYDATAFLAGS    kdf;
 
+        //  node replace causes page overflow
+        //
         Assert( data.Cb() > pfucb->kdfCurr.data.Cb() );
 
         AssertNDGet( pfucb );
@@ -4240,6 +5278,8 @@ Start:
         kdf.data = data;
         Assert( 0 == kdf.fFlags );
 
+        //  call split repeatedly till replace succeeds
+        //
         err = ErrBTISplit(
                     pfucb,
                     &kdf,
@@ -4252,13 +5292,18 @@ Start:
 
         if ( errBTOperNone == err )
         {
+            //  split was performed
+            //  but replace did not succeed
+            //  retry replace
+            //
             Assert( !Pcsr( pfucb )->FLatched() );
-            prceReplace = prceNil;
+            prceReplace = prceNil;  //  the version was nullified in ErrBTISplit
             latch = latchRIW;
             goto Start;
         }
     }
 
+    //  this is the error either from ErrNDReplace() or from ErrBTISplit()
     Call( err );
 
     AssertBTGet( pfucb );
@@ -4282,12 +5327,14 @@ HandleError:
         Assert( fVersion );
         VERNullifyFailedDMLRCE( prceReplace );
     }
-    BTUp( pfucb );
+    BTUp( pfucb );  //  UNDONE:  is this correct?
 
     return err;
 }
 
 
+//  performs a delta operation on current node at specified offset
+//
 template< typename TDelta >
 ERR ErrBTDelta(
     FUCB*           pfucb,
@@ -4303,6 +5350,10 @@ ERR ErrBTDelta(
     Assert( !FFUCBSpace( pfucb ) || fDIRNoVersion & dirflag );
     Assert( cbOffset >= 0 );
 
+    //  can't normally come into this function with the page latched,
+    //  because we may have to wait on a wait-lock when we go to create
+    //  the Delta RCE, but the exception is a delta on the LV tree,
+    //  which we know won't conflict with a wait-lock
     Assert( locOnCurBM == pfucb->locLogical );
     if ( Pcsr( pfucb )->FLatched() )
     {
@@ -4332,14 +5383,24 @@ ERR ErrBTDelta(
     RCE*            prce            = prceNil;
     RCEID           rceid           = rceidNull;
 
+    //  create delta RCE first but can't put in true delta yet
+    //  because the page operation hasn't occurred yet
+    //  (meaning other threads could still come in
+    //  before we're able to obtain the write-latch and
+    //  would calculate the wrong versioned delta
+    //  because they would take into account this delta
+    //  and erroneously compensate for it assuming it
+    //  has already occurred on the page), so initially
+    //  put in a zero-delta and then update RCE once
+    //  we've done the node operation
     if( fVersion )
     {
         _VERDELTA< TDelta > verdelta;
-        verdelta.tDelta             = 0;
+        verdelta.tDelta             = 0;        //  this will be set properly after the node operation
         verdelta.cbOffset           = (USHORT)cbOffset;
-        verdelta.fDeferredDelete    = fFalse;
-        verdelta.fCallbackOnZero    = fFalse;
-        verdelta.fDeleteOnZero      = fFalse;
+        verdelta.fDeferredDelete    = fFalse;   //  this will be set properly after the node operation
+        verdelta.fCallbackOnZero    = fFalse;   //  this will be set properly after the node operation
+        verdelta.fDeleteOnZero      = fFalse;   //  this will be set properly after the node operation
 
         const KEYDATAFLAGS kdfSave = pfucb->kdfCurr;
 
@@ -4391,6 +5452,8 @@ Start:
     }
     Call( err );
 
+    //  try to replace node data with new data
+    //  we need to store the old value
     TDelta tOldValue;
     Call( ErrNDDelta< TDelta >( pfucb, Pcsr( pfucb ), cbOffset, tDelta, &tOldValue, dirflag, rceid ) );
     if( ptOldValue )
@@ -4408,6 +5471,7 @@ Start:
 
         pverdelta->tDelta = tDelta;
 
+        //  if the refcount went to zero we may need to set a flag in the RCE
         if ( 0 == ( tDelta + tOldValue ) )
         {
             if( dirflag & fDIRDeltaDeleteDereferencedLV )
@@ -4448,6 +5512,12 @@ HandleError:
     return err;
 }
 
+//  inserts key and data into tree
+//  if inserted node does not fit into leaf page, split page and insert
+//  if tree does not allow duplicates,
+//      check that there are no duplicates in the tree
+//      and also block out other inserts with the same key
+//
 ERR ErrBTInsert(
     FUCB            *pfucb,
     const KEY&      key,
@@ -4503,6 +5573,7 @@ ERR ErrBTInsert(
         err = pver->ErrVERModify( pfucb, bookmark, operPreInsert, &prceInsert, pverproxy );
         if( JET_errWriteConflict == err )
         {
+            //  insert never returns a writeConflict, turn it into a keyDuplicate
             err = ErrERRCheck( JET_errKeyDuplicate );
         }
         Call( err );
@@ -4518,6 +5589,8 @@ ERR ErrBTInsert(
 Seek:
     PERFOpt( PERFIncCounterTable( cBTSeek, PinstFromPfucb( pfucb ), (TCE)tcScope->nParentObjectClass ) );
 
+    //  set kdf to insert
+    //
 
     kdf.data    = data;
     kdf.key     = key;
@@ -4526,29 +5599,49 @@ Seek:
 
     NDGetBookmarkFromKDF( pfucb, kdf, &bmSearch );
 
+    //  no page should be latched
+    //
     Assert( !Pcsr( pfucb )->FLatched( ) );
 
+    //  go to root
+    //
     Call( ErrBTIGotoRoot( pfucb, latch ) );
     Assert( 0 == Pcsr( pfucb )->ILine() );
 
     if ( Pcsr( pfucb )->Cpage().Clines() == 0 )
     {
+        //  page is empty
+        //  set error so we insert at current iline
+        //
         Assert( Pcsr( pfucb )->Cpage().FLeafPage() );
         pfucb->kdfCurr.Nullify();
         err = ErrERRCheck( wrnNDFoundGreater );
     }
     else
     {
+        //  seek down tree for key alone
+        //
         for ( ; ; )
         {
+            //  for every page level, seek to bmSearch
+            //  if internal page,
+            //      get child page
+            //      move cursor to new page
+            //      release parent page
+            //
             Call( ErrNDSeek( pfucb, bmSearch ) );
 
             if ( !Pcsr( pfucb )->Cpage().FInvisibleSons( ) )
             {
+                //  leaf node reached, exit loop
+                //
                 break;
             }
             else
             {
+                //  get pgno of child from node
+                //  switch to that page
+                //
                 Assert( pfucb->kdfCurr.data.Cb() == sizeof( PGNO ) );
                 Call( Pcsr( pfucb )->ErrSwitchPage(
                             pfucb->ppib,
@@ -4566,6 +5659,8 @@ Insert:
     kdf.fFlags  = 0;
     ASSERT_VALID( &kdf );
 
+    //  now, the cursor is on leaf node
+    //
     Assert( Pcsr( pfucb )->Cpage().FLeafPage() );
 
     if ( JET_errSuccess == err )
@@ -4576,14 +5671,16 @@ Insert:
 
             if( !FNDDeleted( pfucb->kdfCurr ) )
             {
+                //  this is either committed by another transaction that committed before we began
+                //  or we inserted this key ourselves earlier
                 Error( ErrERRCheck( JET_errKeyDuplicate ) );
             }
 #ifdef DEBUG
             else
             {
-                Assert( !FNDPotVisibleToCursor( pfucb ) );
+                Assert( !FNDPotVisibleToCursor( pfucb ) );  //  should have gotten a JET_errWriteConflict when we created the RCE
             }
-#endif
+#endif  //  DEBUG
 
 
             cbReq = kdf.data.Cb() > pfucb->kdfCurr.data.Cb() ?
@@ -4594,26 +5691,41 @@ Insert:
         {
             Assert( 0 == CmpKeyData( bmSearch, pfucb->kdfCurr ) );
 
+            //  can not have two nodes with same key-data
+            //
             if ( !FNDDeleted( pfucb->kdfCurr ) )
             {
+                // Only way to get here is if a multi-valued index column
+                // caused us to generate the same key for the record.
+                // This would have happened if the multi-values are non-
+                // unique, or if we ran out of keyspace before we could
+                // evaluate the unique portion of the multi-values.
                 Error( ErrERRCheck( JET_errMultiValuedIndexViolation ) );
             }
 #ifdef DEBUG
             else
             {
-                Assert( !FNDPotVisibleToCursor( pfucb ) );
+                Assert( !FNDPotVisibleToCursor( pfucb ) );  //  should have gotten a JET_errWriteConflict when we created the RCE
             }
-#endif
+#endif  //  DEBUG
 
+            //  flag insert node
+            //
             cbReq   = 0;
         }
 
+        //  flag insert node and replace data atomically
+        //
         fInsert = fFalse;
     }
     else
     {
+        //  error is from ErrNDSeek
+        //
         if ( wrnNDFoundLess == err )
         {
+            //  inserted key-data falls past last node on cursor
+            //
             Assert( Pcsr( pfucb )->Cpage().Clines() - 1
                         == Pcsr( pfucb )->ILine() );
             Assert( Pcsr( pfucb )->Cpage().Clines() == 0 ||
@@ -4623,6 +5735,8 @@ Insert:
             Pcsr( pfucb )->IncrementILine();
         }
 
+        //  calculate key prefix
+        //
         BTIComputePrefix( pfucb, Pcsr( pfucb ), key, &kdf );
         Assert( !FNDCompressed( kdf ) || kdf.key.prefix.Cb() > 0 );
 
@@ -4651,10 +5765,21 @@ Insert:
     cbUncFreeDBG = Pcsr( pfucb )->Cpage().CbUncommittedFree();
 #endif
 
+    //  cursor is at insertion point
+    //
+    //  check if node fits in page
+    //
     const BOOL fShouldAppend = FBTIAppend( pfucb, Pcsr( pfucb ), cbReq );
     BOOL fSplitRequired = FBTISplit( pfucb, Pcsr( pfucb ), cbReq );
     if ( fSplitRequired && !fInsert && fUnique )
     {
+        // This operation will be a FlagInsertAndReplaceData which means it can
+        // reclaim uncommitted free space. If we don't check this then we can
+        // end up trying to split a page with only one node because all the free
+        // space on the page is reserved by the flag-deleted node.
+        //
+        // If we can reclaim the space then we won't split and instead will go to
+        // the insert case where ErrNDFlagInsertAndReplaceData will call VERSetCbAdjust.
         const ULONG cbReserved = CbNDReservedSizeOfNode( pfucb, Pcsr( pfucb ) );
         fSplitRequired = (ULONG)cbReq >
             cbReserved + Pcsr( pfucb )->Cpage().CbPageFree() - Pcsr( pfucb )->Cpage().CbUncommittedFree();
@@ -4667,14 +5792,19 @@ Insert:
 #ifdef PREREAD_SPACETREE_ON_SPLIT
         if( pfucb->u.pfcb->FPreread() )
         {
+            //  PREREAD space tree while we determine what to split (we WILL need the AE and possibly the OE)
             BTPrereadSpaceTree( pfucb );
         }
-#endif
+#endif  //  PREREAD_SPACETREE_ON_SPLIT
 
+        //  re-adjust kdf to not contain prefix info
+        //
         kdf.key     = key;
         kdf.data    = data;
         kdf.fFlags  = 0;
 
+        //  split and insert in tree
+        //
         err = ErrBTISplit(
                     pfucb,
                     &kdf,
@@ -4688,8 +5818,12 @@ Insert:
 
         if ( errBTOperNone == err )
         {
+            //  insert was not performed
+            //  retry insert
+            //
             Assert( !Pcsr( pfucb )->FLatched() );
 
+            //  the RCE was nullified in ErrBTISplit
             rceidReplace = rceidNull;
             prceReplace = prceNil;
             latch = latchRIW;
@@ -4700,12 +5834,17 @@ Insert:
     }
     else
     {
+        //  upgrade latch to write
+        //
         PGNO    pgno = Pcsr( pfucb )->Pgno();
 
         err = Pcsr( pfucb )->ErrUpgrade();
 
         if ( err == errBFLatchConflict )
         {
+            //  upgrade conflicted
+            //  we lost our read latch
+            //
             Assert( !Pcsr( pfucb )->FLatched( ) );
 
             Call( Pcsr( pfucb )->ErrGetPage(
@@ -4719,10 +5858,13 @@ Insert:
 
             if ( wrnNDNotFoundInPage != err )
             {
+                //  we have re-seeked to the insert position in page
+                //
                 Assert( JET_errSuccess == err ||
                         wrnNDFoundLess == err ||
                         wrnNDFoundGreater == err );
 
+                //  if necessary, we will recreate this so remove it now
                 if( prceNil != prceReplace )
                 {
                     Assert( prceNil != prceInsert );
@@ -4735,6 +5877,7 @@ Insert:
                 goto Insert;
             }
 
+            //  if necessary, we will recreate this so remove it now
 
             if( prceNil != prceReplace )
             {
@@ -4744,6 +5887,7 @@ Insert:
                 prceReplace = prceNil;
             }
 
+            //  reseek from root for insert
 
             BTUp( pfucb );
 
@@ -4792,7 +5936,7 @@ Insert:
     {
         Assert( !fVersion );
     }
-#endif
+#endif  //  DEBUG
 
     if( prceNil != prceReplace )
     {
@@ -4822,6 +5966,10 @@ HandleError:
 }
 
 
+//  append a node to the end of the  latched page
+//  if node insert violates density constraint
+//      split and insert
+//
 ERR ErrBTAppend( FUCB           *pfucb,
                  const KEY&     key,
                  const DATA&    data,
@@ -4868,6 +6016,8 @@ Retry:
         Assert( prceInsert );
     }
 
+    //  set kdf
+    //
     kdf.key     = key;
     kdf.data    = data;
     kdf.fFlags  = 0;
@@ -4875,6 +6025,7 @@ Retry:
 #ifdef DEBUG
     Pcsr( pfucb )->SetILine( Pcsr( pfucb )->Cpage().Clines() - 1 );
     NDGet( pfucb );
+    //  while repairing we may append a NULL key to the end of the page
     if( !( FFUCBRepair( pfucb ) && key.Cb() == 0 ) )
     {
         if ( FFUCBUnique( pfucb ) )
@@ -4888,8 +6039,12 @@ Retry:
     }
 #endif
 
+    //  set insertion point
+    //
     Pcsr( pfucb )->SetILine( Pcsr( pfucb )->Cpage().Clines() );
 
+    //  insert node at end of page
+    //
     BTIComputePrefix( pfucb, Pcsr( pfucb ), key, &kdf );
     Assert( !FNDCompressed( kdf ) || kdf.key.prefix.Cb() > 0 );
 
@@ -4900,12 +6055,20 @@ Retry:
     cbUncFreeDBG = Pcsr( pfucb )->Cpage().CbUncommittedFree();
 #endif
 
+    //  cursor is at insertion point
+    //
+    //  check if node fits in page
+    //
     if ( FBTIAppend( pfucb, Pcsr( pfucb ), cbReq ) )
     {
+        //  readjust kdf to not contain prefix info
+        //
         kdf.key     = key;
         kdf.data    = data;
         kdf.fFlags  = 0;
 
+        //  split and insert in tree
+        //
         err = ErrBTISplit( pfucb,
                            &kdf,
                            dirflag | fDIRInsert,
@@ -4917,12 +6080,20 @@ Retry:
 
         if ( errBTOperNone == err && !FFUCBRepair( pfucb ) )
         {
+            //  insert was not performed
+            //  retry insert using normal insert operation
+            //
             Assert( !Pcsr( pfucb )->FLatched() );
             Call( ErrBTInsert( pfucb, key, data, dirflag ) );
             return err;
         }
         else if ( errBTOperNone == err && FFUCBRepair( pfucb ) )
         {
+            //  insert was not performed
+            //  we may be inserting a NULL key so we can't go through
+            //  the normal insert logic. move to the end of the tree
+            //  and insert
+            //
             Assert( !Pcsr( pfucb )->FLatched() );
 
             DIB dib;
@@ -4940,6 +6111,8 @@ Retry:
         Assert( !FBTISplit( pfucb, Pcsr( pfucb ), cbReq, fFalse ) );
         Assert( latchWrite == Pcsr( pfucb )->Latch() );
 
+        //  insert node
+        //
         err = ErrNDInsert( pfucb, &kdf, dirflag, Rceid( prceInsert ), NULL );
         Assert ( errPMOutOfPageSpace != err );
     }
@@ -4961,7 +6134,7 @@ Retry:
     {
         Assert( !fVersion );
     }
-#endif
+#endif  //  DEBUG
 
     return err;
 
@@ -4977,7 +6150,7 @@ HandleError:
     {
         Assert( !fVersion );
     }
-#endif
+#endif  //  DEBUG
 
     BTUp( pfucb );
     return err;
@@ -5003,6 +6176,8 @@ LOCAL ERR ErrBTITryAvailExtMerge( FUCB * const pfucb )
     if ( PinstFromIfmp( pfucb->ifmp )->m_pver->m_fSyncronousTasks
         || g_rgfmp[ pfucb->ifmp ].FDetachingDB() )
     {
+        // don't start the task because the task manager is no longer running
+        // and we can't run it synchronously because it will deadlock.
         delete ptask;
         return JET_errSuccess;
     }
@@ -5010,12 +6185,15 @@ LOCAL ERR ErrBTITryAvailExtMerge( FUCB * const pfucb )
     err = PinstFromIfmp( pfucb->ifmp )->Taskmgr().ErrTMPost( TASK::DispatchGP, ptask );
     if( err < JET_errSuccess )
     {
+        //  The task was not enqueued successfully.
         delete ptask;
     }
 
     return err;
 }
 
+//  flag-deletes a node
+//
 ERR ErrBTFlagDelete( FUCB *pfucb, DIRFLAG dirflag, RCE *prcePrimary )
 {
     const BOOL      fVersion        = !( dirflag & fDIRNoVersion ) && !g_rgfmp[pfucb->ifmp].FVersioningOff();
@@ -5026,11 +6204,16 @@ ERR ErrBTFlagDelete( FUCB *pfucb, DIRFLAG dirflag, RCE *prcePrimary )
     LATCH   latch = latchReadNoTouch;
     PIBTraceContextScope tcScope = TcBTICreateCtxScope( pfucb, iorsBTDelete );
 
+    //  save bookmark
+    //
     if ( Pcsr( pfucb )->FLatched() )
         CallR( ErrBTISaveBookmark( pfucb ) );
 
 #ifdef DEBUG
 
+    //  Disable RFS and cleanup checking
+    //  It's not a real failure path because it's debug only code
+    //
     const LONG cRFSCountdownOld = RFSThreadDisable( 0 );
     const BOOL fCleanUpStateSaved = FOSSetCleanupState( fFalse );
 
@@ -5048,6 +6231,8 @@ ERR ErrBTFlagDelete( FUCB *pfucb, DIRFLAG dirflag, RCE *prcePrimary )
         pbmCur->data.CopyInto( dataBM );
     }
 
+    //  Restore RFS and cleanup checking
+    //
     FOSSetCleanupState( fCleanUpStateSaved );
     RFSThreadReEnable( cRFSCountdownOld );
 #endif
@@ -5084,9 +6269,11 @@ Start:
     if ( ( latchReadTouch == latch || latchReadNoTouch == latch )
         && ( latchReadTouch == Pcsr( pfucb )->Latch() || latchReadNoTouch == Pcsr( pfucb )->Latch() ) )
     {
+        //  fine!
     }
     else if ( latch == Pcsr( pfucb )->Latch() )
     {
+        //  fine!
     }
     else
     {
@@ -5108,6 +6295,8 @@ Start:
 
     if ( latchWrite != Pcsr( pfucb )->Latch() )
     {
+        //  upgrade latch
+        //
         err = Pcsr( pfucb )->ErrUpgrade();
 
         if ( err == errBFLatchConflict )
@@ -5124,6 +6313,9 @@ Start:
     Assert( Pcsr( pfucb )->FLatched( ) );
     AssertNDGet( pfucb );
 
+    //  if we are in the space tree and unversioned and we are
+    //  not the first node in the page expunge the node
+    //  UNDONE: if we do a BTPrev we will end up on the wrong node
     if ( dirflag & fDIRNoVersion
          && Pcsr( pfucb )->Cpage().FSpaceTree() )
     {
@@ -5135,7 +6327,7 @@ Start:
             Call( ErrNDDelete( pfucb, dirflag ) );
 
             Assert( Pcsr( pfucb )->ILine() > 0 );
-            Pcsr( pfucb )->DecrementILine();
+            Pcsr( pfucb )->DecrementILine();    //  correct the currency for a BTNext
             NDGet( pfucb );
         }
         else
@@ -5170,11 +6362,13 @@ Start:
     {
         Assert( !fVersion );
     }
-#endif
+#endif  //  DEBUG
 
     return err;
 
 HandleError:
+    //  the page may or may not be latched
+    //  it won't be latched if RCE creation failed
 
     Assert( err < 0 );
     if( prceNil != prce )
@@ -5189,7 +6383,12 @@ HandleError:
 
 
 
+//  ================================================================
 ERR ErrBTCopyTree( FUCB * pfucbSrc, FUCB * pfucbDest, DIRFLAG dirflag )
+//  ================================================================
+//
+//  Used by repair. Copy all records in one tree to another tree.
+//
 {
     ERR err;
 
@@ -5204,6 +6403,9 @@ ERR ErrBTCopyTree( FUCB * pfucbSrc, FUCB * pfucbDest, DIRFLAG dirflag )
     dib.dirflag = fDIRNull;
     err = ErrBTDown( pfucbSrc, &dib, latchReadTouch );
 
+    //  check for RecordNotFound, let the loop
+    //  handle all other errors
+    //
     Assert( JET_errNoCurrentRecord != err );
     if ( JET_errRecordNotFound == err )
     {
@@ -5223,11 +6425,12 @@ ERR ErrBTCopyTree( FUCB * pfucbSrc, FUCB * pfucbDest, DIRFLAG dirflag )
 
         BYTE * pb = (BYTE *)pvWorkBuf;
 
-        Assert( g_rgfmp[ pfucbSrc->ifmp ].CbPage() == g_rgfmp[ pfucbDest->ifmp ].CbPage() );
+        Assert( g_rgfmp[ pfucbSrc->ifmp ].CbPage() == g_rgfmp[ pfucbDest->ifmp ].CbPage() ); // or we may have to be more clever
         if (    pfucbSrc->kdfCurr.key.Cb() < 0 || pfucbSrc->kdfCurr.key.Cb() > g_rgfmp[ pfucbSrc->ifmp ].CbPage() ||
                 pfucbSrc->kdfCurr.data.Cb() < 0 || pfucbSrc->kdfCurr.data.Cb() > g_rgfmp[ pfucbSrc->ifmp ].CbPage() ||
                 pfucbSrc->kdfCurr.key.Cb() + pfucbSrc->kdfCurr.data.Cb() > g_rgfmp[ pfucbSrc->ifmp ].CbPage() )
         {
+            //  we should never hit this since we just repaired the table...
             Error( ErrERRCheck( JET_errInternalError ) );
         }
 
@@ -5258,7 +6461,13 @@ HandleError:
 }
 
 
+//  ******************************************************
+//  STATISTICAL OPERATIONS
+//
 
+//  computes statistics on a given tree
+//      calculates number of nodes, keys and leaf pages
+//      in tree
 ERR ErrBTComputeStats( FUCB *pfucb, INT *pcnode, INT *pckey, INT *pcpage )
 {
     ERR     err;
@@ -5275,12 +6484,17 @@ ERR ErrBTComputeStats( FUCB *pfucb, INT *pcnode, INT *pckey, INT *pcpage )
 
     Assert( !Pcsr( pfucb )->FLatched() );
 
+    //  go to first node, this is one-time deal. No need to change buffer touch,
+    //  set read latch as a ReadAgain latch.
+    //
     FUCBSetPrereadForward( pfucb, cpgPrereadSequential );
     dib.dirflag = fDIRNull;
     dib.pos     = posFirst;
     err = ErrBTDown( pfucb, &dib, latchReadNoTouch );
     if ( err < 0 )
     {
+        //  if index empty then set err to success
+        //
         if ( err == JET_errRecordNotFound )
         {
             err = JET_errSuccess;
@@ -5291,6 +6505,8 @@ ERR ErrBTComputeStats( FUCB *pfucb, INT *pcnode, INT *pckey, INT *pcpage )
 
     Assert( Pcsr( pfucb )->FLatched() );
 
+    //  if there is at least one node, then there is a first page.
+    //
     cpage = 1;
 
     if ( FFUCBUnique( pfucb ) )
@@ -5299,8 +6515,13 @@ ERR ErrBTComputeStats( FUCB *pfucb, INT *pcnode, INT *pckey, INT *pcpage )
         {
             cnode++;
 
+            //  this loop can take some time, so see if we need
+            //  to terminate because of shutdown
+            //
             Call( pinst->ErrCheckForTermination() );
 
+            //  move to next node
+            //
             pgnoT = Pcsr( pfucb )->Pgno();
             err = ErrBTNext( pfucb, fDIRNull );
             if ( err < JET_errSuccess )
@@ -5311,6 +6532,8 @@ ERR ErrBTComputeStats( FUCB *pfucb, INT *pcnode, INT *pckey, INT *pcpage )
 
             if ( Pcsr( pfucb )->Pgno() != pgnoT )
             {
+                //  increment page count, if page boundary is crossed
+                //
                 cpage++;
             }
         }
@@ -5326,18 +6549,27 @@ ERR ErrBTComputeStats( FUCB *pfucb, INT *pcnode, INT *pckey, INT *pcpage )
         Assert( pidbNil != pfucb->u.pfcb->Pidb() );
         Assert( !pfucb->u.pfcb->Pidb()->FUnique() );
 
+        //  initialize key count to 1, to represent the
+        //  node we're currently on
         ckey = 1;
 
         forever
         {
+            //  copy key of current node
+            //
             Assert( pfucb->kdfCurr.key.Cb() <= cbKeyMostMost );
             key.suffix.SetCb( pfucb->kdfCurr.key.Cb() );
             pfucb->kdfCurr.key.CopyIntoBuffer( key.suffix.Pv() );
 
             cnode++;
 
+            //  this loop can take some time, so see if we need
+            //  to terminate because of shutdown
+            //
             Call( pinst->ErrCheckForTermination() );
 
+            //  move to next node
+            //
             pgnoT = Pcsr( pfucb )->Pgno();
             err = ErrBTNext( pfucb, fDIRNull );
             if ( err < JET_errSuccess )
@@ -5347,11 +6579,15 @@ ERR ErrBTComputeStats( FUCB *pfucb, INT *pcnode, INT *pckey, INT *pcpage )
 
             if ( Pcsr( pfucb )->Pgno() != pgnoT )
             {
+                //  increment page count, if page boundary is crossed
+                //
                 cpage++;
             }
 
             if ( !FKeysEqual( pfucb->kdfCurr.key, key ) )
             {
+                //  increment key count, if key boundary is crossed
+                //
                 ckey++;
             }
         }
@@ -5359,6 +6595,8 @@ ERR ErrBTComputeStats( FUCB *pfucb, INT *pcnode, INT *pckey, INT *pcpage )
 
 
 Done:
+    //  common exit loop processing
+    //
     if ( err < 0 && err != JET_errNoCurrentRecord )
         goto HandleError;
 
@@ -5375,12 +6613,25 @@ HandleError:
 }
 
 
+//  ================================================================
 bool FBTICpgFragmentedRange(
     __in_ecount(cpg) const PGNO * const rgpgno,
     const CPG cpg,
     __in const CPG cpgFragmentedRangeMin,
     __out INT * const pipgnoStart,
     __out INT * const pipgnoEnd )
+//  ================================================================
+//
+// Given an array of page numbers, determine which of them should be included in
+// the next fragmented range. The range [*pipgnoStart, *pipgnoEnd] is considered
+// fragmented and should be defragmented.
+// 
+// cpgFragmentedRangeMin gives the minimum size of a non-contiguous range that
+// is considered worth defragmenting
+//
+// Returns true if a fragmented range was found, false otherwise.
+//
+//-
 {
     Assert(rgpgno);
     Assert(cpg);
@@ -5395,6 +6646,7 @@ bool FBTICpgFragmentedRange(
     
     if(cpg <= cpgFragmentedRangeMin)
     {
+        // not enough pages to be worth defragmenting
         OSTrace( JET_tracetagOLD, OSFormat( __FUNCTION__ "( rgpgno = [%d, ...], cpg = %d ) did not satisfy minimum defrag range count (%d).",
                         rgpgno ? rgpgno[ 0 ] : 0, cpg, cpgFragmentedRangeMin ) );
         fFoundFragmentedRange = false;
@@ -5407,10 +6659,13 @@ bool FBTICpgFragmentedRange(
         {
             INT ipgnoContiguousRunStart = ipgno;
 
+            // Advance pgno until it points to a non-contiguous page
             for( ipgno++; ipgno < cpg && rgpgno[ipgno-1] + 1 == rgpgno[ipgno]; ++ipgno )
             {
             }
 
+            // All of the pages in the range [ipgnoContiguousRunStart, ipgnoContiguousRunEnd]
+            // are in ascending sequential order. Remember that the run can have a length of 1.
             const CPG cpgContiguous = ipgno - ipgnoContiguousRunStart;
             INT ipgnoContiguousRunEnd = ipgno-1;
 
@@ -5419,10 +6674,15 @@ bool FBTICpgFragmentedRange(
             Assert( (PGNO)(ipgnoContiguousRunEnd - ipgnoContiguousRunStart)
                     == rgpgno[ipgnoContiguousRunEnd] - rgpgno[ipgnoContiguousRunStart] );
             
+            // This run of pages is long enough that we don't want to defrag it.
+            // See if we have a previous set of fragmented pages that should be defragged
+            // We also need to do this if this is the last time through the loop.
             if( cpgContiguous >= cpgFragmentedRangeMin )
             {
                 if( ipgnoFragmentedRangeStart != -1 )
                 {
+                    // prior to encountering this contiguous range we found a non-contiguous range
+                    // in that case we want to defrag that range (if it is long enough)
                     const CPG cpgFragmented = ipgnoContiguousRunStart - ipgnoFragmentedRangeStart;
                     Assert( cpgFragmented >= 0 );
                     if (cpgFragmented > cpgFragmentedRangeMin )
@@ -5439,8 +6699,12 @@ bool FBTICpgFragmentedRange(
             }
             else if ( cpg == ipgno )
             {
+                // this is the last time through the loop so we will consider all the pages from
+                // ipgnoFragmentedRangeStart through the end of the page to be fragmented
                 if( ipgnoFragmentedRangeStart != -1 )
                 {
+                    // prior to encountering this contiguous range we found a non-contiguous range
+                    // in that case we want to defrag that range (if it is long enough)
                     const CPG cpgFragmented = ipgno - ipgnoFragmentedRangeStart;
                     Assert( cpgFragmented >= 0 );
                     if (cpgFragmented > cpgFragmentedRangeMin )
@@ -5453,6 +6717,8 @@ bool FBTICpgFragmentedRange(
             }
             else if ( -1 == ipgnoFragmentedRangeStart )
             {
+                // the run of pages is fragmented remember the start of the range and keep looking
+                // for the end
                 ipgnoFragmentedRangeStart = ipgnoContiguousRunStart;
             }
         }
@@ -5505,9 +6771,10 @@ JETUNITTEST( FBTICpgFragmentedRange, MinRangeSizeIsRespected )
     CHECK( true == FBTICpgFragmentedRange( rgpgno, _countof(rgpgno), 11, &ignored1, &ignored2 ) );
 }
 
+// We can make FBTICpgFragmentedRange less sensitive by decreasing the range size
 JETUNITTEST( FBTICpgFragmentedRange, SmallerRangeSizeTriggersLessOften )
 {
-    PGNO rgpgno[] = { 1, 2, 3, 4,  6, 7, 8, 9, 10, };
+    PGNO rgpgno[] = { 1, 2, 3, 4, /*5*/ 6, 7, 8, 9, 10, };
     INT ignored1;
     INT ignored2;
     CHECK( false == FBTICpgFragmentedRange( rgpgno, _countof(rgpgno), 4, &ignored1, &ignored2 ) );
@@ -5516,7 +6783,7 @@ JETUNITTEST( FBTICpgFragmentedRange, SmallerRangeSizeTriggersLessOften )
 
 JETUNITTEST( FBTICpgFragmentedRange, FragmentedRuns )
 {
-    PGNO rgpgno[] = { 1, 2, 3,  5, 6, 7, 8, 9, 20, 21,  23, 24, 25, 26, 27, 28 };
+    PGNO rgpgno[] = { 1, 2, 3, /*4*/ 5, 6, 7, 8, 9, 20, 21, /*22*/ 23, 24, 25, 26, 27, 28 };
     INT start;
     INT end;
     CHECK( true == FBTICpgFragmentedRange( rgpgno, _countof(rgpgno), 8, &start, &end ) );
@@ -5526,7 +6793,7 @@ JETUNITTEST( FBTICpgFragmentedRange, FragmentedRuns )
 
 JETUNITTEST( FBTICpgFragmentedRange, FragmentedThenUnfragmented )
 {
-    PGNO rgpgno[] = { 1, 2, 3,  5, 6, 7, 8, 9, 10, 20, 21, 22, 23, 24, 25, 26, 27, 28 };
+    PGNO rgpgno[] = { 1, 2, 3, /*4*/ 5, 6, 7, 8, 9, 10, 20, 21, 22, 23, 24, 25, 26, 27, 28 };
     INT start;
     INT end;
     CHECK( true == FBTICpgFragmentedRange( rgpgno, _countof(rgpgno), 8, &start, &end ) );
@@ -5536,7 +6803,7 @@ JETUNITTEST( FBTICpgFragmentedRange, FragmentedThenUnfragmented )
 
 JETUNITTEST( FBTICpgFragmentedRange, UnfragmentedThenFragmented )
 {
-    PGNO rgpgno[] = { 20, 21, 22, 23, 24, 25, 26, 27, 28, 1, 2, 3,  5, 6, 7, 8, 9, 10,  };
+    PGNO rgpgno[] = { 20, 21, 22, 23, 24, 25, 26, 27, 28, 1, 2, 3, /*4*/ 5, 6, 7, 8, 9, 10,  };
     INT start;
     INT end;
     CHECK( true == FBTICpgFragmentedRange( rgpgno, _countof(rgpgno), 8, &start, &end ) );
@@ -5548,7 +6815,7 @@ JETUNITTEST( FBTICpgFragmentedRange, UnfragmentedThenFragmentedThenUnfragmented 
 {
     PGNO rgpgno[] = {
         20, 21, 22, 23, 24, 25, 26, 27, 28,
-        1, 2, 3,  5, 6, 7, 8, 9, 10,
+        1, 2, 3, /*4*/ 5, 6, 7, 8, 9, 10,
         100, 101, 102, 103, 104, 105, 106, 107, 108, 109, 110
 };
     INT start;
@@ -5562,7 +6829,7 @@ JETUNITTEST( FBTICpgFragmentedRange, UnfragmentedThenFragmentedThenShortThenUnfr
 {
     PGNO rgpgno[] = {
         20, 21, 22, 23, 24, 25, 26, 27, 28,
-        1, 2, 3,  5, 6, 7, 8, 9, 10,
+        1, 2, 3, /*4*/ 5, 6, 7, 8, 9, 10,
         500, 501, 502, 503, 504, 505,
         100, 101, 102, 103, 104, 105, 106, 107, 108, 109, 110
 };
@@ -5585,13 +6852,29 @@ JETUNITTEST( FBTICpgFragmentedRange, SmallFragmentedRanges )
     CHECK( false == FBTICpgFragmentedRange( rgpgno, _countof(rgpgno), 8, &start, &end ) );
 }
 
-#endif
+#endif // ENABLE_JET_UNIT_TEST
 
+//  ================================================================
 bool FBTICpgFragmentedRangeTrigger(
     __in_ecount(cpg) const PGNO * const rgpgno,
     const CPG cpg,
     __in const CPG cpgFragmentedRangeTrigger,
     __in const CPG cpgFragmentedRangeMin )
+//  ================================================================
+//
+// Uses FBTICpgFragmentedRange() to determine if the array of page
+// numbers meets the criteria for triggering OLD2.
+// 
+// Returns true if OLD2 should be triggered, given the array of
+// page numbers and the limits for triggering and performing actual
+// defragmentation work (cpgFragmentedRangeTrigger and
+// cpgFragmentedRangeMin, respectively).
+//
+// We do this because the trigger threshold can be lower than the
+// defrag threshold. In that case we want to make sure that there
+// are enough fragmented pages for OLD2 to work on.
+//
+//-
 {
     INT ipgnoStart, ipgnoEnd;
     return FBTICpgFragmentedRange( rgpgno, cpg, cpgFragmentedRangeTrigger, &ipgnoStart, &ipgnoEnd ) &&
@@ -5622,14 +6905,14 @@ JETUNITTEST( FBTICpgFragmentedRangeTrigger, NotEnoughPagesToDefragFragmentedThen
 
 JETUNITTEST( FBTICpgFragmentedRangeTrigger, EnoughPagesToDefragButDoesNotMeetTrigger )
 {
-    PGNO rgpgno[] = { 1, 2, 3, 4, 5,  7, 8, 9, 10, 11, };
+    PGNO rgpgno[] = { 1, 2, 3, 4, 5, /*6*/ 7, 8, 9, 10, 11, };
     CHECK( false == FBTICpgFragmentedRangeTrigger( rgpgno, _countof(rgpgno), 4, 8 ) );
 }
 
 JETUNITTEST( FBTICpgFragmentedRangeTrigger, EnoughPagesToDefragButContiguous )
 {
     PGNO rgpgno[] = { 1, 2, 3, 4, 5, 6, 7, 8, 9,
-                        
+                        /*10*/
                         11, 12, 13, 14, 15, 16, 17, 18, 19, };
     CHECK( false == FBTICpgFragmentedRangeTrigger( rgpgno, _countof(rgpgno), 4, 8 ) );
 }
@@ -5670,13 +6953,20 @@ JETUNITTEST( FBTICpgFragmentedRangeTrigger, EnoughPagesToDefragFragmentedThenUnf
     CHECK( true == FBTICpgFragmentedRangeTrigger( rgpgno, _countof(rgpgno), 4, 8 ) );
 }
 
-#endif
+#endif // ENABLE_JET_UNIT_TEST
 
+//  ================================================================
 ERR ErrBTIGetBookmarkFromPage(
     __in FUCB * const pfucb,
     __in CSR * const pcsr,
     const INT iline,
     __out BOOKMARK * const pbm )
+//  ================================================================
+//
+//  Given a CSR which points to a child page, get the first bookmark
+//  on the child.
+//
+//-
 {
     Assert( pfucb );
     Assert( pcsr );
@@ -5685,6 +6975,7 @@ ERR ErrBTIGetBookmarkFromPage(
     Assert( pbm->key.FNull() );
     Assert( pcsr->Cpage().FInvisibleSons() );
 
+    // this code only works for unique bookmarks
     Assert( FFUCBUnique( pfucb ) );
 
     ERR err;
@@ -5720,12 +7011,19 @@ HandleError:
     return err;
 }
 
+//  ================================================================
 ERR ErrBTIFindFragmentedRangeInParentOfLeafPage(
     __in FUCB * const pfucb,
     __in CSR * const pcsr,
     __in const CPG cpgFragmentedRangeMin,
     __out BOOKMARK * const pbmRangeStart,
     __out BOOKMARK * const pbmRangeEnd)
+//  ================================================================
+//
+//  Look for a fragmented range which occurs after the current iline.
+//  If no range is found then return JET_errRecordNotFound.
+//
+//-
 {
     Assert( pfucb );
     Assert( pcsr );
@@ -5780,21 +7078,30 @@ ERR ErrBTIFindFragmentedRangeInParentOfLeafPage(
 HandleError:
     delete [] rgpgno;
 
-    Assert( err <= JET_errSuccess );
+    Assert( err <= JET_errSuccess );    // no warnings are returned
     if( JET_errSuccess == err )
     {
         Assert( !pbmRangeStart->key.FNull() );
+        // can't assert pbmRangeEnd because a null key is fine for the end of the tree
     }
     
     return err;
 }
 
+//  ================================================================
 ERR ErrBTIFindFragmentedRange(
     __in FUCB * const pfucb,
     __in CSR * const pcsr,
     __in const BOOKMARK& bmStart,
     __out BOOKMARK * const pbmRangeStart,
     __out BOOKMARK * const pbmRangeEnd)
+//  ================================================================
+//
+//  Recursively move down the tree looking for a fragmented range 
+//  which occurs after bmStart. If no range is found then return
+//  JET_errRecordNotFound.
+//
+//-
 {
     Assert( pfucb );
     Assert( pcsr );
@@ -5809,8 +7116,10 @@ ERR ErrBTIFindFragmentedRange(
     
     Assert( !pcsr->Cpage().FLeafPage() );
     
+    // Find the node for bmStart. This sets the iline of the csr.
     Call( ErrNDSeek( pfucb, pcsr, bmStart ) );
 
+    // If the page is a parent-of-leaf then look for a fragmented range
     if( pcsr->Cpage().FParentOfLeaf() )
     {
         Call( ErrBTIFindFragmentedRangeInParentOfLeafPage(
@@ -5827,12 +7136,15 @@ ERR ErrBTIFindFragmentedRange(
 
         bool fFoundRange = false;
         
+        // For each node until the end of the page:         
         for( INT iline = ilineStart; iline < clines; ++iline )
         {
+            // Latch the child page
             pcsr->SetILine( iline );
             NDGet( pfucb, pcsr );
             const PGNO pgnoChild = *(UnalignedLittleEndian< PGNO > *) pfucb->kdfCurr.data.Pv();
             
+            // Recursively look for a fragmented range  
             Call( csrSubtree.ErrGetReadPage(pfucb->ppib,
                                             pfucb->ifmp,
                                             pgnoChild,
@@ -5844,39 +7156,54 @@ ERR ErrBTIFindFragmentedRange(
 
             if( JET_errRecordNotFound == err )
             {
+                // this is an expected error, we should continue to the next subtree
                 err = JET_errSuccess;
             }
             else if( JET_errSuccess == err )
             {
+                // a fragmented range was found in the subtree
                 fFoundRange = true;
                 break;
             }
             Call( err );
         }
 
+        // Return an error if no range was found
         if( !fFoundRange )
         {
             Call( ErrERRCheck( JET_errRecordNotFound ) );
         }
     }
 
+    // No subtree contained a fragmented range
     
 HandleError:
     Assert( !csrSubtree.FLatched() );
-    Assert( err <= JET_errSuccess );
+    Assert( err <= JET_errSuccess );    // no warnings are returned
     if( JET_errSuccess == err )
     {
         Assert( !pbmRangeStart->key.FNull() );
+        // can't assert pbmRangeEnd because a null key is fine for the end of the tree
     }
     
     return err;
 }
 
+//  ================================================================
 ERR ErrBTFindFragmentedRange(
     __in FUCB * const pfucb,
     __in const BOOKMARK& bmStart,
     __out BOOKMARK * const pbmRangeStart,
     __out BOOKMARK * const pbmRangeEnd)
+//  ================================================================
+//
+// Find the first fragmented range of the b-tree after the given bookmark
+// The fragmented range is described by pbmStart and pbmEnd. This function
+// allocates memory for the bookmarks in pbmRangeStart and pbmRangeEnd so
+// they should be nullified when passed in. If no fragmented range is found
+// then JET_errRecordNotFound is returned.
+//
+//-
 {
     Assert( pfucb );
     Assert( pbmRangeStart );
@@ -5888,12 +7215,14 @@ ERR ErrBTFindFragmentedRange(
     CSR csrRoot;
     PIBTraceContextScope tcScope = TcBTICreateCtxScope( pfucb, iorsNone );
 
+    // Latch the root page
     Call( csrRoot.ErrGetReadPage( pfucb->ppib,
                                   pfucb->ifmp,
                                   PgnoRoot( pfucb ),
                                   bflfDefault,
                                   PBFLatchHintPgnoRoot( pfucb ) ) );
     
+    // If the root page is a leaf page then the tree is too shallow
     if( csrRoot.Cpage().FLeafPage() )
     {
         Call( ErrERRCheck( JET_errRecordNotFound ) );
@@ -5904,10 +7233,11 @@ ERR ErrBTFindFragmentedRange(
 HandleError:
     csrRoot.ReleasePage();
 
-    Assert( err <= JET_errSuccess );
+    Assert( err <= JET_errSuccess );    // no warnings are returned
     if( JET_errSuccess == err )
     {
         Assert( !pbmRangeStart->key.FNull() );
+        // can't assert pbmRangeEnd because a null key is fine for the end of the tree
     }
     
     return err;
@@ -5946,6 +7276,8 @@ ERR ErrBTDumpPageUsage( PIB * ppib, const IFMP ifmp, const PGNO pgnoFDP )
         Call( ErrBTOpen( ppib, pgnoFDP, ifmp, &pfucb ) );
         FUCBSetIndex( pfucb );
 
+        //  we will be traversing the entire tree in order, preread all the pages
+        //
         FUCBSetSequential( pfucb );
         FUCBSetPrereadForward( pfucb, cpgPrereadSequential );
 
@@ -5973,12 +7305,18 @@ ERR ErrBTDumpPageUsage( PIB * ppib, const IFMP ifmp, const PGNO pgnoFDP )
             ULONG           cbNodeMax       = 0;
             ULONG           cbNodeMin       = ulMax;
 
+            //  process result of record navigation
+            //
             Call( err );
 
+            //  calculate size of prefix (external header)
+            //
             NDGetPtrExternalHeader( pcsr->Cpage(), &line, noderfWhole );
             cbPrefix = CPAGE::cbInsertionOverhead + line.cb;
             cbUsed += cbPrefix;
 
+            //  calculate stats for each node on the page
+            //
             for ( ULONG iline = 0; iline < cNodes; iline++ )
             {
                 ULONG   cbCurrNode;
@@ -6022,6 +7360,8 @@ ERR ErrBTDumpPageUsage( PIB * ppib, const IFMP ifmp, const PGNO pgnoFDP )
                 }
             }
 
+            //  output this node
+            //
             printf(
                 "%d\t%d\t%d\t%d\t%d\t%d\t%d\t%d\t%d\t%d\t%d\t%d\n",
                 pcsr->Pgno(),
@@ -6037,6 +7377,8 @@ ERR ErrBTDumpPageUsage( PIB * ppib, const IFMP ifmp, const PGNO pgnoFDP )
                 cbNodeMax,
                 cbNodeMin );
 
+            //  update running totals
+            //
             cTotalPages++;
             cTotalNodes += cNodes;
             cTotalDeleted += cDeleted;
@@ -6053,9 +7395,15 @@ ERR ErrBTDumpPageUsage( PIB * ppib, const IFMP ifmp, const PGNO pgnoFDP )
             if ( cbNodeMin < cbTotalNodeMin )
                 cbTotalNodeMin = cbNodeMin;
 
+            //  currency should be on the last node on the page
+            //  (so moving to the next node will force us to
+            //  the next page)
+            //
             Assert( ULONG( pcsr->ILine() + 1 ) == cNodes );
         }
 
+        //  reached end of tree
+        //
         err = JET_errSuccess;
     }
 
@@ -6086,6 +7434,9 @@ HandleError:
 
 
 
+//  ******************************************************
+//  SPECIAL OPERATIONS
+//
 
 
 INLINE ERR ErrBTICreateFCB(
@@ -6100,12 +7451,14 @@ INLINE ERR ErrBTICreateFCB(
     FCB             *pfcb       = pfcbNil;
     FUCB            *pfucb      = pfucbNil;
 
+    //  create a new FCB
 
     CallR( FCB::ErrCreate( ppib, ifmp, pgnoFDP, &pfcb ) );
 
+    //  the creation was successful
 
     Assert( pfcb->IsLocked() );
-    Assert( pfcb->FTypeNull() );
+    Assert( pfcb->FTypeNull() );                // No fcbtype yet.
     Assert( pfcb->Ifmp() == ifmp );
     Assert( pfcb->PgnoFDP() == pgnoFDP );
     Assert( !pfcb->FInitialized() );
@@ -6123,6 +7476,7 @@ INLINE ERR ErrBTICreateFCB(
         {
             Assert( openNormal == opentype );
 
+            //  read space info into FCB cache, including objid
             Call( ErrSPInitFCB( pfucb ) );
             Assert( g_fRepair || pfcb->FSpaceInitialized() );
         }
@@ -6137,7 +7491,7 @@ INLINE ERR ErrBTICreateFCB(
             }
             else
             {
-                Assert( pfcb->FUnique() );
+                Assert( pfcb->FUnique() );          //  btree is initially assumed to be unique
                 Assert( openNormalUnique == opentype );
             }
             Assert( !pfcb->FSpaceInitialized() );
@@ -6146,10 +7500,14 @@ INLINE ERR ErrBTICreateFCB(
 
     if ( pgnoFDP == pgnoSystemRoot )
     {
+        // SPECIAL CASE: For database cursor, we've got all the
+        // information we need.
 
+        //  when opening db cursor, always force to check the root page
         Assert( objidNil == objidFDP );
         if ( openNew == opentype )
         {
+            //  objid will be set when we return to ErrSPCreate()
             Assert( objidNil == pfcb->ObjidFDP() );
         }
         else
@@ -6157,9 +7515,11 @@ INLINE ERR ErrBTICreateFCB(
             Assert( objidSystemRoot == pfcb->ObjidFDP() );
         }
 
+        //  insert this FCB into the global list
 
         pfcb->InsertList();
 
+        //  finish initializing this FCB
 
         pfcb->Lock();
         Assert( pfcb->FTypeNull() );
@@ -6187,12 +7547,15 @@ HandleError:
         if ( pfcbNil != pfucb->u.pfcb )
         {
             Assert( pfcb == pfucb->u.pfcb );
+            // We managed to link the FUCB to the FCB before we errored.
             pfcb->Unlink( pfucb, fTrue );
         }
         
+        //  close the FUCB
         FUCBClose( pfucb );
     }
     
+    //  synchronously purge the FCB
     pfcb->PrepareForPurge( fFalse );
     pfcb->Purge( fFalse );
 
@@ -6200,7 +7563,18 @@ HandleError:
 }
 
 
+//  *****************************************************
+//  BTREE INTERNAL ROUTINES
+//
 
+//  opens a cursor on a tree rooted at pgnoFDP
+//  open cursor on corresponding FCB if it is in cache [common case]
+//  if FCB not in cache, create one, link with cursor
+//              and initialize FCB space info
+//  if fNew is set, this is a new tree,
+//      so do not initialize FCB space info
+//  fWillInitFCB: On a passive, is the caller planning to fully hydrate the placeholder FCB?
+//
 ERR ErrBTIOpen(
     PIB             *ppib,
     const IFMP      ifmp,
@@ -6220,22 +7594,28 @@ ERR ErrBTIOpen(
 RetrieveFCB:
     AssertTrack( cRetries != 100000, "TooManyFcbOpenRetries" );
 
+    //  get the FCB for the given ifmp/pgnoFDP
 
     pfcb = FCB::PfcbFCBGet( ifmp, pgnoFDP, &fState, fTrue, !fWillInitFCB );
     if ( pfcb == pfcbNil )
     {
 
+        //  the FCB does not exist
 
         Assert( fFCBStateNull == fState );
 
+        //  try to create a new B-tree which will cause the creation of the new FCB
 
         err = ErrBTICreateFCB( ppib, ifmp, pgnoFDP, objidFDP, opentype, ppfucb );
-        Assert( err <= JET_errSuccess );
+        Assert( err <= JET_errSuccess );        // Shouldn't return warnings.
 
         if ( err == errFCBExists )
         {
 
+            //  we failed because someone else was racing to create
+            //      the same FCB that we want, but they beat us to it
 
+            //  try to get the FCB again
 
             UtilSleep( 10 );
             cRetries++;
@@ -6254,15 +7634,20 @@ RetrieveFCB:
             Assert( pfcb->WRefCount() >= 1);
             err = ErrBTOpen( ppib, pfcb, ppfucb );
 
+            // Cursor has been opened on FCB, so refcount should be
+            // at least 2 (one for cursor, one for call to PfcbFCBGet()).
+            // (if ErrBTOpen returns w/o error)
             Assert( pfcb->WRefCount() > 1 || (1 == pfcb->WRefCount() && err < JET_errSuccess) );
 
             pfcb->Release();
         }
         else
         {
-            FireWall( "DeprecatedSentinelFcbBtOpen" );
-            Assert( !FFMPIsTempDB( ifmp ) );
+            FireWall( "DeprecatedSentinelFcbBtOpen" ); // Sentinel FCBs are believed deprecated
+            Assert( !FFMPIsTempDB( ifmp ) );     // Sentinels not used by sort/temp. tables.
 
+            // If we encounter a sentinel, it means the
+            // table has been locked for subsequent deletion.
             err = ErrERRCheck( JET_errTableLocked );
         }
     }
@@ -6272,12 +7657,22 @@ HandleError:
 }
 
 
+//  *************************************************
+//  movement operations
+//
 
+//  positions cursor on root page of tree
+//  this is root page of data/index for user cursors
+//      and root of AvailExt or OwnExt trees for Space cursors
+//  page is latched Read or RIW
+//
 ERR ErrBTIGotoRoot( FUCB *pfucb, LATCH latch )
 {
     ERR     err;
     PIBTraceContextScope tcScope = TcBTICreateCtxScope( pfucb, iorsBTOpen );
 
+    //  should have no page latched
+    //
     Assert( !Pcsr( pfucb )->FLatched() );
 
     CallR( Pcsr( pfucb )->ErrGetPage( pfucb->ppib,
@@ -6318,6 +7713,9 @@ ERR ErrBTIOpenAndGotoRoot( PIB *ppib, const PGNO pgnoFDP, const IFMP ifmp, FUCB 
     return err;
 }
 
+//  this is the uncommon case in the refresh logic
+//  where we lost physical currency on page
+//
 ERR ErrBTIIRefresh( FUCB *pfucb, LATCH latch )
 {
     ERR err = JET_errSuccess;
@@ -6332,6 +7730,8 @@ ERR ErrBTIIRefresh( FUCB *pfucb, LATCH latch )
 
     if ( pgnoNull != Pcsr( pfucb )->Pgno() )
     {
+        //  get page latched as per request
+        //
         err = Pcsr( pfucb )->ErrGetPage( pfucb->ppib,
                                          pfucb->ifmp,
                                          Pcsr( pfucb )->Pgno(),
@@ -6339,10 +7739,15 @@ ERR ErrBTIIRefresh( FUCB *pfucb, LATCH latch )
                                          NULL,
                                          fTrue );
 
+        //  this may be a trimmed or shrunk page, so take the slow path to re-establish currency. If we have a real
+        //  problem (unexpected uninitialized or beyond EOF page), the slow path will catch it.
+        //
         if ( ( err == JET_errPageNotInitialized ) ||
                 ( err == JET_errFileIOBeyondEOF ) ||
                 ( ( err >= JET_errSuccess ) && ( Pcsr( pfucb )->Dbtime() == dbtimeShrunk ) ) )
         {
+            // This is unexpected if trim and shrink are disabled. In that case, we'll fallback to
+            // the slow path, just in case.
             if ( !g_rgfmp[ pfucb->ifmp ].FTrimSupported() && !g_rgfmp[ pfucb->ifmp ].FShrinkDatabaseEofOnAttach() )
             {
                 FireWall( OSFormat( "BtRefreshUnexpectedErr:%d", err ) );
@@ -6354,8 +7759,12 @@ ERR ErrBTIIRefresh( FUCB *pfucb, LATCH latch )
         }
         Call( err );
 
+        //  check if DBTime of page is same as last seen by CSR
+        //
         if ( Pcsr( pfucb )->Dbtime() == dbtimeLast )
         {
+            //  page is same as last seen by cursor
+            //
             Assert( Pcsr( pfucb )->Cpage().FLeafPage() );
             Assert( Pcsr( pfucb )->Cpage().ObjidFDP() == ObjidFDP( pfucb ) );
             NDGet( pfucb );
@@ -6366,13 +7775,19 @@ ERR ErrBTIIRefresh( FUCB *pfucb, LATCH latch )
 
         Assert( Pcsr( pfucb )->Dbtime() > dbtimeLast );
 
+        //  check if node still belongs to latched page
+        //
         err = ErrBTISeekInPage( pfucb, pfucb->bmCurr );
 
         if ( JET_errSuccess == err )
         {
+            //  fast path success, return immediately
             goto HandleError;
         }
 
+        //  smart refresh did not work
+        //  use bookmark to seek to node
+        //
         BTUp( pfucb );
         Call( err );
 
@@ -6385,6 +7800,8 @@ ERR ErrBTIIRefresh( FUCB *pfucb, LATCH latch )
     }
 
 LookupBookmark:
+    //  Although the caller said no need to touch, but the buffer of the bookmark
+    //  never touched before, refresh as touch.
 
     if ( latch == latchReadNoTouch && pfucb->fTouch )
     {
@@ -6421,6 +7838,9 @@ LOCAL BOOL FBTIEligibleForOLD2( FUCB * const pfucb )
         && !g_fRepair;
 }
 
+// Register the current table for defragmentation by OLD2. This can be
+// called with a page latched so we avoid triggering the deadlock-detection
+// code by dispatching a task to register the table
 LOCAL ERR ErrBTIRegisterForOLD2( FUCB * const pfucb )
 {
     ERR err = JET_errSuccess;
@@ -6442,6 +7862,8 @@ LOCAL ERR ErrBTIRegisterForOLD2( FUCB * const pfucb )
     
         if ( PinstFromIfmp( pfucb->ifmp )->m_pver->m_fSyncronousTasks || g_rgfmp[ pfucb->ifmp ].FDetachingDB() )
         {
+            // don't start the task because the task manager is no longer running
+            // and we can't run it synchronously because it will deadlock.
             Error( ErrERRCheck( JET_errTaskDropped ) );
         }
 
@@ -6450,6 +7872,8 @@ LOCAL ERR ErrBTIRegisterForOLD2( FUCB * const pfucb )
         OnDebug( fTaskPosted = fTrue; );
         
         ptask = NULL;
+        // WARNING: Please do not overwrite the err after this point. 
+        // Otherwise successfully posted task may get deleted by its caller.
     }
 
 HandleError:
@@ -6461,6 +7885,10 @@ HandleError:
     return err;
 }
     
+//  deletes a node and blows it away
+//  performs single-page cleanup or multipage cleanup, if possible
+//  this is called from VER cleanup or other cleanup threads
+//
 INLINE ERR ErrBTIDelete( FUCB *pfucb, const BOOKMARK& bm )
 {
     ERR     err;
@@ -6473,16 +7901,22 @@ INLINE ERR ErrBTIDelete( FUCB *pfucb, const BOOKMARK& bm )
     auto tc = TcCurr();
     PERFOpt( PERFIncCounterTable( cBTDelete, PinstFromPfucb( pfucb ), (TCE)tc.nParentObjectClass ) );
 
+    //  try to delete node, if multi-page operation is not needed
+    //
     CallR( ErrBTISinglePageCleanup( pfucb, bm ) );
     Assert( !Pcsr( pfucb )->FLatched() );
 
     if ( wrnBTMultipageOLC == err )
     {
+        //  multipage operations are needed to cleanup page
+        //  here we try a right merge first, and then a left merge
+        //
 
         MERGETYPE mergetype;
         err = ErrBTIMultipageCleanup( pfucb, bm, NULL, NULL, &mergetype, fTrue );
         if ( errBTMergeNotSynchronous == err )
         {
+            //  ignore merge conflicts
             err = JET_errSuccess;
         }
         else if ( mergetypeNone == mergetype )
@@ -6490,6 +7924,7 @@ INLINE ERR ErrBTIDelete( FUCB *pfucb, const BOOKMARK& bm )
             err = ErrBTIMultipageCleanup( pfucb, bm, NULL, NULL, &mergetype, fFalse );
             if ( errBTMergeNotSynchronous == err )
             {
+                //  ignore merge conflicts
                 err = JET_errSuccess;
             }
         }
@@ -6505,6 +7940,29 @@ ERR ErrBTDelete( FUCB *pfucb, const BOOKMARK& bm )
     BOOL    fInTransaction  = fFalse;
     PIBTraceContextScope tcScope = TcBTICreateCtxScope( pfucb, iorsBTDelete );
 
+    //  UNDONE: is a transaction really needed?  None of the operations
+    //  performed by single/multi-page cleanup are versioned, so it's not
+    //  for rollback reasons. Probably not visibility either, since I
+    //  believe single/multi-page cleanup ignores version bits when
+    //  looking at nodes. Are we worried about the visibility of other
+    //  transactions? Or maybe are we worried that if we don't begin a
+    //  transaction here, version cleanup might interfere?
+    //
+    //  RESOLVED: The reason we need a transaction is to ensure that
+    //  the parent FCB is not purged out from underneath us.
+    //  The scenario is:
+    //      - DELETERECTASK on LV tree is dispatched
+    //      - table is deleted
+    //      - version cleanup purges table FCB, then waits for
+    //        all tasks on LV to complete
+    //      - DELETERECTASK is executed, space is freed to table
+    //        btree, but FCB for the table has already been purged
+    //  If we wrap the DELETERECTASK in a transaction, then check
+    //  to make sure that the FCB is not flagged as DeletePending,
+    //  we're guaranteed that any btree deletion (eg. table delete)
+    //  will not be processed by version cleanup until after this
+    //  transaction has committed.
+    //
     Assert( !PinstFromPpib( ppib )->FRecovering() || fRecoveringUndo == PinstFromPpib( ppib )->m_plog->FRecoveringMode() );
 
     if ( ppib->Level() == 0 )
@@ -6515,6 +7973,9 @@ ERR ErrBTDelete( FUCB *pfucb, const BOOKMARK& bm )
 
     err = ErrBTIDelete( pfucb, bm );
 
+    //  the node may have gotten expunged by someone else or may have
+    //  gotten undeleted (because a new node was inserted with the same key)
+    //
     switch ( err )
     {
         case JET_errSuccess:
@@ -6526,6 +7987,8 @@ ERR ErrBTDelete( FUCB *pfucb, const BOOKMARK& bm )
             Call( err );
     }
 
+    //  no versioned updates performed, so just force success
+    //
     Assert( prceNil == ppib->prceNewest || operWriteLock == ppib->prceNewest->Oper() );
 
     if ( fInTransaction )
@@ -6544,6 +8007,9 @@ HandleError:
 }
 
 
+//  returns number of bytes to leave free in page
+//  to satisfied density constraint
+//
 INLINE INT CbBTIFreeDensity( const FUCB *pfucb )
 {
     Assert( pfucb->u.pfcb != pfcbNil );
@@ -6551,14 +8017,20 @@ INLINE INT CbBTIFreeDensity( const FUCB *pfucb )
 }
 
 
+//  returns required space for inserting a node into given page
+//  used by split for estimating cbReq for internal page insertions
+//
 LOCAL ULONG CbBTICbReq( FUCB *pfucb, CSR *pcsr, const KEYDATAFLAGS& kdf )
 {
     Assert( pcsr->Latch() == latchRIW );
     Assert( !pcsr->Cpage().FLeafPage() );
     Assert( sizeof( PGNO )== kdf.data.Cb() );
 
+    //  temporary kdf to accommodate
     KEYDATAFLAGS    kdfT = kdf;
 
+    //  get prefix from page
+    //
     const INT   cbCommon = CbNDCommonPrefix( pfucb, pcsr, kdf.key );
 
     if ( cbCommon > cbPrefixOverhead )
@@ -6581,10 +8053,15 @@ LOCAL ULONG CbBTICbReq( FUCB *pfucb, CSR *pcsr, const KEYDATAFLAGS& kdf )
 }
 
 
+//  returns cbCommon for given key
+//  with respect to prefix in page
+//
 INT CbNDCommonPrefix( FUCB *pfucb, CSR *pcsr, const KEY& key )
 {
     Assert( pcsr->FLatched() );
 
+    //  get prefix from page
+    //
     NDGetPrefix( pfucb, pcsr );
     Assert( pfucb->kdfCurr.key.suffix.Cb() == 0 );
 
@@ -6594,6 +8071,9 @@ INT CbNDCommonPrefix( FUCB *pfucb, CSR *pcsr, const KEY& key )
 }
 
 
+//  computes prefix for a given key with respect to prefix key in page
+//  reorganizes key in given kdf to reflect prefix
+//
 VOID BTIComputePrefix( FUCB         *pfucb,
                        CSR          *pcsr,
                        const KEY&   key,
@@ -6607,6 +8087,8 @@ VOID BTIComputePrefix( FUCB         *pfucb,
 
     if ( cbCommon > cbPrefixOverhead )
     {
+        //  adjust inserted key to reflect prefix
+        //
         pkdf->key.prefix.SetCb( cbCommon );
         pkdf->key.prefix.SetPv( key.suffix.Pv() );
         pkdf->key.suffix.SetCb( key.suffix.Cb() - cbCommon );
@@ -6622,17 +8104,27 @@ VOID BTIComputePrefix( FUCB         *pfucb,
 }
 
 
+//  decides if a particular insert should be treated as an append
+//
 INLINE BOOL FBTIAppend( const FUCB *pfucb, CSR *pcsr, ULONG cbReq, const BOOL fUpdateUncFree )
 {
+    //  cbReq includes line TAG overhead and must be compared against CbNDPageAvailMostNoInsert
+    //
     Assert( cbReq <= CbNDPageAvailMostNoInsert( g_rgfmp[ pfucb->ifmp ].CbPage() ) );
     Assert( pcsr->FLatched() );
 
+    //  adjust cbReq for density constraint
+    //
     if ( pcsr->Cpage().FLeafPage()
-        && !pcsr->Cpage().FSpaceTree() )
+        && !pcsr->Cpage().FSpaceTree() )        //  100% density on space trees
     {
         cbReq += CbBTIFreeDensity( pfucb );
     }
 
+    //  last page in tree
+    //  inserting past the last node in page
+    //  and inserting a node of size cbReq violates density contraint
+    //
     return ( pgnoNull == pcsr->Cpage().PgnoNext()
             && pcsr->ILine() == pcsr->Cpage().Clines()
             && !FNDFreePageSpace( pfucb, pcsr, cbReq, fUpdateUncFree ) );
@@ -6645,6 +8137,10 @@ INLINE BOOL FBTISplit( const FUCB *pfucb, CSR *pcsr, const ULONG cbReq, const BO
 }
 
 
+//  finds max size of node in pfucb->kdfCurr
+//  checks version store to find reserved space for
+//  uncommitted nodes
+//
 LOCAL ULONG CbBTIMaxSizeOfNode( const FUCB * const pfucb, const CSR * const pcsr )
 {
     if ( FNDPossiblyVersioned( pfucb, pcsr ) )
@@ -6665,6 +8161,17 @@ LOCAL ULONG CbBTIMaxSizeOfNode( const FUCB * const pfucb, const CSR * const pcsr
 }
 
 
+//  split page and perform operation
+//  update operation to be be performed can be
+//      Insert:     node to insert is in kdf
+//      Replace:    data to replace with is in kdf
+//      FlagInsertAndReplaceData:   node to insert is in kdf
+//                  [for unique trees that
+//                   already have a flag-deleted node
+//                   with the same key]
+//
+//  cursor is placed on node to replace, or insertion point
+//
 ERR ErrBTISplit( FUCB           * const pfucb,
                  KEYDATAFLAGS   * const pkdf,
                  const DIRFLAG  dirflagT,
@@ -6683,6 +8190,8 @@ ERR ErrBTISplit( FUCB           * const pfucb,
     Assert( rceid2 == Rceid( prceReplace )
             || rceid1 == Rceid( prceReplace ) );
 
+    //  copy flags into local, since it can be changed by SelectSplitPath
+    //
     DIRFLAG     dirflag     = dirflagT;
     BOOL        fVersion    = !( dirflag & fDIRNoVersion ) && !g_rgfmp[ pfucb->ifmp ].FVersioningOff();
     const BOOL  fLogging    = !( dirflag & fDIRNoLog ) && g_rgfmp[pfucb->ifmp].FLogOn();
@@ -6702,8 +8211,13 @@ ERR ErrBTISplit( FUCB           * const pfucb,
         Assert( proxyCreateIndex == pverproxy->proxy );
     }
     Assert( pkdf->key.prefix.FNull() );
-#endif
+#endif  //  DEBUG
 
+    //  seek from root
+    //  RIW latching all intermediate pages
+    //      and right sibling of leaf page
+    //  also retry the operation
+    //
     err = ErrBTICreateSplitPathAndRetryOper(
                 pfucb,
                 pkdf,
@@ -6717,6 +8231,10 @@ ERR ErrBTISplit( FUCB           * const pfucb,
     if ( JET_errSuccess == err )
     {
         Assert( psplitPath != NULL ) ;
+        //  performed operation successfully
+        //  set cursor to leaf page,
+        //  release splitPath and return
+        //
         const INT   ilineT      = psplitPath->csr.ILine();
         *Pcsr( pfucb ) = psplitPath->csr;
         Pcsr( pfucb )->SetILine( ilineT );
@@ -6731,24 +8249,41 @@ ERR ErrBTISplit( FUCB           * const pfucb,
 
     Assert( psplitPath != NULL ) ;
 
+    //  select split
+    //      -- this selects split of parents too
+    //
     Call( ErrBTISelectSplit( pfucb, psplitPath, pkdf, dirflag ) );
     BTISplitCheckPath( psplitPath );
     if ( NULL == psplitPath->psplit ||
          splitoperNone == psplitPath->psplit->splitoper )
     {
+        //  save err if operNone
+        //
         fOperNone = fTrue;
     }
 
+    //  get new pages
+    //
     Call( ErrBTIGetNewPages( pfucb, psplitPath, dirflag ) );
 
+    //  release latch on unnecessary pages
+    //
     BTISplitReleaseUnneededPages( pinst, &psplitPath );
     Assert( psplitPath->psplit != NULL );
 
+    //  write latch remaining pages in order
+    //  flag pages dirty and set each with max dbtime of the pages
+    //
     Call( ErrBTISplitUpgradeLatches( pfucb->ifmp, psplitPath ) );
 
+    //  The logging code will log the iline currently in the CSR of the
+    //  psplitPath. The iline is ignored for recovery, but its nice to
+    //  have it set to something sensible for debugging
 
     psplitPath->csr.SetILine( psplitPath->psplit->ilineOper );
 
+    //  log split -- macro logging for whole split
+    //
     if ( fLogging )
     {
         LGPOS   lgpos;
@@ -6763,6 +8298,7 @@ ERR ErrBTISplit( FUCB           * const pfucb,
                       &lgpos,
                       pverproxy );
 
+        // on error, return to before dirty dbtime on all pages
         if ( err < JET_errSuccess )
         {
             BTISplitRevertDbtime( psplitPath );
@@ -6772,21 +8308,37 @@ ERR ErrBTISplit( FUCB           * const pfucb,
         BTISplitSetLgpos( psplitPath, lgpos );
     }
 
+    //  NOTE: after logging succeeds, nothing should fail...
+    //
     if ( prceNil != prceReplace && !fOperNone )
     {
         const INT cbData    = pkdf->data.Cb();
 
+        //  set uncommitted freed space for shrinking node
         VERSetCbAdjust( Pcsr( pfucb ), prceReplace, cbData, cbDataOld, fDoNotUpdatePage );
     }
 
+    //  perform split
+    //  insert parent page pointers
+    //  fix sibling page pointers at leaf
+    //  move nodes
+    //  set dependencies [optional, depending upon page dependencies param]
+    //
     BTIPerformSplit( pfucb, psplitPath, pkdf, dirflag );
 
     BTICheckSplits( pfucb, psplitPath, pkdf, dirflag );
 
+    //  shrink / optimize page image
+    //
     BTISplitShrinkPages( psplitPath );
 
+    //  move cursor to leaf page [write-latched]
+    //  and iLine to operNode
+    //
     BTISplitSetCursor( pfucb, psplitPath );
 
+    //  release all splitPaths
+    //
     BTIReleaseSplitPaths( pinst, psplitPath );
 
     if ( fOperNone )
@@ -6796,6 +8348,8 @@ ERR ErrBTISplit( FUCB           * const pfucb,
 
         if( prceNil != prceReplace )
         {
+            //  UNDONE: we don't have to nullify the RCE here. We could keep it and reuse it. No-one
+            //  else can alter the node because we have a version on it.
             Assert( fVersion );
             VERNullifyFailedDMLRCE( prceReplace );
         }
@@ -6808,6 +8362,8 @@ ERR ErrBTISplit( FUCB           * const pfucb,
     return err;
 
 HandleError:
+    //  release splitPath
+    //
     if ( psplitPath != NULL )
     {
         BTIReleaseSplitPaths( pinst, psplitPath );
@@ -6817,6 +8373,10 @@ HandleError:
 }
 
 
+//  creates path of RIW-latched pages from root for split to work on
+//  if DBTime or leaf pgno has changed after RIW latching path,
+//      retry operation
+//
 ERR ErrBTICreateSplitPathAndRetryOper( FUCB             * const pfucb,
                                        const KEYDATAFLAGS * const pkdf,
                                        SPLITPATH        **ppsplitPath,
@@ -6835,11 +8395,14 @@ ERR ErrBTICreateSplitPathAndRetryOper( FUCB             * const pfucb,
     Assert( NULL == pfucb->pvRCEBuffer );
     Pcsr( pfucb )->ReleasePage();
 
+    //  initialize bookmark to seek for
+    //
     NDGetBookmarkFromKDF( pfucb, *pkdf, &bm );
 
     if ( *pdirflag & fDIRInsert )
     {
         Assert( bm.key.Cb() == pkdf->key.Cb() );
+        //  [ldb 4/30/96]: assert below _may_ go off wrongly. possibly use CmpBm == 0
         Assert( bm.key.suffix.Pv() == pkdf->key.suffix.Pv() );
         Assert( bm.key.prefix.FNull() );
     }
@@ -6849,6 +8412,8 @@ ERR ErrBTICreateSplitPathAndRetryOper( FUCB             * const pfucb,
     }
     else
     {
+        //  get key from cursor
+        //
         Assert( *pdirflag & fDIRReplace );
         bm.key = pfucb->bmCurr.key;
     }
@@ -6856,12 +8421,16 @@ ERR ErrBTICreateSplitPathAndRetryOper( FUCB             * const pfucb,
     Call( ErrBTICreateSplitPath( pfucb, bm, ppsplitPath ) );
     Assert( (*ppsplitPath)->csr.Cpage().FLeafPage() );
 
+    //  set iline to point of insert
+    //
     if ( wrnNDFoundLess == err )
     {
         Assert( (*ppsplitPath)->csr.Cpage().Clines() - 1 ==  (*ppsplitPath)->csr.ILine() );
         (*ppsplitPath)->csr.SetILine( (*ppsplitPath)->csr.Cpage().Clines() );
     }
 
+    //  retry operation if timestamp / pgno has changed
+    //
     if ( (*ppsplitPath)->csr.Pgno() != pgnoSplit ||
          (*ppsplitPath)->csr.Dbtime() != dbtimeLast )
     {
@@ -6869,6 +8438,8 @@ ERR ErrBTICreateSplitPathAndRetryOper( FUCB             * const pfucb,
 
         if ( fDIRReplace & *pdirflag )
         {
+            //  check if replace fits in page
+            //
             AssertNDGet( pfucb, pcsr );
             const INT  cbReq = pfucb->kdfCurr.data.Cb() >= pkdf->data.Cb() ?
                                   0 :
@@ -6879,9 +8450,13 @@ ERR ErrBTICreateSplitPathAndRetryOper( FUCB             * const pfucb,
                 Error( ErrERRCheck( errPMOutOfPageSpace ) );
             }
 
+            //  upgrade to write latch
+            //
             pcsr->UpgradeFromRIWLatch();
             Assert( latchWrite == pcsr->Latch() );
 
+            //  try to replace node data with new data
+            //
             err = ErrNDReplace( pfucb, pcsr, &pkdf->data, *pdirflag, rceid1, prceReplace );
             Assert( errPMOutOfPageSpace != err );
             Call( err );
@@ -6893,19 +8468,38 @@ ERR ErrBTICreateSplitPathAndRetryOper( FUCB             * const pfucb,
             Assert( ( fDIRInsert & *pdirflag ) ||
                     ( fDIRFlagInsertAndReplaceData & *pdirflag ) );
 
+            //  UNDONE: copy code from BTInsert
+            //  set *pdirflag
+            //
+            //  if seek succeeded
+            //      if unique
+            //          flag insert and replace data
+            //      else
+            //          flag insert
+            //  else
+            //      insert whole node
+            //
             if ( JET_errSuccess == err )
             {
+                //  seek succeeded
+                //
+                //  can not have two nodes with same bookmark (attempts
+                //  to do so should have been caught before split)
+                //
 #ifdef DEBUG
-                FUCBResetUpdatable( pfucb );
+                FUCBResetUpdatable( pfucb );    //  don't reset the version bit in FNDPotVisibleToCursor
                 Assert( FNDDeleted( pfucb->kdfCurr ) );
                 Assert( !FNDPotVisibleToCursor( pfucb, pcsr ) );
                 FUCBSetUpdatable( pfucb );
-#endif
+#endif  //  DEBUG
 
                 if ( FFUCBUnique( pfucb ) )
                 {
                     Assert( *pdirflag & fDIRFlagInsertAndReplaceData );
 
+                    //  calcualte space requred
+                    //  if new data fits, flag insert node and replace data
+                    //
                     cbReq = pkdf->data.Cb() > pfucb->kdfCurr.data.Cb() ?
                                 pkdf->data.Cb() - pfucb->kdfCurr.data.Cb() :
                                 0;
@@ -6915,9 +8509,13 @@ ERR ErrBTICreateSplitPathAndRetryOper( FUCB             * const pfucb,
                         Error( ErrERRCheck( errPMOutOfPageSpace ) );
                     }
 
+                    //  upgrade to write latch
+                    //
                     pcsr->UpgradeFromRIWLatch();
                     Assert( latchWrite == pcsr->Latch() );
 
+                    //  flag insert node and replace data
+                    //
                     Call( ErrNDFlagInsertAndReplaceData( pfucb,
                                                          pcsr,
                                                          pkdf,
@@ -6929,6 +8527,14 @@ ERR ErrBTICreateSplitPathAndRetryOper( FUCB             * const pfucb,
                 }
                 else
                 {
+                    //  should never happen, because:
+                    //      - if this is an insert, the dupe should
+                    //        have been caught by BTInsert() before
+                    //        the split
+                    //      - if this is a flag-insert, it wouldn't
+                    //        have caused a split
+                    //      - FlagInsertAndReplaceData doesn't happen
+                    //        on non-unique indexes
                     Assert( fFalse );
                     Assert( *pdirflag & fDIRInsert );
                     Assert( 0 == CmpKeyData( bm, pfucb->kdfCurr ) );
@@ -6939,17 +8545,25 @@ ERR ErrBTICreateSplitPathAndRetryOper( FUCB             * const pfucb,
                         Error( ErrERRCheck( JET_errMultiValuedIndexViolation ) );
                     }
 
+                    //  upgrade to write latch
+                    //
                     pcsr->UpgradeFromRIWLatch();
                     Assert( latchWrite == pcsr->Latch() );
 
+                    //  no additional space required
+                    //
                     Assert( fFalse );
                     Call( ErrNDFlagInsert( pfucb, pcsr, *pdirflag, rceid1, pverproxy ) );
                 }
             }
             else
             {
+                //  insert node if it fits
+                //
                 KEYDATAFLAGS kdfCompressed = *pkdf;
 
+                //  if we were doing a flag insert and replace data and didn't find the node
+                //  then it has been removed. change the operation to an ordinary insert
                 *pdirflag &= ~fDIRFlagInsertAndReplaceData;
                 *pdirflag |= fDIRInsert;
 
@@ -6964,6 +8578,8 @@ ERR ErrBTICreateSplitPathAndRetryOper( FUCB             * const pfucb,
                     Error( ErrERRCheck( errPMOutOfPageSpace ) );
                 }
 
+                //  upgrade to write latch
+                //
                 pcsr->UpgradeFromRIWLatch();
                 Assert( latchWrite == pcsr->Latch() );
 
@@ -6986,6 +8602,9 @@ HandleError:
 }
 
 
+//  creates splitPath of RIW latched pages from root of tree
+//  to seeked bookmark
+//
 LOCAL ERR   ErrBTICreateSplitPath( FUCB             *pfucb,
                                    const BOOKMARK&  bm,
                                    SPLITPATH        **ppsplitPath )
@@ -6994,10 +8613,14 @@ LOCAL ERR   ErrBTICreateSplitPath( FUCB             *pfucb,
     BOOL    fLeftEdgeOfBtree    = fTrue;
     BOOL    fRightEdgeOfBtree   = fTrue;
 
+    //  create splitPath structure
+    //
     Assert( NULL == *ppsplitPath );
     CallR( ErrBTINewSplitPath( ppsplitPath ) );
     Assert( NULL != *ppsplitPath );
 
+    //  RIW latch root
+    //
     Call( (*ppsplitPath)->csr.ErrGetRIWPage( pfucb->ppib,
                                              pfucb->ifmp,
                                              PgnoRoot( pfucb ) ) );
@@ -7016,6 +8639,7 @@ LOCAL ERR   ErrBTICreateSplitPath( FUCB             *pfucb,
             && FFUCBRepair( pfucb )
             && bm.key.Cb() == 0 )
         {
+            //  when creating a repair tree we want NULL keys to go at the end, not the beginning
             NDMoveLastSon( pfucb, &(*ppsplitPath)->csr );
             err = ErrERRCheck( wrnNDFoundLess );
         }
@@ -7041,6 +8665,8 @@ LOCAL ERR   ErrBTICreateSplitPath( FUCB             *pfucb,
 
                 if ( fLeftEdgeOfBtree ^ fLeafPageIsFirstPage )
                 {
+                    //  if not repair, assert, otherwise, suppress the assert
+                    //  and repair will just naturally err out
                     AssertSz( g_fRepair, "Corrupt B-tree: first leaf page has mismatched parent" );
                     Call( ErrBTIReportBadPageLink(
                                 pfucb,
@@ -7053,6 +8679,8 @@ LOCAL ERR   ErrBTICreateSplitPath( FUCB             *pfucb,
                 }
                 if ( fRightEdgeOfBtree ^ fLeafPageIsLastPage )
                 {
+                    //  if not repair, assert, otherwise, suppress the assert
+                    //  and repair will just naturally err out
                     AssertSz( g_fRepair, "Corrupt B-tree: last leaf page has mismatched parent" );
                     Call( ErrBTIReportBadPageLink(
                                 pfucb,
@@ -7080,8 +8708,12 @@ LOCAL ERR   ErrBTICreateSplitPath( FUCB             *pfucb,
         fLeftEdgeOfBtree = ( fLeftEdgeOfBtree
                             && 0 == (*ppsplitPath)->csr.ILine() );
 
+        //  allocate another splitPath structure for next level
+        //
         Call( ErrBTINewSplitPath( ppsplitPath ) );
 
+        //  access child page
+        //
         Assert( sizeof( PGNO ) == pfucb->kdfCurr.data.Cb() );
         Call( (*ppsplitPath)->csr.ErrGetRIWPage(
                                 pfucb->ppib,
@@ -7094,6 +8726,10 @@ HandleError:
 }
 
 
+//  creates a new SPLITPATH structure and initializes it
+//      adds newly created splitPath structure to head of list
+//      pointed to by *ppSplitPath passed in
+//
 ERR ErrBTINewSplitPath( SPLITPATH **ppsplitPath )
 {
     SPLITPATH   *psplitPath;
@@ -7116,6 +8752,10 @@ ERR ErrBTINewSplitPath( SPLITPATH **ppsplitPath )
 }
 
 
+//  selects split at leaf level
+//  recursively calls itself to select split at parent level
+//      psplitPath is already created and all required pages RIW latched
+//
 LOCAL ERR ErrBTISelectSplit( FUCB           *pfucb,
                              SPLITPATH      *psplitPath,
                              KEYDATAFLAGS   *pkdf,
@@ -7123,7 +8763,11 @@ LOCAL ERR ErrBTISelectSplit( FUCB           *pfucb,
 {
     ERR     err;
 
+/// Assert( pkdf->key.prefix.cb == 0 );
 
+    //  create and initialize split structure
+    //  and link to psplitPath
+    //
     CallR( ErrBTINewSplit( pfucb, psplitPath, pkdf, dirflag ) );
     Assert( psplitPath->psplit != NULL );
     Assert( psplitPath->psplit->psplitPath == psplitPath );
@@ -7131,10 +8775,15 @@ LOCAL ERR ErrBTISelectSplit( FUCB           *pfucb,
     SPLIT   *psplit = psplitPath->psplit;
     BTIRecalcWeightsLE( psplit );
 
+    //  if root page
+    //      select vertical split
+    //
     if ( psplitPath->csr.Cpage().FRootPage() )
     {
         BTISelectVerticalSplit( psplit, pfucb );
 
+        //  calculate uncommitted freed space
+        //
         BTISplitCalcUncFree( psplit );
 
         Call( ErrBTISplitAllocAndCopyPrefixes( pfucb, psplit ) );
@@ -7144,28 +8793,47 @@ LOCAL ERR ErrBTISelectSplit( FUCB           *pfucb,
     ULONG   cbReq;
     CSR     *pcsrParent;
 
+    //  horizontal split
+    //
     if  ( psplit->fAppend )
     {
         BTISelectAppend( psplit, pfucb );
     }
     else
     {
+        //  find split point such that the
+        //  two pages have almost equal weight
+        //
         BTISelectRightSplit( psplit, pfucb );
         Assert( psplit->ilineSplit >= 0 );
     }
 
+    //  calculate uncommitted freed space
+    //
     BTISplitCalcUncFree( psplit );
 
+    //  copy page flags
+    //
     psplit->fNewPageFlags   =
     psplit->fSplitPageFlags = psplitPath->csr.Cpage().FFlags();
 
+    //  allocate and copy prefixes
+    //
     Call( ErrBTISplitAllocAndCopyPrefixes( pfucb, psplit ) );
 
+    //  compute separator key to insert in parent
+    //  allocate space for key and link to psplit
+    //
     Call( ErrBTISplitComputeSeparatorKey( psplit, pfucb ) );
     Assert( sizeof( PGNO ) == psplit->kdfParent.data.Cb() );
 
+    //  seek to separator key in parent
+    //
     Call( ErrBTISeekSeparatorKey( psplit, pfucb ) );
 
+    //  if insert in parent causes split
+    //  call BTSelectSplit recursively
+    //
     pcsrParent = &psplit->psplitPath->psplitPathParent->csr;
     cbReq = CbBTICbReq( pfucb, pcsrParent, psplit->kdfParent );
 
@@ -7179,6 +8847,10 @@ LOCAL ERR ErrBTISelectSplit( FUCB           *pfucb,
         if ( NULL == psplitPath->psplitPathParent->psplit ||
              splitoperNone == psplitPath->psplitPathParent->psplit->splitoper )
         {
+            //  somewhere up the tree, split could not bepsplit->kdfParent performed
+            //  along with the operation [insert]
+            //  so reset psplit at this level
+            //
             delete psplit;
             psplitPath->psplit = NULL;
             return err;
@@ -7196,6 +8868,9 @@ HandleError:
 }
 
 
+//  allocates a new SPLIT structure
+//  initalizes psplit and links it to psplitPath
+//
 ERR ErrBTINewSplit(
     FUCB *          pfucb,
     SPLITPATH *     psplitPath,
@@ -7212,6 +8887,8 @@ ERR ErrBTINewSplit(
     Assert( psplitPath != NULL );
     Assert( psplitPath->psplit == NULL );
 
+    //  allocate split structure
+    //
     if ( !( psplit = new SPLIT ) )
     {
         return ErrERRCheck( JET_errOutOfMemory );
@@ -7219,9 +8896,14 @@ ERR ErrBTINewSplit(
 
     psplit->pgnoSplit = psplitPath->csr.Pgno();
 
+    //  initialize split structure
+    //  and link to psplitPath
+    //
     if ( psplitPath->csr.Cpage().FLeafPage( ) &&
          pgnoNull != psplitPath->csr.Cpage().PgnoNext() )
     {
+        //  set right page
+        //
         Assert( !psplitPath->csr.Cpage().FRootPage( ) );
         Call( psplit->csrRight.ErrGetRIWPage(
                                         pfucb->ppib,
@@ -7236,6 +8918,8 @@ ERR ErrBTINewSplit(
                                                     psplit->csrRight.Cpage().PgnoPrev() :
                                                     psplit->csrRight.Cpage().ObjidFDP() );
 
+            //  if not repair, assert, otherwise, suppress the assert and
+            //  repair will just naturally err out
             AssertSz( g_fRepair, "Corrupt B-tree: bad leaf page links detected on Split" );
             Call( ErrBTIReportBadPageLink(
                     pfucb,
@@ -7256,8 +8940,14 @@ ERR ErrBTINewSplit(
 
     psplit->psplitPath = psplitPath;
 
+    //  get operation
+    //  this will be corrected later to splitoperNone (for leaf pages only)
+    //  if split can not still satisfy space requested for operation
+    //
     if ( psplitPath->csr.Cpage().FInvisibleSons( ) )
     {
+        //  internal pages have only insert operation
+        //
         psplit->splitoper = splitoperInsert;
     }
     else if ( dirflag & fDIRInsert )
@@ -7266,6 +8956,7 @@ ERR ErrBTINewSplit(
         Assert( !( dirflag & fDIRFlagInsertAndReplaceData ) );
         psplit->splitoper = splitoperInsert;
 
+        //  must have at least two existing nodes to establish a hotpoint pattern
         fPossibleHotpoint = ( !psplitPath->csr.Cpage().FRootPage()
                             && psplitPath->csr.ILine() >= 2 );
     }
@@ -7280,15 +8971,22 @@ ERR ErrBTINewSplit(
         psplit->splitoper = splitoperFlagInsertAndReplaceData;
     }
 
+    //  allocate line info
+    //
     psplit->clines = psplitPath->csr.Cpage().Clines();
 
     if ( splitoperInsert == psplit->splitoper )
     {
+        //  insert needs one more line for inserted node
+        //
         psplit->clines++;
     }
 
+    //  allocate one more entry than we need so that BTISelectPrefix can use a sentinel value
     Alloc( psplit->rglineinfo = new LINEINFO[psplit->clines + 1] );
 
+    //  psplitPath->csr is positioned at point of insert/replace
+    //
     Assert( splitoperInsert == psplit->splitoper &&
             psplitPath->csr.Cpage().Clines() >= psplitPath->csr.ILine() ||
             psplitPath->csr.Cpage().Clines() > psplitPath->csr.ILine() );
@@ -7300,6 +8998,8 @@ ERR ErrBTINewSplit(
         if ( psplit->ilineOper == iLineTo &&
              splitoperInsert == psplit->splitoper )
         {
+            //  place to be inserted node here
+            //
             psplit->rglineinfo[iLineTo].kdf = *pkdf;
             psplit->rglineinfo[iLineTo].cbSizeMax =
             psplit->rglineinfo[iLineTo].cbSize =
@@ -7309,9 +9009,15 @@ ERR ErrBTINewSplit(
             {
                 Assert( iLineTo >= 2 );
 
+                //  verify last two nodes before insertion point are
+                //  currently last two nodes physically in page
                 if ( psplit->rglineinfo[iLineTo-2].kdf.key.suffix.Pv() > pvHighest
                     && psplit->rglineinfo[iLineTo-1].kdf.key.suffix.Pv() > psplit->rglineinfo[iLineTo-2].kdf.key.suffix.Pv() )
                 {
+                    //  need to guarantee that nodes after
+                    //  the insert point are all physically
+                    //  located before the nodes in the
+                    //  the hotpoint area
                     pvHighest = psplit->rglineinfo[iLineTo-2].kdf.key.suffix.Pv();
                 }
                 else
@@ -7320,18 +9026,26 @@ ERR ErrBTINewSplit(
                 }
             }
 
+            //  do not increment iLineFrom
+            //
             continue;
         }
 
+        //  get node from page
+        //
         psplitPath->csr.SetILine( iLineFrom );
 
         NDGet( pfucb, &psplitPath->csr );
 
         if ( iLineTo == psplit->ilineOper )
         {
+            //  get key from node
+            //  and data from parameter
+            //
             Assert( splitoperInsert != psplit->splitoper );
             Assert( splitoperNone != psplit->splitoper );
 
+            //  hotpoint is dealt with above
             Assert( !fPossibleHotpoint );
 
             psplit->rglineinfo[iLineTo].kdf.key     = pfucb->kdfCurr.key;
@@ -7343,6 +9057,8 @@ ERR ErrBTINewSplit(
 
             psplit->rglineinfo[iLineTo].cbSizeMax = max( cbSize, cbMax );
 
+            //  there should be no uncommitted version for node
+            //
             Assert( cbSize != cbMax || CbNDReservedSizeOfNode( pfucb, &psplitPath->csr ) == 0 );
         }
         else
@@ -7354,10 +9070,14 @@ ERR ErrBTINewSplit(
             {
                 if ( iLineTo < psplit->ilineOper - 2 )
                 {
+                    //  for nodes before the hotpoint area, keep track
+                    //  of highest physical location
                     pvHighest = max( pvHighest, pfucb->kdfCurr.key.suffix.Pv() );
                 }
                 else if ( iLineTo > psplit->ilineOper )
                 {
+                    //  for nodes after insertion point, ensure
+                    //  all are physically located before nodes in hotpoint area
                     fPossibleHotpoint = pfucb->kdfCurr.key.suffix.Pv() < pvHighest;
                 }
             }
@@ -7391,6 +9111,8 @@ ERR ErrBTINewSplit(
         psplit->fHotpoint = fTrue;
     }
 
+    //  determine if this meets the criteria for an append which overrides hotpoint
+    //
     if ( psplit->splitoper == splitoperInsert &&
          psplit->ilineOper == psplit->clines - 1 &&
          psplit->psplitPath->csr.Cpage().PgnoNext() == pgnoNull )
@@ -7411,6 +9133,14 @@ HandleError:
 }
 
 
+//  calculates
+//      size of all nodes to the left of a node
+//          using size of nodes already collected
+//      maximum size of nodes possible due to rollback
+//      size of common key with previous node
+//      cbUncFree in the source and dest pages
+//          using info collected
+//
 VOID BTIRecalcWeightsLE( SPLIT *psplit )
 {
     INT     iline;
@@ -7449,6 +9179,8 @@ VOID BTIRecalcWeightsLE( SPLIT *psplit )
 }
 
 
+//  calculates cbUncommitted for split and new pages
+//
 VOID BTISplitCalcUncFree( SPLIT *psplit )
 {
     Assert( psplit->ilineSplit > 0 ||
@@ -7473,6 +9205,10 @@ VOID BTISplitCalcUncFree( SPLIT *psplit )
     return;
 }
 
+//  selects vertical split
+//  if oper can not be performed with split,
+//      selects vertical split with operNone
+//
 VOID BTISelectVerticalSplit( SPLIT *psplit, FUCB *pfucb )
 {
     Assert( psplit->psplitPath->csr.Pgno() == PgnoRoot( pfucb ) );
@@ -7480,22 +9216,32 @@ VOID BTISelectVerticalSplit( SPLIT *psplit, FUCB *pfucb )
     psplit->splittype   = splittypeVertical;
     psplit->ilineSplit  = 0;
 
+    //  select prefix
+    //
     BTISelectPrefixes( psplit, psplit->ilineSplit );
 
+    //  check if oper fits in new page
+    //
     if ( !FBTISplitCausesNoOverflow( psplit, psplit->ilineSplit ) )
     {
+        //  split without performing operation
+        //
         BTISelectSplitWithOperNone( psplit, pfucb );
         BTISelectPrefixes( psplit, psplit->ilineSplit );
         Assert( FBTISplitCausesNoOverflow( psplit, psplit->ilineSplit ) );
     }
     else
     {
+        //  split and oper would both succeed
+        //
         Assert( psplit->splitoper != splitoperNone );
     }
 
     BTISplitSetPrefixes( psplit );
     Assert( FBTISplitCausesNoOverflow( psplit, psplit->ilineSplit ) );
 
+    //  set page flags for split and new pages
+    //
     Assert( !psplit->fNewPageFlags );
     Assert( !psplit->fSplitPageFlags );
 
@@ -7521,6 +9267,10 @@ VOID BTISelectVerticalSplit( SPLIT *psplit, FUCB *pfucb )
 }
 
 
+//  selects append split
+//  if appended node would not cause an overflow,
+//      set prefix in page to inserted key
+//
 VOID BTISelectAppend( SPLIT *psplit, FUCB *pfucb )
 {
     Assert( psplit->clines - 1 == psplit->ilineOper );
@@ -7531,6 +9281,8 @@ VOID BTISelectAppend( SPLIT *psplit, FUCB *pfucb )
     psplit->ilineSplit          = psplit->ilineOper;
 
     LINEINFO    *plineinfoOper  = &psplit->rglineinfo[psplit->ilineOper];
+    //  CbNDNodeSizeTotal includes line TAG overhead and must be compared against CbNDPageAvailMostNoInsert
+    //
     if ( CbNDNodeSizeTotal( plineinfoOper->kdf ) + cbPrefixOverhead <= CbNDPageAvailMostNoInsert( g_rgfmp[ pfucb->ifmp ].CbPage() ) &&
          plineinfoOper->kdf.key.Cb() > cbPrefixOverhead )
     {
@@ -7549,7 +9301,15 @@ VOID BTISelectAppend( SPLIT *psplit, FUCB *pfucb )
 }
 
 
+//  ================================================================
 LOCAL BOOL FBTISplitAppendLeaf( IN const SPLIT * const psplit )
+//  ================================================================
+//
+//  Determines if we are splitting an internal page whose (eventual)
+//  child leaf page is doing an append split (if that is the case
+//  the internal page should do an append split as well)
+//
+//-
 {
     BOOL fAppendLeaf = fFalse;
     
@@ -7573,7 +9333,18 @@ LOCAL BOOL FBTISplitAppendLeaf( IN const SPLIT * const psplit )
 }
 
 
+//  ================================================================
 LOCAL BOOL FBTIPrependSplit( IN const SPLIT * const psplit )
+//  ================================================================
+//
+//  This function looks for the case where we are doing a prepend
+//  split on a leaf page. This is a split where the split is caused
+//  by inserting a node at the very beginning of the b-tree.
+//
+//  Prepend splits are right splits with a specially selected iline so
+//  they are treated as right splits.
+//
+//-
 {
     BOOL fPrependLeaf = fFalse;
 
@@ -7590,7 +9361,13 @@ LOCAL BOOL FBTIPrependSplit( IN const SPLIT * const psplit )
 }
 
 
+//  ================================================================
 LOCAL VOID BTISelectHotPointSplit( IN SPLIT * const psplit, IN FUCB * pfucb )
+//  ================================================================
+//
+//  Called for a hotpoint split
+//
+//-
 {
     Assert( psplit->prefixinfoSplit.FNull() );
     Assert( psplit->fHotpoint );
@@ -7603,6 +9380,13 @@ LOCAL VOID BTISelectHotPointSplit( IN SPLIT * const psplit, IN FUCB * pfucb )
     INT ilineCandidate = psplit->ilineOper;
     if ( ilineCandidate < psplit->clines - 1 )
     {
+        //  there are nodes after the hotpoint, so what
+        //  we do is force a split consisting of just
+        //  the nodes beyond the hotpoint, then try
+        //  the operation again (the retry will either
+        //  result in the new node being inserted as
+        //  the last node on the page or it will
+        //  result in a hotpoint split)
     
         BTISelectSplitWithOperNone( psplit, pfucb );
         psplit->fHotpoint = fFalse;
@@ -7614,11 +9398,13 @@ LOCAL VOID BTISelectHotPointSplit( IN SPLIT * const psplit, IN FUCB * pfucb )
     
     psplit->ilineSplit = ilineCandidate;
     
+    //  find optimal prefix key for split page
     BTISelectPrefix(
             psplit->rglineinfo,
             ilineCandidate,
             &psplit->prefixinfoSplit );
     
+    //  find optimal prefix key for new pages
     BTISelectPrefix(
             &psplit->rglineinfo[ilineCandidate],
             psplit->clines - ilineCandidate,
@@ -7629,11 +9415,13 @@ LOCAL VOID BTISelectHotPointSplit( IN SPLIT * const psplit, IN FUCB * pfucb )
 }
 
 
+//  ================================================================
 LOCAL VOID BTISelectPrependLeafSplit(
     IN SPLIT * const psplit,
     OUT INT * const pilineCandidate,
     OUT PREFIXINFO * const pprefixinfoSplitCandidate,
     OUT PREFIXINFO * const pprefixinfoNewCandidate )
+//  ================================================================
 {
     Assert( psplit->prefixinfoSplit.FNull() );
     Assert( psplit->prefixinfoNew.FNull() );
@@ -7641,18 +9429,22 @@ LOCAL VOID BTISelectPrependLeafSplit(
 
     const INT iline = 1;
     
+    //  find optimal prefix key for split page
     
     BTISelectPrefix(
             psplit->rglineinfo,
             iline,
             &psplit->prefixinfoSplit );
     
+    //  find optimal prefix key for new page
     
     BTISelectPrefix(
             &psplit->rglineinfo[iline],
             psplit->clines - iline,
             &psplit->prefixinfoNew );
 
+    // as we are moving all existing nodes and no new nodes they must fit 
+    // on the new page
     Assert( 0 == psplit->psplitPath->psplit->ilineOper );
     Assert( FBTISplitCausesNoOverflow( psplit, iline ) );
 
@@ -7662,11 +9454,19 @@ LOCAL VOID BTISelectPrependLeafSplit(
 }
 
 
+//  ================================================================
 LOCAL VOID BTISelectAppendLeafSplit(
     IN SPLIT * const psplit,
     OUT INT * const pilineCandidate,
     OUT PREFIXINFO * const pprefixinfoSplitCandidate,
     OUT PREFIXINFO * const pprefixinfoNewCandidate )
+//  ================================================================
+//
+//  Called if we are an internal page whose (eventual) child leaf page
+//  is doing an append split. We actually want to do an append split as
+//  well (or at least as far to the right as possible)
+//
+//-
 {
     Assert( psplit->prefixinfoSplit.FNull() );
     Assert( psplit->prefixinfoNew.FNull() );
@@ -7687,28 +9487,53 @@ LOCAL VOID BTISelectAppendLeafSplit(
         }
         else
         {
+            //  shouldn't get overflow if only two nodes on page (should end up getting
+            //  one node on split page and one node on new page), but it appears that
+            //  we may have a bug where this is not the case, so put in a firewall
+            //  to trap the occurrence and allow us to debug it the next time it is hit.
             DBEnforce( psplit->psplitPath->csr.Cpage().Ifmp(), psplit->clines > 2 );
         }
     }
 
+    //  if we're doing an append split at the leaf level, then
+    //  if splits at internal levels are needed, they must be
+    //  a right split of either the NULL-key node or of the
+    //  second-last (new) node, because the rest of the nodes
+    //  should be guaranteed to fit on the page because they
+    //  fit on the page before the new node came in
+    //
     Assert( psplit->clines - 1 == *pilineCandidate
         || psplit->clines - 2 == *pilineCandidate );
 }
 
 
+//  ================================================================
 LOCAL VOID BTIRecalculatePrefix(
     IN SPLIT * const psplit,
     IN const INT ilinePrev,
     IN const INT ilineNew )
+//  ================================================================
+//
+//  Called by BTISelectEvenSplit when the splitpoint has changed (by
+//  1 line). Recalculate the prefix compression information, doing
+//  as little work as needed
+//
+//-
 {
     Assert( absdiff( ilinePrev, ilineNew ) == 1 );
 
     if( ilinePrev < ilineNew )
     {
+        //  the split (left) page grew, the new (right) page shrank
+        //      - a line was added to the end of the split (left) page
+        //      - a line was removed from the start of the new (right) page
 
+        //  find optimal prefix key for split page
         
         if ( psplit->rglineinfo[ilineNew-1].cbCommonPrev == 0 )
         {
+            //  added line has nothing in common with the other nodes on the split page, so the prefix compression
+            //  will not be affected
         }
         else
         {
@@ -7718,14 +9543,19 @@ LOCAL VOID BTIRecalculatePrefix(
                     &psplit->prefixinfoSplit );
         }
         
+        //  the new (right) page became smaller, see if we need to recalculate its prefix information
+        //  ilineSegBegin in the prefixinfoNew is relative to the new page, so iline 0 is the node we just
+        //  removed     
         
         if ( 0 == psplit->prefixinfoNew.ilineSegBegin )
         {
+            //  the removed line contributed to prefix. recalculate the prefix for the new page
             
             BTISelectPrefix( &psplit->rglineinfo[ilineNew], psplit->clines - ilineNew, &psplit->prefixinfoNew );
         }
         else if ( !psplit->prefixinfoNew.FNull() )
         {
+            //  adjust the ilines, as the new page now starts one iline later
             
             psplit->prefixinfoNew.ilinePrefix--;
             psplit->prefixinfoNew.ilineSegBegin--;
@@ -7737,18 +9567,31 @@ LOCAL VOID BTIRecalculatePrefix(
     {
         Assert( ilinePrev > ilineNew );
         
+        //  the split (left) page shrank, the new (right) page grew
+        //      - a line was removed from the end of the split (left) page
+        //      - a line was added to the start of the new (right) page
 
+        //  the split (left) page became smaller, see if we need to recalculate its prefix information
+        //  the split looks like [0->iline-1][iline->clines-1], so we recalculate the prefix for the
+        //  left page if the split point is now equal to ilineSegEnd
         
         if ( psplit->prefixinfoSplit.ilineSegEnd == ilineNew )
         {
+            //  the removed line contributed to prefix. recalculate the prefix for the new page
         
             BTISelectPrefix( psplit->rglineinfo, ilineNew, &psplit->prefixinfoSplit );
         }
         
+        //  find optimal prefix key for new page
         
         if ( psplit->rglineinfo[ilineNew+1].cbCommonPrev == 0 )
         {
+            //  added line has nothing in common with the other nodes on the split page, so the prefix compression
+            //  will not be affected
 
+            //  the ilines in the prefixinfo are relative to the ilines in the new page. as we just added a line
+            //  to the start of the page, we have to increment the ilines so that they point to the same places
+            //  in the new page
             
             if ( !psplit->prefixinfoNew.FNull() )
             {
@@ -7768,35 +9611,73 @@ LOCAL VOID BTIRecalculatePrefix(
 }
 
 
+//  ================================================================
 LOCAL VOID BTISelectEvenSplitWithoutCheckingOverflows(
     IN const SPLIT * const psplit,
     OUT INT * const pilineCandidate )
+//  ================================================================
+//
+//  Find the split point that has the "best" distribution of data
+//  between the split and new pages. The best distribution is the one
+//  where the data is distributed as evenly as possible
+//
+//-
 {
     *pilineCandidate = 0;
     
     ULONG       cbSizeCandidateLE   = 0;
 
+    //  in the best case, a split will leave 50% of the data on the split page and
+    //  move 50% of the data to the new page. calculate the number of bytes that will
+    //  be on each page in that case. this is used to determine if a candidate split point
+    //  is better than the current split point
 
     const ULONG     cbSizeTotal     = psplit->rglineinfo[psplit->clines - 1].cbSizeLE;
     const ULONG     cbSizeBestSplit = cbSizeTotal / 2;
 
+    //  pick the initial split point. we will find a split point that has the best distribution
+    //  of data between the two pages (split and new). start by guessing the split point will
+    //  be halfway through the page
     
     INT iline               = psplit->clines / 2;
     Assert( iline >= 1 );
 
+    //  our initial split point will result in the split (left) page either being smaller
+    //  in size than the new (right) page or GEQ to the new (right) page. we will move the
+    //  split point so that the smaller page becomes larger. we only have to do this until
+    //  the page which was previously the small page becomes larger.
+    //
+    //  i.e. if fFirstSplitPageWasSmaller is true, we loop below until fSplitPageIsSmaller
+    //  is no longer true
+    //
+    //  if cbSizeSplitPage == cbSizeNewPage we consider it a "perfect" split and leave the
+    //  loop immediately
     
     const ULONG cbSizeFirstSplitPage        = psplit->rglineinfo[iline - 1].cbSizeLE;
     const ULONG cbSizeFirstNewPage          = cbSizeTotal - cbSizeFirstSplitPage;
     const BOOL  fFirstSplitPageWasSmaller   = cbSizeFirstSplitPage < cbSizeFirstNewPage;
 
+    //  this loop simply interates through the lines. we could use bsearch or interpolation
+    //  but we will (optimistically?) assume that the records are about the same size (or
+    //  the number of records is small) so that this loop won't take many steps
     
     while( true )
     {
+        //  see if this split is better than our current candidate split, a split
+        //  is "better" if the data is more equally distributed between the two
+        //  (split/new or left/right) pages. again, this determination does NOT take
+        //  prefix compression into account
+        //          
+        //  to start, determine how much data will be on the split (left) page and how
+        //  much will be on the new (right) page. this calculation does not
+        //  take prefix compression into account
         
         const ULONG cbSizeSplitPage     = psplit->rglineinfo[iline - 1].cbSizeLE;
         const ULONG cbSizeNewPage       = cbSizeTotal - cbSizeSplitPage;
         const BOOL  fSplitPageIsSmaller = cbSizeSplitPage < cbSizeNewPage;
         
+        //  the first time through this loop (or anytime a candidate point hasn't been
+        //  determined) cbSizeCandidateLE will be 0, so any split will be better
         
         if ( absdiff( cbSizeCandidateLE, cbSizeBestSplit ) >
              absdiff( cbSizeSplitPage, cbSizeBestSplit ) )
@@ -7808,15 +9689,25 @@ LOCAL VOID BTISelectEvenSplitWithoutCheckingOverflows(
                     absdiff( cbSizeSplitPage, cbSizeBestSplit ) )
                 && iline > *pilineCandidate )
         {
+            //  given two equally good split points, we want to choose the split point
+            //  that moves the fewest nodes
 
             *pilineCandidate                = iline;
             cbSizeCandidateLE               = psplit->rglineinfo[iline - 1].cbSizeLE;
 
+            //  if we have seen two split points with equal data distributions, we
+            //  must have made the smaller page larger and vice versa
 
             Assert( fFirstSplitPageWasSmaller != fSplitPageIsSmaller );
         }
         else
         {
+            //  if this split point is not better than our old split point, we must have
+            //  gone past the point where the smaller page becomes larger. otherwise 
+            //  moving data from the larger page to the smaller should have improved
+            //  the split point. note that we are not guaranteed to end up in this clause
+            //  if the smaller page has become larger -- doing so could produce a better
+            //  split point
             
             Assert( fFirstSplitPageWasSmaller != fSplitPageIsSmaller );
         }
@@ -7827,12 +9718,17 @@ LOCAL VOID BTISelectEvenSplitWithoutCheckingOverflows(
         }
         else if( fSplitPageIsSmaller )
         {
+            //  make the split page larger
             
             ++iline;
 
+            //  see if we have reached the end of the page
             
             if( psplit->clines == iline )
             {
+                //  the optimum split point must be the previous line, otherwise
+                //  we should have broken out of the loop earlier, when the smaller
+                //  page became larger
                 
                 Assert( 0 != *pilineCandidate );
                 Assert( psplit->clines - 1 == *pilineCandidate );
@@ -7843,12 +9739,17 @@ LOCAL VOID BTISelectEvenSplitWithoutCheckingOverflows(
         {
             Assert( !fSplitPageIsSmaller );
 
+            //  make the split page smaller
 
             --iline;
 
+            //  see if we have reached the end of the page
 
             if( 0 == iline )
             {
+                //  the optimum split point must be the previous line, otherwise
+                //  we should have broken out of the loop earlier, when the smaller
+                //  page became larger
                 
                 Assert( 1 == *pilineCandidate );
                 break;
@@ -7860,11 +9761,19 @@ LOCAL VOID BTISelectEvenSplitWithoutCheckingOverflows(
 }
 
 #ifdef DEBUG
+//  ================================================================
 LOCAL VOID BTISelectEvenSplitDebug(
     IN SPLIT * const psplit,
     OUT INT * const pilineCandidate,
     OUT PREFIXINFO * const pprefixinfoSplitCandidate,
     OUT PREFIXINFO * const pprefixinfoNewCandidate )
+//  ================================================================
+//
+//  A copy of the split code as it was prior to 06/2003, used to make
+//  sure the new code is returning the correct answer (or at least the
+//  same answer as the old code)
+//
+//-
 {
         INT         iline;
         const PREFIXINFO    prefixinfoSplitSaved    = psplit->prefixinfoSplit;
@@ -7883,12 +9792,22 @@ LOCAL VOID BTISelectEvenSplitDebug(
     
         DBEnforce( psplit->psplitPath->csr.Cpage().Ifmp(), psplit->clines > 1 );
     
+        //  starting from last node
+        //  find candidate split points
+        //
         for ( iline = psplit->clines - 1; iline > 0; iline-- )
         {
+            //  UNDONE: optimize prefix selection using a prefix upgrade function
+            //
+            //  find optimal prefix key for both pages
+            //
             BTISelectPrefixes( psplit, iline );
     
             if ( FBTISplitCausesNoOverflow( psplit, iline ) )
             {
+                //  if this candidate is closer to cbSizeTotal / 2
+                //  than last one, replace candidate
+                //
                 if ( absdiff( cbSizeCandidateLE, cbSizeTotal / 2 ) >
                      absdiff( psplit->rglineinfo[iline - 1].cbSizeLE, cbSizeTotal / 2 ) )
                 {
@@ -7900,6 +9819,10 @@ LOCAL VOID BTISelectEvenSplitDebug(
             }
             else
             {
+                //  shouldn't get overflow if only two nodes on page (should end up getting
+                //  one node on split page and one node on new page), but it appears that
+                //  we may have a bug where this is not the case, so put in a firewall
+                //  to trap the occurrence and allow us to debug it the next time it is hit.
                 DBEnforce( psplit->psplitPath->csr.Cpage().Ifmp(), psplit->clines > 2 );
             }
         }
@@ -7909,13 +9832,22 @@ LOCAL VOID BTISelectEvenSplitDebug(
     
         return;
 }
-#endif
+#endif // DEBUG
 
+//  ================================================================
 LOCAL VOID BTISelectEvenSplit(
     IN SPLIT * const psplit,
     OUT INT * const pilineCandidate,
     OUT PREFIXINFO * const pprefixinfoSplitCandidate,
     OUT PREFIXINFO * const pprefixinfoNewCandidate )
+//  ================================================================
+//
+//  we want to find a split point that splits the data between the two new pages
+//  as equally as possible. to do this we will pick a split point that distributes
+//  the data as equally as possible and then move the split point to take overflow
+//  into account
+//
+//-
 {
     Assert( psplit->prefixinfoSplit.FNull() );
 
@@ -7923,22 +9855,32 @@ LOCAL VOID BTISelectEvenSplit(
 
     INT iline;
     
+    //  find the split point with the best distribution of data
     
     BTISelectEvenSplitWithoutCheckingOverflows( psplit, &iline );
 
+    //  find optimal prefix key for split page
     
     BTISelectPrefix(
             psplit->rglineinfo,
             iline,
             &psplit->prefixinfoSplit );
     
+    //  find optimal prefix key for new page
     
     BTISelectPrefix(
             &psplit->rglineinfo[iline],
             psplit->clines - iline,
             &psplit->prefixinfoNew );
 
+    //  we have picked the best split point, but the split may not work as one or both pages may overflow
+    //  if both pages overflow, there is nothing we can do. if only one page is overflowing we can move
+    //  data from the overflowing page to the other page. we continue to do that until we find a split which
+    //  works, or the non-overflowing page starts to overflow
     
+    //  as we go through this loop we will make the split page either smaller or larger, terminate the loop
+    //  if we attempt to reverse this decision (e.g. we were making the split page smaller and we now want
+    //  to make it larger)
 
     enum { SPLIT_PAGE_SMALLER, SPLIT_PAGE_LARGER, UNKNOWN } splitpointChange, lastsplitpointChange;
 
@@ -7950,9 +9892,14 @@ LOCAL VOID BTISelectEvenSplit(
         Assert( iline < psplit->clines );
         Assert( 0 == *pilineCandidate );
         
+        //  when we improve our splitpoint, we will either make the split page smaller or larger
+        //  track which we want to do in this variable
 
         splitpointChange = UNKNOWN;
         
+        //  there is no guarantee that this split is possible -- the nodes for the
+        //  new or old page may not fit on that page. if there is an overflow, ignore
+        //  this as a split point. 
 
         BOOL fSplitPageOverflow;
         BOOL fNewPageOverflow;
@@ -7960,20 +9907,35 @@ LOCAL VOID BTISelectEvenSplit(
         const BOOL fOverflow = !FBTISplitCausesNoOverflow( psplit, iline, &fSplitPageOverflow, &fNewPageOverflow );
         Assert( fOverflow == ( fSplitPageOverflow || fNewPageOverflow ) );
 
+        //  UNDONE: we think you can't overflow both pages, but handle it
+        //  anyway just in case (specifically, inserting a new node may
+        //  cause the split page or new page to overflow, but shouldn't
+        //  be able to cause both pages to overflow, because all nodes
+        //  except the new node used to fit on one page)
+        //
         Assert( !( fSplitPageOverflow && fNewPageOverflow ) );
 
         if( fOverflow )
         {
             if( fSplitPageOverflow && fNewPageOverflow )
             {
+                //  if both pages are overflowing, we can leave this loop now as no
+                //  split will be possible
 
                 Assert( 0 == *pilineCandidate );
                 break;
             }
 
+            //  shouldn't get overflow if only two nodes on page (should end up getting
+            //  one node on split page and one node on new page), but it appears that
+            //  we may have a bug where this is not the case, so put in a firewall
+            //  to trap the occurrence and allow us to debug it the next time it is hit.
 
             DBEnforce( psplit->psplitPath->csr.Cpage().Ifmp(), psplit->clines > 2 );
 
+            //  this is not a valid split point, as one of the page overflows. we will
+            //  improve our split point by moving one node from the overflowing page
+            //  to the non overflowing page
 
             Assert( fSplitPageOverflow ^ fNewPageOverflow );
             splitpointChange = fSplitPageOverflow ? SPLIT_PAGE_SMALLER : SPLIT_PAGE_LARGER;
@@ -7984,6 +9946,8 @@ LOCAL VOID BTISelectEvenSplit(
             Assert( !fSplitPageOverflow );
             Assert( !fNewPageOverflow );
 
+            //  we have been moving away from the best (in terms of data distribution) split point
+            //  the first split which works (doesn't overflow) will be the best
 
             Assert( 0 == *pilineCandidate );
             *pilineCandidate            = iline;
@@ -7992,11 +9956,14 @@ LOCAL VOID BTISelectEvenSplit(
             break;
         }
 
+        //  we have decided how to improve our split point. if we are about to change directions we are finished
+        //  (we would re-evaluate the same nodes and end up in an infinite loop)
 
         Assert( UNKNOWN != splitpointChange );
         if( ( SPLIT_PAGE_LARGER == lastsplitpointChange && SPLIT_PAGE_SMALLER == splitpointChange )
             || ( SPLIT_PAGE_SMALLER == lastsplitpointChange && SPLIT_PAGE_LARGER == splitpointChange ) )
         {
+            //  if we found a working split point we would have left the loop
 
             Assert( 0 == *pilineCandidate );
             break;
@@ -8004,36 +9971,47 @@ LOCAL VOID BTISelectEvenSplit(
         lastsplitpointChange = splitpointChange;
         Assert( UNKNOWN != lastsplitpointChange );
         
+        //  move to the new split point
 
         if( SPLIT_PAGE_LARGER == splitpointChange )
         {
+            //  we want to make the split page larger, increase the split point to leave more nodes
+            //  on the split page
             
             iline++;
 
+            //  see if we have reached the end of the page
 
             if( psplit->clines == iline )
             {
+                //  if we found a working split point we would have left the loop
 
                 Assert( 0 == *pilineCandidate );
                 break;
             }
 
+            //  recalculate the prefixes
             
             BTIRecalculatePrefix( psplit, iline-1, iline );
         }
         else if( SPLIT_PAGE_SMALLER == splitpointChange )
         {
+            //  we want to make the split page smaller, descrease the split point to move more nodes
+            //  onto the new page
 
             iline--;
 
+            //  see if we have reached the beginning of the page
 
             if( 0 == iline )
             {
+                //  if we found a working split point we would have left the loop
 
                 Assert( 0 == *pilineCandidate );
                 break;
             }
 
+            //  recalculate the prefixes
             
             BTIRecalculatePrefix( psplit, iline+1, iline );
         }
@@ -8044,6 +10022,12 @@ LOCAL VOID BTISelectEvenSplit(
     }
 }
 
+//  selects split point such that
+//      node weights are almost equal
+//      and split nodes fit in both pages [with optimal prefix key]
+//  if no such node exists,
+//      select split with operNone
+//
 VOID BTISelectRightSplit( SPLIT *psplit, FUCB *pfucb )
 {
     INT         ilineCandidate;
@@ -8052,6 +10036,7 @@ VOID BTISelectRightSplit( SPLIT *psplit, FUCB *pfucb )
 
     psplit->splittype = splittypeRight;
 
+    //  if this is a hotpoint split, use the hotpoint split selection
     
     if ( psplit->fHotpoint )
     {
@@ -8059,6 +10044,12 @@ VOID BTISelectRightSplit( SPLIT *psplit, FUCB *pfucb )
         return;
     }
 
+    //  check if internal page and split at leaf level is append or prepend
+    //
+    //  append splits are a different type of split (no data is moved) while
+    //  prepend splits are actually a special case of right splits (all existing
+    //  nodes are moved to the new page and the newly inserted node is placed
+    //  on the old page).
 
     const BOOL fAppendLeaf = FBTISplitAppendLeaf( psplit );
     const BOOL fPrependSplit = FBTIPrependSplit( psplit );
@@ -8066,10 +10057,12 @@ VOID BTISelectRightSplit( SPLIT *psplit, FUCB *pfucb )
 Start:
     ilineCandidate      = 0;
 
+    //  when the following condition fails, we end up spinning in this loop forever;
     DBEnforce( psplit->psplitPath->csr.Cpage().Ifmp(), psplit->clines > 1 );
 
     if ( fAppendLeaf )
     {
+        //  the leaf page is appending, do an append split on the parent
         
         BTISelectAppendLeafSplit( psplit, &ilineCandidate, &prefixinfoSplitCandidate, &prefixinfoNewCandidate );
     }
@@ -8079,6 +10072,7 @@ Start:
     }
     else
     {
+        //  split the data as evenly as possible
         
         BTISelectEvenSplit( psplit, &ilineCandidate, &prefixinfoSplitCandidate, &prefixinfoNewCandidate );
 
@@ -8108,6 +10102,9 @@ Start:
 
     if ( ilineCandidate == 0 )
     {
+        //  no candidate line fits the bill
+        //  need to split without performing operation
+        //
         Assert( psplit->psplitPath->csr.Cpage().FLeafPage() );
         Assert( psplit->splitoper != splitoperNone );
         BTISelectSplitWithOperNone( psplit, pfucb );
@@ -8126,10 +10123,15 @@ Start:
 }
 
 
+//  sets up psplit, so split is performed with no
+//  user-requested operation
+//
 VOID BTISelectSplitWithOperNone( SPLIT *psplit, FUCB *pfucb )
 {
     if ( splitoperInsert == psplit->splitoper )
     {
+        //  move up all lines beyond ilineOper
+        //
         Assert( psplit->clines >= 2 );
         if ( psplit->clines > 0 )
         {
@@ -8146,6 +10148,10 @@ VOID BTISelectSplitWithOperNone( SPLIT *psplit, FUCB *pfucb )
     {
         Assert( psplit->psplitPath->csr.Cpage().FLeafPage( ) );
 
+        //  adjust only rglineinfo[ilineOper]
+        //
+        //  get kdfCurr for ilineOper
+        //
         psplit->psplitPath->csr.SetILine( psplit->ilineOper );
         NDGet( pfucb, &psplit->psplitPath->csr );
 
@@ -8158,6 +10164,9 @@ VOID BTISelectSplitWithOperNone( SPLIT *psplit, FUCB *pfucb )
         psplit->rglineinfo[psplit->ilineOper].cbSizeMax = cbMax;
     }
 
+    //  UNDONE: optimize recalc for only nodes >= ilineOper
+    //          optimize recalc for cbCommonPrev separately
+    //
     psplit->ilineOper = 0;
     BTIRecalcWeightsLE( psplit );
     psplit->splitoper = splitoperNone;
@@ -8167,36 +10176,50 @@ VOID BTISelectSplitWithOperNone( SPLIT *psplit, FUCB *pfucb )
 }
 
 
+//  checks if splitting psplit->rglineinfo[] at cLineSplit
+//      -- i.e., moving nodes cLineSplit and above to new page --
+//      would cause an overflow in either page
+//
 BOOL FBTISplitCausesNoOverflow( SPLIT *psplit, INT ilineSplit, BOOL * pfSplitPageOverflow, BOOL * pfNewPageOverflow )
 {
 #ifdef DEBUG
     if( FExpensiveDebugCodeEnabled( Debug_BT_Split ) )
     {
+        //  check that prefixes have been calculated correctly
+        //
         PREFIXINFO  prefixinfo;
 
         if ( 0 == ilineSplit )
         {
+            //  root page in vertical split has no prefix
+            //
             Assert( splittypeVertical == psplit->splittype );
             prefixinfo.Nullify();
         }
         else
         {
+            //  select prefix for split page
+            //
             BTISelectPrefix( psplit->rglineinfo,
                              ilineSplit,
                              &prefixinfo );
         }
 
+    /// Assert( prefixinfo.ilinePrefix  == psplit->prefixinfoSplit.ilinePrefix );
         Assert( prefixinfo.cbSavings    == psplit->prefixinfoSplit.cbSavings );
         Assert( prefixinfo.ilineSegBegin
                     == psplit->prefixinfoSplit.ilineSegBegin );
         Assert( prefixinfo.ilineSegEnd
                     == psplit->prefixinfoSplit.ilineSegEnd );
 
+        //  select prefix for new page
+        //
         Assert( psplit->clines > ilineSplit );
         BTISelectPrefix( &psplit->rglineinfo[ilineSplit],
                          psplit->clines - ilineSplit,
                          &prefixinfo );
 
+    /// Assert( prefixinfo.ilinePrefix  == psplit->prefixinfoNew.ilinePrefix );
         Assert( prefixinfo.cbSavings    == psplit->prefixinfoNew.cbSavings );
         Assert( prefixinfo.ilineSegBegin
                     == psplit->prefixinfoNew.ilineSegBegin );
@@ -8205,10 +10228,16 @@ BOOL FBTISplitCausesNoOverflow( SPLIT *psplit, INT ilineSplit, BOOL * pfSplitPag
     }
 #endif
 
+    //  ilineSplit == 0 <=> vertical split
+    //  where every node is moved to new page
+    //
     Assert( splittypeVertical != psplit->splittype || ilineSplit == 0 );
     Assert( splittypeVertical == psplit->splittype || ilineSplit > 0 );
     Assert( ilineSplit < psplit->clines );
 
+    //  all nodes to left of ilineSplit should fit in page
+    //  and all nodes >= ilineSplit should fit in page
+    //
     const INT   cbSplitPage =
                     ilineSplit == 0 ?
                         0 :
@@ -8242,6 +10271,8 @@ BOOL FBTISplitCausesNoOverflow( SPLIT *psplit, INT ilineSplit, BOOL * pfSplitPag
 }
 
 
+//  allocates space for key in data and copies entire key into data
+//
 ERR ErrBTISplitAllocAndCopyPrefix( const KEY &key, DATA *pdata )
 {
     Assert( pdata->Pv() == NULL );
@@ -8260,6 +10291,9 @@ ERR ErrBTISplitAllocAndCopyPrefix( const KEY &key, DATA *pdata )
 }
 
 
+//  allocate space for new and old prefixes for split page
+//  copy prefixes
+//
 ERR ErrBTISplitAllocAndCopyPrefixes( FUCB *pfucb, SPLIT *psplit )
 {
     ERR     err = JET_errSuccess;
@@ -8289,6 +10323,8 @@ ERR ErrBTISplitAllocAndCopyPrefixes( FUCB *pfucb, SPLIT *psplit )
 }
 
 
+//  leave psplitPath->psplitPathParent->csr at insert point in parent
+//
 ERR ErrBTISeekSeparatorKey( SPLIT *psplit, FUCB *pfucb )
 {
     ERR         err = JET_errSuccess;
@@ -8301,6 +10337,8 @@ ERR ErrBTISeekSeparatorKey( SPLIT *psplit, FUCB *pfucb )
     Assert( splittypeVertical != psplit->splittype );
     Assert( pcsr->Cpage().FInvisibleSons() );
 
+    //  seeking in internal page should have NULL data
+    //
     bm.key  = psplit->kdfParent.key;
     bm.data.Nullify();
     CallR( ErrNDSeek( pfucb, pcsr, bm ) );
@@ -8309,6 +10347,8 @@ ERR ErrBTISeekSeparatorKey( SPLIT *psplit, FUCB *pfucb )
     Assert( err != JET_errSuccess );
     if ( err == wrnNDFoundLess )
     {
+        //  inserted node should never fall after last node in page
+        //
         Assert( fFalse );
         Assert( pcsr->Cpage().Clines() - 1 == pcsr->ILine() );
         pcsr->IncrementILine();
@@ -8319,6 +10359,8 @@ ERR ErrBTISeekSeparatorKey( SPLIT *psplit, FUCB *pfucb )
 }
 
 
+//  allocates and computes separator key between given lines
+//
 ERR ErrBTIComputeSeparatorKey( FUCB                 *pfucb,
                                const KEYDATAFLAGS   &kdfPrev,
                                const KEYDATAFLAGS   &kdfSplit,
@@ -8331,6 +10373,8 @@ ERR ErrBTIComputeSeparatorKey( FUCB                 *pfucb,
     if ( cbKeyCommon == kdfSplit.key.Cb() &&
          cbKeyCommon == kdfPrev.key.Cb() )
     {
+        //  split key is the same as the previous one
+        //
         Assert( !FFUCBUnique( pfucb ) );
         Assert( FKeysEqual( kdfSplit.key, kdfPrev.key ) );
         Assert( CmpData( kdfSplit.data, kdfPrev.data ) > 0 );
@@ -8344,6 +10388,8 @@ ERR ErrBTIComputeSeparatorKey( FUCB                 *pfucb,
         Assert( cbKeyCommon < kdfSplit.key.Cb() );
     }
 
+    //  allocate memory for separator key
+    //
     Assert( pkey->FNull() );
     pkey->suffix.SetPv( RESBOOKMARK.PvRESAlloc() );
     if ( pkey->suffix.Pv() == NULL )
@@ -8352,6 +10398,8 @@ ERR ErrBTIComputeSeparatorKey( FUCB                 *pfucb,
     }
     pkey->suffix.SetCb( cbKeyCommon + cbDataCommon + 1 );
 
+    //  copy separator key and data into alocated memory
+    //
     Assert( cbKeyCommon <= pkey->Cb() );
     Assert( pkey->suffix.Pv() != NULL );
     kdfSplit.key.CopyIntoBuffer( pkey->suffix.Pv(),
@@ -8359,16 +10407,22 @@ ERR ErrBTIComputeSeparatorKey( FUCB                 *pfucb,
 
     if ( !fKeysEqual )
     {
+        //  copy difference byte from split key
+        //
         Assert( 0 == cbDataCommon );
         Assert( kdfSplit.key.Cb() > cbKeyCommon );
 
         if ( kdfSplit.key.prefix.Cb() > cbKeyCommon )
         {
+            //  byte of difference is in prefix
+            //
             ( (BYTE *)pkey->suffix.Pv() )[cbKeyCommon] =
                     ( (BYTE *) kdfSplit.key.prefix.Pv() )[cbKeyCommon];
         }
         else
         {
+            //  get byte of difference from suffix
+            //
             ( (BYTE *)pkey->suffix.Pv() )[cbKeyCommon] =
                     ( (BYTE *) kdfSplit.key.suffix.Pv() )[cbKeyCommon -
                                             kdfSplit.key.prefix.Cb() ];
@@ -8376,6 +10430,9 @@ ERR ErrBTIComputeSeparatorKey( FUCB                 *pfucb,
     }
     else
     {
+        //  copy common data
+        //  then copy difference byte from split data
+        //
         UtilMemCpy( (BYTE *)pkey->suffix.Pv() + cbKeyCommon,
                 kdfSplit.data.Pv(),
                 cbDataCommon );
@@ -8390,6 +10447,13 @@ ERR ErrBTIComputeSeparatorKey( FUCB                 *pfucb,
 }
 
 
+//  for leaf level,
+//  computes shortest separator
+//  between the keys of ilineSplit and ilineSplit - 1
+//  allocates memory for node to be inserted
+//      and the pointer to it in psplit->kdfParent
+//  for internal pages, return last kdf in page
+//
 ERR ErrBTISplitComputeSeparatorKey( SPLIT *psplit, FUCB *pfucb )
 {
     ERR             err;
@@ -8400,11 +10464,16 @@ ERR ErrBTISplitComputeSeparatorKey( SPLIT *psplit, FUCB *pfucb )
     Assert( psplit->kdfParent.data.FNull() );
     Assert( psplit->psplitPath->psplitPathParent != NULL );
 
+    //  data of node inserted at parent should point to split page
+    //
     psplit->kdfParent.data.SetCb( sizeof( PGNO ) );
     psplit->kdfParent.data.SetPv( &psplit->pgnoSplit );
 
     if ( psplit->psplitPath->csr.Cpage().FInvisibleSons( ) || FFUCBRepair( pfucb ) )
     {
+        //  not leaf page
+        //  separator key should be key of ilineSplit - 1
+        //
         Assert( !psplit->psplitPath->csr.Cpage().FLeafPage() && pkdfSplit->key.FNull()
                 || CmpKey( pkdfPrev->key, pkdfSplit->key )  < 0
                 || g_fRepair );
@@ -8424,6 +10493,9 @@ ERR ErrBTISplitComputeSeparatorKey( SPLIT *psplit, FUCB *pfucb )
 
 
 #ifdef DEBUG
+//  selects prefix for clines in rglineinfo
+//  places result in *pprefixinfo
+//
 LOCAL VOID BTISelectPrefixCheck( const LINEINFO     *rglineinfo,
                                  INT                clines,
                                  PREFIXINFO         *pprefixinfo )
@@ -8436,11 +10508,19 @@ LOCAL VOID BTISelectPrefixCheck( const LINEINFO     *rglineinfo,
         return;
     }
 
+    //  set cbCommonPrev for first line to zero
+    //
     const ULONG cbCommonPrevSav = rglineinfo[0].cbCommonPrev;
     ((LINEINFO *)rglineinfo)[0].cbCommonPrev = 0;
 
     INT         iline;
 
+    //  UNDONE: optimize loop to use info from previous iteration
+    //
+    //  calculate prefixinfo for line
+    //  if better than previous candidate
+    //      choose as new candidate
+    //
     for ( iline = 0; iline < clines; iline++ )
     {
         if ( iline != 0 )
@@ -8464,6 +10544,8 @@ LOCAL VOID BTISelectPrefixCheck( const LINEINFO     *rglineinfo,
         INT     cbSavingsRight = 0;
         ULONG   cbCommonMin;
 
+        //  calculate savings for previous lines
+        //
         cbCommonMin = rglineinfo[iline].cbCommonPrev;
         for ( ilineSegLeft = iline;
               ilineSegLeft > 0 && rglineinfo[ilineSegLeft].cbCommonPrev > 0;
@@ -8478,6 +10560,8 @@ LOCAL VOID BTISelectPrefixCheck( const LINEINFO     *rglineinfo,
             cbSavingsLeft += cbCommonMin;
         }
 
+        //  calculate savings for following lines
+        //
         for ( ilineSegRight = iline + 1;
               ilineSegRight < clines && rglineinfo[ilineSegRight].cbCommonPrev > 0;
               ilineSegRight++ )
@@ -8495,6 +10579,10 @@ LOCAL VOID BTISelectPrefixCheck( const LINEINFO     *rglineinfo,
         }
         ilineSegRight--;
 
+        //  check if savings with iline as prefix
+        //      compensate for prefix overhead
+        //      and are better than previous prefix candidate
+        //
         const INT       cbSavings = cbSavingsLeft + cbSavingsRight - cbPrefixOverhead;
         if ( cbSavings > pprefixinfo->cbSavings )
         {
@@ -8506,11 +10594,16 @@ LOCAL VOID BTISelectPrefixCheck( const LINEINFO     *rglineinfo,
         }
     }
 
+    //  set cbCommonPrev for first line to original value
+    //
     ((LINEINFO *)rglineinfo)[0].cbCommonPrev = cbCommonPrevSav;
 }
-#endif
+#endif // DEBUG
 
 
+//  selects prefix for clines in rglineinfo
+//  places result in *pprefixinfo
+//
 LOCAL VOID BTISelectPrefix( const LINEINFO  *rglineinfo,
                             INT             clines,
                             PREFIXINFO      *pprefixinfo )
@@ -8537,6 +10630,10 @@ LOCAL VOID BTISelectPrefix( const LINEINFO  *rglineinfo,
         return;
     }
 
+    //  set cbCommonPrev for first and last line to zero
+    //  we exploit this to remove an extra check in the calculation loops
+    //  WARNING:  the rglineinfo array must be allocated one entry too large!
+    //
     const ULONG cbCommonPrevFirstSav = rglineinfo[0].cbCommonPrev;
     const ULONG cbCommonPrevLastSav  = rglineinfo[clines].cbCommonPrev;
     ((LINEINFO *)rglineinfo)[0].cbCommonPrev = 0;
@@ -8544,6 +10641,12 @@ LOCAL VOID BTISelectPrefix( const LINEINFO  *rglineinfo,
 
     INT         iline;
 
+    //  UNDONE: optimize loop to use info from previous iteration
+    //
+    //  calculate prefixinfo for line
+    //  if better than previous candidate
+    //      choose as new candidate
+    //
     for ( iline = 1; iline < clines - 1; iline++ )
     {
 #ifdef DEBUG
@@ -8567,6 +10670,8 @@ LOCAL VOID BTISelectPrefix( const LINEINFO  *rglineinfo,
              iline != clines - 2 &&
              rglineinfo[iline + 1].cbCommonPrev >= rglineinfo[iline].cbCommonPrev )
         {
+            //  next line would be at least as good a prefix as this one
+            //
             continue;
         }
 
@@ -8576,6 +10681,8 @@ LOCAL VOID BTISelectPrefix( const LINEINFO  *rglineinfo,
                 && rglineinfo[iline + 1].cbCommonPrev < rglineinfo[iline].cbCommonPrev
              )
         {
+            //  previous line would be at a better prefix than this one
+            //
             continue;
         }
 
@@ -8585,9 +10692,11 @@ LOCAL VOID BTISelectPrefix( const LINEINFO  *rglineinfo,
         INT     cbSavingsRight = 0;
         ULONG   cbCommonMin;
 
+        //  calculate savings for previous lines
+        //
         cbCommonMin = rglineinfo[iline].cbCommonPrev;
         for ( ilineSegLeft = iline;
-              rglineinfo[ilineSegLeft].cbCommonPrev > 0;
+              rglineinfo[ilineSegLeft].cbCommonPrev > 0; //  rglineinfo[0].cbCommonPrev == 0
               ilineSegLeft-- )
         {
             Assert( ilineSegLeft > 0 );
@@ -8600,9 +10709,11 @@ LOCAL VOID BTISelectPrefix( const LINEINFO  *rglineinfo,
             cbSavingsLeft += cbCommonMin;
         }
 
+        //  calculate savings for following lines
+        //
         cbCommonMin = rglineinfo[iline+1].cbCommonPrev;
         for ( ilineSegRight = iline + 1;
-              rglineinfo[ilineSegRight].cbCommonPrev > 0;
+              rglineinfo[ilineSegRight].cbCommonPrev > 0; //  rglineinfo[clines].cbCommonPrev == 0
               ilineSegRight++ )
         {
             Assert( ilineSegRight < clines );
@@ -8615,6 +10726,10 @@ LOCAL VOID BTISelectPrefix( const LINEINFO  *rglineinfo,
         }
         ilineSegRight--;
 
+        //  check if savings with iline as prefix
+        //      compensate for prefix overhead
+        //      and are better than previous prefix candidate
+        //
         const INT       cbSavings = cbSavingsLeft + cbSavingsRight - cbPrefixOverhead;
         if ( cbSavings > pprefixinfo->cbSavings )
         {
@@ -8626,6 +10741,8 @@ LOCAL VOID BTISelectPrefix( const LINEINFO  *rglineinfo,
         }
     }
 
+    //  set cbCommonPrev for first line to original value
+    //
     ((LINEINFO *)rglineinfo)[0].cbCommonPrev = cbCommonPrevFirstSav;
     ((LINEINFO *)rglineinfo)[clines].cbCommonPrev = cbCommonPrevLastSav;
 
@@ -8634,6 +10751,7 @@ LOCAL VOID BTISelectPrefix( const LINEINFO  *rglineinfo,
     {
         PREFIXINFO  prefixinfoT;
         BTISelectPrefixCheck( rglineinfo, clines, &prefixinfoT );
+    //  Assert( prefixinfoT.ilinePrefix == pprefixinfo->ilinePrefix );
         Assert( prefixinfoT.cbSavings == pprefixinfo->cbSavings );
         Assert( prefixinfoT.ilineSegBegin == pprefixinfo->ilineSegBegin );
         Assert( prefixinfoT.ilineSegEnd == pprefixinfo->ilineSegEnd );
@@ -8642,6 +10760,8 @@ LOCAL VOID BTISelectPrefix( const LINEINFO  *rglineinfo,
 }
 
 
+//  remove last line and re-calculate prefix
+//
 LOCAL VOID BTISelectPrefixDecrement( const LINEINFO *rglineinfo,
                                      INT            clines,
                                      PREFIXINFO     *pprefixinfo )
@@ -8653,17 +10773,24 @@ LOCAL VOID BTISelectPrefixDecrement( const LINEINFO *rglineinfo,
 
     if ( pprefixinfo->ilineSegEnd == clines )
     {
+        //  removed line contributed to prefix
+        //
         Assert( !pprefixinfo->FNull() );
         BTISelectPrefix( rglineinfo, clines, pprefixinfo );
     }
     else
     {
+        //  no need to change prefix
+        //
+///     Assert( fFalse );
     }
 
     return;
 }
 
 
+//  add line at beginning and re-calculate prefix
+//
 LOCAL VOID BTISelectPrefixIncrement( const LINEINFO *rglineinfo,
                                      INT            clines,
                                      PREFIXINFO     *pprefixinfo )
@@ -8676,6 +10803,8 @@ LOCAL VOID BTISelectPrefixIncrement( const LINEINFO *rglineinfo,
     if ( clines > 1 &&
          rglineinfo[1].cbCommonPrev == 0 )
     {
+        //  added line does not contribute to prefix
+        //
         if ( !pprefixinfo->FNull() )
         {
             pprefixinfo->ilinePrefix++;
@@ -8686,6 +10815,8 @@ LOCAL VOID BTISelectPrefixIncrement( const LINEINFO *rglineinfo,
     else if ( pprefixinfo->FNull() )
     {
 
+        //  look for prefix only in first segment
+        //
         INT     iline;
         for ( iline = 1; iline < clines; iline++ )
         {
@@ -8699,6 +10830,8 @@ LOCAL VOID BTISelectPrefixIncrement( const LINEINFO *rglineinfo,
     }
     else
     {
+        //  current prefix should be at or before earlier prefix
+        //
         Assert( clines > 1 );
         Assert( pprefixinfo->ilineSegEnd + 1 + 1 <= clines );
         BTISelectPrefix( rglineinfo,
@@ -8710,10 +10843,15 @@ LOCAL VOID BTISelectPrefixIncrement( const LINEINFO *rglineinfo,
 }
 
 
+//  selects optimal prefix for split page and new page
+//  and places result in prefixinfoSplit and prefixinfoNew
+//
 LOCAL VOID BTISelectPrefixes( SPLIT *psplit, INT ilineSplit )
 {
     if ( 0 == ilineSplit )
     {
+        //  root page in vertical split has no prefix
+        //
         Assert( splittypeVertical == psplit->splittype );
         Assert( psplit->prefixinfoSplit.FNull() );
         BTISelectPrefix( &psplit->rglineinfo[ilineSplit],
@@ -8724,6 +10862,8 @@ LOCAL VOID BTISelectPrefixes( SPLIT *psplit, INT ilineSplit )
     {
         Assert( psplit->clines > ilineSplit );
 
+        //  select prefix for split page
+        //
         if ( psplit->clines - 1 == ilineSplit )
         {
             Assert( psplit->prefixinfoNew.FNull() );
@@ -8739,6 +10879,8 @@ LOCAL VOID BTISelectPrefixes( SPLIT *psplit, INT ilineSplit )
                                       &psplit->prefixinfoSplit );
         }
 
+        //  select prefix for new page
+        //
         BTISelectPrefixIncrement( &psplit->rglineinfo[ilineSplit],
                                   psplit->clines - ilineSplit,
                                   &psplit->prefixinfoNew );
@@ -8746,12 +10888,17 @@ LOCAL VOID BTISelectPrefixes( SPLIT *psplit, INT ilineSplit )
 }
 
 
+//  sets cbPrefix for clines in rglineinfo
+//  based on prefix selected in prefixinfo
+//
 LOCAL VOID BTISetPrefix( LINEINFO *rglineinfo, INT clines, const PREFIXINFO& prefixinfo )
 {
     Assert( clines > 0 );
 
     INT         iline;
 
+    //  set all cbPrefix to zero
+    //
     for ( iline = 0; iline < clines; iline++ )
     {
         rglineinfo[iline].cbPrefix = 0;
@@ -8775,6 +10922,8 @@ LOCAL VOID BTISetPrefix( LINEINFO *rglineinfo, INT clines, const PREFIXINFO& pre
         return;
     }
 
+    //  set cbPrefix to appropriate value for lines in prefix segment
+    //
     const INT   ilineSegLeft    = prefixinfo.ilineSegBegin;
     const INT   ilineSegRight   = prefixinfo.ilineSegEnd;
     const INT   ilinePrefix     = prefixinfo.ilinePrefix;
@@ -8787,8 +10936,12 @@ LOCAL VOID BTISetPrefix( LINEINFO *rglineinfo, INT clines, const PREFIXINFO& pre
 
     Assert( ilineSegLeft != ilineSegRight );
 
+    //  cbPrefix for ilinePrefix
+    //
     rglineinfo[ilinePrefix].cbPrefix = rglineinfo[ilinePrefix].kdf.key.Cb();
 
+    //  cbPrefix for previous lines
+    //
     cbCommonMin = rglineinfo[ilinePrefix].cbCommonPrev;
     for ( iline = ilinePrefix; iline > ilineSegLeft; iline-- )
     {
@@ -8808,6 +10961,8 @@ LOCAL VOID BTISetPrefix( LINEINFO *rglineinfo, INT clines, const PREFIXINFO& pre
         #endif
     }
 
+    //  calculate savings for following lines
+    //
     for ( iline = ilinePrefix + 1; iline <= ilineSegRight; iline++ )
     {
         Assert( iline > 0 );
@@ -8828,6 +10983,7 @@ LOCAL VOID BTISetPrefix( LINEINFO *rglineinfo, INT clines, const PREFIXINFO& pre
     }
 
     #ifdef DEBUG
+    //  check if savings are same as in prefixinfo
     const INT   cbSavings = cbSavingsLeft + cbSavingsRight - cbPrefixOverhead;
 
     Assert( cbSavings > 0 );
@@ -8836,42 +10992,58 @@ LOCAL VOID BTISetPrefix( LINEINFO *rglineinfo, INT clines, const PREFIXINFO& pre
     #endif
 }
 
+//  sets cbPrefix in all lineinfo to correspond to chosen prefix
+//
 VOID BTISplitSetPrefixes( SPLIT *psplit )
 {
     const INT   ilineSplit = psplit->ilineSplit;
 
     if ( 0 == ilineSplit )
     {
+        //  root page in vertical split has no prefix
+        //
         Assert( splittypeVertical == psplit->splittype );
         Assert( ilineInvalid == psplit->prefixinfoSplit.ilinePrefix );
     }
     else
     {
+        //  select prefix for split page
+        //
         BTISetPrefix( psplit->rglineinfo,
                       ilineSplit,
                       psplit->prefixinfoSplit );
     }
 
+    //  select prefix for new page
+    //
     Assert( psplit->clines > ilineSplit );
     BTISetPrefix( &psplit->rglineinfo[ilineSplit],
                   psplit->clines - ilineSplit,
                   psplit->prefixinfoNew );
 }
 
+//  get new pages for split
+//
 LOCAL ERR ErrBTIGetNewPages( FUCB *pfucb, SPLITPATH *psplitPathLeaf, DIRFLAG dirflag )
 {
     ERR         err;
     SPLITPATH   *psplitPath;
     const BOOL fLogging = !( dirflag & fDIRNoLog ) && g_rgfmp[pfucb->ifmp].FLogOn();
 
+    //  find pcsrRoot for pfucb
+    //
     Assert( pfucb->pcsrRoot == pcsrNil );
     for ( psplitPath = psplitPathLeaf;
           psplitPath->psplitPathParent != NULL;
           psplitPath = psplitPath->psplitPathParent )
     {
+        //  all logic in for loop
+        //
     }
     pfucb->pcsrRoot = &psplitPath->csr;
 
+    //  get a new page for every split
+    //
     Assert( psplitPath->psplitPathParent == NULL );
     for ( ; psplitPath != NULL; psplitPath = psplitPath->psplitPathChild )
     {
@@ -8883,6 +11055,13 @@ LOCAL ERR ErrBTIGetNewPages( FUCB *pfucb, SPLITPATH *psplitPathLeaf, DIRFLAG dir
 
             BTICheckSplitFlags( psplit );
 
+            //  choose the space pool based on the split characteristics
+            //
+            //  NOTE:  Special case:  presume append split if we are doing the first vertical split
+            //  of an LV tree to compensate for the trick where we insert the LVCHUNK before the
+            //  LVROOT to avoid placing them on separate pages.  This makes us think this isn't an
+            //  append when it really is.
+            //
             ULONG fSPAllocFlags = 0;
             if ( psplit->fAppend ||
                  (  psplit->splittype == splittypeVertical &&
@@ -8901,6 +11080,8 @@ LOCAL ERR ErrBTIGetNewPages( FUCB *pfucb, SPLITPATH *psplitPathLeaf, DIRFLAG dir
                                                 ( psplit->fSplitPageFlags & CPAGE::fPageRoot ) &&
                                                 ( psplit->fSplitPageFlags & CPAGE::fPageParentOfLeaf );
 
+            // If we are on a disk with no seek penalty, it doesn't
+            // make sense to optimize for contiguous access
             if ( !g_rgfmp[pfucb->ifmp].FSeekPenalty() )
             {
                 fSPAllocFlags &= ~fSPContinuous;
@@ -8908,19 +11089,25 @@ LOCAL ERR ErrBTIGetNewPages( FUCB *pfucb, SPLITPATH *psplitPathLeaf, DIRFLAG dir
 
             fSPAllocFlags |= pfucb->u.pfcb->FUtilizeExactExtents() ? fSPExactExtent : 0;
 
-            Assert( !!psplitPath->csr.Cpage().FLeafPage() == !!( psplit->fNewPageFlags & CPAGE::fPageLeaf ) );
+            Assert( !!psplitPath->csr.Cpage().FLeafPage() == !!( psplit->fNewPageFlags & CPAGE::fPageLeaf ) );  // should match, or I(SOMEONE) am lost.
             if ( CpgDIRActiveSpaceRequestReserve( pfucb ) != 0 &&
                     CpgDIRActiveSpaceRequestReserve( pfucb ) != cpgDIRReserveConsumed &&
                     ( ( psplit->fNewPageFlags & CPAGE::fPageLeaf ) || fVerticalToLeafSplit ) )
             {
+                //  If there is an active reserve request outstanding and this is a leaf page allocation,
+                //  indicate to space to consume the active reserve.
                 fSPAllocFlags |= ( fSPContinuous | fSPUseActiveReserve );
                 if ( fVerticalToLeafSplit )
                 {
+                    //  Because we need an additional page for whatever we're about to move off the root to replace
+                    //  with pgno pointers, we adjust the active reserve up by one.
                     const CPG cpgReserveAdjust = CpgDIRActiveSpaceRequestReserve( pfucb ) + 1;
                     DIRSetActiveSpaceRequestReserve( pfucb, cpgReserveAdjust );
                 }
             }
 
+            //  pass in split page for getting locality
+            //
             PGNO    pgnoNew     = pgnoNull;
             Call( ErrSPGetPage( pfucb, psplitPath->csr.Pgno(), fSPAllocFlags, &pgnoNew ) );
             psplit->pgnoNew = pgnoNew;
@@ -8935,6 +11122,8 @@ LOCAL ERR ErrBTIGetNewPages( FUCB *pfucb, SPLITPATH *psplitPathLeaf, DIRFLAG dir
 
             Assert( latchWrite == psplit->csrNew.Latch() );
 
+            //  count pages allocated by an update
+            //
             Ptls()->threadstats.cPageUpdateAllocated++;
         }
     }
@@ -8944,6 +11133,9 @@ LOCAL ERR ErrBTIGetNewPages( FUCB *pfucb, SPLITPATH *psplitPathLeaf, DIRFLAG dir
 
 HandleError:
     Assert( err < JET_errSuccess );
+    //  release all latched pages
+    //  free all allocated pages
+    //
     for ( psplitPath = psplitPathLeaf;
           psplitPath != NULL;
           psplitPath = psplitPath->psplitPathParent )
@@ -8961,6 +11153,8 @@ HandleError:
                 psplit->csrNew.Reset();
             }
 
+            //  UNDONE: we will leak the space if ErrSPFreeExt() fails
+            //
             const ERR   errFreeExt  = ErrSPFreeExt( pfucb, psplit->pgnoNew, 1, "FailedNewPages" );
 #ifdef DEBUG
             if ( !FSPExpectedError( errFreeExt ) )
@@ -8971,6 +11165,8 @@ HandleError:
 
             psplit->pgnoNew = pgnoNull;
 
+            //  count pages released by an update
+            //
             Ptls()->threadstats.cPageUpdateReleased++;
         }
     }
@@ -8980,11 +11176,17 @@ HandleError:
 }
 
 
+//  release latches on pages that are not in the split
+//      this might cause psplitPathLeaf to change\
+//
 LOCAL VOID BTISplitReleaseUnneededPages( INST *pinst, SPLITPATH **ppsplitPathLeaf )
 {
     SPLITPATH   *psplitPath;
     SPLITPATH   *psplitPathNewLeaf = NULL;
 
+    //  go to root
+    //  since we need to latch top-down
+    //
     for ( psplitPath = *ppsplitPathLeaf;
           psplitPath->psplitPathParent != NULL;
           psplitPath = psplitPath->psplitPathParent )
@@ -8993,12 +11195,19 @@ LOCAL VOID BTISplitReleaseUnneededPages( INST *pinst, SPLITPATH **ppsplitPathLea
 
     for ( ; NULL != psplitPath;  )
     {
+        //  check if page is needed
+        //      -- either there is a split at this level
+        //         or there is a split one level below
+        //          when we need write latch for inserting page pointer
+        //
         SPLIT   *psplit = psplitPath->psplit;
 
         if ( psplit == NULL &&
              ( psplitPath->psplitPathChild == NULL ||
                psplitPath->psplitPathChild->psplit == NULL ) )
         {
+            //  release latch and psplitPath at this level
+            //
             SPLITPATH *psplitPathT = psplitPath;
             psplitPath = psplitPath->psplitPathChild;
 
@@ -9006,6 +11215,8 @@ LOCAL VOID BTISplitReleaseUnneededPages( INST *pinst, SPLITPATH **ppsplitPathLea
         }
         else
         {
+            //  update new leaf
+            //
             Assert( NULL == psplitPathNewLeaf ||
                     psplitPath == psplitPathNewLeaf->psplitPathChild );
 
@@ -9022,6 +11233,9 @@ LOCAL VOID BTISplitReleaseUnneededPages( INST *pinst, SPLITPATH **ppsplitPathLea
 }
 
 
+//  upgrade to write latch on all pages invloved in the split
+//  new pages are already latched
+//
 LOCAL ERR ErrBTISplitUpgradeLatches( const IFMP ifmp, SPLITPATH * const psplitPathLeaf )
 {
     ERR             err;
@@ -9030,8 +11244,11 @@ LOCAL ERR ErrBTISplitUpgradeLatches( const IFMP ifmp, SPLITPATH * const psplitPa
 
     Assert( dbtimeSplit > 1 );
     Assert( PinstFromIfmp( ifmp )->m_plog->FRecoveringMode() != fRecoveringRedo
-        || g_rgfmp[ifmp].FCreatingDB() );
+        || g_rgfmp[ifmp].FCreatingDB() );         //  may hit this code path during recovery if explicitly redoing CreateDb
 
+    //  go to root
+    //  since we need to latch top-down
+    //
     for ( psplitPath = psplitPathLeaf;
           psplitPath->psplitPathParent != NULL;
           psplitPath = psplitPath->psplitPathParent )
@@ -9041,6 +11258,11 @@ LOCAL ERR ErrBTISplitUpgradeLatches( const IFMP ifmp, SPLITPATH * const psplitPa
     Assert( NULL == psplitPath->psplitPathParent );
     for ( ; NULL != psplitPath;  psplitPath = psplitPath->psplitPathChild )
     {
+        //  assert write latch is needed
+        //      -- either there is a split at this level
+        //         or there is a split one level below
+        //          when we need write latch for inserting page pointer
+        //
         SPLIT   *psplit = psplitPath->psplit;
 
         Assert( psplit != NULL ||
@@ -9049,6 +11271,9 @@ LOCAL ERR ErrBTISplitUpgradeLatches( const IFMP ifmp, SPLITPATH * const psplitPa
         Assert( psplitPath->csr.Latch() == latchWrite ||
                 psplitPath->csr.Latch() == latchRIW );
 
+        //  Setting dbtime befores to dbtimeNil, so cleanup logic works.
+        //
+        // If this doesn't hold, the BTISplitRevertDbtime() logic won't work out.
         Assert( dbtimeInvalid == psplitPath->dbtimeBefore || dbtimeNil == psplitPath->dbtimeBefore );
 
         psplitPath->dbtimeBefore = dbtimeNil;
@@ -9063,12 +11288,16 @@ LOCAL ERR ErrBTISplitUpgradeLatches( const IFMP ifmp, SPLITPATH * const psplitPa
             psplit->fFlagsRightBefore = 0;
         }
 
+        //  Grab any write latches that may be required.
+        //
 
         if ( psplitPath->csr.Latch() != latchWrite )
         {
             psplitPath->csr.UpgradeFromRIWLatch();
         }
 
+        //  Touch the dbtimes appropriately.
+        //
 
         Assert( psplitPath->csr.Latch() == latchWrite );
         if ( psplitPath->csr.Dbtime() < dbtimeSplit )
@@ -9084,12 +11313,17 @@ LOCAL ERR ErrBTISplitUpgradeLatches( const IFMP ifmp, SPLITPATH * const psplitPa
             Error( ErrERRCheck( JET_errDbTimeCorrupted ) );
         }
 
+        //  new page will already be write latched
+        //  dirty it and update max dbtime
+        //
         if ( psplit != NULL )
         {
             Assert( psplit->csrNew.Latch() == latchWrite );
             psplit->csrNew.CoordinatedDirty( dbtimeSplit );
         }
 
+        //  write latch right page at leaf-level
+        //
         if ( psplitPath->psplitPathChild == NULL )
         {
             Assert( psplit != NULL );
@@ -9134,6 +11368,8 @@ HandleError:
 }
 
 
+//  sets dbtime of every (write) latched page to given dbtime
+//
 VOID BTISplitRevertDbtime( SPLITPATH *psplitPathLeaf )
 {
     SPLITPATH *psplitPath = psplitPathLeaf;
@@ -9151,13 +11387,17 @@ VOID BTISplitRevertDbtime( SPLITPATH *psplitPathLeaf )
 
         if ( latchWrite == psplitPath->csr.Latch() &&
             dbtimeNil != psplitPath->dbtimeBefore &&
-            dbtimeInvalid != psplitPath->dbtimeBefore  )
+            dbtimeInvalid != psplitPath->dbtimeBefore /* defense in depth */ )
         {
+            //  set the dbtime for this page
+            //
             psplitPath->csr.RevertDbtime( psplitPath->dbtimeBefore, psplitPath->fFlagsBefore );
         }
 
         SPLIT   *psplit = psplitPath->psplit;
 
+        //  set dbtime for sibling and new pages
+        //
         if ( psplit != NULL && pgnoNull != psplit->csrRight.Pgno() )
         {
 
@@ -9168,8 +11408,8 @@ VOID BTISplitRevertDbtime( SPLITPATH *psplitPathLeaf )
             Assert( psplit->dbtimeRightBefore < psplit->csrRight.Dbtime() );
 
             if ( dbtimeNil != psplit->dbtimeRightBefore &&
-                dbtimeInvalid != psplit->dbtimeRightBefore && 
-                latchWrite == psplit->csrRight.Latch()  )
+                dbtimeInvalid != psplit->dbtimeRightBefore && /* defense in depth */
+                latchWrite == psplit->csrRight.Latch() /* defense in depth, should've been guaranteed write after dbtimeNil check */ )
             {
                 psplit->csrRight.RevertDbtime( psplit->dbtimeRightBefore, psplit->fFlagsRightBefore );
             }
@@ -9178,6 +11418,8 @@ VOID BTISplitRevertDbtime( SPLITPATH *psplitPathLeaf )
 }
 
 
+//  sets lgpos for all pages involved in split
+//
 LOCAL VOID BTISplitSetLgpos( SPLITPATH *psplitPathLeaf, const LGPOS& lgpos )
 {
     SPLITPATH   *psplitPath = psplitPathLeaf;
@@ -9204,6 +11446,8 @@ LOCAL VOID BTISplitSetLgpos( SPLITPATH *psplitPathLeaf, const LGPOS& lgpos )
 }
 
 
+//  gets node to replace or flagInsertAndReplaceData at leaf level
+//
 VOID BTISplitGetReplacedNode( FUCB *pfucb, SPLIT *psplit )
 {
     Assert( psplit != NULL );
@@ -9293,6 +11537,9 @@ VOID BTISplitSetCbAdjust( SPLIT                 *psplit,
 }
 
 
+//  sets cursor to point to ilineOper if requested
+//  leaf-level operation was performed successfully
+//
 VOID BTISplitSetCursor( FUCB *pfucb, SPLITPATH *psplitPathLeaf )
 {
     SPLIT   *psplit = psplitPathLeaf->psplit;
@@ -9303,16 +11550,24 @@ VOID BTISplitSetCursor( FUCB *pfucb, SPLITPATH *psplitPathLeaf )
     if ( splitoperNone == psplit->splitoper ||
          !psplit->csrNew.Cpage().FLeafPage() )
     {
+        //  split was not performed
+        //  set cursor to point to no valid node
+        //
         BTUp( pfucb );
     }
     else
     {
+        //  set Pcsr( pfucb ) to leaf page with oper
+        //  reset CSR copied from to point to no page
+        //
         Assert( psplit->csrNew.Cpage().FLeafPage() );
         Assert( splitoperNone != psplitPathLeaf->psplit->splitoper );
         Assert( !Pcsr( pfucb )->FLatched() );
 
         if ( psplit->ilineOper < psplit->ilineSplit )
         {
+            //  ilineOper falls in split page
+            //
             *Pcsr( pfucb )          = psplitPathLeaf->csr;
             Pcsr( pfucb )->SetILine( psplit->ilineOper );
         }
@@ -9328,6 +11583,13 @@ VOID BTISplitSetCursor( FUCB *pfucb, SPLITPATH *psplitPathLeaf )
 }
 
 
+//  performs split
+//  this code shared between do and redo phases
+//      insert parent page pointers
+//      fix sibling page pointers at leaf
+//      move nodes
+//      set dependencies
+//
 VOID BTIPerformSplit( FUCB          *pfucb,
                       SPLITPATH     *psplitPathLeaf,
                       KEYDATAFLAGS  *pkdf,
@@ -9339,6 +11601,9 @@ VOID BTIPerformSplit( FUCB          *pfucb,
 
     auto tc = TcCurr();
 
+    //  go to root
+    //  since we need to latch top-down
+    //
     for ( psplitPath = psplitPathLeaf;
           psplitPath->psplitPathParent != NULL;
           psplitPath = psplitPath->psplitPathParent )
@@ -9354,11 +11619,15 @@ VOID BTIPerformSplit( FUCB          *pfucb,
             Assert( psplitPath->psplitPathChild != NULL &&
                     psplitPath->psplitPathChild->psplit != NULL );
 
+            //  insert parent page pointer for next level
+            //
             BTIInsertPgnoNewAndSetPgnoSplit( pfucb, psplitPath );
 
             continue;
         }
 
+        //  finish initializing new page before making changes to it
+        //
         if ( FBTIUpdatablePage( psplit->csrNew ) )
         {
             psplit->csrNew.FinalizePreInitPage();
@@ -9385,6 +11654,8 @@ VOID BTIPerformSplit( FUCB          *pfucb,
         {
             PERFOpt( PERFIncCounterTable( cBTVerticalSplit, PinstFromPfucb( pfucb ), (TCE)tc.nParentObjectClass ) );
 
+            //  move all nodes from root to new page
+            //
             BTISplitMoveNodes( pfucb, psplit, pkdfOper, dirflag );
 
             CSR     *pcsrRoot = &psplit->psplitPath->csr;
@@ -9394,12 +11665,18 @@ VOID BTIPerformSplit( FUCB          *pfucb,
                 Assert( latchWrite == pcsrRoot->Latch() );
                 Assert( pcsrRoot->Cpage().FRootPage() );
 
+                //  set parent page to non-leaf
+                //
                 pcsrRoot->Cpage().SetFlags( psplit->fSplitPageFlags );
 
+                //  insert page pointer in root zero-sized key
+                //
                 Assert( NULL != psplit->psplitPath );
                 Assert( 0 == pcsrRoot->Cpage().Clines() );
 
 #ifdef DEBUG
+                //  check prefix in root is null
+                //
                 NDGetPrefix( pfucb, pcsrRoot );
                 Assert( pfucb->kdfCurr.key.prefix.FNull() );
 #endif
@@ -9418,6 +11695,9 @@ VOID BTIPerformSplit( FUCB          *pfucb,
             if ( psplitPath->psplitPathChild != NULL &&
                  psplitPath->psplitPathChild->psplit != NULL )
             {
+                //  replace data in ilineOper + 1 with pgnoNew
+                //  assert data in ilineOper is pgnoSplit
+                //
                 BTIInsertPgnoNew( pfucb, psplitPath );
                 AssertBTIVerifyPgnoSplit( pfucb, psplitPath );
             }
@@ -9442,10 +11722,16 @@ VOID BTIPerformSplit( FUCB          *pfucb,
 
             if ( psplit->fNewPageFlags & CPAGE::fPageLeaf )
             {
+                //  set sibling page pointers
+                //
                 BTISplitFixSiblings( psplit );
             }
             else
             {
+                //  set page pointers
+                //
+                //  internal pages have no sibling pointers
+                //
 #ifdef DEBUG
                 if ( FBTIUpdatablePage( psplit->csrNew ) )
                 {
@@ -9460,6 +11746,9 @@ VOID BTIPerformSplit( FUCB          *pfucb,
                 Assert( pgnoNull == psplit->csrRight.Pgno() );
 #endif
 
+                //  replace data in ilineOper + 1 with pgnoNew
+                //  assert data in ilineOper is pgnoSplit
+                //
                 BTIInsertPgnoNew( pfucb, psplitPath );
                 AssertBTIVerifyPgnoSplit( pfucb, psplitPath );
             }
@@ -9468,6 +11757,9 @@ VOID BTIPerformSplit( FUCB          *pfucb,
 }
 
 
+//  inserts kdfParent of lower level with pgnoSplit as data
+//  replace data of next node with pgnoNew
+//
 LOCAL VOID BTIInsertPgnoNewAndSetPgnoSplit( FUCB *pfucb, SPLITPATH *psplitPath )
 {
     ERR         err;
@@ -9477,6 +11769,8 @@ LOCAL VOID BTIInsertPgnoNewAndSetPgnoSplit( FUCB *pfucb, SPLITPATH *psplitPath )
 
     if ( !FBTIUpdatablePage( *pcsr ) )
     {
+        //  page does not need redo
+        //
         return;
     }
     Assert( latchWrite == pcsr->Latch() );
@@ -9495,6 +11789,9 @@ LOCAL VOID BTIInsertPgnoNewAndSetPgnoSplit( FUCB *pfucb, SPLITPATH *psplitPath )
 
     bmParent.key    = psplit->kdfParent.key;
     bmParent.data.Nullify();
+    //  we will be in trouble if we get an error here ... luckily I think this should be
+    //  impossible b/c I think we will have ErrNDSeek()d in there already and failed out
+    //  from there.  Not 100% sure of that though.
     err = ErrNDSeek( pfucb, pcsr, bmParent );
     AssertRTL( err != JET_errBadEmptyPage );
     Assert( err != JET_errSuccess );
@@ -9506,9 +11803,13 @@ LOCAL VOID BTIInsertPgnoNewAndSetPgnoSplit( FUCB *pfucb, SPLITPATH *psplitPath )
 
     BTIComputePrefixAndInsert( pfucb, pcsr, psplit->kdfParent );
 
+    //  go to next node and update pgno to pgnoNew
+    //
     Assert( pcsr->ILine() < pcsr->Cpage().Clines() );
     pcsr->IncrementILine();
 #ifdef DEBUG
+    //  current page pointer should point to pgnoSplit
+    //
     NDGet( pfucb, pcsr );
     Assert( sizeof(PGNO) == pfucb->kdfCurr.data.Cb() );
     Assert( psplit->pgnoSplit ==
@@ -9523,6 +11824,9 @@ LOCAL VOID BTIInsertPgnoNewAndSetPgnoSplit( FUCB *pfucb, SPLITPATH *psplitPath )
 }
 
 
+//  computes prefix for node with repect to given page
+//  inserts with appropriate prefix
+//
 LOCAL VOID BTIComputePrefixAndInsert( FUCB *pfucb, CSR *pcsr, const KEYDATAFLAGS& kdf )
 {
     Assert( latchWrite == pcsr->Latch() );
@@ -9539,6 +11843,8 @@ LOCAL VOID BTIComputePrefixAndInsert( FUCB *pfucb, CSR *pcsr, const KEYDATAFLAGS
 }
 
 
+//  replace data in ilineOper + 1 with pgnoNew at lower level
+//
 LOCAL VOID BTIInsertPgnoNew( FUCB *pfucb, SPLITPATH *psplitPath )
 {
     SPLIT   *psplit = psplitPath->psplit;
@@ -9564,11 +11870,15 @@ LOCAL VOID BTIInsertPgnoNew( FUCB *pfucb, SPLITPATH *psplitPath )
 
     if ( psplit->ilineOper + 1 >= psplit->ilineSplit )
     {
+        //  page pointer to new page falls in new page
+        //
         pcsr            = &psplit->csrNew;
         pcsr->SetILine( psplit->ilineOper + 1 - psplit->ilineSplit );
     }
     else
     {
+        //  page pointer falls in split page
+        //
         Assert( splittypeVertical != psplit->splittype );
         pcsr            = &psplit->psplitPath->csr;
         pcsr->SetILine( psplit->ilineOper + 1 );
@@ -9576,13 +11886,19 @@ LOCAL VOID BTIInsertPgnoNew( FUCB *pfucb, SPLITPATH *psplitPath )
 
     if ( !FBTIUpdatablePage( *pcsr ) )
     {
+        //  page does not need redo
+        //
         return;
     }
     Assert( latchWrite == pcsr->Latch() );
 
+    //  check that we already dirtied these pages
+    //
     Assert( pcsr->FDirty() );
 
 #ifdef DEBUG
+    //  current page pointer should point to pgnoSplit
+    //
     NDGet( pfucb, pcsr );
     Assert( sizeof(PGNO) == pfucb->kdfCurr.data.Cb() );
     Assert( psplitPath->psplitPathChild->psplit->pgnoSplit ==
@@ -9594,10 +11910,14 @@ LOCAL VOID BTIInsertPgnoNew( FUCB *pfucb, SPLITPATH *psplitPath )
 }
 
 
+//  fixes sibling pages of split, new and right pages
+//
 LOCAL VOID BTISplitFixSiblings( SPLIT *psplit )
 {
     SPLITPATH   *psplitPath = psplit->psplitPath;
 
+    //  set sibling page pointers only if page is write-latched
+    //
     if ( FBTIUpdatablePage( psplit->csrNew ) )
     {
         psplit->csrNew.Cpage().SetPgnoPrev( psplit->pgnoSplit );
@@ -9632,6 +11952,14 @@ LOCAL VOID BTISplitFixSiblings( SPLIT *psplit )
 }
 
 
+//  move nodes from src to dest page
+//  set prefix in destination page
+//  move nodes >= psplit->ilineSplit
+//  if oper is not operNone, perform oper on ilineOper
+//  set prefix in src page [in-page]
+//  set cbUncommittedFree in src and dest pages
+//  move undoInfo of moved nodes to destination page
+//
 VOID BTISplitMoveNodes( FUCB            *pfucb,
                         SPLIT           *psplit,
                         KEYDATAFLAGS    *pkdf,
@@ -9657,6 +11985,8 @@ VOID BTISplitMoveNodes( FUCB            *pfucb,
     pcsrDest->SetILine( 0 );
     BTICheckSplitLineinfo( pfucb, psplit, *pkdf );
 
+    //  set prefix in destination page
+    //
     if ( psplit->prefixinfoNew.ilinePrefix != ilineInvalid
         && FBTIUpdatablePage( *pcsrDest ) )
     {
@@ -9668,19 +11998,30 @@ VOID BTISplitMoveNodes( FUCB            *pfucb,
         NDSetPrefix( pcsrDest, psplit->rglineinfo[ilinePrefix].kdf.key );
     }
 
+    //  move every node from Src to Dest
+    //
     if ( psplit->splitoper != splitoperNone
         && psplit->ilineOper >= psplit->ilineSplit )
     {
+        //  ilineOper falls in Dest page
+        //  copy lines from ilineSplit till ilineOper - 1 from Src to Dest
+        //  perform oper
+        //  copy remaining lines
+        //  delete copied lines from Src
+        //
         Assert( 0 == pcsrDest->ILine() );
         BTISplitBulkCopy( pfucb,
                           psplit,
                           psplit->ilineSplit,
                           psplit->ilineOper - psplit->ilineSplit );
 
+        //  insert ilineOper
+        //
         pcsrSrc->SetILine( psplit->ilineOper );
 
         if ( FBTIUpdatablePage( *pcsrDest ) )
         {
+            //  if need to redo destination, must need to redo source page as well
             Assert( FBTIUpdatablePage( *pcsrSrc )
                 || !FBTISplitPageBeforeImageRequired( psplit ) );
             Assert( psplit->ilineOper - psplit->ilineSplit == pcsrDest->ILine() );
@@ -9711,6 +12052,8 @@ VOID BTISplitMoveNodes( FUCB            *pfucb,
                          !g_rgfmp[ pfucb->ifmp ].FVersioningOff() &&
                          ( psplit->fNewPageFlags & CPAGE::fPageLeaf ) )
                     {
+                        //  UNDONE: assert version for this node exists
+                        //
                         CallS( ErrNDFlagVersion( pcsrDest ) );
                     }
                     else
@@ -9754,6 +12097,8 @@ VOID BTISplitMoveNodes( FUCB            *pfucb,
                          !g_rgfmp[ pfucb->ifmp ].FVersioningOff( ) &&
                          ( psplit->fNewPageFlags & CPAGE::fPageLeaf ) )
                     {
+                        //  UNDONE: assert version for this node exists
+                        //
                         CallS( ErrNDFlagVersion( pcsrDest ) );
                     }
                     else
@@ -9783,13 +12128,23 @@ VOID BTISplitMoveNodes( FUCB            *pfucb,
         BTISplitBulkDelete( pcsrSrc,
                 psplit->clines - psplit->ilineSplit - cLineInsert );
 
+        //  set prefix in source page
+        //
         if ( splittypeAppend != psplit->splittype )
         {
+            //  set new prefix in src page
+            //  adjust nodes in src to correspond to new prefix
+            //
             BTISplitSetPrefixInSrcPage( pfucb, psplit );
         }
     }
     else
     {
+        //  oper node is in Src page
+        //  move nodes to Dest page
+        //  delete nodes that have been moved
+        //  perform oper in Src page
+        //
         Assert( psplit->ilineOper < psplit->ilineSplit ||
                 splitoperNone == psplit->splitoper );
 
@@ -9805,9 +12160,14 @@ VOID BTISplitMoveNodes( FUCB            *pfucb,
         BTISplitBulkDelete( pcsrSrc,
                             psplit->clines - psplit->ilineSplit );
 
+        //  set prefix
+        //
         Assert( splittypeAppend != psplit->splittype );
         BTISplitSetPrefixInSrcPage( pfucb, psplit );
 
+        //  can't use rglineinfo[].kdf anymore
+        //  since page may have been reorged
+        //
 
         pcsrSrc->SetILine( psplit->ilineOper );
 
@@ -9824,6 +12184,8 @@ VOID BTISplitMoveNodes( FUCB            *pfucb,
                          !g_rgfmp[ pfucb->ifmp ].FVersioningOff( ) &&
                          ( psplit->fNewPageFlags & CPAGE::fPageLeaf ) )
                     {
+                        //  UNDONE: assert version for this node exists
+                        //
                         CallS( ErrNDFlagVersion( pcsrSrc ) );
                     }
                     else
@@ -9837,10 +12199,15 @@ VOID BTISplitMoveNodes( FUCB            *pfucb,
                     break;
 
                 default:
+                    //  replace data
+                    //  by deleting and re-inserting [to avoid page reorg problems]
+                    //
                     Assert( psplit->splitoper == splitoperFlagInsertAndReplaceData ||
                             psplit->splitoper == splitoperReplace );
 
 #ifdef DEBUG
+                    //  assert that key of node is in pfucb->bmCurr
+                    //
                     NDGet( pfucb, pcsrSrc );
                     Assert( FFUCBUnique( pfucb ) );
                     Assert( FKeysEqual( pfucb->bmCurr.key, pfucb->kdfCurr.key ) );
@@ -9862,6 +12229,8 @@ VOID BTISplitMoveNodes( FUCB            *pfucb,
                          !g_rgfmp[ pfucb->ifmp ].FVersioningOff( ) &&
                          ( psplit->fNewPageFlags & CPAGE::fPageLeaf ) )
                     {
+                        //  UNDONE: assert version for this node exists
+                        //
                         CallS( ErrNDFlagVersion( pcsrSrc ) );
                     }
                     else
@@ -9877,16 +12246,21 @@ VOID BTISplitMoveNodes( FUCB            *pfucb,
         }
         else
         {
+            //  if we didn't need to redo the source page, we shouldn't need to redo the
+            //  destination page
             Assert( !FBTIUpdatablePage( *pcsrDest ) );
         }
     }
 
     if ( psplit->fNewPageFlags & CPAGE::fPageLeaf )
     {
+        //  set cbUncommittedFreed in src and dest pages
+        //
         Assert( PinstFromIfmp( pfucb->ifmp )->FRecovering()
             || ( pcsrDest->Cpage().FLeafPage() && latchWrite == pcsrDest->Latch() ) );
         if ( FBTIUpdatablePage( *pcsrDest ) )
         {
+            //  if need to redo destination, must need to redo source page as well
             Assert( FBTIUpdatablePage( *pcsrSrc )
                 || !FBTISplitPageBeforeImageRequired( psplit ) );
             pcsrDest->Cpage().SetCbUncommittedFree( psplit->cbUncFreeDest );
@@ -9914,15 +12288,21 @@ VOID BTISplitMoveNodes( FUCB            *pfucb,
         }
         else
         {
+            //  if we didn't need to redo the source page, we shouldn't need to redo the
+            //  destination page if not an append
             Assert( !FBTIUpdatablePage( *pcsrDest )
                 || !FBTISplitPageBeforeImageRequired( psplit ) );
         }
 
 
+        //  move UndoInfo of moved nodes to destination page
+        //
         Assert( ( splittypeVertical == psplit->splittype && psplit->kdfParent.key.FNull() )
             || ( splittypeVertical != psplit->splittype && !psplit->kdfParent.key.FNull() ) );
         if ( !FBTIUpdatablePage( *pcsrSrc ) )
         {
+            //  if we didn't need to redo the source page, we shouldn't need to redo the
+            //  destination page if not an append
             Assert( !FBTIUpdatablePage( *pcsrDest )
                 || !FBTISplitPageBeforeImageRequired( psplit ) );
         }
@@ -9950,6 +12330,8 @@ INLINE VOID BTISplitBulkDelete( CSR * pcsr, INT clines )
 {
     if ( !FBTIUpdatablePage( *pcsr ) )
     {
+        //  page does not need redo
+        //
         return;
     }
     Assert( latchWrite == pcsr->Latch() );
@@ -9958,6 +12340,9 @@ INLINE VOID BTISplitBulkDelete( CSR * pcsr, INT clines )
 }
 
 
+//  copy clines starting from rglineInfo[ilineStart] to csrDest
+//  prefixes have been calculated in rglineInfo
+//
 VOID BTISplitBulkCopy( FUCB *pfucb, SPLIT *psplit, INT ilineStart, INT clines )
 {
     INT         iline;
@@ -9966,6 +12351,8 @@ VOID BTISplitBulkCopy( FUCB *pfucb, SPLIT *psplit, INT ilineStart, INT clines )
 
     if ( !FBTIUpdatablePage( *pcsrDest ) )
     {
+        //  page does not need redo
+        //
         return;
     }
     Assert( latchWrite == pcsrDest->Latch() );
@@ -9998,6 +12385,8 @@ VOID BTISplitBulkCopy( FUCB *pfucb, SPLIT *psplit, INT ilineStart, INT clines )
 }
 
 
+//  returns reference to rglineInfo corresponding to iline
+//
 INLINE const LINEINFO *PlineinfoFromIline( SPLIT *psplit, INT iline )
 {
     Assert( iline >= 0);
@@ -10020,6 +12409,8 @@ INLINE const LINEINFO *PlineinfoFromIline( SPLIT *psplit, INT iline )
     return &psplit->rglineinfo[iline+1];
 }
 
+//  set prefix in page to psplit->prefix and reorg nodes
+//
 VOID BTISplitSetPrefixInSrcPage( FUCB *pfucb, SPLIT *psplit )
 {
     Assert( psplit->splittype != splittypeAppend );
@@ -10030,6 +12421,8 @@ VOID BTISplitSetPrefixInSrcPage( FUCB *pfucb, SPLIT *psplit )
 
     if ( !FBTIUpdatablePage( *pcsr ) )
     {
+        //  page does not need redo
+        //
         return;
     }
     Assert( latchWrite == pcsr->Latch() );
@@ -10044,6 +12437,8 @@ VOID BTISplitSetPrefixInSrcPage( FUCB *pfucb, SPLIT *psplit )
     INT         iline;
     const INT   clines = pcsr->Cpage().Clines();
 
+    //  delete old prefix
+    //
     if ( !pprefixOld->FNull() )
     {
         KEY keyNull;
@@ -10054,11 +12449,15 @@ VOID BTISplitSetPrefixInSrcPage( FUCB *pfucb, SPLIT *psplit )
     else
     {
 #ifdef DEBUG
+        //  check prefix was null before
+        //
         NDGetPrefix( pfucb, pcsr );
         Assert( pfucb->kdfCurr.key.FNull() );
 #endif
     }
 
+    //  fix nodes that shrink because of prefix change
+    //
     for ( iline = 0; iline < clines; iline++ )
     {
         pcsr->SetILine( iline );
@@ -10080,6 +12479,8 @@ VOID BTISplitSetPrefixInSrcPage( FUCB *pfucb, SPLIT *psplit )
         }
     }
 
+    //  fix nodes that grow because of prefix change
+    //
     for ( iline = 0; iline < clines; iline++ )
     {
         pcsr->SetILine( iline );
@@ -10100,6 +12501,8 @@ VOID BTISplitSetPrefixInSrcPage( FUCB *pfucb, SPLIT *psplit )
         }
     }
 
+    //  set new prefix
+    //
     KEY     keyPrefixNew;
 
     keyPrefixNew.Nullify();
@@ -10109,12 +12512,18 @@ VOID BTISplitSetPrefixInSrcPage( FUCB *pfucb, SPLIT *psplit )
     return;
 }
 
+//  optimizes internal fragmentation for whole 
+//  chain of splitpath's from leaf to root
+//
 VOID BTISplitShrinkPages( SPLITPATH *psplitPathLeaf )
 {
     SPLITPATH *psplitPath = psplitPathLeaf;
 
     for ( ; psplitPath != NULL; )
     {
+        //  attempt to optimize internal frag if nesc and we can piggy back on 
+        //  an existing DBTIME update
+        //
         if( psplitPath->csr.Latch() == latchWrite )
         {
             AssertRTL( psplitPath->dbtimeBefore != psplitPath->csr.Cpage().Dbtime() );
@@ -10124,17 +12533,24 @@ VOID BTISplitShrinkPages( SPLITPATH *psplitPathLeaf )
             }
         }
 
+        //  navigate to the parent
+        //
         psplitPath = psplitPath->psplitPathParent;
     }
 }
 
 
+//  releases whole chain of splitpath's
+//  from leaf to root
+//
 VOID BTIReleaseSplitPaths( INST *pinst, SPLITPATH *psplitPathLeaf )
 {
     SPLITPATH *psplitPath = psplitPathLeaf;
 
     for ( ; psplitPath != NULL; )
     {
+        //  save parent
+        //
         SPLITPATH *psplitPathParent = psplitPath->psplitPathParent;
 
         delete psplitPath;
@@ -10143,12 +12559,18 @@ VOID BTIReleaseSplitPaths( INST *pinst, SPLITPATH *psplitPathLeaf )
 }
 
 
+//  checks to make sure there are no erroneous splits
+//  if there is a operNone split at any level,
+//      there should be no splits at lower levels
+//
 LOCAL VOID BTISplitCheckPath( SPLITPATH *psplitPathLeaf )
 {
 #ifdef DEBUG
     SPLITPATH   *psplitPath;
     BOOL        fOperNone = fFalse;
 
+    //  goto root
+    //
     for ( psplitPath = psplitPathLeaf;
           psplitPath->psplitPathParent != NULL;
           psplitPath = psplitPath->psplitPathParent )
@@ -10164,6 +12586,8 @@ LOCAL VOID BTISplitCheckPath( SPLITPATH *psplitPathLeaf )
 
         if ( fOperNone )
         {
+            //  higher level has a split with no oper
+            //
             Assert( NULL == psplit );
         }
         else
@@ -10178,6 +12602,8 @@ LOCAL VOID BTISplitCheckPath( SPLITPATH *psplitPathLeaf )
 }
 
 
+//  checks lineinfo in split point to the right nodes
+//
 VOID BTICheckSplitLineinfo( FUCB *pfucb, SPLIT *psplit, const KEYDATAFLAGS& kdf )
 {
 #ifdef DEBUG
@@ -10203,6 +12629,7 @@ VOID BTICheckSplitLineinfo( FUCB *pfucb, SPLIT *psplit, const KEYDATAFLAGS& kdf 
         {
             Assert( FKeysEqual( plineinfo->kdf.key, pfucb->kdfCurr.key ) );
             Assert( FDataEqual( plineinfo->kdf.data, pfucb->kdfCurr.data ) );
+///         Assert( plineinfo->kdf.fFlags == pfucb->kdfCurr.fFlags );
         }
         else if ( splitoper == splitoperNone )
         {
@@ -10224,6 +12651,8 @@ VOID BTICheckSplitLineinfo( FUCB *pfucb, SPLIT *psplit, const KEYDATAFLAGS& kdf 
         }
     }
 
+    //  check ilineOper
+    //
     LINEINFO    *plineinfo = &psplit->rglineinfo[psplit->ilineOper];
     if ( splitoperInsert == psplit->splitoper )
     {
@@ -10233,6 +12662,8 @@ VOID BTICheckSplitLineinfo( FUCB *pfucb, SPLIT *psplit, const KEYDATAFLAGS& kdf 
 }
 
 
+//  check if a split just performed is correct
+//
 VOID BTICheckSplits( FUCB           *pfucb,
                     SPLITPATH       *psplitPathLeaf,
                     KEYDATAFLAGS    *pkdf,
@@ -10286,6 +12717,8 @@ LOCAL VOID BTICheckSplitFlags( const SPLIT *psplit )
 }
 
 
+//  check split at one level
+//
 VOID BTICheckOneSplit( FUCB             *pfucb,
                        SPLITPATH        *psplitPath,
                        KEYDATAFLAGS     *pkdf,
@@ -10295,8 +12728,15 @@ VOID BTICheckOneSplit( FUCB             *pfucb,
     SPLIT           *psplit = psplitPath->psplit;
     const DBTIME    dbtime  = psplitPath->csr.Dbtime();
 
+//  UNDONE: check lgpos of all pages is the same
+//  const LGPOS     lgpos;
 
+    //  check that nodes in every page are in order
+    //  this will be done by node at NDGet
+    //
 
+    //  check that key at parent > all sons
+    //
     if ( psplit == NULL )
     {
         return;
@@ -10309,6 +12749,8 @@ VOID BTICheckOneSplit( FUCB             *pfucb,
         {
             CSR     *pcsrRoot = &psplitPath->csr;
 
+            //  parent page has only one node
+            //
             Assert( pcsrRoot->Cpage().FRootPage() );
             Assert( !pcsrRoot->Cpage().FLeafPage() );
             Assert( 1 == pcsrRoot->Cpage().Clines() );
@@ -10323,6 +12765,8 @@ VOID BTICheckOneSplit( FUCB             *pfucb,
             break;
 
         case splittypeAppend:
+            //  assert no node is moved
+            //
             Assert( psplit->csrNew.Cpage().Clines() == 1 );
             Assert( psplit->csrRight.Pgno() == pgnoNull );
             Assert( psplit->csrNew.Cpage().PgnoNext() == pgnoNull );
@@ -10335,6 +12779,8 @@ VOID BTICheckOneSplit( FUCB             *pfucb,
 
             KEYDATAFLAGS    kdfLess, kdfGreater;
 
+            //  if parent is undergoing a vertical split, new page is parent
+            //
             if ( psplitPath->psplitPathParent->psplit != NULL &&
                  splittypeVertical == psplitPath->psplitPathParent->psplit->splittype )
             {
@@ -10345,6 +12791,8 @@ VOID BTICheckOneSplit( FUCB             *pfucb,
             Assert( pcsrNew->Dbtime() == dbtime );
             Assert( pcsrParent->Dbtime() == dbtime );
 
+            //  check split, new and right pages are in order
+            //
             NDMoveLastSon( pfucb, pcsrSplit );
             kdfLess = pfucb->kdfCurr;
 
@@ -10376,9 +12824,13 @@ VOID BTICheckOneSplit( FUCB             *pfucb,
 
                 Assert( CmpKeyData( kdfLess, kdfGreater ) < 0 );
 
+                //  right page should also be >= parent of new page
+                //
 
             }
 
+            //  check parent pointer key > all nodes in child page
+            //
             NDMoveFirstSon( pfucb, pcsrParent );
 
             Assert( sizeof( PGNO ) == pfucb->kdfCurr.data.Cb() );
@@ -10389,6 +12841,8 @@ VOID BTICheckOneSplit( FUCB             *pfucb,
                 Assert( pgnoChild != psplit->pgnoNew );
                 Assert( pgnoChild != psplit->csrRight.Pgno() );
 
+                //  get next page-pointer node
+                //
                 if ( pcsrParent->ILine() + 1 == pcsrParent->Cpage().Clines() )
                 {
                     Assert( psplitPath->psplitPathParent->psplit != NULL );
@@ -10426,9 +12880,13 @@ VOID BTICheckOneSplit( FUCB             *pfucb,
             }
             else
             {
+                //  no suffix compression at internal levels
+                //
                 Assert( FKeysEqual( kdfGreater.key, pfucb->kdfCurr.key ) );
             }
 
+            //  next page pointer should point to new page
+            //
             if ( pcsrParent->ILine() + 1 == pcsrParent->Cpage().Clines() )
             {
                 Assert( psplitPath->psplitPathParent->psplit != NULL );
@@ -10444,6 +12902,8 @@ VOID BTICheckOneSplit( FUCB             *pfucb,
             Assert( sizeof( PGNO ) == pfucb->kdfCurr.data.Cb() );
             Assert( psplit->pgnoNew == *( (UnalignedLittleEndian< PGNO > *)pfucb->kdfCurr.data.Pv() ) );
 
+            //  key at this node should be > last node in pgnoNew
+            //
             kdfGreater = pfucb->kdfCurr;
 
             NDMoveLastSon( pfucb, pcsrNew );
@@ -10462,9 +12922,13 @@ VOID BTICheckOneSplit( FUCB             *pfucb,
             }
             else
             {
+                //  no suffix compression at internal levels
+                //
                 Assert( FKeysEqual( kdfGreater.key, pfucb->kdfCurr.key ) );
             }
 
+            //  key at this node should be < first node in right page, if any
+            //
             if ( pcsrRight->Pgno() != pgnoNull )
             {
                 Assert( pcsrRight->Cpage().FLeafPage() );
@@ -10476,10 +12940,14 @@ VOID BTICheckOneSplit( FUCB             *pfucb,
                 Assert( CmpKeyWithKeyData( kdfLess.key, pfucb->kdfCurr ) <= 0 );
             }
     }
-#endif
+#endif  //  DEBUG
 }
 
 
+//  creates a new MERGEPATH structure and initializes it
+//  adds newly created mergePath structure to head of list
+//  pointed to by *ppMergePath passed in
+//
 ERR ErrBTINewMergePath( MERGEPATH **ppmergePath )
 {
     MERGEPATH   *pmergePath;
@@ -10501,32 +12969,48 @@ ERR ErrBTINewMergePath( MERGEPATH **ppmergePath )
 }
 
 
+//  seeks to node for single page cleanup
+//  returns error if node is not found
+//
 INLINE ERR ErrBTISPCSeek( FUCB *pfucb, const BOOKMARK& bm )
 {
     ERR     err;
 
+    //  no page should be latched
+    //
     Assert( !Pcsr( pfucb )->FLatched( ) );
 
+    //  go to root
+    //
     Call( ErrBTIGotoRoot( pfucb, latchReadNoTouch ) );
     Assert( 0 == Pcsr( pfucb )->ILine() );
 
     if ( Pcsr( pfucb )->Cpage().Clines() == 0 )
     {
+        //  page is empty
+        //
         Assert( Pcsr( pfucb )->Cpage().FLeafPage() );
         err = wrnNDFoundGreater;
     }
     else
     {
+        //  seek down tree for bm
+        //
         for ( ; ; )
         {
             Call( ErrNDSeek( pfucb, bm ) );
 
             if ( !Pcsr( pfucb )->Cpage().FInvisibleSons( ) )
             {
+                //  leaf node reached, exit loop
+                //
                 break;
             }
             else
             {
+                //  get pgno of child from node
+                //  switch to that page
+                //
                 Assert( pfucb->kdfCurr.data.Cb() == sizeof( PGNO ) );
                 Call( Pcsr( pfucb )->ErrSwitchPage(
                             pfucb->ppib,
@@ -10557,6 +13041,11 @@ HandleError:
     return err;
 }
 
+//  deletes all nodes in page that are flagged-deleted
+//      and have no active version
+//  also nullifies versions on deleted nodes
+//  WARNING: May re-organize the page
+//
 LOCAL ERR ErrBTISPCDeleteNodes( FUCB *pfucb, CSR *pcsr )
 {
     ERR         err = JET_errSuccess;
@@ -10585,16 +13074,40 @@ LOCAL ERR ErrBTISPCDeleteNodes( FUCB *pfucb, CSR *pcsr )
             {
                 Call( ErrNDDelete( pfucb, pcsr, fDIRNull ) );
 
+                // WARNING: The assert below is wrong, because by this point, there may actually
+                // be future active versions.  This is because versioning is now done before we
+                // latch the page.
+                // Assert( !FVERActive( pfucb, bm ) );
                 VERNullifyInactiveVersionsOnBM( pfucb, bm );
 
                 fUpdated = fTrue;
             }
+            // Doing this for LV roots will cause problems for some parts of the code
+            // (we've seen backup scrubbing complaining) because, even though the node is
+            // deleted and not visible, it is expected to carry metadata about the LV
+            // See ErrSCRUBIZeroLV().
+            //
             else if ( FFUCBUnique( pfucb ) && !( pcsr->Cpage().FLongValuePage() && FIsLVRootKey( kdf.key ) ) )
             {
+                // ErrNDReplace needs the bmCurr in the FUCB to be set properly. Here we will set it to
+                // the node being replaced and then reset it after the replace
                 BOOKMARK bmSaved = pfucb->bmCurr;
                 pfucb->bmCurr = bm;
                 NDGet( pfucb, pcsr );
                 
+                // We can't remove the last node on the page (b-tree pages can't be empty).
+                // In this case we will have to keep the key and replace the data with null
+                // This is only done for unique indexes.
+                //
+                // The record isn't visible to anyone so the replace isn't versioned
+                //
+                // Technically, we're scrubbing one byte with chSCRUBDBMaintEmptyPageLastNodeFill
+                // below, which we should be skipping if JET_paramZeroDatabaseUnusedSpace is not set,
+                // but this pattern is actually used by DBM to detect cases where we've already performed
+                // single-node cleanup on an empty tree, so we'll keep the single-byte scrubbing below
+                // always active. Note that the scrubbing of the rest of the node being replaced below
+                // will honor the parameter and not get scrubbed if it is not set.
+                //
                 BYTE bNull = chSCRUBDBMaintEmptyPageLastNodeFill;
                 DATA data;
                 data.SetPv(&bNull);
@@ -10608,11 +13121,20 @@ LOCAL ERR ErrBTISPCDeleteNodes( FUCB *pfucb, CSR *pcsr )
         }
     }
 
+    // Note that the following is not crash consistent since this whole
+    // operation is not not undoable and not in a macro
+    // Consider skipping it (at least for DEBUG builds) to catch any other
+    // issues with uneeded prefixes left behind (cannot do that currently since
+    // the test to check for the Replace bug with uneeded prefix depends on this
     Call( ErrBTIResetPrefixIfUnused( pfucb, pcsr ) );
 
+    //  since the OptimizeInternalFragmentation() call piggy-backs on the DBTIME changes of
+    //  others, we can only do it if we updated something (and thus the DBTIME).
 
     if ( fUpdated )
     {
+        //  shrink / optimize page image
+        //
         AssertRTL( dbtimePre != pcsr->Cpage().Dbtime() );
         if( dbtimePre != pcsr->Cpage().Dbtime() )
         {
@@ -10635,6 +13157,8 @@ LOCAL ERR ErrBTIMergeEmptyTree(
     EMPTYPAGE   rgemptypage[cBTMaxDepth];
     LGPOS       lgpos;
 
+    //  go to root
+    //  since we need to latch top-down
     for ( pmergePath = pmergePathLeaf;
           pmergePath->pmergePathParent != NULL;
           pmergePath = pmergePath->pmergePathParent )
@@ -10650,6 +13174,7 @@ LOCAL ERR ErrBTIMergeEmptyTree(
     Assert( 1 == pcsrRoot->Cpage().Clines() );
     pcsrRoot->UpgradeFromRIWLatch();
 
+    //  latch and dirty all pages
     Assert( NULL != pmergePathRoot->pmergePathChild );
     for ( pmergePath = pmergePathRoot->pmergePathChild;
         NULL != pmergePath;
@@ -10677,8 +13202,10 @@ LOCAL ERR ErrBTIMergeEmptyTree(
     {
         NDSetEmptyTree( pcsrRoot );
 
+        //  update lgpos
         pcsrRoot->Cpage().SetLgposModify( lgpos );
 
+        //  update all child pages with dbtime of root, mark them as empty, and update lgpos
         const DBTIME    dbtime      = pcsrRoot->Dbtime();
         for ( pmergePath = pmergePathRoot->pmergePathChild;
             NULL != pmergePath;
@@ -10690,15 +13217,19 @@ LOCAL ERR ErrBTIMergeEmptyTree(
         }
     }
 
+    //  shrink / optimize page image
+    //
     BTIMergeShrinkPages( pmergePathLeaf );
 
     BTIReleaseMergePaths( pmergePathLeaf );
     CallR( err );
 
+    //  WARNING: If we crash after this point, we will lose space
 
     const BOOL      fAvailExt   = FFUCBAvailExt( pfucb );
     const BOOL      fOwnExt     = FFUCBOwnExt( pfucb );
 
+    //  fake out cursor to make it think it's not a space cursor
     if ( fAvailExt )
     {
         Assert( !fOwnExt );
@@ -10710,9 +13241,12 @@ LOCAL ERR ErrBTIMergeEmptyTree(
     }
     Assert( !FFUCBSpace( pfucb ) );
 
+    //  return freed pages to AvailExt
     BTUp( pfucb );
     for ( ULONG i = 0; i < cPagesToFree; i++ )
     {
+        //  UNDONE: track lost space because of inability
+        //          to split availExt tree with the released space
         Assert( PgnoRoot( pfucb ) != rgemptypage[i].pgno );
         const ERR   errFreeExt  = ErrSPFreeExt( pfucb, rgemptypage[i].pgno, 1, "MergeEmptyTree" );
 #ifdef DEBUG
@@ -10722,6 +13256,8 @@ LOCAL ERR ErrBTIMergeEmptyTree(
         }
 #endif
 
+        //  count pages released by an update
+        //
         Ptls()->threadstats.cPageUpdateReleased++;
 
         CallR( errFreeExt );
@@ -10742,6 +13278,11 @@ LOCAL ERR ErrBTIMergeEmptyTree(
 
 
 
+//  performs multipage cleanup
+//      seeks down to node
+//      performs empty page or merge operation if possible
+//      else expunges all deletable nodes in page
+//
 
 ERR ErrBTIMultipageCleanup(
     FUCB                    * const pfucb,
@@ -10763,6 +13304,8 @@ ERR ErrBTIMultipageCleanup(
     
     if ( pfucb->u.pfcb->FDeletePending() )
     {
+        //  btree is scheduled for deletion - don't bother attempting cleanup
+        //
         if ( NULL != pbmNext )
         {
             pbmNext->key.suffix.SetCb( 0 );
@@ -10772,6 +13315,8 @@ ERR ErrBTIMultipageCleanup(
         return JET_errSuccess;
     }
 
+    //  get path RIW latched
+    //
     Call( ErrBTICreateMergePath( pfucb, bm, pgnoNull, fTrue, &pmergePath, pPrereadInfo ) );
     if ( wrnBTShallowTree == err )
     {
@@ -10783,6 +13328,8 @@ ERR ErrBTIMultipageCleanup(
         goto HandleError;
     }
 
+    //  check if merge conditions hold
+    //
     Call( ErrBTISelectMerge( pfucb, pmergePath, bm, pbmNext, preccheck, fRightMerges ) );
     Assert( pmergePath->pmerge != NULL );
     Assert( pmergePath->pmerge->rglineinfo != NULL );
@@ -10799,8 +13346,12 @@ ERR ErrBTIMultipageCleanup(
         return err;
     }
 
+    //  release pages not involved in merge
+    //
     BTIMergeReleaseUnneededPages( pmergePath );
 
+    //  if this is OLD, see if we want to do partial merges
+    //
     if ( mergetypePartialRight == pmergePath->pmerge->mergetype )
     {
         if( pfucb->ppib->FSessionOLD())
@@ -10815,6 +13366,8 @@ ERR ErrBTIMultipageCleanup(
         }
         else
         {
+            // we don't want to do any partial merges during
+            // version store cleanup
             pmergePath->pmerge->mergetype = mergetypeNone;
         }
     }
@@ -10827,23 +13380,33 @@ ERR ErrBTIMultipageCleanup(
 
         case mergetypePartialLeft:
         case mergetypeFullLeft:
+            //  sibling pages, if any, should be RIW latched
+            //
             Assert( pgnoNull != pmergePath->csr.Cpage().PgnoPrev() );
             Assert( latchRIW == pmergePath->pmerge->csrLeft.Latch() );
 
             Assert( pgnoNull == pmergePath->csr.Cpage().PgnoNext()
                 || latchRIW == pmergePath->pmerge->csrRight.Latch() );
 
+            //  log merge, merge pages, release empty page
+            //
             Call( ErrBTIMergeOrEmptyPage( pfucb, pmergePath ) );
             break;
 
+        //  UNDONE: disable partial merges from RCE cleanup
+        //
         case mergetypePartialRight:
         case mergetypeFullRight:
+            //  sibling pages, if any, should be RIW latched
+            //
             Assert( pgnoNull != pmergePath->csr.Cpage().PgnoNext() );
             Assert( latchRIW == pmergePath->pmerge->csrRight.Latch() );
 
             Assert( pgnoNull == pmergePath->csr.Cpage().PgnoPrev()
                 || latchRIW == pmergePath->pmerge->csrLeft.Latch() );
 
+            //  log merge, merge pages, release empty page
+            //
             Call( ErrBTIMergeOrEmptyPage( pfucb, pmergePath ) );
             break;
 
@@ -10851,13 +13414,20 @@ ERR ErrBTIMultipageCleanup(
             Assert( pmergePath->pmerge->mergetype == mergetypeNone );
             Assert( latchRIW == pmergePath->csr.Latch() );
 
+            //  can not delete only node in page
+            //
             if ( pmergePath->csr.Cpage().Clines() == 1 )
             {
                 goto HandleError;
             }
 
+            //  upgrade to write latch on leaf page
+            //
             pmergePath->csr.UpgradeFromRIWLatch();
 
+            //  delete all other flag-deleted nodes with no active version
+            //  may re-org page
+            //
             Call( ErrBTISPCDeleteNodes( pfucb, &pmergePath->csr ) );
             Assert( pmergePath->csr.Cpage().Clines() > 0 );
             break;
@@ -10880,6 +13450,7 @@ ERR ErrBTICanMergeWithSibling(FUCB * const pfucb, LINEINFO * const rglineinfo, c
 
     *pfMergeable = fFalse;
 
+    // latch sibling
     err = csrSibling.ErrGetReadPage( pfucb->ppib, pfucb->ifmp, pgnoSibling, BFLatchFlags( bflfNoTouch | bflfNoWait ) );
     if ( errBFLatchConflict == err )
     {
@@ -10888,6 +13459,7 @@ ERR ErrBTICanMergeWithSibling(FUCB * const pfucb, LINEINFO * const rglineinfo, c
     }
     Call( err );
 
+    // check if page is mergeable with right page
     *pfMergeable = FBTISPCCheckMergeable( pfucb, &csrSibling, rglineinfo );
     if ( !*pfMergeable )
     {
@@ -10896,6 +13468,15 @@ ERR ErrBTICanMergeWithSibling(FUCB * const pfucb, LINEINFO * const rglineinfo, c
     }
     else
     {
+        // we are going to try to merge the current page into the sibling.
+        // merge doesn't remove flag-deleted nodes from the destination page so
+        // make a best-effort attempt to remove them now.
+        // WARNING: the CSR won't be latched if the upgrade fails
+        // Note may re-org page
+        //
+        // to avoid deadlock we should not wait for the page latch
+        // (this only has to be done when latching the left page, but we will
+        // do it for either sibling to keep the code simple)
         csrSibling.ReleasePage();
         if ( JET_errSuccess == csrSibling.ErrGetRIWPage(
                 pfucb->ppib,
@@ -10967,6 +13548,8 @@ LOCAL ERR ErrBTICheckForMultipageOLC(
         }
     }
 
+    // when considering a left merge we only want to do so if this is not the last page in the tree
+    // undoing an append merge by doing a left merge could cause a lot of churn
     if ( pgnoNull != Pcsr( pfucb )->Cpage().PgnoPrev() && pgnoNull != Pcsr( pfucb )->Cpage().PgnoNext() )
     {
         if ( FBTICheckSibling( pfucb, pctFull, Pcsr( pfucb )->Cpage().PgnoPrev() ) )
@@ -10985,6 +13568,13 @@ HandleError:
     return err;
 }
 
+//  performs cleanup deleting bookmarked node from tree
+//  seeks for node using single page read latches
+//  if page is empty/mergeable
+//      return NeedsMultipageOLC
+//  else
+//      expunge all flag deleted nodes without active version from page
+//
 LOCAL ERR ErrBTISinglePageCleanup( FUCB *pfucb, const BOOKMARK& bm )
 {
     Assert( !Pcsr( pfucb )->FLatched() );
@@ -10993,6 +13583,8 @@ LOCAL ERR ErrBTISinglePageCleanup( FUCB *pfucb, const BOOKMARK& bm )
 
     if ( pfucb->u.pfcb->FDeletePending() )
     {
+        //  btree is scheduled for deletion - don't bother attempting cleanup
+        //
         return JET_errSuccess;
     }
 
@@ -11002,6 +13594,9 @@ LOCAL ERR ErrBTISinglePageCleanup( FUCB *pfucb, const BOOKMARK& bm )
     BOOL        fEmptyPage;
     INT         pctFull;
 
+    //  upgrade page to write latch
+    //  if upgrade fails, return NeedsMultipageOLC
+    //
     err = Pcsr( pfucb )->ErrUpgradeFromReadLatch( );
     if ( errBFLatchConflict == err )
     {
@@ -11012,9 +13607,15 @@ LOCAL ERR ErrBTISinglePageCleanup( FUCB *pfucb, const BOOKMARK& bm )
     }
     Call( err );
 
+    //  delete all flag-deleted nodes that have no active versions
+    //  this is done first to ensure that the page is scrubbed properly
+    //  may re-org the page
+    //
     Assert( latchWrite == Pcsr( pfucb )->Latch() );
     Call( ErrBTISPCDeleteNodes( pfucb, Pcsr( pfucb ) ) );
 
+    //  collect page info for nodes
+    //
     Call( ErrBTISPCCollectLeafPageInfo(
                 pfucb,
                 Pcsr( pfucb ),
@@ -11024,18 +13625,32 @@ LOCAL ERR ErrBTISinglePageCleanup( FUCB *pfucb, const BOOKMARK& bm )
                 NULL,
                 &pctFull ) );
 
+    //  if page is empty, needs MultipageOLC (note that
+    //  EmptyPage and EmptyTree merges won't create
+    //  dependencies, so no need to preclude these types
+    //  of merges if a backup is in progress)
+    //
     if ( fEmptyPage )
     {
         err = ErrERRCheck( wrnBTMultipageOLC );
         goto HandleError;
     }
 
+    //  ErrBTICheckForMultipageOLC may write-latch the sibling pages.
+    //  To avoid deadlocks we cannot have this page write-latched so
+    //  the latch is downgraded. That avoids the case where thread A
+    //  has the PgnoPrev read-latched and is trying to latch this page while
+    //  we have this page write-latched and are trying to write-latch
+    //  the previous page.
     Pcsr( pfucb )->Downgrade( latchRIW );
 
     BOOL fMultipageOLC;
     Call( ErrBTICheckForMultipageOLC( pfucb, pctFull, rglineinfo, &fMultipageOLC ) );
     if ( fMultipageOLC )
     {
+        //  if page is mergeable
+        //      needs MultipageOLC
+        //
         err = ErrERRCheck( wrnBTMultipageOLC );
         goto HandleError;
     }
@@ -11051,6 +13666,14 @@ HandleError:
 }
 
 
+//  creates mergePath of RIW latched pages from root of tree
+//  to seeked bookmark or found internal (as in non-leaf) page.
+//
+//  contiguous pages can be preread at the parent-of-leaf level
+//  while descending the tree if a pPrereadInfo pointer is passed in.
+//
+//  pgnoSearch is only supposed to be passed in for an internal page search
+//
 LOCAL ERR ErrBTICreateMergePath( FUCB                       *pfucb,
                                  const BOOKMARK&             bmSearch,
                                  const PGNO                  pgnoSearch,
@@ -11065,10 +13688,14 @@ LOCAL ERR ErrBTICreateMergePath( FUCB                       *pfucb,
     Assert( fLeafPage || ( pgnoSearch != pgnoNull ) );
     Assert( !Pcsr( pfucb )->FLatched() );
 
+    //  create mergePath structure
+    //
     CallR( ErrBTINewMergePath( ppmergePath ) );
     Assert( NULL != *ppmergePath );
     CSR* pcsr = &( (*ppmergePath)->csr );
 
+    //  RIW latch root
+    //
     Call( pcsr->ErrGetRIWPage( pfucb->ppib,
                                              pfucb->ifmp,
                                              PgnoRoot( pfucb ) ) );
@@ -11076,6 +13703,8 @@ LOCAL ERR ErrBTICreateMergePath( FUCB                       *pfucb,
     if ( pcsr->Cpage().FLeafPage() ||
         ( !fLeafPage && ( pgnoSearch == pcsr->Pgno() ) ) )
     {
+        //  tree is too shallow to bother doing merges on
+        //
         Error( ErrERRCheck( wrnBTShallowTree ) );
     }
 
@@ -11086,12 +13715,16 @@ LOCAL ERR ErrBTICreateMergePath( FUCB                       *pfucb,
 
     for ( ; ; )
     {
+        //  Position currency in the bookmark.
+        //
         if ( fLeafPage )
         {
             Call( ErrNDSeek( pfucb, pcsr, bmSearch ) );
         }
         else
         {
+            // If our hint is a null key, we must be going all the way to the right-most
+            // branch of the tree.
             if ( bmSearch.key.FNull() )
             {
                 KEYDATAFLAGS kdf;
@@ -11122,9 +13755,13 @@ LOCAL ERR ErrBTICreateMergePath( FUCB                       *pfucb,
         Assert( ( pcsr->ILine() >= 0 ) && ( pcsr->ILine() < pcsr->Cpage().Clines() ) );
         err = JET_errSuccess;
 
+        //  Save iLine for later use
+        //
         (*ppmergePath)->iLine = SHORT( pcsr->ILine() );
         Assert( (*ppmergePath)->iLine < pcsr->Cpage().Clines() );
 
+        //  Success case.
+        //
         if ( pcsr->Cpage().FLeafPage() ||
             ( !fLeafPage && ( pgnoSearch == pcsr->Pgno() ) ) )
         {
@@ -11133,6 +13770,8 @@ LOCAL ERR ErrBTICreateMergePath( FUCB                       *pfucb,
 
             const MERGEPATH * const pmergePathParent        = (*ppmergePath)->pmergePathParent;
 
+            //  if root page was also a leaf page or the internal page we're looking for, we would have
+            //  err'd out above with wrnBTShallowTree
             Assert( NULL != pmergePathParent );
             Assert( !( pcsr->Cpage().FRootPage() ) );
 
@@ -11143,6 +13782,8 @@ LOCAL ERR ErrBTICreateMergePath( FUCB                       *pfucb,
 
                 if ( fLeftEdgeOfBtree ^ fLeafPageIsFirstPage )
                 {
+                    //  if not repair, assert, otherwise, suppress the assert
+                    //  and repair will just naturally err out
                     AssertSz( g_fRepair, "Corrupt B-tree: first leaf page has mismatched parent" );
                     Call( ErrBTIReportBadPageLink(
                                 pfucb,
@@ -11155,6 +13796,8 @@ LOCAL ERR ErrBTICreateMergePath( FUCB                       *pfucb,
                 }
                 if ( fRightEdgeOfBtree ^ fLeafPageIsLastPage )
                 {
+                    //  if not repair, assert, otherwise, suppress the assert
+                    //  and repair will just naturally err out
                     AssertSz( g_fRepair, "Corrupt B-tree: last leaf page has mismatched parent" );
                     Call( ErrBTIReportBadPageLink(
                                 pfucb,
@@ -11170,6 +13813,8 @@ LOCAL ERR ErrBTICreateMergePath( FUCB                       *pfucb,
             break;
         }
 
+        //  Preread only if we've requested preread and we are not looking for a specific page and we've requested preread.
+        //
         if ( pPrereadInfo && pcsr->Cpage().FParentOfLeaf() && fLeafPage )
         {
             BTIPrereadContiguousPages( pfucb->ifmp, *pcsr, pPrereadInfo, bfprfDefault, pfucb->ppib->BfpriPriority( pfucb->ifmp ), TcCurr() );
@@ -11183,15 +13828,23 @@ LOCAL ERR ErrBTICreateMergePath( FUCB                       *pfucb,
         fLeftEdgeOfBtree = ( fLeftEdgeOfBtree
                             && 0 == (*ppmergePath)->iLine );
 
+        //  allocate another mergePath structure for next level
+        //
         Call( ErrBTINewMergePath( ppmergePath ) );
         pcsr = &( (*ppmergePath)->csr );
 
+        //  access child page
+        //
         Assert( sizeof( PGNO ) == pfucb->kdfCurr.data.Cb() );
         Call( pcsr->ErrGetRIWPage(
                                 pfucb->ppib,
                                 pfucb->ifmp,
                                 *(UnalignedLittleEndian< PGNO > *) pfucb->kdfCurr.data.Pv() ) );
 
+        //  Search match failure cases:
+        //    1- We want an internal page but we already got to the leaf level.
+        //    2- We want a leaf page and we got to the leaf level, but the page is not the one we're expecting.
+        //
         if ( ( pcsr->Cpage().FLeafPage() && !fLeafPage ) ||
                 ( pcsr->Cpage().FLeafPage() && fLeafPage && ( pgnoSearch != pgnoNull ) && ( pgnoSearch != pcsr->Pgno() ) ) )
         {
@@ -11218,10 +13871,28 @@ HandleError:
 }
 
 
+//  ================================================================
 LOCAL VOID BTIMergeCopyNextBookmark( FUCB       * const pfucb,
                                      MERGEPATH  * const pmergePathLeaf,
                                      BOOKMARK   * const pbmNext,
                                      const BOOL         fRightMerges )
+//  ================================================================
+//
+//  Copies next bookmark to seek for online defrag.
+//
+//  This function can run in two modes, left merge mode and right
+//  merge mode. This is necessary because while OLD processes a 
+//  b-tree from right to left doing right merges, b-tree defragmentation
+//  works from left to right doing left merges. The fRightMerges
+//  parameter controls the behaviour of this function:
+//
+//  if fRightMerges is TRUE
+//      - pbmNext is set to the bookmark of the first node on the page on the left
+//
+//  if fRightMerges is FALSE
+//      - pbmNext is set to the bookmark of the last node on the page on the right
+//
+//-
                                      
 {
     Assert( NULL != pmergePathLeaf );
@@ -11233,6 +13904,8 @@ LOCAL VOID BTIMergeCopyNextBookmark( FUCB       * const pfucb,
 
     CSR * const pcsr = fRightMerges ? &(pmergePathLeaf->pmerge->csrLeft) : &(pmergePathLeaf->pmerge->csrRight);
     
+    //  if no sibling, nullify bookmark
+    //
     if ( pcsr->Pgno() == pgnoNull )
     {
         pbmNext->key.suffix.SetCb( 0 );
@@ -11247,6 +13920,8 @@ LOCAL VOID BTIMergeCopyNextBookmark( FUCB       * const pfucb,
     Assert( pcsr->FLatched() );
     Assert( pcsr->Cpage().Clines() > 0 );
 
+    //  get bm of first node from page
+    //
     if( fRightMerges )
     {
         pcsr->SetILine( 0 );
@@ -11258,6 +13933,8 @@ LOCAL VOID BTIMergeCopyNextBookmark( FUCB       * const pfucb,
     NDGet( pfucb, pcsr );
     NDGetBookmarkFromKDF( pfucb, pfucb->kdfCurr, &bm );
 
+    //  copy bm into given buffer
+    //
     Assert( NULL != pbmNext->key.suffix.Pv() );
     Assert( 0 == pbmNext->key.prefix.Cb() );
     bm.key.CopyIntoBuffer( pbmNext->key.suffix.Pv(), bm.key.Cb() );
@@ -11270,6 +13947,7 @@ LOCAL VOID BTIMergeCopyNextBookmark( FUCB       * const pfucb,
 }
 
 
+//  ================================================================
 LOCAL ERR ErrBTISelectMerge(
     FUCB            * const pfucb,
     MERGEPATH       * const pmergePathLeaf,
@@ -11277,19 +13955,46 @@ LOCAL ERR ErrBTISelectMerge(
     BOOKMARK        * const pbmNext,
     RECCHECK        * const preccheck,
     const BOOL              fRightMerges )
+//  ================================================================
+//
+//  Select merge at leaf level and recursively at parent levels.
+//  pmergePathLeaf should be already created and RIW latched.
+//
+//  This function can run in two modes, left merge mode and right
+//  merge mode. This is necessary because while OLD processes a 
+//  b-tree from right to left doing right merges, b-tree defragmentation
+//  works from left to right doing left merges. The fRightMerges
+//  parameter controls the behaviour of this function:
+//
+//  if fRightMerges is TRUE
+//      - mergetypeFullRight, mergetypePartialRight are used
+//      - pbmNext is set to the bookmark of the page on the left
+//
+//  if fRightMerges is FALSE
+//      - mergetypeFullLeft, mergetypePartialLeft are used
+//      - pbmNext is set to the bookmark of the page on the right
+//
+//- 
 {
     ERR             err;
 
     Assert( pmergePathLeaf->csr.Cpage().FLeafPage() );
 
+    //  allocate merge structure and initialize
+    //
     Call( ErrBTINewMerge( pmergePathLeaf ) );
     Assert( NULL != pmergePathLeaf->pmerge );
 
     MERGE * const pmerge = pmergePathLeaf->pmerge;
     pmerge->mergetype = mergetypeNone;
 
+    //  check if page is mergeable, without latching sibling pages,
+    //  also collect info on all nodes in page
+    //
     Call( ErrBTIMergeCollectPageInfo( pfucb, pmergePathLeaf, preccheck, fRightMerges ) );
 
+    //  if we want the next bookmark, then we have to latch the sibling page to
+    //  obtain it, even if no merge will occur with the current page
     if ( mergetypeNone == pmerge->mergetype && NULL == pbmNext )
     {
         return err;
@@ -11299,8 +14004,14 @@ LOCAL ERR ErrBTISelectMerge(
         return err;
     }
 
+    //  page could be merged
+    //  acquire latches on sibling pages
+    //  this might cause latch of merged page to be released
+    //
     Call( ErrBTIMergeLatchSiblingPages( pfucb, pmergePathLeaf ) );
 
+    //  copy next bookmark to seek for online defrag
+    //
     if ( NULL != pbmNext )
     {
         BTIMergeCopyNextBookmark( pfucb, pmergePathLeaf, pbmNext, fRightMerges );
@@ -11309,15 +14020,21 @@ LOCAL ERR ErrBTISelectMerge(
     Assert( pmergePathLeaf->pmergePathParent != NULL || mergetypeNone == pmerge->mergetype );
 
     {
+        //  page may have changed when we released and reacquired latch
+        //  reseek to deleted node
+        //  recompute if merge is possible
+        //
         BTIReleaseMergeLineinfo( pmerge );
 
         Call( ErrNDSeek( pfucb, &pmergePathLeaf->csr, bm ) );
 
         pmergePathLeaf->iLine = SHORT( pmergePathLeaf->csr.ILine() );
 
+        //  we don't want to check the same node multiple times so we don't bother with the reccheck
         Call( ErrBTIMergeCollectPageInfo( pfucb, pmergePathLeaf, NULL, fRightMerges ) );
     }
 
+    // ErrBTIMergeCollectPageInfo only chooses these types of merges
     Assert( mergetypeNone == pmerge->mergetype
             || mergetypeEmptyPage == pmerge->mergetype
             || mergetypeEmptyTree == pmerge->mergetype
@@ -11341,16 +14058,23 @@ LOCAL ERR ErrBTISelectMerge(
                 Assert( mergetypeFullLeft == pmerge->mergetype );
             }
             
+            //  check if page can be merged to next page
+            //  without violating density constraint
+            //
             BTICheckMergeable( pfucb, pmergePathLeaf, fRightMerges );
             if ( mergetypeNone == pmerge->mergetype )
             {
                 return err;
             }
 
+            //  select merge at parent pages
+            //
             Call( ErrBTISelectMergeInternalPages( pfucb, pmergePathLeaf ) );
 
             if ( mergetypeEmptyPage != pmerge->mergetype )
             {
+                //  calculate uncommitted freed space in destination page
+                //
                 const CSR * const pcsrDest = fRightMerges ? &(pmerge->csrRight) : &(pmerge->csrLeft);
                 pmerge->cbUncFreeDest   = pcsrDest->Cpage().CbUncommittedFree() +
                                             pmerge->cbSizeMaxTotal -
@@ -11368,6 +14092,9 @@ HandleError:
 }
 
 
+//  allocate a new merge structure
+//      and link it to mergePath
+//
 ERR ErrBTINewMerge( MERGEPATH *pmergePath )
 {
     MERGE   *pmerge;
@@ -11375,11 +14102,15 @@ ERR ErrBTINewMerge( MERGEPATH *pmergePath )
     Assert( pmergePath != NULL );
     Assert( pmergePath->pmerge == NULL );
 
+    //  allocate split structure
+    //
     if ( !( pmerge = new MERGE ) )
     {
         return ErrERRCheck( JET_errOutOfMemory );
     }
 
+    //  link merge structure to pmergePath
+    //
     pmerge->pmergePath = pmergePath;
     pmergePath->pmerge = pmerge;
 
@@ -11397,6 +14128,8 @@ INLINE VOID BTIReleaseMergeLineinfo( MERGE *pmerge )
 }
 
 
+//  revert dbtime of every (write) latched page to the before dirty dbtime
+//
 VOID BTIMergeRevertDbtime( MERGEPATH *pmergePathTip )
 {
     MERGEPATH *pmergePath = pmergePathTip;
@@ -11407,6 +14140,8 @@ VOID BTIMergeRevertDbtime( MERGEPATH *pmergePathTip )
     {
         MERGE   *pmerge = pmergePath->pmerge;
 
+        //  set dbtime for left sibling
+        //
         if ( NULL != pmerge )
         {
             if ( pgnoNull != pmerge->csrLeft.Pgno() &&
@@ -11417,26 +14152,32 @@ VOID BTIMergeRevertDbtime( MERGEPATH *pmergePathTip )
 
                 Assert ( dbtimeInvalid != pmerge->dbtimeLeftBefore );
                 Assert ( pmerge->dbtimeLeftBefore < pmerge->csrLeft.Dbtime() );
-                if ( dbtimeInvalid != pmerge->dbtimeLeftBefore )
+                if ( dbtimeInvalid != pmerge->dbtimeLeftBefore )    // defense in depth
                 {
                     pmerge->csrLeft.RevertDbtime( pmerge->dbtimeLeftBefore, pmerge->fFlagsLeftBefore );
                 }
             }
         }
 
+        //  set dbtime for merge page
+        //
         if ( latchWrite == pmergePath->csr.Latch() &&
             dbtimeNil != pmergePath->dbtimeBefore )
         {
+            //  set the dbtime for this page
+            //
             Assert ( latchWrite == pmergePath->csr.Latch() );
 
             Assert ( dbtimeInvalid != pmergePath->dbtimeBefore );
             Assert ( pmergePath->dbtimeBefore < pmergePath->csr.Dbtime() );
-            if ( dbtimeInvalid != pmergePath->dbtimeBefore )
+            if ( dbtimeInvalid != pmergePath->dbtimeBefore )    // defense in depth
             {
                 pmergePath->csr.RevertDbtime( pmergePath->dbtimeBefore, pmergePath->fFlagsBefore );
             }
         }
 
+        //  set dbtime for right sibling
+        //
         if ( pmerge != NULL )
         {
             if ( pgnoNull != pmerge->csrRight.Pgno() &&
@@ -11447,7 +14188,7 @@ VOID BTIMergeRevertDbtime( MERGEPATH *pmergePathTip )
 
                 Assert ( dbtimeInvalid != pmerge->dbtimeRightBefore );
                 Assert ( pmerge->dbtimeRightBefore < pmerge->csrRight.Dbtime() );
-                if ( dbtimeInvalid != pmerge->dbtimeRightBefore )
+                if ( dbtimeInvalid != pmerge->dbtimeRightBefore )    // defense in depth
                 {
                     pmerge->csrRight.RevertDbtime( pmerge->dbtimeRightBefore, pmerge->fFlagsRightBefore );
                 }
@@ -11457,6 +14198,11 @@ VOID BTIMergeRevertDbtime( MERGEPATH *pmergePathTip )
 }
 
 
+//  positions cursor fractionally
+//  so that approximately ( pfrac->ulLT / pfrac->ulTotal ) * 100 %
+//  of all records are less than cursor position
+//  UNDONE: understand and rewrite so it does not use clinesMax
+//
 LOCAL INT IlineBTIFrac( FUCB *pfucb, DIB *pdib )
 {
     INT         iLine;
@@ -11467,6 +14213,9 @@ LOCAL INT IlineBTIFrac( FUCB *pfucb, DIB *pdib )
     Assert( pdib->pos == posFrac );
     Assert( pfrac->ulTotal >= pfrac->ulLT );
 
+    //  cast to __int64 to avoid overflow/underflow with
+    //  INT operation
+    //
     iLine = INT( ( __int64( pfrac->ulLT ) * clines ) / pfrac->ulTotal );
     Assert( iLine <= clines );
     if ( iLine >= clines )
@@ -11474,12 +14223,16 @@ LOCAL INT IlineBTIFrac( FUCB *pfucb, DIB *pdib )
         iLine = clines - 1;
     }
 
+    //  preseve fractional information by avoiding underflow
+    //
     if ( pfrac->ulTotal / clines == 0 )
     {
         pfrac->ulTotal *= clinesMax;
         pfrac->ulLT *= clinesMax;
     }
 
+    //  prepare fraction for next lower B-tree level
+    //
     Assert( pfrac->ulTotal > 0 );
     pfrac->ulLT = INT( ( __int64( pfrac->ulLT ) * clines - __int64( iLine ) * pfrac->ulTotal ) / clines );
     pfrac->ulTotal /= clines;
@@ -11489,6 +14242,12 @@ LOCAL INT IlineBTIFrac( FUCB *pfucb, DIB *pdib )
 }
 
 
+//  collects lineinfo for page
+//  if all nodes in page are flag-deleted without active version
+//      set fEmptyPage
+//  if there exists a flag deleted node with active version
+//      set fExistsFlagDeletedNodeWithActiveVersion
+//
 ERR ErrBTISPCCollectLeafPageInfo(
     FUCB        *pfucb,
     CSR         *pcsr,
@@ -11504,6 +14263,10 @@ ERR ErrBTISPCCollectLeafPageInfo(
 
     Assert( pcsr->Cpage().FLeafPage() );
 
+    //  UNDONE: allocate rglineinfo on demand [only if not empty page]
+    //
+    //  allocate rglineinfo
+    //
     Assert( NULL == *pplineinfo );
     *pplineinfo = new LINEINFO[clines];
 
@@ -11517,6 +14280,10 @@ ERR ErrBTISPCCollectLeafPageInfo(
     Assert( NULL != pfEmptyPage );
     *pfEmptyPage = fTrue;
 
+    //  collect total size of movable nodes in page
+    //      i.e, nodes that are not flag-deleted
+    //           or flag-deleted with active versions
+    //
     for ( INT iline = 0; iline < clines; iline++ )
     {
         pcsr->SetILine( iline );
@@ -11548,6 +14315,8 @@ ERR ErrBTISPCCollectLeafPageInfo(
 
             if ( FVERActive( pfucb, bm ) )
             {
+                //  version is still active
+                //
                 cbSizeMaxTotal += rglineinfo[iline].cbSizeMax;
                 rglineinfo[iline].fVerActive = fTrue;
                 *pfEmptyPage = fFalse;
@@ -11569,6 +14338,10 @@ ERR ErrBTISPCCollectLeafPageInfo(
 }
 
 
+//  collects merge info for page
+//  if page has flag-deleted node with an active version
+//      return pmerge->mergetype = mergetypeNone
+//
 LOCAL ERR ErrBTIMergeCollectPageInfo(
     FUCB * const pfucb,
     MERGEPATH * const pmergePath,
@@ -11608,17 +14381,32 @@ LOCAL ERR ErrBTIMergeCollectPageInfo(
 
     if ( NULL == pmergePath->pmergePathParent )
     {
+        //  no merge/empty page possible if single-page tree    
         pmerge->mergetype = mergetypeNone;
     }
     else if (   pmergePath->csr.Cpage().PgnoPrev() != pgnoNull &&
                 pmergePath->csr.Cpage().PgnoNext() == pgnoNull &&
                 pmergePath->pmergePathParent->csr.Cpage().Clines() == 1 )
     {
+        //  eliminate the case where right sibling does not exist
+        //  and left sibling does not have the same parent
+        //  since we can't fix page pointer to left sibling to be NULL-keyed
+        //      [left sibling page's parent is not latched]
+        //      
         pmerge->mergetype = mergetypeNone;
     }
     else if (   !fRightMerges
                 && 0 == pmergePath->pmergePathParent->csr.ILine() )
     {
+        //  When a left merge is done nodes are added to the end of the page
+        //  to the left of the merged page. That means the separator key has
+        //  to be updated. If the parent node of the merged page is the first
+        //  node in the parent-of-leaf page then it won't be possible to
+        //  update the separator key -- the page containing the pointer to 
+        //  the left page is on a different parent-of-leaf page.
+        //
+        //  To work around this left merges are not done when the parent pointer
+        //  is the first pointer on the page
         pmerge->mergetype = mergetypeNone;
     }
     else if ( fEmptyPage )
@@ -11630,6 +14418,8 @@ LOCAL ERR ErrBTIMergeCollectPageInfo(
     }
     else if ( fExistsFlagDeletedNodeWithActiveVersion )
     {
+        //  next cleanup with clean this page
+        //
         pmerge->mergetype = mergetypeNone;
     }
     else
@@ -11641,6 +14431,10 @@ LOCAL ERR ErrBTIMergeCollectPageInfo(
 }
 
 
+//  latches sibling pages
+//  release current page
+//  RIW latch left, current and right pages in order
+//
 ERR ErrBTIMergeLatchSiblingPages( FUCB *pfucb, MERGEPATH * const pmergePathLeaf )
 {
     ERR             err             = JET_errSuccess;
@@ -11676,6 +14470,10 @@ Start:
                                                     pmerge->csrLeft.Cpage().PgnoNext() :
                                                     pmerge->csrLeft.Cpage().ObjidFDP() );
 
+            //  left page has split after we released current page
+            //  release left page
+            //  relatch current page and retry
+            //
             pmerge->csrLeft.ReleasePage();
 
             Call( pcsr->ErrGetRIWPage( pfucb->ppib,
@@ -11685,6 +14483,10 @@ Start:
             Assert( pcsr->Dbtime() >= dbtimeCurr );
             if ( pcsr->Dbtime() == dbtimeCurr )
             {
+                //  dbtime didn't change, but pgnoNext of the left page doesn't
+                //  match pgnoPrev of the current page - must be bad page link, so
+                //  if not repair, assert, otherwise, suppress the assert and
+                //  repair will just naturally err out
                 AssertSz( g_fRepair, "Corrupt B-tree: bad leaf page links detected on Merge (left sibling)" );
                 Call( ErrBTIReportBadPageLink(
                             pfucb,
@@ -11698,7 +14500,7 @@ Start:
                                 "BtMergeBadLeftPageObjid" ) );
             }
             else if ( cLatchFailures < 10
-                && !pcsr->Cpage().FEmptyPage() )
+                && !pcsr->Cpage().FEmptyPage() )    //  someone else could have cleaned the page when we gave it up to latch the sibling
             {
                 cLatchFailures++;
                 goto Start;
@@ -11709,12 +14511,16 @@ Start:
             }
         }
 
+        //  relatch current page
+        //
         Call( pcsr->ErrGetRIWPage( pfucb->ppib,
                                    pfucb->ifmp,
                                    pgnoCurr ) );
     }
     else
     {
+        //  set pgnoLeft to pgnoNull
+        //
         pmerge->csrLeft.Reset();
     }
 
@@ -11738,6 +14544,8 @@ Start:
                                                     pmerge->csrRight.Cpage().PgnoPrev() :
                                                     pmerge->csrRight.Cpage().ObjidFDP() );
 
+            //  if not repair, assert, otherwise, suppress the assert and
+            //  repair will just naturally err out
             AssertSz( g_fRepair, "Corrupt B-tree: bad leaf page links detected on Merge (right sibling)" );
             Call( ErrBTIReportBadPageLink(
                     pfucb,
@@ -11763,6 +14571,7 @@ HandleError:
 }
 
 
+//  ================================================================
 LOCAL BOOL FBTICheckMergeableOneNode(
     const FUCB * const pfucb,
     CSR * const pcsrDest,
@@ -11770,6 +14579,25 @@ LOCAL BOOL FBTICheckMergeableOneNode(
     const INT iline,
     const ULONG cbDensityFree,
     const BOOL fRightMerges )
+//  ================================================================
+//
+//  Used by BTICheckMergeable to determine if the given iline will
+//  fit into the target page in addition to the other nodes already
+//  selected. Returns true if it will fit, false if it won't.
+//
+//  This function can run in two modes, left merge mode and right
+//  merge mode. This is necessary because while OLD processes a 
+//  b-tree from right to left doing right merges, b-tree defragmentation
+//  works from left to right doing left merges. The fRightMerges
+//  parameter controls the behaviour of this function:
+//
+//  if fRightMerges is TRUE
+//      - partialRightMerge is selected if not all nodes will fit
+//
+//  if fRightMerges is FALSE
+//      - partialLeftMerge is selected if not all nodes will fit
+//
+//-
 {
     if( fRightMerges )
     {
@@ -11784,9 +14612,13 @@ LOCAL BOOL FBTICheckMergeableOneNode(
 
     if ( FNDDeleted( plineinfo->kdf ) && !plineinfo->fVerActive )
     {
+        //  this node will not be moved
+        //
         return fTrue;
     }
 
+    //  calculate cbPrefix for node
+    //
     const INT   cbCommon = CbCommonKey( pfucb->kdfCurr.key,
                                         plineinfo->kdf.key );
     INT         cbSavings = pmerge->cbSavings;
@@ -11801,14 +14633,22 @@ LOCAL BOOL FBTICheckMergeableOneNode(
         plineinfo->cbPrefix = 0;
     }
 
+    //  moving nodes should not violate density constraint [assuming no rollbacks]
+    //  and moving nodes should still allow rollbacks to succeed
+    //
     Assert( pcsrDest->Pgno() != pgnoNull );
     const INT   cbSizeTotal     = pmerge->cbSizeTotal + plineinfo->cbSize;
     const INT   cbSizeMaxTotal  = pmerge->cbSizeMaxTotal + plineinfo->cbSizeMax;
     const INT   cbReq           = ( cbSizeMaxTotal - cbSavings ) + cbDensityFree;
 
+    //  UNDONE: this may be expensive if we do not want a partial merge
+    //          move this check to later [on all nodes in page]
+    //
     Assert( cbReq >= 0 );
     if ( !FNDFreePageSpace( pfucb, pcsrDest, cbReq ) )
     {
+        //  if no nodes are moved, there is no merge
+        //
         if ( fRightMerges && iline == pmerge->clines - 1 )
         {
             pmerge->mergetype = mergetypeNone;
@@ -11836,6 +14676,8 @@ LOCAL BOOL FBTICheckMergeableOneNode(
         return fFalse;
     }
 
+    //  update merge to include node
+    //
     pmerge->cbSavings       = cbSavings;
     pmerge->cbSizeTotal     = cbSizeTotal;
     pmerge->cbSizeMaxTotal  = cbSizeMaxTotal;
@@ -11843,10 +14685,35 @@ LOCAL BOOL FBTICheckMergeableOneNode(
     return fTrue;
 }
 
+//  ================================================================
 LOCAL VOID BTICheckMergeable(
     FUCB * const pfucb,
     MERGEPATH * const pmergePath,
     const BOOL fRightMerges )
+//  ================================================================
+//
+//  Calculates how many nodes in merged page fit in the right/left page
+//  without violating density constraint.
+//
+//  This function can run in two modes, left merge mode and right
+//  merge mode. This is necessary because while OLD processes a 
+//  b-tree from right to left doing right merges, b-tree defragmentation
+//  works from left to right doing left merges. The fRightMerges
+//  parameter controls the behaviour of this function:
+//
+//  if fRightMerges is TRUE
+//      - calculates how many nodes will fit onto the right page
+//      - processes nodes from the highest iline to the lowest
+//      - all nodes >= ilineMerge will fit into the right page
+//      - partialRightMerge is selected if not all nodes will fit
+//
+//  if fRightMerges is FALSE
+//      - calculates how many nodes will fit onto the left page
+//      - processes nodes from the lowest (0) iline to the highest
+//      - all nodes <= ilineMerge will fit into the left page
+//      - partialLeftMerge is selected if not all nodes will fit
+//
+//-
 
 {
     MERGE * const pmerge = pmergePath->pmerge;
@@ -11857,6 +14724,8 @@ LOCAL VOID BTICheckMergeable(
         Assert( mergetypeFullRight == pmerge->mergetype );
         if ( pmergePath->csr.Cpage().PgnoNext() == pgnoNull )
         {
+            //  no right sibling -- can't merge
+            //
             Assert( latchNone == pmerge->csrRight.Latch() );
             pmerge->mergetype = mergetypeNone;
             return;
@@ -11867,6 +14736,8 @@ LOCAL VOID BTICheckMergeable(
         Assert( mergetypeFullLeft == pmerge->mergetype );
         if ( pmergePath->csr.Cpage().PgnoPrev() == pgnoNull )
         {
+            //  no left sibling -- can't merge
+            //
             Assert( latchNone == pmerge->csrLeft.Latch() );
             pmerge->mergetype = mergetypeNone;
             return;
@@ -11876,6 +14747,8 @@ LOCAL VOID BTICheckMergeable(
     CSR * const pcsrDest = fRightMerges ? &(pmerge->csrRight) : &(pmerge->csrLeft);
     Assert( pcsrDest->FLatched() );
 
+    //  calculate total size, total max size and prefixes of nodes to move
+    //
     Assert( NULL != pmerge->rglineinfo );
     Assert( 0 == pmerge->cbSizeTotal );
     Assert( 0 == pmerge->cbSizeMaxTotal );
@@ -11943,10 +14816,18 @@ LOCAL VOID BTICheckMergeable(
 }
 
 
+//  ================================================================
 BOOL FBTIFreePageSpaceForMerge(
         const FUCB *pfucb,
         CSR * const pcsr,
         const ULONG cbReq )
+//  ================================================================
+//
+//  Determine if the given page has at lest cbReq bytes free for a merge.
+//  A merge will remove committed flag-deleted nodes on the page
+//  so we should ignore their space usage.
+//  
+//-
 {
     ULONG cbReqActual = cbReq;
 
@@ -11970,6 +14851,9 @@ BOOL FBTIFreePageSpaceForMerge(
     return FNDFreePageSpace( pfucb, pcsr, cbReqActual );
 }
     
+//  check if remaining nodes in merged page fit in the destination page
+//      without violating density constraint
+//
 BOOL FBTISPCCheckMergeable( FUCB *pfucb, CSR *pcsrDest, LINEINFO *rglineinfo )
 {
     const INT   clines = Pcsr( pfucb )->Cpage().Clines();
@@ -11979,6 +14863,8 @@ BOOL FBTISPCCheckMergeable( FUCB *pfucb, CSR *pcsrDest, LINEINFO *rglineinfo )
     Assert( pcsrDest->Cpage().FLeafPage() );
     Assert( Pcsr( pfucb )->Cpage().FLeafPage() );
 
+    //  calculate total size, total max size and prefixes of nodes to move
+    //
     INT     cbSizeTotal = 0;
     INT     cbSizeMaxTotal = 0;
     INT     cbSavings = 0;
@@ -11992,9 +14878,13 @@ BOOL FBTISPCCheckMergeable( FUCB *pfucb, CSR *pcsrDest, LINEINFO *rglineinfo )
 
         if ( FNDDeleted( plineinfo->kdf ) && !plineinfo->fVerActive )
         {
+            //  this node will not be moved
+            //
             continue;
         }
 
+        //  calculate cbPrefix for node
+        //
         INT     cbCommon = CbCommonKey( pfucb->kdfCurr.key,
                                         plineinfo->kdf.key );
         if ( cbCommon > cbPrefixOverhead )
@@ -12007,10 +14897,15 @@ BOOL FBTISPCCheckMergeable( FUCB *pfucb, CSR *pcsrDest, LINEINFO *rglineinfo )
             plineinfo->cbPrefix = 0;
         }
 
+        //  add cbSize and cbSizeMax
+        //
         cbSizeTotal     += plineinfo->cbSize;
         cbSizeMaxTotal  += plineinfo->cbSizeMax;
     }
 
+    //  moving nodes should not violate density constraint [assuming no rollbacks]
+    //  and moving nodes should still allow rollbacks to succeed
+    //
     Assert( pcsrDest->Pgno() != pgnoNull );
     const INT       cbReq       = ( cbSizeMaxTotal - cbSavings )
                                     + ( Pcsr( pfucb )->Cpage().FLeafPage() ? CbBTIFreeDensity( pfucb ) : 0 );
@@ -12019,6 +14914,8 @@ BOOL FBTISPCCheckMergeable( FUCB *pfucb, CSR *pcsrDest, LINEINFO *rglineinfo )
     return fMergeable;
 }
 
+//  check if last node in internal page is null-keyed
+//
 INLINE BOOL FBTINullKeyedLastNode( FUCB *pfucb, MERGEPATH *pmergePath )
 {
     CSR     *pcsr = &pmergePath->csr;
@@ -12029,12 +14926,16 @@ INLINE BOOL FBTINullKeyedLastNode( FUCB *pfucb, MERGEPATH *pmergePath )
     NDGet( pfucb, pcsr );
     Assert( sizeof( PGNO ) == pfucb->kdfCurr.data.Cb() );
 
+    //  cannot be null if not last node
     Assert( pcsr->Cpage().Clines() - 1 == pmergePath->iLine
         || !pfucb->kdfCurr.key.FNull() );
 
     return pfucb->kdfCurr.key.FNull();
 }
 
+//  checks if internal pages are emptied because of page merge/deletion
+//  also checks if internal page must and can adjust page-pointer key
+//
 LOCAL ERR ErrBTISelectMergeInternalPages( FUCB * const pfucb, MERGEPATH * const pmergePathLeaf )
 {
     ERR         err;
@@ -12044,6 +14945,8 @@ LOCAL ERR ErrBTISelectMergeInternalPages( FUCB * const pfucb, MERGEPATH * const 
     const BOOL  fRightSibling       = pgnoNull != pmergeLeaf->csrRight.Pgno();
     BOOL        fKeyChange          = fFalse;
 
+    //  check input
+    //
     Assert( mergetypeNone != pmergeLeaf->mergetype );
     Assert( pmergePath != NULL );
     Assert( pmergePath->pmergePathChild );
@@ -12056,6 +14959,8 @@ LOCAL ERR ErrBTISelectMergeInternalPages( FUCB * const pfucb, MERGEPATH * const 
             !fLeftSibling ||
             pmergePath->csr.ILine() > 0 );
 
+    //  set flag to empty leaf page
+    //
     Assert( !pmergePathLeaf->fEmptyPage );
     if ( mergetypePartialRight != pmergeLeaf->mergetype && mergetypePartialLeft != pmergeLeaf->mergetype )
     {
@@ -12083,6 +14988,8 @@ LOCAL ERR ErrBTISelectMergeInternalPages( FUCB * const pfucb, MERGEPATH * const 
                 const KEYDATAFLAGS * const pkdfMerge    = &pmergeLeaf->rglineinfo[ilineMerge].kdf;
                 const KEYDATAFLAGS * const pkdfPrev     = &pmergeLeaf->rglineinfo[ilineMerge - 1].kdf;
 
+                //  allocate key separator
+                //
                 Assert( ilineMerge > 0 );
                 Assert( !pmergeLeaf->fAllocParentSep );
                 CallR( ErrBTIComputeSeparatorKey( pfucb,
@@ -12094,6 +15001,10 @@ LOCAL ERR ErrBTISelectMergeInternalPages( FUCB * const pfucb, MERGEPATH * const 
                 pmergeLeaf->fAllocParentSep = fTrue;
             }
             
+            //  if parent of leaf
+            //    or last node in child is changing key
+            //      change key at level
+            //  else break
             if ( fParentOfLeaf || pmergePathChild->iLine == pmergePathChild->csr.Cpage().Clines() - 1  )
             {
                 Assert( pmergeLeaf->fAllocParentSep );
@@ -12115,15 +15026,20 @@ LOCAL ERR ErrBTISelectMergeInternalPages( FUCB * const pfucb, MERGEPATH * const 
             const MERGEPATH * const pmergePathChild = pmergePath->pmergePathChild;
             Assert( NULL != pmergePathChild );
 
+            // this loop works from the bottom up so the parent-of-leaf level should
+            // have caused the loop to exit at the 'break' below
             const BOOL fParentOfLeaf = ( NULL == pmergePathChild->pmergePathChild );
             Assert( fParentOfLeaf );
             
+            // all nodes up to and including ilineMerge will move to the left page
+            // nodes from ilineMerge+1 to the end will stay             
             const INT ilineMerge  = pmergeLeaf->ilineMerge;
             Assert( ilineMerge < ( pmergeLeaf->clines - 1 ) );
             
             const KEYDATAFLAGS * const pkdfMerge    = &pmergeLeaf->rglineinfo[ilineMerge].kdf;
             const KEYDATAFLAGS * const pkdfNext     = &pmergeLeaf->rglineinfo[ilineMerge + 1].kdf;
 
+            //  allocate key separator
             Assert( ilineMerge >= 0 );
             Assert( !pmergeLeaf->fAllocParentSep );
             CallR( ErrBTIComputeSeparatorKey( pfucb,
@@ -12133,6 +15049,22 @@ LOCAL ERR ErrBTISelectMergeInternalPages( FUCB * const pfucb, MERGEPATH * const 
             pmergeLeaf->kdfParentSep.data.SetCb( sizeof( PGNO ) );
             pmergeLeaf->fAllocParentSep = fTrue;
 
+            // Nodes are moving from the start of the merged page to the end
+            // of the left page. That means the separator key for the merged
+            // page doesn't change (if the node with the highest key moved
+            // it would be a full left merge, not a partial left merge). 
+            // On the other hand, the highest key on the left page is changing
+            // so the separator key for the pointer to the left page has
+            // to be updated.
+            //
+            // ErrBTIMergeCollectPageInfo doesn't allow a left merge to happen
+            // if the parent pointer is the first in the page so the pointer to
+            // the left page will be on the same parent-of-leaf page as the
+            // pointer to the merged page.
+            //
+            // When the merge is performed the correct node will be updated by
+            // BTIPerformOneMerge.
+            //
 
             Assert( pmergePath->iLine > 0 );
             if ( FBTIOverflowOnReplacingKey( pfucb, &pmergePath->csr, pmergePath->iLine-1, pmergeLeaf->kdfParentSep ) )
@@ -12142,6 +15074,10 @@ LOCAL ERR ErrBTISelectMergeInternalPages( FUCB * const pfucb, MERGEPATH * const 
 
             pmergePath->fKeyChange = fTrue;
 
+            // A partial left merge is only done if both parent-of-leaf nodes are in the same
+            // page. The node before the pointer to the merged page will have its key changed.
+            // As that node is guaranteed not to be the last key on the page the key change
+            // will not propagate up the tree.
             break;
         }
 
@@ -12150,30 +15086,61 @@ LOCAL ERR ErrBTISelectMergeInternalPages( FUCB * const pfucb, MERGEPATH * const 
             const MERGEPATH * const pmergePathChild = pmergePath->pmergePathChild;
             Assert( NULL != pmergePathChild );
 
+            // this loop works from the bottom up so the parent-of-leaf level should
+            // have caused the loop to exit at the 'break' below
             const BOOL fParentOfLeaf = ( NULL == pmergePathChild->pmergePathChild );
             Assert( fParentOfLeaf );
             
+            // Updating the parent-of-leaf level when a full left merge is done requires
+            // two operations.
+            //  - the node that points to the merged page has to be deleted
+            //  - the previous node has to have its separator key changed
+            //
+            // All the nodes moved off the merged page are moved onto the end of the
+            // left page so the separator key of the left page will be the separator
+            // key of the page which is being deleted.
+            //          
+            // ErrBTIMergeCollectPageInfo doesn't allow a left merge to happen
+            // if the parent pointer is the first in the page so the pointer to
+            // the left page will be on the same parent-of-leaf page as the
+            // pointer to the merged page.
+            //
+            // Set fKeyChange and fDeleteNode. BTIPerformOneMerge recognizes this case
+            // and handles it correctly.
 
             Assert( pmergePath->iLine > 0 );
 
             pmergePath->fKeyChange = fTrue;
             pmergePath->fDeleteNode = fTrue;
 
+            // A full left merge is only done if both parent-of-leaf nodes are in the same
+            // page. After the merge there will still be a node with the same separator key
+            // as the deleted node so these changes won't propagate up the tree.
             break;
         }
 
         if ( pmergePath->csr.Cpage().Clines() == 1 )
         {
+            //  only node in page
+            //  whole page will be deleted
+            //
             Assert( pmergePath->csr.ILine() == 0 );
 
             if ( pmergePath->csr.Cpage().FRootPage() )
             {
-                Assert( fFalse );
+                //  UNDONE: fix this by deleting page pointer in root,
+                //          releasing all pages except root and
+                //          setting root to be a leaf page
+                //
+                //  we can't free root page -- so punt empty page operation
+                //
+                Assert( fFalse );   //  should now be handled by mergetypeEmptyTree/
                 Assert( mergetypeEmptyPage == pmergeLeaf->mergetype );
 
                 goto Overflow;
             }
 
+            //  can only delete this page if child page is deleted as well
             if ( pmergePath->pmergePathChild->fEmptyPage )
             {
                 Assert( pmergePath->pmergePathChild->csr.Cpage().FLeafPage()
@@ -12183,6 +15150,10 @@ LOCAL ERR ErrBTISelectMergeInternalPages( FUCB * const pfucb, MERGEPATH * const 
             }
             else
             {
+                //  this code path is a very specialised case -- there is only one page pointer
+                //  in this page, and in a non-leaf child page, the page pointer with
+                //  the largest key was deleted (and the key was non-null), necessitating a key
+                //  change in the key of the sole page pointer in this page
 #ifdef DEBUG
                 Assert( fKeyChange );
                 MERGEPATH *pMergePathChild = pmergePath->pmergePathChild;
@@ -12217,10 +15188,15 @@ LOCAL ERR ErrBTISelectMergeInternalPages( FUCB * const pfucb, MERGEPATH * const 
         Assert( pmergePath->csr.ILine() == pmergePath->iLine );
         if ( pmergePath->csr.Cpage().Clines() - 1 == pmergePath->iLine )
         {
+            //  delete largest parent pointer node in page
+            //      replace current last node in page with new separator key
+            //
             Assert( fLeftSibling );
 
             if ( !fKeyChange )
             {
+                //  allocate and compute separator key from leaf level
+                //
                 Assert( !pmergePathLeaf->pmerge->fAllocParentSep );
 
                 fKeyChange = fTrue;
@@ -12234,6 +15210,8 @@ LOCAL ERR ErrBTISelectMergeInternalPages( FUCB * const pfucb, MERGEPATH * const 
                 Assert( pmergePath->csr.Cpage().Clines() > 1 );
                 if ( FBTINullKeyedLastNode( pfucb, pmergePath ) )
                 {
+                    //  parent pointer is also null-keyed
+                    //
                     Assert( NULL == pmergePath->pmergePathParent ||
                             pmergePath->pmergePathParent->csr.Cpage().Clines() - 1 ==
                                 pmergePath->pmergePathParent->iLine &&
@@ -12262,6 +15240,9 @@ LOCAL ERR ErrBTISelectMergeInternalPages( FUCB * const pfucb, MERGEPATH * const 
                pmergePath->pmergePathChild->iLine ==
                pmergePath->pmergePathChild->csr.Cpage().Clines() - 1 ) )
         {
+            //  change key of page pointer in this page
+            //  since largest key in child page has changed
+            //
             Assert( !pmergePath->pmergePathChild->csr.Cpage().FLeafPage() );
             Assert( pmergePath->pmergePathChild->iLine ==
                     pmergePath->pmergePathChild->csr.Cpage().Clines() - 1 );
@@ -12278,6 +15259,8 @@ LOCAL ERR ErrBTISelectMergeInternalPages( FUCB * const pfucb, MERGEPATH * const 
         }
         else if ( pmergePath->pmergePathChild->fEmptyPage )
         {
+            //  parent of merged or emptied page
+            //
             Assert( pmergePath->iLine != pmergePath->csr.Cpage().Clines() - 1 );
             Assert( pmergePath->csr.Cpage().Clines() > 1 );
 
@@ -12296,6 +15279,9 @@ Overflow:
 
 
 
+//  does replacing the key in node pmergePath->iLine of page
+//  cause a page overflow?
+//
 LOCAL BOOL FBTIOverflowOnReplacingKey(  FUCB                    *pfucb,
                                         MERGEPATH               *pmergePath,
                                         const KEYDATAFLAGS&     kdfSep )
@@ -12303,6 +15289,9 @@ LOCAL BOOL FBTIOverflowOnReplacingKey(  FUCB                    *pfucb,
     return FBTIOverflowOnReplacingKey( pfucb, &pmergePath->csr, pmergePath->iLine, kdfSep );
 }
 
+//  does replacing the key in node iline of the csr
+//  cause a page overflow?
+//
 LOCAL BOOL FBTIOverflowOnReplacingKey(  FUCB                    *pfucb,
                                         CSR * const             pcsr,
                                         const INT               iLine,
@@ -12311,14 +15300,20 @@ LOCAL BOOL FBTIOverflowOnReplacingKey(  FUCB                    *pfucb,
     Assert( !kdfSep.key.FNull() );
     Assert( !pcsr->Cpage().FLeafPage() );
 
+    //  calculate required space for separator with current prefix
+    //
     ULONG   cbReq = CbBTICbReq( pfucb, pcsr, kdfSep );
 
+    //  get last node in page
+    //
     pcsr->SetILine( iLine );
     NDGet( pfucb, pcsr );
     Assert( !FNDVersion( pfucb->kdfCurr ) );
 
     ULONG   cbSizeCurr = CbNDNodeSizeCompressed( pfucb->kdfCurr );
 
+    //  check if new separator key would cause overflow
+    //
     if ( cbReq > cbSizeCurr )
     {
         const BOOL  fOverflow = FBTISplit( pfucb, pcsr, cbReq - cbSizeCurr );
@@ -12330,6 +15325,12 @@ LOCAL BOOL FBTIOverflowOnReplacingKey(  FUCB                    *pfucb,
 }
 
 
+//  UNDONE: we can do without the allocation and copy by
+//          copying kdfCurr into kdfParentSep
+//          and ordering merge/empty page operations top-down
+//
+//  copies new page separator key from last - 1 node in current page
+//
 ERR ErrBTIMergeCopySeparatorKey( MERGEPATH  *pmergePath,
                                  MERGE      *pmergeLeaf,
                                  FUCB       *pfucb )
@@ -12354,6 +15355,8 @@ ERR ErrBTIMergeCopySeparatorKey( MERGEPATH  *pmergePath,
         return ErrERRCheck( JET_errOutOfMemory );
     }
 
+    //  copy separator key into alocated memory
+    //
     pfucb->kdfCurr.key.CopyIntoBuffer( pmergeLeaf->kdfParentSep.key.suffix.Pv() );
     pmergeLeaf->kdfParentSep.key.suffix.SetCb( pfucb->kdfCurr.key.Cb() );
 
@@ -12361,17 +15364,23 @@ ERR ErrBTIMergeCopySeparatorKey( MERGEPATH  *pmergePath,
     Assert( !pmergeLeaf->kdfParentSep.key.FNull() );
     pmergeLeaf->fAllocParentSep = fTrue;
 
+    //  page pointer should have pgno as data
+    //
     pmergeLeaf->kdfParentSep.data.SetCb( sizeof( PGNO ) );
     return JET_errSuccess;
 }
 
 
+//  from leaf to root
+//
 VOID BTIReleaseMergePaths( MERGEPATH *pmergePathTip )
 {
     MERGEPATH *pmergePath = pmergePathTip;
 
     for ( ; pmergePath != NULL; )
     {
+        //  save parent
+        //
         MERGEPATH *pmergePathParent = pmergePath->pmergePathParent;
 
         delete pmergePath;
@@ -12379,6 +15388,8 @@ VOID BTIReleaseMergePaths( MERGEPATH *pmergePathTip )
     }
 }
 
+//  performs merge by going through pages top-down
+//
 ERR ErrBTIMergeOrEmptyPage( FUCB *pfucb, MERGEPATH *pmergePathLeaf )
 {
     ERR         err = JET_errSuccess;
@@ -12388,10 +15399,17 @@ ERR ErrBTIMergeOrEmptyPage( FUCB *pfucb, MERGEPATH *pmergePathLeaf )
     Assert( NULL != pmerge );
     Assert( mergetypeNone != pmerge->mergetype );
 
+    //  upgrade latches
+    //
     CallR( ErrBTIMergeUpgradeLatches( pfucb->ifmp, pmergePathLeaf ) );
 
+    //  log merge operation as a multi-page operation
+    //  there can be no failures after this
+    //      till space release operations
+    //
     err = ErrLGMerge( pfucb, pmergePathLeaf, &lgpos );
 
+    // on error, return to before dirty dbtime on all pages
     if ( JET_errSuccess > err )
     {
         BTIMergeRevertDbtime( pmergePathLeaf );
@@ -12402,21 +15420,37 @@ ERR ErrBTIMergeOrEmptyPage( FUCB *pfucb, MERGEPATH *pmergePathLeaf )
 
     BTIPerformMerge( pfucb, pmergePathLeaf );
 
+    //  check if the merge performed is correct
+    //
     BTICheckMerge( pfucb, pmergePathLeaf );
 
+    //  shrink / optimize page image
+    //
     BTIMergeShrinkPages( pmergePathLeaf );
 
+    //  release all latches
+    //  so space can latch root successfully
+    //
     BTIMergeReleaseLatches( pmergePathLeaf );
 
+    //  release empty pages -- ignores errors
+    //
     BTIReleaseEmptyPages( pfucb, pmergePathLeaf );
 
     return err;
 }
 
 
+//  ================================================================
 LOCAL VOID BTICheckPagePointer(
     __in const CSR& csr,
     __in const PGNO pgno )
+//  ================================================================
+//
+// given an internal page make sure the node pointed to by the current
+// iline has the given pgno
+//
+//-
 {
     Assert( csr.FLatched() );
     Assert( csr.Cpage().FInvisibleSons() );
@@ -12429,9 +15463,16 @@ LOCAL VOID BTICheckPagePointer(
     Assert( pgno == pgnoCurr );
 }
 
+//  ================================================================
 LOCAL VOID BTIUpdatePagePointer(
     __in CSR * const pcsr,
     __in const PGNO pgnoNew )
+//  ================================================================
+//
+// given an internal page change the node pointed to by the current
+// iline to have the given pgno
+//
+//-
 {
     Assert( pcsr );
     Assert( pcsr->FLatched() );
@@ -12445,10 +15486,18 @@ LOCAL VOID BTIUpdatePagePointer(
     BTICheckPagePointer( *pcsr, pgnoNew );
 }
 
+//  ================================================================
 LOCAL VOID BTIMovePageCopyNextBookmark(
             __in        const FUCB * const pfucb,
             __in        const MERGEPATH * const pmergePath,
             __inout     BOOKMARK * const pbmNext )
+//  ================================================================
+//
+// copies the bookmark from the right-hand page for a move
+// the key.suffix.Pv() of the bookmark that is passed in must point to a buffer
+// big enough to hold the largest bookmark possible
+//
+//-
 {
     Assert( pfucb );
     Assert( pmergePath );
@@ -12475,6 +15524,7 @@ LOCAL VOID BTIMovePageCopyNextBookmark(
         NDIGetKeydataflags( pmergePath->pmerge->csrRight.Cpage(), iline, &kdf );
         NDGetBookmarkFromKDF( pfucb, kdf, &bm );
 
+        //  copy bm into given buffer
         bm.key.CopyIntoBuffer( pbmNext->key.suffix.Pv(), bm.key.Cb() );
         pbmNext->key.suffix.SetCb( bm.key.Cb() );
 
@@ -12487,9 +15537,11 @@ LOCAL VOID BTIMovePageCopyNextBookmark(
     }
 }
 
+//  ================================================================
 LOCAL VOID BTIMergeSetPcsrRoot(
     __in FUCB * const pfucb,
     __in MERGEPATH * const pmergePathTip )
+//  ================================================================
 {
     Assert( pfucb );
     Assert( pcsrNil == pfucb->pcsrRoot );
@@ -12506,11 +15558,13 @@ LOCAL VOID BTIMergeSetPcsrRoot(
     Assert( pcsrNil != pfucb->pcsrRoot );
 }
 
+//  ================================================================
 LOCAL ERR ErrBTIPageMoveAllocatePage(
     __in        FUCB * const        pfucb,
     __in        MERGEPATH * const   pmergePath,
     __in        ULONG               fSPAllocFlags,
     __in        const DIRFLAG       dirflag )
+//  ================================================================
 {
     Assert( pfucb );
     Assert( NULL == pfucb->pcsrRoot );
@@ -12528,6 +15582,10 @@ LOCAL ERR ErrBTIPageMoveAllocatePage(
 
     BTIMergeSetPcsrRoot( pfucb, pmergePath );
 
+    // if there is no left page and we are at the leaf level,
+    // then pgnoNew will be pgnoNull and a new extent will be allocated
+    // if we are moving a space page, we'll get it from the space tree's split buffer, so
+    // we don't need that special flag
     if( pmergePath->csr.Cpage().FLeafPage() &&
         ( pgnoNull == pmergePath->pmerge->csrLeft.Pgno() ) &&
         !FFUCBSpace( pfucb ) )
@@ -12551,6 +15609,8 @@ LOCAL ERR ErrBTIPageMoveAllocatePage(
     Assert( pmergePath->pmerge->pgnoNew == pmergePath->pmerge->csrNew.Pgno() );
     Assert( pmergePath->pmerge->csrNew.FLatched() );
 
+    //  count pages allocated by an update
+    //
     Ptls()->threadstats.cPageUpdateAllocated++;
 
 HandleError:
@@ -12558,6 +15618,7 @@ HandleError:
     return err;
 }
 
+//  ================================================================
 LOCAL VOID BTICheckPageMove(
     const CSR& csrParent,
     const CSR& csrSrc,
@@ -12565,10 +15626,13 @@ LOCAL VOID BTICheckPageMove(
     const CSR& csrLeft,
     const CSR& csrRight,
     const BOOL fBeforeMove )
+//  ================================================================
 {
     const BOOL fLeafPage    = csrSrc.Cpage().FLeafPage();
     const OBJID objidFDP    = csrSrc.Cpage().ObjidFDP();
 
+    // source and destination pages must be consistent themselves and consistent
+    // with each other
     Assert( !csrSrc.Cpage().FPreInitPage() );
     Assert( csrSrc.Cpage().FFlags() != 0 );
     Assert( csrSrc.Cpage().ObjidFDP() != objidNil ) ;
@@ -12594,10 +15658,12 @@ LOCAL VOID BTICheckPageMove(
 
     const CSR* const pcsrCurrent = fBeforeMove ? &csrSrc : &csrDest;
 
+    // the parent should point to the destination page
     Assert( !fLeafPage || csrParent.Cpage().FParentOfLeaf() );
     Assert( objidFDP == csrParent.Cpage().ObjidFDP() );
     BTICheckPagePointer( csrParent, pcsrCurrent->Pgno() );
 
+    // left page
     if( pgnoNull != csrLeft.Pgno() )
     {
         Assert( fLeafPage );
@@ -12611,6 +15677,7 @@ LOCAL VOID BTICheckPageMove(
         Assert( pgnoNull == pcsrCurrent->Cpage().PgnoPrev() );
     }
 
+    // right page
     if( pgnoNull != csrRight.Pgno() )
     {
         Assert( fLeafPage );
@@ -12625,7 +15692,21 @@ LOCAL VOID BTICheckPageMove(
     }
 }
 
+//  ================================================================
 VOID BTPerformPageMove( __in MERGEPATH * const pmergePath )
+//  ================================================================
+//
+// the operation is logged and the pages are dirtied. all that remains is to do the move
+// there are 4 things that have to happen:
+//  - copy data from the source page to the destination
+//  - update the page pointer in the parent page
+//  - update the pgnoNext member of the left page
+//  - update the pgnoPrev member of the right page
+//
+// this function is used at recovery time to redo page moves. in that case only the
+// pages which need to be redone will be write latched
+//
+//-
 {
     Assert( pmergePath );
     Assert( NULL != pmergePath->pmerge );
@@ -12635,34 +15716,39 @@ VOID BTPerformPageMove( __in MERGEPATH * const pmergePath )
     const PGNO pgnoOld = pmergePath->csr.Pgno();
     const PGNO pgnoNew = pmergePath->pmerge->csrNew.Pgno();
 
+    // copy the data
     if( FBTIUpdatablePage( pmergePath->pmerge->csrNew ) )
     {
         Assert( pmergePath->csr.Cpage().CbPage() == pmergePath->pmerge->csrNew.Cpage().CbPage() );
         UtilMemCpy(
-            pmergePath->pmerge->csrNew.Cpage().PvBuffer(),
-            pmergePath->csr.Cpage().PvBuffer(),
-            pmergePath->csr.Cpage().CbPage() );
+            pmergePath->pmerge->csrNew.Cpage().PvBuffer(),  // destination
+            pmergePath->csr.Cpage().PvBuffer(),             // source
+            pmergePath->csr.Cpage().CbPage() );             // length
         pmergePath->pmerge->csrNew.Cpage().SetPgno( pgnoNew );
         pmergePath->pmerge->csrNew.FinalizePreInitPage();
     }
 
+    // set the source page as empty
     if( FBTIUpdatablePage( pmergePath->csr ) )
     {
         NDEmptyPage( &(pmergePath->csr) );
     }
 
+    // page pointer in parent page
     if( FBTIUpdatablePage( pmergePath->pmergePathParent->csr ) )
     {
         BTICheckPagePointer( pmergePath->pmergePathParent->csr, pgnoOld );
         BTIUpdatePagePointer( &(pmergePath->pmergePathParent->csr), pgnoNew );
     }
 
+    // left page
     if( pgnoNull != pmergePath->pmerge->csrLeft.Pgno() && FBTIUpdatablePage( pmergePath->pmerge->csrLeft ) )
     {
         Assert( pmergePath->pmerge->csrLeft.Cpage().PgnoNext() == pgnoOld );
         pmergePath->pmerge->csrLeft.Cpage().SetPgnoNext( pgnoNew );
     }
 
+    // right page
     if( pgnoNull != pmergePath->pmerge->csrRight.Pgno() && FBTIUpdatablePage( pmergePath->pmerge->csrRight ) )
     {
         Assert( pmergePath->pmerge->csrRight.Cpage().PgnoPrev() == pgnoOld );
@@ -12670,11 +15756,22 @@ VOID BTPerformPageMove( __in MERGEPATH * const pmergePath )
     }
 }
 
+//  ================================================================
 LOCAL ERR ErrBTIPageMove(
     __in FUCB * const       pfucb,
     __in MERGEPATH * const  pmergePath,
     __in const DIRFLAG      dirflag,
     __in const ULONG        fSPAllocFlags )
+//  ================================================================
+//
+// This function takes a mergePath and performs the merge.
+//  - Latch the sibling pages
+//  - Allocate the new page
+//  - Upgrade the latches
+//  - Log the move
+//  - Perform the move
+//
+//-
 {
     Assert( pfucb );
     Assert( pmergePath );
@@ -12706,25 +15803,28 @@ LOCAL ERR ErrBTIPageMove(
         BTIMergeSetLgpos( pmergePath, lgpos );
     }
 
+    // make sure the pages are correct before the move
     BTICheckPageMove(
-        pmergePath->pmergePathParent->csr,
-        pmergePath->csr,
-        pmergePath->pmerge->csrNew,
-        pmergePath->pmerge->csrLeft,
-        pmergePath->pmerge->csrRight,
-        fTrue );
+        pmergePath->pmergePathParent->csr,  // parent
+        pmergePath->csr,                    // old page
+        pmergePath->pmerge->csrNew,         // new page
+        pmergePath->pmerge->csrLeft,        // left page
+        pmergePath->pmerge->csrRight,       // right page
+        fTrue );                            // fBeforeMove
 
     BTPerformPageMove( pmergePath );
 
+    // make sure the pages are correct after the move
     BTICheckPageMove(
-        pmergePath->pmergePathParent->csr,
-        pmergePath->csr,
-        pmergePath->pmerge->csrNew,
-        pmergePath->pmerge->csrLeft,
-        pmergePath->pmerge->csrRight,
-        fFalse );
+        pmergePath->pmergePathParent->csr,  // parent
+        pmergePath->csr,                    // old page
+        pmergePath->pmerge->csrNew,         // new page
+        pmergePath->pmerge->csrLeft,        // left page
+        pmergePath->pmerge->csrRight,       // right page
+        fFalse );                           // fBeforeMove
 
 #ifdef TEST_PAGEMOVE_RECOVERY
+    // five pages are involved. set some of them to filthy to change the flush pattern
     static INT testcase = 0;
     if( ( testcase % 500 < 0x20 ) )
     {
@@ -12757,6 +15857,7 @@ HandleError:
     return err;
 }
 
+//  ================================================================
 ERR ErrBTPageMove(
     __in FUCB * const pfucb,
     __in const BOOKMARK& bm,
@@ -12764,6 +15865,7 @@ ERR ErrBTPageMove(
     __in const BOOL fLeafPage,
     __in const ULONG fSPAllocFlags,
     __inout BOOKMARK * const pbmNext )
+//  ================================================================
 {
     Assert( pfucb );
     Assert( !Pcsr( pfucb )->FLatched() );
@@ -12775,6 +15877,8 @@ ERR ErrBTPageMove(
     PIBTraceContextScope tcScope = TcBTICreateCtxScope( pfucb, iorsBTMerge );
     MERGEPATH * pmergePath = NULL;
 
+    // If it's a space page, we may need refill the split buffers first, including
+    // reservation for the page we're moving data to.
     if ( FFUCBSpace( pfucb ) )
     {
         Call( ErrSPReserveSPBufPages( pfucb, FFUCBOwnExt( pfucb ), FFUCBAvailExt( pfucb ) ) );
@@ -12795,8 +15899,8 @@ ERR ErrBTPageMove(
 
     Call( ErrBTINewMerge( pmergePath ) );
     pmergePath->pmerge->mergetype               = mergetypePageMove;
-    pmergePath->fEmptyPage                      = fTrue;
-    pmergePath->pmergePathParent->fKeyChange    = fTrue;
+    pmergePath->fEmptyPage                      = fTrue;    // set this so the page will be freed
+    pmergePath->pmergePathParent->fKeyChange    = fTrue;    // set this so the parent page will be write-latched
     
     Call( ErrBTIPageMove(
             pfucb,
@@ -12818,20 +15922,30 @@ HandleError:
     return err;
 }
 
+//  performs merge or empty page operation
+//      by calling one-level merge at each level top-down
+//
 VOID BTIPerformMerge( FUCB *pfucb, MERGEPATH *pmergePathLeaf )
 {
     auto tc = TcCurr();
 
     MERGEPATH   *pmergePath;
 
+    //  go to root
+    //  since we need to process pages top-down
+    //
     for ( pmergePath = pmergePathLeaf;
           pmergePath->pmergePathParent != NULL;
           pmergePath = pmergePath->pmergePathParent )
     {
     }
 
+    //  process pages top-down
+    //
     for ( ; pmergePath != NULL; pmergePath = pmergePath->pmergePathChild )
     {
+        // If this goes off, it means we've started consuming pgnoNew for "regular" (as opposed
+        // to page-move) merges. Make sure pgnoNew gets flagged as initialized (do-time) in this function.
         Assert( ( pmergePath->pmerge == NULL ) || ( pmergePath->pmerge->pgnoNew == pgnoNull ) );
 
         if ( pmergePath->csr.Latch() == latchWrite ||
@@ -12866,10 +15980,14 @@ VOID BTIPerformMerge( FUCB *pfucb, MERGEPATH *pmergePathLeaf )
         }
         else
         {
+//          Assert( fFalse );
         }
     }
 }
 
+//  processes one page for merge or empty page operation
+//  depending on the operation selection in pmergePath->flags
+//
 VOID BTIPerformOneMerge( FUCB       *pfucb,
                          MERGEPATH  *pmergePath,
                          MERGE      *pmergeLeaf )
@@ -12887,6 +16005,13 @@ VOID BTIPerformOneMerge( FUCB       *pfucb,
         Assert( mergetypePartialLeft != pmergeLeaf->mergetype );
     }
 
+    //  if leaf page,
+    //      fix all flag deleted versions of nodes in page to operNull
+    //      if merge,
+    //          move nodes to right page
+    //      if not partial merge
+    //          fix siblings
+    //
     if ( NULL == pmergePath->pmergePathChild )
     {
         Assert( pmergePath->pmerge == pmergeLeaf );
@@ -12900,33 +16025,69 @@ VOID BTIPerformOneMerge( FUCB       *pfucb,
             BTIMergeMoveNodes( pfucb, pmergePath );
         }
 
+        //  delete flag deleted nodes that have no active version
+        //  if there is a version nullify it
+        //
         BTIMergeDeleteFlagDeletedNodes( pfucb, pmergePath );
 
         if ( mergetypePartialRight != mergetype && mergetypePartialLeft != mergetype )
         {
+            //  fix siblings
             BTIMergeFixSiblings( PinstFromIfmp( pfucb->ifmp ), pmergePath );
         }
     }
 
+    //  if page not write latched [no redo needed]
+    //      do nothing
     else if ( !FBTIUpdatablePage( *pcsr ) )
     {
         Assert( PinstFromIfmp( pfucb->ifmp )->FRecovering() );
     }
 
+    //  if a full left merge is being done then both a node deletion
+    //  and a key change are required. handle those here.
     else if ( mergetypeFullLeft == pmergeLeaf->mergetype
             && pmergePath->fDeleteNode
             && pmergePath->fKeyChange )
     {
+        // the parent-of-leaf page will look like this:
+        // (page 2 is being merged onto page 1)
+        //
+        // NODE | SEPARATOR KEY | DATA
+        // -----+---------------+-------
+        // N-1  | KeyA          | 1
+        // N    | KeyB          | 2
+        //
+        // After all nodes are moved from page 2 onto page 1
+        // the parent-of-leaf page should look like this:
+        //
+        // NODE | SEPARATOR KEY | DATA
+        // -----+---------------+-------
+        // N-1  | KeyB          | 1
+        //
+        // There are two ways this can be done:
+        //  1. Delete node N, change the key of node N-1
+        //  2. Delete node N-1, change the data of node N
+        //
+        // The second approach will be taken.
 
+        // These changes don't propagate up the tree so we
+        // can assert that this is the parent-of-leaf
+        // We can only assert that the child page is a leaf
+        // during runtime. During redo time the page may have 
+        // been reused.
         Assert( pmergePath->csr.Cpage().FParentOfLeaf() );
         Assert( pmergePath->pmergePathChild );
         Assert( PinstFromIfmp( pfucb->ifmp )->FRecovering() || pmergePath->pmergePathChild->csr.Cpage().FLeafPage() );
         Assert( NULL == pmergePath->pmergePathChild->pmergePathChild );
         Assert( pmergeLeaf == pmergePath->pmergePathChild->pmerge );
 
+        // A full left merge isn't selected if the parent pointer is
+        // the first node in the page
         Assert( pmergePath->iLine > 0 );
         pmergePath->csr.SetILine( pmergePath->iLine );
 
+        // Change the data
         const PGNO pgnoChild = pmergePath->pmergePathChild->csr.Pgno();
         const PGNO pgnoLeft = pmergeLeaf->csrLeft.Pgno();
 
@@ -12937,10 +16098,17 @@ VOID BTIPerformOneMerge( FUCB       *pfucb,
         BTIUpdatePagePointer( &(pmergePath->csr), pgnoLeft );
         BTICheckPagePointer( pmergePath->csr, pgnoLeft );
 
+        // Delete the previous node
         pmergePath->csr.SetILine( pmergePath->iLine - 1 );
         NDDelete( &(pmergePath->csr) );
     }
     
+    //  if fDeleteNode,
+    //      delete node
+    //      if page pointer is last node and
+    //      there is no right sibling to leaf page,
+    //          fix new last key to NULL
+    //
     else if ( pmergePath->fDeleteNode )
     {
         Assert( !pmergePath->csr.Cpage().FLeafPage() );
@@ -12967,11 +16135,19 @@ VOID BTIPerformOneMerge( FUCB       *pfucb,
         }
     }
 
+    //  if fKeyChange
+    //      change the key of seeked node to new separator
+    //
     else if ( pmergePath->fKeyChange )
     {
         Assert( mergetypeFullLeft != pmergeLeaf->mergetype );
         Assert( !pmergeLeaf->kdfParentSep.key.FNull() );
 
+        // Partial left merges require a different iline be updated.
+        // The nodes are moved from the beginning of the merged page
+        // to the end of the left page so the separator key of the
+        // node before the pointer to the merged page has to be 
+        // updated.
 
         if( mergetypePartialLeft == pmergeLeaf->mergetype )
         {
@@ -12996,6 +16172,8 @@ VOID BTIPerformOneMerge( FUCB       *pfucb,
     if ( pmergePath->fEmptyPage &&
          FBTIUpdatablePage( pmergePath->csr ) )
     {
+        //  set page flag to Empty
+        //
         NDEmptyPage( &(pmergePath->csr) );
     }
 
@@ -13003,6 +16181,8 @@ VOID BTIPerformOneMerge( FUCB       *pfucb,
 }
 
 
+//  changes the key of a page pointer node to given key
+//
 VOID BTIChangeKeyOfPagePointer( FUCB *pfucb, CSR *pcsr, const KEY& key )
 {
     Assert( !pcsr->Cpage().FLeafPage() );
@@ -13014,6 +16194,8 @@ VOID BTIChangeKeyOfPagePointer( FUCB *pfucb, CSR *pcsr, const KEY& key )
     LittleEndian<PGNO>  le_pgno = *((UnalignedLittleEndian< PGNO > *) pfucb->kdfCurr.data.Pv() );
     Assert( le_pgno != pgnoNull );
 
+    //  delete node and re-insert with given key
+    //
     NDDelete( pcsr );
 
     KEYDATAFLAGS    kdfInsert;
@@ -13027,10 +16209,15 @@ VOID BTIChangeKeyOfPagePointer( FUCB *pfucb, CSR *pcsr, const KEY& key )
 }
 
 
+//  release latches on pages that are not required
+//
 VOID BTIMergeReleaseUnneededPages( MERGEPATH *pmergePathTip )
 {
     MERGEPATH   *pmergePath;
 
+    //  go to root
+    //  release latches top-down
+    //
     for ( pmergePath = pmergePathTip;
           pmergePath->pmergePathParent != NULL;
           pmergePath = pmergePath->pmergePathParent )
@@ -13041,6 +16228,12 @@ VOID BTIMergeReleaseUnneededPages( MERGEPATH *pmergePathTip )
     for ( ; NULL != pmergePath;  )
     {
 
+        //  check if page is needed
+        //      -- either there is a merge/empty page at this level
+        //         or there is a merge/empty page one level below
+        //              when we need write latch for deleting page pointer
+        //         or there is a key change at this level
+        //
         if ( !pmergePath->fKeyChange &&
              !pmergePath->fEmptyPage &&
              !pmergePath->fDeleteNode &&
@@ -13048,6 +16241,8 @@ VOID BTIMergeReleaseUnneededPages( MERGEPATH *pmergePathTip )
         {
             Assert( NULL == pmergePath->pmergePathParent );
 
+            //  release latch and pmergePath at this level
+            //
             MERGEPATH *pmergePathT = pmergePath;
 
             Assert( !pmergePath->fDeleteNode );
@@ -13057,15 +16252,24 @@ VOID BTIMergeReleaseUnneededPages( MERGEPATH *pmergePathTip )
             Assert( NULL != pmergePath->pmergePathChild );
             if ( mergetypeNone != pmergePathTip->pmerge->mergetype )
             {
+                //  parent of merged or emptied page must not be released
+                //
                 Assert( pmergePath->pmergePathChild->pmergePathChild != NULL );
                 Assert( !pmergePath->pmergePathChild->csr.Cpage().FLeafPage() );
             }
 
+            //  pages normally get here with latchRIW, but there are a few known cases in which they
+            //  have latchWrite: 1) when a root page's latch gets upgraded so that the tree
+            //  can be up-converted from small to large extent format; 2) when allocating a new page
+            //  for the merge, we may run ErrSPIImproveLastAlloc(), which also upgrades the root's latch.
+            //
             Assert( pmergePath->csr.Latch() == latchRIW || pmergePath->csr.Latch() == latchWrite );
             Expected( pmergePath->csr.Latch() != latchWrite || pmergePath->csr.Cpage().FRootPage() );
 
             pmergePath = pmergePath->pmergePathChild;
 
+            //  release latches on these pages
+            //
             delete pmergePathT;
         }
         else
@@ -13076,6 +16280,12 @@ VOID BTIMergeReleaseUnneededPages( MERGEPATH *pmergePathTip )
 }
 
 
+//  upgrade to write latch on all pages invloved in the merge/emptypage
+//
+//  note that pmergePathTip is the MERGEPATH object which is closest to the leaf level,
+//  but not necessarily at the leaf level, which could happen while moving an internal
+//  page during shrink, for example.
+//
 LOCAL ERR ErrBTIMergeUpgradeLatches( const IFMP ifmp, MERGEPATH * const pmergePathTip )
 {
     ERR             err;
@@ -13085,6 +16295,9 @@ LOCAL ERR ErrBTIMergeUpgradeLatches( const IFMP ifmp, MERGEPATH * const pmergePa
     Assert( dbtimeMerge > 1 );
     Assert( PinstFromIfmp( ifmp )->m_plog->FRecoveringMode() != fRecoveringRedo );
 
+    //  go to root
+    //  since we need to latch top-down
+    //
     for ( pmergePath = pmergePathTip;
           pmergePath->pmergePathParent != NULL;
           pmergePath = pmergePath->pmergePathParent )
@@ -13094,6 +16307,12 @@ LOCAL ERR ErrBTIMergeUpgradeLatches( const IFMP ifmp, MERGEPATH * const pmergePa
     Assert( NULL == pmergePath->pmergePathParent );
     for ( ; NULL != pmergePath;  )
     {
+        //  check if write latch is needed
+        //      -- either there is a merge/empty page at this level
+        //         or there is a merge/empty page one level below
+        //              when we need write latch for deleting page pointer
+        //         or there is a key change at this level
+        //
         MERGE   *pmerge = pmergePath->pmerge;
 
         if ( pmergePath->fKeyChange ||
@@ -13106,9 +16325,14 @@ LOCAL ERR ErrBTIMergeUpgradeLatches( const IFMP ifmp, MERGEPATH * const pmergePa
 
             if ( pmergePath->pmergePathChild == NULL )
             {
+                //  tip-level
+                //  write latch left, current and right pages in order
+                //
                 Assert( NULL != pmerge );
                 Assert( mergetypeNone != pmerge->mergetype );
 
+                //  Verify invalid/nil dbtimes, and then set to nil.
+                //
                 Assert( dbtimeInvalid == pmerge->dbtimeLeftBefore || dbtimeNil == pmerge->dbtimeLeftBefore );
                 Assert( dbtimeInvalid == pmergePath->dbtimeBefore || dbtimeNil == pmergePath->dbtimeBefore );
                 Assert( dbtimeInvalid == pmerge->dbtimeRightBefore || dbtimeNil == pmerge->dbtimeRightBefore );
@@ -13122,6 +16346,8 @@ LOCAL ERR ErrBTIMergeUpgradeLatches( const IFMP ifmp, MERGEPATH * const pmergePa
                 pmerge->dbtimeRightBefore = dbtimeNil;
                 pmerge->fFlagsRightBefore = 0;
 
+                //  Upgrade all latches involved to write latches.
+                //
 
                 if ( pgnoNull != pmerge->csrLeft.Pgno() )
                 {
@@ -13173,6 +16399,8 @@ LOCAL ERR ErrBTIMergeUpgradeLatches( const IFMP ifmp, MERGEPATH * const pmergePa
                 }
 
 
+                //  Set the dbtimes on all involved pages...
+                //
 
                 if ( pgnoNull != pmerge->csrLeft.Pgno() )
                 {
@@ -13236,6 +16464,8 @@ LOCAL ERR ErrBTIMergeUpgradeLatches( const IFMP ifmp, MERGEPATH * const pmergePa
         }
         else
         {
+            //  release latch and pmergePath at this level
+            //
             AssertTrack( fFalse, "MergePathInconsistent" );
             MERGEPATH *pmergePathT = pmergePath;
 
@@ -13263,6 +16493,8 @@ HandleError:
 }
 
 
+//  sets lgpos for every page involved in merge or empty page operation
+//
 VOID BTIMergeSetLgpos( MERGEPATH *pmergePathTip, const LGPOS& lgpos )
 {
     MERGEPATH   *pmergePath = pmergePathTip;
@@ -13310,6 +16542,9 @@ VOID BTIMergeSetLgpos( MERGEPATH *pmergePathTip, const LGPOS& lgpos )
 }
 
 
+//  reduces internal page fragmentation for all pages in the merge
+//  path that are write latched
+//
 VOID BTIMergeShrinkPages( MERGEPATH *pmergePathLeaf )
 {
     MERGEPATH   *pmergePath = pmergePathLeaf;
@@ -13358,6 +16593,8 @@ VOID BTIMergeShrinkPages( MERGEPATH *pmergePathLeaf )
 }
 
 
+//  releases all latches held by merge or empty page operation
+//
 VOID BTIMergeReleaseLatches( MERGEPATH *pmergePathTip )
 {
     MERGEPATH   *pmergePath = pmergePathTip;
@@ -13388,12 +16625,15 @@ VOID BTIMergeReleaseLatches( MERGEPATH *pmergePathTip )
 }
 
 
+//  release every page marked empty
+//
 VOID BTIReleaseEmptyPages( FUCB *pfucb, MERGEPATH *pmergePathTip )
 {
     MERGEPATH   *pmergePath = pmergePathTip;
     const BOOL  fAvailExt   = FFUCBAvailExt( pfucb );
     const BOOL  fOwnExt     = FFUCBOwnExt( pfucb );
 
+    //  fake out cursor to make it think it's not a space cursor
     if ( fAvailExt )
     {
         Assert( !fOwnExt );
@@ -13414,12 +16654,21 @@ VOID BTIReleaseEmptyPages( FUCB *pfucb, MERGEPATH *pmergePathTip )
 
     for ( ; pmergePath != NULL; pmergePath = pmergePath->pmergePathParent )
     {
+        //  if empty page
+        //      release space to FDP
+        //
         Assert( !pmergePath->csr.FLatched() );
         if ( pmergePath->fEmptyPage )
         {
 
+            //  space flags reset at the top of this function in order to fake out SPFreeExtent()
             Assert( !FFUCBSpace( pfucb ) );
 
+            //  UNDONE: track lost space because of inability
+            //          to split availExt tree with the released space
+            //
+            //  UNDONE: we will leak the space if ErrSPFreeExt() fails
+            //
             Assert( pmergePath->csr.Pgno() != PgnoRoot( pfucb ) );
             const ERR   errFreeExt  = ErrSPFreeExt( pfucb, pmergePath->csr.Pgno(), 1, "FreeEmptyPages" );
 #ifdef DEBUG
@@ -13429,6 +16678,8 @@ VOID BTIReleaseEmptyPages( FUCB *pfucb, MERGEPATH *pmergePathTip )
             }
 #endif
 
+            //  count pages released by an update
+            //
             Ptls()->threadstats.cPageUpdateReleased++;
         }
     }
@@ -13445,6 +16696,9 @@ VOID BTIReleaseEmptyPages( FUCB *pfucb, MERGEPATH *pmergePathTip )
 }
 
 
+//  nullify every inactive flag-deleted version in page
+//  delete node if flag-deleted with no active version
+//
 LOCAL VOID BTIMergeDeleteFlagDeletedNodes( FUCB * const pfucb, MERGEPATH * const pmergePath )
 {
     CSR * const pcsr = &pmergePath->csr;
@@ -13472,6 +16726,7 @@ LOCAL VOID BTIMergeDeleteFlagDeletedNodes( FUCB * const pfucb, MERGEPATH * const
         {
             if ( FNDVersion( pfucb->kdfCurr ) )
             {
+                // Cannot have active move FDeleted nodes as recovery does not move them
                 Assert( !plineinfo->fVerActive );
                 if ( !plineinfo->fVerActive )
                 {
@@ -13484,6 +16739,7 @@ LOCAL VOID BTIMergeDeleteFlagDeletedNodes( FUCB * const pfucb, MERGEPATH * const
             }
         }
 
+        // delete the node if it has moved
         if ( mergetypePartialRight == pmerge->mergetype && iline >= pmerge->ilineMerge )
         {
             NDDelete( pcsr );
@@ -13496,6 +16752,9 @@ LOCAL VOID BTIMergeDeleteFlagDeletedNodes( FUCB * const pfucb, MERGEPATH * const
 }
 
 
+//  fix siblings of leaf page merged or emptied
+//  to point to each other
+//
 VOID BTIMergeFixSiblings( INST *pinst, MERGEPATH *pmergePath )
 {
     MERGE   *pmerge = pmergePath->pmerge;
@@ -13551,7 +16810,16 @@ VOID BTIMergeFixSiblings( INST *pinst, MERGEPATH *pmergePath )
 }
 
 
+//  ================================================================
 LOCAL VOID BTIMergeMoveNodes( FUCB * const pfucb, MERGEPATH * const pmergePath )
+//  ================================================================
+//
+//  Move undeleted nodes from the source page to the destination page. 
+//  For left merges nodes <= ilineMerge are moved to the left page.
+//  For right merges nodes >= ilineMerge are moved to the right page.
+//  Set cbUncommittedFree on destination page.
+//
+//-
     
 {
     Assert( mergetypeFullRight == pmergePath->pmerge->mergetype
@@ -13572,8 +16840,12 @@ LOCAL VOID BTIMergeMoveNodes( FUCB * const pfucb, MERGEPATH * const pmergePath )
     Assert( FBTIUpdatablePage( *pcsrSrc ) );
     Assert( FBTIUpdatablePage( *pcsrDest ) );
 
+    // ilineSrcMin is the first iline to copy
     INT ilineSrcMin;
+    // ilineSrcMax is the first iline not to copy (i.e. it is invalid)
     INT ilineSrcMax;
+    // the location on the destination page to insert into. right merges go at the beginning
+    // while left merges go at the end
     INT ilineDest;
 
     if( fRightMerges )
@@ -13595,12 +16867,19 @@ LOCAL VOID BTIMergeMoveNodes( FUCB * const pfucb, MERGEPATH * const pmergePath )
     pcsrDest->SetILine( ilineDest );
 
 #ifdef DEBUG
+    //  cbUncommittedFree will be set correctly at the bottom of the function.
+    //  Set to 0 here to prevent assertions in CPage during merge.
+    //  If there is any error in cbUncommittedFree it will be detected when set.
+    //
     if ( PinstFromIfmp( pfucb->ifmp )->m_plog->FRecovering() )
     {
         pcsrDest->Cpage().SetCbUncommittedFree( 0 );
     }
 #endif
 
+// disable this warning
+//  warning C22019: 'ilineSrcMax - 1' may be greater than 'ilineSrcMax'. 
+//  This can be caused by integer underflow. This could yield an incorrect loop index 'iline>=ilineSrcMin'
 #pragma warning(disable:22019)
     for ( INT iline = ilineSrcMax - 1; iline >= ilineSrcMin; iline-- )
 #pragma warning(default:22019)
@@ -13616,6 +16895,7 @@ LOCAL VOID BTIMergeMoveNodes( FUCB * const pfucb, MERGEPATH * const pmergePath )
 
         if ( FNDDeleted( plineinfo->kdf ) )
         {
+            // Cannot have active move FDeleted nodes as recovery does not move them
             Assert( !plineinfo->fVerActive );
             if ( !plineinfo->fVerActive )
             {
@@ -13624,6 +16904,8 @@ LOCAL VOID BTIMergeMoveNodes( FUCB * const pfucb, MERGEPATH * const pmergePath )
         }
 
 #ifdef DEBUG
+        //  check cbPrefix
+        //
         NDGetPrefix( pfucb, pcsrDest );
         const INT cbCommon = CbCommonKey( pfucb->kdfCurr.key,
                                             plineinfo->kdf.key );
@@ -13637,11 +16919,15 @@ LOCAL VOID BTIMergeMoveNodes( FUCB * const pfucb, MERGEPATH * const pmergePath )
         }
 #endif
 
+        //  copy node to start/end of destination page
+        //
         Assert( !FNDDeleted( plineinfo->kdf ) );
         Assert( pcsrDest->ILine() == ilineDest );
         NDInsert( pfucb, pcsrDest, &plineinfo->kdf, plineinfo->cbPrefix );
     }
 
+    //  add uncommitted freed space caused by move to destination page
+    //
     Assert( PinstFromIfmp( pfucb->ifmp )->m_plog->FRecovering() ||
             pcsrDest->Cpage().CbUncommittedFree() +
                 pmerge->cbSizeMaxTotal -
@@ -13651,13 +16937,19 @@ LOCAL VOID BTIMergeMoveNodes( FUCB * const pfucb, MERGEPATH * const pmergePath )
 }
 
 
+//  checks merge/empty page operation
+//
 INLINE VOID BTICheckMerge( FUCB *pfucb, MERGEPATH *pmergePathLeaf )
 {
 #ifdef DEBUG
     MERGEPATH   *pmergePath;
 
+    //  check leaf level merge/empty page
+    //
     BTICheckMergeLeaf( pfucb, pmergePathLeaf );
 
+    //  check operation at internal levels
+    //
     for ( pmergePath = pmergePathLeaf->pmergePathParent;
           pmergePath != NULL;
           pmergePath = pmergePath->pmergePathParent )
@@ -13667,6 +16959,8 @@ INLINE VOID BTICheckMerge( FUCB *pfucb, MERGEPATH *pmergePathLeaf )
 #endif
 }
 
+//  checks merge/empty page operation at leaf-level
+//
 VOID BTICheckMergeLeaf( FUCB *pfucb, MERGEPATH *pmergePath )
 {
 #ifdef DEBUG
@@ -13702,6 +16996,8 @@ VOID BTICheckMergeLeaf( FUCB *pfucb, MERGEPATH *pmergePath )
         Assert( pcsrLeft->Pgno() != pgnoNull );
     }
 
+    //  check sibling pages point to each other
+    //
     if ( pmergePath->fEmptyPage )
     {
         Assert( pcsrRight->Pgno() != pcsr->Pgno() );
@@ -13720,10 +17016,12 @@ VOID BTICheckMergeLeaf( FUCB *pfucb, MERGEPATH *pmergePath )
             Assert( pcsrLeft->Cpage().PgnoNext() == pcsrRight->Pgno() );
         }
     }
-#endif
+#endif  //  DEBUG
 }
 
 
+//  checks internal page after a merge/empty page operation
+//
 VOID BTICheckMergeInternal( FUCB        *pfucb,
                             MERGEPATH   *pmergePath,
                             MERGE       *pmergeLeaf )
@@ -13739,6 +17037,9 @@ VOID BTICheckMergeInternal( FUCB        *pfucb,
     Assert( pcsr->Latch() == latchRIW
         || pcsr->Dbtime() == dbtime );
 
+    //  if empty page,
+    //      return
+    //
     if ( pmergePath->fEmptyPage )
     {
         Assert( pmergePath->csr.Cpage().Clines() == 0 );
@@ -13755,9 +17056,16 @@ VOID BTICheckMergeInternal( FUCB        *pfucb,
     }
     else
     {
+        //  UNDONE: change this later to Assert( fFalse )
+        //          since the page should be released
+        //
+///     Assert( pcsr->Latch() == latchRIW );
         Assert( fFalse );
     }
 
+    //  for every node in page
+    //  check that it does not point to an empty page
+    //
     for ( SHORT iline = 0; iline < clines; iline++ )
     {
         pcsr->SetILine( iline );
@@ -13780,8 +17088,13 @@ VOID BTICheckMergeInternal( FUCB        *pfucb,
         }
     }
 
+    //  check last node in page has same key
+    //  as parent pointer
+    //
     if ( pmergePath->pmergePathParent == NULL )
     {
+        //  if root page, check if last node is NULL-keyed
+        //
         Assert( !pcsr->Cpage().FLeafPage() );
 
         pcsr->SetILine( pcsr->Cpage().Clines() - 1 );
@@ -13807,11 +17120,12 @@ VOID BTICheckMergeInternal( FUCB        *pfucb,
     NDGet( pfucb, pcsrParent );
 
     Assert( FKeysEqual( kdfLast.key, pfucb->kdfCurr.key ) );
-#endif
+#endif  //  DEBUG
 }
 
 #ifndef MINIMAL_FUNCTIONALITY
 
+// This is support for eseutil /ms space analysis.
 
 class CBTAcrossQueue {
 
@@ -13819,7 +17133,7 @@ class CBTAcrossQueue {
 
     CStupidQueue *  m_pQ;
     PGNO            m_rgpgnoLevelLeftStart[32];
-    ULONG           m_iNextLevel;
+    ULONG           m_iNextLevel;   //  0 is root.
 
 #ifdef DEBUG
     PGNO            m_pgnoCurr;
@@ -13852,11 +17166,12 @@ class CBTAcrossQueue {
 
         if ( pkdf == NULL )
         {
+            // we don't process the external header as a regular node...
             Assert( itag == 0 );
             return JET_errSuccess;
         }
 
-        Assert( pkdf->key.Cb() == ( pkdf->key.prefix.Cb() + pkdf->key.suffix.Cb() ) );
+        Assert( pkdf->key.Cb() == ( pkdf->key.prefix.Cb() + pkdf->key.suffix.Cb() ) );  // I assumed this...
 
         PGNO pgnoLeaf;
         Assert( pkdf->data.Cb() == sizeof(PGNO) );
@@ -13884,7 +17199,7 @@ public:
     CBTAcrossQueue( __in const PGNO pgnoFDP ) :
         m_pgnoFDP( pgnoFDP )
     {
-        memset( m_rgpgnoLevelLeftStart, 0, sizeof(m_rgpgnoLevelLeftStart) );
+        memset( m_rgpgnoLevelLeftStart, 0, sizeof(m_rgpgnoLevelLeftStart) );    // set all pgnoLevelLeftStarts to 0x0
         m_pQ = NULL;
         m_iNextLevel = 0x0;
         m_cPages = 0x0;
@@ -13900,8 +17215,12 @@ public:
 
     CStupidQueue::ERR ErrDequeuePage( __out PGNO * ppgnoNext, __out ULONG * piLevel )
     {
+        //  This is essentially a queue so we steal the require queue's error space.
         CStupidQueue::ERR errQueue = CStupidQueue::ERR::errSuccess;
 
+        //
+        //  We deferred init/allocation of the queue until the first dequeue.
+        //
         if ( m_pQ == NULL )
         {
             m_pQ = new CStupidQueue( sizeof( PGNO ) );
@@ -13917,6 +17236,9 @@ public:
             }
         }
 
+        //
+        //  Dequeue a page and set level.
+        //
         Assert( ppgnoNext );
         Assert( piLevel );
         PGNO pgnoNext;
@@ -13925,6 +17247,10 @@ public:
         {
             if ( m_rgpgnoLevelLeftStart[m_iNextLevel] == pgnoNext )
             {
+                //  We are dequeuing a page that is the left most of this level, which means
+                //  that we should increment the next level, so that any new pages we 
+                //  enqueue (which would be form this page) would logically belong to the 
+                //  next level.
                 m_iNextLevel++;
             }
             Assert( m_iNextLevel != 0 );
@@ -13949,6 +17275,8 @@ public:
             return JET_errSuccess;
         }
         
+        //  Enum the tags, EnumChildPagePtrNodes knows how to crack the page out of 
+        //  internal page nodes, and call ErrEnqueuPage().
 
         err = pcpage->ErrEnumTags( CBTAcrossQueue::EnumChildPagePtrNodes, (void*)this );
         return err;
@@ -13958,6 +17286,16 @@ public:
 };
 
 
+//  This function takes an ifmp and pgno, and does a breadth first evaluation of
+//  the B-Tree, by reading it directly from the file.  It taks a fVisitFlags which
+//  should be CPAGE::fPageLeaf drive all the way to the leaf pages, otherwise the
+//  function will visit all internal pages only.
+//      fVisitFlags is a set of CPage flags that are interprited to determine
+//      what pages we visit.  
+//              CPAGE::fPageParentOfLeaf visits all internal pages, 
+//              CPAGE::fPageLeaf visits all leaf pages, 
+//              together they visit all pages.
+//  ================================================================
 ERR ErrBTUTLAcross(
     IFMP                    ifmp,
     const PGNO              pgnoFDP,
@@ -13967,6 +17305,7 @@ ERR ErrBTUTLAcross(
     CPAGE::PFNVISITNODE *   rgpfnzErrVisitNode,
     void **                 rgpvzVisitNodeCtx
     )
+//  ================================================================
 {
     ERR                     err         = JET_errSuccess;
     IFileAPI *              pfapi = g_rgfmp[ifmp].Pfapi();
@@ -13979,22 +17318,32 @@ ERR ErrBTUTLAcross(
     VOID *              pvPageBuffer = NULL;
 
 
+    //  Setup the variables required to implement our breadth first search of the B+ Tree.
+    //
     Alloc( pBreadthFirst = new CBTAcrossQueue( pgnoFDP ) );
 
+    //  Get buffer to hold page.    
+    //
     Assert( g_rgfmp[ ifmp ].CbPage() >= g_cbPageMin );
     Alloc( pvPageBuffer = PvOSMemoryPageAlloc( g_rgfmp[ ifmp ].CbPage(), NULL ) );
     memset( pvPageBuffer, 0x42, g_rgfmp[ ifmp ].CbPage() );
 
+    //  Walk the queue of pages ...
+    //
     CStupidQueue::ERR errQueue = CStupidQueue::ERR::errSuccess;
     while ( CStupidQueue::ERR::errSuccess == ( errQueue = pBreadthFirst->ErrDequeuePage( &pgnoCurr, &iCurrLevel ) ) )
     {
         Assert( pgnoCurr );
 
+        //  Read the next page.
+        //
         TraceContextScope tcUtil( iorpDirectAccessUtil );
         Call( pfapi->ErrIORead( *tcUtil, OffsetOfPgno( pgnoCurr ), g_rgfmp[ ifmp ].CbPage(), (BYTE* const)pvPageBuffer, qosIONormal ) );
         CPAGE   cpage;
         cpage.LoadPage( ifmp, pgnoCurr, pvPageBuffer, g_rgfmp[ifmp].CbPage() );
 
+        //  Evaluate any visiting the caller wanted to do.
+        //
         if ( ( (fVisitFlags & CPAGE::fPageLeaf) && cpage.FLeafPage() ) ||
                 ( (fVisitFlags & CPAGE::fPageParentOfLeaf) && ( !cpage.FLeafPage() || cpage.FRootPage() ) ) )
         {
@@ -14011,22 +17360,30 @@ ERR ErrBTUTLAcross(
             }
         }
 
+        //  Enqueue the level of pages below this one (if appropriate).
+        //
         if ( !cpage.FLeafPage() )
         {
+            //  Well its not leaf, so it has pages to enqueue, now check if appropriate.
 
             if ( cpage.FParentOfLeaf() && !(fVisitFlags & CPAGE::fPageLeaf) )
             {
+                //  caller did not ask for leaf evaluation, and we're at parent of leaf, so do not 
+                //  enque next level.
                 continue;
             }
 
+            //  Appropriate, so enque pages...
+            //
             Call( pBreadthFirst->ErrEnqueueNextLevel( pgnoCurr, &cpage ) );
         }
 
     }
 
+    //  Validate that we eventually emptied the queue.
     if ( CStupidQueue::ERR::wrnEmptyQueue == errQueue )
     {
-        err = JET_errSuccess;
+        err = JET_errSuccess;   // Done!
     }
     else if ( CStupidQueue::ERR::errOutOfMemory == errQueue )
     {
@@ -14038,7 +17395,7 @@ ERR ErrBTUTLAcross(
         Error( ErrERRCheck( JET_errInvalidParameter ) );
     }
 
-HandleError:
+HandleError:    // cleanup.
 
     OSMemoryPageFree( pvPageBuffer );
     delete pBreadthFirst;
@@ -14046,15 +17403,18 @@ HandleError:
     return err;
 }
 
-#endif
+#endif  // MINIMAL_FUNCTIONALITY
 
+// external header size array for different type of data stored in external header.
 extern USHORT g_rgcbExternalHeaderSize[noderfMax];
 
 ERR ErrBTGetRootField( _Inout_ FUCB* const pfucb, _In_range_( 0, noderfMax - 1 ) const NodeRootField noderf, _In_ const LATCH latch )
 {
     ERR err = JET_errSuccess;
 
+    // navigate to the root page
     CallR( ErrBTIGotoRoot( pfucb, latch ) );
+    // retrieve the specified root field
     NDGetExternalHeader( pfucb, Pcsr( pfucb ), noderf );
 
 #ifdef DEBUG
@@ -14064,7 +17424,7 @@ ERR ErrBTGetRootField( _Inout_ FUCB* const pfucb, _In_range_( 0, noderfMax - 1 )
         Assert( (INT)g_rgcbExternalHeaderSize[noderf] == pfucb->kdfCurr.data.Cb() ||
             0 == pfucb->kdfCurr.data.Cb() );
     }
-#endif
+#endif // DEBUG
 
     if ( 0 == pfucb->kdfCurr.data.Cb() )
     {
@@ -14091,7 +17451,7 @@ ERR ErrBTSetRootField( _In_ FUCB* const pfucb, _In_range_( 0, noderfMax - 1 ) co
         Assert( noderfMax > noderf );
         Assert( dataRootField.Cb() == (INT)g_rgcbExternalHeaderSize[noderf] );
     }
-#endif
+#endif // DEBUG
 
     Assert( Pcsr( pfucb )->FLatched() );
     if ( Pcsr( pfucb )->Latch() != latchWrite )
@@ -14100,11 +17460,14 @@ ERR ErrBTSetRootField( _In_ FUCB* const pfucb, _In_range_( 0, noderfMax - 1 ) co
     }
     Assert( Pcsr( pfucb )->Latch() == latchWrite );
 
+    // retrieve the specified root field and make sure we have enough space to update it
     NDGetExternalHeader( pfucb, Pcsr( pfucb ), noderf );
 
+    // One extra byte required for the new header field
     cbReq = dataRootField.Cb() > pfucb->kdfCurr.data.Cb() ?  ( dataRootField.Cb() - pfucb->kdfCurr.data.Cb() + 1 ) : 0;
     if ( FBTISplit( pfucb, Pcsr( pfucb ), cbReq ) )
     {
+        // Undone: implement split for this.
         return ErrERRCheck( JET_errRecordTooBig );
     }
 

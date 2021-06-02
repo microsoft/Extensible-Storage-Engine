@@ -5,7 +5,7 @@
 
 #ifndef ENABLE_JET_UNIT_TEST
 #error This file should only be compiled with the unit tests!
-#endif
+#endif // ENABLE_JET_UNIT_TEST
 
 
 #define MaxTestRunTimeInMSec    2000
@@ -20,7 +20,13 @@
     CHECK( (condition) );                                                           \
 }
 
+//  ================================================================
 class RBSCleanerTestConfig : public IRBSCleanerConfig
+//  ================================================================
+//
+//  Configure cleaner using test parameters.
+//
+//-
 {
 public:
     RBSCleanerTestConfig() { SetDefaultTestState(); }
@@ -51,10 +57,10 @@ public:
     {
         m_cPassesMax = 10;
         m_fEnableCleanup = fTrue;
-        m_cbLowDiskSpaceThreshold = 1073741824;
-        m_cbMaxSpaceForRBSWhenLowDiskSpace = 1048576;
-        m_cSecRBSMaxTimeSpan = 300;
-        m_cSecMinCleanupIntervalTime = 1;
+        m_cbLowDiskSpaceThreshold = 1073741824; // 1GB
+        m_cbMaxSpaceForRBSWhenLowDiskSpace = 1048576; // 1MB
+        m_cSecRBSMaxTimeSpan = 300; // 5mins
+        m_cSecMinCleanupIntervalTime = 1; // every 1sec
         m_lFirstValidRBSGen = 1;
     }
 
@@ -157,8 +163,8 @@ RBSCleanerTestIOOperator::RBSCleanerTestIOOperator()
     m_lRBSGenMin = 1;
     m_lRBSGenMax = 10;
 
-    m_cbDirSize     = 104857;
-    m_cbDiskSize = 2147483648;
+    m_cbDirSize     = 104857;     // Such that size of 10 snapshots is less than 1MB threshold we setting in config in case of low disk space.
+    m_cbDiskSize = 2147483648; // 2GB, twice the threshold we are setting in config
 
     m_lRBSGenWithInvalidPrevTime = 1;
 }
@@ -260,6 +266,7 @@ ERR RBSCleanerTestIOOperator::ErrRemoveFolder( PCWSTR wszDirPath, PCWSTR wszRBSR
     return m_errRemoveFolder;
 }
 
+// RBS cleanup is disabled. We shouldn't have executed any pass.
 JETUNITTEST( RBSCleaner, RBSCleanupDisabled )
 {
     unique_ptr<RBSCleanerTestConfig> pconfig( new RBSCleanerTestConfig() );
@@ -283,6 +290,7 @@ JETUNITTEST( RBSCleaner, RBSCleanupDisabled )
     CHECKCALLS( JetTerm2( (JET_INSTANCE) pinst, JET_bitTermAbrupt ) );
 }
 
+// RBS is disabled with no existing snapshot. So no reason for cleaner to run.
 JETUNITTEST( RBSCleaner, RBSDisabledWithNoExistingGen )
 {
     __int64 ftStartTime = UtilGetCurrentFileTime();
@@ -310,6 +318,7 @@ JETUNITTEST( RBSCleaner, RBSDisabledWithNoExistingGen )
     CHECKCALLS( JetTerm2( (JET_INSTANCE) pinst, JET_bitTermAbrupt ) );
 }
 
+// RBS Cleaner is set to run in a loop continuously without having to remove anything. It shouldn't cross the max passes allowed.
 JETUNITTEST( RBSCleaner, MaxPassesNotCrossed )
 {
     __int64 ftStartTime = UtilGetCurrentFileTime();
@@ -338,6 +347,7 @@ JETUNITTEST( RBSCleaner, MaxPassesNotCrossed )
     CHECKCALLS( JetTerm2( (JET_INSTANCE) pinst, JET_bitTermAbrupt ) );
 }
 
+// We have enough disk space, no snapshots have expired but first valid snapshot is set to 3. So snapshots 1 & 2 must have been deleted.
 JETUNITTEST( RBSCleaner, InvalidSnapshotsDeleted )
 {
     __int64 ftStartTime = UtilGetCurrentFileTime();
@@ -367,6 +377,7 @@ JETUNITTEST( RBSCleaner, InvalidSnapshotsDeleted )
     CHECKCALLS( JetTerm2( (JET_INSTANCE) pinst, JET_bitTermAbrupt ) );
 }
 
+// We have enough disk space, 4 old snapshots have expired and should have been cleaned up.
 JETUNITTEST( RBSCleaner, ExpiredSnapshotRemoved )
 {
     __int64 ftStartTime = UtilGetCurrentFileTime();
@@ -378,6 +389,7 @@ JETUNITTEST( RBSCleaner, ExpiredSnapshotRemoved )
 
     unique_ptr<RBSCleanerTestConfig> pconfig( new RBSCleanerTestConfig() );
 
+    // Set file time such that it is valid for snapshot 5 onwards ( + 1 )
     pconfig->SetCSecRBSMaxTimeSpan(  piooperator->m_cSecLastCreateTimeFromCurrentTime + ( ( piooperator->m_lRBSGenMax - 5 ) * piooperator->m_cSecBetweenCreateTime ) + 1);
 
     INST* pinst;
@@ -397,6 +409,7 @@ JETUNITTEST( RBSCleaner, ExpiredSnapshotRemoved )
     CHECKCALLS( JetTerm2( (JET_INSTANCE) pinst, JET_bitTermAbrupt ) );
 }
 
+// Low disk space but RBS space well below limit, no snapshots expired. So no snapshots should be removed.
 JETUNITTEST( RBSCleaner, LowDiskSpaceButRBSWithinLimits )
 {
     __int64 ftStartTime = UtilGetCurrentFileTime();
@@ -410,8 +423,10 @@ JETUNITTEST( RBSCleaner, LowDiskSpaceButRBSWithinLimits )
 
     QWORD cbRBSTotalSize = ( piooperator->m_lRBSGenMax - piooperator->m_lRBSGenMin + 1 ) * piooperator->m_cbDirSize;
 
+    // Configure low disk space threshold such that we are consuming 1 byte extra than allowed.
     pconfig->SetCbLowDiskSpaceThreshold( piooperator->m_cbDiskSize - cbRBSTotalSize + 1 );
 
+    // Configure limits such that RBS is not consuming more than its allowed.
     pconfig->SetCbMaxSpaceForRBSWhenLowDiskSpace( cbRBSTotalSize + 1 );
 
     INST* pinst;
@@ -431,6 +446,7 @@ JETUNITTEST( RBSCleaner, LowDiskSpaceButRBSWithinLimits )
     CHECKCALLS( JetTerm2( (JET_INSTANCE) pinst, JET_bitTermAbrupt ) );
 }
 
+// Low disk space and RBS way above limit but one snapshot removal is sufficient
 JETUNITTEST( RBSCleaner, LowDiskSpaceRequiringOneRBSRemoval )
 {
     __int64 ftStartTime = UtilGetCurrentFileTime();
@@ -444,8 +460,10 @@ JETUNITTEST( RBSCleaner, LowDiskSpaceRequiringOneRBSRemoval )
 
     QWORD cbRBSTotalSize = ( piooperator->m_lRBSGenMax - piooperator->m_lRBSGenMin + 1 ) * piooperator->m_cbDirSize;
 
+    // Configure low disk space threshold such that we are consuming 1 byte extra than allowed and one RBS cleanup is sufficient.
     pconfig->SetCbLowDiskSpaceThreshold( piooperator->m_cbDiskSize - cbRBSTotalSize + 1 );
 
+    // Configure limits such that RBS is consuming lot more space than allowed
     pconfig->SetCbMaxSpaceForRBSWhenLowDiskSpace( cbRBSTotalSize - ( cbRBSTotalSize/2 ) );
 
     INST* pinst;
@@ -465,6 +483,7 @@ JETUNITTEST( RBSCleaner, LowDiskSpaceRequiringOneRBSRemoval )
     CHECKCALLS( JetTerm2( (JET_INSTANCE) pinst, JET_bitTermAbrupt ) );
 }
 
+// Low disk space and RBS way above limit and we have to remove multiple RBS files to free up space
 JETUNITTEST( RBSCleaner, LowDiskSpaceRequiringMultipleRBSRemoval )
 {
     __int64 ftStartTime = UtilGetCurrentFileTime();
@@ -478,8 +497,10 @@ JETUNITTEST( RBSCleaner, LowDiskSpaceRequiringMultipleRBSRemoval )
 
     QWORD cbRBSTotalSize = ( piooperator->m_lRBSGenMax - piooperator->m_lRBSGenMin + 1 ) * piooperator->m_cbDirSize;
 
+    // Configure low disk space threshold such that we are consuming lot of extra space and half the RBS need to be cleaned up.
     pconfig->SetCbLowDiskSpaceThreshold( piooperator->m_cbDiskSize - cbRBSTotalSize + ( cbRBSTotalSize/2 ) );
 
+    // Configure limits such that RBS is consuming lot more space than allowed
     pconfig->SetCbMaxSpaceForRBSWhenLowDiskSpace( cbRBSTotalSize - ( cbRBSTotalSize/2 ) );
 
     INST* pinst;
@@ -499,6 +520,7 @@ JETUNITTEST( RBSCleaner, LowDiskSpaceRequiringMultipleRBSRemoval )
     CHECKCALLS( JetTerm2( (JET_INSTANCE) pinst, JET_bitTermAbrupt ) );
 }
 
+// Low disk space and RBS way above limit and all snapshots have to be cleaned for disk space but the latest shouldn't be.
 JETUNITTEST( RBSCleaner, LowDiskSpaceAllRBSRemovedExceptLatest )
 {
     __int64 ftStartTime = UtilGetCurrentFileTime();
@@ -510,8 +532,10 @@ JETUNITTEST( RBSCleaner, LowDiskSpaceAllRBSRemovedExceptLatest )
     piooperator->m_lRBSGenMin = 1;
     piooperator->m_lRBSGenMax = 10;
 
+    // Configure low disk space threshold such that we are consuming all snapshots worth of extra space.
     pconfig->SetCbLowDiskSpaceThreshold( piooperator->m_cbDiskSize );
 
+    // Configure limits such that no space allotted for RBS. But we should still keep the latest around.
     pconfig->SetCbMaxSpaceForRBSWhenLowDiskSpace( 0 );
 
     INST* pinst;
@@ -531,6 +555,7 @@ JETUNITTEST( RBSCleaner, LowDiskSpaceAllRBSRemovedExceptLatest )
     CHECKCALLS( JetTerm2( (JET_INSTANCE) pinst, JET_bitTermAbrupt ) );
 }
 
+// We have enough disk space, no snapshots have expired but we are unable to read file time due to corrupt header. So RBS removed.
 JETUNITTEST( RBSCleaner, CorruptSnapshotsDeleted )
 {
     __int64 ftStartTime = UtilGetCurrentFileTime();
@@ -560,6 +585,7 @@ JETUNITTEST( RBSCleaner, CorruptSnapshotsDeleted )
     CHECKCALLS( JetTerm2( (JET_INSTANCE) pinst, JET_bitTermAbrupt ) );
 }
 
+// GetDirSize returns error. So no snapshot should have been deleted even though we are actually low on space.
 JETUNITTEST( RBSCleaner, GetDirSizeError )
 {
     __int64 ftStartTime = UtilGetCurrentFileTime();
@@ -572,8 +598,10 @@ JETUNITTEST( RBSCleaner, GetDirSizeError )
     piooperator->m_lRBSGenMax = 10;
     piooperator->m_errGetDirSize = JET_errFileAccessDenied;
 
+    // Configure low disk space threshold such that we are consuming all snapshots worth of extra space.
     pconfig->SetCbLowDiskSpaceThreshold( piooperator->m_cbDiskSize );
 
+    // Configure limits such that no space allotted for RBS. But we should still keep the latest around.
     pconfig->SetCbMaxSpaceForRBSWhenLowDiskSpace( 0 );
 
     INST* pinst;
@@ -604,6 +632,7 @@ JETUNITTEST( RBSCleaner, ComputeFirstValidRBSGenSetsInvalidSnapshot )
     piooperator->m_lRBSGenMin = 1;
     piooperator->m_lRBSGenMax = 10;
 
+    // All snapshots before gen7 will be considered invalid and allowed for cleanup.
     piooperator->m_lRBSGenWithInvalidPrevTime = 7;
 
     INST* pinst;

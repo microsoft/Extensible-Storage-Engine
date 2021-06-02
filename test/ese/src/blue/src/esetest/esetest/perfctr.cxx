@@ -1,5 +1,9 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
+//================================================================
+// Performance counters helper functions.
+//================================================================
+//
 
 #include <process.h>
 #include <pdh.h>
@@ -45,6 +49,7 @@ typedef struct{
 
 #ifndef BUILD_ENV_IS_WPHONE
 
+// Global 'functors' to help with the loadlibrary's.
 
 NTOSFuncStd( pfnPdhOpenQueryW, g_mwszzPerfDataHelperBrokenCoreSystem, PdhOpenQueryW, oslfExpectedOnWin5x | oslfNotExpectedOnCoreSystem );
 NTOSFuncStd( pfnPdhCloseQuery, g_mwszzPerfDataHelperBrokenCoreSystem, PdhCloseQuery, oslfExpectedOnWin5x | oslfNotExpectedOnCoreSystem );
@@ -54,9 +59,11 @@ NTOSFuncStd( pfnPdhCollectQueryData, g_mwszzPerfDataHelperBrokenCoreSystem, PdhC
 NTOSFuncStd( pfnPdhGetFormattedCounterValue, g_mwszzPerfDataHelperBrokenCoreSystem, PdhGetFormattedCounterValue, oslfExpectedOnWin5x | oslfNotExpectedOnCoreSystem );
 NTOSFuncStd( pfnPdhGetRawCounterValue, g_mwszzPerfDataHelperBrokenCoreSystem, PdhGetRawCounterValue, oslfExpectedOnWin5x | oslfNotExpectedOnCoreSystem );
 
+// PdhAddEnglishCounterW actually does language-neutral counters.
 NTOSFuncStd( pfnPdhAddCounterW, g_mwszzPerfDataHelperBrokenCoreSystem, PdhAddCounterW, oslfExpectedOnWin5x | oslfNotExpectedOnCoreSystem );
 NTOSFuncStd( pfnPdhAddEnglishCounterW, g_mwszzPerfDataHelperBrokenCoreSystem, PdhAddEnglishCounterW, oslfExpectedOnWin5x | oslfNotExpectedOnCoreSystem );
 
+// Prototypes
 
 BOOL
 PerfCountersExist()
@@ -105,6 +112,7 @@ PerfCountersInstallW(
     WCHAR wszIniFile[ MAX_PATH ];
     BOOL fReturn = FALSE;
 
+    // Try to open/create the key.
     if( ERROR_SUCCESS != ( lError = RegCreateKeyExW( HKEY_LOCAL_MACHINE,
                                                         wszEsentPerfCountersPath,
                                                         0,
@@ -119,6 +127,7 @@ PerfCountersInstallW(
         goto Cleanup;
     }
 
+    // Defaults and path manipulation.
     if ( NULL == wszLibraryPath ||  L'\0' == wszLibraryPath[ 0 ] ){
         GetCurrentDirectoryW( MAX_PATH, wszILibraryPath );
     }
@@ -133,12 +142,14 @@ PerfCountersInstallW(
         StringCchPrintfW( wszIniFile, MAX_PATH, L"lame \"%s\\%s\"", wszIniFilePath, WszEsetestEseperfIni() );
     }
 
+    // Try to load the performance counters.
     if( ERROR_SUCCESS != ( dwError = LoadPerfCounterTextStringsW( wszIniFile,
                                                                     TRUE ) ) ){
         OutputError( "%s(): LoadPerfCounterTextStrings() failed with %lu!" CRLF, __FUNCTION__, dwError );
         goto Cleanup;
     }
 
+    // We have to create these extra registry values.
     if( ERROR_SUCCESS != ( lError = RegSetValueExW( hKey,
                                                     g_wszRegKeyOpenPerfData,
                                                     0,
@@ -202,6 +213,7 @@ PerfCountersUninstall()
     WCHAR wszCmdLine[ MAX_PATH ];
     BOOL fReturn = FALSE;
 
+    // Try to unload the performance counters.
     StringCchPrintfW( wszCmdLine, MAX_PATH, L"lame \"%s\"", WESE_FLAVOUR );
     dwError = UnloadPerfCounterTextStringsW( wszCmdLine, TRUE );    
     if( ERROR_SUCCESS != dwError && ERROR_BADKEY != dwError ){      
@@ -237,12 +249,14 @@ PerfCountersCreateQuery()
         goto Cleanup;
     }
 
+    // Allocate new query object.
     pcqReturn = new EsePerfCounterQuery;
     if ( !pcqReturn ){
         OutputError( "%s(): failed to allocate new query object!" CRLF, __FUNCTION__ );
         goto Cleanup;
     }
 
+    // Initialize memory and resources.
     pcqReturn->pcs                  = NULL;
     pcqReturn->hQuery               = INVALID_HANDLE_VALUE;
     pcqReturn->cCounters            = 0;
@@ -343,6 +357,7 @@ IPerfCountersAddCounter(
         goto Cleanup;
     }
 
+    // Prepare struct to add counter.
     PDH_COUNTER_PATH_ELEMENTS_W pcpeCounterElements;
     pcpeCounterElements.szMachineName       = const_cast< WCHAR* >( wszComputerName );
     pcpeCounterElements.szObjectName        = const_cast< WCHAR* >( wszPerfObject );
@@ -368,6 +383,7 @@ IPerfCountersAddCounter(
         goto Cleanup;
     }
 
+    // The counter is already added to the low level query. Let's put it in our query now.
     size_t cCounters = pcq->cCounters;
     size_t cCountersAllocated = pcq->cCountersAllocated;
     if( ++cCounters > ESETEST_PCHELPER_MAX_COUNTERS ){
@@ -375,6 +391,7 @@ IPerfCountersAddCounter(
         goto Cleanup;   
     }
     if ( cCounters > cCountersAllocated ){
+        // We need more memory. Let's allocate 30% + 1 more.
         cCountersAllocated = ( ( 13 * cCounters ) / 10 + 1 );
         PDH_HCOUNTER* pNewCounters = new PDH_HCOUNTER[ cCountersAllocated ];
         if ( NULL == pNewCounters ){
@@ -386,6 +403,7 @@ IPerfCountersAddCounter(
         pcq->phCounters = pNewCounters;
     }
 
+    // We already have room for the new counter.
     pcq->phCounters[ cCounters - 1 ] = hCounter;
     pcq->cCounters = cCounters;
     pcq->cCountersAllocated = cCountersAllocated;
@@ -507,11 +525,13 @@ IPerfCountersGetCounterValues(
         goto Cleanup;
     }
 
+    // Perform the actual collection.
     if( ERROR_SUCCESS != ( pdhStatus = pfnPdhCollectQueryData( pcq->hQuery ) ) ){
         OutputError( "%s(): PdhCollectQueryData() failed with %#x!" CRLF, __FUNCTION__, pdhStatus );
         goto Cleanup;
     }
 
+    // Go through all the counters, formatting their values.
     fSuccess = TRUE;
     for ( size_t i = 0; i < pcq->cCounters ; i++ ){
         if( ERROR_SUCCESS == ( pdhStatus = pfnPdhGetFormattedCounterValue( pcq->phCounters[ i ],
@@ -531,6 +551,8 @@ IPerfCountersGetCounterValues(
         }       
     }
 
+    // It's ok to return this when it's the first time we are retrieving
+    // a rate-type counter.
     if ( fDoRetry ){
         Sleep( pcq->dwPeriod );
         return IPerfCountersGetCounterValues( pcq, pData, TRUE );
@@ -567,11 +589,13 @@ IPerfCountersGetCounterValuesRaw(
     }
 
 
+    // Perform the actual collection.
     if( ERROR_SUCCESS != ( pdhStatus = pfnPdhCollectQueryData( pcq->hQuery ) ) ){
         OutputError( "%s(): PdhCollectQueryData() failed with %#x!" CRLF, __FUNCTION__, pdhStatus );
         goto Cleanup;
     }
 
+    // Go through all the counters, formatting their values.
     fSuccess = TRUE;
     for ( size_t i = 0; i < pcq->cCounters ; i++ ){
         if( ERROR_SUCCESS == ( pdhStatus = pfnPdhGetRawCounterValue( pcq->phCounters[ i ],
@@ -612,12 +636,14 @@ PerfCountersGetCounterValues(
 
     EsePerfCounterQuery* pcq = ( EsePerfCounterQuery* )hQuery;
 
+    // Acquire critical section.
     EnterCriticalSection( pcq->pcs );
     if ( pcq->fCollecting ){
         OutputError( "%s(): background data collection already under way!" CRLF, __FUNCTION__ );
         goto Cleanup;
     }
 
+    // We are OK to collect new data now.
     fSuccess = IPerfCountersGetCounterValues( pcq, pData, FALSE );
     
 Cleanup:
@@ -641,12 +667,14 @@ PerfCountersGetCounterValuesRaw(
 
     EsePerfCounterQuery* pcq = ( EsePerfCounterQuery* )hQuery;
 
+    // Acquire critical section.
     EnterCriticalSection( pcq->pcs );
     if ( pcq->fCollecting ){
         OutputError( "%s(): background data collection already under way!" CRLF, __FUNCTION__ );
         goto Cleanup;
     }
 
+    // We are OK to collect new data now.
     fSuccess = IPerfCountersGetCounterValuesRaw( pcq, pData1, pData2 );
     
 Cleanup:
@@ -666,6 +694,7 @@ IPerfCountersBackgroundCollection(
     double dTime;
     double dSample, dCoeff1, dCoeff2;
 
+    // Should we log the results?
     HANDLE hFile = INVALID_HANDLE_VALUE;
     if ( pcq->wszLogFile ){     
         hFile = CreateFileW( pcq->wszLogFile,
@@ -687,6 +716,7 @@ IPerfCountersBackgroundCollection(
         }
     }
 
+    // Flag that the thread has been started.
     SetEvent( pcq->hStopThread );
     dwInitialTime = dwCurrentTime = dwCurrentTime2 = GetTickCount();
     dTime = 0.0;
@@ -694,6 +724,7 @@ IPerfCountersBackgroundCollection(
     goto Collect;
 
     do{
+        // If the sampling period has already expired, do not go to sleep.
         dwCurrentTime2 = GetTickCount();
         if ( ( dwCurrentTime2 - dwCurrentTime ) < pcq->dwPeriod ){
             Sleep( pcq->dwPeriod - ( dwCurrentTime2 - dwCurrentTime ) );
@@ -701,13 +732,16 @@ IPerfCountersBackgroundCollection(
         dwCurrentTime = GetTickCount();
 Collect:
 
+        // Avoid time overflow.
         qwTime += ( ( ULONG64 )( dwCurrentTime - dwInitialTime ) - ( qwTime & 0xFFFFFFFFLL ) );
         dTime = ( ( double )( qwTime ) ) / 1000.0;
         dCoeff1 = qwTime ? ( ( (  double )qwTimePrev ) / ( ( double )qwTime ) ) : 0;
         dCoeff2 = qwTime ? ( ( ( double )( qwTime - qwTimePrev ) ) / ( ( double )qwTime ) ) : 1;
 
+        // Actually collect the data.
         if ( IPerfCountersGetCounterValues( pcq, pcq->pBuffer, FALSE ) )
             {
+            // Perform calculations.
             EnterCriticalSection( pcq->pcs );       
             DoubleArrayCopy( pcq->pMostRecent, pcq->pBuffer, pcq->cCounters );
             if ( pcq->cCollected < ( ( ULONG64 ) -1 ) ){
@@ -715,12 +749,14 @@ Collect:
             }
             for ( size_t i = 0; i < pcq->cCounters ; i++ ){
                 dSample = pcq->pBuffer[ i ];
+                // Min.
                 if ( pcq->pgrbitStats[ i ] & ESETEST_bitPCHelperCollectMin ){
                     if ( dSample < pcq->pDataMins[ i ] ){
                         pcq->pDataMins[ i ] = dSample;
                         pcq->pTimeMins[ i ] = dTime;
                     }
                 }
+                // Max.
                 if ( pcq->pgrbitStats[ i ] & ESETEST_bitPCHelperCollectMax ){
                     if (dSample > pcq->pDataMaxs[ i ] ){
                         pcq->pDataMaxs[ i ] = dSample;
@@ -728,10 +764,16 @@ Collect:
                     }
                 }
 
+                // Avg.
                 if ( pcq->pgrbitStats[ i ] & ESETEST_bitPCHelperCollectAvg ){
+                    // This is a floating-point version of the following discrete recursive formula:
+                    // X[ i ] = ( ( i - 1 ) / i ) * X[ i - 1 ] + ( 1 / i ) * x[ i ], where X is the avg. and x is the sample.
                     pcq->pDataAvgs[ i ] = dCoeff1 * pcq->pDataAvgs[ i ] + dCoeff2 * dSample;
 
+                    // Var.
                     if ( pcq->pgrbitStats[ i ] & ESETEST_bitPCHelperCollectVar ){
+                        // This is a floating-point version of the following discrete recursive formula:
+                        // V[ i ] = ( ( i - 1 ) / i ) * V[ i - 1 ] + ( 1 / i ) * ( x[ i ] - X[ i ] )^2, where X is the avg., x is the sample and V is the variance.
                         double dDeltaSqr = dSample - pcq->pDataAvgs[ i ];
                         dDeltaSqr *= dDeltaSqr;
                         pcq->pDataVars[ i ] = dCoeff1 * pcq->pDataVars[ i ] + dCoeff2 * dDeltaSqr;
@@ -743,6 +785,7 @@ Collect:
 
         qwTimePrev = qwTime;
 
+        // Write to the file.
         if ( INVALID_HANDLE_VALUE != hFile ){
             DWORD dw;
             CHAR szBuffer[ 32 ];
@@ -762,8 +805,10 @@ Collect:
         }
     } while( WAIT_OBJECT_0 == WaitForSingleObject( pcq->hStopThread, 0 ) );
 
+    // Close the file, if it was opened.
     CloseHandleP( &hFile );
 
+    // Flag that the thread doesn't need to manipulate resources anymore.
     SetEvent( pcq->hStopThread );   
     _endthread();
 }
@@ -800,12 +845,14 @@ PerfCountersStartCollectingStatsW(
 
     EsePerfCounterQuery* pcq = ( EsePerfCounterQuery* )hQuery;
 
+    // Acquire critical section.
     EnterCriticalSection( pcq->pcs );
     if ( pcq->fCollecting ){
         OutputError( "%s(): background data collection already under way!" CRLF, __FUNCTION__ );
         goto Cleanup;
     }
 
+    // We are OK to start background collection now.    
     pcq->pMostRecent = new double[ 8 * pcq->cCounters ];
     if ( NULL == pcq->pMostRecent ){
         OutputError( "%s(): failed to allocate memory for background collection (data)!" CRLF, __FUNCTION__ );
@@ -835,6 +882,7 @@ PerfCountersStartCollectingStatsW(
     pcq->dwPeriod = dwPeriod;
     if ( pgrbitStats ){
         for ( size_t i = 0; i < pcq->cCounters ; i++ ){
+            // We can't calculate the variance without the average.
             AssertM( ( pgrbitStats[ i ] & ( ESETEST_bitPCHelperCollectAvg | ESETEST_bitPCHelperCollectVar ) ) !=
                         ESETEST_bitPCHelperCollectVar );
             pcq->pgrbitStats[ i ] = pgrbitStats[ i ];
@@ -844,6 +892,7 @@ PerfCountersStartCollectingStatsW(
         memset( pcq->pgrbitStats, -1, pcq->cCounters * sizeof( *pcq->pgrbitStats ) );
     }
 
+    // Should we log the results?
     size_t cStrLen;
     if ( wszLogFile && ( ( cStrLen = wcslen( wszLogFile ) ) != 0 ) ){
         pcq->wszLogFile = new WCHAR[ cStrLen + 1 ];
@@ -854,6 +903,7 @@ PerfCountersStartCollectingStatsW(
         wcscpy( pcq->wszLogFile, wszLogFile );
     }
 
+    // Start background thread to collect data.
     pcq->hStopThread = CreateEventW( NULL, TRUE, FALSE, NULL);
     if ( NULL == pcq->hStopThread ){
         OutputError( "%s(): failed to create event!" CRLF, __FUNCTION__ );
@@ -903,12 +953,14 @@ PerfCountersRetrieveStats(
 
     EsePerfCounterQuery* pcq = ( EsePerfCounterQuery* )hQuery;
 
+    // Acquire critical section.
     EnterCriticalSection( pcq->pcs );
     if ( !pcq->fCollecting ){
         OutputError( "%s(): cannot retrieve statistics if no background collection is under way!" CRLF, __FUNCTION__ );
         goto Cleanup;
     }
 
+    // Just copy everything in case the pointers are valid.
     if ( pMostRecent ){
         memcpy( pMostRecent, pcq->pMostRecent, pcq->cCounters * sizeof( *pMostRecent ) );
     }
@@ -954,12 +1006,14 @@ PerfCountersStopCollectingStats(
 
     EsePerfCounterQuery* pcq = ( EsePerfCounterQuery* )hQuery;
 
+    // Acquire critical section.
     EnterCriticalSection( pcq->pcs );
     if ( !pcq->fCollecting ){
         goto Cleanup;
     }
     LeaveCriticalSection( pcq->pcs );
 
+    // Tell background thread to stop and free memory and resources.
     ResetEvent( pcq->hStopThread );
     WaitForSingleObject( pcq->hStopThread, INFINITE );  
     EnterCriticalSection( pcq->pcs );
@@ -1008,6 +1062,7 @@ PerfCountersDestroyQuery(
         }
     }
 
+    // Remove counters. Is this really necessary?
     if( pcq->hQuery != INVALID_HANDLE_VALUE ){
         for ( size_t i = 0; i < pcq->cCounters ; i++ ){
             if ( pcq->phCounters[ i ] != INVALID_HANDLE_VALUE ){
@@ -1017,6 +1072,7 @@ PerfCountersDestroyQuery(
         }
     }
     
+    // Free resrouces and memory.
     PDH_STATUS pdhStatus;
     if ( ERROR_SUCCESS != ( pdhStatus = pfnPdhCloseQuery( pcq->hQuery ) ) ){
         OutputWarning( "%s(): PdhCloseQuery() failed with %#x!" CRLF, __FUNCTION__, pdhStatus );
@@ -1030,6 +1086,7 @@ PerfCountersDestroyQuery(
 }
 
 #else
+//Windows Phone
 BOOL
 PerfCountersExist()
 {

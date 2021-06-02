@@ -2,8 +2,11 @@
 // Licensed under the MIT License.
 #include "resmgremulatorunit.hxx"
 
+// Unit test class
 
+//  ================================================================
 class ResMgrEmulatorLRU1Test : public UNITTEST
+//  ================================================================
 {
     private:
         static ResMgrEmulatorLRU1Test s_instance;
@@ -48,7 +51,9 @@ bool ResMgrEmulatorLRU1Test::FRunUnderESENT() const         { return true; }
 bool ResMgrEmulatorLRU1Test::FRunUnderESE97() const         { return true; }
 
 
+//  ================================================================
 ERR ResMgrEmulatorLRU1Test::ErrTest()
+//  ================================================================
 {
     ERR err = JET_errSuccess;
     
@@ -67,8 +72,19 @@ HandleError:
     return err;
 }
 
+//  ================================================================
 BFTRACE* ResMgrEmulatorLRU1Test::RgBFTracePrepareSuperColdTest_( const bool fReplaySuperCold )
+//  ================================================================
 {
+    //  Scenario:
+    //  - Init; (1)
+    //  - Cache 101 pages; (102)
+    //  - Supercold 2nd half of the pages; (152)
+    //  - Evict/purge first page; (153)
+    //  - Evict/scavenge 1st or 2nd half of the pages; (203)
+    //  - Evict/purge 1st or 2nd half of the pages; (253)
+    //  - Term; (254)
+    //  - Sentinel. (255)
 
     BFTRACE* const rgbftrace = new BFTRACE[ 255 ];
 
@@ -81,6 +97,7 @@ BFTRACE* ResMgrEmulatorLRU1Test::RgBFTracePrepareSuperColdTest_( const bool fRep
     size_t iTrace = 0;
     TICK tick = 1000;
 
+    //  - Init; (1)
 
     rgbftrace[ iTrace ].tick = tick;
     rgbftrace[ iTrace ].traceid = bftidSysResMgrInit;
@@ -95,6 +112,7 @@ BFTRACE* ResMgrEmulatorLRU1Test::RgBFTracePrepareSuperColdTest_( const bool fRep
     iTrace++;
     tick += 2000;
 
+    //  - Cache 101 pages; (102)
 
     for ( PGNO pgno = 0; iTrace < 102; iTrace++ )
     {
@@ -109,6 +127,7 @@ BFTRACE* ResMgrEmulatorLRU1Test::RgBFTracePrepareSuperColdTest_( const bool fRep
         tick += 2000;
     }
 
+    //  - Supercold 2nd half of the pages; (152)
 
     for ( PGNO pgno = 51; iTrace < 152; iTrace++ )
     {
@@ -121,6 +140,7 @@ BFTRACE* ResMgrEmulatorLRU1Test::RgBFTracePrepareSuperColdTest_( const bool fRep
         tick += 2000;
     }
 
+    //  - Evict/purge first page; (153)
 
     rgbftrace[ iTrace ].tick = tick;
     rgbftrace[ iTrace ].traceid = bftidEvict;
@@ -133,6 +153,7 @@ BFTRACE* ResMgrEmulatorLRU1Test::RgBFTracePrepareSuperColdTest_( const bool fRep
     iTrace++;
     tick += 2000;
 
+    //  - Evict/scavenge 1st or 2nd half of the pages; (203)
 
     for ( PGNO pgno = fReplaySuperCold ? 51 : 1; iTrace < 203; iTrace++ )
     {
@@ -148,6 +169,7 @@ BFTRACE* ResMgrEmulatorLRU1Test::RgBFTracePrepareSuperColdTest_( const bool fRep
         tick += 2000;
     }
 
+    //  - Evict/purge 1st or 2nd half of the pages; (253)
 
     for ( PGNO pgno = fReplaySuperCold ? 1 : 51; iTrace < 253; iTrace++ )
     {
@@ -163,19 +185,33 @@ BFTRACE* ResMgrEmulatorLRU1Test::RgBFTracePrepareSuperColdTest_( const bool fRep
         tick += 2000;
     }
 
+    //  - Term; (254)
 
     rgbftrace[ iTrace ].tick = tick;
     rgbftrace[ iTrace ].traceid = bftidSysResMgrTerm;
     iTrace++;
 
+    //  - Sentinel. (255)
 
     rgbftrace[ iTrace ].traceid = bftidInvalid;
 
     return rgbftrace;
 }
 
+//  ================================================================
 BFTRACE* ResMgrEmulatorLRU1Test::RgBFTracePrepareSuperColdTestOrderNotGuranteed_()
+//  ================================================================
 {
+    //  Scenario:
+    //  - Init; (1)
+    //  - Cache 101 pages; (102)
+    //  - Supercold 2nd half of the pages; (152)
+    //  - Evict/purge first page; (153)
+    //  - Evict/scavenge 2nd half of the pages; (203)
+    //  - Touch 1st half of the pages; (253)
+    //  - Evict/purge 1st half of the pages; (303)
+    //  - Term; (304)
+    //  - Sentinel. (305)
 
     BFTRACE* const rgbftrace = new BFTRACE[ 305 ];
 
@@ -188,6 +224,7 @@ BFTRACE* ResMgrEmulatorLRU1Test::RgBFTracePrepareSuperColdTestOrderNotGuranteed_
     size_t iTrace = 0;
     TICK tick = 1000;
 
+    //  - Init; (1)
 
     rgbftrace[ iTrace ].tick = tick;
     rgbftrace[ iTrace ].traceid = bftidSysResMgrInit;
@@ -202,6 +239,7 @@ BFTRACE* ResMgrEmulatorLRU1Test::RgBFTracePrepareSuperColdTestOrderNotGuranteed_
     iTrace++;
     tick += 2000;
 
+    //  - Cache 101 pages; (102)
 
     for ( PGNO pgno = 0; iTrace < 102; iTrace++ )
     {
@@ -216,6 +254,7 @@ BFTRACE* ResMgrEmulatorLRU1Test::RgBFTracePrepareSuperColdTestOrderNotGuranteed_
         tick += 2000;
     }
 
+    //  - Supercold 2nd half of the pages; (152)
 
     for ( PGNO pgno = 51; iTrace < 152; iTrace++ )
     {
@@ -228,6 +267,7 @@ BFTRACE* ResMgrEmulatorLRU1Test::RgBFTracePrepareSuperColdTestOrderNotGuranteed_
         tick += 2000;
     }
 
+    //  - Evict/purge first page; (153)
 
     rgbftrace[ iTrace ].tick = tick;
     rgbftrace[ iTrace ].traceid = bftidEvict;
@@ -240,6 +280,7 @@ BFTRACE* ResMgrEmulatorLRU1Test::RgBFTracePrepareSuperColdTestOrderNotGuranteed_
     iTrace++;
     tick += 2000;
 
+    //  - Evict/scavenge 2nd half of the pages; (203)
 
     for ( PGNO pgno = 51; iTrace < 203; iTrace++ )
     {
@@ -255,6 +296,7 @@ BFTRACE* ResMgrEmulatorLRU1Test::RgBFTracePrepareSuperColdTestOrderNotGuranteed_
         tick += 2000;
     }
 
+    //  - Touch 1st half of the pages; (253)
 
     for ( PGNO pgno = 1; iTrace < 253; iTrace++ )
     {
@@ -269,6 +311,7 @@ BFTRACE* ResMgrEmulatorLRU1Test::RgBFTracePrepareSuperColdTestOrderNotGuranteed_
         tick += 2000;
     }
 
+    //  - Evict/purge 1st half of the pages; (303)
 
     for ( PGNO pgno = 1; iTrace < 303; iTrace++ )
     {
@@ -284,19 +327,30 @@ BFTRACE* ResMgrEmulatorLRU1Test::RgBFTracePrepareSuperColdTestOrderNotGuranteed_
         tick += 2000;
     }
 
+    //  - Term; (304)
 
     rgbftrace[ iTrace ].tick = tick;
     rgbftrace[ iTrace ].traceid = bftidSysResMgrTerm;
     iTrace++;
 
+    //  - Sentinel. (305)
 
     rgbftrace[ iTrace ].traceid = bftidInvalid;
 
     return rgbftrace;
 }
 
+//  ================================================================
 BFTRACE* ResMgrEmulatorLRU1Test::RgBFTracePrepareCachePriorityTest_( const bool fReplayCachePriority )
+//  ================================================================
 {
+    //  Scenario:
+    //  - Init; (1)
+    //  - Cache 101 pages, pgno 50 page with a cache priority of 15; (102)
+    //  - Touch pgno 50 with a cache priority of 15; (103)
+    //  - Evict/scavenge all pages; (204)
+    //  - Term; (205)
+    //  - Sentinel. (206)
 
     BFTRACE* const rgbftrace = new BFTRACE[ 206 ];
 
@@ -309,6 +363,7 @@ BFTRACE* ResMgrEmulatorLRU1Test::RgBFTracePrepareCachePriorityTest_( const bool 
     size_t iTrace = 0;
     TICK tick = 1;
 
+    //  - Init; (1)
 
     rgbftrace[ iTrace ].tick = tick;
     rgbftrace[ iTrace ].traceid = bftidSysResMgrInit;
@@ -322,6 +377,7 @@ BFTRACE* ResMgrEmulatorLRU1Test::RgBFTracePrepareCachePriorityTest_( const bool 
     pbfinit->dblSpeedSizeTradeoff = 0.0;
     iTrace++;
 
+    //  - Cache 101 pages, pgno 50 page with a cache priority of 15; (102)
 
     for ( PGNO pgno = 0; iTrace < 102; iTrace++ )
     {
@@ -336,6 +392,7 @@ BFTRACE* ResMgrEmulatorLRU1Test::RgBFTracePrepareCachePriorityTest_( const bool 
         tick += 1500;
     }
 
+    //  - Touch the pgno 50 with a cache priority of 15; (103)
 
     rgbftrace[ iTrace ].tick = tick;
     rgbftrace[ iTrace ].traceid = bftidTouch;
@@ -347,6 +404,7 @@ BFTRACE* ResMgrEmulatorLRU1Test::RgBFTracePrepareCachePriorityTest_( const bool 
     iTrace++;
     tick += 1500;
 
+    //  - Evict/scavenge all pages; (204)
 
     PGNO rgpgno[ 101 ] = { 0 };
 
@@ -394,19 +452,29 @@ BFTRACE* ResMgrEmulatorLRU1Test::RgBFTracePrepareCachePriorityTest_( const bool 
         tick += 1500;
     }
 
+    //  - Term; (205)
 
     rgbftrace[ iTrace ].tick = tick;
     rgbftrace[ iTrace ].traceid = bftidSysResMgrTerm;
     iTrace++;
 
+    //  - Sentinel. (206)
 
     rgbftrace[ iTrace ].traceid = bftidInvalid;
 
     return rgbftrace;
 }
 
+//  ================================================================
 BFTRACE* ResMgrEmulatorLRU1Test::RgBFTracePrepareEvictNextOnShrinkTest_( const bool fEvictNextOnShrink )
+//  ================================================================
 {
+    //  Scenario:
+    //  - Init; (1)
+    //  - Cache 100 pages; (101)
+    //  - Evict/shrink all pages; (201)
+    //  - Term; (202)
+    //  - Sentinel. (203)
 
     BFTRACE* const rgbftrace = new BFTRACE[ 203 ];
 
@@ -419,6 +487,7 @@ BFTRACE* ResMgrEmulatorLRU1Test::RgBFTracePrepareEvictNextOnShrinkTest_( const b
     size_t iTrace = 0;
     TICK tick = 1000;
 
+    //  - Init; (1)
 
     rgbftrace[ iTrace ].tick = tick;
     rgbftrace[ iTrace ].traceid = bftidSysResMgrInit;
@@ -433,6 +502,7 @@ BFTRACE* ResMgrEmulatorLRU1Test::RgBFTracePrepareEvictNextOnShrinkTest_( const b
     iTrace++;
     tick += 2000;
 
+    //  - Cache 100 pages; (101)
 
     for ( PGNO pgno = 1; iTrace < 101; iTrace++ )
     {
@@ -447,6 +517,7 @@ BFTRACE* ResMgrEmulatorLRU1Test::RgBFTracePrepareEvictNextOnShrinkTest_( const b
         tick += 2000;
     }
 
+    //  - Evict/shrink all pages; (201)
 
     for ( PGNO pgno = fEvictNextOnShrink ? 1 : 100; iTrace < 201; iTrace++ )
     {
@@ -469,18 +540,22 @@ BFTRACE* ResMgrEmulatorLRU1Test::RgBFTracePrepareEvictNextOnShrinkTest_( const b
         tick += 2000;
     }
 
+    //  - Term; (202)
 
     rgbftrace[ iTrace ].tick = tick;
     rgbftrace[ iTrace ].traceid = bftidSysResMgrTerm;
     iTrace++;
 
+    //  - Sentinel. (203)
 
     rgbftrace[ iTrace ].traceid = bftidInvalid;
 
     return rgbftrace;
 }
 
+//  ================================================================
 ERR ResMgrEmulatorLRU1Test::ErrSuperColdYesLRU1Test_()
+//  ================================================================
 {
     ERR err = JET_errSuccess;
 
@@ -493,18 +568,22 @@ ERR ResMgrEmulatorLRU1Test::ErrSuperColdYesLRU1Test_()
     BFTRACE* const rgbftrace = RgBFTracePrepareSuperColdTest_( true );
     TestCheck( rgbftrace != NULL );
 
+    //  Init driver.
 
     TestCall( ErrBFFTLInit( rgbftrace, fBFFTLDriverTestMode, &pbfftlc ) );
 
+    //  Fill in database info.
 
     pbfftlc->cIFMP = 2;
     pbfftlc->rgpgnoMax[ 0 ] = 100;
     pbfftlc->rgpgnoMax[ 1 ] = 100;
 
+    //  Init./run.
     
     TestCall( emulator.ErrInit( pbfftlc, &algorithm ) );
     TestCall( emulator.ErrExecute() );
 
+    //  Validation.
 
     const PageEvictionEmulator::STATS_AGG& stats = emulator.GetStats();
     TestCall( emulator.ErrDumpStats( false ) );
@@ -557,7 +636,9 @@ HandleError:
     return err;
 }
 
+//  ================================================================
 ERR ResMgrEmulatorLRU1Test::ErrSuperColdNoLRU1Test_()
+//  ================================================================
 {
     ERR err = JET_errSuccess;
 
@@ -570,19 +651,23 @@ ERR ResMgrEmulatorLRU1Test::ErrSuperColdNoLRU1Test_()
     BFTRACE* const rgbftrace = RgBFTracePrepareSuperColdTest_( false );
     TestCheck( rgbftrace != NULL );
 
+    //  Init driver.
 
     TestCall( ErrBFFTLInit( rgbftrace, fBFFTLDriverTestMode, &pbfftlc ) );
 
+    //  Fill in database info.
 
     pbfftlc->cIFMP = 2;
     pbfftlc->rgpgnoMax[ 0 ] = 100;
     pbfftlc->rgpgnoMax[ 1 ] = 100;
 
+    //  Init./run.
 
     TestCall( emulator.ErrSetReplaySuperCold( false ) );
     TestCall( emulator.ErrInit( pbfftlc, &algorithm ) );
     TestCall( emulator.ErrExecute() );
 
+    //  Validation.
 
     const PageEvictionEmulator::STATS_AGG& stats = emulator.GetStats();
     TestCall( emulator.ErrDumpStats( false ) );
@@ -635,7 +720,9 @@ HandleError:
     return err;
 }
 
+//  ================================================================
 ERR ResMgrEmulatorLRU1Test::ErrCachePriorityYesLRU1Test_()
+//  ================================================================
 {
     ERR err = JET_errSuccess;
 
@@ -648,18 +735,22 @@ ERR ResMgrEmulatorLRU1Test::ErrCachePriorityYesLRU1Test_()
     BFTRACE* const rgbftrace = RgBFTracePrepareCachePriorityTest_( true );
     TestCheck( rgbftrace != NULL );
 
+    //  Init driver.
 
     TestCall( ErrBFFTLInit( rgbftrace, fBFFTLDriverTestMode, &pbfftlc ) );
 
+    //  Fill in database info.
 
     pbfftlc->cIFMP = 2;
     pbfftlc->rgpgnoMax[ 0 ] = 100;
     pbfftlc->rgpgnoMax[ 1 ] = 100;
 
+    //  Init./run.
     
     TestCall( emulator.ErrInit( pbfftlc, &algorithm ) );
     TestCall( emulator.ErrExecute() );
 
+    //  Validation.
 
     const PageEvictionEmulator::STATS_AGG& stats = emulator.GetStats();
     TestCall( emulator.ErrDumpStats( false ) );
@@ -712,7 +803,9 @@ HandleError:
     return err;
 }
 
+//  ================================================================
 ERR ResMgrEmulatorLRU1Test::ErrCachePriorityNoLRU1Test_()
+//  ================================================================
 {
     ERR err = JET_errSuccess;
 
@@ -725,19 +818,23 @@ ERR ResMgrEmulatorLRU1Test::ErrCachePriorityNoLRU1Test_()
     BFTRACE* const rgbftrace = RgBFTracePrepareCachePriorityTest_( false );
     TestCheck( rgbftrace != NULL );
 
+    //  Init driver.
 
     TestCall( ErrBFFTLInit( rgbftrace, fBFFTLDriverTestMode, &pbfftlc ) );
 
+    //  Fill in database info.
 
     pbfftlc->cIFMP = 2;
     pbfftlc->rgpgnoMax[ 0 ] = 100;
     pbfftlc->rgpgnoMax[ 1 ] = 100;
 
+    //  Init./run.
 
     TestCall( emulator.ErrSetReplayCachePriority( false ) );    
     TestCall( emulator.ErrInit( pbfftlc, &algorithm ) );
     TestCall( emulator.ErrExecute() );
 
+    //  Validation.
 
     const PageEvictionEmulator::STATS_AGG& stats = emulator.GetStats();
     TestCall( emulator.ErrDumpStats( false ) );
@@ -790,7 +887,9 @@ HandleError:
     return err;
 }
 
+//  ================================================================
 ERR ResMgrEmulatorLRU1Test::ErrEvictNextOnShrinkYesLRU1Test_()
+//  ================================================================
 {
     ERR err = JET_errSuccess;
 
@@ -803,18 +902,22 @@ ERR ResMgrEmulatorLRU1Test::ErrEvictNextOnShrinkYesLRU1Test_()
     BFTRACE* const rgbftrace = RgBFTracePrepareEvictNextOnShrinkTest_( true );
     TestCheck( rgbftrace != NULL );
 
+    //  Init driver.
 
     TestCall( ErrBFFTLInit( rgbftrace, fBFFTLDriverTestMode, &pbfftlc ) );
 
+    //  Fill in database info.
 
     pbfftlc->cIFMP = 2;
     pbfftlc->rgpgnoMax[ 0 ] = 100;
     pbfftlc->rgpgnoMax[ 1 ] = 100;
 
+    //  Init./run.
     
     TestCall( emulator.ErrInit( pbfftlc, &algorithm ) );
     TestCall( emulator.ErrExecute() );
 
+    //  Validation.
     const PageEvictionEmulator::STATS_AGG& stats = emulator.GetStats();
     TestCall( emulator.ErrDumpStats( false ) );
 
@@ -866,7 +969,9 @@ HandleError:
     return err;
 }
 
+//  ================================================================
 ERR ResMgrEmulatorLRU1Test::ErrEvictNextOnShrinkNoLRU1Test_()
+//  ================================================================
 {
     ERR err = JET_errSuccess;
 
@@ -879,19 +984,23 @@ ERR ResMgrEmulatorLRU1Test::ErrEvictNextOnShrinkNoLRU1Test_()
     BFTRACE* const rgbftrace = RgBFTracePrepareEvictNextOnShrinkTest_( false );
     TestCheck( rgbftrace != NULL );
 
+    //  Init driver.
 
     TestCall( ErrBFFTLInit( rgbftrace, fBFFTLDriverTestMode, &pbfftlc ) );
 
+    //  Fill in database info.
 
     pbfftlc->cIFMP = 2;
     pbfftlc->rgpgnoMax[ 0 ] = 100;
     pbfftlc->rgpgnoMax[ 1 ] = 100;
 
+    //  Init./run.
 
     TestCall( emulator.ErrSetEvictNextOnShrink( false ) );  
     TestCall( emulator.ErrInit( pbfftlc, &algorithm ) );
     TestCall( emulator.ErrExecute() );
 
+    //  Validation.
 
     const PageEvictionEmulator::STATS_AGG& stats = emulator.GetStats();
     TestCall( emulator.ErrDumpStats( false ) );
@@ -944,7 +1053,9 @@ HandleError:
     return err;
 }
 
+//  ================================================================
 ERR ResMgrEmulatorLRU1Test::ErrSuperColdYesLRU1ESE_()
+//  ================================================================
 {
     ERR err = JET_errSuccess;
 
@@ -957,18 +1068,22 @@ ERR ResMgrEmulatorLRU1Test::ErrSuperColdYesLRU1ESE_()
     BFTRACE* const rgbftrace = RgBFTracePrepareSuperColdTestOrderNotGuranteed_();
     TestCheck( rgbftrace != NULL );
 
+    //  Init driver.
 
     TestCall( ErrBFFTLInit( rgbftrace, fBFFTLDriverTestMode, &pbfftlc ) );
 
+    //  Fill in database info.
 
     pbfftlc->cIFMP = 2;
     pbfftlc->rgpgnoMax[ 0 ] = 100;
     pbfftlc->rgpgnoMax[ 1 ] = 100;
 
+    //  Init./run.
     
     TestCall( emulator.ErrInit( pbfftlc, &algorithm ) );
     TestCall( emulator.ErrExecute() );
 
+    //  Validation.
 
     const PageEvictionEmulator::STATS_AGG& stats = emulator.GetStats();
     TestCall( emulator.ErrDumpStats( false ) );
@@ -1018,7 +1133,9 @@ HandleError:
     return err;
 }
 
+//  ================================================================
 ERR ResMgrEmulatorLRU1Test::ErrSuperColdNoLRU1ESE_()
+//  ================================================================
 {
     ERR err = JET_errSuccess;
 
@@ -1031,19 +1148,23 @@ ERR ResMgrEmulatorLRU1Test::ErrSuperColdNoLRU1ESE_()
     BFTRACE* const rgbftrace = RgBFTracePrepareSuperColdTest_( false );
     TestCheck( rgbftrace != NULL );
 
+    //  Init driver.
 
     TestCall( ErrBFFTLInit( rgbftrace, fBFFTLDriverTestMode, &pbfftlc ) );
 
+    //  Fill in database info.
 
     pbfftlc->cIFMP = 2;
     pbfftlc->rgpgnoMax[ 0 ] = 100;
     pbfftlc->rgpgnoMax[ 1 ] = 100;
 
+    //  Init./run.
     
     TestCall( emulator.ErrSetReplaySuperCold( false ) );
     TestCall( emulator.ErrInit( pbfftlc, &algorithm ) );
     TestCall( emulator.ErrExecute() );
 
+    //  Validation.
 
     const PageEvictionEmulator::STATS_AGG& stats = emulator.GetStats();
     TestCall( emulator.ErrDumpStats( false ) );
@@ -1096,7 +1217,9 @@ HandleError:
     return err;
 }
 
+//  ================================================================
 ERR ResMgrEmulatorLRU1Test::ErrCachePriorityYesLRU1ESE_()
+//  ================================================================
 {
     ERR err = JET_errSuccess;
 
@@ -1109,18 +1232,22 @@ ERR ResMgrEmulatorLRU1Test::ErrCachePriorityYesLRU1ESE_()
     BFTRACE* const rgbftrace = RgBFTracePrepareCachePriorityTest_( true );
     TestCheck( rgbftrace != NULL );
 
+    //  Init driver.
 
     TestCall( ErrBFFTLInit( rgbftrace, fBFFTLDriverTestMode, &pbfftlc ) );
 
+    //  Fill in database info.
 
     pbfftlc->cIFMP = 2;
     pbfftlc->rgpgnoMax[ 0 ] = 100;
     pbfftlc->rgpgnoMax[ 1 ] = 100;
 
+    //  Init./run.
     
     TestCall( emulator.ErrInit( pbfftlc, &algorithm ) );
     TestCall( emulator.ErrExecute() );
 
+    //  Validation.
 
     const PageEvictionEmulator::STATS_AGG& stats = emulator.GetStats();
     TestCall( emulator.ErrDumpStats( false ) );
@@ -1173,7 +1300,9 @@ HandleError:
     return err;
 }
 
+//  ================================================================
 ERR ResMgrEmulatorLRU1Test::ErrCachePriorityNoLRU1ESE_()
+//  ================================================================
 {
     ERR err = JET_errSuccess;
 
@@ -1186,19 +1315,23 @@ ERR ResMgrEmulatorLRU1Test::ErrCachePriorityNoLRU1ESE_()
     BFTRACE* const rgbftrace = RgBFTracePrepareCachePriorityTest_( false );
     TestCheck( rgbftrace != NULL );
 
+    //  Init driver.
 
     TestCall( ErrBFFTLInit( rgbftrace, fBFFTLDriverTestMode, &pbfftlc ) );
 
+    //  Fill in database info.
 
     pbfftlc->cIFMP = 2;
     pbfftlc->rgpgnoMax[ 0 ] = 100;
     pbfftlc->rgpgnoMax[ 1 ] = 100;
 
+    //  Init./run.
 
     TestCall( emulator.ErrSetReplayCachePriority( false ) );    
     TestCall( emulator.ErrInit( pbfftlc, &algorithm ) );
     TestCall( emulator.ErrExecute() );
 
+    //  Validation.
 
     const PageEvictionEmulator::STATS_AGG& stats = emulator.GetStats();
     TestCall( emulator.ErrDumpStats( false ) );

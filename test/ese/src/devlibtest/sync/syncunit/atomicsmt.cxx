@@ -4,6 +4,7 @@
 #include "syncunittest.hxx"
 #include "sync.hxx"
 
+//  Test class.
 
 class AtomicAddTest
 {
@@ -105,6 +106,7 @@ bool AtomicAddTest::FSuceeded() const
     return m_fSuceeded;
 }
 
+//  Test fixture.
 
 class CAtomicsMultiThreadedTest : public UNITTEST
 {

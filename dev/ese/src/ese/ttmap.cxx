@@ -3,7 +3,9 @@
 
 #include "std.hxx"
 
+//  ================================================================
 TTMAP::TTMAP( PIB * const ppib ) :
+//  ================================================================
     m_tableid( JET_tableidNil ),
     m_sesid( reinterpret_cast<JET_SESID>( ppib ) ),
     m_columnidKey( 0 ),
@@ -13,7 +15,9 @@ TTMAP::TTMAP( PIB * const ppib ) :
 }
 
 
+//  ================================================================
 TTMAP::~TTMAP()
+//  ================================================================
 {
     if( JET_tableidNil != m_tableid )
     {
@@ -23,13 +27,15 @@ TTMAP::~TTMAP()
 }
 
 
+//  ================================================================
 ERR TTMAP::ErrInit( INST * const )
+//  ================================================================
 {
     ERR err = JET_errSuccess;
 
     JET_COLUMNDEF   rgcolumndef[2] = {
-            { sizeof( JET_COLUMNDEF ), 0, JET_coltypUnsignedLongLong, 0, 0, 0, 0, JET_cbKeyMost_OLD, JET_bitColumnTTKey },
-        { sizeof( JET_COLUMNDEF ), 0, JET_coltypLong, 0, 0, 0, 0, 0, 0 },
+            { sizeof( JET_COLUMNDEF ), 0, JET_coltypUnsignedLongLong, 0, 0, 0, 0, JET_cbKeyMost_OLD, JET_bitColumnTTKey },  //  Key
+        { sizeof( JET_COLUMNDEF ), 0, JET_coltypLong, 0, 0, 0, 0, 0, 0 },                               //  Value
     };
     JET_COLUMNID    rgcolumnid[sizeof(rgcolumndef)/sizeof(JET_COLUMNDEF)];
 
@@ -51,7 +57,9 @@ ERR TTMAP::ErrInit( INST * const )
 }
 
 
+//  ================================================================
 ERR TTMAP::ErrInsertKeyValue_( const unsigned __int64 ui64Key, const ULONG ulValue )
+//  ================================================================
 {
     ERR err = JET_errSuccess;
 
@@ -95,7 +103,9 @@ HandleError:
 }
 
 
+//  ================================================================
 ERR TTMAP::ErrRetrieveValue_( const unsigned __int64 ui64Key, ULONG * const pulValue ) const
+//  ================================================================
 {
     ERR err = JET_errSuccess;
 
@@ -128,7 +138,9 @@ ERR TTMAP::ErrRetrieveValue_( const unsigned __int64 ui64Key, ULONG * const pulV
 }
 
 
+//  ================================================================
 ERR TTMAP::ErrIncrementValue( const unsigned __int64 ui64Key )
+//  ================================================================
 {
     ERR     err         = JET_errSuccess;
     BOOL    fUpdatePrepared = fFalse;
@@ -187,7 +199,9 @@ HandleError:
 }
 
 
+//  ================================================================
 ERR TTMAP::ErrSetValue( const unsigned __int64 ui64Key, const ULONG ulValue )
+//  ================================================================
 {
     ERR     err         = JET_errSuccess;
     BOOL    fUpdatePrepared = fFalse;
@@ -235,13 +249,17 @@ HandleError:
 }
 
 
+//  ================================================================
 ERR TTMAP::ErrGetValue( const unsigned __int64 ui64Key, ULONG * const pulValue ) const
+//  ================================================================
 {
     return ErrRetrieveValue_( ui64Key, pulValue );
 }
 
 
+//  ================================================================
 ERR TTMAP::ErrGetCurrentKeyValue( unsigned __int64 * const pui64Key, ULONG * const pulValue ) const
+//  ================================================================
 {
     ERR err = JET_errSuccess;
 
@@ -279,7 +297,9 @@ HandleError:
 }
 
 
+//  ================================================================
 ERR TTMAP::ErrDeleteKey( const unsigned __int64 ui64Key )
+//  ================================================================
 {
     ERR err = JET_errSuccess;
 
@@ -305,7 +325,9 @@ HandleError:
 }
 
 
+//  ================================================================
 ERR TTMAP::ErrMoveFirst()
+//  ================================================================
 {
     if( JET_tableidNil == m_tableid )
     {
@@ -318,7 +340,9 @@ ERR TTMAP::ErrMoveFirst()
 }
 
 
+//  ================================================================
 ERR TTMAP::ErrMoveNext()
+//  ================================================================
 {
     if( JET_tableidNil == m_tableid )
     {
@@ -329,7 +353,9 @@ ERR TTMAP::ErrMoveNext()
 }
 
 
+//  ================================================================
 ERR TTMAP::ErrFEmpty( BOOL * const pfEmpty ) const
+//  ================================================================
 {
     if( JET_tableidNil == m_tableid )
     {
@@ -363,14 +389,16 @@ ERR TTMAP::ErrFEmpty( BOOL * const pfEmpty ) const
 
         Assert( JET_errSuccess == errT );
     }
-#endif
+#endif  //  DEBUG
 
 HandleError:
     return err;
 }
 
 
+//  ================================================================
 TTARRAY::TTARRAY( const ULONG culEntries, const ULONG ulDefault ) :
+//  ================================================================
     m_culEntries( culEntries ),
     m_ulDefault( ulDefault ),
     m_ppib( ppibNil ),
@@ -381,8 +409,11 @@ TTARRAY::TTARRAY( const ULONG culEntries, const ULONG ulDefault ) :
 }
 
 
+//  ================================================================
 TTARRAY::~TTARRAY()
+//  ================================================================
 {
+    //  delete our bit-map of init space if it exists
 
     if ( m_rgbitInit )
     {
@@ -390,6 +421,7 @@ TTARRAY::~TTARRAY()
         m_rgbitInit = NULL;
     }
 
+    //  delete the dummy table if it exists
 
     if ( m_pfucb != pfucbNil )
     {
@@ -397,6 +429,7 @@ TTARRAY::~TTARRAY()
         m_pfucb = pfucbNil;
     }
 
+    //  close our session
 
     if ( m_ppib != ppibNil )
     {
@@ -408,15 +441,20 @@ TTARRAY::~TTARRAY()
 
 DWORD TTARRAY::s_cTTArray = 0;
 
+//  ================================================================
 ERR TTARRAY::ErrInit( INST * const pinst )
+//  ================================================================
 {
     ERR                 err                     = JET_errSuccess;
     CHAR                szName[JET_cbNameMost+1];
     JET_TABLECREATE5_A  tablecreate;
 
+    //  get a session
 
     Call( ErrPIBBeginSession( pinst, &m_ppib, procidNil, fFalse ) );
 
+    //  create a dummy table large enough to contain all the elements of the array
+    //  as well as the FDP
 
     DWORD cpg;
     cpg = sizeof( DWORD ) * m_culEntries / g_cbPage + 1;
@@ -450,6 +488,7 @@ ERR TTARRAY::ErrInit( INST * const pinst )
 
     m_pgnoFirst = m_pfucb->u.pfcb->PgnoFDP() + 16;
 
+    //  issue a preread for up to the first 512 pages of the map file
     {
         TraceContextScope tcScope( iortSort );
         tcScope->nParentObjectClass = tceNone;
@@ -458,6 +497,10 @@ ERR TTARRAY::ErrInit( INST * const pinst )
         BFPrereadPageRange( m_pfucb->ifmp, m_pgnoFirst, min( 512, cpg ), bfprfDefault, m_ppib->BfpriPriority( m_pfucb->ifmp ), *tcScope );
     }
 
+    //  allocate a bit-map to represent init space in the array.  the array will
+    //  be pre-initialized to zero by the OS
+    //
+    //  NOTE:  the largest possible amount of memory allocated will be 512KB
 
     if ( !( m_rgbitInit = (ULONG*)PvOSMemoryPageAlloc( cpg / 8 + 1, NULL ) ) )
     {
@@ -469,12 +512,18 @@ HandleError:
 }
 
 
+//  ================================================================
 VOID TTARRAY::BeginRun( PIB* const ppib, RUN* const prun )
+//  ================================================================
 {
+    //  nop
 }
 
+//  ================================================================
 VOID TTARRAY::EndRun( PIB* const ppib, RUN* const prun )
+//  ================================================================
 {
+    //  unlatch existing page if any
 
     if ( prun->pgno != pgnoNull )
     {
@@ -490,7 +539,9 @@ VOID TTARRAY::EndRun( PIB* const ppib, RUN* const prun )
     }
 }
 
+//  ================================================================
 ERR TTARRAY::ErrSetValue( PIB * const ppib, const ULONG ulEntry, const ULONG ulValue, RUN* const prun )
+//  ================================================================
 {
     ERR err = JET_errSuccess;
 
@@ -499,9 +550,11 @@ ERR TTARRAY::ErrSetValue( PIB * const ppib, const ULONG ulEntry, const ULONG ulV
         return ErrERRCheck( JET_errRecordNotFound );
     }
 
+    //  compute the pgno that this entry lives on
 
     const PGNO pgno = m_pgnoFirst + ulEntry / ( g_cbPage / sizeof( DWORD ) );
 
+    //  we do not already have this page latched
 
     RUN runT;
     runT.pgno           = pgnoNull;
@@ -514,6 +567,7 @@ ERR TTARRAY::ErrSetValue( PIB * const ppib, const ULONG ulEntry, const ULONG ulV
 
     if ( prunT->pgno != pgno )
     {
+        //  unlatch existing page if any
 
         if ( prunT->pgno != pgnoNull )
         {
@@ -529,9 +583,10 @@ ERR TTARRAY::ErrSetValue( PIB * const ppib, const ULONG ulEntry, const ULONG ulV
             prunT->fWriteLatch  = fFalse;
         }
 
+        //  latch the new page
 
         Call( ErrBFRDWLatchPage( &prunT->bfl, m_pfucb->ifmp, pgno, bflfDefault, ppib->BfpriPriority( m_pfucb->ifmp ), *tcRef ) );
-        err = JET_errSuccess;
+        err = JET_errSuccess;   // clobber warnings.
         prunT->pgno         = pgno;
         prunT->fWriteLatch  = fFalse;
     }
@@ -542,9 +597,11 @@ ERR TTARRAY::ErrSetValue( PIB * const ppib, const ULONG ulEntry, const ULONG ulV
         prunT->fWriteLatch  = fTrue;
     }
 
+    //  the page is not yet init
 
     if ( !FPageInit( pgno ) )
     {
+        //  init the page
 
         DWORD iEntryMax;
         iEntryMax = g_cbPage / sizeof( DWORD );
@@ -555,10 +612,12 @@ ERR TTARRAY::ErrSetValue( PIB * const ppib, const ULONG ulEntry, const ULONG ulV
             *( (ULONG*) prunT->bfl.pv + iEntry ) = m_ulDefault;
         }
 
+        //  mark the page as init
 
         SetPageInit( pgno );
     }
 
+    //  set the value on the page
 
     DWORD iEntry;
     iEntry = ulEntry % ( g_cbPage / sizeof( DWORD ) );
@@ -576,7 +635,9 @@ HandleError:
 }
 
 
+//  ================================================================
 ERR TTARRAY::ErrGetValue( PIB * const ppib, const ULONG ulEntry, ULONG * const pulValue, RUN* const prun ) const
+//  ================================================================
 {
     ERR err = JET_errSuccess;
 
@@ -586,9 +647,11 @@ ERR TTARRAY::ErrGetValue( PIB * const ppib, const ULONG ulEntry, ULONG * const p
         return JET_errSuccess;
     }
 
+    //  compute the pgno that this entry lives on
 
     const PGNO pgno = m_pgnoFirst + ulEntry / ( g_cbPage / sizeof( DWORD ) );
 
+    //  we do not already have this page latched
 
     RUN runT;
     runT.pgno           = pgnoNull;
@@ -601,6 +664,7 @@ ERR TTARRAY::ErrGetValue( PIB * const ppib, const ULONG ulEntry, ULONG * const p
 
     if ( prunT->pgno != pgno )
     {
+        //  unlatch existing page if any
 
         if ( prunT->pgno != pgnoNull )
         {
@@ -616,27 +680,32 @@ ERR TTARRAY::ErrGetValue( PIB * const ppib, const ULONG ulEntry, ULONG * const p
             prunT->fWriteLatch  = fFalse;
         }
 
+        //  latch the new page
+        //  if we are not part of a run, just use a read-latch for speed and concurrency
+        //  use we are part of a run use a RDW latch for consistency, but still allow reads
 
         if( prun )
         {
             Call( ErrBFRDWLatchPage( &prunT->bfl, m_pfucb->ifmp, pgno, bflfDefault, ppib->BfpriPriority( m_pfucb->ifmp ), *tcScope ) );
-            err = JET_errSuccess;
+            err = JET_errSuccess;   // clobber warnings.
             prunT->fWriteLatch  = fFalse;
         }
         else
         {
             Assert( prunT == &runT );
             Call( ErrBFReadLatchPage( &prunT->bfl, m_pfucb->ifmp, pgno, bflfDefault, ppib->BfpriPriority( m_pfucb->ifmp ), *tcScope ) );
-            err = JET_errSuccess;
+            err = JET_errSuccess;   // clobber warnings.
             prunT->fWriteLatch  = fFalse;
         }
 
         prunT->pgno = pgno;
     }
 
+    //  this page is initialized
 
     if ( FPageInit( pgno ) )
     {
+        //  retrieve the value from the page
 
         DWORD iEntry;
         iEntry = ulEntry % ( g_cbPage / sizeof( DWORD ) );
@@ -644,9 +713,11 @@ ERR TTARRAY::ErrGetValue( PIB * const ppib, const ULONG ulEntry, ULONG * const p
         *pulValue = *( (ULONG*) prunT->bfl.pv + iEntry );
     }
 
+    //  this page is not initialized
 
     else
     {
+        //  the answer is the default value
 
         *pulValue = m_ulDefault;
     }
@@ -660,13 +731,17 @@ HandleError:
 }
 
 
+//  ================================================================
 ULONG TTARRAY::CEntries() const
+//  ================================================================
 {
     return m_culEntries;
 }
 
 
+//  ================================================================
 BOOL TTARRAY::FPageInit( const PGNO pgno ) const
+//  ================================================================
 {
     const ULONG iPage   = pgno - m_pgnoFirst;
     const ULONG iul     = iPage / 32;
@@ -676,7 +751,9 @@ BOOL TTARRAY::FPageInit( const PGNO pgno ) const
 }
 
 
+//  ================================================================
 VOID TTARRAY::SetPageInit( const PGNO pgno )
+//  ================================================================
 {
     Assert( !FPageInit( pgno ) );
 

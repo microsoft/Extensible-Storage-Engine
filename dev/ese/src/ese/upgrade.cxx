@@ -1,7 +1,11 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
+/*******************************************************************
 
+Converting a database from ESE97 to ESE98 format
+
+*******************************************************************/
 
 #include "std.hxx"
 
@@ -12,16 +16,22 @@
 #else
 
 
+//  ****************************************************************
+//  STRUCTURES
+//  ****************************************************************
 
 
+//  ================================================================
 struct UPGRADEPAGESTATS
+//  ================================================================
 {
-    LONG        err;
-    LONG        cpgSeen;
+    LONG        err;                //  error condition from the first thread to encounter an error
+    LONG        cpgSeen;            //  total pages seen
 };
 
 
-
+/*  long value column in old record format
+/**/
 
 PERSISTED
 struct LV
@@ -34,15 +44,20 @@ struct LV
             BYTE    fSeparated:1;
             BYTE    fReserved:6;
         };
-    };
+    };      // ATTENTION: the size of the union must remain 1 byte
 
     UnalignedLittleEndian< _LID32 >     m_lid;
 };
 
 
+//  ****************************************************************
+//  CLASSES
+//  ****************************************************************
 
 
+//  ================================================================
 class CONVERTPAGETASK : public DBTASK
+//  ================================================================
 {
     public:
         CONVERTPAGETASK( const IFMP ifmp, const PGNO pgnoFirst, const CPG cpg, UPGRADEPAGESTATS * const pstats );
@@ -63,7 +78,9 @@ class CONVERTPAGETASK : public DBTASK
 };
 
 
+//  ================================================================
 class CONVERTPAGETASKPOOL
+//  ================================================================
 {
     public:
         CONVERTPAGETASKPOOL( const IFMP ifmp );
@@ -88,8 +105,12 @@ class CONVERTPAGETASKPOOL
 };
 
 
+//  ****************************************************************
+//  PROTOTYPES
+//  ****************************************************************
 
 
+//  record conversion
 
 VOID UPGRADECheckConvertNode(
     const VOID * const pvRecOld,
@@ -106,21 +127,30 @@ ERR ErrUPGRADEConvertPage(
     VOID * const pvBuf );
 
 
+//  ****************************************************************
+//  FUNCTIONS
+//  ****************************************************************
 
+//  ================================================================
 CONVERTPAGETASKPOOL::CONVERTPAGETASKPOOL( const IFMP ifmp ) :
     m_ifmp( ifmp )
+//  ================================================================
 {
     m_stats.err                 = JET_errSuccess;
     m_stats.cpgSeen             = 0;
 }
 
 
+//  ================================================================
 CONVERTPAGETASKPOOL::~CONVERTPAGETASKPOOL()
+//  ================================================================
 {
 }
 
 
+//  ================================================================
 ERR CONVERTPAGETASKPOOL::ErrInit( PIB * const ppib, const INT cThreads )
+//  ================================================================
 {
     ERR err;
 
@@ -136,7 +166,9 @@ HandleError:
 }
 
 
+//  ================================================================
 ERR CONVERTPAGETASKPOOL::ErrTerm()
+//  ================================================================
 {
     ERR err;
 
@@ -149,7 +181,9 @@ HandleError:
 }
 
 
+//  ================================================================
 ERR CONVERTPAGETASKPOOL::ErrConvertPages( const PGNO pgnoFirst, const CPG cpg )
+//  ================================================================
 {
     CONVERTPAGETASK * ptask = new CONVERTPAGETASK( m_ifmp, pgnoFirst, cpg, &m_stats );
     if( NULL == ptask )
@@ -159,43 +193,55 @@ ERR CONVERTPAGETASKPOOL::ErrConvertPages( const PGNO pgnoFirst, const CPG cpg )
     const ERR err = m_taskmgr.ErrPostTask( TASK::Dispatch, (ULONG_PTR)ptask );
     if( err < JET_errSuccess )
     {
+        //  The task was not enqued successfully.
         delete ptask;
     }
     return err;
 }
 
 
+//  ================================================================
 const volatile UPGRADEPAGESTATS& CONVERTPAGETASKPOOL::Stats() const
+//  ================================================================
 {
     return m_stats;
 }
 
 
+//  ================================================================
 CONVERTPAGETASK::CONVERTPAGETASK(
     const IFMP ifmp,
     const PGNO pgnoFirst,
     const CPG cpg,
     UPGRADEPAGESTATS * const pstats ) :
+//  ================================================================
     DBTASK( ifmp ),
     m_pgnoFirst( pgnoFirst ),
     m_cpg( cpg ),
     m_pstats( pstats )
 {
+    //  don't fire off async tasks on the temp. database because the
+    //  temp. database is simply not equipped to deal with concurrent access
     AssertRTL( !FFMPIsTempDB( ifmp ) );
 }
 
 
+//  ================================================================
 CONVERTPAGETASK::~CONVERTPAGETASK()
+//  ================================================================
 {
 }
 
 
+//  ================================================================
 ERR CONVERTPAGETASK::ErrExecuteDbTask( PIB * const ppib )
+//  ================================================================
 {
     ERR err = JET_errSuccess;
 
     PIBTraceContextScope tcScope = ppib->InitTraceContextScope();
-    tcScope->nParentObjectClass = tceNone;
+    //tcScope->iorReason.SetIort( iortUtilities );
+    tcScope->nParentObjectClass = tceNone;  //  scanning in physical order so we don't know the table class
 
     CSR csr;
 
@@ -207,6 +253,7 @@ ERR CONVERTPAGETASK::ErrExecuteDbTask( PIB * const ppib )
         err = csr.ErrGetRIWPage( ppib, m_ifmp, pgno );
         if( JET_errPageNotInitialized == err )
         {
+            //  error is expected
             err = JET_errSuccess;
             continue;
         }
@@ -221,21 +268,29 @@ HandleError:
 }
 
 
+//  ================================================================
 VOID CONVERTPAGETASK::HandleError( const ERR err )
+//  ================================================================
 {
     AssertSz( fFalse, "Unable to run a CONVERTPAGETASK" );
 }
 
 
+//  ================================================================
 ERR ErrDBUTLConvertRecords( JET_SESID sesid, const JET_DBUTIL_W * const pdbutil )
+//  ================================================================
 {
     ERR err = JET_errSuccess;
     PIB * const ppib = reinterpret_cast<PIB *>( sesid );
     CONVERTPAGETASKPOOL * pconverttasks = NULL;
     PIBTraceContextScope tcScope = ((PIB*)sesid)->InitTraceContextScope();
+    //tcScope->iorReason.SetIort( iortUtilities );
 
     Call( ErrIsamAttachDatabase( sesid, pdbutil->szDatabase, fFalse, NULL, 0, NO_GRBIT ) );
 
+    //  WARNING: must set ifmp to 0 to ensure high-dword is
+    //  initialised on 64-bit, because we'll be casting this
+    //  to a JET_DBID, which is a dword
     IFMP ifmp;
     ifmp = 0;
     Call( ErrIsamOpenDatabase(
@@ -336,10 +391,12 @@ HandleError:
 }
 
 
+//  ================================================================
 ERR ErrUPGRADEPossiblyConvertPage(
         CPAGE * const pcpage,
         const PGNO pgno,
         VOID * const pvWorkBuf )
+//  ================================================================
 {
     ERR err = JET_errSuccess;
 
@@ -355,9 +412,12 @@ ERR ErrUPGRADEPossiblyConvertPage(
         && !pcpage->FLongValuePage() )
     {
         Call( ErrUPGRADEConvertPage( pcpage, pgno, pvWorkBuf ) );
+        //  CONSIDER: return a warning saying the page was converted
     }
     else
     {
+        //  this page doesn't need converting but we will flag it to avoid
+        //  trying to convert in the future
         pcpage->SetFNewRecordFormat();
         BFDirty( pcpage->PBFLatch(), (BFDirtyFlags)GrbitParam( JET_paramRecordUpgradeDirtyLevel ), *TraceContextScope() );
     }
@@ -367,12 +427,14 @@ HandleError:
 }
 
 
+//  ================================================================
 LOCAL ERR ErrUPGRADECheckConvertNode(
     const LONG          cbPage,
     const VOID* const   pvRecOld,
     const SIZE_T        cbRecOld,
     const VOID* const   pvRecNew,
     const SIZE_T        cbRecNew )
+//  ================================================================
 {
     const REC* const    precOld     = reinterpret_cast<const REC *>( pvRecOld );
     const REC* const    precNew     = reinterpret_cast<const REC *>( pvRecNew );
@@ -432,21 +494,78 @@ LOCAL ERR ErrUPGRADECheckConvertNode(
     }
 
 
-    
+    //  sadly, the code below can't deal with derived/non-derived columns
+    /*
+
+    TAGFIELDS tagfields( dataRecNew );
+
+    COLUMNID columnidPrev = 0;
+    INT itagSequence = 1;
+    for( ; ptagfldold < ptagfldoldMax; ptagfldold = ptagfldold->PtagfldNext() )
+    {
+        const FID           fid         = ptagfldold->Fid();
+        const COLUMNID      columnid    = ColumnidOfFid( fid, !ptagfldold->FDerived() );
+        const VOID * const  pvDataOld   = ptagfldold->Rgb() + !!ptagfldold->FLongValue();
+        const INT           cbDataOld   = ptagfldold->CbData() - !!ptagfldold->FLongValue();
+
+        DATA                dataOld;
+        DATA                dataNew;
+
+        dataOld.SetPv( const_cast<VOID *>( pvDataOld ) );
+        dataOld.SetCb( cbDataOld );
+
+        if( columnid == columnidPrev )
+        {
+            ++itagSequence;
+        }
+        else
+        {
+            columnidPrev    = columnid;
+            itagSequence    = 1;
+        }
+
+        DATA dataNewRec;
+
+        const JET_ERR err = tagfields.ErrRetrieveColumn(
+                pfcbNil,
+                columnid,
+                itagSequence,
+                dataRecNew,
+                &dataNew,
+                JET_bitRetrieveIgnoreDefault );
+
+        AssertRtl( dataNew.Cb() == dataOld.Cb() );
+        AssertRtl( 0 == memcmp( dataNew.Pv(), dataOld.Pv(), dataNew.Cb() ) );
+    }
+
+    */
 
     return JET_errSuccess;
 }
 
 
+//  ================================================================
 ERR ErrUPGRADEConvertNode(
     CPAGE * const pcpage,
     const INT iline,
     VOID * const pvBuf )
+//  ================================================================
+//
+//  +------+-----+------+-----+-----+------+-----+-------+-------+-----+-------+
+//  | fid1 | ib1 | fid2 | ib2 | ... | fidn | ibn | data1 | data2 | ... | datan |
+//  +------+-----+------+-----+-----+------+-----+-------+-------+-----+-------+
+//     2B    2B     2B    2B           2B    2B
+//
+//  The high bits of the ib's are used to store derived, extended info byte and NULL
+//  bits
+//
+//-
 {
     ERR err = JET_errSuccess;
 
     Assert( !pcpage->FNewRecordFormat() );
 
+    //  get the record from the page
 
     KEYDATAFLAGS kdf;
     NDIGetKeydataflags( *pcpage, iline, &kdf );
@@ -462,16 +581,18 @@ ERR ErrUPGRADEConvertNode(
 
     const REC * const prec = reinterpret_cast<const REC *>( pbRec );
 
+    //  how much tagged and non-tagged data is there
 
     const SIZE_T cbNonTaggedData    = prec->PbTaggedData() - pbRec;
 
+    //  go through the old-format TAGFLDs. How many are there? Are there multivalues?
 
     const TAGFLD_OLD * const ptagfldoldMin      = reinterpret_cast<const TAGFLD_OLD *>( prec->PbTaggedData() );
     const TAGFLD_OLD * const ptagfldoldMax      = reinterpret_cast<const TAGFLD_OLD *>( pbRecMax );
     const TAGFLD_OLD *  ptagfldold              = NULL;
 
     BOOL                fRecordHasMultivalues   = fFalse;
-    INT                 cTAGFLD                 = 0;
+    INT                 cTAGFLD                 = 0;        //  number of unique multi-values
 
     FID                 fidPrev                 = 0;
     for( ptagfldold = ptagfldoldMin; ptagfldold < ptagfldoldMax; ptagfldold = ptagfldold->PtagfldNext() )
@@ -487,10 +608,12 @@ ERR ErrUPGRADEConvertNode(
         }
     }
 
+    //  copy in the non-tagged data
 
     BYTE * const pb = reinterpret_cast<BYTE *>( pvBuf );
     memcpy( pb, pbRec, cbNonTaggedData );
 
+    //  create the TAGFLD array and copy in the data
 
     BYTE * const pbTagfldsStart = pb + cbNonTaggedData;
     BYTE * pbTagflds            = pbTagfldsStart;
@@ -502,9 +625,9 @@ ERR ErrUPGRADEConvertNode(
     ptagfldold = ptagfldoldMin;
     while( ptagfldold < ptagfldoldMax )
     {
-        static const USHORT fDerived        = 0x8000;
-        static const USHORT fExtendedInfo   = 0x4000;
-        static const USHORT fNull           = 0x2000;
+        static const USHORT fDerived        = 0x8000;       //  if TRUE, then current column is derived from a template
+        static const USHORT fExtendedInfo   = 0x4000;       //  if TRUE, must go to TAGFLD_HEADER byte to check more flags
+        static const USHORT fNull           = 0x2000;       //  if TRUE, column set to NULL to override default value
 
         const FID fid                           = ptagfldold->Fid();
         const TAGFLD_OLD * const ptagfldoldNext = ptagfldold->PtagfldNext();
@@ -528,12 +651,22 @@ ERR ErrUPGRADEConvertNode(
             if( 2 == cMULTIVALUES
                 && !ptagfldold->FLongValue() )
             {
+                //  convert to the TWOVALUES format
+                //
+                //  +---------------+---------------+-----------+-----------+
+                //  | extended info | cbData1       | data1 ... | data2 ... |
+                //  +---------------+---------------+-----------+-----------+
+                //            1B             1B
+                //
+                //  note that the length is one byte (non-lv columns
+                //  are limited to 255 bytes)
 
                 Assert( !ptagfldold->FLongValue() );
                 Assert( !ptagfldoldNext->FLongValue() );
                 Assert( !ptagfldold->FNull() );
                 Assert( !ptagfldoldNext->FNull() );
 
+                //  create the entry in the TAGFLD array
 
                 USHORT ibFlags      = fExtendedInfo;
                 if( ptagfldold->FDerived() )
@@ -550,6 +683,7 @@ ERR ErrUPGRADEConvertNode(
 
                 ibCurr += sizeof( TAGFLD_HEADER ) + sizeof( BYTE ) + cbDataTotal;
 
+                //  set extended info to say we are in the twovalues format
 
                 *pbData = 0;
                 TAGFLD_HEADER * const ptagfldheader = reinterpret_cast<TAGFLD_HEADER *>( pbData );
@@ -557,10 +691,12 @@ ERR ErrUPGRADEConvertNode(
                 ptagfldheader->SetFMultiValues();
                 pbData += sizeof( TAGFLD_HEADER );
 
+                //  set cbData1
 
                 *pbData = (BYTE)ptagfldold->CbData();
                 pbData += sizeof( BYTE );
 
+                //  copy in the data
 
                 memcpy( pbData, ptagfldold->Rgb(), ptagfldold->CbData() );
                 pbData      += ptagfldold->CbData();
@@ -570,7 +706,17 @@ ERR ErrUPGRADEConvertNode(
             }
             else
             {
+                //  convert to the MULTIVALUES format
+                //
+                //  +-------------------+------------+-----+-----------+-----------+-----------+-----+-----------+
+                //  | info |     ib1    |     ib2    | ... |    ibn    | data1 ... | data2 ... | ... | datan ... |
+                //  +-------------------+------------+-----+-----------+-----------+-----------+-----+-----------+
+                //     1B        2B           2B                2B
+                //
+                //
+                //  if the data is a separated LV the high bit of its ib will be set
 
+                //  create the entry in the TAGFLD array
 
                 USHORT ibFlags      = fExtendedInfo;
                 if( ptagfldold->FDerived() )
@@ -591,10 +737,12 @@ ERR ErrUPGRADEConvertNode(
                 }
                 else
                 {
+                    //  we will be losing the header byte from the LV structure
 
                     ibCurr += sizeof( TAGFLD_HEADER ) + ( sizeof( USHORT ) * cMULTIVALUES ) + cbDataTotal - ( sizeof( BYTE ) * cMULTIVALUES );
                 }
 
+                //  set extended info to say we are in the multivalues format
 
                 *pbData = 0;
                 TAGFLD_HEADER * const ptagfldheader = reinterpret_cast<TAGFLD_HEADER *>( pbData );
@@ -605,6 +753,7 @@ ERR ErrUPGRADEConvertNode(
                 }
                 pbData += sizeof( TAGFLD_HEADER );
 
+                //  first make space for the ibOffsets
 
                 INT     ibOffsetCurr = sizeof( USHORT ) * cMULTIVALUES;
                 BYTE * pbIbOffsets = pbData;
@@ -619,6 +768,7 @@ ERR ErrUPGRADEConvertNode(
                     if( ptagfldoldT->FLongValue() )
                     {
 
+                        //  do we need to set the separated bit?
 
                         const LV * const plv = reinterpret_cast<const LV *>( ptagfldoldT->Rgb() );
                         if( plv->fSeparated )
@@ -661,7 +811,7 @@ ERR ErrUPGRADEConvertNode(
             {
                 if( ptagfldold->FLongValue() )
                 {
-                    ibFlags |= fExtendedInfo;
+                    ibFlags |= fExtendedInfo;   //  LVs have a header byte so the length isn't changed
                 }
             }
 
@@ -679,9 +829,12 @@ ERR ErrUPGRADEConvertNode(
 
             ibCurr += ptagfldold->CbData();
 
+            //  copy in the data
 
             memcpy( pbData, ptagfldold->Rgb(), ptagfldold->CbData() );
 
+            //  set the extended info byte
+            //  in this pass we only do it for LVs
 
             if( ibFlags & fExtendedInfo )
             {
@@ -718,10 +871,12 @@ ERR ErrUPGRADEConvertNode(
 }
 
 
+//  ================================================================
 ERR ErrUPGRADEConvertPage(
     CPAGE * const pcpage,
     const PGNO pgno,
     VOID * const pvBuf )
+//  ================================================================
 {
     ERR             err     = JET_errSuccess;
     INST * const    pinst   = PinstFromIfmp( pcpage->Ifmp() );
@@ -731,7 +886,7 @@ ERR ErrUPGRADEConvertPage(
 
 #ifdef DEBUG
     memset( pvBuf, 0xff, pcpage->CbPage() );
-#endif
+#endif  //  DEBUG
 
     INT iline;
     for( iline = 0; iline < pcpage->Clines(); ++iline )
@@ -748,6 +903,7 @@ HandleError:
         if( JET_errRecordFormatConversionFailed == err )
         {
 
+            //  eventlog this failure
 
             const WCHAR * rgcwsz[3];
             INT isz = 0;
@@ -782,6 +938,7 @@ HandleError:
         else
         {
 
+            //  we only expect the above error
 
             Assert( fFalse );
 
@@ -795,5 +952,5 @@ HandleError:
     return err;
 }
 
-#endif
+#endif  //  MINIMAL_FUNCTIONALITY
 

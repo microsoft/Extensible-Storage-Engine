@@ -3,6 +3,7 @@
 
 #pragma once
 
+//  Block Cache Lock Ranks
 
 const INT rankCacheRepository = 0;
 const INT rankFileFilter = 0;
@@ -11,6 +12,7 @@ const INT rankFileWrapperIOComplete = 0;
 const INT rankJournalSegment = 0;
 const INT rankJournalAppend = 1;
 
+//  IO offset range.
 
 class COffsets
 {

@@ -10,6 +10,11 @@ using namespace System::Threading;
 using namespace System::Reflection;
 using namespace System::Runtime::CompilerServices;
 
+//
+// General Information about an assembly is controlled through the following 
+// set of attributes. Change these attribute values to modify the information
+// associated with an assembly.
+//
 #include <bldver.cpp>
 [assembly: AssemblyTitle("Internal.Exchange.Isam")];
 

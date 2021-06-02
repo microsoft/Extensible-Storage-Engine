@@ -13,7 +13,26 @@ static const JET_COLUMNDEF rgcolumndefJoinlist[] =
 };
 
 
+/*=================================================================
+ErrIsamGetLock
 
+Description:
+    get lock on the record from the specified file.
+
+Parameters:
+
+    PIB         *ppib           PIB of user
+    FUCB        *pfucb          FUCB for file
+    JET_GRBIT   grbit           options
+
+Return Value: standard error return
+
+Errors/Warnings:
+<List of any errors or warnings, with any specific circumstantial
+ comments supplied on an as-needed-only basis>
+
+Side Effects:
+=================================================================*/
 
 ERR VTAPI ErrIsamGetLock( JET_SESID sesid, JET_VTID vtid, JET_GRBIT grbit )
 {
@@ -34,6 +53,8 @@ ERR VTAPI ErrIsamGetLock( JET_SESID sesid, JET_VTID vtid, JET_GRBIT grbit )
     }
     else if ( JET_bitWriteLock == grbit )
     {
+        //  ensure that table is updatable
+        //
         CallR( ErrFUCBCheckUpdatable( pfucb )  );
         if ( !FFMPIsTempDB( pfucb->ifmp ) )
         {
@@ -51,6 +72,7 @@ HandleError:
     return err;
 }
 
+//  adds one move filter to the end of the cursor's move filter stack
 VOID RECAddMoveFilter(
     FUCB * const                pfucb,
     PFN_MOVE_FILTER const       pfnMoveFilter,
@@ -63,6 +85,7 @@ VOID RECAddMoveFilter(
     pfucb->pmoveFilterContext = pmoveFilterContext;
 }
 
+//  removes one move filter from the cursor's move filter stack
 VOID RECRemoveMoveFilter(
     FUCB * const                    pfucb,
     PFN_MOVE_FILTER const           pfnMoveFilter,
@@ -87,6 +110,7 @@ VOID RECRemoveMoveFilter(
     }
 }
 
+//  checks the current move filter and invokes the previous filter if any
 ERR ErrRECCheckMoveFilter( FUCB * const pfucb, MOVE_FILTER_CONTEXT * const pmoveFilterContext )
 {
     ERR err = JET_errSuccess;
@@ -109,28 +133,43 @@ HandleError:
 
 struct NORMALIZED_FILTER_COLUMN : public JET_INDEX_COLUMN
 {
-    JET_COLTYP  coltyp;
-    BOOL        fNormalized;
+    JET_COLTYP  coltyp;         //  the column type of the filter value
+    BOOL        fNormalized;    //  was the filter value normalized?
 };
 
 struct CURSOR_FILTER_CONTEXT : public MOVE_FILTER_CONTEXT
 {
-    NORMALIZED_FILTER_COLUMN *  rgFilters;
-    DWORD                       cFilters;
+    NORMALIZED_FILTER_COLUMN *  rgFilters;  //  array of column value filters to apply during lateral btree navigation
+    DWORD                       cFilters;   //  number of column value filters to apply during lateral btree navigation
 };
 
+//  =================================================================
+//  PURPOSE:
+//      Determines whether the current record satisfies a simple
+//      filter condition.
+//
+//  PARAMETERS:
+//      pfucb           - cursor positioned on a record
+//
+//  RETURNS:
+//      JET_errSuccess:           record matches the filter
+//      wrnBTNotVisibleRejected:  record doesn't match the filter
+//  =================================================================
 LOCAL ERR ErrRECICheckCursorFilter( FUCB * const pfucb, CURSOR_FILTER_CONTEXT * const pcursorFilterContext )
 {
     ERR     err         = JET_errSuccess;
     BOOL    fMatch      = fTrue;
     DATA    dataField;
 
+    //  check any higher priority filter
     Call( ErrRECCheckMoveFilter( pfucb, (MOVE_FILTER_CONTEXT * const)pcursorFilterContext ) );
     if ( err > JET_errSuccess )
     {
         goto HandleError;
     }
 
+    //  take .Net GUID normalization flag from current index
+    //
     BOOL    fDotNetGuid = fFalse;
     if ( pfucb->pfucbCurIndex != NULL )
     {
@@ -151,7 +190,7 @@ LOCAL ERR ErrRECICheckCursorFilter( FUCB * const pfucb, CURSOR_FILTER_CONTEXT * 
             Call( ErrRECRetrieveTaggedColumn(
                 pfucb->u.pfcb,
                 pFilter->columnid,
-                1,
+                1,  // for multi-values, we only support validating the first multi-value
                 pfucb->kdfCurr.data,
                 &dataField,
                 NO_GRBIT ) );
@@ -164,7 +203,7 @@ LOCAL ERR ErrRECICheckCursorFilter( FUCB * const pfucb, CURSOR_FILTER_CONTEXT * 
                 pFilter->columnid,
                 pfucb->kdfCurr.data,
                 &dataField,
-                NULL  ) );
+                NULL /* pfieldFixed */ ) ); //  this is only required as a perf optimisation to avoid grabbing the DML latch
         }
 
         CallSx( err, JET_wrnColumnNull );
@@ -174,8 +213,10 @@ LOCAL ERR ErrRECICheckCursorFilter( FUCB * const pfucb, CURSOR_FILTER_CONTEXT * 
             const INT           cbFilter    = pFilter->cb;
             BYTE                *pvData;
             INT                 cbData;
-            BYTE                rgbNormData[ sizeof(GUID) + 1 ];
+            BYTE                rgbNormData[ sizeof(GUID) + 1 ];    //  largest column type we should be normalising is a guid, and +1 for the prefix/header byte
 
+            //  check if the filter value was normalised
+            //
             if ( pFilter->fNormalized )
             {
                 Assert( !FRECLongValue( pFilter->coltyp ) );
@@ -183,6 +224,9 @@ LOCAL ERR ErrRECICheckCursorFilter( FUCB * const pfucb, CURSOR_FILTER_CONTEXT * 
                 Assert( !FRECBinaryColumn( pFilter->coltyp ) );
                 Assert( pFilter->cb > 0 );
 
+                //  the filter value was normalised, so we'll
+                //  need to normalise the data value as well
+                //
                 FLDNormalizeFixedSegment(
                     (BYTE *)dataField.Pv(),
                     dataField.Cb(),
@@ -195,6 +239,8 @@ LOCAL ERR ErrRECICheckCursorFilter( FUCB * const pfucb, CURSOR_FILTER_CONTEXT * 
             }
             else
             {
+                //  no normalisation needed
+                //
                 pvData = (BYTE *)dataField.Pv();
                 cbData = dataField.Cb();
             }
@@ -266,24 +312,35 @@ LOCAL ERR ErrRECICheckCursorFilter( FUCB * const pfucb, CURSOR_FILTER_CONTEXT * 
                     }
                     break;
                 default:
+                    //  in unexpected cases, assume the record matches (so we don't filter it out)
+                    //
                     AssertSz( fFalse, "Unrecognized relop for non-null column." );
                     fMatch = fTrue;
             }
         }
         else if ( JET_wrnColumnNull == err )
         {
+            //  column was null in the record, so
+            //  compare that with the specified
+            //  filter
+            //
             switch ( pFilter->relop )
             {
                 case JET_relopEquals:
                     fMatch = fFilterNull;
                     break;
                 case JET_relopPrefixEquals:
+                    // null, so cannot be a prefix match
+                    //
                     fMatch = fFalse;
                     break;
                 case JET_relopNotEquals:
                     fMatch = !fFilterNull;
                     break;
                 case JET_relopLessThanOrEqual:
+                    //  null is considered less than everything,
+                    //  so consider this a match
+                    //
                     fMatch = fTrue;
                     break;
                 case JET_relopLessThan:
@@ -293,21 +350,37 @@ LOCAL ERR ErrRECICheckCursorFilter( FUCB * const pfucb, CURSOR_FILTER_CONTEXT * 
                     fMatch = fFilterNull;
                     break;
                 case JET_relopGreaterThan:
+                    //  null is considered less than everything,
+                    //  so this can't be a match
+                    //
                     fMatch = fFalse;
                     break;
                 case JET_relopBitmaskEqualsZero:
+                    //  since column was null, it didn't
+                    //  contain any of the bits in the
+                    //  bitmask, so consider it a match
+                    //
                     fMatch = fTrue;
                     break;
                 case JET_relopBitmaskNotEqualsZero:
+                    //  since column was null, it can't
+                    //  contain any of the bits in the
+                    //  bitmask, so consider it not a
+                    //  match
                     fMatch = fFalse;
                     break;
                 default:
+                    //  in unexpected cases, assume the record matches (so we don't filter it out)
+                    //
                     AssertSz( fFalse, "Unrecognized relop for null column." );
                     fMatch = fTrue;
             }
         }
         else
         {
+            //  unexpected error from column retrieval - looks like
+            //  we hit some unforeseen/unsupported scenario
+            //
             Error( ErrERRCheck( JET_errFilteredMoveNotSupported ) );
         }
 
@@ -317,6 +390,8 @@ LOCAL ERR ErrRECICheckCursorFilter( FUCB * const pfucb, CURSOR_FILTER_CONTEXT * 
         }
     }
 
+    //  ignore the record if it is not a match
+    //
     err = fMatch ? JET_errSuccess : wrnBTNotVisibleRejected;
     
 HandleError:
@@ -334,6 +409,17 @@ VOID RECRemoveCursorFilter( FUCB * const pfucb )
     }
 }
 
+//  =================================================================
+//  PURPOSE:
+//      Determines whether the specified simple filter is valid for
+//      a filtered move operation. Also determins the column type
+//      of the filter value and returns it as an OUT parameter.
+//
+//  PARAMETERS:
+//      pfucb       - table cursor on which the filtered move operation will be applied
+//      pFilter     - the simple filters to validate
+//      pcoltyp     - OUT param to be filled in with the column type of the filter value
+//  =================================================================
 ERR ErrRECIValidateOneMoveFilter(
     FUCB *                          pfucb,
     const JET_INDEX_COLUMN * const  pFilter,
@@ -361,10 +447,15 @@ ERR ErrRECIValidateOneMoveFilter(
         Error( ErrERRCheck( JET_errInvalidParameter ) );
     }
 
+    //  verify column visibility
+    //
     Call( ErrRECIAccessColumn( pfucb, columnid ) );
 
     if ( FCOLUMNIDTemplateColumn( columnid ) )
     {
+        //  DDL is fixed on template tables, so DML latch
+        //  is unnecessary
+        //
         fUseDMLLatch = fFalse;
     }
     else if ( FFixedFid( fid ) )
@@ -397,12 +488,18 @@ ERR ErrRECIValidateOneMoveFilter(
 
     if ( FRECLongValue( coltyp ) || FRECTextColumn( coltyp ) || FFIELDUserDefinedDefault( ffield ) )
     {
+        //  don't currently support long values, text values or columns
+        //  with user-defined default values.
+        //
         Error( ErrERRCheck( JET_errFilteredMoveNotSupported ) );
     }
     else if ( ( pFilter->relop == JET_relopPrefixEquals ||
                 pFilter->grbit & JET_bitZeroLength ) &&
               coltyp != JET_coltypBinary )
     {
+        //  prefix-match and ZeroLength only make sense for
+        //  binary columns
+        //
         Error( ErrERRCheck( JET_errInvalidParameter ) );
     }
     else if ( pFilter->cb == 0 )
@@ -411,11 +508,18 @@ ERR ErrRECIValidateOneMoveFilter(
             pFilter->relop == JET_relopBitmaskNotEqualsZero ||
             pFilter->relop == JET_relopPrefixEquals )
         {
+            //  bitmask must be non null, and it doesn't
+            //  make sense to prefix-match to a null/zero-length
+            //  value
+            //
             Error( ErrERRCheck( JET_errInvalidParameter ) );
         }
     }
     else if ( coltyp != JET_coltypBinary && pFilter->cb != UlCATColumnSize( coltyp, 0, NULL ) )
     {
+        //  for non-binary columns, if the specified size is non-zero,
+        //  it must match the size of the column type
+        //
         Error( ErrERRCheck( JET_errInvalidParameter ) );
     }
     else if ( ( coltyp == JET_coltypBit ||
@@ -424,10 +528,14 @@ ERR ErrRECIValidateOneMoveFilter(
               ( pFilter->relop == JET_relopBitmaskEqualsZero ||
                 pFilter->relop == JET_relopBitmaskNotEqualsZero ) )
     {
+        //  bitmask must be integer type
+        //
         Error( ErrERRCheck( JET_errInvalidParameter ) );
     }
 
 HandleError:
+    //  set OUT param
+    //
     *pcoltyp = coltyp;
 
     return err;
@@ -447,6 +555,8 @@ ERR ErrRECSetCursorFilter(
     AssertSz( pfucb->u.pfcb->FTypeTable(), "Currently only support move filters on table cursors." );
     AssertSz( pfucbNil == pfucb->pfucbCurIndex, "Table cursor must be in primary index in order to use a move filter." );
 
+    //  take .Net GUID normalization flag from current index
+    //
     BOOL                fDotNetGuid = fFalse;
     if ( pfucb->pfucbCurIndex != NULL )
     {
@@ -457,6 +567,8 @@ ERR ErrRECSetCursorFilter(
         fDotNetGuid = pfucb->u.pfcb->Pidb()->FDotNetGuid();
     }
 
+    //  before doing anything else, remove any existing filter on the cursor
+    //
     RECRemoveCursorFilter( pfucb );
 
     if ( cFilters == 0 )
@@ -467,6 +579,10 @@ ERR ErrRECSetCursorFilter(
     DWORD   cbNeeded    = sizeof(NORMALIZED_FILTER_COLUMN) * cFilters;
     for ( DWORD i = 0; i < cFilters; i++ )
     {
+        //  add an extra byte in case the filter value needs to be normalised
+        //  (because a prefix/header byte will be pre-pended to the normalised
+        //  value)
+        //
         cbNeeded += rgFilters[i].cb + 1;
     }
 
@@ -478,15 +594,31 @@ ERR ErrRECSetCursorFilter(
     {
         const JET_INDEX_COLUMN * const  pFilter = rgFilters + i;
 
+        //  first, validate the filter value
+        //
         Call( ErrRECIValidateOneMoveFilter( pfucb, pFilter, &coltyp ) );
 
+        //  next, copy the filter meta-data
+        //
         memcpy( &pcursorFilterContext->rgFilters[i], pFilter, sizeof(JET_INDEX_COLUMN) );
 
+        //  next, determine if normalisation is necessary (initially
+        //  assuming it's not)
+        //
         pcursorFilterContext->rgFilters[i].coltyp = coltyp;
         pcursorFilterContext->rgFilters[i].fNormalized = fFalse;
 
+        //  we don't need to normalise binary values or
+        //  null/zero-length values
+        //
         if ( coltyp != JET_coltypBinary && pFilter->cb != 0 )
         {
+            //  we need to normalize coltypBit because we need
+            //  to convert all non-zero values to 0xFF, and we
+            //  need to normalize for relops involving relative
+            //  comparisons in order to properly reconcile the
+            //  comparison
+            //
             if ( coltyp == JET_coltypBit ||
                 pFilter->relop == JET_relopLessThanOrEqual ||
                 pFilter->relop == JET_relopLessThan ||
@@ -497,6 +629,8 @@ ERR ErrRECSetCursorFilter(
             }
         }
 
+        //  copy the filter value into the cursor (normalising first if needed)
+        //
         if ( pcursorFilterContext->rgFilters[i].fNormalized )
         {
             INT cbNormalizedValue   = 0;
@@ -506,6 +640,9 @@ ERR ErrRECSetCursorFilter(
             Assert( !FRECBinaryColumn( coltyp ) );
             Assert( pFilter->cb > 0 );
 
+            //  normalise the filter value, storing the
+            //  normalized value in the cursor
+            //
             FLDNormalizeFixedSegment(
                 (BYTE *)pFilter->pv,
                 pFilter->cb,
@@ -514,7 +651,7 @@ ERR ErrRECSetCursorFilter(
                 coltyp,
                 fDotNetGuid,
                 fTrue );
-            Assert( cbNormalizedValue <= sizeof(GUID) + 1 );
+            Assert( cbNormalizedValue <= sizeof(GUID) + 1 );    //  largest column type we should be normalising is a guid, and +1 for the prefix/header byte
             pcursorFilterContext->rgFilters[i].pv = pBuffer;
             pcursorFilterContext->rgFilters[i].cb = cbNormalizedValue;
             pBuffer += cbNormalizedValue;
@@ -522,6 +659,9 @@ ERR ErrRECSetCursorFilter(
 
         else if ( rgFilters[i].cb != 0 )
         {
+            //  normalisation isn't needed, so just copy
+            //  the raw filter value
+            //
             memcpy( pBuffer, rgFilters[i].pv, rgFilters[i].cb );
             pcursorFilterContext->rgFilters[i].pv = pBuffer;
             Assert( pcursorFilterContext->rgFilters[i].cb == rgFilters[i].cb );
@@ -529,6 +669,10 @@ ERR ErrRECSetCursorFilter(
         }
         else
         {
+            //  filter value is null or zero-length, so there's
+            //  nothing to copy, but set the pointer to NULL
+            //  for safety
+            //
             pcursorFilterContext->rgFilters[i].pv = NULL;
             Assert( pcursorFilterContext->rgFilters[i].cb == 0 );
         }
@@ -554,7 +698,28 @@ HandleError:
     return err;
 }
 
+/*=================================================================
+ErrIsamSetCursorFilter
 
+Description:
+    Sets the filter to be used by JetMove
+
+Parameters:
+
+    PIB                 *ppib           PIB of user
+    FUCB                *pfucb          FUCB for file
+    JET_INDEX_COLUMN    *rgFilters      filters to apply
+    DWORD               cFilters        number of filters
+    JET_GRBIT           grbit           options
+
+Return Value: standard error return
+
+Errors/Warnings:
+<List of any errors or warnings, with any specific circumstantial
+ comments supplied on an as-needed-only basis>
+
+Side Effects:
+=================================================================*/
 
 ERR VTAPI ErrIsamSetCursorFilter( JET_SESID sesid, JET_VTID vtid, JET_INDEX_COLUMN * rgFilters, DWORD cFilters, JET_GRBIT grbit )
 {
@@ -571,6 +736,8 @@ ERR VTAPI ErrIsamSetCursorFilter( JET_SESID sesid, JET_VTID vtid, JET_INDEX_COLU
     else if ( !pfucb->u.pfcb->FTypeTable()
         || pfucbNil != pfucb->pfucbCurIndex )
     {
+        //  currently only support filtered moves on primary indices
+        //
         Error( ErrERRCheck( JET_errFilteredMoveNotSupported ) );
     }
 
@@ -584,16 +751,38 @@ HandleError:
     return err;
 }
 
+/*=================================================================
+ *
+ErrIsamMove
 
+Description:
+    Retrieves the first, last, (nth) next, or (nth) previous
+    record from the specified file.
+
+Parameters:
+
+    PIB                 *ppib           PIB of user
+    FUCB                *pfucb          FUCB for file
+    LONG                crow            number of rows to move
+    JET_GRBIT           grbit           options
+
+Return Value: standard error return
+
+Errors/Warnings:
+<List of any errors or warnings, with any specific circumstantial
+ comments supplied on an as-needed-only basis>
+
+Side Effects:
+=================================================================*/
 
 ERR VTAPI ErrIsamMove( JET_SESID sesid, JET_VTID vtid, LONG crow, JET_GRBIT grbit )
 {
     PIB     *ppib = reinterpret_cast<PIB *>( sesid );
     FUCB    *pfucb = reinterpret_cast<FUCB *>( vtid );
     ERR     err = JET_errSuccess;
-    FUCB    *pfucbSecondary;
-    FUCB    *pfucbIdx;
-    DIB     dib;
+    FUCB    *pfucbSecondary;            // FUCB for secondary index (if any)
+    FUCB    *pfucbIdx;              // FUCB of selected index (pri or sec)
+    DIB     dib;                    // Information block for DirMan
 
     CallR( ErrPIBCheck( ppib ) );
     CheckTable( ppib, pfucb );
@@ -612,6 +801,7 @@ ERR VTAPI ErrIsamMove( JET_SESID sesid, JET_VTID vtid, LONG crow, JET_GRBIT grbi
     AssertDIRNoLatch( ppib );
     dib.dirflag = fDIRNull;
 
+    // Get secondary index FUCB if any
     pfucbSecondary = pfucb->pfucbCurIndex;
     if ( pfucbSecondary == pfucbNil )
         pfucbIdx = pfucb;
@@ -624,8 +814,11 @@ ERR VTAPI ErrIsamMove( JET_SESID sesid, JET_VTID vtid, LONG crow, JET_GRBIT grbi
 
         dib.pos = posLast;
 
+        //  move to DATA root
+        //
         DIRGotoRoot( pfucbIdx );
 
+        // Only enable preread when the filter context specified.
         if( pfucbIdx->pmoveFilterContext )
         {
             FUCBSetSequential( pfucbIdx );
@@ -642,6 +835,8 @@ ERR VTAPI ErrIsamMove( JET_SESID sesid, JET_VTID vtid, LONG crow, JET_GRBIT grbi
         if ( grbit & JET_bitMoveKeyNE )
             dib.dirflag |= fDIRNeighborKey;
 
+        //  Move forward number of rows given
+        //
         while ( crowT-- > 0 )
         {
             err = ErrDIRNext( pfucbIdx, dib.dirflag );
@@ -655,6 +850,8 @@ ERR VTAPI ErrIsamMove( JET_SESID sesid, JET_VTID vtid, LONG crow, JET_GRBIT grbi
 
             if ( ( grbit & JET_bitMoveKeyNE ) && crowT > 0 )
             {
+                // Need to do neighbour-key checking, so bookmark
+                // must always be up-to-date.
                 Call( ErrDIRRelease( pfucbIdx ) );
                 Call( ErrDIRGet( pfucbIdx ) );
                 Assert( Pcsr( pfucbIdx )->FLatched() );
@@ -667,8 +864,11 @@ ERR VTAPI ErrIsamMove( JET_SESID sesid, JET_VTID vtid, LONG crow, JET_GRBIT grbi
 
         dib.pos         = posFirst;
 
+        //  move to DATA root
+        //
         DIRGotoRoot( pfucbIdx );
 
+        // Only enable preread when the filter context specified.
         if( pfucbIdx->pmoveFilterContext )
         {
             FUCBSetSequential( pfucbIdx );
@@ -701,6 +901,8 @@ ERR VTAPI ErrIsamMove( JET_SESID sesid, JET_VTID vtid, LONG crow, JET_GRBIT grbi
             Assert( Pcsr( pfucbIdx )->FLatched() );
             if ( ( grbit & JET_bitMoveKeyNE ) && crowT < 0 )
             {
+                // Need to do neighbour-key checking, so bookmark
+                // must always be up-to-date.
                 Call( ErrDIRRelease( pfucbIdx ) );
                 Call( ErrDIRGet( pfucbIdx ) );
                 Assert( Pcsr( pfucbIdx )->FLatched() );
@@ -708,6 +910,9 @@ ERR VTAPI ErrIsamMove( JET_SESID sesid, JET_VTID vtid, LONG crow, JET_GRBIT grbi
         }
     }
 
+    //  if the movement was successful and a secondary index is
+    //  in use, then position primary index to record.
+    //
     if ( err == JET_errSuccess && pfucbSecondary != pfucbNil )
     {
         BOOKMARK    bmRecord;
@@ -720,6 +925,7 @@ ERR VTAPI ErrIsamMove( JET_SESID sesid, JET_VTID vtid, LONG crow, JET_GRBIT grbi
         bmRecord.key.suffix = pfucbSecondary->kdfCurr.data;
         bmRecord.data.Nullify();
 
+        //  We will need to touch the data page buffer.
 
         CallJ( ErrDIRGotoBookmark( pfucb, bmRecord ), ReleaseLatch );
 
@@ -745,6 +951,8 @@ ReleaseLatch:
 
         if ( err >= 0 && errT < 0 )
         {
+            //  return the more severe error
+            //
             err = errT;
         }
     }
@@ -824,10 +1032,20 @@ ERR ErrRECIFilteredMove( FUCB *pfucbTable, LONG crow, JET_GRBIT grbit )
         if ( grbit & JET_bitMoveKeyNE )
             dirflag |= fDIRNeighborKey;
 
+        //  Move forward number of rows given
+        //
         while ( crowT-- > 0 )
         {
             if ( grbit & JET_bitMoveKeyNE )
             {
+                // Need to do neighbour-key checking, so bookmark
+                // must always be up-to-date.
+                //
+                // WARNING: if at level 0, the ErrDIRGet() might
+                // end up returning JET_errRecordDeleted if the
+                // node gets expunged when the page latch is
+                // released
+                //
                 Call( ErrDIRRelease( pfucbIdx ) );
                 Call( ErrDIRGet( pfucbIdx ) );
             }
@@ -854,6 +1072,8 @@ ERR ErrRECIFilteredMove( FUCB *pfucbTable, LONG crow, JET_GRBIT grbit )
         {
             if ( grbit & JET_bitMoveKeyNE )
             {
+                // Need to do neighbour-key checking, so bookmark
+                // must always be up-to-date.
                 Call( ErrDIRRelease( pfucbIdx ) );
                 Call( ErrDIRGet( pfucbIdx ) );
             }
@@ -869,6 +1089,9 @@ ERR ErrRECIFilteredMove( FUCB *pfucbTable, LONG crow, JET_GRBIT grbit )
         }
     }
 
+    //  if the movement was successful and a secondary index is
+    //  in use, then position primary index to record.
+    //
     if ( JET_errSuccess == err )
     {
         if ( pfucbIdx != pfucbTable )
@@ -884,6 +1107,7 @@ ERR ErrRECIFilteredMove( FUCB *pfucbTable, LONG crow, JET_GRBIT grbit )
             bmRecord.key.suffix = pfucbIdx->kdfCurr.data;
             bmRecord.data.Nullify();
 
+            //  We will need to touch the data page buffer.
 
             Call( ErrDIRGotoBookmark( pfucbTable, bmRecord ) );
 
@@ -927,12 +1151,28 @@ HandleError:
     return err;
 }
 
+//  =================================================================
+//  ErrIsamSeek
 
+//  Description:
+//  Retrieve the record specified by the given key or the
+//  one just after it (SeekGT or SeekGE) or the one just
+//  before it (SeekLT or SeekLE).
 
+//  Parameters:
 
+//  PIB         *ppib           PIB of user
+//  FUCB        *pfucb          FUCB for file
+//  JET_GRBIT   grbit           grbit
 
+//  Return Value: standard error return
 
+//  Errors/Warnings:
+//  <List of any errors or warnings, with any specific circumstantial
+//  comments supplied on an as-needed-only basis>
 
+//  Side Effects:
+//  =================================================================
 
 ERR VTAPI ErrIsamSeek( JET_SESID sesid, JET_VTID vtid, JET_GRBIT grbit )
 {
@@ -940,9 +1180,9 @@ ERR VTAPI ErrIsamSeek( JET_SESID sesid, JET_VTID vtid, JET_GRBIT grbit )
     FUCB        *pfucbTable     = reinterpret_cast<FUCB *>( vtid );
 
     ERR         err;
-    BOOKMARK    bm;
+    BOOKMARK    bm;                     //  for search key
     DIB         dib;
-    FUCB        *pfucbSeek;
+    FUCB        *pfucbSeek;             //  pointer to current FUCB
     BOOL        fFoundLess;
     BOOL        fFoundGreater;
     BOOL        fFoundEqual;
@@ -962,6 +1202,8 @@ ERR VTAPI ErrIsamSeek( JET_SESID sesid, JET_VTID vtid, JET_GRBIT grbit )
         return ErrERRCheck( JET_errInvalidParameter );
     }
     
+    //  find cursor to seek on
+    //
     pfucbSeek = pfucbTable->pfucbCurIndex == pfucbNil ?
                     pfucbTable :
                     pfucbTable->pfucbCurIndex;
@@ -974,13 +1216,19 @@ ERR VTAPI ErrIsamSeek( JET_SESID sesid, JET_VTID vtid, JET_GRBIT grbit )
     }
     FUCBAssertValidSearchKey( pfucbSeek );
 
+    //  Reset copy buffer status
+    //
     if ( FFUCBUpdatePrepared( pfucbTable ) )
     {
         CallR( ErrIsamPrepareUpdate( ppib, pfucbTable, JET_prepCancel ) );
     }
 
+    //  reset index range limit
+    //
     DIRResetIndexRange( pfucbTable );
 
+    //  ignore segment counter
+    //
     bm.key.prefix.Nullify();
     bm.key.suffix.SetPv( pfucbSeek->dataSearchKey.Pv() );
     bm.key.suffix.SetCb( pfucbSeek->dataSearchKey.Cb() );
@@ -1000,13 +1248,19 @@ ERR VTAPI ErrIsamSeek( JET_SESID sesid, JET_VTID vtid, JET_GRBIT grbit )
     else if ( grbit & JET_bitSeekGT )
     {
         if ( !FFUCBUnique( pfucbSeek )
-            && bm.key.suffix.Cb() < KEY::CbLimitKeyMost( pidb->CbKeyMost() ) )
+            && bm.key.suffix.Cb() < KEY::CbLimitKeyMost( pidb->CbKeyMost() ) )      //  may be equal if Limit already set or client used JET_bitNormalizedKey
         {
             Assert( pfcb->FTypeSecondaryIndex() );
             Assert( pidb->Cidxseg() > 0 );
             Assert( pfucbSeek->cColumnsInSearchKey <= pidb->Cidxseg() );
             if ( pfucbSeek->cColumnsInSearchKey == pidb->Cidxseg() )
             {
+                //  PERF: seek on Limit of key, otherwise we would
+                //  end up on the first index entry for this key
+                //  (because of the trailing bookmark) and we
+                //  would have to laterally navigate past it
+                //  (and possibly others)
+                //
                 ( (BYTE *)bm.key.suffix.Pv() )[bm.key.suffix.Cb()] = 0xff;
                 bm.key.suffix.DeltaCb( 1 );
             }
@@ -1029,13 +1283,23 @@ ERR VTAPI ErrIsamSeek( JET_SESID sesid, JET_VTID vtid, JET_GRBIT grbit )
     }
 
 #ifdef TRANSACTED_SEEK
+    //
+    //  UNDONE: support not yet fully added (still need
+    //  transaction commit/rollback on all exit paths), so
+    //  I've purposely not declared the fTransactionStarted
+    //  variable so that this will fail to compile if
+    //  someone tries to enable it
+    //
     if ( 0 == ppib->Level() )
     {
+        //  begin transaction for read consistency
+        //
         Call( ErrDIRBeginTransaction( ppib, 60197, JET_bitTransactionReadOnly ) );
         fTransactionStarted = fTrue;
     }
 #endif
 
+    // Only enable preread when the filter context specified.
     if( pfucbSeek->pmoveFilterContext )
     {
         FUCBSetSequential( pfucbSeek );
@@ -1054,6 +1318,8 @@ ERR VTAPI ErrIsamSeek( JET_SESID sesid, JET_VTID vtid, JET_GRBIT grbit )
 
     err = ErrDIRDown( pfucbSeek, &dib );
 
+    //  remember return from seek
+    //
     fFoundLess = ( wrnNDFoundLess == err );
     fFoundGreater = ( wrnNDFoundGreater == err );
     fFoundEqual = ( !fFoundGreater
@@ -1077,9 +1343,14 @@ ERR VTAPI ErrIsamSeek( JET_SESID sesid, JET_VTID vtid, JET_GRBIT grbit )
         Assert( locOnCurBM == pfucbSeek->locLogical );
         if ( pfucbTable->pfucbCurIndex != pfucbNil )
         {
+            //  if a secondary index is in use,
+            //  then position primary index on record
+            //
             Assert( FFUCBSecondary( pfucbSeek ) );
             Assert( pfucbSeek == pfucbTable->pfucbCurIndex );
 
+            //  goto bookmark pointed to by secondary index node
+            //
             BOOKMARK    bmRecord;
 
             Assert(pfucbSeek->kdfCurr.data.Pv() != NULL);
@@ -1089,6 +1360,7 @@ ERR VTAPI ErrIsamSeek( JET_SESID sesid, JET_VTID vtid, JET_GRBIT grbit )
             bmRecord.key.suffix = pfucbSeek->kdfCurr.data;
             bmRecord.data.Nullify();
 
+            //  We will need to touch the data page buffer.
 
             Call( ErrDIRGotoBookmark( pfucbTable, bmRecord ) );
 
@@ -1104,6 +1376,10 @@ ERR VTAPI ErrIsamSeek( JET_SESID sesid, JET_VTID vtid, JET_GRBIT grbit )
                 Call( ErrDIRRelease( pfucbSeek ) );
                 fRelease = fFalse;
 
+                //  found equal on seek equal.  If index range grbit is
+                //  set and we know the current key is not unique
+                //  then set index range upper inclusive.
+                //
                 if ( fFoundUniqueKey )
                 {
                     err = ErrERRCheck( JET_wrnUniqueKey );
@@ -1112,6 +1388,14 @@ ERR VTAPI ErrIsamSeek( JET_SESID sesid, JET_VTID vtid, JET_GRBIT grbit )
                 {
 #ifdef TRANSACTED_SEEK
 #else
+                    //
+                    //  WARNING: I've always told people that JetSeek()
+                    //  will NEVER return JET_errNoCurrentRecord. But if
+                    //  you get to this code path at level 0, and the
+                    //  node is deleted out from underneath you, then
+                    //  ErrIsamSetIndexRange() will end up failing with
+                    //  precisely that error. Doh!
+                    //
 #endif
                     CallR( ErrIsamSetIndexRange( ppib, pfucbTable, JET_bitRangeInclusive | JET_bitRangeUpperLimit ) );
                 }
@@ -1121,11 +1405,19 @@ ERR VTAPI ErrIsamSeek( JET_SESID sesid, JET_VTID vtid, JET_GRBIT grbit )
 
             case JET_bitSeekGE:
             case JET_bitSeekLE:
+                //  release and return
+                //
                 CallS( err );
                 goto Release;
                 break;
 
             case JET_bitSeekGT:
+                //  move to next node with different key
+                //  (WARNING: if at level 0, there is potential
+                //  for this to fail with JET_errRecordDeleted
+                //  because the page gets unlatched then
+                //  re-latched)
+                //
                 err = ErrRECIFilteredMove( pfucbTable, JET_MoveNext, JET_bitMoveKeyNE );
 
                 if ( err < 0 )
@@ -1145,6 +1437,12 @@ ERR VTAPI ErrIsamSeek( JET_SESID sesid, JET_VTID vtid, JET_GRBIT grbit )
                 break;
 
             case JET_bitSeekLT:
+                //  move to previous node with different key
+                //  (WARNING: if at level 0, there is potential
+                //  for this to fail with JET_errRecordDeleted
+                //  because the page gets unlatched then
+                //  re-latched)
+                //
                 err = ErrRECIFilteredMove( pfucbTable, JET_MovePrevious, JET_bitMoveKeyNE );
 
                 if ( err < 0 )
@@ -1178,6 +1476,14 @@ ERR VTAPI ErrIsamSeek( JET_SESID sesid, JET_VTID vtid, JET_GRBIT grbit )
             case JET_bitSeekEQ:
                 if ( FFUCBUnique( pfucbSeek ) )
                 {
+                    //  see RecordNotFound case below for an
+                    //  explanation of why we need to set
+                    //  the locLogical of the primary cursor
+                    //  (note: the secondary cursor will
+                    //  narmally get set to locLogical when
+                    //  we call ErrDIRRelease() below, but
+                    //  may get set to locOnFDPRoot if we
+                    //  couldn't save the bookmark)
                     if ( pfucbTable != pfucbSeek )
                     {
                         Assert( !Pcsr( pfucbTable )->FLatched() );
@@ -1187,11 +1493,22 @@ ERR VTAPI ErrIsamSeek( JET_SESID sesid, JET_VTID vtid, JET_GRBIT grbit )
                     goto Release;
                 }
 
-                Assert( pfucbSeek->u.pfcb->FTypeSecondaryIndex() );
+                //  For non-unique indexes, because we use
+                //  key+data for keys of internal nodes,
+                //  and because child nodes have a key
+                //  strictly less than its parent, we
+                //  might end up on the wrong leaf node.
+                //  We want to go to the right sibling and
+                //  check the first node there to see if
+                //  the key-only matches.
+                Assert( pfucbSeek->u.pfcb->FTypeSecondaryIndex() ); //  only secondary index can be non-unique
 
+                //  FALL THROUGH
 
             case JET_bitSeekGE:
             case JET_bitSeekGT:
+                //  move to next node
+                //  release and return
 AdjustPositionAfterFoundLess:
                 err = ErrRECIFilteredMove( pfucbTable, JET_MoveNext, NO_GRBIT );
 
@@ -1211,6 +1528,12 @@ AdjustPositionAfterFoundLess:
 
                 if ( !FFUCBUnique( pfucbSeek ) )
                 {
+                    //  For a non-unique index, there are some complexities
+                    //  because the keys are stored as key+data but we're
+                    //  doing a key-only search (see comment in the
+                    //  JET_bitSeekEQ just above for the full explanation).
+                    //  This might cause us to fall short of the node we
+                    //  truly want, so we have to laterally navigate.
                     Assert( pfucbSeek == pfucbTable->pfucbCurIndex );
                     Assert( Pcsr( pfucbSeek )->FLatched() );
                     const INT   cmp = CmpKey( pfucbSeek->kdfCurr.key, bm.key );
@@ -1218,6 +1541,12 @@ AdjustPositionAfterFoundLess:
 #ifdef TRANSACTED_SEEK
                     Assert( cmp >= 0 );
 #else
+                    //  if we're at level 0, the MoveNext above
+                    //  may have landed on another node less than
+                    //  our search criteria (because it just got
+                    //  inserted and/or became visible), so need
+                    //  to skip over it
+                    //
                     Assert( cmp >= 0 || 0 == ppib->Level() );
                     if ( cmp < 0 && 0 == ppib->Level() )
                     {
@@ -1232,6 +1561,9 @@ AdjustPositionAfterFoundLess:
                     }
                     else if ( grbit & JET_bitSeekGT )
                     {
+                        //  the keys match exactly, but we're doing
+                        //  a strictly greater than search, so must
+                        //  keep navigating
                         if ( 0 == cmp )
                             goto AdjustPositionAfterFoundLess;
                     }
@@ -1276,6 +1608,14 @@ AdjustPositionAfterFoundLess:
                             {
 #ifdef TRANSACTED_SEEK
 #else
+                                //
+                                //  WARNING: I've always told people that JetSeek()
+                                //  will NEVER return JET_errNoCurrentRecord. But if
+                                //  you get to this code path at level 0, and the
+                                //  node is deleted out from underneath you, then
+                                //  ErrIsamSetIndexRange() will end up failing with
+                                //  precisely that error. Doh!
+                                //
 #endif
                                 CallR( ErrIsamSetIndexRange( ppib, pfucbTable, JET_bitRangeInclusive | JET_bitRangeUpperLimit ) );
                             }
@@ -1287,6 +1627,12 @@ AdjustPositionAfterFoundLess:
 #else
                 else if ( 0 == ppib->Level() )
                 {
+                    //  since we're at level 0, the MoveNext above
+                    //  may have landed on another node less than
+                    //  our search criteria (because it just got
+                    //  inserted and/or became visible), so need
+                    //  to skip over it
+                    //
                     CallS( err );
                     Assert( grbit & ( JET_bitSeekGE | JET_bitSeekGT ) );
                     Assert( Pcsr( pfucbSeek )->FLatched() );
@@ -1298,11 +1644,18 @@ AdjustPositionAfterFoundLess:
                     }
                     else if ( cmp > 0 )
                     {
+                        //  node has a key creater than what we're looking
+                        //  for, so return appropriate error if necessary
+                        //
                         if ( grbit & JET_bitSeekGE )
                             err = ErrERRCheck( JET_wrnSeekNotEqual );
                     }
                     else
                     {
+                        //  node has key equal to the key we used for
+                        //  seeking, but if we were performing a SeekGT,
+                        //  then we should skip the node
+                        //
                         if ( grbit & JET_bitSeekGT )
                             goto AdjustPositionAfterFoundLess;
                     }
@@ -1329,6 +1682,10 @@ AdjustPositionAfterFoundLess:
 
             case JET_bitSeekLE:
             case JET_bitSeekLT:
+                //  move to previous node -- to adjust DIR level locLogical
+                //  (because coming out of ErrDIRDown(), the locLogical
+                //  will be locBeforeSeekBM)
+                //
                 err = ErrRECIFilteredMove( pfucbTable, JET_MovePrevious, NO_GRBIT );
 
                 if ( err < 0 )
@@ -1363,6 +1720,14 @@ AdjustPositionAfterFoundLess:
         switch ( grbit & bitSeekAll )
         {
             case JET_bitSeekEQ:
+                //  see RecordNotFound case below for an
+                //  explanation of why we need to set
+                //  the locLogical of the primary cursor
+                //  (note: the secondary cursor will
+                //  narmally get set to locLogical when
+                //  we call ErrDIRRelease() below, but
+                //  may get set to locOnFDPRoot if we
+                //  couldn't save the bookmark)
                 if ( pfucbTable != pfucbSeek )
                 {
                     Assert( !Pcsr( pfucbTable )->FLatched() );
@@ -1374,6 +1739,10 @@ AdjustPositionAfterFoundLess:
 
             case JET_bitSeekGE:
             case JET_bitSeekGT:
+                //  move next to fix DIR level locLogical
+                //  (because coming out of ErrDIRDown(), the locLogical
+                //  will be locAfterSeekBM)
+                //
                 err = ErrRECIFilteredMove( pfucbTable, JET_MoveNext, NO_GRBIT );
 
                 Assert( err >= 0 );
@@ -1398,6 +1767,9 @@ AdjustPositionAfterFoundLess:
 
             case JET_bitSeekLE:
             case JET_bitSeekLT:
+                //  move previous
+                //  release and return
+                //
 #ifdef TRANSACTED_SEEK
                 err = ErrRECIFilteredMove( pfucbTable, JET_MovePrevious, NO_GRBIT );
 
@@ -1442,6 +1814,12 @@ AdjustPositionAfterFoundLess:
 
                     if ( 0 == ppib->Level() )
                     {
+                        //  since we're at level 0, the MovePrev above
+                        //  may have landed on another node greater than
+                        //  our search criteria (because it just got
+                        //  inserted and/or became visible), so need to
+                        //  skip over it
+                        //
                         const INT   cmp = CmpKey( pfucbSeek->kdfCurr.key, bm.key );
 
                         if ( cmp < 0 )
@@ -1456,6 +1834,7 @@ AdjustPositionAfterFoundLess:
                         }
                         else
                         {
+                            //  skip over this node
                         }
                     }
                     else
@@ -1466,7 +1845,7 @@ AdjustPositionAfterFoundLess:
                         break;
                     }
                 }
-#endif
+#endif  //  TRANSACTED_SEEK
 
                 goto Release;
                 break;
@@ -1484,6 +1863,24 @@ AdjustPositionAfterFoundLess:
 
         if ( JET_errRecordNotFound == err )
         {
+            //  The secondary index cursor has been placed on a
+            //  virtual record, so we must update the primary
+            //  index cursor as well (if not, then it's possible
+            //  to do, for instance, a RetrieveColumn on the
+            //  primary cursor and you'll get back data from the
+            //  record you were on before the seek but a
+            //  RetrieveFromIndex on the secondary cursor will
+            //  return JET_errNoCurrentRecord).
+            //  Note that although the locLogical of the primary
+            //  cursor is being updated, it's not necessary to
+            //  update the primary cursor's bmCurr, because it
+            //  will never be accessed (the secondary cursor takes
+            //  precedence).  The only reason we reset the
+            //  locLogical is for error-handling so that we
+            //  properly err out with JET_errNoCurrentRecord if
+            //  someone tries to use the cursor to access a record
+            //  before repositioning the secondary cursor to a true
+            //  record.
             Assert( locOnSeekBM == pfucbSeek->locLogical );
             if ( pfucbTable != pfucbSeek )
             {
@@ -1498,6 +1895,8 @@ AdjustPositionAfterFoundLess:
     }
 
 Release:
+    //  release latched page and return error
+    //
     if ( fRelease )
     {
         Assert( Pcsr( pfucbSeek ) ->FLatched() );
@@ -1531,6 +1930,8 @@ Release:
     return err;
 
 HandleError:
+    //  reset cursor to before first
+    //
     Assert( err < 0 );
     KSReset( pfucbSeek );
     DIRUp( pfucbSeek );
@@ -1545,13 +1946,16 @@ HandleError:
 }
 
 
+//  =================================================================
 LOCAL ERR ErrRECICheckIndexrangesForUniqueness(
             const JET_SESID sesid,
             const JET_INDEXRANGE * const rgindexrange,
             const ULONG cindexrange )
+//  =================================================================
 {
     PIB * const ppib        = reinterpret_cast<PIB *>( sesid );
 
+    //  check that all the tableid's are on the same table and different indexes
     for( SIZE_T itableid = 0; itableid < cindexrange; ++itableid )
     {
         if( sizeof( JET_INDEXRANGE ) != rgindexrange[itableid].cbStruct )
@@ -1563,6 +1967,7 @@ LOCAL ERR ErrRECICheckIndexrangesForUniqueness(
         CheckTable( ppib, pfucb );
         CheckSecondary( pfucb );
 
+        //  don't do a join on the primary index!
 
         if( !pfucb->pfucbCurIndex )
         {
@@ -1570,14 +1975,19 @@ LOCAL ERR ErrRECICheckIndexrangesForUniqueness(
             return ErrERRCheck( JET_errInvalidParameter );
         }
 
+        //  check the GRBITs
 
         if( JET_bitRecordInIndex != rgindexrange[itableid].grbit
+//  SOMEONE: 01/10/02: removed until ErrRECIJoinFindDuplicates is fixed
+//  for JET_bitRecordNotInIndex
+///         && JET_bitRecordNotInIndex != rgindexrange[itableid].grbit
             )
         {
             AssertSz( fFalse, "Invalid grbit in JET_INDEXRANGE" );
             return ErrERRCheck( JET_errInvalidGrbit );
         }
 
+        //  check against all other indexes for duplications
 
         for( SIZE_T itableidT = 0; itableidT < cindexrange; ++itableidT )
         {
@@ -1588,6 +1998,7 @@ LOCAL ERR ErrRECICheckIndexrangesForUniqueness(
 
             const FUCB * const pfucbT   = reinterpret_cast<FUCB *>( rgindexrange[itableidT].tableid );
 
+            //  don't do a join on the primary index!
 
             if( !pfucbT->pfucbCurIndex )
             {
@@ -1595,6 +2006,7 @@ LOCAL ERR ErrRECICheckIndexrangesForUniqueness(
                 return ErrERRCheck( JET_errInvalidParameter );
             }
 
+            //  compare FCB's to make sure we are on the same table
 
             if( pfucbT->u.pfcb != pfucb->u.pfcb )
             {
@@ -1602,6 +2014,7 @@ LOCAL ERR ErrRECICheckIndexrangesForUniqueness(
                 return ErrERRCheck( JET_errInvalidParameter );
             }
 
+            //  compare secondary indexes to make sure the indexes are different
 
             if( pfucb->pfucbCurIndex->u.pfcb == pfucbT->pfucbCurIndex->u.pfcb )
             {
@@ -1614,10 +2027,12 @@ LOCAL ERR ErrRECICheckIndexrangesForUniqueness(
 }
 
 
+//  =================================================================
 LOCAL ERR ErrRECIInsertBookmarksIntoSort(
     FUCB * const        pfucb,
     FUCB * const        pfucbSort,
     const JET_GRBIT     grbit )
+//  =================================================================
 {
     ERR                 err;
     const INST * const  pinst       = PinstFromPfucb( pfucb );
@@ -1631,6 +2046,9 @@ LOCAL ERR ErrRECIInsertBookmarksIntoSort(
     Call( ErrDIRGet( pfucb ) );
     do
     {
+        //  this loop can take some time, so see if we need
+        //  to terminate because of shutdown
+        //
         Call( pinst->ErrCheckForTermination() );
 
         key.suffix = pfucb->kdfCurr.data;
@@ -1652,6 +2070,7 @@ HandleError:
 }
 
 
+//  =================================================================
 LOCAL ERR ErrRECIJoinFindDuplicates(
     JET_SESID                       sesid,
     _In_count_( cindexes ) const JET_INDEXRANGE * const rgindexrange,
@@ -1659,20 +2078,25 @@ LOCAL ERR ErrRECIJoinFindDuplicates(
     _In_range_( 1, 64 ) const ULONG cindexes,
     _Out_ JET_RECORDLIST * const            precordlist,
     JET_GRBIT                       grbit )
+//  =================================================================
 {
     ERR                             err;
     const INST * const              pinst       = PinstFromPpib( (PIB *)sesid );
     SIZE_T                          isort;
     BYTE                            rgfSortIsMin[64];
 
+    // prefast wants to know the array count or rgfSortIsMin is big enough for cindexes
     if ( _countof(rgfSortIsMin) < cindexes )
     {
         AssertSz( false, "We have a problem." );
+        // There really should be a code inconsistent error ...
         return( ErrERRCheck(JET_wrnNyi) );
     }
 
+    //  move all the sorts to the first record
 
     Assert( cindexes > 0 );
+    //  pull page size off first sort.
     const LONG cbPage = CbAssertGlobalPageSizeMatchRTL( g_rgfmp[ rgpfucbSort[ 0 ]->ifmp ].CbPage() );
     Assert( cbPage != 0 );
     for( isort = 0; isort < cindexes; ++isort )
@@ -1680,13 +2104,22 @@ LOCAL ERR ErrRECIJoinFindDuplicates(
         err = ErrSORTNext( rgpfucbSort[isort] );
         if( JET_errNoCurrentRecord == err )
         {
+            //  no bookmarks to return
             err = JET_errSuccess;
             return err;
         }
         Call( err );
-        Expected( cbPage == g_rgfmp[ rgpfucbSort[ isort ]->ifmp ].CbPage() );
+        Expected( cbPage == g_rgfmp[ rgpfucbSort[ isort ]->ifmp ].CbPage() ); // page size shouldn't change between indices.
     }
 
+    //  FUTURE: need JET_coltypKey so that made key is not needlessly renormalized as binary
+    //          which can result in the key being truncated thereby perturbing primary key order.
+    //          rgcolumndefJoinList would then use JET_coltypKey in place of JET_coltypBinary.
+    //          Indexes over columns of this type may require that this is either the only column
+    //          or that the column occurs at the end of the index.
+    //
+    //  create the temp table for the bookmarks
+    //
     Assert( 1 == sizeof( rgcolumndefJoinlist ) / sizeof( rgcolumndefJoinlist[0] ) );
     Call( ErrIsamOpenTempTable(
                 sesid,
@@ -1699,13 +2132,18 @@ LOCAL ERR ErrRECIJoinFindDuplicates(
                 CbKeyMostForPage( cbPage ),
                 CbKeyMostForPage( cbPage ) ) );
 
+    //  take a unique list of bookmarks from the sorts
 
     while( 1 )
     {
         SIZE_T  isortMin    = 0;
 
+        //  this loop can take some time, so see if we need
+        //  to terminate because of shutdown
+        //
         Call( pinst->ErrCheckForTermination() );
 
+        //  find the index of the sort with the smallest bookmark
 
         for( isort = 1; isort < cindexes; ++isort )
         {
@@ -1715,18 +2153,23 @@ LOCAL ERR ErrRECIJoinFindDuplicates(
             }
             else if( cmp < 0 )
             {
+                //  the current min is smaller
             }
             else
             {
+                //  we have a new minimum
                 Assert( cmp > 0 );
                 isortMin = isort;
             }
         }
 
+        //  see if all keys are the same as the minimum
 
         BOOL    fDuplicate  = fTrue;
         memset( rgfSortIsMin, 0, sizeof( rgfSortIsMin ) );
 
+        // We errored out at the top of the function if cindexes was greater than
+        // the length of rgfSortIsMin, and isortMin is bounded by cindexes in the loop above.
         AssertPREFIX( isortMin < _countof( rgfSortIsMin ) );
 
         rgfSortIsMin[isortMin] = fTrue;
@@ -1771,6 +2214,7 @@ LOCAL ERR ErrRECIJoinFindDuplicates(
             }
         }
 
+        //  if there are duplicates, insert into the temp table
 
         if( fDuplicate )
         {
@@ -1791,6 +2235,7 @@ LOCAL ERR ErrRECIJoinFindDuplicates(
             ++(precordlist->cRecord);
         }
 
+        //  remove all minimums
 
         for( isort = 0; isort < cindexes; ++isort )
         {
@@ -1819,18 +2264,22 @@ HandleError:
 }
 
 
+//  =================================================================
 ERR ErrIsamIntersectIndexes(
     const JET_SESID sesid,
     _In_count_( cindexrange ) const JET_INDEXRANGE * const rgindexrange,
     _In_range_( 1, 64 ) const ULONG cindexrange,
     _Out_ JET_RECORDLIST * const precordlist,
     const JET_GRBIT grbit )
+//  =================================================================
 {
     PIB * const ppib        = reinterpret_cast<PIB *>( sesid );
     FUCB *      rgpfucbSort[64];
     SIZE_T      ipfucb;
     ERR         err;
 
+    //  check input parameters
+    //
     CallR( ErrPIBCheck( ppib ) );
     AssertDIRNoLatch( ppib );
 
@@ -1850,25 +2299,35 @@ ERR ErrIsamIntersectIndexes(
         return ErrERRCheck( JET_errInvalidParameter );
     }
 
+    //  check that all the tableid's are on the same table and different indexes
+    //
     CallR( ErrRECICheckIndexrangesForUniqueness( sesid, rgindexrange, cindexrange ) );
 
+    //  set all the sort's to NULL
+    //
     for( ipfucb = 0; ipfucb < cindexrange; ++ipfucb )
     {
         Assert( ipfucb < sizeof(rgpfucbSort)/sizeof(rgpfucbSort[0]) );
         rgpfucbSort[ipfucb] = pfucbNil;
     }
 
+    //  initialize the pjoinlist
+    //
     precordlist->tableid    = JET_tableidNil;
     precordlist->cRecord    = 0;
     precordlist->columnidBookmark = 0;
 
     Call( ErrPIBOpenTempDatabase( ppib ) );
     
+    //  create the sorts
+    //
     for( ipfucb = 0; ipfucb < cindexrange; ++ipfucb )
     {
         Call( ErrSORTOpen( ppib, rgpfucbSort + ipfucb, fTrue, fTrue ) );
     }
 
+    //  for each index, put all the primary keys in its index range into its sort
+    //
     for( ipfucb = 0; ipfucb < cindexrange; ++ipfucb )
     {
         FUCB * const pfucb  = reinterpret_cast<FUCB *>( rgindexrange[ipfucb].tableid );
@@ -1876,6 +2335,8 @@ ERR ErrIsamIntersectIndexes(
         Call( ErrSORTEndInsert( rgpfucbSort[ipfucb] ) );
     }
 
+    //  insert duplicate bookmarks into a new temp table
+    //
     Call( ErrRECIJoinFindDuplicates(
             sesid,
             rgindexrange,
@@ -1885,6 +2346,8 @@ ERR ErrIsamIntersectIndexes(
             grbit ) );
 
 HandleError:
+    //  close all the sorts
+    //
     for( ipfucb = 0; ipfucb < cindexrange; ++ipfucb )
     {
         if( pfucbNil != rgpfucbSort[ipfucb] )
@@ -1898,6 +2361,7 @@ HandleError:
 }
 
 
+//  =================================================================
 LOCAL ERR ErrIsamValidatePrereadKeysArguments(
     const PIB * const                               ppib,
     const FUCB * const                              pfucb,
@@ -1906,6 +2370,7 @@ LOCAL ERR ErrIsamValidatePrereadKeysArguments(
     const LONG                                      ckeys,
     __in_opt const LONG * const                     pckeysPreread,
     const JET_GRBIT                                 grbit )
+//  =================================================================
 {
     ERR err = JET_errSuccess;
 
@@ -1924,10 +2389,12 @@ LOCAL ERR ErrIsamValidatePrereadKeysArguments(
         Call( ErrERRCheck( JET_errInvalidGrbit ) );
     }
 
+    // determine the largest possible key for this index
     const FCB * const pfcbTable = pfucb->u.pfcb;
     const IDB * const pidb = pfcbTable->Pidb();
     const ULONG cbKeyMost = pidb ? pidb->CbKeyMost() : sizeof(DBK);
 
+    // validate the arguments
     for( INT ikey = 0; ikey < ckeys; ++ikey )
     {
         if( NULL == rgpvKeys[ikey] )
@@ -1939,6 +2406,7 @@ LOCAL ERR ErrIsamValidatePrereadKeysArguments(
             Call( ErrERRCheck( JET_errInvalidBufferSize ) );
         }
 
+        // make sure the keys are in order (duplicates are OK)
         if( ikey > 0 )
         {
             KEY keyPrev;
@@ -1970,6 +2438,7 @@ HandleError:
 
 
 
+//  =================================================================
 ERR VTAPI ErrIsamPrereadKeys(
     const JET_SESID                                 sesid,
     const JET_VTID                                  vtid,
@@ -1978,12 +2447,14 @@ ERR VTAPI ErrIsamPrereadKeys(
     const LONG                                      ckeys,
     __out_opt LONG * const                          pckeysPreread,
     const JET_GRBIT                                 grbit )
+//  =================================================================
 {
     ERR err = JET_errSuccess;
 
     PIB * const ppib = reinterpret_cast<PIB *>( sesid );
     FUCB * pfucb = reinterpret_cast<FUCB *>( vtid );
 
+    // switch to any secondary index that is in use
     if ( pfucb->pfucbCurIndex != pfucbNil )
     {
         pfucb = pfucb->pfucbCurIndex;
@@ -2039,6 +2510,11 @@ LOCAL ERR ErrRECIMakeKey(
 
     for ( DWORD i = 0; i < cIndexColumns; i++ )
     {
+        // Check for valid relational operators for creating a key
+        // Can be Equals/ZeroLength or PrefixEquals (that one only on the
+        // last column spcified) - all unspecified columns become wildcards
+        // Begin/End range is auto-inferred from whether or not it is the
+        // start or end of the range.
         if ( rgIndexColumns[i].relop != JET_relopEquals &&
              ( i != cIndexColumns - 1 || rgIndexColumns[i].relop != JET_relopPrefixEquals ) )
         {
@@ -2101,6 +2577,9 @@ LOCAL ERR ErrRECIInsertionSort(
 
     for ( DWORD i = 1; i < cIndexRanges; i++ )
     {
+        // If client does not want to know number of ranges read,
+        // sort the ranges for them (still disallow overlapping ranges
+        // use insertion sort, should be good enough here
         for ( DWORD j = 0; j < i; j++ )
         {
             INT cmp1 = CmpKey( pStartKeys[i], startKeyLengths[i], pEndKeys[j], endKeyLengths[j] );
@@ -2111,6 +2590,7 @@ LOCAL ERR ErrRECIInsertionSort(
             {
                 if ( cmp1 < 0 && cmp2 < 0 )
                 {
+                    // insert
                     pvTmp = pStartKeys[i];
                     memmove( pStartKeys+j+1, pStartKeys+j, (i-j)*sizeof(BYTE *) );
                     pStartKeys[j] = pvTmp;
@@ -2131,11 +2611,13 @@ LOCAL ERR ErrRECIInsertionSort(
                 }
                 else if ( cmp1 < 0 || cmp2 < 0 )
                 {
+                    // overlapping ranges
                     Call( ErrERRCheck( JET_errInvalidParameter ) );
                 }
             }
             else if ( cmp1 > 0 && cmp2 > 0 )
             {
+                // insert
                 pvTmp = pStartKeys[i];
                 memmove( pStartKeys+j+1, pStartKeys+j, (i-j)*sizeof(BYTE *) );
                 pStartKeys[j] = pvTmp;
@@ -2156,6 +2638,7 @@ LOCAL ERR ErrRECIInsertionSort(
             }
             else if ( cmp1 > 0 || cmp2 > 0 )
             {
+                // overlapping ranges
                 Call( ErrERRCheck( JET_errInvalidParameter ) );
             }
         }
@@ -2243,6 +2726,8 @@ ERR ErrIsamIPrereadKeyRanges(
     }
     fForward = !!( grbit & JET_bitPrereadForward );
 
+    //  if prereading LVs then current index must be clustered index
+    //
     if ( ccolumnidPreread > 0 && pfucb->pfucbCurIndex != pfucbNil )
     {
         Call( ErrERRCheck( JET_errInvalidPreread ) );
@@ -2261,6 +2746,10 @@ ERR ErrIsamIPrereadKeyRanges(
         grbit |= bitPrereadSingletonRanges;
     }
 
+    //  check that all columnids provided are for long types which can be separated.  
+    //  Long types that are constrained in the DDL not to ever be off page should 
+    //  not be preread since they can never exist in there own pages.
+    //
     ULONG               icolumnidT = 0;
     FCB                 * const pfcbTable = pfucb->u.pfcb;
     pfcbTable->EnterDML();
@@ -2286,6 +2775,7 @@ ERR ErrIsamIPrereadKeyRanges(
 
     for ( iindexrangeT = 0; iindexrangeT < (LONG)cIndexRanges; iindexrangeT++ )
     {
+        // validate the arguments - make sure the keys are in order
         cmp = CmpKey( pStartKeys[iindexrangeT], startKeyLengths[iindexrangeT], pEndKeys[iindexrangeT], endKeyLengths[iindexrangeT] );
         if( fForward && cmp > 0 )
         {
@@ -2298,6 +2788,7 @@ ERR ErrIsamIPrereadKeyRanges(
 
         if ( pcRangesPreread != NULL && iindexrangeT > 0 )
         {
+            // If client wants to know number of ranges read, enforce sorting
             cmp = CmpKey( pEndKeys[iindexrangeT-1], endKeyLengths[iindexrangeT-1], pStartKeys[iindexrangeT], startKeyLengths[iindexrangeT] );
             if( fForward && cmp > 0 )
             {
@@ -2315,8 +2806,12 @@ ERR ErrIsamIPrereadKeyRanges(
         Call( ErrRECIInsertionSort( (BYTE **)pStartKeys, startKeyLengths, (BYTE **)pEndKeys, endKeyLengths, cIndexRanges, fForward ) );
     }
 
+    //  preread primary or secondary index
+    //
     if ( pfucb->pfucbCurIndex != pfucbNil )
     {
+        //  preread secondary index
+        //
         Call( ErrBTPrereadKeyRanges(
             ppib,
             pfucb->pfucbCurIndex,
@@ -2333,6 +2828,8 @@ ERR ErrIsamIPrereadKeyRanges(
     }
     else
     {
+        //  preread primary index
+        //
         Call( ErrBTPrereadKeyRanges(
             ppib,
             pfucb,
@@ -2347,6 +2844,8 @@ ERR ErrIsamIPrereadKeyRanges(
             grbit,
             pcPageCacheActual ) );
 
+        //  preread long values
+        //
         if ( ccolumnidPreread > 0 )
         {
             LvId                rglid[clidMostPreread];
@@ -2364,29 +2863,45 @@ ERR ErrIsamIPrereadKeyRanges(
             
             Assert( pfucbNil != pfucbT );
         
+            //  seek to each record via given key, and retreive all LIDs in all instances in all column ids provided
+            //
             for( iindexrangeT = 0; ( iindexrangeT < cindexrangesPreread ) && ( ilidMac < _countof( rglid ) ); iindexrangeT++ )
             {
+                //  seek to start of index range
+                //
                 Call( ErrIsamMakeKey( ppib, pfucbT, fForward ? pStartKeys[iindexrangeT] : pEndKeys[iindexrangeT], fForward ? startKeyLengths[iindexrangeT] : endKeyLengths[iindexrangeT], JET_bitNewKey|JET_bitNormalizedKey ) );
                 err = ErrIsamSeek( ppib, pfucbT, JET_bitSeekGE );
                 Assert( JET_errNoCurrentRecord != err );
                 if ( JET_errRecordNotFound == err )
                 {
+                    //  if range empty then continue in a best effort fashion
+                    //          
                     continue;
                 }
                 Call( err );
 
+                //  set index range upper/lower+inclusive
+                //
                 Call( ErrIsamMakeKey( ppib, pfucbT, fForward ? pEndKeys[iindexrangeT] : pStartKeys[iindexrangeT], fForward ? endKeyLengths[iindexrangeT] : startKeyLengths[iindexrangeT], JET_bitNewKey|JET_bitNormalizedKey ) );
                 err = ErrIsamSetIndexRange ( ppib, pfucbT, JET_bitRangeUpperLimit |JET_bitRangeInclusive );
                 if ( JET_errNoCurrentRecord == err )
                 {
+                    //  if range empty then continue in best effort fashion
+                    //
                     continue;
                 }
                 Call( err );
                 
+                //  retrieve LIDs for given columns for each record in range
+                //
                 while ( ilidMac < _countof( rglid ) )
                 {
+                    //  retrieve LIDs for given columns
+                    //
                     for ( icolumnidT = 0; ( icolumnidT < ccolumnidPreread ) && ( ilidMac < _countof( rglid ) ); icolumnidT++ )
                     {
+                        //  for each column, retrieve LIDs from all instances
+                        //
                         for( retinfoT.itagSequence = 1; ilidMac < _countof( rglid ); retinfoT.itagSequence++ )
                         {
                             Call( ErrIsamRetrieveColumn( ppib, pfucbT, rgcolumnidPreread[icolumnidT], &lidT, sizeof(lidT),&cbActual, JET_bitRetrieveLongId, &retinfoT ) );
@@ -2412,6 +2927,8 @@ ERR ErrIsamIPrereadKeyRanges(
             }
             
 
+            //  preread LIDs if any found
+            //
             if ( ilidMac > 0 )
             {
                 LONG clidT;
@@ -2419,6 +2936,8 @@ ERR ErrIsamIPrereadKeyRanges(
                 Call( ErrLVPrereadLongValues( pfucb, rglid, ilidMac, 0, ulMax, &clidT, &cPageT, grbit ) );
             }
 
+            //  Users dont expect seek errors from an async preread api
+            //
             if ( JET_errNoCurrentRecord == err || JET_errRecordNotFound == err )
             {
                 err = JET_errSuccess;
@@ -2426,8 +2945,13 @@ ERR ErrIsamIPrereadKeyRanges(
         }
     }
 
+    //  return progress if requested.
+    //  Note that we cannot use LV preread as a contraint on ranges processed because the relationship between column LVs and ranges is not kept.
+    //
     if( pcRangesPreread )
     {
+        //  must return progress of at least one range so application can progress through even if resources unavailable to fully process even one range
+        //
         Assert( cindexrangesPreread >= 1 );
         *pcRangesPreread = cindexrangesPreread;
     }
@@ -2441,6 +2965,7 @@ HandleError:
     return err;
 }
 
+//  =================================================================
 ERR ErrIsamIPrereadIndexRanges(
     const JET_SESID                                 sesid,
     const JET_VTID                                  vtid,
@@ -2453,6 +2978,7 @@ ERR ErrIsamIPrereadIndexRanges(
     __in const ULONG                        cPageCacheMax,
     const JET_GRBIT                                 grbit,
     __out_opt ULONG * const                 pcPageCacheActual )
+//  =================================================================
 {
     ERR     err = JET_errSuccess;
     LONG    iindexrangeT = 0;
@@ -2553,6 +3079,7 @@ HandleError:
     return err;
 }
 
+//  =================================================================
 ERR VTAPI ErrIsamPrereadIndexRanges(
     const JET_SESID                                             sesid,
     const JET_VTID                                              vtid,
@@ -2562,6 +3089,7 @@ ERR VTAPI ErrIsamPrereadIndexRanges(
     __in_ecount(ccolumnidPreread) const JET_COLUMNID * const    rgcolumnidPreread,
     const ULONG                                                 ccolumnidPreread,
     const JET_GRBIT                                             grbit )
+//  =================================================================
 {
     return ErrIsamIPrereadIndexRanges(
         sesid,
@@ -2609,6 +3137,7 @@ ERR VTAPI ErrIsamPrereadKeyRanges(
         );
 }
 
+//  =================================================================
 ERR VTAPI ErrIsamPrereadIndexRange(
     _In_  JET_SESID                     sesid,
     _In_  JET_TABLEID                   vtid,
@@ -2617,6 +3146,7 @@ ERR VTAPI ErrIsamPrereadIndexRange(
     _In_  const ULONG           cPageCacheMax,
     _In_  const JET_GRBIT               grbit,
     _Out_opt_ ULONG * const     pcPageCacheActual )
+//  =================================================================
 {
     if ( pIndexRange == NULL )
     {
@@ -2675,18 +3205,25 @@ LOCAL ERR ErrRECIGotoBookmark(
 
     if( 0 == cbBookmark || NULL == pvBookmark )
     {
+        //  don't pass a NULL bookmark into the DIR level
         return ErrERRCheck( JET_errInvalidBookmark );
     }
 
+    //  reset copy buffer status
+    //
     if ( FFUCBUpdatePrepared( pfucb ) )
     {
         CallR( ErrIsamPrepareUpdate( ppib, pfucb, JET_prepCancel ) );
     }
 
+    //  reset index range limit
+    //
     DIRResetIndexRange( pfucb );
 
     KSReset( pfucb );
 
+    //  get node, and return error if this node is not there for caller.
+    //
     bm.key.prefix.Nullify();
     bm.key.suffix.SetPv( const_cast<VOID *>( pvBookmark ) );
     bm.key.suffix.SetCb( cbBookmark );
@@ -2698,8 +3235,13 @@ LOCAL ERR ErrRECIGotoBookmark(
     Assert( pfucb->u.pfcb->FPrimaryIndex() );
     Assert( PgnoFDP( pfucb ) != pgnoSystemRoot );
 
+    //  goto bookmark record build key for secondary index
+    //  to bookmark record
+    //
     if ( pfucb->pfucbCurIndex != pfucbNil )
     {
+        //  get secondary index cursor
+        //
         FUCB        *pfucbIdx = pfucb->pfucbCurIndex;
         IDB         *pidb;
         KEY         key;
@@ -2715,6 +3257,8 @@ LOCAL ERR ErrRECIGotoBookmark(
 
         KeySequence ksT( pfucb, pidb, itag );
 
+        //  allocate goto bookmark resources
+        //
         if ( NULL == pfucbIdx->dataSearchKey.Pv() )
         {
             pfucbIdx->dataSearchKey.SetPv( RESKEY.PvRESAlloc() );
@@ -2723,6 +3267,8 @@ LOCAL ERR ErrRECIGotoBookmark(
             pfucbIdx->dataSearchKey.SetCb( cbKeyAlloc );
         }
 
+        //  make key for record for secondary index
+        //
         key.prefix.Nullify();
         key.suffix.SetPv( pfucbIdx->dataSearchKey.Pv() );
         key.suffix.SetCb( pfucbIdx->dataSearchKey.Cb() );
@@ -2735,6 +3281,8 @@ LOCAL ERR ErrRECIGotoBookmark(
             goto HandleError;
         }
 
+        //  record must honor index no NULL segment requirements
+        //
         if ( pidb->FNoNullSeg() )
         {
             Assert( wrnFLDNullSeg != err );
@@ -2742,6 +3290,8 @@ LOCAL ERR ErrRECIGotoBookmark(
             Assert( wrnFLDNullKey != err );
         }
 
+        //  if item is not index, then move before first instead of seeking
+        //
         Assert( err > 0 || JET_errSuccess == err );
         if ( err > 0
             && ( ( wrnFLDNullKey == err && !pidb->FAllowAllNulls() )
@@ -2750,13 +3300,19 @@ LOCAL ERR ErrRECIGotoBookmark(
                 || wrnFLDOutOfTuples == err
                 || wrnFLDNotPresentInIndex == err )
         {
+            //  assumes that NULLs sort low
+            //
             DIRBeforeFirst( pfucbIdx );
             err = ErrERRCheck( JET_errNoCurrentRecord );
         }
         else
         {
+            //  move to DATA root
+            //
             DIRGotoRoot( pfucbIdx );
 
+            //  seek on secondary key and primary key as data
+            //
             Assert( bm.key.prefix.FNull() );
             Call( ErrDIRDownKeyData( pfucbIdx, key, bm.key.suffix ) );
             CallS( err );
@@ -2836,6 +3392,7 @@ ERR VTAPI ErrIsamGotoIndexBookmark(
 
     if( 0 == cbSecondaryKey || NULL == pvSecondaryKey )
     {
+        //  don't pass a NULL bookmark into the DIR level
         return ErrERRCheck( JET_errInvalidBookmark );
     }
 
@@ -2845,6 +3402,7 @@ ERR VTAPI ErrIsamGotoIndexBookmark(
 
     if ( FFUCBUnique( pfucbIdx ) )
     {
+        //  don't need primary bookmark, even if one was specified
         bm.data.Nullify();
     }
     else
@@ -2857,11 +3415,15 @@ ERR VTAPI ErrIsamGotoIndexBookmark(
     }
 
 
+    //  reset copy buffer status
+    //
     if ( FFUCBUpdatePrepared( pfucb ) )
     {
         Call( ErrIsamPrepareUpdate( ppib, pfucb, JET_prepCancel ) );
     }
 
+    //  reset index range limit
+    //
     DIRResetIndexRange( pfucb );
 
     KSReset( pfucb );
@@ -2876,13 +3438,21 @@ ERR VTAPI ErrIsamGotoIndexBookmark(
     Assert( !Pcsr( pfucb )->FLatched() );
     Assert( !Pcsr( pfucbIdx )->FLatched() );
 
+    //  move secondary cursor to desired location
     err = ErrDIRGotoJetBookmark( pfucbIdx, bm, fTrue );
 
+    //  Within ErrDIRGotoJetBookmark(), JET_errRecordDeleted
+    //  from ErrBTGotoBookmark() means that the node with the
+    //  specified bookmark was physically expunged, and
+    //  JET_errRecordDeleted from ErrBTGet() means that the
+    //  node is still physically present, but not visible
+    //  to this cursor. In either case, establish virtual
+    //  currency (so DIRNext/Prev() will work) if permitted.
     if ( JET_errRecordDeleted == err
         && ( grbit & JET_bitBookmarkPermitVirtualCurrency ) )
     {
         Assert( !Pcsr( pfucbIdx )->FLatched() );
-        Call( ErrBTDeferGotoBookmark( pfucbIdx, bm, fFalse ) );
+        Call( ErrBTDeferGotoBookmark( pfucbIdx, bm, fFalse/*no touch*/ ) );
         pfucbIdx->locLogical = locOnSeekBM;
     }
     else
@@ -2896,18 +3466,32 @@ ERR VTAPI ErrIsamGotoIndexBookmark(
         Assert( pfucbIdx->kdfCurr.data.Pv() != NULL );
         Assert( pfucbIdx->kdfCurr.data.Cb() > 0 );
 
+        //  primary key can be found in the data portion of the
+        //  secondary bookmark on the index page (but not
+        //  necessarily in the bmCurr, because we optimise
+        //  that out on unique secondary indices)
+        //
         Assert( bm.key.prefix.FNull() );
         bm.key.suffix = pfucbIdx->kdfCurr.data;
         bm.data.Nullify();
 
-        const ERR   errGotoBM   = ErrBTDeferGotoBookmark( pfucb, bm, fTrue );
+        //  move primary cursor to match secondary cursor
+        //
+        const ERR   errGotoBM   = ErrBTDeferGotoBookmark( pfucb, bm, fTrue/*touch*/ );
         CallSx( errGotoBM, JET_errOutOfMemory );
 
+        //  now that we're done with the index page, release the latch
+        //  (regardless of whether we err'd out setting the primary cursor)
+        //
         err = ErrBTRelease( pfucbIdx );
         CallSx( err, JET_errOutOfMemory );
 
         if ( err < 0 || errGotoBM < 0 )
         {
+            //  force both cursors to a virtual currency
+            //  UNDONE: I'm not sure what exactly the
+            //  appropriate currency should be if we
+            //  err out here
             pfucbIdx->locLogical = locOnSeekBM;
             pfucb->locLogical = locOnSeekBM;
 
@@ -2922,20 +3506,55 @@ ERR VTAPI ErrIsamGotoIndexBookmark(
     Assert( !Pcsr( pfucb )->FLatched() );
     Assert( !Pcsr( pfucbIdx )->FLatched() );
 
+    //  The secondary index cursor may have been placed on a
+    //  virtual record, so we must update the primary
+    //  index cursor as well (if not, then it's possible
+    //  to do, for instance, a RetrieveColumn on the
+    //  primary cursor and you'll get back data from the
+    //  record you were on before the seek but a
+    //  RetrieveFromIndex on the secondary cursor will
+    //  return JET_errNoCurrentRecord).
+    //  Note that although the locLogical of the primary
+    //  cursor is being updated, it's not necessary to
+    //  update the primary cursor's bmCurr, because it
+    //  will never be accessed (the secondary cursor takes
+    //  precedence).  The only reason we reset the
+    //  locLogical is for error-handling so that we
+    //  properly err out with JET_errNoCurrentRecord if
+    //  someone tries to use the cursor to access a record
+    //  before repositioning the secondary cursor to a true
+    //  record.
     Assert( locOnCurBM == pfucbIdx->locLogical
         || locOnSeekBM == pfucbIdx->locLogical );
     pfucb->locLogical = pfucbIdx->locLogical;
 
     if ( locOnSeekBM == pfucbIdx->locLogical )
     {
+        //  if currency was placed on virtual bookmark, record must have gotten deleted
         Call( ErrERRCheck( JET_errRecordDeleted ) );
     }
 
     else if ( FFUCBUnique( pfucbIdx ) && 0 != cbPrimaryBookmark )
     {
+        //  on a unique index, we'll ignore any primary bookmark the
+        //  user may have specified, so need to verify this is truly
+        //  the record the user requested
         if ( (ULONG)pfucb->bmCurr.key.suffix.Cb() != cbPrimaryBookmark
             || 0 != memcmp( pfucb->bmCurr.key.suffix.Pv(), pvPrimaryBookmark, cbPrimaryBookmark ) )
         {
+            //  index entry was found, but has a different primary
+            //  bookmark, so must assume that original record
+            //  was deleted (and new record subsequently got
+            //  inserted with same secondary index key, but
+            //  different primary key)
+            //
+            //  NOTE: the user's currency will be left on the
+            //  index entry matching the desired key, even
+            //  though we're erring out because the primary
+            //  bookmark doesn't match - this makes things
+            //  really interesting if PermitVirtualCurrency
+            //  is specified
+            //
             Call( ErrERRCheck( JET_errRecordDeleted ) );
         }
     }
@@ -2961,6 +3580,7 @@ ERR VTAPI ErrIsamGotoPosition( JET_SESID sesid, JET_VTID vtid, JET_RECPOS *precp
     ERR     err;
     FUCB    *pfucbSecondary;
 
+    // filters do not apply to fractional moves
     if ( pfucb->pmoveFilterContext )
     {
         return ErrERRCheck( JET_errFilteredMoveNotSupported );
@@ -2977,19 +3597,29 @@ ERR VTAPI ErrIsamGotoPosition( JET_SESID sesid, JET_VTID vtid, JET_RECPOS *precp
         return err;
     }
 
+    //  Reset copy buffer status
+    //
     if ( FFUCBUpdatePrepared( pfucb ) )
     {
         CallR( ErrIsamPrepareUpdate( ppib, pfucb, JET_prepCancel ) );
     }
 
+    //  reset index range limit
+    //
     DIRResetIndexRange( pfucb );
 
+    //  reset key stat
+    //
     KSReset( pfucb );
 
+    //  set non primary index pointer, may be null
+    //
     pfucbSecondary = pfucb->pfucbCurIndex;
 
     if ( pfucbSecondary == pfucbNil )
     {
+        //  move to DATA root
+        //
         DIRGotoRoot( pfucb );
 
         err = ErrDIRGotoPosition( pfucb, precpos->centriesLT, precpos->centriesTotal );
@@ -3005,12 +3635,19 @@ ERR VTAPI ErrIsamGotoPosition( JET_SESID sesid, JET_VTID vtid, JET_RECPOS *precp
     {
         ERR         errT = JET_errSuccess;
 
+        //  move to DATA root
+        //
         DIRGotoRoot( pfucbSecondary );
 
         err = ErrDIRGotoPosition( pfucbSecondary, precpos->centriesLT, precpos->centriesTotal );
 
+        //  if the movement was successful and a secondary index is
+        //  in use, then position primary index to record.
+        //
         if ( JET_errSuccess == err )
         {
+            //  goto bookmark pointed to by secondary index node
+            //
             BOOKMARK    bmRecord;
 
             Assert(pfucbSecondary->kdfCurr.data.Pv() != NULL);
@@ -3020,6 +3657,7 @@ ERR VTAPI ErrIsamGotoPosition( JET_SESID sesid, JET_VTID vtid, JET_RECPOS *precp
             bmRecord.key.suffix = pfucbSecondary->kdfCurr.data;
             bmRecord.data.Nullify();
 
+            //  We will need to touch the data page buffer.
 
             errT = ErrDIRGotoBookmark( pfucb, bmRecord );
 
@@ -3029,10 +3667,14 @@ ERR VTAPI ErrIsamGotoPosition( JET_SESID sesid, JET_VTID vtid, JET_RECPOS *precp
 
         if ( err >= 0 )
         {
+            //  release latch
+            //
             err = ErrDIRRelease( pfucbSecondary );
 
             if ( errT < 0 && err >= 0 )
             {
+                //  propagate the more severe error
+                //
                 err = errT;
             }
         }
@@ -3044,6 +3686,9 @@ ERR VTAPI ErrIsamGotoPosition( JET_SESID sesid, JET_VTID vtid, JET_RECPOS *precp
 
     AssertDIRNoLatch( ppib );
 
+    //  if no records then return JET_errRecordNotFound
+    //  otherwise return error from called routine
+    //
     if ( err < 0 )
     {
         DIRBeforeFirst( pfucb );
@@ -3071,10 +3716,12 @@ ERR VTAPI ErrIsamSetIndexRange( JET_SESID sesid, JET_VTID vtid, JET_GRBIT grbit 
     FUCB    *pfucb      = pfucbTable->pfucbCurIndex ?
                             pfucbTable->pfucbCurIndex : pfucbTable;
 
-    
+    /*  ppib is not used in this function
+    /**/
     AssertDIRNoLatch( ppib );
 
-    
+    /*  if instant duration index range, then reset index range.
+    /**/
     if ( grbit & JET_bitRangeRemove )
     {
         if ( FFUCBLimstat( pfucb ) )
@@ -3089,7 +3736,8 @@ ERR VTAPI ErrIsamSetIndexRange( JET_SESID sesid, JET_VTID vtid, JET_GRBIT grbit 
         }
     }
 
-    
+    /*  must be on index
+    /**/
     if ( pfucb == pfucbTable )
     {
         FCB     *pfcbTable = pfucbTable->u.pfcb;
@@ -3105,6 +3753,8 @@ ERR VTAPI ErrIsamSetIndexRange( JET_SESID sesid, JET_VTID vtid, JET_GRBIT grbit 
             FCB *pfcbTemplateTable = pfcbTable->Ptdb()->PfcbTemplateTable();
             if ( !pfcbTemplateTable->FSequentialIndex() )
             {
+                //  If template table has a primary index,
+                //  we must have inherited it,
                 fPrimaryIndexTemplate = fTrue;
                 Assert( pfcbTemplateTable->Pidb() != pidbNil );
                 Assert( pfcbTemplateTable->Pidb()->FTemplateIndex() );
@@ -3116,6 +3766,9 @@ ERR VTAPI ErrIsamSetIndexRange( JET_SESID sesid, JET_VTID vtid, JET_GRBIT grbit 
             }
         }
 
+        //  if primary index was present when schema was faulted in,
+        //  no need for further check because we don't allow
+        //  the primary index to be deleted
         if ( !fPrimaryIndexTemplate && !pfcbTable->FInitialIndex() )
         {
             pfcbTable->EnterDML();
@@ -3134,7 +3787,8 @@ ERR VTAPI ErrIsamSetIndexRange( JET_SESID sesid, JET_VTID vtid, JET_GRBIT grbit 
         }
     }
 
-    
+    /*  key must be prepared
+    /**/
     if ( !( FKSPrepared( pfucb ) ) )
     {
         Call( ErrERRCheck( JET_errKeyNotMade ) );
@@ -3142,14 +3796,17 @@ ERR VTAPI ErrIsamSetIndexRange( JET_SESID sesid, JET_VTID vtid, JET_GRBIT grbit 
 
     FUCBAssertValidSearchKey( pfucb );
 
-    
+    /*  set index range and check current position
+    /**/
     DIRSetIndexRange( pfucb, grbit );
     err = ErrDIRCheckIndexRange( pfucb );
 
-    
+    /*  reset key status
+    /**/
     KSReset( pfucb );
 
-    
+    /*  if instant duration index range, then reset index range.
+    /**/
     if ( grbit & JET_bitRangeInstantDuration )
     {
         DIRResetIndexRange( pfucbTable );
@@ -3165,9 +3822,9 @@ ERR ErrIsamSetCurrentIndex(
     JET_SESID           vsesid,
     JET_VTID            vtid,
     const CHAR          *szName,
-    const JET_INDEXID   *pindexid,
-    const JET_GRBIT     grbit,
-    const ULONG         itagSequence )
+    const JET_INDEXID   *pindexid,          //  default = NULL
+    const JET_GRBIT     grbit,              //  default = JET_bitMoveFirst
+    const ULONG         itagSequence )      //  default = 1
 {
     ERR                 err;
     PIB                 *ppib           = (PIB *)vsesid;
@@ -3175,6 +3832,7 @@ ERR ErrIsamSetCurrentIndex(
     CHAR                *szIndex;
     CHAR                szIndexNameBuf[ (JET_cbNameMost + 1) ];
 
+    // filters do not migrate to new index
     if ( pfucb->pmoveFilterContext )
     {
         Error( ErrERRCheck( JET_errFilteredMoveNotSupported ) );
@@ -3186,6 +3844,10 @@ ERR ErrIsamSetCurrentIndex(
     CheckSecondary( pfucb );
     Assert( JET_bitMoveFirst == grbit || JET_bitNoMove == grbit );
 
+    //  index name is ignored if an indexid is passed in
+    //
+    //  a null or empty index name indicates switching to primary index
+    //
     if ( NULL != pindexid
         || NULL == szName
         || '\0' == *szName )
@@ -3200,16 +3862,21 @@ ERR ErrIsamSetCurrentIndex(
 
     if ( JET_bitMoveFirst == grbit )
     {
+        //  Reset copy buffer status
+        //
         if ( FFUCBUpdatePrepared( pfucb ) )
         {
             CallR( ErrIsamPrepareUpdate( ppib, pfucb, JET_prepCancel ) );
         }
 
+        //  change index and defer move first
+        //
         Call( ErrRECSetCurrentIndex( pfucb, szIndex, (INDEXID *)pindexid ) );
         AssertDIRNoLatch( ppib );
 
         if( pfucb->u.pfcb->FPreread() && pfucbNil != pfucb->pfucbCurIndex )
         {
+            //  Preread the root of the index
             PIBTraceContextScope tcScope = ppib->InitTraceContextScope();
             tcScope->nParentObjectClass = TceFromFUCB( pfucb->pfucbCurIndex );
             tcScope->SetDwEngineObjid( ObjidFDP( pfucb->pfucbCurIndex ) );
@@ -3223,6 +3890,8 @@ ERR ErrIsamSetCurrentIndex(
     {
         Assert( JET_bitNoMove == grbit );
 
+        //  get bookmark of current record, change index,
+        //  and goto bookmark.
         BOOKMARK    *pbm;
 
         Call( ErrDIRGetBookmark( pfucb, &pbm ) );
@@ -3230,6 +3899,16 @@ ERR ErrIsamSetCurrentIndex(
 
         Call( ErrRECSetCurrentIndex( pfucb, szIndex, (INDEXID *)pindexid ) );
 
+        //  UNDONE: error handling.  We should not have changed
+        //  currency or current index, if set current index
+        //  fails for any reason.  Note that this functionality
+        //  could be provided by duplicating the cursor, on
+        //  the primary index, setting the current index to the
+        //  new index, getting the bookmark from the original
+        //  cursor, goto bookmark on the duplicate cursor,
+        //  instating the duplicate cursor for the table id of
+        //  the original cursor, and closing the original cursor.
+        //
         Assert( pbm->key.Cb() > 0 );
         Assert( pbm->data.Cb() == 0 );
 
@@ -3275,6 +3954,9 @@ ERR ErrRECSetCurrentIndex(
 
     ppfucbCurIdx = &pfucb->pfucbCurIndex;
 
+    //  caller should have verified that an
+    //  empty index name is not being passed in
+    //
     Assert( NULL == szIndex || '\0' != *szIndex );
 
     OSTraceFMP(
@@ -3288,6 +3970,9 @@ ERR ErrRECSetCurrentIndex(
             (ULONG)pfcbTable->Ifmp(),
             pfcbTable->ObjidFDP() ) );
 
+    //  NOTE: index name is ignored if an indexid
+    //  is specified
+    //
     if ( NULL != pindexid )
     {
         if ( sizeof(INDEXID) != pindexid->cbStruct )
@@ -3309,6 +3994,8 @@ ERR ErrRECSetCurrentIndex(
 
         else if ( NULL != *ppfucbCurIdx && pfcbIndex == (*ppfucbCurIdx)->u.pfcb )
         {
+            //  switching to the current index
+            //
             return ( pfcbIndex->ObjidFDP() != pindexid->objidFDP
                     || pfcbIndex->PgnoFDP() != pindexid->pgnoFDP ?
                             ErrERRCheck( JET_errInvalidIndexId ) :
@@ -3318,11 +4005,13 @@ ERR ErrRECSetCurrentIndex(
 
         else if ( !pfcbIndex->FValid() )
         {
+//          AssertSz( fFalse, "Bogus FCB pointer." );
             return ErrERRCheck( JET_errInvalidIndexId );
         }
 
         else
         {
+            //  verify index visibility
             pfcbTable->EnterDML();
 
             if ( pfcbIndex->ObjidFDP() != pindexid->objidFDP
@@ -3341,6 +4030,7 @@ ERR ErrRECSetCurrentIndex(
             {
                 pfcbTable->LeaveDML();
 
+                //  return JET_errInvalidIndexId if index not visible to us
                 return ( JET_errIndexNotFound == err ?
                                 ErrERRCheck( JET_errInvalidIndexId ) :
                                 err );
@@ -3348,11 +4038,14 @@ ERR ErrRECSetCurrentIndex(
 
             else if ( pfcbIndex->Pidb()->FTemplateIndex() )
             {
+                // Don't need refcount on template indexes, since we
+                // know they'll never go away.
                 Assert( pfcbIndex->Pidb()->CrefCurrentIndex() == 0 );
             }
 
             else
             {
+                //  pin the index until we're ready to open a cursor on it
                 pfcbIndex->Pidb()->IncrementCurrentIndex();
                 fIncrementedRefCount = fTrue;
             }
@@ -3362,6 +4055,8 @@ ERR ErrRECSetCurrentIndex(
 
     }
 
+    //  a null index name indicates switching to primary index
+    //
     else if ( NULL == szIndex )
     {
         fSettingToPrimaryIndex = fTrue;
@@ -3371,6 +4066,8 @@ ERR ErrRECSetCurrentIndex(
     {
         BOOL    fPrimaryIndexTemplate   = fFalse;
 
+        //  see if we're switching to the derived
+        //  primary index (if any)
         if ( pfcbTable->FDerivedTable() )
         {
             Assert( pfcbTable->Ptdb() != ptdbNil );
@@ -3379,6 +4076,7 @@ ERR ErrRECSetCurrentIndex(
 
             if ( !pfcbTemplateTable->FSequentialIndex() )
             {
+                // If template table has a primary index, we must have inherited it.
 
                 fPrimaryIndexTemplate = fTrue;
                 Assert( pfcbTemplateTable->Pidb() != pidbNil );
@@ -3400,6 +4098,7 @@ ERR ErrRECSetCurrentIndex(
             }
         }
 
+        //  see if we're switching to the primary index
         if ( !fPrimaryIndexTemplate )
         {
             pfcbTable->EnterDML();
@@ -3426,6 +4125,9 @@ ERR ErrRECSetCurrentIndex(
                 && pfucbNil != *ppfucbCurIdx
                 && !( (*ppfucbCurIdx)->u.pfcb->FDerivedIndex() ) )
             {
+                //  don't let go of the DML latch because
+                //  we're going to need it below to check
+                //  if we're switching to the current
                 fInDMLLatch = fTrue;
             }
             else
@@ -3450,25 +4152,32 @@ ERR ErrRECSetCurrentIndex(
             Assert( (*ppfucbCurIdx)->u.pfcb->Pidb()->CrefCurrentIndex() > 0
                 || (*ppfucbCurIdx)->u.pfcb->Pidb()->FTemplateIndex() );
 
+            //  move the sequential flag back to this index
+            //  we are about to close this FUCB so we don't need to reset its flags
             if( FFUCBSequential( *ppfucbCurIdx ) )
             {
                 FUCBSetSequential( pfucb );
             }
 
+            //  really changing index, so close old one
 
             DIRClose( *ppfucbCurIdx );
             *ppfucbCurIdx = pfucbNil;
 
+            //  changing to primary index.  Reset currency to beginning.
             ppfucbCurIdx = &pfucb;
             goto ResetCurrency;
         }
 
+        //  UNDONE: this case should honor grbit move expectations
         return JET_errSuccess;
     }
 
 
     Assert( NULL != szIndex || NULL != pindexid );
 
+    //  have a current secondary index
+    //
     if ( *ppfucbCurIdx != pfucbNil )
     {
         const FCB * const   pfcbSecondaryIdx    = (*ppfucbCurIdx)->u.pfcb;
@@ -3484,6 +4193,8 @@ ERR ErrRECSetCurrentIndex(
 
         if ( NULL != pindexid )
         {
+            //  already verified above that we're not
+            //  switching to the current index
             Assert( !fInDMLLatch );
             Assert( pfcbSecondaryIdx != pindexid->pfcbIndex );
         }
@@ -3500,11 +4211,13 @@ ERR ErrRECSetCurrentIndex(
             const CHAR * const  szCurrIdx   = ptdb->SzIndexName( pidb->ItagIndexName() );
             if ( 0 == UtilCmpName( szIndex, szCurrIdx ) )
             {
+                //  changing to the current secondary index, so do nothing.
                 return JET_errSuccess;
             }
         }
         else
         {
+            // See if the desired index is the current one
             if ( !fInDMLLatch )
                 pfcbTable->EnterDML();
 
@@ -3521,6 +4234,7 @@ ERR ErrRECSetCurrentIndex(
 
             if ( 0 == cmp )
             {
+                //  changing to the current secondary index, so do nothing.
                 return JET_errSuccess;
             }
         }
@@ -3528,8 +4242,11 @@ ERR ErrRECSetCurrentIndex(
 
         Assert( !fInDMLLatch );
 
+        //  really changing index, so close old one
+        //
         if ( FFUCBVersioned( *ppfucbCurIdx ) )
         {
+            //  if versioned, must defer-close cursor
             DIRClose( *ppfucbCurIdx );
         }
         else
@@ -3554,11 +4271,14 @@ ERR ErrRECSetCurrentIndex(
         fClosedPreviousIndex = fTrue;
     }
 
+    //  set new current secondary index
+    //
     Assert( pfucbNil == *ppfucbCurIdx );
     Assert( !fInDMLLatch );
 
     if ( NULL != pindexid )
     {
+        //  IDB was already pinned above
         pfcbSecondary = pindexid->pfcbIndex;
         Assert( pfcbNil != pfcbSecondary );
         Assert( pfcbSecondary->Pidb()->CrefCurrentIndex() > 0
@@ -3566,6 +4286,7 @@ ERR ErrRECSetCurrentIndex(
     }
     else
     {
+        //  verify visibility on desired index and pin it
         pfcbTable->EnterDML();
 
         for ( pfcbSecondary = pfcbTable->PfcbNextIndex();
@@ -3586,6 +4307,7 @@ ERR ErrRECSetCurrentIndex(
             }
             else
             {
+                // Found the index we want.
                 break;
             }
         }
@@ -3598,6 +4320,8 @@ ERR ErrRECSetCurrentIndex(
 
         else if ( pfcbSecondary->Pidb()->FTemplateIndex() )
         {
+            // Don't need refcount on template indexes, since we
+            // know they'll never go away.
             Assert( pfcbSecondary->Pidb()->CrefCurrentIndex() == 0 );
         }
         else
@@ -3618,6 +4342,8 @@ ERR ErrRECSetCurrentIndex(
             && pfcbSecondary->Pidb()->FTemplateIndex()
             && pfcbSecondary->Pidb()->CrefCurrentIndex() == 0 ) );
 
+    //  open an FUCB for the new index
+    //
     Assert( pfucbNil == *ppfucbCurIdx );
     Assert( pfucb->ppib != ppibNil );
     Assert( pfucb->ifmp == pfcbSecondary->Ifmp() );
@@ -3635,6 +4361,9 @@ ERR ErrRECSetCurrentIndex(
             FUCBSetUpdatable( pfucbOldIndex );
         }
 
+        //  initialize CSR in fucb
+        //  this allocates page structure
+        //
         new( Pcsr( pfucbOldIndex ) ) CSR;
 
         Call( pfcbSecondary->ErrLink( pfucbOldIndex ) );
@@ -3666,6 +4395,10 @@ ERR ErrRECSetCurrentIndex(
     FUCBSetCurrentSecondary( *ppfucbCurIdx );
     (*ppfucbCurIdx)->pfucbTable = pfucb;
 
+    //  move the sequential flag to this index
+    //  we don't want the sequential flag set on the primary index any more
+    //  because we don't want to preread while seeking on the bookmarks from
+    //  the secondary index
     if( FFUCBSequential( pfucb ) )
     {
         FUCBResetSequential( pfucb );
@@ -3673,11 +4406,14 @@ ERR ErrRECSetCurrentIndex(
         FUCBSetSequential( *ppfucbCurIdx );
     }
 
+    //  copy the opportune read flag to this index
     if ( FFUCBOpportuneRead( pfucb ) )
     {
         FUCBSetOpportuneRead( *ppfucbCurIdx );
     }
 
+    //  reset the index and file currency
+    //
 ResetCurrency:
     Assert( !fInDMLLatch );
     DIRBeforeFirst( *ppfucbCurIdx );
@@ -3697,6 +4433,7 @@ HandleError:
     {
         if ( pfcbNil != pfucbOldIndex->u.pfcb )
         {
+            // Managed to link to the FCB before we failed.
             pfucbOldIndex->u.pfcb->Unlink( pfucbOldIndex );
         }
 
@@ -3728,6 +4465,7 @@ LOCAL ERR ErrRECIIllegalNulls( FUCB * const pfucb, FCB * const pfcb )
 
     Assert( !dataRec.FNull() );
 
+    //  check fixed fields
     if ( ptdb->FTableHasNonNullFixedColumn()
         && ptdb->FidFixedLast() >= ptdb->FidFixedFirst() )
     {
@@ -3738,6 +4476,7 @@ LOCAL ERR ErrRECIIllegalNulls( FUCB * const pfucb, FCB * const pfcb )
         {
             FIELD   field;
 
+            //  template columns are guaranteed to exist
             if ( fTemplateTable )
             {
                 Assert( JET_coltypNil != ptdb->PfieldFixed( columnid )->coltyp );
@@ -3763,7 +4502,7 @@ LOCAL ERR ErrRECIIllegalNulls( FUCB * const pfucb, FCB * const pfcb )
                 const ERR   errCheckNull    = ErrRECIFixedColumnInRecord( columnid, pfcb, dataRec );
 
                 if ( JET_wrnColumnNull == errCheckNull
-                    || JET_errColumnNotFound == errCheckNull )
+                    || JET_errColumnNotFound == errCheckNull )  // if column not in record, it's null (since there's no default value)
                 {
                     return ErrERRCheck( JET_errNullInvalid );
                 }
@@ -3775,6 +4514,7 @@ LOCAL ERR ErrRECIIllegalNulls( FUCB * const pfucb, FCB * const pfcb )
 
     CallSx( err, JET_errColumnNotFound );
 
+    //  check var fields
     if ( ptdb->FTableHasNonNullVarColumn()
         && ptdb->FidVarLast() >= ptdb->FidVarFirst() )
     {
@@ -3783,6 +4523,7 @@ LOCAL ERR ErrRECIIllegalNulls( FUCB * const pfucb, FCB * const pfcb )
             columnid <= columnidVarLast;
             columnid++ )
         {
+            //  template columns are guaranteed to exist
             if ( !fTemplateTable )
             {
                 Assert( !FCOLUMNIDTemplateColumn( columnid ) );
@@ -3810,7 +4551,7 @@ LOCAL ERR ErrRECIIllegalNulls( FUCB * const pfucb, FCB * const pfcb )
                 const ERR   errCheckNull    = ErrRECIVarColumnInRecord( columnid, pfcb, dataRec );
 
                 if ( JET_wrnColumnNull == errCheckNull
-                    || JET_errColumnNotFound == errCheckNull )
+                    || JET_errColumnNotFound == errCheckNull )  // if column not in record, it's null (since there's no default value)
                 {
                     return ErrERRCheck( JET_errNullInvalid );
                 }
@@ -3822,6 +4563,8 @@ LOCAL ERR ErrRECIIllegalNulls( FUCB * const pfucb, FCB * const pfcb )
 
     CallSx( err, JET_errColumnNotFound );
 
+    //  check tagged columns
+    //
     if ( ptdb->FTableHasNonNullTaggedColumn()
         && ptdb->FidTaggedLast() >= ptdb->FidTaggedFirst() )
     {
@@ -3830,6 +4573,7 @@ LOCAL ERR ErrRECIIllegalNulls( FUCB * const pfucb, FCB * const pfcb )
             columnid <= columnidTaggedLast;
             columnid++ )
         {
+            //  template columns are guaranteed to exist
             if ( !fTemplateTable )
             {
                 Assert( !FCOLUMNIDTemplateColumn( columnid ) );
@@ -3856,7 +4600,7 @@ LOCAL ERR ErrRECIIllegalNulls( FUCB * const pfucb, FCB * const pfcb )
             {
                 DATA    dataT;
                 CallR( ErrRECIRetrieveTaggedColumn(
-                            pfucb->u.pfcb,
+                            pfucb->u.pfcb,      //  must use FCB of btree owning the record
                             columnid,
                             1,
                             dataRec,
@@ -3867,7 +4611,7 @@ LOCAL ERR ErrRECIIllegalNulls( FUCB * const pfucb, FCB * const pfcb )
                     return ErrERRCheck( JET_errNullInvalid );
                 }
 
-                Assert( JET_wrnColumnSetNull != err );
+                Assert( JET_wrnColumnSetNull != err );  //  only returned during scan mode
             }
         }
     }
@@ -3957,6 +4701,7 @@ ERR VTAPI ErrIsamGetCurrentIndex( JET_SESID sesid, JET_VTID vtid, _Out_z_bytecap
             const FCB   * const pfcbTemplateTable = pfcbTable->Ptdb()->PfcbTemplateTable();
             if ( !pfcbTemplateTable->FSequentialIndex() )
             {
+                // If template table has a primary index, we must have inherited it.
                 fPrimaryIndexTemplate = fTrue;
                 Assert( pfcbTemplateTable->Pidb() != pidbNil );
                 Assert( pfcbTemplateTable->Pidb()->FTemplateIndex() );
@@ -3986,7 +4731,7 @@ ERR VTAPI ErrIsamGetCurrentIndex( JET_SESID sesid, JET_VTID vtid, _Out_z_bytecap
                         pfcbTable->LeaveDML();
                         return errT;
                     }
-                    szIndex[0] = '\0';
+                    szIndex[0] = '\0';  // Primary index not visible - return sequential index
                 }
                 else
                 {
@@ -4037,13 +4782,18 @@ HandleError:
 
 ULONG UlChecksum( VOID *pv, ULONG cb )
 {
+    //  UNDONE: find a way to compute check sum in longs independant
+    //              of pb, byte offset in page
 
-    
+    /*  compute checksum by adding bytes in data record and shifting
+    /*  result 1 bit to left after each operation.
+    /**/
     BYTE    *pbT = (BYTE *) pv;
     BYTE    *pbMax = pbT + cb;
     ULONG   ulChecksum = 0;
 
-    
+    /*  compute checksum
+    /**/
     for ( ; pbT < pbMax; pbT++ )
     {
         ulChecksum += *pbT;

@@ -6,14 +6,17 @@
 #endif
 #define _OS_NORM_HXX_INCLUDED
 
-
+/*  SORTID constants
+/**/
 const SORTID        g_sortIDNull                  = { 0, 0, 0, 0 };
 
+/*  code page constants
+/**/
+const USHORT        usUniCodePage               = 1200;     /* code page for Unicode strings */
+const USHORT        usEnglishCodePage           = 1252;     /* code page for English */
 
-const USHORT        usUniCodePage               = 1200;     
-const USHORT        usEnglishCodePage           = 1252;     
-
-
+/*  langid and country defaults
+/**/
 const LANGID LangidFromLcid( const LCID lcid );
 
 const WORD          countryDefault              = 1;
@@ -29,8 +32,17 @@ ERR ErrNORMCheckLocaleName( __in INST * const pinst, __in_z const PCWSTR wszLoca
 ERR ErrNORMCheckLCMapFlags( _In_ INST * const pinst, _In_ const DWORD dwLCMapFlags, _In_ const BOOL fUppercaseTextNormalization );
 ERR ErrNORMCheckLCMapFlags( _In_ INST * const pinst, _Inout_ DWORD * const pdwLCMapFlags, _In_ const BOOL fUppercaseTextNormalization );
 
+//  This function is necessary for determining if we can fetch the NLS version.
 BOOL FNORMGetNLSExIsSupported();
 
+//  get the sort-order version for a particular LCID
+//  the sort-order has two components
+//
+//  - defined version:  changes when the set of characters that
+//                      can be sorted changes
+//  - NLS version:      changes when the ordering of the defined
+//                      set of characters changes
+//
 
 ERR ErrNORMGetSortVersion( __in_z PCWSTR wszLocaleName, __out QWORD * const pqwVersion, __out_opt SORTID * const psortID, __in const BOOL fErrorOnInvalidId = fTrue );
 
@@ -60,22 +72,36 @@ VOID AssertNORMConstants();
 #define AssertNORMConstants()
 #endif
 
+//  this value must match LOCALE_NAME_MAX_LENGTH. We cannot set it here
+//  as it would needlessly drag in dependencies to a lot of headers. There is a
+//  C_ASSERT to guarantee these match in norm.cxx.
 #define NORM_LOCALE_NAME_MAX_LENGTH     85
 
 struct NORM_LOCALE_VER
 {
+    // Explicit collation sequence.
+    // When a SORTID is specified, the version (m_dwNlsVersion) is also required.
     SORTID m_sortidCustomSortVersion;
 
+// 0x10 bytes
 
+    // The flags for LCMapString (e.g. NORM_IGNOREKANATYPE, NORM_IGNORECASE)
     DWORD m_dwNormalizationFlags;
 
+    // Which version to use for sorting. Optional, but if it's specified, you should also
+    // specify the sort GUID (Win8+).
     DWORD m_dwNlsVersion;
 
+    // Which version to use for sorting. Used in Vista/Win7, but ignored in Win8+ (according to
+    // the NLS team). Interestingly it's still not zero on Win8+.
     DWORD m_dwDefinedNlsVersion;
 
+// 0x1c bytes
 
-    _Field_z_ WCHAR     m_wszLocaleName[NORM_LOCALE_NAME_MAX_LENGTH];
+    // The locale name. e.g. en-US, pt-BR, en-CA. de-DE_phonebook.
+    _Field_z_ WCHAR     m_wszLocaleName[NORM_LOCALE_NAME_MAX_LENGTH];   // Locale name
 
+// 0xaa bytes
 };
 
 ERR ErrNORMCheckLocaleVersion( _In_ const NORM_LOCALE_VER* pnlv );

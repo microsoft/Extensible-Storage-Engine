@@ -8,14 +8,18 @@
 using namespace std;
 
 #ifdef BUILD_ENV_IS_EX
-#pragma warning(disable:22018)
-#endif
+#pragma warning(disable:22018)  //  Ex12 RTM:  the version of strsafe.h we use has 22018 warnings we can't control
+#endif  //  BUILD_ENV_IS_EX
 #include <strsafe.h>
 #ifdef BUILD_ENV_IS_EX
 #pragma warning(default:22018)
-#endif
+#endif  //  BUILD_ENV_IS_EX
 
+//  ================================================================
 ULONG64 QWQueryPerformanceCounter()
+// Returns the number of milliseconds, using QueryPerformanceFrequency()
+// if possible.
+//  ================================================================
 {
     static bool fCheckedForQpfSupport       = false;
     static bool fUseQueryPerformanceCounter = false;
@@ -25,8 +29,10 @@ ULONG64 QWQueryPerformanceCounter()
     if ( !fCheckedForQpfSupport )
     {
         LARGE_INTEGER   liTemp;
+        // Not synchronized, but that shouldn't be a problem.
         if ( QueryPerformanceFrequency( &liTemp ) )
         {
+            // Since we want a result in milliseconds.
             ulDivisor = liTemp.QuadPart / 1000;
             fUseQueryPerformanceCounter = true;
         }
@@ -44,7 +50,9 @@ ULONG64 QWQueryPerformanceCounter()
     }
 }
 
+//  ================================================================
 DWORD DWGetTickCount()
+//  ================================================================
 {
     return GetTickCount();
 }
@@ -257,6 +265,7 @@ JET_ERR ErrCheckExtErrorsInStrTable( __in const INT cerr )
             {
                 wprintf( L"\n\tCould retrieve an internal error from the string table.  Not bad, but unexpected. 0x%x err = %hs", perrdata->flags, perrdata->szSymbol );
                 fWarning = TRUE;
+                //return errCodeInconsistency;
             }
             continue;
         }
@@ -293,7 +302,7 @@ JET_ERR ErrCheckExtErrorsInStrTable( __in const INT cerr )
 
     if ( fWarning )
     {
-        wprintf( L"\n" );
+        wprintf( L"\n" );   // need a line return 
     }
 
     wprintf( L"Done\n" );
@@ -372,8 +381,11 @@ JET_ERR ErrCheckExtErrorsInCatTable( __in const INT cerr )
 
 
 
+//  simple testing program, no multiple tests, tests just run directly here, exit non-zero on fail ...
 
+//  ================================================================
 INT _cdecl main( INT argc, __in_ecount( argc ) char * argv[] )
+//  ================================================================
 {
     if( argc == 2
         && ( 0 == _stricmp( argv[1], "-h" )
@@ -394,8 +406,10 @@ INT _cdecl main( INT argc, __in_ecount( argc ) char * argv[] )
 
     DWORD tickStart = DWGetTickCount();
 
+    //  first we count how many data table (errdata.txt) entries we have, and how many str atable entries we have ...
 
     INT cerrData = 0;
+    //  som stats ...
     INT cerrExtErr = 0;
     INT cerrExtWrn = 0;
     INT cerrIntErr = 0;
@@ -497,6 +511,7 @@ INT _cdecl main( INT argc, __in_ecount( argc ) char * argv[] )
             return err;                                 \
         }
 
+    //  run various test cases against the error (data, string, and category) tables
 
     FailTestSuite( ErrCheckErrorSpaceConsistent( cerrData, cerrStr ) );
 

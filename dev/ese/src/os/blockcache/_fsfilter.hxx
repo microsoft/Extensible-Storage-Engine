@@ -7,8 +7,9 @@ class CFileFilter;
 class CFileFilterReference;
 static SIZE_T CFileFilterReferenceOffsetOfILE();
 
+//  A file path table entry.
 
-class CFilePathTableEntry
+class CFilePathTableEntry  //  fpte
 {
     public:
 
@@ -45,6 +46,7 @@ class CFilePathTableEntry
 
     public:
 
+        //  Context for an open file.
 
         class COpenFile
         {
@@ -104,6 +106,7 @@ class CFilePathTableEntry
 
     private:
 
+        //  Wait context for cache miss collisions on the file path table.
 
         class CWaiter
         {
@@ -303,6 +306,7 @@ HandleError:
     return err;
 }
 
+//  File path hash table key.
 
 class CFilePathHashKey
 {
@@ -347,6 +351,7 @@ class CFilePathHashKey
         UINT            m_uiHash;
 };
 
+//  File path hash table entry.
 
 class CFilePathHashEntry
 {
@@ -386,15 +391,22 @@ class CFilePathHashEntry
         UINT                    m_uiHash;
 };
 
+//  File path hash table.
 
 typedef CDynamicHashTable<CFilePathHashKey, CFilePathHashEntry> CFilePathHash;
 
+//  TFileSystemFilter:  core implementation of IFileSystemFilter and its derivatives.
+//
+//  This class provides the core of the file system filter used to implement the block cache.  It is responsible for
+//  intercepting relevant IFileSystemAPI calls, detecting files that are or should be cached, and managing the caches
+//  for these files.  This class also provides the ability for the cache to open cached files for write back such that
+//  the engine can successfully access files without being aware of the cache.
 
 template< class I >
-class TFileSystemFilter
+class TFileSystemFilter  //  fsf
     :   public TFileSystemWrapper<I>
 {
-    public:
+    public:  //  specialized API
 
         TFileSystemFilter(  _In_    IFileSystemConfiguration* const pfsconfig,
                             _Inout_ IFileSystemAPI** const          ppfsapi,
@@ -410,8 +422,9 @@ class TFileSystemFilter
         void RemoveFileReference(   _In_ CFileFilterReference* const            pffr,
                                     _In_ CFilePathTableEntry::COpenFile* const  pof );
 
-    public:
+    public:  //  IFileSystemFilter
 
+        //  configuration
 
         ERR ErrFileOpenById(    _In_    const VolumeId                  volumeid,
                                 _In_    const FileId                    fileid,
@@ -423,7 +436,7 @@ class TFileSystemFilter
                             _In_z_  const WCHAR* const wszPathDest,
                             _In_    const BOOL         fOverwriteExisting ) override;
 
-    public:
+    public:  //  IFileSystemAPI
 
         ERR ErrFileDelete( const WCHAR* const wszPath );
         ERR ErrFileMove(    const WCHAR* const  wszPathSource,
@@ -441,7 +454,7 @@ class TFileSystemFilter
                             _In_   const IFileAPI::FileModeFlags    fmf,
                             _Out_  IFileAPI** const                 ppfapi ) override;
 
-    public:
+    public:  //  CFileSystemWrapper
 
         ERR ErrWrapFile( _Inout_ IFileAPI** const ppfapiInner, _Out_ IFileAPI** const ppfapi ) override;
 
@@ -571,6 +584,9 @@ template< class I >
 void TFileSystemFilter<I>::RemoveFileReference( _In_ CFileFilterReference* const            pffr,
                                                 _In_ CFilePathTableEntry::COpenFile* const  pof )
 {
+    //  if this reference is not from the cache and the file is cached then ask the cache to close any references it
+    //  may have to this file.  this will break any circular link that keeps the cache alive.  if the cache still needs
+    //  to do write back to this file then it will open it again
 
     if ( !pffr->FCacheOpen() && pof->Pc() )
     {
@@ -582,6 +598,7 @@ void TFileSystemFilter<I>::RemoveFileReference( _In_ CFileFilterReference* const
         CallS( pof->Pc()->ErrClose( volumeid, fileid, fileserial ) );
     }
 
+    //  release the reference on this open file and file path table entry
 
     ReleaseFile( pof->Pfpte(), NULL, pof, pffr );
 }
@@ -607,6 +624,7 @@ ERR TFileSystemFilter<I>::ErrFileOpenById(  _In_    const VolumeId              
 
     *ppfapi = NULL;
 
+    //  defend against an invalid physical id
 
     if ( volumeid == volumeidInvalid )
     {
@@ -621,35 +639,45 @@ ERR TFileSystemFilter<I>::ErrFileOpenById(  _In_    const VolumeId              
         Error( ErrERRCheck( JET_errInvalidParameter ) );
     }
 
+    //  retry until we have opened a file with the correct physical id
 
     while ( volumeidActual != volumeid || fileidActual != fileid )
     {
+        //  if we have retried too many times then fail
 
         if ( ++cAttempt >= cAttemptMax )
         {
             Call( ErrERRCheck( JET_errInternalError ) );
         }
 
+        //  if we have a file open from a previous attempt then close it
 
         delete *ppfapi;
         *ppfapi = NULL;
 
+        //  translate the file id to a file path and the unambiguous file key path
 
         Call( m_pfident->ErrGetFilePathById( volumeid, fileid, wszAnyAbsPath, wszKeyPath ) );
 
+        //  open the file
+        //
+        //  NOTE:  we presume any file opened by file id is for cache write back
 
         Call( ErrFileOpenInternal( wszAnyAbsPath, wszKeyPath, fmf, fTrue, &pffr ) );
 
+        //  get the actual physical id for the file we opened
 
         Call( pffr->ErrGetPhysicalId( &volumeidActual, &fileidActual, &fileserialActual ) );
     }
 
+    //  verify that the file we opened matches the requested file
 
     if ( fileserialActual != fileserial )
     {
         Call( ErrERRCheck( JET_errFileNotFound ) );
     }
 
+    //  return the opened file
 
     *ppfapi = pffr;
     pffr = NULL;
@@ -686,22 +714,27 @@ ERR TFileSystemFilter<I>::ErrFileRename(    _In_    IFileAPI* const    pfapi,
     WCHAR                   wszAbsPathDest[ cwchAbsPathDestMax ]    = { 0 };
     CFilePathTableEntry*    pfpteDest                               = NULL;
 
+    //  do not accept relative destination paths
 
     if ( TFileSystemWrapper<I>::FPathIsRelative( wszPathDest ) )
     {
         Call( ErrERRCheck( JET_errInvalidParameter ) );
     }
 
+    //  wait to lock the entry for the source and destination files
 
     Call( pfapi->ErrPath( wszPathSrc ) );
     Call( ErrLockFiles( wszPathSrc, wszPathDest, wszAbsPathSrc, wszAbsPathDest, &sem, &pfpteSrc, &pfpteDest ) );
 
+    //  check if we can create the destination file
 
     Call( pfpteDest->ErrAccessCheck( fOverwriteExisting ? IFileAPI::fmfOverwriteExisting : IFileAPI::fmfNone, fTrue, fFalse ) );
 
+    //  rename the file
 
     Call( pfapi->ErrRename( wszAbsPathDest, fOverwriteExisting ) );
 
+    //  move any existing handles from the source to the target
 
     pfpteSrc->TransferFiles( pfpteDest );
 
@@ -720,15 +753,19 @@ ERR TFileSystemFilter<I>::ErrFileDelete( const WCHAR* const wszPath )
     CSemaphore              sem( CSyncBasicInfo( "TFileSystemFilter<I>::ErrFileDelete" ) );
     CFilePathTableEntry*    pfpte                           = NULL;
 
+    //  wait to lock the entry for this file
 
     Call( ErrLockFile( wszPath, wszAbsPath, &sem, &pfpte ) );
 
+    //  prepare to delete the file
 
     Call( ErrPrepareToDelete( pfpte ) );
 
+    //  delete the file
 
     Call( TFileSystemWrapper<I>::ErrFileDelete( wszAbsPath ) );
 
+    //  remove the open file from our file path table
 
     pfpte->DisconnectFile( pfpte->Pof() );
 
@@ -751,18 +788,23 @@ ERR TFileSystemFilter<I>::ErrFileMove(  const WCHAR* const  wszPathSource,
     WCHAR                   wszAbsPathDest[ cwchAbsPathDestMax ]    = { 0 };
     CFilePathTableEntry*    pfpteDest                               = NULL;
 
+    //  wait to lock the entry for the source and destination files
 
     Call( ErrLockFiles( wszPathSource, wszPathDest, wszAbsPathSrc, wszAbsPathDest, &sem, &pfpteSrc, &pfpteDest ) );
 
+    //  prepare to delete the source file
 
     Call( ErrPrepareToDelete( pfpteSrc ) );
 
+    //  check if we can create the destination file
 
     Call( pfpteDest->ErrAccessCheck( fOverwriteExisting ? IFileAPI::fmfOverwriteExisting : IFileAPI::fmfNone, fTrue, fFalse ) );
 
+    //  move the file
 
     Call( TFileSystemWrapper<I>::ErrFileMove( wszAbsPathSrc, wszAbsPathDest, fOverwriteExisting ) );
 
+    //  move any existing handles from the source to the target
 
     pfpteSrc->TransferFiles( pfpteDest );
 
@@ -786,15 +828,19 @@ ERR TFileSystemFilter<I>::ErrFileCopy(  const WCHAR* const  wszPathSource,
     WCHAR                   wszAbsPathDest[ cwchAbsPathDestMax ]    = { 0 };
     CFilePathTableEntry*    pfpteDest                               = NULL;
 
+    //  wait to lock the entry for the source and destination files
 
     Call( ErrLockFiles( wszPathSource, wszPathDest, wszAbsPathSrc, wszAbsPathDest, &sem, &pfpteSrc, &pfpteDest ) );
 
+    //  check if we can access the source file
 
     Call( pfpteSrc->ErrAccessCheck( IFileAPI::fmfReadOnly, fFalse, fFalse ) );
 
+    //  check if we can create the destination file
 
     Call( pfpteDest->ErrAccessCheck( fOverwriteExisting ? IFileAPI::fmfOverwriteExisting : IFileAPI::fmfNone, fTrue, fFalse ) );
 
+    //  copy the file
 
     Call( TFileSystemWrapper<I>::ErrFileCopy( wszAbsPathSrc, wszAbsPathDest, fOverwriteExisting ) );
 
@@ -819,21 +865,28 @@ ERR TFileSystemFilter<I>::ErrFileCreate(    _In_z_ const WCHAR* const           
 
     *ppfapi = NULL;
 
+    //  wait to lock the entry for this file
 
     Call( ErrLockFile( wszPath, wszAbsPath, &sem, &pfpte ) );
     
+    //  if the file isn't open then open it
 
     if ( !pfpte->Pof() )
     {
         Call( ErrFileCreateCacheMiss( wszAbsPath, fmf, pfpte, &pffr ) );
     }
 
+    //  the file is already open
 
     else
     {
+        //  open the already open file
+        //
+        //  NOTE:  we presume any file opened by path is not for cache write back
 
         Call( ErrFileOpenCacheHit( fmf, fTrue, fFalse, pfpte->Pof(), &pffr ) );
 
+        //  we are overwriting an existing file then truncate it.  this also invalidates the cache for this file
 
         if ( DwCreationDispositionFromFileModeFlags( fTrue, fmf ) == CREATE_ALWAYS )
         {
@@ -842,6 +895,7 @@ ERR TFileSystemFilter<I>::ErrFileCreate(    _In_z_ const WCHAR* const           
         }
     }
 
+    //  return the opened file
 
     *ppfapi = pffr;
     pffr = NULL;
@@ -871,12 +925,17 @@ ERR TFileSystemFilter<I>::ErrFileOpen(  _In_z_ const WCHAR* const               
 
     *ppfapi = NULL;
 
+    //  translate the relative file path into an absolute path and an unambiguous file key path
 
     Call( ErrGetFilePath( wszPath, wszAbsPath, wszKeyPath ) );
 
+    //  open the file
+    //
+    //  NOTE:  we presume any file opened by path is not for cache write back
 
     Call( ErrFileOpenInternal( wszAbsPath, wszKeyPath, fmf, fFalse, &pffr ) );
 
+    //  return the opened file
 
     *ppfapi = pffr;
     pffr = NULL;
@@ -1124,9 +1183,11 @@ ERR TFileSystemFilter<I>::ErrGetFilePath(   _In_z_                              
     wszAbsPath[ 0 ] = 0;
     wszKeyPath[ 0 ] = 0;
 
+    //  compute the absolute path of the given path
 
     Call( TFileSystemWrapper<I>::ErrPathComplete( wszPath, wszAbsPath ) );
 
+    //  translate the absolute path into an unambiguous file key path
 
     Call( m_pfident->ErrGetFileKeyPath( wszAbsPath, wszKeyPath ) );
 
@@ -1147,6 +1208,7 @@ ERR TFileSystemFilter<I>::ErrPrepareToDelete( _In_ CFilePathTableEntry* const pf
     FileId      fileid      = fileidInvalid;
     FileSerial  fileserial  = fileserialInvalid;
 
+    //  if the file is open then ask any cache that may have this file open to close it so we can delete it
 
     if ( pfpte->Pof() && pfpte->Pof()->Pc() )
     {
@@ -1154,6 +1216,7 @@ ERR TFileSystemFilter<I>::ErrPrepareToDelete( _In_ CFilePathTableEntry* const pf
         Call( pfpte->Pof()->Pc()->ErrClose( volumeid, fileid, fileserial ) );
     }
 
+    //  check if we can delete the file
 
     Call( pfpte->ErrDeleteCheck() );
 
@@ -1175,19 +1238,24 @@ ERR TFileSystemFilter<I>::ErrFileCreateCacheMiss(   _In_z_  const WCHAR* const  
 
     *ppffr = NULL;
 
+    //  create the file
 
     Call( TFileSystemWrapper<I>::ErrFileCreate( wszAnyAbsPath, fmf, (IFileAPI**)&pff ) );
     fCreated = fTrue;
 
+    //  configure the newly created file
 
     Call( ErrFileConfigure( pff, wszAnyAbsPath ) );
 
+    //  get the file's configured cache
 
     Call( ErrGetConfiguredCache( pff, pfpte->WszKeyPath(), &pc ) );
 
+    //  make the file available for other opens
 
     Call( pfpte->ErrOpenFile( &pff, pc, &pof ) );
 
+    //  provide a wrapper for the cached file that will release it on the last close
 
     Alloc( *ppffr = new CFileFilterReference( this, pof, fmf, fFalse ) );
     pof = NULL;
@@ -1235,21 +1303,26 @@ ERR TFileSystemFilter<I>::ErrFileOpenInternal(  _In_z_  const WCHAR* const      
 
     *ppffr = NULL;
 
+    //  wait to lock the entry for this file
 
     Call( ErrLockFile( wszKeyPath, &sem, &pfpte ) );
 
+    //  if the file isn't open then open it
 
     if ( !pfpte->Pof() )
     {
         Call( ErrFileOpenCacheMiss( wszAnyAbsPath, fmf, fCacheOpen, pfpte, ppffr ) );
     }
 
+    //  the file is already open
 
     else
     {
+        //  open the already open file
 
         Call( ErrFileOpenCacheHit( fmf, fFalse, fCacheOpen, pfpte->Pof(), ppffr ) );
 
+        //  we are overwriting an existing file then truncate it.  this also invalidates the cache for this file
 
         if ( DwCreationDispositionFromFileModeFlags( fFalse, fmf ) == TRUNCATE_EXISTING )
         {
@@ -1284,9 +1357,12 @@ ERR TFileSystemFilter<I>::ErrFileOpenCacheMiss( _In_z_  const WCHAR* const      
 
     *ppffr = NULL;
 
+    //  open the file with the original flags
 
     Call( ErrFileOpenAndConfigure( wszAnyAbsPath, fmf, pfpte, &pff, &pc, &fAttached ) );
 
+    //  if we opened this file read only and it is attached to the cache then open it read write so that the cache can
+    //  perform write back to the file due to cache pressure
 
     if ( fAttached && (fmf & fmfReadOnlyMask) != 0 )
     {
@@ -1296,9 +1372,11 @@ ERR TFileSystemFilter<I>::ErrFileOpenCacheMiss( _In_z_  const WCHAR* const      
         Call( ErrFileOpenAndConfigure( wszAnyAbsPath, fmf & ~fmfReadOnlyMask, pfpte, &pff, &pc, &fAttached ))
     }
 
+    //  make the file available for other opens
 
     Call( pfpte->ErrOpenFile( &pff, pc, &pof ) );
 
+    //  provide a wrapper for the cached file that will release it on the last close
 
     Alloc( *ppffr = new CFileFilterReference( this, pof, fmf, fCacheOpen ) );
     pof = NULL;
@@ -1331,15 +1409,19 @@ ERR TFileSystemFilter<I>::ErrFileOpenAndConfigure(  _In_z_  const WCHAR* const  
     *ppc = NULL;
     *pfAttached = fFalse;
 
+    //  open the file with the specified flags
 
     Call( TFileSystemWrapper<I>::ErrFileOpen( wszAnyAbsPath, fmf, (IFileAPI**)&pff ) );
 
+    //  configure the newly opened file
 
     Call( ErrFileConfigure( pff, wszAnyAbsPath ) );
 
+    //  get the file's cache
 
     Call( ErrGetCache( pff, pfpte->WszKeyPath(), &pc, &fAttached ) );
 
+    //  return the opened file
 
     *ppff = pff;
     pff = NULL;
@@ -1369,9 +1451,11 @@ ERR TFileSystemFilter<I>::ErrFileOpenCacheHit(  _In_    const IFileAPI::FileMode
 
     *ppffr = NULL;
 
+    //  perform the access check against all currently open file handles for this file
 
     Call( pof->Pfpte()->ErrAccessCheck( fmf, fCreate, fCacheOpen ) );
 
+    //  provide a wrapper for the cached file that will release it on the last close
 
     Alloc( *ppffr = new CFileFilterReference( this, pof, fmf, fCacheOpen ) );
 
@@ -1429,18 +1513,23 @@ ERR TFileSystemFilter<I>::ErrGetConfiguredCache(    _In_    CFileFilter* const  
 
     *ppc = NULL;
 
+    //  get the caching configuration for this file
 
     Call( ErrGetConfiguration( &pbcconfig ) );
     Call( pbcconfig->ErrGetCachedFileConfiguration( wszKeyPath, &pcfconfig ) );
 
+    //  if caching is enabled for this file then open its backing store
 
     if ( pcfconfig->FCachingEnabled() )
     {
+        //  get the cache configuration for this file
 
         pcfconfig->CachingFilePath( wszAbsPathCachingFile );
         Call( m_pfident->ErrGetFileKeyPath( wszAbsPathCachingFile, wszKeyPathCachingFile ) );
         Call( pbcconfig->ErrGetCacheConfiguration( wszKeyPathCachingFile, &pcconfig ) );
 
+        //  try to open the cache for this file.  if we can't then we will use access the file without caching.  this
+        //  is intentionally best effort only to allow continued operation if the caching storage is failed
 
         err = m_pcrep->ErrOpen( this, m_pfsconfig, &pcconfig, &pc );
         if ( err < JET_errSuccess )
@@ -1450,9 +1539,11 @@ ERR TFileSystemFilter<I>::ErrGetConfiguredCache(    _In_    CFileFilter* const  
         }
     }
 
+    //  return the cache
 
     *ppc = pc;
 
+    //  save the caching state
 
     pff->SetCacheState( &pcfconfig, &pc, NULL );
 
@@ -1505,9 +1596,11 @@ ERR TFileSystemFilter<I>::ErrGetCache(  _In_    CFileFilter* const  pff,
     *ppc = NULL;
     *pfAttached = fFalse;
 
+    //  determine if this file has a cached file header
 
     err = CCachedFileHeader::ErrLoad( m_pfsconfig, pff, &pcfh );
 
+    //  if the file has a valid cached file header then we need to open its backing store
 
     if ( err >= JET_errSuccess )
     {
@@ -1527,12 +1620,16 @@ ERR TFileSystemFilter<I>::ErrGetCache(  _In_    CFileFilter* const  pff,
         pff->SetCacheState( &pcfconfig, &pc, &pcfh );
     }
 
+    //  if the file doesn't have a recognizable cached file header then open it as if it were not already cached
 
     else if ( err == JET_errReadVerifyFailure )
     {
+        //  ignore any error we got trying to read the cached file header.  if there is corrupt data there then it
+        //  will be discovered at a higher level later
 
         err = JET_errSuccess;
 
+        //  get the file's configured cache
 
         Call( ErrGetConfiguredCache( pff, wszKeyPath, ppc ) );
     }
@@ -1632,10 +1729,11 @@ INLINE void CFilePathHash::CKeyEntry::GetEntry( CFilePathHashEntry * const pentr
     *pentry = m_entry;
 }
 
+//  CFileSystemFilter:  concrete TFileSystemFilter<IFileSystemFilter>
 
 class CFileSystemFilter : public TFileSystemFilter<IFileSystemFilter>
 {
-    public:
+    public:  //  specialized API
 
         CFileSystemFilter(  _In_    IFileSystemConfiguration* const pfsconfig,
                             _Inout_ IFileSystemAPI** const          ppfsapi,
@@ -1649,10 +1747,11 @@ class CFileSystemFilter : public TFileSystemFilter<IFileSystemFilter>
         virtual ~CFileSystemFilter() {}
 };
 
+//  CFileFilterReference:  a reference to an IFileFilter implementation.
 
 class CFileFilterReference : public CFileFilterWrapper
 {
-    public:
+    public:  //  specialized API
 
         CFileFilterReference(   _In_ TFileSystemFilter<IFileSystemFilter>* const    pfsf,
                                 _In_ CFilePathTableEntry::COpenFile* const          pof,
@@ -1674,7 +1773,7 @@ class CFileFilterReference : public CFileFilterWrapper
 
         BOOL FCacheOpen() const { return m_fCacheOpen; }
 
-    public:
+    public:  //  IFileAPI
 
         FileModeFlags Fmf() const override { return m_fmf; }
 
@@ -1697,29 +1796,35 @@ INLINE ERR CFilePathTableEntry::COpenFile::ErrAccessCheck(  _In_ const IFileAPI:
 {
     ERR err = JET_errSuccess;
 
+    //  perform the access check against all currently open file handles for this file
 
     for (   CFileFilterReference* ffr = m_ilReferences.PrevMost();
             ffr != NULL && err >= JET_errSuccess;
             ffr = m_ilReferences.Next( ffr ) )
     {
+        //  if the current open file is for the cache then do not access check against its share mode
         
         if ( ffr->FCacheOpen() )
         {
             continue;
         }
 
+        //  if the proposed file is for the cache then it automatically gets access
 
         if ( fCacheOpen )
         {
             continue;
         }
 
+        //  get the desired access for the proposed file
 
         DWORD dwDesiredAccess = DwDesiredAccessFromFileModeFlags( fmf );
 
+        //  get the share mode for the current open file
 
         DWORD dwShareMode = DwShareModeFromFileModeFlags( ffr->Fmf() );
 
+        //  do not grant access if the desired access doesn't match the share mode of the current open file
 
         if ( ( dwDesiredAccess & GENERIC_READ ) && !( dwShareMode & FILE_SHARE_READ ) )
         {
@@ -1736,9 +1841,11 @@ INLINE ERR CFilePathTableEntry::COpenFile::ErrAccessCheck(  _In_ const IFileAPI:
             err = ErrERRCheck( JET_errFileAccessDenied );
         }
 
+        //  get the creation disposition for the proposed file
 
         DWORD dwCreationDisposition = DwCreationDispositionFromFileModeFlags( fCreate, fmf );
 
+        //  existing file check
 
         if ( dwCreationDisposition == CREATE_NEW )
         {
@@ -1753,14 +1860,17 @@ INLINE ERR CFilePathTableEntry::COpenFile::ErrDeleteCheck()
 {
     ERR err = JET_errSuccess;
 
+    //  perform the delete check against all currently open file handles for this file
 
     for (   CFileFilterReference* ffr = m_ilReferences.PrevMost();
             ffr != NULL && err >= JET_errSuccess;
             ffr = m_ilReferences.Next( ffr ) )
     {
+        //  get the share mode for the current open file
 
         DWORD dwShareMode = DwShareModeFromFileModeFlags( ffr->Fmf() );
 
+        //  delete file check
 
         if ( !( dwShareMode & FILE_SHARE_DELETE ) )
         {

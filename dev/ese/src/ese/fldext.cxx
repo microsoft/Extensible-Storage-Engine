@@ -14,8 +14,12 @@ INLINE ERR ErrRECIGetRecord(
     Assert( ppdataRec );
     Assert( FFUCBSort( pfucb ) || FFUCBIndex( pfucb ) );
 
+    //  retrieving from copy buffer?
+    //
     if ( fUseCopyBuffer )
     {
+        //  only index cursors have copy buffers.
+        //
         Assert( FFUCBIndex( pfucb ) );
         Assert( !Pcsr( pfucb )->FLatched() );
         *ppdataRec = &pfucb->dataWorkBuf;
@@ -28,6 +32,7 @@ INLINE ERR ErrRECIGetRecord(
         }
         else
         {
+            //  sorts always have current data cached.
             Assert( pfucb->locLogical == locOnCurBM
                 || pfucb->locLogical == locBeforeFirst
                 || pfucb->locLogical == locAfterLast );
@@ -44,6 +49,7 @@ INLINE ERR ErrRECIGetRecord(
         *ppdataRec = &pfucb->kdfCurr.data;
     }
 
+    // Negative lengths indicate fatal corruption issues
     if ( err >= JET_errSuccess && (*ppdataRec)->Cb() < 0 )
     {
         err = ErrERRCheck( JET_errDatabaseCorrupted );
@@ -183,6 +189,8 @@ ERR ErrRECIAccessColumn( FUCB *pfucb, COLUMNID columnid, FIELD * const pfieldFix
         {
             *pfieldFixed = *pfieldT;
 
+            //  use the snapshotted FIELD, because the real one
+            //  could be being modified
             ffield = pfieldFixed->ffield;
         }
         else
@@ -222,6 +230,9 @@ ERR ErrRECIAccessColumn( FUCB *pfucb, COLUMNID columnid, FIELD * const pfieldFix
         *pfEncrypted = FFIELDEncrypted( ffield );
     }
 
+    //  check if the FIELD has been versioned or deleted
+    //  (note that we took only a snapshot of the flags
+    //  above, so by now the FIELD may be different),
     if ( FFIELDVersioned( ffield ) )
     {
         Assert( !pfcb->FFixedDDL() );
@@ -233,9 +244,11 @@ ERR ErrRECIAccessColumn( FUCB *pfucb, COLUMNID columnid, FIELD * const pfieldFix
         const BOOL  fLatchHeld  = Pcsr( pfucb )->FLatched();
         if ( fLatchHeld )
         {
+            // UNDONE:  Move latching logic to caller.
             CallS( ErrDIRRelease( pfucb ) );
         }
 
+        // Inherited columns are never versioned.
         Assert( !FCOLUMNIDTemplateColumn( columnid ) );
 
         err = ErrCATAccessTableColumn(
@@ -244,13 +257,15 @@ ERR ErrRECIAccessColumn( FUCB *pfucb, COLUMNID columnid, FIELD * const pfieldFix
                     pfcb->ObjidFDP(),
                     NULL,
                     &columnid );
-        Assert( err <= 0 );
+        Assert( err <= 0 );     // No warning should be generated.
 
         if ( fLatchHeld )
         {
             ERR errT = ErrDIRGet( pfucb );
             if ( errT < 0 )
             {
+                //  if error encountered while re-latching record, return the error
+                //  only if no unexpected errors from catalog consultation.
                 if ( err >= 0 || JET_errColumnNotFound == err )
                     err = errT;
             }
@@ -261,6 +276,10 @@ ERR ErrRECIAccessColumn( FUCB *pfucb, COLUMNID columnid, FIELD * const pfieldFix
     {
         if ( FFIELDDeleted( ffield ) )
         {
+            //  may get deleted columns in FixedDDL tables if an AddColumn() in those
+            //  tables rolled back
+//          Assert( !pfcb->FFixedDDL() );
+//          Assert( !FCOLUMNIDTemplateColumn( columnid ) );
             err = ErrERRCheck( JET_errColumnNotFound );
         }
 
@@ -272,7 +291,7 @@ ERR ErrRECIAccessColumn( FUCB *pfucb, COLUMNID columnid, FIELD * const pfieldFix
 }
 
 ERR ErrRECIRetrieveFixedColumn(
-    FCB             * const pfcb,
+    FCB             * const pfcb,       // pass pfcbNil to bypass EnterDML()
     const TDB       *ptdb,
     const COLUMNID  columnid,
     const DATA&     dataRec,
@@ -309,6 +328,7 @@ ERR ErrRECIRetrieveFixedColumn(
     if ( fUseDMLLatchDBG )
         pfcb->EnterDML();
 
+    // RECIAccessColumn() should have already been called to verify FID.
     Assert( fid <= ptdb->FidFixedLast() );
     Assert( pfieldNil != ptdb->PfieldFixed( columnid ) );
     Assert( JET_coltypNil != ptdb->PfieldFixed( columnid )->coltyp );
@@ -316,9 +336,14 @@ ERR ErrRECIRetrieveFixedColumn(
     Assert( ptdb->PfieldFixed( columnid )->ibRecordOffset < ptdb->IbEndFixedColumns() );
     Assert( !FFIELDUserDefinedDefault( ptdb->PfieldFixed( columnid )->ffield ) );
 
+    // Don't forget to LeaveDML() before exitting this function.
 
+    //  column not represented in record, retrieve from default
+    //  or null column.
+    //
     if ( fid > prec->FidFixedLastInRec() )
     {
+        // if DEBUG, then EnterDML() was already done at the top of this function
         const BOOL  fUseDMLLatch    = ( !fUseDMLLatchDBG
                                         && pfcbNil != pfcb
                                         && fid > ptdb->FidFixedLastInitial() );
@@ -326,8 +351,11 @@ ERR ErrRECIRetrieveFixedColumn(
         if ( fUseDMLLatch )
             pfcb->EnterDML();
 
+        //  assert no infinite recursion
         Assert( dataRec.Pv() != ptdb->PdataDefaultRecord() );
 
+        //  if default value set, then retrieve default
+        //
         if ( FFIELDDefault( ptdb->PfieldFixed( columnid )->ffield ) )
         {
             err = ErrRECIRetrieveFixedDefaultValue( ptdb, columnid, pdataField );
@@ -347,10 +375,13 @@ ERR ErrRECIRetrieveFixedColumn(
     Assert( prec->FidFixedLastInRec() >= fidFixedLeast );
     Assert( ptdb->PfieldFixed( columnid )->ibRecordOffset < prec->IbEndOfFixedData() );
 
+    // check nullity
 
     const UINT  ifid            = fid - fidFixedLeast;
     const BYTE  *prgbitNullity  = prec->PbFixedNullBitMap() + ifid/8;
 
+    //  bit is not set: column is NULL
+    //
     if ( FFixedNullBit( prgbitNullity, ifid ) )
     {
         pdataField->Nullify();
@@ -359,6 +390,7 @@ ERR ErrRECIRetrieveFixedColumn(
     }
     else
     {
+        // if DEBUG, then EnterDML() was already done at the top of this function
         const BOOL  fUseDMLLatch    = ( !fUseDMLLatchDBG
                                         && pfcbNil != pfcb
                                         && pfieldNil == pfieldFixed
@@ -367,6 +399,8 @@ ERR ErrRECIRetrieveFixedColumn(
         if ( fUseDMLLatch )
             pfcb->EnterDML();
 
+        //  set output parameter to length and address of column
+        //
         const FIELD * const pfield = ( pfieldNil != pfieldFixed ? pfieldFixed : ptdb->PfieldFixed( columnid ) );
         Assert( pfield->cbMaxLen == UlCATColumnSize( pfield->coltyp, pfield->cbMaxLen, NULL ) );
         pdataField->SetCb( pfield->cbMaxLen );
@@ -387,7 +421,7 @@ ERR ErrRECIRetrieveFixedColumn(
 
 
 ERR ErrRECIRetrieveVarColumn(
-    FCB             * const pfcb,
+    FCB             * const pfcb,       // pass pfcbNil to bypass EnterDML()
     const TDB       * ptdb,
     const COLUMNID  columnid,
     const DATA&     dataRec,
@@ -422,12 +456,16 @@ ERR ErrRECIRetrieveVarColumn(
     if ( fUseDMLLatchDBG )
         pfcb->EnterDML();
 
+    // RECIAccessColumn() should have already been called to verify FID.
     Assert( fid <= ptdb->FidVarLast() );
     Assert( JET_coltypNil != ptdb->PfieldVar( columnid )->coltyp );
     Assert( !FFIELDUserDefinedDefault( ptdb->PfieldVar( columnid )->ffield ) );
 
+    //  column not represented in record: column is NULL
+    //
     if ( fid > prec->FidVarLastInRec() )
     {
+        // if DEBUG, then EnterDML() was already done at the top of this function
         ERR         err;
         const BOOL  fUseDMLLatch    = ( !fUseDMLLatchDBG
                                         && pfcbNil != pfcb
@@ -436,8 +474,11 @@ ERR ErrRECIRetrieveVarColumn(
         if ( fUseDMLLatch )
             pfcb->EnterDML();
 
+        //  assert no infinite recursion
         Assert( dataRec.Pv() != ptdb->PdataDefaultRecord() );
 
+        //  if default value set, then retrieve default
+        //
         if ( FFIELDDefault( ptdb->PfieldVar( columnid )->ffield ) )
         {
             err = ErrRECIRetrieveVarDefaultValue( ptdb, columnid, pdataField );
@@ -461,13 +502,18 @@ ERR ErrRECIRetrieveVarColumn(
 
     UnalignedLittleEndian<REC::VAROFFSET>   *pibVarOffs     = prec->PibVarOffsets();
 
+    //  adjust fid to an index
+    //
     const UINT              ifid            = fid - fidVarLeast;
 
+    //  beginning of current column is end of previous column
     const REC::VAROFFSET    ibStartOfColumn = prec->IbVarOffsetStart( fid );
 
     Assert( IbVarOffset( pibVarOffs[ifid] ) == prec->IbVarOffsetEnd( fid ) );
     Assert( IbVarOffset( pibVarOffs[ifid] ) >= ibStartOfColumn );
 
+    //  column is set to Null
+    //
     if ( FVarNullBit( pibVarOffs[ifid] ) )
     {
         Assert( IbVarOffset( pibVarOffs[ifid] ) - ibStartOfColumn == 0 );
@@ -480,10 +526,14 @@ ERR ErrRECIRetrieveVarColumn(
 
     if ( pdataField->Cb() == 0 )
     {
+        // length is zero: return success [zero-length non-null
+        // values are allowed]
         pdataField->SetPv( NULL );
     }
     else
     {
+        //  set output parameter: column address
+        //
         BYTE    *pbVarData = prec->PbVarData();
         Assert( pbVarData + IbVarOffset( pibVarOffs[prec->FidVarLastInRec()-fidVarLeast] )
                     <= (BYTE *)dataRec.Pv() + dataRec.Cb() );
@@ -505,7 +555,7 @@ ERR ErrRECIRetrieveTaggedColumn(
     const ULONG     grbit )
 {
     BOOL            fUseDerivedBit      = fFalse;
-    Assert( !( grbit & grbitRetrieveColumnUseDerivedBit ) );
+    Assert( !( grbit & grbitRetrieveColumnUseDerivedBit ) );    //  fDerived check is made below
 
     Assert( pfcb != pfcbNil );
     Assert( FCOLUMNIDTagged( columnid ) );
@@ -531,8 +581,11 @@ ERR ErrRECIRetrieveTaggedColumn(
         {
             pfcb->Ptdb()->AssertValidDerivedTable();
 
+            //  HACK: treat derived columns in original-format derived table as
+            //  non-derived, because they don't have the fDerived bit set in the TAGFLD
             fUseDerivedBit = FRECUseDerivedBitForTemplateColumnInDerivedTable( columnid, pfcb->Ptdb() );
 
+            // switch to template table
             pfcb = pfcb->Ptdb()->PfcbTemplateTable();
         }
         else
@@ -583,8 +636,11 @@ INLINE ULONG UlRECICountTaggedColumnInstances(
         {
             pfcb->Ptdb()->AssertValidDerivedTable();
 
+            //  HACK: treat derived columns in original-format derived table as
+            //  non-derived, because they don't have the fDerived bit set in the TAGFLD
             fUseDerivedBit = FRECUseDerivedBitForTemplateColumnInDerivedTable( columnid, pfcb->Ptdb() );
 
+            // switch to template table
             pfcb = pfcb->Ptdb()->PfcbTemplateTable();
         }
         else
@@ -627,12 +683,18 @@ ERR ErrRECIRetrieveSeparatedLongValue(
     QWORD       cbDataPhysical = 0;
     QWORD       cbOverhead = 0;
 
-    Assert( FFUCBIndex( pfucb ) );
+    Assert( FFUCBIndex( pfucb ) );      // Sorts don't have separated LV's.
 
     if ( grbit & JET_bitRetrieveLongId )
     {
         Assert( ibLVOffset == 0 );
 
+        // We will start returning LID64 on new builds if the client asks for it by passing in a 64-bit or larger buffer.
+        // The move to LID32 -> LID64 on this interface is analogus to changing any runtime structure
+        // (e.g. JET_THREADSTATS3 -> JET_THREADSTATS4). It depends on the cb passed in (rather than the current efv).
+        // Passing in cb == 4, will always give out LID32. We will error out if we have a LID64 to return.
+        // Passing in cb >= 8, will always return 8-byte LIDs, whether its a LID64 or a LID32.
+        // Mixed LIDs is an implementation detail that we won't expose.
 
         bool fRetLid64 = ( cbMax >= sizeof( _LID64 ) );
         if ( !fRetLid64 && cbMax < (ULONG) lid.Cb() )
@@ -648,6 +710,8 @@ ERR ErrRECIRetrieveSeparatedLongValue(
     }
     else
     {
+        //  must release any latch held
+        //
         if ( Pcsr( pfucb )->FLatched() )
         {
             CallS( ErrDIRRelease( pfucb ) );
@@ -689,7 +753,7 @@ ERR ErrRECIRetrieveSeparatedLongValue(
                     reinterpret_cast<BYTE *>( pv ),
                     cbMax,
                     &cbActual ) );
-            CallS( err );
+            CallS( err );           // Don't expect any warnings.
 
             if ( cbActual > cbMax )
                 err = ErrERRCheck( JET_wrnBufferTruncated );
@@ -716,18 +780,23 @@ COLUMNID ColumnidRECFirstTaggedForScanOfDerivedTable( const TDB * const ptdb )
     {
         if ( ptdbTemplate->FidTaggedLast() > ptdbTemplate->FidTaggedLastOfESE97Template() )
         {
+            //  HACK: scan starts with first ESE98 template column
             columnidT = ColumnidOfFid(
                             FID( ptdbTemplate->FidTaggedLastOfESE97Template() + 1 ),
                             fTrue );
         }
         else
         {
+            //  no ESE98 template columns, go to first ESE97 template column (at least one
+            //  must exist)
             Assert( ptdbTemplate->FidTaggedLast() >= ptdbTemplate->FidTaggedFirst() );
             columnidT = ColumnidOfFid( ptdbTemplate->FidTaggedFirst(), fTrue );
         }
     }
     else
     {
+        //  since no ESE97 tagged columns in template, template and derived tables
+        //  must both start numbering at same place
         Assert( ptdbTemplate->FidTaggedFirst() == ptdb->FidTaggedFirst() );
         if ( ptdbTemplate->FidTaggedLast() >= fidTaggedLeast )
         {
@@ -735,6 +804,7 @@ COLUMNID ColumnidRECFirstTaggedForScanOfDerivedTable( const TDB * const ptdb )
         }
         else
         {
+            //  no template columns, go to derived columns
             columnidT = ColumnidOfFid( ptdb->FidTaggedFirst(), fFalse );
         }
     }
@@ -763,19 +833,23 @@ COLUMNID ColumnidRECNextTaggedForScanOfDerivedTable( const TDB * const ptdb, con
         }
         else if ( FidOfColumnid( columnidT ) > ptdbTemplate->FidTaggedLast() )
         {
+            //  move to ESE97 template column space (at least one must exist)
             Assert( ptdbTemplate->FidTaggedLast() >= ptdbTemplate->FidTaggedFirst() );
             columnidT = ColumnidOfFid( ptdbTemplate->FidTaggedFirst(), fTrue );
         }
         else
         {
+            //  still in template table column space, so do nothing special
         }
     }
     else if ( FidOfColumnid( columnidT ) > ptdbTemplate->FidTaggedLast() )
     {
+        //  move to derived table column space
         columnidT = ColumnidOfFid( ptdb->FidTaggedFirst(), fFalse );
     }
     else
     {
+        //  still in template table column space, so do nothing special
     }
 
     return columnidT;
@@ -892,8 +966,10 @@ LOCAL ERR ErrRECIRetrieveFromIndex(
     Assert( NULL != pitagSequence );
     AssertDIRNoLatch( pfucb->ppib );
 
+    //  caller checks for these grbits
     Assert( grbit & ( JET_bitRetrieveFromIndex|JET_bitRetrieveFromPrimaryBookmark ) );
 
+    //  RetrieveFromIndex and RetrieveFromPrimaryBookmark are mutually exclusive
     if ( ( grbit & JET_bitRetrieveFromIndex )
         && ( grbit & JET_bitRetrieveFromPrimaryBookmark ) )
         return ErrERRCheck( JET_errInvalidGrbit );
@@ -901,6 +977,10 @@ LOCAL ERR ErrRECIRetrieveFromIndex(
     if ( !FCOLUMNIDValid( columnid ) )
         return ErrERRCheck( JET_errBadColumnId );
 
+    //  if on primary index, then return code indicating that
+    //  retrieve should be from record.  Note, sequential files
+    //  having no indexes, will be natually handled this way.
+    //
     if ( pfucbNil == pfucb->pfucbCurIndex )
     {
         pfucbIdx = pfucb;
@@ -913,10 +993,16 @@ LOCAL ERR ErrRECIRetrieveFromIndex(
         Assert( ( pfucb->u.pfcb->FSequentialIndex() && pidbNil == pfucb->u.pfcb->Pidb() )
             || ( !pfucb->u.pfcb->FSequentialIndex() && pidbNil != pfucb->u.pfcb->Pidb() ) );
 
+        //  if currency is not locOnCurBM, we have to go to the record anyway,
+        //      so it's pointless to continue
+        //  for a sequential index, must go to the record
+        //  for a sort, data is always cached anyway so just retrieve normally
         if ( locOnCurBM != pfucb->locLogical
             || pfucb->u.pfcb->FSequentialIndex()
             || FFUCBSort( pfucb ) )
         {
+            //  can't have multi-valued column in a primary index,
+            //  so itagSequence must be 1
             *pitagSequence = 1;
             return ErrERRCheck( errDIRNoShortCircuit );
         }
@@ -924,6 +1010,7 @@ LOCAL ERR ErrRECIRetrieveFromIndex(
         Assert( pidbNil != pfucbIdx->u.pfcb->Pidb() );
         Assert( pfucbIdx->u.pfcb->Pidb()->FPrimary() );
 
+        //  force RetrieveFromIndex, strip off RetrieveTag
         grbit = JET_bitRetrieveFromIndex;
         fRetrieveFromPrimaryBM = fFalse;
     }
@@ -936,6 +1023,8 @@ LOCAL ERR ErrRECIRetrieveFromIndex(
         fRetrieveFromPrimaryBM = ( grbit & JET_bitRetrieveFromPrimaryBookmark );
     }
 
+    //  find index segment for given column id
+    //
     pfcbTable = pfucb->u.pfcb;
     Assert( pfcbNil != pfcbTable );
     Assert( pfcbTable->Ptdb() != ptdbNil );
@@ -945,6 +1034,7 @@ LOCAL ERR ErrRECIRetrieveFromIndex(
         Assert( !pfucbIdx->u.pfcb->Pidb()->FPrimary() );
         if ( pfcbTable->FSequentialIndex() )
         {
+            //  no columns in a sequential index
             Assert( pidbNil == pfcbTable->Pidb() );
             return ErrERRCheck( JET_errColumnNotFound );
         }
@@ -964,6 +1054,8 @@ LOCAL ERR ErrRECIRetrieveFromIndex(
         fDerivedIndex = pfcbIdx->FDerivedIndex();
     }
 
+    //  pidb should already be pointing to appropriate index
+    //
     cbKeyMost = pidb->CbKeyMost();
 
     if ( fDerivedIndex )
@@ -993,6 +1085,10 @@ LOCAL ERR ErrRECIRetrieveFromIndex(
             break;
         }
 
+        //  We need to know if there is a Unicode column before the column we want to 
+        //  retrieve.
+        //  If there is a Unicode column before the column we want to retrieve then we can't
+        //  retrieve the column from the normalized key
         const FIELD * const pfieldT = ptdb->Pfield( columnidT );
         if( FRECTextColumn( pfieldT->coltyp ) && usUniCodePage == pfieldT->cp )
         {
@@ -1007,8 +1103,11 @@ LOCAL ERR ErrRECIRetrieveFromIndex(
         return ErrERRCheck( JET_errColumnNotFound );
     }
 
+    //  if retrieving column (and not tuple) from tuple index,
+    //  then fail if column is tuplized.
+    //
     if ( pidb->FTuples()
-        && ( 0 == iidxseg ) 
+        && ( 0 == iidxseg ) /* only first column of tuple index is tuplized */
         && ( 0 == ( grbit & JET_bitRetrieveTuple ) ) )
     {
         if ( fUseDMLLatch )
@@ -1020,6 +1119,8 @@ LOCAL ERR ErrRECIRetrieveFromIndex(
     Assert( pidb->CbVarSegMac() <= cbKeyMost );
     fVarSegMac = ( pidb->CbVarSegMac() < cbKeyMost );
 
+    // Since the column belongs to an active index, we are guaranteed
+    // that the column is accessible.
     if ( FCOLUMNIDTagged( columnid ) )
     {
         pfield = ptdb->PfieldTagged( columnid );
@@ -1027,7 +1128,7 @@ LOCAL ERR ErrRECIRetrieveFromIndex(
         fBinaryChunks = FRECBinaryColumn( pfield->coltyp );
 
         Assert( !FFIELDMultivalued( pfield->ffield )
-            || ( pidb->FMultivalued() && !pidb->FPrimary() ) );
+            || ( pidb->FMultivalued() && !pidb->FPrimary() ) );     //  primary index can't be over multi-valued column
         fMultiValued = FFIELDMultivalued( pfield->ffield );
     }
     else if ( FCOLUMNIDFixed( columnid ) )
@@ -1044,11 +1145,21 @@ LOCAL ERR ErrRECIRetrieveFromIndex(
     }
 
     fText = FRECTextColumn( pfield->coltyp );
-    Assert( pfield->cp != usUniCodePage || fText );
+    Assert( pfield->cp != usUniCodePage || fText );     // Can't be Unicode unless it's text.
 
     if ( fUseDMLLatch )
         pfcbTable->LeaveDML();
 
+    //  if not locOnCurBM, must go to record
+    //
+    //  if locOnCurBM and retrieving from the index, we can just retrieve from bmCurr
+    //
+    //  if locOnCurBM and retrieveing from the primary bookmark we can use the bmCurr
+    //  of the FUCB of the table -- unless the table is not locOnCurBM. The table can
+    //  not be on locCurBM if (iff?) we call JetSetCurrentIndex( JET_bitMoveFirst ) and
+    //  then call JetRetrieveColumn() -- the FUCB of the index will be updated, but not the
+    //  table. We could optimize this case by noting that on a non-unique secondary index
+    //  we could get the primary key from the data of the bmCurr of the pfucbIdx
     if ( locOnCurBM != pfucbIdx->locLogical
         || ( fRetrieveFromPrimaryBM && ( locOnCurBM != pfucb->locLogical ) ) )
     {
@@ -1069,6 +1180,7 @@ LOCAL ERR ErrRECIRetrieveFromIndex(
     }
     else if ( fRetrieveFromPrimaryBM )
     {
+        //  the key in the primary index is in sync with the secondary
         Assert( pfucbIdx != pfucb );
         Assert( locOnCurBM == pfucb->locLogical );
         pkey = &pfucb->bmCurr.key;
@@ -1078,6 +1190,8 @@ LOCAL ERR ErrRECIRetrieveFromIndex(
         pkey = &pfucbIdx->bmCurr.key;
     }
 
+    //  allocate key buffer
+    //
     if ( cbKeyMost > cbKeyStack )
     {
         Alloc( pbKeyRes = (BYTE *)RESKEY.PvRESAlloc() );
@@ -1089,12 +1203,38 @@ LOCAL ERR ErrRECIRetrieveFromIndex(
     }
     dataColumn.SetPv( pbKeyAlloc );
 
+    //  If there is a Unicode column before the column we want to retrieve then we can't
+    //  reliably retrieve the column from the normalized key
     if( fSawUnicodeTextColumn )
     {
         err = ErrERRCheck( errDIRNoShortCircuit );
         goto ComputeItag;
     }
     
+    //  If key is text, then can't de-normalise (due to case).
+    //
+    //  If key may have been truncated, then return code indicating
+    //  that retrieve should be from record. This calculation is a
+    //  bit tricky. The cbKeyMost stored in the IDB may be one of
+    //  three values:
+    //      a) A max key size specified by the user. This must be
+    //         >= JET_cbKeyMostMin
+    //      b) The default value of JET_cbKeyMostMin
+    //      c) A max key size calculated from the index definition.
+    //         This can be done if the normalized size of all columns
+    //         is capped (e.g. if they are all fixed columns). In
+    //         this case cbKeyMost will be < JET_cbKeyMostMin.
+    //  So, to check for truncation we look for a case where (a) or (b)
+    //  is true and the key size is the same as cbKeyMost. In that case
+    //  we can't be sure if truncation has occured so errDIRNoShortCircuit
+    //  is returned.
+    //
+    //  Note that since we
+    //  always consume as much keyspace as possible, the key would
+    //  only have been truncated if the size of the key is cbKeyMost.
+    //
+    //  If key is variable/tagged binary and cbVarSegMac specified,
+    //  then key may also have been truncated.
     Assert( (ULONG)pkey->Cb() <= cbKeyMost );
     if ( fText
         || ((ULONG)pkey->Cb() == cbKeyMost && cbKeyMost >= JET_cbKeyMostMin)
@@ -1128,6 +1268,8 @@ LOCAL ERR ErrRECIRetrieveFromIndex(
         AssertDIRGet( pfucbIdx );
     }
 
+    //  if long value then effect offset
+    //
     if ( fLongValue )
     {
         if ( ibGraphic >= (ULONG)dataColumn.Cb() )
@@ -1141,11 +1283,15 @@ LOCAL ERR ErrRECIRetrieveFromIndex(
         }
     }
 
+    //  set return values
+    //
     if ( pcbActual )
         *pcbActual = dataColumn.Cb();
 
     if ( 0 == dataColumn.Cb() )
     {
+        //  either NULL, zero-length, or
+        //  LV with ibOffset out-of-range
         CallSx( err, JET_wrnColumnNull );
     }
     else
@@ -1176,6 +1322,11 @@ ComputeItag:
             || JET_wrnBufferTruncated == err
             || errDIRNoShortCircuit == err );
 
+        //  Retrieve keys from record and compare against current key
+        //  to compute itag for tagged column instance, responsible for
+        //  this index key.
+        //  If column is NULL, then there must only be one itagsequence.
+        //
         if ( fMultiValued && JET_wrnColumnNull != err )
         {
 
@@ -1232,6 +1383,8 @@ ComputeItag:
                                     fFalse,
                                     &iidxsegT ) );
 
+                        //  all other warnings should have been detected
+                        //  when we retrieved with ichOffset==0
                         CallSx( err, wrnFLDOutOfTuples );
                         if ( JET_errSuccess != err )
                             break;
@@ -1252,8 +1405,12 @@ ComputeItag:
             }
         }
 
+        //  loop should not end on out of keys or index corrupt
+        //
         if ( ksT.FSequenceComplete() )
         {
+            //  index entry cannot be formulated from primary record
+            //
             Assert( wrnFLDOutOfKeys == err );
             OSUHAEmitFailureTag( PinstFromPfucb( pfucb ), HaDbFailureTagCorruption, L"823ac3a5-1237-4706-8d1f-85d945697154" );
             err = ErrERRCheck( JET_errSecondaryIndexCorrupted );
@@ -1279,13 +1436,22 @@ HandleError:
 }
 
 
+//  ================================================================
 INLINE ERR ErrRECAdjustEscrowedColumn(
     FUCB *          pfucb,
     const COLUMNID  columnid,
     const FIELD&    fieldFixed,
     VOID *          pv,
     const ULONG     cb )
+//  ================================================================
+//
+//  if this is an escrowed column, get the compensating delta from the version
+//  store and apply it to the buffer
+//
+//-
 {
+    //  UNDONE: remove columnid param because it's only
+    //  used for DEBUG purposes
     Assert( 0 != columnid );
     Assert( FCOLUMNIDFixed( columnid ) );
 
@@ -1311,6 +1477,7 @@ INLINE ERR ErrRECAdjustEscrowedColumn(
     return JET_errSuccess;
 }
 
+//  ================================================================
 LOCAL ERR ErrRECIDecompressDataForRetrieve(
     const DATA& dataCompressed,
     const FUCB* const pfucb,
@@ -1318,6 +1485,11 @@ LOCAL ERR ErrRECIDecompressDataForRetrieve(
     __out_bcount_part_opt( cbDataMax, *pcbDataActual ) BYTE * const pbData,
     const INT cbDataMax,
     __out INT * const pcbDataActual )
+//  ================================================================
+//
+//  Decompress data, dealing with the ibOffset
+//
+//-
 {
     ERR err;
     
@@ -1332,6 +1504,12 @@ LOCAL ERR ErrRECIDecompressDataForRetrieve(
     }
     else
     {
+        // we are retrieving compressed data, starting at a non-zero offset
+        // we need to allocate a temporary buffer, decompress into
+        // the buffer and then copy the desired data out. we can't
+        // start decompressing in the middle of the blob, we have
+        // to start at the beginning.
+        //
         INT cbDataActualT;
         Call( ErrPKDecompressData(
                 dataCompressed,
@@ -1346,6 +1524,7 @@ LOCAL ERR ErrRECIDecompressDataForRetrieve(
             const INT cbToRetrieve  = cbToCopy + ibOffset;
             BYTE * pbT = NULL;
             Alloc( pbT = new BYTE[cbToRetrieve] );
+            // don't use Call() here, pbT won't be freed
             err = ErrPKDecompressData(
                     dataCompressed,
                     pfucb,
@@ -1368,6 +1547,11 @@ HandleError:
     return err;
 }
 
+//  return the amount of data that can be set into a given column without requiring 
+//  any of the existing intrinsic record data to be separated out to another database page, e.g. in the long tree.
+//  This routine only operates on a copy buffer.  Errors are returned if the copy buffer is not set,
+//  or if the given column instance is already separated from the intrinsic record.
+//
 INLINE ERR ErrRECIGetIntrinsicAvail(
     FUCB                *pfucb,
     JET_COLUMNID        columnid,
@@ -1391,18 +1575,28 @@ INLINE ERR ErrRECIGetIntrinsicAvail(
     Assert( 0 != columnid );
     const FID           fidT = FidOfColumnid( columnid );
 
+    //  compute copy buffer intrinsic available space
+    //
     Assert( REC::CbRecordMost( pfucb ) >= dataRec.Cb() );
     LONG                cbIntrinsicAvail = (LONG)REC::CbRecordMost( pfucb ) - (LONG)dataRec.Cb();
     
+    //  if fixed column then cbIntrinsicAvail is either 0 or column size depending on whether setting column will exceed copy buffer space or not
+    //
     if ( FCOLUMNIDFixed( columnid ) )
     {
+        //  columnid should already have been validated
         Assert( fidT >= ptdbT->FidFixedFirst() );
         Assert( fidT <= ptdbT->FidFixedLast() );
         Assert( precT->FidFixedLastInRec() >= fidFixedLeast );
         pfieldT = ptdbT->PfieldFixed( columnid );
+        //  if setting fixed field does not require any space, or if the space required is available then return the full size of the fixed column.
+        //  Otherwise, return 0.  With fixed columns, its all or nothing.
+        //
         if ( ( pfieldT->ibRecordOffset < precT->IbEndOfFixedData() )
             || ( ( (LONG)pfieldT->ibRecordOffset + (LONG)pfieldT->cbMaxLen - (LONG)precT->IbEndOfFixedData() ) < cbIntrinsicAvail ) )
         {
+            //  since there is room for this fixed length column, return full size of fixed length column.  Note that not more than this can be set.
+            //
             cbIntrinsicAvail = pfieldT->cbMaxLen;
         }
         else
@@ -1410,6 +1604,8 @@ INLINE ERR ErrRECIGetIntrinsicAvail(
             cbIntrinsicAvail = 0;
         }
     }
+    //  if variable or tagged column then cbIntrinsicAvail is remaining copy buffer space minus per column overhead
+    //  
     else
     {
         Assert( !FCOLUMNIDFixed( columnid ) );
@@ -1417,17 +1613,28 @@ INLINE ERR ErrRECIGetIntrinsicAvail(
         {
             Assert( fidT >= ptdbT->FidVarFirst() );
             Assert( fidT <= ptdbT->FidVarLast() );
+            //  pfieldT not used for variable columns
+            //  pfieldT = ptdbT->PfieldVar( columnid );
 
+            //  adjust cbIntrinsicAvail down for variable column overhead, including preceding columns that have never been set
+            //
             if ( fidT > precT->FidVarLastInRec() )
             {
+                //  setting this variable column will implicitly consume one WORD 
+                //  for each of the variable columns between the last set in this record and the column id of this column.
+                //
                 cbIntrinsicAvail -= sizeof(WORD)*(fidT - precT->FidVarLastInRec());
             }
         }
+        //  else must be a tagged column.  cbIntrinsicAvail is remaining copy buffer space minus per column overhead.
+        //
         else
         {
             Assert( FCOLUMNIDTagged( columnid ) );
             pfieldT = ptdbT->PfieldTagged( columnid );
             
+            //  check for NULL value and separated long value
+            //
             DATA        dataT;
             dataT.SetCb(0);
             dataT.SetPv(NULL);
@@ -1440,24 +1647,34 @@ INLINE ERR ErrRECIGetIntrinsicAvail(
                         &dataT,
                         JET_bitRetrieveIgnoreDefault ) );
 
+            //  if column is NULL then adjust cbIntrinsicAvail for tagged column overhead
+            //
             if ( JET_wrnColumnNull == err )
             {
                 cbIntrinsicAvail -= sizeof(TAGFLD);
             }
 
+            //  long values have one byte overhead for intrinsic/separate flag
+            //
             if ( FRECLongValue( pfieldT->coltyp ) )
             {
+                //  check for separate LV
+                //
                 if ( JET_wrnSeparateLongValue == err )
                 {
                     err = ErrERRCheck( JET_errSeparatedLongValue );
                     goto HandleError;
                 }
 
+                //  adjust cbIntrinsicAvail for per column LV overhead
+                //
                 cbIntrinsicAvail -= sizeof(BYTE);
             }
         }
     }
 
+    //  cbIntrinsicAvail cannot be negative
+    //
     if ( cbIntrinsicAvail < 0 )
     {
         *pulIntrinsicAvail = 0;
@@ -1503,6 +1720,8 @@ ERR VTAPI ErrIsamRetrieveColumn(
     CheckFUCB( ppib, pfucb );
     AssertDIRNoLatch( ppib );
 
+    //  set ptdb.  ptdb is same for indexes and for sorts.
+    //
     Assert( pfucb->u.pfcb->Ptdb() == pfucb->u.pscb->fcb.Ptdb() );
     Assert( pfucb->u.pfcb->Ptdb() != ptdbNil );
 
@@ -1532,6 +1751,8 @@ ERR VTAPI ErrIsamRetrieveColumn(
 
     if ( ppib->Level() == 0 )
     {
+        // Begin transaction for read consistency (in case page
+        // latch must be released in order to validate column).
         CallR( ErrDIRBeginTransaction( ppib, 61733, JET_bitTransactionReadOnly ) );
         fTransactionStarted = fTrue;
     }
@@ -1540,14 +1761,17 @@ ERR VTAPI ErrIsamRetrieveColumn(
 
     Assert( FFUCBSort( pfucb ) || FFUCBIndex( pfucb ) );
 
+    //  if the page number then just retrieve it
     if ( grbit & JET_bitRetrievePageNumber )
     {
         if ( JET_bitRetrievePageNumber != grbit )
         {
+            // no other options are supported
             Call( ErrERRCheck( JET_errInvalidGrbit ) );
         }
         if ( !FFUCBIndex( pfucb ) )
         {
+            // this doesn't work on sorts
             Call( ErrERRCheck( JET_errInvalidTableId ) );
         }
         
@@ -1563,14 +1787,17 @@ ERR VTAPI ErrIsamRetrieveColumn(
         goto HandleError;
     }
     
+    //  if retrieving copy buffer intrinsic space available for column then actual must be size of int
     if ( grbit & JET_bitRetrieveCopyIntrinsic )
     {
         if ( JET_bitRetrieveCopyIntrinsic != grbit )
         {
+            // no other options are supported
             Call( ErrERRCheck( JET_errInvalidGrbit ) );
         }
         if ( !FFUCBIndex( pfucb ) )
         {
+            // this doesn't work on sorts
             Call( ErrERRCheck( JET_errInvalidTableId ) );
         }
         
@@ -1583,24 +1810,36 @@ ERR VTAPI ErrIsamRetrieveColumn(
         goto HandleError;
     }
     
+    //  if retrieving compressed size for column then cannot expect data to be returned
+    //
     if ( grbit & JET_bitRetrievePhysicalSize )
     {
+        //  only other option supported with retrieve physical size is whether to operate on the copy buffer or row
+        //
         if ( grbit & ~(JET_bitRetrievePhysicalSize|JET_bitRetrieveCopy) )
         {
+            //  incompatible options
+            //
             Call( ErrERRCheck( JET_errInvalidGrbit ) );
         }
         
+        //  only information returned is in pcbActual, and no ibLVOffset since latter is logical concept
+        //
         if ( cbMax || !pcbActual || ibLVOffset )
         {
             Call( ErrERRCheck( JET_errInvalidParameter ) );
         }
     }
 
+    //  can only retrieve tuple if also retreving from index
+    //
     if ( ( grbit & JET_bitRetrieveTuple ) && ( 0 == ( grbit & JET_bitRetrieveFromIndex ) ) )
     {
         Call( ErrERRCheck( JET_errInvalidGrbit ) );
     }
 
+    //  do not allow retrieve as ref if the storage isn't stable
+    //
     if (    ( grbit & JET_bitRetrieveAsRefIfNotInRecord ) &&
             ( FFUCBUpdatePrepared( pfucb ) || FFUCBSort( pfucb ) || FFMPIsTempDB( pfucb->ifmp ) ) )
     {
@@ -1612,6 +1851,7 @@ ERR VTAPI ErrIsamRetrieveColumn(
         if ( FFUCBAlwaysRetrieveCopy( pfucb )
             || FFUCBNeverRetrieveCopy( pfucb ) )
         {
+            //  insde a callback, so cannot use RetrieveFromIndex/PrimaryBookmark
             Call( ErrERRCheck( JET_errInvalidGrbit ) );
         }
 
@@ -1625,6 +1865,8 @@ ERR VTAPI ErrIsamRetrieveColumn(
                     ibLVOffset,
                     grbit );
 
+        //  return itagSequence if requested
+        //
         if ( pretinfo != NULL
             && ( grbit & JET_bitRetrieveTag )
             && ( errDIRNoShortCircuit == err || err >= 0 ) )
@@ -1685,6 +1927,7 @@ ERR VTAPI ErrIsamRetrieveColumn(
         Assert( 0 == columnid );
         if ( 0 == itagSequence )
         {
+            //  must use RetrieveColumns() in order to count columns
             err = ErrERRCheck( JET_errBadItagSequence );
             goto HandleError;
         }
@@ -1720,6 +1963,7 @@ ERR VTAPI ErrIsamRetrieveColumn(
                 &fieldFixed ) );
     }
 
+    // Some grbits are unsupported for intrinsic LVs
     if ( ( grbit & (JET_bitRetrieveLongId|JET_bitRetrieveLongValueRefCount) ) &&
          err != wrnRECSeparatedLV )
     {
@@ -1734,6 +1978,7 @@ ERR VTAPI ErrIsamRetrieveColumn(
          !( grbit & JET_bitRetrievePhysicalSize ) &&
          dataRetrieved.Cb() > 0 )
     {
+        // Be careful not to overwrite err in block below
 
         pbDataDecrypted = new BYTE[ dataRetrieved.Cb() ];
         if ( pbDataDecrypted == NULL )
@@ -1792,6 +2037,7 @@ ERR VTAPI ErrIsamRetrieveColumn(
                     columnid );
         if( JET_errSuccess == err && *pcbActual > cbMax )
         {
+            //  the callback function may not set this correctly.
             err = ErrERRCheck( JET_wrnBufferTruncated );
         }
 
@@ -1818,6 +2064,8 @@ ERR VTAPI ErrIsamRetrieveColumn(
 
         INT cbActual;
 
+        //  if retrieving physical size then do not decompress data
+        //
         if ( !( grbit & JET_bitRetrievePhysicalSize ) )
         {
             Call( ErrRECIDecompressDataForRetrieve(
@@ -1842,7 +2090,7 @@ ERR VTAPI ErrIsamRetrieveColumn(
     }
     else
     {
-        Assert( wrnRECLongField != err );
+        Assert( wrnRECLongField != err );       //  obsolete error code
 
         switch ( err )
         {
@@ -1863,10 +2111,18 @@ ERR VTAPI ErrIsamRetrieveColumn(
                 }
                 else
                 {
+                    //  If we are retrieving an after-image or
+                    //  haven't replaced a LV we can simply go
+                    //  to the LV tree. Otherwise we have to
+                    //  perform a more detailed consultation of
+                    //  the version store with ErrRECGetLVImage
                     const BOOL fAfterImage = fUseCopyBuffer
                                             || !FFUCBUpdateSeparateLV( pfucb )
                                             || !FFUCBReplacePrepared( pfucb );
 
+                    //  If JET_bitRetrievePrereadOnly, the only other valid grbit is JET_bitRetrievePrereadMany
+                    //  Plus, JET_bitRetrievePrereadMany can't be specified without JET_bitRetrievePrereadOnly
+                    //
                     if ( grbit & ( JET_bitRetrievePrereadOnly | JET_bitRetrievePrereadMany )
                         && grbit != JET_bitRetrievePrereadOnly
                         && grbit != ( JET_bitRetrievePrereadOnly | JET_bitRetrievePrereadMany ) )
@@ -1907,10 +2163,13 @@ ERR VTAPI ErrIsamRetrieveColumn(
         }
     }
 
+    //  these should have been handled and mapped
+    //  to an appropriate return value
     Assert( wrnRECUserDefinedDefault != err );
     Assert( wrnRECSeparatedLV != err );
     Assert( wrnRECIntrinsicLV != err );
 
+    //** Set return values **
     if ( fSetReturnValue )
     {
         ULONG   cbCopy;
@@ -1920,6 +2179,7 @@ ERR VTAPI ErrIsamRetrieveColumn(
         {
             Assert( dataRetrieved.Pv() );
 
+            //  Depends on coltyp, we may need to reverse the bytes
             JET_COLTYP coltyp = ColtypFromColumnid( pfucb, columnid );
             if ( coltyp == JET_coltypShort
                 || coltyp == JET_coltypUnsignedShort )
@@ -1950,6 +2210,8 @@ ERR VTAPI ErrIsamRetrieveColumn(
             *pcbActual = dataRetrieved.Cb();
         }
 
+        //  only retrieve data if not getting column physical size
+        //
         if ( !( grbit & JET_bitRetrievePhysicalSize ) )
         {
             if ( (ULONG)dataRetrieved.Cb() <= cbMax )
@@ -1967,6 +2229,9 @@ ERR VTAPI ErrIsamRetrieveColumn(
                 UtilMemCpy( pv, dataRetrieved.Pv(), cbCopy );
             }
             
+            //  if we are inserting a new record there can't be any versions on the
+            //  escrow column. we also don't know the bookmark of the new record yet...
+            //
             if ( FFIELDEscrowUpdate( fieldFixed.ffield ) && !FFUCBInsertPrepared( pfucb ) )
             {
                 const ERR   errT    = ErrRECAdjustEscrowedColumn(
@@ -2013,6 +2278,7 @@ HandleError:
 
     if ( fTransactionStarted )
     {
+        //  No updates performed, so force success.
         CallS( ErrDIRCommitTransaction( ppib, NO_GRBIT ) );
     }
     
@@ -2056,6 +2322,7 @@ INLINE VOID RECICountColumn(
 
         if ( FCOLUMNIDFixed( columnid ) )
         {
+            //  columnid should already have been validated
             Assert( FidOfColumnid( columnid ) >= pfcb->Ptdb()->FidFixedFirst() );
             Assert( FidOfColumnid( columnid ) <= pfcb->Ptdb()->FidFixedLast() );
 
@@ -2063,6 +2330,7 @@ INLINE VOID RECICountColumn(
 
             if ( JET_errColumnNotFound == errT )
             {
+                // Column not in record -- it's null if there's no default value.
                 const TDB * const   ptdb    = pfcb->Ptdb();
                 if ( FidOfColumnid( columnid ) > ptdb->FidFixedLastInitial() )
                 {
@@ -2085,6 +2353,7 @@ INLINE VOID RECICountColumn(
         {
             Assert( FCOLUMNIDVar( columnid ) );
 
+            //  columnid should already have been validated
             Assert( FidOfColumnid( columnid ) >= pfcb->Ptdb()->FidVarFirst() );
             Assert( FidOfColumnid( columnid ) <= pfcb->Ptdb()->FidVarLast() );
 
@@ -2092,6 +2361,7 @@ INLINE VOID RECICountColumn(
 
             if ( JET_errColumnNotFound == errT )
             {
+                // Column not in record -- it's null if there's no default value.
                 const TDB * const   ptdb    = pfcb->Ptdb();
                 if ( FidOfColumnid( columnid ) > ptdb->FidVarLastInitial() )
                 {
@@ -2128,14 +2398,19 @@ LOCAL ERR ErrRECRetrieveColumns(
 
     Assert( !( FFUCBAlwaysRetrieveCopy( pfucb ) && FFUCBNeverRetrieveCopy( pfucb ) ) );
 
+    //  set ptdb, ptdb is same for indexes and for sorts
+    //
     Assert( pfucb->u.pfcb->Ptdb() == pfucb->u.pscb->fcb.Ptdb() );
     Assert( pfucb->u.pfcb->Ptdb() != ptdbNil );
     AssertDIRNoLatch( pfucb->ppib );
 
     *pfBufferTruncated = fFalse;
 
+    //  get current data
+    //
     if ( FFUCBSort( pfucb ) )
     {
+        //  sorts always have current data cached.
         if ( pfucb->locLogical != locOnCurBM )
         {
             Assert( locBeforeFirst == pfucb->locLogical
@@ -2152,6 +2427,8 @@ LOCAL ERR ErrRECRetrieveColumns(
 
     for ( ULONG i = 0; i < cretcol; i++ )
     {
+        // efficiency variables
+        //
         JET_RETRIEVECOLUMN  * pretcolT      = pretcol + i;
         JET_GRBIT           grbit           = pretcolT->grbit;
         COLUMNID            columnid        = pretcolT->columnid;
@@ -2173,19 +2450,29 @@ LOCAL ERR ErrRECRetrieveColumns(
             grbit = grbit & ~( JET_bitRetrieveFromIndex | JET_bitRetrieveFromPrimaryBookmark );
         }
 
+        //  if retrieving compressed size for column then cannot expect data to be returned
+        //
         if ( grbit & JET_bitRetrievePhysicalSize )
         {
+            //  only other option supported with retrieve physical size is whether to operate on the copy buffer or row
+            //
             if ( grbit & ~(JET_bitRetrievePhysicalSize|JET_bitRetrieveCopy) )
             {
+                //  incompatible options
+                //
                 Call( ErrERRCheck( JET_errInvalidGrbit ) );
             }
             
+            //  no ibLongValue since that logical concept cannot be compbined with JET_bitRetrievePhysicalSize, and no cbData since no data returned
+            //
             if ( pretcol->cbData || pretcol->ibLongValue )
             {
                 Call( ErrERRCheck( JET_errInvalidParameter ) );
             }
         }
 
+        //  do not allow retrieve as ref if the storage isn't stable
+        //
         if (    ( grbit & JET_bitRetrieveAsRefIfNotInRecord ) &&
                 ( FFUCBUpdatePrepared( pfucb ) || FFUCBSort( pfucb ) || FFMPIsTempDB( pfucb->ifmp) ) )
         {
@@ -2194,6 +2481,9 @@ LOCAL ERR ErrRECRetrieveColumns(
 
         if ( FFUCBIndex( pfucb ) )
         {
+            // UNDONE: No copy buffer with sorts, and don't currently support
+            // secondary indexes with sorts, so RetrieveFromIndex reduces to
+            // a record retrieval.
             if ( grbit & ( JET_bitRetrieveFromIndex|JET_bitRetrieveFromPrimaryBookmark ) )
             {
                 if ( Pcsr( pfucb )->FLatched() )
@@ -2204,6 +2494,7 @@ LOCAL ERR ErrRECRetrieveColumns(
                 if ( FFUCBAlwaysRetrieveCopy( pfucb )
                     || FFUCBNeverRetrieveCopy( pfucb ) )
                 {
+                    //  insde a callback, so cannot use RetrieveFromIndex/PrimaryBookmark
                     Call( ErrERRCheck( JET_errInvalidGrbit ) );
                 }
 
@@ -2220,6 +2511,10 @@ LOCAL ERR ErrRECRetrieveColumns(
 
                 if ( errDIRNoShortCircuit == err )
                 {
+                    //  UNDONE: this is EXTREMELY expensive because we
+                    //  will go to the record and formulate all keys
+                    //  for the record to try to determine the itagSequence
+                    //  of the current index entry
                     Assert( pretcolT->itagSequence > 0 );
                 }
                 else
@@ -2239,6 +2534,9 @@ LOCAL ERR ErrRECRetrieveColumns(
             if ( ( ( grbit & JET_bitRetrieveCopy ) && FFUCBUpdatePrepared( pfucb ) && !FFUCBNeverRetrieveCopy( pfucb ) )
                 || FFUCBAlwaysRetrieveCopy( pfucb ) )
             {
+                //  if we obtained the latch on a previous pass,
+                //  we don't relinquish it because we want to
+                //  avoid excessive latching/unlatching
                 Assert( !Pcsr( pfucb )->FLatched()
                     || !FFUCBAlwaysRetrieveCopy( pfucb ) );
                 pdataRec = &pfucb->dataWorkBuf;
@@ -2257,7 +2555,7 @@ LOCAL ERR ErrRECRetrieveColumns(
             Assert( FFUCBSort( pfucb ) );
             Assert( !Pcsr( pfucb )->FLatched() );
             Assert( pdataRec == &pfucb->kdfCurr.data );
-            pdataRec = &pfucb->kdfCurr.data;
+            pdataRec = &pfucb->kdfCurr.data;  //  prefix doesn't understand that pdataRec is already valid here
         }
 
         ULONG   itagSequence    = pretcolT->itagSequence;
@@ -2279,7 +2577,7 @@ LOCAL ERR ErrRECRetrieveColumns(
 
         if ( 0 == columnid )
         {
-            if ( 0 == itagSequence )
+            if ( 0 == itagSequence )        // Are we counting all tagged columns?
             {
                 Call( ErrRECIScanTaggedColumns(
                         pfucb,
@@ -2287,7 +2585,7 @@ LOCAL ERR ErrRECRetrieveColumns(
                         *pdataRec,
                         &dataRetrieved,
                         &columnid,
-                        &pretcolT->itagSequence,
+                        &pretcolT->itagSequence,    // Store count in itagSequence
                         &fEncrypted,
                         grbit ) );
                 Assert( 0 == columnid );
@@ -2313,6 +2611,8 @@ LOCAL ERR ErrRECRetrieveColumns(
         }
         else
         {
+            // Verify column is accessible and that we're in a transaction
+            // (for read consistency).
             Assert( pfucb->ppib->Level() > 0 );
             Call( ErrRECIAccessColumn( pfucb, columnid, &fieldFixed, &fEncrypted ) );
             if ( !( grbit & (JET_bitRetrievePhysicalSize|JET_bitRetrieveLongId|JET_bitRetrieveLongValueRefCount) ) &&
@@ -2327,7 +2627,7 @@ LOCAL ERR ErrRECRetrieveColumns(
                         pfucb->u.pfcb,
                         columnid,
                         *pdataRec,
-                        &pretcolT->itagSequence );
+                        &pretcolT->itagSequence );  // Store count in itagSequence
                 pretcolT->cbActual = 0;
                 pretcolT->columnidNextTagged = columnid;
                 pretcolT->err = JET_errSuccess;
@@ -2354,6 +2654,7 @@ LOCAL ERR ErrRECRetrieveColumns(
             }
         }
 
+        // Some grbits are unsupported for intrinsic LVs
         if ( ( grbit & (JET_bitRetrieveLongId|JET_bitRetrieveLongValueRefCount) ) &&
              err != wrnRECSeparatedLV )
         {
@@ -2367,6 +2668,7 @@ LOCAL ERR ErrRECRetrieveColumns(
              !( grbit & JET_bitRetrievePhysicalSize ) &&
              dataRetrieved.Cb() > 0 )
         {
+            // Be careful not to overwrite err in block below
 
             pbDataDecrypted = new BYTE[ dataRetrieved.Cb() ];
             if ( pbDataDecrypted == NULL )
@@ -2431,6 +2733,7 @@ LOCAL ERR ErrRECRetrieveColumns(
                         columnid );
             if( JET_errSuccess == err && pretcolT->cbActual > pretcolT->cbData )
             {
+                //  the callback function may not set this correctly.
                 err = ErrERRCheck( JET_wrnBufferTruncated );
             }
 
@@ -2460,6 +2763,8 @@ LOCAL ERR ErrRECRetrieveColumns(
 
             INT cbActual = 0;
 
+            //  if retrieving physical size then do not decompress data
+            //
             if ( !( grbit & JET_bitRetrievePhysicalSize ) )
             {
                 Call( ErrRECIDecompressDataForRetrieve(
@@ -2484,7 +2789,7 @@ LOCAL ERR ErrRECRetrieveColumns(
         }
         else
         {
-            Assert( wrnRECLongField != err );
+            Assert( wrnRECLongField != err );       //  obsolete error code
             Assert( !(grbit & JET_bitRetrievePhysicalSize ) || pretcol->ibLongValue == 0 );
 
             switch ( err )
@@ -2506,6 +2811,9 @@ LOCAL ERR ErrRECRetrieveColumns(
                     }
                     else
                     {
+                        //  If we are retrieving a copy, go ahead
+                        //  and do a normal retrieval. Otherwise
+                        //  we have to consult the version store
                         const BOOL fRetrieveBeforeImage =
                             ( FFUCBNeverRetrieveCopy( pfucb ) || !( grbit & JET_bitRetrieveCopy ) )
                             && FFUCBReplacePrepared( pfucb )
@@ -2545,6 +2853,8 @@ LOCAL ERR ErrRECRetrieveColumns(
             }
         }
 
+        //  these should have been handled and mapped
+        //  to an appropriate return value
         Assert( wrnRECUserDefinedDefault != err );
         Assert( wrnRECSeparatedLV != err );
         Assert( wrnRECIntrinsicLV != err );
@@ -2558,6 +2868,7 @@ LOCAL ERR ErrRECRetrieveColumns(
             {
                 Assert( dataRetrieved.Pv() );
 
+                //  Depends on coltyp, we may need to reverse the bytes
                 JET_COLTYP coltyp = ColtypFromColumnid( pfucb, columnid );
                 if ( coltyp == JET_coltypShort
                     || coltyp == JET_coltypUnsignedShort )
@@ -2586,6 +2897,8 @@ LOCAL ERR ErrRECRetrieveColumns(
             pretcolT->cbActual = dataRetrieved.Cb();
 
 
+            //  only retrieve data if not getting column physical size
+            //
             if ( grbit & JET_bitRetrievePhysicalSize )
             {
                 pretcolT->err = err;
@@ -2605,6 +2918,8 @@ LOCAL ERR ErrRECRetrieveColumns(
 
                 UtilMemCpy( pretcolT->pvData, dataRetrieved.Pv(), cbCopy );
 
+                //  if we are inserting a new record there can't be any versions on the
+                //  escrow column. we also don't know the bookmark of the new record yet...
                 if ( FFIELDEscrowUpdate( fieldFixed.ffield ) && !FFUCBInsertPrepared( pfucb ) )
                 {
                     const ERR   errT    = ErrRECAdjustEscrowedColumn(
@@ -2613,6 +2928,7 @@ LOCAL ERR ErrRECRetrieveColumns(
                                                 fieldFixed,
                                                 pretcolT->pvData,
                                                 cbCopy );
+                    //  only assign to err if there was an error
                     if ( errT < 0 )
                     {
                         Call( errT );
@@ -2638,7 +2954,7 @@ LOCAL ERR ErrRECRetrieveColumns(
             *pfBufferTruncated = fTrue;
 
         Assert( pretcolT->err != JET_errNullInvalid );
-    }
+    }   // for
 
     err = JET_errSuccess;
 
@@ -2681,6 +2997,8 @@ ERR VTAPI ErrIsamRetrieveColumns(
 
     if ( 0 == ppib->Level() )
     {
+        // Begin transaction for read consistency (in case page
+        // latch must be released in order to validate column).
         Call( ErrDIRBeginTransaction( ppib, 37157, JET_bitTransactionReadOnly ) );
         fTransactionStarted = fTrue;
     }
@@ -2699,6 +3017,7 @@ ERR VTAPI ErrIsamRetrieveColumns(
 HandleError:
     if ( fTransactionStarted )
     {
+        //  No updates performed, so force success.
         CallS( ErrDIRCommitTransaction( ppib, NO_GRBIT ) );
     }
     AssertDIRNoLatch( ppib );
@@ -2754,9 +3073,11 @@ LOCAL ERR ErrRECIBuildTaggedColumnList(
     FID                 fidRecordFID        = 0;
     FID                 fidDefaultFID       = 0;
     
+    //  initialize return values
 
     *pcentries = 0;
 
+    //  create the iterators
 
     precordIterator = new TAGFIELDS_ITERATOR( dataRec );
     if( NULL == precordIterator )
@@ -2767,6 +3088,7 @@ LOCAL ERR ErrRECIBuildTaggedColumnList(
     precordIterator->MoveBeforeFirst();
     if( JET_errNoCurrentRecord == ( err = precordIterator->ErrMoveNext() ) )
     {
+        //  no tagged columns;
         delete precordIterator;
         precordIterator = NULL;
         err = JET_errSuccess;
@@ -2783,6 +3105,7 @@ LOCAL ERR ErrRECIBuildTaggedColumnList(
         pdefaultValuesIterator->MoveBeforeFirst();
         if( JET_errNoCurrentRecord == ( err = pdefaultValuesIterator->ErrMoveNext() ) )
         {
+            //  no tagged columns;
             delete pdefaultValuesIterator;
             pdefaultValuesIterator = NULL;
             err = JET_errSuccess;
@@ -2790,8 +3113,9 @@ LOCAL ERR ErrRECIBuildTaggedColumnList(
         Call( err );
     }
 
+    //  if necessary, advance to starting column
 
-    if ( FTaggedFid( (WORD)columnidStart ) )
+    if ( FTaggedFid( (WORD)columnidStart ) )     //  can't use FCOLUMNIDTagged() because it assumes a valid columnid
     {
         if ( precordIterator )
         {
@@ -2832,6 +3156,7 @@ LOCAL ERR ErrRECIBuildTaggedColumnList(
         }
     }
 
+    //  iterate
 
     TAGFIELDS_ITERATOR *    pIteratorCur        = NULL;
     INT                     ExistingIterators   = 0;
@@ -2851,6 +3176,7 @@ LOCAL ERR ErrRECIBuildTaggedColumnList(
         ExistingIterators++;
         pIteratorCur = precordIterator;
         cmp = -1;
+        // we have both iterators, assume that we were starting with recordIterator
         if ( 2 == ExistingIterators )
         {
             Assert( 0 == fidRecordFID );
@@ -2870,6 +3196,7 @@ LOCAL ERR ErrRECIBuildTaggedColumnList(
                 fRecordDerived = pIteratorCur->FDerived();
                 if ( 0 == cmp )
                 {
+                    // skip this because we've alread picked up this column from record
                     pIteratorCur = pdefaultValuesIterator;
                     goto NextIteration;
                 }
@@ -2880,13 +3207,18 @@ LOCAL ERR ErrRECIBuildTaggedColumnList(
                 fidDefaultFID = pIteratorCur->Fid();
                 fDefaultDerived = pIteratorCur->FDerived();
             }
+            //  there are both record and default tagged column values
+            //  find which one is first
             cmp = CmpFid( fidRecordFID, fRecordDerived, fidDefaultFID, fDefaultDerived );
             if ( cmp > 0 )
             {
+                //  the column is less than the current column in the record
                 pIteratorCur = pdefaultValuesIterator;
             }
             else
             {
+                //  columns are equal or the default value is greater
+                //  select the one in the record
                 pIteratorCur = precordIterator;
             }
         }
@@ -2903,6 +3235,7 @@ LOCAL ERR ErrRECIBuildTaggedColumnList(
         }
         else
         {
+            //  column is visible to us
             if( !fCountOnly )
             {
                 RECIAddTaggedColumnListEntry(
@@ -2976,17 +3309,22 @@ ERR VTAPI ErrIsamRetrieveTaggedColumnList(
     CheckFUCB( ppib, pfucb );
     AssertDIRNoLatch( ppib );
 
+    //  must always provide facility to return number of entries in the list
     if ( NULL == pcentries )
     {
         err = ErrERRCheck( JET_errInvalidParameter );
         return err;
     }
 
+    //  set ptdb.  ptdb is same for indexes and for sorts.
+    //
     Assert( pfucb->u.pfcb->Ptdb() == pfucb->u.pscb->fcb.Ptdb() );
     Assert( pfucb->u.pfcb->Ptdb() != ptdbNil );
 
     if ( 0 == ppib->Level() )
     {
+        // Begin transaction for read consistency (in case page
+        // latch must be released in order to validate column).
         CallR( ErrDIRBeginTransaction( ppib, 53541, JET_bitTransactionReadOnly ) );
         fTransactionStarted = fTrue;
     }
@@ -3018,6 +3356,7 @@ HandleError:
 
     if ( fTransactionStarted )
     {
+        //  No updates performed, so force success.
         CallS( ErrDIRCommitTransaction( ppib, NO_GRBIT ) );
     }
 

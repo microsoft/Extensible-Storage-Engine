@@ -31,6 +31,7 @@ ERR ErrSORTIncrementLVRefcountDest(
     const LvId      lidSrc,
     LvId            * const plidDest );
 
+// ======================== API ============================
 
 ERR VTAPI ErrIsamSortOpen(
     PIB                 *ppib,
@@ -54,6 +55,12 @@ ERR VTAPI ErrIsamSortSetIndexRange(
     JET_VTID        vtid,
     JET_GRBIT       grbit );
 
+//  ERR VTAPI ErrIsamSortInsert(
+//      JET_SESID       sesid,
+//      JET_VTID        vtid,
+//      BYTE            *pb,
+//      ULONG           cbMax,
+//      ULONG           *pcbActual );
 
 ERR VTAPI ErrIsamSortSeek(
     JET_SESID       sesid,
@@ -107,6 +114,7 @@ ERR VTAPI ErrIsamSortGetBookmark(
     const ULONG     cbMax,
     ULONG * const   pcbActual );
 
+// INLINE HACKS
 
 INLINE ERR VTAPI ErrIsamSortMove(
     PIB             *ppib,
@@ -126,6 +134,16 @@ INLINE ERR VTAPI ErrIsamSortSetIndexRange(
     return ErrIsamSortSetIndexRange( ( JET_SESID )( ppib ), ( JET_VTID )( pfucb ), grbit );
 }
 
+//  INLINE ERR VTAPI ErrIsamSortInsert(
+//      PIB             *ppib,
+//      FUCB            *pfucb,
+//      BYTE            *pb,
+//      ULONG           cbMax,
+//      ULONG           *pcbActual )
+//      {
+//      return ErrIsamSortInsert( ( JET_SESID )( ppib ), ( JET_VTID )( pfucb),
+//                                  pb, cbMax, pcbActual );
+//      }
 
 INLINE ERR VTAPI ErrIsamSortSeek(
     PIB             *ppib,

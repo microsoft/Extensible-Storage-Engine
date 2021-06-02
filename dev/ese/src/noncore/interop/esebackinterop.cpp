@@ -27,8 +27,10 @@ namespace Exchange
 {
 namespace Isam
 {
+    // Unmanaged function pointer prototypes.
     typedef JET_ERR (*PfnSimpleTrace)(const char * const sz);
 
+    // Managed delegates that match the unmanaged prototypes.
     private delegate JET_ERR PrepareInstanceForBackupDelegate(
         PESEBACK_CONTEXT    pBackupContext,
         JET_INSTANCE        ulInstanceId,
@@ -61,11 +63,13 @@ namespace Isam
     private delegate JET_ERR ServerAccessCheckDelegate();
     private delegate JET_ERR TraceDelegate(const char * const szData);
 
+    // A managed version of the flags to MINSTANCE_BACKUP_INFO
     MSINTERNAL enum class DatabaseBackupInfoFlags
     {
         MOUNTED = 0x10,
     };
 
+    // A managed version of the DATABASE_BACKUP_INFO structure.
     MSINTERNAL value struct MDATABASE_BACKUP_INFO
     {
         property String^ Name;
@@ -74,6 +78,7 @@ namespace Isam
         property DatabaseBackupInfoFlags Flags;
     };
 
+    // A managed version of the INSTANCE_BACKUP_INFO structure
     MSINTERNAL value struct MINSTANCE_BACKUP_INFO
     {
         property MJET_INSTANCE Instance;
@@ -81,6 +86,7 @@ namespace Isam
         property array<MDATABASE_BACKUP_INFO>^ Databases;
     };
 
+    // Enumerations of values for MLOGSHIP_INFO.Type
     MSINTERNAL enum class ESE_LOGSHIP
     {
         STANDBY = 0x1,
@@ -88,12 +94,16 @@ namespace Isam
         LOCAL = 0x4,
     };
 
+    // A managed version of the LOGSHIP_INFO structure
     MSINTERNAL value struct MLOGSHIP_INFO
     {
         property ESE_LOGSHIP Type;
         property String^ Name;
     };
 
+    // This interface describes the methods that a client has to implement
+    // to support ESEBACK callbacks. A object implementing this interface
+    // is passed in when ESEBACK is registered.
     MSINTERNAL interface class IEsebackCallbacks
     {
         Int32 PrepareInstanceForBackup(IntPtr context, MJET_INSTANCE instance, IntPtr reserved);
@@ -112,15 +122,24 @@ namespace Isam
         Int32 Trace(String^ data);
     };
 
+    // Holds a reference to the IEsebackCallbacks object that is being
+    // used for callbacks. This is used by the client-facing Eseback
+    // class (to register/unregister) and the ESE-facing InteropCallbacks
+    // class (for callbacks).
     private ref class EsebackCallbacks abstract sealed
     {
     public:
         static property IEsebackCallbacks^ ManagedCallbacks;
     };
 
+    // Methods that convert unmanaged structures to managed, or free the memory
+    // allocated by unmanaged structures.
     private ref class StructConversion abstract sealed
     {
     private:
+        // Allocate an unmanaged array the same size as the managed array.
+        // This function allocates memory. Free with FreeUnmanagedArray.
+        // The array is zero-initialized.
         template<class T> static T * AllocateUnmanagedArray(Array^ const managed)
         {
             T* const rgT = new T[managed->Length];
@@ -133,6 +152,7 @@ namespace Isam
             return rgT;
         }
 
+        // Frees an array allocated by AllocateUnmanagedArray.
         template<class T> static void FreeUnmanagedArray(T * const rgT)
         {
             if (rgT)
@@ -141,11 +161,19 @@ namespace Isam
             }
         }
 
+        // Given an MDATABASE_BACKUP_INFO, return its unmanaged equivalent.
+        // This function allocates memory. Free with FreeUnmanagedDatabaseBackupInfo.
         static DATABASE_BACKUP_INFO MakeUnmanagedDatabaseBackupInfo(MDATABASE_BACKUP_INFO managed)
         {
             DATABASE_BACKUP_INFO databaseInfo;
             databaseInfo.wszDatabaseDisplayName = WszFromString(managed.Name);
 
+            // The database stream in DATABASE_BACKUP_INFO is of the form
+            //  <EDB file>\0<SLV file>\0\0
+            // There is no SLV file so the form is effectively:
+            //  <EDB file>\0\0\0
+            // The length of a managed string does not include a null terminator
+            // so we manually add all of them here.
             String^ const streams = String::Format("{0}\0\0\0", managed.Path);
             databaseInfo.cwDatabaseStreams = streams->Length;
             databaseInfo.wszDatabaseStreams = WszFromString(streams);
@@ -157,12 +185,15 @@ namespace Isam
             return databaseInfo;
         }
 
+        // Frees a DATABASE_BACKUP_INFO created by MakeUnmanagedDatabaseBackupInfo.
         static void FreeUnmanagedDatabaseBackupInfo(DATABASE_BACKUP_INFO databaseInfo)
         {
             FreeWsz(databaseInfo.wszDatabaseDisplayName);
             FreeWsz(databaseInfo.wszDatabaseStreams);
         }
 
+        // Given an array of MDATABASE_BACKUP_INFO, return the unmanaged equivalent.
+        // This function allocates memory. Free with FreeUnmanagedDatabaseBackupInfos.
         static DATABASE_BACKUP_INFO * MakeUnmanagedDatabaseBackupInfos(array<MDATABASE_BACKUP_INFO>^ const databases)
         {
             DATABASE_BACKUP_INFO* const rgDatabaseInfo = AllocateUnmanagedArray<DATABASE_BACKUP_INFO>(databases);
@@ -173,6 +204,7 @@ namespace Isam
             return rgDatabaseInfo;
         }
 
+        // Frees an array of DATABASE_BACKUP_INFO created by MakeUnmanagedDatabaseBackupInfos.
         static void FreeUnmanagedDatabaseBackupInfos(const int cInfo, DATABASE_BACKUP_INFO * const rgDatabaseInfo)
         {
             if (rgDatabaseInfo)
@@ -185,6 +217,8 @@ namespace Isam
             }
         }
 
+        // Given an MINSTANCE_BACKUP_INFO, return its unmanaged equivalent.
+        // This function allocates memory. Free with FreeUnmanagedBackupInfo.
         static INSTANCE_BACKUP_INFO MakeUnmanagedBackupInfo(MINSTANCE_BACKUP_INFO managed)
         {
             INSTANCE_BACKUP_INFO instanceInfo;
@@ -198,12 +232,15 @@ namespace Isam
             return instanceInfo;
         }
 
+        // Frees an INSTANCE_BACKUP_INFO allocated by MakeUnmanagedBackupInfo.
         static void FreeUnmanagedBackupInfo(INSTANCE_BACKUP_INFO instanceInfo)
         {
             FreeWsz(instanceInfo.wszInstanceName);
             FreeUnmanagedDatabaseBackupInfos(instanceInfo.cDatabase, instanceInfo.rgDatabase);
         }
 
+        // Given an MLOGSHIP_INFO, return its unmanaged equivalent.
+        // This function allocates memory. Free with FreeUnmanagedLogshipInfo.
         static LOGSHIP_INFO MakeUnmanagedLogshipInfo(MLOGSHIP_INFO managed)
         {
             LOGSHIP_INFO logshipInfo;
@@ -213,17 +250,21 @@ namespace Isam
             return logshipInfo;
         }
 
+        // Frees an LOGSHIP_INFO allocated by MakeUnmanagedLogshipInfo.
         static void FreeUnmanagedLogshipInfo(LOGSHIP_INFO logshipInfo)
         {
             FreeWsz(logshipInfo.wszName);
         }
 
     public:
+        // Take a native string and return a native wchar_t*.
+        // This function allocates memory. Free with FreeWsz.
         static wchar_t* WszFromString(String^ const s)
         {
             return static_cast<wchar_t*>(Marshal::StringToHGlobalUni(s).ToPointer());
         }
 
+        // Free a string allocated by WszFromString.
         static void FreeWsz(wchar_t * const wsz)
         {
             if (wsz)
@@ -232,6 +273,7 @@ namespace Isam
             }
         }
 
+        // Take a managed System::Guid and return a native GUID.
         static GUID GetUnmanagedGuid(Guid managed)
         {
             GUID guid;
@@ -240,6 +282,8 @@ namespace Isam
             return guid;
         }
 
+        // Given an array of MINSTANCE_BACKUP_INFO, return the unmanaged equivalent.
+        // This function allocates memory. Free with FreeUnmanagedBackupInfos.
         static INSTANCE_BACKUP_INFO * MakeUnmanagedBackupInfos(array<MINSTANCE_BACKUP_INFO>^ const instances)
         {
             const int cInfo = instances->Length;
@@ -260,6 +304,7 @@ namespace Isam
             }
         }
 
+        // Frees an array of INSTANCE_BACKUP_INFO allocated by MakeUnmanagedBackupInfos.
         static void FreeUnmanagedBackupInfos(const int cInfo, INSTANCE_BACKUP_INFO * const rgInfo)
         {
             if (rgInfo)
@@ -272,6 +317,8 @@ namespace Isam
             }
         }
 
+        // Given an array of MLOGSHIP_INFO, return the unmanaged equivalent.
+        // This function allocates memory. Free with FreeUnmanagedLogshipInfos.
         static LOGSHIP_INFO * MakeUnmanagedLogshipInfos(array<MLOGSHIP_INFO>^ const infos)
         {
             const int cInfo = infos->Length;
@@ -292,6 +339,7 @@ namespace Isam
             }
         }
 
+        // Frees an array of LOGSHIP_INFO allocated by MakeUnmanagedLogshipInfos.
         static void FreeUnmanagedLogshipInfos(const int cInfo, LOGSHIP_INFO * const rgInfo)
         {
             if (rgInfo)
@@ -305,6 +353,11 @@ namespace Isam
         }
     };
 
+    // Callback interop class. The methods in this class are called by
+    // ESEBACK, using native functions generated by Marshal::GetFunctionPointerForDelegate.
+    // The methods then convert the data to managed form and then call the
+    // managed callbacks held in the EsebackCallbacks class. The function
+    // pointers are generated in ths Init method.
     class InteropCallbacks
     {
     public:
@@ -348,7 +401,7 @@ namespace Isam
         }
 
         static JET_ERR FreeDatabasesInfo(
-            PESEBACK_CONTEXT            ,
+            PESEBACK_CONTEXT            /* pBackupContext */,
             unsigned long               cInfo,
             INSTANCE_BACKUP_INFO *      rgInfo)
         {
@@ -384,6 +437,7 @@ namespace Isam
                     wchar_t * szT = nullptr;
                     try
                     {
+                        // Fortunately Guid::ToString() matches the format we want
                         szT = StructConversion::WszFromString(guid.ToString());
                         wcscpy_s(wszSGGuid, cbSGGuid / sizeof(WCHAR), szT);
                     }
@@ -423,6 +477,10 @@ namespace Isam
     };
 
 #pragma unmanaged
+    // This is a purely native class that implements the trace callback. This is
+    // needed because there is no native/managed interop for varargs functions.
+    // Instead we sprintf the data into a buffer and then call an interop trace
+    // method that takes a string.
     class NativeCallbacks
     {
     public:
@@ -439,6 +497,7 @@ namespace Isam
     };
 #pragma managed
 
+    // Provides methods to register and unregister ESEBACK.
     MSINTERNAL ref class Eseback abstract sealed
     {
     public:

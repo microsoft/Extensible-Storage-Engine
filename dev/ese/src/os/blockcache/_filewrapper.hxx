@@ -3,19 +3,23 @@
 
 #pragma once
 
+//  TFileWrapper:  wrapper of an implementation of IFileAPI or its derivatives.
+//
+//  This is a utility class used to enable test dependency injection and as the basis for building the file system
+//  filter used to implement the block cache.
 
 template< class I >
-class TFileWrapper
+class TFileWrapper  //  fw
     :   public I
 {
-    public:
+    public:  //  specialized API
 
         TFileWrapper( _In_ I* const pi );
         TFileWrapper( _Inout_ I** const ppi );
 
         virtual ~TFileWrapper();
 
-    public:
+    public:  //  IFileAPI
 
         IFileAPI::FileModeFlags Fmf() const;
 
@@ -113,6 +117,7 @@ class TFileWrapper
 
     protected:
 
+        //  IO completion context for an IFileAPI implementation.
 
         class CIOComplete
         {
@@ -165,6 +170,12 @@ class TFileWrapper
                 { 
                     s_ncrit.Enter();
 
+                    //  determine if this is still a valid io context.  this covers for a design flaw in pfnIOHandoff
+                    //  where the interface presumes that the value assigned to pvIOContext will exist forever.  note
+                    //  that this same flaw can cause us to accidentally look at a pvIOContext that has already been
+                    //  reused
+                    //
+                    //  NOTE:  we cannot use "s_il.FMember( this )" here because it could touch freed memory
 
                     CIOComplete* piocompleteT = NULL;
                     for (   piocompleteT = s_il.PrevMost();
@@ -173,11 +184,14 @@ class TFileWrapper
                     {
                     }
 
+                    //  get the elapsed time only if this is still a valid io context
 
                     TICK dtick = 0;
                     
                     if ( piocompleteT == this )
                     {
+                        //  if the pvIOContext is null then we are the source of the information, otherwise call down
+                        //  to the inner IFileAPI implementation
 
                         if ( !m_pvIOContext )
                         {
@@ -198,21 +212,25 @@ class TFileWrapper
                                 _In_ const TraceContext&    tc,
                                 _In_ const OSFILEQOS        grbitQOS )
                 {
+                    //  make sure we have signaled a handoff if this was a success
 
                     if ( err >= JET_errSuccess )
                     {
                         IOHandoff( err, tc, grbitQOS );
                     }
 
+                    //  if this context is for a sync IO with a successful handoff then make sure we complete
 
                     if ( !m_pfnIOComplete && m_fIOHandoffCalled )
                     {
                         IOComplete( err, tc, grbitQOS );
                     }
 
+                    //  if this context is on the stack then we had better only have one reference left now
 
                     Assert( m_fIsHeapAlloc || m_cref == 1 );
 
+                    //  release our initial reference on the context
 
                     ReleaseInternal();
                 }
@@ -795,14 +813,20 @@ ERR TFileWrapper<I>::HandleReservedIOREQ(   _In_                    const TraceC
     ERR             err         = errOriginal;
     CIOComplete*    piocomplete = piocompleteOriginal;
 
+    //  as for the COSFile::ErrIORead impl, you cannot pass a pioreq for a sync read
 
     Enforce( pfnIOComplete || !pioreq );
 
     if ( pioreq && !fIOREQUsed )
     {
+        //  if we were given a reserved IOREQ and we failed before it could be passed on then we must release it
 
         ReleaseUnusedIOREQ( (void*)pioreq );
 
+        //  if we were given a reserved IOREQ then it is expected that the IO request will succeed.  we must instead
+        //  indicate a failure by accepting the IO and then by completing it with an error.  this IO completion cannot
+        //  accept transient errors like errDiskTilt (which we shouldn't see anyway) or JET_errOutOfMemory.  we will
+        //  transform these errors into a fatal IO error (JET_errDiskIO)
 
         Enforce( err != errDiskTilt );
 
@@ -833,10 +857,11 @@ ERR TFileWrapper<I>::HandleReservedIOREQ(   _In_                    const TraceC
     return err;
 }
 
+//  CFileWrapper:  concrete TFileWrapper<IFileAPI>.
 
 class CFileWrapper : public TFileWrapper<IFileAPI>
 {
-    public:
+    public:  //  specialized API
 
         CFileWrapper( _Inout_ IFileAPI** const ppfapi )
             :   TFileWrapper<IFileAPI>( ppfapi )

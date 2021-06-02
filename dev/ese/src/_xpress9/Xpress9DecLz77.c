@@ -1,7 +1,7 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 #include "Xpress9Internal.h"
-#include <stddef.h>
+#include <stddef.h>     // for "offsetof"
 
 
 #define GET_DECODER_STATE(pStatus,Failure,pDecoder,pXpress9Decoder) do {    \
@@ -175,25 +175,34 @@ Failure:;
 }
 
 
+//
+// Allocates memory, initializes, and returns the pointer to newly created decoder.
+//
+// It is recommended to create few decoders (1-2 decoders per CPU core) and reuse them:
+// creation of new decoder is relatively expensive.
+//
+// Each instance of encoder will use about 64KB + 9 * 2**uMaxWindowSizeLog2 bytes; e.g.
+// encoder with 1MB max window size (uMaxWindowSizeLog2 equal to 20) will use about 9MB + 64KB
+//
 #pragma warning (push)
-#pragma warning (disable: 4311)
+#pragma warning (disable: 4311) // 'type cast' : pointer truncation from 'UInt8 *' to 'xint'
 XPRESS9_EXPORT
 XPRESS9_DECODER
 XPRESS9_CALL
 Xpress9DecoderCreate (
-    XPRESS9_STATUS         *pStatus,
-    void                   *pAllocContext,
-    XpressAllocFn          *pAllocFn,
-    unsigned                uMaxWindowSizeLog2,
-    unsigned                uFlags
+    XPRESS9_STATUS         *pStatus,            // OUT: status
+    void                   *pAllocContext,      // IN:  context for user-defined memory allocator
+    XpressAllocFn          *pAllocFn,           // IN:  user-defined memory allocator (it will be called by Xpress9EncodeCreate only)
+    unsigned                uMaxWindowSizeLog2, // IN:  log2 of max size of LZ77 window [XPRESS9_WINDOW_SIZE_LOG2_MIN..XPRESS9_WINDOW_SIZE_LOG2_MAX]
+    unsigned                uFlags              // IN:  one or more of Xpress9Flag_* flags
 )
 {
-    LZ77_DECODER   *pDecoder;
-    UInt8          *pAllocatedMemory;
-    UInt8          *pAlignedPtr;
-    size_t          uBufferSize;
-    size_t          uReservedSize;
-    size_t          uAllocationSize;
+    LZ77_DECODER   *pDecoder;               // decoder
+    UInt8          *pAllocatedMemory;       // pointer to the beginning of allocated memory block
+    UInt8          *pAlignedPtr;            // a pointer aligned on appropriate byte boundary
+    size_t          uBufferSize;            // amount of temp buffer to store decoded data
+    size_t          uReservedSize;          // amount of memory to reserve after the buffer to allow small overrun caused by fast copy
+    size_t          uAllocationSize;        // total amount of allocated memory
 
     memset (pStatus, 0, sizeof (*pStatus));
     if (uMaxWindowSizeLog2 < XPRESS9_WINDOW_SIZE_LOG2_MIN || uMaxWindowSizeLog2 > XPRESS9_WINDOW_SIZE_LOG2_MAX)
@@ -245,14 +254,19 @@ Failure:
 #pragma warning (pop)
 
 
+//
+// Release memory occupied by the decoder.
+//
+// Please notice that the order to destroy the decoder will be always obeyed irrespective of decoder state
+//
 XPRESS9_EXPORT
 void
 XPRESS9_CALL
 Xpress9DecoderDestroy (
-    XPRESS9_STATUS     *pStatus,
-    XPRESS9_DECODER     pXpress9Decoder,
-    void               *pFreeContext,
-    XpressFreeFn       *pFreeFn
+    XPRESS9_STATUS     *pStatus,                // OUT: status
+    XPRESS9_DECODER     pXpress9Decoder,        // IN:  decoder
+    void               *pFreeContext,           // IN:  context for user-defined memory release function
+    XpressFreeFn       *pFreeFn                 // IN:  user-defined memory release function
 )
 {
     LZ77_DECODER       *pDecoder;
@@ -269,13 +283,16 @@ Failure:;
 }
 
 
+//
+// Start new encoding session. if fForceReset is not set then decoder must be flushed.
+//
 XPRESS9_EXPORT
 void
 XPRESS9_CALL
 Xpress9DecoderStartSession (
-    XPRESS9_STATUS         *pStatus,
-    XPRESS9_DECODER         pXpress9Decoder,
-    unsigned                fForceReset
+    XPRESS9_STATUS         *pStatus,            // OUT: status
+    XPRESS9_DECODER         pXpress9Decoder,    // IN:  decoder
+    unsigned                fForceReset         // IN:  if TRUE then allows resetting of previous session even if it wasn't flushed
 )
 {
     LZ77_DECODER       *pDecoder;
@@ -329,7 +346,7 @@ Failure:;
 static
 void
 Xpress9DecodeState (
-    XPRESS9_STATUS         *pStatus,
+    XPRESS9_STATUS         *pStatus,            // OUT: status
     LZ77_DECODER           *pDecoder
 )
 {
@@ -365,6 +382,7 @@ Xpress9DecodeState (
         BIO_STATE_LEAVE (pDecoder->m_DecodeData.m_BioState);
     }
 
+    // now decode Huffman tables
     HuffmanDecodeLengthTable (
         pStatus,
         &pDecoder->m_DecodeData.m_BioState,
@@ -395,7 +413,7 @@ Xpress9DecodeState (
     HuffmanDecodeLengthTable (
         pStatus,
         &pDecoder->m_DecodeData.m_BioState,
-        uLongLengthLength,
+        uLongLengthLength, // for index i, contains codeword length of i-th symbol.
         LZ77_LONG_LENGTH_ALPHABET_SIZE,
         LZ77_MAX_SHORT_LENGTH,
         HUFFMAN_MAX_CODEWORD_LENGTH
@@ -424,14 +442,16 @@ Failure:;
 }
 
 
+// Attach next buffer with compressed data to the decoder
+//
 XPRESS9_EXPORT
 void
 XPRESS9_CALL
 Xpress9DecoderAttach (
-    XPRESS9_STATUS         *pStatus,
-    XPRESS9_DECODER         pXpress9Decoder,
-    const void             *pCompData,
-    unsigned                uCompDataSize
+    XPRESS9_STATUS         *pStatus,            // OUT: status
+    XPRESS9_DECODER         pXpress9Decoder,    // IN:  decoder
+    const void             *pCompData,          // IN:  buffer containing compressed data
+    unsigned                uCompDataSize       // IN:  amount of data in compressed buffer
 )
 {
     LZ77_DECODER       *pDecoder;
@@ -454,14 +474,17 @@ Failure:;
 
 
 
+//
+// Detaches the buffer with compressed data
+//
 XPRESS9_EXPORT
 void
 XPRESS9_CALL
 Xpress9DecoderDetach (
-    XPRESS9_STATUS         *pStatus,
-    XPRESS9_DECODER         pXpress9Decoder,
-    const void             *pCompData,
-    unsigned                uCompDataSize
+    XPRESS9_STATUS         *pStatus,            // OUT: status
+    XPRESS9_DECODER         pXpress9Decoder,    // IN:  decoder
+    const void             *pCompData,          // IN:  buffer containing compressed data
+    unsigned                uCompDataSize       // IN:  amount of data in compressed buffer
 )
 {
     LZ77_DECODER       *pDecoder;
@@ -495,16 +518,21 @@ Failure:;
 }
 
 
+//
+// Fetch decompressed data filling pOrigData buffer with up to uOrigDataSize bytes.
+//
+// Returns number of decopressed bytes that are available but did not fit into pOrigData buffer
+//
 XPRESS9_EXPORT
 unsigned
 XPRESS9_CALL
 Xpress9DecoderFetchDecompressedData (
-    XPRESS9_STATUS         *pStatus,
-    XPRESS9_DECODER         pXpress9Decoder,
-    void                   *pOrigData,
-    unsigned                uOrigDataSize,
-    unsigned               *puOrigDataWritten,
-    unsigned               *puCompDataNeeded
+    XPRESS9_STATUS         *pStatus,            // OUT: status
+    XPRESS9_DECODER         pXpress9Decoder,    // IN:  decoder
+    void                   *pOrigData,          // IN:  buffer for storing uncompressed data (may be NULL)
+    unsigned                uOrigDataSize,      // IN:  size of pOrigDataBuffer (may be 0)
+    unsigned               *puOrigDataWritten,  // OUT: number of bytes that were actually written into uOrigDataSize buffer
+    unsigned               *puCompDataNeeded    // OUT: how much compressed bytes needed
 )
 {
     LZ77_DECODER       *pDecoder;
@@ -534,6 +562,10 @@ Xpress9DecoderFetchDecompressedData (
     }
 #endif
 
+    //
+    // retrieve session and/or next block header first
+    // by copying header into scratch area and getting it from there
+    //
 
     pDst = pDecoder->m_Scratch.m_uScratchArea;
 
@@ -541,14 +573,21 @@ Xpress9DecoderFetchDecompressedData (
     {
     case LZ77_DECODER_STATE_READY:
         pDecoder->m_uState = LZ77_DECODER_STATE_WAIT_SESSION;
+        // fall through
 
     case LZ77_DECODER_STATE_WAIT_SESSION:
     case LZ77_DECODER_STATE_WAIT_BLOCK:
+        //
+        // retrieve the header first
+        //
         uBytesNeeded = 8*4;
         RETAIL_ASSERT (uBytesNeeded > pDecoder->m_DecodeData.m_uScratchBytesStored, "uBytesNeeded=%Iu ScratchBytesStored=%Iu", uBytesNeeded, pDecoder->m_DecodeData.m_uScratchBytesStored);
         uBytesToCopy = uBytesNeeded - pDecoder->m_DecodeData.m_uScratchBytesStored;
         if (uBytesToCopy > pDecoder->m_UserData.m_uUserDataSize - pDecoder->m_UserData.m_uUserDataRead)
         {
+            //
+            // cannot decoder the header yet; just copy the data and return
+            //
             uBytesToCopy = pDecoder->m_UserData.m_uUserDataSize - pDecoder->m_UserData.m_uUserDataRead;
             memcpy (pDst + pDecoder->m_DecodeData.m_uScratchBytesStored, pDecoder->m_UserData.m_pUserData + pDecoder->m_UserData.m_uUserDataRead, uBytesToCopy);
             pDecoder->m_UserData.m_uUserDataRead += uBytesToCopy;
@@ -562,6 +601,9 @@ Xpress9DecoderFetchDecompressedData (
         pDecoder->m_UserData.m_uUserDataRead += uBytesToCopy;
         pDecoder->m_DecodeData.m_uScratchBytesStored += uBytesToCopy;
 
+        //
+        // we got the header; decode it
+        //
         if (((UInt32 *) pDst)[0] != XPRESS9_MAGIC)
         {
             SET_ERROR (Xpress9Status_DecoderCorruptedHeader, pStatus, "HeaderMagic=%u ExpectedMagic=%u", ((UInt32 *) pDst)[0], (UInt32) XPRESS9_MAGIC);
@@ -603,6 +645,13 @@ Xpress9DecoderFetchDecompressedData (
 
         uFlags = ((UInt32 *) pDst)[3];
 
+//     13 bits      length of encoded huffman tables in bits
+//      3 bits      log2 of window size (16 .. 23)
+//      2 bits      number of MTF entries   (0, 2, 4, reserved)
+//      1 bit       min ptr match length (3 or 4)
+//      1 bit       min mtf match length (2 or 3, shall be 0 if number of MTF entries is set to 0)
+//
+//     12 bits      reserved, must be 0
 
         pDecoder->m_DecodeData.m_uHuffmanTableBits = uFlags & 0x1fff;
         if (pDecoder->m_uState == LZ77_DECODER_STATE_WAIT_SESSION)
@@ -613,7 +662,7 @@ Xpress9DecoderFetchDecompressedData (
                 SET_ERROR (Xpress9Status_DecoderCorruptedHeader, pStatus, "MtfEntryCount=%Iu", pDecoder->m_DecodeData.m_uMtfEntryCount);
                 goto Failure;
             }
-            pDecoder->m_DecodeData.m_uWindowSizeLog2 = ((uFlags >> 13) & 7) + 16;
+            pDecoder->m_DecodeData.m_uWindowSizeLog2 = ((uFlags >> 13) & 7) + 16; // window size - 16 is what is written by encoder.
             pDecoder->m_DecodeData.m_uPtrMinMatchLength = ((uFlags >> 18) & 1) + 3;
             pDecoder->m_DecodeData.m_uMtfMinMatchLength = ((uFlags >> 19) & 1) + 2;
             Xpress9DecoderGetProc (pStatus, pDecoder);
@@ -666,6 +715,9 @@ Xpress9DecoderFetchDecompressedData (
             goto Failure;
         }
 
+        //
+        // fast path for retrieving the uncompressed size 
+        //
         if (pDecoder->m_uState == LZ77_DECODER_STATE_WAIT_SESSION && uOrigDataSize == 0)
         {
             pDecoder->m_uState = LZ77_DECODER_STATE_WAIT_HUFFMAN;
@@ -678,8 +730,12 @@ Xpress9DecoderFetchDecompressedData (
 
     if (pDecoder->m_uState == LZ77_DECODER_STATE_WAIT_HUFFMAN)
     {
-        uBytesNeeded = 8*4 + ((pDecoder->m_DecodeData.m_uHuffmanTableBits + 7) >> 3);
+        uBytesNeeded = 8*4 + ((pDecoder->m_DecodeData.m_uHuffmanTableBits + 7) >> 3); //( + 7 >> 3, rounds off to the next byte)
 
+        //
+        // copy few bytes more so that we may have smooth transition from scratch buffer to user buffer and back
+        // without the need to reload the shift register
+        //
         uBytesNeeded += 64;
         uBytesToCopy = (pDecoder->m_DecodeData.m_uEncodedSizeBits + 7) >> 3;
         if (uBytesNeeded > uBytesToCopy)
@@ -687,12 +743,19 @@ Xpress9DecoderFetchDecompressedData (
 
         if (uBytesNeeded > pDecoder->m_DecodeData.m_uScratchBytesStored)
         {
+            //
+            // need to copy more data
+            //
             uBytesToCopy = uBytesNeeded - pDecoder->m_DecodeData.m_uScratchBytesStored;
             
+            // Check m_uUserDataRead overrun ( see defect 264966 )
             if( uBytesToCopy + pDecoder->m_UserData.m_uUserDataRead > pDecoder->m_UserData.m_uUserDataSize)
             {
                 uBytesToCopy = pDecoder->m_UserData.m_uUserDataSize - pDecoder->m_UserData.m_uUserDataRead;
             
+                //
+                // do not have enough; just copy what we have
+                //
                 memcpy (    pDst + pDecoder->m_DecodeData.m_uScratchBytesStored, 
                             pDecoder->m_UserData.m_pUserData + pDecoder->m_UserData.m_uUserDataRead, 
                             uBytesToCopy
@@ -730,6 +793,7 @@ Xpress9DecoderFetchDecompressedData (
             goto Failure;
         }
 
+        // In the following piece of the code, uBytesToCopy is used to keep count of number of bits ( and not bytes )
         uBytesToCopy = BIORD_TELL_CONSUMED_BITS_STATE (pDecoder->m_DecodeData.m_BioState, pDst + 8*4);
         if (uBytesToCopy != pDecoder->m_DecodeData.m_uHuffmanTableBits)
         {
@@ -745,6 +809,7 @@ Xpress9DecoderFetchDecompressedData (
     fEof = FALSE;
     for (;;)
     {
+        // first, copy already decompressed data into user buffer
         uBytesToCopy = pDecoder->m_DecodeData.m_uDecodePosition - pDecoder->m_DecodeData.m_uCopyPosition;
         if (uBytesToCopy > uOrigDataSize)
             uBytesToCopy = uOrigDataSize;
@@ -765,12 +830,16 @@ Xpress9DecoderFetchDecompressedData (
         pDecoder->m_DecodeData.m_uBlockCopiedBytes += uBytesToCopy;
         uOrigDataWritten += uBytesToCopy;
 
+        //
+        // see whether we have anything left
+        //
         if (
             pDecoder->m_DecodeData.m_uBlockCopiedBytes >= pDecoder->m_Stat.m_Block.m_uOrigSize ||
             pDecoder->m_DecodeData.m_uBlockDecodedBytes + pDecoder->m_DecodeData.m_Tail.m_uLength >= pDecoder->m_Stat.m_Block.m_uOrigSize ||
             pDecoder->m_DecodeData.m_uDecodedSizeBits >= pDecoder->m_DecodeData.m_uEncodedSizeBits
         )
         {
+            // if we decoded everything, make sure we copied everything
             if (
                 pDecoder->m_DecodeData.m_uBlockDecodedBytes + pDecoder->m_DecodeData.m_Tail.m_uLength != pDecoder->m_Stat.m_Block.m_uOrigSize ||
                 pDecoder->m_DecodeData.m_uDecodedSizeBits != pDecoder->m_DecodeData.m_uEncodedSizeBits
@@ -812,10 +881,13 @@ Xpress9DecoderFetchDecompressedData (
                 printf ("%-15s =%12I64u %6.2f%%\n\n", "DecTotal", uTotal, 100.0);
 #undef P
             }
-#endif 
+#endif /* XPRESS9_DEBUG_PERF_STAT */
 
             if (pDecoder->m_DecodeData.m_uBlockCopiedBytes == pDecoder->m_Stat.m_Block.m_uOrigSize)
             {
+                //
+                // decoded and copied everything without a glitch
+                //
                 pDecoder->m_uState = LZ77_DECODER_STATE_WAIT_BLOCK;
 
                 pDecoder->m_Stat.m_uBlockIndex += 1;
@@ -826,6 +898,10 @@ Xpress9DecoderFetchDecompressedData (
             }
             else
             {
+                //
+                // we decoded everything but user didn't supply enough buffers to fetch all the data;
+                // a little bit is still left it internal buffer
+                //
                 RETAIL_ASSERT (
                     pDecoder->m_DecodeData.m_uBlockCopiedBytes < pDecoder->m_Stat.m_Block.m_uOrigSize,
                     "uOrigDataSize=%Iu OrigSize=%I64u BlockCopiedBytes=%Iu",
@@ -849,6 +925,9 @@ Xpress9DecoderFetchDecompressedData (
             pDecoder->m_DecodeData.m_uCopyPosition
         );
 
+        //
+        // see how many bytes we need to go through
+        //
         uBytesNeeded = pDecoder->m_DecodeData.m_uDecodedSizeBits;
         uBytesNeeded += BIORD_TELL_SHIFT_REGISTER_BITS_STATE (pDecoder->m_DecodeData.m_BioState);
         RETAIL_ASSERT ((uBytesNeeded & 7) == 0, "NumberOfBitsFetched=%Iu", uBytesNeeded);
@@ -858,6 +937,10 @@ Xpress9DecoderFetchDecompressedData (
             uBytesNeeded = 0;
             uBytesToCopy = 1;
 
+            //
+            // when decoder comes close to end of buffer we allow small buffer overrun because in
+            // shift register is populated by
+            //
             RETAIL_ASSERT (
                 BIORD_TELL_OUTPUT_PTR_STATE (pDecoder->m_DecodeData.m_BioState) <= pDst + pDecoder->m_DecodeData.m_uScratchBytesStored + sizeof (BIO_FULL) - 1,
                 "BioStatePtr=%p ScratchStart=%p ScratchEnd=%p",
@@ -868,9 +951,15 @@ Xpress9DecoderFetchDecompressedData (
         }
         else
         {
+            //
+            // shift data in scratch buffer if necesary
+            //
             uBytesCopied = BIORD_TELL_OUTPUT_PTR_STATE (pDecoder->m_DecodeData.m_BioState) - pDst;
             if (uBytesCopied > LZ77_DECODER_SCRATCH_AREA_SIZE * 7 / 8)
             {
+                //
+                // not too much left in scratch buffer; shift it
+                //
                 uBytesToCopy = pDecoder->m_DecodeData.m_uScratchBytesStored - uBytesCopied;
 
                 DEBUG_PERF_START (pDecoder->m_DebugPerf.m_uMemcpyComp);
@@ -884,6 +973,9 @@ Xpress9DecoderFetchDecompressedData (
 
             uBytesNeeded = (pDecoder->m_DecodeData.m_uEncodedSizeBits + 7 - uBytesNeeded) >> 3;
 
+            //
+            // see how much already copied
+            //
             RETAIL_ASSERT (
                 pDst + pDecoder->m_DecodeData.m_uScratchBytesStored >= BIORD_TELL_OUTPUT_PTR_STATE (pDecoder->m_DecodeData.m_BioState),
                 "BioStatePtr=%p ScratchStart=%p ScratchEnd=%p",
@@ -921,16 +1013,27 @@ Xpress9DecoderFetchDecompressedData (
             uBytesNeeded -= uBytesToCopy;
             uBytesCopied += uBytesToCopy;
 
+            //
+            // Decoding 1 byte will read at most 27 bits, so we can read up to
+            // Note the value 27 corresponds to MAX_CODEWORD_LENGTH -- we are generating length constrained Huffman code 
+            // where the upper bound length is 27.
+            //
             uBytesToCopy = uBytesCopied * 8 / 27;
             if (uBytesToCopy == 0)
                 uBytesToCopy = 1;
         }
 
 
+        //
+        // clamp number of bytes to decompress by remaining uncompressed bytes
+        //
         uBytesNeeded = ((uxint) pDecoder->m_Stat.m_Block.m_uOrigSize) - pDecoder->m_DecodeData.m_uBlockDecodedBytes;
         if (uBytesToCopy > uBytesNeeded)
             uBytesToCopy = uBytesNeeded;
 
+        //
+        // clamp number of bytes to decompress by number of bytes left in the the buffer
+        //
         uBytesNeeded = pDecoder->m_BufferData.m_uBufferDataSize - pDecoder->m_DecodeData.m_uDecodePosition;
         if (uBytesNeeded < 256 && uBytesNeeded < uBytesToCopy)
         {
@@ -948,8 +1051,13 @@ Xpress9DecoderFetchDecompressedData (
                 goto Failure;
             }
 
+            //
+            // if we have less not much space left in the buffer and we'll need to decompress more than
+            // amount of free space left in the buffer we need to shift the contents of the buffer
+            //
             uBytesNeeded = pDecoder->m_DecodeData.m_uDecodePosition - POWER2 (pDecoder->m_DecodeData.m_uWindowSizeLog2);
 
+            // shift out the left most uBytesNeeded bytes keeping windowsize bytes.
             DEBUG_PERF_START (pDecoder->m_DebugPerf.m_uShift);
             memcpy (
                 pDecoder->m_BufferData.m_pBufferData,
@@ -998,10 +1106,10 @@ XPRESS9_EXPORT
 unsigned
 XPRESS9_CALL
 Xpress9DecoderQueryBuffer(
-    XPRESS9_STATUS     *pStatus,
-    XPRESS9_DECODER     pXpress9Decoder,
-    void              **pBuffer,
-    size_t             *pBufferSize
+    XPRESS9_STATUS     *pStatus,                // OUT: status
+    XPRESS9_DECODER     pXpress9Decoder,        // IN:  decoder
+    void              **pBuffer,                // OUT
+    size_t             *pBufferSize             // OUT
 )
 {
     LZ77_DECODER       *pDecoder;
@@ -1023,10 +1131,10 @@ XPRESS9_EXPORT
 unsigned
 XPRESS9_CALL
 Xpress9DecoderSetBuffer(
-    XPRESS9_STATUS     *pStatus,
-    XPRESS9_DECODER     pXpress9Decoder,
-    void              * pBuffer,
-    size_t              pBufferSize
+    XPRESS9_STATUS     *pStatus,                // OUT: status
+    XPRESS9_DECODER     pXpress9Decoder,        // IN:  decoder
+    void              * pBuffer,                // IN
+    size_t              pBufferSize             // IN
 )
 {
     LZ77_DECODER       *pDecoder;

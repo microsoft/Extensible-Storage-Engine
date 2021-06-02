@@ -4,6 +4,8 @@
 #pragma once
 
 
+//  THashedLRUKCache:  a persistent write back cache implemented as a fixed size hash of chunks each running the LRUK
+//  cache replacement algorithm.  crash resilience is provided by a journal
 
 template< class I >
 class THashedLRUKCache
@@ -15,7 +17,7 @@ class THashedLRUKCache
         {
         }
 
-    public:
+    public:  //  ICache
 
         ERR ErrCreate() override;
 
@@ -90,12 +92,15 @@ ERR THashedLRUKCache<I>::ErrCreate()
     CHashedLRUKCacheHeader* pch     = NULL;
     TraceContextScope       tcScope( iorpBlockCache );
 
+    //  initialize the caching file header
 
     Call( CHashedLRUKCacheHeader::ErrCreate( &pch ) );
 
+    //  set the initial caching file size
 
     Call( PffCaching()->ErrSetSize( *tcScope, Pcconfig()->CbMaximumSize(), fFalse, qosIONormal ) );
 
+    //  write the caching file header
 
     Call( PffCaching()->ErrIOWrite( *tcScope,
                                     sizeof( CCacheHeader ),
@@ -106,6 +111,7 @@ ERR THashedLRUKCache<I>::ErrCreate()
                                     NULL,
                                     NULL ) );
 
+    //  flush the caching file
 
     Call( PffCaching()->ErrFlushFileBuffers( iofrBlockCache ) );
 
@@ -120,13 +126,16 @@ ERR THashedLRUKCache<I>::ErrMount()
     ERR                     err     = JET_errSuccess;
     CHashedLRUKCacheHeader* pch     = NULL;
 
+    //  read the header
 
     Call( CHashedLRUKCacheHeader::ErrLoad( Pfsconfig(), PffCaching(), &pch ) );
 
+    //  save the caching file header
 
     m_pch = pch;
     pch = NULL;
 
+    //  AEG
 
 HandleError:
     delete pch;
@@ -140,6 +149,7 @@ ERR THashedLRUKCache<I>::ErrDump( _In_ CPRINTF* const pcprintf )
 
     Call( m_pch->ErrDump( pcprintf ) );
 
+    //  AEG
 
 HandleError:
     return err;
@@ -153,9 +163,11 @@ ERR THashedLRUKCache<I>::ErrFlush(  _In_ const VolumeId     volumeid,
     ERR                                 err     = JET_errSuccess;
     CHashedLRUKCachedFileTableEntry*    pcfte   = NULL;
    
+    //  get the cached file.  note that we do not release this reference to leave the cached file open
 
     Call( ErrGetCachedFile( volumeid, fileid, fileserial, fFalse, &pcfte ) );
 
+    //  AEG
 
 HandleError:
     return err;
@@ -171,9 +183,11 @@ ERR THashedLRUKCache<I>::ErrInvalidate( _In_ const VolumeId     volumeid,
     ERR                                 err     = JET_errSuccess;
     CHashedLRUKCachedFileTableEntry*    pcfte   = NULL;
    
+    //  get the cached file.  note that we do not release this reference to leave the cached file open
 
     Call( ErrGetCachedFile( volumeid, fileid, fileserial, fFalse, &pcfte ) );
 
+    //  AEG
 
 HandleError:
     return err;
@@ -208,9 +222,11 @@ ERR THashedLRUKCache<I>::ErrRead(   _In_                    const TraceContext& 
                                             keyComplete ) );
     }
 
+    //  get the cached file.  note that we do not release this reference to leave the cached file open
 
     Call( ErrGetCachedFile( volumeid, fileid, fileserial, fFalse, &pcfte ) );
 
+    //  AEG
 
 HandleError:
     if ( pcomplete )
@@ -249,9 +265,11 @@ ERR THashedLRUKCache<I>::ErrWrite(  _In_                    const TraceContext& 
                                             keyComplete ) );
     }
 
+    //  get the cached file.  note that we do not release this reference to leave the cached file open
 
     Call( ErrGetCachedFile( volumeid, fileid, fileserial, fFalse, &pcfte ) );
 
+    //  AEG
 
 HandleError:
     if ( pcomplete )
@@ -261,12 +279,14 @@ HandleError:
     return pcomplete ? JET_errSuccess : err;
 }
 
+//  CHashedLRUKCache:  concrete THashedLRUKCache<ICache>
 
+//  1c73cc4d-ac35-41d9-a9e0-e46112c03a87
 const BYTE c_rgbHashedLRUKCacheType[ sizeof( GUID ) ] = { 0x4D, 0xCC, 0x73, 0x1C, 0x35, 0xAC, 0xD9, 0x41, 0xA9, 0xE0, 0xE4, 0x61, 0x12, 0xC0, 0x3A, 0x87 };
 
 class CHashedLRUKCache : public THashedLRUKCache<ICache>
 {
-    public:
+    public:  //  specialized API
 
         static const BYTE* RgbCacheType()
         {

@@ -10,12 +10,14 @@
 #define BSTF_AVOID_WIN_DEPENDENCE 1
 #include "bstf.hxx"
 
-#pragma warning ( disable : 4100 )
-#pragma warning ( disable : 4127 )
-#pragma warning ( disable : 4512 )
-#pragma warning ( disable : 4706 )
+#pragma warning ( disable : 4100 )  // unreferenced formal parameter
+#pragma warning ( disable : 4127 )  // conditional expression is constant
+#pragma warning ( disable : 4512 )  // assignment operator could not be generated
+#pragma warning ( disable : 4706 )  // assignment within conditional expression
 
 
+//  ================================================================
+//  stat.hxx required support
 
 #ifdef DEBUG
 #define Assert( exp )                               \
@@ -28,7 +30,7 @@
         {                                           \
         AssertFail( sz, __FILE__, __LINE__ );       \
     }
-#else
+#else   //  !DEBUG
 #define Assert( exp )
 #define AssertSz( exp, sz )
 #endif
@@ -72,6 +74,7 @@ _inline void AssertFail( const char * szMessage, const char * szFilename, LONG l
     exit(-1);
 }
 
+// Must implement somewhere else, to avoid the inline, which messes up the linking.
 void __stdcall EnforceFail( const CHAR* szMessage, const CHAR* szFilename, LONG lLine );
 
 #include "stat.hxx"
@@ -83,6 +86,11 @@ void __stdcall EnforceFail( const CHAR* szMessage, const CHAR* szFilename, LONG 
         inline ENUMTYPE operator ~ (ENUMTYPE a) { return ENUMTYPE(~((INT)a)); }                                     \
 }
 
+//
+//  From histoutil.cxx
+//
+//  Contains common histogram testing
+//
 
 enum TestZeroFlags { fTestZeroNormal = 0x00, fHasExplicitBuckets = 0x01, fNoPercentileSupport = 0x2 };
 DEFINE_ENUM_FLAG_OPERATORS_BASIC( TestZeroFlags )

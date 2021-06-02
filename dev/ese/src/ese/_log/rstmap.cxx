@@ -12,11 +12,14 @@ ERR LOG::ErrReplaceRstMapEntryBySignature( const WCHAR *wszName, const SIGNATURE
 
     for ( irstmap = 0; irstmap < m_irstmapMac; irstmap++ )
     {
+        // we are looking at the signature only for the dbs for which we found the file (hence got the signature)
         if ( !m_rgrstmap[irstmap].fFileNotFound &&
             0 == memcmp( pDbSignature, &m_rgrstmap[irstmap].signDatabase, sizeof(SIGNATURE) ) )
         {
             Assert( NULL != m_rgrstmap[irstmap].wszNewDatabaseName );
 
+            //  if source name doesn't exist or doesn't match, update it
+            //
             if ( NULL == m_rgrstmap[irstmap].wszDatabaseName
                 || 0 != UtilCmpFileName( m_rgrstmap[irstmap].wszDatabaseName, wszName ) )
             {
@@ -28,6 +31,8 @@ ERR LOG::ErrReplaceRstMapEntryBySignature( const WCHAR *wszName, const SIGNATURE
 
                 CallR( ErrOSStrCbCopyW( wszSrcDatabaseName, cbName, wszName ) );
 
+                //  free old source name (if any) and retain new source name
+                //
                 OSMemoryHeapFree( m_rgrstmap[irstmap].wszDatabaseName );
                 m_rgrstmap[irstmap].wszDatabaseName = wszSrcDatabaseName;
                 m_rgrstmap[irstmap].cbDatabaseName = cbName;
@@ -36,6 +41,9 @@ ERR LOG::ErrReplaceRstMapEntryBySignature( const WCHAR *wszName, const SIGNATURE
             Assert( NULL != m_rgrstmap[irstmap].wszDatabaseName );
             Assert( NULL != m_rgrstmap[irstmap].wszNewDatabaseName );
 
+            //  if source name doesn't match destination name, report
+            //  the location change
+            //
             if ( 0 != UtilCmpFileName( m_rgrstmap[irstmap].wszDatabaseName, m_rgrstmap[irstmap].wszNewDatabaseName ) )
             {
                 const UINT      csz     = 2;
@@ -63,6 +71,9 @@ ERR LOG::ErrReplaceRstMapEntryBySignature( const WCHAR *wszName, const SIGNATURE
 }
 
 
+// We try to fill the source name with the logged database name based on name matching.
+// The matching is done by finding the longest suffix match between what is in the log (input param)
+// and each entry in the restore map
 ERR LOG::ErrReplaceRstMapEntryByName( const WCHAR *wszName, const SIGNATURE * pDbSignature )
 {
     ERR err = JET_errSuccess;
@@ -81,10 +92,13 @@ ERR LOG::ErrReplaceRstMapEntryByName( const WCHAR *wszName, const SIGNATURE * pD
         {
             Assert ( m_rgrstmap[irstmap].wszDatabaseName );
 
+            // if the name we search for at least as long as the name in the map
             if (cbName >= m_rgrstmap[irstmap].cbDatabaseName &&
+                // and the best fit we found so far is not longer the the potential one we try
                 cbBestFit < m_rgrstmap[irstmap].cbDatabaseName)
             {
 
+                // see if it is a better match between the map entry and the tail of the one we search for
                 if ( 0 == UtilCmpFileName(m_rgrstmap[irstmap].wszDatabaseName, wszName + ( (cbName - m_rgrstmap[irstmap].cbDatabaseName ) / sizeof(WCHAR) ) ))
                 {
                     cbBestFit = m_rgrstmap[irstmap].cbDatabaseName;
@@ -94,6 +108,7 @@ ERR LOG::ErrReplaceRstMapEntryByName( const WCHAR *wszName, const SIGNATURE * pD
         }
     }
 
+        // no matching, exit here
         if ( irstmapBestFit >= m_irstmapMac )
         {
             return ErrERRCheck( JET_errFileNotFound );
@@ -101,6 +116,7 @@ ERR LOG::ErrReplaceRstMapEntryByName( const WCHAR *wszName, const SIGNATURE * pD
     
         Assert( m_rgrstmap[irstmapBestFit].fFileNotFound );
 
+        // we found a match so we will replace the map entry with the full name we matched against
         if ( 0 != UtilCmpFileName(m_rgrstmap[irstmapBestFit].wszDatabaseName, wszName) )
         {
             if ( ( wszSrcDatabaseName = static_cast<WCHAR *>( PvOSMemoryHeapAlloc( cbName ) ) ) == NULL )
@@ -124,6 +140,7 @@ INT LOG::IrstmapGetRstMapEntry( const WCHAR *wszName )
     BOOL fFound = fFalse;
 
     Assert( wszName );
+    //  NOTE: rstmap ALWAYS uses the OS file-system
 
     for ( irstmap = 0; irstmap < m_irstmapMac; irstmap++ )
     {
@@ -132,15 +149,19 @@ INT LOG::IrstmapGetRstMapEntry( const WCHAR *wszName )
         const WCHAR *   wszT = NULL;
         const WCHAR *   wszRst;
 
+        // we are using the generic name only during JetRestore
+        // SOFT_HARD: this is more like a a "if ! JetRestore"
         if ( FExternalRestore() || !FHardRestore() )
         {
-            
+            /*  Use the database path to search.
+             */
             wszT = wszName;
             wszRst = m_rgrstmap[irstmap].wszDatabaseName;
         }
         else
         {
-            
+            /*  use the generic name to search
+             */
             CallS( m_pinst->m_pfsapi->ErrPathParse( wszName, wszPathT, wszFNameT, wszPathT ) );
             wszT = wszFNameT;
             wszRst = m_rgrstmap[irstmap].wszGenericName;
@@ -238,7 +259,8 @@ VOID LOG::FreeRstmap( VOID )
     m_irstmapMac = 0;
 }
 
-
+/*  for log restore to build restore map RSTMAP
+/**/
 ERR LOG::ErrBuildRstmapForRestore( PCWSTR wszRestorePath )
 {
     ERR             err         = JET_errSuccess;
@@ -252,7 +274,10 @@ ERR LOG::ErrBuildRstmapForRestore( PCWSTR wszRestorePath )
     WCHAR           wszT[IFileSystemAPI::cchPathMax];
     IFileFindAPI*   pffapi      = NULL;
 
-    
+    /*  build rstmap, scan all *.pat files and build RSTMAP
+     *  build generic name for search the destination. If szDest is null, then
+     *  keep szNewDatabase Null so that it can be copied backup to szOldDatabaseName.
+     */
     Assert( FOSSTRTrailingPathDelimiterW( wszRestorePath ) );
     Assert( LOSStrLengthW( wszRestorePath ) + LOSStrLengthW( L"*" ) + LOSStrLengthW( wszPatExt ) < IFileSystemAPI::cchPathMax - 1 );
     if ( LOSStrLengthW( wszRestorePath ) + LOSStrLengthW( L"*" ) + LOSStrLengthW( wszPatExt ) >= IFileSystemAPI::cchPathMax - 1 )
@@ -263,11 +288,13 @@ ERR LOG::ErrBuildRstmapForRestore( PCWSTR wszRestorePath )
     Call( ErrOSStrCbAppendW( wszSearch, sizeof(wszSearch), L"*" ) );
     Call( ErrOSStrCbAppendW( wszSearch, sizeof(wszSearch), wszPatExt ) );
 
+    //  patch files are always on the OS file-system
 
     Call( m_pinst->m_pfsapi->ErrFileFind( wszSearch, &pffapi ) );
     while ( ( err = pffapi->ErrNext() ) == JET_errSuccess )
     {
-        
+        /*  run out of rstmap entries, allocate more
+        /**/
         if ( irstmap + 1 >= irstmapMac )
         {
             Alloc( prstmap = static_cast<RSTMAP *>( PvOSMemoryHeapAlloc( sizeof(RSTMAP) * ( irstmap + 8 ) ) ) );
@@ -281,7 +308,9 @@ ERR LOG::ErrBuildRstmapForRestore( PCWSTR wszRestorePath )
             irstmapMac += 8;
         }
 
-        
+        /*  keep resource db null for non-external restore.
+         *  Store generic name ( szFileName without .pat extention )
+         */
         Call( pffapi->ErrPath( wszFileName ) );
         Call( m_pinst->m_pfsapi->ErrPathParse( wszFileName, wszT, wszFile, wszT ) );
         prstmap = rgrstmap + irstmap;
@@ -298,6 +327,8 @@ ERR LOG::ErrBuildRstmapForRestore( PCWSTR wszRestorePath )
 
     if ( 0 == irstmap )
     {
+        //  didn't find any patch files
+        //
         Error( ErrERRCheck( JET_errPatchFileMissing ) );
     }
 
@@ -325,7 +356,7 @@ ERR ErrLGCheckDBFiles(
     INT genHigh,
     LGPOS *plgposSnapshotRestore = NULL );
 
-#define cRestoreStatusPadding   0.10
+#define cRestoreStatusPadding   0.10    // Padding to add to account for DB copy.
 
 ERR LOG::ErrGetDestDatabaseName(
     const WCHAR *wszDatabaseName,
@@ -355,11 +386,14 @@ ERR LOG::ErrGetDestDatabaseName(
     else if ( m_rgrstmap[irstmap].fDestDBReady )
         return JET_errSuccess;
 
-    
+    /*  check if there is any database in the restore directory.
+     *  Make sure szFNameT is big enough to hold both name and extention.
+     */
     CallS( m_pinst->m_pfsapi->ErrPathParse( wszDatabaseName, wszDirT, wszFNameT, wszExtT ) );
     CallR( ErrOSStrCbAppendW( wszFNameT, sizeof(wszFNameT), wszExtT ) );
 
-    
+    /* make sure szRestoreT has enough trailing space for the following function to use.
+     */
     if ( LOSStrLengthW( wszRestorePath ) >= IFileSystemAPI::cchPathMax - 1 )
     {
         return ( ErrERRCheck( JET_errInvalidPath ) );
@@ -368,7 +402,8 @@ ERR LOG::ErrGetDestDatabaseName(
     if ( ErrLGCheckDir( m_pinst->m_pfsapi, wszRestoreT, sizeof(wszRestoreT), wszFNameT ) != JET_errBackupDirectoryNotEmpty )
         return( ErrERRCheck( JET_errFileNotFound ) );
 
-    
+    /*  goto next block, copy it back to working directory for recovery
+     */
     if ( FExternalRestore() )
     {
         Assert( _wcsicmp( m_rgrstmap[irstmap].wszDatabaseName, wszDatabaseName ) == 0 );
@@ -381,13 +416,15 @@ ERR LOG::ErrGetDestDatabaseName(
         WCHAR       *wszSrcDatabaseName;
         WCHAR       wszFullPathT[IFileSystemAPI::cchPathMax];
 
-        
+        /*  store source path in rstmap
+        /**/
         const ULONG cbSrcDatabaseNameT = sizeof( WCHAR ) * ( LOSStrLengthW( wszDatabaseName ) + 1 );
         AllocR( wszSrcDatabaseName = static_cast<WCHAR *>( PvOSMemoryHeapAlloc( cbSrcDatabaseNameT ) ) );
         OSStrCbCopyW( wszSrcDatabaseName, cbSrcDatabaseNameT, wszDatabaseName );
         m_rgrstmap[irstmap].wszDatabaseName = wszSrcDatabaseName;
 
-        
+        /*  store restore path in rstmap
+        /**/
         if ( wszNewDestination[0] != L'\0' )
         {
             const ULONG cbNewDatabaseNameT = sizeof( WCHAR ) * ( LOSStrLengthW( wszNewDestination ) + LOSStrLengthW( wszFNameT ) + 1 );
@@ -403,9 +440,12 @@ ERR LOG::ErrGetDestDatabaseName(
         }
         m_rgrstmap[irstmap].wszNewDatabaseName = wszNewDatabaseName;
 
-        
+        /*  copy database if not external restore.
+         *  make database names and copy the database.
+         */
         CallS( m_pinst->m_pfsapi->ErrPathParse( wszDatabaseName, wszDirT, wszFNameT, wszExtT ) );
-        
+        /* make sure szRestoreT has enough trailing space for the following function to use.
+         */
         if ( LOSStrLengthW( wszRestorePath ) + LOSStrLengthW(wszFNameT) + LOSStrLengthW(wszExtT) >= IFileSystemAPI::cchPathMax - 1 )
         {
             return ( ErrERRCheck( JET_errInvalidPath ) );
@@ -462,11 +502,15 @@ ERR LOG::ErrGetDestDatabaseName(
 
 ERR ErrDBFormatFeatureEnabled_( const JET_ENGINEFORMATVERSION efvFormatFeature, const DbVersion& dbvCurrentFromFile );
 
+// This function is filling the RSTMAP entry for a certain database with the signature
+// If there is no signature, we mark the entry as we can still have a "create db" for it
+//
 ERR ErrRstmapSoftCheckDBFiles( INST *pinst, RSTMAP * pDbMapEntry )
 {
     ERR err;
     DBFILEHDR_FIX *pdbfilehdrDb;
 
+    // the map entry is empty at this point
 #ifdef DEBUG
     SIGNATURE signEmpty;
     memset( &signEmpty, '\0', sizeof(signEmpty) );
@@ -476,13 +520,27 @@ ERR ErrRstmapSoftCheckDBFiles( INST *pinst, RSTMAP * pDbMapEntry )
     Assert ( pDbMapEntry );
     const WCHAR * wszDatabase = pDbMapEntry->wszNewDatabaseName;
 
-    
+    /*  try to read the header of the database.
+    /**/
     pdbfilehdrDb = (DBFILEHDR_FIX * )PvOSMemoryPageAlloc( g_cbPage, NULL );
     if ( pdbfilehdrDb == NULL )
         return ErrERRCheck( JET_errOutOfMemory );
 
+    //  don't just call ErrUtilReadShadowedHeader() without first
+    //  checking for path existence, because if the path doesn't
+    //  exist, it'll cause ErrUtilReadShadowedHeader() (or more
+    //  accurately, COSFileSystem::ErrFileOpen()) to report a
+    //  JET_errInvalidPath (-1023) error in the eventlog
+    //
+    //  UNDONE: should we suppress ERROR_PATH_NOT_FOUND in
+    //  addition to ERROR_FILE_NOT_FOUND in
+    //  COSFileSystem::ErrFileOpen()?
+    //
     err = ErrUtilPathExists( pinst->m_pfsapi, wszDatabase );
 
+    //  ignore all errors except for JET_errFileNotFound and
+    //  just trap the error from ErrUtilReadShadowedHeader
+    //
     if ( err >= JET_errSuccess )
     {
         err = ErrUtilReadShadowedHeader(
@@ -494,16 +552,30 @@ ERR ErrRstmapSoftCheckDBFiles( INST *pinst, RSTMAP * pDbMapEntry )
                             OffsetOf( DBFILEHDR_FIX, le_cbPageSize ),
                             urhfReadOnly );
 
+        //  these errors should have been caught
+        //  by the path-existence check above
+        //
         Assert( JET_errFileNotFound != err );
         Assert( JET_errInvalidPath != err );
     }
 
+    // if the file is not there, we assume the log replay will recreate 
+    // the database so we leave the signature empty and keep going w/o
+    // error at this point but marking the fFileNotFound flag
     if ( ( err == JET_errFileNotFound ) ||
         ( err < JET_errSuccess && pDbMapEntry->grbit & ( JET_bitRestoreMapIgnoreWhenMissing | JET_bitRestoreMapOverwriteOnCreate ) ) )
     {
 
+        // there is no destination file so we need at least part of
+        // the source name to try to match a create database
         if ( !pDbMapEntry->wszDatabaseName || LOSStrLengthW( pDbMapEntry->wszDatabaseName ) < 1 )
         {
+            //  shouldn't be possible, because if the
+            //  source name was empty/missing, the caller
+            //  (LOG::ErrLGRSTBuildRstmapForSoftRecovery())
+            //  should have copied the destination name to
+            //  the source name
+            //
             Assert( fFalse );
             err = ErrERRCheck( JET_errDatabaseInvalidName );
         }
@@ -530,10 +602,12 @@ ERR ErrRstmapSoftCheckDBFiles( INST *pinst, RSTMAP * pDbMapEntry )
         Call( err );
     }
 
+    // fill in the RSTMAP the found database signature
     memcpy ( &pDbMapEntry->signDatabase, &pdbfilehdrDb->signDb , sizeof(SIGNATURE) );
     memcpy ( &pDbMapEntry->signDatabaseHdrFlush, &pdbfilehdrDb->signDbHdrFlush , sizeof(SIGNATURE) );
     memcpy ( &pDbMapEntry->signRBSHdrFlush, &pdbfilehdrDb->signRBSHdrFlush , sizeof(SIGNATURE) );
 
+    // Capture stuff needed to figure out checkpoint from file
     pDbMapEntry->dbstate = pdbfilehdrDb->le_dbstate;
     pDbMapEntry->lGenMinRequired = pdbfilehdrDb->le_lGenMinRequired;
     pDbMapEntry->lGenMaxRequired = pdbfilehdrDb->le_lGenMaxRequired;
@@ -541,6 +615,7 @@ ERR ErrRstmapSoftCheckDBFiles( INST *pinst, RSTMAP * pDbMapEntry )
     pDbMapEntry->lGenLastAttach = pdbfilehdrDb->le_lgposAttach.le_lGeneration;
     pDbMapEntry->fRBSFeatureEnabled = ErrDBFormatFeatureEnabled_( JET_efvRevertSnapshot, pdbfilehdrDb->Dbv() ) >= JET_errSuccess;
 
+    // should be a db header
     if ( attribDb != pdbfilehdrDb->le_attrib )
     {
         if ( pDbMapEntry->grbit & ( JET_bitRestoreMapIgnoreWhenMissing | JET_bitRestoreMapOverwriteOnCreate ) )
@@ -605,6 +680,8 @@ VOID LOG::LoadCheckpointGenerationFromRstmap( LONG * const plgenLow )
         }
         else if ( !( rstmap->grbit & JET_bitRestoreMapIgnoreWhenMissing ) )
         {
+            // If we have a missing db which is not allowed to be missing, just go to lowest log
+            // since we may have to replay the CreateDB for it.
             return;
         }
     }
@@ -665,6 +742,8 @@ VOID LOG::LoadRBSGenerationFromRstmap( LONG * const plgenLow, LONG * plgenHigh )
     Assert( *plgenHigh <= lGenerationMax );
 }
 
+// Return true only if all the databases in the rstmap have their format high enough to support RBS feature.
+//
 BOOL LOG::FRBSFeatureEnabledFromRstmap()
 {
     BOOL fRBSFeatureEnabled = fFalse;
@@ -674,6 +753,7 @@ BOOL LOG::FRBSFeatureEnabledFromRstmap()
         const RSTMAP * const rstmap = m_rgrstmap + irstmap;
         if ( rstmap->fFileNotFound )
         {
+            // If file is missing and we should fail then we will assume RBS feature is not enabled.
             if ( rstmap->grbit & JET_bitRestoreMapFailWhenMissing  )
             {
                 return fFalse;
@@ -700,6 +780,9 @@ ERR LOG::ErrBuildRstmapForSoftRecovery( const JET_RSTMAP2_W * const rgjrstmap, c
     INT         irstmap = 0;
     RSTMAP      *rgrstmap;
 
+    // try to cap the input to a reasonable #
+    // we should not have more them twice (one STM, one EDB) mappings
+    //
     if ( cjrstmap > ( dbidMax * 2 ) || cjrstmap < 0 )
     {
         return ErrERRCheck( JET_errInvalidParameter );
@@ -712,6 +795,8 @@ ERR LOG::ErrBuildRstmapForSoftRecovery( const JET_RSTMAP2_W * const rgjrstmap, c
         return JET_errSuccess;
     }
 
+    // the actual count was checked above, no danger for overflow
+    //
     AllocR( rgrstmap = static_cast<RSTMAP *>( PvOSMemoryHeapAlloc( sizeof(RSTMAP) * cjrstmap ) ) );
     memset( rgrstmap, 0, sizeof(RSTMAP) * cjrstmap );
 
@@ -725,6 +810,9 @@ ERR LOG::ErrBuildRstmapForSoftRecovery( const JET_RSTMAP2_W * const rgjrstmap, c
         ULONG                       cchDbName       = 0;
         WCHAR                       wszFullName[ IFileSystemAPI::cchPathMax ];
 
+        //  basic checking on the destination (ie new) name as this
+        //  is the most important
+        //
         if ( NULL == pjrstmap->szNewDatabaseName )
         {
             Error( ErrERRCheck( JET_errDatabaseInvalidName ) );
@@ -736,21 +824,28 @@ ERR LOG::ErrBuildRstmapForSoftRecovery( const JET_RSTMAP2_W * const rgjrstmap, c
             Call( ErrOSStrCbCopyW( wszFullName, sizeof(wszFullName), pjrstmap->szNewDatabaseName ) );
         }
 
+        // verify grbits
         if ( pjrstmap->grbit & ~( JET_bitRestoreMapIgnoreWhenMissing | JET_bitRestoreMapFailWhenMissing | JET_bitRestoreMapOverwriteOnCreate ) )
         {
             Error( ErrERRCheck( JET_errInvalidGrbit ) );
         }
 
+        //  verify destination name is not empty
+        //
         const ULONG cchNewDbName    = LOSStrLengthW( wszFullName );
         if ( cchNewDbName < 1 )
         {
             Error( ErrERRCheck( JET_errDatabaseInvalidName ) );
         }
 
+        //  fill in the destination name
+        //
         const ULONG cbNewDbName     = sizeof( WCHAR ) * ( cchNewDbName + 1 );
         Alloc( prstmap->wszNewDatabaseName = static_cast<WCHAR *>( PvOSMemoryHeapAlloc( cbNewDbName ) ) );
         OSStrCbCopyW( prstmap->wszNewDatabaseName, cbNewDbName, wszFullName );
 
+        //  determine if we have a source name
+        //
         if ( NULL != pjrstmap->szDatabaseName )
         {
             err = ErrUtilPathComplete( m_pinst->m_pfsapi, pjrstmap->szDatabaseName, wszFullName, fFalse );
@@ -764,17 +859,26 @@ ERR LOG::ErrBuildRstmapForSoftRecovery( const JET_RSTMAP2_W * const rgjrstmap, c
 
         if ( cchDbName > 0 )
         {
+            //  fill in the source name
+            //
             prstmap->cbDatabaseName = sizeof( WCHAR ) * ( cchDbName + 1 );
             Alloc( prstmap->wszDatabaseName = static_cast<WCHAR *>( PvOSMemoryHeapAlloc( prstmap->cbDatabaseName ) ) );
             Call( ErrOSStrCbCopyW( prstmap->wszDatabaseName, prstmap->cbDatabaseName, wszFullName ) );
         }
         else
         {
+            //  if the source name is empty/missing, just use the
+            //  destination name for now and later when we replay
+            //  an attach for that signature, we will fill in the
+            //  correct source name)
+            //
             prstmap->cbDatabaseName = cbNewDbName;
             Alloc( prstmap->wszDatabaseName = static_cast<WCHAR *>( PvOSMemoryHeapAlloc( cbNewDbName ) ) );
             Call( ErrOSStrCbCopyW( prstmap->wszDatabaseName, cbNewDbName, prstmap->wszNewDatabaseName ) );
         }
 
+        //  perform a deep copy of the parameter array
+        //
         if ( ( pjrstmap->rgsetdbparam == NULL ) && ( pjrstmap->csetdbparam > 0 ) )
         {
             Error( ErrERRCheck( JET_errInvalidParameter ) );
@@ -858,11 +962,15 @@ ERR LOG::ErrBuildRstmapForExternalRestore( JET_RSTMAP_W *rgjrstmap, INT cjrstmap
     RSTMAP          *prstmap;
     JET_RSTMAP_W    *pjrstmap;
 
+    // try to cap the input to a reasonable #
+    // we should not have more them twice (one STM, one EDB) mappings
     if ( cjrstmap > ( dbidMax * 2 ) || cjrstmap < 0 )
     {
         return ErrERRCheck( JET_errInvalidParameter );
     }
 
+    // the actual count was checked above, no danger for overflow
+    //
     AllocR( rgrstmap = static_cast<RSTMAP *>( PvOSMemoryHeapAlloc( sizeof(RSTMAP) * cjrstmap ) ) );
     memset( rgrstmap, 0, sizeof( RSTMAP ) * cjrstmap );
 

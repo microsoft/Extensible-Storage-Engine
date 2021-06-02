@@ -1,6 +1,7 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
+//** SYSTEM **********************************************************
 
 #pragma once
 
@@ -41,7 +42,12 @@ using namespace std;
 #include <strsafe.h>
 #pragma prefast(pop)
 
+// some security macros taken from exwarning.h
 
+// Here are three macros which correctly answer the question:  "How many BYTEs (TCHARs, WCHARs)
+// are left in a variable sized object 'pObject', of total size 'cbTotal', starting at pointer 'pCurrent'?"  
+// These macros are written to return 0 if the values are out of bounds, and they are not vulnerable to
+// any integer overflow.
 #define CbRemainingInObject(pObject,pCurrent,cbTotal)  \
     ( ( (((BYTE*)(pCurrent) < ((BYTE*)(pObject))+(cbTotal))) && \
         (((BYTE*)(pObject) <= ((BYTE*)(pObject))+(cbTotal))) ) ? \
@@ -58,40 +64,49 @@ using namespace std;
             (((BYTE*)(pObject))+(cbTotal) - (BYTE*)(pCurrent))/sizeof(WCHAR) : 0  )
 
 
+//** COMPILER CONTROL *************************************************
 
-#pragma warning ( disable : 4100 )
-#pragma warning ( disable : 4200 )
-#pragma warning ( disable : 4201 )
-#pragma warning ( 3 : 4244 )
-#pragma warning ( disable : 4238 )
-#pragma warning ( disable : 4239 )
-#pragma warning ( disable : 4315 )
-#pragma warning ( disable : 4355 )
-#pragma warning ( disable : 4512 )
-#pragma warning ( disable : 4706 )
-#pragma warning ( disable : 4815 )
+#pragma warning ( disable : 4100 )  //  unreferenced formal parameter
+#pragma warning ( disable : 4200 )  //  we allow zero sized arrays
+#pragma warning ( disable : 4201 )  //  we allow unnamed structs/unions
+#pragma warning ( 3 : 4244 )        //  do not hide data truncations
+#pragma warning ( disable : 4238 )  //  nonstandard extension used : class rvalue used as lvalue
+#pragma warning ( disable : 4239 )  //  nonstandard extension used : 'token' : conversion from 'type' to 'type'
+#pragma warning ( disable : 4315 )  // 'struct' : 'this' pointer for member 'struct::member' may not be aligned X as expected by the constructor
+#pragma warning ( disable : 4355 )  //  we allow the use of this in ctor-inits
+#pragma warning ( disable : 4512 )  //  assignment operator could not be generated
+#pragma warning ( disable : 4706 )  //  assignment within conditional expression
+#pragma warning ( disable : 4815 )  //  zero-sized array in stack object will have no elements (unless the object is an aggregate that has been aggregate initialized)
 #if defined( DEBUG ) && !defined( DBG )
 #pragma inline_depth( 0 )
-#else
+#else  //  !DEBUG || DBG
 #pragma inline_depth( 255 )
 #pragma inline_recursion( on )
-#endif
+#endif  //  DEBUG && !DBG
 
+//** OSAL *************************************************************
 
-#include "osu.hxx"
+#include "osu.hxx"              //  OS Abstraction Layer
 
-#include "collection.hxx"
+#include "collection.hxx"       //  Collection Classes
 
+//** JET API **********************************************************
 
-#include "jet.h"
-#include "_jet.hxx"
-#include "isamapi.hxx"
+#include "jet.h"                //  Public JET API definitions
+#include "_jet.hxx"             //  Private JET definitions
+#include "isamapi.hxx"          //  Direct ISAM APIs needed to support Jet API
 
+//** RISKY LATE HYPER-* STUFF *****************************************
 
+//  A set of late breaking changes to Fix DaTaCenter issues ...
 
+//  Hyper-Reorg - This allows ESE to re-organize a page during _some_ / most 
+//  dehydration operations.
+//#define FDTC_0_REORG_DEHYDRATE 1
 #define FDTC_0_REORG_DEHYDRATE_PLAN_B 1
 
 
+//** DAE ISAM *********************************************************
 
 #include "tcconst.hxx"
 #include "tls.hxx"
@@ -145,6 +160,7 @@ using namespace std;
 #include "dataserializer.hxx"
 #include "prl.hxx"
 
+//** UNIT TESTS *************************************************************
 
 #include "jettest.hxx"
 

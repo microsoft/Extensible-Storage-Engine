@@ -2,7 +2,9 @@
 // Licensed under the MIT License.
 #include "osunitstd.hxx"
 
+//  ================================================================
 class PATHTESTS : public UNITTEST
+//  ================================================================
 {
     private:
         static PATHTESTS s_instance;
@@ -35,7 +37,9 @@ bool PATHTESTS::FRunUnderESENT() const      { return true; }
 bool PATHTESTS::FRunUnderESE97() const      { return true; }
 
 
+//  ================================================================
 ERR PATHTESTS::ErrTest()
+//  ================================================================
 {
     JET_ERR         err                 = JET_errSuccess;
     JET_ERR         errBadPathExpected  = JET_errInvalidPath;
@@ -54,6 +58,9 @@ ERR PATHTESTS::ErrTest()
     }
 
 
+    //  This is very disturbing: for non-existing network paths, Vista returns ERROR_FILE_NOT_FOUND,
+    //  which gets translated into JET_errFileNotFound, while Win7 returns ERROR_PATH_NOT_FOUND,
+    //  which turns into JET_errInvalidPath.
 
     wprintf( L"\tTesting OS version ...\n" );
 
@@ -112,6 +119,7 @@ ERR PATHTESTS::ErrTest()
     OSTestCheck( NULL == pfapi );
 
 #ifndef MINIMAL_FUNCTIONALITY
+    // This seems to hang for a while randomly on the phone
     const WCHAR * wszTest12 = L"\\\\localhost\\shouldnotexistforreal\\hagadol\\harishon\\hachaham";
     OSTestCheckErr( pfsapi->ErrPathParse( wszTest12, wszFolder, wszT, wszT ) );
     OSTestCheckExpectedErr( errBadPathExpected, pfsapi->ErrFileOpen( wszTest12, IFileAPI::fmfNone, &pfapi ) );
@@ -145,7 +153,9 @@ HandleError:
     return err;
 }
 
+//  ================================================================
 class TestSimpleWszPathFileNameParseFunctionSuite : public UNITTEST
+//  ================================================================
 {
     private:
         static TestSimpleWszPathFileNameParseFunctionSuite s_instance;
@@ -176,7 +186,9 @@ bool TestSimpleWszPathFileNameParseFunctionSuite::FRunUnderESENT() const        
 bool TestSimpleWszPathFileNameParseFunctionSuite::FRunUnderESE97() const        { return true; }
 
 
+//  ================================================================
 ERR TestSimpleWszPathFileNameParseFunctionSuite::ErrTest()
+//  ================================================================
 {
     JET_ERR         err                 = JET_errSuccess;
     IFileSystemAPI * pfsapi = NULL;
@@ -206,11 +218,12 @@ ERR TestSimpleWszPathFileNameParseFunctionSuite::ErrTest()
     OSTestCheck( 0 == wcscmp( L"UNKNOWN.PTH", pfsapi->WszPathFileName( L"C:\\users\\TheHistorian\\FohBar.edb\\" ) ) );
     OnDebug( FNegTestUnset( fInvalidUsage ) );
 
+    //  Filename should be pulled from the other string and not allocated or some other temporary data.
     WCHAR * wszFumBar = L"C:\\users\\TheHistorian\\FumBar.edb";
     const WCHAR * wszFumBarFn = pfsapi->WszPathFileName( wszFumBar );
     OSTestCheck( ( (QWORD)wszFumBarFn > (QWORD)wszFumBar ) &&
                     ( (QWORD)wszFumBarFn < ( ((QWORD)wszFumBarFn) + ( wcslen(wszFumBar) * sizeof(WCHAR) ) ) ) );
-    OSTestCheck( 0 == wcscmp( L"FumBar.edb", wszFumBarFn ) );
+    OSTestCheck( 0 == wcscmp( L"FumBar.edb", wszFumBarFn ) ); // oh and should've worked!
 
 HandleError:
 

@@ -5,6 +5,7 @@
 
 enum IOREASONPRIMARY : BYTE
 {
+    // iorpNone publically defined
     iorpInvalid = 0,
 
     iorpOSUnitTest
@@ -64,6 +65,7 @@ ERR TestAllocIOReq::ErrTest()
 
     OSTestCheckErr( ErrOSFSCreate( &fsconfig, &pfsapi ) );
 
+    // create and pattern fill the file
     OSTestCheckErr( pfsapi->ErrFileCreate( L"TestAllocIOREQ1.tmp", IFileAPI::fmfOverwriteExisting, &pfapi ) );
     for ( cb = 0; cb < 262144; cb += sizeof(rgbTestPattern) )
     {
@@ -77,6 +79,7 @@ ERR TestAllocIOReq::ErrTest()
     perfTest = new COSFilePerfTest;
     pfapi->RegisterIFilePerfAPI( perfTest );
 
+    // First just try to alloc/free io-reqs a few times
     for ( i=0; i<100; i++ )
     {
         OSTestCheckErr( pfapi->ErrReserveIOREQ( 0, 4096, qosIODispatchImmediate, &pioreq ) );
@@ -86,6 +89,7 @@ ERR TestAllocIOReq::ErrTest()
 
     g_cIOsCompleted = 0;
 
+    // Actually use pre-reserved ioreqs for doing I/O
     for ( i=1; i<32; i++ )
     {
         OSTestCheckErr( pfapi->ErrReserveIOREQ( 4096*i, 4096, qosIODispatchImmediate | ((i == 1) ? 0 : qosIOOptimizeCombinable), &pioreq ) );
@@ -98,6 +102,7 @@ ERR TestAllocIOReq::ErrTest()
         OSTestCheckErr( pfapi->ErrIORead( *TraceContextScope( iorpOSUnitTest ), 4096*i, 4096, pbReadBuffer + i * 4096, qosIODispatchImmediate | ((i == 1) ? 0 : qosIOOptimizeCombinable), IOCompletion, NULL, NULL, pioreq ) );
         pioreq = NULL;
     }
+    // Make sure we are not able to read beyond the max read size when asking for combinable I/O
     OSTestCheck( pfapi->ErrReserveIOREQ( 4096*99, 4096, qosIODispatchImmediate | ((i == 1) ? 0 : qosIOOptimizeCombinable), &pioreq ) == errDiskTilt );
     OSTestCheckErr( pfapi->ErrIOIssue() );
 

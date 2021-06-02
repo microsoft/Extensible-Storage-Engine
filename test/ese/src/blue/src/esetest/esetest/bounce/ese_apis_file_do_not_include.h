@@ -1,5 +1,23 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
+// FORMAT:
+// lines beginning with a slash are comments. Comments MUST end with a semi-colon!
+// <type> <API>;
+// where type is one of:
+// l (loadlibrary, is a new API so it always has to be dynamically loaded)
+// n (neutral, no string parameters)
+// w (widen, has a string buffer that needs to be widened)
+// c (custom, needs to to be addressed manually)
+//
+// NOTE: widen and custom has a different format -- the subsequent lines give:
+// TYPE NAME ALLOCATEFUNCTION CLEANUPFUNCTION
+// e.g.
+// wchar_t* szInstanceName  EsetestWidenString  EsetestUnwidenString
+// wchar_t* szInstanceName  EsetestWidenString  EsetestCleanupString
+// JET_RSTMAP_W*    rgstmap,crstfilemap EsetestWidenJET_RSTMAP  EsetestUnwidenJET_RSTMAP
+// Note that if TYPE is a pointer, there may not be any spaces between the base type and the asterisk.
+// Specifying multiple args for NAME is OK, but there may not be a space.
+//;
 
 n
 JET_ERR JET_API JetInit( JET_INSTANCE *pinstance);
@@ -230,6 +248,10 @@ JET_ERR JET_API JetDetachDatabase2(
     JET_GRBIT       grbit);
 
 
+//workaround for 1507531
+//wchar_t*  szContainerName EsetestWidenString  EsetestCleanupWidenString
+//wchar_t*  szObjectName    EsetestWidenString  EsetestCleanupWidenString
+//;
 
 n
 JET_ERR JET_API JetGetObjectInfo(
@@ -342,6 +364,9 @@ JET_ERR JET_API JetRenameTable(
     const char *szName,
     const char *szNameNew );
 
+//workaround for 1507531
+//wchar_t*  szColumnName EsetestWidenString EsetestCleanupWidenString
+//;
 
 n
 JET_ERR JET_API JetGetTableColumnInfo(
@@ -352,6 +377,10 @@ JET_ERR JET_API JetGetTableColumnInfo(
     unsigned long   cbMax,
     unsigned long   InfoLevel );
 
+//workaround for 1507531
+//wchar_t*  szTableName EsetestWidenString  EsetestCleanupWidenString
+//wchar_t*  szColumnName EsetestWidenString EsetestCleanupWidenString
+//;
 
 n
 JET_ERR JET_API JetGetColumnInfo(
@@ -411,6 +440,9 @@ JET_ERR JET_API JetSetColumnDefaultValue(
     const unsigned long cbData,
     const JET_GRBIT     grbit );
 
+//workaround for 1507531
+//wchar_t*  szIndexName EsetestWidenString EsetestCleanupWidenString
+//;
 
 n
 JET_ERR JET_API JetGetTableIndexInfo(
@@ -421,6 +453,10 @@ JET_ERR JET_API JetGetTableIndexInfo(
     unsigned long   cbResult,
     unsigned long   InfoLevel );
 
+//workaround for 1507531
+//wchar_t*  szTableName EsetestWidenString EsetestCleanupWidenString
+//wchar_t*  szIndexName EsetestWidenString EsetestCleanupWidenString    
+//;
 
 n
 JET_ERR JET_API JetGetIndexInfo(
@@ -1056,7 +1092,20 @@ JET_ERR JET_API JetReadFileInstance(    JET_INSTANCE instance,
                                         unsigned long cb,
                                         unsigned long *pcb );
 
+//n
+// NYI
+//JET_ERR JET_API JetAsyncReadFileInstance( JET_INSTANCE instance,
+//                                          JET_HANDLE hfFile,
+//                                          void* pv,
+//                                          unsigned long cb,
+//                                          JET_OLP *pjolp );
 
+//n
+// NYI!
+//JET_ERR JET_API JetCheckAsyncReadFileInstance(    JET_INSTANCE instance,
+//                                              void *pv,
+//                                              int cb,
+//                                              unsigned long pgnoFirst );
 
 n
 JET_ERR JET_API JetCloseFile( JET_HANDLE hfFile );
@@ -1140,7 +1189,16 @@ JET_ERR JET_API JetExternalRestore2(
     JET_PFNSTATUS pfn );
 
 
+//w
+// deprecated
+//JET_ERR JET_API JetSnapshotStart(         JET_INSTANCE        instance,
+//                                      __in JET_PSTR       szDatabases,
+//                                      JET_GRBIT           grbit);
 
+//n
+// deprecated
+//JET_ERR JET_API JetSnapshotStop(      JET_INSTANCE        instance,
+//                                      JET_GRBIT           grbit);
 
 n
 JET_ERR JET_API JetRegisterCallback(

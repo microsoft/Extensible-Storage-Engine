@@ -5,9 +5,9 @@
 
 #ifndef WIN32_LEAN_AND_MEAN
 #define WIN32_LEAN_AND_MEAN
-#endif
+#endif  //  WIN32_LEAN_AND_MEAN
 
-#include <rpc.h>
+#include <rpc.h>    // required for GUID manipulation
 
 void OSDiagTrackInit( _In_z_ const WCHAR* wszInstDisplayName, _In_ QWORD qwLogSignHash, _In_ const ERR errInit );
 void OSDiagTrackEnforceFail( _In_z_ const WCHAR* wszContext, _In_z_ const CHAR* szMessage, _In_z_ const WCHAR* wszIssueSource );

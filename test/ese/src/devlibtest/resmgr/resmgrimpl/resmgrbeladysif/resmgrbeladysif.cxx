@@ -1,10 +1,12 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
+//  Header files.
 
 #include "resmgrbeladysif.hxx"
 
 
+//  class PageEvictionAlgorithmBeladys.
 
 PageEvictionAlgorithmBeladys::PageEvictionAlgorithmBeladys( const bool fBest ) : 
     IPageEvictionAlgorithmImplementation(),
@@ -81,6 +83,7 @@ ERR PageEvictionAlgorithmBeladys::ErrSuperColdPage( PAGE* const ppage, const BFT
         return m_lrutest.ErrSuperColdPage( ppage, bfsupercold );
     }
 
+    //  No such concept in Bélády's implementation.
 
     return JET_errSuccess;
 }
@@ -116,6 +119,7 @@ ERR PageEvictionAlgorithmBeladys::ErrEvictNextPage( void* const pv, const BFTRAC
         err = m_beladys.ErrEvictWorstNextResource( &qwCompactIFMPPGNO );
     }
 
+    //  Force success if there is nothing to evict.
 
     if ( err == CBeladysResourceUtilityManagerType::errNoCurrentResource )
     {
@@ -159,6 +163,7 @@ ERR PageEvictionAlgorithmBeladys::ErrGetNextPageToEvict( void* const pv, PageEvi
         err = m_beladys.ErrGetWorstNextResource( &qwCompactIFMPPGNO );
     }
 
+    //  Force success if there is nothing to evict.
 
     if ( err == CBeladysResourceUtilityManagerType::errNoCurrentResource )
     {

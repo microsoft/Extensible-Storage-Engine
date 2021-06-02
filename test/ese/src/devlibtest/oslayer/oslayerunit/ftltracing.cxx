@@ -19,6 +19,9 @@
     }                               \
     OSTestCall( ErrOSInit() );
 
+//
+//  FTLB for use in FTL Buffer Tests
+//
 
 CFastTraceLogBuffer g_ftlb;
 
@@ -37,10 +40,17 @@ ERR __stdcall ErrSignalFlushBuffer( __inout void * const pvFlushBufferContext, _
 }
 
 
+//  ================================================================
+//
+//  FTL Buffer Tests
+//
+//  ================================================================
 
 
+//  ================================================================
 CUnitTest( FTLBufferWrapFlushTestBasic, 0, "Tests for writing to / through the end of the buffer, and that the buffer is flushed." );
 ERR FTLBufferWrapFlushTestBasic::ErrTest()
+//  ================================================================
 {
     JET_ERR err = JET_errSuccess;
 
@@ -76,8 +86,10 @@ HandleError:
 }
 
 
+//  ================================================================
 CUnitTest( FTLBufferWrapFlushTestComprehensive, 0, "tests for writing to / through the end of the buffer, and that the buffer is flushed in several contexts and trace sizes." );
 ERR FTLBufferWrapFlushTestComprehensive::ErrTest()
+//  ================================================================
 {
     JET_ERR err = JET_errSuccess;
 
@@ -93,6 +105,7 @@ ERR FTLBufferWrapFlushTestComprehensive::ErrTest()
 
     qwTrace = 0x33432;
 
+    //  test we can stuff 584 7-byte traces in
 
     g_fFlushed = fFalse;
 
@@ -106,6 +119,7 @@ ERR FTLBufferWrapFlushTestComprehensive::ErrTest()
     OSTestCall( g_ftlb.ErrFTLBTrace( 1, ftltdescNone, (BYTE*)&qwTrace, 7, tickTrace ) );
     OSTestCheck( g_fFlushed == fTrue );
 
+    //  test term triggers a flush as well
 
     g_fFlushed = fFalse;
 
@@ -113,12 +127,13 @@ ERR FTLBufferWrapFlushTestComprehensive::ErrTest()
     g_ftlb.FTLBTerm();
     OSTestCheck( g_fFlushed == fTrue );
 
+    //  test we can stuff 682 6-byte traces in
 
     g_fFlushed = fFalse;
 
     OSTestCall( g_ftlb.ErrFTLBInit( ErrSignalFlushBuffer, NULL, tickTrace ) );
 
-    OSTestCheck( g_fFlushed == fFalse );
+    OSTestCheck( g_fFlushed == fFalse );    // should still be false
 
     for ( i = 0; i < ( g_ftlb.CbFTLBBuffer() - g_ftlb.CbFTLBHeader() ) / 8; i++ )
     {
@@ -129,6 +144,7 @@ ERR FTLBufferWrapFlushTestComprehensive::ErrTest()
     OSTestCall( g_ftlb.ErrFTLBTrace( 1, ftltdescNone, (BYTE*)&qwTrace, 7, tickTrace ) );
     OSTestCheck( g_fFlushed == fTrue );
     
+    //  test we can stuff 511 7-byte + tickCompressed (costs 1-byte) traces in
 
     g_ftlb.FTLBTerm();
     OSTestCall( g_ftlb.ErrFTLBInit( ErrSignalFlushBuffer, NULL, tickTrace ) );
@@ -161,8 +177,10 @@ HandleError:
 }
 
 
+//  ================================================================
 CUnitTest( FTLBufferValidationTestBasic, 0, "Tests for writing to the buffer, and validate the traces were saved." );
 ERR FTLBufferValidationTestBasic::ErrTest()
+//  ================================================================
 {
     JET_ERR err = JET_errSuccess;
 
@@ -195,8 +213,10 @@ HandleError:
     return err;
 }
 
+//  ================================================================
 CUnitTest( FTLBufferTraceTestComprehensive, 0, "Tests most writing various states to the buffer, no read validation is done." );
 ERR FTLBufferTraceTestComprehensive::ErrTest()
+//  ================================================================
 {
     JET_ERR err = JET_errSuccess;
 
@@ -252,8 +272,10 @@ HandleError:
     return err;
 }
 
+//  ================================================================
 CUnitTest( FTLBufferTraceTestBasic, 0, "Tests most basic writing to the buffer, no read validation is done." );
 ERR FTLBufferTraceTestBasic::ErrTest()
+//  ================================================================
 {
     JET_ERR err = JET_errSuccess;
 
@@ -271,22 +293,27 @@ ERR FTLBufferTraceTestBasic::ErrTest()
 
     OSTestCheck( g_ftlb.CbFTLBIUsed() == g_ftlb.CbFTLBHeader() );
 
+    //  test tracing one simple trace
 
     OSTestCall( g_ftlb.ErrFTLBTrace( 0x1, ftltdescFixed6, rgbTrace, 6, tickTraceStart ) );
-    OSTestCheck( g_ftlb.CbFTLBIUsed() == g_ftlb.CbFTLBHeader() + 7  );
+    OSTestCheck( g_ftlb.CbFTLBIUsed() == g_ftlb.CbFTLBHeader() + 7 /* 6 bytes of data, and 1 byte of header + traceid */ );
 
+    //  test tracing a second simple trace
 
     OSTestCall( g_ftlb.ErrFTLBTrace( 0x1, ftltdescFixed6, rgbTrace, 6, tickTraceStart ) );
     OSTestCheck( g_ftlb.CbFTLBIUsed() == g_ftlb.CbFTLBHeader() + 7 + 7 );
 
+    //  test tracing a delta-tick compressed trace
 
     OSTestCall( g_ftlb.ErrFTLBTrace( 0x1, ftltdescFixed6, rgbTrace, 6, tickTraceStart + 1 ) );
     OSTestCheck( g_ftlb.CbFTLBIUsed() == g_ftlb.CbFTLBHeader() + 7 + 7 + 8 );
 
+    //  test tracing a a raw-tick trace
 
     OSTestCall( g_ftlb.ErrFTLBTrace( 0x1, ftltdescFixed6, rgbTrace, 6, tickTraceStart + 256 ) );
     OSTestCheck( g_ftlb.CbFTLBIUsed() == g_ftlb.CbFTLBHeader() + 7 + 7 + 8 + 11 );
 
+    //  test tracing a smaller traces
 
     OSTestCall( g_ftlb.ErrFTLBTrace( 0x1, ftltdescFixed1, rgbTrace, 1, tickTraceStart + 1 ) );
     OSTestCheck( g_ftlb.CbFTLBIUsed() == g_ftlb.CbFTLBHeader() + 7 + 7 + 8 + 11 + 3 );
@@ -317,6 +344,11 @@ HandleError:
 }
 
 
+//  ================================================================
+//
+//  FTL Logging Tests
+//
+//  ================================================================
 
 enum IOREASONPRIMARY : BYTE { e = 1 };
 
@@ -333,8 +365,10 @@ class CFileSystemConfiguration : public CDefaultFileSystemConfiguration
 
 CFastTraceLog   g_ftl( NULL, &g_fsconfig );
 
+//  ================================================================
 CUnitTest( FTLTraceValidationTestBasic, 0, "Tests basic writing to the trace log file, and that we can read the same data." );
 ERR FTLTraceValidationTestBasic::ErrTest()
+//  ================================================================
 {
     JET_ERR err = JET_errSuccess;
 
@@ -345,6 +379,7 @@ ERR FTLTraceValidationTestBasic::ErrTest()
 
     IOREASON ior( e );
 
+    // not loving the order here, but ior initializer can't be skipped by goto!!!  why?  i have no idea.
     OSLayerFTLConfig();
     OSLayerStart();
 
@@ -400,13 +435,16 @@ HandleError:
 }
 
 
+//  ================================================================
 CUnitTest( FTLDumpHeader, 0, "Horrible abuse of unit test framework here: Dumps the FTL header of the file FtlUnitTrace.ftl." );
 ERR FTLDumpHeader::ErrTest()
+//  ================================================================
 {
     JET_ERR err = JET_errSuccess;
 
     IOREASON ior( e );
 
+    // not loving the order here, but ior initializer can't be skipped by goto!!!  why? i have no idea.
     OSLayerFTLConfig();
     OSLayerStart();
 
@@ -432,21 +470,84 @@ HandleError:
     return err;
 }
 
+/*  Pure performance test is not necessary
 
-
-CUnitTest( FTLTraceValidationTestLoop, 0, "Tests a variety of test arguments from a loop, and then tests the exact same traces are readable after." );
-ERR FTLTraceValidationTestLoop::ErrTest()
+//  ================================================================
+CUnitTest( FTLTracePerformanceTestLoopFast, 0, "Test just finds time to push 4M tests into trace file." );
+ERR FTLTracePerformanceTestLoopFast::ErrTest()
+//  ================================================================
 {
     JET_ERR err = JET_errSuccess;
 
     BYTE rgbTrace[9] = { 0xff, 0x82, 0x02, 0x34, 0x9a, 0xff, 0x11, 0xb3, 0x10 };
 
+    IOREASON ior( e );
+
+    // not loving the order here, but Trace1 initializer can't be skipped by goto!!!  why?  i have no idea.
+    OSLayerFTLConfig();
+    OSLayerStart();
+
+    OSTestCall( g_ftl.ErrFTLInitWriter( L".\\FtlUnitTrace.ftl", &ior, CFastTraceLog::ftlifReOpenExisting ) );
+
+    TICK tickTrace = g_ftl.TickFTLTickBaseCurrent();
+
+    const ULONG cIter = 4000000;
+    ULONG i;
+
+    for( i = 0; i < cIter; i++ )
+    {
+        FTLTID t = 1 + i * i % ftltidMax;
+        t = ( t == 15 ? 3 : t );
+        err = g_ftl.ErrFTLTrace( t, rgbTrace, 5 + i % 2, TickOSTimeCurrent() );
+        if ( err )
+        {
+            OSTestCall( err );
+        }
+    }
+
+    g_ftl.FTLTerm();
+
+HandleError:
+
+    wprintf(L"\tPerformed iter = %d / %d\n", i, cIter );
+
+    if ( err )
+    {
+        wprintf( L"\tDone(error).\n");
+    }
+    else
+    {
+        wprintf( L"\tDone(success).\n");
+    }
+
+    g_ftl.FTLTerm();
+
+    OSTerm();
+
+    return err;
+}
+
+*/
+
+//  ================================================================
+CUnitTest( FTLTraceValidationTestLoop, 0, "Tests a variety of test arguments from a loop, and then tests the exact same traces are readable after." );
+ERR FTLTraceValidationTestLoop::ErrTest()
+//  ================================================================
+{
+    JET_ERR err = JET_errSuccess;
+
+    BYTE rgbTrace[9] = { 0xff, 0x82, 0x02, 0x34, 0x9a, 0xff, 0x11, 0xb3, 0x10 };
+
+    //  Not 100% sure iterations it takes to hit a full set of possiblities, but I've run this up to 40M iters.  But this
+    //  takes too long / ~54 secs, so dropping it to sub-second time area.
+    //const ULONG cIter = 40000000;
     const ULONG     cIter = 400000;
     ULONG           i = (ULONG)-1;
     BOOL            fReading = fFalse;
 
     IOREASON ior( e );
 
+    // not loving the order here, but Trace1 initializer can't be skipped by goto!!!  why?  i have no idea.
     OSLayerFTLConfig();
     OSLayerStart();
 
@@ -479,6 +580,7 @@ ERR FTLTraceValidationTestLoop::ErrTest()
     for ( i = 0; i < cIter; i++ )
     {
         FTLTID t = 1 + i * i % ftltidMax;
+        // 5 isn't allowed, BUT we didn't assert on it?  Ahh, it gets by for now.
         t = ( t == 15 ? 3 : t );
         OSTestCall( pftlr->ErrFTLGetNextTrace( &ftltrace ) );
         OSTestCall( err );
@@ -509,8 +611,10 @@ HandleError:
 }
 
 
+//  ================================================================
 CUnitTest( FTLTraceValidationTestHeader, 0, "Tests basic header properties of the trace log file, and that we can read the same header out." );
 ERR FTLTraceValidationTestHeader::ErrTest()
+//  ================================================================
 {
     JET_ERR err = JET_errSuccess;
 
@@ -523,6 +627,7 @@ ERR FTLTraceValidationTestHeader::ErrTest()
 
     IOREASON ior( e );
 
+    // not loving the order here, but Trace1 initializer can't be skipped by goto!!!  why?  i have no idea.
     OSLayerFTLConfig();
     OSLayerStart();
 
@@ -547,8 +652,10 @@ HandleError:
 
 #ifdef DISABLE_FOR_A_MOMENT
 
+//  ================================================================
 CUnitTest( FTLTraceValidationTestFailedInit, 0, "Tests that if we get a bad buffer size, FTL will fail to init, AND most importantly that we can term without hanging." );
 ERR FTLTraceValidationTestFailedInit::ErrTest()
+//  ================================================================
 {
     JET_ERR err = JET_errSuccess;
 
@@ -558,8 +665,10 @@ ERR FTLTraceValidationTestFailedInit::ErrTest()
 
     err = g_ftl.ErrFTLInitWriter( L".\\FtlUnitTrace.ftl", &ior, CFastTraceLog::ftlifReOpenExisting );
     OSTestCheck( err == JET_errInvalidBufferSize );
-    err = JET_errSuccess;
+    err = JET_errSuccess; // don't want to return an error
 
+    //  in addition to the expected error, we are testing to see FTLTerm below can term after such
+    //  a failure
 
 HandleError:
 
@@ -583,8 +692,10 @@ HandleError:
 
 CFastTraceLog   g_ftlDenied( NULL );
 
+//  ================================================================
 CUnitTest( FTLTraceValidationTestFailedInitDisabledTrace, 0, "Tests that if we fail to open the file, we can then disable the FTL tracer and that trace calls silently succeed." );
 ERR FTLTraceValidationTestFailedInitDisabledTrace::ErrTest()
+//  ================================================================
 {
     JET_ERR err = JET_errSuccess;
 
@@ -596,11 +707,13 @@ ERR FTLTraceValidationTestFailedInitDisabledTrace::ErrTest()
 
     OSTestCall( g_ftl.ErrFTLInitWriter( L".\\FtlUnitTrace.ftl", &ior, CFastTraceLog::ftlifReOpenExisting ) );
 
+    // note g_ftlDenied <-- diff than g_ftl!  But with same, file ... should fail w/ JET_errFileAccessDenied 
     err = g_ftlDenied.ErrFTLInitWriter( L".\\FtlUnitTrace.ftl", &ior, CFastTraceLog::ftlifReOpenExisting );
     OSTestCheck( err == JET_errFileAccessDenied );
 
     g_ftlDenied.SetFTLDisabled();
 
+    //  these will silently succeed while FTL is disabled.
     OSTestCall( g_ftlDenied.ErrFTLTrace( 2, rgbTrace, sizeof(rgbTrace), g_ftl.TickFTLTickBaseCurrent() ) );
     OSTestCall( g_ftlDenied.ErrFTLTrace( 2, rgbTrace, sizeof(rgbTrace), g_ftl.TickFTLTickBaseCurrent() ) );
 

@@ -15,8 +15,14 @@ namespace Internal
         {
             namespace Interop
             {
+                /// <summary>
+                /// Journal Position
+                /// </summary>
                 public enum class JournalPosition : Int64
                 {
+                    /// <summary>
+                    /// An invalid JournalPosition.
+                    /// </summary>
                     Invalid = Int64::MaxValue,
                 };
             }

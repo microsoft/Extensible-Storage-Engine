@@ -21,6 +21,9 @@ void OSDiagPostterm()
 {
 }
 
+// ---------------------------------------------------------------------------
+// Implementation of general diagnostics
+// ---------------------------------------------------------------------------
 
 void OSDiagTrackInit( _In_z_ const WCHAR* wszInstDisplayName, _In_ const QWORD qwLogSignHash, _In_ const ERR errTracked )
 {
@@ -55,6 +58,8 @@ void OSDiagTrackFileSystemError( _In_ ERR err, _In_ DWORD errorSystem )
 
 void OSDiagTrackJetApiError( _In_z_ const WCHAR* wszInstDisplayName, _In_ INT op, _In_ ERR err )
 {
+    // Too expensive.
+    //OSTrace( JET_tracetagDiagnostics, OSFormat( "JetApiErr: %d, %d\n", op, err ) );
 }
 
 void OSDiagTrackRepair( _In_ ERR err )

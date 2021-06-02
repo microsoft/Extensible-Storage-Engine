@@ -7,6 +7,8 @@
 
 #include "PageSizeClean.hxx"
 
+// Tracing.
+//
 
 LOCAL ERR ErrSHKIShrinkEofTracingBegin( _In_ IFileSystemAPI * pfsapi, _In_ JET_PCWSTR wszDatabase, _Out_ CPRINTF** ppcprintfShrinkTraceRaw )
 {
@@ -31,6 +33,8 @@ VOID SHKIShrinkEofTracingEnd( _Out_ CPRINTF** ppcprintfShrinkTraceRaw )
 }
 
 
+// Top-level shrink functions.
+//
 
 LOCAL ERR ErrSHKIMoveLastExtent(
     _In_ PIB* ppib,
@@ -47,6 +51,34 @@ LOCAL ERR ErrSHKIMoveLastExtent(
     _Out_ PGNO* const pgnoFirstFromLastExtentMoved,
     _Out_ SpaceCategoryFlags* const pspcatfLastProcessed )
 {
+    // This is used in the OBJID lookup logic as follows:
+    //  - cptNormal: regular categorization pass. The move pass starts in this mode.
+    //  - cptIndeterminateLookup: turned on when we find a page which can't be categorized with full
+    //    categorization on (i.e., an spcatfIndeterminate page). The goal is to look for a valid hint
+    //    so that we can go back and re-evaluate indeterminate pages and potentially be able to categorize
+    //    them definitively. It gets turned off and we switch to cptIndeterminateRetry if we can find a valid
+    //    OBJID hint.
+    //  - cptIndeterminateRetry: turned on when a valid OBJID hint has been found and we are going back to re-categorize
+    //    pages. It gets turned off and we return to cptNormal once we reach the page at which we went back and started
+    //    the retry pass.
+    //
+    //  This might sound like an optimization, but it is required to ensure that once we are done with this loop,
+    //  ErrSPShrinkTruncateLastExtent() will then be able to do its job in finding a contiguous range of available
+    //  or shelved extents matching the owned extent we're trying to remove and truncate.
+    //
+    //  Example: the extent we're trying to truncate is 100-110 and pgno 100 belongs to OBJID 43, but it's a blank page.
+    //  We first categorize pgno 100 as spcatfIndeterminate, add it to the shelved page list and move on. Then we
+    //  successfully categorize pgnos 101-110 as belonging to OBJID 43 and moved them all out of the way. ErrSPShrinkTruncateLastExtent()
+    //  won't be able to truncate the extent because it wasn't migrated up to the DB root (pgno 100 is pinning it).
+    //  With the lookup/retry solution described here, we would have gone back and categorized pgno 100 under OBJID 43.
+    //
+    //  Therefore, we predict that an spcatfIndeterminate page will be always either 1) leaked from the root, in
+    //  which case the retry will fail and adding it to the shelved list will allow it to be part of the range to
+    //  be truncated or 2) be available space in a given OBJID. In case 2), if the retry succeeds, the page will
+    //  then be 2.a) categorized and move appropriately; if it fails it will be 2.b) part of a chain of
+    //  spcatfIndeterminate pages which will match the entire space owned by the OBJID and will me sparsified at the
+    //  root level.
+    //
     enum CatPassType
     {
         cptNormal,
@@ -79,12 +111,16 @@ LOCAL ERR ErrSHKIMoveLastExtent(
     *psdr = sdrNone;
     *pgnoFirstFromLastExtentMoved = pgnoNull;
 
+    // Get last owned extent info.
     Call( ErrSPGetLastExtent( ppib, ifmp, &eiLastOE ) );
     *pgnoFirstFromLastExtentMoved = eiLastOE.PgnoFirst();
 
+    // Move pages one by one.
+    //
 
     PGNO pgnoCurrent = eiLastOE.PgnoFirst();
 
+    // The first extent is never supposed to be moved, it's the bootstrap of the database.
     if ( pgnoCurrent == pgnoSystemRoot )
     {
         *psdr = sdrNoLowAvailSpace;
@@ -93,9 +129,11 @@ LOCAL ERR ErrSHKIMoveLastExtent(
         goto HandleError;
     }
 
+    // Set shrink threshold to signal SPACE to not allocate space in the region undergoing shrink.
     pfmp->SetPgnoShrinkTarget( pgnoCurrent - 1 );
     Assert( pgnoCurrent != pgnoNull );
 
+    // Just in case, but we don't expect version store and DB tasks to be running at this point.
     Call( PverFromPpib( ppib )->ErrVERRCEClean( ifmp ) );
     if ( err != JET_errSuccess )
     {
@@ -128,6 +166,8 @@ LOCAL ERR ErrSHKIMoveLastExtent(
                 fDataMove = fFalse;
             }
 
+            // Resume to normal pass type if we're past the proper page or if
+            // the original hint for indeterminate pages has changed.
             if ( ( cpt == cptIndeterminateRetry ) &&
                  ( ( pgnoCurrent >= pgnoPostIndeterminateRetry ) || ( objidHint != objidIndeterminateHint ) ) )
             {
@@ -139,9 +179,11 @@ LOCAL ERR ErrSHKIMoveLastExtent(
                 objidIndeterminateHint = objidNil;
             }
 
-            if ( FCATBaseSystemFDP( pgnoCurrent ) ||
-                 ( pgnoCurrent == ( pgnoSystemRoot + 1 ) ) ||
-                 ( pgnoCurrent == ( pgnoSystemRoot + 2 ) ) )
+            // Some pages cannot be moved by definition.
+            // They are part of the first extent of the database, so we should have bailed earlier.
+            if ( FCATBaseSystemFDP( pgnoCurrent ) ||            // Any base system page.
+                 ( pgnoCurrent == ( pgnoSystemRoot + 1 ) ) ||   // Root OE.
+                 ( pgnoCurrent == ( pgnoSystemRoot + 2 ) ) )    // Toot AE.
             {
                 *psdr = sdrPageNotMovable;
                 goto HandleError;
@@ -156,6 +198,7 @@ LOCAL ERR ErrSHKIMoveLastExtent(
                 fMovedPage = fFalse;
             }
 
+            // We've got signaled to stop.
             if ( !pfmp->FShrinkIsActive() )
             {
                 Error( ErrERRCheck( errSPNoSpaceBelowShrinkTarget ) );
@@ -165,12 +208,17 @@ LOCAL ERR ErrSHKIMoveLastExtent(
             {
                 Assert( !fMovedPage );
 
+                // ErrLGSetExternalHeader, called in ErrNDSetExternalHeader, asks to be under
+                // a transaction. However, note that space operations which are about to be performed
+                // by this function are not versioned and as such do not really rollback upon
+                // transaction rollback.
                 Call( ErrDIRBeginTransaction( ppib, 53898, NO_GRBIT ) );
                 fInTransaction = fTrue;
             }
 
             Assert( fInTransaction && !fMovedPage );
 
+            // Check timeout expiration.
             if ( ( ( dtickQuota >= 0 ) && ( CmsecHRTFromHrtStart( hrtStarted ) >= (QWORD)dtickQuota ) ) ||
                  ( pgnoCurrent == UlConfigOverrideInjection( 43982, pgnoNull ) ) )
             {
@@ -178,6 +226,7 @@ LOCAL ERR ErrSHKIMoveLastExtent(
                 goto HandleError;
             }
 
+            // Preread pages if we crossed the preread waypoint.
             if ( ( pgnoCurrent >= pgnoPrereadWaypoint ) && ( pgnoPrereadNext <= pgnoLast ) )
             {
                 const CPG cpgPrereadCurrent = LFunctionalMin( cpgPrereadMax, (CPG)( pgnoLast - pgnoPrereadNext + 1 ) );
@@ -187,6 +236,7 @@ LOCAL ERR ErrSHKIMoveLastExtent(
                 pgnoPrereadWaypoint = pgnoPrereadNext - ( cpgPrereadCurrent / 2 );
             }
 
+            // Categorize page.
             fPageCategorization = fTrue;
             hrtPageCategorizationStart = HrtHRTCount();
             OBJID objidCurrent = objidNil;
@@ -200,11 +250,12 @@ LOCAL ERR ErrSHKIMoveLastExtent(
                     &objidCurrent,
                     &spcatfCurrent,
                     &pSpCatCtx ) );
-            Assert( !FSPSpaceCatUnknown( spcatfCurrent ) );
-            Assert( !FSPSpaceCatNotOwnedEof( spcatfCurrent ) );
+            Assert( !FSPSpaceCatUnknown( spcatfCurrent ) ); // We should not get this here.
+            Assert( !FSPSpaceCatNotOwnedEof( spcatfCurrent ) ); // We should not get this here because we're only processing known-owned pages.
             *pdhrtPageCategorization += DhrtHRTElapsedFromHrtStart( hrtPageCategorizationStart );
             fPageCategorization = fFalse;
 
+            // It is not possible to handle these. The database is now effectively unshrinkable.
             if ( !FSPValidSpaceCategoryFlags( spcatfCurrent )   ||
                     FSPSpaceCatInconsistent( spcatfCurrent )    ||
                     FSPSpaceCatNotOwned( spcatfCurrent ) )
@@ -214,12 +265,14 @@ LOCAL ERR ErrSHKIMoveLastExtent(
                 goto HandleError;
             }
 
+            // Check if we are in indeterminate page lookup mode and finally found a good hint.
             if ( ( cpt == cptIndeterminateLookup ) && ( objidCurrent != objidNil ) )
             {
                 Assert( pgnoIndeterminateFirst != pgnoNull );
                 Assert( pgnoIndeterminateFirst < pgnoCurrent );
                 Assert( pgnoPostIndeterminateRetry == pgnoNull );
 
+                // Transition to retry mode and go back to the previously indeterminate page.
                 cpt = cptIndeterminateRetry;
                 pgnoPostIndeterminateRetry = pgnoCurrent;
                 pgnoCurrent = pgnoIndeterminateFirst;
@@ -230,6 +283,7 @@ LOCAL ERR ErrSHKIMoveLastExtent(
                 continue;
             }
 
+            // Make sure we're not spinning in an infinite loop.
             if ( ( *ppgnoLastProcessed == pgnoCurrent ) &&
                     ( *pspcatfLastProcessed == spcatfCurrent ) &&
                     ( objidLast == objidCurrent ) )
@@ -247,10 +301,14 @@ LOCAL ERR ErrSHKIMoveLastExtent(
             fDataMove = fTrue;
             hrtDataMoveStart = HrtHRTCount();
 
+            // Indeterminate and leaked pages share some common handling.
             if ( FSPSpaceCatIndeterminate( spcatfCurrent ) || FSPSpaceCatLeaked( spcatfCurrent ) )
             {
+                // Ineterminate-page pre-checks.
                 if ( FSPSpaceCatIndeterminate( spcatfCurrent ) )
                 {
+                    // If the page could not be categorized, try to find a better hint or add it to the
+                    // shelved page list and move on.
                     if ( cpt == cptNormal )
                     {
                         Assert( pgnoIndeterminateFirst == pgnoNull );
@@ -277,6 +335,7 @@ LOCAL ERR ErrSHKIMoveLastExtent(
                     Assert( pgnoPostIndeterminateRetry != pgnoNull );
                     Assert( pgnoIndeterminateFirst < pgnoPostIndeterminateRetry );
 
+                    // We should never get an indeterminate page if full categorization is on.
                     if ( pfmp->FRunShrinkDatabaseFullCatOnAttach() )
                     {
                         AssertTrack( fFalse, "ShrinkMoveUnexpectedIndeterminatePage" );
@@ -284,6 +343,9 @@ LOCAL ERR ErrSHKIMoveLastExtent(
                         goto HandleError;
                     }
 
+                    // Check if indeterminate-page handling is enabled and supported.
+                    // Note that FMP::FEfvSupported() below checks for both DB and log versions, but JET_efvShelvedPages2
+                    // only upgrades the DB version so technically, we wouldn't need to check for the log version.
                     if ( pfmp->FShrinkDatabaseDontTruncateIndeterminatePagesOnAttach() ||
                          !pfmp->FEfvSupported( JET_efvShelvedPages2 ) )
                     {
@@ -292,8 +354,10 @@ LOCAL ERR ErrSHKIMoveLastExtent(
                     }
                 }
 
+                // Leaked-page pre-checks.
                 if ( FSPSpaceCatLeaked( spcatfCurrent ) )
                 {
+                    // We should never see a page leaked at the root level if full categorization is off.
                     if ( !pfmp->FRunShrinkDatabaseFullCatOnAttach() && ( PgnoFDP( pSpCatCtx->pfucb ) == pgnoSystemRoot ) )
                     {
                         AssertTrack( fFalse, "ShrinkMoveUnexpectedRootLeakedPage" );
@@ -301,6 +365,7 @@ LOCAL ERR ErrSHKIMoveLastExtent(
                         goto HandleError;
                     }
 
+                    // Check if leaked-page handling is enabled.
                     if ( pfmp->FShrinkDatabaseDontTruncateLeakedPagesOnAttach() )
                     {
                         *psdr = sdrPageNotMovable;
@@ -310,6 +375,8 @@ LOCAL ERR ErrSHKIMoveLastExtent(
 
                 CPAGE cpage;
 
+                // From here on, we do some defense-in-depth common checks to make sure we aren't truncating
+                // pages which might potentially contain useful data.
 
                 Call( ErrBFRDWLatchPage(
                         &bfl,
@@ -341,10 +408,14 @@ LOCAL ERR ErrSHKIMoveLastExtent(
                 const ULONG fPageFlags = cpage.FFlags();
                 const DBTIME dbtimeOnPage = cpage.Dbtime();
 
+                // Unlatch page, as we may need to search the catalog below and the latches might collide,
+                // though it is not expected, since we are looking at a leaked or indeterminate page, so
+                // it shouldn't be latched as part of consulting the catalog.
                 cpage.UnloadPage();
                 BFRDWUnlatch( &bfl );
                 fPageLatched = fFalse;
 
+                // Make sure the page does not have any useful data.
                 if ( ( errPageStatus != JET_errPageNotInitialized ) &&
                      ( ( dbtimeOnPage != dbtimeShrunk ) || ( clines != 0 ) ) &&
                      ( !fPreInitPage || ( clines > 0 ) ) &&
@@ -353,6 +424,7 @@ LOCAL ERR ErrSHKIMoveLastExtent(
                     const OBJID objidPage = objidFDP;
                     Assert( objidPage != objidNil );
 
+                    // Check if the object exists.
                     BOOL fObjidExists = ( objidPage == objidSystemRoot );
                     if ( !fObjidExists )
                     {
@@ -364,6 +436,9 @@ LOCAL ERR ErrSHKIMoveLastExtent(
 
                     if ( fObjidExists || ( objidPage == objidNil ) )
                     {
+                        // We are rejecting this page because it might potentially contain data and it belongs
+                        // to a valid object or it had objidNil stamped, which is unexpected, but we'll still
+                        // fail for the sake of safety.
                         AssertTrack( fFalse, OSFormat( "%hs:0x%I32x",
                                                        FSPSpaceCatLeaked( spcatfCurrent ) ?
                                                            "ShrinkMoveInvalidLeakedPage" :
@@ -374,6 +449,13 @@ LOCAL ERR ErrSHKIMoveLastExtent(
                     }
                 }
 
+                // Emit divergence check so replicas will stop redo if the check fails, avoiding
+                // propagation of a bad truncation.
+                // For testing purposes, we would like to enable this even if JET_paramEnableExternalAutoHealing
+                // is not enabled (so that crash/recovery would check for divergences). However, unlogged index
+                // creation produces pages in the database for which updates aren't logged, so we may end up with
+                // leaked pages which have a dbtime that is greater than the running dbtime of the database if we
+                // crashing during that index creation operation and end up leaking that space.
                 if ( pfmp->FLogOn() && BoolParam( pfmp->Pinst(), JET_paramEnableExternalAutoHealing ) )
                 {
                     if ( !pfmp->FEfvSupported( JET_efvScanCheck2 ) )
@@ -384,10 +466,20 @@ LOCAL ERR ErrSHKIMoveLastExtent(
 
                     if ( !fRolledLogOnScanCheck )
                     {
+                        // Force a log rollover. We do this because we need to make sure that the ScanCheck log
+                        // record we are about to issue is outside of the required range in a replicated system
+                        // that runs with a non-zero LLR. If the ScanCheck is in the initial required range of
+                        // a passive copy of a replicated system, we may skip certain checks due to it containing
+                        // future data, therefore rendering useless issuing the ScanCheck in the first place. Note
+                        // that we wouldn't have this problem if the required range and waypoint had full LGPOS
+                        // precision, instead of log generation only.
+                        // We could have limited this to LLR being set, but we're always doing it to avoid multiple
+                        // modalities.
                         Call( ErrLGForceLogRollover( pfmp->Pinst(), __FUNCTION__ ) );
                         fRolledLogOnScanCheck = fTrue;
                     }
 
+                    // Latch the page again.
                     Call( ErrBFRDWLatchPage(
                             &bfl,
                             ifmp,
@@ -418,6 +510,7 @@ LOCAL ERR ErrSHKIMoveLastExtent(
                     const ULONG fPageFlagsRelatch = cpage.FFlags();
                     const DBTIME dbtimeOnPageRelatch = cpage.Dbtime();
 
+                    // Defense-in-depth only. We don't expect the page to change from underneath us.
                     if ( ( !!fPreInitPage != !!fPreInitPageRelatch ) ||
                          ( !!fEmptyPage != !!fEmptyPageRelatch ) ||
                          ( clines != clinesRelatch ) ||
@@ -432,11 +525,13 @@ LOCAL ERR ErrSHKIMoveLastExtent(
 
                     Call( ErrDBMEmitDivergenceCheck( ifmp, pgnoCurrent, scsDbShrink, &cpage ) );
 
+                    // Unlatch.
                     cpage.UnloadPage();
                     BFRDWUnlatch( &bfl );
                     fPageLatched = fFalse;
                 }
 
+                // We'll archive the data if requested.
                 if ( BoolParam( pfmp->Pinst(), JET_paramFlight_EnableShrinkArchiving ) )
                 {
                     tcScope->iorReason.SetIorp( iorpDatabaseShrink );
@@ -444,8 +539,10 @@ LOCAL ERR ErrSHKIMoveLastExtent(
                     tcScope->iorReason.SetIorp( iorpNone );
                 }
 
+                // Leaked-page handling.
                 if ( FSPSpaceCatLeaked( spcatfCurrent ) )
                 {
+                    // Release page to its owner and re-evaluate the page.
                     Call( ErrSPCaptureSnapshot( pSpCatCtx->pfucb, pgnoCurrent, 1 ) );
                     Call( ErrSPFreeExt( pSpCatCtx->pfucb, pgnoCurrent, 1, "PageUnleak" ) );
                     cpgUnleaked++;
@@ -453,12 +550,16 @@ LOCAL ERR ErrSHKIMoveLastExtent(
                     continue;
                 }
 
+                // Indeterminate-page handling.
                 if ( FSPSpaceCatIndeterminate( spcatfCurrent ) )
                 {
+                    // Add it to the shelved page list and move on.
                     Call( ErrSPShelvePage( ppib, ifmp, pgnoCurrent ) );
 
                    cpgShelved++;
 
+                    // It should be impossible to change a tree's layout such that the process of shelving
+                    // a page ends up consuming or changing the page itself. Still, re-check it.
                     Assert( pSpCatCtx == NULL );
                     Call( ErrSPGetSpaceCategory(
                             ppib,
@@ -482,12 +583,13 @@ LOCAL ERR ErrSHKIMoveLastExtent(
                     continue;
                 }
                 Assert( fFalse );
-            }
+            }  // end if ( FSPSpaceCatIndeterminate( spcatfCurrent ) || FSPSpaceCatLeaked( spcatfCurrent ) )
 
+            // Handle split buffer pages (free split buffer and allocate a new one below the current shrink watermark).
             if ( FSPSpaceCatSplitBuffer( spcatfCurrent ) )
             {
-                Assert( FSPSpaceCatAvailable( spcatfCurrent ) );
-                Assert( FSPSpaceCatAnySpaceTree( spcatfCurrent ) );
+                Assert( FSPSpaceCatAvailable( spcatfCurrent ) ); // Split buffer pages are available by definition.
+                Assert( FSPSpaceCatAnySpaceTree( spcatfCurrent ) ); // Split buffer pages are space pages by definition.
 
                 Call( ErrSPReplaceSPBuf( pSpCatCtx->pfucb, pSpCatCtx->pfucbParent, pgnoCurrent ) );
                 fMovedPage = fTrue;
@@ -495,16 +597,21 @@ LOCAL ERR ErrSHKIMoveLastExtent(
                 continue;
             }
 
+            // Handle small-space format: convert to large space format first, let the pages be moved,
+            // by the next iterations as non-small-space pages.
             if ( FSPSpaceCatSmallSpace( spcatfCurrent ) )
             {
                 if ( !FSPSpaceCatRoot( spcatfCurrent ) )
                 {
+                    // We should have found the root first as small space trees do not cross extents.
                     FireWall( OSFormat( "ShrinkMoveSmallSpNonRootFirst:0x%I32x", spcatfCurrent ) );
                 }
 
                 Assert( !FSPSpaceCatAnySpaceTree( spcatfCurrent ) );
                 Expected( PgnoFDP( pSpCatCtx->pfucb ) == pgnoCurrent );
 
+                // Avoid bursting to large space if this is a fairly small database, since
+                // large space trees are more expensive to populate.
                 if ( pgnoLast < (PGNO)( 4 * UlParam( pfmp->Pinst(), JET_paramDbExtensionSize ) ) )
                 {
                     *psdr = sdrNoSmallSpaceBurst;
@@ -513,15 +620,27 @@ LOCAL ERR ErrSHKIMoveLastExtent(
 
                 Call( ErrSPBurstSpaceTrees( pSpCatCtx->pfucb ) );
 
+                // Next iteration will see the same page as large space and move it appropriately.
                 fMovedPage = fTrue;
                 continue;
             }
 
+            // If the page is available, move on to the next page:
+            //   o If it's available to the DB root, it is part of an available extent which is ready to be shrunk.
+            //   o If it's available to an object, it is not ready to be shrunk yet, but in most cases no action is
+            //     required because it will eventually be released to the root once neighboring pages are also made
+            //     available and a full extent is then released. However, there two known cases in which we need to
+            //     give it a little push:
+            //       1- We crashed in-between releasing space which would make up for a fully available extent to
+            //          a table and releasing that full extent up to its parent.
+            //       2- We currently do not coalesce space released from different space pools even if they turn out
+            //          to make up a full available extent.
             if ( FSPSpaceCatAvailable( spcatfCurrent ) )
             {
-                if ( FSPSpaceCatSplitBuffer( spcatfCurrent ) ||
-                        FSPSpaceCatAnySpaceTree( spcatfCurrent ) ||
-                        FSPSpaceCatSmallSpace( spcatfCurrent ) )
+                // We should have found the root first, as small space trees do not cross extents.
+                if ( FSPSpaceCatSplitBuffer( spcatfCurrent ) ||     // We should have handled it above.
+                        FSPSpaceCatAnySpaceTree( spcatfCurrent ) || // We should have handled it above (split buffers).
+                        FSPSpaceCatSmallSpace( spcatfCurrent ) )    // We should have moved/converted whole small space trees starting from their roots first.
                 {
                     AssertTrack( fFalse, OSFormat( "ShrinkMoveUnexpectedAvail:0x%I32x", spcatfCurrent ) );
                     *psdr = sdrUnexpected;
@@ -530,6 +649,7 @@ LOCAL ERR ErrSHKIMoveLastExtent(
 
                 BOOL fMoveToNextPage = fTrue;
 
+                // Fix up any pending coalescing at the non-root level.
                 if ( objidCurrent != objidSystemRoot )
                 {
                     Assert( objidCurrent != objidNil );
@@ -550,22 +670,27 @@ LOCAL ERR ErrSHKIMoveLastExtent(
                 continue;
             }
 
+            // Roots.
             if ( FSPSpaceCatRoot( spcatfCurrent ) )
             {
                 Assert( !FSPSpaceCatSmallSpace( spcatfCurrent ) );
 
                 if ( !pfmp->FShrinkDatabaseDontMoveRootsOnAttach() && pfmp->FEfvSupported( JET_efvRootPageMove ) )
                 {
+                    // Note that we currently only support moving all roots of a tree (root itself, OE and AE root)
+                    // at the same time. So depending on what kind of root we are processing, we need to pass the
+                    // actual root of the tree.
                     const PGNO pgnoFDP = pSpCatCtx->pfucb->u.pfcb->PgnoFDP();
                     Assert( !FSPSpaceCatAnySpaceTree( spcatfCurrent ) == ( pgnoFDP == pgnoCurrent ) );
 
+                    // We have to close all cursors before moving a root.
                     SPFreeSpaceCatCtx( &pSpCatCtx );
 
                     Call( ErrSHKRootPageMove( ppib, ifmp, pgnoFDP ) );
                     fMovedPage = fTrue;
                     (*pcprintfShrinkTraceRaw)( "ShrinkMoveRoot[%I32u:%I32u:%I32u:%d]\r\n", objidCurrent, pgnoCurrent, pgnoFDP, (int)spcatfCurrent );
 
-                    cpgMoved += 3;
+                    cpgMoved += 3;  // FDP + OE + AE.
                     continue;
                 }
                 else
@@ -575,6 +700,7 @@ LOCAL ERR ErrSHKIMoveLastExtent(
                 }
             }
 
+            // Strictly internal or leaf pages.
             if ( FSPSpaceCatStrictlyInternal( spcatfCurrent ) || FSPSpaceCatStrictlyLeaf( spcatfCurrent ) )
             {
                 Assert( !FSPSpaceCatSmallSpace( spcatfCurrent ) );
@@ -589,6 +715,9 @@ LOCAL ERR ErrSHKIMoveLastExtent(
                         fSPNoFlags,
                         NULL );
 
+                // If this is a space tree, we may need to retry because reserving split buffers
+                // for the move might have changed the page we're trying to move itself, which
+                // will surface as JET_errRecordNotFound when we try to latch the move path.
                 if ( fSpacePage && ( err == JET_errRecordNotFound ) )
                 {
                     *ppgnoLastProcessed = pgnoNull;
@@ -598,6 +727,10 @@ LOCAL ERR ErrSHKIMoveLastExtent(
                     continue;
                 }
 
+                // We should never get this here because we passed a pgnoSource in and we have
+                // exclusive access to the tree, so we must have been able to find the page
+                // with the passed in bookmark in the expected conditions (i.e., strictly internal
+                // or leaf).
                 AssertTrack( ( err != wrnBTShallowTree ) && ( err != JET_errRecordNotFound ),
                     OSFormat( ( err == wrnBTShallowTree ) ?
                         "ShrinkMoveUnexpectedShallowBt:0x%I32x" : "ShrinkMoveUnexpectedNotFound:0x%I32x",
@@ -610,10 +743,13 @@ LOCAL ERR ErrSHKIMoveLastExtent(
                 continue;
             }
 
+            // WARNING: do not add anything at the end of this block! All individual cases are supposed to
+            // be handled in their respective blocks and the flow continues from there to the next iteration
+            // of the loop.
             AssertTrack( fFalse, OSFormat( "ShrinkMoveUnhandled:0x%I32x", spcatfCurrent ) );
             *psdr = sdrUnexpected;
             goto HandleError;
-        }
+        }  // end while ( pgnoCurrent <= pgnoLast )
 
         if ( fDataMove )
         {
@@ -621,6 +757,7 @@ LOCAL ERR ErrSHKIMoveLastExtent(
             fDataMove = fFalse;
         }
 
+        // If we made all the way with a lookup pending, go back and re-evaluate.
         if ( cpt == cptIndeterminateLookup )
         {
             Assert( pgnoIndeterminateFirst != pgnoNull );
@@ -641,7 +778,7 @@ LOCAL ERR ErrSHKIMoveLastExtent(
         {
             break;
         }
-    }
+    }  // end while ( fTrue )
 
 HandleError:
     Assert( !( fPageCategorization && fDataMove ) );
@@ -666,10 +803,13 @@ HandleError:
 
     SPFreeSpaceCatCtx( &pSpCatCtx );
 
+    // WARNING: most (if not all) of the above is done without versioning, so there
+    // really isn't any rollback of the update.
     if ( fInTransaction )
     {
         if ( ( err >= JET_errSuccess ) && fMovedPage )
         {
+            // Just in case, but all begin/commit cycles are supposed to be handled by the main loop above.
             Assert( fFalse );
             fInTransaction = ( ErrDIRCommitTransaction( ppib, NO_GRBIT ) < JET_errSuccess );
         }
@@ -695,6 +835,9 @@ HandleError:
     return err;
 }
 
+// Iterates over the Avail Extents in the root of the given FMP, shrinking only fully available extents.
+// Assumes exclusive access to root space trees and no concurrency with other threads trying to shrink or extend
+// the database.
 ERR ErrSHKShrinkDbFromEof(
     _In_ PIB *ppib,
     _In_ const IFMP ifmp )
@@ -730,6 +873,7 @@ ERR ErrSHKShrinkDbFromEof(
 
     Assert( !BoolParam( JET_paramEnableViewCache ) );
 
+    // First, delete any previously saved shrink archive files.
     if ( !BoolParam( pinst, JET_paramFlight_EnableShrinkArchiving ) )
     {
         (void)ErrIODeleteShrinkArchiveFiles( ifmp );
@@ -743,10 +887,12 @@ ERR ErrSHKShrinkDbFromEof(
 
     Call( pfmp->Pfapi()->ErrSize( &cbSizeFileInitial, IFileAPI::filesizeLogical ) );
 
+    // Open cursors to space trees.
     Call( ErrSPGetLastExtent( ppib, ifmp, &eiInitialOE ) );
     cbSizeOwnedInitial = OffsetOfPgno( eiInitialOE.PgnoLast() + 1 );
     Assert( cbSizeOwnedInitial <= cbSizeFileInitial );
 
+    // Shrink requires a fully populated MSysObjids table.
     Call( ErrCATCheckMSObjidsReady( ppib, ifmp, &fMSysObjidsReady ) );
     if ( !fMSysObjidsReady )
     {
@@ -754,6 +900,7 @@ ERR ErrSHKShrinkDbFromEof(
         goto DoneWithDataMove;
     }
 
+    // Check if physical file size is smaller than size represented in the OE.
     if ( OffsetOfPgno( eiInitialOE.PgnoLast() + 1 ) > cbSizeFileInitial )
     {
         AssertTrack( fFalse, "ShrinkEofOePgnoLastBeyondFsFileSize" );
@@ -765,6 +912,7 @@ ERR ErrSHKShrinkDbFromEof(
     Assert( !pfmp->FShrinkIsRunning() );
     pfmp->SetShrinkIsRunning();
 
+    // Just in case, but we don't expect version store and DB tasks to be running at this point.
     errVerClean = PverFromPpib( ppib )->ErrVERRCEClean( ifmp );
     if ( errVerClean != JET_errSuccess )
     {
@@ -773,14 +921,22 @@ ERR ErrSHKShrinkDbFromEof(
     }
     pfmp->WaitForTasksToComplete();
 
+    // Clean up orphaned shelved page extents, which may be present if a previous shrink operation
+    // bailed for any reason without freeing up and truncating the extent after having added shelved
+    // pages. Below-EOF shelved pages are innocuous for subsequent space operations in general,
+    // but must be removed before a new shrink pass is attempted. Otherwise, we could either end up
+    // with duplicate shelving during the new pass or, even worse, improperly truncate an extent based
+    // on shelved pages which were available when they were shelved but then got allocated and used.
     CallJ( ErrSPUnshelveShelvedPagesBelowEof( ppib, ifmp ), DoneWithDataMove );
 
+    // Shrink in steps.
     forever
     {
         PGNO pgnoFirstFromLastExtentShrunk = pgnoNull;
         fMayHaveShrunk = fTrue;
         Assert( sdr == sdrNone );
 
+        // Truncate as many extents as possible. Do it one by one.
         PGNO pgnoFirstFromLastExtentTruncatedPrev = pgnoNull;
         PGNO pgnoFirstFromLastExtentTruncated = pgnoNull;
         do
@@ -801,6 +957,7 @@ ERR ErrSHKShrinkDbFromEof(
             pgnoFirstFromLastExtentTruncatedPrev = pgnoFirstFromLastExtentTruncated;
             pgnoFirstFromLastExtentShrunk = pgnoFirstFromLastExtentTruncated;
 
+            // Check done conditions.
             if ( sdr != sdrNone )
             {
                 if ( pgnoFirstFromLastExtentTruncated == pgnoSystemRoot )
@@ -822,6 +979,7 @@ ERR ErrSHKShrinkDbFromEof(
         Assert( sdr == sdrNone );
         err = JET_errSuccess;
 
+        // Make sure we are not bouncing back and forth between truncation and data move.
         if ( ( pgnoFirstFromLastExtentShrunkPrev != pgnoNull ) &&
              ( pgnoFirstFromLastExtentShrunk >= pgnoFirstFromLastExtentShrunkPrev ) )
         {
@@ -831,6 +989,7 @@ ERR ErrSHKShrinkDbFromEof(
         }
         pgnoFirstFromLastExtentShrunkPrev = pgnoFirstFromLastExtentShrunk;
 
+        // Now, move data from the last extent.
         PGNO pgnoFirstFromLastExtentMoved = pgnoNull;
         CallJ( ErrSHKIMoveLastExtent(
                 ppib,
@@ -848,11 +1007,13 @@ ERR ErrSHKShrinkDbFromEof(
                 &spcatfLastProcessed ), DoneWithDataMove );
         Assert( pgnoFirstFromLastExtentMoved == pgnoFirstFromLastExtentTruncated );
 
+        // We've got signaled to stop.
         if ( !pfmp->FShrinkIsActive() )
         {
             CallJ( ErrERRCheck( errSPNoSpaceBelowShrinkTarget ), DoneWithDataMove );
         }
 
+        // Check done conditions.
         if ( sdr != sdrNone )
         {
             goto DoneWithDataMove;
@@ -871,10 +1032,12 @@ DoneWithDataMove:
     Assert( sdr != sdrNone );
     err = JET_errSuccess;
 
+    // See how much we shrunk the database by.
     Call( ErrSPGetLastExtent( ppib, ifmp, &eiFinalOE ) );
     Call( pfmp->Pfapi()->ErrSize( &cbSizeFileFinal, IFileAPI::filesizeLogical ) );
     cbSizeOwnedFinal = OffsetOfPgno( eiFinalOE.PgnoLast() + 1 );
 
+    // Check if we now own less space (i.e., if we shrank).
     if ( eiFinalOE.PgnoLast() >= eiInitialOE.PgnoLast() )
     {
         err = ErrERRCheck( JET_wrnShrinkNotPossible );
@@ -905,8 +1068,9 @@ HandleError:
         Assert( cbSizeOwnedInitial > cbSizeOwnedFinal );
         Assert( cbSizeOwnedFinal <= cbSizeFileFinal );
     }
-#endif
+#endif  // DEBUG
 
+    // For event purposes, try to collect information if it isn't already collected.
     if ( ( cbSizeFileInitial > 0 ) && ( cbSizeFileFinal == 0 ) )
     {
         (void)pfmp->Pfapi()->ErrSize( &cbSizeFileFinal, IFileAPI::filesizeLogical );
@@ -918,33 +1082,40 @@ HandleError:
         cbSizeOwnedFinal = OffsetOfPgno( eiFinalOE.PgnoLast() + 1 );
     }
 
+    // Some safety checks.
     if ( ( cbSizeFileInitial != 0 ) && ( cbSizeFileFinal != 0 ) && ( cbSizeFileFinal > cbSizeFileInitial ) &&
          ( err != JET_wrnShrinkNotPossible ) && ( err >= JET_errSuccess ) )
     {
+        // We don't expect to have grown the file.
         FireWall( "ShrinkEofFileGrowth" );
     }
     if ( ( cbSizeOwnedInitial != 0 ) && ( cbSizeOwnedFinal != 0 ) && ( cbSizeOwnedFinal > cbSizeOwnedInitial ) &&
          ( err != JET_wrnShrinkNotPossible ) && ( err >= JET_errSuccess ) )
     {
+        // We don't expect to own more space.
         FireWall( "ShrinkEofOwnedSpaceGrowth" );
     }
     if ( ( cbSizeFileInitial != 0 ) && ( cbSizeOwnedInitial != 0 ) && ( cbSizeFileInitial < cbSizeOwnedInitial ) )
     {
+        // Owned space must never be larger than the actual file size (before).
         AssertTrack( false, "ShrinkEofOeFileLargerThanOwnedBefore" );
         err = ErrERRCheck( JET_errSPOwnExtCorrupted );
     }
     if ( ( cbSizeFileFinal != 0 ) && ( cbSizeOwnedFinal != 0 ) && ( cbSizeFileFinal < cbSizeOwnedFinal ) )
     {
+        // Owned space must never be larger than the actual file size (after).
         AssertTrack( fFalse, "ShrinkEofOeFileLargerThanOwnedAfter" );
         err = ErrERRCheck( JET_errSPOwnExtCorrupted );
     }
 
+    // If the reason is not set and we failed, set it.
     Assert( ( sdr != sdrNone ) || ( err < JET_errSuccess ) );
     if ( ( sdr == sdrNone ) && ( err < JET_errSuccess ) )
     {
         sdr = sdrFailed;
     }
 
+    // Emit event.
     OSTraceSuspendGC();
     const HRT dhrtElapsed = DhrtHRTElapsedFromHrtStart( hrtStarted );
     const double dblSecTotalElapsed = DblHRTSecondsElapsed( dhrtElapsed );
@@ -1003,11 +1174,16 @@ HandleError:
     {
         Assert( pfmp->FShrinkIsRunning() );
 
+        // Purge all FCBs to restore pristine attach state.
+        // We don't expect any pending version store entries, but just in case, avoid purging the FCBs for the
+        // database in that case. The potential issue is that clients that may try to change template tables
+        // will get an error because the FCB has been opened (i.e., produced an FUCB) by the categorization code.
         errVerClean = PverFromPpib( ppib )->ErrVERRCEClean( ifmp );
         if ( errVerClean != JET_errSuccess )
         {
             AssertTrack( fFalse, OSFormat( "ShrinkEofEndVerCleanErr:%d", errVerClean ) );
 
+            // Only clobber the error if it's not a corruption or it's success.
             const ErrData* perrdata = NULL;
             if ( ( err >= JET_errSuccess ) ||
                  ( ( perrdata = PerrdataLookupErrValue( err ) ) == NULL ) ||
@@ -1019,9 +1195,12 @@ HandleError:
         else
         {
             pfmp->WaitForTasksToComplete();
-            FCB::PurgeDatabase( ifmp, fFalse  );
+            FCB::PurgeDatabase( ifmp, fFalse /* fTerminating */ );
         }
 
+        // Log an attach signal so that any read-from-passive clients can re-attach the database once
+        // shrink is done. The counterpart detach is triggered by LOG::ErrLGRIRedoRootPageMove(), in the
+        // call to ErrLGDbDetachingCallback().
         (void)ErrLGSignalAttachDB( ifmp );
     }
 
@@ -1032,9 +1211,12 @@ HandleError:
 }
 
 
+// Root page move functions.
+//
 
 LOCAL VOID SHKIRootMoveRevertDbTime( ROOTMOVE* const prm )
 {
+    // Root, OE, AE.
     if ( prm->csrFDP.Latch() == latchWrite )
     {
         prm->csrFDP.RevertDbtime( prm->dbtimeBeforeFDP, prm->fFlagsBeforeFDP );
@@ -1048,6 +1230,7 @@ LOCAL VOID SHKIRootMoveRevertDbTime( ROOTMOVE* const prm )
         prm->csrAE.RevertDbtime( prm->dbtimeBeforeAE, prm->fFlagsBeforeAE );
     }
 
+    // Children objects.
     for ( ROOTMOVECHILD* prmc = prm->prootMoveChildren;
             prmc != NULL;
             prmc = prmc->prootMoveChildNext )
@@ -1058,6 +1241,7 @@ LOCAL VOID SHKIRootMoveRevertDbTime( ROOTMOVE* const prm )
         }
     }
 
+    // Catalog pages.
     for ( int iCat = 0; iCat < 2; iCat++ )
     {
         if ( prm->csrCatObj[iCat].Latch() == latchWrite )
@@ -1130,6 +1314,7 @@ LOCAL ERR ErrSHKICreateRootMove( ROOTMOVE* const prm, FUCB* const pfucb, const O
 
     Assert( prm != NULL );
 
+    // Initialize basic move struct members.
     prm->objid = objid;
     prm->pgnoFDP = pfcb->PgnoFDP();
     prm->pgnoOE = pfcb->PgnoOE();
@@ -1139,9 +1324,13 @@ LOCAL ERR ErrSHKICreateRootMove( ROOTMOVE* const prm, FUCB* const pfucb, const O
     Assert( prm->pgnoAE != pgnoNull );
     Assert( prm->pgnoAE == ( prm->pgnoOE + 1 ) );
 
+    // If this is a root object, latch each of the children's root pages because
+    // we'll need to update their external headers with the new pgnoParent.
+    //
 
     if ( fRootObject )
     {
+        // Go through each child object.
         Assert( pfucbCatalog == pfucbNil );
         OBJID objidChild = objidNil;
         SYSOBJ sysobjChild = sysobjNil;
@@ -1149,9 +1338,11 @@ LOCAL ERR ErrSHKICreateRootMove( ROOTMOVE* const prm, FUCB* const pfucb, const O
                 ( err >= JET_errSuccess ) && ( objidChild != objidNil );
                 err = ErrCATGetNextNonRootObject( ppib, ifmp, objidTable, &pfucbCatalog, &objidChild, &sysobjChild ) )
         {
+            // Get child's pgnoFDP.
             PGNO pgnoFDPChild = pgnoNull;
             Call( ErrCATSeekObjectByObjid( ppib, ifmp, objidTable, sysobjChild, objidChild, NULL, 0, &pgnoFDPChild ) );
 
+            // Allocate and set up child root move object.
             ROOTMOVECHILD* const prmc = new ROOTMOVECHILD;
             Alloc( prmc );
             prm->AddRootMoveChild( prmc );
@@ -1176,7 +1367,17 @@ LOCAL ERR ErrSHKICreateRootMove( ROOTMOVE* const prm, FUCB* const pfucb, const O
         pfucbCatalog = pfucbNil;
     }
 
+    // Latch catalog page(s) which contain nodes describing this object.
+    // Note that if this is a root object, we may have two affected nodes: the
+    // first one is the table node and the second one is the clustered index,
+    // which points to the same tree/pgnoFDP. Tables which do not have a primary
+    // index explicitly defined will have an internal unique auto-inc key and will
+    // have only one node representing the table. Otherwise, they will have two nodes
+    // (thus two pgnoFDP references) that need to be fixed up.
+    //
 
+    // Retry until we get a consistent view, since we release page latches for a moment.
+    // Do it for both the main and shadow catalogs.
     for ( int iCat = 0; iCat < 2; iCat++ )
     {
         const BOOL fShadowCat = ( iCat == 1 );
@@ -1196,6 +1397,7 @@ LOCAL ERR ErrSHKICreateRootMove( ROOTMOVE* const prm, FUCB* const pfucb, const O
             prm->csrCatClustIdx[iCat].ReleasePage();
             prm->csrCatClustIdx[iCat].Reset();
 
+            // Go through each object with this pgnoFDP.
             Assert( pfucbCatalog == pfucbNil );
             OBJID objidT = objidNil;
             SYSOBJ sysobjT = sysobjNil;
@@ -1249,6 +1451,7 @@ LOCAL ERR ErrSHKICreateRootMove( ROOTMOVE* const prm, FUCB* const pfucb, const O
             }
             Call( err );
 
+            // Close catalog cursor.
             CallS( ErrCATClose( ppib, pfucbCatalog ) );
             pfucbCatalog = pfucbNil;
 
@@ -1260,12 +1463,14 @@ LOCAL ERR ErrSHKICreateRootMove( ROOTMOVE* const prm, FUCB* const pfucb, const O
 
             fFirstLatchAttempt = fFalse;
 
+            // Now, latch the pages and check if their DB times changed.
             Call( prm->csrCatObj[iCat].ErrGetRIWPage( ppib, ifmp, prm->pgnoCatObj[iCat] ) );
             if ( prm->csrCatObj[iCat].Dbtime() != prm->dbtimeBeforeCatObj[iCat] )
             {
                 continue;
             }
 
+            // Check if it's a valid and different page before latching.
             if ( ( prm->pgnoCatClustIdx[iCat] != pgnoNull ) && ( prm->pgnoCatClustIdx[iCat] != prm->pgnoCatObj[iCat] ) )
             {
                 Call( prm->csrCatClustIdx[iCat].ErrGetRIWPage( ppib, ifmp, prm->pgnoCatClustIdx[iCat] ) );
@@ -1283,11 +1488,15 @@ LOCAL ERR ErrSHKICreateRootMove( ROOTMOVE* const prm, FUCB* const pfucb, const O
         }
     }
 
+    // Verify consistency between main and shadow catalogs.
     Assert( prm->pgnoCatObj[0] != prm->pgnoCatObj[1] );
     Assert( ( ( prm->pgnoCatClustIdx[0] == pgnoNull ) && ( prm->pgnoCatClustIdx[1] == pgnoNull ) ) ||
             ( prm->pgnoCatClustIdx[0] != prm->pgnoCatClustIdx[1] ) );
 
+    // Allocate 3 new contiguous pages (root + OE + AE).
+    //
 
+    // Alocate pages.
     CPG cpgReq = 3;
     PGNO pgnoNewFDP = pgnoNull;
     Call( ErrSPGetExt( pfucb, prm->pgnoFDP, &cpgReq, cpgReq, &pgnoNewFDP ) );
@@ -1296,7 +1505,10 @@ LOCAL ERR ErrSHKICreateRootMove( ROOTMOVE* const prm, FUCB* const pfucb, const O
     prm->pgnoNewOE = pgnoNewFDP + 1;
     prm->pgnoNewAE = pgnoNewFDP + 2;
 
+    // Latch root, OA and AE pages (current and new).
+    //
 
+    // Latch new pages.
     const BOOL fLogging = g_rgfmp[ifmp].FLogOn();
     Call( prm->csrNewFDP.ErrGetNewPreInitPage(
                                 ppib,
@@ -1317,6 +1529,7 @@ LOCAL ERR ErrSHKICreateRootMove( ROOTMOVE* const prm, FUCB* const pfucb, const O
                                 objid,
                                 fLogging ) );
 
+    // Latch old pages.
     Call( prm->csrFDP.ErrGetRIWPage( ppib, ifmp, prm->pgnoFDP ) );
     prm->dbtimeBeforeFDP = prm->csrFDP.Dbtime();
     prm->fFlagsBeforeFDP = prm->csrFDP.Cpage().FFlags();
@@ -1327,6 +1540,7 @@ LOCAL ERR ErrSHKICreateRootMove( ROOTMOVE* const prm, FUCB* const pfucb, const O
     prm->dbtimeBeforeAE = prm->csrAE.Dbtime();
     prm->fFlagsBeforeAE = prm->csrAE.Cpage().FFlags();
 
+    // Get the dbtime of the overall operation.
     prm->dbtimeAfter = g_rgfmp[ifmp].DbtimeIncrementAndGet();
 
 HandleError:
@@ -1360,7 +1574,10 @@ LOCAL ERR ErrSHKIRootMoveUpgradeLatches( ROOTMOVE* const prm, PIB* const ppib, c
     const DBTIME dbtimeAfter = prm->dbtimeAfter;
     FUCB* pfucbCatalog = pfucbNil;
 
+    // Upgrade all latches to write.
+    //
 
+    // Root, OE, AE.
     prm->csrFDP.UpgradeFromRIWLatch();
     prm->csrOE.UpgradeFromRIWLatch();
     prm->csrAE.UpgradeFromRIWLatch();
@@ -1368,6 +1585,7 @@ LOCAL ERR ErrSHKIRootMoveUpgradeLatches( ROOTMOVE* const prm, PIB* const ppib, c
     Assert( prm->csrNewOE.Latch() == latchWrite );
     Assert( prm->csrNewAE.Latch() == latchWrite );
 
+    // Children objects.
     for ( ROOTMOVECHILD* prmc = prm->prootMoveChildren;
             prmc != NULL;
             prmc = prmc->prootMoveChildNext )
@@ -1375,18 +1593,19 @@ LOCAL ERR ErrSHKIRootMoveUpgradeLatches( ROOTMOVE* const prm, PIB* const ppib, c
         prmc->csrChildFDP.UpgradeFromRIWLatch();
     }
 
+    // Catalog pages.
     for ( int iCat = 0; iCat < 2; iCat++ )
     {
         Assert( prm->csrCatObj[iCat].FLatched() );
         Assert( prm->pgnoCatObj[iCat] != pgnoNull );
         Assert( prm->ilineCatObj[iCat] != -1 );
-        Assert( ( prm->csrCatClustIdx[iCat].FLatched() &&
+        Assert( ( prm->csrCatClustIdx[iCat].FLatched() &&                       // Clustered index node in a different page...
                   ( prm->pgnoCatClustIdx[iCat] != prm->pgnoCatObj[iCat] ) &&
                   ( prm->ilineCatClustIdx[iCat] != -1 ) ) ||
-                ( !prm->csrCatClustIdx[iCat].FLatched() &&
+                ( !prm->csrCatClustIdx[iCat].FLatched() &&                       // ... or clustered index node in the same page...
                   ( prm->pgnoCatClustIdx[iCat] == prm->pgnoCatObj[iCat] ) &&
                   ( prm->ilineCatClustIdx[iCat] != -1 ) ) ||
-                ( !prm->csrCatClustIdx[iCat].FLatched() &&
+                ( !prm->csrCatClustIdx[iCat].FLatched() &&                       // ... or no clustered index node.
                   ( prm->pgnoCatClustIdx[iCat] == pgnoNull ) &&
                   ( prm->ilineCatClustIdx[iCat] == -1 ) ) );
 
@@ -1397,11 +1616,15 @@ LOCAL ERR ErrSHKIRootMoveUpgradeLatches( ROOTMOVE* const prm, PIB* const ppib, c
         }
     }
 
+    // Prepare pre/post-images and data blobs.
+    //
 
+    // Root, OE, AE (pre-image).
     SHKIRootMoveGetPagePreImage( ifmp, prm->pgnoFDP, &prm->csrFDP, &prm->dataBeforeFDP );
     SHKIRootMoveGetPagePreImage( ifmp, prm->pgnoOE, &prm->csrOE, &prm->dataBeforeOE );
     SHKIRootMoveGetPagePreImage( ifmp, prm->pgnoAE, &prm->csrAE, &prm->dataBeforeAE );
 
+    // Catalog pages (pre-images).
     for ( int iCat = 0; iCat < 2; iCat++ )
     {
         SHKIRootMoveGetCatNodePreImage(
@@ -1420,6 +1643,7 @@ LOCAL ERR ErrSHKIRootMoveUpgradeLatches( ROOTMOVE* const prm, PIB* const ppib, c
         }
     }
 
+    // Children objects (post-image).
     for ( ROOTMOVECHILD* prmc = prm->prootMoveChildren;
             prmc != NULL;
             prmc = prmc->prootMoveChildNext )
@@ -1427,6 +1651,7 @@ LOCAL ERR ErrSHKIRootMoveUpgradeLatches( ROOTMOVE* const prm, PIB* const ppib, c
         prmc->sphNew.SetPgnoParent( prm->pgnoNewFDP );
     }
 
+    // Catalog pages (post-images).
     Assert( pfucbCatalog == pfucbNil );
     Call( ErrCATOpen( ppib, ifmp, &pfucbCatalog ) );
     for ( int iCat = 0; iCat < 2; iCat++ )
@@ -1448,7 +1673,10 @@ LOCAL ERR ErrSHKIRootMoveUpgradeLatches( ROOTMOVE* const prm, PIB* const ppib, c
     CallS( ErrCATClose( ppib, pfucbCatalog ) );
     pfucbCatalog = pfucbNil;
 
+    // Dirty pages.
+    //
 
+    // Root, OE, AE.
     Assert( prm->csrFDP.Dbtime() == prm->dbtimeBeforeFDP );
     Assert( prm->csrOE.Dbtime() == prm->dbtimeBeforeOE );
     Assert( prm->csrAE.Dbtime() == prm->dbtimeBeforeAE );
@@ -1459,6 +1687,7 @@ LOCAL ERR ErrSHKIRootMoveUpgradeLatches( ROOTMOVE* const prm, PIB* const ppib, c
     prm->csrNewOE.CoordinatedDirty( dbtimeAfter );
     prm->csrNewAE.CoordinatedDirty( dbtimeAfter );
 
+    // Children objects.
     for ( ROOTMOVECHILD* prmc = prm->prootMoveChildren;
             prmc != NULL;
             prmc = prmc->prootMoveChildNext )
@@ -1467,6 +1696,7 @@ LOCAL ERR ErrSHKIRootMoveUpgradeLatches( ROOTMOVE* const prm, PIB* const ppib, c
         prmc->csrChildFDP.CoordinatedDirty( dbtimeAfter );
     }
 
+    // Catalog pages.
     for ( int iCat = 0; iCat < 2; iCat++ )
     {
         Assert( prm->csrCatObj[iCat].Dbtime() == prm->dbtimeBeforeCatObj[iCat] );
@@ -1491,14 +1721,17 @@ HandleError:
 
 LOCAL VOID SHKIRootMoveSetLgposModify( ROOTMOVE* const prm, const LGPOS &lgpos )
 {
+    // Root, OE, AE.
     prm->csrFDP.Cpage().SetLgposModify( lgpos );
     prm->csrOE.Cpage().SetLgposModify( lgpos );
     prm->csrAE.Cpage().SetLgposModify( lgpos );
 
+    // New root, OE, AE.
     prm->csrNewFDP.Cpage().SetLgposModify( lgpos );
     prm->csrNewOE.Cpage().SetLgposModify( lgpos );
     prm->csrNewAE.Cpage().SetLgposModify( lgpos );
 
+    // Children objects.
     for ( ROOTMOVECHILD* prmc = prm->prootMoveChildren;
             prmc != NULL;
             prmc = prmc->prootMoveChildNext )
@@ -1506,6 +1739,7 @@ LOCAL VOID SHKIRootMoveSetLgposModify( ROOTMOVE* const prm, const LGPOS &lgpos )
         prmc->csrChildFDP.Cpage().SetLgposModify( lgpos );
     }
 
+    // Catalog pages.
     for ( int iCat = 0; iCat < 2; iCat++ )
     {
         prm->csrCatObj[iCat].Cpage().SetLgposModify( lgpos );
@@ -1531,17 +1765,20 @@ LOCAL VOID SHKIRootMoveCopyToNewPage(
         pcsr->SetDbtime( dbtimeAfter );
     }
 
+    // Copy image to destination page.
     UtilMemCpy(
         pcsr->Cpage().PvBuffer(),
         dataOld.Pv(),
         dataOld.Cb() );
 
+    // Fix up pgno and dbtime in the destination page.
     pcsr->Cpage().SetPgno( pgnoNew );
     pcsr->Cpage().SetDbtime( dbtimeAfter );
 }
 
 LOCAL VOID SHKIRootMoveReleaseLatches( ROOTMOVE* const prm )
 {
+    // Root, OE, AE.
     prm->csrFDP.ReleasePage();
     prm->csrOE.ReleasePage();
     prm->csrAE.ReleasePage();
@@ -1549,6 +1786,7 @@ LOCAL VOID SHKIRootMoveReleaseLatches( ROOTMOVE* const prm )
     prm->csrNewOE.ReleasePage();
     prm->csrNewAE.ReleasePage();
 
+    // Children objects.
     for ( ROOTMOVECHILD* prmc = prm->prootMoveChildren;
             prmc != NULL;
             prmc = prmc->prootMoveChildNext )
@@ -1556,6 +1794,7 @@ LOCAL VOID SHKIRootMoveReleaseLatches( ROOTMOVE* const prm )
         prmc->csrChildFDP.ReleasePage();
     }
 
+    // Catalog pages.
     for ( int iCat = 0; iCat < 2; iCat++ )
     {
         prm->csrCatObj[iCat].ReleasePage();
@@ -1573,28 +1812,34 @@ LOCAL ERR ErrSHKIRootMoveCheck( const ROOTMOVE& rm, FUCB* const pfucb, const OBJ
     const FCB* const pfcb = pfucb->u.pfcb;
     const BOOL fRootObject = ( rm.objid == objidTable );
 
+    // Check root.
     if ( pfcb->PgnoFDP() != rm.pgnoNewFDP )
     {
         AssertTrack( fFalse, "RootMoveBadPgnoNewFdp" );
         Error( ErrERRCheck( JET_errDatabaseCorrupted ) );
     }
 
+    // Check OE.
     if ( pfcb->PgnoOE() != rm.pgnoNewOE )
     {
         AssertTrack( fFalse, "RootMoveBadPgnoNewOE" );
         Error( ErrERRCheck( JET_errDatabaseCorrupted ) );
     }
 
+    // Check AE.
     if ( pfcb->PgnoAE() != rm.pgnoNewAE )
     {
         AssertTrack( fFalse, "RootMoveBadPgnoNewAE" );
         Error( ErrERRCheck( JET_errDatabaseCorrupted ) );
     }
 
+    // Check children objects.
     if ( fRootObject )
     {
         ROOTMOVECHILD* prmc = rm.prootMoveChildren;
 
+        // Go through each child object (we expect them to show up in the same order they
+        // have been inserted into the list earlier).
         Assert( pfucbCatalog == pfucbNil );
         OBJID objidChild = objidNil;
         SYSOBJ sysobjChild = sysobjNil;
@@ -1608,6 +1853,7 @@ LOCAL ERR ErrSHKIRootMoveCheck( const ROOTMOVE& rm, FUCB* const pfucb, const OBJ
                 Error( ErrERRCheck( JET_errDatabaseCorrupted ) );
             }
 
+            // Get child's pgnoFDP.
             PGNO pgnoFDPChild = pgnoNull;
             Call( ErrCATSeekObjectByObjid( ppib, ifmp, objidTable, sysobjChild, objidChild, NULL, 0, &pgnoFDPChild ) );
 
@@ -1615,6 +1861,7 @@ LOCAL ERR ErrSHKIRootMoveCheck( const ROOTMOVE& rm, FUCB* const pfucb, const OBJ
             Call( ErrBTIGotoRoot( pfucbChild, latchRIW ) );
             pfucbChild->pcsrRoot = Pcsr( pfucbChild );
 
+            // Check against the previously enumerated objected.
             if ( PgnoSPIParentFDP( pfucbChild ) != rm.pgnoNewFDP )
             {
                 AssertTrack( fFalse, "RootMoveBadPgnoParentFdp" );
@@ -1644,12 +1891,14 @@ LOCAL ERR ErrSHKIRootMoveCheck( const ROOTMOVE& rm, FUCB* const pfucb, const OBJ
         Assert( rm.prootMoveChildren == NULL );
     }
 
+    // Check catalogs.
     for ( int iCat = 0; iCat < 2; iCat++ )
     {
         const BOOL fShadowCat = ( iCat == 1 );
         OBJID objidT = objidNil;
         SYSOBJ sysobjT = sysobjNil;
 
+        // Check catalog (no records with the old pgnoFDP).
         Assert( pfucbCatalog == pfucbNil );
         err = ErrCATGetNextObjectByPgnoFDP( ppib, ifmp, objidTable, rm.pgnoFDP, fShadowCat, &pfucbCatalog, &objidT, &sysobjT );
         if ( ( err >= JET_errSuccess ) && ( objidT != objidNil ) )
@@ -1659,9 +1908,11 @@ LOCAL ERR ErrSHKIRootMoveCheck( const ROOTMOVE& rm, FUCB* const pfucb, const OBJ
         }
         Call( err );
 
+        // Close catalog cursor.
         CallS( ErrCATClose( ppib, pfucbCatalog ) );
         pfucbCatalog = pfucbNil;
 
+        // Check catalog (records can be reached with the new pgnoFDP).
         objidT = objidNil;
         sysobjT = sysobjNil;
         ULONG cCatRecords = 0;
@@ -1673,9 +1924,11 @@ LOCAL ERR ErrSHKIRootMoveCheck( const ROOTMOVE& rm, FUCB* const pfucb, const OBJ
         }
         Call( err );
 
+        // Close catalog cursor.
         CallS( ErrCATClose( ppib, pfucbCatalog ) );
         pfucbCatalog = pfucbNil;
 
+        // Verify consistency.
         if ( cCatRecords == 0 )
         {
             AssertTrack( fFalse, OSFormat( "RootMoveNoPostCatNodes:%d", (int)fShadowCat ) );
@@ -1763,6 +2016,7 @@ ERR ErrSHKRootPageMove(
     Assert( pfmp->FExclusiveBySession( ppib ) );
     Expected( pfmp->FShrinkIsActive() );
 
+    // Make sure version store is clean, just in case.
     const ERR errVerClean = PverFromPpib( ppib )->ErrVERRCEClean( ifmp );
     if ( errVerClean != JET_errSuccess )
     {
@@ -1771,19 +2025,26 @@ ERR ErrSHKRootPageMove(
     }
     pfmp->WaitForTasksToComplete();
 
+    // Open a cursor to the tree we want to move the root of and
+    // initialize helper variables.
+    //
 
+    // Retrieve some metadata first by opening it at the BT level.
     Call( ErrBTOpen( ppib, pgnoFDP, ifmp, &pfucb ) );
     pfcb = pfucb->u.pfcb;
 
+    // Determine whether or not this is a root object.
     objid = pfcb->ObjidFDP();
     Call( ErrCATGetObjidMetadata( ppib, ifmp, objid, &objidTable, &sysobj ) );
     fRootObject = ( sysobj == sysobjTable );
     Assert( !!fRootObject == ( objid == objidTable ) );
 
+    // Close primitive cursor.
     BTClose( pfucb );
     pfucb = pfucbNil;
     pfcb = pfcbNil;
 
+    // Open/initialize full-fledged cursor.
     Assert( objid != objidSystemRoot );
     PGNO pgnoFDPT = pgnoNull;
     const OBJID objidParent = fRootObject ? objidSystemRoot : objidTable;
@@ -1802,29 +2063,42 @@ ERR ErrSHKRootPageMove(
     Assert( pgnoFDP == pgnoFDPT );
     Assert( pgnoFDP == pfcb->PgnoFDP() );
 
+    // Prepare latches and metadata.
+    //
 
+    // Build up ROOTMOVE struct with the metadata and latches necessary.
     Call( ErrSHKICreateRootMove( &rm, pfucb, objidTable ) );
 
+    // Upgrade all latches to write latches (new pages are already write-latched).
     Call( ErrSHKIRootMoveUpgradeLatches( &rm, ppib, ifmp ) );
-    OnDebug( rm.AssertValid( fTrue , fFalse  ) );
+    OnDebug( rm.AssertValid( fTrue /* fBeforeMove */, fFalse /* fRedo */ ) );
 
+    // Purge FCBs.
+    //
 
+    // Lock catalogs.
     for ( int iCat = 0; iCat < 2; iCat++ )
     {
         Assert( rm.pgnoCatObj[iCat] != pgnoNull );
-        Assert( ( rm.pgnoCatClustIdx[iCat] == pgnoNull ) ||
-                ( rm.pgnoCatObj[iCat] == rm.pgnoCatClustIdx[iCat] ) ||
-                ( ( pgnoCatFDP[iCat] != rm.pgnoCatObj[iCat] ) &&
-                  ( pgnoCatFDP[iCat] != rm.pgnoCatClustIdx[iCat] ) ) );
+        Assert( ( rm.pgnoCatClustIdx[iCat] == pgnoNull ) ||             // Clustered index object does not exist.
+                ( rm.pgnoCatObj[iCat] == rm.pgnoCatClustIdx[iCat] ) ||  // Main and clustered index objects represented in the same catalog page.
+                ( ( pgnoCatFDP[iCat] != rm.pgnoCatObj[iCat] ) &&        // Main and clustered index objects represented in different catalog pages,
+                  ( pgnoCatFDP[iCat] != rm.pgnoCatClustIdx[iCat] ) ) ); // which means the pages can't be the catalog root.
 
         if ( ( pgnoCatFDP[iCat] != rm.pgnoCatObj[iCat] ) &&
                 ( pgnoCatFDP[iCat] != rm.pgnoCatClustIdx[iCat] ) )
         {
+            // WARNING: We are latching the root of catalog after we have leaf catalog pages latched,
+            // so this is a "page latching" sub-rank / order violation. We believe this to be OK because
+            // DB Shrink operates in locked down / "single-threaded" environment, so there shouldn't be
+            // anyone trying to lock the catalog tree from to bottom ("correct" order) for a split or merge,
+            // for example.
             Call( csrCatLock[iCat].ErrGetRIWPage( ppib, ifmp, pgnoCatFDP[iCat] ) );
             csrCatLock[iCat].UpgradeFromRIWLatch();
         }
     }
 
+    // Purge FCBs of the object and its children (done hierarchically under FCB::PurgeObject()).
     CATFreeCursorsFromObjid( pfucb, pfucbParent );
     fFullyInitCursor = fFalse;
     pfucb = pfucbNil;
@@ -1832,37 +2106,50 @@ ERR ErrSHKRootPageMove(
     pfcb = pfcbNil;
     FCB::PurgeObject( ifmp, fRootObject ? pgnoFDP : pgnoFDPParentBefore );
 
+    // Purge catalog FCBs. We do this so that we can make unversioned/unlogged
+    // updates without worrying about pending version store updates.
     for ( int iCat = 0; iCat < 2; iCat++ )
     {
         FCB::PurgeObject( ifmp, pgnoCatFDP[iCat] );
     }
 
+    // Log the operation and set lgposModify for all affected pages.
+    //
 
     if ( pfmp->FLogOn() )
     {
         LGPOS lgpos = lgposMin;
         Call( ErrLGRootPageMove( ppib, ifmp, &rm, &lgpos ) );
-        OnDebug( rm.AssertValid( fTrue , fFalse  ) );
+        OnDebug( rm.AssertValid( fTrue /* fBeforeMove */, fFalse /* fRedo */ ) );
 
         SHKIRootMoveSetLgposModify( &rm, lgpos );
     }
 
+    // WARNING: we can't fail between fMoveLogged = fTrue and fMovePerformed = fTrue.
 
     fMoveLogged = fTrue;
 
+    // Perform the actual operation and check consistency of the final state.
+    //
 
-    SHKPerformRootMove( &rm, ppib, ifmp, fFalse  );
-    OnDebug( rm.AssertValid( fFalse , fFalse  ) );
+    // Perform the operation.
+    SHKPerformRootMove( &rm, ppib, ifmp, fFalse /* fRecoveryRedo */ );
+    OnDebug( rm.AssertValid( fFalse /* fBeforeMove */, fFalse /* fRedo */ ) );
 
     fMovePerformed = fTrue;
 
+    // Release latches
     SHKIRootMoveReleaseLatches( &rm );
 
+    // Release catalog lock.
     for ( int iCat = 0; iCat < 2; iCat++ )
     {
         csrCatLock[iCat].ReleasePage();
     }
 
+    // Re-open cursors and verify that the move looks consistent.
+    // It's OK to fail from this point on, but it might lead to leaked space.
+    //
 
     Call( ErrCATGetCursorsFromObjid(
             ppib,
@@ -1879,18 +2166,24 @@ ERR ErrSHKRootPageMove(
     Assert( pgnoFDPT == rm.pgnoNewFDP );
     Assert( pgnoFDPParentAfter == pgnoFDPParentBefore );
 
+    // Parent's root must not have changed.
     if ( pfucbParent->u.pfcb->PgnoFDP() != pgnoFDPParentBefore )
     {
         AssertTrack( fFalse, "RootMoveBadPgnoNewFdp" );
         Error( ErrERRCheck( JET_errDatabaseCorrupted ) );
     }
 
+    // Check overall consistency.
     Call( ErrSHKIRootMoveCheck( rm, pfucb, objidTable ) );
 
+    // Free empty pages (space allocation).
+    //
 
     Call( ErrFaultInjection( 45866 ) );
     Call( ErrSHKIRootMoveFreeEmptiedPages( rm, pfucb ) );
 
+    // Close cursors.
+    //
 
     CATFreeCursorsFromObjid( pfucb, pfucbParent );
     fFullyInitCursor = fFalse;
@@ -1898,6 +2191,8 @@ ERR ErrSHKRootPageMove(
     pfucbParent = pfucbNil;
     pfcb = pfcbNil;
 
+    // Release resources/latches.
+    //
     rm.ReleaseResources();
 
     err = JET_errSuccess;
@@ -1907,19 +2202,25 @@ HandleError:
     Assert( fMovePerformed || ( err < JET_errSuccess ) );
     Expected( !fFullyInitCursor || ( err < JET_errSuccess ) );
 
+    // Revert DB times in case of failure.
     if ( !fMoveLogged )
     {
         SHKIRootMoveRevertDbTime( &rm );
     }
 
+    // Release catalog lock.
     for ( int iCat = 0; iCat < 2; iCat++ )
     {
         Assert( ( csrCatLock[iCat].Latch() == latchNone ) || ( err < JET_errSuccess ) );
         csrCatLock[iCat].ReleasePage();
     }
 
+    // Release resources/latches. If we've succeeded, this should be a no-op because
+    // we already called it above in the success path.
     rm.ReleaseResources();
 
+    // We can't guarantee consistency if we fail after logging succeeds, but
+    // before the move is completed,
     if ( ( err < JET_errSuccess ) && fMoveLogged && !fMovePerformed )
     {
         AssertTrack( fFalse, OSFormat( "RootMoveUnexpectedErr:%d", err ) );
@@ -1957,6 +2258,7 @@ VOID SHKPerformRootMove(
     _In_ const IFMP ifmp,
     _In_ const BOOL fRecoveryRedo )
 {
+    // Copy root to destination.
     if ( FBTIUpdatablePage( prm->csrNewFDP ) )
     {
         SHKIRootMoveCopyToNewPage(
@@ -1968,12 +2270,14 @@ VOID SHKPerformRootMove(
 
          prm->csrNewFDP.FinalizePreInitPage();
 
+        // Fix up external header in the destination page.
         LINE lineExtHdr;
         NDGetPtrExternalHeader( prm->csrNewFDP.Cpage(), &lineExtHdr, noderfSpaceHeader );
         SPACE_HEADER* const psph = (SPACE_HEADER*)( lineExtHdr.pv );
         psph->SetPgnoOE( prm->pgnoNewOE );
     }
 
+    // Copy OE to destination.
     if ( FBTIUpdatablePage( prm->csrNewOE ) )
     {
         SHKIRootMoveCopyToNewPage(
@@ -1986,6 +2290,7 @@ VOID SHKPerformRootMove(
         prm->csrNewOE.FinalizePreInitPage();
     }
 
+    // Copy AE to destination.
     if ( FBTIUpdatablePage( prm->csrNewAE ) )
     {
         SHKIRootMoveCopyToNewPage(
@@ -1998,6 +2303,7 @@ VOID SHKPerformRootMove(
         prm->csrNewAE.FinalizePreInitPage();
     }
 
+    // Change children objects to point to new root.
     for ( ROOTMOVECHILD* prmc = prm->prootMoveChildren;
             prmc != NULL;
             prmc = prmc->prootMoveChildNext )
@@ -2022,6 +2328,7 @@ VOID SHKPerformRootMove(
         }
     }
 
+    // Change catalog pages to point to new root.
     for ( int iCat = 0; iCat < 2; iCat++ )
     {
         if ( FBTIUpdatablePage( prm->csrCatObj[iCat] ) )
@@ -2072,18 +2379,24 @@ VOID SHKPerformRootMove(
         }
     }
 
+    // Empty old root.
     if ( FBTIUpdatablePage( prm->csrFDP ) )
     {
+        // Empty Source page.
         NDEmptyPage( &prm->csrFDP );
     }
 
+    // Empty old OE.
     if ( FBTIUpdatablePage( prm->csrOE ) )
     {
+        // Empty Source page.
         NDEmptyPage( &prm->csrOE );
     }
 
+    // Empty old AE.
     if ( FBTIUpdatablePage( prm->csrAE ) )
     {
+        // Empty Source page.
         NDEmptyPage( &prm->csrAE );
     }
 }

@@ -4,16 +4,19 @@
 #include "esefile.hxx"
 #include "xsum.hxx"
 
+//  Checksum a file in ESE format
+//
 
 
 INT g_cbPage;
 INT g_cpagesPerBlock;
 
-static const INT cblocks            = g_cbBufferTotal / g_cbReadBuffer;
+static const INT cblocks            = g_cbBufferTotal / g_cbReadBuffer; //  number of read chunks
 
 
 struct CHECKSUM_STATS
 {
+    //  progress variables
 
     DWORD               cpagesSeen;
     DWORD               cpagesBadChecksum;
@@ -24,11 +27,12 @@ struct CHECKSUM_STATS
     DWORD               pgnoDbtimeHighest;
     DWORD               dwFiller;
 
+    //  I/O latency timing
 
-    LONG                cIOs;
-    LONG                dtickTotal;
-    LONG                dtickMax;
-    LONG                dtickMin;
+    LONG                cIOs;           //  total number of read IOs that were performed
+    LONG                dtickTotal;     //  total tickcount for all IOs
+    LONG                dtickMax;       //  maximum tickcount (slowest IO)
+    LONG                dtickMin;       //  minimum elapsed tickcount (fastest IO)
 
     JET_ERR             errReadFileError;
 };
@@ -40,15 +44,20 @@ static LONG     cblockCurr;
 typedef DWORD (*PFNCHECKSUM)( const BYTE * const, const DWORD );
 
 
+//  ================================================================
 struct JETPAGE
+//  ================================================================
 {
     DWORD               dwChecksum;
     DWORD               pgno;
     unsigned __int64    dbtime;
+//  BYTE                rgbRestOfPage[];
 };
 
 
+//  ================================================================
 class CChecksumContext
+//  ================================================================
 {
     public:
 
@@ -88,9 +97,11 @@ class CChecksumContext
 };
 
 
+//  ================================================================
 static void PrintChecksumStats(
     const QWORD                     dtickElapsed,
     const CHECKSUM_STATS * const    pchecksumstats )
+//  ================================================================
 {
     (void)wprintf( L"\r\n\r\n" );
     (void)wprintf( L"%d pages seen\r\n", pchecksumstats->cpagesSeen );
@@ -125,13 +136,16 @@ static void PrintChecksumStats(
 }
 
 
+//  ================================================================
 static BOOL FChecksumCorrect( const CHECKSUM_STATS * const pchecksumstats )
+//  ================================================================
 {
     return ( 0 == pchecksumstats->cpagesBadChecksum &&
                 0 == pchecksumstats->cpagesWrongPgno &&
                 0 != pchecksumstats->cpagesSeen );
 }
 
+//  Check the whole page content against zero. If all zero, then not initialized; otherwise initialized
 static BOOL FIsPageInitialized(
     _Readable_bytes_(cbPage) const BYTE* const pbPage,
     _In_range_(1, g_cbPage) ULONG cbPage )
@@ -147,6 +161,7 @@ static BOOL FIsPageInitialized(
             return TRUE;
         }
     }
+    //  There might be some bytes less than sizeof(rgbZeroMem) not compared in the loop
     if ( pbAddrToCompare < pbPageEnd )
     {
         return ( memcmp ( pbAddrToCompare, rgbZeroMem, pbPageEnd - pbAddrToCompare ) != 0 );
@@ -154,10 +169,12 @@ static BOOL FIsPageInitialized(
     return FALSE;
 }
 
+//  ================================================================
 static void ProcessESEPages(    const QWORD             ibOffset,
                                 const DWORD             cbData,
                                 const BYTE* const       pbData,
                                 CHECKSUM_STATS* const   pchecksumstats )
+//  ================================================================
 {
     const JETPAGE * const       rgpage          = (JETPAGE*)pbData;
     const DWORD                 cpage           = cbData / g_cbPage;
@@ -188,12 +205,15 @@ static void ProcessESEPages(    const QWORD             ibOffset,
 
             if ( pgnoPhysical == (DWORD)cpageMax )
             {
+                //  last physical page in the database, see
+                //  if it looks like a trailer page
+                //
                 const DWORD * const rgdwPage    = (DWORD *)ppageCurr;
 
-                if ( 0 == rgdwPage[1]
-                    && 0 == rgdwPage[2]
-                    && 0 == rgdwPage[3]
-                    && 0 == rgdwPage[6] )
+                if ( 0 == rgdwPage[1]       //  checksum (high dword)
+                    && 0 == rgdwPage[2]     //  dbtimeDirtied (low dword)
+                    && 0 == rgdwPage[3]     //  dbtimeDirtied (high dword)
+                    && 0 == rgdwPage[6] )   //  objidFDP
                 {
                     fTrailerPage = fTrue;
                 }
@@ -212,6 +232,7 @@ static void ProcessESEPages(    const QWORD             ibOffset,
 
             if( checksumExpected != checksumActual )
             {
+                // we should  Assert( !fCorrectableError ); but there is no Assert in eseutil.
 
                 (void)fwprintf( stderr, L"ERROR: page %d%s checksum failed\r\n", pgnoDisplay, wszPageTypeDisplay );
                 pchecksumstats->cpagesBadChecksum++;
@@ -239,10 +260,12 @@ static void ProcessESEPages(    const QWORD             ibOffset,
 }
 
 
+//  ================================================================
 static void CollectStatistics(
     const QWORD                 hrtCompleted,
     const ERR                   err,
     CChecksumContext * const    pchecksumcontext )
+//  ================================================================
 {
     CHECKSUM_STATS * const  pchecksumstats  = pchecksumcontext->pchecksumstats;
     const DWORD             dtickElapsed    = (DWORD)CmsecHRTFromDhrt( hrtCompleted - pchecksumcontext->hrtStart );
@@ -365,11 +388,13 @@ HandleError:
     return err;
 }
 
+//  ================================================================
 BOOL FChecksumFile(
     const wchar_t * const   szFile,
     const ULONG             cbPage,
     const ULONG             cPagesToChecksum,
     BOOL * const            pfBadPagesDetected )
+//  ================================================================
 {
     BOOL                fSuccess            = FALSE;
     ERR                 err                 = JET_errSuccess;
@@ -387,13 +412,14 @@ BOOL FChecksumFile(
 
     QWORD               cbSize              = 0;
 
-    HRT                 hrtFirstIO;
-    HRT                 hrtLastIO;
+    HRT                 hrtFirstIO;  //  the time the first IO started
+    HRT                 hrtLastIO;   //  the time the last IO finished
 
 
     wprintf( L"File: %.64ls", ( iswascii( szFile[0] ) ? szFile : L"<unprintable>" ) );
     wprintf( L"\r\n\r\n" );
 
+    //  init
 
     InitPageSize( cbPage );
 
@@ -401,6 +427,7 @@ BOOL FChecksumFile(
     cblockMax               = 0;
     cblockCurr              = 0;
 
+    //  create a file system with our desired IO characteristics
 
     class CFileSystemConfiguration : public CDefaultFileSystemConfiguration
     {
@@ -417,21 +444,26 @@ BOOL FChecksumFile(
 
     Call( ErrOSFSCreate( &fsconfig, &pfsapi ) );
 
+    //  create the task manager
 
     Call( taskmgr.ErrTMInit( cblocks, NULL, fTrue ) );
 
+    //  open the file
 
     Call( pfsapi->ErrFileOpen( szFile, IFileAPI::fmfReadOnlyPermissive, &pfapi ) );
 
+    //  get the size of the file
 
     Call( pfapi->ErrSize( &cbSize, IFileAPI::filesizeLogical ) );
 
+    //  see if we're restricted to checking up to a specified size
 
     cbSize = cPagesToChecksum == 0 ? cbSize : min( cbSize, QWORD( g_cbPage ) * cPagesToChecksum );
 
     cpageMax    = (DWORD)( cbSize / g_cbPage );
     cblockMax   = ( cpageMax + g_cpagesPerBlock - 1 ) / g_cpagesPerBlock;
 
+    //  checksum the file using async IO with a fixed queue depth
 
     hrtFirstIO = HrtHRTCount();
 
@@ -455,6 +487,8 @@ BOOL FChecksumFile(
 
     InitStatus( L"Checksum Status (% complete)" );
 
+    //  wait until the io is done
+    //  wake up to update the status bar
 
     while ( iblockio > 0 )
     {
@@ -477,6 +511,11 @@ BOOL FChecksumFile(
 
     fSuccess = FChecksumCorrect( &checksumstats );
 
+    //  by default we return FALSE if a checksum mismatch was detected,
+    //  but if a separate flag was passed in to detect checksum
+    //  mismatches, then always return TRUE if we got this far,
+    //  and report checksum mismatches in the flag
+    //
     if ( NULL != pfBadPagesDetected )
     {
         *pfBadPagesDetected = !fSuccess;

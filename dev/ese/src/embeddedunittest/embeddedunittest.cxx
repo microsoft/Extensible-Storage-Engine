@@ -1,5 +1,7 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
+// Formerly known as 'jettest.exe', this is used to execute unit tests
+// that are embedded in ese.dll/esent.dll
 
 #if defined(BUILD_ENV_IS_NT) || defined(BUILD_ENV_IS_WPHONE)
 #include "esent_x.h"
@@ -21,6 +23,9 @@ void OSTestReportErr( ULONG ulLine, const char *szFileName )
 }
 
 
+//  This is OS Layer Unit test Call/CallJ macros, because sometimes we want
+//  to test the Call()/CallJ()/etc macros as they're part of the OS Layer.
+//
 
 #define OSTestCallConditionJ( condition, label )            \
 {                                                           \
@@ -50,13 +55,15 @@ void OSTestReportErr( ULONG ulLine, const char *szFileName )
 #define OSTestCall( func )                      OSTestCallJ( func, HandleError )
 
 
+//  ================================================================
 void GetTimes(
     LARGE_INTEGER * const psystemTime,
     LARGE_INTEGER * const pkernelTime,
     LARGE_INTEGER * const puserTime )
+//  ================================================================
 {
-    FILETIME creationTime;
-    FILETIME exitTime;
+    FILETIME creationTime;  // ignored
+    FILETIME exitTime;      // ignored
     FILETIME kernelTime;
     FILETIME userTime;
     GetProcessTimes( GetCurrentProcess(), &creationTime, &exitTime, &kernelTime, &userTime );
@@ -71,7 +78,13 @@ void GetTimes(
     psystemTime->HighPart   = systemTime.dwHighDateTime;
 }
 
+//  ================================================================
 double TimeDifference( const LARGE_INTEGER& start, const LARGE_INTEGER& end )
+//  ================================================================
+//
+//  Returns the time difference as a double.
+//
+//-
 {
     const LONGLONG diff = end.QuadPart - start.QuadPart;
     return (double)diff / 10000000.0;
@@ -79,7 +92,9 @@ double TimeDifference( const LARGE_INTEGER& start, const LARGE_INTEGER& end )
 
 extern BOOL g_fDisablePerfmon;
 
+//  ================================================================
 void PrintHelpEmbeddedUnitTest( _In_ const char* szExecutable )
+//  ================================================================
 {
     printf( "Usage: %s <args>\n", szExecutable );
     printf( "   <blank>              Executes all non-persisted tests\n"
@@ -91,24 +106,33 @@ void PrintHelpEmbeddedUnitTest( _In_ const char* szExecutable )
             );
 }
 
+//  ================================================================
 JET_ERR ErrConfigureDatabase(
     _Out_ JET_INSTANCE* pinst,
     _Out_ JET_DBID* pdbid,
     _Out_ JET_SESID* psesid
     )
+//  ================================================================
 {
     JET_ERR err = JET_errSuccess;
+    //  Global Params
+    //
 
     OSTestCall( JetSetSystemParameterW( pinst, JET_sesidNil, JET_paramDatabasePageSize, 4 * 1024, NULL ) );
 
+    //  Create the test instance
 
     OSTestCall( JetCreateInstanceW( pinst, L"KVPStoreInst" ) );
 
+    //  Inst Params
+    //
 
     OSTestCall( JetSetSystemParameterW( pinst, JET_sesidNil, JET_paramRecovery, 0, L"off" ) );
     OSTestCall( JetSetSystemParameterW( pinst, JET_sesidNil, JET_paramMaxTemporaryTables, 0, NULL ) );
     OSTestCall( JetSetSystemParameterW( pinst, JET_sesidNil, JET_paramBaseName, 0, L"kvp" ) );
 
+    //  Create the database so we can run the DB based unit test
+    //
 
     OSTestCall( JetInit( pinst ) );
     OSTestCall( JetBeginSessionW( *pinst, psesid, NULL, NULL ) );
@@ -119,9 +143,11 @@ HandleError:
     return err;
 }
 
+//  ================================================================
 JET_ERR ErrExecutePersistedDatabaseUnitTests(
     _In_opt_ PCSTR szTestToRun
 )
+//  ================================================================
 {
     JET_ERR err = JET_errSuccess;
     JET_INSTANCE inst = JET_instanceNil;
@@ -135,6 +161,8 @@ JET_ERR ErrExecutePersistedDatabaseUnitTests(
         goto HandleError;
     }
 
+    //  Create the arg to specify the KVPStore unit tests we want to run
+    //
 
     JET_TESTHOOKUNITTEST2 jettest;
     jettest.cbStruct = sizeof(jettest);
@@ -149,7 +177,10 @@ JET_ERR ErrExecutePersistedDatabaseUnitTests(
     }
 
 HandleError:
+    //  Cleanup ourselves cleanly (note does not delete DB)
+    //
 
+    // if test went ok, promote cleanup errors to be return instead
     JET_ERR errCleanup;
 
     errCleanup = JetCloseDatabase( sesid, dbid, JET_bitNil );
@@ -174,10 +205,14 @@ HandleError:
 INT ErrSetTestConfigStore()
 {
     JET_INSTANCE instNil = JET_instanceNil;
+    // Note: This path HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\ESE2_EmbeddedUnitTest_Temp is just something 
+    // that accept has to agree upon before running EmbeddedUnitTest.
     return JetSetSystemParameterW( &instNil, JET_sesidNil, JET_paramConfigStoreSpec, 0, L"reg:HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\ESE2_EmbeddedUnitTest_Temp" );
 }
 
+//  ================================================================
 INT __cdecl main( INT argc, __in_ecount(argc) char * argv[] )
+//  ================================================================
 {
     LARGE_INTEGER systemTimeStart;
     LARGE_INTEGER kernelTimeStart;
@@ -188,6 +223,7 @@ INT __cdecl main( INT argc, __in_ecount(argc) char * argv[] )
     err = ErrSetTestConfigStore();
     if ( err == JET_errFileNotFound )
     {
+        //  Just means the key is not present, that's not a blocker, just no overrides in that case.
         err = JET_errSuccess;
     }
 
@@ -195,13 +231,15 @@ INT __cdecl main( INT argc, __in_ecount(argc) char * argv[] )
         && ( argv[ 1 ][ 0 ] == '-' || argv[ 1 ][ 0 ] == '/' )
          && ( argv[ 1 ][ 1 ] == '?' || argv[ 1 ][ 1 ] == 'h' ) )
     {
+        // Asked for help, just print all the tests.
         PrintHelpEmbeddedUnitTest( argv[ 0 ] );
 
         err = JetTestHook( opTestHookUnitTests, "-?" );
     }
-    else if ( ( 1 == argc )
-              || ( 2 == argc && 0 == strcmp( "*", argv[ 1 ] ) ) )
+    else if ( ( 1 == argc )   // No arguments, execute all of the tests.
+              || ( 2 == argc && 0 == strcmp( "*", argv[ 1 ] ) ) ) // Explicitly want all tests.
     {
+        // Execute all of the tests.
         err = JetTestHook( opTestHookUnitTests, "*" );
     }
     else if ( 0 == strcmp( "-database", argv[ 1 ] ) )
@@ -210,6 +248,7 @@ INT __cdecl main( INT argc, __in_ecount(argc) char * argv[] )
     }
     else
     {
+        // Execute the list of user-specified tests.
         for( INT i = 1; i < argc; ++i )
         {
             const JET_ERR errT = JetTestHook( opTestHookUnitTests, argv[i] );

@@ -14,9 +14,11 @@ class CFileFromMemory : public IFileAPI
 {
 public:
 
+    // constructors/destructors
     CFileFromMemory( __in_bcount( cbData ) BYTE *pbData, QWORD cbData, __in PCWSTR wszPath );
     virtual ~CFileFromMemory();
 
+    // IFileAPI methods
     FileModeFlags Fmf() const override { AssertSz( fFalse, "NYI!" ); return IFileAPI::fmfNone; }
     ERR ErrPath( _Out_bytecap_c_(cbOSFSAPI_MAX_PATHW) WCHAR* const wszAbsPath ) override;
     ERR ErrSize(

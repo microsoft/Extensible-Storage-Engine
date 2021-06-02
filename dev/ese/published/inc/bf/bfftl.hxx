@@ -4,24 +4,30 @@
 #ifndef _BFFTL_HXX_INCLUDED
 #define _BFFTL_HXX_INCLUDED
 
+// BFFTL Enable/Disable Macro
+// This macros will wrap BFFTL operations to empower us 
+// to enable/disable BFFTL funcationalities
 
 #ifdef MINIMAL_FUNCTIONALITY
 #define BFFTLOpt( x ) JET_errSuccess
-#else
+#else  //  !MINIMAL_FUNCTIONALITY
 #define BFFTLOpt( x ) x
-#endif
+#endif  //  MINIMAL_FUNCTIONALITY
 
-enum BFTraceID
+enum BFTraceID  // bftid
 {
-    bftidInvalid        = 0,
+    bftidInvalid        = 0,    //  also used as a sentinel for the test mode of the driver.
 
+    //                  = eFTLFirstShortTrace /* 1 */,
     bftidTouch          = 1,
 
+    // reserved for other short traces
 
-    bftidFTLReserved    = 15,
+    //                  = eFTLLastShortTrace /* 14 */
+    bftidFTLReserved    = 15,   //  the FTL trace logging system reserves this trace ID from all clients
 
     bftidCache          = 21,
-    bftidTouchLong      = 22,
+    bftidTouchLong      = 22,   //  see also bftidTouch
     bftidVerifyInfo     = 23,
     bftidEvict          = 24,
     bftidSuperCold      = 25,
@@ -29,13 +35,15 @@ enum BFTraceID
     bftidWrite          = 27,
     bftidSetLgposModify = 28,
 
+    // reserved for other medium traces
 
+    //                  = eFTLLastMedTrace /* 127 */
     bftidSysResMgrInit  = 128,
     bftidSysResMgrTerm  = 129,
     bftidIfmpAtt        = 130,
     bftidIfmpPurge      = 131,
 
-    bftidMax
+    bftidMax    //  must be at end
 };
 
 
@@ -43,8 +51,8 @@ enum BFTraceID
 typedef struct BFTRACE_
 {
 public:
-    USHORT      traceid;
-    TICK        tick;
+    USHORT      traceid;    //  a BFTraceID identifying what event / trace occurred
+    TICK        tick;       //  tick (ms) time of the event / trace
 
     struct BFSysResMgrInit_
     {
@@ -58,47 +66,47 @@ public:
     };
     struct BFSysResMgrTerm_
     {
-        QWORD   ftTerm;
+        QWORD   ftTerm;         //  want absolute time of the term
     };
     struct BFTouch_
     {
-        BYTE    ifmp;
-        PGNO    pgno;
-        BYTE    bflt;
-        BYTE    clientType;
-        ULONG   pctPri;
+        BYTE    ifmp;           //  "dbid" of the touch
+        PGNO    pgno;           //  pgno of the touch
+        BYTE    bflt;           //  BFLatchType of the touch
+        BYTE    clientType;     //  Type of client touching the page
+        ULONG   pctPri;         //  Percent Cache Priority used for touch
         union
         {
             USHORT      flags;
             struct
             {
-                USHORT  fUseHistory:1;
-                USHORT  fNewPage:1;
-                USHORT  fNoTouch:1;
-                USHORT  fDBScan:1;
+                USHORT  fUseHistory:1;      //  If the history should be used
+                USHORT  fNewPage:1;         //  If this is a new page
+                USHORT  fNoTouch:1;         //  If the resource manager should capture this touch/request operation
+                USHORT  fDBScan:1;          //  If this operation is being originated by DBM
             };
         };
     };
     struct BFSuperCold_
     {
-        BYTE    ifmp;
-        PGNO    pgno;
+        BYTE    ifmp;       //  "dbid" of the supercold touch
+        PGNO    pgno;       //  pgno of the supercold touch
     };
     struct BFCache_
     {
-        BYTE    ifmp;
-        PGNO    pgno;
-        BYTE    bflt;
-        BYTE    clientType;
-        ULONG   pctPri;
+        BYTE    ifmp;           //  "dbid" of the cache page event
+        PGNO    pgno;           //  pgno of the cache page event
+        BYTE    bflt;           //  BFLatchType of the touch
+        BYTE    clientType;     //  Type of client caching the page
+        ULONG   pctPri;         //  Percent Cache Priority used for cache
         union
         {
             USHORT      flags;
             struct
             {
-                USHORT  fUseHistory:1;
-                USHORT  fNewPage:1;
-                USHORT  fDBScan:1;
+                USHORT  fUseHistory:1;  //  If the history should be used
+                USHORT  fNewPage:1;     //  If this is a new page
+                USHORT  fDBScan:1;      //  If this operation is being originated by DBM
             };
         };
     };
@@ -114,53 +122,56 @@ public:
         BOOL    fCurrentVersion;
         ERR     errBF;
         ULONG   bfef;
-        ULONG   pctPri;
+        ULONG   pctPri;         //  Percent Cache Priority used for evict (OBSOLETE, always 0)
     };
     struct BFDirty_
     {
-        BYTE    ifmp;
-        PGNO    pgno;
-        BYTE    bfdf;
-        ULONG   lgenModify;
-        USHORT  isecModify;
-        USHORT  ibModify;
+        BYTE    ifmp;       //  "dbid" of the page being dirtied
+        PGNO    pgno;       //  pgno of the page being dirtied
+        BYTE    bfdf;       //  dirty level
+        ULONG   lgenModify; //  log generation of the lgposModify
+        USHORT  isecModify; //  sector of the lgposModify
+        USHORT  ibModify;   //  offset within sector of the lgposModify
     };
     struct BFWrite_
     {
-        BYTE    ifmp;
-        PGNO    pgno;
-        BYTE    bfdf;
-        BYTE    iorp;
+        BYTE    ifmp;       //  "dbid" of the page being written
+        PGNO    pgno;       //  pgno of the page being written
+        BYTE    bfdf;       //  dirty level
+        BYTE    iorp;       //  primary reason for the write operation
     };
     struct BFSetLgposModify_
     {
-        BYTE    ifmp;
-        PGNO    pgno;
-        ULONG   lgenModify;
-        USHORT  isecModify;
-        USHORT  ibModify;
+        BYTE    ifmp;       //  "dbid" of the page being modified
+        PGNO    pgno;       //  pgno of the page being modified
+        ULONG   lgenModify; //  log generation of the lgposModify
+        USHORT  isecModify; //  sector of the lgposModify
+        USHORT  ibModify;   //  offset within sector of the lgposModify
     };
 
     union
     {
-        BFSysResMgrInit_    bfinit;
-        BFSysResMgrTerm_    bfterm;
-        BFTouch_            bftouch;
-        BFSuperCold_        bfsupercold;
-        BFCache_            bfcache;
-        BFVerify_           bfverify;
-        BFEvict_            bfevict;
-        BFDirty_            bfdirty;
-        BFWrite_            bfwrite;
-        BFSetLgposModify_   bfsetlgposmodify;
+        BFSysResMgrInit_    bfinit;             //  bftidSysResMgrInit
+        BFSysResMgrTerm_    bfterm;             //  bftidSysResMgrTerm
+        BFTouch_            bftouch;            //  bftidTouch
+        BFSuperCold_        bfsupercold;        //  bftidSuperCold
+        BFCache_            bfcache;            //  bftidCache
+        BFVerify_           bfverify;           //  bftidVerify
+        BFEvict_            bfevict;            //  bftidEvict
+        BFDirty_            bfdirty;            //  bftidDirty
+        BFWrite_            bfwrite;            //  bftidWrite
+        BFSetLgposModify_   bfsetlgposmodify;   //  bftidSetLgposModify
     };
 }
 BFTRACE;
 
+//
+//  Tracing Support
+//
 #ifdef MINIMAL_FUNCTIONALITY
-#else
+#else  //  !MINIMAL_FUNCTIONALITY
 extern CFastTraceLog* g_pbfftl;
-#endif
+#endif  //  MINIMAL_FUNCTIONALITY
 extern IOREASON g_iorBFTraceFile;
 
 INLINE ERR ErrBFIFTLSysResMgrInit(
@@ -205,8 +216,8 @@ INLINE ERR ErrBFIFTLTouch(
 {
     BFTRACE_::BFTouch_ bftouchlong;
 
-    Assert( bflt < 256 );
-    Assert( pctPriority < 0x80000000 );
+    Assert( bflt < 256 );   // stuffed into a byte
+    Assert( pctPriority < 0x80000000 ); // stuffed into a ULONG
 
     bftouchlong.ifmp = (BYTE)ifmp;
     bftouchlong.pgno = pgno;
@@ -234,8 +245,8 @@ INLINE ERR ErrBFIFTLCache(
 {
     BFTRACE_::BFCache_ bfcache;
 
-    Assert( bflt < 256 );
-    Assert( pctPriority < 0x80000000 );
+    Assert( bflt < 256 );   // stuffed into a byte
+    Assert( pctPriority < 0x80000000 ); // stuffed into a ULONG
 
     bfcache.ifmp = (BYTE)ifmp;
     bfcache.pgno = pgno;
@@ -334,5 +345,5 @@ INLINE ERR ErrBFIFTLSetLgposModify(
     return BFFTLOpt( g_pbfftl->ErrFTLTrace( bftidSetLgposModify, (BYTE*)&bfsetlgposmodify, sizeof(bfsetlgposmodify) ) );
 }
 
-#endif
+#endif  //  _BFFTL_HXX_INCLUDED
 

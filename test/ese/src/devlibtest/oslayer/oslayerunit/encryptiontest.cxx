@@ -5,7 +5,7 @@
 CUnitTest( Aes256Encryption, 0, "Test for AES256 Encryption" );
 ERR Aes256Encryption::ErrTest()
 {
-    COSLayerPreInit oslayer;
+    COSLayerPreInit oslayer; // FOSPreinit()
     JET_ERR err = JET_errSuccess;
     BYTE key[64];
     ULONG keySize;
@@ -13,11 +13,13 @@ ERR Aes256Encryption::ErrTest()
 
     Call( ErrOSInit() );
 
+    // Try null buffer
     wprintf( L"  Generate key: null buffer\n" );
     keySize = 0;
     OSTestCheckExpectedErr( JET_errBufferTooSmall, ErrOSCreateAes256Key( NULL, &keySize ) );
     OSTestCheck( keySize == 49 );
 
+    // Try too small key buffer
     wprintf( L"  Generate key: small buffer\n" );
     keySize = 4;
     OSTestCheckExpectedErr( JET_errBufferTooSmall, ErrOSCreateAes256Key( key, &keySize ) );
@@ -27,6 +29,7 @@ ERR Aes256Encryption::ErrTest()
     OSTestCheckExpectedErr( JET_errBufferTooSmall, ErrOSCreateAes256Key( key, &keySize ) );
     OSTestCheck( keySize == 49 );
 
+    // Try big enough key buffer
     wprintf( L"  Generate key: good buffer\n" );
     keySize = 49;
     OSTestCheckErr( ErrOSCreateAes256Key( key, &keySize ) );
@@ -54,15 +57,18 @@ ERR Aes256Encryption::ErrTest()
 
         wprintf( L"    data size %d\n", dataLength );
 
+        // Too small buffer
         wprintf( L"      Too small buffer\n" );
         OSTestCheckExpectedErr( JET_errBufferTooSmall, ErrOSEncryptWithAes256( pbData, &dataLength, cbNeeded - 1, key, keySize ) );
         OSTestCheck( dataLength == cbNeeded );
 
+        // Just right
         wprintf( L"      Just Right buffer\n" );
         dataLength = sizesToTry[i];
         OSTestCheckErr( ErrOSEncryptWithAes256( pbData, &dataLength, cbNeeded, key, keySize ) );
         OSTestCheck( dataLength == cbNeeded );
 
+        // decrypt
         wprintf( L"      Decrypt\n" );
         OSTestCheckErr( ErrOSDecryptWithAes256( pbData, pbData2, &dataLength, key, keySize ) );
         OSTestCheck( dataLength == sizesToTry[i] );
@@ -71,6 +77,7 @@ ERR Aes256Encryption::ErrTest()
             OSTestCheck( pbData2[j] == j % 256 );
         }
 
+        // Use unaligned buffer
         wprintf( L"      Decrypt: unaligned buffer\n" );
         dataLength = sizesToTry[i];
         for ( j=0; j<dataLength; j++ )
@@ -86,6 +93,7 @@ ERR Aes256Encryption::ErrTest()
             OSTestCheck( pbData2[j+1] == j % 256 );
         }
 
+        // decrypt with wrong key
         wprintf( L"      Decrypt: wrong key\n" );
         dataLength = sizesToTry[i];
         for ( j=0; j<dataLength; j++ )
@@ -97,6 +105,7 @@ ERR Aes256Encryption::ErrTest()
         OSTestCheckErr( ErrOSCreateAes256Key( wrongKey, &keySize ) );
         OSTestCheckExpectedErr( JET_errDecryptionFailed, ErrOSDecryptWithAes256( pbData, pbData2, &dataLength, wrongKey, keySize ) );
 
+        // decrypt with corrupt key
         wprintf( L"      Decrypt: corrupt key\n" );
         dataLength = sizesToTry[i];
         for ( j=0; j<dataLength; j++ )
@@ -108,6 +117,7 @@ ERR Aes256Encryption::ErrTest()
         wrongKey[48] ^= 0xff;
         OSTestCheckExpectedErr( JET_errInvalidParameter, ErrOSDecryptWithAes256( pbData, pbData2, &dataLength, wrongKey, keySize ) );
 
+        // corrupt IV at end of data
         wprintf( L"      Decrypt: corrupt IV\n" );
         dataLength = sizesToTry[i];
         for ( j=0; j<dataLength; j++ )
@@ -119,6 +129,7 @@ ERR Aes256Encryption::ErrTest()
         pbData[ dataLength - 1 ] ^= 0xff;
         OSTestCheckExpectedErr( JET_errDecryptionFailed, ErrOSDecryptWithAes256( pbData, pbData2, &dataLength, key, keySize ) );
 
+        // corrupt version at end of data
         wprintf( L"      Decrypt: corrupt checksum\n" );
         dataLength = sizesToTry[i];
         for ( j=0; j<dataLength; j++ )
@@ -130,6 +141,7 @@ ERR Aes256Encryption::ErrTest()
         pbData[ dataLength - 17 ] ^= 0xff;
         OSTestCheckExpectedErr( JET_errInvalidParameter, ErrOSDecryptWithAes256( pbData, pbData2, &dataLength, key, keySize ) );
 
+        // corrupt checksum at end of data
         wprintf( L"      Decrypt: corrupt checksum\n" );
         dataLength = sizesToTry[i];
         for ( j=0; j<dataLength; j++ )
@@ -141,6 +153,7 @@ ERR Aes256Encryption::ErrTest()
         pbData[ dataLength - 18 ] ^= 0xff;
         OSTestCheckExpectedErr( JET_errDecryptionFailed, ErrOSDecryptWithAes256( pbData, pbData2, &dataLength, key, keySize ) );
 
+        // corrupt data
         wprintf( L"      Decrypt: corrupt data\n" );
         dataLength = sizesToTry[i];
         for ( j=0; j<dataLength; j++ )
@@ -152,6 +165,7 @@ ERR Aes256Encryption::ErrTest()
         pbData[ 0 ] ^= 0xff;
         OSTestCheckExpectedErr( JET_errDecryptionFailed, ErrOSDecryptWithAes256( pbData, pbData2, &dataLength, key, keySize ) );
 
+        // truncate buffer
         wprintf( L"      Decrypt: truncate buffer\n" );
         dataLength = sizesToTry[i];
         for ( j=0; j<dataLength; j++ )
@@ -163,6 +177,7 @@ ERR Aes256Encryption::ErrTest()
         dataLength -= 8;
         OSTestCheckExpectedErr( JET_errInvalidParameter, ErrOSDecryptWithAes256( pbData, pbData2, &dataLength, key, keySize ) );
 
+        // buffer too big
         wprintf( L"      Decrypt: buffer too big\n" );
         dataLength = sizesToTry[i];
         for ( j=0; j<dataLength; j++ )
@@ -230,7 +245,7 @@ HandleError:
 CUnitTest( Aes256EncryptionMultiThreaded, 0, "Test for AES256 Encryption from multiple threads" );
 ERR Aes256EncryptionMultiThreaded::ErrTest()
 {
-    COSLayerPreInit oslayer;
+    COSLayerPreInit oslayer; // FOSPreinit()
     JET_ERR err = JET_errSuccess;
     const INT NumThreads = 4;
     HANDLE hThreads[ NumThreads ];
@@ -258,7 +273,7 @@ HandleError:
 CUnitTest( Aes256EncryptionWrongKey, 0, "Test for AES256 Encryption and decryption with wrong key" );
 ERR Aes256EncryptionWrongKey::ErrTest()
 {
-    COSLayerPreInit oslayer;
+    COSLayerPreInit oslayer; // FOSPreinit()
     JET_ERR err = JET_errSuccess;
 
     Call( ErrOSInit() );

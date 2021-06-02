@@ -5,11 +5,13 @@
 
 #ifndef ENABLE_JET_UNIT_TEST
 #error This file should only be compiled with the unit tests!
-#endif
+#endif // !ENABLE_JET_UNIT_TEST
 
 #include "PageSizeClean.hxx"
 
+//  ================================================================
 class TestCPageValidationAction : public IPageValidationAction
+//  ================================================================
 {
 public:
     TestCPageValidationAction() { Reset(); }
@@ -91,7 +93,9 @@ public:
     Action m_action;
 };
 
+//  ================================================================
 JETUNITTEST ( CPAGE, PgftGetNextFlushType )
+//  ================================================================
 {
     CHECK( CPAGE::pgftRockWrite == CPAGE::PgftGetNextFlushType( CPAGE::pgftUnknown ) );
     CHECK( CPAGE::pgftPaperWrite == CPAGE::PgftGetNextFlushType( CPAGE::pgftRockWrite ) );
@@ -99,7 +103,9 @@ JETUNITTEST ( CPAGE, PgftGetNextFlushType )
     CHECK( CPAGE::pgftRockWrite == CPAGE::PgftGetNextFlushType( CPAGE::pgftScissorsWrite ) );
 }
 
+//  ================================================================
 JETUNITTEST ( CPAGE, PageValidationLostFlushCheck )
+//  ================================================================
 {
 #ifndef RTM
     const bool fPreviouslySet = FNegTestSet( fCorruptingWithLostFlush );
@@ -116,30 +122,35 @@ JETUNITTEST ( CPAGE, PageValidationLostFlushCheck )
     CHECK( JET_errSuccess == flushmap.ErrInitFlushMap() );
     CHECK( JET_errSuccess == flushmap.ErrSetFlushMapCapacity( pgno ) );
 
+    // Basic case.
     flushmap.SetPgnoFlushType( pgno, CPAGE::pgftRockWrite );
     cpage.PreparePageForWrite( CPAGE::pgftRockWrite );
     CHECK( JET_errSuccess == cpage.ErrValidatePage( pgvfDoNotCheckForLostFlush, &nullaction, &flushmap ) );
     CHECK( JET_errSuccess == cpage.ErrValidatePage( pgvfDoNotCheckForLostFlush, &nullaction, NULL ) );
     CHECK( JET_errSuccess == cpage.ErrValidatePage( pgvfDefault, &nullaction, &flushmap ) );
 
+    // Change page state.
     flushmap.SetPgnoFlushType( pgno, CPAGE::pgftRockWrite );
     cpage.PreparePageForWrite( CPAGE::pgftPaperWrite );
     CHECK( JET_errSuccess == cpage.ErrValidatePage( pgvfDoNotCheckForLostFlush, &nullaction, &flushmap ) );
     CHECK( JET_errSuccess == cpage.ErrValidatePage( pgvfDoNotCheckForLostFlush, &nullaction, NULL ) );
     CHECK( JET_errReadLostFlushVerifyFailure == cpage.ErrValidatePage( pgvfDefault, &nullaction, &flushmap ) );
 
+    // Change flush map state.
     flushmap.SetPgnoFlushType( pgno, CPAGE::pgftPaperWrite );
     cpage.PreparePageForWrite( CPAGE::pgftRockWrite );
     CHECK( JET_errSuccess == cpage.ErrValidatePage( pgvfDoNotCheckForLostFlush, &nullaction, &flushmap ) );
     CHECK( JET_errSuccess == cpage.ErrValidatePage( pgvfDoNotCheckForLostFlush, &nullaction, NULL ) );
     CHECK( JET_errReadLostFlushVerifyFailure == cpage.ErrValidatePage( pgvfDefault, &nullaction, &flushmap ) );
 
+    // Page state is unknown.
     flushmap.SetPgnoFlushType( pgno, CPAGE::pgftRockWrite );
     cpage.PreparePageForWrite( CPAGE::pgftUnknown );
     CHECK( JET_errSuccess == cpage.ErrValidatePage( pgvfDoNotCheckForLostFlush, &nullaction, &flushmap ) );
     CHECK( JET_errSuccess == cpage.ErrValidatePage( pgvfDoNotCheckForLostFlush, &nullaction, NULL ) );
     CHECK( JET_errSuccess == cpage.ErrValidatePage( pgvfDefault, &nullaction, &flushmap ) );
 
+    // Flush map state is unknown.
     flushmap.SetPgnoFlushType( pgno, CPAGE::pgftUnknown );
     cpage.PreparePageForWrite( CPAGE::pgftRockWrite );
     CHECK( JET_errSuccess == cpage.ErrValidatePage( pgvfDoNotCheckForLostFlush, &nullaction, &flushmap ) );
@@ -151,7 +162,9 @@ JETUNITTEST ( CPAGE, PageValidationLostFlushCheck )
 #endif
 }
 
+//  ================================================================
 JETUNITTEST ( CPAGE, PageValidationLostFlushCheckInconsistentFlushMapDbTime )
+//  ================================================================
 {
 #ifndef RTM
     const bool fPreviouslySet = FNegTestSet( fCorruptingWithLostFlush );
@@ -168,6 +181,7 @@ JETUNITTEST ( CPAGE, PageValidationLostFlushCheckInconsistentFlushMapDbTime )
     CHECK( JET_errSuccess == flushmap.ErrInitFlushMap() );
     CHECK( JET_errSuccess == flushmap.ErrSetFlushMapCapacity( pgno ) );
 
+    // Must be able to detect with a consistent DBTIME.
     cpage.SetDbtime( 100 );
     flushmap.SetPgnoFlushType( pgno, CPAGE::pgftRockWrite, cpage.Dbtime() );
     flushmap.SetPgnoFlushType( pgno + 1, CPAGE::pgftPaperWrite, cpage.Dbtime() );
@@ -176,12 +190,14 @@ JETUNITTEST ( CPAGE, PageValidationLostFlushCheckInconsistentFlushMapDbTime )
     cpage.PreparePageForWrite( CPAGE::pgftScissorsWrite );
     CHECK( JET_errReadLostFlushVerifyFailure == cpage.ErrValidatePage( pgvfDefault, &nullaction, &flushmap ) );
 
+    // Must not be able to detect with an inconsistent DBTIME.
     cpage.SetDbtime( 101 );
     cpage.PreparePageForWrite( CPAGE::pgftScissorsWrite );
     CHECK( CPAGE::pgftRockWrite == flushmap.PgftGetPgnoFlushType( pgno ) );
     CHECK( CPAGE::pgftPaperWrite == flushmap.PgftGetPgnoFlushType( pgno + 1 ) );
     CHECK( JET_errSuccess == cpage.ErrValidatePage( pgvfDefault, &nullaction, &flushmap ) );
 
+    // Flush page has been invalidated.
     CHECK( CPAGE::pgftUnknown == flushmap.PgftGetPgnoFlushType( pgno ) );
     CHECK( CPAGE::pgftUnknown == flushmap.PgftGetPgnoFlushType( pgno + 1 ) );
 
@@ -190,7 +206,9 @@ JETUNITTEST ( CPAGE, PageValidationLostFlushCheckInconsistentFlushMapDbTime )
 #endif
 }
 
+//  ================================================================
 JETUNITTEST ( CPAGE, PageValidationLostFlushCheckRuntimeDetection )
+//  ================================================================
 {
 #ifndef RTM
     const bool fPreviouslySet = FNegTestSet( fCorruptingWithLostFlush );
@@ -209,8 +227,10 @@ JETUNITTEST ( CPAGE, PageValidationLostFlushCheckRuntimeDetection )
     cpage.LoadNewTestPage( 4096 );
     const PGNO pgno = cpage.PgnoThis();
 
+    // Make sure file doesn't exist.
     (void)pfsapi->ErrFileDelete( wszFmFilePath );
 
+    // Attach, terminate cleanly nad re-attach flush map to force state to be persisted.
     CFlushMapForUnattachedDb flushmap;
     flushmap.SetFmFilePath( wszFmFilePath );
     flushmap.SetPersisted( fTrue );
@@ -228,22 +248,26 @@ JETUNITTEST ( CPAGE, PageValidationLostFlushCheckRuntimeDetection )
     CHECK( JET_errSuccess == flushmap.ErrInitFlushMap() );
     CHECK( CPAGE::pgftRockWrite == flushmap.PgftGetPgnoFlushType( pgno ) );
 
+    // Matching flush type.
     cpage.PreparePageForWrite( CPAGE::pgftRockWrite );
     CHECK( JET_errSuccess == cpage.ErrValidatePage( pgvfDefault, &nullaction, &flushmap ) );
     CHECK( JET_errSuccess == cpage.ErrValidatePage( pgvfFailOnRuntimeLostFlushOnly, &nullaction, &flushmap ) );
     CHECK( CPAGE::pgftRockWrite == flushmap.PgftGetPgnoFlushType( pgno ) );
 
+    // Mismatching flush type.
     cpage.PreparePageForWrite( CPAGE::pgftPaperWrite );
     CHECK( JET_errReadLostFlushVerifyFailure == cpage.ErrValidatePage( pgvfDefault, &nullaction, &flushmap ) );
     CHECK( JET_errSuccess == cpage.ErrValidatePage( pgvfFailOnRuntimeLostFlushOnly, &nullaction, &flushmap ) );
     CHECK( CPAGE::pgftRockWrite == flushmap.PgftGetPgnoFlushType( pgno ) );
 
+    // Mismatching flush type, but state is now 'runtime'.
     cpage.PreparePageForWrite( CPAGE::pgftPaperWrite );
     flushmap.SetPgnoFlushType( pgno, CPAGE::pgftRockWrite );
     CHECK( JET_errReadLostFlushVerifyFailure == cpage.ErrValidatePage( pgvfDefault, &nullaction, &flushmap ) );
     CHECK( JET_errReadLostFlushVerifyFailure == cpage.ErrValidatePage( pgvfFailOnRuntimeLostFlushOnly, &nullaction, &flushmap ) );
     CHECK( CPAGE::pgftRockWrite == flushmap.PgftGetPgnoFlushType( pgno ) );
 
+    // Make it right again.
     cpage.PreparePageForWrite( CPAGE::pgftPaperWrite );
     flushmap.SetPgnoFlushType( pgno, CPAGE::pgftPaperWrite );
     CHECK( JET_errSuccess == cpage.ErrValidatePage( pgvfDefault, &nullaction, &flushmap ) );
@@ -261,7 +285,9 @@ JETUNITTEST ( CPAGE, PageValidationLostFlushCheckRuntimeDetection )
 #endif
 }
 
+//  ================================================================
 JETUNITTEST ( CPAGE, PageValidationLostFlushCheckRuntimeOnly )
+//  ================================================================
 {
 #ifndef RTM
     const bool fPreviouslySet = FNegTestSet( fCorruptingWithLostFlush );
@@ -280,8 +306,10 @@ JETUNITTEST ( CPAGE, PageValidationLostFlushCheckRuntimeOnly )
     cpage.LoadNewTestPage( 4096 );
     const PGNO pgno = cpage.PgnoThis();
 
+    // Make sure file doesn't exist.
     (void)pfsapi->ErrFileDelete( wszFmFilePath );
 
+    // Attach, terminate cleanly nad re-attach flush map to force state to be persisted.
     CFlushMapForUnattachedDb flushmap;
     flushmap.SetFmFilePath( wszFmFilePath );
     flushmap.SetPersisted( fTrue );
@@ -299,22 +327,26 @@ JETUNITTEST ( CPAGE, PageValidationLostFlushCheckRuntimeOnly )
     CHECK( JET_errSuccess == flushmap.ErrInitFlushMap() );
     CHECK( CPAGE::pgftRockWrite == flushmap.PgftGetPgnoFlushType( pgno ) );
 
+    // Matching flush type.
     cpage.PreparePageForWrite( CPAGE::pgftRockWrite );
     CHECK( JET_errSuccess == cpage.ErrValidatePage( pgvfDefault, &nullaction, &flushmap ) );
     CHECK( JET_errSuccess == cpage.ErrValidatePage( pgvfDoNotCheckForLostFlushIfNotRuntime, &nullaction, &flushmap ) );
     CHECK( CPAGE::pgftRockWrite == flushmap.PgftGetPgnoFlushType( pgno ) );
 
+    // Mismatching flush type.
     cpage.PreparePageForWrite( CPAGE::pgftPaperWrite );
     CHECK( JET_errReadLostFlushVerifyFailure == cpage.ErrValidatePage( pgvfDefault, &nullaction, &flushmap ) );
     CHECK( JET_errSuccess == cpage.ErrValidatePage( pgvfDoNotCheckForLostFlushIfNotRuntime, &nullaction, &flushmap ) );
     CHECK( CPAGE::pgftRockWrite == flushmap.PgftGetPgnoFlushType( pgno ) );
 
+    // Mismatching flush type, but state is now 'runtime'.
     cpage.PreparePageForWrite( CPAGE::pgftPaperWrite );
     flushmap.SetPgnoFlushType( pgno, CPAGE::pgftRockWrite );
     CHECK( JET_errReadLostFlushVerifyFailure == cpage.ErrValidatePage( pgvfDefault, &nullaction, &flushmap ) );
     CHECK( JET_errReadLostFlushVerifyFailure == cpage.ErrValidatePage( pgvfDoNotCheckForLostFlushIfNotRuntime, &nullaction, &flushmap ) );
     CHECK( CPAGE::pgftRockWrite == flushmap.PgftGetPgnoFlushType( pgno ) );
 
+    // Make it right again.
     cpage.PreparePageForWrite( CPAGE::pgftPaperWrite );
     flushmap.SetPgnoFlushType( pgno, CPAGE::pgftPaperWrite );
     CHECK( JET_errSuccess == cpage.ErrValidatePage( pgvfDefault, &nullaction, &flushmap ) );
@@ -332,8 +364,11 @@ JETUNITTEST ( CPAGE, PageValidationLostFlushCheckRuntimeOnly )
 #endif
 }
 
+//  ================================================================
 JETUNITTEST ( CPAGE, PageValidationSmall )
+//  ================================================================
 {
+    // ... was 4k
     const INT cbPage = 8 * 1024;
     BYTE * const pvBuffer = (BYTE*)PvOSMemoryPageAlloc( cbPage, NULL );
     CHECK( NULL != pvBuffer );
@@ -368,6 +403,8 @@ JETUNITTEST ( CPAGE, PageValidationSmall )
     CHECK( pgno == validationaction.m_pgno );
     CHECK( JET_errPageNotInitialized == validationaction.m_err );
     
+    //begin FPageIsInitialized test
+    //Change something to non-zero in PGHDR, should behave like initialized
     memset( (BYTE*)pvBuffer, 0xEC, 1);
     CHECK( cpage.FPageIsInitialized() );
     CHECK( JET_errReadVerifyFailure == cpage.ErrValidatePage( pgvfDoNotCheckForLostFlush, &validationaction ) );
@@ -376,6 +413,7 @@ JETUNITTEST ( CPAGE, PageValidationSmall )
     CHECK( JET_errReadVerifyFailure == validationaction.m_err );
     memset( (BYTE*)pvBuffer, 0, 1 );
     
+    //Change something to non-zero in PGHDR2, should behave like initialized
     memset( (BYTE*)pvBuffer+sizeof(CPAGE::PGHDR), 0xEC, 1);
     CHECK( cpage.FPageIsInitialized() );
     CHECK( JET_errReadVerifyFailure == cpage.ErrValidatePage( pgvfDoNotCheckForLostFlush, &validationaction ) );
@@ -384,6 +422,7 @@ JETUNITTEST ( CPAGE, PageValidationSmall )
     CHECK( JET_errReadVerifyFailure == validationaction.m_err );
     memset( (BYTE*)pvBuffer+sizeof(CPAGE::PGHDR), 0, 1);
     
+    //Change something to non-zero at the beginning of data buffer, should behave like initialized
     memset( (BYTE*)pvBuffer+sizeof(CPAGE::PGHDR2), 0xEC, 1);
     CHECK( cpage.FPageIsInitialized() );
     CHECK( JET_errReadVerifyFailure == cpage.ErrValidatePage( pgvfDoNotCheckForLostFlush, &validationaction ) );
@@ -392,6 +431,7 @@ JETUNITTEST ( CPAGE, PageValidationSmall )
     CHECK( JET_errReadVerifyFailure == validationaction.m_err );
     memset( (BYTE*)pvBuffer+sizeof(CPAGE::PGHDR2), 0, 1 );
     
+    //Change something to non-zero at the end of data buffer, should behave like initialized
     memset( (BYTE*)pvBuffer+cbPage-1, 0xEC, 1 );
     CHECK( cpage.FPageIsInitialized() );
     CHECK( JET_errReadVerifyFailure == cpage.ErrValidatePage( pgvfDoNotCheckForLostFlush, &validationaction ) );
@@ -399,11 +439,12 @@ JETUNITTEST ( CPAGE, PageValidationSmall )
     CHECK( pgno == validationaction.m_pgno );
     CHECK( JET_errReadVerifyFailure == validationaction.m_err );
     memset( (BYTE*)pvBuffer+cbPage-1, 0, 1 );
+    //end FPageIsInitialized test
     
     cpage.UnloadPage();
     cpage.LoadNewPage( ifmp, pgno, 3, 0x0, pvBuffer, cbPage );
-    memset( (BYTE*)pvBuffer, 0xEC, 16  );
-    memset( (BYTE*)pvBuffer+sizeof(CPAGE::PGHDR2), 0xEC, cbPage-sizeof(CPAGE::PGHDR2)-8  );
+    memset( (BYTE*)pvBuffer, 0xEC, 16 /* approximate size of checksum */ );
+    memset( (BYTE*)pvBuffer+sizeof(CPAGE::PGHDR2), 0xEC, cbPage-sizeof(CPAGE::PGHDR2)-8 /* 2 * sizeof(CPAGE::TAG) */ );
     CHECK( cpage.FPageIsInitialized() );
     CHECK( cpage.FLoadedPage() );
     CHECK( JET_errReadVerifyFailure == cpage.ErrValidatePage( pgvfDoNotCheckForLostFlush, &validationaction ) );
@@ -411,9 +452,11 @@ JETUNITTEST ( CPAGE, PageValidationSmall )
     CHECK( pgno == validationaction.m_pgno );
     CHECK( JET_errReadVerifyFailure == validationaction.m_err );
 
+    // validate that checksumming works, and that the page valdiates ...
     SetPageChecksum( (BYTE *)pvBuffer, cbPage, databasePage, pgno );
     CHECK( JET_errSuccess == cpage.ErrValidatePage( pgvfDoNotCheckForLostFlush, &validationaction ) );
 
+    //  modify the buffer, corruping it ...
     pvBuffer[200] = ~pvBuffer[200];
 #ifndef RTM
     FNegTestSet( fCorruptingWithLostFlush );
@@ -423,6 +466,7 @@ JETUNITTEST ( CPAGE, PageValidationSmall )
     FNegTestSet( fPreviouslySet );
 #endif
 
+    //  validate all combinations of lost flush detection
     cpage.PreparePageForWrite( CPAGE::pgftRockWrite );
     flushmap.SetPgnoFlushType( pgno, CPAGE::pgftRockWrite );
     CHECK( JET_errSuccess                       == cpage.ErrValidatePage( pgvfDoNotCheckForLostFlush, &validationaction, &flushmap ) );
@@ -472,7 +516,9 @@ JETUNITTEST ( CPAGE, PageValidationSmall )
     OSMemoryPageFree(pvBuffer);
 }
 
+//  ================================================================
 JETUNITTEST ( CPAGE, PageValidationBig )
+//  ================================================================
 {
     const INT cbPage = 32 * 1024;
 
@@ -504,6 +550,8 @@ JETUNITTEST ( CPAGE, PageValidationBig )
     CHECK( pgno == validationaction.m_pgno );
     CHECK( JET_errPageNotInitialized == validationaction.m_err );
     
+    //begin FPageIsInitialized test
+    //Change something to non-zero in PGHDR, should behave like initialized
     memset( (BYTE*)pvBuffer, 0xEC, 1);
     CHECK( cpage.FPageIsInitialized() );
     CHECK( JET_errReadVerifyFailure == cpage.ErrValidatePage( pgvfDoNotCheckForLostFlush, &validationaction ) );
@@ -512,6 +560,7 @@ JETUNITTEST ( CPAGE, PageValidationBig )
     CHECK( JET_errReadVerifyFailure == validationaction.m_err );
     memset( (BYTE*)pvBuffer, 0, 1 );
     
+    //Change something to non-zero in PGHDR2, should behave like initialized
     memset( (BYTE*)pvBuffer+sizeof(CPAGE::PGHDR), 0xEC, 1);
     CHECK( cpage.FPageIsInitialized() );
     CHECK( JET_errReadVerifyFailure == cpage.ErrValidatePage( pgvfDoNotCheckForLostFlush, &validationaction ) );
@@ -520,6 +569,7 @@ JETUNITTEST ( CPAGE, PageValidationBig )
     CHECK( JET_errReadVerifyFailure == validationaction.m_err );
     memset( (BYTE*)pvBuffer+sizeof(CPAGE::PGHDR), 0, 1);
     
+    //Change something to non-zero at the beginning of data buffer, should behave like initialized
     memset( (BYTE*)pvBuffer+sizeof(CPAGE::PGHDR2), 0xEC, 1);
     CHECK( cpage.FPageIsInitialized() );
     CHECK( JET_errReadVerifyFailure == cpage.ErrValidatePage( pgvfDoNotCheckForLostFlush, &validationaction ) );
@@ -528,6 +578,7 @@ JETUNITTEST ( CPAGE, PageValidationBig )
     CHECK( JET_errReadVerifyFailure == validationaction.m_err );
     memset( (BYTE*)pvBuffer+sizeof(CPAGE::PGHDR2), 0, 1 );
     
+    //Change something to non-zero at the end of data buffer, should behave like initialized
     memset( (BYTE*)pvBuffer+cbPage-1, 0xEC, 1 );
     CHECK( cpage.FPageIsInitialized() );
     CHECK( JET_errReadVerifyFailure == cpage.ErrValidatePage( pgvfDoNotCheckForLostFlush, &validationaction ) );
@@ -535,11 +586,12 @@ JETUNITTEST ( CPAGE, PageValidationBig )
     CHECK( pgno == validationaction.m_pgno );
     CHECK( JET_errReadVerifyFailure == validationaction.m_err );
     memset( (BYTE*)pvBuffer+cbPage-1, 0, 1 );
+    //end FPageIsInitialized test
 
     cpage.UnloadPage();
     cpage.LoadNewPage( ifmp, pgno, 3, 0x0, pvBuffer, cbPage );
-    memset( (BYTE*)pvBuffer, 0xEC, 16  );
-    memset( (BYTE*)pvBuffer+sizeof(CPAGE::PGHDR2), 0xEC, cbPage-sizeof(CPAGE::PGHDR2)-8  );
+    memset( (BYTE*)pvBuffer, 0xEC, 16 /* approximate size of checksum */ );
+    memset( (BYTE*)pvBuffer+sizeof(CPAGE::PGHDR2), 0xEC, cbPage-sizeof(CPAGE::PGHDR2)-8 /* 2 * sizeof(CPAGE::TAG) */ );
     CHECK( cpage.FPageIsInitialized() );
     CHECK( cpage.FLoadedPage() );
     CHECK( JET_errReadVerifyFailure == cpage.ErrValidatePage( pgvfDoNotCheckForLostFlush, &validationaction ) );
@@ -547,6 +599,7 @@ JETUNITTEST ( CPAGE, PageValidationBig )
     CHECK( pgno == validationaction.m_pgno );
     CHECK( JET_errReadVerifyFailure == validationaction.m_err );
 
+    // validate that checksumming works, and that the page validates ...
     cpage.SetPgno( pgno );
     SetPageChecksum( (BYTE *)pvBuffer, cbPage, databasePage, pgno );
     CHECK( JET_errSuccess == cpage.ErrValidatePage( pgvfDoNotCheckForLostFlush, &validationaction ) );
@@ -554,6 +607,7 @@ JETUNITTEST ( CPAGE, PageValidationBig )
     Assert( 2 == pgno );
     CHECK( cpage.PgnoThis() == pgno );
 
+    // validate that the PGHDR2's pgno affects page validation functions correctly ...
     cpage.SetPgno( pgno * 2 );
     SetPageChecksum( (BYTE *)pvBuffer, cbPage, databasePage, pgno );
     CHECK( JET_errReadPgnoVerifyFailure == cpage.ErrValidatePage( pgvfDoNotCheckForLostFlush, &validationaction ) );
@@ -573,7 +627,9 @@ JETUNITTEST ( CPAGE, PageValidationBig )
     }
 #endif
 
+    //  set pgno back...
     cpage.SetPgno( pgno );
+    //  modify the buffer, corruping it ...
     pvBuffer[200] = ~pvBuffer[200];
 #ifndef RTM
     FNegTestSet( fCorruptingWithLostFlush );
@@ -583,6 +639,7 @@ JETUNITTEST ( CPAGE, PageValidationBig )
     FNegTestSet( fPreviouslySet );
 #endif
 
+    //  validate all combinations of lost flush detection
     cpage.PreparePageForWrite( CPAGE::pgftRockWrite );
     flushmap.SetPgnoFlushType( pgno, CPAGE::pgftRockWrite );
     CHECK( JET_errSuccess                       == cpage.ErrValidatePage( pgvfDoNotCheckForLostFlush, &validationaction, &flushmap ) );
@@ -632,8 +689,11 @@ JETUNITTEST ( CPAGE, PageValidationBig )
     OSMemoryPageFree(pvBuffer);
 }
 
+//  ================================================================
 JETUNITTEST ( CPAGE, ShrunkPageValidation4KB )
+//  ================================================================
 {
+    // ... was 4k
     const INT cbPage = 4 * 1024;
     BYTE * const pvBuffer = (BYTE*)PvOSMemoryPageAlloc( cbPage, NULL );
     CHECK( NULL != pvBuffer );
@@ -675,7 +735,9 @@ JETUNITTEST ( CPAGE, ShrunkPageValidation4KB )
     OSMemoryPageFree(pvBuffer);
 }
 
+//  ================================================================
 JETUNITTEST ( CPAGE, ShrunkPageValidation32KB )
+//  ================================================================
 {
     const INT cbPage = 32 * 1024;
     BYTE * const pvBuffer = (BYTE*)PvOSMemoryPageAlloc( cbPage, NULL );
@@ -720,6 +782,7 @@ JETUNITTEST ( CPAGE, ShrunkPageValidation32KB )
 
 JETUNITTESTEX( CPAGE, ConcurrentMultiPageSizedUsage, JetSimpleUnitTest::dwBufferManager )
 {
+    //  Playing it fast and loose with the word "concurrent" here
 
     const ULONG cbSmallPage = 4 * 1024;
     const ULONG cbLargePage = 32 * 1024;
@@ -740,15 +803,17 @@ JETUNITTESTEX( CPAGE, ConcurrentMultiPageSizedUsage, JetSimpleUnitTest::dwBuffer
     CHECK( JET_errSuccess == flushmap.ErrSetFlushMapCapacity( pgno ) );
 
 #ifdef DEBUG
+    // CbPage() public in debug to facilitate this check.
     CHECK( cpageSmall.CbPage() == cbSmallPage );
     CHECK( cpageLarge.CbPage() == cbLargePage );
 #endif
 
+    //  now insert several nodes
 
     BYTE rgbData[1000];
     memset( rgbData, 0x3c, sizeof(rgbData) );
     USHORT * pus = (USHORT*)rgbData;
-    pus[0] = 0x0004;
+    pus[0] = 0x0004;    // set suffix cb to reasonable value
 
     for( INT i = 0; i < 4; ++i )
     {
@@ -759,10 +824,12 @@ JETUNITTESTEX( CPAGE, ConcurrentMultiPageSizedUsage, JetSimpleUnitTest::dwBuffer
         cpageLarge.Insert( i%3, &data, 1, 0 );
     }
 
+    //  Small page should be almost all used up, large page should be barely used up.
 
     CHECK( cpageSmall.CbPageFree() < 100 );
     CHECK( cpageLarge.CbPageFree() > 27 * 1024 );
 
+    //  Bloat the large page a little more
 
     for( INT i = 0; i < 8; ++i )
     {
@@ -772,16 +839,18 @@ JETUNITTESTEX( CPAGE, ConcurrentMultiPageSizedUsage, JetSimpleUnitTest::dwBuffer
         cpageLarge.Insert( 2+i, &data, 1, 0 );
     }
 
+    //  Scrub out a few nodes on the 2 pages
 
     cpageSmall.Delete( 1 );
     cpageLarge.Delete( 2 );
     cpageLarge.Delete( 10 );
 
-    CHECK( cpageSmall.CbPageFree() > 1004  );
+    CHECK( cpageSmall.CbPageFree() > 1004 /* should be able to fit another node now */ );
 
     CHECK( JET_errSuccess == cpageSmall.ErrCheckPage( CPRINTFDBGOUT::PcprintfInstance(), CPAGE::OnErrorReturnError, CPAGE::CheckTagsNonOverlapping ) );
     CHECK( JET_errSuccess == cpageLarge.ErrCheckPage( CPRINTFDBGOUT::PcprintfInstance(), CPAGE::OnErrorReturnError, CPAGE::CheckTagsNonOverlapping ) );
 
+    //  We've now created gaps, insert enough data to trigger page re-organization.
 
     for( INT i = 0; i < 22; ++i )
     {
@@ -799,6 +868,7 @@ JETUNITTESTEX( CPAGE, ConcurrentMultiPageSizedUsage, JetSimpleUnitTest::dwBuffer
 
     CHECK( cpageSmall.CbPageFree() < 100 );
 
+    //  validate writing functions work on 2 pages at once
 
     cpageSmall.PreparePageForWrite( CPAGE::pgftRockWrite );
     cpageLarge.PreparePageForWrite( CPAGE::pgftRockWrite );
@@ -813,6 +883,7 @@ JETUNITTESTEX( CPAGE, ConcurrentMultiPageSizedUsage, JetSimpleUnitTest::dwBuffer
 
 }
 
+//  returns true if all chars are the target ch
 
 BOOL memchk( __in const void * pv, __in char ch, __in const ULONG cb )
 {
@@ -844,10 +915,12 @@ JETUNITTESTEX( CPAGE, PageHydrationBasic32KB, JetSimpleUnitTest::dwBufferManager
     CHECK( JET_errSuccess == flushmap.ErrSetFlushMapCapacity( pgno ) );
 
 #ifdef DEBUG
+    // CbPage() public in debug to facilitate this check.
     CHECK( cpage.CbPage() == cbPage );
 #endif
     CHECK( cpage.FIsNormalSized() );
 
+    //  now insert several nodes
 
     BYTE rgbData[1000];
 
@@ -865,13 +938,14 @@ JETUNITTESTEX( CPAGE, PageHydrationBasic32KB, JetSimpleUnitTest::dwBufferManager
             memset( rgbData, 'a' + i - 10, sizeof(rgbData) );
         }
         USHORT * pus = (USHORT*)rgbData;
-        pus[0] = 0x0003;
+        pus[0] = 0x0003;    // set suffix cb to reasonable value
 
         cpage.Insert( i, &data, 1, 0 );
     }
 
     CHECK( cpage.CbPageFree() > 20 * 1024 );
 
+    //  Page is only 12k full, should be dehydratable
 
     CHECK( cpage.FPageIsDehydratable( &cbNextSize ) );
 
@@ -881,10 +955,11 @@ JETUNITTESTEX( CPAGE, PageHydrationBasic32KB, JetSimpleUnitTest::dwBufferManager
     CHECK( cbBuffer == 16 * 1024 );
 #else
     CHECK( cbBuffer == 12 * 1024 );
-#endif
+#endif // _IA64_
 
     const PAGECHECKSUM pgchk = cpage.LoggedDataChecksum();
 
+    //  Now try to dehydrate the page
 
     cpage.DehydratePage( cbBuffer, fFalse );
 
@@ -893,14 +968,18 @@ JETUNITTESTEX( CPAGE, PageHydrationBasic32KB, JetSimpleUnitTest::dwBufferManager
     CHECK( cpage.CbBuffer() == 16 * 1024 );
 #else
     CHECK( cpage.CbBuffer() == 12 * 1024 );
-#endif
+#endif // _IA64_
 #endif
     CHECK( JET_errSuccess == cpage.ErrCheckPage( CPRINTFDBGOUT::PcprintfInstance(), CPAGE::OnErrorReturnError, CPAGE::CheckTagsNonOverlapping ) );
     CHECK( !cpage.FPageIsDehydratable( &cbNextSize ) );
     CHECK( !cpage.FIsNormalSized() );
+// not public
+//  CHECK( cpage.CbFree_() < 1000 );
     CHECK( cpage.CbPageFree() > 20 * 1024 );
     CHECK( pgchk == cpage.LoggedDataChecksum() );
 
+    //  Check that basic read functions work while the page is dehydrated.
+    //
 
     LINE line;
 
@@ -909,6 +988,9 @@ JETUNITTESTEX( CPAGE, PageHydrationBasic32KB, JetSimpleUnitTest::dwBufferManager
     
     cpage.GetPtr( 1, &line );
     CHECK( sizeof(rgbData) == line.cb );
+    //  This is a vugly little issue ... we have to start checking 2 bytes in, because 
+    //  the CPAGE::TAG layer for large pages trashes the top 3 bits of the first USHORT.
+    //  Ugh!!
     CHECK( memchk( (BYTE*)line.pv+2, '1', line.cb-2 ) );
 
     cpage.GetPtr( 3, &line );
@@ -921,14 +1003,19 @@ JETUNITTESTEX( CPAGE, PageHydrationBasic32KB, JetSimpleUnitTest::dwBufferManager
 
     cpage.FRootPage();
 
+    //  Try setting some flags, doesn't need a hydrated page
+    //
 
     cpage.ReplaceFlags( 4, 0x1);
 
+    //  Should still be big.
 
-    CHECK( !cpage.FPageIsDehydratable( &cbNextSize, fFalse  ) );
+    CHECK( !cpage.FPageIsDehydratable( &cbNextSize, fFalse /* as long as we don't re-org */ ) );
     CHECK( cbNextSize >= 12 * 1024 );
     const PAGECHECKSUM pgchk2 = cpage.LoggedDataChecksum();
 
+    //  Alright, finally Rehydrate the page
+    //
 
     cpage.RehydratePage();
 
@@ -939,6 +1026,7 @@ JETUNITTESTEX( CPAGE, PageHydrationBasic32KB, JetSimpleUnitTest::dwBufferManager
     CHECK( JET_errSuccess == cpage.ErrCheckPage( CPRINTFDBGOUT::PcprintfInstance(), CPAGE::OnErrorReturnError, CPAGE::CheckTagsNonOverlapping ) );
     CHECK( pgchk2 == cpage.LoggedDataChecksum() );
 
+    //  Try deletes, not necessary.
 
     cpage.Delete( 8 );
     cpage.Delete( 6 );
@@ -946,6 +1034,7 @@ JETUNITTESTEX( CPAGE, PageHydrationBasic32KB, JetSimpleUnitTest::dwBufferManager
     cpage.Delete( 4 );
     cpage.Delete( 4 );
 
+    //  Now reorg page, and validate ... so we can try to re-Dehydrate the page
 
     const void * pv1; size_t cb1; const void * pv2; size_t cb2;
     cpage.ReorganizePage( &pv1, &cb1, &pv2, &cb2 );
@@ -958,6 +1047,8 @@ JETUNITTESTEX( CPAGE, PageHydrationBasic32KB, JetSimpleUnitTest::dwBufferManager
     CHECK( sizeof(rgbData) == line.cb );
     CHECK( memchk( (BYTE*)line.pv+2, '3', line.cb-2 ) );
 
+    //  Dehydrate the page again, this time smaller than before
+    //
 
     CHECK( cpage.FPageIsDehydratable( &cbNextSize ) );
     CHECK( cbNextSize <= 8 * 1024 );
@@ -975,6 +1066,7 @@ JETUNITTESTEX( CPAGE, PageHydrationBasic32KB, JetSimpleUnitTest::dwBufferManager
 
     const PAGECHECKSUM pgchk4 = cpage.LoggedDataChecksum();
 
+    //  Rehydrate / expand page to allow more inserts
 
     cpage.RehydratePage();
 
@@ -1002,6 +1094,7 @@ JETUNITTESTEX( CPAGE, PageHydrationBasic32KB, JetSimpleUnitTest::dwBufferManager
 
     CHECK( !cpage.FPageIsDehydratable( &cbNextSize ) );
 
+    //  validate writing functions work on 2 pages at once
 
     cpage.PreparePageForWrite( CPAGE::pgftRockWrite );
     flushmap.SetPgnoFlushType( pgno, CPAGE::pgftRockWrite );
@@ -1020,9 +1113,10 @@ JETUNITTESTEX( CPAGE, EmptyPageDehydration16KB, JetSimpleUnitTest::dwBufferManag
 
     CPAGE cpage;
     cpage.LoadNewTestPage( cbPage );
-    cpage.SetDbtime( 0x7f7adaf323 );
+    cpage.SetDbtime( 0x7f7adaf323 );    // make page non-empty
 
 #ifdef DEBUG
+    // CbPage() public in debug to facilitate this check.
     CHECK( cpage.CbPage() == cbPage );
 #endif
     CHECK( cpage.FIsNormalSized() );
@@ -1038,6 +1132,7 @@ JETUNITTESTEX( CPAGE, EmptyPageDehydration16KB, JetSimpleUnitTest::dwBufferManag
 
     const PAGECHECKSUM pgchk = cpage.LoggedDataChecksum();
 
+    //  Now try to dehydrate the page
 
     cpage.DehydratePage( cbBuffer, fFalse );
 
@@ -1047,8 +1142,12 @@ JETUNITTESTEX( CPAGE, EmptyPageDehydration16KB, JetSimpleUnitTest::dwBufferManag
     CHECK( JET_errSuccess == cpage.ErrCheckPage( CPRINTFDBGOUT::PcprintfInstance(), CPAGE::OnErrorReturnError, CPAGE::CheckTagsNonOverlapping ) );
     CHECK( !cpage.FPageIsDehydratable( &cbNextSize ) );
     CHECK( !cpage.FIsNormalSized() );
+// not public
+//  CHECK( cpage.CbFree_() > 4000 );
     CHECK( pgchk == cpage.LoggedDataChecksum() );
 
+    //  Alright Rehydrate again, right away
+    //
 
     cpage.RehydratePage();
 
@@ -1057,6 +1156,7 @@ JETUNITTESTEX( CPAGE, EmptyPageDehydration16KB, JetSimpleUnitTest::dwBufferManag
     CHECK( cpage.FIsNormalSized() );
     CHECK( pgchk == cpage.LoggedDataChecksum() );
 
+    //  now insert at least 5 KB of data.
 
     BYTE rgbData[1000];
 
@@ -1081,10 +1181,12 @@ JETUNITTESTEX( CPAGE, PageHydrationBasic8KB, JetSimpleUnitTest::dwBufferManager 
     cpage.LoadNewTestPage( cbPage );
 
 #ifdef DEBUG
+    // CbPage() public in debug to facilitate this check.
     CHECK( cpage.CbPage() == cbPage );
 #endif
     CHECK( cpage.FIsNormalSized() );
 
+    //  now insert several nodes
 
     BYTE rgbData[1000];
 
@@ -1099,6 +1201,7 @@ JETUNITTESTEX( CPAGE, PageHydrationBasic8KB, JetSimpleUnitTest::dwBufferManager 
 
     CHECK( cpage.CbPageFree() < 200 );
 
+    //  Page is full, should not be dehydratable
 
     CHECK( !cpage.FPageIsDehydratable( &cbNextSize ) );
 
@@ -1106,6 +1209,7 @@ JETUNITTESTEX( CPAGE, PageHydrationBasic8KB, JetSimpleUnitTest::dwBufferManager 
 
     CHECK( cbBuffer == 8 * 1024 );
 
+    //  empty 1/2 the page, and reorg
 
     cpage.Delete( 3 );
     cpage.Delete( 3 );
@@ -1118,17 +1222,20 @@ JETUNITTESTEX( CPAGE, PageHydrationBasic8KB, JetSimpleUnitTest::dwBufferManager 
     CHECK( JET_errSuccess == cpage.ErrCheckPage( CPRINTFDBGOUT::PcprintfInstance(), CPAGE::OnErrorReturnError, CPAGE::CheckTagsNonOverlapping ) );
 
 #ifdef _IA64_
+    // In IA64, the commit page is 8KB, so we still cannot dehydrate it.
     CHECK( !cpage.FPageIsDehydratable( &cbNextSize ) );
 
+    // We're done with tests for IA64.
     return;
 #else
     CHECK( cpage.FPageIsDehydratable( &cbNextSize ) );
     CHECK( cbNextSize <= 4 * 1024 );
     cbBuffer = 4 * 1024;
-#endif
+#endif // _IA64_
 
     const PAGECHECKSUM pgchk = cpage.LoggedDataChecksum();
 
+    //  Now try to dehydrate the page
 
     cpage.DehydratePage( cbBuffer, fFalse );
 
@@ -1139,6 +1246,8 @@ JETUNITTESTEX( CPAGE, PageHydrationBasic8KB, JetSimpleUnitTest::dwBufferManager 
     CHECK( JET_errSuccess == cpage.ErrCheckPage( CPRINTFDBGOUT::PcprintfInstance(), CPAGE::OnErrorReturnError, CPAGE::CheckTagsNonOverlapping ) );
     CHECK( pgchk == cpage.LoggedDataChecksum() );
 
+    //  Check that basic read functions work while the page is dehydrated.
+    //
 
     LINE line;
 
@@ -1147,14 +1256,18 @@ JETUNITTESTEX( CPAGE, PageHydrationBasic8KB, JetSimpleUnitTest::dwBufferManager 
     
     cpage.GetPtr( 1, &line );
     CHECK( sizeof(rgbData) == line.cb );
+    //  This is a vugly little issue ... we have to start checking 2 bytes in, because 
+    //  the CPAGE::TAG layer for large pages trashes the top 3 bits of the first USHORT.
+    //  Ugh!!
     CHECK( memchk( (BYTE*)line.pv+2, '1', line.cb-2 ) );
 
     cpage.GetPtr( 3, &line );
     CHECK( sizeof(rgbData) == line.cb );
-    CHECK( memchk( (BYTE*)line.pv+2, '7' , line.cb-2 ) );
+    CHECK( memchk( (BYTE*)line.pv+2, '7' /* 7 b/c we deleted 4 iline = 3s above */, line.cb-2 ) );
 
     cpage.FRootPage();
 
+    //  Now try to rehydrate the page
 
     cpage.RehydratePage();
 
@@ -1169,11 +1282,14 @@ JETUNITTESTEX( CPAGE, PageHydrationBasic8KB, JetSimpleUnitTest::dwBufferManager 
 
     cpage.GetPtr( 1, &line );
     CHECK( sizeof(rgbData) == line.cb );
+    //  This is a vugly little issue ... we have to start checking 2 bytes in, because 
+    //  the CPAGE::TAG layer for large pages trashes the top 3 bits of the first USHORT.
+    //  Ugh!!
     CHECK( memchk( (BYTE*)line.pv+2, '1', line.cb-2 ) );
 
     cpage.GetPtr( 3, &line );
     CHECK( sizeof(rgbData) == line.cb );
-    CHECK( memchk( (BYTE*)line.pv+2, '7' , line.cb-2 ) );
+    CHECK( memchk( (BYTE*)line.pv+2, '7' /* 7 b/c we deleted 4 iline = 3s above */, line.cb-2 ) );
 
 }
 
@@ -1193,13 +1309,16 @@ JETUNITTESTEX( CPAGE, PageHydrationBasic4KB, JetSimpleUnitTest::dwBufferManager 
     CHECK( JET_errSuccess == flushmap.ErrSetFlushMapCapacity( pgno ) );
 
 #ifdef DEBUG
+    // CbPage() public in debug to facilitate this check.
     CHECK( cpage.CbPage() == cbPage );
 #endif
     CHECK( cpage.FIsNormalSized() );
 
+    //  Check page is not dehydratable even at first
 
     CHECK( !cpage.FPageIsDehydratable( &cbNextSize ) );
 
+    //  now insert several nodes
 
     BYTE rgbData[1000];
 
@@ -1214,6 +1333,7 @@ JETUNITTESTEX( CPAGE, PageHydrationBasic4KB, JetSimpleUnitTest::dwBufferManager 
 
     CHECK( cpage.CbPageFree() < 100 );
 
+    //  Page is full, should not be dehydratable
 
     CHECK( !cpage.FPageIsDehydratable( &cbNextSize ) );
 
@@ -1236,6 +1356,8 @@ JETUNITTESTEX( CPAGE, PageHydrationBasic4KB, JetSimpleUnitTest::dwBufferManager 
     CHECK( !cpage.FPageIsDehydratable( &cbNextSize ) );
 
 
+    //  Alright, try dehydrate/rehydrate on a page we can't make progress on
+    //
 
     FNegTestSet( fInvalidUsage );
     cpage.DehydratePage( cbBuffer, fFalse );
@@ -1243,6 +1365,7 @@ JETUNITTESTEX( CPAGE, PageHydrationBasic4KB, JetSimpleUnitTest::dwBufferManager 
 
     CHECK( JET_errSuccess == cpage.ErrCheckPage( CPRINTFDBGOUT::PcprintfInstance(), CPAGE::OnErrorReturnError, CPAGE::CheckTagsNonOverlapping ) );
 
+    //cpage.RehydratePage();
 
     cpage.PreparePageForWrite( CPAGE::pgftRockWrite );
     flushmap.SetPgnoFlushType( pgno, CPAGE::pgftRockWrite );
@@ -1261,10 +1384,12 @@ JETUNITTESTEX( CPAGE, DirtyPageDehydration, JetSimpleUnitTest::dwBufferManager )
     cpage.LoadNewTestPage( cbPage );
 
 #ifdef DEBUG
+    // CbPage() public in debug to facilitate this check.
     CHECK( cpage.CbPage() == cbPage );
 #endif
     CHECK( cpage.FIsNormalSized() );
 
+    //  now insert several nodes
 
     BYTE rgbData[1000];
 
@@ -1289,6 +1414,7 @@ JETUNITTESTEX( CPAGE, DirtyPageDehydration, JetSimpleUnitTest::dwBufferManager )
 
     ULONG cbNextSize;
 
+    //  Now try to dehydrate the page
 
     CHECK( cpage.FPageIsDehydratable( &cbNextSize ) );
     cbNextSize = roundup( cbNextSize, OSMemoryPageCommitGranularity() );
@@ -1300,14 +1426,62 @@ JETUNITTESTEX( CPAGE, DirtyPageDehydration, JetSimpleUnitTest::dwBufferManager )
     CHECK( cpage.CbBuffer() == 16 * 1024 );
 #else
     CHECK( cpage.CbBuffer() == 12 * 1024 );
-#endif
+#endif // _IA64_
 #endif
     CHECK( JET_errSuccess == cpage.ErrCheckPage( CPRINTFDBGOUT::PcprintfInstance(), CPAGE::OnErrorReturnError, CPAGE::CheckTagsNonOverlapping ) );
     CHECK( !cpage.FPageIsDehydratable( &cbNextSize ) );
     CHECK( !cpage.FIsNormalSized() );
 
     return;
+/*
+    cpage.Delete( 8 );
+    cpage.Delete( 6 );
+    cpage.Delete( 5 );
+    cpage.Delete( 2 );
+    cpage.Delete( 2 );
 
+    CHECK( !cpage.FPageIsDehydratable( &cbNextSize ) );
+    CHECK( cbNextSize >= 12 * 1024 );
+
+    //  Reorg page AVs I think b/c we're using logical page size somewhere.
+    const void * pv1; size_t cb1; const void * pv2; size_t cb2;
+    cpage.ReorganizePage( &pv1, &cb1, &pv2, &cb2 );
+
+    CHECK( JET_errSuccess == cpage.ErrCheckPage( CPRINTFDBGOUT::PcprintfInstance() ) );
+
+    CHECK( cpage.FPageIsDehydratable( &cbNextSize ) );
+    CHECK( cbNextSize <= 8 * 1024 );
+    cbNextSize = 8 * 1024;
+
+    cpage.DehydratePage( cbNextSize, fFalse );
+
+#ifdef DEBUG
+    CHECK( cpage.CbBuffer() == 8 * 1024 );
+#endif
+
+    CHECK( JET_errSuccess == cpage.ErrCheckPage( CPRINTFDBGOUT::PcprintfInstance() ) );
+
+    cpage.RehydratePage();
+    CHECK( cpage.CbPageFree() > 25 * 1024 );
+
+    for( int i = 0; i < 25; ++i )
+    {
+        DATA data;
+        data.SetPv( rgbData );
+        data.SetCb( sizeof(rgbData) );
+        cpage.Insert( 2+i, &data, 1, 0 );
+    }
+    CHECK( cpage.CbPageFree() < 1024 );
+
+    //  validate final page state
+
+    cpage.PreparePageForWrite( CPAGE::pgftRockWrite );
+    flushmap.SetPgnoFlushType( pgno, CPAGE::pgftRockWrite );
+    CPageValidationNullAction nullaction;
+    CHECK( JET_errSuccess == cpage.ErrValidatePage( pgvfDefault, &nullaction, &flushmap ) );
+
+    CHECK( JET_errSuccess == cpage.ErrCheckPage( CPRINTFDBGOUT::PcprintfInstance() ) );
+*/
 }
 
 #ifdef FDTC_0_REORG_DEHYDRATE
@@ -1327,9 +1501,11 @@ JETUNITTESTEX( CPAGE, PageHydrationReorganizationBasic32KB, JetSimpleUnitTest::d
     const PGNO pgno = cpage.PgnoThis();
     CHECK( JET_errSuccess == flushmap.ErrSetFlushMapCapacity( pgno ) );
 
+    // CbPage() public in debug to facilitate this check.
     OnDebug( CHECK( cpage.CbPage() == cbPage ) );
     CHECK( cpage.FIsNormalSized() );
 
+    //  now insert several nodes
 
     BYTE rgbData[1000];
 
@@ -1351,12 +1527,16 @@ JETUNITTESTEX( CPAGE, PageHydrationReorganizationBasic32KB, JetSimpleUnitTest::d
 
     CHECK( cpage.CbPageFree() > 20 * 1024 );
 
+    //  Page is only 12k full, should be dehydratable
 
+    //  NOTE: This will shamelessly break on Itanium.  IA64 has 16 KB commit granularity,
+    //  so it could be made to work.  Cross that when we get there.
     CHECK( cpage.FPageIsDehydratable( &cbNextSize ) );
     cbBuffer = roundup( cbNextSize, 4096 );
     CHECK( cbBuffer == 12 * 1024 );
     const PAGECHECKSUM pgchk = cpage.LoggedDataChecksum();
 
+    //  Now try to dehydrate the page
 
     cpage.DehydratePage( cbBuffer, fTrue );
 
@@ -1364,9 +1544,13 @@ JETUNITTESTEX( CPAGE, PageHydrationReorganizationBasic32KB, JetSimpleUnitTest::d
     CHECK( JET_errSuccess == cpage.ErrCheckPage( CPRINTFDBGOUT::PcprintfInstance(), CPAGE::OnErrorReturnError, CPAGE::CheckTagsNonOverlapping ) );
     CHECK( !cpage.FPageIsDehydratable( &cbNextSize ) );
     CHECK( !cpage.FIsNormalSized() );
+// not public
+//  CHECK( cpage.CbFree_() < 1000 );
     CHECK( cpage.CbPageFree() > 20 * 1024 );
     CHECK( pgchk == cpage.LoggedDataChecksum() );
 
+    //  Check that basic read functions work while the page is dehydrated.
+    //
 
     LINE line;
 
@@ -1375,6 +1559,9 @@ JETUNITTESTEX( CPAGE, PageHydrationReorganizationBasic32KB, JetSimpleUnitTest::d
     
     cpage.GetPtr( 1, &line );
     CHECK( sizeof(rgbData) == line.cb );
+    //  This is a vugly little issue ... we have to start checking 2 bytes in, because 
+    //  the CPAGE::TAG layer for large pages trashes the top 3 bits of the first USHORT.
+    //  Ugh!!
     CHECK( memchk( (BYTE*)line.pv+2, '1', line.cb-2 ) );
 
     cpage.GetPtr( 3, &line );
@@ -1387,20 +1574,28 @@ JETUNITTESTEX( CPAGE, PageHydrationReorganizationBasic32KB, JetSimpleUnitTest::d
 
     cpage.FRootPage();
 
+    //  Try setting some flags, doesn't need a hydrated page
+    //
 
     cpage.ReplaceFlags( 4, 0x1);
 
+    //  Should still be big.
 
     CHECK( !cpage.FPageIsDehydratable( &cbNextSize ) );
     CHECK( cbNextSize >= 11 * 1024 );
     const PAGECHECKSUM pgchk2 = cpage.LoggedDataChecksum();
 
+    //  Must rehydrate temporarily to delete data
+    //
 
     cpage.RehydratePage();
 
+//  CHECK( cpage.CbPageFree() > 20 * 1024 );
+//  OnDebug( CHECK( cpage.CbBuffer() == cbPage ) );
     CHECK( JET_errSuccess == cpage.ErrCheckPage( CPRINTFDBGOUT::PcprintfInstance(), CPAGE::OnErrorReturnError, CPAGE::CheckTagsNonOverlapping ) );
     CHECK( pgchk2 == cpage.LoggedDataChecksum() );
 
+    //  Try deletes, not necessary.
 
     cpage.Delete( 8 );
     cpage.Delete( 6 );
@@ -1408,15 +1603,21 @@ JETUNITTESTEX( CPAGE, PageHydrationReorganizationBasic32KB, JetSimpleUnitTest::d
     cpage.Delete( 4 );
     cpage.Delete( 4 );
 
+    //  re-dehydrate to the 12 KB size ...
     CHECK( 12 * 1024 == cbBuffer );
     cpage.DehydratePage( cbBuffer, fFalse );
 
+    //  cache old cbBuffer 
     ULONG cbOldSize = cbBuffer;
 
+    //  check if we don't re-org, page is NOT dehydrateable 
     CHECK( !cpage.FPageIsDehydratable( &cbNextSize, fFalse ) );
 
+    //  if we DO re-org, page IS dehydrateable 
+    //
     CHECK( cpage.FPageIsDehydratable( &cbNextSize, fTrue ) );
 
+    //  do null dehydrate, to same size
 
     CHECK( cpage.CbPageFree() > 25 * 1024 );
 
@@ -1426,6 +1627,8 @@ JETUNITTESTEX( CPAGE, PageHydrationReorganizationBasic32KB, JetSimpleUnitTest::d
     CHECK( sizeof(rgbData) == line.cb );
     CHECK( memchk( (BYTE*)line.pv+2, '3', line.cb-2 ) );
 
+    //  Dehydrate the page again, asking for the same size, check no reorg
+    //
 
     const PAGECHECKSUM pgchk25 = cpage.LoggedDataChecksum();
 
@@ -1441,6 +1644,8 @@ JETUNITTESTEX( CPAGE, PageHydrationReorganizationBasic32KB, JetSimpleUnitTest::d
 
     const PAGECHECKSUM pgchk3 = cpage.LoggedDataChecksum();
 
+    //  calculate the dehydrate now, with a new _re-orgd_ size
+    //
 
     CHECK( cpage.FPageIsDehydratable( &cbNextSize, fTrue ) );
 
@@ -1448,6 +1653,8 @@ JETUNITTESTEX( CPAGE, PageHydrationReorganizationBasic32KB, JetSimpleUnitTest::d
     CHECK( cbBuffer == 8 * 1024 );
     
 
+    //  Dehydrate the page again, this time smaller than before
+    //
 
     CHECK( cbNextSize >= 4 * 1024 );
     CHECK( cbNextSize <= 8 * 1024 );
@@ -1464,6 +1671,7 @@ JETUNITTESTEX( CPAGE, PageHydrationReorganizationBasic32KB, JetSimpleUnitTest::d
 
     const PAGECHECKSUM pgchk4 = cpage.LoggedDataChecksum();
 
+    //  Rehydrate / expand page to allow more inserts
     cpage.RehydratePage();
 
     CHECK( cpage.CbPageFree() > 25 * 1024 );
@@ -1490,6 +1698,7 @@ JETUNITTESTEX( CPAGE, PageHydrationReorganizationBasic32KB, JetSimpleUnitTest::d
 
     CHECK( !cpage.FPageIsDehydratable( &cbNextSize ) );
 
+    //  validate writing functions work on 2 pages at once
 
     cpage.PreparePageForWrite( CPAGE::pgftRockWrite );
     flushmap.SetPgnoFlushType( pgno, CPAGE::pgftRockWrite );
@@ -1509,6 +1718,8 @@ JETUNITTESTEX( CPAGE, PageHydrationReorganizationBoundary32KB, JetSimpleUnitTest
     BYTE * pbBuffer = NULL;
     BFAlloc( bfasTemporary, (void**)&pbBuffer, cbPage );
 
+    // must start at 3, b/c must have a line w/ enough room for first cb and the flags 
+    // that were moved there.
 
     for ( ULONG cbLast = 3; cbLast <= 5; cbLast++ )
     {
@@ -1518,9 +1729,11 @@ JETUNITTESTEX( CPAGE, PageHydrationReorganizationBoundary32KB, JetSimpleUnitTest
             CPAGE cpage;
             cpage.LoadNewTestPage( cbPage );
             
+            // CbPage() public in debug to facilitate this check.
             OnDebug( CHECK( cpage.CbPage() == cbPage ) );
             CHECK( cpage.FIsNormalSized() );
             
+            //  now insert several nodes
             
             const INT ilineFirst = 0;
             const INT ilineToDelete = 1;
@@ -1528,8 +1741,9 @@ JETUNITTESTEX( CPAGE, PageHydrationReorganizationBoundary32KB, JetSimpleUnitTest
 
             DATA data;
 
-            if ( cpage.CbPageFree() < 1000 + 4  )
+            if ( cpage.CbPageFree() < 1000 + 4 /* sizeof(CPAGE::TAG) */ )
             {
+                //  we can't fit the 1st node on the page, bail, we're done.
                 break;
             }
 
@@ -1539,8 +1753,9 @@ JETUNITTESTEX( CPAGE, PageHydrationReorganizationBoundary32KB, JetSimpleUnitTest
             memset( pbBuffer+1, 'F', cbFirst-1 );
             cpage.Insert( ilineFirst, &data, 1, 0 );
 
-            if ( cpage.CbPageFree() < i + 4  )
+            if ( cpage.CbPageFree() < i + 4 /* sizeof(CPAGE::TAG) */ )
             {
+                //  we can't fit the 1st node on the page, bail, we're done.
                 break;
             }
 
@@ -1550,11 +1765,13 @@ JETUNITTESTEX( CPAGE, PageHydrationReorganizationBoundary32KB, JetSimpleUnitTest
             memset( pbBuffer+1, 'D', cbToDelete-1 );
             cpage.Insert( ilineToDelete, &data, 1, 0 );
 
-            if ( cpage.CbPageFree() < cbLast + 4  )
+            if ( cpage.CbPageFree() < cbLast + 4 /* sizeof(CPAGE::TAG) */ )
             {
+                //  we can't fit the 3rd node on the page, bail, we're done.
                 break;
             }
 
+            //  have enough room, try to insert the last node
             data.SetPv( pbBuffer );
             data.SetCb( cbLast );
             memset( pbBuffer+1, 'L', cbLast-1 );
@@ -1584,6 +1801,7 @@ JETUNITTESTEX( CPAGE, PageHydrationReorganizationBoundary32KB, JetSimpleUnitTest
             CHECK( !cpage.FPageIsDehydratable( &cbNextSize, fFalse ) );
             CHECK( !cpage.FPageIsDehydratable( &cbNextSize, fTrue ) );
 
+            //  check the last line (3) is intact.
             cpage.GetPtr( ilineLast, &lineLast );
             CHECK( lineLast.cb == cbLast );
             CHECK( ((CHAR*)lineLast.pv)[2] == 'L' );
@@ -1599,6 +1817,7 @@ JETUNITTESTEX( CPAGE, PageHydrationReorganizationBoundary32KB, JetSimpleUnitTest
             CHECK( cpage.FIsNormalSized() );
 
             CHECK( cpage.FPageIsDehydratable( &cbNextSize, fFalse )
+                    // 28 KB = 28672 - 27573 => 1099 == 1000 b for ilineFirst + 80 b header + 12 b TAGs + 3 byte + ...  huh!
                     || (ULONG)i >= ( 27573 - ( cbLast - 3 ) ) );
 
             const PAGECHECKSUM pgchkPreDelete = cpage.LoggedDataChecksum();
@@ -1609,9 +1828,11 @@ JETUNITTESTEX( CPAGE, PageHydrationReorganizationBoundary32KB, JetSimpleUnitTest
             cpage.Delete( ilineToDelete );
             ilineLast--;
 
+            //  ensure no re-org happened ...
             cpage.GetPtr( ilineLast, &lineLast );
             CHECK( pvLast == lineLast.pv );
 
+            //  get the pgchk now that we've deleted ...
             PAGECHECKSUM pgchk = cpage.LoggedDataChecksum();
             CHECK( pgchkPreDelete != pgchk );
 
@@ -1626,15 +1847,19 @@ JETUNITTESTEX( CPAGE, PageHydrationReorganizationBoundary32KB, JetSimpleUnitTest
                 CHECK( JET_errSuccess == cpage.ErrCheckPage( CPRINTFDBGOUT::PcprintfInstance(), CPAGE::OnErrorReturnError, CPAGE::CheckTagsNonOverlapping ) );
                 CHECK( pgchk == cpage.LoggedDataChecksum() );
 
+                //  ensure no re-org happened ...
                 cpage.GetPtr( ilineLast, &lineLast );
                 CHECK( pvLast == lineLast.pv );
 
                 CHECK( !cpage.FPageIsDehydratable( &cbNextSize, fFalse ) ||
+                        // We actually can dehydrate w/o re-org sometimes because we've removed a TAG (4 bytes)
+                        // from the TAG array at the end of the page, so we have to have this clause.
                         ( ( cbNextSize % 4096 ) >= 4093 ) );
             }
 
             if ( i > 4096 )
             {
+                // we should be able to dehydrate again ... as long as we do a re-org ...
                 CHECK( cpage.FPageIsDehydratable( &cbNextSize, fTrue ) );
                 cbBuffer = roundup( cbNextSize, 4096 );
                 OnDebug( CHECK( cbBuffer < cpage.CbBuffer() ) );
@@ -1646,20 +1871,25 @@ JETUNITTESTEX( CPAGE, PageHydrationReorganizationBoundary32KB, JetSimpleUnitTest
                 CHECK( JET_errSuccess == cpage.ErrCheckPage( CPRINTFDBGOUT::PcprintfInstance(), CPAGE::OnErrorReturnError, CPAGE::CheckTagsNonOverlapping ) );
                 CHECK( pgchk == cpage.LoggedDataChecksum() );
 
+                // not only should it be equal to CbBuffer, we should be at smallest size possible
                 OnDebug( CHECK( 4096 == cpage.CbBuffer() ) );
 
+                //  ensure no re-org happened ...
                 cpage.GetPtr( ilineLast, &lineLast );
                 CHECK( pvLast != lineLast.pv );
 
                 CHECK( !cpage.FPageIsDehydratable( &cbNextSize, fTrue ) );
             }
 
+            //  check the last line (2) is intact.
             cpage.GetPtr( ilineLast, &lineLast );
             CHECK( lineLast.cb == cbLast );
             CHECK( ((CHAR*)lineLast.pv)[2] == 'L' );
             CHECK( cbLast == 3 || ((CHAR*)lineLast.pv)[3] == 'L' );
 
 #ifdef DEBUG
+            // This test takes too long, so increment by 0 - 100 each iteration, so we complete this
+            // on average in 1/50th time
             i += rand() % 100;
 #endif
         }
@@ -1670,7 +1900,9 @@ JETUNITTESTEX( CPAGE, PageHydrationReorganizationBoundary32KB, JetSimpleUnitTest
 
 #endif
 
+//  ================================================================
 JETUNITTESTEX ( CPAGE, ErrCheckPagesPerf, JetSimpleUnitTest::dwDontRunByDefault )
+//  ================================================================
 {
     const INT cbPage = 32 * 1024;
     BYTE * const pvBuffer = (BYTE*)PvOSMemoryPageAlloc( cbPage, NULL );
@@ -1682,13 +1914,14 @@ JETUNITTESTEX ( CPAGE, ErrCheckPagesPerf, JetSimpleUnitTest::dwDontRunByDefault 
 
     printf( "\n" );
     
+    //  now insert several nodes
     BYTE rgbData[ 25 ];
     INT cIterations = 50000;
 
     DATETIME dtm;
     UtilGetCurrentDateTime( &dtm );
     Assert( dtm.year != 0 && dtm.month != 0 && dtm.day != 0 );
-    const INT seed = dtm.year * 8772  + dtm.month * 731  + dtm.day * 24 + dtm.hour;
+    const INT seed = dtm.year * 8772 /* = ~hrs/yr */ + dtm.month * 731 /* = ~hrs/mo */ + dtm.day * 24 + dtm.hour;
     srand( seed );
     printf( "Seeding based upon hour (of year): %d   (i.e. variably switches every hour)\n", seed );
 
@@ -1715,6 +1948,7 @@ JETUNITTESTEX ( CPAGE, ErrCheckPagesPerf, JetSimpleUnitTest::dwDontRunByDefault 
             {
                 memset( rgbData, 'a' + i - 10, sizeof(rgbData) );
             }
+            //  make it look like a ND rec
             *(UnalignedLittleEndian<USHORT>*)rgbData = (USHORT)min( ( cbRecord - 2 ) / 2, 10 );
             
             cpage.Insert( i, &data, 1, 0 );
@@ -1781,16 +2015,19 @@ JETUNITTESTEX ( CPAGE, ErrCheckPagesPerf, JetSimpleUnitTest::dwDontRunByDefault 
     }
     
         cpage.UnloadPage();
-    }
+    }   // for pages w/ 100, 1000, etc # of records
     
     OSMemoryPageFree(pvBuffer);
 }
 
+//  ================================================================
 JETUNITTESTEX ( CPAGE, VersionCheckFlagsPerf, JetSimpleUnitTest::dwDontRunByDefault )
+//  ================================================================
 {
     const INT cbPage = 32 * 1024;
     printf( "\n" );
     
+    //  now insert several nodes
     BYTE rgbData[ 25 ];
     INT cIterations = 50000;
     
@@ -1829,11 +2066,14 @@ JETUNITTESTEX ( CPAGE, VersionCheckFlagsPerf, JetSimpleUnitTest::dwDontRunByDefa
     
 }
 
+//  ================================================================
 JETUNITTESTEX ( CPAGE, VersionClearFlagsPerf, JetSimpleUnitTest::dwDontRunByDefault )
+//  ================================================================
 {
     const INT cbPage = 32 * 1024;
     printf( "\n" );
     
+    //  now insert several nodes
     BYTE rgbData[ 25 ];
     INT cIterations = 50000;
     
@@ -1873,7 +2113,9 @@ JETUNITTESTEX ( CPAGE, VersionClearFlagsPerf, JetSimpleUnitTest::dwDontRunByDefa
 }
 
 
+//  ================================================================
 static bool FAreLinesEqual( const void* pv0, const void* pv1, ULONG cb)
+//  ================================================================
 {
     Assert( cbKeyCount <= cb );
 
@@ -1891,7 +2133,9 @@ static bool FAreLinesEqual( const void* pv0, const void* pv1, ULONG cb)
     return cbKey0 == cbKey1 && !memcmp( pb0 + cbKeyCount, pb1 + cbKeyCount, cb - cbKeyCount );
 }
 
+//  ================================================================
 class CPageTestFixture : public JetTestFixture
+//  ================================================================
 {
     private:
         CPAGE   m_cpage;
@@ -1927,7 +2171,7 @@ class CPageTestFixture : public JetTestFixture
     public:
         void TestMaxNodeSize()
         {
-            const INT cbMaxNodeOld = 4047 + 1;
+            const INT cbMaxNodeOld = 4047 + 1;  // the node grows by one byte as we have a 2-byte key size
             CHECK( CPAGE::CbPageDataMax( CbPage_() ) >= cbMaxNodeOld || CbPage_() < 4 * 1024 );
         }
         
@@ -1980,8 +2224,10 @@ class CPageTestFixture : public JetTestFixture
         
 };
 
+//  ================================================================
 template <INT PAGESIZE_IN_KB, BOOL RUNTIME_SCRUBBING_ENABLED>
 class CPageTestFixturePageSize : public CPageTestFixture
+//  ================================================================
 {
 public:
     CPageTestFixturePageSize() : CPageTestFixture( RUNTIME_SCRUBBING_ENABLED ) {}
@@ -2039,20 +2285,26 @@ CPAGE_TEST(OverwriteUnusedSpaceFixesContiguousSpaceForNonZeroRecords);
 CPAGE_TEST_EX(ReplacePerf, JetSimpleUnitTest::dwDontRunByDefault);
 CPAGE_TEST(InternalTest);
 
+//  ================================================================
 void CPageTestFixture::TestLoadNewPage()
+//  ================================================================
 {
     CHECK( m_ifmp == m_cpage.Ifmp() );
     CHECK( m_objidFDP == m_cpage.ObjidFDP() );
     CHECK( m_fFlags == (m_cpage.FFlags() & m_fFlags) );
 }
 
+//  ================================================================
 void CPageTestFixture::TestInternalTest()
+//  ================================================================
 {
     const ERR err = m_cpage.ErrTest( CbPage_() );
     CHECK( JET_errSuccess == err );
 }
 
+//  ================================================================
 void CPageTestFixture::TestRevertDbtimeCheckDbtime()
+//  ================================================================
 {
     m_cpage.SetDbtime( 1 );
     CHECK( 1 == m_cpage.Dbtime() );
@@ -2062,11 +2314,14 @@ void CPageTestFixture::TestRevertDbtimeCheckDbtime()
     CHECK( 1 == m_cpage.Dbtime() );
 }
 
+//  ================================================================
 void CPageTestFixture::TestRevertDbtimeCheckFlags()
+//  ================================================================
 {
     ULONG fFlagsBefore = 0;
     ULONG fFlagsAfter = 0;
 
+    // Scrub is unset and doesn't change.
     fFlagsBefore = CPAGE::fPageLeaf | CPAGE::fPageLongValue;
     m_cpage.SetFlags( fFlagsBefore );
     CHECK( !m_cpage.FScrubbed() );
@@ -2082,6 +2337,7 @@ void CPageTestFixture::TestRevertDbtimeCheckFlags()
     CHECK( !m_cpage.FScrubbed() );
     CHECK( fFlagsAfter == m_cpage.FFlags() );
 
+    // Scrub is unset and changes.
     fFlagsBefore = CPAGE::fPageLeaf | CPAGE::fPageLongValue;
     m_cpage.SetFlags( fFlagsBefore );
     CHECK( !m_cpage.FScrubbed() );
@@ -2097,6 +2353,7 @@ void CPageTestFixture::TestRevertDbtimeCheckFlags()
     CHECK( !m_cpage.FScrubbed() );
     CHECK( ( fFlagsAfter & ~CPAGE::fPageScrubbed ) == m_cpage.FFlags() );
 
+    // Scrub is set and doesn't change.
     fFlagsBefore = CPAGE::fPageLeaf | CPAGE::fPageLongValue | CPAGE::fPageScrubbed;
     m_cpage.SetFlags( fFlagsBefore );
     CHECK( m_cpage.FScrubbed() );
@@ -2112,6 +2369,7 @@ void CPageTestFixture::TestRevertDbtimeCheckFlags()
     CHECK( m_cpage.FScrubbed() );
     CHECK( fFlagsAfter == m_cpage.FFlags() );
 
+    // Scrub is set and changes.
     fFlagsBefore = CPAGE::fPageLeaf | CPAGE::fPageLongValue | CPAGE::fPageScrubbed;
     m_cpage.SetFlags( fFlagsBefore );
     CHECK( m_cpage.FScrubbed() );
@@ -2128,7 +2386,9 @@ void CPageTestFixture::TestRevertDbtimeCheckFlags()
     CHECK( fFlagsAfter == ( m_cpage.FFlags() & ~CPAGE::fPageScrubbed ) );
 }
 
+//  ================================================================
 void CPageTestFixture::TestFlags()
+//  ================================================================
 {
     m_cpage.SetFlags( CPAGE::fPageRoot | CPAGE::fPageLeaf | CPAGE::fPageLongValue );
     CHECK( ( CPAGE::fPageRoot | CPAGE::fPageLeaf | CPAGE::fPageLongValue ) == m_cpage.FFlags() );
@@ -2176,7 +2436,9 @@ void CPageTestFixture::TestFlags()
     CHECK( 0 == m_cpage.FFlags() );
 }
 
+//  ================================================================
 void CPageTestFixture::TestLoggedDataChecksum()
+//  ================================================================
 {
     PAGECHECKSUM    checksumLoggedData1 = 0;
     PAGECHECKSUM    checksumLoggedData2 = 0;
@@ -2224,8 +2486,11 @@ void CPageTestFixture::TestLoggedDataChecksum()
     CHECK( checksumLoggedData1 == checksumLoggedData2 );
 }
 
+//  ================================================================
 void CPageTestFixture::TestInsert()
+//  ================================================================
 {
+    // First insert a line made up of multiple data blocks
     
     DATA rgdata[3];
     BYTE * pb = (BYTE *)m_pvBuffer;
@@ -2246,11 +2511,14 @@ void CPageTestFixture::TestInsert()
     CHECK( FAreLinesEqual( line.pv, m_pvBuffer, cbTotal ) );
     CHECK( ( fNDVersion | fNDCompressed ) == line.fFlags );
 
+    // Now insert another line before the first so that
+    // the tag has to be moved
     DATA data;
     data.SetPv( (BYTE *)m_pvBuffer + 500 );
     data.SetCb( 200 );
     m_cpage.Insert( 0, &data, 1, 0 );
 
+    // check both nodes
     m_cpage.GetPtr( 0, &line );
     CHECK( line.cb == (ULONG)data.Cb() );
     CHECK( FAreLinesEqual( line.pv, data.Pv(), data.Cb() ) );
@@ -2263,7 +2531,9 @@ void CPageTestFixture::TestInsert()
     
 }
 
+//  ================================================================
 void CPageTestFixture::TestInsertToCapacity()
+//  ================================================================
 {
     INT cbFreeInitial = m_cpage.CbPageFree();
 
@@ -2274,15 +2544,18 @@ void CPageTestFixture::TestInsertToCapacity()
     INT iline = 0;
     m_cpage.Insert( iline, &data, 1, fNDVersion );
 
+    // Set a check sum so that debug check all verifies everything
     m_cpage.SetPgno(100);
     SetPageChecksum( (BYTE *)m_pvPage, m_cpage.CbPage(), databasePage, 100 );
 
 #ifdef DEBUG
     m_cpage.DebugCheckAll();
-#endif
+#endif // DEBUG
 }
 
+//  ================================================================
 void CPageTestFixture::TestReplace()
+//  ================================================================
 {
     for( INT i = 0; i < 7; ++i )
     {
@@ -2304,7 +2577,9 @@ void CPageTestFixture::TestReplace()
     CHECK( fNDVersion == line.fFlags );
 }
 
+//  ================================================================
 void CPageTestFixture::TestLastDeleteFixesContiguousSpace()
+//  ================================================================
 {
     const char * const sz = "Delete me";
     const INT iline = 0;
@@ -2317,15 +2592,19 @@ void CPageTestFixture::TestLastDeleteFixesContiguousSpace()
     const INT cbContiguousAfterInserts = m_cpage.CbContiguousBufferFree_();
     CHECK( cbContiguousAfterInserts < cbContiguousInitial );
 
+    // deleting first record increases contiguous free space only by a tag
     m_cpage.Delete( iline );
 
+    // deleting last record should fix up contiguous free space
     m_cpage.Delete( iline );
     const INT cbContiguousAfterLastDelete = m_cpage.CbContiguousBufferFree_();
     CHECK( cbContiguousAfterLastDelete == cbContiguousInitial );
     
 }
 
+//  ================================================================
 void CPageTestFixture::TestDeleteScrubsData()
+//  ================================================================
 {
     const char * const sz = "Delete me";
     const INT iline = 0;
@@ -2338,7 +2617,9 @@ void CPageTestFixture::TestDeleteScrubsData()
     CHECK( cInstancesExpected == CInstancesOnPage_( sz ) );
 }
 
+//  ================================================================
 void CPageTestFixture::TestReplaceScrubsData()
+//  ================================================================
 {
     const char * const szBeforeImage    = "FooFooFooFooFooFooFooFooFoo";
     const char * const szAfterImage     = "Bar";
@@ -2354,7 +2635,9 @@ void CPageTestFixture::TestReplaceScrubsData()
     CHECK( 1 == CInstancesOnPage_( "Bar" ) );
 }
 
+//  ================================================================
 void CPageTestFixture::TestReplaceScrubsGapData()
+//  ================================================================
 {
     const char * const szBeforeImage    = "FooFooFooFooFooFooFooFooFoo";
     const char * const szAfterImage     = "Bar";
@@ -2371,7 +2654,9 @@ void CPageTestFixture::TestReplaceScrubsGapData()
     CHECK( 1 == CInstancesOnPage_( "Bar" ) );
 }
 
+//  ================================================================
 void CPageTestFixture::TestReplaceScrubsFirstGap()
+//  ================================================================
 {
     const char * const szBeforeImage    = "Bar";
     const char * const szAfterImage     = "FooFooFooFooFooFooFooFooFoo";
@@ -2388,7 +2673,9 @@ void CPageTestFixture::TestReplaceScrubsFirstGap()
     CHECK( cInstancesExpected == CInstancesOnPage_( "Bar" ) );
 }
 
+//  ================================================================
 void CPageTestFixture::TestReorganizePageScrubsData()
+//  ================================================================
 {
     DATA data;
     data.SetPv( m_pvBuffer );
@@ -2403,6 +2690,7 @@ void CPageTestFixture::TestReorganizePageScrubsData()
     InsertString_( 20, sz );
     CHECK( 1 == CInstancesOnPage_( sz ) );
 
+    // Delete from the top down to avoid renumbering problems
     for( INT iline = 19; iline > 0; iline -= 3 )
     {
         m_cpage.Delete( iline );
@@ -2421,7 +2709,15 @@ void CPageTestFixture::TestReorganizePageScrubsData()
     CHECK( cInstancesExpected == CInstancesOnPage_( sz ) );
 }
 
+//  ================================================================
 void CPageTestFixture::TestInsertLines()
+//  ================================================================
+//
+//  Insert data into the page. This tests the boundary conditions
+//  with small amounts of data, large amounts of data and a medium-
+//  sized line.
+//
+//-
 {
     for( ULONG cb = 2; cb < 17; cb++ )
     {
@@ -2434,7 +2730,9 @@ void CPageTestFixture::TestInsertLines()
     }
 }
 
+//  ================================================================
 void CPageTestFixture::TestReorganizePage()
+//  ================================================================
 {
     DATA data;
     data.SetPv( m_pvBuffer );
@@ -2445,6 +2743,7 @@ void CPageTestFixture::TestReorganizePage()
         m_cpage.Insert( iline, &data, 1, fNDVersion );
     }
 
+    // Delete from the top down to avoid renumbering problems
     for( INT iline = 19; iline > 0; iline -= 3 )
     {
         m_cpage.Delete( iline );
@@ -2462,12 +2761,16 @@ void CPageTestFixture::TestReorganizePage()
     const PAGECHECKSUM checksumLoggedDataAfter = m_cpage.LoggedDataChecksum();
     CHECK( checksumLoggedDataBefore == checksumLoggedDataAfter );
 
+    // Verify that ReorganizePage restored contiguous free space.
+    // Note that while 7 records were deleted; only 6 created wasted space
     INT cbContiguousFreeAfter = m_cpage.CbContiguousFree_();
     CHECK( cbContiguousFreeAfter >= cbContiguousFreeBefore +  50 * 6 );
     
 }
 
+//  ================================================================
 void CPageTestFixture::TestOverwriteUnusedSpace()
+//  ================================================================
 {
     INT iline = 0;
     InsertString_( iline + 0, "AAAA");
@@ -2487,7 +2790,9 @@ void CPageTestFixture::TestOverwriteUnusedSpace()
 }
 
 
+//  ================================================================
 void CPageTestFixture::TestOverwriteUnusedSpaceFixesContiguousSpaceForNonZeroRecords()
+//  ================================================================
 {
     INT iline = 0;
 
@@ -2510,7 +2815,9 @@ void CPageTestFixture::TestOverwriteUnusedSpaceFixesContiguousSpaceForNonZeroRec
 }
 
 
+//  ================================================================
 void CPageTestFixture::TestReplacePerf()
+//  ================================================================
 {
     printf( "\n" );
     
@@ -2544,8 +2851,12 @@ void CPageTestFixture::TestReplacePerf()
 }
 
 
+//  ================================================================
 void CPageTestFixture::InsertString_( INT iline, const char * const sz )
+//  ================================================================
 {
+    // On large pages the flags are stored in the cbKey, so we
+    // can't rely on that data not being changed
     BYTE rgbHeader[4] = {0};
 
     DATA rgdata[2];
@@ -2557,8 +2868,12 @@ void CPageTestFixture::InsertString_( INT iline, const char * const sz )
     m_cpage.Insert( iline, rgdata, 2, 0 );
 }
 
+//  ================================================================
 void CPageTestFixture::ReplaceString_( INT iline, const char * const sz )
+//  ================================================================
 {
+    // On large pages the flags are stored in the cbKey, so we
+    // can't rely on that data not being changed
     BYTE rgbHeader[4] = {0};
 
     DATA rgdata[2];
@@ -2570,8 +2885,17 @@ void CPageTestFixture::ReplaceString_( INT iline, const char * const sz )
     m_cpage.Replace( iline, rgdata, 2, 0 );
 }
 
+//  ================================================================
 INT CPageTestFixture::CInstancesOnPage_( const char * const sz )
+//  ================================================================
+//
+//  Used to make sure scrubbing is correctly removing data from the
+//  page.
+//
+//-
 {
+    // This is the second-simplest approach. There are a lot of ways to
+    // optimize this.
 
     const INT cch = LOSStrLengthA( sz );
     const char * szT = (const char *)m_pvPage;
@@ -2597,7 +2921,9 @@ INT CPageTestFixture::CInstancesOnPage_( const char * const sz )
     return cinstances;
 }
 
+//  ================================================================
 void CPageTestFixture::InsertOneLine_( const ULONG cb )
+//  ================================================================
 {
     PAGECHECKSUM    checksumLoggedData1 = 0;
     PAGECHECKSUM    checksumLoggedData2 = 0;
@@ -2624,11 +2950,13 @@ void CPageTestFixture::InsertOneLine_( const ULONG cb )
     checksumLoggedData2 = m_cpage.LoggedDataChecksum();
     CHECK( checksumLoggedData1 != checksumLoggedData2 );
 
+    //  The replace didn't change the size of the node so it shouldn't have moved
     m_cpage.GetPtr( 0, &line );
     CHECK( line.cb == (ULONG)cb );
     CHECK( line.pv == lineSav.pv );
     CHECK( ( fNDDeleted | fNDCompressed ) == line.fFlags );
 
+    //  Make sure the version flag is ignored by this checksum
     
     checksumLoggedData1 = m_cpage.LoggedDataChecksum();
     
@@ -2645,22 +2973,30 @@ void CPageTestFixture::InsertOneLine_( const ULONG cb )
     CHECK( 0x0 == m_cpage.Clines() );
 }
 
+//  ================================================================
 CPageTestFixture::CPageTestFixture()
+//  ================================================================
 {
     InitMembers_();
 }
 
+//  ================================================================
 CPageTestFixture::CPageTestFixture( const BOOL fRuntimeScrubbingEnabled )
+//  ================================================================
 {
     InitMembers_();
     m_cpage.SetRuntimeScrubbingEnabled_( fRuntimeScrubbingEnabled );
 }
 
+//  ================================================================
 CPageTestFixture::~CPageTestFixture()
+//  ================================================================
 {
 }
 
+//  ================================================================
 bool CPageTestFixture::SetUp_()
+//  ================================================================
 {
     m_pvBuffer = PvOSMemoryPageAlloc( CbPage_(), NULL );
     if( NULL == m_pvBuffer )
@@ -2673,6 +3009,7 @@ bool CPageTestFixture::SetUp_()
         return false;
     }
 
+    //  set the buffer to a known value
     for( size_t idw = 0; idw < ( CbPage_() / sizeof(DWORD) ); ++idw )
     {
         ((DWORD *)m_pvBuffer)[idw] = rand();
@@ -2689,7 +3026,9 @@ bool CPageTestFixture::SetUp_()
     return true;
 }
 
+//  ================================================================
 void CPageTestFixture::TearDown_()
+//  ================================================================
 {
     m_cpage.UnloadPage();
     OSMemoryPageFree( m_pvPage );

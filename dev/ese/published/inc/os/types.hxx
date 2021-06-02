@@ -6,7 +6,9 @@
 
 #include <guiddef.h>
 
+//  build options
 
+//  Compiler defs
 
 #define INLINE      inline
 #define NOINLINE    __declspec(noinline)
@@ -15,12 +17,18 @@
 #define LOCAL_BROKEN
 #define LOCAL     static
 
+///////////////////////////////////
+//
+//  Platform dependent defs
+//
 
 
+//  use x86 assembly for endian conversion
 
 #define TYPES_USE_X86_ASM
 
 
+//  select the native word size for the checksumming code in LOG::UlChecksumBytes
 
 #if defined(_M_AMD64) || defined(_M_IA64) || defined(_M_ARM64)
 #define NATIVE_WORD QWORD
@@ -29,16 +37,22 @@
 #endif
 
 
+//  Path Delimiter
 
 #define chPathDelimiter   '\\'
 #define wchPathDelimiter L'\\'
 #define wszPathDelimiter L"\\"
 
 
+//  host endian-ness
 
 inline constexpr BOOL FHostIsLittleEndian();
 
+//
+//
+///////////////////////////////////
 
+//  types
 
 inline BOOL FOS64Bit()
 {
@@ -69,6 +83,10 @@ public:
     DWORD *PdwLow()             { return FHostIsLittleEndian() ? &m_l : &m_h; }
     DWORD *PdwHigh()            { return FHostIsLittleEndian() ? &m_h : &m_l; }
 
+    //  set qword, setting low dword first, then high dword
+    //  (allows unserialised reading of this qword via
+    //  QwHighLow() as long as it can be guaranteed that
+    //  writing to it is serialised)
     VOID SetQwLowHigh( const QWORD qw )
     {
         if ( FOS64Bit() )
@@ -84,6 +102,10 @@ public:
         }
     }
 
+    //  retrieve qword, retrieving high qword first, then low dword
+    //  (allows unserialised retrieving of this qword as long as
+    //  it can be guaranteed that writing to it is serialised and
+    //  performed using SetQwLowHigh())
     QWORD QwHighLow() const
     {
         if ( FOS64Bit() )
@@ -128,6 +150,7 @@ typedef DWORD (*PUTIL_THREAD_PROC)( DWORD_PTR );
 typedef DWORD_PTR THREAD;
 
 
+//  binary operator translation templates
 
 template< class T >
 inline T& operator++( T& t )
@@ -229,6 +252,7 @@ inline T1& operator|=( T1& t1, const T2& t2 )
     return t1;
 }
 
+//  host endian-ness
 
 const BOOL  fHostIsLittleEndian     = fTrue;
 inline constexpr BOOL FHostIsLittleEndian()
@@ -236,6 +260,7 @@ inline constexpr BOOL FHostIsLittleEndian()
     return fHostIsLittleEndian;
 }
 
+//  byte swap functions
 
 inline unsigned __int16 ReverseTwoBytes( const unsigned __int16 w )
 {
@@ -262,7 +287,7 @@ inline unsigned __int64 ReverseEightBytes( const unsigned __int64 qw )
 
 #pragma warning( default:  4035 )
 
-#else
+#else  //  !_M_IX86 || !TYPES_USE_X86_ASM
 
 inline DWORD ReverseFourBytes( const unsigned __int32 dw )
 {
@@ -280,7 +305,7 @@ inline QWORD ReverseEightBytes( const unsigned __int64 qw )
             ( ( qw3 & 0x00000000FFFFFFFF ) << 32 );
 }
 
-#endif
+#endif  //  _M_IX86 && TYPES_USE_X86_ASM
 
 template< class T >
 inline T ReverseNBytes( const T t )
@@ -393,6 +418,7 @@ inline T ReverseBytesOnBE( const T t )
 }
 
 
+//  big endian type template
 
 template< class T >
 class BigEndian
@@ -446,6 +472,7 @@ inline BigEndian< T >& BigEndian< T >::operator=( const T& t )
 }
 
 
+//  little endian type template
 
 template< class T >
 class LittleEndian
@@ -505,6 +532,7 @@ inline LittleEndian< T >& LittleEndian< T >::operator=( const T& t )
 #define PERMIT_UNALIGNED_ACCESS
 #endif
 
+//  unaligned type template
 
 #define UCAST(T) *(T PERMIT_UNALIGNED_ACCESS *)
 
@@ -560,6 +588,7 @@ inline Unaligned< T >& Unaligned< T >::operator=( const T& t ) PERMIT_UNALIGNED_
 }
 
 
+//  unaligned big endian type template
 
 template< class T >
 class UnalignedBigEndian
@@ -614,6 +643,7 @@ inline UnalignedBigEndian< T >& UnalignedBigEndian< T >::operator=( const T& t )
 }
 
 
+//  unaligned little endian type template
 
 template< class T >
 class UnalignedLittleEndian
@@ -668,13 +698,55 @@ inline UnalignedLittleEndian< T >& UnalignedLittleEndian< T >::operator=( const 
 }
 
 
+//  special type qualifier to allow unaligned access to variables
+//
+//  NOTE:  NEVER DIRECTLY USE THIS TYPE QUALIFIER!  USE THE Unaligned* TEMPLATES!
 
 #undef PERMIT_UNALIGNED_ACCESS
 
 
+//
+//  Compressed Endian Types
+//
+//  These are types like BigEndian<> and LittleEndian<> that are suitable for storage on
+//  any platform, but these types take up variable space depending upon the value stored 
+//  and the probability to be an expected (and thus compressable) value.
+//
+//  Compression Schemes
+//
+//      Random values can never be compressed because they have no higher probability to
+//      be one value than another.  The key is to pick / create a compression scheme that 
+//      can map smaller set of bytes to the most probable of values.
+//
+//      LowSp   - This "Low Spread" method expects values that have a high tendency to 
+//                cluster towards low numerical values.
+//                Good For: Code enums, flags, small cb (like cb of a single field)
+//
+//      Los     - This will be appended to any scheme that is slightly lossy
+//                compare to the native bit size
+//
+//  Naming
+//
+//      Type Naming will be this: CompEndian<CompressionSchema>[Los]<MaxBitSize>b
+//      Hungarian Naming will be: ce_us (USHORT), ce_cb (count of bytes), ce_grbit, etc
+//
+//  Usage
+//
+//      All such types will have two .ctor's:
+//          CompEndianLowSpLos16b( TYPE us ) :
+//          CompEndianLowSpLos16b( __in_bcount( cbBufferMax ) const BYTE * pbe_us, ULONG cbBufferMax )
+//
+//      And after constructing from the native type (uncompressed var) or from the 
+//      buffer (compressed var) respectively, then both the value can be retrieved
+//      or the CopyTo buffer routing can be called.  Also the size of the buffer
+//      will be available.
 
+//  A low spread compressed unsigned short helper class. We lose only a single bit of 16b USHORT and 
+//  can represent values from 0 to 32767 (i.e. 2^15 - 1) with the ability to store values below 128 
+//  in a single byte.
 
 #ifdef DEBUG
+//  Unfortunately too early for asserts, define a simple one.
 #define TYPESAssertSz( expr, str )      if ( !(expr)  ) { *((ULONG*)NULL) = 9; }
 #define TYPESAssert( expr )             TYPESAssertSz( (expr), #expr )
 #else
@@ -682,8 +754,12 @@ inline UnalignedLittleEndian< T >& UnalignedLittleEndian< T >::operator=( const 
 #define TYPESAssert( expr )
 #endif
 
-class CompEndianLowSpLos16b
+class CompEndianLowSpLos16b     //  ce_?? | ce_us | ce_cb | ce_grbit | etc ...
 {
+    //  Format: 1 byte min, 2 bytes max
+    //
+    //      1<x>    cb = 2 form, x = 15 bit USHORT
+    //      0<x>    cb = 1 form, x = 7 bit "USHORT"
 
 public:
     const static USHORT     usMac   = 0x7FFF;
@@ -696,6 +772,8 @@ private:
 
     USHORT          m_us;
 
+    //  this function compresses the m_us (set in CompEndianLowSpLos16b( us ) .ctor) into the pb provided, the
+    //  opposite / correlated function is unobviously
 
     INLINE VOID CopyTo_( __out_bcount( cbBufferMax ) BYTE * const pb, __in const ULONG cbBufferMax )
     {
@@ -714,7 +792,7 @@ private:
     INLINE USHORT CopyOut_( __in_bcount( cbBufferMax ) const BYTE * pbe_us, ULONG cbBufferMax )
     {
         USHORT us;
-        if ( cbBufferMax == 0 )
+        if ( cbBufferMax == 0 )     // fuzz safety first
         {
             TYPESAssertSz( fFalse, "Tried to unpack more data when we have 0 bytes in buffer!" );
             us = 0;
@@ -724,7 +802,7 @@ private:
             TYPESAssert( cbBufferMax >= 1 );
             if ( pbe_us[0] & bExpandedFlag )
             {
-                if ( cbBufferMax < 2 )
+                if ( cbBufferMax < 2 )  // fuzz safety first
                 {
                     TYPESAssertSz( fFalse, "Tried to unpack more data than we have in buffer!" );
                     us = 0;
@@ -746,15 +824,18 @@ private:
 
 public:
 
+    //  initializes a compressed USHORT object, expected user would copy out to buffer 
+    //  of Cb() bytes with CopyTo().
 
     INLINE CompEndianLowSpLos16b( USHORT us ) :
         m_us( us )
     {
         C_ASSERT( usExpandedFlag == usMac + 1 );
-        TYPESAssert( 0 == ( m_us & usExpandedFlag ) );
+        TYPESAssert( 0 == ( m_us & usExpandedFlag ) );  // trying to pack too big of a USHORT in here
         TYPESAssert( m_us <= usMac );
     }
 
+    //  gets the USHORT value stored in the class
 
     INLINE USHORT Us() const
     {
@@ -762,24 +843,29 @@ public:
         return m_us;
     }
 
+    //  this function uncompresses the USHORT out of the pbe_us, expected user would get
+    //  the USHORT with Us().
 
     INLINE CompEndianLowSpLos16b( __in_bcount( cbBufferMax ) const BYTE * pbe_us, ULONG cbBufferMax )
     {
         m_us = CopyOut_( pbe_us, cbBufferMax );
 
+        //  validate recompressibility / consistency
 #ifdef DEBUG
         CompEndianLowSpLos16b   ce_usCheck( m_us );
         BYTE    rgbCheck[3];
         ce_usCheck.CopyTo_( rgbCheck, sizeof(rgbCheck) );
         TYPESAssert( ce_usCheck.Cb() == Cb() );
         TYPESAssert( ( rgbCheck[0] & bExpandedFlag ) == ( pbe_us[0] & bExpandedFlag ) );
-        TYPESAssert( 0 == memcmp( rgbCheck, pbe_us, Cb() ) );
+        TYPESAssert( 0 == memcmp( rgbCheck, pbe_us, Cb() ) );   // just to be sure.
 #endif
     }
 
+    //  returns the size of the buffer required by CopyTo().
 
     INLINE ULONG Cb() const
     {
+        //  dealing with m_us
         if ( m_us < usMaxShortShort )
         {
             return 1;
@@ -790,14 +876,17 @@ public:
         }
     }
 
+    //  this function compresses the m_us (set in CompEndianLowSpLos16b( us ) .ctor) into the pb provided
 
     INLINE VOID CopyTo( BYTE * pb, __in const ULONG cbBufferMax )
     {
         CopyTo_( pb, cbBufferMax );
 
+        //  validate exit criteria are consistent with our understanding
 #ifdef DEBUG
         const BOOL fHighSet = ( Cb() != 1 );
         TYPESAssert( ( *(reinterpret_cast<BYTE*>(pb)) & bExpandedFlag ) || !fHighSet );
+        // This may AV at end of buffer? Could combine w/ previous TYPESAssert, if & 0x80 is true, this should be safe ...
         TYPESAssert( ( *(reinterpret_cast<UnalignedBigEndian<USHORT>*>(pb)) & usExpandedFlag ) || !fHighSet );
         CompEndianLowSpLos16b   ce_usComp( pb, Cb() );
         TYPESAssert( m_us == ce_usComp.Us() );
@@ -807,7 +896,9 @@ public:
 };
 
 
+//      defines natural bit-wise operations (basic, or advanced) on an enum, preserving the enum type
 
+//  note: copied (and renamed) from ntdef.h
 
 #define DEFINE_ENUM_FLAG_OPERATORS_BASIC(ENUMTYPE)  \
     extern "C++" {                                  \
@@ -828,7 +919,15 @@ public:
     }
 
 
+//
+//      Class Init Support
+//
 
+//  Derive from this class to memset all members of your derived class to zero
+//  prior to the exec of its constructor or any constructors of its members
+//
+//  NOTE:  this only works with one level of derivation
+//
 class CZeroInit
 {
     public:
@@ -841,6 +940,6 @@ class CZeroInit
 };
 
 
-#endif
+#endif  //  _OS_TYPES_HXX_INCLUDED
 
 

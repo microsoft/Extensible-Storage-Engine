@@ -6,7 +6,9 @@
 CUnitTest( UppercaseTextNormalizationTest, 0, "Tests the OS Layer Unicode normalization by upper case the text." );
 
 
+//  ================================================================
 ERR UppercaseTextNormalizationTest::ErrTest()
+//  ================================================================
 {
     JET_ERR         err = JET_errSuccess;
     COSLayerPreInit     oslayer;
@@ -56,7 +58,9 @@ HandleError:
 
 CUnitTest( UppercaseTextNormalizationSanityTest, 0, "Tests the OS Layer Unicode normalization by upper case the text." );
 
+//  ================================================================
 ERR UppercaseTextNormalizationSanityTest::ErrTest()
+//  ================================================================
 {
     JET_ERR         err = JET_errSuccess;
     COSLayerPreInit     oslayer;
@@ -76,6 +80,7 @@ ERR UppercaseTextNormalizationSanityTest::ErrTest()
         *(WCHAR *) &szSrc[0] = (WCHAR)i;
         INT result = LCMapStringEx(L"de-DE", LCMAP_UPPERCASE, (LPWSTR)szSrc, 1, (LPWSTR) szDest, 100, NULL, NULL, 0);
 
+        // Result by upper case is in characters.
         OSTestCheck( 1 == result );
     }
 HandleError:

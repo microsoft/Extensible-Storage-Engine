@@ -3,7 +3,9 @@
 
 #include "syncunittest.hxx"
 
+//  ================================================================
 class LeakDetectionTest : public UNITTEST
+//  ================================================================
 {
     private:
         static LeakDetectionTest s_instance;
@@ -49,10 +51,12 @@ class TestClassWithLock
         ~TestClassWithLock() { };
         
     public:
-        CCriticalSection        m_testLock;
+        CCriticalSection        m_testLock;     //  Allocation critical section
 };
 
+//  ================================================================
 ERR LeakDetectionTest::ErrTest()
+//  ================================================================
 {
     TestClassWithLock * pTestClass = NULL;
 

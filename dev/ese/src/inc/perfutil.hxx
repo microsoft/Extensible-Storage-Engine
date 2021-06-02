@@ -13,6 +13,7 @@ extern void PerfUtilLogEvent( DWORD evncat, WORD evntyp, const char *szDescripti
 extern HANDLE g_hOurEventSource;
 
 
+//  Registry Support
 
 extern DWORD DwPerfUtilRegOpenKeyEx( HKEY hkeyRoot, LPCWSTR lpszSubKey, PHKEY phkResult );
 extern DWORD DwPerfUtilRegOpenKeyEx( HKEY hkeyRoot, LPCWSTR lpszSubKey, REGSAM samDesired, PHKEY phkResult );
@@ -25,11 +26,13 @@ extern DWORD DwPerfUtilRegSetValueEx( HKEY hkey, LPCWSTR lpszValue, DWORD fdwTyp
 extern DWORD DwPerfUtilRegQueryValueEx( HKEY hkey, __in LPCWSTR lpszValue, LPDWORD lpdwType, LPBYTE *lplpbData );
 
 
+//  Init/Term
 
 extern DWORD DwPerfUtilInit( VOID );
 extern VOID PerfUtilTerm( VOID );
 
 
+//  shared performance data area resources
 
 extern HANDLE   g_hPERFGlobalMutex;
 extern HANDLE   g_hPERFGDAMMF;

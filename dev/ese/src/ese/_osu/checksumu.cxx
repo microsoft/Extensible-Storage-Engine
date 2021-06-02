@@ -1,14 +1,60 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
+/*******************************************************************
 
+Each database page and database header page contains a 8-byte checksum.
+The checksum is the first 8 bytes on the page. The checksum incorporates
+the page number so that getting back the wrong page will generate a
+checksum error.
+
+There are two different formats of page checksums, called (imaginatively
+enough) old and new:
+
+- Old:  this is the format used by 5.5 through Exchange 2003 SP1, and
+        Windows 2000 through Longhorn. The first DWORD of the checksum
+        is an XOR of all DWORDs on the page (except the checksum) along
+        with the seed value of 0x89abcdef. The second DWORD is the pgno
+        of the page. XOR is used because it's very easy to optimize on
+        processors with wide words lengths.
+
+        The old checksum format is actually a 4-byte format, we expand
+        it to 8-bytes for pages by making the pgno check part of checksum
+        validation. Database and logfile headers don't have a pgno, so
+        they in fact have a 4-byte checksum.
+
+- New:  XOR checksums can only detect problems, not correct them. ECC
+        checksums can correct single-bit errors in pages, which are actually
+        a significant percentage of problems we see. Calculating and verifying
+        ECC checksums is more expensive though.
+
+        The new checksum format uses an ECC checksum to allow correction of
+        single-bit errors in pages.
+
+In an I/O intensive scenario checksum calculation and verification can become
+a performance problem. To optimize checksumming as much as possible we take
+advantage of different processor features (64-bit words, SSE instructions, SSE2
+instructions). This leads to several implementations of the checksum routine,
+for different architectures. All checksum calls are indirected through a function
+pointer, which is set at runtime, depending on the capabilities of the processor
+we are running on.
+
+In order to determine which type of checksum should be used, there is a
+bit in the database header/database page which tells us what type of
+checksum to use. We always have to consider that a corruption could flip
+that bit, so the actual flow of checksumming a page is a little complex to
+deal with that.
+
+*******************************************************************/
 
 #include "osustd.hxx"
 #include "esestd.hxx"
 
 
 
+//  ================================================================
 XECHECKSUM LongChecksumFromShortChecksum( const ULONG xorChecksum, const ULONG pgno )
+//  ================================================================
 {
     Assert( 0 != pgno );
     XECHECKSUM checksum = ( (XECHECKSUM)pgno ) << 32 | xorChecksum;
@@ -16,7 +62,9 @@ XECHECKSUM LongChecksumFromShortChecksum( const ULONG xorChecksum, const ULONG p
 }
 
 
+//  ================================================================
 inline BOOL FGetBit( const void * const pv, const INT ibitOffset )
+//  ================================================================
 {
     const unsigned char * const pb  = (unsigned char *)pv;
     const INT   ibyte       = ibitOffset / 8;
@@ -26,7 +74,9 @@ inline BOOL FGetBit( const void * const pv, const INT ibitOffset )
     return ( pb[ibyte] & bitMask ) ? fTrue : fFalse;
 }
 
+//  ================================================================
 inline void SetBit( void * const pv, const INT ibitOffset )
+//  ================================================================
 {
     unsigned char * const   pb      = (unsigned char *)pv;
     const INT   ibyte       = ibitOffset / 8;
@@ -36,7 +86,9 @@ inline void SetBit( void * const pv, const INT ibitOffset )
     pb[ibyte] |= bitMask;
 }
 
+//  ================================================================
 inline void FlipBit( void * const pv, const INT ibitOffset )
+//  ================================================================
 {
     unsigned char * const   pb      = (unsigned char *)pv;
     const INT   ibyte       = ibitOffset / 8;
@@ -47,10 +99,15 @@ inline void FlipBit( void * const pv, const INT ibitOffset )
 }
 
 
+//  ================================================================
 UINT IbitNewChecksumFormatFlag( const PAGETYPE pagetype )
+//  ================================================================
 {
     if( databasePage == pagetype )
     {
+        //  for database pages, the page flags are stored in the 10th
+        //  unsigned long. The format bit is 0x2000, which is the 14th bit
+        //
         Assert( OffsetOf( CPAGE::PGHDR, fFlags ) * 8 == 9 * 32 );
         Assert( CPAGE::fPageNewChecksumFormat == ( 1 << 13 ) );
 
@@ -61,7 +118,15 @@ UINT IbitNewChecksumFormatFlag( const PAGETYPE pagetype )
 }
 
 
+//  ================================================================
 BOOL FPageHasNewChecksumFormat( const void * const pv, const PAGETYPE pagetype )
+//  ================================================================
+//
+//  Returns fTrue if the ECC format bit for the page is set. Database pages
+//  and header pages have different formats, so we have to store the bit
+//  in different places
+//
+//-
 {
     if( databasePage == pagetype )
     {
@@ -72,31 +137,46 @@ BOOL FPageHasNewChecksumFormat( const void * const pv, const PAGETYPE pagetype )
 }
 
 
+//  ================================================================
 void SetNewChecksumFormatFlag( void * const pv, const PAGETYPE pagetype )
+//  ================================================================
+//
+//  The ECC bit is only currently supported for database pages, not
+//  headers
+//
+//-
 {
     const INT ibit = IbitNewChecksumFormatFlag( pagetype );
     SetBit( pv, ibit );
 }
 
 
+//  ================================================================
 BOOL FPageHasLongChecksum( const PAGETYPE pagetype )
+//  ================================================================
 {
     return ( databasePage == pagetype );
 }
 
+//  ================================================================
 ULONG ShortChecksumFromPage( const void * const pv )
+//  ================================================================
 {
     return *( const ULONG* )pv;
 }
 
+//  ================================================================
 void SetShortChecksumOnPage( void * const pv, const ULONG checksum )
+//  ================================================================
 {
     *( ULONG* )pv = checksum;
 }
 
 
 
+//  ================================================================
 PAGECHECKSUM LongChecksumFromPage( const void * const pv, const ULONG cb )
+//  ================================================================
 {
     BOOL fSmallPage = FIsSmallPage( cb );
 
@@ -112,7 +192,9 @@ PAGECHECKSUM LongChecksumFromPage( const void * const pv, const ULONG cb )
 }
 
 
+//  ================================================================
 void SetLongChecksumOnPage( void * const pv, const ULONG cb, const PAGECHECKSUM checksum )
+//  ================================================================
 {
     BOOL fSmallPage = FIsSmallPage( cb );
 
@@ -128,7 +210,9 @@ void SetLongChecksumOnPage( void * const pv, const ULONG cb, const PAGECHECKSUM 
 }
 
 
+//  ================================================================
 PAGECHECKSUM ChecksumFromPage( const void * const pv, const ULONG cb, const PAGETYPE pagetype )
+//  ================================================================
 {
     if( FPageHasLongChecksum( pagetype ) )
     {
@@ -138,7 +222,9 @@ PAGECHECKSUM ChecksumFromPage( const void * const pv, const ULONG cb, const PAGE
 }
 
 
+//  ================================================================
 void SetChecksumOnPage( void * const pv, const ULONG cb, const PAGETYPE pagetype, const PAGECHECKSUM checksum )
+//  ================================================================
 {
     if( FPageHasLongChecksum( pagetype ) )
     {
@@ -153,8 +239,13 @@ void SetChecksumOnPage( void * const pv, const ULONG cb, const PAGETYPE pagetype
     }
 }
 
+//  ================================================================
 ULONG CbBlockSize( const ULONG cb )
+//  ================================================================
 {
+    // small pages only have 1 block
+    // divide a large page into a max of 4 blocks, first block is header block which hosts the page header
+    // because of backwards compatibility, 16k pages use 4k blocks. 32k pages use 8k blocks, with an ending 4k block if the page is not an 8k multiple
     ULONG cbT = cb;
     if ( !FIsSmallPage( cb ) )
     {
@@ -165,7 +256,7 @@ ULONG CbBlockSize( const ULONG cb )
         }
         else if ( cb <= 32 * 1024 )
         {
-            cbT = 8*1024;
+            cbT = 8*1024;   // header block size
         }
         else
         {
@@ -175,44 +266,54 @@ ULONG CbBlockSize( const ULONG cb )
     return cbT;
 }
 
+//  ================================================================
 static PAGECHECKSUM ComputePageChecksum(
     const void* const pv,
     const UINT cb,
     const PAGETYPE pagetype,
     const ULONG pgno,
+    // set fNew to compute new ECC for a page (R/W wrt the large page!!)
+    // reset fNew to computer ECC for verification purpose (R/O wrt the page)
     const BOOL fNew = fFalse )
+//  ================================================================
 {
     if( FPageHasLongChecksum( pagetype ) )
     {
         if( FPageHasNewChecksumFormat( pv, pagetype ) )
         {
+            // large pages (16/32kiB) always have new checksum format
             PAGECHECKSUM pgChecksum;
             const unsigned char* const pch = ( unsigned char* )pv;
 
+            // divide a large page into a max of 4 blocks, first block is header block which hosts the page header
+            // because of backwards compatibility, 16k pages use 4k blocks. 32k pages use 8k blocks, with an ending 4k block if the page is not an 8k multiple
             unsigned cbBlock = cb;
             if ( !FIsSmallPage( cb ) )
             {
                 cbBlock = CbBlockSize( cb );
-                unsigned ibT = cbBlock;
+                unsigned ibT = cbBlock; // Remove header block
                 INT i = 1;
                 
                 while( ( ibT + cbBlock ) <= cb )
                 {
-                    Enforce( i <= 3 );
+                    Enforce( i <= 3 );  //  no one should pass in an array big enough to overflow the 3 slots
                     AssumePREFAST( i <= 3 );
                     pgChecksum.rgChecksum[ i ] = ChecksumNewFormat( pch + ibT, cbBlock, pgno, fFalse );
                     ibT += cbBlock;
                     i++;
                 }
 
-                AssertRTL( cb - ibT == 4 * 1024 || cb - ibT == 0 );
+                AssertRTL( cb - ibT == 4 * 1024 || cb - ibT == 0 ); // only 4k or nothing should be left
                 if ( cb - ibT > 0 )
                 {
                     pgChecksum.rgChecksum[ i ] = ChecksumNewFormat( pch + ibT, cb - ibT, pgno, fFalse );
                 }
 
+                // write checksums into designated location in header block
+                // so checksum for header block can protect them as well
                 if ( fNew )
                 {
+                    // cast RO pv to RW pPgHdr2
                     CPAGE::PGHDR2* const pPgHdr2 = ( CPAGE::PGHDR2* )pv;
                     pPgHdr2->rgChecksum[ 0 ] = pgChecksum.rgChecksum[ 1 ];
                     pPgHdr2->rgChecksum[ 1 ] = pgChecksum.rgChecksum[ 2 ];
@@ -220,6 +321,7 @@ static PAGECHECKSUM ComputePageChecksum(
                 }
             }
 
+            // whole small page or header block for large page
             pgChecksum.rgChecksum[ 0 ] = ChecksumNewFormat( pch, cbBlock, pgno, fTrue );
             return pgChecksum;
         }
@@ -232,13 +334,15 @@ static PAGECHECKSUM ComputePageChecksum(
     return ChecksumOldFormat((unsigned char *)pv, cb);
 }
 
+//  ================================================================
 enum XECHECKSUMERROR { xeChecksumNoError = 0, xeChecksumCorrectableError = -13, xeChecksumFatalError = -29, };
 
 static XECHECKSUMERROR FTryFixBlock(
     const UINT cb,
-    UINT* const pibitCorrupted,
+    UINT* const pibitCorrupted,         // [in] bit offset of XECHECKSUM flag, [out] bit offset of proposed correction
     const XECHECKSUM xeChecksumExpected,
     const XECHECKSUM xeChecksumActual )
+//  ================================================================
 {
     if ( xeChecksumExpected == xeChecksumActual )
     {
@@ -249,6 +353,7 @@ static XECHECKSUMERROR FTryFixBlock(
     {
         const UINT ibitCorrupted = IbitCorrupted( cb, xeChecksumExpected, xeChecksumActual );
 
+        // *pibitCorrupted is the offset of the BIT we can NOT flip
         if ( ( *pibitCorrupted != ibitCorrupted ) && ( ibitCorrupted < 8 * cb ) )
         {
             *pibitCorrupted = ibitCorrupted;
@@ -259,6 +364,7 @@ static XECHECKSUMERROR FTryFixBlock(
     return xeChecksumFatalError;
 }
 
+//  ================================================================
 static void TryFixPage(
     void * const pv,
     const UINT cb,
@@ -268,6 +374,7 @@ static void TryFixPage(
     INT * const pibitCorrupted,
     PAGECHECKSUM checksumExpected,
     const PAGECHECKSUM checksumActual )
+//  ================================================================
 {
     Assert( checksumActual != checksumExpected );
 
@@ -279,34 +386,39 @@ static void TryFixPage(
     UINT rgibitCorrupted[ cxeChecksumPerPage ] = { IbitNewChecksumFormatFlag( pagetype ), UINT_MAX, UINT_MAX, UINT_MAX, };
     UINT ibitCorrupted = UINT_MAX;
 
+    // work out correction
     UINT iblk = 0;
     while( cbBlock > 0 )
     {
         if ( iblk >= cxeChecksumPerPage )
         {
+            // something is wrong, we can't keep checking this page
             AssertSz( fFalse, "Too many blocks on the page" );
             return;
         }
 
         rgErr[ iblk ] = FTryFixBlock( cbBlock, &rgibitCorrupted[ iblk ], checksumExpected.rgChecksum[ iblk ], checksumActual.rgChecksum[ iblk ] );
-        rgibitCorrupted[ iblk ] = rgibitCorrupted[ iblk ] + CHAR_BIT * ibT;
+        rgibitCorrupted[ iblk ] = rgibitCorrupted[ iblk ] + CHAR_BIT * ibT; // FTryFixBlock() stores the offset relative to the block; we adjust it so that it is relative to the start of the page instead.
         switch ( rgErr[ iblk ] )
         {
             case xeChecksumNoError:
                 break;
 
             case xeChecksumCorrectableError:
+                // save the location of first correctable error
                 if ( UINT_MAX == ibitCorrupted )
                 {
                     ibitCorrupted = rgibitCorrupted[ iblk ];
 
+                    // does this correctable error actually hit other checksums
                     UINT ibitStart = CHAR_BIT * offsetof( CPAGE::PGHDR2, rgChecksum );
                     UINT ibitLength = CHAR_BIT * sizeof( checksumExpected.rgChecksum[ 0 ] );
-                    if ( !fSmallPage &&
-                        0 == iblk &&
-                        ibitStart <= ibitCorrupted  &&
+                    if ( !fSmallPage &&                 // large page
+                        0 == iblk &&                    // header block
+                        ibitStart <= ibitCorrupted  &&  // hit other checksums
                         ibitCorrupted < ibitStart + ibitLength * ( cxeChecksumPerPage - 1 ) )
                     {
+                        // fix the checksum
                         UINT ibit = ibitLength + ( ibitCorrupted - ibitStart );
                         FlipBit( ( void* )&checksumExpected, ibit );
                     }
@@ -320,13 +432,15 @@ static void TryFixPage(
 
         iblk++;
         ibT += cbBlock;
-        cbBlock = min( cb - ibT, cbBlock );
+        cbBlock = min( cb - ibT, cbBlock ); // for non-power of 2 pages bigger than 16k, we have multiple 8k blocks, with possibly the last block of 4k
     }
 
+    // when multiple correctables, just report first one
     *pfCorrectableError = fTrue;
     *pibitCorrupted = ibitCorrupted;
     Assert( (UINT)*pibitCorrupted < ( 8 * cb ) );
 
+    // carry out correction in page
     UINT cblk = iblk;
     for ( iblk = 0; fCorrectError && iblk < cblk; ++iblk )
     {
@@ -341,29 +455,33 @@ static void TryFixPage(
 }
 
 
+//  ================================================================
 void ChecksumPage(
-    const void * const pv,
-    const UINT cb,
-    const PAGETYPE pagetype,
+    const void * const pv,              //  pointer to the page
+    const UINT cb,              //  size of the page (normally g_cbPage)
+    const PAGETYPE pagetype,            //  type of the page
     const ULONG pgno,
-    PAGECHECKSUM * const pchecksumExpected,
-    PAGECHECKSUM * const pchecksumActual )
+    PAGECHECKSUM * const pchecksumExpected, //  set to the checksum the page should have / read out the header
+    PAGECHECKSUM * const pchecksumActual )  //  set the the actual checksum. if actual != expected, JET_errReadVerifyFailure is returned
+//  ================================================================
 {
     *pchecksumExpected  = ChecksumFromPage( pv, cb, pagetype );
     *pchecksumActual    = ComputePageChecksum( pv, cb, pagetype, pgno );
 }
 
 
+//  ================================================================
 void ChecksumAndPossiblyFixPage(
-    void * const pv,
-    const UINT cb,
-    const PAGETYPE pagetype,
+    void * const pv,                    //  pointer to the page
+    const UINT cb,              //  size of the page (normally g_cbPage)
+    const PAGETYPE pagetype,            //  type of the page
     const ULONG pgno,
-    const BOOL fCorrectError,
-    PAGECHECKSUM * const pchecksumExpected,
-    PAGECHECKSUM * const pchecksumActual,
-    BOOL * const pfCorrectableError,
-    INT * const pibitCorrupted )
+    const BOOL fCorrectError,           //  fTrue if ECC should be used to correct errors
+    PAGECHECKSUM * const pchecksumExpected, //  set to the checksum the page should have / read out the header
+    PAGECHECKSUM * const pchecksumActual,   //  set the the actual checksum. if actual != expected, JET_errReadVerifyFailure is returned
+    BOOL * const pfCorrectableError,    //  set to fTrue if ECC could correct the error (set even if fCorrectError is fFalse)
+    INT * const pibitCorrupted )        //  offset of the corrupted bit (meaningful only if *pfCorrectableError is fTrue)
+//  ================================================================
 {
     *pfCorrectableError = fFalse;
     *pibitCorrupted     = -1;
@@ -377,6 +495,7 @@ void ChecksumAndPossiblyFixPage(
         TryFixPage( pv, cb, pagetype, fCorrectError, pfCorrectableError, pibitCorrupted, *pchecksumExpected, *pchecksumActual );
         Assert( ( *pfCorrectableError && *pibitCorrupted != -1 ) || ( !*pfCorrectableError && *pibitCorrupted == -1 ) );
 
+        // no point in re-computing the checksum if we haven't done any changes
         if ( fCorrectError && *pfCorrectableError )
         {
             *pchecksumExpected = ChecksumFromPage( pv, cb, pagetype );
@@ -390,12 +509,14 @@ void ChecksumAndPossiblyFixPage(
     }
 }
 
+//  ================================================================
 void DumpLargePageChecksumInfo(
-    void * const pv,
-    const UINT cb,
-    const PAGETYPE pagetype,
+    void * const pv,                    //  pointer to the page
+    const UINT cb,              //  size of the page (normally g_cbPage)
+    const PAGETYPE pagetype,            //  type of the page
     const ULONG pgno,
           CPRINTF * const pcprintf )
+//  ================================================================
 {
     Assert( FPageHasNewChecksumFormat( pv, pagetype ) );
 
@@ -439,12 +560,14 @@ void DumpLargePageChecksumInfo(
     ENDEXCEPT
 }
 
+//  ================================================================
 void DumpPageChecksumInfo(
-    void * const pv,
-    const UINT cb,
-    const PAGETYPE pagetype,
+    void * const pv,                    //  pointer to the page
+    const UINT cb,              //  size of the page (normally g_cbPage)
+    const PAGETYPE pagetype,            //  type of the page
     const ULONG pgno,
           CPRINTF * const pcprintf )
+//  ================================================================
 {
     if ( !FIsSmallPage( cb ) && FPageHasNewChecksumFormat( pv, pagetype ) )
     {
@@ -539,7 +662,9 @@ void DumpPageChecksumInfo(
     ENDEXCEPT
 }
 
+//  ================================================================
 void SetPageChecksum( void * const pv, const UINT cb, const PAGETYPE pagetype, const ULONG pgno )
+//  ================================================================
 {
     if( FPageHasLongChecksum( pagetype ) )
     {

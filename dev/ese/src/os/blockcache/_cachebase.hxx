@@ -4,16 +4,20 @@
 #pragma once
 
 
+//  TCacheBase:  base implementation of ICache and its derivatives.
+//
+//  I:  ICache or derivative
+//  CFTE:  CCachedFileTableEntryBase or derivative
 
 template< class I, class CFTE >
-class TCacheBase
+class TCacheBase  //  c
     :   public I
 {
     public:
 
         virtual ~TCacheBase();
 
-    public:
+    public:  //  ICache
 
         ERR ErrGetCacheType( _Out_writes_( cbGuid ) BYTE* const rgbCacheType ) override;
 
@@ -51,6 +55,7 @@ class TCacheBase
         VOID ReleaseCachedFile( _In_opt_ CFTE* const        pcfte,
                                 _In_opt_ CSemaphore* const  psem    = NULL);
 
+        //  Reports a cache miss for a file/block and if that block should be cached.
 
         void ReportMiss(    _In_ CFTE* const    pcfte,
                             _In_ const QWORD    ibOffset,
@@ -58,6 +63,7 @@ class TCacheBase
                             _In_ const BOOL     fRead,
                             _In_ const BOOL     fCacheIfPossible );
 
+        //  Reports a cache hit for a file/block and if that block should be cached.
 
         void ReportHit( _In_ CFTE* const    pcfte,
                         _In_ const QWORD    ibOffset,
@@ -65,17 +71,20 @@ class TCacheBase
                         _In_ const BOOL     fRead,
                         _In_ const BOOL     fCacheIfPossible );
 
+        //  Reports an update of a file/block.
 
         void ReportUpdate(  _In_ CFTE* const    pcfte,
                             _In_ const QWORD    ibOffset,
                             _In_ const DWORD    cbData );
 
+        //  Reports a write of a file/block and if that write was due to limited resources.
 
         void ReportWrite(   _In_ CFTE* const    pcfte,
                             _In_ const QWORD    ibOffset,
                             _In_ const DWORD    cbData,
                             _In_ const BOOL     fReplacementPolicy );
 
+        //  Reports the removal of a file/block from the cache and if that removal was due to limited resources.
 
         void ReportEvict(   _In_ CFTE* const    pcfte,
                             _In_ const QWORD    ibOffset,
@@ -97,6 +106,7 @@ class TCacheBase
 
     protected:
 
+        //  Completion context.
 
         class CComplete
         {
@@ -292,9 +302,12 @@ ERR TCacheBase<I, CFTE>::ErrClose(  _In_ const VolumeId     volumeid,
     ERR     err     = JET_errSuccess;
     CFTE*   pcfte   = NULL;
 
+    //  get the cached file if it is already open
 
     Call( ErrGetCachedFile( volumeid, fileid, fileserial, fTrue, &pcfte ) );
 
+    //  release the cached file if it was open.  this will close the file because we only reference it once for all
+    //  opens.  see ErrGetCachedFile
 
 HandleError:
     ReleaseCachedFile( pcfte );
@@ -339,19 +352,24 @@ ERR TCacheBase<I, CFTE>::ErrGetCachedFile(  _In_    const VolumeId      volumeid
 
     *ppcfte = NULL;
 
+    //  wait to lock the entry for this cached file
 
     Call( ErrLockCachedFile( volumeid, fileid, fileserial, &sem, &pcfte ) );
 
+    //  if the cached file isn't open and we want to open it then do so
 
     if ( !pcfte->FOpen() && !fOnlyIfAlreadyOpen )
     {
+        //  open the cached file
 
         Call( pcfte->ErrOpenCachedFile( m_pfsf, m_pfident, m_pbcconfig, m_pffCaching ) );
 
+        //  reference the cached file once for all opens.  this will be released by ICache::ErrClose
 
         pcfte->AddRef();
     }
 
+    //  return the opened cached file
 
     *ppcfte = pcfte->FOpen() ? pcfte : NULL;
 

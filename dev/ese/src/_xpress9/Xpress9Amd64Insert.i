@@ -12,7 +12,7 @@
             uHashValue ^= uHashValue >> 17;
             uHashValue &= uHashMask;
             ASSERT (uHashValue == h0, "uPosition=%Iu ROUND=%u", uPosition, ROUND);
-#endif 
+#endif /* XPRESS9_MAX_TRACE_LEVEL >= TRACE_LEVEL_ASSERT */
 
             pState->m_uNext[uPosition + 4*ROUND + 0] = pHashTable[h0];
             pHashTable[h0] = (LZ77_INDEX) (uPosition  + 4*ROUND + 0);
@@ -24,7 +24,7 @@
             uHashValue ^= uHashValue >> 17;
             uHashValue &= uHashMask;
             ASSERT (uHashValue == h1, "uPosition=%Iu ROUND=%u", uPosition, ROUND);
-#endif 
+#endif /* XPRESS9_MAX_TRACE_LEVEL >= TRACE_LEVEL_ASSERT */
 
             pState->m_uNext[uPosition + 4*ROUND + 1] = pHashTable[h1];
             pHashTable[h1] = (LZ77_INDEX) (uPosition + 4*ROUND + 1);
@@ -36,7 +36,7 @@
             uHashValue ^= uHashValue >> 17;
             uHashValue &= uHashMask;
             ASSERT (uHashValue == h2, "uPosition=%Iu ROUND=%u", uPosition, ROUND);
-#endif 
+#endif /* XPRESS9_MAX_TRACE_LEVEL >= TRACE_LEVEL_ASSERT */
 
             pState->m_uNext[uPosition + 4*ROUND + 2] = pHashTable[h2];
             pHashTable[h2] = (LZ77_INDEX) (uPosition + 4*ROUND + 2);
@@ -48,7 +48,7 @@
             uHashValue ^= uHashValue >> 17;
             uHashValue &= uHashMask;
             ASSERT (uHashValue == h3, "uPosition=%Iu ROUND=%u", uPosition, ROUND);
-#endif 
+#endif /* XPRESS9_MAX_TRACE_LEVEL >= TRACE_LEVEL_ASSERT */
 
             pState->m_uNext[uPosition + 4*ROUND + 3] = pHashTable[h3];
             pHashTable[h3] = (LZ77_INDEX) (uPosition + 4*ROUND + 3);

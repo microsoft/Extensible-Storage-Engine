@@ -5,12 +5,20 @@
 #include "_logredomap.hxx"
 #include "errdata.hxx"
 
+//
+// this function will return one of the followings:
+//      JET_errDatabase200Format
+//      JET_errDatabase400Format
+//      JET_errDatabaseCorrupted
+//
 
 LOCAL ERR ErrDBICheck200And400( INST *const pinst, IFileSystemAPI *const pfsapi, __in PCWSTR wszDatabaseName )
 {
-    
+    /* persistent database data, in database root node
+    /**/
 #include <pshpack1.h>
 
+    //  Structures copied from JET200/JET400
 
     typedef ULONG SRID;
 
@@ -28,16 +36,18 @@ LOCAL ERR ErrDBICheck200And400( INST *const pinst, IFileSystemAPI *const pfsapi,
 
     typedef struct _pghdr
     {
-        ULONG       ulChecksum;
-        ULONG       ulDBTime;
-        PGNO        pgnoFDP;
-        SHORT       cbFree;
-        SHORT       ibMic;
-        SHORT       ctagMac;
-        SHORT       itagFree;
-        SHORT       cbUncommittedFreed;
-        THREEBYTES  pgnoPrev;
-        THREEBYTES  pgnoNext;
+        ULONG       ulChecksum;         //  checksum of page, always 1st byte
+        ULONG       ulDBTime;           //  database time page dirtied
+        PGNO        pgnoFDP;            //  pgno of FDP which owns this page
+        SHORT       cbFree;             //  count free bytes
+        SHORT       ibMic;              //  minimum used byte
+        SHORT       ctagMac;            //  count tags used
+        SHORT       itagFree;           //  itag of first free tag
+        SHORT       cbUncommittedFreed; //  bytes freed from this page, but *possibly*
+                                        //    uncommitted (this number will always be
+                                        //    a subset of cbFree)
+        THREEBYTES  pgnoPrev;           //  pgno of previous page
+        THREEBYTES  pgnoNext;           //  pgno of next page
     } PGHDR;
 
     typedef struct _pgtrlr
@@ -57,11 +67,11 @@ LOCAL ERR ErrDBICheck200And400( INST *const pinst, IFileSystemAPI *const pfsapi,
         PGHDR       pghdr;
         TAG         rgtag[1];
         BYTE        rgbFiller[ cbPageOld -
-                        sizeof(PGHDR) -
-                        sizeof(TAG) -
-                        sizeof(BYTE) -
-                        sizeof(PGTYP) -
-                        sizeof(THREEBYTES) ];
+                        sizeof(PGHDR) -         // pghdr
+                        sizeof(TAG) -           // rgtag[1]
+                        sizeof(BYTE) -          // rgbData[1]
+                        sizeof(PGTYP) -         // pgtyp
+                        sizeof(THREEBYTES) ];   // pgnoThisPage
         BYTE        rgbData[1];
         PGTYP       pgtyp;
         THREEBYTES  pgnoThisPage;
@@ -75,6 +85,7 @@ LOCAL ERR ErrDBICheck200And400( INST *const pinst, IFileSystemAPI *const pfsapi,
             (cbP) = _ptagT->cb;                                 \
         }
 
+    //  node header bits
 #define fNDVersion              0x80
 #define fNDDeleted              0x40
 #define fNDBackLink             0x20
@@ -127,14 +138,16 @@ LOCAL ERR ErrDBICheck200And400( INST *const pinst, IFileSystemAPI *const pfsapi,
         Error( ErrERRCheck( JET_errDatabaseCorrupted ) );
     }
 
-    
+    /*  at least FILES, OWNEXT, AVAILEXT
+    /**/
     pb = (BYTE *)ppage + ibTag;
     if ( !FNDVisibleSons( *pb ) || CbNDKey( pb ) != 0 || FNDNullSon( *pb ) )
     {
         Error( ErrERRCheck( JET_errDatabaseCorrupted ) );
     }
 
-    
+    /*  check data length
+    /**/
     INT cb;
     cb = (INT)( cbTag - ( PbNDData( pb ) - pb ) );
     if ( cb != sizeof(P_DATABASE_DATA) )
@@ -142,7 +155,8 @@ LOCAL ERR ErrDBICheck200And400( INST *const pinst, IFileSystemAPI *const pfsapi,
         Error( ErrERRCheck( JET_errDatabaseCorrupted ) );
     }
 
-    
+    /*  check database version, for 200 ulVersion should be 1, for 400 ulVersion is 0x400.
+    /**/
     ulVersion = ((P_DATABASE_DATA *)PbNDData(pb))->ulVersion;
     if ( ulDAEVersion200 == ulVersion )
         err = ErrERRCheck( JET_errDatabase200Format );
@@ -171,11 +185,23 @@ BOOL FInEseutilPossibleUsageError()
 #endif
 
 
+//  ================================================================
 bool FDBIsLVChunkSizeCompatible(
     const ULONG cbPage,
     const ULONG ulDaeVersion,
     const ULONG ulDaeUpdateMajor )
+//  ================================================================
+//
+//  In version 0x620,0x11 of the database the long-value chunk size
+//  changed, but only for large pages (16kb and 32kb pages). The
+//  change is _not_ backwards compatible so we have to check for
+//  the case where we are attaching a database that is older than
+//  the update.
+//
+//-
 {
+    // when the major version changes this function won't be needed
+    // any more.
     Assert( ulDAEVersionMax == ulDAEVersionNewLVChunk );
     Assert( ulDAEUpdateMajorMax >= ulDAEUpdateMajorNewLVChunk );
 
@@ -185,14 +211,18 @@ bool FDBIsLVChunkSizeCompatible(
             || 16*1024 == cbPage
             || 32*1024 == cbPage );
 
+    // earlier checks should catch these conditions
 
     Assert( ulDAEVersionMax == ulDaeVersion || FNegTest( fInvalidAPIUsage ) || FInEseutilPossibleUsageError() );
 
     if( FIsSmallPage( cbPage ) )
     {
+        // small pages are always compatible
         return true;
     }
 
+    // this is a large page database. if it has the
+    // old chunk size then it isn't compatible
     if( ulDaeVersion == ulDAEVersionNewLVChunk
         && ulDaeUpdateMajor < ulDAEUpdateMajorNewLVChunk )
     {
@@ -202,7 +232,9 @@ bool FDBIsLVChunkSizeCompatible(
     return true;
 }
 
+//  ================================================================
 JETUNITTEST( DB, FDBIsLVChunkSizeCompatible  )
+//  ================================================================
 {
     for( INT i = 4; i <= 32; i *= 2 )
     {
@@ -216,6 +248,23 @@ JETUNITTEST( DB, FDBIsLVChunkSizeCompatible  )
     CHECK( false == FDBIsLVChunkSizeCompatible( 32*1024, ulDAEVersionNewLVChunk, ulDAEUpdateMajorNewLVChunk-1 ) );
 }
 
+//+local
+//  ErrDBInitDatabase
+//  ========================================================================
+//  ErrDBInitDatabase( PIB *ppib, IFMP ifmp, CPG cpgPrimary )
+//
+//  Initializes database structure.  Structure is customized for
+//  system, temporary and user databases which are identified by
+//  the ifmp.  Primary extent is set to cpgPrimary but no allocation
+//  is performed.  The effect of this routine can be entirely
+//  represented with page operations.
+//
+//  PARAMETERS  ppib            ppib of database creator
+//              ifmp            ifmp of created database
+//              cpgPrimary      number of pages to show in primary extent
+//
+//  RETURNS     JET_errSuccess or error returned from called routine.
+//-
 LOCAL ERR ErrDBInitDatabase( PIB *ppib, IFMP ifmp, CPG cpgPrimary )
 {
     ERR             err;
@@ -223,6 +272,8 @@ LOCAL ERR ErrDBInitDatabase( PIB *ppib, IFMP ifmp, CPG cpgPrimary )
 
     CallR( ErrDIRBeginTransaction( ppib, 40229, NO_GRBIT ) );
 
+    //  set up root page
+    //
     Call( ErrSPCreate(
                 ppib,
                 ifmp,
@@ -244,6 +295,7 @@ HandleError:
     return err;
 }
 
+//  we may want to keep track of last page of the database.
 
 ERR ErrDBSetLastPage( PIB* const ppib, const IFMP ifmp )
 {
@@ -258,6 +310,9 @@ ERR ErrDBSetLastPage( PIB* const ppib, const IFMP ifmp )
     Assert( !PinstFromPpib( ppib )->m_plog->FRecovering() ||
                 fRecoveringRedo != PinstFromPpib( ppib )->m_plog->FRecoveringMode() ||
                 g_rgfmp[ ifmp ].m_fCreatingDB ||
+                // Note: We CAN NOT allow ErrDBSetLastPage() during recovery 
+                // of a patched database, because the database is not completely 
+                // consistent yet.
                 g_rgfmp[ ifmp ].Pdbfilehdr()->Dbstate() != JET_dbstateDirtyAndPatchedShutdown );
 
     Call( ErrDBOpenDatabase( ppib, g_rgfmp[ifmp].WszDatabaseName(), &ifmpT, NO_GRBIT ) );
@@ -282,6 +337,12 @@ HandleError:
     return err;
 }
 
+//  Reports the basic event for Create, Attach, and Detach database.
+//
+//  fCacheAlive 
+//      - on attach indicates if we hooked up with an already existing cache for this DB.
+//      - on detach indicates if we managed to save / keep our cache for this DB.
+//      - on create this flag means nothing.
 
 VOID DBReportTachmentEvent( const INST * const pinst, const IFMP ifmp, const MessageId msgidTachment, PCWSTR wszDatabaseName, const BOOL fCacheAlive = fFalse, const BOOL fDirtyCacheAlive = fFalse )
 {
@@ -294,9 +355,11 @@ VOID DBReportTachmentEvent( const INST * const pinst, const IFMP ifmp, const Mes
 
     if ( pfmp->FIsTempDB() )
     {
+        //  we don't log the temp DB attach/detach
         return;
     }
 
+    // report our successful {create|attach|detach} and timings
 
     WCHAR wszSeconds[16];
     WCHAR wszFmpId[16];
@@ -342,8 +405,11 @@ VOID DBReportTachmentEvent( const INST * const pinst, const IFMP ifmp, const Mes
         FormatDbvEfvMapping( ifmp, wszAddlFixedData + ich, _cbrg( wszAddlFixedData ) - ich * sizeof(WCHAR) );
     }
 
+    //  We might consider truncating the timing sequence data when usecTach < 100000 /* 100 ms */, or
+    //  even skipping the whole event altogether.  Probably good to make this behavior based upon the
+    //  event logging level.
 
-    OSStrCbFormatW( wszSeconds, sizeof(wszSeconds), L"%I64d", usecTach / 1000000  );
+    OSStrCbFormatW( wszSeconds, sizeof(wszSeconds), L"%I64d", usecTach / 1000000 /* convert to seconds */ );
     OSStrCbFormatW( wszFmpId, sizeof(wszFmpId), L"%d", (ULONG)ifmp );
     OSStrCbFormatW( wszKeepCacheAlive, sizeof(wszKeepCacheAlive), L"%d %d", fCacheAlive, fDirtyCacheAlive );
 
@@ -361,15 +427,24 @@ VOID DBReportTachmentEvent( const INST * const pinst, const IFMP ifmp, const Mes
 }
 
 
+// The original legacy value, removed from daeconst.hxx:
+//const CPG cpgDatabaseMin              = 256;  //  File Size - cpgDBReserved (ie. true db min = cpgDatabaseMin+cpgDBReserved)
+// we use this instead:
 CPG         cpgLegacyDatabaseDefaultSize    = 256;
 
-const CPG   cpgDatabaseApiMinReserved       = 32;
+const CPG   cpgDatabaseApiMinReserved       = 32;   //  minimum for the current ESE schema (across page sizes).
 
+//  This is the no lies minimal DB we can have with ESE's current base schema, and it
+//  is not meant to be used except for Assert()s and in compact and recovery, because
+//  at that minimum it would hold no user data ... so more of a jumping off point.
 CPG CpgDBDatabaseMinMin()
 {
-    const CPG   cpgDatabaseMinMin8K = 30;
-    const CPG   cpgDatabaseMinMin4K = 30;
-    const CPG   cpgDatabaseMinMin2K = 31;
+    //  Because there is ~x4.5 KB of ESE catalog data in the base schema (and we don't
+    //  seem to do a proper append split, or density on catalog is too low! :P), so we
+    //  need extra pages for the Base ESE schema as you drop in page size to 4KB or less.
+    const CPG   cpgDatabaseMinMin8K = 30;   //  True min is 29 pages, but wanted to match 32 pages w/ everything for 4KB and higher.
+    const CPG   cpgDatabaseMinMin4K = 30;   //  This is one higher than 8KB b/c we need an extra page for shadow.
+    const CPG   cpgDatabaseMinMin2K = 31;   //  This is one higher than 4KB b/c we need an extra extra page for shadow.
 
     CPG cpgRet = cpgDatabaseMinMin2K;
     if ( g_cbPage <= 2048 )
@@ -392,17 +467,35 @@ CPG CpgDBDatabaseMinMin()
     return cpgRet;
 }
 
+//  The initial size is dependent upon the ESE base schema + plus some rounding + the
+//  user paramDbExtensionSize.
+//
 CPG CpgDBInitialUserDatabaseSize( const INST * const pinst )
 {
+    //  We establish the ESE base size off two things:
+    //    A) CpgDBDatabaseMinMin() - this is the true min required, with ESE's min schema, 
+    //          and no data pages reserved for the user.
+    //    B) This 30 pages is just a very good number ... as it works out to 32 pages when 
+    //          you include  DB header + shadow, so that the end of the schema is aligned
+    //          to 128 KB (w/ 4 KB page size) or 256 KB (w/ 8 KB) etc.
+    //  Having an aligned end of schema is good so that subsequent extent allocations will 
+    //  be nicely aligned  for the first and second extensions of the DB.  The 3rd and later 
+    //  extensions will be auto-fixed to align with the paramDbExtensionSize OR the average 
+    //  space hints allocation size.
+    //  Note: Currently CpgDBDatabaseMinMin is dominant/higher only for 2 KB page sized DBs.
     const CPG cpgEseBaseSize = max( CpgDBDatabaseMinMin(), 30 );
 
+    //  We now use the user's DB extension size as the initial allocation of user data
+    //  that will need to be inserted.
 
     const CPG cpgUserDataMin = ( FDefaultParam( pinst, JET_paramDbExtensionSize ) &&
                                         ( (CPG)UlParam( pinst, JET_paramDbExtensionSize ) == cpgLegacyDatabaseDefaultSize ) ) ?
+                                    //  kind of cheat for default param to make it 256 "pages" w/ hdrs total, instead of 258.
                                     (CPG)( cpgLegacyDatabaseDefaultSize - cpgDBReserved - cpgEseBaseSize ) :
                                     UlFunctionalMin( (CPG)UlParam( pinst, JET_paramDbExtensionSize ),
                                             (CPG)( cpgLegacyDatabaseDefaultSize - cpgDBReserved - cpgEseBaseSize ) );
 
+    //  Take the base ESE size and extend by the first desired user extension.
 
     return cpgEseBaseSize + cpgUserDataMin;
 }
@@ -421,6 +514,8 @@ ERR ISAMAPI ErrIsamCreateDatabase(
 
     COSTraceTrackErrors trackerrors( __FUNCTION__ );
 
+    //  check parameters
+    //
     Assert( sizeof(JET_SESID) == sizeof(PIB *) );
     ppib = (PIB *)sesid;
     CallR( ErrPIBCheck( ppib ) );
@@ -450,6 +545,11 @@ ERR ISAMAPI ErrIsamCreateDatabase(
 
 ERR ErrDBFormatFeatureEnabled_( const JET_ENGINEFORMATVERSION efvFormatFeature, const DbVersion& dbvCurrentFromFile );
 
+//  Retrieves the FormatVersions structure representing the intentions of the client app
+//  as specified by their JET_paramEngineFormatValues.  Translates special values (such as 
+//  JET_efvUsePersistedFormat and JET_efvUseEngineDefault) to the closest discreet matching 
+//  value.
+//
 ERR ErrDBGetDesiredVersion(
     _In_ const INST * const                 pinst,
     _In_ const DBFILEHDR_FIX * const        pdbfilehdr,
@@ -460,6 +560,7 @@ ERR ErrDBGetDesiredVersion(
 
     JET_ENGINEFORMATVERSION efv = (JET_ENGINEFORMATVERSION)UlParam( pinst, JET_paramEngineFormatVersion );
 
+    //  Compute and strip the soft compat bit
 
     const BOOL fAllowPersistedFormat = ( efv & JET_efvAllowHigherPersistedFormat ) == JET_efvAllowHigherPersistedFormat;
     if ( pfAllowPersistedFormat )
@@ -471,9 +572,17 @@ ERR ErrDBGetDesiredVersion(
         efv = efv & ~JET_efvAllowHigherPersistedFormat;
     }
 
+    //  Compute the desired DB version we want ...
 
     if ( efv == JET_efvUsePersistedFormat )
     {
+        // Consider this subtle situation - If we have a new EFV with a DB UpdateMinor, but also a Log UpdateMajor change 
+        // we will actually upgrade the DB for that, but NOT the log.  This is kind of correct actually, because the EFV 
+        // param is not supposed to honored for just an UpdateMinor.  But when this is co-mingled with a Log UpdateMajor
+        // this might catch people by surprise that we actually generate a set of files that have half the "updates" for
+        // that particular EFV line in sysver.cxx!?  If we find this too confusing, we could as if FLogOn() and if so,
+        // retrieve Call( ErrLGFindHighestMatchingLogMajors( LOG_STREAM.m_lgvHighestRecovered, &pfmtversLogDesired ) ) and
+        // use the min of this EFV / pfmtversLogDesired and the ErrDBFindHighestMatchingDbMajors() pfmtvers retrieved below.
     
         if ( pdbfilehdr )
         {
@@ -482,7 +591,7 @@ ERR ErrDBGetDesiredVersion(
             if ( err >= JET_errSuccess )
             {
                 Assert( pdbfilehdr->le_ulVersion == pfmtvers->dbv.ulDbMajorVersion &&
-                        pdbfilehdr->le_ulDaeUpdateMajor == pfmtvers->dbv.ulDbUpdateMajor );
+                        pdbfilehdr->le_ulDaeUpdateMajor == pfmtvers->dbv.ulDbUpdateMajor ); // assert lookup did the job right
                 efv = pfmtvers->efv;
             }
 
@@ -504,6 +613,14 @@ ERR ErrDBGetDesiredVersion(
     return err;
 }
 
+//  Validates the versions of the DBFILEHDR against both the DB maximum and the client apps intention
+//  as expressed by dbvDesired (from their JET_paramEngineFormatValues setting).
+//
+//  ErrDBIValidateUserVersions() and ErrDBICheckVersion() are very similar to each other in that they 
+//  both valdiate versions, but ErrDBICheckVersion() can be used in read only contexts by passing the
+//  PfmtversEngineMax()->dbv to just check against what the engine understands.  For read-write contexts
+//  the ErrDBIValidateUserVersions() must be used to check against JET_paramEnableFormatVersion and 
+//  preserve the user specified version.
 ERR ErrDBICheckVersions(
     _In_    const INST* const               pinst,
     _In_z_  const WCHAR* const              wszDbFullName,
@@ -517,9 +634,11 @@ ERR ErrDBICheckVersions(
 
     DbVersion dbvEngineMax = PfmtversEngineMax()->dbv;
     
+    //  First check DB is not greater than the engine itself (this would be a version we can't even hope to understand!).
 
     if ( dbvEngineMax.ulDbMajorVersion < pdbfilehdr->le_ulVersion ||
         dbvEngineMax.ulDbMajorVersion == pdbfilehdr->le_ulVersion && dbvEngineMax.ulDbUpdateMajor < pdbfilehdr->le_ulDaeUpdateMajor )
+        //  Note: a too high le_ulDaeUpdateMinor is ok, as these are forward compatible changes.
     {
         WCHAR wszDatabaseVersion[50];
         WCHAR wszEngineVersion[50];
@@ -541,6 +660,7 @@ ERR ErrDBICheckVersions(
         Call( ErrERRCheck( JET_errInvalidDatabaseVersion ) );
     }
 
+    //  Second check DB is not greater than the specified desired version (typically from the param).
 
     if ( dbvDesired.ulDbMajorVersion < pdbfilehdr->le_ulVersion ||
         dbvDesired.ulDbMajorVersion == pdbfilehdr->le_ulVersion && dbvDesired.ulDbUpdateMajor < pdbfilehdr->le_ulDaeUpdateMajor )
@@ -548,15 +668,18 @@ ERR ErrDBICheckVersions(
         WCHAR wszDatabaseVersion[50];
         WCHAR wszParamVersion[50];
         WCHAR wszParamEfv[cchFormatEfvSetting];
-        const WCHAR * rgszT[5] = { wszDbFullName, wszDatabaseVersion, wszParamVersion, wszParamEfv, L""  };
+        const WCHAR * rgszT[5] = { wszDbFullName, wszDatabaseVersion, wszParamVersion, wszParamEfv, L"" /* deprecated %8 */ };
         
         OSStrCbFormatW( wszDatabaseVersion, _cbrg( wszDatabaseVersion ), L"%d.%d.%d", (ULONG)pdbfilehdr->le_ulVersion, (ULONG)pdbfilehdr->le_ulDaeUpdateMajor, (ULONG)pdbfilehdr->le_ulDaeUpdateMinor );
         OSStrCbFormatW( wszParamVersion, _cbrg( wszParamVersion ), L"%d.%d.%d", dbvDesired.ulDbMajorVersion, dbvDesired.ulDbUpdateMajor, dbvDesired.ulDbUpdateMinor );
         FormatEfvSetting( (JET_ENGINEFORMATVERSION)UlParam( pinst, JET_paramEngineFormatVersion ), wszParamEfv, sizeof(wszParamEfv) );
+        // deprecated: OSStrCbFormatW( wszAllowPersisted, _cbrg( wszAllowPersisted ), L"%d", fAllowPersistedFormat );
 
         if ( fAllowPersistedFormat )
         {
 #ifdef ENABLE_MICROSOFT_MANAGED_DATACENTER_LEVEL_OPTICS
+            //  Since the engine can understand this (got past first check AND the user 
+            //  asked us to, we will let this through ...
 
             UtilReportEvent( eventWarning,
                     GENERAL_CATEGORY,
@@ -570,8 +693,9 @@ ERR ErrDBICheckVersions(
         }
         else
         {
+            //  User wants strict version compatibility, throw this one out.
 
-            UtilReportEvent( eventError,
+            UtilReportEvent( eventError,    // NOTE: Same event, but here it is an error, above it is a warning!
                     GENERAL_CATEGORY,
                     ATTACH_DATABASE_VERSION_TOO_HIGH_FOR_PARAM_ID,
                     _countof( rgszT ),
@@ -584,8 +708,14 @@ ERR ErrDBICheckVersions(
         }
     }
 
+    //  Calculate if the le_efvMaxBinAttachDiagnostic needs updating ...
 
     if ( pdbfilehdr->le_efvMaxBinAttachDiagnostic < JET_efvSetDbVersion &&
+            //  This is not a normal usage of ErrDBFormatFeatureEnabled_() as typically code
+            //  should be passing the current DB header format in as the 2nd arg.  Do not
+            //  copy this example. ;)  We can't do that here b/c this is _whether to actual
+            //  update the DB header iteself_, so the bootstrap has to check the desired / 
+            //  param value instead.
             ErrDBFormatFeatureEnabled_( JET_efvSetDbVersion, dbvDesired ) >= JET_errSuccess )
     {
         if ( pfDbNeedsUpdate )
@@ -594,6 +724,7 @@ ERR ErrDBICheckVersions(
         }
     }
 
+    //  Calculate if any of the main version numbers need updating ...
 
     if ( CmpDbVer( pdbfilehdr->Dbv(), dbvDesired ) < 0 )
     {
@@ -613,6 +744,19 @@ HandleError:
     return err;
 }
 
+//  Retrieves the desired DB versions structure and more importantly validates the versions of the 
+//  DBFILEHDR against both the DB maximum and the client apps intention as expressed by their 
+//  JET_paramEngineFormatValues setting.
+//
+//  ErrDBIValidateUserVersions() and ErrDBICheckVersion() are very similar to each other in that they 
+//  both valdiate versions, but ErrDBICheckVersion() can be used in read only contexts by passing the
+//  PfmtversEngineMax()->dbv to just check against what the engine understands.  For read-write contexts
+//  the ErrDBIValidateUserVersions() must be used to allow us to save / perserve the user specified 
+//  vesion in the case that JET_efvUsePersistedVersion is specified for the JET_paramEngineFormatVersion.
+//
+//  NOTE: for certain errors, such as JET_errEngineFormatVersionSpecifiedTooLowForDatabaseVersion or
+//  JET_errInvalidDatabaseVersion the value of ppfmtversDesired can still be relied on.
+//
 ERR ErrDBIValidateUserVersions(
     _In_    const INST* const               pinst,
     _In_z_  const WCHAR* const              wszDbFullName,
@@ -626,11 +770,16 @@ ERR ErrDBIValidateUserVersions(
     BOOL fAllowPersistedFormat = fFalse;
     const FormatVersions * pfmtversDesired = NULL;
 
+    //  Compute the desired DB version we want ...
 
     err = ErrDBGetDesiredVersion( pinst,
-            ( ifmp == ifmpNil  || !FFMPIsTempDB( ifmp ) ) ? pdbfilehdr : NULL,
+            // We could remove this silly ifmpNil thing?  AND FFMPIsTempDB thing?  If we fixedrepair to run through 
+            // regular attach so it checks and updates (DBISetVersion()) through normal paths. Note: Not actually
+            // sure it would be worth it.
+            ( ifmp == ifmpNil /* from repair, pre-attach */ || !FFMPIsTempDB( ifmp ) ) ? pdbfilehdr : NULL,
             &pfmtversDesired,
             &fAllowPersistedFormat );
+    //  these are used as signal errors from ErrDBICheckVersions()
     Assert( err != JET_errEngineFormatVersionSpecifiedTooLowForDatabaseVersion );
     Call( err );
     if ( ppfmtversDesired != NULL )
@@ -673,14 +822,16 @@ HandleError:
     return err;
 }
 
+//  Sets the ver desired dbvUpdate value in the DBFILEHDR, ensuring that the DB version never
+//  travels backwards.
 void DBISetVersion(
         _In_    const INST* const               pinst,
         _In_z_  const WCHAR* const              wszDbFullName,
         _In_    const IFMP                      ifmp,
         _In_    const DbVersion&                dbvUpdate,
         _Inout_ DBFILEHDR_FIX * const           pdbfilehdr,
-        _In_    const BOOL                      fDbNeedsUpdate,
-        _In_    const BOOL                      fCreateDbUpgradeDoNotLog )
+        _In_    const BOOL                      fDbNeedsUpdate,    // only for debugging
+        _In_    const BOOL                      fCreateDbUpgradeDoNotLog )  // true to suppress logging on create DB path
 {
     Assert( pinst != NULL );
 
@@ -699,12 +850,15 @@ void DBISetVersion(
     if ( errCheckT >= JET_errSuccess )
     {
         Expected( CmpDbVer( pfmtversCheckT->dbv, dbvUpdate ) == 0 ||
+                    //  Redo follows what the log says, so may not check against the current version
                     ( pinst->FRecovering() && pinst->m_plog->FRecoveringMode() == fRecoveringRedo ) ||
+                    //  Also repair just forces a version whether it's out of date or not as well.
                     g_fRepair );
         Expected( fUpdateCheckT ||
+                    //  Redo forces its own versions ...
                     ( pinst->FRecovering() && pinst->m_plog->FRecoveringMode() == fRecoveringRedo &&
                         ( CmpDbVer( pdbfilehdr->Dbv(), dbvUpdate ) < 0 ) ) ||
-                    g_fRepair );
+                    g_fRepair );    // may be able to construct a case this goes off, but harmless.
     }
 
     if ( pdbfilehdr->le_ulCreateVersion == 0 )
@@ -715,28 +869,37 @@ void DBISetVersion(
         Assert( pdbfilehdr->le_ulDaeUpdateMinor == 0 );
         Assert( pdbfilehdr->le_efvMaxBinAttachDiagnostic == 0 );
     }
-#endif
+#endif //   DEBUG
 
     BOOL fUpdatedHeader = fFalse;
 
+    //  ErrDBICheckVersions & DBISetVersion are sort of paired, and if we are here, we would 
+    //  expect one of the things this function knows how to update are out of date.
     Expected( pdbfilehdr->le_efvMaxBinAttachDiagnostic < PfmtversEngineMax()->efv ||
                 CmpDbVer( pdbfilehdr->Dbv(), dbvUpdate ) < 0 ||
                 g_fRepair );
 
     if ( pdbfilehdr->le_efvMaxBinAttachDiagnostic < PfmtversEngineMax()->efv &&
+            //  This is not a normal usage of ErrDBFormatFeatureEnabled_() as typically code
+            //  should be passing the current DB header format in as the 2nd arg.  Do not
+            //  copy this example. ;)  We can't do that here b/c this is _whether to actual
+            //  update the DB header iteself_, so the bootstrap has to check the desired / 
+            //  param value instead.
             ErrDBFormatFeatureEnabled_( JET_efvSetDbVersion, dbvUpdate ) >= JET_errSuccess )
     {
         OSTrace( JET_tracetagUpgrade, OSFormat( "Updating DB.le_efvMaxBinAttachDiagnostic to %d from %d\n", PfmtversEngineMax()->efv, (ULONG)pdbfilehdr->le_efvMaxBinAttachDiagnostic  ) );
         pdbfilehdr->le_efvMaxBinAttachDiagnostic = PfmtversEngineMax()->efv;
-        OnDebug( ifmp != ifmpNil ? g_rgfmp[ifmp].SetDbHeaderUpdateState( FMP::DbHeaderUpdateState::dbhusUpdateSet ) : 3 );
+        OnDebug( ifmp != ifmpNil ? g_rgfmp[ifmp].SetDbHeaderUpdateState( FMP::DbHeaderUpdateState::dbhusUpdateSet ) : 3/*does nothing for repair passing ifmpNil*/ );
         fUpdatedHeader = fTrue;
     }
 
+    //  We're trying to downgrade!  Danger, Will Robinson, Danger!
+    //  We handle this, by skipping the update.
     if ( CmpDbVer( pdbfilehdr->Dbv(), dbvUpdate ) > 0 )
     {
-        CHAR szFireWall[140];
+        CHAR szFireWall[140]; // technically ~108 required.
         OSStrCbFormatA( szFireWall, sizeof(szFireWall), "InvalidDbVersionDowngradeAttempt-%I32u.%I32u.%I32u->%I32u.%I32u.%I32u",
-                        (ULONG)pdbfilehdr->le_ulVersion, (ULONG)pdbfilehdr->le_ulDaeUpdateMajor, (ULONG)pdbfilehdr->le_ulDaeUpdateMinor,
+                        (ULONG)pdbfilehdr->le_ulVersion, (ULONG)pdbfilehdr->le_ulDaeUpdateMajor, (ULONG)pdbfilehdr->le_ulDaeUpdateMinor, // stamped versions
                         dbvUpdate.ulDbMajorVersion, dbvUpdate.ulDbUpdateMajor, dbvUpdate.ulDbUpdateMinor );
         FireWall( szFireWall );
     }
@@ -745,47 +908,61 @@ void DBISetVersion(
     {
         DbVersion dbvCurr = pdbfilehdr->Dbv();
 
+        //  Set version on db header
         pdbfilehdr->le_ulVersion = dbvUpdate.ulDbMajorVersion;
         pdbfilehdr->le_ulDaeUpdateMajor = dbvUpdate.ulDbUpdateMajor;
-        OnDebug( ifmp != ifmpNil ? g_rgfmp[ifmp].SetDbHeaderUpdateState( FMP::DbHeaderUpdateState::dbhusUpdateSet ) : 3 );
+        OnDebug( ifmp != ifmpNil ? g_rgfmp[ifmp].SetDbHeaderUpdateState( FMP::DbHeaderUpdateState::dbhusUpdateSet ) : 3/*does nothing for repair passing ifmpNil*/ );
 
+        //  This is not a normal usage of ErrDBFormatFeatureEnabled_() as typically code
+        //  should be passing the current DB header format in as the 2nd arg.  Do not
+        //  copy this example. ;)  We can't do that here b/c this is _whether to actual
+        //  update the DB header iteself_, so the bootstrap has to check the desired / 
+        //  param value instead.
         if ( ErrDBFormatFeatureEnabled_( JET_efvSetDbVersion, dbvUpdate ) >= JET_errSuccess )
         {
 #ifdef DEBUG
+            //  The very next feature after JET_efvSetDbVersion, specifically the 
+            //  JET_efvExtHdrRootFieldAutoIncStorageReleased feature has an UpdateMAJOR 
+            //  change (not just an UpdateMINOR change like JET_efvSetDbVersion) ... DB 
+            //  UpdateMajor changes are NOT allowed to be unlogged.  So if we've an update
+            //  major change we need to expect logging.
             const FormatVersions * pfmtverExthdrAutoInc = NULL;
             CallS( ErrGetDesiredVersion( NULL, JET_efvExtHdrRootFieldAutoIncStorageReleased, &pfmtverExthdrAutoInc ) );
             const BOOL fRequireLoggingForDbvUpdate = CmpDbVer( dbvUpdate, pfmtverExthdrAutoInc->dbv ) >= 0;
-            Assert( !fRequireLoggingForDbvUpdate || ifmp == ifmpNil || !g_rgfmp[ifmp].FLogOn() || pinst->FRecovering() || pinst->m_plog->ErrLGFormatFeatureEnabled( JET_efvSetDbVersion ) >= JET_errSuccess );
+            Assert( !fRequireLoggingForDbvUpdate || ifmp == ifmpNil || !g_rgfmp[ifmp].FLogOn() || pinst->FRecovering() || pinst->m_plog->ErrLGFormatFeatureEnabled( JET_efvSetDbVersion ) >= JET_errSuccess ); // to ensure we'll log this as well.
 #endif
 
             pdbfilehdr->le_ulDaeUpdateMinor = dbvUpdate.ulDbUpdateMinor;
-            OnDebug( ifmp != ifmpNil ? g_rgfmp[ifmp].SetDbHeaderUpdateState( FMP::DbHeaderUpdateState::dbhusUpdateSet ) : 3 );
+            OnDebug( ifmp != ifmpNil ? g_rgfmp[ifmp].SetDbHeaderUpdateState( FMP::DbHeaderUpdateState::dbhusUpdateSet ) : 3/*does nothing for repair passing ifmpNil*/ );
         }
 
+        //  Usually this version is not meant to be changed; 0 means it's never set, set it here
         if ( pdbfilehdr->le_ulCreateVersion == 0 )
         {
             pdbfilehdr->le_ulCreateVersion = dbvUpdate.ulDbMajorVersion;
             pdbfilehdr->le_ulCreateUpdate = dbvUpdate.ulDbUpdateMajor;
 
             OSTrace( JET_tracetagUpgrade, OSFormat( "Stamp Initial DB Version: %d.%d.%d (%d) - %ws\n",
-                        (ULONG)pdbfilehdr->le_ulVersion, (ULONG)pdbfilehdr->le_ulDaeUpdateMajor, (ULONG)pdbfilehdr->le_ulDaeUpdateMinor,
+                        (ULONG)pdbfilehdr->le_ulVersion, (ULONG)pdbfilehdr->le_ulDaeUpdateMajor, (ULONG)pdbfilehdr->le_ulDaeUpdateMinor, // stamped versions
                         (ULONG)pdbfilehdr->le_efvMaxBinAttachDiagnostic,
                         wszDbFullName ) );
         }
         else if ( ifmp != ifmpNil && ifmp != 0 && !FFMPIsTempDB( ifmp ) )
         {
             OSTrace( JET_tracetagUpgrade, OSFormat( "Upgrade DB Version: %d.%d.%d (Cr %d.%d) from %d.%d.%d - %ws\n",
-                        (ULONG)pdbfilehdr->le_ulVersion, (ULONG)pdbfilehdr->le_ulDaeUpdateMajor, (ULONG)pdbfilehdr->le_ulDaeUpdateMinor,
+                        (ULONG)pdbfilehdr->le_ulVersion, (ULONG)pdbfilehdr->le_ulDaeUpdateMajor, (ULONG)pdbfilehdr->le_ulDaeUpdateMinor, // new versions
                         (ULONG)pdbfilehdr->le_ulCreateVersion, (ULONG)pdbfilehdr->le_ulCreateUpdate,
-                        dbvCurr.ulDbMajorVersion, dbvCurr.ulDbUpdateMajor, dbvCurr.ulDbUpdateMinor,
+                        dbvCurr.ulDbMajorVersion, dbvCurr.ulDbUpdateMajor, dbvCurr.ulDbUpdateMinor, // current
                         wszDbFullName ) );
 
             if ( !fCreateDbUpgradeDoNotLog )
             {
 
+                // Perhaps move this after the header write, so we know we've successfully upgraded.  Low probability fail.
                 WCHAR wszDbvBefore[50];
                 WCHAR wszDbvAfter[50];
                 WCHAR wszEfvSetting[cchFormatEfvSetting];
+                //  Wish we had redo here.
                 const WCHAR * rgszT[4] = { wszDbFullName, wszDbvBefore, wszDbvAfter, wszEfvSetting };
             
                 OSStrCbFormatW( wszDbvBefore, _cbrg( wszDbvBefore ), L"%d.%d.%d", dbvCurr.ulDbMajorVersion, dbvCurr.ulDbUpdateMajor, dbvCurr.ulDbUpdateMinor );
@@ -818,6 +995,9 @@ void DBISetVersion(
     }
 }
 
+//  Dual purpose, rolls the log if necessary to support logging of the DB versions (lrtypSetDbVer) and
+//  logs the desired DB version (which will subsequently be set in the DB file's header).
+//
 ERR ErrDBLGVersionUpdate(
     _In_    const INST * const              pinst,
     _In_    PIB * const                     ppib,
@@ -842,6 +1022,7 @@ ERR ErrDBLGVersionUpdate(
         {
             fLogVersionChanged = pinst->m_plog->FLGFileVersionUpdateNeeded( pfmtversDesired->lgv );
 
+            //  Log rollover if there's log version change
             if ( fLogVersionChanged && pinst->m_plog->ErrLGFormatFeatureEnabled( pfmtversDesired->efv ) < JET_errSuccess )
             {
                 OnDebug( const LONG lgenBefore = pinst->m_plog->PlgfilehdrForVerCtrl()->le_lGeneration );
@@ -854,6 +1035,8 @@ ERR ErrDBLGVersionUpdate(
                 Assert( lgenBefore < pinst->m_plog->PlgfilehdrForVerCtrl()->le_lGeneration );
                 Assert( lgenBefore <= pinst->m_plog->PlgfilehdrForVerCtrl()->le_lGeneration );
 #ifdef DEBUG
+                //  if still not upgraded and we're set to use persisted version, check to see if the persisted
+                //  version is holding back the upgrade.
                 if ( pinst->m_plog->ErrLGFormatFeatureEnabled( pfmtversDesired->efv ) < JET_errSuccess &&
                         UlParam( pinst, JET_paramEngineFormatVersion ) == JET_efvUsePersistedFormat )
                 {
@@ -873,14 +1056,34 @@ ERR ErrDBLGVersionUpdate(
         }
     }
 
+    //  We could do this instead
+    //      if ( fDbNeedsUpdate && pinst->m_plog->ErrLGFormatFeatureEnabled( JET_efvSetDbVersion ) < JET_errSuccess )
+    //  So one could avoid logging if !fDbNeedsUpdate (and indeed we later avoid re-setting
+    //  the same value in the header and definitely want to avoid an extra header IO), BUT
+    //  due to nothing really protecting HA inc-reseed from removing a log file that SetDbVer
+    //  LR that hasn't played into this DB, but has to played into others, it can lead to an
+    //  inconsistent view of the actual DB version.  And then a subsequent active who happened
+    //  to replay the SetDbVer will not re-log it if we avoid relogging where the header isn't
+    //  out of date.  What I don't like about this, is the passive DB will play forward with
+    //  an inaccurate DB version, so instead we'll just always log the latest DB Ver on attach
+    //  (you could think of it as being part of the attach LR) so that the inconsistency will
+    //  be as temporary as possible, the next active will re-log the current DB ver and the
+    //  passive the inc-reseeded the hdr update away will get a fresh one from the next active
+    //  whether he has the current DB ver or a behind one.  Hope that made sense.
+    //
     if ( pinst->m_plog->ErrLGFormatFeatureEnabled( JET_efvSetDbVersion ) >= JET_errSuccess )
     {
         LGPOS logposT;
 
+        // It might seem like an Assert, but do-time, nor even redo of DBISetVersion will let
+        // you take a DB backwards.  It is always one way.
         Expected( CmpDbVer( pfmp->Pdbfilehdr()->Dbv(), pfmtversDesired->dbv ) <= 0 );
 
         Call( ErrLGSetDbVersion( ppib, ifmp, pfmtversDesired->dbv, &logposT ) );
 
+        //  And because of the spitting out of an unnecessary LR for the update, then we have 
+        //  to smack our HeaderUpdateState() forward to realize it is ok to do this cycle in 
+        //  this special case.
         if ( !fDbNeedsUpdate )
         {
             OnDebug( pfmp->SetDbHeaderUpdateState( FMP::DbHeaderUpdateState::dbhusUpdateSet ) );
@@ -892,8 +1095,12 @@ ERR ErrDBLGVersionUpdate(
 #ifdef DEBUG
         if ( fDbNeedsUpdate )
         {
+            //  Log and DB upgrade together for SetDbVersion, so if we can't log it, DB version should be 
+            //  lower than this - which is legal.
             const FormatVersions * pfmtverSetDbVer = NULL;
             CallS( ErrGetDesiredVersion( NULL, JET_efvSetDbVersion, &pfmtverSetDbVer ) );
+            // We're faking this ... because normally we would want to log, but since we're running
+            // on pre SetDbVer LR, we can't log, so fake we logged.
             Assert( CmpDbVer( pfmp->Pdbfilehdr()->Dbv(), pfmtverSetDbVer->dbv ) < 0 );
             Assert( pinst->m_plog->ErrLGFormatFeatureEnabled( JET_efvSetDbVersion ) < JET_errSuccess );
             pfmp->SetDbHeaderUpdateState( FMP::DbHeaderUpdateState::dbhusUpdateLogged );
@@ -906,17 +1113,21 @@ HandleError:
     return err;
 }
 
+//  For given DB it retrieves the current version, checks the version is compatibile with the engine and
+//  the client settings (JET_paramEngineFormatVersion) and then upgrades it (both logging and setting the
+//  actual DBFILEHDR on the FMP), and finally writes the header to disk.
+//
 ERR ErrDBUpdateAndFlushVersion(
     _In_    const INST* const       pinst,
     _In_z_  const WCHAR * const     wszDbFullName,
     _In_    PIB * const             ppib,
     _In_    const IFMP              ifmp,
-    _In_    const BOOL              fCreateDbUpgradeDoNotLog )
+    _In_    const BOOL              fCreateDbUpgradeDoNotLog )  // true to suppress logging on create DB path
 {
     ERR err = JET_errSuccess;
     FMP * const pfmp = &g_rgfmp[ifmp];
     
-    Assert( ifmp != ifmpNil && ifmp != 0 );
+    Assert( ifmp != ifmpNil && ifmp != 0 ); // ?? FValidIfmp()?
     Assert( !pinst->FRecovering() );
     Assert( pinst->m_plog->FRecoveringMode() != fRecoveringUndo );
 
@@ -929,17 +1140,21 @@ ERR ErrDBUpdateAndFlushVersion(
 
     dbvBefore = pdbfilehdr->Dbv();
 
+    //  Check if the header is compatible and/or needs updating.
 
     Call( ErrDBIValidateUserVersions( pinst, wszDbFullName, ifmp, pdbfilehdr.get(), &pfmtversDesired, &fDbNeedsUpdate ) );
-    }
+    } // .dtor release dbfilehdr lock
 
+    //  Do not even log (and of course update DB, but that's double protected lower) if the desired
+    //  version is below the current pdbfilehdr version.  We do allow logging of equal DbVersions in 
+    //  case a log replaying replica missed such an update due to Incremental Reseed or lossy failover.
 
     if ( CmpDbVer( dbvBefore, pfmtversDesired->dbv ) > 0 )
     {
         Assert( !fDbNeedsUpdate );
 
         OSTrace( JET_tracetagUpgrade, OSFormat( "Suppress DB Version Downgrade LR: %d.%d.%d to %d.%d.%d - %ws\n",
-                    dbvBefore.ulDbMajorVersion, dbvBefore.ulDbUpdateMajor, dbvBefore.ulDbUpdateMinor,
+                    dbvBefore.ulDbMajorVersion, dbvBefore.ulDbUpdateMajor, dbvBefore.ulDbUpdateMinor, // current dbfilehdr
                     pfmtversDesired->dbv.ulDbMajorVersion, pfmtversDesired->dbv.ulDbUpdateMajor, pfmtversDesired->dbv.ulDbUpdateMinor,
                     wszDbFullName ) );
         return JET_errSuccess;
@@ -949,24 +1164,29 @@ ERR ErrDBUpdateAndFlushVersion(
     if ( g_rgfmp[ ifmp ].FLogOn() )
     {
 
+        //  Note: takes care of both rolling log to upgrade/downgrade the log version as well as logging the header
+        //  versions update (so must be called whether fDbNeedsUpdate is true or not).  Also we always log the
+        //  SetDbVer on every attach to workaround inc reseed issues documented in this function.
         Call( ErrDBLGVersionUpdate( pinst, ppib, ifmp, pfmtversDesired, fDbNeedsUpdate ) );
     }
 
     {
     PdbfilehdrReadWrite pdbfilehdr = pfmp->PdbfilehdrUpdateable();
     
+    //  Post logging dbv should not have been updated by any other method ...
 
     OnDebug( if ( ( rand() % 5 ) == 0 ) UtilSleep( 20 ) );
 
-    AssertTrack( CmpDbVer( dbvBefore, pdbfilehdr->Dbv() ) == 0, "UnexpectedDbVersionChange" );
+    AssertTrack( CmpDbVer( dbvBefore, pdbfilehdr->Dbv() ) == 0, "UnexpectedDbVersionChange" );  // upgrade to Enforce at some point
 
     if ( fDbNeedsUpdate )
     {
+        //  Update the headers DB version to the desired one.
 
         DBISetVersion( pinst, wszDbFullName, ifmp, pfmtversDesired->dbv, pdbfilehdr.get(), fDbNeedsUpdate, fCreateDbUpgradeDoNotLog );
     }
 
-    }
+    } // .dtor release dbfilehdr lock
 
     Assert( CmpDbVer( pfmp->Pdbfilehdr()->Dbv(), pfmtversDesired->dbv ) >= 0 );
 
@@ -976,14 +1196,22 @@ ERR ErrDBUpdateAndFlushVersion(
         err = ErrUtilWriteAttachedDatabaseHeaders( pinst, pinst->m_pfsapi, pfmp->WszDatabaseName(), pfmp, pfmp->Pfapi() );
     }
 
+    //  Today, this shouldn't go off, because there is only one consumer of the header update 
+    //  state. But if someone utilizes it from like checkpoint update or something, this will
+    //  start going off and someone really should allow (and probably increase the header lock
+    //  rank) the header lock be held over logging data, and definitely let the lock be passed
+    //  into ErrUtilWriteAttachedDatabaseHeaders().
     Assert( !pfmp->FHeaderUpdateInProgress() || err < JET_errSuccess );
 
+    //  We have somehow downgraded the DB version!  Bad.
     AssertTrack( CmpDbVer( pfmp->Pdbfilehdr()->Dbv(), dbvBefore ) >= 0, "InvalidDbVersionDowngradeUpdate" );
 
 HandleError:
     return err;
 }
 
+//  This attempts to reapply the relevant DbVersion from a lrtypSetDbVer operation during recovery::redo.
+//
 ERR ErrDBRedoSetDbVersion(
         _In_    const INST* const               pinst,
         _In_    const IFMP                      ifmp,
@@ -1008,10 +1236,14 @@ ERR ErrDBRedoSetDbVersion(
 
     dbvBefore = pdbfilehdr->Dbv();
 
+    //  First we check if updating with this SetDbVersion LR would push us past what we allow
+    //  for user settings ... the easiest way is to create a false header as if the update was
+    //  applied and check against that. :P
 
     Alloc( pdbfilehdrTestUpdate = (DBFILEHDR*)PvOSMemoryPageAlloc( g_cbPage, NULL ) );
     memcpy( pdbfilehdrTestUpdate, pdbfilehdr.get(), g_cbPage );
     Assert( CmpDbVer( pdbfilehdr->Dbv(), pdbfilehdrTestUpdate->Dbv() ) == 0 );
+    //DBISetVersion( pinst, pfmp->WszDatabaseName(), ifmp, dbvSet, pdbfilehdrTestUpdate, fT );
     if ( CmpDbVer( pdbfilehdrTestUpdate->Dbv(), dbvSet ) < 0 )
     {
         pdbfilehdrTestUpdate->le_ulVersion = dbvSet.ulDbMajorVersion;
@@ -1025,11 +1257,12 @@ ERR ErrDBRedoSetDbVersion(
 
     Expected( CmpDbVer( pfmtversCheckT->dbv, dbvSet ) >= 0 ||
                 FUpdateMinorMismatch( CmpDbVer( pfmtversCheckT->dbv, dbvSet ) ||
-                fAllowPersistedFormat ) );
+                fAllowPersistedFormat ) );  // otherwise we should've failed ErrDBIValidateUserVersions() check ...
 
 
     if ( CmpDbVer( pdbfilehdr->Dbv(), dbvSet ) < 0 )
     {
+        //  Now evaluate if we need to update the actual DB header
 
         Call( ErrDBICheckVersions( pinst, pfmp->WszDatabaseName(), ifmp, pdbfilehdr.get(), dbvSet, fAllowPersistedFormat, &fRedo ) );
 
@@ -1043,9 +1276,11 @@ ERR ErrDBRedoSetDbVersion(
     }
     else
     {
+        // DB file's DbVersion is higher than the DbVersion we're being asked to set, redo 
+        // doesn't make sense - AND is potentially dangerous / a lie.
         Enforce( !fRedo );
     }
-    }
+    } // PdbfilehdrReadWrite
 
     if ( fRedo )
     {
@@ -1053,6 +1288,7 @@ ERR ErrDBRedoSetDbVersion(
         err = ErrUtilWriteAttachedDatabaseHeaders( pinst, pinst->m_pfsapi, pfmp->WszDatabaseName(), pfmp, pfmp->Pfapi() );
     }
 
+    // We have somehow downgraded the DB version!  Bad.
     AssertTrack( CmpDbVer( pfmp->Pdbfilehdr()->Dbv(), dbvBefore ) >= 0, "InvalidDbVersionDowngradeRedo" );
 
 HandleError:
@@ -1067,10 +1303,14 @@ void InitDBDbfilehdr(
     _In_opt_ SIGNATURE * psignDb,
     _Out_ DBFILEHDR * const pdbfilehdr )
 {
+    // This memset() is needed (calling the struct CZeroInit .ctor would NOT be sufficient) to set the whole of the 
+    // header past the actual struct size to zero, to ensure easy upgrade paths.
     memset( pdbfilehdr, 0, g_cbPage );
 
+    // Other versions are set latter with ErrDBSetVersion
     pdbfilehdr->le_ulMagic = ulDAEMagic;
 
+    //  Never changing point in time, the subsequent attach / the SetDbVer LRs will then upgrade.
     const ULONG ulDAEVersionMax_BeforeSetDbVerLr        = 0x00000620;
     const ULONG ulDAEUpdateMajorMax_BeforeSetDbVerLr    = 0x00000014;
     pdbfilehdr->le_ulVersion = ulDAEVersionMax_BeforeSetDbVerLr;
@@ -1122,21 +1362,24 @@ void InitDBDbfilehdr(
 ERR ErrDBParseDbParams(
     _In_reads_opt_( csetdbparam )const JET_SETDBPARAM* const    rgsetdbparam,
     _In_ const ULONG                                            csetdbparam,
-    _Out_opt_ CPG* const                                        pcpgDatabaseSizeMax,
-    _Out_opt_ ULONG* const                                      ppctCachePriority,
-    _Out_opt_ JET_GRBIT* const                                  pgrbitShrinkDatabaseOptions,
-    _Out_opt_ LONG* const                                       pdtickShrinkDatabaseTimeQuota,
-    _Out_opt_ CPG* const                                        pcpgShrinkDatabaseSizeLimit,
-    _Out_opt_ BOOL* const                                       pfLeakReclaimerEnabled,
-    _Out_opt_ LONG* const                                       pdtickLeakReclaimerTimeQuota )
+    _Out_opt_ CPG* const                                        pcpgDatabaseSizeMax,            // JET_dbparamDbSizeMaxPages
+    _Out_opt_ ULONG* const                                      ppctCachePriority,              // JET_dbparamCachePriority
+    _Out_opt_ JET_GRBIT* const                                  pgrbitShrinkDatabaseOptions,    // JET_dbparamShrinkDatabaseOptions
+    _Out_opt_ LONG* const                                       pdtickShrinkDatabaseTimeQuota,  // JET_dbparamShrinkDatabaseTimeQuota
+    _Out_opt_ CPG* const                                        pcpgShrinkDatabaseSizeLimit,    // JET_dbparamShrinkDatabaseSizeLimit
+    _Out_opt_ BOOL* const                                       pfLeakReclaimerEnabled,         // JET_dbparamLeakReclaimerEnabled
+    _Out_opt_ LONG* const                                       pdtickLeakReclaimerTimeQuota )  // JET_dbparamLeakReclaimerTimeQuota
 {
     if ( ( rgsetdbparam == NULL ) && ( csetdbparam > 0 ) )
     {
         return ErrERRCheck( JET_errInvalidParameter );
     }
 
-    Expected( ( csetdbparam > 0 ) || ( rgsetdbparam == NULL ) );
+    Expected( ( csetdbparam > 0 ) || ( rgsetdbparam == NULL ) );    // Why would you have a valid pointer and no elements to process?
 
+    //
+    // Set all Db parameter defaults.
+    //
 
     if ( pcpgDatabaseSizeMax != NULL )
     {
@@ -1177,6 +1420,9 @@ ERR ErrDBParseDbParams(
         *pdtickLeakReclaimerTimeQuota = -1;
     }
 
+    //
+    // Go through the array of DB parameters and collect all user inputs.
+    //
 
     for ( ULONG isetdbparam = 0; isetdbparam < csetdbparam; isetdbparam++ )
     {
@@ -1186,6 +1432,7 @@ ERR ErrDBParseDbParams(
         void* pvParamDest = NULL;
         ULONG cbParamDest = 0;
 
+        // Collect size and memory location of each user input.
         switch ( dbparamid )
         {
             case JET_dbparamDbSizeMaxPages:
@@ -1224,28 +1471,37 @@ ERR ErrDBParseDbParams(
                 break;
 
             default:
-                Expected( ( dbparamid >= JET_dbparamDbSizeMaxPages )  && ( dbparamid < ( JET_dbparamDbSizeMaxPages + 1024 ) ) );
+                Expected( ( dbparamid >= JET_dbparamDbSizeMaxPages ) /* min value */ && ( dbparamid < ( JET_dbparamDbSizeMaxPages + 1024 ) ) ); // or they're passing a sysparam or sesparam?
                 return ErrERRCheck( JET_errInvalidDbparamId );
         }
 
+        //
+        // Validates size and pointers.
+        //
 
+        // Caller is not expecting this parameter, do nothing.
         if ( pvParamDest == NULL )
         {
             continue;
         }
 
+        // Size mismatches.
         if ( cbParam != cbParamDest )
         {
             return ErrERRCheck( JET_errInvalidBufferSize );
         }
 
+        // Invalid pointer.
         if ( ( pvParam == NULL ) && ( cbParam > 0 ) )
         {
             return ErrERRCheck( JET_errInvalidBufferSize );
         }
 
-        Expected( ( cbParam > 0 ) || ( pvParam == NULL ) );
+        Expected( ( cbParam > 0 ) || ( pvParam == NULL ) ); // Why would you have a valid pointer and no bytes to copy?
 
+        //
+        // Finally, copy the data.
+        //
 
         if ( cbParam > 0 )
         {
@@ -1255,7 +1511,11 @@ ERR ErrDBParseDbParams(
         }
     }
 
+    //
+    // Validate individual parameters.
+    //
 
+    // JET_dbparamCachePriority.
     if ( ( ppctCachePriority != NULL ) &&
             FIsCachePriorityAssigned( *ppctCachePriority ) &&
             !FIsCachePriorityValid( *ppctCachePriority ) )
@@ -1263,6 +1523,7 @@ ERR ErrDBParseDbParams(
         return ErrERRCheck( JET_errInvalidParameter );
     }
 
+    // JET_dbparamShrinkDatabaseOptions.
     if ( ( pgrbitShrinkDatabaseOptions != NULL ) &&
         ( ( *pgrbitShrinkDatabaseOptions &
           ~( JET_bitShrinkDatabaseEofOnAttach |
@@ -1274,6 +1535,7 @@ ERR ErrDBParseDbParams(
         return ErrERRCheck( JET_errInvalidGrbit );
     }
 
+    // JET_dbparamShrinkDatabaseTimeQuota.
     if ( ( pdtickShrinkDatabaseTimeQuota != NULL ) &&
             ( *pdtickShrinkDatabaseTimeQuota > ( 7 * 24 * 60 * 60 * 1000 ) ) &&
             ( *pdtickShrinkDatabaseTimeQuota != -1 ) )
@@ -1281,6 +1543,7 @@ ERR ErrDBParseDbParams(
         return ErrERRCheck( JET_errInvalidParameter );
     }
 
+    // JET_dbparamLeakReclaimerTimeQuota.
     if ( ( pdtickLeakReclaimerTimeQuota != NULL ) &&
             ( *pdtickLeakReclaimerTimeQuota > ( 7 * 24 * 60 * 60 * 1000 ) ) &&
             ( *pdtickLeakReclaimerTimeQuota != -1 ) )
@@ -1288,6 +1551,7 @@ ERR ErrDBParseDbParams(
         return ErrERRCheck( JET_errInvalidParameter );
     }
 
+    // JET_dbparamShrinkDatabaseSizeLimit.
     if ( ( pcpgShrinkDatabaseSizeLimit != NULL ) && ( *pcpgShrinkDatabaseSizeLimit < 0 ) )
     {
         return ErrERRCheck( JET_errInvalidParameter );
@@ -1323,21 +1587,22 @@ ERR ErrDBCreateDatabase(
                                 csetdbparam,
                                 &cpgDatabaseSizeMax,
                                 &pctCachePriority,
-                                NULL,
-                                NULL,
-                                NULL,
-                                NULL,
-                                NULL ) );
+                                NULL,       // JET_dbparamShrinkDatabaseOptions (not used here).
+                                NULL,       // JET_dbparamShrinkDatabaseTimeQuota (not used here).
+                                NULL,       // JET_dbparamShrinkDatabaseSizeLimit (not used here).
+                                NULL,       // JET_dbparamLeakReclaimerEnabled (not used here).
+                                NULL ) );   // JET_dbparamLeakReclaimerTimeQuota (not used here).
 
     Assert( !( grbit & bitCreateDbImplicitly ) || PinstFromPpib( ppib )->m_plog->FRecovering() );
 
-    Assert( cpgPrimary );
+    Assert( cpgPrimary );   //  caller should've protected.
     if ( dbidGiven == dbidTemp )
     {
         Assert( cpgPrimary >= cpgMultipleExtentMin );
     }
     else if ( grbit & bitCreateDbImplicitly )
     {
+        //  Legacy create DB from recovery ...
         Assert( PinstFromPpib( ppib )->m_plog->FRecovering() );
         Assert( cpgPrimary >= cpgLegacyDatabaseDefaultSize );
     }
@@ -1395,11 +1660,15 @@ ERR ErrDBCreateDatabase(
         pfsapi = pinst->m_pfsapi;
     }
 
+    //  if recovering and ifmp is given latch the fmp first
+    //
     if ( plog->FRecovering() && dbidGiven < dbidMax && dbidGiven != dbidTemp )
     {
         ifmp = pinst->m_mpdbidifmp[ dbidGiven ];
         FMP::AssertVALIDIFMP( ifmp );
 
+        //  get corresponding ifmp
+        //
         CallS( FMP::ErrNewAndWriteLatch(
             &ifmp,
             g_rgfmp[ifmp].WszDatabaseName(),
@@ -1422,6 +1691,8 @@ ERR ErrDBCreateDatabase(
 
         if ( BoolParam( pinst, JET_paramCreatePathIfNotExist ) )
         {
+            //  make sure database name has a file at the end of it (no '\')
+            //
             Assert( !FOSSTRTrailingPathDelimiterW( const_cast< WCHAR * >( wszDatabaseName ) ) );
             err = ErrUtilCreatePathIfNotExist( pfsapi, wszDatabaseName, rgwchDbFullName, sizeof(rgwchDbFullName) );
         }
@@ -1456,6 +1727,8 @@ ERR ErrDBCreateDatabase(
         dbidGiven = g_rgfmp[ ifmp ].Dbid();
     }
 
+    //  from this point we got a valid ifmp entry. Start the DB creation process.
+    //
     FMP *pfmp;
     pfmp = &g_rgfmp[ ifmp ];
 
@@ -1471,13 +1744,17 @@ ERR ErrDBCreateDatabase(
 
     pfmp->SetRuntimeDbParams( cpgDatabaseSizeMax, pctCachePriority, NO_GRBIT, -1, 0, fFalse, -1 );
 
+    //  check if database file already exists
+    //
     if ( dbidGiven != dbidTemp )
     {
         err = ErrUtilPathExists( pfsapi, wszDbFullName );
         if ( JET_errFileNotFound != err )
         {
-            if ( JET_errSuccess == err )
+            if ( JET_errSuccess == err ) // database file exists
             {
+                // delete db with the same name
+                //
                 if( grbit & JET_bitDbOverwriteExisting )
                 {
                     err = ErrIODeleteDatabase( pfsapi, ifmp );
@@ -1506,16 +1783,22 @@ ERR ErrDBCreateDatabase(
 
     if ( ( dbidGiven != dbidTemp ) && !plog->FRecovering() )
     {
+        // We are about to really create DB, let's check if an available version param is set
 
         const JET_ENGINEFORMATVERSION efv = (JET_ENGINEFORMATVERSION)UlParam( pinst, JET_paramEngineFormatVersion );
         Assert( efv >= EfvMinSupported() );
         if ( JET_efvUsePersistedFormat == efv )
         {
+            // This value means the version is not set, and we use
+            // the version from DB header. In case of creating DB,
+            // we don't know which version to use.
             AssertSz( FNegTest( fInvalidAPIUsage ), "Specified JET_efvUsePersistedFormat during create DB, must have a specific version or JET_efvUseEngineDefault." );
             Call( ErrERRCheck( JET_errInvalidOperation ) );
         }
     }
 
+    //  create an empty database with header only.
+    //
 
     if ( grbit & JET_bitDbRecoveryOff )
     {
@@ -1524,6 +1807,8 @@ ERR ErrDBCreateDatabase(
     else
     {
         FMP::EnterFMPPoolAsWriter();
+        // implicit createDB was done partially with log off, we need to redo it
+        // with log off also
         if ( grbit & bitCreateDbImplicitly )
         {
             pfmp->ResetLogOn();
@@ -1536,12 +1821,15 @@ ERR ErrDBCreateDatabase(
         FMP::LeaveFMPPoolAsWriter();
     }
 
+    // The FMP's waypoint must be min at this point, or we might be able to flush pages we
+    // shouldn't flush.
     DBEnforce( ifmp, CmpLgpos( pfmp->LgposWaypoint(), lgposMin ) == 0 );
 
     pfmp->SetDbtimeLast( grbit & bitCreateDbImplicitly ? 0 : dbtimeStart );
 
     pfmp->SetObjidLast( 0 );
 
+    // Create & initialize & set database header
 
     {
     DBFILEHDR * pdbfilehdrInit = NULL;
@@ -1554,16 +1842,19 @@ ERR ErrDBCreateDatabase(
     Assert( pdbfilehdrInit->le_objidLast == pfmp->ObjidLast() );
     Assert( pdbfilehdrInit->le_dbtimeDirtied == pfmp->DbtimeLast() );
 
+    //  Note conflicts in matching signature DBs on the same instance are thrown 
+    //  here (so I'm not so sure if the if body is dead code).
     DBFILEHDR * pdbfilehdrPrev;
     err = pfmp->ErrSetPdbfilehdr( pdbfilehdrInit, &pdbfilehdrPrev );
     if ( err < JET_errSuccess )
     {
+        //  I think this call is dead code
         Assert( !pdbfilehdrPrev );
         OSMemoryPageFree( pdbfilehdrPrev );
         goto HandleError;
     }
-    Assert( pdbfilehdrPrev == NULL );
-    }
+    Assert( pdbfilehdrPrev == NULL );   // think this should hold ... or aren't we leaking a DBFILEHDR?
+    } // end pdbfilehdrInit / FMP.pdbfilehdr initialization
 
     pfmp->SetDbtimeBeginRBS( grbit & bitCreateDbImplicitly ? 0 : dbtimeStart );
 
@@ -1582,7 +1873,7 @@ ERR ErrDBCreateDatabase(
     Call( ErrLGCreateDB( ppib, ifmp, grbit, fSparseEnabledFile, &lgposLogRec ) );
     fLogged = fTrue;
 
-    {
+    { // .ctor acquires PdbfilehdrReadWrite
     PdbfilehdrReadWrite pdbfilehdr = pfmp->PdbfilehdrUpdateable();
     if ( ( dbidGiven != dbidTemp ) && plog->FRecovering() )
     {
@@ -1602,14 +1893,19 @@ ERR ErrDBCreateDatabase(
 
     Expected( pfmp->m_isdlCreate.FActiveSequence() );
     pfmp->m_isdlCreate.FixedData().sCreateData.lgposCreate = pdbfilehdr->le_lgposAttach;
-    }
+    } // .dtor releases PdbfilehdrReadWrite
 
     pfmp->m_isdlCreate.Trigger( eCreateLogged );
 
+    //  "Header load" for create DB is logically just the init and first write.
     OnDebug( pfmp->SetDbHeaderUpdateState( FMP::DbHeaderUpdateState::dbhusHdrLoaded ) );
 
+    //  write database header (and implicitly create file) for non-temp db
+    //
     if ( dbidGiven != dbidTemp )
     {
+        //  create a flush map for this DB
+        //
         Call( pfmp->ErrCreateFlushMap( grbit ) );
 
 
@@ -1627,10 +1923,15 @@ ERR ErrDBCreateDatabase(
 
     fNewDBCreated = fTrue;
 
+    // Open db file for non-temp db (create for temp db)
+    // Note that a temp db uses iofileDbRecovery during recovery and iofileDBAttached otherwise,
+    // even though the temp DB isn't actually recovering anything.
     Call( ErrIOOpenDatabase( pfsapi, ifmp, wszDbFullName, pinst->FRecovering() ? iofileDbRecovery : iofileDbAttached, fSparseEnabledFile ) );
 
     if ( dbidGiven == dbidTemp )
     {
+        //  write database header for temp db
+        //
         Call( ErrUtilWriteAttachedDatabaseHeaders( pinst, pfsapi, wszDbFullName, pfmp, pfmp->Pfapi() ) );
 
         pfmp->m_isdlCreate.Trigger( eCreateHeaderInitialized );
@@ -1638,6 +1939,10 @@ ERR ErrDBCreateDatabase(
  
     if ( pfmp->FLogOn() )
     {
+        //  WARNING: even though we set the waypoint, waypoint
+        //  advancement will not consider this database until
+        //  FMP::SetAttached() is called below
+        //
         FMP::EnterFMPPoolAsWriter();
         const LONG lgenMaxRequired = pfmp->Pdbfilehdr()->le_lGenMaxRequired;
         pfmp->SetWaypoint( lgenMaxRequired );
@@ -1645,9 +1950,11 @@ ERR ErrDBCreateDatabase(
     }
     else
     {
-        pfmp->ResetWaypoint();
+        pfmp->ResetWaypoint(); // no logging, means no waypoint ...
     }
 
+    //  set proper database size.
+    //
     {
     PIBTraceContextScope tcScope = ppib->InitTraceContextScope();
     err = ErrIONewSize( ifmp, *tcScope, cpgPrimary, 0, JET_bitNil );
@@ -1655,6 +1962,8 @@ ERR ErrDBCreateDatabase(
 
     if ( err < JET_errSuccess )
     {
+        //  we have failed to do a "big" allocation
+        //  drop down to small allocations and see if we can succeed
 
         const INT cbExtend  = g_cbPage;
         const CPG cpgExtend = cbExtend / g_cbPage;
@@ -1672,11 +1981,20 @@ ERR ErrDBCreateDatabase(
 
     pfmp->SetOwnedFileSize( CbFileSizeOfCpg( cpgPrimary ) );
 
+    //  initialize the database file.
+    //
     DBSetOpenDatabaseFlag( ppib, ifmp );
     fDatabaseOpen = fTrue;
 
     pfmp->m_isdlCreate.Trigger( eCreateDatabaseZeroed );
 
+    // for implicitly created DBs we must continue on.
+    // for logged create DBs we bail out here, because the log has the log
+    // records for:
+    //   - ErrDBInitDatabase()
+    //   - ErrCATCreate()
+    //   - and finally one to trigger ErrDBCreateDBFinish().
+    //
     if ( ( dbidGiven != dbidTemp ) &&
          plog->FRecovering() &&
          !( grbit & bitCreateDbImplicitly ) )
@@ -1687,12 +2005,16 @@ ERR ErrDBCreateDatabase(
         return JET_errSuccess;
     }
 
+    //  setup and log root space
+    //
     Call( ErrDBInitDatabase( ppib, ifmp, cpgPrimary ) );
 
     pfmp->m_isdlCreate.Trigger( eCreateDatabaseSpaceInitialized );
 
     if ( dbidGiven != dbidTemp )
     {
+        //  create system tables
+        //
         const BOOL fReplayCreateDbImplicitly =  plog->FRecovering() && ( grbit & bitCreateDbImplicitly );
         Call( ErrCATCreate( ppib, ifmp, fReplayCreateDbImplicitly ) );
     }
@@ -1713,6 +2035,8 @@ ERR ErrDBCreateDatabase(
 
     Call( ErrDBCreateDBFinish( ppib, ifmp, grbit ) );
 
+    // Create this *before* creating the other system tables (such as
+    // MSysLocales) so that MSObjids contains entries for those tables.
     if( dbidGiven != dbidTemp && !pinst->FRecovering() )
     {
         Call( ErrCATCreateMSObjids( ppib, ifmp ) );
@@ -1720,14 +2044,20 @@ ERR ErrDBCreateDatabase(
         pfmp->SetFMaintainMSObjids();
     }
 
+    //  create the MSysLocales table
+    //
     if( dbidGiven != dbidTemp && !pinst->FRecovering() )
     {
+        //  create the MSysLocales table (and init the facility)
 
         Call( ErrCATCreateMSLocales( ppib, ifmp ) );
         Assert( pfmp->PkvpsMSysLocales() );
-        Assert( JET_errDatabaseCorrupted != ErrCATVerifyMSLocales( ppib, ifmp, fFalse  ) );
+        Assert( JET_errDatabaseCorrupted != ErrCATVerifyMSLocales( ppib, ifmp, fFalse /* fixup table */ ) );
 
+        //  Note: We do not need to populate because there are no localized unicode indices
+        //  in the initial database.  Very convenient.
 
+        //  finally upgrade the DB header to indicate we're using the MSysLocales table
 
         pfmp->PdbfilehdrUpdateable()->le_qwSortVersion = g_qwUpgradedLocalesTable;
 
@@ -1746,13 +2076,15 @@ ERR ErrDBCreateDatabase(
             const ERR errDetach = ErrIsamDetachDatabase( (JET_SESID) ppib, NULL, wszDatabaseName );
             if ( ( errDetach >= JET_errSuccess ) )
             {
-                Expected( !FIODatabaseOpen( ifmp ) );
+                Expected( !FIODatabaseOpen( ifmp ) ); // added during FFB feature, b/c I(SOMEONE) didn't understand how on successful detach is there a DB Pfapi() left?
                 if ( FIODatabaseOpen( ifmp ) )
                 {
-                    Assert( g_rgfmp[ifmp].Pfapi()->CioNonFlushed() == 0 );
+                    Assert( g_rgfmp[ifmp].Pfapi()->CioNonFlushed() == 0 );    // must hold - or leaking IOs.
                     IOCloseDatabase( ifmp );
                 }
                 
+                //  best effort.
+                //
                 (VOID)ErrIODeleteDatabase( pfsapi, ifmp );
             }
 
@@ -1773,15 +2105,17 @@ ERR ErrDBCreateDatabase(
 
     pfmp->m_isdlCreate.Trigger( eCreateDone );
 
+    //  we won't log the temp DB
 
     if ( !pfmp->FIsTempDB() )
     {
+        // report our successful create database and timings
 
         DBReportTachmentEvent( pinst, ifmp, CREATE_DATABASE_DONE_ID, pfmp->WszDatabaseName(), fFalse );
     }
     else
     {
-        pfmp->m_isdlCreate.TermSequence();
+        pfmp->m_isdlCreate.TermSequence();  //  cleanup for temp DB as well.
     }
 
     *pifmp = ifmp;
@@ -1802,6 +2136,8 @@ HandleError:
 
     CATTermMSLocales( pfmp );
 
+    //  purge the bad, half-created database
+    //
 
     pfmp->RwlDetaching().EnterAsWriter();
     pfmp->ResetCreatingDB();
@@ -1817,17 +2153,26 @@ HandleError:
 
     if ( fLogged || fLeakFMP )
     {
+        //  we have to take the instance offline if there is an error
+        //  during database creation and the creation is logged or we could
+        //  not clean version store entries for the database
+        //
         PinstFromPpib( ppib )->SetInstanceUnavailable( err );
         if ( JET_errSuccess == ppib->ErrRollbackFailure() )
         {
             ppib->SetErrRollbackFailure( err );
         }
 
-        FCB::PurgeDatabase( ifmp, fTrue  );
+        // we need to clean the FCBs but because there might be RCEs
+        // not expected (as a result of MSU done versioned), we
+        // need to tell the FCB cleanup to ignore versions.
+        // We can do this becase the instance is already unavailable
+        //
+        FCB::PurgeDatabase( ifmp, fTrue /* fTerminating */ );
     }
     else
     {
-        FCB::PurgeDatabase( ifmp, fFalse  );
+        FCB::PurgeDatabase( ifmp, fFalse /* fTerminating */ );
     }
 
     BFPurge( ifmp );
@@ -1864,6 +2209,7 @@ HandleError:
 
     pfmp->DestroyFlushMap();
 
+    // The latch can be released in ErrDBCreateDBFinish function.
     BOOL fWriteLatched = fFalse;
     pfmp->CritLatch().Enter();
     fWriteLatched = pfmp->FWriteLatchByMe( ppib );
@@ -1928,6 +2274,8 @@ ErrDBCreateDBFinish(
 
     pfmp->m_isdlCreate.Trigger( eCreateDatabaseInitialized );
 
+    //  set database status to loggable if it is.
+    //
     if ( grbit & JET_bitDbRecoveryOff )
     {
         Assert( !pfmp->FLogOn() );
@@ -1941,6 +2289,7 @@ ErrDBCreateDBFinish(
     {
         Assert( !( grbit & JET_bitDbVersioningOff ) );
 
+        // Now turn on logging for implicit createDB
         if ( ( grbit & bitCreateDbImplicitly ) )
         {
             pfmp->ResetVersioningOff();
@@ -1951,13 +2300,16 @@ ErrDBCreateDBFinish(
         }
     }
 
-    {
+    { // .ctor acquires PdbfilehdrReadWrite
     PdbfilehdrReadWrite pdbfilehdr = pfmp->PdbfilehdrUpdateable();
     pdbfilehdr->le_dbtimeDirtied = pfmp->DbtimeLast();
     LGIGetDateTime( &pdbfilehdr->logtimeAttach );
 
     pfmp->m_isdlCreate.Trigger( eCreateFinishLogged );
 
+    //  set database state to be inconsistent from creating since
+    //  the createdatabase op is logged.
+    //
     pdbfilehdr->le_objidLast = pfmp->ObjidLast();
 
     Assert( pdbfilehdr->Dbstate() == JET_dbstateJustCreated );
@@ -1978,19 +2330,29 @@ ErrDBCreateDBFinish(
         pdbfilehdr->le_lgposLastResize = pdbfilehdr->le_lgposAttach;
     }
 
+    //  set version info
+    //
     if ( pfmp->FIsTempDB() || !pinst->FRecovering() )
     {
         pdbfilehdr->le_dwMajorVersion = g_dwGlobalMajorVersion;
         pdbfilehdr->le_dwMinorVersion = g_dwGlobalMinorVersion;
         pdbfilehdr->le_dwBuildNumber = g_dwGlobalBuildNumber;
         pdbfilehdr->le_lSPNumber = g_lGlobalSPNumber;
+        //  we no longer track the default sort version in the header
+        //
+        //  during initial create we'll use the default sort version, and upgrade to 
+        //  the MSysLocales table version / approach later.  This is necessary so
+        //  that we don't alter the database generated by lrtypCreateDB, so that
+        //  we can replay old logs and end up with the exact same database after
+        //  CreateDB is done (nesc. b/c create DB is an unlogged operation).
         QWORD qwSortVersion;
         CallS( ErrNORMGetSortVersion( wszLocaleNameDefault, &qwSortVersion, NULL ) );
         pdbfilehdr->le_qwSortVersion = qwSortVersion;
     }
     Assert( pdbfilehdr->le_objidLast );
-    }
+    } // .dtor releases PdbfilehdrReadWrite
 
+    //  we do not update the header for the temp database
 
     if ( !pfmp->FIsTempDB() )
     {
@@ -2001,6 +2363,10 @@ ErrDBCreateDBFinish(
 
     if ( pfmp->FLogOn() )
     {
+        //  WARNING: even though we set the waypoint, waypoint
+        //  advancement will not consider this database until
+        //  FMP::SetAttached() is called below
+        //
         FMP::EnterFMPPoolAsWriter();
         pfmp->SetWaypoint( lgenCurrent );
         FMP::LeaveFMPPoolAsWriter();
@@ -2008,11 +2374,15 @@ ErrDBCreateDBFinish(
 
     if ( !pfmp->FIsTempDB() )
     {
+        //  flush buffers
+        //
         Call( ErrBFFlush( ifmp ) );
     }
 
     pfmp->m_isdlCreate.Trigger( eCreateDatabaseDirty );
 
+    //  make the database attached
+    //
     Assert( !( pfmp->FAttached() ) );
     FMP::EnterFMPPoolAsWriter();
     pfmp->SetAttached();
@@ -2027,22 +2397,33 @@ ErrDBCreateDBFinish(
 
     Call( ErrDBSetLastPage( ppib, ifmp ) );
 
+    //  the database is created and attached.
+    //  Make the fmp available for others to open etc.
+    //  no need to wrl since it is OK for reader to mistaken it is being created
+    //
     pfmp->RwlDetaching().EnterAsWriter();
     pfmp->ResetCreatingDB();
     pfmp->ReleaseWriteLatch( ppib );
     pfmp->RwlDetaching().LeaveAsWriter();
 
+    // Fire attached callback
     if ( !pfmp->FIsTempDB() && pinst->FRecovering() )
     {
         Call( ErrLGDbAttachedCallback( pinst, pfmp ) );
     }
 
+    // Doing return JET_errSucces rather than Error( JET_errSuccess) below because the
+    // caller is responsible for calling pfmp->m_isdlCreate.TermSequence() when it's
+    // truly done.  It's too early here in the success cases we return on.
     
+    // Don't need to do the following tasks if opening a temp DB.
     if ( pfmp->FIsTempDB() )
     {
         return JET_errSuccess;
     }
 
+    // only recovery with non-implicit CreateDB needs to do the following tasks
+    // here
     if ( !plog->FRecovering() ||
          grbit & bitCreateDbImplicitly )
     {
@@ -2057,16 +2438,21 @@ ErrDBCreateDBFinish(
             const ERR errDetach = ErrIsamDetachDatabase( (JET_SESID) ppib, NULL, pfmp->WszDatabaseName() );
             if ( ( errDetach >= JET_errSuccess ) )
             {
-                Expected( !FIODatabaseOpen( ifmp ) );
+                Expected( !FIODatabaseOpen( ifmp ) ); // added during FFB feature, b/c I(SOMEONE) didn't understand how on successful detach is there a DB Pfapi() left?
                 if ( FIODatabaseOpen( ifmp ) )
                 {
-                    Assert( g_rgfmp[ifmp].Pfapi()->CioNonFlushed() == 0 );
+                    Assert( g_rgfmp[ifmp].Pfapi()->CioNonFlushed() == 0 );    // must hold - or leaking IOs.
                     IOCloseDatabase( ifmp );
                 }
                 
+                //  best effort.
+                //
                 (VOID)ErrIODeleteDatabase( pinst->m_pfsapi, ifmp );
             }
 
+            // Error handling in the preceding if statment already called m_isdlCreate.TermSequence()
+            // (the only thing HandleError does).  Since I (SOMEONE) don't know if TermSequence is safely
+            // idempotent, just "return err;" rather than "Error( err );"
             return err;
         }
     }
@@ -2080,15 +2466,18 @@ ErrDBCreateDBFinish(
         CallS( ErrSPTrimDBTaskInit( ifmp ) );
     }
 
+    //  validate the created "and attached" database ... 
 
     Assert( pfmp->Pdbfilehdr()->le_ulVersion != 0 );
     Assert( pfmp->Pdbfilehdr()->le_ulDaeUpdateMajor != 0 );
 
     pfmp->m_isdlCreate.Trigger( eCreateDone );
 
+    //  we won't log the temp DB
 
     if ( !pfmp->FIsTempDB() )
     {
+        // report our successful create database and timings
 
         DBReportTachmentEvent( pinst, ifmp, CREATE_DATABASE_DONE_ID, pfmp->WszDatabaseName(), fFalse );
     }
@@ -2108,8 +2497,12 @@ ERR ErrDBReadHeaderCheckConsistency(
     DBFILEHDR       * pdbfilehdr;
     IFileAPI        * pfapi;
 
+    //  bring in the database and check its header
+    //
     AllocR( pdbfilehdr = (DBFILEHDR * )PvOSMemoryPageAlloc( g_cbPage, NULL ) );
 
+    //  need to zero out header because we try to read it
+    //  later even on failure
     memset( pdbfilehdr, 0, g_cbPage );
 
     Call( CIOFilePerf::ErrFileOpen(
@@ -2136,11 +2529,14 @@ ERR ErrDBReadHeaderCheckConsistency(
 
     if ( err < JET_errSuccess )
     {
+        //  600 use new checksum method, so read shadow will fail with JET_errReadVerifyFailure
         if ( JET_errReadVerifyFailure == err )
         {
             if (    ulDAEMagic == pdbfilehdr->le_ulMagic
                  && ulDAEVersion500 == pdbfilehdr->le_ulVersion )
             {
+                //  500 has different way of doing checksum. Let's check the version directly.
+                //  The magic number stays the same since 500
 
                 err = ErrERRCheck( JET_errDatabase500Format );
             }
@@ -2163,14 +2559,18 @@ ERR ErrDBReadHeaderCheckConsistency(
         goto HandleError;
     }
 
+    //  the version and update numbers should always increase
     Assert( ulDAEVersionMax >= ulDAEVersionESE97 );
 
+    //  do version check
     if ( ulDAEMagic != pdbfilehdr->le_ulMagic )
     {
         Error( ErrERRCheck( JET_errInvalidDatabaseVersion ) );
     }
     else if ( pdbfilehdr->le_ulVersion >= ulDAEVersionESE97 )
     {
+        //  if the database format needs to be upgraded we will do it after
+        //  attaching
         err = JET_errSuccess;
     }
     else
@@ -2179,6 +2579,7 @@ ERR ErrDBReadHeaderCheckConsistency(
         Error( ErrERRCheck( JET_errInvalidDatabaseVersion ) );
     }
 
+    //  do pagesize check
     if ( ( 0 == pdbfilehdr->le_cbPageSize && g_cbPageDefault != g_cbPage )
             || ( 0 != pdbfilehdr->le_cbPageSize && pdbfilehdr->le_cbPageSize != (ULONG)g_cbPage ) )
         {
@@ -2201,6 +2602,8 @@ ERR ErrDBReadHeaderCheckConsistency(
         rgszT[1] = szDiskSectorSize;
         rgszT[2] = szDbPageSize;
 
+        //  The sector size is greater than database page size, may result in
+        //  durability being lost
         UtilReportEvent(
                 eventWarning,
                 GENERAL_CATEGORY,
@@ -2212,6 +2615,7 @@ ERR ErrDBReadHeaderCheckConsistency(
                 pfmp->Pinst() );
     }
 
+    //  check for LV chunk size incompatabilities
 
     if( !FDBIsLVChunkSizeCompatible( pdbfilehdr->le_cbPageSize, pdbfilehdr->le_ulVersion, pdbfilehdr->le_ulDaeUpdateMajor ) )
     {
@@ -2228,6 +2632,8 @@ ERR ErrDBReadHeaderCheckConsistency(
 
                 rgszT[0] = pfmp->WszDatabaseName();
 
+                //  attempting to use a database which did not successfully
+                //  complete conversion
                 UtilReportEvent(
                         eventError,
                         CONVERSION_CATEGORY,
@@ -2251,12 +2657,15 @@ ERR ErrDBReadHeaderCheckConsistency(
             }
             else
             {
+                // we want to return a specific error if the database is from a backup set and not recovered
                 if ( 0 != pdbfilehdr->bkinfoFullCur.le_genLow )
                 {
                     const WCHAR *rgszT[1];
 
                     rgszT[0] = pfmp->WszDatabaseName();
 
+                    //  attempting to use a database which did not successfully
+                    //  complete conversion
                     UtilReportEvent(
                             eventError,
                             LOGGING_RECOVERY_CATEGORY,
@@ -2271,6 +2680,7 @@ ERR ErrDBReadHeaderCheckConsistency(
                 }
                 else
                 {
+                    // Note: We'll return this for both JET_dbstateDirtyShutdown and JET_dbstateDirtyAndPatchedShutdown ...
                     err = ErrERRCheck( JET_errDatabaseInconsistent );
                 }
             }
@@ -2278,6 +2688,7 @@ ERR ErrDBReadHeaderCheckConsistency(
         }
     }
 
+    // make sure the attached file is a database file
     if ( attribDb != pdbfilehdr->le_attrib
         || ( JET_filetypeUnknown != pdbfilehdr->le_filetype
             && JET_filetypeDatabase != pdbfilehdr->le_filetype
@@ -2335,6 +2746,8 @@ ERR ErrDBReadHeaderCheckConsistency(
 
     OnDebug( pfmp->SetDbHeaderUpdateState( FMP::DbHeaderUpdateState::dbhusHdrLoaded ) );
 
+    // Set lGenMinConsistent back to lGenMinRequired because that's our effective initial checkpoint.
+    // In the future, this can be delayed until a DB or flush map page gets dirtied.
     if ( !pfmp->FReadOnlyAttach() )
     {
         PdbfilehdrReadWrite pdbfilehdrUpdateable = pfmp->PdbfilehdrUpdateable();
@@ -2367,6 +2780,7 @@ VOID DBISetHeaderAfterAttach(
 {
     LOG * const             plog    = PinstFromIfmp( ifmp )->m_plog;
 
+    //  Update database file header.
 
     Assert( fRecoveringUndo != plog->FRecoveringMode() );
     if ( plog->FRecovering() )
@@ -2425,6 +2839,7 @@ VOID DBISetHeaderAfterAttach(
                     {
                         pdbfilehdr->SetDbstate( JET_dbstateDirtyShutdown, lgenCurrent, &tmCreate, !plog->FLogDisabled() );
                     }
+                    // else, we maintain / leave the patched state at JET_dbstateDirtyAndPatchedShutdown.
                 }
                 else
                 {
@@ -2457,12 +2872,17 @@ VOID DBISetHeaderAfterAttach(
                 PinstFromIfmp( ifmp ) );
     }
 
+    //  reset bkinfo except in the recovering UNDO mode where
+    //  we would like to keep the original backup information.
 
     if ( !fKeepBackupInfo )
     {
         if ( !g_rgfmp[ifmp].FLogOn()
             || memcmp( &pdbfilehdr->signLog, &plog->SignLog(), sizeof( SIGNATURE ) ) != 0 )
         {
+            //  if no log or the log signaure is not the same as current log signature,
+            //  then the bkinfoIncPrev, bfkinfoFullPrev, bkinfoCopyPrev and bkinfoDiffPrev
+            //  are not meaningful.
 
             memset( &pdbfilehdr->bkinfoIncPrev, 0, sizeof( BKINFO ) );
             memset( &pdbfilehdr->bkinfoFullPrev, 0, sizeof( BKINFO ) );
@@ -2474,11 +2894,13 @@ VOID DBISetHeaderAfterAttach(
             pdbfilehdr->bkinfoTypeDiffPrev = DBFILEHDR::backupNormal;
         }
         memset( &pdbfilehdr->bkinfoFullCur, 0, sizeof( BKINFO ) );
+        // reset the snapshot data as well
         memset( &pdbfilehdr->bkinfoSnapshotCur, 0, sizeof( BKINFO ) );
     }
 
     if ( g_fRepair )
     {
+        //  preserve the signature
     }
     else if ( plog->FRecovering() || g_rgfmp[ifmp].FLogOn() )
     {
@@ -2491,15 +2913,22 @@ VOID DBISetHeaderAfterAttach(
                 ( CmpLgpos( pdbfilehdr->le_lgposLastResize, pdbfilehdr->le_lgposAttach ) >= 0 &&
                   CmpLgpos( lgposAttach, pdbfilehdr->le_lgposAttach ) >= 0 ) );
 
+        //  set new attachment time
         pdbfilehdr->le_lgposAttach = lgposAttach;
 
+        // We have a regular attach, any re-attach is irrelevant now
         pdbfilehdr->le_lgposLastReAttach = lgposMin;
 
+        //  Set global signature.
         if ( 0 != memcmp( &pdbfilehdr->signLog, &plog->SignLog(), sizeof(SIGNATURE) ) )
         {
             pdbfilehdr->le_lGenPreRedoMinRequired = 0;
             pdbfilehdr->le_lGenPreRedoMinConsistent = 0;
 
+            //  must reset lgposConsistent for this log set
+            //  keep that order (set lgposConsistent first
+            //  then signLog) for the following two lines
+            //  it is used by LGLoadAttachmentsFromFMP
             pdbfilehdr->le_lgposConsistent = lgposMin;
             pdbfilehdr->le_lgposLastResize = lgposMin;
             pdbfilehdr->signLog = plog->SignLog();
@@ -2513,24 +2942,38 @@ VOID DBISetHeaderAfterAttach(
     }
     else
     {
+        //  must regenerate signDb to disassociate it from the past
         SIGGetSignature( &pdbfilehdr->signDb );
     }
 
     LGIGetDateTime( &pdbfilehdr->logtimeAttach );
 
+    //  reset detach time
     pdbfilehdr->le_lgposDetach = lgposMin;
     memset( &pdbfilehdr->logtimeDetach, 0, sizeof( LOGTIME ) );
 
+    //  le_ulVersion and le_ulDaeUpdateMajor will be set by log record SetDbVersion after attach
+    //
+    //pdbfilehdr->le_ulVersion = ulDAEVersionMax;
+    //pdbfilehdr->le_ulDaeUpdateMajor = ulDAEUpdateMajorMax;
 
     pdbfilehdr->le_dbid = g_rgfmp[ ifmp ].Dbid();
 }
 
+//  ================================================================
 ERR ErrDBTryCreateSystemTable(
     __in PIB * const ppib,
     const IFMP ifmp,
     const CHAR * const szTableName,
     ERR (*pfnCreate)(PIB * const, const IFMP),
     const JET_GRBIT grbit )
+//  ================================================================
+//
+//  Used to add dynamically created system tables at attach time.
+//  This function checks to see if the table is attached R/W and then
+//  looks to see if the specified table exists. If the table doesn't
+//  exist then the creation function is called.
+//  
 {
     Assert( ppib );
     Assert( ifmpNil != ifmp );
@@ -2543,6 +2986,8 @@ ERR ErrDBTryCreateSystemTable(
 
     if( grbit & JET_bitDbReadOnly || g_fRepair )
     {
+        //  no-one will be modifying the database so it doesn't matter if the table
+        //  repair doesn't want these tables created
         return JET_errSuccess;
     }
 
@@ -2551,10 +2996,15 @@ ERR ErrDBTryCreateSystemTable(
 
     if( JET_wrnFileOpenReadOnly == err )
     {
+        //  we have attached to a read-only file, but JET_bitDbReadOnly was not specified
+        //  no-one will be modifying the database so it doesn't matter if the table exists or not
         err = JET_errSuccess;
     }
     else
     {
+        //  look for the table. we used to simply create the table and look for
+        //  JET_errTableDuplicate but that led to nullified RCE's filling the
+        //  version store when a process did a lot of attaches
 
         err = ErrCATSeekTable( ppib, ifmpT, szTableName, NULL, NULL );
         if( err < JET_errSuccess )
@@ -2580,7 +3030,7 @@ ERR ErrDBTryCreateSystemTable(
 
     return err;
 
-HandleError:
+HandleError:    //  error case only
 
     return err;
 }
@@ -2609,6 +3059,12 @@ INLINE ERR ErrDBDeleteUnicodeIndexes( PIB *ppib, const IFMP ifmp )
 
         if ( fIndexesDeleted )
         {
+            //  signal version cleanup to reclaim space from
+            //  the deleted indices (in case the user recreates
+            //  the indices, the hope is that space requests
+            //  will be serviced by space released from the
+            //  deleted indices)
+            //
             VERSignalCleanup( ppib );
         }
     }
@@ -2616,8 +3072,9 @@ INLINE ERR ErrDBDeleteUnicodeIndexes( PIB *ppib, const IFMP ifmp )
     CallS( ErrDBCloseDatabase( ppib, ifmpT, 0 ) );
     Call( err );
 
+    //  to ensure we don't do this again, we'll ask to fixup the table...
 
-    Call( ErrCATVerifyMSLocales( ppib, ifmp, fTrue  ) );
+    Call( ErrCATVerifyMSLocales( ppib, ifmp, fTrue /* fixup table */ ) );
     
     return err;
 
@@ -2635,10 +3092,13 @@ INLINE ERR ErrDBUpgradeForLocalisation( PIB *ppib, const IFMP ifmp, const JET_GR
     BOOL        fIndexesDeleted     = fFalse;
     const WCHAR *rgsz[9];
 
+    //  judging from the call site, this grbit should never make it here!?!?
     Expected( 0 == ( grbit & JET_bitDbDeleteUnicodeIndexes ) );
 
     BOOL        fReadOnly;
 
+    //  Write out header with build # = 0 so that any crash from now
+    //  will have build # 0. This will cause upgrade again till it is done.
     WCHAR *         wszDatabaseName     = g_rgfmp[ifmp].WszDatabaseName();
 
     Assert( UlParam( pinst, JET_paramEnableIndexChecking ) == JET_IndexCheckingOn || BoolParam( pinst, JET_paramEnableIndexCleanup ) );
@@ -2733,6 +3193,7 @@ INLINE ERR ErrDBUpgradeForLocalisation( PIB *ppib, const IFMP ifmp, const JET_GR
     }
     else
     {
+        //  don't do anything
         err = JET_errSuccess;
     }
 
@@ -2752,6 +3213,7 @@ INLINE ERR ErrDBUpgradeForLocalisation( PIB *ppib, const IFMP ifmp, const JET_GR
             NULL,
             PinstFromPpib( ppib ) );
 
+    //  Update the header with the new version info
 
     {
     PdbfilehdrReadWrite pdbfilehdr = g_rgfmp[ifmp].PdbfilehdrUpdateable();
@@ -2762,15 +3224,23 @@ INLINE ERR ErrDBUpgradeForLocalisation( PIB *ppib, const IFMP ifmp, const JET_GR
     pdbfilehdr->ResetUpgradeDb();
     }
 
+    //  Update the MSysLocales table with the new info for indices' locales
 
-    Call( ErrCATVerifyMSLocales( ppib, ifmp, fTrue  ) );
+    Call( ErrCATVerifyMSLocales( ppib, ifmp, fTrue /* fixup table */ ) );
 
 #ifndef RTM
-    AssertRTL( JET_errDatabaseCorrupted != ErrCATVerifyMSLocales( ppib, ifmp, fFalse  ) );
+    // check it worked 
+    AssertRTL( JET_errDatabaseCorrupted != ErrCATVerifyMSLocales( ppib, ifmp, fFalse /* fixup table */ ) );
 #endif
 
     if ( fIndexesDeleted )
     {
+        //  signal version cleanup to reclaim space from
+        //  the deleted indices (in case the user recreates
+        //  the indices, the hope is that space requests
+        //  will be serviced by space released from the
+        //  deleted indices)
+        //
         VERSignalCleanup( ppib );
         err = ErrERRCheck( JET_wrnCorruptIndexDeleted );
     }
@@ -2830,10 +3300,12 @@ LOCAL VOID DBReportPartiallyDetachedDb(
             pinst );
 }
 
+//  ================================================================
 ERR ErrDBSetUserDbHeaderInfo(
     FMP * const         pfmp,
     ULONG               cbdbinfomisc,
     JET_DBINFOMISC7 *   pdbinfomisc )
+//  ================================================================
 {
     ERR err = JET_errSuccess;
 
@@ -2860,12 +3332,18 @@ HandleError:
 
 
 
+//  ================================================================
 LOCAL ERR ErrDBReadDBTrailer(
     const INST * const pinst,
     IFileSystemAPI * const pfsapi,
     const WCHAR * const wszFileName,
     __out_bcount( cbTrailer ) BYTE * const pbTrailer,
     const INT cbTrailer )
+//  ================================================================
+//
+// Reads the last page of the database into the buffer pointed to by pbTrailer
+//
+//-
 {
     Assert( pfsapi );
     Assert( wszFileName );
@@ -2891,6 +3369,7 @@ LOCAL ERR ErrDBReadDBTrailer(
 
     Call( pfapi->ErrSize( &cbSize, IFileAPI::filesizeLogical ) );
 
+    // there should be at least one page past the database header for us to read
     if( cbSize < QWORD ( cpgDBReserved + 1 )  * g_cbPage )
     {
         OSUHAEmitFailureTag( pinst, HaDbFailureTagCorruption, L"d2482af5-0d49-4abb-ab54-13846e8c5034" );
@@ -2906,10 +3385,16 @@ HandleError:
     return err;
 }
 
+//  ================================================================
 ERR ErrDBTryToZeroDBTrailer(
     const INST * const pinst,
     IFileSystemAPI * const pfsapi,
     const WCHAR * const wszDatabase)
+//  ================================================================
+//
+// Zeroes the last page of the database if the last page is actually a trailer.
+//
+//-
 {
     Assert( pfsapi );
     Assert( wszDatabase );
@@ -2924,10 +3409,13 @@ ERR ErrDBTryToZeroDBTrailer(
 
     Alloc( pbTrailer = static_cast<BYTE *> ( PvOSMemoryPageAlloc( g_cbPage, NULL ) ) );
 
+    // Check the trailer page to see if it really is a trailer page.
     err = ErrDBReadAndCheckDBTrailer( pinst, pfsapi, wszDatabase, pbTrailer, g_cbPage );
     if( err < JET_errSuccess )
     {
         
+        // If something goes wrong here, it's ok because the zero'ing is just to suppress
+        // unexpected checksum failures.
         
         err = JET_errSuccess;
         goto HandleError;
@@ -2940,17 +3428,21 @@ ERR ErrDBTryToZeroDBTrailer(
             
     Call( pfapi->ErrSize( &cbSize, IFileAPI::filesizeLogical ) );
 
+    // there should be at least one page past the database header for us to read
     if( cbSize < QWORD ( cpgDBReserved + 1 )  * g_cbPage )
     {
         OSUHAEmitFailureTag( pinst, HaDbFailureTagCorruption, L"e893b103-65f9-4833-9065-f484904fe609" );
         Error( ErrERRCheck( JET_errDatabaseCorrupted ) );
     }
 
+    // Zero the page
     memset( pbTrailer, 0, g_cbPage );
 
     Call( pfapi->ErrIOWrite( *tcScope, cbSize - QWORD(g_cbPage), g_cbPage, pbTrailer, qosIONormal ) );
     CallS( err );
 
+    //  Ugh, no pinst!  Ugh ... skipping FFB suppression for now, but not that bad 
+    //  for this one time JetInit after backup restore.
     Call( ErrUtilFlushFileBuffers( pfapi, iofrUtility ) );
     
 HandleError:
@@ -2961,12 +3453,19 @@ HandleError:
 
 
 
+//  ================================================================
 ERR ErrDBReadAndCheckDBTrailer(
     const INST * const pinst,
     IFileSystemAPI * const pfsapi,
     const WCHAR * const wszFileName,
     __out_bcount( cbBuffer ) BYTE * const pbBuffer,
     const INT cbBuffer )
+//  ================================================================
+//
+// Read the last page of the database into the buffer pointed to by 
+// pbBuffer and checksum it.
+//
+//-
 {
     Assert( pfsapi );
     Assert( wszFileName );
@@ -2996,6 +3495,7 @@ ERR ErrDBReadAndCheckDBTrailer(
     {
         if ( !BoolParam( JET_paramDisableBlockVerification ) )
         {
+            //  the page has a verification failure
             Call( ErrERRCheck( JET_errBadPatchPage ) );
         }
     }
@@ -3006,11 +3506,17 @@ HandleError:
 }
 
 
+//  ================================================================
 ERR ErrDBCheckDBHeaderAndTrailer(
     const DBFILEHDR * const pdbfilehdr,
     const PATCHHDR * const ppatchhdr,
     const WCHAR * const wszDatabase,
     BOOL fSkipMinLogChecks )
+//  ================================================================
+//
+//  Compare the database header to the trailer page to see if they match
+//
+//-
 {
     Assert( pdbfilehdr );
     Assert( ppatchhdr );
@@ -3035,7 +3541,14 @@ ERR ErrDBCheckDBHeaderAndTrailer(
     return err;
 }
 
+//  ================================================================
 BOOL FDBHeaderNeedsUpdating(const DBFILEHDR * const pdbfilehdr)
+//  ================================================================
+//
+// See if the header has needs to be updated with information from
+// the trailer.
+//
+//-
 {
     if ( 0 == pdbfilehdr->bkinfoFullCur.le_genLow
         || pdbfilehdr->bkinfoFullCur.le_genHigh )
@@ -3046,6 +3559,7 @@ BOOL FDBHeaderNeedsUpdating(const DBFILEHDR * const pdbfilehdr)
 }
 
 
+//  ================================================================
 LOCAL ERR ErrDBIUpdateHeaderFromTrailer(
     const INST * const pinst,
     IFileSystemAPI * const pfsapi,
@@ -3053,6 +3567,12 @@ LOCAL ERR ErrDBIUpdateHeaderFromTrailer(
     const PATCHHDR * const ppatchhdr,
     const WCHAR * const wszDatabase,
     BOOL fSkipMinLogChecks )
+//  ================================================================
+//
+// Updates the database header in pdbfilehdr with information from the
+// trailer in ppatchhdr and writes the header to wszDatabase.
+//
+//-
 {
     Assert( pfsapi );
     Assert( pdbfilehdr );
@@ -3065,6 +3585,11 @@ LOCAL ERR ErrDBIUpdateHeaderFromTrailer(
 
     Assert( FDBHeaderNeedsUpdating( pdbfilehdr ) || fSkipMinLogChecks );
 
+    // All of these values are supposed to be unsigned, but they are sometimes treated
+    // as signed or cast to signed variables in other parts of the code, which may lead
+    // to problems if they are > lMax, i.e., if they turn out to be negative due to bugs.
+    // This has happened in the past so the asserts below aim to catch such bugs as closely
+    // as possible to their source.
     const LONG lgenLow = ppatchhdr->bkinfo.le_genLow;
     const LONG lgenHigh = ppatchhdr->bkinfo.le_genHigh;
     const LONG lgenMinReq = ppatchhdr->lgenMinReq;
@@ -3085,7 +3610,15 @@ LOCAL ERR ErrDBIUpdateHeaderFromTrailer(
     }
     else
     {
+        // HA restartable reseed passes this. We could have also detached/re-attached in the middle of
+        // backup/reseed, so mark header as "dirty and patched" so we do not mark database as clean on
+        // seeing a Detach/Term record until we are past the MaxRequired generation.
+        // Restricting it to HA restartable reseed only because without aggressive log rollover, it may
+        // take too long to get back to dirty state.
 
+        // Copy relevant asserts from SetDbState. We cannot use SetDbState because it does not transition
+        // from JET_dbstateIncrementalReseedInProgress and we do not have logtime of maxCommitted log, so
+        // better to copy relevant asserts here rather than pollute the SetDbState state transition machine.
         Assert( 0 != lgenLow && lGenerationInvalid != lgenLow );
         Assert( 0 != lgenHigh && lGenerationInvalid != lgenHigh );
         Assert( ( pdbfilehdr->le_dbstate == JET_dbstateDirtyShutdown ) || ( pdbfilehdr->le_dbstate == JET_dbstateDirtyAndPatchedShutdown ) );
@@ -3106,9 +3639,15 @@ LOCAL ERR ErrDBIUpdateHeaderFromTrailer(
     const LONG lgenMaxReqPatch = ( lgenMaxReq > 0 ) ? lgenMaxReq : lgenHigh;
     const LONG lgenMaxComPatch = ( lgenMaxCommited > 0 ) ? lgenMaxCommited : lgenHigh;
 
+    // The required range at the beginning of the backup may not be the same as at the end.
     if ( ( lgenMinReqPatch > 0 ) &&
          ( lgenMinReqPatch < pdbfilehdr->le_lGenMinRequired ) )
     {
+        // We don't expect this code to hit for now. This can only happen if the backup was interrupted
+        // and then restarted following a checkpoint deletion or incremental reseed, which only Exchange's
+        // HA does. However, they also use JET_bitReplayIgnoreLogRecordsBeforeMinRequiredLog, which suppresses
+        // replaying log files below the DB's min required. They also abort a full seed if the min required
+        // goes backwards due to incremental reseed.
         FireWall( "BackupUpdHdrFromTrailerLoweredMinReq" );
         Assert( lgenMinReqPatch >= lgenLow );
         pdbfilehdr->le_lGenMinRequired = lgenMinReqPatch;
@@ -3124,6 +3663,7 @@ LOCAL ERR ErrDBIUpdateHeaderFromTrailer(
         pdbfilehdr->le_lGenMaxCommitted = lgenMaxComPatch;
     }
 
+    // Reset these fields.
     pdbfilehdr->le_lGenMinConsistent = pdbfilehdr->le_lGenMinRequired;
     pdbfilehdr->le_lGenPreRedoMinConsistent = 0;
     pdbfilehdr->le_lGenPreRedoMinRequired = 0;
@@ -3138,12 +3678,19 @@ LOCAL ERR ErrDBIUpdateHeaderFromTrailer(
 }
 
 
+//  ================================================================
 ERR ErrDBUpdateHeaderFromTrailer(
     const INST * const pinst,
     IFileSystemAPI * const pfsapi,
     DBFILEHDR   * const pdbfilehdr,
     const WCHAR * const wszDatabase,
     BOOL        fSkipMinLogChecks )
+//  ================================================================
+//
+// Reads the trailer from wszDatabase, updates the database header in pdbfilehdr
+// with information from the trailer and writes the header to wszDatabase.
+//
+//-
 {
     Assert( pfsapi );
     Assert( pdbfilehdr );
@@ -3154,6 +3701,7 @@ ERR ErrDBUpdateHeaderFromTrailer(
 
     Alloc( ppatchhdr = static_cast<PATCHHDR *>( PvOSMemoryPageAlloc( g_cbPage, NULL ) ) );
 
+    // should be a db header
     if( attribDb != pdbfilehdr->le_attrib )
     {
         OSUHAEmitFailureTag( pinst, HaDbFailureTagCorruption, L"0fcb4d48-e21a-4862-95d3-1b599eb63d51" );
@@ -3164,6 +3712,8 @@ ERR ErrDBUpdateHeaderFromTrailer(
     {
         CallS( err );
 
+        // If we have a trailer page then we should try to zero it so as not to confuse any code that
+        // is not expecting it to be a trailer page w.r.t. checksums.
         Call( ErrDBTryToZeroDBTrailer( pinst,
                                        pfsapi,
                                        wszDatabase ) );
@@ -3177,6 +3727,7 @@ ERR ErrDBUpdateHeaderFromTrailer(
     Call( ErrDBIUpdateHeaderFromTrailer( pinst, pfsapi, pdbfilehdr, ppatchhdr, wszDatabase, fSkipMinLogChecks ) );
     CallS( err );
 
+    // Try to zero the trailer page.
     Call( ErrDBTryToZeroDBTrailer( pinst,
                                    pfsapi,
                                    wszDatabase ) );
@@ -3188,6 +3739,7 @@ HandleError:
         const WCHAR *rgszT[1];
         rgszT[0] = wszDatabase;
 
+        //  attempting to use a corrupt trailer page, probably an incomplete backup
         UtilReportEvent(
                 eventError,
                 LOGGING_RECOVERY_CATEGORY,
@@ -3206,11 +3758,18 @@ HandleError:
 }
 
 
+//  ================================================================
 LOCAL ERR ErrDBIUpdateHeaderFromTrailer(
     const INST * const pinst,
     IFileSystemAPI * const pfsapi,
     const WCHAR * const wszDatabase,
     BOOL fSkipMinLogChecks )
+//  ================================================================
+//
+// Reads the trailer from wszDatabase, update the header with information
+// from the trailer if needed.
+//
+//-
 {
     Assert( pfsapi );
     Assert( wszDatabase );
@@ -3240,7 +3799,14 @@ HandleError:
 }
 
 
+//  ================================================================
 ERR ErrDBUpdateHeaderFromTrailer( const WCHAR * const wszDatabase, BOOL fSkipMinLogChecks )
+//  ================================================================
+//
+// Reads the trailer from wszDatabase, update the header with information
+// from the trailer if needed.
+//
+//-
 {
     Assert( wszDatabase );
 
@@ -3302,6 +3868,8 @@ ERR ISAMAPI ErrIsamAttachDatabase(
 
     COSTraceTrackErrors trackerrors( __FUNCTION__ );
 
+    //  check parameters
+    //
     Assert( sizeof(JET_SESID) == sizeof(PIB *) );
     ppib = (PIB *)sesid;
 
@@ -3337,6 +3905,7 @@ ERR ISAMAPI ErrIsamAttachDatabase(
     if ( NULL == wszDatabaseName || 0 == *wszDatabaseName )
         return ErrERRCheck( JET_errDatabaseInvalidPath );
 
+    // We cannot delete indices and call this a read-only attach.
     if ( ( grbit & JET_bitDbDeleteUnicodeIndexes ) && ( grbit & JET_bitDbReadOnly ) )
     {
         return ErrERRCheck( JET_errInvalidGrbit );
@@ -3344,7 +3913,15 @@ ERR ISAMAPI ErrIsamAttachDatabase(
 
     pfsapi = pinst->m_pfsapi;
 
+    //  depend on ErrPathComplete to make same files same name
+    //  thereby preventing same file to be multiply attached
+    //
     err = ErrUtilPathComplete( pfsapi, wszDatabaseName, rgchDbFullName, fTrue );
+    //  if ( JET_errFileNotFound == err )
+    //      {
+    //      must return FileNotFound to retain backward-compatibility
+    //      err = ErrERRCheck( JET_errDatabaseNotFound );
+    //      }
     CallR( JET_errInvalidPath == err ? ErrERRCheck( JET_errDatabaseInvalidPath ) : err );
 
 
@@ -3396,11 +3973,13 @@ ERR ISAMAPI ErrIsamAttachDatabase(
             case JET_errDatabaseInvalidPath:
                 break;
             default:
-                CallS( err );
+                CallS( err );       //  force error to be reported in assert
         }
 #endif
         pbackup->BKUnlockBackup();
 
+        // database already attached by recovery, but needs more initialization
+        // for active
         if ( err == JET_wrnDatabaseAttached &&
              g_rgfmp[ ifmp ].FAttachedForRecovery() )
         {
@@ -3433,35 +4012,40 @@ ERR ISAMAPI ErrIsamAttachDatabase(
             BOOL fDbNeedsUpdate = fFalse;
             DbVersion dbvBefore;
             {
-            PdbfilehdrReadOnly pdbfilehdr = pfmp->Pdbfilehdr();
+            PdbfilehdrReadOnly pdbfilehdr = pfmp->Pdbfilehdr(); // .ctor acquires header lock
 
             dbvBefore = pdbfilehdr->Dbv();
 
             CallJ( ErrDBIValidateUserVersions( pinst, wszDbFullName, ifmp, pdbfilehdr.get(), &pfmtversDesired, &fDbNeedsUpdate ), Detach );
-            }
+            } // .dtor releases header lock
     
             LGPOS lgposReAttach;
             CallJ( ErrLGReAttachDB( ifmp, &lgposReAttach ), Detach );
 
             Assert(  fDbNeedsUpdate == ( CmpDbVer( dbvBefore, pfmtversDesired->dbv ) < 0 ) );
             if ( g_rgfmp[ ifmp ].FLogOn() && 
+                 // We also log equal DbVersions in case a log replaying replica missed such an
+                 // update due to Incremental Reseed or lossy failover.
                  ( CmpDbVer( dbvBefore, pfmtversDesired->dbv ) <= 0 )
-                   )
+                 /* && !fRedoing - but always true */  )
             {
                 CallJ( ErrDBLGVersionUpdate( pinst, ppib, ifmp, pfmtversDesired, fDbNeedsUpdate ), Detach );
             }
             else
             {
+                // If we have a db-version update, no logging is the only reason we should not log the update.
                 Enforce( !fDbNeedsUpdate || !g_rgfmp[ ifmp ].FLogOn() );
             }
         
+            //  Post logging dbv should not have been updated by any other method ...
             
             OnDebug( if ( ( rand() % 3 ) == 0 ) UtilSleep( 20 ) );
             Assert( CmpDbVer( dbvBefore, pfmp->Pdbfilehdr()->Dbv() ) == 0 );
             
             {
-            PdbfilehdrReadWrite pdbfilehdr = pfmp->PdbfilehdrUpdateable();
+            PdbfilehdrReadWrite pdbfilehdr = pfmp->PdbfilehdrUpdateable(); // .ctor acquires header lock
 
+            //  Bunch of stuff normally done by DBISetHeaderAfterAttach below
 
             pdbfilehdr->le_lGenRecovering = 0;
 
@@ -3485,29 +4069,43 @@ ERR ISAMAPI ErrIsamAttachDatabase(
                         PinstFromIfmp( ifmp ) );
             }
 
+            // Set re-attach time
             pdbfilehdr->le_lgposLastReAttach = lgposReAttach;
             LGIGetDateTime( &pdbfilehdr->logtimeLastReAttach );
             pfmp->m_isdlAttach.FixedData().sAttachData.lgposAttach = lgposReAttach;
             Expected( pfmp->m_isdlAttach.FActiveSequence() );
 
+            //  reset bkinfo
             memset( &pdbfilehdr->bkinfoFullCur, 0, sizeof( BKINFO ) );
+            // reset the snapshot data as well
             memset( &pdbfilehdr->bkinfoSnapshotCur, 0, sizeof( BKINFO ) );
 
             if ( fDbNeedsUpdate )
             {
+                //  Update the headers DB version to the desired one.
             
                 DBISetVersion( pinst, wszDbFullName, ifmp, pfmtversDesired->dbv, pdbfilehdr.get(), fDbNeedsUpdate, fFalse );
             }
             
-            }
+            } // .dtor releases header lock
 
             Assert( CmpDbVer( pfmp->Pdbfilehdr()->Dbv(), pfmtversDesired->dbv ) >= 0 );
 
+            //  Note: I caught the checkpoint running AND writing the DB header right here, I am not sure
+            //  this was ever truly intended, but worth noting that the ordering of this code and relation
+            //  to ErrUtilWriteAttachedDatabaseHeaders is not guaranteed!
 
             CallJ( ErrUtilWriteAttachedDatabaseHeaders( pinst, pfsapi, pfmp->WszDatabaseName(), pfmp, pfmp->Pfapi() ), Detach );
 
+            //  Today, this shouldn't go off, because there is only one consumer of the header update 
+            //  state. But if someone utilizes it from like checkpoint update or something, this will
+            //  start going off and someone really should allow (and probably increase the header lock
+            //  rank) the header lock be held over logging data, and definitely let the lock be passed
+            //  into ErrUtilWriteAttachedDatabaseHeaders().
             Assert( !pfmp->FHeaderUpdateInProgress() );
 
+            //  Note: This synchronizes all outstanding IOs to FilePerfAPI completion (though actual IO 
+            //  pfnIOCompletion may fire after).
             pfmp->Pfapi()->UpdateIFilePerfAPIEngineFileTypeId( iofileDbAttached, pfmp->Ifmp() );
             IOResetFmpIoLatencyStats( pfmp->Ifmp() );
 
@@ -3516,6 +4114,7 @@ ERR ISAMAPI ErrIsamAttachDatabase(
             Assert( 0 == memcmp( rgbSigZeroes, pfmp->Pdbfilehdr()->rgbReservedSignSLV, sizeof( rgbSigZeroes ) ) );
 #endif
 
+            //  We have somehow downgraded the DB version!  Bad.
             AssertTrack( CmpDbVer( pfmp->Pdbfilehdr()->Dbv(), dbvBefore ) >= 0, "InvalidDbVersionDowngradeAttach" );
             
             OSTraceWriteRefLog( ostrlSystemFixed, sysosrtlDatapoint|sysosrtlContextFmp, pfmp, &ifmp, sizeof(ifmp) );
@@ -3531,6 +4130,9 @@ ERR ISAMAPI ErrIsamAttachDatabase(
             }
 
             {
+            //  set the last page of the database and resize it (we normally do it at the end of recovery,
+            //  but not when we decide to keep the DB cache alive or were DirtyAndPatched when we hit a
+            //  resize operation (like detach or attach), or we replayed a shrink LR in the required range).
             OnDebug( PGNO pgnoLastBefore = pfmp->PgnoLast() );
             CallJ( ErrDBSetLastPage( ppib, ifmp ), Detach );
             Assert( pgnoLastBefore >= pfmp->PgnoLast() );
@@ -3541,6 +4143,8 @@ ERR ISAMAPI ErrIsamAttachDatabase(
                 Assert( pgnoLastBefore == pfmp->PgnoLast() );
             }
 
+            //  ensure our database has the expected size.
+            //
             QWORD       cbLogicalSize       = OffsetOfPgno( pfmp->PgnoLast() + 1 );
             QWORD       cbNtfsSize          = 0;
             if ( pfmp->Pfapi()->ErrSize( &cbNtfsSize, IFileAPI::filesizeLogical ) >= JET_errSuccess )
@@ -3549,6 +4153,7 @@ ERR ISAMAPI ErrIsamAttachDatabase(
             }
             }
 
+            // Trigger leak reclaimer.
             JET_ERR errLeakReclaimer =  JET_errSuccess;
             if ( pfmp->FLeakReclaimerEnabled() )
             {
@@ -3556,6 +4161,7 @@ ERR ISAMAPI ErrIsamAttachDatabase(
                 pfmp->m_isdlAttach.Trigger( eAttachLeakReclaimerDone );
             }
 
+            //  Trigger DB shrink.
             if ( ( errLeakReclaimer >= JET_errSuccess ) &&
                  pfmp->FShrinkDatabaseEofOnAttach() &&
                  !BoolParam( JET_paramEnableViewCache ) &&
@@ -3563,6 +4169,9 @@ ERR ISAMAPI ErrIsamAttachDatabase(
             {
                 const JET_ERR errT = ErrSHKShrinkDbFromEof( ppib, ifmp );
 
+                // Fail the attach if we hit a corruption error, as safety measure to prevent the corruption from spreading.
+                // Also, JET_errDatabaseInUse is used to signal that codepaths that require/assume exclusive access to the
+                // database could not guarantee exclusivity, so fail the attach in that case for safety.
                 const ErrData* perrdata = NULL;
                 if ( ( errT < JET_errSuccess ) &&
                      ( errT != JET_errReadVerifyFailure ) &&
@@ -3596,12 +4205,14 @@ ERR ISAMAPI ErrIsamAttachDatabase(
         return err;
     }
 
+    //  from this point we got a valid ifmp entry. Start the attaching DB process.
+    //
     pfmp = &g_rgfmp[ ifmp ];
 
     OSTraceWriteRefLog( ostrlSystemFixed, sysosrtlAttachBegin|sysosrtlContextFmp, pfmp, &ifmp, sizeof(ifmp) );
 
     Assert( !plog->FRecovering() );
-    Assert( !pfmp->FIsTempDB() );
+    Assert( !pfmp->FIsTempDB() ); // Temp DBs are created, not [re]attached.
 
     
     pfmp->m_isdlAttach.InitSequence( isdltypeAttach, eAttachSeqMax );
@@ -3620,8 +4231,13 @@ ERR ISAMAPI ErrIsamAttachDatabase(
                               fLeakReclaimerEnabled,
                               dtickLeakReclaimerTimeQuota );
 
+    //  backup thread will wait on attach completion from this point
+    //  as the db is marked as attaching.
+    //
     pbackup->BKUnlockBackup();
 
+    //  set database loggable flags
+    //
     if ( grbit & JET_bitDbRecoveryOff )
     {
         FMP::EnterFMPPoolAsWriter();
@@ -3630,14 +4246,21 @@ ERR ISAMAPI ErrIsamAttachDatabase(
     }
     else
     {
+        //  set all databases loggable except Temp if not specified in grbit
+        //
         FMP::EnterFMPPoolAsWriter();
         pfmp->SetLogOn();
         FMP::LeaveFMPPoolAsWriter();
     }
 
+    // Can only turn versioning off for CreateDatabase().
+    // UNDONE:  Is it useful to allow user to turn versioning off for AttachDatabase()?
+    //
     Assert( !pfmp->FVersioningOff() );
     pfmp->ResetVersioningOff();
 
+    //  set up FMP before logging
+    //
     if ( grbit & JET_bitDbReadOnly )
     {
         FMP::EnterFMPPoolAsWriter();
@@ -3656,6 +4279,7 @@ ERR ISAMAPI ErrIsamAttachDatabase(
 
     pfmp->m_isdlAttach.Trigger( eAttachInitVariableDone );
 
+    //  Make sure the database is a good one
 
     Assert( UtilCmpFileName( pfmp->WszDatabaseName(), wszDbFullName ) == 0 );
     Assert( !( grbit & JET_bitDbReadOnly ) == !g_rgfmp[ifmp].FReadOnlyAttach() );
@@ -3668,9 +4292,14 @@ ERR ISAMAPI ErrIsamAttachDatabase(
         && 0 == memcmp( &pfmp->Pdbfilehdr()->signLog, &plog->SignLog(), sizeof(SIGNATURE) ) )
     {
 #if 0
+        //  UNDONE: This logic detects if we are trying to detect a database that
+        //  is too far in the future.  Re-enable this code when test scripts
+        //  can properly handle this
         if ( CmpLgpos( &pdbfilehdr->lgposAttach, &plog->m_lgposLogRec ) > 0
             || CmpLgpos( &pdbfilehdr->lgposConsistent, &plog->m_lgposLogRec ) > 0 )
         {
+            //  something is gravely wrong - the current lgposAttach
+            //  and/or lgposConsistent are ahead of the current log position
             FireWall( "ConsistentTimeMismatchOnAttach" );
             Call( ErrERRCheck( JET_errConsistentTimeMismatch ) );
         }
@@ -3678,13 +4307,15 @@ ERR ISAMAPI ErrIsamAttachDatabase(
     }
 
     err = ErrDBICheckVersions( pinst, wszDbFullName, ifmp, pfmp->Pdbfilehdr().get(), PfmtversEngineMax()->dbv, pfmp->FReadOnlyAttach() );
-    Assert( err != JET_errEngineFormatVersionSpecifiedTooLowForDatabaseVersion );
+    Assert( err != JET_errEngineFormatVersionSpecifiedTooLowForDatabaseVersion ); // should be impossible.
     Call( err );
 
     pfmp->m_isdlAttach.Trigger( eAttachReadDBHeader );
 
+    //  update header if upgrade needed
     if ( !pfmp->FReadOnlyAttach() )
     {
+        //  log Attach
         Assert( pfmp == &g_rgfmp[ifmp] );
         Assert( UtilCmpFileName( wszDbFullName, pfmp->WszDatabaseName() ) == 0 );
         Assert( pfmp->CpgDatabaseSizeMax() == (UINT)cpgDatabaseSizeMax );
@@ -3700,6 +4331,20 @@ ERR ISAMAPI ErrIsamAttachDatabase(
         {
             Assert( !plog->FRecovering() );
 
+            //  HACK: we want the creation time of the generation with the
+            //  AttachDB log record, and most of the time it should be the
+            //  current log gen, but there are timing holes where it may
+            //  not be (for instance, if the AttachDB log record happened
+            //  to force a new log generation but it hasn't been created
+            //  yet by the time we perform this check), so in such cases,
+            //  just don't bother setting logtimeOfGenWithAttach (the only
+            //  effect is that during redo, we won't be able to make the
+            //  check that ensures that the timestamps match)
+            //
+            //  must grab m_critLGBuf because that's what 
+            //  LOG::ErrLGUseNewLogFile() grabs when updating the contents
+            //  of m_plgfilehdr
+            //
             LOGTIME tmCreate;
             if ( lgposLogRec.lGeneration == plog->LGGetCurrentFileGenWithLock( &tmCreate ) )
             {
@@ -3717,25 +4362,48 @@ ERR ISAMAPI ErrIsamAttachDatabase(
             Call( ErrLGForceLogRollover( ppib, szTrace ) );
         }
 
+        // Below code to repro a bug due to a race condition
         DWORD tickSleep = (DWORD)UlConfigOverrideInjection( 38908, 0 );
         if ( tickSleep > 0 )
         {
+            // Sleep for a bit to allow log rollover to complete and then
+            // force checkpoint update while database cannot take updates
             UtilSleep( tickSleep );
             (void)pinst->m_plog->ErrLGUpdateCheckpointFile( fFalse );
         }
 
-        DBISetHeaderAfterAttach( pfmp->PdbfilehdrUpdateable().get(), lgposLogRec, &logtimeOfGenWithAttach, ifmp, fFalse );
+        //  Update database state to be dirty
+        DBISetHeaderAfterAttach( pfmp->PdbfilehdrUpdateable().get(), lgposLogRec, &logtimeOfGenWithAttach, ifmp, fFalse ); // do not keep bkinfo
         Assert( pfmp->Pdbfilehdr()->le_objidLast );
 
         if ( !pfmp->FIsTempDB() )
         {
+            //  create a flush map for this DB
+            //
             Call( pfmp->ErrCreateFlushMap( grbit ) );
         }
 
         Call( ErrUtilWriteAttachedDatabaseHeaders( pinst, pfsapi, wszDbFullName, pfmp ) );
 
+        //  Once the header has been established for this attached database, we can set our waypoint.
+        //
+        //  a more logically-consistent place to do this is in
+        //  DBISetHeaderAfterAttach() at the same place where
+        //  lgposAttach is set, but we shouldn't do that because
+        //  the waypoint should only be set after the header has
+        //  been flushed (though technically, it doesn't matter
+        //  in this particular case since we've just attached to
+        //  the database so there's no danger of any other pages
+        //  in the database being dirtied)
+        //
         if ( pfmp->FLogOn() )
         {
+            //  WARNING: even though we set the waypoint, waypoint
+            //  advancement will not consider this database until
+            //  FMP::SetAttached() is called below, so until that
+            //  point, we cannot dirty any buffers for this
+            //  database
+            //
             FMP::EnterFMPPoolAsWriter();
             const LONG lgenMaxRequired = pfmp->Pdbfilehdr()->le_lGenMaxRequired;
             pfmp->SetWaypoint( lgenMaxRequired );
@@ -3744,6 +4412,7 @@ ERR ISAMAPI ErrIsamAttachDatabase(
         else
         {
             Assert( pinst->FComputeLogDisabled() );
+            // note FMP::EnterFMPPoolAsWriter() is grabbed by ResetWaypoint()...
             pfmp->ResetWaypoint();
         }
 
@@ -3756,6 +4425,8 @@ ERR ISAMAPI ErrIsamAttachDatabase(
 
         if ( !pfmp->FIsTempDB() )
         {
+            //  create a flush map for this DB
+            //
             Call( pfmp->ErrCreateFlushMap( grbit ) );
         }
     }
@@ -3764,10 +4435,12 @@ ERR ISAMAPI ErrIsamAttachDatabase(
 
     Call( ErrIOOpenDatabase( pfsapi, ifmp, wszDbFullName, pinst->FRecovering() ? iofileDbRecovery : iofileDbAttached, fSparseEnabledFile ) );
 
+    //  if we fail after this, we must close the db
     attachState = ATTACH_DB_OPENED;
 
     pfmp->m_isdlAttach.Trigger( eAttachIOOpenDatabase );
 
+    //  Make the database attached.
 
     Assert( !( pfmp->FAttached() ) );
     FMP::EnterFMPPoolAsWriter();
@@ -3785,6 +4458,8 @@ ERR ISAMAPI ErrIsamAttachDatabase(
     #undef Call
     #define Call DO_NOT_USE_CALL_HERE_Use_CallJ_To_MoreAttachedThanDetached_Like_Others
 
+    //  set the last page of the database and resize it (we normally do it at the end of recovery,
+    //  but not when we decide to keep the DB cache alive or we replayed a shrink LR in the required range).
     OnDebug( PGNO pgnoLastBefore = pfmp->PgnoLast() );
     CallJ( ErrDBSetLastPage( ppib, ifmp ), MoreAttachedThanDetached );
     Assert( pgnoLastBefore >= pfmp->PgnoLast() );
@@ -3799,6 +4474,8 @@ ERR ISAMAPI ErrIsamAttachDatabase(
     }
 
     {
+    //  ensure our database has the expected size.
+    //
     QWORD       cbLogicalSize       = OffsetOfPgno( pfmp->PgnoLast() + 1 );
     QWORD       cbNtfsSize          = 0;
     if ( pfmp->Pfapi()->ErrSize( &cbNtfsSize, IFileAPI::filesizeLogical ) >= JET_errSuccess )
@@ -3807,10 +4484,12 @@ ERR ISAMAPI ErrIsamAttachDatabase(
     }
     }
 
+    //  preread the first 16 pages of the database
     BFPrereadPageRange( ifmp, 1, 16, bfprfDefault, ppib->BfpriPriority( ifmp ), *tcScope );
 
     if ( !pfmp->FReadOnlyAttach() && !g_fRepair )
     {
+        //  Upgrade the DB Version if necessary
         CallJ( ErrDBUpdateAndFlushVersion(
                     pinst,
                     wszDbFullName,
@@ -3818,6 +4497,7 @@ ERR ISAMAPI ErrIsamAttachDatabase(
                     ifmp,
                     fFalse ), MoreAttachedThanDetached );
 
+        // Trigger leak reclaimer.
         JET_ERR errLeakReclaimer =  JET_errSuccess;
         if ( pfmp->FLeakReclaimerEnabled() )
         {
@@ -3825,6 +4505,7 @@ ERR ISAMAPI ErrIsamAttachDatabase(
             pfmp->m_isdlAttach.Trigger( eAttachLeakReclaimerDone );
         }
 
+        //  Trigger DB shrink.
         if ( ( errLeakReclaimer >= JET_errSuccess ) &&
              pfmp->FShrinkDatabaseEofOnAttach() &&
              !BoolParam( JET_paramEnableViewCache ) &&
@@ -3832,6 +4513,9 @@ ERR ISAMAPI ErrIsamAttachDatabase(
         {
             const JET_ERR errT = ErrSHKShrinkDbFromEof( ppib, ifmp );
 
+            // Fail the attach if we hit a corruption error, as safety measure to prevent the corruption from spreading.
+            // Also, JET_errDatabaseInUse is used to signal that codepaths that require/assume exclusive access to the
+            // database could not guarantee exclusivity, so fail the attach in that case for safety.
             const ErrData* perrdata = NULL;
             if ( ( errT < JET_errSuccess ) &&
                  ( errT != JET_errReadVerifyFailure ) &&
@@ -3848,6 +4532,8 @@ ERR ISAMAPI ErrIsamAttachDatabase(
             }
 
             {
+            //  ensure our database has the expected size.
+            //
             QWORD       cbLogicalSize       = OffsetOfPgno( pfmp->PgnoLast() + 1 );
             QWORD       cbNtfsSize          = 0;
             if ( pfmp->Pfapi()->ErrSize( &cbNtfsSize, IFileAPI::filesizeLogical ) >= JET_errSuccess )
@@ -3860,6 +4546,7 @@ ERR ISAMAPI ErrIsamAttachDatabase(
         }
     }
 
+    //  Make the fmp available for others to open etc.
     FMP::EnterFMPPoolAsWriter();
     pfmp->RwlDetaching().EnterAsWriter();
     pfmp->ResetAttachingDB();
@@ -3878,6 +4565,8 @@ PostAttachTasks:
 
     if ( !g_fRepair )
     {
+        // Create this *before* creating the other system tables (such as
+        // MSysLocales) so that MSObjids contains entries for those tables.
         CallJ( ErrDBTryCreateSystemTable( ppib, ifmp, szMSObjids, ErrCATCreateMSObjids, grbit ), Detach );
         CallJ( ErrCATPopulateMSObjids( ppib, ifmp ), Detach );
         g_rgfmp[ ifmp ].SetFMaintainMSObjids();
@@ -3885,20 +4574,22 @@ PostAttachTasks:
 
     pfmp->m_isdlAttach.Trigger( eAttachCreateMSysObjids );
 
-    Expected( !pinst->FRecovering() );
-    Expected( !FFMPIsTempDB( ifmp ) );
-    if( !FFMPIsTempDB( ifmp) &&
-        !pinst->FRecovering() &&
+    Expected( !pinst->FRecovering() );          // assert'ing this, b/c I can't find any evidence it can happen
+    Expected( !FFMPIsTempDB( ifmp ) ); // same
+    if( !FFMPIsTempDB( ifmp) &&   // just in case
+        !pinst->FRecovering() &&            // just in case
         !g_fRepair &&
         !pfmp->FReadOnlyAttach()
         )
     {
+        //  create the MSysLocales table if necessary (and init the facility)
 
         CallJ( ErrCATCreateOrUpgradeMSLocales( ppib, ifmp ), Detach );
         Assert( g_rgfmp[ ifmp ].PkvpsMSysLocales() );
 
         CallJ( ErrFaultInjection( 44400 ), Detach );
 
+        //  update the header if necessary.
 
         if ( pfmp->Pdbfilehdr()->le_qwSortVersion != g_qwUpgradedLocalesTable )
         {
@@ -3912,6 +4603,7 @@ PostAttachTasks:
     {
     PdbfilehdrReadOnly pdbfilehdr = pfmp->Pdbfilehdr();
 
+    //  We will try to delete the (obsolete/deprecated) MSU if permitted.
 
     fDeleteMSUTable = ( !plog->FRecovering()
                         && !pfmp->FReadOnlyAttach()
@@ -3928,14 +4620,29 @@ PostAttachTasks:
 
     BOOL fOsLocaleVersionOutOfDate = fFalse;
 
+    // JET_paramEnableIndexCleanup was off by default pre-Win8 (despite being documented
+    // as being on!). We're turning it on by default in Win8.
+    //
+    // When using JET_IndexCheckingDeferToOpenTable, we do not want to check MSysLocales to verify that we have out-of-date localized indices. While checking
+    // MSysLocales is cheap enough, once it is out of date (remember we do not keep it up-to-date when we delete unicode indices), the cost to bring it back up-to-date
+    // requires walking the whole catalog, which defeats the whole purpose of JET_IndexCheckingDeferToOpenTable.
     const BOOL fIndexCheckingEnabled = ( !pfmp->FReadOnlyAttach() && BoolParam( pinst, JET_paramEnableIndexCleanup ) ) || ( UlParam( pinst, JET_paramEnableIndexChecking ) == JET_IndexCheckingOn );
 
+    //  if the user turned off index cleanup, then we won't even try to open the locales
+    //  table and check for out-of-date locales ...
 
     if ( !plog->FRecovering()
             && !g_fRepair
+            // this next clause is necessary ... 
             && ( fIndexCheckingEnabled ) )
     {
+        //  Note: This code here adds a (at least 1) page read to the default attach 
+        //  path to evaluate out of date indices.  It could be more than 1 page, but
+        //  most likely only 1, as around 18 LCIDs+Versions fit on the first page of
+        //  the MSysLocales table, assuming 4 KB pages.
 
+        //  This used to be free as part of the early header reads, but was often 
+        //  inaccurate and missed major / NLS version upgrades on non-English languages.
         CallJ( ErrCATCheckForOutOfDateLocales( ifmp, &fOsLocaleVersionOutOfDate ), Detach );
     }
 
@@ -3965,18 +4672,21 @@ PostAttachTasks:
     }
     else
     {
+        //  otherwise these two operations happen immediately
         pfmp->m_isdlAttach.Trigger( eAttachDeleteUnicodeIndexes );
         pfmp->m_isdlAttach.Trigger( eAttachUpgradeUnicodeIndexes );
     }
 
-    if( !FFMPIsTempDB( ifmp ) &&
-        !pinst->FRecovering() &&
+    //  We May need to update the headers now.
+    if( !FFMPIsTempDB( ifmp ) &&   // just in case
+        !pinst->FRecovering() &&            // just in case
         !g_fRepair &&
         !pfmp->FReadOnlyAttach() )
     {
         BOOL fUpdateHeaders = fFalse;
 
-    {
+    { // .ctor acquires header lock at this point
+        //  safe for updating if out of date ...
         PdbfilehdrReadWrite pdbfilehdr = pfmp->PdbfilehdrUpdateable();
         if ( pdbfilehdr->le_dwMajorVersion != g_dwGlobalMajorVersion ||
             pdbfilehdr->le_dwMinorVersion != g_dwGlobalMinorVersion ||
@@ -3989,7 +4699,7 @@ PostAttachTasks:
             pdbfilehdr->le_dwBuildNumber = g_dwGlobalBuildNumber;
             pdbfilehdr->le_lSPNumber = g_lGlobalSPNumber;
         }
-    }
+    } // .dtor releases header lock at this point
 
         if ( fUpdateHeaders )
         {
@@ -4005,15 +4715,17 @@ PostAttachTasks:
     if ( !g_fRepair &&
             !pfmp->FReadOnlyAttach() )
     {
-        Assert( JET_errDatabaseCorrupted != ErrCATVerifyMSLocales( ppib, ifmp, fFalse  ) );
+        Assert( JET_errDatabaseCorrupted != ErrCATVerifyMSLocales( ppib, ifmp, fFalse /* fixup table */ ) );
     }
 #endif
 
     if ( !plog->FRecovering() && pfmp->FLogOn() && BoolParam( pinst, JET_paramDefragmentSequentialBTrees ) )
     {
+        // FLogOn() should have protected us above.
         Assert( !g_fRepair );
         Assert( !pfmp->FReadOnlyAttach() );
 
+        // re-register any OLD2 tasks which were running
         CallJ( ErrOLD2Resume( ppib, ifmp ), Detach );
     }
 
@@ -4034,9 +4746,11 @@ PostAttachTasks:
 
     pfmp->m_isdlAttach.Trigger( eAttachDone );
 
+    //  we won't log the temp DB
 
     if ( !pfmp->FIsTempDB() )
     {
+        // report our successful attach and timings
 
         DBReportTachmentEvent( pinst, ifmp, ATTACH_DATABASE_DONE_ID, pfmp->WszDatabaseName(), fCacheAlive, fDirtyCacheAlive );
     }
@@ -4070,6 +4784,8 @@ HandleError:
 
     if ( attachState != ATTACH_NONE )
     {
+        //  we have to take the instance offline if there is an error
+        //  during attach and the attach is logged
         Assert( err < JET_errSuccess );
         pinst->SetInstanceUnavailable( err );
         ppib->SetErrRollbackFailure( err );
@@ -4102,6 +4818,10 @@ HandleError:
 
     if ( fLeakFMP )
     {
+        //  we have to take the instance offline if there is an error
+        //  during database attachment and we could not clean version
+        //  store entries for the database
+        //
         PinstFromPpib( ppib )->SetInstanceUnavailable( err );
         ppib->SetErrRollbackFailure( err );
 
@@ -4126,11 +4846,18 @@ HandleError:
 
 MoreAttachedThanDetached:
 
+    //  I had issues with Call()s near end of attach process in that it dies with some sort of horrible instance 
+    //  unavailable condition ... and ironically I found I could just Detach without even resetting attaching or
+    //  _even_ releasing the write latch, but given the complicated stuff written in FMP::ReleaseWriteLatch(), I
+    //  think it's safer to release it.  The test TestDowngradeCleanFrom102To101FailsAndCanReattach proves this 
+    //  works.
+    //  Let's leave it attaching (i.e., do not call pfmp->ResetAttachingDB()), so no one will use it through the detach.
 
     pfmp->RwlDetaching().EnterAsWriter();
     pfmp->ReleaseWriteLatch( ppib );
     pfmp->RwlDetaching().LeaveAsWriter();
 
+    //  fall through to detach
 
 Detach:
 
@@ -4140,6 +4867,7 @@ Detach:
 
     Assert( err < JET_errSuccess );
     Assert( pfmp != NULL );
+    //  detach the database, ignoring any errors since an error already occurred
     (VOID)ErrIsamDetachDatabase( (JET_SESID) ppib, NULL, pfmp->WszDatabaseName() );
     return err;
 }
@@ -4169,7 +4897,7 @@ VOID DBResetFMP( FMP *pfmp, const LOG *plog )
     }
     else
     {
-        FCB::PurgeDatabase( pfmp->Ifmp(), fFalse  );
+        FCB::PurgeDatabase( pfmp->Ifmp(), fFalse /* fTerminating */ );
     }
 
     if ( pfmp->FRedoMapsEmpty() )
@@ -4188,6 +4916,7 @@ VOID DBResetFMP( FMP *pfmp, const LOG *plog )
     pfmp->ResetReadOnlyAttach();
     pfmp->ResetVersioningOff();
 
+    //  indicate this db entry is detached.
 
     OSMemoryHeapFree( pfmp->Patchchk() );
     pfmp->SetPatchchk( NULL );
@@ -4203,10 +4932,14 @@ VOID DBResetFMP( FMP *pfmp, const LOG *plog )
         pfmp->SetPpatchhdr( NULL );
     }
 
+    //  g_rgfmp[ifmp].szDatabaseName will be released within rwlFMPPool.
+    //  other stream resources will be released within write latch.
 
+    //  clean up fmp for future use
 
     Assert( !pfmp->Pfapi() );
 
+    //  Free the FMP entry.
 
     pfmp->ResetDetachingDB();
     pfmp->ResetNoWaypointLatency();
@@ -4249,9 +4982,14 @@ HandleError:
     return err;
 }
 
+//  szDatabaseName of NULL detaches all user databases.
+//
 ERR ISAMAPI ErrIsamDetachDatabase( JET_SESID sesid, IFileSystemAPI* const pfsapiDB, const WCHAR *wszDatabaseName, const INT flags )
 {
+    // check parameters
+    //
     Assert( sizeof(JET_SESID) == sizeof(PIB *) );
+    // there is no unknown flags set
     Assert( (flags & ~(0xf)) == 0 );
 
     ERR                 err         = JET_errSuccess;
@@ -4283,11 +5021,13 @@ ERR ISAMAPI ErrIsamDetachDatabase( JET_SESID sesid, IFileSystemAPI* const pfsapi
     }
     Assert( JET_errSuccess == ppib->ErrRollbackFailure() );
 
+    //  this should never be called on the temp database (e.g. we do not need to force the OS file-system)
 
     IFileSystemAPI  *pfsapi         = ( NULL == pfsapiDB ) ? pinst->m_pfsapi : pfsapiDB;
 
     if ( NULL == wszDatabaseName || 0 == *wszDatabaseName )
     {
+        // this function will go through m_mpdbidifmp and call ErrIsamDetachDatabase for each one
         return ErrIsamDetachAllDatabase( sesid, flags );
     }
 
@@ -4321,11 +5061,16 @@ ERR ISAMAPI ErrIsamDetachDatabase( JET_SESID sesid, IFileSystemAPI* const pfsapi
         }
     }
 
+    //  Use FMP::FDetachingDB() effectively like a critical section to make sure we don't turn
+    //  tasks on/off concurrently by multiple threads racing in this path. We can't use the FMP
+    //  latch returned by FMP::ErrWriteLatchByNameWsz() because it can't be held throughout the
+    //  shutting down of the OLD/DBM/OLD2/Trim tasks, or we'll deadlock.
 
 StartDetaching:
 
     Call( FMP::ErrWriteLatchByNameWsz( wszFullName, &ifmp, ppib ) );
 
+    //  Retry until we have only one thread trying to detach the database.
 
     g_rgfmp[ifmp].RwlDetaching().EnterAsWriter();
     if ( g_rgfmp[ifmp].FDetachingDB() )
@@ -4338,6 +5083,7 @@ StartDetaching:
     g_rgfmp[ifmp].SetDetachingDB( );
     g_rgfmp[ifmp].RwlDetaching().LeaveAsWriter();
 
+    //  From this point we got a valid ifmp entry. Start the detaching DB process.
 
     Assert( pfmp == NULL );
     pfmp = &g_rgfmp[ ifmp ];
@@ -4349,6 +5095,7 @@ StartDetaching:
 
     pfmp->ReleaseWriteLatch( ppib );
 
+    //  Terminate OLD / OLD2 here so that those sessions close the database
 
     OLDTermFmp( ifmp );
 
@@ -4384,11 +5131,16 @@ StartDetaching:
         Call( ErrERRCheck( JET_errDatabaseNotFound ) );
     }
 
+    //  No new threads can come in and encouter corrupted pages, so now is the time
+    //  to get rid of patch requests
     PagePatching::TermFmp( ifmp );
 
     pfmp->SetNoWaypointLatency();
 
+    //  Enter a critical section to make sure no one, especially the
+    //  checkpointer, looking for pdbfilehdr
 
+    //  the version store will now process all tasks syncronously
 
     pbackup->BKUnlockBackup();
     fInCritBackup = fFalse;
@@ -4398,22 +5150,42 @@ StartDetaching:
     if ( !pfmp->FSkippedAttach()
         && !pfmp->FDeferredAttach() )
     {
+        //  cleanup the version store to allow all tasks to be generated
 
         Call( PverFromIfmp( ifmp )->ErrVERRCEClean( ifmp ) );
 
+        //  SOMEONE 06/09/99
+        //
+        //  CONSIDER: if there was an active user transaction and it commits
+        //  after this call version store cleanup could generate tasks after
+        //  the call to WaitForTasksToComplete which would cause an erroneous
+        //  JET_errDatabaseInUse
+        //
+        //  The fix for this is to grab the version store cleanup critical section
+        //  and to hold it over to calls to ErrVERRCEClean and WaitForTasksToComplete
     }
 
     pfmp->m_isdlDetach.Trigger( eDetachVersionStoreDone );
 
+    //  Let all tasks active on this database complete
+    //  From this point on, no additional tasks should be
+    //  registered because:
+    //      - OLD has terminated
+    //      - the version store has been cleaned up
+    //      - the database has been closed so no user actions can be performed
     pfmp->WaitForTasksToComplete();
 
     pfmp->m_isdlDetach.Trigger( eDetachStopSystemTasks );
 
+    //  Clean up resources used by the ifmp.
     if ( !pfmp->FSkippedAttach()
         && !pfmp->FDeferredAttach() )
     {
+        // Call RCE clean again, this time to clean versions on this db that
+        // we may have missed.
         Call( PverFromIfmp( ifmp )->ErrVERRCEClean( ifmp ) );
 
+        // All versions on this ifmp should be cleanable.
         if ( JET_wrnRemainingVersions == err )
         {
             Assert( fFalse );
@@ -4427,14 +5199,20 @@ StartDetaching:
     if ( FIODatabaseOpen( ifmp ) )
     {
 
+        //  update gen required / waypoint for term
+        //
 
         Call( PinstFromIfmp( ifmp )->m_plog->ErrLGUpdateWaypointIFMP( pfsapi, ifmp ) );
 
+        //  flush all database buffers
+        //
 
         Call( ErrBFFlush( ifmp ) );
 
         pfmp->m_isdlDetach.Trigger( eDetachBufferManagerFlushDone );
 
+        //  purge all buffers for this ifmp
+        //
         BFPurge( ifmp );
 
         pfmp->m_isdlDetach.Trigger( eDetachBufferManagerPurgeDone );
@@ -4448,6 +5226,7 @@ StartDetaching:
 
     pfmp->AssertRangeLockEmpty();
 
+    //  disable checkpoint update so we can detach DB safely
 
     Assert( UtilCmpFileName( wszFullName, pfmp->WszDatabaseName() ) == 0 );
 
@@ -4456,12 +5235,15 @@ StartDetaching:
         plog->SetCheckpointEnabled( fFalse );
     }
 
+    //  Now that we can forced the checkpoint to not write, we can FFB and be assured
+    //  we have gotten to zero non-flushed IOs.
 
     if ( pfmp->Pfapi() )
     {
         Call( ErrIOFlushDatabaseFileBuffers( ifmp, iofrFlushIfmpContext ) );
     }
 
+    //  log detach database
 
     Call( ErrLGDetachDB( ppib, ifmp, (BYTE)flags, &lgposLogRec ) );
     fDetachLogged = fTrue;
@@ -4476,6 +5258,7 @@ StartDetaching:
 
     pfmp->m_isdlDetach.Trigger( eDetachLogged );
 
+    // This cannot be undone (easily), so do this only after detach is logged and the we will not rollback the detach
     CATTermMSLocales( &(g_rgfmp[ifmp]) );
     Assert( NULL == pfmp->PkvpsMSysLocales() );
 
@@ -4485,26 +5268,38 @@ StartDetaching:
         Call( ErrFaultInjection( 37004 ) );
     }
 
+    // Now disallow header update by other threads (log writer or checkpoint advancement)
+    // 1. For the log writer it is OK to generate a new log w/o updating the header as no log operations
+    // for this db will be logged in new logs
+    // 2. For the checkpoint: don't advance the checkpoint if db's header weren't update
     Assert( pfmp->FAllowHeaderUpdate() || pfmp->FReadOnlyAttach() );
     pfmp->RwlDetaching().EnterAsWriter();
     pfmp->ResetAllowHeaderUpdate();
     pfmp->RwlDetaching().LeaveAsWriter();
 
+    // Now, checkpoint maintenance cannot come in and update/flush the database header, assert that
+    // there are no pending writes/flushes
     if ( pfmp->Pfapi() )
     {
         AssertTrack( pfmp->Pfapi()->CioNonFlushed() == 0, "UnexpectedPendingFlushesDetach" );
     }
 
+    // Clean flush map.
     CFlushMapForAttachedDb* const pfm = pfmp->PFlushMap();
     if ( !pfmp->FReadOnlyAttach() && ( pfm != NULL ) )
     {
         Call( pfm->ErrCleanFlushMap() );
     }
 
+    //  Update database file header. If we are detaching a bogus entry,
+    //  then the db file should never be opened and pdbfilehdr will be Nil.
 
 
-    
-    {
+    /*  if attached before this detach.
+     *  there should be no more operations on this database entry.
+     *  detach it!!
+     */
+    { // .ctor acquires PdbfilehdrReadWrite
     PdbfilehdrReadWrite pdbfilehdr = pfmp->PdbfilehdrUpdateable();
     const BKINFO *              pbkInfoToCopy   = pdbfilehdr ? &(pdbfilehdr->bkinfoFullCur) : NULL;
     const DBFILEHDR::BKINFOTYPE     bkinfoType      = DBFILEHDR::backupNormal;
@@ -4513,6 +5308,7 @@ StartDetaching:
     {
         Assert( pbkInfoToCopy->le_genHigh != 0 );
 
+        // don't update backup info on non-full backups (like Copy backups)
         if ( pbackup->FBKLogsTruncated() )
         {
             pdbfilehdr->bkinfoFullPrev = (*pbkInfoToCopy);
@@ -4524,8 +5320,12 @@ StartDetaching:
         memset( &pdbfilehdr->bkinfoSnapshotCur, 0, sizeof( BKINFO ) );
         pdbfilehdr->bkinfoTypeIncPrev = DBFILEHDR::backupNormal;
     }
-    }
+    } // .dtor releases PdbfilehdrReadWrite
 
+    // delete the previous backup info on any hard recovery
+    // this will prevent a incremental backup and log truncation problems
+    // UNDONE: the above logic to copy bkinfoFullPrev is probably not needed
+    // (we may consider this and delete it)
 
     if ( pfmp->FHardRecovery() )
     {
@@ -4540,10 +5340,15 @@ StartDetaching:
         Assert( !pfmp->FSkippedAttach() );
         Assert( !pfmp->FDeferredAttach() );
 
+        //  If anything fail in this block, we simply occupy the FMP
+        //  but bail out to the caller. The database in a state that it can
+        //  not be used any more till next restore where FMP said it is
+        //  detaching!
 
+        // UNDONE: ask user to restart the engine.
 
         Assert( pfmp->LgposWaypoint().lGeneration <= pfmp->Pdbfilehdr()->le_lGenMaxRequired );
-        pfmp->ResetWaypoint();
+        pfmp->ResetWaypoint(); // reset waypoint
 
         pfmp->PdbfilehdrUpdateable()->le_dbtimeDirtied = pfmp->DbtimeLast();
         Assert( pfmp->Pdbfilehdr()->le_dbtimeDirtied != 0 );
@@ -4553,6 +5358,9 @@ StartDetaching:
         if ( plog->FRecovering() && plog->FRecoveringMode() == fRecoveringRedo &&
             pfmp->Pdbfilehdr()->Dbstate() == JET_dbstateDirtyAndPatchedShutdown )
         {
+            //  For the JET_dbstateDirtyAndPatchedShutdown case we must maintain the same dbstate 
+            //  and do not update the le_lGenMaxRequired because we are not done getting to a clean
+            //  or consistent state yet.
         }
         else
         {
@@ -4565,6 +5373,7 @@ StartDetaching:
             Assert( !plog->FLogDisabled() );
             Assert( FSIGSignSet( &pfmp->Pdbfilehdr()->signLog ) );
 
+            //  Set detachment time.
 
             if ( plog->FRecovering() && plog->FRecoveringMode() == fRecoveringRedo )
             {
@@ -4593,6 +5402,9 @@ StartDetaching:
         pdbfilehdr->logtimeConsistent = pdbfilehdr->logtimeDetach;
         }
 
+        //  update the scrub information
+        //  we wait until this point so we are sure all scrubbed pages have
+        //  been written to disk
 
         pfmp->PdbfilehdrUpdateable()->le_dbtimeLastScrub    = pfmp->DbtimeLastScrub();
         pfmp->PdbfilehdrUpdateable()->logtimeScrub      = pfmp->LogtimeScrub();
@@ -4607,6 +5419,8 @@ StartDetaching:
         Assert( pfmp->Pfapi() == NULL || pfmp->Pfapi()->CioNonFlushed() == 0 );
     }
 
+    //  snapshot the header info, retain the cache for this DB, in addition
+    //  to its redo maps, if any,
     pfmp->SnapshotHeaderSignature();
 
     if ( pfm != NULL )
@@ -4627,6 +5441,7 @@ StartDetaching:
         plog->SetCheckpointEnabled( fTrue );
     }
 
+    //  Reset and free up FMP
 
     pfmp->ResetFDontRegisterOLD2Tasks();
     pfmp->ResetFDontStartDBM();
@@ -4639,6 +5454,7 @@ StartDetaching:
 
     DBResetFMP( pfmp, plog );
 
+    // report our successful detach and timings
 
     pfmp->m_isdlDetach.Trigger( eDetachDone );
 
@@ -4665,9 +5481,12 @@ HandleError:
         pfmp->m_isdlDetach.TermSequence();
     }
 
+    //  do not reset detaching. We leave the database in detaching
+    //  mode till next restore.
 
     if ( fDetachLogged )
     {
+        //  if failure after detach logged, force shutdown to fix up database
         DBReportPartiallyDetachedDb( pinst, wszDatabaseName, err );
         ppib->SetErrRollbackFailure( err );
         pinst->SetInstanceUnavailable( err );
@@ -4719,15 +5538,21 @@ ERR ISAMAPI ErrIsamOpenDatabase(
     IFMP    ifmp;
     INST    *pinst = PinstFromPpib( ppib );
 
+    //  initialize return value
     Assert( pjdbid );
     *pjdbid = JET_dbidNil;
 
+    //  check parameters
+    //
     Assert( sizeof(JET_SESID) == sizeof(PIB *) );
 
     CallR( ErrPIBCheck( ppib ) );
 
     CallR( ErrDBOpenDatabase( ppib, wszDatabaseName, &ifmp, grbit ) );
 
+    // we don't have any check to prevent JetOpenDatabase
+    // using the temp database name.
+    // we check now if we actualy opened the temp db
     if( !FUserIfmp( ifmp ) )
     {
         Assert( !g_rgfmp[ifmp].FAttachedForRecovery() );
@@ -4752,6 +5577,7 @@ ERR ISAMAPI ErrIsamOpenDatabase(
 
             if ( !g_rgfmp[ifmp].FRecoveryChecksDone() )
             {
+                // Do not check for JET_paramEnableIndexCleanup since a read-from-passive attach is always a read-only attach
                 const BOOL fIndexCheckingEnabled = ( UlParam( pinst, JET_paramEnableIndexChecking ) == JET_IndexCheckingOn );
                 if ( fIndexCheckingEnabled )
                 {
@@ -4856,6 +5682,10 @@ ERR ErrDBOpenDatabase(
         Call( ErrERRCheck( JET_errOneDatabasePerSession ) );
     }
 
+    //  during recovering, we could open an non-detached database
+    //  to force to initialize the fmp entry.
+    //  if database has been detached, then return error.
+    //
     if ( !fOpenForRecovery && !pfmp->FAttached() )
     {
         Call( ErrERRCheck( JET_errDatabaseNotFound ) );
@@ -4880,11 +5710,12 @@ ERR ErrDBOpenDatabase(
         }
         pfmp->SetExclusiveOpen( ppib );
 
-    }
+    }   //  if excluive open
 
     Assert( pfmp->Pfapi() );
     DBSetOpenDatabaseFlag( ppib, ifmp );
 
+    //  Allow others to open.
 
     pfmp->ReleaseWriteLatch( ppib );
 
@@ -4903,6 +5734,8 @@ ERR ISAMAPI ErrIsamCloseDatabase( JET_SESID sesid, JET_DBID ifmp, JET_GRBIT grbi
     ERR     err;
     PIB     *ppib = (PIB *)sesid;
 
+    //  check parameters
+    //
     Assert( sizeof(JET_SESID) == sizeof(PIB *) );
     CallR( ErrPIBCheck( ppib ) );
 
@@ -4969,6 +5802,7 @@ ERR ISAMAPI ErrIsamSetDatabaseSize( JET_SESID sesid, const WCHAR *wszDatabase, D
 
     AllocR( pdbfilehdr = (DBFILEHDR_FIX*)PvOSMemoryPageAlloc( g_cbPage, NULL ) );
 
+    //  this should never be called on the temp database (e.g. we will not need to force the OS file-system)
     Call( CIOFilePerf::ErrFileOpen( pfsapi,
                                     PinstFromPpib( ppib ),
                                     wszDatabase, 
@@ -4984,6 +5818,7 @@ ERR ISAMAPI ErrIsamSetDatabaseSize( JET_SESID sesid, const WCHAR *wszDatabase, D
                                         g_cbPage,
                                         OffsetOf( DBFILEHDR_FIX, le_cbPageSize ) ) );
  
+    //  Disallow setting size on an inconsistent database
 
     if ( pdbfilehdr->Dbstate() == JET_dbstateIncrementalReseedInProgress )
     {
@@ -4998,6 +5833,7 @@ ERR ISAMAPI ErrIsamSetDatabaseSize( JET_SESID sesid, const WCHAR *wszDatabase, D
         Call( ErrERRCheck( JET_errDatabaseInconsistent ) );
     }
 
+    //  Set new database size only if it is larger than db size.
 
     Call( pfapi->ErrSize( &cbFileSize, IFileAPI::filesizeLogical ) );
 
@@ -5023,6 +5859,7 @@ ERR ISAMAPI ErrIsamSetDatabaseSize( JET_SESID sesid, const WCHAR *wszDatabase, D
                                     fTrue,
                                     QosSyncDefault( PinstFromPpib( ppib ) ) ) );
 
+        //  No pinst, no ifmp, can't use any of the right functions.
         Call( ErrUtilFlushFileBuffers( pfapi, iofrDbResize ) );
     }
 
@@ -5060,11 +5897,13 @@ ERR ISAMAPI ErrIsamResizeDatabase(
         *pcpgActual = cpgActual;
     }
 
+    // Invalid grbits.
     if ( ( grbit & ~grbitValid ) != 0 )
     {
         Error( ErrERRCheck( JET_errInvalidGrbit ) );
     }
 
+    // Invalid grbit combinations.
     if ( ( ( grbit & JET_bitResizeDatabaseOnlyGrow ) != 0 ) && ( ( grbit & JET_bitResizeDatabaseOnlyShrink ) != 0 ) )
     {
         Error( ErrERRCheck( JET_errInvalidGrbit ) );
@@ -5077,30 +5916,38 @@ ERR ISAMAPI ErrIsamResizeDatabase(
 
     if ( cpgCurrent == (CPG)cpgTarget )
     {
+        // Do nothing
         goto DoneWithResizing;
     }
     else if ( (CPG)cpgTarget < cpgCurrent )
     {
+        // We would shrink, but the client only wants growth.
         if ( ( ( grbit & JET_bitResizeDatabaseOnlyGrow ) != 0 ) )
         {
             goto DoneWithResizing;
         }
 
+        // Fail if shrink is disabled.
         if ( ( ( GrbitParam( g_rgfmp[ ifmp ].Pinst(), JET_paramEnableShrinkDatabase ) & JET_bitShrinkDatabaseOn ) == 0 ) )
         {
             Error( ErrERRCheck( JET_errFeatureNotAvailable ) );
         }
 
+        // Trim the database, regardless of whether the user specified JET_bitShrinkDatabaseRealtime
+        // That parameter controls the in-line trimming, and we still want to support explicit
+        // JetResizeDatabase() calls without setting that parameter.
         Call( ErrSPTrimRootAvail( ppib, ifmp, CPRINTFNULL::PcprintfInstance() ) );
         fTrimmed = fTrue;
     }
     else
     {
+        // We would shrink, but the client only wants shrinkage.
         if ( ( ( grbit & JET_bitResizeDatabaseOnlyShrink ) != 0 ) )
         {
             goto DoneWithResizing;
         }
 
+        // Grow the database...
 
         if ( BoolParam( JET_paramEnableViewCache ) )
         {
@@ -5112,16 +5959,23 @@ ERR ISAMAPI ErrIsamResizeDatabase(
 
         if ( ppib->Level() == 0 )
         {
+            // Begin transaction as the space operations below
+            // expect to run under a transaction.
             Call( ErrDIRBeginTransaction( ppib, 46920, NO_GRBIT ) );
             fTransactionStarted = fTrue;
         }
         
+        // Same as above, we will round up by extension size.
         cpgExtend = roundup( cpgExtend, cpgExtensionSize );
         Assert( cpgExtend > 0 );
 
+        // We will extend in extension size chunks so the OE is layed out in extension sizes
+        // as well, which makes shrinking easier over time.
         CPG cpgTotal = 0;
         do
         {
+            // Pass in fFalse for DBEXTENDTASK, so that the pcpgActual output parameter is
+            // accurate.
             Call( ErrSPExtendDB( ppib, ifmp, cpgExtensionSize, &pgnoAlloc, fFalse ) );
 
             cpgTotal += cpgExtensionSize;
@@ -5131,6 +5985,7 @@ ERR ISAMAPI ErrIsamResizeDatabase(
     }
 
 DoneWithResizing:
+    // Update the output parameter.
     QWORD cbActual = 0;
 
     if ( fTrimmed )
@@ -5176,13 +6031,18 @@ ERR ErrDBCloseDatabase( PIB *ppib, IFMP ifmp, ULONG grbit )
         return ErrERRCheck( JET_errDatabaseNotFound );
     }
 
-    
+    /*  get a write latch on this fmp in order to change cPin.
+     */
     pfmp->GetWriteLatch( ppib );
 
     Assert( FIODatabaseOpen( ifmp ) );
     if ( FLastOpen( ppib, ifmp ) )
     {
+        //  close all open FUCBs on this database
+        //
 
+        //  get first table FUCB
+        //
         pfucb = ppib->pfucbOfSession;
         while ( pfucb != pfucbNil
             && ( pfucb->ifmp != ifmp || !pfucb->u.pfcb->FPrimaryIndex() ) )
@@ -5192,6 +6052,8 @@ ERR ErrDBCloseDatabase( PIB *ppib, IFMP ifmp, ULONG grbit )
 
         while ( pfucb != pfucbNil )
         {
+            //  get next table FUCB
+            //
             pfucbNext = pfucb->pfucbNextOfSession;
             while ( pfucbNext != pfucbNil
                 && ( pfucbNext->ifmp != ifmp || !pfucbNext->u.pfcb->FPrimaryIndex() ) )
@@ -5207,6 +6069,7 @@ ERR ErrDBCloseDatabase( PIB *ppib, IFMP ifmp, ULONG grbit )
         }
     }
 
+    // if we opened it exclusively, we reset the flag
 
     DBResetOpenDatabaseFlag( ppib, ifmp );
     if ( pfmp->FExclusiveBySession( ppib ) )
@@ -5218,9 +6081,12 @@ ERR ErrDBCloseDatabase( PIB *ppib, IFMP ifmp, ULONG grbit )
         pfmp->ResetRunningOLD();
     }
 
+    // Release Write Latch
 
     pfmp->ReleaseWriteLatch( ppib );
 
+    //  do not close file until file map space needed or database
+    //  detached.
 
     return JET_errSuccess;
 }
@@ -5230,19 +6096,24 @@ ERR ErrDBOpenDatabaseByIfmp( PIB *ppib, IFMP ifmp )
 {
     ERR     err;
 
+    //  Write latch the fmp since we are going to change cPin.
 
     CallR( FMP::ErrWriteLatchByIfmp( ifmp, ppib ) );
 
+    //  The fmp we latch must be write latched by us and have
+    //  a attached database.
 
     FMP *pfmp = &g_rgfmp[ ifmp ];
     Assert( pfmp->FWriteLatchByMe(ppib) );
     Assert( pfmp->FAttached() );
 
 
+    // Allow LV create, RCE clean, and OLD sessions to bypass exclusive lock.
     if ( pfmp->FExclusiveByAnotherSession( ppib )
         && !FPIBSessionLV( ppib )
         && !FPIBSessionSystemCleanup( ppib ) )
     {
+        //  It is opened by others already.
         err = ErrERRCheck( JET_errDatabaseLocked );
     }
     else
@@ -5264,6 +6135,8 @@ ERR ErrDBOpenDatabaseByIfmp( PIB *ppib, IFMP ifmp )
 }
 
 
+//  ErrDBCloseAllDBs: Close all databases opened by this session
+//
 ERR ErrDBCloseAllDBs( PIB *ppib )
 {
     DBID    dbid;
@@ -5284,20 +6157,27 @@ ERR ErrDBCloseAllDBs( PIB *ppib )
 
 ERR ErrDBFormatFeatureEnabled_( const JET_ENGINEFORMATVERSION efvFormatFeature, const DbVersion& dbvCurrentFromFile )
 {
+    //  Fast path - check assuming all persisted versions are current!
+    //
     const FormatVersions * pfmtversMax = PfmtversEngineMax();
 
-    Expected( efvFormatFeature <= pfmtversMax->efv );
+    Expected( efvFormatFeature <= pfmtversMax->efv ); // any EFV / feature to check should be < than the engines last EFV in the table.
 
     if ( efvFormatFeature <= pfmtversMax->efv &&
+            //  then _most likely_ we're on the current version (as setting EFVs back is usually temporary) ...
             0 == CmpDbVer( pfmtversMax->dbv, dbvCurrentFromFile ) )
     {
         OSTrace( JET_tracetagVersionAndStagingChecks, OSFormat( "DB format feature EFV %d check success (fast path).\n", efvFormatFeature ) );
-        return JET_errSuccess;
+        return JET_errSuccess;  //  yay! fast out ...
     }
+    //  else the header version didn't match (or the should be impossible case of EFV is 
+    //  higher than last EFV in table) ... do slow method in that case.
 
+    //  Slow path - search version table for EFV and check directly ...
+    //
 
     const FormatVersions * pfmtversFormatFeature = NULL;
-    CallS( ErrGetDesiredVersion( NULL , efvFormatFeature, &pfmtversFormatFeature ) );
+    CallS( ErrGetDesiredVersion( NULL /* must be NULL to bypass staging */, efvFormatFeature, &pfmtversFormatFeature ) );
     if ( pfmtversFormatFeature )
     {
         if ( CmpDbVer( dbvCurrentFromFile, pfmtversFormatFeature->dbv ) >= 0 )

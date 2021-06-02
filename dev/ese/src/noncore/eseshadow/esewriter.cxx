@@ -21,6 +21,7 @@
 
 #include <stdio.h>
 
+// Unsynchronized access. Be careful.
 EseRecoveryWriterConfig g_eseRecoveryWriterConfig;
 
 #ifdef DEBUG
@@ -92,6 +93,7 @@ EseRecoveryWriter::~EseRecoveryWriter()
 }
 
 
+// Initialize the writer
 HRESULT STDMETHODCALLTYPE EseRecoveryWriter::Initialize()
 {
     DBGV( wprintf( L"Entering %hs.\n", __FUNCTION__ ) );
@@ -100,14 +102,15 @@ HRESULT STDMETHODCALLTYPE EseRecoveryWriter::Initialize()
     if ( !m_fVssInitialized )
     {
         CallHr( __super::Initialize(
-            EseRecoveryWriterId,
-            EseRecoveryWriterName,
-            VSS_UT_USERDATA,
-            VSS_ST_OTHER
+            EseRecoveryWriterId,        // WriterID
+            EseRecoveryWriterName,          // wszWriterName
+            VSS_UT_USERDATA,        // ut
+            VSS_ST_OTHER              // st
         ) );
         m_fVssInitialized = true;
     }
 
+    // subscribe for events
     if ( !m_fVssSubscribed )
     {
         CallHr( Subscribe() );
@@ -119,6 +122,7 @@ Cleanup:
     return hr;
 }
 
+// Initialize the writer
 HRESULT STDMETHODCALLTYPE EseRecoveryWriter::Uninitialize()
 {
     DBGV( wprintf( L"Entering %hs.\n", __FUNCTION__ ) );
@@ -141,6 +145,7 @@ Cleanup:
 #pragma prefast(push)
 #pragma prefast(disable:28204, "Mismatched annotations; the prototypes are part of the SDK.")
 
+// OnIdentify is called as a result of the requestor calling GatherWriterMetadata
 bool STDMETHODCALLTYPE EseRecoveryWriter::OnIdentify(
     _In_ IVssCreateWriterMetadata *pMetadata
 )
@@ -150,6 +155,10 @@ bool STDMETHODCALLTYPE EseRecoveryWriter::OnIdentify(
     bool filesToAdd = true;
     PCWSTR szComponent = L"FilesComponent";
 
+    //
+    //  Set the backup schema
+    // REVIEW: What should it be? Just VSS_BS_COPY?
+    //
     const DWORD dwBackupSchema = VSS_BS_COPY
         | VSS_BS_DIFFERENTIAL
         | VSS_BS_INCREMENTAL
@@ -160,6 +169,8 @@ bool STDMETHODCALLTYPE EseRecoveryWriter::OnIdentify(
 
     CallHr( pMetadata->SetBackupSchema( dwBackupSchema ) );
 
+    // Set the restore method to restore if can replace
+    // REVIEW: Should it be something else?
     CallHr( pMetadata->SetRestoreMethod(
         VSS_RME_RESTORE_IF_CAN_REPLACE,
         NULL,
@@ -168,18 +179,19 @@ bool STDMETHODCALLTYPE EseRecoveryWriter::OnIdentify(
         false ) );
 
 
+    // add simple FileGroup component
     CallHr( pMetadata->AddComponent(
         VSS_CT_FILEGROUP,
-        NULL,
+        NULL,       // logical path
         szComponent,
-        L"recovered_database",
-        NULL,
-        0,
-        false,
-        true,
-        true,
-        true,
-        VSS_CF_BACKUP_RECOVERY | VSS_CF_APP_ROLLBACK_RECOVERY
+        L"recovered_database",  // caption
+        NULL,       // pbIcon
+        0,          // cbIcon
+        false,      // bRestoreMetadata
+        true,       // bNotifyOnBackupComplete
+        true,       // bSelectable
+        true,       // bSelectableForRestore
+        VSS_CF_BACKUP_RECOVERY | VSS_CF_APP_ROLLBACK_RECOVERY   // dwComponentFlags
     ) );
 
     if ( g_eseRecoveryWriterConfig.m_szDatabaseFileFullPath == NULL )
@@ -192,17 +204,20 @@ bool STDMETHODCALLTYPE EseRecoveryWriter::OnIdentify(
     {
         DBGV( wprintf( L"Adding directory '%s' (file=*) to the file group\n", g_eseRecoveryWriterConfig.m_szDatabasePath ) );
 
+        // add the files to the group   
         CallHr( pMetadata->AddFilesToFileGroup(
             NULL,
             szComponent,
-            g_eseRecoveryWriterConfig.m_szDatabasePath,
-            L"*",
-            false,
-            NULL
+            g_eseRecoveryWriterConfig.m_szDatabasePath, // path
+            L"*",   // filespec, all files
+            false,  // recursive
+            NULL    // alternate location
+            // dwBackupTypeMask (VSS_FSBT_ALL_BACKUP_REQUIRED | VSS_FSBT_ALL_SNAPSHOT_REQUIRED)
         ) );
 
         if ( g_eseRecoveryWriterConfig.m_szLogDirectory != NULL )
         {
+            // No sense adding it to the set if it's in the same location.
             if ( _wcsicmp( g_eseRecoveryWriterConfig.m_szDatabasePath, g_eseRecoveryWriterConfig.m_szLogDirectory ) != 0 )
             {
                 DBGV( wprintf( L"Adding '%s' to the file group\n", g_eseRecoveryWriterConfig.m_szLogDirectory ) );
@@ -211,15 +226,17 @@ bool STDMETHODCALLTYPE EseRecoveryWriter::OnIdentify(
                     NULL,
                     szComponent,
                     g_eseRecoveryWriterConfig.m_szLogDirectory,
-                    L"*",
+                    L"*",   // all files
                     false,
                     NULL
+                    // dwBackupTypeMask (VSS_FSBT_ALL_BACKUP_REQUIRED | VSS_FSBT_ALL_SNAPSHOT_REQUIRED)
                 ) );
             }
         }
 
         if ( g_eseRecoveryWriterConfig.m_szSystemDirectory != NULL )
         {
+            // No sense adding it to the set if it's in the same location.
             if ( _wcsicmp( g_eseRecoveryWriterConfig.m_szDatabasePath, g_eseRecoveryWriterConfig.m_szSystemDirectory ) != 0 &&
                     _wcsicmp( g_eseRecoveryWriterConfig.m_szLogDirectory, g_eseRecoveryWriterConfig.m_szSystemDirectory ) != 0 )
             {
@@ -229,9 +246,10 @@ bool STDMETHODCALLTYPE EseRecoveryWriter::OnIdentify(
                     NULL,
                     szComponent,
                     g_eseRecoveryWriterConfig.m_szSystemDirectory,
-                    L"*",
+                    L"*",   // all files
                     false,
                     NULL
+                    // dwBackupTypeMask (VSS_FSBT_ALL_BACKUP_REQUIRED | VSS_FSBT_ALL_SNAPSHOT_REQUIRED)
                 ) );
             }
         }
@@ -248,6 +266,8 @@ Cleanup:
     return SUCCEEDED( hr );
 }
 
+// This function is called as a result of the requestor calling PrepareForBackup
+// this indicates to the writer that a backup sequence is being initiated
 bool STDMETHODCALLTYPE EseRecoveryWriter::OnPrepareBackup(
     _In_ IVssWriterComponents*
 )
@@ -256,24 +276,31 @@ bool STDMETHODCALLTYPE EseRecoveryWriter::OnPrepareBackup(
     return true;
 }
 
+// This function is called after a requestor calls DoSnapshotSet
+// time-consuming actions related to Freeze can be performed here
 bool STDMETHODCALLTYPE EseRecoveryWriter::OnPrepareSnapshot()
 {
     DBGV( wprintf( L"Entering %hs (and returning true).\n", __FUNCTION__ ) );
     return true;
 }
 
+// This function is called after a requestor calls DoSnapshotSet
+// here the writer is expected to freeze its store
 bool STDMETHODCALLTYPE EseRecoveryWriter::OnFreeze()
 {
     DBGV( wprintf( L"Entering %hs (and returning true).\n", __FUNCTION__ ) );
     return true;
 }
 
+// This function is called after a requestor calls DoSnapshotSet
+// here the writer is expected to thaw its store
 bool STDMETHODCALLTYPE EseRecoveryWriter::OnThaw()
 {
     DBGV( wprintf( L"Entering %hs (and returning true).\n", __FUNCTION__ ) );
     return true;
 }
 
+// This function is called after a requestor calls DoSnapshotSet
 bool
 STDMETHODCALLTYPE
 EseRecoveryWriter::OnPostSnapshot(
@@ -286,8 +313,10 @@ EseRecoveryWriter::OnPostSnapshot(
 
     DBGV( wprintf( L"OnPostSnapshot() begin.\n" ) );
 
+    // First, let's figure out if this is an auto-recovery snapshot
     if ( ( __super::GetContext() & VSS_VOLSNAP_ATTR_AUTORECOVER ) == 0 )
     {
+        // this is not an auto-recovery snapshot, so we won't be able to do anything with it.
         DBGV( wprintf( L"%hs(): Not an auto-recovery snapshot. Doing nothing.\n", __FUNCTION__ ) );
         hr = S_OK;
         goto Cleanup;
@@ -310,12 +339,14 @@ EseRecoveryWriter::OnPostSnapshot(
     WCHAR szLogPath[ _MAX_PATH ];
     WCHAR szSystemPath[ _MAX_PATH ];
 
+    // convert each path to a corresponding snapshot device path
     for ( size_t i = 0; i < _countof( szInPaths ); i++ )
     {
         WCHAR szVolume[ _MAX_PATH ];
         PCWSTR szDeviceName = NULL;
         PCWSTR szInPath = szInPaths[ i ];
 
+        // Log and system directories are optional, after all
         if ( szInPath == NULL )
         {
             continue;
@@ -330,15 +361,17 @@ EseRecoveryWriter::OnPostSnapshot(
             goto Cleanup;
         }
 
+        // REVIEW: Does szDeviceName need to be freed?
         CallHr( GetSnapshotDeviceName( szVolume, &szDeviceName ) );
         
+        // Now we need to tell the caller where in the mounted path to look.
         hfile = CreateFileW(
             szInPath,
             STANDARD_RIGHTS_READ,
             FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
             NULL,
             OPEN_EXISTING,
-            FILE_FLAG_BACKUP_SEMANTICS,
+            FILE_FLAG_BACKUP_SEMANTICS,     // Allows opening a directory
             NULL
         );
 
@@ -359,11 +392,14 @@ EseRecoveryWriter::OnPostSnapshot(
             goto Cleanup;
         }
 
+        // now we can construct the full path
         CallHr( StringCchPrintfW( szOutPaths[ i ], _countof( szOutPaths[ i ]), L"%s%s", szDeviceName, szRelativePathFromRoot ) );
     }
 
     if ( g_eseRecoveryWriterConfig.m_szLogDirectory == NULL )
     {
+        // If the log path wasn't specified, then copy the database full path, and strip off everything
+        // after the last '\'.
         StringCchCopyW( szLogPath, _countof( szLogPath ), szOutPaths[ 0 ] );
         wchar_t* pchLastBackslash = const_cast<wchar_t*>( wcsrchr( szLogPath, L'\\' ) );
         if ( pchLastBackslash != NULL )
@@ -378,6 +414,7 @@ EseRecoveryWriter::OnPostSnapshot(
 
     if ( g_eseRecoveryWriterConfig.m_szSystemDirectory == NULL )
     {
+        // If the system path wasn't specified, then copy the log full path.
         StringCchCopyW( szSystemPath, _countof( szLogPath ), szLogPath );
     }
     else
@@ -385,6 +422,7 @@ EseRecoveryWriter::OnPostSnapshot(
         StringCchCopyW( szSystemPath, _countof( szSystemPath ), szOutPaths[ 2 ] );
     }
 
+    // ok, now we have the transformed database, log and system paths
     DBGV( wprintf( L"Snapshot database file: %s\n", szOutPaths[ 0 ] ) );
     DBGV( wprintf( L"Snapshot log directory: %s\n", szLogPath ) );
     DBGV( wprintf( L"Snapshot system directory: %s\n", szSystemPath ) );
@@ -394,10 +432,12 @@ EseRecoveryWriter::OnPostSnapshot(
         hr = RecoverEseDatabase( szInPaths[ 0 ], szOutPaths[ 0 ], szLogPath, szSystemPath );
         if ( FAILED( hr ) )
         {
+            // error already logged
             goto Cleanup;
         }
     }
 
+    // cool! We are done now.
 
 Cleanup:
     if ( hfile != INVALID_HANDLE_VALUE )
@@ -416,12 +456,15 @@ Cleanup:
     return SUCCEEDED( hr );
 }
 
+// This function is called to abort the writer's backup sequence.
+// This should only be called between OnPrepareBackup and OnPostSnapshot
 bool STDMETHODCALLTYPE EseRecoveryWriter::OnAbort()
 {
     DBGV( wprintf( L"Entering %hs (and returning true).\n", __FUNCTION__ ) );
     return true;
 }
 
+// This function is called as a result of the requestor calling BackupComplete
 bool STDMETHODCALLTYPE EseRecoveryWriter::OnBackupComplete(
     _In_ IVssWriterComponents*
 )
@@ -430,6 +473,9 @@ bool STDMETHODCALLTYPE EseRecoveryWriter::OnBackupComplete(
     return true;
 }
 
+// This function is called at the end of the backup process.  This may happen as a result
+// of the requestor shutting down, or it may happen as a result of abnormal termination 
+// of the requestor.
 bool STDMETHODCALLTYPE EseRecoveryWriter::OnBackupShutdown(
     _In_ VSS_ID
 )
@@ -438,6 +484,8 @@ bool STDMETHODCALLTYPE EseRecoveryWriter::OnBackupShutdown(
     return true;
 }
 
+// This function is called as a result of the requestor calling PreRestore
+// This will be called immediately before files are restored
 bool STDMETHODCALLTYPE EseRecoveryWriter::OnPreRestore(
     _In_ IVssWriterComponents *
 )
@@ -446,6 +494,8 @@ bool STDMETHODCALLTYPE EseRecoveryWriter::OnPreRestore(
     return true;
 }
 
+// This function is called as a result of the requestor calling PreRestore
+// This will be called immediately after files are restored
 bool STDMETHODCALLTYPE EseRecoveryWriter::OnPostRestore(
     _In_ IVssWriterComponents*
 )
@@ -454,7 +504,7 @@ bool STDMETHODCALLTYPE EseRecoveryWriter::OnPostRestore(
     return true;
 }
 
-#pragma prefast(pop)
+#pragma prefast(pop) // SDK headers.
 
 
 HRESULT
@@ -493,6 +543,7 @@ EseRecoveryWriter::RecoverEseDatabase(
         goto Cleanup;
     }
 
+    // turn on legacy config if implemented (or use fast config if ever created)
     JetSetSystemParameterW( &instance, 0, JET_paramTempPath, 0, szDefaultTempDB );
 
     ULONG cbPage;
@@ -517,8 +568,11 @@ EseRecoveryWriter::RecoverEseDatabase(
 
     if ( cbLogFileSize != 0 )
     {
+        //  Set file size.
         JetSetSystemParameterW( &instance, 0, JET_paramLogFileSize, cbLogFileSize / 1024, NULL );
 
+        // Due to implementation details in ESE, we need to make sure that a <basename>tmp.<log-extension> exists
+        // if we are recovering with the possibility of lost logs.
         if ( g_eseRecoveryWriterConfig.m_fIgnoreLostLogs )
         {
             WCHAR szTempLogFileName[MAX_PATH] = { L'\0' };
@@ -546,6 +600,7 @@ EseRecoveryWriter::RecoverEseDatabase(
     rstMap.szDatabaseName = const_cast<WCHAR*>( szOldDbName );
     rstMap.szNewDatabaseName = const_cast<WCHAR*>( szNewDbName );
 
+    // Soft recovery.
     JET_GRBIT grbit = JET_bitNil;
     if ( g_eseRecoveryWriterConfig.m_fIgnoreMissingDb )
     {
@@ -574,14 +629,35 @@ Cleanup:
     return hr;
 }
 
+// static functions.
 
+/*++
 
+Routine Description:
+
+    This function creates the Exchange Writer object.
+
+Arguments:
+
+    None
+
+Return Value:
+
+    hr
+
+--*/
 HRESULT
 EseRecoveryWriter::CreateWriter()
 {
     DBGV( wprintf( L"Entering %hs.\n", __FUNCTION__ ) );
     HRESULT hr = S_OK;
     
+//  ec = InitializeEventLogging();
+//  if ( ecNone != ec)
+//  {
+//      // No event logging is possible here.
+//      goto Error;
+//  }
 
     if ( NULL == EseRecoveryWriter::GetSingleton() )
     {
@@ -598,11 +674,26 @@ Error:
     goto Cleanup;
 }
 
+/*++
 
+Routine Description:
+
+    This function destroys the exchange writer object.
+
+Arguments:
+
+    None
+
+Return Value:
+
+    hr
+
+--*/
 VOID
 EseRecoveryWriter::DestroyWriter()
 {
     DBGV( wprintf( L"Entering %hs.\n", __FUNCTION__ ) );
+//  EseRecoveryWriter::UninitializeEventLogging();
     EseRecoveryWriter::DeleteSingleton();
     DBGV( wprintf( L"Leaving %hs.\n", __FUNCTION__ ) );
 }
@@ -610,6 +701,9 @@ EseRecoveryWriter::DestroyWriter()
 
 
 
+//
+//  DLL Main Function
+//
 extern "C" {
 
 BOOL
@@ -617,7 +711,7 @@ WINAPI
 DllMain(
         HINSTANCE hinstDll,
         DWORD dwReason,
-        LPVOID 
+        LPVOID /*pvReserved*/
         )
 {
     DBGV( wprintf( L"Entering %hs.\n", __FUNCTION__ ) );
@@ -636,7 +730,7 @@ DllMain(
             fReturn = FALSE;
         }
     }
-    else if ( dwReason == DLL_PROCESS_DETACH )
+    else if ( dwReason == DLL_PROCESS_DETACH ) // On all detaches.
     {
         EseRecoveryWriter::DestroyWriter();
 
@@ -648,4 +742,4 @@ DllMain(
 
 }
 
-}
+} // extern "C"

@@ -3,10 +3,12 @@
 
 #include "std.hxx"
 
+///#define SHOW_INDEX_PERF
 #ifdef SHOW_INDEX_PERF
 const JET_TRACETAG  tracetagIndexPerf   = JET_tracetagBtree;
 #endif
 
+// UNDONE:  TEMPORARY HACK to get around unversioned AddColumn/CreateIndex.
 
 CCriticalSection    g_critUnverCol( CLockBasicInfo( CSyncBasicInfo( szFILEUnverCol ), rankFILEUnverCol, 0 ) );
 CCriticalSection    g_critUnverIndex( CLockBasicInfo( CSyncBasicInfo( szFILEUnverIndex ), rankFILEUnverIndex, 0 ) );
@@ -15,7 +17,7 @@ struct UNVER_DDL
 {
     AGENT       agentUnverDDL;
     OBJID       objidTable;
-    CHAR        szName[JET_cbNameMost+4];
+    CHAR        szName[JET_cbNameMost+4];   // +1 for null-terminator, +3 for 4-byte alignment
     UNVER_DDL   *punverNext;
 };
 
@@ -23,6 +25,7 @@ UNVER_DDL   *g_punvercolGlobal = NULL;
 UNVER_DDL   *g_punveridxGlobal = NULL;
 
 
+//  ================================================================
 ERR ErrFILEGetPfieldAndEnterDML(
     PIB         * ppib,
     FCB         * pfcb,
@@ -31,12 +34,23 @@ ERR ErrFILEGetPfieldAndEnterDML(
     COLUMNID    * pcolumnid,
     BOOL        * pfColumnWasDerived,
     const BOOL  fLockColumn )
+//  ================================================================
 {
     ERR         err;
 
     *pfColumnWasDerived = fFalse;
 
+    //  CONSIDER: Look in template table first because we don't
+    //  have to grab DML/DDL latch (since DDL is fixed).  However,
+    //  we used to do this, but we found that for Exchange,
+    //  GetTableColumnInfo() calls would be very expensive because
+    //  it is typically only called for derived columns and we
+    //  first end up searching the 400+ columns of the template
+    //  table
 
+    //  WARNING: This function does a EnterDML() for the derived table only
+    //  and stays in the latch if the requested field is found.  If the
+    //  field is in the template table, the latch is not held.
 
     if ( fLockColumn )
     {
@@ -50,19 +64,23 @@ ERR ErrFILEGetPfieldAndEnterDML(
                     pfcb->ObjidFDP(),
                     szColumnName,
                     pcolumnid,
-                    fTrue );
+                    fTrue );            //  read-lock the column in the catalog to ensure it doesn't disappear
         if ( err < 0 )
         {
             if ( JET_errColumnNotFound != err )
                 return err;
 
+            //  force retrieval from template table
             *ppfield = pfieldNil;
             err = JET_errSuccess;
         }
         else
         {
-            CallS( err );
+            CallS( err );   //  warnings not expected
 
+            //  shouldn't be a template table if it needs,
+            //  to be locked, and besides, we don't persist
+            //  the template bit anyways
             Assert( !FCOLUMNIDTemplateColumn( *pcolumnid ) );
             Assert( !*pfColumnWasDerived );
 
@@ -74,6 +92,7 @@ ERR ErrFILEGetPfieldAndEnterDML(
     {
         pfcb->EnterDML();
 
+        //  WARNING: The following function does a LeaveDML() on error
         CallR( ErrFILEPfieldFromColumnName(
                     ppib,
                     pfcb,
@@ -81,6 +100,7 @@ ERR ErrFILEGetPfieldAndEnterDML(
                     ppfield,
                     pcolumnid ) );
 
+            //  not expecting warnings
         CallS( err );
 
         if ( pfieldNil == *ppfield )
@@ -105,6 +125,7 @@ ERR ErrFILEGetPfieldAndEnterDML(
 
         if ( pfieldNil != *ppfield )
         {
+            //  must have found it in the template table
             Assert( pfcbNil != pfcbTemplate );
             Assert( FCOLUMNIDTemplateColumn( *pcolumnid ) );
             *pfColumnWasDerived = fTrue;
@@ -145,6 +166,9 @@ LOCAL BOOL FFILEIUnverColumnExists(
         {
             if ( columnid == columnidLastInitial + 1 )
             {
+                //  refresh in case the FIELD structures were
+                //  partitioned into initial/dynamic fields
+                //
                 pfield = ptdb->Pfield( columnid );
             }
 
@@ -386,14 +410,20 @@ ERR ErrIDXCheckUnicodeFlagAndDefn(
     JET_INDEXCREATE3_A * pidxCurr = pindexcreate;
     JET_INDEXCREATE3_A * pidxNext = NULL;
 
+    // We must check if the usage of the JET_bitIndexUnicode flag is consistent for the JetCreateIndex4* API.
     for ( ULONG iIndexCreate = 0 ;
           ( iIndexCreate < cIndexCreate ) && ( nullptr != pidxCurr );
           iIndexCreate++, pidxCurr = pidxNext )
     {
         pidxNext = (JET_INDEXCREATE3_A *)(((BYTE*)pidxCurr) + pidxCurr->cbStruct );
 
+        // Only the current version of the structure should have made it here.
+        // The older versions should have been up-converted in jetapi.cxx.
         Assert( pidxCurr->cbStruct == sizeof( JET_INDEXCREATE3_A ) );
 
+        // When checking for null-ness, only look at the bottom 32 bits.
+        // When a structure is created on the stack, then the upper 32-bits may be
+        // garbage, and we did a raw memcpy() up above.
         const JET_UNICODEINDEX2* pidxunicodeNullCheck = ( JET_UNICODEINDEX2* ) ( DWORD_PTR( pidxCurr->pidxunicode ) & 0xffffffff );
         if ( ( ( nullptr != pidxunicodeNullCheck ) && ( 0 == ( pidxCurr->grbit & JET_bitIndexUnicode ) ) ) ||
             ( ( nullptr == pidxunicodeNullCheck ) && ( 0 != ( pidxCurr->grbit & JET_bitIndexUnicode ) ) ) )
@@ -412,9 +442,11 @@ ERR VTAPI ErrIsamCreateTable( JET_SESID vsesid, JET_DBID vdbid, JET_TABLECREATE5
     FUCB            *pfucb;
     IFMP            ifmp = (IFMP) vdbid;
 
+    //  check parameters
+    //
     CallR( ErrPIBCheck( ppib ) );
 
-    Expected( FInRangeIFMP( ifmp ) );
+    Expected( FInRangeIFMP( ifmp ) ); // but just in case, we handle the error ...
     if ( !FInRangeIFMP( ifmp ) )
     {
         err = ErrERRCheck( JET_errInvalidDatabaseId );
@@ -427,11 +459,13 @@ ERR VTAPI ErrIsamCreateTable( JET_SESID vsesid, JET_DBID vdbid, JET_TABLECREATE5
         return err;
     }    
 
+    // Block this if the DB was open read-only.
     if ( g_rgfmp[ ifmp ].FReadOnlyAttach() )
     {
         return ErrERRCheck( JET_errPermissionDenied );
     }
 
+    // UNDONE: Supported nesting of hierarchical DDL.
     if ( ptablecreate->grbit & JET_bitTableCreateTemplateTable )
     {
         if ( ptablecreate->szTemplateTableName != NULL )
@@ -440,6 +474,12 @@ ERR VTAPI ErrIsamCreateTable( JET_SESID vsesid, JET_DBID vdbid, JET_TABLECREATE5
             return err;
         }
 
+        //  This option was originally designed to allow for fixed and variable columns
+        //  to be added to template tables post template creation. Neither the ability
+        //  to add fixed and variable columns to template tables nor the blocking of
+        //  adding them to derived tables are currently implemented in the engine, so
+        //  we'll just reject this bit so users are aware of it. MSDN lists the bit as
+        //  deprecated.
 
         if ( ptablecreate->grbit & JET_bitTableCreateNoFixedVarColumnsInDerivedTables )
         {
@@ -449,11 +489,12 @@ ERR VTAPI ErrIsamCreateTable( JET_SESID vsesid, JET_DBID vdbid, JET_TABLECREATE5
     }
     else if ( ptablecreate->grbit & JET_bitTableCreateNoFixedVarColumnsInDerivedTables )
     {
+        //  this grbit must be used in conjunction with JET_bitTableCreateTemplateTable
         err = ErrERRCheck( JET_errInvalidGrbit );
         return err;
     }
 
-    if ( ptablecreate->grbit & JET_bitTableCreateSystemTable )
+    if ( ptablecreate->grbit & JET_bitTableCreateSystemTable )      //  internal use only
     {
         err = ErrERRCheck( JET_errInvalidGrbit );
         return err;
@@ -461,12 +502,16 @@ ERR VTAPI ErrIsamCreateTable( JET_SESID vsesid, JET_DBID vdbid, JET_TABLECREATE5
 
     CallR( ErrIDXCheckUnicodeFlagAndDefn( ptablecreate->rgindexcreate, ptablecreate->cIndexes ) );
 
+    //  create the table, and open it
+    //
     CallR( ErrFILECreateTable( ppib, ifmp, ptablecreate ) );
 
     if ( ( ptablecreate->grbit & JET_bitTableCreateImmutableStructure ) != 0 )
     {
+        // If the client has immutable structure, we must close the table as we can not pass the JET_TABLEID back to the client.
         ErrFILECloseTable( ppib, (FUCB *) ptablecreate->tableid );
 
+        // Defense-in-depth: This value *should* get discarded at the jetapi layer.
         ptablecreate->tableid = JET_tableidNil;
     }
     else
@@ -475,6 +520,8 @@ ERR VTAPI ErrIsamCreateTable( JET_SESID vsesid, JET_DBID vdbid, JET_TABLECREATE5
         pfucb->pvtfndef = &vtfndefIsam;
     }
 
+    //  Unlikely occurance, but it is easy to check, so lets verify we're not passing an
+    //  internal pointer up out the API.
     Assert( !FFILEITableHasSystemSpaceHints( ptablecreate ) );
 
     Assert( ptablecreate->cCreated <= 1 + ptablecreate->cColumns + ptablecreate->cIndexes + ( ptablecreate->szCallback ? 1 : 0 ) );
@@ -483,6 +530,8 @@ ERR VTAPI ErrIsamCreateTable( JET_SESID vsesid, JET_DBID vdbid, JET_TABLECREATE5
 }
 
 
+//  return fTrue if the column type specified has a fixed length
+//
 INLINE BOOL FCOLTYPFixedLength( JET_COLTYP coltyp )
 {
     switch( coltyp )
@@ -521,7 +570,7 @@ LOCAL ERR ErrFILEIScanForColumnName(
     TDB             *ptdb       = pfcb->Ptdb();
     FIELD           *pfield;
     const STRHASH   strhash     = StrHashValue( szColumnName );
-    const BOOL      fDerived    = fFalse;
+    const BOOL      fDerived    = fFalse;       //  only looking at columns in this TDB (ie. no derived columns)
 
     Assert( FidOfColumnid( *pcolumnid ) == ptdb->FidFixedFirst()
         || FidOfColumnid( *pcolumnid ) == ptdb->FidVarFirst()
@@ -539,6 +588,8 @@ LOCAL ERR ErrFILEIScanForColumnName(
     {
         if ( *pcolumnid == columnidLastInitial + 1 )
         {
+            //  refresh in case the FIELD structures were
+            //  partitioned into initial/dynamic fields
             pfield = ptdb->Pfield( *pcolumnid );
         }
 
@@ -557,19 +608,27 @@ LOCAL ERR ErrFILEIScanForColumnName(
 
                     pfcb->LeaveDML();
 
+                    //  no versioned operations on template table
                     Assert( !ptdb->FTemplateTable() );
                     Assert( !FCOLUMNIDTemplateColumn( *pcolumnid ) );
 
+                    //  must consult catalog.
                     CallR( ErrCATAccessTableColumn(
                                 ppib,
                                 pfcb->Ifmp(),
                                 pfcb->ObjidFDP(),
                                 szColumnName,
                                 &columnidT ) );
-                    CallS( err );
+                    CallS( err );       //  shouldn't return warnings.
 
                     pfcb->EnterDML();
 
+                    //  WARNING: the columnid returned
+                    //  from the catalog lookup (columnidT)
+                    //  may be different from the original
+                    //  columnid (*pcolumnid) if the column
+                    //  got deleted then re-added with the
+                    //  same name
                     *pcolumnid = columnidT;
 
                     *ppfield = ptdb->Pfield( columnidT );
@@ -587,7 +646,7 @@ LOCAL ERR ErrFILEIScanForColumnName(
         }
     }
 
-    Assert( pfieldNil == *ppfield );
+    Assert( pfieldNil == *ppfield );    // Scan was successful, but seek failed.
     return JET_errSuccess;
 }
 
@@ -668,6 +727,7 @@ ERR ErrFILEGetPfieldFromColumnid(
     Assert( FCOLUMNIDTemplateColumn( columnid ) == pfcb->FTemplateTable() );
     pfcb->AssertDML();
 
+    //  special case of TDB::Pfield( fidT )
     if ( FCOLUMNIDTagged( columnid ) )
     {
         if ( fid >= ptdb->FidTaggedFirst() && fid <= ptdb->FidTaggedLast() )
@@ -703,11 +763,13 @@ LOCAL BOOL FFILEIColumnExists(
     const STRHASH       strhash     = StrHashValue( szColumn );
     const FIELD * const pfieldMax   = pfieldStart + cfields;
 
+    //  caller ensures there must be at least one column
     Assert( pfieldNil != pfieldStart );
     Assert( pfieldStart < pfieldMax );
 
     for ( const FIELD * pfield = pfieldStart; pfield < pfieldMax; pfield++ )
     {
+        //  field may have been marked as deleted if an AddColumn rolled back
         if ( !FFIELDDeleted( pfield->ffield )
             && ( strhash == pfield->strhashFieldName )
             && ( 0 == UtilCmpName( szColumn, ptdb->SzFieldName( pfield->itagFieldName, fFalse ) ) ) )
@@ -748,6 +810,7 @@ LOCAL BOOL FFILEITemplateTableColumn(
 
     if ( cDynamicCols > 0 )
     {
+        //  shouldn't be any fixed or variable dynamic columns in the template table
         Assert( ptdbTemplateTable->CDynamicFixedColumns() == 0 );
         Assert( ptdbTemplateTable->CDynamicVarColumns() == 0 );
 
@@ -820,6 +883,8 @@ LOCAL ERR ErrFILEIValidateAddColumn(
         return ErrERRCheck( JET_errInvalidParameter );
     }
 
+    // Duplicate column names will get detected when catalog
+    // insertion is attempted.
     CallR( ErrUTILCheckName( szColumnName, szName, ( JET_cbNameMost + 1 ) ) );
     if ( pfcbNil != pfcbTemplateTable
         && FFILEITemplateTableColumn( pfcbTemplateTable, szColumnName ) )
@@ -829,15 +894,23 @@ LOCAL ERR ErrFILEIValidateAddColumn(
     }
 
 
+//  OLD
+//  if ( pfield->coltyp == 0 || pfield->coltyp > JET_coltypLongText )
+//  NEW - because of the new column type
     if ( pfield->coltyp == 0 || pfield->coltyp >= JET_coltypMax || pfield->coltyp == JET_coltypSLV )
     {
         return ErrERRCheck( JET_errInvalidColumnType );
     }
 
+    //  if column type is text then check code page
+    //
     if ( FRECTextColumn( pfield->coltyp ) )
     {
+        //  check code page
+        //
         if ( 0 == pfield->cp )
         {
+            //  force text column to always have a code page
             pfield->cp = usEnglishCodePage;
         }
         else if ( pfield->cp != usEnglishCodePage && pfield->cp != usUniCodePage )
@@ -860,6 +933,7 @@ LOCAL ERR ErrFILEIValidateAddColumn(
         return ErrERRCheck( JET_errColumnCannotBeEncrypted );
     }
 
+    // check conflicting Tagged column options
     if ( ( grbit & JET_bitColumnTagged ) || FRECLongValue( pfield->coltyp )  )
     {
         if ( grbit & JET_bitColumnFixed )
@@ -872,7 +946,22 @@ LOCAL ERR ErrFILEIValidateAddColumn(
 
     if ( grbit & JET_bitColumnEscrowUpdate )
     {
+        //  Escrow columns can be updated by different sessions in a concurrent fashion
+        //  in order for that to be possible the column must always be present in the record
+        //  otherwise we will end up in a situation where a column must be inserted into the
+        //  record before we escrow it. It would be extremely difficult to insert a column
+        //  into a record concurrently (a replace would be required).
+        //
+        //  Thus, Escrow columns _must_ have a default value and must be fixed so that they
+        //  will be burst into any new records. One alternative is to disallow default values
+        //  for escrow columns so that they will have to be set before they can be escrowed --
+        //  that would probably reduce their usefullness though..
+        //
+        //  This also means that an escrow column cannot be added to a table with any records
+        //  aleady in it because the column will not be present in those records (the alternative
+        //  is to syncronously insert the default-value of the column into all of the records).
 
+        // Supports 32-bit and 64-bit column types
         if ( pfield->coltyp != JET_coltypLong && pfield->coltyp != JET_coltypLongLong )
         {
             return ErrERRCheck( JET_errInvalidGrbit );
@@ -890,13 +979,15 @@ LOCAL ERR ErrFILEIValidateAddColumn(
         if ( !fExclusiveLock )
             return ErrERRCheck( JET_errExclusiveTableLockRequired );
 
+        // Check if efv param allows us to create a 64-bit escrow column
         if ( pfield->coltyp == JET_coltypLongLong )
         {
-            CallR( g_rgfmp[ ifmp ].ErrDBFormatFeatureEnabled( JET_efvEscrow64 ) );
+            CallR( g_rgfmp[ ifmp ].ErrDBFormatFeatureEnabled( JET_efvEscrow64 ) );    // returns JET_errEngineFormatVersionParamTooLowForRequestedFeature if the feature isn't available.
         }
 
         if ( ( grbit & JET_bitColumnFinalize ) && ( grbit & JET_bitColumnDeleteOnZero ) )
         {
+            // These two grbits are not allowed together.
             AssertSz( FNegTest( fInvalidAPIUsage ), "UseOfColumnFinalizeWithDeleteOnZeroInvalidBehavior" );
             if ( !FNegTest( fInvalidAPIUsage ) )
             {
@@ -908,6 +999,9 @@ LOCAL ERR ErrFILEIValidateAddColumn(
         FIELDSetEscrowUpdate( pfield->ffield );
         if ( grbit & JET_bitColumnFinalize )
         {
+            // JET_bitColumnFinalize actually performs all the actions of JET_bitColumnDeleteOnZero but
+            // we discourage it's usage in MSDN.  Checking if people are listening!?!?  :-)
+            // See "Historical Notes" above dbtask.cxx FINALIZETASK<TDelta>::ErrExecute() for more deets.
             AssertTrack( FNegTest( fInvalidAPIUsage ), "NyiFinalizeBehaviorClientRequestedColumnGrbit" );
             FIELDSetFinalize( pfield->ffield );
         }
@@ -922,6 +1016,9 @@ LOCAL ERR ErrFILEIValidateAddColumn(
     }
     else if ( grbit & (JET_bitColumnVersion|JET_bitColumnAutoincrement) )
     {
+        //  if any special column properties have been set,
+        //  then check parameters and set column attributes.
+        //
         if ( grbit & JET_bitColumnAutoincrement )
         {
             if ( pfield->coltyp != JET_coltypLong
@@ -949,6 +1046,8 @@ LOCAL ERR ErrFILEIValidateAddColumn(
             if ( grbit & JET_bitColumnEscrowUpdate )
                 return ErrERRCheck( JET_errInvalidGrbit );
 
+            // For AutoInc or EscrowUpdate columns, we first need
+            // exclusive use of the table.
             if ( !fExclusiveLock )
                 return ErrERRCheck( JET_errExclusiveTableLockRequired );
 
@@ -956,6 +1055,7 @@ LOCAL ERR ErrFILEIValidateAddColumn(
         }
     }
 
+    //  Check FOR user-defined default value
     if( grbit & JET_bitColumnUserDefinedDefault )
     {
         if( grbit & JET_bitColumnFixed )
@@ -977,6 +1077,9 @@ LOCAL ERR ErrFILEIValidateAddColumn(
         if( grbit & JET_bitColumnMaybeNull )
             return ErrERRCheck( JET_errInvalidGrbit );
 
+        //  The column must be tagged. If it is fixed/variable
+        //  we may have to copy the default value into the record
+        //  this won't work for calculated defaults
         if( !( grbit & JET_bitColumnTagged )
             && !FRECLongValue( pfield->coltyp ) )
             return ErrERRCheck( JET_errInvalidGrbit );
@@ -1023,12 +1126,25 @@ LOCAL ERR ErrFILEIValidateAddColumn(
 }
 
 
+//  ================================================================
 LOCAL ERR ErrFILEIAddColumns(
     PIB                 * const ppib,
     const IFMP          ifmp,
     JET_TABLECREATE5_A  * const ptablecreate,
     const OBJID         objidTable,
     FCB                 * const pfcbTemplateTable )
+//  ================================================================
+//
+//  User-defined-default columns can be dependant on other columns
+//  we need to know the columnids of all the normal columns in order
+//  to be able to create user-defined-default columns. We make two
+//  passes through the columns to do this -- once for the normal ones
+//  and once for the user-defined defaults
+//
+//  OPTIMIZATION: on the first pass note if there are any user-defined defaults
+//  and only make the second pass if there are
+//
+//-
 {
     ERR                 err;
     FUCB                *pfucbCatalog       = pfucbNil;
@@ -1050,6 +1166,8 @@ LOCAL ERR ErrFILEIAddColumns(
         return ErrERRCheck( JET_errInvalidParameter );
     }
 
+    //  table has been created
+    //
     Assert( 1 == ptablecreate->cCreated );
 
     if ( ptablecreate->rgcolumncreate == NULL )
@@ -1058,6 +1176,10 @@ LOCAL ERR ErrFILEIAddColumns(
         return err;
     }
 
+    //  compute the max record size allowed for this table based on the max key
+    //  size for the primary index (or sequential index if a primary index was
+    //  not defined)
+    //
     cbKeyMost = JET_cbKeyMost_OLD;
     if ( ptablecreate->cIndexes > 0 )
     {
@@ -1069,10 +1191,12 @@ LOCAL ERR ErrFILEIAddColumns(
         for ( ; iindexcreateT < ptablecreate->cIndexes; iindexcreateT++, pindexcreateT = pindexcreateNext )
         {
 
+            // All paths should've upgraded to the new index structure.
             Assert( sizeof(JET_INDEXCREATE3_A) == pindexcreateT->cbStruct );
+            // but in case we missed one, we'll use old style incrementing ...
             pindexcreateNext = (JET_INDEXCREATE3_A *)((BYTE *)pindexcreateT + pindexcreateT->cbStruct);
 
-            Assert( sizeof( JET_INDEXCREATE3_A ) == pindexcreateT->cbStruct );
+            Assert( sizeof( JET_INDEXCREATE3_A ) == pindexcreateT->cbStruct ); // but just in case leaving the code ...
             if (    ( pindexcreateT->grbit & JET_bitIndexPrimary ) &&
                     ( sizeof( JET_INDEXCREATE_A ) == pindexcreateT->cbStruct ||
                         sizeof( JET_INDEXCREATE2_A ) == pindexcreateT->cbStruct ||
@@ -1093,11 +1217,14 @@ LOCAL ERR ErrFILEIAddColumns(
         Assert( pfcbTemplateTable->FFixedDDL() );
         ptdbTemplateTable->AssertValidTemplateTable();
 
+        // Can't have same fidAutoInc and fidVersion.
         fidAutoInc = ptdbTemplateTable->FidAutoincrement();
         fidVersion = ptdbTemplateTable->FidVersion();
         Assert( 0 == fidAutoInc || fidVersion != fidAutoInc );
         Assert( 0 == fidVersion || fidAutoInc != fidVersion );
 
+        //  fixed and variable columns continue column space started by template table
+        //  tagged columns start their own column space
         tcib.fidFixedLast = ptdbTemplateTable->FidFixedLast();
         tcib.fidVarLast = ptdbTemplateTable->FidVarLast();
         ibNextFixedOffset = ptdbTemplateTable->IbEndFixedColumns();
@@ -1119,6 +1246,7 @@ LOCAL ERR ErrFILEIAddColumns(
         Assert( pcolcreate != NULL );
         Assert( pcolcreate < ptablecreate->rgcolumncreate + ptablecreate->cColumns );
 
+        //  this is the data that will actually be inserted into the catalog
         const VOID      *pvDefaultAdd   = NULL;
         ULONG           cbDefaultAdd    = 0;
         CHAR            *szCallbackAdd  = NULL;
@@ -1140,10 +1268,15 @@ LOCAL ERR ErrFILEIAddColumns(
         field.cbMaxLen = pcolcreate->cbMax;
         field.cp = (USHORT)pcolcreate->cp;
 
+        //  UNDONE: interpret pbDefault of NULL for NULL value, and
+        //          cbDefault == 0 and pbDefault != NULL as set to
+        //          zero length.
         Assert( pcolcreate->cbDefault == 0 || pcolcreate->pvDefault != NULL );
 
         fSetColumnError = fTrue;
 
+        // May return a warning.  Hold warning in pcolcreate->err unless
+        // error encountered.
         Call( ErrFILEIValidateAddColumn(
                     ifmp,
                     pcolcreate->szColumnName,
@@ -1154,6 +1287,8 @@ LOCAL ERR ErrFILEIAddColumns(
                     fTrue,
                     pfcbTemplateTable ) );
 
+        //  for fixed-length columns, make sure record not too big
+        //
         Assert( tcib.fidFixedLast >= fidFixedLeast ?
             ibNextFixedOffset > ibRECStartFixedColumns :
             ibNextFixedOffset == ibRECStartFixedColumns );
@@ -1171,6 +1306,8 @@ LOCAL ERR ErrFILEIAddColumns(
                     &tcib,
                     &pcolcreate->columnid ) );
 
+        //  update TDB
+        //
         Assert( 0 == field.ibRecordOffset );
         if ( FCOLUMNIDFixed( pcolcreate->columnid ) )
         {
@@ -1228,12 +1365,15 @@ LOCAL ERR ErrFILEIAddColumns(
         {
             JET_USERDEFINEDDEFAULT_A * const pudd = (JET_USERDEFINEDDEFAULT_A *)(pcolcreate->pvDefault);
 
+            //  the table will be opened from the catalog later so we don't need to deal with registering
+            //  a CBDESC right now. Make sure that it can be resolved though
             JET_CALLBACK callback = NULL;
             if ( BoolParam( PinstFromPpib( ppib ), JET_paramEnablePersistedCallbacks ) )
             {
                 Call( ErrCALLBACKResolve( pudd->szCallback, &callback ) );
             }
 
+            //  for user-defined-defaults we don't store a default value at all
             pvDefaultAdd    = NULL;
             cbDefaultAdd    = 0;
             szCallbackAdd   = pudd->szCallback;
@@ -1264,7 +1404,7 @@ LOCAL ERR ErrFILEIAddColumns(
                     szCallbackAdd,
                     pvUserDataAdd,
                     cbUserDataAdd ) );
-    }
+    }   // for
 
     err = JET_errSuccess;
 
@@ -1321,6 +1461,9 @@ LOCAL ERR ErrFILEIValidateCreateIndex(
     USHORT                          cbKeyMost           = 0;
     USHORT                          cbVarSegMac         = 0;
 
+    //  if index has custom key size set then set in IDB
+    //  otherwise default to historic maximum key size of 255 bytes
+    //
     if ( fKeyMost )
     {
         if ( pidxcreate->cbKeyMost < JET_cbKeyMostMin || pidxcreate->cbKeyMost > (ULONG) CbKeyMostForPage() )
@@ -1334,6 +1477,8 @@ LOCAL ERR ErrFILEIValidateCreateIndex(
         cbKeyMost = JET_cbKeyMost_OLD;
     }
 
+    //  set cbVarSegMac as requested or default to set key size for index
+    //
     if ( fCustomTupleLimits || 0 == pidxcreate->cbVarSegMac )
     {
         cbVarSegMac = cbKeyMost;
@@ -1345,12 +1490,16 @@ LOCAL ERR ErrFILEIValidateCreateIndex(
 
     pidb->ResetFlags();
 
+    //  do not allow primary indexes with any ignore bits on
+    //
     if ( fPrimary && ( fIgnoreNull || fIgnoreAnyNull || fIgnoreFirstNull ) )
     {
         err = ErrERRCheck( JET_errInvalidGrbit );
         return err;
     }
 
+    //  do not allow both linear and cross product
+    //
     if ( fCrossProduct && fNestedTable )
     {
         err = ErrERRCheck( JET_errInvalidGrbit );
@@ -1399,14 +1548,22 @@ LOCAL ERR ErrFILEIValidateCreateIndex(
     }
     else
     {
+        // Catch that it's a 'reasonable' pointer value and not an LCID. (The
+        // older version of the structure was a union with an LCID.)
         const JET_UNICODEINDEX2* pidxunicodeNullCheck = ( JET_UNICODEINDEX2* ) ( DWORD_PTR( pidxunicode ) & 0xffffffff );
         Assert( pidxunicodeNullCheck == NULL || (__int64)pidxunicodeNullCheck > (__int64)64*1024 );
 
+        // With the JET_INDEXCREATE3_A structure, we no longer need to worry about
+        // the LCID being specified without JET_bitIndexUnicode.
 
+        // The user didn't pass in JET_bitIndexUnicode (or the LCID in older versions of JET_INDEXCREATE was 0 [lcidNone]).
+        // Even if pidxunicode is valid it will be ignored. Fall back to the instance's defaults.
         pidb->SetWszLocaleName( pinst->m_wszLocaleNameDefault );
         pidb->SetDwLCMapFlags( pinst->m_dwLCMapFlagsDefault );
     }
 
+    //  check index description for required format
+    //
     if ( cchKey == 0 )
     {
         err = ErrERRCheck( JET_errInvalidParameter );
@@ -1453,8 +1610,12 @@ LOCAL ERR ErrFILEIValidateCreateIndex(
         return err;
     }
 
+    //  number of columns should not exceed maximum
+    //
     Assert( cFields <= JET_ccolKeyMost );
 
+    //  get locale from end of szKey if present
+    //
     pch++;
     Assert( pch > szKey );
     if ( (unsigned)( pch - szKey ) < cchKey )
@@ -1471,10 +1632,13 @@ LOCAL ERR ErrFILEIValidateCreateIndex(
 
     BOOL fUppercaseTextNormalization = fFalse;
 
+    // At this point the locale and map flags may have been set by pidxunicode, and
+    // may have been overwritten by the index-string syntax.
     if ( fUserDefinedUnicode )
     {
         CallR( ErrNORMCheckLocaleName( pinst, pidb->WszLocaleName() ) );
 
+        // Check the incoming LCMap Flags, possibly adding necessary flags.
         DWORD dwLCMapFlags = pidb->DwLCMapFlags();
         if ( dwLCMapFlags & LCMAP_UPPERCASE )
     {
@@ -1489,6 +1653,8 @@ LOCAL ERR ErrFILEIValidateCreateIndex(
     }
     else
     {
+        // Even if there's no user defined unicode (JET_bitIndexUnicode), the locale name gets set to the
+        // default up above. pinst->m_wszLocaleNameDefault
 
         CallS( ErrNORMCheckLCMapFlags( pinst, pidb->DwLCMapFlags(), fUppercaseTextNormalization ) );
         if ( !FNORMEqualsLocaleName( pidb->WszLocaleName(), pinst->m_wszLocaleNameDefault ) )
@@ -1544,6 +1710,7 @@ LOCAL ERR ErrFILEIValidateCreateIndex(
              ( cchIncrement > usMax ) ||
              ( ( ichStart > usMax ) && (ichStart != -1 ) ) )
         {
+            // Truncation leads to behavior that doesn't match what was requested.
             return ErrERRCheck( JET_errIndexTuplesInvalidLimits );
         }
         
@@ -1572,6 +1739,8 @@ LOCAL ERR ErrFILEIValidateCreateIndex(
         pidb->SetCidxseg( (BYTE)cFields );
     }
 
+    //  set key size for index
+    //
     pidb->SetCbKeyMost( cbKeyMost );
 
     if ( !fDisallowNull && !fIgnoreAnyNull )
@@ -1602,6 +1771,8 @@ LOCAL ERR ErrFILEIValidateCreateIndex(
         pidb->SetFSortNullsHigh();
     }
     
+    //  not both linear and cross product
+    //
     Assert( !( fCrossProduct && fNestedTable ) );
     if ( fCrossProduct )
     {
@@ -1689,19 +1860,23 @@ LOCAL ERR ErrFILEICreateIndexes(
     Assert( ptablecreate->cCreated == 1 + ptablecreate->cColumns );
 
     if ( ptablecreate->rgindexcreate == NULL
-        || ptablecreate->rgcolumncreate == NULL )
+        || ptablecreate->rgcolumncreate == NULL )   // must have columns in order to create indexes
     {
+        //  if an invalid structure is encountered, get out right away
+        //
         err = ErrERRCheck( JET_errInvalidCreateIndex );
         return err;
     }
 
+    // Open cursor for space navigation
     CallR( ErrDIROpen( ppib, pgnoTableFDP, ifmp, &pfucbTableExtent ) );
     Assert( pfucbNil != pfucbTableExtent );
-    Assert( !FFUCBVersioned( pfucbTableExtent ) );
+    Assert( !FFUCBVersioned( pfucbTableExtent ) );  // Verify won't be deferred closed.
     Assert( pfcbNil != pfucbTableExtent->u.pfcb );
     Assert( !pfucbTableExtent->u.pfcb->FInitialized() );
     Assert( pfucbTableExtent->u.pfcb->Pidb() == pidbNil );
 
+    //  force the FCB to be initialized successfully
 
     pfucbTableExtent->u.pfcb->Lock();
     pfucbTableExtent->u.pfcb->CreateComplete();
@@ -1744,6 +1919,8 @@ LOCAL ERR ErrFILEICreateIndexes(
 
         if ( pidxcreate->cbStruct != sizeof(JET_INDEXCREATE3_A) )
         {
+            //  if an invalid structure is encountered, get out right away
+            //
             err = ErrERRCheck( JET_errInvalidCreateIndex );
             goto HandleError;
         }
@@ -1787,7 +1964,7 @@ LOCAL ERR ErrFILEICreateIndexes(
             for ( ; pcolcreate < plastcolcreate; pcolcreate++ )
             {
                 Assert( pcolcreate->cbStruct == sizeof(JET_COLUMNCREATE_A) );
-                Assert( pcolcreate->err >= 0 );
+                Assert( pcolcreate->err >= 0 );     // must have been created successfully
                 if ( UtilCmpName( rgsz[iidxseg], pcolcreate->szColumnName ) == 0 )
                     break;
             }
@@ -1808,8 +1985,11 @@ LOCAL ERR ErrFILEICreateIndexes(
             {
                 FIELD   *pfield = pfieldNil;
 
+                //  initialise to silence compiler warning
+                //
                 columnidT = JET_columnidNil;
 
+                //  column is not in table, so check template table (if any)
                 if ( pfcbNil != pfcbTemplateTable )
                 {
                     Assert( !fTemplateTable );
@@ -1823,6 +2003,7 @@ LOCAL ERR ErrFILEICreateIndexes(
 
                 if ( pfieldNil != pfield )
                 {
+                    //  must be a template column
                     Assert( FCOLUMNIDTemplateColumn( columnidT ) );
                     Assert( pfcbNil != pfcbTemplateTable );
                     fEscrow = FFIELDEscrowUpdate( pfield->ffield );
@@ -1845,16 +2026,18 @@ LOCAL ERR ErrFILEICreateIndexes(
                 goto HandleError;
             }
 
-            if ( fEscrow )
+            if ( fEscrow )          //lint !e644
             {
                 err = ErrERRCheck( JET_errCannotIndex );
                 goto HandleError;
             }
 
-            if ( fMultivalued )
+            if ( fMultivalued )     //lint !e644
             {
                 if ( idb.FPrimary() )
                 {
+                    //  primary index cannot be multivalued
+                    //
                     err = ErrERRCheck( JET_errIndexInvalidDef );
                     goto HandleError;
                 }
@@ -1871,7 +2054,7 @@ LOCAL ERR ErrFILEICreateIndexes(
                 }
             }
 
-            if ( fLocalizedText )
+            if ( fLocalizedText )   //lint !e644
             {
                 idb.SetFLocalizedText();
             }
@@ -1918,7 +2101,7 @@ LOCAL ERR ErrFILEICreateIndexes(
             for ( ; pcolcreate < plastcolcreate; pcolcreate++ )
             {
                 Assert( pcolcreate->cbStruct == sizeof(JET_COLUMNCREATE_A) );
-                Assert( pcolcreate->err >= 0 );
+                Assert( pcolcreate->err >= 0 );     // must have been created successfully
                 if ( UtilCmpName( szColumnName, pcolcreate->szColumnName ) == 0 )
                     break;
             }
@@ -1933,8 +2116,11 @@ LOCAL ERR ErrFILEICreateIndexes(
             {
                 FIELD   *pfield = pfieldNil;
 
+                //  initialise to silence compiler warning
+                //
                 columnidT = JET_columnidNil;
 
+                //  column is not in table, so check template table (if any)
                 if ( pfcbNil != pfcbTemplateTable )
                 {
                     Assert( !fTemplateTable );
@@ -1994,6 +2180,8 @@ LOCAL ERR ErrFILEICreateIndexes(
             Assert( pgnoIndexFDP != pgnoTableFDP );
             Assert( objidIndex > objidSystemRoot );
 
+            //  objids are monotonically increasing, so an index should
+            //  always have higher objid than its table
             Assert( objidIndex > objidTable );
         }
 
@@ -2006,6 +2194,7 @@ LOCAL ERR ErrFILEICreateIndexes(
         {
             Assert( NULL == ptablecreate->szTemplateTableName );
 
+            // If we're creating a template table, this must be a template index.
             idb.SetFTemplateIndex();
         }
 
@@ -2034,14 +2223,17 @@ HandleError:
     Assert( pfucbTableExtent != pfucbNil );
     Assert( pfucbTableExtent->u.pfcb->WRefCount() == 1 );
 
+    //  force the FCB to be uninitialized so it will be purged by DIRClose
 
     pfucbTableExtent->u.pfcb->Lock();
     pfucbTableExtent->u.pfcb->CreateCompleteErr( errFCBUnusable );
     pfucbTableExtent->u.pfcb->Unlock();
 
+    //  verify that this FUCB will not be defer-closed
 
     Assert( !FFUCBVersioned( pfucbTableExtent ) );
 
+    //  close the FUCB
 
     DIRClose( pfucbTableExtent );
 
@@ -2051,7 +2243,7 @@ HandleError:
         Assert( pidxcreate != NULL );
         Assert( sizeof( JET_INDEXCREATE3_A ) == pidxcreate->cbStruct );
         Assert( JET_errSuccess == pidxcreate->err );
-        pidxcreate->err = err;
+        pidxcreate->err = err;  //lint !e644
     }
 
     return err;
@@ -2073,6 +2265,7 @@ LOCAL ERR ErrFILEIInheritIndexes(
     PGNO            pgnoIndexFDP;
     OBJID           objidIndex;
 
+    // Temp tables and catalogs don't use hierarchical DDL.
     if ( FFMPIsTempDB( ifmp ) )
     {
         AssertSz( fFalse, "Don't support DDL on temp tables." );
@@ -2086,13 +2279,15 @@ LOCAL ERR ErrFILEIInheritIndexes(
     Assert( pfcbTemplateTable->FFixedDDL() );
     Assert( pfcbTemplateTable->FTemplateTable() );
 
+    // Open cursor for space navigation
     CallR( ErrDIROpen( ppib, pgnoTableFDP, ifmp, &pfucbTableExtent ) );
     Assert( pfucbNil != pfucbTableExtent );
-    Assert( !FFUCBVersioned( pfucbTableExtent ) );
+    Assert( !FFUCBVersioned( pfucbTableExtent ) );  // Verify won't be deferred closed.
     Assert( pfcbNil != pfucbTableExtent->u.pfcb );
     Assert( !pfucbTableExtent->u.pfcb->FInitialized() );
     Assert( pfucbTableExtent->u.pfcb->Pidb() == pidbNil );
 
+    //  force the FCB to be initialized successfully
 
     pfucbTableExtent->u.pfcb->Lock();
     pfucbTableExtent->u.pfcb->CreateComplete();
@@ -2155,10 +2350,14 @@ LOCAL ERR ErrFILEIInheritIndexes(
             Assert( pgnoIndexFDP != pgnoTableFDP );
             Assert( objidIndex > objidSystemRoot );
 
+            //  objids are monotonically increasing, so an index should
+            //  always have higher objid than its table
             Assert( objidIndex > objidTable );
         }
 
 
+        // Can hold pointers into the TDB's memory pool because the
+        // template table has fixed DDL (and therefore, a fixed memory pool).
         Assert( pfcbTemplateTable->FFixedDDL() );
 
         const IDXSEG*   rgidxseg;
@@ -2195,14 +2394,17 @@ HandleError:
     Assert( pfucbTableExtent != pfucbNil );
     Assert( pfucbTableExtent->u.pfcb->WRefCount() == 1 );
 
+    //  force the FCB to be uninitialized so it will be purged by DIRClose
 
     pfucbTableExtent->u.pfcb->Lock();
     pfucbTableExtent->u.pfcb->CreateCompleteErr( errFCBUnusable );
     pfucbTableExtent->u.pfcb->Unlock();
 
+    //  verify that this FUCB will not be defer-closed
 
     Assert( !FFUCBVersioned( pfucbTableExtent ) );
 
+    //  close the FUCB
 
     DIRClose( pfucbTableExtent );
 
@@ -2210,12 +2412,14 @@ HandleError:
 }
 
 
+//  ================================================================
 LOCAL ERR ErrFILEIValidateCallback(
     const PIB * const ppib,
     const IFMP ifmp,
     const OBJID objidTable,
     const JET_CBTYP cbtyp,
     const CHAR * const szCallback )
+//  ================================================================
 {
     if( 0 == cbtyp )
     {
@@ -2233,11 +2437,13 @@ LOCAL ERR ErrFILEIValidateCallback(
 }
 
 
+//  ================================================================
 LOCAL ERR ErrFILEICreateCallbacks(
     PIB * const ppib,
     const IFMP ifmp,
     JET_TABLECREATE5_A * const ptablecreate,
     const OBJID objidTable )
+//  ================================================================
 {
     Assert( sizeof( JET_TABLECREATE5_A ) == ptablecreate->cbStruct );
 
@@ -2300,10 +2506,16 @@ LOCAL ERR ErrFILECreateTableProcessSpaceHints(
 
         if ( pidxcreate->grbit & JET_bitIndexPrimary )
         {
+            //  We can't assert this, because the check for this isn't until later.
+            // Assert( NULL != pidxprimary );
             pidxprimary = pidxcreate;
         }
     }
 
+    // It is improper API usage to specify sequential space hints when there is a
+    // primary index specified. We could trigger this error in ESENT and
+    // break downlevel code. Otherwise, below the sequential hints will be ignored if there 
+    // is a primary index specified.
     if ( pidxprimary && ptablecreate->pSeqSpacehints )
     {
         Call( ErrERRCheck( JET_errSpaceHintsInvalid ) );
@@ -2311,6 +2523,8 @@ LOCAL ERR ErrFILECreateTableProcessSpaceHints(
 
     if ( pidxprimary )
     {
+        //  We do not need to consume CpgInitial / cbInitial here because it was
+        //  factored in in the iIndex loop above ...
         if ( pidxprimary->pSpacehints )
         {
             Assert( pidxprimary->pSpacehints->cbStruct == sizeof(JET_SPACEHINTS) );
@@ -2321,11 +2535,13 @@ LOCAL ERR ErrFILECreateTableProcessSpaceHints(
         {
             *pjsphPrimaryAlloc = *PSystemSpaceHints(eJSPHDefaultUserTable);
 
+            //  Consume default table density if set.
 
             pjsphPrimaryAlloc->ulInitialDensity = pidxprimary->ulDensity ?
                                                     pidxprimary->ulDensity :
                                                     ( ptablecreate->ulDensity ? ptablecreate->ulDensity : ulFILEDefaultDensity );
 
+            //  This can error out if the density is bad
             Call( ErrCATCheckJetSpaceHints( cbPageSize, pjsphPrimaryAlloc, fFalse ) );
         }
 
@@ -2344,8 +2560,10 @@ LOCAL ERR ErrFILECreateTableProcessSpaceHints(
     {
         *pjsphPrimaryAlloc = *PSystemSpaceHints(eJSPHDefaultUserTable);
 
+        //  Consume default table density if set.
         pjsphPrimaryAlloc->ulInitialDensity = ptablecreate->ulDensity ? ptablecreate->ulDensity : ulFILEDefaultDensity;
 
+        //  This can error out if the density is bad
         Call( ErrCATCheckJetSpaceHints( cbPageSize, pjsphPrimaryAlloc, fFalse ) );
 
         ulTotalPagesRequired += CpgInitial( pjsphPrimaryAlloc, cbPageSize );
@@ -2361,14 +2579,17 @@ LOCAL ERR ErrFILECreateTableProcessSpaceHints(
 
     if( ptablecreate->ulPages > ulTotalPagesRequired )
     {
+        //  If table asking for more pages, upgrade required pages to total table ask.
         ulTotalPagesRequired = ptablecreate->ulPages;
     }
 
+    //  If the primary index doesn't represent the total pages, fix that.
     if( ( ulTotalPagesRequired * g_cbPage ) > pjsphPrimaryAlloc->cbInitial )
     {
         pjsphPrimaryAlloc->cbInitial = ulTotalPagesRequired * g_cbPage;
     }
 
+    //  normalize this to 0x0 if default (cpgInitialTreeDefault=1 page).
     if ( ( (ULONG)g_cbPage * cpgInitialTreeDefault ) == pjsphPrimaryAlloc->cbInitial )
     {
         pjsphPrimaryAlloc->cbInitial = 0x0;
@@ -2379,6 +2600,30 @@ HandleError:
     return err;
 }
 
+//+API
+// ErrFILECreateTable
+// =========================================================================
+// ERR ErrFILECreateTable( PIB *ppib, IFMP ifmp, CHAR *szName,
+//      ULONG ulPages, ULONG ulDensity, FUCB **ppfucb )
+//
+// Create file with pathname szName.  Created file will have no fields or
+// indexes defined (and so will be a "sequential" file ).
+//
+// PARAMETERS
+//                  ppib            PIB of user
+//                  ifmp            database id
+//                  szName          path name of new file
+//                  ulPages         initial page allocation for file
+//                  ulDensity       initial loading density
+//                  ppfucb          Exclusively locked FUCB on new file
+// RETURNS      Error codes from DIRMAN or
+//                   JET_errSuccess     Everything worked OK
+//                  -DensityInvalid     Density parameter not valid
+//                  -TableDuplicate     A file already exists with the path given
+// COMMENTS     A transaction is wrapped around this function.  Thus, any
+//              work done will be undone if a failure occurs.
+// SEE ALSO     ErrIsamAddColumn, ErrIsamCreateIndex, ErrIsamDeleteTable
+//-
 ERR ErrFILECreateTable( PIB *ppib, IFMP ifmp, JET_TABLECREATE5_A *ptablecreate )
 {
     ERR         err;
@@ -2396,6 +2641,8 @@ ERR ErrFILECreateTable( PIB *ppib, IFMP ifmp, JET_TABLECREATE5_A *ptablecreate )
 
     ptablecreate->cCreated = 0;
 
+    //  check parms
+    //
     CheckPIB( ppib );
     CheckDBID( ppib, ifmp );
     CallR( ErrUTILCheckName( szTable, ptablecreate->szTableName, JET_cbNameMost+1 ) );
@@ -2437,8 +2684,12 @@ ERR ErrFILECreateTable( PIB *ppib, IFMP ifmp, JET_TABLECREATE5_A *ptablecreate )
 
         Assert( !FFMPIsTempDB( ifmp ) );
 
+        //  UNDONE: nested hierarchical DDL not yet supported
+        //
         Assert( !fTemplateTable );
 
+        //  bring base table FCB into memory
+        //
         CallR( ErrFILEOpenTable(
             ppib,
             ifmp,
@@ -2455,13 +2706,20 @@ ERR ErrFILECreateTable( PIB *ppib, IFMP ifmp, JET_TABLECREATE5_A *ptablecreate )
 
         if ( pfcbNil != pfcbTemplateTable )
         {
+            //  flag the template as static, i.e., it can't be opened for modification anymore
+            //  need the lock because it's a bit-field, so read/write must be atomic
+            //  NOTE: Once upon a time, the bit fields needed this lock.  Not anymore; the bits
+            //  are set atomically.  Leaving the lock in place now just out of worry they have
+            //  some other unintended sync impact.
             pfcbTemplateTable->Lock();
             pfcbTemplateTable->SetTemplateStatic();
             pfcbTemplateTable->Unlock();
 
+            //  Increment ref count so that template table does not get purged
             pfcbTemplateTable->IncrementRefCount();
         }
 
+        //  close cursor.
         CallS( ErrFILECloseTable( ppib, pfucbTemplateTable ) );
 
         if ( pfcbNil == pfcbTemplateTable )
@@ -2470,15 +2728,25 @@ ERR ErrFILECreateTable( PIB *ppib, IFMP ifmp, JET_TABLECREATE5_A *ptablecreate )
         }
     }
 
+    //
+    //  Calculate required space, validate any space hints .... 
+    //
 
     JET_SPACEHINTS jsphPrimaryAlloc;
     CallR( ErrFILECreateTableProcessSpaceHints( g_rgfmp[ ifmp ].CbPage(), ptablecreate, &jsphPrimaryAlloc ) );
 
+    //
+    //  Making initial space allocation and updating catalog.
+    //
 
     CallR( ErrDIRBeginTransaction( ppib, 42277, NO_GRBIT ) );
 
+    //  check to make sure temp db created if creating a temporary table
+    //
     Assert( !FFMPIsTempDB( ifmp ) || PinstFromPpib( ppib )->m_fTempDBCreated );
 
+    //  allocate cursor
+    //
     Call( ErrDIROpen( ppib, pgnoSystemRoot, ifmp, &pfucb ) );
     Call( ErrDIRCreateDirectory(
                 pfucb,
@@ -2486,7 +2754,7 @@ ERR ErrFILECreateTable( PIB *ppib, IFMP ifmp, JET_TABLECREATE5_A *ptablecreate )
                 &fdpinfo.pgnoFDP,
                 &fdpinfo.objidFDP,
                 CPAGE::fPagePrimary,
-                FFMPIsTempDB( ifmp ) ? fSPUnversionedExtent : 0 ) );
+                FFMPIsTempDB( ifmp ) ? fSPUnversionedExtent : 0 ) );    // For temp. tables, create unversioned extents
     DIRClose( pfucb );
     pfucb = pfucbNil;
 
@@ -2495,6 +2763,8 @@ ERR ErrFILECreateTable( PIB *ppib, IFMP ifmp, JET_TABLECREATE5_A *ptablecreate )
 
     if ( FFMPIsTempDB( ifmp ) )
     {
+        //  don't currently support creation of columns/indexes for temp.
+        //  tables via this API.
         Assert( 0 == ptablecreate->cColumns );
         Assert( 0 == ptablecreate->cIndexes );
         Assert( NULL == ptablecreate->szCallback );
@@ -2505,10 +2775,12 @@ ERR ErrFILECreateTable( PIB *ppib, IFMP ifmp, JET_TABLECREATE5_A *ptablecreate )
         Assert( !FCATSystemTable( fdpinfo.pgnoFDP ) );
         Assert( fdpinfo.objidFDP > objidSystemRoot );
 
+        //  insert record in MSysObjects
+        //
         JET_GRBIT   grbit;
         if ( fTemplateTable )
         {
-            Assert( !fDerived );
+            Assert( !fDerived );    // UNDONE: Nested hierarchical DDL not yet supported
             Assert( !( ptablecreate->grbit & JET_bitTableCreateSystemTable ) );
             grbit = ( JET_bitObjectTableTemplate | JET_bitObjectTableFixedDDL );
         }
@@ -2522,6 +2794,7 @@ ERR ErrFILECreateTable( PIB *ppib, IFMP ifmp, JET_TABLECREATE5_A *ptablecreate )
                 grbit |= JET_bitObjectTableFixedDDL;
             if ( ptablecreate->grbit & JET_bitTableCreateSystemTable )
             {
+                //  if calling CreateTable(), this must be a dynamic system table
                 grbit |= JET_bitObjectSystemDynamic;
                 Assert( FOLDSystemTable( szTable )
                     || FSCANSystemTable( szTable )
@@ -2545,11 +2818,12 @@ ERR ErrFILECreateTable( PIB *ppib, IFMP ifmp, JET_TABLECREATE5_A *ptablecreate )
         }
 #endif
 
+        //  we don't want to modify the LV space hints so copy them here
         JET_SPACEHINTS jsphLV;
         if( ptablecreate->pLVSpacehints )
         {
             jsphLV = *(ptablecreate->pLVSpacehints);
-            CallS( ErrCATCheckJetSpaceHints( g_rgfmp[ ifmp ].CbPage(), &jsphLV, fTrue ) );
+            CallS( ErrCATCheckJetSpaceHints( g_rgfmp[ ifmp ].CbPage(), &jsphLV, fTrue ) );    // validated in ErrFILECreateTableProcessSpaceHints
         }
 
         Call( ErrCATAddTable(
@@ -2560,11 +2834,12 @@ ERR ErrFILECreateTable( PIB *ppib, IFMP ifmp, JET_TABLECREATE5_A *ptablecreate )
                     szTable,
                     ptablecreate->szTemplateTableName,
                     grbit,
-                    &jsphPrimaryAlloc,
+                    &jsphPrimaryAlloc,  // contains ulTableDensity,
                     ptablecreate->cbSeparateLV,
                     ptablecreate->pLVSpacehints ? &jsphLV : NULL,
                     ptablecreate->cbLVChunkMax ) );
 
+        //  create columns and indexes as necessary.
 
         if ( fDerived )
         {
@@ -2613,6 +2888,8 @@ ERR ErrFILECreateTable( PIB *ppib, IFMP ifmp, JET_TABLECREATE5_A *ptablecreate )
     Assert( ptablecreate->cCreated == 1 + ptablecreate->cColumns + ptablecreate->cIndexes + ( ptablecreate->szCallback ? 1 : 0 ) );
 
 
+    //  open table in exclusive mode, for output parameter
+    //
     Call( ErrFILEOpenTable(
             ppib,
             ifmp,
@@ -2646,6 +2923,7 @@ ERR ErrFILECreateTable( PIB *ppib, IFMP ifmp, JET_TABLECREATE5_A *ptablecreate )
     }
 #endif
 
+    // Allow DDL until table (cursor) is closed.
     if ( pfcb->FFixedDDL() && !fTemplateTable )
     {
         FUCBSetPermitDDL( pfucb );
@@ -2661,16 +2939,24 @@ ERR ErrFILECreateTable( PIB *ppib, IFMP ifmp, JET_TABLECREATE5_A *ptablecreate )
         Assert( ( ptablecreate->cbSeparateLV == 0 ) || ( pfcb->Ptdb()->CbPreferredIntrinsicLV() == (ULONG)ptablecreate->cbSeparateLV ) );
     }
     
+    // If this is not a derived table, we expect the space hints to be
+    // unchanged. A derived table's space hints may be changed (from the default provided hints) by 
+    // inheriting the space hints from the template table, unless there are space hints explicitly set
+    // on the derived table, in which case the derived set wins.
 #ifdef DEBUG
     JET_SPACEHINTS jsphCheck;
     pfcb->GetAPISpaceHints( &jsphCheck );
 
+    // If it's not a derived table or new hints were specified, they should
+    // have been set.
     if ( !fDerived || ptablecreate->pSeqSpacehints )
     {
         Assert( 0 == memcmp( &jsphCheck, &jsphPrimaryAlloc, sizeof(jsphCheck) ) );
     }
 #endif
 
+    //  flag FCB as uncommitted for unversioned DML operations
+    //
     if ( !g_rgfmp[ ifmp ].FVersioningOff() )
     {
         pfcb->Lock();
@@ -2692,6 +2978,7 @@ ERR ErrFILECreateTable( PIB *ppib, IFMP ifmp, JET_TABLECREATE5_A *ptablecreate )
         pfcbTemplateTable = pfcbNil;
     }
 
+    //  internally, we use tableid and pfucb interchangeably
     ptablecreate->tableid = (JET_TABLEID)pfucb;
 
     return JET_errSuccess;
@@ -2710,6 +2997,9 @@ HandleError:
     {
         Assert( pfcb != pfcbNil );
 
+        //  if we didn't insert operCreateTable, make sure that
+        //  we'll purge the FCB  on close (because rollback won't do it)
+        //
         if ( !fCreatedRCE )
         {
             pfcb->Lock();
@@ -2719,6 +3009,8 @@ HandleError:
         CallS( ErrFILECloseTable( ppib, pfucb ) );
     }
 
+    //  pfucb is closed by rollback if necessary
+    //
     CallSx( ErrDIRRollback( ppib ), JET_errRollbackError );
 
     if ( pfcbTemplateTable != pfcbNil )
@@ -2727,12 +3019,20 @@ HandleError:
         pfcbTemplateTable = pfcbNil;
     }
 
+    //  reset return variable if close table via rollback
+    //
     ptablecreate->tableid = JET_tableidNil;
 
     return err;
 }
 
 
+//====================================================
+// Determine field "mode" as follows:
+// if ("long" textual || JET_bitColumnTagged given ) ==> TAGGED
+// else if (numeric type || JET_bitColumnFixed given ) ==> FIXED
+// else ==> VARIABLE
+//====================================================
 ERR ErrFILEGetNextColumnid(
     const JET_COLTYP    coltyp,
     const JET_GRBIT     grbit,
@@ -2781,6 +3081,9 @@ INLINE ERR ErrFILEIUpdateAutoInc( PIB *ppib, FUCB *pfucb )
     const BOOL      fTemplateColumn = ptdb->FFixedTemplateColumn( ptdb->FidAutoincrement() );
     const COLUMNID  columnidT       = ColumnidOfFid( ptdb->FidAutoincrement(), fTemplateColumn );
 
+    // set column does not allow sets over an
+    // autoincrement column.  To work around this,
+    // temporarily disable AutoInc column.
     Assert( pfucb->u.pfcb->FDomainDenyReadByUs( ppib ) );
     ptdb->ResetFidAutoincrement();
     BOOL fFidReset = fTrue;
@@ -2826,9 +3129,11 @@ INLINE ERR ErrFILEIUpdateAutoInc( PIB *ppib, FUCB *pfucb )
     Assert( err < 0 );
     if ( JET_errNoCurrentRecord == err )
     {
+        // Since we just added all the auto-inc values, we can try to initialize the auto-inc ext-hdr on the root, if configured
         const BOOL fExternalHeaderNewFormatEnabled =
             ( g_rgfmp[pfucb->ifmp].ErrDBFormatFeatureEnabled( efvExtHdrRootFieldAutoInc ) >= JET_errSuccess );
         if ( fExternalHeaderNewFormatEnabled &&
+             // May fail if root page does not have enough space for the auto-inc ext-hdr
              ErrRECInitAutoIncSpace( pfucb, qwT - 1 ) >= JET_errSuccess )
         {
         }
@@ -2850,10 +3155,17 @@ HandleError:
     return err;
 }
 
+//  ================================================================
 ERR ErrFILEICheckForDuplicateColumn(
         PIB * const ppib,
         FCB * const pfcb,
         const CHAR * const szName )
+//  ================================================================
+//
+//  Returns JET_errColumnDuplicate if the given column exists, 
+//  JET_errSuccess if it doesn't or an error code.
+//
+//-
 {
 
     FIELD *         pfield = pfieldNil;
@@ -2861,6 +3173,7 @@ ERR ErrFILEICheckForDuplicateColumn(
 
     pfcb->EnterDML();
     
+    //  WARNING: The following function does a LeaveDML() on error
     ERR err = ErrFILEPfieldFromColumnName(
         ppib,
         pfcb,
@@ -2873,6 +3186,9 @@ ERR ErrFILEICheckForDuplicateColumn(
         pfcb->LeaveDML();
     }
 
+    // it is possible for ErrFILEPfieldFromColumnName to return JET_errColumnNotFound
+    // in this case it isn't actually an error as we are checking for the non-existence 
+    // of the column.   
     if ( JET_errColumnNotFound == err )
     {
         err = JET_errSuccess;
@@ -2886,6 +3202,44 @@ ERR ErrFILEICheckForDuplicateColumn(
 }
 
 
+//+API
+// ErrIsamAddColumn
+// ========================================================================
+// ERR ErrIsamAddColumn(
+//      PIB             *ppib;          // IN PIB of user
+//      FUCB            *pfucb;         // IN Exclusively opened FUCB on file
+//      CHAR            *szName;        // IN name of new field
+//      JET_COLUMNDEF   *pcolumndef     // IN definition of column added
+//      BYTE            *pvDefault      // IN Default value of column
+//      ULONG           cbDefault       // IN length of Default value
+//      JET_COLUMNID    *pcolumnid )    // OUT columnid of added column
+//
+// Creates a new field definition for a file.
+//
+// PARAMETERS
+//              pcolumndef->coltyp          data type of new field, see jet.h
+//              pcolumndef->grbit           field describing flags:
+//                  VALUE               MEANING
+//                  ========================================
+//                  JET_bitColumnNotNULL            Indicates that the field may
+//                                                  not take on NULL values.
+//                  JET_bitColumnTagged             The field is a "tagged" field.
+//                  JET_bitColumnVersion            The field is a version field
+//
+// RETURNS      JET_errSuccess          Everything worked OK.
+//                  -TaggedDefault          A default value was specified
+//                                              for a tagged field.
+//                  -ColumnDuplicate        There is already a field
+//                                              defined for the name given.
+// COMMENTS
+//      There must not be anyone currently using the file, unless
+//      the ErrIsamAddColumn is at level 0 [when non-exclusive ErrIsamAddColumn works].
+//      A transaction is wrapped around this function.  Thus, any
+//      work done will be undone if a failure occurs.
+//      Transaction logging is turned off for temporary files.
+//
+// SEE ALSO     ErrIsamCreateTable, ErrIsamCreateIndex
+//-
 ERR VTAPI ErrIsamAddColumn(
     JET_SESID           sesid,
     JET_VTID            vtid,
@@ -2914,6 +3268,7 @@ ERR VTAPI ErrIsamAddColumn(
     BOOL                fSetVersioned               = fFalse;
     VER                 *pver;
 
+    //  this is the data that will actually be inserted into the catalog
     const VOID          *pvDefaultAdd               = pvDefault;
     ULONG               cbDefaultAdd                = cbDefault;
     CHAR                *szCallbackAdd              = NULL;
@@ -2921,6 +3276,8 @@ ERR VTAPI ErrIsamAddColumn(
     ULONG               cbUserDataAdd               = 0;
     LONG                cbRecordMost                = REC::CbRecordMost( pfucb );
 
+    //  check paramaters
+    //
     CallR( ErrPIBCheck( ppib ) );
     Assert( pfucb != pfucbNil );
     CheckTable( ppib, pfucb );
@@ -2932,12 +3289,14 @@ ERR VTAPI ErrIsamAddColumn(
         return ErrERRCheck( JET_errInvalidParameter );
     }
     
+    //  ensure that table is updatable
+    //
     CallR( ErrFUCBCheckUpdatable( pfucb ) );
     CallR( ErrPIBCheckUpdatable( ppib ) );
 
     pfcb = pfucb->u.pfcb;
     Assert( pfcb->WRefCount() > 0 );
-    Assert( pfcb->FTypeTable() );
+    Assert( pfcb->FTypeTable() );   // Temp. tables have fixed DDL.
 
     ptdb = pfcb->Ptdb();
     Assert( ptdbNil != ptdb );
@@ -2961,11 +3320,13 @@ ERR VTAPI ErrIsamAddColumn(
 
     if ( pfcb->FFixedDDL() )
     {
+        // Check FixedDDL override.
         if ( !FFUCBPermitDDL( pfucb ) )
         {
             return ErrERRCheck( JET_errFixedDDL );
         }
 
+        // If DDL temporarily permitted, we must have exclusive use of the table.
         Assert( pfcb->FDomainDenyReadByUs( ppib ) );
     }
 
@@ -2988,6 +3349,9 @@ ERR VTAPI ErrIsamAddColumn(
         }
     }
 
+    //  UNDONE: interpret pvDefault of NULL for NULL value, and
+    //          cbDefault == 0 and pvDefault != NULL as set to
+    //          zero length.
     Assert( cbDefault == 0 || pvDefault != NULL );
 
     memset( &field, 0, sizeof(FIELD) );
@@ -3006,6 +3370,11 @@ ERR VTAPI ErrIsamAddColumn(
                 ptdb->PfcbTemplateTable() ) );
     fMaxTruncated = ( JET_wrnColumnMaxTruncated == err );
 
+    //  at this time, we only support adding tagged columns to template tables
+    //  if we ever add support for adding fixed and variable columns to template tables,
+    //  JET_bitTableCreateNoFixedVarColumnsInDerivedTables would also need to be supported
+    //  to prevent derived tables from adding columns whose FIDs conflict with those from
+    //  the template
     if ( pfcb->FTemplateTable() && !( ( pcolumndef->grbit & JET_bitColumnTagged ) || FRECLongValue( field.coltyp ) ) )
     {
         return ErrERRCheck( JET_errFixedDDL );
@@ -3018,9 +3387,15 @@ ERR VTAPI ErrIsamAddColumn(
 
     if ( FFIELDEscrowUpdate( field.ffield ) )
     {
+        //  see the comment int ErrFILEIValidateAddColumn to find out why we
+        //  cannot add an escrow column to a table with any records in it
         Assert( pfcb->FDomainDenyReadByUs( ppib ) );
         Assert( FFIELDDefault( field.ffield ) );
 
+        //  check for any node there, even if it is deleted.  This
+        //  is too strong since it may be deleted and committed,
+        //  but this strong check ensures that no potentially there
+        //  records exist.
         DIB dib;
         dib.dirflag = fDIRAllNode;
         dib.pos     = posFirst;
@@ -3042,13 +3417,17 @@ ERR VTAPI ErrIsamAddColumn(
 
     const PGNO  pgnoFDP         = pfcb->PgnoFDP();
     const OBJID objidTable      = pfcb->ObjidFDP();
-    FUCB        fucbFake( ppib, pfucb->ifmp );
+    FUCB        fucbFake( ppib, pfucb->ifmp );      // for rebuilding default record
     FCB         fcbFake( pfucb->ifmp, pgnoFDP );
 
+    // ExchangeLegacy 261788: Bail out in case the column exists already 
+    // to avoid increasing the columnid
     Call( ErrFILEICheckForDuplicateColumn( ppib, pfcb, szFieldName ) );
     
     if ( FFIELDDefault( field.ffield ) && !FFIELDUserDefinedDefault( field.ffield ) )
     {
+        // pre-allocate buffer for rebuilding default record
+        //
         FILEPrepareDefaultRecord( &fucbFake, &fcbFake, ptdb );
         Assert( fucbFake.pvWorkBuf != NULL );
     }
@@ -3057,18 +3436,36 @@ ERR VTAPI ErrIsamAddColumn(
         fucbFake.pvWorkBuf = NULL;
     }
 
+    //  move to FDP root and update FDP timestamp
+    //
     Assert( ppib->Level() < levelMax );
     DIRGotoRoot( pfucb );
 
     pfcb->EnterDDL();
     fInCritDDL = fTrue;
 
+    //  set tcib
+    //
     tcib.fidFixedLast = ptdb->FidFixedLast();
     tcib.fidVarLast = ptdb->FidVarLast();
     tcib.fidTaggedLast = ptdb->FidTaggedLast();
 
+    //******************************************************
+    //  Determine maximum field length as follows:
+    //  switch field type
+    //      case numeric:
+    //          max = <exact length of specified type>;
+    //      case "short" textual ( Text || Binary ):
+    //          if (specified max == 0 ) max = JET_cbColumnMost
+    //          else max = MIN( JET_cbColumnMost, specified max )
+    //      case "long" textual (Memo || Graphic ):
+    //          max = specified max (if 0, unlimited )
+    //*****************************************************
+    //
     Assert( field.coltyp != JET_coltypNil );
 
+    //  for fixed-length columns, make sure record not too big
+    //
     Assert( ptdb->FidFixedLast() >= fidFixedLeast ?
         ptdb->IbEndFixedColumns() > ibRECStartFixedColumns :
         ptdb->IbEndFixedColumns() == ibRECStartFixedColumns );
@@ -3091,6 +3488,8 @@ ERR VTAPI ErrIsamAddColumn(
         *pcolumnid = columnid;
     }
 
+    //  version and autoincrement are mutually exclusive
+    //
     if ( FFIELDVersion( field.ffield ) )
     {
         if ( ptdb->FidVersion() != 0 )
@@ -3111,12 +3510,17 @@ ERR VTAPI ErrIsamAddColumn(
             ( ( field.coltyp == JET_coltypLongLong ) || ( field.coltyp == JET_coltypUnsignedLongLong ) || ( field.coltyp == JET_coltypCurrency ) ) );
     }
 
+    //  update TDB and default record value
+    //
     cFixed = ptdb->CDynamicFixedColumns();
     cVar = ptdb->CDynamicVarColumns();
     cTagged = ptdb->CDynamicTaggedColumns();
     cbFieldsUsed = ( cFixed + cVar + cTagged ) * sizeof(FIELD);
     cbFieldsTotal = ptdb->MemPool().CbGetEntry( itagTDBFields );
 
+    //  WARNING: if cbFieldsTotal is less than even one FIELD,
+    //  this is the special-case where we just stuck in a
+    //  placeholder in the MEMPOOL for the FIELD structures
     if ( cbFieldsTotal < sizeof(FIELD) )
     {
         Assert( cbFIELDPlaceholder == cbFieldsTotal );
@@ -3126,8 +3530,11 @@ ERR VTAPI ErrIsamAddColumn(
 
     Assert( cbFieldsTotal >= cbFieldsUsed );
 
+    // Is there enough space to add another FIELD?
     if ( sizeof(FIELD) > ( cbFieldsTotal - cbFieldsUsed ) )
     {
+        //  add space for another 10 columns
+        //
         Call( ptdb->MemPool().ErrReplaceEntry(
             itagTDBFields,
             NULL,
@@ -3135,6 +3542,8 @@ ERR VTAPI ErrIsamAddColumn(
             ) );
     }
 
+    //  add the column name to the buffer
+    //
     Call( ptdb->MemPool().ErrAddEntry(
                             reinterpret_cast<BYTE *>( szFieldName ),
                             (ULONG)strlen( szFieldName ) + 1,
@@ -3148,6 +3557,8 @@ ERR VTAPI ErrIsamAddColumn(
     if ( FFIELDDefault( field.ffield )
         && !FFIELDUserDefinedDefault( field.ffield ) )
     {
+        //  note that if AddColumn rolls back, the memory may end up
+        //  on the FCB RECDANGLING list,
         veraddcolumn.pbOldDefaultRec = (BYTE *)ptdb->PdataDefaultRecord();
     }
     else
@@ -3164,6 +3575,8 @@ ERR VTAPI ErrIsamAddColumn(
         goto HandleError;
     }
 
+    // If we have the table exclusively locked, then there's no need to
+    // set the Versioned bit.
     Assert( !pfcb->FDomainDenyRead( ppib ) );
     if ( !pfcb->FDomainDenyReadByUs( ppib ) )
     {
@@ -3182,6 +3595,9 @@ ERR VTAPI ErrIsamAddColumn(
         Assert( !FCOLUMNIDTemplateColumn( columnid ) );
     }
 
+    //  incrementing fidFixed/Var/TaggedLast guarantees that a new FIELD structure
+    //  was added -- rollback checks for this.
+    //
     Assert( pfieldNil == pfieldNew );
     if ( FCOLUMNIDFixed( columnid ) )
     {
@@ -3190,6 +3606,11 @@ ERR VTAPI ErrIsamAddColumn(
         Assert( FFixedFid( ptdb->FidFixedLast() ) );
         pfieldNew = ptdb->PfieldFixed( columnid );
 
+        //  Adjust the location of the FIELD structures for tagged and variable
+        //  columns to accommodate the insertion of a fixed column FIELD structure
+        //  and its associated entry in the fixed offsets table.
+        //  Thus, the new fixed column FIELD structure is now located where
+        //  the variable column FIELD structures used to start.
         memmove(
             (BYTE *)pfieldNew + sizeof(FIELD),
             pfieldNew,
@@ -3210,18 +3631,24 @@ ERR VTAPI ErrIsamAddColumn(
         {
             Assert( FidOfColumnid( columnid ) == ptdb->FidTaggedLast() + 1 );
 
+            // Append the new FIELD structure to the end of the tagged column
+            // FIELD structures.
             ptdb->IncrementFidTaggedLast();
             Assert( FTaggedFid( ptdb->FidTaggedLast() ) );
             pfieldNew = ptdb->PfieldTagged( columnid );
         }
         else
         {
+            // The new variable column FIELD structure, now located where
+            // the tagged column FIELD structures used to start.
             Assert( FCOLUMNIDVar( columnid ) );
             Assert( FidOfColumnid( columnid ) == ptdb->FidVarLast() + 1 );
             ptdb->IncrementFidVarLast();
             Assert( FVarFid( ptdb->FidVarLast() ) );
             pfieldNew = ptdb->PfieldVar( columnid );
 
+            //  adjust the location of the FIELD structures for tagged columns to
+            //  accommodate the insertion of the variable column FIELD structure.
             memmove( pfieldNew + 1, pfieldNew, sizeof(FIELD) * cTagged );
         }
 
@@ -3231,8 +3658,11 @@ ERR VTAPI ErrIsamAddColumn(
 
 
     Assert( field.itagFieldName != 0 );
-    field.itagFieldName = 0;
+    field.itagFieldName = 0;    // From this point on, version cleanup
+                                // will reclaim name space on rollback.
 
+    //  WARNING: rollback will not reset these flags in the TDB
+    //
     if ( FFIELDFinalize( field.ffield ) )
     {
         Assert( FFIELDEscrowUpdate( field.ffield ) );
@@ -3246,6 +3676,7 @@ ERR VTAPI ErrIsamAddColumn(
 
     if ( FFIELDUserDefinedDefault( field.ffield ) )
     {
+        //  the size of the structure should have been checked by ErrFILEIValidateAddColumn
         Assert( NULL != pvDefault );
         Assert( sizeof( JET_USERDEFINEDDEFAULT_A ) == cbDefault );
 
@@ -3269,6 +3700,8 @@ ERR VTAPI ErrIsamAddColumn(
             Error( ErrERRCheck( JET_errOutOfMemory ) );
         }
 
+        //  we should not fail between this point and registering the CBDESC in the TDB
+        //  once the CBDESC is in the TDB it will be freed by TDB::Delete
 
         memcpy( pbUserData, pudd->pbUserData, pudd->cbUserData );
 
@@ -3280,6 +3713,7 @@ ERR VTAPI ErrIsamAddColumn(
         pcbdesc->fPermanent = fTrue;
         pcbdesc->fVersioned = fFalse;
 
+        //  for user-defined-defaults we don't store a default value at all
         pvDefaultAdd    = NULL;
         cbDefaultAdd    = 0;
         szCallbackAdd   = pudd->szCallback;
@@ -3310,8 +3744,14 @@ ERR VTAPI ErrIsamAddColumn(
         Assert( NULL != veraddcolumn.pbOldDefaultRec );
         Assert( veraddcolumn.pbOldDefaultRec != (BYTE *)ptdb->PdataDefaultRecord() );
 
+        //  we normally rely on version cleanup to clean up pbOldDefaultRec,
+        //  but in case versioning is disabled or version cleanup can't get
+        //  to the RCE for some reason, put it on the RECDANGLING list
+        //
 
 #ifdef DEBUG
+        //  verify not already in list
+        //
         for ( RECDANGLING * precdangling = pfcb->Precdangling();
             NULL != precdangling;
             precdangling = precdangling->precdanglingNext )
@@ -3320,6 +3760,9 @@ ERR VTAPI ErrIsamAddColumn(
         }
 #endif
 
+        //  assumes that the memory pointed to by pmemdangling is always at
+        //  least sizeof(ULONG_PTR) bytes
+        //
         Assert( NULL == ( (RECDANGLING *)veraddcolumn.pbOldDefaultRec )->precdanglingNext );
         ( (RECDANGLING *)veraddcolumn.pbOldDefaultRec )->precdanglingNext = pfcb->Precdangling();
         pfcb->SetPrecdangling( (RECDANGLING *)veraddcolumn.pbOldDefaultRec );
@@ -3350,12 +3793,15 @@ ERR VTAPI ErrIsamAddColumn(
     pfcb->LeaveDDL();
     fInCritDDL = fFalse;
 
+    //  set currency before first
+    //
     DIRBeforeFirst( pfucb );
     if ( pfucb->pfucbCurIndex != pfucbNil )
     {
         DIRBeforeFirst( pfucb->pfucbCurIndex );
     }
 
+    // Insert record into MSysColumns.
     Call( ErrCATAddTableColumn(
                 ppib,
                 pfucb->ifmp,
@@ -3387,6 +3833,7 @@ ERR VTAPI ErrIsamAddColumn(
     {
         if ( fSetVersioned )
         {
+            // On success, reset versioned bit (on error, bit reset by rollback)
             FIELD   *pfieldT;
             pfcb->EnterDDL();
             Assert( pfcb->Ptdb() == ptdb );
@@ -3412,7 +3859,11 @@ HandleError:
             err,
             err ) );
 
+    //  For FixedDDL tables, we assume such tables NEVER have deleted columns,
+    //  so we can't tolerate the hack where we set the FIELD of the rolled-back
+    //  column to deleted
 
+    // Verify name space has been reclaimed.
     Assert( field.itagFieldName == 0 );
 
     if ( fInCritDDL )
@@ -3453,6 +3904,7 @@ LOCAL ERR ErrFILEIAddSecondaryIndexEntriesForPrimaryKey(
     BOOL            fFirstColumnMultiValued = FRECIFirstIndexColumnMultiValued( pfucbTable, pidb );
 
 #ifdef DEBUG
+    //  latch status shouldn't change during this function
     const BOOL      fLatched    = Pcsr( pfucbTable )->FLatched();
 #endif
 
@@ -3461,6 +3913,7 @@ LOCAL ERR ErrFILEIAddSecondaryIndexEntriesForPrimaryKey(
     Assert( ksT.FBaseKey() );
     for ( ; !ksT.FSequenceComplete(); ksT.Increment( iidxsegT ) )
     {
+        //  latch status shouldn't change during this function
         Assert( ( fLatched && Pcsr( pfucbTable )->FLatched() )
             || ( !fLatched && !Pcsr( pfucbTable )->FLatched() ) );
 
@@ -3475,15 +3928,17 @@ LOCAL ERR ErrFILEIAddSecondaryIndexEntriesForPrimaryKey(
                 prceNil,
                 &iidxsegT ) );
 
+        //  latch status shouldn't change during this function
         Assert( ( fLatched && Pcsr( pfucbTable )->FLatched() )
             || ( !fLatched && !Pcsr( pfucbTable )->FLatched() ) );
 
         CallS( ErrRECValidIndexKeyWarning( err ) );
 
-        const ERR   errRetrieveKey  = err;
+        const ERR   errRetrieveKey  = err;      //  for debugging
 
         if ( JET_errSuccess == err )
         {
+            //  insert key (below)
         }
 
         else if ( wrnFLDOutOfKeys == err )
@@ -3494,7 +3949,10 @@ LOCAL ERR ErrFILEIAddSecondaryIndexEntriesForPrimaryKey(
 
         else if ( wrnFLDOutOfTuples == err )
         {
+            //  try next itagSequence
             Assert( pidb->FTuples() );
+            //  tuple index supported for first column in index only
+            //
             if ( fFirstColumnMultiValued )
                 continue;
             else
@@ -3521,9 +3979,10 @@ LOCAL ERR ErrFILEIAddSecondaryIndexEntriesForPrimaryKey(
 
             if ( wrnFLDNullKey == err )
             {
-                Assert( ksT.FBaseKey() );
+                Assert( ksT.FBaseKey() );   //  nulls beyond itagSequence 1 would have generated wrnFLDOutOfKeys
                 if ( !pidb->FAllowAllNulls() )
                 {
+                    //  do not insert NULL key as indicated
                     break;
                 }
                 fNullKey = fTrue;
@@ -3532,6 +3991,8 @@ LOCAL ERR ErrFILEIAddSecondaryIndexEntriesForPrimaryKey(
             {
                 if ( !pidb->FAllowFirstNull() )
                 {
+                    //  do not insert keys with NULL first
+                    //  segment as indicated
                     break;
                 }
             }
@@ -3540,6 +4001,8 @@ LOCAL ERR ErrFILEIAddSecondaryIndexEntriesForPrimaryKey(
                 Assert( wrnFLDNullSeg == err );
                 if ( !pidb->FAllowSomeNulls() )
                 {
+                    //  do not insert keys with null
+                    //  segment as indicated
                     break;
                 }
             }
@@ -3551,6 +4014,11 @@ LOCAL ERR ErrFILEIAddSecondaryIndexEntriesForPrimaryKey(
 
         if ( pidb->FTuples() )
         {
+            //  if we received a warning on the first tuple,
+            //  the logic above should ensure we don't
+            //  try to create further tuples
+            //  (except the wrnFLDNullSeg which is expected for an index allowing it)
+            //
             CallSx( errRetrieveKey, ( pidb->FAllowSomeNulls() ? wrnFLDNullSeg : JET_errSuccess ) );
 
             ULONG   ichOffset;
@@ -3558,6 +4026,7 @@ LOCAL ERR ErrFILEIAddSecondaryIndexEntriesForPrimaryKey(
 
             for ( ichOffset = pidb->IchTuplesStart() + pidb->CchTuplesIncrement(), ulTuple = 1; ulTuple < pidb->IchTuplesToIndexMax(); ichOffset += pidb->CchTuplesIncrement(), ulTuple++ )
             {
+                //  latch status shouldn't change during this function
                 Assert( ( fLatched && Pcsr( pfucbTable )->FLatched() )
                     || ( !fLatched && !Pcsr( pfucbTable )->FLatched() ) );
 
@@ -3572,9 +4041,13 @@ LOCAL ERR ErrFILEIAddSecondaryIndexEntriesForPrimaryKey(
                         prceNil,
                         &iidxsegT ) );
 
+                //  latch status shouldn't change during this function
                 Assert( ( fLatched && Pcsr( pfucbTable )->FLatched() )
                     || ( !fLatched && !Pcsr( pfucbTable )->FLatched() ) );
 
+                //  all other warnings should have been detected
+                //  when we retrieved with ichOffset==0
+                //
                 if ( err == wrnFLDNullSeg && pidb->FAllowSomeNulls() )
                 {
                     err = JET_errSuccess;
@@ -3592,11 +4065,14 @@ LOCAL ERR ErrFILEIAddSecondaryIndexEntriesForPrimaryKey(
 
         if ( !pidb->FMultivalued() || fNullKey )
         {
-            Assert( ksT.FBaseKey() );
+            //  if no multivalues in this index, there's no point going beyond first itagSequence
+            //  if key is null, this implies there are no further multivalues
+            Assert( ksT.FBaseKey() );   //  nulls beyond itagSequence 1 would have generated wrnFLDOutOfKeys
             break;
         }
     }
 
+    //  latch status shouldn't change during this function
     Assert( ( fLatched && Pcsr( pfucbTable )->FLatched() )
         || ( !fLatched && !Pcsr( pfucbTable )->FLatched() ) );
 
@@ -3659,6 +4135,8 @@ ERR ErrFILEIndexBatchInit(
         Assert( pfcbIndex->FTypeSecondaryIndex() );
         Assert( pfcbIndex->FInitialized() );
 
+        //  open sort
+        //
         CallR( ErrSORTOpen( ppib, &rgpfucbSort[iindex], pfcbIndex->Pidb()->FUnique(), fTrue ) );
 
         rgcRecInput[iindex] = 0;
@@ -3682,6 +4160,8 @@ ERR ErrFILEIndexBatchInit(
     return JET_errSuccess;
 }
 
+// ORIGINAL BATCH INDEX CREATION (SERIAL)
+// OR DEFRAG IF LESS THEN 16 INDICES
 ERR ErrFILEIndexBatchAddEntry(
     FUCB            ** const rgpfucbSort,
     FUCB            * const pfucbTable,
@@ -3738,8 +4218,22 @@ INLINE ERR ErrFILEIAppendToIndex(
     CallR( ErrDIRInitAppend( pfucbIndex ) );
     do
     {
+        //  this loop can take some time, so see if we need
+        //  to terminate because of shutdown
+        //
         CallR( pinst->ErrCheckForTermination() );
 
+        //  don't want to fill up reserve logs with index entries,
+        //  so bail out if we're in the reserve logs (or out
+        //  of log disk entirely)
+        //
+        //  NOTE: must check even if fLogged is FALSE
+        //  because we may be in the pseudo-logging-disabled
+        //  state where logging is actually enabled, but
+        //  we're not logging batch index creation, but
+        //  we are still logging space operations, so we may
+        //  end up filling the logs with that
+        //
         CallR( pinst->m_plog->ErrLGCheckState() );
 
         CallR( ErrDIRAppend(
@@ -3761,6 +4255,7 @@ INLINE ERR ErrFILEIAppendToIndex(
 }
 
 
+// Don't make this INLINE, since it's just error-handling code.
 LOCAL VOID FILEIReportIndexCorrupt( FUCB * const pfucbIndex, CPRINTF * const pcprintf )
 {
 
@@ -3774,6 +4269,11 @@ LOCAL VOID FILEIReportIndexCorrupt( FUCB * const pfucbIndex, CPRINTF * const pcp
     Assert( pfcbTable->FTypeTable() );
     Assert( pfcbTable->Ptdb() != ptdbNil );
 
+    // Strictly speaking, EnterDML() is not needed because this
+    // function only gets executed by the consistency-checker,
+    // which is single-threaded.  However, make the call anyway
+    // to avoid potential bugs in the future if this function
+    // ever gets used in multi-threaded situations.
     pfcbTable->EnterDML();
     (*pcprintf)(
         "Table \"%s\", Index \"%s\"%s:  ",
@@ -3961,6 +4461,9 @@ LOCAL ERR ErrFILESingleIndexTerm(
                                         TickOSTimeCurrent() - tickStart ) );
 #endif
 
+    //  transfer index entries to actual index
+    //  insert first one in normal method!
+    //
     err = ErrSORTNext( rgpfucbSort[iindex] );
     if ( err < 0 )
     {
@@ -3976,6 +4479,8 @@ LOCAL ERR ErrFILESingleIndexTerm(
     if ( fEntriesExist )
     {
 
+        //  open cursor on index
+        //
         Assert( pfucbNil == pfucbIndex );
         Call( ErrDIROpen( ppib, pfcbIndex, &pfucbIndex ) );
         FUCBSetIndex( pfucbIndex );
@@ -4036,12 +4541,15 @@ LOCAL ERR ErrFILESingleIndexTerm(
     {
         if ( cRecOutput < rgcRecInput[iindex] && !fUnique )
         {
+            //  duplicates over multi-valued columns must have been removed
         }
 
         else if ( NULL != pfCorruptionEncountered )
         {
             *pfCorruptionEncountered = fTrue;
 
+            // Only report this error if we haven't
+            // encountered corruption on this index already.
             if ( !fCorruptedIndex )
             {
                 if ( cRecOutput > rgcRecInput[iindex] )
@@ -4067,6 +4575,9 @@ LOCAL ERR ErrFILESingleIndexTerm(
             Assert( cRecOutput < rgcRecInput[iindex] );
             Assert( fUnique );
 
+            //  If we got dupes and the index was NOT unique, it must have been
+            //  dupes over multi-value columns, in which case the dupes
+            //  get properly eliminated.
             err = ErrERRCheck( JET_errKeyDuplicate );
             goto HandleError;
         }
@@ -4109,7 +4620,7 @@ ERR ErrFILEIndexBatchTerm(
                         iindex,
                         pfCorruptionEncountered,
                         pcprintf,
-                        fFalse ) );
+                        fFalse ) );     //  only called by defrag, which has logging disabled
 
         if ( pstatus )
         {
@@ -4166,11 +4677,14 @@ LOCAL VOID ErrFILEIndexDispatchAddEntries(
     KEYDATAFLAGS                kdf;
     LONG                        cEntriesAdded;
 
+    // Establish user trace context because this code runs on a threadpool thread
     Assert( PutcTLSGetUserContext() == NULL );
     pidxcontext->pfucbTable->ppib->SetUserTraceContextInTls();
     PIBTraceContextScope tcScope = pidxcontext->pfucbTable->ppib->InitTraceContextScope();
     tcScope->iorReason.SetIort( iortSort );
 
+    //  only proceed if previous tasks did not encounter an error
+    //
     if ( JET_errSuccess == pidxcontext->err )
     {
         const INT   ilineMax    = pcsr->Cpage().Clines();
@@ -4180,11 +4694,20 @@ LOCAL VOID ErrFILEIndexDispatchAddEntries(
             Assert( pcsr->FLatched() );
             NDIGetKeydataflags( pcsr->Cpage(), pcsr->ILine(), &kdf );
 
+            //  WARNING! WARNING! WARNING!
+            //  Batch index creation is only performed when we have
+            //  exclusive use of the table, so we don't need to worry
+            //  about versioning and can therefore get away with just
+            //  checking the fDeleted flag
+            //
             if ( FNDDeleted( kdf ) )
             {
                 continue;
             }
 
+            //  must copy key to a buffer because the routines that use it
+            //  are not prepared to deal with prefix/suffix
+            //
             kdf.key.CopyIntoBuffer( pidxcontext->dataBMBuffer.Pv(), cbKeyAlloc );
             pidxcontext->dataBMBuffer.SetCb( kdf.key.Cb() );
 
@@ -4217,6 +4740,9 @@ LOCAL VOID ErrFILEIndexDispatchAddEntries(
         }
     }
 
+    //  NOTE:  we disable ownership tracking here because we are
+    //  releasing read latches acquired for us by another thread
+    //
     CLockDeadlockDetectionInfo::DisableOwnershipTracking();
     pcsr->ReleasePage();
     CLockDeadlockDetectionInfo::EnableOwnershipTracking();
@@ -4234,11 +4760,14 @@ LOCAL VOID ErrFILEIndexDispatchSortTerm(
     CREATEINDEXCONTEXT * const  pidxcontext     = (CREATEINDEXCONTEXT *)dwParam1;
     FCBINDEXCONTEXT * const     pfcbcontext     = (FCBINDEXCONTEXT *)dwParam3;
 
+    // Establish user trace context because this code runs on a threadpool thread
     Assert( PutcTLSGetUserContext() == NULL );
     pidxcontext->pfucbTable->ppib->SetUserTraceContextInTls();
     PIBTraceContextScope tcScope = pidxcontext->pfucbTable->ppib->InitTraceContextScope();
     tcScope->iorReason.SetIort( iortSort );
 
+    //  only proceed if previous tasks did not encounter an error
+    //
     if ( JET_errSuccess == pidxcontext->err )
     {
         BOOL    fCorrupt    = fFalse;
@@ -4260,6 +4789,8 @@ LOCAL VOID ErrFILEIndexDispatchSortTerm(
 
             if ( pidxcontext->pstatus )
             {
+                //  HACK: use DDL/DML latch to serialize progress meter update
+                //
                 pidxcontext->pfucbTable->u.pfcb->EnterDDL();
                 errT = ErrFILEIndexProgress( pidxcontext->pstatus );
                 pidxcontext->pfucbTable->u.pfcb->LeaveDDL();
@@ -4292,6 +4823,8 @@ LOCAL ERR ErrFILEITerminateSorts(
 
     Alloc( rgfcbcontext = (FCBINDEXCONTEXT *)PvOSMemoryHeapAlloc( sizeof(FCBINDEXCONTEXT) * cIndexes ) );
 
+    //  sort and generate index keys
+    //
     for ( ULONG iindex = 0; iindex < cIndexes; iindex++, pfcbIndexes = pfcbIndexes->PfcbNextIndex() )
     {
         rgfcbcontext[iindex].pfcbIndex = pfcbIndexes;
@@ -4314,11 +4847,21 @@ HandleError:
 
 INLINE VOID FILEIPossiblyWaitForDispatchedTasks( const CREATEINDEXCONTEXT * const pidxcontext, const ULONG iProc )
 {
+    //  if we're latching too many pages, wait for some tasks to complete
+    //
     ULONG_PTR   cbfCacheT       = 0;
     ULONG       cTasksPending   = pidxcontext->taskmgrCreateIndex.CPostedTasks();
 
+    //  snapshot current buffer manager size
     CallS( ErrBFGetCacheSize( &cbfCacheT ) );
 
+    //  tasks implicitly match to page latches, so we'll
+    //  compare the number of pending tasks to the current
+    //  buffer manager size to determine if we need to wait
+    //
+    //  if this thread is hogging over half the cached pages,
+    //  wait for it to finish some work
+    //
     if ( cTasksPending > SIZE_T( cbfCacheT * 2 / 3  ) )
     {
         ULONG   csecWait    = 1;
@@ -4335,6 +4878,9 @@ INLINE VOID FILEIPossiblyWaitForDispatchedTasks( const CREATEINDEXCONTEXT * cons
 
             UtilSleep( csecWait * 1000 );
 
+            //  increment wait if we have to retry again
+            //  (capping the wait time at 30 seconds)
+            //
             if ( csecWait < 30 )
                 csecWait *= 2;
 
@@ -4343,6 +4889,9 @@ INLINE VOID FILEIPossiblyWaitForDispatchedTasks( const CREATEINDEXCONTEXT * cons
     }
 }
 
+// USED BY PARALLEL INDEX BUILD AND
+// BY OFFLINE DEFRAG WITH MORE THEN 16 INDICES
+//
 ERR ErrFILEBuildAllIndexes(
     PIB * const             ppib,
     FUCB * const            pfucbTable,
@@ -4379,6 +4928,8 @@ ERR ErrFILEBuildAllIndexes(
 
     Assert( !fLogged || !pinst->m_plog->FLogDisabled() );
 
+    //  just to be safe, don't use up all available sorts
+    //
     CallS( ErrRESGetResourceParam( pinst, JET_residSCB, JET_resoperMaxUse, &cSCBMax ) );
     CallS( ErrRESGetResourceParam( pinst, JET_residSCB, JET_resoperCurrentUse, &cSCBInUse ) );
     cIndexBatchMax = min( cIndexBatchMaxRequested, ULONG( ( cSCBMax - cSCBInUse ) * 0.9 ) );
@@ -4387,16 +4938,22 @@ ERR ErrFILEBuildAllIndexes(
         cIndexBatchMax = 1;
     }
 
+    // Set the trace context
+    //
     PIBTraceContextScope tcScope = ppib->InitTraceContextScope();
     tcScope->nParentObjectClass = TceFromFUCB( pfucbTable );
     tcScope->SetDwEngineObjid( ObjidFDP( pfucbTable ) );
 
+    //  save off current buffer settings as we will be resizing
+    //  the buffer manager during the index rebuild
+    //
     ulCacheSizeMaxSave = UlParam( JET_paramCacheSizeMax );
     ulStartFlushThresholdSave = UlParam( JET_paramStartFlushThreshold );
     ulStopFlushThresholdSave = UlParam( JET_paramStopFlushThreshold );
 
     if ( 0 == ppib->Level() )
     {
+        //  only reason we need a transaction is to ensure read-consistency of primary data
         CallR( ErrDIRBeginTransaction( ppib, 34085, NO_GRBIT ) );
         fTransactionStarted = fTrue;
     }
@@ -4404,6 +4961,9 @@ ERR ErrFILEBuildAllIndexes(
     const ULONG_PTR     ulStartFlushThresholdForIndexCreate     = 5 * ulCacheSizeMaxSave / 100;
     const ULONG_PTR     ulStopFlushThresholdForIndexCreate      = 6 * ulCacheSizeMaxSave / 100;
 
+    //  have to do this comparison to ensure
+    //  settings are always valid
+    //
     if ( ulStopFlushThresholdForIndexCreate > ulStopFlushThresholdSave )
     {
         CallS( Param( pinstNil, JET_paramStopFlushThreshold )->Set( pinstNil, ppibNil, ulStopFlushThresholdForIndexCreate, NULL ) );
@@ -4415,6 +4975,10 @@ ERR ErrFILEBuildAllIndexes(
         CallS( Param( pinstNil, JET_paramStopFlushThreshold )->Set( pinstNil, ppibNil, ulStopFlushThresholdForIndexCreate, NULL ) );
     }
     
+    //  set DB extension size to 1% of the current size of the table, up to
+    //  a limit (I somewhat arbitrarily chose the limit to be a number of pages
+    //  equal to the page size)
+    //
     Call( ErrSPGetInfo(
                 ppib,
                 pfucbTable->ifmp,
@@ -4424,6 +4988,9 @@ ERR ErrFILEBuildAllIndexes(
                 fSPOwnedExtent ) );
     Call( Param( pinst, JET_paramDbExtensionSize )->Set( pinst, ppibNil, max( cpgDbExtensionSizeSave, (CPG)min( g_cbPage, cpgTable / 100 ) ), NULL ) );
 
+    //  if we have a lot of indices to rebuild, make sure we
+    //  have enough temp disk space to accommodate the request
+    //
     if ( cIndexBatchMax > cFILEIndexBatchSizeDefault )
     {
         const QWORD     cbTable         = QWORD( cpgTable ) * QWORD( g_cbPage );
@@ -4432,8 +4999,12 @@ ERR ErrFILEBuildAllIndexes(
 
         Call( ErrEnsureTempDatabaseOpened( pinst, ppib ) );
 
+        //  first check if we have enough free space for potential temp. database growth
+        //
         Call( pinst->m_pfsapi->ErrDiskSpace( SzParam( pinst, JET_paramTempPath ), &cbFreeTempDisk ) );
 
+        //  add on any free space in the temp. db, since that's potentially re-usable
+        //
         Call( ErrSPGetInfo(
                     ppib,
                     pinst->m_mpdbidifmp[ dbidTemp ],
@@ -4445,18 +5016,32 @@ ERR ErrFILEBuildAllIndexes(
 
         if ( cbFreeTempDisk > QWORD( cbTable * 0.75 ) )
         {
+            //  plenty of disk space for the temp database to grow (relative
+            //  to the size of the table), so permit building as many indices
+            //  as requested
+            //
             NULL;
         }
         else
         {
+            //  assume that on average, each index is going to be about 1%
+            //  of the size of the table, so use that assumption to come
+            //  up with an index batch size to use
+            //
             cIndexBatchMax = min( cIndexBatchMax, ULONG( cbFreeTempDisk * 100 / cbTable ) );
 
+            //  if more than 75%, should have been permitted to build all indices
+            //
             Assert( cIndexBatchMax <= 75 );
 
+            //  enforce minimum batch size
+            //
             cIndexBatchMax = max( cIndexBatchMax, cFILEIndexBatchSizeDefault );
         }
     }
 
+    //  now check if we have enough free space for potential log disk growth
+    //
     if ( cIndexBatchMax > cFILEIndexBatchSizeDefault
         && g_rgfmp[pfucbTable->ifmp].FLogOn() )
     {
@@ -4465,29 +5050,50 @@ ERR ErrFILEBuildAllIndexes(
             const QWORD     cbTable         = QWORD( cpgTable ) * QWORD( g_cbPage );
             QWORD           cbFreeLogDisk;
 
+            //  if circular logging enabled, then we're not going to log
+            //  the actual index entries, but we are actually going to log
+            //  space operations, so need a small amount of log disk space
+            //
             Call( pinst->m_pfsapi->ErrDiskSpace( SzParam( pinst, JET_paramLogFilePath ), &cbFreeLogDisk ) );
             if ( cbFreeLogDisk > QWORD( cbTable * 0.001 ) )
             {
+                //  plenty of disk space for logging space operations (relative
+                //  to the size of the table), so permit building as many indices
+                //  as requested
+                //
                 NULL;
             }
             else
             {
+                //  there's a really small amount of free log disk space relative
+                //  to the size of the table, so rather than try to come up with
+                //  a formula for this, I'm just going to set the batch size to
+                //  the default batch size
+                //
                 cIndexBatchMax = cFILEIndexBatchSizeDefault;
             }
         }
         else
         {
+            //  if circular logging is disabled, we'll use the same amount of
+            //  log disk space regardless of batch size, so don't bother trimming
+            //  the index batch size
+            //
             NULL;
         }
     }
 
+    //  use all procs unless there are more procs than indices to build
+    //
     cProcs = min( CUtilProcessProcessor(), cIndexBatchMax );
 
+    //  open LV root so the async threads don't do it
+    //
     if( pfcbNil == pfucbTable->u.pfcb->Ptdb()->PfcbLV() )
     {
         FUCB *  pfucbT  = pfucbNil;
-        Call( ErrFILEOpenLVRoot( pfucbTable, &pfucbT, fFalse ) );
-        if ( pfucbNil != pfucbT )
+        Call( ErrFILEOpenLVRoot( pfucbTable, &pfucbT, fFalse ) );   //  UNDONE: use ErrDIROpenLongRoot instead
+        if ( pfucbNil != pfucbT )   //  may be NULL if no LV tree
             DIRClose( pfucbT );
     }
 
@@ -4506,16 +5112,21 @@ ERR ErrFILEBuildAllIndexes(
         }
     }
 
+    //  allocate space for index contexts, index context pointers, primary key buffers, and secondary key buffers
     Alloc( rgidxcontext = (CREATEINDEXCONTEXT *)PvOSMemoryHeapAlloc( ( sizeof(CREATEINDEXCONTEXT) + sizeof(CREATEINDEXCONTEXT *) + cbKeyAlloc + cbKeyAlloc ) * cProcs ) );
     memset( rgidxcontext, 0, sizeof(CREATEINDEXCONTEXT) * cProcs );
 
+    //  allocate space for sort cursors and entry counts
     Alloc( rgpfucbSort = (FUCB **)PvOSMemoryHeapAlloc( ( sizeof(FUCB *) + sizeof(ULONG) ) * cIndexBatchMax ) );
     memset( rgpfucbSort, 0, sizeof(FUCB *) * cIndexBatchMax );
 
+    //  arrays of index context pointers, primary key buffers, and secondary key buffers
+    //  hangs off the end of the array of index contexts
     CREATEINDEXCONTEXT **   rgpidxcontext   = (CREATEINDEXCONTEXT **)( (BYTE *)rgidxcontext + ( sizeof(CREATEINDEXCONTEXT) * cProcs ) );
     BYTE * const            rgbBMBuffer     = (BYTE *)rgpidxcontext + ( sizeof(CREATEINDEXCONTEXT *) * cProcs );
     BYTE * const            rgbKeyBuffer    = rgbBMBuffer + ( cbKeyAlloc * cProcs );
 
+    //  array of entry counts hangs off the end of the array of sort cursors
     ULONG *                 rgcRecInput     = (ULONG *)( (BYTE *)rgpfucbSort + ( sizeof(FUCB *) * cIndexBatchMax ) );
 
 
@@ -4530,13 +5141,16 @@ ERR ErrFILEBuildAllIndexes(
     {
         if ( JET_errRecordNotFound == err )
         {
+            //  the tree is empty
             err = JET_errSuccess;
         }
         goto HandleError;
     }
 
+    // Cursor building index should only be navigating primary index.
     Assert( pfucbNil == pfucbTable->pfucbCurIndex );
 
+    // Don't waste time by calling this function when unneeded.
     Assert( pfcbNil != pfcbIndexes );
 
 
@@ -4554,6 +5168,9 @@ ERR ErrFILEBuildAllIndexes(
         if ( fCheckOnly )
             pidxcontext->fCheckOnly = fTrue;
 
+        //  open session/cursor for this thread and place it at
+        //  the beginning of the table
+        //
         Call( ErrDIROpen( ppib, pfucbTable->u.pfcb, &pfucbT ) );
         FUCBSetIndex( pfucbT );
         FUCBSetMayCacheLVCursor( pfucbT );
@@ -4583,6 +5200,9 @@ NextBuild:
     tickStart   = TickOSTimeCurrent();
 #endif
 
+    //  HACK: force locLogical to OnCurBM to silence
+    //  RECIRetrieveKey(), which will make DIR-level
+    //  calls using this cursor
     pfucbTable->locLogical = locOnCurBM;
 
     pfcbIndexesToBuild = pfcbNextBuildIndex;
@@ -4597,9 +5217,12 @@ NextBuild:
                 &pfcbNextBuildIndex,
                 cIndexBatchMax ) );
 
+    // This is either a full batch or the last batch of indexes to build.
     Assert( cIndexBatchMax == cIndexesToBuild
         || pfcbNil == pfcbNextBuildIndex );
 
+    //  re-initialise task manager with new index batch
+    //
     ULONG   cProcsCurrBatch;
     ULONG   iindexNext;
     FCB *   pfcbIndexesRemaining;
@@ -4654,7 +5277,12 @@ NextBuild:
     OSTraceIndent( tracetagIndexPerf, -1 );
 #endif
 
+    //  build up new index in a sort file
+    //
 
+    // The PIB here is going to be used on multiple threads at the same time
+    // when we post index creation tasks.
+    // Set its cached TLS pointer to NULL to force an actual TLS lookup
     ppib->ptlsApi = NULL;
 
     CallS( err );
@@ -4664,7 +5292,7 @@ NextBuild:
 
 #ifdef SHOW_INDEX_PERF
         cPages++;
-        cRecs += pcsrTable->Cpage().Clines();
+        cRecs += pcsrTable->Cpage().Clines();   //  this is an estimate because we don't know how many are deleted      cPages++;
 #endif
 
         Assert( pcsrTable->FLatched() );
@@ -4674,14 +5302,38 @@ NextBuild:
         {
             CREATEINDEXCONTEXT * const  pidxcontext     = rgidxcontext + iProc;
 
+            //  verify no errors encountered on previous tasks
+            //
             Call( pidxcontext->err );
 
+            //  this loop can take some time, so see if we need
+            //  to terminate because of shutdown
+            //
             Call( pinst->ErrCheckForTermination() );
 
+            //  check if the log disk is full, because even
+            //  though we're still in the scanning phase,
+            //  we won't be able to insert keys into the
+            //  index if we can't log the insertion
+            //
+            //  NOTE: must check even if fLogged is FALSE
+            //  because we may be in the pseudo-logging-disabled
+            //  state where logging is actually enabled, but
+            //  we're not logging batch index creation, but
+            //  we are still logging space operations, so we may
+            //  end up filling the logs with that
+            //
             Call( pinst->m_plog->ErrLGCheckState() );
 
+            //  create a new CSR for this task
+            //
             Alloc( pcsrT = new CSR );
 
+            //  latch the page for the task
+            //
+            //  NOTE:  we disable ownership tracking here because we are
+            //  acquiring read latches for other threads
+            //
             CLockDeadlockDetectionInfo::DisableOwnershipTracking();
             Call( pcsrT->ErrGetReadPage(
                             ppib,
@@ -4691,16 +5343,26 @@ NextBuild:
                             pcsrTable->Cpage().PBFLatch() ) );
             CLockDeadlockDetectionInfo::EnableOwnershipTracking();
 
+            //  post the task with the page latched to
+            //  ensure it doesn't go away
+            //
             Call( pidxcontext->taskmgrCreateIndex.ErrTMPost(
                                     ErrFILEIndexDispatchAddEntries,
                                     0,
                                     (DWORD_PTR)pcsrT ) );
 
+            //  memory will be freed after task has been dispatched
+            //
             pcsrT = pcsrNil;
 
             FILEIPossiblyWaitForDispatchedTasks( pidxcontext,iProc );
         }
 
+        //  HACK! HACK! HACK!
+        //  Force currency to the last node on the page so that the subsequent call
+        //  to ErrBTNext() will skip to the next page.  The individual nodes on the
+        //  current page will be handled by the dispatched tasks.
+        //
         pcsrTable->SetILine( pcsrTable->Cpage().Clines() - 1 );
 #ifdef DEBUG
         NDGet( pfucbTable );
@@ -4721,6 +5383,8 @@ NextBuild:
     FUCBResetPreread( pfucbTable );
     BTUp( pfucbTable );
 
+    //  wait for sorts to finish
+    //
     for ( iProc = 0; iProc < cProcsCurrBatch; iProc++ )
     {
         CREATEINDEXCONTEXT *    pidxcontext     = rgidxcontext + iProc;
@@ -4757,6 +5421,8 @@ NextBuild:
 
     Call( ErrFILEITerminateSorts( rgpidxcontext, pfcbIndexesToBuild, cIndexesToBuild, cProcsCurrBatch ) );
 
+    //  check for errors and set corruption flag if necessary
+    //
     for ( iProc = 0; iProc < cProcsCurrBatch; iProc++ )
     {
         CREATEINDEXCONTEXT *    pidxcontext     = rgidxcontext + iProc;
@@ -4771,6 +5437,7 @@ NextBuild:
 
     if ( pfcbNil != pfcbNextBuildIndex )
     {
+        //  reseek to beginning of data (must succeed since it succeeded the first time)
         FUCBSetPrereadForward( pfucbTable, cpgPrereadSequential );
         err = ErrBTDown( pfucbTable, &dib, latchReadTouch );
         CallS( err );
@@ -4787,6 +5454,11 @@ NextBuild:
     else if ( !fLogged
         && g_rgfmp[pfucbTable->ifmp].FLogOn() )
     {
+        //  index creation wasn't logged, but
+        //  logging in general is enabled, so must
+        //  force-flush database and guarantee it
+        //  succeeded
+        //
 #ifdef SHOW_INDEX_PERF
         OSTrace( tracetagIndexPerf, "About to force-flush entire database after index creation.\n" );
 #endif
@@ -4794,6 +5466,11 @@ NextBuild:
         Call( ErrBFFlush( pfucbTable->ifmp ) );
         Enforce( JET_errSuccess == err );
 
+        //  HACK: must force a dummy logged update anywhere in this
+        //  database to ensure that after recovery, the dbtime in the
+        //  db header is greater than any of the dbtimes in the non-
+        //  logged indexes
+        //
         Call( ErrSPDummyUpdate( pfucbTable ) );
 
 #ifdef SHOW_INDEX_PERF
@@ -4836,6 +5513,9 @@ HandleError:
     {
         if ( pcsrNil != pcsrT )
         {
+            //  NOTE:  we disable ownership tracking here because we are
+            //  releasing read latches we acquired for other threads
+            //
             CLockDeadlockDetectionInfo::DisableOwnershipTracking();
             pcsrT->ReleasePage();
             CLockDeadlockDetectionInfo::EnableOwnershipTracking();
@@ -4875,10 +5555,13 @@ HandleError:
 
     if ( fTransactionStarted )
     {
+        //  read-only transaction, so should never fail
         CallS( ErrDIRCommitTransaction( ppib, NO_GRBIT ) );
     }
 
 
+    //  restore original buffer manager thresholds
+    //
     if ( ulStopFlushThresholdSave > ulStopFlushThresholdForIndexCreate )
     {
         CallS( Param( pinstNil, JET_paramStopFlushThreshold )->Set( pinstNil, ppibNil, ulStopFlushThresholdSave, NULL ) );
@@ -4900,6 +5583,8 @@ HandleError:
         }
     }
 
+    //  restore original DB extension size
+    //
     CallS( Param( pinst, JET_paramDbExtensionSize )->Set( pinst, ppibNil, cpgDbExtensionSizeSave, NULL ) );
 
     ppib->ResetFBatchIndexCreation();
@@ -4951,6 +5636,9 @@ ERR ErrFILEIndexBatchTerm(
                                             TickOSTimeCurrent() - tickStart ) );
 #endif
 
+        //  transfer index entries to actual index
+        //  insert first one in normal method!
+        //
         err = ErrSORTNext( rgpfucbSort[iindex] );
         if ( err < 0 )
         {
@@ -4966,6 +5654,8 @@ ERR ErrFILEIndexBatchTerm(
         if ( fEntriesExist )
         {
 
+            //  open cursor on index
+            //
             Assert( pfucbNil == pfucbIndex );
             Call( ErrDIROpen( ppib, pfcbIndex, &pfucbIndex ) );
             FUCBSetIndex( pfucbIndex );
@@ -5026,12 +5716,15 @@ ERR ErrFILEIndexBatchTerm(
         {
             if ( cRecOutput < rgcRecInput[iindex] && !fUnique )
             {
+                //  duplicates over multi-valued columns must have been removed
             }
 
             else if ( NULL != pfCorruptionEncountered )
             {
                 *pfCorruptionEncountered = fTrue;
 
+                // Only report this error if we haven't
+                // encountered corruption on this index already.
                 if ( !fCorruptedIndex )
                 {
                     if ( cRecOutput > rgcRecInput[iindex] )
@@ -5057,6 +5750,9 @@ ERR ErrFILEIndexBatchTerm(
                 Assert( cRecOutput < rgcRecInput[iindex] );
                 Assert( fUnique );
 
+                //  If we got dupes and the index was NOT unique, it must have been
+                //  dupes over multi-value columns, in which case the dupes
+                //  get properly eliminated.
                 err = ErrERRCheck( JET_errKeyDuplicate );
                 goto HandleError;
             }
@@ -5105,6 +5801,7 @@ ERR ErrFILEBuildAllIndexes(
 
     if ( 0 == ppib->Level() )
     {
+        //  only reason we need a transaction is to ensure read-consistency of primary data
         CallR( ErrDIRBeginTransaction( ppib, 50469, NO_GRBIT ) );
         fTransactionStarted = fTrue;
     }
@@ -5128,12 +5825,15 @@ ERR ErrFILEBuildAllIndexes(
     Assert( JET_errNoCurrentRecord != err );
     if( JET_errRecordNotFound == err )
     {
+        //  the tree is empty
         err = JET_errSuccess;
         goto HandleError;
     }
 
+    // Cursor building index should only be navigating primary index.
     Assert( pfucbNil == pfucbTable->pfucbCurIndex );
 
+    // Don't waste time by calling this function when unneeded.
     Assert( pfcbNil != pfcbIndexes );
 
     pfcbNextBuildIndex = pfcbIndexes;
@@ -5149,6 +5849,9 @@ NextBuild:
     tickStart   = TickOSTimeCurrent();
 #endif
 
+    //  HACK: force locLogical to OnCurBM to silence
+    //  RECIRetrieveKey(), which will make DIR-level
+    //  calls using this cursor
     pfucbTable->locLogical = locOnCurBM;
 
     pfcbIndexesToBuild = pfcbNextBuildIndex;
@@ -5164,6 +5867,7 @@ NextBuild:
                 &pfcbNextBuildIndex,
                 cIndexBatchMax );
 
+    // This is either a full batch or the last batch of indexes to build.
     Assert( err < 0
         || cIndexBatchMax == cIndexesToBuild
         || pfcbNil == pfcbNextBuildIndex );
@@ -5185,14 +5889,24 @@ NextBuild:
     OSTraceIndent( tracetagIndexPerf, -1 );
 #endif
 
+    //  build up new index in a sort file
+    //
     do
     {
         Call( err );
 
+        //  this loop can take some time, so see if we need
+        //  to terminate because of shutdown
+        //
         Call( pinst->ErrCheckForTermination() );
 
         if ( fLogged )
         {
+            //  check if the log disk is full, because even
+            //  though we're still in the scanning phase,
+            //  we won't be able to insert keys into the
+            //  index if we can't log the insertion
+            //
             Call( pinst->m_plog->ErrLGCheckState() );
         }
 
@@ -5206,6 +5920,8 @@ NextBuild:
         }
 #endif
 
+        //  get bookmark of primary index node
+        //
         Assert( Pcsr( pfucbTable )->FLatched() );
         Assert( locOnCurBM == pfucbTable->locLogical );
         Call( ErrBTISaveBookmark( pfucbTable ) );
@@ -5248,6 +5964,7 @@ NextBuild:
 
     if ( pfcbNil != pfcbNextBuildIndex )
     {
+        //  reseek to beginning of data (must succeed since it succeeded the first time)
         FUCBSetPrereadForward( pfucbTable, cpgPrereadSequential );
         err = ErrBTDown( pfucbTable, &dib, latchReadTouch );
         CallS( err );
@@ -5289,6 +6006,7 @@ HandleError:
 
     if ( fTransactionStarted )
     {
+        //  read-only transaction, so should never fail
         CallS( ErrDIRCommitTransaction( ppib, NO_GRBIT ) );
     }
 
@@ -5297,9 +6015,11 @@ HandleError:
     return err;
 }
 
-#endif
+#endif  //  PARALLEL_BATCH_INDEX_BUILD
 
 
+//  resume logging on an index build for which logging was initially suspended
+//
 LOCAL VOID FILEIEnableCreateIndexLogging( PIB * ppib, FCB * const pfcbIdx )
 {
     INST * const    pinst           = PinstFromPpib( ppib );
@@ -5309,10 +6029,15 @@ LOCAL VOID FILEIEnableCreateIndexLogging( PIB * ppib, FCB * const pfcbIdx )
     Assert( g_rgfmp[pfcbIdx->Ifmp()].FLogOn() );
     Assert( !pinst->m_plog->FLogDisabled() );
 
+    //  reset flag
+    //
     pfcbIdx->Lock();
     pfcbIdx->ResetDontLogSpaceOps();
     pfcbIdx->Unlock();
 
+    //  decrement count of non-logged index creators to
+    //  release backup
+    //
     pinst->DecrementCNonLoggedIndexCreators();
 
     szTraceBuffer[cbTraceBuffer] = 0;
@@ -5326,6 +6051,25 @@ LOCAL VOID FILEIEnableCreateIndexLogging( PIB * ppib, FCB * const pfcbIdx )
 }
 
 
+//+API
+// BuildIndex
+// ========================================================================
+// ERR BuildIndex( PIB *ppib, FUCB *pfucb, CHAR *szIndex )
+//
+// Builds a new index for a file from scratch;  szIndex gives the
+// name of an index definition.
+//
+// PARAMETERS   ppib                        PIB of user
+//              pfucb                       Exclusively opened FUCB on file
+//              szIndex                     name of index to build
+//
+// RETURNS      Error code from DIRMAN or SORT or
+//                  JET_errSuccess          Everything worked OK.
+// COMMENTS
+//          A transaction is wrapped around this function at the callee.
+//
+// SEE ALSO     ErrIsamCreateIndex
+//-
 LOCAL ERR ErrFILEIBuildIndex(
     PIB *           ppib,
     FUCB *          pfucbTable,
@@ -5347,8 +6091,10 @@ LOCAL ERR ErrFILEIBuildIndex(
     LONG            cRecInput       = 0;
     LONG            cRecOutput;
 
+    // Cursor building index should only be navigating primary index.
     Assert( pfucbNil == pfucbTable->pfucbCurIndex );
 
+    // Work buffer is not used when building index.
     Assert( NULL == pfucbIndex->pvWorkBuf );
 
     Assert( FFUCBSecondary( pfucbIndex ) );
@@ -5357,6 +6103,7 @@ LOCAL ERR ErrFILEIBuildIndex(
     Assert( pfcbIdx->FTypeSecondaryIndex() );
     Assert( pfcbIdx->FInitialized() );
 
+    // Index has not yet been linked into table's index list.
     Assert( pfcbIdx->PfcbTable() == pfcbNil );
     Assert( pfcbIdx->PfcbNextIndex() == pfcbNil );
 
@@ -5372,12 +6119,16 @@ LOCAL ERR ErrFILEIBuildIndex(
     Assert( JET_errNoCurrentRecord != err );
     if( JET_errRecordNotFound == err )
     {
+        //  the tree is empty
         err = JET_errSuccess;
         goto HandleError;
     }
 
     Call( err );
 
+    //  HACK: force locLogical to OnCurBM to silence
+    //  RECIRetrieveKey(), which will make DIR-level
+    //  calls using this cursor
     pfucbTable->locLogical = locOnCurBM;
 
     Alloc( pbKey = (BYTE *)RESKEY.PvRESAlloc() );
@@ -5385,6 +6136,8 @@ LOCAL ERR ErrFILEIBuildIndex(
     keyBuffer.suffix.SetCb( cbKeyAlloc );
     keyBuffer.suffix.SetPv( pbKey );
 
+    //  open sort
+    //
     err = ErrSORTOpen( ppib, &pfucbSort, fUnique, fTrue );
 
 #ifdef SHOW_INDEX_PERF
@@ -5397,24 +6150,57 @@ LOCAL ERR ErrFILEIBuildIndex(
     tickStart   = TickOSTimeCurrent();
 #endif
 
+    //  build up new index in a sort file
+    //
     do
     {
         Call( err );
 
+        //  this loop can take some time, so see if we need
+        //  to terminate because of shutdown
+        //
         Call( pinst->ErrCheckForTermination() );
 
+        //  check if the log disk is full, because even
+        //  though we're still in the scanning phase,
+        //  we won't be able to insert keys into the
+        //  index if we can't log the insertion
+        //
+        //  NOTE: must check even if fIndexLogged is FALSE
+        //  because we may be in the pseudo-logging-disabled
+        //  state where logging is actually enabled, but
+        //  we're not logging index creation, but we are
+        //  still logging space operations, so we may end
+        //  up filling the logs with that, and even if
+        //  logging is truly disabled, we're just doing
+        //  an extra check of a couple of members of LOG
+        //
         Call( plog->ErrLGCheckState() );
 
+        //  if we've suspended logging on this btree,
+        //  but a backup is in progress, we're going
+        //  to have to enable logging to ensure
+        //  the backup set is created properly
+        //
         if ( pbackup->FBKBackupInProgress()
             && !( *pfIndexLogged )
             && g_rgfmp[pfucbTable->ifmp].FLogOn() )
         {
+            // surrogate backup shouldn't happen on circular 
+            // logging, which is the only time we suspend logging.
             Assert( pbackup->FBKBackupInProgress( BACKUP_CONTEXT::backupLocalOnly ) );
             Assert( !plog->FLogDisabled() );
             Assert( fDIRFlags & fDIRNoLog );
             fDIRFlags &= ~fDIRNoLog;
 
+            //  NOTE: we don't need to force-flush here
+            //  (as we do below) because at this point,
+            //  we're just scanning and building the
+            //  sort, so we haven't written anything
+            //  non-logged to the database yet
 
+            //  re-enable logging
+            //
             *pfIndexLogged = fTrue;
             FILEIEnableCreateIndexLogging( ppib, pfcbIdx );
         }
@@ -5429,6 +6215,8 @@ LOCAL ERR ErrFILEIBuildIndex(
         }
 #endif
 
+        //  get bookmark of primary index node
+        //
         Assert( Pcsr( pfucbTable )->FLatched() );
         Assert( locOnCurBM == pfucbTable->locLogical );
         Call( ErrBTISaveBookmark( pfucbTable ) );
@@ -5477,6 +6265,9 @@ LOCAL ERR ErrFILEIBuildIndex(
                                         TickOSTimeCurrent() - tickStart ) );
 #endif
 
+    //  transfer index entries to actual index
+    //  insert first one in normal method!
+    //
     err = ErrSORTNext( pfucbSort );
     if ( err < 0 )
     {
@@ -5488,6 +6279,8 @@ LOCAL ERR ErrFILEIBuildIndex(
         goto HandleError;
     }
 
+    //  move to FDP root
+    //
     DIRGotoRoot( pfucbIndex );
     Call( ErrDIRInitAppend( pfucbIndex ) );
 
@@ -5502,6 +6295,8 @@ LOCAL ERR ErrFILEIBuildIndex(
     Assert( Pcsr( pfucbIndex )->FLatched() );
     cRecOutput = 1;
 
+    //  from now on, try short circuit first
+    //
     forever
     {
         err = ErrSORTNext( pfucbSort );
@@ -5509,23 +6304,58 @@ LOCAL ERR ErrFILEIBuildIndex(
             break;
         Call( err );
 
+        //  this loop can take some time, so see if we need
+        //  to terminate because of shutdown
+        //
         Call( pinst->ErrCheckForTermination() );
 
+        //  don't want to fill up reserve logs with index entries,
+        //  so bail out if we're in the reserve logs (or out
+        //  of log disk entirely)
+        //
+        //  NOTE: must check even if fIndexLogged is FALSE
+        //  because we may be in the pseudo-logging-disabled
+        //  state where logging is actually enabled, but
+        //  we're not logging index creation, but we are
+        //  still logging space operations, so we may end
+        //  up filling the logs with that, and even if
+        //  logging is truly disabled, we're just doing
+        //  an extra check of a couple of members of LOG
+        //
         Call( plog->ErrLGCheckState() );
 
+        //  if we've suspended logging on this btree,
+        //  but a backup is in progress, we're going
+        //  to have to enable logging to ensure
+        //  the backup set is created properly
+        //
         if ( pbackup->FBKBackupInProgress()
             && !( *pfIndexLogged )
             && g_rgfmp[pfucbTable->ifmp].FLogOn() )
         {
+            // surrogate backup shouldn't happen on circular 
+            // logging, which is the only time we suspend logging.
             Assert( pbackup->FBKBackupInProgress( BACKUP_CONTEXT::backupLocalOnly ) );
             Assert( !plog->FLogDisabled() );
             Assert( fDIRFlags & fDIRNoLog );
             fDIRFlags &= ~fDIRNoLog;
 
+            //  schedule log flush to minimise the chance a log
+            //  flush dependendency will be hit trying to flush
+            //  this index (because some things, like space ops
+            //  in the table space tree, are still logged and
+            //  also because we'll try to flush pages we couldn't
+            //  latch)
+            //
             Call( ErrLGWrite( ppib ) );
 
+            //  flush all the work we've done so for to
+            //  ensure it makes it into the backup set
+            //
             Call( ErrBFFlush( pfucbTable->ifmp, pfcbIdx->ObjidFDP() ) );
 
+            //  re-enable logging
+            //
             *pfIndexLogged = fTrue;
             FILEIEnableCreateIndexLogging( ppib, pfcbIdx );
         }
@@ -5548,6 +6378,9 @@ LOCAL ERR ErrFILEIBuildIndex(
 
     Call( ErrDIRTermAppend( pfucbIndex ) );
 
+    //  If we got dupes and the index was NOT unique, it must have been
+    //  dupes over multi-value columns, in which case the dupes
+    //  get properly eliminated.
     Assert( cRecOutput <= cRecInput );
     if ( cRecOutput != cRecInput )
     {
@@ -5560,6 +6393,7 @@ LOCAL ERR ErrFILEIBuildIndex(
             }
             else
             {
+                //  duplicates over multi-valued columns must have been removed
             }
         }
         else
@@ -5585,6 +6419,7 @@ HandleError:
         BTUp( pfucbTable );
     }
 
+    // Work buffer is not used when building index.
     Assert( NULL == pfucbIndex->pvWorkBuf );
 
     RESKEY.Free( pbKey );
@@ -5630,6 +6465,7 @@ LOCAL ERR ErrFILEIProcessRCE( PIB *ppib, FUCB *pfucbTable, FUCB *pfucbIndex, RCE
 
     pfcbTable->CritRCEList().Leave();
 
+    // Find node and obtain read latch.
     err = ErrBTGotoBookmark( pfucbTable, bookmark, latchReadNoTouch );
     if ( err < 0 )
     {
@@ -5643,12 +6479,16 @@ LOCAL ERR ErrFILEIProcessRCE( PIB *ppib, FUCB *pfucbTable, FUCB *pfucbIndex, RCE
             Assert( g_crefVERCreateIndexLock >= 0 );
         }
 
+        // Must re-enter CritRCEList() before leaving, to get to the
+        // next RCE on this FCB.
         pfcbTable->CritRCEList().Enter();
         return err;
     }
 
-    Assert( Pcsr( pfucbTable )->FLatched() );
+    Assert( Pcsr( pfucbTable )->FLatched() );   // Read-latch obtained.
 
+    // Must extract proper data-record image with which to update secondary index.
+    // In order to obtain proper image, must scan future RCE's on this node.
     prce->RwlChain().EnterAsReader();
 
     RCE *prceNextReplace;
@@ -5656,6 +6496,7 @@ LOCAL ERR ErrFILEIProcessRCE( PIB *ppib, FUCB *pfucbTable, FUCB *pfucbIndex, RCE
         prceNextReplace != prceNil && prceNextReplace->Oper() != operReplace;
         prceNextReplace = prceNextReplace->PrceNextOfNode() )
     {
+        // Shouldn't be NULL, since our transaction will block cleanup.
         Assert( !prceNextReplace->FOperNull() );
     }
 
@@ -5672,28 +6513,51 @@ LOCAL ERR ErrFILEIProcessRCE( PIB *ppib, FUCB *pfucbTable, FUCB *pfucbIndex, RCE
     {
         prce->RwlChain().LeaveAsReader();
 
+        // Set dataWorkBuf.pv to point to pvWorkBuf, in case it was reset.
         Assert ( NULL != pfucbTable->pvWorkBuf );
         pfucbTable->dataWorkBuf.SetPv( (BYTE*)pfucbTable->pvWorkBuf );
 
+        // Go to database for record.
         pfucbTable->kdfCurr.data.CopyInto( pfucbTable->dataWorkBuf );
     }
 
+    // Table's cursor now contains (in dataWorkBuf) the data record used to generate
+    // the secondary index key to be inserted (for operInsert or operReplace)
+    // or deleted (for operDeleted).
+    // Read-latch may now be freed.
     BTUp( pfucbTable );
 
+    // RCE's can only be removed by two routines: RCEClean and rollback.  Since
+    // we're in a transaction and this RCE is active, the RCE is blocked from
+    // being cleaned up.  This leaves just rollback, which we handle using
+    // the g_crefVERCreateIndexLock global variable.
+    // If this count is non-zero, anyone trying to rollback an update (ie. insert,
+    // delete, or replace) on any primary index will fail and retry.
     if ( fUncommittedRCE )
     {
 
+        // This ensures that the RCE is not committed from underneath us.
+        // Note that even if the RCE has since been committed and the
+        // PIB freed, we are still able to use the rwlTrx member of
+        // the PIB because we never actually release the PIB memory
+        // (we just put it on the free PIB list).
+        // UNDONE: Optimise by blocking only Commit, not all other CreateIndex
+        // threads working on an RCE belonging to this session as well.
         PinstFromPpib( ppib )->RwlTrx( ppibProxy ).EnterAsWriter();
 
+        // Decrement PreventRollback count.  The RCEChain critical section now
+        // protects the RCE from being deleted.
         Assert( g_crefVERCreateIndexLock >= 0 );
         AtomicDecrement( const_cast<LONG *>( &g_crefVERCreateIndexLock ) );
         Assert( g_crefVERCreateIndexLock >= 0 );
 
+        // See if the RCE committed or rolled back in the time when we lost
+        // the FCB critical section and when we gained the PIB critical section.
         if ( prce->TrxCommitted() == trxMax )
         {
             if ( prce->FRolledBack() )
             {
-                err = JET_errSuccess;
+                err = JET_errSuccess;   // RCE rolled back, so nothing to do.
                 goto HandleError;
             }
         }
@@ -5723,6 +6587,10 @@ LOCAL ERR ErrFILEIProcessRCE( PIB *ppib, FUCB *pfucbTable, FUCB *pfucbIndex, RCE
         Call( ErrRECIReplaceInIndex( pfucbTable, pfucbIndex, &bookmark, prce ) );
     }
 
+    // Must version operations committed after the indexer began his
+    // transaction is to ensure that the indexer himself will have a
+    // consistent view of the secondary index.  Additionally, we must
+    // provide an RCE for write-conflict detection.
 
 HandleError:
     AssertDIRNoLatch( pfucbTable->ppib );
@@ -5739,6 +6607,7 @@ HandleError:
 }
 
 
+// This routine updates the index being created with the versioned up
 LOCAL ERR ErrFILEIUpdateIndex( PIB *ppib, FUCB *pfucbTable, FUCB *pfucbIndex )
 {
     ERR         err         = JET_errSuccess;
@@ -5756,12 +6625,16 @@ LOCAL ERR ErrFILEIUpdateIndex( PIB *ppib, FUCB *pfucbTable, FUCB *pfucbIndex )
     Assert( FFUCBSecondary( pfucbIndex ) );
     Assert( pfcbIndex->FInitialized() );
     Assert( pfcbIndex->FTypeSecondaryIndex() );
-    Assert( pfcbIndex->PfcbTable() == pfcbNil );
+    Assert( pfcbIndex->PfcbTable() == pfcbNil );    // Index FCB should not be linked in yet.
     Assert( pfcbIndex->Pidb() != pidbNil );
 
+    //  allocate working buffer
+    //
     Assert( NULL == pfucbTable->pvWorkBuf );
     RECIAllocCopyBuffer( pfucbTable );
 
+    // Set dirty cursor isolation model to allow unversioned
+    // access to secondary index by proxy.
     Assert( !FPIBDirty( pfucbIndex->ppib ) );
     PIBSetCIMDirty( pfucbIndex->ppib );
 
@@ -5770,6 +6643,7 @@ LOCAL ERR ErrFILEIUpdateIndex( PIB *ppib, FUCB *pfucbTable, FUCB *pfucbIndex )
     RCE     *prceLastProcessed  = prceNil;
     RCE     *prce;
 
+    // Add sleeps to allow testing of concurrent create index finalization with concurrent updates
     ULONG msecSleepTime = (ULONG)UlConfigOverrideInjection( 58210, 0 );
     if ( msecSleepTime != 0 )
     {
@@ -5781,6 +6655,7 @@ LOCAL ERR ErrFILEIUpdateIndex( PIB *ppib, FUCB *pfucbTable, FUCB *pfucbIndex )
 
     forever
     {
+        //  scan RCE's for next one to process
         while ( prceNil != prce
                 && ( !prce->FOperAffectsSecondaryIndex()
                     || prce->FRolledBack()
@@ -5795,6 +6670,10 @@ LOCAL ERR ErrFILEIUpdateIndex( PIB *ppib, FUCB *pfucbTable, FUCB *pfucbIndex )
             if ( fUpdatesQuiesced )
                 break;
 
+            // Reached end of RCE list for this FCB.  Quiesce further updates
+            // (letting current updates complete), then re-read RCE list in
+            // case more RCE's entered while we were quiescing.  The RCE we
+            // last processed is guaranteed to remain because we block rollbacks.
             Assert( prceNil == prceLastProcessed || !prceLastProcessed->FOperNull() );
             Assert( g_crefVERCreateIndexLock >= 0 );
             AtomicIncrement( const_cast<LONG *>( &g_crefVERCreateIndexLock ) );
@@ -5843,6 +6722,7 @@ LOCAL ERR ErrFILEIUpdateIndex( PIB *ppib, FUCB *pfucbTable, FUCB *pfucbIndex )
         UtilSleep( msecSleepTime );
     }
 
+    //  link new FCB and update index mask
     Assert( fUpdatesQuiesced );
 
     pfcbTable->EnterDDL();
@@ -5903,6 +6783,9 @@ LOCAL ERR ErrFILEIPrepareOneIndex(
     BOOL            fCleanupIDB             = fFalse;
     USHORT          iidxseg;
 
+    //  if we don't have exclusive use of the table, we have
+    //  to lock all columns in the index to ensure they don't
+    //  get deleted out from underneath us
     Assert( !fLockColumn || !pfcb->FTemplateTable() );
 
     for ( iidxseg = 0; iidxseg < pidb->Cidxseg(); iidxseg++ )
@@ -5932,10 +6815,13 @@ LOCAL ERR ErrFILEIPrepareOneIndex(
         }
         else if ( fPrimary && fMultivalued )
         {
+            //  primary index cannot be multivalued
+            //
             err = ErrERRCheck( JET_errIndexInvalidDef );
         }
         else if ( ( pidxcreate->grbit & JET_bitIndexEmpty ) && FFIELDDefault( pfield->ffield ) )
         {
+            //  can't build empty index over column with default value
             err = ErrERRCheck( JET_errIndexInvalidDef );
         }
 
@@ -6060,6 +6946,8 @@ LOCAL ERR ErrFILEIPrepareOneIndex(
         pidb->SetFVersionedCreate();
     }
 
+    //  currently on Table FDP
+    //
     DIRGotoRoot( pfucbTable );
     if ( fPrimary )
     {
@@ -6071,31 +6959,45 @@ LOCAL ERR ErrFILEIPrepareOneIndex(
         }
         else
         {
+            // Primary index exists, or is in the process of being created (thus,
+            // IDB may or may not be linked in).
             Assert( pfcb->Pidb() != pidbNil );
             pfcb->LeaveDDL();
             err = ErrERRCheck( JET_errIndexHasPrimary );
             goto HandleError;
         }
 
+        // Block other threads from also creating primary index.
         pfcb->Lock();
         pfcb->ResetSequentialIndex();
         pfcb->Unlock();
 
         pfcb->LeaveDDL();
 
+        //  primary indexes are in same FDP as table
+        //
         pgnoIndexFDP = pfcb->PgnoFDP();
         objidIndex = pfcb->ObjidFDP();
 
+        // Must quiesce all updates in order to check that table is empty and
+        // then link IDB in.
         pfcb->SetIndexing();
 
+        //  check for records
+        //
         DIRGotoRoot( pfucbTable );
 
+        //  check for any node there, even if it is deleted.
+        //  UNDONE: This is too strong since it may be deleted and
+        //  committed, but this strong check ensures that no
+        //  potentially there records exist.
+        //
         DIB dib;
         dib.dirflag = fDIRAllNode;
         dib.pos = posFirst;
 
         err = ErrDIRDown( pfucbTable, &dib );
-        Assert( err <= 0 );
+        Assert( err <= 0 );     // Shouldn't get warnings.
         if ( JET_errRecordNotFound != err )
         {
             if ( JET_errSuccess == err )
@@ -6132,6 +7034,8 @@ LOCAL ERR ErrFILEIPrepareOneIndex(
             goto HandleError;
         }
 
+        //  primary index should allow all fixed length columns to be set
+        //
         if ( fPrimary && ( pfcb->Ptdb()->IbEndFixedColumns() > REC::CbRecordMost( g_rgfmp[ ifmp ].CbPage(), pidb ) ) )
         {
             err = ErrERRCheck( JET_errRecordTooBig );
@@ -6153,12 +7057,15 @@ LOCAL ERR ErrFILEIPrepareOneIndex(
 
         pfcb->SetSpaceHints( pspacehints );
 
+        // update all index mask
         FILESetAllIndexMask( pfcb );
 
         pfcb->LeaveDDL();
 
         pfcb->ResetIndexing();
 
+        //  set currency to before first
+        //
         DIRBeforeFirst( pfucbTable );
 
         Assert( pfucbNil == *ppfucbIdx );
@@ -6178,15 +7085,21 @@ LOCAL ERR ErrFILEIPrepareOneIndex(
         Assert( pgnoIndexFDP != pfcb->PgnoFDP() );
         Assert( objidIndex > objidSystemRoot );
 
+        //  objids are monotonically increasing, so an index should
+        //  always have higher objid than its table
         Assert( objidIndex > pfcb->ObjidFDP() );
 
+        //  get pfcb of index directory
+        //
         Call( ErrDIROpen( ppib, pgnoIndexFDP, ifmp, ppfucbIdx ) );
         Assert( *ppfucbIdx != pfucbNil );
-        Assert( !FFUCBVersioned( *ppfucbIdx ) );
+        Assert( !FFUCBVersioned( *ppfucbIdx ) );    // Verify won't be deferred closed.
         pfcbIdx = (*ppfucbIdx)->u.pfcb;
         Assert( !pfcbIdx->FInitialized() );
         Assert( pfcbIdx->Pidb() == pidbNil );
 
+        //  make an FCB for this index
+        //
         pfcb->EnterDDL();
         err = ErrFILEIInitializeFCB(
             ppib,
@@ -6203,6 +7116,7 @@ LOCAL ERR ErrFILEIPrepareOneIndex(
 
         Assert( pidbNil != pfcbIdx->Pidb() );
 
+        //  finish the initialization of the secondary index
 
         pfcbIdx->Lock();
         pfcbIdx->CreateComplete();
@@ -6212,6 +7126,10 @@ LOCAL ERR ErrFILEIPrepareOneIndex(
     Assert( pgnoIndexFDP > pgnoSystemRoot );
     Assert( pgnoIndexFDP <= pgnoSysMax );
 
+    //  create index is flagged in version store so that
+    //  DDL will be undone.  If flag fails then pfcbIdx
+    //  must be released.
+    //
     err = PverFromIfmp( ifmp )->ErrVERFlag( pfucbTable, operCreateIndex, &pfcbIdx, sizeof( pfcbIdx ) );
     if ( err < 0 )
     {
@@ -6224,19 +7142,23 @@ LOCAL ERR ErrFILEIPrepareOneIndex(
         else
         {
 
+            //  force the FCB to be uninitialized so that it will
+            //      eventually be purged by DIRClose
 
             pfcbIdx->Lock();
             pfcbIdx->CreateCompleteErr( errFCBUnusable );
             pfcbIdx->Unlock();
 
+            //  verify that the FUCB will not be defer-closed
 
             Assert( !FFUCBVersioned( *ppfucbIdx ) );
         }
         goto HandleError;
     }
 
-    fCleanupIDB = fFalse;
+    fCleanupIDB = fFalse;   // FCB and IDB now in version store, so rollback will clean up.
 
+    // Insert record into MSysIndexes.
     Call( ErrCATAddTableIndex(
                 ppib,
                 ifmp,
@@ -6252,6 +7174,8 @@ LOCAL ERR ErrFILEIPrepareOneIndex(
 HandleError:
     if ( fCleanupIDB )
     {
+        // We failed before we could properly version the index's FCB, so we'll
+        // have to clean up the IDB ourself.
         Assert( err < 0 );
 
         pfcb->Ptdb()->MemPool().DeleteEntry( pidb->ItagIndexName() );
@@ -6269,6 +7193,44 @@ HandleError:
 }
 
 
+// ErrFILEICreateIndex
+// ========================================================================
+// ERR ErrFILEICreateIndex(
+//      PIB     *ppib;          // IN   PIB of user
+//      FUCB    *pfucb;         // IN   Exclusively opened FUCB of file
+//      JET_INDEXCREATE3_A * pindexcreate )
+//
+//  Defines an index on a file.
+//
+// PARAMETERS
+//      ppib            PIB of user
+//      pfucb           Exclusively opened FUCB of file
+//      pindexcreate    Pointer to index create structure
+//
+//
+// RETURNS  Error code from DIRMAN or
+//          JET_errSuccess          Everything worked OK.
+//          -JET_errColumnNotFound  The index key specified
+//                                  contains an undefined field.
+//          -IndexHasPrimary        The primary index for this
+//                                  Insertfile is already defined.
+//          -IndexDuplicate         An index on this file is
+//                                  already defined with the
+//                                  given name.
+//          -IndexInvalidDef        There are too many segments
+//                                  in the key.
+//          -TableNotEmpty          A primary index may not be
+//                                  defined because there is at
+//                                  least one record already in
+//                                  the file.
+// COMMENTS
+//      If transaction level > 0, there must not be anyone currently
+//      using the file.
+//      A transaction is wrapped around this function.  Thus, any
+//      work done will be undone if a failure occurs.
+//
+// SEE ALSO     ErrIsamAddColumn, ErrIsamCreateTable, ErrIsamCreateIndex
+//-
 LOCAL ERR VTAPI ErrFILEICreateIndex(
     PIB                 * ppib,
     FUCB                * pfucbTable,
@@ -6290,6 +7252,8 @@ LOCAL ERR VTAPI ErrFILEICreateIndex(
     BOOL                fResetVersionedOnSuccess    = fFalse;
     JET_SPACEHINTS      jsphIndex;
 
+    //  check parms
+    //
     CallR( ErrPIBCheck( ppib ) );
     CheckTable( ppib, pfucbTable );
 
@@ -6298,6 +7262,7 @@ LOCAL ERR VTAPI ErrFILEICreateIndex(
         return ErrERRCheck( JET_errInvalidParameter );
     }
 
+    // Don't currently support DDL on temp. tables.
     if ( FFMPIsTempDB( pfucbTable->ifmp ) )
     {
         AssertSz( fFalse, "Don't support DDL on temp tables." );
@@ -6305,6 +7270,7 @@ LOCAL ERR VTAPI ErrFILEICreateIndex(
     }
     
     
+    // Force a write to the output structure (but don't actually modify the value).
     OnDebug( AtomicCompareExchange( &pidxcreate->err, pidxcreate->err, pidxcreate->err ) );
 
     if ( pidxcreate->pSpacehints )
@@ -6337,17 +7303,21 @@ LOCAL ERR VTAPI ErrFILEICreateIndex(
     }
 
 
+    //  ensure that table is updatable
+    //
     CallR( ErrFUCBCheckUpdatable( pfucbTable ) );
     CallR( ErrPIBCheckUpdatable( ppib ) );
 
     if ( pfcb->FFixedDDL() )
     {
+        // Check FixedDDL override.
         if ( !FFUCBPermitDDL( pfucbTable ) || pfcb->FTemplateTable() )
         {
             err = ErrERRCheck( JET_errFixedDDL );
             return err;
         }
 
+        // If DDL temporarily permitted, we must have exclusive use of the table.
         Assert( pfcb->FDomainDenyReadByUs( ppib ) );
     }
 
@@ -6397,6 +7367,7 @@ LOCAL ERR VTAPI ErrFILEICreateIndex(
 
     const BOOL  fPrimary    = idb.FPrimary();
 
+    // Temporarily open new table cursor.
     Call( ErrDIROpen( ppib, pfcb, &pfucb ) );
     FUCBSetIndex( pfucb );
     FUCBSetMayCacheLVCursor( pfucb );
@@ -6404,7 +7375,7 @@ LOCAL ERR VTAPI ErrFILEICreateIndex(
     Assert( pfucb->u.pfcb != pfcbNil );
     Assert( pfcb == pfucbTable->u.pfcb );
     Assert( pfcb->WRefCount() > 0 );
-    Assert( pfcb->FTypeTable() );
+    Assert( pfcb->FTypeTable() );   // Temp. tables have fixed DDL.
     Assert( pfcb->Ptdb() != ptdbNil );
 
     Assert( !FFUCBSecondary( pfucb ) );
@@ -6445,11 +7416,21 @@ LOCAL ERR VTAPI ErrFILEICreateIndex(
 
         if ( pidxcreate->grbit & JET_bitIndexEmpty )
         {
-            Assert( !idb.FNoNullSeg() );
+            // UNDONE: This is a VERY dangerous flag.  The client had better
+            // really know what he's doing, or the index could be easily
+            // corrupted.  Ideally, the CreateIndex() should be wrapped in
+            // a transaction along with the AddColumn() calls for the columns
+            // in the index, and no records should be added between the
+            // AddColumn() and the CreateIndex().  By putting the AddColumn()
+            // in the same transaction as the CreateIndex(), you ensure that
+            // other sessions won't be adding records with values over the
+            // indexed columns.
+            Assert( !idb.FNoNullSeg() );        // JET_bitIndexIgnoreAnyNull must also be specified.
             Assert( !idb.FAllowSomeNulls() );
             Assert( !idb.FAllowFirstNull() );
             Assert( !idb.FAllowAllNulls() );
 
+            // link new FCB and update all index mask
             pfcb->EnterDDL();
             pfcb->LinkSecondaryIndex( pfcbIdx );
             FILESetAllIndexMask( pfcb );
@@ -6461,12 +7442,19 @@ LOCAL ERR VTAPI ErrFILEICreateIndex(
             CHAR        szTraceBuffer[cbTraceBuffer + 1];
             BOOL        fIndexLogged    = g_rgfmp[pfucbTable->ifmp].FLogOn();
 
+            //  we're not going to log this index creation if logging
+            //  itself is disabled or if logging is enabled, but we're
+            //  using circular logging and no backup is in progress
+            //
+            //  Any new backup is blocked from starting below
             fIndexLogged = ( fIndexLogged
                             && ( !BoolParam( pinst, JET_paramCircularLog )
                                 || pinst->m_pbackup->FBKBackupInProgress() ) );
 
             Assert( !fIndexLogged || !pinst->m_plog->FLogDisabled() );
 
+            //  at this point the index has been added to the catalog
+            //
             const IDBFLAG   idbflagPersisted    = idb.FPersistedFlags();
             const IDXFLAG   idbflagPersistedX   = idb.FPersistedFlagsX();
 
@@ -6484,13 +7472,25 @@ LOCAL ERR VTAPI ErrFILEICreateIndex(
                 if ( pcsrTable->Cpage().FLeafPage()
                     || ( pcsrTable->Cpage().FParentOfLeaf() && pcsrTable->Cpage().Clines() < cpgSmallTableToIndex ) )
                 {
+                    //  if root page is also a leaf page or a
+                    //  parent-of-leaf page with just a few nodes,
+                    //  then this table doesn't have a lot of records,
+                    //  so don't bother disabling logging, because
+                    //  the cost of force-flushing this index is going
+                    //  to be more expensive than just logging everything
+                    //
                     fIndexLogged = fTrue;
                     Assert( !pinst->m_plog->FLogDisabled() );
                 }
                 else
                 {
+                    //  logging of this index is disabled, but logging
+                    //  in general is enabled, so we must block backup
+                    //
                     pinst->IncrementCNonLoggedIndexCreators();
 
+                    //  disable logging of space operations on this index
+                    //
                     Assert( !pfcbIdx->FDontLogSpaceOps() );
                     pfcbIdx->Lock();
                     pfcbIdx->SetDontLogSpaceOps();
@@ -6500,6 +7500,8 @@ LOCAL ERR VTAPI ErrFILEICreateIndex(
                 BTUp( pfucbTable );
             }
 
+            //  ignore errors if trace fails
+            //
             szTraceBuffer[cbTraceBuffer] = 0;
             OSStrCbFormatA(
                 szTraceBuffer,
@@ -6511,6 +7513,8 @@ LOCAL ERR VTAPI ErrFILEICreateIndex(
                 pfcbIdx->PgnoFDP() );
             CallS( pinst->m_plog->ErrLGTrace( ppib, szTraceBuffer ) );
 
+            //  build index using our versioned view of the table
+            //
             err = ErrFILEIBuildIndex( ppib, pfucb, pfucbIdx, &fIndexLogged );
 
             OSStrCbFormatA(
@@ -6524,29 +7528,51 @@ LOCAL ERR VTAPI ErrFILEICreateIndex(
 
             if ( !fIndexLogged && g_rgfmp[pfucbTable->ifmp].FLogOn() )
             {
+                //  if logging of this index build was disabled, but
+                //  logging in general is enabled, we need to force-flush
+                //  because we're going to begin logging again
+                //
                 if ( err >= JET_errSuccess )
                 {
+                    //  schedule log flush to minimise the chance a log
+                    //  flush dependendency will be hit trying to flush
+                    //  this index (because some things, like space ops
+                    //  in the table space tree, are still logged and
+                    //  also because we'll try to flush pages we couldn't
+                    //  latch)
+                    //
                     Call( ErrLGWrite( ppib ) );
 
                     err = ErrBFFlush( pfucbTable->ifmp, pfcbIdx->ObjidFDP() );
                 }
 
+                //  must reset flag and count regardless of error
+                //
                 pfcbIdx->Lock();
                 pfcbIdx->ResetDontLogSpaceOps();
                 pfcbIdx->Unlock();
                 pinst->DecrementCNonLoggedIndexCreators();
 
+                //  HACK: must force a dummy logged update anywhere in this
+                //  database to ensure that after recovery, the dbtime in the
+                //  db header is greater than any of the dbtimes in the non-
+                //  logged index
+                //
                 if ( err >= JET_errSuccess )
                 {
                     err = ErrSPDummyUpdate( pfucbIdx );
                 }
             }
 
+            //  process error
+            //
             Call( err );
 
-            Assert( !FFUCBVersioned( pfucbIdx ) );
+            Assert( !FFUCBVersioned( pfucbIdx ) );  // no versioned operations should have occurred on this cursor
             DIRBeforeFirst( pfucb );
 
+            //  update the index with operations happening concurrently
+            //
             err = ErrFILEIUpdateIndex( ppib, pfucb, pfucbIdx );
 
             OSStrCbFormatA(
@@ -6560,6 +7586,12 @@ LOCAL ERR VTAPI ErrFILEICreateIndex(
 
             Call( err );
 
+            //  The FUnicodeFixupFlag() may have been reset during index build,
+            //  so propagate any possible changes to the catalog.
+            //
+            //  Jan 2012: Since the MSU code has been deleted, the flags should
+            //  not be changing during index build.
+            //
 
             Assert( idbflagPersisted == pfcbIdx->Pidb()->FPersistedFlags() );
             if ( idbflagPersisted != pfcbIdx->Pidb()->FPersistedFlags() )
@@ -6577,7 +7609,10 @@ LOCAL ERR VTAPI ErrFILEICreateIndex(
             }
         }
 
-        Assert( !FFUCBVersioned( pfucbIdx ) );
+        // FCB now linked into table's index list, which guarantees that
+        // it will be available at Commit/Rollback time, so we can dispose
+        // of the index cursor.
+        Assert( !FFUCBVersioned( pfucbIdx ) );  // no versioned operations should have occurred on this cursor
         Assert( pfucbNil != pfucbIdx );
         DIRClose( pfucbIdx );
         pfucbIdx = pfucbNil;
@@ -6605,13 +7640,15 @@ HandleError:
 
     if ( fInTransaction )
     {
-        Assert( err < 0 );
+        Assert( err < 0 );      // Must have hit an error.
 
         Assert( pfucbNil != pfucb );
         DIRCloseIfExists( &pfucb->pfucbLV );
 
         if ( pfucbNil != pfucbIdx )
         {
+            //  no versioned operations should have been performed,
+            //  so this FUCB will not be defer-closed
             Assert( !FFUCBVersioned( pfucbIdx ) );
             DIRClose( pfucbIdx );
         }
@@ -6639,8 +7676,11 @@ HandleError:
         {
             IDB     * pidbT;
 
+            //  for primary index, FUCB is not opened
+            //  for secondary index, FUCB is closed on success
             Assert( pfucbNil == pfucbIdx );
 
+            // On success, reset versioned bit (on error, bit reset by rollback)
             pfcb->EnterDDL();
             if ( fPrimary )
             {
@@ -6692,41 +7732,52 @@ LOCAL ERR VTAPI ErrFILEIBatchCreateIndex(
     JET_INDEXCREATE3_A      *pidxcreateT                = NULL;
     JET_INDEXCREATE3_A      *pidxcreateNext             = NULL;
 
+    //  check parms
+    //
     CallR( ErrPIBCheck( ppib ) );
     CheckTable( ppib, pfucbTable );
 
+    // Don't currently support DDL on temp. tables.    
     if ( FFMPIsTempDB( pfucbTable->ifmp ) )
     {
         AssertSz( fFalse, "Don't support DDL on temp tables." );
         return ErrERRCheck( JET_errInvalidParameter );
     }
 
+    //  ensure that table is updatable
+    //
     CallR( ErrFUCBCheckUpdatable( pfucbTable ) );
     CallR( ErrPIBCheckUpdatable( ppib ) );
 
     if ( 0 != ppib->Level() )
     {
+        //  batch mode requires level 0
         err = ErrERRCheck( JET_errInTransaction );
         return err;
     }
 
     if ( !pfcb->FDomainDenyReadByUs( ppib ) )
     {
+        //  batch mode requires
         err = ErrERRCheck( JET_errExclusiveTableLockRequired );
         return err;
     }
 
     if ( pfcb->FFixedDDL() )
     {
+        // Check FixedDDL override.
         if ( !FFUCBPermitDDL( pfucbTable ) || pfcb->FTemplateTable() )
         {
             err = ErrERRCheck( JET_errFixedDDL );
             return err;
         }
 
+        // If DDL temporarily permitted, we must have exclusive use of the table.
         Assert( pfcb->FDomainDenyReadByUs( ppib ) );
     }
 
+    //  if no work to do then return
+    //
     if ( 0 == cIndexes )
     {
         return JET_errSuccess;
@@ -6746,6 +7797,7 @@ LOCAL ERR VTAPI ErrFILEIBatchCreateIndex(
         rgpfucbIdx[iindex] = pfucbNil;
 #endif
 
+    // Temporarily open new table cursor.
     CallJ( ErrDIROpen( ppib, pfcb, &pfucb ), Cleanup );
     FUCBSetIndex( pfucb );
     FUCBSetMayCacheLVCursor( pfucb );
@@ -6753,7 +7805,7 @@ LOCAL ERR VTAPI ErrFILEIBatchCreateIndex(
     Assert( pfucb->u.pfcb != pfcbNil );
     Assert( pfcb == pfucb->u.pfcb );
     Assert( pfcb->WRefCount() > 0 );
-    Assert( pfcb->FTypeTable() );
+    Assert( pfcb->FTypeTable() );   // Temp. tables have fixed DDL.
     Assert( pfcb->Ptdb() != ptdbNil );
 
     Assert( !FFUCBSecondary( pfucb ) );
@@ -6769,6 +7821,8 @@ LOCAL ERR VTAPI ErrFILEIBatchCreateIndex(
 
         Assert( sizeof(JET_INDEXCREATE3_A) == pidxcreateT->cbStruct );
 
+        //  support all JET_INDEXCREATE*_A definitions (anyway)
+        //
         pidxcreateNext = (JET_INDEXCREATE3_A *)((BYTE *)( pidxcreateT ) + pidxcreateT->cbStruct);
 
         if (    sizeof( JET_INDEXCREATE3_A ) != pidxcreateT->cbStruct )
@@ -6778,13 +7832,18 @@ LOCAL ERR VTAPI ErrFILEIBatchCreateIndex(
 
         if ( pidxcreateT->grbit & ( JET_bitIndexPrimary | JET_bitIndexUnversioned | JET_bitIndexEmpty ) )
         {
+            //  currently unsupported in batch mode
+            //
             Call( ErrERRCheck( JET_errInvalidGrbit ) );
         }
 
+        // Force a write to the output structure (but don't actually modify the value).
         OnDebug( AtomicCompareExchange( &pidxcreate->err, pidxcreate->err, pidxcreate->err ) );
 
         if ( fLazyCommit && !( pidxcreateT->grbit & JET_bitIndexLazyFlush ) )
         {
+            //  if even one of the indexes cannot be lazily flushed,
+            //  then none of them can
             fLazyCommit = fFalse;
         }
 
@@ -6796,7 +7855,7 @@ LOCAL ERR VTAPI ErrFILEIBatchCreateIndex(
         }
         if ( ( (ULONG)g_cbPage * cpgInitialTreeDefault ) == jsphIndex.cbInitial )
         {
-            jsphIndex.cbInitial = 0;
+            jsphIndex.cbInitial = 0;    // if default cpgInitialTreeDefault=1 page, set to 0 (meaning default)
         }
 
         Call( ErrUTILCheckName( szIndexName, pidxcreateT->szIndexName, JET_cbNameMost+1 ) );
@@ -6862,7 +7921,7 @@ LOCAL ERR VTAPI ErrFILEIBatchCreateIndex(
         pfcbIndexT->ResetDontLogSpaceOps();
         pfcbIndexT->Unlock();
 
-        Assert( !FFUCBVersioned( pfucbIndexT ) );
+        Assert( !FFUCBVersioned( pfucbIndexT ) );   // No versioned operations should have been performed, so won't be defer-closed.
         DIRClose( pfucbIndexT );
     }
 
@@ -6875,7 +7934,7 @@ HandleError:
 
     if ( fInTransaction )
     {
-        Assert( err < 0 );
+        Assert( err < 0 );      // Must have hit an error.
 
         if ( NULL != rgpfucbIdx )
         {
@@ -6883,7 +7942,7 @@ HandleError:
             {
                 if ( pfucbNil != rgpfucbIdx[iindex] )
                 {
-                    Assert( !FFUCBVersioned( rgpfucbIdx[iindex] ) );
+                    Assert( !FFUCBVersioned( rgpfucbIdx[iindex] ) );    // No versioned operations should have been performed, so won't be defer-closed.
                     DIRClose( rgpfucbIdx[iindex] );
                 }
             }
@@ -6906,6 +7965,41 @@ Cleanup:
     return err;
 }
 
+//+API
+// ErrIsamCreateIndex
+// ========================================================================
+// ERR ErrIsamCreateIndex(
+//      SESID   sesid;          // IN   PIB of user
+//      TABLEID tableid;        // IN   Exclusively opened FUCB of file
+//      JET_INDEXCREATE3_A * pindexcreate;  // IN   Array of indexes to create
+//      unsigned long cIndexCreate );   // IN   Number of indexes to create
+//
+//  Creates indexes on a table
+//
+//
+// RETURNS  Error code from ErrFILEICreateIndex or
+//          JET_errSuccess          Everything worked OK.
+//          -JET_errColumnNotFound  The index key specified
+//                                  contains an undefined field.
+//          -IndexHasPrimary        The primary index for this
+//                                  Insertfile is already defined.
+//          -IndexDuplicate         An index on this file is
+//                                  already defined with the
+//                                  given name.
+//          -IndexInvalidDef        There are too many segments
+//                                  in the key.
+//          -TableNotEmpty          A primary index may not be
+//                                  defined because there is at
+//                                  least one record already in
+//                                  the file.
+// COMMENTS
+//      If transaction level > 0, there must not be anyone currently
+//      using the file.
+//      A transaction is wrapped around this function.  Thus, any
+//      work done will be undone if a failure occurs.
+//
+// SEE ALSO     ErrIsamAddColumn, ErrIsamCreateTable, ErrFILEICreateTable
+//-
 ERR VTAPI ErrIsamCreateIndex(
     JET_SESID           sesid,
     JET_VTID            vtid,
@@ -6948,7 +8042,7 @@ ERR VTAPI ErrIsamCreateIndex(
     Call( ErrDIRCommitTransaction( ppib, fLazyCommit ? JET_bitCommitLazyFlush : 0 ) );
     fInTransaction = fFalse;
 
-#else
+#else  //  !MINIMAL_FUNCTIONALITY
 
     Assert( cIndexCreate >= 0 );
     if ( 1 == cIndexCreate )
@@ -6960,7 +8054,7 @@ ERR VTAPI ErrIsamCreateIndex(
         Call( ErrFILEIBatchCreateIndex( ppib, pfucbTable, pindexcreate, cIndexCreate ) );
     }
 
-#endif
+#endif  //  MINIMAL_FUNCTIONALITY
 
 HandleError:
     if ( fInTransaction )
@@ -6980,17 +8074,33 @@ HandleError:
 }
 
 
+//+API
+// ErrIsamDeleteTable
+// ========================================================================
+// ERR ErrIsamDeleteTable( JET_SESID vsesid, JET_DBID vdbid, CHAR *szName )
+//
+// Calls ErrFILEIDeleteTable to
+// delete a file and all indexes associated with it.
+//
+// RETURNS      JET_errSuccess or err from called routine.
+//
+// SEE ALSO     ErrIsamCreateTable
+//-
 ERR VTAPI ErrIsamDeleteTable( JET_SESID vsesid, JET_DBID vdbid, const CHAR *szName )
 {
     ERR     err;
     PIB     *ppib = (PIB *)vsesid;
     IFMP    ifmp = (IFMP)vdbid;
 
+    //  check parameters
+    //
     CallR( ErrPIBCheck( ppib ) );
     CallR( ErrPIBCheckIfmp( ppib, ifmp ) );
 
     if ( FFMPIsTempDB( ifmp ) )
     {
+        // Cannot use DeleteTable on temporary tables.
+        // Must use CloseTable instead.
         err = ErrERRCheck( JET_errCannotDeleteTempTable );
     }
     else
@@ -7004,7 +8114,23 @@ ERR VTAPI ErrIsamDeleteTable( JET_SESID vsesid, JET_DBID vdbid, const CHAR *szNa
 }
 
 
+// ErrFILEDeleteTable
+// ========================================================================
+// ERR ErrFILEDeleteTable( PIB *ppib, IFMP ifmp, CHAR *szName )
+//
+// Deletes a file and all indexes associated with it.
+//
+// RETURNS      JET_errSuccess or err from called routine.
+//
 
+// COMMENTS
+//  Acquires an exclusive lock on the file [FCBSetDelete].
+//  A transaction is wrapped around this function.  Thus,
+//  any work done will be undone if a failure occurs.
+//  Transaction logging is turned off for temporary files.
+//
+// SEE ALSO     ErrIsamCreateTable
+//-
 ERR ErrFILEDeleteTable( PIB *ppib, IFMP ifmp, const CHAR *szName )
 {
     ERR     err;
@@ -7026,6 +8152,8 @@ ERR ErrFILEDeleteTable( PIB *ppib, IFMP ifmp, const CHAR *szName )
         return ErrERRCheck( JET_errCannotDeleteTempTable );
     }
     
+    //  must normalise for CAT hash deletion
+    //  PERF UNDONE: the name will be normalised again in FILEOpenTable()
     CallR( ErrUTILCheckName( szTable, szName, JET_cbNameMost+1 ) );
 
     CallR( ErrDIRBeginTransaction( ppib, 55589, NO_GRBIT ) );
@@ -7041,6 +8169,8 @@ ERR ErrFILEDeleteTable( PIB *ppib, IFMP ifmp, const CHAR *szName )
             g_rgfmp[ifmp].WszDatabaseName(),
             (ULONG)ifmp ) );
 
+    //  open cursor on database and seek to table without locking
+    //
     Call( ErrDIROpen( ppib, pgnoSystemRoot, ifmp, &pfucbParent ) );
 
     Call( ErrFILEOpenTable(
@@ -7051,6 +8181,7 @@ ERR ErrFILEDeleteTable( PIB *ppib, IFMP ifmp, const CHAR *szName )
                 JET_bitTableDelete|JET_bitTableDenyRead ) );
     fInUseBySystem = ( JET_wrnTableInUseBySystem == err );
 
+    // We should now have exclusive use of the table.
     pfcb = pfucb->u.pfcb;
     pgnoFDP = pfcb->PgnoFDP();
     objidTable = pfcb->ObjidFDP();
@@ -7058,16 +8189,29 @@ ERR ErrFILEDeleteTable( PIB *ppib, IFMP ifmp, const CHAR *szName )
     Assert( pfcb->FTypeTable() );
     if ( pfcb->FTemplateTable() )
     {
+        // UNDONE: Deletion of template table not currently supported.
+        // However, if the template table is opened as a sentinel,
+        // then the TemplateTable flag will not be set, in which
+        // case the table will be allowed to be deleted.  Any existing
+        // inherited tables will fail if an attempt is made to open
+        // them.
         err = ErrERRCheck( JET_errCannotDeleteTemplateTable );
         goto HandleError;
     }
 
+    //  the following assert(s) goes off when we reuse a cursor that
+    //  was defer closed by us -- it has been disabled for now
+    //
+//  Assert( !FFUCBVersioned( pfucb ) );
     Assert( pfcb->FDomainDenyReadByUs( ppib ) );
 
     pver = PverFromIfmp( pfucb->ifmp );
     err = pver->ErrVERFlag( pfucbParent, operDeleteTable, &pgnoFDP, sizeof(pgnoFDP) );
     if ( err < 0 )
     {
+        // Must close FUCB first in case sentinel exists.  Set to pfucbNil
+        // afterwards so HandleError doesn't try to close FUCB again.
+//      Assert( !FFUCBVersioned( pfucb ) );     // Verifies FUCB is not deferred closed.
         DIRClose( pfucb );
         pfucb = pfucbNil;
 
@@ -7077,6 +8221,8 @@ ERR ErrFILEDeleteTable( PIB *ppib, IFMP ifmp, const CHAR *szName )
     Assert( pfcb->PgnoFDP() == pgnoFDP );
     Assert( pfcb->Ifmp() == ifmp );
 
+    // UNDONE: Is it necessary to grab critical section, since we have
+    // exclusive use of the table?
     if ( pfcb->Ptdb() != ptdbNil )
     {
         pfcb->EnterDDL();
@@ -7104,7 +8250,7 @@ ERR ErrFILEDeleteTable( PIB *ppib, IFMP ifmp, const CHAR *szName )
     }
     else
     {
-        FireWall( "DeprecatedSentinelFcbDeleteTable" );
+        FireWall( "DeprecatedSentinelFcbDeleteTable" ); // Sentinel FCBs are believed deprecated
         Assert( !fInUseBySystem );
         Assert( pfcbNil == pfcb->PfcbNextIndex() );
 
@@ -7127,15 +8273,23 @@ ERR ErrFILEDeleteTable( PIB *ppib, IFMP ifmp, const CHAR *szName )
 
             if ( FPIBSessionSystemCleanup( pfucbT->ppib ) )
             {
+                //  don't care about RCE clean, because any outstanding versions will be cleaned
+                //  before the DeleteTable version is cleaned.
                 if( !FPIBSessionRCEClean(pfucbT->ppib ) )
                 {
+                    //  the DeletePending flag for this table has now been set, forcing
+                    //  OLD2/DBSCAN to exit at its earliest convenience. Wait for it.
                     fInUseBySystem = fTrue;
                     break;
                 }
             }
 #ifdef DEBUG
+            //  User owned FUCBs can exist at this point but they will be short-lived. They will be closed when
+            //  ErrFILEICheckAndSetMode() fails because we have JET_bitTableDenyRead.
+            //  Once this tx commits and is the oldest tx, no one should be able to see the FCB and open FUCB's on it
             else
             {
+                // If this cursor was opened by this session but is not the DeleteTable cursor, it should be defer-closed.
                 Assert(pfucbT->ppib != ppib || pfucbT == pfucb || FFUCBDeferClosed( pfucbT ));
             }
 #endif
@@ -7163,6 +8317,7 @@ ERR ErrFILEDeleteTable( PIB *ppib, IFMP ifmp, const CHAR *szName )
     DIRClose( pfucbParent );
     pfucbParent = pfucbNil;
 
+    //  remove table record from MSysObjects before committing.
     Call( ErrCATDeleteTable( ppib, ifmp, objidTable ) );
     CATHashDelete( pfcb, const_cast< CHAR * >( szTable ) );
 
@@ -7192,6 +8347,31 @@ HandleError:
 }
 
 
+//+API
+// DeleteIndex
+// ========================================================================
+// ERR DeleteIndex( PIB *ppib, FUCB *pfucb, CHAR *szIndex )
+//
+// Deletes an index definition and all index entries it contains.
+//
+// PARAMETERS   ppib                        PIB of user
+//              pfucb                       Exclusively opened FUCB on file
+//              szName                      name of index to delete
+// RETURNS      Error code from DIRMAN or
+//                  JET_errSuccess           Everything worked OK.
+//                  -TableInvalid            There is no file corresponding
+//                                           to the file name given.
+//                  -TableNoSuchIndex        There is no index corresponding
+//                                           to the index name given.
+//                  -IndexMustStay           The primary index of a file may
+//                                           not be deleted.
+// COMMENTS
+//      There must not be anyone currently using the file.
+//      A transaction is wrapped around this function.  Thus,
+//      any work done will be undone if a failure occurs.
+//      Transaction logging is turned off for temporary files.
+// SEE ALSO     DeleteTable, CreateTable, CreateIndex
+//-
 ERR VTAPI ErrIsamDeleteIndex(
     JET_SESID       sesid,
     JET_VTID        vtid,
@@ -7213,6 +8393,7 @@ ERR VTAPI ErrIsamDeleteIndex(
     CallR( ErrPIBCheck( ppib ) );
     CheckTable( ppib, pfucbTable );
 
+    // Don't currently support DDL operations on temp tables.
     if ( FFMPIsTempDB( pfucbTable->ifmp ) )
     {
         AssertSz( fFalse, "Don't support DDL on temp tables." );
@@ -7221,6 +8402,8 @@ ERR VTAPI ErrIsamDeleteIndex(
     
     CallR( ErrUTILCheckName( szIndex, szName, ( JET_cbNameMost + 1 ) ) );
 
+    //  ensure that table is updatable
+    //
     CallR( ErrFUCBCheckUpdatable( pfucbTable )  );
     CallR( ErrPIBCheckUpdatable( ppib ) );
 
@@ -7240,18 +8423,24 @@ ERR VTAPI ErrIsamDeleteIndex(
             (ULONG)pfcbTable->Ifmp(),
             pfcbTable->ObjidFDP() ) );
 
-    Assert( pfcbTable->FTypeTable() );
+    Assert( pfcbTable->FTypeTable() );      // Temp. tables have fixed DDL.
 
     if ( pfcbTable->FFixedDDL() )
     {
 
+//  UNDONE: Cannot currently permit DDL deletes even if PermitDDL flag is
+//  specified because DDL deletes will leave RCE's that have to be cleaned
+//  up and modify the FCB while doing so.  This will mess up cursors
+//  opened normally after the PermitDDL cursor closes.
 #ifdef PERMIT_DDL_DELETE
+        // Check FixedDDL override.
         if ( !FFUCBPermitDDL( pfucbTable ) )
         {
             err = ErrERRCheck( JET_errFixedDDL );
             return err;
         }
 
+        // If DDL temporarily permitted, we must have exclusive use of the table.
         Assert( pfcbTable->FDomainDenyReadByUs( ppib ) );
 #else
         err = ErrERRCheck( JET_errFixedDDL );
@@ -7267,11 +8456,16 @@ ERR VTAPI ErrIsamDeleteIndex(
         return err;
     }
 
+    //  create new cursor -- to leave user's cursor unmoved
+    //
     CallR( ErrDIROpen( ppib, pfcbTable, &pfucb ) );
 
     Call( ErrDIRBeginTransaction( ppib, 43301, NO_GRBIT ) );
     fInTransaction = fTrue;
 
+    //  remove index record from MSysIndexes, preventing other threads from
+    //  trying to delete the same index.
+    //
     Call( ErrCATDeleteTableIndex(
                 ppib,
                 pfcbTable->Ifmp(),
@@ -7279,8 +8473,10 @@ ERR VTAPI ErrIsamDeleteIndex(
                 szIndex,
                 &pgnoIndexFDP ) );
 
+    // Can't delete primary index.
     Assert( pfcbTable->PgnoFDP() != pgnoIndexFDP );
 
+    // Find index's FCB in the table's index list.
     pfcbTable->EnterDDL();
     for ( pfcbIdx = pfcbTable->PfcbNextIndex(); pfcbIdx != pfcbNil; pfcbIdx = pfcbIdx->PfcbNextIndex() )
     {
@@ -7288,10 +8484,14 @@ ERR VTAPI ErrIsamDeleteIndex(
         if ( pfcbIdx->PgnoFDP() == pgnoIndexFDP )
         {
 #ifdef DEBUG
+            // Verify no one else is deleting this index (if so, conflict would
+            // have been detected when updating catalog above).
             Assert( !pfcbIdx->FDeletePending() );
             Assert( !pfcbIdx->FDeleteCommitted() );
             Assert( !pfcbIdx->Pidb()->FDeleted() );
 
+            // verify that no other FCB has the same FDP -- would never happen
+            // because the FCB is deallocated before the space is freed.
             FCB *pfcbT;
             for ( pfcbT = pfcbIdx->PfcbNextIndex(); pfcbT != pfcbNil; pfcbT = pfcbT->PfcbNextIndex() )
             {
@@ -7305,7 +8505,7 @@ ERR VTAPI ErrIsamDeleteIndex(
 
     if ( pfcbIdx == pfcbNil )
     {
-        Assert( fFalse );
+        Assert( fFalse );       // If index in catalog, FCB must exist.
         pfcbTable->LeaveDDL();
         err = ErrERRCheck( JET_errIndexNotFound );
         goto HandleError;
@@ -7319,6 +8519,7 @@ ERR VTAPI ErrIsamDeleteIndex(
     pfcbTable->LeaveDDL();
     Call( err );
 
+    // Assert not deleting current secondary index.
     if ( pfucb->pfucbCurIndex != pfucbNil )
     {
         Assert( pfucb->pfucbCurIndex->u.pfcb != pfcbNil );
@@ -7337,13 +8538,17 @@ ERR VTAPI ErrIsamDeleteIndex(
         goto HandleError;
     }
 
+    // Ensure consistent view of table's space tree (to prevent doubly-freed space).
     Assert( pfcbIdx->PfcbTable() == pfcbTable );
     Assert( pfcbIdx->FDeletePending() );
     Assert( !pfcbIdx->FDeleteCommitted() );
+//  Call( ErrDIRDeleteDirectory( pfucb, pfcbIdx->PgnoFDP() ) );
 
     Call( ErrDIRCommitTransaction( ppib, 0 ) );
     fInTransaction = fFalse;
 
+    //  set currency to before first
+    //
     DIRBeforeFirst( pfucb );
     CallS( err );
 
@@ -7366,6 +8571,8 @@ HandleError:
 }
 
 
+// Ensures the column doesn't belong to any non-deleted indexes, or indexes
+// version-deleted by someone else (because the delete may roll back).
 BOOL FFILEIsIndexColumn( PIB *ppib, FCB *pfcbTable, const COLUMNID columnid )
 {
     FCB*            pfcbIndex;
@@ -7378,7 +8585,7 @@ BOOL FFILEIsIndexColumn( PIB *ppib, FCB *pfcbTable, const COLUMNID columnid )
         const IDB * const pidb = pfcbIndex->Pidb();
         if ( pidbNil == pidb )
         {
-            Assert( pfcbIndex == pfcbTable );
+            Assert( pfcbIndex == pfcbTable );   // Only sequential index has no IDB
             continue;
         }
 
@@ -7386,6 +8593,10 @@ BOOL FFILEIsIndexColumn( PIB *ppib, FCB *pfcbTable, const COLUMNID columnid )
         {
             if ( pidb->FVersioned() )
             {
+                // The cursor that deletes the index will set DomainDenyRead
+                // on the FCB.  If it's us, we can bypass the index check (because
+                // this operation will only commit if the DeleteIndex commits),
+                // otherwise we can't (because the DeleteIndex may roll back).
                 Assert( pfcbIndex->FDomainDenyRead( ppib )
                     || pfcbIndex->FDomainDenyReadByUs( ppib ) );
                 if ( pfcbIndex->FDomainDenyReadByUs( ppib ) )
@@ -7395,6 +8606,9 @@ BOOL FFILEIsIndexColumn( PIB *ppib, FCB *pfcbTable, const COLUMNID columnid )
             }
             else
             {
+                // Index is unversioned deleted, meaning the delete has committed
+                // or we have exclusive use of the table and we deleted the index.
+                // In either case, we can bypass the index check.
                 continue;
             }
         }
@@ -7404,6 +8618,8 @@ BOOL FFILEIsIndexColumn( PIB *ppib, FCB *pfcbTable, const COLUMNID columnid )
         {
             if ( rgidxseg[iidxseg].FIsEqual( columnid ) )
             {
+                //  found the column in an index
+                //
                 return fTrue;
             }
         }
@@ -7413,6 +8629,8 @@ BOOL FFILEIsIndexColumn( PIB *ppib, FCB *pfcbTable, const COLUMNID columnid )
         {
             if ( rgidxseg[iidxseg].FIsEqual( columnid ) )
             {
+                //  column is used for a condition
+                //
                 return fTrue;
             }
         }
@@ -7421,6 +8639,8 @@ BOOL FFILEIsIndexColumn( PIB *ppib, FCB *pfcbTable, const COLUMNID columnid )
 }
 
 
+//  determines whether a version-deleted index has committed
+//
 BOOL FFILEIVersionDeletedIndexPotentiallyThere(
     FCB * const         pfcbTable,
     const FCB * const   pfcbIndex )
@@ -7428,6 +8648,13 @@ BOOL FFILEIVersionDeletedIndexPotentiallyThere(
     const IDB * const   pidb                = pfcbIndex->Pidb();
     BOOL                fPotentiallyThere   = fTrue;
 
+    //  once we've got the DML latch, verify the index is still version-deleted
+    //
+    //  UNDONE: we should always be in the Updating/Indexing latch when
+    //  calling this function, so do we really need to enter the DML
+    //  latch as well?  Probably not, but let's just be safe, since this
+    //  is a rare code path anyways.
+    //
     pfcbTable->EnterDML();
 
     if ( pidb->FDeleted() )
@@ -7437,11 +8664,18 @@ BOOL FFILEIVersionDeletedIndexPotentiallyThere(
             ENTERCRITICALSECTION    critRCEList( &pfcbTable->CritRCEList() );
             const RCE *             prce;
 
+            //  find corresponding DeleteIndex RCE in table list
+            //
             for ( prce = pfcbTable->PrceNewest(); prceNil != prce; prce = prce->PrcePrevOfFCB() )
             {
                 if ( operDeleteIndex == prce->Oper()
                     && pfcbIndex == *(FCB **)prce->PbData() )
                 {
+                    //  RCE should not be fully committed (otherwise
+                    //  the Versioned bit would have been cleared),
+                    //  so just need to check if a trxCommit0 has
+                    //  already been assigned
+                    //
                     Assert( !prce->FFullyCommitted() );
                     fPotentiallyThere = ( trxMax == prce->TrxCommitted() );
                     break;
@@ -7451,6 +8685,8 @@ BOOL FFILEIVersionDeletedIndexPotentiallyThere(
 #ifdef DEBUG
             if ( prceNil != prce )
             {
+                //  verify that the table has no other DeleteIndex RCE's for this index
+                //
                 for ( prce = prce->PrcePrevOfFCB(); prceNil != prce; prce = prce->PrcePrevOfFCB() )
                 {
                     Assert( operDeleteIndex != prce->Oper()
@@ -7459,12 +8695,20 @@ BOOL FFILEIVersionDeletedIndexPotentiallyThere(
             }
             else
             {
+                //  if we couldn't find the DeleteIndex RCE, it must mean that
+                //  it has yet to be added, which means that the session deleting
+                //  the index has already flagged the IDB, but has yet to insert
+                //  the RCE (probably because we beat it into critRCEList), so
+                //  the index is still potentially there
+                //
                 Assert( fPotentiallyThere );
             }
 #endif
         }
         else
         {
+            //  unversioned and deleted, so index is no longer potentially there
+            //
             fPotentiallyThere = fFalse;
         }
     }
@@ -7502,6 +8746,8 @@ ERR VTAPI ErrIsamDeleteColumn(
     CheckTable( ppib, pfucb );
     CallR( ErrUTILCheckName( szColumn, szName, (JET_cbNameMost + 1) ) );
 
+    //  ensure that table is updatable
+    //
     CallR( ErrFUCBCheckUpdatable( pfucb ) );
     CallR( ErrPIBCheckUpdatable( ppib ) );
 
@@ -7510,18 +8756,24 @@ ERR VTAPI ErrIsamDeleteColumn(
     Assert( pfucb->u.pfcb != pfcbNil );
     pfcb = pfucb->u.pfcb;
     Assert( pfcb->WRefCount() > 0 );
-    Assert( pfcb->FTypeTable() );
+    Assert( pfcb->FTypeTable() );       // Temp. tables have fixed DDL.
     Assert( pfcb->FPrimaryIndex() );
 
     if ( pfcb->FFixedDDL() )
     {
+//  UNDONE: Cannot currently permit DDL deletes even if PermitDDL flag is
+//  specified because DDL deletes will leave RCE's that have to be cleaned
+//  up and modify the FCB while doing so.  This will mess up cursors
+//  opened normally after the PermitDDL cursor closes.
 #ifdef PERMIT_DDL_DELETE
+        // Check FixedDDL override.
         if ( !FFUCBPermitDDL( pfucb ) )
         {
             err = ErrERRCheck( JET_errFixedDDL );
             return err;
         }
 
+        // If DDL temporarily permitted, we must have exclusive use of the table.
         Assert( pfcb->FDomainDenyReadByUs( ppib ) );
 #else
         err = ErrERRCheck( JET_errFixedDDL );
@@ -7539,6 +8791,9 @@ ERR VTAPI ErrIsamDeleteColumn(
 
     CallR( ErrDIRBeginTransaction( ppib, 59685, NO_GRBIT ) );
 
+    // Flag-delete in the catalog.
+    // Also has the effect of properly reconciling concurrent
+    // CreateIndexes over this column.
     Call( ErrCATDeleteTableColumn(
                 ppib,
                 pfcb->Ifmp(),
@@ -7549,11 +8804,13 @@ ERR VTAPI ErrIsamDeleteColumn(
 #ifdef PERMIT_DDL_DELETE
     if ( pfcb->FTemplateTable() )
     {
-        Assert( !COLUMNIDTemplateColumn( columnidColToDelete ) );
+        Assert( !COLUMNIDTemplateColumn( columnidColToDelete ) );   //  Template flag is not persisted
         COLUMNIDSetFTemplateColumn( columnidColToDelete );
     }
 #endif
 
+    // Search for column in use.  For indexes being concurrently created,
+    // conflict would have been detected by catalog update above.
     pfcb->EnterDML();
     fIndexColumn = FFILEIsIndexColumn( ppib, pfcb, columnidColToDelete );
     pfcb->LeaveDML();
@@ -7572,6 +8829,8 @@ ERR VTAPI ErrIsamDeleteColumn(
     ptdb = pfcb->Ptdb();
     pfield = ptdb->Pfield( columnidColToDelete );
 
+    // If we have the table exclusively locked, then there's no need to
+    // set the Versioned bit.
     Assert( !pfcb->FDomainDenyRead( ppib ) );
     if ( !pfcb->FDomainDenyReadByUs( ppib ) )
     {
@@ -7581,6 +8840,7 @@ ERR VTAPI ErrIsamDeleteColumn(
 
     pfcb->LeaveDDL();
 
+    //  move to FDP root, then set currencies to BeforeFirst and remove unused CSR
     DIRGotoRoot( pfucb );
     Assert( Pcsr( pfucb ) != pcsrNil );
     DIRBeforeFirst( pfucb );
@@ -7600,7 +8860,15 @@ HandleError:
 }
 
 
+//  ================================================================
 ERR VTAPI ErrIsamRenameTable( JET_SESID sesid, JET_DBID dbid, const CHAR *szName, const CHAR *szNameNew )
+//  ================================================================
+//
+//  WARNINGS:
+//    This doesn't version the name properly. Its instantly visible in the TDB, but versioned in the catalog
+//    You can't rename a template table (derived tables are not updated).
+//
+//
 {
     ERR     err;
     PIB     * const ppib = reinterpret_cast<PIB *>( sesid );
@@ -7646,12 +8914,20 @@ ERR VTAPI ErrIsamRenameObject( JET_SESID vsesid, JET_DBID   vdbid, const CHAR *s
 }
 
 
+//  ================================================================
 ERR VTAPI ErrIsamRenameColumn(
     JET_SESID       vsesid,
     JET_VTID        vtid,
     const CHAR      *szName,
     const CHAR      *szNameNew,
     const JET_GRBIT grbit )
+//  ================================================================
+//
+//  WARNINGS:
+//    This doesn't version the name properly. Its instantly visible in the FIELD, but versioned in the catalog
+//    You can't rename an inherited column.
+//
+//
 {
     ERR     err;
     PIB     * const ppib    = reinterpret_cast<PIB *>( vsesid );
@@ -7753,6 +9029,8 @@ VOID IDB::SetFlagsFromGrbit( const JET_GRBIT grbit )
         SetFSortNullsHigh();
     }
     
+    //  not both linear and cross product
+    //
     Assert( !( fCrossProduct && fNestedTable ) );
     if ( fCrossProduct )
     {
@@ -7786,6 +9064,8 @@ JET_GRBIT IDB::GrbitFromFlags() const
     if( FTuples() )
         grbit |= JET_bitIndexTuples;
 
+    //  not both linear and cross product
+    //
     Assert( !( FCrossProduct() && FNestedTable() ) );
     if ( FCrossProduct() )
         grbit |= JET_bitIndexCrossProduct;

@@ -96,8 +96,10 @@ public:
     INT C() const { return 6; }
 };
 
+//  ================================================================
 CUnitTest( FixedLinearHistogramRoundingAndCappingTest, 0, "Testing the rounding and capping of the fixed lineary histogram." );
 ERR FixedLinearHistogramRoundingAndCappingTest::ErrTest()
+//  ================================================================
 {
     ULONG fBailOnError = fFalse;
     CStats::ERR err;
@@ -112,6 +114,7 @@ ERR FixedLinearHistogramRoundingAndCappingTest::ErrTest()
         sMultiStats.Phisto( ihisto )->Zero();
     }
 
+    //  Add all the valid samples
 
     for( INT ihisto = 0; ihisto < sMultiStats.C(); ihisto++ )
     {
@@ -126,6 +129,7 @@ ERR FixedLinearHistogramRoundingAndCappingTest::ErrTest()
         CallTest( sMultiStats.Phisto( ihisto )->ErrAddSample( 60 ) );
     }
 
+    //  Check the samples are all expected
 
     for( INT ihisto = 0; ihisto < sMultiStats.C(); ihisto++ )
     {
@@ -138,6 +142,7 @@ ERR FixedLinearHistogramRoundingAndCappingTest::ErrTest()
         CallTest( sMultiStats.Phisto( ihisto )->ErrReset() );
     }
 
+    //  Test that the rounding up case works ...
 
     CallTest( sMultiStats.PhistoUp()->ErrGetSampleValues( &qwSample ) );        TestSame( 20, qwSample );
     CallTest( sMultiStats.PhistoUp()->ErrGetSampleHits( qwSample, &cHits ) );       TestSame( 1, cHits );
@@ -148,6 +153,7 @@ ERR FixedLinearHistogramRoundingAndCappingTest::ErrTest()
     CallTest( sMultiStats.PhistoUp()->ErrGetSampleValues( &qwSample ) );        TestSame( 60, qwSample );
     CallTest( sMultiStats.PhistoUp()->ErrGetSampleHits( qwSample, &cHits ) );       TestSame( 3, cHits );
 
+    //  Test that the rounding down case works ...
 
     CallTest( sMultiStats.PhistoDown()->ErrGetSampleValues( &qwSample ) );      TestSame( 20, qwSample );
     CallTest( sMultiStats.PhistoDown()->ErrGetSampleHits( qwSample, &cHits ) );     TestSame( 3, cHits );
@@ -166,8 +172,10 @@ HandleError:
 }
 
 
+//  ================================================================
 CUnitTest( FixedLinearHistogramBasicTest, 0, "Testing just the basics of linear fixed histo." );
 ERR FixedLinearHistogramBasicTest::ErrTest()
+//  ================================================================
 {
     wprintf( L"\tTesting Fixed Linear Histogram support ...\n");
 
@@ -195,15 +203,18 @@ ERR FixedLinearHistogramBasicTest::ErrTest()
 
     err = CStats::ERR::errSuccess;
 
+    //  Test empty class
 
     CallTest( ErrTestZerodHisto( phisto, fHasExplicitBuckets | fNoPercentileSupport ) );
 
+    //  Basic tests
 
     CallTest( phisto->ErrAddSample( 90 ) );
     CallTest( phisto->ErrAddSample( 40 ) );
     CallTest( phisto->ErrAddSample( 50 ) );
     CallTest( phisto->ErrAddSample( 100 ) );
 
+    //  Test the samples are properly distributed to the proper multiples of 30
 
     CallTest( phisto->ErrGetSampleHits( 0, &chits ) );
     TestTest( 0 == chits );
@@ -215,10 +226,10 @@ ERR FixedLinearHistogramBasicTest::ErrTest()
     TestTest( 2 == chits );
     CallTest( phisto->ErrGetSampleHits( 100, &chits ) );
     TestTest( 2 == chits );
-    chits = 42;
+    chits = 42; // dirty value
     TestTest( CStats::ERR::wrnOutOfSamples == phisto->ErrGetSampleHits( 121, &chits ) );
     TestTest( 0 == chits );
-    chits = 42;
+    chits = 42; // dirty value
     TestTest( CStats::ERR::wrnOutOfSamples == phisto->ErrGetSampleHits( qwMax, &chits ) );
     TestTest( 0 == chits );
 
@@ -226,6 +237,7 @@ ERR FixedLinearHistogramBasicTest::ErrTest()
 
     phisto->Zero();
 
+    //  Test edge cases of the linear divisions ...
 
     CallTest( phisto->ErrAddSample( 1 ) );
     CallTest( phisto->ErrGetSampleHits( 0, &chits ) );
@@ -236,7 +248,7 @@ ERR FixedLinearHistogramBasicTest::ErrTest()
     TestTest( 0 == chits );
     CallTest( phisto->ErrGetSampleHits( 10, &chits ) );
     TestTest( 1 == chits );
-    chits = 42;
+    chits = 42; // dirty value
     TestFail( CStats::ERR::wrnOutOfSamples, phisto->ErrGetSampleHits( 31, &chits ) );
     TestTest( 0 == chits );
     
@@ -263,6 +275,8 @@ ERR FixedLinearHistogramBasicTest::ErrTest()
 
     phisto->Zero();
 
+    //  Test catch all case
+    //
 
     CallTest( phisto->ErrAddSample( 0 ) );
     for ( ULONG i = 0; i < 30; i++ )

@@ -42,33 +42,49 @@ INLINE INT CmpRbspos( const RBS_POS* prbspos1, const RBS_POS* prbspos2 )
 
 #include <pshpack1.h>
 
-
+/*  Revert snapshot file header
+/**/
 PERSISTED
 struct RBSFILEHDR_FIXED
 {
-    LittleEndian<ULONG>         le_ulChecksum;
-    LittleEndian<LONG>          le_lGeneration;
+    LittleEndian<ULONG>         le_ulChecksum;          //  must be the first 4 bytes
+    LittleEndian<LONG>          le_lGeneration;         //  current rbs generation.
+    //  8 bytes
 
-    LOGTIME                     tmCreate;
-    LOGTIME                     tmPrevGen;
+    //  consistency check
+    LOGTIME                     tmCreate;               //  date time file creation
+    LOGTIME                     tmPrevGen;              //  date time prev file creation
+    //  24 bytes
 
-    LittleEndian<ULONG>         le_ulMajor;
-    LittleEndian<ULONG>         le_ulMinor;
+    LittleEndian<ULONG>         le_ulMajor;             //  major version number - used to breaking changes
+    LittleEndian<ULONG>         le_ulMinor;             //  minor version number - used for backward compat changes (no need for forward compat changes as data is not shipped between servers)
+    //  32 bytes
 
-    LittleEndian<QWORD>         le_cbLogicalFileSize;
+    LittleEndian<QWORD>         le_cbLogicalFileSize;   //  Logical file size
+    // TODO: SOMEONE - add a le_cbLogicalPrevFileSize?
+    // 40 bytes
 
-    SIGNATURE                   signRBSHdrFlush;
+    SIGNATURE                   signRBSHdrFlush;        // Random signature generated at the time of the last RBS header flush. 
+                                                        // We maintain two signatures like flush map, so this can be flushed independent of database header flush 
+    // 68 bytes
 
-    LittleEndian<USHORT>        le_cbDbPageSize;
+    LittleEndian<USHORT>        le_cbDbPageSize;        //  db page size
     BYTE                        rgbReserved1[2];
+    // 72 bytes
 
+    // Range of logs copied with this snapshot
     LittleEndian<LONG>          le_lGenMinLogCopied;
     LittleEndian<LONG>          le_lGenMaxLogCopied;
     BYTE                        bLogsCopied;
+    // 81 bytes
 
     BYTE                        rgbReserved[586];
+    //  667 bytes
 
-    UnalignedLittleEndian<ULONG>    le_filetype;
+    //  WARNING: MUST be placed at this offset
+    //  for uniformity with db/checkpoint headers
+    UnalignedLittleEndian<ULONG>    le_filetype;        //  file type = JET_filetypeSnapshot
+    //  671 bytes
 };
 
 C_ASSERT( offsetof( RBSFILEHDR_FIXED, le_ulChecksum ) == offsetof( DBFILEHDR, le_ulChecksum ) );
@@ -78,22 +94,29 @@ PERSISTED
 class RBSATTACHINFO
 {
     private:
-        BYTE                                bPresent;
-        UnalignedLittleEndian<DBTIME>       mle_dbtimeDirtied;
-        UnalignedLittleEndian<DBTIME>       mle_dbtimePrevDirtied;
+        BYTE                                bPresent;               //  bPresent MUST be first byte because we check this to determine end of attachment list
+        UnalignedLittleEndian<DBTIME>       mle_dbtimeDirtied;      //  DBTime for this db in this revert snapshot
+        UnalignedLittleEndian<DBTIME>       mle_dbtimePrevDirtied;  //  DBTime for this db in the previous revert snapshot (to check the sequence).
+        // 17 bytes
 
-        UnalignedLittleEndian<LONG>         mle_lGenMinRequired;
+        UnalignedLittleEndian<LONG>         mle_lGenMinRequired;    //  the minimum log generation required for bringing database to consistent state before applying the snapshot.
+        // 21 bytes
 
-        UnalignedLittleEndian<LONG>         mle_lGenMaxRequired;
+        UnalignedLittleEndian<LONG>         mle_lGenMaxRequired;    //  the maximum log generation required for bringing database to consistent state before applying the snapshot.
+        // 25 bytes
 
     public:
-        SIGNATURE                           signDb;
+        SIGNATURE                           signDb;                 //  (28 bytes) signature of the db to check if it is for the corresponding db (incl. creation time)
+        // 53 bytes
 
-        SIGNATURE                           signDbHdrFlush;
+        SIGNATURE                           signDbHdrFlush;         // Random signature generated at the time of the last DB header flush.
+        // 81 bytes
 
         UnalignedLittleEndian< WCHAR >      wszDatabaseName[IFileSystemAPI::cchPathMax];
+        // 601 bytes
 
         BYTE                                rgbReserved[39];
+        // 640 bytes
 
     public:
         INLINE BYTE FPresent() const                                           { return bPresent; }
@@ -123,6 +146,7 @@ struct RBSFILEHDR
 
     BYTE                        rgbAttach[cbRBSAttach];
 
+    //  padding to sector boundary
     BYTE                        rgbPadding[cbRBSSegmentSize - sizeof(RBSFILEHDR_FIXED) - cbRBSAttach];
 
     #ifdef DEBUGGER_EXTENSION
@@ -133,7 +157,8 @@ struct RBSFILEHDR
 C_ASSERT( sizeof( RBSFILEHDR ) == cbRBSSegmentSize );
 C_ASSERT( sizeof( RBSFILEHDR::rgbAttach ) == sizeof(RBSATTACHINFO)*dbidMax );
 
-
+/*  Revert snapshot segment header
+/**/
 PERSISTED
 struct RBSSEGHDR
 {
@@ -169,13 +194,14 @@ struct CSnapshotBuffer
 {
 #pragma push_macro( "new" )
 #undef new
-    void* operator new( size_t ) = delete;
-    void* operator new[]( size_t ) = delete;
-    void operator delete[]( void* ) = delete;
+    void* operator new( size_t ) = delete;          //  meaningless without CResource*
+    void* operator new[]( size_t ) = delete;        //  meaningless without CResource*
+    void operator delete[]( void* ) = delete;       //  not supported
 
     void* operator new( size_t cbAlloc, CResource *pcresRBSBuf )
     {
         Assert( cbAlloc == sizeof(CSnapshotBuffer) );
+        // Consider capping usage of this resource, and add retry.
         return pcresRBSBuf->PvRESAlloc_( SzNewFile(), UlNewLine() );
     }
     void operator delete( void* pv )
@@ -189,6 +215,7 @@ struct CSnapshotBuffer
     {
         Reset( startingSegment );
         m_pBuffer = NULL;
+        // Just needed for operator delete
         m_pcresRBSBuf = pcresRBSBuf;
     }
 
@@ -329,23 +356,35 @@ INLINE VOID RBSFILEHDR::Dump( CPRINTF* pcprintf, DWORD_PTR dwOffset ) const
     }
 }
 
-#endif
+#endif  //  DEBUGGER_EXTENSION
 
+//  ================================================================
 class IRBSCleanerIOOperator
+//  ================================================================
+//
+//  Abstract class for I/O operations related to RBS cleaner
+//
+//-
 {
 public:
     virtual ~IRBSCleanerIOOperator() {}
 
+    // calculates the free disk space on the disk of the RBS directory path
     virtual ERR ErrRBSDiskSpace( QWORD* pcbFreeForUser ) = 0;
 
+    // computes the directory size
     virtual ERR ErrGetDirSize( PCWSTR wszDirPath, _Out_ QWORD* pcbSize ) = 0;
 
+    // calculates the lowest and highest revert snapshot generation in the given path.
     virtual ERR ErrRBSGetLowestAndHighestGen( LONG* plRBSGenMin, LONG* plRBSGenMax ) = 0;
 
+    // Returns the directory and file path for the given revert snapshot generation.
     virtual ERR ErrRBSFilePathForGen( __out_bcount ( cbDirPath ) WCHAR* wszRBSDirPath, LONG cbDirPath, __out_bcount ( cbFilePath ) WCHAR* wszRBSFilePath, LONG cbFilePath, LONG lRBSGen ) = 0;
 
+    // Reads file create time from revert snapshot file header.
     virtual ERR ErrRBSFileHeader( PCWSTR wszRBSFilePath,  _Out_ RBSFILEHDR* prbsfilehdr ) = 0;
 
+    // Delete the given directory and all files/folders within it and logs event.
     virtual ERR ErrRemoveFolder( PCWSTR wszDirPath, PCWSTR wszRBSRemoveReason) = 0;
 
     virtual PCWSTR WSZRBSAbsRootDirPath() = 0;
@@ -375,30 +414,49 @@ private:
 
 INLINE PCWSTR RBSCleanerIOOperator::WSZRBSAbsRootDirPath() { return m_wszRBSAbsRootDirPath; }
 
+//  ================================================================
 class IRBSCleanerConfig
+//  ================================================================
+//
+//  Abstract class for cleaner configuration
+//
+//-
 {
 protected:
     IRBSCleanerConfig() {}
 public:
     virtual ~IRBSCleanerConfig() {}
 
+    // the number of passes that should be performed
     virtual INT CPassesMax() = 0;
 
+    // If clean up should run.
     virtual BOOL FEnableCleanup() = 0;
 
+    // Low disk space at which we will start cleaning up RBS aggressively.
     virtual QWORD CbLowDiskSpaceThreshold() = 0;
 
+    // Max alloted space for revert snapshots when the disk space is low.
     virtual QWORD CbMaxSpaceForRBSWhenLowDiskSpace() = 0;
 
+    // Time since when we need revert snapshots relative to current time.
     virtual INT CSecRBSMaxTimeSpan() = 0;
     
+    // Min time between cleanup attempts of revert snapshots.
     virtual INT CSecMinCleanupIntervalTime() = 0;
 
+    // First valid snapshot. Snapshots older than this will be removed.
     virtual LONG LFirstValidRBSGen() = 0;
 };
 
 
+//  ================================================================
 class RBSCleanerConfig : public IRBSCleanerConfig
+//  ================================================================
+//
+//  Configure cleaner using system parameters.
+//
+//-
 {
 private:
     INST* m_pinst;
@@ -440,20 +498,30 @@ INLINE INT RBSCleanerConfig::CSecRBSMaxTimeSpan()
     return ( INT )UlParam( m_pinst, JET_paramFlight_RBSMaxTimeSpanSec );
 }
 
+//  ================================================================
 class IRBSCleanerState
+//  ================================================================
+//
+//  Abstract class for cleaner state
+//
+//-
 {
 protected:
     IRBSCleanerState() {}
 public:
     virtual ~IRBSCleanerState() {}
 
+    // Previous pass completion time
     virtual __int64 FtPrevPassCompletionTime() = 0;
 
+    // Previous pass start time
     virtual __int64 FtPassStartTime() = 0;
     virtual VOID SetPassStartTime() = 0;
 
+    // Number of passes finished.
     virtual INT CPassesFinished() = 0;
 
+    // Mark prev pass completed.
     virtual VOID CompletedPass() = 0;
 };
 
@@ -480,12 +548,26 @@ INLINE VOID RBSCleanerState::CompletedPass()
     m_cPassesFinished++;
 }
 
+//  ================================================================
 namespace RBSCleanerFactory
+//  ================================================================
+//
+//  Create RBSCleaner objects. This returns an initialized, but not
+//  running, RBSCleaner object.
+//
+//-
 {
+    // create a new scan configured to do multiple passes of the
+    // database, using the system parameters
     ERR ErrRBSCleanerCreate( INST*  pinst, __out RBSCleaner ** prbscleaner);
 }
 
+//  ================================================================
 class RBSCleaner : public CZeroInit
+//  ================================================================
+//
+//
+//
 {
 public:
     RBSCleaner( INST* pinst, IRBSCleanerIOOperator* const prbscleaneriooperator, IRBSCleanerState* const prbscleanerstate, IRBSCleanerConfig* const prbscleanerconfig );
@@ -508,6 +590,7 @@ private:
     unique_ptr<IRBSCleanerState>        m_prbscleanerstate;
     unique_ptr<IRBSCleanerConfig>       m_prbscleanerconfig;
 
+    // thread and concurrency control
     THREAD                              m_threadRBSCleaner;
     CManualResetSignal                  m_msigRBSCleanerStop;
 
@@ -527,6 +610,7 @@ INLINE VOID RBSCleaner::SetFirstValidGen( long lrbsgen )
 {
     ENTERCRITICALSECTION critRBSFirstValidGen( &m_critRBSFirstValidGen );
 
+    // Update only if passed generation is greater than already set first valid RBS gen.
     if ( lrbsgen > m_lFirstValidRBSGen )
     {
         m_lFirstValidRBSGen = lrbsgen;
@@ -544,7 +628,7 @@ INLINE BOOL RBSCleaner::FMaxPassesReached() const
     return m_prbscleanerstate->CPassesFinished() >= m_prbscleanerconfig->CPassesMax();
 }
 
-const TICK dtickRBSFlushInterval = 30 * 1000;
+const TICK dtickRBSFlushInterval = 30 * 1000;   // Time interval before force flush of snapshot is considered.
 
 class CRevertSnapshot : public CZeroInit
 {
@@ -622,13 +706,13 @@ class CRevertSnapshot : public CZeroInit
 
     PWSTR           m_wszRBSAbsRootDirPath;
     PWSTR           m_wszRBSBaseName;
-    PWSTR           m_wszRBSCurrentFile;
-    PWSTR           m_wszRBSCurrentLogDir;
-    IFileAPI        *m_pfapiRBS;
+    PWSTR           m_wszRBSCurrentFile;                // Path to the current RBS file.
+    PWSTR           m_wszRBSCurrentLogDir;              // Path to the current RBS Log dir.
+    IFileAPI        *m_pfapiRBS;                        // file handle for read/write the file
 
-    BOOL            m_fInitialized;
-    BOOL            m_fInvalid;
-    BOOL            m_fDumping;
+    BOOL            m_fInitialized;                     // Whether or not the object is initialized.
+    BOOL            m_fInvalid;                         // Whether the snapshot is marked as invalid.
+    BOOL            m_fDumping;                         // Whether this is just being used to dump the snapshot
 
     ULONG           m_cNextActiveSegment;
     ULONG           m_cNextWriteSegment;
@@ -646,9 +730,9 @@ class CRevertSnapshot : public CZeroInit
 
     TICK            m_tickLastFlush;
 
-    _int64          m_ftSpaceUsageLastLogged;
-    QWORD           m_cbFileSizeSpaceUsageLastRun;
-    LONG            m_lGenSpaceUsageLastRun;
+    _int64          m_ftSpaceUsageLastLogged;           // Last time we logged the space usage info
+    QWORD           m_cbFileSizeSpaceUsageLastRun;      // The logical file size during our last run of logging the space usage.
+    LONG            m_lGenSpaceUsageLastRun;            // What was the current log generation during the last run of logging the space usage.
 
     ERR ErrRBSSetRequiredLogs( BOOL fInferFromRstmap );
     ERR ErrRBSCopyRequiredLogs( BOOL fInferFromRstmap );
@@ -695,6 +779,7 @@ INLINE VOID CRevertSnapshot::FreeFileApi( )
 {
     if ( m_pfapiRBS )
     {
+        // TODO SOMEONE: If flush fails do we ignore free'ing or is this best effort?
         ErrUtilFlushFileBuffers( m_pfapiRBS, iofrDefensiveCloseFlush );
         delete m_pfapiRBS;
         m_pfapiRBS = NULL;
@@ -752,27 +837,42 @@ PERSISTED
 struct RBSREVERTCHECKPOINT_FIXED
 {
     LittleEndian<ULONG>         le_ulChecksum;
-    LittleEndian<ULONG>         le_rbsrevertstate;
-    LE_RBSPOS                   le_rbsposCheckpoint;
+    LittleEndian<ULONG>         le_rbsrevertstate;      //  RBS revert state.
+    LE_RBSPOS                   le_rbsposCheckpoint;    //  Last rbs position applied. Today we only set this afer we have completed applying an RBS gen.
+                                                        //  Using RBSPOS to keep it extensible for future. If we decide to save the exact position we flushed, we would require to do a few changes to checkpoint. 
+                                                        //      1. We would need to store bitmap of the pages flushed for a paritcular RBS generation per database.
+                                                        //      2. When applying the lowest gen we would need to store if we have already capture database header per database.
+                                                        //      3. We should save the database header state from database header we captured in (2.). 
+                                                        //         We would stamp that header state on the respective database header once we have completed the revert successfully.
+    //  16 bytes
 
-    LOGTIME                     tmCreate;
-    LOGTIME                     tmCreateCurrentRBSGen;
-    LOGTIME                     tmExecuteRevertBegin;
+    LOGTIME                     tmCreate;               //  Checkpoint file create time
+    LOGTIME                     tmCreateCurrentRBSGen;  //  Create time of the rbs gen as pointed by le_rbsposCheckpoint.
+    LOGTIME                     tmExecuteRevertBegin;   //  Time we first started executing the revert operation.
+    //  40 bytes
 
-    LittleEndian<ULONG>         le_ulMajor;
-    LittleEndian<ULONG>         le_ulMinor;
+    LittleEndian<ULONG>         le_ulMajor;             //  major version number - used to breaking changes
+    LittleEndian<ULONG>         le_ulMinor;             //  minor version number - used for backward compat changes (no need for forward compat changes as data is not shipped between servers)
+    //  48 bytes
     
-    LittleEndian<ULONG>         le_ulGrbitRevert;
+    LittleEndian<ULONG>         le_ulGrbitRevert;       //  Flags being used for the revert.
+    //  52 bytes
 
-    LittleEndian<QWORD>         le_cPagesReverted;
+    LittleEndian<QWORD>         le_cPagesReverted;      //  Count of total pages we have reverted. Updated only when the generation in rbspos gets updated.
+    //  60 bytes
 
-    LittleEndian<QWORD>         le_cSecInRevert;
-    LittleEndian<LONG>          le_lGenMinRevertStart;
-    LittleEndian<LONG>          le_lGenMaxRevertStart;
+    LittleEndian<QWORD>         le_cSecInRevert;        //  Total seconds spent in the revert. We will use this for reporting.
+    LittleEndian<LONG>          le_lGenMinRevertStart;  //  Min log generation required across the databases at start of revert. We will use this for reporting.
+    LittleEndian<LONG>          le_lGenMaxRevertStart;  //  Max log generation required across the databases at start of revert. We will use this for reporting.
+    //  76 bytes
 
     BYTE                        rgbReserved[591];
+    //  667 bytes
 
-    UnalignedLittleEndian<LONG> le_filetype;
+    //  WARNING: MUST be placed at this offset for
+    //  uniformity with db/log headers
+    UnalignedLittleEndian<LONG> le_filetype;            //  file type = JET_filetypeRBSRevertCheckpoint
+    //  671 bytes
 };
 
 C_ASSERT( offsetof( RBSREVERTCHECKPOINT_FIXED, le_ulChecksum ) == offsetof( DBFILEHDR, le_ulChecksum ) );
@@ -783,6 +883,7 @@ struct RBSREVERTCHECKPOINT
 {
     RBSREVERTCHECKPOINT_FIXED           rbsrchkfilehdr;
 
+    //  padding to sector boundary
     BYTE                                rgbPadding[cbRBSSegmentSize - sizeof(RBSREVERTCHECKPOINT_FIXED)];
 };
 
@@ -794,6 +895,7 @@ class CFlushMapForUnattachedDb;
 typedef INT                IRBSDBRC;
 const IRBSDBRC irbsdbrcInvalid = -1;
 
+// Revert snapshot revert context for particular database
 class CRBSDatabaseRevertContext : public CZeroInit
 {
 private:
@@ -801,22 +903,27 @@ private:
     DBID                        m_dbidCurrent;
     WCHAR*                      m_wszDatabaseName;
     DBFILEHDR*                  m_pdbfilehdr;
-    DBFILEHDR*                  m_pdbfilehdrFromRBS;
+    DBFILEHDR*                  m_pdbfilehdrFromRBS;                // Database file header from the lowest RBS generation we apply which needs to be stamped on the database at the end of the revert.
+                                                                    // Note: Each RBS might have multiple database header records. We capture the first one. So basically going backwards this is the last database header captured.
+                                                                    //       Currently it utilizes the fact that RBS gen is applied in the reverse order and if we fail while applying the RBS gen, we start applying that RBS gen all over.
+                                                                    //       Store it in checkpoint if we are changing the apply logic.
     IFileAPI*                   m_pfapiDb;
     CArray< CPagePointer >*     m_rgRBSDbPage;        
-    IBitmapAPI*                 m_psbmDbPages;
+    IBitmapAPI*                 m_psbmDbPages;                      // Sparse bit map indicating whether a given page has been captured.                                                                    
 
-    DBTIME                      m_dbTimePrevDirtied;
+    DBTIME                      m_dbTimePrevDirtied;                // Returns previous db time dirtied set for this database in the RBS gen we processed earlier. Used to check for consistency. 
+                                                                    // If this doesn't match with dbtime of the database from previous RBS gen, any previous RBS with this database attached should be invalid.
     
     CFlushMapForUnattachedDb*   m_pfm;
 
-    CPG                         m_cpgWritePending;
+    CPG                         m_cpgWritePending;                  // Number of writes pending. We coalesce pages and issue write for them together. We will wait for write pending to be 0 before we continue writing.
+                                                                    // We will just let one outstanding I/O to be there.
 
-    CAutoResetSignal            m_asigWritePossible;
+    CAutoResetSignal            m_asigWritePossible;               // Signal to indicate whether a write is possible. Will be set each time a write completes and reset every time we hit disk tilt error.
     
     CPRINTF*                    m_pcprintfRevertTrace; 
 
-    CPRINTF*                    m_pcprintfIRSTrace;
+    CPRINTF*                    m_pcprintfIRSTrace;                 // We will log the begin and complete time of the revert alone to the IRS file to have important details in a single place.
 
 private:
     ERR ErrFlushDBPage( void* pvPage, PGNO pgno, USHORT cbDbPageSize, const OSFILEQOS qos );
@@ -844,6 +951,8 @@ public:
     BOOL FPageAlreadyCaptured( PGNO pgno );
     ERR ErrBeginTracingToIRS();
 
+    // =====================================================================
+    // Member retrieval..
 public:
     WCHAR*      WszDatabaseName() const     { return m_wszDatabaseName; }
     DBID        DBIDCurrent() const         { return m_dbidCurrent; }
@@ -854,6 +963,8 @@ public:
     DBFILEHDR*  PDbfilehdrFromRBS() const   { return m_pdbfilehdrFromRBS; }
     CPRINTF*    CprintfIRSTrace() const     { return m_pcprintfIRSTrace; }
 
+    // =====================================================================
+    // Member manipulation.
 public:
 
     VOID SetDBIDCurrent( __in DBID dbid )                   { m_dbidCurrent = dbid; }
@@ -861,36 +972,38 @@ public:
     VOID SetPrintfTrace( CPRINTF* pcprintfRevertTrace )     { Assert( pcprintfRevertTrace ); m_pcprintfRevertTrace = pcprintfRevertTrace; }
 };
 
+// =====================================================================
 
+// Revert snapshot revert context
 class CRBSRevertContext : public CZeroInit
 {
 private:    
     INST*                   m_pinst;
     PWSTR                   m_wszRBSAbsRootDirPath;
     PWSTR                   m_wszRBSBaseName;
-    CPG                     m_cpgCacheMax;
-    CPG                     m_cpgCached;
-    USHORT                  m_cbDbPageSize;
+    CPG                     m_cpgCacheMax;                      //  Max number of pages we will cache before flushing it to disk. Using JET_paramCacheSizeMax
+    CPG                     m_cpgCached;                        //  Number of pages we have currently cache ( sum of the cached pages in all databases' revert context )
+    USHORT                  m_cbDbPageSize;                     //  db page size
 
     IRBSDBRC                m_mpdbidirbsdbrc[ dbidMax ];
     CRBSDatabaseRevertContext*               m_rgprbsdbrcAttached[ dbidMax ];
     IRBSDBRC                m_irbsdbrcMaxInUse; 
 
-    RBSREVERTCHECKPOINT*    m_prbsrchk;
-    IFileAPI*               m_pfapirbsrchk;
+    RBSREVERTCHECKPOINT*    m_prbsrchk;                         // Pointer to the rbs revert checkpoint
+    IFileAPI*               m_pfapirbsrchk;                     // File pointer to the revert checkpoint file.
     CPRINTF *               m_pcprintfRevertTrace; 
 
-    LONG                    m_lRBSMinGenToApply;
-    LONG                    m_lRBSMaxGenToApply;
+    LONG                    m_lRBSMinGenToApply;                // Min RBS generation we are going to process and apply to the databases
+    LONG                    m_lRBSMaxGenToApply;                // Min RBS generation we are going to process and apply to the databases
 
-    _int64                  m_ftRevertLastUpdate;
+    _int64                  m_ftRevertLastUpdate;               // Last update time used to compute time we spend in revert.
 
     BOOL                    m_fDeleteExistingLogs;
-    BOOL                    m_fRevertCancelled;
-    BOOL                    m_fExecuteRevertStarted;
+    BOOL                    m_fRevertCancelled;                 // Whether the ongoing revert has been cancelled.
+    BOOL                    m_fExecuteRevertStarted;            // Whether execution of the revert has begun.
 
-    LOGTIME                 m_ltRevertTo;
-    QWORD                   m_cPagesRevertedCurRBSGen;
+    LOGTIME                 m_ltRevertTo;                         // The time we are reverting the database files to.
+    QWORD                   m_cPagesRevertedCurRBSGen;             // Number of pages reverted as part of current RBS gen.
 
     BOOL FRBSDBRC( PCWSTR wszDatabaseName, IRBSDBRC* pirbsdbrc );
 
@@ -939,5 +1052,6 @@ public:
         _Out_   CRBSRevertContext**    pprbsrc );
 };
 
+// =====================================================================
 
 VOID UtilLoadRBSinfomiscFromRBSfilehdr( JET_RBSINFOMISC* prbsinfomisc, const ULONG cbrbsinfomisc, const RBSFILEHDR* prbsfilehdr );

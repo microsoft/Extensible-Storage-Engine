@@ -5,6 +5,6 @@
 #define _OSU_TYPES_HXX_INCLUDED
 
 
-#endif
+#endif  //  _OSU_TYPES_HXX_INCLUDED
 
 

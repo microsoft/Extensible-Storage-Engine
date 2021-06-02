@@ -5,6 +5,7 @@
 
 enum IOREASONPRIMARY : BYTE
 {
+    // iorpNone publically defined
     iorpInvalid = 0,
 
     iorpOSUnitTest
@@ -33,19 +34,22 @@ ERR TestErrRename::ErrTest()
     OSTestCheckErr( pfsapi->ErrFileCreate( L"TestErrRename.tmp", IFileAPI::fmfOverwriteExisting, &pfapi ) );
     _wfullpath( wszRenamePath, L"TestErrRename.renamed.tmp", _countof( wszRenamePath ) - 1 );
 
+    // Basic test
     OSTestCheckExpectedErr( JET_errFileNotFound, pfsapi->ErrPathExists( wszRenamePath, NULL ) );
     OSTestCheckErr( pfapi->ErrRename( wszRenamePath, fFalse ) );
     OSTestCheckErr( pfsapi->ErrPathExists( wszRenamePath, NULL ) );
     delete pfapi;
     pfapi = NULL;
 
+    // Rename to an existing file, with fOverwrite = fFalse, then fOverwrite = fTrue
     OSTestCheckErr( pfsapi->ErrFileCreate( L"TestErrRename.tmp", IFileAPI::fmfNone, &pfapi ) );
-    OSTestCheckExpectedErr( JET_errFileAlreadyExists, pfapi->ErrRename( wszRenamePath, fFalse ) );
+    OSTestCheckExpectedErr( JET_errFileAlreadyExists, pfapi->ErrRename( wszRenamePath, fFalse ) );  // ERROR_ALREADY_EXISTS is turned into JET_errFileAlreadyExists
     OSTestCheckErr( pfapi->ErrRename( wszRenamePath, fTrue ) );
 
     delete pfapi;
     pfapi = NULL;
 
+    // Ensure that renaming using a relative path fails
 #ifdef DEBUG
     FNegTestSet( fInvalidUsage );
 #endif

@@ -3,11 +3,23 @@
 #include "Xpress9Internal.h"
 
 
-#define HUFFMAN_RADIX_MERGE_SORT_THRESHOLD  64
+#define HUFFMAN_RADIX_MERGE_SORT_THRESHOLD  64      // use MergeSort if number of entries below HUFFMAN_RADIX_MERGE_SORT_THRESHOLD
+
+/*
+ Time distribution:
+ 40%    sorting symbols by frequency
+ 15%    evaluating codeword lengths
+ 15%    building the tree
+ 15%    storing symbol frequencies
+  8%    sorting symbols by codeword lengths
+  7%    everything else
+*/
 
 
-
-
+//
+// Copies non-0 counts into the nodes.
+// Returns number of nodes that have non-0 counts
+//
 static
 uxint
 HuffmanCreateTemp (
@@ -43,6 +55,10 @@ HuffmanCreateTemp (
 }
 
 
+//
+// Sort single-linked list of HUFFMAN_NODE's in ascending order using m_pNext node
+// Returns pointer to the the node with minumum count value
+//
 static
 HUFFMAN_NODE *
 HuffmanMergeSort (
@@ -70,6 +86,9 @@ HuffmanMergeSort (
 
     for (;;)
     {
+        //
+        // get next 2 records
+        //
         ++pStack;
         ppLink = NULL;
 
@@ -79,6 +98,9 @@ HuffmanMergeSort (
         pStack->m_uBits = 1;
         if (pRecord2 == NULL)
         {
+            //
+            // only 1 record to go
+            //
             pUnsorted = NULL;
             break;
         }
@@ -87,6 +109,9 @@ HuffmanMergeSort (
             pUnsorted = pRecord2->m_pNext;
             if (pRecord1->m_uCount > pRecord2->m_uCount)
             {
+                //
+                // inverse the order
+                //
                 pStack->m_pHead = pRecord2;
                 pRecord2->m_pNext = pRecord1;
                 pRecord2 = pRecord1;
@@ -96,8 +121,12 @@ HuffmanMergeSort (
                 break;
         }
 
+        //
+        // go back and merge
+        //
         while (pStack->m_uBits == pStack[-1].m_uBits)
         {
+            // merge two lists
             pStack[-1].m_uBits += 1;
 
             pRecord1 = pStack[-1].m_pHead;
@@ -142,8 +171,12 @@ HuffmanMergeSort (
         }
     }
 
+    //
+    // go back and merge
+    //
     while (pStack[-1].m_uBits != 0)
     {
+        // merge two lists
         pRecord1 = pStack[-1].m_pHead;
         pRecord2 = pStack->m_pHead;
         ppLink   = &pStack[-1].m_pHead;
@@ -197,6 +230,10 @@ struct HUFFMAN_RADIX_SORT_CHAIN_T
 };
 
 
+//
+// Sort single-linked list of HUFFMAN_NODE's in ascending order using m_pNext node
+// Returns pointer to the the node with minumum count value
+//
 static
 HUFFMAN_NODE *
 HuffmanRadixSort (
@@ -208,6 +245,7 @@ HuffmanRadixSort (
     uxint   uShift;
     uxint   i;
 
+    // initialize ppLast by setting it to pHead
     for (i = 0; i < 256; ++i)
     {
         Chain[i].m_ppLast = &Chain[i].m_pHead;
@@ -218,6 +256,7 @@ HuffmanRadixSort (
     {
         RETAIL_ASSERT (pNode != NULL, "");
 
+        // insert nodes into appropriate buckets
         do
         {
             i = (pNode->m_uCount >> uShift) & 255;
@@ -227,6 +266,7 @@ HuffmanRadixSort (
         }
         while (pNode != NULL);
 
+        // merge all buckets into single list
         pNode = NULL;
         i = 256;
         do
@@ -248,6 +288,10 @@ Failure:
     return (NULL);
 }
 
+//
+// Given sorted [by count] list of symbols, create Huffman tree
+// Returns pointer to the root of the tree, NULL in case of fatal failure (corrupted sorted list)
+//
 static
 HUFFMAN_NODE *
 HuffmanCreateTree (
@@ -259,6 +303,9 @@ HuffmanCreateTree (
     uxint n;
     HUFFMAN_NODE *pNode;
 
+    //
+    // at least 2 leaves shall be available; form first intermediate node by merging two leafs
+    //
     RETAIL_ASSERT (pLeaf != NULL , "");
     pTemp->m_pSon[0] = pLeaf;
     pTemp->m_uCount = pLeaf->m_uCount;
@@ -343,6 +390,10 @@ Failure:
 }
 
 
+//
+// Given Huffman tree, compute length of codewords
+// Returns TRUE if frequencies are correct, FALSE otherwise
+//
 static
 BOOL
 HuffmanComputeBitLength (
@@ -367,9 +418,11 @@ HuffmanComputeBitLength (
         pRoot = *--pStack;
         uBits = pRoot->m_uBits;
 
+        // traverse the tree (it should be right-aligned)
         while (pRoot->m_pSon[0] != NULL)
         {
             RETAIL_ASSERT (pRoot->m_pSon[1] != NULL, "LeftSonIsNotNullButRightIs");
+            // Intermediate nodes all have symbol = 0xffff. Leaf nodes have the original symbols.
             RETAIL_ASSERT (pRoot->m_uSymbol > uAlphabetSize, "IntermediateNodeSymbol=%Iu AlphabetSize=%Iu", pRoot->m_uSymbol, uAlphabetSize);
             uBits += 1;
             pTemp = pRoot->m_pSon[1];
@@ -380,7 +433,9 @@ HuffmanComputeBitLength (
             pRoot->m_uBits = (UInt16) uBits;
         }
 
+        // reached leaf node
         RETAIL_ASSERT (pRoot->m_pSon[1] == NULL, "LeftSonIsNullButRightIsNotNull");
+        // All the nodes which contain the symbols are leaves.
         RETAIL_ASSERT (pRoot->m_uSymbol < uAlphabetSize, "LeafSymbol=%Iu AlphabetSize=%Iu", pRoot->m_uSymbol, uAlphabetSize);
         RETAIL_ASSERT (uBits < HUFFMAN_CODEWORD_LENGTH_LIMIT, "uBits=%Iu", uBits);
 
@@ -395,6 +450,11 @@ Failure:
 }
 
 
+//
+// Ensure that maximum codeword length <= uMaxCodewordLength
+// Returns TRUE if frequencies are correct, FALSE otherwise
+//
+//
 static
 BOOL
 HuffmanTruncateTree (
@@ -413,6 +473,7 @@ HuffmanTruncateTree (
         {
             if (j == uMaxCodewordLength)
             {
+                // find deepest leaf with codeword length < uMaxCodewordLength
                 do
                 {
                     --j;
@@ -423,11 +484,19 @@ HuffmanTruncateTree (
 
             RETAIL_ASSERT (puBitLengthCount[j] > 0, "CorruptHuffmanFrequencyTableIndex");
 
-            puBitLengthCount[j]     -= 1;
-            puBitLengthCount[j + 1] += 2;
-            puBitLengthCount[i - 1] += 1;
-            puBitLengthCount[i]     -= 2;
+            //
+            // convert leaf at level j into node and attach to it one leaf from level i and one leaf from level j;
+            // remaining leaf at level i moves one level up
+            //
+            puBitLengthCount[j]     -= 1; // The node at level j is no longer as leaf now, so decrement.
+            puBitLengthCount[j + 1] += 2; // Two new leaf nodes are attached at level j+1.
+            puBitLengthCount[i - 1] += 1; // The leaf node at level i+1 gets attached here.
+            puBitLengthCount[i]     -= 2; // Two leaf nodes have been lost from level i.
 
+            //
+            // now deepest leaf with codeword length < uMaxCodeWordLength is at level (j+1) unless
+            // (j+1) == uMaxCodewordLength
+            //
             j += 1;
         }
     }
@@ -438,15 +507,19 @@ Failure:
     return (FALSE);
 }
 
+//
+// Canonize the tree
+// Cannonical huffman code see: http://en.wikipedia.org/wiki/Canonical_Huffman_code
+//
 static
 HUFFMAN_NODE *
 HuffmanCanonizeTree (
     XPRESS9_STATUS *pStatus,
-    HUFFMAN_NODE   *pSortedList,
-    uxint           puBitLengthCount[HUFFMAN_CODEWORD_LENGTH_LIMIT],
-    HUFFMAN_MASK   *puBits,
-    uxint           uAlphabetSize,
-    uxint          *puCost
+    HUFFMAN_NODE   *pSortedList,            // list of symbols sorted by m_uCount
+    uxint           puBitLengthCount[HUFFMAN_CODEWORD_LENGTH_LIMIT],   // number of symbols having respective codeword length
+    HUFFMAN_MASK   *puBits,                 // puBits[i] = number of bits for i-th symbol
+    uxint           uAlphabetSize,          // size of the alphabet
+    uxint          *puCost                  // cost of encoding (sum count[i] * bits[i])
 )
 {
     HUFFMAN_RADIX_SORT_CHAIN    Chain[256];
@@ -458,7 +531,10 @@ HuffmanCanonizeTree (
     memset (puBits, 0, sizeof (puBits[0]) * uAlphabetSize);
     memset (uCost, 0, sizeof (uCost));
 
-    i = HUFFMAN_CODEWORD_LENGTH_LIMIT;
+    //
+    // assign # of bits to symbols
+    //
+    i = HUFFMAN_CODEWORD_LENGTH_LIMIT; // Looks like this can be set to maxCodewordLength?
     n = 0;
     for (pNode = pSortedList; pNode != NULL; pNode = pNode->m_pNext)
     {
@@ -468,21 +544,27 @@ HuffmanCanonizeTree (
             {
                 RETAIL_ASSERT (i != 0, "");
                 i -= 1;
-                n = (uxint) puBitLengthCount[i];
+                n = (uxint) puBitLengthCount[i]; // means n = Number of symbols with encoded-length i
             }
             while (n == 0);
         }
-        puBits[pNode->m_uSymbol] = (HUFFMAN_MASK) i;
-        uCost[i] += pNode->m_uCount;
+        puBits[pNode->m_uSymbol] = (HUFFMAN_MASK) i; // The next n symbols have encoded length i.
+        uCost[i] += pNode->m_uCount; // Cost of encoding for symbols of length i = sum of counts of all symbols whose encoding length = i.
         n -= 1;
     }
 
+    //
+    // sort symbols by length of code word in stable manner
+    //
     RETAIL_ASSERT (n == 0, "n=0x%Ix", n);
 
     for (i = 0; i < HUFFMAN_CODEWORD_LENGTH_LIMIT; ++i)
     {
         Chain[i].m_ppLast = &Chain[i].m_pHead;
     }
+    // There is one chain for each codeword length.
+    // chain n connects all nodes of codeword length n with head pointed to by m_pHead
+    // and the nodes linked using their respective pNext pointers.
 
     pNode = pSortedList;
     for (i = 0; i < uAlphabetSize; ++i)
@@ -501,6 +583,7 @@ HuffmanCanonizeTree (
     }
     RETAIL_ASSERT (pNode == NULL, "");
 
+    // Terminate the chains.
     i = HUFFMAN_CODEWORD_LENGTH_LIMIT;
     pNode = NULL;
     do
@@ -508,6 +591,7 @@ HuffmanCanonizeTree (
         --i;
         *(Chain[i].m_ppLast) = pNode;
         pNode = Chain[i].m_pHead;
+//        Chain[i].m_ppLast = &Chain[i].m_pHead;
     }
     while (i != 0);
 
@@ -519,6 +603,7 @@ HuffmanCanonizeTree (
         do
         {
             n += uCost[i];
+            //BUGBUG: According to this computation, cost for i'th symbol = sum of costs of (i.. HUFFMAN_CODEWORD_LENGTH - 1 ) symbols.
             *puCost += n;
             --i;
         }
@@ -531,6 +616,9 @@ Failure:
     return (NULL);
 }
 
+//
+// Create canonical codewords
+//
 static
 BOOL
 HuffmanCreateCodewords (
@@ -547,6 +635,7 @@ HuffmanCreateCodewords (
     uMask = 0;
     for (;pNode != NULL; pNode = pNode->m_pNext)
     {
+        // pNode->m_uBits >= uBits is to ascertain that the symbols are sorted in decreasing order of occurence count or increasing order of number of bits
         RETAIL_ASSERT (
             pNode->m_uBits < HUFFMAN_CODEWORD_LENGTH_LIMIT && pNode->m_uBits >= uBits && pNode->m_uSymbol <= uAlphabetSize,
             "pNode->m_uBits=%u uBits=%Iu pNode->m_uSymbol=%u uAlphabetSize=%Iu",
@@ -576,16 +665,21 @@ Failure:
 }
 
 
+//
+// Create Huffman codewords
+//
+// Returns total number of symbols with non-0 counts (0 or >= 2), (uAlphabetSize+1) in case of memory corruption
+//
 XPRESS9_INTERNAL
 uxint
 Xpress9HuffmanCreateTree (
     XPRESS9_STATUS *pStatus,
-    const HUFFMAN_COUNT *puCount,
-    uxint           uAlphabetSize,
-    uxint           uMaxCodewordLength,
-    HUFFMAN_NODE   *pTemp,
-    HUFFMAN_MASK   *puMask,
-    uxint          *puCost
+    const HUFFMAN_COUNT *puCount,       // IN: uCount[i] = occurance count of i-th symbol
+    uxint           uAlphabetSize,      // IN: number of symbols in the alphabet
+    uxint           uMaxCodewordLength, // IN: max codeword length (inclusively)
+    HUFFMAN_NODE   *pTemp,              // OUT: scratch area (ALPHABET*2)
+    HUFFMAN_MASK   *puMask,             // OUT: encoded codeword + # of bits (least significant HUFFMAN_CODEWORD_LENGTH_BITS)
+    uxint          *puCost              // OUT (optional, may be NULL): cost of encoding
 )
 {
     HUFFMAN_NODE   *pSortedList;
@@ -604,6 +698,7 @@ Xpress9HuffmanCreateTree (
         if (n == 1)
         {
             uxint iSymbol;
+            // Note that in this case the tree is full binary, since it is a single node tree.
             memset (puMask, 0, sizeof (puMask[0]) * uAlphabetSize);
             iSymbol = pTemp[0].m_uSymbol;
             puMask[iSymbol] = (0 << HUFFMAN_CODEWORD_LENGTH_BITS) + 1;
@@ -616,6 +711,8 @@ Xpress9HuffmanCreateTree (
         goto Success;
     }
 
+    // At this point the "first half" of the scratch area (pointed to by pTemp) contains a list of nodes 
+    // that contains non-zero node counts.
     if (n < HUFFMAN_RADIX_MERGE_SORT_THRESHOLD)
     {
         pSortedList = HuffmanMergeSort (pTemp);
@@ -631,6 +728,7 @@ Xpress9HuffmanCreateTree (
         }
     }
 
+    // At this point pSortedList can be used to traverse the "first half" of scratch area in sorted order of symbol counts.
 #if XPRESS9_MAX_TRACE_LEVEL >= TRACE_LEVEL_ERROR_STATUS_AND_POSITION
     {
         HUFFMAN_NODE *p;
@@ -647,8 +745,15 @@ Xpress9HuffmanCreateTree (
             );
         }
     }
-#endif 
+#endif /* XPRESS9_MAX_TRACE_LEVEL >= TRACE_LEVEL_ASSERT */
 
+    // Using the pSortedList, create the huffman tree in the "second half" of the scratch area.
+    //  pTemp                           
+    //   |------------------------------|----------------------------------------|
+    //   |Space used for the leaf nodes | Space used for the intermediate nodes  |
+    //   |                              | in huffman tree                        |
+    //   |------------------------------|----------------------------------------|
+    ///////////////////////////////////////////////////////////////////////////////
     pTreeRoot = HuffmanCreateTree (pStatus, pSortedList, pTemp + n);
     if (pTreeRoot == NULL)
     {
@@ -693,17 +798,22 @@ Failure:
 
 
 #pragma warning (push)
-#pragma warning (disable: 4127)
+#pragma warning (disable: 4127) // conditional expression is constant
 
 
+//
+// Write encoded Huffman table into output bitstream
+//
+// Returns TRUE on success, FALSE on failure (memory corruptions do happen)
+//
 XPRESS9_INTERNAL
 BOOL
 Xpress9HuffmanEncodeTable (
     XPRESS9_STATUS *pStatus,
-    BIO_STATE      *pBioState,
-    HUFFMAN_MASK   *pMask,
-    uxint           uAlphabetSize,
-    uxint           uFillBoundary
+    BIO_STATE      *pBioState,          // bitstream I/O state
+    HUFFMAN_MASK   *pMask,              // array of packed (codeword value, codeword length) for all symbols
+    uxint           uAlphabetSize,      // number of symbols in the alphabet
+    uxint           uFillBoundary       // fill boundary
 )
 {
     HUFFMAN_NODE    HuffmanCreateTreeTemp[HUFFMAN_ENCODED_TABLE_SIZE*2];
@@ -717,6 +827,7 @@ Xpress9HuffmanEncodeTable (
 
     RETAIL_ASSERT (pStatus->m_uStatus == Xpress9Status_OK, "BadStatus");
 
+    // Ensures that the uFillBoundary is a power of 2.
     RETAIL_ASSERT (
         uFillBoundary != 0 && 
         (uFillBoundary & (uFillBoundary - 1)) == 0 &&
@@ -725,6 +836,7 @@ Xpress9HuffmanEncodeTable (
         uFillBoundary,
         uAlphabetSize
     );
+    // Encode the code word lengths using a separate huffman table.
 
     memset (uCount, 0, sizeof (uCount));
 
@@ -760,7 +872,8 @@ Xpress9HuffmanEncodeTable (
             ++i;
         }
         else
-        {
+        { // These symbols are part of the alphabet but do not occur in the input.
+            // zeroes get special treatment
             k = i;
             do
             {
@@ -768,9 +881,25 @@ Xpress9HuffmanEncodeTable (
             }
             while (i < uAlphabetSize && HUFFMAN_GET_CODEWORD_LENGTH (pMask[i]) == 0);
 
+            ////////////////////////////////////////////////////////////////////////////////////////
+            //  k = The largest multiple of uFillBoundary between k and i if there exists one.
+            // There are two cases:
+            // 1. There is at least a single multiple of uFillBoundary between k and i.
+            //    
+            //  -----------|-----------|----------|----------|-----------|----------|--------|
+            //             ma           k          mb         mc          md         me      i
+            //    => k = me
+            //
+            // 2. There is no multiple of uFillBoundary between k and i.
+            //   -----------|-----------|-------|---|----------|-----------|----------|--------
+            //             ma           k       i   mb         mc          md         me      
+            //    => k = k                             
+            ////////////////////////////////////////////////////////////////////////////////////////
             while ((k ^ i) >= uFillBoundary) 
             {// Loop is entered if there exists a multiple of uFillBoundary between k and i.
                 ++uCount[HUFFMAN_ENCODED_TABLE_FILL];
+                // the first time loop is entered, the last lg(uFillBoundary) bits are reset.
+                // k is set to the closest multiple of uFillBoundary that is larger than k.
                 k = (k & ~(uFillBoundary - 1)) + uFillBoundary; 
                 RETAIL_ASSERT (k <= i, "k=%Iu i=%Iu uFillBoundary=%Iu", k, i, uFillBoundary);
             }
@@ -793,10 +922,10 @@ Xpress9HuffmanEncodeTable (
     BIO_STATE_ENTER ((*pBioState));
     k = Xpress9HuffmanCreateTree (
         pStatus,
-        uCount,
-        sizeof (uCount) / sizeof (uCount[0]),
-        8,
-        HuffmanCreateTreeTemp,
+        uCount, // occurrence count of each symbol
+        sizeof (uCount) / sizeof (uCount[0]), // alphabet size
+        8, // Maxcodeword length
+        HuffmanCreateTreeTemp, // 
         uMask,
         NULL
     );
@@ -806,20 +935,25 @@ Xpress9HuffmanEncodeTable (
         goto Failure;
     }
 
+    //
+    // write small table
+    //
     uPrevSymbol = 4;
     for (i = 0; i < HUFFMAN_ENCODED_TABLE_SIZE; ++i)
     {
         k = HUFFMAN_GET_CODEWORD_LENGTH (uMask[i]);
         if (k == uPrevSymbol)
         {
-            BIOWR (0, 1);
+            BIOWR (0, 1); // save bits by writing just a 0 to indicate that this symbol is same as previous symbol.
         }
         else
         {
-            BIOWR (1, 1);
+            BIOWR (1, 1); // write a '1' bit to indicate this symbol is different from the previous one.
+            // BUGBUG: Why do we need this check, we are writing three bits anyway, why not write the value 
+            // of k in both the following two cases? Need to look at decompressor code.
             if (k > uPrevSymbol)
             {
-                BIOWR (k - 1, 3);
+                BIOWR (k - 1, 3); // 3 -- because max code word length passed to Xpress9HuffmanCreateTree is 8, lg8 = 3.
             }
             else
             {
@@ -841,6 +975,9 @@ for (i = 0; i < uAlphabetSize;)
 printf ("\n");
 #endif
 
+    // Write the actual table
+    // With canonical huffman code, only lengths of the symbols need to be transmitted for decoding.
+    // http://en.wikipedia.org/wiki/Canonical_Huffman_code
 
     uPrevSymbol = 8;
     for (i = 0; i < uAlphabetSize;)
@@ -875,6 +1012,7 @@ printf ("\n");
         }
         else
         {
+            // zeroes get special treatment
             k = i;
             do
             {
@@ -934,18 +1072,21 @@ Failure:
 }
 
 
+//
+// Create huffman tables and encode them into output bitstream
+//
 XPRESS9_INTERNAL
 void
 Xpress9HuffmanCreateAndEncodeTable (
     XPRESS9_STATUS *pStatus,
-    BIO_STATE      *pBioState,
-    const HUFFMAN_COUNT *puCount,
-    uxint           uAlphabetSize,
-    uxint           uMaxCodewordLength,
-    HUFFMAN_NODE   *pTemp,
-    HUFFMAN_MASK   *puMask,
-    uxint          *puCost,
-    uxint           uFillBoundary
+    BIO_STATE      *pBioState,       // out bitstream I/O state
+    const HUFFMAN_COUNT *puCount,       // IN:  uCount[i] = occurance count of i-th symbol
+    uxint           uAlphabetSize,      // IN:  number of symbols in the alphabet
+    uxint           uMaxCodewordLength, // IN:  max codeword length (inclusively)
+    HUFFMAN_NODE   *pTemp,              // OUT: scratch area (ALPHABET*2)
+    HUFFMAN_MASK   *puMask,             // OUT: encoded codeword + # of bits (least significant HUFFMAN_CODEWORD_LENGTH_BITS)
+    uxint          *puCost,             // OUT  (optional, may be NULL): cost of encoding
+    uxint           uFillBoundary       // IN:  fill boundary
 )
 {
     BIO_STATE BioState[2];
@@ -959,6 +1100,10 @@ Xpress9HuffmanCreateAndEncodeTable (
     BIO_DECLARE();
 
 
+    //
+    // for given alphabet size |A| return value N <= |A| such that first N symbols of the alphabet
+    // may be encoded with M=MSB(|A|) bits, remaining |A|-N symbols may be encoded with (M+1) bits
+    //
     GET_MSB (uBits, uAlphabetSize);
     uThreshold = POWER2 (uBits + 1) - uAlphabetSize;
 
@@ -983,7 +1128,7 @@ Xpress9HuffmanCreateAndEncodeTable (
 
     BioState[0] = *pBioState;
     BIO_STATE_ENTER (BioState[0]);
-    BIOWR (1, 3);
+    BIOWR (1, 3); //1 Differentiates from stored encoding.
     BIO_STATE_LEAVE (BioState[0]);
     (void) Xpress9HuffmanEncodeTable (pStatus, &BioState[0], puMask, uAlphabetSize, uFillBoundary);
     if (pStatus->m_uStatus != Xpress9Status_OK)
@@ -998,7 +1143,7 @@ Xpress9HuffmanCreateAndEncodeTable (
     if (uCandidateCodeCost <= uHuffmanCodeCost)
     {
         BIO_STATE_ENTER (*pBioState);
-        BIOWR (0, 3);
+        BIOWR (0, 3); // 0 is to differentiate from encoding done by Xpress9HuffmanEncodeTable above.
         BIO_STATE_LEAVE (*pBioState);
 
         for (i = 0; i < uThreshold; ++i)

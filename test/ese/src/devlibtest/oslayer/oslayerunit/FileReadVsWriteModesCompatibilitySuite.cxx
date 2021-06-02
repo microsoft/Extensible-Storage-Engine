@@ -5,6 +5,7 @@
 
 enum IOREASONPRIMARY : BYTE
 {
+    // iorpNone publically defined
     iorpInvalid = 0,
 
     iorpOSUnitTest
@@ -44,6 +45,8 @@ HandleError:                            \
     return err;                         \
 
 
+//  Tests ESEs most basic two modes (ReadWrite w/ Exclusive access, and a ReadOnly with shared
+//  access) both interoperate with each other as expected.
 
 CUnitTest( OSLayerFileOpenReadOnlyModeWorksWithReadOnlyMode, 0, "" );
 ERR OSLayerFileOpenReadOnlyModeWorksWithReadOnlyMode::ErrTest()
@@ -64,7 +67,7 @@ ERR OSLayerFileOpenWriteExclusiveModeFailsWithReadOnlyMode::ErrTest()
     OSTestCall( pfsapi->ErrFileOpen( wszFileDat, IFileAPI::fmfReadOnly, &pfapiOne ) );
     OSTestCheckExpectedErr( JET_errFileAccessDenied, pfsapi->ErrFileOpen( wszFileDat, IFileAPI::fmfNone, &pfapiTwo ) );
 
-    delete pfapiOne; pfapiOne = NULL;
+    delete pfapiOne; pfapiOne = NULL;   //  reset for same test with opposite order.
     delete pfapiTwo; pfapiTwo = NULL;
 
     OSTestCall( pfsapi->ErrFileOpen( wszFileDat, IFileAPI::fmfNone, &pfapiOne ) );
@@ -85,6 +88,11 @@ ERR OSLayerFileOpenWriteExclusiveModeFailsWithWriteExclusiveMode::ErrTest()
 }
 
 
+//  Starting with the FlushFileBuffers mode of ESE we had to split ReadOnly into a fake-ReadOnly mode
+//  that internally opened up the file as RW, to allow the FFB call, and classic RO mode to allow HA
+//  to have concurrent access to the files. These tests check that the new "ReadFlush" / fmfReadOnlyClient 
+//  mode interoperates with existing ESE APIs using fmfReadOnlyPermissive (currently only 
+//  JetGetLogFileInfo()) and the external HA mode of opening the file as expected.
 
 CUnitTest( OSLayerFileOpenReadFlushModeFailsWithReadOnlyMode, 0, "" );
 ERR OSLayerFileOpenReadFlushModeFailsWithReadOnlyMode::ErrTest()
@@ -94,7 +102,7 @@ ERR OSLayerFileOpenReadFlushModeFailsWithReadOnlyMode::ErrTest()
     OSTestCall( pfsapi->ErrFileOpen( wszFileDat, IFileAPI::fmfReadOnlyClient, &pfapiOne ) );
     OSTestCheckExpectedErr( JET_errFileAccessDenied, pfsapi->ErrFileOpen( wszFileDat, IFileAPI::fmfReadOnly, &pfapiTwo ) );
 
-    delete pfapiOne; pfapiOne = NULL;
+    delete pfapiOne; pfapiOne = NULL;   //  reset for same test with opposite order.
     delete pfapiTwo; pfapiTwo = NULL;
 
     OSTestCall( pfsapi->ErrFileOpen( wszFileDat, IFileAPI::fmfReadOnly, &pfapiTwo ) );
@@ -111,7 +119,7 @@ ERR OSLayerFileOpenReadFlushModeFailsWithWriteExclusiveMode::ErrTest()
     OSTestCall( pfsapi->ErrFileOpen( wszFileDat, IFileAPI::fmfNone, &pfapiOne ) );
     OSTestCheckExpectedErr( JET_errFileAccessDenied, pfsapi->ErrFileOpen( wszFileDat, IFileAPI::fmfReadOnlyClient, &pfapiTwo ) );
 
-    delete pfapiOne; pfapiOne = NULL;
+    delete pfapiOne; pfapiOne = NULL;   //  reset for same test with opposite order.
     delete pfapiTwo; pfapiTwo = NULL;
 
     OSTestCall( pfsapi->ErrFileOpen( wszFileDat, IFileAPI::fmfReadOnlyClient, &pfapiTwo ) );
@@ -128,7 +136,7 @@ ERR OSLayerFileOpenReadFlushModeWorksWithReadOnlyPermissibleMode::ErrTest()
     OSTestCall( pfsapi->ErrFileOpen( wszFileDat, IFileAPI::fmfReadOnlyClient, &pfapiOne ) );
     OSTestCall( pfsapi->ErrFileOpen( wszFileDat, IFileAPI::fmfReadOnlyPermissive, &pfapiTwo ) );
 
-    delete pfapiOne; pfapiOne = NULL;
+    delete pfapiOne; pfapiOne = NULL;   //  reset for same test with opposite order.
     delete pfapiTwo; pfapiTwo = NULL;
 
     OSTestCall( pfsapi->ErrFileOpen( wszFileDat, IFileAPI::fmfReadOnlyPermissive, &pfapiTwo ) );
@@ -163,6 +171,7 @@ JET_ERR ErrFileOpenHAReadMode( _In_z_ const WCHAR* const wszPath, _Out_ HANDLE *
     return err;
 }
 
+// This is how says ExternalReadOnlyPermissible - but read as "Exchange High Availability ReadOnly" mode.
 
 CUnitTest( OSLayerFileOpenReadFlushModeWorksWithExternalReadOnlyPermissibleMode, 0, "" );
 ERR OSLayerFileOpenReadFlushModeWorksWithExternalReadOnlyPermissibleMode::ErrTest()
@@ -173,7 +182,7 @@ ERR OSLayerFileOpenReadFlushModeWorksWithExternalReadOnlyPermissibleMode::ErrTes
     OSTestCall( pfsapi->ErrFileOpen( wszFileDat, IFileAPI::fmfReadOnlyClient, &pfapiOne ) );
     OSTestCall( ErrFileOpenHAReadMode( wszFileDat, &hFileTwo ) );
 
-    delete pfapiOne; pfapiOne = NULL;
+    delete pfapiOne; pfapiOne = NULL;   //  reset for same test with opposite order.
     CloseHandle( hFileTwo ); hFileTwo = NULL;
 
     OSTestCall( ErrFileOpenHAReadMode( wszFileDat, &hFileTwo ) );
@@ -184,6 +193,7 @@ ERR OSLayerFileOpenReadFlushModeWorksWithExternalReadOnlyPermissibleMode::ErrTes
 }
 
 
+//  Testing FlushFileBuffers doesn't work in classice modes, and requires a special type of file mode (fmfReadOnlyCleint).
 
 CUnitTest( OSLayerFileFlushOnReadOnlyOpenedFileNotPossible, 0, "" );
 ERR OSLayerFileFlushOnReadOnlyOpenedFileNotPossible::ErrTest()
@@ -193,6 +203,7 @@ ERR OSLayerFileFlushOnReadOnlyOpenedFileNotPossible::ErrTest()
 
     OSTestCall( pfsapi->ErrFileOpen( wszFileDat, IFileAPI::fmfReadOnly, &pfapiOne ) );
 
+    //  This succeeds because COSFile shortcuts FlushFileBuffers if it's not in one of the writeback modes.
     OSTestCall( pfapiOne->ErrFlushFileBuffers( (IOFLUSHREASON)0 ) );
 
     OSTestCheck( !FlushFileBuffers( HOSLayerTestGetFileHandle( pfapiOne ) ) );
@@ -204,6 +215,7 @@ ERR OSLayerFileFlushOnReadOnlyOpenedFileNotPossible::ErrTest()
 
     OSTestCall( ErrFileOpenHAReadMode( wszFileDat, &hFileOne ) );
 
+    //  Now test on the new "Read Flush" / fmfReadOnlyClient mode it works
 
     OSTestCall( pfsapi->ErrFileOpen( wszFileDat, IFileAPI::fmfReadOnlyClient, &pfapiTwo ) );
     OSTestCall( pfapiTwo->ErrFlushFileBuffers( (IOFLUSHREASON)0 ) );

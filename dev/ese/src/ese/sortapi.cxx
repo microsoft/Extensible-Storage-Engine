@@ -5,7 +5,7 @@
 #include "_comp.hxx"
 
 
-const INT fCOLSDELETEDNone      = 0;
+const INT fCOLSDELETEDNone      = 0;        //  Flags to determine if any columns have been deleted.
 const INT fCOLSDELETEDFixedVar  = (1<<0);
 const INT fCOLSDELETEDTagged    = (1<<1);
 
@@ -69,13 +69,19 @@ LOCAL ERR ErrSORTTableOpen(
 
     INST            *pinst = PinstFromPpib( ppib );
 
+    //  always remove duplicates unless this is a forward only sort and the
+    //  caller didn't ask for duplicate removal
     BOOL fRemoveDuplicates = !( ( grbit & JET_bitTTForwardOnly ) && !( grbit & JET_bitTTUnique ) );
 
     CallJ( ErrSORTOpen( ppib, &pfucb, fRemoveDuplicates, fFalse ), SimpleError );
     *ppfucb = pfucb;
 
+    //  save open flags
+    //
     pfucb->u.pscb->grbit = grbit;
 
+    //  check input parameters
+    //
     if ( cbKeyMost != 0 && cbKeyMost < JET_cbKeyMostMin || cbKeyMost > (ULONG) CbKeyMostForPage() )
     {
         CallJ( ErrERRCheck( JET_errInvalidParameter ), SimpleError );
@@ -85,7 +91,23 @@ LOCAL ERR ErrSORTTableOpen(
         CallJ( ErrERRCheck( JET_errInvalidParameter ), SimpleError );
     }
 
+    //  determine max field ids and fix up lengths
+    //
 
+    //====================================================
+    // Determine field "mode" as follows:
+    // if ( JET_bitColumnTagged given ) or "long" ==> TAGGED
+    // else if ( numeric type || JET_bitColumnFixed given ) ==> FIXED
+    // else ==> VARIABLE
+    //====================================================
+    // Determine maximum field length as follows:
+    // switch ( field type )
+    //     case numeric:
+    //         max = <exact length of specified type>;
+    //     case "short" textual:
+    //         if ( specified max == 0 ) max = JET_cbColumnMost
+    //         else max = MIN( JET_cbColumnMost, specified max )
+    //====================================================
     for ( pcolumndef = rgcolumndef, pcolumnid = rgcolumnid; pcolumndef < pcolumndefMax; pcolumndef++, pcolumnid++ )
     {
         if ( ( pcolumndef->grbit & JET_bitColumnTagged )
@@ -128,7 +150,7 @@ LOCAL ERR ErrSORTTableOpen(
 
     Call( ErrTDBCreate( pinst, pfucb->ifmp, &ptdb, &tcib ) );
 
-    Assert( ptdb->ItagTableName() == 0 );
+    Assert( ptdb->ItagTableName() == 0 );       // No name associated with temp. tables
 
     pfucb->u.pscb->fcb.SetPtdb( ptdb );
     Assert( ptdbNil != pfucb->u.pscb->fcb.Ptdb() );
@@ -146,6 +168,8 @@ LOCAL ERR ErrSORTTableOpen(
         field.coltyp = FIELD_COLTYP( pcolumndef->coltyp );
         if ( FRECTextColumn( field.coltyp ) )
         {
+            //  check code page
+            //
             switch( pcolumndef->cp )
             {
                 case usUniCodePage:
@@ -167,6 +191,9 @@ LOCAL ERR ErrSORTTableOpen(
         Assert( field.coltyp != JET_coltypNil );
         field.cbMaxLen = UlCATColumnSize( field.coltyp, pcolumndef->cbMax, &fTruncate );
 
+        //  ibRecordOffset is only relevant for fixed fields.  It will be ignored by
+        //  RECAddFieldDef(), so do not set it.
+        //
         if ( FCOLUMNIDFixed( *pcolumnid ) )
         {
             field.ibRecordOffset = ibRec;
@@ -206,6 +233,8 @@ LOCAL ERR ErrSORTTableOpen(
     
     ptdb->SetIbEndFixedColumns( ibRec, ptdb->FidFixedLast() );
 
+    //  set up the IDB and index definition if necessary
+    //
     Assert( iidxsegMac <= JET_ccolKeyMost );
     idb.SetCidxseg( (BYTE)iidxsegMac );
     if ( iidxsegMac > 0 )
@@ -245,13 +274,15 @@ LOCAL ERR ErrSORTTableOpen(
         idb.SetFAllowFirstNull();
         idb.SetFAllowSomeNulls();
         idb.SetFUnique();
-        idb.SetItagIndexName( 0 );
+        idb.SetItagIndexName( 0 );  // Sorts and temp tables don't store index name
 
         Call( ErrIDBSetIdxSeg( &idb, ptdb, rgidxseg ) );
 
         Call( ErrFILEIGenerateIDB( &( pfucb->u.pscb->fcb ), ptdb, &idb ) );
         Assert( pidbNil != pfucb->u.pscb->fcb.Pidb() );
 
+        //  check for fixed field defined which exceeds record space for given sort
+        //
         if ( ibRec > REC::CbRecordMost( g_rgfmp[ pfucb->ifmp ].CbPage(), &idb ) )
         {
             Error( ErrERRCheck( JET_errRecordTooBig ) );
@@ -264,10 +295,14 @@ LOCAL ERR ErrSORTTableOpen(
 
     Assert( ptdbNil != pfucb->u.pscb->fcb.Ptdb() );
 
+    //  reset copy buffer
+    //
     pfucb->pvWorkBuf = NULL;
     pfucb->dataWorkBuf.SetPv( NULL );
     FUCBResetUpdateFlags( pfucb );
 
+    //  reset key buffer
+    //
     pfucb->dataSearchKey.Nullify();
     pfucb->cColumnsInSearchKey = 0;
     KSReset( pfucb );
@@ -303,6 +338,8 @@ ERR VTAPI ErrIsamSortOpen(
 
     pfucb->pvtfndef = &vtfndefTTSortIns;
 
+    //  sort is done on the temp database which is always updatable
+    //
     FUCBSetUpdatable( pfucb );
     *ppfucb = pfucb;
 
@@ -332,8 +369,12 @@ ERR VTAPI ErrIsamSortSetIndexRange( JET_SESID sesid, JET_VTID vtid, JET_GRBIT gr
     FUCBSetIndexRange( pfucb, grbit );
     err =  ErrSORTCheckIndexRange( pfucb );
 
+    //  reset key status
+    //
     KSReset( pfucb );
 
+    //  if instant duration index range, then reset index range.
+    //
     if ( grbit & JET_bitRangeInstantDuration )
     {
         DIRResetIndexRange( pfucb );
@@ -356,8 +397,12 @@ ERR VTAPI ErrIsamSortMove( JET_SESID sesid, JET_VTID vtid, LONG csrid, JET_GRBIT
     CallR( ErrPIBCheck( ppib ) );
     CheckSort( ppib, pfucb );
 
+    //  assert reset copy buffer status
+    //
     Assert( !FFUCBUpdatePrepared( pfucb ) );
 
+    //  move forward csrid records
+    //
     if ( csrid > 0 )
     {
         if ( csrid == JET_MoveLast )
@@ -395,6 +440,8 @@ ERR VTAPI ErrIsamSortMove( JET_SESID sesid, JET_VTID vtid, LONG csrid, JET_GRBIT
     }
     else
     {
+        //  return currency status for move 0
+        //
         Assert( csrid == 0 );
         if ( pfucb->u.pscb->ispairMac > 0
             && pfucb->ispairCurr < pfucb->u.pscb->ispairMac
@@ -425,6 +472,7 @@ ERR VTAPI ErrIsamSortSeek( JET_SESID sesid, JET_VTID vtid, JET_GRBIT grbit )
         CallR( ErrERRCheck( JET_errIllegalOperation ) );
     }
 
+    //  assert reset copy buffer status
     Assert( !FFUCBUpdatePrepared( pfucb ) );
 
     if ( !( FKSPrepared( pfucb ) ) )
@@ -434,11 +482,14 @@ ERR VTAPI ErrIsamSortSeek( JET_SESID sesid, JET_VTID vtid, JET_GRBIT grbit )
 
     FUCBAssertValidSearchKey( pfucb );
 
+    //  ignore segment counter
     KEY key;
     key.prefix.Nullify();
     key.suffix.SetPv( pfucb->dataSearchKey.Pv() );
     key.suffix.SetCb( pfucb->dataSearchKey.Cb() );
 
+    //  perform seek for equal to or greater than
+    //
     err = ErrSORTSeek( pfucb, key );
     if ( err >= 0 )
     {
@@ -456,6 +507,9 @@ ERR VTAPI ErrIsamSortSeek( JET_SESID sesid, JET_VTID vtid, JET_GRBIT grbit )
                             | JET_bitSeekLE
                             | JET_bitSeekLT );
 
+    //  take additional action if necessary or polymorph error return
+    //  based on grbit
+    //
     switch ( grbit & bitSeekAll )
     {
         case JET_bitSeekLT:
@@ -502,6 +556,8 @@ ERR VTAPI ErrIsamSortSeek( JET_SESID sesid, JET_VTID vtid, JET_GRBIT grbit )
             }
             else if ( wrnNDFoundLess == err )
             {
+                // No point in moving next, the seek would have positioned us
+                // on the first node greater than the key if it existed
                 err = ErrERRCheck( JET_errRecordNotFound );
             }
             break;
@@ -521,6 +577,8 @@ ERR VTAPI ErrIsamSortSeek( JET_SESID sesid, JET_VTID vtid, JET_GRBIT grbit )
             }
             else if ( wrnNDFoundLess == err )
             {
+                // No point in moving next, the seek would have positioned us
+                // on the first node greater than the key if it existed
                 err = ErrERRCheck( JET_errRecordNotFound );
             }
             break;
@@ -557,6 +615,8 @@ ERR VTAPI ErrIsamSortGetBookmark(
         return ErrERRCheck( JET_errBufferTooSmall );
     }
 
+    //  bookmark on sort is index to pointer to byte
+    //
     ipb = pfucb->ispairCurr;
     if ( ipb < 0 || ipb >= pfucb->u.pscb->ispairMac )
         return ErrERRCheck( JET_errNoCurrentRecord );
@@ -587,6 +647,8 @@ ERR VTAPI ErrIsamSortGotoBookmark(
     CheckSort( ppib, pfucb );
     Assert( pfucb->u.pscb->crun == 0 );
 
+    //  assert reset copy buffer status
+    //
     Assert( !FFUCBUpdatePrepared( pfucb ) );
 
     if ( cbBookmark != sizeof( LONG )
@@ -621,10 +683,11 @@ ERR VTAPI ErrIsamSortRetrieveKey(
     return ErrIsamRetrieveKey( ppib, pfucb, (BYTE *)pv, cbMax, pcbActual, NO_GRBIT );
 }
 
-#endif
+#endif  // DEBUG
 
 
-
+/*  update only supports insert
+/**/
 ERR VTAPI ErrIsamSortUpdate(
     JET_SESID       sesid,
     JET_VTID        vtid,
@@ -656,9 +719,11 @@ ERR VTAPI ErrIsamSortUpdate(
     }
     Assert( pfucb->u.pscb != pscbNil );
     Assert( pfucb->u.pscb->fcb.Ptdb() != ptdbNil );
-    
+    /*  cannot get bookmark before sorting.
+    /**/
 
-    
+    /*  record to use for put
+    /**/
     if ( pfucb->dataWorkBuf.FNull() )
     {
         return ErrERRCheck( JET_errRecordNoCopy );
@@ -668,6 +733,8 @@ ERR VTAPI ErrIsamSortUpdate(
         CallR( ErrRECIIllegalNulls( pfucb ) )
     }
 
+    //  allocate key buffer
+    //
     Assert( pfucb->u.pscb->fcb.Pidb() != pidbNil );
     cbKeyMost = pfucb->u.pscb->fcb.Pidb()->CbKeyMost();
     if ( cbKeyMost > cbKeyStack )
@@ -683,6 +750,9 @@ ERR VTAPI ErrIsamSortUpdate(
     key.suffix.SetPv( pbKeyAlloc );
     key.suffix.SetCb( cbKeyMost );
 
+    //  sort inherently supports only one key per entry, just like a clustered index,
+    //  and hence base key and base offset only.
+    //
     CallR( ErrRECRetrieveKeyFromCopyBuffer(
         pfucb,
         pfucb->u.pscb->fcb.Pidb(),
@@ -697,14 +767,16 @@ ERR VTAPI ErrIsamSortUpdate(
     Assert( wrnFLDOutOfTuples != err );
     Assert( wrnFLDNotPresentInIndex != err );
 
-    
+    /*  return err if sort requires no NULL segment and segment NULL
+    /**/
     if ( pfucb->u.pscb->fcb.Pidb()->FNoNullSeg()
         && ( wrnFLDNullSeg == err || wrnFLDNullFirstSeg == err || wrnFLDNullKey == err ) )
     {
         return ErrERRCheck( JET_errNullKeyDisallowed );
     }
 
-    
+    /*  add if sort allows
+    /**/
     if ( JET_errSuccess == err
         || ( wrnFLDNullKey == err && pfucb->u.pscb->fcb.Pidb()->FAllowAllNulls() )
         || ( wrnFLDNullFirstSeg == err && pfucb->u.pscb->fcb.Pidb()->FAllowFirstNull() )
@@ -758,12 +830,14 @@ ERR VTAPI ErrIsamSortDupCursor(
     pfucbDup->cColumnsInSearchKey = 0;
     KSReset( pfucbDup );
 
-    
+    /*  initialize working buffer to unallocated
+    /**/
     pfucbDup->pvWorkBuf = NULL;
     pfucbDup->dataWorkBuf.SetPv( NULL );
     FUCBResetUpdateFlags( pfucbDup );
 
-    
+    /*  move currency to the first record and ignore error if no records
+    /**/
     err = ErrIsamSortMove( ppib, pfucbDup, (ULONG)JET_MoveFirst, 0 );
     if ( err < 0  )
     {
@@ -817,10 +891,12 @@ ERR VTAPI ErrIsamSortClose(
         CheckSort( ppib, pfucb );
         Assert( FFUCBSort( pfucb ) );
 
-        
+        /*  release key buffer
+        /**/
         RECReleaseKeySearchBuffer( pfucb );
 
-        
+        /*  release working buffer
+        /**/
         RECIFreeCopyBuffer( pfucb );
 
         SORTClose( pfucb );
@@ -844,7 +920,8 @@ ERR VTAPI ErrIsamSortGetTableInfo(
         return ErrERRCheck( JET_errInvalidOperation );
     }
 
-    
+    /*  check buffer size
+    /**/
     if ( cbOutMax < sizeof(JET_OBJECTINFO) )
     {
         return ErrERRCheck( JET_errInvalidParameter );
@@ -854,12 +931,24 @@ ERR VTAPI ErrIsamSortGetTableInfo(
     ( (JET_OBJECTINFO *)pv )->cbStruct = sizeof(JET_OBJECTINFO);
     ( (JET_OBJECTINFO *)pv )->objtyp   = JET_objtypTable;
 
+    // Get maximum number of retrievable records.  If sort is totally
+    // in-memory, then this number is exact, because we can predetermine
+    // how many dupes there are (see CspairSORTIUnique()).  However,
+    // if the sort had to be moved to disk, we cannot predetermine
+    // how many dupes will be filtered out.  In this case, this number
+    // may be larger than the number of retrievable records (it is
+    // equivalent to the number of records pumped into the sort
+    // in the first place).
+    //
+    // UNDONE: can't handle more than ulMax records
+    //
     ( (JET_OBJECTINFO *)pv )->cRecord  = ULONG( min( pfucb->u.pscb->cRecords, ulMax ) );
 
     return JET_errSuccess;
 }
 
 
+// Advances the copy progress meter.
 INLINE ERR ErrSORTCopyProgress(
     STATUSINFO  * pstatus,
     const ULONG cPagesTraversed )
@@ -900,6 +989,9 @@ ERR ErrSORTIncrementLVRefcountDest(
 {
     LIDMAP* const plidmap = g_rgfmp[pfucbSrc->ifmp].Plidmap();
     Assert( NULL != plidmap );
+    // If ErrCMPGetSLongFieldFirst returns JET_errRecordNotFound, either because there is no LV tree, or there
+    // is no LV with non-zero ref-count, we never create the LIDMAP. If we subsequently find a record with a LVID
+    // reference, that is a corrupt database. Return corruption instead of crashing.
     if ( plidmap == NULL )
     {
         return ErrERRCheck( JET_errDatabaseCorrupted );
@@ -911,6 +1003,10 @@ ERR ErrSORTIncrementLVRefcountDest(
                 plidDest );
 }
 
+// This function assumes that the source record has already been completely copied
+// over to the destination record.  The only thing left to do is rescan the tagged
+// portion of the record looking for separated long values.  If we find any,
+// copy them over and update the record's LID accordingly.
 INLINE ERR ErrSORTUpdateSeparatedLVs(
     FUCB                * pfucbSrc,
     FUCB                * pfucbDest,
@@ -936,6 +1032,9 @@ INLINE ERR ErrSORTCopyTaggedColumns(
 
     TAGFIELDS           tagfields( pfucbSrc->kdfCurr.data );
 
+    //  Copy the tagged columns into the record buffer,
+    //  to avoid complex latching/unlatching/refreshing
+    //  while copying separated long values
     tagfields.Migrate( pbRecBuf );
     CallS( ErrDIRRelease( pfucbSrc ) );
 
@@ -952,11 +1051,12 @@ INLINE ERR ErrSORTCopyTaggedColumns(
 }
 
 
+// Returns a count of the bytes copied.
 INLINE SIZE_T CbSORTCopyFixedVarColumns(
     TDB             *ptdbSrc,
     TDB             *ptdbDest,
-    CPCOL           *rgcpcol,
-    ULONG           ccpcolMax,
+    CPCOL           *rgcpcol,           // Only used for DEBUG
+    ULONG           ccpcolMax,          // Only used for DEBUG
     BYTE            * const pbRecSrc,
     BYTE            * const pbRecDest )
 {
@@ -983,6 +1083,9 @@ INLINE SIZE_T CbSORTCopyFixedVarColumns(
     Assert( (BYTE *)pibVarOffsSrc > pbRecSrc );
     Assert( (BYTE *)pibVarOffsSrc < pbRecSrc + REC::CbRecordMostWithGlobalPageSize() );
 
+    // Need some space for the null-bit array.  Use the space after the
+    // theoretical maximum space for fixed columns (ie. if all fixed columns
+    // were set).  Assert that the null-bit array will fit in the pathological case.
     const INT   cFixedColumnsDest = ( ptdbDest->FidFixedLast() - fidFixedLeast + 1 );
     Assert( ptdbSrc->IbEndFixedColumns() < REC::CbRecordMostWithGlobalPageSize() );
     Assert( ptdbDest->IbEndFixedColumns() <= ptdbSrc->IbEndFixedColumns() );
@@ -1008,6 +1111,7 @@ INLINE SIZE_T CbSORTCopyFixedVarColumns(
         const WORD  ibNextOffset    = ptdbSrc->IbOffsetOfNextColumn( fidT );
         const FIELD *pfieldFixedSrc = ptdbSrc->PfieldFixed( ColumnidOfFid( fidT, fTemplateColumn ) );
 
+        // Copy only undeleted columns
         if ( JET_coltypNil == pfieldFixedSrc->coltyp
             || FFIELDPrimaryIndexPlaceholder( pfieldFixedSrc->ffield ) )
         {
@@ -1028,7 +1132,7 @@ INLINE SIZE_T CbSORTCopyFixedVarColumns(
         }
         else
         {
-#ifdef DEBUG
+#ifdef DEBUG        // Assert that the fids match what the columnid map says
             BOOL    fFound = fFalse;
 
             for ( ULONG icol = 0; icol < ccpcolMax; icol++ )
@@ -1045,16 +1149,22 @@ INLINE SIZE_T CbSORTCopyFixedVarColumns(
             }
             if ( fidT >= ptdbSrc->FidFixedFirst() )
             {
+                // Only columns in the derived table are in the columnid map.
                 Assert( fFound );
             }
             else
             {
+                // Base table columns are not in the columnid map.  Since base
+                // tables have fixed DDL, the columnid in the source and destination
+                // table should not have changed.
                 Assert( !fFound );
                 Assert( fidT == fidFixedLastDest+1
-                    || ( fSawPlaceholderColumn && fidT == fidFixedLastDest+1+1 ) );
+                    || ( fSawPlaceholderColumn && fidT == fidFixedLastDest+1+1 ) );     //  should only be one placeholder column
             }
 #endif
 
+            // If the source field is null, assert that the destination column
+            // has also been flagged as such.
             const UINT  ifid    = fidT - fidFixedLeast;
 
             Assert( FFixedNullBit( prgbitNullSrc + ( ifid/8 ), ifid )
@@ -1066,6 +1176,8 @@ INLINE SIZE_T CbSORTCopyFixedVarColumns(
                     fidFixedLastDest );
             }
 
+            // Don't increment till here, because the code above requires
+            // the fid as an index.
 
             fidFixedLastDest++;
 
@@ -1103,6 +1215,7 @@ INLINE SIZE_T CbSORTCopyFixedVarColumns(
         const FIELD     * const pfieldT = ptdbDest->PfieldFixed( columnidT );
         prgbitNullDest = pbRecDest + pfieldT->ibRecordOffset;
 
+        // Shift the null-bit array into place.
         memmove( prgbitNullDest, prgbitNullT, ( fidFixedLastDest + 7 ) / 8 );
     }
     else
@@ -1110,9 +1223,13 @@ INLINE SIZE_T CbSORTCopyFixedVarColumns(
         prgbitNullDest = prgbitNullT;
     }
 
+    // Should end up at the start of the null-bit array.
     Assert( pbChunkDest + cbChunk == prgbitNullDest );
 
 
+    // The variable columns must be done in two passes.  The first pass
+    // just determines the highest variable columnid in the record.
+    // The second pass does the work.
     pibVarOffsDest = (UnalignedLittleEndian<REC::VAROFFSET> *)(
                         prgbitNullDest + ( ( fidFixedLastDest + 7 ) / 8 ) );
 
@@ -1122,11 +1239,12 @@ INLINE SIZE_T CbSORTCopyFixedVarColumns(
         const COLUMNID  columnidVarSrc          = ColumnidOfFid( fidT, ptdbSrc->FVarTemplateColumn( fidT ) );
         const FIELD     * const pfieldVarSrc    = ptdbSrc->PfieldVar( columnidVarSrc );
 
+        // Only care about undeleted columns
         Assert( pfieldVarSrc->coltyp != JET_coltypNil
             || !FCOLUMNIDTemplateColumn( columnidVarSrc ) );
         if ( pfieldVarSrc->coltyp != JET_coltypNil )
         {
-#ifdef DEBUG
+#ifdef DEBUG        // Assert that the fids match what the columnid map says
             BOOL        fFound = fFalse;
 
             for ( ULONG icol = 0; icol < ccpcolMax; icol++ )
@@ -1143,10 +1261,14 @@ INLINE SIZE_T CbSORTCopyFixedVarColumns(
             }
             if ( fidT >= ptdbSrc->FidVarFirst() )
             {
+                // Only columns in the derived table are in the columnid map.
                 Assert( fFound );
             }
             else
             {
+                // Base table columns are not in the columnid map.  Since base
+                // tables have fixed DDL, the columnid in the source and destination
+                // table should not have changed.
                 Assert( !fFound );
                 Assert( fidT == fidVarLastDest+1 );
             }
@@ -1157,6 +1279,8 @@ INLINE SIZE_T CbSORTCopyFixedVarColumns(
     }
     Assert( fidVarLastDest <= ptdbDest->FidVarLast() );
 
+    // The second iteration through the variable columns, we copy the column data
+    // and update the offsets and nullity.
     pbChunkSrc = (BYTE *)( pibVarOffsSrc + ( fidVarLastSrc - fidVarLeast + 1 ) );
     Assert( pbChunkSrc == precSrc->PbVarData() );
     pbChunkDest = (BYTE *)( pibVarOffsDest + ( fidVarLastDest - fidVarLeast + 1 ) );
@@ -1173,6 +1297,7 @@ INLINE SIZE_T CbSORTCopyFixedVarColumns(
         const FIELD     * const pfieldVarSrc    = ptdbSrc->PfieldVar( columnidVarSrc );
         const UINT      ifid                    = fidT - fidVarLeast;
 
+        // Only care about undeleted columns
         Assert( pfieldVarSrc->coltyp != JET_coltypNil
             || !FCOLUMNIDTemplateColumn( columnidVarSrc ) );
         if ( pfieldVarSrc->coltyp == JET_coltypNil )
@@ -1234,6 +1359,7 @@ INLINE SIZE_T CbSORTCopyFixedVarColumns(
     precDest->SetFidVarLastInRec( fidVarLastDest );
     precDest->SetIbEndOfFixedData( REC::RECOFFSET( (BYTE *)pibVarOffsDest - pbRecDest ) );
 
+    // Should end up at the start of the tagflds.
     Assert( precDest->PbTaggedData() == pbChunkDest + cbChunk );
 
     Assert( precDest->IbEndOfVarData() <= precSrc->IbEndOfVarData() );
@@ -1244,7 +1370,7 @@ INLINE SIZE_T CbSORTCopyFixedVarColumns(
 
 INLINE VOID SORTCheckVarTaggedCols( const REC *prec, const ULONG cbRec, const TDB *ptdb )
 {
-#if 0
+#if 0   //  enable only to fix corruption
     const BYTE          *pbRecMax           = (BYTE *)prec + cbRec;
     TAGFLD              *ptagfld;
     TAGFLD              *ptagfldPrev;
@@ -1320,6 +1446,7 @@ CheckTagged:
             Assert( PtagfldNext( ptagfld ) == m_pbNext );
             printf( "\nFixed TAGFLD out of order." );
 
+            //  restart from beginning to verify order
             goto CheckTagged;
         }
         ptagfldPrev = ptagfld;
@@ -1327,7 +1454,7 @@ CheckTagged:
         Assert( (BYTE *)PtagfldNext( ptagfld ) <= pbRecMax );
     }
     Assert( (BYTE *)ptagfld == pbRecMax );
-#endif
+#endif  //  0
 }
 
 
@@ -1354,13 +1481,20 @@ LOCAL ERR ErrSORTCopyOneRecord(
 #endif
 
     Assert( Pcsr( pfucbSrc )->FLatched() );
-    CallS( ErrDIRRelease( pfucbSrc ) );
+    CallS( ErrDIRRelease( pfucbSrc ) );     // Must release latch in order to call prepare update.
 
+    //  work buffer pre-allocated so IsamPrepareUpdate won't
+    //  continually allocate one.
+    //
     Assert( NULL != pfucbDest->pvWorkBuf );
     Assert( pfucbDest->dataWorkBuf.Pv() == pfucbDest->pvWorkBuf );
 
+    //  setup pfucbDest for insert
+    //
     Call( ErrIsamPrepareUpdate( pfucbDest->ppib, pfucbDest, JET_prepInsert ) );
 
+    //  re-access source record
+    //
     Assert( !Pcsr( pfucbSrc )->FLatched() );
     Call( ErrDIRGet( pfucbSrc ) );
 
@@ -1400,6 +1534,7 @@ LOCAL ERR ErrSORTCopyOneRecord(
     Assert( cbRecSrc >= REC::cbRecordMin );
     Assert( cbRecSrc <= (SIZE_T)REC::CbRecordMostCHECK( g_rgfmp[ pfucbDest->ifmp ].CbPage() ) );
     Assert( cbRecSrc <= (SIZE_T)REC::CbRecordMost( pfucbDest ) );
+    // No clue if the Sort pfucbDest has the kind of schema / IDB::CbKeyMost() set.
     if ( cbRecSrc > (SIZE_T)REC::CbRecordMost( pfucbDest ) )
     {
         FireWall( "SORTCopyRecTooBig10.2" );
@@ -1434,6 +1569,7 @@ LOCAL ERR ErrSORTCopyOneRecord(
 
     if ( FCOLSDELETEDNone( fColumnsDeleted ) )
     {
+        // Do the copy as one big chunk.
         UtilMemCpy( pbRecDest, pbRecSrc, cbRecSrc );
         pfucbDest->dataWorkBuf.SetCb( cbRecSrc );
         cbRecDestFixedVar = cbRecSrcFixedVar;
@@ -1474,6 +1610,9 @@ LOCAL ERR ErrSORTCopyOneRecord(
             Assert( (SIZE_T)pfucbDest->dataWorkBuf.Cb() >= cbRecDestFixedVar );
             Assert( (SIZE_T)pfucbDest->dataWorkBuf.Cb() <= cbRecSrc );
 
+            // When we copied the tagged columns, we also took care of
+            // copying the separated LV's.  We're done now, so go ahead and
+            // insert the record.
             goto InsertRecord;
         }
         else
@@ -1492,6 +1631,7 @@ LOCAL ERR ErrSORTCopyOneRecord(
     Assert( Pcsr( pfucbSrc )->FLatched() );
     CallS( ErrDIRRelease( pfucbSrc ) );
 
+    // Now fix up the LIDs for separated long values, if any.
     Call( ErrSORTUpdateSeparatedLVs(
         pfucbSrc,
         pfucbDest,
@@ -1509,12 +1649,14 @@ InsertRecord:
         Assert( fidVarLast >= fidVarLeast-1 );
         Assert( fidVarLast <= pfucbDest->u.pfcb->Ptdb()->FidVarLast() );
 
+        // Do not count record header.
         const INT   cbOverhead =
-                        ibRECStartFixedColumns
-                        + ( ( fidFixedLast + 1 - fidFixedLeast ) + 7 ) / 8
-                        + ( fidVarLast + 1 - fidVarLeast ) * sizeof(WORD);
+                        ibRECStartFixedColumns                              // Record header + offset to tagged fields
+                        + ( ( fidFixedLast + 1 - fidFixedLeast ) + 7 ) / 8  // Null array for fixed columns
+                        + ( fidVarLast + 1 - fidVarLeast ) * sizeof(WORD);  // Variable offsets array
         Assert( cbRecDestFixedVar >= (SIZE_T)cbOverhead );
 
+        // Do not count offsets tables or null arrays.
         pstatus->cbRawData += ( cbRecDestFixedVar - cbOverhead );
     }
 
@@ -1528,6 +1670,8 @@ InsertRecord:
         Assert( fidAutoInc <= pfucbDest->u.pfcb->Ptdb()->FidFixedLast() );
         Assert( FFUCBColumnSet( pfucbDest, fidAutoInc ) );
         
+        // Need to set fid to zero to short-circuit AutoInc check
+        // in ErrRECIInsert().
         pfucbDest->u.pfcb->Ptdb()->ResetFidAutoincrement();
     }
     
@@ -1535,6 +1679,7 @@ InsertRecord:
     
     if ( fidAutoInc != 0 )
     {
+        // Reset AutoInc after update.
         pfucbDest->u.pfcb->Ptdb()->SetFidAutoincrement( fidAutoInc, f8BytesAutoInc );
     }
         
@@ -1542,15 +1687,17 @@ InsertRecord:
 
 #else
     Call( ErrRECInsert( pfucbDest, pbmPrimary ) );
-#endif
+#endif  //  DEBUG
 
 HandleError:
+    // Work buffer preserved for next record.
     Assert( NULL != pfucbDest->pvWorkBuf || err < 0 );
 
     return err;
 }
 
 
+// Verify integrity of columnid maps.
 INLINE VOID SORTAssertColumnidMaps(
     TDB             *ptdb,
     CPCOL           *rgcpcol,
@@ -1564,6 +1711,7 @@ INLINE VOID SORTAssertColumnidMaps(
     INT i;
     if ( FCOLSDELETEDFixedVar( fColumnsDeleted ) )
     {
+        // Ensure columnids are monotonically increasing.
         for ( i = 0; i < (INT)ccpcolMax; i++ )
         {
             if ( FCOLUMNIDTemplateColumn( rgcpcol[i].columnidSrc ) )
@@ -1606,6 +1754,8 @@ INLINE VOID SORTAssertColumnidMaps(
     }
     else
     {
+        // No deleted columns, so ensure columnids didn't change.  Additionally,
+        // columnids should be monotonically increasing.
         for ( i = 0; i < (INT)ccpcolMax; i++ )
         {
             Assert( rgcpcol[i].columnidDest == rgcpcol[i].columnidSrc );
@@ -1621,6 +1771,7 @@ INLINE VOID SORTAssertColumnidMaps(
                 Assert( FCOLUMNIDVar( rgcpcol[i].columnidSrc ) );
                 if ( i == 0 )
                 {
+                    // If we get here, there's no fixed columns.
                     Assert( FidOfColumnid( rgcpcol[i].columnidDest ) == ptdb->FidVarFirst() );
                     Assert( ptdb->FidFixedLast() == ptdb->FidFixedFirst() - 1 );
                 }
@@ -1630,6 +1781,7 @@ INLINE VOID SORTAssertColumnidMaps(
                 }
                 else
                 {
+                    // Must be the beginning of the variable columns.
                     Assert( FidOfColumnid( rgcpcol[i].columnidDest ) == ptdb->FidVarFirst() );
                     Assert( FidOfColumnid( rgcpcol[i-1].columnidDest ) == ptdb->FidFixedLast() );
                 }
@@ -1638,6 +1790,8 @@ INLINE VOID SORTAssertColumnidMaps(
     }
 
 
+    // Check tagged columns.  Note that base table columns do not appear in
+    // the columnid map.
     FID         fidT        = ptdb->FidTaggedFirst();
     const FID   fidLast     = ptdb->FidTaggedLast();
     if ( FCOLSDELETEDTagged( fColumnsDeleted ) )
@@ -1654,6 +1808,7 @@ INLINE VOID SORTAssertColumnidMaps(
     }
     else
     {
+        // No deleted columns, so ensure columnids didn't change.
         for ( ; fidT <= fidLast; fidT++ )
         {
             Assert( ptdb->PfieldTagged( ColumnidOfFid( fidT, fTemplateTable ) )->coltyp != JET_coltypNil );
@@ -1666,7 +1821,7 @@ INLINE VOID SORTAssertColumnidMaps(
         }
     }
 
-#endif
+#endif  // DEBUG
 }
 
 
@@ -1688,8 +1843,8 @@ ERR ErrSORTCopyRecords(
     TDB             *ptdb                   = ptdbNil;
     INT             fColumnsDeleted         = 0;
     LONG            dsrid                   = 0;
-    BYTE            *pbRecBuf               = NULL;
-    VOID            *pvWorkBuf              = NULL;
+    BYTE            *pbRecBuf               = NULL;     // buffer for source record
+    VOID            *pvWorkBuf              = NULL;     // buffer for destination record
     BOOL            fDoAll                  = ( 0 == crecMax );
     PGNO            pgnoCurrPage;
     FCB             *pfcbSecondaryIndexes   = pfcbNil;
@@ -1711,6 +1866,7 @@ ERR ErrSORTCopyRecords(
     Assert( pqwAutoIncMax );
     *pqwAutoIncMax = 0;
 
+    //  Copy LV tree before copying data records.
     Assert( !g_rgfmp[pfucbSrc->ifmp].Plidmap() );
     err = ErrCMPCopyLVTree(
                 ppib,
@@ -1733,13 +1889,18 @@ ERR ErrSORTCopyRecords(
         return err;
     }
 
+    //  set FUCB to sequential mode for a more efficient scan
     FUCBSetSequential( pfucbSrc );
 
+//  tableidGlobal may be set in copy long value tree function.
+//  Assert( JET_tableidNil == tableidGlobalLIDMap );
 
     BFAlloc( bfasIndeterminate, (VOID **)&pbRecBuf );
     Assert ( NULL != pbRecBuf );
     Assert( NULL != pbLVBuf );
 
+    // Preallocate work buffer so ErrIsamPrepareUpdate() doesn't continually
+    // allocate one.
     Assert( NULL == pfucbDest->pvWorkBuf );
     RECIAllocCopyBuffer( pfucbDest );
     pvWorkBuf = pfucbDest->pvWorkBuf;
@@ -1751,6 +1912,9 @@ ERR ErrSORTCopyRecords(
 
     ptdb = pfucbSrc->u.pfcb->Ptdb();
 
+    //  determine if there are any delete-on-zero columns
+    //  UNDONE: currently only support one delete-on-zero column
+    //
     if ( ptdb->FTableHasDeleteOnZeroColumn() )
     {
         for ( FID fid = fidFixedLeast; fid <= ptdb->FidFixedLast(); ++fid )
@@ -1769,8 +1933,14 @@ ERR ErrSORTCopyRecords(
         }
     }
 
+    // Need to determine if there were any columns deleted.
     FCOLSDELETEDSetNone( fColumnsDeleted );
 
+    // The fixed/variable columnid map already filters out deleted columns.
+    // If the size of the map is not equal to the number of fixed and variable
+    // columns in the source table, then we know some have been deleted.
+    // Note that for derived tables, we don't have to bother checking deleted
+    // columns in the base table, since the DDL of base tables is fixed.
     Assert( ccpcolMax <=
         (ULONG)( ( ptdb->FidFixedLast() + 1 - ptdb->FidFixedFirst() )
                     + ( ptdb->FidVarLast() + 1 - ptdb->FidVarFirst() ) ) );
@@ -1780,19 +1950,25 @@ ERR ErrSORTCopyRecords(
         FCOLSDELETEDSetFixedVar( fColumnsDeleted );
     }
 
+    //  LAURIONB_HACK
     extern BOOL g_fCompactTemplateTableColumnDropped;
     if( g_fCompactTemplateTableColumnDropped && pfcbNil != ptdb->PfcbTemplateTable() )
     {
         FCOLSDELETEDSetFixedVar( fColumnsDeleted );
     }
 
-    
+    /*  tagged columnid map works differently than the fixed/variable columnid
+    /*  map; deleted columns are not filtered out (they have an entry of 0).  So we
+    /*  have to consult the source table's TDB.
+    /**/
     FID         fidT        = ptdb->FidTaggedFirst();
     const FID   fidLast     = ptdb->FidTaggedLast();
     Assert( fidLast == fidT-1 || FTaggedFid( fidLast ) );
 
     if ( ptdb->FESE97DerivedTable() )
     {
+        //  columnids will be renumbered - set Deleted flag to
+        //  force FIDs in TAGFLDs to be recalculated
         FCOLSDELETEDSetTagged( fColumnsDeleted );
     }
     else
@@ -1827,10 +2003,12 @@ ERR ErrSORTCopyRecords(
     {
         Assert( JET_errRecordNotFound != err );
         if ( JET_errNoCurrentRecord == err )
-            err = JET_errSuccess;
+            err = JET_errSuccess;       // empty table
         goto HandleError;
     }
 
+    // Disconnect secondary indexes to prevent Update from attempting
+    // to update secondary indexes.
     pfcbSecondaryIndexes = pfucbDest->u.pfcb->PfcbNextIndex();
     pfucbDest->u.pfcb->SetPfcbNextIndex( pfcbNil );
 
@@ -1849,6 +2027,10 @@ ERR ErrSORTCopyRecords(
                     cFILEIndexBatchSizeDefault ) );
 
 #ifdef PARALLEL_BATCH_INDEX_BUILD
+        //  only build indexes while copying data records if
+        //  there are not many indexes -- if there are too many,
+        //  then just create all the indexes in one big pass
+        //  after we're done copying the records
         fBuildIndexWhileCopying = ( pfcbNil == pfcbNextIndexBatch );
 #else
         fBuildIndexWhileCopying = fTrue;
@@ -1887,12 +2069,21 @@ ERR ErrSORTCopyRecords(
     {
         Assert( Pcsr( pfucbSrc )->FLatched() );
 
+        //  delete-on-zero column must always be an escrow-updatable LONG column,
+        //  so it must always be present in the record
+        //
         Assert( 0 == ibDeleteOnZeroColumn
             || pfucbSrc->kdfCurr.data.Cb() > LONG( ibDeleteOnZeroColumn + sizeof(LONG) ) );
 
         if ( 0 != ibDeleteOnZeroColumn
             && 0 == *(UnalignedLittleEndian< ULONG > *)( (BYTE *)pfucbSrc->kdfCurr.data.Pv() + ibDeleteOnZeroColumn ) )
         {
+            //  skip records with 0 refcount for delete-on-zero column
+            //
+            //  UNDONE: the associated LV will be marked as deleted when we
+            //  fix up refcounts (see LIDMAP::ErrUpdateLVRefcounts()), but
+            //  a second defrag pass will be needed to reclaim that space)
+            //
             CallS( ErrDIRRelease( pfucbSrc ) );
             Assert( !Pcsr( pfucbDest )->FLatched() );
         }
@@ -1904,8 +2095,8 @@ ERR ErrSORTCopyRecords(
                         pbmPrimary,
                         fColumnsDeleted,
                         pbRecBuf,
-                        rgcpcol,
-                        ccpcolMax,
+                        rgcpcol,                        // Only used for DEBUG
+                        ccpcolMax,                      // Only used for DEBUG
                         mpcolumnidcolumnidTagged,
                         pstatus,
                         pqwAutoIncMax );
@@ -1923,9 +2114,11 @@ ERR ErrSORTCopyRecords(
 
             else
             {
+                // Latch released in order to copy record.
                 Assert( !Pcsr( pfucbSrc )->FLatched() );
                 Assert( !Pcsr( pfucbDest )->FLatched() );
 
+                // Work buffer preserved.
                 Assert( pfucbDest->dataWorkBuf.Pv() == pvWorkBuf );
                 Assert( pfucbDest->dataWorkBuf.Cb() >= REC::cbRecordMin );
                 Assert( pfucbDest->dataWorkBuf.Cb() <= REC::CbRecordMostCHECK( g_rgfmp[ pfucbDest->ifmp ].CbPage() ) );
@@ -1945,14 +2138,15 @@ ERR ErrSORTCopyRecords(
                                 pfcbSecondaryIndexes,
                                 cIndexesToBuild,
                                 rgcRecInput,
-                                keyBuffer ) );
+                                keyBuffer ) );  //lint !e644
                 }
             }
         }
 
         dsrid++;
 
-        
+        /*  break if copied required records or if no next/prev record
+        /**/
 
         if ( !fDoAll && --crecMax == 0 )
             break;
@@ -1987,10 +2181,12 @@ ERR ErrSORTCopyRecords(
 
     if ( g_rgfmp[pfucbSrc->ifmp].Plidmap() )
     {
+        // Validate LV refcounts
         Call( g_rgfmp[pfucbSrc->ifmp].Plidmap()->ErrUpdateLVRefcounts( ppib, pfucbDest ) );
     }
 
 
+    // Reattach secondary indexes.
     Assert( pfucbDest->u.pfcb->PfcbNextIndex() == pfcbNil );
     pfucbDest->u.pfcb->SetPfcbNextIndex( pfcbSecondaryIndexes );
 
@@ -2000,6 +2196,8 @@ ERR ErrSORTCopyRecords(
         {
             Assert( pstatus->cSecondaryIndexes > 0 );
 
+            // if cunitPerProgression is 0, then corruption was detected
+            // during GlobalRepair
             Assert( pstatus->cunitPerProgression > 0 || g_fRepair );
             if ( pstatus->cunitPerProgression > 0 )
             {
@@ -2007,6 +2205,7 @@ ERR ErrSORTCopyRecords(
                 Assert( pstatus->cunitProjected <= pstatus->cunitTotal );
                 const ULONG cpgRemaining = pstatus->cunitProjected - pstatus->cunitDone;
 
+                // Each secondary index has at least an FDP.
                 Assert( cpgRemaining >= pstatus->cSecondaryIndexes );
 
                 pstatus->cunitPerProgression = cpgRemaining / pstatus->cSecondaryIndexes;
@@ -2018,6 +2217,8 @@ ERR ErrSORTCopyRecords(
 #ifdef PARALLEL_BATCH_INDEX_BUILD
         if ( fBuildIndexWhileCopying )
         {
+            //  this should be all the indexes for this table
+            //
             Call( ErrFILEIndexBatchTerm(
                         ppib,
                         rgpfucbSort,
@@ -2043,6 +2244,7 @@ ERR ErrSORTCopyRecords(
                         cIndexes ) );
         }
 #else
+        // Finish first batch of indexes, then make the rest.
         Call( ErrFILEIndexBatchTerm(
                     ppib,
                     rgpfucbSort,
@@ -2061,7 +2263,7 @@ ERR ErrSORTCopyRecords(
                             pstatus,
                             cFILEIndexBatchSizeDefault ) );
         }
-#endif
+#endif  //  PARALLEL_BATCH_INDEX_BUILD
     }
 
 HandleError:
@@ -2072,13 +2274,14 @@ HandleError:
     {
         for ( iindex = 0; iindex < cFILEIndexBatchSizeDefault; iindex++ )
         {
-            if ( pfucbNil != rgpfucbSort[iindex] )
+            if ( pfucbNil != rgpfucbSort[iindex] )  //lint !e644
             {
                 SORTClose( rgpfucbSort[iindex] );
                 rgpfucbSort[iindex] = pfucbNil;
             }
         }
 
+        // Ensure secondary indexes reattached.
         pfucbDest->u.pfcb->SetPfcbNextIndex( pfcbSecondaryIndexes );
     }
 #ifdef DEBUG
@@ -2091,6 +2294,7 @@ HandleError:
     }
 #endif
 
+    // This gets allocated by CopyLVTree()
     if ( g_rgfmp[pfucbSrc->ifmp].Plidmap() )
     {
         LIDMAP* const plidmap = g_rgfmp[pfucbSrc->ifmp].Plidmap();
@@ -2108,13 +2312,15 @@ HandleError:
 
     Assert( NULL != pvWorkBuf );
     Assert( pvWorkBuf == pfucbDest->pvWorkBuf
-        || ( err < 0 && NULL == pfucbDest->pvWorkBuf ) );
+        || ( err < 0 && NULL == pfucbDest->pvWorkBuf ) );   //  work buffer may have been deallocated on error
     Assert( pfucbDest->dataWorkBuf.Pv() == pfucbDest->pvWorkBuf );
     RECIFreeCopyBuffer( pfucbDest );
 
     Assert ( NULL != pbRecBuf );
     BFFree( pbRecBuf );
 
+    //  release resouce if allocated
+    //
     RESKEY.Free( pbPrimaryKey );
     RESKEY.Free( pbSecondaryKey );
 
@@ -2125,6 +2331,7 @@ HandleError:
 }
 
 
+//  UNDONE:  use GetTempFileName()
 INLINE ULONG ulSORTTempNameGen( VOID )
 {
     static ULONG ulTempNum = 0;
@@ -2146,16 +2353,16 @@ LOCAL ERR ErrIsamSortMaterialize( PIB * const ppib, FUCB * const pfucbSort, cons
         sizeof(JET_TABLECREATE5_A),
         szName,
         NULL,
-        16,
-        100,
-        NULL, 0, NULL, 0, NULL, 0,
-        NO_GRBIT,
-        NULL,
-        NULL,
-        0,
-        0,
-        JET_TABLEID( pfucbNil ),
-        0 };
+        16,                         // Pages
+        100,                        // Density
+        NULL, 0, NULL, 0, NULL, 0,  // Columns and indexes and callbacks
+        NO_GRBIT,                   // grbit
+        NULL,                       // sequential index space hints
+        NULL,                       // LV tree space hints
+        0,                          // cbSeparateLV set a little lower ...
+        0,                          // cbLVChunkMax
+        JET_TABLEID( pfucbNil ),    // returned tableid
+        0 };                        // returned count of objects created
 
     CallR( ErrPIBCheck( ppib ) );
     CheckSort( ppib, pfucbSort );
@@ -2166,36 +2373,47 @@ LOCAL ERR ErrIsamSortMaterialize( PIB * const ppib, FUCB * const pfucbSort, cons
 
     if ( pfucbSort->u.pscb->grbit & JET_bitTTIntrinsicLVsOnly )
     {
-        tablecreate.cbSeparateLV = g_cbPage;
+        tablecreate.cbSeparateLV = g_cbPage;    // wish for intrinsic LVs only.
     }
 
     INST *pinst = PinstFromPpib( ppib );
     CallR( ErrPIBOpenTempDatabase( ppib ) );
     
-    
+    /*  causes remaining runs to be flushed to disk
+    /**/
     if ( FSCBInsert( pfucbSort->u.pscb ) )
     {
+        // If fSCBInsert is set, must have been called from ErrIsamOpenTempTable(),
+        // in which case there should be no records.
         Assert( 0 == pfucbSort->u.pscb->cRecords );
         CallR( ErrSORTEndInsert( pfucbSort ) );
     }
 
 
-    
+    /*  generate temporary file name
+    /**/
     OSStrCbFormatA( szName, sizeof(szName), "TEMP%lu", ulSORTTempNameGen() );
 
     CallR( ErrEnsureTempDatabaseOpened( pinst, ppib ) );
 
-    
+    /*  create table
+    /**/
     CallR( ErrFILECreateTable( ppib, pinst->m_mpdbidifmp[ dbidTemp ], &tablecreate ) );
     pfucbTable = (FUCB *)( tablecreate.tableid );
     Assert( pfucbNil != pfucbTable );
-    
+    /*  only one table created
+    /**/
     Assert( tablecreate.cCreated == 1 );
 
+    // This call forces the FUCB list in the FCB to reserve space for one more entry.  We do that here
+    // so that ->ErrLink() later will succeed.  This is safe because this thread is the sole accessor of
+    // the table, and if we're sure now that there'll be space for another FUCB, then that'll be true
+    // later, when we're in code that can't fail.
     Call( pfucbTable->u.pfcb->ErrLinkReserveSpace() );
 
-    
-    const INT   fDIRFlags = ( fDIRNoVersion|fDIRAppend );
+    /*  move to DATA root
+    /**/
+    const INT   fDIRFlags = ( fDIRNoVersion|fDIRAppend );   // No versioning -- on error, entire FDP is freed
     DIRGotoRoot( pfucbTable );
     Call( ErrDIRInitAppend( pfucbTable ) );
 
@@ -2254,10 +2472,10 @@ LOCAL ERR ErrIsamSortMaterialize( PIB * const ppib, FUCB * const pfucbSort, cons
             err = ErrSORTNext( pfucbSort );
         }
 
-        dbk++;
+        dbk++;          //  add one to set to next available dbk
 
         Assert( ptdbTable->DbkMost() == 0 );
-        ptdbTable->InitDbkMost( dbk );
+        ptdbTable->InitDbkMost( dbk );          //  should not conflict with anyone, since we have exclusive use
         Assert( ptdbTable->DbkMost() == dbk );
     }
 
@@ -2267,11 +2485,20 @@ LOCAL ERR ErrIsamSortMaterialize( PIB * const ppib, FUCB * const pfucbSort, cons
 
     Call( ErrDIRTermAppend( pfucbTable ) );
 
+    //  convert sort cursor into table cursor by changing flags.
+    //
     Assert( pfcbTable->PfcbNextIndex() == pfcbNil );
     Assert( FFMPIsTempDB( pfcbTable->Ifmp() ) );
+    // Get the space hints set appropriately 
     pfcbTable->SetSpaceHints( PSystemSpaceHints(eJSPHDefaultHeavyWater) );
 
+    // UNDONE: This strategy of swapping the sort and table FCB's is a real
+    // hack with the potential to cause future problems.  I've already been
+    // bitten several times because ulFCBFlags is forcefully cleared.
+    // Is there a better way to do this?
 
+    // UNDONE:  clean up flag reset
+    //
     Assert( pfcbTable->FDomainDenyReadByUs( ppib ) );
     Assert( pfcbTable->FTypeTemporaryTable() );
     Assert( pfcbTable->FPrimaryIndex() );
@@ -2288,8 +2515,8 @@ LOCAL ERR ErrIsamSortMaterialize( PIB * const ppib, FUCB * const pfucbSort, cons
     pfcbTable->SetTypeTemporaryTable();
     pfcbTable->SetFixedDDL();
     pfcbTable->SetPrimaryIndex();
-    pfcbTable->CreateComplete();
-    pfcbTable->SetInList();
+    pfcbTable->CreateComplete();    //  FInitialized() = fTrue, m_errInit = JET_errSuccess
+    pfcbTable->SetInList();     // Already placed in list by FILEOpenTable()
 
     if ( pfucbSort->u.pscb->grbit & JET_bitTTIntrinsicLVsOnly )
     {
@@ -2298,6 +2525,8 @@ LOCAL ERR ErrIsamSortMaterialize( PIB * const ppib, FUCB * const pfucbSort, cons
     }
     pfcbTable->Unlock();
 
+    // Swap field info in the sort and table TDB's.  The TDB for the sort
+    // will then be released when the sort is closed.
     Assert( ptdbSort != ptdbNil );
     Assert( ptdbSort->PfcbTemplateTable() == pfcbNil );
     Assert( ptdbSort->IbEndFixedColumns() >= ibRECStartFixedColumns );
@@ -2311,12 +2540,22 @@ LOCAL ERR ErrIsamSortMaterialize( PIB * const ppib, FUCB * const pfucbSort, cons
     Assert( pfieldNil == ptdbTable->PfieldsInitial() );
     Assert( ptdbTable->PfcbTemplateTable() == pfcbNil );
 
+    //  copy FIELD structures into byte pool (note that
+    //  although it would be bad, it is theoretically
+    //  possible to create a sort without any columns)
+    //  UNDONE: it would be nicer to copy the FIELD
+    //  structure to the temp. table's PfieldsInitial(),
+    //  but can't modify the fidLastInitial constants
+    //  anymore
     Assert( 0 == ptdbSort->CDynamicColumns() );
     Assert( 0 == ptdbTable->CInitialColumns() );
     Assert( 0 == ptdbTable->CDynamicColumns() );
     const ULONG     cCols   = ptdbSort->CInitialColumns();
     if ( cCols > 0 )
     {
+        //  Add the FIELD structures to the sort's byte pool
+        //  so that it will be a simple matter to swap byte
+        //  pools between the sort and the table
         Call( ptdbSort->MemPool().ErrReplaceEntry(
                     itagTDBFields,
                     (BYTE *)ptdbSort->PfieldsInitial(),
@@ -2324,6 +2563,8 @@ LOCAL ERR ErrIsamSortMaterialize( PIB * const ppib, FUCB * const pfucbSort, cons
     }
 
 
+    // Add the table name to the sort's byte pool so that it will be a simple
+    // matter to swap byte pools between the sort and the table.
     Assert( ptdbSort->ItagTableName() == 0 );
     MEMPOOL::ITAG   itagNew;
     Call( ptdbSort->MemPool().ErrAddEntry(
@@ -2331,7 +2572,7 @@ LOCAL ERR ErrIsamSortMaterialize( PIB * const ppib, FUCB * const pfucbSort, cons
                 (ULONG)strlen( szName ) + 1,
                 &itagNew ) );
     if ( fIndex
-        || pfcbSort->Pidb() != pidbNil )
+        || pfcbSort->Pidb() != pidbNil )    // UNDONE: Temporarily add second clause to silence asserts. -- JL
     {
         Assert( pfcbSort->Pidb() != pidbNil );
         if ( pfcbSort->Pidb()->FIsRgidxsegInMempool() )
@@ -2352,45 +2593,66 @@ LOCAL ERR ErrIsamSortMaterialize( PIB * const ppib, FUCB * const pfucbSort, cons
     }
     ptdbSort->SetItagTableName( itagNew );
 
+    // Try to compact the byte pool.  If it fails, don't worry about it.
+    // It just means the byte pool may contain unused space.
     ptdbSort->MemPool().FCompact();
 
+    // Since sort is about to be closed, everything can be cannibalised,
+    // except the byte pool, which must be explicitly freed.
     mempoolSave = ptdbSort->MemPool();
     ptdbSort->SetMemPool( ptdbTable->MemPool() );
 
+    // WARNING: From this point on pfcbTable will be irrevocably
+    // cannibalised before being transferred to the sort cursor.
+    // Thus, we must ensure success all the way up to the
+    // DIRClose( pfucbTable ), because we will no longer be
+    // able to close the table properly via FILECloseTable()
+    // in HandleError.
 
     ptdbTable->SetMemPool( mempoolSave );
     ptdbTable->MaterializeFids( ptdbSort );
     ptdbTable->SetItagTableName( ptdbSort->ItagTableName() );
 
+    //  shouldn't have a default record, but propagate just to be safe
     Assert( NULL == ptdbSort->PdataDefaultRecord() );
     Assert( NULL == ptdbTable->PdataDefaultRecord() );
     ptdbTable->SetPdataDefaultRecord( ptdbSort->PdataDefaultRecord() );
     ptdbSort->SetPdataDefaultRecord( NULL );
 
+    //  switch sort and table IDB
     Assert( pfcbTable->Pidb() == pidbNil );
     if ( fIndex )
     {
         Assert( pfcbSort->Pidb() != pidbNil );
-        Assert( pfcbSort->Pidb()->ItagIndexName() == 0 );
+        Assert( pfcbSort->Pidb()->ItagIndexName() == 0 );   // Sort and temp table indexes have no name.
         pfcbTable->SetPidb( pfcbSort->Pidb() );
 
+        // now that we have the final IDB,
+        // we have to recompute the index mask
+        //
         FILESetAllIndexMask( pfcbTable );
 
         pfcbSort->SetPidb( pidbNil );
     }
 
+    //  convert sort cursor flags to table flags
+    //
     Assert( FFMPIsTempDB( pfucbSort->ifmp ) );
     Assert( pfucbSort->pfucbCurIndex == pfucbNil );
     FUCBSetIndex( pfucbSort );
     FUCBResetSort( pfucbSort );
     FUCBSetMayCacheLVCursor( pfucbSort );
 
+    // release SCB, upgrade sort cursor to table cursor,
+    // then close original table cursor
+    //
     Assert( pfucbSort->u.pscb->fcb.WRefCount() == 1 );
     Assert( pfucbSort->u.pscb->fcb.Pfucb() == pfucbSort );
     if ( pfucbSort->u.pscb->fcb.PgnoFDP() != pgnoNull )
         SORTICloseRun( ppib, pfucbSort->u.pscb );
     SORTClosePscb( pfucbSort->u.pscb );
     err = pfcbTable->ErrLink( pfucbSort );
+    // Can't fail, we pre-reserved a slot.
     Enforce( JET_errSuccess == err );
     DIRBeforeFirst( pfucbSort );
 
@@ -2406,11 +2668,16 @@ LOCAL ERR ErrIsamSortMaterialize( PIB * const ppib, FUCB * const pfucbSort, cons
 
     if ( ppib->Level() > 0 )
     {
+        //  flag FCB as uncommitted for unversioned DML operations
+        //
         pfucbSort->u.pfcb->Lock();
         pfucbSort->u.pfcb->SetUncommitted();
         pfucbSort->u.pfcb->Unlock();
     }
 
+    // WARNING: Materialisation complete.  Sort has been transformed
+    // into a temp table.  Must return success so dispatch table will
+    // be updated accordingly.
     pfucbSort->pvtfndef = &vtfndefTTBase;
     return JET_errSuccess;
 
@@ -2418,6 +2685,7 @@ LOCAL ERR ErrIsamSortMaterialize( PIB * const ppib, FUCB * const pfucbSort, cons
 HandleError:
     if ( pfucbNil != pfucbTable )
     {
+        // On error, release temporary table.
         Assert( err < JET_errSuccess );
         Assert( pfucbTable->u.pfcb->FTypeTemporaryTable() );
         CallS( ErrFILECloseTable( ppib, pfucbTable ) );
@@ -2427,7 +2695,7 @@ HandleError:
 }
 
 
-#pragma warning(disable:4028 4030)
+#pragma warning(disable:4028 4030)  //  parameter mismatch errors
 
 #ifndef DEBUG
 #define ErrIsamSortRetrieveKey      ErrIsamRetrieveKey
@@ -2660,7 +2928,7 @@ CODECONST(VTFNDEF) vtfndefTTSortIns =
     0,
     NULL,
     ErrIllegalAddColumn,
-    ErrIsamSortClose,
+    ErrIsamSortClose,           // WARNING: Must be same as vtfndefTTSortClose
     ErrIllegalComputeStats,
     ErrIllegalCreateIndex,
     ErrIllegalDelete,
@@ -2721,7 +2989,7 @@ CODECONST(VTFNDEF) vtfndefTTSortRet =
     0,
     NULL,
     ErrIllegalAddColumn,
-    ErrIsamSortClose,
+    ErrIsamSortClose,           // WARNING: Must be same as vtfndefTTSortClose
     ErrIllegalComputeStats,
     ErrIllegalCreateIndex,
     ErrIllegalDelete,
@@ -2776,6 +3044,7 @@ CODECONST(VTFNDEF) vtfndefTTSortRet =
     ErrIllegalStreamRecords,
 };
 
+// for temp table (ie. a sort that's been materialized)
 CODECONST(VTFNDEF) vtfndefTTBase =
 {
     sizeof(VTFNDEF),
@@ -2898,6 +3167,7 @@ const VTFNDEF vtfndefTTBaseMustRollback =
     ErrIllegalStreamRecords,
 };
 
+// Inconsistent sort -- must be closed.
 LOCAL CODECONST(VTFNDEF) vtfndefTTSortClose =
 {
     sizeof(VTFNDEF),
@@ -2960,7 +3230,35 @@ LOCAL CODECONST(VTFNDEF) vtfndefTTSortClose =
 };
 
 
-
+/*=================================================================
+// ErrIsamOpenTempTable
+//
+// Description:
+//
+//  Returns a tableid for a temporary (lightweight) table.  The data
+//  definitions for the table are specified at open time.
+//
+// Parameters:
+//  JET_SESID           sesid               user session id
+//  JET_TABLEID         *ptableid           new JET (dispatchable) tableid
+//  ULONG               csinfo              count of JET_COLUMNDEF structures
+//                                          (==number of columns in table)
+//  JET_COLUMNDEF       *rgcolumndef        An array of column and key defintions
+//                                          Note that TT's do require that a key be
+//                                          defined. (see jet.h for JET_COLUMNDEF)
+//  JET_GRBIT           grbit               valid values
+//                                          JET_bitTTUpdatable (for insert and update)
+//                                          JET_bitTTScrollable (for movement other then movenext)
+//
+// Return Value:
+//  err         jet error code or JET_errSuccess.
+//  *ptableid   a dispatchable tableid
+//
+// Errors/Warnings:
+//
+// Side Effects:
+//
+=================================================================*/
 ERR VDBAPI ErrIsamOpenTempTable(
     JET_SESID               sesid,
     const JET_COLUMNDEF     *rgcolumndef,
@@ -2978,11 +3276,14 @@ ERR VDBAPI ErrIsamOpenTempTable(
     Assert( ptableid );
     *ptableid = JET_tableidNil;
 
+    //  if temp tables are disabled then fail
     if ( !UlParam( PinstFromPpib( (PIB*)sesid ), JET_paramMaxTemporaryTables ) )
     {
         CallR( ErrERRCheck( JET_errTooManySorts ) );
     }
 
+    //  if the caller wants a forward only sort then they cannot ask for any
+    //  functionality that will result in a table
     if (    ( grbit & JET_bitTTForwardOnly ) &&
             ( grbit & ( JET_bitTTIndexed | JET_bitTTUpdatable | JET_bitTTScrollable | JET_bitTTForceMaterialization ) ) )
     {
@@ -3013,10 +3314,17 @@ ERR VDBAPI ErrIsamOpenTempTable(
         fLongValues |= FRECLongValue( rgcolumndef[iColumndef].coltyp );
     }
 
+    //  if no index, force materialisation to avoid unnecessarily sorting
+    //  if long values exist and they won't be forced intrinsic, must materialise
+    //      because sorts don't support LV's
+    //  if user wants error to be returned on insertion of duplicates, then must
+    //      materialise because sorts remove dupes silently
     if ( !fIndexed
         || ( fLongValues && !( grbit & JET_bitTTIntrinsicLVsOnly ) )
         || ( grbit & JET_bitTTForceMaterialization ) )
     {
+        //  if the caller wants a forward only sort then they cannot ask for any
+        //  functionality that will result in a table
         if ( grbit & JET_bitTTForwardOnly )
         {
             CallS( ErrIsamSortClose( sesid, (JET_VTID)pfucb ) );
@@ -3066,6 +3374,8 @@ ERR ErrTTEndInsert( JET_SESID sesid, JET_TABLEID tableid, BOOL *pfMovedToFirst )
     }
     else
     {
+        // In case we have runs, we must call SORTFirst() to
+        // start last merge and get first record
         err = ErrSORTFirst( pfucb );
         Assert( err <= JET_errSuccess );
         if ( err < JET_errSuccess )
@@ -3086,6 +3396,8 @@ HandleError:
     Assert( err < 0 );
     Assert( JET_errNoCurrentRecord != err );
 
+    // On failure, sort is no longer consistent.  It must be
+    // invalidated.  The only legal operation left is to close it.
     Assert( &vtfndefTTSortIns == pfucb->pvtfndef );
     pfucb->pvtfndef = &vtfndefTTSortClose;
 
@@ -3093,7 +3405,15 @@ HandleError:
 }
 
 
-
+/*=================================================================
+// ErrTTSortInsMove
+//
+//  Functionally the same as JetMove().  This routine traps the first
+//  move call on a TT, to perform any necessary transformations.
+//  Routine should only be used by ttapi.c via disp.asm.
+//
+//  May cause a sort to be materialized
+=================================================================*/
 ERR VTAPI ErrTTSortInsMove( JET_SESID sesid, JET_TABLEID tableid, LONG crow, JET_GRBIT grbit )
 {
     ERR     err;
@@ -3111,6 +3431,9 @@ ERR VTAPI ErrTTSortInsMove( JET_SESID sesid, JET_TABLEID tableid, LONG crow, JET
 
     if ( fMovedToFirst )
     {
+        // May have already moved to first record if we had an on-disk sort
+        // that wasn't materialised (because it's not updatable or
+        // backwards-scrollable).
         if ( crow > 0 && crow < JET_MoveLast )
             crow--;
 
@@ -3123,7 +3446,15 @@ ERR VTAPI ErrTTSortInsMove( JET_SESID sesid, JET_TABLEID tableid, LONG crow, JET
 }
 
 
-
+/*=================================================================
+// ErrTTSortInsSeek
+//
+//  Functionally the same as JetSeek().  This routine traps the first
+//  seek call on a TT, to perform any necessary transformations.
+//  Routine should only be used by ttapi.c via disp.asm.
+//
+//  May cause a sort to be materialized
+=================================================================*/
 ERR VTAPI ErrTTSortInsSeek( JET_SESID sesid, JET_TABLEID tableid, JET_GRBIT grbit )
 {
     ERR     err;
@@ -3180,6 +3511,12 @@ ERR VTAPI ErrTTBaseDupCursor( JET_SESID sesid, JET_TABLEID tableid, JET_TABLEID 
 
 
 
+//++++++++++++++++++++++++++++++++++++++++++++++++++++++
+//  Special hack - copy LV a tree of a table.
+//  
+//  This preserves the compression status of LVs. Each
+//  chunk is physically copied (i.e. it isn't decompressed)
+//++++++++++++++++++++++++++++++++++++++++++++++++++++++
 
 ERR ErrCMPCopyLVTree(
     PIB         *ppib,
@@ -3228,13 +3565,25 @@ ERR ErrCMPCopyLVTree(
         LvId    lidDest;
         ULONG   ibLongValue = 0;
 
+        // We want to keep the LID size same while copying the LVs.
+        // So generate a dest LID32 for a src LID32 (and same for LID64).
+        // The LIDs might differ in value but not in size.
+        // This is required because otherwise the record size can change during the copy operation.
+        // Record copy code doesn't resize records on a LID size change. It will corrupt data in this case !
+        // Even if we handle this case, we can potentially hit JET_errRecordTooBig.
+        // We don't want to shrink the record size either (by replacing LID64 with LID32).
+        // That can cause issues with AD's logical replication scheme (same record fitting on 1 copy but too big for another).
 
+        // Since we are traversing in lid order, we will only switch from LID32 to LID64 when we encounter the first LID64.
         pfucbDest->u.pfcb->Ptdb()->SetFLid64( lidSrc.FIsLid64() );
 
         Assert( pgnoNull != Pcsr( pfucbGetLV )->Pgno() );
 
+        // Only copy if it is not partially deleted
         if ( !FPartiallyDeletedLV( lvroot.ulReference ) )
         {
+            // Create destination LV with same refcount as source LV.  Update
+            // later if correction is needed.
             Assert( lvroot.ulReference > 0 && !FPartiallyDeletedLV( lvroot.ulReference ) );
             Assert( pfucbNil == pfucbCopyLV );
             Call( ErrRECSeparateLV(
@@ -3252,11 +3601,14 @@ ERR ErrCMPCopyLVTree(
             do {
                 ULONG cbReturnedPhysical;
 
+                // On each iteration, retrieve as many LV chunks as can fit
+                // into our LV buffer.  For this to work, ibLongValue must
+                // always point to the beginning of a chunk.
                 const LONG cbLVChunkMost = pfucbSrc->u.pfcb->Ptdb()->CbLVChunkMost();
                 Assert( ibLongValue % cbLVChunkMost == 0 );
                 Assert( cbBufSize >= (ULONG)cbLVChunkMost );
                 Call( ErrCMPRetrieveSLongFieldValueByChunk(
-                            pfucbGetLV,
+                            pfucbGetLV,     // pfucb must start on a LVROOT node
                             lidSrc,
                             lvroot.ulSize,
                             ibLongValue,
@@ -3276,7 +3628,8 @@ ERR ErrCMPCopyLVTree(
 
                 Assert( err != JET_wrnCopyLongValue );
 
-                ibLongValue += cbLVChunkMost;
+                // For the last chunk, we do not really know what the logical size is.
+                ibLongValue += cbLVChunkMost;                   // Prepare for next chunk.
 
                 Assert( Pcsr( pfucbGetLV )->Pgno() != pgnoNull );
                 if ( NULL != pstatus )
@@ -3296,6 +3649,7 @@ ERR ErrCMPCopyLVTree(
             DIRClose( pfucbCopyLV );
             pfucbCopyLV = pfucbNil;
 
+            // insert src LID and dest LID into the global LID map table
             Call( g_rgfmp[pfucbSrc->ifmp].Plidmap()->ErrInsert( ppib, lidSrc, lidDest, lvroot.ulReference ) );
 
             Assert( pgnoNull !=  Pcsr( pfucbGetLV )->Pgno() );

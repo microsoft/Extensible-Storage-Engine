@@ -3,6 +3,8 @@
 
 class OLD_STATUS_
 {
+    //  make constructor protected so that this class may
+    //  only be used as a base class
     protected:
         OLD_STATUS_() : m_asig( CSyncBasicInfo( _T( "asigOLD" ) ) )
                                                         { Reset_(); }
@@ -19,17 +21,17 @@ class OLD_STATUS_
             ULONG           m_ulFlags;
             struct
             {
-                FLAG32      m_fTermRequested:1;
-                FLAG32      m_fAvailExtOnly:1;
-                FLAG32      m_fNoPartialMerges:1;
+                FLAG32      m_fTermRequested:1;     //  set to TRUE when OLD needs to be terminated
+                FLAG32      m_fAvailExtOnly:1;      //  Defrag space trees only? (valid for databases only)
+                FLAG32      m_fNoPartialMerges:1;   //  Don't do partial right merges (full/empty will be done)
             };
         };
 
-        ULONG               m_cPasses;
-        ULONG               m_cPassesMax;
-        ULONG_PTR           m_csecStart;
-        ULONG_PTR           m_csecEvent;
-        ULONG_PTR           m_csecMax;
+        ULONG               m_cPasses;          //  passes completed
+        ULONG               m_cPassesMax;       //  maximum number of passes to perform
+        ULONG_PTR           m_csecStart;        //  time OLD started
+        ULONG_PTR           m_csecEvent;        //  time last pause event reported
+        ULONG_PTR           m_csecMax;          //  stop OLD if this time is reached
         JET_CALLBACK        m_callback;
 
     public:
@@ -126,7 +128,7 @@ class OLDDB_STATUS : public OLD_STATUS_
         VOID Reset( INST * const pinst );
 
         ULONG_PTR CTasksDispatched() const              { return m_cTasksDispatched; }
-        VOID IncrementCTasksDispatched()                { m_cTasksDispatched++; }
+        VOID IncrementCTasksDispatched()                { m_cTasksDispatched++; }   //  count does not have to be accurate, so don't need interlocked operation
 };
 
 INLINE OLDDB_STATUS::OLDDB_STATUS()
@@ -156,13 +158,15 @@ class DEFRAG_STATUS
     private:
         DEFRAGTYPE  m_defragtype;
         DEFRAGPASS  m_defragpass;
-        CPG         m_cpgVisited;
-        CPG         m_cpgFreed;
-        CPG         m_cpgPartialMerges;
+        CPG         m_cpgVisited;           // Number of pages visited
+        CPG         m_cpgFreed;             // Number of pages freed (total of empty-page and full merges)
+        CPG         m_cpgPartialMerges;     // Number of partial merges done.
         OBJID       m_objidCurrentTable;
         ULONG       m_cbCurrentKey;
         BYTE        m_rgbCurrentKey[cbKeyAlloc];
 
+        // Time since the pass was started or the status was last updated in MSysDefrag. Note that this
+        // will not always be the start time of the current pass or invocation.
         __int64     m_startTime;
 
 #ifndef RTM
@@ -456,21 +460,24 @@ INLINE BYTE *DEFRAG_STATUS::RgbCurrentKey() const
     return (BYTE *)m_rgbCurrentKey;
 }
 
+//  ================================================================
+// predicate function to pause OLD
 INLINE BOOL FOLDPauseMark( void )
 {
-    const LONG lCacheCleanMark = 10;
-    const LONG lCacheSizeMark = 50;
-    const LONG lCachePinnedMark = 50;
+    const LONG lCacheCleanMark = 10; // buffer % clean low mark to pause OLD
+    const LONG lCacheSizeMark = 50; // buffer size % to max high mark to pause OLD
+    const LONG lCachePinnedMark = 50; // buffer % pinned high mark to pause OLD
 
     return LBFICacheCleanPercentage() < lCacheCleanMark &&
         lCacheSizeMark < LBFICacheSizePercentage() &&
         lCachePinnedMark < LBFICachePinnedPercentage();
 }
 
+// predicate function to resume OLD
 INLINE BOOL FOLDResumeMark( void )
 {
-    const LONG lCacheCleanMark = 20;
-    const LONG lCachePinnedMark = 40;
+    const LONG lCacheCleanMark = 20; // buffer % clean low mark to resume OLD
+    const LONG lCachePinnedMark = 40; // buffer % pinned low mark to resume OLD
 
     return lCacheCleanMark <= LBFICacheCleanPercentage() &&
         LBFICachePinnedPercentage() < lCachePinnedMark;

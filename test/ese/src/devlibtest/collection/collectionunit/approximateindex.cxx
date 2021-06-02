@@ -21,7 +21,9 @@ class CTestResource
 
 DECLARE_APPROXIMATE_INDEX( DWORD, CTestResource, CTestResource::OffsetOfAIIC, CTestApproximateIndex );
 
+//  ================================================================
 class ApproximateIndexTest : public UNITTEST
+//  ================================================================
 {
     private:
         static ApproximateIndexTest s_instance;
@@ -58,7 +60,9 @@ bool ApproximateIndexTest::FRunUnderESE98() const          { return true; }
 bool ApproximateIndexTest::FRunUnderESENT() const          { return true; }
 bool ApproximateIndexTest::FRunUnderESE97() const          { return true; }
 
+//  ================================================================
 ERR ApproximateIndexTest::ErrTest()
+//  ================================================================
 {
     ERR err = JET_errSuccess;
 
@@ -73,7 +77,9 @@ HandleError:
     return err;
 }
 
+//  ================================================================
 ERR ApproximateIndexTest::ErrInsertRetrieveDescendingLowRes()
+//  ================================================================
 {
     ERR err = JET_errSuccess;
 
@@ -85,7 +91,9 @@ HandleError:
     return err;
 }
 
+//  ================================================================
 ERR ApproximateIndexTest::ErrInsertRetrieveDescendingHighRes()
+//  ================================================================
 {
     ERR err = JET_errSuccess;
 
@@ -97,7 +105,9 @@ HandleError:
     return err;
 }
 
+//  ================================================================
 ERR ApproximateIndexTest::ErrInsertRetrieveAscendingLowRes()
+//  ================================================================
 {
     ERR err = JET_errSuccess;
 
@@ -109,7 +119,9 @@ HandleError:
     return err;
 }
 
+//  ================================================================
 ERR ApproximateIndexTest::ErrInsertRetrieveAscendingHighRes()
+//  ================================================================
 {
     ERR err = JET_errSuccess;
 
@@ -121,7 +133,9 @@ HandleError:
     return err;
 }
 
+//  ================================================================
 ERR ApproximateIndexTest::ErrInsertRetrieve( const bool fAscending, const bool fHighRes )
+//  ================================================================
 {
     ERR err = JET_errSuccess;
     CTestApproximateIndex::ERR errIndex = CTestApproximateIndex::ERR::errSuccess;
@@ -157,8 +171,10 @@ ERR ApproximateIndexTest::ErrInsertRetrieve( const bool fAscending, const bool f
         rgresNewer[ i ].m_dw = 2 * dwKeyUncertainty + ( i + 2 * cElements ) * dwKeyDelta;
     }
 
+    // Init.
     TestCheck( CTestApproximateIndex::ERR::errSuccess == index.ErrInit( dwKeyPrecision, dwKeyUncertainty, dblSpeedSizeTradeoff ) );
 
+    // Insert resources.
     for ( DWORD i = 0; i < cElements; i++ )
     {
         index.LockKeyPtr( rgres[ i ].m_dw, &rgres[ i ], &lock );
@@ -166,18 +182,21 @@ ERR ApproximateIndexTest::ErrInsertRetrieve( const bool fAscending, const bool f
         index.UnlockKeyPtr( &lock );
     }
 
+    // Invalid navigation prior to first.
     index.MoveBeforeFirst( &lock );
     TestCheck( CTestApproximateIndex::ERR::errEntryNotFound == index.ErrRetrieveEntry( &lock, &pres ) );
     TestCheck( CTestApproximateIndex::ERR::errNoCurrentEntry == index.ErrMovePrev( &lock ) );
     TestCheck( CTestApproximateIndex::ERR::errEntryNotFound == index.ErrRetrieveEntry( &lock, &pres ) );
     index.UnlockKeyPtr( &lock );
 
+    // Invalid navigation post next.
     index.MoveAfterLast( &lock );
     TestCheck( CTestApproximateIndex::ERR::errEntryNotFound == index.ErrRetrieveEntry( &lock, &pres ) );
     TestCheck( CTestApproximateIndex::ERR::errNoCurrentEntry == index.ErrMoveNext( &lock ) );
     TestCheck( CTestApproximateIndex::ERR::errEntryNotFound == index.ErrRetrieveEntry( &lock, &pres ) );
     index.UnlockKeyPtr( &lock );
 
+    // Check ascending order.
     index.MoveBeforeFirst( &lock );
     for ( DWORD i = 0; i < cElements; i++ )
     {
@@ -200,6 +219,7 @@ ERR ApproximateIndexTest::ErrInsertRetrieve( const bool fAscending, const bool f
         TestCheck( rgresActual[ i ].m_dw == UINT_MAX );
         rgresActual[ i ].m_dw = pres->m_dw;
 
+        // Make sure the bucket is consistent.
         if ( i == 0 )
         {
             rgiBucket[ i ] = 1;
@@ -219,6 +239,7 @@ ERR ApproximateIndexTest::ErrInsertRetrieve( const bool fAscending, const bool f
             }
         }
 
+        // Determine mapping.
         for ( DWORD j = 0; j < cElements; j++ )
         {
             if ( rgres[ j ].m_dw == rgresActual[ i ].m_dw )
@@ -232,6 +253,7 @@ ERR ApproximateIndexTest::ErrInsertRetrieve( const bool fAscending, const bool f
     TestCheck( CTestApproximateIndex::ERR::errNoCurrentEntry == index.ErrMoveNext( &lock ) );
     index.UnlockKeyPtr( &lock );
 
+    // Check descending order.
     index.MoveAfterLast( &lock );
     for ( DWORD i = 0; i < cElements; i++ )
     {
@@ -252,13 +274,16 @@ ERR ApproximateIndexTest::ErrInsertRetrieve( const bool fAscending, const bool f
                        ( ( iBucket > iBucketExpected ) && ( ( iBucket - iBucketExpected ) == 1 ) ) );
         }
 
+        // The order must be the same.
         TestCheck( pres->m_dw == rgresActual[ iT ].m_dw );
     }
     TestCheck( CTestApproximateIndex::ERR::errNoCurrentEntry == index.ErrMovePrev( &lock ) );
     index.UnlockKeyPtr( &lock );
 
+    // Move before key.
     for ( DWORD i = 0; i < cElements; i++ )
     {
+        // MoveBeforeKeyPtr.
         index.MoveBeforeKeyPtr( rgresActual[ i ].m_dw, &rgres[ rgdwMapping[ i ] ], &lock );
         TestCheck( CTestApproximateIndex::ERR::errEntryNotFound == index.ErrRetrieveEntry( &lock, &pres ) );
 
@@ -273,8 +298,10 @@ ERR ApproximateIndexTest::ErrInsertRetrieve( const bool fAscending, const bool f
         index.UnlockKeyPtr( &lock );
     }
 
+    // Move after key.
     for ( DWORD i = 0; i < cElements; i++ )
     {
+        // MoveAfterKeyPtr.
         index.MoveAfterKeyPtr( rgresActual[ i ].m_dw, &rgres[ rgdwMapping[ i ] ], &lock );
         TestCheck( CTestApproximateIndex::ERR::errEntryNotFound == index.ErrRetrieveEntry( &lock, &pres ) );
 
@@ -289,8 +316,10 @@ ERR ApproximateIndexTest::ErrInsertRetrieve( const bool fAscending, const bool f
         index.UnlockKeyPtr( &lock );
     }
 
+    // Move before key (in-between buckets).
     for ( DWORD i = 0; i < cElements; i++ )
     {
+        // MoveBeforeKeyPtr.
         index.MoveBeforeKeyPtr( rgresActual[ i ].m_dw, (CTestResource*)DWORD_PTR( 0 ), &lock );
         TestCheck( CTestApproximateIndex::ERR::errEntryNotFound == index.ErrRetrieveEntry( &lock, &pres ) );
 
@@ -313,8 +342,10 @@ ERR ApproximateIndexTest::ErrInsertRetrieve( const bool fAscending, const bool f
         index.UnlockKeyPtr( &lock );
     }
 
+    // Move after key (in-between buckets).
     for ( DWORD i = 0; i < cElements; i++ )
     {
+        // MoveAfterKeyPtr.
         index.MoveAfterKeyPtr( rgresActual[ i ].m_dw, (CTestResource*)DWORD_PTR( -LONG_PTR( sizeof( CTestResource ) ) ), &lock );
         TestCheck( CTestApproximateIndex::ERR::errEntryNotFound == index.ErrRetrieveEntry( &lock, &pres ) );
 
@@ -339,12 +370,14 @@ ERR ApproximateIndexTest::ErrInsertRetrieve( const bool fAscending, const bool f
 
     DWORD cCount;
 
+    // Navigate to the beginning.
     index.MoveAfterLast( &lock );
     while ( index.ErrMovePrev( &lock ) == CTestApproximateIndex::ERR::errSuccess );
     TestCheck( CTestApproximateIndex::ERR::errNoCurrentEntry == index.ErrMovePrev( &lock ) );
     TestCheck( CTestApproximateIndex::ERR::errEntryNotFound == index.ErrRetrieveEntry( &lock, &pres ) );
     index.UnlockKeyPtr( &lock );
 
+    // Insert older elements.
     for ( DWORD i = 0; i < cElements; i++ )
     {
         index.LockKeyPtr( rgresOlder[ i ].m_dw, &rgresOlder[ i ], &lock );
@@ -354,6 +387,7 @@ ERR ApproximateIndexTest::ErrInsertRetrieve( const bool fAscending, const bool f
         index.UnlockKeyPtr( &lock );
     }
 
+    // Position cursor right before the original first element and scan the new elements.
     index.MoveBeforeKeyPtr( rgresActual[ 0 ].m_dw, (CTestResource*)DWORD_PTR( 0 ), &lock );
     TestCheck( CTestApproximateIndex::ERR::errEntryNotFound == index.ErrRetrieveEntry( &lock, &pres ) );
     cCount = 0;
@@ -368,12 +402,14 @@ ERR ApproximateIndexTest::ErrInsertRetrieve( const bool fAscending, const bool f
     TestCheck( CTestApproximateIndex::ERR::errEntryNotFound == index.ErrRetrieveEntry( &lock, &pres ) );
     index.UnlockKeyPtr( &lock );
 
+    // Navigate to the end.
     index.MoveBeforeFirst( &lock );
     while ( index.ErrMoveNext( &lock ) == CTestApproximateIndex::ERR::errSuccess );
     TestCheck( CTestApproximateIndex::ERR::errNoCurrentEntry == index.ErrMoveNext( &lock ) );
     TestCheck( CTestApproximateIndex::ERR::errEntryNotFound == index.ErrRetrieveEntry( &lock, &pres ) );
     index.UnlockKeyPtr( &lock );
 
+    // Insert newer elements.
     for ( DWORD i = 0; i < cElements; i++ )
     {
         index.LockKeyPtr( rgresNewer[ i ].m_dw, &rgresNewer[ i ], &lock );
@@ -383,6 +419,7 @@ ERR ApproximateIndexTest::ErrInsertRetrieve( const bool fAscending, const bool f
         index.UnlockKeyPtr( &lock );
     }
 
+    // Position cursor right after the original last element and scan the new elements.
     index.MoveAfterKeyPtr( rgresActual[ cElements - 1 ].m_dw, (CTestResource*)DWORD_PTR( -LONG_PTR( sizeof( CTestResource ) ) ), &lock );
     TestCheck( CTestApproximateIndex::ERR::errEntryNotFound == index.ErrRetrieveEntry( &lock, &pres ) );
     cCount = 0;
@@ -397,6 +434,7 @@ ERR ApproximateIndexTest::ErrInsertRetrieve( const bool fAscending, const bool f
     TestCheck( CTestApproximateIndex::ERR::errEntryNotFound == index.ErrRetrieveEntry( &lock, &pres ) );
     index.UnlockKeyPtr( &lock );
     
+    // Term.
     index.Term();
 
 HandleError:

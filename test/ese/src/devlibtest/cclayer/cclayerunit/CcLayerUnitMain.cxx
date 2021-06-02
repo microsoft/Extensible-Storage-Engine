@@ -3,7 +3,9 @@
 
 #include "CcLayerUnit.hxx"
 
+//  ================================================================
 static void PrintHelp( const char * const szApplication )
+//  ================================================================
 {
     fprintf( stderr, "Usage: %s [tests]\r\n", szApplication );
     fprintf( stderr, "\tNo arguments runs all tests.\r\n" );
@@ -12,7 +14,9 @@ static void PrintHelp( const char * const szApplication )
     BstfPrintTests();
 }
 
+//  ================================================================
 INT __cdecl main( INT argc, _In_count_( argc ) char * argv[] )
+//  ================================================================
 {
     if( argc == 2 && FBstfHelpArg( argv[1] ) )
     {

@@ -3,17 +3,17 @@
 #include "Xpress9Internal.h"
 
 #pragma warning (push)
-#pragma warning (disable: 4668)
-#pragma warning (disable: 4820)
-#pragma warning (disable: 4255)
+#pragma warning (disable: 4668) // intrin.h(82) : '_M_IX86' is not defined as a preprocessor macro, replacing with '0' for '#if/#elif'
+#pragma warning (disable: 4820) // malloc.h(66) : '_heapinfo' : '4' bytes padding added after data member '_useflag'
+#pragma warning (disable: 4255) // intrin.h(999) : '__getcallerseflags' : no function prototype given: converting '()' to '(void)'
 
 #if XPRESS9_USE_SSE2
 #include "emmintrin.h"
-#endif 
+#endif /* XPRESS9_USE_SSE2 */
 
 #if XPRESS9_USE_SSE4
 #include "smmintrin.h"
-#endif 
+#endif /* XPRESS9_USE_SSE4 */
 
 #pragma warning (pop)
 
@@ -66,6 +66,8 @@
 } while (0)
 
 
+// Like CHECK_MTF except we only take the match if it is >= uSavedBestLength-3
+// If we take the match, first output the character at uPosition-1
 #define LOOKAHEAD_CHECK_MTF(uPosition,iOffset,iIndex,iEncodeIndex) do {                     \
     if (                                                                                    \
         ((xint) (uPosition)) + (iOffset) > 0 &&                                             \
@@ -99,6 +101,7 @@
 } while (0)
 
 
+// Like LOOKAHEAD_CHECK_MTF except we output characters at uPosition-2 and uPosition-1 if we take the match
 #define LOOKAHEAD2_CHECK_MTF(uPosition,iOffset,iIndex,iEncodeIndex) do {                    \
     if (                                                                                    \
         ((xint) (uPosition)) + (iOffset) > 0 &&                                             \
@@ -157,11 +160,11 @@
     _uLength = (uBestLength) - (uMinMatchLength);                                           \
     if (_uLength < LZ77_MAX_SHORT_LENGTH - 1)                                               \
     {                                                                                       \
-             \
-                                            \
+        /* Note that the last LZ77_MAX_SHORT_LENGTH_LOG bits of _uSymbol are zeroes, */     \
+        /* so all bits of _uLength can be fit in them */                                    \
         _uSymbol += _uLength;                                                               \
         TRACE ("P1 %p %Iu", pIrPtr, _uSymbol);                                              \
-            \
+        /* The following cannot cause loss of precision because of the definition of LZ77_SHORT_SYMBOL_ALPHABET_SIZE */    \
         pIrPtr[0] = (UInt16) _uSymbol;                                                      \
         STATE.m_HuffmanStat.m_uShortSymbolCount[_uSymbol] += 1;                             \
     }                                                                                       \
@@ -188,9 +191,9 @@
             pIrPtr[1] = (UInt16) _uSymbol;                                                  \
             STATE.m_HuffmanStat.m_uLongLengthCount[_uSymbol] += 1;                          \
                                                                                             \
-                   \
+            /* BUGBUG: Why 32, can we improve further by trying to fit in 24 bits? */       \
             if (_uMsbLength > 16)                                                           \
-            {          \
+            { /* The remainder of the length cannot fit in 16 bits, we need more */         \
                 * (UInt32 *) (pIrPtr + 2) = (UInt32) _uLength;                              \
                 pIrPtr += 3;                                                                \
             }                                                                               \
@@ -298,14 +301,14 @@ static
 xint
 s_iMaxOffsetByLength[XRPESS9_LOOKUP_HAVE_MAX_OFFSET_BY_LENGTH] =
 {
-               0,
-               0,
-        -1 <<  6,
-        -1 << 10,
-        -1 << 13,
-        -1 << 16,
+    /* 0 */           0,
+    /* 1 */           0,
+    /* 2 */    -1 <<  6,
+    /* 3 */    -1 << 10,
+    /* 4 */    -1 << 13,
+    /* 5 */    -1 << 16,
 };
-#endif 
+#endif /* XRPESS9_LOOKUP_HAVE_MAX_OFFSET_BY_LENGTH */
 
 
 #define pNext pState[0].m_uNext
@@ -542,7 +545,7 @@ s_iMaxOffsetByLength[XRPESS9_LOOKUP_HAVE_MAX_OFFSET_BY_LENGTH] =
 #define Xpress9Lz77EncInsert_SSE2 Xpress9Lz77EncInsert_MatchLen4_SSE2
 #define Xpress9Lz77EncInsert "Xpress9Lz77EncInsert_ShallNotBeInstantiated"
 #include "Xpress9Lz77EncInsert.i"
-#endif 
+#endif /* XPRESS9_USE_SSE2 */
 
 #define LZ77_MTF 0
 #define Xpress9Lz77EncPass2 Xpress9Lz77EncPass2_Mtf0
@@ -621,9 +624,9 @@ Xpress9GetLz77Procs (
     LZ77_PASS1_STATE                *pState
 )
 {
-    Lz77EncPass1_Proc      *pLz77EncPass1;
-    Lz77EncPass2_Proc      *pLz77EncPass2;
-    Lz77EncInsert_Proc     *pLz77EncInsert;
+    Lz77EncPass1_Proc      *pLz77EncPass1;    // pass 1 encoder
+    Lz77EncPass2_Proc      *pLz77EncPass2;    // pass 2 encoder
+    Lz77EncInsert_Proc     *pLz77EncInsert;   // hash insertion procedure
 
     pLz77EncPass1 = NULL;
     pLz77EncPass2 = NULL;
@@ -740,7 +743,7 @@ Xpress9GetLz77Procs (
             pLz77EncInsert = Xpress9Lz77EncInsert_MatchLen4_SSE2;
         }
         else
-#endif 
+#endif /* XPRESS9_USE_SSE2 */
         {
             pLz77EncInsert = Xpress9Lz77EncInsert_MatchLen4;
         }
@@ -866,27 +869,39 @@ Failure:
 }
 
 
+//
+// Allocates memory, initializes, and returns the pointer to newly created encoder.
+//
+// It is recommended to create few encoders (1-2 encoders per CPU core) and reuse them:
+// creation of new encoder is relatively expensive.
+//
+//
+// Allocates memory, initializes, and returns the pointer to newly created encoder.
+//
+// It is recommended to create few encoders (1-2 encoders per CPU core) and reuse them:
+// creation of new encoder is relatively expensive.
+//
 XPRESS9_EXPORT
 XPRESS9_ENCODER
 XPRESS9_CALL
 Xpress9EncoderCreate (
-    XPRESS9_STATUS         *pStatus,
-    void                   *pAllocContext,
-    XpressAllocFn          *pAllocFn,
-    unsigned                uMaxWindowSizeLog2,
-    unsigned                uFlags
+    XPRESS9_STATUS         *pStatus,            // OUT: status
+    void                   *pAllocContext,      // IN:  context for user-defined memory allocator
+    XpressAllocFn          *pAllocFn,           // IN:  user-defined memory allocator (it will be called by Xpress9EncodeCreate only)
+    unsigned                uMaxWindowSizeLog2, // IN:  log2 of max size of LZ77 window [XPRESS9_WINDOW_SIZE_LOG2_MIN..XPRESS9_WINDOW_SIZE_LOG2_MAX]
+    unsigned                uFlags              // IN:  one or more of Xpress9Flag_* flags
 )
 {
     LZ77_PASS1_STATE    *pState = NULL;
-    UInt8      *pAllocatedMemory = NULL;
-    UInt8      *pAlignedPtr = NULL;
-    uxint       uHashTableSize = 0;
-    uxint       uHashTableAllocSize = 0;
-    uxint       uIrBufferSize = 0;
-    uxint       uScratchAreaSize = 0;
-    uxint       uDataBufferSize = 0;
-    uxint       uNextTableSize = 0;
-    uxint       uAllocationSize = 0;
+    UInt8      *pAllocatedMemory = NULL;       // pointer to the beginning of allocated memory block
+    UInt8      *pAlignedPtr = NULL;            // a pointer aligned on appropriate byte boundary
+    uxint       uHashTableSize = 0;         // hash table max dimension
+    uxint       uHashTableAllocSize = 0;    // amount of memory occupied by the hash table
+    uxint       uIrBufferSize = 0;          // size of the buffer containing intermediate data
+    uxint       uScratchAreaSize = 0;       // size of scratch area
+    uxint       uDataBufferSize = 0;        // size of internal data buffer (must be exact power of 2)
+    uxint       uNextTableSize = 0;         // size of real m_pNext[] array
+    uxint       uAllocationSize = 0;        // total allocation size
 
     memset (pStatus, 0, sizeof (*pStatus));
     if (uMaxWindowSizeLog2 < XPRESS9_WINDOW_SIZE_LOG2_MIN || uMaxWindowSizeLog2 > XPRESS9_WINDOW_SIZE_LOG2_MAX)
@@ -977,14 +992,17 @@ Xpress9EncoderEmpty (
 
 
 
+//
+// Start new encoding session. if fForceReset is not set then encoder must be flushed.
+//
 XPRESS9_EXPORT
 void
 XPRESS9_CALL
 Xpress9EncoderStartSession (
-    XPRESS9_STATUS         *pStatus,
-    XPRESS9_ENCODER         pEncoder,
-    const XPRESS9_ENCODER_PARAMS *pParams,
-    unsigned                fForceReset
+    XPRESS9_STATUS         *pStatus,            // OUT: status
+    XPRESS9_ENCODER         pEncoder,           // IN:  encoder
+    const XPRESS9_ENCODER_PARAMS *pParams,      // IN:  parameter for this encoding session
+    unsigned                fForceReset         // IN:  if TRUE then allows resetting of previous session even if it wasn't flushed
 )
 {
     XPRESS9_ENCODER_PARAMS  Params;
@@ -1011,6 +1029,9 @@ Xpress9EncoderStartSession (
         }
     }
 
+    //
+    // get parameters for this encoding session
+    //
     Params = *pParams;
 
     Xpress9EncoderVerifyParameters (pStatus, pParams, STATE.m_uMaxWindowSizeLog2);
@@ -1029,6 +1050,7 @@ Xpress9EncoderStartSession (
 
     if (STATE.m_Params.m_Current.m_uMaxStreamLength != 0 && STATE.m_Params.m_Current.m_uMaxStreamLength < POWER2 (STATE.m_Params.m_Current.m_uWindowSizeLog2))
     {
+        // If the stream length is less than the window size, constrain the window size to 512. 
         GET_MSB (uMsb, STATE.m_Params.m_Current.m_uMaxStreamLength);
         if (STATE.m_Params.m_Current.m_uMaxStreamLength > POWER2 (uMsb))
             uMsb += 1;
@@ -1037,6 +1059,7 @@ Xpress9EncoderStartSession (
         STATE.m_Params.m_Current.m_uWindowSizeLog2 = uMsb;
     }
 
+    // set size of hash table
     uMaxStreamLength = STATE.m_Params.m_Current.m_uMaxStreamLength;
     if (uMaxStreamLength == 0 || uMaxStreamLength >= POWER2 (STATE.m_Params.m_Current.m_uWindowSizeLog2))
     {
@@ -1112,15 +1135,18 @@ Failure:;
 
 
 
+//
+// Attach buffer with user data to the encoder
+//
 XPRESS9_EXPORT
 void
 XPRESS9_CALL
 Xpress9EncoderAttach (
-    XPRESS9_STATUS         *pStatus,
-    XPRESS9_ENCODER         pEncoder,
-    const void             *pOrigData,
-    unsigned                uOrigDataSize,
-    unsigned                fFlush
+    XPRESS9_STATUS         *pStatus,            // OUT: status
+    XPRESS9_ENCODER         pEncoder,           // IN:  encoder
+    const void             *pOrigData,          // IN:  original (uncompressed) data buffer (optinal, may be NULL)
+    unsigned                uOrigDataSize,      // IN:  amount of data in "pData" buffer (optional, may be 0)
+    unsigned                fFlush              // IN:  if TRUE then flush and compress data buffered internally
 )
 {
     LZ77_PASS1_STATE       *pState;
@@ -1187,6 +1213,20 @@ ShiftValues (
         v1 = pSrc[i + 1];
         v2 = pSrc[i + 2];
         v3 = pSrc[i + 3];
+        // The values in the memory area under consideration m_pNext
+        // are indexes into itself, forming a singly linked list.
+        // If the pointer value points to a cell outside the uRemoveSize,
+        // it should now point to the new cell.
+        //
+        //    |<----removeSize--------->|<--------- uCount, keepSize ---->
+        //    0                         10  
+        //    --------------------------|---------------------------------|
+        //    |                         |                                 |
+        //    |                         |                                 |
+        //    |-------------------------|---------------------------------|
+        //    ^                         ^
+        //    |                         |
+        //    pDst                      pSrc
         if (((xint)(v0 -= uRemoveSize)) < 0)
             v0 = 0;
         if (((xint)(v1 -= uRemoveSize)) < 0)
@@ -1205,7 +1245,7 @@ ShiftValues (
 
 #if XPRESS9_USE_SSE2
 #pragma prefast(push)
-#pragma prefast(disable:6001, "Using uninitialized memory 's'")
+#pragma prefast(disable:6001, "Using uninitialized memory 's'") // prefast complains about initialization of s with 0 via s = s^s in SSE2
 static
 void
 ShiftValues_SSE2 (
@@ -1260,7 +1300,7 @@ ShiftValues_SSE2 (
     }
 }
 #pragma prefast(pop)
-#endif 
+#endif /* XPRESS9_USE_SSE2 */
 
 
 static
@@ -1274,8 +1314,8 @@ ShiftWindow (
     uxint   uRemoveSize;
 
     uWindowSize = STATE.m_EncodeData.m_uWindowSize;
-    uKeepSize = uWindowSize >> 1;
-    uRemoveSize = uWindowSize - uKeepSize;
+    uKeepSize = uWindowSize >> 1; // Keep half of the previous window size, why?
+    uRemoveSize = uWindowSize - uKeepSize; // Remove the other half.
 #if XPRESS9_USE_SSE2
     if (STATE.m_uRuntimeFlags & Xpress9Flag_UseSSE2)
     {
@@ -1283,11 +1323,14 @@ ShiftWindow (
         ShiftValues_SSE2 (STATE.m_HashTable.m_pHashTable, STATE.m_HashTable.m_pHashTable, STATE.m_HashTable.m_uHashTableSizeCurrent, uRemoveSize);
     }
     else
-#endif 
+#endif /* XPRESS9_USE_SSE2 */
     {
         ShiftValues (pState->m_uNext, pState->m_uNext + uRemoveSize, uKeepSize, uRemoveSize);
+        // Update the hash table pointers and remove obsolete pointers that dont belong in the new window.
         ShiftValues (STATE.m_HashTable.m_pHashTable, STATE.m_HashTable.m_pHashTable, STATE.m_HashTable.m_uHashTableSizeCurrent, uRemoveSize);
     }
+    // Actually shift the window. The sliding window is maintained in the m_pData buffer which holds some part of the 
+    // data in its original form.
     memcpy (STATE.m_EncodeData.m_pData, STATE.m_EncodeData.m_pData + uRemoveSize, uKeepSize);
 
     ASSERT (
@@ -1297,6 +1340,7 @@ ShiftWindow (
         uWindowSize,
         uKeepSize
     );
+    // Update the encode position 
     STATE.m_EncodeData.m_uEncodePosition -= uRemoveSize;
 
     ASSERT (
@@ -1345,9 +1389,12 @@ StartFlushing (
 
     pDst = STATE.m_Scratch.m_pScratchArea;
     BIOWR_INITIALIZE_SHIFT_REGISTER ();
-    BIOWR_SET_OUTPUT_PTR (pDst + 8*4);
+    BIOWR_SET_OUTPUT_PTR (pDst + 8*4); // Leave the first 32 bytes ( 8 32 bit numbers of the scratch area for the header information ).
     if (STATE.m_Params.m_Current.m_uMtfEntryCount > 0)
     {
+        //
+        // This one is just passed to the decoder. It is also read back by the decoder, but is not used.
+        //
         iOffset = STATE.m_Pass2.m_Ir.m_Mtf.m_iMtfLastPtr & 1;
         BIOWR (iOffset, 1);
         for (i = 0; i < STATE.m_Params.m_Current.m_uMtfEntryCount; ++i)
@@ -1414,6 +1461,13 @@ StartFlushing (
     ((UInt32 *) pDst)[2] = (UInt32) STATE.m_Pass2.m_uComputedEncodedSizeBits;
 
 
+//     13 bits      length of encoded huffman tables in bits
+//      3 bits      log2 of window size (16 .. 23)
+//      2 bits      number of MTF entries   (0, 2, 4, reserved)
+//      1 bit       min ptr match length (3 or 4)
+//      1 bit       min mtf match length (2 or 3, shall be 0 if number of MTF entries is set to 0)
+//
+//     12 bits      reserved, must be 0
 
     uFlags = uEncodedHuffmanTablesBits & 0x1fff;
 
@@ -1459,14 +1513,18 @@ Failure:;
 }
 
 
+//
+// Compress data in locked buffer. Returns number of compressed bytes that needs to be fetched by the caller.
+// This function shall be called repeatedly until returned value is non-zero
+//
 XPRESS9_EXPORT
 unsigned
 XPRESS9_CALL
 Xpress9EncoderCompress (
-    XPRESS9_STATUS         *pStatus,
-    XPRESS9_ENCODER         pEncoder,
-    Xpress9EncodeCallback  *pCallback,
-    void                   *pCallbackContext
+    XPRESS9_STATUS         *pStatus,            // OUT: status
+    XPRESS9_ENCODER         pEncoder,           // IN:  encoder    
+    Xpress9EncodeCallback  *pCallback,          // IN:  encoder callback (optinal, may be NULL)
+    void                   *pCallbackContext    // IN:  context for the callback
 )
 {
     LZ77_PASS1_STATE       *pState;
@@ -1488,7 +1546,7 @@ Xpress9EncoderCompress (
     STATE.m_EncodeData.m_pData = STATE.m_BufferData.m_pBufferData;
 
     while (STATE.m_UserData.m_uUserDataSize > STATE.m_UserData.m_uUserDataProcessed)
-    {
+    { // While there is still data left to be processed.
         ASSERT (
             STATE.m_EncodeData.m_uEncodePosition >= STATE.m_EncodeData.m_uHashInsertPosition,
             "m_uEncodePosition=%Iu m_uHashInsertPosition=%Iu",
@@ -1502,28 +1560,43 @@ Xpress9EncoderCompress (
             STATE.m_EncodeData.m_uDataSize
         );
 
+        //
+        // Get the number of bytes yet available for processing
+        //
         uUserBytesAvailable = STATE.m_UserData.m_uUserDataSize - STATE.m_UserData.m_uUserDataProcessed;
 
 
+        // Compute remaining capacity of IrBuffer: it should be able to represent each incoming byte + room for last unhashed values
         uIrBytesAvailable = STATE.m_Pass2.m_Ir.m_uIrBufferSize - (uxint)(STATE.m_Pass2.m_Ir.m_pIrPtr - STATE.m_Pass2.m_Ir.m_pIrBuffer);
-        uIrBytesAvailable = uIrBytesAvailable / 3;
+        uIrBytesAvailable = uIrBytesAvailable / 3;    // One input byte may generate 3 bytes in internal representation? 
 
+        //
+        // first see whether we need to flush internal representation
+        //
         if ( uIrBytesAvailable < 512 )
         {
+            // start flushing the data
             goto Flushing;
         }
-        uIrBytesAvailable -= 256;
+        uIrBytesAvailable -= 256; // We still need room to push last un-hashed data 
 
+        //
+        // see whether we need to shift the window
+        //
         uWindowBytesAvailable = STATE.m_EncodeData.m_uWindowSize - STATE.m_EncodeData.m_uDataSize;
         if (uWindowBytesAvailable < 256 && uWindowBytesAvailable < uUserBytesAvailable)
         {
             DEBUG_PERF_START (STATE.m_DebugPerf.m_uShift);
-            ShiftWindow (pState);
+            ShiftWindow (pState); // BUGBUG: This changes the window, does not reduce windowSize.
             uWindowBytesAvailable = STATE.m_EncodeData.m_uWindowSize - STATE.m_EncodeData.m_uDataSize;
             ASSERT (uWindowBytesAvailable >= 256, "uWindowBytesAvailable=%Iu", uWindowBytesAvailable);
             DEBUG_PERF_STOP  (STATE.m_DebugPerf.m_uShift);
         }
 
+        // At this point, windowBytesAvailable is at least 256.
+        //
+        // copy new bytes if necessary
+        //
         uBytesToCopy = uIrBytesAvailable;
         if (uBytesToCopy > uWindowBytesAvailable)
             uBytesToCopy = uWindowBytesAvailable;
@@ -1539,6 +1612,11 @@ Xpress9EncoderCompress (
             DEBUG_PERF_STOP  (STATE.m_DebugPerf.m_uCallback);
         }
 
+        // (pavane) I think we need to have the following check
+        //if ( STATE.m_EncodeData.m_pData == STATE.m_BufferData.m_pBufferData )
+        //{
+        //    ASSERT (STATE.m_EncodeData.m_uDataSize + uBytesToCopy <= STATE.m_BufferData.m_uBufferDataSize, "" );
+        //}
         
         DEBUG_PERF_START (STATE.m_DebugPerf.m_uMemcpy);
         memcpy (
@@ -1551,17 +1629,26 @@ Xpress9EncoderCompress (
         STATE.m_EncodeData.m_uDataSize += uBytesToCopy;
         STATE.m_UserData.m_uUserDataProcessed += uBytesToCopy;
 
+        //
+        // At this point we have the sliding window data in the m_EncodeData.m_pData
+        // For every byte in the sliding window : EncInsert inserts it into the
+        // hash table.
+        //
         DEBUG_PERF_START (STATE.m_DebugPerf.m_uInsert);
         (*STATE.m_Params.m_pLz77EncInsert) (pState);
         DEBUG_PERF_STOP  (STATE.m_DebugPerf.m_uInsert);
 
         if (STATE.m_Pass2.m_Ir.m_pIrPtr == STATE.m_Pass2.m_Ir.m_pIrBuffer)
         {
+            // this is the first write to the IR buffer; so clear statistics
             memset (&STATE.m_HuffmanStat, 0, sizeof (STATE.m_HuffmanStat));
             STATE.m_Pass2.m_Ir.m_Mtf = STATE.m_EncodeData.m_Mtf;
         }
 
         STATE.m_Stat.m_Block.m_uOrigSize -= STATE.m_EncodeData.m_uEncodePosition;
+        //
+        // Encode pass1 populates the m_Pass2.m_Ir.m_pIrBuffer for use by pass2.
+        //
         DEBUG_PERF_START (STATE.m_DebugPerf.m_uPass1);
         (*STATE.m_Params.m_pLz77EncPass1) (pState);
         DEBUG_PERF_STOP  (STATE.m_DebugPerf.m_uPass1);
@@ -1574,10 +1661,15 @@ Xpress9EncoderCompress (
         const UInt8    *pData;
         uxint           uPosition;
 
+        //
+        // encode few last symbols that were not hashed as literals (we should have enough space for them) 
+        // see comment in EncInsert.i
+        //
         pData     = STATE.m_EncodeData.m_pData;
         uPosition = STATE.m_EncodeData.m_uEncodePosition;
         pIrPtr    = (UInt16 *) STATE.m_Pass2.m_Ir.m_pIrPtr;
 
+        // we should have 256 bytes available in IR, more than enough to store 8 literals or less
         RETAIL_ASSERT (
             STATE.m_EncodeData.m_uDataSize < 8 + uPosition ,
             "uDataSize=%Iu uPosition=%Iu",
@@ -1621,10 +1713,22 @@ Xpress9EncoderCompress (
             printf ("%-15s =%12I64u %6.2f%%\n\n", "EncTotal", uTotal, 100.0);
 #undef P
         }
-#endif 
+#endif /* XPRESS9_DEBUG_PERF_STAT */
 
+        //
+        // now orig 
+        //
         if (STATE.m_Pass2.m_Ir.m_pIrPtr != STATE.m_Pass2.m_Ir.m_pIrBuffer)
         {
+            //
+            // If we do not have any more space in the IR buffer, flush whatever we have. To do this,
+            // we first need to write the huffman tables to the scratch area. The huffman tables 
+            // are then copied to the final output when FetchCompressedData is called. This also
+            // causes the actual pass2 huffman encoding of data in the IR buffer and the encoded
+            // data gets written to the output buffer. Each such block of data containing a header,
+            // huffman tables and the encoded data is called a compresed block. A single data buffer 
+            // can be compressed to multiple compression blocks in the final output.
+            // 
             goto Flushing;
         }
     }
@@ -1639,15 +1743,22 @@ Flushing:
 
 
 
+//
+// Copies compressed data into user buffer and returns remaining number of bytes that should be fetched
+//
+// Buffer provided by the user is always filled, i.e. if return value is not zero then
+// (*puCompBytesWritten) is equal to uCompDataBufferSize.
+// 
+//
 XPRESS9_EXPORT
 unsigned
 XPRESS9_CALL
 Xpress9EncoderFetchCompressedData (
-    XPRESS9_STATUS         *pStatus,
-    XPRESS9_ENCODER         pEncoder,
-    void                   *pCompData,
-    unsigned                uCompDataBufferSize,
-    unsigned               *puCompBytesWritten
+    XPRESS9_STATUS         *pStatus,            // OUT: status
+    XPRESS9_ENCODER         pEncoder,           // IN:  encoder    
+    void                   *pCompData,          // IN:  address of a buffer to receive compressed data (may be NULL)
+    unsigned                uCompDataBufferSize,// IN:  size of pCompData buffer
+    unsigned               *puCompBytesWritten  // OUT: actual number of bytes written to pCompData buffer
 )
 {
     LZ77_PASS1_STATE   *pState;
@@ -1683,6 +1794,9 @@ Xpress9EncoderFetchCompressedData (
         ""
     );
 
+    //
+    // first, copy data buffered in scratch area into user buffer
+    //
     RETAIL_ASSERT (
         BIOWR_TELL_OUTPUT_PTR_STATE (pPass2->m_BioState) > STATE.m_Scratch.m_pScratchArea && 
         BIOWR_TELL_OUTPUT_PTR_STATE (pPass2->m_BioState) <= STATE.m_Scratch.m_pScratchArea + STATE.m_Scratch.m_uScratchAreaSize,
@@ -1705,10 +1819,14 @@ Xpress9EncoderFetchCompressedData (
     if (uDstSize == 0)
         goto Done;
 
+    // now do pass2 encoding until we fill the user buffer
     BIOWR_SET_OUTPUT_PTR_STATE (pPass2->m_BioState, pDst);
 
     while (uDstSize > 128)
     {
+        //
+        // in fact, at most 16 bits in IR can produce 27 bits out, but 1:2 ratio is acceptable approximation
+        //
         uMaxIrOutput = (pPass2->m_Ir.m_pIrPtr - pPass2->m_Ir.m_pIrSrc) << 1;
         if (uMaxIrOutput == 0)
             break;
@@ -1731,6 +1849,8 @@ Xpress9EncoderFetchCompressedData (
 
         if (pPass2->m_Ir.m_pIrSrc >= pPass2->m_Ir.m_pIrPtr)
         {
+            // encoded everything; check size
+            // The last byte may be incomplete, add correction for the unfilled bits in the last byte.
             pPass2->m_uActualEncodedSizeBits -= (- (xint) BIOWR_TELL_SHIFT_REGISTER_BITS_STATE (pPass2->m_BioState)) & 7;
             RETAIL_ASSERT (
                 pPass2->m_uActualEncodedSizeBits == pPass2->m_uComputedEncodedSizeBits,
@@ -1742,6 +1862,7 @@ Xpress9EncoderFetchCompressedData (
     }
 
 
+    // now, encode into scratch buffer
     pPass2->m_uBytesCopiedFromScratch = 0;
     BIOWR_SET_OUTPUT_PTR_STATE (pPass2->m_BioState, STATE.m_Scratch.m_pScratchArea);
     uMaxIrOutput = (pPass2->m_Ir.m_pIrPtr - pPass2->m_Ir.m_pIrSrc) << 1;
@@ -1756,6 +1877,9 @@ Xpress9EncoderFetchCompressedData (
 
         (*STATE.m_Params.m_pLz77EncPass2) (pPass2, pPass2->m_Ir.m_pIrSrc + uMaxIrOutput);
 
+        //
+        // copy data buffered in scratch area into user buffer
+        //
         RETAIL_ASSERT (
             BIOWR_TELL_OUTPUT_PTR_STATE (pPass2->m_BioState) >= STATE.m_Scratch.m_pScratchArea && 
             BIOWR_TELL_OUTPUT_PTR_STATE (pPass2->m_BioState) < STATE.m_Scratch.m_pScratchArea + STATE.m_Scratch.m_uScratchAreaSize - 16,
@@ -1775,6 +1899,7 @@ Xpress9EncoderFetchCompressedData (
 
         if (pPass2->m_Ir.m_pIrSrc >= pPass2->m_Ir.m_pIrPtr)
         {
+            // encoded everything; check size
             pPass2->m_uActualEncodedSizeBits -= (- (xint) BIOWR_TELL_SHIFT_REGISTER_BITS_STATE (pPass2->m_BioState)) & 7;
             uCopyBytes = BIOWR_TELL_OUTPUT_PTR_STATE (pPass2->m_BioState) - STATE.m_Scratch.m_pScratchArea;
             uCopyBytes -= pPass2->m_uBytesCopiedFromScratch;
@@ -1789,6 +1914,7 @@ Xpress9EncoderFetchCompressedData (
     }
 
 Done:
+    // see whether we have something left
     if (
         pPass2->m_Ir.m_pIrSrc >= pPass2->m_Ir.m_pIrPtr && 
         pPass2->m_uBytesCopiedFromScratch >= (uxint) (BIOWR_TELL_OUTPUT_PTR_STATE (pPass2->m_BioState) - STATE.m_Scratch.m_pScratchArea)
@@ -1837,14 +1963,18 @@ Failure:
 }
 
 
+//
+// Detach data buffer with user data that was attached to the encoder before
+// Values of pOrigData and uOrigDataSize must match parameters passed to Xpress9EncoderDetach
+//
 XPRESS9_EXPORT
 void
 XPRESS9_CALL
 Xpress9EncoderDetach (
-    XPRESS9_STATUS         *pStatus,
-    XPRESS9_ENCODER         pEncoder,
-    const void             *pOrigData,
-    unsigned                uOrigDataSize
+    XPRESS9_STATUS         *pStatus,            // OUT: status
+    XPRESS9_ENCODER         pEncoder,           // IN:  encoder
+    const void             *pOrigData,          // IN:  original (uncompressed) data buffer (optinal, may be NULL)
+    unsigned                uOrigDataSize       // IN:  amount of data in "pData" buffer (optional, may be 0)
 )
 {
     LZ77_PASS1_STATE   *pState;
@@ -1907,14 +2037,19 @@ Failure:;
 }
 
 
+//
+// Release memory occupied by the encoder.
+//
+// Please notice that the order to destroy the decoder will be always obeyed irrespective of encoder state
+//
 XPRESS9_EXPORT
 void
 XPRESS9_CALL
 Xpress9EncoderDestroy (
-    XPRESS9_STATUS     *pStatus,
-    XPRESS9_ENCODER     pEncoder,
-    void               *pFreeContext,
-    XpressFreeFn       *pFreeFn
+    XPRESS9_STATUS     *pStatus,                // OUT: status
+    XPRESS9_ENCODER     pEncoder,               // IN:  encoder
+    void               *pFreeContext,           // IN:  context for user-defined memory release function
+    XpressFreeFn       *pFreeFn                 // IN:  user-defined memory release function
 )
 {
     LZ77_PASS1_STATE   *pState;

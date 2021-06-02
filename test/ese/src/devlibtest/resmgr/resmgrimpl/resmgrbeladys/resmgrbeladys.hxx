@@ -5,20 +5,41 @@
 #define _RESMGRBELADYS_HXX_INCLUDED
 
 
+//  We allow modules using us to override our assert function.
 
 #ifndef RESMGRBELADYSAssert
 #define RESMGRBELADYSAssert Assert
-#endif
+#endif  //  RESMGRBELADYSAssert
 
 #include <unordered_map>
 #include <vector>
 #include <map>
 
+//  Implementation of the Bélády's (a.k.a. Clairvoyant, a.k.a. OPT) algorithm.
+//
+//  The algorithm requires a pre-processing phase, where all the page requests
+//  will be partitioned according to their resource IDs (ifmp/pgno in ESE). A hash
+//  map will be built where the key will be the res. ID and the data will be a
+//  sorted list of request timestamps.
+//
+//  Once such a list is built, the CBeladysResourceUtilityManager object then is
+//  switched to the processing phase. Upon each page request (cache/touch), the
+//  resource is looked up in the hash map and is added to a list sorted by tick,
+//  with the tick of the next request. The request iterator is then advanced. If
+//  the resource is already on the list, it gets re-added with the updated tick.
+//
+//  At eviction time, the resource suggested for eviction is the one with the
+//  highest tick in the sorted list of resources.
+//
+//  The algorithm assumes resource request timestamps in ascending order.
 
+//  ================================================================
 template<class CKey, class CTimestamp>
 class CBeladysResourceUtilityManager
+//  ================================================================
 {
     public:
+        //  API error codes.
 
         enum ERR
         {
@@ -31,16 +52,19 @@ class CBeladysResourceUtilityManager
         };
 
 
+        //  Ctor./Dtor.
 
         CBeladysResourceUtilityManager();
         ~CBeladysResourceUtilityManager();
 
 
+        //  Init./term.
 
         ERR ErrInit();
         void Term();
 
 
+        //  Cache/touch/evict.
 
         ERR ErrCacheResource( const CKey key, CTimestamp timestamp );
         ERR ErrTouchResource( const CKey key, CTimestamp timestamp );
@@ -51,17 +75,20 @@ class CBeladysResourceUtilityManager
         ERR ErrGetWorstNextResource( CKey* const pkey );
 
 
+        //  Transition functions.
 
         bool FProcessing() const;
         ERR ErrStartProcessing();
         ERR ErrResetProcessing();
 
     private:
+        //  Custom types (eviction index).
 
         typedef std::multimap<CTimestamp, CKey> EvictionIndex;
         typedef typename EvictionIndex::iterator EvictionIndexIter;
 
 
+        //  Custom types (resource-timestamp map).
 
         typedef std::vector<CTimestamp> RequestSequence;
         typedef typename RequestSequence::iterator RequestSequenceIter;
@@ -75,22 +102,26 @@ class CBeladysResourceUtilityManager
         typedef typename ResourceRequestMap::iterator ResourceRequestMapIter;
 
 
+        //  Constants.
 
         static const CTimestamp s_terminator = CTimestamp( 0 ) - 1;
 
 
+        //  State.
 
-        bool m_fProcessing;
+        bool m_fProcessing;                 //  Whether we are processing traces (as opposed to only pre-processing).
 
-        CTimestamp m_time0;
+        CTimestamp m_time0;                 //  First timestamp reported, used as a baseline.
+                                            //  All timestamps stored will be deltas.
 
-        bool m_fTime0init;
+        bool m_fTime0init;                  //  Whether or not m_time0 is initialized.
 
-        ResourceRequestMap m_rrmap;
+        ResourceRequestMap m_rrmap;         //  Maps resources and their list of timestamps.
 
-        EvictionIndex m_eindex;
+        EvictionIndex m_eindex;             //  Eviction index.
 
 
+        //  Helpers.
 
         ERR ErrRequestResource( const CKey key, CTimestamp timestamp );
         ERR ErrEvictNextResource( CKey* const pkey, const bool fBest );
@@ -116,6 +147,7 @@ template<class CKey, class CTimestamp>
 inline CBeladysResourceUtilityManager<CKey, CTimestamp>::
 ~CBeladysResourceUtilityManager()
 {
+    //  Free up all the stored time sequences.
 
     for ( ResourceRequestMapIter iter = m_rrmap.begin(); iter != m_rrmap.end(); iter++ )
     {
@@ -128,6 +160,7 @@ inline typename CBeladysResourceUtilityManager<CKey, CTimestamp>::ERR
 CBeladysResourceUtilityManager<CKey, CTimestamp>::
 ErrInit()
 {
+    //  Either we're not processing yet or the client should have evicted.
 
     RESMGRBELADYSAssert( m_eindex.empty() );
 
@@ -152,6 +185,7 @@ CBeladysResourceUtilityManager<CKey, CTimestamp>::Term()
         return;
     }
 
+    //  If collecting traces, stamp a terminator to everyone's list.
 
     for ( ResourceRequestMapIter iter = m_rrmap.begin(); iter != m_rrmap.end(); iter++ )
     {
@@ -171,6 +205,7 @@ ErrCacheResource( const CKey key, CTimestamp timestamp )
 
     ResourceRequestMapIter iter = m_rrmap.find( key );
 
+    //  It must have shown up previously during pre-processing.
 
     if ( iter == m_rrmap.end() )
     {
@@ -181,18 +216,21 @@ ErrCacheResource( const CKey key, CTimestamp timestamp )
 
     RequestTimeSequence* const prts = iter->second;
 
+    //  Must not be pointing to an entry in the eviction index.
 
     if ( prts->iterevict != m_eindex.end() )
     {
         return errResourceAlreadyCached;
     }
 
+    //  Search for a matching timestamp.
 
     timestamp = TSScaleTimestamp( timestamp );
     RESMGRBELADYSAssert( timestamp != s_terminator );
 
     const CTimestamp timestampNext = TSGetNextRequest( prts, timestamp );
 
+    //  Now, insert into the index.
 
     prts->iterevict = m_eindex.insert( std::pair<CTimestamp, CKey>( timestampNext, key ) );
 
@@ -211,6 +249,7 @@ ErrTouchResource( const CKey key, CTimestamp timestamp )
     
     ResourceRequestMapIter iter = m_rrmap.find( key );
 
+    //  It must have shown up previously during pre-processing.
 
     if ( iter == m_rrmap.end() )
     {
@@ -221,6 +260,7 @@ ErrTouchResource( const CKey key, CTimestamp timestamp )
 
     RequestTimeSequence* const prts = iter->second;
 
+    //  Must be pointing to an entry in the eviction index.
 
     if ( prts->iterevict == m_eindex.end() )
     {
@@ -229,12 +269,14 @@ ErrTouchResource( const CKey key, CTimestamp timestamp )
 
     RESMGRBELADYSAssert( prts->iterevict->second == key );
 
+    //  Search for a matching timestamp.
 
     timestamp = TSScaleTimestamp( timestamp );
     RESMGRBELADYSAssert( timestamp != s_terminator );
 
     const CTimestamp timestampNext = TSGetNextRequest( prts, timestamp );
 
+    //  Now, update the index.
 
     m_eindex.erase( prts->iterevict );
     prts->iterevict = m_eindex.insert( std::pair<CTimestamp, CKey>( timestampNext, key ) );
@@ -247,6 +289,7 @@ inline typename CBeladysResourceUtilityManager<CKey, CTimestamp>::ERR
 CBeladysResourceUtilityManager<CKey, CTimestamp>::
 ErrEvictResource( const CKey key )
 {
+    //  Do nothing if just accumulating traces.
 
     if ( !m_fProcessing )
     {
@@ -255,6 +298,7 @@ ErrEvictResource( const CKey key )
     
     ResourceRequestMapIter iter = m_rrmap.find( key );
 
+    //  It must have shown up previously during pre-processing.
 
     if ( iter == m_rrmap.end() )
     {
@@ -265,6 +309,7 @@ ErrEvictResource( const CKey key )
 
     RequestTimeSequence* const prts = iter->second;
 
+    //  Must be pointing to an entry in the eviction index.
 
     if ( prts->iterevict == m_eindex.end() )
     {
@@ -273,6 +318,7 @@ ErrEvictResource( const CKey key )
 
     RESMGRBELADYSAssert( prts->iterevict->second == key );
 
+    //  Now, delete from the index.
 
     m_eindex.erase( prts->iterevict );
     prts->iterevict = m_eindex.end();
@@ -330,6 +376,7 @@ ErrStartProcessing()
         return errInvalidOperation;
     }
     
+    //  We're not processing yet.
 
     RESMGRBELADYSAssert( m_eindex.empty() );    
     
@@ -355,6 +402,7 @@ ErrRequestResource( const CKey key, CTimestamp timestamp )
 
     timestamp = TSScaleTimestamp( timestamp );
 
+    //  Check if we already have this resource in our map.
 
     ResourceRequestMapIter iter = m_rrmap.find( key );
     RequestTimeSequence* prts = NULL;
@@ -403,18 +451,21 @@ ErrEvictNextResource( CKey* const pkey, const bool fBest, const bool fEvict )
 {
     *pkey = CKey( 0 );
 
+    //  Do nothing if just accumulating traces.
 
     if ( !m_fProcessing )
     {
         return errSuccess;
     }
 
+    //  Nothing to return if it's empty.
 
     if ( m_eindex.empty() )
     {
         return errNoCurrentResource;
     }
 
+    //  Evict last element.
 
     EvictionIndexIter iterevict = fBest ? std::prev( m_eindex.end() ) : m_eindex.begin();
 
@@ -422,17 +473,20 @@ ErrEvictNextResource( CKey* const pkey, const bool fBest, const bool fEvict )
 
     ResourceRequestMapIter iter = m_rrmap.find( key );
 
+    //  It must have shown up previously during pre-processing.
 
     RESMGRBELADYSAssert( iter != m_rrmap.end() );
     RESMGRBELADYSAssert( iter->first == key );
 
     RequestTimeSequence* const prts = iter->second;
 
+    //  Must be pointing to the right entry in the eviction index.
 
     RESMGRBELADYSAssert( prts->iterevict == iterevict );
 
     if ( fEvict )
     {
+        //  Now, delete from the index.
 
         m_eindex.erase( iterevict );
         prts->iterevict = m_eindex.end();
@@ -448,12 +502,14 @@ inline typename CBeladysResourceUtilityManager<CKey, CTimestamp>::ERR
 CBeladysResourceUtilityManager<CKey, CTimestamp>::
 ErrResetProcessing( const bool fResetTimestampSequence )
 {
+    //  Only valid to call this if currently processing.
 
     if ( !m_fProcessing )
     {
         return errInvalidOperation;
     }
 
+    //  Reset state if processing.
 
     m_eindex.clear();
 
@@ -479,6 +535,9 @@ CBeladysResourceUtilityManager<CKey, CTimestamp>::TSGetNextRequest( RequestTimeS
 
     RESMGRBELADYSAssert( timestamp != s_terminator );
 
+    //  There are a few cases (no-touch flag, for example) where a request in the processing phase may
+    //  not have shown up during pre-processing. In that case, stop the lookup once we move to a timestamp
+    //  that is higher than what we're looking for and return that as the next.
 
     while ( ( prts->iterseq != prts->rseq.end() ) &&
         ( ( timestampNext = *( prts->iterseq ) ) != timestamp ) )
@@ -493,6 +552,7 @@ CBeladysResourceUtilityManager<CKey, CTimestamp>::TSGetNextRequest( RequestTimeS
         }
     }
 
+    //  Finally, move to next.
 
     if ( prts->iterseq != prts->rseq.end() )
     {
@@ -517,5 +577,5 @@ CBeladysResourceUtilityManager<CKey, CTimestamp>::TSScaleTimestamp( const CTimes
     return ts - m_time0;
 }
 
-#endif
+#endif  //  _RESMGRBELADYS_HXX_INCLUDED
 

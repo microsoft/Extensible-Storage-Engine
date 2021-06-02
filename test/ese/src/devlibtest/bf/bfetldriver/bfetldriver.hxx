@@ -1,13 +1,16 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
+//  This file declares the interface for the BF ETL driver, which allows
+//  a component to convert a file (or test traces) to an enumerator model
+//  for easy trace processing.
 
 #ifndef _BFETLDRIVER_HXX_INCLUDED
 #define _BFETLDRIVER_HXX_INCLUDED
 
 #include <tchar.h>
 #include "os.hxx"
-#include "bfftl.hxx"
+#include "bfftl.hxx"        // BF trace data and IDs
 #include "EtwCollection.hxx"
 
 #include <set>
@@ -46,50 +49,64 @@ typedef struct _BFETLContext BFETLContext;
 typedef struct _BFETLContext
 {
     private:
+        //  ETW trace provider:
+        //    o A pointer to an array of trace pointers if in test mode (NULL is the sentinel).
+        //    o A pointer to a WCHAR string with the name of the .etl file if in normal mode.
 
         const void* pvTraceProvider;
 
 
+        //  Trace file handle
 
         HANDLE hETW;
 
 
+        //  Special flags / options
 
         BOOL fTestMode;
         BOOL fCollectBfStats;
         BOOL fEOF;
 
 
+        //  Tick tracking.
 
-        DWORD cEventsBufferedMax;
+        DWORD cEventsBufferedMax;   //  Number of entries that we're going to keep around in order to make sure
+                                    //  we always return traces in ascending order of timestamp (tick).
         typedef std::list<EtwEvent*> ListEtwEvent;
         typedef ListEtwEvent::iterator ListEtwEventIter;
-        ListEtwEvent* pListEtwEvent;
-        TICK tickLast;
-        TICK tickMin;
-        TICK tickMax;
+        ListEtwEvent* pListEtwEvent;        //  Buffer of last N entries, sorted by tick, oldest at front.
+        TICK tickLast;                      //  Last tick returned.
+        TICK tickMin;                       //  Min. tick currently buffered.
+        TICK tickMax;                       //  Max. tick currently buffered.
 
 
+        //  Stats by PID
 
         typedef std::unordered_map<DWORD, BFTraceStats*> HashPidStats;
         typedef HashPidStats::iterator HashPidStatsIter;
         HashPidStats* pHashPidStats;
 
     public:
+        //  Process IDs to collect traces from. ZERO is a special value and means "collect-all".
+        //  It should be used for unit-testing only or when you're guaranteed to have only
+        //  one ESE process running at a time, or traces will be overlapped.
 
         std::set<DWORD>* pids;
 
         
+        //  BF trace stats
 
         __int64 cTracesOutOfOrder;
         __int64 cTracesProcessed;
         BFTraceStats bftstats;
 
+        //  Trace file summary data array (one element for each PID collected).
 
         CFastTraceLog::BFFTLFilePostProcessHeader* rgbfftlPostProcHdr;
         CFastTraceLog::BFFTLFilePostProcessHeader& bfftlPostProcHdr( const DWORD dwPID ) const;
         CFastTraceLog::BFFTLFilePostProcessHeader& bfftlPostProcHdr() const;
 
+    //  Friend functions.
     friend ERR ErrBFETLInit(
         __in const void * const pvTraceProvider,
         __in const std::set<DWORD>& pids,
@@ -102,11 +119,13 @@ typedef struct _BFETLContext
 } BFETLContext;
 
 
+//  Flags / options to ErrBFETLInit (and ErrBFETLDumpStats).
 
 #define fBFETLDriverTestMode            (0x00000001)
 #define fBFETLDriverCollectBFStats      (0x00000002)
 
 
+//  Inits BFETL driver of a trace file and driver options.
 
 ERR ErrBFETLInit(
     __in const void * const pvTraceProvider,
@@ -122,19 +141,26 @@ ERR ErrBFETLInit(
     __out BFETLContext** const ppbfetlc );
 
 
+//  Terms and cleanups up the driver handle / allocations.
 
 void BFETLTerm( __in BFETLContext* const pbfetlc );
 
 
+//  Gets the next trace in the trace file (or in the test traces).
 
 ERR ErrBFETLGetNext( __in BFETLContext* const pbfetlc, __out BFTRACE * const pbftrace );
 ERR ErrBFETLGetNext( __in BFETLContext* const pbfetlc, __out BFTRACE * const pbftrace, __out DWORD* const pdwPID );
 
 
+//  Gets BFTraceStats specific to a process ID. pdwPID is an in/out parameter: the input is an iterator
+//  "i" (meaning "ith" process); the output is the actual process ID, for printing purposes.
+//  If "i" is beyond the number of processes for which we have traces for, the output PID will be zero
+//  and the returned pointer will be NULL.
 
 const BFTraceStats* PbftsBFETLStatsByPID( __in const BFETLContext* const pbfetlc, __inout DWORD* const pdwPID );
 
 
+//  Converts an ETL file into an FTL post-processed file.
 
 ERR ErrBFETLConvertToFTL(
     __in const WCHAR* const wszEtlFilePath,
@@ -142,6 +168,7 @@ ERR ErrBFETLConvertToFTL(
     __in const std::set<DWORD>& pids );
 
 
+//  Compares an ETL against an FTL file. Returns JET_errDatabaseCorrupted if they are not the same.
 
 ERR ErrBFETLFTLCmp(
     __in const void* pvTraceProviderEtl,
@@ -151,6 +178,7 @@ ERR ErrBFETLFTLCmp(
     __out __int64* const pcTracesProcessed = NULL );
 
 
+//  Dump stats related to the ETL file.
 
 ERR ErrBFETLDumpStats( __in const BFETLContext* const pbfetlc, __in const DWORD grbit );
 

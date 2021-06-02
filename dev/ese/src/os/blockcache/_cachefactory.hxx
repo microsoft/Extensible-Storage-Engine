@@ -4,6 +4,7 @@
 #pragma once
 
 
+//  CCacheFactory:  creates or mounts a cache based on its configuration
 
 class CCacheFactory
 {
@@ -80,9 +81,11 @@ INLINE ERR CCacheFactory::ErrCreate(    _In_    IFileSystemFilter* const        
 
     *ppc = NULL;
 
+    //  determine the type of cache to create
 
     Call( ErrGetFactory( *ppcconfig, rgbCacheType, &pfnFactory ) );
 
+    //  verify that the file is empty to avoid unintentional data destruction
 
     Call( (*ppffCaching)->ErrSize( &cbSize, IFileAPI::filesizeLogical ) );
     if ( cbSize != 0 )
@@ -90,9 +93,11 @@ INLINE ERR CCacheFactory::ErrCreate(    _In_    IFileSystemFilter* const        
         Error( ErrERRCheck( JET_errInternalError ) );
     }
 
+    //  initialize the caching file header
 
     Call( CCacheHeader::ErrCreate( rgbCacheType, *ppffCaching, &pch ) );
 
+    //  write the caching file header
 
     Call( (*ppffCaching)->ErrIOWrite(   *tcScope,
                                         0, 
@@ -103,21 +108,27 @@ INLINE ERR CCacheFactory::ErrCreate(    _In_    IFileSystemFilter* const        
                                         NULL, 
                                         NULL ) );
 
+    //  flush the caching file
 
     Call( (*ppffCaching)->ErrFlushFileBuffers( iofrBlockCache ) );
 
+    //  get the block cache configuration
 
     Call( pfsconfig->ErrGetBlockCacheConfiguration( &pbcconfig ) );
 
+    //  construct the cache
 
     Alloc( pc = pfnFactory( pfsf, pfident, pfsconfig, &pbcconfig, ppcconfig, pctm, ppffCaching, &pch ) );
 
+    //  create the cache
 
     Call( pc->ErrCreate() );
 
+    //  mount the cache
 
     Call( pc->ErrMount() );
 
+    //  return the cache
 
     *ppc = pc;
     pc = NULL;
@@ -145,21 +156,27 @@ INLINE ERR CCacheFactory::ErrMount( _In_    IFileSystemFilter* const        pfsf
 
     *ppc = NULL;
 
+    //  read the header
 
     Call( CCacheHeader::ErrLoad( pfsconfig, *ppffCaching, &pch ) );
 
+    //  determine the type of cache to mount
 
     Call( ErrGetFactory( pch->RgbCacheType(), &pfnFactory ) );
 
+    //  get the block cache configuration
 
     Call( pfsconfig->ErrGetBlockCacheConfiguration( &pbcconfig ) );
 
+    //  construct the cache
 
     Alloc( pc = pfnFactory( pfsf, pfident, pfsconfig, &pbcconfig, ppcconfig, pctm, ppffCaching, &pch ) );
 
+    //  mount the cache
 
     Call( pc->ErrMount() );
 
+    //  return the cache
 
     *ppc = pc;
     pc = NULL;
@@ -190,18 +207,23 @@ INLINE ERR CCacheFactory::ErrDump(  _In_    IFileSystemFilter* const        pfsf
     IBlockCacheConfiguration*   pbcconfig   = NULL;
     ICache*                     pc          = NULL;
 
+    //  read the header
 
     Call( CCacheHeader::ErrLoad( pfsconfig, *ppffCaching, &pch ) );
 
+    //  determine the type of cache to mount
 
     Call( ErrGetFactory( pch->RgbCacheType(), &pfnFactory ) );
 
+    //  get the block cache configuration
 
     Call( pfsconfig->ErrGetBlockCacheConfiguration( &pbcconfig ) );
 
+    //  construct the cache
 
     Alloc( pc = pfnFactory( pfsf, pfident, pfsconfig, &pbcconfig, ppcconfig, pctm, ppffCaching, &pch ) );
 
+    //  dump the cache
 
     Call( pc->ErrDump( pcprintf ) );
 
@@ -221,9 +243,11 @@ INLINE ERR CCacheFactory::ErrGetFactory(    _In_                    ICacheConfig
     *ppfnFactory = NULL;
     memset( rgbCacheType, 0, cbGuid );
 
+    //  get the cache type id from the cache configuration
 
     pcconfig->CacheType( rgbCacheType );
 
+    //  find the factory method for this cache type id
 
     Call( ErrGetFactory( rgbCacheType, ppfnFactory ) );
 
@@ -243,6 +267,7 @@ INLINE ERR CCacheFactory::ErrGetFactory(    _In_reads_( cbGuid )    const BYTE* 
 
     *ppfnFactory = NULL;
 
+    //  find the factory method for this cache type id
 
     if ( memcmp( CPassThroughCache::RgbCacheType(), rgbCacheType, cbGuid ) == 0 )
     {
@@ -253,6 +278,7 @@ INLINE ERR CCacheFactory::ErrGetFactory(    _In_reads_( cbGuid )    const BYTE* 
         *ppfnFactory = CHashedLRUKCache::PcCreate;
     }
 
+    //  if we didn't find the factory method then fail
 
     if ( *ppfnFactory == NULL )
     {

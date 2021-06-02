@@ -223,6 +223,7 @@ Xpress9Lz77EncInsert (
 #endif
 
             uHashValue &= uHashMask;
+            // Link the position at the head of the list at this hash table position.
             pState->m_uNext[uPosition] = pHashTable[uHashValue];
             pHashTable[uHashValue] = (LZ77_INDEX) uPosition;
 
@@ -234,6 +235,9 @@ Xpress9Lz77EncInsert (
         STATE.m_EncodeData.m_uHashInsertPosition = uPosition;
     }
 
+    //
+    // The last few( upto 3 ) bytes may have been left unhashed if uLastPosition is not a multiple of 4.
+    //
     while (uPosition < uLastPosition)
     {
         pState->m_uNext[uPosition] = 0;

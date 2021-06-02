@@ -3,7 +3,9 @@
 
 #include "collectionunittest.hxx"
 
+//  ================================================================
 class SimpleQueueListTest : public UNITTEST
+//  ================================================================
 {
     private:
         static SimpleQueueListTest s_instance;
@@ -47,12 +49,15 @@ typedef struct _tagRandomStruct {
 #endif
 
 
+//  ================================================================
 ERR SimpleQueueListTest::ErrTest()
+//  ================================================================
 {
     ERR err = JET_errSuccess;
 
     wprintf( L"\tTesting simple queue list ...\n");
 
+    //  create list elements, and Queue
 
     RandomStruct rs1 = { 0x10000, NULL, 0x10000 };
     RandomStruct rs2 = { 0x20000, NULL, 0x20000 };
@@ -66,16 +71,18 @@ ERR SimpleQueueListTest::ErrTest()
     TestCheck( rs2.ulSig1 == rs2.ulSig2 );
     TestCheck( rs1.ulSig1 != rs2.ulSig1 );
 
+    //  test ctor 
 
     TestCheck( Queue.FEmpty() );
     TestCheck( 0 == Queue.CElements() );
     TestCheck( NULL == Queue.RemovePrevMost( OffsetOf( RandomStruct, pNext ) ) );
-    TestCheck( NULL == Queue.RemovePrevMost( OffsetOf( RandomStruct, pNext ) ) );
+    TestCheck( NULL == Queue.RemovePrevMost( OffsetOf( RandomStruct, pNext ) ) );   // works twice in a row.
     TestCheck( 0 == Queue.CElements() );
     
+    //  test dirty mem ctor
 
-    void * pdata [3] = { (void*)0xBAADF00D, (void*)0xF00DBAAD, (void*)0xF0BAAD0D  };
-    C_ASSERT( sizeof(pdata) == sizeof(CSimpleQueue< RandomStruct >) );
+    void * pdata [3] = { (void*)0xBAADF00D, (void*)0xF00DBAAD, (void*)0xF0BAAD0D  };        // "allocate" storage for a new CSimpleQueue
+    C_ASSERT( sizeof(pdata) == sizeof(CSimpleQueue< RandomStruct >) );  // validate storage is big enough
     CSimpleQueue< RandomStruct > * pHeadCtorTest = (CSimpleQueue< RandomStruct > *)&pdata;
     new( pHeadCtorTest) CSimpleQueue< RandomStruct >;
 
@@ -87,6 +94,7 @@ ERR SimpleQueueListTest::ErrTest()
     TestCheck( 0 == Queue.CElements() );
     TestCheck( NULL == pHeadCtorTest->RemovePrevMost( OffsetOf( RandomStruct, pNext ) ) );
 
+    //  test single element insertion, removal, etc
 
     Queue.InsertAsPrevMost( &rs1, OffsetOf( RandomStruct, pNext ) );
 
@@ -101,6 +109,8 @@ ERR SimpleQueueListTest::ErrTest()
     TestCheck( NULL == Queue.RemovePrevMost( OffsetOf( RandomStruct, pNext ) ) );
     TestCheck( 0 == Queue.CElements() );
 
+    //  test two element insertion, element removal, etc
+    //      note: rs2 and then rs inserted
 
     Queue.InsertAsPrevMost( &rs2, OffsetOf( RandomStruct, pNext ) );
     Queue.InsertAsPrevMost( &rs1, OffsetOf( RandomStruct, pNext ) );
@@ -108,23 +118,26 @@ ERR SimpleQueueListTest::ErrTest()
     TestCheck( !Queue.FEmpty() );
     TestCheck( 2 == Queue.CElements() );
 
+    //      test element 1 removal
 
     prs = Queue.RemovePrevMost( OffsetOf( RandomStruct, pNext ) );
 
     TestCheck( &rs1 == prs );
     TestCheck( rs1.ulSig1 == rs1.ulSig2 );
-    TestCheck( NULL == prs->pNext );
-    TestCheck( !Queue.FEmpty() );
+    TestCheck( NULL == prs->pNext );        // should be delinked.
+    TestCheck( !Queue.FEmpty() );           // should have another element in list
     TestCheck( 1 == Queue.CElements() );
 
+    //      test element 2 removal
     
     prs = Queue.RemovePrevMost( OffsetOf( RandomStruct, pNext ) );
 
     TestCheck( &rs2 == prs );
     TestCheck( rs2.ulSig1 == rs2.ulSig2 );
-    TestCheck( NULL == prs->pNext );
+    TestCheck( NULL == prs->pNext );        // should be delinked.
     TestCheck( Queue.FEmpty() );
 
+    //  test two element insertion, and list removal, etc
 
     Queue.InsertAsPrevMost( &rs1, OffsetOf( RandomStruct, pNext ) );
     Queue.InsertAsPrevMost( &rs2, OffsetOf( RandomStruct, pNext ) );
@@ -132,6 +145,7 @@ ERR SimpleQueueListTest::ErrTest()
     TestCheck( !Queue.FEmpty() );
     TestCheck( Queue2.FEmpty() );
 
+    //  test conversion to a lockless link list ...
 
     List = Queue.RemoveList();
     TestCheck( Queue.FEmpty() );
@@ -142,6 +156,7 @@ ERR SimpleQueueListTest::ErrTest()
     TestCheck( List.FEmpty() );
     TestCheck( 0 == Queue.CElements() );
 
+    //  test next most on empty ...
 
     TestCheck( Queue.FEmpty() );    
     Queue.InsertAsNextMost( &rs3, OffsetOf( RandomStruct, pNext ) );
@@ -153,6 +168,7 @@ ERR SimpleQueueListTest::ErrTest()
     TestCheck( 0 == Queue.CElements() );
     TestCheck( NULL == Queue.RemovePrevMost( OffsetOf( RandomStruct, pNext ) ) );
 
+    //  test actual queue like behavior empty ...
 
     Queue.InsertAsNextMost( &rs1, OffsetOf( RandomStruct, pNext ) );
     Queue.InsertAsNextMost( &rs2, OffsetOf( RandomStruct, pNext ) );
@@ -169,11 +185,13 @@ ERR SimpleQueueListTest::ErrTest()
     TestCheck( NULL == Queue.RemovePrevMost( OffsetOf( RandomStruct, pNext ) ) );
     TestCheck( 0 == Queue.CElements() );
     
+    //  test prev most and later next most ...
 
     TestCheck( Queue.FEmpty() );    
     Queue.InsertAsPrevMost( &rs2, OffsetOf( RandomStruct, pNext ) );
     Queue.InsertAsPrevMost( &rs1, OffsetOf( RandomStruct, pNext ) );
     Queue.InsertAsNextMost( &rs3, OffsetOf( RandomStruct, pNext ) );
+    // should be in order 1, 2, 3, ...
 
     TestCheck( 3 == Queue.CElements() );
     TestCheck( &rs1 == Queue.RemovePrevMost( OffsetOf( RandomStruct, pNext ) ) );
@@ -183,11 +201,13 @@ ERR SimpleQueueListTest::ErrTest()
     TestCheck( 0 == Queue.CElements() );
     TestCheck( NULL == Queue.RemovePrevMost( OffsetOf( RandomStruct, pNext ) ) );
 
+    //  test linked list-based queue .ctor
 
     TestCheck( Queue.FEmpty() );    
     Queue.InsertAsPrevMost( &rs1, OffsetOf( RandomStruct, pNext ) );
     Queue.InsertAsNextMost( &rs2, OffsetOf( RandomStruct, pNext ) );
     Queue.InsertAsNextMost( &rs3, OffsetOf( RandomStruct, pNext ) );
+    // should be in order 1, 2, 3, ...
 
     List = Queue.RemoveList();
     TestCheck( Queue.FEmpty() );
@@ -197,6 +217,7 @@ ERR SimpleQueueListTest::ErrTest()
     TestCheck( prs );
     if ( prs )
     {
+        //  build the queue based upon the list.
         CSimpleQueue< RandomStruct > QueueLocal( prs, OffsetOf( RandomStruct, pNext ) );
 
         TestCheck( Queue.FEmpty() );

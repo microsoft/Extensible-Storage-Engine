@@ -3,6 +3,8 @@
 
 #include "std.hxx"
 
+//  prototypes of DIR internal routines
+//
 LOCAL ERR ErrDIRICheckIndexRange( FUCB *pfucb, const KEY& key );
 LOCAL ERR ErrDIRIIRefresh( FUCB * const pfucb );
 INLINE ERR ErrDIRIRefresh( FUCB * const pfucb )
@@ -15,6 +17,7 @@ INLINE ERR ErrDIRIRefresh( FUCB * const pfucb )
 
 #ifdef PERFMON_SUPPORT
 
+//  perf stats
 
 PERFInstanceDelayedTotal<> cDIRUserROTrxCommit0;
 LONG LDIRUserROTrxCommit0CEFLPv(LONG iInstance,void *pvBuf)
@@ -133,12 +136,24 @@ LONG LDIRSystemTrxRollback0CEFLPv(LONG iInstance,void *pvBuf)
     return 0;
 }
 
-#endif
+#endif // PERFMON_SUPPORT
 
 
+//  *****************************************
+//  DIR API functions
+//
 
+// *********************************************************
+// ******************** DIR API Routines ********************
+//
 
+//  ***********************************************
+//  constructor/destructor routines
+//
 
+//  creates a directory
+//  get a new extent from space that is initialized to a directory
+//
 ERR ErrDIRCreateDirectory(
     FUCB    *pfucb,
     CPG     cpgMin,
@@ -154,14 +169,21 @@ ERR ErrDIRCreateDirectory(
     Assert( NULL != ppgnoFDP );
     Assert( NULL != pobjidFDP );
 
+    //  check currency is on "parent" FDP
+    //
     Assert( !Pcsr( pfucb )->FLatched( ) );
     Assert( locOnFDPRoot == pfucb->locLogical );
 
     fSPFlags |= fSPNewFDP;
 
+    // WARNING: Should only create an unversioned extent if its parent was
+    // previously created and versioned in the same transaction as the
+    // creation of this extent.
     Assert( ( fSPFlags & fSPUnversionedExtent )
-            || !FFMPIsTempDB( pfucb->ifmp ) );
+            || !FFMPIsTempDB( pfucb->ifmp ) );       // Don't version creation of temp. table.
 
+    //  create FDP
+    //
     *ppgnoFDP = pgnoNull;
     Call( ErrSPGetExt(
         pfucb,
@@ -181,7 +203,12 @@ HandleError:
 }
 
 
+//  ***********************************************
+//  Open/Close routines
+//
 
+//  opens a cursor on given ifmp, pgnoFDP
+//
 ERR ErrDIROpen( PIB *ppib, PGNO pgnoFDP, IFMP ifmp, FUCB **ppfucb, BOOL fWillInitFCB )
 {
     ERR     err;
@@ -203,10 +230,13 @@ ERR ErrDIROpen( PIB *ppib, PGNO pgnoFDP, IFMP ifmp, FUCB **ppfucb, BOOL fWillIni
     CallR( ErrBTOpen( ppib, pgnoFDP, ifmp, &pfucb, openNormal, fWillInitFCB ) );
     DIRInitOpenedCursor( pfucb, pfucb->ppib->Level() );
 
+    //  set return pfucb
+    //
     *ppfucb = pfucb;
     return JET_errSuccess;
 }
 
+//  open cursor, don't touch root page
 ERR ErrDIROpenNoTouch( PIB *ppib, IFMP ifmp, PGNO pgnoFDP, OBJID objidFDP, BOOL fUnique, FUCB **ppfucb, BOOL fWillInitFCB )
 {
     ERR     err;
@@ -228,10 +258,14 @@ ERR ErrDIROpenNoTouch( PIB *ppib, IFMP ifmp, PGNO pgnoFDP, OBJID objidFDP, BOOL 
     CallR( ErrBTOpenNoTouch( ppib, ifmp, pgnoFDP, objidFDP, fUnique, &pfucb, fWillInitFCB ) );
     DIRInitOpenedCursor( pfucb, pfucb->ppib->Level() );
 
+    //  set return pfucb
+    //
     *ppfucb = pfucb;
     return JET_errSuccess;
 }
 
+//  open cursor on given FCB
+//
 ERR ErrDIROpen( PIB *ppib, FCB *pfcb, FUCB **ppfucb )
 {
     ERR     err;
@@ -254,10 +288,14 @@ ERR ErrDIROpen( PIB *ppib, FCB *pfcb, FUCB **ppfucb )
     CallR( ErrBTOpen( ppib, pfcb, &pfucb ) );
     DIRInitOpenedCursor( pfucb, pfucb->ppib->Level() );
 
+    //  set return pfucb
+    //
     *ppfucb = pfucb;
     return JET_errSuccess;
 }
 
+//  open cursor on given FCB on behalf of another session
+//
 ERR ErrDIROpenByProxy( PIB *ppib, FCB *pfcb, FUCB **ppfucb, LEVEL level )
 {
     ERR     err;
@@ -281,13 +319,20 @@ ERR ErrDIROpenByProxy( PIB *ppib, FCB *pfcb, FUCB **ppfucb, LEVEL level )
     CallR( ErrBTOpenByProxy( ppib, pfcb, &pfucb, level ) );
     DIRInitOpenedCursor( pfucb, level );
 
+    //  set return pfucb
+    //
     *ppfucb = pfucb;
     return JET_errSuccess;
 }
 
 
+//  closes cursor
+//  frees space allocated for logical currency
+//
 VOID DIRClose( FUCB *pfucb )
 {
+    //  this cursor should not be already defer closed
+    //
     Assert( PinstFromIfmp( pfucb->ifmp )->FRecovering() || !FFUCBDeferClosed(pfucb) );
 
     RECReleaseKeySearchBuffer( pfucb );
@@ -297,7 +342,14 @@ VOID DIRClose( FUCB *pfucb )
 }
 
 
+//  ***************************************************
+//  RETRIEVE OPERATIONS
+//
 
+//  currency is implemented at BT level,
+//  so DIRGet just does a BTRefresh()
+//  returns a latched page iff the node access is successful
+//
 ERR ErrDIRGet( FUCB *pfucb )
 {
     ERR     err;
@@ -305,6 +357,11 @@ ERR ErrDIRGet( FUCB *pfucb )
     CheckFUCB( pfucb->ppib, pfucb );
     Assert( !FFUCBSpace( pfucb ) );
 
+    //  UNDONE: special case
+    //      if on current BM and page cached and
+    //      timestamp not changed and
+    //      node has not been versioned
+    //
     if ( locOnCurBM == pfucb->locLogical )
     {
         Call( ErrBTGet( pfucb ) );
@@ -314,6 +371,8 @@ ERR ErrDIRGet( FUCB *pfucb )
 
     CallR( ErrDIRIRefresh( pfucb ) );
 
+    //  check logical currency status
+    //
     switch ( pfucb->locLogical )
     {
         case locOnCurBM:
@@ -327,6 +386,9 @@ ERR ErrDIRGet( FUCB *pfucb )
             Assert( fFalse );
             break;
 
+///     case locOnSeekBM:
+///         return ErrERRCheck( JET_errRecordDeleted );
+///         break;
 
         default:
             Assert( pfucb->locLogical == locAfterLast
@@ -344,6 +406,8 @@ HandleError:
     return err;
 }
 
+//  gets fractional postion of current node in directory
+//
 ERR ErrDIRGetPosition( FUCB *pfucb, ULONG *pulLT, ULONG *pulTotal )
 {
     ERR     err;
@@ -354,8 +418,12 @@ ERR ErrDIRGetPosition( FUCB *pfucb, ULONG *pulLT, ULONG *pulTotal )
     Assert( !Pcsr( pfucb )->FLatched() );
     Assert( !FFUCBSpace( pfucb ) );
 
+    //  refresh logical currency
+    //
     Call( ErrDIRIRefresh( pfucb ) );
 
+    //  return error if not on a record
+    //
     switch ( pfucb->locLogical )
     {
         case locOnCurBM:
@@ -365,6 +433,8 @@ ERR ErrDIRGetPosition( FUCB *pfucb, ULONG *pulLT, ULONG *pulTotal )
             return ErrERRCheck( JET_errNoCurrentRecord );
     }
 
+    //  get approximate position of node.
+    //
     Call( ErrBTGetPosition( pfucb, &ulLT, &ulTotal ) );
     CallS( err );
 
@@ -378,6 +448,9 @@ HandleError:
 }
 
 
+//  reverses a DIRGet() operation
+//  releases latch on page after recording bm of node or seek in pfucb
+//
 ERR ErrDIRRelease( FUCB *pfucb )
 {
     ERR     err;
@@ -390,6 +463,7 @@ ERR ErrDIRRelease( FUCB *pfucb )
     switch ( pfucb->locLogical )
     {
         case locOnCurBM:
+///         AssertDIRGet( pfucb );
             Call( ErrBTRelease( pfucb ) );
             break;
 
@@ -401,14 +475,19 @@ ERR ErrDIRRelease( FUCB *pfucb )
             FUCBAssertValidSearchKey( pfucb );
             bm.Nullify();
 
+            //  first byte is segment counter
+            //
             bm.key.suffix.SetPv( pfucb->dataSearchKey.Pv() );
             bm.key.suffix.SetCb( pfucb->dataSearchKey.Cb() );
-            Call( ErrBTDeferGotoBookmark( pfucb, bm, fFalse ) );
+            Call( ErrBTDeferGotoBookmark( pfucb, bm, fFalse/*no touch*/ ) );
             pfucb->locLogical = locOnSeekBM;
             break;
         }
 
         default:
+            //  should be impossible, but return success just in case
+            //  (okay to return success because we shouldn't have a latch
+            //  even if the locLogical is an unexpected value)
             AssertSz( fFalse, "Unexpected locLogical" );
             err = JET_errSuccess;
             break;
@@ -420,6 +499,9 @@ ERR ErrDIRRelease( FUCB *pfucb )
 HandleError:
     Assert( err < 0 );
 
+    //  bookmark could not be saved
+    //  move up
+    //
     Assert( JET_errOutOfMemory == err );
     DIRUp( pfucb );
 
@@ -427,7 +509,16 @@ HandleError:
     return err;
 }
 
+//  ***************************************************
+//  POSITIONING OPERATIONS
+//
 
+//  called from JetGotoBookmark
+//      bookmark may not be valid
+//      therefore, logical currency of cursor can be changed
+//      only after we move to bookmark successfully
+//      also, save bookmark and release latch
+//
 ERR ErrDIRGotoJetBookmark( FUCB *pfucb, const BOOKMARK& bm, const BOOL fRetainLatch )
 {
     ERR     err;
@@ -463,6 +554,12 @@ HandleError:
 }
 
 
+//  go to given bookmark
+//  saves bookmark in cursor
+//  next DIRGet() call will return an error if bookmark is not valid
+//      this is an internal bookmark [possibly on/from a secondary index]
+//      so bookmark should be valid
+//
 ERR ErrDIRGotoBookmark( FUCB *pfucb, const BOOKMARK& bm )
 {
     ERR     err;
@@ -476,16 +573,23 @@ ERR ErrDIRGotoBookmark( FUCB *pfucb, const BOOKMARK& bm )
         FUCBResetPreread( pfucb );
     }
 
-    CallR( ErrBTDeferGotoBookmark( pfucb, bm, fTrue ) );
+    //  copy given bookmark to cursor, we will need to touch the data page buffer
+    //
+    CallR( ErrBTDeferGotoBookmark( pfucb, bm, fTrue/*Touch*/ ) );
     pfucb->locLogical = locOnCurBM;
 
 #ifdef DEBUG
+    //  check that bookmark is valid
+    //
     if ( !(BOOL)UlConfigOverrideInjection( 44228, fFalse ) )
     {
         err = ErrBTGotoBookmark( pfucb, pfucb->bmCurr, latchReadNoTouch );
         switch ( err )
         {
                 case JET_errSuccess:
+                    //  if we suddenly lost visibility on the node, it must mean
+                    //  that we're at level 0 and the node deletion was suddenly
+                    //  committed underneath us
                     if ( 0 != pfucb->ppib->Level() )
                     {
                         BOOL fVisible;
@@ -495,17 +599,20 @@ ERR ErrDIRGotoBookmark( FUCB *pfucb, const BOOKMARK& bm )
                     break;
 
                 case JET_errRecordDeleted:
+                    //  node must have gotten expunged by RCEClean (only possible
+                    //  if we're at level 0)
                     Assert( 0 == pfucb->ppib->Level() );
                     break;
 
-                case JET_errDiskIO:
-                case_AllDatabaseStorageCorruptionErrs :
-                case JET_errOutOfMemory:
-                case JET_errDiskFull:
+                case JET_errDiskIO:                     //  (#48313 -- RFS testing causes JET_errDiskIO)
+                case_AllDatabaseStorageCorruptionErrs : //  (#86323 -- Repair testing causes JET_errReadVerifyFailure )
+                case JET_errOutOfMemory:                //  (#146720 -- RFS testing causes JET_errOutOfMemory)
+                case JET_errDiskFull:                   //  (W7#456103 -- Testing on small disks causes JET_errDiskFull)
                 case JET_errOutOfBuffers:
                     break;
 
                 default:
+                    //  force an assert
                     CallS( err );
         }
 
@@ -518,6 +625,8 @@ ERR ErrDIRGotoBookmark( FUCB *pfucb, const BOOKMARK& bm )
 }
 
 
+//  goes to fractional position in directory
+//
 ERR ErrDIRGotoPosition( FUCB *pfucb, ULONG ulLT, ULONG ulTotal )
 {
     ERR     err;
@@ -533,9 +642,14 @@ ERR ErrDIRGotoPosition( FUCB *pfucb, ULONG ulLT, ULONG ulTotal )
         FUCBResetPreread( pfucb );
     }
 
+    //  set cursor navigation level for rollback support
+    //
     FUCBSetLevelNavigate( pfucb, pfucb->ppib->Level() );
 
+    //  UNDONE: do we need to refresh here???
 
+    //  refresh logical currency
+    //
     Call( ErrDIRIRefresh( pfucb ) );
 
     dib.dirflag = fDIRNull;
@@ -547,6 +661,9 @@ ERR ErrDIRGotoPosition( FUCB *pfucb, ULONG ulLT, ULONG ulTotal )
     frac.ulLT       = ulLT;
     frac.ulTotal    = ulTotal;
 
+    //  position fractionally on node.  Move up preserving currency
+    //  in case down fails.
+    //
     Call( ErrBTDown( pfucb, &dib, latchReadNoTouch ) );
 
     pfucb->locLogical = locOnCurBM;
@@ -559,6 +676,9 @@ HandleError:
 }
 
 
+//  seek down to a key or position in the directory
+//      returns errSuccess, wrnNDFoundGreater or wrnNDFoundLess
+//
 ERR ErrDIRDown( FUCB *pfucb, DIB *pdib )
 {
     ERR     err;
@@ -569,11 +689,14 @@ ERR ErrDIRDown( FUCB *pfucb, DIB *pdib )
 
     CheckFUCB( pfucb->ppib, pfucb );
 
+    //  set preread flags if we are not navigating sequentially
     if ( !FFUCBSequential( pfucb ) && !pfucb->u.pfcb->FTypeLV() )
     {
         FUCBResetPreread( pfucb );
     }
 
+    //  set cursor navigation level for rollback support
+    //
     FUCBSetLevelNavigate( pfucb, pfucb->ppib->Level() );
 
     err = ErrBTDown( pfucb, pdib, latchReadTouch );
@@ -582,6 +705,8 @@ ERR ErrDIRDown( FUCB *pfucb, DIB *pdib )
         if( ( JET_errRecordNotFound == err )
             && ( posDown == pdib->pos ) )
         {
+            //  we didn't find the record we were looking for. save the bookmark
+            //  so that a DIRNext/DIRPrev will work properly
             Call( ErrBTDeferGotoBookmark( pfucb, *(pdib->pbm), fFalse ) );
             pfucb->locLogical = locOnSeekBM;
 
@@ -593,6 +718,11 @@ ERR ErrDIRDown( FUCB *pfucb, DIB *pdib )
 
     Assert( Pcsr( pfucb )->FLatched() );
 
+    //  bookmark in pfucb has not been set to bm of current node
+    //  but that will be done at the time of latch release
+    //
+    //  save physical position of cursor with respect to node
+    //
     switch ( err )
     {
         case wrnNDFoundGreater:
@@ -605,6 +735,7 @@ ERR ErrDIRDown( FUCB *pfucb, DIB *pdib )
 
         default:
             err = JET_errSuccess;
+            //  FALL THROUGH to set locLogical
         case JET_wrnUniqueKey:
             pfucb->locLogical = locOnCurBM;
             break;
@@ -620,6 +751,8 @@ HandleError:
 }
 
 
+//  seeks secondary index record corresponding to NC key + primary key
+//
 ERR ErrDIRDownKeyData(
     FUCB            *pfucb,
     const KEY&      key,
@@ -628,6 +761,8 @@ ERR ErrDIRDownKeyData(
     ERR             err;
     BOOKMARK        bm;
 
+    //  this routine should only be called with secondary indexes.
+    //
     ASSERT_VALID( &key );
     ASSERT_VALID( &data );
     Assert( FFUCBSecondary( pfucb ) );
@@ -639,8 +774,12 @@ ERR ErrDIRDownKeyData(
         FUCBResetPreread( pfucb );
     }
 
+    //  set cursor navigation level for rollback support
+    //
     FUCBSetLevelNavigate( pfucb, pfucb->ppib->Level() );
 
+    //  goto bookmark pointed by NC key + primary key
+    //
     bm.key = key;
     if ( FFUCBUnique( pfucb ) )
     {
@@ -662,6 +801,10 @@ HandleError:
 }
 
 
+//  CONSIDER: not needed for one-level trees?
+//
+//  moves cursor to root -- releases latch, if any
+//
 VOID DIRUp( FUCB *pfucb )
 {
     BTUp( pfucb );
@@ -670,11 +813,17 @@ VOID DIRUp( FUCB *pfucb )
     pfucb->locLogical = locOnFDPRoot;
 }
 
+//
+//  releases latch, if any, but not to change locLogical
+//
 VOID DIRReleaseLatch( _In_ FUCB* const pfucb )
 {
     BTUp( pfucb );
 }
 
+//  moves cursor to node after current bookmark
+//  if cursor is after current bookmark, gets current record
+//
 ERR ErrDIRNext( FUCB *pfucb, DIRFLAG dirflag )
 {
     ERR     err;
@@ -684,6 +833,7 @@ ERR ErrDIRNext( FUCB *pfucb, DIRFLAG dirflag )
     CheckFUCB( pfucb->ppib, pfucb );
     Assert( !FFUCBSpace( pfucb ) );
 
+    //  set preread flags if we are navigating sequentially
     if( FFUCBSequential( pfucb ) )
     {
         FUCBSetPrereadForward( pfucb, cpgPrereadSequential );
@@ -695,9 +845,10 @@ ERR ErrDIRNext( FUCB *pfucb, DIRFLAG dirflag )
             if( !FFUCBPreread( pfucb )
                 && FFUCBIndex( pfucb )
                 && pfucb->cbSequentialDataRead >= cbSequentialDataPrereadThreshold
-                && locOnCurBM == pfucb->locLogical )
+                && locOnCurBM == pfucb->locLogical )    //  can't call DIRRelease() if locBefore/AfterSeekBM because there may not be a bookmark available
             {
                 FUCBSetPrereadForward( pfucb, cpgPrereadPredictive );
+                //  release to save bookmark and nullify csr to force a BTDown
                 Call( ErrDIRRelease( pfucb ) );
                 BTUp( pfucb );
             }
@@ -709,13 +860,19 @@ ERR ErrDIRNext( FUCB *pfucb, DIRFLAG dirflag )
         }
     }
 
+    //  set cursor navigation level for rollback support
+    //
     FUCBSetLevelNavigate( pfucb, pfucb->ppib->Level() );
 
 Refresh:
+    //  check currency and refresh if necessary
+    //
     Call( ErrDIRIRefresh( pfucb ) );
 
     locLogicalInitial = pfucb->locLogical;
 
+    //  switch action based on logical cursor location
+    //
     switch( pfucb->locLogical )
     {
         case locOnCurBM:
@@ -724,6 +881,8 @@ Refresh:
 
         case locOnSeekBM:
         {
+            //  re-seek to key and if foundLess, fall through to MoveNext
+            //
             Call( ErrBTPerformOnSeekBM( pfucb, fDIRFavourNext ) );
             Assert( Pcsr( pfucb )->FLatched() );
 
@@ -749,6 +908,8 @@ Refresh:
         case locAfterSeekBM:
             Assert( Pcsr( pfucb )->FLatched() );
 
+            //  set currency on current
+            //
             pfucb->locLogical = locOnCurBM;
             Assert( Pcsr( pfucb )->FLatched( ) );
 
@@ -760,15 +921,21 @@ Refresh:
             DIB dib;
             Assert( locBeforeFirst == pfucb->locLogical );
 
+            //  move to root.
+            //
             DIRGotoRoot( pfucb );
             dib.dirflag = fDIRNull;
             dib.pos     = posFirst;
             err = ErrDIRDown( pfucb, &dib );
             if ( err < 0 )
             {
+                //  restore currency.
+                //
                 pfucb->locLogical = locBeforeFirst;
                 Assert( !Pcsr( pfucb )->FLatched() );
 
+                //  polymorph error code.
+                //
                 if ( err == JET_errRecordNotFound )
                 {
                     err = ErrERRCheck( JET_errNoCurrentRecord );
@@ -790,10 +957,15 @@ Refresh:
     {
         if ( JET_errNoCurrentRecord == err )
         {
+            //  moved past last node
+            //
             pfucb->locLogical = locAfterLast;
         }
         else if ( JET_errRecordDeleted == err )
         {
+            //  node was deleted from under the cursor
+            //  reseek to logical bm and move to next node
+            //
             BTSetupOnSeekBM( pfucb );
             goto Refresh;
         }
@@ -805,6 +977,8 @@ Refresh:
 CheckRange:
     wrn = err;
 
+    //  check index range
+    //
     if ( FFUCBLimstat( pfucb ) &&
          FFUCBUpper( pfucb ) &&
          JET_errSuccess == err )
@@ -812,9 +986,16 @@ CheckRange:
         Call( ErrDIRICheckIndexRange( pfucb, pfucb->kdfCurr.key ) );
     }
 
+    // if we just started, we won't have the preread counting set yet
     if ( locBeforeFirst != locLogicalInitial )
     {
         Assert( FFUCBSequential( pfucb ) || FFUCBPrereadForward( pfucb ) );
+        // we want to count the entire row (key + data) as the amount of
+        // data the FUCB read in sequence already. 
+        // Counting only the data (which used to be the case) wasn't accurate
+        // especialy on a secondary index with big index key and small 
+        // primary key (ie small data part in the record). 
+        //
         pfucb->cbSequentialDataRead += pfucb->kdfCurr.key.Cb();
         pfucb->cbSequentialDataRead += pfucb->kdfCurr.data.Cb();
     }
@@ -833,6 +1014,8 @@ HandleError:
 }
 
 
+//  moves cursor to node before current bookmark
+//
 ERR ErrDIRPrev( FUCB *pfucb, DIRFLAG dirflag )
 {
     ERR     err;
@@ -842,6 +1025,7 @@ ERR ErrDIRPrev( FUCB *pfucb, DIRFLAG dirflag )
     CheckFUCB( pfucb->ppib, pfucb );
     Assert( !FFUCBSpace( pfucb ) );
 
+    //  set preread flags if we are navigating sequentially
     if( FFUCBSequential( pfucb ) )
     {
         FUCBSetPrereadBackward( pfucb, cpgPrereadSequential );
@@ -853,9 +1037,10 @@ ERR ErrDIRPrev( FUCB *pfucb, DIRFLAG dirflag )
             if( !FFUCBPreread( pfucb )
                 && FFUCBIndex( pfucb )
                 && pfucb->cbSequentialDataRead >= cbSequentialDataPrereadThreshold
-                && locOnCurBM == pfucb->locLogical )
+                && locOnCurBM == pfucb->locLogical )    //  can't call DIRRelease() if locBefore/AfterSeekBM because there may not be a bookmark available
             {
                 FUCBSetPrereadBackward( pfucb, cpgPrereadPredictive );
+                //  release to save bookmark and nullify csr to force a BTDown
                 Call( ErrDIRRelease( pfucb ) );
                 BTUp( pfucb );
             }
@@ -867,13 +1052,19 @@ ERR ErrDIRPrev( FUCB *pfucb, DIRFLAG dirflag )
         }
     }
 
+    //  set cursor navigation level for rollback support
+    //
     FUCBSetLevelNavigate( pfucb, pfucb->ppib->Level() );
 
 Refresh:
+    //  check currency and refresh if necessary
+    //
     Call( ErrDIRIRefresh( pfucb ) );
 
     locLogicalInital = pfucb->locLogical;
 
+    //  switch action based on logical cursor location
+    //
     switch( pfucb->locLogical )
     {
         case locOnCurBM:
@@ -882,6 +1073,8 @@ Refresh:
 
         case locOnSeekBM:
         {
+            //  re-seek to key and if foundGreater, fall through to MovePrev
+            //
             Call( ErrBTPerformOnSeekBM( pfucb, fDIRFavourPrev ) );
             Assert( Pcsr( pfucb )->FLatched() );
 
@@ -907,6 +1100,8 @@ Refresh:
         case locBeforeSeekBM:
             Assert( Pcsr( pfucb )->FLatched() );
 
+            //  set currency on current
+            //
             pfucb->locLogical = locOnCurBM;
             Assert( Pcsr( pfucb )->FLatched( ) );
 
@@ -918,15 +1113,21 @@ Refresh:
             DIB dib;
             Assert( locAfterLast == pfucb->locLogical );
 
+            //  move to root.
+            //
             DIRGotoRoot( pfucb );
             dib.dirflag = fDIRNull;
             dib.pos     = posLast;
             err = ErrDIRDown( pfucb, &dib );
             if ( err < 0 )
             {
+                //  retore currency.
+                //
                 pfucb->locLogical = locAfterLast;
                 Assert( !Pcsr( pfucb )->FLatched() );
 
+                //  polymorph error code.
+                //
                 if ( err == JET_errRecordNotFound )
                 {
                     err = ErrERRCheck( JET_errNoCurrentRecord );
@@ -948,10 +1149,15 @@ Refresh:
     {
         if ( JET_errNoCurrentRecord == err )
         {
+            //  moved past first node
+            //
             pfucb->locLogical = locBeforeFirst;
         }
         else if ( JET_errRecordDeleted == err )
         {
+            //  node was deleted from under the cursor
+            //  reseek to logical bm and move to next node
+            //
             BTSetupOnSeekBM( pfucb );
             goto Refresh;
         }
@@ -964,6 +1170,8 @@ Refresh:
 CheckRange:
     wrn = err;
 
+    //  check index range
+    //
     if ( FFUCBLimstat( pfucb ) &&
          !FFUCBUpper( pfucb ) &&
          JET_errSuccess == err )
@@ -971,9 +1179,16 @@ CheckRange:
         Call( ErrDIRICheckIndexRange( pfucb, pfucb->kdfCurr.key ) );
     }
 
+    // if we were past the end, we won't have the preread counting set yet
     if ( locAfterLast != locLogicalInital )
     {
         Assert( FFUCBSequential( pfucb ) || FFUCBPrereadBackward( pfucb ) );
+        // we want to count the entire row (key + data) as the amount of
+        // data the FUCB read in sequence already. 
+        // Counting only the data (which used to be the case) wasn't accurate
+        // especialy on a secondary index with big index key and small 
+        // primary key (ie small data part in the record). 
+        //
         pfucb->cbSequentialDataRead += pfucb->kdfCurr.key.Cb();
         pfucb->cbSequentialDataRead += pfucb->kdfCurr.data.Cb();
     }
@@ -992,6 +1207,11 @@ HandleError:
 }
 
 
+//  ************************************************
+//  INDEX RANGE OPERATIONS
+//
+//  could become part of BT
+//
 ERR ErrDIRCheckIndexRange( FUCB *pfucb )
 {
     ERR     err;
@@ -999,8 +1219,15 @@ ERR ErrDIRCheckIndexRange( FUCB *pfucb )
     CheckFUCB( pfucb->ppib, pfucb );
     Assert( !FFUCBSpace( pfucb ) );
 
+    //  check currency and refresh if necessary
+    //
     CallR( ErrDIRIRefresh( pfucb ) );
 
+    //  get key of node for check index range
+    //  we don't need to latch the page, we just need the logical bookmark
+    //  if we were locDeferMoveFirst the ErrDIRIRefresh above should have
+    //  straightened us out
+    //
     if( locOnCurBM == pfucb->locLogical
         || locOnSeekBM == pfucb->locLogical )
     {
@@ -1008,6 +1235,7 @@ ERR ErrDIRCheckIndexRange( FUCB *pfucb )
     }
     else
     {
+        //  UNDONE: deal with locBeforeSeekBM, locAfterSeekBM, locBeforeFirst etc.
         Call( ErrERRCheck( JET_errNoCurrentRecord ) );
     }
 
@@ -1018,7 +1246,20 @@ HandleError:
 
 
 
+//  ************************************************
+//  UPDATE OPERATIONS
+//
 
+//  Updates DIR / Space to reserve an additional set of reserve pages on the very next leaf
+//  page allocation.  This facility only allows the usage of DIRSetActiveSpaceRequestReserve() 
+//  across a single leaf page allocation.
+//
+//  Client (such as lv.cxx) is expected to manage it so that if the reserve is consumed (can 
+//  check with CpgDIRActiveSpaceRequestReserve() == cpgDIRReserveConsumed), then the client
+//  calls DIRResetActiveSpaceRequestReserve() to avoid any additional leaf page allocations
+//  getting the additional reserve (or the reserve allocations being mis-applied to the wrong 
+//  earlier than intended page allocation operation).
+//
 VOID DIRSetActiveSpaceRequestReserve( FUCB * const pfucb, const CPG cpgRequired )
 {
     pfucb->cpgSpaceRequestReserve = cpgRequired;
@@ -1028,6 +1269,10 @@ VOID DIRResetActiveSpaceRequestReserve( FUCB * const pfucb )
     DIRSetActiveSpaceRequestReserve( pfucb, 0 );
 }
 
+//  insert key-data-flags into tree
+//  cursor should be at FDP root
+//      and have no physical currency
+//
 ERR ErrDIRInsert( FUCB          *pfucb,
                   const KEY&    key,
                   const DATA&   data,
@@ -1041,6 +1286,8 @@ ERR ErrDIRInsert( FUCB          *pfucb,
     CheckFUCB( pfucb->ppib, pfucb );
     Assert( !FFUCBSpace( pfucb ) );
 
+    //  set cursor navigation level for rollback support
+    //
     FUCBSetLevelNavigate( pfucb, pfucb->ppib->Level() );
 
     Assert( !Pcsr( pfucb )->FLatched() );
@@ -1049,11 +1296,15 @@ ERR ErrDIRInsert( FUCB          *pfucb,
 
     if ( dirflag & fDIRBackToFather )
     {
+        //  no need to save bookmark
+        //
         DIRUp( pfucb );
         Assert( locOnFDPRoot == pfucb->locLogical );
     }
     else
     {
+        //  save bookmark
+        //
         Call( ErrBTRelease( pfucb ) );
         pfucb->locLogical = locOnCurBM;
     }
@@ -1064,16 +1315,25 @@ HandleError:
 }
 
 
+//  the following three calls provide an API for inserting secondary keys
+//  at Index creation time
+//  DIRAppend is used instead of DIRInit for performance reasons
+//
 ERR ErrDIRInitAppend( FUCB *pfucb )
 {
     Assert( !FFUCBSpace( pfucb ) );
 
+    //  set cursor navigation level for rollback support
+    //
     FUCBSetLevelNavigate( pfucb, pfucb->ppib->Level() );
 
     return JET_errSuccess;
 }
 
 
+//  appends key-data at the end of page
+//  leaves page latched
+//
 ERR ErrDIRAppend( FUCB          *pfucb,
                   const KEY&    key,
                   const DATA&   data,
@@ -1100,6 +1360,9 @@ ERR ErrDIRAppend( FUCB          *pfucb,
     Assert( locOnCurBM == pfucb->locLogical );
     AssertDIRGet( pfucb );
 
+    //  if key-data same as current node, must be
+    //  trying to insert duplicate keys into a
+    //  multi-valued index.
     if ( FKeysEqual( pfucb->kdfCurr.key, key )
         && FDataEqual( pfucb->kdfCurr.data, data ) )
     {
@@ -1111,6 +1374,12 @@ ERR ErrDIRAppend( FUCB          *pfucb,
         Assert( !pfucb->u.pfcb->Pidb()->FPrimary() );
         Assert( !pfucb->u.pfcb->Pidb()->FUnique() );
         Assert( pfucb->u.pfcb->Pidb()->FMultivalued() );
+        //  must have been record with multi-value column
+        //  with sufficiently similar values (ie. the
+        //  indexed portion of the multi-values were
+        //  identical) to produce redundant index
+        //  entries -- this is okay, we simply have
+        //  one index key pointing to multiple multi-values
         err = JET_errSuccess;
         return err;
     }
@@ -1121,6 +1390,8 @@ ERR ErrDIRAppend( FUCB          *pfucb,
 
     Call( ErrBTAppend( pfucb, key, data, dirflag ) );
 
+    //  set logical currency on inserted node.
+    //
     pfucb->locLogical = locOnCurBM;
     Assert( Pcsr( pfucb )->FLatched() );
     return err;
@@ -1140,6 +1411,9 @@ ERR ErrDIRTermAppend( FUCB *pfucb )
 }
 
 
+//  flag delete node
+//  release latch
+//
 ERR ErrDIRDelete( FUCB *pfucb, DIRFLAG dirflag, RCE *prcePrimary )
 {
     ERR     err;
@@ -1147,11 +1421,26 @@ ERR ErrDIRDelete( FUCB *pfucb, DIRFLAG dirflag, RCE *prcePrimary )
     Assert( !FFUCBSpace( pfucb ) );
     CheckFUCB( pfucb->ppib, pfucb );
 
+    //  refresh logical currency
+    //
+    //  UNDONE: should this be a call to ErrDIRGet() instead??
+    //  Currently, we're relying on whatever precedes a call
+    //  to ErrDIRDelete() to perform visibility checks
+    //  (eg. if the same session performs two consecutive
+    //  JetDelete() calls on the same record, the only thing
+    //  saving us is the call in ErrIsamDelete() to
+    //  ErrRECDereferenceLongFieldsInRecord() just before the
+    //  call to ErrDIRDelete())
+    //
     Call( ErrDIRIRefresh( pfucb ) );
 
     if ( locOnCurBM == pfucb->locLogical )
     {
         err = ErrBTFlagDelete( pfucb, dirflag, prcePrimary );
+///     if( err >= JET_errSuccess )
+///         {
+///         pfucb->locLogical = locOnSeekBM;
+///         }
     }
     else
     {
@@ -1167,6 +1456,9 @@ HandleError:
 }
 
 
+//  replaces data portion of current node
+//  releases latch after recording bm of node in pfucb
+//
 ERR ErrDIRReplace( FUCB *pfucb, const DATA& data, DIRFLAG dirflag )
 {
     ERR     err;
@@ -1175,6 +1467,8 @@ ERR ErrDIRReplace( FUCB *pfucb, const DATA& data, DIRFLAG dirflag )
     Assert( !FFUCBSpace( pfucb ) );
     CheckFUCB( pfucb->ppib, pfucb );
 
+    //  check currency and refresh if necessary.
+    //
     Call( ErrDIRIRefresh( pfucb ) );
 
     if ( locOnCurBM != pfucb->locLogical )
@@ -1194,6 +1488,8 @@ HandleError:
 }
 
 
+//  lock record by calling BTLockRecord
+//
 ERR ErrDIRGetLock( FUCB *pfucb, DIRLOCK dirlock )
 {
     ERR     err = JET_errSuccess;
@@ -1202,8 +1498,12 @@ ERR ErrDIRGetLock( FUCB *pfucb, DIRLOCK dirlock )
     Assert( pfucb->ppib->Level() > 0 );
     Assert( !Pcsr( pfucb )->FLatched() );
 
+    //  check currency and refresh if necessary.
+    //
     Call( ErrDIRIRefresh( pfucb ) );
 
+    //  check cursor location
+    //
     switch ( pfucb->locLogical )
     {
         case locOnCurBM:
@@ -1233,6 +1533,9 @@ HandleError:
 }
 
 
+//  called by Lv.c
+//  calls ErrBTDelta
+//
 template< typename TDelta >
 ERR ErrDIRDelta(
     FUCB            *pfucb,
@@ -1246,6 +1549,8 @@ ERR ErrDIRDelta(
     Assert( !FFUCBSpace( pfucb ) );
     CheckFUCB( pfucb->ppib, pfucb );
 
+    //  check currency and refresh if necessary.
+    //
     Call( ErrDIRIRefresh( pfucb ) );
     Assert( locOnCurBM == pfucb->locLogical );
 
@@ -1258,7 +1563,12 @@ HandleError:
 }
 
 
+//  ****************************************************************
+//  STATISTICAL ROUTINES
+//
 
+//  counts nodes from current to limit or end of table
+//
 ERR ErrDIRIndexRecordCount( FUCB *pfucb, ULONG64 *pullCount, ULONG64 ullCountMost, BOOL fNext )
 {
     ERR     err;
@@ -1270,11 +1580,16 @@ ERR ErrDIRIndexRecordCount( FUCB *pfucb, ULONG64 *pullCount, ULONG64 ullCountMos
     CheckFUCB( pfucb->ppib, pfucb );
     Assert( !Pcsr( pfucb )->FLatched() );
 
+    //  intialize count variable
+    //
     *pullCount = 0;
 
+    //  there is no record count limit or the record count limit is larger than
+    //  the maximum fanout of the maximum preread
 
     if ( 0 == ullCountMost )
     {
+        //  turn on maximum preread
 
         cpgPreread = cpgPrereadSequential;
 
@@ -1282,17 +1597,23 @@ ERR ErrDIRIndexRecordCount( FUCB *pfucb, ULONG64 *pullCount, ULONG64 ullCountMos
     }
     else if ( ullCountMost > ( (ULONG64)cpgPrereadSequential * (ULONG64)cpgPrereadSequential ) )
     {
+        //  turn on maximum preread
 
         cpgPreread = cpgPrereadSequential;
     }
 
+    //  we have a small record count limit
 
     else
     {
+        //  preread two pages so that we can use the first page to estimate
+        //  the true number of pages to preread and use the second page to
+        //  trigger the preread without taking another cache miss
 
         cpgPreread = 2;
     }
 
+    //  turn on preread
 
     if ( fNext )
     {
@@ -1303,9 +1624,13 @@ ERR ErrDIRIndexRecordCount( FUCB *pfucb, ULONG64 *pullCount, ULONG64 ullCountMos
         FUCBSetPrereadBackward( pfucb, cpgPreread );
     }
 
+    //  refresh logical currency
+    //
     err = ErrDIRIRefresh( pfucb );
     if ( JET_errNoCurrentRecord == err && pfucb->locLogical == locDeferMoveFirst )
     {
+        //  special-case: empty table
+        //
         err = JET_errSuccess;
         goto HandleError;
     }
@@ -1314,6 +1639,8 @@ ERR ErrDIRIndexRecordCount( FUCB *pfucb, ULONG64 *pullCount, ULONG64 ullCountMos
         Call( err );
     }
 
+    //  return error if not on a record
+    //
     if ( locOnCurBM != pfucb->locLogical )
     {
         Call( ErrERRCheck( JET_errNoCurrentRecord ) );
@@ -1340,6 +1667,11 @@ ERR ErrDIRIndexRecordCount( FUCB *pfucb, ULONG64 *pullCount, ULONG64 ullCountMos
 
     Call( ErrBTGet( pfucb ) );
 
+    //  if we have a small record count limit, use the current page to make an
+    //  estimate at how much we should preread and set our preread limit to that
+    //  amount
+    //
+    //  CONSIDER:  sample and account for percentage of visible nodes
 
     if ( cpgPreread == 2 )
     {
@@ -1359,6 +1691,8 @@ ERR ErrDIRIndexRecordCount( FUCB *pfucb, ULONG64 *pullCount, ULONG64 ullCountMos
         }
     }
 
+    //  count nodes from current to limit or end of table
+    //
     forever
     {
         err = pinst->ErrCheckForTermination();
@@ -1389,6 +1723,8 @@ ERR ErrDIRIndexRecordCount( FUCB *pfucb, ULONG64 *pullCount, ULONG64 ullCountMos
             break;
         }
 
+        //  check index range
+        //
         if ( FFUCBLimstat( pfucb ) )
         {
             err = ErrDIRICheckIndexRange( pfucb, pfucb->kdfCurr.key );
@@ -1400,6 +1736,8 @@ ERR ErrDIRIndexRecordCount( FUCB *pfucb, ULONG64 *pullCount, ULONG64 ullCountMos
         }
     }
 
+    //  common exit loop processing
+    //
     if ( err >= 0 || err == JET_errNoCurrentRecord )
     {
         err = JET_errSuccess;
@@ -1415,6 +1753,7 @@ HandleError:
         }
         else
         {
+            // Keep the existing err code, even if hit the error. At least we did our best
             (VOID)ErrDIRGotoBookmark( pfucb, bm );
         }
         bm.Nullify();
@@ -1428,6 +1767,8 @@ HandleError:
 }
 
 
+//  computes statistics on directory by calling BT level function
+//
 ERR ErrDIRComputeStats( FUCB *pfucb, INT *pcnode, INT *pckey, INT *pcpage )
 {
     ERR     err;
@@ -1441,21 +1782,37 @@ ERR ErrDIRComputeStats( FUCB *pfucb, INT *pcnode, INT *pckey, INT *pcpage )
 }
 
 
+//  ********************************************************
+//  ************** DIR Transaction Routines ******************
+//
 
+//  begins a transaction
+//  gets transaction id
+//  logs trqansaction
+//  records lgpos of begin in ppib [VERBeginTransaction]
+//
 ERR ErrDIRBeginTransaction( PIB *ppib, const TRXID trxid, const JET_GRBIT grbit )
 {
     ERR         err         = JET_errSuccess;
     BOOL        fInRwlTrx   = fFalse;
     INST        * pinst     = PinstFromPpib( ppib );
 
+    //  The critical section ensure that the deferred begin trx level
+    //  issued by indexer for a updater will not be changed till the indexer
+    //  finish changing for the updater's RCEs that need be updated by indexer.
 
     if ( JET_errSuccess != ppib->ErrRollbackFailure() )
     {
+        //  Previous rollback error encountered, no further begin-transactions permitted on this session.
         Error( ErrERRCheck( JET_errRollbackError ) );
     }
 
+    //  log begin transaction.
+    //  Must be called first so that lgpos and trx used in ver are consistent.
+    //
     if ( ppib->Level() == 0 )
     {
+        // Do not allow transactions during recovery until we know what trxBegin0 to assign them
         if ( pinst->FRecovering() &&
              !pinst->m_fTrxNewestSetByRecovery &&
              !( grbit & bitTransactionWritableDuringRecovery ) )
@@ -1471,8 +1828,11 @@ ERR ErrDIRBeginTransaction( PIB *ppib, const TRXID trxid, const JET_GRBIT grbit 
             }
         }
 
+        //  Set a trx ctx so we can catch misbehaved clients that move our sessions
+        //  unknowingly between threads ...
         ppib->PIBSetTrxContext();
 
+        // Special read during recovery transaction share a common procid and so should not be writable
         Assert( !( grbit & bitTransactionWritableDuringRecovery ) || ( ppib->procid != procidReadDuringRecovery ) );
 
         Assert( prceNil == ppib->prceNewest );
@@ -1495,6 +1855,8 @@ ERR ErrDIRBeginTransaction( PIB *ppib, const TRXID trxid, const JET_GRBIT grbit 
         Assert( ppib->FPIBCheckTrxContext() );
     }
 
+    //  Check the trx ctx so we can catch misbehaved clients that move our sessions
+    //  unknowingly between threads ...
     if ( ppib->Level() != 0 && !ppib->FPIBCheckTrxContext() )
     {
         PIBReportSessionSharingViolation( ppib );
@@ -1503,6 +1865,7 @@ ERR ErrDIRBeginTransaction( PIB *ppib, const TRXID trxid, const JET_GRBIT grbit 
     }
     else
     {
+        //  should have been filtered out at ISAM level
         Assert( !( grbit & JET_bitDistributedTransaction ) );
 
         CallS( ErrLGBeginTransaction( ppib ) );
@@ -1526,6 +1889,8 @@ HandleError:
     return err;
 }
 
+//  commits transaction
+//
 ERR ErrDIRCommitTransaction( PIB *ppib, JET_GRBIT grbit, DWORD cmsecDurableCommit, JET_COMMIT_ID *pCommitId )
 {
     ERR     err = JET_errSuccess;
@@ -1548,6 +1913,8 @@ ERR ErrDIRCommitTransaction( PIB *ppib, JET_GRBIT grbit, DWORD cmsecDurableCommi
     INST * const pinst = PinstFromPpib( ppib );
     LOG  * const plog = pinst->m_plog;
 
+    //  Check the trx ctx so we can catch misbehaved clients that move our sessions
+    //  unknowingly between threads ...
     if ( !ppib->FPIBCheckTrxContext() )
     {
         PIBReportSessionSharingViolation( ppib );
@@ -1555,14 +1922,19 @@ ERR ErrDIRCommitTransaction( PIB *ppib, JET_GRBIT grbit, DWORD cmsecDurableCommi
         return ErrERRCheck( JET_errSessionSharingViolation );
     }
 
+    // This reader writer lock ensures that we don't commit RCE's from underneath CreateIndex.
     if( fSessionHasRCE )
     {
         pinst->RwlTrx( ppib ).EnterAsReader();
     }
 
+    //  perf stats
 
     if ( fCommit0 )
     {
+        //  UNDONE: transactions that perform non-logged write operations
+        //  will currently get counted as a read-only transaction
+        //
         if ( fLoggedBegin0 )
         {
             if ( fLazyCommit )
@@ -1580,6 +1952,9 @@ ERR ErrDIRCommitTransaction( PIB *ppib, JET_GRBIT grbit, DWORD cmsecDurableCommi
         }
     }
 
+    // commit trxid's cannot go backwards in the log, otherwise a read transaction during recovery can get
+    // its snapshot isolation violated.  So have to allow log to set trxid in sequentially increasing sequence
+    //
     LGPOS   lgposCommitRec;
     Call( ErrLGCommitTransaction(
                 ppib,
@@ -1614,17 +1989,22 @@ ERR ErrDIRCommitTransaction( PIB *ppib, JET_GRBIT grbit, DWORD cmsecDurableCommi
                     CmpLgpos( lgposCommitRec, lgposMax ) == 0 );
         }
 
+        //  if no RCE's (likely cause they got rolled back),
+        //  then don't need durable commit
+        //
         if ( fSessionHasRCE
-            && fLoggedBegin0 )
+            && fLoggedBegin0 )  //  PrepareToCommit is always force-flushed, so no need to force-flush Commit0
         {
 
             if ( !fLazyCommit )
             {
+                //  remember the minimum requirement to flush.
                 err = ErrLGWaitForWrite( ppib, &lgposCommitRec );
                 Assert( err >= 0 ||
                         ( plog->FNoMoreLogWrite() && JET_errLogWriteFail == err ) );
 
 
+                //  CONSIDER: if ErrLGWaitForFlush fails, are we sure our commit record wasn't logged?
                 Call( err );
             }
             else if ( cmsecDurableCommit > 0 )
@@ -1635,19 +2015,45 @@ ERR ErrDIRCommitTransaction( PIB *ppib, JET_GRBIT grbit, DWORD cmsecDurableCommi
 
         Assert( trxMax == ppib->trxCommit0 );
 
+        //  if this transaction actually versioned something, then
+        //  must use accurate Commit0 to ensure correct visibility
+        //  by other sessions, otherwise the hint is fine because
+        //  no other session will care
+        //
         if ( fSessionHasRCE )
         {
+            //  must set ppib->trxCommit0 to sentinel "precommit" value
+            //  because there's an infinitessimally small window where we
+            //  might increment trxNewest, but before we can assign it to
+            //  ppib->trxCommit0, another session begins a transaction and
+            //  starts looking at our RCE's (in which case he'll see them
+            //  as uncommitted but in actuality, they should be committed
+            //  for him since his Begin0 will be greater than our Commit0)
+            //
             ppib->trxCommit0 = trxPrecommit;
 
+            //  Get the real trxid now, it is ok to be different than the one logged, as recovery does not
+            //  need to do snapshot isolation for logged transactions
+            //
             const TRX   trxCommit0  = TRX( AtomicExchangeAdd( (LONG *)&pinst->m_trxNewest, TRXID_INCR ) ) + TRXID_INCR;
 
 #ifdef DEBUG
             if ( ( trxCommit0 % 4096 ) == 0 )
             {
-                UtilSleep( TickOSTimeCurrent() % 100 );
+                //  every 512 transactions (or 1k trx's, since a trx is always a multiple of 4),
+                //  simulate losing our quantum after we've obtained a trxCommit0 but before
+                //  we could assign it to ppib->trxCommit0 to make it visible to all our RCE's,
+                //  meaning that if another session begins a transaction in this time, then
+                //  without the loop in RCE::TrxCommitted(), they would think that the RCE's
+                //  of this session are uncommitted even though they should be treated as
+                //  committed
+                //
+                UtilSleep( TickOSTimeCurrent() % 100 ); //  sleep a random interval up to 100ms
             }
 #endif
 
+            // Note that the following will be different than the one we already logged
+            //
             ppib->trxCommit0 = trxCommit0;
 
             Assert( ( ppib->trxCommit0 % 4 ) == 0 );
@@ -1668,10 +2074,14 @@ ERR ErrDIRCommitTransaction( PIB *ppib, JET_GRBIT grbit, DWORD cmsecDurableCommi
 
     if ( fCommit0 && fSessionHasRCE )
     {
+        //  if committing to level 0, ppib should have no more
+        //  outstanding versions
         Assert( 0 == ppib->Level() );
         Assert( prceNil == ppib->prceNewest );
     }
 
+    //  set all open cursor transaction levels to new level
+    //
     FUCB    *pfucbNext;
     for ( pfucb = ppib->pfucbOfSession; pfucb != pfucbNil; pfucb = pfucbNext )
     {
@@ -1691,21 +2101,42 @@ ERR ErrDIRCommitTransaction( PIB *ppib, JET_GRBIT grbit, DWORD cmsecDurableCommi
         
         if ( FFUCBUpdatePrepared( pfucb ) )
         {
+            // If update was prepared during this transaction, migrate the
+            // update to the next lower level.
             Assert( pfucb->levelPrep <= ppib->Level() + 1 );
             if ( ppib->Level() + 1 == pfucb->levelPrep )
             {
                 pfucb->levelPrep = ppib->Level();
             }
 
+            //  LV updates no longer allowed at level 0.  This assert detects
+            //  any of the following illegal client actions:
+            //      --  calling PrepareUpdate() at level 1, doing some
+            //          LV operations, then calling CommitTransaction()
+            //          before calling Update(), effectively causing the
+            //          update to migrate to level 0.
+            //      --  called Update(), but the Update() failed
+            //          (eg. errWriteConflict) and the client continued
+            //          to commit the transaction anyway with the update
+            //          still pending
+            //      --  beginning a transaction at level 0 AFTER calling
+            //          PrepareUpdate(), then committing the transaction
+            //          BEFORE calling Update().
             AssertSz(
                 ppib->Level() > 0 || !FFUCBInsertReadOnlyCopyPrepared( pfucb ),
                 "Illegal attempt to migrate read-only copy to level 0." );
 
+            //  Illegal attempt to migrate outstanding LV update(s) to level 0.
             EnforceSz(
                 ppib->Level() > 0 || !FFUCBUpdateSeparateLV( pfucb ),
                 "IllegalLvUpdMigrationToLevel0" );
         }
 
+        //  set cursor navigation level for rollback support
+        //
+        //  Note: This assert used to check for ppib->Level + 2 during batch
+        //  index creation and MSU updates (when we had an MSU).
+        //
         Assert( PinstFromIfmp( pfucb->ifmp )->FRecovering() ||
                 LevelFUCBNavigate( pfucb ) <= ppib->Level() + 1 );
         if ( LevelFUCBNavigate( pfucb ) > ppib->Level() )
@@ -1715,6 +2146,8 @@ ERR ErrDIRCommitTransaction( PIB *ppib, JET_GRBIT grbit, DWORD cmsecDurableCommi
 
         if ( fCommit0 )
         {
+            //  if committing to level 0, ppib should have no more
+            //  outstanding versions
             Assert( 0 == ppib->Level() );
             Assert( prceNil == ppib->prceNewest );
             FUCBResetVersioned( pfucb );
@@ -1760,6 +2193,8 @@ HandleError:
 }
 
 
+//  rolls back a transaction
+//
 ERR ErrDIRRollback( PIB *ppib, JET_GRBIT grbit )
 {
     ERR         err = JET_errSuccess;
@@ -1767,31 +2202,41 @@ ERR ErrDIRRollback( PIB *ppib, JET_GRBIT grbit )
     const BOOL  fRollbackToLevel0   = ( 1 == ppib->Level() );
     const BOOL  fSessionHasRCE      = ( prceNil != ppib->prceNewest );
 
+    //  Start detecting mem alloc during rollback
     const BOOL fCleanUpStateSaved = FOSSetCleanupState( fTrue );
 
     CheckPIB( ppib );
     Assert( ppib->Level() > 0 );
     INST        *pinst = PinstFromPpib( ppib );
 
+    //  UNDONE: if we can guarantee that our clients are well-behaved, we don't
+    //  need this check
     if ( !ppib->FPIBCheckTrxContext() )
     {
         PIBReportSessionSharingViolation( ppib );
         FireWall( "SessionSharingViolationRollbackTrx" );
+        //  Stop detecting mem alloc
         FOSSetCleanupState( fCleanUpStateSaved );
         return ErrERRCheck( JET_errSessionSharingViolation );
     }
 
     if ( JET_errSuccess != ppib->ErrRollbackFailure() )
     {
+        //  previous rollback error encountered, no further rollbacks permitted
+        //  Stop detecting mem alloc
         FOSSetCleanupState( fCleanUpStateSaved );
         return ErrERRCheck( JET_errRollbackError );
     }
 
     Assert( trxMax == ppib->trxCommit0 );
 
+    //  perf stats
 
     if ( fRollbackToLevel0 )
     {
+        //  UNDONE: transactions that perform non-logged write operations
+        //  will currently get counted as a read-only transaction
+        //
         if ( ppib->FBegin0Logged() )
         {
             PERFOpt( ppib->FUserSession() ? cDIRUserRWTrxRollback0.Inc( pinst ) : cDIRSystemRWTrxRollback0.Inc( pinst ) );
@@ -1814,14 +2259,32 @@ ERR ErrDIRRollback( PIB *ppib, JET_GRBIT grbit )
                     pfucb->levelPrep == ppib->Level() );
         }
 
+        //  reset copy buffer if prepared at transaction level
+        //  which is being rolled back.
+        //
         Assert( !FFUCBUpdatePrepared( pfucb ) ||
             pfucb->levelPrep <= ppib->Level() );
         if ( FFUCBUpdatePreparedLevel( pfucb, ppib->Level() ) )
         {
+            //  reset update separate LV and copy buffer status
+            //  all long value resources will be freed as a result of
+            //  rollback and copy buffer status is reset
+            //
+            //  UNDONE: all updates should have already been cancelled
+            //  in ErrIsamRollback(), but better to be safe than sorry,
+            //  so just leave this code here
             RECIFreeCopyBuffer( pfucb );
             FUCBResetUpdateFlags( pfucb );
         }
 
+        //  if LV cursor was opened at this level, close it
+        //  UNDONE: identical logic exists at the IsamRollback
+        //  level, but that didn't catch the case where we're
+        //  in ErrRECSetLongField(), we create the LV tree,
+        //  but the subsequent LV operation rolls back.  For
+        //  now, it was just safest to duplicate the check in
+        //  IsamRollback, but since the check is now done
+        //  here, can I simply remove it from IsamRollback??
         if ( pfucbNil != pfucb->pfucbLV
             && ( pfucb->pfucbLV->levelOpen >= ppib->Level() ||
                  pfucb->pfucbLV->levelReuse >= ppib->Level() ) )
@@ -1831,7 +2294,11 @@ ERR ErrDIRRollback( PIB *ppib, JET_GRBIT grbit )
         }
     }
 
+    //  UNDONE: rollback may fail from resource failure so
+    //          we must retry in order to assure success
 
+    //  rollback changes made in transaction
+    //
     err = ErrVERRollback( ppib );
     CallSx( err, JET_errRollbackError );
 
@@ -1853,9 +2320,14 @@ ERR ErrDIRRollback( PIB *ppib, JET_GRBIT grbit )
         return err;
     }
 
+    //  log rollback. Must be called after VERRollback to record
+    //  the UNDO operations.  Do not handle error.
     err = ErrLGRollback( ppib, 1, fRollbackToLevel0, !!(grbit & JET_bitRollbackRedoCallback) );
     if ( err == JET_errLogWriteFail || err == JET_errDiskFull )
     {
+        //  these error codes will lead to crash recovery which will
+        //  rollback transaction.
+        //
         err = JET_errSuccess;
     }
     CallS( err );
@@ -1865,6 +2337,8 @@ ERR ErrDIRRollback( PIB *ppib, JET_GRBIT grbit )
     {
         Assert( 0 == ppib->Level() );
 
+        //  if rolling back to level 0, ppib should have no more
+        //  outstanding versions
         Assert( prceNil == ppib->prceNewest );
     }
     else
@@ -1873,8 +2347,14 @@ ERR ErrDIRRollback( PIB *ppib, JET_GRBIT grbit )
     }
 #endif
 
+    //  if recovering then we are done. No need to close fucb since they are faked and
+    //  not the same behavior as regular fucb which could be deferred.
+    //
     if ( !pinst->FRecovering() )
     {
+        //  if rollback to level 0 then close deferred closed cursors
+        //  if cursor was opened at this level, close it
+        //
         ENTERREADERWRITERLOCK enterRwlTrx( &pinst->RwlTrx( ppib ), fTrue, fSessionHasRCE );
         for ( pfucb = ppib->pfucbOfSession; pfucb != pfucbNil; )
         {
@@ -1884,6 +2364,8 @@ ERR ErrDIRRollback( PIB *ppib, JET_GRBIT grbit )
 
             if ( fRollbackToLevel0 )
             {
+                //  if rolling back to level 0, ppib should have no more
+                //  outstanding versions
                 Assert( 0 == ppib->Level() );
                 Assert( prceNil == ppib->prceNewest );
                 FUCBResetVersioned( pfucb );
@@ -1895,14 +2377,28 @@ ERR ErrDIRRollback( PIB *ppib, JET_GRBIT grbit )
 
             if ( fOpenedInThisTransaction || fDeferClosed )
             {
+                // A bookmark may still be outstanding if:
+                //   1) Cursor opened in this transaction was
+                //      not closed before rolling back.
+                //   2) Bookmark was allocated by ErrVERIUndoLoggedOper()
+                //      on a deferred-closed cursor.
                 BTReleaseBM( pfucb );
 
                 if ( fOpenedInThisTransaction || fRollbackToLevel0 )
                 {
+                    //  pfucbTable is only set for LV and index cursors,
+                    //  and it should be impossible to get here with
+                    //  non-deferred-closed index cursors because they
+                    //  would have been closed in IsamRollback (it's
+                    //  possible to get here with open LV cursors
+                    //  because an internal transaction in which the
+                    //  LV cursor was opened may have failed)
                     if ( !fDeferClosed
                         && FFUCBLongValue( pfucb )
                         && pfucbNil != pfucb->pfucbTable )
                     {
+                        //  unlink table from LV cursor
+                        //
                         Assert( pfcbNil != pfucb->u.pfcb );
                         Assert( pfucb->u.pfcb->FTypeLV() );
                         Assert( !Pcsr( pfucb )->FLatched() );
@@ -1916,6 +2412,9 @@ ERR ErrDIRRollback( PIB *ppib, JET_GRBIT grbit )
                             || FFUCBLongValue( pfucb ) );
                     }
 
+                    // Force-close cursor if it was open at this level (or higher).
+                    // or if we're dropping to level 0 and there are still deferred-
+                    // closed cursors.
                     FUCBCloseDeferredClosed( pfucb );
                 }
             }
@@ -1943,17 +2442,27 @@ ERR ErrDIRRollback( PIB *ppib, JET_GRBIT grbit )
         }
     }
 
+    //  Stop detecting mem alloc
     FOSSetCleanupState( fCleanUpStateSaved );
     return err;
 }
 
+//  *****************************************
+//  external header operations
+//
 
+//  get external header
+//
+//  Get specified root field. JET_wrnColumnNull is returned if the specified root field hasn't been set.
+//  Latch is held as long as success or warning is returned.
 ERR ErrDIRGetRootField( _Inout_ FUCB* const pfucb, _In_ const NodeRootField noderf, _In_ const LATCH latch )
 {
     Expected( noderfSpaceHeader != noderf );
     return ErrBTGetRootField( pfucb, noderf, latch );
 }
 
+//  set external header
+//
 ERR ErrDIRSetRootField( _In_ FUCB* const pfucb, _In_ const NodeRootField noderf, _In_ const DATA& dataRootField )
 {
     Expected( noderfSpaceHeader != noderf );
@@ -1961,7 +2470,17 @@ ERR ErrDIRSetRootField( _In_ FUCB* const pfucb, _In_ const NodeRootField noderf,
 }
 
 
+//  **********************************************************
+//  ******************* DIR Internal *************************
+//  **********************************************************
+//
+//  *******************************************
+//  DIR internal routines
+//
 
+//  checks index range
+//  and sets currency if cursor is beyond boundaries
+//
 LOCAL ERR ErrDIRICheckIndexRange( FUCB *pfucb, const KEY& key )
 {
     ERR     err;
@@ -1973,6 +2492,8 @@ LOCAL ERR ErrDIRICheckIndexRange( FUCB *pfucb, const KEY& key )
     {
         if( Pcsr( pfucb )->FLatched() )
         {
+            //  if we are called from ErrDIRCheckIndexRange the page may not be latched
+            //  (we use the logical bookmark instead)
             DIRUp( pfucb );
         }
 
@@ -1990,6 +2511,11 @@ LOCAL ERR ErrDIRICheckIndexRange( FUCB *pfucb, const KEY& key )
 }
 
 
+//  cursor is refreshed
+//  if cursor status is DeferMoveFirst,
+//      go to first node in the CurrentIdx
+//  refresh for other cases is handled at BT-level
+//
 LOCAL ERR ErrDIRIIRefresh( FUCB * const pfucb )
 {
     ERR     err;
@@ -2008,8 +2534,12 @@ LOCAL ERR ErrDIRIIRefresh( FUCB * const pfucb )
         pfucbIdx = pfucb;
     }
 
+    //  go to root of index
+    //
     DIRGotoRoot( pfucbIdx );
 
+    //  move to first child
+    //
     dib.dirflag = fDIRNull;
     dib.pos     = posFirst;
     err = ErrBTDown( pfucbIdx, &dib, latchReadTouch );
@@ -2036,6 +2566,8 @@ LOCAL ERR ErrDIRIIRefresh( FUCB * const pfucb )
 
     if ( pfucbNil != pfucb->pfucbCurIndex )
     {
+        //  go to primary key on primary index
+        //
         BOOKMARK    bm;
 
         bm.data.Nullify();

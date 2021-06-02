@@ -3,7 +3,9 @@
 
 #include "syncunittest.hxx"
 
+//  ================================================================
 class BasicInitOnceTest : public UNITTEST
+//  ================================================================
 {
     private:
         static BasicInitOnceTest s_instance;
@@ -43,7 +45,9 @@ INT InitFunction( INT value )
     return -value;
 }
 
+//  ================================================================
 ERR BasicInitOnceTest::ErrTest()
+//  ================================================================
 {
     ERR err = JET_errSuccess;
     wprintf( L"\tTesting basic CInitOnce() support ...\n");

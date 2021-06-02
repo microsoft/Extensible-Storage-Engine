@@ -4,6 +4,9 @@
 #include "std.hxx"
 #include "_dump.hxx"
 
+//  never change the wording here (for English) because we will break applications
+//  that parse our output when analyzing the db state (ESD uses this)
+//
 LOCAL const char * const rgszDBState[] = {
                         "Illegal",
                         "Just Created",
@@ -40,9 +43,9 @@ const CHAR * SzFromState( ULONG dbstate )
 
 #ifdef MINIMAL_FUNCTIONALITY
 const BOOL g_fDisableDumpPrintF = fFalse;
-#else
+#else   // !MINIMAL_FUNCTIONALITY
 extern BOOL g_fDisableDumpPrintF;
-#endif
+#endif  // MINIMAL_FUNCTIONALITY
 
 VOID __cdecl DUMPPrintF(const CHAR * fmt, ...)
 {
@@ -58,6 +61,7 @@ VOID __cdecl DUMPPrintF(const CHAR * fmt, ...)
     va_end( arg_ptr );
 }
 
+// 
 VOID DUMPPrintLogTime( const LOGTIME * const plt )
 {
     DUMPPrintF( "%02d/%02d/%04d %02d:%02d:%02d.%3.3d %s",
@@ -68,7 +72,7 @@ VOID DUMPPrintLogTime( const LOGTIME * const plt )
 
 VOID DUMPPrintSig( const SIGNATURE * const psig )
 {
-    CHAR rgSig[128];
+    CHAR rgSig[128]; // enough space.
     SigToSz( psig, rgSig, sizeof(rgSig) );
     DUMPPrintF( "%s\n", rgSig );
 }
@@ -115,6 +119,7 @@ ERR LOCAL ErrDUMPHeaderStandard( INST *pinst, __in const DB_HEADER_READER* const
     LGPOS                   lgpos;
     DBFILEHDR_FIX* const    pdbfilehdr = reinterpret_cast<DBFILEHDR_FIX* const>( pdbHdrReader->pbHeader );
 
+    // Print out the fields.
     DUMPPrintF( "\nFields:\n" );
     DUMPPrintF( "        File Type: %s\n", attribDb == pdbfilehdr->le_attrib ? "Database" : "UNKNOWN" );
     DUMPPrintF( "         Checksum: 0x%lx\n", LONG( pdbfilehdr->le_ulChecksum ) );
@@ -214,8 +219,8 @@ ERR LOCAL ErrDUMPHeaderStandard( INST *pinst, __in const DB_HEADER_READER* const
                 (ULONG) pdbfilehdr->le_dwMinorVersion,
                 (ULONG) pdbfilehdr->le_dwBuildNumber,
                 (ULONG) pdbfilehdr->le_lSPNumber,
-                (DWORD)( ( pdbfilehdr->le_qwSortVersion >> 32 ) & 0xFFFFFFFF ),
-                (DWORD)( pdbfilehdr->le_qwSortVersion & 0xFFFFFFFF ) );
+                (DWORD)( ( pdbfilehdr->le_qwSortVersion >> 32 ) & 0xFFFFFFFF ), // NLS Version.
+                (DWORD)( pdbfilehdr->le_qwSortVersion & 0xFFFFFFFF ) ); // Defined Version.
 
     if (    pdbfilehdr->le_ulIncrementalReseedCount ||
             pdbfilehdr->le_ulIncrementalReseedCountOld ||
@@ -285,6 +290,10 @@ ERR LOCAL ErrDUMPHeaderStandard( INST *pinst, __in const DB_HEADER_READER* const
     DUMPPrintF( "\n" );
     DUMPPrintF( "       Trim Count: %u\n", (ULONG) pdbfilehdr->le_ulTrimCount );
 
+    // we are tracking the fields below only for EDB files 
+    // (not including the older JET_filetypeUnknown format)
+    // we won't dump them otherwise to don't polute the output
+    //
     if (JET_filetypeDatabase == pdbfilehdr->le_filetype)
     {
         DUMPPrintF( "\n" );
@@ -376,6 +385,7 @@ ERR LOCAL ErrDUMPHeaderStandard( INST *pinst, __in const DB_HEADER_READER* const
         memcpy( &signDb, &pdbfilehdr->signDb, sizeof(signLog) );
         memcpy( &bkinfoFullCur, &pdbfilehdr->bkinfoFullCur, sizeof(BKINFO) );
 
+        //  the patch file is always on the OS file-system
         Call ( ErrDBReadAndCheckDBTrailer( pinst, pinst->m_pfsapi, pdbHdrReader->wszFileName, (BYTE *)ppatchHdr, g_cbPage ) );
 
         if ( memcmp( &signDb, &ppatchHdr->signDb, sizeof( SIGNATURE ) ) != 0 ||
@@ -440,13 +450,14 @@ ERR LOCAL ErrDUMPHeaderStandardDebug( __in const DB_HEADER_READER* const pdbHdrR
     const DBFILEHDR* const pdbfilehdr = reinterpret_cast<DBFILEHDR* const>( pdbHdrReader->pbHeader );
     char* szBuf                       = NULL;
 
+    // Print out the fields.
     DUMPPrintF( "\nFields:\n" );
     (VOID)( pdbfilehdr->Dump( CPRINTFSTDOUT::PcprintfInstance() ) );
 
     DUMPPrintF( "\nBinary Dump:\n" );
     const INT cbWidth = UtilCprintfStdoutWidth() >= 116 ? 32 : 16;
 
-    Assert( pdbHdrReader->fNoAutoDetectPageSize );
+    Assert( pdbHdrReader->fNoAutoDetectPageSize );  //  otherwise, pdbHdrReader->cbHeader can't be used below as the page size.
     const INT cbBuffer = pdbHdrReader->cbHeader * 8;
 
     szBuf = new char[ cbBuffer ];
@@ -464,7 +475,7 @@ HandleError:
     return err;
 }
 
-#endif
+#endif  // defined( DEBUGGER_EXTENSION ) && defined ( DEBUG )
 
 ERR LOCAL ErrDUMPHeaderHex( INST *pinst, __in const DB_HEADER_READER* const pdbHdrReader )
 {
@@ -547,11 +558,14 @@ ERR ErrDUMPHeader( INST *pinst, __in PCWSTR wszDatabase, const BOOL fVerbose )
     BOOL fDatabaseUnusable      = fFalse;
     BOOL fCheckPageSize         = fTrue;
 
+    // Primary header.
     Alloc( pdbfilehdrPrimary = ( DBFILEHDR_FIX* )PvOSMemoryPageAlloc( cbHeader, NULL ) );
     dbHeaderReaderPrimary.pbHeader = ( BYTE* )pdbfilehdrPrimary;
     Call( ErrUtilReadSpecificShadowedHeader( pinst, &dbHeaderReaderPrimary ) );
     if (dbHeaderReaderPrimary.shadowedHeaderStatus == shadowedHeaderCorrupt && FDefaultParam(JET_paramDatabasePageSize))
     {
+        // It's possible that the database was created with a pagesize that used to be valid (e.g. 2k pagesize)
+        // Try to determine the pagesize automatically, then skip checking the pagesize
         dbHeaderReaderPrimary.fNoAutoDetectPageSize = fFalse;
         Call( ErrUtilReadSpecificShadowedHeader( pinst, &dbHeaderReaderPrimary ) );
         if (dbHeaderReaderPrimary.cbHeaderActual == 2 * 1024)
@@ -565,7 +579,7 @@ ERR ErrDUMPHeader( INST *pinst, __in PCWSTR wszDatabase, const BOOL fVerbose )
 
     if ( fCheckPageSize )
     {
-        Assert( dbHeaderReaderPrimary.fNoAutoDetectPageSize );
+        Assert( dbHeaderReaderPrimary.fNoAutoDetectPageSize );  //  otherwise, dbHeaderReaderPrimary.cbHeader can't be used below as the page size.
         fSizeMismatchPrimary    = dbHeaderReaderPrimary.cbHeaderActual != dbHeaderReaderPrimary.cbHeader;
     }
     
@@ -577,11 +591,14 @@ ERR ErrDUMPHeader( INST *pinst, __in PCWSTR wszDatabase, const BOOL fVerbose )
         Call( ErrDUMPHeaderFormat( pinst, &dbHeaderReaderPrimary, fVerbose ) );
     }
 
+    // Shadow header.
     Alloc( pdbfilehdrSecondary = ( DBFILEHDR_FIX* )PvOSMemoryPageAlloc( cbHeader, NULL ) );
     dbHeaderReaderSecondary.pbHeader = ( BYTE* )pdbfilehdrSecondary;
     Call( ErrUtilReadSpecificShadowedHeader( pinst, &dbHeaderReaderSecondary ) );
     if (dbHeaderReaderSecondary.shadowedHeaderStatus == shadowedHeaderCorrupt && !fCheckPageSize)
     {
+        // It's possible that the database was created with a pagesize that used to be valid (e.g. 2k pagesize)
+        // Try to determine the pagesize automatically, then skip checking the pagesize
         dbHeaderReaderSecondary.fNoAutoDetectPageSize = fFalse;
         Call( ErrUtilReadSpecificShadowedHeader( pinst, &dbHeaderReaderSecondary ) );
     }
@@ -591,7 +608,7 @@ ERR ErrDUMPHeader( INST *pinst, __in PCWSTR wszDatabase, const BOOL fVerbose )
 
     if ( fCheckPageSize )
     {
-        Assert( dbHeaderReaderSecondary.fNoAutoDetectPageSize );
+        Assert( dbHeaderReaderSecondary.fNoAutoDetectPageSize );    //  otherwise, dbHeaderReaderSecondary.cbHeader can't be used below as the page size.
         fSizeMismatchSecondary  = dbHeaderReaderSecondary.cbHeaderActual != dbHeaderReaderSecondary.cbHeader;
     }
     
@@ -684,11 +701,13 @@ ERR ErrDUMPFixupHeader( INST *pinst, __in PCWSTR wszDatabase, const BOOL fVerbos
         goto HandleError;
     }
 
-    if( JET_filetypeUnknown != pdbfilehdrPrimary->le_filetype
+    // check filetype
+    if( JET_filetypeUnknown != pdbfilehdrPrimary->le_filetype // old format
         && JET_filetypeDatabase != pdbfilehdrPrimary->le_filetype
         && JET_filetypeTempDatabase != pdbfilehdrPrimary->le_filetype
         && JET_filetypeStreamingFile != pdbfilehdrPrimary->le_filetype )
     {
+        // not a database or streaming file
         Call( ErrERRCheck( JET_errFileInvalidType ) );
     }
 

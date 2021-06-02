@@ -1,17 +1,32 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
+//  Space Dump Utility
+//
+//
 
+//  eseutil related headers.
+//
 #include "_edbutil.hxx"
 #include "_dbspacedump.hxx"
 
+// Get the definition of "enum class SpacePool" from _space.hxx.
 #define SPACE_ONLY_DIAGNOSTIC_CONSTANTS 1
 #include "_space.hxx"
 
+//  Stat library.
+//
 #include "stat.hxx"
 
+//  Prototypes.
+//
 void EseutilDbspacedumpUnitTest();
 
+// SpacePool helpers.
+// This routine is at the boundary between the code in space.cxx (which uses enum class SpacePool)
+// and the published header definition of BTREE_SPACE_EXTENT_INFO (which uses unsigned long iPool).
+// Create some #defined constants in order to avoid all the ULONG casts that would be necessary
+// otherwise.
 
 #define ulsppAvailExtLegacyGeneralPool ((ULONG)spp::AvailExtLegacyGeneralPool)
 #define ulsppPrimaryExt                ((ULONG)spp::PrimaryExt)
@@ -20,7 +35,10 @@ void EseutilDbspacedumpUnitTest();
 #define ulsppOwnedTreeAvail            ((ULONG)spp::OwnedTreeAvail) 
 #define ulsppAvailTreeAvail            ((ULONG)spp::AvailTreeAvail)
 
+//  String helpers.
+//
 
+//  cheap form of fill buffer.
 static WCHAR g_rgSpaces []  = L"                                                                                                                                                         ";
 static WCHAR g_rgStars []   = L"*********************************************************************************************************************************************************";
 static WCHAR g_rgEquals []  = L"=========================================================================================================================================================";
@@ -39,7 +57,7 @@ INLINE const WCHAR * WszFillBuffer_(
     if ( ( wszPatternBufferEnd - cchDesiredLength ) < wszPatternBuffer )
     {
         assertSz( fFalse, "Pattern buffer request is too big" );
-        return wszPatternBuffer;
+        return wszPatternBuffer;        // filler to avoid AV / bad buffer math.
     }
     return wszPatternBufferEnd - cchDesiredLength;
 }
@@ -67,10 +85,10 @@ INLINE const WCHAR * WszFillBuffer(
             return WszFillBuffer_( g_rgCommas, _countof(g_rgCommas), cchDesiredLength );
             break;
         default:
-            break;
+            break;  // no such buffer ...
     }
     assertSz( fFalse, "Unknown pattern" );
-    return L" ";
+    return L" ";    // filler to avoid AV.
 }
 
 INLINE ULONG CchCountOfChar(
@@ -107,11 +125,12 @@ const WCHAR * const WszTableOfStats( _In_ const BTREE_STATS * const pBTreeStats 
         case eBTreeTypeInternalSpaceAE:
             if ( pBTreeStats->pParent->pBasicCatalog->eType == eBTreeTypeInternalDbRootSpace )
             {
-                return L"DbRoot";
+                return L"DbRoot";   //  Root OE and AE Trees (pgno 2, and 3)
             }
             else if ( pBTreeStats->pParent->pParent &&
                     pBTreeStats->pParent->pParent->pBasicCatalog->eType != eBTreeTypeInternalDbRootSpace )
             {
+                //  This is a space tree of a secondary index or LV tree, so it is 2 levels removed from it's name.
                 return pBTreeStats->pParent->pParent->pBasicCatalog->rgName;
             }
             else
@@ -127,7 +146,7 @@ const WCHAR * const WszTableOfStats( _In_ const BTREE_STATS * const pBTreeStats 
 ULONG PgnoFirstFromExt( _In_ const BTREE_SPACE_EXTENT_INFO * const pext )
 {
     Assert( pext->cpgExtent > 0 );
-    Assert( pext->cpgExtent < (ULONG)lMax );
+    Assert( pext->cpgExtent < (ULONG)lMax ); // not irrationally high or unsigned overflowed.
     return pext->pgnoLast - pext->cpgExtent + 1;
 }
 
@@ -150,6 +169,8 @@ BOOL FDBSPUTLContains( const BTREE_SPACE_EXTENT_INFO * const pextContaining, con
         return fTrue;
     }
 
+    // If one end of the extent is not in the containing extent, then it should be completely out, as ESE (at least today) does
+    // not deal in overlapping available extents.
     Assert( !FDBSPUTLContains( pextContaining, PgnoFirstFromExt( pextPossibleSubExtent ) ) );
     Assert( !FDBSPUTLContains( pextContaining, pextPossibleSubExtent->pgnoLast ) );
 
@@ -157,7 +178,16 @@ BOOL FDBSPUTLContains( const BTREE_SPACE_EXTENT_INFO * const pextContaining, con
 }
 
 
+//
+//  Defining Space Dump Fields
+//
 
+//  To add a field:
+//      1. Put an enum here.
+//      2. Add an entry to rgSpaceFields representing the field.
+//      3. Add a case to ErrPrintField().
+//  Note this enum and the rgSpaceFields must be in lock step, but it will assert on first run
+//  if any are out of order, so no big deal.
 typedef enum
 {
     eSPFieldNone = 0,
@@ -239,6 +269,7 @@ typedef enum
     eSPFieldSHMinExtent,
     eSPFieldSHMaxExtent,
 
+    //  At end b/c in the /f#all - 
     eSPFieldName,
 
     eSPFieldMax
@@ -246,12 +277,21 @@ typedef enum
 } E_SP_FIELD;
 
 
+//
+//  Space Dump CTX
+//
 
 typedef struct
 {
 
+    //
+    //      Initial call information
+    //
     JET_GRBIT       grbit;
 
+    //
+    //      Printing / output information
+    //
     ULONG           cFields;
     E_SP_FIELD *    rgeFields;
     WCHAR           rgwchSep[4];
@@ -263,44 +303,66 @@ typedef struct
     BOOL            fSelectOneTable;
     ULONG           cbPageSize;
 
+    //
+    //      Accumulation Data.
+    //
 
+    //  Count of various B-Tree types [always updated] ...
     ULONG           cBTrees[eBTreeTypeMax];
 
+    //  Updated only if space trees info was asked for...
     ULONG           cpgDbOwned;
     ULONG           cpgTotalAvailExt;
     ULONG           cpgTotalShelved;
-    ULONG           pgnoDbEndUnusedBegin;
-    ULONG           pgnoDbEndUnusedEnd;
-    ULONG           pgnoUsedMin;
+    ULONG           pgnoDbEndUnusedBegin;   // The first pgno of the available region at the end of the database (if any).
+    ULONG           pgnoDbEndUnusedEnd;     // The last pgno of the available region at the end of the database (if any).
+    ULONG           pgnoUsedMin;            // used = in a tables, LVs, or indices owned extents (not space trees, though)
     ULONG           pgnoUsedMax;
     ULONG           pgnoLast;
+    //  Count of Page stats ...
     ULONG           cpgTotalOEOverhead;
     ULONG           cpgTotalAEOverhead;
+    //  Updates only if parent of leaf was asked for
     ULONG           cpgTotalInternal;
     ULONG           cpgTotalData;
 
+    //  Data for current table
     ULONG           cpgCurrentTableOwned;
     
 
-    INT             cpgDbRootUnAccountedFor;
+    //  Leaked page detection
+    //      These are ints for a reason, its unfortunate for these values to come up
+    //      positive (i.e. user is leaked space), but its critical if these values
+    //      come up negative!!!  This would mean the space is probably used AND marked
+    //      as available.
+    //  Leaked page detection - working variables.
+    //  Leaked page detection - working variables - DbRoot.
+    INT             cpgDbRootUnAccountedFor;        // Includes cpgDbRootUnAccountedForEof
     INT             cpgDbRootUnAccountedForEof;
     ULONG           objidCurrTable;
-    INT             cpgCurrTableUnAccountedFor;
+    INT             cpgCurrTableUnAccountedFor;     // Includes cpgCurrTableUnAccountedForEof
     INT             cpgCurrTableUnAccountedForEof;
     ULONG           objidCurrIdxLv;
     JET_BTREETYPE   eBTTypeCurr;
-    INT             cpgCurrIdxLvUnAccountedFor;
+    INT             cpgCurrIdxLvUnAccountedFor;     // Includes cpgCurrIdxLvUnAccountedFor
     INT             cpgCurrIdxLvUnAccountedForEof;
+    //  Leaked page detection - final accumulator.
     INT             cpgTotalLeaked;
     INT             cpgTotalLeakedEof;
     INT             cpgTotalOverbooked;
 
+    //
+    //      Global (DB-root level) Shelved Extent List.
+    //
     unsigned long                   cShelvedExtents;
     _Field_size_opt_(cShelvedExtents) BTREE_SPACE_EXTENT_INFO *       prgShelvedExtents;
     BOOL            fOwnedNonShelved;
 } ESEUTIL_SPACE_DUMP_CTX;
 
 
+//
+//  Field printing support
+//
 
 double g_dblSmallTableThreshold = .005;
 
@@ -313,6 +375,7 @@ typedef struct
     JET_GRBIT   grbitRequired;
 } ESEUTIL_SPACE_FIELDS;
 
+//  The sub-header for fields w/ Min,Ave,Max data (as well as count and total for completeness).
 WCHAR * szMAMH = L"   Count,  Min,  Ave,  Max,       Total";
 #define cchMAMH     39
 
@@ -323,14 +386,14 @@ WCHAR szRunsH []= L"    1-Page,   2-Pages,   3-Pages,   4-Pages,   8-Pages,  16-
 #define cchRunsH 120
 SAMPLE rgIORunHistoDivisions[] =
 {
-    1, 2, 3, 4, 8, 16, 32, 64, 96, 128, (SAMPLE)-1 
+    1, 2, 3, 4, 8, 16, 32, 64, 96, 128, (SAMPLE)-1 /* catch the rest */
 };
 
 WCHAR szLVB[] = L"       4KB,       8KB,      16KB,      32KB,      64KB,     128KB,     256KB,     512KB,       1MB,       2MB,  Over-2MB";
 #define cchLVB 120
 SAMPLE rgLVBytesDivisions[] =
 {
-    4096, 8192, 16384, 32768, 65536, 131072, 262144, 524288, 1048576, 2097152, (SAMPLE)-1 
+    4096, 8192, 16384, 32768, 65536, 131072, 262144, 524288, 1048576, 2097152, (SAMPLE)-1 /* catch the rest */
 };
 
 WCHAR szLVR[] = L"       30%,       40%,       50%,       60%,       70%,       80%,       90%,       93%,       95%,       97%,      100%";
@@ -344,35 +407,37 @@ WCHAR szLVS[] = L"         1,         2,         3,         4,         5,       
 #define cchLVS 120
 SAMPLE rgLVSeeksDivisions[] =
 {
-    1, 2, 3, 4, 5, 6, 7, 8, 16, 32, (SAMPLE)-1 
+    1, 2, 3, 4, 5, 6, 7, 8, 16, 32, (SAMPLE)-1 /* catch the rest */
 };
 
 WCHAR szLVES[] = L"         0,         1,         2,         3,         4,         5,         6,         7,         8,        16,   Over-16";
 #define cchLVES 120
 SAMPLE rgLVExtraSeeksDivisions[] =
 {
-    0, 1, 2, 3, 4, 5, 6, 7, 8, 16, (SAMPLE)-1 
+    0, 1, 2, 3, 4, 5, 6, 7, 8, 16, (SAMPLE)-1 /* catch the rest */
 };
 
 WCHAR szLVEB[] = L"       0KB,       4KB,       8KB,      16KB,      32KB,      64KB,     128KB,     256KB,     512KB,       1MB,  Over-1MB";
 #define cchLVEB 120
 SAMPLE rgLVExtraBytesDivisions[] =
 {
-    0, 4096, 8192, 16384, 32768, 65536, 131072, 262144, 524288, 1048576, (SAMPLE)-1 
+    0, 4096, 8192, 16384, 32768, 65536, 131072, 262144, 524288, 1048576, (SAMPLE)-1 /* catch the rest */
 };
 
 ESEUTIL_SPACE_FIELDS rgSpaceFields [] =
 {
 
+    //  enum                            cchFieldSize,   wszFieldName,       wszSubField,    grbitRequired
     { eSPFieldNone,                     3,          L"N/A",                     NULL,   0x0                         },
 
+    // Note: 2-levels of indenting is the worst case for a long name, b/c under an Idx/LV the OE/AE trees would have short names.
     { eSPFieldNameFull,                 64 + 4,     L"FullName",                NULL,   JET_bitDBUtilSpaceInfoBasicCatalog  },
     { eSPFieldOwningTableName,          64 + 4,     L"OwningTableName",         NULL,   JET_bitDBUtilSpaceInfoBasicCatalog  },
-    { eSPFieldType,                     4,          L"Type",                    NULL,   JET_bitDBUtilSpaceInfoBasicCatalog  },
-    { eSPFieldObjid,                    10,         L"ObjidFDP",                NULL,   JET_bitDBUtilSpaceInfoBasicCatalog  },
-    { eSPFieldPgnoFDP,                  10,         L"PgnoFDP",                 NULL,   JET_bitDBUtilSpaceInfoBasicCatalog  },
+    { eSPFieldType,                     4,          L"Type",                    NULL,   JET_bitDBUtilSpaceInfoBasicCatalog  },  // legacy
+    { eSPFieldObjid,                    10,         L"ObjidFDP",                NULL,   JET_bitDBUtilSpaceInfoBasicCatalog  },  // legacy
+    { eSPFieldPgnoFDP,                  10,         L"PgnoFDP",                 NULL,   JET_bitDBUtilSpaceInfoBasicCatalog  },  // legacy
 
-    { eSPFieldPriExt,                   7,          L"PriExt",                  NULL,   JET_bitDBUtilSpaceInfoSpaceTrees    },
+    { eSPFieldPriExt,                   7,          L"PriExt",                  NULL,   JET_bitDBUtilSpaceInfoSpaceTrees    },  // legacy
     { eSPFieldPriExtType,               10,         L"PriExtType",              NULL,   JET_bitDBUtilSpaceInfoSpaceTrees    },
     { eSPFieldPriExtCpg,                9,          L"PriExtCpg",               NULL,   JET_bitDBUtilSpaceInfoSpaceTrees    },
     { eSPFieldPgnoOE,                   10,         L"PgnoOE",                  NULL,   JET_bitDBUtilSpaceInfoSpaceTrees    },
@@ -380,7 +445,7 @@ ESEUTIL_SPACE_FIELDS rgSpaceFields [] =
     { eSPFieldOwnedPgnoMin,             10,         L"OwnPgnoMin",              NULL,   JET_bitDBUtilSpaceInfoSpaceTrees    },
     { eSPFieldOwnedPgnoMax,             10,         L"OwnPgnoMax",              NULL,   JET_bitDBUtilSpaceInfoSpaceTrees    },
     { eSPFieldOwnedExts,                10,         L"OwnedExts",               NULL,   JET_bitDBUtilSpaceInfoSpaceTrees    },
-    { eSPFieldOwnedCPG,                 10,         L"Owned",                   NULL,   JET_bitDBUtilSpaceInfoSpaceTrees    },
+    { eSPFieldOwnedCPG,                 10,         L"Owned",                   NULL,   JET_bitDBUtilSpaceInfoSpaceTrees    },  // legacy
     { eSPFieldOwnedMB,                  8 + 4,      L"Owned(MB)",               NULL,   JET_bitDBUtilSpaceInfoSpaceTrees    },
     { eSPFieldOwnedPctOfDb,             9,          L"O%OfDb",                  NULL,   JET_bitDBUtilSpaceInfoSpaceTrees    },
     { eSPFieldOwnedPctOfTable,          9,          L"O%OfTable",               NULL,   JET_bitDBUtilSpaceInfoSpaceTrees    },
@@ -389,12 +454,12 @@ ESEUTIL_SPACE_FIELDS rgSpaceFields [] =
     { eSPFieldDataPctOfDb,              9,          L"D%OfDb",                  NULL,   JET_bitDBUtilSpaceInfoParentOfLeaf  },
 
     { eSPFieldAvailExts,                10,         L"AvailExts",               NULL,   JET_bitDBUtilSpaceInfoSpaceTrees    },
-    { eSPFieldAvailCPG,                 10,         L"Available",               NULL,   JET_bitDBUtilSpaceInfoSpaceTrees    },
+    { eSPFieldAvailCPG,                 10,         L"Available",               NULL,   JET_bitDBUtilSpaceInfoSpaceTrees    },  // legacy
     { eSPFieldAvailMB,                  8 + 4,      L"Avail(MB)",               NULL,   JET_bitDBUtilSpaceInfoSpaceTrees    },
     { eSPFieldAvailPctOfTable,          9,          L"Avail%Tbl",               NULL,   JET_bitDBUtilSpaceInfoSpaceTrees    },
     { eSPFieldSpaceTreeReservedCPG,     10,         L"SpcReserve",              NULL,   JET_bitDBUtilSpaceInfoSpaceTrees    },
     { eSPFieldAutoInc,                  10,         L"AutoInc",                 NULL,   JET_bitDBUtilSpaceInfoSpaceTrees    },
-    { eSPFieldReservedCPG,              10,         L"Reserved",                NULL,   JET_bitDBUtilSpaceInfoSpaceTrees    },
+    { eSPFieldReservedCPG,              10,         L"Reserved",                NULL,   JET_bitDBUtilSpaceInfoSpaceTrees    },  // legacy
     { eSPFieldReservedMB,               8 + 4,      L"Reser(MB)",               NULL,   JET_bitDBUtilSpaceInfoSpaceTrees    },
     { eSPFieldReservedPctOfTable,       9,          L"Reser%Tbl",               NULL,   JET_bitDBUtilSpaceInfoSpaceTrees    },
 
@@ -413,7 +478,11 @@ ESEUTIL_SPACE_FIELDS rgSpaceFields [] =
     { eSPFieldIntFreeBytesMAM,          cchMAMH,    L"Int:FreeBytes",           szMAMH, JET_bitDBUtilSpaceInfoParentOfLeaf  },
     { eSPFieldIntNodeCountsMAM,         cchMAMH,    L"Int:Nodes",               szMAMH, JET_bitDBUtilSpaceInfoParentOfLeaf  },
     { eSPFieldIntKeySizesMAM,           cchMAMH,    L"Int:KeySizes",            szMAMH, JET_bitDBUtilSpaceInfoParentOfLeaf  },
+    // Avoided as its fundamentally not interesting because DataSize is almost always 4 (a pgno).
+    //eSPFieldIntDataSizesMAM,  cchMAMH,    L"Int:DataSizes",   szMAMH, JET_bitDBUtilSpaceInfoParentOfLeaf  },
     { eSPFieldIntKeyCompMAM,            cchMAMH,    L"Int:KeyComp",             szMAMH, JET_bitDBUtilSpaceInfoParentOfLeaf  },
+    // Don't think this case is valid, couldn't find any cases.
+    //eSPFieldIntUnreclaimedMAM,cchMAMH,    L"Int:Unreclaim",   szMAMH, JET_bitDBUtilSpaceInfoParentOfLeaf  },
 
     { eSPFieldFreeBytesMAM,             cchMAMH,    L"Data:FreeBytes",          szMAMH, JET_bitDBUtilSpaceInfoFullWalk      },
     { eSPFieldNodeCountsMAM,            cchMAMH,    L"Data:Nodes",              szMAMH, JET_bitDBUtilSpaceInfoFullWalk      },
@@ -452,7 +521,7 @@ ESEUTIL_SPACE_FIELDS rgSpaceFields [] =
     { eSPFieldSHMinExtent,              13,         L"SH:MinExt(KB)",           NULL,   JET_bitDBUtilSpaceInfoBasicCatalog  },
     { eSPFieldSHMaxExtent,              13,         L"SH:MaxExt(KB)",           NULL,   JET_bitDBUtilSpaceInfoBasicCatalog  },
 
-    { eSPFieldName,                     23,         L"Name",                    NULL,   JET_bitDBUtilSpaceInfoBasicCatalog  },
+    { eSPFieldName,                     23,         L"Name",                    NULL,   JET_bitDBUtilSpaceInfoBasicCatalog  },  // legacy
 
 };
 
@@ -478,6 +547,7 @@ BOOL FLastField( ULONG eField )
 }
 
     
+//  Print min,ave,max ... as well as count and total for simplicity.
 void PrintMAM( _In_ const JET_HISTO *   phisto )
 {
     CStats * pStats = CStatsFromPv( phisto );
@@ -639,6 +709,7 @@ JET_ERR ErrCalculatePostComputedSpaceStats(
             }
             else if ( pBTreeStats->pSpaceTrees->prgAvailExtents[iext].iPool == ulsppContinuousPool )
             {
+                // Contiguous Marker "extents" come down now, and these aren't really available space, so we'll filter them.
                 if ( pBTreeStats->pSpaceTrees->prgAvailExtents[iext].cpgExtent != 0 )
                 {
                     Call( ErrFromStatErr( pComputedStats->histoContiguousAEs.ErrAddSample( pBTreeStats->pSpaceTrees->prgAvailExtents[iext].cpgExtent ) ) );
@@ -646,6 +717,7 @@ JET_ERR ErrCalculatePostComputedSpaceStats(
             }
             else if ( pBTreeStats->pSpaceTrees->prgAvailExtents[iext].iPool == ulsppShelvedPool )
             {
+                // Do nothing. We don't accumulate details stats on shelved pages.
             }
             else if ( pBTreeStats->pSpaceTrees->prgAvailExtents[iext].iPool == ulsppOwnedTreeAvail ||
                     pBTreeStats->pSpaceTrees->prgAvailExtents[iext].iPool == ulsppAvailTreeAvail )
@@ -669,6 +741,7 @@ double PctNormalized( const unsigned __int64 cNumerator, const unsigned __int64 
     double pct = ((double)cNumerator) / ((double)cDenominator) * 100;
     if ( cDenominator == 0 )
     {
+        //  div by 0 is NaN ... 
         pct = 0.0;
     }
     else if ( cNumerator > 0 )
@@ -683,6 +756,15 @@ double PctNormalized( const unsigned __int64 cNumerator, const unsigned __int64 
 }
 
 
+//  We're not returning any owned min/max for the _actual_ space trees themselves (this shows
+//  as 0s in the report), but the owned min/max of the actual user / parent tree of those 
+//  space tress here.  Just the space trees is where we're puling this information from.
+//
+//  The owned of the space trees themselves would be something like the min/max pgno actually
+//  used in the space tree iteself plus the min/max of thier split buffers.  Do note the owned
+//  of the space trees is actually still contained within the owned min/max of the actual user
+//  / parent trees of those space trees, so all the usable pages are represented in the user /
+//  parent tree line.
 
 ULONG PgnoMinOwned( const BTREE_STATS_SPACE_TREES * const pSpaceTrees )
 {
@@ -728,7 +810,7 @@ JET_ERR ErrPrintField(
         {
             assert( pBTStats->pBasicCatalog );
 
-            const BTREE_STATS * pIndenting = pBTStats;
+            const BTREE_STATS * pIndenting = pBTStats;  // I think this = pBTStats->pParent; would make it so tables weren't indented.
             ULONG cchFieldAdjust = 0;
             while( pIndenting->pParent )
             {
@@ -738,6 +820,7 @@ JET_ERR ErrPrintField(
             }
             if ( eField == eSPFieldNameFull )
             {
+                // This is the whole point of eSPFieldNameFull, lets assert we're achieving our goal.
                 assert( rgSpaceFields[eField].cchFieldSize >= ( cchFieldAdjust + wcslen(pBTStats->pBasicCatalog->rgName) ) );
             }
 
@@ -749,6 +832,7 @@ JET_ERR ErrPrintField(
         case eSPFieldOwningTableName:
         {
             assert( pBTStats->pBasicCatalog );
+            // check for truncation
             assert( rgSpaceFields[eField].cchFieldSize >= wcslen(WszTableOfStats( pBTStats )) );
 
             wprintf(L"%-*.*ws", rgSpaceFields[eField].cchFieldSize,
@@ -819,7 +903,7 @@ JET_ERR ErrPrintField(
                     cpgFirstExt = pext->cpgExtent;
                 }
             }
-            Assert( cpgFirstExt );
+            Assert( cpgFirstExt );  // should be impossible now
             Assert( pBTStats->pSpaceTrees->cpgPrimary == 0 || pBTStats->pSpaceTrees->cpgPrimary == cpgFirstExt );
             wprintf(L"%*d", rgSpaceFields[eField].cchFieldSize, cpgFirstExt );
         }
@@ -874,6 +958,7 @@ JET_ERR ErrPrintField(
             assert( pBTStats->pSpaceTrees );
             if ( pBTStats->pBasicCatalog->eType != eBTreeTypeInternalDbRootSpace && pespCtx->cpgCurrentTableOwned )
             {
+                //assert( pespCtx->cpgCurrentTableOwned );
                 double pct = ((double)pBTStats->pSpaceTrees->cpgOwned) / ((double)pespCtx->cpgCurrentTableOwned) * 100;
                 wprintf(L"%*.*f%%", rgSpaceFields[eField].cchFieldSize-1, 2, pct );
             }
@@ -920,6 +1005,7 @@ JET_ERR ErrPrintField(
             assert( pBTStats->pSpaceTrees );
             if ( pBTStats->pBasicCatalog->eType != eBTreeTypeInternalDbRootSpace && pespCtx->cpgCurrentTableOwned )
             {
+                //assert( pespCtx->cpgCurrentTableOwned );
                 double pct = ((double)pBTStats->pSpaceTrees->cpgAvailable) / ((double)pespCtx->cpgCurrentTableOwned) * 100;
                 wprintf(L"%*.*f%%", rgSpaceFields[eField].cchFieldSize-1, 2, pct );
             }
@@ -959,6 +1045,7 @@ JET_ERR ErrPrintField(
             assert( pBTStats->pSpaceTrees );
             if ( pBTStats->pBasicCatalog->eType != eBTreeTypeInternalDbRootSpace && pespCtx->cpgCurrentTableOwned )
             {
+                //assert( pespCtx->cpgCurrentTableOwned );
                 double pct = ((double)pBTStats->pSpaceTrees->cpgReserved) / ((double)pespCtx->cpgCurrentTableOwned) * 100;
                 wprintf(L"%*.*f%%", rgSpaceFields[eField].cchFieldSize-1, 2, pct );
             }
@@ -1374,6 +1461,9 @@ JET_ERR ErrPrintField(
     return JET_errSuccess;
 }
 
+//
+//  Space dump context processing...
+//
 
 JET_ERR ErrSpaceDumpCtxInit( __out void ** ppvContext )
 {
@@ -1386,6 +1476,9 @@ JET_ERR ErrSpaceDumpCtxInit( __out void ** ppvContext )
         assertSz( fFalse, "Huh?" );
         return ErrERRCheck( JET_errInvalidParameter );
     }
+    //
+    //  Allocate and init the context
+    //
     ESEUTIL_SPACE_DUMP_CTX * pespCtx = (ESEUTIL_SPACE_DUMP_CTX*)malloc( sizeof(ESEUTIL_SPACE_DUMP_CTX) );
     if ( pespCtx == NULL )
     {
@@ -1397,6 +1490,7 @@ JET_ERR ErrSpaceDumpCtxInit( __out void ** ppvContext )
     pespCtx->fPrintSpaceTrees = fFalse;
     pespCtx->fPrintSpaceNodes = fFalse;
 
+    //  Set default separator.
     pespCtx->rgwchSep[0] = L' ';
     pespCtx->rgwchSep[1] = L'\0';
 
@@ -1419,9 +1513,11 @@ JET_ERR ErrSpaceDumpCtxGetGRBIT(
 
     if ( NULL == pespCtx->rgeFields )
     {
+        // User didn't request any specific fields, use default.
         Call( ErrSpaceDumpCtxSetFields( pvContext, L"#default" ) );
     }
 
+    //  Success, set out param
     *pgrbit = pespCtx->grbit;
 
 HandleError:
@@ -1429,23 +1525,40 @@ HandleError:
     return err;
 }
 
+//
+//  "Field Sets" ...
+//      consumed by PrintSpaceDumpHelp and ErrSpaceDumpCtxSetFields.
+//
 
+//      #default
+//
 WCHAR wszDefaultFieldsCmd [] = L"#default";
 WCHAR wszDefaultFields [] = L"Name,Type,Owned(MB),O%OfDb,O%OfTable,Avail(MB),Avail%Tbl,AutoInc";
 
+//      #legacy
+//
 WCHAR wszLegacyFieldsCmd [] = L"#legacy";
 WCHAR wszLegacyFields [] = L"name,type,objidfdp,pgnofdp,priext,owned,available";
 
+//      #leaked
+//
 WCHAR wszLeakedDataCmd [] = L"#leaked";
 WCHAR wszLeakedDataFields [] = L"Name,Type,ObjidFDP,PriExt,PgnoFDP,Owned,Available,Internal,Data";
 
+//      #spacehints
+//
 WCHAR wszSpaceHintsCmd [] = L"#spacehints";
 WCHAR wszSpaceHintsFields [] = L"Name,Type,SH:IDensity,SH:ISize(KB),SH:grbit,SH:MDensity,SH:Growth,SH:MinExt(KB),SH:MaxExt(KB)";
 
+//      #lvs
+//
 WCHAR wszLVsCmd[] = L"#lvs";
 WCHAR wszLVsFields[] = L"FullName,Type,LV:Size,LV:Size(histo),LV:Comp,LV:Comp(histo),LV:Ratio(histo),LV:Seeks,LV:Seeks(histo),LV:ExtraSeeks,LV:ExtraSeeks(histo),LV:Bytes,LV:Bytes(histo),LV:ExtraBytes,LV:ExtraBytes(histo),Data:FreeBytes,Data:Nodes,Data:KeySizes,Data:DataSizes,Data:Unreclaim,VersndNode,cLVRefs,cCorrLVs,cSepRtChk,lidMax,LV:ChunkSize,OwnExt,GenAvailExt";
 
+//          #all
+//
 WCHAR wszAllFieldsCmd [] = L"#all";
+//  Actual fields calculated directly off the table of fields.
 
     
 void PrintSpaceDumpHelp(
@@ -1459,6 +1572,7 @@ void PrintSpaceDumpHelp(
     wprintf( L"%wsSPACE USAGE OPTIONS:%c", wszTab1, wchNewLine );
 
 #if DEBUG
+    // 'Detailed' sounds a little bit vague...
     wprintf( L"%ws%ws     /d[<n>]       - Prints more detailed information on trees.%c", wszTab1, wszTab2, wchNewLine );
     wprintf( L"%ws%ws                      /d1 - Prints space trees (default).%c", wszTab1, wszTab2, wchNewLine );
     wprintf( L"%ws%ws                      /d2 - Prints space nodes.%c", wszTab1, wszTab2, wchNewLine );
@@ -1470,7 +1584,7 @@ void PrintSpaceDumpHelp(
     wprintf( L"%ws%ws     - Space info fields to print. Sets of fields%c", wszTab1, wszTab2, wchNewLine );
 
     wprintf( L"%ws%ws       Sets of fields:%c", wszTab1, wszTab2, wchNewLine );
-    assert( 29 == wcslen(wszTab1) + wcslen(wszTab2) );
+    assert( 29 == wcslen(wszTab1) + wcslen(wszTab2) );  // text will need re-calibration
     wprintf( L"%ws%ws         /f#spacehints - Prints the spacehint settings%c", wszTab1, wszTab2, wchNewLine );
     wprintf( L"%ws%ws                         for the object.%c", wszTab1, wszTab2, wchNewLine );
     wprintf( L"%ws%ws         /f#default    - Produces default output.%c", wszTab1, wszTab2, wchNewLine );
@@ -1503,7 +1617,7 @@ void PrintSpaceDumpHelp(
         }
 
         const WCHAR * wszDelimator = FLastField(eField) ? L"" : L", ";
-        if ( ( cchTab == cchUsed ) ||
+        if ( ( cchTab == cchUsed ) || // first check ensures 1 field printed ...
             ( ( wcslen(wszDelimator) + cchUsed + wcslen(rgSpaceFields[eField].wszField) ) < cchLineWidth ) )
         {
             wprintf( L"%ws%ws", rgSpaceFields[eField].wszField, wszDelimator );
@@ -1547,14 +1661,21 @@ JET_ERR ErrSpaceDumpCtxSetFields(
     }
 
 #ifdef DEBUG
+    //
+    //  Validating the rgSpaceFields and enum are in check.
+    //
     for( ULONG eField = 0; eField < sizeof(rgSpaceFields)/sizeof(rgSpaceFields[0]); eField++ )
     {
         assert( eField == (ULONG)rgSpaceFields[eField].eField );
-        assert( (ULONG)wcslen(rgSpaceFields[eField].wszField) <= rgSpaceFields[eField].cchFieldSize );
+        assert( (ULONG)wcslen(rgSpaceFields[eField].wszField) <= rgSpaceFields[eField].cchFieldSize );  // field header larger than field width.
     }
 #endif
 
+    //
+    //  Parse the field arguments.
+    //
 
+    //  Identify no or special arguments.
     assert( wszFields );
     if ( 0 == _wcsicmp( wszFields, wszDefaultFieldsCmd ) )
     {
@@ -1582,7 +1703,7 @@ JET_ERR ErrSpaceDumpCtxSetFields(
     }
     else if ( 0 == _wcsicmp( wszFields, wszAllFieldsCmd ) )
     {
-        ULONG cb = sizeof(WCHAR);
+        ULONG cb = sizeof(WCHAR);   // for NUL
         for( ULONG eField = 1; eField < sizeof(rgSpaceFields)/sizeof(rgSpaceFields[0]); eField++ )
         {
             cb += (ULONG)( sizeof(WCHAR) * ( 1 + wcslen(rgSpaceFields[eField].wszField) ) );
@@ -1600,6 +1721,7 @@ JET_ERR ErrSpaceDumpCtxSetFields(
         wszFields = wszTemp;
     }
 
+    //  Parse the fields from the wszFields argument
     ULONG cb = sizeof(E_SP_FIELD);
     WCHAR * pchSep = (WCHAR*)wszFields;
     while ( pchSep = wcschr( (WCHAR*)pchSep, L',' ) )
@@ -1608,6 +1730,7 @@ JET_ERR ErrSpaceDumpCtxSetFields(
         cb += sizeof(E_SP_FIELD);
     }
 
+    //  If the last character was a comma, we have over allocated.
     ULONG cchFields = (ULONG) ( wszFields ? wcslen(wszFields) : 0 );
     if ( cchFields && wszFields[cchFields-1] == L',' )
     {
@@ -1630,7 +1753,7 @@ JET_ERR ErrSpaceDumpCtxSetFields(
         pchSep = wcschr( (WCHAR*)wszField, L',' );
         if ( pchSep )
         {
-            *pchSep = L'\0';
+            *pchSep = L'\0';    // temporarily unset the comma.
         }
         ULONG eField;
         if ( !FFindField( wszField, &eField ) )
@@ -1659,6 +1782,7 @@ JET_ERR ErrSpaceDumpCtxSetFields(
 
     if ( !pespCtx->cFields )
     {
+        //  No fields, will use /f#default.
         free( pespCtx->rgeFields );
         pespCtx->rgeFields = NULL;
     }
@@ -1714,6 +1838,7 @@ JET_ERR ErrSpaceDumpCtxSetOptions(
 
     if ( fSPDumpPrintSpaceLeaks & fSPDumpOpts )
     {
+        //  To process space leaks, we need parent of leaf info.
         pespCtx->grbit |= JET_bitDBUtilSpaceInfoParentOfLeaf;
         pespCtx->fPrintSpaceLeaks = fTrue;
     }
@@ -1725,6 +1850,7 @@ JET_ERR ErrSpaceDumpCtxSetOptions(
 
     if( wszSeparator )
     {
+        //  We only allow 1 char + NUL separators, likely it was wrong.
         assert( wszSeparator[0] != L'\0' );
         assert( wszSeparator[1] == L'\0' );
         if ( S_OK != StringCbCopyW( pespCtx->rgwchSep, sizeof(pespCtx->rgwchSep), wszSeparator ) )
@@ -1812,7 +1938,7 @@ ULONG CpgSpaceDumpGetExtPagesEof(
 }
 
 
-ULONG  EseutilSpaceDumpTableWidth(
+ULONG /* cch */ EseutilSpaceDumpTableWidth(
     __in const ESEUTIL_SPACE_DUMP_CTX * const       pespCtx
     )
 {
@@ -1830,7 +1956,13 @@ JET_ERR EseutilSpaceDumpPrintHeadersAndDbRoot(
 {
     JET_ERR err = JET_errSuccess;
 
+    //
+    //  First, print the space dump and field header output.
+    //
 
+    // original...
+    //wprintf( L"******************************** SPACE DUMP ***********************************\n" );
+    //printf( "Name                   Type   ObjidFDP    PgnoFDP  PriExt      Owned  Available\n" );
 
     wprintf( L"        PageSize: %d\n\n", pespCtx->cbPageSize );
 
@@ -1872,6 +2004,7 @@ JET_ERR EseutilSpaceDumpPrintHeadersAndDbRoot(
                 pespCtx->rgwchSep[1] == L'\0' &&
                 rgSpaceFields[pespCtx->rgeFields[ieField]].wszSubFields )
             {
+                // In CSV mode, we must keep the right number of CSV fields, or we won't be "CSV compliant"
                 wprintf( L"%ws%ws%ws",
                         WszFillBuffer( L' ', rgSpaceFields[pespCtx->rgeFields[ieField]].cchFieldSize - wcslen( rgSpaceFields[pespCtx->rgeFields[ieField]].wszField ) - cExtraDelimitters ),
                         WszFillBuffer( L',', cExtraDelimitters  ),
@@ -1912,9 +2045,14 @@ JET_ERR EseutilSpaceDumpPrintHeadersAndDbRoot(
     }
     wprintf( L"\n" );
 
+    //  Do any post-collection stats computations ...
+    //
     BTREE_POST_COMPUTED_SPACE_STATS statsComputed;
     Call( ErrCalculatePostComputedSpaceStats( pDbRoot, &statsComputed ) );
 
+    //
+    //  Now print the fields for the DB Root itself.
+    //
     for( ULONG ieField = 0; ieField < pespCtx->cFields; ieField++ )
     {
         Call( ErrPrintField( pespCtx, pDbRoot, &statsComputed, pespCtx->rgeFields[ieField] ) );
@@ -1934,9 +2072,13 @@ JET_ERR EseutilPrintSpecifiedSpaceFields(
 {
     JET_ERR err = JET_errSuccess;
 
+    //  Do any post-collection stats computations ...
+    //
     BTREE_POST_COMPUTED_SPACE_STATS statsComputed;
     Call( ErrCalculatePostComputedSpaceStats( pBTreeStats, &statsComputed ) );
 
+    //  Print out all fields
+    //
     for( ULONG ieField = 0; ieField < pespCtx->cFields; ieField++ )
     {
         Call( ErrPrintField( pespCtx, pBTreeStats, &statsComputed, pespCtx->rgeFields[ieField] ) );
@@ -1961,11 +2103,15 @@ JET_ERR EseutilPrintSpaceTrees(
     AllocR( rgfAeHandled );
     memset( rgfAeHandled, 0, sizeof( bool ) * pSpaceTrees->cAvailExtents );
 
+    //  Iterate over / print out each OwnExtent - appending / print all AvailExtents contained within the OE.
+    //
     for ( ULONG iextOwned = 0; iextOwned < pSpaceTrees->cOwnedExtents; iextOwned++ )
     {
         const BTREE_SPACE_EXTENT_INFO * const pextOwned = &pSpaceTrees->prgOwnedExtents[ iextOwned ];
         const ULONG cpgNonShelved = CpgSpaceDumpGetOwnedNonShelved( pespCtx, pextOwned );
 
+        //  Start line with basic Owned Extent info...
+        //
         Assert( ( pextOwned->pgnoLast <= pespCtx->pgnoLast ) || ( PgnoFirstFromExt( pextOwned ) > pespCtx->pgnoLast ) );
         wprintf( L"        space[%ws\\%ws]  OE[  %5I32u]: %6I32u - %6I32u (%4I32u, ",
                     wszTable, wszTree,
@@ -1974,8 +2120,10 @@ JET_ERR EseutilPrintSpaceTrees(
                     pextOwned->pgnoLast,
                     pextOwned->cpgExtent );
 
+        // Is this extent beyond the EOF?
         if ( pextOwned->pgnoLast > pespCtx->pgnoLast )
         {
+            // If this extent is beyond EOF, we expect matching shelved extents covering the entire range.
             if ( cpgNonShelved > 0 )
             {
                 wprintf( L">EOF[ERROR:%I32u non-shelved]", cpgNonShelved );
@@ -1991,6 +2139,8 @@ JET_ERR EseutilPrintSpaceTrees(
         }
         wprintf( L"):  " );
 
+        //  Count up avail extents for printing summary Avail Extent info ...
+        //
         ULONG cextAvailInOwned = 0;
         ULONG cpgAvailInOwned = 0;
         ULONG cextContigMarkersInOwned = 0;
@@ -1998,12 +2148,14 @@ JET_ERR EseutilPrintSpaceTrees(
         {
             const BTREE_SPACE_EXTENT_INFO * const pextAvail = &pSpaceTrees->prgAvailExtents[ iextAvail ];
 
+            // If your Pool is not within one of these, make sure that we'll update all our ext and cpg avail tracking
+            // correctly below, and then extend the asserts to cover your new pool.
             Expected( ( pextAvail->iPool >= ulsppAvailExtLegacyGeneralPool && pextAvail->iPool <= ulsppShelvedPool ) ||
                       pextAvail->iPool == ulsppPrimaryExt ||
                       pextAvail->iPool == ulsppOwnedTreeAvail ||
                       pextAvail->iPool == ulsppAvailTreeAvail );
 
-            if ( pextAvail->cpgExtent != 0  && FDBSPUTLContains( pextOwned, pextAvail ) )
+            if ( pextAvail->cpgExtent != 0 /* suppress marker extents */ && FDBSPUTLContains( pextOwned, pextAvail ) )
             {
                 cpgAvailInOwned += pextAvail->cpgExtent;
                 cextAvailInOwned++;
@@ -2019,10 +2171,15 @@ JET_ERR EseutilPrintSpaceTrees(
             wprintf( L"AEs(%I32u extents, %I32u markers, %I32u pages)  Extents: ", cextAvailInOwned, cextContigMarkersInOwned, cpgAvailInOwned );
         }
 
+        //  Reset and print out detailed Avail Extent info ...
+        //
         for ( ULONG iextAvail = 0; iextAvail < pSpaceTrees->cAvailExtents; iextAvail++ )
         {
             const BTREE_SPACE_EXTENT_INFO * const pextAvail = &pSpaceTrees->prgAvailExtents[iextAvail];
 
+            // Similar to above - if your Pool is not within one of these, we'll print it out below possibly correctly
+            // because of WszPoolName(), but you should make sure the printing is clear on the meaning of if it is actually
+            // "available space" (for instance the -Marker means not really available).
             Expected( ( pextAvail->iPool >= ulsppAvailExtLegacyGeneralPool && pextAvail->iPool <= ulsppShelvedPool ) ||
                       pextAvail->iPool == ulsppPrimaryExt ||
                       pextAvail->iPool == ulsppOwnedTreeAvail ||
@@ -2042,13 +2199,16 @@ JET_ERR EseutilPrintSpaceTrees(
                                 L"-<EOF" :
                                 L"" ) );
 
-                Assert( rgfAeHandled[ iextAvail ] == false );
+                Assert( rgfAeHandled[ iextAvail ] == false ); // we should only visit once.  Perhaps overlapping OwnExtents?!?
                 rgfAeHandled[ iextAvail ] = true;
             }
         }
         wprintf( L"\n" );
     }
 
+    //  Finish by printing out any AEs we didn't cover within the OE trees!
+    //  Shelved extents beyond EOF will be printed here.
+    //
     ULONG iPool = ulMax, iextAvailFirst = ulMax, iextAvailLast = ulMax;
     for ( ULONG iextAvailScan = 0; iextAvailScan < pSpaceTrees->cAvailExtents; iextAvailScan++ )
     {
@@ -2067,6 +2227,7 @@ JET_ERR EseutilPrintSpaceTrees(
         {
             if ( iPool == ulMax )
             {
+                // We are initiating printing of a run.
                 iextAvailFirst = iextAvailScan;
                 iextAvailLast = iextAvailScan;
                 iPool = pextAvailScan->iPool;
@@ -2074,15 +2235,18 @@ JET_ERR EseutilPrintSpaceTrees(
             else if ( ( ( pextAvailScan->pgnoLast - pextAvailScan->cpgExtent ) == pSpaceTrees->prgAvailExtents[iextAvailLast].pgnoLast ) &&
                       ( iPool == pSpaceTrees->prgAvailExtents[iextAvailLast].iPool ) )
             {
+                // We are continuing a run.
                 iextAvailLast = iextAvailScan;
             }
             else
             {
+                // We've reached the end of a run.
                 fEndOfRun = fTrue;
             }
         }
         else if ( iPool != ulMax )
         {
+            // We've reached the end of a run.
             fEndOfRun = fTrue;
         }
 
@@ -2091,6 +2255,8 @@ JET_ERR EseutilPrintSpaceTrees(
 
         const BOOL fLastExtent = ( iextAvailScan == ( pSpaceTrees->cAvailExtents - 1 ) );
 
+        //  Print range if we just concluded a run or if this is the last extent and there's a run being built.
+        //
         if ( fEndOfRun || ( fLastExtent && ( iPool != ulMax ) ) )
         {
             Assert( ( ( iPool != ulMax ) && ( iextAvailFirst != ulMax ) && ( iextAvailLast != ulMax ) && ( iextAvailFirst <= iextAvailLast ) ) );
@@ -2110,6 +2276,8 @@ JET_ERR EseutilPrintSpaceTrees(
                             L"" ) );
 
 
+            //  Print out detailed Avail Extent info ...
+            //
             for ( ULONG iextAvailDetail = iextAvailFirst; iextAvailDetail <= iextAvailLast; iextAvailDetail++ )
             {
                 const BTREE_SPACE_EXTENT_INFO * const pextAvailDetail = &pSpaceTrees->prgAvailExtents[iextAvailDetail];
@@ -2138,8 +2306,11 @@ JET_ERR EseutilPrintSpaceTrees(
             iPool = ulMax;
         }
 
+        //  Switch to the next run.
+        //
         if ( fEndOfRun && !fProcessed )
         {
+            // Rewind iextAvailScan.
             iextAvailScan--;
         }
     }
@@ -2164,7 +2335,7 @@ BOOL FChildOfDbRoot( __in const BTREE_STATS * const pBTreeStats )
 {
     if ( pBTreeStats->pParent == NULL )
         return fFalse;
-    if ( pBTreeStats->pParent->pBasicCatalog->objidFDP != 1  )
+    if ( pBTreeStats->pParent->pBasicCatalog->objidFDP != 1 /* DbRoot */ )
         return fFalse;
     return fTrue;
 }
@@ -2193,6 +2364,10 @@ BOOL FChildOfSecIdx( __in const BTREE_STATS * const pBTreeStats )
     return fTrue;
 }
 
+// There are three cases:
+// Database ends with avail pages: (Begin = x, End = pgnoEOF)
+// Database ends with used pages: (Begin = pgnoEOF+1, End = lMax)
+// Database is completely full: (Begin = pgnoEOF+1, End = lMax)
 void EseutilCalculateLastAvailableDbLogicalExtentRange(
     _In_ const BTREE_STATS_SPACE_TREES* pSpaceTrees,
     _Out_ ULONG* ppgnoDbEndUnusedBegin,
@@ -2206,6 +2381,7 @@ void EseutilCalculateLastAvailableDbLogicalExtentRange(
 
     AssertPREFIX( cOE >= 1 );
 
+    // Did the caller pass in data for a table?
     AssertSz( PgnoFirstFromExt( &( rgOE[ 0 ] ) ) == 1, __FUNCTION__ " should be called on the root OE/AE only." );
 
     *ppgnoDbEndUnusedBegin = lMax;
@@ -2213,6 +2389,7 @@ void EseutilCalculateLastAvailableDbLogicalExtentRange(
 
     const ULONG pgnoOELast = rgOE[ cOE - 1 ].pgnoLast;
 
+    // Look for last extent which isn't shelved.
     size_t cAvailAE = cAE;
     while ( ( cAvailAE > 0 ) && ( rgAE[ cAvailAE - 1 ].iPool == ulsppShelvedPool ) )
     {
@@ -2221,6 +2398,7 @@ void EseutilCalculateLastAvailableDbLogicalExtentRange(
 
     if ( cAvailAE == 0 )
     {
+        // No available space in the database!
         *ppgnoDbEndUnusedBegin = pgnoOELast + 1;
     }
     else
@@ -2229,23 +2407,29 @@ void EseutilCalculateLastAvailableDbLogicalExtentRange(
 
         if ( pgnoOELast == pgnoAELast && rgAE[ cAE - 1 ].cpgExtent != 0 )
         {
+            // If they are the same, then the database ends with free space. The End is easy to find,
+            // but we have to manually walk the AE's and see if they are indeed all contiguous.
             *ppgnoDbEndUnusedBegin = PgnoFirstFromExt( &rgAE[ cAvailAE - 1 ] );
             *ppgnoDbEndUnusedEnd = pgnoAELast;
 
             for ( INT iCurrentAE = (INT) cAvailAE - 1; iCurrentAE > 0; --iCurrentAE )
             {
+                // DB Space is currently all from the 'General' pool or split buffers.
                 Assert( ( rgAE[ iCurrentAE ].iPool == ulsppAvailExtLegacyGeneralPool ) ||
                         ( rgAE[ iCurrentAE ].iPool == ulsppOwnedTreeAvail ) ||
                         ( rgAE[ iCurrentAE ].iPool == ulsppAvailTreeAvail ) );
 
+                // Is the passed-in list in sorted order? If not, then we will get bad results.
                 Assert( rgAE[ iCurrentAE - 1 ].pgnoLast < rgAE[ iCurrentAE ].pgnoLast );
 
                 if ( rgAE[ iCurrentAE - 1 ].pgnoLast == PgnoFirstFromExt( &rgAE[ iCurrentAE ] ) - 1 )
                 {
+                    // It's a continuation of free pages. Update the 'Begin' page.
                     *ppgnoDbEndUnusedBegin = PgnoFirstFromExt( &rgAE[ iCurrentAE - 1 ] );
                 }
                 else
                 {
+                    // We found a discontinuity! The Begin page must be the previous AE we examined.
                     break;
                 }
             }
@@ -2254,6 +2438,7 @@ void EseutilCalculateLastAvailableDbLogicalExtentRange(
         }
         else
         {
+            // If the last OE and AE are different, then there are used pages at the end of the database.
             *ppgnoDbEndUnusedBegin = pgnoOELast + 1;
         }
     }
@@ -2291,7 +2476,7 @@ void EseutilTrackSpace(
             switch ( eBTType )
             {
                 case eBTreeTypeInternalDbRootSpace:
-                    objid = 1;
+                    objid = 1;  // objidSystemRoot
                     break;
 
                 case eBTreeTypeUserClusteredIndex:
@@ -2318,22 +2503,33 @@ void EseutilTrackSpace(
 
     if ( FChildOfDbRoot( pBTreeStats ) )
     {
+        //  Don't know we 100% trust this calculation, might not account for last extension
+        //  operation against the DB properly.
         pespCtx->cpgDbRootUnAccountedFor -= pBTreeStats->pSpaceTrees->cpgOwned;
         pespCtx->cpgDbRootUnAccountedForEof -= CpgSpaceDumpGetExtPagesEof( pespCtx, pBTreeStats->pSpaceTrees->prgOwnedExtents, pBTreeStats->pSpaceTrees->cOwnedExtents );
     }
 
+    //  If we walked onto a new table.
+    //
     if ( eBTType == eBTreeTypeUserClusteredIndex )
     {
         if ( pespCtx->cpgCurrTableUnAccountedFor ||
                 pespCtx->cpgCurrIdxLvUnAccountedFor )
         {
+            //
+            //  WHOA LEAKAGE!!!
+            //
             if ( pespCtx->cpgCurrTableUnAccountedFor )
             {
+                //  Print any overbookings or leaks for the last table ...
+                //
                 if ( pespCtx->cpgCurrTableUnAccountedFor < 0 )
                 {
+                    //  I think this is a corrupt database, but lets make the message tame-ish.
                     wprintf(L"\n\t\tERROR: objid(%d) has %d pages overbooked.\n"
                             L"\t\tPlease contact PSS.\n\n",
                                 pespCtx->objidCurrTable, -pespCtx->cpgCurrTableUnAccountedFor );
+                    //  Accumulate global counts for any overbookings or leaks
                     pespCtx->cpgTotalOverbooked += -pespCtx->cpgCurrTableUnAccountedFor;
                 }
                 else
@@ -2343,10 +2539,13 @@ void EseutilTrackSpace(
                         wprintf(L"\t\tTable Objid(%d) leaked %d pages.\n",
                                     pespCtx->objidCurrTable, pespCtx->cpgCurrTableUnAccountedFor );
                     }
+                    //  Accumulate global counts for any overbookings or leaks
                     pespCtx->cpgTotalLeaked += pespCtx->cpgCurrTableUnAccountedFor;
                     pespCtx->cpgTotalLeakedEof += pespCtx->cpgCurrTableUnAccountedForEof;
                 }
 
+                //  Reset current counters.
+                //
                 pespCtx->objidCurrTable = 0;
                 pespCtx->cpgCurrTableUnAccountedFor = 0;
                 pespCtx->cpgCurrTableUnAccountedForEof = 0;
@@ -2354,12 +2553,16 @@ void EseutilTrackSpace(
 
             if ( pespCtx->cpgCurrIdxLvUnAccountedFor )
             {
+                //  Print any overbookings or leaks for the last index or LV ...
+                //
                 assert( pespCtx->eBTTypeCurr != eBTreeTypeInvalid );
                 if ( pespCtx->cpgCurrIdxLvUnAccountedFor < 0 )
                 {
+                    //  I think this is a corrupt database, but lets make the message tame-ish.
                     wprintf(L"\n\t\tERROR: objid(%d) has %d pages overbooked.\n"
                             L"\t\tPlease contact PSS.\n\n",
                                 pespCtx->objidCurrIdxLv, -pespCtx->cpgCurrIdxLvUnAccountedFor );
+                    //  Accumulate global counts for any overbookings or leaks
                     pespCtx->cpgTotalOverbooked += -pespCtx->cpgCurrIdxLvUnAccountedFor;
                 }
                 else
@@ -2370,11 +2573,14 @@ void EseutilTrackSpace(
                                     ( pespCtx->eBTTypeCurr == eBTreeTypeInternalLongValue ) ? L"LV" : L"Index",
                                     pespCtx->objidCurrIdxLv, pespCtx->cpgCurrIdxLvUnAccountedFor );
                     }
+                    //  Accumulate global counts for any overbookings or leaks
                     pespCtx->cpgTotalLeaked += pespCtx->cpgCurrIdxLvUnAccountedFor;
                     pespCtx->cpgTotalLeakedEof += pespCtx->cpgCurrIdxLvUnAccountedForEof;
                 }
 
 
+                //  Reset current counters.
+                //
                 pespCtx->objidCurrIdxLv = 0;
                 pespCtx->eBTTypeCurr = eBTreeTypeInvalid;
                 pespCtx->cpgCurrIdxLvUnAccountedFor = 0;
@@ -2385,10 +2591,13 @@ void EseutilTrackSpace(
         pespCtx->objidCurrTable = pBTreeStats->pBasicCatalog->objidFDP;
         pespCtx->cpgCurrTableUnAccountedFor = pBTreeStats->pSpaceTrees->cpgOwned;
         pespCtx->cpgCurrTableUnAccountedForEof = CpgSpaceDumpGetExtPagesEof( pespCtx, pBTreeStats->pSpaceTrees->prgOwnedExtents, pBTreeStats->pSpaceTrees->cOwnedExtents );
+        //  Remove space we've correctly tracked in AE tree.
         pespCtx->cpgCurrTableUnAccountedFor -= pBTreeStats->pSpaceTrees->cpgAvailable;
         pespCtx->cpgCurrTableUnAccountedForEof -= CpgSpaceDumpGetExtPagesEof( pespCtx, pBTreeStats->pSpaceTrees->prgAvailExtents, pBTreeStats->pSpaceTrees->cAvailExtents );
+        //  Subtract primary B-Tree's internal + data pages.
         pespCtx->cpgCurrTableUnAccountedFor -= pBTreeStats->pParentOfLeaf->cpgInternal;
         pespCtx->cpgCurrTableUnAccountedFor -= pBTreeStats->pParentOfLeaf->cpgData;
+        //  After this its up to subsequent calls to remove their owned cpg counts...
     }
     else
     {
@@ -2399,17 +2608,26 @@ void EseutilTrackSpace(
         }
     }
 
+    //  If we walked onto a new Idx or LV tree ...
+    //
     if ( eBTType == eBTreeTypeInternalLongValue ||
             eBTType == eBTreeTypeUserSecondaryIndex )
     {
         if ( pespCtx->cpgCurrIdxLvUnAccountedFor )
         {
+            //
+            //  WHOA LEAKAGE!!!
+            //
 
+            //  Print any overbookings or leaks for the last index or LV ...
+            //
             if ( pespCtx->cpgCurrIdxLvUnAccountedFor < 0 )
             {
+                //  I think this is a corrupt database, but lets make the message tame-ish.
                 wprintf(L"\n\t\tERROR: objid(%d) has %d pages overbooked.\n"
                         L"\t\tPlease contact PSS.\n\n",
                             pespCtx->objidCurrIdxLv, -pespCtx->cpgCurrIdxLvUnAccountedFor );
+                //  Accumulate global counts for any overbookings or leaks
                 pespCtx->cpgTotalOverbooked += -pespCtx->cpgCurrIdxLvUnAccountedFor;
             }
             else
@@ -2420,11 +2638,14 @@ void EseutilTrackSpace(
                                 ( pespCtx->eBTTypeCurr == eBTreeTypeInternalLongValue ) ? L"LV" : L"Index",
                                 pespCtx->objidCurrIdxLv, pespCtx->cpgCurrIdxLvUnAccountedFor );
                 }
+                //  Accumulate global counts for any overbookings or leaks
                 pespCtx->cpgTotalLeaked += pespCtx->cpgCurrIdxLvUnAccountedFor;
                 pespCtx->cpgTotalLeakedEof += pespCtx->cpgCurrIdxLvUnAccountedForEof;
             }
 
 
+            //  Reset current counters.
+            //
             pespCtx->objidCurrIdxLv = 0;
             pespCtx->eBTTypeCurr = eBTreeTypeInvalid;
             pespCtx->cpgCurrIdxLvUnAccountedFor = 0;
@@ -2435,10 +2656,13 @@ void EseutilTrackSpace(
         pespCtx->eBTTypeCurr = eBTType;
         pespCtx->cpgCurrIdxLvUnAccountedFor = pBTreeStats->pSpaceTrees->cpgOwned;
         pespCtx->cpgCurrIdxLvUnAccountedForEof = CpgSpaceDumpGetExtPagesEof( pespCtx, pBTreeStats->pSpaceTrees->prgOwnedExtents, pBTreeStats->pSpaceTrees->cOwnedExtents );
+        //  Remove space we've correctly tracked in AE tree.
         pespCtx->cpgCurrIdxLvUnAccountedFor -= pBTreeStats->pSpaceTrees->cpgAvailable;
         pespCtx->cpgCurrIdxLvUnAccountedForEof -= CpgSpaceDumpGetExtPagesEof( pespCtx, pBTreeStats->pSpaceTrees->prgAvailExtents, pBTreeStats->pSpaceTrees->cAvailExtents );
+        //  Subtract primary B-Tree's internal + data pages.
         pespCtx->cpgCurrIdxLvUnAccountedFor -= pBTreeStats->pParentOfLeaf->cpgInternal;
         pespCtx->cpgCurrIdxLvUnAccountedFor -= pBTreeStats->pParentOfLeaf->cpgData;
+        //  After this its up to subsequent calls to remove thier owned cpg counts...
     }
     else
     {
@@ -2458,19 +2682,25 @@ JET_ERR EseutilEvalBTreeData(
     JET_ERR err = JET_errSuccess;
 
 
+    //
+    //          Validate data coming in.
+    //
     if ( pBTreeStats->cbStruct != sizeof(*pBTreeStats) )
     {
+        //  ESE and ESEUTIL do not agree on size of struct, bad versions.
         wprintf(L"The ESE engine did not return expected stat data size.\n");
         return ErrERRCheck( JET_errInvalidParameter );
     }
 
-    assert( pBTreeStats->pBasicCatalog );
+    assert( pBTreeStats->pBasicCatalog );   // silly to ask w/o catalog.
     if ( NULL == pBTreeStats->pBasicCatalog )
     {
+        //  ESE and ESEUTIL do not agree about presence of basic catalog info, bad versions?
         wprintf(L"The ESE engine did not return expected catalog data.\n");
         return ErrERRCheck( JET_errInvalidParameter );
     }
 
+    //  For simplicity
     JET_BTREETYPE eBTType = pBTreeStats->pBasicCatalog->eType;
     switch( eBTType )
     {
@@ -2483,41 +2713,56 @@ JET_ERR EseutilEvalBTreeData(
             break;
 
         default:
+            //  ESE and ESEUTIL do not agree on the kinds of BTrees, bad versions?
             wprintf(L"Unknown BTree enum: %d\n", eBTType );
             return ErrERRCheck( JET_errInvalidParameter );
     }
 
 
+    //
+    //          Deal with DB Root and Headers.
+    //
     if( eBTreeTypeInternalDbRootSpace == eBTType )
     {
+        //  This always comes first.
 
         pespCtx->pgnoDbEndUnusedBegin = 0;
         pespCtx->pgnoDbEndUnusedEnd = 0;
 
+        //  Accumulate data.
+        //
         if ( pBTreeStats->pSpaceTrees )
         {
+            //  Database owned pages.
             pespCtx->cpgTotalShelved = pBTreeStats->pSpaceTrees->cpgShelved;
             pespCtx->cpgDbOwned = pBTreeStats->pSpaceTrees->cpgOwned;
             pespCtx->pgnoLast = pBTreeStats->pSpaceTrees->cpgOwned;
             pespCtx->cpgDbRootUnAccountedFor = pespCtx->cpgDbOwned + pespCtx->cpgTotalShelved;
             pespCtx->cpgDbRootUnAccountedForEof = pespCtx->cpgTotalShelved;
 
+            //  Remove avail from unaccounted for.
             pespCtx->cpgDbRootUnAccountedFor -= pBTreeStats->pSpaceTrees->cpgAvailable;
+            //  Accumulate total avail
             pespCtx->cpgTotalAvailExt += pBTreeStats->pSpaceTrees->cpgAvailable;
+            // Do not update pgnoMin/pgnoMax with the root OE tree data here, so it is only "in-use" pgnos at end ...
             pespCtx->pgnoUsedMin = ulMax;
             pespCtx->pgnoUsedMax = 0;
 
             EseutilCalculateLastAvailableDbLogicalExtentRange( pBTreeStats->pSpaceTrees, &pespCtx->pgnoDbEndUnusedBegin, &pespCtx->pgnoDbEndUnusedEnd );
 
             Assert( ( pespCtx->pgnoDbEndUnusedEnd <= pespCtx->pgnoLast ) ||
+                // unless there is no available space ... in which case it reports a virtual extent off the EOF of DB
                 ( ( pespCtx->pgnoDbEndUnusedBegin == ( pespCtx->pgnoLast + 1 ) ) && ( pespCtx->pgnoDbEndUnusedEnd == lMax ) ) );
 
+            //  If we've got pParentOfLeaf stats, we can truly track leaked, the DB root
+            //  has a cpgData of 1 to account for the pgnoSystemRoot (pgno=1).
             if ( pBTreeStats->pParentOfLeaf )
             {
                 assert( pBTreeStats->pParentOfLeaf->cpgData );
                 pespCtx->cpgDbRootUnAccountedFor -= pBTreeStats->pParentOfLeaf->cpgData;
             }
 
+            //  Collect shelved extents into a separate list.
             ULONG cShelvedExtents = 0;
             for ( ULONG iextAvail = 0; iextAvail < pBTreeStats->pSpaceTrees->cAvailExtents; iextAvail++ )
             {
@@ -2542,8 +2787,12 @@ JET_ERR EseutilEvalBTreeData(
             }
         }
 
+        //  Print out header and DbRoot data...
+        //
         Call( EseutilSpaceDumpPrintHeadersAndDbRoot( pBTreeStats, pespCtx ) );
 
+        //  Print out DbRoot space tree data (if appropriate)...
+        //
         if ( ( pespCtx->grbit & JET_bitDBUtilSpaceInfoSpaceTrees ) && pespCtx->fPrintSpaceNodes )
         {
             Assert( pBTreeStats->pSpaceTrees );
@@ -2555,24 +2804,34 @@ JET_ERR EseutilEvalBTreeData(
         return JET_errSuccess;
     }
 
+    //  Every other entry after the DbRoot should have a parent ...
     assert( pBTreeStats->pParent );
 
 
+    //
+    //          Accumulate interesting data.
+    //
 
+    //  B-Tree counts...
+    //
     assert( eBTType < eBTreeTypeMax );
     pespCtx->cBTrees[eBTType]++;
 
-    if ( pBTreeStats->pParent->pBasicCatalog->objidFDP == 1  &&
+    //  
+    if ( pBTreeStats->pParent->pBasicCatalog->objidFDP == 1 /* DbRoot */ &&
             ( eBTType == eBTreeTypeInternalSpaceOE || eBTType == eBTreeTypeInternalSpaceAE ) )
     {
+        // DB Root Space Trees...
     }
 
     if ( pBTreeStats->pSpaceTrees )
     {
+        //  Currently owned.
         if ( pBTreeStats->pBasicCatalog->eType == eBTreeTypeUserClusteredIndex )
         {
             pespCtx->cpgCurrentTableOwned = pBTreeStats->pSpaceTrees->cpgOwned;
         }
+        //  We accumulate avail pages across whole DB ...
         pespCtx->cpgTotalAvailExt += pBTreeStats->pSpaceTrees->cpgAvailable;
         const ULONG pgnoMinFound = PgnoMinOwned( pBTreeStats->pSpaceTrees );
         if ( pgnoMinFound != 0 )
@@ -2597,27 +2856,40 @@ JET_ERR EseutilEvalBTreeData(
         pespCtx->cpgTotalData += pBTreeStats->pParentOfLeaf->cpgData;
     }
 
+    //
+    //  Attemping to track leaking or overbookings of space.
+    //
     if ( pBTreeStats->pSpaceTrees && pBTreeStats->pParentOfLeaf )
     {
         EseutilTrackSpace( pespCtx, pBTreeStats, eBTType );
     }
 
+    //
+    //  Print data about this B-Tree
+    //
     switch( eBTType )
     {
         case eBTreeTypeInternalSpaceOE:
         case eBTreeTypeInternalSpaceAE:
+            //  Do not print space trees unless specifically requested to.
             if ( !pespCtx->fPrintSpaceTrees )
             {
                 break;
             }
+            //  else fall through so wr print the OE/AE tree data.
         case eBTreeTypeUserClusteredIndex:
         case eBTreeTypeInternalLongValue:
         case eBTreeTypeUserSecondaryIndex:
+            //  Do not print small trees unless specifically requested to.
             if ( !pespCtx->fPrintSmallTrees && pBTreeStats->pSpaceTrees )
             {
+                //  All note this about the only way in which ESE's heiarchical space helps us, for this
+                //  case I don't have to worry about accidentally printing an index for a table that wasn't
+                //  printed, b/c we know the table had a larger cpgOwned.
                 double dblPct = ((double)pBTreeStats->pSpaceTrees->cpgOwned) / ((double)pespCtx->cpgDbOwned);
                 if ( dblPct < g_dblSmallTableThreshold )
                 {
+                    //  Track that we didn't print, so we can tell the client how to get it.
                     pespCtx->fSquelchedSmallTrees = fTrue;
                     break;
                 }
@@ -2650,32 +2922,39 @@ void EseutilTrackSpaceComplete(
     __inout ESEUTIL_SPACE_DUMP_CTX * const  pespCtx
     )
 {
+    // Potentially a fragile solution, but a concise solution ... we make up a 0 page table
+    // B+ Tree space entry, so that EseutilTrackSpace() will complete it's calculations on
+    // the last tree we were working on.
 
+    //  First make up a parent BTREE_STATS that will convince them we're a tree...
+    //
     BTREE_STATS_BASIC_CATALOG   FakeBasicCatalog = { sizeof(BTREE_STATS_BASIC_CATALOG),
-                                                        eBTreeTypeUserClusteredIndex,
+                                                        eBTreeTypeUserClusteredIndex,   // this is our fake B+Tree / table
                                                         L"",
                                                         0x0, 0x0, NULL
                                                     };
     BTREE_STATS_SPACE_TREES     EmptySpaceTrees = { sizeof(BTREE_STATS_SPACE_TREES),
-                                                        0, 0, fFalse, 0, 0,
-                                                        0,
-                                                        0, 0, 0
+                                                        0, 0, fFalse, 0, 0, // cpgPrimary, cpgLastAlloc, fMultiExtent, pgnoOE, pgnoAE
+                                                        0,                  // cpgOwned, the relevant field ... this gets subtracted from unaccounted for.
+                                                        0, 0, 0             // cpgAvailable, cpgReserved, cpgShelved
                                                     };
     BTREE_STATS_PARENT_OF_LEAF  EmptyParentOfLeaf = { sizeof(BTREE_STATS_PARENT_OF_LEAF),
-                                                        fTrue,
-                                                        0,
-                                                        0,
-                                                        0, NULL, 0, NULL
+                                                        fTrue,              // fEmptyTree
+                                                        0,                  // cpgInternal
+                                                        0,                  // cpgData
+                                                        0, NULL, 0, NULL        // phistoIOContiguousRuns, cForwardScans, pInternalPageStats.
                                                     };
     BTREE_STATS                 EmptyBTreeStats = { sizeof(BTREE_STATS),
-                                                        0x0,
-                                                        NULL,
-                                                        &FakeBasicCatalog,
-                                                        &EmptySpaceTrees,
+                                                        0x0,                    // grbitData ...
+                                                        NULL,               // do not need parent ...
+                                                        &FakeBasicCatalog,  // space trees that are empty
+                                                        &EmptySpaceTrees,   // more space data that is empty
                                                         &EmptyParentOfLeaf,
                                                         NULL
                                                     };
 
+    //  Finalize the space calculations by claiming one more table.
+    //
     EseutilTrackSpace( pespCtx, &EmptyBTreeStats, eBTreeTypeUserClusteredIndex );
 
 }
@@ -2688,9 +2967,12 @@ JET_ERR ErrSpaceDumpCtxComplete(
 
     if ( pespCtx == NULL || err != JET_errSuccess )
     {
+        //  Haha, just kidding ... only cleanup ...
         goto HandleError;
     }
 
+    //  Finally, do any last calculations.
+    //
 
     if ( pespCtx->objidCurrTable ||
             pespCtx->objidCurrIdxLv ||
@@ -2701,11 +2983,13 @@ JET_ERR ErrSpaceDumpCtxComplete(
         EseutilTrackSpaceComplete( pespCtx );
     }
 
+    //  Accumulate or print any DB Root leakage or overbookings.
 
     if ( !pespCtx->fSelectOneTable )
     {
         if ( pespCtx->cpgDbRootUnAccountedFor < 0 )
         {
+            //  I think this is a horrible inconsistency, but lets make the message tame-ish.
             wprintf(L"\n\t\tERROR: database has %d pages overbooked.\n"
                 L"\t\tPlease contact PSS.\n\n",
                 -pespCtx->cpgDbRootUnAccountedFor );
@@ -2739,9 +3023,14 @@ JET_ERR ErrSpaceDumpCtxComplete(
     }
     wprintf( L"\n" );
 
+    //  Print out the accumulation of selected data.
+    //
 
     wprintf( L"\n" );
 
+    //
+    //  Print out # of B-Tree stats.
+    //
     wprintf( L"    Enumerated %d Tables (",
                     pespCtx->cBTrees[eBTreeTypeUserClusteredIndex] );
     if ( pespCtx->grbit & JET_bitDBUtilSpaceInfoSpaceTrees )
@@ -2763,10 +3052,21 @@ JET_ERR ErrSpaceDumpCtxComplete(
 
     wprintf( L"\n" );
     
+    //  
+    //  Print page purpose stats.
+    //
 
     if ( pespCtx->grbit & JET_bitDBUtilSpaceInfoSpaceTrees )
     {
 
+        //  Retail w/ only space trees:
+        //    Total Pages 34234 ( 34 Used (x%), 234 Available (x%) ) + 4 Shelved
+        //
+        //  Retail w/ parent of leaf:
+        //    Total Pages 34234 ( 34 Data (x%), 34 Overhead (x%), 1 Leaked (x%), 234 Available (x%) ) + 4 Shelved
+        //
+        //  Debug w/ parent of leaf:
+        //    Total Pages 34234 ( 34 Data (x%), 29 Internal (x%), 4 OE (x%), 1 AE (x%), 1 Leaked (x%), 234 Available (x%) ) + 4 Shelved
 
         wprintf( L"    Pages %d (", pespCtx->cpgDbOwned );
 
@@ -2777,6 +3077,7 @@ JET_ERR ErrSpaceDumpCtxComplete(
 
         if ( !(pespCtx->grbit & JET_bitDBUtilSpaceInfoParentOfLeaf) )
         {
+            //  W/o parent of leaf, we can only tell used vs. available, and used is just !available ;)
             ULONG cpgUsed = pespCtx->cpgDbOwned - pespCtx->cpgTotalAvailExt;
             double dblPctUsed = ((double)cpgUsed) / ((double)pespCtx->cpgDbOwned) * 100;
             wprintf( L" %lu Used (%.1f%%), %lu Available (%.1f%%) ) + %lu Shelved\n",
@@ -2791,10 +3092,13 @@ JET_ERR ErrSpaceDumpCtxComplete(
             wprintf( L" %lu Data (%.1f%%),", pespCtx->cpgTotalData, dblPctData );
 
             #ifndef DEBUG
+            //  Retail, but we have parent of leaf, print slightly more detail...
+            //      We'll just call it all "overhead".
             ULONG cpgOverhead = pespCtx->cpgTotalOEOverhead + pespCtx->cpgTotalAEOverhead + pespCtx->cpgTotalInternal;
             double dblPctOverhead = ((double)cpgOverhead) / ((double)pespCtx->cpgDbOwned) * 100;
             wprintf( L" %lu Overhead (%.1f%%),", cpgOverhead, dblPctOverhead );
             #else
+            //  Debug we'll give all the detail... 
             double dblPctInternal = ((double)pespCtx->cpgTotalInternal) / ((double)pespCtx->cpgDbOwned) * 100;
             double dblPctOE = ((double)pespCtx->cpgTotalOEOverhead) / ((double)pespCtx->cpgDbOwned) * 100;
             double dblPctAE = ((double)pespCtx->cpgTotalAEOverhead) / ((double)pespCtx->cpgDbOwned) * 100;
@@ -2804,6 +3108,8 @@ JET_ERR ErrSpaceDumpCtxComplete(
                      pespCtx->cpgTotalAEOverhead, dblPctAE );
             #endif
 
+            //  Don't really feel we should draw attention to this, so it doesn't print by default
+            //  Also we can't have used /tSpecificTable arg, otherwise the counts will be all wacked.
             if( pespCtx->fPrintSpaceLeaks && !pespCtx->fSelectOneTable )
             {
                 Assert( pespCtx->cpgTotalLeaked >= pespCtx->cpgTotalLeakedEof );
@@ -2829,6 +3135,7 @@ JET_ERR ErrSpaceDumpCtxComplete(
 
             if ( pespCtx->cpgTotalOverbooked )
             {
+                //  How should we position this?  DB is probably corrupt.
                 wprintf( L" There are %lu overbooked pages.\n", pespCtx->cpgTotalOverbooked );
             }
         }
@@ -2837,6 +3144,7 @@ JET_ERR ErrSpaceDumpCtxComplete(
             pespCtx->pgnoUsedMin = 0;
         }
 
+        // Compute shelved min/max.
         for ( ULONG iextShelved = 0; iextShelved < pespCtx->cShelvedExtents; iextShelved++ )
         {
             const BTREE_SPACE_EXTENT_INFO * const pextShelved = &pespCtx->prgShelvedExtents[ iextShelved ];
@@ -2858,6 +3166,8 @@ JET_ERR ErrSpaceDumpCtxComplete(
                  pgnoShelvedMin, pgnoShelvedMax,
                  pespCtx->cpgDbOwned );
 
+        //  If database is "pretty" big (100 MB) and over 1/5th empty, suggest defrag.
+        //  Is 20% a good number?  Maybe 25%? 33%? 40%?
         if ( CbFromCpg( pespCtx->cpgDbOwned ) > 100*1024*1024 && dblPctAvail > 20.0 )
         {
             wprintf( L"\n    Note: This database is over 20%% empty, an offline defragmentation can be used to shrink the file.\n");
@@ -2872,12 +3182,17 @@ HandleError:
     {
         if ( pespCtx->cpgTotalOverbooked || pespCtx->fOwnedNonShelved )
         {
+            // One might be tempted to chose JET_errSPAvailExtCorrupted or JET_errSPOwnExtCorrupted, but 
+            //  the space APIs might actually return that if things are very bad, so rather than conflict
+            //  we would like to punt back the more generic corruption error.
             err = ErrERRCheck( JET_errDatabaseCorrupted );
         }
         else if ( pespCtx->cpgTotalLeaked )
         {
+            // This is less serious, it CAN happen on crash ...
             err = ErrERRCheck( JET_errDatabaseLeakInSpace );
         }
+        // else err == JET_errSuccess
     }
 
     if ( pespCtx )
@@ -2897,17 +3212,27 @@ HandleError:
     return err;
 }
 
+//  -------------------------------------
+//
+//  Legacy Formatting.
+//
 
+//  This code is made to be lifted.  When we integrate to Windows we'll have to find all people
+//  who call JetDBUtilities with the opDBUTILDumpSpace operation expecting it to print out a list
+//  of space information, and just push this code to them.
 
+// temporarily and shamelessly copied here from dbutil.cxx
+//  ================================================================
 LOCAL VOID DBUTLPrintfIntN( INT iValue, INT ichMax )
+//  ================================================================
 {
-    CHAR    rgchT[17]; 
+    CHAR    rgchT[17]; /* C-runtime max bytes == 17 */
     INT     ichT;
 
     _itoa_s( iValue, rgchT, _countof(rgchT), 10 );
     for ( ichT = 0; ichT < sizeof(rgchT) && rgchT[ichT] != '\0' ; ichT++ )
         ;
-    if ( ichT > ichMax )
+    if ( ichT > ichMax ) //lint !e661
     {
         for ( ichT = 0; ichT < ichMax; ichT++ )
             printf( "#" );
@@ -2930,24 +3255,33 @@ JET_ERR ErrLegacySpaceDumpEvalBTreeData(
 
     if ( pBTreeStats->cbStruct != sizeof(*pBTreeStats) )
     {
+        //  ESE and ESEUTIL do not agree on size of struct, bad versions.
         wprintf(L"The ESE engine did not return expected stat data size.\n");
         return ErrERRCheck( JET_errInvalidParameter );
     }
 
     if ( NULL == pBTreeStats->pBasicCatalog || NULL == pBTreeStats->pSpaceTrees )
     {
+        //  ESE and ESEUTIL do not agree about presence of basic catalog info, bad versions?
         wprintf(L"The ESE engine did not return expected catalog data.\n");
         return ErrERRCheck( JET_errInvalidParameter );
     }
 
+    //  Accumulate stats.
+    //
     *pcpgAvailTotal += pBTreeStats->pSpaceTrees->cpgAvailable;
 
 
+    //  Print out other B-Tree space info.
+    //
     switch( pBTreeStats->pBasicCatalog->eType )
     {
 
         case eBTreeTypeInternalDbRootSpace:
+            //  This always comes first.
 
+            //  Print out header and DbRoot space info.
+            //
 
             printf( "******************************** SPACE DUMP ***********************************\n" );
             printf( "Name                   Type   ObjidFDP    PgnoFDP  PriExt      Owned  Available\n" );
@@ -2969,6 +3303,7 @@ JET_ERR ErrLegacySpaceDumpEvalBTreeData(
     
         case eBTreeTypeInternalSpaceOE:
         case eBTreeTypeInternalSpaceAE:
+            //  Do nothing.
             break;
 
         case eBTreeTypeUserSecondaryIndex:
@@ -3001,6 +3336,7 @@ JET_ERR ErrLegacySpaceDumpEvalBTreeData(
             break;
 
         default:
+            //  ESE and ESEUTIL do not agree on the kinds of BTrees, bad versions?
             wprintf(L"Eseutil did not recognize the B-Tree type, incompatible engine and utility versions?\n");
             return ErrERRCheck( JET_errInvalidParameter );
 
@@ -3009,6 +3345,8 @@ JET_ERR ErrLegacySpaceDumpEvalBTreeData(
     return JET_errSuccess;
 }
 
+//  This basically converts an older JetDBUtilities() call into something that will perform
+//  nearly exactly like the older Exch2k7/Win2k8 code.
 JET_ERR JetLegacyDBSpaceDump( JET_DBUTIL_W * pdbutilW )
 {
     ULONG cpgAvailable = 0;
@@ -3020,7 +3358,10 @@ JET_ERR JetLegacyDBSpaceDump( JET_DBUTIL_W * pdbutilW )
         printf("Does not look like a proper util argument\n");
         return ErrERRCheck( JET_errInvalidParameter );
     }
+    //  else this looks like a space dump dbutil operations...
 
+    //  convert the dbutil op to use the above externalized callback code that performs the
+    //  same as legacy Exch2k7/Win2k8 code.
     pdbutilW->grbitOptions |= ( JET_bitDBUtilSpaceInfoBasicCatalog | JET_bitDBUtilSpaceInfoSpaceTrees );
     pdbutilW->pfnCallback = ErrLegacySpaceDumpEvalBTreeData;
     pdbutilW->pvCallback = &cpgAvailable;
@@ -3036,6 +3377,8 @@ JET_ERR JetLegacyDBSpaceDump( JET_DBUTIL_W * pdbutilW )
 }
 
 #if DEBUG
+// Calls EseutilCalculateLastAvailableDbLogicalExtentRange and verifies that the returned
+// result is correct.
 void EseutilITestDbspacedump(
     _In_ const ULONG pgnoExpectedStart,
     _In_ const ULONG pgnoExpectedEnd,
@@ -3062,6 +3405,7 @@ void EseutilITestDbspacedump(
 #endif
 
 
+// Set up some fake AE/OE arrays, and call EseutilITestDbspacedump.
 void EseutilDbspacedumpUnitTest()
 {
 #if DEBUG
@@ -3071,6 +3415,7 @@ void EseutilDbspacedumpUnitTest()
         { ulsppAvailExtLegacyGeneralPool, 16, 8, 1 },
     };
 
+    // no free extent space at EOF
     BTREE_SPACE_EXTENT_INFO rgAETwoExtentUsedEnd[] =
     {
         { ulsppAvailExtLegacyGeneralPool, 6, 4, 1 },
@@ -3086,6 +3431,7 @@ void EseutilDbspacedumpUnitTest()
     EseutilITestDbspacedump( 17, lMax, _countof( rgOETwoExtent ), rgOETwoExtent, _countof( rgAETwoExtentUsedEnd ), rgAETwoExtentUsedEnd );
     EseutilITestDbspacedump( 17, lMax, _countof( rgOETwoExtent ), rgOETwoExtent, _countof( rgAETwoExtentUsedEndWithShelved ), rgAETwoExtentUsedEndWithShelved );
 
+    // 1 free extent at EOF.
     BTREE_SPACE_EXTENT_INFO rgAETwoExtentLastExtentPartiallyFree[] =
     {
         { ulsppAvailExtLegacyGeneralPool, 8, 4, 1 },
@@ -3106,6 +3452,7 @@ void EseutilDbspacedumpUnitTest()
         { ulsppAvailExtLegacyGeneralPool, 16, 16, 1 },
     };
 
+    // 1 free extent at EOF. 1 OE total.
     BTREE_SPACE_EXTENT_INFO rgAESingle[] =
     {
         { ulsppAvailExtLegacyGeneralPool, 16, 3, 1 },
@@ -3119,9 +3466,11 @@ void EseutilDbspacedumpUnitTest()
     EseutilITestDbspacedump( 14, 16, _countof( rgOESingle ), rgOESingle, _countof( rgAESingle ), rgAESingle );
     EseutilITestDbspacedump( 14, 16, _countof( rgOESingle ), rgOESingle, _countof( rgAESingleWithShelved ), rgAESingleWithShelved );
 
+    // 1 free extent at EOF, multiple OE.
     EseutilITestDbspacedump( 14, 16, _countof( rgOETwoExtent ), rgOETwoExtent, _countof( rgAESingle ), rgAESingle );
     EseutilITestDbspacedump( 14, 16, _countof( rgOETwoExtent ), rgOETwoExtent, _countof( rgAESingleWithShelved ), rgAESingleWithShelved );
 
+    // 1.5 free extents at EOF.
     BTREE_SPACE_EXTENT_INFO rgAETwoExtentLastExtentFree[] =
     {
         { ulsppAvailExtLegacyGeneralPool, 8, 3, 1 },
@@ -3137,6 +3486,7 @@ void EseutilDbspacedumpUnitTest()
     EseutilITestDbspacedump( 6, 16, _countof( rgOETwoExtent ), rgOETwoExtent, _countof( rgAETwoExtentLastExtentFree ), rgAETwoExtentLastExtentFree );
     EseutilITestDbspacedump( 6, 16, _countof( rgOETwoExtent ), rgOETwoExtent, _countof( rgAETwoExtentLastExtentFreeWithShelved ), rgAETwoExtentLastExtentFreeWithShelved );
 
+    // 2.5 free extents at EOF.
     BTREE_SPACE_EXTENT_INFO rgAEThreeExtentLastTwoExtentsFree[] =
     {
         { ulsppAvailExtLegacyGeneralPool, 8, 3, 1 },
@@ -3154,6 +3504,7 @@ void EseutilDbspacedumpUnitTest()
     EseutilITestDbspacedump( 6, 16, _countof( rgOETwoExtent ), rgOETwoExtent, _countof( rgAEThreeExtentLastTwoExtentsFree ), rgAEThreeExtentLastTwoExtentsFree );
     EseutilITestDbspacedump( 6, 16, _countof( rgOETwoExtent ), rgOETwoExtent, _countof( rgAEThreeExtentLastTwoExtentsFreeWithShelved ), rgAEThreeExtentLastTwoExtentsFreeWithShelved );
 
+    // No free extents.
     BTREE_SPACE_EXTENT_INFO rgAEOnlyShelved[] =
     {
         { ulsppShelvedPool, 22, 1, 1 },
@@ -3162,6 +3513,6 @@ void EseutilDbspacedumpUnitTest()
     EseutilITestDbspacedump( 17, lMax, _countof( rgOETwoExtent ), rgOETwoExtent, 0, NULL );
     EseutilITestDbspacedump( 17, lMax, _countof( rgOETwoExtent ), rgOETwoExtent, _countof( rgAEOnlyShelved ), rgAEOnlyShelved );
 
-#endif
+#endif // DEBUG
 }
 

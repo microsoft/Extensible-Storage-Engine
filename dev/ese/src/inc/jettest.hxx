@@ -6,7 +6,13 @@
 
 #ifdef ENABLE_JET_UNIT_TEST
 
+//  ================================================================
 class JetUnitTestFailure
+//  ================================================================
+//
+//  Represents one failed assertion
+//
+//-
 {
     public:
         JetUnitTestFailure(
@@ -24,13 +30,21 @@ class JetUnitTestFailure
         const char * const m_szCondition;
         const INT m_line;
 
-    private:
+    private:    // not implemented
         JetUnitTestFailure();
         JetUnitTestFailure( const JetUnitTestFailure& );
         JetUnitTestFailure& operator=( const JetUnitTestFailure& );
 };
 
+//  ================================================================
 class JetUnitTestResult
+//  ================================================================
+//
+//  This object is used to track the results of running one test.
+//  Right now it just prints out the test results, but could be
+//  used to keep a list of them instead.
+//
+//-
 {
     public:
         JetUnitTestResult();
@@ -46,12 +60,20 @@ class JetUnitTestResult
         const char * m_szTest;
         INT m_failures;
 
-    private:
+    private:    // not implemented
         JetUnitTestResult( const JetUnitTestResult& );
         JetUnitTestResult& operator=( const JetUnitTestResult& );
 };
 
+//  ================================================================
 class JetUnitTest
+//  ================================================================
+//
+//  Each object that represents one JetTest should inherit from this
+//  class. It keeps a list of tests and provides the ability to
+//  run them.
+//
+//-
 {
     public:
         static INT RunTests( const char * const szTest, const IFMP ifmpTest );
@@ -79,7 +101,15 @@ class JetUnitTest
         const char * const m_szName;
 };
 
+//  ================================================================
 class JetSimpleUnitTest : public JetUnitTest
+//  ================================================================
+//
+//  Each basic test should inherit from this. There are two parts to this
+//  class. The static part keeps a list of tests and can run them.
+//  The dynamic part provides the abstract testing class.
+//
+//-
 {
     public:
         static const DWORD dwBufferManager = 0x1;
@@ -107,8 +137,10 @@ class JetSimpleUnitTest : public JetUnitTest
         JetUnitTestResult * m_presult;
 };
 
+//  ================================================================
 template<class FIXTURE>
 class JetTestCaller : public JetSimpleUnitTest
+//  ================================================================
 {
 public:
     typedef void (FIXTURE::*PfnTestMethod)();
@@ -123,24 +155,30 @@ private:
     const char * const m_szName;
 };
 
+//  ================================================================
 template<class FIXTURE>
 JetTestCaller<FIXTURE>::JetTestCaller( const char * const szName, PfnTestMethod pfnTest ) :
+//  ================================================================
     JetSimpleUnitTest( szName ),
     m_pfnTest( pfnTest ),
     m_szName( szName )
 {
 }
 
+//  ================================================================
 template<class FIXTURE>
 JetTestCaller<FIXTURE>::JetTestCaller( const char * const szName, const DWORD dwFacilities, PfnTestMethod pfnTest ) :
+//  ================================================================
     JetSimpleUnitTest( szName, dwFacilities ),
     m_pfnTest( pfnTest ),
     m_szName( szName )
 {
 }
 
+//  ================================================================
 template<class FIXTURE>
 void JetTestCaller<FIXTURE>::Run_()
+//  ================================================================
 {
     FIXTURE fixture;
     if( fixture.SetUp(m_presult) )
@@ -155,7 +193,15 @@ void JetTestCaller<FIXTURE>::Run_()
     }
 }
 
+//  ================================================================
 class JetSimpleDbUnitTest : public JetSimpleUnitTest
+//  ================================================================
+//
+//  Each basic test should inherit from this. There are two parts to this
+//  class. The static part keeps a list of tests and can run them.
+//  The dynamic part provides the abstract testing class.
+//
+//-
 {
     protected:
         JetSimpleDbUnitTest( const char * const szName );
@@ -177,7 +223,14 @@ class JetSimpleDbUnitTest : public JetSimpleUnitTest
         JetUnitTestResult * m_presult;
 };
 
+//  ================================================================
 class JetTestFixture
+//  ================================================================
+//
+//  A set of tests that require a common setup/teardown method should
+//  inherit from this.
+//
+//-
 {
     public:
         bool SetUp( JetUnitTestResult * const presult );
@@ -196,6 +249,7 @@ class JetTestFixture
         JetUnitTestResult * m_presult;
 };
 
+//** JETUNITTEST *****************************************************
 
 #define JETUNITTEST(component,test) \
 class Test##component##test : public JetSimpleUnitTest                  \
@@ -209,6 +263,7 @@ private:                                                                \
 Test##component##test Test##component##test::s_instance;                \
 void Test##component##test::Run_()
 
+// facilities is something like dwBufferManager
 #define JETUNITTESTEX(component,test,facilities) \
 class Test##component##test : public JetSimpleUnitTest                  \
 {                                                                       \
@@ -235,6 +290,7 @@ private:                                                                \
 Test##component##test Test##component##test::s_instance;                \
 void Test##component##test::Run_()
 
+//** CHECK   *********************************************************
 
 #define FAIL(_reason)          \
     Fail_(__FILE__, __LINE__, _reason)
@@ -252,8 +308,11 @@ void Test##component##test::Run_()
         FAIL( #_err " Failed with above throw site." );     \
     }
 
-#else
+#else // ENABLE_JET_UNIT_TEST
 
+// When the Unit Tests are disabled, then the following macros should do nothing
+// The JETUNITTEST-* macros will still evaluate to functions and be compiled, but
+// the linker will optimize them away.
 #define FAIL(_reason)
 #define CHECK(_condition)
 #define CHECKCALLS( _err )
@@ -265,7 +324,7 @@ void Test##component##test::Run_()
 
 #define CHECK( expr )
 
-#endif
+#endif // !ENABLE_JET_UNIT_TEST
 
-#endif
+#endif // JETTEST_HXX_INCLUDED
 

@@ -4,6 +4,7 @@
 #pragma once
 
 
+//  TPassThroughCache:  simple pass through cache implementation (all requests become cache miss / write through)
 
 template< class I >
 class TPassThroughCache
@@ -15,7 +16,7 @@ class TPassThroughCache
         {
         }
 
-    public:
+    public:  //  ICache
 
         ERR ErrCreate() override;
 
@@ -86,6 +87,7 @@ class TPassThroughCache
 template< class I >
 ERR TPassThroughCache<I>::ErrCreate()
 {
+    //  trivial implementation:  nothing to do
 
     return JET_errSuccess;
 }
@@ -93,6 +95,7 @@ ERR TPassThroughCache<I>::ErrCreate()
 template< class I >
 ERR TPassThroughCache<I>::ErrMount()
 {
+    //  trivial implementation:  nothing to do
 
     return JET_errSuccess;
 }
@@ -100,6 +103,7 @@ ERR TPassThroughCache<I>::ErrMount()
 template< class I >
 ERR TPassThroughCache<I>::ErrDump( _In_ CPRINTF* const pcprintf )
 {
+    //  trivial implementation:  nothing to do
 
     return JET_errSuccess;
 }
@@ -109,6 +113,7 @@ ERR TPassThroughCache<I>::ErrFlush( _In_ const VolumeId     volumeid,
                                     _In_ const FileId       fileid,
                                     _In_ const FileSerial   fileserial )
 {
+    //  trivial implementation:  nothing to do
 
     return JET_errSuccess;
 }
@@ -127,10 +132,13 @@ ERR TPassThroughCache<I>::ErrInvalidate(    _In_ const VolumeId     volumeid,
     BYTE*                               rgbZero             = NULL;
     TraceContextScope                   tcScope( iorpBlockCache );
 
+    //  trivial implementation:  invalidate the displaced data
    
+    //  get the cached file.  note that we do not release this reference to leave the cached file open
 
     Call( ErrGetCachedFile( volumeid, fileid, fileserial, fFalse, &pcfte ) );
 
+    //  if we are invalidating the data displaced by the header then explicitly clear the displaced data
 
     if ( offsets.FOverlaps( s_offsetsCachedFileHeader ) && offsets.Cb() > 0 )
     {
@@ -182,13 +190,18 @@ ERR TPassThroughCache<I>::ErrRead(  _In_                    const TraceContext& 
                                             keyComplete ) );
     }
 
+    //  get the cached file.  note that we do not release this reference to leave the cached file open
 
     Call( ErrGetCachedFile( volumeid, fileid, fileserial, fFalse, &pcfte ) );
 
+    //  trivial implementation:  simply pass the IO on to the cached file as a cache miss, except the displaced header
 
+    //  telemetry
 
     ReportMiss( pcfte, ibOffset, cbData, fTrue, cp != cpDontCache );
 
+    //  if this read is accessing the data displaced by the header then redirect that portion of the IO to the
+    //  displaced data
 
     if ( offsets.FOverlaps( s_offsetsCachedFileHeader ) )
     {
@@ -208,6 +221,7 @@ ERR TPassThroughCache<I>::ErrRead(  _In_                    const TraceContext& 
         CallS( pcfte->PffDisplacedData()->ErrIOIssue() );
     }
 
+    //  perform the original read less whatever displaced header was read
 
     if ( cbHeaderRead < cbData )
     {
@@ -262,15 +276,20 @@ ERR TPassThroughCache<I>::ErrWrite( _In_                    const TraceContext& 
                                             keyComplete ) );
     }
 
+    //  get the cached file.  note that we do not release this reference to leave the cached file open
 
     Call( ErrGetCachedFile( volumeid, fileid, fileserial, fFalse, &pcfte ) );
 
+    //  trivial implementation:  simply pass the IO on to the cached file as a write through, except the displaced header
 
+    //  telemetry
   
     ReportMiss( pcfte, ibOffset, cbData, fFalse, cp != cpDontCache );
     ReportUpdate( pcfte, ibOffset, cbData );
     ReportWrite( pcfte, ibOffset, cbData, fTrue );
 
+    //  if the write is accessing the data displaced by the header then redirect that portion of the IO to the
+    //  displaced data
 
     if ( offsets.FOverlaps( s_offsetsCachedFileHeader ) )
     {
@@ -291,6 +310,7 @@ ERR TPassThroughCache<I>::ErrWrite( _In_                    const TraceContext& 
         pcfte->PffDisplacedData()->SetNoFlushNeeded();
     }
 
+    //  perform the original write less whatever displaced header was written
 
     if ( cbHeaderWritten < cbData )
     {
@@ -313,12 +333,14 @@ HandleError:
     return pcomplete ? JET_errSuccess : err;
 }
 
+//  CPassThroughCache:  concrete TPassThroughCache<ICache>
 
+//  0dbbf833-444d-4025-ab3e-1d2cfd4336f0
 const BYTE c_rgbPassThroughCacheType[ sizeof( GUID ) ] = { 0x33, 0xF8, 0xBB, 0x0D, 0x4D, 0x44, 0x25, 0x40, 0xAB, 0x3E, 0x1D, 0x2C, 0xFD, 0x43, 0x36, 0xF0 };
 
 class CPassThroughCache : public TPassThroughCache<ICache>
 {
-    public:
+    public:  //  specialized API
 
         static const BYTE* RgbCacheType()
         {
