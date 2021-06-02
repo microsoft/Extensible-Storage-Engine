@@ -6,16 +6,22 @@
 #endif
 #define BT_H_INCLUDED
 
+//  **********************************************************
+//  BTREE API
+//
 
 
 enum OPENTYPE
 {
-    openNormal,
-    openNormalUnique,
-    openNormalNonUnique,
-    openNew
+    openNormal,             //  normal open cursor (may be either unique or non-unique btree)
+    openNormalUnique,       //  normal open cursor (unique btree only)
+    openNormalNonUnique,    //  normal open cursor (non-unique btree only)
+    openNew                 //  open cursor on newly-created FDP
 };
 
+//  **************************************
+//  open/close opearations
+//
 ERR ErrBTOpen( PIB *ppib, FCB *pfcb, FUCB **ppfucb, BOOL fAllowReuse = fTrue );
 ERR ErrBTOpenByProxy( PIB *ppib, FCB *pfcb, FUCB **ppfucb, const LEVEL level );
 VOID BTClose( FUCB *pfucb );
@@ -48,6 +54,7 @@ INLINE ERR ErrBTOpen(
                 fWillInitFCB );
 }
 
+//  open cursor, don't touch root page
 INLINE ERR ErrBTOpenNoTouch(
     PIB             *ppib,
     const IFMP      ifmp,
@@ -69,15 +76,24 @@ INLINE ERR ErrBTOpenNoTouch(
 }
 
 
+//  **************************************
+//  retrieve/release operations
+//
 ERR ErrBTGet( FUCB *pfucb );
 ERR ErrBTRelease( FUCB *pfucb );
 ERR ErrBTDeferGotoBookmark( FUCB *pfucb, const BOOKMARK& bm, BOOL fTouch );
 
+//  **************************************
+//  movement operations
+//
 ERR ErrBTNext( FUCB *pfucb, DIRFLAG dirflags );
 ERR ErrBTPrev( FUCB *pfucb, DIRFLAG dirflags );
 ERR ErrBTDown( FUCB *pfucb, DIB *pdib, LATCH latch );
 ERR ErrBTIGotoRoot( FUCB *pfucb, LATCH latch );
 
+//  reset currency
+//  no need to save bookmark
+//
 INLINE VOID BTUp( FUCB *pfucb )
 {
     CSR *pcsr = Pcsr( pfucb );
@@ -92,12 +108,17 @@ INLINE VOID BTUp( FUCB *pfucb )
     pcsr->Reset();
 
 #ifdef DEBUG
+    //  reset kdfCurr of pfucb
+    //
     pfucb->kdfCurr.Nullify();
 #endif
 }
 
 INLINE VOID BTSetupOnSeekBM( FUCB * const pfucb )
 {
+    //  node was deleted from under the cursor
+    //  reseek to logical bm and move to next node
+    //
     Assert( !Pcsr( pfucb )->FLatched() );
     Assert( !pfucb->bmCurr.key.FNull() );
     Assert( locOnCurBM == pfucb->locLogical );
@@ -106,9 +127,14 @@ INLINE VOID BTSetupOnSeekBM( FUCB * const pfucb )
 }
 ERR ErrBTPerformOnSeekBM( FUCB * const pfucb, const DIRFLAG dirflag );
 
+//  **************************************
+//  direct access routines
+//
 ERR ErrBTGotoBookmark( FUCB *pfucb, const BOOKMARK& bm, LATCH latch, BOOL fExactPosition = fTrue );
 ERR ErrBTGetPosition( FUCB *pfucb, ULONG *pulLT, ULONG *pulTotal );
 
+//  release memory allocated for bookmark in cursor
+//
 INLINE VOID BTReleaseBM( FUCB *pfucb )
 {
     RESBOOKMARK.Free( pfucb->pvBMBuffer );
@@ -119,10 +145,20 @@ INLINE VOID BTReleaseBM( FUCB *pfucb )
 #endif
 }
 
+//  **************************************
+//  probing routines
+//
 
+//  Determines whether or not the tree contains a given page.
+//  If it does, it'll return JET_errSuccess, otherwise, it returns JET_errRecordNotFound.
+//  Any other errors which are < JET_errSuccess should be treated as failures.
+//
 ERR ErrBTContainsPage( FUCB* const pfucb, const BOOKMARK& bm, const PGNO pgno, const BOOL fLeafPage );
 
 
+//  **************************************
+//  update operations
+//
 ERR ErrBTLock( FUCB *pfucb, DIRLOCK dirlock );
 ERR ErrBTReplace( FUCB * const pfucb, const DATA& data, const DIRFLAG dirflags );
 
@@ -134,6 +170,7 @@ ERR ErrBTDelta(
         TDelta          *const pOldValue,
         DIRFLAG         dirflag );
 
+// Explicitly instantiatiate the only allowed legal instances of this template
 template ERR ErrBTDelta<LONG>( FUCB *pfucb, INT cbOffset, const LONG delta, LONG *const pOldValue, DIRFLAG dirflag );
 template ERR ErrBTDelta<LONGLONG>( FUCB *pfucb, INT cbOffset, const LONGLONG delta, LONGLONG *const pOldValue, DIRFLAG dirflag );
 
@@ -146,6 +183,9 @@ ERR ErrBTDelete( FUCB *pfucb, const BOOKMARK& bm );
 
 ERR ErrBTCopyTree( FUCB * pfucbSrc, FUCB * pfucbDest, DIRFLAG dirflag );
 
+//  **************************************
+//  statistical functions
+//
 ERR ErrBTComputeStats( FUCB *pfucb, INT *pcnode, INT *pckey, INT *pcpage );
 ERR ErrBTDumpPageUsage( PIB * ppib, const IFMP ifmp, const PGNO pgnoFDP );
 
@@ -181,6 +221,9 @@ INLINE ERR ErrBTUTLAcross(
                 rgpvzVisitNodeCtx );
 }
 
+//  **************************************
+//  special tests
+//
 ERR ErrBTGetLastPgno( PIB *ppib, IFMP ifmp, PGNO * ppgno );
 
 BOOL FVERDeltaActiveNotByMe( const FUCB * pfucb, const BOOKMARK& bookmark );
@@ -219,6 +262,8 @@ INLINE ERR ErrBTGetLastPgno( PIB *ppib, IFMP ifmp, PGNO * ppgno )
 {
     if( g_fRepair )
     {
+        //  this would happen if we were attaching a database with a corrupt global space tree
+        //  the FMP is already initialized with the size of the database file
         *ppgno = g_rgfmp[ifmp].PgnoLast();
         return JET_errSuccess;
     }
@@ -228,21 +273,26 @@ INLINE ERR ErrBTGetLastPgno( PIB *ppib, IFMP ifmp, PGNO * ppgno )
     }
 }
 
+//  saves bookmark from current record in pfucb
+//
 ERR ErrBTISaveBookmark( FUCB *pfucb, const BOOKMARK& bm, BOOL fTouch );
 INLINE ERR ErrBTISaveBookmark( FUCB *pfucb )
 {
     BOOKMARK    bm;
 
+    //  UNDONE: cast kdfCurr to BOOKMARK to avoid copies
+    //
     Assert( Pcsr( pfucb )->FLatched() );
     Assert( !pfucb->kdfCurr.key.FNull() );
     bm.key = pfucb->kdfCurr.key;
     bm.data = pfucb->kdfCurr.data;
 
-    return ErrBTISaveBookmark( pfucb, bm, fFalse );
+    return ErrBTISaveBookmark( pfucb, bm, fFalse/*NoTouch*/ );
 }
 
 
 
+//  Forward declaration because repair.hxx is included after bt.hxx
 class RECCHECK;
 
 struct PrereadInfo
@@ -285,6 +335,9 @@ ERR ErrBTFindFragmentedRange(
     __out BOOKMARK * const pbmStart,
     __out BOOKMARK * const pbmEnd);
 
+//  **************************************
+//  PREREAD FUNCTIONS
+//
 #define PREREAD_SPACETREE_ON_SPLIT
 #define PREREAD_INDEXES_ON_PREPINSERT
 #define PREREAD_INDEXES_ON_REPLACE
@@ -325,6 +378,9 @@ ERR ErrBTPrereadKeyRanges(
     const JET_GRBIT                                 grbit,
     __out_opt ULONG * const                 pcPageCacheActual );
 
+//  **************************************
+//  Tree Root Field Operations
+//
 ERR ErrBTGetRootField(
     _Inout_     FUCB* const                         pfucb,
     _In_range_( 0, noderfMax - 1 )  const NodeRootField     noderf,
@@ -335,7 +391,15 @@ ERR ErrBTSetRootField(
     _In_range_( 0, noderfMax - 1 )  const NodeRootField     noderf,
     _In_        const DATA&                         dataRootField );
 
+//  **************************************
+//  DEBUG ONLY FUNCTIONS
+//
 
+//  ensures that status of fucb is valid before
+//  call can return to higher level, outside BT
+//  use this whenever BT returns a latched page
+//  to a higher layer
+//
 INLINE VOID AssertBTIBookmarkSaved( const FUCB *pfucb )
 {
 #ifdef DEBUG
@@ -345,6 +409,9 @@ INLINE VOID AssertBTIBookmarkSaved( const FUCB *pfucb )
     Assert( FKeysEqual( pfucb->kdfCurr.key,
                          pfucb->bmCurr.key ) );
 
+    //  iff fucb is on unique tree
+    //      data should be zero
+    //
     if ( !pfucb->bmCurr.data.FNull() )
     {
         Assert( !FFUCBUnique( pfucb ) );
@@ -362,11 +429,15 @@ INLINE VOID AssertBTIBookmarkSaved( const FUCB *pfucb )
 INLINE VOID AssertNDCursorOnPage( const FUCB *pfucb, const CSR *pcsr )
 {
 #ifdef DEBUG
+    //  page should be cached
+    //
     Assert( pcsr->FLatched( ) );
     Assert( pcsr->Pgno() != pgnoNull );
     Assert( pcsr->Dbtime() != dbtimeNil );
     Assert( pcsr->Dbtime() == pcsr->Cpage().Dbtime() );
 
+    //  node should be cached
+    //
     Assert( pcsr->ILine() >= 0 &&
             pcsr->ILine() < pcsr->Cpage().Clines( ) );
     if ( pcsr->Cpage().FLeafPage() && !FFUCBRepair( pfucb ) )
@@ -375,6 +446,8 @@ INLINE VOID AssertNDCursorOnPage( const FUCB *pfucb, const CSR *pcsr )
     }
     else
     {
+        //  key may be NULL only for last node in page
+        //
         Assert( !pfucb->kdfCurr.key.FNull() ||
                 pcsr->Cpage().Clines() - 1 == pcsr->ILine() );
     }
@@ -401,8 +474,13 @@ INLINE VOID AssertNDGet( const FUCB *pfucb, const CSR *pcsr )
                 && keyT.prefix.Pv() == pfucb->kdfCurr.key.prefix.Pv() )
             || FKeysEqual( keyT, pfucb->kdfCurr.key ) );
 
+    //  if we're at level 0, the node may been versioned when we first
+    //  retrieved it, but the RCE may subsequently have been cleaned up
+    //  and the versioned bit reset from underneath us.  Thus, dataT.pv
+    //  may now be pointing to something bogus, so don't compare it.
     if ( !FNDVersion( pfucb->kdfCurr ) && pfucb->ppib->Level() > 0 )
     {
+        // Comparison of data only valid if node is not versioned
         Assert( dataT.Cb() == pfucb->kdfCurr.data.Cb() );
         Assert( dataT.Pv() == pfucb->kdfCurr.data.Pv()
             || FDataEqual( dataT, pfucb->kdfCurr.data ) );
@@ -418,40 +496,51 @@ INLINE VOID AssertNDGet( const FUCB *pfucb )
 {
 #ifdef DEBUG
     AssertNDGet( pfucb, Pcsr( pfucb ) );
-#endif
+#endif  // DEBUG
 }
 
 
 INLINE VOID AssertBTGet( const FUCB *pfucb )
 {
 #ifdef DEBUG
+    //  check node-pointer is cached in fucb
+    //
     if ( FNDVersion( pfucb->kdfCurr ) &&
          !FPIBDirty( pfucb->ppib ) )
     {
         KEYDATAFLAGS    kdfT = pfucb->kdfCurr;
 
+        //  page should be latched
+        //  and cursor should be on correct version
+        //
         AssertNDCursorOnPage( pfucb, Pcsr( pfucb ) );
 
         BOOKMARK    bm;
 
         NDGetBookmarkFromKDF( pfucb, pfucb->kdfCurr, &bm );
 
-        if( pfucb->ppib->Level() > 0 )
+        if( pfucb->ppib->Level() > 0 )  //  otherwise ErrVERAccessNode will save the bookmark
         {
             NS          ns;
             CallS( ErrVERAccessNode( (FUCB *) pfucb, bm, &ns ) );
 
             if ( ns == nsDatabase || ns == nsUncommittedVerInDB || ns == nsCommittedVerInDB )
             {
+                //  should point to node in page
+                //
                 Assert( kdfT.fFlags == pfucb->kdfCurr.fFlags );
                 AssertNDGet( pfucb );
             }
             else if ( ns == nsVersionedInsert )
             {
+                //  node shouldn't be visible to us -- why are we on it?
+                //
                 Assert( fFalse );
             }
             else
             {
+                //  node obtained from version store
+                //
                 Assert( kdfT == pfucb->kdfCurr );
             }
         }
@@ -481,6 +570,8 @@ INLINE VOID AssertBTType( const FUCB *pfucb )
     else
     if( pfucb->u.pfcb->FTypeTable() )
     {
+        //  during recovery, table type is overloaded
+        //
         Assert( PinstFromIfmp( pfucb->ifmp )->FRecovering() || Pcsr( pfucb )->Cpage().FPrimaryPage() );
     }
     else if( pfucb->u.pfcb->FTypeSecondaryIndex() )
@@ -491,6 +582,6 @@ INLINE VOID AssertBTType( const FUCB *pfucb )
     {
         Assert( Pcsr( pfucb )->Cpage().FLongValuePage() );
     }
-#endif
+#endif  //  DEBUG
 }
 

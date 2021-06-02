@@ -5,10 +5,14 @@
 
 enum IOREASONPRIMARY : BYTE
 {
+    // iorpNone publically defined
     iorpInvalid = 0,
     iorpOSUnitTest
 };
 
+//  This creates a file that is 256 commit granularity (4 KB) pages long with the 0th page having all 0s, and
+//  the 1st(really 2nd) page having all 1s, and the 2nd(really 3rd) page having all 2s, etc. 
+//  If fBigFile is specified, the file will be 2 x as big as physical memory
 
 ERR ErrCreateIncrementFile( PCWSTR wszFile, const BOOL fBigFile )
 {
@@ -24,10 +28,11 @@ ERR ErrCreateIncrementFile( PCWSTR wszFile, const BOOL fBigFile )
     BYTE* pvPattern = new BYTE[ size_t( cbPage ) ];
 
     Call( ErrOSInit() );
-    Call( ErrOSFSCreate( NULL, &pfsapi ) );
+    Call( ErrOSFSCreate( NULL/* pinstNil */, &pfsapi ) );
 
     if ( !fBigFile )
     {
+        //  Wish there was a better way to ensure sane format ...
         wprintf( L"Resetting/deleting pre-existing file () --> %d", pfsapi->ErrFileDelete( wszFile ) );
     }
 
@@ -36,7 +41,7 @@ ERR ErrCreateIncrementFile( PCWSTR wszFile, const BOOL fBigFile )
                                 IFileAPI::fmfLossyWriteBack,
                                 &pfapi );
     wprintf( L"%d\n", err );
-#ifdef DEBUG
+#ifdef DEBUG    //  Useful for prototyping to not have to re-create the file ...
     if ( fBigFile && JET_errDiskIO == err )
     {
         wprintf( L"\t\t\tTreating JET_errDiskIO as existing file, succeeding.\n" );
@@ -109,6 +114,12 @@ ExplicitMap empprotectsz[] =
     ExpMap( PAGE_WRITECOMBINE ),
 };
 
+//  Print a bitfield in a nice format like (note this is a made up case, OS MM wouldn't return this):
+//          0x1000A = ( 0x10000 | PAGE_READONLY | PAGE_WRITECOPY )
+//      where 
+//          PAGE_READONLY = 0x2 and so is mapped from that part of the value.
+//          PAGE_WRITECOPY = 0xA and so is mapped from that part of the value.
+//          0x10000 = some unknown bit I made up for pretend.
 
 #define PrintBitField( emp, eValue )    PrintBitField_( emp, _countof(emp), eValue )
 void PrintBitField_( const ExplicitMap * const empenumsz, const ULONG cenumsz, const QWORD eValue )
@@ -123,11 +134,12 @@ void PrintBitField_( const ExplicitMap * const empenumsz, const ULONG cenumsz, c
         QWORD eCheck = 0;
         for( ULONG ienum = 0; ienum < cenumsz; ienum++ )
         {
+            // All bits in map must be exclusive, or probably this won't work right at all...
             Assert( 0 == ( eCheck & empenumsz[ienum].eValue ) );
             eCheck |= empenumsz[ienum].eValue;
 
-            eToBeMapped |= ( eValue & empenumsz[ienum].eValue );
-            eLeftOver &= ~empenumsz[ienum].eValue;
+            eToBeMapped |= ( eValue & empenumsz[ienum].eValue );    //  add this value to the mappable values
+            eLeftOver &= ~empenumsz[ienum].eValue;                  //  strip known value from left overs
         }
         Assert( eValue == ( eLeftOver | eToBeMapped ) );
         if ( eLeftOver )
@@ -157,7 +169,7 @@ void PrintBitField_( const ExplicitMap * const empenumsz, const ULONG cenumsz, c
 #include <psapi.h>
 #define wszPsapi                L"psapi.dll"
 #define wszWorkingSet           L"api-ms-win-core-psapi-l1-1-0.dll"
-const wchar_t * const g_mwszzWorkingSetLibs     = wszWorkingSet L"\0"  wszPsapi L"\0";
+const wchar_t * const g_mwszzWorkingSetLibs     = wszWorkingSet L"\0" /* downlevel */ wszPsapi L"\0";
 NTOSFuncStd( g_pfnQueryWorkingSetEx2, g_mwszzWorkingSetLibs, QueryWorkingSetEx, oslfExpectedOnWin6 );
 
 void PrintMemInfo_( const ULONG ibPrefix, const BYTE * const pbMemory, PCSTR szMemVarName )
@@ -176,6 +188,9 @@ void PrintMemInfo_( const ULONG ibPrefix, const BYTE * const pbMemory, PCSTR szM
         const size_t cbResult = VirtualQueryEx( GetCurrentProcess(), (LPCVOID)pbMemory, &membasic, sizeof(membasic) );
         Assert( membasic.BaseAddress == pbMemory );
 
+//      wprintf( L"fRes=%d  [%4dKB] %p / %p . %6I64d    prot=0x%04x / 0x%x    state=0x%x    Type=0x%x\n", 
+//                  (DWORD)cbResult, ibPrefix/1024, membasic.BaseAddress, membasic.AllocationBase, membasic.RegionSize,
+//                  membasic.AllocationProtect, membasic.Protect, membasic.State, membasic.Type );
 
         wprintf( L"%10hs: fRes=%d  [%4dKB] %p / %p . %6I64d    prot=", 
                     szMemVarName, (DWORD)cbResult, ibPrefix/1024, membasic.BaseAddress, membasic.AllocationBase, membasic.RegionSize );
@@ -236,6 +251,7 @@ void PrintMemInfo_( const ULONG ibPrefix, const BYTE * const pbMemory, PCSTR szM
                     {
                         wprintf( L" Res1=0x%x", mwsexinfo.VirtualAttributes.Invalid.Reserved1 );
                     }
+                    //  Not apparently present in x86 definition of this struct.
 #ifdef _AMD64_
                     if ( mwsexinfo.VirtualAttributes.Invalid.ReservedUlong )
                     {

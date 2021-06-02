@@ -9,8 +9,12 @@
 
 struct RECDANGLING
 {
+    //  WARNING: "data" MUST be the first member of
+    //  this struct because we set TDB->pdataDefaultRecord
+    //  to &data, then free the memory using this pointer
     DATA            data;
     RECDANGLING *   precdanglingNext;
+//  BYTE            rgbData[0];
 };
 
 
@@ -167,6 +171,8 @@ INLINE ERR SPLIT_BUFFER::ErrGetPage( const IFMP ifmp, PGNO * const ppgno, const 
     }
     else
     {
+        //  this case should be impossible, but put firewall
+        //  code anyway just in case
 
         FireWall( OSFormat( "GetPageOutOf%sSpBuf", fAvailExt ? "Avail" : "Own" ) );
         err = ErrERRCheck( fAvailExt ? errSPOutOfAvailExtCacheSpace : errSPOutOfOwnExtCacheSpace );
@@ -187,6 +193,7 @@ INLINE VOID SPLIT_BUFFER::ReturnPage( const PGNO pgno )
     }
     else
     {
+        //  page will be orphaned - should be impossible
         Assert( fFalse );
     }
 }
@@ -194,7 +201,7 @@ INLINE VOID SPLIT_BUFFER::ReturnPage( const PGNO pgno )
 
 class SPLITBUF_DANGLING
 {
-    friend class FCB;
+    friend class FCB;           //  only callable by FCB
 
     public:
         SPLITBUF_DANGLING()         {};
@@ -227,7 +234,7 @@ class SPLITBUF_DANGLING
 };
 
 
-const CPG   cpgInitialTreeDefault       = 1;
+const CPG   cpgInitialTreeDefault       = 1; // must be cpgSingleExtentMin or higher
 
 INLINE CPG CpgInitial( const JET_SPACEHINTS * const pspacehints, const LONG cbPageSize )
 {
@@ -237,10 +244,11 @@ INLINE CPG CpgInitial( const JET_SPACEHINTS * const pspacehints, const LONG cbPa
 }
 
 
+//  We use a 25% vs. 11% growth of the 180 byte FCB structure.
 class FCB_SPACE_HINTS
 {
 
-    friend class FCB;
+    friend class FCB;           //  only callable by FCB
     friend CPG CpgSPIGetNextAlloc( __in const FCB_SPACE_HINTS * const pfcbsh, __in const CPG cpgPrevious    );
     friend ERR ErrCATCheckJetSpaceHints( _In_ const LONG cbPageSize, _Inout_ JET_SPACEHINTS * pSpaceHints, _In_ BOOL fAllowCorrection );
 
@@ -253,6 +261,16 @@ private:
         struct
         {
 
+            //  ----------------------------------------------------
+            //
+            //  Defaults used ...
+            //
+            //  This is necessary primarily for template table support
+            //  and doing proper inheritance, but it also has a convienent
+            //  of side affect of always being able to produce the original
+            //  JET_SPACEHINTS and do validation that we're saving all
+            //  important aspects.
+            //
             BYTE    m_fSPHDefaultGrbit          : 1;
 
             BYTE    m_fSPHDefaultMaintDensity   : 1;
@@ -260,9 +278,17 @@ private:
             BYTE    m_fSPHDefaultMinExtent      : 1;
             BYTE    m_fSPHDefaultMaxExtent      : 1;
 
+            //  ----------------------------------------------------
+            //
+            //  SP bits.
+            //
             BYTE    m_fSPHUtilizeParentSpace        : 1;
             BYTE    m_fSPHUtilizeExactExtents       : 1;
 
+            //  ----------------------------------------------------
+            //
+            //  BT bits.
+            //
             BYTE    m_fSPHCreateHintAppendSequential        : 1;
             BYTE    m_fSPHCreateHintHotpointSequential      : 1;
             BYTE    m_fSPHRetrieveHintTableScanForward      : 1;
@@ -270,24 +296,36 @@ private:
 
 #define BUG_EX_55077
 #ifdef BUG_EX_55077
+            // we have retired some space hints, we turn them into reseved for now
+            // will truly retire them at next format change and take out #ifdef BUG_EX_55077
+            // BTW, we don't match the order of the bit field with grbit to keep fix min
             BYTE    m_fSPHRetrieveHintReserve1              : 1;
             BYTE    m_fSPHRetrieveHintReserve2              : 1;
             BYTE    m_fSPHRetrieveHintReserve3              : 1;
 #endif
             BYTE    m_fSPHDeleteHintTableSequential         : 1;
 
+            //  Reserved
             BYTE    m_rgReservedDefaultBits     : 1;
         };
     };
 
     WORD    m_pctGrowth;
+// 4 bytes
     CPG     m_cpgInitial;
     CPG     m_cpgMinExtent;
     CPG     m_cpgMaxExtent;
+// 16 bytes
 
-    SHORT   m_cbDensityFree;
+    //  ----------------------------------------------------
+    //
+    //  BT is considered to nominally own these.    
+    //
+    //
+    SHORT   m_cbDensityFree;    // f/s loading density parameter: / ulInitialDensity in a different form
     BYTE    m_pctMaintDensity;
     BYTE    m_rgReserved[1];
+// 20 bytes
 
 private:
     INLINE SHORT _CbReservedBytesFromDensity( ULONG ulDensity ) const
@@ -297,7 +335,7 @@ private:
     }
     INLINE ULONG _UlDensityFromReservedBytes( SHORT cbReservedBytes ) const
     {
-        const ULONG ulDensityFree   = ( ( cbReservedBytes + 1 ) * 100 ) / g_cbPage;
+        const ULONG ulDensityFree   = ( ( cbReservedBytes + 1 ) * 100 ) / g_cbPage; // +1 to reconcile rounding
         const ULONG ulDensity       = 100 - ulDensityFree;
         return ulDensity;
     }
@@ -308,7 +346,7 @@ public:
 
         Assert( ulDensity == UlBound( ulDensity, ulFILEDensityLeast, ulFILEDensityMost ) );
         Assert( ((( 100 - ulDensity ) * g_cbPage ) / 100) < (size_t)g_cbPage );
-        Assert( ulDensity == _UlDensityFromReservedBytes( s ) );
+        Assert( ulDensity == _UlDensityFromReservedBytes( s ) );    // do we think this actually holds?
 
         return s;
     }
@@ -317,7 +355,7 @@ public:
         const ULONG ulDensity       = _UlDensityFromReservedBytes( cbReservedBytes );
 
         Assert( ulDensity == UlBound( ulDensity, ulFILEDensityLeast, ulFILEDensityMost ) );
-        Assert( cbReservedBytes == _CbReservedBytesFromDensity( ulDensity ) );
+        Assert( cbReservedBytes == _CbReservedBytesFromDensity( ulDensity ) ); // do we think this actually holds?
 
         return ulDensity;
     }
@@ -334,6 +372,9 @@ public:
         return fTrue;
     }
 
+    //
+    //  Accessors ...
+    //
     void SetSpaceHints(
         _In_ const JET_SPACEHINTS * const   pSpaceHints,
         _In_ const LONG                     cbPageSize
@@ -342,32 +383,42 @@ public:
         Assert( pSpaceHints->cbStruct == sizeof(*pSpaceHints) );
         Expected( cbPageSize != 0 );
 
+        //  Original space hints / no defaults necessary, always stored ...
         m_cbDensityFree                 = CbReservedBytesFromDensity( pSpaceHints->ulInitialDensity );
         Assert( pSpaceHints->cbInitial % cbPageSize == 0 );
         Assert( pSpaceHints->cbInitial == 0 || cbPageSize != 0 );
         m_cpgInitial                    = CpgInitial( pSpaceHints, cbPageSize );
 
+        //  Maintenance density
+        //
         m_fSPHDefaultMaintDensity       = ( 0x0 == pSpaceHints->ulMaintDensity );
         m_pctMaintDensity               = (BYTE) ( pSpaceHints->ulMaintDensity ? pSpaceHints->ulMaintDensity : 90 );
 
+        //  Growth control
+        //
         m_fSPHDefaultGrowth             = ( 0x0 == pSpaceHints->ulGrowth );
         m_pctGrowth                     = (WORD) pSpaceHints->ulGrowth;
         
         m_fSPHDefaultMinExtent          = ( 0x0 == pSpaceHints->cbMinExtent );
         Assert( pSpaceHints->cbMinExtent % g_cbPage == 0 );
-        Assert( pSpaceHints->cbMinExtent == 0 || cbPageSize != 0 );
+        Assert( pSpaceHints->cbMinExtent == 0 || cbPageSize != 0 ); // page size is needed if cbMinExtent set
         m_cpgMinExtent                  = pSpaceHints->cbMinExtent ? ( pSpaceHints->cbMinExtent / cbPageSize ) : 0;
 
         m_fSPHDefaultMaxExtent          = ( 0x0 == pSpaceHints->cbMaxExtent );
         Assert( pSpaceHints->cbMaxExtent % g_cbPage == 0 );
-        Assert( pSpaceHints->cbMaxExtent == 0 || cbPageSize != 0 );
+        Assert( pSpaceHints->cbMaxExtent == 0 || cbPageSize != 0 ); // page size is needed if cbMaxExtent set
         m_cpgMaxExtent                  = pSpaceHints->cbMaxExtent ? ( pSpaceHints->cbMaxExtent / cbPageSize ) : 0;
 
+        //  GRBIT controls
+        //
         m_fSPHDefaultGrbit                  = ( 0x0 == pSpaceHints->grbit );
+        //  Generic grbits
         m_fSPHUtilizeParentSpace                = BoolSetFlag( pSpaceHints->grbit, JET_bitSpaceHintsUtilizeParentSpace );
         m_fSPHUtilizeExactExtents               = BoolSetFlag( pSpaceHints->grbit, JET_bitSpaceHintsUtilizeExactExtents);
+        //  CRUD : Create
         m_fSPHCreateHintAppendSequential        = BoolSetFlag( pSpaceHints->grbit, JET_bitCreateHintAppendSequential );
         m_fSPHCreateHintHotpointSequential      = BoolSetFlag( pSpaceHints->grbit, JET_bitCreateHintHotpointSequential );
+        //  CRUD : Retrieve
         m_fSPHRetrieveHintTableScanForward      = BoolSetFlag( pSpaceHints->grbit, JET_bitRetrieveHintTableScanForward );
         m_fSPHRetrieveHintTableScanBackward     = BoolSetFlag( pSpaceHints->grbit, JET_bitRetrieveHintTableScanBackward );
 
@@ -376,6 +427,7 @@ public:
         m_fSPHRetrieveHintReserve2 = BoolSetFlag( pSpaceHints->grbit, JET_bitRetrieveHintReserve2 );
         m_fSPHRetrieveHintReserve3 = BoolSetFlag( pSpaceHints->grbit, JET_bitRetrieveHintReserve3 );
 #endif
+        //  CRUD : Delete
         m_fSPHDeleteHintTableSequential         = BoolSetFlag( pSpaceHints->grbit, JET_bitDeleteHintTableSequential );
 
     }
@@ -387,13 +439,18 @@ public:
     {
         Assert( cbPageSize != 0 );
 
+        //  Init struct
+        //
         memset( pSpaceHints, 0, sizeof(*pSpaceHints) );
         pSpaceHints->cbStruct           = sizeof(*pSpaceHints);
 
+        //  Always set
         pSpaceHints->cbInitial          = cpgInitialTreeDefault == m_cpgInitial ? 0 : cbPageSize * m_cpgInitial;
         pSpaceHints->ulInitialDensity   = UlDensityFromReservedBytes( m_cbDensityFree );
 
 
+        //  Add space manager owned hints
+        //
         
         pSpaceHints->ulGrowth           = m_fSPHDefaultGrowth ? 0x0 :
                                                 m_pctGrowth;
@@ -403,9 +460,13 @@ public:
                                                 cbPageSize * m_cpgMaxExtent;
 
 
+        //  Add BT owned hints
+        //
         pSpaceHints->ulMaintDensity     = m_fSPHDefaultMaintDensity ? 0x0 :
                                                 m_pctMaintDensity;
 
+        //  Add unified grbits
+        //
         pSpaceHints->grbit = m_fSPHDefaultGrbit ? 0x0 :
                                 (
                                 ( m_fSPHUtilizeParentSpace  ? JET_bitSpaceHintsUtilizeParentSpace : 0 ) |
@@ -425,31 +486,37 @@ public:
 
     }
 
-};
+}; // class FCB_SPACE_HINTS
 
 #define CreateCompleteErr( err )        CreateComplete_( err, __FILE__, __LINE__ )
 #define CreateComplete()                CreateComplete_( JET_errSuccess, __FILE__, __LINE__ )
 
+// We need access to FUCB::OffsetOfIAE, a static method of the FUCB struct.
+// But the FUCB struct is usually included AFTER this file, so we can't actually
+// use it here.  Declare a global function that wraps FUCB::OffsetOfIAE.
 SIZE_T FUCBOffsetOfIAE();
 
+// File Control Block
+//
 class FCB
     :   public CZeroInit
 {
 private:
 #ifdef AMD64
-    static VOID VerifyOptimalPacking();
+    static VOID VerifyOptimalPacking();    // Just a bunch of static_asserts to verify optimality.
 #endif
 
     public:
+        // Constructor/destructor
         FCB( IFMP ifmp, PGNO pgnoFDP );
         ~FCB();
 
 #pragma push_macro( "new" )
 #undef new
     private:
-        void* operator new( size_t );
-        void* operator new[]( size_t );
-        void operator delete[]( void* );
+        void* operator new( size_t );           //  meaningless without INST*
+        void* operator new[]( size_t );         //  meaningless without INST*
+        void operator delete[]( void* );        //  not supported
     public:
         void* operator new( size_t cbAlloc, INST* pinst )
         {
@@ -467,123 +534,166 @@ private:
 
 #ifdef DEBUGGER_EXTENSION
     public:
-#else
+#else // DEBUGGER_EXTENSION
     private:
 #endif
 
+        // IMPORTANT: Update rgwszFCBTypeNames in WszFCBType (edbg.cxx) if
+        // this enum is changed.
         enum FCBTYPE
         {
             fcbtypeNull = 0,
             fcbtypeDatabase,
-            fcbtypeTable,
+            fcbtypeTable,               // Sequential/primary index
             fcbtypeSecondaryIndex,
             fcbtypeTemporaryTable,
             fcbtypeSort,
+            // fcbtypeSentinel, // Removed 2015/10/14. Affects the values of fcbtypeLV before/after this date.
             fcbtypeLV,
 
             fcbtypeMax
         };
     
     private:
+        // Note: Try to be aware of cache lines and don't put unrelated hot fields 
+        // too close together.
         RECDANGLING *m_precdangling;
         volatile LSTORE     m_ls;
 
-        TDB         *m_ptdb;
-        FCB         *m_pfcbNextIndex;
+        TDB         *m_ptdb;                // l   for tables only: table and field descriptors
+        FCB         *m_pfcbNextIndex;       // s   chain of indexes for this file
 
-        FCB         *m_pfcbLRU;
-        FCB         *m_pfcbMRU;
+        FCB         *m_pfcbLRU;             // x   next LRU FCB in avail LRU list
+        FCB         *m_pfcbMRU;             // x   previous LRU FCB in avail LRU list
 
-        FCB         *m_pfcbNextList;
-        FCB         *m_pfcbPrevList;
+        FCB         *m_pfcbNextList;        //  next FCB in the global-list
+        FCB         *m_pfcbPrevList;        //  prev FCB in the global-list
 
-        FCB         *m_pfcbTable;
-        IDB         *m_pidb;
+        FCB         *m_pfcbTable;           // f   points to FCB of table for an index FCB
+        IDB         *m_pidb;                // f   index info (NULL if "seq." file)
 
-        CInvasiveConcurrentModSet< FUCB, FUCBOffsetOfIAE >  m_icmsFucbList;
-        LONG        m_wRefCount;
+        CInvasiveConcurrentModSet< FUCB, FUCBOffsetOfIAE >  m_icmsFucbList;  // s   set of FUCBs open on this file
+        LONG        m_wRefCount;            // s   # of FUCBs for this file/index
 
-        OBJID       m_objidFDP;
-        PGNO        m_pgnoFDP;
-        PGNO        m_pgnoOE;
-        PGNO        m_pgnoAE;
+        OBJID       m_objidFDP;             // id  objid of this file/index
+        PGNO        m_pgnoFDP;              // id  FDP of this file/index
+        PGNO        m_pgnoOE;               // f   pgno of OwnExt tree
+        PGNO        m_pgnoAE;               // f   pgno of AvailExt tree
 
+        //  the following flags are protected by INST::m_critFCBList
 
         union
         {
             ULONG   m_ulFCBListFlags;
             struct
             {
-                ULONG   m_fFCBInList            : 1;
-                ULONG   m_fFCBInLRU             : 1;
+                ULONG   m_fFCBInList            : 1;    //  in global list
+                ULONG   m_fFCBInLRU             : 1;    //  in LRU list
             };
         };
 
-        IFMP        m_ifmp;
+        IFMP        m_ifmp;                 // f   which database
 
+        //  The following flags are all set with Atomic bit operations.  They are also
+        //      Immutable
+        //      Protected by m_sxwl
+        //      Protected with Atomic operations.
+        //
         ULONG   m_ulFCBFlags;
 
+        // f This FCB is for data records.
         static const ULONG mskFCBPrimaryIndex = 0x1;
+        // f if 0, then clustered index is being or has been created
         static const ULONG mskFCBSequentialIndex = 0x2;
+        // f DDL cannot be modified
         static const ULONG mskFCBFixedDDL = 0x4;
+        // f table/index DDL can be inherited (implies fFCBFixedDDL)
         static const ULONG mskFCBTemplate = 0x8;
+        // f table DDL derived from a base table
         static const ULONG mskFCBDerivedTable = 0x10;
+        // f index DDL derived from a base table
         static const ULONG mskFCBDerivedIndex = 0x20;
+        // f index was present when schema was faulted in
         static const ULONG mskFCBInitialIndex = 0x40;
+        // l FCB initialized?
         static const ULONG mskFCBInitialized = 0x80;
+        // ? is a delete pending on this table/index?
         static const ULONG mskFCBDeletePending = 0x100;
+        // ? pending delete has committed
         static const ULONG mskFCBDeleteCommitted = 0x200;
+        // is tree unique?
         static const ULONG mskFCBNonUnique = 0x400;
+        // use TossImmediate when releasing pages
         static const ULONG mskFCBNoCache = 0x800;
+        // assume pages aren't in the buffer cache
         static const ULONG mskFCBPreread = 0x1000;
+        // has space info been inited?
         static const ULONG mskFCBSpaceInitialized = 0x2000;
+        // when cursor is closed, attempt to purge FCB
         static const ULONG mskFCBTryPurgeOnClose = 0x4000;
+        // don't log space operations (part of index creation)
         static const ULONG mskFCBDontLogSpaceOps = 0x8000;
+        // don't permit LV's to become separated
         static const ULONG mskFCBIntrinsicLVsOnly = 0x10000;
+        // is OLD2 running against this FCB
         static const ULONG mskFCBOld2Running = 0x20000;
+        // table has never been committed to transaction level 0
         static const ULONG mskFCBUncommitted = 0x40000;
+        // Have we checked for out-of-date NLS locales?
         static const ULONG mskFCBValidatedCurrentLocales = 0x80000;
+        // indicates whether columns (currently only tagged) can be added to this template table
         static const ULONG mskFCBTemplateStatic = 0x100000;
+        // has this FCB only been initialized for recovery?
         static const ULONG mskFCBInitedForRecovery = 0x200000;
+        // FCB was previously init'ed for recovery and additional initialization is now being done
         static const ULONG mskFCBDoingAdditionalInitializationDuringRecovery = 0x400000;
+        //  No more tasks
         static const ULONG mskFCBNoMoreTasks = 0x800000;
+        // Have we checked for valid NLS locales?
         static const ULONG mskFCBValidatedValidLocales = 0x1000000;
 
 
         TABLECLASS  m_tableclass;
-        BYTE        m_fcbtype;
-        BYTE        rgbReserved[2];
+        BYTE        m_fcbtype;              // intended use of FCB
+        BYTE        rgbReserved[2];         // for alignment, TABLECLASS is a BYTE.
 
-        USHORT      m_crefDomainDenyRead;
-        USHORT      m_crefDomainDenyWrite;
-        RCE         *m_prceNewest;
-        RCE         *m_prceOldest;
+        USHORT      m_crefDomainDenyRead;   // s   # of FUCBs with deny read flag
+        USHORT      m_crefDomainDenyWrite;  // s   # of FUCBs with deny write flag
+                                            //     # of bytes free w/o using new page
+        //  these are used to maintain a queue of modifications on the FCB for concurrent DML
+        RCE         *m_prceNewest;          // s   most recently created RCE of FCB
+        RCE         *m_prceOldest;          // s   oldest RCE of FCB
 
-        PIB         *m_ppibDomainDenyRead;
+        PIB         *m_ppibDomainDenyRead;  // s   ppib of process holding exclusive lock
 
         PGNO        m_pgnoNextAvailSE;
 
-        LONG        m_lInitLine;
+        LONG        m_lInitLine;   // File/line where last init status is set
         PCSTR       m_szInitFile;
 
         SPLITBUF_DANGLING   * m_psplitbufdangling;
 
-        BFLatch             m_bflPgnoFDP;
-        BFLatch             m_bflPgnoAE;
-        BYTE                rgbReserved2[8];
-        BFLatch             m_bflPgnoOE;
+        //  Only first void* in these structures actually used, (wasting the other 8 bytes ).
+        BFLatch             m_bflPgnoFDP;   //  latch hint for pgnoFDP
+        BFLatch             m_bflPgnoAE;    //  latch hint for pgnoAE
+        BYTE                rgbReserved2[8]; // Padding for alignment.
+        BFLatch             m_bflPgnoOE;    //  latch hint for pgnoOE
 
-        INT                 m_ctasksActive;
+        INT                 m_ctasksActive; //  # tasks active on this FCB
 
-        ERR                 m_errInit;
+        ERR                 m_errInit;      //  error from initialization
 
+        //  leave CRITs to the end, so the fields they're protecting won't
+        //  be in the same cache line
 
         CCriticalSection    m_critRCEList;
 
-        CSXWLatch           m_sxwl;
+        CSXWLatch           m_sxwl;         //  SXW latch to protect this FCB
 
         FCB_SPACE_HINTS     m_spacehints;
 
+        //  tracking for incidents of many non-visible nodes (MNVN)
+        //
         TICK                m_tickMNVNLastReported;
 
         union
@@ -591,6 +701,9 @@ private:
             QWORD   m_qwMNVN;
             struct
             {
+                // WARNING! WARNING! WARNING!
+                // To avoid sign extension conflicts, enum bitfields must be sized
+                // one greater than the total number of bits actually being used.
                 QWORD   m_cMNVNIncidentsSinceLastReported:21;
                 QWORD   m_cMNVNNodesSkippedSinceLastReported:21;
                 QWORD   m_cMNVNPagesVisitedSinceLastReported:21;
@@ -620,6 +733,8 @@ private:
 
         
 
+    // =====================================================================
+    // Member retrieval..
     public:
         TDB* Ptdb() const;
         FCB* PfcbNextIndex() const;
@@ -656,12 +771,18 @@ private:
         VOID Dump( CPRINTF * pcprintf, DWORD_PTR dwOffset = 0 ) const;
         const WCHAR * WszFCBType() const;
 
+        // IMPORTANT: These functions are approximations for the state of the
+        // FCB for extension purposes. These should never be used for actual
+        // state management of FCBs.
         BOOL FDebuggerExtInUse() const;
         BOOL FDebuggerExtPurgableEstimate() const;
-#endif
+#endif  //  DEBUGGER_EXTENSION
+
+    // =====================================================================
 
 
-
+    // =====================================================================
+    // Member manipulation.
     public:
         VOID SetPtdb( TDB *ptdb );
         VOID SetPfcbNextIndex( FCB *pfcb );
@@ -680,8 +801,11 @@ private:
         VOID SetSortSpace( const PGNO pgno, const OBJID objid );
         VOID ResetSortSpace();
 
+    // =====================================================================
 
 
+    // =====================================================================
+    // Flags.
     public:
         ULONG UlFlags() const;
 
@@ -825,11 +949,15 @@ private:
         BOOL FRetrieveHintTableScanForward() const      { return !!m_spacehints.m_fSPHRetrieveHintTableScanForward; }
         BOOL FRetrieveHintTableScanBackward() const     { return !!m_spacehints.m_fSPHRetrieveHintTableScanBackward; }
         BOOL FDeleteHintTableSequential() const         { return !!m_spacehints.m_fSPHDeleteHintTableSequential; }
+        //  no set routines, handled through m_spacehints::SetSpaceHints().
 
         BOOL FUseOLD2();
 
+    // =====================================================================
 
 
+    // =====================================================================
+    // Latching and reference counts.
     public:
         VOID AttachRCE( RCE * const prce );
         VOID DetachRCE( RCE * const prce );
@@ -859,18 +987,25 @@ private:
         VOID ResetUpdating_();
 
         VOID IncrementRefCount_( BOOL fOwnWriteLock );
+        // pfucbNil can be used in these two methods to avoid link/unlink and just adjust refcount.
         ERR ErrIncrementRefCountAndLink_( FUCB *pfucb, const BOOL fOwnWriteLock = fFalse );
         VOID DecrementRefCountAndUnlink_( FUCB *pfucb, const BOOL fLockList, const BOOL fPreventMoveToAvail = fFalse );
 
+    // =====================================================================
 
 
+    // =====================================================================
+    // Tasks
     public:
         INT CTasksActive() const;
         VOID RegisterTask();
         VOID UnregisterTask();
         VOID WaitForTasksToComplete();
+    // =====================================================================
 
 
+    // =====================================================================
+    // Initialize/terminate FCB subsystem.
     public:
         static ERR ErrFCBInit( INST *pinst );
         static VOID Term( INST *pinst );
@@ -881,8 +1016,11 @@ private:
     private:
         static VOID ResetPerfCounters( __in INST * const pinst, BOOL fTerminating );
         
+    // =====================================================================
 
 
+    // =====================================================================
+    // FCB creation/deletion.
     public:
         static FCB *PfcbFCBGet( IFMP ifmp, PGNO pgnoFDP, INT *pfState, const BOOL fIncrementRefCount = fTrue, const BOOL fInitForRecovery = fFalse );
         static ERR ErrCreate( PIB *ppib, IFMP ifmp, PGNO pgnoFDP, FCB **ppfcb );
@@ -890,7 +1028,7 @@ private:
         VOID PrepareForPurge( const BOOL fPrepareChildren = fTrue );
         VOID CloseAllCursors( const BOOL fTerminating );
         VOID Purge( const BOOL fLockList = fTrue, const BOOL fTerminating = fFalse );
-        static VOID PurgeObject( const IFMP ifmp, const PGNO pgnoFDP );
+        static VOID PurgeObject( const IFMP ifmp, const PGNO pgnoFDP ); // expensive, use pfcb->Purge() if you already have the FCB pointer.
         static VOID PurgeDatabase( const IFMP ifmp, const BOOL fTerminating );
         static VOID PurgeAllDatabases( INST* const pinst );
 
@@ -904,14 +1042,17 @@ private:
         VOID Delete_( INST *pinst );
         BOOL FHasCallbacks_( INST *pinst );
         BOOL FOutstandingVersions_();
+    // =====================================================================
 
 
+    // =====================================================================
+    // SMP support.
     public:
         VOID Lock();
         VOID Unlock();
 #ifdef DEBUG
-        BOOL IsLocked();
-        BOOL IsUnlocked();
+        BOOL IsLocked();    // IsLocked/IsUnlocked needed so we can
+        BOOL IsUnlocked();  // correctly assert when FNeedLock_ == fFalse;
 #endif
 
         VOID EnterDML();
@@ -929,12 +1070,12 @@ private:
             ltWrite,
             ltShared };
 
-        VOID Lock_( LOCK_TYPE lt);
-        BOOL FLockTry_( LOCK_TYPE lt );
+        VOID Lock_( LOCK_TYPE lt);      // Blocking.
+        BOOL FLockTry_( LOCK_TYPE lt ); // Non-blocking.
         VOID Unlock_( LOCK_TYPE lt );
 #ifdef DEBUG
-        BOOL IsLocked_( LOCK_TYPE lt );
-        BOOL IsUnlocked_( LOCK_TYPE lt );
+        BOOL IsLocked_( LOCK_TYPE lt );    // IsLocked/IsUnlocked needed so we can
+        BOOL IsUnlocked_( LOCK_TYPE lt );  // correctly assert when FNeedLock_ == fFalse;
 #endif
         VOID LockDowngradeWriteToShared_();
 
@@ -949,8 +1090,11 @@ private:
         VOID LeaveDDL_();
         VOID AssertDDL_() const;
 
+    // =====================================================================
 
 
+    // =====================================================================
+    // Hashing.
     public:
         VOID InsertHashTable();
         VOID DeleteHashTable();
@@ -958,8 +1102,11 @@ private:
         static BOOL FInHashTable( IFMP ifmp, PGNO pgnoFDB, FCB **ppfcb = NULL );
 
     private:
+    // =====================================================================
 
 
+    // =====================================================================
+    // Global list
 
     public:
         VOID InsertList();
@@ -968,19 +1115,25 @@ private:
     private:
         VOID RemoveList_();
 
+    // =====================================================================
 
 
+    // =====================================================================
+    // LRU list.
 
     private:
 #ifdef DEBUG
         BOOL FCBCheckAvailList_( const BOOL fShouldBeInList, const BOOL fPurging );
         VOID RemoveAvailList_( const BOOL fPurging = fFalse );
-#else
+#else   //  !DEBUG
         VOID RemoveAvailList_();
-#endif
+#endif   // DEBUG
         VOID InsertAvailListMRU_();
+    // =====================================================================
 
 
+    // =====================================================================
+    // FUCB and primary/secondary index linkages.
     public:
         ERR ErrLinkReserveSpace();
         ERR ErrLink( FUCB *pfucb );
@@ -1028,10 +1181,12 @@ private:
 
         VOID CheckFCBLockingForLink_();
 
+    // =====================================================================
 
 };
 
 
+//  FCB hash-table functions (must appear after FCB is defined)
 
 inline FCBHash::NativeCounter FCBHash::CKeyEntry::Hash( const FCBHashKey &key )
 {
@@ -1046,6 +1201,7 @@ inline FCBHash::NativeCounter FCBHash::CKeyEntry::Hash() const
 
 inline BOOL FCBHash::CKeyEntry::FEntryMatchesKey( const FCBHashKey &key ) const
 {
+    //  NOTE: evaluate the local pgnoFDP before faulting in the cache-line for the FCB to compare IFMPs
     Assert( pfcbNil != m_entry.m_pfcb );
     return m_entry.m_pgnoFDP == key.m_pgnoFDP && m_entry.m_pfcb->Ifmp() == key.m_ifmp;
 }
@@ -1063,6 +1219,8 @@ inline void FCBHash::CKeyEntry::GetEntry( FCBHashEntry * const pdst ) const
 
 
 
+// =========================================================================
+// Constructor/destructor.
 
 INLINE FCB::FCB( IFMP ifmp, PGNO pgnoFDP )
     :   CZeroInit( sizeof( FCB ) ),
@@ -1076,8 +1234,10 @@ INLINE FCB::FCB( IFMP ifmp, PGNO pgnoFDP )
 {
     FMP::AssertVALIDIFMP( ifmp );
 
+    // PgnoFDP may be set to Null if this is an SCB's FCB.
     Assert( pgnoFDP != pgnoNull || g_rgfmp[ ifmp ].Dbid() == dbidTemp );
 
+    //  reset latch hints
     Assert( m_bflPgnoFDP.pv         == NULL );
     Assert( m_bflPgnoFDP.dwContext  == NULL );
     Assert( m_bflPgnoOE.pv          == NULL );
@@ -1102,6 +1262,7 @@ INLINE FCB::~FCB()
 
     if ( NULL != Psplitbufdangling_() )
     {
+        //  UNDONE: all space in the splitbuf is lost
         OSMemoryHeapFree( Psplitbufdangling_() );
     }
 
@@ -1128,6 +1289,18 @@ INLINE FCB::~FCB()
 
 INLINE VOID FCB::VerifyOptimalPacking()
 {
+    // Verify optimal packing.  These matter because keeping this structure to a 32 byte boundary
+    // makes it significantly more memory efficient when the resource manager allocates it.
+    // We currently "waste" only 2 bytes in rgbReserved. The structure is at 11 * 32 = 352 bytes,
+    // so there's no point in trying to regain those bytes; we'd need to find 30 more bytes to make
+    // a difference.
+    //
+    // No one ever calls this routine.  It's enough that it compiles cleanly for the static_asserts.
+    //
+    // Note: use a field to take up padding inside the structure.  See rgbReserved.
+    //
+    // Also note that we keep track of 64 byte boundaries as a cache line mark.
+    //
 #define NoWastedSpaceAround(TYPE, FIELDFIRST, FIELDLAST)                \
     (                                                                   \
         ( OffsetOf( TYPE, FIELDFIRST ) == 0 ) &&                        \
@@ -1201,10 +1374,15 @@ INLINE VOID FCB::VerifyOptimalPacking()
     static_assert( NoWastedSpace( FCB, m_tickMNVNLastReported, m_qwMNVN) );
 }
 #endif
+// =========================================================================
 
 
 
+// =========================================================================
+// Member Retrieval.
 
+// UNDONE: Add asserts to all methods to verify that critical section has
+// been obtained where appropriate.
 
 INLINE TDB* FCB::Ptdb() const                   { return m_ptdb; }
 INLINE FCB* FCB::PfcbNextIndex() const          { return m_pfcbNextIndex; }
@@ -1242,9 +1420,12 @@ INLINE VOID FCB::GetAPISpaceHints( __out JET_SPACEHINTS * pjsph ) const
 INLINE const FCB_SPACE_HINTS * FCB::Pfcbspacehints() const  { return &(m_spacehints); }
 INLINE ULONG FCB::UlDensity() const             { return m_spacehints.UlDensityFromReservedBytes( m_spacehints.m_cbDensityFree ); }
 
+// =========================================================================
 
 
 
+// =========================================================================
+// Member manipulation.
 
 INLINE VOID FCB::SetPtdb( TDB *ptdb )           { m_ptdb = ptdb; }
 INLINE VOID FCB::SetPfcbNextIndex( FCB *pfcb )  { m_pfcbNextIndex = pfcb; }
@@ -1273,7 +1454,7 @@ INLINE VOID FCB::SetSortSpace( const PGNO pgno, const OBJID objid )
     Assert( pgnoNull != pgno );
     Assert( objidNil != objid );
 
-    Assert( g_rgfmp[ Ifmp() ].Dbid() == dbidTemp );
+    Assert( g_rgfmp[ Ifmp() ].Dbid() == dbidTemp );       // pgnoFDP is fixed except for sorts.
     Assert( FTypeSort() );
     Assert( ObjidFDP() == objidNil );
     Assert( PgnoFDP() == pgnoNull );
@@ -1287,7 +1468,7 @@ INLINE VOID FCB::SetSortSpace( const PGNO pgno, const OBJID objid )
 }
 INLINE VOID FCB::ResetSortSpace()
 {
-    Assert( g_rgfmp[ Ifmp() ].Dbid() == dbidTemp );
+    Assert( g_rgfmp[ Ifmp() ].Dbid() == dbidTemp );       // pgnoFDP is fixed except for sorts.
     Assert( FTypeSort() );
     Assert( ObjidFDP() != objidNil );
     Assert( PgnoFDP() != pgnoNull );
@@ -1300,8 +1481,11 @@ INLINE VOID FCB::ResetSortSpace()
     Unlock();
 }
 
+// =========================================================================
 
 
+// =========================================================================
+// Flags.
 
 INLINE ULONG FCB::UlFlags() const               { return m_ulFCBFlags; }
 INLINE VOID FCB::ResetFlags()                   { m_ulFCBFlags = 0; }
@@ -1412,6 +1596,8 @@ INLINE VOID FCB::ResetDontLogSpaceOps()         { Assert( IsLocked() ); AtomicEx
 INLINE BOOL FCB::FIntrinsicLVsOnly() const      { return !!(m_ulFCBFlags & mskFCBIntrinsicLVsOnly ); }
 INLINE VOID FCB::SetIntrinsicLVsOnly()          { Assert( IsLocked() ); AtomicExchangeSet( &m_ulFCBFlags, mskFCBIntrinsicLVsOnly ); }
 
+// Whether OLD2 is running on the FCB. This does not keep track of
+// OLD2 on secondary indices nor LVs (those FCBs will have their own FOLD2Running state).
 INLINE BOOL FCB::FOLD2Running() const           { return !!(m_ulFCBFlags & mskFCBOld2Running ); }
 INLINE VOID FCB::SetOLD2Running()               { Assert( IsLocked() ); AtomicExchangeSet( &m_ulFCBFlags, mskFCBOld2Running ); }
 INLINE VOID FCB::ResetOLD2Running()             { Assert( IsLocked() ); AtomicExchangeReset( &m_ulFCBFlags, mskFCBOld2Running ); }
@@ -1433,6 +1619,8 @@ INLINE VOID FCB::SetTemplateStatic()
     Assert( IsLocked() );
     AtomicExchangeSet( &m_ulFCBFlags, mskFCBTemplateStatic );
 }
+// There is no FCB::ResetTemplateStatic(), since
+// "Flagging the template as static is currently a one-way trip."
 
 INLINE BOOL FCB::FNoMoreTasks() const           { return !!(m_ulFCBFlags & mskFCBNoMoreTasks ); }
 INLINE VOID FCB::SetNoMoreTasks()               { Assert( IsLocked() ); AtomicExchangeSet( &m_ulFCBFlags, mskFCBNoMoreTasks ); }
@@ -1460,6 +1648,8 @@ INLINE BOOL FCB::FWRefCountOK_()
         return fFalse;
     }
 
+    // FCB write lock and list enumeration lock both need to be owned by this thread
+    //  in order to have an accurate count.
     if ( IsLocked_( LOCK_TYPE::ltWrite ) && m_icmsFucbList.FLockedForEnumeration() )
     {
         if ( m_wRefCount < m_icmsFucbList.Count() )
@@ -1476,6 +1666,7 @@ INLINE BOOL FCB::FWRefCountOK_()
 }
 #endif
 
+// =========================================================================
 
 INLINE BOOL FCB::FDomainDenyWrite() const       { return ( m_crefDomainDenyWrite > 0 ); }
 INLINE VOID FCB::SetDomainDenyWrite()           { m_crefDomainDenyWrite++; }
@@ -1522,6 +1713,8 @@ INLINE VOID FCB::ResetDomainDenyRead()
 }
 
 
+// =========================================================================
+// TASK support.
 
 
 INLINE INT FCB::CTasksActive() const
@@ -1546,6 +1739,7 @@ INLINE VOID FCB::WaitForTasksToComplete()
     SetNoMoreTasks();
     Unlock();
     
+    //  very ugly, but hopefully we don't do this often
     while( 0 != m_ctasksActive )
     {
         UtilSleep( cmsecWaitGeneric );
@@ -1553,6 +1747,8 @@ INLINE VOID FCB::WaitForTasksToComplete()
 }
 
 
+// =========================================================================
+// SMP support.
 
 INLINE VOID FCB::Lock()
 {
@@ -1567,12 +1763,20 @@ INLINE VOID FCB::Unlock()
 #ifdef DEBUG
 INLINE BOOL FCB::IsLocked()
 {
+    // This public method is presumably being called when someone expects to
+    // be holding the ltWrite lock (the only lock publicly visible).  It would
+    // be somewhat misleading to answer based only on ltWrite if we are holding the
+    // ltShared lock at this time, no matter what.
     Assert( IsUnlocked_( LOCK_TYPE::ltShared ) );
     return IsLocked_( LOCK_TYPE::ltWrite );
 }
 
 INLINE BOOL FCB::IsUnlocked()
 {
+    // This public method is presumably being called when someone expects to
+    // not be holding the ltWrite lock (the only lock publicly visible).  It would
+    // be somewhat misleading to answer based on ltWrite if we are holding the
+    // ltShared lock at this time, no matter what.
     Assert( IsUnlocked_( LOCK_TYPE::ltShared ) );
     return IsUnlocked_( LOCK_TYPE::ltWrite );
 }
@@ -1585,11 +1789,13 @@ INLINE BOOL FCB::FNeedLock() const
 
 INLINE BOOL FCB::FNeedLock_() const
 {
+//  const BOOL  fNeedCrit   = !( dbidTemp == g_rgfmp[ Ifmp() ].Dbid() && pgnoSystemRoot != PgnoFDP() );
     const BOOL  fNeedCrit   = ( dbidTemp != g_rgfmp[ Ifmp() ].Dbid() || pgnoSystemRoot == PgnoFDP() );
 
     if ( !fNeedCrit )
     {
 #ifdef NOT_YET
+        // On the assumption that if a lock isn't needed now, it's never needed.
         Assert( m_sxwl.FNotOwnWriteLatch() );
         Assert( m_sxwl.FNotOwnSharedLatch() );
         Assert( !m_sxwl.FLatched() );
@@ -1599,6 +1805,7 @@ INLINE BOOL FCB::FNeedLock_() const
     return fNeedCrit;
 }
 
+// Enters FCB's critical section for data set/retrieve only if needed.
 INLINE VOID FCB::EnterDML()
 {
     Assert( FTypeTable() || FTypeTemporaryTable() || FTypeSort() );
@@ -1606,7 +1813,7 @@ INLINE VOID FCB::EnterDML()
 
     if ( !FFixedDDL() )
     {
-        Assert( FTypeTable() );
+        Assert( FTypeTable() );     // Sorts and temp tables have fixed DDL.
         Assert( !FTemplateTable() );
         EnterDML_();
     }
@@ -1622,7 +1829,7 @@ INLINE VOID FCB::LeaveDML()
 
     if ( !FFixedDDL() )
     {
-        Assert( FTypeTable() );
+        Assert( FTypeTable() );     // Sorts and temp tables have fixed DDL.
         Assert( !FTemplateTable() );
         LeaveDML_();
     }
@@ -1637,13 +1844,13 @@ INLINE VOID FCB::AssertDML()
 
     if ( !FFixedDDL() )
     {
-        Assert( FTypeTable() );
+        Assert( FTypeTable() );     // Sorts and temp tables have fixed DDL.
         Assert( !FTemplateTable() );
         Assert( IsUnlocked() );
         AssertDML_();
     }
 
-#endif
+#endif  //  DEBUG
 }
 
 INLINE VOID FCB::EnterDDL()
@@ -1672,12 +1879,14 @@ INLINE VOID FCB::AssertDDL()
 
     Assert( IsUnlocked() );
     AssertDDL_();
-#endif
+#endif  //  DEBUG
 }
 
 
+// =========================================================================
+// Hashing.
 
-const INT fFCBStateNull             = 0;
+const INT fFCBStateNull             = 0;    // FCB does not exist in global hash table
 const INT fFCBStateInitialized      = 1;
 
 INLINE VOID FCB::Release()
@@ -1691,10 +1900,16 @@ INLINE VOID FCB::Release()
     else
     {
 
+        //  NOTE: when we find another FCB in the hash-table with the same ifmp/pgnoFDP,
+        //        it should only be due to a table-delete overlapping with a table-create
+        //        (e.g. the 'this' FCB should be in the version store under operDeleteTable, and
+        //              the 'pfcbT' FCB should be the new table being created with the same pgnoFDP
+        //              NOTE: pfcbT could be rolling back from table-create as well)
+        //        in this case, the new FCB should not be delete-committed and should have a different objidFDP
 
         Assert( pfcbT == this || ( FDeleteCommitted() && ObjidFDP() != pfcbT->ObjidFDP() ) );
     }
-#endif
+#endif  //  DEBUG
     DecrementRefCountAndUnlink_( pfucbNil, fTrue );
 }
 
@@ -1705,19 +1920,23 @@ INLINE BOOL FCB::FInHashTable( IFMP ifmp, PGNO pgnoFDP, FCB **ppfcb )
     FCBHashKey          keyFCBHash( ifmp, pgnoFDP );
     FCBHashEntry        entryFCBHash;
 
+    //  lock the key
 
     pinst->m_pfcbhash->ReadLockKey( keyFCBHash, &lockFCBHash );
 
+    //  try to get the entry
 
     FCBHash::ERR errFCBHash = pinst->m_pfcbhash->ErrRetrieveEntry( &lockFCBHash, &entryFCBHash );
     Assert( errFCBHash == FCBHash::ERR::errSuccess || errFCBHash == FCBHash::ERR::errEntryNotFound );
 
+    //  unlock the key
 
     pinst->m_pfcbhash->ReadUnlockKey( &lockFCBHash );
 
     if ( ppfcb != NULL )
     {
 
+        //  return the entry
 
         *ppfcb = ( errFCBHash == FCBHash::ERR::errSuccess ? entryFCBHash.m_pfcb : pfcbNil );
         Assert( pfcbNil == *ppfcb || entryFCBHash.m_pgnoFDP == pgnoFDP );
@@ -1727,14 +1946,16 @@ INLINE BOOL FCB::FInHashTable( IFMP ifmp, PGNO pgnoFDP, FCB **ppfcb )
 }
 
 
+// =========================================================================
+// FUCB and primary/secondary index linkages.
 
 INLINE VOID FCB::LinkPrimaryIndex()
 {
     FCB *pfcbPrimary = this;
     FCB *pfcbIdx;
 
-    Assert( g_rgfmp[ Ifmp() ].Dbid() != dbidTemp );
-    Assert( FPrimaryIndex() );
+    Assert( g_rgfmp[ Ifmp() ].Dbid() != dbidTemp );   // Temp tables have no secondary indexes.
+    Assert( FPrimaryIndex() );      // Verify we have a primary index.
     Assert( !( FTemplateTable() && FDerivedTable() ) );
 
     for ( pfcbIdx = PfcbNextIndex(); pfcbIdx != pfcbNil; pfcbIdx = pfcbIdx->PfcbNextIndex() )
@@ -1742,6 +1963,7 @@ INLINE VOID FCB::LinkPrimaryIndex()
         Assert( pfcbIdx->FTypeSecondaryIndex() );
         Assert( pfcbIdx->Pidb() != pidbNil );
 
+        // Only ever called at init time, so should be no versions.
         Assert( !pfcbIdx->Pidb()->FVersioned() );
 
         pfcbIdx->SetPfcbTable( pfcbPrimary );
@@ -1760,8 +1982,8 @@ INLINE VOID FCB::LinkPrimaryIndex()
 INLINE VOID FCB::LinkSecondaryIndex( FCB *pfcbIdx )
 {
     AssertDDL();
-    Assert( FPrimaryIndex() );
-    Assert( FTypeTable() );
+    Assert( FPrimaryIndex() );      // Verify we have a primary index.
+    Assert( FTypeTable() );         // Temp tables and sorts don't have secondary indexes.
     Assert( pfcbIdx->FTypeSecondaryIndex() );
     pfcbIdx->SetPfcbNextIndex( PfcbNextIndex() );
     SetPfcbNextIndex( pfcbIdx );
@@ -1771,8 +1993,8 @@ INLINE VOID FCB::LinkSecondaryIndex( FCB *pfcbIdx )
 
 INLINE VOID FCB::UnlinkSecondaryIndex( FCB *pfcbIdx )
 {
-    Assert( FPrimaryIndex() );
-    Assert( FTypeTable() );
+    Assert( FPrimaryIndex() );      // Verify we have a primary index.
+    Assert( FTypeTable() );         // Temp tables and sorts don't have secondary indexes.
     Assert( pfcbIdx->FTypeSecondaryIndex() );
     Assert( Ptdb() != ptdbNil );
     AssertDDL();
@@ -1810,6 +2032,9 @@ INLINE VOID FCB::ResetDeleteIndex()
 
     if ( Pidb()->FVersioned() )
     {
+        // UNDONE: Instead of the VersionedCreate flag, scan the version store
+        // for other outstanding versions on this index (should either be
+        // none or a single CreateIndex version).
         if ( !Pidb()->FVersionedCreate() )
         {
             Pidb()->ResetFVersioned();
@@ -1835,6 +2060,8 @@ INLINE VOID FCB::ReleasePidb( const BOOL fTerminating )
 {
     Assert( Pidb() != pidbNil );
 
+    // A derived index is hooked up to the IDB of the template index except it is
+    // explicitly marked as owned by FCB, which may have already been freed.
     if ( Pidb()->FIDBOwnedByFCB() || !FDerivedIndex() )
     {
         Assert( !Pidb()->FVersioned() || fTerminating || errFCBUnusable == ErrErrInit() );
@@ -1846,6 +2073,7 @@ INLINE VOID FCB::ReleasePidb( const BOOL fTerminating )
 }
 
 
+// =========================================================================
 
 
 INLINE PGNO FCB::PgnoNextAvailSE() const
@@ -1882,6 +2110,8 @@ INLINE ERR FCB::ErrEnableSplitbuf( const BOOL fAvailExt )
 {
     AssertTrack( fFalse, "UnexpectedDangSpBuf" );
 
+    //  HACK: can't fit split buffer on the page - store in FCB instead until a natural
+    //  split happens on the page (and hope we don't crash or purge the FCB before that)
     if ( NULL == Psplitbufdangling_() )
     {
         SetPsplitbufdangling_( (SPLITBUF_DANGLING *)PvOSMemoryHeapAlloc( sizeof(SPLITBUF_DANGLING) ) );
@@ -1951,6 +2181,8 @@ INLINE VOID FCB::RemovePrecdangling( RECDANGLING * const precdanglingRemove )
         }
     }
 
+    //  should always be in the list
+    //
     Assert( fFalse );
 }
 
@@ -1961,6 +2193,7 @@ INLINE ERR FCB::ErrSetLS( const LSTORE ls )
 
     if ( JET_LSNil == ls )
     {
+        //  unconditionally reset ls
         m_ls = JET_LSNil;
     }
     else if ( JET_LSNil != lsT
@@ -1975,6 +2208,7 @@ INLINE ERR FCB::ErrGetLS( LSTORE *pls, const BOOL fReset )
 {
     if ( fReset )
     {
+        //  unconditionally reset ls
         *pls = (ULONG_PTR) AtomicExchangePointer( (void **)(&m_ls), (void *)JET_LSNil );
     }
     else
@@ -2002,6 +2236,7 @@ INLINE VOID FCB::ResetCMNVNPagesVisitedSinceLastReported()          { m_cMNVNPag
 INLINE VOID FCB::IncrementCMNVNPagesVisitedSinceLastReported( const ULONG cPages )
                                                                     { m_cMNVNPagesVisitedSinceLastReported = ( m_cMNVNPagesVisitedSinceLastReported & 0x000FFFFF ) + cPages; }
 
+// =========================================================================
 
 
 #ifdef DEBUG

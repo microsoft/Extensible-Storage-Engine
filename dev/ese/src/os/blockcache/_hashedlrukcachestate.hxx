@@ -4,22 +4,28 @@
 #pragma once
 
 #pragma warning (push)
-#pragma warning (disable: 4315)
+#pragma warning (disable: 4315)  //  'CCachedBlock': 'this' pointer for member 'CCachedBlock::m_le_fileid' may not be aligned 8 as expected by the constructor
 
+//  Cluster Number
 
-enum class ClusterNumber : DWORD
+//PERSISTED
+enum class ClusterNumber : DWORD  //  clno
 {
     clnoInvalid = dwMax,
 };
 
+//  Block Number
 
-enum class BlockNumber : DWORD
+//PERSISTED
+enum class BlockNumber : DWORD  //  blno
 {
     blnoInvalid = dwMax,
 };
 
+//  Cluster Operation
 
-enum class ClusterOperation : BYTE
+//PERSISTED
+enum class ClusterOperation : BYTE  //  clop
 {
     clopUpdate = 1,
     clopWriteBack = 2,
@@ -27,15 +33,19 @@ enum class ClusterOperation : BYTE
     clopAccess = 4,
 };
 
+//  Touch Number
 
-enum class TouchNumber : DWORD
+//PERSISTED
+enum class TouchNumber : DWORD  //  tono
 {
 };
 
+//  Cached Block
 
 #include <pshpack1.h>
 
-class CCachedBlock
+//PERSISTED
+class CCachedBlock  //  cbl
 {
     public:
 
@@ -58,18 +68,20 @@ class CCachedBlock
 
     private:
 
-        const UnalignedLittleEndian<VolumeId>       m_le_volumeid;
-        const UnalignedLittleEndian<FileId>         m_le_fileid;
-        const UnalignedLittleEndian<FileSerial>     m_le_fileserial;
-        const UnalignedLittleEndian<BlockNumber>    m_le_blno;
+        const UnalignedLittleEndian<VolumeId>       m_le_volumeid;      //  the volume id of the cached file
+        const UnalignedLittleEndian<FileId>         m_le_fileid;        //  the file id of the cached file
+        const UnalignedLittleEndian<FileSerial>     m_le_fileserial;    //  the serial number of the cached file
+        const UnalignedLittleEndian<BlockNumber>    m_le_blno;          //  the block number of the cached file for the data
 };
 
 #include <poppack.h>
 
+//  Cluster State
 
 #include <pshpack1.h>
 
-class CClusterState
+//PERSISTED
+class CClusterState  //  clst
 {
     public:
 
@@ -98,20 +110,22 @@ class CClusterState
 
     private:
 
-        const CCachedBlock                              m_cbl;
-        const UnalignedLittleEndian<ClusterNumber>      m_le_clno;
-        const UnalignedLittleEndian<DWORD>              m_le_ecc;
-        const UnalignedLittleEndian<TouchNumber>        m_le_rgtono[ 2 ];
-        const UnalignedLittleEndian<ClusterOperation>   m_le_clopLast;
-        const BYTE                                      m_rgbReserved[ 3 ];
+        const CCachedBlock                              m_cbl;              //  the cached block
+        const UnalignedLittleEndian<ClusterNumber>      m_le_clno;          //  the cluster number of the caching file holding the cached block
+        const UnalignedLittleEndian<DWORD>              m_le_ecc;           //  ECC of the block's contents
+        const UnalignedLittleEndian<TouchNumber>        m_le_rgtono[ 2 ];   //  touch numbers for the replacement policy
+        const UnalignedLittleEndian<ClusterOperation>   m_le_clopLast;      //  the last operation on this cluster
+        const BYTE                                      m_rgbReserved[ 3 ]; //  reserved; always zero
 };
 
 #include <poppack.h>
 
+//  Journal Entry Cluster Update
 
 #include <pshpack1.h>
 
-class CJournalEntryClusterUpdate
+//PERSISTED
+class CJournalEntryClusterUpdate  //  jentcu
 {
     public:
 
@@ -127,15 +141,17 @@ class CJournalEntryClusterUpdate
 
     private:
 
-        const UnalignedLittleEndian<ClusterNumber>  m_le_clno;
-        CClusterState                               m_clst;
+        const UnalignedLittleEndian<ClusterNumber>  m_le_clno;  //  cluster number
+        CClusterState                               m_clst;     //  cluster state
 };
 
 #include <poppack.h>
 
+//  Journal Entry Header
 
 #include <pshpack1.h>
 
+//PERSISTED
 class CJournalEntryHeader
 {
     public:
@@ -152,8 +168,8 @@ class CJournalEntryHeader
 
     private:
 
-        const UnalignedLittleEndian<ULONG>  m_le_cClusterUpdate;
-        CJournalEntryClusterUpdate          m_rgjentcu[ 0 ];
+        const UnalignedLittleEndian<ULONG>  m_le_cClusterUpdate;    //  count of cluster updates in this entry
+        CJournalEntryClusterUpdate          m_rgjentcu[ 0 ];        //  cluster updates
 };
 
 #include <poppack.h>

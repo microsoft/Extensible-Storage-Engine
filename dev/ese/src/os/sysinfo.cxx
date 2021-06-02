@@ -23,6 +23,8 @@ extern void OSIProcessAbort();
 
 extern volatile BOOL    g_fDllUp;
 
+//  Responsible for allocating and cleaning up of the useful string buffers.
+//  The destructor is called during DLL detach.
 class SysinfoBufferLifetimeManager
 {
 public:
@@ -73,6 +75,8 @@ public:
         JET_ERR err = JET_errSuccess;
         m_fAllocationAttempted = fTrue;
 
+        //  Note that this is called during Preinit, so we don't have the usual memory
+        // allocators available.
 
         if ( !m_wszProcessFriendlyName )
         {
@@ -96,7 +100,11 @@ HandleError:
         return m_fAllocationSucceeded;
     }
 
+    //  Access to the various strings that this object controls.
 
+    // ErrSetProcessFriendlyName() may get called after DLL Init, so we'll treat
+    // this one special and NOT base it off of the input string, but instead
+    // stick with the same buffer size.
     const WCHAR* WszProcessFriendlyName() const
     {
         Assert( m_fAllocationAttempted );
@@ -232,31 +240,37 @@ HandleError:
 } g_sysinfobuffers;
 
 
+//  Process Attributes
 
+//  returns the current process' name
 
 const WCHAR* WszUtilProcessName()
 {
     return g_sysinfobuffers.WszProcessName();
 }
 
+//  returns the current process' file name
 
 const WCHAR* WszUtilProcessFileName()
 {
     return g_sysinfobuffers.WszProcessFileName();
 }
 
+//  returns the current process' friendly name
 
 const WCHAR* WszUtilProcessFriendlyName()
 {
     return g_sysinfobuffers.WszProcessFriendlyName();
 }
 
+//  returns the current process' path
 
 const WCHAR* WszUtilProcessPath()
 {
     return g_sysinfobuffers.WszProcessPath();
 }
 
+//  returns the current process ID
 
 LOCAL DWORD g_dwProcessId;
 
@@ -265,14 +279,17 @@ const DWORD DwUtilProcessId()
     return g_dwProcessId;
 }
 
+//  returns the number of system processors on which the current process can execute
 
 LOCAL DWORD cProcessProcessor;
 
 const DWORD CUtilProcessProcessor()
 {
+    //  no one uses this correctly right now so set to # system processors
     return OSSyncGetProcessorCountMax();
 }
 
+//  returns fTrue if the current process is terminating abnormally
 
 volatile BOOL g_fProcessAbort = fFalse;
 
@@ -282,7 +299,9 @@ const BOOL FUtilProcessAbort()
 }
 
 
+//  System Attributes
 
+//  retrieves system major version
 
 LOCAL DWORD g_dwSystemVersionMajor;
 
@@ -292,6 +311,7 @@ DWORD DwUtilSystemVersionMajor()
     return g_dwSystemVersionMajor;
 }
 
+//  retrieves system minor version
 
 LOCAL DWORD g_dwSystemVersionMinor;
 
@@ -301,6 +321,7 @@ DWORD DwUtilSystemVersionMinor()
     return g_dwSystemVersionMinor;
 }
 
+//  retrieves system major build number
 
 LOCAL DWORD g_dwSystemBuildNumber;
 
@@ -310,6 +331,7 @@ DWORD DwUtilSystemBuildNumber()
     return g_dwSystemBuildNumber;
 }
 
+//  retrieves system service pack number
 
 LOCAL DWORD g_dwSystemServicePackNumber;
 
@@ -359,9 +381,11 @@ BOOL FUtilSystemRestrictIdleActivity()
     else
     {
 #ifdef DEBUG
+        //  in debug we test various times: 0 ms (i.e. every run / 12.5%), 1 ms (12.5%), 10 - 200 ms (25%),
+        //  the default .5 seconds (25%), and 1 - 90 seconds (25%) to force nasty bugs
         dtickCheck      = ( ( rand() % 2 ) ?
-                                ( ( rand() % 2 ) ? ( rand() % 2 )  : ( ( 1 + rand() % 20 ) * 10 ) ) :
-                                ( ( rand() % 2 ) ? dtickCheck : ( ( 1 + rand() % 90 ) * 1000 ) )
+                                ( ( rand() % 2 ) ? /*25%*/( rand() % 2 )  : /*25%*/( ( 1 + rand() % 20 ) * 10 ) ) :
+                                ( ( rand() % 2 ) ? /*25%*/dtickCheck : /*25%*/( ( 1 + rand() % 90 ) * 1000 ) )
                             );
 #endif
         dtickCheck = (DWORD)UlConfigOverrideInjection( 44080, dtickCheck );
@@ -373,7 +397,7 @@ BOOL FUtilSystemRestrictIdleActivity()
 
             fLastResult     = !GetSystemPowerStatus( &sps ) || sps.ACLineStatus != 1;
             tickLastCheck   = TickOSTimeCurrent();
-#endif
+#endif // !MINIMAL_FUNCTIONALITY
         }
     }
 
@@ -382,17 +406,19 @@ BOOL FUtilSystemRestrictIdleActivity()
     {
         g_eSpeedOfAcLinePowerLoss = 1 + rand() % 3;
     }
-    fLastResult = ( ( g_eSpeedOfAcLinePowerLoss == 1 ) ? fLastResult :
-                    ( ( g_eSpeedOfAcLinePowerLoss == 2 ) ? ( rand() % 999 ) == 0 : rand() % 2 )
+    fLastResult = ( ( g_eSpeedOfAcLinePowerLoss == 1 ) ? /*33%*/fLastResult :
+                    ( ( g_eSpeedOfAcLinePowerLoss == 2 ) ? /*33%*/( rand() % 999 ) == 0 : /*33%*/rand() % 2 )
                    );
-#endif
+#endif // DEBUG
 
     fLastResult = (BOOL)UlConfigOverrideInjection( 56368, fLastResult );
 
     return fLastResult;
 }
 
+//  Image Attributes
 
+//  retrieves image base address
 
 VOID * g_pvImageBaseAddress;
 
@@ -401,24 +427,28 @@ const VOID * PvUtilImageBaseAddress()
     return g_pvImageBaseAddress;
 }
 
+//  retrieves image name
 
 const WCHAR* WszUtilImageName()
 {
     return g_sysinfobuffers.WszImageName();
 }
 
+//  retrieves image path
 
 const WCHAR* WszUtilImagePath()
 {
     return g_sysinfobuffers.WszImagePath();
 }
 
+//  retrieves image version name
 
 const WCHAR* WszUtilImageVersionName()
 {
     return WSZVERSIONNAME;
 }
 
+//  retrieves image major version
 
 LOCAL DWORD g_dwImageVersionMajor;
 
@@ -427,6 +457,7 @@ DWORD DwUtilImageVersionMajor()
     return g_dwImageVersionMajor;
 }
 
+//  retrieves image minor version
 
 LOCAL DWORD g_dwImageVersionMinor;
 
@@ -435,6 +466,7 @@ DWORD DwUtilImageVersionMinor()
     return g_dwImageVersionMinor;
 }
 
+//  retrieves image major build number
 
 LOCAL DWORD g_dwImageBuildNumberMajor;
 
@@ -443,6 +475,7 @@ DWORD DwUtilImageBuildNumberMajor()
     return g_dwImageBuildNumberMajor;
 }
 
+//  retrieves image minor build number
 
 LOCAL DWORD g_dwImageBuildNumberMinor;
 
@@ -451,6 +484,7 @@ DWORD DwUtilImageBuildNumberMinor()
     return g_dwImageBuildNumberMinor;
 }
 
+//  retrieves image build class
 
 const WCHAR* WszUtilImageBuildClass()
 {
@@ -458,6 +492,7 @@ const WCHAR* WszUtilImageBuildClass()
 }
 
 
+//  ^C and ^Break handler for process termination
 
 BOOL g_fConsoleCtrlHandler;
 
@@ -467,6 +502,7 @@ BOOL WINAPI UtilSysinfoICtrlHandler( DWORD dwCtrlType )
     {
         case CTRL_C_EVENT:
         case CTRL_BREAK_EVENT:
+            //  set process to aborting status on ^C and ^Break
             OSIProcessAbort();
             break;
 
@@ -478,6 +514,7 @@ BOOL WINAPI UtilSysinfoICtrlHandler( DWORD dwCtrlType )
 }
 
 
+//  do all processors in the system have the PrefetchNTA capability?
 
 LOCAL BOOL fSSEInstructionsAvailable;
 LOCAL BOOL fSSE2InstructionsAvailable;
@@ -509,7 +546,7 @@ BOOL FDeterminePopcntCapabilities()
 #if ( defined _AMD64_ || defined _X86_ )
         INT cpuidInfo[4];
         __cpuid(cpuidInfo, 1);
-        return !!( cpuidInfo[2] & (1 << 23) );
+        return !!( cpuidInfo[2] & (1 << 23) );  // check bit 23 of CX
 
 #else
         return false;
@@ -523,12 +560,14 @@ BOOL FDetermineAVXCapabilities()
         __cpuid(cpuidInfo, 1);
         bool fAvxEnabled = false;
 
-        bool fOSXSAVE_Enabled = !!( cpuidInfo[2] & (1 << 27) );
-        bool fAVXSupported = !!( cpuidInfo[2] & (1 << 28) );
+        bool fOSXSAVE_Enabled = !!( cpuidInfo[2] & (1 << 27) ); // Is XSAVE/XRSTORE used to store register state on context switches?
+        bool fAVXSupported = !!( cpuidInfo[2] & (1 << 28) );        // Does the processor support AVX?
         if ( fOSXSAVE_Enabled && fAVXSupported )
         {
-            unsigned __int64 xcrFeatureMask = _xgetbv( _XCR_XFEATURE_ENABLED_MASK );
-            fAvxEnabled = ( ( xcrFeatureMask & 0x06 ) == 0x06 );
+            unsigned __int64 xcrFeatureMask = _xgetbv( _XCR_XFEATURE_ENABLED_MASK );    // Did the OS enable saving AVX+SSE state? (indicated by XCR0 - eXtended Control Register 0)?
+            fAvxEnabled = ( ( xcrFeatureMask & 0x06 ) == 0x06 );    // XCR0 -   bit0 = FPU state (always 1)
+                                                                    //          bit1 = SSE state
+                                                                    //          bit2 = AVX state
         }
 
         return fAvxEnabled;
@@ -546,9 +585,11 @@ LOCAL VOID DetermineProcessorCapabilities()
     g_fAVXEnabled                 = FDetermineAVXCapabilities();
 }
 
+//  post-terminate sysinfo subsystem
 
 void OSSysinfoPostterm()
 {
+    //  remove our console ctrl handler if set
 
     if ( g_fConsoleCtrlHandler )
     {
@@ -556,6 +597,7 @@ void OSSysinfoPostterm()
         g_fConsoleCtrlHandler = fFalse;
     }
 
+    //  Free the global memory.
 
     g_sysinfobuffers.FreeSysinfoBufferLifetimeManager();
 }
@@ -563,6 +605,7 @@ void OSSysinfoPostterm()
 
 #ifndef RTM
 
+//  provide a registry override so we can fake the version of the OS we are running on
 
 LOCAL BOOL g_fSystemVersionOverridesTried = fFalse;
 
@@ -626,10 +669,12 @@ VOID GetSystemVersionOverridesFromRegistry()
 #endif
 
 
+//  determine which version of windows we are on
 
 BOOL FGetSystemVersion()
 {
 
+    //  cache system attributes
 
     OSVERSIONINFOW ovi;
     ovi.dwOSVersionInfoSize = sizeof( ovi );
@@ -638,9 +683,12 @@ BOOL FGetSystemVersion()
         goto HandleError;
     }
 
+    // As of Windows 8.1, this is no longer reliable -- it depends on how the
+    // executable was manifested.
     g_dwSystemVersionMajor = ovi.dwMajorVersion;
     g_dwSystemVersionMinor = ovi.dwMinorVersion;
     g_dwSystemBuildNumber = ovi.dwBuildNumber;
+    //  string of format "Service Pack %d"
     WCHAR* szN;
     szN = wcspbrk( ovi.szCSDVersion, L"0123456789" );
     g_dwSystemServicePackNumber = szN ? _wtol( szN ) : 0;
@@ -652,9 +700,11 @@ HandleError:
 }
 
 
+//  pre-init sysinfo subsystem
 
 BOOL FOSSysinfoPreinit()
 {
+    //  cache process name and path
     WCHAR wszWorkingBuffer[ 600 ];
 
     ERR err = g_sysinfobuffers.ErrAllocateIfNeeded();
@@ -675,15 +725,18 @@ BOOL FOSSysinfoPreinit()
 
     Call( g_sysinfobuffers.ErrSetProcessFriendlyName( WszUtilProcessName() ) );
 
+    //  cache process id
 
     g_dwProcessId = GetCurrentProcessId();
 
+    //  cache the version of the OS we are running on
 
     if( !FGetSystemVersion() )
     {
         goto HandleError;
     }
 
+    //  cache image name and path
 
     MEMORY_BASIC_INFORMATION mbi;
     if ( !VirtualQueryEx( GetCurrentProcess(), FOSSysinfoPreinit, &mbi, sizeof( mbi ) ) )
@@ -729,24 +782,25 @@ BOOL FOSSysinfoPreinit()
 #endif
 #ifdef DEBUG
     OSStrCbAppendW( wszWorkingBuffer, sizeof(wszWorkingBuffer), L" DEBUG" );
-#else
+#else  //  !DEBUG
     OSStrCbAppendW( wszWorkingBuffer, sizeof(wszWorkingBuffer), L" RETAIL" );
-#endif
+#endif  //  DEBUG
 #ifdef RTM
     OSStrCbAppendW( wszWorkingBuffer, sizeof(wszWorkingBuffer), L" RTM" );
-#endif
+#endif  //  RTM
 #ifdef _UNICODE
     OSStrCbAppendA( wszWorkingBuffer, sizeof(wszWorkingBuffer), L" UNICODE" );
-#else
+#else  //  !_UNICODE
 #ifdef _MBCS
     OSStrCbAppendW( wszWorkingBuffer, sizeof(wszWorkingBuffer), L" MBCS" );
-#else
+#else  //  !_MBCS
     OSStrCbAppendW( wszWorkingBuffer, sizeof(wszWorkingBuffer), L" ASCII" );
-#endif
-#endif
+#endif  //  _MBCS
+#endif  //  _UNICODE
 
     Call( g_sysinfobuffers.ErrSetUtilImageBuildClass( wszWorkingBuffer ) );
 
+    //  determine processor prefetch capability
 
     DetermineProcessorCapabilities();
 
@@ -776,10 +830,11 @@ VOID COSLayerPreInit::SetRestrictIdleActivity( const BOOL fRestrictIdleActivity 
 
 COSEventTraceIdCheck g_traceidcheckSysGlobal;
 
-void OSSysTraceStationId( const DWORD  tsidr_ )
+void OSSysTraceStationId( const DWORD /* TraceStationIdentificationReason */ tsidr_ )
 {
     const TraceStationIdentificationReason tsidr = (TraceStationIdentificationReason)tsidr_;
 
+    //  Called (with tsidrPulseInfo) for every DB cache read/write.
 
     if ( !g_traceidcheckSysGlobal.FAnnounceTime< _etguidSysStationId >( tsidr ) )
     {
@@ -791,16 +846,20 @@ void OSSysTraceStationId( const DWORD  tsidr_ )
     DWORD dwImageBuildMajor = DwUtilImageBuildNumberMajor();
     DWORD dwImageBuildMinor = DwUtilImageBuildNumberMinor();
 
+    //  Note: We don't log the PID, because it is automatically logged by ETW.
     ETSysStationId( tsidr, dwImageVerMajor, dwImageVerMinor, dwImageBuildMajor, dwImageBuildMinor, WszUtilProcessFileName() );
 
+    //  maybe computer name?  surely some of this must be in trace info itself.
 }
 
+//  FOSSetupRunning is used to determine if ESE is being used during setup.
+//
 static const WCHAR c_wszSysSetupKey[] = L"System\\Setup";
 static const WCHAR c_wszSysSetupValue[] = L"SystemSetupInProgress";
 
 BOOL FOSSetupRunning()
 {
-    BOOL                    fSetupRunning       = fFalse;
+    BOOL                    fSetupRunning       = fFalse;  //  assume it is not
     HKEY                    hKey                = NULL;
     DWORD                   dwType              = 0;
     DWORD                   dwAnswer            = 0;
@@ -846,11 +905,14 @@ HandleError:
 
 #ifdef ESENT
 
+// Defined in $(BASE_INC_PATH)
 #include <appmodel.h>
 #include <statemanager.h>
 
 #else
 WINBASEAPI
+// 2012/03/23 Exchange does not yet have SALv2:
+// _Success_(return == ERROR_SUCCESS)
 LONG
 WINAPI
 GetCurrentPackageFullName(
@@ -873,6 +935,7 @@ VOID CalculateCurrentProcessIsPackaged()
     {
         Assert( !g_fIsProcessPackaged );
 
+        // If the function is not available, then the process can't be packaged.
 
         NTOSFuncError( pfnGetCurrentPackageFullName, g_mwszzAppModelRuntimeLibs, GetCurrentPackageFullName, oslfExpectedOnWin8 | oslfStrictFree );
 
@@ -881,10 +944,12 @@ VOID CalculateCurrentProcessIsPackaged()
 
         if ( ERROR_CALL_NOT_IMPLEMENTED == lWin32Error )
         {
+            // The function isn't available (e.g. pre-Win8 machine).
             g_fIsProcessPackagedCalculated = fTrue;
             return;
         }
 
+        // Is it possible that this Assert might break down in low-resource conditions?
         AssertSz( APPMODEL_ERROR_NO_PACKAGE == lWin32Error || ERROR_INSUFFICIENT_BUFFER == lWin32Error,
                   "GetCurrentPackageFullName returned an unexpected return code: %d (%#x).", lWin32Error, lWin32Error );
 
@@ -899,6 +964,7 @@ VOID CalculateCurrentProcessIsPackaged()
     return;
 }
 
+//  returns whether the current process is Packaged (Win8 only).
 
 const BOOL FUtilProcessIsPackaged()
 {
@@ -920,6 +986,7 @@ LOCAL VOID CalculateCurrentProcessIsWow64()
     {
         Assert( !g_fIsProcessWow64 );
 
+        // If the function is not available, then the process can't be Wow64.
 
         NTOSFuncError( pfnIsWow64Process, g_mwszzWow64Libs, IsWow64Process, oslfExpectedOnWin6 | oslfStrictFree );
 
@@ -936,6 +1003,7 @@ LOCAL VOID CalculateCurrentProcessIsWow64()
     return;
 }
 
+//  returns whether the current process is Wow64 (Win8 only).
 
 const BOOL FUtilIProcessIsWow64()
 {
@@ -948,37 +1016,64 @@ const BOOL FUtilIProcessIsWow64()
     return g_fIsProcessWow64;
 }
 
+//  Private Staging (for alpha, beta, and test in production staging) of features.
+//
 
-enum UtilSystemBetaSiteMode
+enum UtilSystemBetaSiteMode //  usbsm
 {
+    //  You can _NOT_ change these constants b/c some of them are extruded out the JET API, and so
+    //  I have picked values that leave room in the middle for expansion - though technically the
+    //  order doesn't matter (other than making the *All constants easy).  The constants that are
+    //  exposed out the JET API are marked with [*].
 
+    //  the *Explicit and *All constants are _never_ supposed to propogated to jethdr.w ...
+    //  The *All aren't propagated because they are supposed to be sums of environments for use
+    //  in the g_rgbetaconfigs table, not to be passed in for the param.
+    //  The *Explicit are to be used to manually use a numeric value to hack the registry to turn
+    //  on a feature explicitly.
 
-    usbsmTestEnvExplicit        =     0x01,
-    usbsmTestEnvLocalMode       =     0x04,
-    usbsmTestEnvAlphaMode       =     0x10,
-    usbsmTestEnvBetaMode        =     0x40,
-    usbsmTestEnvDebugMode       =     0x80,
-    usbsmTestEnvAll             =     0xD5,
+    //  Test Environments - _NO_ real data at risk
+    //
+    usbsmTestEnvExplicit        =     0x01,     //  requires explicit enablement
+    //usbsmStolenDoNotUse       =     0x02,     //  - stolen for usbsmExFeat* space
+    usbsmTestEnvLocalMode       =     0x04,     //  Set for accept on dev boxes (but only consumed by few ESE tests so far).
+    //usbsmStolenDoNotUse       =     0x08,     //  - stolen for usbsmExFeat* space
+    usbsmTestEnvAlphaMode       =     0x10,     //  ESE test pass (but not tests running via "store.exe") in focus/dailies (but only consumed by few ESE tests so far).
+    //usbsmStolenDoNotUse       =     0x20,     //  - stolen for usbsmExFeat* space
+    usbsmTestEnvBetaMode        =     0x40,     //  [*]Exchange Test Pass - Even in store (extest.microsoft.com) - includes perf tests.
+    usbsmTestEnvDebugMode       =     0x80,     //  Used to turn on debug code if no staging mode is set (such as for eseutil and WSTF tests currently).
+    usbsmTestEnvAll             =     0xD5,     //  Encompasses all previous usbsmTestEnv* bits / Testing environments.
 
-    usbsmSelfhostExplicit       =   0x0100,
-    usbsmSelfhostLocalMode      =   0x0400,
-    usbsmSelfhostAlphaMode      =   0x1000,
-    usbsmSelfhostBetaMode       =   0x4000,
-    usbsmSelfhostAll            =   0x5500,
+    //  Dogfood / Selfhost - Microsoft data at risk
+    //
+    usbsmSelfhostExplicit       =   0x0100,     //  requires explicit enablement
+    usbsmSelfhostLocalMode      =   0x0400,     //  [*]Primary/Pioneer/DFMain selfhost (exchange.corp.microsoft.com)
+    usbsmSelfhostAlphaMode      =   0x1000,     //  [*]Service Dogfood / SDF & SDFv2
+    usbsmSelfhostBetaMode       =   0x4000,     //  [*]Reserved
+    usbsmSelfhostAll            =   0x5500,     //  Encompasses all previous usbsmSelfhost* bits / selfhost environments.
 
-    usbsmProdExplicit           = 0x010000,
-    usbsmProdLocalMode          = 0x040000,
-    usbsmProdAlphaMode          = 0x100000,
-    usbsmProdBetaMode           = 0x400000,
-    usbsmProdWindows            = 0x800000,
-    usbsmProdAll                = 0xD50000,
+    //  Service(s) Production Staging - Customer data at risk
+    //
+    usbsmProdExplicit           = 0x010000,     //
+    usbsmProdLocalMode          = 0x040000,     //  [*]NYI - Reserved
+    usbsmProdAlphaMode          = 0x100000,     //  [*]Datacenter SIP (NAMPRD13 forest)
+    usbsmProdBetaMode           = 0x400000,     //  [*]Datacenter Main (Microsoft owned)
+    usbsmProdWindows            = 0x800000,     //  [*]Windows
+    usbsmProdAll                = 0xD50000,     //  Encompasses all previous usbsmProd* bits / production staging domains.
 
-    usbsmExFeatRiskyFeatTest    = 0x00000002,
-    usbsmExFeatNegTest          = 0x00000008,
-    usbsmExFeatOtherFeatTest    = 0x00000020,
+    //  Explicit or Experimental Features (those too risky to accidentally turn on, or requiring explicit validation phase)
+    //
+    //  NOTE: You will only be able to test _one_ of these features at a time.
+    //
+    //  IMPORTANT: BEFORE REMOVING FROM THIS TABLE, ENSURE YOU'VE REMOVED ANY PROD OVERRIDES FOR YOUR FEATURE FROM
+    //  THE PRODUCTION ENVIRONMENT FOR AT LEAST A FEW WEEKS.  Also recommend you just comment it out for a few weeks
+    //  as well to ensure it isn't reused by anyone.
+    usbsmExFeatRiskyFeatTest    = 0x00000002,   //  Basic unit test feature
+    usbsmExFeatNegTest          = 0x00000008,   //  Basic unit test feature
+    usbsmExFeatOtherFeatTest    = 0x00000020,   //  Basic unit test feature
 
-    usbsmExFeatNext1                                = 0x01000000,
-    usbsmExFeatNext2                                = 0x02000000,
+    usbsmExFeatNext1                                = 0x01000000,  // was ...EseOld2DoesSecondaryIndices - removed 2020/08/04
+    usbsmExFeatNext2                                = 0x02000000,  // was ...EseSetDbVersion - removed 2018/08/01 - around / bit after datacenter fork build AFTER this one v15.20.1058.000
     usbsmExFeatNext3                                = 0x04000000,
     usbsmExFeatNext4                                = 0x08000000,
     usbsmExFeatNext5                                = 0x10000000,
@@ -986,6 +1081,7 @@ enum UtilSystemBetaSiteMode
     usbsmExFeatNext7                                = 0x40000000,
     usbsmExFeatNext8                                = 0x80000000,
 
+    //  Add explicit features for testing above here.
     usbsmExFeatLast,
     usbsmExFeatureMask                              = 0xFF00002A
 };
@@ -994,7 +1090,7 @@ DEFINE_ENUM_FLAG_OPERATORS_BASIC( UtilSystemBetaSiteMode );
 
 INT usbsmPrimaryEnvironments    = ( usbsmTestEnvAll | usbsmSelfhostAll | usbsmProdAll );
 INT usbsmExFeatures             = usbsmExFeatureMask;
-#ifdef DEBUG
+#ifdef DEBUG    // used for unit tests
 INT usbsmExFeatureMin           = usbsmExFeatRiskyFeatTest;
 INT usbsmExFeatureMax           = usbsmExFeatLast;
 #endif
@@ -1012,18 +1108,22 @@ C_ASSERT( JET_bitStageProdAlphaMode == usbsmProdAlphaMode );
 C_ASSERT( JET_bitStageProdBetaMode == usbsmProdBetaMode );
 
 const LONG fLoggedEventAlready = -1;
-C_ASSERT( fLoggedEventAlready );
+C_ASSERT( fLoggedEventAlready ); // testing that implicit BOOL usage works, used this way
 
 UtilSystemBetaConfig    g_rgbetaconfigs [] =
 {
+    //  Note the goal is to keep this list to zero (or near zero) ... after a feature is deployed
+    //  everywhere and is sound - then we remove the line from this table.
 
+    // { fSuppressInfoEvent, fStaticFeature, ulFeatureId,           usbsm },
     { fTrue,  fFeatureDynamic, EseTestFeatures,                     usbsmTestEnvAll },
 
+    //  Add new features above here.
 
 #ifndef OS_LAYER_VIOLATIONS
     { fTrue,  fFeatureDynamic, EseTestCase,                         usbsmTestEnvAll OnDebug( | usbsmSelfhostAlphaMode ) OnNonRTM( | usbsmSelfhostBetaMode ) | usbsmExFeatOtherFeatTest },
-    { fFalse, fFeatureStatic,  EseTestCaseTwo,                      usbsmTestEnvAll   },
-    { fFalse, fFeatureDynamic, EseTestCaseThree,                    usbsmProdAll  },
+    { fFalse, fFeatureStatic,  EseTestCaseTwo,                      usbsmTestEnvAll  /* ! in prod */ },
+    { fFalse, fFeatureDynamic, EseTestCaseThree,                    usbsmProdAll /* ! in test */ },
     { fFalse, fFeatureDynamic, EseRiskyFeatTest,                    usbsmSelfhostAlphaMode | usbsmExFeatRiskyFeatTest },
 #endif
 };
@@ -1031,6 +1131,10 @@ C_ASSERT( _countof(g_rgbetaconfigs) == EseFeatureMax );
 
 void UtilReportBetaFeatureInUse( const INST * const pinst, const UtilSystemBetaSiteMode usbsmCurrent, const ULONG featureid, PCWSTR const wszFeatureName )
 {
+    //  Ensure we only log the event once, by suppressing the event here after ...
+    //  Note while we will only log the event once - in the event of two threads competing ... the
+    //  2nd thread will go on to actually perform the feature potentially before the first / winning
+    //  thread logs the event that we're using the feature. :P  Doesn't seem worth a critsect.
     if ( fFalse == AtomicCompareExchange( &( g_rgbetaconfigs[featureid].fSuppressInfoEvent ), (LONG)fFalse, (LONG)fLoggedEventAlready ) )
     {
 #ifdef ENABLE_MICROSOFT_MANAGED_DATACENTER_LEVEL_OPTICS
@@ -1044,6 +1148,7 @@ void UtilReportBetaFeatureInUse( const INST * const pinst, const UtilSystemBetaS
 }
 
 
+//  retrieves licensing policy configuration
 
 ERR ErrUtilSystemSlConfiguration(
     _In_z_ const WCHAR *    pszValueName,
@@ -1069,7 +1174,7 @@ ERR ErrUtilSystemSlConfiguration(
             err = ErrERRCheck( JET_errUnloadableOSFunctionality );
     }
 #else
-    err = ErrERRCheck( JET_errDisabledFunctionality );
+    err = ErrERRCheck( JET_errDisabledFunctionality );  // may be overwritten by config overrides below...
 #endif
 
 #ifdef DEBUG
@@ -1088,12 +1193,15 @@ ERR ErrUtilSystemSlConfiguration(
     return err;
 }
 
+// I'm going to leave this without a #ifdef ESENT so we can get some testing on Exchange side of the
+// actual Windows WNF_* API we want to use here.
 #define ENABLE_WINPRIV_DOWNGRADE_WINDOW_CHECK
 
 #ifdef ENABLE_WINPRIV_DOWNGRADE_WINDOW_CHECK
 
-#include "NTSecAPI.h"
+#include "NTSecAPI.h" // for NTSTATUS typedef
 
+// Exchange doesn't have ntdef.h available?
 
 #ifndef _DEFINED__WNF_STATE_NAME
 #define _DEFINED__WNF_STATE_NAME
@@ -1102,6 +1210,12 @@ typedef struct _WNF_STATE_NAME {
 } WNF_STATE_NAME;
 
 
+// Exchange doesn't have mrmwnf.h, ntexapi.h, or ntosifs.h either ... ugh.
+//
+// The change stamp is a value associated with the update that
+// uniquely identifies the version of the data for the particular
+// state within its scope.
+//
 
 typedef ULONG WNF_CHANGE_STAMP, *PWNF_CHANGE_STAMP;
 
@@ -1113,8 +1227,21 @@ typedef ULONG WNF_CHANGE_STAMP, *PWNF_CHANGE_STAMP;
     typedef ULONG WNF_CHANGE_STAMP, *PWNF_CHANGE_STAMP;
     typedef struct _WNF_TYPE_ID* PWNF_TYPE_ID;
     typedef const struct _WNF_TYPE_ID* PCWNF_TYPE_ID;
+//    typedef struct _WNF_USER_SUBSCRIPTION *PWNF_USER_SUBSCRIPTION;
 
 
+// Exchange doesn't have wnfnamesp.h ... jeez how many .h files can one API need!
+//
+// WNF_DEP_UNINSTALL_DISABLED
+//
+//   Description : This event triggers when the Uninstall of the system has been disabled
+//   Sequence    : 2
+//   Type        : WnfWellKnownStateName
+//   Scope       : WnfDataScopeSystem
+//   SDDL        : D:(A;;1;;;AU)(A;;3;;;SY)(A;;3;;;BA)
+//   Data size   : 4
+//   Data format : <untyped>
+//
 
 EXTERN_C __declspec(selectany) const WNF_STATE_NAME
     WNF_DEP_UNINSTALL_DISABLED = {0xa3bc1475, 0x41960b29};
@@ -1123,13 +1250,14 @@ EXTERN_C __declspec(selectany) const WNF_STATE_NAME
 typedef struct _WNF_STATE_NAME* PWNF_STATE_NAME;
 typedef const struct _WNF_STATE_NAME* PCWNF_STATE_NAME;
 
-#define STATUS_RETRY                            ((NTSTATUS)0xC000022DL)
-#define STATUS_SUCCESS                          ((NTSTATUS)0x00000000L)
+#define STATUS_RETRY                            ((NTSTATUS)0xC000022DL) // ntstatus
+#define STATUS_SUCCESS                          ((NTSTATUS)0x00000000L) // ntsubauth
 
 _Always_(_Post_satisfies_(return == STATUS_NO_MEMORY || return == STATUS_RETRY || return == STATUS_SUCCESS))
 _Function_class_(WNF_USER_CALLBACK)
 typedef
 NTSTATUS
+// NTAPI
 WNF_USER_CALLBACK(
     _In_ WNF_STATE_NAME StateName,
     _In_ WNF_CHANGE_STAMP ChangeStamp,
@@ -1140,7 +1268,10 @@ WNF_USER_CALLBACK(
     );
 typedef WNF_USER_CALLBACK *PWNF_USER_CALLBACK;
 
+// think this is __declspec(dllimport) ... so don't need it.
+//NTSYSAPI
 NTSTATUS
+// NTAPI
 RtlQueryWnfStateData(
     _Out_ PWNF_CHANGE_STAMP ChangeStamp,
     _In_ WNF_STATE_NAME StateName,
@@ -1159,6 +1290,7 @@ static NTSTATUS WnfQueryDWordDataCallback(
     _In_reads_bytes_opt_(cbBuffer) const VOID* pvBuffer,
     _In_ ULONG                 cbBuffer )
 {
+    // Why would it be 0?  But other windows code expected it, so we'll handle it.
     Assert( ( cbBuffer == 0 ) || ( cbBuffer == sizeof(DWORD) ) );
     Assert( pfExpired != NULL );
 
@@ -1175,18 +1307,26 @@ static NTSTATUS WnfQueryDWordDataCallback(
 
     *(BOOL*)pfExpired = !!dwData;
 
-    return 0;
+    return 0; // STATUS_SUCCESS;
 }
 
-#endif
+#endif // ENABLE_WINPRIV_DOWNGRADE_WINDOW_CHECK
 
 ERR ErrUtilOsDowngradeWindowExpired( _Out_ BOOL * pfExpired )
 {
     NTOSFuncError( pfnRtlQueryWnfStateData, g_mwszzNtdllLibs, RtlQueryWnfStateData, oslfExpectedOnWin10 );
 
+    //  Valid values for UlConfigOverrideInjection - 50026
+    //    0 / fFalse   - Force JET_errSuccess + pfExpired == fFalse.
+    //    1 / fTrue    - Force JET_errSuccess + pfExpired == fTrue.
+    //    3 / <Unset>  - [NT] Passes through to real WinAPI; [EX] Always returns JET_errSuccess + fTrue.  (also the Retail / Free Behavior)
+    //    4            - Allow real WinAPI result to be returned.  May produce inconsistent test results if the flag could be both off and on depending on OS state / pathces.
+    //    -106 / <Neg> - Return -106 and leave pfExpired unset.
+    //
     const ERR errFaultInj = (ERR)UlConfigOverrideInjection( 50026, 3 );
     if ( errFaultInj < JET_errSuccess )
     {
+        // treat as err
         return ErrERRCheck( errFaultInj );
     }
 
@@ -1204,13 +1344,14 @@ ERR ErrUtilOsDowngradeWindowExpired( _Out_ BOOL * pfExpired )
         *pfExpired = fTrue;
         return JET_errSuccess;
 #else
+        //  Perhaps we should do proper error mapping.  Error not returned to user though, soft fail of upgrade.
         return ErrERRCheck( JET_errTaskDropped );
 #endif
     }
 
-#else
-    Assert( errFaultInj != 4 );
-#endif
+#else // !ENABLE_WINPRIV_DOWNGRADE_WINDOW_CHECK
+    Assert( errFaultInj != 4 ); // impossible - remove cases of 4 from test code then.
+#endif // ENABLE_WINPRIV_DOWNGRADE_WINDOW_CHECK
 
     if ( errFaultInj != 4 )
     {
@@ -1227,22 +1368,26 @@ ERR ErrUtilOsDowngradeWindowExpired( _Out_ BOOL * pfExpired )
     return JET_errSuccess;
 }
 
+//  terminate sysinfo subsystem
 
 void OSSysinfoTerm()
 {
     OSSysTraceStationId( tsidrCloseTerm );
 
+    //  reset static features and event log statusi
 
     for( ULONG featureid = 0; featureid < _countof(g_rgbetaconfigs); featureid++ )
     {
         Assert( g_rgbetaconfigs[featureid].fStaticFeature == fFeatureDynamic || g_rgbetaconfigs[featureid].fStaticFeature == fFeatureStatic );
         if ( g_rgbetaconfigs[featureid].fSuppressInfoEvent == fLoggedEventAlready )
         {
+            //  reset so we'll re-log the event
             (void)AtomicExchange( &( g_rgbetaconfigs[featureid].fSuppressInfoEvent ), fFalse );
         }
     }
 }
 
+//  init sysinfo subsystem
 
 ERR ErrOSSysinfoInit()
 {

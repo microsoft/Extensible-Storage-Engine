@@ -20,6 +20,9 @@ ERR ErrOSEncryptionVerifyKey(
     _In_reads_bytes_(cbKey)                         const   BYTE *pbKey,
     _In_                                                    ULONG cbKey );
 
+// Encrypt using AES256 encryption in CBC mode with PKCS5 padding.
+// Also, there is initial padding for checksum, InitVector in the output data.
+// Use CbOSEncryptAes256SizeNeeded above to figure out how big the output buffer needs to be.
 ERR
 ErrOSEncryptWithAes256(
     _Inout_updates_bytes_to_(cbDataBufLen, *pcbDataLen)     BYTE *pbData,
@@ -36,5 +39,5 @@ ErrOSDecryptWithAes256(
     _In_reads_bytes_(cbKey)                     const   BYTE *pbKey,
     _In_                                                ULONG cbKey );
 
-#endif
+#endif // _OS_ENCRYPT_HXX_INCLUDED
 

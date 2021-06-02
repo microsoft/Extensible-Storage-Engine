@@ -2,9 +2,11 @@
 // Licensed under the MIT License.
 #include "ese_common.hxx"
 #include "esetest_bounce.hxx"
-#include <stdlib.h>
+#include <stdlib.h> // for rand()
 #include <strsafe.h>
 #include <windows.h>
+// This file was generated, but you may edit it. If generate_ese_stubs.pl is
+// run again, it will create a '_temp' file instead.
 
 JET_ERR
 BounceJetEnableMultiInstance(
@@ -32,13 +34,16 @@ BounceJetEnableMultiInstance(
                                             unsigned long *     pcsetsucceed );
 
     static PFN_JetEnableMultiInstanceW pfnJetEnableMultiInstanceW = NULL;
+    // Should we widen the parameter?
     bool    fWiden = FEsetestWidenParameters();
 
 
+    // Declare the variables
     JET_SETSYSPARAM_W*  wpsetsysparam   = NULL;
 
     if ( fWiden )
     {
+        // Widen the variables
         wpsetsysparam = EsetestWidenJET_SETSYSPARAM( __FUNCTION__, psetsysparam, csetsysparam );
         if ( NULL == wpsetsysparam )
         {
@@ -47,13 +52,15 @@ BounceJetEnableMultiInstance(
             goto Cleanup;
         }
 
-    }
+    } // fWiden
 
     if ( fWiden )
     {
 
+        // Get the procedure address if this is the first time calling this function.
         if ( NULL == pfnJetEnableMultiInstanceW )
         {
+            // Do not bother with synchronization of GetProcAddress() -- sloppy, but a leak isn't a big deal.
             const HMODULE       hEseDll = HmodEsetestEseDll();
 
             if ( NULL != hEseDll )
@@ -73,11 +80,14 @@ BounceJetEnableMultiInstance(
     }
     else
     {
+        // Call the legacy API sometimes, call the 'A' API others (if available).
         if ( ( !FEsetestFeaturePresent( EseFeatureApisExportedWithA ) )  || 0 == ( rand() % 3 ) )
         {
 
+            // Get the procedure address if this is the first time calling this function.
             if ( NULL == pfnJetEnableMultiInstance )
             {
+                // Do not bother with synchronization of GetProcAddress() -- sloppy, but a leak isn't a big deal.
                 const HMODULE       hEseDll = HmodEsetestEseDll();
 
                 if ( NULL != hEseDll )
@@ -98,8 +108,10 @@ BounceJetEnableMultiInstance(
         else
         {
 
+            // Get the procedure address if this is the first time calling this function.
             if ( NULL == pfnJetEnableMultiInstanceA )
             {
+                // Do not bother with synchronization of GetProcAddress() -- sloppy, but a leak isn't a big deal.
                 const HMODULE       hEseDll = HmodEsetestEseDll();
 
                 if ( NULL != hEseDll )
@@ -118,7 +130,7 @@ BounceJetEnableMultiInstance(
             err = (*pfnJetEnableMultiInstanceA)( psetsysparam, csetsysparam, pcsetsucceed );
         }
     }
-    goto Cleanup;
+    goto Cleanup;   // Need to have the explicit goto in case the function hasn't referenced 'Cleanup' yet.
 Cleanup:
 
     if ( fWiden )
@@ -129,6 +141,7 @@ Cleanup:
             tprintf( "%s():%d Failed to %s()" CRLF, __FUNCTION__, __LINE__, "EsetestUnwidenJET_SETSYSPARAM" );
             if ( JET_errSuccess == err )
             {
+                // Only overwrite err if it's not a success.
                 err = errT;
             }
         }
@@ -136,6 +149,7 @@ Cleanup:
     return err;
 }
 
+//---------------------------------------------------
 
 
 
@@ -168,14 +182,17 @@ BounceJetCreateTableColumnIndex(
     JET_TABLECREATE_W   *ptablecreate  );
 
     static PFN_JetCreateTableColumnIndexW pfnJetCreateTableColumnIndexW = NULL;
+    // Should we widen the parameter?
     bool    fWiden = FEsetestWidenParameters();
 
     bool    fChanged    = false;
     JET_TABLECREATE*    ptablecreateCompatible  = NULL;
 
+    // Declare the variables
     JET_TABLECREATE_W* wptablecreate    = NULL;
     JET_TABLECREATE*  ptablecreateT     = NULL;
 
+    // Compression.
     bool fAllocated = false;
     JET_COLUMNCREATE* pcolumncreateInternal = NULL;
     if ( ptablecreate ){
@@ -183,6 +200,8 @@ BounceJetCreateTableColumnIndex(
         ptablecreate->rgcolumncreate = EsetestCompressJET_COLUMNCREATE( pcolumncreateInternal, ptablecreate->cColumns, &fAllocated );
     }
 
+    // JET_INDEXCREATE changed sizes in Longhorn
+    // Change ptablecreate to be compatible with this particular version of ESE
     Call( EsetestAdaptJET_TABLECREATE( __FUNCTION__, ptablecreate, &ptablecreateCompatible, &fChanged ) );
     if ( fChanged && NULL == ptablecreateCompatible )
     {
@@ -191,10 +210,12 @@ BounceJetCreateTableColumnIndex(
         goto Cleanup;
     }
 
+    //JET_TABLECREATE* const ptablecreateT = fChanged ? ptablecreateCompatible : ptablecreate;
     ptablecreateT = fChanged ? ptablecreateCompatible : ptablecreate;
 
     if ( fWiden )
     {
+        // Widen the variables
         wptablecreate = EsetestWidenJET_TABLECREATE( __FUNCTION__, ptablecreateT );
         if ( NULL == wptablecreate )
         {
@@ -203,13 +224,15 @@ BounceJetCreateTableColumnIndex(
             goto Cleanup;
         }
 
-    }
+    } // fWiden
 
     if ( fWiden )
     {
 
+        // Get the procedure address if this is the first time calling this function.
         if ( NULL == pfnJetCreateTableColumnIndexW )
         {
+            // Do not bother with synchronization of GetProcAddress() -- sloppy, but a leak isn't a big deal.
             const HMODULE       hEseDll = HmodEsetestEseDll();
 
             if ( NULL != hEseDll )
@@ -229,11 +252,14 @@ BounceJetCreateTableColumnIndex(
     }
     else
     {
+        // Call the legacy API sometimes, call the 'A' API others (if available).
         if ( ( !FEsetestFeaturePresent( EseFeatureApisExportedWithA ) )  || 0 == ( rand() % 3 ) )
         {
 
+            // Get the procedure address if this is the first time calling this function.
             if ( NULL == pfnJetCreateTableColumnIndex )
             {
+                // Do not bother with synchronization of GetProcAddress() -- sloppy, but a leak isn't a big deal.
                 const HMODULE       hEseDll = HmodEsetestEseDll();
 
                 if ( NULL != hEseDll )
@@ -254,8 +280,10 @@ BounceJetCreateTableColumnIndex(
         else
         {
 
+            // Get the procedure address if this is the first time calling this function.
             if ( NULL == pfnJetCreateTableColumnIndexA )
             {
+                // Do not bother with synchronization of GetProcAddress() -- sloppy, but a leak isn't a big deal.
                 const HMODULE       hEseDll = HmodEsetestEseDll();
 
                 if ( NULL != hEseDll )
@@ -287,6 +315,7 @@ Cleanup:
             tprintf( "%s():%d Failed to %s()" CRLF, __FUNCTION__, __LINE__, "EsetestUnwidenJET_TABLECREATE" );
             if ( JET_errSuccess == err )
             {
+                // Only overwrite err if it's not a success.
                 err = errT;
             }
         }
@@ -301,6 +330,7 @@ Cleanup:
             tprintf( "%s():%d Failed to %s()" CRLF, __FUNCTION__, __LINE__, "EsetestUnadaptJET_TABLECREATE" );
             if ( JET_errSuccess == err )
             {
+                // Only overwrite err if it's not a success.
                 err = errT;
             }
         }
@@ -318,6 +348,7 @@ Cleanup:
     return err;
 }
 
+//---------------------------------------------------
 
 
 JET_ERR
@@ -349,14 +380,17 @@ BounceJetCreateTableColumnIndex2(
     JET_TABLECREATE2_W  *ptablecreate  );
 
     static PFN_JetCreateTableColumnIndex2W pfnJetCreateTableColumnIndex2W = NULL;
+    // Should we widen the parameter?
     bool    fWiden = FEsetestWidenParameters();
 
     bool    fChanged    = false;
     JET_TABLECREATE2*   ptablecreateCompatible  = NULL;
 
+    // Declare the variables
     JET_TABLECREATE2_W* wptablecreate   = NULL;
     JET_TABLECREATE2* ptablecreateT = NULL;
 
+    // Compression.
     bool fAllocated = false;
     JET_COLUMNCREATE* pcolumncreateInternal = NULL;
     if ( ptablecreate ){
@@ -364,6 +398,8 @@ BounceJetCreateTableColumnIndex2(
         ptablecreate->rgcolumncreate = EsetestCompressJET_COLUMNCREATE( pcolumncreateInternal, ptablecreate->cColumns, &fAllocated );
     }
 
+    // JET_INDEXCREATE changed sizes in Longhorn
+    // Change ptablecreate to be compatible with this particular version of ESE
     Call( EsetestAdaptJET_TABLECREATE2( __FUNCTION__, ptablecreate, &ptablecreateCompatible, &fChanged ) );
     if ( fChanged && NULL == ptablecreateCompatible )
     {
@@ -376,6 +412,7 @@ BounceJetCreateTableColumnIndex2(
     
     if ( fWiden )
     {
+        // Widen the variables
         wptablecreate = EsetestWidenJET_TABLECREATE2( __FUNCTION__, ptablecreateT );
         if ( NULL == wptablecreate )
         {
@@ -384,14 +421,16 @@ BounceJetCreateTableColumnIndex2(
             goto Cleanup;
         }
 
-    }
+    } // fWiden
 
 
     if ( fWiden )
     {
 
+        // Get the procedure address if this is the first time calling this function.
         if ( NULL == pfnJetCreateTableColumnIndex2W )
         {
+            // Do not bother with synchronization of GetProcAddress() -- sloppy, but a leak isn't a big deal.
             const HMODULE       hEseDll = HmodEsetestEseDll();
 
             if ( NULL != hEseDll )
@@ -411,11 +450,14 @@ BounceJetCreateTableColumnIndex2(
     }
     else
     {
+        // Call the legacy API sometimes, call the 'A' API others (if available).
         if ( ( !FEsetestFeaturePresent( EseFeatureApisExportedWithA ) )  || 0 == ( rand() % 3 ) )
         {
 
+            // Get the procedure address if this is the first time calling this function.
             if ( NULL == pfnJetCreateTableColumnIndex2 )
             {
+                // Do not bother with synchronization of GetProcAddress() -- sloppy, but a leak isn't a big deal.
                 const HMODULE       hEseDll = HmodEsetestEseDll();
 
                 if ( NULL != hEseDll )
@@ -436,8 +478,10 @@ BounceJetCreateTableColumnIndex2(
         else
         {
 
+            // Get the procedure address if this is the first time calling this function.
             if ( NULL == pfnJetCreateTableColumnIndex2A )
             {
+                // Do not bother with synchronization of GetProcAddress() -- sloppy, but a leak isn't a big deal.
                 const HMODULE       hEseDll = HmodEsetestEseDll();
 
                 if ( NULL != hEseDll )
@@ -457,7 +501,7 @@ BounceJetCreateTableColumnIndex2(
         }
     }
 
-    goto Cleanup;
+    goto Cleanup;   // Need to have the explicit goto in case the function hasn't referenced 'Cleanup' yet.
 
 Cleanup:
     if ( fWiden )
@@ -468,6 +512,7 @@ Cleanup:
             tprintf( "%s():%d Failed to %s()" CRLF, __FUNCTION__, __LINE__, "EsetestUnwidenJET_TABLECREATE2" );
             if ( JET_errSuccess == err )
             {
+                // Only overwrite err if it's not a success.
                 err = errT;
             }
         }
@@ -481,6 +526,7 @@ Cleanup:
             tprintf( "%s():%d Failed to %s()" CRLF, __FUNCTION__, __LINE__, "EsetestUnadaptJET_TABLECREATE2" );
             if ( JET_errSuccess == err )
             {
+                // Only overwrite err if it's not a success.
                 err = errT;
             }
         }
@@ -498,6 +544,7 @@ Cleanup:
     return err;
 }
 
+//---------------------------------------------------
 
 
 JET_ERR
@@ -522,11 +569,14 @@ BounceJetCreateTableColumnIndex3(
     JET_TABLECREATE3_W *ptablecreate  );
 
     static PFN_JetCreateTableColumnIndex3W pfnJetCreateTableColumnIndex3W = NULL;
+    // Should we widen the parameter?
     bool    fWiden = FEsetestWidenParameters();
 
 
+    // Declare the variables
     JET_TABLECREATE3_W* wptablecreate   = NULL;
 
+    // Compression.
     bool fAllocated = false;
     JET_COLUMNCREATE* pcolumncreateInternal = NULL;
     if ( ptablecreate ){
@@ -536,6 +586,7 @@ BounceJetCreateTableColumnIndex3(
 
     if ( fWiden )
     {
+        // Widen the variables
         if( NULL != ptablecreate ) 
         {
             wptablecreate = EsetestWidenJET_TABLECREATE3( __FUNCTION__, ptablecreate );
@@ -547,13 +598,15 @@ BounceJetCreateTableColumnIndex3(
             }
         }
 
-    }
+    } // fWiden
 
     if ( fWiden )
     {
 
+        // Get the procedure address if this is the first time calling this function.
         if ( NULL == pfnJetCreateTableColumnIndex3W )
         {
+            // Do not bother with synchronization of GetProcAddress() -- sloppy, but a leak isn't a big deal.
             const HMODULE       hEseDll = HmodEsetestEseDll();
 
             if ( NULL != hEseDll )
@@ -573,8 +626,10 @@ BounceJetCreateTableColumnIndex3(
     }
     else
     {
+        // Get the procedure address if this is the first time calling this function.
         if ( NULL == pfnJetCreateTableColumnIndex3A )
         {
+            // Do not bother with synchronization of GetProcAddress() -- sloppy, but a leak isn't a big deal.
             const HMODULE       hEseDll = HmodEsetestEseDll();
 
             if ( NULL != hEseDll )
@@ -592,7 +647,7 @@ BounceJetCreateTableColumnIndex3(
 
         err = (*pfnJetCreateTableColumnIndex3A)( sesid, dbid, ptablecreate );
     }
-    goto Cleanup;
+    goto Cleanup;   // Need to have the explicit goto in case the function hasn't referenced 'Cleanup' yet.
 Cleanup:
 
     if ( fWiden )
@@ -603,6 +658,7 @@ Cleanup:
             tprintf( "%s():%d Failed to %s()" CRLF, __FUNCTION__, __LINE__, "EsetestUnwidenJET_TABLECREATE3" );
             if ( JET_errSuccess == err )
             {
+                // Only overwrite err if it's not a success.
                 err = errT;
             }
         }
@@ -620,6 +676,7 @@ Cleanup:
     return err;
 }
 
+//---------------------------------------------------
 
 
 JET_ERR
@@ -644,11 +701,14 @@ BounceJetCreateTableColumnIndex5(
     JET_TABLECREATE5_W  *ptablecreate  );
 
     static PFN_JetCreateTableColumnIndex5W pfnJetCreateTableColumnIndex5W = NULL;
+    // Should we widen the parameter?
     bool    fWiden = FEsetestWidenParameters();
 
 
+    // Declare the variables
     JET_TABLECREATE5_W* wptablecreate   = NULL;
 
+    // Compression.
     bool fAllocated = false;
     JET_COLUMNCREATE* pcolumncreateInternal = NULL;
     if ( ptablecreate ){
@@ -658,6 +718,7 @@ BounceJetCreateTableColumnIndex5(
 
     if ( fWiden )
     {
+        // Widen the variables
         if( NULL != ptablecreate ) 
         {
             wptablecreate = EsetestWidenJET_TABLECREATE5( __FUNCTION__, ptablecreate );
@@ -669,13 +730,15 @@ BounceJetCreateTableColumnIndex5(
             }
         }
 
-    }
+    } // fWiden
 
     if ( fWiden )
     {
 
+        // Get the procedure address if this is the first time calling this function.
         if ( NULL == pfnJetCreateTableColumnIndex5W )
         {
+            // Do not bother with synchronization of GetProcAddress() -- sloppy, but a leak isn't a big deal.
             const HMODULE       hEseDll = HmodEsetestEseDll();
 
             if ( NULL != hEseDll )
@@ -695,8 +758,10 @@ BounceJetCreateTableColumnIndex5(
     }
     else
     {
+        // Get the procedure address if this is the first time calling this function.
         if ( NULL == pfnJetCreateTableColumnIndex5A )
         {
+            // Do not bother with synchronization of GetProcAddress() -- sloppy, but a leak isn't a big deal.
             const HMODULE       hEseDll = HmodEsetestEseDll();
 
             if ( NULL != hEseDll )
@@ -714,7 +779,7 @@ BounceJetCreateTableColumnIndex5(
 
         err = (*pfnJetCreateTableColumnIndex5A)( sesid, dbid, ptablecreate );
     }
-    goto Cleanup;
+    goto Cleanup;   // Need to have the explicit goto in case the function hasn't referenced 'Cleanup' yet.
 Cleanup:
 
     if ( fWiden )
@@ -725,6 +790,7 @@ Cleanup:
             tprintf( "%s():%d Failed to %s()" CRLF, __FUNCTION__, __LINE__, "EsetestUnwidenJET_TABLECREATE5" );
             if ( JET_errSuccess == err )
             {
+                // Only overwrite err if it's not a success.
                 err = errT;
             }
         }
@@ -742,6 +808,7 @@ Cleanup:
     return err;
 }
 
+//---------------------------------------------------
 
 
 JET_ERR
@@ -777,13 +844,17 @@ BounceJetCreateIndex2(
     unsigned long   cIndexCreate  );
 
     static PFN_JetCreateIndex2W pfnJetCreateIndex2W = NULL;
+    // Should we widen the parameter?
     bool    fWiden = FEsetestWidenParameters();
 
+    // Declare the variables
     JET_INDEXCREATE_W*  wpindexcreate   = NULL;
     bool    fChanged    = false;
     JET_INDEXCREATE*    pindexcreateCompatible  = NULL;
     JET_INDEXCREATE*    pindexcreateT       = NULL;
 
+    // JET_INDEXCREATE changed sizes in Longhorn
+    // Change pindexcreate to be compatible with this particular version of ESE
     Call( EsetestAdaptJET_INDEXCREATE( __FUNCTION__, pindexcreate, cIndexCreate, &pindexcreateCompatible, &fChanged ) );
     if ( fChanged && NULL == pindexcreateCompatible )
     {
@@ -796,6 +867,7 @@ BounceJetCreateIndex2(
 
     if ( fWiden )
     {
+        // Widen the variables
         wpindexcreate = EsetestWidenJET_INDEXCREATE( __FUNCTION__, pindexcreateT, cIndexCreate );
         if ( NULL == wpindexcreate )
         {
@@ -803,13 +875,15 @@ BounceJetCreateIndex2(
             err = JET_errOutOfMemory;
             goto Cleanup;
         }
-    }
+    } // fWiden
 
     if ( fWiden )
     {
 
+        // Get the procedure address if this is the first time calling this function.
         if ( NULL == pfnJetCreateIndex2W )
         {
+            // Do not bother with synchronization of GetProcAddress() -- sloppy, but a leak isn't a big deal.
             const HMODULE       hEseDll = HmodEsetestEseDll();
 
             if ( NULL != hEseDll )
@@ -829,11 +903,14 @@ BounceJetCreateIndex2(
     }
     else
     {
+        // Call the legacy API sometimes, call the 'A' API others (if available).
         if ( ( !FEsetestFeaturePresent( EseFeatureApisExportedWithA ) )  || 0 == ( rand() % 3 ) )
         {
 
+            // Get the procedure address if this is the first time calling this function.
             if ( NULL == pfnJetCreateIndex2 )
             {
+                // Do not bother with synchronization of GetProcAddress() -- sloppy, but a leak isn't a big deal.
                 const HMODULE       hEseDll = HmodEsetestEseDll();
 
                 if ( NULL != hEseDll )
@@ -854,8 +931,10 @@ BounceJetCreateIndex2(
         else
         {
 
+            // Get the procedure address if this is the first time calling this function.
             if ( NULL == pfnJetCreateIndex2A )
             {
+                // Do not bother with synchronization of GetProcAddress() -- sloppy, but a leak isn't a big deal.
                 const HMODULE       hEseDll = HmodEsetestEseDll();
 
                 if ( NULL != hEseDll )
@@ -874,7 +953,7 @@ BounceJetCreateIndex2(
             err = (*pfnJetCreateIndex2A)( sesid, tableid, pindexcreateT, cIndexCreate );
         }
     }
-    goto Cleanup;
+    goto Cleanup;   // Need to have the explicit goto in case the function hasn't referenced 'Cleanup' yet.
 
 Cleanup:
 
@@ -886,6 +965,7 @@ Cleanup:
             tprintf( "%s():%d Failed to %s()" CRLF, __FUNCTION__, __LINE__, "EsetestUnwidenJET_INDEXCREATE" );
             if ( JET_errSuccess == err )
             {
+                // Only overwrite err if it's not a success.
                 err = errT;
             }
         }
@@ -899,6 +979,7 @@ Cleanup:
             tprintf( "%s():%d Failed to %s()" CRLF, __FUNCTION__, __LINE__, "EsetestUnadaptJET_INDEXCREATE" );
             if ( JET_errSuccess == err )
             {
+                // Only overwrite err if it's not a success.
                 err = errT;
             }
         }
@@ -907,6 +988,7 @@ Cleanup:
     return err;
 }
 
+//---------------------------------------------------
 
 
 JET_ERR
@@ -958,9 +1040,11 @@ BounceJetExternalRestore(
     JET_PFNSTATUS   pfn  );
 
     static PFN_JetExternalRestoreW pfnJetExternalRestoreW = NULL;
+    // Should we widen the parameter?
     bool    fWiden = FEsetestWidenParameters();
 
 
+    // Declare the variables
     wchar_t*    wszBackupLogPath    = NULL;
     wchar_t*    wszLogPath  = NULL;
     wchar_t*    wszCheckpointFilePath   = NULL;
@@ -968,6 +1052,7 @@ BounceJetExternalRestore(
 
     if ( fWiden )
     {
+        // Widen the variables
         wszBackupLogPath = EsetestWidenString( __FUNCTION__, szBackupLogPath );
         if ( NULL == wszBackupLogPath )
         {
@@ -992,7 +1077,7 @@ BounceJetExternalRestore(
             goto Cleanup;
         }
 
-        if(rgrstmap != NULL)
+        if(rgrstmap != NULL)    // optional param, can be null
         {
             wrgrstmap = EsetestWidenJET_RSTMAP( __FUNCTION__, rgrstmap, crstfilemap  );
             if ( NULL == wrgrstmap )
@@ -1003,13 +1088,15 @@ BounceJetExternalRestore(
             }
         }
 
-    }
+    } // fWiden
 
     if ( fWiden )
     {
 
+        // Get the procedure address if this is the first time calling this function.
         if ( NULL == pfnJetExternalRestoreW )
         {
+            // Do not bother with synchronization of GetProcAddress() -- sloppy, but a leak isn't a big deal.
             const HMODULE       hEseDll = HmodEsetestEseDll();
 
             if ( NULL != hEseDll )
@@ -1029,11 +1116,14 @@ BounceJetExternalRestore(
     }
     else
     {
+        // Call the legacy API sometimes, call the 'A' API others (if available).
         if ( ( !FEsetestFeaturePresent( EseFeatureApisExportedWithA ) )  || 0 == ( rand() % 3 ) )
         {
 
+            // Get the procedure address if this is the first time calling this function.
             if ( NULL == pfnJetExternalRestore )
             {
+                // Do not bother with synchronization of GetProcAddress() -- sloppy, but a leak isn't a big deal.
                 const HMODULE       hEseDll = HmodEsetestEseDll();
 
                 if ( NULL != hEseDll )
@@ -1054,8 +1144,10 @@ BounceJetExternalRestore(
         else
         {
 
+            // Get the procedure address if this is the first time calling this function.
             if ( NULL == pfnJetExternalRestoreA )
             {
+                // Do not bother with synchronization of GetProcAddress() -- sloppy, but a leak isn't a big deal.
                 const HMODULE       hEseDll = HmodEsetestEseDll();
 
                 if ( NULL != hEseDll )
@@ -1074,7 +1166,7 @@ BounceJetExternalRestore(
             err = (*pfnJetExternalRestoreA)( szCheckpointFilePath, szLogPath, rgrstmap, crstfilemap, szBackupLogPath, genLow, genHigh, pfn );
         }
     }
-    goto Cleanup;
+    goto Cleanup;   // Need to have the explicit goto in case the function hasn't referenced 'Cleanup' yet.
 Cleanup:
 
     if ( fWiden )
@@ -1085,6 +1177,7 @@ Cleanup:
             tprintf( "%s():%d Failed to %s()" CRLF, __FUNCTION__, __LINE__, "EsetestCleanupWidenString" );
             if ( JET_errSuccess == err )
             {
+                // Only overwrite err if it's not a success.
                 err = errT;
             }
         }
@@ -1099,6 +1192,7 @@ Cleanup:
             tprintf( "%s():%d Failed to %s()" CRLF, __FUNCTION__, __LINE__, "EsetestCleanupWidenString" );
             if ( JET_errSuccess == err )
             {
+                // Only overwrite err if it's not a success.
                 err = errT;
             }
         }
@@ -1113,6 +1207,7 @@ Cleanup:
             tprintf( "%s():%d Failed to %s()" CRLF, __FUNCTION__, __LINE__, "EsetestCleanupWidenString" );
             if ( JET_errSuccess == err )
             {
+                // Only overwrite err if it's not a success.
                 err = errT;
             }
         }
@@ -1129,6 +1224,7 @@ Cleanup:
                 tprintf( "%s():%d Failed to %s()" CRLF, __FUNCTION__, __LINE__, "EsetestUnwidenJET_RSTMAP" );
                 if ( JET_errSuccess == err )
                 {
+                    // Only overwrite err if it's not a success.
                     err = errT;
                 }
             }
@@ -1139,6 +1235,7 @@ Cleanup:
     return err;
 }
 
+//---------------------------------------------------
 
 
 JET_ERR
@@ -1199,9 +1296,11 @@ BounceJetExternalRestore2(
 
     static PFN_JetExternalRestore2W pfnJetExternalRestore2W = NULL;
     
+    // Should we widen the parameter?
     bool    fWiden = FEsetestWidenParameters();
 
 
+    // Declare the variables
     wchar_t*    wszTargetInstanceLogPath    = NULL;
     wchar_t*    wszTargetInstanceName   = NULL;
     wchar_t*    wszBackupLogPath    = NULL;
@@ -1213,6 +1312,8 @@ BounceJetExternalRestore2(
 
     if ( fWiden )
     {
+        // Widen the variables
+        // optional parameter according to MSDN
         if ( szTargetInstanceLogPath != NULL )
         {
             wszTargetInstanceLogPath = EsetestWidenString( __FUNCTION__, szTargetInstanceLogPath );
@@ -1224,6 +1325,7 @@ BounceJetExternalRestore2(
             }
         }
         
+        // optional parameter according to MSDN
         if ( szTargetInstanceName != NULL )
         {
             wszTargetInstanceName = EsetestWidenString( __FUNCTION__, szTargetInstanceName );
@@ -1250,6 +1352,7 @@ BounceJetExternalRestore2(
             goto Cleanup;
         }
 
+        // optional parameter according MSDN
         if ( szCheckpointFilePath != NULL )
         {
             wszCheckpointFilePath = EsetestWidenString( __FUNCTION__, szCheckpointFilePath );
@@ -1261,6 +1364,7 @@ BounceJetExternalRestore2(
             }
         }
 
+        // optional parameter according MSDN
         if ( szTargetInstanceCheckpointPath != NULL )
         {
             wszTargetInstanceCheckpointPath = EsetestWidenString( __FUNCTION__, szTargetInstanceCheckpointPath );
@@ -1272,7 +1376,7 @@ BounceJetExternalRestore2(
             }
         }
 
-        if(rgrstmap != NULL)
+        if(rgrstmap != NULL)    // optional param, can be null
         {
             wrgrstmap = EsetestWidenJET_RSTMAP( __FUNCTION__, rgrstmap, crstfilemap );
             if ( NULL == wrgrstmap )
@@ -1292,13 +1396,15 @@ BounceJetExternalRestore2(
         }
 
 
-    }
+    } // fWiden
 
     if ( fWiden )
     {
 
+        // Get the procedure address if this is the first time calling this function.
         if ( NULL == pfnJetExternalRestore2W )
         {
+            // Do not bother with synchronization of GetProcAddress() -- sloppy, but a leak isn't a big deal.
             const HMODULE       hEseDll = HmodEsetestEseDll();
 
             if ( NULL != hEseDll )
@@ -1314,17 +1420,21 @@ BounceJetExternalRestore2(
             }
         }
 
+        //AssertSz( false, "Need to widen pLogInfo!!!" );
         err = (*pfnJetExternalRestore2W)( wszCheckpointFilePath, wszLogPath, wrgrstmap, crstfilemap, wszBackupLogPath,
                 wpLogInfo, wszTargetInstanceName, wszTargetInstanceLogPath, wszTargetInstanceCheckpointPath, pfn );
         
     }
     else
     {
+        // Call the legacy API sometimes, call the 'A' API others (if available).
         if ( ( !FEsetestFeaturePresent( EseFeatureApisExportedWithA ) )  || 0 == ( rand() % 3 ) )
         {
 
+            // Get the procedure address if this is the first time calling this function.
             if ( NULL == pfnJetExternalRestore2 )
             {
+                // Do not bother with synchronization of GetProcAddress() -- sloppy, but a leak isn't a big deal.
                 const HMODULE       hEseDll = HmodEsetestEseDll();
 
                 if ( NULL != hEseDll )
@@ -1345,8 +1455,10 @@ BounceJetExternalRestore2(
         else
         {
 
+            // Get the procedure address if this is the first time calling this function.
             if ( NULL == pfnJetExternalRestore2A )
             {
+                // Do not bother with synchronization of GetProcAddress() -- sloppy, but a leak isn't a big deal.
                 const HMODULE       hEseDll = HmodEsetestEseDll();
 
                 if ( NULL != hEseDll )
@@ -1365,7 +1477,7 @@ BounceJetExternalRestore2(
             err = (*pfnJetExternalRestore2A)( szCheckpointFilePath, szLogPath, rgrstmap, crstfilemap, szBackupLogPath, pLogInfo, szTargetInstanceName, szTargetInstanceLogPath, szTargetInstanceCheckpointPath, pfn );          
         }
     }
-    goto Cleanup;
+    goto Cleanup;   // Need to have the explicit goto in case the function hasn't referenced 'Cleanup' yet.
 Cleanup:
 
     if ( fWiden )
@@ -1376,6 +1488,7 @@ Cleanup:
             tprintf( "%s():%d Failed to %s()" CRLF, __FUNCTION__, __LINE__, "EsetestCleanupWidenString" );
             if ( JET_errSuccess == err )
             {
+                // Only overwrite err if it's not a success.
                 err = errT;
             }
         }
@@ -1390,6 +1503,7 @@ Cleanup:
             tprintf( "%s():%d Failed to %s()" CRLF, __FUNCTION__, __LINE__, "EsetestCleanupWidenString" );
             if ( JET_errSuccess == err )
             {
+                // Only overwrite err if it's not a success.
                 err = errT;
             }
         }
@@ -1404,6 +1518,7 @@ Cleanup:
             tprintf( "%s():%d Failed to %s()" CRLF, __FUNCTION__, __LINE__, "EsetestCleanupWidenString" );
             if ( JET_errSuccess == err )
             {
+                // Only overwrite err if it's not a success.
                 err = errT;
             }
         }
@@ -1418,6 +1533,7 @@ Cleanup:
             tprintf( "%s():%d Failed to %s()" CRLF, __FUNCTION__, __LINE__, "EsetestCleanupWidenString" );
             if ( JET_errSuccess == err )
             {
+                // Only overwrite err if it's not a success.
                 err = errT;
             }
         }
@@ -1432,6 +1548,7 @@ Cleanup:
             tprintf( "%s():%d Failed to %s()" CRLF, __FUNCTION__, __LINE__, "EsetestCleanupWidenString" );
             if ( JET_errSuccess == err )
             {
+                // Only overwrite err if it's not a success.
                 err = errT;
             }
         }
@@ -1446,6 +1563,7 @@ Cleanup:
             tprintf( "%s():%d Failed to %s()" CRLF, __FUNCTION__, __LINE__, "EsetestCleanupWidenString" );
             if ( JET_errSuccess == err )
             {
+                // Only overwrite err if it's not a success.
                 err = errT;
             }
         }
@@ -1454,7 +1572,7 @@ Cleanup:
 
     if ( fWiden )
     {
-        if(wrgrstmap != NULL)
+        if(wrgrstmap != NULL)   // optional param, can be null
         {
             const JET_ERR errT = EsetestUnwidenJET_RSTMAP( __FUNCTION__, wrgrstmap, crstfilemap, rgrstmap );
             if ( JET_errSuccess != errT )
@@ -1462,6 +1580,7 @@ Cleanup:
                 tprintf( "%s():%d Failed to %s()" CRLF, __FUNCTION__, __LINE__, "EsetestUnwidenJET_RSTMAP" );
                 if ( JET_errSuccess == err )
                 {
+                    // Only overwrite err if it's not a success.
                     err = errT;
                 }
             }
@@ -1476,6 +1595,7 @@ Cleanup:
             tprintf( "%s():%d Failed to %s()" CRLF, __FUNCTION__, __LINE__, "EsetestUnwidenJET_LOGINFO" );
             if ( JET_errSuccess == err )
             {
+                // Only overwrite err if it's not a success.
                 err = errT;
             }
         }
@@ -1485,6 +1605,7 @@ Cleanup:
     return err;
 }
 
+//---------------------------------------------------
 
 JET_ERR
 BounceJetGetSystemParameter(
@@ -1527,13 +1648,16 @@ BounceJetGetSystemParameter(
     unsigned long   cbMax  );
 
     static PFN_JetGetSystemParameterW pfnJetGetSystemParameterW = NULL;
+    // Should we widen the parameter?
     bool    fWiden = FEsetestWidenParameters();
 
 
+    // Declare the variables
     wchar_t*    wszParam    = NULL;
 
     if ( fWiden )
     {
+        // Widen the variables
         if ( cbMax != 0 && szParam != NULL )
         {
             wszParam = EsetestWidenStringWithLength( __FUNCTION__, szParam, cbMax );
@@ -1545,13 +1669,15 @@ BounceJetGetSystemParameter(
             }
         }
 
-    }
+    } // fWiden
 
     if ( fWiden )
     {
 
+        // Get the procedure address if this is the first time calling this function.
         if ( NULL == pfnJetGetSystemParameterW )
         {
+            // Do not bother with synchronization of GetProcAddress() -- sloppy, but a leak isn't a big deal.
             const HMODULE       hEseDll = HmodEsetestEseDll();
 
             if ( NULL != hEseDll )
@@ -1571,11 +1697,14 @@ BounceJetGetSystemParameter(
     }
     else
     {
+        // Call the legacy API sometimes, call the 'A' API others (if available).
         if ( ( !FEsetestFeaturePresent( EseFeatureApisExportedWithA ) )  || 0 == ( rand() % 3 ) )
         {
 
+            // Get the procedure address if this is the first time calling this function.
             if ( NULL == pfnJetGetSystemParameter )
             {
+                // Do not bother with synchronization of GetProcAddress() -- sloppy, but a leak isn't a big deal.
                 const HMODULE       hEseDll = HmodEsetestEseDll();
 
                 if ( NULL != hEseDll )
@@ -1596,8 +1725,10 @@ BounceJetGetSystemParameter(
         else
         {
 
+            // Get the procedure address if this is the first time calling this function.
             if ( NULL == pfnJetGetSystemParameterA )
             {
+                // Do not bother with synchronization of GetProcAddress() -- sloppy, but a leak isn't a big deal.
                 const HMODULE       hEseDll = HmodEsetestEseDll();
 
                 if ( NULL != hEseDll )
@@ -1616,7 +1747,7 @@ BounceJetGetSystemParameter(
             err = (*pfnJetGetSystemParameterA)( instance, sesid, paramid, plParam, szParam, cbMax );
         }
     }
-    goto Cleanup;
+    goto Cleanup;   // Need to have the explicit goto in case the function hasn't referenced 'Cleanup' yet.
 Cleanup:
 
     if ( fWiden )
@@ -1629,6 +1760,7 @@ Cleanup:
                 tprintf( "%s():%d Failed to %s()" CRLF, __FUNCTION__, __LINE__, "EsetestUnwidenStringWithLength" );
                 if ( JET_errSuccess == err )
                 {
+                    // Only overwrite err if it's not a success.
                     err = errT;
                 }
             }
@@ -1640,6 +1772,7 @@ Cleanup:
 }
 
 
+//---------------------------------------------------
 
 JET_ERR
 BounceJetSetColumn(
@@ -1665,10 +1798,13 @@ BounceJetSetColumn(
 
     static PFN_JetSetColumn pfnJetSetColumn = NULL;
 
+    // Compression.
     grbit |= GrbitDataCompression( grbit );
 
+    // Get the procedure address if this is the first time calling this function.
     if ( NULL == pfnJetSetColumn )
     {
+        // Do not bother with synchronization of GetProcAddress() -- sloppy, but a leak isn't a big deal.
         const HMODULE       hEseDll = HmodEsetestEseDll();
 
         if ( NULL != hEseDll )
@@ -1685,12 +1821,13 @@ BounceJetSetColumn(
     }
 
     err = (*pfnJetSetColumn)( sesid, tableid, columnid, pvData, cbData, grbit, psetinfo );
-    goto Cleanup;
+    goto Cleanup;   // Need to have the explicit goto in case the function hasn't referenced 'Cleanup' yet.
 Cleanup:
 
     return err;
 }
 
+//---------------------------------------------------
 
 JET_ERR
 BounceJetSetColumns(
@@ -1710,11 +1847,14 @@ BounceJetSetColumns(
 
     static PFN_JetSetColumns pfnJetSetColumns = NULL;
 
+    // Compression.
     bool fAllocated = false;
     JET_SETCOLUMN* psetcolumnInternal = EsetestCompressJET_SETCOLUMN( psetcolumn, csetcolumn, &fAllocated );
 
+    // Get the procedure address if this is the first time calling this function.
     if ( NULL == pfnJetSetColumns )
     {
+        // Do not bother with synchronization of GetProcAddress() -- sloppy, but a leak isn't a big deal.
         const HMODULE       hEseDll = HmodEsetestEseDll();
 
         if ( NULL != hEseDll )
@@ -1731,7 +1871,7 @@ BounceJetSetColumns(
     }
 
     err = (*pfnJetSetColumns)( sesid, tableid, psetcolumnInternal, csetcolumn );
-    goto Cleanup;
+    goto Cleanup;   // Need to have the explicit goto in case the function hasn't referenced 'Cleanup' yet.
 Cleanup:
 
     if ( fAllocated ){
@@ -1744,6 +1884,7 @@ Cleanup:
     return err;
 }
 
+//---------------------------------------------------
 
 JET_ERR
 BounceJetGetCurrentIndex(
@@ -1778,13 +1919,16 @@ BounceJetGetCurrentIndex(
     unsigned long   cbIndexName  );
 
     static PFN_JetGetCurrentIndexW pfnJetGetCurrentIndexW = NULL;
+    // Should we widen the parameter?
     bool    fWiden = FEsetestWidenParameters();
 
 
+    // Declare the variables
     wchar_t*    wszIndexName    = NULL;
 
     if ( fWiden )
     {
+        // Widen the variables
         if ( cbIndexName != 0 )
         {
             wszIndexName = EsetestWidenStringWithLength( __FUNCTION__, szIndexName, cbIndexName );
@@ -1796,13 +1940,15 @@ BounceJetGetCurrentIndex(
             }
         }
 
-    }
+    } // fWiden
 
     if ( fWiden )
     {
 
+        // Get the procedure address if this is the first time calling this function.
         if ( NULL == pfnJetGetCurrentIndexW )
         {
+            // Do not bother with synchronization of GetProcAddress() -- sloppy, but a leak isn't a big deal.
             const HMODULE       hEseDll = HmodEsetestEseDll();
 
             if ( NULL != hEseDll )
@@ -1822,11 +1968,14 @@ BounceJetGetCurrentIndex(
     }
     else
     {
+        // Call the legacy API sometimes, call the 'A' API others (if available).
         if ( ( !FEsetestFeaturePresent( EseFeatureApisExportedWithA ) )  || 0 == ( rand() % 3 ) )
         {
 
+            // Get the procedure address if this is the first time calling this function.
             if ( NULL == pfnJetGetCurrentIndex )
             {
+                // Do not bother with synchronization of GetProcAddress() -- sloppy, but a leak isn't a big deal.
                 const HMODULE       hEseDll = HmodEsetestEseDll();
 
                 if ( NULL != hEseDll )
@@ -1847,8 +1996,10 @@ BounceJetGetCurrentIndex(
         else
         {
 
+            // Get the procedure address if this is the first time calling this function.
             if ( NULL == pfnJetGetCurrentIndexA )
             {
+                // Do not bother with synchronization of GetProcAddress() -- sloppy, but a leak isn't a big deal.
                 const HMODULE       hEseDll = HmodEsetestEseDll();
 
                 if ( NULL != hEseDll )
@@ -1867,7 +2018,7 @@ BounceJetGetCurrentIndex(
             err = (*pfnJetGetCurrentIndexA)( sesid, tableid, szIndexName, cbIndexName );
         }
     }
-    goto Cleanup;
+    goto Cleanup;   // Need to have the explicit goto in case the function hasn't referenced 'Cleanup' yet.
 Cleanup:
 
     if ( fWiden )
@@ -1878,6 +2029,7 @@ Cleanup:
             tprintf( "%s():%d Failed to %s()" CRLF, __FUNCTION__, __LINE__, "EsetestUnwidenStringWithLength" );
             if ( JET_errSuccess == err )
             {
+                // Only overwrite err if it's not a success.
                 err = errT;
             }
         }
@@ -1887,6 +2039,7 @@ Cleanup:
     return err;
 }
 
+//---------------------------------------------------
 
 JET_ERR
 BounceJetAddColumn(
@@ -1933,16 +2086,20 @@ BounceJetAddColumn(
     __out_opt JET_COLUMNID  *pcolumnid  );
 
     static PFN_JetAddColumnW pfnJetAddColumnW = NULL;
+    // Should we widen the parameter?
     bool    fWiden = FEsetestWidenParameters();
 
 
+    // Declare the variables
     wchar_t*    wszColumnName   = NULL;
 
+    // Compression.
     bool fAllocated = false;
     JET_COLUMNDEF* pcolumndefInternal = EsetestCompressJET_COLUMNDEF( pcolumndef, &fAllocated );
 
     if ( fWiden )
     {
+        // Widen the variables
         if( NULL != szColumnName ) 
         {
             wszColumnName = EsetestWidenString( __FUNCTION__, szColumnName );
@@ -1954,13 +2111,15 @@ BounceJetAddColumn(
             }
         }
 
-    }
+    } // fWiden
 
     if ( fWiden )
     {
 
+        // Get the procedure address if this is the first time calling this function.
         if ( NULL == pfnJetAddColumnW )
         {
+            // Do not bother with synchronization of GetProcAddress() -- sloppy, but a leak isn't a big deal.
             const HMODULE       hEseDll = HmodEsetestEseDll();
 
             if ( NULL != hEseDll )
@@ -1980,11 +2139,14 @@ BounceJetAddColumn(
     }
     else
     {
+        // Call the legacy API sometimes, call the 'A' API others (if available).
         if ( ( !FEsetestFeaturePresent( EseFeatureApisExportedWithA ) )  || 0 == ( rand() % 3 ) )
         {
 
+            // Get the procedure address if this is the first time calling this function.
             if ( NULL == pfnJetAddColumn )
             {
+                // Do not bother with synchronization of GetProcAddress() -- sloppy, but a leak isn't a big deal.
                 const HMODULE       hEseDll = HmodEsetestEseDll();
 
                 if ( NULL != hEseDll )
@@ -2005,8 +2167,10 @@ BounceJetAddColumn(
         else
         {
 
+            // Get the procedure address if this is the first time calling this function.
             if ( NULL == pfnJetAddColumnA )
             {
+                // Do not bother with synchronization of GetProcAddress() -- sloppy, but a leak isn't a big deal.
                 const HMODULE       hEseDll = HmodEsetestEseDll();
 
                 if ( NULL != hEseDll )
@@ -2025,7 +2189,7 @@ BounceJetAddColumn(
             err = (*pfnJetAddColumnA)( sesid, tableid, szColumnName, pcolumndefInternal, pvDefault, cbDefault, pcolumnid );
         }
     }
-    goto Cleanup;
+    goto Cleanup;   // Need to have the explicit goto in case the function hasn't referenced 'Cleanup' yet.
 Cleanup:
 
     if ( fWiden )
@@ -2036,6 +2200,7 @@ Cleanup:
             tprintf( "%s():%d Failed to %s()" CRLF, __FUNCTION__, __LINE__, "EsetestCleanupWidenString" );
             if ( JET_errSuccess == err )
             {
+                // Only overwrite err if it's not a success.
                 err = errT;
             }
         }
@@ -2049,6 +2214,7 @@ Cleanup:
     return err;
 }
 
+//---------------------------------------------------
 
 JET_ERR
 BounceJetCreateIndex(
@@ -2095,16 +2261,21 @@ BounceJetCreateIndex(
     unsigned long   lDensity  );
 
     static PFN_JetCreateIndexW pfnJetCreateIndexW = NULL;
+    // Should we widen the parameter?
     bool    fWiden = FEsetestWidenParameters();
 
 
+    // Declare the variables
     wchar_t*    wszKey  = NULL;
     wchar_t*    wszIndexName    = NULL;
 
     if ( fWiden )
     {
+        // Widen the variables
         if( NULL != szKey ) 
         {
+            //wszKey = EsetestWidenString( __FUNCTION__, szKey );
+            // this string could include embedded null
             wszKey = EsetestWidenCbString( __FUNCTION__, szKey, cbKey );
             if ( NULL == wszKey )
             {
@@ -2125,13 +2296,15 @@ BounceJetCreateIndex(
             }
         }
 
-    }
+    } // fWiden
 
     if ( fWiden )
     {
 
+        // Get the procedure address if this is the first time calling this function.
         if ( NULL == pfnJetCreateIndexW )
         {
+            // Do not bother with synchronization of GetProcAddress() -- sloppy, but a leak isn't a big deal.
             const HMODULE       hEseDll = HmodEsetestEseDll();
 
             if ( NULL != hEseDll )
@@ -2147,15 +2320,19 @@ BounceJetCreateIndex(
             }
         }
 
+        // cbKey need to be multiplied by 2. (ugly fix, should be taken care in the perl script.)
         err = (*pfnJetCreateIndexW)( sesid, tableid, wszIndexName, grbit, wszKey, cbKey * sizeof( WCHAR ) / sizeof( CHAR ) , lDensity );
     }
     else
     {
+        // Call the legacy API sometimes, call the 'A' API others (if available).
         if ( ( !FEsetestFeaturePresent( EseFeatureApisExportedWithA ) )  || 0 == ( rand() % 3 ) )
         {
 
+            // Get the procedure address if this is the first time calling this function.
             if ( NULL == pfnJetCreateIndex )
             {
+                // Do not bother with synchronization of GetProcAddress() -- sloppy, but a leak isn't a big deal.
                 const HMODULE       hEseDll = HmodEsetestEseDll();
 
                 if ( NULL != hEseDll )
@@ -2176,8 +2353,10 @@ BounceJetCreateIndex(
         else
         {
 
+            // Get the procedure address if this is the first time calling this function.
             if ( NULL == pfnJetCreateIndexA )
             {
+                // Do not bother with synchronization of GetProcAddress() -- sloppy, but a leak isn't a big deal.
                 const HMODULE       hEseDll = HmodEsetestEseDll();
 
                 if ( NULL != hEseDll )
@@ -2196,17 +2375,19 @@ BounceJetCreateIndex(
             err = (*pfnJetCreateIndexA)( sesid, tableid, szIndexName, grbit, szKey, cbKey, lDensity );
         }
     }
-    goto Cleanup;
+    goto Cleanup;   // Need to have the explicit goto in case the function hasn't referenced 'Cleanup' yet.
 Cleanup:
 
     if ( fWiden )
     {
+        // not sure if i should just clean up string
         const JET_ERR errT = EsetestCleanupWidenString( __FUNCTION__, wszKey, szKey );
         if ( JET_errSuccess != errT )
         {
             tprintf( "%s():%d Failed to %s()" CRLF, __FUNCTION__, __LINE__, "EsetestCleanupWidenString" );
             if ( JET_errSuccess == err )
             {
+                // Only overwrite err if it's not a success.
                 err = errT;
             }
         }
@@ -2221,6 +2402,7 @@ Cleanup:
             tprintf( "%s():%d Failed to %s()" CRLF, __FUNCTION__, __LINE__, "EsetestCleanupWidenString" );
             if ( JET_errSuccess == err )
             {
+                // Only overwrite err if it's not a success.
                 err = errT;
             }
         }
@@ -2230,6 +2412,7 @@ Cleanup:
     return err;
 }
 
+//---------------------------------------------------
 
 JET_ERR
 BounceJetInit3(
@@ -2260,13 +2443,16 @@ BounceJetInit3(
     JET_GRBIT grbit  );
 
     static PFN_JetInit3W pfnJetInit3W = NULL;
+    // Should we widen the parameter?
     bool    fWiden = FEsetestWidenParameters();
 
 
+    // Declare the variables
     JET_RSTINFO_W*  wprstInfo   = NULL;
 
     if ( fWiden )
     {
+        // Widen the variables
         if( NULL != prstInfo ) 
         {
             wprstInfo = EsetestWidenJET_RSTINFO( __FUNCTION__, prstInfo );
@@ -2278,13 +2464,15 @@ BounceJetInit3(
             }
         }
 
-    }
+    } // fWiden
 
     if ( fWiden )
     {
 
+        // Get the procedure address if this is the first time calling this function.
         if ( NULL == pfnJetInit3W )
         {
+            // Do not bother with synchronization of GetProcAddress() -- sloppy, but a leak isn't a big deal.
             const HMODULE       hEseDll = HmodEsetestEseDll();
 
             if ( NULL != hEseDll )
@@ -2304,11 +2492,14 @@ BounceJetInit3(
     }
     else
     {
+        // Call the legacy API sometimes, call the 'A' API others (if available).
         if ( ( !FEsetestFeaturePresent( EseFeatureApisExportedWithA ) )  || 0 == ( rand() % 3 ) )
         {
 
+            // Get the procedure address if this is the first time calling this function.
             if ( NULL == pfnJetInit3 )
             {
+                // Do not bother with synchronization of GetProcAddress() -- sloppy, but a leak isn't a big deal.
                 const HMODULE       hEseDll = HmodEsetestEseDll();
 
                 if ( NULL != hEseDll )
@@ -2329,8 +2520,10 @@ BounceJetInit3(
         else
         {
 
+            // Get the procedure address if this is the first time calling this function.
             if ( NULL == pfnJetInit3A )
             {
+                // Do not bother with synchronization of GetProcAddress() -- sloppy, but a leak isn't a big deal.
                 const HMODULE       hEseDll = HmodEsetestEseDll();
 
                 if ( NULL != hEseDll )
@@ -2349,7 +2542,7 @@ BounceJetInit3(
             err = (*pfnJetInit3A)( pinstance, prstInfo, grbit );
         }
     }
-    goto Cleanup;
+    goto Cleanup;   // Need to have the explicit goto in case the function hasn't referenced 'Cleanup' yet.
 Cleanup:
 
     if ( fWiden )
@@ -2360,6 +2553,7 @@ Cleanup:
             tprintf( "%s():%d Failed to %s()" CRLF, __FUNCTION__, __LINE__, "EsetestUnwidenJET_RSTINFO" );
             if ( JET_errSuccess == err )
             {
+                // Only overwrite err if it's not a success.
                 err = errT;
             }
         }
@@ -2369,6 +2563,7 @@ Cleanup:
     return err;
 }
 
+//---------------------------------------------------
 
 JET_ERR
 BounceJetInit4(
@@ -2399,13 +2594,16 @@ BounceJetInit4(
     JET_GRBIT grbit  );
 
     static PFN_JetInit4W pfnJetInit4W = NULL;
+    // Should we widen the parameter?
     bool    fWiden = FEsetestWidenParameters();
 
 
+    // Declare the variables
     JET_RSTINFO2_W* wprstInfo   = NULL;
 
     if ( fWiden )
     {
+        // Widen the variables
         if( NULL != prstInfo ) 
         {
             wprstInfo = EsetestWidenJET_RSTINFO2( __FUNCTION__, prstInfo );
@@ -2417,13 +2615,15 @@ BounceJetInit4(
             }
         }
 
-    }
+    } // fWiden
 
     if ( fWiden )
     {
 
+        // Get the procedure address if this is the first time calling this function.
         if ( NULL == pfnJetInit4W )
         {
+            // Do not bother with synchronization of GetProcAddress() -- sloppy, but a leak isn't a big deal.
             const HMODULE       hEseDll = HmodEsetestEseDll();
 
             if ( NULL != hEseDll )
@@ -2443,11 +2643,14 @@ BounceJetInit4(
     }
     else
     {
+        // Call the legacy API sometimes, call the 'A' API others (if available).
         if ( ( !FEsetestFeaturePresent( EseFeatureApisExportedWithA ) )  || 0 == ( rand() % 3 ) )
         {
 
+            // Get the procedure address if this is the first time calling this function.
             if ( NULL == pfnJetInit4 )
             {
+                // Do not bother with synchronization of GetProcAddress() -- sloppy, but a leak isn't a big deal.
                 const HMODULE       hEseDll = HmodEsetestEseDll();
 
                 if ( NULL != hEseDll )
@@ -2468,8 +2671,10 @@ BounceJetInit4(
         else
         {
 
+            // Get the procedure address if this is the first time calling this function.
             if ( NULL == pfnJetInit4A )
             {
+                // Do not bother with synchronization of GetProcAddress() -- sloppy, but a leak isn't a big deal.
                 const HMODULE       hEseDll = HmodEsetestEseDll();
 
                 if ( NULL != hEseDll )
@@ -2488,7 +2693,7 @@ BounceJetInit4(
             err = (*pfnJetInit4A)( pinstance, prstInfo, grbit );
         }
     }
-    goto Cleanup;
+    goto Cleanup;   // Need to have the explicit goto in case the function hasn't referenced 'Cleanup' yet.
 Cleanup:
 
     if ( fWiden )
@@ -2499,6 +2704,7 @@ Cleanup:
             tprintf( "%s():%d Failed to %s()" CRLF, __FUNCTION__, __LINE__, "EsetestUnwidenJET_RSTINFO2" );
             if ( JET_errSuccess == err )
             {
+                // Only overwrite err if it's not a success.
                 err = errT;
             }
         }
@@ -2508,6 +2714,7 @@ Cleanup:
     return err;
 }
 
+//-----------------------------------------------------------------
 
 JET_ERR
 BounceJetRemoveLogfile(
@@ -2531,14 +2738,17 @@ BounceJetRemoveLogfile(
     __in JET_GRBIT grbit  );
 
     static PFN_JetRemoveLogfileW pfnJetRemoveLogfileW = NULL;
+    // Should we widen the parameter?
     bool    fWiden = FEsetestWidenParameters();
 
 
+    // Declare the variables
     wchar_t*    wszDatabase = NULL;
     wchar_t*    wszLogfile  = NULL;
 
     if ( fWiden )
     {
+        // Widen the variables
         if( NULL != szDatabase ) 
         {
             wszDatabase = EsetestWidenString( __FUNCTION__, szDatabase );
@@ -2561,13 +2771,15 @@ BounceJetRemoveLogfile(
             }
         }
 
-    }
+    } // fWiden
 
     if ( fWiden )
     {
 
+        // Get the procedure address if this is the first time calling this function.
         if ( NULL == pfnJetRemoveLogfileW )
         {
+            // Do not bother with synchronization of GetProcAddress() -- sloppy, but a leak isn't a big deal.
             const HMODULE       hEseDll = HmodEsetestEseDll();
 
             if ( NULL != hEseDll )
@@ -2587,8 +2799,10 @@ BounceJetRemoveLogfile(
     }
     else
     {
+        // Get the procedure address if this is the first time calling this function.
         if ( NULL == pfnJetRemoveLogfileA )
         {
+            // Do not bother with synchronization of GetProcAddress() -- sloppy, but a leak isn't a big deal.
             const HMODULE       hEseDll = HmodEsetestEseDll();
 
             if ( NULL != hEseDll )
@@ -2606,7 +2820,7 @@ BounceJetRemoveLogfile(
 
         err = (*pfnJetRemoveLogfileA)( szDatabase, szLogfile, grbit );
     }
-    goto Cleanup;
+    goto Cleanup;   // Need to have the explicit goto in case the function hasn't referenced 'Cleanup' yet.
 Cleanup:
 
     if ( fWiden )
@@ -2617,6 +2831,7 @@ Cleanup:
             tprintf( "%s():%d Failed to %s()" CRLF, __FUNCTION__, __LINE__, "EsetestCleanupWidenString" );
             if ( JET_errSuccess == err )
             {
+                // Only overwrite err if it's not a success.
                 err = errT;
             }
         }
@@ -2631,6 +2846,7 @@ Cleanup:
             tprintf( "%s():%d Failed to %s()" CRLF, __FUNCTION__, __LINE__, "EsetestCleanupWidenString" );
             if ( JET_errSuccess == err )
             {
+                // Only overwrite err if it's not a success.
                 err = errT;
             }
         }
@@ -2640,6 +2856,7 @@ Cleanup:
     return err;
 }
 
+//-----------------------------------------------------------------
 
 JET_ERR
 BounceJetGetDatabasePages(
@@ -2679,12 +2896,15 @@ BounceJetGetDatabasePages(
 
     static PFN_JetGetDatabasePages_2 pfnJetGetDatabasePages_2 = NULL;
 
+    // Is incremental reseed supported?
     bool    fIncReseed = FEsetestFeaturePresent( EseFeatureIncrementalReseedApis );
 
     if ( !fIncReseed )
     {
+        // Get the procedure address if this is the first time calling this function.
         if ( NULL == pfnJetGetDatabasePages )
         {
+            // Do not bother with synchronization of GetProcAddress() -- sloppy, but a leak isn't a big deal.
             const HMODULE       hEseDll = HmodEsetestEseDll();
 
             if ( NULL != hEseDll )
@@ -2704,8 +2924,10 @@ BounceJetGetDatabasePages(
     }
     else
     {
+        // Get the procedure address if this is the first time calling this function.
         if ( NULL == pfnJetGetDatabasePages_2 )
         {
+            // Do not bother with synchronization of GetProcAddress() -- sloppy, but a leak isn't a big deal.
             const HMODULE       hEseDll = HmodEsetestEseDll();
 
             if ( NULL != hEseDll )
@@ -2723,9 +2945,10 @@ BounceJetGetDatabasePages(
 
         err = (*pfnJetGetDatabasePages_2)( sesid, dbid, pgnoStart, cpg, pv, cb, pcbActual, grbit );
     }
-    goto Cleanup;
+    goto Cleanup;   // Need to have the explicit goto in case the function hasn't referenced 'Cleanup' yet.
 Cleanup:
 
     return err;
 }
 
+//---------------------------------------------------

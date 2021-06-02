@@ -10,6 +10,9 @@ void NotificationCallback(
     InterlockedIncrement( &g_cNotifications );
 }
 
+// This does not write all bytes of the memory region requested.
+// Instead it writes a single byte to each page (4096) of memory requested.
+// This forces the Memory Manager to back up the request with memory.
 void
 InsecureZeroMemory(
     _Out_writes_bytes_all_(cnt) void* pvStart,
@@ -46,12 +49,14 @@ ERR OslayerNotifiesOnLowMemory::ErrTest()
     OSTestCheckErr( ErrOSQueryMemoryNotification( pNotification, &fLowMemory ) );
     OSTestCheck( !fLowMemory );
 
+    // use up all the memory - may not work on 32-bit systems with lots of RAM
     hHeap = HeapCreate( 0, 0, 0 );
     SIZE_T cbAlloc = (SIZE_T)OSMemoryAvailable();
     PVOID pvAlloc = HeapAlloc( hHeap, 0, cbAlloc );
 
     if ( pvAlloc == NULL )
     {
+        // This can easily fail if we're running a WOW64 process on a 4 GB+ machine.
         goto HandleError;
     }
 
@@ -61,18 +66,21 @@ ERR OslayerNotifiesOnLowMemory::ErrTest()
     {
         if ( g_cNotifications >= 2 )
         {
+            // can only be notified once in one loop
             OSTestCheck( i > 0 );
             break;
         }
 
         Sleep( 100 );
 
+        // test the re-register path
         OSTestCheckErr( ErrOSRegisterMemoryNotification( pNotification ) );
 
         cbAlloc = (SIZE_T)OSMemoryAvailable();
         pvAlloc = HeapAlloc( hHeap, 0, cbAlloc );
         if ( pvAlloc == NULL )
         {
+            // This can easily fail if we're running a WOW64 process on a 4 GB+ machine.
             goto HandleError;
         }
 

@@ -1,14 +1,18 @@
-// Copyright (c) Microsoft Corporation.
-// Licensed under the MIT License.
+//================================================================
+// Disk helper functions.
+//================================================================
+//
 
 #include "ese_common.hxx"
 #include <strsafe.h>
 #include <stdlib.h>
 
+// =============================================================================
 DWORD GetAttributeListSizeA(
     __in PCSTR const szFilename,
     __out ULONG64* const pcbAttributeList
 )
+// =============================================================================
 {
     PCWSTR const wszFilename    = EsetestWidenString( __FUNCTION__, szFilename );
     const DWORD dwReturn        = GetAttributeListSizeW( wszFilename, pcbAttributeList );
@@ -17,10 +21,12 @@ DWORD GetAttributeListSizeA(
     return dwReturn;
 }
 
+// =============================================================================
 DWORD GetAttributeListSizeW(
     __in PCWSTR const wszFilename,
     __out ULONG64* const pcbAttributeList
 )
+// =============================================================================
 {
     DWORD           dwGLE = 0;
     HANDLE          hFile = INVALID_HANDLE_VALUE;
@@ -55,10 +61,12 @@ Cleanup:
     return dwGLE;
 }
 
+// =============================================================================
 DWORD GetExtentCountA(
     __in PCSTR const szFilename,
     __out DWORD* const pcExtent
 )
+// =============================================================================
 {
     PCWSTR const wszFilename    = EsetestWidenString( __FUNCTION__, szFilename );
     const DWORD dwReturn        = GetExtentCountW( wszFilename, pcExtent );
@@ -67,10 +75,12 @@ DWORD GetExtentCountA(
     return dwReturn;
 }
 
+// =============================================================================
 DWORD GetExtentCountW(
     __in PCWSTR const wszFilename,
     __out DWORD* const pcExtent
 )
+// =============================================================================
 {
     DWORD                       dwGLE = 0;
     HANDLE                      hFile = INVALID_HANDLE_VALUE;
@@ -94,6 +104,7 @@ DWORD GetExtentCountW(
     pData = HeapAlloc( hProcHeap, 0, dataSize );
     if ( pData == NULL )
     {
+        // can't use GetLastError for HeapAlloc, oddly enough
         dwGLE = ERROR_NOT_ENOUGH_MEMORY;
         goto Cleanup;
     }
@@ -111,7 +122,7 @@ DWORD GetExtentCountW(
             dwGLE = GetLastError();
         }
 
-        AssertM( dwGLE != ERROR_INSUFFICIENT_BUFFER );
+        AssertM( dwGLE != ERROR_INSUFFICIENT_BUFFER );  // shouldnt return that with a 1MB buffer
 
         if ( dwGLE == ERROR_MORE_DATA || dwGLE == 0 )
         {
@@ -137,9 +148,11 @@ Cleanup:
     return dwGLE;
 }
 
+// =============================================================================
 DISK_GEOMETRY* GetDiskGeometry(
     __in unsigned long ulDisk
 )
+// =============================================================================
 {
     HANDLE hDevice;
     BOOL bResult        = FALSE;
@@ -180,9 +193,11 @@ Cleanup:
     return pdg;
 }
 
+// =============================================================================
 DISK_CACHE_INFORMATION* GetDiskCacheInfo(
     __in unsigned long ulDisk
 )
+// =============================================================================
 {
     HANDLE hDevice;
     BOOL bResult                = FALSE;
@@ -223,10 +238,12 @@ Cleanup:
     return pdc;
 }
 
+// =============================================================================
 BOOL SetDiskCacheInfo(
     __in const DISK_CACHE_INFORMATION* const pdc,
     __in unsigned long ulDisk
 )
+// =============================================================================
 {
     HANDLE hDevice;
     BOOL bResult                = FALSE;
@@ -260,10 +277,12 @@ Cleanup:
     return bResult;
 }
 
+// =============================================================================
 BOOL GetDiskReadCache(
     __in unsigned long ulDisk,
     __out BOOLEAN* pfOn
 )
+// =============================================================================
 {
     BOOL bResult = FALSE;
     DISK_CACHE_INFORMATION *pdc = GetDiskCacheInfo( ulDisk );
@@ -279,10 +298,12 @@ Cleanup:
     return bResult;
 }
 
+// =============================================================================
 BOOL SetDiskReadCache(
     __in unsigned long ulDisk,
     __in BOOLEAN fOn
 )
+// =============================================================================
 {
     BOOL bResult = FALSE;
     DISK_CACHE_INFORMATION *pdc = GetDiskCacheInfo( ulDisk );
@@ -301,10 +322,12 @@ Cleanup:
     return bResult;
 }
 
+// =============================================================================
 BOOL GetDiskWriteCache(
     __in unsigned long ulDisk,
     __out BOOLEAN* pfOn
 )
+// =============================================================================
 {
     BOOL bResult = FALSE;
     DISK_CACHE_INFORMATION *pdc = GetDiskCacheInfo( ulDisk );
@@ -320,10 +343,12 @@ Cleanup:
     return bResult;
 }
 
+// =============================================================================
 BOOL SetDiskWriteCache(
     __in unsigned long ulDisk,
     __in BOOLEAN fOn
 )
+// =============================================================================
 {
     BOOL bResult = FALSE;
     DISK_CACHE_INFORMATION *pdc = GetDiskCacheInfo( ulDisk );
@@ -343,6 +368,14 @@ Cleanup:
 }
 
 
+//  2008/11/26 - SOMEONE: I believe this is an undocumented CTL_CODE for DeviceIoControl(). I've figured it out
+//  by attaching the disk management console to a debugger and watching the data being passed-in/returned-from
+//  DeviceIoControl().
+//  We can read/change the regular cache configuration by using IOCTL_DISK_GET_CACHE_INFORMATION (function 0x0035)
+//  and IOCTL_DISK_SET_CACHE_INFORMATION (function 0x0036) and this is documented.
+//  The reason I believe the "advanced cache configuration" is hidden is because  we can find functions 0x0035 and
+//  0x0036, but we can't find 0x0038 and 0x0039 which I observed are the CTL_CODEs used to read/change that
+//  option, respectively.
 
 #define IOCTL_DISK_GET_CACHE_INFORMATION_ADVANCED    CTL_CODE(IOCTL_DISK_BASE, 0x0038, METHOD_BUFFERED, FILE_READ_ACCESS)
 #define IOCTL_DISK_SET_CACHE_INFORMATION_ADVANCED    CTL_CODE(IOCTL_DISK_BASE, 0x0039, METHOD_BUFFERED, FILE_READ_ACCESS | FILE_WRITE_ACCESS)
@@ -355,9 +388,11 @@ typedef struct _DISK_CACHE_INFORMATION_ADVANCED {
 } DISK_CACHE_INFORMATION_ADVANCED, *PDISK_CACHE_INFORMATION_ADVANCED;
 
 
+// =============================================================================
 static DISK_CACHE_INFORMATION_ADVANCED* IGetAdvancedDiskCacheInfo(
     __in unsigned long ulDisk
 )
+// =============================================================================
 {
     HANDLE hDevice;
     BOOL bResult                            = FALSE;
@@ -398,10 +433,12 @@ Cleanup:
     return pdca;
 }
 
+// =============================================================================
 static BOOL ISetAdvancedDiskCacheInfo(
     __in const DISK_CACHE_INFORMATION_ADVANCED* const pdca,
     __in unsigned long ulDisk
 )
+// =============================================================================
 {
     HANDLE hDevice;
     BOOL bResult                = FALSE;
@@ -435,10 +472,12 @@ Cleanup:
     return bResult;
 }
 
+// =============================================================================
 BOOL GetAdvancedDiskWriteCache(
     __in unsigned long ulDisk,
     __out BOOLEAN* pfOn
 )
+// =============================================================================
 {
     BOOL bResult = FALSE;
     DISK_CACHE_INFORMATION_ADVANCED *pdca = IGetAdvancedDiskCacheInfo( ulDisk );
@@ -454,10 +493,12 @@ Cleanup:
     return bResult;
 }
 
+// =============================================================================
 BOOL SetAdvancedDiskWriteCache(
     __in unsigned long ulDisk,
     __in BOOLEAN fOn
 )
+// =============================================================================
 {
     BOOL bResult = FALSE;
     DISK_CACHE_INFORMATION_ADVANCED *pdca = IGetAdvancedDiskCacheInfo( ulDisk );
@@ -477,9 +518,11 @@ Cleanup:
 }
 
 
+// =============================================================================
 BOOL RunDiskPart(
     __in PCSTR const szDiskPartScript
 )
+// =============================================================================
 {
     const DWORD cRetry = 10;
     bool fReturn = false;
@@ -490,6 +533,7 @@ BOOL RunDiskPart(
 
     StringCchPrintfA( szCmd, _countof( szCmd ), "DiskPart.exe /s %hs", szDiskPartScript );
     
+    //  DiskPart.exe mysteriously fails sometimes. Adding a hacky retry logic.
     for ( DWORD iRetry = 0; iRetry < cRetry; iRetry++ )
     {
         dwExitCode = ERROR_SUCCESS;
@@ -532,11 +576,13 @@ BOOL RunDiskPart(
     return fReturn;
 }
 
+// =============================================================================
 BOOL CreateVirtualDisk(
     __in PCWSTR const wszVhdFilePath,
     __in const ULONG cmbSize,
     __in const WCHAR* const wszMountPoint
 )
+// =============================================================================
 {
     char szFile[ MAX_PATH + 1 ];
     BOOL bReturn = TRUE;
@@ -575,9 +621,11 @@ Cleanup:
     return bReturn;
 }
 
+// =============================================================================
 BOOL DestroyVirtualDisk(
     __in PCWSTR const wszVhdFilePath
 )
+// =============================================================================
 {
     char szFile[ MAX_PATH + 1 ];
     BOOL bReturn = TRUE;
@@ -612,9 +660,11 @@ Cleanup:
     return bReturn;
 }
 
+// =============================================================================
 VOLUME_DISK_EXTENTS* GetVolumeExtents(
     __in WCHAR** pwszLogicalVolume
 )
+// =============================================================================
 {
     HANDLE hDevice;
     BOOL bResult        = FALSE;
@@ -677,9 +727,11 @@ Cleanup:
     return ( VOLUME_DISK_EXTENTS* )pBuffer;
 }
 
+// =============================================================================
 BOOL DefragmentVolumeA(
     __in PCSTR const szVolumeName
 )
+// =============================================================================
 {
     PCWSTR const wszVolumeName  = EsetestWidenString( __FUNCTION__, szVolumeName );
     const BOOL fReturn          = DefragmentVolumeW( wszVolumeName );
@@ -688,18 +740,22 @@ BOOL DefragmentVolumeA(
     return fReturn;
 }
 
+// =============================================================================
 BOOL DefragmentVolumeW(
     __in PCWSTR const wszVolumeName
 )
+// =============================================================================
 {
     WCHAR wszVolumeNameT[ MAX_PATH ] = { L'\0' };
     BOOL fReturn = FALSE; 
 
+    // The user may have passed a file name, so let's retrieve the actual volume name to defrag.
     if ( !GetVolumePathNameW( wszVolumeName, wszVolumeNameT, _countof( wszVolumeNameT ) ) )
     {
         goto Cleanup;
     }
 
+    // Do the job.
     WCHAR wszCmd[ MAX_PATH ];
     STARTUPINFOW si;
     PROCESS_INFORMATION pi;
@@ -723,9 +779,11 @@ Cleanup:
     return fReturn;
 }
 
+// =============================================================================
 DRIVE_LAYOUT_INFORMATION_EX* GetDiskPartitions(
     __in unsigned long ulDisk
 )
+// =============================================================================
 {
     HANDLE hDevice;
     BOOL bResult        = FALSE;
@@ -779,9 +837,11 @@ Cleanup:
     return ( DRIVE_LAYOUT_INFORMATION_EX* )pdl;
 }
 
+// =============================================================================
 BOOL OnlineDisk(
     __in unsigned long ulDisk
 )
+// =============================================================================
 {
     char szFile[ MAX_PATH + 1 ];
     BOOL bReturn = TRUE;
@@ -796,6 +856,7 @@ BOOL OnlineDisk(
     OSVERSIONINFOW osInfo;
     osInfo.dwOSVersionInfoSize = static_cast< DWORD >( sizeof( osInfo ) );
     if ( !GetVersionExW( &osInfo ) ){
+        // Assume it's Vista/W2k8.
         osInfo.dwMajorVersion = 6;
     }
     if ( osInfo.dwMajorVersion >= 6 ){
@@ -823,10 +884,12 @@ Cleanup:
     return bReturn;
 }
 
+// =============================================================================
 BOOL DeleteDiskPartition(
     __in unsigned long ulDisk,
     __in unsigned long ulPartition
 )
+// =============================================================================
 {
     char szFile[ MAX_PATH + 1 ];
     BOOL bReturn = TRUE;
@@ -858,16 +921,20 @@ Cleanup:
     return bReturn;
 }
 
+// =============================================================================
 BOOL DeleteDiskPartitions(
     __in unsigned long ulDisk
 )
+// =============================================================================
 {
     DRIVE_LAYOUT_INFORMATION_EX* pdl;
     BOOL bReturn = TRUE;
 
+    // Partition enumeration.
     pdl = GetDiskPartitions( ulDisk );
     if ( pdl && pdl->PartitionCount > 0 ){
         for ( unsigned long ulPartition = pdl->PartitionCount ; ulPartition > 0 ; ulPartition-- ){
+            // Delete only valid partitions.
             DWORD dwPartitionNumber = pdl->PartitionEntry[ ulPartition - 1 ].PartitionNumber;
             if ( dwPartitionNumber > 0 ){
                 bReturn = bReturn && DeleteDiskPartition( ulDisk, dwPartitionNumber );
@@ -882,11 +949,13 @@ BOOL DeleteDiskPartitions(
     return bReturn;
 }
 
+// =============================================================================
 BOOL CreateFormatDiskPartition(
     __in unsigned long  ulDisk,
     __in ULONGLONG      cmbDiskSize,
     __in char           chLetter    
 )
+// =============================================================================
 {
     char szFile[ MAX_PATH + 1 ];
     char szCmd[ MAX_PATH + 1 ];
@@ -913,6 +982,7 @@ BOOL CreateFormatDiskPartition(
     OSVERSIONINFOW osInfo;
     osInfo.dwOSVersionInfoSize = static_cast< DWORD >( sizeof( osInfo ) );
     if ( !GetVersionExW( &osInfo ) ){
+        // Assume it's Vista/W2k8.
         osInfo.dwMajorVersion = 6;
     }
     if ( osInfo.dwMajorVersion >= 6 ){
@@ -952,9 +1022,11 @@ Cleanup:
     return bReturn;
 }
 
+// =============================================================================
 BOOL FormatVolume(
     __in char   chLetter
 )
+// =============================================================================
 {
     char szFile[ MAX_PATH + 1 ];
     char szCmd[ MAX_PATH + 1 ];
@@ -969,6 +1041,7 @@ BOOL FormatVolume(
     OSVERSIONINFOW osInfo;
     osInfo.dwOSVersionInfoSize = static_cast< DWORD >( sizeof( osInfo ) );
     if ( !GetVersionExW( &osInfo ) ){
+        // Assume it's Vista/W2k8.
         osInfo.dwMajorVersion = 6;
     }
     if ( osInfo.dwMajorVersion >= 6 ){

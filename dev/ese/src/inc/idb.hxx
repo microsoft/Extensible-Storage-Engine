@@ -1,35 +1,46 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
+// Flags for IDB
 typedef USHORT IDBFLAG;
 
-const IDBFLAG   fidbUnique          = 0x0001;
-const IDBFLAG   fidbAllowAllNulls   = 0x0002;
-const IDBFLAG   fidbAllowFirstNull  = 0x0004;
-const IDBFLAG   fidbAllowSomeNulls  = 0x0008;
-const IDBFLAG   fidbNoNullSeg       = 0x0010;
-const IDBFLAG   fidbPrimary         = 0x0020;
-const IDBFLAG   fidbLocaleSet       = 0x0040;
-const IDBFLAG   fidbMultivalued     = 0x0080;
-const IDBFLAG   fidbTemplateIndex   = 0x0100;
-const IDBFLAG   fidbDerivedIndex    = 0x0200;
-const IDBFLAG   fidbLocalizedText   = 0x0400;
-const IDBFLAG   fidbSortNullsHigh   = 0x0800;
-const IDBFLAG   fidbUnicodeFixupOn_Deprecated   = 0x1000;
-const IDBFLAG   fidbCrossProduct    = 0x2000;
-const IDBFLAG   fidbDisallowTruncation = 0x4000;
-const IDBFLAG   fidbNestedTable     = 0x8000;
+const IDBFLAG   fidbUnique          = 0x0001;   // Duplicate keys not allowed
+const IDBFLAG   fidbAllowAllNulls   = 0x0002;   // Make entries for NULL keys (all segments are null)
+const IDBFLAG   fidbAllowFirstNull  = 0x0004;   // First index column NULL allowed in index
+const IDBFLAG   fidbAllowSomeNulls  = 0x0008;   // Make entries for keys with some null segments
+const IDBFLAG   fidbNoNullSeg       = 0x0010;   // Don't allow a NULL key segment
+const IDBFLAG   fidbPrimary         = 0x0020;   // Index is the primary index
+const IDBFLAG   fidbLocaleSet       = 0x0040;   // Index locale information (locale name) is set (JET_bitIndexUnicode was specified).
+const IDBFLAG   fidbMultivalued     = 0x0080;   // Has a multivalued segment
+const IDBFLAG   fidbTemplateIndex   = 0x0100;   // Index of a template table
+const IDBFLAG   fidbDerivedIndex    = 0x0200;   // Index derived from template table
+                                                //   Note that this flag is persisted, but
+                                                //   never used in an in-memory IDB, because
+                                                //   we use the template index IDB instead.
+const IDBFLAG   fidbLocalizedText   = 0x0400;   // Has a unicode text column? (code page is 1200)
+const IDBFLAG   fidbSortNullsHigh   = 0x0800;   // NULL sorts after data
+// Jan 2012: MSU is being removed. fidbUnicodeFixupOn should no longer be referenced.
+const IDBFLAG   fidbUnicodeFixupOn_Deprecated   = 0x1000;   // Track entries with undefined Unicode codepoints
+const IDBFLAG   fidbCrossProduct    = 0x2000;   // all combinations of multi-valued columns are indexed
+const IDBFLAG   fidbDisallowTruncation = 0x4000; // fail update rather than allow key truncation
+const IDBFLAG   fidbNestedTable     = 0x8000;   // combinations of multi-valued columns of same itagSequence are indexed
 
-const IDBFLAG   fidbVersioned               = 0x1000;
-const IDBFLAG   fidbDeleted                 = 0x2000;
-const IDBFLAG   fidbVersionedCreate         = 0x4000;
-const IDBFLAG   fidbHasPlaceholderColumn    = 0x0100;
-const IDBFLAG   fidbSparseIndex             = 0x0200;
+// The following flags are not persisted.
+// UNDONE: Eliminate the VersionedCreate flag -- it would increase complexity in the
+// version store for the following scenarios, but it would be more uniform with NODE:
+//      1) Rollback of DeleteIndex - does the Version bit get reset as well?
+//      2) Cleanup of CreateIndex - don't reset Version bit if Delete bit is set
+//      3) As soon as primary index is committed, updates will no longer conflict.
+const IDBFLAG   fidbVersioned               = 0x1000;   // Create/DeleteIndex not yet committed
+const IDBFLAG   fidbDeleted                 = 0x2000;   // index has been deleted
+const IDBFLAG   fidbVersionedCreate         = 0x4000;   // CreateIndex not yet committed
+const IDBFLAG   fidbHasPlaceholderColumn    = 0x0100;   // First column of index is a dummy column
+const IDBFLAG   fidbSparseIndex             = 0x0200;   // optimisation: detect unnecessary index update
 const IDBFLAG   fidbSparseConditionalIndex  = 0x0400;
-const IDBFLAG   fidbTuples                  = 0x0800;
-const IDBFLAG   fidbBadSortVersion          = 0x0010;
-const IDBFLAG   fidbOwnedByFcb              = 0x0020;
-const IDBFLAG   fidbOutOfDateSortVersion    = 0x0040;
+const IDBFLAG   fidbTuples                  = 0x0800;   // indexed over substring tuples
+const IDBFLAG   fidbBadSortVersion          = 0x0010;   // index was built with bad sort version
+const IDBFLAG   fidbOwnedByFcb              = 0x0020;   // index was owned by FCB
+const IDBFLAG   fidbOutOfDateSortVersion    = 0x0040;   // index was built with out-of-date sort version
 
 INLINE BOOL FIDBUnique( const IDBFLAG idbflag )                 { return ( idbflag & fidbUnique ); }
 INLINE BOOL FIDBAllowAllNulls( const IDBFLAG idbflag )          { return ( idbflag & fidbAllowAllNulls ); }
@@ -50,14 +61,19 @@ INLINE BOOL FIDBUnicodeFixupOn_Deprecated( const IDBFLAG idbflag )  { return ( i
 INLINE BOOL FIDBCrossProduct( const IDBFLAG idbflag )           { return ( idbflag & fidbCrossProduct ); }
 INLINE BOOL FIDBDisallowKeyTruncation( const IDBFLAG idbflag )  { return ( idbflag & fidbDisallowTruncation ); }
 
+//  extended index flags
 typedef USHORT  IDXFLAG;
 
-const IDXFLAG   fIDXExtendedColumns = 0x0001;
-const IDXFLAG   fIDXDotNetGuid      = 0x0002;
+//  fIDXExtendedColumns is special.  It is set on all catalogs, but not in IDBs, and is consumed only in cat.cxx
+//  It may not be set in the IDB for an index that has this value set in the indexes catalog entry.
+//
+const IDXFLAG   fIDXExtendedColumns = 0x0001;   // IDXSEGs are comprised of JET_COLUMNIDs, not FIDs
+const IDXFLAG   fIDXDotNetGuid      = 0x0002;   // GUIDs sort according to .Net rules
 
 INLINE BOOL FIDXExtendedColumns( const IDXFLAG idxflag )        { return ( idxflag & fIDXExtendedColumns ); }
 INLINE BOOL FIDXDotNetGUID( const IDXFLAG idxflag )     { return ( idxflag & fIDXDotNetGuid ); }
 
+// persisted index flags
 PERSISTED
 struct LE_IDXFLAG
 {
@@ -66,17 +82,30 @@ struct LE_IDXFLAG
 };
 
 
+/*  Index Descriptor Block: information about index key
+/**/
 
-
+// If there are at most this many columns in the index, then the columns will
+// be listed in the IDB.  Otherwise, the array will be stored in the byte pool
+// of the table's TDB.  Note that the value chosen satisfies 32-byte cache line
+// alignment of the structure.
 const INT       cIDBIdxSegMax                   = 6;
 
+// If there are at most this many conditional columns in the index, then the columns will
+// be listed in the IDB.  Otherwise, the array will be stored in the byte pool
+// of the table's TDB.  Note that the value chosen satisfies 32-byte cache line
+// alignment of the structure.
 const INT       cIDBIdxSegConditionalMax        = 2;
 
 
+//  for tuple indexes: absolute min/max length of substring tuples
+//  and absolute max characters to index per string
 const ULONG     cchIDXTuplesLengthMinAbsolute   = 2;
 const ULONG     cchIDXTuplesLengthMaxAbsolute   = 255;
 const ULONG     ichIDXTuplesToIndexMaxAbsolute  = 0x7fff;
 
+//  for tuple indexes, default min/max length of substring tuples
+//  and default max characters to index per string
 const ULONG     cchIDXTuplesLengthMinDefault        = 3;
 const ULONG     cchIDXTuplesLengthMaxDefault        = 10;
 const ULONG     cchIDXTuplesToIndexMaxDefault   = 0x7fff;
@@ -108,6 +137,7 @@ class IDB
         IDB( INST* const pinst )
             :   m_pinst( pinst )
         {
+            //  ensure bit array is aligned for LONG_PTR traversal
             Assert( (LONG_PTR)m_rgbitIdx % sizeof(LONG_PTR) == 0 );
             m_nlv.m_dwNormalizationFlags = 0;
             m_nlv.m_dwNlsVersion = 0;
@@ -120,9 +150,9 @@ class IDB
 #pragma push_macro( "new" )
 #undef new
     private:
-        void* operator new( size_t );
-        void* operator new[]( size_t );
-        void operator delete[]( void* );
+        void* operator new( size_t );           //  meaningless without INST*
+        void* operator new[]( size_t );         //  meaningless without INST*
+        void operator delete[]( void* );        //  not supported
     public:
         void* operator new( size_t cbAlloc, INST* pinst )
         {
@@ -139,45 +169,72 @@ class IDB
 #pragma pop_macro( "new" )
 
     private:
-        LONG        m_crefCurrentIndex;
-        USHORT      m_crefVersionCheck;
-        IDBFLAG     m_fidbPersisted;
-        IDXFLAG     m_fidxPersisted;
-        IDBFLAG     m_fidbNonPersisted;
-        USHORT      m_itagIndexName;
-        USHORT      m_cbVarSegMac;
-        USHORT      m_cbKeyMost;
-        BYTE        m_cidxseg;
-        BYTE        m_cidxsegConditional;
+        LONG        m_crefCurrentIndex;         //  for secondary indexes only, number of cursors with SetCurrentIndex on this IDB
+//  0x4 bytes. m_crefVersionCheck must be on an atomically-modifiable alignment..
+        USHORT      m_crefVersionCheck;         //  number of cursors consulting catalog for versioned index info
+        IDBFLAG     m_fidbPersisted;            //  persisted index flags
+        IDXFLAG     m_fidxPersisted;            //  additional persisted flags
+        IDBFLAG     m_fidbNonPersisted;         //  non-persisted index flags
+        USHORT      m_itagIndexName;            //  itag into ptdb->rgb where index name is stored
+        USHORT      m_cbVarSegMac;              //  maximum variable segment size
+        USHORT      m_cbKeyMost;                //  maximum key size
+        BYTE        m_cidxseg;                  //  number of columns in index (<=12)
+        BYTE        m_cidxsegConditional;       //  number of conditional columns (<=12)
 
+//  0x14 bytes
 
     public:
-            IDXSEG  rgidxseg[cIDBIdxSegMax];
+//      union
+//          {
+            IDXSEG  rgidxseg[cIDBIdxSegMax];    //  array of columnid for index
+//          USHORT  itagrgidxseg;               //  if m_cidxseg > cIDBIdxSegMax, then rgidxseg
+//                                              //      will be stored in byte pool at this itag
+//          };
+//  0x2c bytes
 
+//      union
+//          {
             IDXSEG  rgidxsegConditional[cIDBIdxSegConditionalMax];
+//          USHORT  itagrgidxsegConditional;    //  if m_cidxsegConditional > cIDBIdxSegConditionalMax,
+//          };                                  //      then rgidxseg will be stored in byte pool at this itag
 
+//  0x34 bytes
             NORM_LOCALE_VER m_nlv;
+//  0xfc bytes
             USHORT      m_cchTuplesLengthMin;
             USHORT      m_cchTuplesLengthMax;
 
+//  0x100 bytes
     public:
         union
         {
-            INST*   m_pinst;
-            BYTE    m_rgbAlign[8];
+            INST*   m_pinst;                    //  INST
+            BYTE    m_rgbAlign[8];              //  forces alignment on all platforms
         };
+//
+//
+//  0x108 bytes
 
 
     private:
-        BYTE        m_rgbitIdx[32];
+        BYTE        m_rgbitIdx[32];             //  bit array for index columns
+//
+//
+//  0x108 bytes
 
 
         USHORT      m_ichTuplesToIndexMax;
         USHORT      m_cchTuplesIncrement;
         USHORT      m_ichTuplesStart;
+//
+//
+//  0x12e bytes
 
 
         USHORT      m_usReserved2[1];
+//
+//
+//  0x130 bytes (AMD64 aligned)
 
     public:
         INLINE VOID InitRefcounts()
@@ -196,6 +253,8 @@ class IDB
             Assert( !FPrimary() );
             Assert( !FDeleted() );
 
+            // Don't need refcount on template indexes, since we
+            // know they'll never go away.
             Assert( !FTemplateIndex() );
 
             Assert( CrefCurrentIndex() >= 0 );
@@ -207,6 +266,8 @@ class IDB
         {
             Assert( !FPrimary() );
 
+            // Don't need refcount on template indexes, since we
+            // know they'll never go away.
             Assert( !FTemplateIndex() );
 
             Assert( CrefCurrentIndex() > 0 );
@@ -216,6 +277,7 @@ class IDB
         INLINE USHORT CrefVersionCheck() const      { return m_crefVersionCheck; }
         INLINE VOID IncrementVersionCheck()
         {
+            // WARNING: Ensure table's critical section is held during this call.
             Assert( FVersioned() );
             Assert( !FTemplateIndex() );
             Assert( CrefVersionCheck() < 0xFFFF );
@@ -224,7 +286,11 @@ class IDB
         }
         INLINE VOID DecrementVersionCheck()
         {
+            // WARNING: Ensure table's critical section is held during this call.
 
+            // At this point, the Versioned flag is not necessarily set,
+            // because it may have been reset while we were performing the
+            // actual version check.
 
             Assert( !FTemplateIndex() );
             Assert( CrefVersionCheck() > 0 );
@@ -404,6 +470,7 @@ class IDB
             return &m_nlv.m_sortidCustomSortVersion;
         }
 
+        // Accepts a zero'ed-out SORTID.
         INLINE VOID SetSortidCustomSortVersion( _In_ const SORTID* const psortidCustomSortVersion )
         {
             m_nlv.m_sortidCustomSortVersion = *psortidCustomSortVersion;
@@ -481,12 +548,17 @@ class IDB
         INLINE BOOL FPrimary() const                    { return ( m_fidbPersisted & fidbPrimary ); }
         INLINE VOID SetFPrimary()                       { m_fidbPersisted |= fidbPrimary; }
 
+        // Whether the user specified a locale when creating the index. The default locale may
+        // still be used and persisted, but FLocaleSet() will be false in that case.
+        // Also see FLocalizedText().
         INLINE BOOL FLocaleSet() const                  { return ( m_fidbPersisted & fidbLocaleSet ); }
         INLINE VOID SetFLocaleSet()                     { m_fidbPersisted |= fidbLocaleSet; }
 
         INLINE BOOL FMultivalued() const                { return ( m_fidbPersisted & fidbMultivalued ); }
         INLINE VOID SetFMultivalued()                   { m_fidbPersisted |= fidbMultivalued; }
 
+        // Whether *any* column in the index is Text, and set to Unicode (codepage == 1200).
+        // Also see FLocaleSet().
         INLINE BOOL FLocalizedText() const              { return ( m_fidbPersisted & fidbLocalizedText ); }
         INLINE VOID SetFLocalizedText()                 { m_fidbPersisted |= fidbLocalizedText; }
 
@@ -539,7 +611,7 @@ class IDB
 
 #ifdef DEBUGGER_EXTENSION
         VOID Dump( CPRINTF * pcprintf, DWORD_PTR dwOffset = 0 ) const;
-#endif
+#endif  //  DEBUGGER_EXTENSION
 };
 
 

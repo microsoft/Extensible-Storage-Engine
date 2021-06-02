@@ -5,6 +5,7 @@
 
 #define _CRT_RAND_S
 
+// needed for JET errors
 #if defined(BUILD_ENV_IS_NT) || defined(BUILD_ENV_IS_WPHONE)
 #include <esent_x.h>
 #endif
@@ -12,7 +13,7 @@
 #include <jet.h>
 #endif
 
-#include "ntstatus.h"
+#include "ntstatus.h"   //  for access to STATUS_CRC_ERROR in MemoryMappedIoSuite.cxx
 #define WIN32_NO_STATUS
 #include <windows.h>
 #include <cstdio>
@@ -24,6 +25,9 @@
 #include "bstf.hxx"
 
 
+//  This is OS Layer Unit test Call/CallJ macros, because sometimes we want
+//  to test the Call()/CallJ()/etc macros as they're part of the OS Layer.
+//
 
 #define OSTestCallJ( func, label )                      TestCallJ( func, label )
 
@@ -52,9 +56,14 @@ VOID ZeroBuffer_( BYTE * pb, ULONG cb );
 #include "os.hxx"
 
 
+//  ================================================================
+//  OS MM (MemoryManager) Helpers
+//  ================================================================
 
 inline QWORD CbIncrementalFileSize( const BOOL fBigFile )
 {
+    //  The small size is choosen b/c it gives 1 segment with each byte value for the
+    //  memset(), so all 256 segments have simple unique data.
     return fBigFile ? ( OSMemoryTotal() * 2 ) : 256 * 4096;
 }
 ERR ErrCreateIncrementFile( PCWSTR wszFile, const BOOL fBigFile = fFalse );
@@ -64,6 +73,9 @@ void PrintMemInfo_( const ULONG ibPrefix, const BYTE * const pbMemory, PCSTR szM
 #define PrintMemInfo( ibPrefix, pbMemory )      PrintMemInfo_( ibPrefix, pbMemory, #pbMemory )
 
 
+//  ================================================================
+//  OS Revision Helpers
+//  ================================================================
 
 
 BOOL FUtilOsIsGeq( const ULONG dwMajorOsVerRequired, const ULONG dwMinorOsVerRequired = 0 );

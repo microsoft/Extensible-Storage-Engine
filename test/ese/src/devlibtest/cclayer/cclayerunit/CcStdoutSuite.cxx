@@ -6,6 +6,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 
+//  Simple printing to stdout tests.
 
 CUnitTest( CcPrintfPrintsNumbersCorrectly, 0x0, "This is a manual test, it just prints things out and someone has to read it to verify it." );
 ERR CcPrintfPrintsNumbersCorrectly::ErrTest()
@@ -35,7 +36,7 @@ ERR CcPrintfPrintsNumbersCorrectly::ErrTest()
     printf( "\tHello to %I64d platform(s) under ESE.\n", rgll[1] );
 
 
-    printf( "\tHello to 6 platform(s) under ESE.\n" );
+    printf( "\tHello to 6 platform(s) under ESE.\n" ); // final and max print.
     printf( "\nThat finishes our number printing test.\n\n" );
 
     return JET_errSuccess;
@@ -51,17 +52,17 @@ ERR CcPrintfPrintsInsertStringsCorrectly::ErrTest()
     const char * szOne = "1";
     printf( "\tHello to %s platform(s) under ESE.\n", szOne );
 
-    const wchar_t * wszTwo = L"2";
-    printf( "\tHello to %ws platform(s) under ESE.\n", wszTwo );
+    const wchar_t * wszTwo = L"2";  // mixed mode v1
+    printf( "\tHello to %ws platform(s) under ESE.\n", wszTwo );        //  FAILURE(Debian): Prints explicit "  Hello to %ws platform(s) under ESE."  Awesome.
 
     const wchar_t * wszThree = L"3";
-    wprintf( L"\tHello to %ws platform(s) under ESE.\n", wszThree );
+    wprintf( L"\tHello to %ws platform(s) under ESE.\n", wszThree );    //  FAILURE(Debian): See CcPrintfBasicHandwritingIsLegible test 3.
 
     const char * szFour = "4";
     printf( "\tHello to %hs platform(s) under ESE.\n", szFour );
 
 
-    printf( "\tHello to 5 platform(s) under ESE.\n" );
+    printf( "\tHello to 5 platform(s) under ESE.\n" ); // final and max print.
     printf( "\nThat finishes our string printing test.\n\n" );
 
     return JET_errSuccess;
@@ -79,10 +80,10 @@ ERR CcPrintfBasicHandwritingIsLegible::ErrTest()
 
     printf( "\tHello to 2 platform(s) under ESE. Should be 1 tab stop in from here on out.\n" );
 
-    wprintf( L"\tHello to 3 platform(s) under ESE.\n" );
+    wprintf( L"\tHello to 3 platform(s) under ESE.\n" );                //  FAILURE(Debian): wprintf() seems to just not print.
 
 
-    printf( "\tHello to 4 platform(s) under ESE.\n" );
+    printf( "\tHello to 4 platform(s) under ESE.\n" ); // final and max print.
     printf( "\nThat finishes our grammar school handwriting test.\n\n" );
 
     return JET_errSuccess;

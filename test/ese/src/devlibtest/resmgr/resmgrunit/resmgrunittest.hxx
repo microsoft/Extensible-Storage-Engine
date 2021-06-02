@@ -1,6 +1,7 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
+// needed for JET errors
 #if defined( BUILD_ENV_IS_NT ) || defined( BUILD_ENV_IS_WPHONE )
 #include <esent_x.h>
 #endif
@@ -16,13 +17,15 @@
 #include "testerr.h"
 #include "bstf.hxx"
 
-#pragma warning ( disable : 4100 )
-#pragma warning ( disable : 4127 )
-#pragma warning ( disable : 4512 )
-#pragma warning ( disable : 4706 )
+#pragma warning ( disable : 4100 )  // unreferenced formal parameter
+#pragma warning ( disable : 4127 )  // conditional expression is constant
+#pragma warning ( disable : 4512 )  // assignment operator could not be generated
+#pragma warning ( disable : 4706 )  // assignment within conditional expression
 
 DWORD DWGetTickCount();
 
+//  ================================================================
+//  resmgr.hxx required support (i.e. layering yuckiness)
 
 #ifdef DEBUG
 #define Assert( exp )                               \
@@ -31,7 +34,7 @@ DWORD DWGetTickCount();
         AssertFail( #exp, __FILE__, __LINE__ );     \
     }
 #define AssertSz( exp, sz ) Assert( exp )
-#else
+#else   //  !DEBUG
 #define Assert( exp )
 #define AssertSz( exp, sz )
 #endif
@@ -49,6 +52,7 @@ _inline void AssertFail( const char * szMessage, const char * szFilename, LONG l
 }
 
 
+// TODO: Layering yuckiness. Considering making this explicit in the LRUK constructor or template parameters
 const LONG g_pctCachePriorityMin        = 0;
 const LONG g_pctCachePriorityMax        = 1000;
 const LONG g_pctCachePriorityMaxMax     = (LONG)wMax;

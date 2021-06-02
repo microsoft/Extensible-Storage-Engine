@@ -4,6 +4,7 @@
 PERSISTED
 class TAGFLD_HEADER
 {
+    //  must use TAGFIELDS to access individual TAGFLD's
     friend class TAGFIELDS_ITERATOR;
     friend class TAGFIELDS;
     friend class CTaggedColumnIter;
@@ -143,11 +144,13 @@ INLINE ERR TAGFLD_HEADER::ErrMultiValueRetrievalResult(
 }
 
 
+// =========================================================================
     
 
 PERSISTED
 class TAGFLD
 {
+    //  must use TAGFIELDS to access individual TAGFLD's
     friend class TAGFIELDS;
     friend class TAGFIELDS_ITERATOR;
     friend class CTaggedColumnIter;
@@ -171,11 +174,13 @@ class TAGFLD
         typedef UnalignedLittleEndian<FID>      TAGFID;
         typedef UnalignedLittleEndian<WORD>     TAGOFFSET;
 
-        enum { fDerived             = 0x8000 };
-        enum { fNullSmallPage       = 0x2000 };
+        enum { fDerived             = 0x8000 };     //  if TRUE, then current column is derived from a template
+        enum { fNullSmallPage       = 0x2000 };     //  if TRUE, column set to NULL to override default value
 
-        static WORD fExtendedInfo;
-        static WORD maskIb;
+        //================================
+        // pre-computed page size dependent static member variables
+        static WORD fExtendedInfo;      // tagfld flag ( 0x4000 or 0x0000 )
+        static WORD maskIb;             // tagfld offset mask ( 0x1fff or 0x7fff )
 
     private:
         TAGFID      m_fid;
@@ -253,6 +258,7 @@ INLINE BOOL TAGFLD::FExtendedInfo( ) const
 
 INLINE VOID TAGFLD::ResetFExtendedInfo()
 {
+    //AssertSz( g_fSmallPage, "Resetting fExtendedInfo is meaningless in large (16/32kiB) page mode, ignoring..." );
     m_ib &= WORD( ~fExtendedInfo );
 }
 
@@ -299,14 +305,14 @@ INLINE BOOL TAGFLD::FIsLessThan( const FID fid, const BOOL fDerived ) const
     if ( FDerived() )
     {
         return ( fDerived ?
-                    ( Fid() < fid ) :
-                    fTrue );
+                    ( Fid() < fid ) :   //  both derived, so compare FIDs
+                    fTrue );            //  TAGFLD is derived, FID isn't, so TAGFLD is less
     }
     else
     {
         return ( fDerived ?
-                    fFalse :
-                    ( Fid() < fid ) );
+                    fFalse :            //  TAGFLD is non-derived, but FID is, so TAGFLD is greater
+                    ( Fid() < fid ) );  //  both non-derived, so compare FIDs
     }
 }
 INLINE BOOL TAGFLD::FIsLessThanOrEqual( const FID fid, const BOOL fDerived ) const
@@ -315,14 +321,14 @@ INLINE BOOL TAGFLD::FIsLessThanOrEqual( const FID fid, const BOOL fDerived ) con
     if ( FDerived() )
     {
         return ( fDerived ?
-                    ( Fid() <= fid ) :
-                    fTrue );
+                    ( Fid() <= fid ) :  //  both derived, so compare FIDs
+                    fTrue );            //  TAGFLD is derived, FID isn't, so TAGFLD is less
     }
     else
     {
         return ( fDerived ?
-                    fFalse :
-                    ( Fid() <= fid ) );
+                    fFalse :            //  TAGFLD is non-derived, but FID is, so TAGFLD is greater
+                    ( Fid() <= fid ) ); //  both non-derived, so compare FIDs
     }
 }
 INLINE BOOL TAGFLD::FIsGreaterThan( const FID fid, const BOOL fDerived ) const
@@ -331,14 +337,14 @@ INLINE BOOL TAGFLD::FIsGreaterThan( const FID fid, const BOOL fDerived ) const
     if ( FDerived() )
     {
         return ( fDerived ?
-                    ( Fid() > fid ) :
-                    fFalse );
+                    ( Fid() > fid ) :   //  both derived, so compare FIDs
+                    fFalse );           //  TAGFLD is derived, FID isn't, so TAGFLD is less
     }
     else
     {
         return ( fDerived ?
-                    fTrue :
-                    ( Fid() > fid ) );
+                    fTrue :             //  TAGFLD is non-derived, but FID is, so TAGFLD is greater
+                    ( Fid() > fid ) );  //  both non-derived, so compare FIDs
     }
 }
 INLINE BOOL TAGFLD::FIsGreaterThanOrEqual( const FID fid, const BOOL fDerived ) const
@@ -347,14 +353,14 @@ INLINE BOOL TAGFLD::FIsGreaterThanOrEqual( const FID fid, const BOOL fDerived ) 
     if ( FDerived() )
     {
         return ( fDerived ?
-                    ( Fid() >= fid ) :
-                    fFalse );
+                    ( Fid() >= fid ) :  //  both derived, so compare FIDs
+                    fFalse );           //  TAGFLD is derived, FID isn't, so TAGFLD is less
     }
     else
     {
         return ( fDerived ?
-                    fTrue :
-                    ( Fid() >= fid ) );
+                    fTrue :             //  TAGFLD is non-derived, but FID is, so TAGFLD is greater
+                    ( Fid() >= fid ) ); //  both non-derived, so compare FIDs
     }
 }
 
@@ -380,8 +386,14 @@ INLINE BOOL TAGFLD::FIsGreaterThanOrEqual( const COLUMNID columnid, const TDB * 
     return FIsGreaterThanOrEqual( FidOfColumnid( columnid ), FRECUseDerivedBit( columnid, ptdb ) );
 }
 
+// =========================================================================
 
 
+//  This class is a huge hack to ensure that the new multi-value format doesn't
+//  take up more record space than the old format.  If we have exactly two multi-values
+//  and the column is not a LongValue, then the new multi-value format
+//  would require one more byte of overhead than the old format.  So we use a
+//  TWOVALUES structure in that special case.
 class TWOVALUES
 {
     friend class TAGFLD_ITERATOR_TWOVALUES;
@@ -397,7 +409,7 @@ class TWOVALUES
     
         TAGFLD_HEADER   * m_pheader;
         TVLENGTH        * m_pcbFirstValue;
-        TVLENGTH        m_cbSecondValue;
+        TVLENGTH        m_cbSecondValue;            //  not persisted
         BYTE            * m_pbData;
 
     private:
@@ -428,6 +440,7 @@ INLINE TWOVALUES::TWOVALUES(
     BYTE            * const pbTwoValues,
     const ULONG     cbTwoValues )
 {
+    //  must have at least header byte and then cb of first value
     Assert( NULL != pbTwoValues );
     Assert( cbTwoValues >= sizeof(TAGFLD_HEADER) + sizeof(TVLENGTH) );
 
@@ -442,7 +455,7 @@ INLINE TWOVALUES::TWOVALUES(
     Assert( cbTwoValues >= sizeof(TAGFLD_HEADER) + sizeof(TVLENGTH) + *m_pcbFirstValue );
 
     const SIZE_T cbSecondValue = cbTwoValues - ( sizeof(TAGFLD_HEADER) + sizeof(TVLENGTH) + *m_pcbFirstValue );
-    Assert( cbSecondValue <= 0xff );
+    Assert( cbSecondValue <= 0xff ); // BYTE_MAX
     m_cbSecondValue = BYTE( cbSecondValue );
 
     m_pbData = pbTwoValues + sizeof(TAGFLD_HEADER) + sizeof(TVLENGTH);
@@ -484,14 +497,15 @@ class MULTIVALUES
     private:
         typedef UnalignedLittleEndian<USHORT>   MVOFFSET;
 
-        enum { fSeparatedInstance   = 0x8000 };
+        //  flags on individual MVOFFSET entries
+        enum { fSeparatedInstance   = 0x8000 };     //  is individual MV separated?
         enum { maskFlags            = 0x8000 };
-        enum { maskIb               = 0x7fff };
+        enum { maskIb               = 0x7fff };     //  max is 1024 * 32 - 1 (ie. max page size is 32kiB)
 
-        TAGFLD_HEADER   * m_pheader;
-        MVOFFSET        * m_rgmvoffs;
-        ULONG           m_cbMultiValues;
-        ULONG           m_cMultiValues;
+        TAGFLD_HEADER   * m_pheader;                //  header byte
+        MVOFFSET        * m_rgmvoffs;               //  start of MVOFFSET array
+        ULONG           m_cbMultiValues;            //  bytes used to store MVOFFSET array and data of all multi-values
+        ULONG           m_cMultiValues;             //  count of multi-values
 
     private:
         VOID            Refresh(
@@ -554,6 +568,7 @@ INLINE MULTIVALUES::MULTIVALUES(
     const BYTE  * const pbMultiValues,
     const ULONG cbMultiValues )
 {
+    //  must be at least two multi-values
     Assert( NULL != pbMultiValues );
     Assert( cbMultiValues >= sizeof(TAGFLD_HEADER) + sizeof(MVOFFSET) );
 
@@ -581,6 +596,7 @@ INLINE VOID MULTIVALUES::Refresh(
     const BYTE  * const pbMultiValues,
     const ULONG cbMultiValues )
 {
+    //  must be at least two multi-values
     Assert( NULL != pbMultiValues );
     Assert( cbMultiValues >= sizeof(TAGFLD_HEADER) + sizeof(MVOFFSET) );
 
@@ -609,6 +625,9 @@ INLINE VOID MULTIVALUES::Refresh(
     Assert( CMultiValues() > 1 );
 }
 
+//  returns where the tagged data starts, relative to the
+//  start of the tag array (ie. ib==0 is the start of the
+//  the tag array)
 INLINE ULONG MULTIVALUES::IbStartOfMVData() const
 {
     Assert( CMultiValues() > 1 );
@@ -682,8 +701,9 @@ INLINE ERR MULTIVALUES::ErrRetrieveInstance(
 }
 
     
+// =========================================================================
 
-class RECCHECKTABLE;
+class RECCHECKTABLE;    //  forward reference
 
 class TAGFIELDS
 {
@@ -696,9 +716,9 @@ class TAGFIELDS
         virtual ~TAGFIELDS()    {}
 
     private:
-        TAGFLD          * m_rgtagfld;
-        ULONG           m_cbTaggedColumns;
-        ULONG           m_cTaggedColumns;
+        TAGFLD          * m_rgtagfld;                           //  start of TAGFLD array
+        ULONG           m_cbTaggedColumns;                      //  bytes used to store TAGFLD array and tagged data
+        ULONG           m_cTaggedColumns;                       //  count of tagged columns
         
     private:
         VOID            Refresh( const DATA& dataRec );
@@ -863,7 +883,13 @@ class TAGFIELDS
 };
 
 
+//  ================================================================
 class TAGFLD_ITERATOR
+//  ================================================================
+//
+//  Base class for things that iterate through tags
+//
+//-
 {
     protected:
         TAGFLD_ITERATOR();
@@ -885,6 +911,9 @@ class TAGFLD_ITERATOR
         
     public:
 
+        //  information about the current tag
+        //  the separated flag is per-tag, other flags
+        //  are per-column
 
         virtual INT Itag() const;
         virtual BOOL FSeparated() const;
@@ -932,7 +961,15 @@ INLINE INT CmpFid(
 }
 
     
+//  ================================================================
 class TAGFIELDS_ITERATOR
+//  ================================================================
+//
+//  Iterates through the different columns in a record. Contains
+//  a TAGFLD_ITERATOR which can be used to iterate through the
+//  tags in a columns
+//
+//-
 {
     public:
         TAGFIELDS_ITERATOR( const DATA& dataRec );
@@ -949,16 +986,18 @@ class TAGFIELDS_ITERATOR
 
         VOID AssertValid() const;
         
-#endif
+#endif  //  DEBUG
 
     public:
 
+        //  information about all the TAGFLDS
 
         INT CbTaggedColumns() const;
         INT CTaggedColumns() const;
         
     public:
 
+        //  navigate between columns
         
         VOID MoveBeforeFirst();
         VOID MoveAfterLast();
@@ -968,6 +1007,7 @@ class TAGFIELDS_ITERATOR
 
     public:
 
+        //  information about the current column
 
         FID Fid() const;
         BOOL FNull() const;
@@ -979,6 +1019,7 @@ class TAGFIELDS_ITERATOR
 
     public:
 
+        //  iterate through the multivalues of the current column
         
         TAGFLD_ITERATOR& TagfldIterator();
         const TAGFLD_ITERATOR& TagfldIterator() const;
@@ -989,14 +1030,14 @@ class TAGFIELDS_ITERATOR
     private:
         const TAGFIELDS m_tagfields;
 
-        const TAGFLD * const m_ptagfldMic;
-        const TAGFLD * const m_ptagfldMax;
+        const TAGFLD * const m_ptagfldMic;  //  out-of-bounds lower limit of TAGFLDs
+        const TAGFLD * const m_ptagfldMax;  //  out-of-bounds upper limit of TAGFLDs
 
         TAGFLD_ITERATOR * const m_ptagflditerator;
         
-        const TAGFLD * m_ptagfldCurr;
+        const TAGFLD * m_ptagfldCurr;       //  where we are in the record
         
-        BYTE    m_rgbTagfldIteratorBuf[64];
+        BYTE    m_rgbTagfldIteratorBuf[64]; //  used with pacement new to hold TAGFLD_ITERATORS
         
 };
 
@@ -1021,7 +1062,7 @@ INLINE TAGFIELDS::TAGFIELDS( const DATA& dataRec )
     }
     else
     {
-        Assert( m_rgtagfld[0].Ib() >= sizeof(TAGFLD) );
+        Assert( m_rgtagfld[0].Ib() >= sizeof(TAGFLD) );     //  must be at least one TAGFLD
         Assert( m_rgtagfld[0].Ib() <= m_cbTaggedColumns );
         Assert( m_rgtagfld[0].Ib() % sizeof(TAGFLD) == 0 );
         m_cTaggedColumns = m_rgtagfld[0].Ib() / sizeof(TAGFLD);
@@ -1046,8 +1087,9 @@ INLINE VOID TAGFIELDS::Refresh( const DATA& dataRec )
 
     m_cbTaggedColumns   = ULONG( pbRecMax - pbStartOfTaggedColumns );
 
+    //  do as much as possible to verify record hasn't changed
 #ifdef DEBUG
-    Assert( Ptagfld( 0 )->Ib() >= sizeof(TAGFLD) );
+    Assert( Ptagfld( 0 )->Ib() >= sizeof(TAGFLD) );     //  must be at least one TAGFLD
     Assert( Ptagfld( 0 )->Ib() <= CbTaggedColumns() );
 
     const BYTE  * const pbTaggedData        = PbTaggedColumns() + Ptagfld( 0 )->Ib();
@@ -1057,6 +1099,7 @@ INLINE VOID TAGFIELDS::Refresh( const DATA& dataRec )
 #endif
 }
 
+//  copy TAGFIELDS to buffer and update to point to that buffer
 INLINE VOID TAGFIELDS::Migrate( BYTE * const pbBuffer )
 {
     UtilMemCpy( pbBuffer, PbTaggedColumns(), CbTaggedColumns() );
@@ -1163,6 +1206,7 @@ INLINE VOID TAGFLD::ResetFNull( const TAGFIELDS* const ptagfields )
 
 #ifdef DEBUG
 
+// Original safe CmpTagfld() that describes intended behavior of CmpTagfld*()
 
 INLINE BOOL TAGFLD::CmpTagfldSlow(
     const TAGFLD& tagfld1,
@@ -1172,10 +1216,12 @@ INLINE BOOL TAGFLD::CmpTagfldSlow(
     {
         if ( tagfld2.FDerived() )
         {
+            //  both are template columns, so do straight fid comparison
             return ( tagfld1.Fid() < tagfld2.Fid() );
         }
         else
         {
+            //  template columns always precede non-template columns
             return fTrue;
         }
     }
@@ -1183,15 +1229,20 @@ INLINE BOOL TAGFLD::CmpTagfldSlow(
     {
         if ( tagfld2.FDerived() )
         {
+            //  template columns always precede non-template columns
             return fFalse;
         }
         else
         {
+            //  both are template columns, so do straight fid comparison
             return ( tagfld1.Fid() < tagfld2.Fid() );
         }
     }
 }
 
+// Branch-less CmpTagfld()
+//
+// (less optimized than CmpTagfld2())
 
 INLINE BOOL TAGFLD::CmpTagfld1(
     const TAGFLD& tagfld1,
@@ -1199,14 +1250,23 @@ INLINE BOOL TAGFLD::CmpTagfld1(
 {
     const UINT cbitsPerByte = 8;
 
+    // ensure that output space is large enough to hold FID and !fDerived
     Assert( sizeof( DWORD ) >= ( sizeof( tagfld1.m_ib ) + sizeof( FID ) ) );
     const DWORD dw1 = ( ( ~ ( tagfld1.m_ib & TAGFLD::fDerived ) ) << ( cbitsPerByte * sizeof( FID ) ) ) | tagfld1.Fid();
     const DWORD dw2 = ( ( ~ ( tagfld2.m_ib & TAGFLD::fDerived ) ) << ( cbitsPerByte * sizeof( FID ) ) ) | tagfld2.Fid();
     return dw1 < dw2;
 }
 
-#endif
+#endif // DEBUG
 
+// Branch-less CmpTagfld() over-optimized for little-endian (correct operation on big-endian)
+//
+// Compute DWORD for each tagfld with:
+//  - FID in low word
+//  - ( ! fDerived ) into high BIT of the DWORD
+// Execute straight DWORD comparison
+//
+// Depends on structure of TAGFLD, fDerived bit of m_ib, and many sizes.
 
 INLINE BOOL TAGFLD::CmpTagfld2(
     const TAGFLD& tagfld1,
@@ -1221,13 +1281,16 @@ INLINE BOOL TAGFLD::CmpTagfld2(
     
     const UINT cbitsPerByte = 8;
     
+    // For XOR to flip the derived bit in the flags
     const DWORD32 dwFlipDerived = DWORD32( TAGFLD::fDerived ) << ( cbitsPerByte * sizeof( tagfld1.m_fid ) );
     
+    // Mask to preserve FID and derived bit
     const DWORD32 dwMask = dwFlipDerived | ( ( 1 << ( cbitsPerByte * sizeof( tagfld1.m_fid ) ) ) - 1 );
 
     const DWORD32 dw1 = ::FHostIsLittleEndian() ? ( Unaligned< DWORD32 >& ) tagfld1 : _rotl( ( const Unaligned< DWORD32 >& ) tagfld1, cbitsPerByte * sizeof( tagfld1.m_fid ) );
     const DWORD32 dw2 = ::FHostIsLittleEndian() ? ( Unaligned< DWORD32 >& ) tagfld2 : _rotl( ( const Unaligned< DWORD32 >& ) tagfld2, cbitsPerByte * sizeof( tagfld1.m_fid ) );
 
+    // verify that _rotl worked, or (on little endian) that reading TAGFLD straight works as expected
     Assert( dw1 == ( ( DWORD32( tagfld1.m_ib ) << ( cbitsPerByte * sizeof( tagfld1.m_fid ) ) ) | DWORD32( tagfld1.Fid() ) ) );
     Assert( dw2 == ( ( DWORD32( tagfld2.m_ib ) << ( cbitsPerByte * sizeof( tagfld1.m_fid ) ) ) | DWORD32( tagfld2.Fid() ) ) );
 
@@ -1252,6 +1315,9 @@ INLINE BOOL TAGFLD::CmpTagfld(
 
 #ifdef DEBUG
 
+//  Canonical comparison combinations: zero as a value for all fields,
+//  non-zero IB (i.e. in case of forgetting to mask it out), maximum
+//  FID and IB, derived & non-derived, etc.
 
 INLINE VOID
 TAGFLD::CmpTagfldTest()
@@ -1271,6 +1337,7 @@ TAGFLD::CmpTagfldTest()
             for ( INT ifid1 = 0; ifid1 < _countof( rgfid ); ++ifid1 )
             {
                 const TAGFID fid1 = rgfid[ ifid1 ];
+                // got fDerived1, ib1, fid1
 
                 {
                     for ( INT iDerived2 = 0; iDerived2 < _countof( rgfDerived ); ++iDerived2 )
@@ -1284,12 +1351,14 @@ TAGFLD::CmpTagfldTest()
                             for ( INT ifid2 = 0; ifid2 < _countof( rgfid ); ++ifid2 )
                             {
                                 const TAGFID fid2 = rgfid[ ifid2 ];
+                                // got fDerived2, ib2, fid2
 
                                 TAGFLD  tagfld1( fid1, fDerived1 );
                                 tagfld1.SetIb( ib1 );
                                 TAGFLD  tagfld2( fid2, fDerived2 );
                                 tagfld2.SetIb( ib2 );
 
+                                // will execute all three algorithms
                                 (VOID) CmpTagfld( tagfld1, tagfld2 );
                             }
                         }
@@ -1302,6 +1371,7 @@ TAGFLD::CmpTagfldTest()
 
 #endif
 
+// Adapted from STL lower_bound() to allow TAGFLD::CmpTagfld() inlining.
 INLINE const TAGFLD*
 TAGFIELDS::PtagfldLowerBound
     (
@@ -1316,6 +1386,7 @@ TAGFIELDS::PtagfldLowerBound
     Assert( ptagfldMax >= ptagfldStart );
 
 #ifdef DEBUG
+    // Verify TAGFLD::CmpTagfld() correctness before use
     {
         static BOOL fTested = fFalse;
 
@@ -1332,11 +1403,13 @@ TAGFIELDS::PtagfldLowerBound
     const TAGFLD* ptagfld = ptagfldStart;
     while ( cfldSeparation > 0 )
     {
+        // check middle
         const SIZE_T cfldHalf = cfldSeparation / 2;
         const TAGFLD* const ptagfldMid = ptagfld + cfldHalf;
         if ( TAGFLD::CmpTagfld( *ptagfldMid, tagfldFind ) )
         {
-            ptagfld = ptagfldMid + 1;
+            // Look in right half
+            ptagfld = ptagfldMid + 1;   // exclude the element we're looking at
             cfldSeparation -= cfldHalf + 1;
         }
         else
@@ -1347,6 +1420,8 @@ TAGFIELDS::PtagfldLowerBound
     return ptagfld;
 }
 
+//  find first TAGFLD with matching FID (if it doesn't exist, return
+//  position where it would be)
 INLINE ULONG TAGFIELDS::ItagfldFind( const TAGFLD& tagfldFind ) const
 {
     const TAGFLD    *       ptagfldStart    = Rgtagfld();
@@ -1362,6 +1437,9 @@ INLINE ULONG TAGFIELDS::ItagfldFind( const TAGFLD& tagfldFind ) const
     return ULONG( ptagfld - ptagfldStart );
 }
 
+//  returns where the tagged data starts, relative to the
+//  start of the tag array (ie. ib==0 is the start of the
+//  the tag array)
 INLINE ULONG TAGFIELDS::IbStartOfTaggedData() const
 {
     Assert( CTaggedColumns() > 0 );
@@ -1442,11 +1520,13 @@ INLINE VOID TAGFIELDS::AssertValidTagColumns( const FUCB* const pfucb ) const
 }
 
 
+// Structure imposed upon a tagged field occurance in a record
 PERSISTED
 class TAGFLD_OLD
 {
     public:
 
+        // Constructor/destructor
         TAGFLD_OLD( const FID fid, const BOOL fLongValue, const BOOL fDerived );
         ~TAGFLD_OLD();
 
@@ -1455,17 +1535,17 @@ class TAGFLD_OLD
         {
             WORD        m_w;
             struct {
-                WORD    m_cbData:12;
+                WORD    m_cbData:12;        // accommodates up to 4095 for cbLVIntrinsicMost
                 WORD    reserved:1;
-                WORD    m_fDerived:1;
-                WORD    m_fNull:1;
-                WORD    m_fLongValue:1;
+                WORD    m_fDerived:1;       // column was derived from template
+                WORD    m_fNull:1;          // Null instance (only occurs if default value set)
+                WORD    m_fLongValue:1;     // coltypLongBinary or coltypLongText
             };
         };
         
-        UnalignedLittleEndian< FID >    m_fid;
+        UnalignedLittleEndian< FID >    m_fid;      // field id of occurance
         UnalignedLittleEndian< WORD >   m_wBitFields;
-        BYTE                            m_rgb[];
+        BYTE                            m_rgb[];    // data (extends off the end of the structure)
 
 
     public:
@@ -1518,7 +1598,7 @@ INLINE TAGFLD_OLD::TAGFLD_OLD( const FID fid, const BOOL fLongValue, const BOOL 
         btflds.m_w = 0;
         btflds.m_fLongValue = WORD( fLongValue ? fTrue : fFalse );
         btflds.m_fDerived = WORD( fDerived ? fTrue : fFalse );
-        m_wBitFields = btflds.m_w;
+        m_wBitFields = btflds.m_w;  // Endian conversion
     }
     else
         m_wBitFields = 0;
@@ -1537,8 +1617,8 @@ INLINE FID TAGFLD_OLD::Fid() const
 INLINE ULONG TAGFLD_OLD::CbData() const
 {
     BITFIELDS btflds;
-    btflds.m_w = m_wBitFields;
-    Assert( btflds.m_cbData <= cbLVIntrinsicMost + 1 );
+    btflds.m_w = m_wBitFields;      // endian conversion
+    Assert( btflds.m_cbData <= cbLVIntrinsicMost + 1 ); //  cbLVIntrinsicMost decreased by 1 with the record format change
     return btflds.m_cbData;
 }
 
@@ -1606,6 +1686,9 @@ INLINE VOID TAGFLD_OLD::ResetNull()
 
 INLINE VOID TAGFLD_OLD::UpgradeToESE98DerivedColumn()
 {
+    //  only called by defrag to convert an ESE97 derived
+    //  column to an ESE98 derived column (ie. derived
+    //  bit in TAGFLD is set)
     BITFIELDS btflds;
     btflds.m_w = m_wBitFields;
     btflds.m_fDerived = fTrue;
@@ -1625,6 +1708,7 @@ INLINE BOOL TAGFLD_OLD::FLastTaggedInstance( const BYTE *pbRecMax ) const
     Assert( (BYTE *)ptagfldNext <= pbRecMax );
     if ( (BYTE *)ptagfldNext < pbRecMax )
     {
+        // TAGFLD's are sorted in ascending order, with derived columns first
         if ( !FDerived() || ptagfldNext->FDerived() )
         {
             Assert( FDerived() || !ptagfldNext->FDerived() );
@@ -1661,10 +1745,12 @@ INLINE BOOL TAGFLD_OLD::FIsLessThan( const FID fid, const BOOL fDerived ) const
     {
         if ( fDerived )
         {
+            //  both derived, so compare FIDs
             return ( Fid() < fid );
         }
         else
         {
+            //  TAGFLD is derived, COLUMNID isn't, so TAGFLD is less
             return fTrue;
         }
     }
@@ -1672,10 +1758,12 @@ INLINE BOOL TAGFLD_OLD::FIsLessThan( const FID fid, const BOOL fDerived ) const
     {
         if ( fDerived )
         {
+            //  TAGFLD is non-derived, but COLUMNID is, so TAGFLD is greater
             return fFalse;
         }
         else
         {
+            //  both non-derived, so compare FIDs
             return ( Fid() < fid );
         }
     }
@@ -1687,10 +1775,12 @@ INLINE BOOL TAGFLD_OLD::FIsLessThanOrEqual( const FID fid, const BOOL fDerived )
     {
         if ( fDerived )
         {
+            //  both derived, so compare FIDs
             return ( Fid() <= fid );
         }
         else
         {
+            //  TAGFLD is derived, COLUMNID isn't, so TAGFLD is less
             return fTrue;
         }
     }
@@ -1698,10 +1788,12 @@ INLINE BOOL TAGFLD_OLD::FIsLessThanOrEqual( const FID fid, const BOOL fDerived )
     {
         if ( fDerived )
         {
+            //  TAGFLD is non-derived, but COLUMNID is, so TAGFLD is greater
             return fFalse;
         }
         else
         {
+            //  both non-derived, so compare FIDs
             return ( Fid() <= fid );
         }
     }
@@ -1713,10 +1805,12 @@ INLINE BOOL TAGFLD_OLD::FIsGreaterThan( const FID fid, const BOOL fDerived ) con
     {
         if ( fDerived )
         {
+            //  both derived, so compare FIDs
             return ( Fid() > fid );
         }
         else
         {
+            //  TAGFLD is derived, COLUMNID isn't, so TAGFLD is less
             return fFalse;
         }
     }
@@ -1724,10 +1818,12 @@ INLINE BOOL TAGFLD_OLD::FIsGreaterThan( const FID fid, const BOOL fDerived ) con
     {
         if ( fDerived )
         {
+            //  TAGFLD is non-derived, but COLUMNID is, so TAGFLD is greater
             return fTrue;
         }
         else
         {
+            //  both non-derived, so compare FIDs
             return ( Fid() > fid );
         }
     }
@@ -1739,10 +1835,12 @@ INLINE BOOL TAGFLD_OLD::FIsGreaterThanOrEqual( const FID fid, const BOOL fDerive
     {
         if ( fDerived )
         {
+            //  both derived, so compare FIDs
             return ( Fid() >= fid );
         }
         else
         {
+            //  TAGFLD is derived, COLUMNID isn't, so TAGFLD is less
             return fFalse;
         }
     }
@@ -1750,10 +1848,12 @@ INLINE BOOL TAGFLD_OLD::FIsGreaterThanOrEqual( const FID fid, const BOOL fDerive
     {
         if ( fDerived )
         {
+            //  TAGFLD is non-derived, but COLUMNID is, so TAGFLD is greater
             return fTrue;
         }
         else
         {
+            //  both non-derived, so compare FIDs
             return ( Fid() >= fid );
         }
     }

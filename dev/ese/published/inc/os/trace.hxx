@@ -4,6 +4,7 @@
 #ifndef _OS_TRACE_HXX_INCLUDED
 #define _OS_TRACE_HXX_INCLUDED
 
+// Required for std::move()
 #include <utility>
 
 class TRACEINFO
@@ -21,11 +22,13 @@ class TRACEINFO
         const BOOL FDisabled()                  { return !m_fEnabled; }
 
     private:
-        ULONG_PTR   m_ul;
-        BOOL        m_fEnabled;
+        ULONG_PTR   m_ul;           //  for user data
+        BOOL        m_fEnabled;     //  is this tag enabled?
 };
 
 
+//  must match JET_PFNTRACEEMIT
+//
 typedef ULONG               TRACETAG;
 typedef void (__stdcall * PFNTRACEEMIT)( const TRACETAG tag, const char * szPrefix, const char * szTrace, const ULONG_PTR ul );
 
@@ -65,12 +68,77 @@ inline void OSTraceSetThreadidFilter( const DWORD tidTrace )
 }
 
 
+//  Info Strings
+//
+//  "info strings" are garbage-collected strings that can be used to greatly
+//  simplify tracing code.  these strings may be created by any one of the
+//  debug info calls and passed directly into OSFormat in its variable argument
+//  list.  the strings can then be printed via the %s format specification.
+//  these strings make code like this possible:
+//
+//      OSTrace( ostlLow,
+//               OSFormat( "IRowset::QueryInterface() called for IID %s (%s)",
+//                         OSFormatGUID( iid ),
+//                         OSFormatIID( iid ) ) );
+//
+//  OSFormatGUID() would return an info string containing a sprintf()ed IID
+//  and OSFormatIID() would return a pointer to a const string from our
+//  image.  note that the programmer doesn't have to know which type of string
+//  is returned!  the programmer also doesn't have to worry about out-of-memory
+//  conditions because these will cause the function to return NULL which
+//  printf will safely convert into "(null)"
+//
+//  an info string may be directly allocated via OSAllocInfoString( cch ) where
+//  cch is the maximum string length desired not including the null terminator.
+//  a null terminator is automatically added at the last position in the string
+//  to facilitate the use of _snprintf
+//
+//  because info strings are garbage-collected, cleanup must be triggered
+//  somewhere.  it is important to know when this happens:
+//
+//      -  at the end of OSTrace()
+//      -  manually via OSFreeInfoStrings()
+//      -  on image unload
 
 char* OSAllocInfoString( const size_t cch );
 WCHAR* OSAllocInfoStringW( const size_t cch );
 void OSFreeInfoStrings();
 
 
+//  Tracing
+//
+//  OSTrace() provides a method for emitting useful information to the debugger
+//  during operation.  Several detail levels are supported to restrict the flow
+//  of information as desired.  Here are the current conventions tied to each
+//  trace level:
+//
+//      ostlNone
+//          - used to disable individual traces
+//      ostlLow
+//          - exceptions, asserts, error traps
+//      ostlMedium
+//          - method execution summary
+//          - calls yielding a fatal result
+//      ostlHigh
+//          - method execution details
+//      ostlVeryHigh
+//          - calls yielding a failure result
+//      ostlFull
+//          - method internal operations
+//
+//  OSTraceIndent() provides a method for setting the indent level of traces
+//  emitted to the debugger for the current thread.  A positive value will
+//  increase the indent level by that number of indentations.  A negative value
+//  will reduce the indent level by that number of indentations.  A value of
+//  zero will reset the indent level to the default.
+//
+//  Tracing can also be controlled within an individual trace.  Inserting the
+//  control string OSTRACEINDENTSZ into a trace string will cause subsequent
+//  lines in that trace string to be indented by one more level than the indent
+//  level for the current thread.  Similarly, inserting the control string
+//  OSTRACEUNINDENTSZ into a trace string will cause subsequent lines in that
+//  trace string to be indented by one fewer level than the indent level for
+//  the current thread.
 
 void OSTraceRegisterEmitCallback( PFNTRACEEMIT pfnEmit );
 void __stdcall OSTraceEmit( const TRACETAG tag, const char* const szPrefixNYI, const char* const szRawTrace, const ULONG_PTR ul );
@@ -127,6 +195,13 @@ void OSTraceResumeGC_();
 #define OSTRACENULLPARAMW   L"<null>"
 
 
+//  Trace Formatting
+//
+//  OSFormat() returns an Info String containing the specified data formatted to
+//  the printf() specifications in the format string.  This function is used to
+//  generate most of the data that are fed to the format string in OSTrace()
+//  either directly or indirectly via other more specialized OSFormat*()
+//  functions.
 
 const char* __cdecl OSFormat( __format_string const char* const szFormat, ... );
 const WCHAR* __cdecl OSFormatW( __format_string const WCHAR* const wszFormat, ... );
@@ -156,6 +231,7 @@ const char* OSFormatImageVersion();
 const char* OSFormatError( const ERR err );
 
 const char* OSFormatString( const char* sz );
+// This has the return parameter, b/c it differs from the W designator.
 const char* SzOSFormatStringW( const WCHAR* wsz );
 const char* OSFormatRawData(    const BYTE* const   rgbData,
                                 const size_t        cbData,
@@ -167,10 +243,13 @@ const char* OSFormatRawDataParam(
                                 const BYTE* const   rgbData,
                                 const size_t        cbData );
 
+//
+//  Ref Log
+//
 
 typedef VOID *  POSTRACEREFLOG;
 
-#define ostrlSystemFixed            ((POSTRACEREFLOG)(0x0))
+#define ostrlSystemFixed            ((POSTRACEREFLOG)(0x0)) //  A basic ref log for system, w/ 16 bytes extra info.
 #define ostrlMaxFixed               ((POSTRACEREFLOG)(0x1))
 
 enum sysosirtl
@@ -179,6 +258,7 @@ enum sysosirtl
     sysosrtlErrorThrow      = 13,
 };
 
+//  this is how much the client expects to be able to stuff in the system ref log
 #define cbSystemRefLogExtra         max( sizeof(ULONG) * 4, sizeof(void*) * 2 )
 
 ERR ErrOSTraceCreateRefLog( IN ULONG cLogSize, IN ULONG cbExtraBytes, OUT POSTRACEREFLOG *ppRefLog );
@@ -196,35 +276,53 @@ class COSTraceTrackErrors
 public:
     COSTraceTrackErrors( const CHAR * const szFunc );
     ~COSTraceTrackErrors();
+    //  should make other kinds of .ctors illegal
 };
 
 BOOL FOSRefTraceErrors();
 
 #ifndef MINIMAL_FUNCTIONALITY
+//
+//  Fast Trace Logging / FTL
+//
+
+//  This is organized into a few objects 
+//
+//  CFastTraceLog / CFastTraceLogBuffer / FTLTID / FTLTDESC / etc
 
 
+//
+//  FTL Primitive Types
+//
 
-
-typedef USHORT  FTLTID;
-typedef BYTE    FTLTDESC;
+typedef USHORT  FTLTID;     //  ftltid (Fast Trace Log Trace ID)
+typedef BYTE    FTLTDESC;   //  ftltdesc (Fast Trace Log Trace DESCriptor)
 
 typedef ERR ( __stdcall * PfnErrFTLBFlushBuffer )( __inout void * const pvFlushBufferContext, __in const BYTE * const rgbBuffer, __in const ULONG cbBuffer );
 
 
+//
+//  FTL Trace ID constants and functions
+//
 
-const static FTLTID     ftltidMax               = (FTLTID)(0x8000);
-const static FTLTID     ftltidSmallMax          = (FTLTID)(0x000F);
+const static FTLTID     ftltidMax               = (FTLTID)(0x8000); //  we support ~32k trace IDs
+const static FTLTID     ftltidSmallMax          = (FTLTID)(0x000F); //  the first ftltid value that will not get a short trace ID when traced
 
 INLINE BOOL FFTLValidFTLTID( __in const FTLTID ftltid )
 {
     return ftltid != 0 &&
             ftltid < ftltidMax &&
+            // Actually, it could equal ftltidSmallMax, it would just be stored as a
+            // medium format trace ID ... consider removing this.
             ftltid != ftltidSmallMax;
 }
 
+//
+//  FTL Trace Descriptor constants and functions
+//
 
-const static FTLTDESC   ftltdescNone            = (FTLTDESC)(0x00);
-const static FTLTDESC   mskFtltdescFixedSize    = (FTLTDESC)(0x0F);
+const static FTLTDESC   ftltdescNone            = (FTLTDESC)(0x00); //  this is the empty descriptor, has no fixed size, by default stores cb after, etc
+const static FTLTDESC   mskFtltdescFixedSize    = (FTLTDESC)(0x0F); //  defines the portion of the descriptor reserved to define fixed size
 
 
 INLINE USHORT CbFTLBIFixedSize( __in const FTLTDESC bTraceDescriptor )
@@ -232,10 +330,11 @@ INLINE USHORT CbFTLBIFixedSize( __in const FTLTDESC bTraceDescriptor )
     return bTraceDescriptor & mskFtltdescFixedSize;
 }
 
+//  Silly helper function to dump a line of data
 
 INLINE VOID PrintfDataLine( const BYTE * const rgbBuffer, ULONG cLines )
 {
-    DWORD ibOffset = 0;
+    DWORD ibOffset = 0; // line offset in bytes
     const DWORD cbLine = 16;
     for( ULONG i = 0; i < cLines; i++ )
     {
@@ -250,16 +349,20 @@ INLINE VOID PrintfDataLine( const BYTE * const rgbBuffer, ULONG cLines )
 }
 
 
+//  Fwd decls required for ErrFTL[B]Trace ... as tracing is kind of ahead of it's time.
 const DWORD DwUtilThreadId();
 
 
+//  This class implements the tracing buffer and the tracing of all fields that are 
+//  common to all traces (such as the Trace ID, time/TICK, size of trace, etc).
 
-class CFastTraceLogBuffer
+class CFastTraceLogBuffer   //  ftlb
 {
 
 private:
 
     volatile DWORD          m_ibOffset;
+    //  well we'll be unable to re-establish an order of traces w/o a TID *once we move to multi-buffer*
     volatile DWORD          m_dwTIDLast;
     DWORD                   m_cbHeader;
     BYTE                    m_rgbBuffer[4 * 1024];
@@ -271,8 +374,45 @@ private:
 
     CCriticalSection        m_crit;
 
+    //
+    //  The FTL Trace Format:
+    //
 
+    //  Trace Header:
+    //
+    //  |11111111|22222222|33333333|44444444|55555555|
+    //  | bHeader|        |        |        |        |
+    //  |    TrID| - This low nibble / 4 bits is for the short FTL Trace IDs / ftltid (i.e. <= ftltidShortMac)
+    //  |TF      | - These two bits are the Tick Compression Flags
+    //  |  ??    | - This is reserved space, will likely be used for TID/Thread & cb/compaction scheme
+    //
+    //  Trace Common Fields:
+    //
+    //  |11111111|22222222|33333333|44444444|55555555|
+    //      Extended FTL Trace ID - Then depending upon if bHeader & mskHeaderShortTraceID == bHeaderLongTraceID
+    //           | <nothing>
+    //           [0|ftltid]
+    //           [1| Longer ftltid ]
+    //      Time / TICK Field - Then depending upon bHeader & mskHeaderTick == bHeaderTickHeaderMatch   | bHeaderTickDelta | bHeaderTickRaw
+    //           | <nothing>
+    //           [  dtick ]
+    //           [    Full Raw Tick (4 bytes)        ]
+    //      CbUserTraceData - Then depending upon ftltdesc[indexed by ftltid] fixed size
+    //           | <nothing>
+    //           [ cbUser ]
+    //
+    //  Trace User Data:
+    //
+    //      This is remainder of the user's specific trace data.
+    //
 
+    //  Ramifications:
+    //   - A trace must be at least 1 byte.
+    //   - Often the bHeaderTickHeaderMatch will allow us to not log any TICK / time info.
+    //   - We do not support more than 31k traces
+    //   - We do not support tracing more than 255 bytes of user payload data.
+    //   - The first byte of any valid trace is guaranteed to be non-zero.
+    //
 
     INLINE void FTLBISetTickBase( const TICK tickBase )
     {
@@ -280,6 +420,7 @@ private:
         Assert( tickBase == TickFTLBITickBase() );
     }
 
+    //  public for testing only
 public:
     INLINE TICK TickFTLBITickBase() const
     {
@@ -309,6 +450,7 @@ private:
             return;
         }
 
+        // else uncompressible
 
         *pfTickTrace = bHeaderTickRaw;
         *pdtick = tickTrace;
@@ -318,19 +460,22 @@ private:
 private:
     
                     const static FTLTID     ftltidShortMac          = (FTLTID)0x0E;
-     const static BYTE       bHeaderLongTraceID      = (BYTE)0x0F;
+    /* PERSISTED */ const static BYTE       bHeaderLongTraceID      = (BYTE)0x0F;
                     const static BYTE       mskHeaderShortTraceID   = (BYTE)0x0F;
 
-     const static BYTE       bHeaderTickHeaderMatch  = (BYTE)0x00;
-     const static BYTE       bHeaderTickDelta        = (BYTE)0x40;
+    /* PERSISTED */ const static BYTE       bHeaderTickHeaderMatch  = (BYTE)0x00;
+    /* PERSISTED */ const static BYTE       bHeaderTickDelta        = (BYTE)0x40;
                     const static BYTE       bHeaderTickReserved     = (BYTE)0x80;
-     const static BYTE       bHeaderTickRaw          = (BYTE)0xC0;
+    /* PERSISTED */ const static BYTE       bHeaderTickRaw          = (BYTE)0xC0;
                     const static BYTE       mskHeaderTick           = (BYTE)0xC0;
 
                     const static BYTE       cbTraceHeader           = 1;
     
 public:
 
+    //
+    //  FTL Buffer Init/Term
+    //
 
     CFastTraceLogBuffer();
     ERR ErrFTLBInit( PfnErrFTLBFlushBuffer pfnFlushBuffer, void * pvFlushBufferContext, const TICK tickInitialBase = TickOSTimeCurrent() );
@@ -344,6 +489,9 @@ public:
 
 private:
 
+    //
+    //  FTL Buffer Tracing
+    //
 
 private:
     friend class FTLBufferTraceTestBasic;
@@ -381,7 +529,7 @@ public:
 
     INLINE ERR ErrFTLBTrace( __in const USHORT ftltid, __in const FTLTDESC ftltdesc, __in_bcount(cbTraceData) const BYTE * pbTraceData, __in const DWORD cbTraceData, __in const TICK tickTrace )
     {
-        ERR err = 0x0;
+        ERR err = 0x0/*JET_errSuccess*/;
 
         if ( m_fTracingDisabled )
         {
@@ -390,10 +538,14 @@ public:
 
         Assert( FFTLBInitialized() );
 
+        //  acquire the right to trace to the trace buffer
 
         m_crit.Enter();
 
+        //  Pre-trace calculations
+        //
 
+        //  calculate ftltid / TraceID compression
 
         BYTE                    bHeaderTraceID;
         ULONG                   cbTraceID;
@@ -414,6 +566,7 @@ public:
             cbTraceID = ce_ftltid.Cb();
         }
 
+        //  calculate tickTrace compression
 
         BYTE fHeaderTickTraceFlags;
         ULONG cbTickTrace;
@@ -422,19 +575,25 @@ public:
         Assert( 0 == ( ~mskHeaderTick & fHeaderTickTraceFlags ) );
 
 
+        //  calculate size compression
 
-        Assert( cbTraceData == (ULONG)(USHORT)cbTraceData );
+        Assert( cbTraceData == (ULONG)(USHORT)cbTraceData );    // check for truncation
 
         const USHORT cbLeft = (USHORT)cbTraceData - CbFTLBIFixedSize( ftltdesc );
         CompEndianLowSpLos16b   ce_cbLeft( cbLeft );
         const ULONG cbTraceDataFieldSize = cbLeft ? ce_cbLeft.Cb() : 0;
         
+        //  identify required buffer
+        //
 
         DWORD cbBufferNeeded = cbTraceHeader + cbTraceID + cbTickTrace + cbTraceDataFieldSize + cbTraceData;
 
+        //  try to acquire the required buffer
+        //
 
         if ( m_ibOffset + cbBufferNeeded > _countof( m_rgbBuffer ) )
         {
+            //  buffer overflow, need to recharge the FTL buffer ...
 
             memset( m_rgbBuffer + m_ibOffset, 0, _countof( m_rgbBuffer ) - m_ibOffset );
 
@@ -455,14 +614,19 @@ public:
 
         m_dwTIDLast = DwUtilThreadId();
 
+        //  should have required buffer now
 
         AssertPREFIX( m_ibOffset + cbBufferNeeded <= _countof( m_rgbBuffer ) );
 
+        //  Trace
+        //
 
         BYTE * pbTraceDest = m_rgbBuffer + m_ibOffset;
 
+        //  should not be data in way of where we're putting these tick flag data
         Assert( ( bHeaderTraceID & mskHeaderTick ) == 0 );
 
+        //  trace the traceid / ftltid and header (with compression schemes)
 
         Assert( cbTraceID != 0 || ( ftltid <= ftltidShortMac && bHeaderTraceID <= ftltidShortMac ) );
         Assert( 0 == ( bHeaderTraceID & fHeaderTickTraceFlags ) );
@@ -470,9 +634,11 @@ public:
         *pbTraceDest = bHeaderTraceID | fHeaderTickTraceFlags;
         pbTraceDest += cbTraceHeader;
 
+        //  trace residual TraceID / ftltid (if any)
 
         if ( cbTraceID )
         {
+            //  residual TraceID left to be traced ...
 
             Assert( bHeaderTraceID == bHeaderLongTraceID );
 
@@ -480,36 +646,48 @@ public:
             pbTraceDest += ce_ftltid.Cb();
         }
 
+        //  trace compressed tickTrace (if any)
 
         if ( cbTickTrace )
         {
+            //  residual tick time to be traced
             memcpy( pbTraceDest, &tickTraceCompressed, cbTickTrace );
             pbTraceDest += cbTickTrace;
         }
 
+        //  trace compressed data size field (if any)
 
         if ( cbTraceDataFieldSize )
         {
+            //  ensure we still have room for the data size field
             Assert( ( pbTraceDest + cbTraceDataFieldSize ) <= ( m_rgbBuffer + _countof( m_rgbBuffer ) ) );
 
             Assert( ce_cbLeft.Us() != 0 );
             Assert( ce_cbLeft.Cb() == cbTraceDataFieldSize );
 
+            //  residual cbLeft left to be traced ...
             ce_cbLeft.CopyTo( pbTraceDest, cbTraceDataFieldSize );
             pbTraceDest += ce_cbLeft.Cb();
         }
 
+        //  ensure we still have room for the data
         AssertPREFIX( ( pbTraceDest + cbTraceData ) <= ( m_rgbBuffer + _countof( m_rgbBuffer ) ) );
 
+        //  trace the trace data
 
         memcpy( pbTraceDest, pbTraceData, cbTraceData );
-        pbTraceDest += cbTraceData;
+        pbTraceDest += cbTraceData; // technically not necessary
 
+        // convienent for debugging ...
+        //wprintf( L"WTrace(%d = h:%d + cbftltid:%d + cbtick:%d + cbcb:%d + %d ) ib = %I64d: ", cbBufferNeeded, cbTraceHeader, cbTraceID, cbTickTrace, cbTraceDataFieldSize, cbTraceData, m_ibOffset );
+        //PrintfDataLine( m_rgbBuffer + m_ibOffset, 1 + cbBufferNeeded / 16 );
 
+        //  update the trace state
 
         m_ibOffset += cbBufferNeeded;
-        Assert( pbTraceDest == m_rgbBuffer + m_ibOffset );
+        Assert( pbTraceDest == m_rgbBuffer + m_ibOffset );  // world is sane.
 
+        //  leave the trace buffer lock
 
         m_crit.Leave();
     
@@ -530,53 +708,74 @@ public:
 
 
 
+// PERSISTED
 enum FASTTRACELOGSTATE
 {
-    eFTLCreated         = 0,
-    eFTLDirty           = 1,
-    eFTLClean           = 2,
-    eFTLPostProcessed   = 3
+    eFTLCreated         = 0,    //  the file has just been created
+    eFTLDirty           = 1,    //  the file was being logged to last time it was attached
+    eFTLClean           = 2,    //  the file had a clean / order detach, and did not lose any traces
+    eFTLPostProcessed   = 3     //  the file can not be opened for update again after it is post processed
 };
 
 #include <pshpack1.h>
 
 
+// PERSISTED
 struct FTLFILEHDR
 {
-    LittleEndian<ULONG>     le_ulChecksumReserved;
+    //  Basic Header Info
+    //
+    LittleEndian<ULONG>     le_ulChecksumReserved;      //  in case we later want a header like checksum of the 4k page
 
-    LittleEndian<ULONG>     le_ulFTLVersionMajor;
-    LittleEndian<ULONG>     le_ulFTLVersionMinor;
-    LittleEndian<ULONG>     le_ulFTLVersionUpdate;
+    LittleEndian<ULONG>     le_ulFTLVersionMajor;       //  major version of fast trace file
+    LittleEndian<ULONG>     le_ulFTLVersionMinor;       //  minor version of fast trace file
+    LittleEndian<ULONG>     le_ulFTLVersionUpdate;      //  update version of fast trace file
 
-    LittleEndian<FASTTRACELOGSTATE>     le_tracelogstate;
+    LittleEndian<FASTTRACELOGSTATE>     le_tracelogstate;// this tracks the state of the log file
     BYTE                    rgbReservedBasicHdrInfo[12];
+//  32 bytes
 
-    LittleEndian<QWORD>     le_ftFirstOpen;
-    LittleEndian<ULONG>     le_cReOpens;
-    LittleEndian<ULONG>     le_cRecoveries;
-    LittleEndian<QWORD>     le_ftLastOpen;
-    LittleEndian<QWORD>     le_ftLastClose;
-    LittleEndian<QWORD>     le_ftPostProcessed;
+    //  File Maintenance Information
+    //
+    LittleEndian<QWORD>     le_ftFirstOpen;             //  time of the first open
+    LittleEndian<ULONG>     le_cReOpens;                //  number of times the file was [re]opened (for appending to) from a clean state
+    LittleEndian<ULONG>     le_cRecoveries;             //  number of times the file was [re]opened (for appending to) from a dirty state
+    LittleEndian<QWORD>     le_ftLastOpen;              //  time of the most recent open
+    LittleEndian<QWORD>     le_ftLastClose;             //  time of the last / final close of the file (not including post processing close)
+    LittleEndian<QWORD>     le_ftPostProcessed;         //  time of the post processing
 
-    LittleEndian<QWORD>     le_cbLastKnownBuffer;
+    LittleEndian<QWORD>     le_cbLastKnownBuffer;       //  size of formatted and filled trace file (note size is cb, but always in 4 KB buffers multiples)
 
-    LittleEndian<QWORD>     le_cWriteFailures;
+    LittleEndian<QWORD>     le_cWriteFailures;          //  number of times we tried to write a chunk of data and failed
     BYTE                    rgbReservedFileMaintInfo[40];
+//  128 bytes
 
-    LittleEndian<ULONG>     le_cMaxWriteIOs;
-    LittleEndian<ULONG>     le_cMaxWriteBuffers;
+    //  Runtime Efficiency Statistics
+    //
+    LittleEndian<ULONG>     le_cMaxWriteIOs;            //  maximum number of write IOs that were outstanding at a given time
+    LittleEndian<ULONG>     le_cMaxWriteBuffers;        //  maximum number of buffers that were used to buffer data for disk
     BYTE                    rgbReservedRuntimeStatsInfo[88];
+//  224 bytes
 
-    LittleEndian<ULONG>     le_ulSchemaID;
-    LittleEndian<ULONG>     le_ulSchemaVersionMajor;
-    LittleEndian<ULONG>     le_ulSchemaVersionMinor;
-    LittleEndian<ULONG>     le_ulSchemaVersionUpdate;
+    //  Specific Trace Schema Definition
+    //
+    LittleEndian<ULONG>     le_ulSchemaID;              //  An ID that tells us what schema (and CFTLDescriptor definition) to use
+    LittleEndian<ULONG>     le_ulSchemaVersionMajor;    //  major version of the trace schema used within
+    LittleEndian<ULONG>     le_ulSchemaVersionMinor;    //  minor version of the trace schema used within
+    LittleEndian<ULONG>     le_ulSchemaVersionUpdate;   //  update version of the trace schema used within
     BYTE                    rgbReservedSchemaHdrInfo[16];
+//  256 bytes
 
-    BYTE                    rgbReservedFileTypeAlignment[667-256];
+    BYTE                    rgbReservedFileTypeAlignment[667-256];  // buffer for the mis-alignment of le_filetype
+                                                        // keeping the le_filetype in the same
+                                                        // place as log file header and checkpoint
+                                                        // and DB file header
+//  667 bytes
 
-    UnalignedLittleEndian<ULONG>    le_filetype;
+    //  WARNING: MUST be placed at this offset for
+    //  uniformity with db/log headers
+    UnalignedLittleEndian<ULONG>    le_filetype;    //  JET_filetypeDatabase or JET_filetypeStreamingFile
+//  671 bytes
 
 };
 
@@ -599,7 +798,7 @@ typedef struct FTLDescriptor_
     INT             m_cShortTraceDescriptors;
     INT             m_cLongTraceDescriptors;
 
-    FTLTDESC        m_rgftltdescShortTraceDescriptors[128];
+    FTLTDESC        m_rgftltdescShortTraceDescriptors[128]; // technically handles the medium ones as well
     FTLTDESC *      m_rgftltdescLongTraceDescriptors;
 }
 FTLDescriptor;
@@ -614,20 +813,42 @@ class CFastTraceLog
 {
 
 private:
+    // ------------------------------------------------------------------------
+    //
+    //          FTL writing
+    //
 
+    //  Tracing Buffer
+    //
     CFastTraceLogBuffer                 m_ftlb;
     BOOL                                m_fTerminating;
 
+    //  File Management and Settings
+    //
 
+    //      File version info
+    //          [2010/10/31] 1.0.0 - Initial version.
+    //          [2013/10/18] 1.1.0 - Added fNewPage to BFCache_ and BFTouch_ and shrunk size
+    //                               of those structures by 2 bytes by using a union.
+    //          [2014/01/29] 1.2.0 - Added fNoTouch to BFTouch_.
+    //                               Added fDBScan to BFTouch_ and BFCache_.
+    //          [2014/08/22] 1.3.0 - Added BFDirty_ and BFWrite_.
+    //          [2015/11/19] 2.0.0 - Removed fKeepHistory from BFEvict_.
+    //          [2016/10/05] 2.1.0 - Added clientType to BFCache_ and BFTouch_.
+    //          [2019/09/05] 2.2.0 - Added BFSetLgposModify_.
+    //PERSISTED
     const static ULONG                  ulFTLVersionMajor = 2;
     const static ULONG                  ulFTLVersionMinor = 2;
     const static ULONG                  ulFTLVersionUpdate = 0;
+    //      header format offsets
     const static ULONG                  ibTraceLogHeaderOffset              = 0;
     const static ULONG                  ibPrivateHeaderOffset               = 1024;
     const static ULONG                  ibTraceLogPostProcessedHeaderOffset = 2048;
     const static ULONG                  ibPrivatePostProcessedHeaderOffset  = 3072;
+    //      settings
     INT                                 m_cbWriteBufferMax;
-    IOREASON *                          m_piorTraceLog;
+    IOREASON *                          m_piorTraceLog;     //  must be provided by client
+    //      active file management
     IFileSystemConfiguration * const    m_pfsconfig;
     IFileSystemAPI *                    m_pfsapi;
     IFileAPI *                          m_pfapiTraceLog;
@@ -636,25 +857,32 @@ private:
     ERR ErrFTLICheckVersions();
     ERR ErrFTLIFlushHeader();
 
+    //  Specific Schema's FTL Descriptor info
+    //
     const static FTLTDESC   ftltdescDefaultDescriptor = ftltdescNone;
-    FTLDescriptor           m_ftldesc;
+    FTLDescriptor           m_ftldesc;          //  describes the schema of this specific trace file
 
     FTLTDESC FtltdescFTLIGetDescriptor( __in const USHORT usTraceID ) const;
 
 
+    //  Writing / Flushing Buffers
+    //
 
+    //      state values (for m_rgfBufferState & m_ipbWriteBufferCurrent)
     const static INT        fBufferAvailable    = 0x0;
     const static INT        fBufferInUse        = 0x1;
     const static INT        fBufferFlushed      = 0x2;
     const static INT        fBufferDone         = 0x3;
     const static INT        ibufUninitialized   = -1;
+    //      current write buffer state
     QWORD                   m_ibWriteBufferCurrent;
     volatile INT            m_ipbWriteBufferCurrent;
     volatile INT            m_cbWriteBufferFull;
     CSXWLatch               m_sxwlFlushing;
+    //      write buffers
     CSemaphore              m_semBuffersInUse;
     INT                     m_rgfBufferState[80];
-    BYTE *                  m_rgpbWriteBuffers[80];
+    BYTE *                  m_rgpbWriteBuffers[80]; // today: 384K * 80 = 30 MBs of backlog potentially
 
     void FTLIResetWriteBuffering( void );
     INT IFTLIGetFlushBuffer();
@@ -663,16 +891,21 @@ private:
     static void FTLFlushBufferComplete( const ERR           err,
                                         IFileAPI* const     pfapi,
                                         const FullTraceContext& ptc,
-                                        const QWORD grbitQOS,
+                                        const QWORD/*OSFILEQOS*/ grbitQOS,
                                         const QWORD         ibOffset,
                                         const DWORD         cbData,
                                         const BYTE* const       pbData,
                                         const DWORD_PTR     keyIOComplete );
 
+    //      stats
     volatile LONG           m_cOutstandingIO;
     volatile LONG           m_cOutstandingIOHighWater;
 
 
+    // ------------------------------------------------------------------------
+    //
+    //      FTL Reading 
+    //
 
 public:
     class CFTLReader;
@@ -687,35 +920,53 @@ private:
 
 public:
 
+    // ------------------------------------------------------------------------
+    //
+    //          FTL API
+    //
 
+    //  FTL Init / Term
+    //
 
     CFastTraceLog(  const FTLDescriptor * const         pftldesc,
                     IFileSystemConfiguration * const    pfsconfig = NULL );
 
-    enum FTLInitFlags
+    enum FTLInitFlags   // ftlif
     {
         ftlifNone               = 0,
 
+        //  write file disposition flags
         ftlifNewlyCreated       = 1,
         ftlifReOpenExisting     = 2,
         ftlifReCreateOverwrite  = 3,
         ftlifmskFileDisposition = ( ftlifNewlyCreated | ftlifReOpenExisting | ftlifReCreateOverwrite ),
 
+        //  reader flags
         ftlifKeepStats          = 0x100,
 
     };
 
+    //  Must init the FTL trace log with intention of writing or reading, but not both.
     ERR ErrFTLInitWriter( __in_z const WCHAR * wszTraceLogFile, IOREASON * pior, __in const FTLInitFlags ftlif );
     ERR ErrFTLInitReader( __in_z const WCHAR * wszTraceLogFile, IOREASON * pior, __in const FTLInitFlags ftlif, __out CFTLReader ** ppftlr );
 
+    //  cleans up all FTL allocated resources (note including the ppftlr returned by ErrFTLInitReader()).
     void FTLTerm();
 
+    //  FTL Tracing APIs
+    //
 
     void SetFTLDisabled();
     ERR ErrFTLTrace( __in const USHORT usTraceID, __in_bcount(cbTrace) const BYTE * pbTrace, __in const ULONG cbTrace, __in const TICK tickTrace = TickOSTimeCurrent() );
 
+    //  FTL Reading APIs
+    //
 
+    //      header
     FTLFILEHDR *    PftlhdrFTLTraceLogHeader()      { return (FTLFILEHDR *)( m_pbTraceLogHeader + ibTraceLogHeaderOffset ); }
+    // reserved
+    //void *        PvFTLPrivateHeader()            { return m_pbTraceLogHeader + ibPrivateHeaderOffset; }
+    //void *        PvFTLTraceLogPostHeader()       { return m_pbTraceLogHeader + ibTraceLogPostProcessedHeaderOffset; }
     void *          PvFTLPrivatePostHeader()        { return m_pbTraceLogHeader + ibPrivatePostProcessedHeaderOffset; }
     ULONG           CbFullHeader()                  { return ibPrivatePostProcessedHeaderOffset + 1024; }
     ULONG           CbPrivateHeader()               { return 1024; }
@@ -725,31 +976,37 @@ public:
 
     struct BFFTLFilePostProcessHeader
     {
-        LittleEndian<ULONG>     le_cifmp;
-        LittleEndian<ULONG>     le_mpifmpcpg[255];
+        LittleEndian<ULONG>     le_cifmp;               //  number of valid IFMPs set in the le_mpifmpcpg array
+        LittleEndian<ULONG>     le_mpifmpcpg[255];      //  for each ifmp a count of pages referenced in this file
     };
 
+    //      retrieving traces
     struct FTLTrace
     {
-        QWORD           ibBookmark;
-        USHORT          ftltid;
-        TICK            tick;
-        const BYTE *    pbTraceData;
-        ULONG           cbTraceData;
+        QWORD           ibBookmark;     //  Location in trace file (can be saved, restored)
+        USHORT          ftltid;         //  Trace ID
+        TICK            tick;           //  Tick of Trace
+        const BYTE *    pbTraceData;    //  Trace Data
+        ULONG           cbTraceData;    //  Trace Data Size
     };
 
-    class CFTLReader
+    class CFTLReader    // ftlr
     {
         friend class CFastTraceLog;
 
     private:
+        //  needs access to the m_pfapiXxx.
         CFastTraceLog *     m_pftl;
 
+        //  Settings and Constants
+        //
 
         ULONG               m_cbReadBufferSize;
         BOOL                m_fKeepStats;
         const static INT    ibufUninitialized = -1;
 
+        //  Read Buffers
+        //
         typedef struct ReadBuffers_
         {
             QWORD           ibBookmark;
@@ -760,9 +1017,13 @@ public:
         QWORD               m_ibBookmarkNext;
         TICK                m_tickBase;
 
+        //  Usage Efficiency Stats
+        //
 
         QWORD               m_cReadIOs;
 
+        //  Trace File Stats
+        //
         QWORD               m_cFullBuffers;
         QWORD               m_cPartialBuffers;
         QWORD               m_cbPartialEmpty;
@@ -770,6 +1031,8 @@ public:
         QWORD               m_cbBlankEmpty;
 
 #ifdef DEBUG
+        //  Debugging
+        //
         INT                 m_ibufTracePrevPrev;
         FTLTrace            m_ftltracePrevPrev;
         INT                 m_ibufTracePrev;
@@ -789,10 +1052,15 @@ public:
 
     };
 
+    //  testing only
     TICK TickFTLTickBaseCurrent() const;
 
 };
 
+//  The "shared interface" for the 4 sub-reasons is this simple list of predefined
+//  "integer" types that must be defined by the client library linking to the OS
+//  File IO APIs.
+//
 
 enum IOREASONPRIMARY : BYTE;
 enum IOREASONSECONDARY : BYTE;
@@ -800,12 +1068,17 @@ enum IOREASONTERTIARY : BYTE;
 enum IOREASONUSER : BYTE;
 enum IOREASONFLAGS : BYTE;
 
+//  Null IO reasons defined for the client...
+//      Note: In some contexts the clients may use 0x0 to not mean none, but mean
+//      unspecified or generic.
 #define iorpNone        ((IOREASONPRIMARY)0x0)
 #define iorsNone        ((IOREASONSECONDARY)0x0)
 #define iortNone        ((IOREASONTERTIARY)0x0)
 #define ioruNone        ((IOREASONUSER)0x0)
 #define iorfNone        ((IOREASONFLAGS)0x0)
 
+//  Helper class that combines the 4 sub-reasons into a solitary chunk of memory
+//  for easy shipping into and out of the IO APIs.
 class IOREASON {
 
 private:
@@ -906,6 +1179,7 @@ public:
 
     bool FValid( void ) const
     {
+        // reserving the top bit, why? why not?
         if ( Iorp( ) >= 0x80 )
         {
             return fFalse;
@@ -920,6 +1194,7 @@ public:
     enum IOREASONTERTIARY iort,
     enum IOREASONUSER ioru,
     enum IOREASONFLAGS iorf ) :
+        //  Set the various IO reason sub-elements ...
         m_iorp( iorp ), m_iors( iors ), m_iort( iort ), m_ioru( ioru ), m_iorf( iorf )
     {
         Assert( iorp <= 0x7f );
@@ -931,6 +1206,7 @@ public:
     enum IOREASONSECONDARY iors,
     enum IOREASONUSER ioru,
     enum IOREASONFLAGS iorf ) :
+        //  Set the various IO reason sub-elements ...
         m_iorp( iorp ), m_iors( iors ), m_iort( iortNone ), m_ioru( ioru ), m_iorf( iorf )
     {
         Assert( iorp <= 0x7f );
@@ -1025,18 +1301,21 @@ struct USER_CONTEXT_DESC
     static const INT cchStrMax = 32;
     static const INT cbStrMax = cchStrMax * sizeof( char );
 
+    // Exchange specific context
     GUID    guidActivityId;
 
     char    szClientComponent[ cchStrMax ];
     char    szClientAction[ cchStrMax ];
     char    szClientActionContext[ cchStrMax ];
 
+    // Copies a description string, truncating it if it doesn't fit
     static ERR ErrCopyDescString( char* const szDest, const char* const szSrc, const INT cbSrc );
 };
 
-#define OC_bitInternalUser  0x80000000
-#define OCUSER_SYSTEM       ( OC_bitInternalUser | 0x7fffffff )
+#define OC_bitInternalUser  0x80000000      // grbit used with OPERATION_CONTEXT::dwUserID to identify internal users of the system
+#define OCUSER_SYSTEM       ( OC_bitInternalUser | 0x7fffffff )     // Default context for system operations that can't be classified into any othe context
 
+//  shortcut
 #define IOR IOREASON
 
 const BYTE  pocNone = 0xff;
@@ -1045,15 +1324,17 @@ inline bool FParentObjectClassSet( BYTE nParentObjectClass )
     return nParentObjectClass != pocNone;
 }
 
+//  Holds tracing context information supplied by the user
+//  Used to track the context and emit it in IO traces
 class UserTraceContext
 {
 public:
-    static const USER_CONTEXT_DESC s_ucdNil;
+    static const USER_CONTEXT_DESC s_ucdNil;    // Constant object used to initialize pUserContextDesc
 
-    USER_CONTEXT_DESC*  pUserContextDesc;
-    OPERATION_CONTEXT   context;
-    DWORD               dwCorrelationID;
-    DWORD               dwIOSessTraceFlags;
+    USER_CONTEXT_DESC*  pUserContextDesc;   //  Exchange specific user context
+    OPERATION_CONTEXT   context;            //  True user context (note: provided from above Engine [i.e. above ESE]).
+    DWORD               dwCorrelationID;    //  True user correlation context.
+    DWORD               dwIOSessTraceFlags; //  Flags for enabling session specific IO traces
 
     UserTraceContext()
     {
@@ -1072,6 +1353,8 @@ public:
         dwIOSessTraceFlags = false;
     }
 
+    // Copy constructor, but the user has to explicitly select whether he wants to copy the user context desc
+    // Because it requires a heap allocation
     UserTraceContext( const UserTraceContext& rhs, bool fCopyUserContextDesc );
 
     UserTraceContext( UserTraceContext&& rhs )
@@ -1084,6 +1367,7 @@ public:
 
         rhs.pUserContextDesc = const_cast<USER_CONTEXT_DESC*>( &s_ucdNil );
 #else
+        // Call to UserTraceContext::.move_ctor not allowed in retail. UserTraceContext creation should always be inlined.
         EnforceSz( false, "DisallowedUserTraceContextMoveCtor" );
 #endif
     }
@@ -1105,6 +1389,8 @@ public:
     {
         if ( FUserContextDescInitialized() )
         {
+            // We don't want to keep freeing and reallocating memory if we are switching between null and real contexts
+            // So we just reset the allocated structure to zeroes.
 
             pUserContextDesc->szClientComponent[ 0 ] = 0;
             pUserContextDesc->szClientAction[ 0 ] = 0;
@@ -1122,6 +1408,7 @@ public:
     }
 
 private:
+    // Disallowed
     UserTraceContext( const UserTraceContext& rhs );
     const UserTraceContext& operator=( const UserTraceContext& rhs );
 };
@@ -1129,12 +1416,16 @@ private:
 
 const ULONG dwEngineObjidNone = 0xFFFFFFFF;
  
+//  Holds mutable tracing information related to an IO
+//  TraceContext is kept on the callstack (and in the TLS).
+//  This information is supposed to change frequently between various components and layers.
+//  Use TraceContextScope below to break down the shared state into separate scopes with distinct state
 class TraceContext
 {
 public:
-    IOREASON                    iorReason;
-    ULONG                       dwEngineObjid;
-    BYTE                        nParentObjectClass;
+    IOREASON                    iorReason;          // Reasons identifying the nature of this IO for the Engine.
+    ULONG                       dwEngineObjid;      // objidFDP the current operation targets.
+    BYTE                        nParentObjectClass; // The type of logical object that this IO belongs to (e.g. tce).
 
     TraceContext() :
         nParentObjectClass( pocNone ), dwEngineObjid( dwEngineObjidNone )
@@ -1169,6 +1460,7 @@ public:
         dwEngineObjid = dwEngineObjidNew;
     }
 
+    // FEmpty() is NOT an inverse of FValid()
     bool FEmpty() const
     {
         return ( iorReason.FValid() && nParentObjectClass == pocNone && dwEngineObjid == dwEngineObjidNone ) ? true : false;
@@ -1187,6 +1479,8 @@ INLINE bool FEngineObjidSet( DWORD dwEngineObjid )
     return dwEngineObjid != dwEngineObjidNone;
 }
 
+//  Stores a copy of all the tracing context information related to an IO
+//  Required to make deep copies of the context
 class FullTraceContext
 {
 public:
@@ -1197,6 +1491,8 @@ public:
     {
     }
 
+    // Copy constructor, but the user has to explicitly select whether he wants to copy the user context desc
+    // Because it requires a heap allocation
     FullTraceContext( const FullTraceContext& rhs, bool fCopyUserContextDesc ) :
         utc( rhs.utc, fCopyUserContextDesc ),
         etc( rhs.etc )
@@ -1216,11 +1512,32 @@ public:
     }
 
 private:
+    // Disallowed
     FullTraceContext( FullTraceContext& rhs );
     const FullTraceContext& operator= ( const FullTraceContext& rhs );
 };
 
+//  Used to manage a logical scope for a tracing context.
+//  The current scope is stored in some thread-local context, accessible through the TFnGetEtc functor.
+//  The functor allows the source of the TraceContext to be configurable, e.g. it is used to reduce calls to TlsGetValue()
+//  by sourcing the tc from higher level scopes (like PIB).
+//  A functor is used to allow inlining the call to get the tc. A simple pfn wouldn't inline.
+//
+//  Restores the context to the previous state when the scope ends.
+//  The scope is defined by the caller. The caller should ensure that tracing info isn't mixed unintentionally between
+//  unrelated operations (unrelated at caller's layer). Create a new scope for a new unrelated operations.
+//  When in doubt, create a new scope.
+// For example:
 
+//      Layer A     Layer B     Layer C                 TraceContext
+//      op1                                             create scope1
+//                  op1.a                               create scope1.a (inherits scope1 automatically)
+//                              op1.a.1                 create scope1.a.1 (can choose to reuse scope1.a)
+//                  op1.b                               create scope1.b (inherits scope1)
+//                              op1.b.1                 reuse scope1.b (can reuse scope1.b.1)
+//      op2                                             create scope2
+//                  op2.a                               reuse scope2
+//                              op2.a.1                 reuse scope2
 template< typename TFnGetEtc >
 class _TraceContextScope
 {
@@ -1231,13 +1548,13 @@ public:
     _TraceContextScope( const TFnGetEtc& tfnGetEtc )
     {
         m_ptcCurr = tfnGetEtc();
-        m_tcSaved = *m_ptcCurr;
+        m_tcSaved = *m_ptcCurr; // save a copy to restore back
     }
 
     _TraceContextScope( TFnGetEtc tfnGetEtc, IOREASONPRIMARY iorp, IOREASONSECONDARY iors = iorsNone, IOREASONTERTIARY iort = iortNone, IOREASONFLAGS iorf = iorfNone )
     {
         m_ptcCurr = tfnGetEtc();
-        m_tcSaved = *m_ptcCurr;
+        m_tcSaved = *m_ptcCurr; // save a copy to restore back
 
         iorp != iorpNone ? m_ptcCurr->iorReason.SetIorp( iorp ) : 0;
         iors != iorsNone ? m_ptcCurr->iorReason.SetIors( iors ) : 0;
@@ -1248,7 +1565,7 @@ public:
     _TraceContextScope( TFnGetEtc tfnGetEtc, IOREASONSECONDARY iors, IOREASONTERTIARY iort = iortNone, IOREASONFLAGS iorf = iorfNone )
     {
         m_ptcCurr = tfnGetEtc();
-        m_tcSaved = *m_ptcCurr;
+        m_tcSaved = *m_ptcCurr; // save a copy to restore back
 
         iors != iorsNone ? m_ptcCurr->iorReason.SetIors( iors ) : 0;
         iort != iortNone ? m_ptcCurr->iorReason.SetIort( iort ) : 0;
@@ -1258,7 +1575,7 @@ public:
     _TraceContextScope( TFnGetEtc tfnGetEtc, IOREASONTERTIARY iort, IOREASONFLAGS iorf = iorfNone )
     {
         m_ptcCurr = tfnGetEtc();
-        m_tcSaved = *m_ptcCurr;
+        m_tcSaved = *m_ptcCurr; // save a copy to restore back
 
         iort != iortNone ? m_ptcCurr->iorReason.SetIort( iort ) : 0;
         m_ptcCurr->iorReason.AddFlag( iorf );
@@ -1274,6 +1591,16 @@ public:
     TraceContext& operator*()           { return *m_ptcCurr; }
     TraceContext* Ptc()                 { return m_ptcCurr; }
 
+    // Special handling for copies, move semantics
+    //  - Copying isn't allowed. Always create a new scope.
+    //  - That means return by value must use RVO/NRVO in retail. We expect the compiler to always be able to do this. We Enforce() if it doesn't.
+    //  - In debug, more general return by value is explicitly allowed through move semantics.
+    //  - This is how the move .ctor works:
+    //      .ctor <temp>: set TLS
+    //      .move_ctor <actual>: setup temp to 'fix' TLS upon .dtor <temp>
+    //      .dtor <temp>: clear TLS (fixes up TLS to point to actual)
+    //      scope is properly constructed
+    //      .dtor <actual>: clear TLS   (when the user is done with the scope)
 
     _TraceContextScope( _TraceContextScope&& rvalue )
     {
@@ -1281,16 +1608,21 @@ public:
         m_ptcCurr = rvalue.m_ptcCurr;
         m_tcSaved = rvalue.m_tcSaved;
 
+        // Fix up rvalue
         rvalue.m_tcSaved = *m_ptcCurr;
 #else
+        // Call to _TraceContextScope::.move_ctor not allowed in retail. _TraceContextScope creation should always allow RVO (Return Value Optimization).
         EnforceSz( false, "DisallowedTraceContextScopeCtor" );
 #endif
     }
 
+    // Disallowed
     _TraceContextScope( const _TraceContextScope& tc ) = delete;
     const _TraceContextScope& operator=( const _TraceContextScope& tc ) = delete;
 };
 
+// A helper class to get the current user trace context from the TLS
+// Returns an empty system context, if the TLS has a null user context
 class GetCurrUserTraceContext
 {
     const UserTraceContext* m_putcTls;
@@ -1307,8 +1639,9 @@ const TraceContext* PetcTLSGetEngineContext();
 const UserTraceContext* PutcTLSGetUserContext();
 
 struct TLS;
-const TraceContext* PetcTLSGetEngineContextCached( TLS *ptlsCached );
+const TraceContext* PetcTLSGetEngineContextCached( TLS *ptlsCached );    // use this variant if you have a cached TLS pointer
 
+// A functor that gets the engine TraceContext from the TLS to use with _TraceContextScope
 class TLSGetEtcFunctor
 {
 public:
@@ -1318,6 +1651,7 @@ public:
     }
 };
 
+// TraceContextScope that works with the current TraceContext on the TLS
 class TraceContextScope : public _TraceContextScope< TLSGetEtcFunctor >
 {
 public:
@@ -1347,8 +1681,8 @@ inline const TraceContext& TcCurr()
     return *PetcTLSGetEngineContext();
 }
 
-#endif
+#endif  //  MINIMAL_FUNCTIONALITY
 
-#endif
+#endif  //  _OS_TRACE_HXX_INCLUDED
 
 

@@ -7,16 +7,16 @@ Xpress9Lz77Dec (
     LZ77_DECODER    *pDecoder
 )
 {
-
+/* Writes decoded data to the internal data buffer, m_pBufferData. Data is then copied from this buffer to the final buffer. */
 #if LZ77_MTF >= 2
-    xint            iMtfLastPtr     = pDecoder->m_DecodeData.m_Mtf.m_iMtfLastPtr;
+    xint            iMtfLastPtr     = pDecoder->m_DecodeData.m_Mtf.m_iMtfLastPtr; // whether the last encoding was using MTF or not.
     xint            iMtfOffset0     = pDecoder->m_DecodeData.m_Mtf.m_iMtfOffset[0]; 
     xint            iMtfOffset1     = pDecoder->m_DecodeData.m_Mtf.m_iMtfOffset[1];
-#endif 
+#endif /* LZ77_MTF >= 2 */
 #if LZ77_MTF >= 4
     xint            iMtfOffset2     = pDecoder->m_DecodeData.m_Mtf.m_iMtfOffset[2];
     xint            iMtfOffset3     = pDecoder->m_DecodeData.m_Mtf.m_iMtfOffset[3];
-#endif 
+#endif /* LZ77_MTF >= 4 */
     HUFFMAN_DECODE_TABLE_ENTRY *piShortSymbolRoot   = pDecoder->m_DecodeData.m_piShortSymbolRoot;
     HUFFMAN_DECODE_TABLE_ENTRY *piLongLengthRoot    = pDecoder->m_DecodeData.m_piLongLengthRoot;
     uxint   uDecodePosition         = pDecoder->m_DecodeData.m_uDecodePosition;
@@ -41,6 +41,7 @@ Xpress9Lz77Dec (
         uEndOfBuffer
     );
 
+    // We #defined LZ77_MTF such that it is equal to m_uMtfEntryCount that we obtained from the header of the encoded data.
     RETAIL_ASSERT (
         pDecoder->m_DecodeData.m_uMtfEntryCount == LZ77_MTF,
         "m_uMtfEntryCount=%Iu expected=%u",
@@ -55,7 +56,7 @@ Xpress9Lz77Dec (
         pDecoder->m_DecodeData.m_uMtfMinMatchLength,
         LZ77_MTF_MIN_MATCH_LENGTH
     );
-#endif 
+#endif /* LZ77_MTF > 0 */
 
     RETAIL_ASSERT (
         pDecoder->m_DecodeData.m_uPtrMinMatchLength == LZ77_PTR_MIN_MATCH_LENGTH,
@@ -106,18 +107,22 @@ Xpress9Lz77Dec (
             {
                 break;
             }
+            // Literal, write it as is -- Note that a literal is 8-bit. ENCODE_LIT writes it out as 16-bit to Ir.
             TRACE ("DEC %Iu LIT %Iu", uDecodePosition, uSymbol + 256);
             pDst[uDecodePosition] = (UInt8) uSymbol;
             uDecodePosition += 1;
 #if LZ77_MTF > 0
             iMtfLastPtr = 0;
-#endif 
+#endif /* LZ77_MTF > 0 */
             if (uDecodePosition >= uStopPosition)
             {
                 goto DoneNoTail;
             }
         }
 
+        //
+        // this is a pointer. Decode the length first
+        //
         uLength = (uxint) (uSymbol & (LZ77_MAX_SHORT_LENGTH - 1));
         uSymbol >>= LZ77_MAX_SHORT_LENGTH_LOG;
         if (uLength == LZ77_MAX_SHORT_LENGTH - 1)
@@ -138,6 +143,9 @@ Xpress9Lz77Dec (
 #if LZ77_MTF > 0
         if (uSymbol < LZ77_MTF)
         {
+            //
+            // this is MTF pointer
+            //
             uLength += LZ77_MTF_MIN_MATCH_LENGTH;
 
             TRACE ("DEC %Iu MTF %Iu %Id", uDecodePosition, uLength, uSymbol);
@@ -172,7 +180,7 @@ Xpress9Lz77Dec (
                     SET_ERROR (Xpress9Status_DecoderCorruptedData, pStatus, "uDecodePosition=%Iu", uDecodePosition);
                     goto Failure;
                 }
-#endif 
+#endif /* LZ77_MTF <= 2 */
                 iMtfOffset1 = iMtfOffset0;
                 iMtfOffset0 = iOffset;
             }
@@ -185,7 +193,7 @@ Xpress9Lz77Dec (
                 else
 #if LZ77_MTF > 2
                 if (uSymbol == 1)
-#endif 
+#endif /* LZ77_MTF > 2 */
                 {
                     iOffset     = iMtfOffset1;
                     iMtfOffset1 = iMtfOffset0;
@@ -207,12 +215,15 @@ Xpress9Lz77Dec (
                     iMtfOffset1 = iMtfOffset0;
                     iMtfOffset0 = iOffset;
                 }
-#endif 
+#endif /* LZ77_MTF > 2 */
             }
         }
         else
-#endif 
+#endif /* LZ77_MTF > 0 */
         {
+            //
+            // regular pointer; decode the offset
+            //
             uLength += LZ77_PTR_MIN_MATCH_LENGTH;
 
             uSymbol -= LZ77_MTF;
@@ -224,13 +235,16 @@ Xpress9Lz77Dec (
 #if LZ77_MTF > 2
             iMtfOffset3 = iMtfOffset2;
             iMtfOffset2 = iMtfOffset1;
-#endif 
+#endif /* LZ77_MTF > 2 */
 #if LZ77_MTF > 0
             iMtfOffset1 = iMtfOffset0;
             iMtfOffset0 = iOffset;
-#endif 
+#endif /* LZ77_MTF > 0 */
         }
 
+        //
+        // got length and offset, copy the data
+        //
         if (((uxint) iOffset) > uDecodePosition)
         {
             SET_ERROR (Xpress9Status_DecoderCorruptedData, pStatus, "uDecodePosition=%Iu uBufferOffset=%I64u iOffset=%Iu", uDecodePosition, pDecoder->m_DecodeData.m_uBufferOffset, iOffset);
@@ -240,7 +254,7 @@ Xpress9Lz77Dec (
 
 #if LZ77_MTF > 0
         iMtfLastPtr = 1;
-#endif 
+#endif /* LZ77_MTF > 0 */
 
         uPositionLast = uDecodePosition + uLength;
         if (uPositionLast > uEndOfBuffer)
@@ -250,9 +264,16 @@ Xpress9Lz77Dec (
 
         pSrc = pDst + iOffset;
 
+        // uLength is always >= 2; see all possible values for LZ77_PTR_MIN_MATCH_LENGTH and LZ77_MTF_MIN_MATCH_LENGTH
+        // Therefore inline the first 2 byte copies to avoid branching and let the compiler get clever with the instruction pipeline
+        //
+        // Note: Cosmos uses PtrMinMatchLength = 4, MtfMinMatchLength = 2 (see cscompression.cpp) but we can't just inline 4 byte copies,
+        //       because sometimes we will get here via MtfMinMatchLength.  There was no additional perf improvement from inlining 4
+        //       byte copies here, and duplicating code and making the Mtf path inline 2 copies there.
 #if LZ77_PTR_MIN_MATCH_LENGTH < 2
 #error Invalid LZ77_PTR_MIN_MATCH_LENGTH
 #endif
+        // Can't make this an && because LZ77_MTF_MIN_MATCH_LENGTH is not a number when LZ77_MTF is 0
 #if LZ77_MTF > 0
 #if LZ77_MTF_MIN_MATCH_LENGTH < 2
 #error Invalid LZ77_MTF_MIN_MATCH_LENGTH
@@ -271,6 +292,9 @@ Xpress9Lz77Dec (
     }
     while (uDecodePosition < uStopPosition);
 
+    //
+    // set tail length to 0
+    //
 DoneNoTail:
     pDecoder->m_DecodeData.m_Tail.m_uLength = 0;
 
@@ -283,17 +307,20 @@ Done:
     pDecoder->m_DecodeData.m_Mtf.m_iMtfLastPtr   = iMtfLastPtr;
     pDecoder->m_DecodeData.m_Mtf.m_iMtfOffset[0] = iMtfOffset0;
     pDecoder->m_DecodeData.m_Mtf.m_iMtfOffset[1] = iMtfOffset1;
-#endif 
+#endif /* LZ77_MTF >= 2 */
 #if LZ77_MTF >= 4
     pDecoder->m_DecodeData.m_Mtf.m_iMtfOffset[2] = iMtfOffset2;
     pDecoder->m_DecodeData.m_Mtf.m_iMtfOffset[3] = iMtfOffset3;
-#endif 
+#endif /* LZ77_MTF >= 4 */
 
     return;
 
 
 
 EndOfBuffer:
+    //
+    // copy as much as we can and remember the rest
+    //
     pSrc = pDst + iOffset;
     do
     {

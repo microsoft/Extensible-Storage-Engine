@@ -5,17 +5,129 @@
 #include <ctype.h>
 #include <_logredomap.hxx>
 
+//  Source Insight users:
+//  ------------------
+//  If you get parse errors with this file, open up C.tom in your Source
+//  Insight directory, comment out the "TRY try {" line with a semi-colon,
+//  and then add a line with "PERSISTED" only.
+//
+//  If you don't use Source Insight, you are either a fool or else there is
+//  a better editor by the time you read this.
+
+//  D O C U M E N T A T I O N ++++++++++++++++++++++++++++
+//
+//  FASTFLUSH Physical Logging Overview
+//  ==========================
+//  For information on how the FASTFLUSH Physical Logging works, please see
+//  ese\doc\ESE Physical Logging.doc.
+//
+//  Asynchronous Log File Creation Overview
+//  ============================
+//  Background
+//  ----------
+//  This text uses 5MB as an example for the log file size (configurable via
+//  JET_paramLogFileSize) and 1MB as the maximum write size (configurable via
+//  JET_paramMaxCoalesceWriteSize). 512KB is frequently used as being half
+//  of the maximum write size.
+//  Before asynchronous log file creation, ESE would stall in ErrLGNewLogFile()
+//  when it would create and format a new 5MB log file (formatting means
+//  applying a special signature pattern to the file which is used to determine
+//  if corruption has occurred; log file size is settable via a Jet system
+//  parameter). 5MB of I/O isn't that fast, especially considering that NTFS
+//  makes extending I/Os synchronous plus each of the 1MB I/Os causes a write
+//  to the MFT.
+//
+//  Solution
+//  -------
+//  Once ErrLGNewLogFile() is about to return (since it has completed setting
+//  up the next log file), we should create edbtmp.jtx/log immediately (or rename
+//  an archived edb%05X.jtx/log (or edb%08X.jtx/log if the log generation is over
+//  0xFFFFF) file in the case of circular logging). Then we set a "TRIGGER" for the
+//  first asynchronous 1MB formatting I/O to start once we have logged 512K to the
+//  log buffer.
+//
+//  What is this TRIGGER about?
+//  -------------------------
+//  One way we could have done this is just to immediately start a 1MB
+//  asynchronous formatting I/O, then once it finishes, issue another one
+//  immediately. Unfortunately back-to-back 1MB I/Os basically consume
+//  the disk and keep it busy -- thus no logging would be able to be done
+//  to edb.jtx/log since we'd be busy using the disk to format edbtmp.jtx/log!
+//  (I actually determined this experimentally with a prototype).
+//
+//  The trigger allows us to throttle I/O to the edbtmp.jtx/log that we're
+//  formatting, so that we log 1MB of data to the in-memory log buffer, then
+//  write 1MB to edbtmp.jtx/log, then... etc.
+//
+//  The trigger is handled such that once we pass the trigger, we will
+//  issue a task that will perform a synch (or potentially multiple)
+//  formatting I/O(s), then once it completes AND we pass the next trigger, we will
+//  issue the next, etc. If we reach ErrLGNewLogFile() before edbtmp.jtx/log is
+//  completely formatted (or there is currently an outstanding task), we will stop
+//  the asynch triggering mechanism and "cancel" any potentially pending
+//  tasks (by making the number of pending I/Os equal to zero).
+//  Then, we format the rest of the file if necessary.
+//
+//  Why is the policy based on how much we've logged to the log buffer
+//  and not how much we've flushed to edb.jtx/log?
+//  --------------------------------------------------------------
+//  In the case of many lazy commit transactions, waiting for a log flush
+//  may be a long time with a large log buffer (i.e. there are some
+//  performance recommendations that Exchange Servers should
+//  have log buffers set to `9000' which is 9000 * 512 bytes = ~4.4MB;
+//  BTW, do not set the log buffers equal to the log file size or greater or
+//  you will get some bizarre problems). So in this case, we should try to
+//  format edbtmp.jtx/log while those lazy commit transactions are coming in,
+//  especially since they're not causing edb.jtx/log to be used at all.
+//
+//  Why set the trigger to 512K instead of issuing the first I/O immediately?
+//  ----------------------------------------------------------------
+//  In ErrLGNewLogFile() we're doing a lot with files, deleting unnecessary
+//  log files in some circumstances, creating files, renaming files, etc. In other
+//  words, this is going to take a while since we have to wait for NTFS to
+//  update metadata by writing to the NTFS transaction log, at a minimum.
+//  While we're waiting for NTFS to do this stuff, it is pretty likely that some
+//  clients are doing transactions and they are now waiting for their commit
+//  records to hit the disk -- in other words, they are waiting for their stuff
+//  to be flushed to edb.jtx/log.
+//
+//  If we write 1MB to edbtmp.jtx/log now, those clients will have to wait until
+//  the 1MB hits the disk before their records hit the disk.
+//
+//  Thus, this is why we wait for 512K to be logged to the log buffer -- as
+//  a heuristic wait.
+//
+//  If back-to-back I/Os are bad, why do we post a task to issue potentially
+//  several sequential I/Os at a time?
+//  ----------------------------------------------------------------
+//  Under nominal load, only one I/O will be issued at a time. However, we
+//  have seen cases in which the temp log filling falls behind and by the time
+//  we reach ErrLGNewLogFile(), the temp log is still far from completely formatted,
+//  causing user threads to hang waiting for the rest of the log to be filled.
+//  Issuing multiple back-to-back I/Os is an effort to avoid this dive in terms
+//  of user experience. So, we are sacrificing more I/O during normal log filling
+//  to provide a smoother and more uniform latency and response time, even though
+//  the average use throughput (replaces/sec, for example) might not change
+//  significantly.
+//
+//  What about error handling with this asynch business?
+//  -----------------------------------------------
+//  If we get an error creating the new edbtmp.jtx/log, we'll handle the error
+//  later when ErrLGNewLogFile() is next called. The same with errors from
+//  any asynch I/O.
+//
+//  We handle all the weird errors with disk-full and using reserve log files, etc.
 
 
 
-
+//  constants
 
 const LGPOS     lgposMax = { 0xffff, 0xffff, 0x7fffffff };
 const LGPOS     lgposMin = { 0x0,  0x0,  0x0 };
 
 #ifdef DEBUG
 CCriticalSection g_critDBGPrint( CLockBasicInfo( CSyncBasicInfo( szDBGPrint ), rankDBGPrint, 0 ) );
-#endif
+#endif  //  DEBUG
 
 #ifdef PERFMON_SUPPORT
 
@@ -89,7 +201,7 @@ LONG LLGLogGenerationCheckpointDepthTargetCEFLPv( LONG iInstance, VOID *pvBuf )
     return 0;
 }
 
-#endif
+#endif // PERFMON_SUPPORT
 
 LOG::LOG( INST *pinst )
     :   CZeroInit( sizeof( LOG ) ),
@@ -125,6 +237,9 @@ LOG::~LOG()
     PERFOpt( ibLGDbConsistency.Clear( m_pinst ) );
     PERFOpt( cbLGCheckpointDepthMax.Clear( m_pinst ) );
 
+    //  These should have been cleaned up earlier, but there are cases where we might not
+    //  due to errors in cleanup functions (see LOG::ErrLGRIEndAllSessionsWithError()).
+    //  Just making sure we won't leak.
 
     Assert( m_pctablehash == NULL || m_fLGNoMoreLogWrite );
     Assert( m_pcsessionhash == NULL || m_fLGNoMoreLogWrite );
@@ -190,10 +305,12 @@ VOID LOG::LGReportError( const MessageId msgid, const ERR err, IFileAPI* const p
     const ERR   errPath = pfapi->ErrPath( wszAbsPath );
     if ( errPath < JET_errSuccess )
     {
+        //  If we get an error here, this is the best we can do.
 
         OSStrCbFormatW( wszAbsPath, sizeof( wszAbsPath ),
                     L"%ws [%i (0x%08x)]",
-                    m_pLogStream->LogName(),
+                    // UNDONE: if we recompile this unicode, since this isn't a _TCHAR, we'll get giberish for the log name.
+                    m_pLogStream->LogName(),    // closest thing we have to pfapi's path
                     errPath,
                     errPath );
     }
@@ -215,7 +332,12 @@ const LGFILEHDR_FIXED * LOG::PlgfilehdrForVerCtrl() const
 }
 
 
+//********************* INIT/TERM **************************
+//**********************************************************
 
+//
+//  Initialize global variablas and threads for log manager.
+//
 ERR LOG::ErrLGInit( BOOL *pfNewCheckpointFile )
 {
     ERR err;
@@ -265,27 +387,44 @@ ERR LOG::ErrLGInit( BOOL *pfNewCheckpointFile )
 
     CallR( m_pLogStream->ErrLGInit() );
 
+    //  assuming everything will work out
+    //
     ResetNoMoreLogWrite();
 
+    // first signal callback that this is the beginning of logging
     m_pLogStream->ErrEmitSignalLogBegin();
 
+    //  Initialize trace mechanism
 
     m_pttFirst = NULL;
     m_pttLast = NULL;
 
+    // SOFT_HARD: leave, not important
     Assert( m_fHardRestore || m_pLogStream->LogExt() == NULL );
     Assert( !m_fHardRestore || m_pLogStream->LogExt() != NULL );
 
+    // If they call JetInit AFTER JetRestoreInstance
+    // the two log related semaphors will NOT be released.
+    // The semaphores were released on LOG::LOG and
+    // aquired back at the end of JetRestoreInstance (in ErrLGTerm)
+    //
     Call( m_pLogWriteBuffer->ErrLGTasksInit() );
 
+    //  Multiple things make me nervous here, this haphazard way of initing 
+    //  the checkpoint memory vs. file, and the fact that we init portions 
+    //  of this memory and not others, as well as the fact that we touched 
+    //  off LGTasksInit before this is init'd.
     Call( ErrLGICheckpointInit( pfNewCheckpointFile ) );
 
     memset( &m_signLog, 0, sizeof( m_signLog ) );
     m_fSignLogSet = fFalse;
 
+    //  determine if we are in "log sequence end" mode
 
+    // Note, this code doesn't actually check properly if we ONLY have edb.jtx/log, b/c ErrLGGetGenerationRange()
+    // doesn't actually retrieve the max gen from edb.jtx/log, so we could consider removing this code?
     (void)m_pLogStream->ErrLGGetGenerationRange( SzParam( m_pinst, JET_paramLogFilePath ), &lGenMin, &lGenMax, m_pLogStream->LogExt() ? fFalse : fTrue );
-    lGenMax += 1;
+    lGenMax += 1;   //  assume edb.jtx/log exists (if not, who cares -- if they hit this, they have to shutdown and wipe the log anyway)
     if ( lGenMax >= lGenerationMax )
     {
         m_pLogStream->SetLogSequenceEnd();
@@ -293,20 +432,29 @@ ERR LOG::ErrLGInit( BOOL *pfNewCheckpointFile )
 
     if ( 0 == lGenMin )
     {
+        // There is no min-log to train our m_lgenInitial off of, so we use the registry (if it exists) ...
 
+        // I think this still doesn't handle one case, where we both 1. do not have a checkpoint, 
+        // and 2. have only one log (edb.jtx) and thus we couldn't get the the min-log above. Verified,
+        // yes this doesn't handle that exact case ... this is fixed up in ErrLGSoftStart().
         WCHAR wsz[11];
         if ( FOSConfigGet( L"DEBUG", L"Initial Log Generation", wsz, sizeof(wsz) ) )
         {
             lGenMin = _wtoi( wsz );
-            lGenMin = (lGenMin == 0) ? 1 : lGenMin;
+            lGenMin = (lGenMin == 0) ? 1 : lGenMin; // zero is an invalid initial log gen.
         }
         else
         {
+            //  no registry setting either, 1 is our default initial log gen ...
             lGenMin = 1;
         }
     }
+    // else if there was already a log stream / sequence existing, upgrade our lgenInitial to that.
     Assert( lGenMin );
 
+    //  We might consider moving this into the places ErrLGInit is called, namely ErrLGSoftStart, 
+    //  ErrLGRestore, and ErrLGRSTExternalRestore(), all of which have a great deal more context on
+    //  which log files actually exist and are valid.
     LGISetInitialGen( lGenMin );
 
     m_fLogInitialized = fTrue;
@@ -322,6 +470,12 @@ HandleError:
 }
 
 
+//  Terminates update logging.  Adds quit record to in-memory log,
+//  flushes log buffer to disk, updates checkpoint and closes active
+//  log generation file.  Frees buffer memory.
+//
+//  RETURNS    JET_errSuccess, or error code from failing routine
+//
 ERR LOG::ErrLGTerm( const BOOL fLogQuitRec )
 {
     ERR         err             = JET_errSuccess;
@@ -329,14 +483,21 @@ ERR LOG::ErrLGTerm( const BOOL fLogQuitRec )
     LE_LGPOS    le_lgposStart;
     LGPOS       lgposQuit;
 
+    //  if logging has been initialized, terminate it!
+    //
     if ( !m_fLogInitialized )
     {
         if ( m_pshadlog )
         {
+            //  quit the alternate / secondary log
             err = ErrLGShadowLogTerm();
+            // assert not thread safe, but on term, so we shouldn't have trouble here.
             Assert( NULL == m_pshadlog );
         }
 
+        // Note: Because ErrLGTerm() is called from JetRestore, ExternalRestore() and for a failing
+        // JetInit that is past log initialization, we have to defensively only trigger term sequences
+        // when we're actually in / tracking term - which we can tell with .FActiveSequence().
         if ( m_pinst->m_isdlTerm.FActiveSequence() )
         {
             m_pinst->m_isdlTerm.Trigger( eTermLogFilesClosed );
@@ -353,6 +514,8 @@ ERR LOG::ErrLGTerm( const BOOL fLogQuitRec )
     Assert( !m_fRecovering );
     Expected( m_pinst->m_isdlTerm.FActiveSequence() );
 
+    //  last written sector should have been written during final flush
+    //
     le_lgposStart = m_lgposStart;
     Call( ErrLGQuit(
                 this,
@@ -360,6 +523,9 @@ ERR LOG::ErrLGTerm( const BOOL fLogQuitRec )
                 BoolParam( m_pinst, JET_paramAggressiveLogRollover ),
                 &lgposQuit ) );
 
+    // Keep doing synchronous flushes until all log data
+    // is definitely flushed to disk. With FASTFLUSH, a single call to
+    // ErrLGFlushLog() may not flush everything in the log buffers.
     Call( m_pLogWriteBuffer->ErrLGWaitAllFlushed( fFalse ) );
 
     if ( m_pinst->m_isdlTerm.FActiveSequence() )
@@ -376,6 +542,8 @@ ERR LOG::ErrLGTerm( const BOOL fLogQuitRec )
 
     fTermFlushLog = fTrue;
 
+    // the last thing to do with the checkpoint is to update it to
+    // the Term log record. This will determine a clean shutdown
     Call( ErrLGIUpdateCheckpointLgposForTerm( lgposQuit ) );
 
     if ( m_pinst->m_isdlTerm.FActiveSequence() )
@@ -389,8 +557,13 @@ ERR LOG::ErrLGTerm( const BOOL fLogQuitRec )
     }
 #endif
 
+    //  flush must have checkpoint log so no need to do checkpoint again
+    //
+    //  Call( ErrLGWriteFileHdr( m_plgfilehdr ) );
 
 
+    //  check for log-sequence-end
+    //  (since we logged a term/rcvquit record, we know this is a clean shutdown)
 
     if ( err >= JET_errSuccess )
     {
@@ -401,7 +574,7 @@ ERR LOG::ErrLGTerm( const BOOL fLogQuitRec )
         Call( err );
     }
 
-HandleError:
+HandleError:    // free resources
 
     if ( !fTermFlushLog )
     {
@@ -414,7 +587,9 @@ HandleError:
 
 
     m_pLogWriteBuffer->LGTasksTerm();
-
+    
+    //  terminate log checkpoint
+    //
     LGDisableCheckpoint();
     LGICheckpointTerm();
 
@@ -423,18 +598,31 @@ HandleError:
         m_pinst->m_isdlTerm.Trigger( eTermLogTasksTermed );
     }
 
+    //  close the log file
+    //
 
     m_pLogStream->LGCloseFile();
 
+    // Signal callback that we have logged everything that this instance can possibly 
+    // log, so that any shadow log subscribers can clean up thier resources.
     m_pLogStream->ErrEmitSignalLogEnd();
 
+    // We have logged everything we can possibly log to the log files, now
+    // we can shutdown the alternate log as we couldn't possibly get any other
+    // callbacks.
+    //
     if ( m_pshadlog )
     {
+        // now terminate the alternate log as well
         const ERR errLGShadow = ErrLGShadowLogTerm();
+        // assert not thread safe, but on term, so we shouldn't have trouble here.
         Assert( NULL == m_pshadlog );
         err = ( err == JET_errSuccess ? errLGShadow : err );
     }
 
+    //  If edbtmp.jtx/log is being written to, wait for it to complete, close the file and
+    //  free related memory.
+    //
 
     m_pLogStream->LGCreateAsynchCancel( fTrue );
 
@@ -445,9 +633,12 @@ HandleError:
 
     m_pLogStream->LGTermTmpLogBuffers();
 
+    //  clean up allocated resources
+    //
     m_LogBuffer.LGTermLogBuffers();
     m_pLogStream->LGTerm();
 
+    //  check for log-sequence-end
 
     if ( err >= JET_errSuccess )
     {
@@ -463,6 +654,8 @@ HandleError:
 }
 
 
+//********************* LOGGING ****************************
+//**********************************************************
 
 BOOL g_fStallFirewallFired = fFalse;
 
@@ -477,6 +670,8 @@ ERR LOG::ErrLGLogRec(   const DATA* const           rgdata,
 
     TICK tickStart = TickOSTimeCurrent();
 
+    //  try to insert the log record in the log buffer if there is room
+    //
     while ( ( err = ErrLGTryLogRec( rgdata, cdata, fLGFlags, lgenBegin0, plgposLogRec ) ) == errLGNotSynchronous )
     {
         if ( NULL != pcrit )
@@ -484,6 +679,7 @@ ERR LOG::ErrLGLogRec(   const DATA* const           rgdata,
 
         m_pLogWriteBuffer->WriteToClearSpace();
 
+        // Raise firewall for really long stalls
         if ( !g_fStallFirewallFired &&
 #ifdef DEBUG
              TickOSTimeCurrent() - tickStart > 20 * 60 * 1000 &&
@@ -513,12 +709,13 @@ ERR LOG::ErrLGTryLogRec(    const DATA* const   rgdata,
     {
         ERR err = JET_errSuccess;
 
+        //  There a list of trace in temp memory structure. Log them first.
         do {
             m_critLGTrace.Enter();
             if ( m_pttFirst )
             {
                 TEMPTRACE *ptt = m_pttFirst;
-                err = ErrLGITrace( ptt->ppib, ptt->szData, fTrue  );
+                err = ErrLGITrace( ptt->ppib, ptt->szData, fTrue /* fInternal */ );
                 if ( err >= JET_errSuccess )
                 {
                     m_pttFirst = ptt->pttNext;
@@ -537,6 +734,7 @@ ERR LOG::ErrLGTryLogRec(    const DATA* const   rgdata,
             return err;
     }
 
+    //  No trace to log or trace list is taken care of, log the normal log record
 
     return m_pLogWriteBuffer->ErrLGLogRec( rgdata, cdata, fLGFlags, lgenBegin0, plgposLogRec );
 }
@@ -544,6 +742,7 @@ ERR LOG::ErrLGTryLogRec(    const DATA* const   rgdata,
 
 ERR LOG::ErrLGITrace(
     PIB *ppib,
+    // UNDONE: Better to make this PCSTR, but may be impossible b/c we pass it to Data::SetPv() :P
     __in PSTR sz,
     BOOL fInternal )
 {
@@ -555,6 +754,7 @@ ERR LOG::ErrLGITrace(
     const ULONG     cbDateTimeBuf   = 31;
     CHAR            szDateTimeBuf[cbDateTimeBuf+1];
 
+    //  No trace in recovery mode
 
     if ( m_fRecovering && m_fRecoveringMode == fRecoveringRedo )
         return JET_errSuccess;
@@ -575,6 +775,11 @@ ERR LOG::ErrLGITrace(
 
     UtilGetCurrentDateTime( &datetime );
 
+    //  UNDONE: a better idea would be to add a LOGTIME
+    //  field to LRTRACE, but that would require a log
+    //  format change, or at least a new lrtyp, so just
+    //  add the date/timestamp to the trace string
+    //
     szDateTimeBuf[cbDateTimeBuf] = 0;
     OSStrCbFormatA(
         szDateTimeBuf,
@@ -601,6 +806,8 @@ ERR LOG::ErrLGITrace(
 
     if ( fInternal )
     {
+        //  To prevent recursion, do not call ErrLGLogRec which then callback
+        //  ErrLGTrace
 
         return m_pLogWriteBuffer->ErrLGLogRec( rgdata, cdata, 0, 0, pNil );
     }
@@ -608,6 +815,9 @@ ERR LOG::ErrLGITrace(
     err = ErrLGTryLogRec( rgdata, cdata, 0, 0, pNil );
     if ( err == errLGNotSynchronous )
     {
+        //  Trace should not block anyone, put the record in a temp
+        //  space and log it next time. It is OK to loose trace if the system
+        //  crashes.
 
         TEMPTRACE *ptt;
 
@@ -632,6 +842,8 @@ ERR LOG::ErrLGITrace(
 
 ERR LOG::ErrLGTrace(
     PIB *ppib,
+    // UNDONE: Better to make this PCSTR, but may be impossible b/c we pass it to Data::SetPv() :P
+    // Can we fix this?  Don't understand the internl ErrLGITrace() it's complicated.
     __in PSTR sz )
 {
     ERR err = ErrLGITrace( ppib, sz, fFalse );
@@ -639,6 +851,9 @@ ERR LOG::ErrLGTrace(
     if ( ( JET_errLogWriteFail == err || JET_errOutOfMemory == err )
         && FRFSAnyFailureDetected() )
     {
+        //  assume these errors were due to RFS and just throw away
+        //  the trace log record
+        //
         err = JET_errSuccess;
     }
 
@@ -651,12 +866,27 @@ ERR LOG::ErrLGTrace(
 
 
 #ifdef ENABLE_LOG_V7_RECOVERY_COMPAT
+//  ================================================================
 bool FLGIsLVChunkSizeCompatible(
     const ULONG cbPage,
     const ULONG ulVersionMajor,
     const ULONG ulVersionMinor,
     const ULONG ulVersionUpdate )
+//  ================================================================
+//
+//  In version 3,3704,14 of the logs the long-value chunk size
+//  changed, but only for large pages (16kb and 32kb pages). The
+//  change is _not_ backwards compatible so we have to check for
+//  the case where we are using a log that is older than
+//  the update.
+//
+//-
 {
+    // when the major or minor version changes this function won't be needed
+    // any more.  Not true right now since v8 log still supports reading v7 log
+    // C_ASSERT( ulLGVersionMajorMax == ulLGVersionMajorNewLVChunk );
+    // C_ASSERT( ulLGVersionMinorFinalDeprecatedValue == ulLGVersionMinorNewLVChunk );
+    // C_ASSERT( ulLGVersionUpdateMajorMax >= ulLGVersionUpdateNewLVChunk );
 
     Assert( 2*1024 == cbPage
             || 4*1024 == cbPage
@@ -664,12 +894,19 @@ bool FLGIsLVChunkSizeCompatible(
             || 16*1024 == cbPage
             || 32*1024 == cbPage );
 
+    // earlier checks should catch these conditions
+    // Assert( ulLGVersionMajorMax == ulVersionMajor );
+    // Assert( ulLGVersionMinorFinalDeprecatedValue == ulVersionMinor );
+    // Assert( ulLGVersionUpdateMajorMax >= ulVersionUpdate );
 
     if( FIsSmallPage( cbPage ) )
     {
+        // small pages are always compatible
         return true;
     }
 
+    // this is a large page database. if it has the
+    // old chunk size then it isn't compatible
     if( ulVersionMajor == ulLGVersionMajorNewLVChunk
         && ulVersionMinor == ulLGVersionMinorNewLVChunk
         && ulVersionUpdate < ulLGVersionUpdateNewLVChunk )
@@ -679,8 +916,8 @@ bool FLGIsLVChunkSizeCompatible(
 
     return true;
 }
-
-#endif
+    
+#endif  // ENABLE_LOG_V7_RECOVERY_COMPAT
 
 ERR ErrLGICheckVersionCompatibility( const INST * const pinst, const LGFILEHDR* const plgfilehdr );
 
@@ -695,12 +932,16 @@ ERR ErrLGIReadFileHeader(
     PAGECHECKSUM        checksumExpected    = 0;
     PAGECHECKSUM        checksumActual      = 0;
 
-    
+    /*  read log file header.  Header is written only during
+    /*  log file creation and cannot become corrupt unless system
+    /*  crash in the middle of file creation.
+    /**/
 
     TraceContextScope tcScope( iorsHeader );
     Call( pfapiLog->ErrIORead( *tcScope, 0, sizeof( LGFILEHDR ), (BYTE* const)plgfilehdr, grbitQOS ) );
 
-    
+    /*  check if the data is bogus.
+     */
     ChecksumPage(
                 plgfilehdr,
                 sizeof(LGFILEHDR),
@@ -717,35 +958,43 @@ ERR ErrLGIReadFileHeader(
         }
     }
 
-    
+    /*  check for old JET version
+    /**/
     if ( *(LONG *)(((char *)plgfilehdr) + 24) == 4
-         && ( *(LONG *)(((char *)plgfilehdr) + 28) == 909
-              || *(LONG *)(((char *)plgfilehdr) + 28) == 995 )
+         && ( *(LONG *)(((char *)plgfilehdr) + 28) == 909       //  NT version
+              || *(LONG *)(((char *)plgfilehdr) + 28) == 995 )  //  Exchange 4.0
          && *(LONG *)(((char *)plgfilehdr) + 32) == 0
         )
     {
-        
+        /*  version 500
+        /**/
         err = ErrERRCheck( JET_errDatabase500Format );
     }
     else if ( *(LONG *)(((char *)plgfilehdr) + 20) == 443
          && *(LONG *)(((char *)plgfilehdr) + 24) == 0
          && *(LONG *)(((char *)plgfilehdr) + 28) == 0 )
     {
-        
+        /*  version 400
+        /**/
         err = ErrERRCheck( JET_errDatabase400Format );
     }
     else if ( *(LONG *)(((char *)plgfilehdr) + 44) == 0
          && *(LONG *)(((char *)plgfilehdr) + 48) == 0x0ca0001 )
     {
-        
+        /*  version 200
+        /**/
         err = ErrERRCheck( JET_errDatabase200Format );
     }
 
+    //  process error from checksum and/or version validation
+    //
     Call( err );
 
-    if( JET_filetypeUnknown != plgfilehdr->lgfilehdr.le_filetype
+    // check filetype
+    if( JET_filetypeUnknown != plgfilehdr->lgfilehdr.le_filetype // old format
         && JET_filetypeLog != plgfilehdr->lgfilehdr.le_filetype )
     {
+        // not a log file
         Call( ErrERRCheck( JET_errFileInvalidType ) );
     }
 
@@ -764,11 +1013,16 @@ enum eLogVersionCompatibility{
     eLogVersionTooNew,
 };
 
+//TODO: find a good place for this macro.
 #define COMPARE_LOG_VERSION(a, b) ((a) == (b) ? eLogVersionCompatible : ((a) < (b) ? eLogVersionTooOld : eLogVersionTooNew) )
-
+    
 ERR ErrLGICheckVersionCompatibility( const INST * const pinst, const LGFILEHDR* const plgfilehdr )
 {
     ERR err = JET_errSuccess;
+    //  verify current engine understands this log file format
+    //  This includes the current major/minor version with updateversion <=
+    //  current version + (temporarily) all v7 log formats
+    //
 
     Assert ( NULL != plgfilehdr );
     eLogVersionCompatibility result = eLogVersionCompatible;
@@ -789,6 +1043,8 @@ ERR ErrLGICheckVersionCompatibility( const INST * const pinst, const LGFILEHDR* 
 #ifdef ENABLE_LOG_V7_RECOVERY_COMPAT
     if( eLogVersionCompatible != result )
     {
+        // Per SOMEONE (SOMEONE) 8.4000.* is compatible with 7.3704.*
+        // Assuming current app version is 8.4000.*, then compare log ver == 7.3704.*.
         Assert( 8 == ulLGVersionMajorMax );
         Assert( 4000 == ulLGVersionMinorFinalDeprecatedValue );
         if( ulLGVersionMajor_OldLrckFormat == plgfilehdr->lgfilehdr.le_ulMajor &&
@@ -797,10 +1053,13 @@ ERR ErrLGICheckVersionCompatibility( const INST * const pinst, const LGFILEHDR* 
             result = eLogVersionCompatible;
         }
     }
-
+    
     if( eLogVersionCompatible == result )
     {
-
+        //After app's log version is updated to >8.4000, value of result will not be 0 so this IF block will not be entered.
+        
+        //Check for LV chunksize compatability
+        //This function returns false only when the header version is between 7.3704.0 (included) and 7.3704.14 (not included)
         if( !FLGIsLVChunkSizeCompatible(
                 g_cbPage,
                 plgfilehdr->lgfilehdr.le_ulMajor,
@@ -813,7 +1072,7 @@ ERR ErrLGICheckVersionCompatibility( const INST * const pinst, const LGFILEHDR* 
             result = eLogVersionTooOld;
         }
     }
-#endif
+#endif //ENABLE_LOG_V7_RECOVERY_COMPAT
 
     if ( eLogVersionCompatible != result )
     {
@@ -824,12 +1083,17 @@ ERR ErrLGICheckVersionCompatibility( const INST * const pinst, const LGFILEHDR* 
             WCHAR wszEngineVersion[50];
             const WCHAR * rgszT[3] = { wszLogGeneration, wszLogVersion, wszEngineVersion };
 
+            //  note: here we use plgfilehdr->lgfilehdr.le_ulMinor, le_ulMinor, le_ulUpdate* explicitly because
+            //  the version is older, and LgvFromLgfilehdr() insists le_ulMinor (which we've dropped) is in a 
+            //  certain range.  But also probably a better idea to get the 4-piece version out since it is an 
+            //  older version.
+            //const LogVersion lgvLgfilehdr = LgvFromLgfilehdr( plgfilehdr );
 
             const LogVersion lgvEngineMax = PfmtversEngineMax()->lgv;
             OSStrCbFormatW( wszLogGeneration, _cbrg( wszLogGeneration ), L"0x%x", (LONG)plgfilehdr->lgfilehdr.le_lGeneration );
             OSStrCbFormatW( wszLogVersion, _cbrg( wszLogVersion ), L"%d.%d.%d.%d", (ULONG)plgfilehdr->lgfilehdr.le_ulMajor, (ULONG)plgfilehdr->lgfilehdr.le_ulMinor, (ULONG)plgfilehdr->lgfilehdr.le_ulUpdateMajor, (ULONG)plgfilehdr->lgfilehdr.le_ulUpdateMinor );
             OSStrCbFormatW( wszEngineVersion, _cbrg( wszEngineVersion ), L"%d.%d.%d", lgvEngineMax.ulLGVersionMajor, lgvEngineMax.ulLGVersionUpdateMajor, lgvEngineMax.ulLGVersionUpdateMinor );
-
+            
             UtilReportEvent( eventError,
                     GENERAL_CATEGORY,
                     LOG_VERSION_TOO_LOW_FOR_ENGINE_ID,
@@ -845,12 +1109,17 @@ ERR ErrLGICheckVersionCompatibility( const INST * const pinst, const LGFILEHDR* 
             WCHAR wszLogVersion[50];
             WCHAR wszEngineVersion[50];
             const WCHAR * rgszT[3] = { wszLogGeneration, wszLogVersion, wszEngineVersion };
-
+            
             const LogVersion lgvEngineMax = PfmtversEngineMax()->lgv;
             OSStrCbFormatW( wszLogGeneration, _cbrg( wszLogGeneration ), L"0x%x", (LONG)plgfilehdr->lgfilehdr.le_lGeneration );
             if ( plgfilehdr->lgfilehdr.le_ulMinor != ulLGVersionMinorFinalDeprecatedValue &&
                 plgfilehdr->lgfilehdr.le_ulMinor != ulLGVersionMinor_Win7 )
             {
+                //  unknown le_ulMinor version!  Did we start re-using this?
+                //  note: here we use plgfilehdr->lgfilehdr.le_ulMinor, le_ulMinor, le_ulUpdate* explicitly because
+                //  the version is "newer", and LgvFromLgfilehdr() insists le_ulMinor (which we've dropped) is in a 
+                //  certain range, and in fuzzing tests it may not be in that range.
+                //const LogVersion lgvLgfilehdr = LgvFromLgfilehdr( plgfilehdr );
                 AssertSz( fFalse, "Confused newer version of log is re-using le_ulMinor again after we deprecated it?" );
                 OSStrCbFormatW( wszLogVersion, _cbrg( wszLogVersion ), L"%d.%d.%d.%d", (ULONG)plgfilehdr->lgfilehdr.le_ulMajor, (ULONG)plgfilehdr->lgfilehdr.le_ulMinor, (ULONG)plgfilehdr->lgfilehdr.le_ulUpdateMajor, (ULONG)plgfilehdr->lgfilehdr.le_ulUpdateMinor );
             }
@@ -861,7 +1130,7 @@ ERR ErrLGICheckVersionCompatibility( const INST * const pinst, const LGFILEHDR* 
             }
 
             OSStrCbFormatW( wszEngineVersion, _cbrg( wszEngineVersion ), L"%d.%d.%d", lgvEngineMax.ulLGVersionMajor, lgvEngineMax.ulLGVersionUpdateMajor, lgvEngineMax.ulLGVersionUpdateMinor );
-
+            
             UtilReportEvent( eventError,
                     GENERAL_CATEGORY,
                     LOG_VERSION_TOO_HIGH_FOR_ENGINE_ID,
@@ -875,6 +1144,7 @@ ERR ErrLGICheckVersionCompatibility( const INST * const pinst, const LGFILEHDR* 
         Call( ErrERRCheck( JET_errBadLogVersion ) );
     }
 
+    //  Evaluate the allowed/desired version.
 
     const FormatVersions * pfmtversAllowed = NULL;
     JET_ENGINEFORMATVERSION efvUser = pinst ?
@@ -883,13 +1153,16 @@ ERR ErrLGICheckVersionCompatibility( const INST * const pinst, const LGFILEHDR* 
 
     if ( efvUser == JET_efvUsePersistedFormat )
     {
+        //  Whatever is persisted is fine, so we can just check against the max engine.
         efvUser = EfvMaxSupported();
 
         const LogVersion lgv = LgvFromLgfilehdr( plgfilehdr );
         const ERR errT = ErrLGFindHighestMatchingLogMajors( lgv, &pfmtversAllowed );
         CallS( errT );
-        if ( errT < JET_errSuccess )
+        if ( errT < JET_errSuccess )    // don't think it will fail, but just in case ...
         {
+            //  if we fail, we'll just try to lookup EfvMaxSupported(),  but with NULL for pinst to side step
+            //  the staging.
             FireWall( OSFormat( "GetHighestLgMajorFailedVer:%lu.%lu.%lu", (ULONG)lgv.ulLGVersionMajor, (ULONG)lgv.ulLGVersionUpdateMajor, (ULONG)lgv.ulLGVersionUpdateMinor ) );
             CallS( ErrGetDesiredVersion( NULL, efvUser, &pfmtversAllowed ) );
         }
@@ -911,6 +1184,8 @@ ERR ErrLGICheckVersionCompatibility( const INST * const pinst, const LGFILEHDR* 
         }
     }
 
+    //  The current log file's update minor version can be higher than the desired update minor version
+    //  because it doesn't signify a format breaking change.
     const INT icmpver = CmpLgVer( LgvFromLgfilehdr( plgfilehdr ), pfmtversAllowed->lgv );
     if ( !fAllowPersistedFormat && ( icmpver > 0 && !FUpdateMinorMismatch( icmpver ) ) )
     {
@@ -918,14 +1193,16 @@ ERR ErrLGICheckVersionCompatibility( const INST * const pinst, const LGFILEHDR* 
         WCHAR wszLogVersion[50];
         WCHAR wszParamVersion[50];
         WCHAR wszParamEfv[cchFormatEfvSetting];
-        const WCHAR * rgszT[5] = { wszLogGeneration, wszLogVersion, wszParamVersion, wszParamEfv, L""  };
+        const WCHAR * rgszT[5] = { wszLogGeneration, wszLogVersion, wszParamVersion, wszParamEfv, L"" /* deprecated %8 */ };
 
         const LogVersion lgvLgfilehdr = LgvFromLgfilehdr( plgfilehdr );
         OSStrCbFormatW( wszLogGeneration, _cbrg( wszLogGeneration ), L"0x%x", (LONG)plgfilehdr->lgfilehdr.le_lGeneration );
         OSStrCbFormatW( wszLogVersion, _cbrg( wszLogVersion ), L"%d.%d.%d", lgvLgfilehdr.ulLGVersionMajor, lgvLgfilehdr.ulLGVersionUpdateMajor, lgvLgfilehdr.ulLGVersionUpdateMinor );
         OSStrCbFormatW( wszParamVersion, _cbrg( wszParamVersion ), L"%d.%d.%d", pfmtversAllowed->lgv.ulLGVersionMajor, pfmtversAllowed->lgv.ulLGVersionUpdateMajor, pfmtversAllowed->lgv.ulLGVersionUpdateMinor );
         FormatEfvSetting( (JET_ENGINEFORMATVERSION)UlParam( pinst, JET_paramEngineFormatVersion ), wszParamEfv, sizeof(wszParamEfv) );
-
+        // deprecated: OSStrCbFormatW( wszAllowPersisted, _cbrg( wszAllowPersisted ), L"%d", fAllowPersistedFormat );
+        
+        //  Log is > than user requested 
         UtilReportEvent( eventError,
                 GENERAL_CATEGORY,
                 LOG_VERSION_TOO_HIGH_FOR_PARAM_ID,
@@ -935,14 +1212,14 @@ ERR ErrLGICheckVersionCompatibility( const INST * const pinst, const LGFILEHDR* 
                 NULL,
                 pinst );
 
-
+        
         if( pinst == NULL )
         {
-            FireWall( "CheckingLogVerWithoutInst" );
-            err = JET_errSuccess;
+            FireWall( "CheckingLogVerWithoutInst" ); // is this even possible
+            err = JET_errSuccess;   // should already be true
             goto HandleError;
         }
-
+        
         Call( ErrERRCheck( JET_errEngineFormatVersionSpecifiedTooLowForLogVersion ) );
     }
 
@@ -979,6 +1256,8 @@ BOOL FLGVersionAttachInfoInCheckpoint( const LGFILEHDR_FIXED* const plgfilehdr )
 #ifdef DEBUG
 ERR LOG::ErrLGGetPersistedLogVersion( _In_ const JET_ENGINEFORMATVERSION efv, _Out_ const LogVersion ** const pplgv ) const
 {
+    //  ErrLGGetDesiredLogVersion() only will return the persisted version if EFV param = JET_efvUsePersistedFormat,
+    //  so this function is invalid in any other context.
     Assert( UlParam( m_pinst, JET_paramEngineFormatVersion ) == JET_efvUsePersistedFormat );
     return m_pLogStream->ErrLGGetDesiredLogVersion( efv, pplgv );
 }
@@ -990,6 +1269,8 @@ ERR LOG::ErrLGFormatFeatureEnabled( _In_ const JET_ENGINEFORMATVERSION efvFormat
 
     if ( FLogDisabled() )
     {
+        //  We assume if there is no logging that the format feature is on.  If a feature affects
+        //  the database, it should also be protected by a DB format check.
         return JET_errSuccess;
     }
 
@@ -997,7 +1278,8 @@ ERR LOG::ErrLGFormatFeatureEnabled( _In_ const JET_ENGINEFORMATVERSION efvFormat
 }
 
 
-
+/*  copy tm to a smaller structure logtm to save space on disk.
+ */
 VOID LGIGetDateTime( LOGTIME *plogtm )
 {
     DATETIME tm;
@@ -1014,7 +1296,7 @@ VOID LGIGetDateTime( LOGTIME *plogtm )
     plogtm->SetMilliseconds( tm.millisecond );
     Assert( plogtm->Milliseconds() == tm.millisecond );
 }
-
+    
 ERR ErrSetUserDbHeaderInfos(
     INST *              pinst,
     ULONG *     pcbinfomisc,
@@ -1063,6 +1345,8 @@ VOID CleanupRecoveryControl(
     const JET_SNT           snt,
     JET_RECOVERYCONTROL *   precctrl )
 {
+    //  This must match ErrLGRecoveryControlCallback()'s decision to allocate
+    //  via ErrSetUserDbHeaderInfos().
     if ( snt == JET_sntOpenLog )
     {
         precctrl->OpenLog.cdbinfomisc = 0;
@@ -1111,6 +1395,7 @@ BOOL LOG::FLGILgenHighAtRedoStillHolds()
         (void)m_pLogStream->ErrLGGetGenerationRange( m_wszLogCurrent, NULL, &lgenHighCurrent );
         const BOOL fCurrentLogExists = m_pLogStream->FCurrentLogExists();
 
+        // validate
         AssertRTL( lgenHighCurrent == m_lgenHighestAtEndOfRedo ||
                    lgenHighCurrent == m_lgenHighestAtEndOfRedo + 1 );
         AssertRTL( fCurrentLogExists == !!m_fCurrentGenExistsAtEndOfRedo );
@@ -1131,7 +1416,7 @@ ERR ErrLGRecoveryControlCallback(
     const ERR           errDefault,
     const LONG          lgen,
     const BOOL          fCurrentLog,
-    const ULONG         eDisposition,
+    const ULONG         eDisposition,   //  eReason | eNextAction
     const CHAR *        szFile,
     const LONG          lLine )
 {
@@ -1148,21 +1433,27 @@ ERR ErrLGRecoveryControlCallback(
         return errDefault;
     }
 
+    //  initialize the callback control structure
 
     memset( &recctrl, 0, sizeof(JET_RECOVERYCONTROL) );
     recctrl.cbStruct = sizeof( JET_RECOVERYCONTROL );
 
+    //  setup all the global info
 
     recctrl.instance = (JET_INSTANCE)pinst;
     recctrl.errDefault = errDefault;
 
     recctrl.sntUnion = sntRecCtrl;
 
+    //  setup the per-control type info
 
     switch ( sntRecCtrl )
     {
         case JET_sntOpenLog:
-            Assert( lgen >= 0 );
+            // note that at this point we have the previous log closed
+            //
+            // Assert( !FPfapiInited() || eDisposition == JET_OpenLogForDo );
+            Assert( lgen >= 0 ); // should not be signal / lgenSignal* - client won't understand that.
             Assert( lgen > 0 || fCurrentLog );
 
             recctrl.OpenLog.cbStruct = sizeof( recctrl.OpenLog );
@@ -1170,6 +1461,8 @@ ERR ErrLGRecoveryControlCallback(
             recctrl.OpenLog.lGenNext = (ULONG)lgen;
             recctrl.OpenLog.fCurrentLog = (unsigned char)fCurrentLog;
             recctrl.OpenLog.eReason = (unsigned char)eDisposition;
+            // UNDONE: would it be better to have a buffer to pass
+            // rather then the LOG member?
             recctrl.OpenLog.wszLogFile = (WCHAR*)wszLogName;
             Call( ErrSetUserDbHeaderInfos( pinst, &(recctrl.OpenLog.cdbinfomisc), &(recctrl.OpenLog.rgdbinfomisc) ) );
             break;
@@ -1180,12 +1473,17 @@ ERR ErrLGRecoveryControlCallback(
             break;
 
         case JET_sntMissingLog:
-            Assert( lgen >= 0 );
+            // note that at this point we have the previous log closed
+            //
+            // Assert( !FPfapiInited() );
+            Assert( lgen >= 0 ); // should not be signal / lgenSignal* - client won't understand that.
 
             recctrl.MissingLog.cbStruct = sizeof( recctrl.MissingLog );
 
             recctrl.MissingLog.lGenMissing = lgen;
             recctrl.MissingLog.fCurrentLog = (unsigned char)fCurrentLog;
+            // UNDONE: would it be better to have a buffer to pass
+            // rather then the LOG member?
             recctrl.MissingLog.wszLogFile = (WCHAR*)wszLogName;
             recctrl.MissingLog.eNextAction = (unsigned char)eDisposition;
             Call( ErrSetUserDbHeaderInfos( pinst, &(recctrl.MissingLog.cdbinfomisc), &(recctrl.MissingLog.rgdbinfomisc) ) );
@@ -1217,7 +1515,7 @@ ERR ErrLGRecoveryControlCallback(
             break;
 
         case JET_sntCommitCtx:
-            Assert( lgen >= 0 );
+            Assert( lgen >= 0 ); // lgen being overloaded ... but obviously couldn't be more than 2^31 bytes.
             recctrl.CommitCtx.cbStruct = sizeof( recctrl.CommitCtx );
             recctrl.CommitCtx.pbCommitCtx = (BYTE *)wszLogName;
             recctrl.CommitCtx.cbCommitCtx = lgen;
@@ -1268,10 +1566,13 @@ ERR ErrLGRecoveryControlCallback(
     {
         if ( errDefault == err )
         {
+            //  we throw the default error from the original throw location.
             ErrERRCheck_( err, szFile, lLine );
         }
         else
         {
+            //  we run ErrERRCheck() to notice if the client threw the given 
+            //  error we are trying to trap.
             ErrERRCheck( err );
         }
     }
@@ -1279,14 +1580,18 @@ ERR ErrLGRecoveryControlCallback(
     if ( sntRecCtrl == JET_sntMissingLog &&
             ( err == JET_errFileNotFound || err == JET_errMissingLogFile ) )
     {
+        //  if we got a failure for a missing log, log the event now.
 
         pinst->m_plog->LGReportError( LOG_OPEN_FILE_ERROR_ID, JET_errFileNotFound );
 
         if ( recctrl.errDefault != JET_errSuccess )
         {
+            //  This means it was even more serious, as we expected it to be 
+            //  there for sure.
             OSUHAEmitFailureTag( pinst, HaDbFailureTagConfiguration, L"eb1fa469-3926-45a9-8286-075850b5069a" );
         }
 
+        //  we translate all JET_errFileNotFound to JET_errMissingLogFile for log
         err = ErrERRCheck( JET_errMissingLogFile );
     }
 
@@ -1301,6 +1606,7 @@ ERR ErrLGDbAttachedCallback_( INST *pinst, FMP *pfmp, const CHAR *szFile, const 
 {
     const ERR err = ErrLGRecoveryControlCallback( pinst, pfmp, NULL, JET_sntAttachedDb, JET_errSuccess, 0, fFalse, 0, szFile, lLine );
 
+    // reset backup context's suspended flag when ErrLGDbAttachedCallback is fired to allow future backups.
     if ( BoolParam( pinst, JET_paramFlight_EnableBackupDuringRecovery ) )
     {
         pinst->m_pbackup->BKLockBackup();
@@ -1315,6 +1621,7 @@ ERR ErrLGDbDetachingCallback_( INST *pinst, FMP *pfmp, const CHAR *szFile, const
 {
     const ERR err = ErrLGRecoveryControlCallback( pinst, pfmp, NULL, JET_sntDetachingDb, JET_errSuccess, 0, fFalse, 0, szFile, lLine );
 
+    // suspend backup context when ErrLGDbDetachingCallback is fired, and wait for client to close it up.
     if ( BoolParam( pinst, JET_paramFlight_EnableBackupDuringRecovery ) )
     {
         pinst->m_pbackup->BKLockBackup();
@@ -1324,6 +1631,7 @@ ERR ErrLGDbDetachingCallback_( INST *pinst, FMP *pfmp, const CHAR *szFile, const
         {
             const TICK  tickStart = TickOSTimeCurrent();
 
+            // There shouldn't be any non-internal backups during recovery-redo (i.e. a "passive").
             Assert( pinst->m_pbackup->FBKBackupIsInternal() );
 
             BOOL fBackupInProgress = fTrue;
@@ -1338,6 +1646,7 @@ ERR ErrLGDbDetachingCallback_( INST *pinst, FMP *pfmp, const CHAR *szFile, const
                 }
             }
 
+            // after client hits failure during reading file, it should close the backup instance.
             pinst->m_pbackup->BKAssertNoBackupInProgress();
 
             const UINT  csz = 2;
@@ -1365,6 +1674,8 @@ ERR ErrLGDbDetachingCallback_( INST *pinst, FMP *pfmp, const CHAR *szFile, const
     return err;
 }
 
+// A page patch request log record has been encountered. Call the recovery callback with the
+// current page data.
 ERR LOG::ErrLGOpenPagePatchRequestCallback(
     const IFMP ifmp,
     const PGNO pgno,
@@ -1372,7 +1683,7 @@ ERR LOG::ErrLGOpenPagePatchRequestCallback(
     const void * const pvPage ) const
 {
     ERR err;
-
+    
     Assert(pgnoNull != pgno);
     Assert(dbtimeInvalid != pgno);
     Assert(NULL != pvPage);
@@ -1418,10 +1729,10 @@ ERR LOG::ErrLGOpenPagePatchRequestCallback(
 
         if ( err != JET_errSuccess )
         {
-            ErrERRCheck( err );
+            ErrERRCheck( err ); // fire the error trap on the callback
         }
     }
-
+    
     return JET_errSuccess;
 }
 
@@ -1473,10 +1784,12 @@ void LOG::LGSetChkExts(
     BOOL fLegacy, BOOL fReset
     )
 {
+    // the first two phases of recoveyr pre-init, and pre-recovery is where we should be discovering
+    // and setting the actual log ext ...
     Assert( !m_fLogInitialized ||
             (m_fRecoveringMode == fRecoveringNone) ||
             m_wszChkExt != NULL );
-    Assert( fReset ||
+    Assert( fReset || // if not reset, we must be setting these for the first time.
             m_wszChkExt == NULL );
 
     m_wszChkExt = (fLegacy) ? wszOldChkExt : wszNewChkExt;
@@ -1534,20 +1847,44 @@ VOID LOG::LGIGetEffectiveWaypoint(
     Assert( plgposEffWaypoint );
 
 #if DEBUG
+    // for debugging
     LGPOS lgposCurrentWaypoint;
     lgposCurrentWaypoint = g_rgfmp[ ifmp ].LgposWaypoint();
 #endif
 
+    //
+    //  we start with what BF thinks is the best waypoint ...
+    //
 
     BFGetBestPossibleWaypoint( ifmp, lGenCommitted, &lgposBestWaypoint );
     Assert( lgposBestWaypoint.ib == lgposMax.ib );
     Assert( lgposBestWaypoint.isec == lgposMax.isec );
+    // Should never go backwards from the current waypoint.
     Assert( CmpLgpos( lgposBestWaypoint, lgposCurrentWaypoint ) >= 0 );
 
     *plgposEffWaypoint = lgposBestWaypoint;
 }
 
-
+/*  update the appropriate headers for the appropriate[1] DBs ...
+ *
+ *  [1] appropriate seems to means DBs attached w/ logging,
+ *  non-read only, without "skipping attach", non-deferred
+ *  attached, and with a Pdbfilehdr().
+ *
+ *  Parameters:
+ *      pfsapi -
+ *      lGenMinRequired - if 0, this is not updated.
+ *      lGenMinConsistent - if 0, this is not updated.
+ *      lGenCommitted - Generally the value of a new log.  If this is
+ *              0, we will not update the max gen committed or required.
+ *      logtimeGenMaxCreate -
+ *      pfSkippedAttachDetach - This may get set if ANY of the DB headers
+ *              we skipped updating, because they're in the middle of
+ *              attached or detach.
+ *      ifmpTarget - The specific database to check for.  ifmpNil is
+ *              the default, which means do all databases that
+ *              are attached and logged.
+/**/
 ERR LOG::ErrLGUpdateGenRequired(
     IFileSystemAPI * const  pfsapi,
     const LONG              lGenMinRequired,
@@ -1561,6 +1898,7 @@ ERR LOG::ErrLGUpdateGenRequired(
     ERR                     errRet          = JET_errSuccess;
     LOGTIME                 tmEmpty;
     const BOOL fUpdateGenMaxRequired = ( lGenCommitted != 0 );
+    // If we are not looking at all the IFMPs, do not trim logtimeMaxRequired mapping table
     LONG                    lGenMaxRequiredMin = ( ifmpTarget == ifmpNil ) ? lMax : 0;
     memset( &tmEmpty, '\0', sizeof( LOGTIME ) );
 
@@ -1593,7 +1931,7 @@ ERR LOG::ErrLGUpdateGenRequired(
 
         if ( ifmpTarget != ifmpNil &&
             ifmp != ifmpTarget )
-            continue;
+            continue;   // this is not the IFMP you are looking for.
 
         FMP         *pfmpT          = &g_rgfmp[ ifmp ];
 
@@ -1602,7 +1940,11 @@ ERR LOG::ErrLGUpdateGenRequired(
 
         pfmpT->RwlDetaching().EnterAsReader();
 
-
+        //  need to check ifmp again. Because the db may be cleaned up
+        //  and FDetachingDB is reset, and so is its ifmp in m_mpdbidifmp.
+        //
+        
+        //  If FSkippedAttach or FDeferredAttach return true, FAttached must be false
         Assert( ( !pfmpT->FSkippedAttach() && !pfmpT->FDeferredAttach() ) || !pfmpT->FAttached() );
 
         if (   m_pinst->m_mpdbidifmp[ dbidT ] >= g_ifmpMax
@@ -1627,8 +1969,13 @@ ERR LOG::ErrLGUpdateGenRequired(
 
         LGPOS lgposBestWaypoint;
         LGIGetEffectiveWaypoint( ifmp, lGenCommitted, &lgposBestWaypoint );
+        // Should never go backwards from the current waypoint / max log gen required.
         Assert( CmpLgpos( lgposBestWaypoint, pfmpT->LgposWaypoint() ) >= 0 );
 
+        //
+        //  Compute and Flush if necessary the deferred DB updates that prevent the 
+        //  checkpoint from moving forward.
+        //
 
         BOOL fPreHeaderUpdateMinRequired, fPreHeaderUpdateMinConsistent, fDidPreDbFlush;
         fPreHeaderUpdateMinRequired = fPreHeaderUpdateMinConsistent = fDidPreDbFlush = fFalse;
@@ -1643,15 +1990,18 @@ ERR LOG::ErrLGUpdateGenRequired(
 
             const LONG lgenMinConsistentFuture = max( max( lGenMinConsistent, pdbfilehdr->le_lgposAttach.le_lGeneration ), pdbfilehdr->le_lGenMinConsistent );
             fPreHeaderUpdateMinConsistent = ( pdbfilehdr->le_lGenMinConsistent != lgenMinConsistentFuture );
-            }
+            } // .dtor releases read header lock.
 
             if ( err >= JET_errSuccess && fPreHeaderUpdateMinRequired )
             {
                 Assert( pfmpT == &g_rgfmp[ifmp] );
+                // Goes off in read from passive [basic] test
+                //Expected( fPreHeaderUpdateMinRequired && fPreHeaderUpdateMinConsistent );
                 err = ErrIOFlushDatabaseFileBuffers( ifmp, iofrDbUpdMinRequired );
                 fDidPreDbFlush = ( err >= JET_errSuccess );
                 if ( err < JET_errSuccess )
                 {
+                    //  failed to force deferred DB writes to disk, can't move the checkpoints or min-required up...
                     goto FailedSkipDatabase;
                 }
             }
@@ -1662,7 +2012,7 @@ ERR LOG::ErrLGUpdateGenRequired(
         BOOL fHeaderUpdateGenMaxCreateTime = fFalse;
         BOOL fLogtimeGenMaxRequiredEfvEnabled = ( pfmpT->ErrDBFormatFeatureEnabled( JET_efvLogtimeGenMaxRequired ) == JET_errSuccess );
 
-        {
+        { // .ctor acquires PdbfilehdrReadWrite
         PdbfilehdrReadWrite pdbfilehdr = pfmpT->PdbfilehdrUpdateable();
 
 #ifdef DEBUG
@@ -1677,14 +2027,25 @@ ERR LOG::ErrLGUpdateGenRequired(
         if ( fUpdateGenMaxRequired )
         {
             const LONG  lGenMaxRequiredOld  = pdbfilehdr->le_lGenMaxRequired;
+            //Assert( max( lgposBestWaypoint.lGeneration, lGenMaxRequiredOld ) == lgposBestWaypoint.lGeneration );
 
-            
+            /*
+            We have the following scenario:
+            - start new log -> update m_plgfilehdrT -> call this function with genMax = 5 (from m_plgfilehdrT)
+            - other thread is updating the checkpoint file setting genMin but is passing genMax from m_plgfilehdr
+            which is still 4 because the log thread is moving m_plgfilehdrT into m_plgfilehdr later on
+
+            The header ends up with genMax 4 and data is logged in 5 -> Wrong !!! We need max (old, new)
+            SOMEONE: I wonder why have checkpoint pass genMax at all?  Why not pull current value from in here?
+            After all the lg buff crit rank sect is < than checkpoint lock.
+            */
             pdbfilehdr->le_lGenMaxRequired = max( lgposBestWaypoint.lGeneration, lGenMaxRequiredOld );
             Assert ( lGenMaxRequiredOld <= pdbfilehdr->le_lGenMaxRequired );
 
             const LONG  lGenCommittedOld    = pdbfilehdr->le_lGenMaxCommitted;
 
 #ifdef DEBUG
+            // we should have the same time for the same generation
             Assert( m_fIgnoreLostLogs
                 || lGenCommittedOld != lGenCommitted
                 || 0 == lGenCommittedOld
@@ -1717,6 +2078,7 @@ ERR LOG::ErrLGUpdateGenRequired(
                 }
             }
 
+            // if we updated the genCommitted with the value passed in, update the time with the new value as well
             Assert( !fHeaderUpdateMaxCommitted || pdbfilehdr->le_lGenMaxCommitted == lGenCommitted );
             if ( pdbfilehdr->le_lGenMaxCommitted == lGenCommitted )
             {
@@ -1727,11 +2089,21 @@ ERR LOG::ErrLGUpdateGenRequired(
 
                 fHeaderUpdateGenMaxCreateTime = ( 0 != memcmp( &logtimeGenMaxCreateOld, &pdbfilehdr->logtimeGenMaxCreate, sizeof( LOGTIME ) ) );
 
+                //  This needs some explanation ... so let's switch tracks, in recovery the logtimeGenMaxCreate must 
+                //  be equivalent and match that logtime of the le_lGenMaxCommitted log OR tmEmpty is also OK.  So
+                //  that means for this code if fHeaderUpdateGenMaxCreateTime is true, it means the logtimeGenMaxCreate 
+                //  changed, and then we must have a tmEmpty in the old header (to avoid a crash recovery problem) or
+                //  be doing an update b/c lgen for le_lGenMaxCommitted / fHeaderUpdateMaxCommitted actually changed.
+                //  I think this is held.
+                //  We fix-up le_lGenMaxCommitted/logtimeGenMaxCreate when we hit JET_wrnCommittedLogFilesLost in
+                //  ErrLGCheckGenMaxRequired. However, with log replication, one set of committed logs can disappear
+                //  underneath us and another set reappear while we are in redo mode, hence the fRecoveringRedo
+                //  clause below.
                 Assert( fHeaderUpdateGenMaxCreateTime == fFalse ||
                         fHeaderUpdateMaxCommitted ||
                         0 == memcmp( &logtimeGenMaxCreateOld, &tmEmpty, sizeof( LOGTIME ) ) ||
                         m_fRecoveringMode == fRecoveringRedo ||
-                        ( m_fRecoveringMode == fRecoveringUndo && !m_fRecoveryUndoLogged )  );
+                        ( m_fRecoveringMode == fRecoveringUndo && !m_fRecoveryUndoLogged ) /* we switch to undo state too early, if undo hasn't been logged, we aren't really in undo */ );
             }
         }
 
@@ -1740,6 +2112,16 @@ ERR LOG::ErrLGUpdateGenRequired(
             const LONG  lGenMinRequiredOld          = pdbfilehdr->le_lGenMinRequired;
             const LONG  lGenMinRequiredCandidate    = max( lGenMinRequired, pdbfilehdr->le_lgposAttach.le_lGeneration );
 
+            //  UNDONE: hate to lose this valuable assert, but in
+            //  LOG::ErrLGUpdateCheckpointFile(), genMin may get
+            //  ahead of the checkpoint if we updated some
+            //  db headers while there was attach/detach activity
+            //  or if the write to the checkpoint failed, and
+            //  then we later use the stale checkpoint to try
+            //  to update genMin (LOG::ErrLGUpdateGenRequired()
+            //  is one culprit, and there may be others)
+            //
+            //  Assert( lGenMinRequiredOld <= lGenMinRequiredCandidate );
 
             pdbfilehdr->le_lGenMinRequired = max( lGenMinRequiredCandidate, lGenMinRequiredOld );
 
@@ -1778,17 +2160,30 @@ ERR LOG::ErrLGUpdateGenRequired(
         BFFree( pdbfilehdrPreimage );
 #endif
 
-        }
+        } // .dtor releases PdbfilehdrReadWrite
 
+        //  Just double checking above pre-flush 
         if ( err >= JET_errSuccess && fHeaderUpdateMinRequired )
         {
+            //  If this goes off it is concerning, but there are two conceivable possibilities:
+            //   1. that the calculations for lgenMinRequiredFuture, fPreHeaderUpdateMinRequired,
+            //      lgenMinConsistentFuture, fPreHeaderUpdateMinConsistent above no longer match
+            //      the slightly lower recalculations of lGenMinRequiredOld, fHeaderUpdateMinRequired,
+            //      lGenMinConsistentOld, lGenMinConsistentCandidate... this is the bad case, make
+            //      the two copies of code match. 
+            //   2. just the checkpoint lock and RwlDetaching is not enough to protect the state
+            //      of pdbfilehdr->le_lGenMinRequired and pdbfilehdr->le_lGenMinConsistent or the
+            //      pdbfilehdr->le_lgposAttach from changing state between when we release the hdr
+            //      RO lock and grab the RW lock over the FFB call above.  If so the assert is un-
+            //      maintainable I think.  Or we'll have to do a FFB in the header lock!  Yuck.
             Assert( fDidPreDbFlush );
         }
         else
         {
-            Expected( !fDidPreDbFlush );
+            Expected( !fDidPreDbFlush ); // much less important, but above comment applies.
         }
 
+        //  Note: If we're updating fHeaderUpdateMaxRequired, we should have already flushed the respective log
 
         if ( err >= JET_errSuccess )
         {
@@ -1802,7 +2197,7 @@ ERR LOG::ErrLGUpdateGenRequired(
                         ( fHeaderUpdateMaxRequired ? iofrDbHdrUpdMaxRequired : 0 ) );
                 err = ErrIOFlushDatabaseFileBuffers( ifmp, iofr );
             }
-
+            
             PdbfilehdrReadOnly pdbfilehdr = pfmpT->Pdbfilehdr();
             const LE_LGPOS * ple_lgposGreater = ( CmpLgpos( pdbfilehdr->le_lgposAttach, pdbfilehdr->le_lgposLastReAttach ) > 0 ) ?
                                                     &pdbfilehdr->le_lgposAttach : &pdbfilehdr->le_lgposLastReAttach;
@@ -1812,9 +2207,11 @@ ERR LOG::ErrLGUpdateGenRequired(
                 (LONG)pdbfilehdr->le_lGenMinConsistent, (LONG)pdbfilehdr->le_lGenMinRequired, (LONG)pdbfilehdr->le_lGenMaxRequired, (LONG)pdbfilehdr->le_lGenMaxCommitted ) );
         }
 
+        //  if we've committed the new waypoint, update the FMP.
 
         if ( JET_errSuccess <= err && fUpdateGenMaxRequired )
         {
+            // If the current waypoint is behind, improve it.
             const LONG lgenMaxRequired = pfmpT->Pdbfilehdr()->le_lGenMaxRequired;
             pfmpT->SetWaypoint( lgenMaxRequired );
         }
@@ -1840,26 +2237,35 @@ ERR LOG::ErrLGUpdateGenRequired(
 
 
 
+//  ================================================================
 ERR LOG::ErrLGLockCheckpointAndUpdateGenRequired( const LONG lGenCommitted, const LOGTIME logtimeGenMaxCreate )
+//  ================================================================
+//
+//  Update all the database headers with proper lGenMaxRequired and lGenMaxCommitted.
+//
+//-
 {
     m_critCheckpoint.Enter();
     Assert( lGenCommitted != 0 );
 
     const ERR err = ErrLGUpdateGenRequired(
                         m_pinst->m_pfsapi,
-                        0,
-                        0,
-                        lGenCommitted,
+                        0,  //  do not update gen min
+                        0,  //  do not update gen min consistent
+                        lGenCommitted, // logs committed
                         logtimeGenMaxCreate,
                         NULL );
     m_critCheckpoint.Leave();
+    //}
 
     return err;
 }
 
 
 
-
+/********************* CHECKPOINT **************************
+/***********************************************************
+/**/
 
 
 VOID
@@ -1880,11 +2286,13 @@ LOG::LGLoadAttachmentsFromFMP(
 
         FMP         *pfmpT          = &g_rgfmp[ ifmp ];
         ULONG       cbNames;
+        // following is functionally equivalent to whether we are in redo mode
         const BOOL  fUsePatchchk    = ( pfmpT->Patchchk()
                                         && m_fRecovering
                                         && m_fRecoveringMode == fRecoveringRedo );
 
         pfmpT->RwlDetaching().EnterAsReader();
+        // Assert( lgenNewFile >= pfmpT->LgposDetach().lGeneration );
         if ( pfmpT->FLogOn() &&
              NULL != pfmpT->Pdbfilehdr() &&
              ( ( !fUsePatchchk &&
@@ -1897,6 +2305,7 @@ LOG::LGLoadAttachmentsFromFMP(
                  CmpLgpos( lgposNext, pfmpT->Patchchk()->lgposAttach ) > 0 &&
                  CmpLgpos( lgposNext, pfmpT->Patchchk()->lgposConsistent ) > 0 ) ) )
         {
+            //  verify we don't overrun buffer (ensure we have enough room for sentinel)
             EnforceSz( pbBuf + cbAttach > (BYTE *)pattachinfo + sizeof(ATTACHINFO), "TooManyDbsForAttachInfoBefore" );
 
             memset( pattachinfo, 0, sizeof(ATTACHINFO) );
@@ -1923,6 +2332,7 @@ LOG::LGLoadAttachmentsFromFMP(
                 pattachinfo->SetDbtime( pfmpT->DbtimeLast() );
                 pattachinfo->SetCpgDatabaseSizeMax( pfmpT->CpgDatabaseSizeMax() );
                 pattachinfo->le_lgposAttach = pfmpT->LgposAttach();
+                //   relays DBISetHeaderAfterAttach behavior for resetting lgposConsistent
                 if ( 0 == memcmp( &pdbfilehdr->signLog, &m_signLog, sizeof(SIGNATURE) ) &&
                      CmpLgpos( lgposNext, pdbfilehdr->le_lgposConsistent ) > 0 )
                 {
@@ -1947,6 +2357,8 @@ LOG::LGLoadAttachmentsFromFMP(
             {
                 if ( !FDefaultParam( m_pinst, JET_paramAlternateDatabaseRecoveryPath ) )
                 {
+                    //  HACK: original database name hangs off the end
+                    //  of the relocated database name
                     wszDatabaseName += LOSStrLengthW( wszDatabaseName ) + 1;
                 }
                 else
@@ -1963,13 +2375,16 @@ LOG::LGLoadAttachmentsFromFMP(
 
             pattachinfo->SetFUnicodeNames();
 
+            // we can't use OSStrCbCopyW because the destination is unaligned
             cbNames = (ULONG)( sizeof(WCHAR) * ( LOSStrLengthW( wszDatabaseName ) + 1 ) );
 
+            //  verify we don't overrun buffer (ensure we have enough room for sentinel)
             EnforceSz( pbBuf + cbAttach >= (BYTE *)pattachinfo + sizeof(ATTACHINFO) + cbNames, "TooManyDbsForAttachInfoAfter" );
 
             memcpy( pattachinfo->szNames, wszDatabaseName, cbNames );
             pattachinfo->SetCbNames( (USHORT)cbNames );
 
+            //  advance to next attachinfo
             pattachinfo = (ATTACHINFO*)( (BYTE *)pattachinfo + sizeof(ATTACHINFO) + cbNames );
         }
         pfmpT->RwlDetaching().LeaveAsReader();
@@ -1977,12 +2392,15 @@ LOG::LGLoadAttachmentsFromFMP(
 
     FMP::LeaveFMPPoolAsReader();
 
-    
+    /*  put a sentinal
+    /**/
     *(BYTE *)pattachinfo = 0;
 
+    //  UNDONE: next version we will allow it go beyond 4kByte limit
     Assert( pbBuf + cbAttach > (BYTE *)pattachinfo );
 }
 
+//  Load attachment information - how and what the db is attached.
 
 ERR LOG::ErrLGLoadFMPFromAttachments( BYTE *pbAttach )
 {
@@ -2022,9 +2440,10 @@ void LOG::LGISetInitialGen( __in const LONG lgenStart )
 
     m_lgenInitial = lgenStart;
 
+    //  Ensure that the checkpoint never reverts.
     Assert( m_pcheckpoint->checkpoint.le_lgposCheckpoint.le_lGeneration <= m_lgenInitial );
 
-    m_pcheckpoint->checkpoint.le_lgposCheckpoint.le_lGeneration = m_lgenInitial; 
+    m_pcheckpoint->checkpoint.le_lgposCheckpoint.le_lGeneration = m_lgenInitial; /* "first" generation */
     m_pcheckpoint->checkpoint.le_lgposCheckpoint.le_isec = USHORT( sizeof( LGFILEHDR ) / m_pLogStream->CbSec() );
     m_pcheckpoint->checkpoint.le_lgposCheckpoint.le_ib = 0;
     m_pcheckpoint->checkpoint.le_lgposDbConsistency = m_pcheckpoint->checkpoint.le_lgposCheckpoint;
@@ -2045,10 +2464,14 @@ ERR LOG::ErrLGICheckpointInit( BOOL *pfGlobalNewCheckpointFile )
     Assert( m_pcheckpoint == NULL );
     Alloc( m_pcheckpoint = (CHECKPOINT *)PvOSMemoryPageAlloc( sizeof(CHECKPOINT), NULL ) );
 
+    //  Initialize. Used by perfmon counters
     m_pcheckpoint->checkpoint.le_lgposCheckpoint = lgposMin;
     m_pcheckpoint->checkpoint.le_lgposDbConsistency = lgposMin;
 
 TryAnotherExtension:
+    //  Intentionally not calling LGFullNameCheckpoint() here, as that doesn't allow a pickable checkpoint
+    //  extension, and this is first contact with the file system for our extension, so we need to try both
+    //  extensions ... and pick that ext, if we find a checkpoint file ...
     CallS( m_pinst->m_pfsapi->ErrPathBuild( SzParam( m_pinst, JET_paramSystemPath ), SzParam( m_pinst, JET_paramBaseName ), m_pLogStream->LogExt() ? m_pLogStream->LogExt() : wszChkExt, wszPathJetChkLog ) );
 
     err = CIOFilePerf::ErrFileOpen(
@@ -2072,8 +2495,10 @@ TryAnotherExtension:
     {
         Call( err );
 
+        // Success, if we haven't settled on a log ext yet, settle it now.
         if ( m_pLogStream->LogExt() == NULL )
         {
+            // SOFT_HARD: leave, not important
             Assert( !m_fHardRestore );
             LGSetChkExts( FLGIsLegacyExt( fTrue, wszChkExt ), fFalse);
             m_pLogStream->LGSetLogExt( FLGIsLegacyExt( fTrue, wszChkExt ), fFalse);
@@ -2102,6 +2527,7 @@ HandleError:
 VOID LOG::LGICheckpointTerm( VOID )
 {
 
+    // technically shouldn't need lock anymore, should be single threaded at this point ...
     m_critCheckpoint.Enter();
 
     Assert( m_fDisableCheckpoint );
@@ -2118,7 +2544,8 @@ VOID LOG::LGICheckpointTerm( VOID )
 }
 
 
-
+/*  read checkpoint from file.
+/**/
 ERR LOG::ErrLGReadCheckpoint( __in PCWSTR wszCheckpointFile, CHECKPOINT *pcheckpoint, const BOOL fReadOnly )
 {
     ERR     err;
@@ -2140,10 +2567,13 @@ ERR LOG::ErrLGReadCheckpoint( __in PCWSTR wszCheckpointFile, CHECKPOINT *pcheckp
             sizeof(CHECKPOINT),
             -1,
             UtilReadHeaderFlags( ( fReadOnly ? urhfReadOnly : urhfNone ) | urhfNoAutoDetectPageSize ) );
-
+    
     if ( err < JET_errSuccess )
     {
-        
+        /*  it should never happen that both checkpoints in the checkpoint
+        /*  file are corrupt.  The only time this can happen is with a
+        /*  hardware error.
+        /**/
         if ( JET_errFileNotFound == err )
         {
             err = ErrERRCheck( JET_errCheckpointFileNotFound );
@@ -2165,13 +2595,16 @@ ERR LOG::ErrLGReadCheckpoint( __in PCWSTR wszCheckpointFile, CHECKPOINT *pcheckp
 
     Call( err );
 
-    if( JET_filetypeUnknown != pcheckpoint->checkpoint.le_filetype
+    // Check if the file indeed is checkpoint file
+    if( JET_filetypeUnknown != pcheckpoint->checkpoint.le_filetype // old format
         && JET_filetypeCheckpoint != pcheckpoint->checkpoint.le_filetype )
     {
+        // not a checkpoint file
         OSUHAEmitFailureTag( m_pinst, HaDbFailureTagCorruption, L"c0c9b597-c2d5-4dd4-a5e8-9904c00507df" );
         Call( ErrERRCheck( JET_errFileInvalidType ) );
     }
 
+    // Initialize lgposDbConsistency in case this checkpoint file does not have it set yet.
     if ( !CmpLgpos( pcheckpoint->checkpoint.le_lgposDbConsistency, lgposMin ) )
     {
         pcheckpoint->checkpoint.le_lgposDbConsistency = pcheckpoint->checkpoint.le_lgposCheckpoint;
@@ -2186,14 +2619,15 @@ ERR LOG::ErrLGReadCheckpoint( __in PCWSTR wszCheckpointFile, CHECKPOINT *pcheckp
     PERFOpt( ibLGCheckpoint.Set( m_pinst, m_pLogStream->CbOffsetLgpos( pcheckpoint->checkpoint.le_lgposCheckpoint, lgposMin ) ) );
     PERFOpt( ibLGDbConsistency.Set( m_pinst, m_pLogStream->CbOffsetLgpos( pcheckpoint->checkpoint.le_lgposDbConsistency, lgposMin ) ) );
     PERFOpt( cbLGCheckpointDepthMax.Set( m_pinst, UlParam( m_pinst, JET_paramCheckpointDepthMax ) ) );
-
+    
 HandleError:
     m_critCheckpoint.Leave();
     return err;
 }
 
 
-
+/*  write checkpoint to file.
+/**/
 ERR LOG::ErrLGIWriteCheckpoint( __in PCWSTR wszCheckpointFile, const IOFLUSHREASON iofr, CHECKPOINT *pcheckpoint )
 {
     ERR     err;
@@ -2207,6 +2641,8 @@ ERR LOG::ErrLGIWriteCheckpoint( __in PCWSTR wszCheckpointFile, const IOFLUSHREAS
     Assert( m_fSignLogSet );
     pcheckpoint->checkpoint.signLog = m_signLog;
 
+    //  write JET_filetypeCheckpoint to header
+    //
     pcheckpoint->checkpoint.le_filetype = JET_filetypeCheckpoint;
 
 
@@ -2217,6 +2653,9 @@ ERR LOG::ErrLGIWriteCheckpoint( __in PCWSTR wszCheckpointFile, const IOFLUSHREAS
                                          pcheckpoint );
 
 
+    //  Ignore errors. Bet on that it may be failed temporily (e.g. being locked)
+//  if ( err < 0 )
+//      m_fDisableCheckpoint = fTrue;
 
     return err;
 }
@@ -2233,6 +2672,9 @@ ERR LOG::ErrLGIUpdateCheckpointLgposForTerm( const LGPOS& lgposCheckpoint )
 
     LGFullNameCheckpoint( wszPathJetChkLog );
 
+    // if we had a clean termination (m_fAfterEndAllSessions is TRUE)
+    // then we need to regenerate the checkpoint with the last
+    // termination position which is the last thing it got redone
     m_pcheckpoint->checkpoint.le_lgposCheckpoint = lgposCheckpoint;
     m_pcheckpoint->checkpoint.le_lgposDbConsistency = lgposCheckpoint;
 
@@ -2249,13 +2691,23 @@ ERR LOG::ErrLGIUpdateCheckpointLgposForTerm( const LGPOS& lgposCheckpoint )
     return err;
 }
 
-
+/*  Update in memory checkpoint.
+/*
+/*  Computes log checkpoint, which is the lGeneration, isec and ib
+/*  of the oldest transaction which either modified a currently-dirty buffer
+/*  an uncommitted version (RCE). Flush map up-to-dateness is also factored
+/*  in.  Recovery begins redoing from the checkpoint.
+/*
+/*  The checkpoint is stored in the checkpoint file, which is rewritten
+/*  whenever a isecChekpointPeriod disk sectors are written.
+/**/
 VOID LOG::LGIUpdateCheckpoint( CHECKPOINT *pcheckpoint )
 {
     PIB     *ppibT;
     LGPOS   lgposCheckpoint = lgposMax;
     LGPOS   lgposDbConsistency = lgposMax;
 
+    //  tracing support
     LGPOS   lgposToFlushT;
     LGPOS   lgposLogRecT;
     LGPOS   lgposLowestStartT;
@@ -2269,6 +2721,19 @@ VOID LOG::LGIUpdateCheckpoint( CHECKPOINT *pcheckpoint )
         return;
 #endif
 
+    //  we start with the most recent log record on disk.
+    //  we are starting with m_lgposToFlush because we know that any
+    //  new transactions that are started while we are scanning the
+    //  session list must get an lgposStart larger than the current
+    //  value of m_lgposToFlush (note that we must read this value
+    //  inside LockBuffer and it must be a global lock so
+    //  that we are guaranteed to get a value that is <= any
+    //  lgposStart to be given out in the future)
+    //
+    //  note that with FASTFLUSH, m_lgposToFlush points to the start
+    //  of a log record that didn't make it to disk (or to data that
+    //  hasn't yet been added to the log buffer)
+    //
     m_pLogWriteBuffer->LockBuffer();
 
     const LGPOS lgposWrittenTip = ( m_fRecoveringMode == fRecoveringRedo ) ? m_lgposRedo : m_pLogWriteBuffer->LgposWriteTip();
@@ -2277,31 +2742,80 @@ VOID LOG::LGIUpdateCheckpoint( CHECKPOINT *pcheckpoint )
     lgposToFlushT = lgposWrittenTip;
     lgposLogRecT = m_pLogWriteBuffer->LgposLogTip();
 
-    
+    // Stopped trying to fight this very basic assert ... think this is an
+    // terrible feature choice that lgposToFlush is measured as end of last
+    // LR, and lgposLogRec is beginning of last log record?  Be better if
+    // the lgposLogRec was after last LR.  Or if it is, then I can't explain
+    // the last hit I had, and someone who owns log should take this assert.
+    /*
+    Assert( m_fRecoveringMode == fRecoveringRedo || // lgposLogRecT/Tip only relevant in do-time ...
+                CmpLgpos( lgposToFlushT, lgposLogRecT ) <= 0 ||
+                //  I just reversed engineered this case, but I find it quite vugly ... we
+                //  should just consider moving the LgposLogTip() UP whenever we flush a
+                //  buffer such that we move the _next_ LR forward. It's almost as if the
+                //  NOP/NOP2s are not counting.
+                ( lgposToFlushT.lGeneration == lgposLogRecT.lGeneration &&
+                    lgposToFlushT.isec - 1 == lgposLogRecT.isec ) ||
+                ( lgposToFlushT.lGeneration - 1 == lgposLogRecT.lGeneration &&
+                    lgposToFlushT.isec == 1 &&
+                    lgposToFlushT.ib == 0 ) ||
+                // during ErrIOTerm(): 19:0039:02a8 < 19:0039:029a (lgposToFlush < lgposLogRecT respectively)
+                m_pinst->m_fTermInProgress
+                ); // that would be confusing
+    */
 
     m_pLogWriteBuffer->UnlockBuffer();
 
+    //  find the oldest transaction with an uncommitted update
+    //
     m_pinst->m_critPIB.Enter();
     for ( ppibT = m_pinst->m_ppibGlobal; ppibT != NULL; ppibT = ppibT->ppibNext )
     {
+        //  verify that the PIB is active, but in truth, it should
+        //  be impossible to be inactive (because it would have
+        //  gotten removed from the global list)
+        //
         Assert( levelNil != ppibT->Level() );
         if ( levelNil != ppibT->Level() )
         {
+            //  must enter critLogBeginTrx to ensure a new BeginTrx
+            //  doesn't get logged while we're performing this check
+            //
             ENTERCRITICALSECTION    enterCritLogBeginTrx( &ppibT->critLogBeginTrx );
 
+            //  if this session has a transaction with an
+            //  uncommitted update, see if it's the oldest one we've
+            //  we've encountered so far (note that we can read the
+            //  FBegin0Logged() flag unserialised because even if
+            //  the session is concurrently committing or rolling
+            //  back, its lgposStart is still valid (it won't be
+            //  reset again until it begins a new transaction, which
+            //  is blocked because we are holding critLogBeginTrx)
+            //
             if ( ppibT->FBegin0Logged()
                 && CmpLgpos( &ppibT->lgposStart, &lgposDbConsistency ) < 0 )
             {
                 lgposDbConsistency = ppibT->lgposStart;
             }
 
+            //  check for transaction that has been running for too long 
+            //  and warn the user / app about the issue. 
             const LONG dlgenTattleThreshold = (LONG)UlParam( m_pinst, JET_paramCheckpointTooDeep ) / 4;
+            //  while the above sort of claims we can look at lgposStart, I
+            //  am skeptical because PIBResetTrxBegin0() is set to lgposMax
+            //  in DIRCommit/Rollback without any protection - I deal with
+            //  this by a little volatile and defense in depth to check the
+            //  value I read.  This is only for optics so it's fine.
+            //  Note: Didn't want to enter ppib->critLogBeginTrx where we 
+            //  reset lgposStart due to perf concerns as Begin Trx is a 
+            //  moderately hot path.
             const LONG lgenStart = *(volatile LONG *)( &ppibT->lgposStart.lGeneration );
             const LONG dlgenTransactionLength = lgposWrittenTip.lGeneration - lgenStart;
-            if ( !m_pinst->m_plog->FRecovering() &&
-                   ppibT->FBegin0Logged() &&
-                   lgenStart != lGenerationInvalid &&
+            if ( !m_pinst->m_plog->FRecovering() && 
+                   ppibT->FBegin0Logged() && 
+                   lgenStart != lGenerationInvalid && // defense in depth
                    dlgenTransactionLength > dlgenTattleThreshold &&
+                   //  must be last, sets whether we evented or not
                    ppibT->FCheckSetLoggedCheckpointGettingDeep() )
             {
                 const LONG lgenStartRecheck = *(volatile LONG *)( &ppibT->lgposStart.lGeneration );
@@ -2312,16 +2826,19 @@ VOID LOG::LGIUpdateCheckpoint( CHECKPOINT *pcheckpoint )
                 }
                 else
                 {
+                    //  Everything stayed same, we won right to log this event.
                     WCHAR wszTrxLgens[30];
                     WCHAR wszTrxCtxInfo[50];
                     WCHAR wszTrxIdTimeStack[400];
                     const WCHAR * rgpwsz[] = { wszTrxLgens, wszTrxCtxInfo, wszTrxIdTimeStack };
 
+                    //  we only read variables we can read without significant locking (i.e. 
+                    //  no pointers) ... remember pib can't go away because m_pinst->m_critPIB.
                     OSStrCbFormatW( wszTrxLgens, sizeof( wszTrxLgens ), L"%d (0x%x)", dlgenTransactionLength, dlgenTransactionLength );
                     CallS( ppibT->TrxidStack().ErrDump( wszTrxIdTimeStack, _countof( wszTrxIdTimeStack ), L", " ) );
                     const UserTraceContext * const putc = ppibT->Putc();
-                    OSStrCbFormatW( wszTrxCtxInfo, sizeof( wszTrxCtxInfo ), L"%d.%d.%d - %d(0x%x) - 0x%x",
-                                    (DWORD)putc->context.nClientType, (DWORD)putc->context.nOperationType, (DWORD)putc->context.nOperationID,
+                    OSStrCbFormatW( wszTrxCtxInfo, sizeof( wszTrxCtxInfo ), L"%d.%d.%d - %d(0x%x) - 0x%x", 
+                                    (DWORD)putc->context.nClientType, (DWORD)putc->context.nOperationType, (DWORD)putc->context.nOperationID, 
                                     putc->context.dwUserID, putc->context.dwUserID,
                                     (DWORD)putc->context.fFlags );
 
@@ -2340,9 +2857,15 @@ VOID LOG::LGIUpdateCheckpoint( CHECKPOINT *pcheckpoint )
     }
     m_pinst->m_critPIB.Leave();
 
+    //  for the most part 0 == CmpLgpos( lgposDbConsistency, lgposToFlushT ) will mean
+    //  there is no trx started.  Unless lgposToFlush is actually sitting waiting 
+    //  to flush a deferred begin0 LR / lgposStart.
     lgposLowestStartT = ( 0 == CmpLgpos( lgposDbConsistency, lgposToFlushT ) ) ? lgposMax : lgposDbConsistency;
 
-    
+    /*  find the oldest transaction which dirtied a current buffer
+    /*  NOTE:  no concurrency is required as all transactions that could
+    /*  NOTE:  dirty any BF are already accounted for by the above code
+    /**/
 
     fAdvanceCheckpoint = !m_fPendingRedoMapEntries;
 
@@ -2353,6 +2876,7 @@ VOID LOG::LGIUpdateCheckpoint( CHECKPOINT *pcheckpoint )
 
     FMP::EnterFMPPoolAsReader();
 
+    // First, compute the DB consistency LGPOS.
     for ( DBID dbid = dbidMin; dbid < dbidMax; dbid++ )
     {
         const IFMP ifmp = m_pinst->m_mpdbidifmp[ dbid ];
@@ -2361,26 +2885,41 @@ VOID LOG::LGIUpdateCheckpoint( CHECKPOINT *pcheckpoint )
         {
             FMP* const pfmp = &g_rgfmp[ifmp];
 
+            // do not advance the checkpoint if there is a skipped attachment that we are not ignoring
             if ( pfmp->FSkippedAttach() && !m_fReplayingIgnoreMissingDB )
             {
                 fAdvanceCheckpoint = fFalse;
                 break;
             }
 
+            // do not advance the checkpoint if there is a deferred attachment that we aren't ignoring
             if ( pfmp->FDeferredAttach() && !pfmp->FIgnoreDeferredAttach() && !m_fReplayingIgnoreMissingDB )
             {
                 fAdvanceCheckpoint = fFalse;
                 break;
             }
 
+            // If any (not deferred or skipped) dbs are still attaching/creating, do not allow checkpoint
+            // to move past their minRequired generation
             if ( !pfmp->FAllowHeaderUpdate() && !pfmp->FSkippedAttach() && !pfmp->FDeferredAttach() )
             {
                 fAdvanceCheckpoint = fFalse;
                 break;
             }
 
+            // Should not advance checkpoint if we are dealing with log redo maps.
+            // There is a window where we could:
+            // -Replay a log record.
+            // -Add an entry to a log redo map.
+            // -Advance the checkpoint beyond that point.
+            // -Crash!
+            // -Subsequent log replay would skip that log record!
             if ( FRecovering() && pfmp->FContainsDataFromFutureLogs() )
             {
+                // This would be a problem for backup-restored (i.e., fully reseeded) databases because we would
+                // have to hold the checkpoint for potentially thousands of logs. The good news is that we currently
+                // only shrink during attach and the database is not reported as attached (for purposes of backing it up)
+                // until it has finished shrinking. That means we won't have cases where the maps are non-empty.
 
                 if ( !pfmp->FRedoMapsEmpty() )
                 {
@@ -2403,6 +2942,13 @@ VOID LOG::LGIUpdateCheckpoint( CHECKPOINT *pcheckpoint )
                 lgposWaypoint   = pfmp->LgposWaypoint();
 
 
+                //  if we close the hole in the scenario described
+                //  in the comment above, then it should not be
+                //  possible to have a 0 waypoint by the time we
+                //  get here, but this has caused us enough grief
+                //  due to other bugs that we should just be safe
+                //  about it
+                //
                 if ( CmpLgpos( lgposDbConsistency, lgposWaypoint ) > 0
                     && 0 != CmpLgpos( lgposWaypoint, lgposMin ) )
                 {
@@ -2417,7 +2963,14 @@ VOID LOG::LGIUpdateCheckpoint( CHECKPOINT *pcheckpoint )
                 lgposFmMinRequiredT.lGeneration = pfm->LGetFmGenMinRequired();
             }
 
-
+            //  trace relevant pieces ...
+            //
+            //  A fairly expected order would be this, so we'll trace this order...
+            //      |            |               |             |          |                 |              |     |
+            //    existing   flush map         existing       OB0    lgposStart       lgposWaypoint    ToFlush LogRec
+            //   checkpoint  min required   DB consistency         (min of all PIBs) 
+            //
+    
             LGPOS lgposExistingCheckpointT = pcheckpoint->checkpoint.le_lgposCheckpoint;
             LGPOS lgposExistingDbConsistencyT = pcheckpoint->checkpoint.le_lgposDbConsistency;
 
@@ -2445,13 +2998,15 @@ VOID LOG::LGIUpdateCheckpoint( CHECKPOINT *pcheckpoint )
                                 OSFormatLgpos( lgposToFlushT ),
                                 OSFormatLgpos( lgposLogRecT ) ) );
 
+            //  update dbtime/trxOldest
             if ( ppibNil != m_pinst->m_ppibGlobal )
             {
                 pfmp->UpdateDbtimeOldest();
             }
-        }
-    }
+        } // if ifmp < g_ifmpMax
+    } // for each dbid
 
+    // If we should not advance the checkpoint for some reason then we're done.
     if ( !fAdvanceCheckpoint )
     {
         FMP::LeaveFMPPoolAsReader();
@@ -2460,6 +3015,7 @@ VOID LOG::LGIUpdateCheckpoint( CHECKPOINT *pcheckpoint )
 
     lgposCheckpoint = lgposDbConsistency;
 
+    // Now, factor in the flush map restriction.
     for ( DBID dbid = dbidMin; dbid < dbidMax; dbid++ )
     {
         const IFMP ifmp = m_pinst->m_mpdbidifmp[ dbid ];
@@ -2486,7 +3042,8 @@ VOID LOG::LGIUpdateCheckpoint( CHECKPOINT *pcheckpoint )
 
     FMP::LeaveFMPPoolAsReader();
 
-    
+    /*  set the new checkpoint if it is advancing
+     */
     if ( CmpLgpos( &lgposCheckpoint, &pcheckpoint->checkpoint.le_lgposCheckpoint ) > 0 )
     {
         Assert( lgposCheckpoint.lGeneration != 0 );
@@ -2497,7 +3054,7 @@ VOID LOG::LGIUpdateCheckpoint( CHECKPOINT *pcheckpoint )
         }
         pcheckpoint->checkpoint.le_lgposCheckpoint = lgposCheckpoint;
 
-        OSTrace( JET_tracetagBufferManagerMaintTasks,
+        OSTrace( JET_tracetagBufferManagerMaintTasks, // updated, but not written yet.
                 OSFormat(   "CPUPD: updating checkpoint to %s",
                             OSFormatLgpos( lgposCheckpoint ) ) );
     }
@@ -2508,7 +3065,8 @@ VOID LOG::LGIUpdateCheckpoint( CHECKPOINT *pcheckpoint )
                             OSFormatLgpos( LGPOS( pcheckpoint->checkpoint.le_lgposCheckpoint ) ) ) );
     }
 
-    
+    /*  set the new DB consistency LGPOS if it is advancing
+     */
     if ( CmpLgpos( &lgposDbConsistency, &pcheckpoint->checkpoint.le_lgposDbConsistency ) > 0 )
     {
         Assert( lgposDbConsistency.lGeneration != 0 );
@@ -2519,7 +3077,7 @@ VOID LOG::LGIUpdateCheckpoint( CHECKPOINT *pcheckpoint )
         }
         pcheckpoint->checkpoint.le_lgposDbConsistency = lgposDbConsistency;
 
-        OSTrace( JET_tracetagBufferManagerMaintTasks,
+        OSTrace( JET_tracetagBufferManagerMaintTasks, // updated, but not written yet.
                 OSFormat(   "CPUPD: updating DB consistency LGPOS to %s",
                             OSFormatLgpos( lgposDbConsistency ) ) );
     }
@@ -2530,9 +3088,13 @@ VOID LOG::LGIUpdateCheckpoint( CHECKPOINT *pcheckpoint )
                             OSFormatLgpos( LGPOS( pcheckpoint->checkpoint.le_lgposDbConsistency ) ) ) );
     }
 
-    
+    /*  set DBMS parameters
+    /**/
     m_pinst->SaveDBMSParams( &pcheckpoint->checkpoint.dbms_param );
 
+    // if the checkpoint is on a log file we haven't generated (disk full, etc.)
+    // move the checkpoint back ONE LOG file
+    // anyway the current checkpoint should not be more that one generation ahead of the current log generation
 {
     LONG lCurrentLogGeneration;
 
@@ -2546,12 +3108,14 @@ VOID LOG::LGIUpdateCheckpoint( CHECKPOINT *pcheckpoint )
     m_pLogWriteBuffer->UnlockBuffer();
 }
 
+    // just in case one of the adjustments above generated an inconsistency.
     if ( CmpLgpos( pcheckpoint->checkpoint.le_lgposCheckpoint, pcheckpoint->checkpoint.le_lgposDbConsistency ) > 0 )
     {
         pcheckpoint->checkpoint.le_lgposCheckpoint = pcheckpoint->checkpoint.le_lgposDbConsistency;
     }
 
-    
+    /*  set database attachments
+    /**/
     LGLoadAttachmentsFromFMP( pcheckpoint->checkpoint.le_lgposCheckpoint, pcheckpoint->rgbAttach );
     pcheckpoint->checkpoint.fVersion |= fCheckpointAttachInfoPresent;
 
@@ -2560,6 +3124,14 @@ VOID LOG::LGIUpdateCheckpoint( CHECKPOINT *pcheckpoint )
     return;
 }
 
+//  Parameters:
+//      lGenCommitted - if this is zero instead of the current
+//              log, then the value returned from this function
+//              could be false when the waypoint is updateable.
+//      ifmp - The specific database to check for.  ifmpNil is
+//              the default, which means do all databases that
+//              are attached and logged.
+//
 BOOL LOG::FLGIUpdatableWaypoint( __in const LONG lGenCommitted, __in const IFMP ifmpTarget )
 {
     BOOL    fUpdatableWaypoint = fFalse;
@@ -2577,21 +3149,32 @@ BOOL LOG::FLGIUpdatableWaypoint( __in const LONG lGenCommitted, __in const IFMP 
 
         if ( ifmpTarget != ifmpNil &&
             ifmp != ifmpTarget )
-            continue;
+            continue;   // this is not the IFMP you are looking for.
 
         if ( g_rgfmp[ifmp].FLogOn() && g_rgfmp[ifmp].FAttached() )
         {
             const LGPOS lgposCurrentWaypoint    = g_rgfmp[ifmp].LgposWaypoint();
 
 
+            //  if we close the hole in the scenario described
+            //  in the comment above, then it should not be
+            //  possible to have a 0 waypoint by the time we
+            //  get here, but this has caused us enough grief
+            //  due to other bugs that we should just be safe
+            //  about it
+            //
             if ( 0 != CmpLgpos( lgposCurrentWaypoint, lgposMin ) )
             {
                 LGPOS   lgposBestWaypoint;
 
                 BFGetBestPossibleWaypoint( ifmp, lGenCommitted, &lgposBestWaypoint );
 
+                // Should never go backwards from the current waypoint.
                 Assert( CmpLgpos( lgposBestWaypoint, lgposCurrentWaypoint ) >= 0 );
 
+                //
+                //  Check if the waypoint was improved...
+                //
 
                 if ( CmpLgpos( lgposBestWaypoint, lgposCurrentWaypoint ) > 0 )
                 {
@@ -2607,7 +3190,8 @@ BOOL LOG::FLGIUpdatableWaypoint( __in const LONG lGenCommitted, __in const IFMP 
     return( fUpdatableWaypoint );
 }
 
-
+/*  update checkpoint file.
+/**/
 ERR LOG::ErrLGIUpdateCheckpointFile( const BOOL fForceUpdate, CHECKPOINT * pcheckpointT )
 {
     ERR             err             = JET_errSuccess;
@@ -2634,12 +3218,14 @@ ERR LOG::ErrLGIUpdateCheckpointFile( const BOOL fForceUpdate, CHECKPOINT * pchec
         goto HandleError;
     }
 
-    
+    /*  save checkpoint
+    /**/
     lgposCheckpointT = m_pcheckpoint->checkpoint.le_lgposCheckpoint;
     lgposDbConsistencyT = m_pcheckpoint->checkpoint.le_lgposDbConsistency;
     *pcheckpointT = *m_pcheckpoint;
 
-    
+    /*  update checkpoint
+    /**/
     LGIUpdateCheckpoint( pcheckpointT );
     const BOOL fCheckpointUpdated =
         ( ( lgposCheckpointT.lGeneration < pcheckpointT->checkpoint.le_lgposCheckpoint.le_lGeneration ) ||
@@ -2652,23 +3238,41 @@ ERR LOG::ErrLGIUpdateCheckpointFile( const BOOL fForceUpdate, CHECKPOINT * pchec
         ( ( lgposCheckpointT.lGeneration < pcheckpointT->checkpoint.le_lgposCheckpoint.le_lGeneration ) ||
           ( lgposCheckpointT.isec < pcheckpointT->checkpoint.le_lgposCheckpoint.le_isec ) );
 
+    // Some snapshot preimages (like those collected for DeleteTable) are not tied to dirty buffers,
+    // so we need to make sure that they are flushed before the checkpoint moves and the lrtypExtentFreed
+    // LR moves out of the required range
     if ( fUpdatedCheckpointMinRequired && m_pinst->m_prbs && m_pinst->m_prbs->FInitialized() && !m_pinst->m_prbs->FInvalid() )
     {
         Call( m_pinst->m_prbs->ErrFlushAll() );
     }
 
+    //  if this assert goes off, it means the checkpoint
+    //  is moving backward, which is bad, especially if
+    //  we're forced to update the checkpoint file
+    //
     Assert( lgposCheckpointT.lGeneration <= pcheckpointT->checkpoint.le_lgposCheckpoint.le_lGeneration );
 
-    
+    /*  updatable waypoint
+    **/
     const BOOL fUpdateWaypoint = FLGIUpdatableWaypoint( 0 );
 
-    
+    /*  if checkpoint or waypoint unchanged then return JET_errSuccess
+    /**/
     if ( fForceUpdate || fCheckpointUpdated || fUpdateWaypoint )
     {
+        //  no in-memory checkpoint change if failed to write out to any of
+        //  the database headers.
 
         BOOL fSkippedAttachDetach;
 
+        // Now disallow header update by other threads (log writer or checkpoint advancement)
+        // 1. For the log writer it is OK to generate a new log w/o updating the header as no log operations
+        // for this db will be logged in new logs
+        // 2. For the checkpoint: don't advance the checkpoint if db's header weren't update  <- THIS CASE
 
+        // During Redo, the genMax is updated only when we switch to a new generation,
+        // and there is no need to update it here (because we might have not replayed anything from the
+        // current log)
 
         LOGTIME tmCreate;
         LONG lGenCurrent = LGGetCurrentFileGenWithLock( &tmCreate );
@@ -2677,12 +3281,18 @@ ERR LOG::ErrLGIUpdateCheckpointFile( const BOOL fForceUpdate, CHECKPOINT * pchec
             pcheckpointT->checkpoint.le_lgposCheckpoint.le_lGeneration,
             pcheckpointT->checkpoint.le_lgposDbConsistency.le_lGeneration,
             lGenCurrent,
-            tmCreate,
+            tmCreate, // if the previous param is 0, this param is ignored
             &fSkippedAttachDetach,
             ifmpNil ) );
 
         if ( fSkippedAttachDetach )
         {
+            //  since we're not going to be updating the checkpoint,
+            //  this means some database headers may actually
+            //  be ahead of the checkpoint, but that's fine, as all
+            //  it means during recovery is that we'll try to
+            //  replay a few extra logfiles
+            //
             Error( ErrERRCheck( errSkippedDbHeaderUpdate ) );
         }
 
@@ -2698,6 +3308,17 @@ ERR LOG::ErrLGIUpdateCheckpointFile( const BOOL fForceUpdate, CHECKPOINT * pchec
         err = ErrLGIWriteCheckpoint( wszPathJetChkLog, iofr, pcheckpointT );
         if ( err < 0 )
         {
+            //  since we're not going to be updating the checkpoint,
+            //  this means the database headers may actually
+            //  be ahead of the checkpoint, but that's fine, as all
+            //  it means during recovery is that we'll try to
+            //  replay a few extra logfiles
+            //
+            //  for debuggability, record checkpoint update failure
+            //  (if repeated failures occur trying to move from a
+            //  particular checkpoint, just record the first error
+            //  encountered)
+            //
             if ( JET_errSuccess == m_errCheckpointUpdate
                 || 0 != CmpLgpos( lgposCheckpointT, m_lgposCheckpointUpdateError ) )
             {
@@ -2733,12 +3354,13 @@ HandleError:
     return err;
 }
 
-
+/*  update checkpoint file.
+/**/
 ERR LOG::ErrLGUpdateCheckpointFile( const BOOL fForceUpdate )
 {
     ERR             err             = JET_errSuccess;
     CHECKPOINT *    pcheckpointT;
-
+    
     AllocR( pcheckpointT = (CHECKPOINT *)PvOSMemoryPageAlloc(  sizeof( CHECKPOINT ), NULL ) );
 
     m_critCheckpoint.Enter();
@@ -2750,9 +3372,11 @@ ERR LOG::ErrLGUpdateCheckpointFile( const BOOL fForceUpdate )
     return err;
 }
 
-
-LGPOS LOG::LgposLGCurrentCheckpointMayFail() 
+/*  retrieve the current checkpoint, not function can fail.
+/**/
+LGPOS LOG::LgposLGCurrentCheckpointMayFail() /* const, m_critCheckpoint.Enter() :P */
 {
+    // min is not what the one caller would prefer, but it is the safest
     LGPOS lgposRet = lgposMin;
 
     if ( m_critCheckpoint.FTryEnter() )
@@ -2765,8 +3389,9 @@ LGPOS LOG::LgposLGCurrentCheckpointMayFail()
     return lgposRet;
 }
 
-
-LGPOS LOG::LgposLGCurrentDbConsistencyMayFail() 
+/*  retrieve the current DB consistency point, not function can fail.
+/**/
+LGPOS LOG::LgposLGCurrentDbConsistencyMayFail() /* const, m_critCheckpoint.Enter() :P */
 {
     LGPOS lgposRet = lgposMin;
 
@@ -2780,7 +3405,14 @@ LGPOS LOG::LgposLGCurrentDbConsistencyMayFail()
     return lgposRet;
 }
 
-
+/*  update waypoint position of the specified IFMP(s).
+ *
+ *  Parameters:
+ *      pfsapi -
+ *      ifmpTarget - The specific database to check for.  ifmpNil is
+ *              the default, which means do all databases that
+ *              are attached and logged.
+/**/
 ERR LOG::ErrLGUpdateWaypointIFMP( IFileSystemAPI *const pfsapi, __in const IFMP ifmpTarget )
 {
     ERR err = JET_errSuccess;
@@ -2788,19 +3420,26 @@ ERR LOG::ErrLGUpdateWaypointIFMP( IFileSystemAPI *const pfsapi, __in const IFMP 
     LOGTIME tmCreate;
     memset( &tmCreate, 0, sizeof(LOGTIME) );
 
+    // First move the flush tip all the way forward so that Waypoint is not inhibited
     Call( ErrLGFlush( iofrLogMaxRequired ) );
 
     m_critCheckpoint.Enter();
     fOwnsChkptCritSec = fTrue;
 
-    if ( m_fDisableCheckpoint
+    if ( m_fDisableCheckpoint // We're using this var in LGITryCleanupAfterRedoError() to prohibit header update here ...
         || m_fLogDisabled
+// I took this check out of original checkpoint function I stole this 
+// from (ErrLGUpdateCheckpointFile), it seems to be protecting checkpoint 
+// advancement specifically, updating the headers is still allowed ...
+//      || !m_fLGFMPLoaded
         || m_fLGNoMoreLogWrite
         || m_pinst->FInstanceUnavailable() )
     {
         if ( m_fLGNoMoreLogWrite
             || m_pinst->FInstanceUnavailable() )
         {
+            // the regular checkpoint file upd function ... maybe they should
+            // use ErrLGUpdateWaypointIFMP()
             Error( ErrERRCheck( JET_errInstanceUnavailable ) );
         }
         else
@@ -2812,14 +3451,26 @@ ERR LOG::ErrLGUpdateWaypointIFMP( IFileSystemAPI *const pfsapi, __in const IFMP 
 
     const LONG lGenCommitted = LGGetCurrentFileGenWithLock( &tmCreate );
 
+    //  updatable waypoint
+    //
     const BOOL fUpdateWaypoint = FLGIUpdatableWaypoint( lGenCommitted, ifmpTarget );
+    //  Note: This may return a false positive, in that it checks all IFMPs.  However,
+    //  we typically call this function when it is likely we need an update (such as
+    //  during detach), so false positives are unlikely, and harmeless.
 
+    //  if checkpoint or waypoint unchanged then return JET_errSuccess
+    //
     if ( !fUpdateWaypoint )
     {
+        //  I believe this can happen, but not too common ... would require checkpoint
+        //  update (and thus waypoint update) to kick in just as we're detaching, such 
+        //  that the waypoint was updated for detach before we got to the point this
+        //  function is called in detach.  if so, we don't need to do anything.  This 
+        //  also avoids excess header updates if we make a mistake.
         if ( ( !m_fRecovering || m_fRecoveringMode == fRecoveringUndo ) &&
             lGenCommitted < m_pLogWriteBuffer->LgposLogTip().lGeneration )
         {
-            m_pLogWriteBuffer->FLGSignalWrite();
+            m_pLogWriteBuffer->FLGSignalWrite();    // async
         }
         err = JET_errSuccess;
         goto HandleError;
@@ -2830,16 +3481,16 @@ ERR LOG::ErrLGUpdateWaypointIFMP( IFileSystemAPI *const pfsapi, __in const IFMP 
     Assert( lGenCommitted != 0 );
     Call( ErrLGUpdateGenRequired(
         pfsapi,
-        0,
-        0,
+        0,      // don't update the gen min required ...
+        0,      // don't update the gen min consistent ...
         lGenCommitted,
-        tmCreate,
+        tmCreate, // if the previous param is 0, this param is ignored
         &fSkippedAttachDetach,
         ifmpTarget ) );
 
     if ( fSkippedAttachDetach )
     {
-        Assert( ifmpTarget == ifmpNil );
+        Assert( ifmpTarget == ifmpNil ); // only can happen if we're trying to update all IFMPs.
         Error( ErrERRCheck( JET_errInternalError ) );
     }
 
@@ -2852,7 +3503,14 @@ HandleError:
     return err;
 }
 
-
+/*  quiesces the waypoint latency of the specified IFMP, which means we'll
+ *  write out the log buffer completely and flush the log, then update the
+ *  database header to indicate that all log files are required up to the
+ *  current generation.
+ *
+ *  Parameters:
+ *      ifmpTarget - The specific database to quiesce the waypoint latency of.
+/**/
 ERR LOG::ErrLGQuiesceWaypointLatencyIFMP( __in const IFMP ifmpTarget )
 {
     ERR err = JET_errSuccess;
@@ -2866,9 +3524,11 @@ ERR LOG::ErrLGQuiesceWaypointLatencyIFMP( __in const IFMP ifmpTarget )
         goto HandleError;
     }
 
+    // Write out the entire log buffer.
     pibFake.m_pinst = m_pinst;
     Call( ErrLGWaitForWrite( &pibFake, &lgposMax ) );
 
+    // Force an update with LLR disabled.
     Assert( !pfmp->FNoWaypointLatency() );
     pfmp->SetNoWaypointLatency();
     Call( ErrLGUpdateWaypointIFMP( m_pinst->m_pfsapi, ifmpTarget ) );
@@ -2884,6 +3544,8 @@ BOOL LOG::FLGRecoveryLgposStopLogGeneration(  ) const
 {
     LGPOS lgposEndOfLog;
 
+    // check if the stop lgpos is set
+    //
     if ( !FLGRecoveryLgposStop() )
     {
         return fFalse;
@@ -2896,6 +3558,9 @@ BOOL LOG::FLGRecoveryLgposStopLogGeneration(  ) const
     lgposEndOfLog.lGeneration = m_pLogStream->GetCurrentFileGen();
 
 
+    // if the stop lgpos is not at log boundary, we do not stop at this generation
+    // (we might stop at a log position though)
+    //
     return ( CmpLgpos( &m_lgposRecoveryStop, &lgposEndOfLog ) == 0 );
 }
 
@@ -2916,11 +3581,15 @@ BOOL LOG::FLGRecoveryLgposStop( ) const
 BOOL LOG::FLGRecoveryLgposStopLogRecord( const LGPOS &lgpos ) const
 {
 
+    // check if the stop lgpos is set
+    //
     if ( !FLGRecoveryLgposStop() )
     {
         return fFalse;
     }
 
+    // check if the stop lgpos is not at log boundary
+    //
     if ( m_lgposRecoveryStop.isec == 0 && m_lgposRecoveryStop.ib == 0 )
     {
         return fFalse;
@@ -2996,9 +3665,10 @@ VOID LOG::LGSetFlushTipWithLock( const LGPOS &lgpos )
 #ifdef DEBUG
     Assert( m_pLogWriteBuffer->FOwnsBufferLock() );
 
-    Assert( ( m_fRecovering && ( m_fRecoveringMode == fRecoveringRedo ) ) ||
+     // recovery doesn't update the write tip  - or does so oddly, so can't validate flush tip against it.
+    Assert( ( m_fRecovering && ( m_fRecoveringMode == fRecoveringRedo ) ) || 
             ( CmpLgpos( lgpos, m_pLogWriteBuffer->LgposWriteTip() ) <= 0 ) );
-#endif
+#endif  // DEBUG
 
     if ( CmpLgpos( lgpos, m_lgposFlushTip ) > 0 )
     {
@@ -3019,6 +3689,7 @@ VOID LOG::LGResetFlushTipWithLock( const LGPOS &lgpos )
                 ( CmpLgpos( lgpos, m_lgposRedo ) == 0 ) ) ) );
     if ( m_fRecovering && m_fRecoveringMode == fRecoveringRedo )
     {
+        // Unfortunately, we sometimes roll the log at end of redo before changing recovery mode
         Assert( lgpos.lGeneration <= m_lgposRedo.lGeneration ||
                 ( lgpos.lGeneration == m_lgposRedo.lGeneration + 1 &&
                   lgpos.isec == m_pLogStream->CSecHeader() &&
@@ -3034,7 +3705,7 @@ VOID LOG::LGResetFlushTipWithLock( const LGPOS &lgpos )
     {
         Assert( CmpLgpos( lgpos, m_pLogWriteBuffer->LgposWriteTip() ) <= 0 );
     }
-#endif
+#endif  // DEBUG
 
     m_lgposFlushTip = lgpos;
 }
@@ -3089,17 +3760,22 @@ VOID LOG::LGSetSectorGeometry(
 {
     m_pLogStream->LGSetSectorGeometry( cbSecSize, csecLGFile );
 
+    //  if we have a checkpoint allocated and it points to the initial checkpoint and it's 
+    //  been initialized to the previous sector size, then update it ...
     if ( m_pcheckpoint &&
          ( m_pcheckpoint->checkpoint.le_lgposCheckpoint.le_isec != USHORT( sizeof( LGFILEHDR ) / cbSecSize ) ) ||
          ( m_pcheckpoint->checkpoint.le_lgposDbConsistency.le_isec != USHORT( sizeof( LGFILEHDR ) / cbSecSize ) ) )
     {
-        Assert( m_pcheckpoint->checkpoint.le_lgposCheckpoint.le_isec <= sizeof( LGFILEHDR ) / 512  );
+        //  should be at most, the le_isec for a 512 byte sector ...
+        Assert( m_pcheckpoint->checkpoint.le_lgposCheckpoint.le_isec <= sizeof( LGFILEHDR ) / 512 /* smallest sector size */ );
         Assert( m_pcheckpoint->checkpoint.le_lgposCheckpoint.le_ib == 0 );
-        Assert( m_pcheckpoint->checkpoint.le_lgposDbConsistency.le_isec <= sizeof( LGFILEHDR ) / 512  );
+        Assert( m_pcheckpoint->checkpoint.le_lgposDbConsistency.le_isec <= sizeof( LGFILEHDR ) / 512 /* smallest sector size */ );
         Assert( m_pcheckpoint->checkpoint.le_lgposDbConsistency.le_ib == 0 );
 
+        // This may not hold ... if not, it's harmless, remove it ...
         Expected( m_pcheckpoint->checkpoint.le_lgposCheckpoint.le_lGeneration == m_lgenInitial );
 
+        //  re-fix up the checkpoint initial ...
         m_pcheckpoint->checkpoint.le_lgposCheckpoint.le_isec = USHORT( sizeof( LGFILEHDR ) / cbSecSize );
         m_pcheckpoint->checkpoint.le_lgposCheckpoint.le_ib = 0;
         m_pcheckpoint->checkpoint.le_lgposDbConsistency.le_isec = USHORT( sizeof( LGFILEHDR ) / cbSecSize );
@@ -3161,6 +3837,21 @@ ERR LOG::ErrLGFlush( const IOFLUSHREASON iofr, const BOOL fMayOwnBFLatch )
     {
         BOOL fFlushed = fFalse;
 
+        // Being able to hold BF latches and acquire the write log buffer's critical
+        // section (LOG_STREAM::m_critLGWrite) is a requirement we have today. Every
+        // code path that emits log records and writes to the log stream today already
+        // do that: see LOG_WRITE_BUFFER::ErrLGWriteLog and LOG_WRITE_BUFFER::FLGIAddLogRec.
+        // Unfortunately, rankBFLatch is lower than rankLGWrite, which means we have a
+        // rank violation situation. Those code paths explicitly disable deadlock detection
+        // to avoid hitting that DEBUG assert.
+        //
+        // Fortunately, in practice, a real deadlock is not going to happen today because
+        // the code paths that hold LOG_STREAM::m_critLGWrite are not going to block when
+        // trying to latch a BF. They all do try-latches (e.g., checkpoint advancement).
+        //
+        // Therefore, we are extending this "forgiveness" to flushing the log because some
+        // of those code paths that emit log records and write to the log stream may also
+        // need to flush the log to make sure log records are persisted to physical storage.
 
         if ( fMayOwnBFLatch )
         {
@@ -3196,12 +3887,15 @@ ERR LOG::ErrLGStopAndEmitLog()
 {
     ERR err = JET_errSuccess;
 
+    // First prevent any more logging
     m_pLogWriteBuffer->LockBuffer();
     SetNoMoreLogWrite( ErrERRCheck( errLogServiceStopped ) );
     m_pLogWriteBuffer->UnlockBuffer();
 
+    // Wait for everything to be flushed - this will also emit end of log stream before doing the actual write
     CallR( m_pLogWriteBuffer->ErrLGWaitAllFlushed( fTrue ) );
 
+    // In case nothing needed to be written out, we may still need to emit end of log stream
     return m_pLogStream->ErrEmitSignalLogEnd();
 }
 
@@ -3242,6 +3936,8 @@ VOID LOG::LGTermTmpLogBuffers()
 
 ERR LOG::ErrLGInitSetInstanceWiseParameters( JET_GRBIT grbit )
 {
+    //  set log disable state
+    //
     m_fLogDisabled = m_pinst->FComputeLogDisabled();
     m_fReplayMissingMapEntryDB = ( grbit & JET_bitReplayMissingMapEntryDB ? fTrue : fFalse );
     if ( !m_fLogDisabled )
@@ -3323,27 +4019,36 @@ ERR LOG::ErrLGVerifyFileSize( QWORD qwFileSize )
     if ( m_fUseRecoveryLogFileSize )
     {
 
+        // we are recovering which means we must bypass the enforcement of the
+        // log file size and allow the user to recover (so long as all the
+        // recovery logs are the same size)
 
         if ( m_lLogFileSizeDuringRecovery == 0 )
         {
 
+            //  this is the first log the user is reading during recovery
+            //  initialize the recovery log file size
 
             Assert( qwFileSize % 1024 == 0 );
             m_lLogFileSizeDuringRecovery = LONG( qwFileSize / 1024 );
         }
 
+        //  enforce the recovery log file size
 
         qwSystemFileSize = QWORD( m_lLogFileSizeDuringRecovery ) * 1024;
     }
     else if ( !FDefaultParam( m_pinst, JET_paramLogFileSize ) )
     {
 
+        //  we are not recovering, so we must enforce the size set by the user
 
         qwSystemFileSize = QWORD( UlParam( m_pinst, JET_paramLogFileSize ) ) * 1024;
     }
     else
     {
 
+        // we are not recovering, but the user never set a size for us to
+        // enforce. Set the size using the current log file on the user's behalf
 
         qwSystemFileSize = qwFileSize;
         Call( Param( m_pinst, JET_paramLogFileSize )->Set( m_pinst, ppibNil, LONG( qwFileSize / 1024 ), NULL ) );
@@ -3500,6 +4205,8 @@ LGEN_LOGTIME_MAP::ErrAddLogtimeMapping( const LONG lGen, const LOGTIME* const pL
     {
         LONG cSlotsAllocated = max( max( cSlotsNeeded, 4 ), 2 * m_cLogtimeMappingAlloc );
         LOGTIME *pNewSlots;
+        // If we fail to allocate, we will just not stamp a valid logtimeGenMaxRequired for that generation
+        // and lose that validation, do not treat as fatal error.
         AllocR( pNewSlots = (LOGTIME *)PvOSMemoryHeapAlloc( cSlotsAllocated * sizeof(LOGTIME) ) );
         memset( pNewSlots, '\0', cSlotsAllocated * sizeof(LOGTIME) );
         if ( m_cLogtimeMappingAlloc != 0 )

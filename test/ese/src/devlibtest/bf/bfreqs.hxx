@@ -1,11 +1,16 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
+//  This header thunks out all the requisite structures for including various
+//  bf (and resmgr) headers and linking to said.
 
 #ifndef _BFREQS_HXX_INCLUDED
 #define _BFREQS_HXX_INCLUDED
 
 
+//
+//  BF Elements
+//
 
 typedef ULONG PGNO;
 
@@ -15,16 +20,19 @@ typedef UINT            IFMP;
 
 static const IFMP ifmpMax = 200;
 
-enum BFDirtyFlags
+enum BFDirtyFlags  //  bfdf
 {
     bfdfMin     = 0,
-    bfdfClean   = 0,
-    bfdfUntidy  = 1,
-    bfdfDirty   = 2,
-    bfdfFilthy  = 3,
+    bfdfClean   = 0,        //  the page will not be written
+    bfdfUntidy  = 1,        //  the page will be written only when idle
+    bfdfDirty   = 2,        //  the page will be written only when necessary
+    bfdfFilthy  = 3,        //  the page will be written as soon as possible
     bfdfMax     = 4,
 };
 
+//
+//  ResMgr Elements
+//
 
 struct IFMPPGNO
 {
@@ -57,8 +65,11 @@ struct IFMPPGNO
     PGNO    pgno;
 };
 
+//
+//  Trace Constants
+//
 
 #include "tcconst.hxx"
 
-#endif
+#endif  //  _BFREQS_HXX_INCLUDED
 

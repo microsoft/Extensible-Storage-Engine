@@ -56,9 +56,13 @@ TestPageData rgs[] = {
 };
 
 
+//  ================================================================
 CUnitTest( TestIterQueryAbstractTypesCanManageEntryTypes, 0, "See class name." );
 ERR TestIterQueryAbstractTypesCanManageEntryTypes::ErrTest()
+//  ================================================================
 {
+    //    Testing basic type usage and various struct casts works / compiles.
+    //
 
     PvEntry pve = &rgs[1];
     PcvEntry pcve = &rgs[1];
@@ -73,8 +77,10 @@ ERR TestIterQueryAbstractTypesCanManageEntryTypes::ErrTest()
     return JET_errSuccess;
 }
 
+//  ================================================================
 CUnitTest( TestAddressFromSzArgProcessCanProcessWeirdDebuggerPointerSyntax, 0, "See class name." );
 ERR TestAddressFromSzArgProcessCanProcessWeirdDebuggerPointerSyntax::ErrTest()
+//  ================================================================
 {
     ERR err = JET_errSuccess;
 
@@ -90,8 +96,10 @@ ERR TestAddressFromSzArgProcessCanProcessWeirdDebuggerPointerSyntax::ErrTest()
 }
 
 
+//  ================================================================
 CUnitTest( TestEntryDescriptorCanMatchRequestedMembersByName, 0, "See class name." );
 ERR TestEntryDescriptorCanMatchRequestedMembersByName::ErrTest()
+//  ================================================================
 {
     ERR err = JET_errSuccess;
 
@@ -107,8 +115,10 @@ ERR TestEntryDescriptorCanMatchRequestedMembersByName::ErrTest()
     return err;
 }
 
+//  ================================================================
 CUnitTest( TestBasicIteratorQueryCanFindTwoEntriesWithSeqMembersGreaterThanThree, 0, "See class name." );
 ERR TestBasicIteratorQueryCanFindTwoEntriesWithSeqMembersGreaterThanThree::ErrTest()
+//  ================================================================
 {
     ERR err = JET_errSuccess;    
 

@@ -1,6 +1,8 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
+//  TASKMGR (wrapper for CTaskManager -- uses PIB* as per-thread context)
+//
 
 class PIB;
 class TaskInfo;
@@ -13,6 +15,9 @@ class TASKMGR
 
     private:
 
+        //  private context for dispatching a task
+        //  NOTE: if this could fit into a DWORD and a DWORD_PTR, we wouldn't need it
+        //        because CTaskManager takes a DWORD and DWORD_PTR for each posted task
 
         struct TASKMGRCONTEXT
         {
@@ -39,13 +44,13 @@ class TASKMGR
 
     private:
 
-        ULONG               m_cContext;
+        ULONG               m_cContext;         //  per-thread context information
         DWORD_PTR           *m_rgdwContext;
 
-        volatile BOOL       m_fInit;
-        CMeteredSection     m_cmsPost;
+        volatile BOOL       m_fInit;            //  task manager is initialized
+        CMeteredSection     m_cmsPost;          //  all task-post requests are done within the metered section
 
-        CTaskManager        m_tm;
+        CTaskManager        m_tm;               //  real task-manager
 };
 
 

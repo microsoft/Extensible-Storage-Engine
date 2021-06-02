@@ -19,11 +19,11 @@
 
 #ifndef WIN32_LEAN_AND_MEAN
 #define WIN32_LEAN_AND_MEAN
-#endif
+#endif  //  WIN32_LEAN_AND_MEAN
 
 #include <windows.h>
 #include <winnt.h>
-#include "NTSecAPI.h"
+#include "NTSecAPI.h" // for NTSTATUS typedef
 
 #include "xp10.h"
 
@@ -34,6 +34,7 @@
 
 #define STATUS_SUCCESS                  ((NTSTATUS)0x00000000L)
 
+// CRC64 implementation compatible with what Corsica generates
 #define CORSICA_CRC64_POLY 0x9a6c9329ac4bc9b5ULL
 LOCAL ULONGLONG
 UtilGenCorsicaCrc64(
@@ -116,6 +117,8 @@ ERR ErrXpress10SoftwareDecompress(
     ULONG cbCompressionWorkspaceSize, cbDecompressionWorkspaceSize;
 
 #ifdef DEBUG
+    // Both the xp10 library and our decompression code is doing verification of uncompressed
+    // data's CRC, no need to verify compressed data's CRC. Just leave it in for debug.
     if ( Crc != UtilGenCorsicaCrc64( CompressedBuffer, CompressedBufferSize ) )
     {
         return ErrERRCheck( JET_errCompressionIntegrityCheckFailed );

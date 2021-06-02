@@ -6,10 +6,11 @@
 
 #ifdef RTM
 #else
+//  UNDONE: consider turning these off when repair stabilizes
 #define REPAIR_DEBUG_VERBOSE_SPACE
 #define REPAIR_DEBUG_VERBOSE_STREAMING
 #define REPAIR_DEBUG_CALLS
-#endif
+#endif  //  !RTM
 
 
 #ifdef REPAIR_DEBUG_CALLS
@@ -38,9 +39,9 @@ void ReportErr( const LONG err, const ULONG ulLine, const char * const szFileNam
 
 #define Call( fn )      CallJ( fn, HandleError )
 
-#endif
+#endif  //  REPAIR_DEBUG_CALLS
 
-#define KeyLengthMax    16
+#define KeyLengthMax    16  // the max key length we currently use
 
 LOCAL const WCHAR       cwszIntegrityCheckQuitInconsistentMsg[]   =
     L"The database is not up-to-date. Integrity check may find that this database is corrupt "
@@ -58,8 +59,13 @@ LOCAL const WCHAR   cwszRepairCheckContinueMsg[]  =
     L"Database corruption was found by integrity check.  Do you wish to repair the database?";
 
 
+//  ****************************************************************
+//  STRUCTS/CLASSES
+//  ****************************************************************
 
+//  ================================================================
 struct REPAIRTT
+//  ================================================================
 {
     JET_TABLEID     tableidBadPages;
     INT             crecordsBadPages;
@@ -79,7 +85,9 @@ struct REPAIRTT
 };
 
 
+//  ================================================================
 struct REPAIRTABLE
+//  ================================================================
 {
     OBJID       objidFDP;
     OBJID       objidLV;
@@ -107,7 +115,13 @@ struct REPAIRTABLE
     BOOL        fDerivedTable;
 };
 
+//  ================================================================
 class PgnoCollection : private CArray< PGNO >
+//  ================================================================
+//
+//  Page number collection to track shelved pages.
+//
+//-
 {
     private:
         CReaderWriterLock m_rwl;
@@ -184,7 +198,14 @@ class PgnoCollection : private CArray< PGNO >
         }
 };
 
+//  ================================================================
 struct INTEGGLOBALS
+//  ================================================================
+//
+//  Values shared between the different threads for multi-threaded
+//  integrity
+//
+//-
 {
     INTEGGLOBALS() :
         crit( CLockBasicInfo( CSyncBasicInfo( szIntegGlobals ), rankIntegGlobals, 0 ) ),
@@ -201,8 +222,8 @@ struct INTEGGLOBALS
 
     CCriticalSection crit;
 
-    BOOL                fCorruptionSeen;
-    ERR                 err;
+    BOOL                fCorruptionSeen;    //  did we encounter a corrupted table?
+    ERR                 err;                //  used for runtime failures (i.e. not -1206)
 
     REPAIRTABLE         ** pprepairtable;
 
@@ -212,11 +233,17 @@ struct INTEGGLOBALS
     BOOL                * pfDbtimeTooLarge;
     const REPAIROPTS    * popts;
 
-    BOOL                fRepairDisallowed;
+    BOOL                fRepairDisallowed;  //  we should not run repair (like for NTDS.DIT)
 
 };
 
+//  ================================================================
 struct CHECKTABLE
+//  ================================================================
+//
+//  Tells a given task thread which table to check
+//
+//-
 {
     IFMP                ifmp;
     char                szTable[JET_cbNameMost+1];
@@ -230,18 +257,25 @@ struct CHECKTABLE
     BOOL                fUnique;
     RECCHECK *          preccheck;
 
-    CPG                 cpgPrimaryExtent;
+    CPG                 cpgPrimaryExtent;   //  used to preread the table
     INTEGGLOBALS        *pglobals;
 
-    BOOL                fDeleteWhenDone;
-    CManualResetSignal  signal;
+    BOOL                fDeleteWhenDone;    //  if set to true the structure will be 'delete'd
+    CManualResetSignal  signal;             //  set when the table has been checked if fDelete is not set
 
+    //  need a constructor to initialize the signal
 
     CHECKTABLE() : signal( CSyncBasicInfo( _T( "CHECKTABLE::signal" ) ) ) {}
 };
 
 
+//  ================================================================
 class RECCHECKMACRO : public RECCHECK
+//  ================================================================
+//
+//  Used to string together multiple RECCHECKs
+//
+//-
 {
     public:
         RECCHECKMACRO();
@@ -257,7 +291,13 @@ class RECCHECKMACRO : public RECCHECK
 };
 
 
+//  ================================================================
 class RECCHECKNULL : public RECCHECK
+//  ================================================================
+//
+//  No-op
+//
+//-
 {
     public:
         RECCHECKNULL() {}
@@ -267,7 +307,13 @@ class RECCHECKNULL : public RECCHECK
 };
 
 
+//  ================================================================
 class RECCHECKSPACE : public RECCHECK
+//  ================================================================
+//
+//  Checks OE/AE trees
+//
+//-
 {
     public:
         RECCHECKSPACE( PIB * const ppib, const REPAIROPTS * const popts );
@@ -292,7 +338,11 @@ class RECCHECKSPACE : public RECCHECK
 };
 
 
+//  ================================================================
 class RECCHECKSPACEEXTENT : public RECCHECKSPACE
+//  ================================================================
+//
+//-
 {
     public:
         RECCHECKSPACEEXTENT(
@@ -317,7 +367,11 @@ class RECCHECKSPACEEXTENT : public RECCHECKSPACE
 };
 
 
+//  ================================================================
 class RECCHECKSPACEOE : public RECCHECKSPACEEXTENT
+//  ================================================================
+//
+//-
 {
     public:
         RECCHECKSPACEOE(
@@ -334,7 +388,11 @@ class RECCHECKSPACEOE : public RECCHECKSPACEEXTENT
 };
 
 
+//  ================================================================
 class RECCHECKSPACEAE : public RECCHECKSPACEEXTENT
+//  ================================================================
+//
+//-
 {
     public:
         RECCHECKSPACEAE(
@@ -351,7 +409,9 @@ class RECCHECKSPACEAE : public RECCHECKSPACEEXTENT
 };
 
 
+//  ================================================================
 struct ENTRYINFO
+//  ================================================================
 {
     ULONG           objidTable;
     SHORT           objType;
@@ -360,7 +420,7 @@ struct ENTRYINFO
     ULONG           pgnoFDPORColType;
     ULONG           dwFlags;
     CHAR            szTemplateTblORCallback[JET_cbNameMost + 1];
-    ULONG           ibRecordOffset;
+    ULONG           ibRecordOffset;     //  offset of record in fixed column
     BYTE            rgbIdxseg[JET_ccolKeyMost*sizeof(IDXSEG)];
     WCHAR           wszLocaleName[ NORM_LOCALE_NAME_MAX_LENGTH ];
     SORTID          sortid;
@@ -391,26 +451,35 @@ struct ENTRYINFO
     }
 };
 
+//  ================================================================
 struct ENTRYTOCHECK
+//  ================================================================
 {
     ULONG           objidTable;
     SHORT           objType;
     ULONG           objidFDP;
 };
 
+//  ================================================================
 struct INFOLIST
+//  ================================================================
 {
     ENTRYINFO       info;
     INFOLIST    *   pInfoListNext;
 };
 
+//  ================================================================
 struct TEMPLATEINFOLIST
+//  ================================================================
 {
     CHAR                    szTemplateTableName[JET_cbNameMost + 1];
     INFOLIST            *   pColInfoList;
     TEMPLATEINFOLIST    *   pTemplateInfoListNext;
 };
 
+//  ****************************************************************
+//  PROTOTYPES
+//  ****************************************************************
 
 LOCAL VOID REPAIRIPrereadIndexesOfFCB( const PIB * const ppib, const FCB * const pfcb );
 
@@ -435,9 +504,11 @@ LOCAL VOID REPAIRDumpLVStats(
 
 LOCAL VOID REPAIRPrintSig( const SIGNATURE * const psig, CPRINTF * const pcprintf );
 
+//
 
 LOCAL JET_ERR __stdcall ErrREPAIRNullStatusFN( JET_SESID, JET_SNP, JET_SNT, void * );
 
+//
 
 LOCAL VOID REPAIRPrintStartMessages( const WCHAR * const wszDatabase, const REPAIROPTS * const popts );
 LOCAL ERR ErrREPAIRCheckDatabaseSize( const WCHAR * const wszDatabase, const IFMP ifmp, const REPAIROPTS * const popts );
@@ -456,6 +527,7 @@ LOCAL ERR ErrREPAIRAttachForIntegrity(
     IFMP * const pifmp,
     const REPAIROPTS * const popts );
 
+// Routines to check the database header, global space tree and catalogs
 
 LOCAL ERR ErrREPAIRCheckHeader(
     INST * const pinst,
@@ -475,6 +547,7 @@ LOCAL ERR ErrREPAIRCheckSystemTables(
     BOOL * const pfDbtimeTooLarge,
     const REPAIROPTS * const popts );
 
+// check the logical consistency of catalogs
 LOCAL ERR ErrREPAIRRetrieveCatalogColumns(
     PIB * const ppib,
     const IFMP ifmp,
@@ -571,6 +644,7 @@ LOCAL ERR ErrREPAIRCheckRange(
     BOOL * const pfMismatch,
     const REPAIROPTS * const popts );
 
+//  Routines to check the space allocation of a table
 
 LOCAL ERR ErrREPAIRGetPgnoOEAE(
     PIB * const ppib,
@@ -615,6 +689,7 @@ LOCAL ERR ErrREPAIRInsertAERunIntoTT(
     const BOOL fOddRun,
     const REPAIROPTS * const popts );
 
+//  Routines to check tables
 
 LOCAL ERR ErrREPAIRStartCheckAllTables(
     PIB * const ppib,
@@ -812,6 +887,7 @@ LOCAL ERR ErrREPAIRCheckLeaf(
     const BOOKMARK * const pbookmarkPrevParent,
     const REPAIROPTS * const popts );
 
+//  Preparing to repair
 
 LOCAL ERR ErrREPAIRCreateTempTables(
     PIB * const ppib,
@@ -819,6 +895,7 @@ LOCAL ERR ErrREPAIRCreateTempTables(
     REPAIRTT * const prepairtt,
     const REPAIROPTS * const popts );
 
+//  Scanning all the pages in the database
 
 LOCAL ERR ErrREPAIRScanDB(
     PIB * const ppib,
@@ -848,6 +925,7 @@ LOCAL ERR ErrREPAIRInsertBadPageIntoTables(
     const REPAIRTABLE * const prepairtable,
     const REPAIROPTS * const popts );
 
+//  Attach the database to repair it, changing the header
 
 LOCAL ERR ErrREPAIRAttachForRepair(
     const JET_SESID sesid,
@@ -870,12 +948,14 @@ LOCAL ERR ErrREPAIRChangeSignature(
     const OBJID objidLast,
     const REPAIROPTS * const popts );
 
+//  Repair the global space tree
 
 LOCAL ERR ErrREPAIRRepairGlobalSpace(
     PIB * const ppib,
     const IFMP ifmp,
     const REPAIROPTS * const popts );
 
+//  Fix the catalogs, copying from the shadow if necessary
 
 LOCAL ERR ErrREPAIRBuildCatalogEntryToDeleteList(
     INFOLIST **ppDeleteList,
@@ -917,6 +997,7 @@ LOCAL ERR ErrREPAIRCopyTempTableToCatalog(
     const JET_COLUMNID columnidData,
     const REPAIROPTS * const popts );
 
+//  Repair ordinary tables
 
 LOCAL ERR ErrREPAIRRepairDatabase(
     PIB * const ppib,
@@ -1051,7 +1132,16 @@ LOCAL ERR ErrREPAIRBuildAllIndexes(
     const REPAIROPTS * const popts );
 
 
+//  ****************************************************************
+//  GLOBALS
+//  ****************************************************************
 
+//  These are typically very large tables. Start integrity checking
+//  them first for maximum overlap
+//
+//  THE TABLENAMES MUST BE IN ASCENDING ALPHABETICAL ORDER
+//  if they are not FIsLargeTable will not work properly!
+//
 
 const CHAR * const rgszLargeTables[] =
 {
@@ -1065,6 +1155,7 @@ const CHAR * const rgszLargeTables[] =
 };
 const INT cszLargeTables = sizeof( rgszLargeTables ) / sizeof( rgszLargeTables[0] );
 
+//  To take advantage of sequential NT I/O round up sequential prereads to this many pages (64K)
 INLINE INT CpgMinRepairSequentialPreread( ULONG cbPageSize )
 {
     return ( 64 * 1024 ) / cbPageSize;
@@ -1079,7 +1170,9 @@ INLINE TraceContextScope TcRepair()
     return tc;
 }
 
+//  ================================================================
 ERR ErrDBUTLRepair( JET_SESID sesid, const JET_DBUTIL_W *pdbutil, CPRINTF* const pcprintf )
+//  ================================================================
 {
     Assert( NULL != pdbutil->szDatabase );
 
@@ -1098,6 +1191,8 @@ ERR ErrDBUTLRepair( JET_SESID sesid, const JET_DBUTIL_W *pdbutil, CPRINTF* const
     WCHAR wszFileExt[ IFileSystemAPI::cchPathMax ];
     WCHAR wszFile[ IFileSystemAPI::cchPathMax ];
 
+    // Cap the number of threads at 100. On massively-parallel systems we hit
+    // diminishing returns, and we'll hit a cap of max sessions. (128 recommended).
     const   INT cThreads            = min( 100, ( CUtilProcessProcessor() * 4 ) );
 
     CPRINTFFN   cprintfStdout( printf );
@@ -1125,6 +1220,8 @@ ERR ErrDBUTLRepair( JET_SESID sesid, const JET_DBUTIL_W *pdbutil, CPRINTF* const
     OSStrCbFormatW(wszFile, sizeof( wszFile ), L"%s%s", wszPrefix, L".INTEG.RAW" );
     CPRINTFFILE cprintfFile( wszFile );
 
+    // we check this only if we are going to use the szFile in the next line
+    //
     if ( pdbutil->grbitOptions & JET_bitDBUtilOptionStats )
     {
         if ( LOSStrLengthW(wszPrefix) + LOSStrLengthW(L".INTGINFO.TXT") >= _countof(wszFile) )
@@ -1150,7 +1247,7 @@ ERR ErrDBUTLRepair( JET_SESID sesid, const JET_DBUTIL_W *pdbutil, CPRINTF* const
 
 #ifdef REPAIR_DEBUG_CALLS
     g_pcprintfRepairDebugCalls = &cprintfError;
-#endif
+#endif  //  REPAIR_DEBUG_CALLS
 
     JET_SNPROG  snprog;
     memset( &snprog, 0, sizeof( JET_SNPROG ) );
@@ -1169,9 +1266,11 @@ ERR ErrDBUTLRepair( JET_SESID sesid, const JET_DBUTIL_W *pdbutil, CPRINTF* const
 
     const REPAIROPTS * const popts = &repairopts;
 
+    //  startup messages
 
     REPAIRPrintStartMessages( wszDatabase, popts );
 
+    //  initialize locals
 
     BOOL            fHeaderNotClean             = fFalse;
     BOOL            fGlobalSpaceCorrupt         = fFalse;
@@ -1204,6 +1303,7 @@ ERR ErrDBUTLRepair( JET_SESID sesid, const JET_DBUTIL_W *pdbutil, CPRINTF* const
 
     memset( &logtimeLastFullBackup, 0, sizeof( logtimeLastFullBackup ) );
 
+    //  unless fDontRepair is set this will set the consistency bit so we can attach
 
     Call( ErrREPAIRCheckHeader(
             pinst,
@@ -1212,6 +1312,7 @@ ERR ErrDBUTLRepair( JET_SESID sesid, const JET_DBUTIL_W *pdbutil, CPRINTF* const
             &fHeaderNotClean,
             popts ) );
 
+    //  popup a message box in repair and ask to continue repair
 
     if ( !( popts->grbit & JET_bitDBUtilOptionSuppressLogo )
         && !( popts->grbit & JET_bitDBUtilOptionDontRepair ) )
@@ -1224,14 +1325,17 @@ ERR ErrDBUTLRepair( JET_SESID sesid, const JET_DBUTIL_W *pdbutil, CPRINTF* const
     
     Call( ErrPIBOpenTempDatabase ( ppib ) );
 
+    //  set the magic switch!
 
     g_fRepair = fTrue;
 
+    //  attach to the database
 
     Call( ErrREPAIRAttachForIntegrity( sesid, wszDatabase, &ifmp, popts ) );
     fAttached   = fTrue;
     fOpened     = fTrue;
 
+    //  make sure the database is a multiple of the page size
 
     err = ErrREPAIRCheckDatabaseSize( wszDatabase, ifmp, popts );
     if ( JET_errDatabaseCorrupted == err )
@@ -1253,9 +1357,11 @@ ERR ErrDBUTLRepair( JET_SESID sesid, const JET_DBUTIL_W *pdbutil, CPRINTF* const
 
     cpgDatabase = PgnoLast( ifmp );
 
+    //  preread the first 2048 pages (8/16 megs)
 
     BFPrereadPageRange( ifmp, pgnoSystemRoot, min( 2048, cpgDatabase ), bfprfDefault, ppib->BfpriPriority( ifmp ), *TcRepair() );
 
+    //  init the TTARRAY's
 
     integglobalsTables.pttarrayOwnedSpace               = new TTARRAY( cpgDatabase + 1, objidSystemRoot );
     integglobalsTables.pttarrayAvailSpace               = new TTARRAY( cpgDatabase + 1, objidNil );
@@ -1271,15 +1377,18 @@ ERR ErrDBUTLRepair( JET_SESID sesid, const JET_DBUTIL_W *pdbutil, CPRINTF* const
     Call( integglobalsTables.pttarrayOwnedSpace->ErrInit( pinst ) );
     Call( integglobalsTables.pttarrayAvailSpace->ErrInit( pinst ) );
 
+    //  init the TASKMGR
 
     (*popts->pcprintfVerbose)( "Creating %d threads\r\n", cThreads );
     Call( taskmgr.ErrInit( pinst, cThreads ) );
 
+    //  init the status bar
 
     snprog.cunitTotal   = cpgDatabase;
     snprog.cunitDone    = 0;
     (VOID)popts->pfnStatus( (JET_SESID)ppib, JET_snpRepair, JET_sntBegin, NULL );
 
+    //  check the global space trees
 
     Call( ErrREPAIRCheckGlobalSpaceTree(
             ppib,
@@ -1292,6 +1401,7 @@ ERR ErrDBUTLRepair( JET_SESID sesid, const JET_DBUTIL_W *pdbutil, CPRINTF* const
             &fDbtimeTooLarge,
             popts ) );
 
+    //  check the catalog and shadow catalog
 
     Call( ErrREPAIRCheckSystemTables(
             ppib,
@@ -1305,6 +1415,8 @@ ERR ErrDBUTLRepair( JET_SESID sesid, const JET_DBUTIL_W *pdbutil, CPRINTF* const
             &fDbtimeTooLarge,
             popts ) );
 
+    // IF   at least one of catalogs is physically consistent
+    // THEN Check the logical consistency of catalogs
     if ( !fCatalogCorrupt || !fShadowCatalogCorrupt )
     {
         BOOL fPgnoFDPMarkedAsAvail = fFalse;
@@ -1328,6 +1440,7 @@ ERR ErrDBUTLRepair( JET_SESID sesid, const JET_DBUTIL_W *pdbutil, CPRINTF* const
     }
 
 
+    //  if needed we have to repair the catalog right now so that we can access the other tables
 
     if ( fCatalogCorrupt || fShadowCatalogCorrupt )
     {
@@ -1343,14 +1456,22 @@ ERR ErrDBUTLRepair( JET_SESID sesid, const JET_DBUTIL_W *pdbutil, CPRINTF* const
             }
             else
             {
+                //  we only have to bail out of integrity checking the database if the catalog
+                //  is corrupted. if the shadow is corrupted that shouldn't stop us
             }
         }
         else
         {
 
+            //  We don't know the dbtimeLast yet. We'll find it when we scan the database
+            //  and attach for repair again. we set the dbtimeLast to 1. This will be
+            //  fine as we will set the dbtime in the header later and when these pages are updated
+            //  later they will get a good dbtime
 
             Call( ErrREPAIRAttachForRepair( sesid, wszDatabase, &ifmp, 1, objidNil, popts ) );
 
+            //  some pgnoFDPs in the catalog may be in the global availExt. The easiest way to deal with this
+            //  is to repair the global space tree
 
             Call( ErrREPAIRRepairGlobalSpace( ppib, ifmp, popts ) );
             fGlobalSpaceCorrupt     = fFalse;
@@ -1367,6 +1488,7 @@ ERR ErrDBUTLRepair( JET_SESID sesid, const JET_DBUTIL_W *pdbutil, CPRINTF* const
                         popts ) );
             (*popts->pcprintfVerbose).Unindent();
 
+            //  Flush the entire database so that if we crash here we don't have to repair the catalogs again
 
             (VOID)ErrBFFlush( ifmp );
 
@@ -1376,6 +1498,8 @@ ERR ErrDBUTLRepair( JET_SESID sesid, const JET_DBUTIL_W *pdbutil, CPRINTF* const
                 cpgDatabase = PgnoLast( ifmp );
             }
 
+            //Space tree may change after repairing catalog
+            //Re-build pttarrayOwnedSpace, pttarrayAvailSpace and ppgnocollShelved
             Call( ErrREPAIRRecheckSpaceTreeAndSystemTablesSpace(
                         ppib,
                         ifmp,
@@ -1391,8 +1515,10 @@ ERR ErrDBUTLRepair( JET_SESID sesid, const JET_DBUTIL_W *pdbutil, CPRINTF* const
             fShadowCatalogCorrupt   = fFalse;
             fRepairedCatalog        = fTrue;
 
+            // done repairing catalogs
             (VOID)popts->pfnStatus( (JET_SESID)ppib, JET_snpRepair, JET_sntComplete, NULL );
 
+            // continue integrity check
             (*popts->pcprintf)( "\r\nChecking the database.\r\n"  );
             popts->psnprog->cunitTotal  = cpgDatabase;
             popts->psnprog->cunitDone   = 0;
@@ -1400,6 +1526,8 @@ ERR ErrDBUTLRepair( JET_SESID sesid, const JET_DBUTIL_W *pdbutil, CPRINTF* const
         }
     }
 
+    //  check all the normal tables in the system
+    //  if this returns JET_errDatabaseCorrupted it means there is a corruption in the catalog
 
     Call( ErrREPAIRStartCheckAllTables(
             ppib,
@@ -1410,9 +1538,12 @@ ERR ErrDBUTLRepair( JET_SESID sesid, const JET_DBUTIL_W *pdbutil, CPRINTF* const
             &integglobalsTables,
             popts ) );
 
+    //  terminate the taskmgr. once all the threads have stopped all the checks will
+    //  have been done and we can collect the results
 
     Call( taskmgr.ErrTerm() );
 
+    //  were any tables corrupt?
 
     Call( ErrREPAIRStopCheckTables(
                 &integglobalsTables,
@@ -1423,6 +1554,9 @@ ERR ErrDBUTLRepair( JET_SESID sesid, const JET_DBUTIL_W *pdbutil, CPRINTF* const
         objidLast = objidNil + 1;
     }
 
+    //  if we don't think the global space tree is corrupt, check to see
+    //  if any of the pages beyond the end of the global OwnExt are actually
+    //  being used by other tables
 
     if ( !fGlobalSpaceCorrupt )
     {
@@ -1438,6 +1572,8 @@ ERR ErrDBUTLRepair( JET_SESID sesid, const JET_DBUTIL_W *pdbutil, CPRINTF* const
         else if ( pgnoLastPhysical > pgnoLastLogical )
         {
 
+            //  make sure that every page from the logical last to the
+            //  physical last is owned by the database
 
             (*popts->pcprintfWarning)( "Database file is too big (expected %d pages, file is %d pages)\r\n",
                                         pgnoLastLogical, pgnoLastPhysical );
@@ -1461,13 +1597,17 @@ ERR ErrDBUTLRepair( JET_SESID sesid, const JET_DBUTIL_W *pdbutil, CPRINTF* const
         }
     }
 
+    //  finished with the integrity checking phase
 
     (VOID)popts->pfnStatus( (JET_SESID)ppib, JET_snpRepair, JET_sntComplete, NULL );
     (*popts->pcprintfVerbose).Unindent();
 
+    //  repair the database, or exit if we are just doing an integrity check
 
     Assert( !fCatalogCorrupt );
 
+    //  need to scan the database if we repaired the catalog and
+    //  no tables are corrupt. the dbtime, objid must be set and bad pages must be zeroed out
 
     if ( fHeaderNotClean ||
         fTablesCorrupt ||
@@ -1480,8 +1620,16 @@ ERR ErrDBUTLRepair( JET_SESID sesid, const JET_DBUTIL_W *pdbutil, CPRINTF* const
 
         if ( !( popts->grbit & JET_bitDBUtilOptionDontRepair ) )
         {
+            // we have corruptions but the database is repair
+            // is disallowed based on the database content
             if ( integglobalsTables.fRepairDisallowed )
             {
+                // the best we can do is run defrag and hope for the best
+                // so we will instruct eseutil to do this
+                //
+                // UNDONE: shall we display a specific message here to say
+                // that we have corrution but we will try defrag only?
+                //
                 err = ErrERRCheck( JET_errDatabaseCorruptedNoRepair );
             }
             else
@@ -1553,6 +1701,7 @@ HandleError:
 
     g_fRepair = fGlobalRepairSave;
 
+    // Track every usage of repair, failed or successful
     if ( !( popts->grbit & JET_bitDBUtilOptionDontRepair ) )
     {
         OSDiagTrackRepair( err );
@@ -1561,24 +1710,33 @@ HandleError:
     return err;
 }
 
+//  ================================================================
 LOCAL VOID CheckRepairGrbit( JET_GRBIT * pgrbit )
+//  ================================================================
 {
     if ( (*pgrbit) & JET_bitDBUtilOptionRepairCheckOnly )
     {
+        //  these two grbits are mutually exclusive
         Assert( !( (*pgrbit) & JET_bitDBUtilOptionDontRepair ) );
 
+        // popup a message box and ask if continue repairing
         if ( !FUtilRepairIntegrityMsgBox( cwszRepairCheckContinueMsg ) )
         {
+            // only check integrity and no repair
             (*pgrbit) |= JET_bitDBUtilOptionDontRepair;
         }
+        // Unset the flag
         (*pgrbit) &= ~JET_bitDBUtilOptionRepairCheckOnly;
     }
 }
 
+//  ================================================================
 BOOL FIsLargeTable( const CHAR * const szTable )
+//  ================================================================
 {
 #ifdef DEBUG
 
+    //  check to make sure the rgszLargeTables is in order
 
     static INT fChecked = fFalse;
     if ( !fChecked )
@@ -1590,7 +1748,7 @@ BOOL FIsLargeTable( const CHAR * const szTable )
         }
         fChecked = fTrue;
     }
-#endif
+#endif  //  DEBUG
 
     INT isz;
     for( isz = 0; isz < cszLargeTables; ++isz )
@@ -1602,6 +1760,8 @@ BOOL FIsLargeTable( const CHAR * const szTable )
         }
         if ( cmp < 0 )
         {
+            //  all other table names in the array will be greater than this as
+            //  well. we can stop checking here
             return fFalse;
         }
     }
@@ -1609,17 +1769,21 @@ BOOL FIsLargeTable( const CHAR * const szTable )
 }
 
 
+//  ================================================================
 LOCAL PGNO PgnoLast( const IFMP ifmp )
+//  ================================================================
 {
     return g_rgfmp[ifmp].PgnoLast();
 }
 
 
+//  ================================================================
 LOCAL VOID REPAIRIPrereadIndexesOfFCB( const PIB * const ppib, const FCB * const pfcb )
+//  ================================================================
 {
     const INT cSecondaryIndexesToPreread = 64;
 
-    PGNO rgpgno[cSecondaryIndexesToPreread + 1];
+    PGNO rgpgno[cSecondaryIndexesToPreread + 1];    //  NULL-terminated
     INT ipgno = 0;
     const FCB * pfcbT = pfcb->PfcbNextIndex();
 
@@ -1634,12 +1798,14 @@ LOCAL VOID REPAIRIPrereadIndexesOfFCB( const PIB * const ppib, const FCB * const
 }
 
 
+//  ================================================================
 LOCAL VOID REPAIRDumpStats(
     PIB * const ppib,
     const IFMP ifmp,
     const PGNO pgnoFDP,
     const BTSTATS * const pbtstats,
     const REPAIROPTS * const popts )
+//  ================================================================
 {
     if ( !(popts->grbit & JET_bitDBUtilOptionStats ) )
     {
@@ -1677,6 +1843,7 @@ LOCAL VOID REPAIRDumpStats(
         cbKeyPrefixes   += pbtstats->rgckeyPrefixLeaf[ikey] * ikey;
     }
 
+    //  take the total size of the keys, compare with the space actually used
 
     const QWORD cbSavings = cbKeyTotal - ( cbKeySuffixes + cbKeyPrefixes + ( pbtstats->cnodeCompressed * 2 ) );
 
@@ -1692,12 +1859,14 @@ LOCAL VOID REPAIRDumpStats(
 }
 
 
+//  ================================================================
 LOCAL VOID REPAIRDumpLVStats(
     PIB * const ppib,
     const IFMP ifmp,
     const PGNO pgnoFDP,
     const LVSTATS * const plvstats,
     const REPAIROPTS * const popts )
+//  ================================================================
 {
     if ( !(popts->grbit & JET_bitDBUtilOptionStats ) )
     {
@@ -1724,7 +1893,9 @@ LOCAL VOID REPAIRDumpLVStats(
 }
 
 
+//  ================================================================
 LOCAL_BROKEN VOID REPAIRDumpHex( __out_bcount(cbDest) CHAR * const szDest, INT cbDest, __in_bcount(cb) const BYTE * const pb, const INT cb )
+//  ================================================================
 {
     const BYTE * const pbMax = pb + cb;
     const BYTE * pbT = pb;
@@ -1752,7 +1923,9 @@ LOCAL_BROKEN VOID REPAIRDumpHex( __out_bcount(cbDest) CHAR * const szDest, INT c
 }
 
 
+//  ================================================================
 LOCAL VOID REPAIRPrintSig( const SIGNATURE * const psig, CPRINTF * const pcprintf )
+//  ================================================================
 {
     (*pcprintf)( "Create time:" );
     DUMPPrintSig( pcprintf, psig );
@@ -1760,7 +1933,9 @@ LOCAL VOID REPAIRPrintSig( const SIGNATURE * const psig, CPRINTF * const pcprint
 }
 
 
+//  ================================================================
 LOCAL VOID REPAIRPrintStartMessages( const WCHAR * const wszDatabase, const REPAIROPTS * const popts )
+//  ================================================================
 {
     (*popts->pcprintfStats)( "***** %s of database '%ws' started [%ws version %02d.%02d.%04d.%04d, (%ws)]\r\n\r\n",
                 ( popts->grbit & JET_bitDBUtilOptionDontRepair ) ? "Integrity check" : "Repair",
@@ -1793,10 +1968,12 @@ LOCAL VOID REPAIRPrintStartMessages( const WCHAR * const wszDatabase, const REPA
 }
 
 
+//  ================================================================
 LOCAL ERR ErrREPAIRCheckDatabaseSize(
     const WCHAR * const wszDatabase,
     const IFMP ifmp,
     const REPAIROPTS * const popts )
+//  ================================================================
 {
     ERR err = JET_errSuccess;
 
@@ -1834,10 +2011,12 @@ HandleError:
 }
 
 
+//  ================================================================
 LOCAL ERR ErrREPAIRFixDatabaseSize(
     const WCHAR * const wszDatabase,
     const IFMP ifmp,
     const REPAIROPTS * const popts )
+//  ================================================================
 {
     ERR err = JET_errSuccess;
 
@@ -1862,7 +2041,9 @@ HandleError:
 }
 
 
+//  ================================================================
 LOCAL VOID REPAIRFreeRepairtables( REPAIRTABLE * const prepairtable )
+//  ================================================================
 {
     REPAIRTABLE * prepairtableT = prepairtable;
 
@@ -1876,10 +2057,12 @@ LOCAL VOID REPAIRFreeRepairtables( REPAIRTABLE * const prepairtable )
 }
 
 
+//  ================================================================
 LOCAL VOID REPAIRPrintEndMessages(
             const WCHAR * const wszDatabase,
             const ULONG timerStart,
             const REPAIROPTS * const popts )
+//  ================================================================
 {
     const ULONG timerEnd = TickOSTimeCurrent();
     (*popts->pcprintfStats)( "\r\n\r\n" );
@@ -1891,9 +2074,11 @@ LOCAL VOID REPAIRPrintEndMessages(
 }
 
 
+//  ================================================================
 LOCAL VOID INTEGRITYPrintEndErrorMessages(
     const LOGTIME logtimeLastFullBackup,
     const REPAIROPTS * const popts )
+//  ================================================================
 {
     (*popts->pcprintf)( "\r\nIntegrity check completed.  " );
     if ( 0 == logtimeLastFullBackup.bYear && 0 == logtimeLastFullBackup.bMonth &&
@@ -1914,18 +2099,28 @@ LOCAL VOID INTEGRITYPrintEndErrorMessages(
 }
 
 
+//  ================================================================
 LOCAL JET_ERR __stdcall ErrREPAIRNullStatusFN( JET_SESID, JET_SNP, JET_SNT, void * )
+//  ================================================================
 {
     return JET_errSuccess;
 }
 
 
+//  ================================================================
 LOCAL ERR ErrREPAIRCheckHeader(
     INST * const pinst,
     const WCHAR * const wszDatabase,
     LOGTIME * const plogtimeLastFullBackup,
     BOOL * const pfHeaderNotClean,
     const REPAIROPTS * const popts )
+//  ================================================================
+//
+//  Force the database to a consistent state and change the signature
+//  so that we will not be able to use the logs against the database
+//  again
+//
+//-
 {
     ERR err = JET_errSuccess;
 
@@ -1995,6 +2190,7 @@ LOCAL ERR ErrREPAIRCheckHeader(
             (*popts->pcprintf)( "yet to be placed in the database.\r\n\n" );
             (*popts->pcprintf)( "To ensure the database is up-to-date please use the 'Recovery' operation.\r\n\n" );
 
+            // popup a message box and warn inconsistency in integrity check
             if ( ( popts->grbit & JET_bitDBUtilOptionDontRepair )
                 && !( popts->grbit & JET_bitDBUtilOptionSuppressLogo ) )
             {
@@ -2009,6 +2205,7 @@ LOCAL ERR ErrREPAIRCheckHeader(
     }
 
 
+    // Get the last full backup info
     if ( NULL != plogtimeLastFullBackup )
     {
         *plogtimeLastFullBackup = pdbfilehdr->bkinfoFullPrev.logtimeMark;
@@ -2021,6 +2218,7 @@ HandleError:
 }
 
 
+//  ================================================================
 LOCAL ERR ErrREPAIRCheckSystemTables(
     PIB * const ppib,
     const IFMP ifmp,
@@ -2032,6 +2230,7 @@ LOCAL ERR ErrREPAIRCheckSystemTables(
     PgnoCollection * const ppgnocollShelved,
     BOOL * const pfDbtimeTooLarge,
     const REPAIROPTS * const popts )
+//  ================================================================
 {
     ERR err = JET_errSuccess;
     FUCB * pfucbCatalog = pfucbNil;
@@ -2064,6 +2263,7 @@ LOCAL ERR ErrREPAIRCheckSystemTables(
     CHECKTABLE checktableMSO_NameIndex;
     CHECKTABLE checktableMSO_RootObjectIndex;
 
+    //  MSO
 
     checktableMSO.ifmp                          = ifmp;
     OSStrCbCopyA(checktableMSO.szTable, sizeof(checktableMSO.szTable), szMSO );
@@ -2082,6 +2282,7 @@ LOCAL ERR ErrREPAIRCheckSystemTables(
     Call( ptaskmgr->ErrPostTask( REPAIRCheckTreeAndSpaceTask, (ULONG_PTR)&checktableMSO ) );
     (*popts->pcprintfVerbose)( "%s %s\r\n", checktableMSO.szTable, checktableMSO.szIndex  );
 
+    //  MSOShadow
 
     checktableMSOShadow.ifmp                    = ifmp;
     OSStrCbCopyA(checktableMSOShadow.szTable, sizeof(checktableMSOShadow.szTable), szMSOShadow );
@@ -2100,6 +2301,7 @@ LOCAL ERR ErrREPAIRCheckSystemTables(
     Call( ptaskmgr->ErrPostTask( REPAIRCheckTreeAndSpaceTask, (ULONG_PTR)&checktableMSOShadow ) );
     (*popts->pcprintfVerbose)( "%s %s\r\n", checktableMSOShadow.szTable, checktableMSOShadow.szIndex  );
 
+    //  wait for the check of MSO to finish so the space tables are up to date
 
     checktableMSO.signal.Wait();
     Call( integglobalsCatalog.err );
@@ -2107,6 +2309,7 @@ LOCAL ERR ErrREPAIRCheckSystemTables(
     if ( !integglobalsCatalog.fCorruptionSeen )
     {
 
+        //  MSO ==> MSO_NameIndex
 
         checktableMSO_NameIndex.ifmp                = ifmp;
         OSStrCbCopyA(checktableMSO_NameIndex.szTable, sizeof(checktableMSO_NameIndex.szTable), szMSO );
@@ -2125,6 +2328,7 @@ LOCAL ERR ErrREPAIRCheckSystemTables(
         Call( ptaskmgr->ErrPostTask( REPAIRCheckTreeAndSpaceTask, (ULONG_PTR)&checktableMSO_NameIndex ) );
         (*popts->pcprintfVerbose)( "%s %s\r\n", checktableMSO_NameIndex.szTable, checktableMSO_NameIndex.szIndex  );
 
+        //  MSO ==> MSO_RootObjectIndex
 
         checktableMSO_RootObjectIndex.ifmp              = ifmp;
         OSStrCbCopyA(checktableMSO_RootObjectIndex.szTable, sizeof(checktableMSO_RootObjectIndex.szTable), szMSO );
@@ -2143,6 +2347,7 @@ LOCAL ERR ErrREPAIRCheckSystemTables(
         Call( ptaskmgr->ErrPostTask( REPAIRCheckTreeAndSpaceTask, (ULONG_PTR)&checktableMSO_RootObjectIndex ) );
         (*popts->pcprintfVerbose)( "%s %s\r\n", checktableMSO_RootObjectIndex.szTable, checktableMSO_RootObjectIndex.szIndex  );
 
+        //  wait for the index checks
 
         checktableMSO_NameIndex.signal.Wait();
         checktableMSO_RootObjectIndex.signal.Wait();
@@ -2150,13 +2355,16 @@ LOCAL ERR ErrREPAIRCheckSystemTables(
         Call( integglobalsCatalog.err );
     }
 
+    //  wait for the shadow catalog
 
     checktableMSOShadow.signal.Wait();
     Call( integglobalsShadowCatalog.err );
 
+    //  were there any corruptions?
 
     *pfShadowCatalogCorrupt = integglobalsShadowCatalog.fCorruptionSeen;
 
+    //  rebuild the indexes of the catalog
 
     if ( !integglobalsCatalog.fCorruptionSeen )
     {
@@ -2191,6 +2399,7 @@ LOCAL ERR ErrREPAIRCheckSystemTables(
             goto HandleError;
         }
 
+        //  if we made it this far, the catalog must be fine
 
         *pfCatalogCorrupt       = fFalse;
     }
@@ -2209,12 +2418,14 @@ HandleError:
 
 
 
+//  ================================================================
 LOCAL ERR ErrREPAIRRetrieveCatalogColumns(
     PIB * const ppib,
     const IFMP ifmp,
     FUCB * pfucbCatalog,
     ENTRYINFO * const pentryinfo,
     const REPAIROPTS * const popts )
+//  ================================================================
 {
     const INT   cColumnsToRetrieve      = 12;
     JET_RETRIEVECOLUMN  rgretrievecolumn[ cColumnsToRetrieve ];
@@ -2223,6 +2434,7 @@ LOCAL ERR ErrREPAIRRetrieveCatalogColumns(
 
     memset( rgretrievecolumn, 0, sizeof( rgretrievecolumn ) );
 
+    // Fixed columns.
 
     rgretrievecolumn[iretrievecolumn].columnid      = fidMSO_ObjidTable;
     rgretrievecolumn[iretrievecolumn].pvData        = (BYTE *)&( pentryinfo->objidTable );
@@ -2260,6 +2472,7 @@ LOCAL ERR ErrREPAIRRetrieveCatalogColumns(
     rgretrievecolumn[iretrievecolumn].itagSequence  = 1;
     ++iretrievecolumn;
 
+    // Variable columns
     rgretrievecolumn[iretrievecolumn].columnid      = fidMSO_Name;
     rgretrievecolumn[iretrievecolumn].pvData        = (BYTE *)( pentryinfo->szName );
     rgretrievecolumn[iretrievecolumn].cbData        = sizeof( pentryinfo->szName );
@@ -2296,8 +2509,10 @@ LOCAL ERR ErrREPAIRRetrieveCatalogColumns(
     rgretrievecolumn[iretrievecolumn].itagSequence  = 1;
     ++iretrievecolumn;
 
+    // Ensure we have the correct number of columns.
     Assert( iretrievecolumn == _countof( rgretrievecolumn ) );
 
+    // We don't want to have un-init data show up if the column is NULL.
     pentryinfo->szName[ 0 ] = 0;
     pentryinfo->wszLocaleName[ 0 ] = L'\0';
 
@@ -2307,6 +2522,7 @@ LOCAL ERR ErrREPAIRRetrieveCatalogColumns(
                 rgretrievecolumn,
                 iretrievecolumn ) );
 
+    //  null-terminate this string (just in case!)
 
     pentryinfo->szName[ sizeof( pentryinfo->szName ) - 1] = 0;
     pentryinfo->wszLocaleName[ _countof( pentryinfo->wszLocaleName ) - 1] = L'\0';
@@ -2316,11 +2532,13 @@ HandleError:
 }
 
 
+//  ================================================================
 LOCAL ERR ErrREPAIRInsertIntoTemplateInfoList(
     TEMPLATEINFOLIST ** ppTemplateInfoList,
     const CHAR * szTemplateTable,
     INFOLIST * const pInfoList,
     const REPAIROPTS * const popts )
+//  ================================================================
 {
     ERR                     err             = JET_errSuccess;
     TEMPLATEINFOLIST    *   pTemplateInfo;
@@ -2330,13 +2548,15 @@ LOCAL ERR ErrREPAIRInsertIntoTemplateInfoList(
 
     memset( pTemplateInfo, 0, sizeof(TEMPLATEINFOLIST) );
 
+    //  table name should have been pre-validated, but be defensive just in case
+    //
     Assert( strlen( szTemplateTable ) <= JET_cbNameMost );
     OSStrCbCopyA( pTemplateInfo->szTemplateTableName, sizeof(pTemplateInfo->szTemplateTableName), szTemplateTable);
 
     pTemplateInfo->pColInfoList = pInfoList;
     pTemplateInfo->pTemplateInfoListNext = NULL;
 
-    if ( NULL == pTemp )
+    if ( NULL == pTemp ) // empty list
     {
         *ppTemplateInfoList = pTemplateInfo;
     }
@@ -2354,7 +2574,9 @@ HandleError:
 }
 
 
+//  ================================================================
 LOCAL VOID REPAIRUtilCleanInfoList( INFOLIST **ppInfo )
+//  ================================================================
 {
     INFOLIST *pTemp = *ppInfo;
 
@@ -2366,7 +2588,9 @@ LOCAL VOID REPAIRUtilCleanInfoList( INFOLIST **ppInfo )
     }
 }
 
+//  ================================================================
 LOCAL VOID REPAIRUtilCleanInfoLists( INFOLIST * rgpInfo[], const INT cpInfo )
+//  ================================================================
 {
     for( INT ipInfo = 0; ipInfo < cpInfo; ++ipInfo )
     {
@@ -2375,7 +2599,9 @@ LOCAL VOID REPAIRUtilCleanInfoLists( INFOLIST * rgpInfo[], const INT cpInfo )
 }
 
 
+//  ================================================================
 LOCAL VOID REPAIRUtilCleanTemplateInfoList( TEMPLATEINFOLIST **ppTemplateInfoList )
+//  ================================================================
 {
     TEMPLATEINFOLIST *pTemp = *ppTemplateInfoList;
 
@@ -2388,18 +2614,22 @@ LOCAL VOID REPAIRUtilCleanTemplateInfoList( TEMPLATEINFOLIST **ppTemplateInfoLis
     }
 }
 
+//  ================================================================
 LOCAL ERR ErrREPAIRCheckOneColumnLogical(
     PIB * const ppib,
     FUCB * const pfucbCatalog,
     const ENTRYINFO entryinfo,
     const ULONG objidTable,
     const REPAIROPTS * const popts )
+//  ================================================================
 {
     ERR             err         = JET_errSuccess;
 
-#ifdef DEAD_CODE
+#ifdef DEAD_CODE // for record purpose
+    // ERROR: column is escrow && no default value
     if ( entryinfo.dwFlags & JET_bitColumnEscrowUpdate )
     {
+        // Check default value
         BYTE    rgbDefaultValue[cbDefaultValueMost];
         ULONG   cbActual = 0;
 
@@ -2419,7 +2649,7 @@ LOCAL ERR ErrREPAIRCheckOneColumnLogical(
             Call( ErrERRCheck( JET_errDatabaseCorrupted ) );
         }
     }
-#endif
+#endif // DEAD_CODE
 
     Call( err );
 
@@ -2428,6 +2658,7 @@ HandleError:
 }
 
 
+//  ================================================================
 LOCAL VOID REPAIRCheckIndexColumnsOldFormat(
     const OBJID objidTable,
     const ENTRYINFO entryinfo,
@@ -2435,6 +2666,13 @@ LOCAL VOID REPAIRCheckIndexColumnsOldFormat(
     const INFOLIST * const pTemplateColInfo,
     BOOL * const pfCorrupted,
     const REPAIROPTS * const popts )
+//  ================================================================
+//
+//  Without the TDB we can't determine if a column belongs to a
+//  template table or not. We'll look in both places and assume
+//  the one we find is correct
+//
+//-
 {
     *pfCorrupted = fFalse;
 
@@ -2476,7 +2714,7 @@ LOCAL VOID REPAIRCheckIndexColumnsOldFormat(
             }
         }
 
-        if ( !pinfolistT )
+        if ( !pinfolistT )  // not find any table column that matches this column in an index
         {
             (*popts->pcprintfError)( "Column %d from index %s (%d) does not exist in the table (%d) \r\n",
                                     fid, entryinfo.szName, entryinfo.objidFDP, objidTable );
@@ -2492,6 +2730,7 @@ LOCAL VOID REPAIRCheckIndexColumnsOldFormat(
 }
 
 
+//  ================================================================
 LOCAL VOID REPAIRCheckIndexColumnsExtendedFormat(
     const OBJID objidTable,
     const ENTRYINFO entryinfo,
@@ -2499,6 +2738,7 @@ LOCAL VOID REPAIRCheckIndexColumnsExtendedFormat(
     const INFOLIST * const pTemplateColInfo,
     BOOL * const pfCorrupted,
     const REPAIROPTS * const popts )
+//  ================================================================
 {
     *pfCorrupted = fFalse;
 
@@ -2517,6 +2757,8 @@ LOCAL VOID REPAIRCheckIndexColumnsExtendedFormat(
         }
 
         const INFOLIST  * pinfolistT = NULL;
+        //  if this is a template table, pTemplateColInfo will be NULL
+        //  we should check against our own columns
         if ( !rgidxseg[iidxseg].FTemplateColumn() || !pTemplateColInfo )
         {
             pinfolistT = pColInfoList;
@@ -2535,7 +2777,7 @@ LOCAL VOID REPAIRCheckIndexColumnsExtendedFormat(
             pinfolistT = pinfolistT->pInfoListNext;
         }
 
-        if ( !pinfolistT )
+        if ( !pinfolistT )  // not find any table column that matches this column in an index
         {
             (*popts->pcprintfError)( "Column %d (FID = %d) from index %s (%d) does not exist in the table (%d) \r\n",
                                     rgidxseg[iidxseg].Columnid(), rgidxseg[iidxseg].Fid(), entryinfo.szName, entryinfo.objidFDP, objidTable );
@@ -2551,6 +2793,7 @@ LOCAL VOID REPAIRCheckIndexColumnsExtendedFormat(
 }
 
 
+//  ================================================================
 LOCAL ERR ErrREPAIRCheckOneIndexLogical(
     PIB * const ppib,
     const IFMP ifmp,
@@ -2565,6 +2808,7 @@ LOCAL ERR ErrREPAIRCheckOneIndexLogical(
     const BOOL fDerivedTable,
     const CHAR * pszTemplateTableName,
     const REPAIROPTS * const popts )
+//  ================================================================
 {
     ERR             err                 = JET_errSuccess;
     ULONG           fPrimaryIndex       = fidbPrimary & entryinfo.dwFlags;
@@ -2572,6 +2816,7 @@ LOCAL ERR ErrREPAIRCheckOneIndexLogical(
 
     INFOLIST        *   pTemplateColInfo    = NULL;
 
+    // check index entry itself
 
     if ( objidTable == entryinfo.objidFDP && !fPrimaryIndex )
     {
@@ -2614,6 +2859,7 @@ LOCAL ERR ErrREPAIRCheckOneIndexLogical(
         fCorrupted = fTrue;
     }
 
+    // Check if a column in an index is a table column
 
     if ( fDerivedTable )
     {
@@ -2670,10 +2916,12 @@ LOCAL ERR ErrREPAIRCheckOneIndexLogical(
 }
 
 
+//  ================================================================
 ERR ErrREPAIRInsertEntryinfoIntoPgnoFDPInfolist(
     INFOLIST **ppInfo,
     const ENTRYINFO entryinfo,
     const REPAIROPTS * const popts )
+//  ================================================================
 {
     ERR             err         = JET_errSuccess;
     INFOLIST    *   pInfo;
@@ -2694,6 +2942,8 @@ ERR ErrREPAIRInsertEntryinfoIntoPgnoFDPInfolist(
 
     while ( pTemp && pTemp->info.pgnoFDPORColType <= pInfo->info.pgnoFDPORColType )
     {
+        //  Check uniqueness of pgnoFDP
+        //  A primary index has the same pgnoFDP as its table
         if ( pTemp->info.pgnoFDPORColType == pInfo->info.pgnoFDPORColType
             &&  ( sysobjTable != pTemp->info.objType
                 || sysobjIndex != pInfo->info.objType ) )
@@ -2725,10 +2975,12 @@ HandleError:
 }
 
 
+//  ================================================================
 ERR ErrREPAIRInsertEntryinfoIntoObjidInfolist(
     INFOLIST **ppInfo,
     const ENTRYINFO entryinfo,
     const REPAIROPTS * const popts )
+//  ================================================================
 {
     ERR             err         = JET_errSuccess;
     INFOLIST    *   pInfo;
@@ -2749,6 +3001,8 @@ ERR ErrREPAIRInsertEntryinfoIntoObjidInfolist(
 
     while ( pTemp && pTemp->info.objidFDP <= pInfo->info.objidFDP )
     {
+        // Check uniqueness of objid
+        //  A primary index has the same objid as its table
         if ( pTemp->info.objidFDP == pInfo->info.objidFDP
             &&  ( sysobjTable != pTemp->info.objType
                 || sysobjIndex != pInfo->info.objType ) )
@@ -2780,6 +3034,7 @@ HandleError:
 }
 
 
+//  ================================================================
 ERR ErrREPAIRInsertEntryinfoIntoInfolists(
     INFOLIST *rgpinfoObjid[],
     INFOLIST *rgpinfoPgnoFDP[],
@@ -2787,6 +3042,7 @@ ERR ErrREPAIRInsertEntryinfoIntoInfolists(
     const ENTRYINFO entryinfo,
     BOOL * const pfTableCorrupted,
     const REPAIROPTS * const popts )
+//  ================================================================
 {
     ERR err = JET_errSuccess;
 
@@ -2818,10 +3074,12 @@ HandleError:
 }
 
 
+//  ================================================================
 ERR ErrREPAIRInsertEntryinfoIntoInfolist(
     INFOLIST **ppInfo,
     const ENTRYINFO entryinfo,
     const REPAIROPTS * const popts )
+//  ================================================================
 {
     ERR             err         = JET_errSuccess;
     INFOLIST    *   pInfo;
@@ -2834,21 +3092,24 @@ ERR ErrREPAIRInsertEntryinfoIntoInfolist(
     pInfo->info = entryinfo;
     pInfo->pInfoListNext = NULL;
 
-    if (NULL == pTemp )
+    if (NULL == pTemp ) // empty list
     {
         *ppInfo = pInfo;
         fAddedIntoList = fTrue;
     }
     else
     {
+        // at least one element in the linked list
         do
         {
+            // Check uniqueness of name
             if ( !strcmp( pTemp->info.szName, pInfo->info.szName ) )
             {
                 (*popts->pcprintfError)( "Two object have the same name (%s)\r\n", pInfo->info.szName );
                 Call( ErrERRCheck( JET_errDatabaseCorrupted ) );
             }
 
+            // Check uniqueness of pgnoFDP for Indexes
             if ( sysobjIndex == pInfo->info.objType  &&
                 pTemp->info.pgnoFDPORColType == pInfo->info.pgnoFDPORColType )
             {
@@ -2857,6 +3118,7 @@ ERR ErrREPAIRInsertEntryinfoIntoInfolist(
                 Call( ErrERRCheck( JET_errDatabaseCorrupted ) );
             }
 
+            // Check uniqueness of objid
             if ( pTemp->info.objidFDP == pInfo->info.objidFDP )
             {
                 (*popts->pcprintfError)( "Duplicated objid (%d) in objects %s and %s\r\n",
@@ -2867,7 +3129,7 @@ ERR ErrREPAIRInsertEntryinfoIntoInfolist(
 
             if ( NULL == pTemp->pInfoListNext )
             {
-                pTemp->pInfoListNext = pInfo;
+                pTemp->pInfoListNext = pInfo; // always inserted into the end of the list
                 fAddedIntoList = fTrue;
                 break;
             }
@@ -2889,6 +3151,7 @@ HandleError:
 }
 
 
+//  ================================================================
 LOCAL ERR ErrREPAIRICheckCatalogEntryPgnoFDPs(
     PIB * const ppib,
     const IFMP ifmp,
@@ -2900,14 +3163,20 @@ LOCAL ERR ErrREPAIRICheckCatalogEntryPgnoFDPs(
     PgnoCollection * const ppgnocollShelved,
     BOOL * const pfPgnoFDPMarkedAsAvail,
     const REPAIROPTS * const popts )
+//  ================================================================
 {
     ERR             err = JET_errSuccess;
 
     ULONG   ulpgno = 0;
 
+    //  preread
 
     BFPrereadPageList( ifmp, prgpgno, bfprfDefault, ppib->BfpriPriority( ifmp ), *TcRepair() );
 
+    //  see if any of the pages are marked as available
+    //  DO NOT INITIALIZE pfPgnoFDPMarkedAsAvail TO fFalse!
+    //  this routine is called multiple times and we want to accumulate
+    //  the results. the caller must initialize the variable
 
     Assert( ( pttarrayAvailSpace == NULL ) == ( ppgnocollShelved == NULL ) );
     Assert( ( pttarrayAvailSpace == NULL ) == ( pfPgnoFDPMarkedAsAvail == NULL ) );
@@ -2919,6 +3188,7 @@ LOCAL ERR ErrREPAIRICheckCatalogEntryPgnoFDPs(
             Call( pttarrayAvailSpace->ErrGetValue( ppib, prgpgno[ulpgno], &objidAvail ) );
             objidAvail &= 0x7fffffff;
 
+            // getting either objidNil or objidInsert is OK
 
             if ( objidNil != objidAvail )
             {
@@ -2933,9 +3203,11 @@ LOCAL ERR ErrREPAIRICheckCatalogEntryPgnoFDPs(
         }
     }
 
+    //  check
 
     for(ulpgno = 0; pgnoNull != prgpgno[ulpgno]; ulpgno++ )
     {
+        //  check the root page of an index
         OBJID objidIndexFDP = 0;
         CSR csr;
 
@@ -2955,6 +3227,7 @@ LOCAL ERR ErrREPAIRICheckCatalogEntryPgnoFDPs(
         }
         csr.ReleasePage( fTrue );
 
+        //  error: the root page of a tree belongs to another objid
         if ( prgentryToCheck[ulpgno].objidFDP != objidIndexFDP
             && sysobjTable != prgentryToCheck[ulpgno].objType )
         {
@@ -2967,6 +3240,7 @@ LOCAL ERR ErrREPAIRICheckCatalogEntryPgnoFDPs(
             (*popts->pcprintfError)( "Catalog entry corruption: page %d belongs to %d (expected %d)\r\n",
                                     prgpgno[ulpgno], objidIndexFDP, entryinfo.objidFDP );
 
+            //  Collect Corrupted catalog entry info for future use
             if ( fFix )
             {
                 Call( ErrREPAIRBuildCatalogEntryToDeleteList( ppEntriesToDelete, entryinfo ) );
@@ -2983,6 +3257,7 @@ HandleError:
 }
 
 
+//  ================================================================
 LOCAL ERR ErrREPAIRCheckFixCatalogLogical(
     PIB * const ppib,
     const IFMP ifmp,
@@ -2994,6 +3269,7 @@ LOCAL ERR ErrREPAIRCheckFixCatalogLogical(
     PgnoCollection * const ppgnocollShelved,
     BOOL * const pfPgnoFDPMarkedAsAvail,
     const REPAIROPTS * const popts )
+//  ================================================================
 {
     ERR             err             = JET_errSuccess;
     FUCB        *   pfucbCatalog    = pfucbNil;
@@ -3024,16 +3300,18 @@ LOCAL ERR ErrREPAIRCheckFixCatalogLogical(
     INFOLIST    *   pTablesToDelete = NULL;
     INFOLIST    *   pEntriesToDelete = NULL;
 
-    const INT       cpgnoFDPToPreread       = 64;
+    const INT       cpgnoFDPToPreread       = 64; // max pgnoFDP to pre-read
 
-    PGNO            rgpgno[cpgnoFDPToPreread + 1];
+    PGNO            rgpgno[cpgnoFDPToPreread + 1]; //  NULL-terminated
     ENTRYTOCHECK    rgentryToCheck[cpgnoFDPToPreread + 1];
     ULONG           ulCount = 0;
 
     ULONG           ulpgno;
 
+    //  having one long linked list of PgnoFDPs and Objids was too slow (O(n^2))
+    //  the cheap-n-cheesy approach is to use overflow hashing to speed this up
 
-    const INT       cHash = ( 1024 * 1024 ) - 1;
+    const INT       cHash = ( 1024 * 1024 ) - 1;    //  each array will be 4MB/8MB (32-bit/64-bit)
 
     INFOLIST    **  rgpinfoObjid = 0;
     INFOLIST    **  rgpinfoPgnoFDP = 0;
@@ -3046,7 +3324,11 @@ LOCAL ERR ErrREPAIRCheckFixCatalogLogical(
 
     *pcTables = 0;
 
+    //  DO NOT INITIALIZE pfPgnoFDPMarkedAsAvail TO fFalse!
+    //  this routine is called multiple times and we want to accumulate
+    //  the results. the caller must initialize the variable
 
+    //  initialize
 
     for( ulpgno = 0; ulpgno <= cpgnoFDPToPreread; ulpgno++ )
     {
@@ -3062,6 +3344,7 @@ LOCAL ERR ErrREPAIRCheckFixCatalogLogical(
     err = ErrIsamMove( ppib, pfucbCatalog, JET_MoveFirst, NO_GRBIT );
     if ( err == JET_errNoCurrentRecord )
     {
+        //  we expect at least one record in these tables
         err = ErrERRCheck( JET_errDatabaseCorrupted );
     }
     Call( err );
@@ -3075,6 +3358,7 @@ LOCAL ERR ErrREPAIRCheckFixCatalogLogical(
 
         if ( objidSystemRoot == entryinfo.objidTable    && !fSeenCorruptedTable )
         {
+            // special tables
 
             objidTableCurr = entryinfo.objidTable;
 
@@ -3086,10 +3370,13 @@ LOCAL ERR ErrREPAIRCheckFixCatalogLogical(
         }
         else if ( objidTableCurr != entryinfo.objidTable )
         {
+            //  we are on the first record of a different table
             ++(*pcTables);
 
+            // Clean the info of previous table
             if ( fTemplateTable && !fSeenCorruptedTable )
             {
+                // We need keep template table column info
                 Call( ErrREPAIRInsertIntoTemplateInfoList(
                                 &pTemplateInfoList,
                                 szTemplateTable,
@@ -3102,8 +3389,10 @@ LOCAL ERR ErrREPAIRCheckFixCatalogLogical(
             }
             REPAIRUtilCleanInfoList ( &pIdxInfo );
 
+            // Start checking new table info
             objidTableCurr = entryinfo.objidTable;
 
+            // set up some info for new table
             fSeenCorruptedTable = fFalse;
             objidTableCurr      = entryinfo.objidTable;
             pgnoFDPTableCurr    = entryinfo.pgnoFDPORColType;
@@ -3126,6 +3415,7 @@ LOCAL ERR ErrREPAIRCheckFixCatalogLogical(
 
             if ( sysobjTable != entryinfo.objType )
             {
+                //  ERROR: the first record must be sysobjTable
                 (*popts->pcprintfError)( "Invalid object type for object %s (%d, expected %d)\r\n",
                                         entryinfo.szName, entryinfo.objType, sysobjTable );
                 fSeenCorruptedTable = fTrue;
@@ -3162,6 +3452,7 @@ LOCAL ERR ErrREPAIRCheckFixCatalogLogical(
 
                     if ( NULL == pTemplateListT )
                     {
+                        //  did not find the template table
                         (*popts->pcprintfError)("Template table (%s) does not exist\r\n", szTemplateTable );
                         fSeenCorruptedTable = fTrue;
                     }
@@ -3175,22 +3466,27 @@ LOCAL ERR ErrREPAIRCheckFixCatalogLogical(
         }
         else if ( !fSeenCorruptedTable )
         {
+            // check the logical correctness of a table
             Assert( objidTableCurr == entryinfo.objidTable );
 
             switch ( entryinfo.objType )
             {
                 case sysobjTable:
+                    //  ERROR: multiple table record;
                     (*popts->pcprintfError)("Multiple table records for a table (%d) in a catalog\r\n", entryinfo.objidTable );
                     fSeenCorruptedTable = fTrue;
                     break;
 
                 case sysobjColumn:
+                    //  don't insert the column into the list if it is JET_coltypNil
+                    //  that means its a deleted column and shouldn't be seen
                     if ( JET_coltypNil == entryinfo.pgnoFDPORColType )
                     {
                         err = JET_errSuccess;
                     }
                     else
                     {
+                        //  check column info and store it into column linked list
                         err = ErrREPAIRCheckOneColumnLogical(
                                     ppib,
                                     pfucbCatalog,
@@ -3242,6 +3538,7 @@ LOCAL ERR ErrREPAIRCheckFixCatalogLogical(
                     }
                     Call( err );
 
+                    //  check index info and store it into index linked list
                     err = ErrREPAIRInsertEntryinfoIntoInfolist(
                                 &pIdxInfo,
                                 entryinfo,
@@ -3259,6 +3556,7 @@ LOCAL ERR ErrREPAIRCheckFixCatalogLogical(
                 case sysobjLongValue:
                     if ( fSeenLongValue )
                     {
+                        //  ERROR: multiple long-value records
                         (*popts->pcprintfError)("Multiple long-value records for a table (%d) in a catalog\r\n", entryinfo.objidTable );
                         fSeenCorruptedTable = fTrue;
                     }
@@ -3282,6 +3580,7 @@ LOCAL ERR ErrREPAIRCheckFixCatalogLogical(
                 case sysobjCallback:
                     if ( fSeenCallback )
                     {
+                        //  ERROR: multiple callbacks
                         (*popts->pcprintfError)("Multiple callbacks for a table (%d) in a catalog\r\n", entryinfo.objidTable );
                         fSeenCorruptedTable = fTrue;
                     }
@@ -3289,18 +3588,21 @@ LOCAL ERR ErrREPAIRCheckFixCatalogLogical(
                     break;
 
                 default:
+                    //  ERROR
                     (*popts->pcprintfError)("Invalid Object Type (%d) for a table (%d) in a catalog\r\n", entryinfo.objType, entryinfo.objidTable );
                     fSeenCorruptedTable = fTrue;
                     break;
-            }
+            } //switch
         }
         else
         {
+            // Inside a table that has already been found corruption
             Assert( fSeenCorruptedTable && objidTableCurr == entryinfo.objidTable );
         }
 
         if ( fSeenCorruptedIndex )
         {
+            //Collect Corrupted index info for future use
             if ( fFix )
             {
                 Call( ErrREPAIRBuildCatalogEntryToDeleteList( &pEntriesToDelete, entryinfo ) );
@@ -3314,6 +3616,7 @@ LOCAL ERR ErrREPAIRCheckFixCatalogLogical(
 
         if ( fSeenCorruptedTable && objidLastCorruptedTable != entryinfo.objidTable )
         {
+            //Collect Corrupted table info for future use
             if ( fFix )
             {
                 Call( ErrREPAIRBuildCatalogEntryToDeleteList( &pTablesToDelete, entryinfo ) );
@@ -3343,6 +3646,8 @@ LOCAL ERR ErrREPAIRCheckFixCatalogLogical(
 
         err = ErrIsamMove( ppib, pfucbCatalog, JET_MoveNext, NO_GRBIT );
 
+        //  special case:
+        //  test if the root page in an index belongs to objid
 
         if ( 0 == ( ulCount % ( cpgnoFDPToPreread - 1 ) )
              || JET_errNoCurrentRecord == err )
@@ -3363,6 +3668,7 @@ LOCAL ERR ErrREPAIRCheckFixCatalogLogical(
                 Call( errT );
             }
 
+            //reset the array for future use
             for( ulpgno = 0; (ulpgno < (sizeof(rgpgno)/sizeof(PGNO))) && (pgnoNull != rgpgno[ulpgno]); ulpgno++ )
             {
                 Assert( cpgnoFDPToPreread > ulpgno );
@@ -3372,10 +3678,11 @@ LOCAL ERR ErrREPAIRCheckFixCatalogLogical(
 
         }
 
-    }
+    } // while ( JET_errNoCurrentRecord != err )
 
     if ( JET_errNoCurrentRecord == err )
     {
+        //  expected error: we are at the end of catalog
         err = JET_errSuccess;
     }
 
@@ -3389,6 +3696,7 @@ HandleError:
 
     if ( fFix && ( pTablesToDelete || pEntriesToDelete ) )
     {
+        // Delete corrupted table entries in catalog
         (*popts->pcprintfVerbose)( "Deleting corrupted catalog entries\r\n" );
         err = ErrREPAIRDeleteCorruptedEntriesFromCatalog(
                     ppib,
@@ -3402,6 +3710,7 @@ HandleError:
         }
     }
 
+    // clean
     REPAIRUtilCleanInfoList( &pColInfo );
     REPAIRUtilCleanInfoList( &pIdxInfo );
     REPAIRUtilCleanInfoList( &pTablesToDelete );
@@ -3422,10 +3731,12 @@ HandleError:
     return err;
 }
 
+//  ================================================================
 LOCAL ERR ErrREPAIRCompareCatalogs(
     PIB * const ppib,
     const IFMP ifmp,
     const REPAIROPTS * const popts )
+//  ================================================================
 {
     ERR             err             = JET_errSuccess;
     FUCB        *   pfucbCatalog    = pfucbNil;
@@ -3477,11 +3788,17 @@ LOCAL ERR ErrREPAIRCompareCatalogs(
                   entryinfoShadow.pgnoFDPORColType == JET_coltypNil )
 
         {
+            //  there has to be a next record (to match with the catalog's record); 
+            //  so NoCurrentRecord is fatal.
             Call( ErrIsamMove( ppib, pfucbShadow, JET_MoveNext, NO_GRBIT ) );
         }
         else if ( entryinfo.objType           == sysobjColumn &&
                   entryinfo.pgnoFDPORColType == JET_coltypNil )
         {
+            //  this can happen if we are trying to repair a database from a dirty shutdown state.
+            //  The catalog might have been flushed, but not the shadow, so they may contain
+            //  divergent data.
+            //  Treat as a corruption because future DDL operations may fail when they try to update the shadow.
             (*popts->pcprintfVerbose)( "Deleted column is missing from the shadow catalog\r\n" );
             Error( ErrERRCheck( JET_errDatabaseCorrupted ) );
         }
@@ -3522,6 +3839,7 @@ HandleError:
 
 
 
+//  ================================================================
 LOCAL ERR ErrREPAIRCheckSystemTablesLogical(
     PIB * const ppib,
     const IFMP ifmp,
@@ -3534,10 +3852,13 @@ LOCAL ERR ErrREPAIRCheckSystemTablesLogical(
     PgnoCollection * const ppgnocollShelved,
     BOOL * const pfPgnoFDPMarkedAsAvail,
     const REPAIROPTS * const popts )
+//  ================================================================
 {
     ERR             err             = JET_errSuccess;
-    const BOOL      fFix            = fFalse;
+    const BOOL      fFix            = fFalse;   // Don't fix
 
+    // Enter this function when we did not find corruption
+    // in at least one catalog from physical check
     Assert( ! ( *pfCatalogCorrupt ) || !( *pfShadowCatalogCorrupt ) );
 
     (*popts->pcprintfVerbose)( "checking logical consistency of system tables\r\n" );
@@ -3581,6 +3902,11 @@ LOCAL ERR ErrREPAIRCheckSystemTablesLogical(
         ERR errT = ErrREPAIRCompareCatalogs( ppib, ifmp, popts );
         if ( errT < 0 )
         {
+            //  shadow catalogs tend to be more up-to-date because they are flushed more aggressively
+            //  than the catalog. however, they are only used for DDL operations. when we have a mismatch
+            //  after both the catalog and shadow pass logical checks, we go with the catalog that has more
+            //  tables to maximize our chance to salvage data. treating both the catalog and shadow as 
+            //  corrupt triggers a full database scan-based union operation that is considered too risky 
 
             if ( cTablesInCatalog >= cTablesInShadowCatalog )
             {
@@ -3595,6 +3921,8 @@ LOCAL ERR ErrREPAIRCheckSystemTablesLogical(
         }
     }
 
+    //  We can only verify MSObjids if the catalog is ok. If the catalog is bad or 
+    //  there is any other problem with the table, report it as corrupt. 
     *pfMSObjidsCorrupt = fTrue;
     if ( !*pfCatalogCorrupt )
     {
@@ -3610,6 +3938,11 @@ LOCAL ERR ErrREPAIRCheckSystemTablesLogical(
         }
     }
 
+    //  Very much like MSObjids, we can only verify MSLocales if the catalog is ok. If the catalog is bad or 
+    //  there is any other problem with the table, report it as corrupt. 
+    //
+    //  We will only look at MSLocales if it does exist. So if g_rgfmp[ifmp].PkvpsMSysLocales() is NULL, there
+    //  is no MSLocales to look at and it is not corrupt.
     *pfMSLocalesCorrupt = ( NULL != g_rgfmp[ifmp].PkvpsMSysLocales() );
     if ( !*pfCatalogCorrupt && *pfMSLocalesCorrupt )
     {
@@ -3634,6 +3967,7 @@ HandleError:
     return err;
 }
 
+//  ================================================================
 LOCAL ERR ErrREPAIRCheckGlobalSpaceTree(
     PIB * const ppib,
     const IFMP ifmp,
@@ -3644,6 +3978,7 @@ LOCAL ERR ErrREPAIRCheckGlobalSpaceTree(
     PgnoCollection * const ppgnocollShelved,
     BOOL * const pfDbtimeTooLarge,
     const REPAIROPTS * const popts )
+//  ================================================================
 {
     ERR err = JET_errSuccess;
     bool fInTransaction = false;
@@ -3727,6 +4062,7 @@ HandleError:
 
     switch ( err )
     {
+        //  we should never normally get these errors. morph them into corrupted database errors
         case JET_errNoCurrentRecord:
         case JET_errRecordDeleted:
         case JET_errRecordNotFound:
@@ -3748,6 +4084,7 @@ HandleError:
 }
 
 
+//  ================================================================
 LOCAL ERR ErrREPAIRCheckRange(
     PIB * const ppib,
     TTARRAY * const pttarray,
@@ -3757,6 +4094,11 @@ LOCAL ERR ErrREPAIRCheckRange(
     const ULONG ulValue,
     BOOL * const pfMismatch,
     const REPAIROPTS * const popts )
+//  ================================================================
+//
+//  Make sure all entries in the ttarray are equal to the given value
+//
+//-
 {
     ERR err = JET_errSuccess;
     TTARRAY::RUN run;
@@ -3784,6 +4126,11 @@ HandleError:
 }
 
 
+// repair is not allowed on NTDS.DITs.
+// Lackin a better mechanism (and the need to
+// have a small change) we will decide this based
+// on the presence "datatable" and a "hidden"
+//
 
 const CHAR * const rgszRepairDisallowedTables[] =
 {
@@ -3802,7 +4149,7 @@ LOCAL ERR ErrDBRepairDisallowed(
     INT     isz;
 #ifdef DEBUG
     INT     iTableFound     = 0;
-#endif
+#endif // DEBUG
 
 
     Assert( pfRepairDisallowed );
@@ -3829,6 +4176,9 @@ LOCAL ERR ErrDBRepairDisallowed(
 
         if ( JET_errRecordNotFound == err )
         {
+            // This object not present in this database
+            // so we can exit here and decide that the database
+            // is allowed to be repaired
             Assert( !(*pfRepairDisallowed) );
             err = JET_errSuccess;
             goto HandleError;
@@ -3836,10 +4186,12 @@ LOCAL ERR ErrDBRepairDisallowed(
         Call( err );
 
 #ifdef DEBUG
+        // we found one of the tables
         iTableFound++;
-#endif
+#endif // DEBUG
     }
 
+    // we found all tables we are looking for
     Assert ( iTableFound == cszRepairDisallowedTables );
     (*pfRepairDisallowed) = fTrue;
 
@@ -3848,6 +4200,7 @@ HandleError:
 }
 
 
+//  ================================================================
 LOCAL ERR ErrREPAIRStartCheckAllTables(
     PIB * const ppib,
     const IFMP ifmp,
@@ -3856,11 +4209,14 @@ LOCAL ERR ErrREPAIRStartCheckAllTables(
     BOOL * const pfDbtimeTooLarge,
     INTEGGLOBALS * const pintegglobals,
     const REPAIROPTS * const popts )
+//  ================================================================
+//
+//-
 {
     ERR     err             = JET_errSuccess;
     FUCB    *pfucbCatalog   = pfucbNil;
     DATA    data;
-    BOOL    fCorruptionSeen = fFalse;
+    BOOL    fCorruptionSeen = fFalse;   //  true if we have seen corruption in the catalog itself
 
     pintegglobals->fCorruptionSeen              = fFalse;
     pintegglobals->err                          = JET_errSuccess;
@@ -3876,6 +4232,9 @@ LOCAL ERR ErrREPAIRStartCheckAllTables(
     FUCBSetSequential( pfucbCatalog );
     FUCBSetPrereadForward( pfucbCatalog, cpgPrereadSequential );
 
+    // even if repair is not allowed, we keep going to check
+    // for corruptions. We will consider the flag set above
+    // before the repair phase
     Call( ErrDBRepairDisallowed( ppib, pfucbCatalog, &(pintegglobals->fRepairDisallowed) ) );
 
     if ( pintegglobals->fRepairDisallowed )
@@ -3885,6 +4244,7 @@ LOCAL ERR ErrREPAIRStartCheckAllTables(
 
     Call( ErrIsamSetCurrentIndex( ppib, pfucbCatalog, szMSORootObjectsIndex ) );
 
+    //  check the large tables first for maximum overlap
 
     INT isz;
     for( isz = 0; isz < cszLargeTables && !fCorruptionSeen; ++isz )
@@ -3905,6 +4265,7 @@ LOCAL ERR ErrREPAIRStartCheckAllTables(
         err = ErrIsamSeek( ppib, pfucbCatalog, JET_bitSeekEQ );
         if ( JET_errRecordNotFound == err )
         {
+            //  This large table not present in this database
             continue;
         }
         Call( err );
@@ -3951,6 +4312,8 @@ LOCAL ERR ErrREPAIRStartCheckAllTables(
             UtilMemCpy( szTable, data.Pv(), cbData );
             szTable[cbData] = 0;
 
+            //  if this is a catalog or a large table it will
+            //  already have been checked
 
             if ( !FCATSystemTable( szTable )
                 && !FIsLargeTable( szTable ) )
@@ -3997,13 +4360,16 @@ HandleError:
 }
 
 
+//  ================================================================
 LOCAL ERR ErrREPAIRStopCheckTables( const INTEGGLOBALS * const pintegglobals, BOOL * const pfCorrupt )
+//  ================================================================
 {
     *pfCorrupt = pintegglobals->fCorruptionSeen;
     return pintegglobals->err;
 }
 
 
+//  ================================================================
 LOCAL ERR ErrREPAIRPostTableTask(
     PIB * const ppib,
     const IFMP ifmp,
@@ -4014,6 +4380,11 @@ LOCAL ERR ErrREPAIRPostTableTask(
     TASKMGR * const ptaskmgr,
     BOOL * const pfCorrupted,
     const REPAIROPTS * const popts )
+//  ================================================================
+//
+//  Takes a latched FUCB, returns an unlatched FUCB
+//
+//-
 {
     ERR err = JET_errSuccess;
     DATA data;
@@ -4106,7 +4477,7 @@ LOCAL ERR ErrREPAIRPostTableTask(
                 &data ) );
     CallS( err );
     Assert( 0 == _strnicmp( szTable, reinterpret_cast<CHAR *>( data.Pv() ), data.Cb() ) );
-#endif
+#endif  //  DEBUG
 
     OBJID objidTable;
     Assert( FFixedFid( fidMSO_Id ) );
@@ -4143,6 +4514,8 @@ LOCAL ERR ErrREPAIRPostTableTask(
             Error( ErrERRCheck( JET_errOutOfMemory ) );
         }
 
+        //  table name should have been pre-validated, but be defensive just in case
+        //
         Assert( strlen( szTable ) <= JET_cbNameMost );
         OSStrCbCopyA( pchecktable->szTable, sizeof(pchecktable->szTable), szTable );
 
@@ -4163,6 +4536,7 @@ LOCAL ERR ErrREPAIRPostTableTask(
         if ( err < 0 )
         {
             Assert( JET_errOutOfMemory == err );
+            //  we were not able to post this
             delete pchecktable;
             Call( err );
         }
@@ -4176,9 +4550,11 @@ HandleError:
 }
 
 
+//  ================================================================
 LOCAL VOID REPAIRCheckTreeAndSpaceTask( PIB * const ppib, const ULONG_PTR ul )
+//  ================================================================
 {
-    TASKMGR::TASK task = REPAIRCheckTreeAndSpaceTask;
+    TASKMGR::TASK task = REPAIRCheckTreeAndSpaceTask;   // should only compile if the signatures match
 
     Unused( task );
 
@@ -4210,6 +4586,7 @@ LOCAL VOID REPAIRCheckTreeAndSpaceTask( PIB * const ppib, const ULONG_PTR ul )
 
     switch ( err )
     {
+        //  we should never normally get these errors. morph them into corrupted database errors
         case JET_errNoCurrentRecord:
         case JET_errRecordDeleted:
         case JET_errRecordNotFound:
@@ -4225,10 +4602,12 @@ LOCAL VOID REPAIRCheckTreeAndSpaceTask( PIB * const ppib, const ULONG_PTR ul )
 
     if ( JET_errDatabaseCorrupted == err )
     {
+        //  we just need to set this, it will never be unset
         pchecktable->pglobals->fCorruptionSeen = fTrue;
     }
     else if ( err < 0 )
     {
+        //  we'll just keep the last non-corrupting error
         pchecktable->pglobals->err = err;
     }
 
@@ -4247,9 +4626,11 @@ LOCAL VOID REPAIRCheckTreeAndSpaceTask( PIB * const ppib, const ULONG_PTR ul )
 }
 
 
+//  ================================================================
 LOCAL VOID REPAIRCheckOneTableTask( PIB * const ppib, const ULONG_PTR ul )
+//  ================================================================
 {
-    TASKMGR::TASK task = REPAIRCheckOneTableTask;
+    TASKMGR::TASK task = REPAIRCheckOneTableTask;   // should only compile if the signatures match
 
     Unused( task );
 
@@ -4280,10 +4661,12 @@ LOCAL VOID REPAIRCheckOneTableTask( PIB * const ppib, const ULONG_PTR ul )
 
     if ( JET_errDatabaseCorrupted == err )
     {
+        //  we just need to set this, it will never be unset
         pchecktable->pglobals->fCorruptionSeen = fTrue;
     }
     else if ( err < 0 )
     {
+        //  we'll just keep the last non-corrupting error
         pchecktable->pglobals->err = err;
     }
 
@@ -4310,6 +4693,7 @@ LOCAL VOID REPAIRCheckOneTableTask( PIB * const ppib, const ULONG_PTR ul )
 }
 
 
+//  ================================================================
 LOCAL ERR ErrREPAIRCheckOneTable(
     PIB * const ppib,
     const IFMP ifmp,
@@ -4323,6 +4707,7 @@ LOCAL ERR ErrREPAIRCheckOneTable(
     PgnoCollection * const ppgnocollShelved,
     BOOL * const pfDbtimeTooLarge,
     const REPAIROPTS * const popts )
+//  ================================================================
 {
     ERR     err;
 
@@ -4341,12 +4726,14 @@ LOCAL ERR ErrREPAIRCheckOneTable(
 
     const ULONG timerStart          = TickOSTimeCurrent();
 
+    //  preread the first extent
 
     const CPG   cpgToPreread        = min(
                                         CPG( g_rgfmp[ifmp].PgnoLast() - pgnoFDP + 1 ),
                                         max( cpgPrimaryExtent, CpgMinRepairSequentialPreread( g_rgfmp[ifmp].CbPage() ) ) );
     BFPrereadPageRange( ifmp, pgnoFDP, cpgToPreread, bfprfDefault, ppib->BfpriPriority( ifmp ), *TcRepair() );
 
+    //  do not pass in the pgnoFDP (forces lookup of the objid)
 
     err = ErrFILEOpenTable( ppib, ifmp, &pfucbTable, szTable, JET_bitTableTryPurgeOnClose );
 
@@ -4375,9 +4762,11 @@ LOCAL ERR ErrREPAIRCheckOneTable(
     Call( err );
 
 
+    //  preread the indexes of the table
 
     REPAIRIPrereadIndexesOfFCB( ppib, pfcbTable );
 
+    //  check for a LV tree
 
     Call( ErrCATAccessTableLV( ppib, ifmp, objidTable, &pgnoLV, &objidLV ) );
     if ( pgnoNull != pgnoLV )
@@ -4412,6 +4801,8 @@ LOCAL ERR ErrREPAIRCheckOneTable(
             pfDbtimeTooLarge,
             popts ) );
 
+    //  check the long-value tree if it exists
+    //  CONSIDER:  multi-thread this by checking the LV tree and data trees in separate threads
 
     if ( pgnoNull != pgnoLV )
     {
@@ -4422,7 +4813,7 @@ LOCAL ERR ErrREPAIRCheckOneTable(
         RECCHECKLVSTATS recchecklvstats( &lvstats );
         RECCHECKMACRO   reccheckmacro;
         reccheckmacro.Add( &recchecklvstats );
-        reccheckmacro.Add( &recchecklv );
+        reccheckmacro.Add( &recchecklv );   // put this last so that warnings are returned
         (*popts->pcprintfVerbose)( "checking long value tree (%d)\r\n", objidLV );
         Call( ErrREPAIRCheckTreeAndSpace(
                 ppib,
@@ -4451,6 +4842,7 @@ LOCAL ERR ErrREPAIRCheckOneTable(
         fRepairLV = fFalse;
     }
 
+    //  check the main table
 
     (*popts->pcprintfStats)( "\r\n\r\n" );
     (*popts->pcprintfStats)( "===== table \"%s\" =====\r\n", szTable );
@@ -4472,6 +4864,7 @@ LOCAL ERR ErrREPAIRCheckOneTable(
             pfDbtimeTooLarge,
             popts ) );
 
+    //  check all secondary indexes
 
     for(
         pfcbIndex = pfucbTable->u.pfcb->PfcbNextIndex();
@@ -4503,12 +4896,19 @@ LOCAL ERR ErrREPAIRCheckOneTable(
     }
 
 
+    //  if any indexes have to be repaired because they are physically corrupt, we have to repair the table as well,
+    //  to make sure the space tree of the table is repaired. corruption above means that not all of the indexes were checked
+    //  so we don't know if the table's space tree was OK
 
     fRepairTable = fFalse;
 
+    //  if the table gets rebuilt, we should rebuild the LV tree. this works around a bug where the pgnoParent in the SPACE_HEADER
+    //  of the LV tree is no longer correct because a new pgnoFDP has been assigned to the table. If the table isn't being repaired
+    //  we don't need to repair the LV tree.
 
     fRepairLV = fFalse;
 
+    //  compare LV refcounts found in the table to LV refcounts found in the LV tree
 
     if ( pgnoNull != pgnoLV )
     {
@@ -4517,6 +4917,7 @@ LOCAL ERR ErrREPAIRCheckOneTable(
     }
     else
     {
+        // LV tree does not exist, LV refcounts found in the table should be 0
         err = ttmapLVRefcountsFromTable.ErrMoveFirst();
         if ( JET_errNoCurrentRecord != err )
         {
@@ -4528,13 +4929,14 @@ LOCAL ERR ErrREPAIRCheckOneTable(
             Call( ErrERRCheck( JET_errDatabaseCorrupted ) );
         }
         else
-        {
+        { // expected result from a good table
             err = JET_errSuccess;
         }
     }
 
     fRepairLVRefcounts  = fFalse;
 
+    //  rebuild the indexes
 
     if ( !( popts->grbit & JET_bitDBUtilOptionDontBuildIndexes ) )
     {
@@ -4569,6 +4971,7 @@ LOCAL ERR ErrREPAIRCheckOneTable(
 HandleError:
     switch ( err )
     {
+        //  we should never normally get these errors. morph them into corrupted database errors
         case JET_errNoCurrentRecord:
         case JET_errRecordDeleted:
         case JET_errRecordNotFound:
@@ -4607,6 +5010,8 @@ HandleError:
 
     if ( JET_errDatabaseCorrupted == err && !( popts->grbit & JET_bitDBUtilOptionDontRepair ) )
     {
+        //  store all the pgnos that we are interested in
+        //  the error handling here is sloppy (running out of memory will cause a leak)
 
         Assert( pfcbNil != pfcbTable );
 
@@ -4669,11 +5074,22 @@ HandleError:
 Abort:
     if ( pfucbNil != pfucbTable )
     {
+///     FCB * const pfcbTable = pfucbTable->u.pfcb;
 
         CallS( ErrFILECloseTable( ppib, pfucbTable ) );
 
+        //  BUGFIX: purge the FCB to avoid confusion with other tables/indexes with have
+        //  the same pgnoFDP (corrupted catalog)
 
+        //  BUGFIX: callbacks can open this table so we can no longer guarantee that
+        //  the FCB is not referenced.
+        //  UNDONE: get a better way to avoid duplicate pgnoFDP problems
 
+///     if ( pfcbTable && !pfcbTable->FTemplateTable() )
+///         {
+///         pfcbTable->PrepareForPurge();
+///         pfcbTable->Purge();
+///         }
     }
 
     (*popts->pcprintfVerbose).Unindent();
@@ -4699,12 +5115,14 @@ Abort:
 }
 
 
+//  ================================================================
 LOCAL ERR ErrREPAIRCompareLVRefcounts(
     PIB * const ppib,
     const IFMP ifmp,
     TTMAP& ttmapLVRefcountsFromTable,
     TTMAP& ttmapLVRefcountsFromLV,
     const REPAIROPTS * const popts )
+//  ================================================================
 {
     ERR err = JET_errSuccess;
 
@@ -4728,6 +5146,7 @@ LOCAL ERR ErrREPAIRCompareLVRefcounts(
     }
     Call( err );
 
+    //  repeat while we have at least one set of refcounts
 
     while (     !fNoMoreRefcountsFromTable
             || !fNoMoreRefcountsFromLV )
@@ -4759,6 +5178,8 @@ LOCAL ERR ErrREPAIRCompareLVRefcounts(
         if ( lidFromTable > lidFromLV )
         {
 
+            //  we see a lid in the LV-tree that is not referenced in the table
+            //  its an orphaned LV. WARNING
 
             (*popts->pcprintfWarning)( "orphaned LV (lid 0x%I64x, refcount %d). Offline defragmentation should fix this.\r\n", lidFromLV, ulRefcountFromLV );
 
@@ -4766,6 +5187,7 @@ LOCAL ERR ErrREPAIRCompareLVRefcounts(
         else if ( lidFromLV > lidFromTable )
         {
 
+            //  we see a lid in the table that doesn't exist in the LV tree. ERROR
 
             (*popts->pcprintfError)( "record references non-existant LV (lid 0x%I64x, refcount %d)\r\n",
                                     lidFromTable, ulRefcountFromTable );
@@ -4775,6 +5197,7 @@ LOCAL ERR ErrREPAIRCompareLVRefcounts(
         {
             Assert( lidFromTable == lidFromLV );
 
+            //  the refcount in the LV tree is too low. ERROR
 
             (*popts->pcprintfError)( "LV refcount too low (lid 0x%I64x, refcount %d, correct refcount %d)\r\n",
                                         lidFromLV, ulRefcountFromLV, ulRefcountFromTable );
@@ -4785,6 +5208,7 @@ LOCAL ERR ErrREPAIRCompareLVRefcounts(
         {
             Assert( lidFromTable == lidFromLV );
 
+            //  the refcount in the LV tree is too high. WARNING
 
             (*popts->pcprintfWarning)( "LV refcount too high (lid 0x%I64x, refcount %d, correct refcount %d). Offline defragmentation should fix this.\r\n",
                                         lidFromLV, ulRefcountFromLV, ulRefcountFromTable );
@@ -4793,6 +5217,7 @@ LOCAL ERR ErrREPAIRCompareLVRefcounts(
         else
         {
 
+            //  perfect match. no error
 
             Assert( lidFromTable == lidFromLV );
             Assert( ulRefcountFromTable == ulRefcountFromLV );
@@ -4831,11 +5256,13 @@ HandleError:
 }
 
 
+//  ================================================================
 LOCAL ERR ErrREPAIRCreateTempTables(
     PIB * const ppib,
     const BOOL fRepairGlobalSpace,
     REPAIRTT * const prepairtt,
     const REPAIROPTS * const popts )
+//  ================================================================
 {
     ERR err = JET_errSuccess;
 
@@ -4845,7 +5272,8 @@ LOCAL ERR ErrREPAIRCreateTempTables(
         { sizeof( JET_COLUMNDEF ), 0, JET_coltypNil, 0, 0, 0, 0, 0, JET_bitColumnTTKey }
     };
 
-    rgcolumndef[0].coltyp = JET_coltypLong;
+    //  BadPages
+    rgcolumndef[0].coltyp = JET_coltypLong; // Pgno
     Call( ErrIsamOpenTempTable(
         reinterpret_cast<JET_SESID>( ppib ),
         rgcolumndef,
@@ -4857,8 +5285,9 @@ LOCAL ERR ErrREPAIRCreateTempTables(
         JET_cbKeyMost_OLD,
         JET_cbKeyMost_OLD ) );
 
-    rgcolumndef[0].coltyp = JET_coltypLong;
-    rgcolumndef[1].coltyp = JET_coltypLong;
+    //  Owned
+    rgcolumndef[0].coltyp = JET_coltypLong; // ObjidFDP
+    rgcolumndef[1].coltyp = JET_coltypLong; // Pgno
     Call( ErrIsamOpenTempTable(
         reinterpret_cast<JET_SESID>( ppib ),
         rgcolumndef,
@@ -4870,10 +5299,11 @@ LOCAL ERR ErrREPAIRCreateTempTables(
         JET_cbKeyMost_OLD,
         JET_cbKeyMost_OLD ) );
 
-    rgcolumndef[0].coltyp = JET_coltypLong;
-    rgcolumndef[1].coltyp = JET_coltypLongBinary;
-    rgcolumndef[2].grbit  = NO_GRBIT;
-    rgcolumndef[2].coltyp = JET_coltypLong;
+    //  Used
+    rgcolumndef[0].coltyp = JET_coltypLong;         // ObjidFDP
+    rgcolumndef[1].coltyp = JET_coltypLongBinary;   // Key
+    rgcolumndef[2].grbit  = NO_GRBIT;               // allows us to catch duplicates (same objid/key)
+    rgcolumndef[2].coltyp = JET_coltypLong;         // Pgno
     Call( ErrIsamOpenTempTable(
         reinterpret_cast<JET_SESID>( ppib ),
         rgcolumndef,
@@ -4886,8 +5316,9 @@ LOCAL ERR ErrREPAIRCreateTempTables(
         CbKeyMostForPage()) );
     rgcolumndef[2].grbit  = rgcolumndef[0].grbit;
 
-    rgcolumndef[0].coltyp = JET_coltypLong;
-    rgcolumndef[1].coltyp = JET_coltypLong;
+    //  Available
+    rgcolumndef[0].coltyp = JET_coltypLong; // ObjidFDP
+    rgcolumndef[1].coltyp = JET_coltypLong; // Pgno
     Call( ErrIsamOpenTempTable(
         reinterpret_cast<JET_SESID>( ppib ),
         rgcolumndef,
@@ -4904,6 +5335,7 @@ HandleError:
 }
 
 
+//  ================================================================
 LOCAL ERR ErrREPAIRScanDB(
     PIB * const ppib,
     const IFMP ifmp,
@@ -4916,6 +5348,7 @@ LOCAL ERR ErrREPAIRScanDB(
     const TTARRAY * const pttarrayAvailSpace,
     PgnoCollection * const ppgnocollShelved,
     const REPAIROPTS * const popts )
+//  ================================================================
 {
     const JET_SESID sesid   = reinterpret_cast<JET_SESID>( ppib );
     ERR err = JET_errSuccess;
@@ -4962,11 +5395,14 @@ LOCAL ERR ErrREPAIRScanDB(
 
         if ( JET_errPageNotInitialized == err )
         {
+            //  unused page. ignore it
             ++cpgUninitialized;
             err = JET_errSuccess;
         }
         else if ( FErrIsDbCorruption( err ) || JET_errDiskIO == err )
         {
+            //  NOTE: JET_errDiskIO doesn't represent corruption anymore, but this makes repair more robust, at the 
+            //  cost of potential sporadic disk errors "ditching" data.
             ++cpgBad;
             const ERR errT = CPAGE::ErrResetHeader( ppib, ifmp, pgno );
             if ( errT < 0 )
@@ -5015,14 +5451,25 @@ HandleError:
 }
 
 
+//  ================================================================
 LOCAL ERR ErrREPAIRIFixLeafPage(
     PIB * const ppib,
     const IFMP ifmp,
     CSR& csr,
 #ifdef SYNC_DEADLOCK_DETECTION
     COwner* const pownerSaved,
-#endif
+#endif  //  SYNC_DEADLOCK_DETECTION
     const REPAIROPTS * const popts)
+//  ================================================================
+//
+//  Called on leaf pages that are part of tables being repaired
+//
+//  Currently this just checks leaf pages to make sure that they are
+//  usable.
+//
+//  UNDONE: write-latch the page and fix it
+//
+//-
 {
     ERR err = JET_errSuccess;
     KEYDATAFLAGS    rgkdf[2];
@@ -5031,6 +5478,7 @@ LOCAL ERR ErrREPAIRIFixLeafPage(
 
 Restart:
 
+    //  check to see if the nodes are in key order
 
     INT iline;
     for( iline = 0; iline < csr.Cpage().Clines(); iline++ )
@@ -5043,6 +5491,8 @@ Restart:
 
         if ( FNDDeleted( rgkdf[ikdfCurr] ) )
         {
+            // runtime scrubbing can replace the data of a flag-deleted record, causing it to be invalid
+            // don't check the data of this record
         }
         else
         {
@@ -5066,20 +5516,23 @@ Restart:
                 if ( JET_errDatabaseCorrupted == err )
                 {
 
+                    //  delete this record
 
 #ifdef SYNC_DEADLOCK_DETECTION
                     if ( pownerSaved )
                     {
                         Pcls()->pownerLockHead = pownerSaved;
                     }
-#endif
+#endif  //  SYNC_DEADLOCK_DETECTION
 
+                    // the page should have been read/write latched
                     Assert( FBFReadLatched( ifmp, csr.Pgno() )
                             || FBFWriteLatched( ifmp, csr.Pgno() ) );
 
                     if ( csr.Latch() != latchWrite )
                     {
                         err = csr.ErrUpgrade( );
+                        //Only one thread should latch the page
                         Assert( errBFLatchConflict != err );
                         Call( err );
                         csr.Dirty();
@@ -5100,6 +5553,8 @@ Restart:
 
         if ( iline > 0 )
         {
+            //  this routine should only be called on the clustered index or LV tree
+            //  just compare the keys
 
             const INT cmp = CmpKey( rgkdf[ikdfPrev].key, rgkdf[ikdfCurr].key );
             if ( cmp > 0 )
@@ -5122,27 +5577,29 @@ HandleError:
     {
         Pcls()->pownerLockHead = NULL;
     }
-#endif
+#endif  //  SYNC_DEADLOCK_DETECTION
 
     return err;
 }
 
 
+//  ================================================================
 LOCAL ERR ErrREPAIRInsertOwned(
     const JET_SESID sesid,
     const OBJID objidOwning,
     const PGNO pgno,
     REPAIRTT * const prepairtt,
     const REPAIROPTS * const popts )
+//  ================================================================
 {
     ERR err = JET_errSuccess;
 
 #ifdef REPAIR_DEBUG_VERBOSE_SPACE
     (*popts->pcprintfDebug)( "Inserting page %d (objidOwning: %d) into Owned table\r\n", pgno, objidOwning );
-#endif
+#endif  //  REPAIR_DEBUG_VERBOSE_SPACE
 
     Call( ErrDispPrepareUpdate( sesid, prepairtt->tableidOwned, JET_prepInsert ) );
-    Call( ErrDispSetColumn(
+    Call( ErrDispSetColumn(     //  ObjidFDP
         sesid,
         prepairtt->tableidOwned,
         prepairtt->rgcolumnidOwned[0],
@@ -5150,7 +5607,7 @@ LOCAL ERR ErrREPAIRInsertOwned(
         sizeof( objidOwning ),
         0,
         NULL ) );
-    Call( ErrDispSetColumn(
+    Call( ErrDispSetColumn(     //  Pgno
         sesid,
         prepairtt->tableidOwned,
         prepairtt->rgcolumnidOwned[1],
@@ -5167,6 +5624,7 @@ HandleError:
 }
 
 
+//  ================================================================
 LOCAL ERR ErrREPAIRInsertPageIntoTables(
     PIB * const ppib,
     const IFMP ifmp,
@@ -5176,6 +5634,7 @@ LOCAL ERR ErrREPAIRInsertPageIntoTables(
     const TTARRAY * const pttarrayOwnedSpace,
     const TTARRAY * const pttarrayAvailSpace,
     const REPAIROPTS * const popts )
+//  ================================================================
 {
     ERR         err         = JET_errSuccess;
     const PGNO  pgno        = csr.Pgno();
@@ -5208,6 +5667,7 @@ LOCAL ERR ErrREPAIRInsertPageIntoTables(
         {
             Assert( !csr.Cpage().FPreInitPage() );
 
+            //  leaf page of main tree.  re-used
             fOwnedPage      = fTrue;
             fAvailPage      = fFalse;
             fUsedPage       = fTrue;
@@ -5228,6 +5688,7 @@ LOCAL ERR ErrREPAIRInsertPageIntoTables(
         {
             Assert( !csr.Cpage().FPreInitPage() );
 
+            //  leaf page of LV tree.  re-used
             fOwnedPage      = fTrue;
             fAvailPage      = fFalse;
             fUsedPage       = fTrue;
@@ -5241,6 +5702,7 @@ LOCAL ERR ErrREPAIRInsertPageIntoTables(
         else if ( prepairtableT->objidlistIndexes.FObjidPresent( objidFDP )
             && csr.Cpage().FIndexPage())
         {
+            //  a secondary index page (non-FDP). discard as we will rebuild the indexes
             fOwnedPage      = fTrue;
             fAvailPage      = fTrue;
             fUsedPage       = fFalse;
@@ -5253,6 +5715,8 @@ LOCAL ERR ErrREPAIRInsertPageIntoTables(
         else if ( objidFDP == prepairtableT->objidFDP
                  || objidFDP == prepairtableT->objidLV )
         {
+            //  a internal/space page from the main or LV tree. discard as we rebuild internal pages and the
+            //  space tree
             Assert( !csr.Cpage().FLeafPage()
                     || csr.Cpage().FSpaceTree()
                     || csr.Cpage().FEmptyPage()
@@ -5272,6 +5736,7 @@ LOCAL ERR ErrREPAIRInsertPageIntoTables(
         prepairtableT = prepairtableT->prepairtableNext;
     }
 
+    //  Optimization: this is not a page we are interested in
     if ( NULL == prepairtableT )
     {
         Assert( !fOwnedPage );
@@ -5287,11 +5752,12 @@ LOCAL ERR ErrREPAIRInsertPageIntoTables(
 #ifdef SYNC_DEADLOCK_DETECTION
     COwner* const pownerSaved = Pcls()->pownerLockHead;
     Pcls()->pownerLockHead = NULL;
-#endif
+#endif  //  SYNC_DEADLOCK_DETECTION
 
     OBJID objidAvail;
     Call( pttarrayAvailSpace->ErrGetValue( ppib, pgno, &objidAvail ) );
     objidAvail &= 0x7fffffff;
+    // getting either objidNil or objidInsert is OK
     if ( objidNil != objidAvail
         && objidInsert != objidAvail )
     {
@@ -5356,12 +5822,12 @@ LOCAL ERR ErrREPAIRInsertPageIntoTables(
         (*popts->pcprintfDebug)(
             "Inserting page %d (objidFDP: %d, objidInsert: %d) into Available table\r\n",
             pgno, objidFDP, objidInsert );
-#endif
+#endif  //  REPAIR_DEBUG_VERBOSE_SPACE
 
         Assert( JET_tableidNil != prepairtt->tableidAvailable );
 
         Call( ErrDispPrepareUpdate( sesid, prepairtt->tableidAvailable, JET_prepInsert ) );
-        Call( ErrDispSetColumn(
+        Call( ErrDispSetColumn(     //  ObjidInsert
             sesid,
             prepairtt->tableidAvailable,
             prepairtt->rgcolumnidAvailable[0],
@@ -5369,7 +5835,7 @@ LOCAL ERR ErrREPAIRInsertPageIntoTables(
             sizeof( objidInsert ),
             0,
             NULL ) );
-        Call( ErrDispSetColumn(
+        Call( ErrDispSetColumn(     //  Pgno
             sesid,
             prepairtt->tableidAvailable,
             prepairtt->rgcolumnidAvailable[1],
@@ -5393,7 +5859,7 @@ LOCAL ERR ErrREPAIRInsertPageIntoTables(
                 csr,
             #ifdef SYNC_DEADLOCK_DETECTION
                 pownerSaved,
-            #endif
+            #endif  //  SYNC_DEADLOCK_DETECTION
                 popts );
         if ( JET_errDatabaseCorrupted == err )
         {
@@ -5405,6 +5871,7 @@ LOCAL ERR ErrREPAIRInsertPageIntoTables(
                     REPAIR_BAD_PAGE_ID,
                     0, NULL );
 
+            //  this page is not usable. skip it
 
             err = JET_errSuccess;
             goto HandleError;
@@ -5419,6 +5886,7 @@ LOCAL ERR ErrREPAIRInsertPageIntoTables(
                     REPAIR_BAD_PAGE_ID,
                     0, NULL );
 
+            //  this page is now empty. skip it
 
             err = JET_errSuccess;
             goto HandleError;
@@ -5426,9 +5894,9 @@ LOCAL ERR ErrREPAIRInsertPageIntoTables(
 
 #ifdef REPAIR_DEBUG_VERBOSE_SPACE
         (*popts->pcprintfDebug)( "Inserting page %d (objidFDP: %d) into Used table\r\n", pgno, objidFDP );
-#endif
+#endif  //  REPAIR_DEBUG_VERBOSE_SPACE
         Call( ErrDispPrepareUpdate( sesid, prepairtt->tableidUsed, JET_prepInsert ) );
-        Call( ErrDispSetColumn(
+        Call( ErrDispSetColumn(     //  ObjidFDP
             sesid,
             prepairtt->tableidUsed,
             prepairtt->rgcolumnidUsed[0],
@@ -5437,13 +5905,14 @@ LOCAL ERR ErrREPAIRInsertPageIntoTables(
             0,
             NULL ) );
 
+        //  extract the key of the last node on the page
         BYTE rgbKey[cbKeyAlloc+1];
         csr.SetILine( csr.Cpage().Clines() - 1 );
         KEYDATAFLAGS kdf;
         NDIGetKeydataflags( csr.Cpage(), csr.ILine(), &kdf );
         kdf.key.CopyIntoBuffer( rgbKey, sizeof( rgbKey ) );
 
-        Call( ErrDispSetColumn(
+        Call( ErrDispSetColumn(     //  Key
             sesid,
             prepairtt->tableidUsed,
             prepairtt->rgcolumnidUsed[1],
@@ -5451,7 +5920,7 @@ LOCAL ERR ErrREPAIRInsertPageIntoTables(
             kdf.key.Cb(),
             0,
             NULL ) );
-        Call( ErrDispSetColumn(
+        Call( ErrDispSetColumn(     //  Pgno
             sesid,
             prepairtt->tableidUsed,
             prepairtt->rgcolumnidUsed[2],
@@ -5462,6 +5931,31 @@ LOCAL ERR ErrREPAIRInsertPageIntoTables(
         err = ErrDispUpdate( sesid, prepairtt->tableidUsed, NULL, 0, NULL, 0 );
         if ( JET_errKeyDuplicate == err )
         {
+            //
+            //  BUGBUG:  Key truncation in the temp table can cause repair to
+            //  BUGBUG:  erroneously believe that it has found a duplicate page
+            //
+            //  If you go and look at the creation of this temp table, you will
+            //  note that we declare the key to be +objidFDP+key where key is
+            //  the last key on a primary index or LV leaf page.  Because this
+            //  key can be of the maximum allowed length for a primary index
+            //  and because it is stored as a variable binary column and because
+            //  there is another segment in the key, this means that a large
+            //  chunk of the end of the key on the page will NOT be included in
+            //  the computed key for the temp table entry.  This truncation will
+            //  result in false duplicates when subsequent pages of a primary
+            //  index contain very long keys that only differ by the last few
+            //  bytes.  As a result, repair will think that a perfectly correct
+            //  database is actually corrupted and will throw away valid data!
+            //
+            //  At this time, we will not fix this issue because it seems that
+            //  it would be quite difficult to write an application on JET that
+            //  would result in this kind of pattern and still be useful.  This
+            //  is because the application would probably get all kinds of false
+            //  duplicate key errors during runtime while it tried to insert
+            //  its data.  These errors would force the application to use
+            //  something else for the primary key.
+            //
             UtilReportEvent(
                 eventWarning,
                 REPAIR_CATEGORY,
@@ -5485,18 +5979,20 @@ HandleError:
 
 #ifdef SYNC_DEADLOCK_DETECTION
     Pcls()->pownerLockHead = pownerSaved;
-#endif
+#endif  //  SYNC_DEADLOCK_DETECTION
 
     return err;
 }
 
 
+//  ================================================================
 LOCAL ERR ErrREPAIRInsertBadPageIntoTables(
     PIB * const ppib,
     const PGNO pgno,
     REPAIRTT * const prepairtt,
     const REPAIRTABLE * const prepairtable,
     const REPAIROPTS * const popts )
+//  ================================================================
 {
     ERR err = JET_errSuccess;
 
@@ -5515,13 +6011,13 @@ LOCAL ERR ErrREPAIRInsertBadPageIntoTables(
 #ifdef SYNC_DEADLOCK_DETECTION
     COwner* const pownerSaved = Pcls()->pownerLockHead;
     Pcls()->pownerLockHead = NULL;
-#endif
+#endif  //  SYNC_DEADLOCK_DETECTION
 
     Call( ErrDIRBeginTransaction( ppib, 48165, NO_GRBIT ) );
     fInTransaction = fTrue;
 
     Call( ErrDispPrepareUpdate( sesid, prepairtt->tableidBadPages, JET_prepInsert ) );
-    Call( ErrDispSetColumn(
+    Call( ErrDispSetColumn(     //  pgno
         sesid,
         prepairtt->tableidBadPages,
         prepairtt->rgcolumnidBadPages[0],
@@ -5543,12 +6039,13 @@ HandleError:
 
 #ifdef SYNC_DEADLOCK_DETECTION
     Pcls()->pownerLockHead = pownerSaved;
-#endif
+#endif  //  SYNC_DEADLOCK_DETECTION
 
     return JET_errSuccess;
 }
 
 
+//  ================================================================
 LOCAL ERR ErrREPAIRGetPgnoOEAE(
     PIB * const ppib,
     const IFMP ifmp,
@@ -5558,6 +6055,7 @@ LOCAL ERR ErrREPAIRGetPgnoOEAE(
     PGNO * const ppgnoParent,
     const BOOL fUnique,
     const REPAIROPTS * const popts )
+//  ================================================================
 {
     ERR err = JET_errSuccess;
 
@@ -5641,6 +6139,7 @@ HandleError:
 }
 
 
+//  ================================================================
 LOCAL ERR ErrREPAIRCheckSplitBuf(
     PIB * const ppib,
     const PGNO pgnoLastBuffer,
@@ -5651,6 +6150,7 @@ LOCAL ERR ErrREPAIRCheckSplitBuf(
     TTARRAY * const pttarrayAvailSpace,
     PgnoCollection * const ppgnocollShelved,
     const REPAIROPTS * const popts )
+//  ================================================================
 {
     ERR     err                     = JET_errSuccess;
     PGNO    pgnoT;
@@ -5659,6 +6159,7 @@ LOCAL ERR ErrREPAIRCheckSplitBuf(
     Assert( pgnoLastBuffer <= pgnoSysMax );
     Assert( pgnoLastBuffer >= (ULONG)cpgBuffer );
 
+    //  these TTARRAYs are always accessed in OwnedSpace, AvailSpace order
     TTARRAY::RUN runOwned;
     TTARRAY::RUN runAvail;
 
@@ -5734,6 +6235,7 @@ HandleError:
 }
 
 
+//  ================================================================
 LOCAL ERR ErrREPAIRCheckSPLITBUFFERInSpaceTree(
     PIB * const ppib,
     const IFMP ifmp,
@@ -5744,6 +6246,7 @@ LOCAL ERR ErrREPAIRCheckSPLITBUFFERInSpaceTree(
     TTARRAY * const pttarrayAvailSpace,
     PgnoCollection * const ppgnocollShelved,
     const REPAIROPTS * const popts )
+//  ================================================================
 {
     ERR     err                     = JET_errSuccess;
 
@@ -5766,6 +6269,7 @@ LOCAL ERR ErrREPAIRCheckSPLITBUFFERInSpaceTree(
         Call( err );
     }
 
+    // the spacetree and rootpage flags should be checked before this function
     Assert( csr.Cpage().FSpaceTree() );
     Assert( csr.Cpage().FRootPage() );
 
@@ -5774,6 +6278,7 @@ LOCAL ERR ErrREPAIRCheckSPLITBUFFERInSpaceTree(
 
     if ( 0 == line.cb )
     {
+        // no SPLIT_BUFFER
         err = JET_errSuccess;
     }
     else if (sizeof( SPLIT_BUFFER ) == line.cb)
@@ -5824,6 +6329,7 @@ HandleError:
 
 
 
+//  ================================================================
 LOCAL ERR ErrREPAIRCheckSpace(
     PIB * const ppib,
     const IFMP ifmp,
@@ -5839,6 +6345,7 @@ LOCAL ERR ErrREPAIRCheckSpace(
     PgnoCollection * const ppgnocollShelved,
     BOOL * const pfDbtimeTooLarge,
     const REPAIROPTS * const popts )
+//  ================================================================
 {
     ERR err = JET_errSuccess;
 
@@ -5846,6 +6353,7 @@ LOCAL ERR ErrREPAIRCheckSpace(
     Alloc( pbtstats = new BTSTATS );
     BTSTATS& btstats = *pbtstats;
 
+    //  don't preread the root of the tree, it should have been preread already
 
     PGNO pgnoOE;
     PGNO pgnoAE;
@@ -5862,6 +6370,7 @@ LOCAL ERR ErrREPAIRCheckSpace(
 
     if ( pgnoNull != pgnoOE )
     {
+        //  preread the roots of the space trees
         PGNO    rgpgno[3];
         rgpgno[0] = pgnoOE;
         rgpgno[1] = pgnoAE;
@@ -5890,8 +6399,8 @@ LOCAL ERR ErrREPAIRCheckSpace(
                 fPageFlags | CPAGE::fPageSpaceTree,
                 &reccheckOE,
                 NULL,
-                pttarrayAvailSpace,
-                ppgnocollShelved,
+                pttarrayAvailSpace, //  at least make sure we aren't available to anyone else
+                ppgnocollShelved, //  at least make sure we aren't available to anyone else
                 fFalse,
                 pfDbtimeTooLarge,
                 &btstats,
@@ -5905,14 +6414,15 @@ LOCAL ERR ErrREPAIRCheckSpace(
                 objid,
                 fPageFlags | CPAGE::fPageSpaceTree,
                 &reccheckAE,
-                pttarrayOwnedSpace,
-                pttarrayAvailSpace,
-                ppgnocollShelved,
+                pttarrayOwnedSpace, //  we now know which pages we own
+                pttarrayAvailSpace, //  at least make sure we aren't available to anyone else
+                ppgnocollShelved, //  at least make sure we aren't available to anyone else
                 fFalse,
                 pfDbtimeTooLarge,
                 &btstats,
                 popts ) );
 
+        // check SPLIT_BUFFER
         Call( ErrREPAIRCheckSPLITBUFFERInSpaceTree(
                 ppib,
                 ifmp,
@@ -5955,6 +6465,7 @@ HandleError:
 }
 
 
+//  ================================================================
 LOCAL ERR ErrREPAIRCheckTree(
     PIB * const ppib,
     const IFMP ifmp,
@@ -5970,6 +6481,7 @@ LOCAL ERR ErrREPAIRCheckTree(
     PgnoCollection * const ppgnocollShelved,
     BOOL * const pfDbtimeTooLarge,
     const REPAIROPTS * const popts )
+//  ================================================================
 {
     ERR err = JET_errSuccess;
 
@@ -6004,6 +6516,7 @@ HandleError:
 }
 
 
+//  ================================================================
 LOCAL ERR ErrREPAIRCheckTreeAndSpace(
     PIB * const ppib,
     const IFMP ifmp,
@@ -6019,6 +6532,7 @@ LOCAL ERR ErrREPAIRCheckTreeAndSpace(
     PgnoCollection * const ppgnocollShelved,
     BOOL * const pfDbtimeTooLarge,
     const REPAIROPTS * const popts )
+//  ================================================================
 {
     ERR err = JET_errSuccess;
 
@@ -6059,6 +6573,7 @@ HandleError:
 }
 
 
+//  ================================================================
 LOCAL ERR ErrREPAIRInsertSEInfo(
     PIB * const ppib,
     const IFMP ifmp,
@@ -6069,6 +6584,7 @@ LOCAL ERR ErrREPAIRInsertSEInfo(
     TTARRAY * const pttarrayAvailSpace,
     PgnoCollection * const ppgnocollShelved,
     const REPAIROPTS * const popts )
+//  ================================================================
 {
     JET_ERR err = JET_errSuccess;
     CSR csr;
@@ -6082,10 +6598,10 @@ LOCAL ERR ErrREPAIRInsertSEInfo(
     LINE line;
     NDGetPtrExternalHeader( csr.Cpage(), &line, noderfSpaceHeader );
 
-    Assert( sizeof( SPACE_HEADER ) == line.cb );
+    Assert( sizeof( SPACE_HEADER ) == line.cb );    //  checked in ErrREPAIRGetPgnoOEAE
 
     const SPACE_HEADER * const psph = reinterpret_cast <SPACE_HEADER *> ( line.pv );
-    Assert( psph->FSingleExtent() );
+    Assert( psph->FSingleExtent() );    //  checked in ErrREPAIRGetPgnoOEAE
 
     const CPG cpgOE = psph->CpgPrimary();
     const PGNO pgnoOELast = pgnoFDP + cpgOE - 1;
@@ -6110,6 +6626,7 @@ HandleError:
 }
 
 
+//  ================================================================
 LOCAL ERR ErrREPAIRInsertOERunIntoTT(
     PIB * const ppib,
     const PGNO pgnoLast,
@@ -6121,9 +6638,10 @@ LOCAL ERR ErrREPAIRInsertOERunIntoTT(
     PgnoCollection * const ppgnocollShelved,
     const BOOL  fOddRun,
     const REPAIROPTS * const popts )
+//  ================================================================
 {
     JET_ERR         err         = JET_errSuccess;
-    BOOL            fOddRunT    = fFalse;
+    BOOL            fOddRunT    = fFalse;   //  initial value doesn't matter, as it will get set on the first iteration of the loop below
 
     TTARRAY::RUN    runOwned;
     TTARRAY::RUN    runAvail;
@@ -6140,11 +6658,13 @@ LOCAL ERR ErrREPAIRInsertOERunIntoTT(
 
             if ( pgno == pgnoLast )
             {
+                //  first time through the loop. init fOddRunT and make sure it doesn't change
 
                 fOddRunT = !!( objidOwning & 0x80000000 );
             }
             else if ( fOddRunT != !!( objidOwning & 0x80000000 ) )
             {
+                //  repair can't fix this, and will in fact generate this problem, so don't flag the database as corrupted
 
                 (*popts->pcprintfWarning)(  "space allocation error (OE): page %d spans OE extents in the parent. it is part of a run of %d pages"
                                             " ending at page %d. the page is owned by objid %d (parent ojbid %d, expected owning objid %d)\r\n",
@@ -6161,6 +6681,7 @@ LOCAL ERR ErrREPAIRInsertOERunIntoTT(
             }
         }
 
+        //  this page must not be available to any other table
 
         OBJID objidAvail;
         Call( pttarrayAvailSpace->ErrGetValue( ppib, pgno, &objidAvail, &runAvail ) );
@@ -6172,6 +6693,7 @@ LOCAL ERR ErrREPAIRInsertOERunIntoTT(
             Call( ErrERRCheck( JET_errDatabaseCorrupted ) );
         }
 
+        //  set the ownership in the ttarray
 
         const OBJID objidT = objid | ( fOddRun ? 0x80000000 : 0 );
         err = pttarrayOwnedSpace->ErrSetValue( ppib, pgno, objidT, &runOwned );
@@ -6197,6 +6719,7 @@ HandleError:
 }
 
 
+//  ================================================================
 LOCAL ERR ErrREPAIRInsertAERunIntoTT(
     PIB * const ppib,
     const PGNO pgnoLast,
@@ -6209,10 +6732,13 @@ LOCAL ERR ErrREPAIRInsertAERunIntoTT(
     PgnoCollection * const ppgnocollShelved,
     const BOOL fOddRun,
     const REPAIROPTS * const popts )
+//  ================================================================
 {
     JET_ERR         err         = JET_errSuccess;
-    BOOL            fOddRunT    = fFalse;
+    BOOL            fOddRunT    = fFalse;   //  initial value doesn't matter, as it will get set on the first iteration of the loop below
 
+    //  these TTARRAYs are always accessed in OwnedSpace, AvailSpace order
+    //
     TTARRAY::RUN    runOwned;
     TTARRAY::RUN    runAvail;
 
@@ -6230,12 +6756,14 @@ LOCAL ERR ErrREPAIRInsertAERunIntoTT(
 
     for ( PGNO pgno = pgnoLast; pgno > pgnoLast - cpgRun; --pgno )
     {
+        //  we must own this page
 
         OBJID   objidOwning;
         Call( pttarrayOwnedSpace->ErrGetValue( ppib, pgno, &objidOwning, &runOwned ) );
 
         if ( pgno == pgnoLast )
         {
+            //  first time through the loop. init fOddRunT and make sure it doesn't change
             fOddRunT = !!( objidOwning & 0x80000000 );
         }
         else if ( fOddRunT != !!( objidOwning & 0x80000000 ) )
@@ -6244,7 +6772,9 @@ LOCAL ERR ErrREPAIRInsertAERunIntoTT(
                                         " ending at page %d. the page is owned by objid %d\r\n",
                                         pgno, cpgRun, pgnoLast, objidOwning );
 
+            //  repair can't fix this, and will in fact generate this problem, so don't flag the database as corrupted
 
+///         Call( ErrERRCheck( JET_errDatabaseCorrupted ) );
         }
         objidOwning &= 0x7FFFFFFF;
 
@@ -6255,6 +6785,7 @@ LOCAL ERR ErrREPAIRInsertAERunIntoTT(
             Call( ErrERRCheck( JET_errDatabaseCorrupted ) );
         }
 
+        //  the page must not be available to any other table
         Call( pttarrayAvailSpace->ErrGetValue( ppib, pgno, &objidOwning, &runAvail ) );
         objidOwning &= 0x7fffffff;
         if ( ( objidNil != objidOwning ) && ( ( objidSystemRoot != objidOwning ) || ( sppPool != spp::ShelvedPool ) ) )
@@ -6295,6 +6826,7 @@ HandleError:
 }
 
 
+//  ================================================================
 LOCAL ERR ErrREPAIRRecheckSpaceTreeAndSystemTablesSpace(
     PIB * const ppib,
     const IFMP ifmp,
@@ -6305,6 +6837,7 @@ LOCAL ERR ErrREPAIRRecheckSpaceTreeAndSystemTablesSpace(
     PgnoCollection ** const pppgnocollShelved,
     BOOL * const pfDbtimeTooLarge,
     const REPAIROPTS * const popts )
+//  ================================================================
 {
     ERR err = JET_errSuccess;
 
@@ -6414,6 +6947,7 @@ HandleError:
 }
 
 
+//  ================================================================
 LOCAL ERR ErrREPAIRCheckTree(
     PIB * const ppib,
     const IFMP ifmp,
@@ -6428,6 +6962,7 @@ LOCAL ERR ErrREPAIRCheckTree(
     BOOL * const pfDbtimeTooLarge,
     BTSTATS * const pbtstats,
     const REPAIROPTS * const popts )
+//  ================================================================
 {
     ERR err = JET_errSuccess;
 
@@ -6487,6 +7022,7 @@ HandleError:
 }
 
 
+//  ================================================================
 LOCAL ERR ErrREPAIRICheck(
     PIB * const ppib,
     const IFMP ifmp,
@@ -6495,22 +7031,23 @@ LOCAL ERR ErrREPAIRICheck(
     CSR& csr,
     const BOOL fPrereadSibling,
     RECCHECK * const preccheck,
-    const TTARRAY * const pttarrayOwnedSpace,
-    const TTARRAY * const pttarrayAvailSpace,
-    PgnoCollection * const ppgnocollShelved,
+    const TTARRAY * const pttarrayOwnedSpace,   //  can be null
+    const TTARRAY * const pttarrayAvailSpace,   //  can be null
+    PgnoCollection * const ppgnocollShelved,    //  can be null
     const BOOL fNonUnique,
     BOOL * const pfDbtimeTooLarge,
     BTSTATS * const pbtstats,
     const BOOKMARK * const pbookmarkCurrParent,
     const BOOKMARK * const pbookmarkPrevParent,
     const REPAIROPTS * const popts )
+//  ================================================================
 {
     ERR             err     = JET_errSuccess;
 
     const ULONG cunitDone = AtomicIncrement( (LONG *)(&popts->psnprog->cunitDone) );
     const BOOL fHitBoundary = ( ( popts->psnprog->cunitTotal >= 100 ) ?
-                ( 0 == ( cunitDone % ( popts->psnprog->cunitTotal / 100 ) ) ) :
-                ( 0 == ( cunitDone % ( 100 / popts->psnprog->cunitTotal ) ) ) );
+                ( 0 == ( cunitDone % ( popts->psnprog->cunitTotal / 100 ) ) ) :     //  every 1%
+                ( 0 == ( cunitDone % ( 100 / popts->psnprog->cunitTotal ) ) ) );    //  every x pages
     if ( fHitBoundary
         && popts->crit.FTryEnter() )
     {
@@ -6547,6 +7084,7 @@ LOCAL ERR ErrREPAIRICheck(
         *pfDbtimeTooLarge = fTrue;
     }
 
+    //  check that this page is owned by this tree and not available to anyone
 
     OBJID objid;
     if ( pttarrayOwnedSpace )
@@ -6574,6 +7112,7 @@ LOCAL ERR ErrREPAIRICheck(
 
     if ( csr.Cpage().FLeafPage() )
     {
+        //  if we were the last leaf page page preread we preread our neighbour
         if ( fPrereadSibling )
         {
             const PGNO pgnoNext = csr.Cpage().PgnoNext();
@@ -6602,6 +7141,7 @@ LOCAL ERR ErrREPAIRICheck(
             Call( ErrERRCheck( JET_errDatabaseCorrupted ) );
         }
 
+        //  check the internal page before prereading its children
 
         Call( ErrREPAIRCheckInternal(
                 ppib,
@@ -6615,6 +7155,7 @@ LOCAL ERR ErrREPAIRICheck(
         PGNO        rgpgno[g_cbPageMax/(sizeof(PGNO) + cbNDNullKeyData )];
         const INT   cpgno = csr.Cpage().Clines();
 
+        // csr.Cpage().Clines() returned more than the max number of possible nodes/lines.
         if ( cpgno >= (sizeof(rgpgno)/sizeof(PGNO)) )
         {
             Call( ErrERRCheck( JET_errDatabaseCorrupted ) );
@@ -6666,6 +7207,7 @@ LOCAL ERR ErrREPAIRICheck(
                 if ( cpgno-1 != ipgno )
                 {
                     (*popts->pcprintfError)( "node [%d:%d]: NULL key is not last key in page\r\n", csr.Pgno(), csr.ILine() );
+//                  BFFree( rgpgno );
                     Call( ErrERRCheck( JET_errDatabaseCorrupted ) );
                 }
                 rgpbookmark[ibookmarkCurr] = NULL;
@@ -6680,6 +7222,7 @@ LOCAL ERR ErrREPAIRICheck(
             if ( err < 0 )
             {
                 (*popts->pcprintfError)( "page %d: error %d on read\r\n", rgpgno[ipgno], err );
+//              BFFree( rgpgno );
                 goto HandleError;
             }
 
@@ -6743,8 +7286,13 @@ LOCAL ERR ErrREPAIRICheck(
 
             csrChild.ReleasePage( fTrue );
             csrChild.Reset();
+//          if ( err < 0 )
+//              {
+//              BFFree( rgpgno );
+//              }
             Call( err );
         }
+//      BFFree( rgpgno );
     }
 
 HandleError:
@@ -6752,16 +7300,18 @@ HandleError:
 }
 
 
+//  ================================================================
 LOCAL ERR ErrREPAIRICheckNode(
     const PGNO pgno,
     const INT iline,
     const BYTE * const pbPage,
     const KEYDATAFLAGS& kdf,
     const REPAIROPTS * const popts )
+//  ================================================================
 {
     ERR         err = JET_errSuccess;
 
-    if ( (ULONG) kdf.key.Cb() > (ULONG) CbKeyMostForPage() * 2 )
+    if ( (ULONG) kdf.key.Cb() > (ULONG) CbKeyMostForPage() * 2 )  //  why do we multiply by 2 here?  do we see KEY + DATA for secondary indices?
     {
         (*popts->pcprintfError)( "node [%d:%d]: key is too long (%d bytes)\r\n", pgno, iline, kdf.key.Cb() );
         CallR( ErrERRCheck( JET_errDatabaseCorrupted ) );
@@ -6815,12 +7365,14 @@ LOCAL ERR ErrREPAIRICheckNode(
 }
 
 
+//  ================================================================
 LOCAL ERR ErrREPAIRICheckRecord(
     const PGNO pgno,
     const INT iline,
     const BYTE * const pbPage,
     const KEYDATAFLAGS& kdf,
     const REPAIROPTS * const popts )
+//  ================================================================
 {
     ERR     err = JET_errSuccess;
     const FIDLASTINTDB fidLastInTDB = { fidFixedMost, fidVarMost, fidTaggedMost };
@@ -6835,12 +7387,14 @@ HandleError:
 }
 
 
+//  ================================================================
 LOCAL INT LREPAIRHandleException(
     const PIB * const ppib,
     const IFMP ifmp,
     const CSR& csr,
     const EXCEPTION exception,
     const REPAIROPTS * const popts )
+//  ================================================================
 {
     const DWORD dwExceptionId           = ExceptionId( exception );
     const EExceptionFilterAction efa    = efaExecuteHandler;
@@ -6856,6 +7410,7 @@ LOCAL INT LREPAIRHandleException(
 
 
 #pragma warning( disable : 4509 )
+//  ================================================================
 LOCAL ERR ErrREPAIRICheckInternalLine(
     PIB * const ppib,
     const IFMP ifmp,
@@ -6864,6 +7419,7 @@ LOCAL ERR ErrREPAIRICheckInternalLine(
     const REPAIROPTS * const popts,
     KEYDATAFLAGS& kdfCurr,
     const KEYDATAFLAGS& kdfPrev )
+//  ================================================================
 {
     ERR err = JET_errSuccess;
 
@@ -6938,6 +7494,7 @@ HandleTryError:
 #pragma warning( default : 4509 )
 
 
+//  ================================================================
 LOCAL ERR ErrREPAIRCheckInternal(
     PIB * const ppib,
     const IFMP ifmp,
@@ -6946,6 +7503,7 @@ LOCAL ERR ErrREPAIRCheckInternal(
     const BOOKMARK * const pbookmarkCurrParent,
     const BOOKMARK * const pbookmarkPrevParent,
     const REPAIROPTS * const popts )
+//  ================================================================
 {
     ERR             err     = JET_errSuccess;
     KEYDATAFLAGS    rgkdf[2];
@@ -7030,7 +7588,7 @@ LOCAL ERR ErrREPAIRCheckInternal(
 
         KEYDATAFLAGS kdfFirst;
         NDIGetKeydataflags( csr.Cpage(), csr.ILine(), &kdfFirst );
-        if ( kdfFirst.key.Cb() != 0 )
+        if ( kdfFirst.key.Cb() != 0 )   //  NULL is greater than anything
         {
             const INT cmp = CmpKey( kdfFirst.key, pbookmarkPrevParent->key );
             if ( cmp < 0 )
@@ -7047,6 +7605,7 @@ HandleError:
 
 
 #pragma warning( disable : 4509 )
+//  ================================================================
 LOCAL ERR ErrREPAIRICheckLeafLine(
     PIB * const ppib,
     const IFMP ifmp,
@@ -7058,6 +7617,7 @@ LOCAL ERR ErrREPAIRICheckLeafLine(
     KEYDATAFLAGS& kdfCurr,
     const KEYDATAFLAGS& kdfPrev,
     BOOL * const pfEmpty )
+//  ================================================================
 {
     ERR err = JET_errSuccess;
 
@@ -7143,6 +7703,7 @@ HandleTryError:
 #pragma warning( default : 4509 )
 
 
+//  ================================================================
 LOCAL ERR ErrREPAIRCheckLeaf(
     PIB * const ppib,
     const IFMP ifmp,
@@ -7153,6 +7714,7 @@ LOCAL ERR ErrREPAIRCheckLeaf(
     const BOOKMARK * const pbookmarkCurrParent,
     const BOOKMARK * const pbookmarkPrevParent,
     const REPAIROPTS * const popts )
+//  ================================================================
 {
     ERR             err     = JET_errSuccess;
     BOOL            fEmpty  = fTrue;
@@ -7245,7 +7807,7 @@ LOCAL ERR ErrREPAIRCheckLeaf(
             Call( ErrERRCheck( JET_errDatabaseCorrupted ) );
         }
     }
-    else if ( pgnoNull != csr.Cpage().PgnoNext() )
+    else if ( pgnoNull != csr.Cpage().PgnoNext() )  // NULL parent means we are at the end of the tree
     {
         (*popts->pcprintfError)( "page %d: NULL page pointer to leaf page with pgnoNext\r\n", csr.Pgno() );
         Call( ErrERRCheck( JET_errDatabaseCorrupted ) );
@@ -7260,6 +7822,7 @@ LOCAL ERR ErrREPAIRCheckLeaf(
 
         if ( kdfFirst.key.Cb() != 0 )
         {
+            //  for secondary indexes compare with the primary key that is in the data
             const INT cmp = CmpKeyWithKeyData( pbookmarkPrevParent->key, kdfFirst );
             if ( cmp > 0 )
             {
@@ -7279,7 +7842,9 @@ HandleError:
 }
 
 
+//  ================================================================
 OBJIDLIST::OBJIDLIST() :
+//  ================================================================
     m_cobjid( 0 ),
     m_cobjidMax( 0 ),
     m_rgobjid( NULL ),
@@ -7288,7 +7853,9 @@ OBJIDLIST::OBJIDLIST() :
 }
 
 
+//  ================================================================
 OBJIDLIST::~OBJIDLIST()
+//  ================================================================
 {
     if ( NULL != m_rgobjid )
     {
@@ -7304,10 +7871,13 @@ OBJIDLIST::~OBJIDLIST()
 }
 
 
+//  ================================================================
 ERR OBJIDLIST::ErrAddObjid( const OBJID objid )
+//  ================================================================
 {
     if ( m_cobjid == m_cobjidMax )
     {
+        //  resize/create the array
 
         OBJID * const rgobjidOld = m_rgobjid;
         const INT cobjidMaxNew   = m_cobjidMax + 16;
@@ -7328,25 +7898,34 @@ ERR OBJIDLIST::ErrAddObjid( const OBJID objid )
 }
 
 
+//  ================================================================
 BOOL OBJIDLIST::FObjidPresent( const OBJID objid ) const
+//  ================================================================
 {
     Assert( m_fSorted );
     return binary_search( (OBJID *)m_rgobjid, (OBJID *)m_rgobjid + m_cobjid, objid );
 }
 
 
+//  ================================================================
 VOID OBJIDLIST::Sort()
+//  ================================================================
 {
     sort( m_rgobjid, m_rgobjid + m_cobjid );
     m_fSorted = fTrue;
 }
 
 
+//  ================================================================
 LOCAL ERR ErrREPAIRAttachForIntegrity(
     const JET_SESID sesid,
     const WCHAR * const wszDatabase,
     IFMP * const pifmp,
     const REPAIROPTS * const popts )
+//  ================================================================
+//
+//  Attach R/O
+//
 {
     ERR                 err             = JET_errSuccess;
     JET_DBID            dbid;
@@ -7372,6 +7951,7 @@ LOCAL ERR ErrREPAIRAttachForIntegrity(
 
     g_rgfmp[*pifmp].SetVersioningOff();
 
+    // It doesn't make any sense to do OLD during either Integrity Check nor Repair.
     g_rgfmp[*pifmp].SetFDontRegisterOLD2Tasks();
 
 HandleError:
@@ -7379,6 +7959,7 @@ HandleError:
 }
 
 
+//  ================================================================
 LOCAL ERR ErrREPAIRAttachForRepair(
     const JET_SESID sesid,
     const WCHAR * const wszDatabase,
@@ -7386,6 +7967,10 @@ LOCAL ERR ErrREPAIRAttachForRepair(
     const DBTIME dbtimeLast,
     const OBJID objidLast,
     const REPAIROPTS * const popts )
+//  ================================================================
+//
+//  Close/Detach a previously attached database, attach R/W and change the signature
+//
 {
     ERR                 err         = JET_errSuccess;
     JET_DBID            dbid;
@@ -7405,6 +7990,7 @@ LOCAL ERR ErrREPAIRAttachForRepair(
     *pifmp = dbid;
     g_rgfmp[*pifmp].SetVersioningOff();
 
+    // It doesn't make any sense to do OLD during either Integrity Check nor Repair.
     g_rgfmp[*pifmp].SetFDontRegisterOLD2Tasks();
 
     g_rgfmp[*pifmp].ResetFMaintainMSObjids();
@@ -7412,12 +7998,20 @@ LOCAL ERR ErrREPAIRAttachForRepair(
 }
 
 
+//  ================================================================
 LOCAL ERR ErrREPAIRChangeSignature(
     INST *pinst,
     const WCHAR * const wszDatabase,
     const DBTIME dbtimeLast,
     const OBJID objidLast,
     const REPAIROPTS * const popts )
+//  ================================================================
+//
+//  Force the database to a consistent state and change the signature
+//  so that we will not be able to use the logs against the database
+//  again
+//
+//-
 {
     ERR err = JET_errSuccess;
 
@@ -7435,6 +8029,7 @@ HandleError:
     return err;
 }
 
+//  ================================================================
 LOCAL ERR ErrREPAIRChangeDBSignature(
     INST *pinst,
     const WCHAR * const wszDatabase,
@@ -7442,6 +8037,16 @@ LOCAL ERR ErrREPAIRChangeDBSignature(
     const OBJID objidLast,
     SIGNATURE * const psignDb,
     const REPAIROPTS * const popts )
+//  ================================================================
+//
+//  Force the database to a consistent state and change the signature
+//  so that we will not be able to use the logs against the database
+//  again
+//  Note: I (SOMEONE) don't see where it sets it to a consistent state,
+//  but it later directly attaches the DB so it must somehow?  I can't
+//  see it.
+//
+//-
 {
     ERR err = JET_errSuccess;
     CFlushMapForUnattachedDb* pfm = NULL;
@@ -7478,6 +8083,7 @@ LOCAL ERR ErrREPAIRChangeDBSignature(
         if ( 0 != dbtimeLast )
         {
 
+            //  sometimes we may not have re-calculated the dbtime
 
             pdbfilehdr->le_dbtimeDirtied      = dbtimeLast + 1;
         }
@@ -7487,6 +8093,8 @@ LOCAL ERR ErrREPAIRChangeDBSignature(
         pdbfilehdr->le_dwMinorVersion     = g_dwGlobalMinorVersion;
         pdbfilehdr->le_dwBuildNumber      = g_dwGlobalBuildNumber;
         pdbfilehdr->le_lSPNumber          = g_lGlobalSPNumber;
+        // This will cause the MSysLocales table to be rebuilt on the next regular
+        // attach.
         QWORD qwSortVersion;
         CallS( ErrNORMGetSortVersion( wszLocaleNameDefault, &qwSortVersion, NULL ) );
         pdbfilehdr->le_qwSortVersion            = qwSortVersion;
@@ -7501,6 +8109,9 @@ LOCAL ERR ErrREPAIRChangeDBSignature(
         {
             ++(pdbfilehdr->le_ulRepairCount);
 
+            // the database is repaired so it is a good moment
+            // to save the counts for bad/repaired checksums/ECC
+            // 
             pdbfilehdr->le_ulECCFixSuccessOld = pdbfilehdr->le_ulECCFixSuccess;
             pdbfilehdr->le_ulECCFixFailOld = pdbfilehdr->le_ulECCFixFail;
             pdbfilehdr->le_ulBadChecksumOld = pdbfilehdr->le_ulBadChecksum;
@@ -7539,6 +8150,7 @@ LOCAL ERR ErrREPAIRChangeDBSignature(
         (*popts->pcprintfVerbose)( "new DB signature is:\r\n" );
         REPAIRPrintSig( &pdbfilehdr->signDb, popts->pcprintfVerbose );
 
+        //  initialize persisted flush map
         Call( CFlushMapForUnattachedDb::ErrGetPersistedFlushMapOrNullObjectIfRuntime( wszDatabase, pdbfilehdr, pinst, &pfm ) );
 
         Call( ErrUtilWriteUnattachedDatabaseHeaders( pinst, pinst->m_pfsapi, wszDatabase, pdbfilehdr, NULL, pfm ) );
@@ -7561,15 +8173,17 @@ HandleError:
 }
 
 
+//  ================================================================
 LOCAL ERR ErrREPAIRRepairGlobalSpace(
     PIB * const ppib,
     const IFMP ifmp,
     const REPAIROPTS * const popts )
+//  ================================================================
 {
     ERR err = JET_errSuccess;
 
     const PGNO pgnoLast = PgnoLast( ifmp );
-    const CPG  cpgOwned = PgnoLast( ifmp ) - 3;
+    const CPG  cpgOwned = PgnoLast( ifmp ) - 3; // we will insert three pages in the ErrSPCreate below
 
     FUCB    *pfucb      = pfucbNil;
     FUCB    *pfucbOE    = pfucbNil;
@@ -7590,6 +8204,7 @@ LOCAL ERR ErrREPAIRRepairGlobalSpace(
 
     Call( ErrDIROpen( ppib, pgnoSystemRoot, ifmp, &pfucb ) );
 
+    //  The tree has only one node so we can insert ths node without splitting
     Call( ErrSPIOpenOwnExt( ppib, pfucb->u.pfcb, &pfucbOE ) );
 
     (*popts->pcprintfDebug)( "Global OwnExt:  %d pages ending at %d\r\n", cpgOwned, pgnoLast );
@@ -7614,10 +8229,13 @@ HandleError:
 }
 
 
+//  ================================================================
 LOCAL ERR ErrREPAIRBuildCatalogEntryToDeleteList(
     INFOLIST **ppDeleteList,
     const ENTRYINFO entryinfo )
+//  ================================================================
 {
+    //Insert entryinfo into the list based on its objidTable+objType+objidFDP
 
     ERR             err         = JET_errSuccess;
     INFOLIST    *   pTemp       = *ppDeleteList;
@@ -7629,7 +8247,7 @@ LOCAL ERR ErrREPAIRBuildCatalogEntryToDeleteList(
     pInfo->info = entryinfo;
     pInfo->pInfoListNext = NULL;
 
-    if ( NULL == pTemp
+    if ( NULL == pTemp // empty list
         || pTemp->info.objidTable > entryinfo.objidTable
         || ( pTemp->info.objidTable == entryinfo.objidTable
              && pTemp->info.objType > entryinfo.objType )
@@ -7637,6 +8255,7 @@ LOCAL ERR ErrREPAIRBuildCatalogEntryToDeleteList(
              && pTemp->info.objType == entryinfo.objType
              && pTemp->info.objidFDP > entryinfo.objidFDP ) )
     {
+        // insert into the first record of the list
         pInfo->pInfoListNext = pTemp;
         *ppDeleteList = pInfo;
     }
@@ -7661,12 +8280,14 @@ HandleError:
 }
 
 
+//  ================================================================
 LOCAL ERR ErrREPAIRDeleteCorruptedEntriesFromCatalog(
     PIB * const ppib,
     const IFMP ifmp,
     const INFOLIST *pTablesToDelete,
     const INFOLIST *pEntriesToDelete,
     const REPAIROPTS * const popts )
+//  ================================================================
 {
     ERR             err             = JET_errSuccess;
     FUCB        *   pfucbCatalog    = pfucbNil;
@@ -7689,6 +8310,7 @@ LOCAL ERR ErrREPAIRDeleteCorruptedEntriesFromCatalog(
 
     err = ErrDIRDown( pfucbCatalog, &dib );
 
+    // if no more records in catalog or no more records to delete, exit
     while ( JET_errNoCurrentRecord != err
             && ( pTablesToDelete || pEntriesToDelete ) )
     {
@@ -7725,6 +8347,7 @@ LOCAL ERR ErrREPAIRDeleteCorruptedEntriesFromCatalog(
                  && pEntriesToDelete->info.objidFDP == entryinfo.objidFDP
                  && pEntriesToDelete->info.objType == entryinfo.objType )
             {
+                // find the corrupted entry in catalog
                 fEntryToDelete = fTrue;
 
             (*popts->pcprintfVerbose)( "deleting (%d %d %s) (%d %d %s)\r\n",
@@ -7735,10 +8358,12 @@ LOCAL ERR ErrREPAIRDeleteCorruptedEntriesFromCatalog(
             }
         else
         {
+            // good entry in catalog
         }
 
         if ( fEntryToDelete )
         {
+            // delete the entry in the catalog
             (*popts->pcprintfVerbose)( "Deleting a catalog entry (%d %d %s)\r\n",
                                         entryinfo.objidTable, entryinfo.objidFDP, entryinfo.szName );
 
@@ -7777,10 +8402,12 @@ HandleError:
 }
 
 
+//  ================================================================
 LOCAL ERR ErrREPAIRInsertMSOEntriesToCatalog(
     PIB * const ppib,
     const IFMP ifmp,
     const REPAIROPTS * const popts )
+//  ================================================================
 {
     ERR         err     = JET_errSuccess;
     CallR( ErrDIRBeginTransaction( ppib, 39973, NO_GRBIT ) );
@@ -7789,8 +8416,8 @@ LOCAL ERR ErrREPAIRInsertMSOEntriesToCatalog(
                     ifmp,
                     objidFDPMSO_NameIndex,
                     objidFDPMSO_RootObjectIndex,
-                    fTrue,
-                    fFalse ) );
+                    fTrue, // fRepair
+                    fFalse ) ); // fReplayCreateDbImplicitly
     Call( ErrDIRCommitTransaction( ppib, NO_GRBIT ) );
 HandleError:
     if ( JET_errSuccess != err )
@@ -7802,6 +8429,7 @@ HandleError:
 }
 
 
+//  ================================================================
 LOCAL ERR ErrREPAIRRepairCatalogs(
     PIB * const ppib,
     const IFMP ifmp,
@@ -7809,6 +8437,7 @@ LOCAL ERR ErrREPAIRRepairCatalogs(
     const BOOL fCatalogCorrupt,
     const BOOL fShadowCatalogCorrupt,
     const REPAIROPTS * const popts )
+//  ================================================================
 {
     ERR     err                     = JET_errSuccess;
 
@@ -7823,6 +8452,7 @@ LOCAL ERR ErrREPAIRRepairCatalogs(
 
     if ( fCatalogCorrupt || fShadowCatalogCorrupt )
     {
+        //  we'll need this for the space
         Call( ErrDIROpen( ppib, pgnoSystemRoot, ifmp, &pfucbParent ) );
     }
 
@@ -7830,6 +8460,7 @@ LOCAL ERR ErrREPAIRRepairCatalogs(
     {
         Call( ErrREPAIRScanDBAndRepairCatalogs( ppib, ifmp, popts ) );
 
+        // Check New Catalog and Delete all records pertaining to a corrupted table
         err = ErrREPAIRCheckFixCatalogLogical(
                     ppib,
                     ifmp,
@@ -7849,9 +8480,10 @@ LOCAL ERR ErrREPAIRRepairCatalogs(
 
     if ( fShadowCatalogCorrupt )
     {
+        //  if the catalog was corrupted as well it was repaired above
         const PGNO cpgOwned = CpgCATShadowInitial( g_cbPage );
         const PGNO pgnoLast = pgnoFDPMSOShadow - 1 + cpgOwned;
-        Expected( pgnoFDPMSO + cpgMSOInitial - 1  == pgnoLast - cpgOwned);
+        Expected( pgnoFDPMSO + cpgMSOInitial - 1 /* last page of regular catalog */ == pgnoLast - cpgOwned);
         Assert( pgnoLast <= 32 );
 
         (*popts->pcprintf)( "\r\nRebuilding %s from %s.\r\n", szMSOShadow, szMSO );
@@ -7861,6 +8493,7 @@ LOCAL ERR ErrREPAIRRepairCatalogs(
 
         (*popts->pcprintfVerbose)( "rebuilding %s from %s\r\n", szMSOShadow, szMSO );
 
+        //  copy from the catalog to the shadow
         Assert( pfucbNil != pfucbParent );
         Call( ErrSPCreateMultiple(
             pfucbParent,
@@ -7889,7 +8522,7 @@ LOCAL ERR ErrREPAIRRepairCatalogs(
     else if ( fCatalogCorrupt )
     {
         const PGNO pgnoLast = 23;
-        const PGNO cpgOwned = 23 - 3 - 3;
+        const PGNO cpgOwned = 23 - 3 - 3;   //  3 for system root, 3 for FDP
         Assert( cpgMSOInitial >= cpgOwned );
 
         (*popts->pcprintf)( "\r\nRebuilding %s from %s.\r\n", szMSO, szMSOShadow );
@@ -7900,6 +8533,8 @@ LOCAL ERR ErrREPAIRRepairCatalogs(
         (*popts->pcprintfVerbose)( "rebuilding %s from %s\r\n", szMSO, szMSOShadow );
 
         Assert( pfucbNil != pfucbParent );
+        //  when we create this we cannot make all the pages available, some will be needed later
+        //  for the index FDP's. The easiest thing to do is not add any pages to the AvailExt
         Call( ErrSPCreateMultiple(
             pfucbParent,
             pgnoSystemRoot,
@@ -7928,7 +8563,7 @@ LOCAL ERR ErrREPAIRRepairCatalogs(
         Call( ErrSPIOpenOwnExt( ppib, pfucbCatalog->u.pfcb, &pfucbSpace ) );
 #ifdef REPAIR_DEBUG_VERBOSE_SPACE
         (*popts->pcprintfDebug)( "%s OwnExt: %d pages ending at %d\r\n", szMSO, cpgOwned, pgnoLast );
-#endif
+#endif  //  REPAIR_DEBUG_VERBOSE_SPACE
 
         Call( ErrREPAIRInsertRunIntoSpaceTree(
                     ppib,
@@ -7951,6 +8586,9 @@ LOCAL ERR ErrREPAIRRepairCatalogs(
 
     if ( fCatalogCorrupt || !fShadowCatalogCorrupt )
     {
+        //  we don't need to repair the indexes if just the shadow catalog was corrupt
+        //  otherwise (i.e. the catalog was corrupt or neither catalog was corrupt) we
+        //  need to rebuild the indexes
         (*popts->pcprintfVerbose)( "rebuilding indexes for %s\r\n", szMSO );
 
         REPAIRTABLE repairtable;
@@ -7962,6 +8600,7 @@ LOCAL ERR ErrREPAIRRepairCatalogs(
         repairtable.fHasPrimaryIndex = fTrue;
         OSStrCbCopyA( repairtable.szTableName, sizeof(repairtable.szTableName), szMSO );
 
+        //  we should be able to open the catalog without referring to the catalog
         Call( ErrFILEOpenTable( ppib, ifmp, &pfucbCatalog, szMSO ) );
         FUCBSetSystemTable( pfucbCatalog );
         Call( ErrREPAIRBuildAllIndexes( ppib, ifmp, &pfucbCatalog, &repairtable, popts ) );
@@ -7993,10 +8632,19 @@ HandleError:
 #pragma prefast(push)
 #pragma prefast(disable:6262, "This function uses a lot of stack (33k)")
 
+//  ================================================================
 LOCAL ERR ErrREPAIRScanDBAndRepairCatalogs(
     PIB * const ppib,
     const IFMP ifmp,
     const REPAIROPTS * const popts )
+//  ================================================================
+//
+//  This is called if both copies of the system catalog are corrupt
+//  we extract all the pages belonging to _either_ the catalog or
+//  the shadow catalog and then take the union of their records (removing
+//  duplicates).
+//
+//-
 {
     const JET_SESID sesid   = reinterpret_cast<JET_SESID>( ppib );
     const CPG cpgPreread    = 256;
@@ -8013,8 +8661,8 @@ LOCAL ERR ErrREPAIRScanDBAndRepairCatalogs(
     INT     cRecordsDuplicate   = 0;
 
     JET_COLUMNDEF   rgcolumndef[2] = {
-        { sizeof( JET_COLUMNDEF ), 0, JET_coltypLongBinary, 0, 0, 0, 0, JET_cbKeyMost_OLD, JET_bitColumnTTKey },
-        { sizeof( JET_COLUMNDEF ), 0, JET_coltypLongBinary, 0, 0, 0, 0, 0, 0 },
+        { sizeof( JET_COLUMNDEF ), 0, JET_coltypLongBinary, 0, 0, 0, 0, JET_cbKeyMost_OLD, JET_bitColumnTTKey },    //  KEY
+        { sizeof( JET_COLUMNDEF ), 0, JET_coltypLongBinary, 0, 0, 0, 0, 0, 0 },                                     //  DATA
     };
 
     JET_TABLEID tableid;
@@ -8069,6 +8717,8 @@ LOCAL ERR ErrREPAIRScanDBAndRepairCatalogs(
         }
         else if ( FErrIsDbCorruption( err ) || JET_errDiskIO == err )
         {
+            //  NOTE: JET_errDiskIO doesn't represent corruption anymore, but this makes repair more robust, at the 
+            //  cost of potential sporadic disk errors "ditching" data.
             err = JET_errSuccess;
         }
         else if ( err >= 0 )
@@ -8090,7 +8740,7 @@ LOCAL ERR ErrREPAIRScanDBAndRepairCatalogs(
                             csr,
                     #ifdef SYNC_DEADLOCK_DETECTION
                             NULL,
-                    #endif
+                    #endif  //  SYNC_DEADLOCK_DETECTION
                             popts );
                 if ( err < 0 )
                 {
@@ -8102,6 +8752,7 @@ LOCAL ERR ErrREPAIRScanDBAndRepairCatalogs(
                             REPAIR_BAD_PAGE_ID,
                             0, NULL );
 
+                    //  this page is not usable. skip it
 
                     err = JET_errSuccess;
                 }
@@ -8115,12 +8766,14 @@ LOCAL ERR ErrREPAIRScanDBAndRepairCatalogs(
                             REPAIR_BAD_PAGE_ID,
                             0, NULL );
 
+                    //  this page is now empty. skip it
 
                     err = JET_errSuccess;
                     goto HandleError;
                 }
                 else
                 {
+                    //  a non-empty leaf page of one of the catalogs. copy the records into the temp table
                     INT iline;
                     for( iline = 0;
                         iline < csr.Cpage().Clines() && err >= 0;
@@ -8132,6 +8785,14 @@ LOCAL ERR ErrREPAIRScanDBAndRepairCatalogs(
                         {
                             ++cRecords;
 
+                            //  a ranking violation assert occurs if we attempt
+                            //  to do the insert with a page latched (thanks
+                            //  to SOMEONE)
+                            //
+                            //  copy the information to a separate page before inserting it
+                            //
+                            //  UNDONE: consider skipping this step in retail as it is
+                            //  only working around an assert
 
                             BYTE rgb[g_cbPageMax];
                             BYTE * pb = rgb;
@@ -8195,6 +8856,7 @@ LOCAL ERR ErrREPAIRScanDBAndRepairCatalogs(
     (VOID)popts->pfnStatus( sesid, JET_snpRepair, JET_sntComplete, NULL );
     (*popts->pcprintfVerbose)( "%d catalog records found. %d unique\r\n", cRecords, cRecords - cRecordsDuplicate );
 
+    //  Now we have to insert the records back into the catalog
     (*popts->pcprintf)( "\r\nRebuilding %s.\r\n", szMSO );
 
     popts->psnprog->cunitTotal = cRecords - cRecordsDuplicate;
@@ -8216,6 +8878,7 @@ HandleError:
 }
 #pragma prefast(pop)
 
+//  ================================================================
 LOCAL ERR ErrREPAIRInsertCatalogRecordIntoTempTable(
     PIB * const ppib,
     const IFMP ifmp,
@@ -8224,6 +8887,7 @@ LOCAL ERR ErrREPAIRInsertCatalogRecordIntoTempTable(
     const JET_COLUMNID columnidKey,
     const JET_COLUMNID columnidData,
     const REPAIROPTS * const popts )
+//  ================================================================
 {
     const JET_SESID sesid = (JET_SESID)ppib;
 
@@ -8266,6 +8930,7 @@ HandleError:
 }
 
 
+//  ================================================================
 LOCAL ERR ErrREPAIRCopyTempTableToCatalog(
     PIB * const ppib,
     const IFMP ifmp,
@@ -8273,9 +8938,15 @@ LOCAL ERR ErrREPAIRCopyTempTableToCatalog(
     const JET_COLUMNID columnidKey,
     const JET_COLUMNID columnidData,
     const REPAIROPTS * const popts )
+//  ================================================================
+//
+//  Copy from the temp table to the catalog. The progress bar should have been initialized
+//  before and should be terminated afterwards.
+//
+//-
 {
     const PGNO pgnoLast = 23;
-    const PGNO cpgOwned = 23 - 3 - 3;
+    const PGNO cpgOwned = 23 - 3 - 3;   //  3 for system root, 3 for FDP
     Assert( cpgMSOInitial >= cpgOwned );
     const JET_SESID sesid = reinterpret_cast<JET_SESID>( ppib );
 
@@ -8285,6 +8956,7 @@ LOCAL ERR ErrREPAIRCopyTempTableToCatalog(
     FUCB    * pfucbCatalog  = pfucbNil;
     FUCB    * pfucbSpace    = pfucbNil;
 
+    //  UNDONE: this could be done in just one buffer, but this makes it easier
 
     VOID * pvKey = NULL;
     BFAlloc( bfasIndeterminate, &pvKey );
@@ -8294,6 +8966,8 @@ LOCAL ERR ErrREPAIRCopyTempTableToCatalog(
     Call( ErrDIROpen( ppib, pgnoSystemRoot, ifmp, &pfucbParent ) );
     Assert( pfucbNil != pfucbParent );
 
+    //  when we create this we cannot make all the pages available, some will be needed later
+    //  for the index FDP's. The easiest thing to do is not add any pages to the AvailExt
     Call( ErrSPCreateMultiple(
         pfucbParent,
         pgnoSystemRoot,
@@ -8322,7 +8996,7 @@ LOCAL ERR ErrREPAIRCopyTempTableToCatalog(
     Call( ErrSPIOpenOwnExt( ppib, pfucbCatalog->u.pfcb, &pfucbSpace ) );
 #ifdef REPAIR_DEBUG_VERBOSE_SPACE
     (*popts->pcprintfDebug)( "%s OwnExt: %d pages ending at %d\r\n", szMSO, cpgOwned, pgnoLast );
-#endif
+#endif  //  REPAIR_DEBUG_VERBOSE_SPACE
 
     Call( ErrREPAIRInsertRunIntoSpaceTree(
                 ppib,
@@ -8363,6 +9037,7 @@ LOCAL ERR ErrREPAIRCopyTempTableToCatalog(
     }
     if ( JET_errNoCurrentRecord == err )
     {
+        //  we moved off the end of the table
         err = JET_errSuccess;
     }
 
@@ -8388,6 +9063,7 @@ HandleError:
 }
 
 
+//  ================================================================
 LOCAL ERR ErrREPAIRRepairDatabase(
             PIB * const ppib,
             const WCHAR * const wszDatabase,
@@ -8404,6 +9080,7 @@ LOCAL ERR ErrREPAIRRepairDatabase(
             TTARRAY * const pttarrayAvailSpace,
             PgnoCollection * const ppgnocollShelved,
             const REPAIROPTS * const popts )
+//  ================================================================
 {
     Assert( !(popts->grbit & JET_bitDBUtilOptionDontRepair ) );
     Assert( pfAttached );
@@ -8421,14 +9098,15 @@ LOCAL ERR ErrREPAIRRepairDatabase(
 
     REPAIRTABLE *   prepairtableT           = NULL;
     DBTIME          dbtimeLast              = 0;
-    const OBJID     objidFDPMin             = 5;
-    OBJID           objidFDPLast            = objidLast;
+    const OBJID     objidFDPMin             = 5; // normal table should have > 5 objidFDP
+    OBJID           objidFDPLast            = objidLast; // objidLast from catalog
     PGNO            pgnoLastOESeen          = pgnoLastOE;
 
     INT             cTablesToRepair         = 0;
 
     OBJIDLIST   objidlist;
 
+    //  get a list of objids we'll be repairing
 
     prepairtableT = prepairtable;
     while ( prepairtableT )
@@ -8439,6 +9117,7 @@ LOCAL ERR ErrREPAIRRepairDatabase(
     }
     objidlist.Sort();
 
+    //  scan the database
 
     (*popts->pcprintf)( "\r\nScanning the database.\r\n"  );
     (*popts->pcprintfVerbose).Indent();
@@ -8484,6 +9163,7 @@ LOCAL ERR ErrREPAIRRepairDatabase(
         fRepairGlobalSpace = fTrue;
     }
 
+    //  set sequential access for the temp tables that we will be using
 
     FUCBSetSequential( (FUCB *)(repairtt.tableidAvailable) );
     FUCBSetPrereadForward( (FUCB *)(repairtt.tableidAvailable), cpgPrereadSequential );
@@ -8492,6 +9172,7 @@ LOCAL ERR ErrREPAIRRepairDatabase(
     FUCBSetSequential( (FUCB *)(repairtt.tableidUsed) );
     FUCBSetPrereadForward( (FUCB *)(repairtt.tableidUsed), cpgPrereadSequential );
 
+    //  attach and set dbtimeLast and objidLast
 
     Call( ErrREPAIRAttachForRepair(
             sesid,
@@ -8501,6 +9182,7 @@ LOCAL ERR ErrREPAIRRepairDatabase(
             objidFDPLast,
             popts ) );
 
+    // Check new catalog and add system table entries if they did not exist
     if ( fRepairedCatalog )
     {
         Call( ErrREPAIRInsertMSOEntriesToCatalog( ppib, *pifmp, popts ) );
@@ -8509,6 +9191,8 @@ LOCAL ERR ErrREPAIRRepairDatabase(
     (*popts->pcprintf)( "\r\nRepairing damaged tables.\r\n"  );
     (VOID)popts->pfnStatus( sesid, JET_snpRepair, JET_sntBegin, NULL );
 
+    //  for the progress baruse the number of things we are going to repair
+    //  (a really bad approximation, but better than nothing)
 
     popts->psnprog->cunitTotal  = 0;
     popts->psnprog->cunitDone   = 0;
@@ -8530,6 +9214,7 @@ LOCAL ERR ErrREPAIRRepairDatabase(
 
     if ( prepairtable )
     {
+        //  delete the unicode fixup table (MSU) and reset the fixup flag on all indexes
         (*popts->pcprintfVerbose)( "\r\nDeleting unicode fixup table.\r\n"  );
         Call( ErrCATDeleteMSU( ppib, *pifmp ) );
     }
@@ -8538,12 +9223,14 @@ LOCAL ERR ErrREPAIRRepairDatabase(
 
     if ( fMsoDependentsOutOfDate || fRepairMSObjids )
     {
+        //  delete the MSObjids table. the below attach will rebuild it
         (*popts->pcprintfVerbose)( "\r\nDeleting MSObjids.\r\n"  );
         Call( ErrCATDeleteMSObjids( ppib, *pifmp ) );
     }
 
     if ( fMsoDependentsOutOfDate || fRepairMSLocales )
     {
+        //  Delete the MSysLocales table. the below attach will rebuild it.
         (*popts->pcprintfVerbose)( "\r\nDeleting MSysLocales.\r\n"  );
         CATTermMSLocales( &(g_rgfmp[*pifmp]) );
         Call( ErrCATDeleteMSLocales( ppib, *pifmp ) );
@@ -8556,15 +9243,24 @@ LOCAL ERR ErrREPAIRRepairDatabase(
         if ( FCATObjidsTable( prepairtableT->szTableName ) ||
                 FCATLocalesTable( prepairtableT->szTableName ) )
         {
+            //  We deleted these tables above ... and the below re-attach will rebuild them.
             (*popts->pcprintfVerbose)( "table \"%s\" is a system table and is repaired via attach\r\n", prepairtableT->szTableName );
         }
         else
         {
+            //  CONSIDER:  multi-thread the repair code. the main issue to deal with is
+            //  the call to DetachDatabase() which purges the FCBs. A more selective
+            //  purge call should suffice. Also, any template tables should probably
+            //  be repaired first, to avoid changing the FCB of a template table while
+            //  a derived table is being repaired
 
+            //  we are going to be changing pgnoFDPs so we need to purge all FCBs
 
-            FCB::PurgeDatabase( *pifmp, fFalse  );
+            FCB::PurgeDatabase( *pifmp, fFalse /* fTerminating */ );
             Call( ErrREPAIRRepairTable( ppib, *pifmp, &repairtt, prepairtableT, popts ) );
 
+            //  Flush the entire database so that if we crash here we don't have to repair this
+            //  table again
 
             (VOID)ErrBFFlush( *pifmp );
         }
@@ -8575,18 +9271,26 @@ LOCAL ERR ErrREPAIRRepairDatabase(
     }
     (*popts->pcprintfVerbose).Unindent();
 
+    //  Fixup all MSO dependant tables, that attach will rebuild for us.  Note: I'm not going
+    //  to bother with a progress bar, though that would be goodness.  Better to burn the time
+    //  here in repair than on the first attach, which may be in the critical path to getting
+    //  a service restored.  ALSO the cache will be more likely to have Catalog data pages here.
 
     if ( fMsoDependentsOutOfDate || fRepairMSObjids || fRepairMSLocales )
     {
+        //  The JET_sntComplete callback prints the final dot of the primary repair status bar,
+        //  so we'll just make it appear to hang at 98% done until this is done.
+        //(*popts->pcprintf)( "\r\nCatalog dependent tables being fixed (may take a while) ..."  );
 
         (*popts->pcprintfVerbose)( "Closing and detaching database (for MSO dependent table fixups).\r\n" );
-        CallS( ErrIsamCloseDatabase( (JET_SESID)ppib, (JET_DBID)*pifmp, 0 ) );
+        CallS( ErrIsamCloseDatabase( (JET_SESID)ppib, (JET_DBID)*pifmp, 0 ) );  // shouldn't be able to fail
 
         if ( ErrIsamDetachDatabase( (JET_SESID)ppib, NULL, wszDatabase ) >= JET_errSuccess )
         {
             *pfAttached = fFalse;
 
             Assert( g_fRepair );
+            //  We want a completely regular attach this time ... 
             g_fRepair = fFalse;
 
             (*popts->pcprintfVerbose)( "Reattaching database (for MSO dependent table fixups).\r\n" );
@@ -8594,18 +9298,27 @@ LOCAL ERR ErrREPAIRRepairDatabase(
             Call( ErrIsamAttachDatabase( sesid, wszDatabase, fFalse, NULL, 0, JET_bitDbRecoveryOff ) );
             Assert( JET_wrnDatabaseAttached != err );
 
+            // Then it turns g_fRepair back on, and then the database detaches.
+            // Normally FCB::PurgeDatabase will remove the entry from this Cat Hash.
+            // but because g_fRepair is true, it's skipped.
+            // Then when we get to CATTerm, the FCB for MSysObjids is still present in the cache.
+            // But in the meantime, g_fRepair was set back to fTrue, and we trigger an
+            // Assert in the Detach path that the Cat Hash is empty.
+            // So we need to detach it while g_fRepair is still fFalse, re-enable g_fRepair,
+            // and then attach the database again. This wey, the Cat Hash will be empty.
             Call( ErrIsamDetachDatabase( sesid, NULL, wszDatabase ) );
 
-            g_fRepair = fTrue;
+            g_fRepair = fTrue;  //  reset it back to true
             Call( ErrIsamAttachDatabase( sesid, wszDatabase, fFalse, NULL, 0, JET_bitDbRecoveryOff ) );
             Assert( JET_wrnDatabaseAttached != err );
 
-            CallS( ErrIsamOpenDatabase( sesid, wszDatabase, NULL, (JET_DBID*)pifmp, JET_bitDbRecoveryOff ) );
+            CallS( ErrIsamOpenDatabase( sesid, wszDatabase, NULL, (JET_DBID*)pifmp, JET_bitDbRecoveryOff ) );   // probably won't fail
             *pfAttached = fTrue;
         }
     }
 
 #ifdef DEBUG
+    //  We want to make sure that we fixed the MSO dependents up, but we wouldn't want to add this to retail runtime.
     (*popts->pcprintfVerbose)( "Verifying MSO Dependants fixed up.\r\n" );
     CallS( ErrCATVerifyMSObjids( ppib, *pifmp, popts->pcprintfError ) );
     const ERR errT = ErrCATVerifyMSLocales( ppib, *pifmp, fFalse );
@@ -8613,9 +9326,10 @@ LOCAL ERR ErrREPAIRRepairDatabase(
     {
         (*popts->pcprintfError)( "ERROR: Failed to validate MSysLocales table, didn't match MSO contents (%d).\r\n", errT );
     }
-    CallS( err );
+    CallS( err );   // Assert on this condition, should've been fixed up.
 #endif
 
+    //  CONSIDER:  add the pages in the BadPages TT to the OwnExt of a special table
 
     (VOID)popts->pfnStatus( sesid, JET_snpRepair, JET_sntComplete, NULL );
 
@@ -8647,12 +9361,14 @@ HandleError:
 
 ERR ErrDIROpenLongRoot( FUCB * pfucb );
 
+//  ================================================================
 LOCAL ERR ErrREPAIRRepairTable(
     PIB * const ppib,
     const IFMP ifmp,
     REPAIRTT * const prepairtt,
     REPAIRTABLE * const prepairtable,
     const REPAIROPTS * const popts )
+//  ================================================================
 {
     ERR     err                 = JET_errSuccess;
     FUCB    * pfucb             = pfucbNil;
@@ -8731,6 +9447,7 @@ HandleError:
 }
 
 
+//  ================================================================
 LOCAL ERR ErrREPAIRRebuildBT(
     PIB * const ppib,
     const IFMP ifmp,
@@ -8740,6 +9457,7 @@ LOCAL ERR ErrREPAIRRebuildBT(
     const ULONG fPageFlags,
     REPAIRTT * const prepairtt,
     const REPAIROPTS * const popts )
+//  ================================================================
 {
     ERR err = JET_errSuccess;
 
@@ -8752,6 +9470,7 @@ LOCAL ERR ErrREPAIRRebuildBT(
     const OBJID objidFDP    = ( fRepairLV ? prepairtable->objidLV : prepairtable->objidFDP );
     const PGNO pgnoParent   = fRepairLV ? prepairtable->pgnoFDP : pgnoSystemRoot;
 
+    //  we change the pgnoFDP so this cannot be called on system tables
     Assert( !FCATSystemTable( prepairtable->szTableName ) );
 
     Call( ErrREPAIRCreateEmptyFDP(
@@ -8761,7 +9480,7 @@ LOCAL ERR ErrREPAIRRebuildBT(
         pgnoParent,
         &pgnoFDPNew,
         fPageFlags,
-        fTrue,
+        fTrue,  //  data and LV trees are always unique
         popts ) );
 
     if ( fRepairLV )
@@ -8795,6 +9514,11 @@ LOCAL ERR ErrREPAIRRebuildBT(
             pgnoFDPNew ) );
     }
 
+    //  at this point:
+    //     1.  the system tables have been repaired
+    //     2.  we have a global space tree
+    //     3.  we have a new (empty) pgnoFDP and space trees
+    //     4.  the catalogs have been updated with our new pgnoFDP
 
     if ( !fRepairLV )
     {
@@ -8805,6 +9529,7 @@ LOCAL ERR ErrREPAIRRebuildBT(
     {
         Call( ErrDIROpenLongRoot( pfucbTable ) );
         Call( ErrFILEOpenLVRoot( pfucbTable, &pfucb, fFalse ) );
+        // Make sure the LV FCB is properly linked to the Table FCB, needed later to look up chunk-size
         Assert( pfucb->u.pfcb->PfcbTable() != pfcbNil );
     }
     FUCBSetRepair( pfucb );
@@ -8823,6 +9548,7 @@ HandleError:
 }
 
 
+//  ================================================================
 LOCAL ERR ErrREPAIRCreateEmptyFDP(
     PIB * const ppib,
     const IFMP ifmp,
@@ -8832,6 +9558,7 @@ LOCAL ERR ErrREPAIRCreateEmptyFDP(
     const ULONG fPageFlags,
     const BOOL fUnique,
     const REPAIROPTS * const popts )
+//  ================================================================
 {
     ERR err = JET_errSuccess;
 
@@ -8843,6 +9570,7 @@ LOCAL ERR ErrREPAIRCreateEmptyFDP(
 
     FUCB * pfucb = pfucbNil;
 
+    //  the fucb is just used to get the pib so we open it on the parent
     Call( ErrDIROpen( ppib, pgnoParent, ifmp, &pfucb ) );
     if ( pgnoNull == *ppgnoFDPNew )
     {
@@ -8868,7 +9596,7 @@ LOCAL ERR ErrREPAIRCreateEmptyFDP(
         pgnoAE,
         *ppgnoFDPNew + cpgRequest - 1,
         cpgRequest,
-        fUnique,
+        fUnique,            //  always unique
         fPageFlags ) );
 
 HandleError:
@@ -8880,7 +9608,9 @@ HandleError:
 }
 
 
+//  ================================================================
 class REPAIRRUN
+//  ================================================================
 {
     public:
         REPAIRRUN(
@@ -8903,12 +9633,14 @@ class REPAIRRUN
 };
 
 
+//  ================================================================
 REPAIRRUN::REPAIRRUN(
             const JET_SESID sesid,
             const JET_TABLEID tableid,
             const JET_COLUMNID columnidFDP,
             const JET_COLUMNID columnidPgno,
             const OBJID objidFDP ) :
+//  ================================================================
     m_sesid( sesid ),
     m_tableid( tableid ),
     m_columnidFDP( columnidFDP ),
@@ -8918,7 +9650,9 @@ REPAIRRUN::REPAIRRUN(
 }
 
 
+//  ================================================================
 ERR REPAIRRUN::ErrREPAIRRUNInit()
+//  ================================================================
 {
     ERR err = JET_errSuccess;
 
@@ -8934,7 +9668,9 @@ HandleError:
 }
 
 
+//  ================================================================
 ERR REPAIRRUN::ErrGetRun( PGNO * const ppgnoLast, CPG * const pcpgRun )
+//  ================================================================
 {
     ERR     err         = JET_errSuccess;
     PGNO    pgnoStart   = pgnoNull;
@@ -8985,6 +9721,7 @@ ERR REPAIRRUN::ErrGetRun( PGNO * const ppgnoLast, CPG * const pcpgRun )
         }
         else if ( pgnoStart + cpgRun == pgnoCurr )
         {
+            //  this is part of a contiguous chunk
             ++cpgRun;
         }
         else
@@ -9009,6 +9746,7 @@ HandleError:
 }
 
 
+//  ================================================================
 LOCAL ERR ErrREPAIRRebuildSpace(
     PIB * const ppib,
     const IFMP ifmp,
@@ -9016,6 +9754,7 @@ LOCAL ERR ErrREPAIRRebuildSpace(
     const PGNO pgnoParent,
     REPAIRTT * const prepairtt,
     const REPAIROPTS * const popts )
+//  ================================================================
 {
     ERR             err     = JET_errSuccess;
 
@@ -9024,7 +9763,7 @@ LOCAL ERR ErrREPAIRRebuildSpace(
 #ifdef DEBUG
     PGNO    pgnoPrev        = pgnoNull;
     CPG     cpgPrev         = 0;
-#endif
+#endif  //  DEBUG
 
     PGNO    pgnoLast        = pgnoNull;
     CPG     cpgRun          = 0;
@@ -9042,6 +9781,7 @@ LOCAL ERR ErrREPAIRRebuildSpace(
         prepairtt->rgcolumnidOwned[1],
         objidFDP );
 
+    //  The FCB is new so the space should be uninit
     if ( !pfucb->u.pfcb->FSpaceInitialized() )
     {
         pfucb->u.pfcb->SetPgnoOE( pfucb->u.pfcb->PgnoFDP()+1 );
@@ -9069,7 +9809,7 @@ LOCAL ERR ErrREPAIRRebuildSpace(
 #ifdef DEBUG
     pgnoPrev = pgnoNull;
     cpgPrev = 0;
-#endif
+#endif  //  DEBUG
 
     forever
     {
@@ -9081,7 +9821,7 @@ LOCAL ERR ErrREPAIRRebuildSpace(
         Assert( pgnoLast - cpgRun > pgnoPrev );
 #ifdef REPAIR_DEBUG_VERBOSE_SPACE
         (*popts->pcprintfDebug)( "OwnExt:  %d pages ending at %d\r\n", cpgRun, pgnoLast );
-#endif
+#endif  //  REPAIR_DEBUG_VERBOSE_SPACE
 
         Call( ErrSPReserveSPBufPagesForSpaceTree( pfucb, pfucbOE, pfucbParent ) );
 
@@ -9113,6 +9853,7 @@ HandleError:
 }
 
 
+//  ================================================================
 LOCAL ERR ErrREPAIRInsertRunIntoSpaceTree(
     PIB * const ppib,
     const IFMP ifmp,
@@ -9120,6 +9861,7 @@ LOCAL ERR ErrREPAIRInsertRunIntoSpaceTree(
     const PGNO pgnoLast,
     const CPG cpgRun,
     const REPAIROPTS * const popts )
+//  ================================================================
 {
     ERR err = JET_errSuccess;
 
@@ -9147,11 +9889,13 @@ HandleError:
 }
 
 
+//  ================================================================
 LOCAL ERR ErrREPAIRResetRepairFlags(
     PIB * const ppib,
     const IFMP ifmp,
     FUCB * const pfucb,
     const REPAIROPTS * const popts )
+//  ================================================================
 {
     ERR err = JET_errSuccess;
 
@@ -9160,6 +9904,7 @@ LOCAL ERR ErrREPAIRResetRepairFlags(
     CSR csr;
     CallR( csr.ErrGetRIWPage( ppib, ifmp, pgnoFDP ) );
 
+    //  move down to the leaf level
     while ( !csr.Cpage().FLeafPage() )
     {
         NDMoveFirstSon( pfucb, &csr );
@@ -9181,6 +9926,7 @@ LOCAL ERR ErrREPAIRResetRepairFlags(
         }
         else
         {
+            //  This is an empty tree so this should be the root page
             Assert( csr.Cpage().FRootPage() );
         }
         ulFlags &= ~CPAGE::fPageRepair;
@@ -9217,15 +9963,22 @@ HandleError:
 }
 
 
+//  ================================================================
 LOCAL ERR ErrREPAIRRebuildInternalBT(
     PIB * const ppib,
     const IFMP ifmp,
     FUCB * const pfucb,
     REPAIRTT * const prepairtt,
     const REPAIROPTS * const popts )
+//  ================================================================
 {
     ERR err = JET_errSuccess;
 
+    //  for every used page
+    //      compute the separator key
+    //      insert the separator key into the new BT
+    //      set pgnoPrev and pgnoNext of the page
+    //  traverse the leaf level, unlink all the pages and change them to parent of leaf
 
     const CPG           cpgDatabase = PgnoLast( ifmp );
 
@@ -9297,6 +10050,7 @@ LOCAL ERR ErrREPAIRRebuildInternalBT(
         Assert( pgnoNull == pgnoNext && pgnoNull == pgnoPrev
                 || pgnoCurr == pgnoNext );
 
+        //  assume that the pages for the tree are found close together. preread them
         if ( pgnoCurr > pgnoPrev + CpgMinRepairSequentialPreread( g_rgfmp[ifmp].CbPage() )
             && pgnoCurr + CpgMinRepairSequentialPreread( g_rgfmp[ifmp].CbPage() ) < (SIZE_T)cpgDatabase )
         {
@@ -9364,6 +10118,7 @@ NextPage:
                 if ( (ULONG)ibKeyCommon >= cbKey2
                     || (ULONG)ibKeyCommon < cbKey1 && rgbKey1[ibKeyCommon] > rgbKey2[ibKeyCommon] )
                 {
+                    //  this removed inter-page duplicates. it won't remove intra-page duplicates
                     (*popts->pcprintfVerbose)
                         ( "page %d and page %d have duplicate/overlapping keys. discarding page %d\r\n",
                             pgnoCurr, pgnoNext, pgnoNext );
@@ -9374,7 +10129,7 @@ NextPage:
 
         key.prefix.Nullify();
         key.suffix.SetPv( rgbKey2 );
-        key.suffix.SetCb( ibKeyCommon + 1 );
+        key.suffix.SetCb( ibKeyCommon + 1 );    //  turn from ib to cb
 
         LittleEndian<PGNO> le_pgnoCurr = pgnoCurr;
         data.SetPv( &le_pgnoCurr );
@@ -9383,18 +10138,20 @@ NextPage:
 #ifdef REPAIR_DEBUG_VERBOSE_SPACE
         (*popts->pcprintfDebug)( "Page %d: pgnoPrev %d, pgnoNext %d, key-length %d\r\n",
             pgnoCurr, pgnoPrev, pgnoNext, key.Cb() );
-#endif
+#endif  //  REPAIR_DEBUG_VERBOSE_SPACE
 
         ++cpgInserted;
 
         if ( pgnoNull != pgnoPrev )
         {
+            //  we have been through here before
 
             Call( ErrDIRGet( pfucb ) );
             err = Pcsr( pfucb )->ErrUpgrade();
 
             while ( errBFLatchConflict == err )
             {
+                //  do a BTUp() so that the append code will do a BTInsert
 
                 CallS( ErrDIRRelease( pfucb ) );
                 Call( ErrDIRGet( pfucb ) );
@@ -9409,6 +10166,7 @@ NextPage:
         }
         else
         {
+            //  this is our last time through
             DIRUp( pfucb );
         }
 
@@ -9438,6 +10196,7 @@ HandleError:
 }
 
 
+//  ================================================================
 LOCAL ERR ErrREPAIRFixLVs(
     PIB * const ppib,
     const IFMP ifmp,
@@ -9446,6 +10205,13 @@ LOCAL ERR ErrREPAIRFixLVs(
     const BOOL fFixMissingLVROOT,
     REPAIRTABLE * const prepairtable,
     const REPAIROPTS * const popts )
+//  ================================================================
+//
+//  Delete LVs that are not complete
+//  Re-insert missing LVROOTs
+//  Store the LV refcounts in the ttmap
+//
+//-
 {
     ERR err = JET_errSuccess;
 
@@ -9465,6 +10231,7 @@ LOCAL ERR ErrREPAIRFixLVs(
 
     Call( ErrDIROpen( ppib, pgnoLV, ifmp, &pfucb ) );
     Assert( pfucbNil != pfucb );
+    // Make sure the LV FCB is properly linked to the Table FCB, needed later to look up chunk-size
     Assert( pfucb->u.pfcb->PfcbTable() != pfcbNil );
 
     FUCBSetIndex( pfucb );
@@ -9475,6 +10242,7 @@ LOCAL ERR ErrREPAIRFixLVs(
     if ( JET_errRecordNotFound == err )
     {
 
+        // no long values
 
         err = JET_errSuccess;
         fDone = fTrue;
@@ -9494,6 +10262,8 @@ LOCAL ERR ErrREPAIRFixLVs(
 
         Call( ErrREPAIRCheckLV( pfucb, &lidCurr, &ulRefcount, &ulSize, &fLVHasRoot, &fLVComplete, &fLVPartiallyScrubbed, &fDone ) );
 
+        //  If the LV is known to have been partially scrubbed (i.e., at least one of its chunks), no determinations
+        //  can be made regarding its original size because compression metadata is lost.
         const BOOL fDeleteIncompleteLV = ( !fLVComplete && !fLVPartiallyScrubbed );
 
         const BOOL fDeleteRootlessLV = ( !fLVHasRoot && !fFixMissingLVROOT );
@@ -9546,6 +10316,7 @@ LOCAL ERR ErrREPAIRFixLVs(
 
                 err = ErrREPAIRCreateLVRoot( pfucbLVRoot, lidCurr, ulRefcount, ulSize );
 
+                //  close the cursor before checking the error
 
                 DIRClose( pfucbLVRoot );
                 pfucbLVRoot = pfucbNil;
@@ -9558,6 +10329,7 @@ LOCAL ERR ErrREPAIRFixLVs(
                 }
             }
 
+            //  we are already on the next LV
 
             Assert( lidCurr > lidOld );
             if ( !fDone )
@@ -9584,12 +10356,14 @@ HandleError:
 }
 
 
+//  ================================================================
 LOCAL ERR ErrREPAIRCheckUpdateLVsFromColumn(
     FUCB * const pfucb,
     const PGNO pgnoLV,
     TAGFLD_ITERATOR& tagfldIterator,
     const TTMAP * const pttmapLVTree,
     const REPAIROPTS * const popts )
+//  ================================================================
 {
     ERR err = JET_errSuccess;
 
@@ -9631,11 +10405,13 @@ HandleError:
 }
 
 
+//  ================================================================
 LOCAL ERR ErrREPAIRUpdateLVsFromColumn(
     FUCB * const pfucb,
     TAGFLD_ITERATOR& tagfldIterator,
     TTMAP * const pttmapRecords,
     const REPAIROPTS * const popts )
+//  ================================================================
 {
     ERR err = JET_errSuccess;
 
@@ -9659,6 +10435,7 @@ HandleError:
 }
 
 
+//  ================================================================
 LOCAL ERR ErrREPAIRAddOneCatalogRecord(
     PIB * const ppib,
     const IFMP ifmp,
@@ -9667,6 +10444,7 @@ LOCAL ERR ErrREPAIRAddOneCatalogRecord(
     const USHORT ibRecordOffset,
     const ULONG cbMaxLen,
     const REPAIROPTS * const popts )
+//  ================================================================
 {
     ERR             err = JET_errSuccess;
     CHAR            szColumnName[32];
@@ -9677,12 +10455,15 @@ LOCAL ERR ErrREPAIRAddOneCatalogRecord(
     (*popts->pcprintfStats).Indent();
 
 
+    // Set column name to be a bogus name of the form "JetStub_<objidFDP>_<fid>".
     OSStrCbFormatA( szColumnName, sizeof(szColumnName),  "JetStub_%u_%u", objidTable, columnid);
 
+    //  must zero out to ensure unused fields are ignored
     memset( &field, 0, sizeof(field) );
 
     field.coltyp = JET_coltypNil;
     field.cbMaxLen = cbMaxLen;
+    //field.ffield = ffieldDeleted;
     field.ffield = 0;
     field.ibRecordOffset = ibRecordOffset;
     field.cp = 0;
@@ -9729,11 +10510,13 @@ HandleError:
 }
 
 
+//  ================================================================
 LOCAL ERR ErrREPAIRInsertDummyRecordsToCatalog(
     PIB * const ppib,
     const IFMP ifmp,
     REPAIRTABLE * const prepairtable,
     const REPAIROPTS * const popts )
+//  ================================================================
 {
     ERR         err     = JET_errSuccess;
 
@@ -9765,6 +10548,7 @@ LOCAL ERR ErrREPAIRInsertDummyRecordsToCatalog(
 #else
             JET_COLTYP  colTypeLastOld          = JET_coltypNil;
 
+            // Get values of colType and ibRecordOffset !
             FUCB        *   pfucbCatalog    = pfucbNil;
             USHORT      sysobj  = sysobjColumn;
 
@@ -9792,7 +10576,7 @@ LOCAL ERR ErrREPAIRInsertDummyRecordsToCatalog(
                         sizeof(COLUMNID),
                         NO_GRBIT ) );
             err = ErrIsamSeek( ppib, pfucbCatalog, JET_bitSeekEQ );
-            Assert( err <= JET_errSuccess );
+            Assert( err <= JET_errSuccess );    //  SeekEQ shouldn't return warnings
 
             if ( JET_errSuccess == err )
             {
@@ -9832,7 +10616,7 @@ LOCAL ERR ErrREPAIRInsertDummyRecordsToCatalog(
                 if ( JET_wrnColumnNull == err )
                 {
                     Assert( dataField.Cb() == 0 );
-                    Assert( REC::cbRecordMin == ibRecordOffsetLastOld );
+                    Assert( REC::cbRecordMin == ibRecordOffsetLastOld );    //  just use initialised value
                 }
                 else
                 {
@@ -9848,6 +10632,10 @@ LOCAL ERR ErrREPAIRInsertDummyRecordsToCatalog(
             }
             err = JET_errSuccess;
 
+            //  for fixed-size columns, in case there's a discrepancy
+            //  between the type and the size, assume the type is
+            //  authoritative
+            //
             switch ( colTypeLastOld )
             {
                 case JET_coltypBit:
@@ -9865,9 +10653,19 @@ LOCAL ERR ErrREPAIRInsertDummyRecordsToCatalog(
                 case JET_coltypGUID:            cbFixedLastOld = 16; break;
                 default:                        break;
             }
-#endif
+#endif  //  GET_FIXED_COLUMN_METADATA_FROM_TDB
 
-            
+            /* Calculate record offset and max column length
+
+             max column length  = ibEndOfFixedData
+                                    - offset of fidFixedLastInCAT
+                                    - Length of fidFixedLastInCAT
+                                    - sizeof fixed field bit array
+                                    - (one byte for each fid in between these two fids)
+
+            offset = offset of fidFixedLastInCAT + Length of fidFixedLastInCAT
+                        + (one byte for each fid in between these two fids)
+            */
 
             ULONG cbMaxLen = prepairtable->ibEndOfFixedData
                             - ibRecordOffsetLastOld
@@ -9875,6 +10673,7 @@ LOCAL ERR ErrREPAIRInsertDummyRecordsToCatalog(
                             - ( prepairtable->fidFixedLast % 8 ? prepairtable->fidFixedLast/8 + 1 : prepairtable->fidFixedLast/8 )
                             - (prepairtable->fidFixedLast - FidOfColumnid(columnidFixedLast) - 1 );
 
+            //  Make a retail check that this difference didn't underflow:
             if ( prepairtable->ibEndOfFixedData <
                     ( ibRecordOffsetLastOld + cbFixedLastOld
                       + ( prepairtable->fidFixedLast % 8 ? prepairtable->fidFixedLast/8 + 1 : prepairtable->fidFixedLast/8 )
@@ -9889,6 +10688,7 @@ LOCAL ERR ErrREPAIRInsertDummyRecordsToCatalog(
                             + (prepairtable->fidFixedLast - FidOfColumnid(columnidFixedLast) - 1 ) );
 
             USHORT ibRecordOffset = (USHORT) ulTempRecordOffset;
+            //  Make sure that the cast to USHORT didn't destroy information.
             if ( (ULONG) ibRecordOffset  != ulTempRecordOffset )
             {
                 err = ErrERRCheck( JET_errInvalidParameter );
@@ -9928,6 +10728,7 @@ LOCAL ERR ErrREPAIRInsertDummyRecordsToCatalog(
                         popts );
         }
 
+        // ignore errors
         err = JET_errSuccess;
     }
 
@@ -9942,6 +10743,7 @@ HandleError:
 }
 
 
+//  ================================================================
 LOCAL ERR ErrREPAIRCheckFixOneRecord(
     PIB * const ppib,
     const IFMP ifmp,
@@ -9952,6 +10754,7 @@ LOCAL ERR ErrREPAIRCheckFixOneRecord(
     const TTMAP * const pttmapLVTree,
     REPAIRTABLE * const prepairtable,
     const REPAIROPTS * const popts )
+//  ================================================================
 {
     ERR err = JET_errSuccess;
 
@@ -9996,6 +10799,7 @@ HandleError:
 }
 
 
+//  ================================================================
 LOCAL ERR ErrREPAIRFixOneRecord(
     PIB * const ppib,
     const IFMP ifmp,
@@ -10005,6 +10809,7 @@ LOCAL ERR ErrREPAIRFixOneRecord(
     TTMAP * const pttmapRecords,
     REPAIRTABLE * const prepairtable,
     const REPAIROPTS * const popts )
+//  ================================================================
 {
     ERR err = JET_errSuccess;
 
@@ -10042,6 +10847,7 @@ HandleError:
 }
 
 
+//  ================================================================
 LOCAL ERR ErrREPAIRFixRecords(
     PIB * const ppib,
     const IFMP ifmp,
@@ -10051,6 +10857,12 @@ LOCAL ERR ErrREPAIRFixRecords(
     const TTMAP * const pttmapLVTree,
     REPAIRTABLE * const prepairtable,
     const REPAIROPTS * const popts )
+//  ================================================================
+//
+//  Delete records that reference non-existant LVs
+//  Store the correct refcounts in the TTMAP
+//
+//-
 {
     ERR err = JET_errSuccess;
 
@@ -10072,6 +10884,7 @@ LOCAL ERR ErrREPAIRFixRecords(
     FUCBSetSequential( pfucb );
     FUCBSetPrereadForward( pfucb, cpgPrereadSequential );
 
+    //  allocate working buffer
 
     Assert( NULL == pfucb->pvWorkBuf );
     RECIAllocCopyBuffer( pfucb );
@@ -10081,6 +10894,7 @@ LOCAL ERR ErrREPAIRFixRecords(
     while ( err >= 0 )
     {
 
+        //  CONSIDER:  do we really need to copy the record? Try keeping the page latched
 
         UtilMemCpy( pfucb->dataWorkBuf.Pv(), pfucb->kdfCurr.data.Pv(), pfucb->kdfCurr.data.Cb() );
 
@@ -10145,6 +10959,8 @@ HandleError:
     {
         Assert( NULL != pfucb->pvWorkBuf );
 
+        //Insert dummy table column records to catalog
+        //if the last column in record is not the last one in TDB
         if ( prepairtable->fidFixedLast > pfucb->u.pfcb->Ptdb()->FidFixedLast()
             || prepairtable->fidVarLast > pfucb->u.pfcb->Ptdb()->FidVarLast()
             || prepairtable->fidTaggedLast > pfucb->u.pfcb->Ptdb()->FidTaggedLast() )
@@ -10160,6 +10976,7 @@ HandleError:
 }
 
 
+//  ================================================================
 LOCAL ERR ErrREPAIRFixLVRefcounts(
     PIB * const ppib,
     const IFMP ifmp,
@@ -10168,6 +10985,11 @@ LOCAL ERR ErrREPAIRFixLVRefcounts(
     TTMAP * const pttmapLVTree,
     REPAIRTABLE * const prepairtable,
     const REPAIROPTS * const popts )
+//  ================================================================
+//
+//  Using the two TTMAPs find LVs with the wrong refcount and fix the refcounts
+//
+//-
 {
     ERR err         = JET_errSuccess;
     FUCB * pfucb    = pfucbNil;
@@ -10184,6 +11006,8 @@ LOCAL ERR ErrREPAIRFixLVRefcounts(
 
     Call( ErrDIROpen( ppib, pgnoLV, ifmp, &pfucb ) );
 
+    //  Mark the fcb as being an LV; (see ErrFILEIInitLVRoot for 
+    //  other initialization that isn't needed)
     Assert( pfucb->u.pfcb->FTypeNull() || pfucb->u.pfcb->FTypeLV() );
     pfucb->u.pfcb->SetTypeLV();
 
@@ -10227,11 +11051,13 @@ HandleError:
 }
 
 
+//  ================================================================
 LOCAL ERR ErrREPAIRFixupTable(
     PIB * const ppib,
     const IFMP ifmp,
     REPAIRTABLE * const prepairtable,
     const REPAIROPTS * const popts )
+//  ================================================================
 {
     ERR err         = JET_errSuccess;
 
@@ -10265,9 +11091,11 @@ HandleError:
 }
 
 
+//  ================================================================
 LOCAL BOOL FREPAIRIdxsegIsUserDefinedColumn(
     const FCB * const pfcbIndex,
     const IDXSEG idxseg )
+//  ================================================================
 {
     const COLUMNID      columnid    = idxseg.Columnid();
     const TDB * const   ptdb        = pfcbIndex->PfcbTable()->Ptdb();
@@ -10277,10 +11105,12 @@ LOCAL BOOL FREPAIRIdxsegIsUserDefinedColumn(
 }
 
 
+//  ================================================================
 LOCAL BOOL FREAPIRIdxsegHasCallbacks(
     const FCB * const pfcbIndex,
     const IDXSEG * rgidxseg,
     const INT cidxseg )
+//  ================================================================
 {
     for( INT iidxseg = 0; iidxseg < cidxseg; ++iidxseg )
     {
@@ -10293,8 +11123,10 @@ LOCAL BOOL FREAPIRIdxsegHasCallbacks(
 }
 
 
+//  ================================================================
 LOCAL BOOL FREAPIRIndexHasCallbacks(
     const FCB * const pfcbIndex )
+//  ================================================================
 {
     const TDB * const ptdb = pfcbIndex->PfcbTable()->Ptdb();
     const IDB * const pidb = pfcbIndex->Pidb();
@@ -10315,6 +11147,7 @@ LOCAL BOOL FREAPIRIndexHasCallbacks(
 }
 
 
+//  ================================================================
 LOCAL ERR ErrREPAIRReopenTable(
         PIB * const ppib,
         const IFMP ifmp,
@@ -10323,6 +11156,12 @@ LOCAL ERR ErrREPAIRReopenTable(
         const OBJID objidFDP,
         FUCB ** ppfucb,
         const REPAIROPTS * const popts )
+//  ================================================================
+//
+//  Used when the meta-data of a table has been changed. Close the table,
+//  purge FCBs and re-open to get the new PgnoFDPs
+//
+//-
 {
     ERR err = JET_errSuccess;
 
@@ -10352,12 +11191,14 @@ HandleError:
 }
 
 
+//  ================================================================
 LOCAL ERR ErrREPAIRDeleteIndexesWithCallbacks(
         PIB * const ppib,
         const IFMP ifmp,
         const PGNO pgnoFDPTable,
         FCB * const pfcbTable,
         const REPAIROPTS * const popts )
+//  ================================================================
 {
     ERR         err         = JET_errSuccess;
     FCB     *   pfcbIndex   = NULL;
@@ -10370,6 +11211,8 @@ LOCAL ERR ErrREPAIRDeleteIndexesWithCallbacks(
     {
         if ( pfcbIndex->FPrimaryIndex() )
         {
+            //  even if the primary index is over a user-defined default column we can't delete it
+            //  anyway -- by this point the primary index should have been rebuilt already
             continue;
         }
 
@@ -10401,12 +11244,14 @@ HandleError:
 }
 
 
+//  ================================================================
 LOCAL ERR ErrREPAIRCreateEmptyIndexes(
         PIB * const ppib,
         const IFMP ifmp,
         const PGNO pgnoFDPTable,
         FCB * const pfcbTable,
         const REPAIROPTS * const popts )
+//  ================================================================
 {
     ERR         err         = JET_errSuccess;
     FCB     *   pfcbIndex   = NULL;
@@ -10453,23 +11298,30 @@ HandleError:
 }
 
 
+//  ================================================================
 LOCAL ERR ErrREPAIRBuildAllIndexes(
     PIB * const ppib,
     const IFMP ifmp,
     FUCB ** const ppfucb,
     REPAIRTABLE * const prepairtable,
     const REPAIROPTS * const popts )
+//  ================================================================
 {
     ERR     err         = JET_errSuccess;
 
+    //  delete indexes over user-defined defaults. rebuilding indexes with user-defined defaults
+    //  isn't guaranteed to work as the callback may try to access other (unrepaired) tables
+    //  reopen the table as the indexes will have changed
 
     Call( ErrREPAIRDeleteIndexesWithCallbacks( ppib, ifmp, prepairtable->pgnoFDP, (*ppfucb)->u.pfcb, popts ) );
     Call( ErrREPAIRReopenTable( ppib, ifmp, prepairtable->szTableName, prepairtable->pgnoFDP, prepairtable->objidFDP, ppfucb, popts ) );
 
+    //  create the empty indexes. reopen the table as pgnoFDPs will have changed
 
     Call( ErrREPAIRCreateEmptyIndexes( ppib, ifmp, prepairtable->pgnoFDP, (*ppfucb)->u.pfcb, popts ) );
     Call( ErrREPAIRReopenTable( ppib, ifmp, prepairtable->szTableName, prepairtable->pgnoFDP, prepairtable->objidFDP, ppfucb, popts ) );
 
+    //  rebuild the indexes in batch
 
     if ( pfcbNil != (*ppfucb)->u.pfcb->PfcbNextIndex() )
     {
@@ -10497,22 +11349,28 @@ HandleError:
 }
 
 
+//  ================================================================
 RECCHECK::RECCHECK()
+//  ================================================================
 {
 }
 
 
+//  ================================================================
 RECCHECK::~RECCHECK()
+//  ================================================================
 {
 }
 
 
+//  ================================================================
 RECCHECKTABLE::RECCHECKTABLE(
     const OBJID objid,
     FUCB * const pfucb,
     const FIDLASTINTDB fidLastInTDB,
     TTMAP * const pttmapLVRefcounts,
     const REPAIROPTS * const popts ) :
+//  ================================================================
     m_objid( objid ),
     m_pfucb( pfucb ),
     m_fidLastInTDB( fidLastInTDB ),
@@ -10522,37 +11380,47 @@ RECCHECKTABLE::RECCHECKTABLE(
 }
 
 
+//  ================================================================
 RECCHECKTABLE::~RECCHECKTABLE()
+//  ================================================================
 {
 }
 
 
+//  ================================================================
 ERR RECCHECKTABLE::ErrCheckRecord_(
     const KEYDATAFLAGS& kdf,
     const BOOL fCheckLV )
+//  ================================================================
 {
     ERR err = JET_errSuccess;
 
+    //  Check the basic REC structure
 
     Call( ErrCheckREC_( kdf ) );
 
+    //  Check the fixed columns
 
     Call( ErrCheckFixedFields_( kdf ) );
 
+    //  Check variable columns
 
     Call( ErrCheckVariableFields_( kdf ) );
 
+    //  Check tagged columns
 
     Call( ErrCheckTaggedFields_( kdf ) );
 
     if ( fCheckLV)
     {
+        //  Check LV columns
 
         Call( ErrCheckLVFields_( kdf ) );
     }
 
     if ( m_pfucb )
     {
+        //  Check the primary key
 
         Call( ErrCheckPrimaryKey_( kdf ) );
     }
@@ -10562,27 +11430,30 @@ HandleError:
 }
 
 
+//  ================================================================
 ERR RECCHECKTABLE::ErrCheckREC_( const KEYDATAFLAGS& kdf )
+//  ================================================================
 {
     ERR err = JET_errSuccess;
 
     const REC * const prec = reinterpret_cast<REC *>( kdf.data.Pv() );
     const BYTE * const pbRecMax = reinterpret_cast<BYTE *>( kdf.data.Pv() ) + kdf.data.Cb();
 
+    //  sanity check the pointers in the records
 
-    if ( prec->PbFixedNullBitMap() > pbRecMax )
+    if ( prec->PbFixedNullBitMap() > pbRecMax ) //  can point to the end of the record
     {
         (*m_popts->pcprintfError)( "Record corrupted: PbFixedNullBitMap is past the end of the record\r\n" );
         Call( ErrERRCheck( JET_errDatabaseCorrupted ) );
     }
 
-    if ( prec->PbVarData() > pbRecMax )
+    if ( prec->PbVarData() > pbRecMax ) //  can point to the end of the record
     {
         (*m_popts->pcprintfError)( "Record corrupted: PbVarData is past the end of the record\r\n" );
         Call( ErrERRCheck( JET_errDatabaseCorrupted ) );
     }
 
-    if (    prec->PbTaggedData() > pbRecMax )
+    if (    prec->PbTaggedData() > pbRecMax )   //  can point to the end of the record
     {
         (*m_popts->pcprintfError)( "Record corrupted: PbTaggedData is past the end of the record\r\n" );
         Call( ErrERRCheck( JET_errDatabaseCorrupted ) );
@@ -10592,13 +11463,16 @@ HandleError:
     return err;
 }
 
+//  ================================================================
 ERR RECCHECKTABLE::ErrCheckFixedFields_( const KEYDATAFLAGS& kdf )
+//  ================================================================
 {
     ERR err = JET_errSuccess;
 
     const REC * const prec = reinterpret_cast<REC *>( kdf.data.Pv() );
     const FID fidFixedLast  = prec->FidFixedLastInRec();
 
+    // Check if the last fixed column info in catalog is correct
     if ( fidFixedLast > m_fidLastInTDB.fidFixedLastInTDB )
     {
         (*m_popts->pcprintfError)(
@@ -10611,7 +11485,9 @@ HandleError:
 }
 
 
+//  ================================================================
 ERR RECCHECKTABLE::ErrCheckVariableFields_( const KEYDATAFLAGS& kdf )
+//  ================================================================
 {
     ERR err = JET_errSuccess;
 
@@ -10627,6 +11503,7 @@ ERR RECCHECKTABLE::ErrCheckVariableFields_( const KEYDATAFLAGS& kdf )
     REC::VAROFFSET ibStartOfColumnPrev = 0;
     REC::VAROFFSET ibEndOfColumnPrev = 0;
 
+    //  check the variable columns
 
     for( fid = fidVariableFirst; fid <= fidVariableLast; ++fid )
     {
@@ -10683,7 +11560,7 @@ ERR RECCHECKTABLE::ErrCheckVariableFields_( const KEYDATAFLAGS& kdf )
                 Call( ErrERRCheck( JET_errDatabaseCorrupted ) );
             }
 
-            if ( pbColumnEnd > pbRecMax )
+            if ( pbColumnEnd > pbRecMax )   //  can point to the end of the record
             {
                 (*m_popts->pcprintfError)(
                     "Record corrupted: variable field is too long (fid: %d, length: %d)\r\n", fid, cbColumn );
@@ -10692,6 +11569,7 @@ ERR RECCHECKTABLE::ErrCheckVariableFields_( const KEYDATAFLAGS& kdf )
         }
     }
 
+    // Check if the last variable column info in catalog is correct
     if ( fidVariableLast > m_fidLastInTDB.fidVarLastInTDB )
     {
         (*m_popts->pcprintfError)(
@@ -10706,11 +11584,13 @@ HandleError:
 }
 
 
+//  ================================================================
 ERR RECCHECKTABLE::ErrCheckSeparatedLV_(
                     const KEYDATAFLAGS& kdf,
                     const COLUMNID columnid,
                     const ULONG itagSequence,
                     const LvId lid )
+//  ================================================================
 {
     ERR err = JET_errSuccess;
 
@@ -10719,13 +11599,13 @@ ERR RECCHECKTABLE::ErrCheckSeparatedLV_(
 #ifdef SYNC_DEADLOCK_DETECTION
         COwner* const pownerSaved = Pcls()->pownerLockHead;
         Pcls()->pownerLockHead = NULL;
-#endif
+#endif  //  SYNC_DEADLOCK_DETECTION
 
         Call( m_pttmapLVRefcounts->ErrIncrementValue( lid ) );
 
 #ifdef SYNC_DEADLOCK_DETECTION
         Pcls()->pownerLockHead = pownerSaved;
-#endif
+#endif  //  SYNC_DEADLOCK_DETECTION
     }
     else
     {
@@ -10738,17 +11618,21 @@ HandleError:
     return err;
 }
 
+//  ================================================================
 ERR RECCHECKTABLE::ErrCheckIntrinsicLV_(
         const KEYDATAFLAGS& kdf,
         const COLUMNID columnid,
         const ULONG itagSequence,
         const DATA& dataLV )
+//  ================================================================
 {
     return JET_errSuccess;
 }
 
 
+//  ================================================================
 ERR RECCHECKTABLE::ErrCheckPrimaryKey_( const KEYDATAFLAGS& kdf )
+//  ================================================================
 {
     Assert( m_pfucb );
     if ( pfcbNil == m_pfucb->u.pfcb
@@ -10780,6 +11664,8 @@ ERR RECCHECKTABLE::ErrCheckPrimaryKey_( const KEYDATAFLAGS& kdf )
                 prceNil,
                 &iidxsegT ) );
 
+    //  check for unexpected warnings
+    //
     switch ( err )
     {
         case wrnFLDNullKey:
@@ -10790,6 +11676,8 @@ ERR RECCHECKTABLE::ErrCheckPrimaryKey_( const KEYDATAFLAGS& kdf )
             CallS( err );
     }
 
+    //  strip out warnings from ErrRECIRetrieveKey
+    //
     err = JET_errSuccess;
 
     if ( 0 != CmpKey( key, kdf.key ) )
@@ -10803,7 +11691,9 @@ HandleError:
 }
 
 
+//  ================================================================
 ERR RECCHECKTABLE::ErrCheckTaggedFields_( const KEYDATAFLAGS& kdf )
+//  ================================================================
 {
     ERR         err             = JET_errSuccess;
 
@@ -10851,6 +11741,7 @@ ERR RECCHECKTABLE::ErrCheckTaggedFields_( const KEYDATAFLAGS& kdf )
 
     BFFree( pvWorkBuf );
 
+    // Check if the last tagged column info in catalog is correct
     if ( fidTaggedLast > m_fidLastInTDB.fidTaggedLastInTDB )
     {
         (*m_popts->pcprintfError)(
@@ -10863,8 +11754,12 @@ ERR RECCHECKTABLE::ErrCheckTaggedFields_( const KEYDATAFLAGS& kdf )
 }
 
 
+//  ================================================================
 ERR RECCHECKTABLE::ErrCheckLVFields_( const KEYDATAFLAGS& kdf )
+//  ================================================================
 {
+    // From ErrCheckTaggedFields_(), we have already
+    // known that FIsValidTagfields is TRUE
     Assert( TAGFIELDS::FIsValidTagfields( g_cbPage, kdf.data, m_popts->pcprintfError ) );
 
     TAGFIELDS   tagfields( kdf.data );
@@ -10872,25 +11767,33 @@ ERR RECCHECKTABLE::ErrCheckLVFields_( const KEYDATAFLAGS& kdf )
 }
 
 
+//  ================================================================
 ERR RECCHECKTABLE::operator()( const KEYDATAFLAGS& kdf, const PGNO pgno )
+//  ================================================================
 {
     return ErrCheckRecord_( kdf );
 }
 
 
+//  ================================================================
 RECCHECKMACRO::RECCHECKMACRO() :
+//  ================================================================
     m_creccheck( 0 )
 {
     memset( m_rgpreccheck, 0, sizeof( m_rgpreccheck ) );
 }
 
 
+//  ================================================================
 RECCHECKMACRO::~RECCHECKMACRO()
+//  ================================================================
 {
 }
 
 
+//  ================================================================
 ERR RECCHECKMACRO::operator()( const KEYDATAFLAGS& kdf, const PGNO pgno )
+//  ================================================================
 {
     ERR err = JET_errSuccess;
 
@@ -10905,14 +11808,18 @@ HandleError:
 }
 
 
+//  ================================================================
 VOID RECCHECKMACRO::Add( RECCHECK * const preccheck )
+//  ================================================================
 {
     m_rgpreccheck[m_creccheck++] = preccheck;
     Assert( m_creccheck < ( sizeof( m_rgpreccheck ) / sizeof( preccheck ) ) );
 }
 
 
+//  ================================================================
 RECCHECKSPACE::RECCHECKSPACE( PIB * const ppib, const REPAIROPTS * const popts ) :
+//  ================================================================
     m_ppib( ppib ),
     m_popts( popts ),
     m_sppLast( spp::AvailExtLegacyGeneralPool ),
@@ -10924,12 +11831,16 @@ RECCHECKSPACE::RECCHECKSPACE( PIB * const ppib, const REPAIROPTS * const popts )
 }
 
 
+//  ================================================================
 RECCHECKSPACE::~RECCHECKSPACE()
+//  ================================================================
 {
 }
 
 
+//  ================================================================
 ERR RECCHECKSPACE::operator()( const KEYDATAFLAGS& kdf, const PGNO )
+//  ================================================================
 {
     ERR err = JET_errSuccess;
 
@@ -10966,6 +11877,7 @@ ERR RECCHECKSPACE::operator()( const KEYDATAFLAGS& kdf, const PGNO )
             Call( ErrERRCheck( JET_errDatabaseCorrupted ) );
         }
 
+        //  Rewrite this to avoid integer underflow. (The previous check validates the page-number difference used here.)
         if ( (cpg < 0) || ( (ULONG) cpg > ( pgno - m_pgnoLast ) ) || (cpg > lMax-m_cpgSeen) )
         {
             (*m_popts->pcprintfError)( "space tree overlap (previous extent was %d:%d, current extent is %d:%d)\r\n",
@@ -10992,6 +11904,7 @@ HandleError:
                 JET_errSPAvailExtCorrupted == err ||
                 JET_errDatabaseCorrupted == err );
 
+    //  Normalize the error to success or DB corrupted.
     if ( JET_errSuccess != err &&
             JET_errDatabaseCorrupted != err )
     {
@@ -11000,6 +11913,7 @@ HandleError:
     return err;
 }
 
+//  ================================================================
 RECCHECKSPACEEXTENT::RECCHECKSPACEEXTENT(
             PIB * const ppib,
             TTARRAY * const pttarrayOE,
@@ -11008,6 +11922,7 @@ RECCHECKSPACEEXTENT::RECCHECKSPACEEXTENT(
             const OBJID objid,
             const OBJID objidParent,
             const REPAIROPTS * const popts ) :
+//  ================================================================
     RECCHECKSPACE( ppib, popts ),
     m_pttarrayOE( pttarrayOE ),
     m_pttarrayAE( pttarrayAE ),
@@ -11019,12 +11934,16 @@ RECCHECKSPACEEXTENT::RECCHECKSPACEEXTENT(
 }
 
 
+//  ================================================================
 RECCHECKSPACEEXTENT::~RECCHECKSPACEEXTENT()
+//  ================================================================
 {
 }
 
 
+//  ================================================================
 ERR RECCHECKSPACEEXTENT::operator()( const KEYDATAFLAGS& kdf, const PGNO pgno )
+//  ================================================================
 {
     ERR err = JET_errSuccess;
 
@@ -11034,6 +11953,7 @@ ERR RECCHECKSPACEEXTENT::operator()( const KEYDATAFLAGS& kdf, const PGNO pgno )
 }
 
 
+//  ================================================================
 RECCHECKSPACEOE::RECCHECKSPACEOE(
     PIB * const ppib,
     TTARRAY * const pttarrayOE,
@@ -11042,17 +11962,22 @@ RECCHECKSPACEOE::RECCHECKSPACEOE(
     const OBJID objid,
     const OBJID objidParent,
     const REPAIROPTS * const popts ) :
+//  ================================================================
     RECCHECKSPACEEXTENT( ppib, pttarrayOE, pttarrayAE, ppgnocollShelved, objid, objidParent, popts )
 {
 }
 
 
+//  ================================================================
 RECCHECKSPACEOE::~RECCHECKSPACEOE()
+//  ================================================================
 {
 }
 
 
+//  ================================================================
 ERR RECCHECKSPACEOE::operator()( const KEYDATAFLAGS& kdf, const PGNO pgno )
+//  ================================================================
 {
     ERR err = JET_errSuccess;
 
@@ -11083,6 +12008,7 @@ ERR RECCHECKSPACEOE::operator()( const KEYDATAFLAGS& kdf, const PGNO pgno )
 }
 
 
+//  ================================================================
 RECCHECKSPACEAE::RECCHECKSPACEAE(
     PIB * const ppib,
     TTARRAY * const pttarrayOE,
@@ -11091,17 +12017,22 @@ RECCHECKSPACEAE::RECCHECKSPACEAE(
     const OBJID objid,
     const OBJID objidParent,
     const REPAIROPTS * const popts ) :
+//  ================================================================
     RECCHECKSPACEEXTENT( ppib, pttarrayOE, pttarrayAE, ppgnocollShelved, objid, objidParent, popts )
 {
 }
 
 
+//  ================================================================
 RECCHECKSPACEAE::~RECCHECKSPACEAE()
+//  ================================================================
 {
 }
 
 
+//  ================================================================
 ERR RECCHECKSPACEAE::operator()( const KEYDATAFLAGS& kdf, const PGNO pgno )
+//  ================================================================
 {
     ERR err = JET_errSuccess;
 
@@ -11134,13 +12065,17 @@ ERR RECCHECKSPACEAE::operator()( const KEYDATAFLAGS& kdf, const PGNO pgno )
 }
 
 
+//  ================================================================
 REPAIROPTS::REPAIROPTS() :
+//  ================================================================
     crit( CLockBasicInfo( CSyncBasicInfo( szREPAIROpts ), rankREPAIROpts, 0 ) )
 {
 }
 
 
+//  ================================================================
 REPAIROPTS::~REPAIROPTS()
+//  ================================================================
 {
 }
 

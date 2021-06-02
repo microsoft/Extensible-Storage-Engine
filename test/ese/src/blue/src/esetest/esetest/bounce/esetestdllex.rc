@@ -1,3 +1,5 @@
+// Copyright (c) Microsoft Corporation.
+// Licensed under the MIT License.
 #define RC_VERSION_FILE_DESCRIPTION 	"ESE Test Utility: esetestdll abstraction. Loads ese.dll.\0"
 #define RC_VERSION_INTERNAL_NAME		"esetest.dll\0"
 #define RC_VERSION_ORIGINAL_FILE_NAME	"esetest.dll\0"

@@ -14,6 +14,13 @@ ERR ErrUtilFlushFileBuffers( _Inout_ IFileAPI * const pfapi, _In_ const IOFLUSHR
     return pfapi->ErrFlushFileBuffers( iofr );
 }
 
+// Keep a copy of the header and shadow header
+// in case we hit corruption on both, which should
+// not happen.
+//
+// IMPORTANT: THESE ARE NOT SAFE. We are not
+// locking or guarding them in any way. This is a
+// best effort debugging effort.
 static BYTE*    g_rgbDebugHeader = NULL;
 static BYTE*    g_rgbDebugShadowHeader = NULL;
 static ERR  g_errDebugHeaderIO = JET_errSuccess;
@@ -31,8 +38,12 @@ LOCAL INLINE BOOL FValidCbPage( const ULONG cb )
                 32 * 1024 == cb );
 }
 
+//  Returns whether or not range (ibContainer,cbContainer) contains range (ibContainee,cbContainee).
+//
 LOCAL INLINE BOOL FRangeContains( const DWORD ibContainer, const DWORD cbContainer, const DWORD ibContainee, const DWORD cbContainee )
 {
+    //  non-overlapping or containee is larger
+    //
     if ( ibContainee < ibContainer ||
             ( ibContainee - ibContainer ) >= cbContainer ||
             cbContainee > cbContainer )
@@ -43,6 +54,9 @@ LOCAL INLINE BOOL FRangeContains( const DWORD ibContainer, const DWORD cbContain
     return ( ( ibContainer + cbContainer ) - ibContainee ) >= cbContainee;
 }
 
+//  Merges range (ibNew,cbNew) into (*pibCurrent,*pcbCurrent). If the ranges don't overlap in any way, the resulting
+//  range will be (ibNew,cbNew). A non-overlap with a gap of zero is also considered an overlap.
+//
 LOCAL INLINE VOID MergeRange( DWORD* const pibCurrent, DWORD* const pcbCurrent, const DWORD ibNew, const DWORD cbNew )
 {
     if ( FRangeContains( *pibCurrent, *pcbCurrent, ibNew, cbNew ) )
@@ -76,6 +90,27 @@ LOCAL INLINE VOID MergeRange( DWORD* const pibCurrent, DWORD* const pcbCurrent, 
     }
 }
 
+//  a resilient form of reading the shadowed header that will take any file and
+//  do one of the following things:
+//  - if shadowedHeaderRequest is headerRequestGoodOnly:
+//    o  fail to recognize it as a valid ESE file with JET_errReadVerifyFailure
+//    o  find a valid pair of shadowed headers
+//    o  find either a valid header or a valid shadow
+//    o  if fNoAutoDetectPageSize is note set, this function will try to auto-detect the page size among
+//       the valid page sizes supported by ESE
+//    o  if fNoAutoDetectPageSize is set, the search will be narrowed down to only cbHeader
+//  - if shadowedHeaderRequest is either headerRequestPrimaryOnly or headerRequestSecondaryOnly:
+//    o  either the primary or shadow header will be returned, respectively
+//    o  if fNoAutoDetectPageSize is not set, page-size auto-detection will be enabled and JET_errReadVerifyFailure
+//       will still be returned if a valid header can't be found
+//    o  if fNoAutoDetectPageSize is set, this function should always succeed unless there is an IO failure
+//       or and out-of-memory condition
+//
+//  on a success, the first cbHeader bytes of the valid header are returned.
+//  also the actual size of the header is returned. The actual size of the header
+//  will be the auto-detected page size if fNoAutoDetectPageSize is not set, or the actual number of
+//  bytes copied o the output buffer if we explicitly passed the page size.
+//
 ERR ErrUtilReadSpecificShadowedHeader( const INST* const pinst, DB_HEADER_READER* const pdbHdrReader )
 {
     ERR                     err                         = JET_errSuccess;
@@ -94,7 +129,7 @@ ERR ErrUtilReadSpecificShadowedHeader( const INST* const pinst, DB_HEADER_READER
     BYTE*                   pbRead                      = NULL;
     ULONG                   cOffsetOfPbRead             = 0;
     ULONG                   cbPageCandidate             = 0;
-    const ULONG             cbPageDownlevelMin          = 2048;
+    const ULONG             cbPageDownlevelMin          = 2048; // we supported 2 KB page sizes through Win 8.1, and removed in Threshold / Win X.
     const ULONG             fNoAutoDetectPageSize       = pdbHdrReader->fNoAutoDetectPageSize;
     const ULONG             cbPageCandidateMin          = fNoAutoDetectPageSize ? cbHeader : cbPageDownlevelMin;
     const ULONG             cbPageCandidateMax          = fNoAutoDetectPageSize ? cbHeader : g_cbPageMax;
@@ -109,10 +144,14 @@ ERR ErrUtilReadSpecificShadowedHeader( const INST* const pinst, DB_HEADER_READER
                                                             qosIONormal;
     TraceContextScope       tcHeader                    ( iorpHeader );
 
+    //  reset out params
+    //
     memset( pdbHdrReader->pbHeader, 0, pdbHdrReader->cbHeader );
     shadowedHeaderStatus = shadowedHeaderCorrupt;
     cbHeaderActual = 0;
 
+    //  get the file to be read
+    //
     if ( !pdbHdrReader->pfapi )
     {
         Call( pdbHdrReader->pfsapi->ErrFileOpen(    pdbHdrReader->wszFileName,
@@ -127,9 +166,14 @@ ERR ErrUtilReadSpecificShadowedHeader( const INST* const pinst, DB_HEADER_READER
         pfapiRead = pdbHdrReader->pfapi;
     }
 
+    //  get the current size of the file to be read and its I/O size
+    //
     Call( pfapiRead->ErrSize( &cbFileSize, IFileAPI::filesizeLogical ) );
     Call( pfapiRead->ErrIOSize( &cbIOSize ) );
 
+    //  read up to two times the worst case size of the database header or the
+    //  entire file, which ever is smaller, from the start of the file
+    //
     cbReadT = min( 2 * cbPageCandidateMax, ( cbFileSize / cbIOSize ) * cbIOSize );
     cbAlloc = (DWORD)cbReadT;
     Assert( QWORD( cbAlloc ) == cbReadT );
@@ -145,6 +189,8 @@ ERR ErrUtilReadSpecificShadowedHeader( const INST* const pinst, DB_HEADER_READER
         }
     }
 
+    //  try to deduce the correct page header size and state from the file data
+    //
     for ( cbPageCandidate = cbPageCandidateMin ; cbPageCandidate <= cbPageCandidateMax && cbAlloc > 0 ; cbPageCandidate *= 2 )
     {
         if ( FRangeContains( ibRead, cbRead, 0 * cbPageCandidate, cbPageCandidate ) ||
@@ -225,9 +271,16 @@ ERR ErrUtilReadSpecificShadowedHeader( const INST* const pinst, DB_HEADER_READER
         }
     }
 
+    //  if we didn't find a valid header then return that the header is corrupt
+    //
+    //  NOTE:  we used to return JET_errDiskIO here.  we must now return
+    //  JET_errReadVerifyFailure to enable better automated error recovery
+    //
     if ( !cbPagePrimary && !cbPageSecondary &&
             ( shadowedHeaderRequest == headerRequestGoodOnly || !fNoAutoDetectPageSize ) )
     {
+        // We should not be hitting this unless something serious happened. We will then fire two IO reads
+        // to get the header and shadow header for debugging purposes.
 
         g_tickDebugHeader = TickOSTimeCurrent();
         
@@ -262,6 +315,9 @@ ERR ErrUtilReadSpecificShadowedHeader( const INST* const pinst, DB_HEADER_READER
         Error( ErrERRCheck( JET_errReadVerifyFailure ) );
     }
 
+    //  if both headers are valid but don't match then return that the secondary
+    //  is corrupt
+    //
     if (    ( cbPagePrimary && cbPageSecondary ) &&
             (   cbPagePrimary != cbPageSecondary ||
                 memcmp( pbRead + 0 * cbPagePrimary, pbRead + 1 * cbPagePrimary, cbPagePrimary ) != 0 ) )
@@ -272,6 +328,8 @@ ERR ErrUtilReadSpecificShadowedHeader( const INST* const pinst, DB_HEADER_READER
         Error( JET_errSuccess );
     }
 
+    //  if the primary was good and the secondary was bad, return that
+    //
     if ( cbPagePrimary && !cbPageSecondary )
     {
         cbHeaderElected = cbPagePrimary;
@@ -280,6 +338,8 @@ ERR ErrUtilReadSpecificShadowedHeader( const INST* const pinst, DB_HEADER_READER
         Error( JET_errSuccess );
     }
 
+    //  if the primary was bad and the secondary was good, return that
+    //
     if ( !cbPagePrimary && cbPageSecondary )
     {
         cbHeaderElected = cbPageSecondary;
@@ -288,6 +348,8 @@ ERR ErrUtilReadSpecificShadowedHeader( const INST* const pinst, DB_HEADER_READER
         Error( JET_errSuccess );
     }
 
+    //  if both headers were good then return the primary
+    //
     if ( cbPagePrimary && cbPageSecondary )
     {
         cbHeaderElected = cbPagePrimary;
@@ -296,6 +358,9 @@ ERR ErrUtilReadSpecificShadowedHeader( const INST* const pinst, DB_HEADER_READER
         Error( JET_errSuccess );
     }
 
+    //  if we got here, it means we know what we are doing: we want a header no matter what and
+    //  we know what the page size is.
+    //
     if ( !cbPagePrimary && !cbPageSecondary )
     {
         Assert( fNoAutoDetectPageSize );
@@ -304,6 +369,8 @@ ERR ErrUtilReadSpecificShadowedHeader( const INST* const pinst, DB_HEADER_READER
         Error( JET_errSuccess );
     }
 
+    //  we should have trapped all valid cases above
+    //
     AssertSz( fFalse, "Unexpected case when validating a shadowed header!" );
     Error( ErrERRCheck( JET_errInternalError ) );
 
@@ -313,10 +380,12 @@ HandleError:
                 shadowedHeaderRequest != headerRequestPrimaryOnly &&
                 shadowedHeaderRequest != headerRequestSecondaryOnly ) );
 
+    // Should we copy it to the output buffer?
     if ( cbAlloc > 0 && err == JET_errSuccess )
     {
         Assert( cOffsetOfPbRead == 0 || cOffsetOfPbRead == 1 );
 
+        // Did we request a specific header?
         switch ( shadowedHeaderRequest )
         {
             case headerRequestPrimaryOnly:
@@ -347,6 +416,9 @@ HandleError:
         Assert( cbReadToCopy <= pdbHdrReader->cbHeader );
         Assert( cbReadToCopy <= cbAlloc );
 
+        //  we may have to re-read what we need, since our merge algorithm was simplified to avoid
+        //  having to add bitmaps to map valid data down to the IO size granularity
+        //
         errRead = JET_errSuccess;
         const BOOL fRangeContainsBytesToCopy = FRangeContains( ibRead, cbRead, cbReadToCopyOffset, cbReadToCopy );
         if ( fRangeContainsBytesToCopy ||
@@ -358,8 +430,12 @@ HandleError:
                 MergeRange( &ibRead, &cbRead, cbReadToCopyOffset, cbReRead );
             }
             
+            // finally, copy the data
+            //
             memcpy( pdbHdrReader->pbHeader, pbReadToCopy, cbReadToCopy );
 
+            //  it's not valid to checksum a binary blob that doesn't even have a valid page size.
+            //
             if ( FRangeContains( ibRead, cbRead, cbReadToCopyOffset, cbHeaderElected ) )
             {
                 ChecksumPage(   pbReadToCopy,
@@ -375,6 +451,8 @@ HandleError:
                 pdbHdrReader->checksumActual    = 0;
             }
 
+            // If the user knew what the page size was, returned the actual number of bytes written.
+            //
             if ( fNoAutoDetectPageSize )
             {
                 cbHeaderActual = cbReadToCopy;
@@ -401,6 +479,8 @@ HandleError:
     return err;
 }
 
+//  Internal function to read a database, log or checkpoint header.
+//
 LOCAL ERR ErrUtilIReadShadowedHeader(
         const INST* const               pinst,
         IFileSystemAPI* const           pfsapi,
@@ -420,21 +500,23 @@ LOCAL ERR ErrUtilIReadShadowedHeader(
     const BOOL              fNoFailOnPageMismatch   = ( urhf & urhfNoFailOnPageMismatch ) != 0;
     const BOOL              fNoAutoDetectPageSize   = ( urhf & urhfNoAutoDetectPageSize ) != 0;
 
+    //  attempt to read a shadowed header from this file
+    //
     DB_HEADER_READER dbHeaderReader =
     {
-        headerRequestGoodOnly,
-        wszFileName,
-        pbHeader,
-        cbHeader,
-        ibPageSize,
-        pfsapi,
-        pfapi,
-        fNoAutoDetectPageSize,
+        headerRequestGoodOnly,  // shadowedHeaderRequest
+        wszFileName,            // wszFileName
+        pbHeader,               // pbHeader
+        cbHeader,               // cbHeader
+        ibPageSize,             // ibPageSize
+        pfsapi,                 // pfsapi
+        pfapi,                  // pfapi
+        fNoAutoDetectPageSize,  // fNoAutoDetectPageSize
 
-        0,
-        0,
-        0,
-        shadowedHeaderCorrupt
+        0,                      // cbHeaderActual
+        0,                      // checksumExpected
+        0,                      // checksumActual
+        shadowedHeaderCorrupt   // shadowedHeaderStatus
     };
 
     err = ErrUtilReadSpecificShadowedHeader( pinst, &dbHeaderReader );
@@ -446,8 +528,10 @@ LOCAL ERR ErrUtilIReadShadowedHeader(
     *pShadowedHeaderStatus = dbHeaderReader.shadowedHeaderStatus;
     cbHeaderActual = dbHeaderReader.cbHeaderActual;
 
-    Assert( *pShadowedHeaderStatus != shadowedHeaderCorrupt );
+    Assert( *pShadowedHeaderStatus != shadowedHeaderCorrupt ); //  otherwise, we would have returned an error above.
 
+    //  log an event if the file has one valid header and one damaged header
+    //
     if ( !fNoEventLogging &&
             ( ( *pShadowedHeaderStatus == shadowedHeaderPrimaryBad ) ||
             ( *pShadowedHeaderStatus == shadowedHeaderSecondaryBad ) ) )
@@ -474,6 +558,9 @@ LOCAL ERR ErrUtilIReadShadowedHeader(
             pinst );
     }
 
+    //  if the actual header size doesn't match the specified size then fail
+    //  with a page size mismatch
+    //
     if ( !fNoFailOnPageMismatch && ( cbHeader != cbHeaderActual ) )
     {
         if ( !fNoEventLogging )
@@ -487,6 +574,9 @@ HandleError:
     return err;
 }
 
+//  Public function to read a database, log or checkpoint header.
+//  This overload takes in a file path and opens an IFileAPI handle to it.
+//
 ERR ErrUtilReadShadowedHeader(
     const INST* const               pinst,
     IFileSystemAPI* const           pfsapi,
@@ -516,6 +606,9 @@ HandleError:
     return err;
 }
 
+//  Public function to read a database, log or checkpoint header.
+//  This overload takes in an IFileAPI object and assumes it is not NULL.
+//
 ERR ErrUtilReadShadowedHeader(
     const INST* const               pinst,
     IFileSystemAPI* const           pfsapi,
@@ -555,11 +648,13 @@ ERR ErrUtilReadShadowedHeader(
 
     if ( !fReadOnly )
     {
-        Assert( shadowedHeaderStatus != shadowedHeaderCorrupt );
+        Assert( shadowedHeaderStatus != shadowedHeaderCorrupt ); //  otherwise, we would have returned an error above.
 
         if ( ( shadowedHeaderStatus == shadowedHeaderPrimaryBad ) ||
                 ( shadowedHeaderStatus == shadowedHeaderSecondaryBad ) )
         {
+            //  try to patch the bad page
+            //  and if do not succeed then put the warning in the event log
             TraceContextScope tcScope( iorpPatchFix );
             tcScope->iorReason.SetIors( iorsHeader );
 
@@ -605,8 +700,11 @@ HandleError:
     return err;
 }
 
+//  This validates that the header passed in checksums correctly.  Note it takes a cbDbHeader because
+//  it can be used for the FMP signature, which is only as large as it needs to be.
 void AssertDatabaseHeaderConsistent( const DBFILEHDR * const pdbfilehdr, const DWORD cbDbHeader, const DWORD cbPage )
 {
+    //  retail does nothing
 #ifdef DEBUG
     const BYTE* pbDbHeaderT         = NULL;
 
@@ -614,6 +712,7 @@ void AssertDatabaseHeaderConsistent( const DBFILEHDR * const pdbfilehdr, const D
     Assert( cbDbHeader >= offsetof( DBFILEHDR, rgbReserved ) );
     Assert( cbDbHeader <= cbPage );
 
+    //  this must be a database header
     
     Assert( pdbfilehdr->le_filetype == JET_filetypeDatabase );
 
@@ -633,9 +732,12 @@ void AssertDatabaseHeaderConsistent( const DBFILEHDR * const pdbfilehdr, const D
         pbDbHeaderT = (const BYTE*)pdbfilehdr;
     }
 
+    //  if we have a full header, check padding and checksum
 
     if ( pbDbHeaderT != NULL )
     {
+        //  padding must be all zeroed out
+        //  note: check disables itself if a newer version of the engine has modified the DB.
 
         if ( CmpDbVer( pdbfilehdr->Dbv(), PfmtversEngineMax()->dbv ) <= 0 )
         {
@@ -644,7 +746,7 @@ void AssertDatabaseHeaderConsistent( const DBFILEHDR * const pdbfilehdr, const D
                 Assert( pdbfilehdr->rgbReserved[ ibReserved ] == 0 );
                 if ( pdbfilehdr->rgbReserved[ ibReserved ] != 0 )
                 {
-                    break;
+                    break; // no need to belabor the point ...
                 }
             }
             
@@ -653,11 +755,12 @@ void AssertDatabaseHeaderConsistent( const DBFILEHDR * const pdbfilehdr, const D
                 Assert( pbDbHeaderT[ ibHeader ] == 0 );
                 if ( pbDbHeaderT[ ibHeader ] == 0 )
                 {
-                    break;
+                    break; // no need to belabor the point ...
                 }
             }
         }
 
+        //  it must also checksum
 
         PAGECHECKSUM checksumExpected   = 0;
         PAGECHECKSUM checksumActual     = 0;
@@ -704,6 +807,7 @@ LOCAL ERR ErrUtilWriteShadowedHeaderInternal(
     {
         pfapiT = NULL;
 
+        //  open the specified file
 
         err = pfsapi->ErrFileOpen(  wszFileName,
                                     BoolParam( JET_paramEnableFileCache ) ?
@@ -711,9 +815,11 @@ LOCAL ERR ErrUtilWriteShadowedHeaderInternal(
                                         IFileAPI::fmfNone,
                                     &pfapiT );
 
+        //  we could not open the file
 
         if ( JET_errFileNotFound == err )
         {
+            //  create the specified file
 
             Call( pfsapi->ErrFileCreate(    wszFileName,
                                             BoolParam( JET_paramEnableFileCache ) ?
@@ -734,22 +840,28 @@ LOCAL ERR ErrUtilWriteShadowedHeaderInternal(
 
     ULONG cbSectorSize = 0;
     Call( pfapiT->ErrSectorSize( &cbSectorSize ) );
-    if ( ( cbSectorSize == 0 ) ||
+    if ( ( cbSectorSize == 0 ) ||  // protect against div by zero
          ( ( cbHeader % cbSectorSize ) != 0 ) )
     {
+        //  indicate that this is a configuration error
+        //
         OSUHAEmitFailureTag( pinst, HaDbFailureTagConfiguration, L"fca51f8a-5caa-43b5-a50e-d56ed665dc3b" );
 
         Assert( cbSectorSize != 0 );
         Error( ErrERRCheck( JET_errSectorSizeNotSupported ) );
     }
 
+    //  compute the checksum of the header to write
 
     SetPageChecksum( pbHeader, cbHeader, databaseHeader, 0 );
 
+    //  protect the page from updates while it is being written
 
     OSMemoryPageProtect( pbHeader, cbHeader );
     fHeaderRO = fTrue;
 
+    //  write two copies of the header synchronously.  if one is corrupted,
+    //  the other will be valid containing either the old or new header data
 
     Call( pfapiT->ErrIOWrite( *tcHeader, QWORD( 0 ), cbHeader, pbHeader, qos ) );
     Call( pfapiT->ErrIOWrite( *tcHeader, QWORD( cbHeader ), cbHeader, pbHeader, qos ) );
@@ -794,6 +906,7 @@ HandleError:
 
     if ( pfapi == NULL && pfapiT != NULL )
     {
+        //  then pfapiT is opened / allocated here
         const ERR errT = ErrUtilFlushFileBuffers( pfapiT, iofrDefensiveFileHdrWrite );
         if ( err == JET_errSuccess )
         {
@@ -820,6 +933,7 @@ LOCAL ERR ErrUtilWriteDatabaseHeadersInternal(  const INST* const           pins
     Assert( pdbfilehdr->le_ulVersion != 0 );
     Assert( CmpDbVer( pdbfilehdr->Dbv(), PfmtversEngineMax()->dbv ) <= 0 ||
             FUpdateMinorMismatch( CmpDbVer( pdbfilehdr->Dbv(), PfmtversEngineMax()->dbv ) ) ||
+            //  JetTestHook() uses this to jack the headers up to higher than understood versions for testing.
             ( FNegTest( fInvalidUsage ) && FNegTest( fCorruptingDbHeaders ) ) );
 
     Assert( pdbfilehdr->Dbstate() >= JET_dbstateJustCreated &&
@@ -828,6 +942,7 @@ LOCAL ERR ErrUtilWriteDatabaseHeadersInternal(  const INST* const           pins
     Assert( pdbfilehdr->le_lGenMinRequired <= pdbfilehdr->le_lGenMaxRequired );
     Assert( pdbfilehdr->le_lGenMaxRequired <= pdbfilehdr->le_lGenMaxCommitted );
     Assert( pdbfilehdr->le_lGenMinConsistent >= pdbfilehdr->le_lGenMinRequired ||
+            // le_lGenMinConsistent is 0 on databases from before the persistent lost flush feature was introduced.
             pdbfilehdr->le_lGenMinConsistent == 0 );
     Assert( pdbfilehdr->le_lGenMinConsistent <= pdbfilehdr->le_lGenMaxRequired );
     Assert( pdbfilehdr->le_lGenRecovering == 0 ||
@@ -846,14 +961,20 @@ LOCAL ERR ErrUtilWriteDatabaseHeadersInternal(  const INST* const           pins
               ( pdbfilehdr->le_lGenPreRedoMinRequired <= pdbfilehdr->le_lGenMaxRequired ) ) );
 
     Assert(
+            // Uninitialized.
             ( CmpLgpos( pdbfilehdr->le_lgposLastResize, lgposMin ) == 0 ) ||
 
+            // It must always be ahead of le_lgposAttach if initialized.
             ( ( CmpLgpos( pdbfilehdr->le_lgposLastResize, pdbfilehdr->le_lgposAttach ) >= 0 ) &&
 
               ( pdbfilehdr->Dbstate() != JET_dbstateCleanShutdown ) ||
 
+                // If the database is clean, le_lgposLastResize would normally match le_lgposConsistent...
                 ( ( CmpLgpos( pdbfilehdr->le_lgposLastResize, pdbfilehdr->le_lgposConsistent ) == 0 ) ||
 
+                  // ...  except if this is a clean detach of a post-repaired database, which was repaired from a dirty state.
+                  // In that case, le_lgposConsistent is not updated at detach (repair isn't logged), but le_lgposAttach is kept
+                  // at its original value.
                   ( ( CmpLgpos( pdbfilehdr->le_lgposAttach, pdbfilehdr->le_lgposConsistent ) > 0 ) ) &&
                     ( g_fRepair || ( pdbfilehdr->le_ulRepairCount > 0 ) ) ) ) );
 
@@ -894,13 +1015,16 @@ ERR ErrUtilWriteAttachedDatabaseHeaders(    const INST* const           pinst,
     CFlushMap::EnterDbHeaderFlush( pfm, &signDbHdrFlushNew, &signFlushMapHdrFlushNew );
     CRevertSnapshot::EnterDbHeaderFlush( prbs, &signRBSHdrFlushNew );
 
+    // Copy off header to avoid locking it through the entire I/O operation.
     Alloc( pdbfilehdr = (DBFILEHDR*)PvOSMemoryPageAlloc( g_cbPage, NULL ) );
     UtilMemCpy( pdbfilehdr, pfmp->Pdbfilehdr().get(), sizeof( DBFILEHDR ) );
 
+    // Save off signatures.
     UtilMemCpy( &signDbHdrFlushOld, &pdbfilehdr->signDbHdrFlush, sizeof( SIGNATURE ) );
     UtilMemCpy( &signFlushMapHdrFlushOld, &pdbfilehdr->signFlushMapHdrFlush, sizeof( SIGNATURE ) );
     UtilMemCpy( &signRBSHdrFlushOld, &pdbfilehdr->signRBSHdrFlush, sizeof( SIGNATURE ) );
 
+    // Copy in new signatures.
     UtilMemCpy( &pdbfilehdr->signDbHdrFlush, &signDbHdrFlushNew, sizeof( SIGNATURE ) );
     UtilMemCpy( &pdbfilehdr->signFlushMapHdrFlush, &signFlushMapHdrFlushNew, sizeof( SIGNATURE ) );
 
@@ -909,8 +1033,10 @@ ERR ErrUtilWriteAttachedDatabaseHeaders(    const INST* const           pinst,
         UtilMemCpy( &pdbfilehdr->signRBSHdrFlush, &signRBSHdrFlushNew, sizeof( SIGNATURE ) );
     }
 
+    // Write header.
     err = ErrUtilWriteDatabaseHeadersInternal( pinst, pfsapi, wszFileName, pdbfilehdr, pfapi );
 
+    // Commit checksum and new signatures if write succeeded.
     if ( err >= JET_errSuccess )
     {
         PdbfilehdrReadWrite pdbfilehdrUpdateable = pfmp->PdbfilehdrUpdateable();
@@ -953,24 +1079,32 @@ ERR ErrUtilWriteUnattachedDatabaseHeaders(  const INST *const               pins
     SIGNATURE signDbHdrFlushNew, signFlushMapHdrFlushNew, signDbHdrFlushOld, signFlushMapHdrFlushOld;
     CFlushMap::EnterDbHeaderFlush( pfm, &signDbHdrFlushNew, &signFlushMapHdrFlushNew );
 
+    // Save off signatures.
     UtilMemCpy( &signDbHdrFlushOld, &pdbfilehdr->signDbHdrFlush, sizeof( SIGNATURE ) );
     UtilMemCpy( &signFlushMapHdrFlushOld, &pdbfilehdr->signFlushMapHdrFlush, sizeof( SIGNATURE ) );
 
+    // Copy in new signatures.
     UtilMemCpy( &pdbfilehdr->signDbHdrFlush, &signDbHdrFlushNew, sizeof( SIGNATURE ) );
     UtilMemCpy( &pdbfilehdr->signFlushMapHdrFlush, &signFlushMapHdrFlushNew, sizeof( SIGNATURE ) );
 
+    // TODO SOMEONE: Reset RBS signatures so that when we init session after incremental reseed, snapshot is invalidated till we implement support for it.
+    // ErrUtilWriteUnattachedDatabaseHeaders is also called while applying the revert snapshot in which case we don't want to reset the RBS header flush since we will
+    // update the RBS header flush once we revert back using the snapshot signature.
     if ( fResetRBSHdrFlush )
     {
         SIGResetSignature( &pdbfilehdr->signRBSHdrFlush );
     }
 
+    // Write header.
     const ERR err = ErrUtilWriteDatabaseHeadersInternal( pinst, pfsapi, wszFileName, pdbfilehdr, pfapi );
 
+    // Revert signatures if write failed.
     if ( err < JET_errSuccess )
     {
         UtilMemCpy( &pdbfilehdr->signDbHdrFlush, &signDbHdrFlushOld, sizeof( SIGNATURE ) );
         UtilMemCpy( &pdbfilehdr->signFlushMapHdrFlush, &signFlushMapHdrFlushOld, sizeof( SIGNATURE ) );
         
+        // TODO SOMEONE: Should we revert RBS signature here? Going to let it be reset in memory as we did perform incremental reseed.
     }
 
     CFlushMap::LeaveDbHeaderFlush( pfm );
@@ -1002,12 +1136,13 @@ ERR ErrUtilWriteCheckpointHeaders(  const INST * const      pinst,
         CallR( ErrUtilFlushFileBuffers( pfapi, iofr ) );
     }
 
-    CallS( err );
+    CallS( err ); // no expected warnings (or errors)
     return err;
 }
 
 ERR ErrUtilFullPathOfFile(
     IFileSystemAPI* const   pfsapi,
+    // UNDONE_BANAPI:
     __out_bcount(OSFSAPI_MAX_PATH*sizeof(WCHAR)) WCHAR* const           wszPathOnly,
     const WCHAR* const      wszFile )
 {
@@ -1027,6 +1162,8 @@ PWSTR OSSTRCharNext( PCWSTR const pwsz )
 {
     return const_cast< WCHAR *const >( L'\0' != *pwsz ? pwsz + 1 : pwsz );
 }
+//  returns a pointer to the previous character in the string.  when the first
+//  character is reached, the given ptr is returned.
 PWSTR OSSTRCharPrev( PCWSTR const pwszBase, PCWSTR const pwsz )
 {
     return const_cast< WCHAR *const >( pwsz > pwszBase ? pwsz - 1 : pwsz );
@@ -1049,6 +1186,8 @@ ERR ErrUtilCreatePathIfNotExist(
         Call( ErrERRCheck( JET_errInvalidParameter ) );
     }
 
+    //  copy the path, remove any trailing filename, and point to the ending path-delimiter
+    //
     if( LOSStrLengthW( wszPath ) >= IFileSystemAPI::cchPathMax )
     {
         Call( ErrERRCheck( JET_errInvalidPath ) );
@@ -1066,8 +1205,13 @@ ERR ErrUtilCreatePathIfNotExist(
         }
         else
         {
+            //  we cannot move backwards anymore
+            //
             Assert( pwszMove == wszPathT );
 
+            //  there were no path delimiters which means we were given only a filename.
+            //  Resolve the path before returning.
+            //
             Call( pfsapi->ErrPathComplete( wszPath, wszAbsPath ) );
 
             err = JET_errSuccess;
@@ -1078,9 +1222,13 @@ ERR ErrUtilCreatePathIfNotExist(
     Assert( *pwszEnd == wchPathDelimiter );
     pwszEnd[1] = L'\0';
 
+    //  loop until we find a directory that exists
+    //
     pwsz = pwszEnd;
     do
     {
+        //  try to validate the current path
+        //
         Assert( *pwsz == wchPathDelimiter );
         ch = pwsz[1];
         pwsz[1] = L'\0';
@@ -1089,6 +1237,9 @@ ERR ErrUtilCreatePathIfNotExist(
         pwsz[1] = ch;
         if ( err == JET_errInvalidPath )
         {
+            //  path does not exist, so we will chop off a subdirectory
+            //  and try to validate the parent.
+            //
             pwszT = OSSTRCharPrev( wszPathT, pwsz );
             while ( *pwszT != wchPathDelimiter && pwszT >= wszPathT )
             {
@@ -1099,24 +1250,38 @@ ERR ErrUtilCreatePathIfNotExist(
                 }
                 else
                 {
+                    //  we cannot move backwards anymore
+                    //
                     Assert( pwszMove == wszPathT );
 
+                    //  none of the directories in the path exist
+                    //  we need to start creating at this point
+                    //  from the outer-most directory.
+                    //
                     goto BeginCreation;
                 }
             }
 
+            //  move the real path ptr
+            //
             pwsz = pwszT;
         }
         else
         {
+            //  we found an existing directory
+            //
             CallSx( err, JET_errFileAccessDenied );
             Call( err );
         }
     }
     while ( err == JET_errInvalidPath );
 
+    //  loop until all directories are created
+    //
     while ( pwsz < pwszEnd )
     {
+        //  move forward to the next directory
+        //
         Assert( *pwsz == wchPathDelimiter );
         pwsz++;
         while ( *pwsz != wchPathDelimiter )
@@ -1124,39 +1289,63 @@ ERR ErrUtilCreatePathIfNotExist(
 #ifdef DEBUG
             pwszMove = OSSTRCharNext( pwsz );
 
+            //  if this assert fires, it means we scanned to the end
+            //  of the path string and did not find a path
+            //  delimiter; this should never happen because
+            //  we append a path delimiter at the start of
+            //  this function.
+            //
             Assert( pwszMove <= pwszEnd );
 
+            //  if this assert fires, the one before it should have
+            //  fired as well; this means that we can no longer
+            //  move to the next character because the string
+            //  is completely exhausted.
+            //
             Assert( pwszMove > pwsz );
 
+            //  move next
+            //
             pwsz = pwszMove;
-#else
+#else   //  !DEBUG
             pwsz = OSSTRCharNext( pwsz );
-#endif
+#endif  //  DEBUG
         }
 
 BeginCreation:
         Assert( pwsz <= pwszEnd );
         Assert( *pwsz == wchPathDelimiter );
 
+        //  make sure the name of the directory we
+        //  need to create is not already in use by a file
+        //
         ch = pwsz[0];
         pwsz[0] = L'\0';
         err = ErrUtilPathExists( pfsapi, wszPathT );
         if ( err >= JET_errSuccess )
         {
+            //  determine if the path that we found is a file or directory
+            //
             BOOL fIsDirectory = fFalse;
             Call( pfsapi->ErrPathExists( wszPathT, &fIsDirectory ) );
 
+            //  if this is a file then we don't allow that
+            //
             if ( !fIsDirectory )
             {
                 Error( ErrERRCheck( JET_errInvalidPath ) );
             }
 
+            //  if this is a directory then we don't need to create it
+            //
             pwsz[0] = ch;
             continue;
         }
         Call( err == JET_errFileNotFound ? JET_errSuccess : err );
         pwsz[0] = ch;
 
+        //  create the directory, if needed.  don't fail if it already exists due to a race
+        //
         ch = pwsz[1];
         pwsz[1] = L'\0';
         err = pfsapi->ErrFolderCreate( wszPathT );
@@ -1164,18 +1353,22 @@ BeginCreation:
         pwsz[1] = ch;
     }
 
+    //  verify the new path and prepare the absolute path
+    //
     CallS( ErrUtilDirectoryValidate( pfsapi, wszPathT, wszAbsPath ) );
     if ( fFileName && wszAbsPath )
     {
         CallS( pfsapi->ErrPathFolderNorm( wszAbsPath, cbAbsPath ) );
 
+        //  copy the filename over to the absolute path as well
+        //
 #ifdef DEBUG
         Assert( *pwszEnd == wchPathDelimiter );
         Assert( pwszEnd[1] == L'\0' );
         pwszT = const_cast< WCHAR * >( wszPath ) + ( pwszEnd - wszPathT );
         Assert( *pwszT == wchPathDelimiter );
         Assert( pwszT[1] != L'\0' );
-#endif
+#endif  //  DEBUG
         OSStrCbAppendW( wszAbsPath, cbAbsPath, wszPath + ( pwszEnd - wszPathT ) + 1 );
     }
 
@@ -1184,6 +1377,16 @@ HandleError:
     return err;
 }
 
+//  tests if the given path exists.  Full path of the given path is
+//  returned in szAbsPath if that path exists and szAbsPath is not NULL.
+//
+//  This will fail if the process does not have permissions to the parent
+//  directory (for example in packaged processes).
+//
+//  This is the legacy implementation, resurrected after we discovered that
+//  the newer way (using GetFileAttributesEx) returned slightly different
+//  error codes.
+//
 LOCAL ERR ErrUtilPathExistsByFindFirst(
     IFileSystemAPI* const   pfsapi,
     const WCHAR* const      wszPath,
@@ -1212,9 +1415,13 @@ HandleError:
 }
 
 
+//  tests if the given path exists.  Full path of the given path is
+//  returned in szAbsPath if that path exists and szAbsPath is not NULL.
+//
 ERR ErrUtilPathExists(
     IFileSystemAPI* const   pfsapi,
     const WCHAR* const      wszPath,
+    // UNDONE_BANAPI:
     __out_bcount_opt(OSFSAPI_MAX_PATH*sizeof(WCHAR)) WCHAR* const           wszAbsPath )
 {
     ERR                     err     = JET_errSuccess;
@@ -1224,11 +1431,19 @@ ERR ErrUtilPathExists(
 
     wszAbsPathWritable[0] = L'\0';
 
+    //  First check to see if the path exists by using FindFirst/FindNext. For legacy/backwards
+    //  compat reasons we need to keep the identical error codes and can't change the implementation.
+    //
     C_ASSERT( sizeof( wszAbsPathLocal ) == cbOSFSAPI_MAX_PATHW );
     err = ErrUtilPathExistsByFindFirst( pfsapi, wszPath, wszAbsPathWritable );
 
     if ( JET_errAccessDenied == err || JET_errFileAccessDenied == err )
     {
+        //  However there are times when the legacy method fails. Most notably when the process
+        //  doesn't have permissions to the parent directory (which happens in Packed Processes).
+        //  In this case, we'll fail back to ErrPathExists(), which currently does a GetFileAttributes()
+        //  call.
+        //
         Call( pfsapi->ErrPathComplete( wszPath, wszAbsPathWritable ) );
         Call( pfsapi->ErrPathExists( wszAbsPathWritable, &fIsDirectory ) );
     }
@@ -1238,6 +1453,7 @@ HandleError:
 }
 
 
+//  returns the logical size of the file
 
 ERR ErrUtilGetLogicalFileSize(  IFileSystemAPI* const   pfsapi,
                                 const WCHAR* const      wszPath,
@@ -1269,10 +1485,18 @@ ERR ErrUtilPathComplete(
     Assert( JET_errFileNotFound != err );
     Call( err );
 
+    //  at this point we have a "well-formed" path
+    //
 
+    //  do a FileFindExact to try an convert from an 8.3 equivalent to the full path
+    //  but if the file doesn't exist then continue on for the temp database error-handling.
+    //
     err = ErrUtilPathExists( pfsapi, wszName, wszAbsPath );
     if( JET_errFileNotFound == err && !fPathMustExist )
     {
+        //  the file isn't there. we'll deal with this later
+        //
+        // UNDONE_BANAPI:
         OSStrCbCopyW( wszAbsPath, OSFSAPI_MAX_PATH*sizeof(WCHAR), wszName );
         err = JET_errSuccess;
     }
@@ -1284,6 +1508,8 @@ HandleError:
 }
 
 
+//  tests if the given path is read only
+//
 ERR ErrUtilPathReadOnly(
     IFileSystemAPI* const   pfsapi,
     const WCHAR* const      wszPath,
@@ -1305,6 +1531,11 @@ HandleError:
     return err;
 }
 
+//  checks whether or not the specified directory exists
+//  if not, JET_errInvalidPath will be returned.
+//  if so, JET_errSuccess will be returned and szAbsPath
+//  will contain the full path to the directory.
+//
 ERR ErrUtilDirectoryValidate(
     IFileSystemAPI* const   pfsapi,
     const WCHAR* const      wszPath,
@@ -1314,8 +1545,12 @@ ERR ErrUtilDirectoryValidate(
     WCHAR                   wszFolder[ IFileSystemAPI::cchPathMax ];
     WCHAR                   wszT[ IFileSystemAPI::cchPathMax ];
 
+    //  extract the folder from the path
+    //
     Call( pfsapi->ErrPathParse( wszPath, wszFolder, wszT, wszT ) );
 
+    //  see if the path exists
+    //
 
     Call( ErrUtilPathExists( pfsapi, wszFolder, wszAbsPath ) );
 
@@ -1328,13 +1563,16 @@ HandleError:
     }
     if ( wszAbsPath )
     {
+        // UNDONE_BANAPI:
         wszAbsPath[0] = L'\0';
     }
     return err;
 }
 
 
-ULONG           cbLogExtendPatternMin   = 512;
+//  log file extension pattern buffer
+//
+ULONG           cbLogExtendPatternMin   = 512; //   this must be EXACTLY 512 bytes (not 1 sector)
 ULONG           cbLogExtendPattern;
 #ifdef ENABLE_LOG_V7_RECOVERY_COMPAT
 BYTE*           rgbLogExtendPattern;
@@ -1370,15 +1608,21 @@ INLINE ERR ErrUtilIApplyLogExtendPattern(
 
             Call( pfapi->ErrSectorSize( &cbWriteMin ) );
 
+            // even if the disk (or RFS) is telling us less then 512
+            // we have this requirement for the pattern size,
+            // otherwise we might end up with multiple parts
+            // being only the partial start of the pattern
+            //
             cbWriteMin = max( cbLogExtendPatternMin, cbWriteMin );
 
-            cbWrite = 0;
+            cbWrite = 0;                            // no data written this iteration
 
-            cbWriteMax /= 2;
+            cbWriteMax /= 2;                        // exponentially backoff
 
-            cbWriteMax += cbWriteMin - 1;
+            cbWriteMax += cbWriteMin - 1;           // round up
             cbWriteMax -= cbWriteMax % cbWriteMin;
 
+            //  exponentially backed off to the minimum
 
             if ( cbWriteMax >= cbWriteMaxOrig )
             {
@@ -1397,6 +1641,8 @@ HandleError:
     return err;
 }
 
+//  re-format an existing log file
+//
 ERR ErrUtilFormatLogFile(
     IFileSystemAPI* const   pfsapi,
     IFileAPI * const        pfapi,
@@ -1408,16 +1654,23 @@ ERR ErrUtilFormatLogFile(
 {
     ERR                 err;
 
+    //  apply the pattern to the log file
+    //  (the file will expand if necessary)
+    //
     CallR( ErrUtilIApplyLogExtendPattern( pfsapi, pfapi, qwSize, ibFormatted, grbitQOS ) );
 
     if ( fPermitTruncate )
     {
         QWORD   qwRealSize;
 
+        //  we may need to truncate the rest of the file
+        //
         CallR( pfapi->ErrSize( &qwRealSize, IFileAPI::filesizeLogical ) );
         Assert( qwRealSize >= qwSize );
         if ( qwRealSize > qwSize )
         {
+            //  do the truncation
+            //
             TraceContextScope tcScope( iorpLog );
             CallR( pfapi->ErrSetSize( *tcScope, qwSize, fTrue, grbitQOS ) );
         }
@@ -1510,10 +1763,16 @@ LOCAL ERR ErrOSULogPatternInit()
     ERR     err     = JET_errSuccess;
     ULONG   cbFill  = 0;
 
+    //  reset all pointers
+    //
     rgbLogExtendPattern = NULL;
 
+    //  init log file extension buffer
+    //
     if ( cbLogExtendPattern < OSMemoryPageCommitGranularity() )
     {
+        //  allocate the log file extension buffer from the heap.  our log files
+        //  had better be cached or this won't work!
 
         rgbLogExtendPattern = (BYTE*)PvOSMemoryHeapAlloc( size_t( cbLogExtendPattern ) );
 
@@ -1527,6 +1786,7 @@ LOCAL ERR ErrOSULogPatternInit()
     else if (   !COSMemoryMap::FCanMultiMap() ||
                 cbLogExtendPattern < OSMemoryPageReserveGranularity() )
     {
+        //  allocate the log file extension buffer
 
         rgbLogExtendPattern = (BYTE*)PvOSMemoryPageAlloc( size_t( cbLogExtendPattern ), NULL );
 
@@ -1539,7 +1799,13 @@ LOCAL ERR ErrOSULogPatternInit()
     }
     else
     {
+        //  allocate log file extension buffer by allocating the smallest chunk of page
+        //  store possible and remapping it consecutively in memory until we hit the
+        //  desired chunk size
+        //
 
+        //  init the memory map
+        //
         COSMemoryMap::ERR errOSMM;
         errOSMM = osmmOSUFile.ErrOSMMInit();
         if ( COSMemoryMap::ERR::errSuccess != errOSMM )
@@ -1547,6 +1813,8 @@ LOCAL ERR ErrOSULogPatternInit()
             Call( ErrERRCheck( JET_errOutOfMemory ) );
         }
 
+        //  allocate the pattern
+        //
         errOSMM = osmmOSUFile.ErrOSMMPatternAlloc(  OSMemoryPageReserveGranularity(),
                                                     cbLogExtendPattern,
                                                     (void**)&rgbLogExtendPattern );
@@ -1566,23 +1834,28 @@ LOCAL ERR ErrOSULogPatternInit()
     ULONG ib;
     ULONG cb;
 
-    cb = cbLogExtendPatternMin;
+    cb = cbLogExtendPatternMin; //  this must be EXACTLY 512 bytes (not 1 sector)
 
-    Assert( bLOGUnusedFill == 0xDA );
+    Assert( bLOGUnusedFill == 0xDA );   //  don't let this change
     Assert( cbLogExtendPattern >= cb );
     Assert( 0 == ( cbLogExtendPattern % cb ) );
 
+    //  make the unique 512 byte logfile pattern
+    //
     memset( rgbLogExtendPattern, bLOGUnusedFill, cb );
     for ( ib = 0; ib < cb; ib += 16 )
     {
         rgbLogExtendPattern[ib] = BYTE( bLOGUnusedFill + ib );
     }
 
+    //  copy it until we fill the whole buffer
+    //
     for ( ib = cb; ib < cbFill; ib += cb )
     {
         memcpy( rgbLogExtendPattern + ib, rgbLogExtendPattern, cb );
     }
 
+    //  protect the log file extension buffer from modification
 
     if ( cbLogExtendPattern >= OSMemoryPageCommitGranularity() )
     {
@@ -1602,6 +1875,7 @@ LOCAL VOID OSULogPatternTerm()
 {
     if ( cbLogExtendPattern < OSMemoryPageCommitGranularity() )
     {
+        //  free log file extension buffer
 
         OSMemoryHeapFree( rgbLogExtendPattern );
         rgbLogExtendPattern = NULL;
@@ -1609,22 +1883,27 @@ LOCAL VOID OSULogPatternTerm()
     else if (   !COSMemoryMap::FCanMultiMap() ||
                 cbLogExtendPattern < OSMemoryPageReserveGranularity() )
     {
+        //  free log file extension buffer
 
         OSMemoryPageFree( rgbLogExtendPattern );
         rgbLogExtendPattern = NULL;
     }
     else
     {
+        //  free log file extension buffer
 
         osmmOSUFile.OSMMPatternFree();
         rgbLogExtendPattern = NULL;
 
+        //  term the memory map
 
         osmmOSUFile.OSMMTerm();
     }
 }
-#endif
+#endif // ENABLE_LOG_V7_RECOVERY_COMPAT
 
+//  init file subsystem
+//
 ERR ErrOSUFileInit()
 {
     ERR     err     = JET_errSuccess;
@@ -1640,6 +1919,8 @@ HandleError:
 }
 
 
+//  terminate file subsystem
+//
 void OSUFileTerm()
 {
 #ifdef ENABLE_LOG_V7_RECOVERY_COMPAT

@@ -17,7 +17,14 @@
     OSTestCall( ErrOSInit() );
 
 
+//  ================================================================
+//
+//  OS Memory BitMap Tests
+//
+//  ================================================================
 
+//  Temporarily define this, so that code reviewers have an easy time validating the code 
+//  wasn't significantly modifed ... 
 #define CHECK   OSTestCheck
 
 ERR ValidateBasicBitMapFunctionality( IBitmapAPI * const pbm )
@@ -46,9 +53,11 @@ ERR ValidateBasicBitMapFunctionality( IBitmapAPI * const pbm )
         }
     }
     
+    //  validate net results ...
     for ( ULONG i = 0; i < 16 * 8; i++ )
     {
         BOOL fExpected = fFalse;
+        //  These expected calculations must exactly match the above % sets ...
         if ( i % 2 == 0 )
         {
             fExpected = fTrue;
@@ -68,8 +77,10 @@ HandleError:
     return err;
 }
 
+//  ================================================================
 CUnitTest( MemorySparseBitMapBasicTest, 0, "This tests that some basic operations work on the CSparseBitmap implementation." );
 ERR MemorySparseBitMapBasicTest::ErrTest()
+//  ================================================================
 {
     JET_ERR err = JET_errSuccess;
 

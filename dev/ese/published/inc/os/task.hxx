@@ -6,6 +6,19 @@
 
 
 
+////////////////////////////////////////////////
+//
+//  Generic Task Manager
+//
+//      This has 2 levels of context information: per-thread and per-task.
+//
+//      Per-thread context is established at init time.  It is bound to each worker thread and is passed
+//      to each user-defined task function.  The purpose of this is to provide a generic, local context
+//      in which each thread will operate regardless of the task being done (e.g. passing JET_SESIDs to
+//      each thread because the tasks will all be background database operations).
+//
+//      Per-task contexts are the obvious "completion key" mechanism.  At post-time, the user passes
+//      a specific completion context (usually so the routine can idenfity what work is being done).
 
 #include "collection.hxx"
 
@@ -22,12 +35,31 @@ public:
 };
 
 
+/*
+In order to add Task Information reporting to a specific task, the steps to follow are:
+1. define a global TaskInfoGenericStats class with the desired parameters. This class will be used for all
+tasks that can and will be monitored together
 
+EX:  TaskInfoGenericStats g_TaskInfoGenericStats( "SCRUB", 10 * 1000, 30 * 1000);
 
+2. for each task you want to monitor, create a new TaskInfoGeneric object which will maintain his runtime
+caracteristics and use the TaskInfoGenericStats for the type of task (check the allocation as well :))
+
+EX:  TaskInfoGeneric * pTaskInfo = new TaskInfoGeneric( &g_TaskInfoGenericStats );
+
+3. use the task info object when posting the task (rather then the default NULL TaskInfo param)
+
+EX:  errPostScrub = m_pinst->Taskmgr().ErrTMPost( TASK::DispatchGP, pSCRUBTASK, pTaskInfo);
+
+*/
+
+// the TaskInfoGenericStats events won't be reported more often then this time:
 const TICK  dtickTaskAbnormalLatencyEvent       = (60 * 1000);
 
+// this is what the default "abnormal" task dispatch time is considered
 const TICK  dtickTaskMaxDispatchDefault     = (1 * 60 * 1000);
 
+// this is what the default "abnormal" task execution time is considered
 const TICK  dtickTaskMaxExecuteDefault      = (10 * 60 * 1000);
 
 
@@ -53,12 +85,16 @@ public:
     virtual void NotifyEnd();
 
 private:
+    // initial tick when the task was posted
     DWORD   m_dwPostTick;
 
+    // tick when the task was dispatched
     DWORD   m_dwDispatchTick;
 
+    // tick when the task finished
     DWORD   m_dwEndTick;
 
+    // task statistics to report to
     TaskInfoGenericStats * m_pTaskInfoGenericStats;
 };
 
@@ -95,6 +131,10 @@ private:
     DWORD   m_cLastReportNotReported;
 
 
+    // Total (all m_cTasks tasks) and average time to
+    // - dispatch a task (m_dwDispatchTick - m_dwPostTick)
+    // - execute a task (m_dwEndTick - m_dwDispatchTick)
+    // - complete a task (m_dwEndTick - m_dwPostTick)
     DWORD   m_cTasks;
     QWORD   m_qwDispatchTickTotal;
     QWORD   m_qwExecuteTickTotal;
@@ -125,11 +165,13 @@ class CTaskManager
 
             public:
 
+                //  task information
 
                 PfnCompletion   m_pfnCompletion;
                 DWORD           m_dwCompletionKey1;
                 DWORD_PTR       m_dwCompletionKey2;
 
+                //  task-pool context
 
                 CInvasiveList< CTaskNode, OffsetOfILE >::CElement m_ile;
         };
@@ -139,31 +181,34 @@ class CTaskManager
 
         struct THREADCONTEXT
         {
-            THREAD          thread;
-            CTaskManager    *ptm;
-            DWORD_PTR       dwThreadContext;
+            THREAD          thread;             //  thread handle
+            CTaskManager    *ptm;               //  back-pointer for thread to get at CTaskManager data
+            DWORD_PTR       dwThreadContext;    //  per-thread user-defined context
         };
 
-        struct COMPLETIONPACKETINFO
+        struct COMPLETIONPACKETINFO // cpi
         {
+            //  required completion information
 
-            BOOL                fDequeued;
-            DWORD               gle;
-            PfnCompletion       pfnCompletion;
-            DWORD               dwCompletionKey1;
-            DWORD_PTR           dwCompletionKey2;
-            BOOL                fGQCSSuccess;
-            TICK                tickStartWait;
-            TICK                tickComplete;
+            BOOL                fDequeued;          //  whether we successfully got a completion packet from GQCS (whether it was a success or failure packet)
+            DWORD               gle;                //  error associated with the completion packet
+            PfnCompletion       pfnCompletion;      //  completion packet completion function
+            DWORD               dwCompletionKey1;   //
+            DWORD_PTR           dwCompletionKey2;   //
+            BOOL                fGQCSSuccess;       //  return value of GQCS / success (mostly for debugging, should use fDequeued instead; see comments in TMIDispatch)
+            TICK                tickStartWait;      //  tick time before calling GQCS
+            TICK                tickComplete;       //  time time on return from GQCS
 #ifndef RTM
+            //  debugging status information
 
-            TICK                dtickIdle;
-            PfnCompletion       pfnIdle;
+            TICK                dtickIdle;          //  tick time before triggering the idle callback
+            PfnCompletion       pfnIdle;            //  the completion function for the idle callback
 #endif
         };
 
     public:
 
+        //  init / term
 
         CTaskManager();
         ~CTaskManager();
@@ -173,6 +218,7 @@ class CTaskManager
                         const BOOL                      fForceMaxThreads    = fFalse );
         VOID TMTerm();
 
+        //  methods for posting and/or associating completion functions
 
         ERR ErrTMPost(  PfnCompletion       pfnCompletion,
                         const DWORD         dwCompletionKey1,
@@ -194,32 +240,38 @@ class CTaskManager
                                     const DWORD_PTR dwThreadContext,
                                     const DWORD     dwCompletionKey1,
                                     const DWORD_PTR dwCompletionKey2 );
-        ERR     ErrAddThreadCheck( const BOOL fForceMaxThreads );
+        ERR     ErrAddThreadCheck( const BOOL fForceMaxThreads );   //  increase the number of activce threads in thread pool if necessary
         BOOL    FNeedNewThread() const;
 
     private:
 
-        volatile ULONG                  m_cThreadMax;
-        volatile ULONG                  m_cPostedTasks;
-        volatile ULONG                  m_cmsLastActivateThreadTime;
-        CCriticalSection                m_critActivateThread;
-        volatile ULONG                  m_cTasksThreshold;
-        volatile ULONG                  m_cThread;
-        THREADCONTEXT                   *m_rgThreadContext;
+        volatile ULONG                  m_cThreadMax;                   //  Max number of active threads
+        volatile ULONG                  m_cPostedTasks;                 //  number of currently posted ( and eventually running) tasks
+        volatile ULONG                  m_cmsLastActivateThreadTime;    //  when is the next time to check
+                                                                        //  whether we should add more threads in the thread pool
+        CCriticalSection                m_critActivateThread;           //  critical section to activate thread
+        volatile ULONG                  m_cTasksThreshold;              //  tasks threshold above which we will consider
+                                                                        //  creation of new thread in the thread pool
+        volatile ULONG                  m_cThread;                      //  number of active threads
+        THREADCONTEXT                   *m_rgThreadContext;             //  per-thread context for each active thread
 
-        TaskList                        m_ilTask;
-        CCriticalSection                m_critTask;
-        CSemaphore                      m_semTaskDispatch;
-        CTaskNode                       **m_rgpTaskNode;
+        // These four variables are only used when IO Completion Ports aren't supported.
+        TaskList                        m_ilTask;                       //  list of task-nodes
+        CCriticalSection                m_critTask;                     //  protect the task-node list
+        CSemaphore                      m_semTaskDispatch;              //  dispatch tasks via Acquire/Release
+        CTaskNode                       **m_rgpTaskNode;                //  extra task-nodes reserved for TMTerm
 
-        VOID                            *m_hIOCPTaskDispatch;
-        BOOL                            m_fIOCPHasRegisteredFile;
+        VOID                            *m_hIOCPTaskDispatch;           //  I/O completion port for dispatching tasks
+        BOOL                            m_fIOCPHasRegisteredFile;       //  was a file registered with the IOCP?
 
-        PfnCompletion                   m_pfnFileIOCompletion;
+        PfnCompletion                   m_pfnFileIOCompletion;          //  completion function specific to File I/O completions
 
 #ifndef RTM
-        volatile DWORD                  m_irrcpiLast;
-        COMPLETIONPACKETINFO            m_rgcpiLast[10];
+        //  IIRC we only have one completion thread, but this is by no means a requirement of the system or GQCS and
+        //  if we ever want to parallelize IO completion this will need to be thread safe, so we just leave it thread
+        //  safe today.  And just in case I misunderstood all our task mgr usage cases. ;-)
+        volatile DWORD                  m_irrcpiLast;                   //  An "index" (unwrapped) for last completion packet info saved in m_rgcpiLast
+        COMPLETIONPACKETINFO            m_rgcpiLast[10];                //  A round-robin buffer for the last 10 completion packets
 #endif
 
     public:
@@ -265,6 +317,6 @@ class CGPTaskManager
 
 BOOL FOSTaskIsTaskThread( void );
 
-#endif
+#endif  //  _OS_TASK_HXX_INCLUDED
 
 

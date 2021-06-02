@@ -3,10 +3,12 @@
 
 #pragma once
 
+//  Journal Region
 
 #include <pshpack1.h>
 
-class CJournalRegion
+//PERSISTED
+class CJournalRegion  //  jreg
 {
     public:
 
@@ -23,8 +25,8 @@ class CJournalRegion
 
     private:
 
-        const UnalignedLittleEndian<ULONG>  m_le_cbPayload;
-        BYTE                                m_rgbPayload[ 0 ];
+        const UnalignedLittleEndian<ULONG>  m_le_cbPayload;     //  payload size;  0 indicates the last region in a segment
+        BYTE                                m_rgbPayload[ 0 ];  //  payload
 };
 
 #include <poppack.h>

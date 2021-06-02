@@ -18,15 +18,17 @@ void COSLayerPreInit::SetEventLogCache( ULONG cbEventCache ) {}
 
 #else
 
+//  delay loads for the event functionality
 
 NTOSFuncPD( g_pfnRegisterEventSourceW, RegisterEventSourceW );
 NTOSFuncPD( g_pfnReportEvent, ReportEventW );
 NTOSFuncPD( g_pfnDeregisterEventSource, DeregisterEventSource );
 
+//  Event Logging
 
 LOCAL volatile HANDLE g_hEventSource;
 
-#pragma warning ( disable : 4200 )
+#pragma warning ( disable : 4200 )  //  we allow zero sized arrays
 
 struct EVENT
 {
@@ -52,6 +54,7 @@ void COSLayerPreInit::SetEventLogCache( ULONG cbEventCacheSet )
     g_cbEventHeapMax = cbEventCacheSet;
 }
 
+//  writes all cached events to the event log, ignoring any errors encountered
 
 void OSEventIFlushEventCache()
 {
@@ -59,9 +62,11 @@ void OSEventIFlushEventCache()
     EVENT*  pevent;
     EVENT*  peventNext;
 
+    //  report all cached events
 
     for ( pevent = g_peventCacheHead; NULL != pevent; pevent = peventNext )
     {
+        //  save next event, because this one may go away
         peventNext = pevent->peventNext;
 
         g_hEventSource = g_pfnRegisterEventSourceW( NULL, pevent->szSourceEventKey );
@@ -69,6 +74,7 @@ void OSEventIFlushEventCache()
         {
             SIZE_T  cbAlloc     = pevent->cb;
 
+            //  remove this event from the list
             if ( NULL == peventPrev )
             {
                 Assert( pevent == g_peventCacheHead );
@@ -91,6 +97,7 @@ void OSEventIFlushEventCache()
                                     (const WCHAR**)pevent->rgpsz,
                                     pevent->pvRawData );
 
+            //  free the event
             const BOOL  fFreedEventMemory   = !LocalFree( pevent );
             Assert( fFreedEventMemory );
 
@@ -102,31 +109,36 @@ void OSEventIFlushEventCache()
         }
         else
         {
+            //  this event is going to remain in the list
             peventPrev = pevent;
         }
     }
 
     Assert( NULL == g_peventCacheHead ? NULL == g_peventCacheTail : NULL != g_peventCacheTail );
 
+    //  we have lost some cached events
 
     if ( g_ceventLost )
     {
+        //  UNDONE:  gripe about it in the event log
         g_ceventLost = 0;
     }
 }
 
-#endif
+#endif // DISABLE_EVENT_LOG
 
 #ifdef DEBUG
 LOCAL BOOL  g_fOSSuppressEvents   = fFalse;
 #endif
 
+//  our in memory cache of emitted events
 
 const size_t    g_cLastEvent                        = 10;
 WCHAR*          g_rgwszLastEvent[ g_cLastEvent ]    = { NULL };
 size_t          g_iLastEvent                        = 0;
 
 
+//  reports the specifed event using the given data to the system event log
 void OSEventReportEvent(    const WCHAR*        szSourceEventKey,
                             const EEventFacility eventfacility,
                             const EEventType    type,
@@ -137,16 +149,25 @@ void OSEventReportEvent(    const WCHAR*        szSourceEventKey,
                             const DWORD         cbRawData,
                             void*               pvRawData )
 {
+    //  defined, but never tested them off and always (currently) passed ... you make sure no memory leaks. ;-)
     Expected( eventfacility & eventfacilityOsDiagTracking );
     Expected( eventfacility & eventfacilityRingBufferCache );
     Expected( eventfacility & eventfacilityOsEventTrace );
     Expected( eventfacility & eventfacilityOsTrace );
 
+    //  Save this event into memory and emit a trace for debugging purposes
+    //
     OnThreadWaitBegin();
     EnterCriticalSection( &g_csEventCache );
     OnThreadWaitEnd();
 
 #ifdef DEBUG
+    //  ensure we don't get into a vicious cycle if we recursively enter this function
+    //  because an assert fired within this function (and we go to report the assert in
+    //  the event log)
+    //  NOTE: this check needs to be in the critical section because events will be silently
+    //  discarded if a second thread comes in while an event is already being generated and
+    //  g_fOSSuppressEvents is true.
     if ( g_fOSSuppressEvents )
     {
         LeaveCriticalSection( &g_csEventCache );
@@ -168,16 +189,18 @@ void OSEventReportEvent(    const WCHAR*        szSourceEventKey,
                         (va_list *)rgpszString ) )
     {
         const WCHAR * wszLogStrFormatter = L"EventLog[ID=%d(0x%x)@%I64d]:  %ws";
-        const INT cchLogStr = wcslen( wszLogStrFormatter ) + 10  + 8  + 20  + wcslen( wszEvent ) + 1 ;
+        const INT cchLogStr = wcslen( wszLogStrFormatter ) + 10 /* %d */ + 8 /* %x */ + 20 /* %I64d */ + wcslen( wszEvent ) + 1 /* NUL term */;
         WCHAR * wszLogStr = (WCHAR*)LocalAlloc( LMEM_FIXED, cchLogStr * sizeof(WCHAR) );
         if ( wszLogStr )
         {
+            //  or should we use TickOSTimeCurrent(), or DateTime?
             OSStrCbFormatW( wszLogStr, cchLogStr*sizeof(WCHAR), wszLogStrFormatter, msgid, msgid, HrtHRTCount(), wszEvent );
             LocalFree( wszEvent );
             wszEvent = NULL;
         }
         else
         {
+            //  fallback to just wszEvent which was already allocated
             wszLogStr = wszEvent;
             wszEvent = NULL;
         }
@@ -226,6 +249,7 @@ void OSEventReportEvent(    const WCHAR*        szSourceEventKey,
         Assert( wszLogStr == NULL );
     }
 
+    //  log a OS diagnostic data point for warnings and errors.
 
     if ( ( type == eventWarning ) || ( type == eventError ) )
     {
@@ -242,47 +266,61 @@ void OSEventReportEvent(    const WCHAR*        szSourceEventKey,
     }
 
 #ifndef DISABLE_EVENT_LOG
+    //  load the defer loaded functions
 
     NTOSFuncPtrPreinit( g_pfnRegisterEventSourceW, g_mwszzEventLogLegacyLibs, RegisterEventSourceW, oslfExpectedOnWin5x | oslfStrictFree | oslfNotExpectedOnCoreSystem );
     NTOSFuncStdPreinit( g_pfnReportEvent, g_mwszzEventLogLegacyLibs, ReportEventW, oslfExpectedOnWin5x | oslfStrictFree | oslfNotExpectedOnCoreSystem );
     NTOSFuncStdPreinit( g_pfnDeregisterEventSource, g_mwszzEventLogLegacyLibs, DeregisterEventSource, oslfExpectedOnWin5x | oslfStrictFree | oslfNotExpectedOnCoreSystem );
 
+    //  the event log isn't open
 
     Assert( !g_hEventSource );
 
     Assert( cbRawData == 0 || pvRawData != NULL );
 
+    //  only log event if we're supposed to
 
     if ( eventfacility & eventfacilityReportOsEvent )
     {
         
+        //  write all cached events to the event log
 
         if ( NULL != g_peventCacheHead )
             OSEventIFlushEventCache();
 
+        //  try once again to open the event log
 
         g_hEventSource = g_pfnRegisterEventSourceW( NULL, szSourceEventKey );
 
+        //  we still failed to open the event log
         
         if ( !g_hEventSource )
         {
+            //  allocate memory to cache this event
 
             EVENT*          pevent              = NULL;
             SIZE_T          cbAlloc             = sizeof(EVENT);
 
+            // after the raw data we have WCHAR strings. Those need to be
+            // WCHAR alligned (we are using them as param to win32 calls
+            // so pad the raw data to a WCHAR boundary.
             const DWORD     cbRawDataAlligned   = sizeof(WCHAR) * ( ( cbRawData + sizeof(WCHAR) - 1 ) / sizeof(WCHAR) );
             Assert( cbRawDataAlligned >= cbRawData );
             Assert( cbRawDataAlligned % sizeof(WCHAR) == 0 );
             
+            //  allocate room for eventsource, plus null terminator
             cbAlloc += sizeof(WCHAR) * LOSStrLengthW( szSourceEventKey ) + sizeof(WCHAR );
 
+            //  allocate room for string array
             cbAlloc += sizeof(const WCHAR*) * cString;
 
+            //  allocate room for individual strings, plus null terminator
             for ( DWORD ipsz = 0; ipsz < cString; ipsz++ )
             {
                 cbAlloc += sizeof(WCHAR) * LOSStrLengthW( rgpszString[ipsz] ) + sizeof(WCHAR);
             }
 
+            //  allocate room for raw data
             cbAlloc += cbRawDataAlligned;
 
             if ( cbEventCache + cbAlloc < (SIZE_T)g_cbEventHeapMax )
@@ -294,16 +332,20 @@ void OSEventReportEvent(    const WCHAR*        szSourceEventKey,
                 }
             }
 
+            //  we are out of memory
 
             if ( !pevent )
             {
+                //  we lost this event
 
                 g_ceventLost++;
             }
 
+            //  we got the memory
 
             else
             {
+                //  insert the event into the event cache
                 WCHAR*      psz;
 
                 pevent->cb = cbAlloc;
@@ -314,12 +356,15 @@ void OSEventReportEvent(    const WCHAR*        szSourceEventKey,
                 pevent->cbRawData = cbRawData;
                 pevent->cString = cString;
 
+                //  start storing strings after the string array
                 psz = (WCHAR*)( (BYTE*)pevent->rgpsz + ( sizeof(const WCHAR*) * cString ) );
         
+                //  eventsource comes first
                 pevent->szSourceEventKey = psz;
                 OSStrCbCopyW( psz, cbAlloc - (((BYTE*)psz)-(BYTE*)pevent), szSourceEventKey );
                 psz += 1 + LOSStrLengthW( szSourceEventKey );
 
+                //  next store raw data
                 if ( cbRawData > 0 )
                 {
                     pevent->pvRawData = (void*)psz;
@@ -334,6 +379,7 @@ void OSEventReportEvent(    const WCHAR*        szSourceEventKey,
                     pevent->pvRawData = NULL;
                 }
 
+                //  finally store individual strings
                 for ( DWORD ipsz = 0; ipsz < cString; ipsz++ )
                 {
                     pevent->rgpsz[ipsz] = psz;
@@ -357,7 +403,7 @@ void OSEventReportEvent(    const WCHAR*        szSourceEventKey,
                 }
                 else
                 {
-                    Assert( fFalse );
+                    Assert( fFalse );   //  should be impossible
                     const BOOL  fFreedEventMemory = !LocalFree( pevent );
                     Assert( fFreedEventMemory );
                 }
@@ -365,9 +411,11 @@ void OSEventReportEvent(    const WCHAR*        szSourceEventKey,
             }
         }
 
+        //  we opened the event log
 
         else
         {
+            //  write event to the event log, ignoring any errors encountered
 
             (void)g_pfnReportEvent( g_hEventSource,
                                     WORD( type ),
@@ -385,7 +433,7 @@ void OSEventReportEvent(    const WCHAR*        szSourceEventKey,
 
     }
 
-#endif
+#endif // DISABLE_EVENT_LOG
 
 #ifdef DEBUG
     g_fOSSuppressEvents = fFalse;
@@ -394,17 +442,21 @@ void OSEventReportEvent(    const WCHAR*        szSourceEventKey,
     LeaveCriticalSection( &g_csEventCache );
 }
 
+//  post-terminate event subsystem
 
 void OSEventPostterm()
 {
 #ifndef DISABLE_EVENT_LOG
+    //  with our current eventlog scheme, it should be impossible to come here with an open event source
     Assert( !g_hEventSource || FUtilProcessAbort() );
 
+    //  the event log is not open and we still have cached events
 
     if ( NULL != g_peventCacheHead )
     {
         Assert( NULL != g_peventCacheTail );
 
+        //  try one last time to open the event log and write all cached events
         if ( g_hEventSource )
         {
             Assert( FUtilProcessAbort() );
@@ -413,6 +465,8 @@ void OSEventPostterm()
         }
         OSEventIFlushEventCache();
 
+        //  purge remaining cached events
+        //  CONSIDER:  write remaining cached events to a file
         EVENT*  pevent;
         EVENT*  peventNext;
         for ( pevent = g_peventCacheHead; pevent; pevent = pevent = peventNext )
@@ -427,27 +481,36 @@ void OSEventPostterm()
         Assert( NULL == g_peventCacheTail );
     }
 
+    //  the event log is open
 
     if ( g_hEventSource )
     {
+        //  UNDONE: this code path should be dead
         Assert( FUtilProcessAbort() );
 
+        //  we should not have any cached events
 
         Assert( NULL == g_peventCacheHead );
         Assert( NULL == g_peventCacheTail );
 
+        //  close the event log
+        //
+        //  NOTE:  ignore any error returned as the event log service may have
+        //  already been shut down
 
         g_pfnDeregisterEventSource( g_hEventSource );
         g_hEventSource = NULL;
     }
 
+    //  reset the event cache
 
     g_peventCacheHead = NULL;
     g_peventCacheTail = NULL;
     g_ceventLost      = 0;
     cbEventCache    = 0;
-#endif
+#endif // DISABLE_EVENT_LOG
 
+    //  reset our in memory cache of emitted events
 
     for ( size_t iLastEvent = 0; iLastEvent < g_cLastEvent; iLastEvent++ )
     {
@@ -459,6 +522,7 @@ void OSEventPostterm()
     }
     g_iLastEvent = 0;
 
+    //  delete the event cache critical section
 
     if( g_fcsEventCacheInit )
     {
@@ -467,13 +531,15 @@ void OSEventPostterm()
     }
 }
 
+//  pre-init event subsystem
 
 BOOL FOSEventPreinit()
 {
 #ifndef DISABLE_EVENT_LOG
+    //  initialize the event cache critical section
 
-    g_cbEventHeapMax = 0;
-#endif
+    g_cbEventHeapMax = 0;   // assume no event log cache
+#endif // DISABLE_EVENT_LOG
 
     if ( !InitializeCriticalSectionAndSpinCount( &g_csEventCache, 0 ) )
     {
@@ -481,6 +547,7 @@ BOOL FOSEventPreinit()
     }
     g_fcsEventCacheInit = fTrue;
 
+    //  reset our in memory cache of emitted events
 
     for ( size_t iLastEvent = 0; iLastEvent < g_cLastEvent; iLastEvent++ )
     {
@@ -489,14 +556,19 @@ BOOL FOSEventPreinit()
     g_iLastEvent = 0;
 
 #ifndef DISABLE_EVENT_LOG
+    //  reset the event cache
 
     g_peventCacheHead = NULL;
     g_peventCacheTail = NULL;
     g_ceventLost      = 0;
     cbEventCache    = 0;
 
+    //  add ourself as an event source in the registry
+    //
+    //  NOTE:  we do not do this if this is the offical Windows build because
+    //  our reg keys are now installed as part of our component setup
 
-#endif
+#endif  // DISABLE_EVENT_LOG
 
     return fTrue;
 
@@ -542,6 +614,7 @@ VOID OSEventRegister()
             DWORD           cbData;
             DWORD           Data;
 
+            // UICODE_UNDONE: fix the WszUtilImagePath references below
             cbData = cbDataMax;
             if (    pfnRegQueryValueExW(    hkeyImage,
                                             L"EventMessageFile",
@@ -623,19 +696,23 @@ VOID OSEventRegister()
             error = pfnRegCloseKey( hkeyImage );
             Assert( error == ERROR_SUCCESS );
         }
-    }
-#endif
-#endif
+    }   //  not the unit tests / ESElibwithtests.dll
+#endif  //  OS_LAYER_VIOLATIONS
+#endif  //  !OFFICIAL_BUILD
 }
 
+//  terminate event subsystem
 
 void OSEventTerm()
 {
+    //  nop
 }
 
+//  init event subsystem
 
 ERR ErrOSEventInit()
 {
+    //  nop
 
     return JET_errSuccess;
 }

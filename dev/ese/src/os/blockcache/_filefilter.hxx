@@ -3,12 +3,17 @@
 
 #pragma once
 
+//  TFileFilter:  core implementation of IFileFilter and its derivatives.
+//
+//  This class provides the most important interaction between the file system filter and the block cache.  It is
+//  responsible for hooking the methods that impact cached file state and indirecting through the cache.  Most of
+//  the complexity involves synchronizing the engine IO coming through the filter and the write back from the cache.
 
 template< class I >
-class TFileFilter
+class TFileFilter  //  ff
     :   public TFileWrapper<I>
 {
-    public:
+    public:  //  specialized API
 
         TFileFilter(    _Inout_     IFileAPI** const                    ppfapi,
                         _In_        IFileSystemFilter* const            pfsf,
@@ -56,13 +61,13 @@ class TFileFilter
             OSTrace( JET_tracetagBlockCache, OSFormat( "%s ctor", OSFormat( this ) ) );
         }
 
-    public:
+    public:  //  IFileFilter
 
         ERR ErrGetPhysicalId(   _Out_ VolumeId* const   pvolumeid,
                                 _Out_ FileId* const     pfileid,
                                 _Out_ FileSerial* const pfileserial ) override;
 
-    public:
+    public:  //  IFileAPI
 
         ERR ErrFlushFileBuffers( _In_ const IOFLUSHREASON iofr ) override;
 
@@ -97,7 +102,7 @@ class TFileFilter
                         _In_                    const IFileAPI::PfnIOHandoff    pfnIOHandoff ) override;
         ERR ErrIOIssue() override;
 
-    public:
+    public:  //  IFileFilter
 
         ERR ErrRead(    _In_                    const TraceContext&             tc,
                         _In_                    const QWORD                     ibOffset,
@@ -122,6 +127,7 @@ class TFileFilter
 
     private:
 
+        //  Wait context for access to an IO offset range.
 
         class CWaiter
         {
@@ -158,6 +164,7 @@ class TFileFilter
                 CMeteredSection::Group                                  m_group;
         };
 
+        //  Context for a write back from the cache.
 
         class CWriteBack
         {
@@ -215,6 +222,10 @@ class TFileFilter
                 {
                     if ( m_pfnIOHandoff )
                     {
+                        //  NOTE:  if there is an error when requesting a write back then we will call the handoff
+                        //  callback, when provided, with that error and with a NULL IOREQ*.  This deviates from the
+                        //  behavior for all engine IOs and for successful write back requests.  However, we can write
+                        //  the block cache to expect this behavior.
 
                         m_pfnIOHandoff( err,
                                         pff,
@@ -257,6 +268,7 @@ class TFileFilter
                 const IFileAPI::PfnIOHandoff                                        m_pfnIOHandoff;
         };
 
+        //  Context for a sync write back completion.
 
         class CWriteBackComplete
         {
@@ -491,6 +503,7 @@ class TFileFilter
 
     protected:
 
+        //  IO completion context for an IFileFilter implementation.
 
         class CIOComplete
             :   public TFileWrapper<I>::CIOComplete
@@ -695,12 +708,14 @@ ERR TFileFilter<I>::ErrFlushFileBuffers( _In_ const IOFLUSHREASON iofr )
 
     OSTrace( JET_tracetagBlockCache, OSFormat( "%s ErrFlushFileBuffers", OSFormat( this ) ) );
 
+    //  if any unflushed cache writes have occurred then flush the cache
 
     if ( AtomicExchange( &m_cCacheWriteForFlush, 0 ) > 0 )
     {
         Call( m_pc->ErrFlush( m_volumeid, m_fileid, m_fileserial ) );
     }
 
+    //  flush the cached file
 
     Call( TFileWrapper<I>::ErrFlushFileBuffers( iofr ) );
 
@@ -720,17 +735,24 @@ ERR TFileFilter<I>::ErrSetSize( _In_ const TraceContext&    tc,
     CMeteredSection::Group  group           = CMeteredSection::groupInvalidNil;
     CSemaphore*             psem            = NULL;
 
+    //  get the current size of the file
 
     Call( TFileWrapper<I>::ErrSize( &cbSizeCurrent, IFileAPI::filesizeLogical ) );
 
     OSTrace( JET_tracetagBlockCache, OSFormat( "%s ErrSetSize %llu -> %llu", OSFormat( this ), cbSizeCurrent, cbSizeNew ) );
 
+    //  protect all impacted offsets in the file from write back
 
     Call( ErrBeginAccess( COffsets( min( cbSizeCurrent, cbSizeNew ), qwMax ), fTrue, &group, &psem ) );
 
+    //  invalidate all offsets beyond the new end of the file
 
     Call( ErrInvalidate( COffsets( cbSizeNew, qwMax ) ) );
 
+    //  change the file size
+    //
+    //  NOTE:  we will not truncate the header if we are attached.  ideally we would detach the file from the cache
+    //  and truly set the file to zero size.  we will defer this work until later
 
     if ( FAttached() )
     {
@@ -769,15 +791,21 @@ ERR TFileFilter<I>::ErrIOTrim(  _In_ const TraceContext&    tc,
 
     OSTrace( JET_tracetagBlockCache, OSFormat( "%s ErrIOTrim ib=%llu cb=%llu", OSFormat( this ), ibOffset, cbToFree ) );
 
+    //  ignore zero length trims
 
     if ( cbToFree > 0 )
     {
+        //  protect this offset range in the file from write back
 
         Call( ErrBeginAccess( offsets, fTrue, &group, &psem ) );
 
+        //  invalidate this offset range in the file
 
         Call( ErrInvalidate( offsets ) );
 
+        //  trim the file
+        //
+        //  NOTE:  we will not trim the header if we are attached
 
         QWORD cbHeaderOverlapped = FAttached() && offsets.FOverlaps( s_offsetsCachedFileHeader ) ?
             min(offsets.Cb(), s_offsetsCachedFileHeader.IbEnd() - offsets.IbStart() + 1 ) :
@@ -845,9 +873,14 @@ ERR TFileFilter<I>::ErrRead(    _In_                    const TraceContext&     
     CMeteredSection::Group  group       = CMeteredSection::groupInvalidNil;
     CSemaphore*             psem        = NULL;
 
-    Assert( cbData > 0 );
+    Assert( cbData > 0 );  //  underlying impl also asserts no zero length IO
     Assert( iom == IOMode::iomRaw || iom == IOMode::iomEngine || iom == IOMode::iomCacheMiss );
 
+    //  if this read is from the engine and not the cache then we need to protect this offset range in the file from
+    //  colliding with cache write back.  if the read is from the cache then it is the cache doing a read inside
+    //  the scope of the original engine read and thus it is already protected.  the cache cannot do a caching read
+    //  outside of the original scope (e.g. a prefetch read of additional offsets) without a potential deadlock in this
+    //  locking model.  we check for such requests and fail them
 
     if ( iom == IOMode::iomEngine )
     {
@@ -910,7 +943,7 @@ ERR TFileFilter<I>::ErrWrite(   _In_                    const TraceContext&     
     CMeteredSection::Group  group   = CMeteredSection::groupInvalidNil;
     CSemaphore*             psem    = NULL;
 
-    Assert( cbData > 0 );
+    Assert( cbData > 0 );  //  underlying impl also asserts no zero length IO
     Assert( iom == IOMode::iomRaw ||
             iom == IOMode::iomEngine || 
             iom == IOMode::iomCacheWriteThrough || 
@@ -925,6 +958,12 @@ ERR TFileFilter<I>::ErrWrite(   _In_                    const TraceContext&     
                             OSFormatBoolean( CCachedFileHeader::FValid( m_pfsconfig, pbData, cbData ) ),
                             iom ) );
 
+    //  if this write is from the engine and not the cache then we need to protect this offset range in the file from
+    //  colliding with cache write back.  if this is a cache write through then the write should be inside the scope of
+    //  the original engine write and thus it is already protected.  the cache cannot do a write through outside of the
+    //  original scope without a potential deadlock in this locking model.  we check for such requests and fail them.
+    //  if this is a cache write back then we need to wait until any engine IOs to this offset range are complete
+    //  before proceeding
 
     if ( iom == IOMode::iomEngine )
     {
@@ -1019,6 +1058,8 @@ ERR TFileFilter<I>::ErrBeginAccess( _In_    const COffsets&                 offs
     *pgroup = CMeteredSection::groupInvalidNil;
     *ppsem = NULL;
 
+    //  if this is a write and the file is cached and not yet attached then expand the offset range to include the
+    //  header so that we can write our cached file header
 
     const BOOL fNotYetAttached = m_pc && !m_pcfh && !m_initOnceAttach.FIsInit();
     const BOOL fNeedsAttach = fWrite && fNotYetAttached;
@@ -1027,9 +1068,11 @@ ERR TFileFilter<I>::ErrBeginAccess( _In_    const COffsets&                 offs
         offsetsActual = COffsets( 0, offsetsActual.IbEnd() );
     }
 
+    //  determine which list of pending write backs are effective for this IO
 
     group = m_msPendingWriteBacks.Enter();
 
+    //  if we cannot access this offset range of the file due to pending write backs then wait until we can
 
     if ( !FAccessPermitted( offsetsActual, group ) )
     {
@@ -1038,6 +1081,8 @@ ERR TFileFilter<I>::ErrBeginAccess( _In_    const COffsets&                 offs
         Assert( FAccessPermitted( offsetsActual, group ) );
     }
 
+    //  if this IO is accessing the offset range that may contain the cached file header and the file is not yet
+    //  attached then serialize access to that offset range to ensure the IO and the attach do not conflict
 
     if ( fNotYetAttached && offsetsActual.FOverlaps( s_offsetsCachedFileHeader ) )
     {
@@ -1045,16 +1090,19 @@ ERR TFileFilter<I>::ErrBeginAccess( _In_    const COffsets&                 offs
         psem->Acquire();
     }
 
+    //  if we need to attach the file to the cache then do so now
 
     if ( fNeedsAttach )
     {
         Call( m_initOnceAttach.Init( ErrAttach_, this, offsets ) );
     }
 
+    //  return the list of pending write backs that are effective for this IO
 
     *pgroup = group;
     group = CMeteredSection::groupInvalidNil;
 
+    //  return the semaphore controlling access to the header for this IO, if applicable
 
     *ppsem = psem;
     psem = NULL;
@@ -1114,12 +1162,14 @@ ERR TFileFilter<I>::ErrVerifyAccessIgnoringWriteBack( _In_ const COffsets& offse
 {
     ERR err = JET_errSuccess;
 
+    //  if the file is not attached to the cache then the cache had better not be accessing it
 
     if ( !FAttached() )
     {
         Call( ErrERRCheck( JET_errInternalError ) );
     }
 
+    //  the cache is not allowed to access the cached file header
 
     if ( FAttached() && offsets.FOverlaps( s_offsetsCachedFileHeader ) )
     {
@@ -1135,9 +1185,12 @@ ERR TFileFilter<I>::ErrVerifyAccess( _In_ const COffsets& offsets )
 {
     ERR err = JET_errSuccess;
 
+    //  verify that this access is allowed ignoring pending write backs
 
     Call( ErrVerifyAccessIgnoringWriteBack( offsets ) );
 
+    //  if the requested offset range conflicts with a write back then we cannot allow the cache to access these
+    //  offsets or it could cause a deadlock
 
     const CMeteredSection::Group group = m_msPendingWriteBacks.GroupActive();
     if ( !FAccessPermitted( offsets, group ) )
@@ -1168,9 +1221,11 @@ ERR TFileFilter<I>::ErrInvalidate( _In_ const COffsets& offsets )
 {
     ERR err = JET_errSuccess;
 
+    //  we only need to invalidate the cache if we are attached
 
     if ( FAttached() )
     {
+        //  invalidate the cache for this offset range
 
         Call( m_pc->ErrInvalidate( m_volumeid, m_fileid, m_fileserial, offsets.IbStart(), offsets.Cb() ) );
     }
@@ -1192,6 +1247,9 @@ ERR TFileFilter<I>::ErrAttach( _In_ const COffsets& offsetsFirstWrite )
     BOOL                    fPresumeCached              = fFalse;
     BOOL                    fPresumeAttached            = fFalse;
 
+    //  get the size of the cached file and extend to include the proposed write.  if it is smaller than the header
+    //  then don't attach it.  our contract is to not cause any noticeable changes to the file meta-data such as by
+    //  changing the file size
 
     Call( TFileWrapper<I>::ErrSize( &cbSize, IFileAPI::filesizeLogical ) );
     cbSizeWithFirstWrite = max( cbSize, offsetsFirstWrite.IbEnd() + 1 );
@@ -1201,6 +1259,7 @@ ERR TFileFilter<I>::ErrAttach( _In_ const COffsets& offsetsFirstWrite )
         goto HandleError;
     }
 
+    //  read the data to be displaced by the cached file header, if any
 
     Alloc( pvData = PvOSMemoryPageAlloc( cbHeader, NULL ) );
     if ( cbSize > 0 )
@@ -1217,12 +1276,15 @@ ERR TFileFilter<I>::ErrAttach( _In_ const COffsets& offsetsFirstWrite )
                         NULL ) );
     }
 
+    //  create the new cached file header
 
     Call( CCachedFileHeader::ErrCreate( this, m_pc, &pcfh ) );
 
+    //  allow this file to be opened by the cache
 
     m_fileserial = pcfh->Fileserial();
 
+    //  load the displaced data into the cache on behalf of the cached file once it is attached
 
     Call( m_pc->ErrWrite(   *tcScope,
                             m_volumeid,
@@ -1238,24 +1300,36 @@ ERR TFileFilter<I>::ErrAttach( _In_ const COffsets& offsetsFirstWrite )
     fPresumeCached = fTrue;
     Call( m_pc->ErrFlush( m_volumeid, m_fileid, m_fileserial ) );
 
+    //  write the header to the file, making it cached.  once this happens we must presume it is attached
+    //
+    //  NOTE:  if the cached file header doesn't make it to the file then the cache will be loaded with an image of the
+    //  initial bytes of this file.  however, it will be keyed to a FileSerial that didn't get stamped on the file.  so
+    //  the cache will end up tossing that write later because the target cached file doesn't exist.  also once we fail
+    //  we will remove the ability of the cache to open this already open file for write through / write back.  so we 
+    //  are not at risk of writing this stale data back to the file
 
     Call( ErrWrite( *tcScope, 0, cbHeader, (const BYTE*)pcfh, qosIONormal, iomRaw, NULL, NULL, NULL ) );
     fPresumeAttached = fTrue;
     Call( ErrFlushFileBuffers( iofrBlockCache ) );
 
+    //  mark the file as attached by retaining the cached file header.  this will allow cache write through / write back
+    //  to the cached file to occur
 
     m_pcfh = pcfh;
     pcfh = NULL;
 
+    //  if we could not attach the file then ignore the failure and continue running uncached
 
 HandleError:
     if ( err < JET_errSuccess )
     {
         if ( fPresumeCached )
         {
+            //  don't allow the cache to open this file anymore 
 
             m_fileserial = fileserialInvalid;
 
+            //  cause the cache to close its handle to this file
 
             (void)m_pc->ErrClose( m_volumeid, m_fileid, pcfh->Fileserial() );
         }
@@ -1281,16 +1355,21 @@ ERR TFileFilter<I>::ErrTryEnqueueWriteBack( _In_                    const TraceC
     BOOL                    fLeave      = fFalse;
     CWriteBackComplete      writeBackComplete( keyIOComplete, pfnIOHandoff );
 
+    //  verify that this access is allowed ignoring pending write backs
 
     Call( ErrVerifyAccessIgnoringWriteBack( COffsets( ibOffset, ibOffset + cbData - 1 ) ) );
 
+    //  enter the pending write backs metered section only to stabilize the active group so we can ensure enough
+    //  enough storage for the pending write back offset array
 
     group = m_msPendingWriteBacks.Enter();
 
+    //  protect our access to the pending write back lists
 
     m_critPendingWriteBacks.Enter();
     fLeave = fTrue;
 
+    //  if we are already at the max pending write backs then reject new requests
 
     const size_t cPendingWriteBacks = CPendingWriteBacks();
     const size_t cPendingWriteBackMax = CPendingWriteBackMax();
@@ -1300,6 +1379,8 @@ ERR TFileFilter<I>::ErrTryEnqueueWriteBack( _In_                    const TraceC
         Call( ErrERRCheck( errDiskTilt ) );
     }
 
+    //  ensure that we have enough storage in the pending write back offset array to represent this write back.  we do
+    //  this here to prevent OOM during IssueWriteBacks
 
     if ( m_cPendingWriteBacksMax < cPendingWriteBacks + 1 )
     {
@@ -1315,6 +1396,7 @@ ERR TFileFilter<I>::ErrTryEnqueueWriteBack( _In_                    const TraceC
         Error( ErrERRCheck( JET_errOutOfMemory ) );
     }
 
+    //  queue the new write request
 
     Alloc( pwriteback = new CWriteBack( tc,
                                         ibOffset,
@@ -1360,12 +1442,15 @@ size_t TFileFilter<I>::CPendingWriteBackMax()
 template< class I >
 void TFileFilter<I>::IssueWriteBacks()
 {
+    //  if we can become the write back requestor then we will request write backs
 
     if ( m_semRequestWriteBacks.FTryAcquire() )
     {
+        //  get the inactive group
 
         CMeteredSection::Group groupInactive = m_msPendingWriteBacks.GroupInactive();
 
+        //  generate the set of offset ranges that correspond to existing and desired write backs
 
         m_critPendingWriteBacks.Enter();
 
@@ -1388,6 +1473,9 @@ void TFileFilter<I>::IssueWriteBacks()
 
         m_critPendingWriteBacks.Leave();
 
+        //  lock these offsets for write back by switching active groups.  this will take effect for all new engine IOs
+        //  immediately.  however we must wait until any pending engine IOs have completed before we can request new
+        //  write backs.  to be continued in RequestWriteBacks
 
         m_msPendingWriteBacks.Partition( (CMeteredSection::PFNPARTITIONCOMPLETE)TFileFilter<I>::RequestWriteBacks_, (DWORD_PTR)this );
     }
@@ -1396,15 +1484,18 @@ void TFileFilter<I>::IssueWriteBacks()
 template<class I>
 void TFileFilter<I>::RequestWriteBacks()
 {
+    //  release any IOs that are waiting for a pending write back to complete if it is now safe to do so
 
     ReleaseWaitingIOs();
 
+    //  try to issue as many of these write backs as possible
 
     size_t cWriteBacksStarted = 0;
     size_t cWriteBacksFailed = 0;
     ERR err = JET_errSuccess;
     while ( err >= JET_errSuccess )
     {
+        //  move the oldest queued write back, if any, to the requested write back list
 
         m_critPendingWriteBacks.Enter();
         CWriteBack* const pwriteback = m_ilQueuedWriteBacks.PrevMost();
@@ -1420,25 +1511,31 @@ void TFileFilter<I>::RequestWriteBacks()
             break;
         }
 
+        //  try to request the write
 
         CWriteBack writebackCopy( *pwriteback );
         err = pwriteback->ErrWriteBack( this );
 
+        //  if we failed due to too many writes on the first write then try again while overriding the throttling.  it
+        //  is very important that we maintain forward progress
 
         if ( FTooManyWrites( err ) && !cWriteBacksStarted )
         {
             err = pwriteback->ErrWriteBack( this, fTrue );
         }
 
+        //  if the write request succeeded then note that
 
         if ( err >= JET_errSuccess )
         {
             cWriteBacksStarted++;
         }
 
+        //  if the write request failed then we must handle that
 
         else
         {
+            //  if the write request failed due to too many writes then put it back in the queue
 
             if ( FTooManyWrites( err ) )
             {
@@ -1448,11 +1545,14 @@ void TFileFilter<I>::RequestWriteBacks()
                 m_critPendingWriteBacks.Leave();
             }
 
+            //  if the write request failed for any other reason then remove it from the requested list and complete
+            //  its callbacks
 
             else
             {
                 m_critPendingWriteBacks.Enter();
 
+                //  we cannot use "m_ilRequestedWriteBacks.FMember( pwriteback )" here because it could touch freed memory
                 CWriteBack* pwritebackT = NULL;
                 for (   pwritebackT = m_ilRequestedWriteBacks.PrevMost();
                         pwritebackT != NULL && pwritebackT != pwriteback;
@@ -1462,7 +1562,7 @@ void TFileFilter<I>::RequestWriteBacks()
 
                 if ( pwritebackT == pwriteback )
                 {
-                    Assert( err == JET_errOutOfMemory );
+                    Assert( err == JET_errOutOfMemory );  //  OOM on alloc of CIOComplete in ErrWriteCommon
                     m_ilRequestedWriteBacks.Remove( pwriteback );
                 }
 
@@ -1477,21 +1577,26 @@ void TFileFilter<I>::RequestWriteBacks()
 
                 cWriteBacksFailed++;
 
+                //  continue processing other write backs
 
                 err = JET_errSuccess;
             }
         }
     }
 
+    //  if any write backs were successfully requested then issue IO
 
     if ( cWriteBacksStarted )
     {
         CallS( TFileWrapper<I>::ErrIOIssue() );
     }
 
+    //  allow another attempt to request write backs
 
     m_semRequestWriteBacks.Release();
 
+    //  if any write backs failed and completed while we were processing write backs then immediately retry so we can
+    //  release any engine IOs waiting on those failed write backs
 
     if ( cWriteBacksFailed )
     {
@@ -1530,6 +1635,7 @@ void TFileFilter<I>::CompleteWriteBack( _In_ CWriteBack* const pwriteback )
         return;
     }
 
+    //  remove the write back from the requested write back list
 
     m_critPendingWriteBacks.Enter();
     m_ilRequestedWriteBacks.Remove( pwriteback );
@@ -1537,6 +1643,7 @@ void TFileFilter<I>::CompleteWriteBack( _In_ CWriteBack* const pwriteback )
 
     delete pwriteback;
 
+    //  try to issue more write backs and, crucially, release any waiters blocked by this write back
 
     IssueWriteBacks();
 }
@@ -1563,6 +1670,7 @@ BOOL TFileFilter<I>::FTooManyWrites( _In_ const ERR err )
 template< class I >
 ICache::CachingPolicy TFileFilter<I>::CpGetCachingPolicy( _In_ const TraceContext& tc, _In_ const BOOL fWrite )
 {
+    //  trivial implementation:  always request best effort caching
 
     return cpBestEffort;
 }
@@ -1584,12 +1692,15 @@ ERR TFileFilter<I>::ErrCacheRead(   _In_                    const TraceContext& 
     BOOL            fIOREQUsed  = fFalse;
     CIOComplete*    piocomplete = NULL;
 
+    //  determine the caching policy for this read
 
     const ICache::CachingPolicy cp = CpGetCachingPolicy( tc, fFalse );
 
+    //  if the file isn't attached to the cache then read as if it is a cache miss.  otherwise, use the cache
 
     if ( FAttached() )
     {
+        //  try to service the read via the cache
 
         if ( pfnIOComplete || pfnIOHandoff )
         {
@@ -1625,6 +1736,7 @@ ERR TFileFilter<I>::ErrCacheRead(   _In_                    const TraceContext& 
             }
         }
 
+        //  release any reserved IOREQ because we will not be using it
 
         if ( pioreq )
         {
@@ -1632,6 +1744,7 @@ ERR TFileFilter<I>::ErrCacheRead(   _In_                    const TraceContext& 
             ReleaseUnusedIOREQ( (void*)pioreq );
         }
 
+        //  ask the cache for this data
 
         Call( m_pc->ErrRead(    tc,
                                 m_volumeid,
@@ -1647,6 +1760,7 @@ ERR TFileFilter<I>::ErrCacheRead(   _In_                    const TraceContext& 
     }
     else
     {
+        //  there is no cache so handle as if it were a cache miss
 
         const ICacheTelemetry::FileNumber filenumber = Filenumber();
         const BOOL fCacheIfPossible = cp != cpDontCache;
@@ -1780,12 +1894,15 @@ ERR TFileFilter<I>::ErrCacheWrite(  _In_                    const TraceContext& 
     ERR             err         = JET_errSuccess;
     CIOComplete*    piocomplete = NULL;
 
+    //  determine the caching policy for this write
 
     const ICache::CachingPolicy cp = CpGetCachingPolicy( tc, fTrue );
 
+    //  if the file isn't attached to the cache then write as if it is a write through.  otherwise, use the cache
 
     if ( FAttached() )
     {
+        //  try to service the write via the cache
         
         if ( pfnIOComplete || pfnIOHandoff )
         {
@@ -1833,6 +1950,8 @@ ERR TFileFilter<I>::ErrCacheWrite(  _In_                    const TraceContext& 
                                 pfnIOComplete ? (ICache::PfnComplete)CIOComplete::Complete_ : NULL,
                                 DWORD_PTR( piocomplete ) ) );
 
+        //  if the file is configured for write through then immediately flush the cache.  otherwise, remember to flush
+        //  the cache later
 
         if ( ( Fmf() & fmfStorageWriteBack ) == 0 )
         {
@@ -1845,6 +1964,7 @@ ERR TFileFilter<I>::ErrCacheWrite(  _In_                    const TraceContext& 
     }
     else
     {
+        //  there is no cache so handle as if it were a write through
 
         const ICacheTelemetry::FileNumber filenumber = Filenumber();
         const BOOL fCacheIfPossible = cp != cpDontCache;
@@ -1970,10 +2090,11 @@ HandleError:
     return err;
 }
 
+//  CFileFilter:  concrete TFileFilter<IFileFilter>
 
 class CFileFilter : public TFileFilter<IFileFilter>
 {
-    public:
+    public:  //  specialized API
 
         CFileFilter(    _Inout_     IFileAPI** const                    ppfapi,
                         _In_        IFileSystemFilter* const            pfsf,
@@ -1992,12 +2113,13 @@ class CFileFilter : public TFileFilter<IFileFilter>
 };
 
 
+//  TFileFilterWrapper:  wrapper of an implementation of IFileFilter or its derivatives.
 
 template< class I >
-class TFileFilterWrapper
+class TFileFilterWrapper  //  cff
     :   public TFileWrapper<I>
 {
-    public:
+    public:  //  specialized API
 
         TFileFilterWrapper( _Inout_ I** const ppi, _In_ const IFileFilter::IOMode iom )
             :   TFileWrapper<I>( ppi ),
@@ -2011,7 +2133,7 @@ class TFileFilterWrapper
         {
         }
 
-    public:
+    public:  //  IFileAPI
 
         ERR ErrIORead(  _In_                    const TraceContext&             tc,
                         _In_                    const QWORD                     ibOffset,
@@ -2032,7 +2154,7 @@ class TFileFilterWrapper
                         _In_                    const IFileAPI::PfnIOHandoff    pfnIOHandoff ) override;
         ERR ErrIOIssue() override;
 
-    public:
+    public:  //  IFileFilter
 
         ERR ErrGetPhysicalId(   _Out_ VolumeId* const   pvolumeid,
                                 _Out_ FileId* const     pfileid,
@@ -2140,10 +2262,11 @@ ERR TFileFilterWrapper<I>::ErrIssue( _In_ const IFileFilter::IOMode iom )
     return m_piInner->ErrIssue( iom );
 }
 
+//  CFileFilterWrapper:  concrete TFileFilterWrapper<IFileFilter>.
 
 class CFileFilterWrapper : public TFileFilterWrapper<IFileFilter>
 {
-    public:
+    public:  //  specialized API
 
         CFileFilterWrapper( _Inout_ IFileFilter** const ppff, _In_ const IFileFilter::IOMode iom )
             :   TFileFilterWrapper<IFileFilter>( ppff, iom )

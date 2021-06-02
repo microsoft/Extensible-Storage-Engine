@@ -4,6 +4,11 @@
 #pragma once
 #include <pshpack1.h>
 
+// Addition of any new record type should have a corresponding update in -
+//      -   SzRBSRec    ( to return corresponding RBS record tag )
+//      -   RBSRecToSz  ( to return string representation of the record )
+//
+//
 #define     rbsrectypeNOP               0
 #define     rbsrectypeDbHdr             1
 #define     rbsrectypeDbAttach          2

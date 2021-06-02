@@ -3,6 +3,7 @@
 
 #pragma once
 
+//  Cached file table key.
 
 class CCachedFileKey
 {
@@ -55,6 +56,7 @@ class CCachedFileKey
         FileSerial  m_fileserial;
 };
 
+//  Cached file table entry.
 
 class CCachedFileEntry
 {
@@ -94,6 +96,7 @@ class CCachedFileEntry
         UINT                        m_uiHash;
 };
 
+//  Cached file hash table.
 
 typedef CDynamicHashTable<CCachedFileKey, CCachedFileEntry> CCachedFileHash;
 

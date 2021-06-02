@@ -1,7 +1,53 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
+/***********************************************************
 
+Introduction to repair
+======================
+
+Repair is the tool of last resort. It scans a database for
+errors and then rebuilds the database to a (theoretically)
+error-free state. In integrity check mode the database is
+only checked for errors. There are three major phases to repair
+    - Checking the database for errors
+    - Scanning the database for pages that belong to corrupted
+      tables
+    - Repairing corrupted tables
+
+Checking the database
+---------------------
+1.  Attach the database. We have to do this without
+attempting to navigate any of the trees in the database or
+its catalog.
+2.  Check the global space tree.
+3.  Check the catalog, catalog indexes and shadow catalog.
+4.  Check the tables. Checking the tables is a multi-threaded
+    operation, with each thread checking one table. On an
+    Exchange server the Msg and attachments table are always
+    very large so we start those first (the time to check
+    the Msg/attachment tables is often the dominant factor
+    in the runtime of the integrity check).
+
+Scanning the database
+---------------------
+While checking tables for corruption we build a list of tables
+that are corrupt. In order to repair the table we will need
+all the leaf pages of the tree. We scan the database sequentially
+building a list of all pages whose objid indicates that they are
+a leaf page of one of the tables that needs repairing.
+
+Repairing corrupted tables
+--------------------------
+We rebuild a b-tree by assembling its leaf pages together in key
+order. The internal pages are completely reconstructed. Secondary
+indexes are simply rebuilt from the primary data.
+After the b-trees are reconstructed we go through the long-values,
+deleting any that are not complete. We remove any records that
+reference LVs that don't exist and fix any refcounts that are too
+low.
+
+*************************************************************/
 
 ERR ErrDBUTLRepair( JET_SESID sesid, const JET_DBUTIL_W *pdbutil, CPRINTF* const pcprintf );
 
@@ -26,7 +72,9 @@ ERR ErrREPAIRUpdateLVRefcount(
 
 #define wrnLVRefcountsTooHigh 1206
 
+//  ================================================================
 class OBJIDLIST
+//  ================================================================
 {
     public:
         OBJIDLIST( );
@@ -44,8 +92,11 @@ class OBJIDLIST
 };
 
 
+//  ================================================================
 struct REPAIROPTS
+//  ================================================================
 {
+    //  need a constructor because we contain a critical section
     REPAIROPTS();
     ~REPAIROPTS();
     
@@ -58,13 +109,15 @@ struct REPAIROPTS
 
     JET_GRBIT   grbit;
 
-    mutable CCriticalSection crit;
+    mutable CCriticalSection crit;      //  used to syncronize the status callbacks
     JET_PFNSTATUS   pfnStatus;
     JET_SNPROG      *psnprog;
 };
 
 
+//  ================================================================
 struct FIDLASTINTDB
+//  ================================================================
 {
     FID         fidFixedLastInTDB;
     FID         fidVarLastInTDB;
@@ -72,7 +125,9 @@ struct FIDLASTINTDB
 };
 
 
+//  ================================================================
 class RECCHECK
+//  ================================================================
 {
     public:
         RECCHECK();
@@ -86,7 +141,13 @@ class RECCHECK
 };
 
 
+//  ================================================================
 class RECCHECKTABLE : public RECCHECK
+//  ================================================================
+//
+//  Checks ISAM records
+//
+//-
 {
     public:
         RECCHECKTABLE(
@@ -128,6 +189,8 @@ class RECCHECKTABLE : public RECCHECK
             }
             else
             {
+/// UNDONE: currenly nop                
+///             return ErrCheckIntrinsicLV_( kdf, columnid, itagSequence, dataLV );
                 return JET_errSuccess;
             }
         }
@@ -140,7 +203,9 @@ class RECCHECKTABLE : public RECCHECK
         const REPAIROPTS * const m_popts;
 };
 
+//  ================================================================
 class RECCHECKLV : public RECCHECK
+//  ================================================================
 {
     public:
         RECCHECKLV( TTMAP& ttmap, const REPAIROPTS * popts, LONG cbLVChunkMost );
@@ -163,7 +228,9 @@ class RECCHECKLV : public RECCHECK
 };
 
 
+//  ================================================================
 class RECCHECKLVSTATS : public RECCHECK
+//  ================================================================
 {
     public:
         RECCHECKLVSTATS( LVSTATS * plvstats );

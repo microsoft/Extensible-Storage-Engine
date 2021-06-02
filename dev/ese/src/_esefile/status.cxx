@@ -5,7 +5,9 @@
 
 static INT iLastPercentage;
 
+//  ================================================================
 void PrintWindowsError( const wchar_t * const szMessage )
+//  ================================================================
 {
     DWORD dwGLE = GetLastError();
     LPVOID lpMsgBuf = NULL;

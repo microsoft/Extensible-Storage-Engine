@@ -92,7 +92,7 @@ public:
 MSINTERNAL value struct MJET_COLUMNID
 {
 internal:
-    MJET_COLTYP     Coltyp;
+    MJET_COLTYP     Coltyp;         //  the coltyp isn't always filled it, it may be JET_ColtypNil
     System::Boolean isASCII;
     System::Int64   NativeValue;
 
@@ -459,6 +459,8 @@ MSINTERNAL value struct MJET_COLUMNCREATE
     array<System::Byte>^        DefaultValue;
     System::Int32       Cp;
 
+    //JET_COLUMNID  columnid;   // returned column id
+    //JET_ERR       err;            // returned error code
 
     virtual String ^ ToString( void ) override
         {
@@ -671,17 +673,17 @@ MSINTERNAL value struct MJET_OBJECTLIST
 
 MSINTERNAL value struct MJET_RECSIZE
 {
-    System::Int64   Data;
-    System::Int64   LongValueData;
-    System::Int64   Overhead;
-    System::Int64   LongValueOverhead;
-    System::Int64   NonTaggedColumns;
-    System::Int64   TaggedColumns;
-    System::Int64   LongValues;
-    System::Int64   MultiValues;
-    System::Int64   CompressedColumns;
-    System::Int64   DataCompressed;
-    System::Int64   LongValueDataCompressed;
+    System::Int64   Data;               //  user data in record
+    System::Int64   LongValueData;      //  user data associated with the record but stored in the long-value tree (NOTE: does NOT count intrinsic long-values)
+    System::Int64   Overhead;           //  record overhead
+    System::Int64   LongValueOverhead;  //  overhead of long-value data (NOTE: does not count intrinsic long-values)
+    System::Int64   NonTaggedColumns;   //  total number of fixed/variable columns
+    System::Int64   TaggedColumns;      //  total number of tagged columns
+    System::Int64   LongValues;         //  total number of values stored in the long-value tree for this record (NOTE: does NOT count intrinsic long-values)
+    System::Int64   MultiValues;        //  total number of values beyond the first for each column in the record
+    System::Int64   CompressedColumns;          //  total number of columns which are compressed
+    System::Int64   DataCompressed;             //  compressed size of user data in record (same as Data if no intrinsic long-values are compressed)
+    System::Int64   LongValueDataCompressed;    //  compressed size of user data in the long-value tree (same as LongValueData if no separated long values are compressed)
 
     virtual String ^ ToString() override
         {
@@ -715,24 +717,57 @@ MSINTERNAL value struct MJET_RECSIZE
         }
 };
 
+/// <summary>
+/// Information about a page
+/// </summary>
 MSINTERNAL value struct MJET_PAGEINFO
 {
+    /// <summary>
+    /// Page number
+    /// </summary>
     System::Int64   PageNumber;
 
+    /// <summary>
+    /// False if the page is zeroed, true otherwise
+    /// </summary>
     System::Boolean IsInitialized;
 
+    /// <summary>
+    /// True if a correctable error was found on the page, false otherwise
+    /// </summary>
     System::Boolean IsCorrectableError;
 
+    /// <summary>
+    /// Checksum that is calculated for this page
+    /// </summary>
     array<System::Byte>^  ActualChecksum;
 
+    /// <summary>
+    /// Checksum stored on the page
+    /// </summary>
     array<System::Byte>^  ExpectedChecksum;
 
+    /// <summary>
+    /// Dbtime on the page
+    /// </summary>
     System::UInt64  Dbtime;
 
+    /// <summary>
+    /// Checksum of the page structure
+    /// </summary>
     System::UInt64  StructureChecksum;
 
+    /// <summary>
+    /// Flags
+    /// </summary>
+    /// <remarks>
+    /// Currently unused
+    /// </remarks>
     System::Int64   Flags;
 
+    /// <summary>
+    /// Convert to string
+    /// </summary>
     virtual String ^ ToString() override
         {
         array<System::String^>^ actualChecksums = gcnew array<System::String^>( 4 );
@@ -767,12 +802,27 @@ MSINTERNAL value struct MJET_PAGEINFO
         }
 };
 
+/// <summary>
+/// 'Unique' signature for a database or log stream.
+/// </summary>
+/// <remarks>
+/// The non-managed version has a Computername field, but it is always empty.
+/// </remarks>
 MSINTERNAL value struct MJET_SIGNATURE
 {
+    /// <summary>
+    /// A random number (for uniqueness)
+    /// </summary>
     System::Int64       Random;
 
+    /// <summary>
+    /// The creation time of the database or the first logfile in the stream as UInt64
+    /// </summary>
     System::UInt64      CreationTimeUInt64;
 
+    /// <summary>
+    /// The creation time of the database or the first logfile in the stream.
+    /// </summary>
     System::DateTime    CreationTime;
 
     virtual String ^ ToString() override
@@ -783,32 +833,69 @@ MSINTERNAL value struct MJET_SIGNATURE
         }
 };
 
+/// <summary>
+/// Information about a logfile. Returned by JetGetLogFileInfo.
+/// </summary>
 MSINTERNAL value struct MJET_LOGINFOMISC
 {
+    /// <summary>
+    /// Generation of the logfile.
+    /// </summary>
     System::Int64       Generation;
 
+    /// <summary>
+    /// Logfile signature
+    /// </summary>
+    /// <remarks>
+    /// Unique per logfile sequence, not per logfile.
+    /// </remarks>
     MJET_SIGNATURE      Signature;
 
+    /// <summary>
+    /// Creation time of this logfile.
+    /// </summary>
     System::DateTime    CreationTime;
 
+    /// <summary>
+    /// Creation time of the previous logfile.
+    /// </summary>
     System::DateTime    PreviousGenerationCreationTime;
 
+    /// <summary>
+    /// </summary>
     System::Int64       Flags;
 
+    /// <summary>
+    /// </summary>
     System::Int64       VersionMajor;
 
+    /// <summary>
+    /// </summary>
     System::Int64       VersionMinor;
 
+    /// <summary>
+    /// </summary>
     System::Int64       VersionUpdate;
 
+    /// <summary>
+    /// </summary>
     System::Int64       SectorSize;
 
+    /// <summary>
+    /// </summary>
     System::Int64       HeaderSize;
 
+    /// <summary>
+    /// </summary>
     System::Int64       FileSize;
 
+    /// <summary>
+    /// </summary>
     System::Int64       DatabasePageSize;
 
+    /// <summary>
+    /// Checkpoint generation at the time this logfile was created
+    /// </summary>
     System::Int64       CheckpointGeneration;
 
     virtual String ^ ToString() override
@@ -847,12 +934,24 @@ MSINTERNAL value struct MJET_LOGINFOMISC
 
 };
 
+/// <summary>
+/// A position in the stream of log records generated by ESE
+/// </summary>
 MSINTERNAL value struct MJET_LGPOS
 {
+    /// <summary>
+    /// Generation number. This maps to an individual logfile
+    /// </summary>
     System::Int64   Generation;
 
+    /// <summary>
+    /// Sector offset in logfile.
+    /// </summary>
     System::Int32   Sector;
 
+    /// <summary>
+    /// Byte offset in sector
+    /// </summary>
     System::Int32   ByteOffset;
 
     virtual String ^ ToString() override
@@ -872,35 +971,68 @@ MSINTERNAL value struct MJET_LGPOS
         }
 };
 
+/// <summary>
+/// Database states which can be present in the MJET_DBINFO structure
+/// </summary>
 MSINTERNAL enum class MJET_DBSTATE
 {
+    /// <summary>
+    /// </summary>
     JustCreated = 1,
 
+    /// <summary>
+    /// </summary>
     DirtyShutdown = 2,
 
+    /// <summary>
+    /// </summary>
     CleanShutdown = 3,
 
+    /// <summary>
+    /// </summary>
     BeingConverted = 4,
 
+    /// <summary>
+    /// </summary>
     ForceDetach = 5,
 
+    /// <summary>
+    /// </summary>
     IncrementalReseedInProgress = 6,
 
+    /// <summary>
+    /// </summary>
     DirtyAndPatchedShutdown = 7,
 
+    /// <summary>
+    /// </summary>
     Unknown = 99,
 };
 
+/// <summary>
+/// Information about a backup
+/// </summary>
 MSINTERNAL value struct MJET_BKINFO
 {
+    /// <summary>
+    /// </summary>
     MJET_LGPOS          Lgpos;
 
+    /// <summary>
+    /// </summary>
     System::DateTime    BackupTime;
 
+    /// <summary>
+    /// True if this is a snapshot backup.
+    /// </summary>
     System::Boolean     SnapshotBackup;
 
+    /// <summary>
+    /// </summary>
     System::Int64       LowestGeneration;
 
+    /// <summary>
+    /// </summary>
     System::Int64       HighestGeneration;
 
     virtual String ^ ToString() override
@@ -924,112 +1056,315 @@ MSINTERNAL value struct MJET_BKINFO
         }
 };
 
+/// <summary>
+/// Returned by JetGetDatabaseFileInfo
+/// </summary>
 MSINTERNAL value struct MJET_DBINFO
 {
+    /// <summary>
+    /// Version of DAE the database was created with.
+    /// </summary>
     System::Int64   Version;
 
+    /// <summary>
+    /// Used to track incremental database format updates that are backward-
+    /// compatible.
+    /// </summary>
     System::Int64   Update;
 
+    /// <summary>
+    /// Signature of the database. Includes creation time
+    /// </summary>
     MJET_SIGNATURE  Signature;
 
+    /// <summary>
+    /// Database state (e.g. consistent/inconsistent)
+    /// </summary>
     MJET_DBSTATE        State;
 
+    /// <summary>
+    /// Time of last detach/shutdown.
+    /// </summary>
+    /// <remarks>
+    /// 0 if in inconsistent state
+    /// </remarks>
     MJET_LGPOS      ConsistentLgpos;
 
+    /// <summary>
+    /// Lgpos of last detach/shutdown record.
+    /// </summary>
+    /// <remarks>
+    /// 0 if in inconsistent state
+    /// </remarks>
     System::DateTime    ConsistentTime;
 
+    /// <summary>
+    /// Lgpos of last attach record.
+    /// </summary>
     MJET_LGPOS      AttachLgpos;
 
+    /// <summary>
+    /// Last attach time
+    /// </summary>
     System::DateTime    AttachTime;
 
+    /// <summary>
+    /// Lgpos of last detach record.
+    /// </summary>
     MJET_LGPOS      DetachLgpos;
 
+    /// <summary>
+    /// Last detach time
+    /// </summary>
     System::DateTime    DetachTime;
 
+    /// <summary>
+    /// Log signature for log stream that uses this database
+    /// </summary>
     MJET_SIGNATURE  LogSignature;
 
+    /// <summary>
+    /// Information about that last successful full backup.
+    /// </summary>
     MJET_BKINFO     LastFullBackup;
 
+    /// <summary>
+    /// Information about the last successful incremental backup.
+    /// </summary>
+    /// <remarks>
+    /// Reset when LastFullBackup is set.
+    /// </remarks>
     MJET_BKINFO     LastIncrementalBackup;
 
+    /// <summary>
+    /// Current full backup information. If this is set then the database
+    /// is the product of a backup.
+    /// </summary>
     MJET_BKINFO     CurrentFullBackup;
 
+    /// <summary>
+    /// Is the shadow catalog disabled for this database.
+    /// </summary>
+    /// <remarks>
+    /// The shadow catalog is always enabled.
+    /// </remarks>
     System::Boolean ShadowCatalogDisabled;
 
+    /// <summary>
+    /// </summary>
     System::Boolean UpgradeDatabase;
 
+    /// <summary>
+    /// Major version of the OS that the database was last used on.
+    /// </summary>
+    /// <remarks>
+    /// This information is needed to decide if an index needs
+    /// be recreated due to sort table changes.
+    /// </remarks>
     System::Int64   OSMajorVersion;
 
+    /// <summary>
+    /// Minor version of the OS that the database was last used on.
+    /// </summary>
+    /// <remarks>
+    /// This information is needed to decide if an index needs
+    /// be recreated due to sort table changes.
+    /// </remarks>
     System::Int64   OSMinorVersion;
 
+    /// <summary>
+    /// Build number of the OS that the database was last used on.
+    /// </summary>
+    /// <remarks>
+    /// This information is needed to decide if an index needs
+    /// be recreated due to sort table changes.
+    /// </remarks>
     System::Int64   OSBuild;
 
+    /// <summary>
+    /// Service pack number of the OS that the database was last used on.
+    /// </summary>
+    /// <remarks>
+    /// This information is needed to decide if an index needs
+    /// be recreated due to sort table changes.
+    /// </remarks>
     System::Int64   OSServicePackNumber;
 
+    /// <summary>
+    /// Page size of the database.
+    /// </summary>
     System::Int32   DatabasePageSize;
 
+    /// <summary>
+    /// The minimum log generation required for replaying the logs. Typically the checkpoint generation
+    /// </summary>
     System::Int64   MinimumLogGenerationRequired;
 
+    /// <summary>
+    /// The maximum log generation required for replaying the logs. Typically the current log generation
+    /// </summary>
     System::Int64   MaximumLogGenerationRequired;
 
+    /// <summary>
+    /// Creation time of the MaximumLogGenerationRequired logfile.
+    /// </summary>
     System::DateTime MaximumLogGenerationCreationTime;
 
+    /// <summary>
+    /// Number of times repair has been called on this database
+    /// </summary>
     System::Int64   RepairCount;
 
+    /// <summary>
+    /// The date of the last time repair was called on this database.
+    /// </summary>
     System::DateTime    LastRepairTime;
 
+    /// <summary>
+    /// Number of times ErrREPAIRAttachForRepair has been called on this database before the last defrag
+    /// </summary>
     System::Int64   RepairCountOld;
 
+    /// <summary>
+    /// Number of times a one bit error was fixed and resulted in a good page
+    /// </summary>
     System::Int64   SuccessfulECCPageFixes;
 
+    /// <summary>
+    /// The date of the last time that a one bit error was fixed and resulted in a good page
+    /// </summary>
     System::DateTime LastSuccessfulECCPageFix;
 
+    /// <summary>
+    /// Number of times a one bit error was fixed and resulted in a good page before last repair
+    /// </summary>
+    /// <remarks>
+    /// Reset by repair.
+    /// </remarks>
     System::Int64   SuccessfulECCPageFixesOld;
 
+    /// <summary>
+    /// Number of times a one bit error was fixed and resulted in a bad page
+    /// </summary>
     System::Int64   UnsuccessfulECCPageFixes;
 
+    /// <summary>
+    /// The date of the last time that a one bit error was fixed and resulted in a bad page
+    /// </summary>
     System::DateTime LastUnsuccessfulECCPageFix;
 
+    /// <summary>
+    /// Number of times a one bit error was fixed and resulted in a bad page before last repair
+    /// </summary>
+    /// <remarks>
+    /// Reset by repair.
+    /// </remarks>
     System::Int64   UnsuccessfulECCPageFixesOld;
 
+    /// <summary>
+    /// Number of times a non-correctable ECC/checksum error was found
+    /// </summary>
     System::Int64   BadChecksums;
 
+    /// <summary>
+    /// The date of the last time that a non-correctable ECC/checksum error was found
+    /// </summary>
     System::DateTime LastBadChecksum;
 
+    /// <summary>
+    /// Number of times a non-correctable ECC/checksum error was found before last repair
+    /// </summary>
+    /// <remarks>
+    /// Reset by repair.
+    /// </remarks>
     System::Int64   BadChecksumsOld;
 
+    /// <summary>
+    /// The maximum log generation committed to the database. Typically the current log generation
+    /// </summary>
     System::Int64   CommittedGeneration;
 
+    /// <summary>
+    /// Information about that last successful copy backup.
+    /// </summary>
     MJET_BKINFO     LastCopyBackup;
 
+    /// <summary>
+    /// Information about the last successful differential backup.
+    /// </summary>
+    /// <remarks>
+    /// Reset when LastFullBackup is set.
+    /// </remarks>
     MJET_BKINFO     LastDifferentialBackup;
 
+    /// <summary>
+    /// Number of times incremental reseed has been invoked on this database
+    /// </summary>
     System::Int64   IncrementalReseedCount;
 
+    /// <summary>
+    /// The date of the last time incremental reseed was invoked on this database.
+    /// </summary>
     System::DateTime    LastIncrementalReseedTime;
 
+    /// <summary>
+    /// Number of times incremental reseed was invoked on this database before the last defrag
+    /// </summary>
     System::Int64   IncrementalReseedCountOld;
 
+    /// <summary>
+    /// Number of pages patched in the database as a part of incremental reseed
+    /// </summary>
     System::Int64   PagePatchCount;
 
+    /// <summary>
+    /// The date of the last time that a page was patched in the database as a part of incremental reseed
+    /// </summary>
     System::DateTime    LastPagePatchTime;
 
+    /// <summary>
+    /// Number of pages patched in the database as a part of incremental reseed before the last defrag
+    /// </summary>
     System::Int64   PagePatchCountOld;
 
+    /// <summary>
+    /// The date of the last time that the database scan finished during recovery
+    /// </summary>
     System::DateTime    LastChecksumTime;
 
+    /// <summary>
+    /// The date of the start time of the current database scan during recovery
+    /// </summary>
     System::DateTime    ChecksumStartTime;
 
+    /// <summary>
+    /// Number of pages checked in the current database scan during recovery
+    /// </summary>
     System::Int64 PageCheckedCount;
 
+    /// <summary>
+    /// Lgpos of last attach record.
+    /// </summary>
     MJET_LGPOS      LastReAttachLgpos;
 
+    /// <summary>
+    /// Last attach time
+    /// </summary>
     System::DateTime    LastReAttachTime;
 
+    /// <summary>
+    /// Random signature generated at the time of the last DB header flush.
+    /// </summary>
     MJET_SIGNATURE DbHeaderFlushSignature;
 
+    /// <summary>
+    /// Random signature generated at the time of the last FM header flush.
+    /// </summary>
     MJET_SIGNATURE FlushMapHeaderFlushSignature;
 
+    /// <summary>
+    /// The minimum log generation required to bring the database to a clean state.
+    /// </summary>
     System::Int64 MinimumLogGenerationConsistent;
 
     virtual String ^ ToString() override
@@ -1150,14 +1485,36 @@ MSINTERNAL value struct MJET_DBINFO
 
 };
 
+/// <summary>
+/// The MJET_INSTANCE_INFO structure receives information about running database instances when used
+/// with the MJetGetInstanceInfo and MJetOSSnapshotFreeze functions.
+/// </summary>
+/// <remarks>
+/// Each database instance can have several databases attached to it.
+/// For a given MJET_INSTANCE_INFO structure, the array of strings that is returned for the databases
+/// are in the same order. For example, "DatabaseDisplayName[ i ]" and "DatabaseFileName[ i ]" both
+/// refer to the same database.
+/// </remarks>
 MSINTERNAL value struct MJET_INSTANCE_INFO
 {
+    /// <summary>
+    /// The MJET_INSTANCE of the given instance.
+    /// </summary>
     MJET_INSTANCE           Instance;
 
+    /// <summary>
+    /// The name of the database instance. This value can be null if the instance does not have a name.
+    /// </summary>
     System::String^         InstanceName;
 
+    /// <summary>
+    /// An array of strings, each holding the file name of a database that is attached to the database instance.
+    /// </summary>
     array<System::String^>^ DatabaseFileName;
 
+    /// <summary>
+    /// An array of strings, each holding the display name of a database. Currently the strings can be null.
+    /// </summary>
     array<System::String^>^ DatabaseDisplayName;
 
     virtual String ^ ToString() override
@@ -1266,6 +1623,8 @@ MSINTERNAL value struct MJET_DBUTIL
 
     System::Int32           RetryCount;
 
+    //  void *      pfnCallback;
+    //  void *      pvCallback;
 
     virtual String ^ ToString() override
         {
@@ -1370,7 +1729,7 @@ MSINTERNAL enum class MJET_DBINFO_LEVEL : unsigned long
     Connect         = 1,
     Country         = 2,
     LCID            = 3,
-    Langid          = 3,
+    Langid          = 3,    // OBSOLETE: use JET_DbInfoLCID instead
     Cp          = 4,
     Collate         = 5,
     Options         = 6,
@@ -1383,11 +1742,11 @@ MSINTERNAL enum class MJET_DBINFO_LEVEL : unsigned long
     Upgrade         = 13,
     Misc            = 14,
     DBInUse         = 15,
-    HasSLVFile      = 16,
+    HasSLVFile      = 16,   // not_PubEsent
     PageSize        = 17,
-    StreamingFileSpace  = 18,
+    StreamingFileSpace  = 18,   // SLV owned and available space (may be slow because this sequentially scans the SLV space tree)
     FileType        = 19,
-    StreamingFileSize   = 20,
+    StreamingFileSize   = 20,   // SLV owned space only (fast because it does NOT scan the SLV space tree)
 };
 
 MSINTERNAL enum class MJET_SNP
@@ -1729,14 +2088,15 @@ MSINTERNAL value struct MJET_OPENTEMPORARYTABLE
         }
 };
 
+// The following flags are combinable
 #ifdef INTERNALUSE
 MSINTERNAL enum class MJET_HUNG_IO_ACTION
 {
-    Event = JET_bitHungIOEvent,
-    CancelIo = JET_bitHungIOCancel,
-    Debug = JET_bitHungIODebug,
-    Enforce = JET_bitHungIOEnforce,
-    Timeout = JET_bitHungIOTimeout,
+    Event = JET_bitHungIOEvent, // Log event when an IO appears to be hung for over the IO threshold.
+    CancelIo = JET_bitHungIOCancel, // Cancel an IO when an IO appears to be hung for over 2 x the IO threshhold.
+    Debug = JET_bitHungIODebug, // Crash the process when an IO appears to be hung for over 3 x the IO threshhold.
+    Enforce = JET_bitHungIOEnforce, // Crash the process when an IO appears to be hung for over 3 x the IO threshhold.
+    Timeout = JET_bitHungIOTimeout, // Failure item when an IO appears to be hung for over 4 x the IO threshhold (considered timed out).
 };
 
 MSINTERNAL enum class MJET_NEGATIVE_TESTING_BITS
@@ -1745,32 +2105,32 @@ MSINTERNAL enum class MJET_NEGATIVE_TESTING_BITS
     CorruptingLogFiles                  = fCorruptingLogFiles,
     LockingCheckpointFile               = fLockingCheckpointFile,
     CorruptingDbHeaders                 = fCorruptingDbHeaders,
-    CorruptingPagePgnos                 = fCorruptingPagePgnos,
+    CorruptingPagePgnos                 = fCorruptingPagePgnos,             // but checksum is ok.
     LeakStuff                           = fLeakStuff,
     CorruptingWithLostFlush             = fCorruptingWithLostFlush,
     DisableTimeoutDeadlockDetection     = fDisableTimeoutDeadlockDetection,
     CorruptingPages                     = fCorruptingPages,
-    DiskIOError                         = fDiskIOError,
-    InvalidAPIUsage                     = fInvalidAPIUsage,
-    InvalidUsage                        = fInvalidUsage,
-    CorruptingPageLogically             = fCorruptingPageLogically,
+    DiskIOError                         = fDiskIOError, // Injecting ERROR_IO_DEVICE (results in Jet_errDiskIO)
+    InvalidAPIUsage                     = fInvalidAPIUsage, // invalid usage of the JET API
+    InvalidUsage                        = fInvalidUsage, // invalid usage of some sub-component during unit testing
+    CorruptingPageLogically             = fCorruptingPageLogically, // but checksum (and perhaps structure / consistency) is ok.
     OutOfMemory                         = fOutOfMemory,
-    LeakingUnflushedIos                 = fLeakingUnflushedIos,
-    HangingIOs                          = fHangingIOs,
+    LeakingUnflushedIos                 = fLeakingUnflushedIos, // for internal tests that do not flush file buffers before deleting the pfapi.
+    HangingIOs                          = fHangingIOs, // Simulate hung IOs
 };
 
 MSINTERNAL enum class MJET_TRACEOP
 {
     Null = JET_traceopNull,
-    SetGlobal = JET_traceopSetGlobal,
-    SetTag = JET_traceopSetTag,
-    SetAllTags = JET_traceopSetAllTags,
-    SetMessagePrefix = JET_traceopSetMessagePrefix,
-    RegisterTag = JET_traceopRegisterTag,
-    RegisterAllTags = JET_traceopRegisterAllTags,
-    SetEmitCallback = JET_traceopSetEmitCallback,
-    SetThreadidFilter = JET_traceopSetThreadidFilter,
-    SetDbidFilter = JET_traceopSetDbidFilter,
+    SetGlobal = JET_traceopSetGlobal,               //  enable/disable tracing ("ul" param cast to BOOL)
+    SetTag = JET_traceopSetTag,                 //  enable/disable tracing for specified tag ("ul" param cast to BOOL)
+    SetAllTags = JET_traceopSetAllTags,             //  enable/disable tracing for all tags ("ul" param cast to BOOL)
+    SetMessagePrefix = JET_traceopSetMessagePrefix,     //  text which should prefix all emitted messages ("ul" param cast to CHAR*)
+    RegisterTag = JET_traceopRegisterTag,           //  callback to register a trace tag ("ul" param cast to JET_PFNTRACEREGISTER)
+    RegisterAllTags = JET_traceopRegisterAllTags,       //  callback to register all trace tags ("ul" param cast to JET_PFNTRACEREGISTER)
+    SetEmitCallback = JET_traceopSetEmitCallback,       //  override default trace emit function with specified function, or pass NULL to revert to default ("ul" param ast to JET_PFNTRACEEMIT)
+    SetThreadidFilter = JET_traceopSetThreadidFilter,       //  threadid to use to filter traces (0==all threads, -1==no threads)
+    SetDbidFilter = JET_traceopSetDbidFilter,           //  JET_DBID to use to filter traces (0x7fffffff==all db's, JET_dbidNil==no db's)
 };
 
 MSINTERNAL enum class MJET_TRACETAG

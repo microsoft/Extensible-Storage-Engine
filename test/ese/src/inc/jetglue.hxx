@@ -1,6 +1,10 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
-
+/*
+**      JetGlue.hxx
+**
+**      NT wrappers for Jet calls to provide exception support   e
+*/
 
 #pragma once
 #include <iostream>
@@ -9,6 +13,7 @@
 #define STRSAFE_NO_DEPRECATE
 #include <strsafe.h>
 
+// Define logging file (can be overriden at compile time with -DNO_LOGGING flag)
 #ifdef NO_LOGGING
 #define RESULTS_LOG     "nul:"
 #else
@@ -26,12 +31,13 @@ const long MAX_COLUMN_BINARY = MAX_COLUMN_TEXT;
 const long MAX_COLUMN_LONGVALUE_DEFAULT = MAX_COLUMN_TEXT;
 const long MIN_NAME_LENGTH = 4;
 const long MAX_KEY_CHARS = 2000;
-const long MAX_TRANSACTION_LEVEL = 5+1+5;
+//const long MAX_KEY_SECTIONS = JET_ccolKeyMost;
+const long MAX_TRANSACTION_LEVEL = 5+1+5; //Jet Limit + 0th level + extra slack
 
 
 #define JERR_COUNT(rge) (sizeof(rge)/sizeof(JET_ERR))
 
-
+/* Debug Information Levels */
 const long kelAlways=0L;
 const long kelErr=(kelAlways +1);
 const long kelCmds=(kelErr +1);
@@ -44,7 +50,7 @@ const long kelFieldInfo=(kelColInfo + 1);
 const long kelFieldData=(kelFieldInfo + 1);
 const long kelInfo=(kelFieldData+1);
 
-
+/* Some contants used by the random datas generator */
 #define kfNone          0
 #define kfLower     1
 #define kfUpper     2
@@ -58,6 +64,7 @@ const long kelInfo=(kelFieldData+1);
 #define TEST_bitCleanBackup     0x00000001
 #define TEST_bitSkipTruncate        0x00000002
 
+// The exception code that we use. I just made it up. It looks slightly like 'ESE code'.
 enum { excJetGlueExceptionCode = 0x0e5ec0de };
 
 void SetupLogging(BOOL, char*, char* =NULL, long=0, long=80);
@@ -104,7 +111,7 @@ void JetGlueSetAllowConcurrentDDL(BOOL fAllowConcurrentDDL=TRUE);
 void JetGlueSetUpdatesInTransaction(BOOL fValue=TRUE);
 void JetGlueSetRecordsToUpdateBeforeCommit(long lUpdates);
 
-
+/* Data Generation */
 void
 szRandom(
     __out_ecount( len ) char *sz,
@@ -124,7 +131,7 @@ void FillColSz(JET_COLTYP, char *, char *, unsigned long);
 
 
 
-
+/* Magic Functions */
 void JetDateToSz(JET_DATESERIAL dt, char* sz);
 void JObjTyp2Sz(JET_OBJTYP, char*);
 void JColTyp2Sz(JET_COLTYP, char*);
@@ -250,12 +257,18 @@ JGResizeDatabase(
     _In_  const JET_GRBIT   grbit );
 
 
-
+/* Utility funtions */
 inline long lAbs(long n) {return n>0?n:-n;}
 void ParseRange(char *, long*, long*);
 
 
-
+/*
+********************************************************
+**                                                     *
+**  Pattern Generators                                 *
+**                                                     *
+********************************************************
+*/
 class cPatTyphoon
 {
 private:
@@ -269,31 +282,52 @@ public:
 };
 
 
+/*
+** Trying to force serialization of rand()
+** StandardRand() returns a number in the range of
+** 0-(2^31-2). The implementation is straight off
+** the Standard Random number generator proposal
+** in:
+** "Random Number Generators : Good Ones are Hard to Find"
+** Stephen K. Park and Keith W. Miller, CACM v31.No10 pp1195
+**
+** Verified for z(10001)=1043618065 (-1, due to our normalization)
+*/
 
+// These are the original random functions. They were ported to esetest.lib Unfortunately, the names 'Rand' and 'StandardRand'
+// were swapped (BARF)
 
+// I'm going to rely on function overloading to dismbiguate it all.
 
-
+//3 // same as esetest.lib
+// inline long GetStandardSeed(void) {return gStandardRandSeed;}
+//3 // same as esetest.lib
+// inline void SeedStandardRand(long seed)
 
 inline long Rand(long &lCurrentSeed)
 {
+    //3 // in esetest.lib
     return StandardRand( lCurrentSeed );
 }
 
 inline long StandardRand()
 {
+    //3 // in esetest.lib
     return Rand();
 }
 
+// END of what was moved to esetest.lib
 
 inline long StandardRand(long lo, long hi)
 {
     return lo + (lAbs(StandardRand()%(hi-lo+1)));
 }
 
-inline BOOL StandardRandProbability(double prob)
+inline BOOL StandardRandProbability(double prob) // return true with probability prob
 {
     const long probModulo = 0xfffffff;
 
+    // special case 0.
     if ( 0.0 == prob )
     {
         return FALSE;
@@ -307,11 +341,27 @@ private:
     long seed;
 
 public:
+//  cPatRandom(long seed=1) {val = seed;}
     cPatRandom(long seed=1) {this->seed = seed;}
     virtual long operator[](long i) const {return 0;}
     virtual long Next(void) {return StandardRand();}
     virtual void Initialize(void) {SeedStandardRand(seed);}
-    
+    /*
+    {
+        #define A ((unsigned long)0x41A7)
+        #define High(x) (((unsigned long)(x)&0xffff0000)>>16)
+        #define Low(x) ((unsigned long)(x)&0xffff)
+        unsigned long temp;
+
+        temp = A*High(val) + High(A*Low(val));
+        val = ((temp & 0x7fff) << 16) + High(temp<<1) + Low(A*val);
+
+        if (Low(val) == 0x8000)
+            return 0;
+        else
+            return Low(val);
+    }
+    */
 };
 
 
@@ -350,12 +400,19 @@ public:
 
 
 
-
-
+/*
+********************************************************
+**
+**      Utility classes
+**
+********************************************************
+*/
+/* A general-purpose stack which grows dynamically */
 class PtrStack
 {
 private:
     void **rgpv;
+    // These are actually NOT 'count of bytes', but 'count of elements'.
     long cb;
     long cbMax;
     long cbPad;
@@ -391,6 +448,7 @@ public:
         long cbDelete = to-from+1;
         long cbMove=cb-to-1;
 
+        //printf("count:%ld\n", cb);
         if (cbDelete<=0)
         {
             return;
@@ -428,20 +486,28 @@ public:
 };
 
 
-
+/*
+****************************************************
+**
+**      Jet wrapper classes
+**
+****************************************************
+*/
 
 class JetSession;
 class JetTable;
 
 
 
-
+/* Structure to hold Verification column data */
 typedef struct _JetVerificationData
 {
     unsigned long lCheckSum;
+// $cleanup -SOMEONE I see no use for storing a pointer in the Database
+//  class JetSession * pjs;
 } JetVerificationData;
 
-
+/* Structure to hold checksum information */
 class JetCheckSum
 {
 private:
@@ -481,13 +547,14 @@ public:
 };
 typedef JetBookMark *PJBM;
 
-
+/* Struct to store column info */
 #define MAX_COLUMN_NAME JET_cbNameMost
 class JetColumn
 {
 private:
 
 public:
+//    JET_COLUMNID jci;
     JET_COLUMNDEF jcd;
     char szName[MAX_COLUMN_NAME+1];
     JetCheckSum jcs;
@@ -506,7 +573,7 @@ public:
 };
 typedef JetColumn *PJCI;
 
-
+/* Struct to store index info */
 #define MAX_INDEX_NAME JET_cbNameMost
 class JetIndex
 {
@@ -529,7 +596,7 @@ public:
 };
 typedef JetIndex *PJII;
 
-
+/* class to store table info */
 #define MAX_TABLE_NAME  JET_cbNameMost
 class JetTable
 {
@@ -541,9 +608,9 @@ private:
 public:
     JET_TABLEID jti;
     char szName[MAX_TABLE_NAME+1];
-    BOOL fHasPrimaryIndex;
+    BOOL fHasPrimaryIndex;      // Does this table have a primary index?
     BOOL fIsOpen;
-    long cSecondary;
+    long cSecondary;    // Number of Secondary indices
     JetColumn *pjcVerify;
     BOOL fDMLVerify;
     long lRowCount;
@@ -559,6 +626,8 @@ public:
     ~JetTable();
 
 
+    //  Note will take JET_TABLECREATE or JET_TABLECREATE3 and do the right thing as long
+    //  as the cbStruct is set correctly.
     void Create(JetSession *pjs, JET_TABLECREATE3 *pjtc, BOOL fClose, BOOL fVerify=FALSE);
     PJCI Column(long i) {return ((PJCI)(*this->rgColumns)[i]);}
     PJCI Column(char *sz);
@@ -575,6 +644,7 @@ public:
     void Remove(PJII pjii) {this->rgIndices->Remove(pjii);}
     void Add(PJBM pjbm) {this->rgBookmarks->Push(pjbm);}
     void Remove(PJBM pjbm) {this->rgBookmarks->Remove(pjbm);}
+    //void RemoveColumns(long from, long to) {this->rgColumns->Remove(from, to);}
     void RemoveIndices(long from, long to) {this->rgIndices->Remove(from, to);}
     void Close(JetSession*);
     void Open(JetSession*, JET_GRBIT=0);
@@ -616,7 +686,7 @@ public:
 };
 
 
-
+/* A class to hold information about a particular Jet Session */
 class JetSession
 {
 private:
@@ -632,7 +702,7 @@ public:
     int nTransactionLevel;
     long gLVMaxChunks;
     long gLVMaxChunkSize;
-    char *rgLVBuffer;
+    char *rgLVBuffer;  // Buffer for LV chunks
     BOOL fDMLVerify;
 
 private:
@@ -657,7 +727,7 @@ public:
     BOOL IsThereVerifyArchive(void);
     void DeleteVerifyArchive(void);
     void Archive(void);
-    void AllocateLVBuffer(void);
+    void AllocateLVBuffer(void);  // Buffer for LV chunks
 };
 
 class JetTest
@@ -673,15 +743,21 @@ public:
     static BOOL fUpdateRecordsInTransaction;
     static long lRecordsToUpdateBeforeCommit;
     static BOOL fAllowConcurrentDDL;
+// $cleanup SOMEONE  Moving rgLVBuffer into JetSession so that there
+// is only one per thread
+//  static char *rgLVBuffer;
 
 public:
     ~JetTest();
+// $cleanup SOMEONE  Moving rgLVBuffer into JetSession so that there
+// is only one per thread
+//  static void AllocateLVBuffer(void);
 };
 
 
 typedef void (*TyphoonCmdCallback)(JetSession *pjs, void*);
 
-
+/* An abstract class for typhoon cmds. */
 class TyphoonCmd
 {
 protected:
@@ -773,6 +849,7 @@ private:
 
 public:
     static cPatTyphoon *gPatTyphoon;
+    //_declspec (thread) static cPatTyphoon *gPatTyphoon;
 
 public:
     TCPattern(cPatTyphoon* pt) {newPat = pt;};
@@ -787,7 +864,20 @@ public:
     }
 };
 
-
+// Just call JetGlueSetInfoLevel from Typhoon since the behavior
+// is global.  -SOMEONE
+/*
+class TCDebugLevel: public TyphoonCmd
+{
+private:
+    int newLevel;
+public:
+    TCDebugLevel(void) {newLevel = kelErr;}
+    TCDebugLevel(int newl) {newLevel = newl;}
+    virtual void PrintInfo(void) {PrintN(kelCmds, "DebugLevel:%ld\n", JetGlueGetInfoLevel());}
+    virtual void Play(JetSession *pjs) {TyphoonCmd::Play(pjs);JetGlueSetInfoLevel(newLevel);}
+};
+*/
 
 class TCThreadPriority: public TyphoonCmd
 {
@@ -872,6 +962,7 @@ public:
         long lIterations = this->lIterations;
 
         TyphoonCmd::Play(pjs);
+ //     JGSetSystemParameter(pjs->jsi, JET_paramOnLineCompact, JET_bitCompactOn, NULL);
         do
         {
             PrintN(kelProgress, "idle:%ld\n", lIterations);
@@ -918,7 +1009,7 @@ public:
     virtual void PrintInfo(void) {PrintN(kelCmds, "JetBeginTransaction ");TCTransaction::PrintInfo();};
     virtual void Play(JetSession * pjs)
     {
-        level = pjs->nTransactionLevel+1;
+        level = pjs->nTransactionLevel+1; // Print the new level
         TCTransaction::Play(pjs);
         pjs->BeginTransaction();
     }
@@ -954,7 +1045,7 @@ class TCHardExit : public TyphoonCmd
 typedef TyphoonCmd super;
 
 public:
-    static BOOL fHardExit;
+    static BOOL fHardExit; // We use this flag to indicate to the try-exception block that the exception is expected
 public:
     virtual void PrintInfo(void) {PrintN(kelCmds, "Hard Exit. Terminating shamelessly\n");};
     virtual void Play(JetSession *pjs);
@@ -962,7 +1053,7 @@ public:
 
 
 
-class TCLongValueParam
+class TCLongValueParam //: public TyphoonCmd
 {
 public:
     static long gLVMaxChunks;
@@ -970,10 +1061,36 @@ public:
 
     static void SetLVParameters(long mc, long mcs)
     {
+        // Backward compatibility. These assignments have a global effect for subsequent long value assignments
         gLVMaxChunks = mc;
         gLVMaxChunkSize = mcs;
     }
+// class will only be used for static members -SOMEONE
+/*
+protected:
+    unsigned long ulMaxChunks, ulMaxChunkSize;
 
+public:
+    TCLongValueParam(long mc, long mcs)
+    {
+        ulMaxChunks = mc;
+        ulMaxChunkSize = mcs;
+        // Backward compatibility. These assignments have a global effect for subsequent long value assignments
+        gLVMaxChunks = mc;
+        gLVMaxChunkSize = mcs;
+    }
+    virtual void PrintInfo() {PrintN(kelCmds, "Long Value parameters, MaxChunks:%ld, MaxChunkSize:%ld\n", gLVMaxChunks, gLVMaxChunks);}
+    virtual void Play(JetSession *pjs)
+    {
+        TyphoonCmd::Play(pjs);
+        pjs->gLVMaxChunks = ulMaxChunks;
+        pjs->gLVMaxChunkSize = ulMaxChunkSize;
+
+        // Backward compatibility. These assignments have a global effect for subsequent long value assignments
+        gLVMaxChunks = mc;
+        gLVMaxChunkSize = mcs;
+  }
+*/
 };
 
 
@@ -1428,7 +1545,18 @@ public:
 
 
 
+/*
+class TCCreateColumnsTo: public TCRangeTables
+{
+private:
+    long cb;
 
+public:
+    TCCreateColumnsTo(long s, long e, long cb):TCRangeTables(s,e){this->cb = cb;}
+    virtual void PrintInfo() {PrintN(kelCmds, "Create upto %ld Columns for", cb); TCRangeTables::PrintInfo();}
+    virtual void Play(JetSession *pjs, PJTI pjti);
+};
+*/
 
 class TCRangeColumns: public TCRangeTables
 {
@@ -1457,6 +1585,7 @@ public:
     TCDeleteColumns(long ts, long te, long s, long e):TCRangeColumns(ts, te, s, e){}
     virtual void PrintInfo() {PrintN(kelCmds, "Delete"); TCRangeColumns::PrintInfo();}
     virtual void Play(JetSession *pjs, PJTI pjti);
+//    virtual void Play(JetSession *pjs, PJTI pjti, PJCI pjci);
 };
 
 

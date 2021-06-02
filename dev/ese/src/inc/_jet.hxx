@@ -4,7 +4,7 @@
 #ifndef _JET_H
 #define _JET_H
 
-#define CATCH_EXCEPTIONS
+#define CATCH_EXCEPTIONS    // catch exceptions in JET and handle like asserts
 
 #define CODECONST(type) type const
 
@@ -12,15 +12,15 @@
 
 typedef ULONG OBJID;
 
-    
+    /* cbFilenameMost includes the trailing null terminator */
 
-const INT   cbFilenameMost          = 260;
+const INT   cbFilenameMost          = 260;  // Windows NT limit
 
-const INT   cbUnpathedFilenameMax   = 12;
+const INT   cbUnpathedFilenameMax   = 12;   // max length of an 8.3-format filename, without a path
 
-    
+    /*** Global system initialization variables ***/
 
-extern BOOL g_fRepair;      
+extern BOOL g_fRepair;      /* if this is for repair or not */
 
 
 INLINE VOID ProbeClientBuffer( __out_bcount(cb) VOID * pv, const ULONG cb, const BOOL fNullOkay = fFalse )
@@ -34,9 +34,11 @@ INLINE VOID ProbeClientBuffer( __out_bcount(cb) VOID * pv, const ULONG cb, const
             BYTE bStart = pb[ 0 ];
             BYTE bEnd = pb[ cb - 1 ];
 
+            // This will crash if the buffer is invalid.
             pb[ 0 ] = 42;
             pb[ cb - 1 ] = 43;
 
+            // Restore the previous values.
             pb[ 0 ] = bStart;
             pb[ cb - 1 ] = bEnd;
         }
@@ -44,18 +46,22 @@ INLINE VOID ProbeClientBuffer( __out_bcount(cb) VOID * pv, const ULONG cb, const
 #endif
 }
 
-    
+    /* util.c */
 
 ERR ErrUTILICheckName(
     __out_bcount(JET_cbNameMost+1) PSTR const       szNewName,
     const CHAR * const  szName,
     const BOOL          fTruncate );
 INLINE ERR ErrUTILCheckName(
+    // UNDONE_BANAPI: shoudl be, but must remove callers of ErrUTILICheckName ...
+    //__out_ecount(cbNameMost) PSTR const       szNewName,
     __out_ecount(JET_cbNameMost+1) PSTR const       szNewName,
     const CHAR * const  szName,
     const ULONG         cbNameMost,
     const BOOL          fTruncate = fFalse )
 {
+    //  ErrUTILICheckName() currently assumes a buffer of JET_cbNameMost+1
+    //
     Assert( JET_cbNameMost+1 == cbNameMost );
     return ErrUTILICheckName( szNewName, szName, fTruncate );
 }
@@ -71,6 +77,8 @@ INLINE ERR ErrUTILCheckPathName(
     const ULONG         cbNameMost,
     const BOOL          fTruncate = fFalse )
 {
+    //  ErrUTILICheckPathName() currently assumes a buffer of IFileSystemAPI::cchPathMax
+    //
     Assert( IFileSystemAPI::cchPathMax * sizeof(WCHAR) == cbNameMost );
     return ErrUTILICheckPathName( wszNewName, wszName, fTruncate );
 }
@@ -138,6 +146,7 @@ ErrSet( const WCHAR * sz )
 
         err = ErrOSSTRUnicodeToAscii( sz, NULL, 0, &cch, OSSTR_NOT_LOSSY, osstrConversion );
 
+        // we don't expect other errors but still be check
         Assert( JET_errBufferTooSmall == err );
 
         if ( JET_errBufferTooSmall == err )
@@ -208,14 +217,22 @@ ErrGet( WCHAR * const sz, const size_t cbMax )
     return ErrOSSTRAsciiToUnicode( m_sz, sz, cbMax / sizeof( WCHAR ), &cwchActual, osstrConversion );
 }
 
+// generic CAutoWSZ with no pre-allocated size
+//
 typedef CAutoISZ< 0 >   CAutoSZ;
 
+// this should be JET_cbNameMost not 64
+//
+//typedef CAutoISZ< 64 >    CAutoSZDDL;
 
 class CAutoSZDDL: public CAutoISZ< 64, OSSTR_FIXED_CONVERSION >
 {
 
     public:
     
+        // we need to overwrite to return a specific error
+        // on invalid characters in the name
+        //
         ERR ErrSet( const WCHAR * sz )
         {
             ERR err = ((CAutoISZ<64, OSSTR_FIXED_CONVERSION>*)this)->ErrSet( sz );
@@ -288,8 +305,14 @@ ErrSet( const CHAR * sz )
     {
         size_t      cch;
 
+        // UNICODE_UNDONE_DEFERRED: shell we try to actually convert first
+        // in the preallocated buffer? I think so ...
+        // Do we get the actual needed count IF we do have a buffer
+        // passed in which is not big enough?
+        //
         err = ErrOSSTRAsciiToUnicode( sz, NULL, 0, &cch, osstrConversion );
 
+        // we don't expect other errors but still be check
         Assert( JET_errBufferTooSmall == err );
 
         if ( JET_errBufferTooSmall == err )
@@ -402,12 +425,23 @@ ErrGet( CHAR * const sz, const size_t cbMax )
 }
 
 
+// generic CAutoWSZ with no pre-allocated size
+//
 typedef CAutoIWSZ< 0 >  CAutoWSZ;
 
+// CAutoWSZ with no pre-allocated size for ASCII usage
+//
 typedef CAutoIWSZ< 0, OSSTR_FIXED_CONVERSION >  CAutoWSZFixedConversion;
 
+// this should be JET_cbNameMost not 64 (or JET_cbNameMost / sizeof( WCHAR )
+// but JET_cbNameMost depends on the JET_UNICODE definition ...
+//
 typedef CAutoIWSZ< 64, OSSTR_FIXED_CONVERSION > CAutoWSZDDL;
 
+// not always best to use as it will put on the stack 180+ bytes
+// but it should be enough for most users having path shorted then this
+// For the others, it will go to the allocation
+//
 typedef CAutoIWSZ< 90 > CAutoWSZPATH;
 
 
@@ -444,7 +478,7 @@ typedef CAutoIWSZ< 90 > CAutoWSZPATH;
     return err;                                                                     \
 }
 
-#else
+#else  //  !MINIMAL_FUNCTIONALITY
 
 #define JET_TRY_( api, func, fDisableLockCheck )                                    \
 {                                                                                   \
@@ -475,8 +509,8 @@ typedef CAutoIWSZ< 90 > CAutoWSZPATH;
     return err;                                                                     \
 }
 
-#endif
-#else
+#endif  //  MINIMAL_FUNCTIONALITY
+#else  //  !CATCH_EXCEPTIONS
 
 #define JET_TRY_( api, func, fDisableLockCheck )                                    \
 {                                                                                   \
@@ -494,7 +528,7 @@ typedef CAutoIWSZ< 90 > CAutoWSZPATH;
     return err;                                                                     \
 }
 
-#endif
+#endif  //  CATCH_EXCEPTIONS
 
 #define JET_TRY( api, func )            JET_TRY_( api, func, fFalse )
 
@@ -639,7 +673,7 @@ INLINE BOOL FAlignedForThisPlatform( const VOID * const pv )
 #define opResizeDatabase                    122
 #define opSetSessionParameter               123
 #define opGetSessionParameter               124
-#define opPrereadTable                      125
+#define opPrereadTable                      125 // [Removed]
 #define opCommitTransaction2                126
 #define opPrereadIndexRanges                127
 #define opSetCursorFilter                   128
@@ -678,11 +712,11 @@ INLINE BOOL FAlignedForThisPlatform( const VOID * const pv )
 #define opMax                               161
 
 
-
+/* Typedefs for dispatched functions that use tableid(pfucb). */
 
 #define VTAPI
 
-typedef ULONG_PTR JET_VTID;        
+typedef ULONG_PTR JET_VTID;        /* Received from dispatcher */
 
 
 typedef ERR VTAPI VTFNAddColumn(JET_SESID sesid, JET_VTID vtid,
@@ -986,10 +1020,10 @@ typedef ERR VTAPI VTFNStreamRecords(
     _In_ const JET_GRBIT                                            grbit );
 
 
-    
-    
-    
-    
+    /* The following structure is that used to allow dispatching to */
+    /* a VT provider.  Each VT provider must create an instance of */
+    /* this structure and give the pointer to this instance when */
+    /* allocating a table id. */
 
 typedef struct VTDBGDEF
 {
@@ -1000,7 +1034,7 @@ typedef struct VTDBGDEF
     ULONG           dwRFSMask[4];
 } VTDBGDEF;
 
-    
+    /* Please add to the end of the table */
 
 typedef struct tagVTFNDEF {
     USHORT                  cbStruct;
@@ -1063,9 +1097,9 @@ typedef struct tagVTFNDEF {
 } VTFNDEF;
 
 
-
-
-
+/* The following entry points are to be used by VT providers */
+/* in their VTFNDEF structures for any function that is not */
+/* provided.  This functions returns JET_errIllegalOperation */
 
 
 extern VTFNAddColumn                    ErrIllegalAddColumn;
@@ -1124,10 +1158,12 @@ extern VTFNPrereadColumnsByReference    ErrIllegalPrereadColumnsByReference;
 extern VTFNStreamRecords                ErrIllegalStreamRecords;
 
 
-
+/*  The following APIs are VT APIs are are dispatched using the TABLEID parameter
+ *  and there is an entry in VTFNDEF.
+ */
 
 #ifdef DEBUG
-BOOL FFUCBValidTableid( const JET_SESID sesid, const JET_TABLEID tableid );
+BOOL FFUCBValidTableid( const JET_SESID sesid, const JET_TABLEID tableid ); // Exported from FUCB.CXX
 #endif
 
 INLINE VOID ValidateTableid( JET_SESID sesid, JET_TABLEID tableid )
@@ -1191,6 +1227,8 @@ __forceinline ERR VTAPI ErrDispCopyBookmarks(
     ValidateTableid( sesid, tableidSrc );
     ValidateTableid( sesid, tableidDest );
 
+//  const VTFNDEF   *pvtfndef   = *( (VTFNDEF **)tableidSrc );
+//  const ERR       err         = pvtfndef->pfnCopyBookmarks( sesid, tableidSrc, tableidDest, columnidDest, crecMax );
     const ERR       err     = JET_errFeatureNotAvailable;
 
     return err;
@@ -1615,13 +1653,22 @@ __forceinline ERR VTAPI ErrDispRetrieveColumn(
     const VTFNDEF*  pvtfndef    = *( (VTFNDEF **)tableid );
     const ERR       err         = pvtfndef->pfnRetrieveColumn( sesid, tableid, columnid, pvData, cbData, &cbActualTmp, grbit, pretinfo );
 
+    // set the output value
     if ( pcbActual )
     {
         *pcbActual = cbActualTmp;
     }
 
+    // Historical Note:
 
+    // prior to E14SP1/Win8, we would (in debug) always smash the entire buffer to help validate that the buffer promised
+    // was entirely there. Some clients using only retail builds have adapted to a programming model where they 
+    // initialize the contents of pvData with a default value; and then they ignore the errors: JET_wrnColumnNull
+    // and JET_errColumnNotFound. Now smash none of the buffer for those two special cases, all of the buffer for
+    // other errors, and just the remainder of the buffer for positive cases.
 
+    // In E15, we changed from FillClientBuffer (modifying the buffer in debug builds only) to
+    // ProbeClientBuffer (touching the buffer and restoring the previous contents).
 
     
     return err;
@@ -1757,17 +1804,22 @@ __forceinline ERR VTAPI ErrDispRetrieveColumns(
 {
     ValidateTableid( sesid, tableid );
 
+    // In the error case, not all err/cbActual fields are initialized by pfnRetrieveColumns. 
+    // So we pre-initialize all the errors to failures, and then only use cbData and pvData in the
+    // error case.
     for ( ULONG iretcol = 0; iretcol < cretcols; iretcol++ )
     {
 #ifdef DEBUG
         pretcols[ iretcol ].err = JET_errInternalError;
-#endif
+#endif // DEBUG
         ProbeClientBuffer( pretcols[ iretcol ].pvData, pretcols[ iretcol ].cbData, fTrue );
     }
 
     const VTFNDEF   *pvtfndef   = *( (VTFNDEF **)tableid );
     const ERR       err         = pvtfndef->pfnRetrieveColumns( sesid, tableid, pretcols, cretcols );
 
+    // Historical note:
+    // AD was broken by FillClientBuffer() since they were retrieving non-null terminated string from the database in a null buffer
 
     return err;
 }
@@ -1972,10 +2024,12 @@ __forceinline ERR VTAPI ErrDispRetrieveTaggedColumnList(
 }
 
 
+//  ================================================================
 __forceinline ERR VTAPI ErrDispSetTableSequential(
     const JET_SESID     sesid,
     const JET_TABLEID   tableid,
     const JET_GRBIT     grbit )
+//  ================================================================
 {
     Assert( FFUCBValidTableid( sesid, tableid ) );
 
@@ -1986,10 +2040,12 @@ __forceinline ERR VTAPI ErrDispSetTableSequential(
 }
 
 
+//  ================================================================
 __forceinline ERR VTAPI ErrDispResetTableSequential(
     const JET_SESID     sesid,
     const JET_TABLEID   tableid,
     const JET_GRBIT     grbit )
+//  ================================================================
 {
     Assert( FFUCBValidTableid( sesid, tableid ) );
 
@@ -2072,13 +2128,40 @@ __forceinline ERR VTAPI ErrDispStreamRecords(
     return err;
 }
 
+/*
 
+System can be in one of the 3 states:
+
+1. multi-instance enabled
+    Use:  JetEnableMultiInstance to set global-default parameters
+    Use:  JetCreateInstance to allocate an instance
+    Use:  JetSetSystemParameter with not null instance to set param per instance
+    Use:  JetInit with not null pinstance to initialize it (or allocate and inititalize if *pinstance == 0)
+    Error:  JetSetSystemParameter with null instance (try to set global param
+    Error:  JetInit with null pinstance (default instance can be find only in one-instance mode)
+
+2. one-instance enabled
+    Use:  JetSetSystemParameter with null instance to set param per instance
+    Use:  JetSetSystemParameter with not null instance to set param per instance
+    Use:  JetInit with to initialize the instance (the second call before JetTerm will fail)
+    Error:  JetEnableMultiInstance
+    Error:  JetCreateInstance
+
+3. mode not set
+    no instance is started (initial state and state after last running instance calls JetTerm (g_cpinstInit == 0)
+
+If the mode is not set, the first function call specific for one of the modes will set it
+*/
 typedef enum { runInstModeNoSet, runInstModeOneInst, runInstModeMultiInst} RUNINSTMODE;
 extern RUNINSTMODE g_runInstMode;
 
 
+// ------------------------------------------------------------------------------------------------
+//
+//  err.lib functions that ESE needs
+//
 
 JET_ERRCAT ErrcatERRLeastSpecific( const JET_ERR err );
 
-#endif 
+#endif /* !_JET_H */
 

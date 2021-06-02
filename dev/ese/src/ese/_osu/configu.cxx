@@ -2,10 +2,12 @@
 // Licensed under the MIT License.
 
 #include "osustd.hxx"
-#include "esestd.hxx"
+#include "esestd.hxx"   // for SzParam()
 
 
+//  Persistent Configuration
 
+//  system parameters
 
 LOCAL const DWORD rgparam[] =
 {
@@ -120,11 +122,14 @@ LOCAL const WCHAR* const rglpwszParam[] =
 };
 
 
+//  loads all system parameter overrides
 
 LOCAL const WCHAR wszParamRoot[] = L"System Parameter Overrides";
 
 LOCAL void OSUConfigLoadParameterOverrides()
 {
+    //  read all system parameters from the registry or create null entries if
+    //  they do not exist
 
     for ( INT iparam = 0; rglpwszParam[iparam]; iparam++ )
     {
@@ -155,19 +160,24 @@ LOCAL void OSUConfigLoadParameterOverrides()
         }
         else
         {
+            //  UNDONE:  gripe in the event log that the value was too big
         }
     }
 }
 
 
+//  terminate config subsystem
 
 void OSUConfigTerm()
 {
+    //  nop
 }
 
+//  init config subsystem
 
 ERR ErrOSUConfigInit()
 {
+    //  load configuration
 
     OSUConfigLoadParameterOverrides();
 

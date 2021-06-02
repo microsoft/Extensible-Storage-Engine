@@ -4,15 +4,15 @@
 #ifndef _XPRS_H_
 #define _XPRS_H_
 
-#pragma warning (disable: 4820)
+#pragma warning (disable: 4820) // padding
 
 #pragma warning (push)
-#pragma warning (disable: 4619)
-#pragma warning (disable: 4255)
+#pragma warning (disable: 4619) // #pragma warning : there is no warning number '4259')
+#pragma warning (disable: 4255) // no function prototype given: converting '()' to '(void)'
 
 #ifndef DEBUG
 #define DEBUG 0
-#endif 
+#endif /* DEBUG */
 
 #include <stdlib.h>
 
@@ -34,14 +34,14 @@
 
 #ifdef _NTSYSTEM_
 #pragma code_seg ("PAGELK")
-#endif 
+#endif /* _NTSYSTEM_ */
 
-#endif 
-
-
+#endif /* _MSC_VER */
 
 
 
+/* ------------------------ Configuration ----------------------------- */
+/*                          -------------                               */
 
 #ifndef CODING_ALG
 #define CODING_ALG      1
@@ -95,7 +95,7 @@
 #endif
 #endif
 
-#define MIN_MATCH       3       
+#define MIN_MATCH       3       /* min acceptable match length  */
 
 #if CODING == CODING_HUFF_LEN
 #define DECODE_BITS     8
@@ -104,43 +104,43 @@
 #endif
 
 
-#define MEM_ALIGN   256         
+#define MEM_ALIGN   256         /* default memory alignment */
 #define ALIGNED_PTR(b) \
   ((void *) (((char *) (b)) + MEM_ALIGN - (((size_t) (b)) & (MEM_ALIGN-1))))
 
 
-
-
+/* ---------------------- Useful types ------------------------ */
+/*                        ------------                          */
 
 #if defined (_M_IX86) && !defined (i386)
-#define i386 1                  
+#define i386 1                  /* ifdef i386 asm code will be used for some encodings */
 #endif
 
 #if defined (i386) && defined (NOASM)
 #undef i386
 #endif
 
-#define uchar unsigned char     
+#define uchar unsigned char     /* useful types */
 #define schar signed char
 
 #ifdef _M_IX86
-#define __unaligned             
+#define __unaligned             /* x86 does not have __unaligned keyword    */
 #endif
 
-#define int4  int               
-#define int2  short             
-#define xint  int               
-#define int32 int               
-#define int16 short             
+#define int4  int               /* any long enough integral type            */
+#define int2  short             /* assert (2*sizeof(int2) == sizeof (int4)) */
+#define xint  int               /* any int type >= 32 bits && >= sizeof (bitmask4) */
+#define int32 int               /* 32 bit type */
+#define int16 short             /* 16 bit type */
 
 #define tag_t    int32
 
 #ifdef i386
-#define bitmask4 int32  
+#define bitmask4 int32  /* must be 32 bit for i386 */
 #define bitmask2 int16
 #else
-#define bitmask4 int4   
-#define bitmask2 int2   
+#define bitmask4 int4   /* not important otherwise; shall not exceed xint */
+#define bitmask2 int2   /* well, well... it's important for x86 compatibility */
 #endif
 
 
@@ -159,11 +159,11 @@
 #else
 #define INLINE __inline
 #endif
-#pragma warning(disable:4127)   
-#pragma warning(disable:4711)   
-#pragma warning(disable:4710)   
-#pragma warning(disable:4100)   
-#pragma warning(disable:4068)   
+#pragma warning(disable:4127)   /* conditional expression is constant */
+#pragma warning(disable:4711)   /* function XXX selected for automatic inline expansion */
+#pragma warning(disable:4710)   /* function XXX not expanded */
+#pragma warning(disable:4100)   /* unreferenced formal paramter */
+#pragma warning(disable:4068)   /* bogus "unknown pragma" */
 #endif
 
 #ifndef DEBUG
@@ -209,11 +209,11 @@ extern long xxx[];
 #endif
 
 #ifdef _MSC_VER
-#pragma warning (disable: 4731) 
+#pragma warning (disable: 4731) /* frame pointer register 'ebp' modified by inline assembly code */
 #endif
 
 #if CODING_ALG != 1 && CODING_ALG != 6
 #error CODING_ALGs different from 1 and 6 are not supported anymore
 #endif
 
-#endif 
+#endif /* _XPRS_H_ */

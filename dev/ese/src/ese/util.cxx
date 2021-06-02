@@ -53,6 +53,9 @@ VOID UtilLoadDbinfomiscFromPdbfilehdr(
     pdbinfomisc->ulUpdate           = pdbfilehdr->le_ulDaeUpdateMajor;
     pdbinfomisc->cbPageSize         = pdbfilehdr->le_cbPageSize == 0 ? (ULONG) g_cbPageDefault : (ULONG) pdbfilehdr->le_cbPageSize;
 
+    // if the call is still with the older structure
+    // return right here
+    //
     if ( cbdbinfomisc < sizeof( JET_DBINFOMISC2 ) )
     {
         Assert( sizeof( JET_DBINFOMISC ) == cbdbinfomisc );
@@ -123,7 +126,7 @@ VOID UtilLoadDbinfomiscFromPdbfilehdr(
     pdbinfomisc->logtimeChecksumStart = *( JET_LOGTIME* )&pdbfilehdr->logtimeDbscanStart;
     if (pdbfilehdr->le_pgnoDbscanHighestContinuous)
     {
-        pdbinfomisc->cpgDatabaseChecked = pdbfilehdr->le_pgnoDbscanHighestContinuous - 1;
+        pdbinfomisc->cpgDatabaseChecked = pdbfilehdr->le_pgnoDbscanHighestContinuous - 1; // pgnoDbscanHighestContinuous is the next page to be checked
     }
     else
     {
@@ -140,6 +143,8 @@ VOID UtilLoadDbinfomiscFromPdbfilehdr(
     pdbinfomisc->logtimeLastReAttach    = *(JET_LOGTIME *) &(pdbfilehdr->logtimeLastReAttach);
     pdbinfomisc->lgposLastReAttach      = *(JET_LGPOS *) &(pdbfilehdr->le_lgposLastReAttach);
 
+    // Do we need JET_DBINFOMISC8?
+    // pdbinfomisc->logtimeGenMaxRequired  = *(JET_LOGTIME *) &(pdbfilehdr->logtimeGenMaxRequired);
 }
 
 VOID UtilLoadRBSinfomiscFromRBSfilehdr(
@@ -158,30 +163,32 @@ VOID UtilLoadRBSinfomiscFromRBSfilehdr(
 }
 
 LOCAL CODECONST(unsigned char) rgbValidName[16] = {
-    0xff,                  
-    0xff,                  
-    0xff,                  
-    0xff,                  
-    0x02,                  
-    0x40,                  
-    0x00,                  
-    0x00,                  
-    0x00,                  
-    0x00,                  
-    0x00,                  
-    0x28,                  
-    0x00,                  
-    0x00,                  
-    0x00,                  
-    0x00,                  
+    0xff,                  /* 00-07 No control characters */
+    0xff,                  /* 08-0F No control characters */
+    0xff,                  /* 10-17 No control characters */
+    0xff,                  /* 18-1F No control characters */
+    0x02,                  /* 20-27 No ! */
+    0x40,                  /* 28-2F No . */
+    0x00,                  /* 30-37 */
+    0x00,                  /* 38-3F */
+    0x00,                  /* 40-47 */
+    0x00,                  /* 48-4F */
+    0x00,                  /* 50-57 */
+    0x28,                  /* 58-5F No [ or ] */
+    0x00,                  /* 60-67 */
+    0x00,                  /* 68-6F */
+    0x00,                  /* 70-77 */
+    0x00,                  /* 78-7F */
 };
 
 
 #ifdef DEBUG
 static CHAR g_szLastInvalidName[JET_cbNameMost+1] = "";
 static ULONG g_ulCheckErrorLine = 0;
-#endif
+#endif // DEBUG
 
+//  WARNING: Assumes an output buffer of JET_cbNameMost+1
+//
 ERR ErrUTILICheckName(
     __out_bcount(JET_cbNameMost+1) CHAR * const     szNewName,
     const CHAR * const  szName,
@@ -192,8 +199,9 @@ ERR ErrUTILICheckName(
     SIZE_T              cch;
     BYTE                ch;
 
-    C_ASSERT( JET_cbNameMost == 64 );
+    C_ASSERT( JET_cbNameMost == 64 ); // ensure we're not getting the Unicode version.
 
+    //  a name must exist and may not begin with a space
     if ( NULL == szName || ' ' == *szName )
     {
         OnDebug( g_ulCheckErrorLine = __LINE__ );
@@ -204,6 +212,7 @@ ERR ErrUTILICheckName(
         cch < JET_cbNameMost && ( ( ch = (BYTE)szName[cch] ) != '\0' );
         cch++ )
     {
+        //  extended characters always valid
         if ( ch < 0x80 )
         {
             if ( ( rgbValidName[ch >> 3] >> (ch & 0x7) ) & 1 )
@@ -215,10 +224,15 @@ ERR ErrUTILICheckName(
 
         szNewName[cch] = (CHAR)ch;
 
+        //  last significant character
         if ( ' ' != ch )
             pchLast = szNewName + cch + 1;
     }
 
+    //  check name too long
+    //  UNDONE: insignificant trailing spaces that cause
+    //  the length of the name to exceed cbNameMost will
+    //  currently trigger an error
     if ( JET_cbNameMost == cch )
     {
         if ( !fTruncate && '\0' != szName[JET_cbNameMost] )
@@ -228,6 +242,7 @@ ERR ErrUTILICheckName(
         }
     }
 
+    //  length of significant portion
     Assert( pchLast >= szNewName );
     Assert( pchLast <= szNewName + JET_cbNameMost );
     cch = pchLast - szNewName;
@@ -238,6 +253,7 @@ ERR ErrUTILICheckName(
         Error( ErrERRCheck( JET_errInvalidName ) );
     }
 
+    //  we assume an output buffer of JET_cbNameMost+1
     Assert( cch <= JET_cbNameMost );
     szNewName[cch] = '\0';
 
@@ -248,12 +264,14 @@ HandleError:
     {
         memcpy( g_szLastInvalidName, szName, sizeof(g_szLastInvalidName) );
     }
-#endif
+#endif // DEBUG
 
     return err;
 }
 
 
+//  WARNING: Assumes an output buffer of IFileSystemAPI::cchPathMax
+//
 ERR ErrUTILICheckPathName(
     __out_bcount(OSFSAPI_MAX_PATH * sizeof(WCHAR)) PWSTR const      wszNewName,
     const WCHAR * const wszName,
@@ -261,6 +279,8 @@ ERR ErrUTILICheckPathName(
 {
     SIZE_T              ichT;
 
+    //  path must exist and may not begin with a space
+    //
     if ( NULL == wszName || ' ' == *wszName )
     {
         return ErrERRCheck( JET_errInvalidPath );
@@ -273,11 +293,19 @@ ERR ErrUTILICheckPathName(
             wszNewName[ichT] = wszName[ichT];
     }
 
+    //  check for empty path
+    //
     if ( 0 == ichT )
     {
         return ErrERRCheck( JET_errInvalidPath );
     }
 
+    //  check name too long
+    //
+    //  FUTURE: insignificant trailing spaces
+    //  that cause the length of the name to exceed IFileSystemAPI::cchPathMax
+    //  will currently trigger an error.
+    //
     if ( IFileSystemAPI::cchPathMax == ichT )
     {
         if ( !fTruncate )
@@ -290,6 +318,8 @@ ERR ErrUTILICheckPathName(
         }
     }
 
+    //  we assume an output buffer of IFileSystemAPI::cchPathMax
+    //
     Assert( ichT < IFileSystemAPI::cchPathMax );
     wszNewName[ichT] = L'\0';
 
@@ -311,7 +341,7 @@ void __cdecl DebugPrintf(const char  *szFmt, ...)
 {
     va_list arg_ptr;
 
-    if (pfn.pfnvprintf == NULL)        
+    if (pfn.pfnvprintf == NULL)        /* No op if no callback registered */
         return;
 
     va_start(arg_ptr, szFmt);
@@ -320,7 +350,10 @@ void __cdecl DebugPrintf(const char  *szFmt, ...)
 }
 
 
-    
+    /*  The following pragma affects the code generated by the C
+    /*  compiler for all FAR functions.  Do NOT place any non-API
+    /*  functions beyond this point in this file.
+    /**/
 
 void JET_API JetDBGSetPrintFn(JET_SESID sesid, PFNvprintf pfnParm)
 {
@@ -329,4 +362,4 @@ void JET_API JetDBGSetPrintFn(JET_SESID sesid, PFNvprintf pfnParm)
     pfn.pfnvprintf = pfnParm;
 }
 
-#endif  
+#endif  /* DEBUG */

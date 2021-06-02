@@ -4,9 +4,19 @@
 #pragma once
 
 
+// ---------------------------------------------------------------------------------
+//
+//          BSTF Compile Options
+//
+
+// BSTF_AVOID_WIN_DEPENDENCE - Replaces nice windows functionality with rudimentary C++ efforts
+// to perform the same operations.
 
 
-
+// ---------------------------------------------------------------------------------
+//
+//          Required CRT support headers
+//
 
 #ifndef BSTF_AVOID_WIN_DEPENDENCE
 #include <windows.h>
@@ -14,10 +24,19 @@
 #include <wchar.h>
 
 
+// ---------------------------------------------------------------------------------
+//
+//          BSTF Compile Time Dependencies
+//
+//  Hint: There should be only one.
 
 #include "cc.hxx"
 
 
+// ---------------------------------------------------------------------------------
+//
+//          BSTF Verbosity Level / Print / Trace Support
+//
 void BstfSetVerbosity( QWORD bvl );
 
 #define bvlPrintTests       (50)
@@ -25,10 +44,17 @@ void BstfSetVerbosity( QWORD bvl );
 extern QWORD    g_bvl;
 
 
+// ---------------------------------------------------------------------------------
+//
+//          Test Flow Support
+//
 
 void TestReportErr( long err, unsigned long ulLine, const char *szFileName );
 void TestReportErr( unsigned long ulLine, const char *szFileName );
 
+//  This is BSTF unit test Call/CallJ macros, because sometimes we want
+//  to test the Call()/CallJ()/etc macros as they're part of the OS Layer.
+//
 
 #define TestCallJ( func, label )                            \
     {                                                       \
@@ -63,6 +89,7 @@ void TestReportErr( unsigned long ulLine, const char *szFileName );
 #define TestCall( func )                        TestCallJ( func, HandleError )
 #define TestCallS( func )                       TestCallSJ( func, HandleError )
 
+//  Test stats
 
 extern QWORD    g_cTests;
 extern QWORD    g_cTestsSucceeded;
@@ -100,6 +127,7 @@ inline void TestReportSuccess_( const char * const szTestType, const char * cons
 #endif
             }
 
+        //  We print a status . 3 times / second (or if we can't time it, 10 times per order of magnitude") ...
 #ifndef BSTF_AVOID_WIN_DEPENDENCE
         if ( ( DWGetTickCount() - g_tickLastSuppressStatus ) > g_dtickSuppressStatusUpdateDelay )
 #else
@@ -215,22 +243,27 @@ inline void TestReportFail_( const char * const szTestType, const char * const s
         }
 
 
+// ---------------------------------------------------------------------------------
+//
+//          Test Definition Support
+//
 
-enum BstfTestCaseFlags : QWORD
+enum BstfTestCaseFlags : QWORD  //  btcf
     {
 
-    btcfmskTestType                     = 0xFF00000000000000,
-    btcfmskTestState                    = 0x00FF000000000000,
-    btcfmskTestReqs                     = 0x0000FF0000000000,
+    btcfmskTestType                     = 0xFF00000000000000,   //  These flags defines the type of test it is (perf, stress, etc).
+    btcfmskTestState                    = 0x00FF000000000000,   //  These flags defines the state the test is in (known failure, sporadic failure)
+    btcfmskTestReqs                     = 0x0000FF0000000000,   //  These flags defines the generic requirements that test needs to run.
 
-    btcfmskTestRigsFlags                = 0x000000000000FF00,
-    btcfmskTestRigsReqs                 = 0x0000000000FF0000,
+    btcfmskTestRigsFlags                = 0x000000000000FF00,   //  These flags defines the flags that the test rig (such as syncunit.exe, sysinitunittestrig.exe, etc) want to indepedantly define.
+    btcfmskTestRigsReqs                 = 0x0000000000FF0000,   //  These flags defines the requirements that the test rig (such as syncunit.exe, sysinitunittestrig.exe, etc) want to indepedantly define.
 
-    btcfmskTestsFlags                   = 0x00000000000000FF,
+    btcfmskTestsFlags                   = 0x00000000000000FF,   //  These flags are defined by the independant tests.
 
-    btcfForceStackTrash                 = 0x0000010000000000,
+    //  btcfmskTestReqs
+    btcfForceStackTrash                 = 0x0000010000000000,   //  Causes BSTF test harness to trash the stack before calling the test.
 
-    bitExplicitOnly                     =       0x1,
+    bitExplicitOnly                     =       0x1,    //  This test is not run by default, must specify it explicitly.
     };
 
 
@@ -253,6 +286,7 @@ class UNITTEST
 
         virtual bool FRunByDefault() const  { return !( m_btcf & bitExplicitOnly ); }
 
+        //
         virtual bool FRunUnderESE98() const { return true; }
         virtual bool FRunUnderESENT() const { return true; }
         virtual bool FRunUnderESE97() const { return false; }
@@ -288,6 +322,10 @@ class UNITTEST
 
 
 
+// ---------------------------------------------------------------------------------
+//
+//          Argument Processing Helpers
+//
 
 inline bool FBstfHelpArg( const char * const szArg )
     {
@@ -301,6 +339,10 @@ inline bool FBstfHelpArg( const char * const szArg )
     }
 
 
+// ---------------------------------------------------------------------------------
+//
+//          Test Enumerator(s)
+//
 
 void BstfPrintTests();
 ERR ErrBstfRunTests( const int argc, const char * const argv[] );

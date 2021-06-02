@@ -14,14 +14,17 @@
 #define WIDEN2(x) L ## x
 #define WIDEN(x) WIDEN2(x)
 #endif
+//  global state for exceptions/asserts
+//
 CRITICAL_SECTION    g_csError;
 BOOL                g_fCritSecErrorInit = fFalse;
 
 DWORD               g_tidAssertFired = 0x0;
-CErrFrameSimple     g_cerrDoubleAssert;
+CErrFrameSimple     g_cerrDoubleAssert;         // protected by g_csError
 
 BOOL                g_fRetryException   = fFalse;
 
+//  these should only accessed while g_csError is held
 #ifdef DEBUG
 WCHAR               g_wszAssertText[1024];
 #endif
@@ -49,6 +52,7 @@ ULONG UlLineLastCall()
 }
 
 
+//  dynamically load MessageBox to avoid linking with the DLL
 
 
 INT UtilMessageBoxW( IN const WCHAR * const wszText, IN const WCHAR * const wszCaption, IN const UINT uType )
@@ -69,6 +73,7 @@ NoMessageBox:
     return retval;
 }
 
+//  returns fTrue if a debugger is attached to this process
 
 BOOL IsDebuggerAttached()
 {
@@ -87,6 +92,7 @@ NoIsDebuggerPresent:
     return fDebuggerPresent;
 }
 
+//  returns fTrue if a debugger can be attached to this process
 
 BOOL IsDebuggerAttachable()
 {
@@ -103,19 +109,27 @@ void KernelDebugBreakPoint()
 
 void UserDebugBreakPoint()
 {
+    //     get last error before another system call
+    //
     DWORD dwSavedGLE = GetLastError();
 
+    //  We must prevent ourselves from falling into
+    //  the kernel debugger by issuing a debug break with no debugger attached
 
 #if defined(MINIMAL_FUNCTIONALITY) && !defined(DEBUG)
+    // throw AV on phone when build type is not debug
     *((INT*)NULL) = 0;
 #else
     if ( !IsDebuggerAttached() )
     {
+        //  if it is possible to attach a debugger to the current process then
+        //  we will do so
 
         if ( IsDebuggerAttachable() )
         {
             while ( !IsDebuggerAttached() )
             {
+                //  get the AE Debug command line if present
 
                 WCHAR szCmdFormat[ 256 ];
 
@@ -128,6 +142,7 @@ void UserDebugBreakPoint()
                     szCmdFormat[ 0 ] = L'\0';
                 }
 
+                //  ignore the AE Debug command line if it is pointing to Dr. Watson
 
                 WCHAR szCmdFname[ 256 ];
 
@@ -137,6 +152,7 @@ void UserDebugBreakPoint()
                     szCmdFormat[ 0 ] = L'\0';
                 }
 
+                //  try to use the AE Debug command line to start the debugger
 
                 SECURITY_ATTRIBUTES sa;
                 HANDLE              hEvent;
@@ -170,6 +186,8 @@ void UserDebugBreakPoint()
                                         &si,
                                         &pi ) )
                 {
+                    //  wait for debugger to load (force timeout to ensure we
+                    //  don't hang if "-e" was omitted from the command line)
                     for ( DWORD dw = WaitForSingleObjectEx( hEvent, 3000, TRUE );
                         ( WAIT_IO_COMPLETION == dw || WAIT_TIMEOUT == dw ) && !IsDebuggerAttached();
                         dw = WaitForSingleObjectEx( hEvent, 30000, TRUE ) )
@@ -181,6 +199,7 @@ void UserDebugBreakPoint()
                     CloseHandle( pi.hThread );
                 }
 
+                //  if we couldn't start the debugger, prompt for one to be installed
 
                 else
                 {
@@ -225,9 +244,11 @@ void UserDebugBreakPoint()
                 {
                     CloseHandle( hEvent );
                 }
-            }
+            } // while ( !IsDebuggerAttached() )
         }
 
+        //  if we make it here and there is still no debugger attached, we will
+        //  just kill the process
 
         if ( !IsDebuggerAttached() )
         {
@@ -236,6 +257,7 @@ void UserDebugBreakPoint()
     }
 #endif
 
+    //  stop in the debugger
 
     SetLastError(dwSavedGLE);
     DebugBreak();
@@ -246,6 +268,9 @@ static void ForceProcessCrash()
     *( char* )0 = 0;
 }
 
+// Raise an exception that bypasses any frame-based or vectored exception handlers,
+// including the process' unhandled exception filter.
+// This function can be used to rethrow an existing exception.
 static void TryRaiseFailFastException(
     const PEXCEPTION_RECORD pExceptionRecord,
     const PCONTEXT pContextRecord,
@@ -253,6 +278,7 @@ static void TryRaiseFailFastException(
 {
 #ifdef OS_LAYER_VIOLATIONS
 #ifdef USE_WATSON_API
+    // Send exchange watson report
     EXCEPTION_POINTERS exceptionPointers;
     exceptionPointers.ExceptionRecord = pExceptionRecord;
     exceptionPointers.ContextRecord = pContextRecord;
@@ -260,6 +286,7 @@ static void TryRaiseFailFastException(
 #else
     extern ERR ErrBFConfigureProcessForCrashDump( const JET_GRBIT grbit );
 
+    // Register pages with WER in view-cache mode (WER does not collect view cached pages by default)
     (VOID)ErrBFConfigureProcessForCrashDump( JET_bitDumpCacheMaximum | JET_bitDumpCacheNoDecommit );
 #endif
 #endif
@@ -276,14 +303,20 @@ VOID OSErrorRegisterForWer( VOID *pv, DWORD cb )
     (VOID)WerRegisterMemoryBlock( pv, cb );
 }
 
+// Raise an exception that bypasses any frame-based or vectored exception handlers,
+// including the process' unhandled exception filter.
+// This function should be used to generate a crash at the point it is called.
 static void RaiseFailFastException()
 {
 
     TryRaiseFailFastException( NULL, NULL, FAIL_FAST_GENERATE_EXCEPTION_ADDRESS );
 
+    // If we get this far then assume that RaiseFailFastException failed and
+    // fallback to ForceProcessCrash()
     ForceProcessCrash();
 }
 
+// Mixing __try/__except in a function with C++ unwinding isn't supported.
 LOCAL void RaiseFailFastExceptionCheckingSkipAssert()
 {
     __try
@@ -304,7 +337,7 @@ const WCHAR wszAssertCaption[]  = L"JET Assertion Failure";
 const WCHAR wszAssertPrompt[]   = L"Choose OK to continue execution or CANCEL to debug the process.";
 const WCHAR wszAssertPrompt2[]  = L"Choose OK to continue execution (attaching the debugger is impossible during process initialization and termination).";
 
-#endif
+#endif  //  DEBUG || MEM_CHECK || ENABLE_EXCEPTIONS
 
 UINT g_wAssertAction = JET_AssertFailFast;
 UINT g_wExceptionAction = JET_ExceptionFailFast;
@@ -326,11 +359,14 @@ UINT COSLayerPreInit::SetExceptionAction( const UINT wExceptionAction )
 
 INT g_fNoWriteAssertEvent = 0;
 
-#define CCH_MAX_SHORT_FILENAME  (30)
-#define CCH_32_BIT_MAX          (11)
-static const ULONG  g_cchIssueSourceMax = 40 +
-                                            CCH_MAX_SHORT_FILENAME * 2 +
-                                            CCH_32_BIT_MAX * 12;
+//  Based upon ERRFormatIssueSource -> wszFormatString
+#define CCH_MAX_SHORT_FILENAME  (30)    // we truncate it to this size below.
+#define CCH_32_BIT_MAX          (11)    // as a negative "-2147483647", it's the worst case
+//  This is the accumulation of the required size for the OSStrCbFormatW( wszIssueSource, cbIssueSource, L"PV:..." ...)
+//  call below in this function, so other callers know how much stack space they will need.
+static const ULONG  g_cchIssueSourceMax = 40 +          // for format below, some extra slop room
+                                            CCH_MAX_SHORT_FILENAME * 2 +    // 2 file names below
+                                            CCH_32_BIT_MAX * 12;            // 12 integers used below
 VOID ERRFormatIssueSource( __out_bcount( cbIssueSource ) WCHAR * wszIssueSource, __in const ULONG cbIssueSource, const DWORD dwSavedGLE, __in PCSTR szFilename, __in const LONG lLine )
 {
 
@@ -346,6 +382,7 @@ VOID ERRFormatIssueSource( __out_bcount( cbIssueSource ) WCHAR * wszIssueSource,
     const ERR errLast = PefLastThrow() ? PefLastThrow()->Err() : 0;
     const ULONG lErrLastLine = PefLastThrow() ? PefLastThrow()->UlLine() : 0;
 
+//#define TEST_ONCE_FORMAT_MAX 1
 #ifdef TEST_ONCE_FORMAT_MAX
     szFilenameSource = "Asdfjkl;weroasdfasadfanawenrsernmasdfnasernaesrnaserasndfnasernaensraseezxASDFJKL;AsdfJkl.cxx";
     szFilenameLastErr = "1234234535341451451234123423412348283481724571237040213488123408123481823482340%s3%d0%%s12%hs4.hxx";
@@ -369,6 +406,8 @@ VOID ERRFormatIssueSource( __out_bcount( cbIssueSource ) WCHAR * wszIssueSource,
         szFilenameLastErrPre = szDotDotDot;
     }
 
+    //  WARNING: This code was designed and tested to be 100% resilient to all the worse
+    //  parameters and so if you change it, retest as this is retail code.
     OSStrCbFormatW( wszIssueSource, cbIssueSource,
                         L"PV: %u.%u.%u.%u SV: %u.%u.%u.%u GLE: %u ERR: %d(%hs%hs:%u): %hs%hs(%u)",
 #ifndef TEST_ONCE_FORMAT_MAX
@@ -392,7 +431,17 @@ static const ULONG  g_cchIssueMsgMax = 1024 + 1;
 
 #ifdef DEBUG
 
-
+/*      write assert to assert.txt
+/*      may raise alert
+/*      may log to event log
+/*      may pop up
+/*
+/*      condition parameters
+/*      assemble monolithic string for assert.txt,
+/*              alert and event log
+/*      assemble separated string for pop up
+/*
+/**/
 
 LOCAL DWORD g_pidAssert = GetCurrentProcessId();
 LOCAL DWORD g_tidAssert = GetCurrentThreadId();
@@ -415,14 +464,21 @@ void HandleNestedAssert( WCHAR const *szMessageFormat, char const *szFilename, L
 {
     DWORD dwSavedGLE = GetLastError();
 
+    //  Be nice to assert we own g_csError...
 
+    //  Since we're in a double fault right now, we can't do
+    //  much, so we'll just dprint the double fault, set a
+    //  global (in case a debugger wasn't present), and return
+    //  like nothing is wrong, rather than potentially recurse
+    //  infinitely ...
 
     OSDebugPrint( L"\n\nDOUBLE ASSERT: " );
-    OSDebugPrint( szMessageFormat );
+    OSDebugPrint( szMessageFormat );  // "safe" b/c it's not a format string arg.
     OSDebugPrint( L"\nSee g_cerrDoubleAssert for file/line info.\n" );
     OSDebugPrint( L"Breaking into debugger. 'g' to continue like nothing is wrong.\n\n" );
     g_cerrDoubleAssert.Set( szFilename, lLine, -1 );
 
+    //  break.
 
     SetLastError( dwSavedGLE );
     KernelDebugBreakPoint();
@@ -436,19 +492,29 @@ void __stdcall AssertFail( char const *szMessageFormat, char const *szFilename, 
 
     if ( g_wAssertAction == JET_AssertSkipAll )
     {
+        //  we immediately return here to allow the SkipAll action to be
+        //  used for disabling asserts during crashdumps
         va_end( args );
         return;
     }
 
     CHAR                szAssertText[1024];
 
-    
+    /*      get last error before another system call
+    /**/
     DWORD dwSavedGLE = GetLastError();
 
+    //  allow only one assert/enforce at a time
+    //
     EnterCriticalSection( &g_csError );
 
     if ( g_tidAssertFired == DwUtilThreadId() )
     {
+        //  Deal with the case where an assert has gone off in the middle
+        //  of an assert. One case where this can happen is if the assert
+        //  action causes a crash which is then intercepted by the calling
+        //  application which then calls back into Jet (typically as part
+        //  of a finally block in exception handling).
 
         SetLastError( dwSavedGLE );
         WCHAR wszMessageFormat[ _MAX_PATH ];
@@ -457,9 +523,10 @@ void __stdcall AssertFail( char const *szMessageFormat, char const *szFilename, 
                                       _countof( wszMessageFormat ) );
         HandleNestedAssert( wszMessageFormat, szFilename, lLine );
 
+        //  Ok, blunder on like nothing is wrong.
         LeaveCriticalSection( &g_csError );
         SetLastError( dwSavedGLE );
-        return;
+        return; // this is not the assert we're interested in.
     }
 
     g_tidAssertFired = DwUtilThreadId();
@@ -469,12 +536,15 @@ void __stdcall AssertFail( char const *szMessageFormat, char const *szFilename, 
     g_szFilenameAssert = szFilename;
     g_lLineAssert = lLine;
 
-    
+    /*      select file name from file path
+    /**/
     szFilename = ( NULL == strrchr( szFilename, chPathDelimiter ) ) ? szFilename : strrchr( szFilename, chPathDelimiter ) + sizeof( CHAR );
 
-    
+    /*      assemble monolithic assert string
+    /**/
 
-    
+    /*  start by putting in the assert message
+    /**/
     OSStrCbFormatA(
         szAssertText + offset,
         sizeof( szAssertText ) - offset * sizeof( szAssertText[0] ),
@@ -494,7 +564,8 @@ void __stdcall AssertFail( char const *szMessageFormat, char const *szFilename, 
         "\r\n" );
     offset = strlen( szAssertText );
 
-    
+    /*  Add the version, file, line and PID/TID info
+    /**/
     OSStrCbFormatA(
         szAssertText + offset,
         sizeof( szAssertText ) - offset,
@@ -508,10 +579,11 @@ void __stdcall AssertFail( char const *szMessageFormat, char const *szFilename, 
         DwUtilThreadId() );
     offset = strlen( szAssertText );
 
-    
+    /*  Can't get TLS error state until OS preinit is done */
     if ( FOSLayerUp() )
     {
-        
+        /*  Add the last error info
+        /**/
         OSStrCbFormatA(
             szAssertText + offset,
             sizeof( szAssertText ) - offset,
@@ -525,7 +597,8 @@ void __stdcall AssertFail( char const *szMessageFormat, char const *szFilename, 
         offset = strlen( szAssertText );
     }
 
-    
+    /*  Add the assert.txt file
+    /**/
     OSStrCbFormatA(
         szAssertText + offset,
         sizeof( szAssertText ) - offset,
@@ -535,8 +608,11 @@ void __stdcall AssertFail( char const *szMessageFormat, char const *szFilename, 
 
     OSTrace( JET_tracetagAsserts, szAssertText );
 
-    
-    
+    /******************************************************
+    /**/
+    /*      if event log environment variable set then write
+    /*      assertion to event log.
+    /**/
     if ( !g_fNoWriteAssertEvent && FOSDllUp() )
     {
         const WCHAR *   rgszT[] = { g_wszAssertText };
@@ -553,8 +629,10 @@ void __stdcall AssertFail( char const *szMessageFormat, char const *szFilename, 
                 rgszT );
     }
 
+    // Log to OS Diagnostics
+    //
     WCHAR wszIssueSource[ g_cchIssueSourceMax ] = L"FORMAT STRING FAIL";
-    C_ASSERT( _countof( wszIssueSource ) < 260 );
+    C_ASSERT( _countof( wszIssueSource ) < 260 );   //  make sure we stay reasonably small
     if ( FOSDllUp() )
     {
         ERRFormatIssueSource( wszIssueSource, sizeof( wszIssueSource ), dwSavedGLE, szFilename, lLine );
@@ -579,13 +657,18 @@ void __stdcall AssertFail( char const *szMessageFormat, char const *szFilename, 
         case JET_AssertStop:
         case JET_AssertCrash:
         case JET_AssertFailFast:
+            // Normally non-continuable break, but since it's a dev machine, break.
+            // It'll either break in the debugger or launch a crash-debugger, if you've
+            // got that set up.
             wAssertAction = JET_AssertBreak;
             break;
 
         case JET_AssertMsgBox:
         case JET_AssertSkippableMsgBox:
+            // Optional break
             if ( IsDebuggerAttached() )
             {
+                // Change action so we don't constantly throw up a msg box.
                 wAssertAction = JET_AssertBreak;
             }
             break;
@@ -596,10 +679,12 @@ void __stdcall AssertFail( char const *szMessageFormat, char const *szFilename, 
     }
 #endif
 
-    
+    /*      Print out the assert if a debugger is attached
+    /**/
     OSDebugPrint( g_wszAssertText );
 
-    
+    /*      Perform the Assert Action
+    /**/
     if ( wAssertAction == JET_AssertExit )
     {
         TerminateProcess( GetCurrentProcess(), UINT( ~0 ) );
@@ -614,7 +699,8 @@ void __stdcall AssertFail( char const *szMessageFormat, char const *szFilename, 
     {
         for( ; !g_fSkipAssert; )
         {
-            
+            /*  wait for developer, or anyone else, to debug the failure
+            /**/
             Sleep( 100 );
         }
         g_fSkipAssert = fFalse;
@@ -642,6 +728,7 @@ void __stdcall AssertFail( char const *szMessageFormat, char const *szFilename, 
     {
         ULONG   cchOffset;
 
+        //  append the debugger message
 
         cchOffset = wcslen( g_wszAssertText );
 
@@ -666,15 +753,18 @@ void __stdcall AssertFail( char const *szMessageFormat, char const *szFilename, 
     }
     else if ( wAssertAction == JET_AssertSkipAll )
     {
+        // Do nothing.
     }
 
     g_tidAssertFired = 0x0;
     LeaveCriticalSection( &g_csError );
 
-    
+    /* End the var args ... not sure it should be before SetLastError(), but playing it safe.
+    /**/
     va_end( args );
 
-    
+    /* Restore the last error, to avoid affecting other code paths if we ignored the assert(), and to make debuggability better
+    /**/
     SetLastError(dwSavedGLE);
     return;
 }
@@ -682,11 +772,12 @@ void __stdcall AssertFail( char const *szMessageFormat, char const *szFilename, 
 
 void AssertErr( const ERR err, PCSTR szFileName, const LONG lLine )
 {
+    //  get last error before another system call
     DWORD dwSavedGLE = GetLastError();
 
     if ( JET_errSuccess == err )
     {
-        FireWallAt( "UnexpectedAssertErrOnSuccess", szFileName, lLine );
+        FireWallAt( "UnexpectedAssertErrOnSuccess", szFileName, lLine );  // only call this routine if we know err != JET_errSuccess
     }
     else
     {
@@ -696,26 +787,32 @@ void AssertErr( const ERR err, PCSTR szFileName, const LONG lLine )
     SetLastError( dwSavedGLE );
 }
 
-#else
+#else  //  !DEBUG
 
+// Needed by FUtilSystemBetaFeatureEnabled
 extern ULONG_PTR UlParam( const INST* const pinst, const ULONG paramid );
 
 void __stdcall AssertFail( PCSTR szMessage, PCSTR szFilename, LONG lLine, ... )
 {
-    
+    /*      get last error before another system call
+    /**/
     DWORD dwSavedGLE = GetLastError();
 
-    
+    /*      format the source of the issue, including product ver,
+    /*      system ver, files ptrs and last errors
+    /**/
 
     WCHAR wszIssueSource[  g_cchIssueSourceMax ] = L"FORMAT STRING FAIL";
-    C_ASSERT( _countof( wszIssueSource ) < 260 );
+    C_ASSERT( _countof( wszIssueSource ) < 260 );   //  make sure we stay reasonably small
 
     if ( FOSDllUp() )
     {
         ERRFormatIssueSource( wszIssueSource, sizeof( wszIssueSource ), dwSavedGLE, szFilename, lLine );
     }
 
-    
+    /*      if event log environment variable set then write
+    /*      assertion to event log.
+    /**/
     if ( !g_fNoWriteAssertEvent && FOSDllUp() )
     {
         WCHAR wszMessage[ g_cchIssueMsgMax ] = L"FORMAT STRING FAIL";
@@ -731,6 +828,7 @@ void __stdcall AssertFail( PCSTR szMessage, PCSTR szFilename, LONG lLine, ... )
                 rgszT );
     }
 
+    // NULL is not expected here, but will check just in case.
     OSDiagTrackAssertFail( szMessage ? szMessage : "", wszIssueSource );
 
 #ifdef DEBUG
@@ -738,6 +836,8 @@ void __stdcall AssertFail( PCSTR szMessage, PCSTR szFilename, LONG lLine, ... )
 #endif
     if ( FUtilSystemBetaFeatureEnabled_( NULL, NULL, (UtilSystemBetaSiteMode)UlParam( NULL, JET_paramStageFlighting ), EseTestFeatures, L"EseFeatureTestOnly" ) )
     {
+        //  allow only one assert at a time
+        //
         EnterCriticalSection( &g_csError );
         g_tidAssertFired = DwUtilThreadId();
 
@@ -761,7 +861,8 @@ void __stdcall AssertFail( PCSTR szMessage, PCSTR szFilename, LONG lLine, ... )
             case JET_AssertStop:
                 for( ; !g_fSkipAssert ; )
                 {
-                    
+                    /*  wait for developer, or anyone else, to debug the failure
+                    /**/
                     Sleep( 100 );
                 }
                 g_fSkipAssert = fFalse;
@@ -779,14 +880,17 @@ void __stdcall AssertFail( PCSTR szMessage, PCSTR szFilename, LONG lLine, ... )
         LeaveCriticalSection( &g_csError );
     }
 
-    
+    /* Restore the last error, to avoid affecting other code paths if we ignored the assert(), and to make debuggability better */
     SetLastError(dwSavedGLE);
 }
 
-#endif
+#endif  //  DEBUG
 
 
+//  Enforces
 
+//  Enforce Failure action
+//
 
 VOID DefaultReportEnforceFailure( const WCHAR* wszContext, const CHAR* szMessage, const WCHAR* wszIssueSource )
 {
@@ -804,6 +908,7 @@ VOID DefaultReportEnforceFailure( const WCHAR* wszContext, const CHAR* szMessage
     OSDiagTrackEnforceFail( wszContext, szMessage, wszIssueSource );
 }
 
+//  called when a strictly enforced condition has been violated
 
 BOOL g_fOverrideEnforceFailure = fFalse;
 VOID (*g_pfnReportEnforceFailure)( const WCHAR* wszContext, const CHAR* szMessage, const WCHAR* wszIssueSource ) = DefaultReportEnforceFailure;
@@ -820,16 +925,20 @@ void __stdcall EnforceFail( const CHAR* szMessage, const CHAR* szFilename, LONG 
 
 void __stdcall EnforceContextFail( const WCHAR* wszContext, const CHAR* szMessage, const CHAR* szFilename, LONG lLine )
 {
+    //  get last error before another system call
     DWORD dwSavedGLE = GetLastError();
 
+    //  allow only one enforce/assert at a time
+    //
     EnterCriticalSection( &g_csError );
 
+    //  turn off the assert event so we won't log twice.
     g_fNoWriteAssertEvent = 1;
 
     if ( g_pfnReportEnforceFailure != NULL )
     {
         WCHAR           wszIssueSource[  g_cchIssueSourceMax ] = L"FORMAT STRING FAIL";
-        C_ASSERT( _countof( wszIssueSource ) < 260 );
+        C_ASSERT( _countof( wszIssueSource ) < 260 );   //  make sure we stay reasonably small
 
         ERRFormatIssueSource( wszIssueSource, sizeof(wszIssueSource), dwSavedGLE, szFilename, lLine );
 
@@ -843,34 +952,47 @@ void __stdcall EnforceContextFail( const WCHAR* wszContext, const CHAR* szMessag
     if ( !g_fOverrideEnforceFailure )
     {
 
+        //  force a process crash to get watson data on enforce failures
 
         RaiseFailFastException();
 
+        //  we must ensure process death on enforce failures
 
         TerminateProcess( GetCurrentProcess(), UINT( ~0 ) );
     }
 
+    //  if we get to here, leave and fix-backup error ... for the most part we'll die in
+    //  the above FailFast/Terminate path.
 
     LeaveCriticalSection( &g_csError );
 
     SetLastError(dwSavedGLE);
 }
 
+//  Exceptions
 
 #ifdef ENABLE_EXCEPTIONS
 
+//  Exception Information function for use by an exception filter
+//
+//  NOTE:  must be called in the scope of the exception filter expression
 
 typedef DWORD_PTR EXCEPTION;
 
 EXCEPTION (*pfnExceptionInfo)();
 
+//  Exception Failure action
+//
+//  used as the filter whenever any exception that occurs is considered a failure
 
 const WCHAR wszExceptionCaption[]   = L"JET Exception";
 const WCHAR wszExceptionInfo[]      = L"More detailed information can be found in:  ";
 const WCHAR wszExceptionPrompt[]        = L"Choose OK to terminate the process or CANCEL to debug the process.";
 const WCHAR wszExceptionPrompt2[]   = L"Choose OK to terminate the process (attaching the debugger is impossible during process initialization and termination).";
 
+//  ================================================================
 LOCAL_BROKEN BOOL ExceptionDialog( const WCHAR wszException[] )
+//  ================================================================
 {
     WCHAR       wszMessage[1024];
 #ifdef RTM
@@ -925,7 +1047,9 @@ C_ASSERT( EXCEPTION_CONTINUE_EXECUTION == efaContinueExecution );
 C_ASSERT( EXCEPTION_CONTINUE_SEARCH == efaContinueSearch );
 C_ASSERT( EXCEPTION_EXECUTE_HANDLER == efaExecuteHandler );
 
+//  ================================================================
 EExceptionFilterAction _ExceptionFail( const CHAR* szMessage, EXCEPTION exception )
+//  ================================================================
 {
     PEXCEPTION_POINTERS pexp            = PEXCEPTION_POINTERS( exception );
     PEXCEPTION_RECORD   pexr            = pexp->ExceptionRecord;
@@ -936,15 +1060,25 @@ EExceptionFilterAction _ExceptionFail( const CHAR* szMessage, EXCEPTION exceptio
 
     const WCHAR *       wszException        = L"UNKNOWN";
 
+    //  get last error before another system call
+    //
     DWORD dwSavedGLE = GetLastError();
 
     if ( JET_ExceptionFailFast == g_wExceptionAction )
     {
         TryRaiseFailFastException( pexr, pcxr, 0 );
+        // If RaiseFailFastException isn't supported then simply fall through
+        // to the code below.
     }
 
+    //  only allow one exception at a time
+    //
     EnterCriticalSection( &g_csError );
 
+    //  this exception has already been trapped once, so the user must have
+    //  allowed the exception to be passed on to the application by the
+    //  debugger
+    //
     if ( g_fRetryException )
     {
         LeaveCriticalSection( &g_csError );
@@ -952,6 +1086,9 @@ EExceptionFilterAction _ExceptionFail( const CHAR* szMessage, EXCEPTION exceptio
         return efaContinueSearch;
     }
 
+    //  this exception is caused by an assert, so let's go ahead and stop it in
+    //  the debugger
+    //
     if ( g_tidAssertFired )
     {
         LeaveCriticalSection( &g_csError );
@@ -960,9 +1097,12 @@ EExceptionFilterAction _ExceptionFail( const CHAR* szMessage, EXCEPTION exceptio
 
 #if !defined( DEBUG ) && defined( RTM )
 
+    //  display the system unhandled exception dialog
 
     EExceptionFilterAction efa = EExceptionFilterAction( UnhandledExceptionFilter( pexp ) );
 
+    //  the UEF handler chose to execute our handler.  we will always
+    //  terminate the process in this case
 
     if ( efa == efaExecuteHandler )
     {
@@ -971,6 +1111,7 @@ EExceptionFilterAction _ExceptionFail( const CHAR* szMessage, EXCEPTION exceptio
         return efaExecuteHandler;
     }
 
+    //  the UEF handler chose some other action.  pass it through
 
     else
     {
@@ -978,14 +1119,15 @@ EExceptionFilterAction _ExceptionFail( const CHAR* szMessage, EXCEPTION exceptio
         return efa;
     }
 
-#else
+#else  //  DEBUG || !RTM
 
+    //  start our handler
 
     switch( dwException )
     {
 #ifdef SZEXP
 #error  SZEXP already defined
-#endif
+#endif  //  SZEXP
 
 #define SZEXP( EXP )                    \
         case EXP:                       \
@@ -1017,6 +1159,7 @@ EExceptionFilterAction _ExceptionFail( const CHAR* szMessage, EXCEPTION exceptio
     }
 
 
+    //  print the exception information and callstack to our assert file
 
     {
         CPRINTFFILE cprintffileAssert( wszAssertFile );
@@ -1036,6 +1179,7 @@ EExceptionFilterAction _ExceptionFail( const CHAR* szMessage, EXCEPTION exceptio
     }
 
 
+    //  ask user what they want to do with the exception
 
     WCHAR szT[512];
     OSStrCbFormatW(     szT, sizeof(szT),
@@ -1055,35 +1199,60 @@ EExceptionFilterAction _ExceptionFail( const CHAR* szMessage, EXCEPTION exceptio
 
     BOOL fDebug = ExceptionDialog( szT );
 
+    //  the user chose to debug the process
 
     if ( fDebug )
     {
+        //  Here is the exception that has caused the program failure:
 
         static DWORD dwExceptionCode = pexp->ExceptionRecord->ExceptionCode;
 
+        //  halt the debugger
 
         SetLastError(dwSavedGLE);
         UserDebugBreakPoint();
 
+        //  To debug the exception, perform the following steps:
+        //
+        //  MS Developer Studio:
+        //
+        //    Go to the exception setup dialog and configure the debugger to
+        //      Stop Always when exception <dwExceptionCode> occurs
+        //    Continue program execution.  The debugger will stop on the
+        //      offending code
+        //
+        //  Windbg:
+        //
+        //    Enter "SXE <dwExceptionCode> /C" to enable first chance handling
+        //      of the exception
+        //    Continue program execution.  The debugger will stop on the
+        //      offending code
+        //
+        //  If you choose none of the above, the exception will simply be
+        //  passed on to the next higher exception filter on the stack
 
+        //  retry the instruction that caused the exception
 
         g_fRetryException = fTrue;
         LeaveCriticalSection( &g_csError );
         return efaContinueExecution;
     }
 
+    //  the user chose to terminate the process through either dialog
 
     TerminateProcess( GetCurrentProcess(), UINT( ~0 ) );
 
     LeaveCriticalSection( &g_csError );
 
+    //should never be reached
     return efaExecuteHandler;
 
-#endif
+#endif  //  !DEBUG && RTM
 }
 
-#endif
+#endif  //  ENABLE_EXCEPTIONS
 
+//  returns the exception id of an exception
 
 const DWORD ExceptionId( EXCEPTION exception )
 {
@@ -1093,9 +1262,12 @@ const DWORD ExceptionId( EXCEPTION exception )
 }
 
 
+/***********************************************************
+/******************** error handling ***********************
+/***********************************************************
+/**/
 
-
-ERR g_errTrap = JET_errSuccess;
+ERR g_errTrap = JET_errSuccess; // Default is no error trap.
 
 ERR ErrERRSetErrTrap( const ERR errSet )
 {
@@ -1108,6 +1280,8 @@ ERR ErrERRSetErrTrap( const ERR errSet )
 
 ERR ErrERRCheck_( const ERR err, const CHAR* szFile, const LONG lLine )
 {
+    //  note: retail ErrERRCheck() does not destroy, so get last error
+    //  before another system call clobbers it.
     DWORD dwSavedGLE = GetLastError();
 
     AssertRTL( err > -65536 && err < 65536 );
@@ -1117,10 +1291,12 @@ ERR ErrERRCheck_( const ERR err, const CHAR* szFile, const LONG lLine )
         OSTraceWriteRefLog( ostrlSystemFixed, sysosrtlErrorThrow, (void*)(INT_PTR)err );
     }
 
+    //  if an assert is hit in one thread, dead-loop all other threads
     while ( g_tidAssertFired )
     {
         if ( g_tidAssertFired == DwUtilThreadId() )
         {
+            //  we don't want to hang our own thread while processing an assert
             return err;
         }
         UtilSleep( 1000 );
@@ -1136,7 +1312,8 @@ ERR ErrERRCheck_( const ERR err, const CHAR* szFile, const LONG lLine )
 
     OSTrace( JET_tracetagErrors, OSFormat( "Error %d (0x%x) returned from %s@%d", err, err, szFile, lLine ) );
 
-    
+    /*  There are a couple errors we never expect to get called here ...
+    /**/
     switch( err )
     {
         case JET_errSuccess:
@@ -1144,7 +1321,7 @@ ERR ErrERRCheck_( const ERR err, const CHAR* szFile, const LONG lLine )
             break;
 
         case JET_errDerivedColumnCorruption:
-            AssertSz( fFalse, "Corruption detected in column space of derived columns." );
+            AssertSz( fFalse, "Corruption detected in column space of derived columns." );  //  allow debugging of corruption
             break;
 
         default:
@@ -1153,11 +1330,12 @@ ERR ErrERRCheck_( const ERR err, const CHAR* szFile, const LONG lLine )
 
     PefLastThrow()->Set( szFile, lLine, err );
 
-    SetLastError( dwSavedGLE );
+    SetLastError( dwSavedGLE );     // restore last error state
 
     return err;
 }
 
+//  Sets in OS TLS the result from the last Call(), CallJ(), etc type call site.
 
 void ERRSetLastCall( __in const CHAR* szFile, __in const LONG lLine, __in const ERR err )
 {
@@ -1166,12 +1344,15 @@ void ERRSetLastCall( __in const CHAR* szFile, __in const LONG lLine, __in const 
     Postls()->errLastCall    = err;
 }
 
-#endif
+#endif  //  DEBUG
 
 
 #ifdef DEBUG
 
-
+/***********************************************************
+/********************* Cleanup State ***********************
+/***********************************************************
+/**/
 
 BOOL FOSSetCleanupState(const BOOL fInCleanupState)
 {
@@ -1185,23 +1366,28 @@ inline BOOL FOSGetCleanupState()
     return Postls()->fCleanupState;
 }
 
-#endif
+#endif  //  DEBUG
 
-
+/***********************************************************
+/******************* Test injection ***********************
+/***********************************************************
+/**/
 
 #ifdef TEST_INJECTION
 
 #include "_testinjection.hxx"
 
- TESTINJECTION    g_rgTestInjections[g_cTestInjectionsMax];
+/*LOCAL+edbg*/ TESTINJECTION    g_rgTestInjections[g_cTestInjectionsMax];
 LOCAL INT                       g_cTestInjections;
 
-ULONG                   g_ulIDTrap = 0;
+ULONG                   g_ulIDTrap = 0;     // -1/0xFFFFFFFF breaks on all test injections.
 
 LOCAL CRITICAL_SECTION          g_csTestInjections;
 LOCAL BOOL                      g_fcsTestInjectionsInit;
 
+//  ================================================================
 ERR ErrEnableTestInjection( const ULONG ulID, const ULONG_PTR pv, const INT type, const ULONG ulProbability, const DWORD grbit )
+//  ================================================================
 {
     ERR err = JET_errSuccess;
     const JET_API_PTR pvT = pv;
@@ -1213,26 +1399,34 @@ ERR ErrEnableTestInjection( const ULONG ulID, const ULONG_PTR pv, const INT type
 
     const BOOL fCleanup = ( grbit & JET_bitInjectionProbabilityCleanup ) != 0;
 
-    if (
+    // Parameter validation.
+    if (    //  Do not accept invalid ulIDs.
             ( ulID == ulIDInvalid ) ||
+            //  We can accept any type if we just want to disable an injection.
             ( ( typeT < JET_TestInjectMin || typeT >= JET_TestInjectMax ) && !fCleanup )
         )
     {
         Call( ErrERRCheck( JET_errInvalidParameter ) );
     }
 
-    if (
+    // More parameter validation.
+    if (    // We assume the external API took care of not passing a zero'd grbit.
             ( grbit == JET_bitNil ) ||
+            // Invalid to mix different types of probability.
             ( ( grbit & JET_bitInjectionProbabilityPct ) && ( grbit & JET_bitInjectionProbabilityCount ) ) ||
+            // Invalid to set one of these two without the count type.
             ( !( grbit & JET_bitInjectionProbabilityCount ) &&
                 ( ( grbit & JET_bitInjectionProbabilityPermanent ) || ( grbit & JET_bitInjectionProbabilityFailUntil ) ) ) ||
+            // Invalid to mix these two types of count.
             ( ( grbit & JET_bitInjectionProbabilityPermanent ) && ( grbit & JET_bitInjectionProbabilityFailUntil ) ) ||
+            // Cleanup must be alone.
             ( fCleanup && ( grbit != JET_bitInjectionProbabilityCleanup ) )
         )
     {
         Call( ErrERRCheck( JET_errInvalidParameter ) );
     }
 
+    //  Some specific types of injection may be disabled.
     switch ( typeT )
     {
             default:
@@ -1253,11 +1447,14 @@ ERR ErrEnableTestInjection( const ULONG ulID, const ULONG_PTR pv, const INT type
             break;
     }
 
+    // Have we added too many test injections?
     if( g_cTestInjections >= _countof( g_rgTestInjections ) )
     {
         Call( ErrERRCheck( JET_errTooManyTestInjections ) );
     }
 
+    // find returns the last iterator if it can't find the item,
+    // which is exactly where we want to put the new item
 
     TESTINJECTION* const pinjection = find( g_rgTestInjections, g_rgTestInjections + g_cTestInjections, injectionNew );
 
@@ -1266,11 +1463,13 @@ ERR ErrEnableTestInjection( const ULONG ulID, const ULONG_PTR pv, const INT type
 
     if( fCleanup && fNewInjection )
     {
+        // we're cleaning up a non-existent injection, treat it as a no-op
     }
     else
     {
         if( fCleanup && !fNewInjection )
         {
+            // we're cleaning up / clobbering an existing injection, trace it first
             pinjection->TraceStats();
             injectionNew.Disable();
         }
@@ -1290,15 +1489,20 @@ HandleError:
     return err;
 }
 
+//  ================================================================
 VOID RFSSuppressFaultInjection( const ULONG ulID )
+//  ================================================================
 {
     TESTINJECTION injectionTarget( ulID, NULL, 0, 0 );
 
     Assert( g_fcsTestInjectionsInit );
     EnterCriticalSection( &g_csTestInjections );
 
+    //  parameter validation.
     Assert( ulID != ulIDInvalid );
 
+    //  find returns the last iterator if it can't find the item, which
+    //  will have an ID of 0xffffffff
 
     TESTINJECTION* const pinjection = find( g_rgTestInjections, g_rgTestInjections + g_cTestInjections, injectionTarget );
 
@@ -1306,19 +1510,26 @@ VOID RFSSuppressFaultInjection( const ULONG ulID )
     {
         pinjection->Suppress();
     }
+    //  else if not found it's obviously suppressed ... may have to change if we get someone enabling FI after
+    //  the suppress call.
 
     LeaveCriticalSection( &g_csTestInjections );
 }
 
+//  ================================================================
 VOID RFSUnsuppressFaultInjection( const ULONG ulID )
+//  ================================================================
 {
     TESTINJECTION injectionTarget( ulID, NULL, 0, 0 );
 
     Assert( g_fcsTestInjectionsInit );
     EnterCriticalSection( &g_csTestInjections );
 
+    //  parameter validation.
     Assert( ulID != ulIDInvalid );
 
+    //  find returns the last iterator if it can't find the item, which
+    //  will have an ID of 0xffffffff
 
     TESTINJECTION* const pinjection = find( g_rgTestInjections, g_rgTestInjections + g_cTestInjections, injectionTarget );
 
@@ -1326,14 +1537,22 @@ VOID RFSUnsuppressFaultInjection( const ULONG ulID )
     {
         pinjection->Unsuppress();
     }
+    //  else if not found it obviously can't be unsupressed.
 
     LeaveCriticalSection( &g_csTestInjections );
 }
 
 
-inline BOOL FRFSThreadEnabled();
+inline BOOL FRFSThreadEnabled();    // from RFS2
 
+//-
+//  ================================================================
 INLINE TESTINJECTION* PinjectionFind_( const ULONG ulID )
+//  ================================================================
+//
+//  Returns the test injection structure
+//
+//-
 {
     if( 0 == g_cTestInjections )
     {
@@ -1342,6 +1561,14 @@ INLINE TESTINJECTION* PinjectionFind_( const ULONG ulID )
 
     TESTINJECTION injectionSearch( ulID, NULL, 0, 0x0 );
 
+    //  This code makes 2 implicit assumptions:
+    //      1 - The number of entries g_cTestInjections in the g_rgTestInjections array never shrinks.
+    //          Removal of entries is achieved by placing a marker dummy ID in the entry;
+    //      2 - The g_cTestInjections global variable is updated last in ErrEnableTestInjection() so
+    //          that the present function (which is not protected by the g_csTestInjections critical
+    //          section) will see the change only after the array has been successfully updated. This
+    //          is the reason why ( g_rgTestInjections + g_cTestInjections ) needs to be cached
+    //          upfront below.
 
     TESTINJECTION* pinjection;
     const TESTINJECTION* const pinjectionTail = g_rgTestInjections + g_cTestInjections;
@@ -1354,7 +1581,12 @@ INLINE TESTINJECTION* PinjectionFind_( const ULONG ulID )
     return NULL;
 }
 
+//  ================================================================
 INLINE BOOL FTestInjection_( const ULONG ulID, JET_API_PTR* const ppv )
+//  ================================================================
+//
+//  Returns whether or not to trigger test injection
+//
 {
     TESTINJECTION * const pinjection = PinjectionFind_( ulID );
     if ( pinjection )
@@ -1375,7 +1607,12 @@ INLINE BOOL FTestInjection_( const ULONG ulID, JET_API_PTR* const ppv )
     return fFalse;
 }
 
+//  ================================================================
 QWORD ChitsFaultInj( const ULONG ulID )
+//  ================================================================
+//
+//  Returns whether or not this fault injection has been triggered.
+//
 {
     TESTINJECTION * const pinjection = PinjectionFind_( ulID );
     if ( pinjection )
@@ -1387,35 +1624,51 @@ QWORD ChitsFaultInj( const ULONG ulID )
 }
 
 
-#else
+#else   //  !TEST_INJECTION
 
+//  ================================================================
 ERR ErrEnableTestInjection( const ULONG ulID, const ULONG_PTR pv, const INT type, const ULONG ulProbability, const DWORD grbit )
+//  ================================================================
 {
     return ErrERRCheck( JET_errTestInjectionNotSupported );
 }
 
-#endif
+#endif  //  TEST_INJECTION
 
 
 #ifdef FAULT_INJECTION
 
+//  ================================================================
 ERR ErrFaultInjection_( const ULONG ulID, const CHAR * const szFile, const LONG lLine )
+//  ================================================================
+//
+//  Returns the error set by ErrEnableTestInjection or JET_errSuccess.
+//
+//-
 {
     JET_API_PTR pv;
 
     if ( FTestInjection_( ulID, &pv ) )
     {
+        //  We also pass NTSTATUS faults through here now for 63560, so only ErrERRCheck() if it looks like
+        //  a proper JET_err* constant.  Yes, this is a bit of a layering violation.
         return ( pv && ulID != 63560 ) ? ErrERRCheck_( (ERR)pv, szFile, lLine ) : (ERR)pv;
     }
 
     return JET_errSuccess;
 }
 
-#endif
+#endif  //  FAULT_INJECTION
 
 #ifdef CONFIGOVERRIDE_INJECTION
 
+//  ================================================================
 JET_API_PTR UlConfigOverrideInjection_( const ULONG ulID, const JET_API_PTR ulDefault )
+//  ================================================================
+//
+//  Returns the value set by ErrEnableTestInjection or the default value that was passed in.
+//
+//-
 {
     JET_API_PTR pv;
 
@@ -1427,12 +1680,18 @@ JET_API_PTR UlConfigOverrideInjection_( const ULONG ulID, const JET_API_PTR ulDe
     return ulDefault;
 }
 
-#endif
+#endif  //  CONFIGOVERRIDE_INJECTION
 
 
 #ifdef HANG_INJECTION
 
+//  ================================================================
 void HangInjection_( const ULONG ulID )
+//  ================================================================
+//
+//  Returns the value set by ErrEnableTestInjection or the default value that was passed in.
+//
+//-
 {
     JET_API_PTR pv;
 
@@ -1445,18 +1704,22 @@ void HangInjection_( const ULONG ulID )
     }
 }
 
-#endif
+#endif  //  HANG_INJECTION
 
 
+/*  RFS2 constants */
 
-
-    
+    /*
+        RFS allocator:  returns 0 if allocation is disallowed.  Also handles RFS logging.
+        g_cRFSAlloc is the global allocation counter.  A value of -1 disables RFS in debug mode.
+        A value of -2 breaks into the debugger upon any call to RFS.
+    */
 
 const DWORD cRFSDisable             = (DWORD)-1;
 const DWORD cRFSBreak               = (DWORD)-2;
 const DWORD maskRFSThreadCountdown  = 0x80000000;
 
-
+/*  RFS2 Options Text  */
 
 LOCAL const CHAR szDisableRFS[]                = "Disable RFS";
 LOCAL const CHAR szLogJETCall[]                = "Enable JET Call Logging";
@@ -1464,19 +1727,19 @@ LOCAL const CHAR szLogRFS[]                    = "Enable RFS Logging";
 LOCAL const CHAR szRFSAlloc[]                  = "RFS Allocations (-1 to allow all)";
 LOCAL const CHAR szRFSIO[]                     = "RFS IOs (-1 to allow all)";
 
-
+/*  RFS2 Defaults  */
 
 LOCAL const DWORD_PTR rgrgdwRFS2Defaults[][2] =
 {
-    (DWORD_PTR)szDisableRFS,            fTrue,          
-    (DWORD_PTR)szLogJETCall,            fFalse,         
-    (DWORD_PTR)szLogRFS,                fFalse,         
-    (DWORD_PTR)szRFSAlloc,              cRFSDisable,    
-    (DWORD_PTR)szRFSIO,                 cRFSDisable,    
-    (DWORD_PTR)NULL,                    0,              
+    (DWORD_PTR)szDisableRFS,            fTrue,          /*  Disable RFS  */
+    (DWORD_PTR)szLogJETCall,            fFalse,         /*  Disable JET call logging  */
+    (DWORD_PTR)szLogRFS,                fFalse,         /*  Disable RFS logging  */
+    (DWORD_PTR)szRFSAlloc,              cRFSDisable,    /*  Allow ALL RFS allocations  */
+    (DWORD_PTR)szRFSIO,                 cRFSDisable,    /*  Allow ALL RFS IOs  */
+    (DWORD_PTR)NULL,                    0,              /*  <EOL>  */
 };
 
-
+/*  RFS2 globals */
 
 BOOL g_fDisableRFS      = fTrue;
 BOOL g_fKnownRFSLeak    = fFalse;
@@ -1485,7 +1748,7 @@ BOOL g_fLogRFS          = fFalse;
 DWORD g_cRFSAlloc       = cRFSDisable;
 DWORD g_cRFSIO          = cRFSBreak;
 
-
+/*  RFS2 functions */
 
 void EnableDisableRFS()
 {
@@ -1544,7 +1807,10 @@ inline void RFSDecrementCount( LONG* const plTarget )
     Assert( lTarget >= 0 );
 }
 
-    
+    /*
+        RFS logging (log on success/failure).  If fPermitted == 0, access was denied .  Returns fPermitted.
+        Turns on JET call logging if fPermitted == 0
+    */
 
 inline BOOL UtilRFSLog( const WCHAR* const wszType, const BOOL fPermitted )
 {
@@ -1575,20 +1841,20 @@ inline BOOL UtilRFSLog( const WCHAR* const wszType, const BOOL fPermitted )
 BOOL UtilRFSAlloc( const WCHAR* const wszType, const INT Type )
 {
 
-    
+    /* If we are in clean up state and the alloc type is general allocation (0) */
     if ( FOSGetCleanupState() && Type == UnknownAllocResource )
     {
         AssertSz( fFalse, "Cleanup codepaths should not allocate resources." );
     }
 
-    
+    /*  leave ASAP if we are not enabled  */
 
     if ( g_fDisableRFS )
     {
         return UtilRFSLog( wszType, fTrue );
     }
 
-    
+    /*  Breaking here on RFS failure allows easy change to RFS success during debugging  */
 
     if ( ( ( cRFSBreak == g_cRFSAlloc && Type == 0 ) ||
             ( cRFSBreak == g_cRFSIO && Type == 1 ) ) &&
@@ -1601,11 +1867,11 @@ BOOL UtilRFSAlloc( const WCHAR* const wszType, const INT Type )
 
     switch ( Type )
     {
-        case 0:
+        case 0:  //  general allocation
             pcRFSGlobal = &g_cRFSAlloc;
             break;
 
-        case 1:
+        case 1:  //  IO operation
             pcRFSGlobal = &g_cRFSIO;
             break;
 
@@ -1649,11 +1915,11 @@ BOOL FRFSFailureDetected( const UINT Type )
         return fFalse;
     }
 
-    if ( 0 == Type )
+    if ( 0 == Type )        //  general allocations
     {
         return ( 0 == g_cRFSAlloc );
     }
-    else if ( 1 == Type )
+    else if ( 1 == Type )   //  I/O
     {
         return ( 0 == g_cRFSIO );
     }
@@ -1690,6 +1956,15 @@ BOOL FRFSKnownResourceLeak()
     return g_fKnownRFSLeak;
 }
 
+//  cRFSCountdown is the maximum number of failures that can happen on a given thread.
+//  If it is not time to inject a failure yet, this will not be decremented. For
+//  each injected failure, the cRFSCountdown member of OSTLS is then decremented
+//  so that when it hits zero, operations start succeeding again.
+//  This is used in places currently known to spin forever waiting for memory and/or
+//  I/O to succeed (which we should fix or mitigate, BTW).
+//  Because RFSThreadDisable()/RFSThreadReEnable() can be called from different frames
+//  of a given stack, the contract is that RFSThreadDisable() returns a context number
+//  that must be fed back into RFSThreadReEnable().
 
 LONG RFSThreadDisable( const LONG cRFSCountdown )
 {
@@ -1699,6 +1974,7 @@ LONG RFSThreadDisable( const LONG cRFSCountdown )
     return cRFSCountdownOld;
 }
 
+//  Re-enables normal RFS injection for a thread.
 
 void RFSThreadReEnable( const LONG cRFSCountdownOld )
 {
@@ -1706,7 +1982,9 @@ void RFSThreadReEnable( const LONG cRFSCountdownOld )
     Postls()->cRFSCountdown = cRFSCountdownOld;
 }
 
-    
+    /*  JET call logging (log on failure)
+    /*  Logging will start even if disabled when RFS denies an allocation
+    /**/
 
 void UtilRFSLogJETCall( const CHAR* const szFunc, const ERR err, const CHAR* const szFile, const unsigned Line )
 {
@@ -1722,6 +2000,8 @@ void UtilRFSLogJETCall( const CHAR* const szFunc, const ERR err, const CHAR* con
     }
 
     errTemp = ErrOSStrCbFormatW( szFuncName, sizeof( szFuncName ), L"%hs", szFunc );
+    // it is ok to have names bigger then 64 chars and we will truncate
+    //
     Assert( JET_errSuccess <= errTemp || JET_errBufferTooSmall == errTemp );
 
     rgszT[0] = szFuncName;
@@ -1743,7 +2023,7 @@ void UtilRFSLogJETCall( const CHAR* const szFunc, const ERR err, const CHAR* con
             rgszT );
 }
 
-    
+    /*  JET INLINE error logging (logging controlled by JET call flags)  */
 
 void UtilRFSLogJETErr( const ERR err, const CHAR* const szLabel, const CHAR* const szFile, const unsigned Line )
 {
@@ -1785,6 +2065,7 @@ BOOL RFSError::Check( ERR err, ... ) const
     for ( ; err != 0; err = va_arg( arg_ptr, ERR ) )
     {
         Assert( err > -9000 && err < 9000 );
+        // acceptable RFS error
         if ( m_err == err )
         {
             break;
@@ -1794,19 +2075,21 @@ BOOL RFSError::Check( ERR err, ... ) const
     va_end( arg_ptr );
     return (err != 0);
 }
-#else
+#else // !RFS2
 
 inline BOOL FRFSThreadEnabled()
 {
     return fFalse;
 }
 
-#endif
+#endif // RFS2
 
 
+//  post-terminate error subsystem
 
 void OSErrorPostterm()
 {
+    //  delete critical sections
 
 #ifdef TEST_INJECTION
     if( g_fcsTestInjectionsInit )
@@ -1828,9 +2111,11 @@ void OSErrorPostterm()
     }
 }
 
+//  pre-init error subsystem
 
 BOOL FOSErrorPreinit()
 {
+    //  initialize critical sections
 
     if ( !InitializeCriticalSectionAndSpinCount( &g_csError, 0 ) )
     {
@@ -1854,25 +2139,34 @@ HandleError:
 }
 
 
+//  terminate error subsystem
 
 void OSErrorTerm()
 {
+    //  nop
 }
 
+//  init error subsystem
 
 ERR ErrOSErrorInit()
 {
+    //  nop
 
     return JET_errSuccess;
 }
 
 
 #ifndef RTM
+//  Usable bits/flags defined in jethdr.w (fDeletingLogFiles is first enum)
 DWORD   g_grbitNegativeTesting  = 0x0;
 #endif
 
 
+//Repair/Integrity Utility
+// Pop up a message box for user instruction
+//===============================================================
 BOOL FUtilRepairIntegrityMsgBox( const WCHAR * const wszMsg )
+//===============================================================
 {
     const WCHAR wszCaptionWarning[]     = L"Warning";
     const INT       id                      = UtilMessageBoxW(
@@ -1882,6 +2176,7 @@ BOOL FUtilRepairIntegrityMsgBox( const WCHAR * const wszMsg )
     return ( IDCANCEL != id );
 }
 
+//  map Win32 error to JET API error
 ERR ErrOSErrFromWin32Err( __in DWORD dwWinError, __in ERR errDefault )
 {
     switch ( dwWinError )
@@ -1895,6 +2190,9 @@ ERR ErrOSErrFromWin32Err( __in DWORD dwWinError, __in ERR errDefault )
         case ERROR_HANDLE_EOF:
         case ERROR_VC_DISCONNECTED:
         case ERROR_IO_DEVICE:
+            // consider moving ERROR_DEVICE_NOT_CONNECTED so we return JET_errFileNotFound, like
+            // we do for CD-ROM ERROR_NOT_READY ...
+            // Another error to consider might be: ERROR_NO_MEDIA_IN_DRIVE
         case ERROR_DEVICE_NOT_CONNECTED:
             return ErrERRCheck( JET_errDiskIO );
 
@@ -1903,6 +2201,9 @@ ERR ErrOSErrFromWin32Err( __in DWORD dwWinError, __in ERR errDefault )
             return ErrERRCheck( JET_errFileSystemCorruption );
 
         case ERROR_NOT_READY:
+            // CD-ROMs return ERROR_NOT_READY, when no CD is in them.  This is found to be an
+            // unexpected condition for recovery, so logically we feel this is the same as
+            // file not found.
         case ERROR_NO_MORE_FILES:
         case ERROR_FILE_NOT_FOUND:
             return ErrERRCheck( JET_errFileNotFound );
@@ -1946,7 +2247,11 @@ ERR ErrOSErrFromWin32Err(__in DWORD dwWinError)
 
 const CHAR * g_szBadSourceFileName  = "#BadFileName#";
 
+//  This gets the main filename, ergo "C:\MySource\Blah.cxx" gives "Blah.cxx".
 
+//  Note: This func is used in Assert()s and places that need to stay super-stable
+//  so if anything is wrong with the seeming format of the file, it will return
+//  either "#BadFileName#" or (for NULL files) "".
 
 const CHAR * SzSourceFileName( const CHAR * szFilePath )
 {

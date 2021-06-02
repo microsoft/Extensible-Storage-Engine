@@ -8,18 +8,27 @@
 #include "PageSizeClean.hxx"
 
 
+///#define BREAK_ON_PREFERRED_BUCKET_LIMIT
 
 #ifdef DEBUG
 
+//  DEBUG_VER:  check the consistency of the version store hash table
+///#define DEBUG_VER
 
+//  DEBUG_VER_EXPENSIVE:  time-consuming version store consistency check
+///#define DEBUG_VER_EXPENSIVE
 
-#endif
+#endif  //  DEBUG
 
+//  forward declarations
 
 BOOL FResCloseToQuota( INST * const pinst, JET_RESID resid );
 
 #ifdef PERFMON_SUPPORT
 
+//  ****************************************************************
+//  PERFMON STATISTICS
+//  ****************************************************************
 
 PERFInstanceDelayedTotal<> cVERcbucketAllocated;
 PERFInstanceDelayedTotal<> cVERcbucketDeleteAllocated;
@@ -33,14 +42,18 @@ PERFInstanceDelayedTotal<> cVERCleanupDiscarded;
 PERFInstanceDelayedTotal<> cVERCleanupFailed;
 
 
+//  ================================================================
 LONG LVERcbucketAllocatedCEFLPv( LONG iInstance, VOID * pvBuf )
+//  ================================================================
 {
     cVERcbucketAllocated.PassTo( iInstance, pvBuf );
     return 0;
 }
 
 
+//  ================================================================
 LONG LVERcbucketDeleteAllocatedCEFLPv( LONG iInstance, VOID * pvBuf )
+//  ================================================================
 {
     if ( pvBuf )
     {
@@ -59,14 +72,18 @@ LONG LVERcbucketDeleteAllocatedCEFLPv( LONG iInstance, VOID * pvBuf )
 }
 
 
+//  ================================================================
 LONG LVERBucketAllocWaitForRCECleanCEFLPv( LONG iInstance, VOID * pvBuf )
+//  ================================================================
 {
     cVERBucketAllocWaitForRCEClean.PassTo( iInstance, pvBuf );
     return 0;
 }
 
 
+//  ================================================================
 LONG LVERcbAverageBookmarkCEFLPv( LONG iInstance, VOID * pvBuf )
+//  ================================================================
 {
     if ( NULL != pvBuf )
     {
@@ -91,46 +108,63 @@ LONG LVERcbAverageBookmarkCEFLPv( LONG iInstance, VOID * pvBuf )
 }
 
 
+//  ================================================================
 LONG LVERUnnecessaryCallsCEFLPv( LONG iInstance, VOID * pvBuf )
+//  ================================================================
 {
     cVERUnnecessaryCalls.PassTo( iInstance, pvBuf );
     return 0;
 }
 
+//  ================================================================
 LONG LVERAsyncCleanupDispatchedCEFLPv( LONG iInstance, VOID * pvBuf )
+//  ================================================================
 {
     cVERAsyncCleanupDispatched.PassTo( iInstance, pvBuf );
     return 0;
 }
 
+//  ================================================================
 LONG LVERSyncCleanupDispatchedCEFLPv( LONG iInstance, VOID * pvBuf )
+//  ================================================================
 {
     cVERSyncCleanupDispatched.PassTo( iInstance, pvBuf );
     return 0;
 }
 
+//  ================================================================
 LONG LVERCleanupDiscardedCEFLPv( LONG iInstance, VOID * pvBuf )
+//  ================================================================
 {
     cVERCleanupDiscarded.PassTo( iInstance, pvBuf );
     return 0;
 }
 
+//  ================================================================
 LONG LVERCleanupFailedCEFLPv( LONG iInstance, VOID * pvBuf )
+//  ================================================================
 {
     cVERCleanupFailed.PassTo( iInstance, pvBuf );
     return 0;
 }
 
-#endif
+#endif // PERFMON_SUPPORT
 
 
 
+//  ****************************************************************
+//  GLOBALS
+//  ****************************************************************
 
 const DIRFLAG   fDIRUndo = fDIRNoLog | fDIRNoVersion | fDIRNoDirty;
 
+//  exported
 volatile LONG   g_crefVERCreateIndexLock  = 0;
 
 
+//  ****************************************************************
+//  VER class
+//  ****************************************************************
 
 static const INT cbatchesMaxDefault = 128;
 static const INT ctasksPerBatchMaxDefault = 1024;
@@ -146,7 +180,8 @@ VER::VER( INST *pinst )
         m_critBucketGlobal( CLockBasicInfo( CSyncBasicInfo( szBucketGlobal ), rankBucketGlobal, 0 ) ),
 #ifdef VERPERF
         m_critVERPerf( CLockBasicInfo( CSyncBasicInfo( szVERPerf ), rankVERPerf, 0 ) ),
-#endif
+#endif  //  VERPERF
+        // RAND_MAX is only 32K so there is no underflow risk
         m_rceidLast( 0xFFFFFFFF - ( rand() * 2 ) ),
         m_rectaskbatcher(
             pinst,
@@ -156,12 +191,18 @@ VER::VER( INST *pinst )
         m_cresBucket( pinst )
 {
 
+    //  initialised to the Set state (it should
+    //  be impossible to wait on the signal if
+    //  it didn't first get reset, but this
+    //  will guarantee it)
+    //
     m_msigRCECleanPerformedRecently.Set();
 
 #ifdef VERPERF
     HRT hrtStartHrts = HrtHRTCount();
 #endif
 
+    // m_rceidLast must be odd so that it can never be equal to rceidNull
     Assert(0 != (m_rceidLast % 2));
     Assert(0 == (rceidNull % 2));
 }
@@ -172,8 +213,19 @@ VER::~VER()
 
 
 
+//  ****************************************************************
+//  BUCKET LAYER
+//  ****************************************************************
+//
+//  A bucket is a contiguous block of memory used to hold versions.
+//
+//-
 
+//  ================================================================
 INLINE size_t VER::CbBUFree( const BUCKET * pbucket )
+//  ================================================================
+//
+//-
 {
     const size_t cbBUFree = m_cbBucket - ( (BYTE*)pbucket->hdr.prceNextNew - (BYTE*)pbucket );
     Assert( cbBUFree < m_cbBucket );
@@ -181,7 +233,13 @@ INLINE size_t VER::CbBUFree( const BUCKET * pbucket )
 }
 
 
+//  ================================================================
 INLINE BOOL VER::FVERICleanDiscardDeletes()
+//  ================================================================
+//
+//  If the version store is really full we will simply discard the
+//  RCEs (only if not cleaning the last bucket)
+//
 {
     DWORD_PTR       cbucketMost     = 0;
     DWORD_PTR       cbucket         = 0;
@@ -192,15 +250,23 @@ INLINE BOOL VER::FVERICleanDiscardDeletes()
 
     if ( cbucket > min( cbucketMost, UlParam( m_pinst, JET_paramPreferredVerPages ) ) )
     {
+        //  discard deletes if we've exceeded the preferred threshold
+        //  or if the task manager is being overrun
+        //
         fDiscardDeletes = fTrue;
     }
     else if ( m_pbucketGlobalHead != m_pbucketGlobalTail
             && ( cbucketMost - cbucket ) < 2 )
     {
+        //  discard deletes if this is not the only bucket and there are
+        //  less than two buckets left
+        //
         fDiscardDeletes = fTrue;
     }
     else if ( FResCloseToQuota( m_pinst, JET_residFCB ) )
     {
+        //  discard deletes if we are running out of FCBs for
+        //  active instances.
         fDiscardDeletes = fTrue;
     }
 
@@ -213,8 +279,27 @@ VOID VER::VERIReportDiscardedDeletes( const RCE * const prce )
 
     FMP * const pfmp        = g_rgfmp + prce->Ifmp();
 
+    //  UNDONE: there's a small window here where the RCE could get nullified
+    //  after we do the FOperNull() check but before we can extract the trxBegin0,
+    //  in which case we'll assert in DBG that the RCE is invalid to read. This is
+    //  actually harmless, but it's too much of a pain to try to completely close
+    //  the concurrency hole just for an assert, so just ignore the assert if
+    //  it ever goes off. We know the RCE could not be going away (because we
+    //  have critRCEClean), so it's fine to read trxBegin0 from it even if it
+    //  gets nullified underneath us. Nevertheless, a second FOperNull() check is
+    //  done anyway just to be safe and ensure we don't read some bogus trxBegin0
+    //  value.
+    //
     const TRX   trxBegin0   = ( prce->FOperNull() ? trxMax : prce->TrxBegin0() );
 
+    //  if OLD is already running on this database,
+    //  don't bother reporting discarded deletes
+    //
+    //  we keep track of the NEWEST trx at the time discards were last
+    //  reported, and will only generate future discard reports for
+    //  deletes that occurred after the current trxNewest (this is a
+    //  means of ensuring we don't report too often)
+    //
     if ( !pfmp->FRunningOLD()
         && !prce->FOperNull()
         && ( pfmp->TrxNewestWhenDiscardsLastReported() == trxMin ||
@@ -240,6 +325,9 @@ VOID VER::VERIReportDiscardedDeletes( const RCE * const prce )
                 NULL,
                 m_pinst );
 
+        //  this ensures no further reports will be generated for
+        //  deletes which were present in the version store at
+        //  the time this report was generated
         pfmp->SetTrxNewestWhenDiscardsLastReported( m_pinst->m_trxNewest );
     }
 }
@@ -276,6 +364,7 @@ VOID VER::VERIReportVersionStoreOOM( PIB * ppibTrxOldest, BOOL fMaxTrxSize, cons
         }
     }
 
+    //  only generate the eventlog entry once per long-running transaction
     if ( ppibNil != ppibTrxOldest )
     {
         const TRX   trxBegin0           = ppibTrxOldest->trxBegin0;
@@ -307,6 +396,7 @@ VOID VER::VERIReportVersionStoreOOM( PIB * ppibTrxOldest, BOOL fMaxTrxSize, cons
             Assert( cbucket <= cbucketMost );
             if ( fMaxTrxSize )
             {
+                // Report cases where we have hit max trx size but not yet VSOOM.
                 const UINT  csz     = 9;
                 const WCHAR * rgcwsz[csz];
                 WCHAR       wszCurrVerPages[16];
@@ -337,6 +427,7 @@ VOID VER::VERIReportVersionStoreOOM( PIB * ppibTrxOldest, BOOL fMaxTrxSize, cons
             }
             else if ( cbucket < cbucketMost )
             {
+                //  OOM because NT returned OOM
                 const UINT  csz     = 9;
                 const WCHAR * rgcwsz[csz];
                 WCHAR       wszCurrVerPages[16];
@@ -367,6 +458,7 @@ VOID VER::VERIReportVersionStoreOOM( PIB * ppibTrxOldest, BOOL fMaxTrxSize, cons
             }
             else
             {
+                //  OOM because the user-specified max. has been reached
                 const UINT  csz     = 7;
                 const WCHAR * rgcwsz[csz];
 
@@ -419,17 +511,34 @@ VOID VER::VERIReportVersionStoreOOM( PIB * ppibTrxOldest, BOOL fMaxTrxSize, cons
 }
 
 
+//  ================================================================
 INLINE ERR VER::ErrVERIBUAllocBucket( const INT cbRCE, const UINT uiHash )
+//  ================================================================
+//
+//  Inserts a bucket to the top of the bucket chain, so that new RCEs
+//  can be inserted.  Note that the caller must set ibNewestRCE himself.
+//
+//-
 {
+    //  use m_critBucketGlobal to make sure only one allocation
+    //  occurs at one time.
     Assert( m_critBucketGlobal.FOwner() );
 
+    //  caller would only call this routine if they determined
+    //  that current bucket was not enough to satisfy allocation
+    //
     Assert( m_pbucketGlobalHead == pbucketNil
         || (size_t)cbRCE > CbBUFree( m_pbucketGlobalHead ) );
 
+    //  signal RCE clean in case it can now do work
     VERSignalCleanup();
 
+    //  Must allocate within m_critBucketGlobal to make sure that
+    //  the allocated bucket will be in circularly increasing order.
     BUCKET *  pbucket = new( this ) BUCKET( this );
 
+    //  We are really out of bucket, return to high level function
+    //  call to retry.
     if ( pbucketNil == pbucket )
     {
         m_critBucketGlobal.Leave();
@@ -439,6 +548,9 @@ INLINE ERR VER::ErrVERIBUAllocBucket( const INT cbRCE, const UINT uiHash )
             RwlRCEChain( uiHash ).LeaveAsWriter();
         }
 
+        //  ensure RCE clean was performed recently (if our wait times out, it
+        //  means something is horribly wrong and blocking version cleanup)
+        //
         const BOOL  fCleanupWasRun  = m_msigRCECleanPerformedRecently.FWait( cmsecAsyncBackgroundCleanup );
 
         PERFOpt( cVERBucketAllocWaitForRCEClean.Inc( m_pinst ) );
@@ -450,13 +562,22 @@ INLINE ERR VER::ErrVERIBUAllocBucket( const INT cbRCE, const UINT uiHash )
 
         m_critBucketGlobal.Enter();
 
+        //  see if someone else beat us to it
+        //
         if ( m_pbucketGlobalHead == pbucketNil || (size_t)cbRCE > CbBUFree( m_pbucketGlobalHead ) )
         {
+            //  retry allocation
+            //
             pbucket = new( this ) BUCKET( this );
 
+            //  check again
+            //
             if ( pbucketNil == pbucket )
             {
-                VERIReportVersionStoreOOM( NULL, fFalse , fCleanupWasRun );
+                //  still couldn't allocate bucket, so bail with
+                //  appropriate error
+                //
+                VERIReportVersionStoreOOM( NULL, fFalse /* fMaxTrxSize */, fCleanupWasRun );
                 return ErrERRCheck( fCleanupWasRun ?
                                         JET_errVersionStoreOutOfMemory :
                                         JET_errVersionStoreOutOfMemoryAndCleanupTimedOut );
@@ -464,22 +585,28 @@ INLINE ERR VER::ErrVERIBUAllocBucket( const INT cbRCE, const UINT uiHash )
         }
         else
         {
+            //  someone allocated a bucket for us, so just bail
+            //
             return JET_errSuccess;
         }
     }
 
+    //  ensure RCE's will be properly aligned
     Assert( pbucketNil != pbucket );
     Assert( FAlignedForThisPlatform( pbucket ) );
     Assert( FAlignedForThisPlatform( pbucket->rgb ) );
     Assert( (BYTE *)PvAlignForThisPlatform( pbucket->rgb ) == pbucket->rgb );
 
+    //  Link up the bucket to global list.
     pbucket->hdr.pbucketPrev = m_pbucketGlobalHead;
     if ( pbucket->hdr.pbucketPrev )
     {
+        //  there is a bucket after us
         pbucket->hdr.pbucketPrev->hdr.pbucketNext = pbucket;
     }
     else
     {
+        //  we are last in the chain
         m_pbucketGlobalTail = pbucket;
     }
     m_pbucketGlobalHead = pbucket;
@@ -508,12 +635,20 @@ INLINE ERR VER::ErrVERIBUAllocBucket( const INT cbRCE, const UINT uiHash )
         }
     }
 
+    //  if RCE doesn't fit into an empty bucket, something is horribly wrong
+    //
     Assert( (size_t)cbRCE <= CbBUFree( pbucket ) );
     return ( (size_t)cbRCE > CbBUFree( pbucket ) ? ErrERRCheck( JET_errVersionStoreEntryTooBig ) : JET_errSuccess );
 }
 
 
+//  ================================================================
 INLINE BUCKET *VER::PbucketVERIGetOldest( )
+//  ================================================================
+//
+//  find the oldest bucket in the bucket chain
+//
+//-
 {
     Assert( m_critBucketGlobal.FOwner() );
 
@@ -524,19 +659,22 @@ INLINE BUCKET *VER::PbucketVERIGetOldest( )
 }
 
 
+//  ================================================================
 BUCKET *VER::PbucketVERIFreeAndGetNextOldestBucket( BUCKET * pbucket )
+//  ================================================================
 {
     Assert( m_critBucketGlobal.FOwner() );
 
     BUCKET * const pbucketNext = (BUCKET *)pbucket->hdr.pbucketNext;
     BUCKET * const pbucketPrev = (BUCKET *)pbucket->hdr.pbucketPrev;
 
+    //  unlink bucket from bucket chain and free.
     if ( pbucketNil != pbucketNext )
     {
         Assert( m_pbucketGlobalHead != pbucket );
         pbucketNext->hdr.pbucketPrev = pbucketPrev;
     }
-    else
+    else    //  ( pbucketNil == pbucketNext )
     {
         Assert( m_pbucketGlobalHead == pbucket );
         m_pbucketGlobalHead = pbucketPrev;
@@ -547,7 +685,7 @@ BUCKET *VER::PbucketVERIFreeAndGetNextOldestBucket( BUCKET * pbucket )
         Assert( m_pbucketGlobalTail != pbucket );
         pbucketPrev->hdr.pbucketNext = pbucketNext;
     }
-    else
+    else    //  ( pbucketNil == pbucketPrev )
     {
         m_pbucketGlobalTail = pbucketNext;
     }
@@ -575,7 +713,9 @@ BUCKET *VER::PbucketVERIFreeAndGetNextOldestBucket( BUCKET * pbucket )
 }
 
 
+//  ================================================================
 INLINE CReaderWriterLock& VER::RwlRCEChain( UINT ui )
+//  ================================================================
 {
     Assert( m_frceHashTableInited );
     Assert( ui < m_crceheadHashTable );
@@ -603,7 +743,9 @@ INLINE VOID VER::SetChain( UINT ui, RCE *prce )
     m_rgrceheadHashTable[ ui ].prceChain = prce;
 }
 
+//  ================================================================
 CReaderWriterLock& RCE::RwlChain()
+//  ================================================================
 {
     Assert( ::FOperInHashTable( m_oper ) );
     Assert( uiHashInvalid != m_uiHash );
@@ -611,13 +753,16 @@ CReaderWriterLock& RCE::RwlChain()
 }
 
 
+//  ================================================================
 LOCAL UINT UiRCHashFunc( IFMP ifmp, PGNO pgnoFDP, const BOOKMARK& bookmark, const UINT crcehead = 0 )
+//  ================================================================
 {
     ASSERT_VALID( &bookmark );
     Assert( pgnoNull != pgnoFDP );
 
     const UINT crceheadHashTable = crcehead ? crcehead : PverFromIfmp( ifmp )->m_crceheadHashTable;
 
+    //  An optimized version of the hash function from "Algorithms in C++" by Sedgewick
 
     UINT uiHash =   (UINT)ifmp
                     + pgnoFDP
@@ -715,38 +860,51 @@ LOCAL UINT UiRCHashFunc( IFMP ifmp, PGNO pgnoFDP, const BOOKMARK& bookmark, cons
 
 #ifdef DEBUGGER_EXTENSION
 
+//  ================================================================
 UINT UiVERHash( IFMP ifmp, PGNO pgnoFDP, const BOOKMARK& bookmark, const UINT crcehead )
+//  ================================================================
+//
+//  Used by the debugger extension
+//
 {
     return UiRCHashFunc( ifmp, pgnoFDP, bookmark, crcehead );
 }
 
-#endif
+#endif  //  DEBUGGER_EXTENSION
 
 #ifdef DEBUG
 
 
+//  ================================================================
 BOOL RCE::FAssertRwlHash_() const
+//  ================================================================
 {
     Assert( ::FOperInHashTable( m_oper ) );
     return  PverFromIfmp( Ifmp() )->RwlRCEChain( m_uiHash ).FReader() ||
             PverFromIfmp( Ifmp() )->RwlRCEChain( m_uiHash ).FWriter();
 }
 
+//  ================================================================
 BOOL RCE::FAssertRwlHashAsWriter_() const
+//  ================================================================
 {
     Assert( ::FOperInHashTable( m_oper ) );
     return  PverFromIfmp( Ifmp() )->RwlRCEChain( m_uiHash ).FWriter();
 }
 
 
+//  ================================================================
 BOOL RCE::FAssertCritFCBRCEList_() const
+//  ================================================================
 {
     Assert( !::FOperNull( m_oper ) );
     return Pfcb()->CritRCEList().FOwner();
 }
 
 
+//  ================================================================
 BOOL RCE::FAssertRwlPIB_() const
+//  ================================================================
 {
     Assert( !FFullyCommitted() );
     Assert( !::FOperNull( m_oper ) );
@@ -754,16 +912,27 @@ BOOL RCE::FAssertRwlPIB_() const
 }
 
 
+//  ================================================================
 BOOL RCE::FAssertReadable_() const
+//  ================================================================
+//
+//  We can read the const members of a RCE if we are holding an accessing
+//  critical section or the RCE is committed but younger than the oldest active
+//  transaction or the RCE is older than the oldest transaction and we are
+//  RCECleanup
+//
+//-
 {
     AssertRTL( !::FOperNull( m_oper ) );
     return fTrue;
 }
 
 
-#endif
+#endif  //  DEBUG
 
+//  ================================================================
 VOID RCE::AssertValid() const
+//  ================================================================
 {
     Assert( FAlignedForThisPlatform( this  ) );
     Assert( FAssertReadable_() );
@@ -788,6 +957,7 @@ VOID RCE::AssertValid() const
     }
     else
     {
+        //  No-one can see these members if we are not in the hash table
         AssertRTL( prceNil == m_prceNextOfNode );
         AssertRTL( prceNil == m_prcePrevOfNode );
     }
@@ -818,12 +988,17 @@ VOID RCE::AssertValid() const
 
     if ( FFullyCommitted() )
     {
+        //  we are committed to level 0
         AssertRTL( 0 == m_level );
         AssertRTL( prceNil == m_prceNextOfSession );
         AssertRTL( prceNil == m_prcePrevOfSession );
     }
 
 #ifdef SYNC_DEADLOCK_DETECTION
+    //  UNDONE: must be in critRCEChain to make these checks
+    //  (otherwise the RCE might get nullified from underneath us),
+    //  but the FOwner() check currently doesn't work properly if
+    //  SYNC_DEADLOCK_DETECTION is disabled
 
     const IFMP ifmp = Ifmp();
 
@@ -860,6 +1035,7 @@ VOID RCE::AssertValid() const
                         case operInsert:
                         case operPreInsert:
                         case operWriteLock:
+                            //  these are the only valid operations after a delete
                             break;
 
                         default:
@@ -872,7 +1048,7 @@ VOID RCE::AssertValid() const
         }
     }
 
-#endif
+#endif  //  SYNC_DEADLOCK_DETECTION
 
 }
 
@@ -880,7 +1056,9 @@ VOID RCE::AssertValid() const
 #ifndef RTM
 
 
+//  ================================================================
 ERR VER::ErrCheckRCEChain( const RCE * const prce, const UINT uiHash ) const
+//  ================================================================
 {
     const RCE   * prceChainOld  = prceNil;
     const RCE   * prceChain     = prce;
@@ -900,7 +1078,9 @@ ERR VER::ErrCheckRCEChain( const RCE * const prce, const UINT uiHash ) const
 }
 
 
+//  ================================================================
 ERR VER::ErrCheckRCEHashList( const RCE * const prce, const UINT uiHash ) const
+//  ================================================================
 {
     ERR err = JET_errSuccess;
     const RCE * prceT = prce;
@@ -912,7 +1092,14 @@ ERR VER::ErrCheckRCEHashList( const RCE * const prce, const UINT uiHash ) const
 }
 
 
+//  ================================================================
 ERR VER::ErrInternalCheck()
+//  ================================================================
+//
+//  check the consistency of the entire hash table, entering the
+//  critical sections if needed
+//
+//-
 {
     ERR err = JET_errSuccess;
     UINT uiHash = 0;
@@ -929,9 +1116,10 @@ ERR VER::ErrInternalCheck()
 }
 
 
-#endif
+#endif  //  !RTM
 
 
+//  ================================================================
 INLINE RCE::RCE(
             FCB *       pfcb,
             FUCB *      pfucb,
@@ -947,6 +1135,7 @@ INLINE RCE::RCE(
             BOOL        fProxy,
             RCEID       rceid
             ) :
+//  ================================================================
     m_pfcb( pfcb ),
     m_pfucb( pfucb ),
     m_ifmp( pfcb->Ifmp() ),
@@ -964,7 +1153,7 @@ INLINE RCE::RCE(
     m_oper( (USHORT)oper ),
     m_uiHash( uiHash ),
     m_pgnoUndoInfo( pgnoNull ),
-    m_fRolledBack( fFalse ),
+    m_fRolledBack( fFalse ),            //  protected by m_critBucketGlobal
     m_fMoved( fFalse ),
     m_fProxy( fProxy ? fTrue : fFalse ),
     m_fEmptyDiff( fFalse ),
@@ -978,33 +1167,41 @@ INLINE RCE::RCE(
         m_prcePrevOfSession             = prceInvalid;
         m_prceNextOfFCB                 = prceInvalid;
         m_prcePrevOfFCB                 = prceInvalid;
-#endif
+#endif  //  DEBUG
 
     }
 
 
+//  ================================================================
 INLINE BYTE * RCE::PbBookmark()
+//  ================================================================
 {
     Assert( FAssertRwlHash_() );
     return m_rgbData + m_cbData;
 }
 
 
+//  ================================================================
 INLINE RCE *&RCE::PrceHashOverflow()
+//  ================================================================
 {
     Assert( FAssertRwlHash_() );
     return m_prceHashOverflow;
 }
 
 
+//  ================================================================
 INLINE VOID RCE::SetPrceHashOverflow( RCE * prce )
+//  ================================================================
 {
     Assert( FAssertRwlHashAsWriter_() );
     m_prceHashOverflow = prce;
 }
 
 
+//  ================================================================
 INLINE VOID RCE::SetPrceNextOfNode( RCE * prce )
+//  ================================================================
 {
     Assert( FAssertRwlHashAsWriter_() );
     Assert( prceNil == prce
@@ -1013,7 +1210,9 @@ INLINE VOID RCE::SetPrceNextOfNode( RCE * prce )
 }
 
 
+//  ================================================================
 INLINE VOID RCE::SetPrcePrevOfNode( RCE * prce )
+//  ================================================================
 {
     Assert( FAssertRwlHashAsWriter_() );
     Assert( prceNil == prce
@@ -1022,51 +1221,68 @@ INLINE VOID RCE::SetPrcePrevOfNode( RCE * prce )
 }
 
 
+//  ================================================================
 INLINE VOID RCE::FlagRolledBack()
+//  ================================================================
 {
     Assert( FAssertRwlPIB_() );
     m_fRolledBack = fTrue;
 }
 
 
+//  ================================================================
 INLINE VOID RCE::FlagMoved()
+//  ================================================================
 {
     m_fMoved = fTrue;
 }
 
 
+//  ================================================================
 INLINE VOID RCE::SetPrcePrevOfSession( RCE * prce )
+//  ================================================================
 {
     m_prcePrevOfSession = prce;
 }
 
 
+//  ================================================================
 INLINE VOID RCE::SetPrceNextOfSession( RCE * prce )
+//  ================================================================
 {
     m_prceNextOfSession = prce;
 }
 
 
+//  ================================================================
 INLINE VOID RCE::SetLevel( LEVEL level )
+//  ================================================================
 {
     Assert( FAssertRwlPIB_() || PinstFromIfmp( m_ifmp )->m_plog->FRecovering() );
-    Assert( m_level > level );
+    Assert( m_level > level );  // levels are always decreasing
     m_level = level;
 }
 
 
+//  ================================================================
 INLINE VOID RCE::SetTrxCommitted( const TRX trx )
+//  ================================================================
 {
     Assert( !FOperInHashTable() || FAssertRwlHashAsWriter_() );
     Assert( FAssertRwlPIB_() || PinstFromIfmp( m_ifmp )->m_plog->FRecovering() );
     Assert( FAssertCritFCBRCEList_()  );
-    Assert( prceNil == m_prcePrevOfSession );
+    Assert( prceNil == m_prcePrevOfSession );   //  only uncommitted RCEs in session list
     Assert( prceNil == m_prceNextOfSession );
-    Assert( prceInvalid == m_prceUndoInfoNext );
+    Assert( prceInvalid == m_prceUndoInfoNext );    //  no before image when committing to 0
     Assert( prceInvalid == m_prceUndoInfoPrev );
     Assert( pgnoNull == m_pgnoUndoInfo );
     Assert( TrxCmp( trx, m_trxBegin0 ) > 0 );
 
+    //  ptrxCommitted should currently be pointing into the
+    //  owning sessions's PIB, since the session has now
+    //  committed, we want to copy the trxCommit0 into
+    //  the RCE and switch ptrxCommitted to now point there
+    //
     Assert( trx == *m_ptrxCommitted );
     Assert( trxMax == m_trxCommittedInactive );
     m_trxCommittedInactive = trx;
@@ -1074,7 +1290,14 @@ INLINE VOID RCE::SetTrxCommitted( const TRX trx )
 }
 
 
+//  ================================================================
 INLINE VOID RCE::NullifyOper()
+//  ================================================================
+//
+//  This is the end of the RCEs lifetime. It must have been removed
+//  from all lists
+//
+//-
 {
     Assert( prceNil == m_prceNextOfNode );
     Assert( prceNil == m_prcePrevOfNode );
@@ -1088,26 +1311,42 @@ INLINE VOID RCE::NullifyOper()
 
     m_oper |= operMaskNull;
 
+    //  make sure ptrxCommitted points into the RCE
+    //
     m_ptrxCommitted = &m_trxCommittedInactive;
 }
 
 
+//  ================================================================
 INLINE VOID RCE::NullifyOperForMove()
+//  ================================================================
+//
+//  RCE has been copied elsewhere -- nullify this copy
+//
+//-
 {
     m_oper |= ( operMaskNull | operMaskNullForMove );
 }
 
 
+//  ================================================================
 LOCAL BOOL FRCECorrect( IFMP ifmp, PGNO pgnoFDP, const BOOKMARK& bookmark, const RCE * prce )
+//  ================================================================
+//
+//  Checks whether a RCE describes the given BOOKMARK
+//
+//-
 {
     ASSERT_VALID( prce );
 
     BOOL fRCECorrect = fFalse;
 
+    //  same database and table
     if ( prce->Ifmp() == ifmp && prce->PgnoFDP() == pgnoFDP )
     {
         if ( bookmark.key.Cb() == prce->CbBookmarkKey() && (INT)bookmark.data.Cb() == prce->CbBookmarkData() )
         {
+            //  bookmarks are the same length
             BOOKMARK bookmarkRCE;
             prce->GetBookmark( &bookmarkRCE );
 
@@ -1118,7 +1357,16 @@ LOCAL BOOL FRCECorrect( IFMP ifmp, PGNO pgnoFDP, const BOOKMARK& bookmark, const
 }
 
 
+//  ================================================================
 BOOL RCE::FRCECorrectEDBG( IFMP ifmp, PGNO pgnoFDP, const BOOKMARK& bookmark )
+//  ================================================================
+//
+//  Checks whether a RCE describes the given BOOKMARK
+//
+//  HACK: This is just a stripped-down version of the function above, with asserts removed
+//  so debugger extensions don't trip over them.
+//
+//-
 {
     BOOL fRCECorrect = fFalse;
 
@@ -1126,6 +1374,8 @@ BOOL RCE::FRCECorrectEDBG( IFMP ifmp, PGNO pgnoFDP, const BOOKMARK& bookmark )
     {
         if ( bookmark.key.Cb() == m_cbBookmarkKey && bookmark.data.Cb() == m_cbBookmarkData )
         {
+            //  bookmarks are the same length, so now compare the bytes
+            //
             BOOKMARK bookmarkRCE;
             bookmarkRCE.key.prefix.Nullify();
             bookmarkRCE.key.suffix.SetPv( const_cast<BYTE *>( m_rgbData + m_cbData ) );
@@ -1140,7 +1390,13 @@ BOOL RCE::FRCECorrectEDBG( IFMP ifmp, PGNO pgnoFDP, const BOOKMARK& bookmark )
 }
 
 
+//  ================================================================
 LOCAL RCE **PprceRCEChainGet( UINT uiHash, IFMP ifmp, PGNO pgnoFDP, const BOOKMARK& bookmark )
+//  ================================================================
+//
+//  Given a BOOKMARK, get the correct RCEHEAD.
+//
+//-
 {
     Assert( PverFromIfmp( ifmp )->RwlRCEChain( uiHash ).FReader() ||
             PverFromIfmp( ifmp )->RwlRCEChain( uiHash ).FWriter() );
@@ -1166,6 +1422,8 @@ LOCAL RCE **PprceRCEChainGet( UINT uiHash, IFMP ifmp, PGNO pgnoFDP, const BOOKMA
             }
             else
             {
+                //  if there is a NextOfNode, then we are not in the hash overflow
+                //  chain, so can't check PrceHashOverflow().
                 Assert( prceT->PrceNextOfNode()->UiHash() == prceT->UiHash() );
             }
 
@@ -1181,6 +1439,7 @@ LOCAL RCE **PprceRCEChainGet( UINT uiHash, IFMP ifmp, PGNO pgnoFDP, const BOOKMA
                     Assert( fFalse );
                 }
             }
+            //  can only check prceHashOverflow if there is no prceNextOfNode
             else if ( prceNil != prceT->PrceHashOverflow()
                 && prceT->PrceHashOverflow()->UiHash() != prceT->UiHash() )
             {
@@ -1199,7 +1458,13 @@ LOCAL RCE **PprceRCEChainGet( UINT uiHash, IFMP ifmp, PGNO pgnoFDP, const BOOKMA
 }
 
 
+//  ================================================================
 LOCAL RCE *PrceRCEGet( UINT uiHash, IFMP ifmp, PGNO pgnoFDP, const BOOKMARK& bookmark )
+//  ================================================================
+//
+//  Given a BOOKMARK, get the correct hash chain of RCEs.
+//
+//-
 {
     ASSERT_VALID( &bookmark );
 
@@ -1216,7 +1481,13 @@ LOCAL RCE *PrceRCEGet( UINT uiHash, IFMP ifmp, PGNO pgnoFDP, const BOOKMARK& boo
 }
 
 
+//  ================================================================
 LOCAL RCE * PrceFirstVersion ( const UINT uiHash, const FUCB * pfucb, const BOOKMARK& bookmark )
+//  ================================================================
+//
+//  gets the first version of a node
+//
+//-
 {
     RCE * const prce = PrceRCEGet( uiHash, pfucb->ifmp, pfucb->u.pfcb->PgnoFDP(), bookmark );
 
@@ -1235,8 +1506,16 @@ LOCAL RCE * PrceFirstVersion ( const UINT uiHash, const FUCB * pfucb, const BOOK
 }
 
 
+//  ================================================================
 LOCAL const RCE *PrceVERIGetPrevReplace( const RCE * const prce )
+//  ================================================================
+//
+//  Find previous replace of changed by the session within
+//  current transaction. The found rce may be in different transaction level.
+//
+//-
 {
+    //  Look for previous replace on this node of this transaction ( level > 0 ).
     const RCE * prcePrevReplace = prce->PrcePrevOfNode();
     for ( ; prceNil != prcePrevReplace
             && !prcePrevReplace->FOperReplace()
@@ -1244,6 +1523,7 @@ LOCAL const RCE *PrceVERIGetPrevReplace( const RCE * const prce )
          prcePrevReplace = prcePrevReplace->PrcePrevOfNode() )
         ;
 
+    //  did we find a previous replace operation at level greater than 0
     if ( prceNil != prcePrevReplace )
     {
         if ( !prcePrevReplace->FOperReplace()
@@ -1263,7 +1543,13 @@ LOCAL const RCE *PrceVERIGetPrevReplace( const RCE * const prce )
 }
 
 
+//  ================================================================
 BOOL FVERActive( const IFMP ifmp, const PGNO pgnoFDP, const BOOKMARK& bm, const TRX trxSession )
+//  ================================================================
+//
+//  is there a version on the node that is visible to an uncommitted trx?
+//
+//-
 {
     ASSERT_VALID( &bm );
 
@@ -1272,6 +1558,7 @@ BOOL FVERActive( const IFMP ifmp, const PGNO pgnoFDP, const BOOKMARK& bm, const 
 
     BOOL                    fVERActive  = fFalse;
 
+    //  get RCE
     const RCE * prce = PrceRCEGet( uiHash, ifmp, pgnoFDP, bm );
     for ( ; prceNil != prce; prce = prce->PrcePrevOfNode() )
     {
@@ -1286,7 +1573,13 @@ BOOL FVERActive( const IFMP ifmp, const PGNO pgnoFDP, const BOOKMARK& bm, const 
 }
 
 
+//  ================================================================
 BOOL FVERActive( const FUCB * pfucb, const BOOKMARK& bm, const TRX trxSession )
+//  ================================================================
+//
+//  is there a version on the node that is visible to an uncommitted trx?
+//
+//-
 {
     ASSERT_VALID( pfucb );
     ASSERT_VALID( &bm );
@@ -1298,6 +1591,7 @@ BOOL FVERActive( const FUCB * pfucb, const BOOKMARK& bm, const TRX trxSession )
 
     BOOL                    fVERActive  = fFalse;
 
+    //  get RCE
     const RCE * prce = PrceRCEGet( uiHash, pfucb->ifmp, pfucb->u.pfcb->PgnoFDP(), bm );
     for ( ; prceNil != prce; prce = prce->PrcePrevOfNode() )
     {
@@ -1312,7 +1606,14 @@ BOOL FVERActive( const FUCB * pfucb, const BOOKMARK& bm, const TRX trxSession )
 }
 
 
+//  ================================================================
 INLINE BOOL FVERIAddUndoInfo( const RCE * const prce )
+//  ================================================================
+//
+//  Do we need to create a deferred before image for this RCE?
+//
+//  UNDONE: do not create dependency for
+//              replace at same level as before
 {
     BOOL    fAddUndoInfo = fFalse;
 
@@ -1323,8 +1624,17 @@ INLINE BOOL FVERIAddUndoInfo( const RCE * const prce )
     {
         if ( prce->FOperReplace() )
         {
+//          ENTERREADERWRITERLOCK   enterRwlHashAsReader( &( PverFromIfmp( prce->Ifmp() )->RwlRCEChain( prce->UiHash() ) ), fTrue );
+//          const RCE               *prcePrevReplace = PrceVERIGetPrevReplace( prce );
 
+            //  if previous replace is at the same level
+            //  before image for rollback is in the other RCE
+//          Assert( prce->Level() > 0 );
+//          if ( prceNil == prcePrevReplace
+//              || prcePrevReplace->Level() != prce->Level() )
+//              {
                 fAddUndoInfo = !prce->FEmptyDiff();
+//              }
         }
         else if ( operFlagDelete == prce->Oper() )
         {
@@ -1332,6 +1642,7 @@ INLINE BOOL FVERIAddUndoInfo( const RCE * const prce )
         }
         else
         {
+            //  these operations log the logical bookmark or do not log
             Assert( operInsert == prce->Oper()
                     || operDelta == prce->Oper()
                     || operDelta64 == prce->Oper()
@@ -1347,17 +1658,26 @@ INLINE BOOL FVERIAddUndoInfo( const RCE * const prce )
     return fAddUndoInfo;
 }
 
+//  ================================================================
 ERR VER::ErrVERIAllocateRCE( INT cbRCE, RCE ** pprce, const UINT uiHash )
+//  ================================================================
+//
+//  Allocates enough space for a new RCE or return out of memory
+//  error. New buckets may be allocated
+//
+//-
 {
     Assert( m_critBucketGlobal.FOwner() );
 
     ERR err = JET_errSuccess;
 
+    //  Verify for prefast.
     if ( cbRCE < (INT)0 )
     {
         return(JET_errOutOfMemory);
     }
 
+    //  if insufficient bucket space, then allocate new bucket.
 
     if ( m_pbucketGlobalHead == pbucketNil || (size_t)cbRCE > CbBUFree( m_pbucketGlobalHead ) )
     {
@@ -1365,8 +1685,10 @@ ERR VER::ErrVERIAllocateRCE( INT cbRCE, RCE ** pprce, const UINT uiHash )
     }
     Assert( (size_t)cbRCE <= CbBUFree( m_pbucketGlobalHead ) );
 
+    //  pbucket always on double-word boundary
     Assert( FAlignedForThisPlatform( m_pbucketGlobalHead ) );
 
+    //  set prce to next avail RCE location, and assert aligned
 
     *pprce = m_pbucketGlobalHead->hdr.prceNextNew;
     m_pbucketGlobalHead->hdr.prceNextNew =
@@ -1380,6 +1702,7 @@ HandleError:
 }
 
 
+//  ================================================================
 ERR VER::ErrVERICreateRCE(
     INT         cbNewRCE,
     FCB         *pfcb,
@@ -1396,11 +1719,21 @@ ERR VER::ErrVERICreateRCE(
     const BOOL  fProxy,
     RCEID       rceid
     )
+//  ================================================================
+//
+//  Allocate a new RCE in a bucket. m_critBucketGlobal is used to
+//  protect the RCE until its oper and trxCommitted are set
+//
+//-
 {
     ERR         err                 = JET_errSuccess;
     RCE *       prce                = prceNil;
     UINT        uiHashConcurrentOp;
 
+    // For concurrent operations, we must be in critHash
+    // from the moment the rceid is allocated until the RCE
+    // is placed in the hash table, otherwise we may get
+    // rceid's out of order.
     if ( FOperConcurrent( oper ) )
     {
         Assert( uiHashInvalid != uiHash );
@@ -1441,6 +1774,9 @@ ERR VER::ErrVERICreateRCE(
     Assert( trxMax != trxBegin0 );
     Assert( NULL == ptrxCommit0 || trxMax == *ptrxCommit0 );
 
+    //  UNDONE: break this new function into two parts. One that only need to
+    //  UNDONE: be recognizable by Clean up (trxTime?) and release
+    //  UNDONE: the m_critBucketGlobal as soon as possible.
 
     new( prce ) RCE(
             pfcb,
@@ -1456,7 +1792,7 @@ ERR VER::ErrVERICreateRCE(
             uiHash,
             fProxy,
             rceidNull == rceid ? RceidLastIncrement() : rceid
-            );
+            );  //lint !e522
 
 HandleError:
     m_critBucketGlobal.Leave();
@@ -1465,6 +1801,7 @@ HandleError:
     {
         Assert( prce != prceNil );
 
+        //  check RCE
         Assert( FAlignedForThisPlatform( prce ) );
         Assert( (RCE *)PvAlignForThisPlatform( prce ) == prce );
 
@@ -1479,13 +1816,20 @@ HandleError:
 }
 
 
+//  ================================================================
 LOCAL ERR ErrVERIInsertRCEIntoHash( RCE * const prce )
+//  ================================================================
+//
+//  Inserts an RCE to hash table. We must already be in the critical
+//  section of the hash chain.
+//
+//-
 {
     BOOKMARK    bookmark;
     prce->GetBookmark( &bookmark );
 #ifdef DEBUG_VER
     Assert( UiRCHashFunc( prce->Ifmp(), prce->PgnoFDP(), bookmark ) == prce->UiHash() );
-#endif
+#endif  //  DEBUG_VER
 
     RCE ** const    pprceChain  = PprceRCEChainGet( prce->UiHash(),
                                                     prce->Ifmp(),
@@ -1494,8 +1838,10 @@ LOCAL ERR ErrVERIInsertRCEIntoHash( RCE * const prce )
 
     if ( pprceChain )
     {
+        //  hash chain for node already exists
         Assert( *pprceChain != prceNil );
 
+        //  insert in order of rceid
         Assert( prce->Rceid() != rceidNull );
 
         RCE * prceNext      = prceNil;
@@ -1512,6 +1858,21 @@ LOCAL ERR ErrVERIInsertRCEIntoHash( RCE * const prce )
             {
                 if ( prcePrev->Rceid() == rceid )
                 {
+                    //  we are recovering and have already created this RCE (redo)
+                    //
+                    //  that means we've encountered a deferred undo-info
+                    //  log record for this operation
+                    //
+                    //  this RCE may have a pgno undo info. In which case the
+                    //  page cannot be flushed (we have no facilities to log
+                    //  deferred undo-info log records during recovery)
+                    //
+                    //  *but*
+                    //
+                    //  we've now encountered a deferred-undo log record which
+                    //  means it is in fact safe to flush this page
+                    //
+                    //  remove the undo info
 
                     if( pgnoNull != prcePrev->PgnoUndoInfo() )
                     {
@@ -1520,6 +1881,9 @@ LOCAL ERR ErrVERIInsertRCEIntoHash( RCE * const prce )
                         BFRemoveUndoInfo( prcePrev, lgposTip );
                     }
 
+                    //  release last version created
+                    //  remove RCE from bucket
+                    //
                     Assert( PinstFromIfmp( prce->Ifmp() )->m_plog->FRecovering() );
                     Assert( FAlignedForThisPlatform( prce ) );
 
@@ -1536,18 +1900,23 @@ LOCAL ERR ErrVERIInsertRCEIntoHash( RCE * const prce )
         else
         {
 
+            //  if we are not recovering don't insert in RCEID order -- if we have waited
+            //  for a wait-latch we actually want to insert after it
 
         }
 
+        //  adjust head links
         if ( prceNil == prceNext )
         {
+            //  insert before first rce in chain
+            //
             Assert( prcePrev == *pprceChain );
             prce->SetPrceHashOverflow( (*pprceChain)->PrceHashOverflow() );
             *pprceChain = prce;
 
             #ifdef DEBUG
             prcePrev->SetPrceHashOverflow( prceInvalid );
-            #endif
+            #endif  //  DEBUG
             Assert( prceNil == prce->PrceNextOfNode() );
         }
         else
@@ -1569,6 +1938,7 @@ LOCAL ERR ErrVERIInsertRCEIntoHash( RCE * const prce )
             Assert( prce->UiHash() == prcePrev->UiHash() );
         }
 
+        //  adjust RCE links
         prce->SetPrcePrevOfNode( prcePrev );
     }
     else
@@ -1576,6 +1946,7 @@ LOCAL ERR ErrVERIInsertRCEIntoHash( RCE * const prce )
         Assert( prceNil == prce->PrceNextOfNode() );
         Assert( prceNil == prce->PrcePrevOfNode() );
 
+        //  create new rce chain
         prce->SetPrceHashOverflow( PverFromIfmp( prce->Ifmp() )->GetChain( prce->UiHash() ) );
         PverFromIfmp( prce->Ifmp() )->SetChain( prce->UiHash(), prce );
     }
@@ -1595,7 +1966,7 @@ LOCAL ERR ErrVERIInsertRCEIntoHash( RCE * const prce )
 
 #ifdef DEBUG_VER
     Assert( UiRCHashFunc( prce->Ifmp(), prce->PgnoFDP(), bookmark ) == prce->UiHash() );
-#endif
+#endif  //  DEBUG_VER
 
     Assert( prceNil == prce->PrceNextOfNode() ||
             PinstFromIfmp( prce->Ifmp() )->m_plog->FRecovering()
@@ -1603,7 +1974,9 @@ LOCAL ERR ErrVERIInsertRCEIntoHash( RCE * const prce )
 
     Assert( prce->Pfcb() != pfcbNil );
 
+    //  monitor statistics
 {
+    //  Do not need critical section here. It is OK to miss a little.
 
     PERFOptDeclare( const INT cbBookmark = prce->CbBookmarkKey() + prce->CbBookmarkData() );
     PERFOptDeclare( VER *pver = PverFromIfmp( prce->Ifmp() ) );
@@ -1616,21 +1989,31 @@ LOCAL ERR ErrVERIInsertRCEIntoHash( RCE * const prce )
 }
 
 
+//  ================================================================
 LOCAL VOID VERIDeleteRCEFromHash( RCE * const prce )
+//  ================================================================
+//
+//  Deletes RCE from hashtable/RCE chain, and may set hash table entry to
+//  prceNil. Must already be in the critical section for the hash chain.
+//
+//-
 {
     BOOKMARK    bookmark;
     prce->GetBookmark( &bookmark );
 #ifdef DEBUG_VER
     Assert( UiRCHashFunc( prce->Ifmp(), prce->PgnoFDP(), bookmark ) == prce->UiHash() );
-#endif
+#endif  //  DEBUG_VER
 
     RCE ** const pprce = PprceRCEChainGet( prce->UiHash(), prce->Ifmp(), prce->PgnoFDP(), bookmark );
+    // We won't call the function to delete an RCE from a hash chain, unless there actually is an RCE
+    // to delete, but prefix can't comprehend this, so we have to convince it.
     AssertPREFIX( pprce != NULL );
 
     if ( prce == *pprce )
     {
         Assert( prceNil == prce->PrceNextOfNode() );
 
+        //  the RCE is at the head of the chain
         if ( prceNil != prce->PrcePrevOfNode() )
         {
             Assert( prce->PrcePrevOfNode()->UiHash() == prce->UiHash() );
@@ -1664,6 +2047,8 @@ LOCAL VOID VERIDeleteRCEFromHash( RCE * const prce )
     prce->SetPrceNextOfNode( prceNil );
     prce->SetPrcePrevOfNode( prceNil );
 
+    //  monitor statistics
+    //  Do not need critical section here. It is OK to miss a little.
 
     PERFOptDeclare( VER *pver = PverFromIfmp( prce->Ifmp() ) );
     PERFOptDeclare( INST *pinst = pver->m_pinst );
@@ -1672,7 +2057,18 @@ LOCAL VOID VERIDeleteRCEFromHash( RCE * const prce )
 }
 
 
+//  ================================================================
 INLINE VOID VERIInsertRCEIntoSessionList( PIB * const ppib, RCE * const prce )
+//  ================================================================
+//
+//  Inserts the RCE into the session list of the pib provided. During ordinary
+//  operation this means putting the RCE at the head of the list. During recovery
+//  the RCE is inserted in its RCEID order.
+//  
+//  No critical section needed to do this, because the only session that
+//  inserts at the head of the list is the pib itself.
+//
+//-
 {
     RCE         *prceNext   = prceNil;
     RCE         *prcePrev   = ppib->prceNewest;
@@ -1708,6 +2104,7 @@ INLINE VOID VERIInsertRCEIntoSessionList( PIB * const ppib, RCE * const prce )
 
         prcePrev = ppib->PrceNearestRegistered(prce->Rceid());
 
+        // move previous until we are pointing at the RCE that comes before this insertion
         while( prcePrev && (level > prcePrev->Level() || RceidCmp( prcePrev->Rceid(), rceid ) < 0 ) )
         {
             prcePrev = prcePrev->PrceNextOfSession();
@@ -1718,6 +2115,7 @@ INLINE VOID VERIInsertRCEIntoSessionList( PIB * const ppib, RCE * const prce )
             prcePrev = ppib->prceNewest;
         }
 
+        //  insert RCE in rceid order at the same level
         Assert( level < prcePrev->Level() || RceidCmp( rceid, prcePrev->Rceid() ) < 0 );
         for ( ;
             prcePrev != prceNil
@@ -1748,6 +2146,7 @@ RceidCmp( rceid, prcePrev->Rceid() ) < 0 ) );
 
     if ( plog->FRecovering() )
     {
+        // track this RCE
         (void)ppib->ErrRegisterRceid(prce->Rceid(), prce);
     }
     
@@ -1755,7 +2154,19 @@ RceidCmp( rceid, prcePrev->Rceid() ) < 0 ) );
 }
 
 
+//  ================================================================
 INLINE VOID VERIInsertRCEIntoSessionList( PIB * const ppib, RCE * const prce, RCE * const prceParent )
+//  ================================================================
+//
+//  Inserts the RCE after the given parent RCE in the session list.
+//  NEVER inserts at the head (since the insert occurs after an existing
+//  RCE), so no possibility of conflict with regular session inserts, and
+//  therefore no critical section needed.  However, may conflict with
+//  other concurrent create indexers, which is why we must obtain rwlTrx
+//  (to ensure only one concurrent create indexer is processing the parent
+//  at a time.
+//
+//-
 {
     Assert( PinstFromPpib( ppib )->RwlTrx( ppib ).FWriter() );
 
@@ -1781,13 +2192,21 @@ INLINE VOID VERIInsertRCEIntoSessionList( PIB * const ppib, RCE * const prce, RC
 }
 
 
+//  ================================================================
 LOCAL VOID VERIDeleteRCEFromSessionList( PIB * const ppib, RCE * const prce )
+//  ================================================================
+//
+//  Deletes the RCE from the session list of the given PIB. Must be
+//  in the critical section of the PIB
+//
+//-
 {
-    Assert( !prce->FFullyCommitted() );
+    Assert( !prce->FFullyCommitted() ); //  only uncommitted RCEs in the session list
     Assert( ppib == prce->Pfucb()->ppib );
 
     if ( prce == ppib->prceNewest )
     {
+        //  we are at the head of the list
         PIBSetPrceNewest( ppib, prce->PrcePrevOfSession() );
         if ( prceNil != ppib->prceNewest )
         {
@@ -1797,6 +2216,7 @@ LOCAL VOID VERIDeleteRCEFromSessionList( PIB * const ppib, RCE * const prce )
     }
     else
     {
+        // we are in the middle/end
         Assert( prceNil != prce->PrceNextOfSession() );
         RCE * const prceNext = prce->PrceNextOfSession();
         RCE * const prcePrev = prce->PrcePrevOfSession();
@@ -1816,25 +2236,39 @@ LOCAL VOID VERIDeleteRCEFromSessionList( PIB * const ppib, RCE * const prce )
 }
 
 
+//  ================================================================
 LOCAL VOID VERIInsertRCEIntoFCBList( FCB * const pfcb, RCE * const prce )
+//  ================================================================
+//
+//  Must be in critFCB
+//
+//-
 {
     Assert( pfcb->CritRCEList().FOwner() );
     pfcb->AttachRCE( prce );
 }
 
 
+//  ================================================================
 LOCAL VOID VERIDeleteRCEFromFCBList( FCB * const pfcb, RCE * const prce )
+//  ================================================================
+//
+//  Must be in critFCB
+//
+//-
 {
     Assert( pfcb->CritRCEList().FOwner() );
     pfcb->DetachRCE( prce );
 }
 
 
+//  ================================================================
 VOID VERInsertRCEIntoLists(
-    FUCB        *pfucbNode,
+    FUCB        *pfucbNode,     // cursor of session performing node operation
     CSR         *pcsr,
     RCE         *prce,
     const VERPROXY  *pverproxy )
+//  ================================================================
 {
     Assert( prceNil != prce );
 
@@ -1845,15 +2279,18 @@ VOID VERInsertRCEIntoLists(
 
     if ( prce->TrxCommitted() == trxMax )
     {
-        FUCB    *pfucbVer = prce->Pfucb();
+        FUCB    *pfucbVer = prce->Pfucb();  // cursor of session for whom the
+                                            // RCE was created,
         Assert( pfucbNil != pfucbVer );
         Assert( pfcb == pfucbVer->u.pfcb );
 
+        // cursor performing the node operation may be different than cursor
+        // for which the version was created if versioning by proxy
         Assert( pfucbNode == pfucbVer || pverproxy != NULL );
 
         if ( FVERIAddUndoInfo( prce ) )
         {
-            Assert( pcsrNil != pcsr || plog->FRecovering() );
+            Assert( pcsrNil != pcsr || plog->FRecovering() );   // Allow Redo to override UndoInfo.
             if ( pcsrNil != pcsr )
             {
                 Assert( !g_rgfmp[ pfcb->Ifmp() ].FLogOn() || !plog->FLogDisabled() );
@@ -1861,10 +2298,16 @@ VOID VERInsertRCEIntoLists(
                 {
                     if( pcsr->Cpage().FLoadedPage() )
                     {
+                        // during recovery we may use the before-image of a page to redo a split
+                        // or merge. the before-image isn't a real page and we shouldn't set
+                        // the undo info on it
                         Assert( plog->FRecovering() );
                     }
                     else
                     {
+                        //  set up UndoInfo dependency
+                        //  to make sure UndoInfo will be logged if the buffer
+                        //  is flushed before commit/rollback.
                         BFAddUndoInfo( pcsr->Cpage().PBFLatch(), prce );
                     }
                 }
@@ -1876,7 +2319,7 @@ VOID VERInsertRCEIntoLists(
             Assert( !plog->FRecovering() );
             Assert( pfucbNode != pfucbVer );
             Assert( prce->Oper() == operInsert
-                || prce->Oper() == operReplace
+                || prce->Oper() == operReplace      // via FlagInsertAndReplaceData
                 || prce->Oper() == operFlagDelete );
             VERIInsertRCEIntoSessionList( pfucbVer->ppib, prce, pverproxy->prcePrimary );
         }
@@ -1896,6 +2339,8 @@ VOID VERInsertRCEIntoLists(
     }
     else
     {
+        // Don't put committed RCE's into session list.
+        // Only way to get a committed RCE is via concurrent create index.
         Assert( !plog->FRecovering() );
         Assert( NULL != pverproxy );
         Assert( proxyCreateIndex == pverproxy->proxy );
@@ -1904,7 +2349,7 @@ VOID VERInsertRCEIntoLists(
         Assert( pfcb->FTypeSecondaryIndex() );
         Assert( pfcb->PfcbTable() == pfcbNil );
         Assert( prce->Oper() == operInsert
-                || prce->Oper() == operReplace
+                || prce->Oper() == operReplace      // via FlagInsertAndReplaceData
                 || prce->Oper() == operFlagDelete );
     }
 
@@ -1914,7 +2359,14 @@ VOID VERInsertRCEIntoLists(
 }
 
 
+//  ================================================================
 LOCAL VOID VERINullifyUncommittedRCE( RCE * const prce )
+//  ================================================================
+//
+//  Remove undo info from a RCE, remove it from the session list
+//  FCB list and the hash table. The oper is then nullified
+//
+//-
 {
     Assert( prceInvalid != prce->PrceNextOfSession() );
     Assert( prceInvalid != prce->PrcePrevOfSession() );
@@ -1930,6 +2382,8 @@ LOCAL VOID VERINullifyUncommittedRCE( RCE * const prce )
     const BOOL fInHash = prce->FOperInHashTable();
     if ( fInHash )
     {
+        //  VERIDeleteRCEFromHash may call ASSERT_VALID so we do this deletion first,
+        //  before we mess up the other linked lists
         VERIDeleteRCEFromHash( prce );
     }
 
@@ -1962,10 +2416,21 @@ LOCAL VOID VERINullifyRolledBackRCE(
 
     prceToNullify->FlagRolledBack();
 
+    // Take snapshot of count of people concurrently creating a secondary
+    // index entry.  Since this count is only ever incremented within this
+    // table's critRCEList (which we currently have) it doesn't matter
+    // if value changes after the snapshot is taken, because it will
+    // have been incremented for some other table.
+    // Also, if this FCB is not a table or if it is but has fixed DDL, it
+    // doesn't matter if others are doing concurrent create index -- we know
+    // they're not doing it on this FCB.
+    // Finally, the only RCE types we have to lock are Insert, FlagDelete, and Replace,
+    // because they are the only RCE's that concurrent CreateIndex acts upon.
     const LONG  crefCreateIndexLock     = ( fPossibleSecondaryIndex ? g_crefVERCreateIndexLock : 0 );
     Assert( g_crefVERCreateIndexLock >= 0 );
     if ( 0 == crefCreateIndexLock )
     {
+        //  set return value before the RCE is nullified
         if ( NULL != pprceNextToNullify )
             *pprceNextToNullify = prceToNullify->PrcePrevOfSession();
 
@@ -1998,13 +2463,21 @@ LOCAL VOID VERINullifyRolledBackRCE(
             UtilSleep( cmsecWaitGeneric );
             PinstFromPpib( ppib )->RwlTrx( ppib ).EnterAsReader();
 
+            //  restart RCE scan
             *pprceNextToNullify = ppib->prceNewest;
         }
     }
 }
 
 
+//  ================================================================
 LOCAL VOID VERINullifyCommittedRCE( RCE * const prce )
+//  ================================================================
+//
+//  Remove a RCE from the Hash table (if necessary) and the FCB list.
+//  The oper is then nullified
+//
+//-
 {
     Assert( prce->PgnoUndoInfo() == pgnoNull );
     Assert( prce->TrxCommitted() != trxMax );
@@ -2014,6 +2487,8 @@ LOCAL VOID VERINullifyCommittedRCE( RCE * const prce )
     const BOOL fInHash = prce->FOperInHashTable();
     if ( fInHash )
     {
+        //  VERIDeleteRCEFromHash may call ASSERT_VALID so we do this deletion first,
+        //  before we mess up the other linked lists
         VERIDeleteRCEFromHash( prce );
     }
 
@@ -2021,7 +2496,9 @@ LOCAL VOID VERINullifyCommittedRCE( RCE * const prce )
 }
 
 
+//  ================================================================
 INLINE VOID VERINullifyRCE( RCE *prce )
+//  ================================================================
 {
     if ( prce->FFullyCommitted() )
     {
@@ -2034,7 +2511,9 @@ INLINE VOID VERINullifyRCE( RCE *prce )
 }
 
 
+//  ================================================================
 VOID VERNullifyFailedDMLRCE( RCE *prce )
+//  ================================================================
 {
     ASSERT_VALID( prce );
     Assert( prceInvalid == prce->PrceNextOfSession() || prceNil == prce->PrceNextOfSession() );
@@ -2053,7 +2532,13 @@ VOID VERNullifyFailedDMLRCE( RCE *prce )
 }
 
 
+//  ================================================================
 VOID VERNullifyAllVersionsOnFCB( FCB * const pfcb )
+//  ================================================================
+//
+//  This is used to nullify all RCEs on an FCB
+//
+//-
 {
     VER *pver = PverFromIfmp( pfcb->Ifmp() );
     LOG *plog = pver->m_pinst->m_plog;
@@ -2075,6 +2560,7 @@ VOID VERNullifyAllVersionsOnFCB( FCB * const pfcb )
         Assert( prce->Ifmp() == pfcb->Ifmp() );
         Assert( prce->PgnoFDP() == pfcb->PgnoFDP() );
 
+        //  during recovery, should not see any uncommitted RCE's
         Assert( prce->TrxCommitted() != trxMax || !plog->FRecovering() );
 
         if ( prce->FOperInHashTable() )
@@ -2090,12 +2576,19 @@ VOID VERNullifyAllVersionsOnFCB( FCB * const pfcb )
 
             if ( fNeedRwlTrx )
             {
+                // If uncommitted, must grab rwlTrx to ensure that
+                // RCE does not commit or rollback on us while
+                // nullifying.  Note that we don't need rwlTrx
+                // if this is a temp table because we're the
+                // only ones who have access to it.
                 Assert( prce->Pfucb() != pfucbNil );
                 Assert( prce->Pfucb()->ppib != ppibNil );
                 ppib = prce->Pfucb()->ppib;
             }
             else
             {
+                //  initialise to silence compiler warning
+                //
                 ppib = ppibNil;
             }
 
@@ -2113,6 +2606,8 @@ VOID VERNullifyAllVersionsOnFCB( FCB * const pfcb )
 
             pfcb->CritRCEList().Enter();
 
+            // Verify no one nullified the RCE while we were
+            // switching critical sections.
             if ( pfcb->PrceOldest() == prce )
             {
                 Assert( !prce->FOperNull() );
@@ -2125,6 +2620,15 @@ VOID VERNullifyAllVersionsOnFCB( FCB * const pfcb )
         }
         else
         {
+            // If not hashable, nullification will be expensive,
+            // because we have to grab m_critRCEClean.  Fortunately
+            // this should be rare:
+            //  - the only non-hashable versioned operation
+            //    possible for a temporary table is CreateTable, unless
+            //    the table is close while still in the transaction that created
+            //    it.
+            //  - no non-hashable versioned operations possible
+            //    on secondary index.
             if ( !plog->FRecovering() )
             {
                 Assert( FFMPIsTempDB( prce->Ifmp() ) );
@@ -2135,7 +2639,11 @@ VOID VERNullifyAllVersionsOnFCB( FCB * const pfcb )
             pver->m_critRCEClean.Enter();
             pfcb->CritRCEList().Enter();
 
+            // rwlTrx not needed, since we're the only ones
+            // who should have access to this FCB.
 
+            // Verify no one nullified the RCE while we were
+            // switching critical sections.
             if ( pfcb->PrceOldest() == prce )
             {
                 Assert( !prce->FOperNull() );
@@ -2149,11 +2657,25 @@ VOID VERNullifyAllVersionsOnFCB( FCB * const pfcb )
 }
 
 
+//  ================================================================
 VOID VERNullifyInactiveVersionsOnBM( const FUCB * pfucb, const BOOKMARK& bm )
+//  ================================================================
+//
+//  Nullifies all RCE's for given bm. Used by online cleanup when
+//  a page is being cleaned.
+//
+//  All the RCE's should be inactive and thus don't need to be
+//  removed from a session list
+//
+//-
 {
     ASSERT_VALID( pfucb );
     ASSERT_VALID( &bm );
 
+    // calculating the oldest TRX in the system takes a lot of locks
+    // to avoid concurrency problems we will use a cached version of
+    // the oldest TRX and only update the trx if we find a version
+    // that can't be cleaned.
     INST * const            pinst               = PinstFromPfucb( pfucb );
     bool                    fUpdatedTrxOldest   = false;
     TRX                     trxOldest           = TrxOldestCached( pinst );
@@ -2170,6 +2692,7 @@ VOID VERNullifyInactiveVersionsOnBM( const FUCB * pfucb, const BOOKMARK& bm )
 
         if ( TrxCmp( prce->TrxCommitted(), trxOldest ) < 0 && !fUpdatedTrxOldest )
         {
+            // update the oldest TRX and retry
             UpdateCachedTrxOldest( pinst );
             trxOldest = TrxOldestCached( pinst );
             fUpdatedTrxOldest = true;
@@ -2188,18 +2711,28 @@ VOID VERNullifyInactiveVersionsOnBM( const FUCB * pfucb, const BOOKMARK& bm )
 
 
 
+//  ****************************************************************
+//  VERSION LAYER
+//  ****************************************************************
 
 
 VOID VER::VERSignalCleanup()
 {
+    //  check whether we already requested clean up of that version store
     if ( NULL != m_pbucketGlobalTail
         && 0 == AtomicCompareExchange( (LONG *)&m_fVERCleanUpWait, 0, 1 ) )
     {
+        //  reset signal in case we need to ensure RCE clean gets
+        //  performed soon
+        //
         m_msigRCECleanPerformedRecently.Reset();
 
+        //  be aware if we are in syncronous mode already, do not try to start a new task
         if ( m_fSyncronousTasks
             || m_pinst->Taskmgr().ErrTMPost( VERIRCECleanProc, this ) < JET_errSuccess )
         {
+            //  couldn't post task, so set signal to ensure no one waits on it
+            //
             m_msigRCECleanPerformedRecently.Set();
 
             LONG fStatus = AtomicCompareExchange( (LONG *)&m_fVERCleanUpWait, 1, 0 );
@@ -2212,7 +2745,18 @@ VOID VER::VERSignalCleanup()
 }
 
 
+//  ================================================================
 DWORD VER::VERIRCECleanProc( VOID *pvThis )
+//  ================================================================
+//
+//  Go through all sessions, cleaning buckets as versions are
+//  no longer needed.  Only those versions older than oldest
+//  transaction are cleaned up.
+//
+//  Side Effects:
+//      frees buckets.
+//
+//-
 {
     VER *pver = (VER *)pvThis;
 
@@ -2221,6 +2765,8 @@ DWORD VER::VERIRCECleanProc( VOID *pvThis )
     LONG fStatus = AtomicCompareExchange( (LONG *)&pver->m_fVERCleanUpWait, 1, 0 );
     pver->m_critRCEClean.Leave();
 
+    //  indicate that RCE clean was performed recently
+    //
     pver->m_msigRCECleanPerformedRecently.Set();
 
     if ( 2 == fStatus )
@@ -2232,7 +2778,13 @@ DWORD VER::VERIRCECleanProc( VOID *pvThis )
 }
 
 
+//  ================================================================
 DWORD_PTR CbVERISize( BOOL fLowMemory, BOOL fMediumMemory, DWORD_PTR cbVerStoreMax )
+//  ================================================================
+//
+//  Creates version store hash table
+//
+//-
 {
     DWORD_PTR cbVER;
 
@@ -2247,11 +2799,12 @@ DWORD_PTR CbVERISize( BOOL fLowMemory, BOOL fMediumMemory, DWORD_PTR cbVerStoreM
     else
     {
         cbVER = cbVerStoreMax / 1024;
-        cbVER = cbVER * VER::cbrcehead / VER::cbrceheadLegacy;
+        cbVER = cbVER * VER::cbrcehead / VER::cbrceheadLegacy;  //  compensate for hash chain size increase
         cbVER = max( cbVER, OSMemoryPageReserveGranularity() );
     }
 
 #if DEBUG
+    // reduce store size on debug to increase chance of hash collision
     cbVER = cbVER / 30;
 #endif
     cbVER = roundup( cbVER, OSMemoryPageCommitGranularity() );
@@ -2260,7 +2813,9 @@ DWORD_PTR CbVERISize( BOOL fLowMemory, BOOL fMediumMemory, DWORD_PTR cbVerStoreM
 }
 
 
+//  ================================================================
 JETUNITTEST( VER, CheckVerSizing )
+//  ================================================================
 {
 #if DEBUG
     CHECK( OSMemoryPageCommitGranularity() == CbVERISize( fTrue, fFalse, 0 ) );
@@ -2285,12 +2840,19 @@ JETUNITTEST( VER, CheckVerSizing )
 
 
 
+//  ================================================================
 VER * VER::VERAlloc( INST* pinst )
+//  ================================================================
+//
+//  Creates version store hash table
+//
+//-
 {
     C_ASSERT( OffsetOf( VER, m_rgrceheadHashTable ) == sizeof( VER ) );
 
     const BOOL fLowMemory = pinst->m_config & JET_configLowMemory;
     const BOOL fMediumMemory = ( pinst->m_config & JET_configDynamicMediumMemory ) || FDefaultParam( pinst, JET_paramMaxVerPages );
+    // Get version store page size from resource manager, JET_paramVerPageSize is not the correct value.
     DWORD_PTR cbBucket;
     CallS( ErrRESGetResourceParam( pinstNil, JET_residVERBUCKET, JET_resoperSize, &cbBucket ) );
     const DWORD_PTR cbVersionStoreMax = UlParam( pinst, JET_paramMaxVerPages ) * cbBucket;
@@ -2309,6 +2871,8 @@ VER * VER::VERAlloc( INST* pinst )
     if ( FDefaultParam( pinst, JET_paramMaxVerPages ) )
     {
         pVer->m_crceheadHashTable = min( pVer->m_crceheadHashTable, 4001 );
+        // would like to assert that this is in fact 4001, but this is only
+        // non-debug
     }
 #endif
 
@@ -2317,7 +2881,13 @@ VER * VER::VERAlloc( INST* pinst )
     return pVer;
 }
 
+//  ================================================================
 VOID VER::VERFree( VER * pVer )
+//  ================================================================
+//
+//  Deletes version store hash table
+//
+//-
 {
     if ( pVer == NULL )
     {
@@ -2328,7 +2898,13 @@ VOID VER::VERFree( VER * pVer )
     OSMemoryPageFree( pVer );
 }
 
+//  ================================================================
 ERR VER::ErrVERInit( INST* pinst )
+//  ================================================================
+//
+//  Creates background version bucket clean up thread.
+//
+//-
 {
     ERR     err = JET_errSuccess;
     OPERATION_CONTEXT opContext = { OCUSER_VERSTORE, 0, 0, 0, 0 };
@@ -2336,13 +2912,13 @@ ERR VER::ErrVERInit( INST* pinst )
     PERFOpt( cVERcbucketAllocated.Clear( m_pinst ) );
     PERFOpt( cVERcbucketDeleteAllocated.Clear( m_pinst ) );
     PERFOpt( cVERBucketAllocWaitForRCEClean.Clear( m_pinst ) );
-    PERFOpt( cVERcrceHashEntries.Clear( m_pinst ) );
-    PERFOpt( cVERcbBookmarkTotal.Clear( m_pinst ) );
-    PERFOpt( cVERUnnecessaryCalls.Clear( m_pinst ) );
-    PERFOpt( cVERSyncCleanupDispatched.Clear( m_pinst ) );
-    PERFOpt( cVERAsyncCleanupDispatched.Clear( m_pinst ) );
-    PERFOpt( cVERCleanupDiscarded.Clear( m_pinst ) );
-    PERFOpt( cVERCleanupFailed.Clear( m_pinst ) );
+    PERFOpt( cVERcrceHashEntries.Clear( m_pinst ) );            //  number of RCEs that currently exist in hash table
+    PERFOpt( cVERcbBookmarkTotal.Clear( m_pinst ) );            //  amount of space used by bookmarks of existing RCEs
+    PERFOpt( cVERUnnecessaryCalls.Clear( m_pinst ) );           //  calls for a bookmark that doesn't exist
+    PERFOpt( cVERSyncCleanupDispatched.Clear( m_pinst ) );      //  cleanup operations dispatched synchronously
+    PERFOpt( cVERAsyncCleanupDispatched.Clear( m_pinst ) );     //  cleanup operations dispatched asynchronously
+    PERFOpt( cVERCleanupDiscarded.Clear( m_pinst ) );           //  cleanup operations dispatched but failed
+    PERFOpt( cVERCleanupFailed.Clear( m_pinst ) );              //  cleanup operations discarded
 
     AssertRTL( TrxCmp( trxMax, trxMax ) == 0 );
     AssertRTL( TrxCmp( trxMax, 0 ) > 0 );
@@ -2361,6 +2937,10 @@ ERR VER::ErrVERInit( INST* pinst )
     AssertRTL( TrxCmp( trxMax - 257, trxMax - 513 ) > 0 );
     AssertRTL( TrxCmp( trxMax - 511, trxMax - 255 ) < 0 );
 
+    //  init the Bucket resource manager
+    //
+    //  NOTE:  if we are recovering, then disable quotas
+    //
     if ( m_pinst->FRecovering() )
     {
         CallS( ErrRESSetResourceParam( m_pinst, JET_residVERBUCKET, JET_resoperEnableMaxUse, fFalse ) );
@@ -2368,6 +2948,8 @@ ERR VER::ErrVERInit( INST* pinst )
     CallR( m_cresBucket.ErrInit( JET_residVERBUCKET ) );
     CallS( ErrRESGetResourceParam( m_pinst, JET_residVERBUCKET, JET_resoperSize, &m_cbBucket ) );
 
+    // pbucketGlobal{Head,Tail} should be NULL. If they aren't we probably
+    // didn't terminate properly at some point
     Assert( pbucketNil == m_pbucketGlobalHead );
     Assert( pbucketNil == m_pbucketGlobalTail );
     m_pbucketGlobalHead = pbucketNil;
@@ -2385,10 +2967,12 @@ ERR VER::ErrVERInit( INST* pinst )
     m_ppibRCEClean->grbitCommitDefault = JET_bitCommitLazyFlush;
     m_ppibRCECleanCallback->SetFSystemCallback();
 
+    // sync tasks only during termination
     m_fSyncronousTasks = fFalse;
 
     m_fVERCleanUpWait = 0;
 
+    //  init the hash table
     for ( size_t ircehead = 0; ircehead < m_crceheadHashTable; ircehead++ )
     {
         new( &m_rgrceheadHashTable[ ircehead ] ) VER::RCEHEAD;
@@ -2405,6 +2989,8 @@ EndCleanSession:
 
 DeleteHash:
 
+    //  term the Bucket resource manager
+    //
     m_cresBucket.Term();
     if ( m_pinst->FRecovering() )
     {
@@ -2414,10 +3000,19 @@ DeleteHash:
 }
 
 
+//  ================================================================
 VOID VER::VERTerm( BOOL fNormal )
+//  ================================================================
+//
+//  Terminates background thread and releases version store
+//  resources.
+//
+//-
 {
+    //  The TASKMGR has gone away by the time we are shutting down
     Assert ( m_fSyncronousTasks );
 
+    //  be sure that the state will not change
     m_critRCEClean.FEnter( cmsecInfiniteNoDeadlock );
     LONG fStatus = AtomicExchange( (LONG *)&m_fVERCleanUpWait, 2 );
     m_critRCEClean.Leave();
@@ -2440,13 +3035,22 @@ VOID VER::VERTerm( BOOL fNormal )
 
     if ( ppibNil != m_ppibRCEClean )
     {
+        //  We don't end RCE session here, because PurgeAllDatabases/PIBTerm is
+        //  doing it in the correct order (closing FUCBs before ending sessions),
+        //  and ending session here doesn't work with failure case such as 
+        //  when rollback failed, in which case there could still be FUCBs not closed.
+        //
+        //  PIBEndSession( m_ppibRCEClean );
 #ifdef DEBUG
+        //  There should not be any fucbOfSession attached, unless there's rollback failure and instance unavailable
         Assert( pfucbNil == m_ppibRCEClean->pfucbOfSession || m_pinst->FInstanceUnavailable() );
 
+        //  Ensure the RCEClean PIB is in the global PIB list,
+        //  so that we know PurgeAllDatabases/PIBTerm will take care of closing it
         const PIB* ppibT = m_pinst->m_ppibGlobal;
         for ( ; ppibT != m_ppibRCEClean && ppibT != ppibNil; ppibT = ppibT->ppibNext );
         Assert( ppibT == m_ppibRCEClean );
-#endif
+#endif  //  DEBUG
 
         m_ppibRCEClean = ppibNil;
     }
@@ -2459,17 +3063,29 @@ VOID VER::VERTerm( BOOL fNormal )
             Assert( !FPIBUserOpenedDatabase( m_ppibRCECleanCallback, dbid ) );
         }
 
+        //  There should not be any fucbOfSession attached, unless there's rollback failure and instance unavailable
         Assert( pfucbNil == m_ppibRCECleanCallback->pfucbOfSession || m_pinst->FInstanceUnavailable() );
         
+        //  Ensure the RCECleanCallback PIB is in the global PIB list,
+        //  so that we know PurgeAllDatabases/PIBTerm will take care of closing it
         const PIB* ppibT = m_pinst->m_ppibGlobal;
         for ( ; ppibT != m_ppibRCECleanCallback && ppibT != ppibNil; ppibT = ppibT->ppibNext );
         Assert( ppibT == m_ppibRCECleanCallback );
-#endif
+#endif  //  DEBUG
 
+        //  We don't end RCECleanCallback session here, because PurgeAllDatabases/PIBTerm is
+        //  doing it in the correct order (closing FUCBs before ending sessions),
+        //  and ending session here doesn't work with failure case such as 
+        //  when rollback failed, in which case there could still be FUCBs not closed.
+        //
+        //  PIBEndSession( m_ppibRCECleanCallback );
 
         m_ppibRCECleanCallback = ppibNil;
     }
 
+    //  free all buckets
+    //  Note that linked list goes from head -> prev -> prev -> prev -> nil
+    //
     Assert( pbucketNil == m_pbucketGlobalHead || !fNormal);
     Assert( pbucketNil == m_pbucketGlobalTail || !fNormal );
 
@@ -2484,12 +3100,16 @@ VOID VER::VERTerm( BOOL fNormal )
     m_pbucketGlobalHead = pbucketNil;
     m_pbucketGlobalTail = pbucketNil;
 
+    //  term the Bucket resource manager
+    //
     m_cresBucket.Term();
     if ( m_pinst->FRecovering() )
     {
         CallS( ErrRESSetResourceParam( m_pinst, JET_residVERBUCKET, JET_resoperEnableMaxUse, fTrue ) );
     }
 
+    //  term the hash table
+    //
     if ( m_frceHashTableInited )
     {
         for ( size_t ircehead = 0; ircehead < m_crceheadHashTable; ircehead++ )
@@ -2502,17 +3122,24 @@ VOID VER::VERTerm( BOOL fNormal )
     PERFOpt( cVERcbucketAllocated.Clear( m_pinst ) );
     PERFOpt( cVERcbucketDeleteAllocated.Clear( m_pinst ) );
     PERFOpt( cVERBucketAllocWaitForRCEClean.Clear( m_pinst ) );
-    PERFOpt( cVERcrceHashEntries.Clear( m_pinst ) );
-    PERFOpt( cVERcbBookmarkTotal.Clear( m_pinst ) );
-    PERFOpt( cVERUnnecessaryCalls.Clear( m_pinst ) );
-    PERFOpt( cVERSyncCleanupDispatched.Clear( m_pinst ) );
-    PERFOpt( cVERAsyncCleanupDispatched.Clear( m_pinst ) );
-    PERFOpt( cVERCleanupDiscarded.Clear( m_pinst ) );
-    PERFOpt( cVERCleanupFailed.Clear( m_pinst ) );
+    PERFOpt( cVERcrceHashEntries.Clear( m_pinst ) );            //  number of RCEs that currently exist in hash table
+    PERFOpt( cVERcbBookmarkTotal.Clear( m_pinst ) );            //  amount of space used by bookmarks of existing RCEs
+    PERFOpt( cVERUnnecessaryCalls.Clear( m_pinst ) );           //  calls for a bookmark that doesn't exist
+    PERFOpt( cVERSyncCleanupDispatched.Clear( m_pinst ) );      //  cleanup operations dispatched synchronously
+    PERFOpt( cVERAsyncCleanupDispatched.Clear( m_pinst ) );     //  cleanup operations dispatched asynchronously
+    PERFOpt( cVERCleanupDiscarded.Clear( m_pinst ) );           //  cleanup operations dispatched but failed
+    PERFOpt( cVERCleanupFailed.Clear( m_pinst ) );              //  cleanup operations discarded
 }
 
 
+//  ================================================================
 ERR VER::ErrVERStatus( )
+//  ================================================================
+//
+//  Returns JET_wrnIdleFull if version store more than half full.  Half is defined as 60% of the
+//  optimal max version store (before we stop cleaning up deletes).
+//
+//-
 {
     ERR             err             = JET_errSuccess;
     DWORD_PTR       cbucketMost     = 0;
@@ -2529,7 +3156,18 @@ ERR VER::ErrVERStatus( )
 }
 
 
+//  ================================================================
 VS VsVERCheck( const FUCB * pfucb, CSR * pcsr, const BOOKMARK& bookmark )
+//  ================================================================
+//
+//  Given a BOOKMARK, returns the version status / visibility calculation.
+//
+//  RETURN VALUE
+//      vsCommitted
+//      vsUncommittedByCaller
+//      vsUncommittedByOther
+//
+//-
 {
     ASSERT_VALID( pfucb );
     ASSERT_VALID( &bookmark );
@@ -2540,6 +3178,8 @@ VS VsVERCheck( const FUCB * pfucb, CSR * pcsr, const BOOKMARK& bookmark )
 
     VS vs = vsNone;
 
+    //  if no RCE for node then version bit in node header must
+    //  have been orphaned due to crash.  Remove node bit.
     if ( prceNil == prce )
     {
         PERFOpt( cVERUnnecessaryCalls.Inc( PinstFromPfucb( pfucb ) ) );
@@ -2551,14 +3191,17 @@ VS VsVERCheck( const FUCB * pfucb, CSR * pcsr, const BOOKMARK& bookmark )
     }
     else if ( prce->TrxCommitted() != trxMax )
     {
+        //  committed
         vs = vsCommitted;
     }
     else if ( prce->Pfucb()->ppib != pfucb->ppib )
     {
+        //  not modified (uncommitted)
         vs = vsUncommittedByOther;
     }
     else
     {
+        //  modifier (uncommitted)
         vs = vsUncommittedByCaller;
     }
 
@@ -2567,17 +3210,39 @@ VS VsVERCheck( const FUCB * pfucb, CSR * pcsr, const BOOKMARK& bookmark )
 }
 
 
+//  ================================================================
 ERR ErrVERAccessNode( FUCB * pfucb, const BOOKMARK& bookmark, NS * pns )
+//  ================================================================
+//
+//  Finds the correct version of a node.
+//
+//  PARAMETERS
+//      pfucb           various fields used/returned.
+//      pfucb->kdfCurr  the returned prce or NULL to tell caller to
+//                      use the node in the DB page.
+//
+//  RETURN VALUE
+//      nsDatabase
+//      nsVersionedUpdate
+//      nsVersionedInsert
+//      nsUncommittedVerInDB
+//      nsCommittedVerInDB
+//-
 {
     ASSERT_VALID( pfucb );
     ASSERT_VALID( &bookmark );
 
+    //  session with dirty cursor isolation model should never
+    //  call NsVERAccessNode.
     Assert( !FPIBDirty( pfucb->ppib ) );
     Assert( FPIBVersion( pfucb->ppib ) );
     Assert( !FFUCBUnique( pfucb ) || 0 == bookmark.data.Cb() );
     Assert( Pcsr( pfucb )->FLatched() );
 
 
+    //  FAST PATH:  if there are no RCEs in this bucket, immediately bail with
+    //  nsDatabase.  the assumption is that the version store is almost always
+    //  nearly empty
 
     const UINT uiHash = UiRCHashFunc( pfucb->ifmp, pfucb->u.pfcb->PgnoFDP(), bookmark );
 
@@ -2587,6 +3252,8 @@ ERR ErrVERAccessNode( FUCB * pfucb, const BOOKMARK& bookmark, NS * pns )
 
         if ( FFUCBUpdatable( pfucb ) )
         {
+            //  the version bit is set but there is no version. reset the bit
+            //  we cast away const because we are secretly modifying the page
             NDDeferResetNodeVersion( Pcsr( const_cast<FUCB *>( pfucb ) ) );
         }
 
@@ -2608,6 +3275,8 @@ ERR ErrVERAccessNode( FUCB * pfucb, const BOOKMARK& bookmark, NS * pns )
         PERFOpt( cVERUnnecessaryCalls.Inc( PinstFromPfucb( pfucb ) ) );
         if ( FFUCBUpdatable( pfucb ) )
         {
+            //  the version bit is set but there is no version. reset the bit
+            //  we cast away const because we are secretly modifying the page
             NDDeferResetNodeVersion( Pcsr( const_cast<FUCB *>( pfucb ) ) );
         }
         nsStatus = nsDatabase;
@@ -2615,21 +3284,32 @@ ERR ErrVERAccessNode( FUCB * pfucb, const BOOKMARK& bookmark, NS * pns )
     else if ( prce->TrxCommitted() == trxMax &&
               prce->Pfucb()->ppib == pfucb->ppib )
     {
+        //  cannot be trying to access an RCE that we ourselves rolled back
         Assert( !prce->FRolledBack() );
 
+        //  if caller is modifier of uncommitted version then database
         nsStatus = nsUncommittedVerInDB;
     }
     else if ( TrxCmp( prce->TrxCommitted(), trxSession ) < 0 )
     {
+        //  if committed version younger than our transaction then database
         nsStatus = nsCommittedVerInDB;
     }
     else
     {
+        //  active version created by another session. look for before image
         Assert( prceNil != prce );
 
+        //  level 0 sessions may play havoc with visibility here, as
+        //  RCE's in the middle of the node chain may suddenly become
+        //  visible while we're traversing the chain
+        //
         Assert( TrxCmp( prce->TrxCommitted(), trxSession ) >= 0
             || trxMax == trxSession );
 
+        //  loop will set prce to the non-delta RCE whose before image was committed
+        //  before this transaction began. if all active RCE's are delta RCE's we set prce to
+        //  the oldest uncommitted delta RCE
         const RCE * prceLastNonDelta = prce;
         const RCE * prceLastReplace  = prceNil;
         for ( ; prceNil != prce && TrxCmp( prce->TrxCommitted(), trxSession ) >= 0; prce = prce->PrcePrevOfNode() )
@@ -2645,6 +3325,7 @@ ERR ErrVERAccessNode( FUCB * pfucb, const BOOKMARK& bookmark, NS * pns )
                         break;
                     case operReplace:
                         prceLastReplace = prce;
+                        //  FALLTHRU to case below
                     default:
                         prceLastNonDelta = prce;
                         break;
@@ -2658,6 +3339,13 @@ ERR ErrVERAccessNode( FUCB * pfucb, const BOOKMARK& bookmark, NS * pns )
         {
             case operReplace:
             case operFlagDelete:
+                //  if the RCE was rolled back, then it's just as if 
+                //  the node was unversioned, so set to nsDatabase;
+                //  otherwise, the operation is not visible to us,
+                //  so set to nsVersionedUpdate (note that the node
+                //  is visible, though the operation on the node
+                //  is not)
+                //
                 nsStatus = ( prce->FRolledBack() ? nsDatabase : nsVersionedUpdate );
                 break;
             case operInsert:
@@ -2668,6 +3356,9 @@ ERR ErrVERAccessNode( FUCB * pfucb, const BOOKMARK& bookmark, NS * pns )
             case operReadLock:
             case operWriteLock:
             case operPreInsert:
+                //  all the active versions are delta or lock,
+                //  so no before images, so treat this as unversioned for visibility
+                //  purposes (ie. classify it as nsDatabase and not ns*VerInDB)
                 nsStatus = nsDatabase;
                 break;
             default:
@@ -2688,7 +3379,11 @@ ERR ErrVERAccessNode( FUCB * pfucb, const BOOKMARK& bookmark, NS * pns )
 
             if ( 0 == pfucb->ppib->Level() )
             {
+                //  Because we are at level 0 this RCE may disappear at any time after
+                //  we leave the version store. We copy the before image into the FUCB
+                //  to make sure we can always access it
 
+                //  we should not be modifying the page at level 0
                 Assert( Pcsr( pfucb )->Latch() == latchReadTouch
                         || Pcsr( pfucb )->Latch() == latchReadNoTouch );
 
@@ -2726,7 +3421,9 @@ HandleError:
 }
 
 
+//  ================================================================
 LOCAL BOOL FUpdateIsActive( const PIB * const ppib, const UPDATEID& updateid )
+//  ================================================================
 {
     BOOL fUpdateIsActive = fFalse;
 
@@ -2744,8 +3441,16 @@ LOCAL BOOL FUpdateIsActive( const PIB * const ppib, const UPDATEID& updateid )
 }
 
 
+//  ================================================================
 template< typename TDelta >
 TDelta DeltaVERGetDelta( const FUCB * pfucb, const BOOKMARK& bookmark, INT cbOffset )
+//  ================================================================
+//
+//  Returns the correct compensating delta for this transaction on the given offset
+//  of the bookmark. Collect the negation of all active delta versions not created
+//  by our session.
+//
+//-
 {
     ASSERT_VALID( pfucb );
     ASSERT_VALID( &bookmark );
@@ -2769,13 +3474,21 @@ TDelta DeltaVERGetDelta( const FUCB * pfucb, const BOOKMARK& bookmark, INT cbOff
             {
                 if ( prce->FActiveNotByMe( pfucb->ppib, trxSession ) )
                 {
+                    //  there is an outstanding replace (not by us) on this
+                    //  node -- must reset compensating delta count to begin
+                    //  from this point
                     tDelta = 0;
 
+                    //  UNDONE: return a flag indicating potential write
+                    //  conflict so ErrRECAOSeparateLV() will not bother even
+                    //  even trying to do a replace on the LVROOT and instead
+                    //  burst immediately
+                    //  *pfPotentialWriteConflict = fTrue;
                 }
             }
             else if ( _VERDELTA< TDelta >::TRAITS::oper == prce->Oper() )
             {
-                Assert( !prce->FRolledBack() );
+                Assert( !prce->FRolledBack() );     // Delta RCE's can never be flag-RolledBack
 
                 const _VERDELTA< TDelta >* const pverdelta = ( _VERDELTA< TDelta >* )prce->PbData();
                 if ( pverdelta->cbOffset == cbOffset
@@ -2784,6 +3497,10 @@ TDelta DeltaVERGetDelta( const FUCB * pfucb, const BOOKMARK& bookmark, INT cbOff
                                 && prce->Pfucb()->ppib == pfucb->ppib
                                 && FUpdateIsActive( prce->Pfucb()->ppib, prce->Updateid() ) ) ) )
                 {
+                    //  delta version created by a different session.
+                    //  the version is either uncommitted or created by
+                    //  a session that started after us
+                    //  or a delta done by a currently uncommitted replace
                     tDelta -= pverdelta->tDelta;
                 }
             }
@@ -2794,11 +3511,19 @@ TDelta DeltaVERGetDelta( const FUCB * pfucb, const BOOKMARK& bookmark, INT cbOff
 }
 
 
+//  ================================================================
 BOOL FVERDeltaActiveNotByMe( const FUCB * pfucb, const BOOKMARK& bookmark, INT cbOffset )
+//  ================================================================
+//
+//  get prce for node and look for uncommitted increment/decrement
+//  versions created by another session.Used to determine if the delta
+//  value we see may change because of a rollback.
+//
+//-
 {
     ASSERT_VALID( pfucb );
     ASSERT_VALID( &bookmark );
-    Assert( 0 == cbOffset );
+    Assert( 0 == cbOffset );    //  should only be used from LV
 
     const TRX               trxSession      = pfucb->ppib->trxBegin0;
     Assert( trxMax != trxSession );
@@ -2822,6 +3547,7 @@ BOOL FVERDeltaActiveNotByMe( const FUCB * pfucb, const BOOKMARK& bookmark, INT c
                 || ( trxMax != trxCommitted
                     && TrxCmp( trxCommitted, trxSession ) > 0 ) )
             {
+                //  uncommitted delta version created by another session
                 fVersionExists = fTrue;
                 break;
             }
@@ -2832,6 +3558,7 @@ BOOL FVERDeltaActiveNotByMe( const FUCB * pfucb, const BOOKMARK& bookmark, INT c
 }
 
 
+//  ================================================================
 INLINE BOOL FVERIGetReplaceInRangeByUs(
     const PIB       *ppib,
     const RCE       *prceLastBeforeEndOfRange,
@@ -2841,6 +3568,7 @@ INLINE BOOL FVERIGetReplaceInRangeByUs(
     const TRX       trxCommitted,
     const BOOL      fFindLastReplace,
     const RCE       **pprceReplaceInRange )
+//  ================================================================
 {
     const RCE       *prce;
     BOOL            fSawCommittedByUs = fFalse;
@@ -2851,15 +3579,20 @@ INLINE BOOL FVERIGetReplaceInRangeByUs(
 
     Assert( PverFromIfmp( prceLastBeforeEndOfRange->Ifmp() )->RwlRCEChain( prceLastBeforeEndOfRange->UiHash() ).FReader() );
 
+    // Initialize return value.
     *pprceReplaceInRange = prceNil;
 
     Assert( rceidNull != rceidLast );
     Assert( RceidCmp( rceidFirst, rceidLast ) < 0 );
     if ( rceidNull == rceidFirst )
     {
+        // If rceidFirst == NULL, then no updates were done in the range (this
+        // will force retrieval of the after-image (since no updates were done
+        // the before-image will be equivalent to the after-image).
         return fFalse;
     }
 
+    //  go backwards through all RCEs in the range
     const RCE   *prceFirstReplaceInRange = prceNil;
     for ( prce = prceLastBeforeEndOfRange;
         prceNil != prce && RceidCmp( rceidFirst, prce->Rceid() ) < 0;
@@ -2870,11 +3603,15 @@ INLINE BOOL FVERIGetReplaceInRangeByUs(
         {
             if ( fSawCommittedByUs )
             {
+                // If only looking for the last RCE, we would have exited
+                // before finding a second one.
                 Assert( !fFindLastReplace );
 
                 Assert( trxMax != trxCommitted );
                 Assert( ppibNil == ppib );
 
+                // If one node in the range belogs to us, they must all belong
+                // to us (otherwise a WriteConflict would have been generated).
                 if ( fSawUncommittedByUs )
                 {
                     Assert( prce->TrxCommitted() == trxMax );
@@ -2893,8 +3630,12 @@ INLINE BOOL FVERIGetReplaceInRangeByUs(
 
             else if ( fSawUncommittedByUs )
             {
+                // If only looking for the last RCE, we would have exited
+                // before finding a second one.
                 Assert( !fFindLastReplace );
 
+                // If one node in the range belogs to us, they must all belong
+                // to us (otherwise a WriteConflict would have been generated).
                 Assert( prce->TrxCommitted() == trxMax );
                 Assert( prce->TrxBegin0() == trxBegin0 );
                 if ( trxMax == trxCommitted )
@@ -2910,11 +3651,14 @@ INLINE BOOL FVERIGetReplaceInRangeByUs(
                     Assert( ppibNil != prce->Pfucb()->ppib );
                     if ( prce->TrxBegin0() != trxBegin0 )
                     {
+                        // The node is uncommitted, but it doesn't belong to us.
                         Assert( trxCommitted != trxMax
                             || prce->Pfucb()->ppib != ppib );
                         return fFalse;
                     }
 
+                    //  if original RCE also uncommitted, assert same session.
+                    //  if original RCE already committed, can't assert anything.
                     Assert( trxCommitted != trxMax
                         || prce->Pfucb()->ppib == ppib );
 
@@ -2922,25 +3666,29 @@ INLINE BOOL FVERIGetReplaceInRangeByUs(
                 }
                 else if ( prce->TrxCommitted() == trxCommitted )
                 {
+                    // The node was committed by us.
                     Assert( trxMax != trxCommitted );
                     Assert( ppibNil == ppib );
                     fSawCommittedByUs = fTrue;
                 }
                 else
                 {
+                    // The node is committed, but not by us.
                     Assert( prce->TrxBegin0() != trxBegin0 );
                     return fFalse;
                 }
 
                 if ( fFindLastReplace )
                 {
+                    // Only interested in the existence of a replace in the range,
+                    // don't really want the image.
                     return fTrue;
                 }
             }
 
             prceFirstReplaceInRange = prce;
         }
-    }
+    }   // for
     Assert( prceNil == prce || RceidCmp( rceidFirst, prce->Rceid() ) >= 0 );
 
     if ( prceNil != prceFirstReplaceInRange )
@@ -2953,6 +3701,7 @@ INLINE BOOL FVERIGetReplaceInRangeByUs(
 }
 
 
+//  ================================================================
 #ifdef DEBUG
 LOCAL VOID VERDBGCheckReplaceByOthers(
     const RCE   * const prce,
@@ -2969,6 +3718,7 @@ LOCAL VOID VERDBGCheckReplaceByOthers(
 
         if ( *pfFoundUncommitted )
         {
+            // All uncommitted RCE's should be owned by the same session.
             Assert( prceNil != prceFirstActiveReplaceByOther );
             Assert( prceFirstActiveReplaceByOther->TrxCommitted() == trxMax || prceFirstActiveReplaceByOther->TrxCommitted() == prce->TrxCommitted() );
             Assert( prceFirstActiveReplaceByOther->TrxBegin0() == prce->TrxBegin0() );
@@ -2978,6 +3728,7 @@ LOCAL VOID VERDBGCheckReplaceByOthers(
         {
             if ( *pfFoundCommitted )
             {
+                //  must belong to same session in the middle of committing to level 0
                 Assert( prceNil != prceFirstActiveReplaceByOther );
                 Assert( prceFirstActiveReplaceByOther->TrxBegin0() == prce->TrxBegin0() );
             }
@@ -2997,12 +3748,17 @@ LOCAL VOID VERDBGCheckReplaceByOthers(
         {
             if ( *pfFoundUncommitted )
             {
+                // If there's also an uncommitted RCEs on this node,
+                // it must have started its transaction after this one committed.
                 Assert( prceNil != prceFirstActiveReplaceByOther );
                 Assert( prceFirstActiveReplaceByOther->TrxCommitted() == trxMax || prceFirstActiveReplaceByOther->TrxCommitted() == prce->TrxCommitted() );
                 Assert( RceidCmp( prce->Rceid(), prceFirstActiveReplaceByOther->Rceid() ) < 0 );
                 Assert( prceFirstActiveReplaceByOther->TrxCommitted() != trxMax || TrxCmp( prce->TrxCommitted(), prceFirstActiveReplaceByOther->TrxBegin0() ) < 0 );
             }
 
+            //  Cannot be any uncommitted RCE's of any type
+            //  before a committed replace RCE, except if the
+            //  same session is in the middle of committing to level 0.
             const RCE   * prceT;
             for ( prceT = prce; prceNil != prceT; prceT = prceT->PrcePrevOfNode() )
             {
@@ -3018,8 +3774,10 @@ LOCAL VOID VERDBGCheckReplaceByOthers(
     }
 }
 #endif
+//  ================================================================
 
 
+//  ================================================================
 BOOL FVERGetReplaceImage(
     const PIB       *ppib,
     const IFMP      ifmp,
@@ -3033,6 +3791,12 @@ BOOL FVERGetReplaceImage(
     const BYTE      **ppb,
     ULONG           * const pcbActual
     )
+//  ================================================================
+//
+//  Extract the before image from the oldest replace RCE for the bookmark
+//  that falls exclusively within the range (rceidFirst,rceidLast)
+//
+//-
 {
     const UINT  uiHash              = UiRCHashFunc( ifmp, pgnoLVFDP, bookmark );
     ENTERREADERWRITERLOCK enterRwlHashAsReader( &( PverFromIfmp( ifmp )->RwlRCEChain( uiHash ) ), fTrue );
@@ -3043,6 +3807,7 @@ BOOL FVERGetReplaceImage(
 
     Assert( trxMax != trxBegin0 );
 
+    // find the last RCE before the end of the range
     while ( prceNil != prce && RceidCmp( prce->Rceid(), rceidLast ) >= 0 )
     {
         prceFirstAfterRange = prce;
@@ -3075,6 +3840,8 @@ BOOL FVERGetReplaceImage(
         {
             if ( fAfterImage )
             {
+                // If looking for the after-image, it will be found in the
+                // node's next replace RCE after the one found in the range.
                 Assert( prceNil == prceDesiredImage );
                 Assert( prceNil != prceLastBeforeEndOfRange );
                 Assert( prceFirstAfterRange == prceLastBeforeEndOfRange->PrceNextOfNode() );
@@ -3087,22 +3854,39 @@ BOOL FVERGetReplaceImage(
 
         else if ( prceLastBeforeEndOfRange->TrxBegin0() == trxBegin0 )
         {
+            //  If last operation before the end of the range belongs
+            //  to us, then there will be no other active images on the
+            //  node by other sessions (they would have write-conflicted).
+            //  We can just fall through below to grab the proper image.
 
             if ( prceLastBeforeEndOfRange->TrxCommitted() != trxMax )
             {
+                //  If the last RCE in the range has already committed,
+                //  then the RCE on which the search was based must
+                //  also have been committed at the same time.
                 Assert( prceLastBeforeEndOfRange->TrxCommitted() == trxCommitted );
                 Assert( ppibNil == ppib );
             }
             else if ( trxCommitted == trxMax )
             {
+                //  Verify last RCE in the range belongs to same
+                //  transaction.
                 Assert( ppibNil != ppib );
                 Assert( ppib == prceLastBeforeEndOfRange->Pfucb()->ppib );
                 Assert( trxBegin0 == ppib->trxBegin0 );
             }
             else
             {
+                //  This is the case where the RCE in the range is uncommitted,
+                //  but the RCE on which the search was based has already
+                //  committed.  This is a valid case (we could be looking at
+                //  the RCE while the transaction is in the middle of being
+                //  committed).  Can't really do anything to assert this except
+                //  to check that the trxBegin0 is the same, which we've already
+                //  done above.
             }
 
+            // Force to look after the specified range for our image.
             Assert( prceNil == prceDesiredImage );
         }
 
@@ -3117,15 +3901,19 @@ BOOL FVERGetReplaceImage(
             Assert( prceNil == prceDesiredImage );
             Assert( prceFirstAfterRange == prceLastBeforeEndOfRange->PrceNextOfNode() );
 
+            // No replace RCE's by us between the specified range, or
+            // any RCE's by us of any type before the end of the range.
+            // Check active RCE's by others.
             for ( prce = prceLastBeforeEndOfRange;
                 prceNil != prce;
                 prce = prce->PrcePrevOfNode() )
             {
                 Assert( RceidCmp( prce->Rceid(), rceidLast ) < 0 );
+                //  For retrieving a LVROOT while getting a before image we may see deltas
                 Assert( prce->TrxBegin0() != trxBegin0 || operDelta == prce->Oper() || operDelta64 == prce->Oper() );
 
                 if ( TrxCmp( prce->TrxCommitted(), trxBegin0 ) < 0 )
-                    break;
+                    break;  // No more active RCE's.
 
                 if ( prce->FOperReplace() )
                 {
@@ -3139,10 +3927,12 @@ BOOL FVERGetReplaceImage(
                                 &fFoundCommitted );
 #endif
 
+                    // There may be multiple active RCE's on
+                    // the same node. We want the very first one.
                     prceFirstActiveReplaceByOther = prce;
                 }
 
-            }
+            }   // for
 
 
             Assert( prceNil == prceDesiredImage );
@@ -3151,6 +3941,7 @@ BOOL FVERGetReplaceImage(
         }
     }
 
+    // If no RCE's within range or before range, look after the range.
     if ( prceNil == prceDesiredImage )
     {
         for ( prce = prceFirstAfterRange;
@@ -3178,6 +3969,7 @@ BOOL FVERGetReplaceImage(
 }
 
 
+//  ================================================================
 ERR VER::ErrVERICreateDMLRCE(
     FUCB            * pfucb,
     UPDATEID        updateid,
@@ -3189,6 +3981,11 @@ ERR VER::ErrVERICreateDMLRCE(
     RCE             **pprce,
     RCEID           rceid
     )
+//  ================================================================
+//
+//  Creates a DML RCE in a bucket
+//
+//-
 {
     Assert( pfucb->ppib->Level() > 0 );
     Assert( level > 0 );
@@ -3198,6 +3995,9 @@ ERR VER::ErrVERICreateDMLRCE(
     ERR     err     = JET_errSuccess;
     RCE     *prce   = prceNil;
 
+    //  calculate the length of the RCE in the bucket.
+    //  if updating node, set cbData in RCE to length of data. (w/o the key).
+    //  set cbNewRCE as well.
     const INT cbBookmark = bookmark.key.Cb() + bookmark.data.Cb();
 
     INT cbNewRCE = sizeof( RCE ) + cbBookmark;
@@ -3224,6 +4024,9 @@ ERR VER::ErrVERICreateDMLRCE(
             break;
     }
 
+    //  Set up a skeleton RCE. This holds m_critBucketGlobal, so do it
+    //  first before filling the rest.
+    //
     Assert( trxMax == pfucb->ppib->trxCommit0 );
     Call( ErrVERICreateRCE(
             cbNewRCE,
@@ -3251,12 +4054,14 @@ ERR VER::ErrVERICreateDMLRCE(
         Assert( RwlRCEChain( uiHash ).FNotWriter() );
     }
 
+    //  copy the bookmark
     prce->CopyBookmark( bookmark );
 
     Assert( pgnoNull == prce->PgnoUndoInfo( ) );
     Assert( prce->Oper() != operAllocExt );
     Assert( !prce->FOperDDL() );
 
+    //  flag FUCB version
     FUCBSetVersioned( pfucb );
 
     CallS( err );
@@ -3271,9 +4076,22 @@ HandleError:
 }
 
 
+//  ================================================================
 LOCAL VOID VERISetupInsertedDMLRCE( const FUCB * pfucb, RCE * prce )
+//  ================================================================
+//
+//  This copies the appropriate data from the FUCB into the RCE and
+//  propagates the maximum node size. This must be called after
+//  insertion so the maximum node size can be found (for operReplace)
+//
+//  This currently does not need to be called from VERModifyByProxy
+//
+//-
 {
     Assert( prce->TrxCommitted() == trxMax );
+    //  If replacing node, rather than inserting or deleting node,
+    //  copy the data to RCE for before image for version readers.
+    //  Data size may be 0.
     switch( prce->Oper() )
     {
         case operReplace:
@@ -3284,6 +4102,7 @@ LOCAL VOID VERISetupInsertedDMLRCE( const FUCB * pfucb, RCE * prce )
 
             if ( pfucb->fUpdateSeparateLV )
             {
+                //  we updated a separateLV store the begin time of the PrepareUpdate
                 pverreplace->rceidBeginReplace = pfucb->rceidBeginUpdate;
             }
             else
@@ -3294,6 +4113,8 @@ LOCAL VOID VERISetupInsertedDMLRCE( const FUCB * pfucb, RCE * prce )
             const RCE * const prcePrevReplace = PrceVERIGetPrevReplace( prce );
             if ( prceNil != prcePrevReplace )
             {
+                //  a previous version exists. its max size is the max of the before- and
+                //  after-images (the after-image is our before-image)
                 Assert( !prcePrevReplace->FRolledBack() );
                 const VERREPLACE* const pverreplacePrev = (VERREPLACE*)prcePrevReplace->PbData();
                 Assert( PinstFromIfmp( pfucb->ifmp )->m_plog->FRecovering() && fRecoveringUndo != PinstFromIfmp( pfucb->ifmp )->m_plog->FRecoveringMode() ||
@@ -3302,6 +4123,7 @@ LOCAL VOID VERISetupInsertedDMLRCE( const FUCB * pfucb, RCE * prce )
             }
             else
             {
+                //  no previous replace. max size is the size of our before image
                 pverreplace->cbMaxSize = (SHORT)pfucb->kdfCurr.data.Cb();
             }
 
@@ -3309,6 +4131,7 @@ LOCAL VOID VERISetupInsertedDMLRCE( const FUCB * pfucb, RCE * prce )
 
             Assert( prce->Oper() == operReplace );
 
+            // move to data byte and copy old data (before image)
             UtilMemCpy( pverreplace->rgbBeforeImage, pfucb->kdfCurr.data.Pv(), pfucb->kdfCurr.data.Cb() );
         }
             break;
@@ -3333,12 +4156,14 @@ LOCAL VOID VERISetupInsertedDMLRCE( const FUCB * pfucb, RCE * prce )
 }
 
 
+//  ================================================================
 LOCAL BOOL FVERIWriteConflict(
     FUCB*           pfucb,
     const BOOKMARK& bookmark,
     UINT            uiHash,
     const OPER      oper
     )
+//  ================================================================
 {
     BOOL            fWriteConflict  = fFalse;
     const TRX       trxSession      = TrxVERISession( pfucb );
@@ -3350,17 +4175,33 @@ LOCAL BOOL FVERIWriteConflict(
 
     Assert( trxSession != trxMax );
 
+    //  check for write conficts
+    //  we can't use the pfucb of a committed transaction as the FUCB has been closed
+    //  if a version is committed after we started however, it must have been
+    //  created by another session
     if ( prce != prceNil )
     {
         if ( prce->FActiveNotByMe( pfucb->ppib, trxSession ) )
         {
             if ( operReadLock == oper || operDelta == oper || operDelta64 == oper )
             {
+                //  these operations commute. i.e. two sessions can perform
+                //  these operations without conflicting
+                //  we can only do this modification if all the active RCE's
+                //  in the chain are of this type
+                //  look at all active versions for an operation not of this type
+                //  OPTIMIZATION:   if the session changes again (i.e. we get a
+                //                  _third_ session) we can stop looking as we
+                //                  know that the second session commuted with
+                //                  the first, therefore the third will commute
+                //                  with the second and first (transitivity)
                 const RCE   * prceT         = prce;
                 for ( ;
                     prceNil != prceT && TrxCmp( prceT->TrxCommitted(), trxSession ) > 0;
                     prceT = prceT->PrcePrevOfNode() )
                 {
+                    //  if all active RCEs have the same oper we are OK,
+                    //  else WriteConflict.
                     if ( prceT->Oper() != oper )
                     {
                         fWriteConflict = fTrue;
@@ -3379,12 +4220,19 @@ LOCAL BOOL FVERIWriteConflict(
 #ifdef DEBUG
             if ( prce->TrxCommitted() == trxMax )
             {
+                // Must be my uncommitted version, otherwise it would have been
+                // caught by FActiveNotByMe().
                 Assert( prce->Pfucb()->ppib == pfucb->ppib );
                 Assert( prce->Level() <= pfucb->ppib->Level()
-                        || PinstFromIfmp( pfucb->ifmp )->FRecovering() );
+                        || PinstFromIfmp( pfucb->ifmp )->FRecovering() );       //  could be an RCE created by redo of UndoInfo
             }
             else
             {
+                //  RCE exists, but it committed before our session began, so no
+                //  danger of write conflict.
+                //  Normally, this session's Begin0 cannot be equal to anyone else's Commit0,
+                //  but because we only log an approximate trxCommit0, during recovery, we
+                //  may find that this session's Begin0 is equal to someone else's Commit0
                 Assert( TrxCmp( prce->TrxCommitted(), trxSession ) < 0
                     || ( prce->TrxCommitted() == trxSession && PinstFromIfmp( pfucb->ifmp )->FRecovering() ) );
             }
@@ -3394,6 +4242,20 @@ LOCAL BOOL FVERIWriteConflict(
                                             || operDelta == prce->Oper()
                                             || operDelta64 == prce->Oper() ) )
             {
+                //  these previous operation commuted. i.e. two sessions can perform
+                //  these operations without conflicting
+                //
+                //  we are creating a different type of operation that does
+                //  not commute
+                //
+                //  therefore we must check all active versions to make sure
+                //  that we are the only session that has created them
+                //
+                //  we can only do this modification if all the active RCE's
+                //  in the chain created by us
+                //
+                //  look at all versions for a active versions for a different session
+                //
                 const RCE   * prceT         = prce;
                 for ( ;
                      prceNil != prceT;
@@ -3418,11 +4280,14 @@ LOCAL BOOL FVERIWriteConflict(
             {
                 Assert( prce->Pfucb()->ppib != pfucb->ppib
                     || prce->Level() <= pfucb->ppib->Level()
-                    || PinstFromIfmp( prce->Pfucb()->ifmp )->FRecovering() );
+                    || PinstFromIfmp( prce->Pfucb()->ifmp )->FRecovering() );       //  could be an RCE created by redo of UndoInfo
             }
 
             if ( prce->Oper() == operFlagDelete )
             {
+                //  normally, the only RCE that can follow a FlagDelete is an Insert.
+                //  unless the RCE was moved, or if we're recovering, in which case we might
+                //  create RCE's for UndoInfo
                 Assert( operInsert == oper
                     || operPreInsert == oper
                     || operWriteLock == oper
@@ -3454,6 +4319,7 @@ BOOL FVERWriteConflict(
 }
 
 
+//  ================================================================
 INLINE ERR VER::ErrVERModifyCommitted(
     FCB             *pfcb,
     const BOOKMARK& bookmark,
@@ -3462,9 +4328,16 @@ INLINE ERR VER::ErrVERModifyCommitted(
     const TRX       trxCommitted,
     RCE             **pprce
     )
+//  ================================================================
+//
+//  Used by concurrent create index to create a RCE as though it was done
+//  by another session. The trxCommitted of the RCE is set and no checks for
+//  write conflicts are done
+//
+//-
 {
     ASSERT_VALID( &bookmark );
-    Assert( pfcb->FTypeSecondaryIndex() );
+    Assert( pfcb->FTypeSecondaryIndex() );      // only called from concurrent create index.
     Assert( pfcb->PfcbTable() == pfcbNil );
     Assert( trxCommitted != trxMax );
 
@@ -3473,13 +4346,18 @@ INLINE ERR VER::ErrVERModifyCommitted(
     ERR                 err     = JET_errSuccess;
     RCE                 *prce   = prceNil;
 
+    //  assert default return value
     Assert( NULL != pprce );
     Assert( prceNil == *pprce );
 
     {
+        //  calculate the length of the RCE in the bucket.
         const INT cbBookmark = bookmark.key.Cb() + bookmark.data.Cb();
         const INT cbNewRCE = sizeof( RCE ) + cbBookmark;
 
+        //  Set up a skeleton RCE. This holds m_critBucketGlobal, so do it
+        //  first before filling the rest.
+        //
         Call( ErrVERICreateRCE(
                 cbNewRCE,
                 pfcb,
@@ -3497,6 +4375,7 @@ INLINE ERR VER::ErrVERModifyCommitted(
                 ) );
         AssertPREFIX( prce );
 
+        //  copy the bookmark
         prce->CopyBookmark( bookmark );
 
         if( !prce->FOperConcurrent() )
@@ -3526,20 +4405,24 @@ HandleError:
     return err;
 }
 
+//  ================================================================
 ERR VER::ErrVERCheckTransactionSize( PIB * const ppib )
+//  ================================================================
 {
     ERR err = JET_errSuccess;
     if ( m_fAboveMaxTransactionSize )
     {
         UpdateCachedTrxOldest( m_pinst );
 
+        // If this is the oldest transaction and the version store is too
+        // full, return an error
         if ( ppib->trxBegin0 == TrxOldestCached( m_pinst ) )
         {
             const BOOL fCleanupWasRun   = m_msigRCECleanPerformedRecently.FWait( cmsecAsyncBackgroundCleanup );
 
             m_critBucketGlobal.Enter();
 
-            VERIReportVersionStoreOOM ( ppib, fTrue , fCleanupWasRun );
+            VERIReportVersionStoreOOM ( ppib, fTrue /* fMaxTrxSize */, fCleanupWasRun );
 
             m_critBucketGlobal.Leave();
 
@@ -3552,6 +4435,7 @@ HandleError:
 }
 
 
+//  ================================================================
 ERR VER::ErrVERModify(
     FUCB            * pfucb,
     const BOOKMARK& bookmark,
@@ -3559,15 +4443,30 @@ ERR VER::ErrVERModify(
     RCE             **pprce,
     const VERPROXY  * const pverproxy
     )
+//  ================================================================
+//
+//  Create an RCE for a DML operation.
+//
+//  OPTIMIZATION:   combine delta/readLock/replace versions
+//                  remove redundant replace versions
+//
+//  RETURN VALUE
+//      Jet_errWriteConflict for two cases:
+//          -for any committed node, caller's transaction begin time
+//          is less than node's level 0 commit time.
+//          -for any uncommitted node except operDelta/operReadLock at all by another session
+//
+//-
 {
     ASSERT_VALID( pfucb );
     ASSERT_VALID( &bookmark );
-    Assert( FOperInHashTable( oper ) );
+    Assert( FOperInHashTable( oper ) ); //  not supposed to be in hash table? use VERFlag
     Assert( !bookmark.key.FNull() );
     Assert( !g_rgfmp[pfucb->ifmp].FVersioningOff() );
     Assert( !pfucb->ppib->FReadOnlyTrx() );
     AssertTrack( !g_rgfmp[pfucb->ifmp].FShrinkIsRunning(), "VerCreateDuringShrink" );
 
+    //  set default return value
     Assert( NULL != pprce );
     *pprce = prceNil;
 
@@ -3581,6 +4480,9 @@ ERR VER::ErrVERModify(
     FUCB        *pfucbProxy     = pfucbNil;
     const BOOL  fProxy          = ( NULL != pverproxy );
 
+    //  we never create an insert version at runtime. instead we create a writeLock version
+    //  and use ChangeOper to change it into an insert
+    //
     Assert( m_pinst->m_plog->FRecovering() || operInsert != oper );
 
     Assert( !m_pinst->m_plog->FRecovering() || ( fProxy && proxyRedo == pverproxy->proxy ) );
@@ -3591,7 +4493,7 @@ ERR VER::ErrVERModify(
             Assert( !m_pinst->m_plog->FRecovering() );
             Assert( oper == operWriteLock
                 || oper == operPreInsert
-                || oper == operReplace
+                || oper == operReplace      // via FlagInsertAndReplaceData
                 || oper == operFlagDelete );
             Assert( prceNil != pverproxy->prcePrimary );
             prcePrimary = pverproxy->prcePrimary;
@@ -3613,6 +4515,7 @@ ERR VER::ErrVERModify(
 
                 level = prcePrimary->Level();
 
+                // Need to allocate an FUCB for the proxy, in case it rolls back.
                 CallR( ErrDIROpenByProxy(
                             prcePrimary->Pfucb()->ppib,
                             pfucb->u.pfcb,
@@ -3620,9 +4523,13 @@ ERR VER::ErrVERModify(
                             level ) );
                 Assert( pfucbNil != pfucbProxy );
 
+                //  force pfucbProxy to be defer-closed, so that it will
+                //  not be released until the owning session commits
+                //  or rolls back
                 Assert( pfucbProxy->ppib->Level() > 0 );
                 FUCBSetVersioned( pfucbProxy );
 
+                // Use proxy FUCB for versioning.
                 pfucb = pfucbProxy;
             }
         }
@@ -3638,12 +4545,17 @@ ERR VER::ErrVERModify(
     else
     {
         if ( FUndoableLoggedOper( oper )
-            || operPreInsert == oper )
+            || operPreInsert == oper )      //  HACK: this oper will get promoted to operInsert on success (or manually nullified on failure)
         {
             updateid = UpdateidOfPpib( pfucb->ppib );
         }
         else
         {
+            //  If in the middle of an update, only a few
+            //  non-DML RCE's are possible.  These RCE's
+            //  will remain outstanding (by design) even
+            //  if the update rolls back.
+            //
             Assert( updateidNil == UpdateidOfPpib( pfucb->ppib )
                 || operWriteLock == oper
                 || operReadLock == oper );
@@ -3668,18 +4580,27 @@ ERR VER::ErrVERModify(
 
     if ( FOperConcurrent( oper ) )
     {
+        // For concurrent operations, we had to obtain rwlHash before
+        // allocating an rceid, to ensure that rceid's are chained in order.
         Assert( RwlRCEChain( uiHash ).FWriter() );
     }
     else
     {
+        // For non-concurrent operations, rceid's won't be chained out
+        // of order because all but one RCE will fail with write-conflict
+        // below.
         RwlRCEChain( uiHash ).EnterAsWriter();
     }
 
+    // UNDONE: CIM support for updates is currently broken -- only
+    // used for dirty reads by concurrent create index.
     Assert( FPIBVersion( pfucb->ppib )
         || ( prceNil != prcePrimary && prcePrimary->Pfucb()->ppib == pfucb->ppib ) );
 
     if ( !m_pinst->m_plog->FRecovering() && FVERIWriteConflict( pfucb, bookmark, uiHash, oper ) )
     {
+        //  UNDONE: is there a way to easily report the bm?
+        //
         OSTraceFMP(
             pfucb->ifmp,
             JET_tracetagDMLConflicts,
@@ -3705,7 +4626,7 @@ ERR VER::ErrVERModify(
         *PprceRCEChainGet( (*pprce)->UiHash(), (*pprce)->Ifmp(), (*pprce)->PgnoFDP(), bookmarkT ),
         (*pprce)->UiHash() ) );
 }
-#endif
+#endif  //  DEBUG_VER
 
     RwlRCEChain( uiHash ).LeaveAsWriter();
 
@@ -3724,7 +4645,7 @@ HandleError:
 
     if ( pfucbNil != pfucbProxy )
     {
-        Assert( pfucbProxy->ppib->Level() > 0 );
+        Assert( pfucbProxy->ppib->Level() > 0 );    // Ensure defer-closed, even on error
         Assert( FFUCBVersioned( pfucbProxy ) );
         DIRClose( pfucbProxy );
     }
@@ -3733,15 +4654,22 @@ HandleError:
 }
 
 
+//  ================================================================
 ERR VER::ErrVERFlag( FUCB * pfucb, OPER oper, const VOID * pv, INT cb )
+//  ================================================================
+//
+//  Creates a RCE for a DDL or space operation. The RCE is not put
+//  in the hash table
+//
+//-
 {
 #ifdef DEBUG
     ASSERT_VALID( pfucb );
     Assert( pfucb->ppib->Level() > 0 );
     Assert( cb >= 0 );
-    Assert( !FOperInHashTable( oper ) );
+    Assert( !FOperInHashTable( oper ) );    //  supposed to be in hash table? use VERModify
     Ptls()->fAddColumn = operAddColumn == oper;
-#endif
+#endif  //  DEBUG
 
     ERR     err     = JET_errSuccess;
     RCE     *prce   = prceNil;
@@ -3756,6 +4684,9 @@ ERR VER::ErrVERFlag( FUCB * pfucb, OPER oper, const VOID * pv, INT cb )
     pfcb = pfucb->u.pfcb;
     Assert( pfcb != NULL );
 
+    //  Set up a skeleton RCE. This holds m_critBucketGlobal, so do it
+    //  first before filling the rest.
+    //
     Assert( trxMax == pfucb->ppib->trxCommit0 );
     Call( ErrVERICreateRCE(
             sizeof(RCE) + cb,
@@ -3785,18 +4716,44 @@ ERR VER::ErrVERFlag( FUCB * pfucb, OPER oper, const VOID * pv, INT cb )
 HandleError:
 #ifdef DEBUG
     Ptls()->fAddColumn = fFalse;
-#endif
+#endif  //  DEBUG
 
     return err;
 }
 
 
+//  ================================================================
 VOID VERSetCbAdjust(
             CSR         *pcsr,
     const   RCE         *prce,
             INT         cbDataNew,
             INT         cbDataOld,
             UPDATEPAGE  updatepage )
+//  ================================================================
+//
+//  Sets the max size and delta fields in a replace RCE
+//
+//  WARNING:  The following comments explain how a Replace RCE's delta field
+//  (ie. the second SHORT stored in rgbData) is used.  The semantics can get
+//  pretty confusing, so PLEASE DO NOT REMOVE THESE COMMENTS.  -- JL
+//
+//  *psDelta records how much the operation contributes to deferred node
+//  space reservation. A positive cbDelta here means the node is growing,
+//  so we will use up space which may have been reserved (ie. *psDelta will
+//  decrease).  A negative cbDelta here means the node is shrinking,
+//  so we must add abs(cbDelta) to the *psDelta to reflect how much more node
+//  space must be reserved.
+//
+//  This is how to interpret the value of *psDelta:
+//      - if *psDelta is positive, then *psDelta == reserved node space.  *psDelta can only
+//        be positive after a node shrinkage.
+//      - if *psDelta is negative, then abs(*psDelta) is the reserved node space that
+//        was consumed during a node growth.  *psDelta can only become negative
+//        after a node shrinkage (which sets aside some reserved node space)
+//        followed by a node growth (which consumes some/all of that
+//        reserved node space).
+//
+//-
 {
     ASSERT_VALID( pcsr );
     Assert( pcsr->Latch() == latchWrite || fDoNotUpdatePage == updatepage );
@@ -3811,8 +4768,11 @@ VOID VERSetCbAdjust(
     INT cbMax = pverreplace->cbMaxSize;
     Assert( pverreplace->cbMaxSize >= cbDataOld );
 
+    //  set new node maximum size.
     if ( cbDataNew > cbMax )
     {
+        //  this is the largest the node has ever been. set the max size and
+        //  free all previously reserved space
         Assert( cbDelta > 0 );
         pverreplace->cbMaxSize  = SHORT( cbDataNew );
         cbDelta                 = cbMax - cbDataOld;
@@ -3824,10 +4784,19 @@ VOID VERSetCbAdjust(
     {
         if ( cbDelta > 0 )
         {
+            // If, during this transaction, we've shrunk the node.  There will be
+            // some uncommitted freed space.  Reclaim as much of this as needed to
+            // satisfy the new node growth.  Note that we can update cbUncommittedFreed
+            // in this fashion because the subsequent call to ErrPMReplace() is
+            // guaranteed to succeed (ie. the node is guaranteed to grow).
             pcsr->Cpage().ReclaimUncommittedFreed( cbDelta );
         }
         else if ( cbDelta < 0 )
         {
+            // Node has decreased in size.  The page header's cbFree has already
+            // been increased to reflect this.  But we must also increase
+            // cbUncommittedFreed to indicate that the increase in cbFree is
+            // contingent on commit of this operation.
             pcsr->Cpage().AddUncommittedFreed( -cbDelta );
         }
     }
@@ -3836,14 +4805,23 @@ VOID VERSetCbAdjust(
     {
         Assert( fDoNotUpdatePage == updatepage );
     }
-#endif
+#endif  //  DEBUG
 }
 
 
+//  ================================================================
 LOCAL INT CbVERIGetNodeMax( const FUCB * pfucb, const BOOKMARK& bookmark, UINT uiHash )
+//  ================================================================
+//
+//  This assumes nodeMax is propagated through the replace RCEs. Assumes
+//  it is in the critical section to CbVERGetNodeReserverved can use it for
+//  debugging
+//
+//-
 {
     INT         nodeMax = 0;
 
+    // Look for any replace RCE's.
     const RCE *prce = PrceRCEGet( uiHash, pfucb->ifmp, pfucb->u.pfcb->PgnoFDP(), bookmark );
     for ( ; prceNil != prce && trxMax == prce->TrxCommitted(); prce = prce->PrcePrevOfNode() )
     {
@@ -3859,7 +4837,13 @@ LOCAL INT CbVERIGetNodeMax( const FUCB * pfucb, const BOOKMARK& bookmark, UINT u
 }
 
 
+//  ================================================================
 INT CbVERGetNodeMax( const FUCB * pfucb, const BOOKMARK& bookmark )
+//  ================================================================
+//
+//  This enters the critical section and calls CbVERIGetNodeMax
+//
+//-
 {
     ASSERT_VALID( pfucb );
     ASSERT_VALID( &bookmark );
@@ -3873,7 +4857,9 @@ INT CbVERGetNodeMax( const FUCB * pfucb, const BOOKMARK& bookmark )
 }
 
 
+//  ================================================================
 INT CbVERGetNodeReserve( const PIB * ppib, const FUCB * pfucb, const BOOKMARK& bookmark, INT cbCurrentData )
+//  ================================================================
 {
     Assert( ppibNil == ppib || (ASSERT_VALID( ppib ), fTrue) );
     ASSERT_VALID( pfucb );
@@ -3886,6 +4872,8 @@ INT CbVERGetNodeReserve( const PIB * ppib, const FUCB * pfucb, const BOOKMARK& b
     const RCE *             prceFirstUncommittedReplace = prceNil;
     INT                     cbNodeReserve               = 0;
 
+    //  find all uncommitted replace RCE's for this node
+    //
     for ( const RCE * prce = PrceRCEGet( uiHash, pfucb->ifmp, pfucb->u.pfcb->PgnoFDP(), bookmark );
         prceNil != prce && trxMax == prce->TrxCommitted();
         prce = prce->PrcePrevOfNode() )
@@ -3902,6 +4890,12 @@ INT CbVERGetNodeReserve( const PIB * ppib, const FUCB * pfucb, const BOOKMARK& b
         }
     }
 
+    //  double-check one last time that the transaction with the outstanding
+    //  replace RCE's is still outstanding (or more importantly, that it
+    //  didn't commit while we were traversing the RCE list, because that
+    //  may result in a bogus, or even negative, reserved node space
+    //  calculation)
+    //
     if ( prceNil != prceFirstUncommittedReplace
         && trxMax != prceFirstUncommittedReplace->TrxCommitted() )
     {
@@ -3909,8 +4903,15 @@ INT CbVERGetNodeReserve( const PIB * ppib, const FUCB * pfucb, const BOOKMARK& b
     }
     else if ( 0 != cbNodeReserve )
     {
+        //  the deltas should always net out to a non-negative value
+        //
         Assert( cbNodeReserve > 0 );
 
+        //  the deltas should net out to the same value as the max node size minus
+        //  the current node size, except if we compute a bogus max size because
+        //  the transaction with the outstanding replace RCE's commits while we're
+        //  trying to compute the max node size
+        //
         Assert( cbNodeReserve == CbVERIGetNodeMax( pfucb, bookmark, uiHash ) - (INT)cbCurrentData
             || ( prceNil != prceFirstUncommittedReplace && trxMax != prceFirstUncommittedReplace->TrxCommitted() ) );
     }
@@ -3919,11 +4920,18 @@ INT CbVERGetNodeReserve( const PIB * ppib, const FUCB * pfucb, const BOOKMARK& b
 }
 
 
+//  ================================================================
 BOOL FVERCheckUncommittedFreedSpace(
     const FUCB  * pfucb,
     CSR         * const pcsr,
     const INT   cbReq,
     const BOOL  fPermitUpdateUncFree )
+//  ================================================================
+//
+// This function is called after it has been determined that cbFree will satisfy
+// cbReq. We now check that cbReq doesn't use up any uncommitted freed space.
+//
+//-
 {
     BOOL    fEnoughPageSpace    = fTrue;
 
@@ -3931,11 +4939,16 @@ BOOL FVERCheckUncommittedFreedSpace(
     ASSERT_VALID( pcsr );
     Assert( cbReq <= pcsr->Cpage().CbPageFree() );
 
+    //  during recovery we would normally set cbUncommitted free to 0
+    //  but if we didn't redo anything on the page and are now rolling
+    //  back or if this is viewcache, this may not be the case
 
     if ( PinstFromPfucb( pfucb )->FRecovering() )
     {
         if ( fPermitUpdateUncFree && pcsr->Cpage().CbUncommittedFree() != 0 )
         {
+            //  recovery is single threaded so we should only conflict with the buffer manager;
+            //  however, this is known to always fail for ViewCache.
 
             LATCH   latchOld;
             ERR err = pcsr->ErrUpgradeToWARLatch( &latchOld );
@@ -3943,46 +4956,69 @@ BOOL FVERCheckUncommittedFreedSpace(
             if ( err == JET_errSuccess )
             {
                 pcsr->Cpage().SetCbUncommittedFree( 0 );
-                BFDirty( pcsr->Cpage().PBFLatch(), bfdfUntidy, *TraceContextScope() );
+                BFDirty( pcsr->Cpage().PBFLatch(), bfdfUntidy, *TraceContextScope() );  // Not tracing untidied pages
                 pcsr->DowngradeFromWARLatch( latchOld );
             }
         }
 
+        //  even if we were unable to update cbUncommittedFree, we know that the
+        //  it is essentially zero (because of recovery); so just return fTrue.
         
         return fTrue;
     }
 
 
+    // We should already have performed the check against cbFree only (in other
+    // words, this function is only called from within FNDFreePageSpace(),
+    // or something that simulates its function).  This tells us that if all
+    // currently-uncommitted transactions eventually commit, we should have
+    // enough space to satisfy this request.
     Assert( cbReq <= pcsr->Cpage().CbPageFree() );
 
+    // The amount of space freed but possibly uncommitted should be a subset of
+    // the total amount of free space for this page.
     Assert( pcsr->Cpage().CbUncommittedFree() >= 0 );
     Assert( pcsr->Cpage().CbPageFree() >= pcsr->Cpage().CbUncommittedFree() );
 
+    // In the worst case, all transactions that freed space on this page will
+    // rollback, causing the space freed to be reclaimed.  If the space
+    // required can be satisfied even in the worst case, then we're okay;
+    // otherwise, we have to do more checking.
     if ( cbReq > pcsr->Cpage().CbPageFree() - pcsr->Cpage().CbUncommittedFree() )
     {
         Assert( !FFUCBSpace( pfucb ) );
         Assert( !pcsr->Cpage().FSpaceTree() );
 
+        //  UNDONE: use the CbNDUncommittedFree call
+        //          to get rglineinfo for later split
+        //          this will reduce CPU usage for RCE hashing
+        //
         const INT   cbUncommittedFree = CbNDUncommittedFree( pfucb, pcsr );
         Assert( cbUncommittedFree >= 0 );
 
         if ( cbUncommittedFree == pcsr->Cpage().CbUncommittedFree() )
         {
+            //  cbUncommittedFreed in page is correct
+            //  return
+            //
             fEnoughPageSpace = fFalse;
         }
         else
         {
             if ( fPermitUpdateUncFree )
             {
+                // Try updating cbUncommittedFreed, in case some freed space was committed.
                 LATCH latchOld;
                 if ( pcsr->ErrUpgradeToWARLatch( &latchOld ) == JET_errSuccess )
                 {
                     pcsr->Cpage().SetCbUncommittedFree( cbUncommittedFree );
-                    BFDirty( pcsr->Cpage().PBFLatch(), bfdfUntidy, *TraceContextScope() );
+                    BFDirty( pcsr->Cpage().PBFLatch(), bfdfUntidy, *TraceContextScope() );  // Not tracing untidied pages
                     pcsr->DowngradeFromWARLatch( latchOld );
                 }
             }
 
+            // The amount of space freed but possibly uncommitted should be a subset of
+            // the total amount of free space for this page.
             Assert( pcsr->Cpage().CbUncommittedFree() >= 0 );
             Assert( pcsr->Cpage().CbPageFree() >= pcsr->Cpage().CbUncommittedFree() );
 
@@ -3995,12 +5031,19 @@ BOOL FVERCheckUncommittedFreedSpace(
 
 
 
+//  ****************************************************************
+//  RCE CLEANUP
+//  ****************************************************************
 
+//  ================================================================
 ERR RCE::ErrGetTaskForDelete( VOID ** ppvtask ) const
+//  ================================================================
 {
     ERR                 err     = JET_errSuccess;
     DELETERECTASK *     ptask   = NULL;
 
+    //  since we have the RwlRCEChain, we're guaranteed that the RCE will not go away,
+    //  nor will it be nullified
 
     const UINT              uiHash      = m_uiHash;
     ENTERREADERWRITERLOCK   enterRwlRCEChainAsReader( &( PverFromIfmp( Ifmp() )->RwlRCEChain( uiHash ) ), fTrue );
@@ -4009,6 +5052,7 @@ ERR RCE::ErrGetTaskForDelete( VOID ** ppvtask ) const
     {
         Assert( operFlagDelete == Oper() || operInsert == Oper() );
 
+        //  no cleanup for temporary tables or tables/indexes scheduled for deletion
         Assert( !FFMPIsTempDB( Ifmp() ) );
         if ( !Pfcb()->FDeletePending() )
         {
@@ -4033,7 +5077,9 @@ ERR RCE::ErrGetTaskForDelete( VOID ** ppvtask ) const
 }
 
 
+//  ================================================================
 ERR VER::ErrVERIDelete( PIB * ppib, const RCE * const prce )
+//  ================================================================
 {
     ERR             err;
     DELETERECTASK * ptask;
@@ -4041,6 +5087,7 @@ ERR VER::ErrVERIDelete( PIB * ppib, const RCE * const prce )
     Assert( ppibNil != ppib );
     Assert( m_critRCEClean.FOwner() );
 
+    //  We've had a rollback failure on this session, we're a stone throw away from terminating uncleanly, bail ...
     if ( ppib->ErrRollbackFailure() < JET_errSuccess )
     {
         err = m_pinst->ErrInstanceUnavailableErrorCode() ?  m_pinst->ErrInstanceUnavailableErrorCode() : JET_errInstanceUnavailable;
@@ -4056,12 +5103,14 @@ ERR VER::ErrVERIDelete( PIB * ppib, const RCE * const prce )
 
     if( NULL == ptask )
     {
+        //  we determined that a task wasn't needed for whatever reason
+        //
         CallS( err );
     }
 
     else if ( m_fSyncronousTasks
         || g_rgfmp[prce->Ifmp()].FDetachingDB()
-        || m_pinst->Taskmgr().CPostedTasks() > UlParam( m_pinst, JET_paramVersionStoreTaskQueueMax ) )
+        || m_pinst->Taskmgr().CPostedTasks() > UlParam( m_pinst, JET_paramVersionStoreTaskQueueMax ) )  //  if task manager is overloaded, perform task synchronously
     {
         IncrementCSyncCleanupDispatched();
         TASK::Dispatch( m_ppibRCECleanCallback, (ULONG_PTR)ptask );
@@ -4071,6 +5120,7 @@ ERR VER::ErrVERIDelete( PIB * ppib, const RCE * const prce )
     else
     {
         IncrementCAsyncCleanupDispatched();
+        // DELETERECTASK is a RECTASK so use the RECTASKBATCHER object to batch the tasks together      
         err = m_rectaskbatcher.ErrPost( ptask );
     }
 
@@ -4078,7 +5128,10 @@ ERR VER::ErrVERIDelete( PIB * ppib, const RCE * const prce )
 }
 
 
+//  ================================================================
 LOCAL VOID VERIFreeExt( PIB * const ppib, FCB *pfcb, PGNO pgnoFirst, CPG cpg )
+//  ================================================================
+//  Throw away any errors encountered -- at worst, we just lose space.
 {
     Assert( pfcb );
 
@@ -4092,6 +5145,12 @@ LOCAL VOID VERIFreeExt( PIB * const ppib, FCB *pfcb, PGNO pgnoFirst, CPG cpg )
     if ( err < 0 )
         return;
 
+    // Can't call DIROpen() because this function gets called
+    // only during rollback AFTER the logic in DIRRollback()
+    // which properly resets the navigation level of this
+    // session's cursors.  Thus, when we close the cursor
+    // below, the navigation level will not get properly reset.
+    // Call( ErrDIROpen( ppib, pfcb, &pfucb ) );
     Call( ErrBTOpen( ppib, pfcb, &pfucb ) );
 
     Assert( !FFUCBSpace( pfucb ) );
@@ -4100,6 +5159,7 @@ LOCAL VOID VERIFreeExt( PIB * const ppib, FCB *pfcb, PGNO pgnoFirst, CPG cpg )
 
     (VOID)ErrSPFreeExt( pfucb, pgnoFirst, cpg, "VerFreeExt" );
     
+    // Restore cleanup checking
     FOSSetCleanupState( fCleanUpStateSavedSavedSaved );
 
 HandleError:
@@ -4116,31 +5176,50 @@ HandleError:
 
 
 #ifdef DEBUG
+//  ================================================================
 BOOL FIsRCECleanup()
+//  ================================================================
+//
+//  DEBUG:  is the current thread a RCECleanup thread?
 {
     return Ptls()->fIsRCECleanup;
 }
 
+//  ================================================================
 BOOL FInCritBucket( VER *pver )
+//  ================================================================
+//
+//  DEBUG:  is the current thread in m_critBucketGlobal
 {
     return pver->m_critBucketGlobal.FOwner();
 }
-#endif
+#endif  //  DEBUG
 
 
+//  ================================================================
 BOOL FPIBSessionRCEClean( PIB *ppib )
+//  ================================================================
+//
+// Is the given PIB the one used by RCE clean?
+//
+//-
 {
     Assert( ppibNil != ppib );
     return ( (PverFromPpib( ppib ))->m_ppibRCEClean == ppib );
 }
 
 
+//  ================================================================
 INLINE VOID VERIUnlinkDefunctSecondaryIndex(
     PIB * const ppib,
     FCB * const pfcb )
+//  ================================================================
 {
     Assert( pfcb->FTypeSecondaryIndex() );
 
+    // Must unlink defunct FCB from all deferred-closed cursors.
+    // The cursors themselves will be closed when the
+    // owning session commits or rolls back.
     pfcb->Lock();
 
     while ( pfcb->Pfucb() != pfucbNil )
@@ -4156,6 +5235,8 @@ INLINE VOID VERIUnlinkDefunctSecondaryIndex(
             pfucbT->u.pfcb->Unlink( pfucbT );
 
             BTReleaseBM( pfucbT );
+            // If cursor belongs to us, we can close
+            // it right now.
             FUCBClose( pfucbT );
         }
         else
@@ -4163,8 +5244,18 @@ INLINE VOID VERIUnlinkDefunctSecondaryIndex(
             BOOL fDoUnlink = fFalse;
             PinstFromPpib( ppibT )->RwlTrx( ppibT ).EnterAsWriter();
 
+            //  if undoing CreateIndex, we know other session must be
+            //  in a transaction if it has a link to this FCB because
+            //  the index is not visible yet.
 
+            // FCB may have gotten unlinked if other session
+            // committed or rolled back while we were switching
+            // critical sections.
 
+            // We rely on pfcb->Pfucb() continuing to return the same value until the FUCB* is
+            // unlinked.  That is, we rely on any addition or removal to the FUCB list on the
+            // FCB to leave the 0th element in place as the 0th element, although any other
+            // reordering is possible.
             pfcb->Lock();
             if ( pfcb->Pfucb() == pfucbT )
             {
@@ -4187,9 +5278,19 @@ INLINE VOID VERIUnlinkDefunctSecondaryIndex(
 }
 
 
+//  ================================================================
 INLINE VOID VERIUnlinkDefunctLV(
     PIB * const ppib,
     FCB * const pfcb )
+//  ================================================================
+//
+//  If we are rolling back, only the owning session could have seen
+//  the LV tree, because
+//      -- the table was opened exclusively and the session that opened
+//      the table created the LV tree
+//      -- ppibLV created the LV tree and is rolling back before returning
+//
+//-
 {
     Assert( pfcb->FTypeLV() );
 
@@ -4213,19 +5314,24 @@ INLINE VOID VERIUnlinkDefunctLV(
 }
 
 
+//  ================================================================
 template< typename TDelta >
 ERR VER::ErrVERICleanDeltaRCE( const RCE * const prce )
+//  ================================================================
 {
     ERR       err = JET_errSuccess;
     IFMP      ifmp;
     RECTASK  *ptask;
     PIB      *ppib;
     
+    // To access the RCE, we need to take the RwlRCE chain to prevent others
+    // from nullifying it.
     {
     ENTERREADERWRITERLOCK enterRwlRCEChainAsWriter( &( PverFromIfmp( prce->Ifmp() )->RwlRCEChain( prce->UiHash() ) ), fFalse );
 
     if ( prce->Oper() != _VERDELTA<TDelta>::TRAITS::oper )
     {
+        //  Nullified by someone else (e.g. VERNullifyInactiveVersionsOnBM), nothing for us to do
         Assert( prce->Oper() == ( _VERDELTA<TDelta>::TRAITS::oper | operMaskNull ) );
         return err;
     }
@@ -4244,7 +5350,7 @@ ERR VER::ErrVERICleanDeltaRCE( const RCE * const prce )
         !prce->Pfcb()->FDeletePending() )
     {
         Assert( !prce->Pfcb()->FDeleteCommitted() );
-        Assert( !prce->Pfcb()->Ptdb() );
+        Assert( !prce->Pfcb()->Ptdb() );    //  LV trees don't have TDB's
         ptask = new DELETELVTASK( prce->PgnoFDP(),
                                   prce->Pfcb(),
                                   prce->Ifmp(),
@@ -4278,9 +5384,11 @@ ERR VER::ErrVERICleanDeltaRCE( const RCE * const prce )
     }
     else
     {
+        // Nothing to do
         return err;
     }
 
+    //  We've had a rollback failure on this session, we're a stone throw away from terminating uncleanly, bail ...
     if ( ppib->ErrRollbackFailure() < JET_errSuccess )
     {
         err = m_pinst->ErrInstanceUnavailableErrorCode() ? m_pinst->ErrInstanceUnavailableErrorCode() : JET_errInstanceUnavailable;
@@ -4290,16 +5398,19 @@ ERR VER::ErrVERICleanDeltaRCE( const RCE * const prce )
 
     ifmp = prce->Ifmp();
 
+    //  In order to do the next steps, we need to leave the critical section
     Assert( prce->Oper() == operDelta || prce->Oper() == operDelta64 );
-    }
+    } // End of local scope to release the critical section
 
+    //  The RCE can not go away because we are on a cleanup thread processing this RCE. 
+    //  Careful to not access it, however, to avoid FReadable asserts if it gets nullified.
     Assert( ptask );
     Assert( ppib );
     Assert( FIsRCECleanup() );
     
     if ( m_fSyncronousTasks
         || g_rgfmp[ ifmp ].FDetachingDB()
-        || m_pinst->Taskmgr().CPostedTasks() > UlParam( m_pinst, JET_paramVersionStoreTaskQueueMax ) )
+        || m_pinst->Taskmgr().CPostedTasks() > UlParam( m_pinst, JET_paramVersionStoreTaskQueueMax ) )  //  if task manager is overloaded, perform task synchronously
     {
         IncrementCSyncCleanupDispatched();
         TASK::Dispatch( ppib, (ULONG_PTR)ptask );
@@ -4308,6 +5419,7 @@ ERR VER::ErrVERICleanDeltaRCE( const RCE * const prce )
     {
         IncrementCAsyncCleanupDispatched();
 
+        // DELETELVTASK and FINALIZETASK are RECTASKs so use the RECTASKBATCHER object to batch the tasks together
         err = m_rectaskbatcher.ErrPost( ptask );
     }
 
@@ -4315,7 +5427,13 @@ ERR VER::ErrVERICleanDeltaRCE( const RCE * const prce )
 }
 
 
+//  ================================================================
 LOCAL VOID VERIRemoveCallback( const RCE * const prce )
+//  ================================================================
+//
+//  Remove the callback from the list
+//
+//-
 {
     Assert( prce->CbData() == sizeof(VERCALLBACK) );
     const VERCALLBACK* const pvercallback = (VERCALLBACK*)prce->PbData();
@@ -4344,6 +5462,10 @@ VOID VER::IncrementCCleanupFailed()
 
 VOID VER::IncrementCCleanupDiscarded( const RCE * const prce )
 {
+    //  if another thread nullifies this RCE (via VERNullifyAllVersionsOnFCB
+    //  or VERNullifyInactiveVersionsOnBM) while we were trying to discard it,
+    //  then don't count it as a discard
+    //
     if ( !prce->FOperNull() )
     {
         PERFOpt( cVERCleanupDiscarded.Inc( m_pinst ) );
@@ -4355,6 +5477,18 @@ VOID VER::IncrementCCleanupDiscarded( const RCE * const prce )
 
 VOID VERIWaitForTasks( VER *pver, FCB *pfcb, BOOL fInRollback, BOOL fHaveRceCleanLock )
 {
+    //  wait for all tasks on the FCB to complete
+    //  no new tasks should be created because there is a delete on the FCB
+    //
+    //  UNDONE: we're assuming that the tasks we're waiting
+    //  for will be serviced by other threads while this task
+    //  thread waits, but is it possible that NT only assigns
+    //  one thread to us, meaning the other tasks will never
+    //  get serviced and we will therefore end up waiting
+    //  forever?
+    //
+    //  Post all pending tasks to avoid deadlock where we wait for tasks
+    //  which haven't been issued yet
     const BOOL fCleanUpStateSavedSavedSaved = fInRollback ? FOSSetCleanupState( fFalse ) : fTrue;
     if ( fHaveRceCleanLock )
     {
@@ -4372,7 +5506,9 @@ VOID VERIWaitForTasks( VER *pver, FCB *pfcb, BOOL fInRollback, BOOL fHaveRceClea
     Assert( pfcb->CTasksActive() == 0 );
 }
 
+//  ================================================================
 ERR VER::ErrVERICleanOneRCE( RCE * const prce )
+//  ================================================================
 {
     ERR err = JET_errSuccess;
 
@@ -4384,6 +5520,7 @@ ERR VER::ErrVERICleanOneRCE( RCE * const prce )
     switch( prce->Oper() )
     {
         case operCreateTable:
+            // RCE list ensures FCB is still pinned
             Assert( pfcbNil != prce->Pfcb() );
             Assert( prce->Pfcb()->PrceOldest() != prceNil );
             if ( prce->Pfcb()->FTypeTable() )
@@ -4391,14 +5528,17 @@ ERR VER::ErrVERICleanOneRCE( RCE * const prce )
                 if ( FCATHashActive( m_pinst ) )
                 {
 
+                    //  catalog hash is active so we need to insert this table
 
                     CHAR szTable[JET_cbNameMost+1];
 
+                    //  read the table-name from the TDB
 
                     prce->Pfcb()->EnterDML();
                     OSStrCbFormatA( szTable, sizeof(szTable), prce->Pfcb()->Ptdb()->SzTableName() );
                     prce->Pfcb()->LeaveDML();
 
+                    //  insert the table into the catalog hash
 
                     CATHashIInsert( prce->Pfcb(), szTable );
                 }
@@ -4411,6 +5551,7 @@ ERR VER::ErrVERICleanOneRCE( RCE * const prce )
 
         case operAddColumn:
         {
+            // RCE list ensures FCB is still pinned
             Assert( prce->Pfcb()->PrceOldest() != prceNil );
 
             Assert( prce->CbData() == sizeof(VERADDCOLUMN) );
@@ -4425,11 +5566,15 @@ ERR VER::ErrVERICleanOneRCE( RCE * const prce )
 
             FIELDResetVersionedAdd( pfield->ffield );
 
+            // Only reset the Versioned bit if a Delete
+            // is not pending.
             if ( FFIELDVersioned( pfield->ffield ) && !FFIELDDeleted( pfield->ffield ) )
             {
                 FIELDResetVersioned( pfield->ffield );
             }
 
+            //  should be impossible for current default record to be same as old default record,
+            //  but check anyways to be safe
             Assert( NULL == pbOldDefaultRec
                 || (BYTE *)ptdb->PdataDefaultRecord() != pbOldDefaultRec );
             if ( NULL != pbOldDefaultRec
@@ -4445,6 +5590,7 @@ ERR VER::ErrVERICleanOneRCE( RCE * const prce )
 
         case operDeleteColumn:
         {
+            // RCE list ensures FCB is still pinned
             Assert( prce->Pfcb()->PrceOldest() != prceNil );
 
             prce->Pfcb()->EnterDDL();
@@ -4454,11 +5600,18 @@ ERR VER::ErrVERICleanOneRCE( RCE * const prce )
             TDB             * const ptdb    = prce->Pfcb()->Ptdb();
             FIELD           * const pfield  = ptdb->Pfield( columnid );
 
+            // If field was version-added, it would have been cleaned
+            // up by now.
             Assert( pfield->coltyp != JET_coltypNil );
 
+            // UNDONE: Don't reset coltyp to Nil, so that we can support
+            // column access at level 0.
+///                 pfield->coltyp = JET_coltypNil;
 
+            //  remove the column name from the TDB name space
             ptdb->MemPool().DeleteEntry( pfield->itagFieldName );
 
+            // Reset version and autoinc fields.
             Assert( !( FFIELDVersion( pfield->ffield )
                      && FFIELDAutoincrement( pfield->ffield ) ) );
             if ( FFIELDVersion( pfield->ffield ) )
@@ -4484,6 +5637,8 @@ ERR VER::ErrVERICleanOneRCE( RCE * const prce )
 
         case operCreateIndex:
         {
+            //  pfcb of secondary index FCB or pfcbNil for primary
+            //  index creation
             FCB                     * const pfcbT = *(FCB **)prce->PbData();
             FCB                     * const pfcbTable = prce->Pfcb();
             FCB                     * const pfcbIndex = ( pfcbT == pfcbNil ? pfcbTable : pfcbT );
@@ -4497,6 +5652,7 @@ ERR VER::ErrVERICleanOneRCE( RCE * const prce )
 
             if ( pfcbTable == pfcbIndex )
             {
+                // VersionedCreate flag is reset at commit time for primary index.
                 Assert( !pidb->FVersionedCreate() );
                 Assert( !pidb->FDeleted() );
                 pidb->ResetFVersioned();
@@ -4505,6 +5661,8 @@ ERR VER::ErrVERICleanOneRCE( RCE * const prce )
             {
                 pidb->ResetFVersionedCreate();
 
+                // If deleted, Versioned bit will be properly reset when
+                // Delete commits or rolls back.
                 if ( !pidb->FDeleted() )
                 {
                     pidb->ResetFVersioned();
@@ -4534,6 +5692,8 @@ ERR VER::ErrVERICleanOneRCE( RCE * const prce )
             Assert( pfcbIndex != pfcbTable );
             Assert( pfcbIndex->PfcbTable() == pfcbTable );
 
+            // Use dummy ppib because we lost the original one when the
+            // transaction committed.
             Assert( pfcbIndex->FDomainDenyRead( m_ppibRCEClean ) );
 
             Assert( pfcbIndex->Pidb() != pidbNil );
@@ -4546,18 +5706,41 @@ ERR VER::ErrVERICleanOneRCE( RCE * const prce )
             pfcbTable->LeaveDDL();
             pfcbTable->ResetIndexing();
 
+            //  verify not called during recovery, which would be
+            //  bad because VERNullifyAllVersionsOnFCB() enters
+            //  m_critRCEClean, which we already have
             Assert( !m_pinst->FRecovering() );
             VERNullifyAllVersionsOnFCB( pfcbIndex );
             VERIUnlinkDefunctSecondaryIndex( ppibNil, pfcbIndex );
 
+            //  prepare the FCB to be purged
+            //  this removes the FCB from the hash-table among other things
+            //      so that the following case cannot happen:
+            //          we free the space for this FCB
+            //          someone else allocates it
+            //          someone else BTOpen's the space
+            //          we try to purge the table and find that the refcnt
+            //              is not zero and the state of the FCB says it is
+            //              currently in use!
+            //          result --> CONCURRENCY HOLE
 
             pfcbIndex->PrepareForPurge( fFalse );
 
+            //  if the parent (ie. the table) is pending deletion, we
+            //  don't need to bother freeing the index space because
+            //  it will be freed when the parent is freed
+            //  Note that the DeleteCommitted flag is only ever set
+            //  when the delete is guaranteed to be committed.  The
+            //  flag NEVER gets reset, so there's no need to grab
+            //  the FCB critical section to check it.
 
             if ( !pfcbTable->FDeleteCommitted() )
             {
                 if ( ErrLGFreeFDP( pfcbIndex, prce->TrxCommitted() ) >= JET_errSuccess )
                 {
+                    //  ignore errors if we can't free the space
+                    //  (it will be leaked)
+                    //
                     (VOID)ErrSPFreeFDP(
                                 m_ppibRCEClean,
                                 pfcbIndex,
@@ -4565,6 +5748,7 @@ ERR VER::ErrVERICleanOneRCE( RCE * const prce )
                 }
             }
 
+            //  purge the FCB
 
             pfcbIndex->Purge();
 
@@ -4584,8 +5768,14 @@ ERR VER::ErrVERICleanOneRCE( RCE * const prce )
             Assert( pfcbTable->FTypeTable() );
             Assert( fFCBStateInitialized == fState );
 
+            //  verify VERNullifyAllVersionsOnFCB() not called during recovery,
+            //  which would be bad because VERNullifyAllVersionsOnFCB() enters
+            //  m_critRCEClean, which we already have
             Assert( !m_pinst->FRecovering() );
 
+            // Remove all associated FCB's from hash table, so they will
+            // be available for another file using the FDP that is about
+            // about to be freed.
             for ( FCB *pfcbT = pfcbTable; pfcbT != pfcbNil; pfcbT = pfcbT->PfcbNextIndex() )
             {
                 Assert( pfcbT->FDeletePending() );
@@ -4593,6 +5783,7 @@ ERR VER::ErrVERICleanOneRCE( RCE * const prce )
 
                 VERIWaitForTasks( this, pfcbT, fFalse, fTrue );
 
+                // bugfix (#45382): May have outstanding moved RCE's
                 Assert( pfcbT->PrceOldest() == prceNil
                     || ( pfcbT->PrceOldest()->Oper() == operFlagDelete
                         && pfcbT->PrceOldest()->FMoved() ) );
@@ -4612,6 +5803,8 @@ ERR VER::ErrVERICleanOneRCE( RCE * const prce )
 
                     VERIWaitForTasks( this, pfcbLV, fFalse, fTrue );
 
+                    // bugfix (#36315): processing of delta RCEs may have created flagDelete/writeLock
+                    // RCEs after this RCE.
                     Assert( pfcbLV->PrceOldest() == prceNil
                          || pfcbLV->PrceOldest()->Oper() == operFlagDelete
                          || pfcbLV->PrceOldest()->Oper() == operWriteLock );
@@ -4622,11 +5815,16 @@ ERR VER::ErrVERICleanOneRCE( RCE * const prce )
             }
             else
             {
-                FireWall( "DeprecatedSentinelFcbVerCleanFcbNil" );
+                FireWall( "DeprecatedSentinelFcbVerCleanFcbNil" ); // Sentinel FCBs are believed deprecated
             }
 
             if ( ErrLGFreeFDP( pfcbTable, prce->TrxCommitted() ) >= JET_errSuccess )
             {
+                //  free table FDP (which implicitly frees child FDP's)
+                //
+                //  ignore errors if we can't free the space
+                //  (it will be leaked)
+                //
                 (VOID)ErrSPFreeFDP(
                             m_ppibRCEClean,
                             pfcbTable,
@@ -4641,12 +5839,14 @@ ERR VER::ErrVERICleanOneRCE( RCE * const prce )
                 Assert( pfcbTable->FDeletePending() );
                 Assert( pfcbTable->FDeleteCommitted() );
 
+                // All transactions which were able to access this table
+                // must have committed and been cleaned up by now.
                 Assert( pfcbTable->PrceOldest() == prceNil );
                 Assert( pfcbTable->PrceNewest() == prceNil );
             }
             else
             {
-                FireWall( "DeprecatedSentinelFcbVerCleanFcbInvState" );
+                FireWall( "DeprecatedSentinelFcbVerCleanFcbInvState" ); // Sentinel FCBs are believed deprecated
             }
             pfcbTable->Purge();
 
@@ -4655,11 +5855,14 @@ ERR VER::ErrVERICleanOneRCE( RCE * const prce )
 
         case operRegisterCallback:
         {
+            //  the callback is now visible to all transactions
+            //  CONSIDER: unset the fVersioned flag if the callback has not been unregistered
         }
             break;
 
         case operUnregisterCallback:
         {
+            //  the callback cannot be seen by any transaction. remove the callback from the list
             VERIRemoveCallback( prce );
         }
             break;
@@ -4674,6 +5877,7 @@ ERR VER::ErrVERICleanOneRCE( RCE * const prce )
 
             else if ( !m_pinst->FRecovering() )
             {
+                //  don't bother cleaning if there are future versions
                 if ( !prce->FFutureVersionsOfNode() )
                 {
                     err = ErrVERIDelete( m_ppibRCEClean, prce );
@@ -4684,6 +5888,7 @@ ERR VER::ErrVERICleanOneRCE( RCE * const prce )
         }
 
         case operDelta:
+            //  we may have to defer delete a LV
             if ( FVERICleanDiscardDeletes() )
             {
                 IncrementCCleanupDiscarded( prce );
@@ -4696,6 +5901,7 @@ ERR VER::ErrVERICleanOneRCE( RCE * const prce )
             break;
 
         case operDelta64:
+            //  we may have to defer delete a LV
             if ( FVERICleanDiscardDeletes() )
             {
                 IncrementCCleanupDiscarded( prce );
@@ -4715,7 +5921,12 @@ ERR VER::ErrVERICleanOneRCE( RCE * const prce )
 }
 
 
+//  ================================================================
 ERR RCE::ErrPrepareToDeallocate( TRX trxOldest )
+//  ================================================================
+//
+// Called by RCEClean to clean/nullify RCE before deallocation.
+//
 {
     ERR         err     = JET_errSuccess;
     const OPER  oper    = m_oper;
@@ -4743,12 +5954,17 @@ ERR RCE::ErrPrepareToDeallocate( TRX trxOldest )
 
     if ( FOperNull() || wrnVERRCEMoved == err )
     {
+        //  RCE may have been nullified by VERNullifyAllVersionsOnFCB()
+        //  (which is called while closing the temp table).
+        //  or RCE may have been moved instead of being cleaned up
     }
     else
     {
         Assert( !FRolledBack() );
         Assert( !FOperNull() );
 
+        //  Clean up the RCE. Also clean up any RCE of the same list to reduce
+        //  Enter/leave critical section calls.
 
         RCE *prce = this;
 
@@ -4772,17 +5988,21 @@ ERR RCE::ErrPrepareToDeallocate( TRX trxOldest )
                 prce != prceNil &&
                 prce->FFullyCommitted() &&
                 TrxCmp( prce->TrxCommitted(), trxOldest ) < 0 &&
-                operFlagDelete != prce->Oper() &&
-                operDelta != prce->Oper() &&
-                operDelta64 != prce->Oper() );
+                operFlagDelete != prce->Oper() &&       // Let RCE clean do the nullify for delete.
+                operDelta != prce->Oper() &&            // Delta is used to indicate if
+                operDelta64 != prce->Oper() );          // it needs to do LV delete.
     }
 
     return JET_errSuccess;
 }
 
 
+//  ================================================================
 ERR VER::ErrVERRCEClean( const IFMP ifmp )
+//  ================================================================
+//  critical section wrapper
 {
+    //  clean PIB in critical section held across IO operations
 
     m_critRCEClean.FEnter( cmsecInfiniteNoDeadlock );
     const ERR err = ErrVERIRCEClean( ifmp );
@@ -4790,23 +6010,36 @@ ERR VER::ErrVERRCEClean( const IFMP ifmp )
     return err;
 }
 
+//  ================================================================
 ERR VER::ErrVERIRCEClean( const IFMP ifmp )
+//  ================================================================
+//
+//  Cleans RCEs in bucket chain.
+//  We only clean up the RCEs that has a commit timestamp older
+//  that the oldest XactBegin of any user.
+//
+//-
 {
     Assert( m_critRCEClean.FOwner() );
 
     const BOOL fCleanOneDb = ( ifmp != g_ifmpMax );
 
+    // Only two places we do per-DB RCE Clean is just before we want to
+    // detach the database, running shrink or reclaiming space leaks.
     Assert( !fCleanOneDb || g_rgfmp[ifmp].FDetachingDB() || g_rgfmp[ifmp].FShrinkIsRunning() || g_rgfmp[ifmp].FLeakReclaimerIsRunning() );
 
+    // keep the original value
     const BOOL fSyncronousTasks = m_fSyncronousTasks;
 
+    //  override the default if we are cleaning one database
     m_fSyncronousTasks = fCleanOneDb ? fTrue : m_fSyncronousTasks;
 
 #ifdef DEBUG
     Ptls()->fIsRCECleanup = fTrue;
-#endif
+#endif  //  DEBUG
 
 #ifdef VERPERF
+    //  UNDONE: why do these get reset every RCEClean??
     m_cbucketCleaned    = 0;
     m_cbucketSeen       = 0;
     m_crceSeen          = 0;
@@ -4814,11 +6047,12 @@ ERR VER::ErrVERIRCEClean( const IFMP ifmp )
     HRT hrtStartHrts    = HrtHRTCount();
     m_crceFlagDelete    = 0;
     m_crceDeleteLV      = 0;
-#endif
+#endif  //  VERPERF
 
     ERR         err     = JET_errSuccess;
     BUCKET *    pbucket;
 
+    //  get oldest bucket and clean RCEs from oldest to youngest
 
     m_critBucketGlobal.Enter();
 
@@ -4827,17 +6061,21 @@ ERR VER::ErrVERIRCEClean( const IFMP ifmp )
     m_critBucketGlobal.Leave();
 
     TRX trxOldest = TrxOldest( m_pinst );
+    //  loop through buckets, oldest to newest. stop when we run out of buckets
+    //  or find an uncleanable RCE
 
     while ( pbucketNil != pbucket )
     {
 #ifdef VERPERF
         INT crceInBucketSeen    = 0;
         INT crceInBucketCleaned = 0;
-#endif
+#endif  //  VERPERF
 
+        //  Check if need to get RCE within m_critBucketGlobal
 
         BOOL    fNeedBeInCritBucketGlobal   = ( pbucket->hdr.pbucketNext == pbucketNil );
 
+        //  Only clean can change prceOldest and only one clean thread is active.
 
         Assert( m_critRCEClean.FOwner() );
         RCE *   prce                        = pbucket->hdr.prceOldest;
@@ -4850,6 +6088,7 @@ ERR VER::ErrVERIRCEClean( const IFMP ifmp )
             ++crceInBucketSeen;
 #endif
 
+            //  verify RCE is within the bucket or we are at the end of the bucket
             Assert( pbucket->rgb <= (BYTE*)prce );
             Assert( (BYTE*)prce < (BYTE*)pbucket + m_cbBucket ||
                     (   (BYTE*)prce == (BYTE*)pbucket + m_cbBucket &&
@@ -4871,14 +6110,17 @@ ERR VER::ErrVERIRCEClean( const IFMP ifmp )
             Assert( pbucket->hdr.pbLastDelete <= reinterpret_cast<BYTE *>( pbucket->hdr.prceOldest ) );
             Assert( pbucket->hdr.prceOldest <= pbucket->hdr.prceNextNew );
 
+            //  break to release the bucket
             if ( pbucket->hdr.prceNextNew == prce )
                 break;
 
             if ( fNeedBeInCritBucketGlobal )
                 m_critBucketGlobal.Leave();
 
+            //  Save the size for use later
             const INT   cbRce = prce->CbRce();
 
+            //  verify RCE is within the bucket
             Assert( pbucket->rgb <= (BYTE*)prce );
             Assert( prce->CbRce() > 0 );
             Assert( (BYTE*)prce + prce->CbRce() <= (BYTE*)pbucket + m_cbBucket );
@@ -4895,9 +6137,22 @@ ERR VER::ErrVERIRCEClean( const IFMP ifmp )
 
                 if ( trxMax == trxOldest )
                 {
+                    //  trxOldest may no longer be trxMax. if so we may not be able to
+                    //  clean up this RCE after all. we retrieve the trxCommitted of the rce
+                    //  first to avoid a race condition
                     trxOldest = TrxOldest( m_pinst );
                 }
 
+                //  RCE's for the temp db are normally cleaned up at commit
+                //  time (see VERICommitTransactionToLevel0()), so if we hit
+                //  a fully-committed non-nullified RCE for the temp db at
+                //  this point, it means we hit the small timing window where
+                //  VERICommitTransactionToLevel0() has set the trxCommitted
+                //  in the RCE (so the RCE is fully committed) but hasn't
+                //  yet nullified the RCE, so we need to wait until the RCE
+                //  is nullified by the committing session before proceeding
+                //  any further
+                //
                 if ( fFullyCommitted && !FFMPIsTempDB( prce->Ifmp() ) )
                 {
                     Assert( trxMax != trxRCECommitted );
@@ -4907,6 +6162,10 @@ ERR VER::ErrVERIRCEClean( const IFMP ifmp )
                     }
                     else if ( trxMax != trxOldest )
                     {
+                        //  refresh trxOldest to see if it's been
+                        //  updated, which might now make this RCE
+                        //  cleanable
+                        //
                         trxOldest = TrxOldest( m_pinst );
                         if ( TrxCmp( trxRCECommitted, trxOldest ) < 0 )
                         {
@@ -4915,6 +6174,11 @@ ERR VER::ErrVERIRCEClean( const IFMP ifmp )
                     }
                     else
                     {
+                        //  should be impossible, because if trxOldest was
+                        //  trxMax, then the RCE should have been cleanable
+                        //  (since trxRCECommitted can't be trxMax if we
+                        //  reached this code path)
+                        //
                         Assert( fFalse );
                     }
                 }
@@ -4928,15 +6192,20 @@ ERR VER::ErrVERIRCEClean( const IFMP ifmp )
                         {
                             if ( !prce->FFullyCommitted() )
                             {
+                                //  this can be caused by a task that is active
+                                //  stop here as we have cleaned up what we can
                                 err = ErrERRCheck( JET_wrnRemainingVersions );
                                 goto HandleError;
                             }
                             else
                             {
+                                // Fall through and clean the RCE.
                             }
                         }
                         else
                         {
+                            // Skip uncleanable RCE's that don't belong to
+                            // the db we're trying to clean.
                             fSkippedRCEInBucket = fTrue;
                             goto NextRCE;
                         }
@@ -4977,16 +6246,19 @@ ERR VER::ErrVERIRCEClean( const IFMP ifmp )
                         ++m_crceDeleteLV;
                     }
                 }
-#endif
+#endif  //  VERPERF
 
                 Call( prce->ErrPrepareToDeallocate( trxOldest ) );
 
 #ifdef VERPERF
                 ++crceInBucketCleaned;
                 ++m_crceCleaned;
-#endif
+#endif  //  VERPERF
             }
 
+            //  Set the oldest to next prce entry in the bucket
+            //  Rce clean thread ( run within m_critRCEClean ) is
+            //  the only one touch prceOldest
 NextRCE:
             Assert( m_critRCEClean.FOwner() );
 
@@ -4996,6 +6268,7 @@ NextRCE:
 
             prce = (RCE *)pbNextRce;
 
+            //  verify RCE is within the bucket or we are at the end of the bucket
             Assert( pbucket->rgb <= (BYTE*)prce );
             Assert( (BYTE*)prce < (BYTE*)pbucket + m_cbBucket ||
                     (   (BYTE*)prce == (BYTE*)pbucket + m_cbBucket &&
@@ -5004,6 +6277,8 @@ NextRCE:
             Assert( pbucket->hdr.prceOldest <= pbucket->hdr.prceNextNew );
         }
 
+        //  all RCEs in bucket cleaned.  Now get next bucket and free
+        //  cleaned bucket.
 
         if ( fNeedBeInCritBucketGlobal )
             Assert( m_critBucketGlobal.FOwner() );
@@ -5033,15 +6308,23 @@ NextRCE:
         m_critBucketGlobal.Leave();
     }
 
+    //  stop as soon as find RCE commit time younger than oldest
+    //  transaction.  If bucket left then set ibOldestRCE and
+    //  unlink back offset of last remaining RCE.
+    //  If no error then set warning code if some buckets could
+    //  not be cleaned.
 
     Assert( pbucketNil == pbucket );
     err = JET_errSuccess;
 
+    // If only cleaning one db, we don't clean buckets because
+    // there may be outstanding versions on other databases.
     if ( !fCleanOneDb )
     {
         m_critBucketGlobal.Enter();
         if ( pbucketNil != m_pbucketGlobalHead )
         {
+            //  return warning if remaining versions
             Assert( pbucketNil != m_pbucketGlobalTail );
             err = ErrERRCheck( JET_wrnRemainingVersions );
         }
@@ -5053,7 +6336,10 @@ NextRCE:
     }
 
 HandleError:
+    // dispatch any batched tasks. this should be done even if there is an error
+    // as we don't want the tasks created before the error to hang around indefinitely
     const ERR errT = m_rectaskbatcher.ErrPostAllPending();
+    // but, we don't want to overwrite warnings with success
     if( errT < JET_errSuccess && err >= JET_errSuccess )
     {
         err = errT;
@@ -5084,16 +6370,19 @@ HandleError:
                     );
         (VOID)m_pinst->m_plog->ErrLGTrace( ppibNil, szBuf );
     }
-#endif
+#endif  //  DEBUG_VER_EXPENSIVE
 
 #ifdef DEBUG
     Ptls()->fIsRCECleanup = fFalse;
-#endif
+#endif  //  DEBUG
 
+    // restore the original value
     m_fSyncronousTasks = fSyncronousTasks;
 
     if ( !fCleanOneDb )
     {
+        //  record when we performed this pass of version cleanup
+        //
         m_tickLastRCEClean = TickOSTimeCurrent();
     }
 
@@ -5101,7 +6390,13 @@ HandleError:
 }
 
 
+//  ================================================================
 VOID VERICommitRegisterCallback( const RCE * const prce, const TRX trxCommit0 )
+//  ================================================================
+//
+//  Set the trxRegisterCommit0 in the CBDESC
+//
+//-
 {
 #ifdef VERSIONED_CALLBACKS
     Assert( prce->CbData() == sizeof(VERCALLBACK) );
@@ -5114,11 +6409,17 @@ VOID VERICommitRegisterCallback( const RCE * const prce, const TRX trxCommit0 )
     Assert( trxMax == pcbdesc->trxUnregisterCommit0 );
     pvercallback->pcbdesc->trxRegisterCommit0 = trxCommit0;
     prce->Pfcb()->LeaveDDL();
-#endif
+#endif  //  VERSIONED_CALLBACKS
 }
 
 
+//  ================================================================
 VOID VERICommitUnregisterCallback( const RCE * const prce, const TRX trxCommit0 )
+//  ================================================================
+//
+//  Set the trxUnregisterCommit0 in the CBDESC
+//
+//-
 {
 #ifdef VERSIONED_CALLBACKS
     Assert( prce->CbData() == sizeof(VERCALLBACK) );
@@ -5131,15 +6432,19 @@ VOID VERICommitUnregisterCallback( const RCE * const prce, const TRX trxCommit0 
     Assert( trxMax == pcbdesc->trxUnregisterCommit0 );
     pvercallback->pcbdesc->trxUnregisterCommit0 = trxCommit0;
     prce->Pfcb()->LeaveDDL();
-#endif
+#endif  //  VERSIONED_CALLBACKS
 }
 
 
+//  ================================================================
 LOCAL VOID VERICommitTransactionToLevelGreaterThan0( const PIB * const ppib )
+//  ================================================================
 {
     const LEVEL level   = ppib->Level();
     Assert( level > 1 );
 
+    //  we do not need to lock the RCEs as other transactions do not care about the level,
+    //  only that they are uncommitted
 
     RCE         *prce   = ppib->prceNewest;
     for ( ; prceNil != prce && prce->Level() == level; prce = prce->PrcePrevOfSession() )
@@ -5178,17 +6483,21 @@ INLINE VOID VERICommitOneRCEToLevel0( PIB * const ppib, RCE * const prce )
     prce->Pfcb()->CritRCEList().Leave();
 }
 
+//  ================================================================
 LOCAL VOID VERICommitTransactionToLevel0( PIB * const ppib )
+//  ================================================================
 {
     RCE         * prce              = ppib->prceNewest;
 
     Assert( 1 == ppib->Level() );
 
+    //  because of some optimizations at the DIR/LOG level we cannot always assert this
+/// Assert( TrxCmp( ppib->trxCommit0, ppib->trxBegin0 ) > 0 );
 
     RCE * prceNextToCommit;
 #ifdef DEBUG
     prceNextToCommit = prceInvalid;
-#endif
+#endif  //  DEBUG
     for ( ; prceNil != prce; prce = prceNextToCommit )
     {
         prceNextToCommit    = prce->PrcePrevOfSession();
@@ -5203,12 +6512,21 @@ LOCAL VOID VERICommitTransactionToLevel0( PIB * const ppib )
 
         if ( FFMPIsTempDB( prce->Ifmp() ) )
         {
+            //  RCEs for temp tables are used only for rollback.
+            //   - The table is not shared so there is no risk of write conflicts
+            //   - The table is not recovered so no undo-info is needed
+            //   - No committed RCEs exist on temp tables so RCEClean will never access the FCB
+            //   - No concurrent-create-index on temp tables
+            //  Thus, we simply nullify the RCE so that the FCB can be freed
+            //
+            //  UNDONE: RCEs for temp tables should not be inserted into the FCB list or hash table
 
+            // DDL currently not supported on temp tables.
             Assert( !prce->FOperNull() );
             Assert( !prce->FOperDDL() || operCreateTable == prce->Oper() || operCreateLV == prce->Oper() );
             Assert( !PinstFromPpib( ppib )->m_plog->FRecovering() );
             Assert( !prce->FFullyCommitted() );
-            Assert( prce->PgnoUndoInfo() == pgnoNull );
+            Assert( prce->PgnoUndoInfo() == pgnoNull ); //  no logging on temp tables
 
             const BOOL fInHash = prce->FOperInHashTable();
 
@@ -5220,6 +6538,17 @@ LOCAL VOID VERICommitTransactionToLevel0( PIB * const ppib )
             prce->SetLevel( 0 );
             prce->SetTrxCommitted( ppib->trxCommit0 );
 
+            //
+            //  WARNING: now that the RCE is fully committed,
+            //  there's a small chance version cleanup will
+            //  make it to this RCE before we've had a chance
+            //  to nullify it (via the call to NullifyOper() a
+            //  half-dozen lines below), so I added a check in
+            //  VER::ErrVERIRCEClean() to ensure that it doesn't
+            //  attempt to call RCE::ErrPrepareToDeallocate()
+            //  for temp. db RCE's, since they should always
+            //  be nullified here
+            //
 
             VERIDeleteRCEFromFCBList( prce->Pfcb(), prce );
             if ( fInHash )
@@ -5231,6 +6560,7 @@ LOCAL VOID VERICommitTransactionToLevel0( PIB * const ppib )
             continue;
         }
 
+        //  Remove UndoInfo dependency if committing to level 0
 
         if ( prce->PgnoUndoInfo() != pgnoNull )
             BFRemoveUndoInfo( prce );
@@ -5241,16 +6571,20 @@ LOCAL VOID VERICommitTransactionToLevel0( PIB * const ppib )
             prce->FOperInHashTable()
             );
 
+        //  if version for DDL operation then reset deny DDL
+        //  and perform special handling
         if ( prce->FOperDDL() )
         {
             switch( prce->Oper() )
             {
                 case operAddColumn:
+                    // RCE list ensures FCB is still pinned
                     Assert( prce->Pfcb()->PrceOldest() != prceNil );
                     Assert( prce->CbData() == sizeof(VERADDCOLUMN) );
                     break;
 
                 case operDeleteColumn:
+                    // RCE list ensures FCB is still pinned
                     Assert( prce->Pfcb()->PrceOldest() != prceNil );
                     Assert( prce->CbData() == sizeof(COLUMNID) );
                     break;
@@ -5268,6 +6602,10 @@ LOCAL VOID VERICommitTransactionToLevel0( PIB * const ppib )
                         Assert( pfcbTable->Pidb() != pidbNil );
                         Assert( pfcbTable->Pidb()->FPrimary() );
 
+                        // For primary index, must reset VersionedCreate()
+                        // flag at commit time so updates can occur
+                        // immediately once the primary index has been
+                        // committed (see ErrSetUpdatingAndEnterDML()).
                         pfcbTable->Pidb()->ResetFVersionedCreate();
 
                         pfcbTable->LeaveDDL();
@@ -5284,6 +6622,7 @@ LOCAL VOID VERICommitTransactionToLevel0( PIB * const ppib )
 
                 case operCreateLV:
                 {
+                    //  no further action is required
                     break;
                 }
 
@@ -5302,6 +6641,7 @@ LOCAL VOID VERICommitTransactionToLevel0( PIB * const ppib )
 
                     pfcbTable->EnterDDL();
 
+                    //  free in-memory structure
 
                     Assert( pfcbIndex->Pidb() != pidbNil );
                     Assert( pfcbIndex->Pidb()->CrefCurrentIndex() == 0 );
@@ -5312,6 +6652,7 @@ LOCAL VOID VERICommitTransactionToLevel0( PIB * const ppib )
                     pfcbIndex->SetDeleteCommitted();
                     pfcbIndex->Unlock();
 
+                    //  update all index mask
                     FILESetAllIndexMask( pfcbTable );
 
                     pfcbTable->LeaveDDL();
@@ -5323,6 +6664,7 @@ LOCAL VOID VERICommitTransactionToLevel0( PIB * const ppib )
                     FCB     *pfcbTable;
                     INT     fState;
 
+                    //  pfcb should be found, even if it's a sentinel
                     pfcbTable = FCB::PfcbFCBGet( prce->Ifmp(), *(PGNO*)prce->PbData(), &fState );
                     Assert( pfcbTable != pfcbNil );
                     Assert( pfcbTable->FTypeTable() );
@@ -5334,6 +6676,8 @@ LOCAL VOID VERICommitTransactionToLevel0( PIB * const ppib )
 
                         pfcbTable->EnterDDL();
 
+                        // Nothing left to prevent access to this FCB except
+                        // for DeletePending.
                         Assert( !pfcbTable->FDeleteCommitted() );
                         for ( FCB *pfcbT = pfcbTable; pfcbT != pfcbNil; pfcbT = pfcbT->PfcbNextIndex() )
                         {
@@ -5354,11 +6698,12 @@ LOCAL VOID VERICommitTransactionToLevel0( PIB * const ppib )
 
                         pfcbTable->LeaveDDL();
 
+                        // If regular FCB, decrement refcnt
                         pfcbTable->Release();
                     }
                     else
                     {
-                        FireWall( "DeprecatedSentinelFcbVerCommit0" );
+                        FireWall( "DeprecatedSentinelFcbVerCommit0" ); // Sentinel FCBs are believed deprecated
                         Assert( pfcbTable->PfcbNextIndex() == pfcbNil );
                         pfcbTable->Lock();
                         pfcbTable->SetDeleteCommitted();
@@ -5403,31 +6748,45 @@ LOCAL VOID VERICommitTransactionToLevel0( PIB * const ppib )
 #ifdef DEBUG
         else
         {
+            //  the deferred before image chain of the prce should have been
+            //  cleaned up in the beginning of this while block
             const PGNO  pgnoUndoInfo = prce->PgnoUndoInfo();
             Assert( pgnoNull == pgnoUndoInfo );
         }
-#endif
+#endif  //  DEBUG
 
+        //  set level and trxCommitted
         VERICommitOneRCEToLevel0( ppib, prce );
-    }
+    }   //  WHILE
 
     Assert( prceNil == ppib->prceNewest );
 
+    //  UNDONE: prceNewest should already be prceNil
     Assert( prceNil == ppib->prceNewest );
     PIBSetPrceNewest( ppib, prceNil );
 }
 
 
+//  ================================================================
 VOID VERCommitTransaction( PIB * const ppib )
+//  ================================================================
+//
+//  OPTIMIZATION:   combine delta/readLock/replace versions
+//                  remove redundant replace versions
+//
+//-
 {
     ASSERT_VALID( ppib );
 
     const LEVEL             level = ppib->Level();
 
+    //  must be in a transaction in order to commit
     Assert( level > 0 );
     Assert( PinstFromPpib( ppib )->m_plog->FRecovering() || trxMax != TrxOldest( PinstFromPpib( ppib ) ) );
     Assert( PinstFromPpib( ppib )->m_plog->FRecovering() || TrxCmp( ppib->trxBegin0, TrxOldest( PinstFromPpib( ppib ) ) ) >= 0 );
 
+    //  handle commit to intermediate transaction level and
+    //  commit to transaction level 0 differently.
     if ( level > 1 )
     {
         VERICommitTransactionToLevelGreaterThan0( ppib );
@@ -5442,7 +6801,13 @@ VOID VERCommitTransaction( PIB * const ppib )
 }
 
 
+//  ================================================================
 LOCAL ERR ErrVERILogUndoInfo( RCE *prce, CSR* pcsr )
+//  ================================================================
+//
+//  log undo information [if not in redo phase]
+//  remove rce from before-image chain
+//
 {
     ERR     err             = JET_errSuccess;
     LGPOS   lgpos           = lgposMin;
@@ -5455,6 +6820,8 @@ LOCAL ERR ErrVERILogUndoInfo( RCE *prce, CSR* pcsr )
         CallR( ErrLGUndoInfo( prce, &lgpos ) );
     }
 
+    //  remove RCE from deferred BI chain
+    //
     BFRemoveUndoInfo( prce, lgpos );
 
     return err;
@@ -5462,7 +6829,9 @@ LOCAL ERR ErrVERILogUndoInfo( RCE *prce, CSR* pcsr )
 
 
 
+//  ================================================================
 ERR ErrVERIUndoReplacePhysical( RCE * const prce, CSR *pcsr, const BOOKMARK& bm )
+//  ================================================================
 {
     ERR     err;
     DATA    data;
@@ -5482,8 +6851,15 @@ ERR ErrVERIUndoReplacePhysical( RCE * const prce, CSR *pcsr, const BOOKMARK& bm 
         CallR( ErrVERILogUndoInfo( prce, pcsr ) );
     }
 
+    //  dirty page and log operation
+    //
     CallR( ErrLGUndo( prce, pcsr, fMustDirtyCSR ) );
 
+    //  replace should not fail since splits are avoided at undo
+    //  time via deferred page space release.  This refers to space
+    //  within a page and not pages freed when indexes and tables
+    //  are deleted
+    //
 
     data.SetPv( prce->PbData() + cbReplaceRCEOverhead );
     data.SetCb( prce->CbData() - cbReplaceRCEOverhead );
@@ -5491,11 +6867,20 @@ ERR ErrVERIUndoReplacePhysical( RCE * const prce, CSR *pcsr, const BOOKMARK& bm 
     const VERREPLACE* const pverreplace = (VERREPLACE*)prce->PbData();
     const INT cbDelta = pverreplace->cbDelta;
 
+    //  if we are recovering we don't need to track the cbUncommitted free
+    //  (the version store will be empty at the end of recovery)
     if ( cbDelta > 0 )
     {
+        //  Rolling back replace that shrunk the node.  To satisfy the rollback,
+        //  we will consume the reserved node space, but first we must remove this
+        //  reserved node space from the uncommitted freed count so that BTReplace()
+        //  can see it.
+        //  (This complements the call to AddUncommittedFreed() in SetCbAdjust()).
         pcsr->Cpage().ReclaimUncommittedFreed( cbDelta );
     }
 
+    //  ND expects that fucb will contain bookmark of replaced node
+    //
     if ( PinstFromIfmp( pfucb->ifmp )->m_plog->FRecovering() )
     {
         pfucb->bmCurr = bm;
@@ -5509,6 +6894,9 @@ ERR ErrVERIUndoReplacePhysical( RCE * const prce, CSR *pcsr, const BOOKMARK& bm 
 
     if ( cbDelta < 0 )
     {
+        // Rolling back a replace that grew the node.  Add to uncommitted freed
+        // count the amount of reserved node space, if any, that we must restore.
+        // (This complements the call to ReclaimUncommittedFreed in SetCbAdjust()).
         pcsr->Cpage().AddUncommittedFreed( -cbDelta );
     }
 
@@ -5516,19 +6904,28 @@ ERR ErrVERIUndoReplacePhysical( RCE * const prce, CSR *pcsr, const BOOKMARK& bm 
 }
 
 
+//  ================================================================
 ERR ErrVERIUndoInsertPhysical( RCE * const prce, CSR *pcsr, PIB * ppib = NULL, BOOL *pfRolledBack = NULL )
+//  ================================================================
+//
+//  set delete bit in node header and let RCE clean up
+//  remove the node later
+//
+//-
 {
     ERR     err;
     FUCB    * const pfucb = prce->Pfucb();
 
     Assert( pgnoNull == prce->PgnoUndoInfo() );
 
+    //  dirty page and log operation
+    //
     CallR( ErrLGUndo( prce, pcsr, fMustDirtyCSR ) );
 
     CallS( ErrNDFlagDelete( pfucb, pcsr, fDIRUndo, rceidNull, NULL ) );
 
     if ( ( !PinstFromIfmp( prce->Ifmp() )->FRecovering()
-     ) &&
+    /* || fRecoveringUndo == PinstFromIfmp( ifmp )->m_plog->FRecoveringMode() */ ) &&
          !FFMPIsTempDB( prce->Ifmp() ) &&
          !prce->FFutureVersionsOfNode() )
     {
@@ -5541,24 +6938,30 @@ ERR ErrVERIUndoInsertPhysical( RCE * const prce, CSR *pcsr, PIB * ppib = NULL, B
 
 #ifdef DEBUG
         Ptls()->fIsRCECleanup = fTrue;
-#endif
+#endif  //  DEBUG
 
         err = prce->ErrGetTaskForDelete( (VOID **)&ptask );
         if ( err >= JET_errSuccess && ptask != NULL )
         {
+            //  must nullify RCE so that ErrBTDelete does not see an active version on this node
+            //  and can actually reclaim space.
             VERINullifyRolledBackRCE( ppib, prce );
             *pfRolledBack = fTrue;
 
+            // Release all latches before calling cleanup
             BTUp( pfucb );
 
+            // This BT may get marked for deletion between creating the task above and executing it, but that is
+            // all right because the cleanup of deletion still has to wait for this transaction to complete.
             PverFromPpib( ppib )->IncrementCSyncCleanupDispatched();
             TASK::DispatchGP( ptask );
         }
 
 #ifdef DEBUG
         Ptls()->fIsRCECleanup = fFalse;
-#endif
+#endif  //  DEBUG
 
+        // Restore cleanup checking
         FOSSetCleanupState( fCleanUpStateSavedSavedSaved );
     }
 
@@ -5566,20 +6969,28 @@ ERR ErrVERIUndoInsertPhysical( RCE * const prce, CSR *pcsr, PIB * ppib = NULL, B
 }
 
 
+//  ================================================================
 LOCAL ERR ErrVERIUndoFlagDeletePhysical( RCE * prce, CSR *pcsr )
+//  ================================================================
+//
+//  reset delete bit
+//
+//-
 {
     ERR     err;
 #ifdef DEBUG
     FUCB    * const pfucb   = prce->Pfucb();
 
     Unused( pfucb );
-#endif
+#endif  //  DEBUG
 
     if ( prce->PgnoUndoInfo() != pgnoNull )
     {
         CallR( ErrVERILogUndoInfo( prce, pcsr ) );
     }
 
+    //  dirty page and log operation
+    //
     CallR( ErrLGUndo( prce, pcsr, fMustDirtyCSR ) );
 
     NDResetFlagDelete( pcsr );
@@ -5587,8 +6998,14 @@ LOCAL ERR ErrVERIUndoFlagDeletePhysical( RCE * prce, CSR *pcsr )
 }
 
 
+//  ================================================================
 template< typename TDelta >
 ERR ErrVERIUndoDeltaPhysical( RCE * const prce, CSR *pcsr )
+//  ================================================================
+//
+//  undo delta change. modifies the RCE by setting the lDelta to 0
+//
+//-
 {
     ERR     err;
     FUCB    * const pfucb = prce->Pfucb();
@@ -5599,11 +7016,16 @@ ERR ErrVERIUndoDeltaPhysical( RCE * const prce, CSR *pcsr )
 
     Assert( pgnoNull == prce->PgnoUndoInfo() );
 
+    //  NDDelta is dependant on the data that it is operating on. for this reason we use
+    //  NDGet to get the real data from the database (DIRGet will get the versioned copy)
+/// AssertNDGet( pfucb, pcsr );
+/// NDGet( pfucb, pcsr );
 
     if ( pverdelta->tDelta < 0 && !plog->FRecovering() )
     {
         ENTERREADERWRITERLOCK enterRwlHashAsWriter( &( PverFromIfmp( prce->Ifmp() )->RwlRCEChain( prce->UiHash() ) ), fFalse );
 
+        //  we are rolling back a decrement. we need to remove all the deferredDelete flags
         RCE * prceT = prce;
         for ( ; prceNil != prceT->PrceNextOfNode(); prceT = prceT->PrceNextOfNode() )
             ;
@@ -5619,6 +7041,8 @@ ERR ErrVERIUndoDeltaPhysical( RCE * const prce, CSR *pcsr )
         }
     }
 
+    //  dirty page and log operation
+    //
     CallR( ErrLGUndo( prce, pcsr, fMustDirtyCSR ) );
 
 
@@ -5633,16 +7057,27 @@ ERR ErrVERIUndoDeltaPhysical( RCE * const prce, CSR *pcsr )
             rceidNull ) );
     if ( 0 == ( tOldValue + tDelta ) )
     {
+        //  by undoing an increment delta we have reduced the refcount of a LV to zero
+        //  UNDONE:  morph the RCE into a committed level 0 decrement with deferred delete
+        //           the RCE must be removed from the list of RCE's on the pib
     }
 
+    //  in order that the compensating delta is calculated properly, set the delta value to 0
     pverdelta->tDelta = 0;
 
     return err;
 }
 
 
+//  ================================================================
 VOID VERRedoPhysicalUndo( INST *pinst, const LRUNDO *plrundo, FUCB *pfucb, CSR *pcsr, BOOL fRedoNeeded )
+//  ================================================================
+//  retrieve RCE to be undone
+//  call corresponding physical undo
+//
 {
+    //  get RCE for operation
+    //
     BOOKMARK    bm;
     bm.key.prefix.Nullify();
     bm.key.suffix.SetPv( (VOID *) plrundo->rgbBookmark );
@@ -5663,11 +7098,17 @@ VOID VERRedoPhysicalUndo( INST *pinst, const LRUNDO *plrundo, FUCB *pfucb, CSR *
     {
         if ( prce->Rceid() == plrundo->le_rceid )
         {
+            //  UNDONE: use rceid instead of level and procid
+            //          to identify RCE
+            //
             Assert( prce->Pfucb() == pfucb );
             Assert( prce->Pfucb()->ppib == pfucb->ppib );
             Assert( prce->Oper() == plrundo->le_oper );
             Assert( prce->TrxCommitted() == trxMax );
 
+            //  UNDONE: the following assert will fire if
+            //  the original node operation was created by proxy
+            //  (ie. concurrent create index).
             Assert( prce->Level() == plrundo->level );
 
             if ( fRedoNeeded )
@@ -5716,7 +7157,12 @@ VOID VERRedoPhysicalUndo( INST *pinst, const LRUNDO *plrundo, FUCB *pfucb, CSR *
 }
 
 
+//  ================================================================
 LOCAL ERR ErrVERITryUndoLoggedOper( PIB *ppib, RCE * const prce )
+//  ================================================================
+//  seek to bookmark, upgrade latch
+//  call corresponding physical undo
+//
 {
     ERR             err;
     FUCB * const    pfucb       = prce->Pfucb();
@@ -5736,6 +7182,23 @@ LOCAL ERR ErrVERITryUndoLoggedOper( PIB *ppib, RCE * const prce )
     tcScope->SetDwEngineObjid( ObjidFDP( pfucb ) );
     tcScope->iorReason.SetIort( iortRollbackUndo );
 
+    //  logged opers are undone by their own individual
+    //  Undo log records, so by the time we get around to redoing
+    //  the Rollback log record, there shouldn't be any more
+    //  logged opers to undo
+    //
+    // - except -
+    //
+    //  If concurrent create-index rolls back, then any RCEs that other sessions 
+    //  created for the index will be nullified out from underneath the session. This 
+    //  works fine so long as the session doesn't ultimately roll back. If the session 
+    //  rolls back, then because the RCE was nullified, no Undo record is generated.  
+    //  This is fine, until you try to replay the whole thing on recovery. Recovery 
+    //  will recreate the RCE, but because CreateIndex is not logged, recovery does not 
+    //  replay the nullification of the RCE when the index rolls back. So when the 
+    //  session rolls back, the RCE is outstanding. To deal with this we simply ignore
+    //  the RCE during recovery redo.
+    //
     if ( fRecoveringRedo == PinstFromPpib( ppib )->m_plog->FRecoveringMode() )
     {
         VERINullifyRolledBackRCE( ppib, prce );
@@ -5744,8 +7207,15 @@ LOCAL ERR ErrVERITryUndoLoggedOper( PIB *ppib, RCE * const prce )
     
     prce->GetBookmark( &bm );
 
+    //  reset index range on this cursor
+    //  we may be using a deferred-closed cursor or a cursor that
+    //  had an index-range on it before the rollback
     DIRResetIndexRange( pfucb );
 
+    //  save off cursor's current bookmark, set
+    //  to bookmark of operation to be rolled back,
+    //  then release any latches to force re-seek
+    //  to bookmark
     bmSave = pfucb->bmCurr;
     pfucb->bmCurr = bm;
 
@@ -5757,6 +7227,8 @@ Refresh:
     Assert( JET_errRecordDeleted != err );
     Call( err );
 
+    //  upgrade latch on page
+    //
     err = Pcsr( pfucb )->ErrUpgrade();
     if ( errBFLatchConflict == err )
     {
@@ -5768,6 +7240,8 @@ Refresh:
 
     switch( prce->Oper() )
     {
+        //  logged operations
+        //
         case operReplace:
             Call( ErrVERIUndoReplacePhysical( prce, Pcsr( pfucb ), bm ) );
             break;
@@ -5794,12 +7268,17 @@ Refresh:
 
     if ( !fRolledBack )
     {
+        //  we have successfully undone the operation
+        //  must now set RolledBack flag before releasing page latch
         Assert( !prce->FOperNull() );
         Assert( !prce->FRolledBack() );
 
+        //  must nullify RCE while page is still latched, to avoid inconsistency
+        //  between what's on the page and what's in the version store
         VERINullifyRolledBackRCE( ppib, prce );
     }
 
+    //  re-instate original bookmark
     pfucb->bmCurr = bmSave;
     BTUp( pfucb );
 
@@ -5807,6 +7286,7 @@ Refresh:
     return JET_errSuccess;
 
 HandleError:
+    //  re-instate original bookmark
     pfucb->bmCurr = bmSave;
     BTUp( pfucb );
 
@@ -5817,7 +7297,12 @@ HandleError:
 }
 
 
+//  ================================================================
 LOCAL ERR ErrVERIUndoLoggedOper( PIB *ppib, RCE * const prce )
+//  ================================================================
+//  seek to bookmark, upgrade latch
+//  call corresponding physical undo
+//
 {
     ERR             err     = JET_errSuccess;
     FUCB    * const pfucb   = prce->Pfucb();
@@ -5831,13 +7316,18 @@ LOCAL ERR ErrVERIUndoLoggedOper( PIB *ppib, RCE * const prce )
 HandleError:
     Assert( err < JET_errSuccess );
 
+    //  if rollback fails due to an error, then we will disable
+    //  logging in order to force the system down (we are in
+    //  an uncontinuable state).  Recover to restart the database.
 
+    //  We should never fail to rollback due to disk full
 
     Assert( JET_errDiskFull != err );
 
     switch ( err )
     {
         
+        // failures possibly due to lost flushes on a specific database
 
         case JET_errBadPageLink:
         case JET_errDatabaseCorrupted:
@@ -5848,23 +7338,31 @@ HandleError:
         case JET_errPageNotInitialized:
         
     
+        //  by adding errors to this list, we're effectively downgrading from Enforce to AssertRTL for these cases. 
+        //  with RTM, the application will see JET_errRollbackError and the instance will go unavailable. 
+        //  this will be a clear signal to the application that it needs to rebuild or restore from
+        //  a backup
         
         AssertSzRTL( false, "Unexpected error condition blocking Rollback. Error = %d, oper = %d", err, prce->Oper() );
 
+        //  intentional fall-through to next block
 
+        //  failure with impact on the database only
 
         case JET_errFileAccessDenied:
         case JET_errDiskIO:
         case_AllDatabaseStorageCorruptionErrs:
         case JET_errOutOfBuffers:
-        case JET_errOutOfMemory :
+        case JET_errOutOfMemory :       // BF may hit OOM when trying to latch the page
         case JET_errCheckpointDepthTooDeep:
 
+        //  failure with impact on the instance
 
         case JET_errLogWriteFail:
         case JET_errLogDiskFull:
             {
 
+                //  rollback failed -- log an event message
 
                 INST * const    pinst       = PinstFromPpib( ppib );
                 LOG * const     plog        = pinst->m_plog;
@@ -5876,6 +7374,8 @@ HandleError:
                     && plog->FNoMoreLogWrite( &errLog )
                     && JET_errLogDiskFull == errLog )
                 {
+                    //  special-case: trap JET_errLogDiskFull
+                    //
                     err = ErrERRCheck( JET_errLogDiskFull );
                 }
 
@@ -5893,11 +7393,14 @@ HandleError:
                         NULL,
                         pinst );
 
+                //  REVIEW: (SOMEONE) how can we get a logging failure if FLogOn() is
+                //  not set?
                 if ( g_rgfmp[pfucb->ifmp].FLogOn() )
                 {
                     Assert( plog );
                     Assert( !plog->FLogDisabled() );
 
+                    //  flush and halt the log
 
                     (void)ErrLGWrite( ppib );
                     UtilSleep( cmsecWaitLogWrite );
@@ -5905,10 +7408,18 @@ HandleError:
                 }
 
 
+                //  There may be an older version of this page which needs
+                //  the undo-info from this RCE. Take down the instance and
+                //  error out
+                //
+                //  (Yes, this could be optimized to only do this for RCEs
+                //  with before-images, but why complicate the code to optimize
+                //  a failure case)
 
                 Assert( !prce->FOperNull() );
                 Assert( !prce->FRolledBack() );
 
+                // Do not bring down the whole instance because we have deliberately stopped logging
                 ERR errLogNoMore;
                 if ( !plog->FNoMoreLogWrite( &errLogNoMore ) || errLogNoMore != errLogServiceStopped )
                 {
@@ -5920,6 +7431,7 @@ HandleError:
             }
 
         default:
+            //  error is non-fatal, so caller will attempt to redo rollback
             break;
     }
 
@@ -5927,11 +7439,22 @@ HandleError:
 }
 
 
+//  ================================================================
 INLINE VOID VERINullifyForUndoCreateTable( PIB * const ppib, FCB * const pfcb )
+//  ================================================================
+//
+//  This is used to nullify all RCEs on table FCB because CreateTable
+//  was rolled back.
+//
+//-
 {
     Assert( pfcb->FTypeTable()
         || pfcb->FTypeTemporaryTable() );
 
+    // Because rollback is done in two phases, the RCE's on
+    // this FCB are still outstanding -- they've already
+    // been processed for rollback, they just need to be
+    // nullified.
     while ( prceNil != pfcb->PrceNewest() )
     {
         RCE * const prce = pfcb->PrceNewest();
@@ -5939,10 +7462,16 @@ INLINE VOID VERINullifyForUndoCreateTable( PIB * const ppib, FCB * const pfcb )
         Assert( prce->Pfcb() == pfcb );
         Assert( !prce->FOperNull() );
 
+        // Since we're rolling back CreateTable, all operations
+        // on the table must also be uncommitted and rolled back
         Assert( prce->TrxCommitted() == trxMax );
 
         if ( !prce->FRolledBack() )
         {
+            // The CreateTable RCE itself should be the only
+            // RCE on this FCB that is not yet marked as
+            // rolled back, because that's what we're in the
+            // midst of doing
             Assert( prce->Oper() == operCreateTable );
             Assert( pfcb->FTypeTable() || pfcb->FTypeTemporaryTable() );
             Assert( pfcb->PrceNewest() == prce );
@@ -5950,7 +7479,7 @@ INLINE VOID VERINullifyForUndoCreateTable( PIB * const ppib, FCB * const pfcb )
         }
 
         Assert( prce->Pfucb() != pfucbNil );
-        Assert( ppib == prce->Pfucb()->ppib );
+        Assert( ppib == prce->Pfucb()->ppib );  // only one session should have access to the table
 
         ENTERREADERWRITERLOCK   maybeEnterRwlHashAsWriter(
                                     prce->FOperInHashTable() ? &( PverFromIfmp( prce->Ifmp() )->RwlRCEChain( prce->UiHash() ) ) : NULL,
@@ -5960,11 +7489,19 @@ INLINE VOID VERINullifyForUndoCreateTable( PIB * const ppib, FCB * const pfcb )
         VERINullifyUncommittedRCE( prce );
     }
 
+    // should be no more versions on the FCB
     Assert( pfcb->PrceOldest() == prceNil );
     Assert( pfcb->PrceNewest() == prceNil );
 }
 
+//  ================================================================
 INLINE VOID VERICleanupForUndoCreateTable( RCE * const prceCreateTable )
+//  ================================================================
+//
+//  This is used to cleanup RCEs and deferred-closed cursors
+//  on table FCB because CreateTable was rolled back.
+//
+//-
 {
     FCB * const pfcbTable = prceCreateTable->Pfcb();
 
@@ -5972,6 +7509,7 @@ INLINE VOID VERICleanupForUndoCreateTable( RCE * const prceCreateTable )
     Assert( pfcbTable->FTypeTable() || pfcbTable->FTypeTemporaryTable() );
     Assert( pfcbTable->FPrimaryIndex() );
 
+    // Last RCE left should be the CreateTable RCE (ie. this RCE).
     Assert( operCreateTable == prceCreateTable->Oper() );
     Assert( pfcbTable->PrceOldest() == prceCreateTable );
 
@@ -5982,11 +7520,16 @@ INLINE VOID VERICleanupForUndoCreateTable( RCE * const prceCreateTable )
     Assert( pfcbTable->Ptdb() != ptdbNil );
     FCB * pfcbT         = pfcbTable->Ptdb()->PfcbLV();
 
+    // force-close any deferred closed cursors
     if ( pfcbNil != pfcbT )
     {
         Assert( pfcbT->FTypeLV() );
 
+        //  all RCE's on the table's LV should have already been rolled back AND nullified
+        //  (since we don't suppress nullification of LV RCE's during concurrent create-index
+        //  like we do for Table RCE's)
         Assert( prceNil == pfcbT->PrceNewest() );
+//      VERINullifyForUndoCreateTable( ppib, pfcbT );
 
         FUCBCloseAllCursorsOnFCB( ppib, pfcbT );
     }
@@ -5995,16 +7538,30 @@ INLINE VOID VERICleanupForUndoCreateTable( RCE * const prceCreateTable )
     {
         Assert( pfcbT->FTypeSecondaryIndex() );
 
+        //  all RCE's on the table's indexes should have already been rolled back AND nullified
+        //  (since we don't suppress nullification of Index RCE's during concurrent create-index
+        //  like we do for Table RCE's)
         Assert( prceNil == pfcbT->PrceNewest() );
+//      VERINullifyForUndoCreateTable( ppib, pfcbT );
 
         FUCBCloseAllCursorsOnFCB( ppib, pfcbT );
     }
 
+    //  there may be rolled-back versions on the table that couldn't be nullified
+    //  because concurrent create-index was in progress on another table (we
+    //  suppress nullification of certain table RCE's if a CCI is in progress
+    //  anywhere)
     VERINullifyForUndoCreateTable( ppib, pfcbTable );
     FUCBCloseAllCursorsOnFCB( ppib, pfcbTable );
 }
 
+//  ================================================================
 LOCAL VOID VERIUndoCreateTable( PIB * const ppib, RCE * const prce )
+//  ================================================================
+//
+//  Takes a non-const RCE as VersionDecrement sets the pfcb to NULL
+//
+//-
 {
     FCB     * const pfcb    = prce->Pfcb();
 
@@ -6016,6 +7573,7 @@ LOCAL VOID VERIUndoCreateTable( PIB * const ppib, RCE * const prce )
     Assert( pfcb->FTypeTable() || pfcb->FTypeTemporaryTable() );
     Assert( pfcb->FPrimaryIndex() );
 
+    // Need to leave RwlTrx to wait for tasks to complete
     PinstFromPpib( ppib )->RwlTrx( ppib ).LeaveAsReader();
 
     for ( FCB *pfcbT = pfcb; pfcbT != pfcbNil; pfcbT = pfcbT->PfcbNextIndex() )
@@ -6034,23 +7592,33 @@ LOCAL VOID VERIUndoCreateTable( PIB * const ppib, RCE * const prce )
     PinstFromPpib( ppib )->RwlTrx( ppib ).EnterAsReader();
 
     pfcb->Lock();
+    //  set FDeleteCommitted flag to silence asserts in ErrSPFreeFDP()
+    //
     pfcb->SetDeleteCommitted();
     pfcb->Unlock();
 
+    // close all cursors on this table
     forever
     {
         FUCB *pfucb = pfucbNil;
 
         pfcb->Lock();
         pfcb->FucbList().LockForEnumeration();
+        // find the first element in FucbList() that is NOT defer-closed.
+        // This is an N^2 algorithm because we release the lock on
+        // pfcb to deal with the pfucb we find.  I'm not sure that's
+        // necessary.
         for ( INT ifucbList = 0; ifucbList < pfcb->FucbList().Count(); ifucbList++)
         {
             pfucb = pfcb->FucbList()[ ifucbList ];
 
             ASSERT_VALID( pfucb );
 
+            // Since CreateTable is uncommitted, we should be the
+            // only one who could have opened cursors on it.
             Assert( pfucb->ppib == ppib );
 
+            //  if defer closed then continue
             if ( !FFUCBDeferClosed( pfucb ) )
             {
                 break;
@@ -6062,6 +7630,7 @@ LOCAL VOID VERIUndoCreateTable( PIB * const ppib, RCE * const prce )
 
         if ( pfucb == pfucbNil )
         {
+            // There are no non-defer-closed FUCB* left.  This is the way out of forever.  
             break;
         }
 
@@ -6077,18 +7646,34 @@ LOCAL VOID VERIUndoCreateTable( PIB * const ppib, RCE * const prce )
 
     VERICleanupForUndoCreateTable( prce );
 
+    //  prepare the FCB to be purged
+    //  this removes the FCB from the hash-table among other things
+    //      so that the following case cannot happen:
+    //          we free the space for this FCB
+    //          someone else allocates it
+    //          someone else BTOpen's the space
+    //          we try to purge the table and find that the refcnt
+    //              is not zero and the state of the FCB says it is
+    //              currently in use!
+    //          result --> CONCURRENCY HOLE
     pfcb->PrepareForPurge();
     const BOOL fCleanUpStateSavedSavedSaved = FOSSetCleanupState( fFalse );
 
+    //  ignore errors if we can't free the space (it will be leaked)
+    //
     (VOID)ErrSPFreeFDP( ppib, pfcb, pgnoSystemRoot, fTrue );
 
+    //  Restore cleanup checking
+    //
     FOSSetCleanupState( fCleanUpStateSavedSavedSaved );
 
     pfcb->Purge();
 }
 
 
+//  ================================================================
 LOCAL VOID VERIUndoAddColumn( const RCE * const prce )
+//  ================================================================
 {
     Assert( prce->Oper() == operAddColumn );
     Assert( prce->TrxCommitted() == trxMax );
@@ -6100,6 +7685,7 @@ LOCAL VOID VERIUndoAddColumn( const RCE * const prce )
 
     pfcbTable->EnterDDL();
 
+    // RCE list ensures FCB is still pinned
     Assert( pfcbTable->PrceOldest() != prceNil );
 
     TDB             * const ptdb        = pfcbTable->Ptdb();
@@ -6111,12 +7697,14 @@ LOCAL VOID VERIUndoAddColumn( const RCE * const prce )
             || ( FCOLUMNIDVar( columnid ) && FidOfColumnid( columnid ) <= ptdb->FidVarLast() )
             || ( FCOLUMNIDFixed( columnid ) && FidOfColumnid( columnid ) <= ptdb->FidFixedLast() ) );
 
+    //  rollback the added column by marking it as deleted
     Assert( !FFIELDDeleted( pfield->ffield ) );
     FIELDSetDeleted( pfield->ffield );
 
     FIELDResetVersioned( pfield->ffield );
     FIELDResetVersionedAdd( pfield->ffield );
 
+    //  rollback version and autoinc fields, if set.
     Assert( !( FFIELDVersion( pfield->ffield ) && FFIELDAutoincrement( pfield->ffield ) ) );
     if ( FFIELDVersion( pfield->ffield ) )
     {
@@ -6130,16 +7718,37 @@ LOCAL VOID VERIUndoAddColumn( const RCE * const prce )
         ptdb->ResetAutoIncInitOnce();
     }
 
+    //  itag 0 in the TDB is reserved for the FIELD structures.  We
+    //  cannibalise it for itags of field names to indicate that a name
+    //  has not been added to the buffer.
     if ( 0 != pfield->itagFieldName )
     {
+        //  remove the column name from the TDB name space
         ptdb->MemPool().DeleteEntry( pfield->itagFieldName );
     }
 
+    //  UNDONE: remove the CBDESC for this from the TDB
+    //  the columnid will not be re-used so the callback
+    //  will not be called. The CBDESC will be freed when
+    //  the table is closed so no memory will be lost
+    //  Its just not pretty though...
 
+    //  if we modified the default record, the changes will be invisible,
+    //  since the field is now flagged as deleted (unversioned).  The
+    //  space will be reclaimed by a subsequent call to AddColumn.
 
+    //  if there was an old default record and we were successful in
+    //  creating a new default record for the TDB, must get rid of
+    //  the old default record.  However, we can't just free the
+    //  memory because other threads could have stale pointers.
+    //  So build a list hanging off the table FCB and free the
+    //  memory when the table FCB is freed.
     if ( NULL != pbOldDefaultRec
         && (BYTE *)ptdb->PdataDefaultRecord() != pbOldDefaultRec )
     {
+        //  user-defined defaults are not stored in the default
+        //  record (ie. this AddColumn would not have caused
+        //  us to rebuild the default record)
         Assert( !FFIELDUserDefinedDefault( pfield->ffield ) );
 
         for ( RECDANGLING * precdangling = pfcbTable->Precdangling();
@@ -6148,6 +7757,10 @@ LOCAL VOID VERIUndoAddColumn( const RCE * const prce )
         {
             if ( NULL == precdangling )
             {
+                //  not in list, so add it;
+                //  assumes that the memory pointed to by pmemdangling is always at
+                //  least sizeof(ULONG_PTR) bytes
+                //
                 Assert( NULL == ( (RECDANGLING *)pbOldDefaultRec )->precdanglingNext );
                 ( (RECDANGLING *)pbOldDefaultRec )->precdanglingNext = pfcbTable->Precdangling();
                 pfcbTable->SetPrecdangling( (RECDANGLING *)pbOldDefaultRec );
@@ -6155,6 +7768,8 @@ LOCAL VOID VERIUndoAddColumn( const RCE * const prce )
             }
             else if ( (BYTE *)precdangling == pbOldDefaultRec )
             {
+                //  pointer is already in the list, just get out
+                //
                 break;
             }
         }
@@ -6164,7 +7779,9 @@ LOCAL VOID VERIUndoAddColumn( const RCE * const prce )
 }
 
 
+//  ================================================================
 LOCAL VOID VERIUndoDeleteColumn( const RCE * const prce )
+//  ================================================================
 {
     Assert( prce->Oper() == operDeleteColumn );
     Assert( prce->TrxCommitted() == trxMax );
@@ -6176,6 +7793,7 @@ LOCAL VOID VERIUndoDeleteColumn( const RCE * const prce )
 
     pfcbTable->EnterDDL();
 
+    // RCE list ensures FCB is still pinned
     Assert( pfcbTable->PrceOldest() != prceNil );
 
     TDB             * const ptdb        = pfcbTable->Ptdb();
@@ -6192,6 +7810,9 @@ LOCAL VOID VERIUndoDeleteColumn( const RCE * const prce )
 
     if ( FFIELDVersioned( pfield->ffield ) )
     {
+        // UNDONE: Instead of the VersionedAdd flag, scan the version store
+        // for other outstanding versions on this column (should either be
+        // none or a single AddColumn version).
         if ( !FFIELDVersionedAdd( pfield->ffield ) )
         {
             FIELDResetVersioned( pfield->ffield );
@@ -6206,22 +7827,27 @@ LOCAL VOID VERIUndoDeleteColumn( const RCE * const prce )
 }
 
 
+//  ================================================================
 LOCAL VOID VERIUndoDeleteTable( const RCE * const prce )
+//  ================================================================
 {
     if ( FFMPIsTempDB( prce->Ifmp() ) )
     {
+        // DeleteTable (ie. CloseTable) doesn't get rolled back for temp. tables.
         return;
     }
 
     Assert( prce->Oper() == operDeleteTable );
     Assert( prce->TrxCommitted() == trxMax );
 
+    //  may be pfcbNil if sentinel
     INT fState;
     FCB * const pfcbTable = FCB::PfcbFCBGet( prce->Ifmp(), *(PGNO*)prce->PbData(), &fState );
     Assert( pfcbTable != pfcbNil );
     Assert( pfcbTable->FTypeTable() );
     Assert( fFCBStateInitialized == fState );
 
+    // If regular FCB, decrement refcnt, else free sentinel.
     if ( pfcbTable->Ptdb() != ptdbNil )
     {
         Assert( fFCBStateInitialized == fState );
@@ -6232,6 +7858,7 @@ LOCAL VOID VERIUndoDeleteTable( const RCE * const prce )
         {
             Assert( pfcbT->FDeletePending() );
 
+            //Reset the DeletePending flag, unless the index was deleted in a previous transaction
             if (!pfcbT->FDeleteCommitted())
             {
                 pfcbT->Lock();
@@ -6256,7 +7883,7 @@ LOCAL VOID VERIUndoDeleteTable( const RCE * const prce )
     }
     else
     {
-        FireWall( "DeprecatedSentinelFcbUndoDelTable" );
+        FireWall( "DeprecatedSentinelFcbUndoDelTable" ); // Sentinel FCBs are believed deprecated
         Assert( pfcbTable->FDeletePending() );
         Assert( !pfcbTable->FDeleteCommitted() );
         pfcbTable->Lock();
@@ -6269,18 +7896,23 @@ LOCAL VOID VERIUndoDeleteTable( const RCE * const prce )
 }
 
 
+//  ================================================================
 LOCAL VOID VERIUndoCreateLV( PIB *ppib, const RCE * const prce )
+//  ================================================================
 {
     if ( pfcbNil != prce->Pfcb()->Ptdb()->PfcbLV() )
     {
         FCB * const pfcbLV = prce->Pfcb()->Ptdb()->PfcbLV();
 
+        // Need to leave RwlTrx to wait for tasks to complete
         PinstFromPpib( ppib )->RwlTrx( ppib ).LeaveAsReader();
 
         VERIWaitForTasks( PverFromPpib( ppib ), pfcbLV, fTrue, fFalse );
 
         PinstFromPpib( ppib )->RwlTrx( ppib ).EnterAsReader();
 
+        //  if we rollback the creation of the LV tree, unlink the LV FCB
+        //  the FCB will be lost (memory leak)
 
         VERIUnlinkDefunctLV( prce->Pfucb()->ppib, pfcbLV );
         pfcbLV->PrepareForPurge( fFalse );
@@ -6290,27 +7922,42 @@ LOCAL VOID VERIUndoCreateLV( PIB *ppib, const RCE * const prce )
 }
 
 
+//  ================================================================
 LOCAL VOID VERIUndoCreateIndex( PIB *ppib, const RCE * const prce )
+//  ================================================================
 {
     Assert( prce->Oper() == operCreateIndex );
     Assert( prce->TrxCommitted() == trxMax );
     Assert( prce->CbData() == sizeof(TDB *) );
 
+    //  pfcb of secondary index FCB or pfcbNil for primary
+    //  index creation
     FCB * const pfcb = *(FCB **)prce->PbData();
     FCB * const pfcbTable = prce->Pfucb()->u.pfcb;
 
     Assert( pfcbNil != pfcbTable );
     Assert( pfcbTable->FTypeTable() );
-    Assert( pfcbTable->PrceOldest() != prceNil );
+    Assert( pfcbTable->PrceOldest() != prceNil );   // This prevents the index FCB from being deallocated.
 
+    //  if secondary index then close all cursors on index
+    //  and purge index FCB, else free IDB for primary index.
 
     if ( pfcb != pfcbNil )
     {
+        // This can't be the primary index, because we would not have allocated
+        // an FCB for it.
         Assert( prce->Pfucb()->u.pfcb != pfcb );
 
         Assert( pfcb->FTypeSecondaryIndex() );
         Assert( pfcb->Pidb() != pidbNil );
 
+        //  Normally, we grab the updating/indexing latch before we grab
+        //  the ppib's rwlTrx, but in this case, we are already in the
+        //  ppib's rwlTrx (because we are rolling back) and we need the
+        //  updating/indexing latch.  We can guarantee that this will not
+        //  cause a deadlock because the only person that grabs rwlTrx
+        //  after grabbing the updating/indexing latch is concurrent create
+        //  index, which quiesces all rollbacks before it begins.
         CLockDeadlockDetectionInfo::NextOwnershipIsNotADeadlock();
 
         pfcbTable->SetIndexing();
@@ -6320,46 +7967,88 @@ LOCAL VOID VERIUndoCreateIndex( PIB *ppib, const RCE * const prce )
         Assert( !pfcb->FDeletePending() );
         Assert( !pfcb->FDeleteCommitted() );
 
+        // Mark as committed delete so no one else will attempt version check.
         pfcb->Pidb()->SetFDeleted();
         pfcb->Pidb()->ResetFVersioned();
 
         if ( pfcb->PfcbTable() == pfcbNil )
         {
+            // Index FCB not yet linked into table's FCB list, but we did use
+            // table's TDB memory pool to store some information for the IDB.
             pfcb->UnlinkIDB( pfcbTable );
         }
         else
         {
             Assert( pfcb->PfcbTable() == pfcbTable );
 
+            // Unlink the FCB from the table's index list.
+            // Note that the only way the FCB could have been
+            // linked in is if the IDB was successfully created.
             pfcbTable->UnlinkSecondaryIndex( pfcb );
 
+            //  update all index mask
             FILESetAllIndexMask( pfcbTable );
         }
 
         pfcbTable->LeaveDDL();
         pfcbTable->ResetIndexing();
 
+        //  must leave rwlTrx because we may enter the rwlTrx
+        //  of other sessions when we try to remove their RCEs
+        //  or cursors on this index
         PinstFromPpib( ppib )->RwlTrx( ppib ).LeaveAsReader();
 
+        // Index FCB has been unlinked from table, so we're
+        // guaranteed no further versions will occur on this
+        // FCB.  Clean up remaining versions.
         VERNullifyAllVersionsOnFCB( pfcb );
 
         VERIWaitForTasks( PverFromPpib( ppib ), pfcb, fTrue, fFalse );
 
+        //  set FDeleteCommitted flag to silence asserts in ErrSPFreeFDP()
+        //
         pfcb->Lock();
         pfcb->SetDeleteCommitted();
         pfcb->Unlock();
 
+        //  ignore errors if we can't free the space (it will be leaked)
+        //
+        //  WARNING: if this is recovery and the index was not logged,
+        //  it's very possible that not all pages in the OwnExt tree
+        //  were flushed and the btree is therefore inconsistent, so
+        //  this may fail with weird errors (though I don't believe
+        //  it will crash or corrupt space in the parent) and
+        //  therefore leak the space
+        //
         
         VERIUnlinkDefunctSecondaryIndex( prce->Pfucb()->ppib, pfcb );
 
         PinstFromPpib( ppib )->RwlTrx( ppib ).EnterAsReader();
 
+        // The table's version count will prevent the
+        // table FCB (and thus this secondary index FCB)
+        // from being deallocated before we can delete
+        // this index FCB.
+        //
+        //  prepare the FCB to be purged
+        //  this removes the FCB from the hash-table among other things
+        //      so that the following case cannot happen:
+        //          we free the space for this FCB
+        //          someone else allocates it
+        //          someone else BTOpen's the space
+        //          we try to purge the table and find that the refcnt
+        //              is not zero and the state of the FCB says it is
+        //              currently in use!
+        //          result --> CONCURRENCY HOLE
         pfcb->PrepareForPurge( fFalse );
 
         const BOOL fCleanUpStateSavedSavedSaved = FOSSetCleanupState( fFalse );
 
+        //  ignore errors if we can't free the space (it will be leaked)
+        //
         (VOID)ErrSPFreeFDP( ppib, pfcb, pfcbTable->PgnoFDP(), fTrue );
 
+        //  Restore cleanup checking
         FOSSetCleanupState( fCleanUpStateSavedSavedSaved );
 
         pfcb->Purge();
@@ -6376,6 +8065,7 @@ LOCAL VOID VERIUndoCreateIndex( PIB *ppib, const RCE * const prce )
         Assert( !pfcbTable->FDeleteCommitted() );
         Assert( !pfcbTable->FSequentialIndex() );
 
+        // Mark as committed delete so no one else will attempt version check.
         pidb->SetFDeleted();
         pidb->ResetFVersioned();
         pidb->ResetFVersionedCreate();
@@ -6386,8 +8076,10 @@ LOCAL VOID VERIUndoCreateIndex( PIB *ppib, const RCE * const prce )
         pfcbTable->SetSequentialIndex();
         pfcbTable->Unlock();
 
+        // UNDONE: Reset density to original value.
         pfcbTable->SetSpaceHints( PSystemSpaceHints(eJSPHDefaultUserIndex) );
 
+        //  update all index mask
         FILESetAllIndexMask( pfcbTable );
 
         pfcbTable->LeaveDDL();
@@ -6395,7 +8087,9 @@ LOCAL VOID VERIUndoCreateIndex( PIB *ppib, const RCE * const prce )
 }
 
 
+//  ================================================================
 LOCAL VOID VERIUndoDeleteIndex( const RCE * const prce )
+//  ================================================================
 {
     FCB * const pfcbIndex = *(FCB **)prce->PbData();
     FCB * const pfcbTable = prce->Pfcb();
@@ -6412,7 +8106,9 @@ LOCAL VOID VERIUndoDeleteIndex( const RCE * const prce )
 }
 
 
+//  ================================================================
 INLINE VOID VERIUndoAllocExt( const RCE * const prce )
+//  ================================================================
 {
     Assert( prce->CbData() == sizeof(VEREXT) );
     Assert( prce->PgnoFDP() == ((VEREXT*)prce->PbData())->pgnoFDP );
@@ -6425,13 +8121,25 @@ INLINE VOID VERIUndoAllocExt( const RCE * const prce )
 }
 
 
+//  ================================================================
 INLINE VOID VERIUndoRegisterCallback( const RCE * const prce )
+//  ================================================================
+//
+//  Remove the callback from the list
+//
+//-
 {
     VERIRemoveCallback( prce );
 }
 
 
+//  ================================================================
 VOID VERIUndoUnregisterCallback( const RCE * const prce )
+//  ================================================================
+//
+//  Set the trxUnregisterBegin0 in the CBDESC to trxMax
+//
+//-
 {
 #ifdef VERSIONED_CALLBACKS
     Assert( prce->CbData() == sizeof(VERCALLBACK) );
@@ -6443,17 +8151,21 @@ VOID VERIUndoUnregisterCallback( const RCE * const prce )
     Assert( trxMax != pcbdesc->trxUnregisterBegin0 );
     Assert( trxMax == pcbdesc->trxUnregisterCommit0 );
     pvercallback->pcbdesc->trxUnregisterBegin0 = trxMax;
-#endif
+#endif  //  VERSIONED_CALLBACKS
     prce->Pfcb()->LeaveDDL();
 }
 
 
+//  ================================================================
 INLINE VOID VERIUndoNonLoggedOper( PIB *ppib, RCE * const prce, RCE **pprceNextToUndo )
+//  ================================================================
 {
     Assert( *pprceNextToUndo == prce->PrcePrevOfSession() );
 
     switch( prce->Oper() )
     {
+        //  non-logged operations
+        //
         case operAllocExt:
             VERIUndoAllocExt( prce );
             break;
@@ -6471,6 +8183,8 @@ INLINE VOID VERIUndoNonLoggedOper( PIB *ppib, RCE * const prce, RCE **pprceNextT
             break;
         case operCreateIndex:
             VERIUndoCreateIndex( ppib, prce );
+            //  refresh prceNextToUndo in case RCE list was
+            //  updated when we lost rwlTrx
             *pprceNextToUndo = prce->PrcePrevOfSession();
             break;
         case operDeleteIndex:
@@ -6486,12 +8200,18 @@ INLINE VOID VERIUndoNonLoggedOper( PIB *ppib, RCE * const prce, RCE **pprceNextT
         case operWriteLock:
             break;
         case operPreInsert:
+            //  should never need to rollback an operPreInsert, because
+            //  they are either promoted to an operInsert or manually nullified
+            //  in the same transaction
+            //
         default:
             Assert( fFalse );
             break;
 
         case operCreateTable:
             VERIUndoCreateTable( ppib, prce );
+            // For CreateTable only, the RCE is nullified, so no need
+            // to set RolledBack flag -- get out immediately.
             Assert( prce->FOperNull() );
             return;
     }
@@ -6499,13 +8219,32 @@ INLINE VOID VERIUndoNonLoggedOper( PIB *ppib, RCE * const prce, RCE **pprceNextT
     Assert( !prce->FOperNull() );
     Assert( !prce->FRolledBack() );
 
+    //  we have successfully undone the operation
     VERINullifyRolledBackRCE( ppib, prce );
 }
 
 
+//
+//Log file recovery gets into infinite loop if there is a logical corruption 
+//if it exceeds the limit(MAX_ROLLBACK_RETRIES) then we terminate the process
+//
 #define MAX_ROLLBACK_RETRIES 100
 
+//  ================================================================
 ERR ErrVERRollback( PIB *ppib )
+//  ================================================================
+//
+//  Rollback is done in 2 phase. 1st phase is to undo the versioned
+//  operation and may involve IO. 2nd phase is nullify the undone
+//  RCE. 2 phases are needed so that the version will be held till all
+//  IO is done, then wipe them all. If it is mixed, then once we undo
+//  a RCE, the record become writable to other session. This may mess
+//  up recovery where we may get write conflict since we have not guarrantee
+//  that the log for operations on undone record won't be logged before
+//  Rollback record is logged.
+//  UNDONE: rollback should behave the same as commit, and need two phase log.
+//
+//-
 {
     ASSERT_VALID( ppib );
     Assert( ppib->Level() > 0 );
@@ -6532,6 +8271,8 @@ ERR ErrVERRollback( PIB *ppib )
             Assert( prceToUndo->Pfcb() != pfcbNil );
             Assert( !prceToUndo->FRolledBack() );
     
+            //  Save next RCE to process, because RCE will attempt to be
+            //  nullified if undo is successful.
             prceNextToUndo = prceToUndo->PrcePrevOfSession();
     
             if ( prceToUndo->FUndoableLoggedOper() )
@@ -6540,10 +8281,14 @@ ERR ErrVERRollback( PIB *ppib )
                 Assert( ppib == prceToUndo->Pfucb()->ppib );
                 Assert( JET_errSuccess == ppib->ErrRollbackFailure() );
     
+                //  logged operations
+                //
     
                 err = ErrVERIUndoLoggedOper( ppib, prceToUndo );
                 if ( err < JET_errSuccess )
                 {
+                    // if due to an error we stopped a database usage
+                    // error out from the rollback
                     if ( JET_errRollbackError == err )
                     {
                         Assert( ppib->ErrRollbackFailure() < JET_errSuccess );
@@ -6557,7 +8302,7 @@ ERR ErrVERRollback( PIB *ppib )
                     {
                         cRepeat++;
                         prceNextToUndo = prceToUndo;
-                        continue;
+                        continue;       //  sidestep resetting of cRepeat
                     }
                     Assert ( fFalse );
                 }
@@ -6565,15 +8310,22 @@ ERR ErrVERRollback( PIB *ppib )
     
             else
             {
+                // non-logged operations can never fail to rollback
                 VERIUndoNonLoggedOper( ppib, prceToUndo, &prceNextToUndo );
             }
     
             cRepeat = 0;
         }
     
+        //  must loop through again and catch any RCE's that couldn't be nullified
+        //  during the first pass because of concurrent create index
         prceToNullify = ppib->prceNewest;
         while ( prceNil != prceToNullify && prceToNullify->Level() == level )
         {
+            // Only time nullification should have failed during the first pass is
+            // if the RCE was locked for concurrent create index.  This can only
+            // occur on a non-catalog, non-fixed DDL table for an Insert,
+            // FlagDelete, or Replace operation.
             Assert( pfucbNil != prceToNullify->Pfucb() );
             Assert( ppib == prceToNullify->Pfucb()->ppib );
             Assert( !prceToNullify->FOperNull() );
@@ -6589,14 +8341,17 @@ ERR ErrVERRollback( PIB *ppib )
         }
     }
 
+    // If this PIB has any RCE's remaining, they must be at a lower level.
     Assert( prceNil == ppib->prceNewest
         || ppib->prceNewest->Level() <= level );
 
+    //  decrement session transaction level
     Assert( level == ppib->Level() );
     if ( 1 == ppib->Level() )
     {
+        //  we should have processed all RCEs
         Assert( prceNil == ppib->prceNewest );
-        PIBSetPrceNewest( ppib, prceNil );
+        PIBSetPrceNewest( ppib, prceNil );          //  safety measure, in case it's not NULL for whatever reason
     }
     Assert( ppib->Level() > 0 );
     ppib->DecrementLevel();
@@ -6606,7 +8361,24 @@ HandleError:
 }
 
 
+//  ================================================================
 ERR ErrVERRollback( PIB *ppib, UPDATEID updateid )
+//  ================================================================
+//
+//  This is used to rollback the operations from one particular update
+//  all levels are rolled back.
+//
+//  Rollback is done in 2 phase. 1st phase is to undo the versioned
+//  operation and may involve IO. 2nd phase is nullify the undone
+//  RCE. 2 phases are needed so that the version will be held till all
+//  IO is done, then wipe them all. If it is mixed, then once we undo
+//  a RCE, the record become writable to other session. This may mess
+//  up recovery where we may get write conflict since we have not guarrantee
+//  that the log for operations on undone record won't be logged before
+//  Rollback record is logged.
+//  UNDONE: rollback should behave the same as commit, and need two phase log.
+//
+//-
 {
     ASSERT_VALID( ppib );
     Assert( ppib->Level() > 0 );
@@ -6631,6 +8403,8 @@ ERR ErrVERRollback( PIB *ppib, UPDATEID updateid )
         prceNil != prceToUndo && prceToUndo->TrxCommitted() == trxMax;
         prceToUndo = prceNextToUndo )
     {
+        //  Save next RCE to process, because RCE will attemp to be nullified
+        //  if undo is successful.
         prceNextToUndo = prceToUndo->PrcePrevOfSession();
 
         if ( prceToUndo->Updateid() == updateid )
@@ -6641,12 +8415,15 @@ ERR ErrVERRollback( PIB *ppib, UPDATEID updateid )
             Assert( prceToUndo->Pfcb() != pfcbNil );
             Assert( !prceToUndo->FRolledBack() );
 
+            //  the only RCEs with an updateid should be DML RCE's.
             Assert( prceToUndo->FUndoableLoggedOper() );
             Assert( JET_errSuccess == ppib->ErrRollbackFailure() );
 
             err = ErrVERIUndoLoggedOper( ppib, prceToUndo );
             if ( err < JET_errSuccess )
             {
+                // if due to an error we stopped a database usage
+                // error out from the rollback
                 if ( JET_errRollbackError == err )
                 {
                     Assert( ppib->ErrRollbackFailure() < JET_errSuccess );
@@ -6657,7 +8434,7 @@ ERR ErrVERRollback( PIB *ppib, UPDATEID updateid )
                     cRepeat++;
                     EnforceSz( cRepeat < MAX_ROLLBACK_RETRIES, OSFormat( "TooManyRollbackRetries2:Err%d:Op%u", err, prceToUndo->Oper() ) );
                     prceNextToUndo = prceToUndo;
-                    continue;
+                    continue;       //  sidestep resetting of cRepeat
                 }
                 Assert ( fFalse );
             }
@@ -6667,12 +8444,18 @@ ERR ErrVERRollback( PIB *ppib, UPDATEID updateid )
     }
 
 
+    //  must loop through again and catch any RCE's that couldn't be nullified
+    //  during the first pass because of concurrent create index
     RCE *prceToNullify;
     prceToNullify = ppib->prceNewest;
     while ( prceNil != prceToNullify && prceToNullify->TrxCommitted() == trxMax )
     {
         if ( prceToNullify->Updateid() == updateid )
         {
+            // Only time nullification should have failed during the first pass is
+            // if the RCE was locked for concurrent create index.  This can only
+            // occur on a non-catalog, non-fixed DDL table for an Insert,
+            // FlagDelete, or Replace operation.
             Assert( pfucbNil != prceToNullify->Pfucb() );
             Assert( ppib == prceToNullify->Pfucb()->ppib );
             Assert( !prceToNullify->FOperNull() );
@@ -6698,37 +8481,51 @@ HandleError:
     return err;
 }
 
+//  ================================================================
 JETUNITTEST( VER, RceidCmpReturnsZeroWhenRceidsAreEqual )
+//  ================================================================
 {
     CHECK(0 == RceidCmp(5,5));
 }
 
+//  ================================================================
 JETUNITTEST( VER, RceidCmpGreaterThan )
+//  ================================================================
 {
     CHECK(RceidCmp(11,5) > 0);
 }
 
+//  ================================================================
 JETUNITTEST( VER, RceidCmpGreaterThanWraparound )
+//  ================================================================
 {
     CHECK(RceidCmp(3,0xFFFFFFFD) > 0);
 }
 
+//  ================================================================
 JETUNITTEST( VER, RceidCmpLessThan )
+//  ================================================================
 {
     CHECK(RceidCmp(21,35) < 0);
 }
 
+//  ================================================================
 JETUNITTEST( VER, RceidCmpLessThanWraparound )
+//  ================================================================
 {
     CHECK(RceidCmp(0xFFFFFF0F,1) < 0);
 }
 
+//  ================================================================
 JETUNITTEST( VER, RceidNullIsLessThanAnything )
+//  ================================================================
 {
     CHECK(RceidCmp(rceidNull,0xFFFFFFFF) < 0);
 }
 
+//  ================================================================
 JETUNITTEST( VER, AnythingIsGreaterThanRceidNull )
+//  ================================================================
 {
     CHECK(RceidCmp(1,rceidNull) > 0);
 }

@@ -5,8 +5,11 @@
 
 #ifndef ENABLE_JET_UNIT_TEST
 #error This file should only be compiled with the unit tests!
-#endif
+#endif // !ENABLE_JET_UNIT_TEST
 
+//  We have moved all globals / statics involving g_cbPage out of 
+//  cpage, and new usage is variabla non-grata.
+//
 #undef g_cbPage
 #define g_cbPage g_cbPage_CPAGE_NOT_ALLOWED_TO_USE_THIS_VARIABLE
 
@@ -27,7 +30,7 @@ JETUNITTEST( GenericVersions, GenericVersionsTestEqualCompare )
 
     verCase1.ulVersionUpdateMajor++;
     CHECK( 0 != CmpFormatVer( verCase1, verCase2 ) );
-    verCase2.ulVersionUpdateMajor++;
+    verCase2.ulVersionUpdateMajor++;    // fix it back up.
     CHECK( 0 == CmpFormatVer( verCase1, verCase2 ) );
 
     verCase2.ulVersionMajor++;
@@ -39,46 +42,47 @@ JETUNITTEST( GenericVersions, GenericVersionsTestGreaterThanCompare )
     GenVersion verCase1 = { 6, 10, 200 };
     GenVersion verCase2 = { 6, 10, 200 };
 
-    CHECK( CmpFormatVer( verCase1, verCase2 ) == 0 );
+    CHECK( CmpFormatVer( verCase1, verCase2 ) == 0 ); // starting position
 
     verCase1.ulVersionMajor++;
     CHECK( CmpFormatVer( verCase1, verCase2 ) > 0 );
     CHECK( FMajorVersionMismatch( CmpFormatVer( verCase1, verCase2 ) ) );
     CHECK( !FUpdateMajorMismatch( CmpFormatVer( verCase1, verCase2 ) ) );
     CHECK( !FUpdateMinorMismatch( CmpFormatVer( verCase1, verCase2 ) ) );
-    verCase1.ulVersionMajor--; CHECK( CmpFormatVer( verCase1, verCase2 ) == 0 );
+    verCase1.ulVersionMajor--; CHECK( CmpFormatVer( verCase1, verCase2 ) == 0 ); // reset
 
     verCase1.ulVersionUpdateMajor++;
     CHECK( CmpFormatVer( verCase1, verCase2 ) > 0 );
     CHECK( !FMajorVersionMismatch( CmpFormatVer( verCase1, verCase2 ) ) );
     CHECK( FUpdateMajorMismatch( CmpFormatVer( verCase1, verCase2 ) ) );
     CHECK( !FUpdateMinorMismatch( CmpFormatVer( verCase1, verCase2 ) ) );
-    verCase1.ulVersionUpdateMajor--; CHECK( CmpFormatVer( verCase1, verCase2 ) == 0 );
+    verCase1.ulVersionUpdateMajor--; CHECK( CmpFormatVer( verCase1, verCase2 ) == 0 ); // reset
 
     verCase1.ulVersionUpdateMinor++;
     CHECK( CmpFormatVer( verCase1, verCase2 ) > 0 );
     CHECK( !FMajorVersionMismatch( CmpFormatVer( verCase1, verCase2 ) ) );
     CHECK( !FUpdateMajorMismatch( CmpFormatVer( verCase1, verCase2 ) ) );
     CHECK( FUpdateMinorMismatch( CmpFormatVer( verCase1, verCase2 ) ) );
-    verCase1.ulVersionUpdateMinor--; CHECK( CmpFormatVer( verCase1, verCase2 ) == 0 );
+    verCase1.ulVersionUpdateMinor--; CHECK( CmpFormatVer( verCase1, verCase2 ) == 0 ); // reset
 
+    //  Same set of tests, but with inverted order (decreasing) Major, UpdateMajor, UpdateMinor ... 
 
     GenVersion verCaseA = { 10, 5, 2 };
     GenVersion verCaseB = { 10, 5, 2 };
 
-    CHECK( CmpFormatVer( verCaseA, verCaseB ) == 0 );
+    CHECK( CmpFormatVer( verCaseA, verCaseB ) == 0 ); // starting position
 
     verCaseA.ulVersionMajor++;
     CHECK( CmpFormatVer( verCaseA, verCaseB ) > 0 );
-    verCaseA.ulVersionMajor--; CHECK( CmpFormatVer( verCaseA, verCaseB ) == 0 );
+    verCaseA.ulVersionMajor--; CHECK( CmpFormatVer( verCaseA, verCaseB ) == 0 ); // reset
 
     verCaseA.ulVersionUpdateMajor++;
     CHECK( CmpFormatVer( verCaseA, verCaseB ) > 0 );
-    verCaseA.ulVersionUpdateMajor--; CHECK( CmpFormatVer( verCaseA, verCaseB ) == 0 );
+    verCaseA.ulVersionUpdateMajor--; CHECK( CmpFormatVer( verCaseA, verCaseB ) == 0 ); // reset
 
     verCaseA.ulVersionUpdateMinor++;
     CHECK( CmpFormatVer( verCaseA, verCaseB ) > 0 );
-    verCaseA.ulVersionUpdateMinor--; CHECK( CmpFormatVer( verCaseA, verCaseB ) == 0 );
+    verCaseA.ulVersionUpdateMinor--; CHECK( CmpFormatVer( verCaseA, verCaseB ) == 0 ); // reset
 }
 
 JETUNITTEST( GenericVersions, GenericVersionsTestLessThanCompare )
@@ -86,46 +90,47 @@ JETUNITTEST( GenericVersions, GenericVersionsTestLessThanCompare )
     GenVersion verCase1 = { 7, 20, 100 };
     GenVersion verCase2 = { 7, 20, 100 };
 
-    CHECK( CmpFormatVer( verCase1, verCase2 ) == 0 );
+    CHECK( CmpFormatVer( verCase1, verCase2 ) == 0 ); // starting position
 
     verCase1.ulVersionMajor--;
     CHECK( CmpFormatVer( verCase1, verCase2 ) < 0 );
     CHECK( FMajorVersionMismatch( CmpFormatVer( verCase1, verCase2 ) ) );
     CHECK( !FUpdateMajorMismatch( CmpFormatVer( verCase1, verCase2 ) ) );
     CHECK( !FUpdateMinorMismatch( CmpFormatVer( verCase1, verCase2 ) ) );
-    verCase1.ulVersionMajor++; CHECK( CmpFormatVer( verCase1, verCase2 ) == 0 );
+    verCase1.ulVersionMajor++; CHECK( CmpFormatVer( verCase1, verCase2 ) == 0 ); // reset
 
     verCase1.ulVersionUpdateMajor--;
     CHECK( CmpFormatVer( verCase1, verCase2 ) < 0 );
     CHECK( !FMajorVersionMismatch( CmpFormatVer( verCase1, verCase2 ) ) );
     CHECK( FUpdateMajorMismatch( CmpFormatVer( verCase1, verCase2 ) ) );
     CHECK( !FUpdateMinorMismatch( CmpFormatVer( verCase1, verCase2 ) ) );
-    verCase1.ulVersionUpdateMajor++; CHECK( CmpFormatVer( verCase1, verCase2 ) == 0 );
+    verCase1.ulVersionUpdateMajor++; CHECK( CmpFormatVer( verCase1, verCase2 ) == 0 ); // reset
 
     verCase1.ulVersionUpdateMinor--;
     CHECK( CmpFormatVer( verCase1, verCase2 ) < 0 );
     CHECK( !FMajorVersionMismatch( CmpFormatVer( verCase1, verCase2 ) ) );
     CHECK( !FUpdateMajorMismatch( CmpFormatVer( verCase1, verCase2 ) ) );
     CHECK( FUpdateMinorMismatch( CmpFormatVer( verCase1, verCase2 ) ) );
-    verCase1.ulVersionUpdateMinor++; CHECK( CmpFormatVer( verCase1, verCase2 ) == 0 );
+    verCase1.ulVersionUpdateMinor++; CHECK( CmpFormatVer( verCase1, verCase2 ) == 0 ); // reset
 
+    //  Same set of tests, but with inverted order (decreasing) Major, UpdateMajor, UpdateMinor ... 
 
     GenVersion verCaseA = { 10, 5, 2 };
     GenVersion verCaseB = { 10, 5, 2 };
 
-    CHECK( CmpFormatVer( verCaseA, verCaseB ) == 0 );
+    CHECK( CmpFormatVer( verCaseA, verCaseB ) == 0 ); // starting position
 
     verCaseA.ulVersionMajor--;
     CHECK( CmpFormatVer( verCaseA, verCaseB ) < 0 );
-    verCaseA.ulVersionMajor++; CHECK( CmpFormatVer( verCaseA, verCaseB ) == 0 );
+    verCaseA.ulVersionMajor++; CHECK( CmpFormatVer( verCaseA, verCaseB ) == 0 ); // reset
 
     verCaseA.ulVersionUpdateMajor--;
     CHECK( CmpFormatVer( verCaseA, verCaseB ) < 0 );
-    verCaseA.ulVersionUpdateMajor++; CHECK( CmpFormatVer( verCaseA, verCaseB ) == 0 );
+    verCaseA.ulVersionUpdateMajor++; CHECK( CmpFormatVer( verCaseA, verCaseB ) == 0 ); // reset
 
     verCaseA.ulVersionUpdateMinor--;
     CHECK( CmpFormatVer( verCaseA, verCaseB ) < 0 );
-    verCaseA.ulVersionUpdateMinor++; CHECK( CmpFormatVer( verCaseA, verCaseB ) == 0 );
+    verCaseA.ulVersionUpdateMinor++; CHECK( CmpFormatVer( verCaseA, verCaseB ) == 0 ); // reset
 }
 
 JETUNITTEST( GenericVersions, GenericVersionsCheckMismatchPriorities )
@@ -134,48 +139,48 @@ JETUNITTEST( GenericVersions, GenericVersionsCheckMismatchPriorities )
     GenVersion verCase1 = verTemplate;
     GenVersion verCase2 = verTemplate;
 
-    CHECK( CmpFormatVer( verCase1, verCase2 ) == 0 );
+    CHECK( CmpFormatVer( verCase1, verCase2 ) == 0 ); // starting position
 
     verCase1.ulVersionMajor += ( rand() % 2 ) ? (1) : (-1);
     verCase1.ulVersionUpdateMajor += ( rand() % 3 ) - 1;
     verCase1.ulVersionUpdateMinor += ( rand() % 3 ) - 1;
     CHECK( CmpFormatVer( verCase1, verCase2 ) != 0 );
-    CHECK( CmpFormatVer( verCase2, verCase1 ) != 0 );
+    CHECK( CmpFormatVer( verCase2, verCase1 ) != 0 );   //  order should not matter.
     CHECK( FMajorVersionMismatch( CmpFormatVer( verCase1, verCase2 ) ) );
     CHECK( FMajorVersionMismatch( CmpFormatVer( verCase2, verCase1 ) ) );
     CHECK( !FUpdateMajorMismatch( CmpFormatVer( verCase1, verCase2 ) ) );
     CHECK( !FUpdateMajorMismatch( CmpFormatVer( verCase2, verCase1 ) ) );
     CHECK( !FUpdateMinorMismatch( CmpFormatVer( verCase1, verCase2 ) ) );
     CHECK( !FUpdateMinorMismatch( CmpFormatVer( verCase2, verCase1 ) ) );
-    verCase1 = verTemplate; CHECK( CmpFormatVer( verCase1, verCase2 ) == 0 );
+    verCase1 = verTemplate; CHECK( CmpFormatVer( verCase1, verCase2 ) == 0 ); // reset
 
     verCase1.ulVersionUpdateMajor += ( rand() % 2 ) ? (1) : (-1);
     verCase1.ulVersionUpdateMinor += ( rand() % 3 ) - 1;
     CHECK( CmpFormatVer( verCase1, verCase2 ) != 0 );
-    CHECK( CmpFormatVer( verCase2, verCase1 ) != 0 );
+    CHECK( CmpFormatVer( verCase2, verCase1 ) != 0 );   //  order should not matter.
     CHECK( !FMajorVersionMismatch( CmpFormatVer( verCase1, verCase2 ) ) );
     CHECK( !FMajorVersionMismatch( CmpFormatVer( verCase2, verCase1 ) ) );
     CHECK( FUpdateMajorMismatch( CmpFormatVer( verCase1, verCase2 ) ) );
     CHECK( FUpdateMajorMismatch( CmpFormatVer( verCase2, verCase1 ) ) );
     CHECK( !FUpdateMinorMismatch( CmpFormatVer( verCase1, verCase2 ) ) );
     CHECK( !FUpdateMinorMismatch( CmpFormatVer( verCase2, verCase1 ) ) );
-    verCase1 = verTemplate; CHECK( CmpFormatVer( verCase1, verCase2 ) == 0 );
+    verCase1 = verTemplate; CHECK( CmpFormatVer( verCase1, verCase2 ) == 0 ); // reset
 
     verCase1.ulVersionUpdateMinor += ( rand() % 2 ) ? (1) : (-1);
     CHECK( CmpFormatVer( verCase1, verCase2 ) != 0 );
-    CHECK( CmpFormatVer( verCase2, verCase1 ) != 0 );
+    CHECK( CmpFormatVer( verCase2, verCase1 ) != 0 );   //  order should not matter.
     CHECK( !FMajorVersionMismatch( CmpFormatVer( verCase1, verCase2 ) ) );
     CHECK( !FMajorVersionMismatch( CmpFormatVer( verCase2, verCase1 ) ) );
     CHECK( !FUpdateMajorMismatch( CmpFormatVer( verCase1, verCase2 ) ) );
     CHECK( !FUpdateMajorMismatch( CmpFormatVer( verCase2, verCase1 ) ) );
     CHECK( FUpdateMinorMismatch( CmpFormatVer( verCase1, verCase2 ) ) );
     CHECK( FUpdateMinorMismatch( CmpFormatVer( verCase2, verCase1 ) ) );
-    verCase1 = verTemplate; CHECK( CmpFormatVer( verCase1, verCase2 ) == 0 );
+    verCase1 = verTemplate; CHECK( CmpFormatVer( verCase1, verCase2 ) == 0 ); // reset
 
 }
 
 
-JETUNITTEST( EngineFormatVersionsTable, TestLookupOfDbMajors )
+JETUNITTEST( EngineFormatVersionsTable, TestLookupOfDbMajors )  //  P2 Rule, exceptions made for QFEs
 {
     DbVersion dbvTest1A = { 0x620, 30, 50 };
     DbVersion dbvTest1B = { 0x620, 30, 30 };

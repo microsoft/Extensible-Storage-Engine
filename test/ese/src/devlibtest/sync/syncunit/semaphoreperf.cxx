@@ -5,6 +5,7 @@
 #include "sync.hxx"
 #include <time.h>
 
+//  Interface class.
 
 class ISlimSemaphore
 {
@@ -24,6 +25,7 @@ ISlimSemaphore::ISlimSemaphore( const LONG cInitial )
 }
 
 
+//  SlimSemaphoreBroken implementation.
 
 class SlimSemaphoreBroken : public ISlimSemaphore
 {
@@ -47,6 +49,7 @@ void SlimSemaphoreBroken::Leave()
 }
 
 
+//  SlimSemaphoreHeavy implementation.
 
 class SlimSemaphoreHeavy : public ISlimSemaphore
 {
@@ -85,6 +88,7 @@ void SlimSemaphoreHeavy::Leave()
 }
 
 
+//  SlimSemaphoreLightSpin implementation.
 
 class SlimSemaphoreLightSpin : public ISlimSemaphore
 {
@@ -171,6 +175,7 @@ void SlimSemaphoreLightSpin::Leave()
 }
 
 
+//  SlimSemaphoreLightEvents implementation.
 
 class SlimSemaphoreLightEvents : public ISlimSemaphore
 {
@@ -257,6 +262,7 @@ void SlimSemaphoreLightEvents::Leave()
 }
 
 
+//  SlimSemaphoreLightKSemaphore implementation.
 
 class SlimSemaphoreLightKSemaphore : public ISlimSemaphore
 {
@@ -312,6 +318,7 @@ void SlimSemaphoreLightKSemaphore::Leave()
 }
 
 
+//  SlimSemaphoreLightEseCSemaphore implementation.
 
 class SlimSemaphoreLightEseCSemaphore : public ISlimSemaphore
 {
@@ -351,6 +358,7 @@ void SlimSemaphoreLightEseCSemaphore::Leave()
 }
 
 
+//  ISlimSemaphore factory.
 class SlimSemaphoreFactory
 {
     public:
@@ -403,6 +411,7 @@ void SlimSemaphoreFactory::Destroy( ISlimSemaphore* const pISlimSemaphore )
 }
 
 
+//  Test class.
 
 class SlimSemaphoreTest
 {
@@ -592,6 +601,7 @@ bool SlimSemaphoreTest::FSuceeded( double* const pdblThroughput, double* const p
 }
 
 
+//  Helper functions.
 
 bool FRunTest( const SlimSemaphoreFactory::SlimSemaphoreType smtyp, const LONG cInitial, const LONG cParallelThreads, const DWORD cmsecRuntime, double* const pdblThroughput, double* const pdblKernelTime, double* const pdblUserTime, double* const pdblTotalTime )
 {
@@ -669,6 +679,7 @@ bool FRunTests( const SlimSemaphoreFactory::SlimSemaphoreType smtyp, const bool 
     return fPassed == fExpected;
 }
 
+//  Test fixture.
 
 class CSemaphorePerfTest : public UNITTEST
 {
@@ -728,6 +739,11 @@ ERR CSemaphorePerfTest::ErrTest()
     TestAssert( fOsSyncInit );
 
     wprintf( L"\tTesting semaphore performance...\n" );
+//  TestAssert( FRunTests( SlimSemaphoreFactory::smtypBroken, false ) );
+//  TestAssert( FRunTests( SlimSemaphoreFactory::smtypHeavy, true ) );
+//  TestAssert( FRunTests( SlimSemaphoreFactory::smtypLightSpin, true ) );
+//  TestAssert( FRunTests( SlimSemaphoreFactory::smtypLightEvents, true ) );
+//  TestAssert( FRunTests( SlimSemaphoreFactory::smtypLightKSemaphore, true ) );
     TestAssert( FRunTests( SlimSemaphoreFactory::smtypLightEseCSemaphore, true ) );
 
     OSSyncPostterm();

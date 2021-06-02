@@ -1,6 +1,7 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
+// the sever simulation functionality will be DEBUG only
 #if defined(DEBUG) && !defined(ESENT)
 #define RESTORE_SERVER_SIMULATION
 #define RESTORE_SERVER_SIMULATION_HELP
@@ -8,14 +9,14 @@
 
 #ifdef RESTORE_SERVER_SIMULATION
 #include <eseback2.h>
-#endif
+#endif // RESTORE_SERVER_SIMULATION
 
 #include "_edbutil.hxx"
 #include "_dbspacedump.hxx"
 #include "stat.hxx"
 
 #include "esefile.hxx"
-#undef UNICODE
+#undef UNICODE              //  esefile.hxx enables UNICODE
 
 #pragma prefast(push)
 #pragma prefast(disable:28196, "Do not bother us with strsafe, someone else owns that.")
@@ -34,15 +35,20 @@
 
 #define ESEBACK2_DLL_NAME   L"ESEBACK2.DLL"
 
-#endif
+#endif // ESENT
 
 #ifdef ESESHADOW
 
 #include "eseshadow.h"
 
+//  Required for indirection (ESESHADOW_LOCAL_DEFERRED_DLL).
+//
 ESESHADOW_LOCAL_DEFERRED_DLL_STATE
 #endif
 
+//  In fake recovery without undo, we set the grbit for JET_bitRecoveryWithoutUndo, but 
+//  then the our callback control decides to do undo after all, unless the "/u" option 
+//  was passed.
 #define ESEUTIL_FAKE_RECOVERY_WITHOUT_UNDO 1
 
 
@@ -50,9 +56,13 @@ LOCAL const WCHAR   * const wszUser         = L"user";
 LOCAL const WCHAR   * const wszPassword     = L"";
 
 
+// UNDONE:  Must still be localised, but centralising all the localisable strings
+// here makes my job easier.
 
 LOCAL const WCHAR   * const wszCurrDir                  = L".";
 
+// Specify .\ to guarantee it's the local directory. ErrInit will stick bare path names in
+// the System directory, which will fail when using a /vss snap.
 LOCAL const WCHAR   * const wszDefaultTempDBFormat      = L"TEMP%d.EDB";
 LOCAL const WCHAR   * const wszDefaultDefragDBFormat    = L".\\TEMPDFRG%d.EDB";
 LOCAL const WCHAR   * const wszDefaultUpgradeDBFormat   = L"TEMPUPGD%d.EDB";
@@ -139,9 +149,9 @@ LOCAL const WCHAR   * const wszUsageErr22   = L"Usage Error: Invalid log generat
 
 #ifdef ESENT
 LOCAL const WCHAR   * const wszHelpDesc1        = L"DESCRIPTION:  Database utilities for the Extensible Storage Engine for Microsoft(R) Windows(R).";
-#else
+#else  //  !ESENT
 LOCAL const WCHAR   * const wszHelpDesc1        = L"DESCRIPTION:  Database utilities for the Extensible Storage Engine for Microsoft(R) Exchange Server.";
-#endif
+#endif  //  ESENT
 LOCAL const WCHAR   * const wszHelpSyntax   = L"MODES OF OPERATION:";
 LOCAL const WCHAR   * const wszHelpModes1   = L"      Defragmentation:  %s /d <database name> [options]";
 LOCAL const WCHAR   * const wszHelpModes2   = L"             Recovery:  %s /r <logfile base name> [options]";
@@ -152,6 +162,8 @@ LOCAL const WCHAR   * const wszHelpModes6   = L"            File Dump:  %s /m[mo
 LOCAL const WCHAR   * const wszHelpModes7   = L"            Copy File:  %s /y <source file> [options]";
 LOCAL const WCHAR   * const wszHelpModes8   = L"              Restore:  %s /c[mode-modifier] <path name> [options]";
 LOCAL const WCHAR   * const wszHelpModes9   = L"               Backup:  %s /b <backup path> [options]";
+                        //  wszHelpModes10 was Record Format Upgrade. (/f)
+                        //  wszHelpModes11 was Upgrade. (/u)
 LOCAL const WCHAR   * const wszHelpModes12  = L"               Secure:  %s /z <database name> [options]";
 
 LOCAL const WCHAR   * const wszHelpPrompt1  = L"<<<<<  Press a key for more help  >>>>>";
@@ -159,9 +171,9 @@ LOCAL const WCHAR   * const wszHelpPrompt2  = L"D=Defragmentation, R=Recovery, G
 
 #ifdef ESENT
 LOCAL const WCHAR   * const wszHelpPrompt3  = L"P=rePair, M=file duMp, Y=copY file";
-#else
+#else //ESENT
 LOCAL const WCHAR   * const wszHelpPrompt3  = L"P=rePair, M=file duMp, Y=copY file, C=restore";
-#endif
+#endif // ESENT
 
 #ifdef DEBUG
 LOCAL const WCHAR   * const wszHelpPrompt4  = L"B=Backup, F=record Format upgrade, U=upgrade, Z=secure";
@@ -176,10 +188,12 @@ LOCAL const WCHAR * const   wszOperFailUnknownError = L"Operation terminated uns
 
 const JET_LGPOS lgposMax = { 0xffff, 0xffff, 0x7fffffff };
 
+//  ================================================================
 JET_ERR ErrGetProcAddress(
             const HMODULE hmod,
             const CHAR * const szFunc,
             VOID ** const pvPfn )
+//  ================================================================
 {
     if( NULL == ( (*pvPfn) = GetProcAddress( hmod, szFunc ) ) )
     {
@@ -204,12 +218,12 @@ LOCAL VOID EDBUTLPrintLogo( void )
 #ifdef ESENT
     StringCbPrintfW( wszVersion, sizeof(wszVersion), L"%d.%d", VER_PRODUCTMAJORVERSION, VER_PRODUCTMINORVERSION );
     wprintf( L"Extensible Storage Engine Utilities for Microsoft(R) Windows(R)%c", wchNewLine );
-#else
+#else  //  !ESENT
     StringCbPrintfW( wszVersion, sizeof(wszVersion), L"%hs.%hs", PRODUCT_MAJOR, PRODUCT_MINOR );
     wprintf( L"Extensible Storage Engine Utilities for Microsoft(R) Exchange Server%c", wchNewLine );
-#endif
+#endif  //  ESENT
     wprintf( L"Version %s%c", wszVersion, wchNewLine );
-    wprintf( L"Copyright (c) Microsoft Corporation.\nLicensed under the MIT License.%c", wchNewLine );
+    wprintf( L"Copyright (C) Microsoft Corporation. All Rights Reserved.%c", wchNewLine );
     wprintf( L"%c", wchNewLine );
 }
 
@@ -224,7 +238,7 @@ LOCAL VOID EDBUTLHelpDefrag( __in PCWSTR wszAppName )
     wprintf( L"                  /t<db>     - set temp. database name (default: TEMPDFRG*.EDB)%c", wchNewLine );
     wprintf( L"                  /p         - preserve temporary database (ie. don't instate)%c", wchNewLine );
     wprintf( L"                  /b<db>     - make backup copy under the specified name%c", wchNewLine );
-#ifdef DEBUG
+#ifdef DEBUG    // Undocumented switches.
     wprintf( L"                  /n         - dump defragmentation information to DFRGINFO.TXT%c", wchNewLine );
     wprintf( L"                  /x<#>      - database extension size, in pages (default: 256)%c", wchNewLine );
     wprintf( L"                  /w         - set batch IO size%c", wchNewLine );
@@ -265,6 +279,7 @@ LOCAL VOID EDBUTLHelpRecovery( __in PCWSTR wszAppName )
     wprintf( L"                  /p    <database>  - on successful recovery, run space leakage reclaimer. Cannot be%c", wchNewLine );
     wprintf( L"                                      combined with /k.%c", wchNewLine );
 #if defined( ESENT ) || defined( DEBUG )
+    //  Note: Available in retail, but not documented.
     wprintf( L"                  /u[log]           - stop recovery when the Undo phase is reached with the option%c", wchNewLine );
     wprintf( L"                                      to stop when a certain log generation is recovered.%c", wchNewLine );
     wprintf( L"                                      [log] is the log generation number and if not specified %c", wchNewLine );
@@ -272,8 +287,8 @@ LOCAL VOID EDBUTLHelpRecovery( __in PCWSTR wszAppName )
 #ifdef DEBUG
     wprintf( L"                                      [log] can be a log position in the N:N:N form in which case %c", wchNewLine );
     wprintf( L"                                      recovery will stop after the specified position %c", wchNewLine );
-#endif
-#endif
+#endif  //  DEBUG
+#endif  //  ESENT || DEBUG
     wprintf( L"                  /d[path]          - location of database files, or current directory%c", wchNewLine );
     wprintf( L"                                      if [path] not specified (default: directory%c", wchNewLine );
     wprintf( L"                                      originally logged in log files)%c", wchNewLine );
@@ -318,10 +333,10 @@ LOCAL VOID EDBUTLHelpIntegrity( __in PCWSTR wszAppName )
     wprintf( L"                  /t<db>    - set temp. database name (default: TEMPINTEG*.EDB)%c", wchNewLine );
     wprintf( L"                  /f<name>  - set prefix to use for name of report files%c", wchNewLine );
     wprintf( L"                              (default: <database>.integ.raw)%c", wchNewLine );
-#ifdef DEBUG
+#ifdef DEBUG    // Undocumented switches.
     wprintf( L"                  /b        - don't rebuild and compare indexes%c", wchNewLine );
     wprintf( L"                  /n        - dump table statistics to INTGINFO.TXT%c", wchNewLine );
-#endif
+#endif  //  DEBUG
 #ifdef ESESHADOW
     wprintf( L"                  /vssrec <basename> <logpath>%c", wchNewLine );
     wprintf( L"                            - verifies a snapshot of a live database. This%c", wchNewLine );
@@ -417,9 +432,9 @@ LOCAL VOID EDBUTLHelpRepair( __in PCWSTR wszAppName )
     wprintf( L"                                 (default: TEMPREPAIR*.EDB)%c", wchNewLine );
     wprintf( L"                  /f<name>     - set prefix to use for name of report files%c", wchNewLine );
     wprintf( L"                                 (default: <database>.integ.raw)%c", wchNewLine );
-#ifdef DEBUG
+#ifdef DEBUG    // Undocumented switches.
     wprintf( L"                  /n           - dump table statistics to INTGINFO.TXT%c", wchNewLine );
-#endif
+#endif  //  DEBUG
     wprintf( L"                  /g           - run integrity check before repairing%c", wchNewLine );
     wprintf( L"                  /2           - set 2k database page size (default: auto-detect)%c", wchNewLine );
     wprintf( L"                  /4           - set 4k database page size (default: auto-detect)%c", wchNewLine );
@@ -519,8 +534,10 @@ LOCAL VOID EDBUTLHelpDump( __in PCWSTR wszAppName )
     wprintf( L"                               optional ending log generation (also as a hex%c", wchNewLine );
     wprintf( L"                               number)%c", wchNewLine );
 
+    //  Prints the space usage options ...
     PrintSpaceDumpHelp( 80, wchNewLine, L"                  ", L"           " );
 
+    //  Space categorization options.
     wprintf( L"%c", wchNewLine );
     wprintf( L"%*cSPACE CATEGORIZATION OPTIONS:%c", 18, L' ', wchNewLine );
     wprintf( L"%*c     /f            - Runs full space categorization. This may be expensive, but%c", 29, L' ', wchNewLine );
@@ -535,9 +552,9 @@ LOCAL VOID EDBUTLHelpHardRecovery( __in PCWSTR wszAppName )
     wprintf( L"    DESCRIPTION:  Restore information and completion.%c", wchNewLine );
 #ifdef RESTORE_SERVER_SIMULATION_HELP
     wprintf( L"         SYNTAX:  %s /c[mode-modifier] <path name|file name> [options]%c", wszAppName, wchNewLine );
-#else
+#else // RESTORE_SERVER_SIMULATION_HELP
     wprintf( L"         SYNTAX:  %s /c[mode-modifier] <path name> [options]%c", wszAppName, wchNewLine );
-#endif
+#endif // RESTORE_SERVER_SIMULATION_HELP
     wprintf( L"     PARAMETERS:  [mode-modifier] - a letter designating the type of operation%c", wchNewLine );
     wprintf( L"                                    to be done%c", wchNewLine );
     wprintf( L"                                    m - dump Restore.Env %c", wchNewLine );
@@ -548,10 +565,10 @@ LOCAL VOID EDBUTLHelpHardRecovery( __in PCWSTR wszAppName )
     wprintf( L"                                    (Restore.Env location)%c", wchNewLine );
     wprintf( L"                                  OR%c", wchNewLine );
     wprintf( L"                  <file name>     - (/cs) name of the server description file%c", wchNewLine );
-#else
+#else // RESTORE_SERVER_SIMULATION_HELP
     wprintf( L"                  <path name>     - directory of the restore%c", wchNewLine );
     wprintf( L"                                    (Restore.Env location)%c", wchNewLine );
-#endif
+#endif // RESTORE_SERVER_SIMULATION_HELP
     wprintf( L"        OPTIONS:  zero or more of the following switches, separated by a space:%c", wchNewLine );
     wprintf( L"                  /t[instance]    - name of the instance containing the log%c", wchNewLine );
     wprintf( L"                                    files to play forward, or if [instance] is%c", wchNewLine );
@@ -569,7 +586,7 @@ LOCAL VOID EDBUTLHelpHardRecovery( __in PCWSTR wszAppName )
     wprintf( L"                  /32             - set 32k database page size (default: %dk)%c", ckbPageDefault, wchNewLine );
     wprintf( L"                  /o              - suppress logo%c", wchNewLine );
 }
-#endif
+#endif // ESENT
 
 #ifdef DEBUG
 
@@ -594,7 +611,7 @@ LOCAL VOID EDBUTLHelpBackup( __in PCWSTR wszAppName )
     wprintf( L"                  /o         - suppress logo%c", wchNewLine );
 }
 
-#endif
+#endif // DEBUG
 
 LOCAL VOID EDBUTLHelpScrub( __in PCWSTR const wszAppName )
 {
@@ -620,32 +637,32 @@ LOCAL VOID EDBUTLHelp( __in PCWSTR wszAppName )
     EDBUTLPrintLogo();
     wprintf( L"%s%c%c", wszHelpDesc1, wchNewLine, wchNewLine );
     wprintf( L"%s%c", wszHelpSyntax, wchNewLine );
-    wprintf( wszHelpModes1, wszAppName );
+    wprintf( wszHelpModes1, wszAppName );   //  mode 1 is Defrag
     wprintf( L"%c", wchNewLine );
-    wprintf( wszHelpModes2, wszAppName );
+    wprintf( wszHelpModes2, wszAppName );   //  mode 2 is Recovery
     wprintf( L"%c", wchNewLine );
-    wprintf( wszHelpModes3, wszAppName );
+    wprintf( wszHelpModes3, wszAppName );   //  mode 3 is Integrity-Check
     wprintf( L"%c", wchNewLine );
-    wprintf( wszHelpModes4, wszAppName );
+    wprintf( wszHelpModes4, wszAppName );   //  mode 4 is Checksum
     wprintf( L"%c", wchNewLine );
-    wprintf( wszHelpModes5, wszAppName );
+    wprintf( wszHelpModes5, wszAppName );   //  mode 5 is Repair
     wprintf( L"%c", wchNewLine );
-    wprintf( wszHelpModes6, wszAppName );
+    wprintf( wszHelpModes6, wszAppName );   //  mode 6 is File Dump
     wprintf( L"%c", wchNewLine );
-    wprintf( wszHelpModes7, wszAppName );
+    wprintf( wszHelpModes7, wszAppName );   //  mode 7 is Copy File
     wprintf( L"%c", wchNewLine );
 #ifndef ESENT
-    wprintf( wszHelpModes8, wszAppName );
+    wprintf( wszHelpModes8, wszAppName );   //  mode 8 is Restore
     wprintf( L"%c", wchNewLine );
-#endif
+#endif // ESENT
 
 #ifdef DEBUG
-    wprintf( wszHelpModes9, wszAppName );
+    wprintf( wszHelpModes9, wszAppName );   //  mode 9 is Backup
     wprintf( L"%c", wchNewLine );
 
-    wprintf( wszHelpModes12, wszAppName );
+    wprintf( wszHelpModes12, wszAppName );  //  mode 12 is Scrub (undocumented in RETAIL )
     wprintf( L"%c", wchNewLine );
-#endif
+#endif  //  DEBUG
 
     wprintf( L"%c", wchNewLine );
     wprintf( L"%s%c", wszHelpPrompt1, wchNewLine );
@@ -698,7 +715,7 @@ LOCAL VOID EDBUTLHelp( __in PCWSTR wszAppName )
         case L'C':
             EDBUTLHelpHardRecovery( wszAppName );
             break;
-#endif
+#endif // ESENT
 
 #ifdef DEBUG
         case L'b':
@@ -707,6 +724,7 @@ LOCAL VOID EDBUTLHelp( __in PCWSTR wszAppName )
             break;
 #endif
 
+        //  NOTE: Scrub is undocumented in RETAIL
         case L'z':
         case L'Z':
             EDBUTLHelpScrub( wszAppName );
@@ -732,7 +750,7 @@ LOCAL JET_ERR __stdcall PrintStatus( JET_SESID sesid, JET_SNP snp, JET_SNT snt, 
 
     switch ( snp )
     {
-        case JET_SNP( -1 ):
+        case JET_SNP( -1 ):             // during Begin pv will point to szOperation
             AssertSz( fFalse, "Do we really get -1 from here!?  What would that mean" );
         case JET_snpCompact:
         case JET_snpUpgrade:
@@ -791,6 +809,8 @@ LOCAL JET_ERR __stdcall PrintStatus( JET_SESID sesid, JET_SNP snp, JET_SNT snt, 
 
                     wprintf( L"%c", wchNewLine );
 
+                    // Center the status message above the status bar.
+                    // Formula is: ( length of status bar - length of message ) / 2
                     cchOper = wcslen( wszOperation );
                     assert( cchOper + (ULONG)wcslen( wszStatusMsg ) <= 51 );
                     cchPadding = ( 51 - ( cchOper + (ULONG)wcslen( wszStatusMsg ) ) ) / 2;
@@ -821,7 +841,8 @@ LOCAL JET_ERR __stdcall PrintStatus( JET_SESID sesid, JET_SNP snp, JET_SNT snt, 
                     wprintf( L"X" );
                     break;
 
-                case 8:
+                // Deprecated ...
+                case 8: // deprecated JET_sntRecoveryStep:
                     AssertSz( fFalse, "We do not want to do JET_sntRecoveryStep anymore ... old ese[nt].dll?" );
                     break;
 
@@ -873,22 +894,25 @@ LOCAL JET_ERR __stdcall ProcessRecoveryControlAndRestoreStatus( JET_SNP snp, JET
     JET_ERR errRet = JET_errSuccess;
 
     const UTILOPTS * const popts = reinterpret_cast< UTILOPTS* >( pvContext );
+    // in case we need it, I believe the prstinfo is available here:
+    //const JET_RSTINFO2_W popts = reinterpret_cast<JET_RSTINFO_W *>( popts->pv );
 
     const BOOL fVerbose = FUTILOPTSVerbose( popts->fUTILOPTSFlags );
 
     const WCHAR wszStatusIndent [] = L"        ";
 
-    Assert(  8 != snt );
+    Assert( /* Deprecated JET_sntRecoveryStep */ 8 != snt );
 
     switch ( snp )
     {
         case JET_snpRestore:
+            // I don't think I need the other cases here b/c they use callback v1
 
             if ( !fVerbose )
             {
                 PrintStatus( JET_sesidNil, snp, snt, pvData );
             }
-            else
+            else    // fVerbose = fTrue ...
             {
                 switch ( snt )
                 {
@@ -897,6 +921,9 @@ LOCAL JET_ERR __stdcall ProcessRecoveryControlAndRestoreStatus( JET_SNP snp, JET
                         break;
                     case JET_sntProgress:
                     {
+                        // int iPercentage = static_cast< int >( ( __int64( reinterpret_cast< JET_SNPROG* >( pvData )->cunitDone ) * __int64( 100 ) ) / __int64( reinterpret_cast< JET_SNPROG* >( pvData )->cunitTotal ) );
+                        // this one is a little noisy and breaks up the table affect I'm going for in /v(erbose) mode.
+                        //wprintf( L"%wsStatus: %d%% complete.\n", wszStatusIndent, iPercentage );
                     }
                         break;
                     case JET_sntComplete:
@@ -921,6 +948,7 @@ LOCAL JET_ERR __stdcall ProcessRecoveryControlAndRestoreStatus( JET_SNP snp, JET
 
             if ( precctrl->cbStruct >= ( OffsetOf( JET_RECOVERYCONTROL, errDefault ) + sizeof(JET_ERR) ) )
             {
+                //  Setup the return error as instructed by ESE.
                 errRet = precctrl->errDefault;
             }
 
@@ -969,16 +997,17 @@ LOCAL JET_ERR __stdcall ProcessRecoveryControlAndRestoreStatus( JET_SNP snp, JET
                                 precctrl->MissingLog.cdbinfomisc, precctrl->MissingLog.wszLogFile );
                     }
 
+                    //  validation
                     if ( precctrl->MissingLog.fCurrentLog &&
                             precctrl->MissingLog.eNextAction == JET_MissingLogCreateNewLogStream )
                     {
                         if ( popts->grbitInit & JET_bitLogStreamMustExist )
                         {
-                            Assert( precctrl->errDefault != JET_errSuccess );
+                            Assert( precctrl->errDefault != JET_errSuccess ); // typical case for eseutil
                         }
                         else
                         {
-                            Assert( precctrl->errDefault == JET_errSuccess );
+                            Assert( precctrl->errDefault == JET_errSuccess ); // yes, create a new stream
                         }
                     }
                 }
@@ -1019,23 +1048,25 @@ LOCAL JET_ERR __stdcall ProcessRecoveryControlAndRestoreStatus( JET_SNP snp, JET
                     break;
 
                 default:
+                    //  We should keep eseutil up-to-date with know possibilities ...
                     ExpectedSz( fFalse, "Unknown JET_SNT snt = %d\n", snt );
             }
             break;
         }
 
-        case JET_SNP( -1 ):
+        case JET_SNP( -1 ):             // during Begin pv will point to szOperation
             AssertSz( fFalse, "Do we really get -1 from here!?  What would that mean" );
         default:
+            //  We should keep eseutil up-to-date with known possibilities ...
             ExpectedSz( fFalse, "Unknown JET_SNP snp = %d", snp );
     }
 
     return errRet;
 }
 
-const BYTE EDBUTL_errInvalidPath = 1;
-const BYTE EDBUTL_errSharedName = 2;
-const BYTE EDBUTL_errInvalidDB  = 3;
+const BYTE EDBUTL_errInvalidPath = 1;   //  Does not form right path. param1 = file type
+const BYTE EDBUTL_errSharedName = 2;    //  Two file types share one file name. param1, param2 - files types
+const BYTE EDBUTL_errInvalidDB  = 3;    //  cannot read source database header. param1 - error code
 
 const BYTE EDBUTL_paramSrcDB        = 1;
 const BYTE EDBUTL_paramTempDB   = 2;
@@ -1097,6 +1128,7 @@ LOCAL VOID PrintErrorMessage( INT const err, const UTILOPTS* const popts, INT pa
 }
 
 
+//  Set default cache size max
 LOCAL JET_ERR ErrEDBUTLSetCacheSizeMax( UTILOPTS* pOpts )
 {
     JET_ERR err = JET_errSuccess;
@@ -1121,10 +1153,14 @@ HandleError:
     return err;
 }
 
+//  Check database file:
 LOCAL JET_ERR ErrEDBUTLCheckDBName(
     UTILOPTS* const             popts,
     PCWSTR const                wszTempDB,
     LONG * const                pfiletype )
+//  Parameters:
+//      options structure
+//      default temporary database name
 {
     assert( NULL != popts );
     assert( NULL != wszTempDB );
@@ -1132,17 +1168,21 @@ LOCAL JET_ERR ErrEDBUTLCheckDBName(
     WCHAR   wszFullpathSrcDB[ _MAX_PATH + 1] = L"";
     WCHAR   wszFullpathTempDB[ _MAX_PATH + 1 ] = L"";
 
+    //  if TempDB is not defined
     if ( NULL == popts->wszTempDB )
     {
+        //  set TempDB to DefaultTempDB
         popts->wszTempDB = (WCHAR *)wszTempDB;
     }
 
+    //  if temp db is not valid path then ERROR
     if ( NULL == _wfullpath( wszFullpathTempDB, popts->wszTempDB, _MAX_PATH ) )
     {
         PrintErrorMessage( EDBUTL_errInvalidPath, popts, EDBUTL_paramTempDB );
         return ErrERRCheck( JET_errInvalidPath );
     }
 
+    //  if SrcDB is not defined or is invalid path then ERROR
     if ( NULL == popts->wszSourceDB )
     {
         wprintf( wszUsageErr1, L"source database" );
@@ -1155,13 +1195,15 @@ LOCAL JET_ERR ErrEDBUTLCheckDBName(
         return ErrERRCheck( JET_errInvalidPath );
     }
 
+    //  if the page size is NOT specified, try to consult the database header
+    //  to determine the page size
     ULONG   cbPageSize  = 0;
     if (    !FUTILOPTSExplicitPageSet( popts->fUTILOPTSFlags ) &&
             JET_errSuccess == JetGetDatabaseFileInfoW( popts->wszSourceDB, &cbPageSize, sizeof( cbPageSize ), JET_DbInfoPageSize ) )
     {
         const JET_ERR err = JetSetSystemParameterW( NULL, 0, JET_paramDatabasePageSize, cbPageSize, NULL );
         if ( err < JET_errSuccess &&
-            ( popts->mode != modeDump || cbPageSize != 2048 || err != JET_errInvalidParameter) )
+            ( popts->mode != modeDump || cbPageSize != 2048 || err != JET_errInvalidParameter) ) //special case for 2k pagesize headers
         {
             return err;
         }
@@ -1191,10 +1233,12 @@ LOCAL JET_ERR ErrEDBUTLCheckDBName(
         }
     }
 
+    //  try to find the file type
     LONG    filetype;
     JET_ERR err = JetGetDatabaseFileInfoW( popts->wszSourceDB, &filetype, sizeof( filetype ), JET_DbInfoFileType );
     if ( JET_errSuccess != err )
     {
+        // From an user-perspective, this means the database is effectivelly corrupted.
         if ( err == JET_errReadVerifyFailure ||
             err == JET_errFileSystemCorruption ||
             err == JET_errDiskReadVerificationFailure )
@@ -1213,6 +1257,7 @@ LOCAL JET_ERR ErrEDBUTLCheckDBName(
         *pfiletype = filetype;
     }
 
+    //  if TempDB is the same as SrcDB then ERROR
     if ( 0 == _wcsicmp( wszFullpathSrcDB, wszFullpathTempDB ) )
     {
         PrintErrorMessage( EDBUTL_errSharedName, popts, EDBUTL_paramSrcDB, EDBUTL_paramTempDB );
@@ -1254,10 +1299,12 @@ LOCAL BOOL FEDBUTLParsePath(    __in PCWSTR             arg,
 {
     BOOL    fResult = fTrue;
 
+    // if the argument is empty try to read next one argument
     if ( L'\0' == *arg )
     {
         const WCHAR *argT = arg;
         arg = GetNextArg();
+        // if it was last argument or option follows it means we passed empty argument
         if ( NULL == arg || NULL != wcschr( wszSwitches, *arg ) )
         {
             arg = argT;
@@ -1265,6 +1312,7 @@ LOCAL BOOL FEDBUTLParsePath(    __in PCWSTR             arg,
         }
     }
 
+    // no path should contain leading ':'(s)
     while ( L':' == *arg )
     {
         arg++;
@@ -1273,7 +1321,7 @@ LOCAL BOOL FEDBUTLParsePath(    __in PCWSTR             arg,
 
     if ( L'\0' == *arg && !fAllowEmpty )
     {
-        wprintf( wszUsageErr1, wszParamDesc );
+        wprintf( wszUsageErr1, wszParamDesc );          // Missing spec.
         wprintf( L"%c%c", wchNewLine, wchNewLine );
         fResult = fFalse;
     }
@@ -1283,7 +1331,7 @@ LOCAL BOOL FEDBUTLParsePath(    __in PCWSTR             arg,
     }
     else
     {
-        wprintf( wszUsageErr2, wszParamDesc );
+        wprintf( wszUsageErr2, wszParamDesc );          // Duplicate spec.
         wprintf( L"%c%c", wchNewLine, wchNewLine );
         fResult = fFalse;
     }
@@ -1291,6 +1339,10 @@ LOCAL BOOL FEDBUTLParsePath(    __in PCWSTR             arg,
     return fResult;
 }
 
+// will look for something like <path1>[:<path2>].
+// Note that if <path1> is just one char long, we have a problem ...
+// The workaround for the user would be to provide full path instead.
+//
 LOCAL BOOL FEDBUTLParseDoublePath(  __in PCWSTR                 arg,
                                     __deref_inout_z PWSTR*      pwszParam1,
                                     __deref_opt_out_opt PWSTR*  pwszParam2,
@@ -1303,16 +1355,20 @@ LOCAL BOOL FEDBUTLParseDoublePath(  __in PCWSTR                 arg,
 
     if ( fResult && pwszParam2 )
     {
+        // let's check if there are 2 parts in the path found
         assert( *pwszParam1 );
 
         *pwszParam2 = NULL;
         if ( wcslen( *pwszParam1 ) >= 2 )
         {
+            // we start to look for the ":" with the 3rd position (it might be \0 but that's ok)
             WCHAR * wszDelim = wcschr( (*pwszParam1) + 2, L':' );
 
             if ( wszDelim )
             {
                 *pwszParam2 = wszDelim + 1;
+                // replace the ':' with a '\0' such that we have 2
+                // zero terminated strings now
                 *wszDelim = L'\0';
             }
         }
@@ -1325,8 +1381,9 @@ LOCAL const INT g_cchEfvOptionPrefix = 4;
 LOCAL BOOL FEseutilIsEfvArg( PCWSTR wszArg )
 {
     #define wszEfvOptionPrefix L"/efv"
-    C_ASSERT( _countof(wszEfvOptionPrefix) == g_cchEfvOptionPrefix + 1  );
+    C_ASSERT( _countof(wszEfvOptionPrefix) == g_cchEfvOptionPrefix + 1 /* NUL char */ );
     if ( _wcsnicmp( wszArg, wszEfvOptionPrefix, g_cchEfvOptionPrefix ) == 0 ||
+        //  some people like minuses ...
         _wcsnicmp( wszArg, L"-efv", g_cchEfvOptionPrefix ) == 0 )
     {
         return fTrue;
@@ -1348,6 +1405,7 @@ LOCAL ERR ErrEseutilScanEfv( PCWSTR wszParam, JET_ENGINEFORMATVERSION * const pe
     else if ( 1 == swscanf_s( wszParam, L"%d", pefv ) &&
                 *pefv > 0 )
     {
+        //  set by swscanf_s() and > 0 ... success!
     }
     else
     {
@@ -1393,11 +1451,14 @@ LOCAL VOID EseutilDumpSpaceCat(
 
     if ( !fVerbose )
     {
+        // First page.
         if ( pgno == pdbutil->spcatOptions.pgnoFirst )
         {
+            // Print progress bar initilizer.
             (void)PrintStatus( JET_sesidNil, JET_snpSpaceCategorization, JET_sntBegin, NULL );
         }
 
+        // Report progress bar step.
         JET_SNPROG snprog =
         {
             sizeof( snprog ),
@@ -1406,19 +1467,23 @@ LOCAL VOID EseutilDumpSpaceCat(
         };
         (void)PrintStatus( JET_sesidNil, JET_snpSpaceCategorization, JET_sntProgress, &snprog );
 
+        // Last page.
         if ( pgno == pdbutil->spcatOptions.pgnoLast )
         {
+            // Print progress bar finalizer.
             (void)PrintStatus( JET_sesidNil, JET_snpSpaceCategorization, JET_sntComplete, NULL );
         }
     }
     else
     {
+        // First page.
         if ( pgno == pdbutil->spcatOptions.pgnoFirst )
         {
             wprintf( L"%c%c", wchNewLine, wchNewLine );
             wprintf( L"Pgno,Objid,Unkn,NotOwnedEof,NotOwned,Leaked,Inc,Ind,Avail,SpaceAE,SpaceOE,SmallSpace,SpBuffer,Root,Internal,Leaf%c", wchNewLine );
         }
 
+        // Print flags which are set.
         wprintf( L"%I32u,%I32u,%hhu,%hhu,%hhu,%hhu,%hhu,%hhu,%hhu,%hhu,%hhu,%hhu,%hhu,%hhu,%hhu,%hhu%c",
                     pgno,
                     objid,
@@ -1438,12 +1503,14 @@ LOCAL VOID EseutilDumpSpaceCat(
                     BEseUtilSpaceCatFlagToByte( spcatf, spcatfStrictlyLeaf ),
                     wchNewLine );
 
+        // Last page.
         if ( pgno == pdbutil->spcatOptions.pgnoLast )
         {
             wprintf( L"%c", wchNewLine );
         }
     }
 
+    // Accumulate stats.
     if ( pgno == pdbutil->spcatOptions.pgnoFirst )
     {
         memset( &spcatStats, 0, sizeof( spcatStats ) );
@@ -1471,6 +1538,7 @@ LOCAL VOID EseutilDumpSpaceCat(
 #endif
     spcatStats.cpgTotal++;
 
+    // Print stats if we're done.
     if ( pgno == pdbutil->spcatOptions.pgnoLast )
     {
         wprintf( L"Space Categorization Statistics:%c", wchNewLine );
@@ -1506,7 +1574,7 @@ LOCAL BOOL FEDBUTLParseDefragment( __in PCWSTR arg, UTILOPTS *popts )
         case 'e':
         case 'E':
             fResult = fFalse;
-            if ( FEseutilIsEfvArg( arg ) )
+            if ( FEseutilIsEfvArg( arg ) ) //   /efvX
             {
                 fResult = fTrue;
                 if ( ErrEseutilScanEfv( arg + g_cchEfvOptionPrefix, &popts->efvUserSpecified ) < JET_errSuccess )
@@ -1576,6 +1644,8 @@ LOCAL BOOL FEDBUTLParseRecovery( __in PCWSTR arg, UTILOPTS *popts )
 {
     BOOL    fResult = fTrue;
 
+    // convenient for debugging to always set verbose ...
+    //UTILOPTSSetVerbose( popts->fUTILOPTSFlags );
 
     switch( arg[1] )
     {
@@ -1587,7 +1657,7 @@ LOCAL BOOL FEDBUTLParseRecovery( __in PCWSTR arg, UTILOPTS *popts )
         case L'e':
         case L'E':
             fResult = fFalse;
-            if ( FEseutilIsEfvArg( arg ) )
+            if ( FEseutilIsEfvArg( arg ) ) //   /efvX
             {
                 fResult = fTrue;
                 if ( ErrEseutilScanEfv( arg + g_cchEfvOptionPrefix, &popts->efvUserSpecified ) < JET_errSuccess )
@@ -1598,6 +1668,7 @@ LOCAL BOOL FEDBUTLParseRecovery( __in PCWSTR arg, UTILOPTS *popts )
             }
             else
             {
+                //  Unset this bit, thats set by default ...
                 popts->grbitInit &= ~JET_bitLogStreamMustExist;
                 fResult = fTrue;
             }
@@ -1608,6 +1679,9 @@ LOCAL BOOL FEDBUTLParseRecovery( __in PCWSTR arg, UTILOPTS *popts )
             popts->grbitInit |= JET_bitReplayIgnoreLostLogs;
             UTILOPTSSetDelOutOfRangeLogs( popts->fUTILOPTSFlags );
 #ifdef DEBUG
+            //  This is for being able to triger the ignore lost logs without 
+            //  delete out of range logs being set ... "/a-" which is like /a 
+            //  but slightly less, thus the minus.
             if ( arg[2] == L'-' )
             {
                 UTILOPTSResetDelOutOfRangeLogs( popts->fUTILOPTSFlags );
@@ -1627,6 +1701,8 @@ LOCAL BOOL FEDBUTLParseRecovery( __in PCWSTR arg, UTILOPTS *popts )
 
             JET_LGPOS      lgposStop;
 
+            // if no log or log position specified, then we will play to the end but no Undo
+            //
             lgposStop = lgposMax;
 
             assert( wcslen(arg) >= 2 );
@@ -1636,16 +1712,24 @@ LOCAL BOOL FEDBUTLParseRecovery( __in PCWSTR arg, UTILOPTS *popts )
                 prstinfo->lgposStop = lgposStop;
                 fResult = fTrue;
             }
+// the option to stop at a log position is not requested and not tested
+// so we will make this DEBUG only
+//
 #ifdef DEBUG
+            // try to see if there is a log position
+            //
             else if ( swscanf_s( &(arg[2]), L"%u:%hu:%hu", &lgposStop.lGeneration, &lgposStop.isec, &lgposStop.ib ) == 3 )
             {
                 prstinfo->lgposStop = lgposStop;
                 fResult = fTrue;
             }
             
-#endif
+#endif // DEBUG
+            // try to see if there is a log generation
+            //
             else if ( swscanf_s( &(arg[2]), L"%u", &lgposStop.lGeneration ) == 1 )
             {
+                // set the stop at the end of log
                 prstinfo->lgposStop.lGeneration = lgposStop.lGeneration;
                 fResult = fTrue;
             }
@@ -1680,6 +1764,8 @@ LOCAL BOOL FEDBUTLParseRecovery( __in PCWSTR arg, UTILOPTS *popts )
 
         case L'm':
         case L'M':
+            //  UNDONE: temp db is not used during recovery, so why is this useful???
+            //
             popts->pageTempDBMin = _wtol( arg + 2 );
             fResult = fTrue;
             break;
@@ -1695,6 +1781,7 @@ LOCAL BOOL FEDBUTLParseRecovery( __in PCWSTR arg, UTILOPTS *popts )
             }
             else
             {
+                //  if no directory specified, use current directory
                 fResult = FEDBUTLParsePath( arg+2, &popts->wszDbAltRecoveryDir, L"database directory", fTrue );
                 if ( fResult && L'\0' == popts->wszDbAltRecoveryDir[0] )
                     popts->wszDbAltRecoveryDir = (WCHAR *)wszCurrDir;
@@ -1749,18 +1836,22 @@ LOCAL BOOL FEDBUTLParseRecovery( __in PCWSTR arg, UTILOPTS *popts )
                     ULONG_PTR cMaxDbs = 0;
                     if ( JET_errSuccess >= JetGetSystemParameterW( JET_instanceNil, JET_sesidNil, JET_paramMaxDatabasesPerInstance, &cMaxDbs, NULL, sizeof( cMaxDbs ) ) )
                     {
+                        // default to 6 (the current ESE default max user db)
                         cMaxDbs = 6;
                     }
 
-                    popts->crstmap = (LONG) cMaxDbs;
+                    // we allocate space for each database EDB
+                    popts->crstmap = (LONG) cMaxDbs; // truncate, hope we never end up w/ more than 2 billion DBs attachable ...
                     popts->prstmap = (JET_RSTMAP2_W *) LocalAlloc( LMEM_FIXED | LMEM_ZEROINIT, popts->crstmap * sizeof(JET_RSTMAP2_W) );
 
+                    // we will error out
                     if ( NULL == popts->prstmap )
                     {
                         wprintf( L"Out of memory error trying to allocate JET_RSTMAP of %zd bytes.", popts->crstmap * sizeof(JET_RSTMAP2_W) );
                         wprintf( L"%c%c", wchNewLine, wchNewLine );
                         popts->crstmap = 0;
                         fResult = fFalse;
+                        // exit the case
                         break;
                     }
 
@@ -1768,6 +1859,7 @@ LOCAL BOOL FEDBUTLParseRecovery( __in PCWSTR arg, UTILOPTS *popts )
                 }
 
 
+                // the * is a special mark to use JET_bitReplayMissingMapEntryDB
                 if ( *(arg+2) == L'*' )
                 {
                     if ( *(arg+3) != L'\0' )
@@ -1787,6 +1879,7 @@ LOCAL BOOL FEDBUTLParseRecovery( __in PCWSTR arg, UTILOPTS *popts )
                     assert ( 0 != popts->crstmap );
                     assert ( 0 != popts->prstmap );
 
+                    //  if no directory specified, use current directory
                     popts->prstmap[popts->irstmap].cbStruct = sizeof(JET_RSTMAP2_W);
                     popts->prstmap[popts->irstmap].szDatabaseName = NULL;
                     popts->prstmap[popts->irstmap].szNewDatabaseName = NULL;
@@ -1902,7 +1995,7 @@ LOCAL BOOL FEDBUTLParseIntegrity( __in PCWSTR arg, UTILOPTS *popts )
         case 'e':
         case 'E':
             fResult = fFalse;
-            if ( FEseutilIsEfvArg( arg ) )
+            if ( FEseutilIsEfvArg( arg ) ) //   /efvX
             {
                 fResult = fTrue;
                 if ( ErrEseutilScanEfv( arg + g_cchEfvOptionPrefix, &popts->efvUserSpecified ) < JET_errSuccess )
@@ -1936,6 +2029,7 @@ LOCAL BOOL FEDBUTLParseChecksum( __in PCWSTR arg, UTILOPTS *popts )
 
         case L'i':
         case L'I':
+            //  APPCOMPAT:  DPM:  ignore this deprecated flag rather than tripping a usage error
             break;
 
         case L't':
@@ -1982,7 +2076,7 @@ LOCAL BOOL FEDBUTLParseRepair( __in PCWSTR arg, UTILOPTS *popts )
         case 'e':
         case 'E':
             fResult = fFalse;
-            if ( FEseutilIsEfvArg( arg ) )
+            if ( FEseutilIsEfvArg( arg ) ) //   /efvX
             {
                 fResult = fTrue;
                 if ( ErrEseutilScanEfv( arg + g_cchEfvOptionPrefix, &popts->efvUserSpecified ) < JET_errSuccess )
@@ -2055,19 +2149,20 @@ LOCAL BOOL FEDBUTLParseDump( __in PCWSTR arg, UTILOPTS *popts )
                             pdbutil->pvCallback,
                             NULL, NULL, NULL, fSPDumpPrintSmallTrees ) )
                 {
-                    fResult = fFalse;
+                    fResult = fFalse;   // whoops problem.
                 }
             }
             else
             {
                 pdbutil->grbitOptions |= JET_bitDBUtilOptionDumpVerboseLevel1;
 
-                if ( arg[2] == L'\0'  || arg[2] == L'2' )
+                if ( arg[2] == L'\0' /* default is /v2 */ || arg[2] == L'2' )
                 {
                     pdbutil->grbitOptions |= JET_bitDBUtilOptionDumpVerboseLevel2;
                 }
                 else if ( arg[2] != L'1' )
                 {
+                    //  unknown verbosity level
                     fResult = fFalse;
                     break;
                 }
@@ -2116,7 +2211,7 @@ LOCAL BOOL FEDBUTLParseDump( __in PCWSTR arg, UTILOPTS *popts )
                 fResult = fTrue;
                 if ( ErrSpaceDumpCtxSetFields( pdbutil->pvCallback, arg+2 ) < JET_errSuccess )
                 {
-                    fResult = fFalse;
+                    fResult = fFalse;   // ErrSpaceDumpCtxSetFields() printed error.
                 }
             }
             else if ( opDBUTILDumpSpaceCategory == pdbutil->op )
@@ -2138,6 +2233,13 @@ LOCAL BOOL FEDBUTLParseDump( __in PCWSTR arg, UTILOPTS *popts )
             fResult = fTrue;
             if ( pdbutil->op != opDBUTILDumpSpaceCategory && pdbutil->op != opDBUTILDumpRBSHeader ) 
             {
+                // The jet api is responsible for validating pgno because the
+                // pgno range is not exported. But fyi:
+                //             -1 = header
+                //              0 = shadow header
+                //     1..7fffffe = valid page numbers
+                //
+                // wcstol returns LONG _MIN..LONG _MAX (even if overflow)
                 pdbutil->pgno = wcstol( arg + 2, NULL, 0 );
             }
             else if ( pdbutil->op == opDBUTILDumpRBSHeader ) 
@@ -2148,6 +2250,7 @@ LOCAL BOOL FEDBUTLParseDump( __in PCWSTR arg, UTILOPTS *popts )
 
                 fResult = fFalse;
                 
+                // opDBUTILDumpSpaceCategory can take a range.
                 const SIZE_T cchArg = wcslen( arg + 2 );
                 LONG pgnoFirst, pgnoLast;
 
@@ -2184,6 +2287,7 @@ LOCAL BOOL FEDBUTLParseDump( __in PCWSTR arg, UTILOPTS *popts )
             {
                  fResult = fFalse;
                 
+                // opDBUTILDumpSpaceCategory can take a range.
                 const SIZE_T cchArg = wcslen( arg + 2 );
                 LONG pgnoFirst, pgnoLast;
                 if ( wcsstr( arg + 2, L":max" ) != NULL )
@@ -2215,10 +2319,14 @@ LOCAL BOOL FEDBUTLParseDump( __in PCWSTR arg, UTILOPTS *popts )
 
         case L'k':
         case L'K':
+            //  MUST specify /p before /k and /k before /d
+            //
             if ( opDBUTILDumpPage == pdbutil->op
                 && NULL == pdbutil->szIndex
                 && NULL == pdbutil->szTable )
             {
+                //  overload szIndex
+                //
                 pdbutil->szIndex = arg+2;
                 fResult = fTrue;
             }
@@ -2232,10 +2340,14 @@ LOCAL BOOL FEDBUTLParseDump( __in PCWSTR arg, UTILOPTS *popts )
 
         case L'd':
         case L'D':
+            //  MUST specify /p and /k before /d
+            //
             if ( opDBUTILDumpPage == pdbutil->op
                 && NULL != pdbutil->szIndex
                 && NULL == pdbutil->szTable )
             {
+                //  overload szTable
+                //
                 pdbutil->szTable = arg+2;
                 fResult = fTrue;
             }
@@ -2243,16 +2355,17 @@ LOCAL BOOL FEDBUTLParseDump( __in PCWSTR arg, UTILOPTS *popts )
             {
                 UTILOPTSSetDebugMode( popts->fUTILOPTSFlags );
                 SPDUMPOPTS fSPDumpOpts;
-                if ( arg[2] == L'\0'  || arg[2] == L'1' )
+                if ( arg[2] == L'\0' /* default is /d1 */ || arg[2] == L'1' )
                 {
                     fSPDumpOpts = fSPDumpPrintSpaceTrees;
                 }
-                else if ( arg[2] == L'2' )
+                else if ( arg[2] == L'2' )  //  /d2 - adds space nodes
                 {
                     fSPDumpOpts = SPDUMPOPTS( fSPDumpPrintSpaceTrees | fSPDumpPrintSpaceNodes );
                 }
                 else
                 {
+                    //  unknown debug level
                     fResult = fFalse;
                     break;
                 }
@@ -2261,7 +2374,7 @@ LOCAL BOOL FEDBUTLParseDump( __in PCWSTR arg, UTILOPTS *popts )
                             pdbutil->pvCallback,
                             NULL, NULL, NULL, fSPDumpOpts ) )
                 {
-                    fResult = fFalse;
+                    fResult = fFalse;   // whoops problem.
                 }
             }
             else
@@ -2313,7 +2426,7 @@ LOCAL BOOL FEDBUTLParseDump( __in PCWSTR arg, UTILOPTS *popts )
                             pdbutil->pvCallback,
                             NULL, NULL, NULL, fSPDumpPrintSpaceLeaks ) )
                 {
-                    fResult = fFalse;
+                    fResult = fFalse;   // whoops problem.
                 }
             }
             break;
@@ -2328,8 +2441,9 @@ LOCAL BOOL FEDBUTLParseDump( __in PCWSTR arg, UTILOPTS *popts )
                             pdbutil->pvCallback,
                             NULL, NULL, L",", fSPDumpNoOpts ) )
                 {
-                    fResult = fFalse;
+                    fResult = fFalse;   // whoops problem.
                 }
+                //  For now, we'll not support separate CSV file.
             }
             else
             {
@@ -2346,6 +2460,8 @@ LOCAL BOOL FEDBUTLParseDump( __in PCWSTR arg, UTILOPTS *popts )
 
         case L'r':
         case L'R':
+            // This option permits specifying a log generation range
+            // when used in log-dumper mode.
             if ( opDBUTILDumpLogfile == pdbutil->op )
             {
                 const size_t    cchSzLogRange   = 256;
@@ -2368,6 +2484,8 @@ LOCAL BOOL FEDBUTLParseDump( __in PCWSTR arg, UTILOPTS *popts )
                     break;
                 }
 
+                // lGeneration is used for the starting generation and isec is
+                // overloaded with the ending generation.
                 pdbutil->lGeneration    = lgenStart;
                 pdbutil->isec           = lgenEnd;
 
@@ -2398,15 +2516,17 @@ LOCAL BOOL FEDBUTLParseHardRecovery( __in PCWSTR arg, UTILOPTS *popts )
                 UTILOPTSSetPreserveTempDB( popts->fUTILOPTSFlags );
                 break;
             }
+            // no /t allowed if dump mode specified
         case L't':
         case L'T':
             if ( !FUTILOPTSDumpRestoreEnv(popts->fUTILOPTSFlags) )
             {
                 if ( !popts->wszLogfilePath )
                 {
+                    // allow NULL target name. It means : no play forward
                     fResult = FEDBUTLParsePath( arg+2, &popts->wszRestore, L"target instance", fTrue );
                 }
-                else
+                else // don't allow /f and /t
                 {
                     wprintf( wszUsageErr4, arg );
                     wprintf( L"%c%c", wchNewLine, wchNewLine );
@@ -2414,6 +2534,7 @@ LOCAL BOOL FEDBUTLParseHardRecovery( __in PCWSTR arg, UTILOPTS *popts )
                 }
                 break;
             }
+            // no /t allowed if dump mode specified
         case L'f':
         case L'F':
             if ( !FUTILOPTSDumpRestoreEnv(popts->fUTILOPTSFlags) )
@@ -2422,7 +2543,7 @@ LOCAL BOOL FEDBUTLParseHardRecovery( __in PCWSTR arg, UTILOPTS *popts )
                 {
                     fResult = FEDBUTLParsePath( arg+2, &popts->wszLogfilePath, L"logfile path", fFalse );
                 }
-                else
+                else // don't allow /f and /t
                 {
                     wprintf( wszUsageErr4, arg );
                     wprintf( L"%c%c", wchNewLine, wchNewLine );
@@ -2430,6 +2551,7 @@ LOCAL BOOL FEDBUTLParseHardRecovery( __in PCWSTR arg, UTILOPTS *popts )
                 }
                 break;
             }
+            // no /t allowed if dump mode specified
         default:
             wprintf( wszUsageErr4, arg );
             wprintf( L"%c%c", wchNewLine, wchNewLine );
@@ -2444,7 +2566,7 @@ LOCAL BOOL FEDBUTLParseHardRecovery( __in PCWSTR arg, UTILOPTS *popts )
 
 LOCAL BOOL FEDBUTLParseBackup( __in PCWSTR arg, UTILOPTS *popts )
 {
-    BOOL    fResult = fFalse;
+    BOOL    fResult = fFalse;   // backup directory must be set at least.
 
     switch( arg[1] )
     {
@@ -2473,7 +2595,7 @@ LOCAL BOOL FEDBUTLParseBackup( __in PCWSTR arg, UTILOPTS *popts )
     return fResult;
 }
 
-#endif
+#endif  //  DEBUG
 
 LOCAL BOOL FEDBUTLParseScrub( __in PCWSTR arg, UTILOPTS *popts )
 {
@@ -2537,6 +2659,7 @@ LOCAL WCHAR **g_argv = NULL;
 LOCAL INT   g_argMaxID = 0;
 LOCAL INT   g_argCurID = -1;
 
+//  initalizes argument index, and set to point before firts index
 LOCAL VOID InitArg( INT argc, __in_ecount(argc) LPWSTR argv[] )
 {
     AssertPREFIX( argc > 0 );
@@ -2547,6 +2670,9 @@ LOCAL VOID InitArg( INT argc, __in_ecount(argc) LPWSTR argv[] )
     g_argCurID = -1;
 }
 
+//  returns current argument index
+//  returns -1 if is before first argument
+//  return  ArgCount after last argument
 LOCAL INT GetCurArgID()
 {
     AssertPREFIX( g_argCurID >= -1 );
@@ -2630,7 +2756,7 @@ LOCAL BOOL FSetDumpModeModifier( WCHAR chMode, JET_DBUTIL_W *pdbutil )
         case L'F':
             pdbutil->op = opDBUTILSetHeaderState;
             break;
-#endif
+#endif // DEBUG
 
         case L'n':
         case L'N':
@@ -2645,7 +2771,7 @@ LOCAL BOOL FSetDumpModeModifier( WCHAR chMode, JET_DBUTIL_W *pdbutil )
         case L'p':
         case L'P':
             pdbutil->op = opDBUTILDumpFlushMapFile;
-            pdbutil->pgno = -1;
+            pdbutil->pgno = -1; // default to dumping header.
             break;
 
         case L's':
@@ -2654,7 +2780,7 @@ LOCAL BOOL FSetDumpModeModifier( WCHAR chMode, JET_DBUTIL_W *pdbutil )
             pdbutil->pfnCallback = EseutilEvalBTreeData;
             if ( ErrSpaceDumpCtxInit( &(pdbutil->pvCallback) ) < JET_errSuccess )
             {
-                return fFalse;
+                return fFalse;  //ErrSpaceDumpCtxInit() printed error.
             }
             
             break;
@@ -2675,6 +2801,7 @@ LOCAL BOOL FSetDumpModeModifier( WCHAR chMode, JET_DBUTIL_W *pdbutil )
 
         case L'r':
         case L'R':
+            // By default dump RBS header. If /p is specified we will dump specific pages.
             pdbutil->op = opDBUTILDumpRBSHeader;
             break;
         default:
@@ -2699,7 +2826,7 @@ LOCAL BOOL FSetHardRecoveryModeModifier( WCHAR chMode, UTILOPTS *popts )
         case L'S':
             UTILOPTSSetServerSim ( popts->fUTILOPTSFlags );
             break;
-#endif
+#endif // RESTORE_SERVER_SIMULATION
         default:
             return fFalse;
     }
@@ -2754,21 +2881,23 @@ LOCAL BOOL FEDBUTLParseOptions(
 {
     BOOL        fResult = fTrue;
     WCHAR       *arg = GetCurArg();
-    INT         iSkipID = -1;
+    INT         iSkipID = -1; // argument ID to skip. Related to dump and hard recovery hacks
 
     AssertPREFIX( NULL != arg );
     assert( NULL != arg );
     assert( NULL != wcschr( wszSwitches, *arg ) );
     assert( '\0' != *arg + 1 );
 
+    //  HACK for dump
     if ( modeDump == popts->mode )
     {
+        // when we have only one char after mode it is mode modifier
         if ( L'\0' != arg[2] && L'\0' == arg[3] )
         {
             fResult = FSetDumpModeModifier( arg[2], (JET_DBUTIL_W *)popts->pv );
             arg++;
         }
-        else
+        else    // run search to set mode specifier
         {
             INT curid = GetCurArgID();
             WCHAR *argT;
@@ -2789,14 +2918,16 @@ LOCAL BOOL FEDBUTLParseOptions(
             assert( GetCurArgID() == curid );
         }
     }
+    //  HACK for hard recovery
     else if ( modeHardRecovery == popts->mode )
     {
+        // when we have only one char after mode it is mode modifier
         if ( L'\0' != arg[2] && L'\0' == arg[3] )
         {
             fResult = FSetHardRecoveryModeModifier( arg[2], popts );
-            arg ++;
+            arg ++; // ignore mode modifier
         }
-        else
+        else    // run search to set mode specifier
         {
             INT curid = GetCurArgID();
             WCHAR *argT;
@@ -2825,8 +2956,10 @@ LOCAL BOOL FEDBUTLParseOptions(
         arg = GetNextArg();
     }
 
+    // First option specifies the mode, so start with the second option.
     for ( ; fResult && NULL != arg; arg = GetNextArg() )
     {
+        //  dump and hard recovery hack
         if ( GetCurArgID() == iSkipID )
         {
             continue;
@@ -2834,6 +2967,7 @@ LOCAL BOOL FEDBUTLParseOptions(
 
         if ( wcschr( wszSwitches, arg[0] ) == NULL )
         {
+            // SPECIAL CASE: Backup mode does not DB specification.
             switch ( popts->mode )
             {
                 case modeRecovery:
@@ -2890,6 +3024,9 @@ LOCAL BOOL FEDBUTLParseOptions(
                 UTILOPTSSetOperateTempVssRec( popts->fUTILOPTSFlags );
                 popts->wszBase = GetNextArg();
 
+                //  if this is passed in as an empty string, consider it NULL so we don't fail
+                //  when setting the system parameters and are still able to take a snapshot
+                //  without actually replaying the logs.
                 if ( popts->wszBase != NULL && popts->wszBase[0] == '\0' )
                 {
                     popts->wszBase = NULL;
@@ -2898,6 +3035,8 @@ LOCAL BOOL FEDBUTLParseOptions(
                 popts->wszLogfilePath = GetNextArg();
                 if ( !popts->wszLogfilePath )
                 {
+                    // Default to the current working directory. This allows "-vssrec edb" to work,
+                    // instead of requiring "-vssrec edb e:\bla".
                     popts->wszLogfilePath = L".";
                 }
             }
@@ -2929,16 +3068,18 @@ LOCAL BOOL FEDBUTLParseOptions(
             }
         }
 #endif
-        else if ( 0 == _wcsnicmp( &(arg[1]), wszConfigArgPrefix, wcslen( wszConfigArgPrefix ) ) )
+        else if ( 0 == _wcsnicmp( &(arg[1]), wszConfigArgPrefix, wcslen( wszConfigArgPrefix ) ) )   // /config -config /config: -config:
         {
             const WCHAR * wszConfigSpec = &( arg[ 1 + wcslen( wszConfigArgPrefix ) ] );
             if ( wszConfigSpec[0] == L':' )
             {
+                //  inline arg, increment past ":"
                 wszConfigSpec++;
                 fResult = ( wszConfigSpec[0] != L'\0' );
             }
             else
             {
+                //  or spec is next arg
                 wszConfigSpec = GetNextArg();
                 fResult = ( wszConfigSpec != NULL && wszConfigSpec[0] != L'\0' );
             }
@@ -2949,6 +3090,8 @@ LOCAL BOOL FEDBUTLParseOptions(
         }
         else
         {
+            // Parse options common to all modes.  Pass off unique options to the
+            // custom parsers.
             switch ( arg[1] )
             {
                 case L'2':
@@ -2977,6 +3120,8 @@ LOCAL BOOL FEDBUTLParseOptions(
                     break;
 
                 case L'!':
+                    //  logfile size param no longer needed (Jet now
+                    //  auto-detects logfile size when needed)
                     break;
 
                 default:
@@ -2999,6 +3144,7 @@ LOCAL BOOL FEDBUTLParseOptions(
 }
 
 
+//  ================================================================
 LOCAL JET_ERR ErrEDBUTLRepair(
     const JET_SESID sesid,
     const WCHAR * const wszDatabase,
@@ -3008,6 +3154,7 @@ LOCAL JET_ERR ErrEDBUTLRepair(
     const JET_PFNSTATUS pfnStatus,
     const JET_GRBIT grbit
     )
+//  ================================================================
 {
     JET_DBUTIL_W dbutil;
     memset( &dbutil, 0, sizeof( dbutil ) );
@@ -3027,12 +3174,14 @@ LOCAL JET_ERR ErrEDBUTLRepair(
 }
 
 
+//  ================================================================
 LOCAL JET_ERR ErrEDBUTLScrub(
     JET_SESID   sesid,
     const WCHAR * const wszDatabase,
     JET_PFNSTATUS pfnStatus,
     JET_GRBIT grbit
     )
+//  ================================================================
 {
     JET_DBUTIL_W dbutil;
     memset( &dbutil, 0, sizeof( dbutil ) );
@@ -3049,19 +3198,21 @@ LOCAL JET_ERR ErrEDBUTLScrub(
 }
 
 
+//  callback function used by CopyFileEx
 LOCAL DWORD CALLBACK DwEDBUTILCopyProgressRoutine(
-    LARGE_INTEGER   cTotalFileSize,
-    LARGE_INTEGER   cTotalBytesTransferred,
-    LARGE_INTEGER   cStreamSize,
-    LARGE_INTEGER   cStreamBytesTransferred,
-    DWORD           dwStreamNumber,
-    DWORD           dwCallbackReason,
-    HANDLE          hSourceFile,
-    HANDLE          hDestinationFile,
-    INT             *pcShift
+    LARGE_INTEGER   cTotalFileSize,          // file size
+    LARGE_INTEGER   cTotalBytesTransferred,  // bytes transferred
+    LARGE_INTEGER   cStreamSize,             // bytes in stream
+    LARGE_INTEGER   cStreamBytesTransferred, // bytes transferred for stream
+    DWORD           dwStreamNumber,         // current stream
+    DWORD           dwCallbackReason,       // callback reason
+    HANDLE          hSourceFile,            // handle to source file
+    HANDLE          hDestinationFile,       // handle to destination file
+    INT             *pcShift                // from CopyFileEx. How much to shift file size to fit in INT value
 )
 {
     enum { LITOI_LOW = 1, LITOI_HIGH, LITOI_SHIFT };
+    //  zero sized file?
     if ( 0 == cTotalFileSize.QuadPart )
     {
         return PROGRESS_CONTINUE;
@@ -3073,10 +3224,12 @@ LOCAL DWORD CALLBACK DwEDBUTILCopyProgressRoutine(
         PrintStatus( 0, JET_SNP( -1 ), JET_sntBegin, (void *)wszCopyFileStatus );
         assert( sizeof( ULONG ) == sizeof( INT ) );
         assert( sizeof( LARGE_INTEGER ) > sizeof( INT ) );
+        //  if all data fits in INT value
         if ( 0 == (ULONG)cTotalFileSize.HighPart )
         {
             *pcShift = LITOI_LOW;
         }
+        //  if High part can be used as 1% change detector
         else if ( 100 <= (ULONG)cTotalFileSize.HighPart )
         {
             *pcShift = LITOI_HIGH;
@@ -3089,16 +3242,20 @@ LOCAL DWORD CALLBACK DwEDBUTILCopyProgressRoutine(
     snpprog.cbStruct = sizeof( snpprog );
     switch ( *pcShift )
     {
+        //  if all data fits in INT value
         case LITOI_LOW:
             assert( 0 == cTotalFileSize.HighPart );
             snpprog.cunitTotal = cTotalFileSize.LowPart;
             snpprog.cunitDone = cTotalBytesTransferred.LowPart;
             break;
+        //  if High part can be used as 1% change detector
         case LITOI_HIGH:
             assert( 100 <= cTotalFileSize.HighPart );
             snpprog.cunitTotal = cTotalFileSize.HighPart;
             snpprog.cunitDone = cTotalBytesTransferred.HighPart;
             break;
+        //  if none of the above shift it 7 times because 2^7 > 100 and it will move
+        //  all High Part data to Low Part
         case LITOI_SHIFT:
             assert( 100 > cTotalFileSize.HighPart && 0 < cTotalFileSize.HighPart );
             snpprog.cunitTotal = (INT)( cTotalFileSize.QuadPart >> 7 );
@@ -3146,8 +3303,8 @@ HandleError:
 }
 
 LOCAL JET_ERR ErrEDBUTLMoveFile(
-    const WCHAR * const wszExistingFileName,
-    const WCHAR * const wszNewFileName,
+    const WCHAR * const wszExistingFileName,  // file name
+    const WCHAR * const wszNewFileName,       // new file name
     const DWORD dwFlags )
 {
     wprintf( wszMoveFile, wszExistingFileName, wszNewFileName );
@@ -3157,6 +3314,7 @@ LOCAL JET_ERR ErrEDBUTLMoveFile(
 
         if ( ( dwFlags & ~MOVEFILE_REPLACE_EXISTING ) != 0 )
         {
+            // unsupported move flag
             assert( fFalse );
             wprintf( L"%s%c", wszMoveFailed, wchNewLine );
             return ErrERRCheck( JET_errFileAccessDenied );
@@ -3164,8 +3322,9 @@ LOCAL JET_ERR ErrEDBUTLMoveFile(
 
         if ( dw == ERROR_NOT_SAME_DEVICE )
         {
+            //  the source file is on a different device -- we must copy it instead
             BOOL        fCancel     = fFalse;
-            INT         cShift      = -1;
+            INT         cShift      = -1;       // used from progress routine
             const BOOL  fSuccess    = CopyFileExW(  wszExistingFileName,
                                                         wszNewFileName,
                                                         LPPROGRESS_ROUTINE( DwEDBUTILCopyProgressRoutine ),
@@ -3202,6 +3361,8 @@ LOCAL VOID EDBUTLDeleteTemp( const UTILOPTS * const popts )
     }
 }
 
+// Backs up source database if required, then copies temporary database over
+// source database if required.  Should be called after Jet has terminated.
 LOCAL JET_ERR ErrEDBUTLBackupAndInstateDB(
     JET_SESID   sesid,
     UTILOPTS    *popts )
@@ -3214,6 +3375,7 @@ LOCAL JET_ERR ErrEDBUTLBackupAndInstateDB(
     assert( popts->wszSourceDB != NULL );
     assert( popts->wszTempDB != NULL );
 
+    //  upgrade from 8.3 to full filename
 
     WCHAR   wszSourceDB[_MAX_PATH+1];
 
@@ -3236,6 +3398,7 @@ LOCAL JET_ERR ErrEDBUTLBackupAndInstateDB(
         StringCbCopyW( wszSourceDB, sizeof(wszSourceDB), popts->wszSourceDB );
     }
 
+    // Make backup before instating, if requested.
 
     if ( popts->wszBackup != NULL )
     {
@@ -3270,6 +3433,7 @@ LOCAL JET_ERR ErrEDBUTLBackupAndInstateDB(
             (void)ErrEDBUTLMoveFile( wszFmFilePathSrc, wszFmFilePathDst, MOVEFILE_REPLACE_EXISTING );
         }
 
+        // Delete temporary database only if everything was successful.
         EDBUTLDeleteTemp( popts );
     }
 
@@ -3278,10 +3442,12 @@ HandleError:
 }
 
 
+// Load registry environment, if enabled.  Then load command-line overrides.
 LOCAL JET_ERR ErrEDBUTLUserSystemParameters( JET_INSTANCE *pinstance, UTILOPTS *popts )
 {
     JET_ERR err = JET_errSuccess;
 
+    // Command-line parameters override all default and registry values.
     if ( popts->wszLogfilePath != NULL )
     {
         Call( JetSetSystemParameterW( pinstance, 0, JET_paramLogFilePath, 0, popts->wszLogfilePath ) );
@@ -3314,6 +3480,7 @@ HandleError:
 }
 
 
+// Teminate Jet, either normally or abnormally.
 LOCAL JET_ERR ErrEDBUTLCleanup( JET_INSTANCE instance, JET_SESID sesid, JET_ERR err )
 {
     JET_ERR wrn = err;
@@ -3328,6 +3495,7 @@ LOCAL JET_ERR ErrEDBUTLCleanup( JET_INSTANCE instance, JET_SESID sesid, JET_ERR 
 
     if ( err < 0 )
     {
+        // On error, terminate abruptly and throw out return code from JetTerm2().
         JetTerm2( instance, JET_bitTermAbrupt );
     }
     else
@@ -3342,8 +3510,11 @@ LOCAL JET_ERR ErrEDBUTLCleanup( JET_INSTANCE instance, JET_SESID sesid, JET_ERR 
     return err;
 }
 
+//  ErrDBUTLRestoreComplete 
 #ifdef ESENT
-#else
+//  The FUtilSystemRestrictIdleActivity() is only utilized in higher level ESE code for non-NT builds of the 
+//  engine, and further the function is not available in ESENT.
+#else //  !ESENT
 
 LOCAL BOOL FAquireBackupRestoreRights()
 {
@@ -3356,9 +3527,11 @@ LOCAL BOOL FAquireBackupRestoreRights()
     TOKEN_PRIVILEGES NewState;
 
 
+    // get process handle
 
     ProcessHandle = GetCurrentProcess();
 
+    // open process token
 
     DesiredAccess = MAXIMUM_ALLOWED;
 
@@ -3367,6 +3540,7 @@ LOCAL BOOL FAquireBackupRestoreRights()
         return FALSE;
     }
 
+    // adjust backup token privileges
     if ( ! LookupPrivilegeValueW( NULL, L"SeRestorePrivilege", &RestoreValue ) )
     {
         ret_val = FALSE;
@@ -3377,6 +3551,7 @@ LOCAL BOOL FAquireBackupRestoreRights()
         ret_val = FALSE;
     }
 
+    // Enable backup privilege for this process
 
     NewState.PrivilegeCount = 1;
     NewState.Privileges[0].Luid = BackupValue;
@@ -3396,18 +3571,20 @@ LOCAL BOOL FAquireBackupRestoreRights()
     {
         ret_val = FALSE;
     }
+    // AdjustTokenPriv always returns SUCCESS, call GetLast to see if it worked.
 
     if ( GetLastError() != ERROR_SUCCESS )
     {
         ret_val = FALSE;
     }
 
+    // close process token
 
     CloseHandle( TokenHandle );
     return( ret_val );
 }
 
-#endif
+#endif //  !ESENT
 
 #define JET_errReturnedForESEBCLI2      JET_errInternalError
 #define JET_errReturnedForESEBACK2      JET_errInternalError
@@ -3431,6 +3608,7 @@ ERR ErrPrintESEBCLI2Error ( HRESULT hr, HRESULT hrGLE, HMODULE hESEBCLI2 )
     LPVOID      lpMsgBuf                = NULL;
     WCHAR *     wszFinalMsg                 = NULL;
 
+    // return all the way to main() the JET error
     if ( hr == hrErrorFromESECall )
     {
         assert( hrGLE );
@@ -3451,7 +3629,7 @@ ERR ErrPrintESEBCLI2Error ( HRESULT hr, HRESULT hrGLE, HMODULE hESEBCLI2 )
                 FORMAT_MESSAGE_ALLOCATE_BUFFER,
                 hESEBCLI2,
                 hr,
-                MAKELANGID(LANG_NEUTRAL, SUBLANG_DEFAULT),
+                MAKELANGID(LANG_NEUTRAL, SUBLANG_DEFAULT), // Default language
                 (LPWSTR) &lpMsgBuf,
                 0,
                 NULL ) )
@@ -3480,6 +3658,7 @@ ERR ErrPrintESEBCLI2Error ( HRESULT hr, HRESULT hrGLE, HMODULE hESEBCLI2 )
         }
         else
         {
+            // print the message without error number
             wszFinalMsg = (WCHAR *)lpMsgBuf;
         }
     }
@@ -3489,8 +3668,10 @@ ERR ErrPrintESEBCLI2Error ( HRESULT hr, HRESULT hrGLE, HMODULE hESEBCLI2 )
     }
 
 
+//  LocalFree ( szFinalMsg );
     hrESEBACK = hr;
 
+    // will be freed at the end in main after printing the result
     wszESEBACKError = wszFinalMsg;
     assert ( hrNone != hr );
 
@@ -3533,7 +3714,7 @@ typedef HRESULT (ESEBACK_API * PfnHrESERecoverAfterRestore2)(
     IN  WCHAR *         wszTargetInstanceCheckpointFilePath,
     IN  WCHAR *         wszTargetInstanceLogPath);
 
-#endif
+#endif // ESENT
 
 
 WCHAR * WszCopy( const WCHAR *  wsz )
@@ -3560,8 +3741,9 @@ void FormatErrorInfoString(
 {
     Assert( szFormatted[0] == '\0' );
     (void)ErrOSStrCbFormatA( szFormatted, cbFormatted, "err = %d (%ws", err, wszErrStrings ? wszErrStrings : L"unknown, unknown"  );
+    // Truncate off the ", <Full error message>" to get the constant name only.
     CHAR * const szBeginErrExplanation = strchr( szFormatted, ',' );
-    Assert( szBeginErrExplanation );
+    Assert( szBeginErrExplanation ); // implies we didn't get the , before we potentially truncated!?
     if ( szBeginErrExplanation )
     {
         Assert( szBeginErrExplanation[0] == ',' );
@@ -3691,6 +3873,9 @@ LOCAL HRESULT HrDBUTLLoadRestoreEnv( const HMODULE  hESEBCLI2, const WCHAR * wsz
                                             (WCHAR*) wszRestorePath,
                                             ppREnv ) );
 HandleError:
+    // SOMEONE commented this out, this func doesn't allocate this variable, and I found at least one path
+    // where this is a stack allocated MAX_PATH variable.
+    //LocalFree ( wszRestorePath );
 
     return hr;
 }
@@ -3700,6 +3885,7 @@ LOCAL VOID DBUTLIDumpRestoreEnv( RESTORE_ENVIRONMENT * pREnv, INT   cDesc = 0 )
 {
     WCHAR           wszBuffer[64];
 
+    // dump Restore.Env
     assert ( pREnv );
 
     PrintField( L"Restore Path:", cDesc, pREnv->m_wszRestoreLogPath );
@@ -3734,6 +3920,7 @@ LOCAL VOID DBUTLIDumpRestoreEnv( RESTORE_ENVIRONMENT * pREnv, INT   cDesc = 0 )
         GUID guid = pREnv->m_rguidDatabase[iDb];
 
         PrintField( L"Database Name:", cDesc, pREnv->m_wszDatabaseDisplayName[iDb] );
+        // like: 6B29FC40-CA47-1067-B31D-00DD010662DA
         StringCbPrintfW( guidStr, sizeof( guidStr ),
                     L"%08X-%04X-%04X-%08X%08X",
                     guid.Data1, guid.Data2, guid.Data3,
@@ -3770,6 +3957,11 @@ LOCAL VOID DBUTLIDumpRestoreEnv( RESTORE_ENVIRONMENT * pREnv, INT   cDesc = 0 )
         assert ( 0 != pREnv->m_ulGenHigh );
         assert ( pREnv->m_ulGenLow <= pREnv->m_ulGenHigh );
 
+        // UNDONE: we need to fix this to detect 8.3 or 11.3 and
+        // JTX or LOG extension. This will be done by adding this info
+        // in restore.env at parsing point (HrESERestoreOpenFile)
+        // For now, we will display the Store defaults as this is
+        // the only client using the eseback2/esebcli2 anyway
         StringCbPrintfW( wszBuffer, sizeof( wszBuffer ), L"%s%08X.log - %s%08X.log",
             pREnv->m_wszLogBaseName,
             pREnv->m_ulGenLow,
@@ -3878,6 +4070,7 @@ LOCAL JET_ERR ErrDBUTLRestoreComplete( const WCHAR * wszFullRestorePath, const W
 
     assert ( wszFullRestorePath );
 
+    // if target instance is used, the should be no play forward directory set
     assert ( NULL == wszTargetInstance ||  NULL == wszPlayForwardLogs );
 
     if ( !FDBUTLLoadLibrary( ESEBCLI2_DLL_NAME, &hESEBCLI2 ) )
@@ -3911,6 +4104,10 @@ LOCAL JET_ERR ErrDBUTLRestoreComplete( const WCHAR * wszFullRestorePath, const W
 
     PrintField( L"Using restore environment", cDesc, NULL );
 
+    // we did the attempt using GetComputerName which may not work on
+    // clusters where you have to use the virtual node  (x5:160326)
+    // We will try to use the server name in the restore.env which was
+    // set at HrESERestoreOpen time (the node the restore took place on)
     CallHr ( HrDBUTLLoadRestoreEnv( hESEBCLI2, wszFullRestorePath, &pREnv, cDesc ) );
 
     assert ( pREnv );
@@ -3921,6 +4118,9 @@ LOCAL JET_ERR ErrDBUTLRestoreComplete( const WCHAR * wszFullRestorePath, const W
 
     if ( wszPlayForwardLogs )
     {
+        // /f set, we will run recovery right here
+        // (as oposed with signaling the running server process using RestoreComplete)
+        // so we need the call into eseback2.dll
 
         if ( !FDBUTLLoadLibrary( ESEBACK2_DLL_NAME, &hESEBACK2 ) )
         {
@@ -3938,11 +4138,11 @@ LOCAL JET_ERR ErrDBUTLRestoreComplete( const WCHAR * wszFullRestorePath, const W
         }
 
         CallHr( (*pfnHrESERecoverAfterRestore2)(
-                            (WCHAR*) wszFullRestorePath,
-                            (WCHAR*) wszPlayForwardLogs,
-                            (WCHAR*) wszPlayForwardLogs,
-                            (WCHAR*) wszPlayForwardLogs,
-                            (WCHAR*) wszPlayForwardLogs ) );
+                            (WCHAR*) wszFullRestorePath,                //  restore directory
+                            (WCHAR*) wszPlayForwardLogs,            //  log path for recovery instance
+                            (WCHAR*) wszPlayForwardLogs,            //  system path for recovery instance
+                            (WCHAR*) wszPlayForwardLogs,            //  play-forward system path
+                            (WCHAR*) wszPlayForwardLogs ) );        //  play-forward log path
     }
     else
     {
@@ -3956,12 +4156,15 @@ LOCAL JET_ERR ErrDBUTLRestoreComplete( const WCHAR * wszFullRestorePath, const W
         {
             if ( wszTargetInstance[0] == L'\0' )
             {
+                // no play forward
                 wszTargetInstance = NULL;
             }
         }
         else
         {
+            // get the instance form the Restore.Env, as the Source Instance Name
 
+            // get restore.env if not read already
             if ( NULL == pREnv )
             {
                 assert ( pfnHrESERestoreGetEnv );
@@ -3969,6 +4172,7 @@ LOCAL JET_ERR ErrDBUTLRestoreComplete( const WCHAR * wszFullRestorePath, const W
                                                     &pREnv ) );
             }
 
+            // dump Restore.Env
             assert ( pREnv );
             assert ( pREnv->m_wszSrcInstanceName );
             wszTargetInstance = WszCopy( pREnv->m_wszSrcInstanceName );
@@ -3990,7 +4194,7 @@ LOCAL JET_ERR ErrDBUTLRestoreComplete( const WCHAR * wszFullRestorePath, const W
                                         (WCHAR*) wszFullRestorePath,
                                         (WCHAR*) wszFullRestorePath,
                                         (WCHAR*) wszTargetInstance,
-                                        fKeepLogs?ESE_RESTORE_KEEP_LOG_FILES:0
+                                        fKeepLogs?ESE_RESTORE_KEEP_LOG_FILES:0 // no db mount, wait restore complete
                                         ) );
     }
 HandleError:
@@ -4032,6 +4236,7 @@ HandleError:
 
 #ifdef RESTORE_SERVER_SIMULATION
 
+// must match the definition from ESEBACK2\srvsim.cxx
 typedef HRESULT (__stdcall * PfnServerSim)( const char * szFileDef );
 
 LOCAL JET_ERR ErrDBUTLServerSim( const WCHAR * wszSimulationDef )
@@ -4076,11 +4281,24 @@ HandleError:
 
 }
 
-#endif
+#endif // RESTORE_SERVER_SIMULATION
 
-#endif
+#endif // ESENT
 
-
+/*
+typedef struct
+{
+    JET_COLUMNID        columnid;
+    void                *pvData;
+    unsigned long       cbData;
+    unsigned long       cbActual;
+    JET_GRBIT           grbit;
+    unsigned long       ibLongValue;
+    unsigned long       itagSequence;
+    JET_COLUMNID        columnidNextTagged;
+    JET_ERR             err;
+} JET_RETRIEVECOLUMN;
+*/
 
 struct DUMPCOLUMN
 {
@@ -4092,26 +4310,28 @@ struct DUMPCOLUMN
 };
 
 
+//  ================================================================
 LOCAL INT CchPrintForColtyp( IN const JET_COLTYP coltyp, IN const INT cchColumnName, IN const INT cbMax )
+//  ================================================================
 {
     INT cchPrint = 0;
 
     switch( coltyp )
     {
         case JET_coltypBit:
-            cchPrint = 1;
+            cchPrint = 1; // 0 => 1
             break;
         case JET_coltypUnsignedByte:
-            cchPrint = 2;
+            cchPrint = 2; // 00 => ff
             break;
         case JET_coltypShort:
-            cchPrint = 6;
+            cchPrint = 6; // -32768 => 32767
             break;
         case JET_coltypUnsignedShort:
             cchPrint = 6;
             break;
         case JET_coltypLong:
-            cchPrint = 10;
+            cchPrint = 10; // -2147483649 => 2147483648
             break;
         case JET_coltypUnsignedLong:
             cchPrint = 10;
@@ -4156,7 +4376,9 @@ LOCAL INT CchPrintForColtyp( IN const JET_COLTYP coltyp, IN const INT cchColumnN
 }
 
 
+//  ================================================================
 LOCAL void PrintColumn( IN const JET_COLTYP coltyp, IN const INT cchMax, IN const void * const pv, IN const INT cb )
+//  ================================================================
 {
     switch( coltyp )
     {
@@ -4212,13 +4434,13 @@ LOCAL void PrintColumn( IN const JET_COLTYP coltyp, IN const INT cchMax, IN cons
         case JET_coltypIEEESingle:
         {
             const float f = *((float *)pv);
-            wprintf( L"% *.4g", cchMax - 6, f );
+            wprintf( L"% *.4g", cchMax - 6, f );    //  precision = 4, decimal = 1, minus = 1
             break;
         }
         case JET_coltypIEEEDouble:
         {
             const double d = *((double *)pv);
-            wprintf( L"% *.4g", cchMax - 6, d );
+            wprintf( L"% *.4g", cchMax - 6, d ); // precision = 4, decimal = 1, minus = 1
             break;
         }
         case JET_coltypText:
@@ -4230,7 +4452,7 @@ LOCAL void PrintColumn( IN const JET_COLTYP coltyp, IN const INT cchMax, IN cons
             break;
         }
         default:
-            assert( 0 );
+            assert( 0 );    //  missed case
         case JET_coltypDateTime:
         case JET_coltypGUID:
         case JET_coltypBinary:
@@ -4254,18 +4476,21 @@ LOCAL void PrintColumn( IN const JET_COLTYP coltyp, IN const INT cchMax, IN cons
 }
 
 
+//  ================================================================
 LOCAL JET_ERR ErrDumpcolumnFromColumnlist(
     IN const JET_SESID          sesid,
     IN const JET_COLUMNLIST&    columnlist,
     OUT DUMPCOLUMN * const      rgdumpcolumn,
     IN const ULONG      cdumpcolumnMax,
     OUT ULONG&          cdumpcolumn )
+//  ================================================================
 {
     JET_ERR err     = JET_errSuccess;
     const JET_TABLEID tableid = columnlist.tableid;
 
     cdumpcolumn = 0;
 
+    //  need to know the name, columnid, coltyp, cbMax
 
     enum {
         iretcolName = 0,
@@ -4297,11 +4522,16 @@ LOCAL JET_ERR ErrDumpcolumnFromColumnlist(
 
     Call( JetMove( sesid, tableid, JET_MoveFirst, 0 ) );
 
+    //  there are three ways to leave this loop
+    //      - an error from a Jet call
+    //      - getting JET_errNoCurrentRecord from JetMove( MoveNext )
+    //      - retrieving the maximum number of columns allowed
 
     while( 1 )
     {
         if( cdumpcolumn >= cdumpcolumnMax )
         {
+            //  we have hit the maximum number of columns to dump
             break;
         }
 
@@ -4314,6 +4544,7 @@ LOCAL JET_ERR ErrDumpcolumnFromColumnlist(
 
         Call( JetRetrieveColumns( sesid, tableid, rgretrievecolumn, cretcol ) );
 
+        //  the column names are not NULL-terminated. Add a terminator
 
         rgdumpcolumn[cdumpcolumn].szColumnName[rgretrievecolumn[iretcolName].cbActual] = 0;
 
@@ -4328,6 +4559,7 @@ LOCAL JET_ERR ErrDumpcolumnFromColumnlist(
         if( JET_errNoCurrentRecord == err )
         {
             assert( columnlist.cRecord == cdumpcolumn );
+            //  we have hit the end of the table
             err = JET_errSuccess;
             break;
         }
@@ -4341,9 +4573,16 @@ HandleError:
 }
 
 
+//  ================================================================
 LOCAL void DBUTLDumpTableRecordsHeader(
     IN const DUMPCOLUMN * const rgdumpcolumn,
     IN const INT ccolumns )
+//  ================================================================
+//
+//  Print the name of each column, followed by a space
+//  Keep track of the number of characters and print a line of '-'s
+//
+//-
 {
     INT icolumn;
     INT ich;
@@ -4364,10 +4603,12 @@ LOCAL void DBUTLDumpTableRecordsHeader(
 }
 
 
+//  ================================================================
 LOCAL VOID EDBUTLPrintOneTableRecord(
     IN const DUMPCOLUMN * const     rgdumpcolumn,
     IN JET_RETRIEVECOLUMN * const   rgretcol,
     IN const INT                    ccolumns )
+//  ================================================================
 {
     INT icolumn;
     for( icolumn = 0; icolumn < ccolumns; ++icolumn )
@@ -4384,12 +4625,14 @@ LOCAL VOID EDBUTLPrintOneTableRecord(
 }
 
 
+//  ================================================================
 LOCAL JET_ERR ErrEDBUTLDumpOneTableRecord(
     IN const JET_SESID              sesid,
     IN const JET_TABLEID            tableid,
     IN const DUMPCOLUMN * const     rgdumpcolumn,
     IN JET_RETRIEVECOLUMN * const   rgretcol,
     IN const INT                    ccolumns )
+//  ================================================================
 {
     JET_ERR                 err         = JET_errSuccess;
 
@@ -4401,12 +4644,14 @@ HandleError:
 }
 
 
+//  ================================================================
 LOCAL JET_ERR ErrEDBUTLDumpTableRecords(
     IN const JET_SESID          sesid,
     IN const JET_TABLEID        tableid,
     IN const DUMPCOLUMN * const rgdumpcolumn,
     IN const INT                ccolumns,
     IN const INT                crecordsMax )
+//  ================================================================
 {
     JET_ERR                 err         = JET_errSuccess;
     JET_RETRIEVECOLUMN  *   rgretcol    = NULL;
@@ -4465,12 +4710,14 @@ HandleError:
 }
 
 
+//  ================================================================
 LOCAL_BROKEN JET_ERR ErrEDBUTLDumpTable(
     IN const JET_INSTANCE   instance,
     IN const JET_SESID      sesid,
     IN const JET_DBID       dbid,
     IN const WCHAR * const  wszTable,
     IN const INT            crecordsMax )
+//  ================================================================
 {
     JET_ERR         err         = JET_errSuccess;
     JET_TABLEID     tableid     = JET_tableidNil;
@@ -4535,11 +4782,13 @@ HandleError:
 
 IOREASON g_iorThunk( (IOREASONPRIMARY) 1 );
 
+//  ================================================================
 LOCAL JET_ERR ErrEDBUTLDumpFTLHeader( IN const WCHAR * const wszFTLFile )
+//  ================================================================
 {
     JET_ERR         err         = JET_errSuccess;
 #ifdef MINIMAL_FUNCTIONALITY
-#else
+#else  //  !MINIMAL_FUNCTIONALITY
     CFastTraceLog *                 pftl = NULL;
     CFastTraceLog::CFTLReader *     pftlr = NULL;
 
@@ -4550,6 +4799,8 @@ LOCAL JET_ERR ErrEDBUTLDumpFTLHeader( IN const WCHAR * const wszFTLFile )
                                     CFastTraceLog::ftlifNone,
                                     &pftlr ) );
 
+    // consider dumping something more intelligent for each schema ID, like "BF" ...
+    //pftl->PftlhdrFTLTraceLogHeader()->le_ulSchemaIDs
     
     Call( pftl->ErrFTLDumpHeader() );
 
@@ -4562,12 +4813,12 @@ HandleError:
 
     if ( pftl )
     {
-        pftl->FTLTerm();
-        delete pftl;
+        pftl->FTLTerm();    // cleanup open files
+        delete pftl;        // cleanup memory
         pftl = NULL;
         pftlr = NULL;
     }
-#endif
+#endif  //  MINIMAL_FUNCTIONALITY
     return err;
 }
 
@@ -4633,6 +4884,7 @@ LOCAL DWORD DumpExtentCount( const WCHAR* const wszFilename, const DWORD cbClust
     pData = HeapAlloc( hProcHeap, 0, dataSize );
     if ( pData == NULL )
     {
+        //  Can't use GetLastError for HeapAlloc, oddly enough.
         dwGLE = ERROR_NOT_ENOUGH_MEMORY;
         goto HandleError;
     }
@@ -4655,11 +4907,12 @@ LOCAL DWORD DumpExtentCount( const WCHAR* const wszFilename, const DWORD cbClust
             dwGLE = GetLastError();
         }
 
-        Assert( dwGLE != ERROR_INSUFFICIENT_BUFFER );
+        Assert( dwGLE != ERROR_INSUFFICIENT_BUFFER );   // Shouldn't return that with a 1MB buffer.
         if ( dwGLE == ERROR_MORE_DATA || dwGLE == ERROR_SUCCESS )
         {
             RETRIEVAL_POINTERS_BUFFER *pRetPtrs = (RETRIEVAL_POINTERS_BUFFER*)pData;
 
+            //  Go through all the extents to accumulate and/or print out detailed information.
             for ( ULONG iExtent = 0; iExtent < pRetPtrs->ExtentCount; iExtent++ )
             {
                 const LONGLONG iVCN = startingVCN.StartingVcn.QuadPart;
@@ -4668,6 +4921,9 @@ LOCAL DWORD DumpExtentCount( const WCHAR* const wszFilename, const DWORD cbClust
 
                 startingVCN.StartingVcn = pRetPtrs->Extents[iExtent].NextVcn;
 
+                //  There is a special case where LCN is negative, which happens when a file is compressed.
+                //  In this case, the extent with a negative LCN is actually an extension of the previous
+                //  LCN to describe the compressed extent.
                 if ( iLCN == -1 )
                 {
                     Assert( extentCount > 0 );
@@ -4678,6 +4934,7 @@ LOCAL DWORD DumpExtentCount( const WCHAR* const wszFilename, const DWORD cbClust
                     const LONGLONG ibExtent = iLCN * cbCluster;
                     const LONGLONG ibFile = iVCN * cbCluster;
 
+                    //  If this is the first extent, we must initialize the last offset.
                     if ( extentCount == 0 )
                     {
                         ibExtentEndLast = ibExtent;
@@ -4767,18 +5024,21 @@ LOCAL DWORD DumpExtentCount( const WCHAR* const wszFilename, const DWORD cbClust
             Assert( errStats == CStats::ERR::errSuccess );
             Assert( pctPercentile <= 100 );
 
+            //  Don't print out repeated percentiles.
             if ( pctPercentile != pctPercentileLast )
             {
                 wprintf( L"      Percentile:%-3u Length:%11.3f%c", pctPercentile, DblMBs( cbPercentileExtent ), wchNewLine );
                 pctPercentileLast = pctPercentile;
             }
 
+            //  We are done.
             if ( pctPercentile >= 100 )
             {
                 Expected( pctPercentile == 100 );
                 break;
             }
 
+            //  Can never go back.
             while ( pctPercentile <= pctPercentileT )
             {
                 pctPercentile = ( ( pctPercentile + pctPercentileSegment ) / pctPercentileSegment ) * pctPercentileSegment;
@@ -4866,6 +5126,7 @@ LOCAL JET_ERR ErrFileSystemDump( const WCHAR* const wszFilename, const BOOL fVer
 
     if ( 0 == _wcsicmp( wszFSName, L"NTFS" ) )
     {
+        // print attribute list size        
         err = pFSApi->ErrGetLastError( GetAttributeListSize( wszFilename, &attrListSize ) );
         if ( err == JET_errFileNotFound )
         {
@@ -4893,6 +5154,9 @@ LOCAL JET_ERR ErrFileSystemDump( const WCHAR* const wszFilename, const BOOL fVer
 
     if ( 0 == _wcsicmp( wszFSName, L"NTFS" ) || 0 == _wcsicmp( wszFSName, L"ReFS" ) )
     {
+        // Print extent count
+        // This uses FSCTL_GET_RETRIEVAL_POINTERS
+        // Fails on network shares (DRIVE_REMOTE)
         uiDriveType = GetDriveTypeW( wszVolumeRoot );
         if ( uiDriveType != DRIVE_UNKNOWN && uiDriveType != DRIVE_REMOTE )
         {
@@ -4939,14 +5203,17 @@ LOCAL JET_ERR ErrEDBUTLDump(
     Call( JetSetSystemParameterW( &instance, 0, JET_paramRecovery, 0, L"off" ) );
     Call( JetSetSystemParameterW( &instance, 0, JET_paramEnableOnlineDefrag, 0, NULL ) );
 
+    //  set temp table size to be 0 so that no temp db will be created
 
     Call( JetSetSystemParameterW( &instance, 0, JET_paramMaxTemporaryTables, 0, NULL ) );
 
+    //  set user overrides.
 
     Call( ErrEDBUTLUserSystemParameters( &instance, popts ) );
 
     if ( opDBUTILDumpFTLHeader == pdbutil->op )
     {
+        //  we want to handle this one externally
         Call( ErrEDBUTLDumpFTLHeader( popts->wszSourceDB ) );
     }
     else
@@ -4996,6 +5263,7 @@ LOCAL JET_ERR ErrEDBUTLDump(
         {
              if ( opDBUTILDumpSpaceCategory != pdbutil->op )
              {
+                // why were we setting it to NULL here for all dump operations?
                 pdbutil->pfnCallback = NULL;
              }
         }
@@ -5007,7 +5275,8 @@ HandleError:
 
     if ( opDBUTILDumpSpace == pdbutil->op )
     {
-        err = ErrSpaceDumpCtxComplete( pdbutil->pvCallback, err  );
+        //  Note this prints final statistics if necessary, as well as deallocates.
+        err = ErrSpaceDumpCtxComplete( pdbutil->pvCallback, err /* passes through */ );
     }
 
     return err;
@@ -5020,13 +5289,18 @@ LOCAL JET_ERR ErrEDBUTLCheckLogStream( JET_INSTANCE* pInst, UTILOPTS* pOpts )
     if (    modeRecovery != pOpts->mode ||
             FUTILOPTSExplicitPageSet( pOpts->fUTILOPTSFlags ) )
     {
+        // no need to do auto-detection
         return JET_errSuccess;
     }
 
+    //================================
+    // file name (with wild card)
     WCHAR wszFName[ _MAX_PATH + 1 ];
     Call( JetGetSystemParameterW( *pInst, JET_sesidNil, JET_paramBaseName, NULL, wszFName, sizeof( wszFName ) ) );
     StringCchCatW( wszFName, _countof( wszFName ), L"*" );
 
+    //================================
+    // drive and dir
     WCHAR wszLogFilePath[ _MAX_PATH + 1 ];
     Call( JetGetSystemParameterW( *pInst, JET_sesidNil, JET_paramLogFilePath, NULL, wszLogFilePath, sizeof( wszLogFilePath ) ) );
 
@@ -5034,18 +5308,24 @@ LOCAL JET_ERR ErrEDBUTLCheckLogStream( JET_INSTANCE* pInst, UTILOPTS* pOpts )
     WCHAR wszDir[ _MAX_DIR ];
     _wsplitpath_s( wszLogFilePath, wszDrive, _countof( wszDrive ), wszDir, _countof( wszDir ), NULL, 0, NULL, 0 );
 
+    //================================
+    // ext
     DWORD_PTR ulLegacy = 0;
     Call( JetGetSystemParameterW( *pInst, JET_sesidNil, JET_paramLegacyFileNames, &ulLegacy, NULL, sizeof( ulLegacy ) ) );
 
+    //================================
+    // try both log extensions
     const WCHAR* rgwszExt[] = { L"log", L"jtx", };
     INT iExtIdx = !( ulLegacy & JET_bitESE98FileNames );
 
-    assert( 2 == _countof( rgwszExt ) );
+    assert( 2 == _countof( rgwszExt ) );    // because of "iExtIdx = 1 - iExtIdx"
     for ( size_t i = 0; i < _countof( rgwszExt ); ++i, iExtIdx = 1 - iExtIdx )
     {
         WCHAR wszPath[ _MAX_PATH ];
         _wmakepath_s( wszPath, _countof( wszPath ), wszDrive, wszDir, wszFName, rgwszExt[ iExtIdx ] );
 
+        //================================
+        // scan all log files to find database page size
         BOOL fFound = fTrue;
         HANDLE hFind = INVALID_HANDLE_VALUE;
         WIN32_FIND_DATAW wfd;
@@ -5057,6 +5337,7 @@ LOCAL JET_ERR ErrEDBUTLCheckLogStream( JET_INSTANCE* pInst, UTILOPTS* pOpts )
             _wsplitpath_s( wfd.cFileName, NULL, 0, NULL, 0, wszFName, _countof( wszFName ), wszExt, _countof( wszExt ) );
             _wmakepath_s( wszLogFilePath, _countof( wszLogFilePath ), wszDrive, wszDir, wszFName, wszExt );
             
+            // database page size
             JET_LOGINFOMISC logInfo;
             if ( JET_errSuccess <= JetGetLogFileInfoW( wszLogFilePath, &logInfo, sizeof( logInfo ), JET_LogInfoMisc ) )
             {
@@ -5081,21 +5362,22 @@ void PushEseutilArgTrace( INT argc, __in_ecount(argc) LPWSTR argv[] )
     size_t cbAllArgs = 0;
     for( INT iarg = 0; iarg < argc; iarg++ )
     {
-        cbAllArgs += sizeof(WCHAR) * ( wcslen( argv[iarg] ) + 2  );
+        cbAllArgs += sizeof(WCHAR) * ( wcslen( argv[iarg] ) + 2 /* one for space, one more because of .... ahhhh<fell off SOMEONE> */ );
     }
-    cbAllArgs += sizeof(WCHAR) + 783;
+    cbAllArgs += sizeof(WCHAR) + 783; // + NUL terminator space + Buffer for potential MBCS expansion (of 3 full paths) ... at top of stack, so 783 is fine.
     CHAR * szEseutilCmd = (CHAR*)alloca( cbAllArgs );
     if ( szEseutilCmd )
     {
         CHAR * szT = szEseutilCmd;
 
-        (void)ErrOSStrCbFormatA( szT, cbAllArgs, "Command:     \"" );
+        (void)ErrOSStrCbFormatA( szT, cbAllArgs, "Command:     \"" );   // 5 spaces is _perfect_. Excercise to reader as to why.
         size_t cbUsed = strlen( szT );
         szT += cbUsed;
         cbAllArgs -= cbUsed;
 
         for( INT iarg = 0; iarg < argc; iarg++ )
         {
+            //  Not sure if MBCS can expand this, but left buffer anyways, may truncate but we'd survive.
             (void)ErrOSStrCbFormatA( szT, cbAllArgs, "%ws ", argv[iarg] );
             cbUsed = strlen( szT );
             szT += cbUsed;
@@ -5103,6 +5385,7 @@ void PushEseutilArgTrace( INT argc, __in_ecount(argc) LPWSTR argv[] )
         }
         if ( argc )
         {
+            //  if we had any args wipe out the last space with the end quote.
             (void)ErrOSStrCbFormatA( szT - 1, cbAllArgs + 1, "\"" );
         }
         JET_TESTHOOKTRACETESTMARKER mark = { sizeof(mark), szEseutilCmd, 1 };
@@ -5127,7 +5410,7 @@ INT __cdecl wmain( INT argc, __in_ecount(argc) LPWSTR argv[] )
 #ifdef ESESHADOW
     BOOL                    fMountedShadow          = fFalse;
 #endif
-    COSLayerPreInit         oslayer;
+    COSLayerPreInit         oslayer;                // FOSPreinit()
 
     memset( &opts, 0, sizeof(UTILOPTS) );
 
@@ -5139,20 +5422,26 @@ INT __cdecl wmain( INT argc, __in_ecount(argc) LPWSTR argv[] )
         return ErrERRCheck( JET_errOutOfMemory );
     }
 
+    //  configure OS layer
 
-    COSLayerPreInit::DisablePerfmon();
-    COSLayerPreInit::DisableTracing();
+    COSLayerPreInit::DisablePerfmon();  //  for now we will avoid dealing with perfmon, note ese[nt].dll will still use perfmon, just not eseutil.exe
+    COSLayerPreInit::DisableTracing();  //  for now we will avoid dealing with tracing, note ese[nt].dll will still use tracing, just not eseutil.exe
 
     Call( (JET_ERR)ErrOSInit() );
 
+    //  must be after init so that Time Inj has a chance to adjust the ticks
+    //  we're using
 
     timer = TickOSTimeCurrent();
 
 
 #ifdef USE_WATSON_API
+    // Register Watson for error reporting.
     RegisterWatson();
 #endif
 
+    //  Force the process to terminate if heap corruption is detected
+    //
     HeapSetInformation( NULL, HeapEnableTerminationOnCorruption, NULL, 0 );
 
     PushEseutilArgTrace( argc, argv );
@@ -5194,13 +5483,13 @@ INT __cdecl wmain( INT argc, __in_ecount(argc) LPWSTR argv[] )
 
     switch( GetCurArg()[1] )
     {
-        case L'd':
+        case L'd':      // Defragment
         case L'D':
             opts.mode   = modeDefragment;
             fResult = FEDBUTLParseOptions( &opts, FEDBUTLParseDefragment );
             break;
 
-        case L'r':
+        case L'r':      // Recovery
         case L'R':
             opts.mode = modeRecovery;
             opts.grbitInit = JET_bitLogStreamMustExist;
@@ -5208,26 +5497,27 @@ INT __cdecl wmain( INT argc, __in_ecount(argc) LPWSTR argv[] )
             fResult = FEDBUTLParseOptions( &opts, FEDBUTLParseRecovery );
             break;
 
-        case L'g':
+        case L'g':      // inteGrity
         case L'G':
             opts.mode = modeIntegrity;
             fResult = FEDBUTLParseOptions( &opts, FEDBUTLParseIntegrity );
             break;
 
-        case L'k':
+        case L'k':      // esefile - checKsum
         case L'K':
             opts.mode = modeChecksum;
+            // by default try to checksum EDB
             UTILOPTSSetChecksumEDB( opts.fUTILOPTSFlags );
             fResult = FEDBUTLParseOptions( &opts, FEDBUTLParseChecksum );
             break;
 
-        case L'p':
+        case L'p':      // rePair
         case L'P':
             opts.mode   = modeRepair;
             fResult = FEDBUTLParseOptions( &opts, FEDBUTLParseRepair );
             break;
 
-        case L'm':
+        case L'm':      // file duMp.
         case L'M':
             opts.mode = modeDump;
             opts.pv = &dbutil;
@@ -5235,31 +5525,31 @@ INT __cdecl wmain( INT argc, __in_ecount(argc) LPWSTR argv[] )
             fResult = FEDBUTLParseOptions( &opts, FEDBUTLParseDump );
             break;
 
-        case L'y':
+        case L'y':      // esefile - copYfile
         case L'Y':
             opts.mode = modeCopyFile;
             fResult = FEDBUTLParseOptions( &opts, FEDBUTLParseCopyFile );
             break;
 
 #ifndef ESENT
-        case L'c':
+        case L'c':      // Hard Recovery (dump Restore.Env or/and RestoreComplete)
         case L'C':
             opts.mode = modeHardRecovery;
             opts.pv = &dbutil;
 
             fResult = FEDBUTLParseOptions( &opts, FEDBUTLParseHardRecovery );
             break;
-#endif
+#endif // ESENT
 
 #ifdef DEBUG
-        case L'b':
+        case L'b':      // Backup
         case L'B':
             opts.mode = modeBackup;
             fResult = FEDBUTLParseOptions( &opts, FEDBUTLParseBackup );
             break;
 #endif
 
-        case L'z':
+        case L'z':      // Zero out deleted portions of the database
         case L'Z':
             opts.mode   = modeScrub;
             fResult = FEDBUTLParseOptions( &opts, FEDBUTLParseScrub );
@@ -5268,6 +5558,7 @@ INT __cdecl wmain( INT argc, __in_ecount(argc) LPWSTR argv[] )
         case L'?':
             goto Usage;
 
+            //  else FALLTHRU
         default:
             wprintf( L"%s%c%c", wszUsageErr12, wchNewLine, wchNewLine );
             fResult = fFalse;
@@ -5276,10 +5567,12 @@ INT __cdecl wmain( INT argc, __in_ecount(argc) LPWSTR argv[] )
     if ( !fResult )
         goto Usage;
 
+    // turn on legacy config if implemented (or use fast config if ever created)
     (void)JetSetSystemParameterW( &instance, 0, JET_paramConfiguration, 1, NULL );
 
     if ( opts.wszConfigStoreSpec )
     {
+        // arg is of form /config:reg:HKEY_LOCAL_MACHINE\SYSTEM\CurrentControlSet\Services\ESENT\IntegCheck
         err = JetSetSystemParameterW( &instance, 0, JET_paramConfigStoreSpec, 0, opts.wszConfigStoreSpec );
         if ( err < JET_errSuccess )
         {
@@ -5291,12 +5584,17 @@ INT __cdecl wmain( INT argc, __in_ecount(argc) LPWSTR argv[] )
 
     Call( JetSetSystemParameterW( &instance, 0, JET_paramRecovery, 0, L"ESEUTIL" ) );
 
+    //  enable persisted callbacks because we have to be able to maintain
+    //  databases where they are used
 
     Call( JetSetSystemParameterW( &instance, 0, JET_paramEnablePersistedCallbacks, 1, NULL ) );
 
+    //  generate a new temporary database name
+    //  this may be overwritten later
 
     Call( JetSetSystemParameterW( &instance, 0, JET_paramTempPath, 0, wszDefaultTempDB ) );
 
+    //  enable persisted lost flush detection
     Call( JetSetSystemParameter( &instance, 0, JET_paramPersistedLostFlushDetection, JET_bitPersistedLostFlushDetectionEnabled, NULL ) );
 
     if ( !FUTILOPTSSuppressLogo( opts.fUTILOPTSFlags ) )
@@ -5306,6 +5604,11 @@ INT __cdecl wmain( INT argc, __in_ecount(argc) LPWSTR argv[] )
 
     if ( modeHardRecovery == opts.mode || modeBackup == opts.mode )
     {
+        // these modes cannot auto-detect page size
+        //
+        //  at this point all commandline options have been parsed.  if a page size
+        //  wasn't chosen then choose the default
+        //
         if ( !FUTILOPTSExplicitPageSet( opts.fUTILOPTSFlags ) )
         {
             switch ( cbPageDefault )
@@ -5352,6 +5655,7 @@ INT __cdecl wmain( INT argc, __in_ecount(argc) LPWSTR argv[] )
 
     Call( ErrEDBUTLSetCacheSizeMax( &opts ) );
 
+    // Lights, cameras, action...
     timer = TickOSTimeCurrent();
 
 #ifdef ESESHADOW
@@ -5363,6 +5667,9 @@ INT __cdecl wmain( INT argc, __in_ecount(argc) LPWSTR argv[] )
         NULL != opts.wszSourceDB )
     {
 
+        //
+        //  User requested us work off snapshot data
+        //
 
         wprintf( L"Initializing VSS subsystem...%c%c", wchNewLine, wchNewLine );
 
@@ -5415,6 +5722,8 @@ INT __cdecl wmain( INT argc, __in_ecount(argc) LPWSTR argv[] )
             Error( ErrERRCheck( JET_errOSSnapshotNotAllowed ) );
         }
 
+        //  Snapshot created and mounted, configure DB utility options for this ...
+        //
 
         fMountedShadow = fTrue;
         opts.wszSourceDB = wszShadowedFile;
@@ -5484,17 +5793,30 @@ INT __cdecl wmain( INT argc, __in_ecount(argc) LPWSTR argv[] )
 
             Call( JetSetSystemParameterW( &instance, 0, JET_paramRecovery, 0, L"on" ) );
 
+            // Currently the engine defaults to having trim enabled, and a periodic task running
+            // in DEBUG builds. Turn all of that off to ensure that recovery will work
+            // consistently (that it replays TRIM log records even when the system parameter is off).
             Call( JetSetSystemParameterW( &instance, 0, JET_paramEnableShrinkDatabase, JET_bitShrinkDatabaseOff, NULL ) );
 
-            Assert( opts.efvUserSpecified == 0 );
+            Assert( opts.efvUserSpecified == 0 ); // do not take this as an argument yet
             Call( JetSetSystemParameterW( &instance, 0, JET_paramEngineFormatVersion, opts.efvUserSpecified == 0 ? ( JET_efvExchange2016Rtm | JET_efvAllowHigherPersistedFormat ) : opts.efvUserSpecified, NULL ) );
 
+///         Call( JetSetSystemParameterW( &instance, 0, JET_paramCacheSizeMax, 500, NULL ) );
+///         Call( JetSetSystemParameterW( &instance, 0, JET_paramMaxOpenTables, 10000, NULL ) );
+///         Call( JetSetSystemParameterW( &instance, 0, JET_paramMaxCursors, 10000, NULL ) );
+///         Call( JetSetSystemParameterW( &instance, 0, JET_paramMaxSessions, 16, NULL ) );
+///         Call( JetSetSystemParameterW( &instance, 0, JET_paramMaxVerPages, 128, NULL ) );
+///         Call( JetSetSystemParameterW( &instance, 0, JET_paramMaxTemporaryTables, 10000, NULL ) );
+///         Call( JetSetSystemParameterW( &instance, 0, JET_paramLogBuffers, 41, NULL ) );
             wprintf( L"%c", wchNewLine );
 
+            // Set user overrides.
             Call( ErrEDBUTLUserSystemParameters( &instance, &opts ) );
 
+            // get database page size from log stream if necessary
             Call( ErrEDBUTLCheckLogStream( &instance, &opts ) );
 
+            // allow recovery of 5-digit log files
             if ( opts.cLogDigits == 5 )
             {
                 Call( JetSetSystemParameter( &instance, 0, JET_paramLegacyFileNames, JET_bitESE98FileNames | JET_bitEightDotThreeSoftCompat, NULL ) );
@@ -5509,6 +5831,7 @@ INT __cdecl wmain( INT argc, __in_ecount(argc) LPWSTR argv[] )
                 rstInfo.crstmap = opts.irstmap;
                 rstInfo.rgrstmap = opts.prstmap;
 
+                // if there is nothing in the map, replay to default location
                 if ( !opts.irstmap )
                 {
                     opts.grbitInit |= JET_bitReplayMissingMapEntryDB;
@@ -5520,6 +5843,7 @@ INT __cdecl wmain( INT argc, __in_ecount(argc) LPWSTR argv[] )
                 opts.grbitInit |= JET_bitExternalRecoveryControl;
                 rstInfo.pfnCallback = ProcessRecoveryControlAndRestoreStatus;
                 rstInfo.pvCallbackContext = &opts;
+                // Soft recovery.
                 fWhitespaceOnErr = fTrue;
                 wprintf( L"Performing soft recovery..." );
                 if ( FUTILOPTSVerbose( opts.fUTILOPTSFlags ) )
@@ -5531,6 +5855,7 @@ INT __cdecl wmain( INT argc, __in_ecount(argc) LPWSTR argv[] )
 
                 Assert( sesid == JET_sesidNil );
 
+                // Attach to shrink or reclaim leaked space, if requested.
                 if ( ( err >= JET_errSuccess ) &&
                     ( ( opts.grbitShrink & JET_bitShrinkDatabaseEofOnAttach ) || ( opts.fRunLeakReclaimer ) ) &&
                     ( ( err = JetBeginSessionW( instance, &sesid, NULL, NULL ) ) >= JET_errSuccess ) )
@@ -5541,6 +5866,7 @@ INT __cdecl wmain( INT argc, __in_ecount(argc) LPWSTR argv[] )
                     wprintf( L"             Shrink options: 0x%I32x%c", opts.grbitShrink, wchNewLine );
                     wprintf( L"             Leakage reclaimer: %d%c", (int)opts.fRunLeakReclaimer, wchNewLine );
 
+                    // Set DB parameters.
                     JET_SETDBPARAM rgsetdbparam[] =
                     {
                         {
@@ -5572,6 +5898,7 @@ INT __cdecl wmain( INT argc, __in_ecount(argc) LPWSTR argv[] )
             else
             {
 
+                // Hard recovery.
 
                 if ( opts.wszRestore )
                 {
@@ -5596,7 +5923,15 @@ INT __cdecl wmain( INT argc, __in_ecount(argc) LPWSTR argv[] )
             wprintf( L"    System files: %s%c%c", opts.wszSystemPath ? opts.wszSystemPath : L"<current directory>", wchNewLine, wchNewLine );
 
             Call( JetSetSystemParameterW( &instance, 0, JET_paramRecovery, 0, L"on" ) );
+///         Call( JetSetSystemParameterW( &instance, 0, JET_paramCacheSizeMax, 500, NULL ) );
+///         Call( JetSetSystemParameterW( &instance, 0, JET_paramMaxOpenTables, 10000, NULL ) );
+///         Call( JetSetSystemParameterW( &instance, 0, JET_paramMaxCursors, 10000, NULL ) );
+///         Call( JetSetSystemParameterW( &instance, 0, JET_paramMaxSessions, 16, NULL ) );
+///         Call( JetSetSystemParameterW( &instance, 0, JET_paramMaxVerPages, 128, NULL ) );
+///         Call( JetSetSystemParameterW( &instance, 0, JET_paramMaxTemporaryTables, 10000, NULL ) );
+///         Call( JetSetSystemParameterW( &instance, 0, JET_paramLogBuffers, 41, NULL ) );
 
+            // Set user overrides.
             Call( ErrEDBUTLUserSystemParameters( &instance, &opts ) );
 
             fWhitespaceOnErr = fTrue;
@@ -5633,6 +5968,7 @@ INT __cdecl wmain( INT argc, __in_ecount(argc) LPWSTR argv[] )
 
                 Call( JetSetSystemParameterW( &instance, 0, JET_paramRecovery, 0, L"repair_off" ) );
 
+                // save the default temp dbg name to restore it if needed for defrag
                 WCHAR   wszTempDatabaseDefault[_MAX_PATH + 1];
                 Call( JetGetSystemParameterW( instance, 0, JET_paramTempPath, 0, wszTempDatabaseDefault, sizeof(wszTempDatabaseDefault) ) );
                 Call( JetSetSystemParameterW( &instance, 0, JET_paramTempPath, 0, opts.wszTempDB ) );
@@ -5645,11 +5981,14 @@ INT __cdecl wmain( INT argc, __in_ecount(argc) LPWSTR argv[] )
                 Call( JetSetSystemParameterW( &instance, 0, JET_paramMaxOpenTables, 10000, NULL ) );
                 Call( JetSetSystemParameterW( &instance, 0, JET_paramPreferredMaxOpenTables, 10000, NULL ) );
                 Call( JetSetSystemParameterW( &instance, 0, JET_paramDisableCallbacks, fTrue, NULL ) );
+                //  create plenty of sessions for multi-threaded integrity/repair
+                //  need to have plenty of pages to have that many sessions
                 Call( JetSetSystemParameterW( &instance, 0, JET_paramMaxSessions, 128, NULL ) );
                 Call( JetSetSystemParameterW( &instance, 0, JET_paramMaxCursors, 10240, NULL ) );
                 Call( JetSetSystemParameterW( &instance, 0, JET_paramMaxTemporaryTables, 10000, NULL ) );
                 Call( JetSetSystemParameterW( &instance, 0, JET_paramEngineFormatVersion, JET_efvUsePersistedFormat, NULL ) );
 
+                // Set user overrides.
                 Call( ErrEDBUTLUserSystemParameters( &instance, &opts ) );
 
                 Call( JetInit( &instance ) );
@@ -5671,6 +6010,9 @@ INT __cdecl wmain( INT argc, __in_ecount(argc) LPWSTR argv[] )
                 }
                 else if( FUTILOPTSSuppressLogo( opts.fUTILOPTSFlags ) )
                 {
+                    // if /g is chosen, repair will pop up a message box
+                    // so that a user won't accidently repair a dirty-
+                    // shutdown database
                     grbit |= JET_bitDBUtilOptionSuppressLogo;
                 }
 
@@ -5683,14 +6025,22 @@ INT __cdecl wmain( INT argc, __in_ecount(argc) LPWSTR argv[] )
                     PrintStatus,
                     grbit );
 
+                // if the repair detected corruptions but
+                // data lossing repair is not allowed (ie NTDS.DIT)
+                // then we will try defrag as all we can do
+                //
                 if ( JET_errDatabaseCorruptedNoRepair == err )
                 {
+                    // in order to run defrag we need to clean-up the current instance
+                    // and set back JET_paramTempPath to the default
+                    //
                     err                 = JET_errSuccess;
                     ErrEDBUTLCleanup( instance, sesid, err );
                     instance            = 0;
                     sesid               = JET_sesidNil;
                     Call( JetSetSystemParameterW( &instance, 0, JET_paramTempPath, 0, wszTempDatabaseDefault ) );
 
+                    // fall through to defrag
                     fTryDefrag = fTrue;
                 }
                 else
@@ -5732,6 +6082,7 @@ INT __cdecl wmain( INT argc, __in_ecount(argc) LPWSTR argv[] )
 
                 fWhitespaceOnErr = fTrue;
 
+                // Restart with logging/recovery disabled.
                 Call( JetSetSystemParameterW( &instance, 0, JET_paramRecovery, 0, L"off" ) );
                 Call( JetSetSystemParameterW( &instance, 0, JET_paramEnableOnlineDefrag, 0, NULL ) );
                 Call( JetSetSystemParameterW( &instance, 0, JET_paramDbExtensionSize, 256, NULL ) );
@@ -5744,10 +6095,12 @@ INT __cdecl wmain( INT argc, __in_ecount(argc) LPWSTR argv[] )
                 Call( JetSetSystemParameterW( &instance, 0, JET_paramDisableCallbacks, fTrue, NULL ) );
                 Call( JetSetSystemParameterW( &instance, 0, JET_paramEngineFormatVersion, opts.efvUserSpecified == 0 ? JET_efvUsePersistedFormat : opts.efvUserSpecified, NULL ) );
 
+                // Set user overrides.
                 Call( ErrEDBUTLUserSystemParameters( &instance, &opts ) );
                 Call( JetInit( &instance ) );
                 CallJ( JetBeginSessionW( instance, &sesid, wszUser, wszPassword ), Cleanup );
 
+                // Detach temporary database and delete file if present (ignore errors).
                 EDBUTLDeleteTemp( &opts );
 
                 dbutil.sesid        = sesid;
@@ -5786,6 +6139,9 @@ INT __cdecl wmain( INT argc, __in_ecount(argc) LPWSTR argv[] )
                                 wszDefaultChecksumDB,
                                 &filetype );
 
+                // if there is no such a file and the file name was just a 3 letter name
+                // probably it is the set of logs with that extension
+                //
                 if ( JET_filetypeUnknown == filetype && fCheckLogSet )
                 {
                     filetype = JET_filetypeLog;
@@ -5799,6 +6155,7 @@ INT __cdecl wmain( INT argc, __in_ecount(argc) LPWSTR argv[] )
                 switch ( filetype )
                 {
                     case JET_filetypeCheckpoint:
+                        // we have a checkpoint file. We will checksum it as a database.
                         wprintf( L" Checkpoint File: %s%c", opts.wszSourceDB, wchNewLine );
                         UTILOPTSSetChecksumEDB( opts.fUTILOPTSFlags );
                         break;
@@ -5812,8 +6169,12 @@ INT __cdecl wmain( INT argc, __in_ecount(argc) LPWSTR argv[] )
                             wprintf( L"      Log File: %s%c", opts.wszSourceDB, wchNewLine );
                         }
 
+                        // we will reset the flags below in order to avoid additional
+                        // checksuming once we go past the log file checking below
                         UTILOPTSResetChecksumEDB( opts.fUTILOPTSFlags );
 
+                        // we prepare the variables in order to
+                        // call the same code the modeDump for log files
                         opts.pv = &dbutil;
                         opts.mode = modeDump;
                         dbutil.op = opDBUTILDumpLogfile;
@@ -5824,6 +6185,9 @@ INT __cdecl wmain( INT argc, __in_ecount(argc) LPWSTR argv[] )
                         Call( JetSetSystemParameterW( &instance, 0, JET_paramEnableIndexChecking, JET_IndexCheckingOff, NULL ) );
                         Call( JetSetSystemParameterW( &instance, 0, JET_paramDisableCallbacks, fTrue, NULL ) );
 
+                        //  UNDONE: all the other /k cases except log will have
+                        //  a status bar printing. Can we get one
+                        //  for the logs as well?
                         Call( ErrEDBUTLDump( &dbutil, &opts ) );
                     }
                         break;
@@ -5844,8 +6208,12 @@ INT __cdecl wmain( INT argc, __in_ecount(argc) LPWSTR argv[] )
                     {
                         wprintf( L"      Flush Map File: %s%c", opts.wszSourceDB, wchNewLine );
 
+                        // we will reset the flags below in order to avoid additional
+                        // checksuming once we go past the log file checking below
                         UTILOPTSResetChecksumEDB( opts.fUTILOPTSFlags );
 
+                        // we prepare the variables in order to
+                        // call the same code the modeDump for flush map files
                         opts.pv = &dbutil;
                         opts.mode = modeDump;
                         dbutil.op = opDBUTILDumpFlushMapFile;
@@ -5856,8 +6224,10 @@ INT __cdecl wmain( INT argc, __in_ecount(argc) LPWSTR argv[] )
                         break;
 
                     default:
+                        //  New type at ESE level? Must be added here!
                         AssertSz( false, "Invalid file type %d found.", filetype );
 
+                        //  FALL THROUGH
 
                     case JET_filetypeUnknown:
                     case JET_filetypeDatabase:
@@ -5891,6 +6261,9 @@ INT __cdecl wmain( INT argc, __in_ecount(argc) LPWSTR argv[] )
                     }
                 }
 
+                //  now go back and check if we detected any
+                //  checksum mismatches in the database
+                //
                 if ( fBadDbChecksumDetected )
                 {
                     Call( ErrERRCheck( JET_errDatabaseCorrupted ) );
@@ -5965,9 +6338,12 @@ INT __cdecl wmain( INT argc, __in_ecount(argc) LPWSTR argv[] )
                     Call( JetSetSystemParameterW( &instance, 0, JET_paramEnableShrinkDatabase, JET_bitShrinkDatabaseOff, NULL ) );
                 }
 
+                //  create enough sessions for multi-threadeding
+                //  need to have plenty of pages to have that many sessions
                 Call( JetSetSystemParameterW( &instance, 0, JET_paramMaxSessions, 16, NULL ) );
                 Call( JetSetSystemParameterW( &instance, 0, JET_paramMaxCursors, 10240, NULL ) );
 
+                // Set user overrides.
                 Call( ErrEDBUTLUserSystemParameters( &instance, &opts ) );
 
                 Call( JetInit( &instance ) );
@@ -6038,11 +6414,14 @@ INT __cdecl wmain( INT argc, __in_ecount(argc) LPWSTR argv[] )
                 Call( JetSetSystemParameterW( &instance, 0, JET_paramMaxOpenTables, 10000, NULL ) );
                 Call( JetSetSystemParameterW( &instance, 0, JET_paramPreferredMaxOpenTables, 10000, NULL ) );
                 Call( JetSetSystemParameterW( &instance, 0, JET_paramDisableCallbacks, fTrue, NULL ) );
+                //  create plenty of sessions for multi-threaded integrity/repair
+                //  need to have plenty of pages to have that many sessions
                 Call( JetSetSystemParameterW( &instance, 0, JET_paramMaxSessions, 128, NULL ) );
                 Call( JetSetSystemParameterW( &instance, 0, JET_paramMaxCursors, 10240, NULL ) );
                 Call( JetSetSystemParameterW( &instance, 0, JET_paramMaxTemporaryTables, 10000, NULL ) );
                 Call( JetSetSystemParameterW( &instance, 0, JET_paramEngineFormatVersion, JET_efvUsePersistedFormat, NULL ) );
 
+                // Set user overrides.
                 Call( ErrEDBUTLUserSystemParameters( &instance, &opts ) );
 
                 Call( JetInit( &instance ) );
@@ -6084,6 +6463,7 @@ INT __cdecl wmain( INT argc, __in_ecount(argc) LPWSTR argv[] )
             WCHAR *     wszTargetInstance = opts.wszRestore;
             WCHAR       wszFullRestorePath[_MAX_PATH + 1];
 
+            // if missing, get current directory
             if ( _wfullpath( wszFullRestorePath, opts.wszSourceDB?opts.wszSourceDB:L".", _MAX_PATH ) == NULL )
             {
                 Call ( JET_errInvalidPath );
@@ -6094,12 +6474,16 @@ INT __cdecl wmain( INT argc, __in_ecount(argc) LPWSTR argv[] )
             if ( FUTILOPTSServerSim ( opts.fUTILOPTSFlags ) )
             {
 #ifdef RESTORE_SERVER_SIMULATION
+                // if no definition file was provided, call with NULL and
+                // it will print a sample of such a file
 
                 err = ErrDBUTLServerSim( opts.wszSourceDB?wszFullRestorePath:NULL );
 
-#else
+#else // RESTORE_SERVER_SIMULATION
+                // FUTILOPTSServerSim() set only with RESTORE_SERVER_SIMULATION
+                // defined, check command line parsing above
                 assert ( fFalse );
-#endif
+#endif // RESTORE_SERVER_SIMULATION
             }
             else if ( FUTILOPTSDumpRestoreEnv( opts.fUTILOPTSFlags ) )
             {
@@ -6118,13 +6502,15 @@ INT __cdecl wmain( INT argc, __in_ecount(argc) LPWSTR argv[] )
 
             Call( err );
             break;
-#endif
+#endif // ESENT
 
         case modeDump:
         default:
         {
             WCHAR   wszBaseName[4];
 
+            // Make the most innocuous operation the fall-through (to cover
+            // ourselves in the unlikely event we messed up the modes).
             assert( opts.mode == modeDump );
             assert( opts.pv == &dbutil );
 
@@ -6137,14 +6523,14 @@ INT __cdecl wmain( INT argc, __in_ecount(argc) LPWSTR argv[] )
 
                 if ( opts.wszSourceDB == NULL )
                 {
-                    wprintf( wszUsageErr1, L"database/filename" );
+                    wprintf( wszUsageErr1, L"database/filename" );          // Missing spec.
                     wprintf( L"%c%c", wchNewLine, wchNewLine );
                     Call( ErrERRCheck( JET_errInvalidParameter ) );
                 }
 
                 wprintf( L"Initiating FILE DUMP mode...%c", wchNewLine );
 
-                switch( dbutil.op )
+                switch( dbutil.op ) //lint !e644
                 {
                     case opDBUTILDumpLogfile:
                         opts.wszBase = wszBaseName;
@@ -6181,6 +6567,8 @@ INT __cdecl wmain( INT argc, __in_ecount(argc) LPWSTR argv[] )
                         }
                         else
                         {
+                            //  non-NULL szTable means we'll be seeking down
+                            //  the btree searching for a specified key
                         }
                         break;
 
@@ -6199,9 +6587,11 @@ INT __cdecl wmain( INT argc, __in_ecount(argc) LPWSTR argv[] )
                     case opDBUTILDumpRBSPages:
                         err = ErrEDBUTLCheckDBName( &opts, wszDefaultTempDB, NULL );
 
+                        //  we may still want to dump file system information if the file is locked
                         if ( dbutil.op == opDBUTILDumpSpace &&
                             ( err == JET_errSuccess || err == JET_errFileAccessDenied || err == JET_errDatabaseCorrupted ) )
                         {
+                            //  dump NTFS information
                             (void)ErrFileSystemDump( opts.wszSourceDB, FUTILOPTSVerbose( opts.fUTILOPTSFlags ), FUTILOPTSDebugMode( opts.fUTILOPTSFlags ) );
                         }
                         Call( err );
@@ -6242,8 +6632,12 @@ INT __cdecl wmain( INT argc, __in_ecount(argc) LPWSTR argv[] )
 
             assert( instance == 0 );
 
+            //
+            // Actually dump the relevant info ...
+            //
             err = ErrEDBUTLDump( &dbutil, &opts );
 
+            // Print progress failure for space categorization.
             if ( ( err < JET_errSuccess ) && ( err != JET_errInvalidParameter ) &&
                     ( dbutil.op == opDBUTILDumpSpaceCategory ) && !( dbutil.grbitOptions & JET_bitDBUtilOptionDumpVerbose ) )
             {
@@ -6252,13 +6646,14 @@ INT __cdecl wmain( INT argc, __in_ecount(argc) LPWSTR argv[] )
 
             wprintf( L"%c", wchNewLine );
 
+            //  dump the cached file header if present
             dbutil.op = opDBUTILDumpCachedFileHeader;
             (void)ErrEDBUTLDump( &dbutil, &opts );
 
             Call( err );
             break;
         }
-    }
+    } // switch( opts.mode )
 
 #ifdef ESESHADOW
     if ( FUTILOPTSOperateTempVss( opts.fUTILOPTSFlags ) )
@@ -6292,7 +6687,7 @@ INT __cdecl wmain( INT argc, __in_ecount(argc) LPWSTR argv[] )
 
     EDBUTLGetTime( timer, &iSec, &iMSec );
 
-    if( JET_errSuccess != errRepaired )
+    if( JET_errSuccess != errRepaired ) //db is repaired
     {
         ULONG_PTR   ulWarn      = errRepaired;
         WCHAR       wszWarn[512];
@@ -6310,7 +6705,7 @@ INT __cdecl wmain( INT argc, __in_ecount(argc) LPWSTR argv[] )
         wprintf( L"%c%c", wchNewLine, wchNewLine );
         PushEseutilEndMarker( iSec, iMSec, err, wszWarn );
     }
-    else
+    else // JET_errSuccess == err
     {
         wprintf( wszOperSuccess, iSec, iMSec );
         wprintf( L"%c%c", wchNewLine, wchNewLine );
@@ -6318,6 +6713,7 @@ INT __cdecl wmain( INT argc, __in_ecount(argc) LPWSTR argv[] )
     }
 
     OSTerm();
+    // OSPostterm() implicit with oslayer destructor.
     return err;
 
 
@@ -6385,6 +6781,7 @@ HandleError:
     }
 
     OSTerm();
+    // OSPostterm() implicit with oslayer destructor.
 
     wprintf( L"%c%c", wchNewLine, wchNewLine );
     return err;
@@ -6396,8 +6793,9 @@ ESEBACKError:
     PrintESEUTILError( hrESEBACK, wszESEBACKError, fWhitespaceOnErr, timer );
     LocalFree( wszESEBACKError );
     OSTerm();
+    // OSPostterm() implicit with oslayer destructor.
     return hrESEBACK;
-#endif
+#endif // ESENT
 
 
 Usage:
@@ -6408,6 +6806,7 @@ Usage:
     EDBUTLHelp( GetCurArg() );
     
     OSTerm();
+    // OSPostterm() implicit with oslayer destructor.
     return -1;
 }
 

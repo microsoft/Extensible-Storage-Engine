@@ -15,8 +15,14 @@ namespace Internal
         {
             namespace Interop
             {
+                /// <summary>
+                /// Region Position
+                /// </summary>
                 public enum class RegionPosition : Int64
                 {
+                    /// <summary>
+                    /// An invalid RegionPosition.
+                    /// </summary>
                     Invalid = Int64::MaxValue,
                 };
             }

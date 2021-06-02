@@ -1,9 +1,9 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-const INT ccolCMPFixedVar       = 255;
+const INT ccolCMPFixedVar       = 255;          // max. number of fixed and variable columns */
 
-const ULONG ulCMPDefaultDensity = 100;
+const ULONG ulCMPDefaultDensity = 100;          // to be fine-tuned later
 const ULONG ulCMPDefaultPages   = 0;
 
 
@@ -16,7 +16,7 @@ struct COLUMNIDINFO
 
 ERR ErrCMPCopyLVTree(
     PIB         *ppib,
-    FUCB        *pfucbSrc,
+    FUCB        *pfucbSrc,      // pfucbSrc is on the root of LV tree
     FUCB        *pfucbDest,
     BYTE        *pbBuf,
     ULONG       cbBufSize,
@@ -32,13 +32,13 @@ ERR ErrCMPGetSLongFieldNext(
     LVROOT2     *plvroot );
 VOID CMPGetSLongFieldClose( FUCB *pfucbGetLV );
 ERR ErrCMPRetrieveSLongFieldValueByChunk(
-    FUCB        *pfucb,
+    FUCB        *pfucb,             // pfucb must be on the first LV node
     const LvId  lid,
     const ULONG cbTotal,
     ULONG       ibLongValue,
     BYTE        *pb,
     const ULONG cbMax,
-    ULONG       *pcbReturnedPhysical );
+    ULONG       *pcbReturnedPhysical );     //  Total returned byte count
 ERR ErrCMPAppendLVChunk(
     FUCB                *pfucbLV,
     LvId                lid,
@@ -108,6 +108,8 @@ INLINE ERR ErrCMPReportProgress( STATUSINFO *pstatus )
                                 &snprog );
 }
 
+// UNICODE_UNDONE_DEFERRED: we should review all %ws to see if we are missing something if not shown
+//
 
 INLINE ERR ErrCMPInitProgress(
     STATUSINFO  *pstatus,
@@ -127,6 +129,7 @@ INLINE ERR ErrCMPInitProgress(
     {
         WCHAR   wszPathedStatsFile[IFileSystemAPI::cchPathMax];
 
+        //  write stats file to same location as temp database
         CallR( ErrUtilFullPathOfFile(   PinstFromPpib( PpibFromSesid( pstatus->sesid ) )->m_pfsapi,
                                         wszPathedStatsFile,
                                         SzParam( PinstFromPpib( PpibFromSesid( pstatus->sesid ) ), JET_paramTempPath ) ) );
@@ -149,7 +152,7 @@ INLINE ERR ErrCMPInitProgress(
                 "DEBUG"
 #else
                 "RETAIL"
-#endif
+#endif  //  DEBUG
                 );
             fflush( pstatus->hfCompactStats );
             CMPSetTime( &pstatus->timerCopyDB );
@@ -223,10 +226,12 @@ INLINE LIDMAP::~LIDMAP()
 {
 }
 
+//  set up LV copy buffer and tableids for IsamCopyRecords
+//
 INLINE ERR LIDMAP::ErrLIDMAPInit( PIB *ppib )
 {
     ERR                 err;
-    const JET_COLUMNDEF columndefLIDMap[] =
+    const JET_COLUMNDEF columndefLIDMap[] = // Table definition of LID map table.
                             {
                                 { sizeof( JET_COLUMNDEF ), 0, JET_coltypUnsignedLongLong, 0, 0, 0, 0, sizeof( unsigned __int64 ), JET_bitColumnFixed | JET_bitColumnTTKey },
                                 { sizeof( JET_COLUMNDEF ), 0, JET_coltypUnsignedLongLong, 0, 0, 0, 0, sizeof( unsigned __int64 ), JET_bitColumnFixed },
@@ -236,6 +241,8 @@ INLINE ERR LIDMAP::ErrLIDMAPInit( PIB *ppib )
     const INT           ccolumndefLIDMap = sizeof( columndefLIDMap ) / sizeof( JET_COLUMNDEF );
     JET_COLUMNID        rgcolumnid[ccolumndefLIDMap];
 
+    //  open temporary table
+    //
     Assert( JET_tableidNil == m_tableidLIDMap );
     CallR( ErrIsamOpenTempTable(
         (JET_SESID)ppib,
@@ -259,6 +266,8 @@ INLINE ERR LIDMAP::ErrLIDMAPInit( PIB *ppib )
 }
 
 
+//  free LVBuffer and close LIDMap table
+//
 INLINE ERR LIDMAP::ErrTerm( PIB *ppib )
 {
     Assert( JET_tableidNil != m_tableidLIDMap );
@@ -343,7 +352,8 @@ INLINE ERR LIDMAP::ErrGetLIDDest(
     ERR         err;
     ULONG       cbActual;
 
-    
+    /*  check for lidSrc in LVMapTable
+    /**/
     CallR( ErrDispMakeKey(
         (JET_SESID)ppib,
         m_tableidLIDMap,
@@ -444,7 +454,7 @@ INLINE ERR LIDMAP::ErrUpdateLVRefcounts( PIB *ppib, FUCB *pfucb )
                 0,
                 NULL ) );
         Assert( sizeof(ULONG) == cbActual );
-        Assert( ulRefcountSrc > 0 );
+        Assert( ulRefcountSrc > 0 );            // We don't copy LV's with refcount 0
 
         Call( ErrDispRetrieveColumn(
                 (JET_SESID)ppib,
@@ -458,6 +468,9 @@ INLINE ERR LIDMAP::ErrUpdateLVRefcounts( PIB *ppib, FUCB *pfucb )
         Assert( sizeof(ULONG) == cbActual );
         Assert( ulRefcountSrc != ulRefcountDest || ulRefcountDest > 0 );
 
+        // If the refcount in the source table was wrong, it should have
+        // erred on the side of safety (so LV's wouldn't have been
+        // orphaned).
         Assert( ulRefcountSrc >= ulRefcountDest );
 
 #ifndef DEBUG

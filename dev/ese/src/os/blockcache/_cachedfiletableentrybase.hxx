@@ -3,8 +3,9 @@
 
 #pragma once
 
+//  A cached file table entry base class.
 
-class CCachedFileTableEntryBase
+class CCachedFileTableEntryBase  //  cfte
 {
     public:
 
@@ -47,6 +48,7 @@ class CCachedFileTableEntryBase
 
     private:
 
+        //  Wait context for cache miss collisions on the cached file table.
 
         class CWaiter
         {
@@ -188,6 +190,7 @@ INLINE ERR CCachedFileTableEntryBase::ErrOpenCachedFile(    _In_ IFileSystemFilt
     WCHAR                       wszCachedFileKeyPath[ IFileSystemAPI::cchPathMax ]  = { 0 };
     ICachedFileConfiguration*   pcfconfig                                           = NULL;
 
+    //  open the cached file by id
 
     Call( pfsf->ErrFileOpenById(    Volumeid(),
                                     Fileid(),
@@ -195,15 +198,18 @@ INLINE ERR CCachedFileTableEntryBase::ErrOpenCachedFile(    _In_ IFileSystemFilt
                                     IFileAPI::fmfStorageWriteBack,
                                     (IFileAPI**)&pff ) );
 
+    //  get the configuration for the cached file
 
     Call( pff->ErrPath( wszAbsCachedFilePath ) );
     Call( pfident->ErrGetFileKeyPath( wszAbsCachedFilePath, wszCachedFileKeyPath ) );
     Call( pbcconfig->ErrGetCachedFileConfiguration( wszCachedFileKeyPath, &pcfconfig ) );
 
+    //  cache commonly used configuration
 
     m_filenumber = (ICacheTelemetry::FileNumber)pcfconfig->LCacheTelemetryFileNumber();
     m_cbBlockSize = pcfconfig->CbBlockSize();
 
+    //  make the cached file available for other opens
 
     m_pff = pff;
     m_pcfconfig = pcfconfig;

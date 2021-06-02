@@ -30,7 +30,7 @@ struct __declspec(uuid("00000000-0000-0000-0000-000000000000")) GUID_NULL;
 #define GUID_NULL __uuidof(struct GUID_NULL)
 #endif
 
-const VSS_ID guidSystemWriter = { 
+const VSS_ID guidSystemWriter = { /* e8132975-6f93-4464-a53e-1050253ae220 */
     0xe8132975,
     0x6f93,
     0x4464,
@@ -38,6 +38,7 @@ const VSS_ID guidSystemWriter = {
 };
 
 
+// Add definitions for the Store writer? VssJet writer?
 
 
 class EseShadowInformation
@@ -50,6 +51,7 @@ public:
     VSS_ID          m_vssIdLogSnapshot;
     VSS_ID          m_vssIdSystemSnapshot;
 
+    //  Target file paths
     PWSTR           m_databaseFile;
     PWSTR           m_logFilePath;
     PWSTR           m_systemFilePath;
@@ -103,6 +105,7 @@ EseShadowInit(
     hr = CoInitializeEx( NULL, COINIT_APARTMENTTHREADED );
     if ( SUCCEEDED( hr ) )
     {
+        // including S_FALSE
         pesi->m_ComInitialized = true;
     }
 
@@ -193,6 +196,10 @@ Cleanup:
     return szNew;
 }
 
+// Historical note: This function used to expose the snapshot, which is
+// why it uses the verb 'Mount'.
+// Presently it just retrieves the information of where the VSS snap
+// exists.
 static HRESULT __stdcall
 EseShadowIMountShadow(
     __in IVssBackupComponents* pvbc,
@@ -215,6 +222,7 @@ EseShadowIMountShadow(
 
     szOutPath[ 0 ] = L'\0';
 
+    // grab snapshotset data so that we can construct the mount name
     CallHr( pvbc->GetSnapshotProperties( vssIdVolume, &prop ) );
     fFreeProp = TRUE;
     pProp = &prop;
@@ -224,11 +232,15 @@ EseShadowIMountShadow(
 
     if ( pProp->m_pwszSnapshotDeviceObject != NULL )
     {
+        // already mounted
         DBGV( wprintf( L"Device name is %s.\n", pProp->m_pwszSnapshotDeviceObject ) );
         CallHr( StringCchCopyW( szOutPath, cchOutPath, pProp->m_pwszSnapshotDeviceObject ) );
         hr = S_OK;
     }
 
+    //
+    // Now we need to tell the caller where in the mounted path to look.
+    //
     hfile = CreateFileW( fileName,
         STANDARD_RIGHTS_READ,
         FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
@@ -286,6 +298,7 @@ EseShadowMountShadow(
     EseShadowInformation* pesi  = static_cast<EseShadowInformation*>( context );
     IVssBackupComponents* pvbc  = pesi->m_pvbc;
 
+    //  database volume.
     CallHr( EseShadowIMountShadow(
         pvbc,
         pesi->m_vssIdDbSnapshot,
@@ -294,6 +307,7 @@ EseShadowMountShadow(
         cchOutDatabasePath
     ) );
 
+    //  log volume.
     CallHr( EseShadowIMountShadow(
         pvbc,
         pesi->m_vssIdLogSnapshot,
@@ -302,6 +316,7 @@ EseShadowMountShadow(
         cchOutLogPath
     ) );
 
+    //  system volume.
     CallHr( EseShadowIMountShadow(
         pvbc,
         pesi->m_vssIdSystemSnapshot,
@@ -390,6 +405,7 @@ EseShadowICreateShadow(
 
     CallHr( pvbc->SetBackupState( true, false, VSS_BT_FULL, true ) );
 
+    // TODO: What does this do?
     CallHr( pvbc->DisableWriterClasses( &guidSystemWriter, 1 ) );
 
     CallHr( pvbc->GatherWriterMetadata( &pAsync ) );
@@ -415,7 +431,9 @@ EseShadowICreateShadow(
 
         pMetadata.Release();
 
+        // get writer metadata
         CallHr( pvbc->GetWriterMetadata(iWriter, &idInstance, &pMetadata ) );
+        // get writer identity
         CallHr( pMetadata->GetIdentity(
             &idInstanceT,
             &idWriter,
@@ -438,8 +456,8 @@ EseShadowICreateShadow(
             || memcmp( &idWriter, &AdWriterId, sizeof(VSS_ID) ) == 0
 #else
             || memcmp( &idWriter, &StoreWriterId, sizeof(VSS_ID) ) == 0
-#endif
-#endif
+#endif  //  ESENT
+#endif  //  ENABLE_EXTERNAL_ESE_WRITERS
         )
         {
             WCHAR szId[50];
@@ -490,6 +508,7 @@ EseShadowICreateShadow(
 
     if ( szLogDirectory )
     {
+        // Log volume
         fRc = GetVolumePathNameW( szLogDirectory, szLogDrive, _countof( szLogDrive ) );
         if ( !fRc )
         {
@@ -515,6 +534,7 @@ EseShadowICreateShadow(
 
     if ( szSystemDirectory )
     {
+        // System volume
         fRc = GetVolumePathNameW( szSystemDirectory, szSystemDrive, _countof( szSystemDrive ) );
         if ( !fRc )
         {
@@ -542,6 +562,7 @@ EseShadowICreateShadow(
         *pvssIdSystemSnapshot = *pvssIdLogSnapshot;
     }
 
+    // Ok, now we can run the snapshot.
     CallHr( pvbc->PrepareForBackup( &pAsync ) );
     CallHr( pAsync->Wait() );
     pAsync.Detach();
@@ -636,6 +657,8 @@ EseShadowCreateShadow(
             szEseBaseName );
         }
 
+        // Get the directory name by duping the string, and overwriting the last backslash.
+        // I don't think _splitpath works with 'unconventional' paths.
         g_eseRecoveryWriterConfig.m_szDatabasePath = WcsDupNew( g_eseRecoveryWriterConfig.m_szDatabaseFileFullPath );
 
         wchar_t* pchLastBackslash = const_cast<wchar_t*>( wcsrchr( g_eseRecoveryWriterConfig.m_szDatabasePath, L'\\' ) );
@@ -770,6 +793,8 @@ EseShadowCreateSimpleShadow(
         wcscpy_s( pesi->m_databaseFile, databasePathLen, szArbitraryFile );
         g_eseRecoveryWriterConfig.m_szDatabaseFileFullPath = pesi->m_databaseFile;
 
+        // Get the directory name by duping the string, and overwriting the last backslash.
+        // I don't think _splitpath works with 'unconventional' paths.
         g_eseRecoveryWriterConfig.m_szDatabasePath = WcsDupNew( g_eseRecoveryWriterConfig.m_szDatabaseFileFullPath );
 
         wchar_t* pchLastBackslash = const_cast<wchar_t*>( wcsrchr( g_eseRecoveryWriterConfig.m_szDatabasePath, L'\\' ) );

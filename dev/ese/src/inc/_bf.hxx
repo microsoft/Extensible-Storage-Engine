@@ -13,7 +13,7 @@
 typedef LONG_PTR IPG;
 const IPG ipgNil = IPG( -1 );
 
-struct IFMPPGNO
+struct IFMPPGNO                                     //  IFMPPGNO -- Page Key
 {
     IFMPPGNO() {}
     IFMPPGNO( IFMP ifmpIn, PGNO pgnoIn )
@@ -58,25 +58,30 @@ struct IFMPPGNO
 };
 
 
+// CAtomicBfBitField class
 
 class CAtomicBfBitField
 {
     private:
         typedef union
         {
+            // DWORD that contains the bits.
             FLAG32 bits;
 
+            // Actual bits.
             struct
             {
-                FLAG32 FDependentPurged:1;
-                FLAG32 FImpedingCheckpoint:1;
-                FLAG32 FRangeLocked:1;
-                FLAG32 rgbitReserved:29;
+                FLAG32 FDependentPurged:1;      //  BF we were dependent on has been purged.
+                FLAG32 FImpedingCheckpoint:1;   //  BF where someone dependant upon this page
+                                                //  is impeding the checkpoint.
+                FLAG32 FRangeLocked:1;          //  BF is range-locked.
+                FLAG32 rgbitReserved:29;        //  Free space.
             };
         } BfBitField;
 
         BfBitField m_bfbf;
 
+        // Declaration macro.
         #define BitFieldDecl( _Type, _Name )                                                    \
         inline _Type _Name() const                                                              \
         {                                                                                       \
@@ -103,11 +108,13 @@ class CAtomicBfBitField
         }
 
     public:
+        // Initialize all bits with zero.
         CAtomicBfBitField()
         {
             m_bfbf.bits = 0;
         }
 
+        // Getter/setter declaration.
         BitFieldDecl( BOOL, FDependentPurged );
         BitFieldDecl( BOOL, FImpedingCheckpoint );
         BitFieldDecl( BOOL, FRangeLocked );
@@ -115,6 +122,7 @@ class CAtomicBfBitField
 C_ASSERT( sizeof( CAtomicBfBitField ) == sizeof( FLAG32 ) );
 
 
+//  BF struct
 
 struct BF;
 typedef BF* PBF;
@@ -123,7 +131,7 @@ typedef LONG_PTR IBF;
 const IBF ibfNil = IBF( -1 );
 typedef IBF CBF;
 
-struct BF
+struct BF                                           //  BF  --  IFMP/PGNO buffer state
 {
     BF()
         :   ifmp( ifmpNil ),
@@ -151,7 +159,7 @@ struct BF
             pv( NULL ),
             bfrs( bfrsNotCommitted ),
             fLazyIO( fFalse ),
-            pWriteSignalComplete( NULL ),
+            pWriteSignalComplete( NULL ), // and thus pbfNext( NULL )
             icbPage( icbPageInvalid ),
             icbBuffer( icbPageInvalid ),
             fSuspiciouslySlowRead( fFalse ),
@@ -170,7 +178,7 @@ struct BF
     {
     }
 
-    void Dump( CPRINTF* pcprintf, DWORD_PTR dwOffset = 0 ) const;
+    void Dump( CPRINTF* pcprintf, DWORD_PTR dwOffset = 0 ) const;   //  dumps BF state
 
     static SIZE_T OffsetOfLRUKIC()      { return OffsetOf( BF, lrukic ); }
 
@@ -187,181 +195,224 @@ struct BF
 
 #ifdef _WIN64
 
+    //   0 B /////////////////////////////////////////////////////////////////////////////////////
 
+    //  UNION: This is a union, but hidden via the OffsetOfOB0IC() / OffsetOfOB0OLILE() functions.
     CApproximateIndex< LGPOS, BF, OffsetOfOB0IC >::CInvasiveContext ob0ic;
+                                                    //  Invasive Context for the OldestBegin0 index or
+                                                    //    Invasive List Element for the Overflow List
 
-    LGPOS               lgposOldestBegin0;
+    LGPOS               lgposOldestBegin0;          //  log position of Begin0 of the oldest
+                                                    //    transaction to dirty this IFMP/PGNO
 
-    LGPOS               lgposModify;
+    LGPOS               lgposModify;                //  log position of most recent log record
+                                                    //    to reference this IFMP/PGNO
 
+    //  32 B //////////////////////////////////////////////////////////////////////////////////////
 
-    CSXWLatch           sxwl;
+    CSXWLatch           sxwl;                       //  S/X/W Latch protecting this BF state and
+                                                    //    its associated cached page
 
+    //  64 B //////////////////////////////////////////////////////////////////////////////////////
 
-    IFMP                ifmp;
-    PGNO                pgno;
+    IFMP                ifmp;                       //  IFMP of this cached page
+    PGNO                pgno;                       //  PGNO of this cached page
 
-    TICK                tickLastDirtied;
+    TICK                tickLastDirtied;            //  time when the BF was last dirtied (unique pages modified)
 
-    SHORT               err;
-    BYTE                fLazyIO:1;
-    BYTE                fNewlyEvicted:1;
-    BYTE                fQuiesced:1;
-    BYTE                fAvailable:1;
-    BYTE                fReserved4:1;
-    BYTE                fWARLatch:1;
-    BYTE                bfdf:2;
-    BYTE                fInOB0OL:1;
-    BYTE                irangelock:1;
-    BYTE                fCurrentVersion:1;
-    BYTE                fOlderVersion:1;
-    BYTE                fFlushed:1;
-    BYTE                bfls:3;
-
-    union
-    {
-        ULONG           iHashedLatch;
-        TICK            tickEligibleForNomination;
-        TICK            tickViewLastRefreshed;
-    };
-
-    BFResidenceState    bfrs;
-
-    void*               pv;
-
+    SHORT               err;                        //  I/O error
+    BYTE                fLazyIO:1;                  //  BF is issued at non-immediate dispatch priority
+    BYTE                fNewlyEvicted:1;            //  BF cache memory is newly evicted
+    BYTE                fQuiesced:1;                //  BF is quiesced for shrinking the cache
+    BYTE                fAvailable:1;               //  BF is in the avail pool
+    BYTE                fReserved4:1;               //  Available for re-use (was fMemory)
+    BYTE                fWARLatch:1;                //  BF is WAR Latched (valid only if exclusively latched)
+    BYTE                bfdf:2;                     //  BF dirty flags
+    BYTE                fInOB0OL:1;                 //  BF is in the Oldest Begin 0 index Overflow List
+    BYTE                irangelock:1;               //  active rangelock for this attempted flush
+    BYTE                fCurrentVersion:1;          //  BF contains the current version of this IFMP / PGNO
+    BYTE                fOlderVersion:1;            //  BF contains an older version of this IFMP / PGNO
+    BYTE                fFlushed:1;                 //  BF has been successfully flushed at least once
+    BYTE                bfls:3;                     //  BF latch state
 
     union
     {
-        volatile ULONG_PTR  pWriteSignalComplete;
+        ULONG           iHashedLatch;               //  bflsHashed:     offset of hashed latch in PLS
+        TICK            tickEligibleForNomination;  //  !bflsHashed:    time BF is eligible for nomination
+        TICK            tickViewLastRefreshed;      //  [bfat==bfatViewMapped]: tick of the last time all pages were definitely read (typically within an exception handler)
     };
 
-    BYTE                icbPage:4;
-    BYTE                icbBuffer:4;
+    BFResidenceState    bfrs;                       //  BF residence state
 
-    BYTE                fSuspiciouslySlowRead:1;
-    BYTE                fSyncRead:1;
-    BYTE                bfat:2;
-    BYTE                fAbandoned:1;
+    void*               pv;                         //  Cached page image
+
+    //  96 B //////////////////////////////////////////////////////////////////////////////////////
+
+    union
+    {
+        volatile ULONG_PTR  pWriteSignalComplete;   //  write IO completion signal/information
+//      volatile PBF    pbfNext;                    //  future, this will be used for evict immediate
+    };
+
+    //  Important: Next 4 bytes protected from modify x-latch, can be read locklessly
+    BYTE                icbPage:4;                  //  Index into g_rgcbPageSize[] for the size of the page
+    BYTE                icbBuffer:4;                //  Index into g_rgcbPageSize[] for the CURRENT size of the buffer (dehydrated)
+
+    BYTE                fSuspiciouslySlowRead:1;    //  BF is for IO that has a suspiciously slow read
+    BYTE                fSyncRead:1;                //  BF was read synchronously (otherwise BF was read async)
+    BYTE                bfat:2;                     //  Method used to allocate the pv buffer
+    BYTE                fAbandoned:1;               //  Client abandoned this page, ok to purge / evict with dirty data immediately
     BYTE                grbitReserved:3;
 
-    BYTE                rgbReserved2[ 1 ];
+    BYTE                rgbReserved2[ 1 ];          //  Free space
 
-    TCE                 tce;
+    TCE                 tce;                        //  table class for perfmon tracking of pages
 
-    CAtomicBfBitField   bfbitfield;
+    CAtomicBfBitField   bfbitfield;                 //  Bit field that can be read from and written to without any latches.
 
-    volatile PBF        pbfTimeDepChainPrev;
-    volatile PBF        pbfTimeDepChainNext;
+    volatile PBF        pbfTimeDepChainPrev;        //  prev BF in our time dependency chain
+    volatile PBF        pbfTimeDepChainNext;        //  next BF in our time dependency chain
 
+    //  128 B /////////////////////////////////////////////////////////////////////////////////////
 
-    RCE*                prceUndoInfoNext;
+    RCE*                prceUndoInfoNext;           //  Undo Info chain
 
-    void*               pvIOContext;
+    void*               pvIOContext;                //  I/O context (in practice, an IOREQ)
 
+    //  144 B /////////////////////////////////////////////////////////////////////////////////////
 
     CLRUKResourceUtilityManager< Kmax, BF, OffsetOfLRUKIC, IFMPPGNO >::CInvasiveContext lrukic;
+                                                    //  Invasive Context the LRUK Resource Utility Manager, Avail pool
+                                                    //  or Quiesced list.
+
+    //  184 B /////////////////////////////////////////////////////////////////////////////////////
 
 
+    RBS_POS             rbsposSnapshot;           //  Position of the rollback snapshot containing preimage for this page
 
-    RBS_POS             rbsposSnapshot;
+    // 192 B (64-bit/cache aligned) ///////////////////////////////////////////////////////////////
 
+#else  //  !_WIN64
 
-#else
-
+    //   0 B /////////////////////////////////////////////////////////////////////////////////////
 
     CApproximateIndex< LGPOS, BF, OffsetOfOB0IC >::CInvasiveContext ob0ic;
+                                                    //  Invasive Context for the OldestBegin0 index or
+                                                    //    Invasive List Element for the Overflow List
 
-    LGPOS               lgposOldestBegin0;
+    LGPOS               lgposOldestBegin0;          //  log position of Begin0 of the oldest
+                                                    //    transaction to dirty this IFMP/PGNO
 
-    LGPOS               lgposModify;
+    LGPOS               lgposModify;                //  log position of most recent log record
+                                                    //    to reference this IFMP/PGNO
 
-    volatile PBF        pbfTimeDepChainPrev;
-    volatile PBF        pbfTimeDepChainNext;
+    volatile PBF        pbfTimeDepChainPrev;        //  prev BF in our time dependency chain
+    volatile PBF        pbfTimeDepChainNext;        //  next BF in our time dependency chain (aka "older")
 
+    //  32 B //////////////////////////////////////////////////////////////////////////////////////
 
-    CSXWLatch           sxwl;
+    CSXWLatch           sxwl;                       //  S/X/W Latch protecting this BF state and
+                                                    //    its associated cached page
 
-    void*               pvIOContext;
+    void*               pvIOContext;                //  I/O context (in practice, an IOREQ)
 
-    IFMP                ifmp;
-    PGNO                pgno;
+    IFMP                ifmp;                       //  IFMP of this cached page
+    PGNO                pgno;                       //  PGNO of this cached page
 
+    //  64 B //////////////////////////////////////////////////////////////////////////////////////
 
-    void*               pv;
+    void*               pv;                         //  Cached page image
 
-    SHORT               err;
-    BYTE                fLazyIO:1;
-    BYTE                fNewlyEvicted:1;
-    BYTE                fQuiesced:1;
-    BYTE                fAvailable:1;
-    BYTE                fReserved4:1;
-    BYTE                fWARLatch:1;
-    BYTE                bfdf:2;
-    BYTE                fInOB0OL:1;
-    BYTE                irangelock:1;
-    BYTE                fCurrentVersion:1;
-    BYTE                fOlderVersion:1;
-    BYTE                fFlushed:1;
-    BYTE                bfls:3;
+    SHORT               err;                        //  I/O error
+    BYTE                fLazyIO:1;                  //  BF is issued at non-immediate dispatch priority
+    BYTE                fNewlyEvicted:1;            //  BF cache memory is newly evicted
+    BYTE                fQuiesced:1;                //  BF is quiesced for shrinking the cache
+    BYTE                fAvailable:1;               //  BF is in the avail pool
+    BYTE                fReserved4:1;               //  Available for re-use (was fMemory)
+    BYTE                fWARLatch:1;                //  BF is WAR Latched (valid only if exclusively latched)
+    BYTE                bfdf:2;                     //  BF dirty flags
+    BYTE                fInOB0OL:1;                 //  BF is in the Oldest Begin 0 index Overflow List
+    BYTE                irangelock:1;               //  active rangelock for this attempted flush
+    BYTE                fCurrentVersion:1;          //  BF contains the current version of this IFMP / PGNO
+    BYTE                fOlderVersion:1;            //  BF contains an older version of this IFMP / PGNO
+    BYTE                fFlushed:1;                 //  BF has been successfully flushed at least once
+    BYTE                bfls:3;                     //  BF latch state
 
     union
     {
-        ULONG           iHashedLatch;
-        TICK            tickEligibleForNomination;
-        TICK            tickViewLastRefreshed;
+        ULONG           iHashedLatch;               //  bflsHashed:     offset of hashed latch in PLS
+        TICK            tickEligibleForNomination;  //  !bflsHashed:    time BF is eligible for nomination
+        TICK            tickViewLastRefreshed;      //  [bfat==bfatViewMapped]: tick of the last time all pages were definitely read (typically within an exception handler)
     };
 
-    BFResidenceState    bfrs;
+    BFResidenceState    bfrs;                       //  BF residence state
 
+    //  80 B //////////////////////////////////////////////////////////////////////////////////////
 
-    RCE*                prceUndoInfoNext;
+    RCE*                prceUndoInfoNext;           //  Undo Info chain
 
-    CAtomicBfBitField   bfbitfield;
+    CAtomicBfBitField   bfbitfield;                 //  Bit field that can be read from and written to without any latches.
 
+    //  88 B //////////////////////////////////////////////////////////////////////////////////////
 
     CLRUKResourceUtilityManager< Kmax, BF, OffsetOfLRUKIC, IFMPPGNO >::CInvasiveContext lrukic;
+                                                    //  Invasive Context the LRUK Resource Utility Manager, Avail pool
+                                                    //  or Quiesced list.
+    //  120 B /////////////////////////////////////////////////////////////////////////////////////
 
     union
     {
-        volatile ULONG_PTR  pWriteSignalComplete;
+        volatile ULONG_PTR  pWriteSignalComplete;   //  write IO completion signal/information
+//      volatile PBF    pbfNext;                    //  future, this will be used for evict immediate
     };
 
+    //  Important: Next 4 bytes protected from modify x-latch, can be read locklessly
 
-    BYTE                icbPage:4;
-    BYTE                icbBuffer:4;
+    BYTE                icbPage:4;                  //  Index into g_rgcbPageSize[] for the size of the page
+    BYTE                icbBuffer:4;                //  Index into g_rgcbPageSize[] for the CURRENT size of the buffer (dehydrated)
 
-    BYTE                fSuspiciouslySlowRead:1;
-    BYTE                fSyncRead:1;
-    BYTE                bfat:2;
-    BYTE                fAbandoned:1;
+    BYTE                fSuspiciouslySlowRead:1;    //  BF is for IO that has a suspiciously slow read
+    BYTE                fSyncRead:1;                //  BF was read synchronously (otherwise BF was read async)
+    BYTE                bfat:2;                     //  Method used to allocate the pv buffer
+    BYTE                fAbandoned:1;               //  Client abandoned this page, ok to purge / evict with dirty data immediately
     BYTE                grbitReserved:3;
 
-    BYTE                rgbReserved1[ 1 ];
+    BYTE                rgbReserved1[ 1 ];          //  Free space
 
-    TCE                 tce;
+    TCE                 tce;                        //  table class for perfmon tracking of pages
 
+    // 128 B (64-bit/cache aligned) //////////////////////////////////////////////////////////////
 
-    RBS_POS             rbsposSnapshot;
+    RBS_POS             rbsposSnapshot;             //  Position of the rollback snapshot containing preimage for this page
 
-    TICK                tickLastDirtied;
+    TICK                tickLastDirtied;            //  time when the BF was last dirtied (unique pages modified)
 
-    BYTE                rgbReserved3[ 20 ];
+    BYTE                rgbReserved3[ 20 ];         //  Free space
 
+    // 160 B (64-bit/cache aligned) ///////////////////////////////////////////////////////////////
 
-#endif
+#endif  //  _WIN64
 };
 
+// The CInvasiveList class will return NULL for the Prev()/Next() pointers that are returned IF it gets
+// to the end AND IF (ONLY IF) the invasive context is at the beginning of (offset 0) the datastructure.  
+// BUT IF the invasive context is not at the beginning of the datastructure the experience of the Prev()
+// or Next() pointers are return as this very odd / unpleasant negative offset.
 C_ASSERT( OffsetOf( BF, ob0ic ) == 0 );
 
+// Atomic bit fields must be DWORD-aligned so that we can use interlocked operations to read from and write to them
+// consistently.
 C_ASSERT( ( OffsetOf( BF, bfbitfield ) % sizeof( FLAG32 ) ) == 0 );
 C_ASSERT( sizeof( BF::bfbitfield ) == sizeof( FLAG32 ) );
 
+//  Be conscious of the size if you're changing it ...
 #ifdef _WIN64
 C_ASSERT( sizeof(BF) == 192 );
-#else
+#else  //  !_WIN64
 C_ASSERT( sizeof(BF) == 160 );
-#endif
+#endif  //  _WIN64
 
+//  Buffer Manager Global Flags
 
 extern BOOL     g_fBFInitialized;
 
@@ -385,14 +436,17 @@ extern TICK     g_tickBFCrashDumpPrepared;
 extern ERR      g_errBFCrashDumpResult;
 extern BOOL     g_fBFErrorBuildingReferencedPageListForCrashDump;
 
+//  Buffer Manager Global Statistics
 
 extern ULONG cBFOpportuneWriteIssued;
 
 
+//  Buffer Manager Global Constants
 
 extern double   g_dblBFSpeedSizeTradeoff;
 
 
+//  IFMP/PGNO Hash Table
 
 struct PGNOPBF
 {
@@ -405,7 +459,7 @@ struct PGNOPBF
 
     BOOL operator==( const PGNOPBF& pgnopbf ) const
     {
-        return pbf == pgnopbf.pbf;
+        return pbf == pgnopbf.pbf;  //  pbf alone uniquely identifies this entry
     }
 
     const PGNOPBF& operator=( const PGNOPBF& pgnopbf )
@@ -425,6 +479,7 @@ typedef CDynamicHashTable< IFMPPGNO, PGNOPBF > BFHash;
 
 inline BFHash::NativeCounter HashIfmpPgno( const IFMP ifmp, const PGNO pgno )
 {
+    //  CONSIDER:  revise this hash function
 
     return BFHash::NativeCounter( pgno + ( ifmp << 13 ) + ( pgno >> 17 ) );
 }
@@ -454,6 +509,7 @@ inline void BFHash::CKeyEntry::GetEntry( PGNOPBF* const ppgnopbf ) const
     *ppgnopbf = m_entry;
 }
 
+// IFMPPGNO uses the same hash function
 inline ULONG_PTR IFMPPGNO::Hash() const
 {
     return (ULONG_PTR) HashIfmpPgno( this->ifmp, this->pgno );
@@ -464,14 +520,17 @@ extern double g_dblBFHashLoadFactor;
 extern double g_dblBFHashUniformity;
 
 
+//  Avail Pool
 
 typedef CPool< BF, BF::OffsetOfAPIC > BFAvail;
 extern BFAvail g_bfavail;
 
+//  Quiesced List
 
 typedef CInvasiveList< BF, BF::OffsetOfQPIC > BFQuiesced;
 extern BFQuiesced g_bfquiesced;
 
+//  lookaside cache for BFAlloc
 
 class CSmallLookasideCache
 {
@@ -487,6 +546,9 @@ public:
     INT CbBufferSize() const;
 
 #ifdef DEBUGGER_EXTENSION
+    //  This should be concurrently safe (though probably would give you a stale value).  But it 
+    //  was intended only for debugger use, as it won't be very efficient as the lookaside list 
+    //  is rather long.
     __int64 CbCacheSize()
     {
         __int64 cbTotal = 0;
@@ -504,10 +566,11 @@ public:
 private:
     INT m_cbBufferSize;
 
-    static const INT m_cLocalLookasideBuffers = ( 128  / sizeof(void*) ) * 16 ;
+    static const INT m_cLocalLookasideBuffers = ( 128 /* large CPU cache line */ / sizeof(void*) ) * 16 /* 16 CPUs worst case */;
 
     void * m_rgpvLocalLookasideBuffers[m_cLocalLookasideBuffers];
 
+    //  stats
 
 #ifdef DEBUG
 #define MEMORY_STATS_TRACKING
@@ -515,7 +578,7 @@ private:
 #ifdef MEMORY_STATS_TRACKING
     QWORD   m_cHits;
     QWORD   m_cAllocs;
-    QWORD   m_cFrees;
+    QWORD   m_cFrees;   // essentially overallocs
     QWORD   m_cFailures;
 #endif
 
@@ -525,19 +588,23 @@ private:
 };
 
 #ifdef DEBUG
+// Lookaside buffer for validating pages in the IO thread
 extern void * g_pvIoThreadImageCheckCache;
 #endif
 
+//  LRUK
 
 DECLARE_LRUK_RESOURCE_UTILITY_MANAGER( Kmax, BF, BF::OffsetOfLRUKIC, IFMPPGNO, BFLRUK );
 
 extern BFLRUK g_bflruk;
 extern double g_csecBFLRUKUncertainty;
 
+//  BF FTL Tracing
 
 ERR ErrBFIFTLInit();
 void BFIFTLTerm();
 
+//  BF tracing
 
 INLINE void BFITraceResMgrInit(
     const INT       K,
@@ -595,6 +662,7 @@ INLINE void BFITraceSetLgposModify(
     const LGPOS&    lgposModify );
 
 
+//  Oldest Begin 0 Index and Overflow List
 
 DECLARE_APPROXIMATE_INDEX( QWORD, BF, BF::OffsetOfOB0IC, BFOB0 );
 typedef CInvasiveList< BF, BF::OffsetOfOB0OLILE > BFOB0OverflowList;
@@ -603,13 +671,16 @@ QWORD BFIOB0Offset( const IFMP ifmp, const LGPOS* const plgpos );
 INLINE LGPOS BFIOB0Lgpos( const IFMP ifmp, LGPOS lgpos, const BOOL fNextBucket = fFalse );
 
 
+//
+// structs to maintain a histogram of something vs log generation
+// 
 struct LogHistData
 {
-    LONG m_lgenBase;
-    LONG m_cgen;
+    LONG m_lgenBase;    // min log generation we hold for histogram
+    LONG m_cgen;        // # of log generations in histogram
 
-    LONG* m_rgc;
-    LONG m_cOverflow;
+    LONG* m_rgc;        // histogram, m_rgc = new LONG[ m_cgenb ];
+    LONG m_cOverflow;   // overflow bucket
 
     LogHistData( void )
         :   m_lgenBase( 0 ),
@@ -627,8 +698,8 @@ struct LogHistData
 
 struct BFSTAT
 {
-    LONG m_cBFMod;
-    LONG m_cBFPin;
+    LONG m_cBFMod;      // modified BFs
+    LONG m_cBFPin;      // pinned BFs
 
     BFSTAT( LONG cBFMod, LONG cBFPin )
         :   m_cBFMod( cBFMod ),
@@ -692,13 +763,18 @@ struct BFFMPContext
         fCurrentlyAttached              = fFalse;
     }
 
-    void Dump( CPRINTF* pcprintf, DWORD_PTR dwOffset = 0 ) const;
+    void Dump( CPRINTF* pcprintf, DWORD_PTR dwOffset = 0 ) const;   //  dumps BFFMPContext state
 
     BFOB0               bfob0;
 
     CCriticalSection    critbfob0ol;
+    //  protected by critbfob0ol
     BFOB0OverflowList   bfob0ol;
 
+    //
+    //  Checkpoint depth maint properties.
+    //
+    //  protected implicitly by 1 checkpoint thread on this struct
 
     ERR                 errLastCheckpointMaint;
     TICK                tickMaintCheckpointDepthLast;
@@ -722,23 +798,34 @@ struct BFFMPContext
     } ChkAdvStats;
     ChkAdvStats         ChkAdvData;
 
-    TICK                tickMaintCheckpointDepthNext;
+    // not protected, but OK.
+    TICK                tickMaintCheckpointDepthNext;   //  The next soonest time this should run. (unless IO completes)
 
+    //  maximum lgposModify for any cached BF that is found to be pinned by LLR
+    //
     LGPOS               lgposNewestModify;
 
+    //  last value returned by BFGetOldestLgposBegin0 (lgposMax = not set)
+    //
     LGPOS               lgposOldestBegin0Last;
 
+    //
+    // histogram for BF/LogPosModify.lGeneration
+    // (how many BFs are modified by each log generation)
+    //
     BFLogHistogram      m_logHistModify;
 
-    BYTE                fCurrentlyAttached:1;
+    BYTE                fCurrentlyAttached:1;           // BFFMPContext currently has an attached database
     BYTE                m_rgbReserved[ 7 ];
 };
 
 
+//  Deferred Undo Information
 
 extern CRITPOOL< BF > g_critpoolBFDUI;
 
 
+//  Cache
 
 extern CSmallLookasideCache*    g_pBFAllocLookasideList;
 
@@ -783,8 +870,8 @@ enum eResidentCacheStatusChange
     eResidentCacheStatusRestore,
 };
 
-struct BFCacheStatsChanges : public CZeroInit
-{
+struct BFCacheStatsChanges : public CZeroInit   //  BFCacheStatsChanges derives from CZeroInit so we don't have to remember to
+{                                           //  initililze it with { 0 } in case of local variables (as in the unit tests).
     __int64                     ftResidentLastEvent;
     eResidentCacheStatusChange  eResidentLastEventType;
     LONG                        cbfResidentLast;
@@ -820,6 +907,7 @@ IPG IpgBFICachePv( const void* const pv );
 ERR ErrBFICacheISetSize( const LONG_PTR cbfCacheNew );
 
 
+//  Cache Resource Allocation Manager
 
 class CCacheRAM
     :   public CDBAResourceAllocationManager< cMaintCacheSamplesAvg >
@@ -878,6 +966,7 @@ extern CCacheRAM g_cacheram;
 bool FBFIFaultInBuffer( const PBF pbf, LONG * pcmmpgReclaimed = NULL );
 
 
+//  Issue List
 
 class CBFIssueList
 {
@@ -942,21 +1031,26 @@ class CBFIssueList
 
     private:
 
+        //  used to keep issue list stack for this thread
 
         CBFIssueList*           m_pbfilPrev;
 
+        //  used to keep track of pending flush operations for this thread
 
         CMeteredSection::Group  m_group;
         CInvasiveList< CEntry, CEntry::OffsetOfILE >
                                 m_il;
 
+        //  used to sync with all pending flush operations
 
         static CCriticalSection s_critSync;
         static CMeteredSection  s_msSync;
 };
 
 
+//  Maintenance
 
+    //  Init / Term
 
 ERR ErrBFIMaintInit();
 void BFIMaintTerm();
@@ -966,10 +1060,12 @@ ERR ErrBFIMaintScheduleTask(    POSTIMERTASK        postt,
                                 const TICK          dtickDelay,
                                 const TICK          dtickSlop );
 
+    //  Concurrency simulation
 
 INLINE BOOL FBFIChance( INT pctChance );
 INLINE void BFISynchronicity( void );
 
+    //  Scavenging
 
 enum BFIScavengeSatisfiedReason
 {
@@ -986,6 +1082,8 @@ enum BFIScavengeSatisfiedReason
 
 typedef struct
 {
+    //  If you change order of / add a field / remove / etc try to remember to update
+    //  the "!ese cachescavengeruns repro" output.
 
     __int64         iRun;
     BOOL            fSync;
@@ -1011,10 +1109,10 @@ typedef struct
     LONG            cbfEvictedShrink;
     LONG            cbfShrinkFromAvailPool;
 
-    LONG            cbfFlushPending;
+    LONG            cbfFlushPending;            // includes cbfFlushPendingSlow and cbfFlushPendingHung
     LONG            cbfFlushPendingSlow;
     LONG            cbfFlushPendingHung;
-    LONG            cbfFaultPending;
+    LONG            cbfFaultPending;            // includes cbfFaultPendingHung
     LONG            cbfFaultPendingHung;
     LONG            cbfOutOfMemory;
     
@@ -1055,6 +1153,7 @@ ERR ErrBFIMaintScavengeInit( void );
 void BFIMaintScavengeTerm( void );
 ERR ErrBFIMaintScavengeIScavengePages( const char* const szContextTraceOnly, const BOOL fSync );
 
+    //  Avail Pool
 
 extern CSemaphore       g_semMaintAvailPoolRequestUrgent;
 extern CSemaphore       g_semMaintAvailPoolRequest;
@@ -1066,14 +1165,14 @@ extern LONG_PTR         cbfAvailPoolTarget;
 extern LONG_PTR         cbfCacheDeadlock;
 extern LONG_PTR         g_cbfCacheDeadlockMax;
 
-enum BFIMaintAvailPoolRequestType
+enum BFIMaintAvailPoolRequestType   // bfmaprt
 {
     bfmaprtUnspecific   = 1,
     bfmaprtSync         = 2,
     bfmaprtAsync        = 3,
 };
 
-enum BFIMaintCacheStatsRequestType
+enum BFIMaintCacheStatsRequestType  // bfmcsrt
 {
     bfmcsrtNormal       = 1,
     bfmcsrtForce        = 2,
@@ -1087,6 +1186,7 @@ void BFIMaintAvailPoolIUrgentTask( void*, void* );
 void BFIMaintAvailPoolITask( void*, void* );
 void BFIMaintAvailPoolUpdateThresholds( const LONG_PTR cbfCacheTargetOptimalNew );
 
+    //  Checkpoint Depth
 
 extern CSemaphore       g_semMaintCheckpointDepthRequest;
 
@@ -1108,6 +1208,7 @@ void BFIMaintCheckpointDepthITask( void*, void* );
 void BFIMaintCheckpointDepthIFlushPages( TICK * ptickNextScheduleDelta );
 ERR ErrBFIMaintCheckpointDepthIFlushPagesByIFMP( const IFMP ifmp, BOOL * const pfUpdateCheckpoint );
 
+    //  Checkpoint
 
 extern CSemaphore       g_semMaintCheckpointRequest;
 extern TICK             g_tickMaintCheckpointLast;
@@ -1120,8 +1221,9 @@ void BFIMaintCheckpointIUpdateInst( const size_t ipinst );
 void BFIMaintCheckpointIUpdate();
 
 #ifdef MINIMAL_FUNCTIONALITY
-#else
+#else  //  !MINIMAL_FUNCTIONALITY
 
+    //  Hashed Latches
 
 extern const BOOL       g_fBFMaintHashedLatches;
 extern size_t           g_icReqOld;
@@ -1133,8 +1235,9 @@ TICK TickBFIHashedLatchTime( const TICK tickIn );
 void BFIMaintHashedLatchesITask( DWORD_PTR );
 void BFIMaintHashedLatchesIRedistribute();
 
-#endif
+#endif  //  MINIMAL_FUNCTIONALITY
 
+    //  Cache Size
 
 extern POSTIMERTASK     g_posttBFIMaintCacheStatsITask;
 extern POSTIMERTASK     g_posttBFIMaintIdleCacheStatsITask;
@@ -1174,6 +1277,7 @@ INLINE BOOL FBFIMaintCacheSizeAcquire();
 INLINE ERR ErrBFIMaintCacheSizeReleaseAndRescheduleIfPending();
 TICK DtickBFIMaintCacheSizeDuration();
 
+    //  Buffer Size and Management
 
 void BFIFaultInBuffer( __inout void * pv, __in LONG cb );
 void BFIFaultInBuffer( const PBF pbf );
@@ -1191,6 +1295,7 @@ void BFIDehydratePage( PBF pbf, __in const BOOL fAllowReorg );
 void BFIRehydratePage( PBF pbf );
 
 
+    //  Idle Database
 
 extern CSemaphore       g_semMaintIdleDatabaseRequest;
 
@@ -1205,6 +1310,7 @@ void BFIMaintIdleDatabaseIRollLogs();
 void BFIMaintIdleDatabaseIRollLogs( INST * const pinst );
 BOOL FBFIMaintIdleDatabaseIDatabaseHasPinnedPages( const INST * const pinst, const DBID dbid );
 
+    //  Cache residency map and statistics
 
 extern POSTIMERTASK     g_posttBFIMaintCacheResidencyITask;
 
@@ -1215,6 +1321,7 @@ void BFIMaintCacheResidencyITask( void*, void* );
 INLINE BFResidenceState BfrsBFIUpdateResidentState( PBF const pbf, const BFResidenceState bfrsNew );
 INLINE BFResidenceState BfrsBFIUpdateResidentState( PBF const pbf, const BFResidenceState bfrsNew, const BFResidenceState bfrsIfOld );
 
+    //  Cache telemetry
 
 extern POSTIMERTASK    g_posttBFIMaintTelemetryITask;
 
@@ -1222,7 +1329,9 @@ void BFIMaintTelemetryRequest();
 
 void BFIMaintTelemetryITask( VOID *, VOID * pvContext );
 
+//  Internal Functions
 
+    //  Hashed Latch
 
 INLINE BOOL FBFILatchValidContext( const DWORD_PTR dwContext );
 INLINE PBF PbfBFILatchContext( const DWORD_PTR dwContext );
@@ -1230,9 +1339,11 @@ INLINE CSXWLatch* PsxwlBFILatchContext( const DWORD_PTR dwContext );
 void BFILatchNominate( const PBF pbf );
 BOOL FBFILatchDemote( const PBF pbf );
 
+    //  BF FMP Context
 
 ERR ErrBFISetupBFFMPContext( IFMP ifmp );
 
+    //  Page Manipulation
 
 void BFIAssertNewlyAllocatedPage( const PBF pbfNew, const BOOL fAvailPoolAdd = fFalse );
 ERR ErrBFIAllocPage( PBF* const ppbf, __in const ICBPage icbBufferSize, const BOOL fWait = fTrue, const BOOL fMRU = fTrue );
@@ -1254,12 +1365,24 @@ INLINE BOOL FBFICacheViewFresh( const PBF pbf );
 
 void BFIOpportunisticallyFlushPage( PBF pbf, IOREASONPRIMARY iorp );
 
+//  Page / Buffer maintenance occasionally has to work against foreground threads that
+//  happen to have the latch.  These functions perform that maintenance.  Note the two
+//  functions have significantly different contracts.  The deprecated one is first,
+//  and should only be used in places where you can't guarantee at the BF API level
+//  that you will be able to unburden the page.  The 2nd version is preferred, but
+//  can only be used in places where the current/newer version of the page can be moved
+//  to a newer buffer.
 void BFIMaintImpedingPage( PBF pbf );
 ERR ErrBFIMaintImpedingPageLatch( PBF pbf, __in const BOOL fOwnsWrite, BFLatch* pbfl );
 
+//  While the name claims it is for versioning pages, the truth is these are only used
+//  to unload a hot or behind the checkpoint page.
 void BFIOpportunisticallyVersionPage( PBF pbf, PBF * ppbfOpportunisticCheckpointAdv );
 void BFIOpportunisticallyVersionCopyPage( PBF pbf, PBF * ppbfNew, __in const BOOL fOwnsWrite );
 
+//  Versioning a page can happen in two directions, one where the newly allocated buffer
+//  is the "older" version (ErrBFIVersionPage()) and one where the newly allocated
+//  buffer is the "current" version of the page (ErrBFIVersionCopyPage()).
 ERR ErrBFIVersionPage( PBF pbf, PBF* ppbfOld, const BOOL fWait = fTrue );
 ERR ErrBFIVersionCopyPage( PBF pbfOrigOld, PBF* ppbfNewCurr, const BOOL fWait, __in const BOOL fOwnsWrite );
 void BFICleanVersion( PBF pbf, BOOL fTearDownFMP );
@@ -1351,20 +1474,22 @@ extern const CHAR mpbfdfsz[ bfdfMax - bfdfMin ][ 16 ];
 void BFIDirtyPage( PBF pbf, BFDirtyFlags bfdf, const TraceContext& tc );
 void BFICleanPage( __inout PBF pbf, __in const BFLatchType bfltHave, __in const BFCleanFlags bfcf = bfcfNone );
 
+    //  Range-locking for external zeroing.
 
 struct BFIPageRangeLock
 {
-    IFMP                        ifmp;
-    PGNO                        pgnoFirst;
-    PGNO                        pgnoLast;
-    PGNO                        pgnoDbLast;
-    CPG                         cpg;
-    BFLatch*                    rgbfl;
-    _Field_size_opt_(cpg) BOOL* rgfLatched;
-    _Field_size_opt_(cpg) BOOL* rgfUncached;
-    BOOL                        fRangeLocked;
-    CMeteredSection::Group      irangelock;
+    IFMP                        ifmp;           // IFMP.
+    PGNO                        pgnoFirst;      // First page to be locked.
+    PGNO                        pgnoLast;       // Last page to be locked.
+    PGNO                        pgnoDbLast;     // Last page of the database before starting to lock the range.
+    CPG                         cpg;            // Number of pages to be locked.
+    BFLatch*                    rgbfl;          // Array of BFLatch objects.
+    _Field_size_opt_(cpg) BOOL* rgfLatched;     // Whether or not each page is currently latched.
+    _Field_size_opt_(cpg) BOOL* rgfUncached;    // Whether or not each page was uncached when first write-latched.
+    BOOL                        fRangeLocked;   // Whether or not the range is range-locked (file-level range-locked).
+    CMeteredSection::Group      irangelock;     // Range-lock group.
 
+    //  Ctor.
     BFIPageRangeLock() :
         ifmp( ifmpNil ),
         pgnoFirst( pgnoNull ),
@@ -1379,6 +1504,7 @@ struct BFIPageRangeLock
     {
     }
 
+    //  Dtor.
     ~BFIPageRangeLock()
     {
 #ifdef DEBUG
@@ -1390,7 +1516,7 @@ struct BFIPageRangeLock
                 Assert( !rgfLatched[ ipg ] );
             }
         }
-#endif
+#endif  // DEBUG.
 
         delete[] rgbfl;
         delete[] rgfLatched;
@@ -1398,11 +1524,13 @@ struct BFIPageRangeLock
     }
 };
 
+    //  Log I/O
 
 ERR ErrBFIWriteLog( __in const IFMP ifmp, __in const BOOL fSync );
 ERR ErrBFIFlushLog( __in const IFMP ifmp, __in const IOFLUSHREASON iofr, const BOOL fMayOwnBFLatch = fFalse );
 
 
+    //  I/O
 
 void* PvBFIAcquireIOContext( PBF pbf );
 void BFIReleaseIOContext( PBF pbf, void* const pvIOContext );
@@ -1437,6 +1565,7 @@ void BFISyncReadComplete(   const ERR err,
 ERR ErrBFIAsyncPreReserveIOREQ( IFMP ifmp, PGNO pgno, OSFILEQOS qos, VOID ** ppioreq );
 VOID BFIAsyncReleaseUnusedIOREQ( IFMP ifmp, VOID * pioreq );
 
+//  this function performs a Async Read into the specified Write Latched BF
 
 ERR ErrBFIAsyncRead( PBF pbf, OSFILEQOS qos, VOID * pioreq, const TraceContext& tc );
 void BFIAsyncReadHandoff(   const ERR err,
@@ -1502,15 +1631,17 @@ void BFIAsyncWriteComplete( const ERR err,
                             const DWORD cbData,
                             const BYTE* const pbData,
                             const PBF pbf );
-ERR ErrBFIWriteSignalIError( ULONG_PTR pSignalNext );
+ERR ErrBFIWriteSignalIError( ULONG_PTR pSignalNext ); // for edbg.cxx
 ERR ErrBFIWriteSignalState( const PBF pbf );
 void BFIFlushComplete( _Inout_ const PBF pbf, _In_ const BFLatchType bfltHave, _In_ const BOOL fUnencumberedPath, _In_ const BOOL fCompleteRemapReVerify, _In_ const BOOL fAllowTearDownClean );
 
 INLINE BOOL FBFIOpportuneWrite( PBF pbf );
 
+    //  Time Dependencies
 
 extern CCriticalSection     g_critBFDepend;
     
+    //  Transaction/Logging Support
 
 void BFISetLgposOldestBegin0( PBF pbf, LGPOS lgpos, const TraceContext& tc );
 void BFIResetLgposOldestBegin0( PBF pbf, BOOL fCalledFromSet = fFalse );
@@ -1522,6 +1653,7 @@ void BFIAddUndoInfo( PBF pbf, RCE* prce, BOOL fMove = fFalse );
 void BFIRemoveUndoInfo( PBF pbf, RCE* prce, LGPOS lgposModify = lgposMin, BOOL fMove = fFalse );
 
 #ifdef PERFMON_SUPPORT
+//  Performance Monitoring Support
 
 
 extern PERFInstanceLiveTotalWithClass<> cBFPagesReadAsync;
@@ -1569,11 +1701,12 @@ extern PERFInstanceDelayedTotal< LONG, INST, fFalse > cBFCheckpointMaintOutstand
 extern PERFInstanceLiveTotalWithClass<> cBFPagesWritten;
 extern PERFInstanceLiveTotalWithClass<> cBFPagesRepeatedlyWritten;
 extern PERFInstanceLiveTotalWithClass<> cBFPagesCoalescedWritten;
+// various kinds of flushes
 extern PERFInstanceLiveTotalWithClass<> cBFPagesFlushedCacheShrink;
 extern PERFInstanceLiveTotalWithClass<> cBFPagesFlushedCheckpoint;
 extern PERFInstanceLiveTotalWithClass<> cBFPagesFlushedCheckpointForeground;
 
-#endif
+#endif //PERFMON_SUPPORT
 
 extern PERFInstanceLiveTotalWithClass<> cBFPagesFlushedContextFlush;
 
@@ -1601,7 +1734,7 @@ extern PERFInstanceLiveTotalWithClass<> cBFCacheMissLatencyTotalOperationsAttach
 
 extern PERFInstanceLiveTotalWithClass<> cBFCacheUnused;
 
-#endif
+#endif  //  PERFMON_SUPPORT
 
-#endif
+#endif  //  _BF_HXX_INCLUDED
 

@@ -19,7 +19,7 @@
 
 #ifndef WIN32_LEAN_AND_MEAN
 #define WIN32_LEAN_AND_MEAN
-#endif
+#endif  //  WIN32_LEAN_AND_MEAN
 
 #include <windows.h>
 
@@ -28,6 +28,9 @@
 #include "osu.hxx"
 #include "jet.h"
 
+// Number of compression-encrytion and decompression-decryption queues that the current hardware
+// revision supports. Given that our payloads are at most 8k, unclear if we actually need 8 queues
+// per process for optimal performance, but that is what we are going with right now.
 constexpr ULONGLONG NUM_CE_QUEUES = 8;
 constexpr ULONGLONG NUM_DD_QUEUES = 8;
 
@@ -52,6 +55,7 @@ struct CORSICA_WRAPPER : public CZeroInit
         }
     }
 
+    // servicing encode/decode requests
     CORSICA_HANDLE m_hDevice;
     CORSICA_HANDLE m_hChannel;
 
@@ -144,7 +148,7 @@ CORSICA_STATUS ChannelRegister( ULONG ChannelId, CORSICA_FAILURE_REASON *preason
     CORSICA_CHANNEL_ADD_RESOURCE_INPUT addResource;
     CORSICA_CHANNEL_ADD_RESOURCE_OUTPUT addResourceOut;
 
-    status = CorsicaChannelCreate( g_pWrapper->m_hDevice, ChannelId, 0 , &g_pWrapper->m_hChannel );
+    status = CorsicaChannelCreate( g_pWrapper->m_hDevice, ChannelId, 0 /* ChannelCreateFlags */, &g_pWrapper->m_hChannel );
     if (FAILED(status))
     {
         *preason = CorsicaChannelCreateFailed;
@@ -262,14 +266,14 @@ ERR ErrXpress10CorsicaInit()
     }
 
     CORSICA_DEVICE_SETUP_INFORMATION_INIT( &deviceSetupInfo );
-    status = CorsicaDeviceEnumeratorGetItem( hDeviceEnum, 0 , &deviceSetupInfo );
+    status = CorsicaDeviceEnumeratorGetItem( hDeviceEnum, 0 /* DeviceIndex */, &deviceSetupInfo );
     if (FAILED(status))
     {
         reason = CorsicaDeviceEnumeratorGetItemFailed;
         goto HandleError;
     }
 
-    status = CorsicaDeviceOpen( hLibrary, deviceSetupInfo.DeviceId, nullptr, 0 , &g_pWrapper->m_hDevice );
+    status = CorsicaDeviceOpen( hLibrary, deviceSetupInfo.DeviceId, nullptr, 0 /* DeviceOpenFlags */, &g_pWrapper->m_hDevice );
     if (FAILED(status))
     {
         reason = CorsicaDeviceOpenFailed;
@@ -307,6 +311,8 @@ ERR ErrXpress10CorsicaInit()
     ULONG attempt = 0;
     do
     {
+        // Temp fix for channel-id conflict between multiple processes to try random channels,
+        // corsica team working on a better API to checkout channel.
         ULONG ChannelId = rand() % userResources.QueueGroupCount;
         status = ChannelRegister( ChannelId, &reason );
         attempt++;
@@ -352,6 +358,8 @@ HandleError:
     return err;
 }
 
+// Temp: error code for when output buffer is not big enough to hold the output
+// Adding until Corsica folks add it to their redist header
 #define CORSICA_BUFFER_OVERRUN 192
 
 LOCAL ERR InternalCorsicaRequest(
@@ -452,6 +460,7 @@ LOCAL ERR InternalCorsicaRequest(
     }
 
     if ( err < JET_errSuccess &&
+         // compression can report buffer overrun for uncompressible input, no need to event for that.
          ( status != CORSICA_BUFFER_OVERRUN || pRequestParameters->DecryptDecompress ) )
     {
         if ( reason == EngineExecutionError && pEngineResponsePointer->EngineErrorCode != 0 )
@@ -492,6 +501,8 @@ ERR ErrXpress10CorsicaCompress(
 
     CORSICA_REQUEST_PARAMETERS requestParameters;
     CORSICA_REQUEST_PARAMETERS_INIT(&requestParameters);
+    // Just round-robin the queues rather than keeping track and trying to find an empty queue.
+    // Maybe if we started compressing/decompressing larger payload, we may need a different allocation mechanism.
     requestParameters.QueueId = g_pWrapper->m_rgusDefaultCeQueueId[ AtomicIncrement( &g_pWrapper->m_lLastUsedCeQueueId ) % NUM_CE_QUEUES ];
     requestParameters.DecryptDecompress = false;
     requestParameters.FrameParameters.FrameType = CorsicaFrameTypeNone;
@@ -557,6 +568,8 @@ ERR ErrXpress10CorsicaDecompress(
 
     CORSICA_REQUEST_PARAMETERS requestParameters;
     CORSICA_REQUEST_PARAMETERS_INIT(&requestParameters);
+    // Just round-robin the queues rather than keeping track and trying to find an empty queue.
+    // Maybe if we started compressing/decompressing larger payload, we may need a different allocation mechanism.
     requestParameters.QueueId = g_pWrapper->m_rgusDefaultDdQueueId[ AtomicIncrement( &g_pWrapper->m_lLastUsedDdQueueId ) % NUM_DD_QUEUES ];
     requestParameters.DecryptDecompress = true;
     requestParameters.FrameParameters.FrameType = CorsicaFrameTypeNone;

@@ -1,7 +1,9 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
+//  ================================================================
 namespace PagePatching
+//  ================================================================
 {
     INLINE BOOL FIsPatchableError( const ERR err );
     void TryToRequestPatch( const IFMP ifmp, const PGNO pgno );

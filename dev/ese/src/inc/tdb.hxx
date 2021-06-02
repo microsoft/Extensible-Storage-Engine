@@ -10,10 +10,11 @@ class MEMPOOL
 
     private:
         BYTE    *m_pbuf;
-        ULONG   m_cbBufSize;
-        ULONG   m_ibBufFree;
-        ITAG    m_itagUnused;
-        ITAG    m_itagFreed;
+        ULONG   m_cbBufSize;            // Length of buffer.
+        ULONG   m_ibBufFree;            // Beginning of free space in buffer
+                                        //   (if ibBufFree==cbBufSize, then buffer is full)
+        ITAG    m_itagUnused;           // Next unused tag (never been used or freed)
+        ITAG    m_itagFreed;            // Next freed tag (previously used, but since freed)
 
     private:
         struct MEMPOOLTAG
@@ -76,7 +77,7 @@ class MEMPOOL
             const DWORD_PTR dwOffset );
 
         VOID DumpTag( CPRINTF * pcprintf, const ITAG itag, const SIZE_T lShift ) const;
-#endif
+#endif  //  DEBUGGER_EXTENSION
 };
 
 INLINE VOID MEMPOOL::AssertValid() const
@@ -101,7 +102,7 @@ INLINE VOID MEMPOOL::AssertValid() const
     Assert( ItagUnused() <= cTotalTags );
     Assert( ItagFreed() >= itagFirstUsable );
     Assert( ItagFreed() <= ItagUnused() );
-#endif
+#endif  //  DEBUG
 }
 
 INLINE VOID MEMPOOL::AssertValidTag( ITAG iTagEntry ) const
@@ -116,7 +117,7 @@ INLINE VOID MEMPOOL::AssertValidTag( ITAG iTagEntry ) const
     Assert( DWORD_PTR( rgbTags[iTagEntry].ib ) % sizeof( QWORD ) == 0 );
     Assert( rgbTags[iTagEntry].ib >= rgbTags[itagTagArray].ib + rgbTags[itagTagArray].cb );
     Assert( rgbTags[iTagEntry].ib + rgbTags[iTagEntry].cb <= IbBufFree() );
-#endif
+#endif  //  DEBUG
 }
 
 
@@ -124,18 +125,26 @@ INLINE VOID MEMPOOL::MEMPOOLRelease()
 {
     if ( Pbuf() != NULL )
     {
-        AssertValid();
+        AssertValid();          // Validate integrity of buffer.
         OSMemoryHeapFree( Pbuf() );
         SetPbuf( NULL );
     }
 }
 
+//  Retrieve a pointer to the desired entry in the buffer.
+//  WARNING: Pointers into the contents of the buffer are very
+//  volatile -- they may be invalidated the next time the buffer
+//  is reallocated.  Ideally, we should never allow direct access
+//  via pointers -- we should only allow indirect access via itags
+//  which we will dereference for the user and copy to a user-
+//  provided buffer.  However, there would be a size and speed hit
+//  with such a method.
 INLINE BYTE *MEMPOOL::PbGetEntry( ITAG itag ) const
 {
     MEMPOOLTAG  *rgbTags;
 
-    AssertValid();
-    AssertValidTag( itag );
+    AssertValid();              // Validate integrity of string buffer.
+    AssertValidTag( itag );     // Validate integrity of itag.
 
     rgbTags = (MEMPOOLTAG *)Pbuf();
 
@@ -146,8 +155,8 @@ INLINE ULONG MEMPOOL::CbGetEntry( ITAG itag ) const
 {
     MEMPOOLTAG  *rgbTags;
 
-    AssertValid();
-    AssertValidTag( itag );
+    AssertValid();              // Validate integrity of string buffer.
+    AssertValidTag( itag );     // Validate integrity of itag.
 
     rgbTags = (MEMPOOLTAG *)Pbuf();
 
@@ -155,28 +164,38 @@ INLINE ULONG MEMPOOL::CbGetEntry( ITAG itag ) const
 }
 
 
+// Flags for field descriptor
+//  note that these flags are stored persistantly in database
+//  catalogs and cannot be changed without a database format change
+//
 typedef ULONG FIELDFLAG;
 
+// WARNING: Don't confuse Version and Versioned!!!
 
-const FIELDFLAG ffieldNotNull                   = 0x0001;
-const FIELDFLAG ffieldVersion                   = 0x0002;
-const FIELDFLAG ffieldAutoincrement             = 0x0004;
-const FIELDFLAG ffieldMultivalued               = 0x0008;
-const FIELDFLAG ffieldDefault                   = 0x0010;
-const FIELDFLAG ffieldEscrowUpdate              = 0x0020;
-const FIELDFLAG ffieldFinalize                  = 0x0040;
-const FIELDFLAG ffieldUserDefinedDefault        = 0x0080;
-const FIELDFLAG ffieldTemplateColumnESE98       = 0x0100;
-const FIELDFLAG ffieldDeleteOnZero              = 0x0200;
-const FIELDFLAG ffieldPrimaryIndexPlaceholder   = 0x0800;
-const FIELDFLAG ffieldCompressed                = 0x1000;
-const FIELDFLAG ffieldEncrypted                 = 0x2000;
+const FIELDFLAG ffieldNotNull                   = 0x0001;   // NULL values not allowed
+const FIELDFLAG ffieldVersion                   = 0x0002;   // Version field
+const FIELDFLAG ffieldAutoincrement             = 0x0004;   // Autoincrement field
+const FIELDFLAG ffieldMultivalued               = 0x0008;   // Multi-valued column
+const FIELDFLAG ffieldDefault                   = 0x0010;   // Column has ISAM default value
+const FIELDFLAG ffieldEscrowUpdate              = 0x0020;   // Escrow updated column
+const FIELDFLAG ffieldFinalize                  = 0x0040;   // Finalizable column
+const FIELDFLAG ffieldUserDefinedDefault        = 0x0080;   // The default value is generated through a callback
+const FIELDFLAG ffieldTemplateColumnESE98       = 0x0100;   // Template table column created in ESE98 (ie. fDerived bit will be set in TAGFLD of records of derived tables)
+const FIELDFLAG ffieldDeleteOnZero              = 0x0200;   // DeleteOnZero column
+const FIELDFLAG ffieldPrimaryIndexPlaceholder   = 0x0800;   // Field is no longer in primary index, but must be retained as a placeholder
+const FIELDFLAG ffieldCompressed                = 0x1000;   // Data stored in the column should be compressed
+const FIELDFLAG ffieldEncrypted                 = 0x2000;   // Data stored in the column is encrypted
 
-const FIELDFLAG ffieldPersistedMask             = 0xffff;
+const FIELDFLAG ffieldPersistedMask             = 0xffff;   // filter for flags that are persisted
 
-const FIELDFLAG ffieldVersioned                 = 0x10000;
-const FIELDFLAG ffieldDeleted                   = 0x20000;
-const FIELDFLAG ffieldVersionedAdd              = 0x40000;
+// The following flags are not persisted.
+// UNDONE: Eliminate the VersionedAdd flag -- it would increase complexity in the
+// version store for the following scenarios, but it would be more uniform with NODE:
+//      1) Rollback of DeleteColumn - does the Version bit get reset as well?
+//      2) Cleanup of AddColumn - don't reset Version bit if Delete bit is set
+const FIELDFLAG ffieldVersioned                 = 0x10000;  // Add/DeleteColumn not yet committed
+const FIELDFLAG ffieldDeleted                   = 0x20000;  // column has been deleted
+const FIELDFLAG ffieldVersionedAdd              = 0x40000;  // AddColumn not yet committed
 
 INLINE BOOL FFIELDNotNull( FIELDFLAG ffield )           { return ( ffield & ffieldNotNull ); }
 INLINE VOID FIELDSetNotNull( FIELDFLAG &ffield )        { ffield |= ffieldNotNull; }
@@ -232,6 +251,7 @@ INLINE BOOL FFIELDCommittedDelete( FIELDFLAG ffield )
 }
 INLINE VOID FIELDSetDeleted( FIELDFLAG &ffield )
 {
+    // Two threads can't delete same column.
     Assert( !( ffield & ffieldDeleted ) );
     ffield |= ffieldDeleted;
 }
@@ -256,59 +276,76 @@ INLINE VOID FIELDResetVersionedAdd( FIELDFLAG &ffield )
 }
 
 
+//  ================================================================
 struct CBDESC
+//  ================================================================
+//
+//  entry in callbacks tables found in a TDB (CallBack DESCriptor)
+//
+//-
 {
-    CBDESC          *pcbdescNext;
-    CBDESC          **ppcbdescPrev;
+    CBDESC          *pcbdescNext;   //  the next CBDESC (NULL for end of list)
+    CBDESC          **ppcbdescPrev; //  the pointer to this CBDESC in the previous CBDESC
 
-    JET_CALLBACK    pcallback;
-    JET_CBTYP       cbtyp;
-    VOID            *pvContext;
-    ULONG           cbContext;
-    ULONG           ulId;
+    JET_CALLBACK    pcallback;      //  the callback function
+    JET_CBTYP       cbtyp;          //  when to call the callback
+    VOID            *pvContext;     //  context pointer for the callback
+    ULONG           cbContext;      //  length of context infor for the callback
+    ULONG           ulId;           //  used to identify an instance of the callback
+                                    //  (columnid for JET_cbtypUserDefinedCallback )s
 
-    ULONG           fPermanent:1;
-    ULONG           fVersioned:1;
+    ULONG           fPermanent:1;   //  did this callback come from the catalog?
+    ULONG           fVersioned:1;   //  is this callback versioned
 
 #ifdef VERSIONED_CALLBACKS
     TRX             trxRegisterBegin0;
     TRX             trxRegisterCommit0;
     TRX             trxUnregisterBegin0;
     TRX             trxUnregisterCommit0;
-#endif
+#endif  //  VERSIONED_CALLBACKS
 };
 
 
-
+/*  entry in field descriptor tables found in a TDB
+/**/
 
 typedef USHORT  FIELD_COLTYP;
 
 struct FIELD
 {
-    FIELD_COLTYP    coltyp;
-    STRHASH         strhashFieldName;
-    ULONG           cbMaxLen;
-    FIELDFLAG       ffield;
-    WORD            ibRecordOffset;
-    MEMPOOL::ITAG   itagFieldName;
-    USHORT          cp;
+    FIELD_COLTYP    coltyp;                         // column data type
+    STRHASH         strhashFieldName;               // field name hash value
+    ULONG           cbMaxLen;                       // maximum length
+    FIELDFLAG       ffield;                         // various flags
+    WORD            ibRecordOffset;                 // for fixed fields only
+    MEMPOOL::ITAG   itagFieldName;                  // Offset into TDB's buffer
+    USHORT          cp;                             // code page of language
 };
 
-const ULONG cbFIELDPlaceholder      = 1;
+const ULONG cbFIELDPlaceholder      = 1;    //  size of dummy MEMPOOL entry for future FIELD structures
 
-const MEMPOOL::ITAG itagTDBFields                   = 1;
-const MEMPOOL::ITAG itagTDBTableName                = 2;
+const MEMPOOL::ITAG itagTDBFields                   = 1;    // Tag into TDB's memory pool for field info
+                                                            //   (FIELD structures and fixed offsets table)
+const MEMPOOL::ITAG itagTDBTableName                = 2;    // Tag for table's name
 
-const MEMPOOL::ITAG itagTDBTempTableIdxSeg          = 2;
-const MEMPOOL::ITAG itagTDBTempTableNameWithIdxSeg  = 3;
+const MEMPOOL::ITAG itagTDBTempTableIdxSeg          = 2;    // Special case for temp table
+                                                            // with IdxSeg in memory pool
+                                                            // (since sorts have no table name)
+const MEMPOOL::ITAG itagTDBTempTableNameWithIdxSeg  = 3;    // Table name's itag may be 3 in
+                                                            // the special case of a temp
+                                                            // table with the primary index's
+                                                            // IdxSeg also in the memory pool.
 
 extern const WORD ibRECStartFixedColumns;
 
 
+//  unique sequential key
+//
 typedef ULONG   DBK;
 ERR ErrRECIInitAutoIncrement( _In_ FUCB* const pfucb, QWORD qwAutoInc );
 
-
+/*  table descriptor block
+/**/
 class TDB
     :   public CZeroInit
 {
@@ -329,9 +366,9 @@ class TDB
 #pragma push_macro( "new" )
 #undef new
     private:
-        void* operator new( size_t );
-        void* operator new[]( size_t );
-        void operator delete[]( void* );
+        void* operator new( size_t );           //  meaningless without INST*
+        void* operator new[]( size_t );         //  meaningless without INST*
+        void operator delete[]( void* );        //  not supported
     public:
         void* operator new( size_t cbAlloc, INST* pinst )
         {
@@ -348,95 +385,112 @@ class TDB
 #pragma pop_macro( "new" )
 
     private:
-        const FID       m_fidTaggedFirst;
-        const FID       m_fidTaggedLastInitial;
-        const FID       m_fidFixedFirst;
-        const FID       m_fidFixedLastInitial;
-        const FID       m_fidVarFirst;
-        const FID       m_fidVarLastInitial;
-        FID             m_fidTaggedLast;
-        FID             m_fidFixedLast;
-        FID             m_fidVarLast;
-        FID             m_fidTaggedLastOfESE97Template;
-        MEMPOOL::ITAG   m_itagTableName;
-        USHORT          m_ibEndFixedColumns;
+        const FID       m_fidTaggedFirst;       //  First *possible* tagged field id.
+        const FID       m_fidTaggedLastInitial; //  Highest tagged field id in use when schema was faulted in
+        const FID       m_fidFixedFirst;        //  First *possible* fixed field id
+        const FID       m_fidFixedLastInitial;  //  Highest fixed field id in use when schema was faulted in
+        const FID       m_fidVarFirst;          //  First *possible* variable field id
+        const FID       m_fidVarLastInitial;    //  Highest variable field id in use when schema was faulted in
+        FID             m_fidTaggedLast;        //  Highest tagged field id in use
+        FID             m_fidFixedLast;         //  Highest fixed field id in use
+//  16 bytes
+        FID             m_fidVarLast;           //  Highest variable field id in use
+        FID             m_fidTaggedLastOfESE97Template; //  last template table tagged column created in ESE97 format (ie. fDerived bit not set in records of derived table)
+        MEMPOOL::ITAG   m_itagTableName;        //  itag into memory pool for table name
+        USHORT          m_ibEndFixedColumns;    //  record offset for end of fixed column
+                                                //  column data and beginning of fixed
+                                                //  column null bit array
 
         FIELD *         m_pfieldsInitial;
+//  24 / 32 bytes (amd64)
 
         DATA *          m_pdataDefaultRecord;
-        FCB             *m_pfcbTemplateTable;
+        FCB             *m_pfcbTemplateTable;   //  NULL if this is not a derived table
 
         union
         {
             ULONG       m_ulFlags;
             struct
             {
-                ULONG   m_fTDBTemplateTable:1;
-                ULONG   m_fTDBESE97TemplateTable:1;
-                ULONG   m_fTDBDerivedTable:1;
-                ULONG   m_fTDBESE97DerivedTable:1;
-                ULONG   m_f8BytesAutoInc:1;
-                ULONG   m_fTableHasFinalizeColumn:1;
-                ULONG   m_fTableHasDeleteOnZeroColumn:1;
-                ULONG   m_fTableHasDefault:1;
-                ULONG   m_fTableHasNonEscrowDefault:1;
-                ULONG   m_fTableHasUserDefinedDefault:1;
-                ULONG   m_fTableHasNonNullFixedColumn:1;
-                ULONG   m_fTableHasNonNullVarColumn:1;
-                ULONG   m_fTableHasNonNullTaggedColumn:1;
-                ULONG   m_fInitialisingDefaultRecord:1;
-                ULONG   m_fAutoIncOldFormat:1;
-                ULONG   m_fLid64:1;
+                ULONG   m_fTDBTemplateTable:1;              //  TRUE if table is a template table
+                ULONG   m_fTDBESE97TemplateTable:1;         //  TRUE if table is a template table created by ESE97
+                ULONG   m_fTDBDerivedTable:1;               //  TRUE if table is a derived table
+                ULONG   m_fTDBESE97DerivedTable:1;          //  TRUE if tagged columns in derived table don't have discrete column space
+                ULONG   m_f8BytesAutoInc:1;                 //  TRUE if autoinc column is 8 bytes long
+                ULONG   m_fTableHasFinalizeColumn:1;        //  TRUE if a Finalize column is present
+                ULONG   m_fTableHasDeleteOnZeroColumn:1;    //  TRUE if a DeleteOnZero column is present
+                ULONG   m_fTableHasDefault:1;               //  TRUE if table has at least one column with a default value
+                ULONG   m_fTableHasNonEscrowDefault:1;      //  TRUE if table has at least one non-escrow column with a default value
+                ULONG   m_fTableHasUserDefinedDefault:1;    //  TRUE if table has at least one column with a user-defined default value (callback)
+                ULONG   m_fTableHasNonNullFixedColumn:1;    //  TRUE if table has at least one fixed column flagged as JET_bitColumnNotNULL and no default value
+                ULONG   m_fTableHasNonNullVarColumn:1;      //  TRUE if table has at least one variable column flagged as JET_bitColumnNotNULL and no default value
+                ULONG   m_fTableHasNonNullTaggedColumn:1;   //  TRUE if table has at least one tagged column flagged as JET_bitColumnNotNULL and no default value
+                ULONG   m_fInitialisingDefaultRecord:1;     //  DEBUG-only flag for silencing asserts when building default record
+                ULONG   m_fAutoIncOldFormat:1;              //  Is autoInc in old format? New format stores the autoInc value on root page
+                ULONG   m_fLid64:1;                         //  TRUE if the LV-tree uses 64-bit LIDs
             };
         };
+        // 4 byte hole here on amd64
 
-        FCB             *m_pfcbLV;
+        FCB             *m_pfcbLV;              //  FCB of LV tree
+//  48 / 64 bytes (amd64)
 
         volatile unsigned __int64
-                        m_lidLast;
+                        m_lidLast;          //  Last LID that was used by the LV tree
 
         union
         {
             QWORD       m_qwAutoincrement;
             ULONG       m_ulAutoincrement;
         };
-        FID             m_fidVersion;
-        FID             m_fidAutoincrement;
+        FID             m_fidVersion;           //  fid of version field
+        FID             m_fidAutoincrement;     //  fid of autoincrement field
+//  68 / 84 bytes (amd64)
 
-        DBK             m_dbkMost;
-        MEMPOOL         m_mempool;
+        DBK             m_dbkMost;              //  greatest DBK in use
+        MEMPOOL         m_mempool;              //  buffer for additional FIELD structures,
+                                                //  long IDXSEG's, and table/column/index names
+//  88 / 112 bytes (amd64)
 
         CBinaryLock     m_blIndexes;
+//  104 / 136 bytes (amd64)
 
         BYTE            m_rgbitAllIndex[cbRgbitIndex];
+//  136 / 168 bytes (amd64)
 
         CReaderWriterLock   m_rwlDDL;
+//  152 / 192 bytes (amd64)
 
-        CBDESC          *m_pcbdesc;
+        CBDESC          *m_pcbdesc;             //  callback info
 
         INST*           m_pinst;
 
         ULONG           m_cbPreferredIntrinsicLV;
         LONG            m_cbLVChunkMost;
-        MEMPOOL::ITAG   m_itagDeferredLVSpacehints;
+        MEMPOOL::ITAG   m_itagDeferredLVSpacehints;     //  itag into memory pool for table name
 
+//  172 bytes / 220 bytes (amd64)
 
     private:
+        //For new auto inc
         DWORD               m_dwAutoIncBatchSize;
         QWORD               m_qwAllocatedAutoIncMax;
         BYTE                m_bReserved[8];
 
+//  192 / 240 bytes (amd64)
 
         CInitOnce< ERR, decltype( &ErrRECIInitAutoIncrement ), FUCB * const, QWORD >  m_AutoIncInitOnce;
 
 #ifdef _AMD64_
-        BYTE                m_bReserved2[8];
+        BYTE                m_bReserved2[8];     //  for alignment. fileopen.cxx: C_ASSERT( sizeof(TDB) % 16 == 0 );
 #else
-        BYTE                m_bReserved2[4];
+        BYTE                m_bReserved2[4];     //  for alignment. fileopen.cxx: C_ASSERT( sizeof(TDB) % 16 == 0 );
 #endif
 
+//  208 / 272 bytes (amd64)
 
     public:
+        // Member retrieval.
         MEMPOOL& MemPool() const;
         FID FidFixedFirst() const;
         FID FidFixedLastInitial() const;
@@ -482,9 +536,10 @@ class TDB
 
 #ifdef DEBUGGER_EXTENSION
     VOID Dump( CPRINTF * pcprintf, DWORD_PTR dwOffset = 0 ) const;
-#endif
+#endif  //  DEBUGGER_EXTENSION
 
     public:
+        // Member manipulation.
         VOID SetMemPool( const MEMPOOL& mempool );
         VOID IncrementFidFixedLast();
         VOID IncrementFidVarLast();
@@ -533,6 +588,7 @@ class TDB
         BOOL FLid64() const                             { return m_fLid64; }
         VOID SetFLid64( BOOL fLid64 );
 
+        //  the following flag is DEBUG-only
         BOOL FInitialisingDefaultRecord() const         { return m_fInitialisingDefaultRecord; }
         VOID SetFInitialisingDefaultRecord()
         {
@@ -547,6 +603,8 @@ class TDB
 #endif
         }
 
+        // used only in OLD in order to avoid bookmark change
+        // no concurrency problems in this case
         VOID SetDbkMost( DBK dbk ) { m_dbkMost = dbk; }
 
         ERR ErrGetAndIncrDbkMost( DBK * const pdbk );
@@ -639,6 +697,7 @@ INLINE TDB::TDB(
         m_pfcbTemplateTable = pfcbTemplateTable;
     }
 
+    //  ensure bit array is aligned for LONG_PTR traversal
     Assert( (LONG_PTR)m_rgbitAllIndex % sizeof(LONG_PTR) == 0 );
 
     Assert( pfieldNil == m_pfieldsInitial );
@@ -647,14 +706,17 @@ INLINE TDB::TDB(
     Assert( 0 == m_fidVersion );
     Assert( 0 == m_fidAutoincrement );
 
+    // FFixedNoneFull() should only be true if there is a template table.
     Assert( m_fidFixedFirst.FFixed() || ( m_pfcbTemplateTable && m_fidFixedFirst.FFixedNoneFull() ) );
     Assert( m_fidFixedLastInitial.FFixedNone() || m_fidFixedLastInitial.FFixed() );
     Assert( m_fidFixedLast.FFixedNone() || m_fidFixedLast.FFixed() );
 
+    // FVarNoneFull() should only be true if there is a template table.
     Assert( m_fidVarFirst.FVar() || ( m_pfcbTemplateTable && m_fidVarFirst.FVarNoneFull() ) );
     Assert( m_fidVarLastInitial.FVarNone() || m_fidVarLastInitial.FVar() );
     Assert( m_fidVarLast.FVarNone() || m_fidVarLast.FVar() );
 
+    // FTaggedNoneFull() should only be true if there is a template table.
     Assert( m_fidTaggedFirst.FTagged() || ( m_pfcbTemplateTable && m_fidTaggedFirst.FTaggedNoneFull() ) );
     Assert( m_fidTaggedLastInitial.FTaggedNone() || m_fidTaggedLastInitial.FTagged() );
     Assert( m_fidTaggedLast.FTaggedNone() || m_fidTaggedLast.FTagged() );
@@ -682,6 +744,7 @@ INLINE TDB::~TDB()
         pcbdesc = pcbdesc->pcbdescNext;
         if( pcbdescDelete->fPermanent )
         {
+            //  if this callback came from the catalog, we PvOSMemoryHeapAlloc'd the memory for it
             OSMemoryHeapFree( pcbdescDelete->pvContext );
         }
         delete pcbdescDelete;
@@ -819,6 +882,7 @@ INLINE VOID TDB::SetItagDeferredLVSpacehints( MEMPOOL::ITAG itag )
 
 INLINE VOID TDB::SetIbEndFixedColumns( const WORD ibRec, const FID fidFixedLast )
 {
+    // Set the last offset.
     Assert( m_ibEndFixedColumns >= ibRECStartFixedColumns );
     m_ibEndFixedColumns = ibRec;
 
@@ -875,7 +939,7 @@ INLINE VOID TDB::SetIbEndFixedColumns( const WORD ibRec, const FID fidFixedLast 
 INLINE VOID TDB::SetFidVersion( FID fid )
 {
     Assert( 0 == m_fidVersion );
-    Assert( 0 == fid || FFixedFid( fid ) );
+    Assert( 0 == fid || FFixedFid( fid ) );     //  UNDONE: Not sure if this is ever called with fid==0, but relax the assert to allow it
     m_fidVersion = fid;
 }
 INLINE VOID TDB::ResetFidVersion()
@@ -888,7 +952,7 @@ INLINE VOID TDB::ResetFidVersion()
 INLINE VOID TDB::SetFidAutoincrement( FID fid, BOOL f8BytesAutoInc )
 {
     Assert( 0 == m_fidAutoincrement );
-    Assert( 0 == fid || FFixedFid( fid ) );
+    Assert( 0 == fid || FFixedFid( fid ) );     //  UNDONE: Not sure if this is ever called with fid==0, but relax the assert to allow it
     m_fidAutoincrement = fid;
     m_f8BytesAutoInc = (USHORT)( fid != 0 ? f8BytesAutoInc : fFalse );
 }
@@ -912,6 +976,8 @@ INLINE ERR TDB::ErrGetAndIncrAutoincrement( QWORD * const pqwT )
 {
     ERR err = JET_errSuccess;
 
+    //  auto-inc counter should have been pre-initialised
+    //  to a non-zero value
     Assert( m_qwAutoincrement > 0 );
 
     if ( FOS64Bit() )
@@ -1022,6 +1088,8 @@ INLINE VOID TDB::UnregisterPcbdesc( CBDESC * const pcbdescRemove )
 
 INLINE VOID TDB::MaterializeFids( TDB *ptdbSrc )
 {
+    // Called only by SortMaterialize() to propagate FIDs from the sort to the
+    // temp table.
     Assert( m_fidFixedLast.FFixedNone() );
     Assert( m_fidVarLast.FVarNone() );
     Assert( m_fidTaggedLast.FTaggedNone() );
@@ -1032,6 +1100,7 @@ INLINE VOID TDB::MaterializeFids( TDB *ptdbSrc )
     Assert( ptdbSrc->FidVarLast().FVarNone()         || ptdbSrc->FidVarLast().FVar() );
     Assert( ptdbSrc->FidTaggedLast().FTaggedNone()   || ptdbSrc->FidTaggedLast().FTagged() );
 
+    // These two special column types must be fixed.
     Assert( ptdbSrc->FidVersion().FFixedNone()       || ptdbSrc->FidVersion().FFixed() );
     Assert( ptdbSrc->FidAutoincrement().FFixedNone() || ptdbSrc->FidAutoincrement().FFixed() );
 
@@ -1049,7 +1118,7 @@ INLINE CHAR *TDB::SzName_( MEMPOOL::ITAG iTagEntry ) const
     CHAR    *szString;
 
     szString = reinterpret_cast<CHAR *>( MemPool().PbGetEntry( iTagEntry ) );
-    Assert( strlen( szString ) == MemPool().CbGetEntry( iTagEntry ) - 1 );
+    Assert( strlen( szString ) == MemPool().CbGetEntry( iTagEntry ) - 1 );  // Account for null-terminator.
     Assert( strlen( szString ) <= JET_cbNameMost );
 
     return szString;
@@ -1068,6 +1137,7 @@ INLINE CHAR *TDB::SzIndexName( MEMPOOL::ITAG itagIndexName, const BOOL fDerivedI
     Assert( itagIndexName != itagTDBTableName );
     if ( fDerivedIndex )
     {
+        // Derived index, so must use TDB of template table.
         AssertValidDerivedTable();
         szIndexName = PfcbTemplateTable()->Ptdb()->SzName_( itagIndexName );
     }
@@ -1088,6 +1158,7 @@ INLINE CHAR *TDB::SzFieldName( MEMPOOL::ITAG itagFieldName, const BOOL fDerivedC
 
     if ( fDerivedColumn )
     {
+        //  derived column, so must use TDB of template table
         AssertValidDerivedTable();
         szFieldName = PfcbTemplateTable()->Ptdb()->SzName_( itagFieldName );
     }
@@ -1115,6 +1186,7 @@ INLINE VOID TDB::AssertFIELDValid( const FIELD * const pfield ) const
 
         pfieldStart = (FIELD *)MemPool().PbGetEntry( itagTDBFields );
 
+        //  must be at least one dynamic column
         Assert( FidFixedLastInitial() < FidFixedLast()
             || FidVarLastInitial() < FidVarLast()
             || FidTaggedLastInitial() < FidTaggedLast() );
@@ -1126,10 +1198,11 @@ INLINE VOID TDB::AssertFIELDValid( const FIELD * const pfield ) const
     }
 
     Assert( ( (BYTE *)pfield - (BYTE *)pfieldStart ) % sizeof(FIELD) == 0 );
-#endif
+#endif  //  DEBUG
 }
 
 
+// Get the appropriate FIELD strcture, starting from the beginning of the field info.
 INLINE FIELD *TDB::PfieldFixed( const COLUMNID columnid ) const
 {
     const TDB *     ptdb;
@@ -1244,6 +1317,9 @@ INLINE FIELD *TDB::PfieldTagged( const COLUMNID columnid ) const
     }
     else
     {
+        //  fixed and variable columns may not be added to template tables, though tagged ones may,
+        //  so assert that if we are dealing with template tables, no fixed or variable columns have
+        //  been added.
 
 #ifdef DEBUG
         if( ptdb->FTemplateTable() )
@@ -1283,6 +1359,7 @@ INLINE FIELD *TDB::Pfield( const COLUMNID columnid ) const
         pfield = PfieldVar( columnid );
     }
 
+    //  template columns can't be deleted
     Assert( !FCOLUMNIDTemplateColumn( columnid )
         || JET_coltypNil != pfield->coltyp );
 
@@ -1301,8 +1378,16 @@ INLINE WORD TDB::IbOffsetOfNextColumn( const FID fid ) const
         ib = IbEndFixedColumns();
     }
 #ifdef DEBUG
+    //  this flag is DEBUG-only
     else if ( FInitialisingDefaultRecord() )
     {
+        //  HACK/SPECIAL-CASE: if calling SetColumn() while
+        //  initialising default record, columns beyond this
+        //  one may not be initialised yet.  However, we're
+        //  guaranteed that this column has been initialised
+        //  (and not deleted), so we can compute the offset
+        //  of the next column by using the offset/length of
+        //  this column
         if ( fid >= fidFixedLeast )
         {
             const BOOL      fTemplateColumn     = FFixedTemplateColumn( fid );
@@ -1329,6 +1414,7 @@ INLINE WORD TDB::IbOffsetOfNextColumn( const FID fid ) const
     {
         Assert( ib <= IbEndFixedColumns() );
 
+        // Last fixed column always has cbMaxLen set, even if deleted.
         if ( fid >= fidFixedLeast )
         {
             const COLUMNID  columnid    = ColumnidOfFid( fid, FFixedTemplateColumn( fid ) );
@@ -1360,7 +1446,7 @@ INLINE WORD TDB::IbOffsetOfNextColumn( const FID fid ) const
             Assert( ibRECStartFixedColumns == ib );
         }
     }
-#endif
+#endif  // DEBUG
 
     return ib;
 }
@@ -1463,8 +1549,11 @@ INLINE VOID TDB::LeaveIndexing()
 }
 INLINE VOID TDB::SetFLid64( BOOL fLid64 )
 {
+    //Assert( RwlDDL().FWriter() );
     if ( m_fLid64 == fTrue && fLid64 == fFalse )
     {
+        // DataCorruption: Can't switch from LID64 to LID32 after a LID has been generated
+        // Technically, we can still go back if I64LidLast() is a 32-bit LID but this is just easier
         EnforceSz( Ui64LidLast() == 0, "DataCorruptionSwitchFromLID64toLID32" );
     }
 
@@ -1473,7 +1562,7 @@ INLINE VOID TDB::SetFLid64( BOOL fLid64 )
 
 INLINE VOID FCB::ResetUpdating_()
 {
-    Assert( FTypeTable() );
+    Assert( FTypeTable() );             // Sorts and temp tables have fixed DDL.
     Assert( !FTemplateTable() );
     Assert( !FFixedDDL() );
     Assert( Ptdb() != ptdbNil );
@@ -1482,6 +1571,7 @@ INLINE VOID FCB::ResetUpdating_()
 }
 INLINE VOID FCB::ResetUpdatingAndLeaveDML()
 {
+    // If DDL is fixed, then there's no contention with CreateIndex
     if ( !FFixedDDL() )
     {
         LeaveDML_();
@@ -1490,6 +1580,7 @@ INLINE VOID FCB::ResetUpdatingAndLeaveDML()
 }
 INLINE VOID FCB::ResetUpdating()
 {
+    // If DDL is fixed, then there's no contention with CreateIndex
     if ( !FFixedDDL() )
     {
         ResetUpdating_();
@@ -1499,9 +1590,10 @@ INLINE VOID FCB::ResetUpdating()
 
 INLINE VOID FCB::SetIndexing()
 {
-    Assert( FTypeTable() );
+    Assert( FTypeTable() );     // Can't create indexes on sorts and temp tables.
     Assert( Ptdb() != ptdbNil );
 
+    // Can only override FixedDDL flag if we have exclusive use of the table.
     Assert( !FFixedDDL() || CrefDomainDenyRead() > 0 );
 
     Ptdb()->EnterIndexing();
@@ -1510,9 +1602,10 @@ INLINE VOID FCB::SetIndexing()
 
 INLINE VOID FCB::ResetIndexing()
 {
-    Assert( FTypeTable() );
+    Assert( FTypeTable() );     // Can't create indexes on sorts and temp tables.
     Assert( Ptdb() != ptdbNil );
 
+    // Can only override FixedDDL flag if we have exclusive use of the table.
     Assert( !FFixedDDL() || CrefDomainDenyRead() > 0 );
 
     Ptdb()->LeaveIndexing();

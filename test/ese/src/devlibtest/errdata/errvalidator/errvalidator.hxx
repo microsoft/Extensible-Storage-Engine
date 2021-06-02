@@ -1,6 +1,7 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
+// needed for JET errors
 #ifdef BUILD_ENV_IS_NT
 #include <esent_x.h>
 #endif

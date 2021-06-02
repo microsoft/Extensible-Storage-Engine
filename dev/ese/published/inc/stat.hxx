@@ -3,18 +3,26 @@
 
 #ifndef _STAT_HXX_INCLUDED
 #define _STAT_HXX_INCLUDED
+//
+//  stat library
+//
+//
 
 
+//  Assertions
 
+//  called to indicate to the developer that an assumption is not true
+//
+//  #define STATAssert to point to your favorite assert function pre #include
 
 #ifdef STATAssert
-#else
+#else  //  !STATAssert
 #define STATAssert Assert
-#endif
+#endif  //  STATAssert
 #ifdef STATAssertSz
-#else
+#else  //  !STATAssertSz
 #define STATAssertSz AssertSz
-#endif
+#endif  //  STATAssertSz
 
 #ifndef INLINE
 #define INLINE inline
@@ -22,9 +30,13 @@
 
 #include "sync.hxx"
 
+// copy from math.hxx ...
 #define roundup( val, align ) ( ( ( ( val ) + ( align ) - 1 ) / ( align ) ) * ( align ) )
 
 
+//
+//  Simple statistical routines
+//
 
 inline ULONG UlFunctionalMin( ULONG ulVal1, ULONG ulVal2 )
 {
@@ -44,6 +56,11 @@ inline LONG LFunctionalMax( LONG lVal1, LONG lVal2 )
     return lVal1 > lVal2 ? lVal1 : lVal2;
 }
 
+// Would love to use this more pretty version, like this:
+//  #define bound( iIn, iLow, iHigh )           ( max( min( iIn, iHigh ), iLow ) )
+// but it has problems in that iIn if a function (that can change its result) is 
+// specified, the code compiled behaves incorrectly b/c there are multiple calls 
+// to iIn().
 
 #define UlBound( ulIn, ulLow, ulHigh )          ( UlFunctionalMax( UlFunctionalMin( ulIn, ulHigh ), ulLow ) )
 
@@ -71,19 +88,56 @@ inline LONG_PTR LpFunctionalMax( LONG_PTR lpVal1, LONG_PTR lpVal2 )
 
 #define LpBound( lpIn, lpLow, lpHigh )              ( LpFunctionalMax( LpFunctionalMin( lpIn, lpHigh ), lpLow ) )
 
+//
+//  Histogram Support
+//
+//
+//  For these implementations
+//      N = samples
+//      M = distinct samples | sample buckets
+//
+//  Types of CStats implementations:
+//
+//                      CMinMaxTotStats ( void )
+//                                  CPerfectHistogram ( void )
+//                                              CSegmentedHistogram
+//                                                          CLinearHistogram
+//                                                                      CFixedLinearHistogram
+//                                                                                  <More to be implemented on an as needed basis>
+//
+//  Implemented:                                            
+//  Thread Safe:        Yes[1a]     Yes[1a,1b]  Yes[1a,1b]  Yes[1a,1b]  Yes[1a,1b]
+//  Initial size:       36          60+rwl      80+8*rgSeg  16+CPerfect 36+8*cSect
+//  Preallocated:       Yes         No          Yes         No          Yes
+//  O() mem usage:      N/A         M           M           M           M/2
+//  O() of insert:      1           ?Log M?     Log M       ?Log M?     1
+//  worst insert O:     1           M           Log M       M           1
+//
+//  [1] - Thread safe in that during sample collection the structure will not crash nor
+//  produce inaccurate data. Not thread safe in that no class today can handle concurrency
+//  between collection and sample enumeration, and most can't handle two sample enumerators:
+//      [1a] - Not guaranteed 100% accuracy of data if 2 threads contend during sample collection,
+//          though the timing window is small.
+//      [1b] - Not guaranteed 100% accuracy of data is sample enumeration overlaps with sample 
+//          collection.
+//
 
 
 namespace STAT {
 
 
+//  This was of considerable consternation but I just found it was much easier
+//  on the mind to just shuck one problem at a time, unsigned __int64's.  This
+//  seems reasonable as there are few people who care about negative values, and
+//  DWORDs can be fully subsumed by QWORD histograms.
 
 typedef  QWORD SAMPLE;
 typedef  __int64 CHITS;
 
-enum HistogramCurrencyResetFlags
+enum HistogramCurrencyResetFlags // hgcrf
 {
-    hgcrfResetSampleEnumeration = 0x1,
-    hgcrfResetHitsEnumeration   = 0x2,
+    hgcrfResetSampleEnumeration = 0x1,  //  Allows resetting of ONLY the sample enumeration for ErrGetSamplevalues.
+    hgcrfResetHitsEnumeration   = 0x2,  //  Allows resetting of ONLY the hits enumeration for ErrGetSampleHits / ErrGetPercentileHits.
 
     hgcrfDefault                = ( hgcrfResetSampleEnumeration | hgcrfResetHitsEnumeration ),
 };
@@ -91,10 +145,16 @@ enum HistogramCurrencyResetFlags
 
 
 
+//
+//  Virtual interface.
+//
 class CStats {
 
 public:
 
+    //
+    //          API Status Codes
+    //
 
     enum class ERR
     {
@@ -105,24 +165,58 @@ public:
         errFuncNotSupported,
     };
 
+    //
+    //  dtor.
+    //
 
     virtual ~CStats() {}
 
+    //
+    //          Sample collection.
+    //
 
+    //  Sets the collection of samples to "zero".
+    //
     virtual void Zero( void ) = 0;
 
+    //  Adds a sample value to the collection.
+    //
     virtual ERR ErrAddSample( _In_ const SAMPLE qwSample ) = 0;
 
 
+    //
+    //          Sample enumeration.
+    //
 
+    //  Both ErrGetSampleValues() and ErrGetSampleHits() are user an iterator
+    //  model ... this function, ErrReset(), sets both enumerators back to 
+    //  their "starting point" by default.
+    //
     virtual ERR ErrReset( const HistogramCurrencyResetFlags hgcrf = hgcrfDefault ) = 0;
 
+    //  Retrieves the distinct sample values the collector mechanism was able
+    //  to track, i.e. the "native" sample values the collector knows of.
+    //
     virtual ERR ErrGetSampleValues( __out SAMPLE * pSamples ) = 0;
 
+    //  Retieves number of samples equal to or less than this value, compared 
+    //  to the previous call.  This function should not assume that the sample
+    //  values requested match those ErrGetSampleValues() gives back, the user
+    //  may break the histogram up into exact chunks of a 100, or something.
+    //
     virtual ERR ErrGetSampleHits( __in const SAMPLE qwSample, __out CHITS * pcHits ) = 0;
 
+    //  Gets the sample value at the nth percentile.  This is just more convienent
+    //  way of calling ErrGetSampleValues()/ErrGetSampleHits() in a loop to count
+    //  up to the nth percentile.  Note also the Median() is just this function,
+    //  passing cPercentile = 50.
+    //
     virtual ERR ErrGetPercentileHits( __inout ULONG * pPercentile, __out SAMPLE * pSample ) = 0;
 
+    //  These are a set of useful statistical functions.  Not all of them may
+    //  give precisely true values, depending upon the base kind of CStats
+    //  implementation the user picked.
+    //
     virtual CHITS C() const = 0;
     virtual SAMPLE Min() const = 0;
     virtual SAMPLE Max() const = 0;
@@ -134,9 +228,15 @@ public:
 };
 
 
+//  In several places we are forced to void*'s via callbacks and such, so this is
+//  a helper macro to undo this ... C# has reflection, we have this.
+//
 #define CStatsFromPv( pv )      ((CStats*)(pv))
 
 
+//  This simple implementation of CStats keeps the count, min, max, and total of all
+//  samples added to the collection.  With this we can also implement Ave() obviously.
+//
 class CMinMaxTotStats : public CStats {
 
 protected:
@@ -148,6 +248,7 @@ protected:
 public:
 
 #ifdef DEBUG
+    //  Note, not at all thread safe.
     void AssertValid ( void ) const
     {
         if ( c )
@@ -155,6 +256,7 @@ public:
             STATAssert( qwMin <= qwMax );
             if ( qwMax < qwTotal )
             {
+                //  meaning we have more than one of sample.
                 STATAssert( c > 1 );
             }
         }
@@ -163,6 +265,9 @@ public:
             STATAssert( qwMin == 0xFFFFFFFFFFFFFFFF );
             STATAssert( qwMax == 0 );
             STATAssert( qwTotal == 0 );
+            //  Can not call these, as they call AssertValid().
+            //STATAssert( Ave() == 0 ); // and should not AV
+            //STATAssert( DblAve() == 0.0 );    // and should not AV
         }
     }
 #else
@@ -236,6 +341,9 @@ public:
 
 };
 
+//  This simple extension of CMinMaxTotStats allows an average to be built over time by
+//  allowing the caller to instantiate with a total and count
+//
 class CReloadableAveStats : public CMinMaxTotStats {
 public:
     void Init(CHITS cInitial, SAMPLE qwInitial)
@@ -248,6 +356,8 @@ public:
             qwTotal = qwInitial;
             c = cInitial;
 
+            // Min/Max aren't used, but need to be
+            // initialized to a valid state
             qwMin = 0;
             qwMax = qwInitial;
             }
@@ -257,6 +367,7 @@ public:
             }
     }
 
+    // Not supported
     SAMPLE Min() const { AssertValid(); return 0; }
     SAMPLE Max() const { AssertValid(); return 0; }
 };
@@ -275,9 +386,9 @@ public:
 };
 
 
-enum PerfectHistogramStatsFlags
+enum PerfectHistogramStatsFlags // phsf
 {
-    phsfReadSyncExternalControlled = 1,
+    phsfReadSyncExternalControlled = 1, // disables locking for read enumeration (GetSampleValues/Hits).
 };
 
 class CPerfectHistogramStats : public CStats {
@@ -307,6 +418,7 @@ private:
 
         ULONG iVal;
         ULONG fExactMatch = fFalse;
+        // improvement, bsearch.
         for ( iVal = 0; iVal < m_cValues; iVal++ )
         {
             if( qwSample <= m_pValues[iVal] )
@@ -343,6 +455,9 @@ public:
 
 public:
 
+    //
+    //  Sample collection.
+    //
 
     void Zero( void )
     {
@@ -369,18 +484,22 @@ public:
     }
 
     CPerfectHistogramStats() :
-        m_rwlGrowing( CLockBasicInfo( CSyncBasicInfo( "CPerfectHistogramStats" ), 10 , 0 ) )
+        //  rankBasicStats is hard coded here, all others are in daeconst.hxx,
+        //  but can't include that here, due to errors (and layering violation).
+        m_rwlGrowing( CLockBasicInfo( CSyncBasicInfo( "CPerfectHistogramStats" ), 10 /* rankBasicStats */, 0 ) )
     {
         m_pValues = NULL;
         m_pcValues = NULL;
         m_fInReadValues = fFalse;
         Zero();
         AssertValid();
-        STATAssert( cmmts.C() == 0 );
+        STATAssert( cmmts.C() == 0 ); // ctor should've taken care of
     }
 
     CPerfectHistogramStats( PerfectHistogramStatsFlags pfhs ) :
-        m_rwlGrowing( CLockBasicInfo( CSyncBasicInfo( "CPerfectHistogramStats" ), 10 , 0 ) )
+        //  rankBasicStats is hard coded here, all others are in daeconst.hxx,
+        //  but can't include that here, due to errors (and layering violation).
+        m_rwlGrowing( CLockBasicInfo( CSyncBasicInfo( "CPerfectHistogramStats" ), 10 /* rankBasicStats */, 0 ) )
     {
         m_pValues = NULL;
         m_pcValues = NULL;
@@ -395,7 +514,7 @@ public:
         AssertValid();
         ErrReset();
         AssertValid();
-        Zero();
+        Zero(); // frees allocated memory.
         AssertValid();
     }
 
@@ -420,15 +539,20 @@ public:
 
         if ( !fExactMatch )
         {
+            // allocating over 80 MBs for 10 M values, need to move to something else ...
             STATAssert( m_cValues < 10000000 );
 
             m_rwlGrowing.LeaveAsReader();
             m_rwlGrowing.EnterAsWriter();
 
+            //  We let go of the latch, so we have to re-establish our point of insertion ... 
             if ( FFindSampleBucket( qwSample, &iVal ) )
             {
+                //  Whoa, what are the chances that someone else got in and fixed the histo to
+                //  have the bucket we need!  Wow.
                 AssertValid();
                 m_rwlGrowing.LeaveAsWriter();
+                // endless recursion, EXTREMELY unlikely. Have to have someone fighting us w/ Zero() calls.
                 return ErrAddSample( qwSample );
             }
 
@@ -465,7 +589,7 @@ public:
         else
         {
             STATAssert( FValidIndex(iVal) );
-            m_pcValues[iVal]++;
+            m_pcValues[iVal]++; // increment count
             AssertValid();
             m_rwlGrowing.LeaveAsReader();
         }
@@ -487,6 +611,9 @@ private:
 
 public:
 
+    //
+    //  Sample enumeration.
+    //
     
     CStats::ERR ErrReset( const HistogramCurrencyResetFlags hgcrf = hgcrfDefault )
     {
@@ -584,7 +711,7 @@ public:
         {
             if ( qwValue < m_pValues[m_iValueLastQuery] )
             {
-                break;
+                break;  // Done counting values for this histo ...
             }
             cHits += m_pcValues[m_iValueLastQuery];
         }
@@ -621,6 +748,7 @@ public:
 
         cTotHits = ( C() * *pPercentile ) / 100;
 
+        // Which way to go?
         if ( m_cValueLastPercentile == 0 )
         {
             m_cValueLastPercentile = m_pcValues[ 0 ];
@@ -666,10 +794,11 @@ public:
         return ERR::errSuccess;
     }
 
-    SAMPLE Mode()
+    SAMPLE Mode()   // sort of a mode ...
     {
         if ( m_cValues == 0 )
         {
+            //  Kind of on the caller to check C() first, give crazy value.
             return 0x4242424242424242;
         }
         if ( !m_fDisableEnumerationLocking )
@@ -680,6 +809,7 @@ public:
         ULONG iMode = 0;
         for( ULONG iVal = 0; iVal < m_cValues; iVal++ )
         {
+            //  Note returns the "lowest" mode that fits.
             if ( cHighCount < m_pcValues[iVal] )
             {
                 cHighCount = m_pcValues[iVal];
@@ -701,7 +831,7 @@ public:
     SAMPLE Max() const      { AssertValid(); return cmmts.Max(); }
     SAMPLE Total() const    { AssertValid(); return cmmts.Total(); }
     SAMPLE Ave() const      { AssertValid(); return cmmts.Ave(); }
-    SAMPLE Mean() const     { AssertValid(); return Ave(); }
+    SAMPLE Mean() const     { AssertValid(); return Ave(); }    // in case you're a td statiscian
     double DblAve() const   { AssertValid(); return cmmts.DblAve(); }
 
 };
@@ -711,6 +841,8 @@ class CLinearHistogramStats : public CStats {
 
 private:
 
+    //  A perfect histogram is sufficient as long as we just normalize the data
+    //  on the way in...
     CPerfectHistogramStats  m_stats;
 
     SAMPLE                  m_cSection;
@@ -729,6 +861,9 @@ public:
 
 public:
 
+    //
+    //  Sample collection.
+    //
 
     void Zero( void )
     {
@@ -741,14 +876,14 @@ public:
         m_fRoundUp = fTrue;
         Zero();
         AssertValid();
-        STATAssert( m_stats.C() == 0 );
+        STATAssert( m_stats.C() == 0 ); // ctor should've taken care of
     }
     ~CLinearHistogramStats()
     {
         AssertValid();
         ErrReset();
         AssertValid();
-        Zero();
+        Zero(); // frees allocated memory.
         AssertValid();
     }
 
@@ -756,6 +891,7 @@ public:
     {
         SAMPLE qwSampleNormalized;
 
+        //  Normalize the data to our linear histogram data model ...
 
         if ( 0 == qwSample )
         {
@@ -770,12 +906,16 @@ public:
             qwSampleNormalized = ( ( m_fRoundUp ? 1 : 0 ) + qwSample / m_cSection ) * m_cSection;
         }
 
+        //  Add to our perfect histogram storage ...
 
         return m_stats.ErrAddSample( qwSampleNormalized );
     }
 
 public:
 
+    //
+    //  Sample enumeration.
+    //
     
     CStats::ERR ErrReset( const HistogramCurrencyResetFlags hgcrf = hgcrfDefault )
     {
@@ -797,7 +937,7 @@ public:
         return m_stats.ErrGetPercentileHits( pPercentile, pSample );
     }
 
-    SAMPLE Mode()
+    SAMPLE Mode()   // sort of a mode ...
     {
         return m_stats.Mode();
     }
@@ -807,7 +947,7 @@ public:
     SAMPLE Max() const      { AssertValid(); return m_stats.Max(); }
     SAMPLE Total() const    { AssertValid(); return m_stats.Total(); }
     SAMPLE Ave() const      { AssertValid(); return m_stats.Ave(); }
-    SAMPLE Mean() const     { AssertValid(); return Ave(); }
+    SAMPLE Mean() const     { AssertValid(); return Ave(); }    // in case you're a td statiscian
     double DblAve() const   { AssertValid(); return m_stats.DblAve(); }
 
 };
@@ -853,6 +993,7 @@ class CSegmentedHistogram : public CStats {
             }
 
             ULONG iVal;
+            // improvement, bsearch.
             for ( iVal = 0; iVal < m_cValues; iVal++ )
             {
                 if( qwSample <= m_pValues[iVal] )
@@ -882,9 +1023,14 @@ class CSegmentedHistogram : public CStats {
         void AssertValid ( void ) const { ; }
 #endif
 
+    //
+    //  Sample collection.
+    //
 
     private:
 
+        //  We make the histogram be preallocated, so we protect this .ctor.
+        //      see src\blue\src\statunit\segmentedhisto.cxx
         CSegmentedHistogram( );
 
     public:
@@ -912,6 +1058,7 @@ class CSegmentedHistogram : public CStats {
 
             STATAssert( FInit_() );
 
+            //  We must be at an offset that is a __int64 atomically modifable ...
             STATAssert( sizeof(*this) % 8 == 0 );
             STATAssert( (LONG_PTR)PcHits_() % 8 == 0 );
             STATAssert( ((BYTE*)(&PcHits_()[m_cValues-1])) + sizeof(SAMPLE) <= ((BYTE*)this) + cbHitsData );
@@ -924,6 +1071,7 @@ class CSegmentedHistogram : public CStats {
 
         ~CSegmentedHistogram()
         {
+            //  Intentionally does nothing
         }
 
         void Zero( void )
@@ -963,6 +1111,9 @@ class CSegmentedHistogram : public CStats {
         }
 
 
+    //
+    //  Sample enumeration.
+    //
 
     private:
 
@@ -973,7 +1124,7 @@ class CSegmentedHistogram : public CStats {
 
         CStats::ERR ErrReset( const HistogramCurrencyResetFlags hgcrf = hgcrfDefault )
         {
-            STATAssert( hgcrf == hgcrfDefault );
+            STATAssert( hgcrf == hgcrfDefault ); // Not yet implemented specific flag processing.
             m_iSampleValueNext = 0;
             m_iValueLastQuery = 0;
             return ERR::errSuccess;
@@ -1000,6 +1151,8 @@ class CSegmentedHistogram : public CStats {
             return ERR::errSuccess;
         }
 
+        //  This version of get samples values, captures the values, destructively 
+        //  reading them from the object and setting them into phistoNew.
 
         CStats::ERR ErrCaptureSampleValues( CSegmentedHistogram * phistoNew )
         {
@@ -1015,6 +1168,7 @@ class CSegmentedHistogram : public CStats {
 
             for( ULONG iVal = 0; iVal < m_cValues; iVal++ )
             {
+                //  Fails if any of the sample buckets does not match ...
                 if ( m_pValues[iVal] != phistoNew->m_pValues[iVal] )
                 {
                     return ERR::errInvalidParameter;
@@ -1056,7 +1210,7 @@ class CSegmentedHistogram : public CStats {
             {
                 if ( qwValue < m_pValues[m_iValueLastQuery] )
                 {
-                    break;
+                    break;  // Done counting values for this histo ...
                 }
                 cHits += PcHits_()[m_iValueLastQuery];
             }
@@ -1075,13 +1229,14 @@ class CSegmentedHistogram : public CStats {
             return ERR::errInvalidParameter;
         }
 
-        SAMPLE Mode()
+        SAMPLE Mode()   // sort of a mode ...
         {
             STATAssert( FInit_() );
 
             STATAssert( m_cValues );
             if ( m_cValues == 0 )
             {
+                //  Kind of on the caller to check C() first, give crazy value.
                 return 0x4242424242424242;
             }
 
@@ -1089,6 +1244,7 @@ class CSegmentedHistogram : public CStats {
             ULONG iMode = 0;
             for( ULONG iVal = 0; iVal < m_cValues; iVal++ )
             {
+                //  Note returns the "lowest" mode that fits.
                 if ( cHighCount < PcHits_()[iVal] )
                 {
                     cHighCount = PcHits_()[iVal];
@@ -1114,6 +1270,8 @@ class CSegmentedHistogram : public CStats {
             return cTotal;
         }
 
+        //  Note min, max, total will all be not 100% accurate, because the histogram
+        //  is segmented.
 
         SAMPLE Min() const
         {
@@ -1160,7 +1318,7 @@ class CSegmentedHistogram : public CStats {
         {
             AssertValid();
             return Ave();
-        }
+        }   // in case you're a td statiscian
         double DblAve() const
         {
             AssertValid();
@@ -1183,20 +1341,37 @@ class CSegmentedHistogram : public CStats {
         inline ENUMTYPE operator ~ (ENUMTYPE a) { return ENUMTYPE(~((INT)a)); }                                     \
     }
 
-enum FixedLinearHistoFlags
+enum FixedLinearHistoFlags // flhf
 {
     flhfNone            = 0x0,
 
-    flhfFullRoundUp     = 0x1,
-    flhfFullRoundDown   = 0x2,
+    flhfFullRoundUp     = 0x1,  //  If dqwSamplesInSection = 10, then 0 -> 0, 1 -> 10, 9 -> 10, 10 -> 10, 11 -> 20, etc.
+    flhfFullRoundDown   = 0x2,  //  If dqwSamplesInSection = 10, then 0 -> 0, 1 -> 0, 9 -> 0, 10 -> 10, 11 -> 10, etc.
+    //flhfHardNoRounding= 0x4,  //  NYI: thought being, 0 -> 0, 10 -> 10, and 1, 9, or 11 map to errInvalidParameter and Assert.
 
-    flhfSoftMax         = 0x10,
-    flhfHardMax         = 0x20,
-    flhfHardMin         = 0x40,
-    flhfSoftMin         = 0x40,
+    flhfSoftMax         = 0x10, //  Adds too high samples to the highest bucket
+                                //      Note: Default "Medium" Cap is to reject with error - as that is safest assumption.
+    flhfHardMax         = 0x20, //  Asserts in addition to rejecting too high samples with errInvalidParameter.
+    flhfHardMin         = 0x40, //  Asserts in addition to rejecting too low samples with errInvalidParameter.
+    flhfSoftMin         = 0x40, //  Adds too low samples to the lowest bucket
 };
 STAT_DEFINE_ENUM_FLAG_OPERATORS_BASIC( FixedLinearHistoFlags );
 
+//
+//  This histogram sorts samples into pre-allocated fixed size bucket/sections, shifted by a 
+//  sample base.  So that the adding samples is allocationless and O(1) run time, while covering
+//  any portion of the number space at any resolution.
+//
+//  This leads to three basic configs to ctor/class:
+//      [m_] qwSampleBase        - This is the shift, nothing below this is stored, unless the flhfSoftMin flag was used
+//                                 to force the value up.
+//      [m_] dqwSamplesInSection - This is the bucket size, or divisor for the samples.
+//      [m_] cSection            - This is how many sample buckets to hold.  Any sample above 
+//                                      qwSampleBase + ( cSection * dqwSamplesInSection )
+//                                 would be dropped unless flhfSoftMax flag is used to truncate the value.
+//
+//  So the range of samples stored is from: ( qwSampleBase ) to ( qwSampleBase + ( dqwSamplesInSection * cSection ) ).
+//
 
 class CFixedLinearHistogram : public CStats
 {
@@ -1209,6 +1384,7 @@ private:
     
 private:
 
+    //  private, so people don't use it 
     CFixedLinearHistogram()
     {
     }
@@ -1218,7 +1394,7 @@ private:
 #ifdef DEBUG
     void AssertValid ( void ) const
     {
-        STATAssert( m_iSampleValueNext <= m_cSection || m_iSampleValueNext == ulMax  );
+        STATAssert( m_iSampleValueNext <= m_cSection || m_iSampleValueNext == ulMax /* used as before first */ );
         STATAssert( m_iSampleHitsNext <= m_cSection );
     }
 #else
@@ -1234,6 +1410,9 @@ private:
 
 public:
 
+    //
+    //  Sample collection.
+    //
 
     void Zero( void )
     {
@@ -1246,7 +1425,7 @@ public:
     CFixedLinearHistogram( size_t cbSizeGiven, SAMPLE qwSampleBase, SAMPLE dqwSamplesInSection, ULONG cSection, const FixedLinearHistoFlags flhf )
     {
         STATAssert( ( ( cbSizeGiven - sizeof(CFixedLinearHistogram) ) / sizeof(SAMPLE) ) >= cSection );
-        STATAssert( cSection < lMax );
+        STATAssert( cSection < lMax ); // Used in LONG i = ... for loopss
 
         m_flhf = flhf;
         m_qwSampleBase = qwSampleBase;
@@ -1254,12 +1433,13 @@ public:
         m_cSection = cSection;
         m_rgcHits = (CHITS*)roundup( ULONG_PTR((BYTE*)this) + sizeof( CFixedLinearHistogram ), sizeof( CHITS ) );
 
+        // Double check we've got our bounds are correct.
 #ifdef DEBUG
         ULONG_PTR pbObjMax = ((ULONG_PTR)this) + cbSizeGiven + 1;
         ULONG_PTR pbLastSlot = (ULONG_PTR)&m_rgcHits[ m_cSection - 1 ];
         STATAssert( ( pbLastSlot + sizeof(CHITS) ) <= pbObjMax );
 #endif
-        STATAssert( ( (ULONG_PTR)m_rgcHits % sizeof( CHITS ) ) == 0 );
+        STATAssert( ( (ULONG_PTR)m_rgcHits % sizeof( CHITS ) ) == 0 );  // ensure m_rgcHits is aligned
 
         ErrReset();
         Zero();
@@ -1278,11 +1458,13 @@ public:
 
         if ( qwSampleAdjusted < m_qwSampleBase )
         {
+            //  What's a shoe?  Opposite of a cap, Silly!
             if ( !( flhf & flhfSoftMin ) )
             {
                 STATAssert( !( flhf & flhfHardMin ) );
                 return CStats::ERR::errInvalidParameter;
             }
+            // soft shoe, bound it ...
             qwSampleAdjusted = m_qwSampleBase;
         }
 
@@ -1300,6 +1482,7 @@ public:
         {
             STATAssertSz( fFalse, "Not implemented proper rounding - where if < m_dqwSamplesInSection / 2 above bucket boundary it would round down, else round up." );
         }
+        // else flhfFullRoundDown is the default with this math
 
         SAMPLE iSection = ULONG( qwSampleAdjusted / m_dqwSamplesInSection );
 
@@ -1310,6 +1493,7 @@ public:
                 STATAssert( !( flhf & flhfHardMax ) );
                 return CStats::ERR::errInvalidParameter;
             }
+            // hard cap, bound it ...
             iSection = m_cSection - 1;
         }
         STATAssert( iSection < (SAMPLE)ulMax );
@@ -1325,7 +1509,9 @@ public:
 
     CStats::ERR ErrAddSample( _In_ const SAMPLE qwSample )
     {
+        //SAMPLE qwSampleNormalized;
 
+        //  Normalize the data to our fixed linear histogram data model ...
 
         ULONG iSection;
         CStats::ERR errNormalize = ErrGetSampleSection_( qwSample, m_flhf, &iSection );
@@ -1334,6 +1520,7 @@ public:
             return errNormalize;
         }
 
+        //  Add to our histogram storage ...
 
         (void)AtomicAdd( (QWORD*)&m_rgcHits[iSection], (QWORD)1 );
 
@@ -1346,12 +1533,15 @@ private:
 
 public:
 
+    //
+    //  Sample enumeration.
+    //
     
     CStats::ERR ErrReset( const HistogramCurrencyResetFlags hgcrf = hgcrfDefault )
     {
         if ( hgcrf & hgcrfResetSampleEnumeration )
         {
-            m_iSampleValueNext = ulMax;
+            m_iSampleValueNext = ulMax; // yes, we're relying on wrap to iterate into the first bucket.
         }
         if ( hgcrf & hgcrfResetHitsEnumeration )
         {
@@ -1362,8 +1552,10 @@ public:
 
     CStats::ERR ErrGetSampleValues( __out SAMPLE * psample )
     {
+        //  Must move to next bucket
         m_iSampleValueNext++;
 
+        //  Find a non-zero sample ...
 
         while( m_iSampleValueNext < m_cSection && m_rgcHits[ m_iSampleValueNext ] == 0 )
         {
@@ -1394,6 +1586,8 @@ public:
     
         if ( cHitsTotal == 0 )
         {
+            //  In order to match the contracts of like perfect histograms, we're supposed to return wrnOuctOfSamples when 
+            //  there are no more buckets left with samples ... so search forward without affecting the Get currency.
             ULONG iNextHits = m_iSampleHitsNext;
             if ( iNextHits < m_cSection )
             {
@@ -1408,6 +1602,7 @@ public:
             }
             if ( iNextHits >= m_cSection )
             {
+                //  No there is nothing left, return out of samples.
                 return CStats::ERR::wrnOutOfSamples;
             }
         }
@@ -1423,7 +1618,7 @@ public:
         return CStats::ERR::errFuncNotSupported;
     }
 
-    SAMPLE Mode()
+    SAMPLE Mode()   // sort of a mode ...
     {
         return 0;
     }
@@ -1466,7 +1661,7 @@ public:
         {
             if ( m_rgcHits[isection] )
             {
-                STATAssert( ( qwTotal + ( m_rgcHits[isection] * QwSampleFromSection_( isection ) ) ) >= qwTotal );
+                STATAssert( ( qwTotal + ( m_rgcHits[isection] * QwSampleFromSection_( isection ) ) ) >= qwTotal ); // overflow may happen someday.
                 qwTotal += ( m_rgcHits[isection] * QwSampleFromSection_( isection ) );
             }
         }
@@ -1488,17 +1683,18 @@ private:
 
     CHITS *                 m_rgcHits;
 
-};
+}; // class CFixedLinearHistogram
 
+// Otherwise, we'll need a + sizeof( CHITS ) in CbCFixedLinearHistogram() to adjust for array at end.
 static_assert( ( sizeof( CFixedLinearHistogram ) % sizeof( SAMPLE ) ) == 0, "Basic CFixedLinearHistogram must be modulo 8 == 0 to ensure alignment of array at end." );
 
 void PrintStats( CStats * pCS );
 
-enum CompoundHistogramFlags
+enum CompoundHistogramFlags // chf
 {
     chfInvalid = 0,
     chfDoNotFreeExternalMemory  = 0x1,
-    chfDeleteOnDeleteYouOwn     = 0x2,
+    chfDeleteOnDeleteYouOwn     = 0x2,  // Indicates the destructor should flow through and delete the sub-histo
 };
 
 
@@ -1529,6 +1725,7 @@ class CCompoundHistogram : public CStats {
         {
             STATAssert( m_cSegmentMac );
             STATAssert( m_cSegmentMac <= cSegmentsMax );
+            // These do not hold because we do not reset when done with an enum, so this stays in state past end until next ErrReset().
             if ( fAllowPastEndEnumState )
             {
                 STATAssert( m_iSampleHistoSegmentCurr <= m_cSegmentMac );
@@ -1546,6 +1743,9 @@ class CCompoundHistogram : public CStats {
         void AssertValid ( const BOOL fAllowPastEndEnumState = fFalse ) const { ; }
 #endif
 
+    //
+    //  Sample collection.
+    //
 
     public:
 
@@ -1555,6 +1755,8 @@ class CCompoundHistogram : public CStats {
             memset( m_rgqwSampleSegmentMax, 0, sizeof( m_rgqwSampleSegmentMax ) );
             memset( m_rgphistoSegments, 0, sizeof( m_rgphistoSegments ) );
             ErrReset();
+            // implicitly not calling AssertValid(), reserving it's use for end of ErrAddHistoRange(), so class is
+            // invalid until first segment is added.
         }
 
         ERR ErrAddHistoRange( _In_ const SAMPLE qwSampleMax, _In_ CStats * phisto )
@@ -1572,6 +1774,7 @@ class CCompoundHistogram : public CStats {
             }
             if ( phisto == NULL )
             {
+                // consider just presuming client code failed to allocate, and returning OOM for this?
                 return ERR::errInvalidParameter;
             }
 
@@ -1585,6 +1788,7 @@ class CCompoundHistogram : public CStats {
 
         ~CCompoundHistogram()
         {
+            //  Intentionally does nothing
         }
 
         void Zero( void )
@@ -1610,10 +1814,14 @@ class CCompoundHistogram : public CStats {
                 return errStat;
             }
             
+            // Doesn't fit in any bucket, could define a new better error? 
             return CStats::ERR::errInvalidParameter;
         }
 
 
+    //
+    //  Sample enumeration.
+    //
 
     private:
 
@@ -1640,7 +1848,7 @@ class CCompoundHistogram : public CStats {
             for ( ULONG iSeg  = 0; iSeg < m_cSegmentMac; iSeg++ )
             {
                 CStats::ERR errReset = m_rgphistoSegments[ iSeg ]->ErrReset( hgcrf );
-                STATAssert( errReset == CStats::ERR::errSuccess );
+                STATAssert( errReset == CStats::ERR::errSuccess ); // only use histograms that have non-failing ErrReset().
             }
             return ERR::errSuccess;
         }
@@ -1677,15 +1885,18 @@ class CCompoundHistogram : public CStats {
                 errGet = m_rgphistoSegments[m_iSampleHistoSegmentCurr]->ErrGetSampleValues( pSamples );
                 if ( errGet != CStats::ERR::wrnOutOfSamples )
                 {
-                    STATAssert( errGet == CStats::ERR::errSuccess );
+                    //  Most likely this is success, so yay!  But could be a invalid parameter or problem.
+                    STATAssert( errGet == CStats::ERR::errSuccess ); // try to help someone debug thier bad code.
                     break;
                 }
 
+                //  Ok, we're out of samples in the current bucket, try the next bucket 
                 m_rgphistoSegments[m_iSampleHistoSegmentCurr]->ErrReset( hgcrfResetSampleEnumeration );
                 m_iSampleHistoSegmentCurr++;
 
                 if ( m_iSampleHistoSegmentCurr >= m_cSegmentMac )
                 {
+                    //  This is the normal exit for when all samples in all buckets are exhausted.
                     return CStats::ERR::wrnOutOfSamples;
                 }
             }
@@ -1721,7 +1932,7 @@ class CCompoundHistogram : public CStats {
                 STATAssert( errGet != CStats::ERR::wrnOutOfSamples || cHitsCurr == 0 );
                 if ( errGet != CStats::ERR::wrnOutOfSamples && errGet != CStats::ERR::errSuccess )
                 {
-                    STATAssert( fFalse );
+                    STATAssert( fFalse ); // try to help someone debug thier bad code.
                     break;
                 }
 
@@ -1736,10 +1947,12 @@ class CCompoundHistogram : public CStats {
 
                 *pcHits += cHitsCurr;
 
+                //  Ok, we're out of samples in the current bucket, try the next bucket 
                 iSeg++;
 
                 if ( iSeg >= m_cSegmentMac )
                 {
+                    //  This is the normal exit for when all samples in all buckets are exhausted.
                     break;
                 }
             }
@@ -1808,12 +2021,13 @@ class CCompoundHistogram : public CStats {
                 }
                 else if ( errGet != CStats::ERR::errSuccess )
                 {
-                    STATAssert( fFalse );
+                    STATAssert( fFalse ); // not sure what this would mean.
                     return errGet;
                 }
-                STATAssert( qwSampleNext > m_qwSampleLast || qwSampleNext == 0  );
+                STATAssert( qwSampleNext > m_qwSampleLast || qwSampleNext == 0 /* could be samples in the zero bucket */ );
 
                 CStats::ERR errHits = ErrGetSampleHits( qwSampleNext, &cHitsNext );
+                // if we just got this sample value, getting hits should always succeed.
                 STATAssert( errHits == CStats::ERR::errSuccess );
 
                 m_qwSampleLast = qwSampleNext;
@@ -1825,9 +2039,9 @@ class CCompoundHistogram : public CStats {
             return CStats::ERR::errSuccess;
         }
 
-        SAMPLE Mode()
+        SAMPLE Mode()   // sort of a mode ...
         {
-            STATAssert( fFalse );
+            STATAssert( fFalse );  // NYI
             return 0x4242424242424242;
         }
 
@@ -1837,6 +2051,8 @@ class CCompoundHistogram : public CStats {
             return m_mmts.C();
         }
 
+        //  Note min, max, total will all be not 100% accurate, because the histogram
+        //  is segmented.
 
         SAMPLE Min() const
         {
@@ -1874,7 +2090,7 @@ class CCompoundHistogram : public CStats {
         {
             AssertValid();
             return Ave();
-        }
+        }   // in case you're a td statiscian
         double DblAve() const
         {
             AssertValid();
@@ -1883,10 +2099,13 @@ class CCompoundHistogram : public CStats {
             return c ? ( t / c ) : 0.0;
         }
 
-};
+}; // CCompoundHistogram
 
 
 
+//
+//  CStat utilities
+//
 
 inline void PrintStats( CStats * pCS )
 {
@@ -1957,6 +2176,7 @@ inline void PrintStats( CStats * pCS, SAMPLE dcChunk )
         iChunk++;
         cChunk += dcChunk;
     }
+    //  Due to the way the chunk can wrap, this error is ok.
     if ( csErr != CStats::ERR::wrnOutOfSamples &&
             csErr != CStats::ERR::errInvalidParameter  )
     {
@@ -1973,12 +2193,23 @@ inline void PrintStats( CStats * pCS, SAMPLE dcChunk )
     (void)pCS->ErrReset();
 }
 
+//  CMovingAverage
+//
+//  Implements a real-time moving average object.
+//
+//  CType: class representing the samples to be averaged.
+//
+//  NOTE: this templatized class is only supposed to be used with numeric types, although one could
+//        make it work for any object types, given that the appropriate operators are implemented.
+//        Also, note that it does not perform any sort of time adjustment, so the average it outputs
+//        is merely the average of the samples that were fed into the object.
 
 template< class CType, LONG_PTR m_cSamples >
 class CMovingAverage
 {
     private:
 
+        //  private state.
 
         C_ASSERT( m_cSamples > 0 );
         CType           m_rgSamples[ m_cSamples ];
@@ -1987,11 +2218,13 @@ class CMovingAverage
     
     public:
 
+        //  ctor/dtor.
 
         CMovingAverage( const CType& initSample )   { Reset( initSample ); }
 
     public:
 
+        //  Public methods.
 
         INLINE void Reset( const CType& initSample )
         {
@@ -2031,7 +2264,7 @@ class CMovingAverage
         }
 };
 
-};
+}; // namespace STAT
 
 
 using namespace STAT;

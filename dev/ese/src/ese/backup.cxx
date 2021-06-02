@@ -13,6 +13,8 @@ extern VOID ITDBGSetConstants( INST * pinst = NULL);
 BACKUP_CONTEXT::BACKUP_CONTEXT( INST * pinst )
     : CZeroInit( sizeof( BACKUP_CONTEXT ) ),
       m_pinst( pinst ),
+      //    Note: That m_iInstance is 1 higher than the corresponding ipinst value.  I am adding 1 so 
+      //    no INST has a subrank of 0.
       m_critBackupInProgress( CLockBasicInfo( CSyncBasicInfo( "BackupInProcess" ), rankBackupInProcess, 1 + g_cpinstMax - pinst->m_iInstance ) )
 {
 #ifdef DEBUG
@@ -27,7 +29,8 @@ BACKUP_CONTEXT::BACKUP_CONTEXT( INST * pinst )
 #endif
 }
 
-
+/*  caller has to make sure szDir has enough space for appending "*"
+/**/
 LOCAL ERR ErrLGDeleteAllFiles( IFileSystemAPI *const pfsapi, __inout_bcount(cbDir) const PWSTR wszDir, ULONG cbDir )
 {
     ERR             err     = JET_errSuccess;
@@ -40,6 +43,7 @@ LOCAL ERR ErrLGDeleteAllFiles( IFileSystemAPI *const pfsapi, __inout_bcount(cbDi
     Call( pfsapi->ErrPathFolderNorm( wszPath, sizeof( wszPath ) ) );
     Call( ErrOSStrCbAppendW( wszPath, sizeof( wszPath ), L"*" ) );
 
+    //  iterate over all files in this directory
     Call( pfsapi->ErrFileFind( wszPath, &pffapi ) );
     while ( ( err = pffapi->ErrNext() ) == JET_errSuccess )
     {
@@ -54,7 +58,8 @@ LOCAL ERR ErrLGDeleteAllFiles( IFileSystemAPI *const pfsapi, __inout_bcount(cbDi
         wszDirT[0] = 0;
         Call( pfsapi->ErrPathBuild( wszDirT, wszFileT, wszExtT, wszFileNameT ) );
 
-        
+        /* not . , and .. and not temp
+        /**/
         if (    wcscmp( wszFileNameT, L"." ) &&
                 wcscmp( wszFileNameT, L".." ) &&
                 UtilCmpFileName( wszFileNameT, wszTemp ) )
@@ -71,7 +76,8 @@ LOCAL ERR ErrLGDeleteAllFiles( IFileSystemAPI *const pfsapi, __inout_bcount(cbDi
     err = JET_errSuccess;
 
 HandleError:
-    
+    /*  assert restored szDir
+    /**/
     Assert( wszDir[LOSStrLengthW(wszDir)] != L'*' );
 
     delete pffapi;
@@ -80,7 +86,8 @@ HandleError:
 }
 
 
-
+/*  caller has to make sure szDir has enough space for appending "*"
+/**/
 ERR ErrLGCheckDir( IFileSystemAPI *const pfsapi, __inout_bcount(cbDir) const PWSTR wszDir, ULONG cbDir, __in_opt PCWSTR wszSearch )
 {
     ERR             err     = JET_errSuccess;
@@ -93,6 +100,7 @@ ERR ErrLGCheckDir( IFileSystemAPI *const pfsapi, __inout_bcount(cbDir) const PWS
     Call( pfsapi->ErrPathFolderNorm( wszPath, sizeof( wszPath ) ) );
     Call( ErrOSStrCbAppendW( wszPath, sizeof( wszPath ), L"*" ) );
 
+    //  iterate over all files in this directory
     Call( pfsapi->ErrFileFind( wszPath, &pffapi ) );
     while ( ( err = pffapi->ErrNext() ) == JET_errSuccess )
     {
@@ -107,7 +115,8 @@ ERR ErrLGCheckDir( IFileSystemAPI *const pfsapi, __inout_bcount(cbDir) const PWS
         wszDirT[0] = 0;
         Call( pfsapi->ErrPathBuild( wszDirT, wszFileT, wszExtT, wszFileNameT ) );
 
-        
+        /* not . , and .. and not szSearch
+        /**/
         if (    wcscmp( wszFileNameT, L"." ) &&
                 wcscmp( wszFileNameT, L".." ) &&
                 ( !wszSearch || !UtilCmpFileName( wszFileNameT, wszSearch ) ) )
@@ -120,7 +129,8 @@ ERR ErrLGCheckDir( IFileSystemAPI *const pfsapi, __inout_bcount(cbDir) const PWS
     err = JET_errSuccess;
 
 HandleError:
-    
+    /*  assert restored szDir
+    /**/
     Assert( wszDir[LOSStrLengthW(wszDir)] != L'*' );
 
     delete pffapi;
@@ -149,12 +159,14 @@ ERR BACKUP_CONTEXT::ErrBKIReadPages(
     FMP     *pfmp = &g_rgfmp[ifmp];
     TraceContextScope tcBackup( iortBackupRestore );
 
+    // we add a final page, the former patch file header
     BOOL fRoomForFinalHeaderPage = fFalse;
 
 #ifdef MINIMAL_FUNCTIONALITY
 #else
 
-    
+    /*  determine if we are scrubbing the database
+    /**/
     CONST BOOL fScrub = BoolParam( m_pinst, JET_paramZeroDatabaseDuringBackup );
 
     if ( fScrub && m_pinst->FRecovering() )
@@ -162,13 +174,16 @@ ERR BACKUP_CONTEXT::ErrBKIReadPages(
         return ErrERRCheck( JET_errInvalidParameter );
     }
 
-    
+    /*  we are scrubbing the database
+    /**/
     if ( fScrub )
     {
-        
+        /*  we are scrubbing the first page of the database
+        /**/
         if ( g_rgfmp[ ifmp ].PgnoBackupCopyMost() == 0 )
         {
-            
+            /*  init the scrub
+            /**/
             const WCHAR * rgszT[1];
             INT isz = 0;
 
@@ -195,21 +210,35 @@ ERR BACKUP_CONTEXT::ErrBKIReadPages(
         }
     }
 
-#endif
+#endif  //  MINIMAL_FUNCTIONALITY
 
+    //  caller should have verified that buffer is not empty
+    //
     Assert( cpage > 0 );
 
-    
+    /*  assume that database will be read in sets of cpage
+    /*  pages.  Preread next cpage pages while the current
+    /*  cpage pages are being read, and copied to caller
+    /*  buffer.
+    /*
+    /*  preread next next cpage pages.  These pages should
+    /*  be read while the next cpage pages are written to
+    /*  the backup datababase file.
+    /**/
 
-    
+    /*  read pages, which may have been preread, up to cpage but
+    /*  not beyond last page at time of initiating backup.
+    /**/
     Assert( pfmp->PgnoBackupMost() >= pfmp->PgnoBackupCopyMost() );
     cpageT = min( cpage, (INT)( pfmp->PgnoBackupMost() - pfmp->PgnoBackupCopyMost() + ( 0 == pfmp->PgnoBackupCopyMost() ? cpgDBReserved : 0 ) ) );
     *pcbActual = 0;
     ipageT = 0;
 
+    // we check if we have space for the last page
     fRoomForFinalHeaderPage =  ( cpageT < cpage );
 
-    
+    /*  if we have no more pages to read, we're done
+    /**/
     if ( cpageT == 0
         && ( !fRoomForFinalHeaderPage || pfmp->FCopiedPatchHeader() ) )
     {
@@ -219,13 +248,20 @@ ERR BACKUP_CONTEXT::ErrBKIReadPages(
 
     if ( pfmp->PgnoBackupCopyMost() == 0 )
     {
+        //  caller should have verified that buffer has enough
+        //  space for the reserved pages, plus at least one
+        //  more page (to ensure that PgnoBackupCopyMost advances
+        //  beyond 0)
+        //
         Assert( cpage > cpgDBReserved );
 
+        // Patch the db header (and shadow) with the one saved off at OpenFile
         Assert( prhf->ib == 0 );
         UtilMemCpy( pvPageMin, prhf->pdbfilehdr, g_cbPage );
         UtilMemCpy( (BYTE*)pvPageMin + g_cbPage, prhf->pdbfilehdr, g_cbPage );
 
-        
+        /*  we use first 2 pages buffer
+         */
         *pcbActual += g_cbPage * 2;
         ipageT += 2;
         Assert( 2 == cpgDBReserved );
@@ -237,8 +273,10 @@ ERR BACKUP_CONTEXT::ErrBKIReadPages(
 
     if ( pgnoStart <= pgnoEnd  )
     {
+        //  engage range lock for the region to copy
         CallR( pfmp->ErrRangeLock( pgnoStart, pgnoEnd ) );
 
+        // we will revert this on error after the RangeUnlock
         pfmp->SetPgnoBackupCopyMost( pgnoEnd );
     }
     else
@@ -246,6 +284,8 @@ ERR BACKUP_CONTEXT::ErrBKIReadPages(
         Assert( fRoomForFinalHeaderPage );
     }
 
+    //  we will retry failed reads during backup in the hope of saving the
+    //  backup set
 
     const TICK  tickStart   = TickOSTimeCurrent();
     const TICK  tickBackoff = 100;
@@ -253,6 +293,8 @@ ERR BACKUP_CONTEXT::ErrBKIReadPages(
 
     INT         iRetry      = 0;
 
+    // if we have just the last page, avoid the loop
+    // and the range locking part
     if ( pgnoStart > pgnoEnd )
     {
         Assert( fRoomForFinalHeaderPage );
@@ -261,7 +303,7 @@ ERR BACKUP_CONTEXT::ErrBKIReadPages(
 
     do
     {
-        TraceContextScope tcBackupT( iorpBackup );
+        TraceContextScope tcBackupT( iorpBackup );   // iortBackupRestore is already setup in the current scope above
 
         err = ErrIOReadDbPages( ifmp, pfmp->Pfapi(), (BYTE *) pvPageMin + ipageT * g_cbPage, pgnoStart, pgnoEnd, fTrue, 0, *tcBackupT, !!( UlParam( m_pinst, JET_paramDisableVerifications ) & DISABLE_EXTENSIVE_CHECKS_DURING_STREAMING_BACKUP ) );
 
@@ -269,9 +311,11 @@ ERR BACKUP_CONTEXT::ErrBKIReadPages(
         {
             if ( iRetry < cRetry )
             {
+                // For patchable errors, release the range lock so that page patching has a chance to patch the page
                 BOOL fIsPatchable = BoolParam( m_pinst, JET_paramEnableExternalAutoHealing ) && PagePatching::FIsPatchableError( err );
                 if ( fIsPatchable )
                 {
+                    // disengage range lock for the region copied
                     pfmp->RangeUnlock( pgnoStart, pgnoEnd );
                 }
 
@@ -279,6 +323,7 @@ ERR BACKUP_CONTEXT::ErrBKIReadPages(
 
                 if ( fIsPatchable )
                 {
+                    // engage range lock for the region to copy
                     ERR errLock = pfmp->ErrRangeLock( pgnoStart, pgnoEnd );
                     if ( errLock < JET_errSuccess )
                     {
@@ -327,10 +372,13 @@ ERR BACKUP_CONTEXT::ErrBKIReadPages(
 #ifdef MINIMAL_FUNCTIONALITY
 #else
 
-    
+    /*  we are scrubbing the database and there was no error reading the pages
+    /**/
     if ( fScrub && err >= JET_errSuccess )
     {
-        
+        /*  load all pages from the backup region into the cache so that they
+        /*  can be scrubbed, skipping any uninitialized pages
+        /**/
         PGNO pgnoScrubStart = 0xFFFFFFFF;
         PGNO pgnoScrubEnd   = 0x00000000;
         PIBTraceContextScope tcRef = m_ppibBackup->InitTraceContextScope();
@@ -339,20 +387,24 @@ ERR BACKUP_CONTEXT::ErrBKIReadPages(
 
         for ( PGNO pgno = pgnoStart; pgno <= pgnoEnd; pgno++ )
         {
-            
+            /*  get the raw page data
+            /**/
             void* pv = (BYTE *)pvPageMin + ( pgno - pgnoStart + ipageT ) * g_cbPage;
 
-            
-            Assert( pfmp->CbPage() == g_cbPage );
+            /*  see if this page is initialized
+            /**/
+            Assert( pfmp->CbPage() == g_cbPage ); // for now
             CPAGE cpageLoad;
             cpageLoad.LoadPage( pv, pfmp->CbPage() );
             const BOOL fPageIsInitialized = cpageLoad.FPageIsInitialized();
             cpageLoad.UnloadPage();
 
-            
+            /*  this page is initialized
+            /**/
             if ( fPageIsInitialized )
             {
-                
+                /*  load this page data into the cache if not already cached
+                /**/
                 BFLatch bfl;
                 if ( ErrBFWriteLatchPage( &bfl, ifmp, pgno, BFLatchFlags( bflfNoCached | bflfNew ), m_ppibBackup->BfpriPriority( ifmp ), *tcRef ) >= JET_errSuccess )
                 {
@@ -360,46 +412,55 @@ ERR BACKUP_CONTEXT::ErrBKIReadPages(
                     BFWriteUnlatch( &bfl );
                 }
 
-                
+                /*  we need to scrub this page eventually
+                /**/
                 pgnoScrubStart  = min( pgnoScrubStart, pgno );
                 pgnoScrubEnd    = max( pgnoScrubEnd, pgno );
             }
 
-            
+            /*  this page is not initialized or we are on the last page
+            /**/
             if ( !fPageIsInitialized || pgno == pgnoEnd )
             {
-                
+                /*  we have pages to scrub
+                /**/
                 if ( pgnoScrubStart <= pgnoScrubEnd )
                 {
-                    
+                    /*  scrub these pages
+                    /**/
                     err = m_pscrubdb->ErrScrubPages( pgnoScrubStart, pgnoScrubEnd - pgnoScrubStart + 1 );
 
-                    
+                    /*  reset scrub range
+                    /**/
                     pgnoScrubStart  = 0xFFFFFFFF;
                     pgnoScrubEnd    = 0x00000000;
                 }
             }
         }
 
-        
+        /*  all pages had better be scrubbed!
+        /**/
         Assert( pgnoScrubStart == 0xFFFFFFFF );
         Assert( pgnoScrubEnd == 0x00000000 );
     }
 
-#endif
+#endif  //  MINIMAL_FUNCTIONALITY
 
     if ( err < JET_errSuccess )
     {
         Assert ( pgnoStart > 0 );
+        // we need to revert CopyMost on error
         pfmp->SetPgnoBackupCopyMost( pgnoStart - 1 );
     }
 
-    
+    /*  disengage range lock for the region copied
+    /**/
     pfmp->RangeUnlock( pgnoStart, pgnoEnd );
 
     Call( err );
 
-    
+    /*  update the read data count
+    /**/
     *pcbActual += g_cbPage * ( cpageT - ipageT );
 
 CopyFinalHeaderPage:
@@ -414,6 +475,7 @@ CopyFinalHeaderPage:
             pibFake.m_pinst = m_pinst;
             LGPOS lgposRoll;
 
+            // Make best effort to roll the log so that the newly reseeded copy is not dependent on edb.log
             if ( ErrLGForceLogRollover( &pibFake, __FUNCTION__, &lgposRoll ) >= JET_errSuccess )
             {
                 (VOID)ErrLGWaitForWrite( &pibFake, &lgposRoll );
@@ -428,7 +490,7 @@ CopyFinalHeaderPage:
     {
         if ( m_fDBGTraceBR > 1 && szLGDBGPageList )
         {
-            Assert( pfmp->CbPage() == g_cbPage );
+            Assert( pfmp->CbPage() == g_cbPage ); // for now
             CPAGE cpageLoad;
             cpageLoad.LoadPage( (BYTE*) pvPageMin + g_cbPage * ipageT, pfmp->CbPage() );
             OSStrCbFormatA( szLGDBGPageList,
@@ -452,12 +514,14 @@ HandleError:
 #ifdef MINIMAL_FUNCTIONALITY
 #else
 
-    
+    /*  we just scrubbed the last page in the database
+    /**/
     if ( fScrub
         && ( NULL != m_pscrubdb )
         && ( g_rgfmp[ ifmp ].PgnoBackupCopyMost() == g_rgfmp[ ifmp ].PgnoBackupMost() ) )
     {
-        
+        /*  term the scrub
+        /**/
         err = m_pscrubdb->ErrTerm();
 
         const ULONG_PTR ulSecFinished   = UlUtilGetSeconds();
@@ -518,13 +582,18 @@ HandleError:
         g_rgfmp[ifmp].SetLogtimeScrub( logtimeScrub );
     }
 
-#endif
+#endif  //  MINIMAL_FUNCTIONALITY
 
     return err;
 }
 
 
-
+/*  begin new log file and compute log backup parameters:
+ *      m_lgenCopyMac = m_plgfilehdr->lGeneration;
+ *      m_lgenCopyMic = fFullBackup ? set befor database copy : m_lgenDeleteMic.
+ *      m_lgenDeleteMic = first generation in the current log file path
+ *      m_lgenDeleteMac = current checkpoint, which may be several gen less than m_lgenCopyMac
+ */
 ERR BACKUP_CONTEXT::ErrBKIPrepareLogFiles(
     JET_GRBIT                   grbit,
     __in PCWSTR                 wszLogFilePath,
@@ -543,8 +612,12 @@ ERR BACKUP_CONTEXT::ErrBKIPrepareLogFiles(
 
     Assert( m_fBackupInProgressLocal );
 
+    // We now allow backups during recovery (aka "seed from passive"), but we should not get this far in that mode.
+    // However if we did, we would need to avoid logging anything here, and possibly wait for a log to roll on to roll on it's own.
     Enforce( !m_pinst->FRecovering() );
 
+    // Note we don't actually know m_lgenCopyMic / m_lgenCopyMac here, b/c we need to 
+    // rotate the log first, and this log op is what does that. 
     if ( fFullBackup )
     {
         LGIGetDateTime( &m_logtimeFullBackup );
@@ -563,13 +636,17 @@ ERR BACKUP_CONTEXT::ErrBKIPrepareLogFiles(
 
     m_fBackupBeginNewLogFile = fTrue;
 
-    
+    /*  compute m_lgenCopyMac:
+    /*  copy all log files up to but not including current log file
+    /**/
     Assert( m_lgenCopyMac == 0 );
     m_lgenCopyMac = plog->LGGetCurrentFileGenWithLock();
     Assert( m_lgenCopyMac != 0 );
     m_cGenCopyDone = 0;
 
-    
+    /*  set m_lgenDeleteMic
+    /*  to first log file generation number.
+    /**/
     Assert( m_lgenDeleteMic == 0 );
     Call ( plog->ErrLGGetGenerationRange( wszLogFilePath, &m_lgenDeleteMic, NULL ) );
     if ( 0 == m_lgenDeleteMic )
@@ -581,7 +658,9 @@ ERR BACKUP_CONTEXT::ErrBKIPrepareLogFiles(
     if ( fIncrementalBackup && wszBackupPath )
     {
         LONG lgenT;
-        
+        /*  validate incremental backup against previous
+        /*  full and incremenal backup.
+        /**/
         Call ( plog->ErrLGGetGenerationRange( wszBackupPath, NULL, &lgenT ) );
         if ( m_lgenDeleteMic > lgenT + 1 )
         {
@@ -594,7 +673,8 @@ ERR BACKUP_CONTEXT::ErrBKIPrepareLogFiles(
         Call ( ErrBKICheckLogsForIncrementalBackup( m_lgenDeleteMic ) );
     }
 
-    
+    /*  set m_lgenDeleteMac to checkpoint log file
+    /**/
     AllocR( pcheckpointT = (CHECKPOINT *) PvOSMemoryPageAlloc( sizeof(CHECKPOINT), NULL ) );
 
     plog->LGFullNameCheckpoint( wszPathJetChkLog );
@@ -602,9 +682,15 @@ ERR BACKUP_CONTEXT::ErrBKIPrepareLogFiles(
     Assert( m_lgenDeleteMac == 0 );
     m_lgenDeleteMac = pcheckpointT->checkpoint.le_lgposCheckpoint.le_lGeneration;
 
+    // if the checkpoint just advanced after the m_lgenCopyMac computation above
+    // we need to keep the logs around from the truncation point (m_lgenCopyMac)
+    // as we might need them for an incremental backup
     m_lgenDeleteMac = min( m_lgenDeleteMac, m_lgenCopyMac);
     Assert( m_lgenDeleteMic <= m_lgenDeleteMac );
 
+    // calculate delete range the databases considering the
+    // databases that were not involved in the backup process
+    //
     if ( fFullBackup )
     {
         for ( DBID dbid = dbidUserLeast; dbid < dbidMax; dbid++ )
@@ -628,7 +714,13 @@ ERR BACKUP_CONTEXT::ErrBKIPrepareLogFiles(
                 Assert( !pfmp->FDeferredAttach() );
 
                 ULONG genLastFullBackupForDb = (ULONG) pfmp->Pdbfilehdr()->bkinfoFullPrev.le_genHigh;
+//              ULONG genLastIncBackupForDb = (ULONG) pfmp->Pdbfilehdr()->bkinfoIncPrev.le_genHigh;
 
+//              m_lgenDeleteMac = min ( m_lgenDeleteMac, max( genLastFullBackupForDb, genLastIncBackupForDb ) );
+                // if one database not in this full backup has a differential backup
+                // (which shows as an incremental for JET), we will truncate the logs. We don't want this
+                // (the log truncation must be done using a full or incremental backup)
+                // In other words: don't consider Copy backups, those aren't supposed to affect the log sequence
                 m_lgenDeleteMac = min( (ULONG)m_lgenDeleteMac, genLastFullBackupForDb );
             }
         }
@@ -636,16 +728,19 @@ ERR BACKUP_CONTEXT::ErrBKIPrepareLogFiles(
     }
 
 
-    
+    /*  compute m_lgenCopyMic
+    /**/
     if ( fFullBackup )
     {
-        
+        /*  m_lgenCopyMic set before database copy
+        /**/
         Assert( m_lgenCopyMic != 0 );
     }
     else
     {
         Assert ( fIncrementalBackup );
-        
+        /*  copy all files that are deleted for incremental backup
+        /**/
         Assert( m_lgenDeleteMic != 0 );
         m_lgenCopyMic = m_lgenDeleteMic;
     }
@@ -653,6 +748,7 @@ ERR BACKUP_CONTEXT::ErrBKIPrepareLogFiles(
     Assert ( m_lgenDeleteMic <= m_lgenDeleteMac );
     Assert ( m_lgenCopyMic <= m_lgenCopyMac );
 
+    // report start backup of log file
     {
         WCHAR           wszFullLogNameCopyMic[IFileSystemAPI::cchPathMax];
         WCHAR           wszFullLogNameCopyMac[IFileSystemAPI::cchPathMax];
@@ -693,6 +789,10 @@ ERR BACKUP_CONTEXT::ErrBKIPrepareLogFiles(
     }
 
 HandleError:
+    // UNDONE: if this function failed, we should stop the backup
+    // not relay on the backup client behaviour and on or on the
+    // fact that the code in log copy/truncate part will deal with
+    // the state in which the backup is.
 
     OSMemoryPageFree( pcheckpointT );
     return err;
@@ -704,6 +804,8 @@ ERR ErrLGCheckIncrementalBackup( INST *pinst, DBFILEHDR::BKINFOTYPE backupType )
     DBID dbid;
     const BKINFO *pbkinfo;
 
+    // We treat surrogate backup like OSSnapshot backup, because it is a OS snapshot backup, but on
+    // the passive node of a log shipping cluster.
     backupType = ( backupType == DBFILEHDR::backupSurrogate ) ? DBFILEHDR::backupOSSnapshot : backupType;
 
     for ( dbid = dbidUserLeast; dbid < dbidMax; dbid++ )
@@ -714,7 +816,8 @@ ERR ErrLGCheckIncrementalBackup( INST *pinst, DBFILEHDR::BKINFOTYPE backupType )
 
         FMP *pfmp = &g_rgfmp[ifmp];
 
-        
+        /*  make sure all the attached DB are qualified for incremental backup.
+         */
         if ( pfmp->FAttached() && !pfmp->FAttachedForRecovery() && !pfmp->FAttachingDB() )
         {
             Assert( pfmp->Pdbfilehdr() );
@@ -722,6 +825,7 @@ ERR ErrLGCheckIncrementalBackup( INST *pinst, DBFILEHDR::BKINFOTYPE backupType )
             Assert( !pfmp->FDeferredAttach() );
             pbkinfo = &pfmp->Pdbfilehdr()->bkinfoFullPrev;
             if ( pbkinfo->le_genLow == 0 ||
+                // we have a full backup but it is not matching the backup type we want to do
                 (pbkinfo->le_genLow != 0 && backupType != pfmp->Pdbfilehdr()->bkinfoTypeFullPrev ) )
             {
                 const UINT  csz = 1;
@@ -757,6 +861,8 @@ ERR BACKUP_CONTEXT::ErrBKICheckLogsForIncrementalBackup( LONG lGenMinExisting )
 
             PdbfilehdrReadOnly pdbfilehdr = pfmp->Pdbfilehdr();
 
+            // if we have both backup (full and incremental), then those should be of the
+            // same type (insured by the backup logic)
             Assert( 0 == pdbfilehdr->bkinfoFullPrev.le_genHigh ||
                    0 == pdbfilehdr->bkinfoIncPrev.le_genHigh ||
                    pdbfilehdr->bkinfoTypeFullPrev == pdbfilehdr->bkinfoTypeIncPrev );
@@ -789,7 +895,34 @@ ERR BACKUP_CONTEXT::ErrBKICheckLogsForIncrementalBackup( LONG lGenMinExisting )
 }
 
 
-
+/*  copies database files and logfile generations starting at checkpoint
+ *  record to directory specified by the environment variable BACKUP.
+ *  No writing or switching of log generations is involved.
+ *  The Backup call may be issued at any time, and does not interfere
+ *  with the normal functioning of the system - nothing gets locked.
+ *
+ *  The database page is copied page by page in page sequence number. If
+ *  a copied page is dirtied after it is copied, the page has to be
+ *  recopied again. A flag is indicated if a database is being copied. If
+ *  BufMan is writing a dirtied page and the page is copied, then BufMan
+ *  has to copy the dirtied page to both the backup copy and the current
+ *  database.
+ *
+ *  If the copy is later used to Restore without a subsequent log file, the
+ *  restored database will be consistent and will include any transaction
+ *  committed prior to backing up the very last log record; if there is a
+ *  subsequent log file, that file will be used during Restore as a
+ *  continuation of the backed-up log file.
+ *
+ *  PARAMETERS
+ *
+ *  RETURNS
+ *      JET_errSuccess, or the following error codes:
+ *          JET_errNoBackupDirectory
+ *          JET_errFailCopyDatabase
+ *          JET_errFailCopyLogFile
+ *
+ */
 ERR ISAMAPI ErrIsamBackup(
     JET_INSTANCE jinst,
     const WCHAR* wszPathName,
@@ -814,7 +947,8 @@ ERR ErrLGIRemoveTempDir(
 {
     ERR err;
 
-    
+    /*  backup directory
+    /**/
     Assert( LOSStrLengthW( wszBackupPath ) + LOSStrLengthW( wszTempDirIn ) < IFileSystemAPI::cchPathMax - 1 );
     if ( LOSStrLengthW( wszBackupPath ) + LOSStrLengthW( wszTempDirIn ) >= IFileSystemAPI::cchPathMax - 1 )
     {
@@ -855,6 +989,7 @@ ERR BACKUP_CONTEXT::ErrBKICopyFile(
         return( JET_errOutOfMemory );
     }
 
+    // UNDONE: keep status
 
     {
     ULONG                       ulFileSizeLow       = 0;
@@ -881,10 +1016,16 @@ ERR BACKUP_CONTEXT::ErrBKICopyFile(
 
     CallS( m_pinst->m_pfsapi->ErrPathParse( wszFileName, wszDirT, wszFNameT, wszExtT ) );
 
+    //  backup directory (should be pre-validated, but be defensive
+    //  and handle it just in case)
+    //
     Assert( LOSStrLengthW( wszBackup ) < IFileSystemAPI::cchPathMax - 1 );
     OSStrCbCopyW( wszBackupPath, IFileSystemAPI::cchPathMax * sizeof( WCHAR ), wszBackup );
     if ( LOSStrLengthW( wszBackup ) >= IFileSystemAPI::cchPathMax - 1 )
     {
+        //  no room for trailing path delimiter, so just
+        //  ensure null termination
+        //
         wszBackupPath[ IFileSystemAPI::cchPathMax - 1 ] = 0;
     }
     else
@@ -911,8 +1052,10 @@ ERR BACKUP_CONTEXT::ErrBKICopyFile(
     }
     else
     {
+        // thunk patch file.
         qwEseFileID = qwPatchFileID;
     }
+    // Where is checkpoint file?  As fIsLog?  or else case?
     
     Call( CIOFilePerf::ErrFileCreate(
                             m_pinst->m_pfsapi,
@@ -983,7 +1126,8 @@ ERR BACKUP_CONTEXT::ErrBKIPrepareDirectory(
     WCHAR           wszT[IFileSystemAPI::cchPathMax];
     WCHAR           wszFrom[IFileSystemAPI::cchPathMax];
 
-    
+    /*  backup directory
+    /**/
     Assert( LOSStrLengthW( wszBackup ) < IFileSystemAPI::cchPathMax - 1 );
     if ( ErrOSStrCbCopyW( wszBackupPath, cbBackupPath, wszBackup ) < JET_errSuccess )
     {
@@ -991,6 +1135,7 @@ ERR BACKUP_CONTEXT::ErrBKIPrepareDirectory(
     }
     if ( LOSStrLengthW( wszBackup ) < IFileSystemAPI::cchPathMax - 1 )
     {
+        // there is room for the trailing path delimiter
         CallS( m_pinst->m_pfsapi->ErrPathFolderNorm( wszBackupPath, cbBackupPath ) );
     }
 
@@ -999,12 +1144,21 @@ ERR BACKUP_CONTEXT::ErrBKIPrepareDirectory(
         Call( ErrUtilCreatePathIfNotExist( m_pinst->m_pfsapi, wszBackupPath, NULL, 0 ) );
     }
 
-    
+    /*  reconsist atomic backup directory
+    /*  1)  if temp directory, delete temp directory
+    /**/
     Call( ErrLGIRemoveTempDir( m_pinst->m_pfsapi, wszT, sizeof(wszT), wszBackupPath, wszTempDir ) );
 
     if ( fBackupAtomic )
     {
-        
+        /*  2)  if old and new directories, delete old directory
+        /*  3)  if new directory, move new to old
+        /*
+        /*  Now we should have an empty direcotry, or a directory with
+        /*  an old subdirectory with a valid backup.
+        /*
+        /*  4) make a temporary directory for the current backup.
+        /**/
         err = ErrLGCheckDir( m_pinst->m_pfsapi, wszBackupPath, cbBackupPath, wszAtomicNew );
         if ( err == JET_errBackupDirectoryNotEmpty )
         {
@@ -1033,10 +1187,13 @@ ERR BACKUP_CONTEXT::ErrBKIPrepareDirectory(
             Call( m_pinst->m_pfsapi->ErrFileMove( wszFrom, wszT ) );
         }
 
-        
+        /*  if incremental, set backup directory to szAtomicOld
+        /*  else create and set to szTempDir
+        /**/
         if ( !fFullBackup )
         {
-            
+            /*  backup to old directory
+            /**/
             if ( LOSStrLengthW( wszBackupPath ) + LOSStrLengthW( wszAtomicOld ) + 1 >= IFileSystemAPI::cchPathMax - 1 )
             {
                 Call( ErrERRCheck( JET_errInvalidPath ) );
@@ -1059,7 +1216,8 @@ ERR BACKUP_CONTEXT::ErrBKIPrepareDirectory(
                 Call( ErrERRCheck( JET_errMakeBackupDirectoryFail ) );
             }
 
-            
+            /*  backup to temp directory
+            /**/
             OSStrCbAppendW( wszBackupPath, cbBackupPath, wszTempDir );
         }
     }
@@ -1067,13 +1225,15 @@ ERR BACKUP_CONTEXT::ErrBKIPrepareDirectory(
     {
         if ( !fFullBackup )
         {
-            
+            /*  check for non-atomic backup directory empty
+            /**/
             Call( ErrLGCheckDir( m_pinst->m_pfsapi, wszBackupPath, cbBackupPath, wszAtomicNew ) );
             Call( ErrLGCheckDir( m_pinst->m_pfsapi, wszBackupPath, cbBackupPath, wszAtomicOld ) );
         }
         else
         {
-            
+            /*  check for backup directory empty
+            /**/
             Call( ErrLGCheckDir( m_pinst->m_pfsapi, wszBackupPath, cbBackupPath, NULL ) );
         }
     }
@@ -1092,6 +1252,7 @@ ERR BACKUP_CONTEXT::ErrBKIPromoteDirectory(
     const BOOL      fFullBackup     = !( grbit & JET_bitBackupIncremental );
     const BOOL      fBackupAtomic   = ( grbit & JET_bitBackupAtomic );
 
+    //  for full backup, graduate temp backup to new backup and delete old backup.
 
     if ( !fBackupAtomic || !fFullBackup )
         return JET_errSuccess;
@@ -1099,11 +1260,15 @@ ERR BACKUP_CONTEXT::ErrBKIPromoteDirectory(
     WCHAR           wszFrom[IFileSystemAPI::cchPathMax];
     WCHAR           wszT[IFileSystemAPI::cchPathMax];
 
+    //  backup directory (should be pre-validated, but be defensive
+    //  and handle it just in case)
+    //
     Assert( LOSStrLengthW( wszBackupPath ) < IFileSystemAPI::cchPathMax );
     OSStrCbCopyW( wszFrom, sizeof(wszFrom) ,wszBackupPath );
     wszFrom[ IFileSystemAPI::cchPathMax - 1 ] = 0;
 
-    
+    /*  reset backup path
+    /**/
 
     if ( LOSStrLengthW(wszBackupPath) < LOSStrLengthW(wszTempDir) )
     {
@@ -1168,6 +1333,8 @@ ERR BACKUP_CONTEXT::ErrBKICleanupDirectory(
         OSStrCbCopyW( wszBackupPath, cbBackupPath, wszBackup );
 
         CallS( m_pinst->m_pfsapi->ErrPathFolderNorm( wszBackupPath, cbBackupPath ) );
+        //  apparently, it is ok if there is no room for trailing path delimiter?
+        //  not sure why, but didn't bother changing it, when I moved to non-banned APIs.
 
         CallS( ErrLGIRemoveTempDir( m_pinst->m_pfsapi, wszT, sizeof(wszT), wszBackupPath, wszTempDir ) );
     }
@@ -1214,26 +1381,41 @@ ERR BACKUP_CONTEXT::ErrBKBackup(
     CallR( ErrBKBeginExternalBackup( ( fFullBackup ? 0 : JET_bitBackupIncremental ) ) );
     Assert ( m_fBackupInProgressLocal );
 
-    
+    /*  if NULL backup directory then just delete log files
+    /**/
     if ( wszBackup == NULL || wszBackup[0] == L'\0' )
     {
+        //  set lgenDeleteMac to current checkpoint
         m_lgenDeleteMac = plog->LgposGetCheckpoint().le_lGeneration;
 
+        //  if circular logging is not enabled, try to set lgenDeleteMic
+        //  to first log file generation number
+        //  if circular logging is enabled, no point in truncating
+        //  logs (it will just happen naturally)
         m_lgenDeleteMic = 0;
 
         if ( !BoolParam( m_pinst, JET_paramCircularLog ) )
         {
+            //  ignore any errors (we will just force TruncateLog
+            //  not to do anything)
             (void)plog->ErrLGGetGenerationRange( SzParam( m_pinst, JET_paramLogFilePath ), &m_lgenDeleteMic, NULL );
         }
 
         if ( 0 == m_lgenDeleteMic )
         {
+            //  this will force TruncateLog not to do anything
             m_lgenDeleteMic = m_lgenDeleteMac;
         }
 
         goto DeleteLogs;
     }
 
+    //  ensure path is not too long (-1 because we have subsequent
+    //  code all over the place that will be appending a trailing
+    //  path delimiter to this, but even if a trailing path delimiter
+    //  is already present, the check is still valid because we will
+    //  also be appending various filenames)
+    //
     if ( LOSStrLengthW( wszBackup ) >= IFileSystemAPI::cchPathMax - 1 )
     {
         Call( ErrERRCheck( JET_errInvalidPath ) );
@@ -1245,10 +1427,12 @@ ERR BACKUP_CONTEXT::ErrBKBackup(
         goto CopyLogFiles;
     }
 
-    
+    /*  full backup
+    /**/
     Assert( fFullBackup );
 
-    
+    /*  initialize status
+    /**/
     fShowStatus = ( pfnStatus != NULL );
     if ( fShowStatus )
     {
@@ -1256,11 +1440,13 @@ ERR BACKUP_CONTEXT::ErrBKBackup(
         snprog.cbStruct = sizeof(JET_SNPROG);
         snprog.cunitTotal = 100;
 
-        
+        /*  status callback
+        /**/
         (*pfnStatus)( JET_snpBackup, JET_sntBegin, &snprog, pvStatusContext );
     }
     Call ( ErrIsamGetInstanceInfo( &cInstanceInfo, &aInstanceInfo, NULL ) );
 
+    // find the instance and backup all database file: edb
     {
     pInstanceInfo = NULL;
     for ( ULONG iInstanceInfo = 0; iInstanceInfo < cInstanceInfo && !pInstanceInfo; iInstanceInfo++)
@@ -1270,6 +1456,7 @@ ERR BACKUP_CONTEXT::ErrBKBackup(
             pInstanceInfo = aInstanceInfo + iInstanceInfo;
         }
     }
+    // we should find at least the instance in which we are running
     AssertRTL ( pInstanceInfo );
 
     for ( ULONG_PTR iDatabase = 0; iDatabase < pInstanceInfo->cDatabases; iDatabase++ )
@@ -1279,7 +1466,7 @@ ERR BACKUP_CONTEXT::ErrBKBackup(
         Call ( ErrBKICopyFile( pInstanceInfo->szDatabaseFileName[iDatabase], wszBackupPath, pfnStatus, pvStatusContext ) );
     }
     }
-    
+    /*  successful copy of all the databases */
 
 CopyLogFiles:
     {
@@ -1292,6 +1479,7 @@ CopyLogFiles:
     Assert ( wszNames );
     }
 
+    // now backup all files (patch and logs) in szNames
     WCHAR *wszNamesWalking;
     wszNamesWalking = wszNames;
     while ( *wszNamesWalking )
@@ -1306,7 +1494,8 @@ DeleteLogs:
     Assert( err == JET_errSuccess );
     Call ( ErrBKTruncateLog() );
 
-    
+    /*  complete status update
+    /**/
     if ( fShowStatus )
     {
         Assert( snprog.cbStruct == sizeof(snprog) );
@@ -1352,7 +1541,8 @@ VOID DBGBRTrace( __in PCSTR sz )
 #endif
 
 
-
+/***********************************************************
+/******************* SURROGATE BACKUP *********************/
 
 ERR ISAMAPI ErrIsamBeginSurrogateBackup(
     __in        JET_INSTANCE    jinst,
@@ -1364,6 +1554,7 @@ ERR ISAMAPI ErrIsamBeginSurrogateBackup(
     ERR     err;
     ULONG   lgenTip;
 
+    // Validate the log range the client thinks they want to backup.
 
     if ( lgenFirst > lgenLast )
     {
@@ -1374,6 +1565,7 @@ ERR ISAMAPI ErrIsamBeginSurrogateBackup(
 
     if ( lgenTip < lgenLast )
     {
+        // we'll assert() in case it is useful to block here.
         AssertSz( fFalse, "Uh-oh!  The replica is ahead of us!" );
         return ErrERRCheck( JET_errInvalidParameter );
     }
@@ -1411,8 +1603,10 @@ ERR ISAMAPI ErrIsamEndSurrogateBackup(
     }
     else
     {
+        // We skip to done in surrogate backup, because the real backup happened offline, and
+        // calling this function with JET_bitBackupEndNormal means everything went smoothly, somewhere.
         pinst->m_pbackup->BKSetBackupStatus( BACKUP_CONTEXT::backupStateDone );
-        err = JET_errSuccess;
+        err = JET_errSuccess; // explicit is nice.
     }
 
     err = pinst->m_pbackup->ErrBKExternalBackupCleanUp( err, JET_bitBackupSurrogate | grbit );
@@ -1421,7 +1615,8 @@ ERR ISAMAPI ErrIsamEndSurrogateBackup(
 
 
 
-
+/***********************************************************
+/********************* EXTERNAL BACKUP *********************/
 
 ERR ISAMAPI ErrIsamBeginExternalBackup( JET_INSTANCE jinst, JET_GRBIT grbit )
 {
@@ -1456,6 +1651,8 @@ ERR BACKUP_CONTEXT::ErrBKBeginExternalBackup( JET_GRBIT grbit, ULONG lgenFirst, 
         return ErrERRCheck( JET_errLogWriteFail );
     }
 
+    // Allow opening backup during recovering only for internal copy
+    // 
     if ( m_pinst->FRecovering() )
     {
         if ( !fInternalCopyBackup || !BoolParam( m_pinst, JET_paramFlight_EnableBackupDuringRecovery ) )
@@ -1464,7 +1661,8 @@ ERR BACKUP_CONTEXT::ErrBKBeginExternalBackup( JET_GRBIT grbit, ULONG lgenFirst, 
         }
     }
 
-    
+    /*  grbit may be 0 or combination of JET_bitBackupIncremental or JET_bitBackupSurrogate or JET_bitInternalCopy.
+    /**/
     if ( ( grbit & ~(JET_bitBackupSurrogate | JET_bitBackupIncremental | JET_bitInternalCopy) ) != 0 )
     {
         return ErrERRCheck( JET_errInvalidGrbit );
@@ -1485,11 +1683,19 @@ ERR BACKUP_CONTEXT::ErrBKBeginExternalBackup( JET_GRBIT grbit, ULONG lgenFirst, 
     if ( ( grbit & JET_bitInternalCopy ) &&
             ( grbit & (JET_bitBackupSurrogate | JET_bitBackupIncremental) ) )
     {
+        //  we wouldn't expect surrogate or incremental backups for internal copy
         return ErrERRCheck( JET_errInvalidGrbit );
     }
 
+    //  don't permit backups if low on log disk space or
+    //  if approaching the end of the log sequence, because
+    //  backups are just going to make the situation worse
+    //  by forcing a new log generation
+    //
     CallR( m_pinst->m_plog->ErrLGCheckState() );
 
+    //  bail if we already have a backup in progress
+    //
     m_critBackupInProgress.Enter();
 
     if ( m_fBackupInProgressAny )
@@ -1508,6 +1714,7 @@ ERR BACKUP_CONTEXT::ErrBKBeginExternalBackup( JET_GRBIT grbit, ULONG lgenFirst, 
 
     Assert ( backupStateNotStarted == m_fBackupStatus);
 
+    // Not allow backup to start if the context is marked as suspended.
     if ( m_pinst->FRecovering() && m_fCtxIsSuspended )
     {
         m_critBackupInProgress.Leave();
@@ -1530,11 +1737,16 @@ ERR BACKUP_CONTEXT::ErrBKBeginExternalBackup( JET_GRBIT grbit, ULONG lgenFirst, 
     if ( fSurrogateBackup )
     {
         Assert( !BoolParam( m_pinst, JET_paramCircularLog ) );
-        Assert( m_pinst->CNonLoggedIndexCreators() == 0 );
+        Assert( m_pinst->CNonLoggedIndexCreators() == 0 ); // since we're not circular, this is true.
     }
 #endif
+    // we technically don't need to do this for surrogate backup, unless we ever the circular flag to 
+    // toggle while online.
     while ( m_pinst->CNonLoggedIndexCreators() > 0 )
     {
+        //  wait for non-logged index creators
+        //  to begin logging again
+        //
         UtilSleep( cmsecWaitGeneric );
     }
 
@@ -1547,15 +1759,30 @@ ERR BACKUP_CONTEXT::ErrBKBeginExternalBackup( JET_GRBIT grbit, ULONG lgenFirst, 
         m_fBackupStatus = backupStateDatabases;
     }
 
+    //  make sure no detach/attach going. If there are, let them continue and finish.
 
     m_pinst->WaitForDBAttachDetach();
  
+    // FULL: clean the "involved" in backup flag for all databases in a full backup. We mark the
+    // databases as involved in the backup process during JetOpenFile for the database file
+    // INCREMENTAL: set the "involved" in backup flag for all databases in a incremental backup
+    // because in this case the database file is not used and, in fact, all the daatbases are
+    // contained in the log files.
     for ( dbid = dbidUserLeast; dbid < dbidMax; dbid++ )
     {
         IFMP ifmp = m_pinst->m_mpdbidifmp[ dbid ];
         if ( ifmp >= g_ifmpMax )
             continue;
 
+        // on Incremental, all the databases are part of the backup
+        // on Surrogate, all databases are part of the backup
+        //      SUBTLE NOTE:  Note we are assuming ALL databases attached to the 
+        //      instance (storage group for exch) are being backed up here, no
+        //      matter what technology is used on the replica.  This is because
+        //      the surrogate backup provides no guidance on which databases it
+        //      is backing up.
+        // on Full, we mark the Db as part of the backup only on JetOpenFile on it
+        // on Snapshot we mark the Db as part of the backup on SnapshotStart
         if ( fIncrementalBackup || fSurrogateBackup )
         {
             g_rgfmp[ifmp].SetInBackupSession();
@@ -1569,6 +1796,9 @@ ERR BACKUP_CONTEXT::ErrBKBeginExternalBackup( JET_GRBIT grbit, ULONG lgenFirst, 
     if ( fIncrementalBackup )
     {
 
+//  UNDONE: need to do tight checking to make sure there was a full backup before and
+//  UNDONE: the logs after that full backup are still available.
+        //  The UNDONE it is not done by ErrLGCheckLogsForIncrementalBackup later on.
 
         Call( ErrLGCheckIncrementalBackup( m_pinst,
                             fSurrogateBackup ?
@@ -1587,11 +1817,15 @@ ERR BACKUP_CONTEXT::ErrBKBeginExternalBackup( JET_GRBIT grbit, ULONG lgenFirst, 
 
     Assert( m_ppibBackup != ppibNil );
 
+    //  reset global copy/delete generation variables
 
     m_fBackupBeginNewLogFile = fFalse;
 
 
-    
+    /*  if incremental backup set copy/delete mic and mac variables,
+    /*  else backup is full and set copy/delete mic and delete mac.
+    /*  Copy mac will be computed after database copy is complete.
+    /**/
     if ( fIncrementalBackup )
     {
 #ifdef DEBUG
@@ -1602,7 +1836,8 @@ ERR BACKUP_CONTEXT::ErrBKBeginExternalBackup( JET_GRBIT grbit, ULONG lgenFirst, 
                 START_INCREMENTAL_BACKUP_INSTANCE_ID, 0, NULL, 0, NULL, m_pinst );
         m_fBackupFull = fFalse;
 
-        
+        /*  if all database are allowed to do incremental backup? Check bkinfo prev.
+         */
     }
     else
     {
@@ -1641,6 +1876,7 @@ ERR BACKUP_CONTEXT::ErrBKBeginExternalBackup( JET_GRBIT grbit, ULONG lgenFirst, 
 
         m_pinst->m_plog->LGFullNameCheckpoint( wszPathJetChkLog );
 
+        // This call should only return an error on hardware failure.
         Call( m_pinst->m_plog->ErrLGReadCheckpoint( wszPathJetChkLog, pcheckpointT, fTrue ) );
 
         m_lgenCopyMic = pcheckpointT->checkpoint.le_lgposCheckpoint.le_lGeneration;
@@ -1653,7 +1889,8 @@ ERR BACKUP_CONTEXT::ErrBKBeginExternalBackup( JET_GRBIT grbit, ULONG lgenFirst, 
         const ERR errLGBackupBegin = ErrLGBackupBegin( m_pinst->m_plog, fSurrogateBackup ? DBFILEHDR::backupSurrogate : DBFILEHDR::backupNormal, fIncrementalBackup, &lgposT );
         if ( fSurrogateBackup && fIncrementalBackup )
         {
-            Call( errLGBackupBegin );
+            Call( errLGBackupBegin ); // critical for surrogate incremental backups.
+            // full is set above for surrogate backup, but incremental is not ...
             m_lgposIncBackup = lgposT;
 
         }
@@ -1723,7 +1960,8 @@ ERR BACKUP_CONTEXT::ErrBKGetAttachInfo(
         return ErrERRCheck( JET_errBackupAbortByServer );
     }
 
-    
+    /*  should not get attach info if not performing full backup
+    /**/
     if ( !m_fBackupFull )
     {
         return ErrERRCheck( JET_errInvalidBackupSequence );
@@ -1734,7 +1972,9 @@ ERR BACKUP_CONTEXT::ErrBKGetAttachInfo(
         DBGBRTrace( "** Begin GetAttachInfo.\n" );
 #endif
 
-    
+    /*  compute cbActual, for each database name with NULL terminator
+    /*  and with terminator of super string.
+    /**/
     cbActual = 0;
     for ( dbid = dbidUserLeast; dbid < dbidMax; dbid++ )
     {
@@ -1755,7 +1995,7 @@ ERR BACKUP_CONTEXT::ErrBKGetAttachInfo(
             cbActual += sizeof( WCHAR ) * ( (ULONG) LOSStrLengthW( pfmp->WszDatabaseName() ) + 1 );
         }
     }
-    cbActual += sizeof(WCHAR);
+    cbActual += sizeof(WCHAR); // double NUL terminator for "super string" / multisz type string
 
     Alloc( pwch = static_cast<WCHAR *>( PvOSMemoryHeapAlloc( cbActual ) ) );
 
@@ -1791,18 +2031,21 @@ ERR BACKUP_CONTEXT::ErrBKGetAttachInfo(
     Assert( cchT >= 1 );
     *pwchT = 0;
 
-    
+    /*  return cbActual
+    /**/
     if ( pcbActual != NULL )
     {
         *pcbActual = cbActual;
     }
 
-    
+    /*  return data
+    /**/
     if ( wszzDatabases != NULL )
         UtilMemCpy( wszzDatabases, pwch, min( cbMax, cbActual ) );
 
 HandleError:
-    
+    /*  free buffer
+    /**/
     if ( pwch != NULL )
     {
         OSMemoryHeapFree( pwch );
@@ -1855,8 +2098,17 @@ HandleError:
 }
 
 
+//  ====================================================
+//  Spin off IOs of optimal size to fill buffer.
+//  As IOs complete, if its chunk in the buffer is the next to checksum,
+//  checksum that along with any other chunks forward in the buffer that
+//  have also completed. If it's not the chunk's turn to checksum, simply
+//  make a note that it should be checksummed later (it will be checksummed
+//  by the chunk who's turn comes up next).
+//  ====================================================
 
 
+// *********************************************************** END log verification stuff
 
 ERR ISAMAPI ErrIsamOpenFile(
     JET_INSTANCE jinst,
@@ -1883,7 +2135,7 @@ ERR BACKUP_CONTEXT::ErrBKOpenFile(
     WCHAR   wszDirT[IFileSystemAPI::cchPathMax];
     WCHAR   wszFNameT[IFileSystemAPI::cchPathMax];
     WCHAR   wszExtT[IFileSystemAPI::cchPathMax];
-    PGNO    pgnoRead = 0;
+    PGNO    pgnoRead = 0; //page number of the read offset passed
     BOOL    fDbOpen = fFalse;
 
     if ( !m_fBackupInProgressLocal )
@@ -1897,11 +2149,13 @@ ERR BACKUP_CONTEXT::ErrBKOpenFile(
 
     if ( m_pinst->FRecovering() )
     {
+        // Currently backup during recovery in only allowed for internal copy
         if ( !m_fBackupIsInternal || !BoolParam( m_pinst, JET_paramFlight_EnableBackupDuringRecovery ) )
         {
             return ErrERRCheck( JET_errBackupNotAllowedYet );
         }
 
+        // The backup has been suspended by ErrLGDbDetachingCallback. 
         if ( m_fCtxIsSuspended )
         {
             return ErrERRCheck( JET_errBackupNotAllowedYet );
@@ -1921,13 +2175,20 @@ ERR BACKUP_CONTEXT::ErrBKOpenFile(
     if ( ibRead > 0 )
     {
         pgnoRead = PgnoOfOffset( ibRead );
+        
+        // 29/08/2017 - SOMEONE
+        // If we aren't reading from offset 0 we should start reading from atleast page 2
+        // This is because ErrBKIReadPages checks that when we read from offset 0, we read the db header pages plus atleast one db page
+        // I don't want to modify the logic in ErrBKIReadPages for this
+        // So if someone wants to read from 1st page they may as well read the headers too (offset 0) 
         if ( pgnoRead < 2 )
         {
             return ErrERRCheck( JET_errInvalidParameter );
         }
     }
 
-    
+    /*  allocate rhf from rhf array.
+    /**/
     if ( m_crhfMac < crhfMax )
     {
         irhf = m_crhfMac;
@@ -1979,6 +2240,7 @@ ERR BACKUP_CONTEXT::ErrBKOpenFile(
 
     IFMP ifmpT;
 
+    // Blocks backup when database is still in required range.
 
     err = ErrDBOpenDatabase( m_ppibBackup, wszFileName, &ifmpT, 0 );
     Expected( err < JET_errSuccess || err == JET_errSuccess || err == JET_wrnFileOpenReadOnly );
@@ -1990,23 +2252,30 @@ ERR BACKUP_CONTEXT::ErrBKOpenFile(
 
         fDbOpen = fTrue;
 
-        
+        /*  should not open database if not performing full backup
+        /**/
         if ( !m_fBackupFull )
         {
             Assert ( backupStateLogsAndPatchs == m_fBackupStatus );
             Error( ErrERRCheck( JET_errInvalidBackupSequence ) );
         }
 
-        
+        /*  should not open database if we are during log copy phase
+        /**/
         if ( backupStateDatabases != m_fBackupStatus )
         {
+            // it looks like it is called after ErrBKGetLogInfo
             Assert ( m_fBackupBeginNewLogFile );
             Error( ErrERRCheck( JET_errInvalidBackupSequence ) );
         }
 
         FMP* const pfmpT = &g_rgfmp[ifmp];
 
-        
+        /*  we fire ErrLGDbDetachingCallback for every shrink, so FAttachedForRecovery
+        /*  can be backed up only when it's internal client and is turned on.
+        /*  previous, databases undergoing recovery cannot be backed up at this time
+        /*  because of currently unsupported interactions with database shrinkage from EOF.
+        /**/
         if ( pfmpT->FAttachedForRecovery() )
         {
             if ( !m_fBackupIsInternal || !BoolParam( m_pinst, JET_paramFlight_EnableBackupDuringRecovery ) )
@@ -2022,16 +2291,21 @@ ERR BACKUP_CONTEXT::ErrBKOpenFile(
         m_rgrhf[irhf].fDatabase = fTrue;
         m_rgrhf[irhf].ifmp = ifmp;
 
-        
+        /*  database should be loggable or would not have been
+        /*  given out for backup purposes.
+        /**/
         Assert( pfmpT->FLogOn() );
 
         if ( fIncludePatch )
         {
-            
+            /*  create a local patch file
+            /**/
             IFileAPI *  pfapiPatch      = NULL;
             WCHAR       wszPatch[IFileSystemAPI::cchPathMax];
 
-            
+            /*  patch file should be in database directory during backup. In log directory during
+             *  restore.
+             */
 
             BKIGetPatchName( wszPatch, pfmpT->WszDatabaseName() );
 
@@ -2048,6 +2322,10 @@ ERR BACKUP_CONTEXT::ErrBKOpenFile(
 
         Assert( pfmpT->PgnoBackupCopyMost() == 0 );
 
+        // Snapshot the db header before getting the file size. This is so that the minRequired in the backed up
+        // database reflects the size of the database copied and we are not missing updates to pages extended between
+        // now and when we start reading the database.
+        //
         Alloc( m_rgrhf[irhf].pdbfilehdr = (DBFILEHDR *)PvOSMemoryPageAlloc( g_cbPage, NULL ) );
         UtilMemCpy( m_rgrhf[irhf].pdbfilehdr, pfmpT->Pdbfilehdr(), g_cbPage );
         BKINFO *pbkinfo = &m_rgrhf[irhf].pdbfilehdr->bkinfoFullCur;
@@ -2059,6 +2337,7 @@ ERR BACKUP_CONTEXT::ErrBKOpenFile(
         Assert( pbkinfo->le_genHigh == 0 );
         SetPageChecksum( m_rgrhf[irhf].pdbfilehdr, g_cbPage, databaseHeader, 0 );
 
+        //  set backup database file size to current database OE size
 
         const PGNO pgnoWriteLatchedMax = pfmpT->PgnoHighestWriteLatched();
         const PGNO pgnoDirtiedMax = pfmpT->PgnoDirtiedMax();
@@ -2068,6 +2347,10 @@ ERR BACKUP_CONTEXT::ErrBKOpenFile(
         const PGNO pgnoScanMax = pfmpT->PgnoScanMax();
         const PGNO pgnoLast = pfmpT->PgnoLast();
 
+        // We need to use the logical size here (instead of the file system size) to avoid resuming backups
+        // to incorrectly treat the database as having undergone shrinkage in case the physical size is reduced
+        // after an in-between attach (due to truncation down to logical size), despite the logical size having
+        // remained the same.
         AssertTrack( pgnoDirtiedMax <= pgnoLast, "BackupPgnoLastTooLowv3Dirtied" );
         AssertTrack( pgnoWriteLatchedNonScanMax <= pgnoLast, "BackupPgnoLastTooLowv3NonScan" );
         AssertTrack( pgnoWriteLatchedMax <= pgnoLast, "BackupPgnoLastTooLowv2Original" );
@@ -2083,17 +2366,25 @@ ERR BACKUP_CONTEXT::ErrBKOpenFile(
 
         if ( pgnoRead > 1 )
         {
+            // PgnoBackupCopyMost indicates the last/most page copied
+            // And copy starts at 1 higher than the value of PgnoBackupCopyMost
+            // Here we set PgnoBackupCopyMost to pgnoRead - 1 so that we start copying from pgnoRead
             pfmpT->SetPgnoBackupCopyMost( pgnoRead - 1 );
             Assert( pfmpT->PgnoBackupMost() >= pfmpT->PgnoBackupCopyMost() );
         }
 
+        //  set the returned file size.
+        // Must add on cpgDBReserved to accurately inform backup of file size
 
         m_rgrhf[irhf].cb += g_cbPage * cpgDBReserved;
 
+        // we add the additional header added at the end
+        // to replace information stored in the patch file header
         m_rgrhf[irhf].cb += g_cbPage;
 
         pfmpT->CritLatch().Leave();
 
+        //  setup patch file header for copy.
 
         if ( !pfmpT->Ppatchhdr() )
         {
@@ -2101,6 +2392,7 @@ ERR BACKUP_CONTEXT::ErrBKOpenFile(
             pfmpT->SetPpatchhdr( ppatchhdr );
         }
 
+        // mark database as involved in an external backup
         pfmpT->SetInBackupSession();
 
 #ifdef DEBUG
@@ -2122,7 +2414,11 @@ ERR BACKUP_CONTEXT::ErrBKOpenFile(
 
         if ( backupStateDatabases == m_fBackupStatus )
         {
+            // we are in backup databases mode but database file (edb)
+            // is not found in the FMP's.
 
+            // UNDONE: we return JET_errDatabaseNotFound at this point
+            // maybe we shell return something like "database unmounted" ...
             Call( err );
 
             Call( ErrERRCheck( JET_wrnNyi ) );
@@ -2131,10 +2427,17 @@ ERR BACKUP_CONTEXT::ErrBKOpenFile(
         {
             Assert ( backupStateLogsAndPatchs == m_fBackupStatus );
 
+            // we backup just patch and log files at this point
 
+            // UNDONE: check the format of the file (extension, etc.)
 
             Assert( !m_rgrhf[irhf].fDatabase );
 
+            //  CONSIDER: Instead of checking extension, read in header to see if it's
+            //  a valid log file header, else try to see if it's a valid patch file,
+            //  else die because it's not a correct file that we recognize.
+            //  Better yet, check if it's a log file first, since we open more log files
+            //  than anything.
 
             CallS( m_pinst->m_pfsapi->ErrPathParse( wszFileName, wszDirT, wszFNameT, wszExtT ) );
             m_rgrhf[irhf].fIsLog = ( UtilCmpFileName( wszExtT, m_pinst->m_plog->LogExt() ) == 0 );
@@ -2158,9 +2461,11 @@ ERR BACKUP_CONTEXT::ErrBKOpenFile(
             }
             else
             {
+                // only thing left is the thunk patch file
                 qwEseFileID = qwPatchFileID;
             }
 
+            //  first try opening the file from the regular file-system
 
             err = CIOFilePerf::ErrFileOpen(
                                     m_pinst->m_pfsapi,
@@ -2191,7 +2496,9 @@ ERR BACKUP_CONTEXT::ErrBKOpenFile(
                 Alloc( m_rgrhf[irhf].pLogVerifyState = new LOG_VERIFY_STATE() );
             }
 
-            
+            /*  get file size
+            /**/
+            // just opened the file, so the file size must be correctly buffered
             Call( m_rgrhf[irhf].pfapi->ErrSize( &m_rgrhf[irhf].cb, IFileAPI::filesizeLogical ) );
             Assert( m_rgrhf[irhf].cb > 0 || !m_rgrhf[irhf].fIsLog );
             Assert( m_rgrhf[irhf].cb == 0 || m_rgrhf[irhf].fIsLog );
@@ -2217,6 +2524,7 @@ ERR BACKUP_CONTEXT::ErrBKOpenFile(
     }
     err = JET_errSuccess;
 
+    // report start backup of file (report only EDB)
     if ( m_rgrhf[irhf].fDatabase )
     {
         WCHAR wszSize[32];
@@ -2277,6 +2585,9 @@ HandleError:
             fDbOpen = fFalse;
         }
 
+        // if they try to backup a unmounted database or we get an error on one database
+        // we will not stop the backup
+        // on all other errors (logs, patch files) we stop the backup of the instance
         if ( backupStateDatabases == m_fBackupStatus )
         {
             WCHAR wszError[32];
@@ -2301,7 +2612,10 @@ HandleError:
                 {
                     WCHAR   wszPatch[IFileSystemAPI::cchPathMax];
 
+                    // delete the created patch file
 
+                    //  UNDONE: Does this work?? If patch file was created, there might
+                    //  be a handle open on the file, in which case deletion will fail
 
                     BKIGetPatchName( wszPatch, g_rgfmp[ m_rgrhf[irhf].ifmp ].WszDatabaseName()  );
                     ERR errAux;
@@ -2326,7 +2640,8 @@ HandleError:
 
             Assert( m_fBackupInProgressLocal );
 
-            
+            /*  release file handle resource on error
+            /**/
             Assert ( m_rgrhf[irhf].wszFileName );
             OSMemoryHeapFree( m_rgrhf[irhf].wszFileName );
             m_rgrhf[irhf].wszFileName = NULL;
@@ -2342,7 +2657,8 @@ HandleError:
         else
         {
 
-            
+            /*  release file handle resource on error
+            /**/
             Assert ( m_rgrhf[irhf].wszFileName );
             OSMemoryHeapFree( m_rgrhf[irhf].wszFileName );
             m_rgrhf[irhf].wszFileName = NULL;
@@ -2395,11 +2711,13 @@ ERR BACKUP_CONTEXT::ErrBKReadFile(
     BOOL fBackupDuringRecovery = fFalse;
     if ( m_pinst->FRecovering() )
     {
+        // Currently backup during recovery in only allowed for internal copy
         if ( !m_fBackupIsInternal || !BoolParam( m_pinst, JET_paramFlight_EnableBackupDuringRecovery ) )
         {
             return ErrERRCheck( JET_errBackupNotAllowedYet );
         }
 
+        // The backup has been suspended by ErrLGDbDetachingCallback. 
         if ( m_fCtxIsSuspended )
         {
             return ErrERRCheck( JET_errBackupNotAllowedYet );
@@ -2408,6 +2726,15 @@ ERR BACKUP_CONTEXT::ErrBKReadFile(
         fBackupDuringRecovery = fTrue;
     }
 
+    // we pottentialy make an async IO on the pv so check here
+    // for alignment rather then let the IO fail and get some
+    // weird error back. One convenine way to check it (per MSDN)
+    // is to check memory page size allocation. It is much easier
+    // then to get the volume sector size at this point becuase
+    // in theory that is dependent of where the file we are
+    // reading is located and we should also cache it becuase
+    // we should not call pfsapi->ErrFileAtomicWriteSize() each time.
+    //
     if ( UINT_PTR(0) != ( UINT_PTR(pv) & UINT_PTR( OSMemoryPageCommitGranularity( ) - 1 ) ) )
     {
         return ErrERRCheck( JET_errInvalidParameter );
@@ -2450,7 +2777,7 @@ ERR BACKUP_CONTEXT::ErrBKReadFile(
                                           *TraceContextScope( iorpBackup ),
                                           pb,
                                           cbToRead ) );
-        }
+        }   // cbToRead > 0
 
         Assert ( 1 == m_ppibBackup->Level() );
 
@@ -2483,6 +2810,9 @@ ERR BACKUP_CONTEXT::ErrBKReadFile(
 
         cpage = cbMax / g_cbPage;
 
+        //  we need to read at least 2 pages for the database header,
+        //  plus one more to ensure PgnoBackupCopyMost advances beyond 0
+        //
         if ( 0 == cpage || ( cpage <= cpgDBReserved && 0 == pfmpT->PgnoBackupCopyMost() ) )
         {
             return ErrERRCheck( JET_errInvalidParameter );
@@ -2501,11 +2831,13 @@ ERR BACKUP_CONTEXT::ErrBKReadFile(
         }
 #endif
 
+        // check database as involved in an external backup
         Assert ( pfmpT->FInBackupSession() );
 
         if ( cpage > 0 )
         {
-            
+            /*  read next cpageBackupBuffer pages
+            /**/
             err = ErrBKIReadPages(
                 &m_rgrhf[irhf],
                 pv,
@@ -2523,11 +2855,15 @@ ERR BACKUP_CONTEXT::ErrBKReadFile(
                 m_cbDBGCopied += cbActual;
 #endif
 
+            // The backup context has been suspended by ErrLGDbDetachingCallback. 
+            // Currently it's only for backup during recovery opened by internal copy
+            // 
             if ( fBackupDuringRecovery && m_fCtxIsSuspended )
             {
                 return ErrERRCheck( JET_errBackupNotAllowedYet );
             }
 
+            // set the data read (used just to check at the end if all was read.
             m_rgrhf[irhf].ib += cbActual;
             Assert( (m_rgrhf[irhf].ib / g_cbPage) == (g_rgfmp[ m_rgrhf[irhf].ifmp ].PgnoBackupCopyMost() + cpgDBReserved )
                     || ( (g_rgfmp[ m_rgrhf[irhf].ifmp ].PgnoBackupCopyMost() == g_rgfmp[ m_rgrhf[irhf].ifmp ].PgnoBackupMost() )
@@ -2576,6 +2912,9 @@ HandleError:
 
         OSStrCbFormatW( wszError, sizeof(wszError), L"%d", err );
 
+        // if they try to backup a unmounted database or we get an error on one database
+        // we will not stop the backup
+        // on all other errors (logs, patch files) we stop the backup of the instance
         if ( backupStateDatabases == m_fBackupStatus )
         {
             FMP::AssertVALIDIFMP( m_rgrhf[irhf].ifmp );
@@ -2634,7 +2973,13 @@ ERR BACKUP_CONTEXT::ErrBKCloseFile( JET_HANDLE hfFile )
         return ErrERRCheck( JET_errInvalidParameter );
     }
 
-    
+    /*  check if handle if for database file or non-database file.
+    /*  if handle is for database file, then terminate patch file
+    /*  support and release recovery handle for file.
+    /*
+    /*  if handle is for non-database file, then close file handle
+    /*  and release recovery handle for file.
+    /**/
     if ( m_rgrhf[irhf].fDatabase )
     {
         Assert( backupStateDatabases == m_fBackupStatus );
@@ -2655,7 +3000,11 @@ ERR BACKUP_CONTEXT::ErrBKCloseFile( JET_HANDLE hfFile )
             m_rgrhf[irhf].pdbfilehdr = NULL;
         }
 
+        // Assert no longer valid as we reset this flag defore
+        // calling CloseFile in ReadFile on error
 
+        // check database as involved in an external backup
+        // Assert ( g_rgfmp[ifmpT].FInBackupSession() );
 
 #ifdef DEBUG
         if ( m_fDBGTraceBR )
@@ -2669,9 +3018,14 @@ ERR BACKUP_CONTEXT::ErrBKCloseFile( JET_HANDLE hfFile )
 
 #ifdef MINIMAL_FUNCTIONALITY
 #else
+        // if the scrub object is left because they haven't read
+        // all the pages from the db, hence we haven't stopped
+        // the scrubbing at the end of the ReadFile phase
         if( m_pscrubdb )
         {
-            CallSRFS( m_pscrubdb->ErrTerm(), ( JET_errDiskIO, 0 ) );
+            // We get the operation's error here, and we can fail with an error from the disk ... should
+            // be ignoreable in this cleanup.
+            CallSRFS( m_pscrubdb->ErrTerm(), ( JET_errDiskIO, 0 ) ); // may fail with JET_errOutOfMemory. what to do?
             delete m_pscrubdb;
             m_pscrubdb = NULL;
         }
@@ -2692,6 +3046,7 @@ ERR BACKUP_CONTEXT::ErrBKCloseFile( JET_HANDLE hfFile )
         }
     }
 
+    // report end backup of file
     {
         WCHAR wszSizeRead[32];
         WCHAR wszSizeAll[32];
@@ -2702,6 +3057,7 @@ ERR BACKUP_CONTEXT::ErrBKCloseFile( JET_HANDLE hfFile )
 
         if ( m_rgrhf[irhf].ib == m_rgrhf[irhf].cb )
         {
+            // if all file read, report just EDB files
             if ( m_rgrhf[irhf].fDatabase )
             {
                 UtilReportEvent( eventInformation, LOGGING_RECOVERY_CATEGORY, BACKUP_FILE_STOP_OK, 1, rgszT, 0, NULL, m_pinst );
@@ -2718,6 +3074,11 @@ ERR BACKUP_CONTEXT::ErrBKCloseFile( JET_HANDLE hfFile )
             }
             else if ( m_rgrhf[irhf].fIsLog )
             {
+                // we can count this log as read if it is a required log
+                // Note: we will add each generation number
+                // and at the end of backup, they should have
+                // the sum of all values between copyMic and copyMac
+                //
                 Assert( m_lgenCopyMic );
                 Assert( m_lgenCopyMac );
                 Assert( m_lgenCopyMic <= (m_lgenCopyMac - 1) );
@@ -2729,6 +3090,7 @@ ERR BACKUP_CONTEXT::ErrBKCloseFile( JET_HANDLE hfFile )
 
         }
         else
+        // if not all file was read, issue a warning
         {
             OSStrCbFormatW( wszSizeRead, sizeof(wszSizeRead), L"%I64u", m_rgrhf[irhf].ib );
             OSStrCbFormatW( wszSizeAll, sizeof(wszSizeAll),  L"%I64u", m_rgrhf[irhf].cb );
@@ -2762,7 +3124,8 @@ ERR BACKUP_CONTEXT::ErrBKCloseFile( JET_HANDLE hfFile )
 
     OSMemoryHeapFree( m_rgrhf[irhf].wszFileName );
 
-    
+    /*  reset backup file handle and free
+    /**/
     Assert( m_rgrhf[irhf].fInUse );
 
     m_rgrhf[irhf].fInUse            = fFalse;
@@ -2804,7 +3167,8 @@ ERR BACKUP_CONTEXT::ErrBKIPrepareLogInfo()
         return ErrERRCheck( JET_errBackupAbortByServer );
     }
 
-    
+    /*  all backup files must be closed
+    /**/
     for ( irhf = 0; irhf < m_crhfMac; irhf++ )
     {
         if ( m_rgrhf[irhf].fInUse )
@@ -2816,7 +3180,8 @@ ERR BACKUP_CONTEXT::ErrBKIPrepareLogInfo()
     Assert ( backupStateDatabases == m_fBackupStatus || backupStateLogsAndPatchs == m_fBackupStatus );
 
 
-    
+    /*  begin new log file and compute log backup parameters
+    /**/
     if ( !m_fBackupBeginNewLogFile )
     {
         Call( ErrBKIPrepareLogFiles(
@@ -2850,7 +3215,8 @@ ERR BACKUP_CONTEXT::ErrBKIGetLogInfo(
     WCHAR       wszT[IFileSystemAPI::cchPathMax];
     WCHAR       wszFullLogFilePath[IFileSystemAPI::cchPathMax];
 
-    
+    /*  make full path from log file path, including trailing back slash
+    /**/
     CallR( m_pinst->m_pfsapi->ErrPathComplete( SzParam( m_pinst, JET_paramLogFilePath ), wszFullLogFilePath ) );
 
 #ifdef DEBUG
@@ -2868,7 +3234,8 @@ ERR BACKUP_CONTEXT::ErrBKIGetLogInfo(
 
     Assert ( m_fBackupBeginNewLogFile );
 
-    
+    /*  get cbActual for log file and patch files.
+    /**/
     cbActual = 0;
 
     CallS( m_pinst->m_pfsapi->ErrPathParse( wszFullLogFilePath, wszDirT, wszFNameT, wszExtT ) );
@@ -2885,7 +3252,8 @@ ERR BACKUP_CONTEXT::ErrBKIGetLogInfo(
 
     if ( fIncludePatch )
     {
-        
+        /*  put all the patch file info
+        /**/
         for ( DBID dbid = dbidUserLeast; dbid < dbidMax; dbid++ )
         {
             IFMP    ifmp = m_pinst->m_mpdbidifmp[ dbid ];
@@ -2895,6 +3263,7 @@ ERR BACKUP_CONTEXT::ErrBKIGetLogInfo(
             FMP *   pfmp = &g_rgfmp[ifmp];
 
             if ( pfmp->FInUse()
+//              && pfmp->CpagePatch() > 0
                 && pfmp->FAttached()
                 && !pfmp->FAttachedForRecovery()
                 && !pfmp->FAttachingDB()
@@ -2904,7 +3273,8 @@ ERR BACKUP_CONTEXT::ErrBKIGetLogInfo(
                 Assert( !pfmp->FSkippedAttach() );
                 Assert( !pfmp->FDeferredAttach() );
 
-                
+                /*  database with patch file must be loggable
+                /**/
 
                 Assert( pfmp->FLogOn() );
                 BKIGetPatchName( wszT, pfmp->WszDatabaseName() );
@@ -2916,7 +3286,8 @@ ERR BACKUP_CONTEXT::ErrBKIGetLogInfo(
 
     Alloc( pch = static_cast<WCHAR *>( PvOSMemoryHeapAlloc( cbActual ) ) );
 
-    
+    /*  return list of log files and patch files
+    /**/
     pchT = pch;
     ULONG cchT = cbActual / sizeof(WCHAR);
 
@@ -2938,9 +3309,11 @@ ERR BACKUP_CONTEXT::ErrBKIGetLogInfo(
         pchT++;
     }
 
+    // on snapshot we don't have patch file
     if ( fIncludePatch )
     {
-        
+        /*  copy all the patch file info
+        /**/
         for ( DBID dbid = dbidUserLeast; dbid < dbidMax; dbid++ )
         {
             IFMP    ifmp = m_pinst->m_mpdbidifmp[ dbid ];
@@ -2973,12 +3346,14 @@ ERR BACKUP_CONTEXT::ErrBKIGetLogInfo(
     Assert( pchT == pch + cbActual/sizeof(WCHAR) - 1 );
     *pchT = L'\0';
 
-    
+    /*  return data
+    /**/
     if ( wszzLogs != NULL )
     {
         UtilMemCpy( wszzLogs, pch, min( cbMax, cbActual ) );
 
-        
+        /*  return cbActual
+        /**/
         if ( pcbActual != NULL )
         {
             *pcbActual = min( cbMax, cbActual );
@@ -2986,7 +3361,8 @@ ERR BACKUP_CONTEXT::ErrBKIGetLogInfo(
     }
     else
     {
-        
+        /*  return cbActual
+        /**/
         if ( pcbActual != NULL )
         {
             *pcbActual = cbActual;
@@ -3006,7 +3382,7 @@ HandleError:
     if ( m_fDBGTraceBR )
     {
         CHAR sz[256];
-        WCHAR *pwchT;
+        WCHAR *pwchT; // added T to not be confused pch, which should be pwch anyway
 
         if ( err >= 0 )
         {
@@ -3028,6 +3404,7 @@ HandleError:
                         }
                         else
                         {
+                            // success.
                             OSStrCbFormatA( sz, sizeof(sz), "     %s\n", (CHAR*)lszTemp );
                         }
                         Assert( strlen( sz ) <= sizeof( sz ) - 1 );
@@ -3064,6 +3441,7 @@ HandleError:
         }
 
         Assert ( backupStateDatabases == m_fBackupStatus || backupStateLogsAndPatchs == m_fBackupStatus );
+        // switch to the LogAndPatch status
         m_fBackupStatus = backupStateLogsAndPatchs;
     }
     return err;
@@ -3132,6 +3510,7 @@ ERR BACKUP_CONTEXT::ErrBKTruncateLog()
         return ErrERRCheck( JET_errBackupAbortByServer );
     }
 
+    //  all backup files must be closed
     for ( INT irhf = 0; irhf < m_crhfMac; irhf++ )
     {
         if ( m_rgrhf[irhf].fInUse )
@@ -3143,18 +3522,32 @@ ERR BACKUP_CONTEXT::ErrBKTruncateLog()
     if ( 0 == m_lgenCopyMic ||
         0 == m_lgenCopyMac )
     {
+        // The copy mic/mac are set during prepare log files, if we have a 0 here
+        // it is an invalid backup sequence.
         return ErrERRCheck( JET_errInvalidBackupSequence );
     }
 
-    Assert( backupStateDatabases == m_fBackupStatus
+    // switch to the LogAndPatch status if not already there
+    Assert( backupStateDatabases == m_fBackupStatus         //  this state is possible via JetBackup( NULL )
         || backupStateLogsAndPatchs == m_fBackupStatus );
     m_fBackupStatus = backupStateLogsAndPatchs;
 
+    // we need to check if they got all the log files they need
+    // The files they need are from m_lgenCopyMic to (m_lgenCopyMac - 1) inclusive.
+    // The formula for the sum of all numbers from A to B inclusive is
+    // S = ( (A+B)(B-A+1) / 2 )
+    //
     Assert( m_lgenCopyMic );
     Assert( m_lgenCopyMac );
     Assert( m_lgenCopyMic <= (m_lgenCopyMac - 1) );
     const SIZE_T        cGenCopyMust = ( ( (SIZE_T)m_lgenCopyMic + (SIZE_T)(m_lgenCopyMac - 1) ) * ( (SIZE_T)(m_lgenCopyMac - 1) - (SIZE_T)m_lgenCopyMic + 1  ) ) / 2;
 
+    // we don't check with == becuase there is a chance
+    // that they copy one file twice
+    // ( like it didn't fit in the destination the first time )
+    // It is ok as it should cover the big majority of code bugs
+    // in which they fail to copy some file
+    //
     if ( m_cGenCopyDone < cGenCopyMust )
     {
         UtilReportEvent( eventWarning, LOGGING_RECOVERY_CATEGORY, BACKUP_LOG_FILE_NOT_COPIED_ID, 0, NULL, 0 , NULL, m_pinst );
@@ -3174,6 +3567,9 @@ ERR BACKUP_CONTEXT::ErrBKOSSnapshotTruncateLog( const JET_GRBIT grbit )
 
     m_lgenDeleteMic = 0;
 
+    // if m_lgenDeleteMac is 0 at this point
+    // (like the instance started after the snapshot thaw but before Truncate is called)
+    // then the instance is not part of the snaphot
     if ( 0 == m_lgenDeleteMac )
     {
         return JET_errSuccess;
@@ -3194,12 +3590,18 @@ ERR BACKUP_CONTEXT::ErrBKOSSnapshotTruncateLog( const JET_GRBIT grbit )
     }
     else
     {
+        // If not all the databaseses are attached, we won't truncate
+        // but we make the call with 0-0 range just to display the EventLog
+        // Also, if circular logging is on, we won't truncate as in this case
+        // snapshot is not forcing a new log generation and we should avoid
+        // coliding with the logging thread on old log deletion
         Call ( m_pinst->m_plog->ErrLGTruncateLog( 0, 0, fTrue, m_fBackupFull ) );
     }
 
 HandleError:
 
 
+    // reset the range to avoid further truncate attempts
     m_lgenDeleteMic = 0;
     m_lgenDeleteMac = 0;
     return err;
@@ -3243,6 +3645,9 @@ void BACKUP_CONTEXT::BKOSSnapshotSaveInfo( const BOOL fIncremental, const BOOL f
         
     }
 
+    // write the db header so that the info we updated is written.
+    // otherwise a crash before other db header updates
+    // may result in backup information lost.
 
     BOOL    fSkippedAttachDetach;
     LOGTIME tmEmpty;
@@ -3252,6 +3657,7 @@ void BACKUP_CONTEXT::BKOSSnapshotSaveInfo( const BOOL fIncremental, const BOOL f
     errUpdateHdr = m_pinst->m_plog->ErrLGUpdateGenRequired( m_pinst->m_pfsapi, 0, 0, 0, tmEmpty, &fSkippedAttachDetach );
     m_pinst->m_plog->UnlockCheckpoint();
 
+    // on error, report a Warning and continue as the backup is OK from it's point of view.
     if ( errUpdateLog < JET_errSuccess || errUpdateHdr < JET_errSuccess )
     {
         WCHAR   sz1T[32];
@@ -3281,12 +3687,16 @@ ERR BACKUP_CONTEXT::ErrBKOSSnapshotStopLogging( const BOOL fIncremental )
     }
     else
     {
+        // nothing, we will just enter m_critLGFlush once we log the snapshot start
     }
 
     if ( !fIncremental )
     {
         LGIGetDateTime( &m_logtimeFullBackup );
 
+        //  fLGStopOnNewGen forces the log flush thread to set m_sigLogPaused
+        //  when the new gen has been created, and we will wait on that signal below
+        //
         Call ( ErrLGBackupPrepLogs(
                     m_pinst->m_plog,
                     DBFILEHDR::backupOSSnapshot, fIncremental,
@@ -3296,6 +3706,12 @@ ERR BACKUP_CONTEXT::ErrBKOSSnapshotStopLogging( const BOOL fIncremental )
 
         if ( fCreateAndStopOnNewGen )
         {
+            //  wait for log flush thread to create
+            //  the new gen (we used the fLGStopOnNewGen
+            //  flag above to indicate to the log flush
+            //  thread that upon creation of the new
+            //  gen, set this signal and bail)
+            //
             m_pinst->m_plog->LGWaitLogPaused();
             Assert( m_pinst->m_plog->FLGLogPaused() || m_pinst->m_plog->FNoMoreLogWrite() );
         }
@@ -3304,9 +3720,18 @@ ERR BACKUP_CONTEXT::ErrBKOSSnapshotStopLogging( const BOOL fIncremental )
         
         Assert( fCircularLogging || m_lgposFullBackup.lGeneration > 1 );
 
+        // this will be set later after getting the checkpoint critical section.
         m_lgenCopyMic = 0;
         m_lgenCopyMac = m_lgposFullBackup.lGeneration;
 
+        // if no circular logging, we do switch to the new log with
+        // the log record so the last log generation is less then
+        // the one where the Backup log record is as that one is the
+        // first in the next log which is not generated yet.
+        // Note: if we didn't get a lgpos because we couldn't log
+        // the new log record (m_lgenCopyMac will be 0), then
+        // we will get the new log generation number later
+        // after we wait for it it finish the switch
         if ( !fCircularLogging )
         {
             Assert( 0 != CmpLgpos( &m_lgposFullBackup, &lgposMin ) );
@@ -3316,6 +3741,7 @@ ERR BACKUP_CONTEXT::ErrBKOSSnapshotStopLogging( const BOOL fIncremental )
     else
     {
 
+        // we need to check if all dbs do have a full backup
         Call( ErrLGCheckIncrementalBackup( m_pinst, DBFILEHDR::backupOSSnapshot ) );
 
         if ( fCircularLogging )
@@ -3325,6 +3751,9 @@ ERR BACKUP_CONTEXT::ErrBKOSSnapshotStopLogging( const BOOL fIncremental )
 
         LGIGetDateTime( &m_logtimeIncBackup );
 
+        //  fLGStopOnNewGen forces the log flush thread to set m_sigLogPaused
+        //  when the new gen has been created, and we will wait on that signal below
+        //
         Call ( ErrLGBackupPrepLogs(
                     m_pinst->m_plog,
                     DBFILEHDR::backupOSSnapshot, fIncremental,
@@ -3334,6 +3763,12 @@ ERR BACKUP_CONTEXT::ErrBKOSSnapshotStopLogging( const BOOL fIncremental )
 
         if ( fCreateAndStopOnNewGen )
         {
+            //  wait for log flush thread to create
+            //  the new gen (we used the fLGStopOnNewGen
+            //  flag above to indicate to the log flush
+            //  thread that upon creation of the new
+            //  gen, set this signal and bail)
+            //
             m_pinst->m_plog->LGWaitLogPaused();
             Assert( m_pinst->m_plog->FLGLogPaused() || m_pinst->m_plog->FNoMoreLogWrite() );
         }
@@ -3343,14 +3778,18 @@ ERR BACKUP_CONTEXT::ErrBKOSSnapshotStopLogging( const BOOL fIncremental )
         Assert (m_lgposIncBackup.lGeneration > 1);
         m_lgenCopyMac = m_lgposIncBackup.lGeneration - 1;
 
+        // on incrementals, we need to copy from the first existing log
         Call ( m_pinst->m_plog->ErrLGGetGenerationRange( SzParam( m_pinst, JET_paramLogFilePath ), &m_lgenCopyMic, NULL ) );
 
+        // we were just during the first log
         if ( 0 == m_lgenCopyMic )
         {
             Assert( 1 == m_lgenCopyMac );
             m_lgenCopyMic = 1;
         }
 
+        // we need to check if the first existing log is
+        // enough for all databases since the previous backup
         Call( ErrBKICheckLogsForIncrementalBackup( m_lgenCopyMic ) );
 
     }
@@ -3358,6 +3797,16 @@ ERR BACKUP_CONTEXT::ErrBKOSSnapshotStopLogging( const BOOL fIncremental )
 
     if ( !fCircularLogging )
     {
+        //  if we don't have a valid m_lgposFullBackup then let's set it to a
+        //  safe value so that the rest of the code functions properly
+        //
+        //  NOTE:  we could try to scan all attached FMPs and get the min
+        //  of the max of the prev full backup and prev incr backup for each
+        //  FMP and use that number, but there is always a case where we could
+        //  take a snap with no databases attached so we need this safe value
+        //  case anyway.  also, we used something like this safe value for
+        //  the entire history of snapshot backup in ESE anyway
+        //
         if ( 0 == CmpLgpos( &m_lgposFullBackup, &lgposMin ) )
         {
             m_lgposFullBackup.lGeneration = m_lgenCopyMac + 1;
@@ -3370,15 +3819,30 @@ ERR BACKUP_CONTEXT::ErrBKOSSnapshotStopLogging( const BOOL fIncremental )
     {
         WCHAR   wszLogName[ IFileSystemAPI::cchPathMax ];
 
+        //  will be released by CESESnapshotSession::ThawInstance()
+        //
         m_pinst->m_plog->LGLockWrite();
 
+        // we need to delete the incomplete edbtmp.jtx/log because
+        // otherwise the snapshot image will have it and it will not checksum
+        // This is the case only for the circular logging case in which we just
+        // stop logging, for the normal case where will be an edbtmp.jtx/log ready
+        // to be used as edb.jtx/log (i.e. will checksum fine)
 
+        //  If edbtmp.jtx/log is being written to, cancel the operation and close file.
 
         m_pinst->m_plog->LGCreateAsynchCancel( fFalse );
 
+        //  Delete any existing edbtmp.jtx/log since we would need to recreate
+        //  it at next startup anyway (we never trust any prepared log files,
+        //  not edbtmp.jtx/log, not edb00001.jrs, nor edb00002.jrs).
 
         m_pinst->m_plog->LGMakeLogName( wszLogName, sizeof(wszLogName), eCurrentTmpLog );
 
+        // If the deletion fails, we keep going, no point in failing the snapshot:
+        // If the backup app will checksum the image and this file will fail the checksum
+        // then it will fail anyway. If they don't checksum (or they know it is a tmp log)
+        // we will recover fine anyway.
         (void) m_pinst->m_pfsapi->ErrFileDelete( wszLogName );
     }
 
@@ -3408,7 +3872,11 @@ VOID BACKUP_CONTEXT::BKOSSnapshotResumeLogging()
     {
         WCHAR   wszTempLogName[ IFileSystemAPI::cchPathMax ];
 
+        //  m_critLGWrite obtained by BACKUP_CONTEXT::ErrBKOSSnapshotStopLogging()
+        //
 
+        // we did stop the async log file creation on freeze for circular logging
+        // so we need to restart it now.
         m_pinst->m_plog->LGMakeLogName( wszTempLogName, sizeof(wszTempLogName), eCurrentTmpLog );
 
         CallS( m_pinst->m_plog->ErrStartAsyncLogFileCreation( wszTempLogName, lGenSignalTempID ) );
@@ -3420,24 +3888,45 @@ VOID BACKUP_CONTEXT::BKOSSnapshotResumeLogging()
 
         ERR err = JET_errSuccess;
 
+        //  finish creating the logfile we started in Freeze
+        //  We don't want to return an error from Thaw and
+        //  the instance will be "m_fLGNoMoreLogWrite" anyway
         err = m_pinst->m_plog->ErrLGNewLogFile(
-                                0 ,
+                                0 /* not used for rename only */,
                                 fLGLogRenameOnly);
 
+        // on error, we continue with the other instances.
+        // The error for renaming the logs was logged in the EventLog
+        // and the log was made unavailable.
         Assert ( JET_errSuccess <= err || m_pinst->m_plog->FNoMoreLogWrite() );
 
         m_pinst->m_plog->LGSetLogPaused( fFalse );
     }
     m_pinst->m_plog->LGUnlockWrite();
 
+    // there might be waiters on log to write (like Commit0)
+    // which were blocked by the log write freezing
+    // so try to write to make those wake up
+    //
+    //  WARNING: a log write is not guaranteed,
+    //  because a log write won't be signalled if
+    //  we can't acquire the right to signal a log
+    //  write (typically because a log write is
+    //  already under way, but note that it could
+    //  be at the very end of that process)
+    //
     m_pinst->m_plog->FLGSignalWrite( );
 
+    // we add a trace for the end of the snapshot. This will contain also
+    // the snapshot start LGPOS which will be invalid if the freeze wasn't
+    // able to log the trace for the start of the snapshot
     const INT cbFillBuffer = 128;
     char szTrace[cbFillBuffer + 1];
     LGPOS lgposFreezeLogRec = lgposMax;
 
     BKIOSSnapshotGetFreezeLogRec( &lgposFreezeLogRec );
 
+    //  we don't expect this method to be called if BACKUP_CONTEXT::ErrBKOSSnapshotStopLogging() did not succeed
     Assert( 0 != CmpLgpos( &lgposFreezeLogRec, &lgposMax ) );
 
     if ( 0 != CmpLgpos( &lgposFreezeLogRec, &lgposMax ) )
@@ -3510,8 +3999,8 @@ ERR ISAMAPI ErrIsamEndExternalBackup(  JET_INSTANCE jinst, JET_GRBIT grbit )
 ERR BACKUP_CONTEXT::ErrBKUpdateHdrBackupInfo(
     const IFMP              ifmp,
     DBFILEHDR::BKINFOTYPE   bkinfoType,
-    const BOOL              fLogOnly,
-    const BOOL              fLogTruncated,
+    const BOOL              fLogOnly,       // eg1: fLogOnly && fLogTruncated == Incremental
+    const BOOL              fLogTruncated,  // eg2: !fLogOnly && !fLogTruncated == Copy
     const INT                   lgenLow,
     const INT                   lgenHigh,
     const LGPOS *           plgposMark,
@@ -3549,11 +4038,14 @@ ERR BACKUP_CONTEXT::ErrBKUpdateHdrBackupInfo(
                                     lgenLow, lgenHigh, plgposMark, plogtimeMark,
                                     pfmp->Dbid(),
                                     &lgposRecT ) );
-        fLoggedNow = fTrue;
+        fLoggedNow = fTrue; // just used to help us check an assert below.
     }
 
+    // Surrogate backups are actually snapshot backups on another machine, so we put them
+    // as snapshot backups for the header, but note we loged the bkinfoType with full fidelity.
     bkinfoType = ( bkinfoType == DBFILEHDR::backupSurrogate ) ? DBFILEHDR::backupOSSnapshot : bkinfoType;
 
+    //  Grab the checkpoint
     m_pinst->m_plog->LockCheckpoint();
 
     Assert( pfmp->Pdbfilehdr() );
@@ -3571,6 +4063,7 @@ ERR BACKUP_CONTEXT::ErrBKUpdateHdrBackupInfo(
                 { { &pdbfilehdr->bkinfoTypeDiffPrev, &pdbfilehdr->bkinfoDiffPrev, }, {&pdbfilehdr->bkinfoTypeIncPrev, &pdbfilehdr->bkinfoIncPrev, }, },
         };
 
+        // select out proper field for future reference
         BKINFO2 bkInfo2 = rgbkInfo2[ !!fLogOnly ][ !!fLogTruncated ];
 
         if ( CmpLgpos( &bkInfo2.m_pbkInfo->le_lgposMark, plgposMark ) <= 0 )
@@ -3588,13 +4081,18 @@ ERR BACKUP_CONTEXT::ErrBKUpdateHdrBackupInfo(
         bkInfo2.m_pbkInfo->le_genLow = lgenLow;
         bkInfo2.m_pbkInfo->le_genHigh = lgenHigh;
 
+        //
+        //  Clear out and invalidate appropriate backup varieties
+        //
         if ( fLogTruncated )
         {
             if ( !fLogOnly )
             {
+                // new full, nullifies prev incremental
                 pdbfilehdr->bkinfoTypeIncPrev = DBFILEHDR::backupNormal;
                 memset( &pdbfilehdr->bkinfoIncPrev, 0, sizeof( BKINFO ) );
 
+                // new full, nullifies prev diff as well
                 pdbfilehdr->bkinfoTypeDiffPrev = DBFILEHDR::backupNormal;
                 memset( &pdbfilehdr->bkinfoDiffPrev, 0, sizeof( pdbfilehdr->bkinfoDiffPrev ) );
             }
@@ -3602,11 +4100,13 @@ ERR BACKUP_CONTEXT::ErrBKUpdateHdrBackupInfo(
             switch( bkinfoType )
             {
                 case DBFILEHDR::backupNormal:
+                    // clean the snapshot info after a normal full backup
                     memset( &(pdbfilehdr->bkinfoSnapshotCur), 0, sizeof( BKINFO ) );
                     pdbfilehdr->bkinfoTypeIncPrev = DBFILEHDR::backupNormal;
                     break;
 
                 case DBFILEHDR::backupOSSnapshot:
+                    // no need to clear anything.
                     break;
 
                 case DBFILEHDR::backupSnapshot:
@@ -3645,13 +4145,17 @@ ERR BACKUP_CONTEXT::ErrBKExternalBackupCleanUp( ERR error, const JET_GRBIT grbit
     if ( ( fSurrogateBackup && m_fBackupInProgressLocal ) ||
         ( !fSurrogateBackup && !m_fBackupInProgressLocal ) )
     {
+        // They've mismatched the "destinations" of the backups from begin to end, fail
+        // them out.
         fNormal = fFalse;
         if ( m_fBackupInProgressLocal )
         {
+            // tried to end local backup w/ surrogate backup bit.
             error = ErrERRCheck( JET_errBackupInProgress );
         }
         else
         {
+            // tried to end surrogate backup w/ external backup.
             error = ErrERRCheck( JET_errSurrogateBackupInProgress );
         }
     }
@@ -3660,18 +4164,25 @@ ERR BACKUP_CONTEXT::ErrBKExternalBackupCleanUp( ERR error, const JET_GRBIT grbit
     {
         if ( m_fStopBackup )
         {
+            //  premature termination specifically requested
+            //
             fNormal = fFalse;
             error = ErrERRCheck( JET_errBackupAbortByServer );
         }
         else if ( m_fBackupStatus == backupStateDatabases )
         {
+            // if backup client calls BackupEnd without error
+            // before logs are read, force the backup as "with error"
+            //
             fNormal = fFalse;
             error = ErrERRCheck( errBackupAbortByCaller );
         }
     }
 
 
-    
+    /*  delete patch files, if present, for all databases.
+    /**/
+    //  first close the patch file if needed
     for ( INT irhf = 0; irhf < crhfMax; ++irhf )
     {
         if ( m_rgrhf[irhf].fInUse && m_rgrhf[irhf].pfapi )
@@ -3682,6 +4193,7 @@ ERR BACKUP_CONTEXT::ErrBKExternalBackupCleanUp( ERR error, const JET_GRBIT grbit
         }
     }
 
+    // clean up patch file state
     for ( dbid = dbidUserLeast; dbid < dbidMax; dbid++ )
     {
         IFMP    ifmp = m_pinst->m_mpdbidifmp[ dbid ];
@@ -3699,6 +4211,7 @@ ERR BACKUP_CONTEXT::ErrBKExternalBackupCleanUp( ERR error, const JET_GRBIT grbit
             Assert( !pfmp->FSkippedAttach() );
             Assert( !pfmp->FDeferredAttach() );
 
+            // only full backup is using patch files
             if ( m_fBackupFull )
             {
                 pfmp->CritLatch().Enter();
@@ -3710,6 +4223,9 @@ ERR BACKUP_CONTEXT::ErrBKExternalBackupCleanUp( ERR error, const JET_GRBIT grbit
         }
     }
 
+    //
+    //  Log and update Database headers, or log abort.
+    //
     if ( fNormal &&
         !( JET_bitBackupNoDbHeaderUpdate & grbit ) )
     {
@@ -3732,9 +4248,11 @@ ERR BACKUP_CONTEXT::ErrBKExternalBackupCleanUp( ERR error, const JET_GRBIT grbit
                 Assert( !pfmp->FSkippedAttach() );
                 Assert( !pfmp->FDeferredAttach() );
 
+                // log each one, b/c params may vary from FMP to FMP...
 
                 if ( fSurrogateBackup )
                 {
+                    // surrogate backup
                     BOOL fLoggedT = fFalse;
                     err = ErrBKUpdateHdrBackupInfo( ifmp,
                         DBFILEHDR::backupSurrogate, !m_fBackupFull, grbit & JET_bitBackupTruncateDone,
@@ -3745,14 +4263,15 @@ ERR BACKUP_CONTEXT::ErrBKExternalBackupCleanUp( ERR error, const JET_GRBIT grbit
                 }
                 else if ( m_fBackupFull && pfmp->FBackupFileCopyDone() )
                 {
+                    // full backup
                     Assert( pfmp->Ppatchhdr() );
                     Assert( pfmp->Pdbfilehdr()->bkinfoFullCur.le_genLow == 0 );
                     PATCH_HEADER_PAGE * ppatchHdr = pfmp->Ppatchhdr();
 
-                    LGPOS lgposT = ppatchHdr->bkinfo.le_lgposMark;
+                    LGPOS lgposT = ppatchHdr->bkinfo.le_lgposMark; // needs help converting from & le_lgpos to const * lgpos
                     BOOL fLoggedT = fFalse;
                     err = ErrBKUpdateHdrBackupInfo( ifmp,
-                        DBFILEHDR::backupNormal, fFalse ,
+                        DBFILEHDR::backupNormal, fFalse /* !m_fBackupFull */,
                         JET_bitBackupTruncateDone & grbit || FBKLogsTruncated(),
                         ppatchHdr->bkinfo.le_genLow, m_lgenCopyMac - 1,
                         &(lgposT), &(ppatchHdr->bkinfo.logtimeMark),
@@ -3760,9 +4279,10 @@ ERR BACKUP_CONTEXT::ErrBKExternalBackupCleanUp( ERR error, const JET_GRBIT grbit
                 }
                 else if ( !m_fBackupFull )
                 {
+                    // incremental backup
                     BOOL fLoggedT = fFalse;
                     err = ErrBKUpdateHdrBackupInfo( ifmp,
-                        DBFILEHDR::backupNormal, fTrue ,
+                        DBFILEHDR::backupNormal, fTrue /* !m_fBackupFull */,
                         JET_bitBackupTruncateDone & grbit || FBKLogsTruncated(),
                         m_lgenCopyMic, m_lgenCopyMac - 1,
                         &m_lgposIncBackup, &m_logtimeIncBackup,
@@ -3770,14 +4290,15 @@ ERR BACKUP_CONTEXT::ErrBKExternalBackupCleanUp( ERR error, const JET_GRBIT grbit
                 }
                 else
                 {
+                    // must've been a full backup, but the copy wasn't done....
                     Assert( !pfmp->FBackupFileCopyDone() );
-                    err = JET_errSuccess;
+                    err = JET_errSuccess; // N/A but make sure it causes no problems.
                 }
                 errUpdateLog = ( errUpdateLog < JET_errSuccess ) ? errUpdateLog : err;
                 err = JET_errSuccess;
 
             }
-        }
+        } // end for each db
 
     }
 
@@ -3788,6 +4309,7 @@ ERR BACKUP_CONTEXT::ErrBKExternalBackupCleanUp( ERR error, const JET_GRBIT grbit
                     !m_fBackupFull, &lgposRecT );
     }
 
+    // Reset in backup session and cleanup FMPs for all relevant dbs...
     for ( dbid = dbidUserLeast; dbid < dbidMax; dbid++ )
     {
         IFMP    ifmp = m_pinst->m_mpdbidifmp[ dbid ];
@@ -3817,7 +4339,8 @@ ERR BACKUP_CONTEXT::ErrBKExternalBackupCleanUp( ERR error, const JET_GRBIT grbit
     }
 
 
-    
+    /*  clean up rhf entries.
+     */
 
     for ( INT irhf = 0; irhf < crhfMax; ++irhf )
     {
@@ -3830,10 +4353,12 @@ ERR BACKUP_CONTEXT::ErrBKExternalBackupCleanUp( ERR error, const JET_GRBIT grbit
             {
                 const IFMP ifmp = m_rgrhf[irhf].ifmp;
                 FMP::AssertVALIDIFMP( ifmp );
+                // patch file already been closed
                 Assert( !g_rgfmp[ ifmp ].PfapiPatch() );
                 CallS( ErrDBCloseDatabase( m_ppibBackup, ifmp, 0 ) );
             }
 
+            // we close those files defore deleting the patch files
             Assert( NULL == m_rgrhf[irhf].pfapi );
 
             if ( m_rgrhf[irhf].fIsLog )
@@ -3849,13 +4374,18 @@ ERR BACKUP_CONTEXT::ErrBKExternalBackupCleanUp( ERR error, const JET_GRBIT grbit
         }
     }
 
-    
+    /*  Log error event
+     */
     if ( fNormal )
     {
         CallS( error );
 
         if ( m_fBackupIsInternal )
         {
+            // impossible today as HA does not actually complete a backup, it stops before
+            // it backups up logs, so we should not be here.  IF we get here, we have a
+            // problem because we're updating the backup state for full backup.  SO we'd
+            // have to fix it.
             AssertSz( fFalse, "Impossible today." );
             UtilReportEvent(
                     eventInformation,
@@ -3881,6 +4411,9 @@ ERR BACKUP_CONTEXT::ErrBKExternalBackupCleanUp( ERR error, const JET_GRBIT grbit
 
         }
 
+        // write the db header so that the info we updated is written.
+        // otherwise a crash before other db header updates
+        // may result in backup information lost.
 
         ERR     errUpdateHdr;
         BOOL    fSkippedAttachDetach;
@@ -3891,6 +4424,7 @@ ERR BACKUP_CONTEXT::ErrBKExternalBackupCleanUp( ERR error, const JET_GRBIT grbit
         errUpdateHdr = m_pinst->m_plog->ErrLGUpdateGenRequired( m_pinst->m_pfsapi, 0, 0, 0, tmEmpty, &fSkippedAttachDetach );
         m_pinst->m_plog->UnlockCheckpoint();
 
+        // on error, report a Warning and continue as the backup is OK from it's point of view.
         if ( errUpdateLog < JET_errSuccess || errUpdateHdr < JET_errSuccess )
         {
             WCHAR   sz1T[32];
@@ -3906,6 +4440,7 @@ ERR BACKUP_CONTEXT::ErrBKExternalBackupCleanUp( ERR error, const JET_GRBIT grbit
         }
 
     }
+    // special messages for frequent error cases
     else if ( errBackupAbortByCaller == error )
     {
         if ( m_fBackupIsInternal )
@@ -3999,7 +4534,7 @@ ERR BACKUP_CONTEXT::ErrBKExternalBackupCleanUp( ERR error, const JET_GRBIT grbit
 #else
     if( BoolParam( m_pinst, JET_paramZeroDatabaseDuringBackup ) && m_pscrubdb )
     {
-        CallS( m_pscrubdb->ErrTerm() );
+        CallS( m_pscrubdb->ErrTerm() ); // may fail with JET_errOutOfMemory. what to do?
         delete m_pscrubdb;
         m_pscrubdb = NULL;
     }
@@ -4014,6 +4549,7 @@ ERR BACKUP_CONTEXT::ErrBKExternalBackupCleanUp( ERR error, const JET_GRBIT grbit
 
     err = JET_errSuccess;
 
+    // Note this rolls the log, and terminates the backup LR sequence.
 
     if ( !m_pinst->FRecovering() )
     {
@@ -4023,6 +4559,7 @@ ERR BACKUP_CONTEXT::ErrBKExternalBackupCleanUp( ERR error, const JET_GRBIT grbit
                          BoolParam( m_pinst, JET_paramAggressiveLogRollover ) ? fLGCreateNewGen : 0,
                          NULL );
     }
+    // we ignore the error.
 
 
 #ifdef DEBUG
@@ -4040,6 +4577,9 @@ ERR BACKUP_CONTEXT::ErrBKExternalBackupCleanUp( ERR error, const JET_GRBIT grbit
 }
 
 
+// build in szFindPath the patch file full name for a database
+// in a certain directory. If directory is NULL, build in the
+// database directory (patch file during backup)
 VOID BACKUP_CONTEXT::BKIGetPatchName( __out_bcount(OSFSAPI_MAX_PATH * sizeof(WCHAR)) PWSTR wszPatch, PCWSTR wszDatabaseName, __in PCWSTR wszDirectory)
 {
     Assert ( wszDatabaseName );
@@ -4050,11 +4590,15 @@ VOID BACKUP_CONTEXT::BKIGetPatchName( __out_bcount(OSFSAPI_MAX_PATH * sizeof(WCH
 
     CallS( m_pinst->m_pfsapi->ErrPathParse( wszDatabaseName, wszDirT, wszFNameT, wszExtT ) );
 
+    //  patch file is always on the OS file-system
     if ( wszDirectory )
+        // patch file in the specified directory
+        // (m_wszRestorePath during restore)
     {
         LGMakeName( m_pinst->m_pfsapi, wszPatch, wszDirectory, wszFNameT, wszPatExt );
     }
     else
+        // patch file in the same directory with the database
     {
         LGMakeName( m_pinst->m_pfsapi, wszPatch, wszDirT, wszFNameT, wszPatExt );
     }
@@ -4065,12 +4609,16 @@ ERR ISAMAPI  ErrIsamSnapshotStart(  JET_INSTANCE        instance,
                                     JET_PCSTR           szDatabases,
                                     JET_GRBIT           grbit)
 {
+    // we never supported this non-VSS snapshot in a shipped product
+    //
     return ErrERRCheck( JET_wrnNyi );
 }
 
 ERR ISAMAPI  ErrIsamSnapshotStop(   JET_INSTANCE        instance,
                                     JET_GRBIT           grbit)
 {
+    // we never supported this non-VSS snapshot in a shipped product
+    //
     return ErrERRCheck( JET_wrnNyi );
 }
 
@@ -4088,6 +4636,8 @@ VOID BACKUP_CONTEXT::BKIMakeDbTrailer(const IFMP ifmp, BYTE *pvPage)
 
     memset( (void *)ppatchHdr, '\0', g_cbPage );
 
+    // Capture these before the backup marks so we avoid advancing them too much and capturing a max.
+    // required which is ahead of the max. committed in busy clients.
     const BOOL fLowerMinReqLogGenOnRedo = ( pfmp->ErrDBFormatFeatureEnabled( JET_efvLowerMinReqLogGenOnRedo ) == JET_errSuccess );
     if ( fLowerMinReqLogGenOnRedo )
     {
@@ -4124,6 +4674,9 @@ VOID BACKUP_CONTEXT::BKIMakeDbTrailer(const IFMP ifmp, BYTE *pvPage)
     pbkinfo->le_genHigh = m_pinst->m_plog->LGGetCurrentFileGenWithLock();
     Assert( (LONG)pbkinfo->le_genHigh > 0 );
 
+    // Unfortunately, there is a race condition here: the DB header may get updated
+    // before the log stream object gets updated with a recently-rolled-over log file. Therefore,
+    // take the max of both as the lgenHigh.
     if ( ( ppatchHdr->lgenMaxCommitted != 0 ) && ( ppatchHdr->lgenMaxCommitted > pbkinfo->le_genHigh ) )
     {
         Assert( ppatchHdr->lgenMaxCommitted <= ( pbkinfo->le_genHigh + 1 ) );
@@ -4139,7 +4692,7 @@ VOID BACKUP_CONTEXT::BKIMakeDbTrailer(const IFMP ifmp, BYTE *pvPage)
         Assert( pbkinfo->le_genLow <= ppatchHdr->lgenMinReq );
         Assert( pbkinfo->le_genHigh >= ppatchHdr->lgenMaxReq );
     }
-#endif
+#endif // DEBUG
 
     SetPageChecksum( ppatchHdr, g_cbPage, databaseHeader, 0 );
 
@@ -4188,11 +4741,13 @@ VOID BACKUP_CONTEXT::BKCopyLastBackupStateToCheckpoint( CHECKPOINT_FIXED * pchec
 {
     if ( m_lgposFullBackup.lGeneration )
     {
+        //  full backup in progress
         pcheckpoint->le_lgposFullBackup = m_lgposFullBackup;
         pcheckpoint->logtimeFullBackup = m_logtimeFullBackup;
     }
     if ( m_lgposIncBackup.lGeneration )
     {
+        //  incremental backup in progress
         pcheckpoint->le_lgposIncBackup = m_lgposIncBackup;
         pcheckpoint->logtimeIncBackup = m_logtimeIncBackup;
     }
@@ -4201,6 +4756,7 @@ VOID BACKUP_CONTEXT::BKCopyLastBackupStateToCheckpoint( CHECKPOINT_FIXED * pchec
 VOID BACKUP_CONTEXT::BKInitForSnapshot( BOOL fIncrementalSnapshot, LONG lgenCheckpoint )
 {
     m_lgenDeleteMic = 0;
+    // For incremental backup m_lgenCopyMic is set ErrOSSnapshotStopLogging().
     if ( !fIncrementalSnapshot )
     {
         m_lgenCopyMic = lgenCheckpoint;

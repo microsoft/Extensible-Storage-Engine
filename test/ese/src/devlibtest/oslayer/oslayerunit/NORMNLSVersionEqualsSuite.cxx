@@ -12,7 +12,9 @@ struct TestData
     BOOL fexpectEquals;
 };
 
+//  ================================================================
 ERR NORMNLSVersionEqualsTest::ErrTest()
+//  ================================================================
 {
     JET_ERR         err = JET_errSuccess;
     COSLayerPreInit     oslayer;

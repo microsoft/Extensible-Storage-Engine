@@ -5,6 +5,11 @@
 #include <wincrypt.h>
 #include <ntsecapi.h>
 
+//
+//  Computes the bit reversed CRC32C (Castagnoli) compatible with SSE4.2 CRC instruction
+//
+// The faster table version.  Use the init routine below with the reversed CRC polynomial 0x1EDC6F41 to create it
+//
 
 static const ULONG dwCRC32_LOOKUP_TABLE [256] =
 {
@@ -43,6 +48,9 @@ static const ULONG dwCRC32_LOOKUP_TABLE [256] =
 };
 
 #if 0
+    // this is actually calculating the reverse CRC
+    // computing the reverse CRC of 0 gives the table entry above
+    //
     static uint32 calc_entry( uint32 crc, unsigned index, uint32 poly )
 {
         for(INT i=0;i<8;i++)
@@ -87,6 +95,7 @@ ProcessorComputeCRC32(
 
     crc = 0xffffffff;
 
+    // First do the bytes in groups of 4 or 8
     endBytes = Length % COMPUTE_CRC_SIZE;
     for ( i=0; i<Length/COMPUTE_CRC_SIZE; i++ )
     {
@@ -98,6 +107,7 @@ ProcessorComputeCRC32(
         Buffer += COMPUTE_CRC_SIZE;
     }
 
+    // Calculate for the remaining bytes.
     for(i=0; i<endBytes; i++)
     {
         crc = _mm_crc32_u8(crc, *Buffer++);
@@ -106,7 +116,7 @@ ProcessorComputeCRC32(
 
     return crc;
 }
-#endif
+#endif // #if defined (_AMD64_) || defined (_X86_)
 
 void
 OSInitializeProcessorSupportsCRC32()
@@ -116,8 +126,17 @@ OSInitializeProcessorSupportsCRC32()
 #if defined (_AMD64_) || defined (_X86_)
     INT CPUInfo[4] = { 0, 0, 0, 0 };
 
+    //
+    // Get processor information.
+    // use Infotype parameter as 1 to get the SSE 4 (CRC support_ information.
+    // Refer msdn description of __cpuid for details.
+    //
     __cpuid( CPUInfo, 1 );
 
+    //
+    // Bit 20 of 2nd array index indicates support for SSE 4.2 CRC32
+    // instruction on the current platform.
+    //
     if ( CPUInfo[2] & 0x100000 )
     {
         g_fProcessorSupportsCRC32 = fTrue;
@@ -135,10 +154,14 @@ Crc32Checksum(
 #if defined (_AMD64_) || defined (_X86_)
     if ( g_fProcessorSupportsCRC32 )
     {
+        //
+        // Processor supports instruction to compute CRC32. 
+        //
         crcProcessor = ProcessorComputeCRC32( pbData, cbData );
 #ifndef DEBUG
         return crcProcessor;
 #endif
+        // On debug builds, compute both CRCs and compare them
     }
 #endif
 
@@ -219,6 +242,7 @@ OSEncryptionTerm()
 }
 
 #include <pshpack1.h>
+// PERSISTED
 struct AES256KEY
 {
     BYTE                            Version;
@@ -259,6 +283,7 @@ ErrOSCreateAes256Key(
         return ErrOSErrFromWin32Err(GetLastError());
     }
 
+    // Prepend the version
     if ( cbKeySize >= sizeof(AES256KEY) )
     {
         cbKeySize -= sizeof(AES256KEY);
@@ -273,6 +298,7 @@ ErrOSCreateAes256Key(
     {
         if ( GetLastError() == ERROR_MORE_DATA )
         {
+            // Add header
             *pcbKeySize = cbKeySize + sizeof(AES256KEY);
             Error( ErrERRCheck( JET_errBufferTooSmall ) );
         }
@@ -280,7 +306,9 @@ ErrOSCreateAes256Key(
         Error( ErrOSErrFromWin32Err(GetLastError()) );
     }
     Expected( cbKeySize == 44 );
+    // Add header
     *pcbKeySize = cbKeySize + sizeof(AES256KEY);
+    // A null key generated success instead of ERROR_MORE_DATA, pretend as if it was ERROR_MORE_DATA.
     if ( pbData == NULL )
     {
         Error( ErrERRCheck( JET_errBufferTooSmall ) );
@@ -294,6 +322,7 @@ ErrOSCreateAes256Key(
     ULONG blocksizeLen = sizeof(blockSize);
     if ( CryptGetKeyParam( hKey, KP_BLOCKLEN, (BYTE*)&blockSize, &blocksizeLen, 0 ) )
     {
+        // AES256 uses 16-byte block size
         Expected( blockSize == BlockSizeAes256*8 );
     }
 
@@ -306,6 +335,7 @@ HandleError:
     return err;
 }
 
+// PERSISTED
 struct AES256BLOBTRAILER
 {
     BYTE    Version;
@@ -315,10 +345,10 @@ struct AES256BLOBTRAILER
 ULONG CbOSEncryptAes256SizeNeeded( ULONG cbDataLen )
 {
     C_ASSERT( sizeof(AES256BLOBTRAILER) == 1 + BlockSizeAes256 );
-    cbDataLen += sizeof(ULONG);
-    return cbDataLen
-        + ( BlockSizeAes256 - cbDataLen % BlockSizeAes256 )
-        + sizeof(AES256BLOBTRAILER);
+    cbDataLen += sizeof(ULONG);                             // CRC32 checksum of data
+    return cbDataLen                                        // data
+        + ( BlockSizeAes256 - cbDataLen % BlockSizeAes256 ) // AES256 padding
+        + sizeof(AES256BLOBTRAILER);                        // version + Init Vector
 }
 
 ERR
@@ -348,6 +378,7 @@ ErrOSEncryptWithAes256(
     }
 
     checksum = Crc32Checksum( pbData, *pcbDataLen );
+    // checksum is appended to the plaintext
     *(UnalignedLittleEndian<ULONG> *)(pbData + *pcbDataLen) = checksum;
     *pcbDataLen += sizeof(checksum);
 
@@ -356,6 +387,7 @@ ErrOSEncryptWithAes256(
         return ErrOSErrFromWin32Err(GetLastError());
     }
 
+    // We are depending on OS default of CBC mode and PKCS5 padding
     if ( !CryptGenRandom( g_hAESProv, sizeof(trailer.InitVector), trailer.InitVector ) ||
          !CryptSetKeyParam( hKey, KP_IV, trailer.InitVector, 0 ) )
     {
@@ -367,9 +399,10 @@ ErrOSEncryptWithAes256(
         Error( ErrOSErrFromWin32Err(GetLastError()) );
     }
 
+    // Version+InitVector is appended to the ciphertext
     if ( *pcbDataLen + sizeof(trailer) > cbDataBufLen )
     {
-        Assert( fFalse );
+        Assert( fFalse ); // Messed up the calculation above?
         *pcbDataLen += sizeof(trailer);
         Error( ErrERRCheck( JET_errBufferTooSmall ) );
     }
@@ -414,6 +447,7 @@ ErrOSDecryptWithAes256(
     {
         return ErrERRCheck( JET_errInvalidParameter );
     }
+    // Version+InitVector is appended to the ciphertext
     ptrailer = (AES256BLOBTRAILER *)(pbDataIn + *pcbDataLen) - 1;
     if ( ptrailer->Version != JET_EncryptionAlgorithmAes256 )
     {
@@ -426,11 +460,13 @@ ErrOSDecryptWithAes256(
         return ErrERRCheck( JET_errInvalidParameter );
     }
 
+    // We are depending on OS default of CBC mode and PKCS5 padding
     if ( !CryptSetKeyParam( hKey, KP_IV, ptrailer->InitVector, 0 ) )
     {
         Error( ErrOSErrFromWin32Err(GetLastError()) );
     }
 
+    // assert that the in/out buffers are not overlapping
     Assert( pbDataOut < pbDataIn || pbDataOut >= ( pbDataIn + *pcbDataLen ) );
     Assert( pbDataIn < pbDataOut || pbDataIn >= ( pbDataOut + *pcbDataLen ) );
 
@@ -444,6 +480,7 @@ ErrOSDecryptWithAes256(
         Error( ErrERRCheck( JET_errDecryptionFailed ) );
     }
     *pcbDataLen -= sizeof(checksum);
+    // checksum is appended to the plaintext
     checksum = *(UnalignedLittleEndian<ULONG> *)(pbDataOut + *pcbDataLen);
 
     if ( checksum != Crc32Checksum( pbDataOut, *pcbDataLen ) )

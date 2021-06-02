@@ -3,6 +3,8 @@
 
 #include "resmgrreplay.hxx"
 
+//  ================================================================
+//  Helper Functions
 
 static void PrintHelp( const WCHAR * const wszApplication )
 {
@@ -25,7 +27,6 @@ static void PrintHelp( const WCHAR * const wszApplication )
     fprintf( stderr, "    /DontReplCachePri: traced cache priority should not be input into the simulation. (/Emulate only)\n" );
     fprintf( stderr, "    /ReplNoTouch: no-touch requests should be replayed as normal requests. (/Emulate only)\n" );
     fprintf( stderr, "    /DontReplDbScan: DBM-related requests should not be replayed. (/Emulate only)\n" );
-    fprintf( stderr, "    /DontEvictNextOnShrink: simulation should not evict the next target when shrinking. (/Emulate only)\n" );
     fprintf( stderr, "    /DontReplInitTerm: Init and Term ResMgr events should be ignored. This avoids the simulated cache to be purged on init/term cycles, to simulate very long trace is being processed. (/Emulate only)\n" );
     fprintf( stderr, "    /CacheSize <Size1>[,<Size2>][,<Size3>]...: iterates through all cache sizes, running the simulation with fixed numbers of resources, i.e., not following eviction patterns (/Emulate only, > 0).\n" );
     fprintf( stderr, "    /CacheAge <AgeInSeconds>: sizes the cache accordingly to keep only resources which are newer than a certain age, i.e., eviction does not follow eviction patterns (/Emulate only, > 0).\n" );
@@ -44,6 +45,8 @@ static void PrintHelp( const WCHAR * const wszApplication )
     fprintf( stderr, "    /Ifmp <IfmpFilter>: specific IFMP to report results on (default: all IFMPs). Note, the simulation is always performed with all IFMPs. (/Emulate only)\n" );
 }
 
+//  ================================================================
+//  Main
 
 INT _cdecl wmain( INT argc, __in_ecount(argc) LPWSTR argv[] )
 {
@@ -61,16 +64,22 @@ INT _cdecl wmain( INT argc, __in_ecount(argc) LPWSTR argv[] )
     PageEvictionEmulator& emulator = PageEvictionEmulator::GetEmulatorObj();
     BFTRACE::BFSysResMgrInit_ bfsysresmgrinit =
     {
-        -1,
-        -1.0,
-        -1.0,
-        -1.0,
-        -1.0,
-        -1.0
+        -1,     // K.
+        -1.0,   // csecCorrelatedTouch.
+        -1.0,   // csecTimeout.
+        -1.0,   // dblHashLoadFactor.
+        -1.0,   // dblHashUniformity.
+        -1.0    // dblSpeedSizeTradeoff.
     };
     std::set<DWORD>* pids = NULL;
     std::set<DWORD>* cacheSizes = NULL;
 
+    //
+    //  Initialize the OS Layer
+    //
+    //  note: not needed by resmgr.hxx directly, needed by the FTL trace log
+    //  infrastructure.
+    //
     COSLayerPreInit oslayer;
     if ( !oslayer.FInitd() )
     {
@@ -79,8 +88,14 @@ INT _cdecl wmain( INT argc, __in_ecount(argc) LPWSTR argv[] )
         goto HandleError;
     }
 
+    //
+    //  configure OS layer
+    //
     Call( ErrOSInit() );
 
+    //
+    //  Process Generic Args
+    //
     if( argc == 2
         && ( 0 == _wcsicmp( argv[1], L"-h" )
             || 0 == _wcsicmp( argv[1], L"/h" )
@@ -92,7 +107,12 @@ INT _cdecl wmain( INT argc, __in_ecount(argc) LPWSTR argv[] )
         Error( ErrERRCheck( JET_errInvalidParameter ) );
     }
 
+    // FUTURE-2010/08/26 - Do dup args and consume model, to make it easier to deal with
+    // the remaining args being processed by the emulator.
 
+    //
+    //  Process args 
+    //
     if( argc < 3 )
     {
         PrintHelp( argv[0] );
@@ -104,6 +124,9 @@ INT _cdecl wmain( INT argc, __in_ecount(argc) LPWSTR argv[] )
     WCHAR * wszFtlTraceLogFiles = NULL;
     WCHAR * wszEtlTraceLogFile = NULL;
 
+    //
+    //  Process the option and command args
+    //
     ResMgrReplayAlgorithm rmralg        = rmralgInvalid;
     ResMgrReplayEmulationMode rmmode    = rmemInvalid;
     bool fDumpTraces                    = false;
@@ -173,6 +196,7 @@ INT _cdecl wmain( INT argc, __in_ecount(argc) LPWSTR argv[] )
         {
             fConvertFromEtl = true;
 
+            //  ETL file must have been passed in, as well as PID.
 
             if ( ( iarg + 2 ) < argc )
             {
@@ -200,6 +224,7 @@ INT _cdecl wmain( INT argc, __in_ecount(argc) LPWSTR argv[] )
         {
             fCmpAgainstEtl = true;
 
+            //  ETL file must have been passed in, as well as PID.
 
             if ( ( iarg + 2 ) < argc )
             {
@@ -216,6 +241,7 @@ INT _cdecl wmain( INT argc, __in_ecount(argc) LPWSTR argv[] )
         {
             iarg++;
 
+            //  algorithm must have been passed in
 
             if ( iarg < argc )
             {
@@ -614,6 +640,9 @@ INT _cdecl wmain( INT argc, __in_ecount(argc) LPWSTR argv[] )
         }
     }
 
+    //
+    //  At least one operation mode must have been selected.
+    //
     if ( !fCollectFtlStats &&
         !fCollectBfStats &&
         !fRunResMgrEmulation &&
@@ -627,6 +656,9 @@ INT _cdecl wmain( INT argc, __in_ecount(argc) LPWSTR argv[] )
         Error( ErrERRCheck( JET_errInvalidParameter ) );
     }
 
+    //
+    //  These options are valid for FTL only.
+    //
     if ( ( fCollectFtlStats || fRunResMgrEmulation || fDumpTraces || fPostProcess ) &&
         ( wszFtlTraceLogFiles == NULL ) )
     {
@@ -635,12 +667,19 @@ INT _cdecl wmain( INT argc, __in_ecount(argc) LPWSTR argv[] )
         Error( ErrERRCheck( JET_errInvalidParameter ) );
     }
 
+    //
+    //  Collecting FTL stats changes the state of the reader. Collecting stats and running
+    //  simulation are not supported at this point.
+    //
     if ( fCollectFtlStats && fRunResMgrEmulation  )
     {
         wprintf( L"Cannot collect FTL stats and run simulation in the same command.\n" );
         Error( ErrERRCheck( JET_errInvalidParameter ) );
     }
 
+    //
+    //  These options require either FTL or ETL, but not both.
+    //
     if ( fCollectBfStats &&
         ( ( ( wszFtlTraceLogFiles == NULL ) && ( wszEtlTraceLogFile == NULL ) ) ||
         ( ( wszFtlTraceLogFiles != NULL ) && ( wszEtlTraceLogFile != NULL ) ) ) )
@@ -650,6 +689,9 @@ INT _cdecl wmain( INT argc, __in_ecount(argc) LPWSTR argv[] )
         Error( ErrERRCheck( JET_errInvalidParameter ) );
     }
 
+    //
+    //  These options require both FTL and ETL.
+    //
     if ( ( fConvertFromEtl || fCmpAgainstEtl ) &&
         ( ( wszFtlTraceLogFiles == NULL ) || ( wszEtlTraceLogFile == NULL ) ) )
     {
@@ -658,12 +700,18 @@ INT _cdecl wmain( INT argc, __in_ecount(argc) LPWSTR argv[] )
         Error( ErrERRCheck( JET_errInvalidParameter ) );
     }
 
+    //
+    //  Convert from ETL trace.
+    //
     if ( fConvertFromEtl )
     {
         wprintf( L"Converting ETL into FTL...\n" );
         Call( ErrBFETLConvertToFTL( wszEtlTraceLogFile, wszFtlTraceLogFiles, *pids ) );
     }
 
+    //
+    //  Compare against ETL trace.
+    //
     if ( fCmpAgainstEtl )
     {
         wprintf( L"Comparing ETL against FTL...\n" );
@@ -671,13 +719,22 @@ INT _cdecl wmain( INT argc, __in_ecount(argc) LPWSTR argv[] )
         Call( ErrBFETLFTLCmp( wszEtlTraceLogFile, wszFtlTraceLogFiles, *( pids->begin() ) ) );
     }
 
+    //
+    //  Process FTL.
+    //
     if ( wszFtlTraceLogFiles != NULL )
     {
+        //
+        //  Don't bother going further if not needed.
+        //
         if ( !( fRunResMgrEmulation || fCollectFtlStats || fCollectBfStats || fDumpTraces || fPostProcess ) )
         {
             goto HandleError;
         }
 
+        //
+        //  Initialize the BF/ResMgr driver.
+        //
         const DWORD grbitFTLTracesFilter = ( fRunResMgrEmulation ?
                                                fBFFTLDriverResMgrTraces :
                                                ( fBFFTLDriverResMgrTraces | fBFFTLDriverDirtyTraces ) );
@@ -693,11 +750,17 @@ INT _cdecl wmain( INT argc, __in_ecount(argc) LPWSTR argv[] )
             Error( ErrERRCheck( JET_errInvalidParameter ) );
         }
 
+        //
+        //  Process BF FTL file: pre-processing or stats.
+        //
         if ( fCollectFtlStats || fCollectBfStats || fDumpTraces || fPostProcess )
         {
             Call( ErrResMgrAccumFtlStats( pbfftlc, fDumpTraces ) );
         }
 
+        //
+        //  Dump any stats
+        //
         Call( ErrBFFTLDumpStats( pbfftlc, 
                         ( fCollectFtlStats ? fBFFTLDriverCollectFTLStats : 0 ) |
                         ( fCollectBfStats ? fBFFTLDriverCollectBFStats : 0 ) ) );
@@ -707,6 +770,9 @@ INT _cdecl wmain( INT argc, __in_ecount(argc) LPWSTR argv[] )
             Call( ErrBFFTLPostProcess( pbfftlc ) );
         }
 
+        //
+        //  Process BF FTL file: run the resmgr emulator.
+        //
         if ( fRunResMgrEmulation )
         {
             switch ( rmralg )
@@ -738,6 +804,9 @@ INT _cdecl wmain( INT argc, __in_ecount(argc) LPWSTR argv[] )
 
             Alloc( pipea );
 
+            //
+            //  May need to pre-process.
+            //
             if ( pipea->FNeedsPreProcessing() )
             {
                 wprintf( L"Pre-processing traces...\n" );
@@ -786,6 +855,10 @@ INT _cdecl wmain( INT argc, __in_ecount(argc) LPWSTR argv[] )
                 Call( ErrBFFTLInit( wszFtlTraceLogFiles, grbitFTL, &pbfftlc ) );
             }
 
+            //
+            //  For normal, fixed-cache-size and age-based-cache-size modes, we'll leverage the previous BF driver init and perhaps
+            //  even proceed with dumping stats.
+            //
             if ( ( rmmode == rmemNormal ) || ( rmmode == rmemCacheSizeFixed ) || ( rmmode == rmemCacheSizeAgeBased ) )
             {
                 Call( emulator.ErrSetReplaySuperCold( fReplaySuperCold ) );
@@ -830,6 +903,9 @@ INT _cdecl wmain( INT argc, __in_ecount(argc) LPWSTR argv[] )
             {
                 QWORD cRequested = 0, cRequestedUnique = 0;
                 
+                //
+                //  Will get re-initialized at each iteration.
+                //
                 BFFTLTerm( pbfftlc );
                 pbfftlc = NULL;
 
@@ -868,6 +944,9 @@ INT _cdecl wmain( INT argc, __in_ecount(argc) LPWSTR argv[] )
                 DWORD dwIteration = 0;
                 for ( DWORD i = 0; ( ( cIteration == 0 ) || ( i < cIteration ) ); i++ )
                 {
+                    //
+                    //  Decide what the next iteration will be.
+                    //
                     dwIteration = 0;
 
                     if ( rmmode == rmemCacheSizeFixedIteration )
@@ -1029,6 +1108,9 @@ INT _cdecl wmain( INT argc, __in_ecount(argc) LPWSTR argv[] )
                     }
                 }
 
+                //
+                //  Print a summary with all iterations.
+                //
                 if ( ( rmmode == rmemCacheSizeIteration ) || ( rmmode == rmemCacheSizeFixedIteration ) || ( rmmode == rmemCacheSizeIterationAvoidable ) ||
                         ( rmmode == rmemCacheFaultIteration ) || ( rmmode == rmemCacheFaultIterationAvoidable ) ||
                         ( rmmode == rmemChkptDepthIteration ) )
@@ -1051,6 +1133,9 @@ INT _cdecl wmain( INT argc, __in_ecount(argc) LPWSTR argv[] )
                         wprintf( L"%u,%I64u,%I64u,%I64u,%I64u,%I64u,%I64u,%I64u\n", dwIterationValue, cFaults, cFaultsAvoidable, cWrites, cWritesChkpt, cWritesScavenge, cFaults + cWrites, cpgCachedMax );
                     }
 
+                    //
+                    //  Check the best match if we're running fault lookup.
+                    //
                     if ( ( rmmode == rmemCacheFaultIteration ) || ( rmmode == rmemCacheFaultIterationAvoidable ) )
                     {
                         wprintf( L"\n" );
@@ -1093,6 +1178,9 @@ INT _cdecl wmain( INT argc, __in_ecount(argc) LPWSTR argv[] )
                         wprintf( L"%.3f,%I64u,%I64u,%I64u,%I64u,%I64u,%I64u,%I64u\n", (double)dwIterationValue / 1000.0, cFaults, cFaultsAvoidable, cWrites, cWritesChkpt, cWritesScavenge, cFaults + cWrites, cpgCachedMax );
                     }
 
+                    //
+                    //  Check the minimum found.
+                    //
                     DWORD dtickCorrelatedTouchFound = UINT_MAX;
                     QWORD cFaultsSampleFound = UINT_MAX;
                     QWORD cFaultsSample = 0;
@@ -1125,13 +1213,22 @@ INT _cdecl wmain( INT argc, __in_ecount(argc) LPWSTR argv[] )
         goto HandleError;
     }
 
+    //
+    //  Process ETL.
+    //
     if ( wszEtlTraceLogFile != NULL )
     {
+        //
+        //  Don't bother going further if not needed.
+        //
         if ( !fCollectBfStats )
         {
             goto HandleError;
         }
 
+        //
+        //  Initialize the BF/ResMgr driver.
+        //
         Call( ErrBFETLInit( wszEtlTraceLogFile, 0, 0, fCollectBfStats ? fBFETLDriverCollectBFStats : 0, &pbfetlc ) );
 
         if ( fCollectBfStats )
@@ -1139,6 +1236,9 @@ INT _cdecl wmain( INT argc, __in_ecount(argc) LPWSTR argv[] )
             Call( ErrResMgrAccumEtlStats( pbfetlc ) );
         }
 
+        //
+        //  Dump any stats
+        //
         Call( ErrBFETLDumpStats( pbfetlc, fCollectBfStats ? fBFETLDriverCollectBFStats : 0 ) );
 
         goto HandleError;

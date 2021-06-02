@@ -6,7 +6,7 @@
 
 #ifndef ENABLE_JET_UNIT_TEST
 #error This file should only be compiled with the unit tests!
-#endif
+#endif // ENABLE_JET_UNIT_TEST
 
 static const LGPOS lgposAny1 = { 0x1, 0x2, 0x3 };
 static const LGPOS lgposAny2 = { 0x4, 0x5, 0x6 };

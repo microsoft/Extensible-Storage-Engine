@@ -3,6 +3,7 @@
 
 #include "osstd.hxx"
 
+//  up-ness variables
 
 volatile BOOL g_fOsLayerUp = fFalse;
 
@@ -11,18 +12,22 @@ BOOL FOSLayerUp()
     return g_fOsLayerUp;
 }
 
+//  signal the OS subsystem that the process is aborting
 
 extern volatile BOOL g_fProcessAbort;
 
 void OSIProcessAbort()
 {
+    //  set the global process abort state.
     
     g_fProcessAbort = fTrue;
 
+    //  signal the OS subsystems that need to know about unexpected process termination
 
     OSSyncProcessAbort();
 }
 
+//  post-terminate OS subsystem
 
 extern void OSEdbgPostterm();
 extern void OSEncryptionPostterm();
@@ -52,6 +57,7 @@ void OSPostterm()
 {
     PreinitTrace( L"Begin OSPostterm()\n" );
 
+    //  terminate all OS subsystems in reverse dependency order
 
     OSEdbgPostterm();
     OSEncryptionPostterm();
@@ -81,6 +87,7 @@ void OSPostterm()
     PreinitTrace( L"Finish OSPostterm()\n" );
 }
 
+//  pre-init OS subsystem
 
 extern bool FOSHaPublishPreinit();
 extern BOOL FOSLibraryPreinit();
@@ -111,11 +118,22 @@ extern BOOL FOSEdbgPreinit();
 #define InitFailurePointsFromRegistry()
 #else
 
+//  Need to test error-handling for DLL load failures
+//  g_cFailurePoints should be a negative number, indicating
+//  the failure point that we should stop at
+//
+//  The failure point count will be loaded from the registry
+//
+//  To test this, write a test that increments the failure point
+//  until the DLL loads successfully
+//
 
 LOCAL INT g_cFailurePoints;
 
 #define PREINIT_FAILURE_POINT (!(++g_cFailurePoints))
 
+//  this is called before anything is init
+//  so we can't use any of the wrapper functions
 LOCAL VOID InitFailurePointsFromRegistry()
 {
     g_cFailurePoints = 0;
@@ -124,6 +142,7 @@ LOCAL VOID InitFailurePointsFromRegistry()
     NTOSFuncError( pfnRegQueryValueExW, g_mwszzRegistryLibs, RegQueryValueExW, oslfExpectedOnWin5x | oslfRequired );
     NTOSFuncError( pfnRegCloseKey, g_mwszzRegistryLibs, RegCloseKey, oslfExpectedOnWin5x | oslfRequired );
 
+    //  open registry key with this path
 
     HKEY hkeyPath;
     DWORD dw = pfnRegOpenKeyExW(    HKEY_LOCAL_MACHINE,
@@ -134,6 +153,7 @@ LOCAL VOID InitFailurePointsFromRegistry()
 
     if ( dw != ERROR_SUCCESS )
     {
+        //  we failed to open the key. do nothing
     }
     else
     {
@@ -167,6 +187,7 @@ BOOL FOSPreinit()
 
     InitFailurePointsFromRegistry();
 
+    //  initialize all OS subsystems in dependency order
 
     if (
             PREINIT_FAILURE_POINT ||
@@ -233,6 +254,7 @@ HandleError:
 }
 
 
+//  init OS subsystem
 
 extern ERR ErrOSLibraryInit();
 extern ERR ErrOSSysinfoInit();
@@ -263,6 +285,7 @@ ERR ErrOSInit()
 
     PreinitTrace( L"Begin ErrOSInit()\n" );
 
+    //  initialize all OS subsystems in dependency order
 
     Call( ErrOSLibraryInit() );
     Call( ErrOSSysinfoInit() );
@@ -299,6 +322,7 @@ HandleError:
     return err;
 }
 
+//  terminate OS subsystem
 
 extern void OSEdbgTerm();
 extern void OSEncryptionTerm();
@@ -329,6 +353,7 @@ void OSTerm()
 
     g_fOsLayerUp = fFalse;
 
+    //  terminate all OS subsystems in reverse dependency order
 
     OSEdbgTerm();
     OSEncryptionTerm();
@@ -356,31 +381,42 @@ void OSTerm()
     PreinitTrace( L"Finish OSTerm()\n" );
 }
 
+// Simplified EXE OS Layer support.
 
 
 void COSLayerPreInit::SetDefaults()
 {
 
+    //  debugging
+    //
     SetAssertAction( JET_AssertFailFast );
     SetExceptionAction( JET_ExceptionFailFast );
     SetCatchExceptionsOnBackgroundThreads( fTrue );
     SetRFSAlloc( 0xffffffff );
     SetRFSIO( 0xffffffff );
 
+    //  os file settings
+    //
     SetZeroExtend( 1024 * 1024 );
     SetIOMaxOutstanding( 1024 );
     SetIOMaxOutstandingBackground( 32 );
 
+    //  analysis sub-systems, logging, perfmon, etc...
+    //
 
-    SetEventLogCache( 0 );
+    SetEventLogCache( 0 );  // event log cache disabled by default
 #ifdef PERFMON_SUPPORT
-    EnablePerfmon();
+    EnablePerfmon();        // by default we use perfmon.
 #endif
 
+    //  performance data
+    //
     SetThreadWaitBeginNotification( NULL );
     SetThreadWaitEndNotification( NULL );
 }
 
+//  While it's called "fDllUp() really it means CRT & OSPreinit has run, so for library-challenged binaries (such as .exes) we
+//  need to set this after they run OSPreInit.
 extern volatile BOOL g_fDllUp;
 
 COSLayerPreInit::COSLayerPreInit() :
@@ -388,6 +424,7 @@ COSLayerPreInit::COSLayerPreInit() :
 {
     Assert( !m_fInitedSuccessfully  );
 
+    //  Pre-init the OS Layer ...
     m_fInitedSuccessfully = FOSPreinit();
 
     if ( m_fInitedSuccessfully )
@@ -412,12 +449,14 @@ COSLayerPreInit::~COSLayerPreInit()
         g_fident.Cleanup();
         g_crep.Cleanup();
 
+        //  Post-term the OS Layer ...
         g_fDllUp = fFalse;
         OSPostterm();
     }
 }
 
 
+//  support for thread wait notifications
 
 static void OSThreadWaitBegin()
 {

@@ -4,12 +4,17 @@
 #include "syncunittest.hxx"
 #include "sync.hxx"
 
+// --------------------------------------------------------------------------
+//
+//  Helpers
+//
 
 #define SyncBasicTestInit               \
     ERR err = JET_errSuccess;           \
     const BOOL fOsSyncInit = FOSSyncPreinit();  \
     TestAssert( fOsSyncInit );
 
+// Note: Technically not needed right now, but be a good citizen
 #define SyncBasicTestTerm               \
     OSSyncPostterm();
 
@@ -66,6 +71,10 @@ DWORD WINAPI WaitOneTimeout( LPVOID lpParameter )
     return pSemaphore->FWait( g_dwTimeout );
 }
 
+// --------------------------------------------------------------------------
+//
+//  Tests
+//
 
 CUnitTest( SyncSemaphoreConcurrentlyCorrectCWaitAndAvail, 0x0, "" );
 ERR SyncSemaphoreConcurrentlyCorrectCWaitAndAvail::ErrTest()
@@ -316,6 +325,12 @@ HandleError:
     return err;
 }
 
+//  The spawned threads wait forever by doing psemaphore->Wait(). Note that Wait() does _not_ acquire 
+//  resources. Those threads just sit there waiting for the object to be signaled. So, once the main 
+//  thread releases 3000 resources, all 6000 waiting threads get unblocked (yet, as I said, they don't 
+//  acquire) and finish, and the expected final state is then between CWait() == 0 and CAvail() == 3000.
+//
+//  Note: that even releasing one resource would suffice to unblock them all.
 
 ERR SyncSemaphoreCheckWaitDoesNotPermanentlyAcquireResourcesWorker( const DWORD cThreadGroups )
 {
@@ -411,16 +426,26 @@ HandleError:
 CUnitTest( SyncSemaphoreCheckWaitDoesNotPermanentlyAcquireResources, 0x0, "" );
 ERR SyncSemaphoreCheckWaitDoesNotPermanentlyAcquireResources::ErrTest()
 {
-    return SyncSemaphoreCheckWaitDoesNotPermanentlyAcquireResourcesWorker( 1 );
+    return SyncSemaphoreCheckWaitDoesNotPermanentlyAcquireResourcesWorker( 1 ); // 1 group = 6 threads ...
 }
 
 CUnitTest( SyncSemaphoreCheckWaitDoesNotPermanentlyAcquireResourcesStress, bitExplicitOnly, "" );
 ERR SyncSemaphoreCheckWaitDoesNotPermanentlyAcquireResourcesStress::ErrTest()
 {
-    return SyncSemaphoreCheckWaitDoesNotPermanentlyAcquireResourcesWorker( 100 );
+    return SyncSemaphoreCheckWaitDoesNotPermanentlyAcquireResourcesWorker( 100 ); // ~6000 threads
 }
 
 
+//  FWait() is similar to previous SyncSemaphoreCheckWaitDoesNotPermanentlyAcquireResources() above. The 
+//  only difference is that it takes a timeout and it returns false/true to indicate whether it got 
+//  unblocked before the timeout expired. This test is actually very similar to the test above, but it 
+//  only releases one resource and in the end expects CWait() == 0 or CAvail() == 1.
+//
+//  Note: The test asserts TestAssert( cAvail == 1 || cAvail == 0 ) while there are threads potentially 
+//  running, this is because even though Wait()/FWait() don't _permanently_ acquire resources, they may 
+//  TEMPORARILY do so and immediately release it and that is why you could see CAvail() == 0 in some spots.
+//
+//  But regardless, the final state should always be CWait() == 0 or CAvail() == 1.
 
 ERR SyncSemaphoreFWaitDoesNotPermanentlyAcquireResourcesWorker( const DWORD cThreadGroups )
 {
@@ -504,13 +529,13 @@ HandleError:
 CUnitTest( SyncSemaphoreFWaitDoesNotPermanentlyAcquireResources, 0x0, "" );
 ERR SyncSemaphoreFWaitDoesNotPermanentlyAcquireResources::ErrTest()
 {
-    return SyncSemaphoreFWaitDoesNotPermanentlyAcquireResourcesWorker( 1 );
+    return SyncSemaphoreFWaitDoesNotPermanentlyAcquireResourcesWorker( 1 ); // 1 group = 6 threads ...
 }
 
 CUnitTest( SyncSemaphoreFWaitDoesNotPermanentlyAcquireResourcesStress, bitExplicitOnly, "" );
 ERR SyncSemaphoreFWaitDoesNotPermanentlyAcquireResourcesStress::ErrTest()
 {
-    return SyncSemaphoreFWaitDoesNotPermanentlyAcquireResourcesWorker( 100 );
+    return SyncSemaphoreFWaitDoesNotPermanentlyAcquireResourcesWorker( 100 ); // ~6000 threads
 }
 
 

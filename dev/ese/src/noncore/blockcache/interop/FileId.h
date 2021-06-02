@@ -15,8 +15,14 @@ namespace Internal
         {
             namespace Interop
             {
+                /// <summary>
+                /// File ID
+                /// </summary>
                 public enum class FileId : Int64
                 {
+                    /// <summary>
+                    /// An invalid FileId.
+                    /// </summary>
                     Invalid = 0,
                 };
             }

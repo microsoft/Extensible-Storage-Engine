@@ -13,7 +13,14 @@
 
 #include "PageSizeClean.hxx"
 
+//  ================================================================
 class IDataCompressorStats
+//  ================================================================
+//
+//  Abstract class passed into the compression routine to collect performance
+//  statistics.
+//
+//-
 {
     public:
         ~IDataCompressorStats() {}
@@ -50,7 +57,13 @@ class IDataCompressorStats
 
 #define CHECK_INST( x ) if ( m_iInstance != 0 ) { x; }
 
+//  ================================================================
 class CDataCompressorPerfCounters : public IDataCompressorStats
+//  ================================================================
+//
+//  Updates perf counters with the passed-in statistics.
+//
+//-
 {
     public:
         CDataCompressorPerfCounters( const INT iInstance );
@@ -139,47 +152,65 @@ PERFInstanceLiveTotal<> CDataCompressorPerfCounters::s_cXpress10CorsicaDecompres
 PERFInstanceLiveTotal<QWORD> CDataCompressorPerfCounters::s_cXpress10CorsicaDecompressionTotalDhrts;
 PERFInstanceLiveTotal<QWORD> CDataCompressorPerfCounters::s_cXpress10CorsicaDecompressionHardwareTotalDhrts;
 
+//  ================================================================
 CDataCompressorPerfCounters::CDataCompressorPerfCounters( const INT iInstance ) :
+//  ================================================================
     IDataCompressorStats(),
     m_iInstance( iInstance )
 {
 }
 
+//  ================================================================
 CDataCompressorPerfCounters::~CDataCompressorPerfCounters()
+//  ================================================================
 {
 }
 
+//  ================================================================
 void CDataCompressorPerfCounters::AddUncompressedBytes( const INT cb )
+//  ================================================================
 {
     PERFOpt( CHECK_INST( s_cbUncompressedBytes.Add( m_iInstance, cb ) ) );
 }
 
+//  ================================================================
 void CDataCompressorPerfCounters::AddCompressedBytes( const INT cb )
+//  ================================================================
 {
     PERFOpt( CHECK_INST( s_cbCompressedBytes.Add( m_iInstance, cb ) ) );
 }
 
+//  ================================================================
 void CDataCompressorPerfCounters::IncCompressionCalls()
+//  ================================================================
 {
     PERFOpt( CHECK_INST( s_cCompressionCalls.Inc( m_iInstance ) ) );
 }
 
+//  ================================================================
 void CDataCompressorPerfCounters::AddCompressionDhrts( const QWORD dhrts )
+//  ================================================================
 {
     PERFOpt( CHECK_INST( s_cCompressionTotalDhrts.Add( m_iInstance, dhrts ) ) );
 }
 
+//  ================================================================
 void CDataCompressorPerfCounters::AddDecompressionBytes( const INT cb )
+//  ================================================================
 {
     PERFOpt( CHECK_INST( s_cbDecompressionBytes.Add( m_iInstance, cb ) ) );
 }
 
+//  ================================================================
 void CDataCompressorPerfCounters::IncDecompressionCalls()
+//  ================================================================
 {
     PERFOpt( CHECK_INST( s_cDecompressionCalls.Inc( m_iInstance ) ) );
 }
 
+//  ================================================================
 void CDataCompressorPerfCounters::AddDecompressionDhrts( const QWORD dhrts )
+//  ================================================================
 {
     PERFOpt( CHECK_INST( s_cDecompressionTotalDhrts.Add( m_iInstance, dhrts ) ) );
 }
@@ -344,9 +375,15 @@ LONG LXpress10CorsicaDecompressionHardwareLatencyCEFLPv( LONG iInstance, VOID * 
     return 0;
 }
 
-#endif
+#endif // PERFMON_SUPPORT
 
+//  ================================================================
 class CCompressionBufferCache
+    //  ================================================================
+    //
+    //  To avoid constantly allocating and freeing buffers to compress/decompress
+    //  data we cache them here.
+    //  
 {
     public:
         CCompressionBufferCache();
@@ -370,23 +407,31 @@ class CCompressionBufferCache
         CCompressionBufferCache& operator=( const CCompressionBufferCache& );
 };
 
+//  ================================================================
 CCompressionBufferCache::CCompressionBufferCache() :
+    //  ================================================================
     m_cbBufferSize( 0 ),
     m_cpbCachedCompressionBuffers( 0 ),
     m_rgpbCachedCompressionBuffers( NULL )
 {
 }
 
+//  ================================================================
 CCompressionBufferCache::~CCompressionBufferCache()
+//  ================================================================
 {
 }
 
+//  ================================================================
 INT CCompressionBufferCache::CbBufferSize() const
+//  ================================================================
 {
     return m_cbBufferSize;
 }
 
+//  ================================================================
 ERR CCompressionBufferCache::ErrInit( const INT cbBufferSize )
+//  ================================================================
 {
     ERR err = JET_errSuccess;
     Assert( 0 <= m_cbBufferSize );
@@ -400,7 +445,9 @@ HandleError:
     return err;
 }
 
+//  ================================================================
 void CCompressionBufferCache::Term()
+//  ================================================================
 {
     for ( INT ipb = 0; ipb < m_cpbCachedCompressionBuffers; ++ipb )
     {
@@ -412,7 +459,9 @@ void CCompressionBufferCache::Term()
     m_cbBufferSize = 0;
 }
 
+//  ================================================================
 BYTE * CCompressionBufferCache::PbAlloc()
+//  ================================================================
 {
     BYTE * pb = GetCachedPtr<BYTE *>( m_rgpbCachedCompressionBuffers, m_cpbCachedCompressionBuffers );
     if ( NULL == pb )
@@ -422,7 +471,9 @@ BYTE * CCompressionBufferCache::PbAlloc()
     return pb;
 }
 
+//  ================================================================
 void CCompressionBufferCache::Free( BYTE * const pb )
+//  ================================================================
 {
     if ( pb && !FCachePtr<BYTE *>( pb, m_rgpbCachedCompressionBuffers, m_cpbCachedCompressionBuffers ) )
     {
@@ -430,16 +481,23 @@ void CCompressionBufferCache::Free( BYTE * const pb )
     }
 }
 
+// This is a global instance of the LV compression buffer cache, which can be used by the entire process
 static CCompressionBufferCache g_compressionBufferCache;
 
+//  ================================================================
 class CDataCompressor
+//  ================================================================
+//
+//  A class that contains compress/decompress routines
+//
+//-
 {
     public:
         CDataCompressor();
         ~CDataCompressor();
 
         ERR ErrInit( const INT cbMin, const INT cbMax );
-        void Term();
+        void Term();                        // frees the cached compression/decompression workspaces
         
         ERR ErrCompress(
             const DATA& data,
@@ -461,6 +519,7 @@ class CDataCompressor
             const CHAR chScrub );
         
     private:
+        // PERSISTED
         enum COMPRESSION_SCHEME
             {
                 COMPRESS_NONE,
@@ -470,7 +529,7 @@ class CDataCompressor
                 COMPRESS_SCRUB = 0x4,
                 COMPRESS_XPRESS9 = 0x5,
                 COMPRESS_XPRESS10 = 0x6,
-                COMPRESS_MAXIMUM = 0x1f,
+                COMPRESS_MAXIMUM = 0x1f, // We only have 5 bits due to 3 bits used by 7 bit compression
             };
 
 #include <pshpack1.h>
@@ -486,16 +545,22 @@ class CDataCompressor
         {
             BYTE                                m_fCompressScheme;
             UnalignedLittleEndian<WORD>         mle_cbUncompressed;
+            // SSE 4.2 compatible CRC of the uncompressed data
             UnalignedLittleEndian<ULONG>        mle_ulUncompressedChecksum;
+            // Corsica compatible CRC of the compressed data
             UnalignedLittleEndian<ULONGLONG>    mle_ullCompressedChecksum;
         };
 #include <poppack.h>
 
     private:
+        // Xpress (legacy) compression level, ranging from 0 (fastest) to 9 (smallest)
         static const INT xpressLegacyCompressionLevel = 2;
 
+        // if xpress compression is attempted and shrinks the data by less than
+        // this amount we consider the effort wasted and report it
         static const INT pctCompressionWastedEffort = 10;
 
+        // cached encoders/decoders
         INT m_cencodeCachedMax;
         INT m_cdecodeCachedMax;
 
@@ -506,10 +571,13 @@ class CDataCompressor
         XPRESS9_DECODER* m_rgdecodeXpress9;
 #endif
 
+        // minimum practical size threshold for compression (not including 7 bit compression)
         INT m_cbMin;
 
+        // maximum size of data that will be compressed (may inform compression window)
         INT m_cbMax;
 
+        // get/free Xpress (legacy) encoders/decoders
         ERR ErrXpressEncodeOpen_( _Out_ XpressEncodeStream * const pencode );
         void XpressEncodeClose_( XpressEncodeStream encode );
         void XpressEncodeRelease_( XpressEncodeStream encode );
@@ -518,6 +586,7 @@ class CDataCompressor
         void XpressDecodeRelease_( XpressDecodeStream decode );
 
 #ifdef XPRESS9_COMPRESSION
+        // get/free Xpress 9 encoders/decoders
         ERR ErrXpress9EncodeOpen_( _Out_ XPRESS9_ENCODER * const pencode );
         void Xpress9EncodeClose_( XPRESS9_ENCODER encode );
         void Xpress9EncodeRelease_( XPRESS9_ENCODER encode );
@@ -526,15 +595,19 @@ class CDataCompressor
         void Xpress9DecodeRelease_( XPRESS9_DECODER decode );
 #endif
 
+        // user-supplied callback function that allocates memory
+        // if there is no memory available it shall return NULL
         static void * XPRESS_CALL PvXpressAlloc_(
-            _In_opt_ void * pvContext,
-            INT             cbAlloc );
+            _In_opt_ void * pvContext,  // user-defined context (as passed to XpressEncodeCreate)
+            INT             cbAlloc );  // size of memory block to allocate (bytes)
 
+        // user-supplied callback function that releases memory
         static void XPRESS_CALL XpressFree_(
-            _In_opt_ void *             pvContext,
-            _Post_ptr_invalid_ void *   pvAlloc );
+            _In_opt_ void *             pvContext,      // user-defined context (as passed to XpressEncodeClose)
+            _Post_ptr_invalid_ void *   pvAlloc );      // pointer to the block to be freed
 
     private:
+        // calculate the size of compressed data
         INT CbCompressed7BitAscii_( const INT cb );
         INT CbCompressed7BitUnicode_( const INT cb );
 
@@ -628,7 +701,9 @@ private:
     CDataCompressor& operator=( const CDataCompressor& );
 };
 
+//  ================================================================
 CDataCompressor::CDataCompressor() :
+//  ================================================================
     m_cbMin( 0 ),
     m_cbMax( 0 ),
     m_cencodeCachedMax( 0 ),
@@ -642,21 +717,32 @@ CDataCompressor::CDataCompressor() :
 {
 }
 
+//  ================================================================
 CDataCompressor::~CDataCompressor()
+//  ================================================================
 {
+    // Asserting that Term() has been called doesn't always work for
+    // global objects because the destructor is called if the DLL
+    // is unloaded because of a crash.
 }
 
+//  ================================================================
 void * XPRESS_CALL CDataCompressor::PvXpressAlloc_( _In_opt_ void * pvContext, INT cbAlloc )
+//  ================================================================
 {
     return new BYTE[cbAlloc];
 }
 
+//  ================================================================
 void XPRESS_CALL CDataCompressor::XpressFree_( _In_opt_ void * pvContext, _Post_ptr_invalid_ void * pvAlloc )
+//  ================================================================
 {
     delete [] pvAlloc;
 }
 
+//  ================================================================
 ERR CDataCompressor::ErrXpressEncodeOpen_( _Out_ XpressEncodeStream * const pencode )
+//  ================================================================
 {
     C_ASSERT( sizeof(void*) == sizeof(XpressEncodeStream) );
     *pencode = 0;
@@ -664,15 +750,17 @@ ERR CDataCompressor::ErrXpressEncodeOpen_( _Out_ XpressEncodeStream * const penc
     XpressEncodeStream encode = GetCachedPtr<XpressEncodeStream>( m_rgencodeXpress, m_cencodeCachedMax );
     if ( 0 != encode )
     {
+        // we found a cached XpressEncodeStream
         *pencode = encode;
         return JET_errSuccess;
     }
 
+    // no cached XpressEncodeStream was found. create one
     encode = XpressEncodeCreate(
-                    m_cbMax,
-                    0,
-                    PvXpressAlloc_,
-                    xpressLegacyCompressionLevel );
+                    m_cbMax,                        // max size of data to compress
+                    0,                              // user defined context info (passed to allocfn)
+                    PvXpressAlloc_,                 // user allocfn
+                    xpressLegacyCompressionLevel ); // compression quality - 0 fastest, 9 best
     if( NULL == encode )
     {
         return ErrERRCheck( JET_errOutOfMemory );
@@ -681,20 +769,26 @@ ERR CDataCompressor::ErrXpressEncodeOpen_( _Out_ XpressEncodeStream * const penc
     return JET_errSuccess;
 }
 
+//  ================================================================
 void CDataCompressor::XpressEncodeClose_( XpressEncodeStream encode )
+//  ================================================================
 {
     if ( encode )
     {
         if( FCachePtr<XpressEncodeStream>( encode, m_rgencodeXpress, m_cencodeCachedMax ) )
         {
+            // we cached the XpressEncodeStream in an empty slot
             return;
         }
 
+        // we didn't find an empty slot, free the XpressEncodeStream        
         XpressEncodeRelease_( encode );
     }
 }
 
+//  ================================================================
 void CDataCompressor::XpressEncodeRelease_( XpressEncodeStream encode )
+//  ================================================================
 {
     if ( encode )
     {
@@ -702,7 +796,9 @@ void CDataCompressor::XpressEncodeRelease_( XpressEncodeStream encode )
     }
 }
 
+//  ================================================================
 ERR CDataCompressor::ErrXpressDecodeOpen_( _Out_ XpressDecodeStream * const pdecode )
+//  ================================================================
 {
     C_ASSERT( sizeof(void*) == sizeof(XpressDecodeStream) );
     
@@ -711,13 +807,15 @@ ERR CDataCompressor::ErrXpressDecodeOpen_( _Out_ XpressDecodeStream * const pdec
     XpressDecodeStream decode = GetCachedPtr<XpressDecodeStream>( m_rgdecodeXpress, m_cdecodeCachedMax );
     if( 0 != decode )
     {
+        // found a cached XpressDecodeStream
         *pdecode = decode;
         return JET_errSuccess;
     }
 
+    // no cached XpressDecodeStream was found. create one
     decode = XpressDecodeCreate(
-                    0,
-                    PvXpressAlloc_ );
+                    0,                  // user defined context info (passed to allocfn)
+                    PvXpressAlloc_ );   // user allocfn
     if (NULL == decode)
     {
         return ErrERRCheck( JET_errOutOfMemory );
@@ -726,20 +824,26 @@ ERR CDataCompressor::ErrXpressDecodeOpen_( _Out_ XpressDecodeStream * const pdec
     return JET_errSuccess;
 }
 
+//  ================================================================
 void CDataCompressor::XpressDecodeClose_( XpressDecodeStream decode )
+//  ================================================================
 {
     if ( decode )
     {
         if( FCachePtr<XpressDecodeStream>( decode, m_rgdecodeXpress, m_cdecodeCachedMax ) )
         {
+            // we cached the XpressDecodeStream in an empty slot
             return;
         }
 
+        // we didn't find an empty slot, free the XpressDecodeStream        
         XpressDecodeRelease_( decode );
     }
 }
 
+//  ================================================================
 void CDataCompressor::XpressDecodeRelease_( XpressDecodeStream decode )
+//  ================================================================
 {
     if ( decode )
     {
@@ -748,7 +852,9 @@ void CDataCompressor::XpressDecodeRelease_( XpressDecodeStream decode )
 }
 
 #ifdef XPRESS9_COMPRESSION
+//  ================================================================
 ERR CDataCompressor::ErrXpress9EncodeOpen_( _Out_ XPRESS9_ENCODER * const pencode )
+//  ================================================================
 {
     C_ASSERT( sizeof( void* ) == sizeof( XPRESS9_ENCODER ) );
 
@@ -760,10 +866,12 @@ ERR CDataCompressor::ErrXpress9EncodeOpen_( _Out_ XPRESS9_ENCODER * const pencod
     XPRESS9_ENCODER encode = GetCachedPtr<XPRESS9_ENCODER>( m_rgencodeXpress9, m_cencodeCachedMax );
     if ( 0 == encode )
     {
+        // no cached XPRESS9_ENCODER was found. create one
         encode = Xpress9EncoderCreate( &status, NULL, PvXpressAlloc_, XPRESS9_WINDOW_SIZE_LOG2_MIN, Xpress9Flag_UseSSE2 );
         Call( ErrXpress9StatusToJetErr( status ) );
     }
 
+    // return the XPRESS9_ENCODER
     *pencode = encode;
 
 HandleError:
@@ -774,20 +882,26 @@ HandleError:
     return err;
 }
 
+//  ================================================================
 void CDataCompressor::Xpress9EncodeClose_( XPRESS9_ENCODER encode )
+//  ================================================================
 {
     if ( encode )
     {
         if ( FCachePtr<XPRESS9_ENCODER>( encode, m_rgencodeXpress9, m_cencodeCachedMax ) )
         {
+            // we cached the XPRESS9_ENCODER in an empty slot
             return;
         }
 
+        // we didn't find an empty slot, free the XPRESS9_ENCODER
         Xpress9EncodeRelease_( encode );
     }
 }
 
+//  ================================================================
 void CDataCompressor::Xpress9EncodeRelease_( XPRESS9_ENCODER encode )
+//  ================================================================
 {
     if ( encode )
     {
@@ -797,7 +911,9 @@ void CDataCompressor::Xpress9EncodeRelease_( XPRESS9_ENCODER encode )
     }
 }
 
+//  ================================================================
 ERR CDataCompressor::ErrXpress9DecodeOpen_( _Out_ XPRESS9_DECODER * const pdecode )
+//  ================================================================
 {
     C_ASSERT( sizeof( void* ) == sizeof( XPRESS9_DECODER ) );
 
@@ -809,10 +925,12 @@ ERR CDataCompressor::ErrXpress9DecodeOpen_( _Out_ XPRESS9_DECODER * const pdecod
     XPRESS9_DECODER decode = GetCachedPtr<XPRESS9_DECODER>( m_rgdecodeXpress9, m_cdecodeCachedMax );
     if ( 0 == decode )
     {
+        // no cached XPRESS9_DECODER was found. create one
         decode = Xpress9DecoderCreate( &status, NULL, PvXpressAlloc_, XPRESS9_WINDOW_SIZE_LOG2_MIN, Xpress9Flag_UseSSE2 );
         Call( ErrXpress9StatusToJetErr( status ) );
     }
 
+    // return the XPRESS9_DECODER
     *pdecode = decode;
 
 HandleError:
@@ -823,20 +941,26 @@ HandleError:
     return err;
 }
 
+//  ================================================================
 void CDataCompressor::Xpress9DecodeClose_( XPRESS9_DECODER decode )
+//  ================================================================
 {
     if ( decode )
     {
         if ( FCachePtr<XPRESS9_DECODER>( decode, m_rgdecodeXpress9, m_cdecodeCachedMax ) )
         {
+            // we cached the XPRESS9_DECODER in an empty slot
             return;
         }
 
+        // we didn't find an empty slot, free the XPRESS9_DECODER
         Xpress9DecodeRelease_( decode );
     }
 }
 
+//  ================================================================
 void CDataCompressor::Xpress9DecodeRelease_( XPRESS9_DECODER decode )
+//  ================================================================
 {
     if ( decode )
     {
@@ -845,21 +969,39 @@ void CDataCompressor::Xpress9DecodeRelease_( XPRESS9_DECODER decode )
         Assert( status.m_uStatus == Xpress9Status_OK );
     }
 }
-#endif
+#endif // XPRESS9_COMPRESSION
 
+//  ================================================================
 INT CDataCompressor::CbCompressed7BitAscii_( const INT cb )
+//  ================================================================
 {
+    // calculate the size as:
+    //  number of input characters(data size) * bits-per-character(7) + header byte
+    // remember to round _up_
     const INT cbCompressed = ( ((cb*7) + 7) / 8 ) + 1;
     return cbCompressed;
 }
 
+//  ================================================================
 INT CDataCompressor::CbCompressed7BitUnicode_( const INT cb )
+//  ================================================================
 {
+    // calculate the size as:
+    //  number of input characters(data size) * bits-per-character(7) + header byte
+    // remember to round _up_
     const INT cbCompressed = ( (((cb/sizeof(WORD))*7) + 7) / 8 ) + 1;
     return cbCompressed;
 }
 
+//  ================================================================
 CDataCompressor::COMPRESSION_SCHEME CDataCompressor::Calculate7BitCompressionScheme_( const DATA& data, BOOL fUnicodeOnly )
+//  ================================================================
+//
+//  7-bit Unicode (56% savings) is preferable to 7-bit ASCII (12.5% savings)
+//  If 7-bit ASCII is impossible then 7-bit Unicode is impossible as well,
+//  so we know no compression is possible at that point.
+//
+//-
 {
     bool fUnicodePossible = ( 0 == data.Cb() % sizeof(WORD) );
     if ( fUnicodeOnly && !fUnicodePossible )
@@ -867,9 +1009,15 @@ CDataCompressor::COMPRESSION_SCHEME CDataCompressor::Calculate7BitCompressionSch
         return COMPRESS_NONE;
     }
 
+    // the 7-bit compression schemes can only be applied if all the data
+    // consists of characters which are less than 0x80. use these masks
+    // to quickly determine if there are any characters which have their
+    // high bits set
     const DWORD dwMaskAscii     = fUnicodeOnly ? 0x007f007f : 0x7f7f7f7f;
     const DWORD dwMaskUnicode   = 0x007f007f;
 
+    // first process by DWORD until we have less than one DWORD of
+    // data remaining
     const Unaligned<DWORD> * const  pdw     = (Unaligned<DWORD> *)data.Pv();
     const INT                       cdw     = data.Cb() / sizeof(DWORD);
 
@@ -921,6 +1069,7 @@ CDataCompressor::COMPRESSION_SCHEME CDataCompressor::Calculate7BitCompressionSch
         }
     }
 
+    // now process the remaining bytes  
     const BYTE * const  pb = (BYTE *)data.Pv();
     Assert( ( data.Cb() - (cdw * sizeof(DWORD)) ) < sizeof(DWORD) );
     for( INT ib = cdw * sizeof(DWORD); ib < data.Cb(); ++ib )
@@ -929,6 +1078,10 @@ CDataCompressor::COMPRESSION_SCHEME CDataCompressor::Calculate7BitCompressionSch
         {
             return COMPRESS_NONE;
         }
+        // for Unicode we only check each WORD
+        // (if the data length isn't a multiple of sizeof(WORD)
+        // then fUnicodePossible is set to false at the top of
+        // this function)
         if( fUnicodePossible && ( 0 == ( ib % sizeof(WORD) ) ) )
         {
             const Unaligned<WORD> * const pw = (Unaligned<WORD> *)(pb + ib);
@@ -939,6 +1092,7 @@ CDataCompressor::COMPRESSION_SCHEME CDataCompressor::Calculate7BitCompressionSch
         }
     }
 
+    // prefer 7-bit Unicode to 7-bit ASCII
     if( fUnicodePossible )
     {
         const INT cbCompressed = CbCompressed7BitUnicode_(data.Cb());
@@ -956,6 +1110,24 @@ CDataCompressor::COMPRESSION_SCHEME CDataCompressor::Calculate7BitCompressionSch
 #define NBITMASK( n ) ((QWORD)( ( (QWORD)1 << n ) - 1 ))
 #define ASCII7BITMASKANDSHIFT( qw, mask ) ( ( qw & mask ) | ((qw >> 1) & ~mask) )
 
+// This is the same idea as ReverseEightBytes, but it operates with eight 7-bit blocks, instead of eight 8-bit bytes.
+// The bit values of the masks used below are:
+//
+// qwMask1
+// 00000000 00000001 11111100 00000111 11111111 11100000 00000000 01111111
+// Mask2
+// 00000000 11111110 00000011 11111000 00001111 11100000 00111111 10000000
+//
+// qwMask3
+// 00000000 00000000 00000011 11111111 11110000 00000000 00111111 11111111
+// qwMask4
+// 00000000 11111111 11111100 00000000 00001111 11111111 11000000 00000000
+// 
+// qwMask5
+// 00000000 00000000 00000000 00000000 00001111 11111111 11111111 11111111
+// qwMask6
+// 00000000 11111111 11111111 11111111 11110000 00000000 00000000 00000000
+//
 __forceinline QWORD ReverseEightCompressedBytes( const unsigned __int64 qw )
 {
     const unsigned __int64 qwMask1 = (NBITMASK(7) <<  0) | (NBITMASK(7) << 14) | (NBITMASK(7) << 28) | (NBITMASK(7) << 42);
@@ -982,11 +1154,20 @@ __forceinline QWORD ReverseEightCompressedBytes( const unsigned __int64 qw )
             ( ( qw3 & qwMask5 ) << shf3 );
 }
 
+//  ================================================================
 ERR CDataCompressor::ErrCompress7BitAscii_(
     const DATA& data,
     _Out_writes_bytes_to_( cbDataCompressedMax, *pcbDataCompressedActual ) BYTE * const pbDataCompressed,
     _In_ const INT cbDataCompressedMax,
     _Out_ INT * const pcbDataCompressedActual )
+//  ================================================================
+//
+//  In this scheme we remove the top bit (Which is always 0)
+//  and store only the bottom 7-bits of each BYTE in the output array
+//
+//  This compression format is PERSISTED
+//
+//-
 {
     *pcbDataCompressedActual = 0;
 
@@ -998,6 +1179,7 @@ ERR CDataCompressor::ErrCompress7BitAscii_(
         return ErrERRCheck( JET_errBufferTooSmall );
     }
 
+    // byte 0 is the header byte
     INT ibOutput    = 1;
     INT ibInput     = 0;
 
@@ -1005,9 +1187,67 @@ ERR CDataCompressor::ErrCompress7BitAscii_(
     INT cdwOutputCheck = 0;
     INT cbOutputCheck = 0;
 
+    // first do fast 64-bit compression. we can only do this if all 64-bits of the input data are needed
+    // one extra byte in the output data may be overwritten, so make sure it is part of the output buffer
     const INT cqwInput  = cbData / sizeof(QWORD);
     const INT cqwOutput = ( cbDataCompressedMax - ibOutput - 1 ) / 7;
 
+    // Here we want to take 8 uncompressed bytes (64 bits) and compress them into
+    // 7 compressed bytes (56 bits). We do this by loading the 8 bytes into a 
+    // QWORD, processing the QWORD and then writing out the entire QWORD. Although
+    // a QWORD is written, the output buffer index is only advanced by 7 bytes so the
+    // last byte will be overwritten with the correct value. The check above ensures
+    // that the user buffer has space for the extra byte.
+    //
+    // Endian-ness makes this ugly. Once the bytes are loaded from memory into a QWORD,
+    // the QWORD has to be reversed. After the processing the QWORD has to be reversed
+    // again, but this time by 7-bit values (not by bytes).
+    //
+    // Suppose we have the ASCII string "01234567"
+    //
+    // In memory it looks like this:
+    //
+    //  76543210 76543210 76543210 76543210 76543210 76543210 76543210 76543210
+    //  -------- -------- -------- -------- -------- -------- -------- --------
+    //  00110000 00110001 00110010 00110011 00110100 00110101 00110110 00110111  30 31 32 33 34 35 36 37
+    //
+    // Loaded into a QWORD it looks like this:
+    //
+    //  76543210 76543210 76543210 76543210 76543210 76543210 76543210 76543210
+    //  -------- -------- -------- -------- -------- -------- -------- --------
+    //  00110111 00110110 00110101 00110100 00110011 00110010 00110001 00110000
+    //
+    // After ReverseEightBytes we have:
+    //
+    //  76543210 76543210 76543210 76543210 76543210 76543210 76543210 76543210
+    //  -------- -------- -------- -------- -------- -------- -------- --------
+    //  00110000 00110001 00110010 00110011 00110100 00110101 00110110 00110111
+    //
+    // Processing with ASCII7BITMASKANDSHIFT turns it into:
+    //
+    //  76543210 76543210 76543210 76543210 76543210 76543210 76543210 76543210
+    //  -------- -------- -------- -------- -------- -------- -------- --------
+    //  00110000 00110001 00110010 00110011 00110100 00110101 00110110 00110111
+    //  00011000 00011000 10011001 00011001 10011010 00011010 10011011 00110111
+    //  ...
+    //  00000001 10000001 10001001 10010011 00110110 10001101 01011011 00110111
+    //  00000000 11000000 11000101 10010011 00110110 10001101 01011011 00110111
+    //  00000000 01100000 11000101 10010011 00110110 10001101 01011011 00110111
+    //
+    // After ReverseEightCompressedBytes the value becomes:
+    //
+    //  76543210 76543210 76543210 76543210 76543210 76543210 76543210 76543210
+    //  -------- -------- -------- -------- -------- -------- -------- --------
+    //  00000000 01101110 11011001 10101011 01000110 01101100 10011000 10110000
+    //
+    // Written to the output buffer we end up with:
+    //
+    //  76543210 76543210 76543210 76543210 76543210 76543210 76543210 76543210
+    //  -------- -------- -------- -------- -------- -------- -------- --------
+    //  10110000 10011000 01101100 01000110 10101011 11011001 01101110 00000000
+    //  
+    // Note that the last byte is 0. The output buffer is then advanced by 7 bytes.
+    //
     for( INT iqw = 0; iqw < min( cqwInput, cqwOutput ); ++iqw )
     {
         BYTE * const pbInput    = (BYTE *)data.Pv() + ibInput;
@@ -1017,6 +1257,8 @@ ERR CDataCompressor::ErrCompress7BitAscii_(
 
         qw = ReverseEightBytes( qw );
 
+        // there are 56 wanted bits in the QWORD, shift them
+        // to the bottom 7 bytes
         
         qw = ASCII7BITMASKANDSHIFT( qw, NBITMASK( 7  ) );
         qw = ASCII7BITMASKANDSHIFT( qw, NBITMASK( 14 ) );
@@ -1028,6 +1270,11 @@ ERR CDataCompressor::ErrCompress7BitAscii_(
 
         qw = ReverseEightCompressedBytes( qw );
 
+        // although only the bottom 7 bytes contain useful data
+        // we will write the entire QWORD to the output buffer
+        // (that is why why checked to see if there was space)
+        // the output buffer pointer is only advanced by 7 bytes
+        // so the last byte will be overwritten
 
         *(Unaligned<QWORD> *)pbOutput = qw;
 
@@ -1037,6 +1284,7 @@ ERR CDataCompressor::ErrCompress7BitAscii_(
         cqwOutputCheck++;
     }
 
+    // now fill a DWORD with output bytes and then write it to the output buffer
     DWORD dwOutput = 0;
     INT ibitOutputCurr = 0;
     const BYTE * const pb = (BYTE *)data.Pv();
@@ -1045,15 +1293,19 @@ ERR CDataCompressor::ErrCompress7BitAscii_(
         INT i = pb[ib];
         Assert( i < 0x80 );
 
+        // now we have to write the correct bits of the value into the output array
+        // calculate how many bits from the current compression index will fit 
+        // into the current DWORD
         
         const INT cbits = 7;
-        INT cbitsRemaining = cbits;
+        INT cbitsRemaining = cbits; // # of bits to be copied from i to the output buffer
         while( true )
         {
             const INT cbitsToCopy = min( cbitsRemaining, 32 - ibitOutputCurr );
             Assert( cbitsToCopy > 0 );
             Assert( cbitsToCopy < 32 );
 
+            // create a bit mask for the bits we want to copy
             const ULONG ulBitMask = ( 1 << cbitsToCopy ) - 1;
 
             dwOutput |= (i & ulBitMask) << ibitOutputCurr;
@@ -1085,6 +1337,8 @@ ERR CDataCompressor::ErrCompress7BitAscii_(
         }
     }
 
+    // the last DWORD we calculated may have been incomplete. 
+    // if so, write the bytes that contain data
     AssertPREFIX( ibOutput < cbDataCompressedMax - 1 - ((ibitOutputCurr+7) / 8) );
     for( INT ib = 0; ib < (ibitOutputCurr+7) / 8; ++ib )
     {
@@ -1097,7 +1351,16 @@ ERR CDataCompressor::ErrCompress7BitAscii_(
         cbOutputCheck++;
     }
 
+    // so now we have to create the header byte. it has two parts, the compression signature
+    // and the count of the number of bits used in the final byte. it will be laid out like
+    // this
+    // 7 | 6 | 5 | 4 | 3 | 2 | 1 | 0
+    //      signature    | bit count-1
+    // 
+    // note that the bit count is stored as 0-7 rather than 1-8
 
+    // if ibitOutputCurr is 0 then we haven't written anything to the current DWORD, so the previous
+    // DWORD is fully used and is actually the last DWORD
     if( 0 == ibitOutputCurr )
     {
         ibitOutputCurr = 32;
@@ -1113,11 +1376,20 @@ ERR CDataCompressor::ErrCompress7BitAscii_(
     return JET_errSuccess;
 }
 
+//  ================================================================
 ERR CDataCompressor::ErrCompress7BitUnicode_(
     const DATA& data,
     _Out_writes_bytes_to_( cbDataCompressedMax, *pcbDataCompressedActual ) BYTE * const pbDataCompressed,
     _In_ const INT cbDataCompressedMax,
     _Out_ INT * const pcbDataCompressedActual )
+//  ================================================================
+//
+//  In this scheme we remove the top 9 bits (Which are always 0)
+//  and store only the bottom 7-bits of each WORD in the output array
+//
+//  This compression format is PERSISTED
+//
+//-
 {
     Assert( 0 == data.Cb() % sizeof(WORD) );
     *pcbDataCompressedActual = 0;
@@ -1129,6 +1401,7 @@ ERR CDataCompressor::ErrCompress7BitUnicode_(
     }
     
     INT ibitOutputCurr  = 0;
+    // byte 0 is the header byte    
     Unaligned<DWORD> * const pdwOutput = (Unaligned<DWORD> *)(pbDataCompressed + 1);
     INT idwOutput = 0;
     
@@ -1139,15 +1412,19 @@ ERR CDataCompressor::ErrCompress7BitUnicode_(
         INT i = pw[iw];
         Assert( i < 0x80 );
 
+        // now we have to write the correct bits of the value into the output array
+        // calculate how many bits from the current compression index will fit 
+        // into the current byte
         
         const INT cbits = 7;
-        INT cbitsRemaining = cbits;
+        INT cbitsRemaining = cbits; // # of bits to be copied from i to the output buffer
         while( true )
         {
             const INT cbitsToCopy = min( cbitsRemaining, 32 - ibitOutputCurr );
             Assert( cbitsToCopy > 0 );
             Assert( cbitsToCopy < 32 );
 
+            // create a bit mask for the bits we want to copy
             const ULONG ulBitMask = ( 1 << cbitsToCopy ) - 1;
             
             dwOutput |= (i & ulBitMask) << ibitOutputCurr;
@@ -1176,6 +1453,7 @@ ERR CDataCompressor::ErrCompress7BitUnicode_(
         }
     }
 
+    // we need to write the last partial bits
     AssertPREFIX( (ULONG)( idwOutput * sizeof( DWORD ) ) < (ULONG)( cbDataCompressedMax - 1 - ( ( ibitOutputCurr + 7 ) / 8) ) );
     BYTE * pbOutput = (BYTE *)(pdwOutput + idwOutput);
     for( INT ib = 0; ib < (ibitOutputCurr+7) / 8; ++ib )
@@ -1185,7 +1463,16 @@ ERR CDataCompressor::ErrCompress7BitUnicode_(
         dwOutput >>= 8;
     }
 
+    // so now we have to create the header byte. it has two parts, the compression signature
+    // and the count of the number of bits used in the final byte. it will be laid out like
+    // this
+    // 7 | 6 | 5 | 4 | 3 | 2 | 1 | 0
+    //      signature    | bit count-1
+    // 
+    // note that the bit count is stored as 0-7 rather than 1-8
     
+    // if ibitOutputCurr is 0 then we haven't written anything to the current DWORD, so the previous
+    // DWORD is fully used and is actually the last DWORD
     if( 0 == ibitOutputCurr )
     {
         Assert( idwOutput > 0 );
@@ -1193,9 +1480,9 @@ ERR CDataCompressor::ErrCompress7BitUnicode_(
         idwOutput--;
     }
     const INT cbOutput =
-        1
-        + idwOutput*sizeof(DWORD)
-        + (ibitOutputCurr+7) / 8
+        1                                               // header byte
+        + idwOutput*sizeof(DWORD)                       // fully used DWORDs
+        + (ibitOutputCurr+7) / 8                        // fully or partially used bytes in the last DWORD
         ;
     const INT cbitFinalByte = ( ibitOutputCurr - 1 ) % 8;
     
@@ -1206,18 +1493,20 @@ ERR CDataCompressor::ErrCompress7BitUnicode_(
     return JET_errSuccess;
 }
 
+//  ================================================================
 ERR CDataCompressor::ErrCompressXpress_(
     const DATA& data,
     _Out_writes_bytes_to_( cbDataCompressedMax, *pcbDataCompressedActual ) BYTE * const pbDataCompressed,
     const INT cbDataCompressedMax,
     _Out_ INT * const pcbDataCompressedActual,
     IDataCompressorStats * const pstats )
+//  ================================================================
 {
     PERFOptDeclare( const HRT hrtStart = HrtHRTCount() );
 
     Assert( data.Cb() >= m_cbMin );
-    Assert( data.Cb() <= wMax );
-    Assert( data.Cb() <= m_cbMax );
+    Assert( data.Cb() <= wMax );                // size must fit in a WORD
+    Assert( data.Cb() <= m_cbMax );             // Xpress (legacy) only supports compressing one window at a time
     Assert( pstats );
     
     ERR err = JET_errSuccess;
@@ -1225,21 +1514,23 @@ ERR CDataCompressor::ErrCompressXpress_(
     XpressEncodeStream encode = 0;
     Call( ErrXpressEncodeOpen_( &encode ) );
 
+    // Reserve 1 BYTE (for the signature) and 1 WORD (for the data length)
     const INT cbReserved = sizeof(BYTE) + sizeof(WORD);
     
     const INT cbCompressed = XpressEncode(
-                        encode,
-                        pbDataCompressed + cbReserved,
-                        cbDataCompressedMax - cbReserved,
-                        data.Pv(),
-                        data.Cb(),
-                        0,
-                        0,
-                        0 );
+                        encode,                             // encoding workspace
+                        pbDataCompressed + cbReserved,      // pointer to output buffer for compressed data
+                        cbDataCompressedMax - cbReserved,   // size of output buffer
+                        data.Pv(),                          // pointer to input buffer
+                        data.Cb(),                          // size of input buffer
+                        0,                                  // NULL or progress callback
+                        0,                                  // user-defined context that will be passed to ProgressFn
+                        0 );                                // call ProgressFn each time ProgressSize bytes processed
     Assert( cbCompressed <= data.Cb() );
     
     if( cbCompressed == 0 || cbCompressed + cbReserved >= data.Cb() )
     {
+        // Xpress was unable to compress.
         err = ErrERRCheck( errRECCannotCompress );
     }
     else
@@ -1266,9 +1557,17 @@ HandleError:
     return err;
 }
 
+//  ================================================================
 ERR CDataCompressor::ErrScrub(
     DATA& data,
     const CHAR chScrub )
+//  ================================================================
+//
+//  This code scrubs the byte array in a way that is detectable by
+//  decompression. We set a known "compression type" in the first
+//  byte and scrub with the passed in pattern fill after that.
+//
+//-
 {
     BYTE * const pbData = (BYTE *)data.Pv();
     const INT cbData = data.Cb();
@@ -1281,8 +1580,10 @@ ERR CDataCompressor::ErrScrub(
 }
 
 #ifdef XPRESS9_COMPRESSION
+//  ================================================================
 ERR CDataCompressor::ErrXpress9StatusToJetErr(
     const XPRESS9_STATUS& status )
+//  ================================================================
 {
     if ( status.m_uStatus == Xpress9Status_OK )
     {
@@ -1311,12 +1612,16 @@ ERR CDataCompressor::ErrXpress9StatusToJetErr(
     }
 }
 
+//  ================================================================
+// This function decompresses data compressed with xpress9 to prove that
+// xpress9 compression isn't introducing data corruption.
 
 ERR CDataCompressor::ErrVerifyCompressXpress9_(
     _In_reads_bytes_( cbDataCompressed ) const BYTE * const pbDataCompressed,
     const INT cbDataCompressed,
     const INT cbDataCompressedMax,
     IDataCompressorStats * const pstats )
+    //  ================================================================
 {
     ERR err = JET_errSuccess;
     DATA dataCompressed;
@@ -1332,12 +1637,16 @@ ERR CDataCompressor::ErrVerifyCompressXpress9_(
     }
     else
     {
+        // Only allowed if running unit tests with uninitialized caches
         Alloc( pbDecompress = new BYTE[ cbDataCompressedMax ] );
     }
 
     err = ErrDecompressXpress9_( dataCompressed, pbDecompress, cbDataCompressedMax, &cbDataDecompressed, pstats );
     if ( err != JET_errSuccess && err != JET_errOutOfMemory )
     {
+        // We have caught a potential data corruption issue in our compress/decompress pipeline !
+        // Crash and diagnose.
+        // If we couldn't decompress because of OOM, do nothing. Verification is an optional step.
 
         FireWall( "Xpress9CannotCompress" );
         err = ErrERRCheck( errRECCannotCompress );
@@ -1349,6 +1658,7 @@ ERR CDataCompressor::ErrVerifyCompressXpress9_(
     }
     else
     {
+        // Only allowed if running unit tests with uninitialized caches
         delete[] pbDecompress;
     }
 
@@ -1356,21 +1666,24 @@ HandleError:
     return err;
 }
 
+//  ================================================================
 ERR CDataCompressor::ErrCompressXpress9_(
     const DATA& data,
     _Out_writes_bytes_to_( cbDataCompressedMax, *pcbDataCompressedActual ) BYTE * const pbDataCompressed,
     const INT cbDataCompressedMax,
     _Out_ INT * const pcbDataCompressedActual )
+//  ================================================================
 {
     Assert( data.Cb() >= m_cbMin );
-    Assert( data.Cb() <= lMax );
+    Assert( data.Cb() <= lMax );                // size must fit in a DWORD
 
     ERR err = JET_errSuccess;
-    const INT cbReserved = sizeof( Xpress9Header );
+    const INT cbReserved = sizeof( Xpress9Header ); // Reserve 5 bytes for the header
     XPRESS9_STATUS status = { 0 };
     XPRESS9_ENCODER encode = 0;
     Call( ErrXpress9EncodeOpen_( &encode ) );
 
+    // start an encoding session using the exact parameters for Cosmos Level 6 compression
     XPRESS9_ENCODER_PARAMS params;
     memset( &params, 0, sizeof( params ) );
     params.m_cbSize = sizeof( params );
@@ -1384,6 +1697,7 @@ ERR CDataCompressor::ErrCompressXpress9_(
     Xpress9EncoderStartSession( &status, encode, &params, fTrue );
     Call( ErrXpress9StatusToJetErr( status ) );
 
+    // Compress the data
     Xpress9EncoderAttach( &status, encode, data.Pv(), (unsigned)data.Cb(), fTrue );
     Call( ErrXpress9StatusToJetErr( status ) );
 
@@ -1403,7 +1717,11 @@ ERR CDataCompressor::ErrCompressXpress9_(
 
         if ( cbCompressedRemainder > 0 )
         {
+            // The buffer was too small for the compressed data.
+            // Very likely, data didn't compress well and we ended up 
+            // needing more bytes than original because of xpress9 format.
             
+            // Empty the encoder. Testing shows that Detach/StartSession/Attach doesn't reset the encoder.
             do
             {
                 cbCompressedRemainder = Xpress9EncoderFetchCompressedData(
@@ -1439,15 +1757,19 @@ HandleError:
 
     return err;
 }
-#endif
+#endif // XPRESS9_COMPRESSION
 
 #ifdef XPRESS10_COMPRESSION
+//  ================================================================
+// This function decompresses data compressed with xpress10 to prove that
+// xpress10 compression isn't introducing data corruption.
 
 ERR CDataCompressor::ErrVerifyCompressXpress10_(
     _In_reads_bytes_( cbDataCompressed ) const BYTE * const pbDataCompressed,
     const INT cbDataCompressed,
     const INT cbDataUncompressed,
     IDataCompressorStats * const pstats )
+    //  ================================================================
 {
     ERR err = JET_errSuccess;
     DATA dataCompressed;
@@ -1465,24 +1787,35 @@ ERR CDataCompressor::ErrVerifyCompressXpress10_(
     }
     else
     {
+        // Only allowed if running unit tests with uninitialized caches
         Alloc( pbDecompress = new BYTE[ cbDataUncompressed ] );
     }
 
+    // This is probably cheap enough that we can leave this in forever for peace of mind.
     err = ErrDecompressXpress10_( dataCompressed, pbDecompress, cbDataUncompressed, &cbDataDecompressed, pstats, fFalse, &fUsedCorsica );
     if ( ( err == JET_errSuccess && cbDataUncompressed != cbDataDecompressed ) ||
          ( err != JET_errSuccess && err != JET_errOutOfMemory ) )
     {
+        // We have caught a potential data corruption issue in our compress/decompress pipeline !
+        // Crash and diagnose.
+        // If we couldn't decompress because of OOM, do nothing. Verification is an optional step.
 
         FireWall( "Xpress10CorsicaCannotDecompress" );
         err = ErrERRCheck( errRECCannotCompress );
     }
     else if ( fUsedCorsica )
     {
+        // This is hopefully cheap enough that we can leave this in forever for peace of mind.
+        // If it is too expensive, we may need to do verification on less than 100% of the data, maybe progressively
+        // (start with 100% on process start and go down slowly, eg)
         err = ErrDecompressXpress10_( dataCompressed, pbDecompress, cbDataUncompressed, &cbDataDecompressed, pstats, fTrue, &fUsedCorsica );
         AssertTrack( err != JET_errSuccess || !fUsedCorsica, "SoftwareDecompressionFlagNotHonored" );
         if ( ( err == JET_errSuccess && cbDataUncompressed != cbDataDecompressed ) ||
              ( err != JET_errSuccess && err != JET_errOutOfMemory ) )
         {
+            // We have caught a potential data corruption issue in our compress/decompress pipeline !
+            // Crash and diagnose.
+            // If we couldn't decompress because of OOM, do nothing. Verification is an optional step.
 
             FireWall( "Xpress10SoftwareCannotDecompress" );
             err = ErrERRCheck( errRECCannotCompress );
@@ -1495,6 +1828,7 @@ ERR CDataCompressor::ErrVerifyCompressXpress10_(
     }
     else
     {
+        // Only allowed if running unit tests with uninitialized caches
         delete[] pbDecompress;
     }
 
@@ -1502,15 +1836,18 @@ HandleError:
     return err;
 }
 
+// Software Xpress10 compression is only for unit-test
 BOOL g_fAllowXpress10SoftwareCompression = fFalse;
 CInitOnce< ERR, decltype(&ErrXpress10CorsicaInit) > g_CorsicaInitOnce;
 
+//  ================================================================
 ERR CDataCompressor::ErrCompressXpress10_(
     const DATA& data,
     _Out_writes_bytes_to_( cbDataCompressedMax, *pcbDataCompressedActual ) BYTE * const pbDataCompressed,
     const INT cbDataCompressedMax,
     _Out_ INT * const pcbDataCompressedActual,
     IDataCompressorStats * const pstats )
+//  ================================================================
 {
     PERFOptDeclare( const HRT hrtStart = HrtHRTCount() );
     ERR err;
@@ -1519,6 +1856,7 @@ ERR CDataCompressor::ErrCompressXpress10_(
 
     Assert( data.Cb() <= wMax );
 
+    // Reserve 15 BYTE for signature
     C_ASSERT( sizeof( Xpress10Header ) == 15 );
     const INT cbReserved = sizeof( Xpress10Header );
     ULONGLONG ullCompressedCrc;
@@ -1570,16 +1908,23 @@ ERR CDataCompressor::ErrCompressXpress10_(
 
     return err;
 }
-#endif
+#endif // XPRESS10_COMPRESSION
 
+ //  ================================================================
 ERR CDataCompressor::ErrDecompress7BitAscii_(
     const DATA& dataCompressed,
     _Out_writes_bytes_to_opt_( cbDataMax, *pcbDataActual ) BYTE * const pbData,
     const INT cbDataMax,
     _Out_ INT * const pcbDataActual )
+//  ================================================================
+//
+//  This compression format is PERSISTED
+//
+//-
 {
     ERR err = JET_errSuccess;
     
+    // first calculate the final length
     const BYTE * const pbCompressed = (BYTE *)dataCompressed.Pv();
     const BYTE bHeader = *(BYTE *)dataCompressed.Pv();
     const BYTE bIdentifier = bHeader >> 3;
@@ -1598,14 +1943,16 @@ ERR CDataCompressor::ErrDecompress7BitAscii_(
         err = ErrERRCheck( JET_wrnBufferTruncated );
     }
 
+    // no output buffer? just return the size
     if( 0 == cbDataMax || NULL == pbData )
     {
         goto HandleError;
     }
 
+    // calculate the number of bytes to extract
     const INT ibDataMax = min( cbTotal, cbDataMax );
 
-    INT ibCompressed = 1;
+    INT ibCompressed = 1;   // skip the header
     INT ibitCompressed = 0;
     for( INT ibData = 0; ibData < ibDataMax; ++ibData )
     {
@@ -1613,11 +1960,13 @@ ERR CDataCompressor::ErrDecompress7BitAscii_(
         BYTE bDecompressed;
         if( ibitCompressed <= 1 )
         {
+            // all the bits we need are in this one byte
             const BYTE bCompressed = pbCompressed[ibCompressed];
             bDecompressed = (BYTE)(( bCompressed >> ibitCompressed ) & 0x7F);
         }
         else
         {
+            // all the bits we need are in this word
             Assert( ibCompressed < dataCompressed.Cb()-1 );
             const WORD wCompressed = (WORD)pbCompressed[ibCompressed] | ( (WORD)pbCompressed[ibCompressed+1] << 8 );
             bDecompressed = (BYTE)(( wCompressed >> ibitCompressed ) & 0x7F);
@@ -1636,14 +1985,21 @@ HandleError:
     return err;
 }
 
+//  ================================================================
 ERR CDataCompressor::ErrDecompress7BitUnicode_(
     const DATA& dataCompressed,
     _Out_writes_bytes_to_opt_( cbDataMax, *pcbDataActual ) BYTE * const pbData,
     const INT cbDataMax,
     _Out_ INT * const pcbDataActual )
+//  ================================================================
+//
+//  This compression format is PERSISTED
+//
+//-
 {
     ERR err = JET_errSuccess;
     
+    // first calculate the final length
     const BYTE * const pbCompressed = (BYTE *)dataCompressed.Pv();
     const BYTE bHeader = *(BYTE *)dataCompressed.Pv();
     const BYTE bIdentifier = bHeader >> 3;
@@ -1662,14 +2018,16 @@ ERR CDataCompressor::ErrDecompress7BitUnicode_(
         err = ErrERRCheck( JET_wrnBufferTruncated );
     }
 
+    // no output buffer? just return the size
     if( 0 == cbDataMax || NULL == pbData )
     {
         goto HandleError;
     }
 
+    // calculate the number of bytes to extract
     const INT ibDataMax = min( *pcbDataActual, cbDataMax );
 
-    INT ibCompressed = 1;
+    INT ibCompressed = 1;   // skip the header
     INT ibitCompressed = 0;
     for( INT ibData = 0; ibData < ibDataMax; )
     {
@@ -1677,16 +2035,19 @@ ERR CDataCompressor::ErrDecompress7BitUnicode_(
         BYTE bDecompressed;
         if( ibitCompressed <= 1 )
         {
+            // all the bits we need are in this one byte
             const BYTE bCompressed = pbCompressed[ibCompressed];
             bDecompressed = (BYTE)(( bCompressed >> ibitCompressed ) & 0x7F);
         }
         else
         {
+            // all the bits we need are in this word
             Assert( ibCompressed < dataCompressed.Cb()-1 );
             const WORD wCompressed = (WORD)pbCompressed[ibCompressed] | ( (WORD)pbCompressed[ibCompressed+1] << 8 );
             bDecompressed = (BYTE)(( wCompressed >> ibitCompressed ) & 0x7F);
         }
 
+        // insert the byte and the following null
         pbData[ibData++] = bDecompressed;
         if( ibData >= ibDataMax )
         {
@@ -1711,18 +2072,21 @@ HandleError:
     return err;
 }
 
+//  ================================================================
 ERR CDataCompressor::ErrDecompressXpress_(
     const DATA& dataCompressed,
     _Out_writes_bytes_to_opt_( cbDataMax, *pcbDataActual ) BYTE * const pbData,
     const INT cbDataMax,
     _Out_ INT * const pcbDataActual,
     IDataCompressorStats * const pstats )
+//  ================================================================
 {
     ERR err = JET_errSuccess;
     PERFOptDeclare( const HRT hrtStart = HrtHRTCount() );
 
     XpressDecodeStream decode = 0;
 
+    // first calculate the final length
     const BYTE * const  pbCompressed    = (BYTE *)dataCompressed.Pv();
     const UnalignedLittleEndian<WORD> * const pwSize    = (UnalignedLittleEndian<WORD> *)(pbCompressed + 1);
     const INT cbUncompressed            = *pwSize;
@@ -1733,6 +2097,7 @@ ERR CDataCompressor::ErrDecompressXpress_(
 
     *pcbDataActual = cbUncompressed;
     
+    // there is a header byte and then a WORD containing the size of the data
     const INT cbHeader              = sizeof(BYTE) + sizeof(WORD);
     const BYTE * pbCompressedData   = (BYTE *)dataCompressed.Pv() + cbHeader;
     const INT cbCompressedData      = dataCompressed.Cb() - cbHeader;
@@ -1740,6 +2105,7 @@ ERR CDataCompressor::ErrDecompressXpress_(
 
     if ( NULL == pbData || 0 == cbDataMax )
     {
+        // no data, just the size
         err = ErrERRCheck( JET_wrnBufferTruncated );
         goto HandleError;
     }
@@ -1749,14 +2115,15 @@ ERR CDataCompressor::ErrDecompressXpress_(
     Call( ErrXpressDecodeOpen_( &decode ) );
 
     const INT cbDecoded = XpressDecode(
-        decode,
-        pbData,
-        cbUncompressed,
-        cbWanted,
-        pbCompressedData,
-        cbCompressedData );
+        decode,             // decoder's workspace
+        pbData,             // output buffer (decompressed)
+        cbUncompressed,     // original size of the data
+        cbWanted,           // # of bytes to decode (should be <= original data size)
+        pbCompressedData,   // compressed data buffer
+        cbCompressedData ); // size of compressed data
     if( -1 == cbDecoded )
     {
+        // decompression has failed
         Call( ErrERRCheck( JET_errDecompressionFailed ) );
     }
     Assert( cbDecoded == cbWanted );
@@ -1780,10 +2147,20 @@ HandleError:
     return err;
 }
 
+//  ================================================================
 ERR CDataCompressor::ErrDecompressScrub_(
     const DATA& data )
+//  ================================================================
+//
+//  Decompressing data that was scrubbed using the COMPRESS_SCRUB
+//  does not return any valid data and does not change the buffer
+//  in any way. This function merely signals wrnRECCompressionScrubDetected
+//  so that callers can take proper actions.
+//
+//-
 {
 #ifdef DEBUG
+    // first calculate the final length
     const BYTE * const pbData = (BYTE *)data.Pv();
     const INT cbData = data.Cb();
     Assert( cbData >= 1 );
@@ -1791,12 +2168,14 @@ ERR CDataCompressor::ErrDecompressScrub_(
     const BYTE bIdentifier = bHeader >> 3;
 
     Assert( bIdentifier == COMPRESS_SCRUB );
-    Expected( ( bHeader & 0x07 ) == 0 );
+    Expected( ( bHeader & 0x07 ) == 0 );    //  no meta-data for this compression type.
 
+    // make sure all the characters are the same
     if ( cbData > 1 )
     {
         const CHAR chKnownPattern = pbData[1];
 
+        // currently only used to scrub orphaned LV chunks.
         Expected( chKnownPattern == chSCRUBLegacyLVChunkFill || chKnownPattern == chSCRUBDBMaintLVChunkFill );
         
         const INT cbKnownPattern = cbData - 1;
@@ -1813,12 +2192,14 @@ ERR CDataCompressor::ErrDecompressScrub_(
 }
 
 #ifdef XPRESS9_COMPRESSION
+//  ================================================================
 ERR CDataCompressor::ErrDecompressXpress9_(
     const DATA& dataCompressed,
     _Out_writes_bytes_to_opt_( cbDataMax, min( cbDataMax, *pcbDataActual ) ) BYTE * const pbData,
     const INT cbDataMax,
     _Out_ INT * const pcbDataActual,
     IDataCompressorStats * const pstats )
+//  ================================================================
 {
     ERR err = JET_errSuccess;
     PERFOptDeclare( const HRT hrtStart = HrtHRTCount() );
@@ -1828,8 +2209,10 @@ ERR CDataCompressor::ErrDecompressXpress9_(
     unsigned cbDecompressed = 0;
     unsigned cbCompressedNeeded = 0;
 
+    // Reserved 5 bytes (for the signature)
     const INT cbReserved = sizeof( Xpress9Header );
 
+    // get the compressed data
     const BYTE * pbCompressedData = (BYTE *)dataCompressed.Pv() + cbReserved;
     const INT cbCompressedData = dataCompressed.Cb() - cbReserved;
     if ( cbCompressedData < 0 )
@@ -1844,10 +2227,12 @@ ERR CDataCompressor::ErrDecompressXpress9_(
         return ErrERRCheck( JET_errDecompressionFailed );
     }
 
+    // start a decoding session
     Call( ErrXpress9DecodeOpen_( &decode ) );
     Xpress9DecoderStartSession( &status, decode, TRUE );
     Call( ErrXpress9StatusToJetErr( status ) );
 
+    // decompress the requested portion of the data
     Xpress9DecoderAttach( &status, decode, pbCompressedData, (unsigned)cbCompressedData );
     Call( ErrXpress9StatusToJetErr( status ) );
 
@@ -1872,6 +2257,8 @@ ERR CDataCompressor::ErrDecompressXpress9_(
     }
     else
     {
+        // Verify checksum
+        // Note that we can't verify the checksum if JET_wrnBufferTruncated was returned
         pHdr = (Xpress9Header*) dataCompressed.Pv();
         ULONG computedChecksum = Crc32Checksum( pbData, *pcbDataActual );
         if ( computedChecksum != pHdr->m_ulChecksum )
@@ -1896,9 +2283,10 @@ HandleError:
 
     return err;
 }
-#endif
+#endif // XPRESS9_COMPRESSION
 
 #ifdef XPRESS10_COMPRESSION
+//  ================================================================
 ERR CDataCompressor::ErrDecompressXpress10_(
     const DATA& dataCompressed,
     _Out_writes_bytes_to_opt_( cbDataMax, min( cbDataMax, *pcbDataActual ) ) BYTE * const pbData,
@@ -1907,6 +2295,7 @@ ERR CDataCompressor::ErrDecompressXpress10_(
     IDataCompressorStats * const pstats,
     BOOL fForceSoftwareDecompression,
     BOOL *pfUsedCorsica )
+//  ================================================================
 {
     ERR err = JET_errSuccess;
     BYTE *pbAlloc = NULL;
@@ -1916,6 +2305,7 @@ ERR CDataCompressor::ErrDecompressXpress10_(
     PERFOptDeclare( const HRT hrtStart = HrtHRTCount() );
     HRT dhrtHardwareLatency;
 
+    // Reserved 15 BYTE (for the signature)
     C_ASSERT( sizeof( Xpress10Header ) == 15 );
     const INT cbReserved = sizeof( Xpress10Header );
     const INT cbCompressedData = dataCompressed.Cb() - cbReserved;
@@ -1924,18 +2314,23 @@ ERR CDataCompressor::ErrDecompressXpress10_(
         return ErrERRCheck( JET_errDecompressionFailed );
     }
 
+    // Verify the header flags
     const Xpress10Header * const pHdr = (Xpress10Header *)dataCompressed.Pv();
     if ( ( pHdr->m_fCompressScheme >> 3 ) != COMPRESS_XPRESS10 )
     {
         return ErrERRCheck( JET_errDecompressionFailed );
     }
+    // first calculate the final length
     const INT cbUncompressed = pHdr->mle_cbUncompressed;
     if ( NULL == pbData || 0 == cbDataMax )
     {
+        // no data, just the size
         *pcbDataActual = cbUncompressed;
         return ErrERRCheck( JET_wrnBufferTruncated );
     }
 
+    // Xpress10 decompression cannot provide partial data for decompression,
+    // so allocate a buffer big enough to hold the whole data.
     if ( cbDataMax < cbUncompressed )
     {
         if ( g_compressionBufferCache.CbBufferSize() != 0 )
@@ -1945,6 +2340,7 @@ ERR CDataCompressor::ErrDecompressXpress10_(
         }
         else
         {
+            // Only allowed if running unit tests with uninitialized caches
             AllocR( pbAlloc = new BYTE[ cbUncompressed ] );
         }
     }
@@ -2014,12 +2410,14 @@ ERR CDataCompressor::ErrDecompressXpress10_(
     }
     else
     {
+        // Only allowed if running unit tests with uninitialized caches
         delete[] pbAlloc;
     }
     return err;
 }
-#endif
+#endif // XPRESS10_COMPRESSION
 
+//  ================================================================
 ERR CDataCompressor::ErrCompress(
     const DATA& data,
     const CompressFlags compressFlags,
@@ -2027,6 +2425,7 @@ ERR CDataCompressor::ErrCompress(
     _Out_writes_bytes_to_opt_( cbDataCompressedMax, *pcbDataCompressedActual ) BYTE * const pbDataCompressed,
     const INT cbDataCompressedMax,
     _Out_ INT * const pcbDataCompressedActual )
+//  ================================================================
 {
     ERR err = JET_errSuccess;
     BOOL fCompressed = fFalse;
@@ -2035,6 +2434,7 @@ ERR CDataCompressor::ErrCompress(
 
     if ( data.Cb() >= m_cbMin )
     {
+        // try the advanced compression algorithms in priority order (highest compression potential first)
 #ifdef XPRESS10_COMPRESSION
         if ( ( compressFlags & compressXpress10 ) && data.Cb() <= wMax )
         {
@@ -2046,13 +2446,14 @@ ERR CDataCompressor::ErrCompress(
                 pstats ),
                 TryXpress9Compression );
 
+            // Verify that compressed data is decompressible, otherwise a firmware bug/hardware issue with Corsica can result in replicated corruption.
             CallJ( ErrVerifyCompressXpress10_( pbDataCompressed, *pcbDataCompressedActual, data.Cb(), pstats ), TryXpress9Compression );
 
             fCompressed = fTrue;
         }
 
 TryXpress9Compression:
-#endif
+#endif // XPRESS10_COMPRESSION
 #ifdef XPRESS9_COMPRESSION
         if ( !fCompressed && ( compressFlags & compressXpress9 ) )
         {
@@ -2063,6 +2464,9 @@ TryXpress9Compression:
                 pcbDataCompressedActual ),
                 TryXpressCompression );
 
+            // Verify that compressed data is decompressible.
+            // Just to be on the safe side, we consider OOM during verify a failure to compress
+            // (not a verification failure which would indicate a serious corruption bug).
 
             CallJ( ErrVerifyCompressXpress9_( pbDataCompressed, *pcbDataCompressedActual, cbDataCompressedMax, pstats ), TryXpressCompression );
 
@@ -2070,7 +2474,7 @@ TryXpress9Compression:
         }
 
 TryXpressCompression:
-#endif
+#endif // XPRESS9_COMPRESSION
         if ( !fCompressed && ( compressFlags & compressXpress ) )
         {
             CallJ( ErrCompressXpress_(
@@ -2084,6 +2488,7 @@ TryXpressCompression:
             fCompressed = fTrue;
         }
 
+        // if this compression was better than 7-bit unicode can do then we're done
 
         if ( fCompressed && *pcbDataCompressedActual <= CbCompressed7BitUnicode_( data.Cb() ) )
         {
@@ -2092,11 +2497,14 @@ TryXpressCompression:
     }
 
 Try7bitCompression:
+    // We don't want to clobber any errors reported by lower layers unless its errRECCannotCompress or OOM.
+    // OOM is a transient condition, optionally try 7-bit compression and/or return errRECCannotCompress
     if ( err != JET_errSuccess && err != errRECCannotCompress && err != JET_errOutOfMemory )
     {
         return err;
     }
 
+    // try 7 bit compression
     if ( compressFlags & compress7Bit )
     {
         switch ( Calculate7BitCompressionScheme_( data, fCompressed ) )
@@ -2126,12 +2534,14 @@ Try7bitCompression:
     return ErrERRCheck( errRECCannotCompress );
 }
 
+//  ================================================================
 ERR CDataCompressor::ErrDecompress(
     const DATA& dataCompressed,
     IDataCompressorStats * const pstats,
     _Out_writes_bytes_to_opt_( cbDataMax, min( cbDataMax, *pcbDataActual ) ) BYTE * const pbData,
     const INT cbDataMax,
     _Out_ INT * const pcbDataActual )
+//  ================================================================
 {
     ERR err = JET_errSuccess;
     BOOL fUnused = fFalse;
@@ -2151,6 +2561,7 @@ ERR CDataCompressor::ErrDecompress(
             Call( ErrDecompressXpress_( dataCompressed, pbData, cbDataMax, pcbDataActual, pstats ) );
             break;
         case COMPRESS_SCRUB:
+            //  No one can call this to actually decompress any data, caller can only query the size.
             Expected( pbData == NULL );
             Expected( cbDataMax == 0 );
             Assert( g_fRepair || FNegTest( fInvalidUsage ) );
@@ -2168,6 +2579,9 @@ ERR CDataCompressor::ErrDecompress(
             break;
 #endif
         default:
+            // fUnused *is* used in the conditionally compiled XPRESS10_COMPRESSION above,
+            // but if XPRESS10_COMPRESSION is not defined, we get a compiler warning, so
+            // let's "use" fUnused here:
             Unused( fUnused );
             *pcbDataActual = 0;
             Call( ErrERRCheck( JET_errDecompressionFailed ) );
@@ -2185,7 +2599,9 @@ HandleError:
     return err;
 }
 
+//  ================================================================
 ERR CDataCompressor::ErrInit( const INT cbMin, const INT cbMax )
+//  ================================================================
 {
     ERR err = JET_errSuccess;
 
@@ -2226,7 +2642,9 @@ HandleError:
     return err;
 }
 
+//  ================================================================
 void CDataCompressor::Term()
+//  ================================================================
 {
     for ( INT iencode = 0; iencode < m_cencodeCachedMax; ++iencode )
     {
@@ -2274,15 +2692,20 @@ void CDataCompressor::Term()
     m_cbMax = 0;
 }
 
+// This is a global instance of the data compressor, which can be used by the entire process
 static CDataCompressor g_dataCompressor;
 
+//  ================================================================
 ERR ErrRECScrubLVChunk(
     DATA& data,
     const CHAR chScrub )
+//  ================================================================
 {
+    // we are only expecting LV chunks for now.
     return g_dataCompressor.ErrScrub( data, chScrub );
 }
 
+//  ================================================================
 ERR ErrPKCompressData(
     const DATA& data,
     const CompressFlags compressFlags,
@@ -2290,29 +2713,34 @@ ERR ErrPKCompressData(
     _Out_writes_bytes_to_( cbDataCompressedMax, *pcbDataCompressedActual ) BYTE * const pbDataCompressed,
     const INT cbDataCompressedMax,
     _Out_ INT * const pcbDataCompressedActual )
+//  ================================================================
 {
     CDataCompressorPerfCounters perfcounters( pinst ? pinst->m_iInstance : 0 );
     
     return g_dataCompressor.ErrCompress( data, compressFlags, &perfcounters, pbDataCompressed, cbDataCompressedMax, pcbDataCompressedActual );
 }
 
+//  ================================================================
 ERR ErrPKIDecompressData(
     const DATA& dataCompressed,
     const INST* const pinst,
     _Out_writes_bytes_to_opt_( cbDataMax, min( cbDataMax, *pcbDataActual ) ) BYTE * const pbData,
     const INT cbDataMax,
     _Out_ INT * const pcbDataActual )
+//  ================================================================
 {
     CDataCompressorPerfCounters perfcounters( pinst ? pinst->m_iInstance : 0 );
     return g_dataCompressor.ErrDecompress( dataCompressed, &perfcounters, pbData, cbDataMax, pcbDataActual );
 }
 
+//  ================================================================
 VOID PKIReportDecompressionFailed(
         const IFMP ifmp,
         const PGNO pgno,
         const INT iline,
         const OBJID objidFDP,
         const PGNO pgnoFDP )
+//  ================================================================
 {
     INST *pinst = ( ifmp != ifmpNil ) ? PinstFromIfmp( ifmp ) : pinstNil;
     const WCHAR *rgsz[5];
@@ -2350,12 +2778,14 @@ VOID PKIReportDecompressionFailed(
     }
 }
 
+//  ================================================================
 ERR ErrPKDecompressData(
     const DATA& dataCompressed,
     const FUCB* const pfucb,
     _Out_writes_bytes_to_opt_( cbDataMax, min( cbDataMax, *pcbDataActual ) ) BYTE * const pbData,
     const INT cbDataMax,
     _Out_ INT * const pcbDataActual )
+//  ================================================================
 {
     const ERR err = ErrPKIDecompressData(
             dataCompressed,
@@ -2375,6 +2805,7 @@ ERR ErrPKDecompressData(
     return err;
 }
 
+//  ================================================================
 ERR ErrPKDecompressData(
     const DATA& dataCompressed,
     const IFMP ifmp,
@@ -2382,6 +2813,7 @@ ERR ErrPKDecompressData(
     _Out_writes_bytes_to_opt_( cbDataMax, min( cbDataMax, *pcbDataActual ) ) BYTE * const pbData,
     const INT cbDataMax,
     _Out_ INT * const pcbDataActual )
+//  ================================================================
 {
     const ERR err = ErrPKIDecompressData(
             dataCompressed,
@@ -2396,11 +2828,13 @@ ERR ErrPKDecompressData(
     return err;
 }
 
+//  ================================================================
 ERR ErrPKAllocAndDecompressData(
     const DATA& dataCompressed,
     const FUCB* const pfucb,
     _Outptr_result_bytebuffer_( *pcbDataActual )  BYTE ** const ppbData,
     _Out_ INT * const pcbDataActual )
+//  ================================================================
 {
     ERR err = JET_errSuccess;
 
@@ -2424,24 +2858,33 @@ HandleError:
     return err;
 }
 
+//  ================================================================
 BYTE * PbPKAllocCompressionBuffer()
+//  ================================================================
 {
     return g_compressionBufferCache.PbAlloc();
 }
 
+//  ================================================================
 INT CbPKCompressionBuffer()
+//  ================================================================
 {
     return g_compressionBufferCache.CbBufferSize();
 }
 
+//  ================================================================
 VOID PKFreeCompressionBuffer( _Post_ptr_invalid_ BYTE * const pb )
+//  ================================================================
 {
     g_compressionBufferCache.Free(pb);
 }
 
+//  ================================================================
 ERR ErrPKInitCompression( const INT cbPage, const INT cbCompressMin, const INT cbCompressMax )
+//  ================================================================
 {
     ERR err = JET_errSuccess;
+    // Buffer size needs to be as big as the page size for compressing intrinsic LVs ( extrinsic LVs only need JET_paramLVChunkSizeMost + AES256 overhead )
     CallJ( g_compressionBufferCache.ErrInit( cbPage ), Term );
     CallJ( g_dataCompressor.ErrInit( cbCompressMin, cbCompressMax ), TermBufferCache );
     return err;
@@ -2453,7 +2896,9 @@ Term:
     return err;
 }
 
+//  ================================================================
 void PKTermCompression()
+//  ================================================================
 {
 #ifdef XPRESS10_COMPRESSION
     Xpress10CorsicaTerm();
@@ -2465,7 +2910,13 @@ void PKTermCompression()
 
 #ifdef ENABLE_JET_UNIT_TEST
 
+//  ================================================================
 class TestCompressorStats : public IDataCompressorStats
+//  ================================================================
+//
+//  Used in the unit-tests
+//
+//-
 {
     public:
         TestCompressorStats() :
@@ -2516,7 +2967,9 @@ class TestCompressorStats : public IDataCompressorStats
         QWORD m_dhrtsDecompression;
 };
     
+//  ================================================================
 JETUNITTEST( CDataCompressor, 7BitAscii )
+//  ================================================================
 {
     CDataCompressor compressor;
     TestCompressorStats stats;
@@ -2531,12 +2984,14 @@ JETUNITTEST( CDataCompressor, 7BitAscii )
 
     CHECK( JET_errSuccess == compressor.ErrInit( 1024, 4096 ) );
 
+    // data that is too small to compress
     sz = "foo";
     data.SetPv( sz );
     data.SetCb( strlen(sz) );
     err = compressor.ErrCompress( data, compress7Bit, &stats, rgbBuf1, cbBuf, &cbDataActual );
     CHECK( errRECCannotCompress == err );
 
+    // data that is just big enough to compress
     sz = "1234567890ABCDEF";
     data.SetPv( sz );
     data.SetCb( strlen(sz) );
@@ -2544,6 +2999,7 @@ JETUNITTEST( CDataCompressor, 7BitAscii )
     CHECK( JET_errSuccess == err );
     CHECK( 15 == cbDataActual );
 
+    // decompress the data
     data.SetPv( rgbBuf1 );
     data.SetCb( cbDataActual );
     err = compressor.ErrDecompress( data, &stats, rgbBuf2, cbBuf, &cbDataActual );
@@ -2551,6 +3007,7 @@ JETUNITTEST( CDataCompressor, 7BitAscii )
     CHECK( 16 == cbDataActual );
     CHECK( 0 == memcmp( sz, rgbBuf2, 16 ) );
 
+    // decompress 1 byte of the data
     data.SetPv( rgbBuf1 );
     data.SetCb( 15 );
     err = compressor.ErrDecompress( data, &stats, rgbBuf2, 1, &cbDataActual );
@@ -2561,7 +3018,9 @@ JETUNITTEST( CDataCompressor, 7BitAscii )
     compressor.Term();
 }
 
+//  ================================================================
 JETUNITTEST( CDataCompressor, 7BitUnicode )
+//  ================================================================
 {
     CDataCompressor compressor;
     TestCompressorStats stats;
@@ -2576,12 +3035,14 @@ JETUNITTEST( CDataCompressor, 7BitUnicode )
 
     CHECK( JET_errSuccess == compressor.ErrInit( 1024, 8192 ) );
 
+    // data that is too small to compress
     sz = L"f";
     data.SetPv( sz );
     data.SetCb( wcslen(sz) );
     err = compressor.ErrCompress( data, compress7Bit, &stats, rgbBuf1, cbBuf, &cbDataActual );
     CHECK( errRECCannotCompress == err );
 
+    // data that is just big enough to compress
     sz = L"12";
     data.SetPv( sz );
     data.SetCb( wcslen(sz)*sizeof(sz[0]) );
@@ -2589,6 +3050,7 @@ JETUNITTEST( CDataCompressor, 7BitUnicode )
     CHECK( JET_errSuccess == err );
     CHECK( 3 == cbDataActual );
 
+    // decompress the data
     data.SetPv( rgbBuf1 );
     data.SetCb( cbDataActual );
     err = compressor.ErrDecompress( data, &stats, rgbBuf2, cbBuf, &cbDataActual );
@@ -2596,6 +3058,7 @@ JETUNITTEST( CDataCompressor, 7BitUnicode )
     CHECK( 4 == cbDataActual );
     CHECK( 0 == memcmp( sz, rgbBuf2, 4 ) );
 
+    // decompress 1 byte of the data
     data.SetPv( rgbBuf1 );
     data.SetCb( 3 );
     err = compressor.ErrDecompress( data, &stats, rgbBuf2, 1, &cbDataActual );
@@ -2610,7 +3073,9 @@ JETUNITTEST( CDataCompressor, 7BitUnicode )
 #undef CHECK
 #define CHECK Enforce
 
+//  ================================================================
 void DataCompressorBasic( const CompressFlags compressFlags, BYTE* rgbBuf = NULL, INT cbBuf = 2048 )
+//  ================================================================
 {
     CDataCompressor compressor;
     TestCompressorStats stats;
@@ -2635,6 +3100,7 @@ void DataCompressorBasic( const CompressFlags compressFlags, BYTE* rgbBuf = NULL
     CHECK( JET_errSuccess == err );
     CHECK( cbDataActual < cbBuf );
 
+    // query the size of the data
     data.SetPv( rgbBufCompressed );
     data.SetCb( cbDataActual );
 
@@ -2643,11 +3109,13 @@ void DataCompressorBasic( const CompressFlags compressFlags, BYTE* rgbBuf = NULL
     CHECK( JET_wrnBufferTruncated == err );
     CHECK( cbBuf == cbDataActual );
 
+    // decompress the data
     err = compressor.ErrDecompress( data, &stats, rgbBufDecompressed, cbBuf, &cbDataActual );
     CHECK( JET_errSuccess == err );
     CHECK( cbBuf == cbDataActual );
     CHECK( 0 == memcmp( rgbBuf, rgbBufDecompressed, cbDataActual ) );
 
+    // decompress 1 byte of the data
     rgbBufDecompressed[0] = 0;
     err = compressor.ErrDecompress( data, &stats, rgbBufDecompressed, 1, &cbDataActual );
     CHECK( JET_wrnBufferTruncated == err );
@@ -2659,20 +3127,26 @@ void DataCompressorBasic( const CompressFlags compressFlags, BYTE* rgbBuf = NULL
 
 #pragma pop_macro("CHECK")
 
+//  ================================================================
 JETUNITTEST( CDataCompressor, Xpress )
+//  ================================================================
 {
     DataCompressorBasic( compressXpress );
 }
 
 #ifdef XPRESS9_COMPRESSION
+//  ================================================================
 JETUNITTEST( CDataCompressor, Xpress9Cpu )
+//  ================================================================
 {
     DataCompressorBasic( compressXpress9 );
 }
 #endif
 
 #ifdef XPRESS10_COMPRESSION
+//  ================================================================
 JETUNITTEST( CDataCompressor, Xpress10 )
+//  ================================================================
 {
     CHECK( JET_errSuccess == ErrPKInitCompression( 32*1024, 1024, 32*1024 ) );
     g_fAllowXpress10SoftwareCompression = fTrue;
@@ -2682,8 +3156,12 @@ JETUNITTEST( CDataCompressor, Xpress10 )
     PKTermCompression();
 }
 
+//  ================================================================
 JETUNITTEST( CDataCompressor, Xpress10FallbackXpress )
+//  ================================================================
 {
+    // If neither Corsica nor software compression for xpress10 is enabled,
+    // we should fallback to xpress, if specified.
     CHECK( JET_errSuccess == ErrPKInitCompression( 32*1024, 1024, 32*1024 ) );
     DataCompressorBasic( CompressFlags( compressXpress10 | compressXpress ) );
     DataCompressorBasic( CompressFlags( compressXpress10 | compressXpress ), NULL, 8150 );
@@ -2691,7 +3169,9 @@ JETUNITTEST( CDataCompressor, Xpress10FallbackXpress )
 }
 #endif
 
+//  ================================================================
 JETUNITTEST( CDataCompressor, XpressThreshold )
+//  ================================================================
 {
     CDataCompressor compressor;
     TestCompressorStats stats;
@@ -2710,10 +3190,12 @@ JETUNITTEST( CDataCompressor, XpressThreshold )
     memset( rgbBufOrig, chRECCompressTestFill, cbBuf );
     data.SetPv( rgbBufOrig );
 
+    // Smallest size that does compress
     data.SetCb( cbMinDataForXpress );
     err = compressor.ErrCompress( data, compressXpress, &stats, rgbBufCompressed, sizeof(rgbBufCompressed), &cbDataActual );
     CHECK( JET_errSuccess == err );
 
+    // Too small to compress
     data.SetCb( cbMinDataForXpress - 1 );
     err = compressor.ErrCompress( data, compressXpress, &stats, rgbBufCompressed, sizeof(rgbBufCompressed), &cbDataActual );
     CHECK( errRECCannotCompress == err );
@@ -2721,7 +3203,9 @@ JETUNITTEST( CDataCompressor, XpressThreshold )
     compressor.Term();
 }
 
+//  ================================================================
 JETUNITTEST( CDataCompressor, Scrub )
+//  ================================================================
 {
     CDataCompressor compressor;
     TestCompressorStats stats;
@@ -2734,6 +3218,7 @@ JETUNITTEST( CDataCompressor, Scrub )
 
     CHECK( JET_errSuccess == compressor.ErrInit( 1024, 2048 ) );
 
+    // compress the data
     memset( rgbBufOrig, 0, cbBuf );
     memset( rgbBufScrubbed, chSCRUBDBMaintLVChunkFill, cbBuf );
     data.SetPv( rgbBufOrig );
@@ -2742,6 +3227,7 @@ JETUNITTEST( CDataCompressor, Scrub )
     CHECK( JET_errSuccess == err );
     CHECK( 0 == memcmp( rgbBufOrig + 1, rgbBufScrubbed, cbBuf - 1 ) );
 
+    // decompress the data
     INT cbDataActual = INT_MAX;
     UtilMemCpy( rgbBufScrubbed, rgbBufOrig, cbBuf );
     FNegTestSet( fInvalidUsage );
@@ -2751,12 +3237,14 @@ JETUNITTEST( CDataCompressor, Scrub )
     CHECK( 0 == cbDataActual );
     CHECK( 0 == memcmp( rgbBufOrig, rgbBufScrubbed, cbBuf ) );
 
+    // compress 1 byte of data
     memset( rgbBufOrig, 0, cbBuf );
     data.SetPv( rgbBufOrig );
     data.SetCb( 1 );
     err = compressor.ErrScrub( data, chSCRUBDBMaintLVChunkFill );
     CHECK( JET_errSuccess == err );
 
+    // decompress 1 byte of data
     cbDataActual = INT_MAX;
     UtilMemCpy( rgbBufScrubbed, rgbBufOrig, cbBuf );
     FNegTestSet( fInvalidUsage );
@@ -2773,7 +3261,9 @@ JETUNITTEST( CDataCompressor, Scrub )
 #undef CHECK
 #define CHECK Enforce
 
+//  ================================================================
 void DataCompressorEfficiencyCases( const CompressFlags compressFlags )
+//  ================================================================
 {
     CDataCompressor compressor;
     TestCompressorStats stats;
@@ -2787,6 +3277,7 @@ void DataCompressorEfficiencyCases( const CompressFlags compressFlags )
 
     CHECK( JET_errSuccess == compressor.ErrInit( 1024, 4096 ) );
 
+    // data that compresses well
     memset( rgbBuf1, 0xEE, cbBuf );
     data.SetPv( rgbBuf1 );
     data.SetCb( cbBuf );
@@ -2794,6 +3285,9 @@ void DataCompressorEfficiencyCases( const CompressFlags compressFlags )
     CHECK( JET_errSuccess == err );
     CHECK( cbDataActual < cbBuf );
 
+    // data that doesn't compress
+    // fill the buffer with a pattern (so all bytes are equally likely)
+    // and then randomize the order of the bytes
     for( INT ib = 0; ib < cbBuf; ++ib )
     {
         rgbBuf1[ib] = ib % 256;
@@ -2812,6 +3306,8 @@ void DataCompressorEfficiencyCases( const CompressFlags compressFlags )
     err = compressor.ErrCompress( data, compressFlags, &stats, rgbBuf2, cbBuf, &cbDataActual );
     CHECK( errRECCannotCompress == err );
 
+    // data that compresses poorly
+    // take the randomized buffer from above and set 1/8 of it to be compressable data
     memset( rgbBuf1, 0xCC, cbBuf/8 );
     
     data.SetPv( rgbBuf1 );
@@ -2825,20 +3321,26 @@ void DataCompressorEfficiencyCases( const CompressFlags compressFlags )
 
 #pragma pop_macro("CHECK")
 
+//  ================================================================
 JETUNITTEST( CDataCompressor, XpressEfficiencyCases )
+//  ================================================================
 {
     DataCompressorEfficiencyCases( compressXpress );
 }
 
 #ifdef XPRESS9_COMPRESSION
+//  ================================================================
 JETUNITTEST( CDataCompressor, Xpress9CpuEfficiencyCases )
+//  ================================================================
 {
     DataCompressorEfficiencyCases( compressXpress9 );
 }
 #endif
 
 #ifdef XPRESS10_COMPRESSION
+//  ================================================================
 JETUNITTEST( CDataCompressor, Xpress10EfficiencyCases )
+//  ================================================================
 {
     CHECK( JET_errSuccess == ErrPKInitCompression( 32*1024, 1024, 32*1024 ) );
     g_fAllowXpress10SoftwareCompression = fTrue;
@@ -2848,22 +3350,27 @@ JETUNITTEST( CDataCompressor, Xpress10EfficiencyCases )
 }
 #endif
 
+//  ================================================================
 JETUNITTEST( CCompressionBufferCache, Basic )
+//  ================================================================
 {
     CCompressionBufferCache cache;
 
     CHECK( JET_errSuccess == cache.ErrInit( 1024 ) );
     CHECK( 1024 == cache.CbBufferSize() );
 
+    // allocate a buffer
     BYTE * const pb1 = cache.PbAlloc();
     CHECK( NULL != pb1 );
     memset( pb1, 0, cache.CbBufferSize() );
     cache.Free(pb1);
 
+    // if we free one buffer we should get the same buffer back
     BYTE * const pb2 = cache.PbAlloc();
     CHECK( pb1 == pb2 );
     memset( pb2, 0xFF, cache.CbBufferSize() );
 
+    // but allocating a second buffer concurrently should give a different buffer
     BYTE * const pb3 = cache.PbAlloc();
     CHECK( pb2 != pb3 );
     
@@ -2873,5 +3380,5 @@ JETUNITTEST( CCompressionBufferCache, Basic )
     cache.Term();
 }
 
-#endif
+#endif // ENABLE_JET_UNIT_TEST
 

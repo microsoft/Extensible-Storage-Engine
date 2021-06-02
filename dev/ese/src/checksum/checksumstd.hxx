@@ -1,6 +1,7 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
+//** SYSTEM **********************************************************
 
 #include <stdlib.h>
 #include <string.h>
@@ -26,21 +27,25 @@
 using namespace std;
 #endif
 
+//** COMPILER CONTROL ************************************************
 
-#pragma warning ( disable : 4127 )
-#pragma warning ( disable : 4200 )
-#pragma warning ( disable : 4201 )
-#pragma warning ( disable : 4355 )
-#pragma warning ( 3 : 4244 )
+#pragma warning ( disable : 4127 )  //  conditional expression is constant
+#pragma warning ( disable : 4200 )  //  we allow zero sized arrays
+#pragma warning ( disable : 4201 )  //  we allow unnamed structs/unions
+#pragma warning ( disable : 4355 )  //  we allow the use of this in ctor-inits
+#pragma warning ( 3 : 4244 )        //  do not hide data truncations
 #pragma inline_depth( 255 )
 #pragma inline_recursion( on )
 
+//** OSAL *************************************************************
 
 #define OS_LAYER_VIOLATIONS
 #include "os.hxx"
 
+//** JET API **********************************************************
 
-#include "jet.h"
+#include "jet.h"                    //  Public JET API definitions
 
+//** Checksum API *****************************************************
 
 #include "checksum.hxx"

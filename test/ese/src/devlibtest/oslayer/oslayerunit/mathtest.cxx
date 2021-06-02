@@ -3,6 +3,7 @@
 
 #include "osunitstd.hxx"
 
+//  ================================================================
 
 JET_ERR ErrMathAlignmentRounding( void )
 {
@@ -21,16 +22,18 @@ JET_ERR ErrMathAlignmentRounding( void )
     OSTestCheck( 0 == roundup( 0, 32 ) );
     OSTestCheck( 0 == rounddn( 1, 32 ) );
     OSTestCheck( 32 == roundup( 1, 32 ) );
-    OSTestCheck( 32 == roundup( 28, 32 ) );
+    OSTestCheck( 32 == roundup( 28, 32 ) ); // fairly relevant
     OSTestCheck( 0 == rounddn( 31, 32 ) );
     OSTestCheck( 32 == roundup( 31, 32 ) );
     OSTestCheck( 32 == rounddn( 32, 32 ) );
     OSTestCheck( 32 == roundup( 32, 32 ) );
     OSTestCheck( 32 == rounddn( 33, 32 ) );
-    OSTestCheck( 32 != roundup( 33, 32 ) );
+    OSTestCheck( 32 != roundup( 33, 32 ) ); // xtra sure
     OSTestCheck( 64 == roundup( 33, 32 ) );
 
     OSTestCheck( 0xFFFFFFF8 == roundup( 0xFFFFFFF1, 8 ) );
+    // Rather comfortingly, this actually fails to compile with integral constant overflow.
+    //OSTestCheck( 0x0 == roundup( 0xFFFFFFF1, 16 ) );
 
     err = JET_errSuccess;
 
@@ -65,6 +68,7 @@ HandleError:
     return err;
 }
 
+//  ================================================================
 
 JET_ERR ErrFPowerOf2( void )
 {
@@ -97,6 +101,7 @@ HandleError:
     return err;
 }
 
+//  ================================================================
 
 JET_ERR ErrLog2( void )
 {
@@ -122,6 +127,7 @@ HandleError:
     return err;
 }
 
+//  ================================================================
 
 JET_ERR ErrLNextPowerOf2( void )
 {
@@ -167,9 +173,12 @@ HandleError:
     return err;
 }
 
+//  ================================================================
 
 JET_ERR ErrHalfAvalancheHash()
 {
+    // Hash a 16-bit number space into 8-bit buckets, and count collisions for each bucket.
+    //
     const INT cBits = 8;
     const INT cbBuckets = 1 << cBits;
     const UINT maxVal = 0xffffffff;
@@ -185,6 +194,7 @@ JET_ERR ErrHalfAvalancheHash()
         rgBuckets[ hash ]++;
     }
 
+    // Output the buckets
     wprintf( L"[Bucket] = count\n" );
     const INT cColumns = 4;
     const INT cRows = cbBuckets / cColumns;
@@ -206,12 +216,24 @@ HandleError:
     return err;
 }
 
+//  ================================================================
 
 CUnitTest( MathTest, 0, "And you thought you were done with math tests after college." );
 ERR MathTest::ErrTest()
 {
     JET_ERR         err = JET_errSuccess;
 
+// Note: The math functionality should all work without OS pre-init and OS init
+// having been run.  This is ensuring that.
+//
+//  COSLayerPreInit     oslayer;
+//  if ( !oslayer.FInitd() )
+//      {
+//      wprintf( L"Out of memory error during OS Layer pre-init." );
+//      err = JET_errOutOfMemory;
+//      goto HandleError;
+//      }
+//  OSTestCall( ErrOSInit() );
 
     wprintf( L"\tYou may open your booklets and begin your math test...\n");
 
@@ -232,16 +254,19 @@ HandleError:
         wprintf( L"\tDone(success).\n");
     }
 
+//  OSTerm();
 
     return err;
 }
 
+//  ================================================================
 
 USHORT UsBitsSlow( const DWORD dw )
 {
     USHORT usRet = 0;
     for( ULONG curr = dw; curr; curr = curr >> 1 )
     {
+        // SOMEONE
         if ( curr & 0x1 )
         {
             usRet++;
@@ -260,15 +285,19 @@ ERR MathTestCountingALLTHEBITS::ErrTest()
     C_ASSERT( sizeof( ULONG ) == sizeof( DWORD ) );
     do
     {
-        if ( ( ul & 0x00FFFFFF ) == 0 )
+        if ( ( ul & 0x00FFFFFF ) == 0 ) // 256 status dots
         {
             printf( "." );
         }
+        // test only UsBits() or __popcnt speed.
+        //c += UsBits( ul );
+        //c += __popcnt( (INT) ul );
         OSTestCheck( UsBits( ul ) == UsBitsSlow( ul ) );
+        //OSTestCheck( UsBits( ul ) == __popcnt( (INT) ul ) ); // only works on some CPUs
         ul++;
     }
     while( ul < ulMax );
-    c = ul;
+    c = ul;  // pointless.
 
 HandleError:
     if ( err )

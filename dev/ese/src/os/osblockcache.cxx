@@ -3,6 +3,7 @@
 
 #include "osstd.hxx"
 
+//  Block Cache Configuration
 
 CDefaultCachedFileConfiguration::CDefaultCachedFileConfiguration()
     :   m_fCachingEnabled( fFalse ),
@@ -98,6 +99,7 @@ HandleError:
     return err;
 }
 
+//  Factory methods
 
 ERR ErrOSBCCreateFileSystemWrapper( _Inout_ IFileSystemAPI** const  ppfsapiInner,
                                     _Out_   IFileSystemAPI** const  ppfsapi )
@@ -107,6 +109,7 @@ ERR ErrOSBCCreateFileSystemWrapper( _Inout_ IFileSystemAPI** const  ppfsapiInner
 
     *ppfsapi = NULL;
 
+    //  create the file system wrapper
 
     Alloc( pfsapi = new CFileSystemWrapper( ppfsapiInner ) );
 
@@ -135,6 +138,7 @@ ERR ErrOSBCCreateFileSystemFilter(  _In_    IFileSystemConfiguration* const pfsc
 
     *ppfsf = NULL;
 
+    //  create the file system filter
 
     Alloc( pfsf = new CFileSystemFilter( pfsconfig, ppfsapiInner, pfident, pctm, pcrep ) );
 
@@ -159,6 +163,7 @@ ERR ErrOSBCCreateFileWrapper(   _Inout_ IFileAPI** const    ppfapiInner,
 
     *ppfapi = NULL;
 
+    //  create the file wrapper
 
     Alloc( pfapi = new CFileWrapper( ppfapiInner ) );
 
@@ -193,15 +198,18 @@ ERR ErrOSBCCreateFileFilter(    _Inout_                     IFileAPI** const    
 
     *ppff = NULL;
 
+    //  marshal the cached file header.  note that an expected case is not getting a valid header
 
     if ( pbHeader )
     {
         (void)CCachedFileHeader::ErrLoad( pfsconfig, pbHeader, cbHeader, &pcfh );
     }
 
+    //  create the file filter
 
     Alloc( pff = new CFileFilter( ppfapiInner, pfsf, pfsconfig, pctm, volumeid, fileid, ppcfconfig, ppc, &pcfh ) );
 
+    //  return the file filter
 
     *ppff = pff;
     pff = NULL;
@@ -226,6 +234,7 @@ ERR ErrOSBCCreateFileFilterWrapper( _Inout_ IFileFilter** const         ppffInne
 
     *ppff = NULL;
 
+    //  create the file filter wrapper
 
     Alloc( pff = new CFileFilterWrapper( ppffInner, iom ) );
 
@@ -248,6 +257,7 @@ ERR ErrOSBCCreateFileIdentification( _Out_ IFileIdentification** const ppfident 
 
     *ppfident = NULL;
 
+    //  create the file identification
 
     Alloc( *ppfident = new CFileIdentification() );
 
@@ -273,9 +283,11 @@ ERR ErrOSBCCreateCache( _In_    IFileSystemFilter* const        pfsf,
 
     *ppc = NULL;
 
+    //  create the cache
 
     Call( CCacheFactory::ErrCreate( pfsf, pfident, pfsconfig, ppcconfig, pctm, ppff, &pc ) );
 
+    //  return the cache
 
     *ppc = pc;
     pc = NULL;
@@ -298,6 +310,7 @@ ERR ErrOSBCCreateCacheWrapper(  _Inout_ ICache** const  ppcInner,
 
     *ppc = NULL;
 
+    //  create the cache wrapper
 
     Alloc( pc = new CCacheWrapper( ppcInner ) );
 
@@ -322,6 +335,7 @@ ERR ErrOSBCCreateCacheRepository(   _In_    IFileIdentification* const      pfid
 
     *ppcrep = NULL;
 
+    //  create the cache repository
 
     Alloc( *ppcrep = new CCacheRepository( pfident, pctm ) );
 
@@ -340,6 +354,7 @@ ERR ErrOSBCCreateCacheTelemetry( _Out_ ICacheTelemetry** const ppctm )
 
     *ppctm = NULL;
 
+    //  create the cache telemetry
 
     Alloc( *ppctm = new CCacheTelemetry() );
 

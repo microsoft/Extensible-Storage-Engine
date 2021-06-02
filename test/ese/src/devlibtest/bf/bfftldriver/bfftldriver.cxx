@@ -11,13 +11,14 @@
 #include "jet.h"
 #endif
 
-#include "bfreqs.hxx"
-#include "_bfconst.hxx"
-#include "bfftl.hxx"
-#include "bfftldriver.hxx"
+#include "bfreqs.hxx"       // requisite thunked out types
+#include "_bfconst.hxx"     // BF constants and simple types we need
+#include "bfftl.hxx"        // BF trace data and IDs
+#include "bfftldriver.hxx"  // header for this library
 
 IOREASON g_iorThunk( (IOREASONPRIMARY) 1 );
 
+//  Terminates the FTL reader.
 
 void BFFTLITermFTLReader( __in BFFTLContext * const pbfftlc )
 {
@@ -25,6 +26,7 @@ void BFFTLITermFTLReader( __in BFFTLContext * const pbfftlc )
 
     if ( pbfftlc->pftlr )
     {
+        //  note FTLTerm destroys pbfftlc->pftlr as well
         pbfftlc->pftl->FTLTerm();
         pbfftlc->pftlr = NULL;
     }
@@ -47,6 +49,7 @@ class CFileSystemConfiguration : public CDefaultFileSystemConfiguration
         }
 } g_fsconfigFTL;
 
+//  Initializes the FTL reader.
 
 ERR ErrBFFTLIInitFTLReader( __in BFFTLContext * const pbfftlc, __in const WCHAR * const wszTraceLogFile )
 {
@@ -71,6 +74,7 @@ HandleError:
     return err;
 }
 
+//  Initializes the BF trace driver's handle / context
 
 ERR ErrBFFTLInit( __in const void * const pvTraceDataLog, __in const DWORD grbit, __out BFFTLContext ** ppbfftlc )
 {
@@ -89,7 +93,10 @@ ERR ErrBFFTLInit( __in const void * const pvTraceDataLog, __in const DWORD grbit
     }
     else
     {
+        // Deal with real trace log(s)
+        //
 
+        // Count how many logs we need to process.
         ULONG cTraceLogFiles = 0;
         const WCHAR * wszTraceLogFiles = (WCHAR*)pvTraceDataLog;
         while ( ( wszTraceLogFiles != NULL ) && ( wszTraceLogFiles[0] != L'\0' ) )
@@ -109,14 +116,17 @@ ERR ErrBFFTLInit( __in const void * const pvTraceDataLog, __in const DWORD grbit
         }
         if ( ( grbit & fBFFTLDriverCollectFTLStats ) && ( cTraceLogFiles > 1 ) )
         {
+            // Not supported when working with multiple files.
             Error( ErrERRCheck( JET_errInvalidParameter ) );
         }
 
+        // Allocate space for all file paths.
         Alloc( pbfftlc->wszTraceLogFiles = new WCHAR*[ cTraceLogFiles ] );
         memset( pbfftlc->wszTraceLogFiles, 0, cTraceLogFiles * sizeof( WCHAR* ) );
         pbfftlc->cTraceLogFiles = cTraceLogFiles;
         pbfftlc->iTraceLogFile = 0;
 
+        // Collect all paths to our array of paths.
         ULONG iTraceLogFile = 0;
         wszTraceLogFiles = (WCHAR*)pvTraceDataLog;
         while ( ( wszTraceLogFiles != NULL ) && ( wszTraceLogFiles[0] != L'\0' ) )
@@ -140,6 +150,7 @@ ERR ErrBFFTLInit( __in const void * const pvTraceDataLog, __in const DWORD grbit
         }
         Assert( cTraceLogFiles == iTraceLogFile );
 
+        // Collect max ifmp and pgnoMax from the multiple trace files.
         ULONG cifmpMin = ulMax, cifmpMax = 0;
         for ( iTraceLogFile = 0; iTraceLogFile < pbfftlc->cTraceLogFiles; iTraceLogFile++ )
         {
@@ -155,6 +166,8 @@ ERR ErrBFFTLInit( __in const void * const pvTraceDataLog, __in const DWORD grbit
             BFFTLITermFTLReader( pbfftlc );
         }
 
+        // If any of the traces was not processed (0 ifmps), force the client to process them by
+        // returning 0 in the IFMP count. Should we error out instead?
         if ( cifmpMin == 0 )
         {
             pbfftlc->cIFMP = cifmpMin;
@@ -164,6 +177,7 @@ ERR ErrBFFTLInit( __in const void * const pvTraceDataLog, __in const DWORD grbit
             pbfftlc->cIFMP = cifmpMax;
         }
 
+        // Max all pgnoMaxes.
         if ( pbfftlc->cIFMP != 0 )
         {
             for ( iTraceLogFile = 0; iTraceLogFile < pbfftlc->cTraceLogFiles; iTraceLogFile++ )
@@ -184,6 +198,7 @@ ERR ErrBFFTLInit( __in const void * const pvTraceDataLog, __in const DWORD grbit
             }
         }
 
+        // FTL reader (open first file).
         Assert( pbfftlc->cTraceLogFiles > 0 );
         Assert( pbfftlc->iTraceLogFile == 0 );
         Call( ErrBFFTLIInitFTLReader( pbfftlc, pbfftlc->wszTraceLogFiles[pbfftlc->iTraceLogFile] ) );
@@ -194,6 +209,7 @@ HandleError:
     return err;
 }
 
+//  Shuts down and frees resources maintained by the BFFTLContext.
 
 void BFFTLTerm( __out BFFTLContext * pbfftlc )
 {
@@ -202,8 +218,10 @@ void BFFTLTerm( __out BFFTLContext * pbfftlc )
         return;
     }
 
+    // FTL reader.
     BFFTLITermFTLReader( pbfftlc );
 
+    // Trace file path strings.
     if ( pbfftlc->wszTraceLogFiles )
     {
         for ( ULONG iTraceLogFile = 0; iTraceLogFile < pbfftlc->cTraceLogFiles; iTraceLogFile++ )
@@ -224,7 +242,33 @@ void BFFTLTerm( __out BFFTLContext * pbfftlc )
     delete pbfftlc;
 }
 
-  
+/*
+
+
+BOOL FBFFTLPostProcessed( __in const CFastTraceLog * pftl, const ULONG ulPostProcessVersionMajor )
+{
+    AssertSz( fFalse, "FBFFTLPostProcessed() NYI!" );
+
+    return fFalse;
+}
+
+ERR ErrBFFTLPostProcess( __inout CFastTraceLog * pftl )
+{
+    ERR err = JET_errSuccess;
+
+    AssertSz( fFalse, "ErrBFFTLPostProcess() NYI!" );
+    
+    return err;
+}
+
+PGNO CpgBFFTLHighPgnoRef( __in const IFMP ifmp )
+{
+    AssertSz( fFalse, "CpgBFFTLHighPgnoRef() NYI!" );
+
+    return -1;
+}
+
+*/  
 
 ERR ErrBFFTLIUpdIfmpCpgStats( __inout BFFTLContext * pbfftlc, __in const IFMP ifmp, __in const PGNO pgno )
 {
@@ -298,6 +342,7 @@ ERR ErrBFFTLIAddSample( __inout BFFTLContext * pbfftlc, __out BFTRACE * pbftrace
             break;
     
         default:
+            // test code uses bftidFTLReserved as discardable trace ... ugh
             AssertSz( pbftrace->traceid == bftidFTLReserved, "Unknown BF FTL Trace (%d)!\n", (ULONG)pbftrace->traceid );
             wprintf( L"T:%08x { Unknown BF FTL Trace }\n", pbftrace->tick );
     }
@@ -306,6 +351,9 @@ ERR ErrBFFTLIAddSample( __inout BFFTLContext * pbfftlc, __out BFTRACE * pbftrace
 }
 
 
+//  Gets the next trace record in the Buffer Manager FTL trace log file, returning success if we were
+//  able to get the trace, errNotFound if we're done with the trace file, and an a specific error in
+//  any case.
 
 ERR ErrBFFTLGetNext( __inout BFFTLContext * pbfftlc, __out BFTRACE * pbftrace )
 {
@@ -325,6 +373,7 @@ ERR ErrBFFTLGetNext( __inout BFFTLContext * pbfftlc, __out BFTRACE * pbftrace )
     else
     {
 
+        //  real traces: this loop will only normally execute once, unless we're switching files.
 
         while ( true )
         {
@@ -334,6 +383,7 @@ ERR ErrBFFTLGetNext( __inout BFFTLContext * pbfftlc, __out BFTRACE * pbftrace )
                 Assert( pbfftlc->cTraceLogFiles > 0 );
                 Assert( pbfftlc->iTraceLogFile < pbfftlc->cTraceLogFiles );
 
+                //  switch to the next trace file, if any
                 if ( ( pbfftlc->iTraceLogFile + 1 ) < pbfftlc->cTraceLogFiles )
                 {
                     err = JET_errSuccess;
@@ -366,6 +416,7 @@ ERR ErrBFFTLGetNext( __inout BFFTLContext * pbfftlc, __out BFTRACE * pbftrace )
 
     Assert( pbftrace->traceid != 0 );
 
+    //  accumulate statistics
 
     pbfftlc->cTracesProcessed++;
 
@@ -373,6 +424,7 @@ ERR ErrBFFTLGetNext( __inout BFFTLContext * pbfftlc, __out BFTRACE * pbftrace )
 
 HandleError:
 
+    //  once empty returns errNotFound
 
     return err;
 }
@@ -398,6 +450,7 @@ ERR ErrBFFTLPostProcess( __in const BFFTLContext * pbfftlc )
 
     if ( 0 == ( pbfftlc->grbit & fBFFTLDriverCollectBFStats ) )
     {
+        //  if stats weren't collected, impossible to update post proc header
         return ErrERRCheck( JET_errInvalidParameter );
     }
 
@@ -410,12 +463,15 @@ ERR ErrBFFTLPostProcess( __in const BFFTLContext * pbfftlc )
 }
 
 #define DblPct( numerator, denominator )        ( ((double)numerator)/((double)denominator)*100.0 )
+//  Dumps stats about the trace file processed
     
 ERR ErrBFFTLDumpStats( __in const BFFTLContext * pbfftlc, __in const DWORD grbit )
 {
     wprintf( L"Dumping pbfftlc = %p with grbit = 0x%x\n", pbfftlc, grbit );
     wprintf( L"\n" );
 
+    //  Dump the IFMP + cpgMax map
+    //
     CFastTraceLog::BFFTLFilePostProcessHeader * pPostProcessHeader = (CFastTraceLog::BFFTLFilePostProcessHeader *)( pbfftlc->pftl->PvFTLPrivatePostHeader() );
     wprintf( L"    Processed file that has %d | %d ifmps\n", pbfftlc->cIFMP, pPostProcessHeader->le_cifmp );
     ULONG ifmp;
@@ -428,12 +484,16 @@ ERR ErrBFFTLDumpStats( __in const BFFTLContext * pbfftlc, __in const DWORD grbit
         wprintf( L"        OVERFLOW of pPostProcessHeader->le_mpifmpcpg array!\n" );
     }
 
+    //  Dump FTL-level stats
+    //
     if ( grbit & fBFFTLDriverCollectFTLStats )
     {
         CallS( pbfftlc->pftlr->ErrFTLDumpStats() );
         wprintf( L"\n" );
     }
 
+    //  Dump BF-level stats
+    //
     if ( grbit & fBFFTLDriverCollectBFStats )
     {
         wprintf( L"BF Stats:\n" );

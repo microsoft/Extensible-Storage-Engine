@@ -107,7 +107,7 @@ LONG LRECFalseTupleIndexColumnUpdatesCEFLPv( LONG iInstance, VOID* pvBuf )
     return 0;
 }
 
-#endif
+#endif // PERFMON_SUPPORT
 
 
 INLINE ERR ErrRECIRetrieveKeyForEnumeration(
@@ -128,7 +128,7 @@ INLINE ERR ErrRECIRetrieveKeyForEnumeration(
     {
         case keyLocationCopyBuffer:
             Assert( prceNil != prcePrimary ?
-                    pfcbIdx->PfcbTable() == pfcbNil :
+                    pfcbIdx->PfcbTable() == pfcbNil :       // Index not linked in yet.
                     pfcbIdx->PfcbTable() == pfucb->u.pfcb );
 
             CallR( ErrRECRetrieveKeyFromCopyBuffer(
@@ -160,7 +160,7 @@ INLINE ERR ErrRECIRetrieveKeyForEnumeration(
 
         case keyLocationRCE:
         {
-            Assert( pfcbIdx->PfcbTable() == pfcbNil );
+            Assert( pfcbIdx->PfcbTable() == pfcbNil );      // Index not linked in yet.
             DATA    dataRec;
 
             dataRec.SetPv( const_cast<BYTE *>( prcePrimary->PbData() ) + cbReplaceRCEOverhead );
@@ -259,6 +259,7 @@ ERR ErrRECIEnumerateKeys(
     ULONG ichIncrement;
     ULONG ulTupleMax;
 
+    // Set inner-most loop limit params.
     if ( fTuples )
     {
         ichOffsetStart = pidb->IchTuplesStart();
@@ -269,17 +270,20 @@ ERR ErrRECIEnumerateKeys(
     }
     else
     {
+        // Non-tuple degenerate case, 1 "tuple" starting at offset 0.
         ichOffsetStart = 0;
         ichIncrement = 1;
         ulTupleMax = 1;
     }
 
+    // Read all the KeySequence values from one source.
     ULONG iidxseg = ULONG( -1 );
     for ( KeySequence ksRead( pfucb, pidb ); !ksRead.FSequenceComplete(); ksRead.Increment( iidxseg ) )
     {
         ULONG ichOffset;
         ULONG ulTuple;
 
+        // Read all the required tuples from one KeySequence value.
         for ( ichOffset = ichOffsetStart, ulTuple = 0, err = JET_errSuccess;
               ( JET_errSuccess == err ) && ( ulTuple < ulTupleMax );
               ichOffset += ichIncrement, ulTuple++ )
@@ -301,12 +305,13 @@ ERR ErrRECIEnumerateKeys(
                     case wrnFLDNullKey:
                     case wrnFLDNullFirstSeg:
                     case wrnFLDNullSeg:
+                        // A NoNullSeg requirement violation.
                         if ( fErrorOnNullSegViolation )
                         {
                             Call( ErrERRCheck( JET_errNullKeyDisallowed ) );
                         }
 
-                        Assert( !fNoNullSeg );
+                        Assert( !fNoNullSeg ); // No matter where the key is from, it should honor index no NULL segment requirements.
                         break;
 
                     default:
@@ -333,15 +338,18 @@ ERR ErrRECIEnumerateKeys(
                     continue;
 
                 case wrnFLDNotPresentInIndex:
+                    // Record was not in this index because of a conditional column.
+                    // No need to check any more keys, since all are affected by the same conditional column.
                     Assert( 0 == ulTuple );
                     Assert( ksRead.FBaseKey() );
                     iidxseg = iidxsegComplete;
                     continue;
 
                 case wrnFLDNullKey:
-                    Assert( !fTuples );
-                    Assert( ksRead.FBaseKey() );
+                    Assert( !fTuples ); // Tuples would have generated wrnFLDOutOfTuples.
+                    Assert( ksRead.FBaseKey() ); //  NULLs beyond base key would have generated wrnFLDOutOfKeys
 
+                    // Regardless, we're done reading with this KeySequence.
                     iidxseg = iidxsegComplete;
 
                     if ( !fAllowAllNulls ) {
@@ -375,6 +383,14 @@ ERR ErrRECIEnumerateKeys(
                     break;
             }
 
+            //  Is it possible that the index entry may already have been deleted/inserted
+            //  as a result of a previous tuple-value (from this or another value
+            //  of a multi-valued column) generating the same index entry as the
+            //  current tuple-value?
+            //  We use this as an overly broad correction for DeleteKey failing with
+            //  KeyNotPresent or InsertKey failing with KeyAlreadyPresent.
+            //  We assume that the only reason to get these kinds of errors is that
+            //  we've already inserted this/deleted key, but we can't be sure.
             const BOOL  fMayHaveAlreadyBeenModified  = ( !( ksRead.FBaseKey() && ( 0 == ulTuple ) )
                                                           && !fUnique
                                                           && *pfIndexUpdated );
@@ -387,6 +403,7 @@ ERR ErrRECIEnumerateKeys(
                       pfIndexUpdated,
                       pIndexEntryCallbackContext ) );
 
+            // We've dealt with any error cases; reset to success as it's a loop control criterion.
             err = JET_errSuccess;
         }
 
@@ -396,6 +413,7 @@ ERR ErrRECIEnumerateKeys(
 
         if ( !fHasMultivalue )
         {
+            //  If there are no multivalues in this index, there's no point going beyond base key.
             Assert( ksRead.FBaseKey() );
             iidxseg = iidxsegComplete;
             continue;
@@ -416,6 +434,7 @@ LOCAL ERR ErrRECIInsert(
 LOCAL ERR ErrRECIReplace( FUCB *pfucb, const JET_GRBIT grbit );
 
 
+//  ================================================================
 LOCAL ERR ErrRECICallback(
         PIB * const ppib,
         FUCB * const pfucb,
@@ -425,7 +444,11 @@ LOCAL ERR ErrRECICallback(
         void * const pvArg1,
         void * const pvArg2,
         const ULONG ulUnused )
+//  ================================================================
 {
+    //  optimization: do a quick sanity check to see if we have any callbacks
+    //  of the appropriate type.
+    //
     const CBDESC *  pcbdesc;
     for ( pcbdesc = ptdb->Pcbdesc();
         NULL != pcbdesc;
@@ -440,15 +463,23 @@ LOCAL ERR ErrRECICallback(
 
     if( NULL == pcbdesc )
     {
+        //  no matching callbacks were found
+        //  if the pointer is non-null then it is pointing to
+        //  the first matching CBDESC
+        //
         return JET_errSuccess;
     }
 
+    // concurrency testing. sleep here for a while to allow
+    // time for the callback to be unregistered
 
     if(JET_errSuccess != ErrFaultInjection(36013))
     {
         UtilSleep( cmsecWaitGeneric );
     }
 
+    //  if we reach this point, we have a matching callback
+    //  if callback versioning is on, we'll check the visibility later
 
     ERR                     err             = JET_errSuccess;
     const JET_SESID         sesid           = (JET_SESID)ppib;
@@ -458,6 +489,9 @@ LOCAL ERR ErrRECICallback(
 
     pfucb->pvtfndef = &vtfndefIsamCallback;
 
+    //  the first loop above, stopped us at the first possibly matching CBDESC
+    //  we don't need to re-initialize the variable as we've done the work already
+    //
     while( NULL != pcbdesc && err >= JET_errSuccess )
     {
         BOOL fVisible = fTrue;
@@ -470,6 +504,7 @@ LOCAL ERR ErrRECICallback(
         {
             if( trxMax == pcbdesc->trxRegisterCommit0 )
             {
+                //  uncommitted register. only visible if we are the session that added it
                 Assert( trxMax != pcbdesc->trxRegisterBegin0 );
                 Assert( trxMax == pcbdesc->trxRegisterCommit0 );
                 Assert( trxMax == pcbdesc->trxUnregisterBegin0 );
@@ -478,6 +513,7 @@ LOCAL ERR ErrRECICallback(
             }
             else if( trxMax == pcbdesc->trxUnregisterBegin0 )
             {
+                //  committed register. visible if we began after the register committed
                 Assert( trxMax != pcbdesc->trxRegisterBegin0 );
                 Assert( trxMax != pcbdesc->trxRegisterCommit0 );
                 Assert( trxMax == pcbdesc->trxUnregisterBegin0 );
@@ -486,6 +522,7 @@ LOCAL ERR ErrRECICallback(
             }
             else if( trxMax == pcbdesc->trxUnregisterCommit0 )
             {
+                //  uncommitted unregister. visible unless we are the session that unregistered it
                 Assert( trxMax != pcbdesc->trxRegisterBegin0 );
                 Assert( trxMax != pcbdesc->trxRegisterCommit0 );
                 Assert( trxMax != pcbdesc->trxUnregisterBegin0 );
@@ -494,6 +531,7 @@ LOCAL ERR ErrRECICallback(
             }
             else
             {
+                //  commited unregister. only visible if we began before the unregister committed
                 Assert( trxMax != pcbdesc->trxRegisterBegin0 );
                 Assert( trxMax != pcbdesc->trxRegisterCommit0 );
                 Assert( trxMax != pcbdesc->trxUnregisterBegin0 );
@@ -501,7 +539,7 @@ LOCAL ERR ErrRECICallback(
                 fVisible = TrxCmp( trxSession, pcbdesc->trxUnregisterCommit0 ) <= 0;
             }
         }
-#endif
+#endif  //  VERSIONED_CALLBACKS
 
         if( fVisible
             && ( pcbdesc->cbtyp & cbtyp )
@@ -574,6 +612,7 @@ LOCAL ERR ErrRECICallback(
 }
 
 
+//  ================================================================
 ERR ErrRECCallback(
         PIB * const ppib,
         FUCB * const pfucb,
@@ -582,6 +621,11 @@ ERR ErrRECCallback(
         void * const pvArg1,
         void * const pvArg2,
         const ULONG ulUnused )
+//  ================================================================
+//
+//  Call the specified callback type for the specified id
+//
+//-
 {
     Assert( JET_cbtypNull != cbtyp );
 
@@ -596,7 +640,9 @@ ERR ErrRECCallback(
 
     if( NULL != ptdb->Pcbdesc() )
     {
+///     pfcb->EnterDDL();
         err = ErrRECICallback( ppib, pfucb, ptdb, cbtyp, ulId, pvArg1, pvArg2, ulUnused );
+///     pfcb->LeaveDDL();
     }
 
     if( err >= JET_errSuccess )
@@ -656,12 +702,16 @@ ERR VTAPI ErrIsamUpdate(
     }
     else if ( FFUCBInsertPrepared( pfucb ) )
     {
+        //  get bookmark of inserted node in pv
+        //
         err = ErrRECIInsert( pfucb, pv, cbMax, pcbActual, grbit );
     }
     else
         err = ErrERRCheck( JET_errUpdateNotPrepared );
 
-    if ( err >= 0 && !g_fRepair )
+    //  free temp working buffer
+    //
+    if ( err >= 0 && !g_fRepair )       //  for g_fRepair we will cache these until we close the cursor
     {
         RECIFreeCopyBuffer( pfucb );
     }
@@ -677,8 +727,8 @@ LOCAL ERR ErrRECIUpdateIndex(
     const RECOPER   recoper,
     const DIB       *pdib = NULL )
 {
-    ERR             err = JET_errSuccess;
-    FUCB            *pfucbIdx;
+    ERR             err = JET_errSuccess;                   // error code of various utility
+    FUCB            *pfucbIdx;                              //  cursor on secondary index
 
     Assert( pfcbIdx != pfcbNil );
     Assert( pfcbIdx->PfcbTable()->Ptdb() != ptdbNil );
@@ -692,11 +742,15 @@ LOCAL ERR ErrRECIUpdateIndex(
     Assert( pfcbIdx->FTypeSecondaryIndex() );
     Assert( pfcbIdx->PfcbTable() == pfucb->u.pfcb );
 
+    //  open FUCB on this index
+    //
     CallR( ErrDIROpen( pfucb->ppib, pfcbIdx, &pfucbIdx ) );
     Assert( pfucbIdx != pfucbNil );
     FUCBSetIndex( pfucbIdx );
     FUCBSetSecondary( pfucbIdx );
 
+    //  get bookmark of primary index record replaced
+    //
     Assert( FFUCBPrimary( pfucb ) );
     Assert( FFUCBUnique( pfucb ) );
 
@@ -724,6 +778,8 @@ LOCAL ERR ErrRECIUpdateIndex(
             err = ErrRECIReplaceInIndex( pfucb, pfucbIdx, &pfucb->bmCurr );
     }
 
+    //  close the FUCB
+    //
     DIRClose( pfucbIdx );
 
     AssertDIRNoLatch( pfucb->ppib );
@@ -738,6 +794,9 @@ LOCAL BOOL FRECIAllSparseIndexColumnsSet(
 
     if ( pidb->CidxsegConditional() > 0 )
     {
+        //  can't use IDB's rgbitIdx because
+        //  we must filter out conditional index
+        //  columns
 
         const FCB * const       pfcbTable   = pfucbTable->u.pfcb;
         const TDB * const       ptdb        = pfcbTable->Ptdb();
@@ -749,12 +808,15 @@ LOCAL BOOL FRECIAllSparseIndexColumnsSet(
         {
             if ( !FFUCBColumnSet( pfucbTable, pidxseg->Fid() ) )
             {
+                //  found a sparse index column that didn't get set
                 return fFalse;
             }
         }
     }
     else
     {
+        //  no conditional columns, so we can use
+        //  the IDB bit array
 
         const LONG_PTR *        plIdx       = (LONG_PTR *)pidb->RgbitIdx();
         const LONG_PTR * const  plIdxMax    = plIdx + ( cbRgbitIndex / sizeof(LONG_PTR) );
@@ -764,11 +826,13 @@ LOCAL BOOL FRECIAllSparseIndexColumnsSet(
         {
             if ( (*plIdx & *plSet) != *plIdx )
             {
+                //  found a sparse index column that didn't get set
                 return fFalse;
             }
         }
     }
 
+    //  all sparse index columns were set
     return fTrue;
 }
 
@@ -780,6 +844,9 @@ LOCAL BOOL FRECIAnySparseIndexColumnSet(
 
     if ( pidb->CidxsegConditional() > 0 )
     {
+        //  can't use IDB's rgbitIdx because
+        //  we must filter out conditional index
+        //  columns
 
         const FCB * const       pfcbTable   = pfucbTable->u.pfcb;
         const TDB * const       ptdb        = pfcbTable->Ptdb();
@@ -791,6 +858,7 @@ LOCAL BOOL FRECIAnySparseIndexColumnSet(
         {
             if ( FFUCBColumnSet( pfucbTable, pidxseg->Fid() ) )
             {
+                //  found a sparse index column that got set
                 return fTrue;
             }
         }
@@ -798,6 +866,8 @@ LOCAL BOOL FRECIAnySparseIndexColumnSet(
 
     else
     {
+        //  no conditional columns, so we can use
+        //  the IDB bit array
 
         const LONG_PTR *        plIdx       = (LONG_PTR *)pidb->RgbitIdx();
         const LONG_PTR * const  plIdxMax    = plIdx + ( cbRgbitIndex / sizeof(LONG_PTR) );
@@ -807,11 +877,13 @@ LOCAL BOOL FRECIAnySparseIndexColumnSet(
         {
             if ( *plIdx & *plSet )
             {
+                //  found a sparse index column that got set
                 return fTrue;
             }
         }
     }
 
+    //  no sparse index columns were set
     return fFalse;
 }
 
@@ -824,10 +896,15 @@ INLINE BOOL FRECIPossiblyUpdateSparseIndex(
 
     if ( !pidb->FAllowSomeNulls() )
     {
+        //  IgnoreAnyNull specified, so only need to
+        //  update the index if all index columns
+        //  were set
         return FRECIAllSparseIndexColumnsSet( pidb, pfucbTable );
     }
     else if ( !pidb->FAllowFirstNull() )
     {
+        //  IgnoreFirstNull specified, so only need to
+        //  update the index if the first column was set
         const FCB * const       pfcbTable   = pfucbTable->u.pfcb;
         const TDB * const       ptdb        = pfcbTable->Ptdb();
         const IDXSEG *          pidxseg     = PidxsegIDBGetIdxSeg( pidb, ptdb );
@@ -835,6 +912,8 @@ INLINE BOOL FRECIPossiblyUpdateSparseIndex(
     }
     else
     {
+        //  IgnoreNull specified, so need to update the
+        //  index if any index column was set
         return FRECIAnySparseIndexColumnSet( pidb, pfucbTable );
     }
 }
@@ -851,31 +930,48 @@ LOCAL BOOL FRECIPossiblyUpdateSparseConditionalIndex(
     const IDXSEG *          pidxseg     = PidxsegIDBGetIdxSegConditional( pidb, ptdb );
     const IDXSEG * const    pidxsegMac  = pidxseg + pidb->CidxsegConditional();
 
+    //  check conditional columns and see if we can
+    //  automatically deduce whether the record should
+    //  be added to the index, regardless of whether any
+    //  of the actual index columns were set or not
     for ( ; pidxseg < pidxsegMac; pidxseg++ )
     {
+        //  check that the update didn't modify the
+        //  conditional column
         if ( !FFUCBColumnSet( pfucbTable, pidxseg->Fid() ) )
         {
             const FIELD * const pfield  = ptdb->Pfield( pidxseg->Columnid() );
 
             if ( !FFIELDUserDefinedDefault( pfield->ffield ) )
             {
+                //  given that the update didn't modify the
+                //  conditional column, see if the default
+                //  value of the column would cause the
+                //  record to be excluded from the index
+                //  (NOTE: default values cannot be NULL)
                 const BOOL  fHasDefault = FFIELDDefault( pfield->ffield );
                 const BOOL  fSparse     = ( pidxseg->FMustBeNull() ?
                                                 fHasDefault :
                                                 !fHasDefault );
                 if ( fSparse )
                 {
+                    //  this record will be excluded from
+                    //  the index
                     return fFalse;
                 }
             }
         }
     }
 
+    //  could not exclude the record based on
+    //  unset conditional columns
     return fTrue;
 }
 
 
+//  ================================================================
 LOCAL BOOL FRECIHasUserDefinedColumns( const IDXSEG * const pidxseg, const INT cidxseg, const TDB * const ptdb )
+//  ================================================================
 {
     INT iidxseg;
     for( iidxseg = 0; iidxseg < cidxseg; ++iidxseg )
@@ -889,7 +985,9 @@ LOCAL BOOL FRECIHasUserDefinedColumns( const IDXSEG * const pidxseg, const INT c
     return fFalse;
 }
 
+//  ================================================================
 LOCAL BOOL FRECIHasUserDefinedColumns( const IDB * const pidb, const TDB * const ptdb )
+//  ================================================================
 {
     const INT cidxseg = pidb->Cidxseg();
     const IDXSEG * const pidxseg = PidxsegIDBGetIdxSeg( pidb, ptdb );
@@ -913,12 +1011,19 @@ LOCAL VOID RECIReportIndexCorruption( const FCB * const pfcbIdx )
     INT                 iszT                    = 0;
     const WCHAR *       rgcwszT[4];
 
+    //  only for secondary indexes
     Assert( pidbNil != pidb );
     Assert( !pidb->FPrimary() );
 
+    //  pfcbTable may not be linked up if we're in CreateIndex(),
+    //  in which case we don't have access to the information
+    //  we want to report
     if ( pfcbNil == pfcbIdx->PfcbTable() )
         return;
 
+    //  WARNING! WARNING!  This code currently does not grab the DML latch,
+    //  so there doesn't appear to be any guarantee that the table and index
+    //  name won't be relocated from underneath us
 
     const BOOL          fHasUserDefinedColumns  = FRECIHasUserDefinedColumns(
                                                             pidb,
@@ -969,17 +1074,46 @@ LOCAL ERR ErrRECICheckESE97Compatibility( FUCB * const pfucb, const DATA& dataRe
 
     Assert( pfcbTable->FTypeTable() );
 
+    //  fixed/variable column overhead hasn't changed
+    //
+    //  UNDONE: we don't currently account for fixed/variable columns
+    //  that may have been deleted
+    //
     cbRecESE97 = prec->PbTaggedData() - (BYTE *)prec;
     Assert( cbRecESE97 <= (SIZE_T)REC::CbRecordMostCHECK( g_rgfmp[ pfucb->ifmp ].CbPage() ) );
     Assert( cbRecESE97 <= (SIZE_T)REC::CbRecordMost( pfucb ) );
     Assert( cbRecESE97 <= (SIZE_T)dataRec.Cb() );
 
+    //  OPTIMISATION: see if the record size is small enough such that
+    //  we know we're guaranteed to fit in an ESE97 record
+    //
+    //  The only size difference between ESE97 and ESE98 is the amount
+    //  of overhead that multi-values consume.  Fixed, variable, and
+    //  non-multi-valued tagged columns still take the same amount of
+    //  overhead.  Thus, for the greatest size difference, we need to
+    //  ask how we could cram the most multi-values into a record.
+    //  The answer is to have just a single multi-valued non-long-value
+    //  tagged column where all multi-values contain zero-length data.
+    //
+    //  So what we're going to do first is take the amount of possible
+    //  record space remaining and compute how many such ESE97 multi-
+    //  values we could fill that space with.
+    //
     const SIZE_T        cbESE97Remaining            = ( REC::CbRecordMost( g_rgfmp[ pfucb->ifmp ].CbPage(), JET_cbKeyMost_OLD ) - cbRecESE97 );
     const SIZE_T        cESE97MultiValues           = cbESE97Remaining / sizeof(TAGFLD);
 
+    //  In ESE98, the marginal cost for a multi-value is 2 bytes, and the
+    //  overhead for the initial column is 5 bytes.
+    //
     const SIZE_T        cbESE98ColumnOverhead       = 5;
     const SIZE_T        cbESE98MultiValueOverhead   = 2;
 
+    //  Next, see how big the tagged data would be if the same
+    //  multi-values were represented in ESE98.  This will be
+    //  our threshold record size.  If the current tagged data
+    //  is less than this threshold, then we're guaranteed
+    //  that this record will fit in ESE97 no matter what.
+    //
     const SIZE_T        cbESE98Threshold            = cbESE98ColumnOverhead
                                                         + ( cESE97MultiValues * cbESE98MultiValueOverhead );
     const BOOL          fRecordWillFitInESE97       = ( ( dataRec.Cb() - cbRecESE97 ) <= cbESE98Threshold );
@@ -987,17 +1121,29 @@ LOCAL ERR ErrRECICheckESE97Compatibility( FUCB * const pfucb, const DATA& dataRe
     if ( fRecordWillFitInESE97 )
     {
 #ifdef DEBUG
+        //  in DEBUG, take non-optimised path anyway to verify
+        //  that record does indeed fit in ESE97
 #else
         return JET_errSuccess;
 #endif
     }
     else
     {
+        //  this DOESN'T mean that the record won't fit, it
+        //  just means it may or may not fit, we can't make
+        //  an absolute determination just by the record
+        //  size, so we have to iterate through all the
+        //  tagged data
     }
 
 
+    //  If the optimisation above couldn't definitively
+    //  determine if the record will fit in ESE97, then
+    //  we have to take the slow path of computing
+    //  ESE97 record size column-by-column.
+    //
     CTaggedColumnIter   citerTagged;
-    Call( citerTagged.ErrInit( pfcbTable ) );
+    Call( citerTagged.ErrInit( pfcbTable ) );   //  initialises currency to BeforeFirst
     Call( citerTagged.ErrSetRecord( dataRec ) );
 
     while ( errRECNoCurrentColumnValue != ( err = citerTagged.ErrMoveNext() ) )
@@ -1005,8 +1151,14 @@ LOCAL ERR ErrRECICheckESE97Compatibility( FUCB * const pfucb, const DATA& dataRe
         COLUMNID    columnid;
         size_t      cbESE97Format;
 
+        //  validate error returned from column navigation
+        //
         Call( err );
 
+        //  ignore columns that are not visible to us (we're assuming the
+        //  column has been deleted and the column space would be able to
+        //  be re-used
+        //
         Call( citerTagged.ErrGetColumnId( &columnid ) );
         err = ErrRECIAccessColumn( pfucb, columnid );
         if ( JET_errColumnNotFound != err )
@@ -1040,6 +1192,8 @@ LOCAL ERR ErrRECIInitDbkMost( FUCB * const pfucb )
 
     DIRGotoRoot( pfucb );
 
+    //  down to the last data record
+    //
     dib.dirflag = fDIRAllNode;
     dib.pbm = NULL;
     dib.pos = posLast;
@@ -1047,23 +1201,33 @@ LOCAL ERR ErrRECIInitDbkMost( FUCB * const pfucb )
     Assert( JET_errNoCurrentRecord != err );
     if ( JET_errRecordNotFound == err )
     {
+        //  table is empty
+        //
         Assert( 0 == dbk );
         err = JET_errSuccess;
     }
     else
     {
         Call( err );
-        CallS( err );
+        CallS( err );           //  warnings not expected
 
         Assert( Pcsr( pfucb )->FLatched() );
         LongFromKey( &dbk, pfucb->kdfCurr.key );
-        Assert( dbk > 0 );
+        Assert( dbk > 0 );      // dbk's start numbering at 1
 
         DIRUp( pfucb );
     }
 
+    //  if there are no records in the table, then the first
+    //  dbk value is 1, otherwise, set dbk to next value after
+    //  maximum found
+    //
     dbk++;
 
+    //  while retrieving the dbkMost, someone else may have been
+    //  doing the same thing and beaten us to it, so when this happens,
+    //  cede to the other guy.
+    //
     pfucb->u.pfcb->Ptdb()->InitDbkMost( dbk );
 
 HandleError:
@@ -1072,6 +1236,38 @@ HandleError:
 }
 
 
+//+local
+// ErrRECIInsert
+// ========================================================================
+// ErrRECIInsert( FUCB *pfucb, VOID *pv, ULONG cbMax, ULONG *pcbActual, DIRFLAG dirflag )
+//
+// Adds a record to a data file.  All indexes on the data file are
+// updated to reflect the addition.
+//
+// PARAMETERS   pfucb                       FUCB for file
+//              pv                          pointer to bookmark buffer pv != NULL, bookmark is returned
+//              cbMax                       size of bookmark buffer
+//              pcbActual                   returned size of bookmark
+//
+// RETURNS      Error code, one of the following:
+//                   JET_errSuccess     Everything went OK.
+//                  -KeyDuplicate       The record being added causes
+//                                      an illegal duplicate entry in an index.
+//                  -NullKeyDisallowed  A key of the new record is NULL.
+//                  -RecordNoCopy       There is no working buffer to add from.
+//                  -NullInvalid        The record being added contains
+//                                      at least one null-valued field
+//                                      which is defined as NotNull.
+// SIDE EFFECTS
+//      After addition, file currency is left on the new record.
+//      Index currency (if any) is left on the new index entry.
+//      On failure, the currencies are returned to their initial states.
+//
+//  COMMENTS
+//      No currency is needed to add a record.
+//      A transaction is wrapped around this function.  Thus, any
+//      work done will be undone if a failure occurs.
+//-
 LOCAL ERR ErrRECIInsert(
     FUCB *          pfucb,
     _Out_writes_bytes_to_opt_(cbMax, *pcbActual) VOID *         pv,
@@ -1079,17 +1275,22 @@ LOCAL ERR ErrRECIInsert(
     ULONG *         pcbActual,
     const JET_GRBIT grbit )
 {
-    ERR             err;
+    ERR             err;                            // error code of various utility
     PIB *           ppib                    = pfucb->ppib;
-    KEY             keyToAdd;
+    KEY             keyToAdd;                       // key of new data record
     BYTE            *pbKey                  = NULL;
-    FCB *           pfcbTable;
+    FCB *           pfcbTable;                      // file's FCB
     TDB *           ptdb;
-    FCB *           pfcbIdx;
+    FCB *           pfcbIdx;                        // loop variable for each index on file
     FUCB *          pfucbT                  = pfucbNil;
     BOOL            fUpdatingLatchSet       = fFalse;
     ULONG           iidxsegT;
 
+    //  if table itself created in same transaction then allow application
+    //  to update table without creating separate versions for each update.
+    //  It is expected that any error returned from any update operation
+    //  to lead to the table creation being rolled back.
+    //
     DIRFLAG fDIRFlags = fDIRNull;
     BOOL    fNoVersionUpdate = fFalse;
 
@@ -1100,17 +1301,27 @@ LOCAL ERR ErrRECIInsert(
     CheckTable( ppib, pfucb );
     CheckSecondary( pfucb );
 
+    //  should have been checked in PrepareUpdate
+    //
     Assert( FFUCBUpdatable( pfucb ) );
     Assert( FFUCBInsertPrepared( pfucb ) );
 
+    //  efficiency variables
+    //
     pfcbTable = pfucb->u.pfcb;
     Assert( pfcbTable != pfcbNil );
 
     ptdb = pfcbTable->Ptdb();
     Assert( ptdbNil != ptdb );
 
+    //  if necessary, begin transaction
+    //
     CallR( ErrDIRBeginTransaction( ppib, 52005, NO_GRBIT ) );
 
+    //  insert unversioned if requested, and if table uncommitted.
+    //  Any error should result in client application rolling backt transaction
+    //  which created table, since table may be left inconsistent.
+    //
     if ( ( 0 != (grbit & JET_bitUpdateNoVersion) ) )
     {
         if ( pfcbTable->FUncommitted() )
@@ -1124,14 +1335,19 @@ LOCAL ERR ErrRECIInsert(
         }
     }
 
+    //  delete the original copy if necessary
+    //
     if ( FFUCBInsertCopyDeleteOriginalPrepared( pfucb ) )
     {
         FUCBSetUpdateForInsertCopyDeleteOriginal( pfucb );
         Call( ErrIsamDelete( ppib, pfucb ) );
     }
 
+    // Do the BeforeInsert callback
     Call( ErrRECCallback( ppib, pfucb, JET_cbtypBeforeInsert, 0, NULL, NULL, 0 ) );
 
+    //  open temp FUCB on data file
+    //
     Call( ErrDIROpen( ppib, pfcbTable, &pfucbT ) );
     Assert( pfucbT != pfucbNil );
     FUCBSetIndex( pfucbT );
@@ -1147,11 +1363,15 @@ LOCAL ERR ErrRECIInsert(
     Call( pfcbTable->ErrSetUpdatingAndEnterDML( ppib ) );
     fUpdatingLatchSet = fTrue;
 
+    //  set version and autoinc columns
+    //
     pfcbTable->AssertDML();
 
-    fidVersion = ptdb->FidVersion();
+    fidVersion = ptdb->FidVersion();        // UNDONE: Need to properly version these.
     if ( fidVersion != 0 && !( FFUCBColumnSet( pfucb, fidVersion ) ) )
     {
+        //  set version column to zero
+        //
         TDB *           ptdbT           = ptdb;
         const BOOL      fTemplateColumn = ptdbT->FFixedTemplateColumn( fidVersion );
         const COLUMNID  columnidT       = ColumnidOfFid( fidVersion, fTemplateColumn );
@@ -1163,6 +1383,7 @@ LOCAL ERR ErrRECIInsert(
             Assert( FCOLUMNIDTemplateColumn( columnidT ) );
             if ( !pfcbTable->FTemplateTable() )
             {
+                // Switch to template table.
                 ptdbT->AssertValidDerivedTable();
                 ptdbT = ptdbT->PfcbTemplateTable()->Ptdb();
             }
@@ -1200,8 +1421,13 @@ LOCAL ERR ErrRECIInsert(
         const COLUMNID  columnidT       = ColumnidOfFid( ptdb->FidAutoincrement(), fTemplateColumn );
         DATA            dataT;
 
+        //  AutoInc column id not set in JET_prepInsertCopyReplaceOriginal.  
+        //  FFUCBUpdateForInsertCopyDeleteOriginalPrepared is set both for this grbit and also for JET_prepInsertCopyReplaceOriginal.
+        //
         Assert( FFUCBColumnSet( pfucb, FidOfColumnid( columnidT ) ) || FFUCBUpdateForInsertCopyDeleteOriginal( pfucb ) );
 
+        //  just retrieve column, even if we don't have versioned access to it
+        //
         CallS( ErrRECIRetrieveFixedColumn(
                 pfcbNil,
                 ptdb,
@@ -1210,7 +1436,7 @@ LOCAL ERR ErrRECIInsert(
                 &dataT ) );
 
         Assert( !( pfcbTable->FTypeSort()
-                || pfcbTable->FTypeTemporaryTable() ) );
+                || pfcbTable->FTypeTemporaryTable() ) );    // Don't currently support autoinc with sorts/temp. tables
 
         Assert( ptdb->QwAutoincrement() > 0 );
         if ( ptdb->F8BytesAutoInc() )
@@ -1228,6 +1454,8 @@ LOCAL ERR ErrRECIInsert(
 
     pfcbTable->LeaveDML();
 
+    //  get key to add with new record
+    //
     Alloc( pbKey = (BYTE *)RESKEY.PvRESAlloc() );
     keyToAdd.prefix.Nullify();
     keyToAdd.suffix.SetPv( pbKey );
@@ -1236,7 +1464,14 @@ LOCAL ERR ErrRECIInsert(
     {
         DBK dbk;
 
+        //  file is sequential
+        //
 
+        //  dbk's are numbered starting at 1.  A dbk of 0 indicates that we must
+        //  first retrieve the dbkMost.  In the pathological case where there are
+        //  currently no dbk's, we'll go through here anyway, but only the first
+        //  time (since there will be dbk's after that).
+        //
         if ( ptdb->DbkMost() == 0 )
         {
             Call( ErrRECIInitDbkMost( pfucbT ) );
@@ -1252,6 +1487,8 @@ LOCAL ERR ErrRECIInsert(
 
     else
     {
+        //  file is primary
+        //
         Assert( !pfcbTable->Pidb()->FMultivalued() );
         Assert( !pfcbTable->Pidb()->FTuples() );
         Call( ErrRECRetrieveKeyFromCopyBuffer(
@@ -1275,15 +1512,23 @@ LOCAL ERR ErrRECIInsert(
         }
     }
 
+    //  check if return buffer for bookmark is sufficient size
+    //
     if ( pv != NULL && (ULONG)keyToAdd.Cb() > cbMax )
     {
         Error( ErrERRCheck( JET_errBufferTooSmall ) );
     }
 
+    //  insert record.  Move to DATA root.
+    //
     DIRGotoRoot( pfucbT );
 
     err = ErrDIRInsert( pfucbT, keyToAdd, pfucb->dataWorkBuf, fDIRFlags );
 
+    //  if have gotten this far then set fNoVersionUpdate flag so subsequent error
+    //  will require table to be abandoned.  Key duplicate is a permitted error
+    //  since it means that no changes have been made to the index.
+    //
     if ( err != JET_errKeyDuplicate && ( 0 != ( fDIRFlags & fDIRNoVersion ) ) )
     {
         fNoVersionUpdate = fTrue;
@@ -1302,20 +1547,28 @@ LOCAL ERR ErrRECIInsert(
             err,
             err ) );
 
+    //  process result of insertion
+    //
     Call( err );
 
+    //  test error handling
+    //
     Call( ErrFaultInjection( 55119 ) );
 
+    //  return bookmark of inserted record
+    //
     AssertDIRNoLatch( ppib );
     Assert( !pfucbT->bmCurr.key.FNull() && pfucbT->bmCurr.key.Cb() == keyToAdd.Cb() );
     Assert( pfucbT->bmCurr.data.Cb() == 0 );
 
     if ( pcbActual != NULL || pv != NULL )
     {
-        BOOKMARK    *pbmPrimary;
+        BOOKMARK    *pbmPrimary;    //  bookmark of primary index node inserted
 
         CallS( ErrDIRGetBookmark( pfucbT, &pbmPrimary ) );
 
+        //  set return values
+        //
         if ( pcbActual != NULL )
         {
             Assert( pbmPrimary->key.Cb() == keyToAdd.Cb() );
@@ -1329,6 +1582,10 @@ LOCAL ERR ErrRECIInsert(
         }
     }
 
+    //  insert item in secondary indexes
+    //
+    // No critical section needed to guard index list because Updating latch
+    // protects it.
     DIB     dib;
     BOOL fInsertCopy;
     fInsertCopy = FFUCBInsertCopyPrepared( pfucb );
@@ -1345,9 +1602,14 @@ LOCAL ERR ErrRECIInsert(
 
             if ( !fInsertCopy )
             {
+                //  see if the sparse conditional index can tell
+                //  us to skip the update
                 if ( pidb->FSparseConditionalIndex() )
                     fUpdate = FRECIPossiblyUpdateSparseConditionalIndex( pidb, pfucb );
 
+                //  if the sparse conditional index could not cause us to
+                //  skip the index update, see if the sparse index can
+                //  tell us to skip the update
                 if ( fUpdate && pidb->FSparseIndex() )
                     fUpdate = FRECIPossiblyUpdateSparseIndex( pidb, pfucb );
             }
@@ -1366,10 +1628,13 @@ LOCAL ERR ErrRECIInsert(
     DIRClose( pfucbT );
     pfucbT = pfucbNil;
 
+    //  if no error, commit transaction
+    //
     Call( ErrDIRCommitTransaction( ppib, NO_GRBIT ) );
 
     FUCBResetUpdateFlags( pfucb );
 
+    // Do the AfterInsert callback
     CallS( ErrRECCallback( ppib, pfucb, JET_cbtypAfterInsert, 0, NULL, NULL, 0 ) );
 
     AssertDIRNoLatch( ppib );
@@ -1394,9 +1659,13 @@ HandleError:
         DIRClose( pfucbT );
     }
 
-    
+    /*  rollback all changes on error
+    /**/
     CallSx( ErrDIRRollback( ppib ), JET_errRollbackError );
 
+    //  if no version update failed then table may be corrupt.
+    //  Session must roll back to level 0 to delete table.
+    //
     if ( fNoVersionUpdate )
     {
         Assert( ppib->Level() > 0 );
@@ -1412,6 +1681,7 @@ HandleError:
 }
 
 
+// Called by defrag to insert record but preserve copy buffer.
 ERR ErrRECInsert( FUCB *pfucb, BOOKMARK * const pbmPrimary )
 {
     ERR     err;
@@ -1494,6 +1764,12 @@ ERR ErrRECIInsertIndexEntry(
         case JET_errMultiValuedIndexViolation:
             if ( fMayHaveAlreadyBeenInserted )
             {
+                //  must have been record with multi-value column
+                //  or tuples with sufficiently similar values
+                //  (ie. the indexed portion of the multi-values
+                //  or tuples were identical) to produce redundant
+                //  index entries.
+                //
                 err = JET_errSuccess;
                 break;
             }
@@ -1529,6 +1805,21 @@ HandleError:
     return err;
 }
 
+//+local
+// ErrRECIAddToIndex
+// ========================================================================
+// ERR ErrRECIAddToIndex( FCB *pfcbIdx, FUCB *pfucb )
+//
+// Extracts key from data record and adds that key with the given primary key to the index
+//
+// PARAMETERS   pfcbIdx                     FCB of index to insert into
+//              pfucb                       cursor pointing to primary index record
+//
+// RETURNS      JET_errSuccess, or error code from failing routine
+//
+// SIDE EFFECTS
+// SEE ALSO     Insert
+//-
 ERR ErrRECIAddToIndex(
     FUCB        *pfucb,
     FUCB        *pfucbIdx,
@@ -1547,6 +1838,10 @@ ERR ErrRECIAddToIndex(
     Assert( pfcbIdx->FTypeSecondaryIndex() );
     Assert( pidbNil != pidb );
 
+    //  unversioned inserts into a secondary index are dangerous as if this fails the
+    //  record will not be removed from the primary index.  
+    //  Uncommitted tables that suffer an update failure must be rolled back.
+    //
     Assert( !( dirflag & fDIRNoVersion ) || pfucb->u.pfcb->FUncommitted() );
 
     INSERT_INDEX_ENTRY_CONTEXT Context( recoperInsert, dirflag );
@@ -1576,6 +1871,40 @@ HandleError:
 }
 
 
+//+API
+// ErrIsamDelete
+// ========================================================================
+// ErrIsamDelete( PIB *ppib, FCBU *pfucb )
+//
+// Deletes the current record from data file.  All indexes on the data
+// file are updated to reflect the deletion.
+//
+// PARAMETERS
+//          ppib        PIB of this user
+//          pfucb       FUCB for file to delete from
+// RETURNS
+//      Error code, one of the following:
+//          JET_errSuccess              Everything went OK.
+//          JET_errNoCurrentRecord      There is no current record.
+// SIDE EFFECTS
+//          After the deletion, file currency is left just before
+//          the next record.  Index currency (if any) is left just
+//          before the next index entry.  If the deleted record was
+//          the last in the file, the currencies are left after the
+//          new last record.  If the deleted record was the only record
+//          in the entire file, the currencies are left in the
+//          "beginning of file" state.  On failure, the currencies are
+//          returned to their initial states.
+//          If there is a working buffer for SetField commands,
+//          it is discarded.
+// COMMENTS
+//          If the currencies are not ON a record, the delete will fail.
+//          A transaction is wrapped around this function.  Thus, any
+//          work done will be undone if a failure occurs.
+//          Index entries are not made for entirely-null keys.
+//          For temporary files, transaction logging is deactivated
+//          for the duration of the routine.
+//-
 ERR VTAPI ErrIsamDelete(
     JET_SESID   sesid,
     JET_VTID    vtid )
@@ -1583,8 +1912,8 @@ ERR VTAPI ErrIsamDelete(
     ERR         err;
     PIB         * ppib              = reinterpret_cast<PIB *>( sesid );
     FUCB        * pfucb             = reinterpret_cast<FUCB *>( vtid );
-    FCB         * pfcbTable;
-    FCB         * pfcbIdx;
+    FCB         * pfcbTable;                    // table FCB
+    FCB         * pfcbIdx;                      // loop variable for each index on file
     BOOL        fUpdatingLatchSet   = fFalse;
 
     CallR( ErrPIBCheck( ppib ) );
@@ -1593,12 +1922,16 @@ ERR VTAPI ErrIsamDelete(
     CheckSecondary( pfucb );
     AssertDIRNoLatch( ppib );
 
+    //  ensure that table is updatable
+    //
     CallR( ErrFUCBCheckUpdatable( pfucb )  );
     if ( !FFMPIsTempDB( pfucb->ifmp ) )
     {
         CallR( ErrPIBCheckUpdatable( ppib ) );
     }
 
+    //  efficiency variables
+    //
     pfcbTable = pfucb->u.pfcb;
     Assert( pfcbTable != pfcbNil );
 
@@ -1607,10 +1940,12 @@ ERR VTAPI ErrIsamDelete(
     {
         BTPrereadIndexesOfFCB( pfucb );
     }
-#endif
+#endif  //  PREREAD_INDEXES_ON_DELETE
 
     if ( !FFUCBUpdateForInsertCopyDeleteOriginal( pfucb ) )
     {
+        //  reset copy buffer status on record delete unless we are in
+        //  insert-copy-delete-original mode (ie: copy buffer is in use)
         if ( FFUCBUpdatePrepared( pfucb ) )
         {
             if ( FFUCBInsertCopyDeleteOriginalPrepared( pfucb ) )
@@ -1625,6 +1960,7 @@ ERR VTAPI ErrIsamDelete(
         CallR( ErrDIRBeginTransaction( ppib, 45861, NO_GRBIT ) );
     }
 
+    //  if InsertCopyDeleteOriginal, transaction is started in ErrRECIInsert()
     Assert( !FFUCBInsertCopyDeleteOriginalPrepared( pfucb ) );
     Assert( ppib->Level() > 0 );
 
@@ -1634,11 +1970,16 @@ ERR VTAPI ErrIsamDelete(
                             && g_rgfmp[pfucb->ifmp].FLogOn();
 #endif
 
+    //  efficiency variables
+    //
     pfcbTable = pfucb->u.pfcb;
     Assert( pfcbTable != pfcbNil );
 
+    // Do the BeforeDelete callback
     Call( ErrRECCallback( ppib, pfucb, JET_cbtypBeforeDelete, 0, NULL, NULL, 0 ) );
 
+    // After ensuring that we're in a transaction, refresh
+    // our cursor to ensure we still have access to the record.
     Call( ErrDIRGetLock( pfucb, writeLock ) );
 
     Call( pfcbTable->ErrSetUpdatingAndEnterDML( ppib ) );
@@ -1647,6 +1988,10 @@ ERR VTAPI ErrIsamDelete(
     Assert( fLogIsDone == ( !PinstFromPpib( ppib )->m_plog->FLogDisabled() && !PinstFromPpib( ppib )->m_plog->FRecovering() && g_rgfmp[pfucb->ifmp].FLogOn() ) );
     Assert( ppib->Level() < levelMax );
 
+    //  delete from secondary indexes
+    //
+    // No critical section needed to guard index list because Updating latch
+    // protects it.
     pfcbTable->LeaveDML();
     for( pfcbIdx = pfcbTable->PfcbNextIndex();
         pfcbIdx != pfcbNil;
@@ -1658,13 +2003,19 @@ ERR VTAPI ErrIsamDelete(
         }
     }
 
+    //  do not touch LV data if we are doing an insert-copy-delete-original
+    //  
     if ( !FFUCBUpdateForInsertCopyDeleteOriginal( pfucb ) )
     {
+        //  delete record long values
+        //
         Call( ErrRECDereferenceLongFieldsInRecord( pfucb ) );
     }
 
     Assert( fLogIsDone == ( !PinstFromPpib( ppib )->m_plog->FLogDisabled() && !PinstFromPpib( ppib )->m_plog->FRecovering() && g_rgfmp[pfucb->ifmp].FLogOn() ) );
 
+    //  delete record
+    //
     err = ErrDIRDelete( pfucb, fDIRNull );
     AssertDIRNoLatch( ppib );
 
@@ -1686,8 +2037,13 @@ ERR VTAPI ErrIsamDelete(
             err,
             err ) );
 
+    //  process result of deletion
+    //
     Call( err );
 
+    //  if no error, commit transaction
+    //
+    //  if InsertCopyDeleteOriginal, commit will be performed in ErrRECIInsert()
     if ( !FFUCBUpdateForInsertCopyDeleteOriginal( pfucb ) )
     {
         Call( ErrDIRCommitTransaction( ppib, NO_GRBIT ) );
@@ -1695,6 +2051,7 @@ ERR VTAPI ErrIsamDelete(
 
     AssertDIRNoLatch( ppib );
 
+    // Do the AfterDelete callback
     CallS( ErrRECCallback( ppib, pfucb, JET_cbtypAfterDelete, 0, NULL, NULL, 0 ) );
 
     Assert( fLogIsDone == ( !PinstFromPpib( ppib )->m_plog->FLogDisabled() && !PinstFromPpib( ppib )->m_plog->FRecovering() && g_rgfmp[pfucb->ifmp].FLogOn() ) );
@@ -1711,9 +2068,11 @@ HandleError:
     if ( fUpdatingLatchSet )
     {
         Assert( pfcbTable != pfcbNil );
-        pfcbTable->ResetUpdating();
+        pfcbTable->ResetUpdating();     //lint !e644
     }
 
+    //  rollback all changes on error
+    //  if InsertCopyDeleteOriginal, rollback will be performed in ErrRECIInsert()
     if ( !FFUCBUpdateForInsertCopyDeleteOriginal( pfucb ) )
     {
         CallSx( ErrDIRRollback( ppib ), JET_errRollbackError );
@@ -1774,6 +2133,12 @@ ERR ErrRECIDeleteIndexEntry(
         case JET_errRecordNotFound:
             if ( fMayHaveAlreadyBeenDeleted )
             {
+                //  must have been record with multi-value column
+                //  or tuples with sufficiently similar values
+                //  (ie. the indexed portion of the multi-values
+                //  or tuples were identical) to produce redundant
+                //  index entries.
+                //
                 err = JET_errSuccess;
                 break;
             }
@@ -1788,8 +2153,11 @@ ERR ErrRECIDeleteIndexEntry(
 
         default:
             CallR( err );
-            CallS( err );
+            CallS( err );   //  don't expect any warnings except the ones filtered out above
 
+            //  PERF: we should be able to avoid the release and call
+            //  ErrDIRDelete with the page latched
+            //
             CallR( ErrDIRRelease( pfucbIdx ) );
             CallR( ErrDIRDelete( pfucbIdx, fDIRNull, prcePrimary ) );
             fThisIndexEntryDeleted = fTrue;
@@ -1815,6 +2183,21 @@ ERR ErrRECIDeleteIndexEntry(
     return err;
 }
 
+//+INTERNAL
+//  ErrRECIDeleteFromIndex
+//  ========================================================================
+//  ErrRECIDeleteFromIndex( FCB *pfcbIdx, FUCB *pfucb )
+//
+//  Extracts key from data record and deletes the key with the given SRID
+//
+//  PARAMETERS
+//              pfucb                           pointer to primary index record to delete
+//              pfcbIdx                         FCB of index to delete from
+//  RETURNS
+//              JET_errSuccess, or error code from failing routine
+//  SIDE EFFECTS
+//  SEE ALSO    ErrRECDelete
+//-
 
 ERR ErrRECIDeleteFromIndex(
     FUCB            *pfucb,
@@ -1834,6 +2217,8 @@ ERR ErrRECIDeleteFromIndex(
     Assert( pfcbIdx->FTypeSecondaryIndex() );
     Assert( pidbNil != pidb );
 
+    //  delete all keys from this index for dying data record
+    //
     DELETE_INDEX_ENTRY_CONTEXT Context( recoperDelete );
     Call( ErrRECIEnumerateKeys(
                pfucb,
@@ -1860,6 +2245,8 @@ HandleError:
 }
 
 
+//  determines whether an index may have changed using the hashed tags
+//
 LOCAL BOOL FRECIIndexPossiblyChanged(
     const BYTE * const      rgbitIdx,
     const BYTE * const      rgbitSet )
@@ -1880,12 +2267,17 @@ LOCAL BOOL FRECIIndexPossiblyChanged(
 }
 
 
+//  determines whether an index has changed by comparing the keys
+//  UNDONE: only checks first multi-value in a multi-valued index, but
+//  for now that's fine because this code is only used for DEBUG purposes
+//  except on the primary index, which will never have multi-values
+//
 LOCAL ERR ErrRECFIndexChanged( FUCB *pfucb, FCB *pfcbIdx, BOOL *pfChanged )
 {
     KEY     keyOld;
     KEY     keyNew;
-    BYTE    *pbOldKey                       = NULL;
-    BYTE    *pbNewKey                       = NULL;
+    BYTE    *pbOldKey                       = NULL;     //  this function is called on primary index to ensure it hasn't changed
+    BYTE    *pbNewKey                       = NULL;     //  and on secondary index to cascade record updates
     DATA    *plineNewData = &pfucb->dataWorkBuf;
     ERR     err;
     ULONG   iidxsegT;
@@ -1899,8 +2291,11 @@ LOCAL ERR ErrRECFIndexChanged( FUCB *pfucb, FCB *pfcbIdx, BOOL *pfChanged )
     Assert( pfucb->dataWorkBuf.Cb() == plineNewData->Cb() );
     Assert( pfucb->dataWorkBuf.Pv() == plineNewData->Pv() );
 
+    //  UNDONE: do something else for tuple indexes
     Assert( !pfcbIdx->Pidb()->FTuples() );
 
+    //  get new key from copy buffer
+    //
     Alloc( pbNewKey = (BYTE *)RESKEY.PvRESAlloc() );
     keyNew.prefix.Nullify();
     keyNew.suffix.SetCb( cbKeyAlloc );
@@ -1914,12 +2309,14 @@ LOCAL ERR ErrRECFIndexChanged( FUCB *pfucb, FCB *pfcbIdx, BOOL *pfChanged )
         prceNil,
         &iidxsegT ) );
     CallS( ErrRECValidIndexKeyWarning( err ) );
-    Assert( wrnFLDOutOfKeys != err );
-    Assert( wrnFLDOutOfTuples != err );
+    Assert( wrnFLDOutOfKeys != err );       //  should never get OutOfKeys since we're only retrieving itagSequence 1
+    Assert( wrnFLDOutOfTuples != err );     //  this routine not currently called for tuple indexes
 
     fCopyBufferKeyIsPresentInIndex = ( wrnFLDNotPresentInIndex != err );
 
 
+    //  get the old key from the node
+    //
     Alloc( pbOldKey = (BYTE *)RESKEY.PvRESAlloc() );
     keyOld.prefix.Nullify();
     keyOld.suffix.SetCb( cbKeyAlloc );
@@ -1936,6 +2333,7 @@ LOCAL ERR ErrRECFIndexChanged( FUCB *pfucb, FCB *pfcbIdx, BOOL *pfChanged )
     if( fCopyBufferKeyIsPresentInIndex && !fRecordKeyIsPresentInIndex
         || !fCopyBufferKeyIsPresentInIndex && fRecordKeyIsPresentInIndex )
     {
+        //  one is in the index and the other isn't (even though an indexed column may not have changed!)
         *pfChanged = fTrue;
         Assert( !Pcsr( pfucb )->FLatched() );
         err = JET_errSuccess;
@@ -1943,6 +2341,7 @@ LOCAL ERR ErrRECFIndexChanged( FUCB *pfucb, FCB *pfcbIdx, BOOL *pfChanged )
     }
     else if( !fCopyBufferKeyIsPresentInIndex && !fRecordKeyIsPresentInIndex )
     {
+        //  neither are in the index (nothing has changed)
         *pfChanged = fFalse;
         Assert( !Pcsr( pfucb )->FLatched() );
         err = JET_errSuccess;
@@ -1950,6 +2349,7 @@ LOCAL ERR ErrRECFIndexChanged( FUCB *pfucb, FCB *pfcbIdx, BOOL *pfChanged )
     }
 
 #ifdef DEBUG
+    //  record must honor index no NULL segment requirements
     if ( pfcbIdx->Pidb()->FNoNullSeg() )
     {
         Assert( wrnFLDNullSeg != err );
@@ -1971,12 +2371,20 @@ HandleError:
 
 
 
+//  upgrades a ReplaceNoLock to a regular Replace by write-locking the record
 ERR ErrRECUpgradeReplaceNoLock( FUCB *pfucb )
 {
     ERR     err;
 
     Assert( FFUCBReplaceNoLockPrepared( pfucb ) );
 
+    //  UNDONE: compute checksum on commit to level 0
+    //          in support of following sequence:
+    //              BeginTransaction
+    //              PrepareUpdate, defer checksum since in xact
+    //              SetColumns
+    //              Commit to level 0, other user may update it
+    //              Update
     Assert( !FFUCBDeferredChecksum( pfucb )
         || pfucb->ppib->Level() > 0 );
 
@@ -1988,6 +2396,8 @@ ERR ErrRECUpgradeReplaceNoLock( FUCB *pfucb )
 
     if ( fWriteConflict )
     {
+        //  UNDONE: is there a way to easily report the bm?
+        //
         OSTraceFMP(
             pfucb->ifmp,
             JET_tracetagDMLConflicts,
@@ -2008,13 +2418,50 @@ ERR ErrRECUpgradeReplaceNoLock( FUCB *pfucb )
 }
 
 
+//+local
+//  ErrRECIReplace
+//  ========================================================================
+//  ErrRECIReplace( FUCB *pfucb, DIRFLAG dirflag )
+//
+//  Updates a record in a data file.     All indexes on the data file are
+//  pdated to reflect the updated data record.
+//
+//  PARAMETERS  pfucb        FUCB for file
+//  RETURNS     Error code, one of the following:
+//                   JET_errSuccess              Everything went OK.
+//                  -NoCurrentRecord             There is no current record
+//                                               to update.
+//                  -RecordNoCopy                There is no working buffer
+//                                               to update from.
+//                  -KeyDuplicate                The new record data causes an
+//                                               illegal duplicate index entry
+//                                               to be generated.
+//                  -RecordPrimaryChanged        The new data causes the primary
+//                                               key to change.
+//  SIDE EFFECTS
+//      After update, file currency is left on the updated record.
+//      Similar for index currency.
+//      The effect of a GetNext or GetPrevious operation will be
+//      the same in either case.  On failure, the currencies are
+//      returned to their initial states.
+//      If there is a working buffer for SetField commands,
+//      it is discarded.
+//
+//  COMMENTS
+//      If currency is not ON a record, the update will fail.
+//      A transaction is wrapped around this function.  Thus, any
+//      work done will be undone if a failure occurs.
+//      For temporary files, transaction logging is deactivated
+//      for the duration of the routine.
+//      Index entries are not made for entirely-null keys.
+//-
 LOCAL ERR ErrRECIReplace( FUCB *pfucb, const JET_GRBIT grbit )
 {
-    ERR     err;
+    ERR     err;                    // error code of various utility
     PIB *   ppib                = pfucb->ppib;
-    FCB *   pfcbTable;
+    FCB *   pfcbTable;              // file's FCB
     TDB *   ptdb;
-    FCB *   pfcbIdx;
+    FCB *   pfcbIdx;                // loop variable for each index on file
     FID     fidFixedLast;
     FID     fidVarLast;
     FID     fidVersion;
@@ -2026,31 +2473,45 @@ LOCAL ERR ErrRECIReplace( FUCB *pfucb, const JET_GRBIT grbit )
     CheckTable( ppib, pfucb );
     CheckSecondary( pfucb );
 
+    //  should have been checked in PrepareUpdate
+    //
     Assert( FFUCBUpdatable( pfucb ) );
     Assert( FFUCBReplacePrepared( pfucb ) );
 
+    //  efficiency variables
+    //
     pfcbTable = pfucb->u.pfcb;
     Assert( pfcbTable != pfcbNil );
 
     ptdb = pfcbTable->Ptdb();
     Assert( ptdbNil != ptdb );
 
+    //  data to use for update is in workBuf
+    //
     Assert( !pfucb->dataWorkBuf.FNull() );
 
     CallR( ErrDIRBeginTransaction( ppib, 62245, NO_GRBIT ) );
 
+    //  NoVersion replace operations are not yet supported.
+    //
     if ( ( 0 != (grbit & JET_bitUpdateNoVersion) ) )
     {
         Error( ErrERRCheck( JET_errUpdateMustVersion ) );
     }
 
+    //  optimistic locking, ensure that record has
+    //  not changed since PrepareUpdate
+    //
     if ( FFUCBReplaceNoLockPrepared( pfucb ) )
     {
         Call( ErrRECUpgradeReplaceNoLock( pfucb ) );
     }
 
+    // Do the BeforeReplace callback
     Call( ErrRECCallback( ppib, pfucb, JET_cbtypBeforeReplace, 0, NULL, NULL, 0 ) );
 
+    //  check for clients that commit an update even though they didn't actually change anything
+    //
     if ( !FFUCBAnyColumnSet( pfucb ) )
     {
         PERFOpt( PERFIncCounterTable( cRECNoOpReplaces, PinstFromPfucb( pfucb ), pfcbTable->TCE() ) );
@@ -2065,10 +2526,14 @@ LOCAL ERR ErrRECIReplace( FUCB *pfucb, const JET_GRBIT grbit )
     Call( pfcbTable->ErrSetUpdatingAndEnterDML( ppib ) );
     fUpdatingLatchSet = fTrue;
 
+    //  Set these efficiency variables after FUCB read latch
+    //
     pfcbTable->AssertDML();
     fidFixedLast = ptdb->FidFixedLast();
     fidVarLast = ptdb->FidVarLast();
 
+    //  if need to update indexes, then cache old record
+    //
     fUpdateIndex = FRECIIndexPossiblyChanged( ptdb->RgbitAllIndex(), pfucb->rgbitSet );
 
     pfcbTable->LeaveDML();
@@ -2076,6 +2541,8 @@ LOCAL ERR ErrRECIReplace( FUCB *pfucb, const JET_GRBIT grbit )
     Assert( !Pcsr( pfucb )->FLatched() );
     if ( fUpdateIndex )
     {
+        //  ensure primary key did not change
+        //
         if ( pfcbTable->Pidb() != pidbNil )
         {
             BOOL    fIndexChanged;
@@ -2103,6 +2570,8 @@ LOCAL ERR ErrRECIReplace( FUCB *pfucb, const JET_GRBIT grbit )
     }
 #endif
 
+    //  set version column if present
+    //
     Assert( FFUCBIndex( pfucb ) );
     pfcbTable->EnterDML();
     fidVersion = ptdb->FidVersion();
@@ -2125,6 +2594,8 @@ LOCAL ERR ErrRECIReplace( FUCB *pfucb, const JET_GRBIT grbit )
                 goto HandleError;
         }
 
+        //  get current record
+        //
         Call( ErrDIRGet( pfucb ) );
 
         if ( fTemplateColumn )
@@ -2132,6 +2603,7 @@ LOCAL ERR ErrRECIReplace( FUCB *pfucb, const JET_GRBIT grbit )
             Assert( FCOLUMNIDTemplateColumn( columnidT ) );
             if ( !pfcbT->FTemplateTable() )
             {
+                // Switch to template table.
                 pfcbT->Ptdb()->AssertValidDerivedTable();
                 pfcbT = pfcbT->Ptdb()->PfcbTemplateTable();
             }
@@ -2146,6 +2618,8 @@ LOCAL ERR ErrRECIReplace( FUCB *pfucb, const JET_GRBIT grbit )
             Assert( !pfcbT->FTemplateTable() );
         }
 
+        //  increment field from value in current record
+        //
         pfcbT->EnterDML();
 
         err = ErrRECIRetrieveFixedColumn(
@@ -2161,6 +2635,9 @@ LOCAL ERR ErrRECIReplace( FUCB *pfucb, const JET_GRBIT grbit )
             goto HandleError;
         }
 
+        //  handle case where field is NULL when column added
+        //  to table with records present
+        //
         if ( dataField.Cb() == 0 )
         {
             ulT = 1;
@@ -2184,6 +2661,8 @@ LOCAL ERR ErrRECIReplace( FUCB *pfucb, const JET_GRBIT grbit )
 
     Assert( !Pcsr( pfucb )->FLatched( ) );
 
+    //  update indexes
+    //
     if ( fUpdateIndex )
     {
 #ifdef PREREAD_INDEXES_ON_REPLACE
@@ -2191,9 +2670,11 @@ LOCAL ERR ErrRECIReplace( FUCB *pfucb, const JET_GRBIT grbit )
         {
             const INT cSecondaryIndexesToPreread = 16;
 
-            PGNO rgpgno[cSecondaryIndexesToPreread + 1];
+            PGNO rgpgno[cSecondaryIndexesToPreread + 1];    //  NULL-terminated
             INT ipgno = 0;
 
+            // No critical section needed to guard index list because Updating latch
+            // protects it.
             for ( pfcbIdx = pfcbTable->PfcbNextIndex();
                   pfcbIdx != pfcbNil && ipgno < cSecondaryIndexesToPreread;
                   pfcbIdx = pfcbIdx->PfcbNextIndex() )
@@ -2202,6 +2683,7 @@ LOCAL ERR ErrRECIReplace( FUCB *pfucb, const JET_GRBIT grbit )
                      && FFILEIPotentialIndex( pfcbTable, pfcbIdx )
                      && FRECIIndexPossiblyChanged( pfcbIdx->Pidb()->RgbitIdx(), pfucb->rgbitSet ) )
                 {
+                    //  preread this index as we will probably update it
                     rgpgno[ipgno++] = pfcbIdx->PgnoFDP();
                 }
             }
@@ -2213,13 +2695,15 @@ LOCAL ERR ErrRECIReplace( FUCB *pfucb, const JET_GRBIT grbit )
 
             BFPrereadPageList( pfucb->ifmp, rgpgno, bfprfDefault, pfucb->ppib->BfpriPriority( pfucb->ifmp ), *tcScope );
         }
-#endif
+#endif  //  PREREAD_INDEXES_ON_REPLACE
 
+        // No critical section needed to guard index list because Updating latch
+        // protects it.
         for ( pfcbIdx = pfcbTable->PfcbNextIndex();
             pfcbIdx != pfcbNil;
             pfcbIdx = pfcbIdx->PfcbNextIndex() )
         {
-            if ( pfcbIdx->Pidb() != pidbNil )
+            if ( pfcbIdx->Pidb() != pidbNil )       // sequential indexes don't need updating
             {
                 if ( FFILEIPotentialIndex( pfcbTable, pfcbIdx ) )
                 {
@@ -2230,6 +2714,9 @@ LOCAL ERR ErrRECIReplace( FUCB *pfucb, const JET_GRBIT grbit )
 #ifdef DEBUG
                     else if ( pfcbIdx->Pidb()->FTuples() )
                     {
+                        //  UNDONE: Need to come up with some other validation
+                        //  routine because ErrRECFIndexChanged() doesn't
+                        //  properly handle tuple index entries
                     }
                     else
                     {
@@ -2244,6 +2731,8 @@ LOCAL ERR ErrRECIReplace( FUCB *pfucb, const JET_GRBIT grbit )
         }
     }
 
+    //  do the replace
+    //
     err = ErrDIRReplace( pfucb, pfucb->dataWorkBuf, fDIRLogColumnDiffs );
 
     pfcbTable->ResetUpdating();
@@ -2262,13 +2751,18 @@ LOCAL ERR ErrRECIReplace( FUCB *pfucb, const JET_GRBIT grbit )
             err,
             err ) );
 
+    //  process result of update
+    //
     Call( err );
 
 Done:
+    //  if no error, commit transaction
+    //
     Call( ErrDIRCommitTransaction( ppib, NO_GRBIT ) );
 
     FUCBResetUpdateFlags( pfucb );
 
+    // Do the AfterReplace callback
     CallS( ErrRECCallback( ppib, pfucb, JET_cbtypAfterReplace, 0, NULL, NULL, 0 ) );
 
     AssertDIRNoLatch( ppib );
@@ -2286,6 +2780,8 @@ HandleError:
         pfcbTable->ResetUpdating();
     }
 
+    //  rollback all changes on error
+    //
     CallSx( ErrDIRRollback( ppib ), JET_errRollbackError );
 
     return err;
@@ -2364,26 +2860,29 @@ public:
             return;
         }
 
+        // For a sequence of eDeletes, turn all but the last one into an eSkip.
+        // For a sequence of iInserts, turn all but the first one into an eSkip.
+        // For an eDelete followed by an eInsert, turn both into eSkips.
 #define STATE(X, Y)  ( (X << 4) | Y )
         Assert( ( 1 << 4 ) > next.m_Action );
 
         switch ( STATE(this->m_Action, next.m_Action ) )
         {
-            case STATE( eDelete, eDelete ):
+            case STATE( eDelete, eDelete ): //  => STATE(eSkip, eDelete)
                 this->m_Action = eSkip;
                 break;
 
-            case STATE( eInsert, eInsert):
-            case STATE( eSkip, eInsert):
+            case STATE( eInsert, eInsert): // => STATE( eInsert, eSkip )
+            case STATE( eSkip, eInsert): // => STATE( eSkip, eSkip )
                 next.m_Action = eSkip;
                 break;
 
-            case STATE( eDelete, eInsert ):
+            case STATE( eDelete, eInsert ): // => STATE( eSkip, eSkip )
                 this->m_Action = eSkip;
                 next.m_Action = eSkip;
                 break;
 
-            case STATE( eSkip, eDelete ):
+            case STATE( eSkip, eDelete ): // => STATE( eSkip, eDelete )
                 break;
 
             case STATE( eSkip, eSkip ):
@@ -2456,12 +2955,15 @@ struct TRACK_INDEX_ENTRY_CONTEXT : INDEX_ENTRY_CALLBACK_CONTEXT
         ULONG cNeeded;
         ULONG cTotalRequested = m_cDataUsed + cDataRequested;
 
+        // At the minimum, allocate 256 of them.
         if ( 256 >= cTotalRequested )
         {
             cNeeded = 256;
         }
         else
         {
+            // Round up to the next power of 2.  If already a power of 2, doesn't do anything.
+            // That is (LNextPowerOf2( 256 ) == 256 ), not (LNextPowerOf2(256) == 512).
             cNeeded = LNextPowerOf2( cTotalRequested );
             Assert( cNeeded >= cTotalRequested );
             Assert( ( 2 * cTotalRequested ) >= cNeeded );
@@ -2492,8 +2994,16 @@ struct TRACK_INDEX_ENTRY_CONTEXT : INDEX_ENTRY_CALLBACK_CONTEXT
             return;
         }
 
+        //
+        // We tracked keys to post process.  Sort by key, with eDeletes from the old record
+        // coming before eInserts from the new record.  There should be no eSkips at this time,
+        // they all come during AdjustForDuplicateKeys().
+        //
         qsort( m_pData, m_cDataUsed, sizeof( m_pData[ 0 ] ), &(TRACK_INDEX_ENTRY_DATA::Comp) );
 
+        //
+        // Look for successive duplicate keys, re-marking actions appropriately.
+        //
         for ( ULONG i = 1; i < m_cDataUsed; i++ )
         {
             m_pData[ i - 1 ].AdjustForDuplicateKeys( m_pData[ i ] );
@@ -2528,6 +3038,22 @@ HandleError:
 }
 
 
+//+local
+// ErrRECIReplaceInIndex
+// ========================================================================
+// ERR ErrRECIReplaceInIndex( FCB *pfcbIdx, FUCB *pfucb )
+//
+// Removes all unneded index entries from an index and adds all needed entries.
+//
+// PARAMETERS
+//              pfcbIdx                     FCB of index to insert into
+//              pfucb                       record FUCB pointing to primary record changed
+//
+// RETURNS      JET_errSuccess, or error code from failing routine
+//
+// SIDE EFFECTS
+// SEE ALSO     Replace
+//-
 ERR ErrRECIReplaceInIndex(
     FUCB            *pfucb,
     FUCB            *pfucbIdx,
@@ -2552,6 +3078,7 @@ ERR ErrRECIReplaceInIndex(
 
     if ( pidb->FTuples() )
     {
+        // Delete all the old keys.
         Call ( ErrRECIEnumerateKeys(
                    pfucb,
                    pfucbIdx,
@@ -2563,6 +3090,7 @@ ERR ErrRECIReplaceInIndex(
                    &DeleteContext,
                    ErrRECIDeleteIndexEntry ) );
 
+        // Insert all the new keys.
         DIRGotoRoot( pfucbIdx );
         Call ( ErrRECIEnumerateKeys(
                    pfucb,
@@ -2576,6 +3104,7 @@ ERR ErrRECIReplaceInIndex(
                    ErrRECIInsertIndexEntry ) );
     }
     else {
+        // Track all the old keys for potential deletion.
         TrackContext.m_eCurrentAction = TRACK_INDEX_ENTRY_DATA::eDelete;
         Call( ErrRECIEnumerateKeys(
                   pfucb,
@@ -2589,6 +3118,7 @@ ERR ErrRECIReplaceInIndex(
                   ErrRECITrackIndexEntry ) );
         Assert( fFalse == fIndexUpdated );
 
+        // Track all the new keys for potential insertion.
         TrackContext.m_eCurrentAction = TRACK_INDEX_ENTRY_DATA::eInsert;
         Call( ErrRECIEnumerateKeys(
                   pfucb,
@@ -2604,13 +3134,20 @@ ERR ErrRECIReplaceInIndex(
 
         if ( 0 != TrackContext.m_cDataUsed )
         {
+            //
+            // We tracked keys to post process.
             TrackContext.CleanActionList();
 
+            //
+            // Do the resulting actions.
+            //
             for ( ULONG i = 0; i < TrackContext.m_cDataUsed; i++ )
             {
                 switch (TrackContext.m_pData[i].Action())
                 {
                     case TRACK_INDEX_ENTRY_DATA::eSkip:
+                        // Key either was in both old and new record AND/OR was present in old or new
+                        // more than once.  We act only once on a key.
                         continue;
 
                     case TRACK_INDEX_ENTRY_DATA::eDelete:
@@ -2625,6 +3162,7 @@ ERR ErrRECIReplaceInIndex(
                         break;
 
                     case TRACK_INDEX_ENTRY_DATA::eInsert:
+                        // Necessary on the first eInsert, cheap on all the others.
                         DIRGotoRoot( pfucbIdx );
 
                         Call( ErrRECIInsertIndexEntry(
@@ -2668,6 +3206,7 @@ HandleError:
     return err;
 }
 
+//  ================================================================
 LOCAL ERR ErrRECIEscrowUpdate(
     PIB             *ppib,
     FUCB            *pfucb,
@@ -2678,6 +3217,7 @@ LOCAL ERR ErrRECIEscrowUpdate(
     ULONG           cbOldMax,
     ULONG           *pcbOldActual,
     JET_GRBIT       grbit )
+//  ================================================================
 {
     ERR         err         = JET_errSuccess;
     FIELD       fieldFixed;
@@ -2704,6 +3244,8 @@ LOCAL ERR ErrRECIEscrowUpdate(
         return ErrERRCheck( JET_errInvalidOperation );
     }
 
+    //  assert against client misbehaviour - EscrowUpdating a record while
+    //  another cursor of the same session has an update pending on the record
     CallR( ErrRECSessionWriteConflict( pfucb ) );
 
     FCB *pfcb = pfucb->u.pfcb;
@@ -2712,6 +3254,7 @@ LOCAL ERR ErrRECIEscrowUpdate(
     {
         if ( !pfcb->FTemplateTable() )
         {
+            // Switch to template table.
             pfcb->Ptdb()->AssertValidDerivedTable();
             pfcb = pfcb->Ptdb()->PfcbTemplateTable();
         }
@@ -2740,6 +3283,7 @@ LOCAL ERR ErrRECIEscrowUpdate(
     Assert( !Pcsr( pfucb )->FLatched() );
 #endif
 
+    //  ASSERT: the offset is represented in the record
 
     DIRFLAG dirflag = fDIRNull;
     if ( JET_bitEscrowNoRollback & grbit )
@@ -2755,6 +3299,7 @@ LOCAL ERR ErrRECIEscrowUpdate(
         dirflag |= fDIREscrowDeleteOnZero;
     }
 
+    // Escrow updates on 32-bit and 64-bit signed/unsigned types are supported
     if ( fieldFixed.cbMaxLen == 4 )
     {
         LONG* plDelta = (LONG*)pv;
@@ -2812,6 +3357,7 @@ LOCAL ERR ErrRECIEscrowUpdate(
     return err;
 }
 
+//  ================================================================
 ERR VTAPI ErrIsamEscrowUpdate(
     JET_SESID       sesid,
     JET_VTID        vtid,
@@ -2822,6 +3368,7 @@ ERR VTAPI ErrIsamEscrowUpdate(
     ULONG           cbOldMax,
     ULONG           *pcbOldActual,
     JET_GRBIT       grbit )
+//  ================================================================
 {
     PIB * const ppib    = reinterpret_cast<PIB *>( sesid );
     FUCB * const pfucb  = reinterpret_cast<FUCB *>( vtid );
@@ -2838,6 +3385,8 @@ ERR VTAPI ErrIsamEscrowUpdate(
     CheckTable( ppib, pfucb );
     CheckSecondary( pfucb );
 
+    //  ensure that table is updatable
+    //
     CallR( ErrFUCBCheckUpdatable( pfucb )  );
     if ( !FFMPIsTempDB( pfucb->ifmp ) )
     {

@@ -3,6 +3,9 @@
 
 #include "std.hxx"
 
+//  ****************************************************************
+//  Performance Counters
+//  ****************************************************************
 
 #ifdef PERFMON_SUPPORT
 
@@ -85,30 +88,47 @@ LONG LDBMaintFollowerDivergentCheckedCEFLPv( LONG iInstance, VOID * pvBuf )
     return 0;
 }
 
-#endif
+#endif // PERFMON_SUPPORT
 
 
+//  ================================================================
 class IDBMScanConfig
+//  ================================================================
+//
+//  Abstract class for scan configuration
+//
+//-
 {
 public:
     virtual ~IDBMScanConfig() {}
 
+    // the number of scans that should be performed
     virtual INT CScansMax() = 0;
 
+    // how long the scans should run for
     virtual INT CSecMax() = 0;
     
+    // if a scan completes in less than the minimum we wait
+    // for the rest of the interval to pass before starting
+    // a new scan
     virtual INT     CSecMinScanTime() = 0;
 
+    // read this many pages in one batch
     virtual CPG CpgBatch() = 0;
 
+    // sleep this long between batches of page reads
     virtual DWORD   DwThrottleSleep() = 0;
 
+    // serialize database maintenance
     virtual bool    FSerializeScan() = 0;
 
+    // required to get perf counter information
     virtual INST *  Pinst() = 0;
 
+    // disk id
     virtual ULONG_PTR UlDiskId() const = 0;
 
+    // periodic timeout to notify progress in one pass
     virtual INT     CSecNotifyInterval() = 0;
 
 protected:
@@ -116,7 +136,13 @@ protected:
 };
 
 
+//  ================================================================
 class IDBMScanReader
+//  ================================================================
+//
+//  Abstract class for reading pages from the database
+//
+//-
 {
 protected:
     IDBMScanReader() {}
@@ -126,21 +152,35 @@ public:
 
     virtual ERR InitDBMScanReader() = NULL;
 
+    // issue a preread for a set of pages
     virtual void PrereadPages( const PGNO pgnoFirst, const CPG cpg ) = 0;
 
+    // actually read one page. can return a checksum error, 
+    // I/O error or EOF
     virtual ERR ErrReadPage( const PGNO pgno ) = 0;
 
+    // indicate that pre-read page is no long needed
     virtual void DoneWithPreread( const PGNO pgno ) = 0;
 
+    // max pgno to scan
     virtual PGNO PgnoLast() const = 0;
 
+    // constants
     enum
     {
         cpgPrereadMax = cbReadSizeMax / g_cbPageMin
     };
 };
 
+//  ================================================================
 struct DBMScanStats
+//  ================================================================
+//
+//  Holds stats related to the scan, just makes it easier to pass
+//  around the collection of stats that is needed by things like
+//  DBMScanObserverEvents.
+//
+//-
 {
         DBMScanStats() :
             m_cbAveFreeSpaceLVPages( 0 ),
@@ -156,7 +196,16 @@ struct DBMScanStats
         CPG m_cpgRecPagesScanned;
 };
 
+//  ================================================================
 class IDBMScanState
+//  ================================================================
+//
+//  The base class for objects which keep track of the state of the
+//  scan. This class provides basic state properties and subclasses
+//  persist the state in either the database header or the database
+//  (possibly adding other properties).
+//
+//-
 {
 public:
     virtual ~IDBMScanState() {}
@@ -171,6 +220,7 @@ public:
     virtual __int64 FtPrevPassCompletionTime() const = 0;
     virtual CPG CpgScannedPrevPass() const = 0;
 
+    // events which can cause the state to be updated
     virtual void StartedPass() = 0;
     virtual void ResumedPass() = 0;
     virtual void FinishedPass() = 0;
@@ -184,7 +234,16 @@ protected:
 };
 
 
+//  ================================================================
 class DBMScanObserver
+//  ================================================================
+//
+//  The base class that all DBMScanObserver classes inherit from. The
+//  public methods perform some housekeeping and then call the protected
+//  virtual methods. Subclasses can override the virtual methods to
+//  receive messages when certain scan events happen.
+//
+//-
 {
 public:
     virtual ~DBMScanObserver() {}
@@ -218,20 +277,36 @@ private:
 };
 
 
+//  Forward declaration.
 class IDBMScanSerializer;
 
 
+//  ================================================================
 class DBMScan : public IDBMScan
+//  ================================================================
+//
+//  Main scanning object. Owns these objects:
+//      - DBMScanConfig: controls scan duration and speed
+//      - DBMScanReader: gets the pages from the database
+//      - DBMScanState: stores the current state of the scan
+//
+//  DBMScanObservers can be added to this object, their methods 
+//  will be called as the scan progresses.
+//
+//-
 {
+    //  CInvasiveList glue.
 public:
     static SIZE_T OffsetOfILE() { return OffsetOf( DBMScan, m_ile ); }
 private:
     CInvasiveList<DBMScan, OffsetOfILE>::CElement m_ile;
 
 public:
+    // these objects will be owned and deleted by the DBMScan
     DBMScan( IDBMScanState * const pscanstate, IDBMScanReader * const pscanreader, IDBMScanConfig * const pscanconfig );
     ~DBMScan();
 
+    // once added, the observer will be owned and deleted by the DBMScan
     void AddObserver( DBMScanObserver * const pscanobserver );
 
     ERR ErrStartDBMScan();
@@ -242,9 +317,11 @@ public:
     void WaitForScanGo( const INT msec );
 
 private:
+    // thread procedures
     static DWORD DwDBMScanThreadProc_( DWORD_PTR dwContext );
     DWORD DwDBMScan_();
 
+    // starting/stopping
     bool FIsDBMScanRunning_() const { return ( NULL != m_threadDBMScan ); }
     ERR ErrStartDBMScan_();
     void PrepareToTerm_();
@@ -252,6 +329,7 @@ private:
     void SetScanStop_();
     void ResetScanStop_();
 
+    // running a pass
     bool FResumingPass_() const;
     void ResumePass_();
     void StartNewPass_();
@@ -262,6 +340,26 @@ private:
     void DoOnePass_();
     void WaitForMinPassTime_();
 
+    // The status methods (ResumePass_, StartNewPass_, etc.) all have to call a member function of all
+    // the observers. That functionality is provided by the ForEachObserver_ methods. The first variation
+    // calls an observer method which just expects the state. The second variation calls an observer method
+    // which expects the state and an additional argument (e.g. the pgno of the page with the bad checksum).
+    // The second method is a template method so that the second argument can be of different types (e.g.
+    // objid, pgno, cpg). 
+    //
+    // The pfn declaration might look strange at first:
+    //
+    //  void (DBMScanObserver::* const pfn)(const IDBMScanState * const)
+    //
+    // Reading complex declarations should be done from the inside out:
+    //
+    //  pfn is a const
+    //      pointer
+    //          to a member of DBMScanObserver
+    //              which is a function
+    //                  taking 'const IDBMScanState * const'
+    //                      and returning void
+    //  
     
     void ForEachObserverCall_( void ( DBMScanObserver::* const pfn )( const IDBMScanState * const ) ) const;
     template<class Arg> void ForEachObserverCall_(
@@ -276,16 +374,19 @@ private:
     unique_ptr<IDBMScanConfig>    m_pscanconfig;
     unique_ptr<IDBMScanReader>    m_pscanreader;
     
+    // state and observers
     static const INT            m_cscanobserversMax = 8;
     INT m_cscanobservers;
     unique_ptr<IDBMScanState>     m_pscanstate;
     unique_ptr<DBMScanObserver>   m_rgpscanobservers[m_cscanobserversMax];
 
+    // thread and concurrency control
     THREAD                      m_threadDBMScan;
     CCriticalSection            m_critSignalControl;
     CManualResetSignal          m_msigDBScanStop;
     CManualResetSignal          m_msigDBScanGo;
 
+    // serialization object
     IDBMScanSerializer *    m_pidbmScanSerializationObj;
 
     INT m_cscansFinished;
@@ -294,20 +395,31 @@ private:
     bool m_fNeedToSuspendPass;
     bool m_fSerializeScan;
 
-private:
+private: // not implemented
     DBMScan( const DBMScan& );
     DBMScan& operator=( const DBMScan& );
 };
 
 
+//  Forward declaration.
 class DBMScanSerializerFactory;
 
 
+//  ================================================================
 class IDBMScanSerializer
+//  ================================================================
+//
+//  This abstract class is used to avoid branching the DBMScan code
+//  very often whether JET_paramEnableDBScanSerialization is enabled
+//  or not.
+//
+//-
 {
 protected:
+    //  The factory is a friend.
     friend class DBMScanSerializerFactory;
     
+    //  CInvasiveList glue.
 public:
     static SIZE_T OffsetOfILE() { return OffsetOf( IDBMScanSerializer, m_ile ); }
 private:
@@ -325,106 +437,163 @@ protected:
     IDBMScanSerializer( const ULONG_PTR ulKey, const IDBMScanSerializerType idbmsType );
 
 public:
+    //  Interface.
     virtual ~IDBMScanSerializer();
     virtual bool FEnqueueAndWait( DBMScan * const pdbmScan, const INT cmsec ) = 0;
     virtual void Dequeue( DBMScan * const pdbmScan ) = 0;
     virtual bool FDBMScanCurrent( DBMScan * const pdbmScan ) = 0;
     virtual DWORD DwTimeSlice() const = 0;
 
+    //  Other public methods.
     IDBMScanSerializer::IDBMScanSerializerType GetSerializerType() const;
     ULONG_PTR UlSerializerKey() const;
     LONG CSerializerRef() const;
 
 protected:
+    //  Only the factory can use these.
     LONG CIncrementSerializerRef();
     LONG CDecrementSerializerRef();
 
 private:
+    //  Object type.
     IDBMScanSerializerType m_idbmsType;
 
+    //  Key.
     ULONG_PTR m_ulKey;
 
+    //  Ref count.
     LONG m_cRef;
 };
 
 
+//  ================================================================
 class DBMScanSerializerDummy : public IDBMScanSerializer
+//  ================================================================
+//
+//  This class is a dummy implementation of IDBMScanSerializer
+//  which will always succeed in enqueuing but won't do any wait
+//  or useful work.
+//
+//-
 {
 protected:
+    //  The factory is a friend.
     friend class DBMScanSerializerFactory;
     
 public:
+    //  Interface implementation.
     bool FEnqueueAndWait( DBMScan * const pdbmScan, const INT cmsec );
     void Dequeue( DBMScan * const pdbmScan );
     bool FDBMScanCurrent( DBMScan * const pdbmScan );
     DWORD DwTimeSlice() const;
 
 protected:
+    //  Constructor/destructor. Only the factory can use these.
     DBMScanSerializerDummy( const ULONG_PTR ulKey );
     ~DBMScanSerializerDummy();
 
 private:
+    //  "Enqueued" object.
     DBMScan * m_pdbmScan;
 };
 
 
+//  ================================================================
 class DBMScanSerializer : public IDBMScanSerializer
+//  ================================================================
+//
+//  This class maintains a list of DBMScan objects interested
+//  in entering a running state and excuting for a given timeslice.
+//
+//-
 {
 protected:
+    //  The factory is a friend.
     friend class DBMScanSerializerFactory;
     
 private:
     const static DWORD s_cmsecTimeSlice = 10 * 1000;
 
 public:
+    //  Interface implementation.
     bool FEnqueueAndWait( DBMScan * const pdbmScan, const INT cmsec );
     void Dequeue( DBMScan * const pdbmScan );
     bool FDBMScanCurrent( DBMScan * const pdbmScan );
     DWORD DwTimeSlice() const;
 
 protected:
+    //  Constructor/destructor. Only the factory can use these.
     DBMScanSerializer( const ULONG_PTR ulKey );
     ~DBMScanSerializer();
 
 private:
+    //  Synchronization.
     CCriticalSection m_critSerializer;
 
+    //  List of DBMScans.
     CInvasiveList<DBMScan, DBMScan::OffsetOfILE> m_ilDbmScans;
 };
 
 
+//  ================================================================
 class DBMScanSerializerFactory
+//  ================================================================
+//
+//  This class maintains a list of DBMScanSerializer objects
+//  that will be consumed by DBMScan objects for the purpose of
+//  serializing Database Maintenance threads that scan databases
+//  that share the same disk. This class works as a factory that
+//  returns either DBMScanSerializer or DBMScanSerializerDummy
+//  objects. DBMScanSerializerDummy objects are not kept on a list,
+//  but will be ref counted for debugging purposes.
+//
+//-
 {
 public:
+    //  Initialize/terminate the serializer.
     ERR ErrInitSerializerFactory();
     void TermSerializerFactory();
 
+    //  Register/unregister.
     ERR ErrRegisterRealSerializer( const ULONG_PTR ulKey, IDBMScanSerializer ** const ppidbmSerializer );
     ERR ErrRegisterDummySerializer( const ULONG_PTR ulKey, IDBMScanSerializer ** const ppidbmSerializer );
     void UnregisterSerializer( IDBMScanSerializer * const pidbmSerializer );
 
+    //  Return if the list of registered DBMScanSerializers is empty.
     bool FSerializerFactoryEmpty();
     
 public:
+    //  Constructor/destructor.
     DBMScanSerializerFactory();
     ~DBMScanSerializerFactory();
 
 protected:
+    //  Builds different types of objects.
     ERR ErrRegisterSerializer_( const ULONG_PTR ulKey, const bool fDummy, IDBMScanSerializer ** const ppidbmSerializer );
 
 private:
+    //  Synchronization.
     CCriticalSection m_critSerializer;
 
+    //  List of DBMScanSerializer objects.
     CInvasiveList<DBMScanSerializer, DBMScanSerializer::OffsetOfILE> m_ilSerializers;
 
+    //  Ref count of DBMScanSerializerDummy objects.
     LONG m_cDummySerializers;
 };
 
 
+//  Global DBM serializer.
 LOCAL DBMScanSerializerFactory g_dbmSerializerFactory;
 
 
+//  ================================================================
 class DBMScanReader : public IDBMScanReader
+//  ================================================================
+//
+//  Read pages from the given FMP
+//
+//-
 {
 public:
     DBMScanReader( const IFMP ifmp );
@@ -447,7 +616,15 @@ private:
 };
 
 
+//  ================================================================
 class DBMSimpleScanState : public IDBMScanState
+//  ================================================================
+//
+//  A simple scan state, which tracks the variables. There are 
+//  two subclasses of this, one saves the state to a database header
+//  and the other is used for testing the class.
+//
+//-
 {
 public:
     DBMSimpleScanState();
@@ -465,6 +642,7 @@ public:
     virtual void CalculatePageLevelStats( const CPAGE& cpage ) { return; }
     virtual DBMScanStats DbmScanStatsCurrPass() const { return DBMScanStats(); }
 
+    // events which can cause the state to be updated
     virtual void StartedPass();
     virtual void ResumedPass() {}
     virtual void FinishedPass();
@@ -481,13 +659,19 @@ protected:
     PGNO    m_pgnoHighestChecked;
     CPG     m_cpgScannedPrevPass;
     
-private:
+private:    // not implemented
     DBMSimpleScanState( const DBMSimpleScanState& );
     DBMSimpleScanState& operator=( const DBMSimpleScanState& );
 };
 
 
+//  ================================================================
 class DBMScanStateHeader : public DBMSimpleScanState
+//  ================================================================
+//
+//  Sets and retrieves the state in the DB header.
+//
+//-
 {
 public:
     DBMScanStateHeader( FMP * const pfmp );
@@ -505,34 +689,46 @@ private:
     void SaveStateToHeader_();
     
 private:
+    // update the header once this many pages have been scanned
 #ifdef ENABLE_JET_UNIT_TEST
     static const CPG m_cpgUpdateInterval = 32;
 #else
     static const CPG m_cpgUpdateInterval = 256;
 #endif
 
+    // the number of pages that were scanned the last time the
+    // header was updated
     CPG     m_cpgScannedLastUpdate;
 
+    // FMP containing the header
     FMP * const m_pfmp;
 };
 
 
+//  ================================================================
 PERSISTED struct MSysDatabaseScanRecord
+//  ================================================================
+//
+//  This defines the record format in MSysDatabaseScan. All the 
+//  members that start with p_ are stored in MSysDatabaseScan, 
+//  according to the given bindings.
+//
+//-
 {
 public:
     MSysDatabaseScanRecord();
     ~MSysDatabaseScanRecord();
     
-    __int64 p_ftLastUpdateTime;
+    __int64 p_ftLastUpdateTime;         // time this structure was updated
     
-    __int64 p_ftPassStartTime;
-    CPG     p_cpgPassPagesRead;
+    __int64 p_ftPassStartTime;          // start time of the current pass
+    CPG     p_cpgPassPagesRead;         // pages read for this pass
     
-    __int64 p_ftPrevPassStartTime;
-    __int64 p_ftPrevPassEndTime;
-    CPG     p_cpgPrevPassPagesRead;
+    __int64 p_ftPrevPassStartTime;      // start time of the previous pass
+    __int64 p_ftPrevPassEndTime;        // end time of the previous pass
+    CPG     p_cpgPrevPassPagesRead;     // pages read by the previous pass
     
-    LONG    p_csecPassElapsed;
+    LONG    p_csecPassElapsed;          // elapsed seconds this pass
     LONG    p_cInvocationsPass;
     CPG     p_cpgBadChecksumsPass;
     LONG    p_cInvocationsTotal;
@@ -570,9 +766,18 @@ private:
 };
 
 
+//  ================================================================
 class DBMScanStateMSysDatabaseScan : public IDBMScanState
+//  ================================================================
+//
+//  Sets and retrieves the state in MSysDatabaseScan. Errors 
+//  loading/saving the state are ignored.
+//
+//-
 {
 public:
+    // the store passed into this object will be owned by the object
+    // and deleted by its destructor
     DBMScanStateMSysDatabaseScan( const IFMP ifmp, IDataStore * const pstore );
     virtual ~DBMScanStateMSysDatabaseScan();
 
@@ -599,24 +804,35 @@ private:
     void SaveStateToTable();
     
 protected:
+    // update the table once this many pages have been scanned
 #ifdef DEBUG
     static const CPG m_cpgUpdateInterval = 32;
 #else
     static const CPG m_cpgUpdateInterval = 256;
 #endif
     
+    // the number of pages that were scanned the last time the
+    // header was updated
     CPG m_cpgScannedLastUpdate;
 
+    // Space analysis data
     CReloadableAveStats m_histoCbFreeLVPages;
     CReloadableAveStats m_histoCbFreeRecPages;
 
+    // used to persist items
     MSysDatabaseScanRecord m_record;
     unique_ptr<IDataStore> m_pstore;
     IFMP m_ifmp;
 };
 
 
+//  ================================================================
 class DBMScanConfig : public IDBMScanConfig
+//  ================================================================
+//
+//  Configure scans using system parameters.
+//
+//-
 {
 public:
     DBMScanConfig( INST * const pinst, FMP * const pfmp );
@@ -638,7 +854,14 @@ private:
 };
 
 
+//  ================================================================
 class DBMSingleScanConfig : public DBMScanConfig
+//  ================================================================
+//
+//  Configure a single scan (i.e. JetDatabaseScan) using passed in
+//  parameters to override some of the system parameters.
+//
+//-
 {
 public:
     DBMSingleScanConfig( INST * const pinst, FMP * const pfmp, const INT csecMax, const DWORD dwThrottleSleep );
@@ -656,7 +879,13 @@ private:
 };
 
 
+//  ================================================================
 class DBMScanObserverCallback : public DBMScanObserver
+//  ================================================================
+//
+//  Invoke a callback when a scan finishes.
+//
+//-
 {
 public:
     DBMScanObserverCallback(
@@ -681,7 +910,13 @@ private:
     const JET_DBID m_dbid;
 };
 
+//  ================================================================
 class DBMScanObserverFileCheck : public DBMScanObserver
+//  ================================================================
+//
+//  Do file level operations whenever a scan is started
+//
+//-
 {
 public:
     DBMScanObserverFileCheck( const IFMP ifmp );
@@ -701,7 +936,13 @@ private:
     const IFMP m_ifmp;
 };
 
+//  ================================================================
 class DBMScanObserverEvents : public DBMScanObserver
+//  ================================================================
+//
+//  Log events when a scan starts and stops.
+//
+//-
 {
 public:
     DBMScanObserverEvents(
@@ -736,7 +977,13 @@ private:
 };
 
 
+//  ================================================================
 class DBMScanObserverPerfmon : public DBMScanObserver
+//  ================================================================
+//
+//  Increments perfmon counters for various events.
+//
+//-
 {
 public:
     DBMScanObserverPerfmon( INST * const pinst );
@@ -760,7 +1007,13 @@ private:
 };
 
 
+//  ================================================================
 class DBMScanObserverRecoveryEvents : public DBMScanObserver
+//  ================================================================
+//
+//  Log events when a scan starts and stops during recovery.
+//
+//-
 {
 public:
     DBMScanObserverRecoveryEvents(
@@ -791,19 +1044,29 @@ private:
 private:
     const CategoryId m_categoryId;
 
+    //  Stats
     PGNO m_pgnoStart;
     PGNO m_pgnoLast;
     CPG m_cpgBadChecksums;
 
     FMP * const m_pfmp;
 
+    // a pass that takes longer than this is overdue
     const INT m_csecMaxPassTime;
 
+    // deadline for scan completion. exceeding this deadline means
+    // the scan is overdue
     __int64         m_ftDeadline;
 };
 
 
+//  ================================================================
 class DBMScanObserverDebugPrint : public DBMScanObserver
+//  ================================================================
+//
+//  Used for debugging.
+//
+//-
 {
 public:
     DBMScanObserverDebugPrint() { printf("%s\n", __FUNCTION__ ); }
@@ -821,22 +1084,56 @@ protected:
 
 typedef enum class ObjidState
 {
-    Unknown,
+    Unknown,    // In the object cache, it's the uninitialized state of an entry. In the calling code,
+                // it is used to signal that we don't know about the object's existence and it need
+                // to look it up in MSysObjids. It is expected that the accompanying FUCB* is pfucbNil.
 
-    Valid,
+    Valid,      // The object is known to still exist. It is expected that the accompanying
+                // FUCB* is not pfucbNil.
 
-    Invalid
+    Invalid     // The object is known to have been deleted. It is expected that the accompanying
+                // FUCB* is pfucbNil.
 } ois;
 
+//  ================================================================
 class DBMObjectCache
+//  ================================================================
+//
+//  Cache object FUCBs for tables and LVs, and validity information for indices
+//  that DBM is working on.
+//
+//  Even though secondary indices are also maintained in the cache, we don't
+//  keep FUCBs for those objects cached, for two reasons:
+//
+//    1 - DBM does not need, at any point, to open an FUCB to a secondary index
+//        to do its work.
+//
+//    2 - Index deletion might fail to the client because its FCB will have been
+//        referenced by the cache. A similar situation exists for tables but, in
+//        that case, table deletion handles it by waiting until all FUCBs have been
+//        closed, which happens when DBM senses that a deletion is pending.
+//
+//  Also, note that, because FUCBs against secondary indices are not cached, there
+//  is no way for this cache to detect that an index deletion is pending. That means
+//  that a secondary index entry in the cache is useful to short-circuit looking for
+//  the object when the index has already been deleted, but not the other way around.
+//  This causes an MSysObjids lookup every time a secondary index page is found, which
+//  is not as expensive as loading up an FUCB for a table, for example, and chances are
+//  those few MSysObjids pages will remain in the cache. Clients that control progress
+//  of DBM via suspend/resume already lose the entire cache in-between batches, so we
+//  already have to refresh the cache periodically anyways.
+//
+//-
 {
 public:
     DBMObjectCache();
 
+    // the destructor closes all the cached objects
     ~DBMObjectCache();
 
     ObjidState OisGetObjidState( const OBJID objid );
 
+    // Returns NULL if there is no cached FUCB
     FUCB * PfucbGetCachedObject( const OBJID objid );
 
     void CacheObjectFucb( FUCB * const pfucb, const OBJID objid );
@@ -861,21 +1158,31 @@ private:
         __int64 ftAccess;
     } m_rgstate[m_cobjectsMax];
 
-private:
+private:    // not implemented
     DBMObjectCache( const DBMObjectCache& );
     DBMObjectCache& operator=( const DBMObjectCache& );
 };
 
 
+//  ================================================================
 namespace DBMScanObserverCleanupFactory
+//  ================================================================
 {
+    // Create a DBMScanObserverCleanup object. This involves allocating
+    // a new PIB.
     ERR ErrCreateDBMScanObserverCleanup(
             INST * const pinst,
             const IFMP ifmp,
             __out DBMScanObserver ** pobserver );
 }
 
+//  ================================================================
 class DBMScanObserverCleanup : public DBMScanObserver
+//  ================================================================
+//
+//  Performs logical cleanup on a page.
+//
+//-
 {
 public:
     ~DBMScanObserverCleanup();
@@ -925,16 +1232,21 @@ protected:
     const IFMP m_ifmp;
     OBJID m_objidMaxCommitted;
 
+    // Caches both open regular table clustered indices and open LV trees, in addition
+    // to validity information about secondary indices.
     DBMObjectCache m_objectCache;
 
     bool m_fPrepareToTerm;
 
-private:
+private: // not implemented
     DBMScanObserverCleanup( const DBMScanObserverCleanup& );
     DBMScanObserverCleanup& operator=( const DBMScanObserverCleanup& );
 };
 
 
+//  ================================================================
+//  IDBMScan
+//  ================================================================
 
 IDBMScan::IDBMScan()
 {
@@ -944,17 +1256,23 @@ IDBMScan::~IDBMScan()
 {
 }
 
+//  ================================================================
+//  MSysDBM
+//  ================================================================
 
+// namespace members that should not appear in the header
 namespace MSysDBM
 {
     const char * const szMSysDBM = "MSysDatabaseMaintenance";
 }
 
+// Returns true if the given tablename is the DBM system table
 bool MSysDBM::FIsSystemTable( const char * const szTable )
 {
     return ( 0 == UtilCmpName( szTable, szMSysDBM ) );
 }
 
+// Dump the MSysDatabaseMaintenance table
 ERR MSysDBM::ErrDumpTable( const IFMP ifmp )
 {
     ERR err;
@@ -990,13 +1308,18 @@ HandleError:
 }
 
 
+//  ================================================================
+//  DBMScanFactory
+//  ================================================================
 
+// namespace members that should not appear in the header
 namespace DBMScanFactory
 {
     ERR ErrPdbmScanCreateForRecovery_( const IFMP ifmp, __out IDBMScan ** pdbmscan );
     ERR ErrPdbmScanCreate_( const IFMP ifmp, __out IDBMScan ** pdbmscan );
 }
 
+// Create a scan object to perform a scan during recovery. Cleanup is not performed.
 ERR DBMScanFactory::ErrPdbmScanCreateForRecovery_( const IFMP ifmp, __out IDBMScan ** pdbmscan )
 {
     ERR err = JET_errSuccess;
@@ -1039,6 +1362,8 @@ HandleError:
     return err;
 }
 
+// Create a scan object to perform a scan during runtime. This is used when a
+// scan is started at database attach time. 
 ERR DBMScanFactory::ErrPdbmScanCreate_( const IFMP ifmp, __out IDBMScan ** pdbmscan )
 {
     ERR err = JET_errSuccess;
@@ -1102,6 +1427,8 @@ HandleError:
     return err;
 }
 
+// Create a scan object to perform a scan when JetDatabaseScan is called. This also
+// takes a callback.
 ERR DBMScanFactory::ErrPdbmScanCreateSingleScan(
     const JET_SESID sesid,
     const IFMP ifmp,
@@ -1172,6 +1499,7 @@ HandleError:
     return err;
 }
 
+// Create a scan object for automatic scan (i.e. a scan not started by JetDatabaseScan, or started by JetDatabaseScan with JET_bitDatabaseScanBatchStartContinuous)
 ERR DBMScanFactory::ErrPdbmScanCreate( const IFMP ifmp, __out IDBMScan ** pdbmscan )
 {
     *pdbmscan = NULL;
@@ -1183,12 +1511,16 @@ ERR DBMScanFactory::ErrPdbmScanCreate( const IFMP ifmp, __out IDBMScan ** pdbmsc
 }
 
 
+//  ================================================================
+//  DBMScanObserver
+//  ================================================================
 
 DBMScanObserver::DBMScanObserver() :
     m_fScanInProgress( false )
 {
 }
 
+// Called when a pass starts. Call the protected method that subclasses override
 void DBMScanObserver::StartedPass( const IDBMScanState * const pstate )
 {
     Assert( !FScanInProgress_() );
@@ -1197,6 +1529,7 @@ void DBMScanObserver::StartedPass( const IDBMScanState * const pstate )
     Assert( FScanInProgress_() );
 }
 
+// Called when a pass resumes. Call the protected method that subclasses override
 void DBMScanObserver::ResumedPass( const IDBMScanState * const pstate )
 {
     Assert( !FScanInProgress_() );
@@ -1205,11 +1538,13 @@ void DBMScanObserver::ResumedPass( const IDBMScanState * const pstate )
     Assert( FScanInProgress_() );
 }
 
+// Called when preparing to terminate. Calls the protected method that subclasses override.
 void DBMScanObserver::PrepareToTerm( const IDBMScanState * const pstate )
 {
     PrepareToTerm_( pstate );
 }
 
+// Called when a pass finishes. Call the protected method that subclasses override
 void DBMScanObserver::FinishedPass( const IDBMScanState * const pstate )
 {
     Assert( FScanInProgress_() );
@@ -1218,6 +1553,7 @@ void DBMScanObserver::FinishedPass( const IDBMScanState * const pstate )
     Assert( !FScanInProgress_() );
 }
 
+// Called when a pass is suspended. Call the protected method that subclasses override
 void DBMScanObserver::SuspendedPass( const IDBMScanState * const pstate )
 {
     Assert( FScanInProgress_() );
@@ -1226,18 +1562,21 @@ void DBMScanObserver::SuspendedPass( const IDBMScanState * const pstate )
     Assert( !FScanInProgress_() );
 }
 
+// Called inside a pass when a certain interval is passed.
 void DBMScanObserver::NotifyStats( const IDBMScanState * const pstate )
 {
     Assert( FScanInProgress_() );
     NotifyStats_( pstate );
 }
 
+// Called when a page is read. Call the protected method that subclasses override
 void DBMScanObserver::ReadPage( const IDBMScanState * const pstate, const PGNO pgno )
 {
     Assert( FScanInProgress_() );
     ReadPage_( pstate, pgno );
 }
 
+// Called when a bad checksum is found. Call the protected method that subclasses override
 void DBMScanObserver::BadChecksum( const IDBMScanState * const pstate, const PGNO pgnoBadChecksum )
 {
     Assert( FScanInProgress_() );
@@ -1245,6 +1584,9 @@ void DBMScanObserver::BadChecksum( const IDBMScanState * const pstate, const PGN
 }
 
 
+//  ================================================================
+//  DBMSimpleScanState
+//  ================================================================
 
 DBMSimpleScanState::DBMSimpleScanState() :
     m_ftCurrPassStartTime( 0 ),
@@ -1257,6 +1599,7 @@ DBMSimpleScanState::DBMSimpleScanState() :
 {
 }
 
+// when a pass starts the start time should be recorded
 void DBMSimpleScanState::StartedPass()
 {
     m_ftCurrPassStartTime = UtilGetCurrentFileTime();
@@ -1264,6 +1607,7 @@ void DBMSimpleScanState::StartedPass()
     m_pgnoHighestChecked = 0;
 }
 
+// when a pass completes the completion time should be recorded
 void DBMSimpleScanState::FinishedPass()
 {
     m_ftPrevPassStartTime = m_ftCurrPassStartTime;
@@ -1275,10 +1619,17 @@ void DBMSimpleScanState::FinishedPass()
     m_pgnoHighestChecked = pgnoNull;
 }
 
+// when pages are read increment the number of scanned pages
+// in current pass and the counter for the highest page scanned
+// so far
 void DBMSimpleScanState::ReadPages( const PGNO pgnoStart, const CPG cpgRead )
 {
     m_cpgScannedCurrPass += cpgRead;
 
+    // We will only update this counter if we incremented by 1 page, meaning we have continuously covered
+    // every page.  This has some ramifications, the most significant is, if redo (i.e. repl) crashes, 
+    // we will not be able to prove we covered every page, so we won't log a true finished event. We will
+    // however, save the state (as long as it's continuous) and make steady progress towards a true finish
     if ( ( pgnoStart - m_pgnoContinuousHighWatermark ) == 1 )
     {
         m_pgnoContinuousHighWatermark += cpgRead;
@@ -1291,6 +1642,9 @@ void DBMSimpleScanState::ReadPages( const PGNO pgnoStart, const CPG cpgRead )
 }
 
 
+//  ================================================================
+//  DBMScanReader
+//  ================================================================
 
 DBMScanReader::DBMScanReader( const IFMP ifmp ) :
     m_ifmp( ifmp ),
@@ -1304,11 +1658,12 @@ DBMScanReader::DBMScanReader( const IFMP ifmp ) :
 DBMScanReader::~DBMScanReader()
 {
 #ifdef DEBUG
+    // Verify that all previously preread pages have had DoneWithPreread called
     for ( INT i = 0; i < m_cpgLastPreread; i++ )
     {
         Assert( m_rgfPageAlreadyCached[i] == 'D' );
     }
-#endif
+#endif // DEBUG
 
     if ( m_pvPages != NULL )
     {
@@ -1327,22 +1682,24 @@ HandleError:
     return err;
 }
 
+// Issue a preread for a set of pages.  
 void DBMScanReader::PrereadPages( const PGNO pgnoFirst, const CPG cpg )
 {
     Assert( cpg <= cpgPrereadMax );
     Assert( cpg > 0 );
 
 #ifdef DEBUG
+    // Verify that all previously preread pages have had DoneWithPreread called
     for ( INT i = 0; i < m_cpgLastPreread; i++ )
     {
         Assert( m_rgfPageAlreadyCached[i] == 'D' );
         m_rgfPageAlreadyCached[i] = 'U';
     }
-#endif
+#endif // DEBUG
     
     m_pgnoLastPreread = pgnoFirst;
     m_cpgLastPreread = cpg;
-    m_tickLastPreread = TickOSTimeCurrent();
+    m_tickLastPreread = TickOSTimeCurrent();    // for debugging ...
 
     TraceContextScope tcScope( iortDbScan );
     tcScope->nParentObjectClass = tceNone;
@@ -1368,6 +1725,8 @@ void DBMScanReader::PrereadPages( const PGNO pgnoFirst, const CPG cpg )
     }
 }
 
+//  This is a function to consolidate the ways in which we dump time to the event logs, so that the datacenter optics
+//  we build upon this will be more likely to succeed.
 
 VOID DBMScanFormatOpticalTime_( const __int64 ft, __out_ecount( cchLastFullCompletionTime ) WCHAR * wszLastFullCompletionTime, const ULONG cchLastFullCompletionTime )
 {
@@ -1377,7 +1736,7 @@ VOID DBMScanFormatOpticalTime_( const __int64 ft, __out_ecount( cchLastFullCompl
         size_t cwchRequired;
         CallS( ErrUtilFormatFileTimeAsDate( ft, wszLastFullCompletionTime, cchLastFullCompletionTime, &cwchRequired ) );
         ULONG ichCurr = wcslen( wszLastFullCompletionTime );
-        if ( ichCurr < cchLastFullCompletionTime - 2 )
+        if ( ichCurr < cchLastFullCompletionTime - 2 )  // should always be true
         {
             wszLastFullCompletionTime[ichCurr] = L' ';
             wszLastFullCompletionTime[ichCurr+1] = L'\0';
@@ -1405,6 +1764,7 @@ CDBMScanFollower::CDBMScanFollower()
 
 CDBMScanFollower::~CDBMScanFollower()
 {
+    // shouldn't have any memory leaks
     Assert( m_pstate == NULL );
     Assert( m_pscanobsFileCheck == NULL );
     Assert( m_pscanobsLgriEvents == NULL );
@@ -1421,6 +1781,7 @@ ERR CDBMScanFollower::ErrRegisterFollower( FMP * const pfmp, const PGNO pgnoStar
     if ( m_pstate )
     {
 #ifdef ENABLE_JET_UNIT_TEST
+        //  setup by test hook
         pstate = m_pstate;
         Alloc( pscanobsLgriEvents = new DBMScanObserverRecoveryEvents( pfmp, 2 * 60 ) );
         Alloc( pscanobsPerfmon = new DBMScanObserverPerfmon( NULL ) );
@@ -1433,7 +1794,7 @@ ERR CDBMScanFollower::ErrRegisterFollower( FMP * const pfmp, const PGNO pgnoStar
     {
         const IFMP ifmp = pfmp->Ifmp();
         Assert( ( ( INT_PTR )ifmp ) >= cfmpReserved && ifmp < g_ifmpMax );
-        Alloc( pstate = new DBMScanStateHeader( pfmp ) );
+        Alloc( pstate = new DBMScanStateHeader( pfmp ) );   //  loads state from header.
         Alloc( pscanobsFileCheck = new DBMScanObserverFileCheck( ifmp ) );
         Alloc( pscanobsLgriEvents = new DBMScanObserverRecoveryEvents( pfmp , ( INT )UlParam( pfmp->Pinst(), JET_paramDbScanIntervalMaxSec ) ) );
         Alloc( pscanobsPerfmon = new DBMScanObserverPerfmon( pfmp->Pinst() ) );
@@ -1448,6 +1809,8 @@ ERR CDBMScanFollower::ErrRegisterFollower( FMP * const pfmp, const PGNO pgnoStar
     m_pscanobsPerfmon = pscanobsPerfmon;
     pscanobsPerfmon = NULL;
 
+    //  Must initialize m_pgnoHighestContigCompleted to allow our tracking of the current progress towards
+    //  a complete DBScan pass
     m_pgnoHighestContigCompleted = m_pstate->PgnoContinuousHighWatermark();
 
     if( pgnoStart == 1 )
@@ -1481,14 +1844,16 @@ ERR CDBMScanFollower::ErrRegisterFollower( FMP * const pfmp, const PGNO pgnoStar
             }
             else
             {
-                Assert( pgnoStartReported == pgnoScanLastSentinel );
+                //  The unlikely event that the very first ScanCheck LR we see is the actual sentinel, so we haven't
+                //  actually started a proper scan yet.
+                Assert( pgnoStartReported == pgnoScanLastSentinel );    // well that doesn't make much sense, so fix it ...
                 pgnoStartReported = m_pgnoHighestContigCompleted;
 
                 Assert( cpgOwned >= m_pstate->CpgScannedCurrPass() );
                 cpgSkipped = cpgOwned - m_pgnoHighestContigCompleted;
                 if ( cpgSkipped < 1 )
                 {
-                    cpgSkipped = 1;
+                    cpgSkipped = 1; // hack to avoid assert 3 lines below, just in case.
                 }
             }
             const double pctFile = double( cpgSkipped ) * 100.0 / double( cpgOwned );
@@ -1508,6 +1873,7 @@ ERR CDBMScanFollower::ErrRegisterFollower( FMP * const pfmp, const PGNO pgnoStar
         m_pscanobsPerfmon->ResumedPass( m_pstate );
     }
 
+    // PgnoContinuousHighWatermark() should only get reset during FinishedPass()
     Assert( m_pstate->PgnoContinuousHighWatermark() == m_pgnoHighestContigCompleted );
 
 HandleError:
@@ -1526,8 +1892,12 @@ VOID CDBMScanFollower::DeRegisterFollower( const FMP * const pfmp, const DBMScan
     {
         case dbmdrrFinishedScan:
 
+            //  A pass should only be considered complete if we truly started from the beginning and
+            //  checksummed every matching page the active sent down.
             if ( m_pstate->PgnoHighestChecked() == m_pgnoHighestContigCompleted )
             {
+                //  We completed the pass, examining and checksumming every pgno provied from 1 to the
+                //  DB end.
                 Assert( m_pstate->PgnoContinuousHighWatermark() == m_pgnoHighestContigCompleted );
                 m_pstate->FinishedPass();
                 m_pscanobsLgriEvents->FinishedPass( m_pstate );
@@ -1535,24 +1905,34 @@ VOID CDBMScanFollower::DeRegisterFollower( const FMP * const pfmp, const DBMScan
             }
             else
             {
+                //  We completed the pass, but DID NOT examine and checksum every page due to background
+                //  DB maintenance being disabled for some period of time.
+                //  It seems weird to hide this in a func: m_pscanobsLgriEvents->IncompleteFinishPass( m_pstate );,
+                //  that would apply to no other observers, so I'll just log an event.
                 WCHAR wszLastFullCompletionTime[100];
                 DBMScanFormatOpticalTime_( m_pstate->FtPrevPassCompletionTime(), wszLastFullCompletionTime, _countof( wszLastFullCompletionTime ) );
                 const WCHAR* rgwsz[] = { pfmp->WszDatabaseName(), wszLastFullCompletionTime };
                 UtilReportEvent( eventInformation, ONLINE_DEFRAG_CATEGORY,
                     SCAN_CHECKSUM_INCOMPLETE_PASS_FINISHED_ID, _countof( rgwsz ), rgwsz, 0, NULL, pfmp->Pinst() );
 
+                //  Not technically accurate but leaves the pass variable at the suspended 
+                //  value of 1, which is more interesting.
                 m_pscanobsPerfmon->SuspendedPass( m_pstate );
             }
             break;
 
         case dbmdrrStoppedScan:
+            // We should still be at the highest contig, as SuspendedPass() will save the state
             Assert( m_pstate->PgnoContinuousHighWatermark() == m_pgnoHighestContigCompleted );
             m_pstate->SuspendedPass();
+            //  We don't report it to observers, b/c we don't want an event for this case.
+            //m_pscanobsLgriEvents->SuspendedPass( m_pstate );
             m_pscanobsPerfmon->SuspendedPass( m_pstate );
             break;
 
         case dbmdrrDisabledScan:
 
+            // We should still be at the highest contig, as SuspendedPass() will save the state
             Assert( m_pstate->PgnoContinuousHighWatermark() == m_pgnoHighestContigCompleted );
             m_pstate->SuspendedPass();
             m_pscanobsLgriEvents->SuspendedPass( m_pstate );
@@ -1573,6 +1953,7 @@ VOID CDBMScanFollower::DeRegisterFollower( const FMP * const pfmp, const DBMScan
     m_pscanobsFileCheck = NULL;
 
 #ifdef ENABLE_JET_UNIT_TEST
+    //  m_pstate setup by test hook, don't free
 #else
     delete m_pstate;
 #endif
@@ -1581,17 +1962,35 @@ VOID CDBMScanFollower::DeRegisterFollower( const FMP * const pfmp, const DBMScan
 
 BOOL CDBMScanFollower::FStopped() const
 {
+    //  If we don't have any m_pstate, we're either not started or stopped.
     return m_pstate == NULL;
 }
 
 VOID CDBMScanFollower::CompletePage( const PGNO pgno, const BOOL fBadPage )
 {
+    // I can conceive of a way this would go off, but probably it will be a bug the first time it does.
+    // These can happen in mixed upgrade env, which I was testing in for compat ... ugh, ok, leaving off for now.
+    //Expected( pgno != 1 || m_pgnoHighestContigCompleted == 0 /* should be starting first pass if pgno == 1 */ );
+    //if ( m_pstate->PgnoHighestChecked() )
+    //  {
+    //  //  Once we've started checking, we should never go backwards without destroying 
+    //  //  the CDBMScanFollower object and Re-Registering a new follower.
+    //  Assert( m_pstate->PgnoHighestChecked() < pgno );
+    //  }
 
+    // This will increment the CpgScannedCurrPass counter, set the PgnoHighestChecked
+    // tracker to this pgno (unless it's already higher), and if it's continuous it will
+    // update the PgnoContinuousHighWatermark counter
     m_pstate->ReadPages( pgno, 1 );
     Assert( m_pstate->PgnoHighestChecked() >= pgno );
 
+    //  Log an event if we are taking too long in this scan
     m_pscanobsLgriEvents->ReadPage( m_pstate, pgno );
 
+    // We will only update state if we incremented by 1 page, meaning we have continuously covered
+    // every page.  This has some ramifications, the most significant is, if redo (i.e. repl) crashes, 
+    // we will not be able to prove we covered every page, so we won't log a true finished event. We will
+    // however, save the state (as long as it's continuous) and make steady progress towards a true finish
     if ( ( pgno - m_pgnoHighestContigCompleted ) == 1 )
     {
         m_pgnoHighestContigCompleted = pgno;
@@ -1632,8 +2031,12 @@ ERR CDBMScanFollower::ErrDBMScanReadThroughCache( const IFMP ifmp, const PGNO pg
     return ErrDBMScanReadThroughCache_( ifmp, pgno, pvPages, cpg, *tcScope );
 }
 
+// Increment the perf counter for skipped pages, and check if we need to reset the header state
+// Even if scanning is disabled or we are re-scanning things (which is how we get here), we want
+// to reset the header state when we hit pgno=1
 VOID CDBMScanFollower::SkippedDBMScanCheckRecord( FMP * const pfmp, const PGNO pgno )
 {
+    // increment the perf counter
     PERFOpt( perfctrDBMFollowerSkips.Add( pfmp->Pinst(), 1 ) );
 
     if ( pgno == 1 )
@@ -1647,10 +2050,12 @@ VOID CDBMScanFollower::ProcessedDBMScanCheckRecord( const FMP * const pfmp )
     PERFOpt( perfctrDBMFollowerDivChecked.Add( pfmp->Pinst(), 1 ) );
 }
 
+// Try to read a page.
 ERR DBMScanReader::ErrReadPage( const PGNO pgno )
 {
     ERR err;
 
+    // Verify that reads have all been pre-read.
     Assert( pgno >= m_pgnoLastPreread );
     Assert( pgno < m_pgnoLastPreread + m_cpgLastPreread );
     Assert( m_rgfPageAlreadyCached[pgno - m_pgnoLastPreread] == fTrue ||
@@ -1658,6 +2063,11 @@ ERR DBMScanReader::ErrReadPage( const PGNO pgno )
 
     g_rgfmp[ m_ifmp ].UpdatePgnoScanMax( pgno );
 
+    // If we use a shared latch, this page may not be verified due to latch conflicts, which would cause
+    // the corruption event to be discarded. The case we've seen was that the DBM thread had the shared latch
+    // and the eviction code had the exclusive latch at first, so it returned the error, but did not fire the
+    // event. In addition to that, the error was not be saved to the BF. So, now we grab the RDW latch to force
+    // having the ability to verify the page and fire the event.
 
     TraceContextScope tcScope( iortDbScan );
     tcScope->nParentObjectClass = tceNone;
@@ -1683,13 +2093,14 @@ ERR DBMScanReader::ErrReadPage( const PGNO pgno )
     {
         CPAGE cpage;
 
+        // The page should checksum and be valid or uninitialized, or we shouldn't log it
         Assert( ErrBFLatchStatus( &bfl ) >= JET_errSuccess || ErrBFLatchStatus( &bfl ) == JET_errPageNotInitialized );
 
         Assert( !PinstFromIfmp( m_ifmp )->m_plog->FRecovering() );
 
         cpage.ReBufferPage( bfl, m_ifmp, pgno, bfl.pv, ( ULONG )UlParam( PinstFromIfmp( m_ifmp ), JET_paramDatabasePageSize ) );
         Assert( cpage.CbPage() == UlParam( PinstFromIfmp( m_ifmp ), JET_paramDatabasePageSize ) );
-        Assert( !fPageUninit || cpage.Dbtime() == 0  );
+        Assert( !fPageUninit || cpage.Dbtime() == 0 /* must be zero if page is non-init, for redo code to work */ );
         Assert( cpage.Dbtime() > 0 || cpage.Dbtime() == dbtimeShrunk || fPageUninit );
         Assert( cpage.Dbtime() > dbtimeStart || cpage.Dbtime() == dbtimeShrunk || fPageUninit );
         Assert( cpage.Dbtime() != dbtimeNil );
@@ -1707,9 +2118,12 @@ ERR DBMScanReader::ErrReadPage( const PGNO pgno )
 
     BFRDWUnlatch( &bfl );
 
+    // Also, if the page was already cached in buffer manager, also read from
+    // disk
     if ( !m_fPagesReRead &&
          m_rgfPageAlreadyCached[pgno - m_pgnoLastPreread] )
     {
+        // figure out how many pages to read
         PGNO pgnoLast = pgno;
         for ( INT i = pgno - m_pgnoLastPreread + 1; i < m_cpgLastPreread; i++ )
         {
@@ -1721,10 +2135,13 @@ ERR DBMScanReader::ErrReadPage( const PGNO pgno )
         Assert( pgnoLast >= pgno );
         Assert( pgnoLast - pgno + 1 <= cpgPrereadMax );
 
+        // read the actual pages of data off disk
 
         TraceContextScope tcScopeT( iorpDbScan );
-        err = ErrDBMScanReadThroughCache_( m_ifmp, pgno, m_pvPages, pgnoLast - pgno + 1, *tcScopeT );
+        err = ErrDBMScanReadThroughCache_( m_ifmp, pgno, m_pvPages, pgnoLast - pgno + 1/*cpg*/, *tcScopeT );
 
+        // Either everything was successful or
+        // BF marked filthy (or page request issued in case BF evicted already)
         m_fPagesReRead = fTrue;
     }
 
@@ -1739,17 +2156,20 @@ void DBMScanReader::DoneWithPreread( const PGNO pgno )
 {
     const INT ipgno = pgno - m_pgnoLastPreread;
 
+    // Verify that reads have all been pre-read.
     Assert( pgno >= m_pgnoLastPreread );
     Assert( pgno < m_pgnoLastPreread + m_cpgLastPreread );
     Assert( m_rgfPageAlreadyCached[ipgno] == fTrue ||
            m_rgfPageAlreadyCached[ipgno] == fFalse );
 
+    // Reset m_fPagesReRead only if it's the last page of the batch.
 
     if ( ( ipgno + 1 ) == m_cpgLastPreread )
     {
         m_fPagesReRead = fFalse;
     }
 
+    // Any pages that we read in just for scanning, we can fast-evict
 
     if ( m_rgfPageAlreadyCached[ipgno] == fFalse )
     {
@@ -1761,8 +2181,9 @@ void DBMScanReader::DoneWithPreread( const PGNO pgno )
     }
 
 #ifdef DEBUG
+    // Mark the value as Done so that asserts will fire if we try to read the page again
     m_rgfPageAlreadyCached[ipgno] = ( BOOL )'D';
-#endif
+#endif // DEBUG
 
     return;
 }
@@ -1773,6 +2194,9 @@ PGNO DBMScanReader::PgnoLast() const
 }
 
 
+//  ================================================================
+//  DBMScanStateHeader
+//  ================================================================
 
 DBMScanStateHeader::DBMScanStateHeader( FMP * const pfmp ) :
     m_pfmp( pfmp ),
@@ -1784,24 +2208,28 @@ DBMScanStateHeader::DBMScanStateHeader( FMP * const pfmp ) :
 
 void DBMScanStateHeader::StartedPass()
 {
+    // need to call the inherited method so the counts are updated
     DBMSimpleScanState::StartedPass();
     m_cpgScannedLastUpdate = 0;
 }
 
 void DBMScanStateHeader::FinishedPass()
 {
+    // need to call the inherited method so the counts are updated
     DBMSimpleScanState::FinishedPass();
     SaveStateToHeader_();
 }
 
 void DBMScanStateHeader::SuspendedPass()
 {
+    // need to call the inherited method so the counts are updated
     DBMSimpleScanState::SuspendedPass();
     SaveStateToHeader_();
 }
 
 void DBMScanStateHeader::ReadPages( const PGNO pgnoStart, const CPG cpgRead )
 {
+    // need to call the inherited method so the counts are updated
     DBMSimpleScanState::ReadPages( pgnoStart, cpgRead );
 
     Assert( ( CPG )m_pgnoHighestChecked >= m_cpgScannedLastUpdate );
@@ -1811,24 +2239,29 @@ void DBMScanStateHeader::ReadPages( const PGNO pgnoStart, const CPG cpgRead )
     }
 }
 
+// Get the internal state from the database header
 void DBMScanStateHeader::LoadStateFromHeader_()
 {
+    // Timestamps.
     m_ftCurrPassStartTime                       = ConvertLogTimeToFileTime( &( m_pfmp->Pdbfilehdr()->logtimeDbscanStart ) );
     m_ftPrevPassCompletionTime                  = ConvertLogTimeToFileTime( &( m_pfmp->Pdbfilehdr()->logtimeDbscanPrev ) );
 
+    // Page numbers.
     m_pgnoContinuousHighWatermark               = m_pfmp->Pdbfilehdr()->le_pgnoDbscanHighestContinuous;
     m_pgnoHighestChecked                        = m_pfmp->Pdbfilehdr()->le_pgnoDbscanHighest;
     if ( FMP::FAllocatedFmp( m_pfmp ) && m_pfmp->FInUse() )
     {
-        const PGNO pgnoHighestMax = m_pfmp->PgnoLast() - 1;
+        const PGNO pgnoHighestMax = m_pfmp->PgnoLast() - 1;  // shrink might have lowered the threshold.
         m_pgnoContinuousHighWatermark = UlFunctionalMin( m_pgnoContinuousHighWatermark, pgnoHighestMax );
         m_pgnoHighestChecked = UlFunctionalMin( m_pgnoHighestChecked, pgnoHighestMax );
     }
 
+    // Page counts.
     m_cpgScannedLastUpdate                      = m_pgnoHighestChecked;
     m_cpgScannedCurrPass                        = m_pgnoHighestChecked;
 }
 
+// Save the internal state to the database header
 void DBMScanStateHeader::SaveStateToHeader_()
 {
     PdbfilehdrReadWrite pdbfilehdr = m_pfmp->PdbfilehdrUpdateable();
@@ -1839,15 +2272,25 @@ void DBMScanStateHeader::SaveStateToHeader_()
     m_cpgScannedLastUpdate = m_pgnoHighestChecked;
 }
 
+// This is called when we need to reset the stats, but aren't currently scanning, for
+// example, if scanning is turned off but we replay the sentinel, we want to reset the counters
+// as if we ended that scan (as we effectively did), so if we pick it up at some point, we have
+// correct data saved about what time this iteration started. The two fields that matter for this
+// context are the PgnoHighestChecked and the CurrPassStartTime
 void DBMScanStateHeader::ResetScanStats( FMP * const pfmp )
 {
     PdbfilehdrReadWrite pdbfilehdr = pfmp->PdbfilehdrUpdateable();
 
+    // We intentionally do *not* reset the lg_pgnoDbscanHighestContinuous here as it tracks
+    // over multiple passes until we are able to complete a scan of every page in the db
     pdbfilehdr->le_pgnoDbscanHighest = 0;
     ConvertFileTimeToLogTime( UtilGetCurrentFileTime(), &( pdbfilehdr->logtimeDbscanStart ) );
 }
 
 
+//  ================================================================
+//  DBMScanStateMSysDatabaseScan
+//  ================================================================
 
 DBMScanStateMSysDatabaseScan::DBMScanStateMSysDatabaseScan( const IFMP ifmp, IDataStore * const pstore ) :
     IDBMScanState(),
@@ -1885,10 +2328,12 @@ void DBMScanStateMSysDatabaseScan::ResumedPass()
 void DBMScanStateMSysDatabaseScan::FinishedPass()
 {
     Expected( m_ifmp == ifmpNil || !PinstFromIfmp( m_ifmp )->FRecovering() );
-    if ( m_ifmp != ifmpNil  &&
+    if ( m_ifmp != ifmpNil /* means we're unit testing */ &&
          !PinstFromIfmp( m_ifmp )->FRecovering() &&
          ( BoolParam( PinstFromIfmp( m_ifmp ), JET_paramEnableExternalAutoHealing ) ) )
     {
+        //  We log a sentinel PGNO which gets picked up by the other side to know that the checksumming of
+        //  the DB pass has finished.
         (void)ErrDBMEmitEndScan( m_ifmp );
     }
 
@@ -1931,6 +2376,7 @@ void DBMScanStateMSysDatabaseScan::LoadStateFromTable()
 
     if ( ( m_ifmp <= g_ifmpMax ) && FMP::FAllocatedFmp( m_ifmp ) && g_rgfmp[m_ifmp].FInUse() )
     {
+        // Shrink might have lowered the threshold.
         m_record.p_cpgPassPagesRead = UlFunctionalMin( m_record.p_cpgPassPagesRead, g_rgfmp[m_ifmp].PgnoLast() - 1 );
     }
 
@@ -1952,6 +2398,8 @@ void DBMScanStateMSysDatabaseScan::SaveStateToTable()
     m_cpgScannedLastUpdate = CpgScannedCurrPass();
 }
 
+// Return stats about the current pass. Eventually, we could move all stats into this struct
+// and simplify the interface
 DBMScanStats DBMScanStateMSysDatabaseScan::DbmScanStatsCurrPass() const
 {
     DBMScanStats dbmScanStats = DBMScanStats();
@@ -1963,13 +2411,17 @@ DBMScanStats DBMScanStateMSysDatabaseScan::DbmScanStatsCurrPass() const
     return dbmScanStats;
 }
 
+// Calculate any page-level stats that we care about. Current stats being tracked:
+//    - Average free space per page (tracked for LV pages and Record pages)
 void DBMScanStateMSysDatabaseScan::CalculatePageLevelStats( const CPAGE& cpage )
 {
-    if ( cpage.FLeafPage() &&
-         !cpage.FSpaceTree() &&
-         !cpage.FEmptyPage() &&
-         !cpage.FRootPage() &&
-         cpage.PgnoNext() != pgnoNull )
+    // Check the free space on this page, keep track of how much page "fragmentation" we've seen
+    // Track LV and non-LV leaf pages separately
+    if ( cpage.FLeafPage() &&           // Only look at leaf pages
+         !cpage.FSpaceTree() &&         // Space tree pages aren't about data layout efficacy
+         !cpage.FEmptyPage() &&         // Empty pages are outside the tree and available for other use
+         !cpage.FRootPage() &&          // Root pages are required, so free space there can't be reduced
+         cpage.PgnoNext() != pgnoNull ) // Last page is the typical append point and often only partially full
     {
         Assert( !cpage.FPreInitPage() );
         if ( cpage.FLongValuePage() )
@@ -1984,6 +2436,9 @@ void DBMScanStateMSysDatabaseScan::CalculatePageLevelStats( const CPAGE& cpage )
     }
 }
 
+//  ================================================================
+//  MSysDatabaseScanRecord
+//  ================================================================
 
 MSysDatabaseScanRecord::MSysDatabaseScanRecord() :
     m_bindingFtLastUpdateTime( &p_ftLastUpdateTime, "LastUpdateTime" ),
@@ -2025,6 +2480,9 @@ MSysDatabaseScanRecord::~MSysDatabaseScanRecord()
 {
 }
 
+//  ================================================================
+//  DBMScanConfig
+//  ================================================================
 
 DBMScanConfig::DBMScanConfig( INST * const pinst, FMP * const pfmp ) :
     m_pinst( pinst ),
@@ -2066,6 +2524,9 @@ ULONG_PTR DBMScanConfig::UlDiskId() const
     return m_pfmp->UlDiskId();
 }
 
+//  ================================================================
+//  DBMSingleScanConfig
+//  ================================================================
 
 DBMSingleScanConfig::DBMSingleScanConfig( INST * const pinst, FMP * const pfmp, const INT csecMax, const DWORD dwThrottleSleep ) :
     DBMScanConfig( pinst, pfmp ),
@@ -2075,6 +2536,9 @@ DBMSingleScanConfig::DBMSingleScanConfig( INST * const pinst, FMP * const pfmp, 
 }
 
 
+//  ================================================================
+//  DBMScanObserverCallback
+//  ================================================================
 
 DBMScanObserverCallback::DBMScanObserverCallback(
     const JET_CALLBACK pfnCallback,
@@ -2104,6 +2568,9 @@ void DBMScanObserverCallback::FinishedPass_( const IDBMScanState * const pstate 
     ( *m_pfnCallback )( m_sesid, m_dbid, JET_tableidNil, JET_cbtypScanCompleted, &csecPass, &cpgPass, NULL, 0 );
 }
 
+//  ================================================================
+//  DBMScanObserverFileCheck
+//  ================================================================
 
 DBMScanObserverFileCheck::DBMScanObserverFileCheck( const IFMP ifmp ) :
     m_ifmp( ifmp )
@@ -2118,6 +2585,8 @@ void DBMScanObserverFileCheck::StartedPass_( const IDBMScanState * const )
 
     Call( g_rgfmp[m_ifmp].Pfapi()->ErrNTFSAttributeListSize( &cbAttributeListSize ) );
 
+    // NTFS attribute list sizes are limited by 256K; which is why we need to event if are
+    // approaching the limit.
     Expected( cbAttributeListSize <= 256 * 1024 );
 
     const QWORD cbAttributeListSizeThreshold = UlConfigOverrideInjection( 38735, 200 * 1024 );
@@ -2125,6 +2594,7 @@ void DBMScanObserverFileCheck::StartedPass_( const IDBMScanState * const )
     if ( cbAttributeListSize >= cbAttributeListSizeThreshold )
     {
 
+        // The NTFS File Attributes size for database '%1%' is %2% bytes which exceeds the threshold of %3% bytes. Be afraid.
 
         WCHAR wszSize[10];
         OSStrCbFormatW( wszSize, sizeof( wszSize ), L"%I64d", cbAttributeListSize );
@@ -2148,9 +2618,13 @@ void DBMScanObserverFileCheck::StartedPass_( const IDBMScanState * const )
     }
 
 HandleError:
+    // Failures are ignored because the attribute list may not exist for valid reasons.
     return;
 }
 
+//  ================================================================
+//  DBMScanObserverEvents
+//  ================================================================
 
 DBMScanObserverEvents::DBMScanObserverEvents( FMP * const pfmp, const INT csecMaxPassTime ) :
     m_categoryId( ONLINE_DEFRAG_CATEGORY ),
@@ -2188,6 +2662,7 @@ void DBMScanObserverEvents::BadChecksum_( const IDBMScanState * const, const PGN
 
 void DBMScanObserverEvents::StartedPass_( const IDBMScanState * const pstate )
 {
+    // %1 (%2) %3 Database Maintenance is starting for database '%4'.
     const WCHAR* rgwsz[] = { Pfmp_()->WszDatabaseName(), };
     UtilReportEvent(
         eventInformation,
@@ -2202,6 +2677,9 @@ void DBMScanObserverEvents::StartedPass_( const IDBMScanState * const pstate )
 
 void DBMScanObserverEvents::ResumedPass_( const IDBMScanState * const pstate )
 {
+    // %1 (%2) %3 Database Maintenance is resuming for database '%4',
+    // starting from page %5. This pass started on %6 and has been
+    // running for %7 days.
     
     const PGNO pgnoResume = pstate->CpgScannedCurrPass();
 
@@ -2260,6 +2738,14 @@ void DBMScanObserverEvents::FinishedPass_( const IDBMScanState * const pstate )
 {
     DBMScanStateHeader  statePassiveHdrInfo( Pfmp_() );
 
+    //  Before logging the finish event (inaccurately), we check that this last pass we just did
+    //  _began_ AFTER the completion of the last passive pass in the header.  If it didn't, it
+    //  suggests that this ESE instance spent time as active, failed off, became passive for a
+    //  while (completing one or more full checksum passes) and then became active, and as such
+    //  completed a super long pass. It's better in this case to not claim we have actually
+    //  completed a pass, so we'll squash it.  This happens BTW b/c we keep separate table and
+    //  header state for active and passive, so an active doesn't pick up where a passive left
+    //  off.
 
     if ( pstate->FtPrevPassStartTime() >= statePassiveHdrInfo.FtPrevPassCompletionTime() )
     {
@@ -2277,6 +2763,7 @@ void DBMScanObserverEvents::FinishedPass_( const IDBMScanState * const pstate )
         WCHAR wszScanStats[ cchScanStats ];
         FormatScanStats( wszScanStats, sizeof( wszScanStats ), m_pgnoStart, m_pgnoLast, m_cpgBadChecksums );
 
+        // Get the space tracking stats
         DBMScanStats dbmScanStats = pstate->DbmScanStatsCurrPass();
 
         WCHAR wszCbFreeRec[ 32 ];
@@ -2330,6 +2817,9 @@ void DBMScanObserverEvents::FinishedPass_( const IDBMScanState * const pstate )
 
 void DBMScanObserverEvents::NotifyStats_( const IDBMScanState * const pstate )
 {
+    // %1 (%2) %3 Database Maintenance is running on database '%4'.
+    // This pass started on %5 and has been running for %6 hours.
+    // %7 pages seen
     
     WCHAR wszcpgScanned[ 16 ];
     OSStrCbFormatW( wszcpgScanned, sizeof( wszcpgScanned ), L"%d", pstate->CpgScannedCurrPass() );
@@ -2360,6 +2850,9 @@ void DBMScanObserverEvents::NotifyStats_( const IDBMScanState * const pstate )
 }
 
 
+//  ================================================================
+//  DBMScanObserverRecoveryEvents
+//  ================================================================
 
 DBMScanObserverRecoveryEvents::DBMScanObserverRecoveryEvents( FMP * const pfmp, const INT csecMaxPassTime ) :
     m_categoryId( ONLINE_DEFRAG_CATEGORY ),
@@ -2382,6 +2875,7 @@ void DBMScanObserverRecoveryEvents::BadChecksum_( const IDBMScanState * const, c
 
 void DBMScanObserverRecoveryEvents::StartedPass_( const IDBMScanState * const pstate )
 {
+    // %1 (%2) %3Online Maintenance is starting Database Checksumming background task for database '%4'.
     const WCHAR* rgwsz[] = { Pfmp_()->WszDatabaseName(), };
     UtilReportEvent(
         eventInformation,
@@ -2397,6 +2891,8 @@ void DBMScanObserverRecoveryEvents::StartedPass_( const IDBMScanState * const ps
 
 void DBMScanObserverRecoveryEvents::ResumedPass_( const IDBMScanState * const pstate )
 {
+    // %1 (%2) %3Online Maintenance is resuming Database Checksumming background task for database '%4'. 
+    // This pass started on %5 and has been running for %6 days.
     WCHAR wszStartTime[ 64 ];
     size_t cwchRequired = 0;
     if( pstate->FtCurrPassStartTime() )
@@ -2409,6 +2905,10 @@ void DBMScanObserverRecoveryEvents::ResumedPass_( const IDBMScanState * const ps
     }
     else
     {
+        //  Because we follow the active, the very first time we mount as a passive we might 
+        //  get DBM ScanCheck LRs from the middle of a scan, that would not have started a pass
+        //  normally in such a way as to set pstate->FtCurrPassStartTime() / in the DB header
+        //  previously.
         wszStartTime[0] = L'-';
         wszStartTime[0] = L'\0';
     }
@@ -2434,10 +2934,14 @@ void DBMScanObserverRecoveryEvents::ResumedPass_( const IDBMScanState * const ps
 
 void DBMScanObserverRecoveryEvents::SuspendedPass_( const IDBMScanState * const pstate )
 {
-    if ( Pfmp_()->Pinst() == NULL  ||
+    if ( Pfmp_()->Pinst() == NULL /* the unit test uses a mock FMP, that doesn't have a real inst */ ||
         UlParam( Pfmp_()->Pinst(), JET_paramEnableDBScanInRecovery ) & bitDBScanInRecoveryFollowActive )
     {
+        //  In the FollowActive mode a suspended DBScan results in an actually incomplete DBScan so we want to 
+        //  log about this condition.
         WCHAR wszPgnoHighest[32];
+        //  I am conflicted on whether we should use CpgScannedCurrPass() or the highest pgno we checked
+        //  from the regular pass.
         OSStrCbFormatW( wszPgnoHighest, sizeof( wszPgnoHighest ), L"%d", pstate->PgnoContinuousHighWatermark() );
         WCHAR wszLastFullCompletionTime[100];
         DBMScanFormatOpticalTime_( pstate->FtPrevPassCompletionTime(), wszLastFullCompletionTime, _countof( wszLastFullCompletionTime ) );
@@ -2460,7 +2964,18 @@ void DBMScanObserverRecoveryEvents::SuspendedPass_( const IDBMScanState * const 
 
 void DBMScanObserverRecoveryEvents::FinishedPass_( const IDBMScanState * const pstate )
 {
+    // %1 (%2) %3 Online Maintenance Database Checksumming background task has completed for database '%4'.
+    // This pass started on %5 and ran for a total of %6 seconds (over %7 days) on %8 pages.
 
+    //  NOTE: There WAS a fundamental weirdness in our event time b/c the Active keeps state
+    //  in a table, and the passive keeps state in a header ... so a passive could do say 25%
+    //  of a pass, get switched to being an active, complete 15 passes over 1 month, then go
+    //  back to passive and register a 1 MONTH long dbscan pass.  The opposite issue event is
+    //  suppressed in DBMScanObserverEvents::FinishedPass_.  The reason it is no longer an
+    //  issue with the passive DBScan pass here, is b/c now that the scan follows the active
+    //  our passive start time will be caused by the latest active start time.  BTW, in the
+    //  old / non-"follow" mode, it is still a problem ... one that's hard to solve as the
+    //  table is not available during replay.
 
     WCHAR wszStartTime[ 64 ];
     DBMScanFormatOpticalTime_( pstate->FtPrevPassStartTime(), wszStartTime, _countof( wszStartTime ) );
@@ -2508,7 +3023,14 @@ void DBMScanObserverRecoveryEvents::ReadPage_( const IDBMScanState * const pstat
 
 void DBMScanObserverRecoveryEvents::ReportPassIsOverdue_( const IDBMScanState * const pstate ) const
 {
+    // %1 (%2) %3 Online Maintenance Database Checksumming background task is not finishing on time for database '%4'.
+    // This pass started on %5 and has been running for %6 seconds (over %7 days) so far.
     
+    //  Because we follow the active, the very first time we mount as a passive we might 
+    //  get DBM ScanCheck LRs from the middle of a scan, that would not have started a pass
+    //  normally in such a way as to set pstate->FtCurrPassStartTime() / in the DB header
+    //  previously. If this is the case, don't bother logging the event since it's not
+    //  meaningful.
     if ( pstate->FtCurrPassStartTime() )
     {
         WCHAR wszStartTime[ 64 ];
@@ -2553,10 +3075,14 @@ void DBMScanObserverRecoveryEvents::SetPassDeadline_( const IDBMScanState * cons
     
 void DBMScanObserverRecoveryEvents::ExtendPassDeadline_( const IDBMScanState * const pstate )
 {
+    // issue a 1 day extension  
     const INT csecIn1Day = 60 * 60 * 24;
     m_ftDeadline = UtilGetCurrentFileTime() + UtilConvertSecondsToFileTime( csecIn1Day );
 }
 
+//  ================================================================
+//  DBMScanObserverPerfmon
+//  ================================================================
 
 DBMScanObserverPerfmon::DBMScanObserverPerfmon( INST * const pinst ) :
     m_pinst( pinst )
@@ -2594,6 +3120,7 @@ void DBMScanObserverPerfmon::SuspendedPass_( const IDBMScanState * const )
 {
     if ( Pinst_() )
     {
+        //  We'll use 1 for a special value to mean suspended ...
         PERFOpt( perfctrDBMDuration.Set( Pinst_(), 1 ) );
     }
 }
@@ -2610,6 +3137,9 @@ void DBMScanObserverPerfmon::ReadPage_( const IDBMScanState * const, const PGNO 
 }
 
 
+//  ================================================================
+//  DBMScanObserverCleanupFactory
+//  ================================================================
 
 ERR DBMScanObserverCleanupFactory::ErrCreateDBMScanObserverCleanup(
         INST * const pinst,
@@ -2630,6 +3160,7 @@ ERR DBMScanObserverCleanupFactory::ErrCreateDBMScanObserverCleanup(
 
     Alloc( *pobserver = new DBMScanObserverCleanup( ppib, ifmp ) );
 
+    // The PIB is now owned by the DBMScanObserver
     ppib = ppibNil;
     
 HandleError:
@@ -2642,6 +3173,9 @@ HandleError:
 }
 
 
+//  ================================================================
+//  DBMScanObserverCleanup
+//  ================================================================
 
 DBMScanObserverCleanup::DBMScanObserverCleanup(
         PIB * const ppib,
@@ -2677,6 +3211,8 @@ void DBMScanObserverCleanup::SuspendedPass_( const IDBMScanState * const )
     m_objectCache.CloseAllCachedObjects();
 }
 
+// Called when Database Maintenance has read and verified a page. The cleanup
+// code will latch the page and then perform the cleanup.
 void DBMScanObserverCleanup::ReadPage_( const IDBMScanState * const pstate, const PGNO pgno )
 {
     ERR err;
@@ -2704,20 +3240,27 @@ void DBMScanObserverCleanup::ReadPage_( const IDBMScanState * const pstate, cons
     switch ( ois )
     {
         case ois::Unknown:
+            // Ignorable or unknown: nothing needs to be done with this page .
             break;
 
         case ois::Invalid:
+            // Important: this call may release the page in case of failure.
             Call( ErrCleanupUnusedPage_( &csr ) );
             break;
 
         case ois::Valid:
+            // Save the page-level stats for this page
             const_cast<IDBMScanState *>( pstate )->CalculatePageLevelStats( csr.Cpage() );
 
             if ( csr.Cpage().Dbtime() >= g_rgfmp[m_ifmp].DbtimeOldestGuaranteed() )
             {
+                // updates on this page are recent enough that we won't process it
+                // runtime cleanup should deal with this page, otherwise we will
+                // process it on the next pass.
             }
             else if ( csr.Cpage().FLongValuePage() )
             {
+                // Important: this call may release the page in case of failure.
                 Call( ErrCleanupLVPage_( &csr ) );
             }
             else if ( csr.Cpage().FPrimaryPage() )
@@ -2726,6 +3269,7 @@ void DBMScanObserverCleanup::ReadPage_( const IDBMScanState * const pstate, cons
             }
             else
             {
+                // Important: this call may release the page in case of failure.
                 Call( ErrCleanupIndexPage_( &csr ) );
             }
             break;
@@ -2737,6 +3281,8 @@ void DBMScanObserverCleanup::ReadPage_( const IDBMScanState * const pstate, cons
 
 HandleError:
 
+    // If there are failures above, we may have released the page
+    // in order to rollback, so it would not be latched. 
     if ( csr.FLatched() )
     {
         csr.ReleasePage();
@@ -2744,6 +3290,9 @@ HandleError:
     }
 }
 
+// Get objidMax. To do this we wait to become the oldest transaction in the
+// system, at which point all objids < objidMax have been committed to the
+// catalog. Then we commit our transaction and read the catalog.
 ERR DBMScanObserverCleanup::ErrGetHighestCommittedObjid_()
 {
     ERR err;
@@ -2759,19 +3308,19 @@ ERR DBMScanObserverCleanup::ErrGetHighestCommittedObjid_()
     {
         if ( pinst->m_fTermInProgress )
         {
-            err = ErrERRCheck( JET_errTermInProgress );
+            err = ErrERRCheck( JET_errTermInProgress ); // don't use Call() -- we need to commit the transaction
             break;
         }
 
         if ( pinst->FInstanceUnavailable() )
         {
-            err = pinst->ErrInstanceUnavailableErrorCode();
+            err = pinst->ErrInstanceUnavailableErrorCode(); // don't use Call() -- we need to commit the transaction
             break;
         }
 
         if ( m_fPrepareToTerm )
         {
-            err = ErrERRCheck( JET_errTermInProgress );
+            err = ErrERRCheck( JET_errTermInProgress ); // don't use Call() -- we need to commit the transaction
             break;
         }
 
@@ -2783,9 +3332,9 @@ ERR DBMScanObserverCleanup::ErrGetHighestCommittedObjid_()
         }
         
         UtilSleep( 100 );
-        if ( ++cLoop > 10*120 )
+        if ( ++cLoop > 10*120 ) // wait up to 2 minutes
         {
-            err = ErrERRCheck( JET_errTooManyActiveUsers );
+            err = ErrERRCheck( JET_errTooManyActiveUsers ); // don't use Call() -- we need to commit the transaction
             break;
         }
     }
@@ -2803,48 +3352,61 @@ HandleError:
     return err;
 }
 
+// Determine if cleanup on this page can be safely skipped
 bool DBMScanObserverCleanup::FIgnorablePage_( const CSR& csr ) const
 {
     const OBJID objid = csr.Cpage().ObjidFDP();
 
     if( !csr.Cpage().FLeafPage() )
     {
+        // non-leaf pages aren't cleanable
         return true;
     }
     else if( csr.Cpage().FSpaceTree() )
     {
+        // do not scrub space tree pages
         return true;
     }
     else if ( objidSystemRoot == objid )
     {
+        // the system root doesn't need to be scrubbed
         return true;
     }
     else if ( csr.Cpage().FEmptyPage() )
     {
+        // empty pages are scrubbed when they are freed
         return true;
     }
     else if ( csr.Cpage().FPreInitPage() )
     {
+        // pre-init pages do not hold and have never held any data
         return true;
     }
     else if ( FCATMsysObjectsTableIndex( objid ) )
     {
+        // We can open the catalog/shadow catalog with some special cases, but the
+        // indices are much harder to open without deadlocking.
         return true;
     }
     else if ( objid > m_objidMaxCommitted )
     {
+        // Without the catalog info we can't determine the pgnoFDP, which means
+        // version info can't be looked up, so we can't process this page
+        // CONSIDER: recalculate the max committed objid if we have been running
+        // for a long time
         return true;
     }
     return false;
 }
 
+// See if the objid has been deleted. This method also caches the FUCB for the table.
 ObjidState DBMScanObserverCleanup::OisGetObjectIdState_( CSR& csr )
 {
     ERR err = JET_errSuccess;
     ObjidState ois = ois::Unknown;
 
     const OBJID objid = csr.Cpage().ObjidFDP();
-    Assert( objid > objidNil );
+    Assert( objid > objidNil ); // otherwise I think this is an empty page ...
 
     const bool fCacheCheck = (bool)UlConfigOverrideInjection( 51678, false );
     const ObjidState oisCached = m_objectCache.OisGetObjidState( objid );
@@ -2866,6 +3428,8 @@ ObjidState DBMScanObserverCleanup::OisGetObjectIdState_( CSR& csr )
         {
             Assert( pfucbTable == pfucbNil );
             
+            // The table doesn't exist, the objid is less than the committed max, and the page
+            // has data on it. Clean the page
             Assert( objid <= m_objidMaxCommitted );
             Assert( csr.Cpage().FLeafPage() );
             if ( oisCached == ois::Unknown )
@@ -2894,6 +3458,11 @@ ObjidState DBMScanObserverCleanup::OisGetObjectIdState_( CSR& csr )
     }
     else
     {
+        // This code can't be used for all cases -- if we are scrubbing the MSObjids table then this
+        // can deadlock. We avoid this by using the above code for primary index pages, but we could
+        // save the objid of MSysObjids in the FMP at database attach time.
+        // This code can also deadlock trying to look up / open the MSysObjids table from the 
+        // catalog, but we protect this by ignoring such pages in FIgnorablePage_()
         OBJID objidTable = objidNil;
         SYSOBJ sysobj = sysobjNil;
         Call( ErrCATGetObjidMetadata( m_ppib, m_ifmp, objid, &objidTable, &sysobj ) );
@@ -2907,6 +3476,7 @@ ObjidState DBMScanObserverCleanup::OisGetObjectIdState_( CSR& csr )
             {
                 FUCB * pfucbTable = pfucbNil;
 
+                // Get table fucb.
                 if ( pfucbNil == ( pfucbTable = m_objectCache.PfucbGetCachedObject( objidTable ) ) )
                 {
                     BOOL fExists = fTrue;
@@ -2925,6 +3495,8 @@ ObjidState DBMScanObserverCleanup::OisGetObjectIdState_( CSR& csr )
                 {
                     FUCB * pfucbLV = pfucbNil;
 
+                    // Release the latch on the page as ErrGetFUCBForLV needs to m_critLV.Enter() with 
+                    // rankLVCreate 7000
                     const DBTIME dbtime = csr.Dbtime();
                     const PGNO pgno = csr.Pgno();
                     csr.ReleasePage();
@@ -2944,6 +3516,8 @@ ObjidState DBMScanObserverCleanup::OisGetObjectIdState_( CSR& csr )
                 }
                 else if ( sysobj == sysobjIndex )
                 {
+                    // We do not cache FUCBs for secondary indices.
+                    // Please, read detailed comment above DBMObjectCache.
                 }
                 else
                 {
@@ -2982,6 +3556,9 @@ HandleError:
     return ois;
 }
 
+// Called on a page whose b-tree has been deleted
+// 
+// Important: this call may release the page in case of failure.
 ERR DBMScanObserverCleanup::ErrCleanupUnusedPage_( CSR * const pcsr )
 {
     Assert( pcsr->FLatched() );
@@ -2990,6 +3567,9 @@ ERR DBMScanObserverCleanup::ErrCleanupUnusedPage_( CSR * const pcsr )
     ERR err = JET_errSuccess;
     bool fInTransaction = false;
 
+    // ErrNDScrubOneUnusedPage below performs node deletion in addition to scrubbing,,
+    // but we're skipping the entire operation because there is no penalty in
+    // not cleaning up unused pages because they are not supposed to be consumed anyways.
     if ( !BoolParam( PinstFromPpib( m_ppib ), JET_paramZeroDatabaseUnusedSpace ) )
     {
         goto HandleError;
@@ -3016,6 +3596,10 @@ HandleError:
     {
         Assert( pcsr->FLatched() );
 
+        // First we must release the page. This is not actually strictly needed
+        // since there is nothing to rollback, but it's good form to release the
+        // page before we latch in case we end up tweaking the code later
+        // on and doing an actual operation that would require rolling back.
         pcsr->ReleasePage();
         pcsr->Reset();
         
@@ -3024,11 +3608,13 @@ HandleError:
     return err;
 }
 
+// Cleanup LV with zero ref count(orphan LV).
 ERR DBMScanObserverCleanup::ErrDeleteZeroRefCountLV( FCB *pfcbLV, const BOOKMARK& bm )
 {
     ERR err = JET_errSuccess;
     DELETELVTASK * ptask = new DELETELVTASK( pfcbLV->PgnoFDP(), pfcbLV, m_ifmp, bm );
     Alloc( ptask );
+    // Assert PIB is not in a transaction
     Assert( m_ppib->Level() == levelMin );
     Call( ptask->ErrExecute( m_ppib ) );
 HandleError:
@@ -3039,6 +3625,9 @@ HandleError:
     return err;
 }
 
+// Cleanup an LV page. All versions on the page are committed
+// 
+// Important: this call may release the page in case of failure.
 ERR DBMScanObserverCleanup::ErrCleanupLVPage_( CSR * const pcsr )
 {
     Assert( pcsr->FLatched() );
@@ -3088,6 +3677,7 @@ ERR DBMScanObserverCleanup::ErrCleanupLVPage_( CSR * const pcsr )
         {
             fBTDeleteNeeded = fTrue;
 
+            // Get the bookmark for BTDelete
 
             kdf.key.CopyIntoBuffer( &lvkeyToDelete, sizeof( lvkeyToDelete ) );
             bmBTDelete.key.prefix.Nullify();
@@ -3099,6 +3689,8 @@ ERR DBMScanObserverCleanup::ErrCleanupLVPage_( CSR * const pcsr )
 
     if ( arrLid.Size() > 0 || fBTDeleteNeeded )
     {
+        // Release the latch on the page as the functions to clean up the page below will need to
+        // acquire it.
         pcsr->ReleasePage();
         pcsr->Reset();
 
@@ -3107,7 +3699,8 @@ ERR DBMScanObserverCleanup::ErrCleanupLVPage_( CSR * const pcsr )
 
         if ( arrLid.Size() > 0 )
         {
-            LVKEY_BUFFER lvkeyZeroRef;
+            // Delete zero-ref count LVs
+            LVKEY_BUFFER lvkeyZeroRef;  // to hold the pv of bmZeroRef.key temporarily
             BOOKMARK bmZeroRef;
             bmZeroRef.key.prefix.Nullify();
             bmZeroRef.data.Nullify();
@@ -3117,17 +3710,24 @@ ERR DBMScanObserverCleanup::ErrCleanupLVPage_( CSR * const pcsr )
                 Assert( bmZeroRef.data.FNull() );
                 LVRootKeyFromLid( &lvkeyZeroRef, &bmZeroRef.key, arrLid[ i ] );
                 Assert( !pcsr->FLatched() );
-                Call( ErrDeleteZeroRefCountLV( pfucbLV->u.pfcb, bmZeroRef ) );
+                Call( ErrDeleteZeroRefCountLV( pfucbLV->u.pfcb, bmZeroRef ) );  // copies the bookmark and kicks off a DELETELVTASK
+                // Increase the perf count
                 PERFOpt( perfctrDBMZeroRefCountLvsDeleted.Inc( PinstFromPpib( m_ppib ) ) );
             }
+            // ErrDeleteZeroRefCountLV only flag delete zero-refcount LVs. We still need
+            // to wait till next round for ErrBTDelete to expunge all flag-deleted LVs.
         }
         else if ( fBTDeleteNeeded )
         {
+            // Delete flag deleted LVs.
             if ( pfucbLV != pfucbNil )
             {
                 Assert( !pcsr->FLatched() );
                 const ULONG cpgDirtiedBeforeBTDelete = Ptls()->threadstats.cPageDirtied;
                 
+                // ErrBTDelete deletes all flag-deleted nodes in the page that contains the bm.
+                // Warning: Deletes all nodes, even those unrelated to the bm, that just happen
+                // to be on the same page as the bm.
                 Call( ErrBTDelete( pfucbLV, bmBTDelete ) );
                 if ( cpgDirtiedBeforeBTDelete < Ptls()->threadstats.cPageDirtied )
                 {
@@ -3140,6 +3740,10 @@ HandleError:
     return err;
 }
 
+// Given a CSR and the iline of an LVROOT on the page, zero out all
+// LVCHUNKs belonging to that LV.
+// 
+// Important: this call may release the page in case of failure.
 ERR DBMScanObserverCleanup::ErrZeroLV_( CSR * const pcsr, const INT iline )
 {
     Assert( pcsr->Cpage().FLongValuePage() );
@@ -3158,6 +3762,11 @@ ERR DBMScanObserverCleanup::ErrZeroLV_( CSR * const pcsr, const INT iline )
     LvId lid;
     LidFromKey( &lid, kdf.key );
 
+    //  we need to keep the root of the LV latched for further processing
+    //  use a new CSR to venture onto new pages
+    //
+    // Important: this call may release the page in case of failure, so we should not use
+    // it in failure mode.
     Call( ErrZeroLVChunks_( pcsr, pcsr->Cpage().ObjidFDP(), lid, ulSize ) );
 
 HandleError:
@@ -3165,6 +3774,10 @@ HandleError:
     return err;
 }
 
+// Zero out all of the LVCHUNKS for the given LID. This may latch pages to the right of the current page.
+// The latch on the current page will not be released.
+// 
+// Important: this call may release the page in case of failure.
 ERR DBMScanObserverCleanup::ErrZeroLVChunks_(
     __in CSR * const    pcsrRoot,
     const OBJID         objid,
@@ -3172,7 +3785,7 @@ ERR DBMScanObserverCleanup::ErrZeroLVChunks_(
     const ULONG         ulSize )
 {
     Assert( pcsrRoot->Cpage().FAssertRDWLatch() );
-    Expected( m_ppib->Level() == 0 );
+    Expected( m_ppib->Level() == 0 ); // about to scrub an undeterminedly long LV, we shouldn't be in a trx
 
     ERR err;
 
@@ -3214,6 +3827,7 @@ ERR DBMScanObserverCleanup::ErrZeroLVChunks_(
             }
             else
             {
+                // the LVROOT can't be scrubbed, so skip it
                 Assert( FIsLVRootKey( kdf.key ) );
                 Assert( sizeof( LVROOT ) == kdf.data.Cb() || sizeof( LVROOT2 ) == kdf.data.Cb() );
                 Assert( scrubOperNone == rgscruboper[iline] );
@@ -3223,19 +3837,24 @@ ERR DBMScanObserverCleanup::ErrZeroLVChunks_(
 
         if ( !fSawLV )
         {
+            // no need to scrub this page and we have seen all of the LV
             break;
         }
 
+        // Important: this call may release the page from pcsrT. So we should not use
+        // it in failure mode.
         Call( ErrScrubOneUsedPage( pcsrT, rgscruboper, pcsrT->Cpage().Clines() ) );
         
         const PGNO pgnoNext = pcsrT->Cpage().PgnoNext();
         if ( pgnoNull == pgnoNext || fSawGreaterLV )
         {
+            // reached the end of the tree/LV
             break;
         }
 
         if ( pcsrT == pcsrRoot )
         {
+            // we have to leave the root of the LV latched, so use a temporary CSR to move to the next page
             Call( csrT.ErrGetRIWPage( m_ppib, m_ifmp, pgnoNext ) );
             pcsrT = &csrT;
         }
@@ -3246,6 +3865,13 @@ ERR DBMScanObserverCleanup::ErrZeroLVChunks_(
             Call( pcsrT->ErrSwitchPage( m_ppib, m_ifmp, pgnoNext ) );
         }
 
+        // Keeping the latch while moving from one page to the next protects us from the case where a
+        // page is freed. The case we are looking for here is wholesale space reuse. The scenario is:
+        //  1. We decide to scrub an LV.
+        //  2. While scrubbing the LV the table containing the LV is deleted, freeing all the pages.
+        //  3. One of the pages is used by a different b-tree
+        // We can recognize the case by looking at the objid to see if it changed. If so, we abandon
+        // the scrub. The LV b-tree is now deleted so it will be scrubbed the next time.
         if ( objid != pcsrT->Cpage().ObjidFDP() )
         {
 #ifndef RTM
@@ -3265,6 +3891,7 @@ HandleError:
 }
 
 
+// Cleanup a primary index page. All versions on the page are committed.
 ERR DBMScanObserverCleanup::ErrCleanupPrimaryPage_( CSR * const pcsr )
 {
     Assert( pcsr->Cpage().FPrimaryPage() );
@@ -3286,15 +3913,32 @@ ERR DBMScanObserverCleanup::ErrCleanupPrimaryPage_( CSR * const pcsr )
         
             if ( FNDDeleted( kdf ) )
             {
+                // Two cases of scrubbing which cause the number of dirty pages to increase after ErrBTDelete:
+                // 1. This node (flag-deleted) is the only node of a single page b-tree, and the new dirty 
+                //    page is caused by ErrNDReplace inside ErrBTISPCDeleteNodes by replacing/scrubbing a 
+                //    single byte NULL (chSCRUBDBMaintEmptyPageLastNodeFill) of the node's data.
+                // 2. Otherwise, some nodes are scrubbed by ErrNDDelete in ErrBTDelete.
+                //
+                // Reason why ErrBTDelete cannot merge case 1 pages:
+                //    In ErrBTISinglePageCleanup, ErrBTISPCDeleteNodes will nullify the node's data (replace with
+                //    a single byte NULL chSCRUBDBMaintEmptyPageLastNodeFill) but it can't remove the only node in 
+                //    the page (b-tree pages can't be empty), and return MultipageOLC. Then ErrBTIMultipageCleanup will 
+                //    return wrnBTShallowTree without doing anything.
+                //
 
+                // Avoid repeated replacing/scrubbing of case 1 pages 
                 if ( pcsr->Cpage().FLeafPage() &&
                      pcsr->Cpage().FRootPage() && pcsr->Cpage().Clines() == 1 &&
                      kdf.data.Cb() == sizeof( chSCRUBDBMaintEmptyPageLastNodeFill ) &&
                      ( ( BYTE * )kdf.data.Pv() )[0] == chSCRUBDBMaintEmptyPageLastNodeFill )
                 {
+                    // If the b-tree is a single page tree, whose last flag-deleted node is already replaced with 
+                    // bNULL by ErrNDReplace inside ErrBTISPCDeleteNodes, we skip the scrubbing. 
                     goto HandleError;
                 }
 
+                // Extract the bookmark
+                // Call ErrBTDelete
                 unique_ptr<BYTE> pbBookmark( new BYTE[kdf.key.Cb()] );
                 Alloc( pbBookmark.get() );
                 kdf.key.CopyIntoBuffer( pbBookmark.get(), kdf.key.Cb() );
@@ -3305,6 +3949,7 @@ ERR DBMScanObserverCleanup::ErrCleanupPrimaryPage_( CSR * const pcsr )
                 bm.key.suffix.SetCb( kdf.key.Cb() );
                 bm.data.Nullify();
 
+                // Release the page before calling ErrBTDelete.
                 pcsr->ReleasePage();
                 pcsr->Reset();
 
@@ -3312,10 +3957,14 @@ ERR DBMScanObserverCleanup::ErrCleanupPrimaryPage_( CSR * const pcsr )
 
                 Call( ErrBTDelete( pfucbTable, bm ) );
 
+                // Scrubbing is performed by lower layers, which are already honoring JET_paramZeroDatabaseUnusedSpace.
+                // Therefore, do not increment the counter if scrubbing is not enabled, even if some form of cleanup
+                // was done.
                 if ( BoolParam( PinstFromPpib( m_ppib ), JET_paramZeroDatabaseUnusedSpace ) && ( cpgDirtiedBeforeBTDelete < Ptls()->threadstats.cPageDirtied ) )
                 {
                     PERFOpt( perfctrDBMPagesZeroed.Inc( PinstFromPpib( m_ppib ) ) );
                 }
+                // We can break since ErrBTDelete processes all records/lines on this page.
                 break;
             }
         }
@@ -3325,6 +3974,9 @@ HandleError:
     return err;
 }
 
+// Cleanup an index page. All versions on the page are committed
+// 
+// Important: this call may release the page in case of failure.
 ERR DBMScanObserverCleanup::ErrCleanupIndexPage_( CSR * const pcsr )
 {
     Assert( pcsr->FLatched() );
@@ -3338,6 +3990,8 @@ HandleError:
     return err;
 }
 
+//  for each node on the page:
+//    if it is flag-deleted zero out the data
 ERR DBMScanObserverCleanup::ErrCleanupDeletedNodes_( CSR * const pcsr )
 {
     Assert( pcsr->FLatched() );
@@ -3353,6 +4007,8 @@ ERR DBMScanObserverCleanup::ErrCleanupDeletedNodes_( CSR * const pcsr )
         goto HandleError;
     }
 
+    // Don't zero out the data for non-unique indices. The data is part of the bookmark
+    // and can't be removed or the sort order will be wrong.
     if ( pcsr->Cpage().FAnyLineHasFlagSet( fNDDeleted ) && !pcsr->Cpage().FNonUniqueKeys() )
     {
         Alloc( rgscruboper = new SCRUBOPER[pcsr->Cpage().Clines()] );
@@ -3381,6 +4037,9 @@ HandleError:
     return err;
 }
 
+// Begin a transaction, upgrade the latch and call ErrNDScrubOneUsedPage
+// 
+// Important: this call may release the page in case of failure.
 ERR DBMScanObserverCleanup::ErrScrubOneUsedPage(
         CSR * const pcsr,
         __in_ecount( cscrubOper ) const SCRUBOPER * const rgscruboper,
@@ -3412,6 +4071,10 @@ HandleError:
     {
         Assert( pcsr->FLatched() );
 
+        // First we must release the page. This is not actually strictly needed
+        // since there is nothing to rollback, but it's good form to release the
+        // page before we latch in case we end up tweaking the code later
+        // on and doing an actual operation that would require rolling back.
         pcsr->ReleasePage();
         pcsr->Reset();
         
@@ -3420,6 +4083,7 @@ HandleError:
     return err;
 }
 
+// Use the objid of the table to open an FUCB
 ERR DBMScanObserverCleanup::ErrOpenTableGetFucb_( const OBJID objid, BOOL* const pfExists, FUCB ** ppfucbTable )
 {
     ERR err;
@@ -3431,6 +4095,8 @@ ERR DBMScanObserverCleanup::ErrOpenTableGetFucb_( const OBJID objid, BOOL* const
     *pfExists = fTrue;
     *ppfucbTable = pfucbNil;
 
+    // If the PIB isn't marked as a system cleanup session then we will conflict with
+    // JetDeleteTable.
     Assert( FPIBSessionSystemCleanup( m_ppib ) );
     Call( ErrDIRBeginTransaction( m_ppib, 54683, JET_bitTransactionReadOnly ) );
 
@@ -3461,6 +4127,9 @@ HandleError:
     return err;
 }
 
+//  ================================================================
+//  DBMObjectCache
+//  ================================================================
 
 DBMObjectCache::DBMObjectCache()
 {
@@ -3617,6 +4286,7 @@ INT DBMObjectCache::IndexOfLeastRecentlyUsedObject_() const
             indexLeast = i;
             ftLeast = m_rgstate[i].ftAccess;
 
+            // Unused entry.
             if( m_rgstate[i].ftAccess == 0 )
             {
                 break;
@@ -3643,7 +4313,7 @@ void DBMObjectCache::CloseObjectAt_( const INT index )
             Assert( m_rgstate[index].pfucb->u.pfcb->FTypeTable() );
             CallS( ErrFILECloseTable( m_rgstate[index].pfucb->ppib, m_rgstate[index].pfucb ) );
         }
-#endif
+#endif // ENABLE_JET_UNIT_TEST
     }
     m_rgstate[index].objid = objidNil;
     m_rgstate[index].ois = ois::Unknown;
@@ -3652,6 +4322,9 @@ void DBMObjectCache::CloseObjectAt_( const INT index )
 }
 
 
+//  ================================================================
+//  DBMScan
+//  ================================================================
     
 DBMScan::DBMScan(
         IDBMScanState * const pscanstate,
@@ -3748,6 +4421,7 @@ void DBMScan::TrySetScanGo()
 {
     Expected( m_fSerializeScan );
 
+    //  m_msigDBScanStop has priority.
     m_critSignalControl.Enter();
     if ( !m_msigDBScanStop.FIsSet() )
     {
@@ -3764,6 +4438,7 @@ void DBMScan::TryResetScanGo()
 {
     Expected( m_fSerializeScan );
 
+    //  m_msigDBScanStop has priority.
     m_critSignalControl.Enter();
     if ( !m_msigDBScanStop.FIsSet() )
     {
@@ -3784,6 +4459,7 @@ void DBMScan::WaitForScanStop()
 void DBMScan::WaitForScanGo( const INT msec )
 {
     Expected( m_fSerializeScan );
+    //  Disable deadlock detection.
     const INT cmsecTimeout = msec < 0 ? msec : -msec;
     ( void )m_msigDBScanGo.FWait( cmsecTimeout );
 }
@@ -3792,6 +4468,7 @@ void DBMScan::TermDBMScan_()
 {
     SetScanStop_();
 
+    // Let the observers know that we are terminating.
     PrepareToTerm_();
 
     if ( m_threadDBMScan != NULL )
@@ -3866,6 +4543,7 @@ DWORD DBMScan::DwDBMScan_()
         PERFOpt( perfctrDBMThrottleSetting.Set( m_pscanconfig->Pinst(), 0 ) );
     }
 
+    // we are exiting. if the pass is still in progress then suspend it
     if ( m_fNeedToSuspendPass )
     {
         SuspendPass_();
@@ -3881,14 +4559,17 @@ void DBMScan::DoOnePass_()
     DWORD tickStart = 0;
     DWORD dtickTimeSlice = 0;
     __int64 iSecNotifyStart = UtilGetCurrentFileTime();
+    // Choose a reasonable maximum-granularity of work
     cpgBatch = min( cpgBatch, m_pscanreader->cpgPrereadMax );
 
     while ( !m_msigDBScanStop.FWait( m_pscanconfig->DwThrottleSleep() ) && !FTimeLimitReached_() )
         {
+            //  ask permission to run, if necessary.
             if ( !fRunnable )
             {
                 fRunnable = m_pidbmScanSerializationObj->FEnqueueAndWait( this, CMSecBeforeTimeLimit_() );
 
+                //  Compute our timeslice.
                 if ( fRunnable )
                 {
                     tickStart = TickOSTimeCurrent();
@@ -3901,6 +4582,7 @@ void DBMScan::DoOnePass_()
                 }
             }
 
+            //  May we run?
             if ( fRunnable )
             {
                 const PGNO pgnoFirst = m_pscanstate->CpgScannedCurrPass() + 1;
@@ -3916,7 +4598,7 @@ void DBMScan::DoOnePass_()
                         switch ( err )
                         {
                             case JET_errFileIOBeyondEOF:
-                                Expected( fFalse );
+                                Expected( fFalse );   // Unexpected because we're not reading past the last page above.
                                 FinishPass_();
                                 goto Finished;
 
@@ -3939,6 +4621,7 @@ void DBMScan::DoOnePass_()
                 }
             }
 
+            //  We may have to give up our timeslice.
             if ( fRunnable && ( ( TickOSTimeCurrent() - tickStart ) >= dtickTimeSlice ) )
             {
                 Assert( m_pidbmScanSerializationObj->FDBMScanCurrent( this ) );
@@ -3969,6 +4652,8 @@ Finished:
     return;
 }
 
+// we are resuming a pass if the state tells us that we have scanned
+// some pages already
 bool DBMScan::FResumingPass_() const
 {
     return m_pscanstate->CpgScannedCurrPass() > 0;
@@ -4004,6 +4689,7 @@ void DBMScan::SuspendPass_()
 
 void DBMScan::PrepareToTerm_()
 {
+    // No need to update m_pscanstate.
     ForEachObserverCall_( &DBMScanObserver::PrepareToTerm );
 }
 
@@ -4054,7 +4740,8 @@ void DBMScan::WaitForMinPassTime_()
 
     if ( csecToWait > 0 )
     {
-        Assert( csecToWait <= ( INT_MAX / 1000 ) );
+        // negative wait time turns off deadlock detection
+        Assert( csecToWait <= ( INT_MAX / 1000 ) ); // overflow?
         ( void )m_msigDBScanStop.FWait( -1000 * ( INT )csecToWait );
     }
 }
@@ -4070,7 +4757,7 @@ INT DBMScan::CMSecBeforeTimeLimit_() const
     if ( cmsecBeforeTimeLimit > 0 )
     {
         cmsecBeforeTimeLimit = min( INT_MAX, cmsecBeforeTimeLimit );
-        Assert( cmsecBeforeTimeLimit <= INT_MAX );
+        Assert( cmsecBeforeTimeLimit <= INT_MAX );    // overflow?
         return ( INT )cmsecBeforeTimeLimit;
     }
     else
@@ -4085,6 +4772,9 @@ bool DBMScan::FMaxScansReached_() const
 }
 
 
+//  ================================================================
+//  IDBMScanSerializer
+//  ================================================================
 
 IDBMScanSerializer::IDBMScanSerializer( const ULONG_PTR ulKey, const IDBMScanSerializerType idbmsType ) :
     m_idbmsType( idbmsType ),
@@ -4130,6 +4820,9 @@ LONG IDBMScanSerializer::CSerializerRef() const
 }
 
 
+//  ================================================================
+//  DBMScanSerializerDummy
+//  ================================================================
 
 bool DBMScanSerializerDummy::FEnqueueAndWait( DBMScan * const pdbmScan, const INT cmsec )
 {
@@ -4155,7 +4848,7 @@ DWORD DBMScanSerializerDummy::DwTimeSlice() const
     return 1000;
 #else
     return ulMax;
-#endif
+#endif  // DEBUG
 }
 
 DBMScanSerializerDummy::DBMScanSerializerDummy( const ULONG_PTR ulKey ) :
@@ -4170,14 +4863,19 @@ DBMScanSerializerDummy::~DBMScanSerializerDummy()
 }
 
 
+//  ================================================================
+//  DBMScanSerializer
+//  ================================================================
 
 bool DBMScanSerializer::FEnqueueAndWait( DBMScan * const pdbmScan, const INT cmsec )
 {
     bool fSuccess = false;
     Assert( pdbmScan != NULL );
 
+    //  First, enter the critical section.
     m_critSerializer.Enter();
 
+    //  Are we re-enqueuing? Is the queue empty?
     const BOOL fReEnqueuing = m_ilDbmScans.FMember( pdbmScan );
     const BOOL fEmpty = m_ilDbmScans.FEmpty();
     Assert( !fReEnqueuing );
@@ -4185,23 +4883,29 @@ bool DBMScanSerializer::FEnqueueAndWait( DBMScan * const pdbmScan, const INT cms
 
     if ( !fReEnqueuing )
     {
+        //  Insert ourselves as a waiter. We may be already first at this point.
         m_ilDbmScans.InsertAsNextMost( pdbmScan );
         
+        //  If the waiting queue is empty, then we can immediately start.
         if ( fEmpty )
         {
             fSuccess = true;
         }
         else
         {
+            //  Try and reset the signal so that we can wait.
             pdbmScan->TryResetScanGo();
             m_critSerializer.Leave();
 
+            //  Wait.
             pdbmScan->WaitForScanGo( cmsec );
 
+            //  Enter the critical section again so that we can evalute if we are first now.
             m_critSerializer.Enter();
 
             fSuccess = m_ilDbmScans.PrevMost() == pdbmScan;
 
+            //  If we are not the first, remove ourselves from the queue.
             if ( !fSuccess )
             {
                 Assert( m_ilDbmScans.FMember( pdbmScan ) );
@@ -4214,6 +4918,7 @@ bool DBMScanSerializer::FEnqueueAndWait( DBMScan * const pdbmScan, const INT cms
         Assert( !fEmpty );
     }
 
+    //  Leave the critical section.
     m_critSerializer.Leave();
 
     return fSuccess;
@@ -4221,6 +4926,7 @@ bool DBMScanSerializer::FEnqueueAndWait( DBMScan * const pdbmScan, const INT cms
 
 void DBMScanSerializer::Dequeue( DBMScan * const pdbmScan )
 {
+    //  First, enter the critical section.
     m_critSerializer.Enter();
 
     const BOOL fPresent = m_ilDbmScans.FMember( pdbmScan );
@@ -4236,6 +4942,7 @@ void DBMScanSerializer::Dequeue( DBMScan * const pdbmScan )
             DBMScan * const pdbmScanNext = m_ilDbmScans.PrevMost();
             Assert( pdbmScan != pdbmScanNext );
 
+            //  If there's someone waiting, we need to signal it.
             if ( pdbmScanNext != NULL )
             {
                 pdbmScanNext->TrySetScanGo();
@@ -4247,6 +4954,7 @@ void DBMScanSerializer::Dequeue( DBMScan * const pdbmScan )
         Assert( !fCurrent );
     }
     
+    //  Leave the critical section.
     m_critSerializer.Leave();
 }
 
@@ -4277,6 +4985,9 @@ DBMScanSerializer::~DBMScanSerializer()
 }
 
 
+//  ================================================================
+//  DBMScanSerializerFactory
+//  ================================================================
 
 ERR DBMScanSerializerFactory::ErrInitSerializerFactory()
 {
@@ -4297,6 +5008,7 @@ void DBMScanSerializerFactory::TermSerializerFactory()
     Assert( m_ilSerializers.FEmpty() || FUtilProcessAbort() );
     Assert( m_cDummySerializers == 0 || FUtilProcessAbort() );
 
+    //  Iterate and free memory.
     for ( DBMScanSerializer * pdbmSerializer = m_ilSerializers.PrevMost();
             pdbmSerializer != NULL;
             pdbmSerializer = m_ilSerializers.PrevMost() )
@@ -4323,6 +5035,7 @@ ERR DBMScanSerializerFactory::ErrRegisterSerializer_( const ULONG_PTR ulKey, con
     DBMScanSerializer * pdbmSerializer = NULL;
     if ( !fDummy )
     {
+        //  Key lookup.
         for ( pdbmSerializer = m_ilSerializers.PrevMost();
                 pdbmSerializer != NULL;
                 pdbmSerializer = m_ilSerializers.Next( pdbmSerializer ) )
@@ -4334,9 +5047,11 @@ ERR DBMScanSerializerFactory::ErrRegisterSerializer_( const ULONG_PTR ulKey, con
         }
     }
 
+    //  Have we found the object?
     if ( pdbmSerializer != NULL )
     {
         Assert( !fDummy );
+        //  We just need to increment the ref count.
         const LONG cRefOld = pdbmSerializer->CSerializerRef();
         const LONG cRefNew = pdbmSerializer->CIncrementSerializerRef();
         Assert( cRefOld > 0 );
@@ -4345,6 +5060,7 @@ ERR DBMScanSerializerFactory::ErrRegisterSerializer_( const ULONG_PTR ulKey, con
     }
     else
     {
+        //  Allocate a new one and insert it into the list.
         IDBMScanSerializer* pidbmSerializerNew = NULL;
         if ( fDummy )
         {
@@ -4417,11 +5133,13 @@ void DBMScanSerializerFactory::UnregisterSerializer( IDBMScanSerializer * const 
 
         if ( m_cDummySerializers > 0 )
         {
+            //  We just need to decrement the ref count.
             const LONG cRefOld = pidbmSerializer->CSerializerRef();
             const LONG cRefNew = pidbmSerializer->CDecrementSerializerRef();
             Assert( cRefOld == 1 );
             Assert( cRefNew == 0 );
 
+            //  We'll delete this unreferenced object.
             if ( cRefNew == 0 )
             {
                 m_cDummySerializers--;
@@ -4437,15 +5155,18 @@ void DBMScanSerializerFactory::UnregisterSerializer( IDBMScanSerializer * const 
 
         Assert( fPresent );
 
+        //  Have we found the object?
         if ( fPresent )
         {
             Assert( !m_ilSerializers.FEmpty() );
 
+            //  We just need to decrement the ref count.
             const LONG cRefOld = pdbmSerializer->CSerializerRef();
             const LONG cRefNew = pdbmSerializer->CDecrementSerializerRef();
             Assert( cRefOld > 0 );
             Assert( cRefNew == cRefOld - 1 );
 
+            //  We'll remove and delete this unreferenced object.
             if ( cRefNew == 0 )
             {
                 m_ilSerializers.Remove( pdbmSerializer );
@@ -4479,7 +5200,9 @@ DBMScanSerializerFactory::~DBMScanSerializerFactory()
     TermSerializerFactory();
 }
 
+//  ================================================================
 VOID DBMScanStopAllScansForInst( INST * pinst, const BOOL fAllowRestarting )
+//  ================================================================
 {
     for ( DBID dbid = dbidUserLeast; dbid < dbidMax; dbid++ )
     {
@@ -4488,6 +5211,8 @@ VOID DBMScanStopAllScansForInst( INST * pinst, const BOOL fAllowRestarting )
         if ( ifmp < g_ifmpMax &&
             g_rgfmp[ifmp].FInUse() )
         {
+            //  if it cannot be restarted, set it not to 
+            //  start again.
             if ( !fAllowRestarting )
             {
                 g_rgfmp[ifmp].SetFDontStartDBM();
@@ -4495,6 +5220,9 @@ VOID DBMScanStopAllScansForInst( INST * pinst, const BOOL fAllowRestarting )
             else
             {
                 Expected( pinst->m_plog->FRecovering() );
+                //  This is tantamount to plog->FRecovering() = fTrue, this means that
+                //  we are quiting redo with error (or at end of undo) and so we MUST
+                //  stop the follower (to cause it to save the progress state).
                 if ( g_rgfmp[ifmp].PdbmFollower() )
                 {
                     g_rgfmp[ifmp].PdbmFollower()->DeRegisterFollower( &g_rgfmp[ifmp], CDBMScanFollower::dbmdrrStoppedScan );
@@ -4507,7 +5235,9 @@ VOID DBMScanStopAllScansForInst( INST * pinst, const BOOL fAllowRestarting )
     }
 }
 
+//  ================================================================
 ERR ErrDBMInit()
+//  ================================================================
 {
     ERR err = JET_errSuccess;
 
@@ -4517,16 +5247,20 @@ HandleError:
     return err;
 }
 
+//  ================================================================
 void DBMTerm()
+//  ================================================================
 {
     g_dbmSerializerFactory.TermSerializerFactory();
 }
 
+//  ================================================================
 ERR ErrDBMEmitDivergenceCheck(
     const IFMP ifmp,
     const PGNO pgno,
     const ScanCheckSource scs,
     const CPAGE* const pcpage )
+//  ================================================================
 {
     Assert( ( scs != scsInvalid ) && ( scs < scsMax ) );
     Expected( ( scs == scsDbScan ) || ( scs == scsDbShrink ) );
@@ -4534,8 +5268,12 @@ ERR ErrDBMEmitDivergenceCheck(
     Assert( pgno != pgnoMax );
     Assert( pcpage != NULL );
 
+    // In order to ensure we can compare the same version of page, we must have RDW
+    // latch so that the page dbtime is serialized for us (and to get a stable checksum as well).
     Assert( pcpage->FAssertRDWLatch() );
 
+    // Note that FMP::FEfvSupported() below checks for both DB and log versions, but JET_efvScanCheck2
+    // only upgrades the log version so technically, we wouldn't need to check for the DB version.
     const BOOL fScanCheck2Supported = g_rgfmp[ifmp].FEfvSupported( JET_efvScanCheck2 );
     Assert( fScanCheck2Supported || ( scs == scsDbScan ) );
 
@@ -4545,8 +5283,8 @@ ERR ErrDBMEmitDivergenceCheck(
                                 UsDBMGetCompressedLoggedChecksum( *pcpage, dbtimeCurrent );
 
     const DBTIME dbtimePage = pcpage->Dbtime();
-    Assert( ( dbtimePage == 0 && pcpage->ObjidFDP() == 0 ) || 
-            ( pcpage->PgnoThis() == pgno )  );
+    Assert( ( dbtimePage == 0 && pcpage->ObjidFDP() == 0 ) || /* zero'd page */
+            ( pcpage->PgnoThis() == pgno ) /* or the pgno should match */ );
     Assert( ( dbtimePage != dbtimeShrunk ) || ( pcpage->ObjidFDP() == 0 ) );
 
     LGPOS lgposLogRec = lgposMin;
@@ -4560,6 +5298,7 @@ ERR ErrDBMEmitDivergenceCheck(
                         fScanCheck2Supported,
                         &lgposLogRec );
 
+    // Check if the persisted dbtime is ahead of the running dbtime.
     if ( ( dbtimePage != 0 ) && ( dbtimePage != dbtimeShrunk ) && ( dbtimePage > dbtimeCurrent ) )
     {
         OSTraceSuspendGC();
@@ -4603,22 +5342,26 @@ ERR ErrDBMEmitDivergenceCheck(
     return err;
 }
 
+//  ================================================================
 ERR ErrDBMEmitEndScan( const IFMP ifmp )
+//  ================================================================
 {
     return ErrLGScanCheck(
             ifmp,
             pgnoScanLastSentinel,
             scsDbScan,
-            0,
-            0,
-            0,
-            g_rgfmp[ifmp].FEfvSupported( JET_efvScanCheck2 ) );
+            0, // dbtimePage
+            0, // dbtimeCurrent
+            0, // ulChecksum
+            g_rgfmp[ifmp].FEfvSupported( JET_efvScanCheck2 ) ); // fScanCheck2Supported
 
 }
 
+//  ================================================================
 USHORT UsDBMGetCompressedLoggedChecksum( const CPAGE& cpage, const DBTIME dbtimeSeed )
+//  ================================================================
 {
-    const ULONG cRotate = dbtimeSeed & 0x1f;
+    const ULONG cRotate = dbtimeSeed & 0x1f;    // 0x3f might be even better?
     QWORD seed = _rotl64( dbtimeSeed, cRotate );
     QWORD qwPreCompressed = cpage.LoggedDataChecksum().rgChecksum[0] ^ seed;
 
@@ -4626,9 +5369,11 @@ USHORT UsDBMGetCompressedLoggedChecksum( const CPAGE& cpage, const DBTIME dbtime
                    ( qwPreCompressed >> 16 ) ^ ( qwPreCompressed & 0xffff ) );
 }
 
+//  ================================================================
 ULONG UlDBMGetCompressedLoggedChecksum( const CPAGE& cpage, const DBTIME dbtimeSeed )
+//  ================================================================
 {
-    const ULONG cRotate = dbtimeSeed & 0x1f;
+    const ULONG cRotate = dbtimeSeed & 0x1f;    // 0x3f might be even better?
     QWORD seed = _rotl64( dbtimeSeed, cRotate );
     QWORD qwPreCompressed = cpage.LoggedDataChecksum().rgChecksum[0] ^ seed;
 
@@ -4637,8 +5382,13 @@ ULONG UlDBMGetCompressedLoggedChecksum( const CPAGE& cpage, const DBTIME dbtimeS
 
 #ifdef ENABLE_JET_UNIT_TEST
 
+//  ================================================================
+//  DBMObjectCache tests
+//  ================================================================
 
+//  ================================================================
 JETUNITTEST( DBMObjectCache, UnknownObjidReturnsUnknown )
+//  ================================================================
 {
     DBMObjectCache cache;
 
@@ -4646,7 +5396,9 @@ JETUNITTEST( DBMObjectCache, UnknownObjidReturnsUnknown )
     CHECK( pfucbNil == cache.PfucbGetCachedObject( 1 ) );
 }
 
+//  ================================================================
 JETUNITTEST( DBMObjectCache, SetObjidToValid )
+//  ================================================================
 {
     DBMObjectCache cache;
     cache.CacheObjectFucb( (FUCB*)0x12345678, 1 );
@@ -4655,7 +5407,9 @@ JETUNITTEST( DBMObjectCache, SetObjidToValid )
     CHECK( (FUCB*)0x12345678 == cache.PfucbGetCachedObject( 1 ) );
 }
 
+//  ================================================================
 JETUNITTEST( DBMObjectCache, CloseObjects )
+//  ================================================================
 {
     DBMObjectCache cache;
     cache.CacheObjectFucb( (FUCB*)0x12345678, 1 );
@@ -4665,7 +5419,9 @@ JETUNITTEST( DBMObjectCache, CloseObjects )
     CHECK( pfucbNil == cache.PfucbGetCachedObject( 1 ) );
 }
 
+//  ================================================================
 JETUNITTEST( DBMObjectCache, SetObjidToInvalid )
+//  ================================================================
 {
     DBMObjectCache cache;
     cache.CacheObjectFucb( (FUCB*)0x12345678, 1 );
@@ -4676,7 +5432,9 @@ JETUNITTEST( DBMObjectCache, SetObjidToInvalid )
     CHECK( pfucbNil == cache.PfucbGetCachedObject( 1 ) );
 }
 
+//  ================================================================
 JETUNITTEST( DBMObjectCache, SetMultipleObjids )
+//  ================================================================
 {
     DBMObjectCache cache;
     cache.CacheObjectFucb( (FUCB*)0x12345678 - 1, 1 );
@@ -4696,7 +5454,9 @@ JETUNITTEST( DBMObjectCache, SetMultipleObjids )
     CHECK( pfucbNil == cache.PfucbGetCachedObject( 5 ) );
 }
 
+//  ================================================================
 JETUNITTEST( DBMObjectCache, SetTooManyObjids )
+//  ================================================================
 {
     DBMObjectCache cache;
     for ( INT i = 1; i <= 1000; ++i )
@@ -4715,7 +5475,11 @@ JETUNITTEST( DBMObjectCache, SetTooManyObjids )
     CHECK( pfucbNil == cache.PfucbGetCachedObject( 1003 ) );
 }
 
+//  ================================================================
+//  DBMScanState tests
+//  ================================================================
 
+// test that creating a scan object zeroes out the members
 JETUNITTEST( DBMSimpleScanState, ConstructorZeroesMembers )
 {
     DBMSimpleScanState state;
@@ -4728,6 +5492,7 @@ JETUNITTEST( DBMSimpleScanState, ConstructorZeroesMembers )
     CHECK( 0 == state.CpgScannedPrevPass() );
 }
 
+// test that calling StartedPass stores the start time
 JETUNITTEST( DBMSimpleScanState, StartedPassRecordsTime )
 {
     DBMSimpleScanState state;
@@ -4740,6 +5505,7 @@ JETUNITTEST( DBMSimpleScanState, StartedPassRecordsTime )
     CHECK( state.FtCurrPassStartTime() <= ftTimeAfter );
 }
 
+// test that calling ReadPages increments CpgScannedCurrPass
 JETUNITTEST( DBMSimpleScanState, ReadPagesIncrementsCpgScanned )
 {
     DBMSimpleScanState state;
@@ -4753,6 +5519,7 @@ JETUNITTEST( DBMSimpleScanState, ReadPagesIncrementsCpgScanned )
     CHECK( cpgRead == state.PgnoContinuousHighWatermark() );
 }
 
+// test that calling FinishedPass stores the completion time
 JETUNITTEST( DBMSimpleScanState, FinishedPassRecordsCompletionTime )
 {
     DBMSimpleScanState state;
@@ -4766,6 +5533,7 @@ JETUNITTEST( DBMSimpleScanState, FinishedPassRecordsCompletionTime )
     CHECK( state.FtPrevPassCompletionTime() <= ftTimeAfter );
 }
 
+// test that calling FinishedPass stores the old start time
 JETUNITTEST( DBMSimpleScanState, FinishedPassRecordsStartTime )
 {
     DBMSimpleScanState state;
@@ -4776,6 +5544,7 @@ JETUNITTEST( DBMSimpleScanState, FinishedPassRecordsStartTime )
     CHECK( state.FtPrevPassStartTime() == ftStartTime );
 }
 
+// test that calling FinishedPass stores the number of pages scanned
 JETUNITTEST( DBMSimpleScanState, FinishedPassRecordsCpgScanned )
 {
     DBMSimpleScanState state;
@@ -4789,6 +5558,7 @@ JETUNITTEST( DBMSimpleScanState, FinishedPassRecordsCpgScanned )
     CHECK( cpgRead == state.CpgScannedPrevPass() );
 }
 
+// test that calling FinishedPass clears the start time
 JETUNITTEST( DBMSimpleScanState, FinishedPassClearsStartTime )
 {
     DBMSimpleScanState state;
@@ -4799,6 +5569,8 @@ JETUNITTEST( DBMSimpleScanState, FinishedPassClearsStartTime )
     CHECK( 0 == state.FtCurrPassStartTime() );
 }
 
+// test that calling FinishedPass clears CpgScannedCurrPass and
+// PgnoContinuousHighWatermark
 JETUNITTEST( DBMSimpleScanState, FinishedPassClearsCounters )
 {
     DBMSimpleScanState state;
@@ -4837,6 +5609,9 @@ JETUNITTEST( DBMSimpleScanState, TestPgnoHighestChecked )
 }
 
 
+//  ================================================================
+//  DBMScanStateHeader tests
+//  ================================================================
 
 JETUNITTEST( DBMScanStateHeader, ConstructorLoadsPgnoChecksumCur )
 {
@@ -4865,7 +5640,7 @@ JETUNITTEST( DBMScanStateHeader, ConstructorLoadsPgnoChecksumHigh )
 
 JETUNITTEST( DBMScanStateHeader, ConstructorLoadsLogtimeChecksumStart )
 {
-    const LOGTIME logtime = { 1, 2, 4, 5, 6, 108, fTrue, 0 };
+    const LOGTIME logtime = { 1, 2, 4, 5, 6, 108, fTrue, 0 }; // 04:02.01 June 5th, 2008
     const __int64 filetime = ConvertLogTimeToFileTime( &logtime );
     FMP * const pfmp = FMP::PfmpCreateMockFMP();
     pfmp->PdbfilehdrUpdateable()->logtimeDbscanStart = logtime;
@@ -4878,7 +5653,7 @@ JETUNITTEST( DBMScanStateHeader, ConstructorLoadsLogtimeChecksumStart )
 
 JETUNITTEST( DBMScanStateHeader, ConstructorLoadsLogtimeChecksumPrev )
 {
-    const LOGTIME logtime = { 0, 4, 11, 13, 3, 96, fTrue, 0 };
+    const LOGTIME logtime = { 0, 4, 11, 13, 3, 96, fTrue, 0 }; // 11:04.00 March 13th, 1996
     const __int64 filetime = ConvertLogTimeToFileTime( &logtime );
     FMP * const pfmp = FMP::PfmpCreateMockFMP();
     pfmp->PdbfilehdrUpdateable()->logtimeDbscanPrev = logtime;
@@ -4941,8 +5716,11 @@ JETUNITTEST( DBMScanStateHeader,FinishedUpdatesHeader )
     FMP::FreeMockFMP( pfmp );
 }
 
-#endif
+#endif // ENABLE_JET_UNIT_TEST
 
+//  ================================================================
+//  MSysDatabaseScanRecord tests
+//  ================================================================
 
 void SetMSysDatabaseScanRecord( MSysDatabaseScanRecord * precord )
 {
@@ -5052,6 +5830,9 @@ JETUNITTEST( MSysDatabaseScanRecord, LoadAndSave )
 
 #ifdef ENABLE_JET_UNIT_TEST
 
+//  ================================================================
+//  DBMScanStateMSysDatabaseScan tests
+//  ================================================================
 
 class TestDBMScanStateMSysDatabaseScan : public DBMScanStateMSysDatabaseScan
 {
@@ -5195,6 +5976,7 @@ JETUNITTEST( DBMScanStateMSysDatabaseScan, ResumeIncrementsInvocations )
     CHECK( 2 == state.Record().p_cInvocationsTotal );
 }
 
+// FinishedPass() should clear the current pass state
 JETUNITTEST( DBMScanStateMSysDatabaseScan, FinishedClearsState )
 {
     TestDBMScanStateMSysDatabaseScan state( new MemoryDataStore() );
@@ -5209,6 +5991,7 @@ JETUNITTEST( DBMScanStateMSysDatabaseScan, FinishedClearsState )
     CHECK( 0 == state.Record().p_cInvocationsPass );
 }
 
+// FinishedPass() should not clear global counters
 JETUNITTEST( DBMScanStateMSysDatabaseScan, FinishedSavesTotalCounters )
 {
     TestDBMScanStateMSysDatabaseScan state( new MemoryDataStore() );
@@ -5222,6 +6005,7 @@ JETUNITTEST( DBMScanStateMSysDatabaseScan, FinishedSavesTotalCounters )
     CHECK( 2 == state.Record().p_cInvocationsTotal );
 }
 
+// FinishedPass() should set the previous pass counters
 JETUNITTEST( DBMScanStateMSysDatabaseScan, FinishedSavesPrevPassCounters )
 {
     const CPG cpg = 123;
@@ -5240,8 +6024,10 @@ JETUNITTEST( DBMScanStateMSysDatabaseScan, FinishedSavesPrevPassCounters )
     CHECK( state.FtPrevPassCompletionTime() <= ftAfter );
 }
 
+// FinishedPass() should save the state
 JETUNITTEST( DBMScanStateMSysDatabaseScan, FinishedSavesState )
 {
+    // this store is deleted by the destructor of the state
     IDataStore * pstore = new MemoryDataStore();
     TestDBMScanStateMSysDatabaseScan state( pstore );
     state.StartedPass();
@@ -5254,6 +6040,7 @@ JETUNITTEST( DBMScanStateMSysDatabaseScan, FinishedSavesState )
     state.FinishedPass();
     const __int64 ftAfter = UtilGetCurrentFileTime();
 
+    // force a reload
     SetMSysDatabaseScanRecord( &state.Record() );
     state.Record().Serializer().ErrLoadBindings( pstore );
 
@@ -5267,8 +6054,10 @@ JETUNITTEST( DBMScanStateMSysDatabaseScan, FinishedSavesState )
     CHECK( 1 == state.Record().p_cInvocationsTotal );
 }
 
+// SuspendedPass() should save the state
 JETUNITTEST( DBMScanStateMSysDatabaseScan, SuspendedSavesState )
 {
+    // this store is deleted by the destructor of the state
     IDataStore * pstore = new MemoryDataStore();
     TestDBMScanStateMSysDatabaseScan state( pstore );
     state.StartedPass();
@@ -5281,6 +6070,7 @@ JETUNITTEST( DBMScanStateMSysDatabaseScan, SuspendedSavesState )
     state.SuspendedPass();
     const __int64 ftAfter = UtilGetCurrentFileTime();
 
+    // force a reload
     SetMSysDatabaseScanRecord( &state.Record() );
     state.Record().Serializer().ErrLoadBindings( pstore );
     
@@ -5294,14 +6084,17 @@ JETUNITTEST( DBMScanStateMSysDatabaseScan, SuspendedSavesState )
     CHECK( 1 == state.Record().p_cInvocationsTotal );
 }
 
+// Reading a lot of pages should save the state
 JETUNITTEST( DBMScanStateMSysDatabaseScan, ReadingPagesSavesState )
 {
+    // this store is deleted by the destructor of the state
     IDataStore * pstore = new MemoryDataStore();
     TestDBMScanStateMSysDatabaseScan state( pstore );
     state.StartedPass();
     const __int64 ft = state.FtCurrPassStartTime();
     state.ReadPages( 1, 10000 );
 
+    // force a reload
     SetMSysDatabaseScanRecord( &state.Record() );
     state.Record().Serializer().ErrLoadBindings( pstore );
 
@@ -5312,14 +6105,16 @@ JETUNITTEST( DBMScanStateMSysDatabaseScan, ReadingPagesSavesState )
     CHECK( 1 == state.Record().p_cInvocationsTotal );
 }
 
+// Page level stats
 JETUNITTEST( DBMScanStateMSysDatabaseScan, CalculateAverageFreeBytes )
     {
+    // this store is deleted by the destructor of the state
     IDataStore * pstore = new MemoryDataStore();
     TestDBMScanStateMSysDatabaseScan state( pstore );
-    state.InitStats( 100,
-                     200,
-                     1000,
-                     500 );
+    state.InitStats( 100,  // cpgLV
+                     200,  // cpgRec
+                     1000, // cbFreeLV
+                     500 );// cbFreeRec
     DBMScanStats dbmScanStats = state.DbmScanStatsCurrPass();
 
     CHECK( 1000 / 100 == dbmScanStats.m_cbAveFreeSpaceLVPages );
@@ -5330,12 +6125,13 @@ JETUNITTEST( DBMScanStateMSysDatabaseScan, CalculateAverageFreeBytes )
 
 JETUNITTEST( DBMScanStateMSysDatabaseScan, SinglePageCalculation )
     {
+    // this store is deleted by the destructor of the state
     IDataStore * pstore = new MemoryDataStore();
     TestDBMScanStateMSysDatabaseScan state( pstore );
-    state.InitStats( 1,
-        1,
-        500,
-        700 );
+    state.InitStats( 1,  // cpgLV
+        1,  // cpgRec
+        500, // cbFreeLV
+        700 );// cbFreeRec
     DBMScanStats dbmScanStats = state.DbmScanStatsCurrPass();
 
     CHECK( 500 / 1 == dbmScanStats.m_cbAveFreeSpaceLVPages );
@@ -5344,13 +6140,18 @@ JETUNITTEST( DBMScanStateMSysDatabaseScan, SinglePageCalculation )
     CHECK( 1 == dbmScanStats.m_cpgRecPagesScanned );
     }
 
+//  ================================================================
+//  DBMScanConfig tests
+//  ================================================================
 
+// This config scans until shutdown
 JETUNITTEST( DBMScanConfig, NumberOfScansIsIntMax )
 {
     DBMScanConfig config( NULL, NULL );
     CHECK( INT_MAX == config.CScansMax() );
 }
 
+// This config scans until shutdown
 JETUNITTEST( DBMScanConfig, RuntimeIsIntMax )
 {
     DBMScanConfig config( NULL, NULL );
@@ -5358,6 +6159,9 @@ JETUNITTEST( DBMScanConfig, RuntimeIsIntMax )
 }
 
 
+//  ================================================================
+//  DBMSingleScanConfig tests
+//  ================================================================
 
 JETUNITTEST( DBMSingleScanConfig, ConstructorSetsMembers )
 {
@@ -5369,12 +6173,14 @@ JETUNITTEST( DBMSingleScanConfig, ConstructorSetsMembers )
     CHECK( dwThrottleSleep == config.DwThrottleSleep() );
 }
 
+// only one scan
 JETUNITTEST( DBMSingleScanConfig, NumberOfScansIsOne )
 {
     DBMSingleScanConfig config( NULL, NULL, 0, 0 );
     CHECK( 1 == config.CScansMax() );
 }
 
+// start a new scan
 JETUNITTEST( DBMSingleScanConfig, MinScanTimeIsZero )
 {
     DBMSingleScanConfig config( NULL, NULL, 0, 0 );
@@ -5382,6 +6188,9 @@ JETUNITTEST( DBMSingleScanConfig, MinScanTimeIsZero )
 }
 
 
+//  ================================================================
+//  TestDBMScanConfig
+//  ================================================================
 
 class TestDBMScanConfig : public IDBMScanConfig
 {
@@ -5402,6 +6211,7 @@ public:
     void SetCSecMax( const INT csec ) { m_csecMax = csec; }
     void SetCSecMinScanTime( const ULONG csec ) { m_csecMinScanTime = csec; }
 
+    // DBMScanReader may cap this value at IDBMScanReader::cpgPrereadMax.
     void SetCpgBatch( const CPG cpg ) { m_cpgBatch = cpg; }
     void SetDwThrottleSleep( const DWORD dw ) { m_dwThrottleSleep = dw; }
     void SetFSerializeScan( const bool f ) { m_fSerializeScan = f; }
@@ -5430,13 +6240,17 @@ JETUNITTEST( TestDBMScanConfig, ConstructorSetsMembers )
 {
     TestDBMScanConfig config;
 
+    // by default the scan should run forever
     CHECK( INT_MAX == config.CScansMax() );
     CHECK( INT_MAX == config.CSecMax() );
 
+    // by default the scan should run as quickly as possible
     CHECK( 0 == config.CSecMinScanTime() );
     CHECK( 0 == config.DwThrottleSleep() );
     CHECK( false == config.FSerializeScan() );
 
+    // and the scan should read some pages, otherwise no 
+    // progress will be made
     CHECK( config.CpgBatch() > 0 );
 }
 
@@ -5489,7 +6303,11 @@ JETUNITTEST( TestDBMScanConfig, SetFSerializeScan )
 }
 
     
+//  ================================================================
+//  DBMScanObserver tests
+//  ================================================================
 
+// test class allowing sensing
 class TestDBMScanObserver : public DBMScanObserver
 {
 public:
@@ -5504,6 +6322,7 @@ public:
     CPG  CpgRead() const { return m_cpgRead; }
     PGNO PgnoBadChecksum() const { return m_pgnoBadChecksum; }
 
+    // waits for FinishedPass_ to be called
     void WaitForFinishedPass() { m_asigFinishedPass.Wait(); }
     
 protected:
@@ -5549,6 +6368,7 @@ void TestDBMScanObserver::FinishedPass_( const IDBMScanState * const )
     m_asigFinishedPass.Set();
 }
 
+// test that all the sensing variables are false
 JETUNITTEST( DBMScanObserver, SensingVariablesAreFalseAfterConstruction )
 {
     TestDBMScanObserver observer;
@@ -5562,6 +6382,7 @@ JETUNITTEST( DBMScanObserver, SensingVariablesAreFalseAfterConstruction )
     CHECK( pgnoNull == observer.PgnoBadChecksum() );
 }
 
+// test that calling StartedPass calls the inherited StartedPass_ method
 JETUNITTEST( DBMScanObserver, StartedPass )
 {
     TestDBMScanObserver observer;
@@ -5570,6 +6391,7 @@ JETUNITTEST( DBMScanObserver, StartedPass )
     CHECK( true == observer.FStartedPassCalled() );
 }
 
+// test that calling ResumedPass calls the inherited ResumedPass_ method
 JETUNITTEST( DBMScanObserver, ResumedPass )
 {
     TestDBMScanObserver observer;
@@ -5578,6 +6400,7 @@ JETUNITTEST( DBMScanObserver, ResumedPass )
     CHECK( true == observer.FResumedPassCalled() );
 }
 
+// test that calling FinishedPass calls the inherited FinishedPass_ method
 JETUNITTEST( DBMScanObserver, FinishedPass )
 {
     TestDBMScanObserver observer;
@@ -5587,6 +6410,7 @@ JETUNITTEST( DBMScanObserver, FinishedPass )
     CHECK( true == observer.FFinishedPassCalled() );
 }
 
+// test that calling SuspendedPass calls the inherited SuspendedPass_ method
 JETUNITTEST( DBMScanObserver, SuspendedPass )
 {
     TestDBMScanObserver observer;
@@ -5596,6 +6420,7 @@ JETUNITTEST( DBMScanObserver, SuspendedPass )
     CHECK( true == observer.FSuspendedPassCalled() );
 }
 
+// test that calling PrepareToTerm calls the inherited PrepareToTerm_ method
 JETUNITTEST( DBMScanObserver, PrepareToTerm )
 {
     TestDBMScanObserver observer;
@@ -5605,6 +6430,7 @@ JETUNITTEST( DBMScanObserver, PrepareToTerm )
     CHECK( true == observer.FPrepareToTermCalled() );
 }
 
+// test that calling ReadPages calls the inherited ReadPages_ method
 JETUNITTEST( DBMScanObserver, ReadPages )
 {
     TestDBMScanObserver observer;
@@ -5615,6 +6441,7 @@ JETUNITTEST( DBMScanObserver, ReadPages )
     CHECK( 1 == observer.CpgRead() );
 }
 
+// test that calling BadChecksum calls the inherited BadChecksum_ method
 JETUNITTEST( DBMScanObserver, BadChecksum )
 {
     TestDBMScanObserver observer;
@@ -5626,6 +6453,9 @@ JETUNITTEST( DBMScanObserver, BadChecksum )
 }
 
 
+//  ================================================================
+//  TestDBMScanState
+//  ================================================================
 
 class TestDBMScanState : public DBMSimpleScanState
 {
@@ -5690,7 +6520,11 @@ JETUNITTEST( TestDBMScanState, SetCpgScannedPrevPass )
 }
 
 
+//  ================================================================
+//  DBMScanObserverCallback tests
+//  ================================================================
 
+// namespace to enclose test methods
 namespace TestDBMScanObserverCallback {
     
     static bool fCallbackCalled;
@@ -5713,8 +6547,8 @@ namespace TestDBMScanObserverCallback {
         JET_DBID    dbid,
         JET_TABLEID tableid,
         JET_CBTYP   cbtyp,
-        void *      pvArg1,
-        void *      pvArg2,
+        void *      pvArg1, // pointer to # of seconds
+        void *      pvArg2, // pointer to # of pages
         void *      pvContext,
         JET_API_PTR ulUnused )
     {
@@ -5728,8 +6562,9 @@ namespace TestDBMScanObserverCallback {
         cpgCallback = *( ( CPG * )pvArg2 );
         return JET_errSuccess;
     }
-};
+}; // namespace TestDBMScanObserverCallback
 
+// test that Reset() resets all members
 JETUNITTEST( DBMScanObserverCallback, ResetSensingVariables )
 {
     TestDBMScanObserverCallback::fCallbackCalled = true;
@@ -5746,6 +6581,7 @@ JETUNITTEST( DBMScanObserverCallback, ResetSensingVariables )
     CHECK( 0 == TestDBMScanObserverCallback::cpgCallback );
 }
 
+// test that calling StartedPass doesn't invoke the callback
 JETUNITTEST( DBMScanObserverCallback, StartedPassDoesNotInvokeCallback )
 {
     TestDBMScanObserverCallback::Reset();
@@ -5756,6 +6592,7 @@ JETUNITTEST( DBMScanObserverCallback, StartedPassDoesNotInvokeCallback )
     CHECK( false == TestDBMScanObserverCallback::fCallbackCalled );
 }
 
+// test that calling FinishedPass invokes the callback
 JETUNITTEST( DBMScanObserverCallback, FinishedPassInvokesCallback )
 {
     TestDBMScanObserverCallback::Reset();
@@ -5767,6 +6604,7 @@ JETUNITTEST( DBMScanObserverCallback, FinishedPassInvokesCallback )
     CHECK( true == TestDBMScanObserverCallback::fCallbackCalled );
 }
 
+// test that calling SuspendPass doesn't invoke the callback
 JETUNITTEST( DBMScanObserverCallback, SuspendedPassDoesNotInvokeCallback )
 {
     TestDBMScanObserverCallback::Reset();
@@ -5778,6 +6616,7 @@ JETUNITTEST( DBMScanObserverCallback, SuspendedPassDoesNotInvokeCallback )
     CHECK( false == TestDBMScanObserverCallback::fCallbackCalled );
 }
 
+// test that calling PrepareToTerm doesn't invoke the callback
 JETUNITTEST( DBMScanObserverCallback, PrepareToTermDoesNotInvokeCallback )
 {
     TestDBMScanObserverCallback::Reset();
@@ -5789,6 +6628,7 @@ JETUNITTEST( DBMScanObserverCallback, PrepareToTermDoesNotInvokeCallback )
     CHECK( false == TestDBMScanObserverCallback::fCallbackCalled );
 }
 
+// test that the callback passes in the correct sesid
 JETUNITTEST( DBMScanObserverCallback, CallbackPassesSesid )
 {
     TestDBMScanObserverCallback::Reset();
@@ -5801,6 +6641,7 @@ JETUNITTEST( DBMScanObserverCallback, CallbackPassesSesid )
     CHECK( sesid == TestDBMScanObserverCallback::sesidCallback );
 }
 
+// test that the callback passes in the correct dbid
 JETUNITTEST( DBMScanObserverCallback, CallbackPassesDbid )
 {
     TestDBMScanObserverCallback::Reset();
@@ -5813,6 +6654,7 @@ JETUNITTEST( DBMScanObserverCallback, CallbackPassesDbid )
     CHECK( dbid == TestDBMScanObserverCallback::dbidCallback );
 }
 
+// test that the callback passes in the elapsed seconds
 JETUNITTEST( DBMScanObserverCallback, CallbackPassesElapsedSeconds )
 {
     TestDBMScanObserverCallback::Reset();
@@ -5832,6 +6674,7 @@ JETUNITTEST( DBMScanObserverCallback, CallbackPassesElapsedSeconds )
     CHECK( csec == TestDBMScanObserverCallback::csecCallback );
 }
 
+// test that the callback passes in the number of pages
 JETUNITTEST( DBMScanObserverCallback, CallbackPassesCpgScanned )
 {
     TestDBMScanObserverCallback::Reset();
@@ -5848,6 +6691,9 @@ JETUNITTEST( DBMScanObserverCallback, CallbackPassesCpgScanned )
 }
 
 
+//  ================================================================
+//  TestDBMScanReader
+//  ================================================================
 
 class TestDBMScanReader : public IDBMScanReader
 {
@@ -5869,12 +6715,14 @@ public:
     CPG CpgPrereadTotal() const { return m_cpgPrereadTotal; }
     CPG CpgDoneWithPrereadTotal() const { return m_cpgDoneTotal; }
     
+    // waits for the first call to ErrReadPage()
     void WaitForFirstPageRead() { m_msigReadPageCalled.Wait(); }
 
     BOOL FInError() { return m_fInError; }
 
 
 private:
+    // sensing variables
     PGNO    m_pgnoLastPreread;
     CPG     m_cpgLastPreread;
     PGNO    m_pgnoLastRead;
@@ -5883,6 +6731,7 @@ private:
     CPG     m_cpgPrereadTotal;
     CPG     m_cpgDoneTotal;
 
+    // controlling the number of pages and checksum errors
     const PGNO  m_pgnoLast;
     const PGNO  m_pgnoBadChecksum;
     
@@ -6124,7 +6973,11 @@ JETUNITTEST( TestDBMScanReader, PrereadTest )
 }
 
 
+//  ================================================================
+//  DBMScan tests
+//  ================================================================
 
+// test that starting a scan calls the observers
 JETUNITTEST( DBMScan, StartScanCallsObservers )
 {
     TestDBMScanReader * preader = new TestDBMScanReader();
@@ -6142,6 +6995,7 @@ JETUNITTEST( DBMScan, StartScanCallsObservers )
     CHECK( true == pobserver->FStartedPassCalled() );
 }
 
+// test that starting a scan updates the state
 JETUNITTEST( DBMScan, StartScanUpdatesState )
 {
     TestDBMScanReader * preader = new TestDBMScanReader();
@@ -6156,6 +7010,7 @@ JETUNITTEST( DBMScan, StartScanUpdatesState )
     CHECK( 0 != pstate->FtCurrPassStartTime() );
 }
 
+// test that a finished scan updates the state
 JETUNITTEST( DBMScan, FinishedScanUpdateState )
 {
     unique_ptr<TestDBMScanConfig> pconfig( new TestDBMScanConfig() );
@@ -6177,6 +7032,7 @@ JETUNITTEST( DBMScan, FinishedScanUpdateState )
 }
 
 
+// test that starting a scan twice returns an error
 JETUNITTEST( DBMScan, StartScanTwiceReturnsError )
 {
     unique_ptr<DBMScan> pscan( new DBMScan(
@@ -6188,6 +7044,7 @@ JETUNITTEST( DBMScan, StartScanTwiceReturnsError )
     CHECK( JET_errDatabaseAlreadyRunningMaintenance == pscan->ErrStartDBMScan() );
 }
     
+// test that stopping a scan calls the suspend method of the observers
 JETUNITTEST( DBMScan, StopScanCallsSuspend )
 {
     TestDBMScanReader * preader = new TestDBMScanReader();
@@ -6206,6 +7063,7 @@ JETUNITTEST( DBMScan, StopScanCallsSuspend )
     CHECK( true == pobserver->FPrepareToTermCalled() );
 }
 
+// test that suspending a scan updates CpgScannedCurrPass in the state
 JETUNITTEST( DBMScan, StopScanUpdatesPgnoLastRead )
 {
     TestDBMScanReader * preader = new TestDBMScanReader();
@@ -6221,6 +7079,7 @@ JETUNITTEST( DBMScan, StopScanUpdatesPgnoLastRead )
     CHECK( pstate->CpgScannedCurrPass() == ( CPG )preader->PgnoLastRead() );
 }
 
+// test that scan reads only pages known to exist in the file
 JETUNITTEST( DBMScan, ScanDoesNotGoBeyondEof )
 {
     const PGNO pgnoLast = 123;
@@ -6242,6 +7101,7 @@ JETUNITTEST( DBMScan, ScanDoesNotGoBeyondEof )
     CHECK( pgnoLast == ( CPG )preader->PgnoLastRead() );
 }
 
+// test that a scan will run repeatedly
 JETUNITTEST( DBMScan, ScanRepeats )
 {
     unique_ptr<DBMScan> pscan( new DBMScan(
@@ -6253,12 +7113,14 @@ JETUNITTEST( DBMScan, ScanRepeats )
 
     CHECK( JET_errSuccess == pscan->ErrStartDBMScan() );
 
+    // if the scan doesn't repeat this will hang
     for( INT i = 0; i < 3; ++i )
     {
         pobserver->WaitForFinishedPass();
     }
 }
 
+// test that a bad checksum is reported to the observers
 JETUNITTEST( DBMScan, BadChecksumCallsObservers )
 {
     PGNO pgnoBadChecksum = 70;
@@ -6276,6 +7138,7 @@ JETUNITTEST( DBMScan, BadChecksumCallsObservers )
     CHECK( pgnoBadChecksum == pobserver->PgnoBadChecksum() );
 }
 
+// test that a scan can be started after it stops
 JETUNITTEST( DBMScan, StartAfterStop )
 {
     unique_ptr<DBMScan> pscan( new DBMScan(
@@ -6289,6 +7152,8 @@ JETUNITTEST( DBMScan, StartAfterStop )
     CHECK( JET_errSuccess == pscan->ErrStartDBMScan() );
 }
 
+// when starting a new scan, the previous completion
+// time should be respected
 JETUNITTEST( DBMScan, StartWaitsForScanInterval )
 {
     unique_ptr<TestDBMScanConfig> pconfig( new TestDBMScanConfig() );
@@ -6305,6 +7170,8 @@ JETUNITTEST( DBMScan, StartWaitsForScanInterval )
     TestDBMScanObserver * pobserver = new TestDBMScanObserver();
     pscan->AddObserver( pobserver );
 
+    // start a scan and stop before the scan interval passes.
+    // the scan shouldn't have started
     CHECK( JET_errSuccess == pscan->ErrStartDBMScan() );
     UtilSleep( 2 );
     pscan->StopDBMScan();
@@ -6313,6 +7180,7 @@ JETUNITTEST( DBMScan, StartWaitsForScanInterval )
     CHECK( false == pobserver->FStartedPassCalled() );
 }
 
+// test the max scan count is respected
 JETUNITTEST( DBMScan, MaxScans )
 {
     const INT cscans = 2;
@@ -6329,18 +7197,22 @@ JETUNITTEST( DBMScan, MaxScans )
     
     CHECK( JET_errSuccess == pscan->ErrStartDBMScan() );
 
+    // let the scans complete
     for( INT i = 0; i < cscans; ++i )
     {
         pobserver->WaitForFinishedPass();
     }
 
+    // wait a short while to make sure a new scan doesn't start
     UtilSleep( 2 );
 
+    // if a new scan started then stopping it will suspend the pass 
     pscan->StopDBMScan();
     CHECK( false == pobserver->FSuspendedPassCalled() );
     CHECK( true == pobserver->FPrepareToTermCalled() );
 }
 
+// test resuming a scan
 JETUNITTEST( DBMScan, ResumeScanCallsObserver )
 {
     unique_ptr<TestDBMScanConfig> pconfig( new TestDBMScanConfig() );
@@ -6368,8 +7240,10 @@ JETUNITTEST( DBMScan, ResumeScanCallsObserver )
     CHECK( false == pobserver->FPrepareToTermCalled() );
 }
 
+// make sure that the CpgBatch member of the config is used
 JETUNITTEST( DBMScan, CpgBatchIsUsed )
 {
+    // cpgPrereadMax is limited to 16 on ese.dll/x86.
     const CPG cpgBatch = 15;
     unique_ptr<TestDBMScanConfig> pconfig( new TestDBMScanConfig() );
     pconfig->SetCpgBatch( cpgBatch );
@@ -6394,6 +7268,7 @@ JETUNITTEST( DBMScan, PrereadPagesAreReleased )
     unique_ptr<TestDBMScanConfig> pconfig( new TestDBMScanConfig() );
     pconfig->SetCScansMax( 1 );
 
+    // cpgPrereadMax is limited to 16 on ese.dll/x86.
     const CPG cpgBatch = 15;
     pconfig->SetCpgBatch( cpgBatch );
     pconfig->SetDwThrottleSleep( 1000 );
@@ -6409,9 +7284,11 @@ JETUNITTEST( DBMScan, PrereadPagesAreReleased )
     TestDBMScanObserver * pobserver = new TestDBMScanObserver();
     pscan->AddObserver( pobserver );
 
+    // wait for the pass to finish
 
     CHECK( JET_errSuccess == pscan->ErrStartDBMScan() );
 
+    // check that we pre-read a full batch (cpgBatch pages)
     CHECK( 0 == preader->CpgPrereadTotal() );
     while ( preader->CpgPrereadTotal() == 0 )
     {
@@ -6419,13 +7296,17 @@ JETUNITTEST( DBMScan, PrereadPagesAreReleased )
     }
     CHECK( cpgBatch == preader->CpgPrereadTotal() );
 
+    // wait for pass to finish
     pobserver->WaitForFinishedPass();
 
+    // check that we have actually read 'cpgTotal' unique pages 
     CHECK( cpgTotal == preader->CpgPrereadTotal() );
     CHECK( cpgTotal == preader->CpgReadTotal() );
 
+    // check that we called done with preread 'cpgTotal' times.
     CHECK( cpgTotal == preader->CpgDoneWithPrereadTotal() );
 
+    // check that we didn't hit any illegal uses of the TestDBMScanReader
     CHECK( fFalse == preader->FInError() );
     
 }
@@ -6440,6 +7321,7 @@ JETUNITTEST( CDBMScanFollower, TestOneCompletePass )
     FMP * const pfmp = FMP::PfmpCreateMockFMP();
     DBMScanStateHeader state( pfmp );
 
+    //  These 5 checks are assumed not just by this test, but excluded from subsequent tests for brevity
     CHECK( state.FtCurrPassStartTime() == 0 );
     CHECK( state.FtPrevPassCompletionTime() == 0 );
     CHECK( state.CpgScannedPrevPass() == 0 );
@@ -6451,6 +7333,7 @@ JETUNITTEST( CDBMScanFollower, TestOneCompletePass )
 
     CHECKCALLS( dbscanfollower.ErrRegisterFollower( pfmp, 1 ) );
 
+    // Check again that reading from the header left these counters still at 0
     CHECK( state.PgnoContinuousHighWatermark() == 0 );
     CHECK( state.CpgScannedCurrPass() == 0 );
 
@@ -6458,7 +7341,7 @@ JETUNITTEST( CDBMScanFollower, TestOneCompletePass )
     {
         dbscanfollower.CompletePage( pgno );
         CHECK( state.FtCurrPassStartTime() != 0 );
-        CHECK( pgno - pfmp->PdbfilehdrUpdateable()->le_pgnoDbscanHighestContinuous < 33  );
+        CHECK( pgno - pfmp->PdbfilehdrUpdateable()->le_pgnoDbscanHighestContinuous < 33 /* the DB hdr update frequencey */ );
     }
     dbscanfollower.DeRegisterFollower( pfmp, CDBMScanFollower::dbmdrrFinishedScan );
 
@@ -6492,13 +7375,14 @@ JETUNITTEST( CDBMScanFollower, TestTwoPhaseCompletePass )
 
     DoHalfPassAndDisable( pfmp, 75 );
 
-    DBMScanStateHeader state( pfmp );
+    DBMScanStateHeader state( pfmp );   //  re-establish from fresh memory state
     CDBMScanFollower dbscanfollower;
     dbscanfollower.TestSetup( &state );
 
     CHECK( state.FtPrevPassCompletionTime() == 0 );
     CHECK( state.PgnoContinuousHighWatermark() == 75 );
 
+    //  Pick up where we left off ...
     CHECK( JET_errSuccess == dbscanfollower.ErrRegisterFollower( pfmp, 76 ) );
     for( ULONG pgno = 76; pgno <= 150; pgno++ )
     {
@@ -6506,6 +7390,7 @@ JETUNITTEST( CDBMScanFollower, TestTwoPhaseCompletePass )
     }
     dbscanfollower.DeRegisterFollower( pfmp, CDBMScanFollower::dbmdrrFinishedScan );
 
+    //  Check we finished.
     CHECK( state.FtPrevPassCompletionTime() != 0 );
     CHECK( state.PgnoContinuousHighWatermark() == 0 );
     CHECK( state.CpgScannedPrevPass() == 150 );
@@ -6519,13 +7404,14 @@ JETUNITTEST( CDBMScanFollower, TestTwoPhaseBackStartCompletePass )
 
     DoHalfPassAndDisable( pfmp, 75 );
 
-    DBMScanStateHeader state( pfmp );
+    DBMScanStateHeader state( pfmp );   //  re-establish from fresh memory state
     CDBMScanFollower dbscanfollower;
     dbscanfollower.TestSetup( &state );
 
     CHECK( state.FtPrevPassCompletionTime() == 0 );
     CHECK( state.PgnoContinuousHighWatermark() == 75 );
 
+    //  Pick up BACK BEFORE we left off (such as if we crash and re-start recovery from checkpoint) ...
     CHECK( JET_errSuccess == dbscanfollower.ErrRegisterFollower( pfmp, 70 ) );
     for( ULONG pgno = 70; pgno <= 150; pgno++ )
     {
@@ -6535,6 +7421,7 @@ JETUNITTEST( CDBMScanFollower, TestTwoPhaseBackStartCompletePass )
     CHECK( state.PgnoContinuousHighWatermark() == 150 );
     dbscanfollower.DeRegisterFollower( pfmp, CDBMScanFollower::dbmdrrFinishedScan );
 
+    //  Check we finished.
     CHECK( state.FtPrevPassCompletionTime() != 0 );
     CHECK( state.PgnoContinuousHighWatermark() == 0 );
     CHECK( state.CpgScannedPrevPass() == 150 );
@@ -6552,33 +7439,42 @@ JETUNITTEST( CDBMScanFollower, TestTwoPhaseBrokenThenCompletePass )
 
     DoHalfPassAndDisable( pfmp, 75 );
 
-    DBMScanStateHeader state( pfmp );
+    DBMScanStateHeader state( pfmp );   //  re-establish from fresh memory state
     CDBMScanFollower dbscanfollower;
     dbscanfollower.TestSetup( &state );
 
     CHECK( state.FtPrevPassCompletionTime() == 0 );
     CHECK( state.PgnoContinuousHighWatermark() == 75 );
 
+    //  Pick up after skipping ... bad mojo.
+    //  Note these numbers aren't magic, they're picked to be > m_cpgUpdateInterval / 32 pages apart
     CHECK( JET_errSuccess == dbscanfollower.ErrRegisterFollower( pfmp, 115 ) );
     for( ULONG pgno = 115; pgno <= 150; pgno++ )
     {
         dbscanfollower.CompletePage( pgno );
     }
+    //  Check we made no progress on high watermark, b/c it wasn't continuous
     CHECK( state.PgnoContinuousHighWatermark() == 75 );
 
+    //  Check we made progress on CpgScannedCurrPass, because it just tracks reads
     CHECK( state.CpgScannedCurrPass() == 111 );
     dbscanfollower.DeRegisterFollower( pfmp, CDBMScanFollower::dbmdrrFinishedScan );
 
+    //  Check we DID NOT finish.
     CHECK( state.FtPrevPassCompletionTime() == 0 );
  
+    //
+    //      Next, do complete passs
+    //
 
-    DBMScanStateHeader state2ndPass( pfmp );
+    DBMScanStateHeader state2ndPass( pfmp );    //  re-establish from fresh memory state
     CDBMScanFollower dbscanfollower2ndPass;
     dbscanfollower2ndPass.TestSetup( &state2ndPass );
 
     CHECK( state2ndPass.FtPrevPassCompletionTime() == 0 );
     CHECK( state2ndPass.PgnoContinuousHighWatermark() == 75 );
 
+    //  Restart all the way from pgno 1.
     CHECK( JET_errSuccess == dbscanfollower2ndPass.ErrRegisterFollower( pfmp, 1 ) );
     for( ULONG pgno = 1; pgno <= 150; pgno++ )
     {
@@ -6588,14 +7484,21 @@ JETUNITTEST( CDBMScanFollower, TestTwoPhaseBrokenThenCompletePass )
     CHECK( state2ndPass.PgnoContinuousHighWatermark() == 150 );
     dbscanfollower2ndPass.DeRegisterFollower( pfmp, CDBMScanFollower::dbmdrrFinishedScan );
 
+    //  Check we DID finish after all.
     CHECK( state2ndPass.FtPrevPassCompletionTime() != 0 );
     CHECK( state2ndPass.PgnoContinuousHighWatermark() == 0 );
     CHECK( state2ndPass.CpgScannedPrevPass() == 150 );
 
+    //
+    //      Next, do broken pass again to get the prev time in the finished broken event.
+    //
 
     DBMScanStateHeader state3rdPass( pfmp );
     CDBMScanFollower dbscanfollower3rdPass;
     dbscanfollower3rdPass.TestSetup( &state3rdPass );
+    // We would like to use this next line, but the storage to the disk HDR, and back again is
+    // lossy for the FILETIME
+    //const __int64 ftPrev = state2ndPass.FtPrevPassCompletionTime();
     const __int64 ftPrev = state3rdPass.FtPrevPassCompletionTime();
 
     CallS( dbscanfollower3rdPass.ErrRegisterFollower( pfmp, 1 ) );
@@ -6606,7 +7509,7 @@ JETUNITTEST( CDBMScanFollower, TestTwoPhaseBrokenThenCompletePass )
     CHECK( state3rdPass.PgnoContinuousHighWatermark() == 75 );
     dbscanfollower3rdPass.DeRegisterFollower( pfmp, CDBMScanFollower::dbmdrrDisabledScan );
 
-    DBMScanStateHeader state4thPass( pfmp );
+    DBMScanStateHeader state4thPass( pfmp );    //  re-establish from fresh memory state
     CDBMScanFollower dbscanfollower4thPass;
     dbscanfollower4thPass.TestSetup( &state4thPass );
     CHECK( JET_errSuccess == dbscanfollower4thPass.ErrRegisterFollower( pfmp, 115 ) );
@@ -6615,6 +7518,7 @@ JETUNITTEST( CDBMScanFollower, TestTwoPhaseBrokenThenCompletePass )
     {
         dbscanfollower4thPass.CompletePage( pgno );
     }
+    //  Check we made no progress, b/c it wasn't continuous
     CHECK( state4thPass.PgnoContinuousHighWatermark() == 75 );
     dbscanfollower4thPass.DeRegisterFollower( pfmp, CDBMScanFollower::dbmdrrFinishedScan );
     CHECK( ftPrev == state4thPass.FtPrevPassCompletionTime() );
@@ -6652,21 +7556,27 @@ JETUNITTEST( CDBMScanFollower, TestCompletedTimeStaysBackOnBadPasses )
 
     DoFullCompletePass( pfmp, 150 );
 
-    DBMScanStateHeader stateCheckOne( pfmp );
+    DBMScanStateHeader stateCheckOne( pfmp );   //  re-establish from fresh memory state
     const __int64 ftPrevComplete = stateCheckOne.FtPrevPassCompletionTime();
     CHECK( ftPrevComplete != 0 );
+    // We can't check this, b/c this isn't saved to the header!  So it's only in memory 
+    // in the DBMScanStateHeader var we used IN DoFullCompletePass() above.  Well we
+    // could scan the freed stack above us for a 150 I suppose ... (I'm teasing ;-)
+    //CHECK( stateCheckOne.CpgScannedPrevPass() == 150 );
 
+    //  Now test that FT moves forward w/ 2 sec.
 
     UtilSleep( cmsecTimeSep );
 
     DoFullCompletePass( pfmp, 150 );
-    DBMScanStateHeader stateCheckTwo( pfmp );
+    DBMScanStateHeader stateCheckTwo( pfmp );   //  re-establish from fresh memory state
     const __int64 ftPrevCompleteTwo = stateCheckTwo.FtPrevPassCompletionTime();
 
     CHECK( ftPrevComplete < ftPrevCompleteTwo );
     
     UtilSleep( cmsecTimeSep );
 
+    //  Do a couple incomplete passes.
     
     DBMScanStateHeader state( pfmp );
     CDBMScanFollower dbscanfollower;
@@ -6680,7 +7590,7 @@ JETUNITTEST( CDBMScanFollower, TestCompletedTimeStaysBackOnBadPasses )
     CHECK( state.PgnoContinuousHighWatermark() == 85 );
     dbscanfollower.DeRegisterFollower( pfmp, CDBMScanFollower::dbmdrrDisabledScan );
 
-    DBMScanStateHeader state4thPass( pfmp );
+    DBMScanStateHeader state4thPass( pfmp );    //  re-establish from fresh memory state
     CDBMScanFollower dbscanfollower4thPass;
     dbscanfollower4thPass.TestSetup( &state4thPass );
     CHECK( JET_errSuccess == dbscanfollower4thPass.ErrRegisterFollower( pfmp, 1 ) );
@@ -6689,14 +7599,17 @@ JETUNITTEST( CDBMScanFollower, TestCompletedTimeStaysBackOnBadPasses )
     {
         dbscanfollower4thPass.CompletePage( pgno );
     }
+    //  Check we made no progress, b/c it wasn't continuous
     CHECK( state4thPass.PgnoContinuousHighWatermark() == 85 );
     dbscanfollower4thPass.DeRegisterFollower( pfmp, CDBMScanFollower::dbmdrrDisabledScan );
 
+    //  Check pass time did not improve.
     DBMScanStateHeader stateInterimNoTimeCheck( pfmp );
     CHECK( stateInterimNoTimeCheck.FtPrevPassCompletionTime() == ftPrevCompleteTwo );
 
+    //  Do a broken/intrupted pass
 
-    DBMScanStateHeader state5thPass( pfmp );
+    DBMScanStateHeader state5thPass( pfmp );    //  re-establish from fresh memory state
     CDBMScanFollower dbscanfollower5thPass;
     dbscanfollower5thPass.TestSetup( &state5thPass );
     CHECK( JET_errSuccess == dbscanfollower5thPass.ErrRegisterFollower( pfmp, 1 ) );
@@ -6704,9 +7617,10 @@ JETUNITTEST( CDBMScanFollower, TestCompletedTimeStaysBackOnBadPasses )
     {
         dbscanfollower5thPass.CompletePage( pgno );
     }
+    //  Check we made no progress, b/c it wasn't continuous
     CHECK( state5thPass.PgnoContinuousHighWatermark() == 85 );
     dbscanfollower5thPass.DeRegisterFollower( pfmp, CDBMScanFollower::dbmdrrDisabledScan );
-    DBMScanStateHeader state6thPass( pfmp );
+    DBMScanStateHeader state6thPass( pfmp );    //  re-establish from fresh memory state
     CDBMScanFollower dbscanfollower6thPass;
     dbscanfollower6thPass.TestSetup( &state6thPass );
     CHECK( JET_errSuccess == dbscanfollower6thPass.ErrRegisterFollower( pfmp, 110 ) );
@@ -6717,6 +7631,7 @@ JETUNITTEST( CDBMScanFollower, TestCompletedTimeStaysBackOnBadPasses )
     dbscanfollower6thPass.DeRegisterFollower( pfmp, CDBMScanFollower::dbmdrrDisabledScan );
     CHECK( state6thPass.PgnoContinuousHighWatermark() == 85 );
 
+    //  Check pass time did not improve AGAIN.
     DBMScanStateHeader stateFinalNoTimeCheck( pfmp );
     CHECK( stateFinalNoTimeCheck.FtPrevPassCompletionTime() == ftPrevCompleteTwo );
 
@@ -6739,10 +7654,11 @@ JETUNITTEST( CDBMScanFollower, TestScanCompletesBasedOnHighestContigCompleted )
 
     DoHalfPassAndDisable( pfmp, 100 );
 
-    DBMScanStateHeader state( pfmp );
+    DBMScanStateHeader state( pfmp );   //  re-establish from fresh memory state
     CHECK( state.FtPrevPassCompletionTime() == 0 );
     CHECK( state.PgnoContinuousHighWatermark() == 100 );
 
+    // Now do a shorter pass, then skip ahead some
     DoHalfPassAndDisable( pfmp, 75 );
 
     DBMScanStateHeader state2ndPass( pfmp );
@@ -6752,6 +7668,8 @@ JETUNITTEST( CDBMScanFollower, TestScanCompletesBasedOnHighestContigCompleted )
     CHECK( state2ndPass.FtPrevPassCompletionTime() == 0 );
     CHECK( state2ndPass.PgnoContinuousHighWatermark() == 100 );
 
+    // Now "skip" to a number below the highest contig completed
+    // Scan should still resume
     dbscanfollower2ndPass.ErrRegisterFollower( pfmp, 95 );
     CHECK( state2ndPass.PgnoContinuousHighWatermark() == 100 );
     for ( ULONG pgno = 95; pgno <= 150; pgno++ )
@@ -6759,8 +7677,10 @@ JETUNITTEST( CDBMScanFollower, TestScanCompletesBasedOnHighestContigCompleted )
         dbscanfollower2ndPass.CompletePage( pgno );
     }
 
+    // Check we made progress, because of the continuous scan
     CHECK( state2ndPass.PgnoContinuousHighWatermark() == 150 );
 
+    // Check we did finish the pass
     dbscanfollower2ndPass.DeRegisterFollower( pfmp, CDBMScanFollower::dbmdrrFinishedScan );
     CHECK( state2ndPass.FtPrevPassCompletionTime() != 0 );
     CHECK( state2ndPass.PgnoContinuousHighWatermark() == 0 );
@@ -6784,6 +7704,7 @@ JETUNITTEST( CDBMScanFollower, TestLateScanEventStartsInMiddle )
 
     CHECKCALLS( dbscanfollower.ErrRegisterFollower( pfmp, 25 ) );
 
+    // Check again that reading from the header left these counters still at 0
     CHECK( state.PgnoContinuousHighWatermark() == 0 );
     CHECK( state.CpgScannedCurrPass() == 0 );
 
@@ -6791,6 +7712,7 @@ JETUNITTEST( CDBMScanFollower, TestLateScanEventStartsInMiddle )
 
     dbscanfollower.DeRegisterFollower( pfmp, CDBMScanFollower::dbmdrrStoppedScan );
 
+    // No valid scan was started, check that this is true
     CHECK( state.FtPrevPassCompletionTime() == 0 );
     CHECK( state.PgnoContinuousHighWatermark() == 0 );
     CHECK( state.CpgScannedCurrPass() == 1 );
@@ -6798,5 +7720,5 @@ JETUNITTEST( CDBMScanFollower, TestLateScanEventStartsInMiddle )
     FMP::FreeMockFMP( pfmp );
 }
 
-#endif
+#endif // ENABLE_JET_UNIT_TEST
 

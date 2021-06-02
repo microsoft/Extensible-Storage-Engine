@@ -3,7 +3,9 @@
 
 #include "collectionunittest.hxx"
 
+//  ================================================================
 class ArrayTest : public UNITTEST
+//  ================================================================
 {
     private:
         static ArrayTest s_instance;
@@ -52,12 +54,14 @@ bool FTestArraySortAndSearch( CArray<INT>& array, const INT* const rgiUnsorted, 
     TestCheck( CArray<INT>::ERR::errSuccess == array.ErrSetSize( 0 ) );
     TestCheck( 0 == array.Size() );
 
+    //  searching on empty array
 
     TestCheck( CArray<INT>::iEntryNotFound == array.SearchLinear( iMustNotBeFound, CmpFunction ) );
     TestCheck( CArray<INT>::iEntryNotFound == array.SearchBinary( iMustNotBeFound, CmpFunction ) );
     TestCheck( CArray<INT>::iEntryNotFound == array.SearchLinear( &iMustNotBeFound, CmpFunction ) );
     TestCheck( CArray<INT>::iEntryNotFound == array.SearchBinary( &iMustNotBeFound, CmpFunction ) );
 
+    //  inserting unsorted objects
 
 
 
@@ -70,6 +74,7 @@ bool FTestArraySortAndSearch( CArray<INT>& array, const INT* const rgiUnsorted, 
         TestCheck( CArray<INT>::iEntryNotFound == array.SearchLinear( iMustNotBeFound, CmpFunction ) );
     }
 
+    //  make sure we can find all the objects by linear search
 
     for ( size_t i = 0; i < ci; i++ )
     {
@@ -81,12 +86,14 @@ bool FTestArraySortAndSearch( CArray<INT>& array, const INT* const rgiUnsorted, 
     }
     TestCheck( ci == array.Size() );
 
+    //  sort the array
 
     array.Sort( CmpFunction );
     TestCheck( ci == array.Size() );
     TestCheck( CArray<INT>::iEntryNotFound == array.SearchLinear( iMustNotBeFound, CmpFunction ) );
     TestCheck( CArray<INT>::iEntryNotFound == array.SearchBinary( iMustNotBeFound, CmpFunction ) );
 
+    //  make sure elements are properly sorted
 
     for ( size_t i = 0; i < ci; i++ )
     {
@@ -97,12 +104,14 @@ bool FTestArraySortAndSearch( CArray<INT>& array, const INT* const rgiUnsorted, 
     TestCheck( CArray<INT>::iEntryNotFound == array.SearchLinear( iMustNotBeFound, CmpFunction ) );
     TestCheck( CArray<INT>::iEntryNotFound == array.SearchBinary( iMustNotBeFound, CmpFunction ) );
 
+    //  sort the array and remove duplicates
 
     array.SortAndRemoveDuplicates( CmpFunction );
     TestCheck( ciNoDupes == array.Size() );
     TestCheck( CArray<INT>::iEntryNotFound == array.SearchLinear( iMustNotBeFound, CmpFunction ) );
     TestCheck( CArray<INT>::iEntryNotFound == array.SearchBinary( iMustNotBeFound, CmpFunction ) );
 
+    //  make sure elements are properly sorted with no duplicates
 
     for ( size_t i = 0; i < ciNoDupes; i++ )
     {
@@ -113,6 +122,7 @@ bool FTestArraySortAndSearch( CArray<INT>& array, const INT* const rgiUnsorted, 
     TestCheck( CArray<INT>::iEntryNotFound == array.SearchLinear( iMustNotBeFound, CmpFunction ) );
     TestCheck( CArray<INT>::iEntryNotFound == array.SearchBinary( iMustNotBeFound, CmpFunction ) );
 
+    //  make sure we can find all the objects both by linear search and bsearch
 
     for ( size_t i = 0; i < ciNoDupes; i++ )
     {
@@ -142,40 +152,48 @@ HandleError:
     return true;
 }
 
+//  ================================================================
 ERR ArrayTest::ErrTest()
+//  ================================================================
 {
     ERR err = JET_errSuccess;
 
     wprintf( L"\tTesting array (CArray) ...\n");
 
-    BstfSetVerbosity(bvlPrintTests-1);
+    BstfSetVerbosity(bvlPrintTests-1);  // too many tests ...
 
+    //  create array
     CArray<INT> array( 2 );
     CArray<INT> arrayClone;
 
+    //  test ctor 
 
     TestCheck( 0 == array.Size() );
     TestCheck( 0 == array.Capacity() );
     TestCheck( NULL == array.PEntry( 0 ) );
 
+    //  setting a small capacity
 
     TestCheck( CArray<INT>::ERR::errSuccess == array.ErrSetCapacity( 1 ) );
     TestCheck( 0 == array.Size() );
     TestCheck( 1 == array.Capacity() );
     TestCheck( NULL == array.PEntry( 0 ) );
 
+    //  setting a bigger capacity
 
     TestCheck( CArray<INT>::ERR::errSuccess == array.ErrSetCapacity( 10 ) );
     TestCheck( 0 == array.Size() );
     TestCheck( 10 == array.Capacity() );
     TestCheck( NULL == array.PEntry( 0 ) );
 
+    //  setting the capacity too big
 
     TestCheck( CArray<INT>::ERR::errOutOfMemory == array.ErrSetCapacity( SIZE_MAX ) );
     TestCheck( 0 == array.Size() );
     TestCheck( 10 == array.Capacity() );
     TestCheck( NULL == array.PEntry( 0 ) );
 
+    //  setting the size
 
     TestCheck( CArray<INT>::ERR::errSuccess == array.ErrSetSize( 5 ) );
     TestCheck( 5 == array.Size() );
@@ -184,6 +202,7 @@ ERR ArrayTest::ErrTest()
     TestCheck( NULL != array.PEntry( 4 ) );
     TestCheck( NULL == array.PEntry( 5 ) );
 
+    //  setting the size too big
 
     TestCheck( CArray<INT>::ERR::errOutOfMemory == array.ErrSetSize( SIZE_MAX ) );
     TestCheck( 5 == array.Size() );
@@ -192,6 +211,7 @@ ERR ArrayTest::ErrTest()
     TestCheck( NULL != array.PEntry( 4 ) );
     TestCheck( NULL == array.PEntry( 5 ) );
 
+    //  growing size/capacity 2 by 2
 
     TestCheck( CArray<INT>::ERR::errSuccess == array.ErrSetSize( 13 ) );
     TestCheck( 13 == array.Size() );
@@ -201,6 +221,7 @@ ERR ArrayTest::ErrTest()
     TestCheck( NULL == array.PEntry( 13 ) );
     TestCheck( NULL == array.PEntry( 14 ) );
 
+    //  setting a different growth
 
     array.SetCapacityGrowth( 6 );
     TestCheck( CArray<INT>::ERR::errSuccess == array.ErrSetSize( 17 ) );
@@ -211,6 +232,7 @@ ERR ArrayTest::ErrTest()
     TestCheck( NULL == array.PEntry( 17 ) );
     TestCheck( NULL == array.PEntry( 18 ) );
 
+    //  setting a different growth (0 will default to 1)
 
     array.SetCapacityGrowth( 0 );
     TestCheck( CArray<INT>::ERR::errSuccess == array.ErrSetSize( 29 ) );
@@ -221,6 +243,7 @@ ERR ArrayTest::ErrTest()
     TestCheck( NULL == array.PEntry( 29 ) );
     TestCheck( NULL == array.PEntry( 30 ) );
 
+    //  setting a different growth
 
     array.SetCapacityGrowth( 7 );
     TestCheck( CArray<INT>::ERR::errSuccess == array.ErrSetSize( 40 ) );
@@ -231,6 +254,7 @@ ERR ArrayTest::ErrTest()
     TestCheck( NULL == array.PEntry( 40 ) );
     TestCheck( NULL == array.PEntry( 41 ) );
 
+    //  setting existing elements
     
     for ( size_t iElement = 0; iElement < array.Size(); iElement++ )
     {
@@ -251,6 +275,7 @@ ERR ArrayTest::ErrTest()
         }
     }
 
+    //  setting the capacity too big to make sure we don't wash the existing contents away
 
     TestCheck( CArray<INT>::ERR::errOutOfMemory == array.ErrSetCapacity( SIZE_MAX ) );
     TestCheck( 40 == array.Size() );
@@ -260,6 +285,7 @@ ERR ArrayTest::ErrTest()
     TestCheck( NULL == array.PEntry( 40 ) );
     TestCheck( NULL == array.PEntry( 41 ) );
 
+    //  checking if they got set correctly
     
     for ( size_t iElement = 0; iElement < array.Size(); iElement++ )
     {
@@ -269,6 +295,7 @@ ERR ArrayTest::ErrTest()
         TestCheck( element == elementT );
     }
 
+    //  sanity
 
     TestCheck( 40 == array.Size() );
     TestCheck( 43 == array.Capacity() );
@@ -277,9 +304,11 @@ ERR ArrayTest::ErrTest()
     TestCheck( NULL == array.PEntry( 40 ) );
     TestCheck( NULL == array.PEntry( 41 ) );
 
+    //  setting a default value for new elements
 
     array.SetEntryDefault( g_defaultElement );
 
+    //  setting the 65th element will cause the array to grow to a size of 71
 
     TestCheck( CArray<INT>::ERR::errSuccess == array.ErrSetEntry( 64, g_elementMult * 64 ) );
     TestCheck( 65 == array.Size() );
@@ -290,6 +319,7 @@ ERR ArrayTest::ErrTest()
     TestCheck( NULL == array.PEntry( 66 ) );
     TestCheck( ( g_elementMult * 64 ) == array.Entry( 64 ) );
 
+    //  checking if they got set correctly to the default
     
     for ( size_t iElement = 40; iElement < array.Size() - 1; iElement++ )
     {
@@ -298,29 +328,34 @@ ERR ArrayTest::ErrTest()
         TestCheck( element == g_defaultElement );
     }
 
+    //  test ctor 
 
     TestCheck( 0 == arrayClone.Size() );
     TestCheck( 0 == arrayClone.Capacity() );
     TestCheck( NULL == arrayClone.PEntry( 0 ) );
 
+    //  setting a small capacity
 
     TestCheck( CArray<INT>::ERR::errSuccess == arrayClone.ErrSetCapacity( 1 ) );
     TestCheck( 0 == arrayClone.Size() );
     TestCheck( 1 == arrayClone.Capacity() );
     TestCheck( NULL == arrayClone.PEntry( 0 ) );
 
+    //  setting a bigger capacity
 
     TestCheck( CArray<INT>::ERR::errSuccess == arrayClone.ErrSetCapacity( 10 ) );
     TestCheck( 0 == arrayClone.Size() );
     TestCheck( 10 == arrayClone.Capacity() );
     TestCheck( NULL == arrayClone.PEntry( 0 ) );
 
+    //  setting the capacity too big
 
     TestCheck( CArray<INT>::ERR::errOutOfMemory == arrayClone.ErrSetCapacity( SIZE_MAX ) );
     TestCheck( 0 == arrayClone.Size() );
     TestCheck( 10 == arrayClone.Capacity() );
     TestCheck( NULL == arrayClone.PEntry( 0 ) );
 
+    //  setting the size
 
     TestCheck( CArray<INT>::ERR::errSuccess == arrayClone.ErrSetSize( 5 ) );
     TestCheck( 5 == arrayClone.Size() );
@@ -329,6 +364,7 @@ ERR ArrayTest::ErrTest()
     TestCheck( NULL != arrayClone.PEntry( 4 ) );
     TestCheck( NULL == arrayClone.PEntry( 5 ) );
 
+    //  growing size/capacity 1 by 1
 
     TestCheck( CArray<INT>::ERR::errSuccess == arrayClone.ErrSetSize( 13 ) );
     TestCheck( 13 == arrayClone.Size() );
@@ -338,6 +374,7 @@ ERR ArrayTest::ErrTest()
     TestCheck( NULL == arrayClone.PEntry( 13 ) );
     TestCheck( NULL == arrayClone.PEntry( 14 ) );
 
+    //  cloning the array
 
     TestCheck( CArray<INT>::ERR::errSuccess == arrayClone.ErrClone( array ) );
     TestCheck( 65 == arrayClone.Size() );
@@ -358,6 +395,7 @@ ERR ArrayTest::ErrTest()
     TestCheck( g_defaultElement == arrayClone.Entry( 63 ) );
     TestCheck( ( g_elementMult * 64 ) == arrayClone.Entry( 64 ) );
 
+    //  sanity
 
     TestCheck( 65 == array.Size() );
     TestCheck( 71 == array.Capacity() );
@@ -366,6 +404,7 @@ ERR ArrayTest::ErrTest()
     TestCheck( NULL == array.PEntry( 65 ) );
     TestCheck( ( g_elementMult * 64 ) == array.Entry( 64 ) );
 
+    //  operating on the clone. growing by one chunk
 
     TestCheck( CArray<INT>::ERR::errSuccess == arrayClone.ErrSetEntry( 77, g_elementMult * 77 ) );
     TestCheck( 78 == arrayClone.Size() );
@@ -375,6 +414,7 @@ ERR ArrayTest::ErrTest()
     TestCheck( NULL == arrayClone.PEntry( 78 ) );
     TestCheck( ( g_elementMult * 77 ) == arrayClone.Entry( 77 ) );
 
+    //  checking if they got set correctly to the default
     
     for ( size_t iElement = 65; iElement < arrayClone.Size() - 1; iElement++ )
     {
@@ -383,6 +423,7 @@ ERR ArrayTest::ErrTest()
         TestCheck( element == g_defaultElement );
     }
 
+    //  sanity: checking original array is unaltered after cloning
 
     for ( size_t iElement = 0; iElement < 40; iElement++ )
     {
@@ -396,6 +437,7 @@ ERR ArrayTest::ErrTest()
     TestCheck( NULL == array.PEntry( 65 ) );
     TestCheck( ( g_elementMult * 64 ) == array.Entry( 64 ) );
 
+    //  shrinking
 
     TestCheck( CArray<INT>::ERR::errSuccess == array.ErrSetSize( 33 ) );
     TestCheck( 33 == array.Size() );
@@ -411,6 +453,7 @@ ERR ArrayTest::ErrTest()
         TestCheck( element == elementT );
     }
 
+    //  shrinking by reducing the capacity
 
     TestCheck( CArray<INT>::ERR::errSuccess == array.ErrSetCapacity( 19 ) );
     TestCheck( 19 == array.Size() );
@@ -426,6 +469,7 @@ ERR ArrayTest::ErrTest()
         TestCheck( element == elementT );
     }
 
+    //  sanity
 
     TestCheck( 78 == arrayClone.Size() );
     TestCheck( 78 == arrayClone.Capacity() );
@@ -444,49 +488,58 @@ ERR ArrayTest::ErrTest()
     TestCheck( g_defaultElement == arrayClone.Entry( 76 ) );
     TestCheck( ( g_elementMult * 77 ) == arrayClone.Entry( 77 ) );
 
+    //  cleaning to start sort/search tests
 
     TestCheck( CArray<INT>::ERR::errSuccess == array.ErrSetSize( 0 ) );
     TestCheck( 0 == array.Size() );
 
+    //  inserting and sorting/searching: empty
 
     TestCheck( FTestArraySortAndSearch( array, NULL, NULL, 0, NULL, 0 ) );
 
+    //  inserting and sorting/searching: 1 element
 
     const INT rgiUnsorted1[]    = { 10 };
     const INT rgiSorted1[]      = { 10 };
     const size_t ci1 = _countof( rgiSorted1 );
     TestCheck( FTestArraySortAndSearch( array, rgiUnsorted1, rgiSorted1, ci1, rgiSorted1, ci1 ) );
 
+    //  inserting and sorting/searching: 2 elements sorted
 
     const INT rgiUnsorted2Sorted[]  = { 10, 20 };
     const INT rgiSorted2Sorted[]    = { 10, 20 };
     const size_t ci2Sorted = _countof( rgiSorted2Sorted );
     TestCheck( FTestArraySortAndSearch( array, rgiUnsorted2Sorted, rgiSorted2Sorted, ci2Sorted, rgiSorted2Sorted, ci2Sorted ) );
 
+    //  inserting and sorting/searching: 2 elements unsorted
 
     const INT rgiUnsorted2Unsorted[]    = { 20, 10 };
     const INT rgiSorted2Unsorted[]      = { 10, 20 };
     const size_t ci2Unsorted = _countof( rgiSorted2Unsorted );
     TestCheck( FTestArraySortAndSearch( array, rgiUnsorted2Unsorted, rgiSorted2Unsorted, ci2Unsorted, rgiSorted2Unsorted, ci2Unsorted ) );
 
+    //  inserting and sorting/searching: 10 elements sorted
 
     const INT rgiUnsorted10Sorted[] = { 1, 2, 5, 6, 8, 10, 11, 12, 13 };
     const INT rgiSorted10Sorted[]   = { 1, 2, 5, 6, 8, 10, 11, 12, 13 };
     const size_t ci10Sorted = _countof( rgiSorted10Sorted );
     TestCheck( FTestArraySortAndSearch( array, rgiUnsorted10Sorted, rgiSorted10Sorted, ci10Sorted, rgiSorted10Sorted, ci10Sorted ) );
 
+    //  inserting and sorting/searching: 10 elements inversely sorted
 
     const INT rgiUnsorted10InvSorted[]  = { 13, 12, 11, 10, 8, 6, 5, 2, 1 };
     const INT rgiSorted10InvSorted[]    = { 1, 2, 5, 6, 8, 10, 11, 12, 13 };
     const size_t ci10InvSorted = _countof( rgiSorted10InvSorted );
     TestCheck( FTestArraySortAndSearch( array, rgiUnsorted10InvSorted, rgiSorted10InvSorted, ci10InvSorted, rgiSorted10InvSorted, ci10InvSorted ) );
 
+    //  inserting and sorting/searching: 10 elements unsorted
 
     const INT rgiUnsorted10Unsorted[]   = { 5, 13, 10, 11, 8, 6, 12, 1, 2 };
     const INT rgiSorted10Unsorted[]     = { 1, 2, 5, 6, 8, 10, 11, 12, 13 };
     const size_t ci10Unsorted = _countof( rgiSorted10Unsorted );
     TestCheck( FTestArraySortAndSearch( array, rgiUnsorted10Unsorted, rgiSorted10Unsorted, ci10Unsorted, rgiSorted10Unsorted, ci10Unsorted ) );
 
+    //  inserting and sorting/searching: 10 unique elements unsorted with duplicates
 
     const INT rgiUnsorted10UnsortedDup[]        = { 5, 13, 13, 8, 10, 13, 11, 8, 6, 12, 8, 1, 2, 1, 1, 12, 1 };
     const INT rgiSorted10UnsortedDup[]          = { 1, 1, 1, 1, 2, 5, 6, 8, 8, 8, 10, 11, 12, 12, 13, 13, 13 };
@@ -495,18 +548,21 @@ ERR ArrayTest::ErrTest()
     const size_t ci10UnsortedDupUnique  = _countof( rgiSorted10UnsortedDupUnique );
     TestCheck( FTestArraySortAndSearch( array, rgiUnsorted10UnsortedDup, rgiSorted10UnsortedDup, ci10UnsortedDup, rgiSorted10UnsortedDupUnique, ci10UnsortedDupUnique ) );
 
+    //  inserting and sorting/searching: 11 elements inversely sorted
 
     const INT rgiUnsorted11InvSorted[]  = { 13, 12, 11, 10, 8, 6, 5, 2, 1, -1 };
     const INT rgiSorted11InvSorted[]    = { -1, 1, 2, 5, 6, 8, 10, 11, 12, 13 };
     const size_t ci11InvSorted = _countof( rgiSorted11InvSorted );
     TestCheck( FTestArraySortAndSearch( array, rgiUnsorted11InvSorted, rgiSorted11InvSorted, ci11InvSorted, rgiSorted11InvSorted, ci11InvSorted ) );
 
+    //  inserting and sorting/searching: 11 elements unsorted
 
     const INT rgiUnsorted11Unsorted[]   = { 5, 13, 10, 11, -1, 8, 6, 12, 1, 2 };
     const INT rgiSorted11Unsorted[]     = { -1, 1, 2, 5, 6, 8, 10, 11, 12, 13 };
     const size_t ci11Unsorted = _countof( rgiSorted11Unsorted );
     TestCheck( FTestArraySortAndSearch( array, rgiUnsorted11Unsorted, rgiSorted11Unsorted, ci11Unsorted, rgiSorted11Unsorted, ci11Unsorted ) );
 
+    //  inserting and sorting/searching: 11 unique elements unsorted with duplicates
 
     const INT rgiUnsorted11UnsortedDup[]        = { 5, 13, 13, 8, 10, 13, 11, -1, -1, -1, 8, 6, 12, 8, 1, 2, 1, 1, 12, 1 };
     const INT rgiSorted11UnsortedDup[]          = { -1, -1, -1, 1, 1, 1, 1, 2, 5, 6, 8, 8, 8, 10, 11, 12, 12, 13, 13, 13 };

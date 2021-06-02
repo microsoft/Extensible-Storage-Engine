@@ -5,9 +5,10 @@
 
 #include "PageSizeClean.hxx"
 
+/*  local data types
+/**/
 
-
-typedef struct                      
+typedef struct                      /* returned by INFOGetTableColumnInfo */
 {
     JET_COLUMNID    columnid;
     JET_COLTYP      coltyp;
@@ -23,15 +24,15 @@ typedef struct
 } INFOCOLUMNDEF;
 
 
-
+/* Static data for ErrIsamGetObjectInfo */
 
 CODECONST( JET_COLUMNDEF ) rgcolumndefGetObjectInfo_A[] =
 {
     { sizeof(JET_COLUMNDEF), 0, JET_coltypText, 0, 0, 0, 0, 0, JET_bitColumnTTKey },
     { sizeof(JET_COLUMNDEF), 0, JET_coltypText, 0, 0, 0, 0, 0, JET_bitColumnTTKey },
     { sizeof(JET_COLUMNDEF), 0, JET_coltypLong, 0, 0, 0, 0, 0, JET_bitColumnFixed },
-    { sizeof(JET_COLUMNDEF), 0, JET_coltypDateTime, 0, 0, 0, 0, 0, JET_bitColumnFixed },
-    { sizeof(JET_COLUMNDEF), 0, JET_coltypDateTime, 0, 0, 0, 0, 0, JET_bitColumnFixed },
+    { sizeof(JET_COLUMNDEF), 0, JET_coltypDateTime, 0, 0, 0, 0, 0, JET_bitColumnFixed },    //  XXX -- to be deleted
+    { sizeof(JET_COLUMNDEF), 0, JET_coltypDateTime, 0, 0, 0, 0, 0, JET_bitColumnFixed },    //  XXX -- to be deleted
     { sizeof(JET_COLUMNDEF), 0, JET_coltypLong, 0, 0, 0, 0, 0, JET_bitColumnFixed },
     { sizeof(JET_COLUMNDEF), 0, JET_coltypLong, 0, 0, 0, 0, 0, JET_bitColumnFixed },
     { sizeof(JET_COLUMNDEF), 0, JET_coltypLong, 0, 0, 0, 0, 0, JET_bitColumnFixed },
@@ -43,8 +44,8 @@ CODECONST( JET_COLUMNDEF ) rgcolumndefGetObjectInfo_W[] =
     { sizeof(JET_COLUMNDEF), 0, JET_coltypText, 0, 0, usUniCodePage, 0, 0, JET_bitColumnTTKey },
     { sizeof(JET_COLUMNDEF), 0, JET_coltypText, 0, 0, usUniCodePage, 0, 0, JET_bitColumnTTKey },
     { sizeof(JET_COLUMNDEF), 0, JET_coltypLong, 0, 0, 0, 0, 0, JET_bitColumnFixed },
-    { sizeof(JET_COLUMNDEF), 0, JET_coltypDateTime, 0, 0, 0, 0, 0, JET_bitColumnFixed },
-    { sizeof(JET_COLUMNDEF), 0, JET_coltypDateTime, 0, 0, 0, 0, 0, JET_bitColumnFixed },
+    { sizeof(JET_COLUMNDEF), 0, JET_coltypDateTime, 0, 0, 0, 0, 0, JET_bitColumnFixed },    //  XXX -- to be deleted
+    { sizeof(JET_COLUMNDEF), 0, JET_coltypDateTime, 0, 0, 0, 0, 0, JET_bitColumnFixed },    //  XXX -- to be deleted
     { sizeof(JET_COLUMNDEF), 0, JET_coltypLong, 0, 0, 0, 0, 0, JET_bitColumnFixed },
     { sizeof(JET_COLUMNDEF), 0, JET_coltypLong, 0, 0, 0, 0, 0, JET_bitColumnFixed },
     { sizeof(JET_COLUMNDEF), 0, JET_coltypLong, 0, 0, 0, 0, 0, JET_bitColumnFixed },
@@ -53,17 +54,20 @@ CODECONST( JET_COLUMNDEF ) rgcolumndefGetObjectInfo_W[] =
 
 const ULONG ccolumndefGetObjectInfoMax  = ( sizeof(rgcolumndefGetObjectInfo_A) / sizeof(JET_COLUMNDEF) );
 
-
+/* column indexes for rgcolumndefGetObjectInfo */
 #define iContainerName      0
 #define iObjectName         1
 #define iObjectType         2
+//  #define iDtCreate           3   //  XXX -- to be deleted
+//  #define iDtUpdate           4   //  XXX -- to be deleted
 #define iCRecord            5
 #define iCPage              6
 #define iGrbit              7
 #define iFlags              8
 
 
-
+/* static data for ErrIsamGetColumnInfo
+/**/
 CODECONST( JET_COLUMNDEF ) rgcolumndefGetColumnInfo_A[] =
 {
     { sizeof(JET_COLUMNDEF), 0, JET_coltypLong, 0, 0, 0, 0, 0, JET_bitColumnFixed | JET_bitColumnTTKey },
@@ -149,7 +153,8 @@ const ULONG ccolumndefGetColumnInfoMax  = ( sizeof( rgcolumndefGetColumnInfo_A )
 #define iColumnColumnName   12
 
 
-
+/*  static data for ErrIsamGetIndexInfo
+/**/
 CODECONST( JET_COLUMNDEF ) rgcolumndefGetIndexInfo_A[] =
 {
     { sizeof(JET_COLUMNDEF), 0, JET_coltypText, 0, 0, 0, 0, 0, JET_bitColumnTTKey },
@@ -209,29 +214,43 @@ const ULONG ccolumndefGetIndexInfoMax   = ( sizeof( rgcolumndefGetIndexInfo_A ) 
 #define iIndexColName       14
 #define iIndexLCMapFlags    15
 
-extern const ULONG  cbIDXLISTNewMembersSinceOriginalFormat  = 4;
+extern const ULONG  cbIDXLISTNewMembersSinceOriginalFormat  = 4;    // for LCMapFlags
 
 
+/*  internal function prototypes
+/**/
+/*=================================================================
+INFOGetTableColumnInfo
 
+Parameters: pfucb               pointer to FUCB for table containing columns
+            szColumnName        column name or NULL for next column
+            pcolumndef          output buffer containing column info
 
+Return Value: Column id of column found ( fidTaggedMost if none )
+
+Errors/Warnings:
+
+Side Effects:
+=================================================================*/
 LOCAL ERR ErrINFOGetTableColumnInfo(
-    FUCB            *pfucb,             
-    const CHAR      *szColumnName,      
-    INFOCOLUMNDEF   *pcolumndef )       
+    FUCB            *pfucb,             /* FUCB for table containing columns */
+    const CHAR      *szColumnName,      /* column name */
+    INFOCOLUMNDEF   *pcolumndef )       /* output buffer for column info */
 {
     ERR             err;
     FCB             *pfcb                   = pfucb->u.pfcb;
     TDB             *ptdb                   = pfcb->Ptdb();
     FCB             * const pfcbTemplate    = ptdb->PfcbTemplateTable();
     COLUMNID        columnidT;
-    FIELD           *pfield                 = pfieldNil;    
-    JET_GRBIT       grbit;                  
+    FIELD           *pfield                 = pfieldNil;    /* first element of specific field type */
+    JET_GRBIT       grbit;                  /* flags for the field */
 
     Assert( pcolumndef != NULL );
 
     Assert( szColumnName != NULL || pcolumndef->columnid != 0 );
     if ( szColumnName != NULL )
     {
+        //  quick failure for empty column name
         if ( *szColumnName == '\0' )
             return ErrERRCheck( JET_errColumnNotFound );
 
@@ -251,10 +270,12 @@ LOCAL ERR ErrINFOGetTableColumnInfo(
             Assert( FCOLUMNIDTemplateColumn( columnidT ) );
             pfcb = pfcbTemplate;
             ptdb = pfcbTemplate->Ptdb();
-            pfcb->EnterDML();
+            pfcb->EnterDML();               //  to match LeaveDML() at the end of this function
         }
         else
         {
+            //  if column was not derived, then this can't be a template
+            //  column, unless we are querying the template table itself
             if ( FCOLUMNIDTemplateColumn( columnidT ) )
             {
                 Assert( pfcb->FTemplateTable() );
@@ -265,7 +286,7 @@ LOCAL ERR ErrINFOGetTableColumnInfo(
             }
         }
     }
-    else
+    else    // szColumnName == NULL
     {
         const FID   fid = FidOfColumnid( pcolumndef->columnid );
 
@@ -275,6 +296,7 @@ LOCAL ERR ErrINFOGetTableColumnInfo(
         {
             pfcb->Ptdb()->AssertValidDerivedTable();
 
+            // switch to template table
             pfcb = pfcbTemplate;
             Assert( pfcbNil != pfcb );
             Assert( pfcb->FTemplateTable() );
@@ -285,6 +307,7 @@ LOCAL ERR ErrINFOGetTableColumnInfo(
 
         pfcb->EnterDML();
 
+        //  special case of TDB::Pfield( fidT )
         pfield = pfieldNil;
         if ( FCOLUMNIDTagged( columnidT ) )
         {
@@ -313,8 +336,9 @@ LOCAL ERR ErrINFOGetTableColumnInfo(
     pfcb->AssertDML();
     Assert( ptdb->Pfield( columnidT ) == pfield );
 
-    
-    if ( FCOLUMNIDTagged( columnidT ) )
+    /*  if a field was found, then return the information about it
+    /**/
+    if ( FCOLUMNIDTagged( columnidT ) ) //lint !e644
     {
         grbit = JET_bitColumnTagged;
     }
@@ -373,6 +397,7 @@ LOCAL ERR ErrINFOGetTableColumnInfo(
 
     pcolumndef->langid      = LangidFromLcid( lcid );
     pcolumndef->cp          = pfield->cp;
+//  UNDONE: support collation order
     pcolumndef->wCollate    = 0;
     pcolumndef->grbit       = grbit;
     pcolumndef->cbMax       = pfield->cbMaxLen;
@@ -380,10 +405,13 @@ LOCAL ERR ErrINFOGetTableColumnInfo(
 
     OSStrCbCopyA( pcolumndef->szName, sizeof(pcolumndef->szName), ptdb->SzFieldName( pfield->itagFieldName, fFalse ) );
 
+    //  only retrieve the default value if we are passed in a buffer to place it into
     if( NULL != pcolumndef->pbDefault )
     {
         if ( FFIELDUserDefinedDefault( pfield->ffield ) )
         {
+            //  We need to build up a JET_USERDEFINEDDEFAULT_A structure
+            //  in the pvDefault.
 
             CHAR        szCallback[JET_cbNameMost+1];
             ULONG       cchSzCallback           = 0;
@@ -395,6 +423,7 @@ LOCAL ERR ErrINFOGetTableColumnInfo(
 
             pfcb->LeaveDML();
 
+            //  Template bit is not persisted
             COLUMNIDResetFTemplateColumn( columnidCallback );
 
             err = ErrCATGetColumnCallbackInfo(
@@ -449,8 +478,10 @@ LOCAL ERR ErrINFOGetTableColumnInfo(
                 puserdefineddefault->szDependantColumns = NULL;
             }
 
+            //  REMEMBER: to pass this into JetAddColumn the cbDefault must be set to sizeof( JET_USERDEFINEDDEFAULT )
             pcolumndef->cbDefault = ULONG( pbMax - pbMin );
 
+            //  re-enter because we will try and leave at the end of this routine
             pfcb->EnterDML();
         }
         else if ( FFIELDDefault( pfield->ffield ) )
@@ -521,12 +552,12 @@ LOCAL ERR ErrINFOGetTableIndexInfo(
 LOCAL ERR ErrINFOGetTableIndexInfo(
     PIB             *ppib,
     FUCB            *pfucb,
-    IFMP            ifmp,                   
+    IFMP            ifmp,                   /* for certain info-levels, ifmp/objidTable provided instead of pfucb */
     OBJID           objidTable,
-    const CHAR      *szIndex,               
+    const CHAR      *szIndex,               /* index name */
     void            *pb,
     ULONG           cbMax,
-    ULONG           lInfoLevel,             
+    ULONG           lInfoLevel,             /* information level ( 0, 1, or 2 ) */
     const BOOL      fUnicodeNames );
 LOCAL ERR ErrINFOGetTableIndexIdInfo(
     PIB                 * ppib,
@@ -543,19 +574,37 @@ LOCAL ERR ErrINFOGetTableIndexInfoForCreateIndex(
     ULONG       lIdxVersion );
 
 
-LOCAL const CHAR    szTcObject[]    = "Tables";
-LOCAL const WCHAR   wszTcObject[]   = L"Tables";
+LOCAL const CHAR    szTcObject[]    = "Tables";     //  currently the only valid "container" object
+LOCAL const WCHAR   wszTcObject[]   = L"Tables";        //  currently the only valid "container" object
 
+/*=================================================================
+ErrIsamGetObjectInfo
 
+Description: Returns information about all objects or a specified object
+
+Parameters:     ppib            pointer to PIB for current session
+                ifmp            database id containing objects
+                objtyp          type of object or objtypNil for all objects
+                szContainer     container name or NULL for all objects
+                szObjectName    object name or NULL for all objects
+                pout            output buffer
+                lInfoLevel      level of information ( 0, 1, or 2 )
+
+Return Value:   JET_errSuccess if the oubput buffer is valid
+
+Errors/Warnings:
+
+Side Effects:
+=================================================================*/
 ERR VDBAPI ErrIsamGetObjectInfo(
-    JET_SESID       vsesid,             
-    JET_DBID        vdbid,              
-    JET_OBJTYP      objtyp,             
-    const CHAR      *szContainer,       
-    const CHAR      *szObject,          
+    JET_SESID       vsesid,             /* pointer to PIB for current session */
+    JET_DBID        vdbid,              /* database id containing objects */
+    JET_OBJTYP      objtyp,             /* type of object or objtypNil for all */
+    const CHAR      *szContainer,       /* container name or NULL for all */
+    const CHAR      *szObject,          /* object name or NULL for all */
     VOID            *pv,
     ULONG           cbMax,
-    ULONG           lInfoLevel,         
+    ULONG           lInfoLevel,         /* information level */
     const BOOL      fUnicodeNames )
 {
     ERR             err;
@@ -564,7 +613,8 @@ ERR VDBAPI ErrIsamGetObjectInfo(
     CHAR            szObjectName[JET_cbNameMost+1];
     bool            fTransactionStarted = false;
 
-    
+    /*  check parameters
+    /**/
     CallR( ErrPIBCheck( ppib ) );
     CallR( ErrPIBCheckIfmp( ppib, ifmp ) );
 
@@ -574,6 +624,7 @@ ERR VDBAPI ErrIsamGetObjectInfo(
         CallR( ErrUTILCheckName( szContainerName, szContainer, JET_cbNameMost+1 ) );
         if ( 0 != _stricmp( szContainerName, szTcObject ) )
         {
+            //  UNDONE: currently only support "Tables" container
             err = ErrERRCheck( JET_errObjectNotFound );
             return err;
         }
@@ -620,7 +671,7 @@ ERR VDBAPI ErrIsamGetObjectInfo(
         case JET_ObjInfoListACM:
         case JET_ObjInfoRulesLoaded:
         default:
-            Assert( fFalse );
+            Assert( fFalse );       // should be impossible (filtered out by JetGetObjectInfo())
             err = ErrERRCheck( JET_errInvalidParameter );
             break;
     }
@@ -657,7 +708,8 @@ LOCAL ERR ErrInfoGetObjectInfo(
     FUCB            *pfucbInfo;
     JET_OBJECTINFO  objectinfo;
 
-    
+    /*  return error if the output buffer is too small
+    /**/
     if ( cbMax < sizeof( JET_OBJECTINFO ) )
     {
         return ErrERRCheck( JET_errBufferTooSmall );
@@ -665,13 +717,16 @@ LOCAL ERR ErrInfoGetObjectInfo(
 
     CallR( ErrCATGetTableInfoCursor( ppib, ifmp, szObjectName, &pfucbInfo ) );
 
-    
+    /*  set cbStruct
+    /**/
     objectinfo.cbStruct = sizeof( JET_OBJECTINFO );
     objectinfo.objtyp   = JET_objtypTable;
 
-    
+    /*  set base table capability bits
+    /**/
     objectinfo.grbit = JET_bitTableInfoBookmark | JET_bitTableInfoRollback;
 
+    // UNDONE: How to set updatable (currently, use catalog's Updatable flag)
     if ( FFUCBUpdatable( pfucbInfo ) )
     {
         objectinfo.grbit |= JET_bitTableInfoUpdatable;
@@ -690,7 +745,8 @@ LOCAL ERR ErrInfoGetObjectInfo(
     CallS( err );
     Assert( sizeof(ULONG) == cbActual );
 
-    
+    /*  set stats
+    /**/
     if ( fStats )
     {
         LONG    cRecord, cPage;
@@ -737,14 +793,15 @@ LOCAL ERR ErrInfoGetObjectInfoList(
     const JET_OBJTYP    objtypTable     = JET_objtypTable;
     JET_GRBIT           grbitTable;
     ULONG               ulFlags;
-    LONG                cRecord         = 0;        
-    LONG                cPage           = 0;        
-    ULONG               cRows           = 0;        
+    LONG                cRecord         = 0;        /* count of records in table */
+    LONG                cPage           = 0;        /* count of pages in table */
+    ULONG               cRows           = 0;        /* count of objects found */
     ULONG               cbActual;
     CHAR                szObjectName[JET_cbNameMost+1];
     JET_OBJECTLIST      objectlist;
 
-    
+    /* Open the temporary table which will be returned to the caller
+    /**/
     C_ASSERT( sizeof(rgcolumndefGetObjectInfo_A) == sizeof(rgcolumndefGetObjectInfo_W) );
     CallR( ErrIsamOpenTempTable(
                 sesid,
@@ -759,6 +816,8 @@ LOCAL ERR ErrInfoGetObjectInfoList(
 
     if ( JET_objtypNil != objtyp && JET_objtypTable != objtyp )
     {
+        //  the only objects currently supported are Table objects
+        //  (or objtypNil, which means scan all objects)
         goto ResetTempTblCursor;
     }
 
@@ -767,8 +826,10 @@ LOCAL ERR ErrInfoGetObjectInfoList(
 
     Call( ErrIsamSetCurrentIndex( ppib, pfucbCatalog, szMSORootObjectsIndex ) );
 
+    //  set base table capability bits
     grbitTable = JET_bitTableInfoBookmark|JET_bitTableInfoRollback;
 
+    //  UNDONE: How to set updatable (currently, use catalog's Updatable flag)
     if ( FFUCBUpdatable( pfucbCatalog ) )
         grbitTable |= JET_bitTableInfoUpdatable;
 
@@ -781,6 +842,7 @@ LOCAL ERR ErrInfoGetObjectInfoList(
 
 
 #ifdef DEBUG
+        //  verify this is a Table object
         SYSOBJ  sysobj;
         Call( ErrIsamRetrieveColumn(
                     ppib,
@@ -796,6 +858,8 @@ LOCAL ERR ErrInfoGetObjectInfoList(
         Assert( sysobjTable == sysobj );
 #endif
 
+        // get object name
+        //
         Call( ErrIsamRetrieveColumn(
                     ppib,
                     pfucbCatalog,
@@ -814,6 +878,8 @@ LOCAL ERR ErrInfoGetObjectInfoList(
         }
         szObjectName[cbActual] = 0;
 
+        //  get flags
+        //
         Call( ErrIsamRetrieveColumn(
                     ppib,
                     pfucbCatalog,
@@ -826,6 +892,8 @@ LOCAL ERR ErrInfoGetObjectInfoList(
         CallS( err );
         Assert( sizeof(ULONG) == cbActual );
 
+        //  get statistics (if requested)
+        //
         if ( fStats )
         {
             Call( ErrSTATSRetrieveTableStats(
@@ -842,6 +910,8 @@ LOCAL ERR ErrInfoGetObjectInfoList(
             Assert( 0 == cPage );
         }
 
+        // add the current object info to the temporary table
+        //
         Call( ErrDispPrepareUpdate(
                     sesid,
                     tableid,
@@ -934,9 +1004,12 @@ LOCAL ERR ErrInfoGetObjectInfoList(
                     NULL,
                     NO_GRBIT ) );
 
+        //  set the number of objects found
+        //
         cRows++;
 
-        
+        /* move to the next record
+        /**/
         err = ErrIsamMove( ppib, pfucbCatalog, JET_MoveNext, NO_GRBIT );
     }
 
@@ -945,7 +1018,8 @@ LOCAL ERR ErrInfoGetObjectInfoList(
 
 
 ResetTempTblCursor:
-    
+    /* move to first record in the temporary table
+    /**/
     err = ErrDispMove( sesid, tableid, JET_MoveFirst, NO_GRBIT );
     if ( err < 0 )
     {
@@ -953,7 +1027,8 @@ ResetTempTblCursor:
             goto HandleError;
     }
 
-    
+    /* set the return structure
+    /**/
     objectlist.cbStruct                 = sizeof(JET_OBJECTLIST);
     objectlist.tableid                  = tableid;
     objectlist.cRecord                  = cRows;
@@ -980,17 +1055,25 @@ HandleError:
         CallS( ErrCATClose( ppib, pfucbCatalog ) );
     }
 
+    //  ignore errors returned while destroying temp table.
     (VOID)ErrDispCloseTable( sesid, tableid );
 
     return err;
 }
 
 
+//  ================================================================
 LOCAL ERR ErrInfoGetTableAvailSpace(
     PIB * const ppib,
     FUCB * const pfucb,
     void * const pvResult,
     const ULONG cbMax )
+//  ================================================================
+//
+//  Count the number of available pages in a table, its indexes and its
+//  LV tree
+//
+//-
 {
     ERR         err         = JET_errSuccess;
     CPG* const  pcpg        = (CPG *)pvResult;
@@ -1006,13 +1089,19 @@ LOCAL ERR ErrInfoGetTableAvailSpace(
     }
     *pcpg = 0;
 
+    //  first, the table
+    //
     Call( ErrSPGetInfo( ppib, pfucb->ifmp, pfucb, (BYTE *)&cpgT, sizeof( cpgT ), fSPAvailExtent ) );
     *pcpg += cpgT;
     
+    //  then, the secondary indices of the table
+    //
     pfucb->u.pfcb->EnterDML();
     fLeaveDML = fTrue;
     for ( pfcbT = pfucb->u.pfcb->PfcbNextIndex(); pfcbNil != pfcbT; pfcbT = pfcbT->PfcbNextIndex() )
     {
+        //  check for access to this secondary index
+        //
         Assert( !pfcbT->Pidb()->FPrimary() );
         err = ErrFILEIAccessIndex( pfucb->ppib, pfucb->u.pfcb, pfcbT );
         if ( err != JET_errIndexNotFound )
@@ -1020,8 +1109,12 @@ LOCAL ERR ErrInfoGetTableAvailSpace(
             Call( err );
         }
         
+        //  skip indices that are not visible to us
+        //
         if ( err != JET_errIndexNotFound )
         {
+            //  pin the index so it won't be deleted while we are outside the DML lock
+            //
             if ( !pfcbT->Pidb()->FTemplateIndex() )
             {
                 pfcbT->Pidb()->IncrementCurrentIndex();
@@ -1030,12 +1123,16 @@ LOCAL ERR ErrInfoGetTableAvailSpace(
             pfucb->u.pfcb->LeaveDML();
             fLeaveDML = fFalse;
 
+            //  open the index and get its space info
+            //
             Call( ErrDIROpen( ppib, pfcbT, &pfucbT ) );
             Call( ErrSPGetInfo( ppib, pfucbT->ifmp, pfucbT, (BYTE *)&cpgT, sizeof( cpgT ), fSPAvailExtent ) );
             *pcpg += cpgT;
             DIRClose( pfucbT );
             pfucbT = pfucbNil;
 
+            //  unpin the index
+            //
             pfucb->u.pfcb->EnterDML();
             fLeaveDML = fTrue;
             if ( fUnpinFCB )
@@ -1048,15 +1145,21 @@ LOCAL ERR ErrInfoGetTableAvailSpace(
     pfucb->u.pfcb->LeaveDML();
     fLeaveDML = fFalse;
 
+    //  finally, the LV tree
+    //
     Call( ErrFILEOpenLVRoot( pfucb, &pfucbT, fFalse ) )
     if ( JET_errSuccess == err )
     {
+        //  the LV tree exists
+        //
         Call( ErrSPGetInfo( ppib, pfucbT->ifmp, pfucbT, (BYTE *)&cpgT, sizeof( cpgT ), fSPAvailExtent ) );
         *pcpg += cpgT;
         DIRClose( pfucbT );
         pfucbT = pfucbNil;
     }
 
+    //  don't want to return wrnLVNoLongValues
+    //
     err = JET_errSuccess;
 
 HandleError:
@@ -1151,7 +1254,8 @@ ERR VTAPI ErrIsamGetTableInfo(
             pfucb->u.pfcb->ObjidFDP(),
             lInfoLevel ) );
 
-    
+    /* if OLCStats info/reset can be done now
+    /**/
     switch( lInfoLevel )
     {
         case JET_TblInfo:
@@ -1165,7 +1269,8 @@ ERR VTAPI ErrIsamGetTableInfo(
             return ErrERRCheck( JET_errFeatureNotAvailable );
 
         case JET_TblInfoSpaceAlloc:
-            
+            /*  number of pages and density
+            /**/
             Assert( cbMax >= sizeof(ULONG) * 2);
             err = ErrCATGetTableAllocInfo(
                     ppib,
@@ -1238,6 +1343,7 @@ ERR VTAPI ErrIsamGetTableInfo(
             }
 #endif
             memcpy( pvResult, pfucb->pbEncryptionKey, pfucb->cbEncryptionKey );
+            // Weird that we cannot tell the caller the size of data copied
             return JET_errSuccess;
 
         default:
@@ -1260,7 +1366,8 @@ ERR VTAPI ErrIsamGetTableInfo(
             LONG            cRecord;
             LONG            cPage;
 
-            
+            /* check buffer size
+            /**/
             if ( cbMax < sizeof( JET_OBJECTINFO ) )
             {
                 err = ErrERRCheck( JET_errBufferTooSmall );
@@ -1275,7 +1382,8 @@ ERR VTAPI ErrIsamGetTableInfo(
 
             Assert( !FFMPIsTempDB( pfucb->u.pfcb->Ifmp() ) );
 
-            
+            /* set data to return
+            /**/
             objectinfo.cbStruct = sizeof(JET_OBJECTINFO);
             objectinfo.objtyp   = JET_objtypTable;
             objectinfo.flags    = 0;
@@ -1298,13 +1406,15 @@ ERR VTAPI ErrIsamGetTableInfo(
             if ( pfucb->u.pfcb->FFixedDDL() )
                 objectinfo.flags |= JET_bitObjectTableFixedDDL;
 
+            //  hierarchical DDL not currently nestable
             Assert( !( pfucb->u.pfcb->FTemplateTable() && pfucb->u.pfcb->FDerivedTable() ) );
             if ( pfucb->u.pfcb->FTemplateTable() )
                 objectinfo.flags |= JET_bitObjectTableTemplate;
             else if ( pfucb->u.pfcb->FDerivedTable() )
                 objectinfo.flags |= JET_bitObjectTableDerived;
 
-            
+            /*  set base table capability bits
+            /**/
             objectinfo.grbit = JET_bitTableInfoBookmark | JET_bitTableInfoRollback;
             if ( FFUCBUpdatable( pfucb ) )
                 objectinfo.grbit |= JET_bitTableInfoUpdatable;
@@ -1331,6 +1441,7 @@ ERR VTAPI ErrIsamGetTableInfo(
 
         case JET_TblInfoName:
         case JET_TblInfoMostMany:
+            //  UNDONE: add support for most many
             if ( pfucb->u.pfcb->FTypeTemporaryTable() )
             {
                 err = ErrERRCheck( JET_errInvalidOperation );
@@ -1350,7 +1461,8 @@ ERR VTAPI ErrIsamGetTableInfo(
                 err = ErrERRCheck( JET_errInvalidOperation );
                 goto HandleError;
             }
-            
+            /* check buffer size
+            /**/
             if ( cbMax < sizeof(JET_DBID) )
             {
                 err = ErrERRCheck( JET_errBufferTooSmall );
@@ -1369,6 +1481,7 @@ ERR VTAPI ErrIsamGetTableInfo(
                 goto HandleError;
             }
 
+            // Need at least JET_cbNameMost, plus 1 for null-terminator.
             if ( cbMax <= JET_cbNameMost )
                 err = ErrERRCheck( JET_errBufferTooSmall );
             else if ( pfucb->u.pfcb->FDerivedTable() )
@@ -1381,6 +1494,7 @@ ERR VTAPI ErrIsamGetTableInfo(
             }
             else
             {
+                //  table was not derived from a template -- return NULL
                 *( (CHAR *)pvResult ) = '\0';
             }
             break;
@@ -1394,13 +1508,32 @@ HandleError:
 }
 
 
+/*=================================================================
+ErrIsamGetColumnInfo
 
+Description: Returns information about all columns for the table named
+
+Parameters:
+            ppib                pointer to PIB for current session
+            ifmp                id of database containing the table
+            szTableName         table name
+            szColumnName        column name or NULL for all columns
+            pv                  pointer to results
+            cbMax               size of result buffer
+            lInfoLevel          level of information ( 0, 1, or 2 )
+
+Return Value: JET_errSuccess
+
+Errors/Warnings:
+
+Side Effects:
+=================================================================*/
 ERR VDBAPI ErrIsamGetColumnInfo(
-    JET_SESID       vsesid,                 
-    JET_DBID        vdbid,                  
-    const CHAR      *szTable,               
-    const CHAR      *szColumnName,          
-    JET_COLUMNID    *pcolid,                
+    JET_SESID       vsesid,                 /* pointer to PIB for current session */
+    JET_DBID        vdbid,                  /* id of database containing the table */
+    const CHAR      *szTable,               /* table name */
+    const CHAR      *szColumnName,          /* column name or NULL for all columns except when pcolid set */
+    JET_COLUMNID    *pcolid,                /* used when szColumnName is null or "" AND lInfoLevel == JET_ColInfoByColid */
     VOID            *pv,
     ULONG   cbMax,
     ULONG   lInfoLevel,
@@ -1412,7 +1545,8 @@ ERR VDBAPI ErrIsamGetColumnInfo(
     CHAR            szTableName[ JET_cbNameMost+1 ];
     FUCB            *pfucb;
 
-    
+    /*  check parameters
+    /**/
     CallR( ErrPIBCheck( ppib ) );
     CallR( ErrPIBCheckIfmp( ppib, (IFMP)vdbid ) );
     ifmp = (IFMP) vdbid;
@@ -1443,16 +1577,34 @@ HandleError:
 }
 
 
+/*=================================================================
+ErrIsamGetTableColumnInfo
 
+Description: Returns column information for the table id passed
+
+Parameters:     ppib                pointer to PIB for the current session
+                pfucb               pointer to FUCB for the table
+                szColumnName        column name or NULL for all columns
+                pcolid              retrieve info by colid, JET_colInfo only
+                pv                  pointer to result buffer
+                cbMax               size of result buffer
+                lInfoLevel          level of information
+
+Return Value: JET_errSuccess
+
+Errors/Warnings:
+
+Side Effects:
+=================================================================*/
     ERR VTAPI
 ErrIsamGetTableColumnInfo(
-    JET_SESID           vsesid,         
-    JET_VTID            vtid,           
-    const CHAR          *szColumn,      
-    const JET_COLUMNID  *pcolid,        
+    JET_SESID           vsesid,         /* pointer to PIB for current session */
+    JET_VTID            vtid,           /* pointer to FUCB for the table */
+    const CHAR          *szColumn,      /* column name or NULL for all columns */
+    const JET_COLUMNID  *pcolid,        /* except if colid is set, then retrieve column info of ths col */
     void                *pb,
     ULONG       cbMax,
-    ULONG       lInfoLevel,     
+    ULONG       lInfoLevel,     /* information level ( 0, 1, or 2 ) */
     const BOOL          fUnicodeNames )
 {
     ERR                 err;
@@ -1515,7 +1667,7 @@ ErrIsamGetTableColumnInfo(
 
         case JET_ColInfoSysTabCursor:
         default:
-            Assert( fFalse );
+            Assert( fFalse );       // should be impossible (filtered out by JetGetTableColumnInfo())
             err = ErrERRCheck( JET_errInvalidParameter );
     }
 
@@ -1556,6 +1708,7 @@ LOCAL ERR ErrInfoGetTableColumnInfo(
         return ErrERRCheck( JET_errInvalidParameter );
     }
 
+    //  do lookup by columnid, not column name
     if ( szColumnName[0] == '\0' )
     {
         if ( pcolid )
@@ -1777,7 +1930,7 @@ HandleError:
 }
 
 
-BOOL g_fCompactTemplateTableColumnDropped = fFalse;
+BOOL g_fCompactTemplateTableColumnDropped = fFalse; //  LAURIONB_HACK
 
 LOCAL ERR ErrInfoGetTableColumnInfoList(
     PIB             *ppib,
@@ -1808,7 +1961,8 @@ LOCAL ERR ErrInfoGetTableColumnInfoList(
 
     columndef.pbDefault = NULL;
 
-    
+    /*  initialize variables
+    /**/
     if ( cbMax < sizeof(JET_COLUMNLIST) )
     {
         return ErrERRCheck( JET_errInvalidParameter );
@@ -1817,7 +1971,8 @@ LOCAL ERR ErrInfoGetTableColumnInfoList(
     C_ASSERT( sizeof( rgcolumndefGetColumnInfoCompact_A ) == sizeof( rgcolumndefGetColumnInfo_A ) );
     C_ASSERT( sizeof( rgcolumndefGetColumnInfoCompact_A ) == sizeof( rgcolumndefGetColumnInfo_W ) );
     C_ASSERT( sizeof( rgcolumndefGetColumnInfoCompact_A ) == sizeof( rgcolumndefGetColumnInfoCompact_W ) );
-    
+    /*  create temporary table
+    /**/
     CallR( ErrIsamOpenTempTable(
                 (JET_SESID)ppib,
                 (JET_COLUMNDEF *)( fCompacting ? ( fUnicodeNames ? rgcolumndefGetColumnInfoCompact_W : rgcolumndefGetColumnInfoCompact_A ) :
@@ -1830,12 +1985,16 @@ LOCAL ERR ErrInfoGetTableColumnInfoList(
                 JET_cbKeyMost_OLD,
                 JET_cbKeyMost_OLD ) );
 
+    // this is from the definition of JET_cbCallbackDataAllMost in the external header
+    //
     C_ASSERT( (sizeof(JET_USERDEFINEDDEFAULT)
-                + JET_cbNameMost + 1 
+                + JET_cbNameMost + 1 /* for callback name */
                 + JET_cbCallbackUserDataMost
-                + ( ( JET_ccolKeyMost * ( JET_cbNameMost + 1 ) ) + 1 ) 
+                + ( ( JET_ccolKeyMost * ( JET_cbNameMost + 1 ) ) + 1 ) /* for list of dependent columns */
                 ) < JET_cbCallbackDataAllMost );
 
+    //  default allocation must handle user defined default case where it holds callback data
+    //
     columndef.pbDefault = (BYTE *)PvOSMemoryHeapAlloc( JET_cbCallbackDataAllMost );
     if( NULL == columndef.pbDefault )
     {
@@ -1944,6 +2103,7 @@ LOCAL ERR ErrInfoGetTableColumnInfoList(
             
             CallS( ErrINFOGetTableColumnInfo( pfucb, NULL, &columndef ) );
             
+            //  if compacting, ignore placeholder
             if ( !fCompacting || !( columndef.grbit & JET_bitColumnRenameConvertToPrimaryIndexPlaceholder ) )
             {
                 Call( ErrINFOSetTableColumnInfoList(
@@ -1960,14 +2120,16 @@ LOCAL ERR ErrInfoGetTableColumnInfoList(
             else if ( fCompacting && ( columndef.grbit & JET_bitColumnRenameConvertToPrimaryIndexPlaceholder ) )
             {
                 
+                //  LAURIONB_HACK
                 
                 g_fCompactTemplateTableColumnDropped = fTrue;
             }
             
-        }
+        }   // for
     }
 
-    
+    /*  move temporary table cursor to first row and return column list
+    /**/
     err = ErrDispMove( (JET_SESID)ppib, tableid, JET_MoveFirst, NO_GRBIT );
     if ( err < 0  )
     {
@@ -2004,6 +2166,7 @@ LOCAL ERR ErrInfoGetTableColumnInfoList(
 HandleError:
     (VOID)ErrDispCloseTable( (JET_SESID)ppib, tableid );
 
+    //  columndef.pbDefault may be NULL
     OSMemoryHeapFree( columndef.pbDefault );
 
     return err;
@@ -2027,6 +2190,7 @@ LOCAL ERR ErrInfoGetTableColumnInfoBase(
         return ErrERRCheck( JET_errInvalidParameter );
     }
 
+    //  do lookup by columnid, not column name
     if ( szColumnName[0] == '\0' )
     {
         if ( pcolid )
@@ -2065,16 +2229,34 @@ LOCAL ERR ErrInfoGetTableColumnInfoBase(
 }
 
 
+/*=================================================================
+ErrIsamGetIndexInfo
 
+Description: Returns a temporary file containing index definition
+
+Parameters:     ppib                pointer to PIB for the current session
+                ifmp                id of database containing the table
+                szTableName         name of table owning the index
+                szIndexName         index name
+                pv                  pointer to result buffer
+                cbMax               size of result buffer
+                lInfoLevel          level of information ( 0, 1, or 2 )
+
+Return Value: JET_errSuccess
+
+Errors/Warnings:
+
+Side Effects:
+=================================================================*/
 ERR VDBAPI
 ErrIsamGetIndexInfo(
-    JET_SESID       vsesid,                 
-    JET_DBID        vdbid,                  
-    const CHAR      *szTable,               
-    const CHAR      *szIndexName,           
+    JET_SESID       vsesid,                 /* pointer to PIB for current session */
+    JET_DBID        vdbid,                  /* id of database containing table */
+    const CHAR      *szTable,               /* name of table owning the index */
+    const CHAR      *szIndexName,           /* index name */
     VOID            *pv,
     ULONG           cbMax,
-    ULONG           lInfoLevel,             
+    ULONG           lInfoLevel,             /* information level ( 0, 1, or 2 ) */
     const BOOL      fUnicodeNames )
 {
     ERR             err;
@@ -2085,7 +2267,8 @@ ErrIsamGetIndexInfo(
     PGNO            pgnoFDP = pgnoNull;
     OBJID           objidTable = objidNil;
 
-    
+    /*  check parameters
+    /**/
     CallR( ErrPIBCheck( ppib ) );
     CallR( ErrPIBCheckIfmp( ppib, (IFMP)vdbid ) );
     ifmp = (IFMP) vdbid;
@@ -2101,6 +2284,9 @@ ErrIsamGetIndexInfo(
         case JET_IdxInfoSortId:
         case JET_IdxInfoVarSegMac:
         case JET_IdxInfoKeyMost:
+            // These info levels do not need a FUCB/FCB to gather their data, so just get needed information.
+            // For getting things like sort info, where opening the table would fail for out of date indices,
+            // we lookup straight from catalog (instead of opening the table to get an FCB).
             if ( !FCATHashLookup( ifmp, szTable, &pgnoFDP, &objidTable ) )
             {
                 CallR( ErrCATSeekTable( ppib, ifmp, szTable, &pgnoFDP, &objidTable ) );
@@ -2136,15 +2322,32 @@ HandleError:
 }
 
 
+/*=================================================================
+ErrIsamGetTableIndexInfo
 
+Description: Returns a temporary table containing the index definition
+
+Parameters:     ppib                pointer to PIB for the current session
+                pfucb               FUCB for table owning the index
+                szIndexName         index name
+                pv                  pointer to result buffer
+                cbMax               size of result buffer
+                lInfoLevel          level of information
+
+Return Value: JET_errSuccess
+
+Errors/Warnings:
+
+Side Effects:
+=================================================================*/
 ERR VTAPI
 ErrIsamGetTableIndexInfo(
-    JET_SESID       vsesid,                 
-    JET_VTID        vtid,                   
-    const CHAR      *szIndex,               
+    JET_SESID       vsesid,                 /* pointer to PIB for current session */
+    JET_VTID        vtid,                   /* FUCB for the table owning the index */
+    const CHAR      *szIndex,               /* index name */
     void            *pb,
     ULONG           cbMax,
-    ULONG           lInfoLevel,             
+    ULONG           lInfoLevel,             /* information level ( 0, 1, or 2 ) */
     const BOOL      fUnicodeNames )
 {
     return ErrINFOGetTableIndexInfo( (PIB*)vsesid, (FUCB*)vtid, ifmpNil, objidNil, szIndex, pb, cbMax, lInfoLevel, fUnicodeNames );
@@ -2153,19 +2356,20 @@ ErrIsamGetTableIndexInfo(
 ERR ErrINFOGetTableIndexInfo(
     PIB             *ppib,
     FUCB            *pfucb,
-    IFMP            ifmp,                   
+    IFMP            ifmp,                   /* for certain info-levels, ifmp/objidTable provided instead of pfucb */
     OBJID           objidTable,
-    const CHAR      *szIndex,               
+    const CHAR      *szIndex,               /* index name */
     void            *pb,
     ULONG           cbMax,
-    ULONG           lInfoLevel,             
+    ULONG           lInfoLevel,             /* information level ( 0, 1, or 2 ) */
     const BOOL      fUnicodeNames )
 {
     ERR             err = JET_errSuccess;
     CHAR            szIndexName[JET_cbNameMost+1];
     bool            fTransactionStarted = false;
 
-    
+    /*  validate the arguments
+    /**/
     CallR( ErrPIBCheck( ppib ) );
     if ( pfucb != pfucbNil )
     {
@@ -2303,7 +2507,7 @@ ERR ErrINFOGetTableIndexInfo(
             break;
         case JET_IdxInfoCount:
         {
-            INT cIndexes = 1;
+            INT cIndexes = 1;       // the first index is the primary/sequential index
             FCB *pfcbT;
             FCB * const pfcbTable = pfucb->u.pfcb;
 
@@ -2343,7 +2547,7 @@ ERR ErrINFOGetTableIndexInfo(
         case JET_IdxInfoOLC:
         case JET_IdxInfoResetOLC:
         default:
-            Assert( fFalse );
+            Assert( fFalse );       // should be impossible (filtered out by JetGetTableIndexInfo())
             err = ErrERRCheck( JET_errInvalidParameter );
             break;
     }
@@ -2377,32 +2581,33 @@ LOCAL ERR ErrINFOGetTableIndexInfo(
     const ULONG     cbMax,
     const BOOL      fUnicodeNames)
 {
-    ERR             err;            
+    ERR             err;            /* return code from internal functions */
     FCB             *pfcbTable;
-    FCB             *pfcbIndex;     
-    TDB             *ptdb;          
+    FCB             *pfcbIndex;     /* file control block for the index */
+    TDB             *ptdb;          /* field descriptor block for column */
 
-    LONG            cRecord;        
-    LONG            cKey;           
-    LONG            cPage;          
-    LONG            cRows;          
+    LONG            cRecord;        /* number of index entries */
+    LONG            cKey;           /* number of unique index entries */
+    LONG            cPage;          /* number of pages in the index */
+    LONG            cRows;          /* number of index definition records */
 
-    JET_TABLEID     tableid;        
-    JET_COLUMNID    columnid;       
-    JET_GRBIT       grbit = 0;      
-    JET_GRBIT       grbitColumn;    
+    JET_TABLEID     tableid;        /* table id for the VT */
+    JET_COLUMNID    columnid;       /* column id of the current column */
+    JET_GRBIT       grbit = 0;      /* flags for the current index */
+    JET_GRBIT       grbitColumn;    /* flags for the current column */
     JET_COLUMNID    rgcolumnid[ccolumndefGetIndexInfoMax];
 
     WORD            wCollate = 0;
     WORD            wT;
-    LANGID          langid;         
-    DWORD           dwMapFlags;     
+    LANGID          langid;         /* langid for the current index */
+    DWORD           dwMapFlags;     /* LCMapString() flags for the current index */
 
     Assert( NULL != szIndexName );
     BOOL            fIndexList = ( '\0' == *szIndexName );
     BOOL            fUpdatingLatchSet = fFalse;
 
-    
+    /*  return nothing if the buffer is too small
+    /**/
     if ( cbMax < sizeof(JET_INDEXLIST) - cbIDXLISTNewMembersSinceOriginalFormat )
         return ErrERRCheck( JET_wrnBufferTruncated );
 
@@ -2410,7 +2615,8 @@ LOCAL ERR ErrINFOGetTableIndexInfo(
                                         ( cbMax < sizeof(JET_INDEXLIST) ? cbIDXLISTNewMembersSinceOriginalFormat : 0 );
 
     C_ASSERT( sizeof(rgcolumndefGetIndexInfo_W) == sizeof(rgcolumndefGetIndexInfo_A) );
-    
+    /*  open the temporary table ( fills in the column ids in rgcolumndef )
+    /**/
     CallR( ErrIsamOpenTempTable(
                 (JET_SESID)ppib,
                 (JET_COLUMNDEF *)( fUnicodeNames ? rgcolumndefGetIndexInfo_W : rgcolumndefGetIndexInfo_A ),
@@ -2424,20 +2630,24 @@ LOCAL ERR ErrINFOGetTableIndexInfo(
 
     cRows = 0;
 
-    
+    /*  set the pointer to the field definitions for the table
+    /**/
     pfcbTable = pfucb->u.pfcb;
     Assert( pfcbTable != pfcbNil );
 
     ptdb = pfcbTable->Ptdb();
     Assert( ptdbNil != ptdb );
 
+    // Treat this as an update (but ignore write conflicts), to freeze index list.
     Call( pfcbTable->ErrSetUpdatingAndEnterDML( ppib, fTrue ) );
     fUpdatingLatchSet = fTrue;
 
-    
+    /*  locate the FCB for the specified index ( if null name, get list of indexes )
+    /**/
     pfcbTable->AssertDML();
     for ( pfcbIndex = pfcbTable; pfcbIndex != pfcbNil; pfcbIndex = pfcbIndex->PfcbNextIndex() )
     {
+        // Only primary index may not have an IDB.
         Assert( pfcbIndex->Pidb() != pidbNil || pfcbIndex == pfcbTable );
 
         if ( pfcbIndex->Pidb() != pidbNil )
@@ -2460,7 +2670,7 @@ LOCAL ERR ErrINFOGetTableIndexInfo(
                 }
             }
             else
-                break;
+                break;      // The index is accessible
         }
     }
 
@@ -2473,7 +2683,8 @@ LOCAL ERR ErrINFOGetTableIndexInfo(
         goto HandleError;
     }
 
-    
+    /*  as long as there is a valid index, add its definition to the VT
+    /**/
     while ( pfcbIndex != pfcbNil )
     {
         CHAR    szCurrIndex[JET_cbNameMost+1];
@@ -2490,10 +2701,11 @@ LOCAL ERR ErrINFOGetTableIndexInfo(
             sizeof(szCurrIndex),
             pfcbTable->Ptdb()->SzIndexName( pidb->ItagIndexName(), pfcbIndex->FDerivedIndex() ) );
 
-        const ULONG     cColumn = pidb->Cidxseg();      
+        const ULONG     cColumn = pidb->Cidxseg();      /* get number of columns in the key */
         UtilMemCpy( rgidxseg, PidxsegIDBGetIdxSeg( pidb, pfcbTable->Ptdb() ), cColumn * sizeof(IDXSEG) );
 
-        
+        /*  set the index flags
+        /**/
         grbit = pidb->GrbitFromFlags();
         LCID lcid;
         Call( ErrNORMLocaleToLcid( pidb->WszLocaleName(), &lcid ) );
@@ -2502,7 +2714,8 @@ LOCAL ERR ErrINFOGetTableIndexInfo(
 
         pfcbTable->LeaveDML();
 
-        
+        /*  process each column in the index key
+        /**/
         for ( ULONG iidxseg = 0; iidxseg < cColumn; iidxseg++ )
         {
             FIELD   field;
@@ -2516,7 +2729,8 @@ LOCAL ERR ErrINFOGetTableIndexInfo(
             {
                 Call( ErrOSSTRAsciiToUnicode( szCurrIndex, wszName, _countof(wszName), &cwchActual ) );
             
-                
+                /* index name
+                /**/
                 Call( ErrDispSetColumn(
                             (JET_SESID)ppib,
                             tableid,
@@ -2528,7 +2742,8 @@ LOCAL ERR ErrINFOGetTableIndexInfo(
             }
             else
             {
-                
+                /* index name
+                /**/
                 Call( ErrDispSetColumn(
                             (JET_SESID)ppib,
                             tableid,
@@ -2539,7 +2754,8 @@ LOCAL ERR ErrINFOGetTableIndexInfo(
                             NULL ) );
             }
 
-            
+            /*  index flags
+            /**/
             Call( ErrDispSetColumn(
                         (JET_SESID)ppib,
                         tableid,
@@ -2549,7 +2765,8 @@ LOCAL ERR ErrINFOGetTableIndexInfo(
                         NO_GRBIT,
                         NULL ) );
 
-            
+            /*  get statistics
+            /**/
             Call( ErrSTATSRetrieveIndexStats(
                         pfucb,
                         szCurrIndex,
@@ -2582,7 +2799,8 @@ LOCAL ERR ErrINFOGetTableIndexInfo(
                         NO_GRBIT,
                         NULL ) );
 
-            
+            /*  number of key columns
+            /**/
             Call( ErrDispSetColumn(
                         (JET_SESID)ppib,
                         tableid,
@@ -2592,7 +2810,9 @@ LOCAL ERR ErrINFOGetTableIndexInfo(
                         NO_GRBIT,
                         NULL ) );
 
-            
+            /*  column number within key
+            /*  required by CLI and JET spec
+            /**/
             Call( ErrDispSetColumn(
                         (JET_SESID)ppib,
                         tableid,
@@ -2602,12 +2822,14 @@ LOCAL ERR ErrINFOGetTableIndexInfo(
                         NO_GRBIT,
                         NULL ) );
 
-            
+            /*  get the ascending/descending flag
+            /**/
             grbitColumn = ( rgidxseg[iidxseg].FDescending() ?
                                 JET_bitKeyDescending :
                                 JET_bitKeyAscending );
 
-            
+            /*  column id
+            /**/
             columnid  = rgidxseg[iidxseg].Columnid();
             Call( ErrDispSetColumn(
                         (JET_SESID)ppib,
@@ -2618,7 +2840,8 @@ LOCAL ERR ErrINFOGetTableIndexInfo(
                         0,
                         NULL ) );
 
-            
+            /*  make copy of column definition
+            /**/
             if ( FCOLUMNIDTemplateColumn( columnid ) && !ptdb->FTemplateTable() )
             {
                 ptdb->AssertValidDerivedTable();
@@ -2636,9 +2859,10 @@ LOCAL ERR ErrINFOGetTableIndexInfo(
                 pfcbTable->LeaveDML();
             }
 
-            
+            /*  column type
+            /**/
             {
-                JET_COLTYP coltyp = field.coltyp;
+                JET_COLTYP coltyp = field.coltyp; // just to resize the variable from 2 to 4 bytes width
                 Call( ErrDispSetColumn(
                             (JET_SESID)ppib,
                             tableid,
@@ -2649,7 +2873,8 @@ LOCAL ERR ErrINFOGetTableIndexInfo(
                             NULL ) );
             }
 
-            
+            /*  Country
+            /**/
             wT = countryDefault;
             Call( ErrDispSetColumn(
                         (JET_SESID)ppib,
@@ -2660,7 +2885,8 @@ LOCAL ERR ErrINFOGetTableIndexInfo(
                         NO_GRBIT,
                         NULL ) );
 
-            
+            /*  Langid
+            /**/
             Call( ErrDispSetColumn(
                         (JET_SESID)ppib,
                         tableid,
@@ -2670,7 +2896,8 @@ LOCAL ERR ErrINFOGetTableIndexInfo(
                         NO_GRBIT,
                         NULL ) );
 
-            
+            /*  LCMapStringFlags
+            /**/
             Call( ErrDispSetColumn(
                         (JET_SESID)ppib,
                         tableid,
@@ -2680,7 +2907,8 @@ LOCAL ERR ErrINFOGetTableIndexInfo(
                         NO_GRBIT,
                         NULL ) );
 
-            
+            /*  Cp
+            /**/
             Call( ErrDispSetColumn(
                         (JET_SESID)ppib,
                         tableid,
@@ -2690,7 +2918,8 @@ LOCAL ERR ErrINFOGetTableIndexInfo(
                         NO_GRBIT,
                         NULL ) );
 
-            
+            /* Collate
+            /**/
             Call( ErrDispSetColumn(
                         (JET_SESID)ppib,
                         tableid,
@@ -2700,7 +2929,8 @@ LOCAL ERR ErrINFOGetTableIndexInfo(
                         NO_GRBIT,
                         NULL ) );
 
-            
+            /* column flags
+            /**/
             Call( ErrDispSetColumn(
                         (JET_SESID)ppib,
                         tableid,
@@ -2710,7 +2940,8 @@ LOCAL ERR ErrINFOGetTableIndexInfo(
                         NO_GRBIT,
                         NULL ) );
 
-            
+            /*  column name
+            /**/
             if ( fUnicodeNames )
             {
                 Call( ErrOSSTRAsciiToUnicode( szFieldName, wszName, _countof(wszName), &cwchActual ) );
@@ -2738,11 +2969,13 @@ LOCAL ERR ErrINFOGetTableIndexInfo(
 
             Call( ErrDispUpdate( (JET_SESID)ppib, tableid, NULL, 0, NULL, NO_GRBIT ) );
 
-            
+            /* count the number of VT rows
+            /**/
             cRows++;
         }
 
-        
+        /*  quit if an index name was specified; otherwise do the next index
+        /**/
         pfcbTable->EnterDML();
         if ( fIndexList )
         {
@@ -2758,19 +2991,20 @@ LOCAL ERR ErrINFOGetTableIndexInfo(
                     }
                 }
                 else
-                    break;
+                    break;  // The index is accessible.
             }
         }
         else
         {
             pfcbIndex = pfcbNil;
         }
-    }
+    }   // while ( pfcbIndex != pfcbNil )
 
     pfcbTable->ResetUpdatingAndLeaveDML();
     fUpdatingLatchSet = fFalse;
 
-    
+    /*  position to the first entry in the VT ( ignore error if no rows )
+    /**/
     err = ErrDispMove( (JET_SESID)ppib, tableid, JET_MoveFirst, NO_GRBIT );
     if ( err < 0  )
     {
@@ -2779,7 +3013,8 @@ LOCAL ERR ErrINFOGetTableIndexInfo(
         err = JET_errSuccess;
     }
 
-    
+    /*  set up the return structure
+    /**/
     ((JET_INDEXLIST *)pv)->cbStruct = cbIndexList;
     ((JET_INDEXLIST *)pv)->tableid = tableid;
     ((JET_INDEXLIST *)pv)->cRecord = cRows;
@@ -2832,15 +3067,19 @@ LOCAL ERR ErrINFOGetTableIndexIdInfo(
 
     Assert( NULL != szIndexName );
 
-    
+    /*  set the pointer to the field definitions for the table
+    /**/
     Assert( pfcbTable != pfcbNil );
 
+    // Treat this as an update (but ignore write conflicts), to freeze index list.
     CallR( pfcbTable->ErrSetUpdatingAndEnterDML( ppib, fTrue ) );
 
-    
+    /*  locate the FCB for the specified index ( if null name, get list of indexes )
+    /**/
     pfcbTable->AssertDML();
     for ( pfcbIndex = pfcbTable; pfcbIndex != pfcbNil; pfcbIndex = pfcbIndex->PfcbNextIndex() )
     {
+        // Only primary index may not have an IDB.
         Assert( pfcbIndex->Pidb() != pidbNil || pfcbIndex == pfcbTable );
 
         if ( pfcbIndex->Pidb() != pidbNil )
@@ -2860,7 +3099,7 @@ LOCAL ERR ErrINFOGetTableIndexIdInfo(
             else
             {
                 CallS( err );
-                break;
+                break;      // The index is accessible
             }
         }
     }
@@ -2893,10 +3132,10 @@ HandleError:
 
 
 LOCAL ERR ErrINFOICopyAsciiName(
-    _Out_writes_(cwchNameDest) WCHAR * const        wszNameDest,
-    const size_t        cwchNameDest,
-    const CHAR * const  szNameSrc,
-    size_t *            pcbActual )
+    _Out_writes_(cwchNameDest) WCHAR * const        wszNameDest,        //  destination buffer
+    const size_t        cwchNameDest,       //  size of destination buffer
+    const CHAR * const  szNameSrc,          //  source name to copy
+    size_t *            pcbActual )         //  number of bytes copied or required
 {
     size_t              cwchActual  = 0;
     const ERR           err         = ErrOSSTRAsciiToUnicode( szNameSrc, wszNameDest, cwchNameDest, &cwchActual );
@@ -2907,14 +3146,18 @@ LOCAL ERR ErrINFOICopyAsciiName(
     return err;
 }
 LOCAL ERR ErrINFOICopyAsciiName(
-    _Out_writes_(cchNameDest) CHAR * const      szNameDest,
-    const size_t        cchNameDest,
-    const CHAR * const  szNameSrc,
-    size_t *            pcbActual )
+    _Out_writes_(cchNameDest) CHAR * const      szNameDest,         //  destination buffer
+    const size_t        cchNameDest,        //  size of destination buffer
+    const CHAR * const  szNameSrc,          //  source name to copy
+    size_t *            pcbActual )         //  number of bytes copied or required
 {
     const ERR           err         = ErrOSStrCbCopyA( szNameDest, cchNameDest, szNameSrc );
     CallSx( err, JET_errBufferTooSmall );
 
+    //  on success, the destination name should be the same
+    //  size as the source name, but to be safe, take the
+    //  string length of the destination name
+    //
     if ( NULL != pcbActual )
         *pcbActual = ( strlen( JET_errSuccess == err ? szNameDest : szNameSrc ) + 1 ) * sizeof( CHAR );
     return err;
@@ -2935,6 +3178,9 @@ INLINE VOID INFOISetKeySegmentDescendingFlag(
     *pch = ( fDescending ? '-' : '+' );
 }
 
+//  build a JET_INDEXCREATE structure reflecting
+//  the meta-data of pfcbIndex
+//  this function handles all versions of JET_INDEXCREATE due to it's templated nature. 
 template< class JET_INDEXCREATE_T, class JET_CONDITIONALCOLUMN_T, class JET_UNICODEINDEX_T, class T, ULONG cbV2Reserve >
 ERR ErrINFOIBuildIndexCreateVX(
     FCB * const             pfcbTable,
@@ -2975,6 +3221,9 @@ ERR ErrINFOIBuildIndexCreateVX(
     pidb = pfcbIndex->Pidb();
     Assert( pidbNil != pidb );
 
+    //  caller should have verified that the buffer is adequately
+    //  sized, but double-check again anyways
+    //
     Assert( NULL != pbBuffer );
     Assert( cbBufferRemaining >= sizeof( JET_INDEXCREATE_T ) );
     if ( cbBufferRemaining < sizeof( JET_INDEXCREATE_T ) )
@@ -2982,13 +3231,19 @@ ERR ErrINFOIBuildIndexCreateVX(
         Error( ErrERRCheck( JET_errBufferTooSmall ) );
     }
 
+    //  start with the JET_INDEXCREATE structure,
+    //
     pindexcreate = (JET_INDEXCREATE_T *)pbBuffer;
     memset( pindexcreate, 0, sizeof( JET_INDEXCREATE_T ) );
     pindexcreate->cbStruct = sizeof( JET_INDEXCREATE_T );
 
+    //  advance buffer pointer past initial struct
+    //
     pbBuffer += sizeof( JET_INDEXCREATE_T );
     cbBufferRemaining -= sizeof( JET_INDEXCREATE_T );
 
+    //  set the V2 reserve buffer and advance pointer
+    //
     if ( cbV2Reserve )
     {
         if ( cbBufferRemaining < cbV2Reserve )
@@ -3000,13 +3255,19 @@ ERR ErrINFOIBuildIndexCreateVX(
         cbBufferRemaining -= cbV2Reserve;
     }
 
+    //  to index name
+    //
     pindexcreate->szIndexName = (T *)pbBuffer;
 
+    //  retrieve ASCII index name
+    //
     szIndexName = ptdb->SzIndexName( pidb->ItagIndexName() );
     Assert( NULL != szIndexName );
     Assert( strlen( szIndexName ) > 0 );
     Assert( strlen( szIndexName ) <= JET_cbNameMost );
 
+    //  copy index name
+    //
     Call( ErrINFOICopyAsciiName(
                 pindexcreate->szIndexName,
                 cbBufferRemaining / sizeof( T ),
@@ -3014,14 +3275,20 @@ ERR ErrINFOIBuildIndexCreateVX(
                 &cbActual ) );
     Assert( '\0' == pindexcreate->szIndexName[ ( cbActual / sizeof( T ) ) - 1 ] );
 
+    //  advance buffer pointer to index key
+    //
     Assert( cbBufferRemaining >= cbActual );
     pbBuffer += cbActual;
     cbBufferRemaining -= cbActual;
     pindexcreate->szKey = (T *)pbBuffer;
 
+    //  retrieve ASCII index key
+    //
     rgidxseg = PidxsegIDBGetIdxSeg( pidb, ptdb );
     Assert( NULL != rgidxseg );
     
+    //  copy each index key segment one by one
+    //
     Assert( pidb->Cidxseg() > 0 );
     Assert( pidb->Cidxseg() <= JET_ccolKeyMost );
     for ( size_t iidxseg = 0; iidxseg < pidb->Cidxseg(); iidxseg++ )
@@ -3031,8 +3298,13 @@ ERR ErrINFOIBuildIndexCreateVX(
 
         Assert( pfieldNil != pfield );
 
+        //  skip primary index placeholders, since they
+        //  are due to be removed
+        //
         if ( !FFIELDPrimaryIndexPlaceholder( pfield->ffield ) )
         {
+            //  retrieve ASCII key column name
+            //
             const BOOL      fDerived        = ( FCOLUMNIDTemplateColumn( columnid ) && !ptdb->FTemplateTable() );
             const CHAR *    szColumnName    = ptdb->SzFieldName( pfield->itagFieldName, fDerived );
 
@@ -3040,16 +3312,24 @@ ERR ErrINFOIBuildIndexCreateVX(
             Assert( strlen( szColumnName ) > 0 );
             Assert( strlen( szColumnName ) <= JET_cbNameMost );
 
+            //  verify buffer can accommodate the ascending/descending indicator
+            //
             if ( cbBufferRemaining < sizeof( T ) )
             {
                 Error( ErrERRCheck( JET_errBufferTooSmall ) );
             }
 
+            //  copy ascending/descending indicator
+            //
             INFOISetKeySegmentDescendingFlag( (T *)pbBuffer, rgidxseg[ iidxseg ].FDescending() );
 
+            //  advance buffer pointer to key column name
+            //
             pbBuffer += sizeof( T );
             cbBufferRemaining -= sizeof( T );
 
+            //  copy key column name
+            //
             Call( ErrINFOICopyAsciiName(
                         (T *)pbBuffer,
                         cbBufferRemaining / sizeof( T ),
@@ -3057,38 +3337,63 @@ ERR ErrINFOIBuildIndexCreateVX(
                         &cbActual ) );
             Assert( '\0' == ( (T *)pbBuffer )[ ( cbActual / sizeof( T ) ) - 1 ] );
 
+            //  advance buffer pointer to next key segment
+            //
             Assert( cbBufferRemaining >= cbActual );
             pbBuffer += cbActual;
             cbBufferRemaining -= cbActual;
 
+            //  update total key length
+            //
             cbKey += ( sizeof( T ) + cbActual );
         }
         else
         {
+            //  must be first column in primary index
+            //
             Assert( pidb->FPrimary() );
             Assert( 0 == iidxseg );
         }
     }
 
+    //  must have at least one key segment, which must be a minimum
+    //  of an ascending/descending indicator, a one-character column
+    //  name, and the NULL terminator
+    //
     Assert( cbKey > sizeof( T ) + sizeof( T ) );
 
+    //  verify buffer can accommodate double-NULL terminator
+    //  for the key
+    //
     if ( cbBufferRemaining < sizeof( T ) )
     {
         Error( ErrERRCheck( JET_errBufferTooSmall ) );
     }
 
+    //  double-NULL terminate the key
+    //
     *(T *)pbBuffer = 0;
     cbKey += sizeof( T );
 
+    //  advance buffer pointer to Unicode index info
+    //
     pbBuffer += sizeof( T );
     cbBufferRemaining -= sizeof( T );
 
+    //  copy key length
+    //
     pindexcreate->cbKey = cbKey;
 
+    //  copy grbit
+    //
     pindexcreate->grbit = pidb->GrbitFromFlags();
 
+    //  copy density
+    //
     pindexcreate->ulDensity = pfcbIndex->UlDensity();
 
+    //  verify buffer can accommodate Unicode index info
+    //
     if ( cbBufferRemaining < sizeof( JET_UNICODEINDEX_T ) )
     {
         Error( ErrERRCheck( JET_errBufferTooSmall ) );
@@ -3100,24 +3405,34 @@ ERR ErrINFOIBuildIndexCreateVX(
     {
         JET_UNICODEINDEX idxUnicode;
 
+        //  copy Unicode index info (we always mark it as a Unicode
+        //  index even if it's not, because if it's not actually a
+        //  Unicode index, JetCreateIndex2() will just ignore it)
+        //
         pindexcreate->pidxunicode = (JET_UNICODEINDEX_T *)pbBuffer;
 
         Call( ErrNORMLocaleToLcid( pidb->WszLocaleName(), &idxUnicode.lcid ) );
         idxUnicode.dwMapFlags = pidb->DwLCMapFlags();
 
-#pragma warning(suppress:26000)
+#pragma warning(suppress:26000) // prefast/fix doesn't seem to be smart enough to know that none of the call sites break this assumption
         *( pindexcreate->pidxunicode ) = *( (JET_UNICODEINDEX_T *)&idxUnicode );
 
+        //  advance buffer pointer to tuple limits
+        //
         pbBuffer += sizeof( JET_UNICODEINDEX );
         cbBufferRemaining -= sizeof( JET_UNICODEINDEX );
     }
     else
     {
         pindexcreate->pidxunicode = (JET_UNICODEINDEX_T *)pbBuffer;
+        //  advance buffer pointer to to JET_UNICODEINDEX2's dwMapFlags
+        //
         pbBuffer += sizeof(WCHAR*);
         cbBufferRemaining -= sizeof(WCHAR*);
 
         pindexcreate->pidxunicode->dwMapFlags = pidb->DwLCMapFlags();
+        //  advance buffer pointer to LocaleName
+        //
         pbBuffer += sizeof( pidb->DwLCMapFlags() );
         cbBufferRemaining -= sizeof( pidb->DwLCMapFlags() );
 
@@ -3128,19 +3443,27 @@ ERR ErrINFOIBuildIndexCreateVX(
 
         const ULONG_PTR cbLocaleName = ( wcslen( *pszLocaleName ) + 1 ) * sizeof(WCHAR);
 
+        //  advance buffer pointer to tuple limits
+        //
         pbBuffer += cbLocaleName;
         cbBufferRemaining -= cbLocaleName;
     }
 
+    //  see if this is a tuple index
+    //
     if ( pidb->FTuples() )
     {
         JET_TUPLELIMITS *   ptuplelimits    = (JET_TUPLELIMITS *)pbBuffer;
 
+        //  verify buffer can accommodate tuple limits info
+        //
         if ( cbBufferRemaining < sizeof( JET_TUPLELIMITS ) )
         {
             Error( ErrERRCheck( JET_errBufferTooSmall ) );
         }
 
+        //  copy tuple limits info
+        //
         pindexcreate->grbit |= JET_bitIndexTupleLimits;
         ptuplelimits->chLengthMin = pidb->CchTuplesLengthMin();
         ptuplelimits->chLengthMax = pidb->CchTuplesLengthMax();
@@ -3149,23 +3472,33 @@ ERR ErrINFOIBuildIndexCreateVX(
         ptuplelimits->ichStart = pidb->IchTuplesStart();
         pindexcreate->ptuplelimits = ptuplelimits;
 
+        //  advance buffer pointer to conditional columns
+        //
         pbBuffer += sizeof( JET_TUPLELIMITS );
         cbBufferRemaining -= sizeof( JET_TUPLELIMITS );
     }
     else
     {
+        //  copy cbVarSegMac
+        //
         pindexcreate->cbVarSegMac = pidb->CbVarSegMac();
     }
 
+    //  check for conditional columns
+    //
     if ( pidb->CidxsegConditional() > 0 )
     {
         JET_CONDITIONALCOLUMN_T *   rgconditionalcolumn     = (JET_CONDITIONALCOLUMN_T *)pbBuffer;
 
+        //  verify buffer can accommodate conditional columns
+        //
         if ( cbBufferRemaining < sizeof( JET_CONDITIONALCOLUMN_T ) * pidb->CidxsegConditional() )
         {
             Error( ErrERRCheck( JET_errBufferTooSmall ) );
         }
 
+        //  advance buffer pointer to conditional column names
+        //
         pbBuffer += ( sizeof( JET_CONDITIONALCOLUMN_T ) * pidb->CidxsegConditional() );
         cbBufferRemaining -= ( sizeof( JET_CONDITIONALCOLUMN_T ) * pidb->CidxsegConditional() );
 
@@ -3174,6 +3507,8 @@ ERR ErrINFOIBuildIndexCreateVX(
 
         for ( size_t iidxseg = 0; iidxseg < pidb->CidxsegConditional(); iidxseg++ )
         {
+            //  retrieve ASCII conditional column name
+            //
             const COLUMNID  columnid        = rgidxseg[ iidxseg ].Columnid();
             const FIELD *   pfield          = ptdb->Pfield( columnid );
             const BOOL      fDerived        = ( FCOLUMNIDTemplateColumn( columnid ) && !ptdb->FTemplateTable() );
@@ -3183,6 +3518,8 @@ ERR ErrINFOIBuildIndexCreateVX(
             Assert( strlen( szColumnName ) > 0 );
             Assert( strlen( szColumnName ) <= JET_cbNameMost );
 
+            //  copy conditional column name
+            //
             Call( ErrINFOICopyAsciiName(
                         (T *)pbBuffer,
                         cbBufferRemaining / sizeof( T ),
@@ -3190,21 +3527,29 @@ ERR ErrINFOIBuildIndexCreateVX(
                         &cbActual ) );
             Assert( '\0' == ( (T *)pbBuffer )[ ( cbActual / sizeof( T ) ) - 1 ] );
 
+            //  copy conditional column info
+            //
             rgconditionalcolumn[ iidxseg ].cbStruct = sizeof( JET_CONDITIONALCOLUMN_T );
             rgconditionalcolumn[ iidxseg ].szColumnName = (T *)pbBuffer;
             rgconditionalcolumn[ iidxseg ].grbit = ( rgidxseg[ iidxseg ].FMustBeNull() ?
                                                                 JET_bitIndexColumnMustBeNull :
                                                                 JET_bitIndexColumnMustBeNonNull );
 
+            //  advance buffer pointer to next conditional column name
+            //
             Assert( cbBufferRemaining >= cbActual );
             pbBuffer += cbActual;
             cbBufferRemaining -= cbActual;
         }
 
+        //  copy conditional columns
+        //
         pindexcreate->rgconditionalcolumn = rgconditionalcolumn;
         pindexcreate->cConditionalColumn = pidb->CidxsegConditional();
     }
 
+    //  copy cbKeyMost
+    //
     pindexcreate->cbKeyMost = max( JET_cbKeyMost_OLD, pidb->CbKeyMost() );
 
     CallS( err );
@@ -3215,6 +3560,10 @@ HandleError:
 }
 
 
+//  given an index name, return a JET_INDEXCREATE
+//  structure that may be used to re-create the
+//  index
+//
 LOCAL ERR ErrINFOGetTableIndexInfoForCreateIndex(
     PIB *           ppib,
     FUCB *          pfucb,
@@ -3222,7 +3571,7 @@ LOCAL ERR ErrINFOGetTableIndexInfoForCreateIndex(
     VOID *          pvResult,
     const ULONG     cbMax,
     const BOOL      fUnicodeNames,
-    ULONG   lIdxVersion )               
+    ULONG   lIdxVersion )               /* information level ( JET_IdxInfoCreateIndex, JET_IdxInfoCreateIndex2, JET_IdxInfoCreateIndex3 ) */
 {
     ERR             err                 = JET_errSuccess;
     FCB *           pfcbTable           = pfcbNil;
@@ -3236,6 +3585,8 @@ LOCAL ERR ErrINFOGetTableIndexInfoForCreateIndex(
     Assert( pfcbNil != pfcbTable );
     Assert( lIdxVersion == JET_IdxInfoCreateIndex || lIdxVersion == JET_IdxInfoCreateIndex2 || lIdxVersion == JET_IdxInfoCreateIndex3 );
     
+    //  treat this as an update (but ignore write conflicts), to freeze index list
+    //
     Call( pfcbTable->ErrSetUpdatingAndEnterDML( ppib, fTrue ) );
     fUpdatingLatchSet = fTrue;
     
@@ -3243,14 +3594,21 @@ LOCAL ERR ErrINFOGetTableIndexInfoForCreateIndex(
     {
         if ( pidbNil != pfcbTable->Pidb() )
         {
+            //  assume we're being asked to retrieve the primary index
+            //  (as long as it's not a sequential index)
+            //
             pfcbIndex = pfcbTable;
         }
     }
     else
     {
+        //  locate the FCB for the specified index
+        //
         pfcbTable->AssertDML();
         for ( pfcbIndex = pfcbTable; pfcbIndex != pfcbNil; pfcbIndex = pfcbIndex->PfcbNextIndex() )
         {
+            //  only sequential primary index may not have an IDB
+            //
             Assert( pfcbIndex->Pidb() != pidbNil || pfcbIndex == pfcbTable );
 
             if ( pfcbIndex->Pidb() != pidbNil )
@@ -3260,6 +3618,9 @@ LOCAL ERR ErrINFOGetTableIndexInfoForCreateIndex(
                 {
                     if ( JET_errIndexNotFound == err )
                     {
+                        //  this is not the index we're looking for,
+                        //  so just skip it
+                        //
                         err = JET_errSuccess;
                     }
                     else
@@ -3268,7 +3629,7 @@ LOCAL ERR ErrINFOGetTableIndexInfoForCreateIndex(
                     }
                 }
                 else
-                    break;
+                    break;      // The index is accessible
             }
         }
     }
@@ -3278,10 +3639,15 @@ LOCAL ERR ErrINFOGetTableIndexInfoForCreateIndex(
 
     if ( pfcbNil == pfcbIndex )
     {
+        //  didn't find the desired index
+        //
         Error( ErrERRCheck( JET_errIndexNotFound ) );
         goto HandleError;
     }
 
+    //  found the desired index, now build up the appropriate
+    //  JET_INDEXCREATE structure for it
+    //
     if ( lIdxVersion == JET_IdxInfoCreateIndex )
         if ( fUnicodeNames )
         {
@@ -3334,17 +3700,20 @@ LOCAL ERR ErrINFOGetTableIndexInfoForCreateIndex(
         if ( err >= JET_errSuccess )
         {
 
+            //  Update the V2 parameters, which are not WCHAR/ASCII dependant.
             C_ASSERT( OffsetOf(JET_INDEXCREATE2_W, pSpacehints) == OffsetOf(JET_INDEXCREATE2_A, pSpacehints) );
             Assert( OffsetOf(JET_INDEXCREATE2_W, pSpacehints) == OffsetOf(JET_INDEXCREATE2_A, pSpacehints) );
+            //  Validate ErrINFOIBuildIndexCreateVX worked correctly and the pSPHints buffer 
+            //  is bounded by the user's buffer
             Assert( pvResult );
 
             Assert( pSPHints > pvResult );
             Assert( ((BYTE*)(pSPHints + sizeof(JET_SPACEHINTS))) <= ((BYTE*)pvResult) + cbMax );
-            Assert( (size_t)pSPHints % sizeof(ULONG) == 0 );
+            Assert( (size_t)pSPHints % sizeof(ULONG) == 0 );    // otherwise fix ErrINFOIBuildIndexCreateVX().
 
             pfcbIndex->GetAPISpaceHints( pSPHints );
             Assert( pSPHints->cbStruct == sizeof(JET_SPACEHINTS) );
-            if ( fUnicodeNames )
+            if ( fUnicodeNames )    // just in case we'll use the right type ...
             {
                 ((JET_INDEXCREATE2_W*)pvResult)->pSpacehints = pSPHints;
                 Assert( ((JET_INDEXCREATE2_W*)pvResult)->pSpacehints->ulInitialDensity == ((JET_INDEXCREATE2_W*)pvResult)->ulDensity );
@@ -3387,9 +3756,12 @@ LOCAL ERR ErrINFOGetTableIndexInfoForCreateIndex(
         }
         if ( err >= JET_errSuccess )
         {
+            //  Update the V3 parameters, which are not WCHAR/ASCII dependant.
             C_ASSERT( OffsetOf(JET_INDEXCREATE3_W, pSpacehints) == OffsetOf(JET_INDEXCREATE3_A, pSpacehints) );
             Assert( OffsetOf(JET_INDEXCREATE3_W, pSpacehints) == OffsetOf(JET_INDEXCREATE3_A, pSpacehints) );
             
+            //  Validate ErrINFOIBuildIndexCreateVX worked correctly and the pSPHints buffer 
+            //  is bounded by the user's buffer
             Assert( pvResult );
 
 
@@ -3400,11 +3772,11 @@ LOCAL ERR ErrINFOGetTableIndexInfoForCreateIndex(
             
             Assert( pSPHints > pvResult );
             Assert( (((BYTE*)pSPHints) + sizeof(JET_SPACEHINTS)) <= ((BYTE*)pvResult) + cbMax );
-            Assert( (size_t)pSPHints % sizeof(ULONG) == 0 );
+            Assert( (size_t)pSPHints % sizeof(ULONG) == 0 );    // otherwise fix ErrINFOIBuildIndexCreateVX().
 
             pfcbIndex->GetAPISpaceHints( pSPHints );
             Assert( pSPHints->cbStruct == sizeof(JET_SPACEHINTS) );
-            if ( fUnicodeNames )
+            if ( fUnicodeNames )    // just in case we'll use the right type ...
             {
                 ((JET_INDEXCREATE3_W*)pvResult)->pSpacehints = pSPHints;
                 Assert( ((JET_INDEXCREATE3_W*)pvResult)->pSpacehints->ulInitialDensity == ((JET_INDEXCREATE3_W*)pvResult)->ulDensity );
@@ -3422,7 +3794,7 @@ LOCAL ERR ErrINFOGetTableIndexInfoForCreateIndex(
     }
     
     Call( err );
-    CallS( err );
+    CallS( err );   //  warnings not expected
 
 
 HandleError:
@@ -3444,6 +3816,7 @@ ERR VDBAPI ErrIsamGetDatabaseInfo(
     PIB             *ppib = (PIB *)vsesid;
     ERR             err;
     IFMP            ifmp;
+    //  UNDONE: support these fields;
     WORD            cp          = usEnglishCodePage;
     WORD            wCountry    = countryDefault;
     WORD            wCollate    = 0;
@@ -3452,22 +3825,28 @@ ERR VDBAPI ErrIsamGetDatabaseInfo(
     
     
 
-    
+    /*  check parameters
+    /**/
     CallR( ErrPIBCheck( ppib ) );
     CallR( ErrPIBCheckIfmp( ppib, (IFMP)vdbid ) );
     ifmp = (IFMP) vdbid;
 
     Assert ( cbMax == 0 || pvResult != NULL );
 
+    //  UNDONE: move access to FMP internals into io.c for proper MUTEX.
+    //          Please note that below is a bug.
 
-    
-    Expected( FInRangeIFMP( ifmp ) );
+    /*  returns database name and connect string given ifmp
+    /**/
+    Expected( FInRangeIFMP( ifmp ) ); // but just in case, we handle the error ...
     if ( !FInRangeIFMP( ifmp ) || !g_rgfmp[ifmp].FInUse()  )
     {
         err = ErrERRCheck( JET_errInvalidParameter );
         goto HandleError;
     }
 
+    //  save refresh cache flag and remove from info level
+    //
     fUseCachedResult = (bool)((ulInfoLevel & JET_DbInfoUseCachedResult) ? 1 : 0 );
     ulT = (ulInfoLevel & ~(JET_DbInfoUseCachedResult));
     switch ( ulT )
@@ -3509,23 +3888,27 @@ ERR VDBAPI ErrIsamGetDatabaseInfo(
             break;
 
         case JET_DbInfoCollate:
-            
+            /*  check the buffer size
+            /**/
             if ( cbMax != sizeof(LONG) )
                 return ErrERRCheck( JET_errInvalidBufferSize );
             *(LONG *)pvResult = wCollate;
             break;
 
         case JET_DbInfoOptions:
-            
+            /*  check the buffer size
+            /**/
             if ( cbMax != sizeof(JET_GRBIT) )
                 return ErrERRCheck( JET_errInvalidBufferSize );
 
-            
+            /*  return the open options for the current database
+            /**/
             *(JET_GRBIT *)pvResult = g_rgfmp[ifmp].FExclusiveBySession( ppib ) ? JET_bitDbExclusive : 0;
             break;
 
         case JET_DbInfoTransactions:
-            
+            /*  check the buffer size
+            /**/
             if ( cbMax != sizeof(LONG) )
                 return ErrERRCheck( JET_errInvalidBufferSize );
 
@@ -3533,7 +3916,8 @@ ERR VDBAPI ErrIsamGetDatabaseInfo(
             break;
 
         case JET_DbInfoVersion:
-            
+            /*  check the buffer size
+            /**/
             if ( cbMax != sizeof(LONG) )
                 return ErrERRCheck( JET_errInvalidBufferSize );
 
@@ -3541,7 +3925,8 @@ ERR VDBAPI ErrIsamGetDatabaseInfo(
             break;
 
         case JET_DbInfoIsam:
-            
+            /*  check the buffer size
+            /**/
             return ErrERRCheck( JET_errFeatureNotAvailable );
 
         case JET_DbInfoMisc:
@@ -3592,6 +3977,7 @@ ERR VDBAPI ErrIsamGetDatabaseInfo(
             break;
 
         case JET_DbInfoSpaceOwned:
+            // Return file size in terms of pages.
             if ( cbMax != sizeof(ULONG) )
                 return ErrERRCheck( JET_errInvalidBufferSize );
 
@@ -3619,6 +4005,7 @@ ERR VDBAPI ErrIsamGetDatabaseInfo(
             Expected( !fUseCachedResult );
             ULONG rgcpg[2] = { 0 };
 
+            // Return file size in terms of pages.
             if ( cbMax < sizeof(*rgcpg) )
             {
                 return ErrERRCheck( JET_errInvalidBufferSize );
@@ -3629,7 +4016,7 @@ ERR VDBAPI ErrIsamGetDatabaseInfo(
                         ifmp,
                         (BYTE*)rgcpg,
                         sizeof(rgcpg),
-                        fSPAvailExtent | fSPShelvedExtent,
+                        fSPAvailExtent | fSPShelvedExtent,  // need fSPAvailExtent to retrive fSPShelvedExtent
                         fFalse );
             *( (ULONG*)pvResult ) = rgcpg[1];
             return err;
@@ -3668,6 +4055,8 @@ ERR VTAPI ErrIsamGetCursorInfo(
     if ( pfucb->locLogical != locOnCurBM )
         return ErrERRCheck( JET_errNoCurrentRecord );
 
+    //  check if this record is being updated by another cursor
+    //
     Assert( !Pcsr( pfucb )->FLatched() );
 
     Call( ErrDIRGet( pfucb ) );
@@ -3678,6 +4067,8 @@ ERR VTAPI ErrIsamGetCursorInfo(
         {
             CallS( ErrDIRRelease( pfucb ) );
 
+            //  UNDONE: is there a way to easily report the bm?
+            //
             OSTraceFMP(
                 pfucb->ifmp,
                 JET_tracetagDMLConflicts,
@@ -3693,6 +4084,8 @@ ERR VTAPI ErrIsamGetCursorInfo(
 
     CallS( ErrDIRRelease( pfucb ) );
 
+    //  temporary tables are never visible to other sessions
+    //
     if ( pfucb->u.pfcb->FTypeTemporaryTable() )
         err = JET_errSuccess;
 

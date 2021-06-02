@@ -1,5 +1,18 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
+// ESETest.cpp
+//
+//  This is a generic library of functions that I have found useful when
+// writing test cases outside of MUJET.  This library provides functions
+// that take care of standard operations like reporting in results.txt and
+// results.log so that they will work well in our School/Pupil environment.
+//
+// History:
+// Rev  MM/DD/YYYY  E-Mail      Comment
+// ---  ----------  ------      ---------------------------------------------
+// [0]  10/06/1997  SOMEONE      Initial coding of MUSTRESS
+// [1]  01/19/1997  SOMEONE     Moved generic code out into ESETest lib
+// [2]  05/10/2000  SOMEONE      Added FormatLastError function
 
 #include <windows.h>
 #include <float.h>
@@ -12,11 +25,14 @@
 #include "ese_common.hxx"
 #define STRSAFE_NO_DEPRECATE
 #include <strsafe.h>
+// presently only used for the GetEnvironment() stuff
 #include <tchar.h>
 
 #ifdef BUILD_ENV_IS_NT
+// Don't pollute the Exchange esetest with any WTT references.
 #include <wttlogger.h>
 
+// Dynamically load all the WTT logger goo.
 typedef
 HRESULT
 (WINAPI *PFNWTTLogCreateLogDevice)
@@ -38,9 +54,9 @@ HRESULT
 (WINAPI *PFNWTTLogEndTest)
         (
         IN  LONG     hDevice,
-        IN  LPWSTR   pwszTestName,
-        IN  DWORD    dwResult,
-        IN  LPWSTR   pwszRepro
+        IN  LPWSTR   pwszTestName, // Name of the test case
+        IN  DWORD    dwResult,     // test result
+        IN  LPWSTR   pwszRepro     // repro line
         );
 
 
@@ -78,17 +94,23 @@ typedef void* PFNWTTLogCloseLogDevice;
 typedef void* PFNWTTLogUninit;
 #endif 
 
+// From ESE's cc.hxx:
 #define fFalse  BOOL( 0 )
 #define fTrue   BOOL( !0 )
 
 
+// Sloppy coding -- the code uses TCHAR, but it isn't actually generic.
 C_ASSERT( sizeof( TCHAR ) == sizeof( char ) );
 
+// needed for _open(), etc.
 #include <errno.h>
 #include <io.h>
 #include <fcntl.h>
 #include <sys/stat.h>
 
+//----------------
+// Macros
+// Define logging file (can be overriden at compile time with -DNO_LOGGING flag)
 static char RESULTS_LOG[MAX_PATH] =
 #ifdef NO_LOGGING
     "nul:";
@@ -98,10 +120,17 @@ static char RESULTS_LOG[MAX_PATH] =
 #endif
 ;
 
+/*
+#define JetGetSystemParameter( instance, sesid, paramid, plParam, sz, cbMax ) \
+    In_esetestcxx_useDynLoadJetGetSystemParameter_instead
+*/
+
+//----------------
+// Prototypes
 
 
-
-
+// This function was copied from loadnarrow.cxx, and was known as BounceJetXXX().
+// If that function changes, please update this one as well.
 static
 JET_ERR
 DynLoadJetGetSystemParameter(
@@ -114,6 +143,8 @@ DynLoadJetGetSystemParameter(
 )
 ;
 
+// This function was copied from loadnarrow.cxx, and was known as BounceJetXXX().
+// If that function changes, please update this one as well.
 static
 JET_ERR
 DynLoadJetSetSystemParameter(
@@ -124,6 +155,8 @@ DynLoadJetSetSystemParameter(
     __in_opt JET_PCSTR      szParam
 );
 
+// This function was copied from loadnarrow.cxx, and was known as BounceJetXXX().
+// If that function changes, please update this one as well.
 static
 JET_ERR
 DynLoadJetConsumeLogData(
@@ -151,34 +184,45 @@ static const char PASS_STR[] = " ...PASSED" SZNEWLINE;
 
 #define PRIVATE static
 
+// Environment variables
 PRIVATE const CHAR* g_szEnvironmentPagesize         = "ESETEST_PAGESIZE";
 PRIVATE const CHAR* g_szSystemPibFailureEnvironment     = "ESE_PIB_FAILURES";
 PRIVATE const CHAR* g_szEnvironmentTopDown              = "TOPDOWN_ALLOCATION";
 PRIVATE const CHAR* g_szEnvironmentSmallConfig          = "ESE_SMALL_CONFIG";
 PRIVATE const CHAR* g_szEnvironment2gLogs               = "ESETEST_2GLOGS";
-PRIVATE const CHAR* g_szEnvironmentLegacyLogNames       = "ESETEST_LEGACY_LOG_NAMES";
+PRIVATE const CHAR* g_szEnvironmentLegacyLogNames       = "ESETEST_LEGACY_LOG_NAMES";   // if 2glogs is speciifed, defaults to new names
 PRIVATE const CHAR* g_szEnvironmentUseWttLog            = "ESE_WTT_LOG";
-PRIVATE const CHAR* g_szEnvironmentPctWidenApis         = "PCTWIDEAPIS";
-PRIVATE const CHAR* g_szEnvironmentPctCompression       = "PCTCOMPRESSION";
-PRIVATE const CHAR* g_szEnvironmentEsetestAssertAction  = "ESETEST_ASSERT_ACTION";
-PRIVATE const CHAR* g_szEnvironmentEseAssertAction      = "ESE_ASSERT_ACTION";
-PRIVATE const CHAR* g_szEnvironmentExceptionAction      = "ESE_EXCEPTION_ACTION";
-PRIVATE const CHAR* g_szEnvironmentShadowLog            = "ESETEST_SHADOW_LOGS";
+PRIVATE const CHAR* g_szEnvironmentPctWidenApis         = "PCTWIDEAPIS";            //if unicode filepath is specified, this is the perentage of widen APIs called by 
+PRIVATE const CHAR* g_szEnvironmentPctCompression       = "PCTCOMPRESSION";             // <0: nothing is changed from what is passed when creating/setting columns; 0-100: defines the percentage of compressed data.
+PRIVATE const CHAR* g_szEnvironmentEsetestAssertAction  = "ESETEST_ASSERT_ACTION";      // defines JET_paramAssertAction
+PRIVATE const CHAR* g_szEnvironmentEseAssertAction      = "ESE_ASSERT_ACTION";      // defines JET_paramAssertAction
+PRIVATE const CHAR* g_szEnvironmentExceptionAction      = "ESE_EXCEPTION_ACTION";   // defines JET_paramExceptionAction
+PRIVATE const CHAR* g_szEnvironmentShadowLog            = "ESETEST_SHADOW_LOGS";    // determines if we should set JET_paramEmitLogDataCallback
 
+// Global Variables
 PRIVATE bool        g_fLoggingInitialized           = false;
-PRIVATE BOOL        gfLogToFile                     = FALSE;
-PRIVATE bool        g_fEnableWritingToResultsTxt    = true;
+PRIVATE BOOL        gfLogToFile                     = FALSE;    // Indicates whether the logging was enabled to begin with
+PRIVATE bool        g_fEnableWritingToResultsTxt    = true;     // Should almost always be true
+// const long           kStandardRandMax    = (1L<<30) - 2;
 PRIVATE CRITICAL_SECTION    gcsLogging;
 PRIVATE BOOL        g_fUsingShadowLog               = FALSE;
 
 #if 0
+// Indicates whether any of the Jet calls failed.
 BOOL g_fERROR   = FALSE;
 #endif
 
+// Eventually this should be accessible via the registry or environment.
+// Then the 'volatile' can be removed (I don't want the compiler to optimize
+// it away).
+// Currently in order to use this, it is necessary to edit it with
+// the debugger.
 volatile
 DWORD       g_fEsetestBreakOnCall   = 0;
 
 
+//----------------
+// Constants
 
 const char*
 SzEsetestEseutil()
@@ -209,6 +253,8 @@ WszEsetestEseutil()
     return wszEseutil;
 }
 
+//----------------
+// Constants
 
 const char*
 SzEsetestEseDll()
@@ -525,6 +571,8 @@ WszEsetestEsebackEventSource()
 }
 
 
+//-----------------------
+// Naming
 
 const char*
 SzEsetestGetStartDotLog()
@@ -710,7 +758,7 @@ EsetestGetLogGenFromNameA(
         char szJetTmpLogNameWithoutExt[JET_BASE_NAME_LENGTH + 4];
         strcpy_s(szJetTmpLogNameWithoutExt, _countof(szJetTmpLogNameWithoutExt), szBase );
         strcat_s(szJetTmpLogNameWithoutExt, _countof(szJetTmpLogNameWithoutExt), "tmp" );
-        if(6 == strlen(szJetTmpLogNameWithoutExt) &&
+        if(6 == strlen(szJetTmpLogNameWithoutExt) &&    // first clause protects from malformed base name
             0 == _stricmp(szJetTmpLogNameWithoutExt, szLogNameWithoutExt))
         {
             lGen = 0;
@@ -737,7 +785,7 @@ EsetestGetLogGenFromNameW(
         wchar_t wszJetTmpLogNameWithoutExt[JET_BASE_NAME_LENGTH + 4];
         wcscpy_s(wszJetTmpLogNameWithoutExt, _countof(wszJetTmpLogNameWithoutExt), wszBase );
         wcscat_s(wszJetTmpLogNameWithoutExt, _countof(wszJetTmpLogNameWithoutExt), L"tmp" );
-        if(6 == wcslen(wszJetTmpLogNameWithoutExt) &&
+        if(6 == wcslen(wszJetTmpLogNameWithoutExt) &&   // first clause protects from malformed base name
             0 == _wcsicmp(wszJetTmpLogNameWithoutExt, wszLogNameWithoutExt))
         {
             lGen = 0;
@@ -765,6 +813,8 @@ WszEsetestPerfSummaryXml()
 }
 
 
+//-----------------------
+// Configuration
 
 class EsetestConfig
 {
@@ -781,6 +831,7 @@ class EsetestConfig
         bool    m_fMultiInstanceBackupSupported;
         bool    m_fRunningStress;
 
+        // WTT-related logging stuff
         bool    m_fWttLog;
         HMODULE m_hmodWttLog;
         LONG    m_hdevWttLog;
@@ -808,12 +859,16 @@ class EsetestConfig
             m_fVerboseInternalLogging = false;
 
 
+            // ESE97
             m_fScrubbingSupported = true;
 
+            // ESE98+
+            // ESENT from XP forward
             m_fMultiInstanceSupported = true;
 
             m_fPrepInsertCopyDeleteOriginalSupported = true;
 
+            // ESE97+
             m_fParamCacheSizeMaxSupported = true;
 
             m_fBackupSupported = true;
@@ -845,6 +900,8 @@ class EsetestConfig
             m_hmodEsebackDll = NULL;
             InitializeCriticalSection( &m_csEsebackDll );
 
+            // HACK:
+            // This does not have anything to do with EsetestConfig.
             InitializeCriticalSection( &gcsLogging );
 
         }
@@ -869,6 +926,7 @@ class EsetestConfig
                 m_hmodEsebackDll = NULL;
             }
 
+            // I assume that in order to be called by the destructor, they must have been initialized properly.
             DeleteCriticalSection( &m_csEseDll );
             DeleteCriticalSection( &m_csEsebackDll );
             DeleteCriticalSection( &gcsLogging );
@@ -876,8 +934,17 @@ class EsetestConfig
 }
 ;
 
+///////////////////////////////////////////////////////////////
+// IRandom
+////////////////////////////////////////////////////////////////
 
+// This is a copy/paste of part of the random number generator.
+// The reason for this is that many tests rely on seeding the random generator
+// with a known seed, insert data and then re-seed to that value and search for
+// the data. This may be aliased by internal functions in esetest.dll that also
+// use the random generator. Ex: PCTWIDEAPIS and PCTCOMPRESSION.
 
+// This is Thread-local
 _declspec( thread ) static long gIStandardRandSeed = 1;
 
 long IGetStandardSeed( void )
@@ -900,6 +967,7 @@ long IRand( void )
 
 long IRandRange( long min, long max )
 {
+    // Shouldn't happen, but just in case...
     if ( max < min ){
         max = min;
     }
@@ -913,6 +981,7 @@ __int64 IRand64( void )
 
 __int64 IRand64Range( __int64 min, __int64 max )
 {
+    // Shouldn't happen, but just in case...
     if ( max < min ){
         max = min;
     }
@@ -1019,6 +1088,8 @@ FEsetestMultiInstanceBackupSupported()
 bool
 FEsetestLongKeysSupported()
 {
+    // E12 or Longhorn
+    // EXCHANGE12_CODEMERGE: Hasn't been done yet.
     if ( FEsetestVerifyVersion( EsetestEseFlavourEse, 8, 0, 0, 0 ) || FEsetestVerifyVersion( EsetestEseFlavourEsent, 6, 0, 0, 0 ) )
     {
         return true;
@@ -1032,6 +1103,8 @@ FEsetestLongKeysSupported()
 bool
 FEsetestTracingSupported()
 {
+    // E12 or Longhorn
+    // EXCHANGE12_CODEMERGE: Hasn't been done yet.
     if ( FEsetestVerifyVersion( EsetestEseFlavourEse, 8, 0, 0, 0 ) || FEsetestVerifyVersion( EsetestEseFlavourEsent, 6, 0, 0, 0 ) )
     {
         return true;
@@ -1049,6 +1122,7 @@ FEsetestFeaturePresent(
 {
     bool    fRet = false;
 
+    // TODO: table-based.
     switch ( feature )
     {
         case EseFeatureEightK:
@@ -1088,6 +1162,9 @@ FEsetestFeaturePresent(
             }
             break;
         case EseFeature2GLogs:
+            // Checked into vbl_srv_esent on June 17 (changelist 80063), but unsure when it will make it to winmain.
+            // NOTE: It's a beta2 feature, so it will make it into winmain at circa build 5215. But for now let's use
+            // an environment variable override.
             if ( FEnvironmentVariableSet( g_szEnvironment2gLogs ) )
             {
                 fRet = true;
@@ -1098,6 +1175,7 @@ FEsetestFeaturePresent(
             }
             break;
         case EseFeatureApisExportedWithA:
+            // this is part of Unicode file path feature. let us make it avaiable for Vista/LH ESENT and Ex12 ESE
             if ( FEsetestVerifyVersion( EsetestEseFlavourEse, 8, 0, 0, 0 ) || FEsetestVerifyVersion( EsetestEseFlavourEsent, 6, 0, 0, 0 ) )
             {
                 fRet = true;
@@ -1245,7 +1323,7 @@ FEsetestFeaturePresent(
                 fRet = true;
             break;
 
-        case EseFeatureReadCoalescing:
+        case EseFeatureReadCoalescing: // This counter has never been added.
             if( FEsetestVerifyVersion( EsetestEseFlavourEse, 99, 999, 999, 999) )
                 fRet = true;
             break;
@@ -1286,17 +1364,17 @@ FEsetestFeaturePresent(
             break;
 
         case EseFeatureLogRewrite:
-            if( FEsetestVerifyVersion( EsetestEseFlavourEse, 15, 0, 0, 102 ) || FEsetestVerifyVersion( EsetestEseFlavourEsent, 6, 1, 0, 7800 ) )
+            if( FEsetestVerifyVersion( EsetestEseFlavourEse, 15, 0, 0, 102 ) || FEsetestVerifyVersion( EsetestEseFlavourEsent, 6, 1, 0, 7800 ) )    //  ASC_FUTURE: fix esent version
                 fRet = true;
             break;
 
         case EseFeatureDatabaseShrink:
-            if( FEsetestVerifyVersion( EsetestEseFlavourEse, 15, 0, 0, 591 ) || FEsetestVerifyVersion( EsetestEseFlavourEsent, 6, 2, 0, 9268 ) )
+            if( FEsetestVerifyVersion( EsetestEseFlavourEse, 15, 0, 0, 591 ) || FEsetestVerifyVersion( EsetestEseFlavourEsent, 6, 2, 0, 9268 ) )    //  MAC_FUTURE: fix esent version
                 fRet = true;
             break;
 
         case EseFeatureScrubbingOnOff:
-            if( FEsetestVerifyVersion( EsetestEseFlavourEse, 15, 0, 0, 901 ) || FEsetestVerifyVersion( EsetestEseFlavourEsent, 6, 2, 0, 9268 ) )
+            if( FEsetestVerifyVersion( EsetestEseFlavourEse, 15, 0, 0, 901 ) || FEsetestVerifyVersion( EsetestEseFlavourEsent, 6, 2, 0, 9268 ) )    //  MAC_FUTURE: fix esent version
                 fRet = true;
             break;
 
@@ -1322,6 +1400,8 @@ EsetestColtypMax()
 
     if ( 0 == coltypmax )
     {
+        // premature optimization: minimize the calls to FEsetestVerifyVersion().
+        // Note that it is NOT properly synchronized, but that's not a problem here.
         if ( !fFetched )
         {
 #ifdef ESE_FLAVOUR_IS_ESE
@@ -1331,28 +1411,39 @@ EsetestColtypMax()
             const size_t    coltypmaxDefault = JET_coltypSLV;
 #endif
 
+            // Pre-Longhorn would assert/crash on JET_instanceNil
             err = DynLoadJetGetSystemParameter( 0, 0, JET_paramMaxColtyp, &coltypmaxFetched, NULL, 0 );
 
             if ( FEsetestVerifyVersion( EsetestEseFlavourEsent, 6, 0, 0, 0 ) )
             {
+                //fFetchShouldSucceed = true;
                 fFetchShouldSucceed = false;
             }
             else if ( FEsetestVerifyVersion( EsetestEseFlavourEse, 8, 0, 0, 0 ) )
             {
+                // EXCHANGE12_CODEMERGE: Exchange 12 _will_ support fetching JET_paramMaxColtyp, but that modification has
+                // not been integraged yet.
+                //
+                // fFetchShouldSucceed = true;
                 fFetchShouldSucceed = false;
             }
 
             if ( fFetchShouldSucceed )
             {
+                // 2004.12.18 Re-enable the asserts at some later point in time.
+                // EXCHANGE12_CODEMERGE: AssertM( JET_errSuccess == err );
             }
             else
             {
+                // 2004.12.18 Re-enable the asserts at some later point in time.
+                // EXCHANGE12_CODEMERGE: AssertM( JET_errInvalidParameter == err );
             }
 
             if ( fFetchShouldSucceed && JET_errSuccess == err )
             {
                 coltypmax = coltypmaxFetched;
 
+                // This assert will fail if any coltyps were added after JET_paramMaxColtyp was implemented.
                 AssertM( coltypmaxFetched == JET_coltypMax );
             }
             else
@@ -1372,14 +1463,18 @@ EsetestColtypMax()
     return coltypmax;
 }
 
+// Longhorn changed the size of JET_ccolKeyMost
 size_t
 EsetestCColKeyMost()
 {
     static size_t   ccolKeyMost = 0;
     static bool     fFetched    = false;
 
+    // premature optimization: minimize the calls to FEsetestVerifyVersion().
+    // Note that it is NOT properly synchronized, but that's not a problem here.
     if ( !fFetched )
     {
+        // EXCHANGE12_CODEMERGE:
         if ( FEsetestVerifyVersion( EsetestEseFlavourEsent, 6, 0, 0, 0 )
             || FEsetestVerifyVersion( EsetestEseFlavourEse, 9, 0, 0, 0 ) )
         {
@@ -1414,11 +1509,61 @@ FEsetestValidVersion(
     __in EsetestEseVersion  eseversion
 )
 {
+    // TODO:
     return true;
+/*
+    bool                fRet    = false;
+    const EsetestEseVersion eseversionnobuild   = static_cast< EsetestEseVersion >( eseversion & ~0xffff );
 
+    for ( size_t i = 0; i < sizeof2( rgKnownVersions ); ++i )
+    {
+        if ( eseversionnobuild == rgKnownVersions[ i ] )
+        {
+            fRet = true;
+            break;
+        }
+    }
+
+    // If it's not found, it's a new build!
+    AssertM( fRet );
+    return fRet;
+*/
 }
 
+/*
+JET_ERR
+EsetestGetEseVersion(
+    __out   EsetestEseVersion*  peseversion
+)
+{
+    JET_ERR     err     = JET_errSuccess;
 
+    EsetestEseVersion       eseversion;
+    EsetestEseFlavour       flavour     = EsetestEseFlavourNil;
+    UINT                    verMajor    = 0;
+    UINT                    verMinor    = 0;
+    UINT                    verSp       = 0;
+    UINT                    verBuild    = 0;
+
+    if ( NULL == peseversion )
+    {
+        AssertM( 0 && "bad param" );
+        err = JET_errInvalidParameter;
+        goto Cleanup;
+    }
+    *peseversion = 0;
+
+    Call( EsetestGetEseVersionParts( &flavour, &verMajor, &verMinor, &verSp, &verBuild ) );
+    AssertM( EsetestEseFlavourNil != flavour );
+
+    eseversion = static_cast< EsetestEseVersion >( EsetestEseVersionFromParts( flavour, verMajor, verMinor, verSp, verBuild ) );
+    AssertM( FEsetestValidVersion( eseversion ) );
+
+
+Cleanup:
+    return err;
+}
+*/
 struct EseVersionBuildToRelease {
     UINT    build;
     UINT    major;
@@ -1427,24 +1572,26 @@ struct EseVersionBuildToRelease {
 }
 ;
 
+// KB 158530
+// Build numbers and release dates for Exchange
 PRIVATE
 EseVersionBuildToRelease
 rgeseversionbuildtoreleaseEse[] = {
-    { 4417, 6, 0, 0 },
-    { 4712, 6, 0, 1 },
-    { 5762, 6, 0, 2 },
-    { 6249, 6, 0, 3 },
+    { 4417, 6, 0, 0 },  // Pt RTM
+    { 4712, 6, 0, 1 },  // Pt SP1
+    { 5762, 6, 0, 2 },  // Pt SP2
+    { 6249, 6, 0, 3 },  // Pt SP3
 
-    { 6944, 6, 5, 0 },
-    { 7226, 6, 5, 0 },
+    { 6944, 6, 5, 0 },  // Ti RTM
+    { 7226, 6, 5, 0 },  // Ti SP1
 };
 
 PRIVATE
 EseVersionBuildToRelease
 rgeseversionbuildtoreleaseEsent[] = {
-    { 3939, 5, 0, 0 },
-    { 2600, 5, 1, 0 },
-    { 3790, 5, 2, 0 },
+    { 3939, 5, 0, 0 },  // 2000 (built out of Exchange, need to fix it up later)
+    { 2600, 5, 1, 0 },  // XP
+    { 3790, 5, 2, 0 },  // 2003
 };
 
 
@@ -1473,6 +1620,8 @@ EsetestFillInSpAndBuild(
             const EseVersionBuildToRelease* pver = &rgeseversionbuildtoreleaseEse[ i ];
             if ( buildno == pver->build )
             {
+                // Exchange does not use the spbuildno. Instead they produce new builds.
+                // e.g. PtRtm is 6.0.4417.5, but PtSp3 is 6.0.6249.0
                 *pverSp = pver->sp;
                 AssertM( 0 != buildno );
                 *pverBuild = buildno;
@@ -1485,10 +1634,15 @@ EsetestFillInSpAndBuild(
         if ( spbuildno != 0 )
         {           
             if ( fileversionHighMajor < 6 ){
+                // For SPs, NT will increase the spbuildno
+                // e.g. XpRtm is 5.1.2600.0, and XpSp2 is 5.1.2600.2180
                 *pverBuild = spbuildno;
                 *pverSp = ( spbuildno / 1000 );
+            // got  6.0.5270.7 for CTP, so it could be zero
+            //AssertM( *pverSp > 0 );
             }
             else{
+                // Kernel changes to correctly formulate CSDVersion string from SP#, build, release type.
                 switch ( fileversionHighMajor ){
                     case 6:
                         if ( buildno >= 5600 && buildno < 6000 ){
@@ -1586,6 +1740,7 @@ EsetestGetEseVersion(
 #ifndef ESE_CORESYSTEM_WORK_AROUND
         *pfChecked = ( pfixedfileinfo->dwFileFlags & VS_FF_DEBUG ) ? true : false;
 #else
+        // phone debug esent.dll somehow does not have the debug bit set - assume it is the same as current binary
 #ifdef DEBUG
         *pfChecked = true;
 #else
@@ -1704,11 +1859,13 @@ EsetestEseVersionToParts(
     ULARGE_INTEGER  li;
     li.QuadPart = version;
 
+    // Mask the Flavour
     *pflavour = static_cast< EsetestEseFlavour >( ( li.HighPart >> 28 ) & 0xf );
     *pverMajor  = (HIWORD( li.HighPart ) & 0xfff);
     *pverMinor  = LOWORD( li.HighPart );
     Call( EsetestFillInSpAndBuild( pflavour, *pverMajor, *pverMinor, li.LowPart, pverSp, pverBuild ) );
 
+    // win2000 fixup
     if ( 3939 == *pverBuild )
     {
         AssertM( 6 == *pverMajor );
@@ -1737,6 +1894,7 @@ EsetestEseFileVersionToParts(
     ULARGE_INTEGER  li;
     li.QuadPart = version;
 
+    // Mask the Flavour
     *pflavour       = static_cast< EsetestEseFlavour >( ( li.HighPart >> 28 ) & 0xf );
     *pverMajor      = (HIWORD( li.HighPart ) & 0xfff);
     *pverMinor      = LOWORD( li.HighPart );
@@ -1748,9 +1906,11 @@ EsetestEseFileVersionToParts(
 
 bool
 FEsetestIsBugFixed(
-    __in    UINT                bugnumberEse,
-    __in    UINT                bugnumberEsent
+    __in    UINT                bugnumberEse,       // Can be 0
+    __in    UINT                bugnumberEsent      // Can be 0
 )
+// Sometimes a bug is filed in either ESE or ESENT, but it will eventually be fixed in both.
+// Therefore we must allow the caller to specify a bug number of zero.
 {
     bool    fRet    = false;
     struct EseBugs{
@@ -1770,28 +1930,38 @@ FEsetestIsBugFixed(
 
     static const EseBugs rgesebugsEse[] =
     {
-        { 11,   6, 0, 0, 0,     0,      5, 2, 1, 0 },
-        { 0,    6, 0, 0, 0,     12,     5, 2, 1, 0 },
-        { 0,    6, 0, 0, 0,     13,     6, 2, 1, 0 },
-        { 14,   6, 0, 0, 0,     15,     5, 2, 1, 0 },
-        { 0,    6, 0, 0, 0,     16,     6, 1, 1, 0 },
+        // Test cases for the function.
+        { 11,   6, 0, 0, 0,     0,      5, 2, 1, 0 },   // specify ESE only
+        { 0,    6, 0, 0, 0,     12,     5, 2, 1, 0 },   // specify ESENT only
+        { 0,    6, 0, 0, 0,     13,     6, 2, 1, 0 },   // not supported
+        { 14,   6, 0, 0, 0,     15,     5, 2, 1, 0 },   // both bugs
+        { 0,    6, 0, 0, 0,     16,     6, 1, 1, 0 },   // Longhorn+
 
-        { 0,    8, 0, 0, 365,   950134, 6, 0, 0, 5069 },
-        { 0,    8, 0, 0, 596,   1567397,    6, 0, 0, 5362 },
-        { 0,    0xFFFFFFFF, 0, 0, 0,    1634256,    0xFFFFFFFF, 0, 0, 0 },
-        { 0,    8, 0, 0, 596,   1636877,    6, 0, 0, 5444 },
-        { 0,    8, 0, 0, 596,   1636979,    6, 0, 0, 5444 },
-        { 95306,    8, 0, 0, 663,   0,  6, 1, 0, 6470 },
-        { 41418,    14, 0, 0, 187,  0,  6, 1, 0, 6470 },
+        { 0,    8, 0, 0, 365,   950134, 6, 0, 0, 5069 }, // Backup API needs to check for buffer alignment.
+        { 0,    8, 0, 0, 596,   1567397,    6, 0, 0, 5362 }, // JetGetPageInfo should ignore PGHDR::ibMicFree.
+        { 0,    0xFFFFFFFF, 0, 0, 0,    1634256,    0xFFFFFFFF, 0, 0, 0 }, // JetOSSnapshot APIs should fail with JET_errOSSnapshotTimeOut if the session times out.
+        { 0,    8, 0, 0, 596,   1636877,    6, 0, 0, 5444 }, // JetOSSnapshotFreezeA should validate pointers before JetOSSnapshotFreezeEx.
+        { 0,    8, 0, 0, 596,   1636979,    6, 0, 0, 5444 }, // JetOSSnapshotAbort doesn't validate grbit.
+        { 95306,    8, 0, 0, 663,   0,  6, 1, 0, 6470 }, // crash attempting to update an index with multi-valued key columns and more than 6 key segments (add test case).
+        { 41418,    14, 0, 0, 187,  0,  6, 1, 0, 6470 }, // Hang in BTISelectRightSplit.
     }
     ;
 
-
+/*
+    static const EseBugs esebugsEsent[] =
+    {
+        // ESENT
+        { 950134,   6, 0, 0, 5069 },
+    }
+    ;
+*/
     const size_t    cbugsEse    = sizeof2( rgesebugsEse );
 
+//  const size_t    cbugsEsent  = sizeof2( esebugsEsent );
 
     const EseBugs*      pesebugsT   = NULL;
 
+    // Find the element
     for ( size_t i = 0; i < cbugsEse; ++i )
     {
         if ( ( bugnumberEse > 0 && bugnumberEse == rgesebugsEse[ i ].m_bugnumberEse )
@@ -1805,12 +1975,14 @@ FEsetestIsBugFixed(
 
     if ( pesebugsT )
     {
+        // Has it been fixed in ESE?
         if ( FEsetestVerifyVersion( EsetestEseFlavourEse, pesebugsT->m_verMajorEse, pesebugsT->m_verMinorEse, pesebugsT->m_verSpEse, pesebugsT->m_verBuildEse ) )
         {
             fRet = true;
             goto Cleanup;
         }
 
+        // Has it been fixed in ESENT?
         if ( FEsetestVerifyVersion( EsetestEseFlavourEsent, pesebugsT->m_verMajorEsent, pesebugsT->m_verMinorEsent, pesebugsT->m_verSpEsent, pesebugsT->m_verBuildEsent ) )
         {
             fRet = true;
@@ -1819,9 +1991,44 @@ FEsetestIsBugFixed(
     }
 
 
+/*
+    if ( ppesebugsT )
+    {
+        for ( size_t i = 0; i < 2; ++i )
+        {
+            EseBugs*    pesebugsT   = pesebugsT[ i ];
+            if ( FEsetestVerifyVersion( pesebugsT->m_flavour, pesebugsT->m_verMajor, pesebugsT->m_verMinor, pesebugsT->m_verSp, pesebugsT->m_verBuild ) )
+            {
+                fRet = true;
+                goto Cleanup;
+            }
+        }
+    }
+*/
 
+/*
+    // Now to check for ESENT bugs
+    if ( bugnumberEsent > 0 )
+    {
+        for ( size_t i = 0; i < cbugsEsent; ++i )
+        {
+            if ( bugnumberEsent == cbugsEsent[ i ].m_bugnumber )
+            {
+                pesebugsT = &cbugsEsent[ i ];
+                break;
+            }
+        }
+    }
 
-
+    if ( pesebugsT )
+    {
+        if ( FEsetestVerifyVersion( EsetestEseFlavourEsent, pesebugsT->m_verMajor, pesebugsT->mverMinor, pesebugsT->mverSp, pesebugsT->mverBuild ) )
+        {
+            fRet = true;
+            goto Cleanup;
+        }
+    }
+*/
 Cleanup:
     return fRet;
 }
@@ -1832,8 +2039,9 @@ FEsetestVerifyVersion(
     __in    UINT                verMajor,
     __in    UINT                verMinor,
     __in    UINT                verSp,
-    __in    UINT                verBuild
+    __in    UINT                verBuild        // can be zero
 )
+// Returns whether the current version of ESE meets the minimum required.
 {
     bool    fRet    = false;
     JET_ERR err     = JET_errSuccess;
@@ -1852,6 +2060,7 @@ FEsetestVerifyVersion(
         goto Cleanup;
     }
 
+    // Check the Major Version
     if ( verMajorActual > verMajor )
     {
         fRet = true;
@@ -1862,6 +2071,7 @@ FEsetestVerifyVersion(
         goto Cleanup;
     }
 
+    // Check the Minor Version
     if ( verMinorActual > verMinor )
     {
         fRet = true;
@@ -1872,6 +2082,7 @@ FEsetestVerifyVersion(
         goto Cleanup;
     }
 
+    // Check the Sp Version
     if ( verSpActual > verSp )
     {
         fRet = true;
@@ -1882,6 +2093,7 @@ FEsetestVerifyVersion(
         goto Cleanup;
     }
 
+    // Check the Build Version
     if ( verBuildActual > verBuild )
     {
         fRet = true;
@@ -1892,6 +2104,7 @@ FEsetestVerifyVersion(
         goto Cleanup;
     }
 
+    // exactly the required version
     AssertM( verMajor == verMajorActual );
     AssertM( verMinor == verMinorActual );
     AssertM( verSp == verSpActual );
@@ -1910,16 +2123,18 @@ FEsetestWidenParameters()
 
     bool fRet;
 
+    //tprintf (  "PctWideApis is %d" CRLF, g_esetestconfig.m_pctWideApis );
     if ( FEsetestAlwaysNarrow() == true ) return false;
 
+    // If it's 0 or 100, don't bother checking the random number.
 
     if ( 0 == g_esetestconfig.m_pctWideApis )
     {
-        fRet = false;
+        fRet = false;   //no widen
     }
     else if ( 100 == g_esetestconfig.m_pctWideApis )
     {
-        fRet = true;
+        fRet = true;    //all widen
     }
     else
     {
@@ -2038,6 +2253,7 @@ HmodEsetestEsebackDll()
 
 ULONG64
 QWEsetestQueryPerformanceFrequency()
+// Returns the frequency of the high-resolution performance counter, in counters per sec.
 {
     LARGE_INTEGER frequency;
 
@@ -2053,6 +2269,8 @@ QWEsetestQueryPerformanceFrequency()
 
 ULONG64
 QWEsetestQueryPerformanceCounter()
+// Returns the number of milliseconds, using QueryPerformanceFrequency()
+// if possible.
 {
     static bool fCheckedForQpfSupport       = false;
     static bool fUseQueryPerformanceCounter = false;
@@ -2062,8 +2280,10 @@ QWEsetestQueryPerformanceCounter()
     if ( !fCheckedForQpfSupport )
     {
         LARGE_INTEGER   liTemp;
+        // Not synchronized, but that shouldn't be a problem.
         if ( QueryPerformanceFrequency( &liTemp ) )
         {
+            // Since we want a result in milliseconds.
             ulDivisor = liTemp.QuadPart / 1000;
             fUseQueryPerformanceCounter = true;
         }
@@ -2081,17 +2301,21 @@ QWEsetestQueryPerformanceCounter()
     }
 }
 
+// Prototype
 PRIVATE int AppendToFileHandleFromFileHandle(HANDLE hfileSrc, HANDLE hfileDest);
 PRIVATE VOID CustomEseInitTest();
 PRIVATE VOID CustomEsentInitTest();
 PRIVATE VOID CustomEseAndEsentInitTest();
 
+// Stuff for asserts:
 #define Assert( exp )               AssertSz( exp, #exp )
 
+// Also for assert stuff, but this is to minimise code change when we steal new versions from error.cxx
 #ifndef LOCAL
 #define LOCAL   PRIVATE
 #endif
 
+// These globals help debugging dumps.
 static DWORD pidAssert;
 static DWORD tidAssert;
 static const _TCHAR * szFilenameAssert;
@@ -2112,6 +2336,7 @@ const WCHAR wszAssertPrompt2[]  = L"Choose OK to continue execution (attaching t
 #define DwUtilProcessId()               ::GetCurrentProcessId()
 #define DwUtilThreadId()                ::GetCurrentThreadId()
 
+// When can't it be? I think only in DllMain()
 BOOL IsDebuggerAttachable();
 BOOL IsDebuggerAttached();
 
@@ -2119,6 +2344,9 @@ void UserDebugBreakPoint();
 
 #define SzUtilImageVersionName()    _T( "unknown_esetest_binary.exe" )
 
+/////////////////////////////////////////////////////////////////////
+// Format GetLastError in a string
+/////////////////////////////////////////////////////////////////////
 void FormatLastError(
     _Out_writes_z_( iLength ) char* szTemp,
     _In_ const int iLength
@@ -2128,6 +2356,9 @@ void FormatLastError(
     FormatSpecificError( szTemp, iLength, dwGle );
 }
 
+/////////////////////////////////////////////////////////////////////
+// Format specific error to a string
+/////////////////////////////////////////////////////////////////////
 void FormatSpecificError(
     __in_ecount( iLength ) char* szTemp,
     _In_ const int iLength,
@@ -2143,23 +2374,29 @@ void FormatSpecificError(
         FORMAT_MESSAGE_IGNORE_INSERTS,
         NULL,
         dwError,
-        MAKELANGID(LANG_NEUTRAL, SUBLANG_DEFAULT),
+        MAKELANGID(LANG_NEUTRAL, SUBLANG_DEFAULT), // Default language
         (LPTSTR) &lpMsgBuf,
         0,
         NULL
     );
 
+    // WinSE teams hits AV. So we need to check if FormatMessage() succeeds.
     if ( cchWritten == 0 )
     {
+        // fails
         StringCchPrintfA( szTemp, iLength, "FormatMessage() for error %d failed with %d.",
                           dwError, GetLastError() );
     } else 
     {
+        // succeeds
         StringCchPrintfA( szTemp, iLength, "%s", (LPCTSTR)lpMsgBuf);
         LocalFree( lpMsgBuf );
     }
 }
 
+/////////////////////////////////////////////////////////////////////
+// Memory-related functions
+/////////////////////////////////////////////////////////////////////
 static HANDLE   g_hHeap = NULL;
 
 void*
@@ -2169,11 +2406,16 @@ PvMemoryHeapAlloc(
 {
     if ( !g_hHeap )
     {
+        // It should have been allocated in DllMain(), but sometimes we statically
+        // link, in which case DllMain() is never run.
         g_hHeap = GetProcessHeap();
     }
     AssertM( g_hHeap );
 
+    // During stress runs, out of memory errors are more likely.
 
+    // Retry 20 times, exponentially backing off.
+    // 20 times means the last attempt will take a bit over 17 minutes.
     size_t  cmsecBackoff    = 1;
     const size_t    cRetries    = g_esetestconfig.m_fRunningStress ? 20 : 4;
 
@@ -2188,6 +2430,7 @@ PvMemoryHeapAlloc(
         Sleep( cmsecBackoff );
     }
 
+    // Drat. Retrying didn't work.
     return NULL;
 }
 
@@ -2216,17 +2459,22 @@ BOOL WINAPI DllMainEsetest( HANDLE hinstDLL, DWORD dwReason, LPVOID lpvReserved 
     switch( dwReason ) {
         case DLL_PROCESS_ATTACH: {
 
+            // This should be run before any possible allocations.
             g_hHeap = GetProcessHeap();
 
+            // We do not want to see thread notifications.
             (void)DisableThreadLibraryCalls( (HMODULE)hinstDLL );
 
+            // init /GS cookie.
             __security_init_cookie();
 
+            // Init CRT.
             fResult = fResult && _CRT_INIT( hinstDLL, dwReason, lpvReserved );
 
             break;
         }
         case DLL_PROCESS_DETACH: {
+            // Terminate CRT.
             (void)_CRT_INIT( hinstDLL, dwReason, lpvReserved );
 
             break;
@@ -2246,6 +2494,9 @@ BOOL WINAPI DllMainEsetest( HANDLE hinstDLL, DWORD dwReason, LPVOID lpvReserved 
 
 
 
+/////////////////////////////////////////////////////////////////////
+// Logging utility functions
+/////////////////////////////////////////////////////////////////////
 
 void
 EsetestSetResultsTxt(
@@ -2267,9 +2518,12 @@ EsetestSetResultsLog(
     RESULTS_LOG[ cchResultsLog - 1 ] = '\0';
 }
 
-void InitLogging( BOOL fLogToDisk  )
+void InitLogging( BOOL fLogToDisk /* = TRUE */ )
 {
     if ( !g_fLoggingInitialized ) {
+        // Moved the InitializeCriticalSection() to the global object.
+        // This means that InitLogging() won't actually re-initialize the logging
+        // after TermLogging() is called.
         g_fLoggingInitialized = true;
     }
     gfLogToFile = fLogToDisk;
@@ -2324,14 +2578,16 @@ void InitLogging( BOOL fLogToDisk  )
             goto Cleanup;
         }
 
+        // Device string syntax is:
+        // $<device_type>:<parameter_list>($<child_device1>[; $<child_device2>; ...])
         hr = pcfg->pfnWTTLogCreateLogDevice(
             L"$LocalPub($LogFile:"
-            L"file=\"results_esetest.xml\""
-            L",Shared=true"
-            L",Compressed=false"
-            L",CRC=true"
-            L",writemode=append"
-            L",Nofscache=true"
+            L"file=\"results_esetest.xml\"" // File name. By default, this will be the name of the EXE file with .WTL extension. If you want to specify the full path name, you need to escape the file name with double-quote. For example: file="c:\temp\myxmllog.xml"
+            L",Shared=true"         // Specifies whether the log file is shared between more than one process. This option introduces a minor performance degradation. The log file is always open/created with shared access level in the OS. Default = false
+            L",Compressed=false"    // Specifies whether the log file is compressed. Default = true if the file is created on an NTFS volume.
+            L",CRC=true"            // Specifies whether the log file needs to be CRCÆd at the end. Default = false
+            L",writemode=append"    // How the log file should be opened. Default = overwrite
+            L",Nofscache=true"      // Specifies whether the file system cache needs to be turned off. Default = false Warning: if this option is specified, logging will become extremely slow.
             L";$Console)",
             &pcfg->m_hdevWttLog
         );
@@ -2346,13 +2602,14 @@ void InitLogging( BOOL fLogToDisk  )
     }
 Cleanup:
     ;
-#endif
+#endif // BUILD_ENV_IS_NT
 }
 
 void TermLogging( void )
 {
     if ( g_fLoggingInitialized )
     {
+        // gcsLogging will be deleted by the global destructor on DLL detach.
         g_fLoggingInitialized = false;
     }
 
@@ -2363,6 +2620,8 @@ void TermLogging( void )
     if ( pcfg->m_fWttLog )
     {
         pcfg->m_hmodWttLog = LoadLibraryExW( L"wttlog.dll", NULL, 0 );
+        // Device string syntax is:
+        // $<device_type>:<parameter_list>($<child_device1>[; $<child_device2>; ...])
         hr = pcfg->pfnWTTLogCloseLogDevice (
             pcfg->m_hdevWttLog,
             NULL
@@ -2378,7 +2637,7 @@ void TermLogging( void )
     }
 Cleanup:
     ;
-#endif
+#endif // BUILD_ENV_IS_NT
 }
 
 BOOL EsetestSetLoggingToDisk( BOOL fLogToDisk )
@@ -2386,6 +2645,7 @@ BOOL EsetestSetLoggingToDisk( BOOL fLogToDisk )
     const BOOL  fOldValue = gfLogToFile;
 
     gfLogToFile = fLogToDisk;
+    // By calling InitLogging() here, we allow usage of EsetestSetLoggingToDisk( FALSE ) and tprintf() before InitTest() is called.
     InitLogging( fLogToDisk );
 
     return fOldValue;
@@ -2397,6 +2657,7 @@ BOOL EsetestGetLoggingToDisk()
 }
 
 BOOL EsetestDisableWritingToResultsTxt()
+// I am not providing a corresponding 'enable' because I think this function should be used exceedingly sparingly
 {
     BOOL fOld = g_fEnableWritingToResultsTxt;
     g_fEnableWritingToResultsTxt = false;
@@ -2416,25 +2677,28 @@ EsetestWttVprintf(
     EsetestConfig* const    pcfg = &g_esetestconfig;
     AssertM( pcfg->pfnWTTLogTrace );
     HRESULT     hr;
+    // Yes, this function uses a log of stack space. But WttLog does not do var args yet,
+    // so we will sprintf() to a temporary buffer.
     const size_t    cchBufferIdioticWttLogDoesNotDoVarArgs  = 16384;
     char            rgchBufferIdioticWttLogDoesNotDoVarArgs[ cchBufferIdioticWttLogDoesNotDoVarArgs ];
     StringCchVPrintf( rgchBufferIdioticWttLogDoesNotDoVarArgs, cchBufferIdioticWttLogDoesNotDoVarArgs, szFormat, ap );
 
     hr = pcfg->pfnWTTLogTrace( pcfg->m_hdevWttLog, WTT_LVL_MSG, rgchBufferIdioticWttLogDoesNotDoVarArgs );
+//      hr = pcfg->pfnWTTLogTrace( pcfg->m_hdevWttLog, WTT_LVL_MSG, szFormat, ap );
     if ( FAILED( hr ) )
     {
         printf( "%s(): Failed to pfnWTTLogTrace, hr = %#x. Trying again with vprintf()." CRLF, __FUNCTION__, hr );
         int cchWrittenToScreen = vprintf( szFormat, ap );
         nRC = FAILURE;
     }
-#endif
+#endif // BUILD_ENV_IS_NT
 
     fflush(stdout);
     return nRC;
 }
 
 int EsetestVprintf(
-    __in_opt const char*            szLogFile,
+    __in_opt const char*            szLogFile,          // if NULL, will log to results.log
     __in const JET_GRBIT        level,
     _In_ _Printf_format_string_ const char*         szFormat,
     __in va_list                ap
@@ -2442,9 +2706,10 @@ int EsetestVprintf(
 {
 #ifdef ESE_FLAVOUR_IS_ESE
     AssertM( !g_esetestconfig.m_fWttLog );
-#endif
+#endif // ESE_FLAVOUR_IS_ESE
 
     BOOL    fLogToScreen    = ( ( level & Esetest_bitLogToScreen )  ? TRUE : FALSE );
+    // Do not log to disk if the logging subsystem hasn't been initialized yet.
     BOOL    fLogToDisk      = ( ( g_fLoggingInitialized && ( level & Esetest_bitLogToDisk ) )       ? TRUE : FALSE );
     const bool  fLogTid         = !( level & Esetest_bitLogDoNotLogThreadId );
 
@@ -2462,6 +2727,7 @@ int EsetestVprintf(
     rgchThreadId[ 0 ] = '\0';
     if ( fLogTid )
     {
+        // We will record the thread id in the log as well
         _snprintf( rgchThreadId, sizeof(rgchThreadId), "TID:%lu, ", GetCurrentThreadId() );
         rgchThreadId[ sizeof( rgchThreadId ) - 1 ] = '\0';
     }
@@ -2472,29 +2738,34 @@ int EsetestVprintf(
     {
         return EsetestWttVprintf( szFormat, ap );
     }
-#endif
+#endif // BUILD_ENV_IS_NT
 
 
     EnterCriticalSection( &gcsLogging );
     __try {
         if ( fLogToScreen ) {
+            // Log the text to the console first
             if ( fLogTid ){
                 printf("%s", rgchThreadId );
             }           
             cchWrittenToScreen = vprintf( szFormat, ap );
         }
 
+        // If the user did not turn logging on, then return immediately
+        // before outputting the text to the log file
         if ( !gfLogToFile ) {
             __leave;
         }
 
+        // Likewise if the user just doesn't want it logged to disk.
         if ( !fLogToDisk ) {
             __leave;
         }
 
+        // Open the file and append the text to the file
         for ( int i = 0 ; i < 60 ; i++ ){
             iFileLog = _open( szFileToLogTo,
-                _O_APPEND | _O_CREAT  | _O_SEQUENTIAL | _O_WRONLY | _O_BINARY,
+                _O_APPEND | _O_CREAT /* creates if nonexistent */ | _O_SEQUENTIAL | _O_WRONLY | _O_BINARY,
                 _S_IREAD | _S_IWRITE );
             if ( EOF != iFileLog ) break;
             Sleep( 1000 );
@@ -2552,6 +2823,7 @@ int EsetestVprintf(
             __leave;
         }
 
+        // Append the text to the log file
 
         if ( fLogTid )
         {
@@ -2586,12 +2858,19 @@ int EsetestVprintf(
         if ( NULL != fileLog )
         {
             iTemp = fclose( fileLog );
+            // Ignore the failure case -- what should we do, anyway?
+            // AssertM( 0 == iTemp );
             fileLog = NULL;
 
+            // Apparently you do not need to _close the handle after the file pointer
+            // has been fclose()ed.
             iFileLog = EOF;
         }
         else if ( EOF != iFileLog )
         {
+            // in case the fdopen() failed, _close the _open()ed file.
+            // Ignore the failure case -- what should we do, anyway?
+            // AssertM( 0 == iTemp );
             iFileLog = EOF;
         }
         LeaveCriticalSection( &gcsLogging );
@@ -2646,6 +2925,10 @@ int EsetestVcprintf(
 }
 
 
+/////////////////////////////////////////////////////////////////////
+// Printing
+///////////////////////////////////////////////////////////////
+// Logs to console and results.log, prepending the thread id.
 int tprintf(
     _Printf_format_string_ const char* szFormat,
     ...
@@ -2661,6 +2944,7 @@ int tprintf(
     return nRC;
 }
 
+// Logs to console and results.log.
 int tprintfnothid(
     _Printf_format_string_ const char* szFormat,
     ...
@@ -2678,12 +2962,18 @@ int tprintfnothid(
 }
 
 int tprintfSpecifyTargets(
-    __in_opt const char*            szLogFile,
+    __in_opt const char*            szLogFile,          // if NULL, will log to results.log
     __in const JET_GRBIT level,
     __in _Printf_format_string_ const char* szFormat,
     ...
 )
+/*++ level: one of
+Esetest_bitLogDoNotLog
+Esetest_bitLogToScreen
+Esetest_bitLogToDisk
+Esetest_bitLogToDiskAndScreen
 
+--*/
 {
     int nRC = 0;
     va_list valst;
@@ -2696,12 +2986,18 @@ int tprintfSpecifyTargets(
 }
 
 int tprintfSpecifyTargetsV(
-    __in_opt const char*            szLogFile,
+    __in_opt const char*            szLogFile,          // if NULL, will log to results.log
     __in const JET_GRBIT level,
     __in _Printf_format_string_ const char* szFormat,
     __in va_list        valst
 )
+/*++ level: one of
+Esetest_bitLogDoNotLog
+Esetest_bitLogToScreen
+Esetest_bitLogToDisk
+Esetest_bitLogToDiskAndScreen
 
+--*/
 {
     int nRC = 0;
 
@@ -2731,6 +3027,15 @@ tprintfPerfLog(
     return nRC;
 }
 
+/////////////////////////////////////////////////////////////////////
+// Printing
+// results.txt is the file that contains the summary, like:
+// foo -a -b -q .. FAILED
+// printing to results.txt should therefore be done with cauion (because of how it needs to be parsed)
+// I (SOMEONE, 2002.04.29) am adding this function just to make porting old tests a bit
+// easier. In particular, mverify.
+// (tprintf will print to results.log.)
+///////////////////////////////////////////////////////////////
 int tprintfResultsTxtUseWithCaution(
     _In_ _Printf_format_string_ const char* szFormat,
     ...
@@ -2746,6 +3051,9 @@ int tprintfResultsTxtUseWithCaution(
     return nRC;
 }
 
+/////////////////////////////////////////////////////////////////////
+// Printing with a different foreground colour
+///////////////////////////////////////////////////////////////
 
 int tcprintf(
     _In_ DWORD dColour,
@@ -2765,7 +3073,10 @@ int tcprintf(
 
 
 
-void NTError( BOOL fLogToDisk )
+//////////////////////////////////////////////////////////////
+//  NTError
+//////////////////////////////////////////////////////////////
+void NTError( BOOL fLogToDisk /* = TRUE */)
 {
     DWORD dwGle = GetLastError();
 
@@ -2777,7 +3088,13 @@ void NTError( BOOL fLogToDisk )
     }
 }
 
-int InitTestArgv( const int argc, const char* const argv[], BOOL fLogToDisk , BOOL fWriteFailed  )
+//////////////////////////////////////////////////////////////
+//  InitTest
+//////////////////////////////////////////////////////////////
+int InitTestArgv( const int argc, const char* const argv[], BOOL fLogToDisk /* TRUE */, BOOL fWriteFailed /* TRUE */ )
+// returns:
+// SUCCESS
+// FAILURE
 {
     const size_t    cchCommand              = 16384;
     char*           szCommand               = new char[ cchCommand ];
@@ -2796,8 +3113,11 @@ int InitTestArgv( const int argc, const char* const argv[], BOOL fLogToDisk , BO
     }
     AssertM( strlen( szCommand ) < cchCommand );
 
+//  // It looks better with a newline appended
+//  nCurrPos += sprintf ( szCommand + nCurrPos, "%s", "" SZNEWLINE );
 
 Cleanup:
+    // InitTest() can accept NULLs
     nRet = InitTest( szCommand, fLogToDisk, fWriteFailed );
 
     delete[] szCommand;
@@ -2805,12 +3125,15 @@ Cleanup:
     return nRet;
 }
 
+//////////////////////////////////////////////////////////////
 int
 InitTest(
     __in_opt const char *szCommandLine_,
     BOOL fLogToDisk,
     BOOL fWriteFailed
 )
+// szCommandLine can be NULL
+//////////////////////////////////////////////////////////////
 {
     InitLogging( fLogToDisk );
 
@@ -2824,6 +3147,8 @@ InitTest(
         AssertM( pcfg->pfnWTTLogStartTest );
         AssertM( pcfg->m_hdevWttLog );
 
+        // It is not allowed to have a NULL wszTestName. Use
+        // GetCommandeLineW() for both WTTLogStartTest and WTTLogEndTest().
         hr = pcfg->pfnWTTLogStartTest( pcfg->m_hdevWttLog, GetCommandLineW() );
 
         if ( FAILED( hr ) )
@@ -2832,8 +3157,10 @@ InitTest(
         }
     }
     else
-#endif
+#endif // BUILD_ENV_IS_NT
     if ( g_fEnableWritingToResultsTxt ) {
+        // Assume that the program will fail and only change results.txt
+        // if this is not the case.
         HANDLE hFile = INVALID_HANDLE_VALUE;
         for ( int i =0 ; i < 10 ; i++ ){
             hFile = CreateFile(
@@ -2900,6 +3227,7 @@ InitTest(
         VerifyP( CloseHandleP( &hFile ) );
     }
 
+    // I should really do something more generic here.
     CustomEseInitTest();
     CustomEsentInitTest();
     CustomEseAndEsentInitTest();
@@ -2907,6 +3235,8 @@ InitTest(
     return SUCCESS;
 }
 
+// This function was copied from loadcommon.cxx, and was known as BounceJetXXX().
+// If that function changes, please update this one as well.
 PRIVATE
 JET_ERR
 DynLoadJetSetResourceParam(
@@ -2926,8 +3256,10 @@ DynLoadJetSetResourceParam(
 
     static PFN_JetSetResourceParam pfnJetSetResourceParam = NULL;
 
+    // Get the procedure address if this is the first time calling this function.
     if ( NULL == pfnJetSetResourceParam )
     {
+        // Do not bother with synchronization of GetProcAddress() -- sloppy, but a leak isn't a big deal.
         const HMODULE       hEseDll = HmodEsetestEseDll();
 
         if ( NULL != hEseDll )
@@ -2944,13 +3276,15 @@ DynLoadJetSetResourceParam(
     }
 
     err = (*pfnJetSetResourceParam)( instance, resoper, resid, ulParam );
-    goto Cleanup;
+    goto Cleanup;   // Need to have the explicit goto in case the function hasn't referenced 'Cleanup' yet.
 Cleanup:
 
     return err;
 }
 
 
+// This function was copied from loadnarrow.cxx, and was known as BounceJetXXX().
+// If that function changes, please update this one as well.
 PRIVATE
 JET_ERR
 DynLoadJetSetSystemParameter(
@@ -2972,8 +3306,10 @@ DynLoadJetSetSystemParameter(
 
     static PFN_JetSetSystemParameter pfnJetSetSystemParameter = NULL;
 
+    // Get the procedure address if this is the first time calling this function.
     if ( NULL == pfnJetSetSystemParameter )
     {
+        // Do not bother with synchronization of GetProcAddress() -- sloppy, but a leak isn't a big deal.
         const HMODULE       hEseDll = HmodEsetestEseDll();
 
         if ( NULL != hEseDll )
@@ -2990,13 +3326,15 @@ DynLoadJetSetSystemParameter(
     }
 
     err = (*pfnJetSetSystemParameter)( pinstance, sesid, paramid, lParam, szParam );
-    goto Cleanup;
+    goto Cleanup;   // Need to have the explicit goto in case the function hasn't referenced 'Cleanup' yet.
 Cleanup:
 
     return err;
 }
 
 
+// This function was copied from loadnarrow.cxx, and was known as BounceJetXXX().
+// If that function changes, please update this one as well.
 PRIVATE
 JET_ERR
 DynLoadJetGetSystemParameter(
@@ -3020,8 +3358,10 @@ DynLoadJetGetSystemParameter(
 
     static PFN_JetGetSystemParameter pfnJetGetSystemParameter = NULL;
 
+    // Get the procedure address if this is the first time calling this function.
     if ( NULL == pfnJetGetSystemParameter )
     {
+        // Do not bother with synchronization of GetProcAddress() -- sloppy, but a leak isn't a big deal.
         const HMODULE       hEseDll = HmodEsetestEseDll();
 
         if ( NULL != hEseDll )
@@ -3038,12 +3378,14 @@ DynLoadJetGetSystemParameter(
     }
 
     err = (*pfnJetGetSystemParameter)( instance, sesid, paramid, plParam, szParam, cbMax );
-    goto Cleanup;
+    goto Cleanup;   // Need to have the explicit goto in case the function hasn't referenced 'Cleanup' yet.
 Cleanup:
 
     return err;
 }
 
+// This function was copied from loadnarrow.cxx, and was known as BounceJetXXX().
+// If that function changes, please update this one as well.
 PRIVATE
 JET_ERR
 DynLoadJetConsumeLogData(
@@ -3065,8 +3407,10 @@ DynLoadJetConsumeLogData(
 
     static PFN_JetConsumeLogData pfnJetConsumeLogData = NULL;
 
+    // Get the procedure address if this is the first time calling this function.
     if ( NULL == pfnJetConsumeLogData )
     {
+        // Do not bother with synchronization of GetProcAddress() -- sloppy, but a leak isn't a big deal.
         const HMODULE       hEseDll = HmodEsetestEseDll();
 
         if ( NULL != hEseDll )
@@ -3083,15 +3427,22 @@ DynLoadJetConsumeLogData(
     }
 
     err = (*pfnJetConsumeLogData)( instance, pEmitLogDataCtx, pvLogData, cbLogData, grbits );
-    goto Cleanup;
+    goto Cleanup;   // Need to have the explicit goto in case the function hasn't referenced 'Cleanup' yet.
 Cleanup:
 
     return err;
 }
 
+//================================================================
+// Registry API helper functions.
+//================================================================
+//
 
+//  Code style doesn't match, as this is shamelessly stolen from windows RegGetValueA() ...
 
-
+/*----------------------------------------------------------
+Purpose: Helper for RegGetValueA()/RegGetValueW() 
+*/
 __inline LONG RestrictArguments(HKEY hkey, DWORD dwFlags, void *pvData, DWORD *pcbData)
 {
     LONG Ret;
@@ -3109,28 +3460,35 @@ __inline LONG RestrictArguments(HKEY hkey, DWORD dwFlags, void *pvData, DWORD *p
     return Ret;
 }
 
-
+/*----------------------------------------------------------
+Purpose: Helpers for RegGetValueA()/RegGetValueW().
+*/
 LONG NullTerminateRegSzString(
-    void *  pvData,
-    DWORD * pcbData,
-    DWORD   cbDataBuffer,
-    LONG    lr,
-    BOOLEAN Ansi
+    void *  pvData,         // data bytes returned from RegQueryValueEx()
+    DWORD * pcbData,        // data size returned from RegQueryValueEx()
+    DWORD   cbDataBuffer,   // data buffer size (actual allocated size of pvData)
+    LONG    lr,             // long result returned from RegQueryValueEx()
+    BOOLEAN Ansi            // ANSI or UNICODE
     )             
 {
     DWORD   ElemSize = Ansi?sizeof(CHAR):sizeof(WCHAR); 
 
-    AssertM(pcbData != NULL);
+    AssertM(pcbData != NULL); // Sanity check.
 
     if (lr == ERROR_SUCCESS && pvData != NULL) {
-        DWORD cchDataBuffer = cbDataBuffer / ElemSize;
-        DWORD cchData = *pcbData / ElemSize;
+        DWORD cchDataBuffer = cbDataBuffer / ElemSize; // cchDataBuffer is the actual allocated size of pvData in TCHARs
+        DWORD cchData = *pcbData / ElemSize;           // cchData is the length of the string written into pvData in TCHARs (including the null terminator)
         PSTR  pszDataAnsi = (PSTR)pvData;
         PWSTR pszDataUnicode = (PWSTR)pvData;
         DWORD cNullsMissing;
 
-        AssertM(cchDataBuffer >= cchData);
+        AssertM(cchDataBuffer >= cchData); // Sanity check.
 
+        //
+        // [1] string and size request with sufficient original buffer
+        //     (must ensure returned string and returned size include
+        //      null terminator)
+        //
 
         if( Ansi ) {
             cNullsMissing = ((cchData >= 1) && (pszDataAnsi[cchData-1] == 0)) ? 0 : 1;
@@ -3151,18 +3509,32 @@ LONG NullTerminateRegSzString(
             }
         }
 
+        //  it is always possible for *pcbData to be odd!!!
+        //  in the UNICODE case ONLY, when cchData is calculated the odd byte is truncated.
+        //  this is fine when cNullsMissing is non-zero or if the buffer is large enough to begin with.
+        //  but if there needs to be a resize of the buffer, then we must return the correct odd size.
+        //  if we truncate we will always return a size that is insufficient by one byte.
         *pcbData = max(*pcbData, (cchData + cNullsMissing) * ElemSize);
     }
     else if ((lr == ERROR_SUCCESS && pvData == NULL) || lr == ERROR_MORE_DATA)
     {
+        //
+        // [2] size only request or string and size request with insufficient
+        //     original buffer (must ensure returned size includes null
+        //     terminator)
+        //
 
-        *pcbData += ElemSize;
+        *pcbData += ElemSize; // *** APPROXIMATION FOR PERF -- size is
+                                   // therefore not guaranteed to be exact,
+                                   // merely sufficient
     }
 
     return lr;
 }
 
-
+/*----------------------------------------------------------
+Purpose: Helper for SHRegQueryValueA()/SHRegQueryValueW().
+*/
 __inline LONG RestrictRegType(DWORD dwFlags, DWORD dwType, DWORD cbData, LONG lr)
 {
     if (lr == ERROR_SUCCESS || lr == ERROR_MORE_DATA)
@@ -3207,11 +3579,11 @@ LONG FixRegData(
     PVOID   pszValue,
     DWORD   dwFlags,
     DWORD * pdwType,
-    void *  pvData,
-    DWORD * pcbData,
-    DWORD   cbDataBuffer,
-    LONG    lr,
-    BOOLEAN Ansi)
+    void *  pvData,         // data bytes returned from RegQueryValueEx()
+    DWORD * pcbData,        // data size returned from RegQueryValueEx()
+    DWORD   cbDataBuffer,   // data buffer size (actual allocated size of pvData)
+    LONG    lr,             // long result returned from RegQueryValueEx()
+    BOOLEAN Ansi)           // ANSI or UNICODE selector  
 {
     switch (*pdwType)
     {
@@ -3222,13 +3594,31 @@ LONG FixRegData(
             break;
 
         case REG_EXPAND_SZ:
+/*
+            if (pcbData) {
+                lr = dwFlags & RRF_NOEXPAND
+                    ? NullTerminateRegSzString(pvData, pcbData, cbDataBuffer, lr, Ansi)
+                    : NullTerminateRegExpandSzString(hkey, pszValue, pdwType, pvData, pcbData, cbDataBuffer, lr, Ansi);
+            }
 
+            // Note:
+            //  If we automatically expand the REG_EXPAND_SZ data, we change
+            //  *pdwType to REG_SZ to reflect this fact.  This helps to avoid
+            //  the situation where the caller could mistakenly re-expand it.
+            if (!(dwFlags & RRF_NOEXPAND)) {
+                *pdwType = REG_SZ;
+            }
+*/
         AssertM( !"We do not handle this case for simplicity." );
         return ERROR_UNSUPPORTED_TYPE;
             break;
 
         case REG_MULTI_SZ:
-
+/*
+            if (pcbData) {
+                lr = NullTerminateRegMultiSzString(pvData, pcbData, cbDataBuffer, lr, Ansi);
+            }
+*/
         AssertM( !"We do not handle this case for simplicity." );
         return ERROR_UNSUPPORTED_TYPE;
             break;
@@ -3238,7 +3628,9 @@ LONG FixRegData(
 }
 
 
-
+/*----------------------------------------------------------
+Purpose: Helper for RegGetValueA().
+*/
 LONG
 QueryValueInternalA(
     HKEY    hkey,
@@ -3273,7 +3665,9 @@ QueryValueInternalA(
 }
 
 
-
+/*----------------------------------------------------------
+Purpose: Helper for RegGetValueA()/RegGetValueW().
+*/
 __inline void ZeroDataOnFailure(DWORD dwFlags, __in_bcount_opt(cbDataBuffer) void *pvData, DWORD cbDataBuffer, LONG lr)
 {
     if ((lr != ERROR_SUCCESS) && (dwFlags & RRF_ZEROONFAILURE) && (cbDataBuffer > 0)) {
@@ -3284,6 +3678,7 @@ __inline void ZeroDataOnFailure(DWORD dwFlags, __in_bcount_opt(cbDataBuffer) voi
 
 
 
+// =============================================================================
 LONG EsetestRegGetValueA(
     __in         HKEY hkey,
     __in_opt     LPCTSTR pszSubKey,
@@ -3293,6 +3688,7 @@ LONG EsetestRegGetValueA(
     __out_opt    PVOID pvData,
     __inout_opt  LPDWORD pcbData
 )
+// =============================================================================
 {
     LONG  lr;
     DWORD cbDataBuffer = pvData && pcbData ? *pcbData : 0;
@@ -3318,6 +3714,7 @@ LONG EsetestRegGetValueA(
 }
 
 
+// The path under HKEY_LOCAL_MACHINE where ESE settings are stored
 LOCAL const TCHAR tszEsentGlobalPath[]          =   _T( "SOFTWARE\\Microsoft\\" ESE_FLAVOUR "\\Global" );
 
 
@@ -3354,13 +3751,13 @@ ErrEsetestWriteRegistry(
     lRc = RegCreateKeyEx(
         hkeyHive,
         szKeyPath,
-        0,
-        _T(""),
+        0,                          // reserved
+        _T(""),                         // lpClass
         REG_OPTION_NON_VOLATILE,
         KEY_WRITE,
-        NULL,
+        NULL,                       // lpsa
         &hkeyOperations,
-        &disposition
+        &disposition                // REG_CREATED_NEW_KEY || REG_OPENED_EXISTING_KEY
         );
     if ( ERROR_SUCCESS != lRc ) {
         dwGle = GetLastError();
@@ -3418,8 +3815,8 @@ JET_ERR
 ErrEsetestReadConfigToEsentGlobal(
     __in const TCHAR*   szKeyPath,
     __in const TCHAR*   szKeyName,
-    __out_bcount_part( *pcbValue, *pcbValue ) TCHAR* const  szValue,
-    __inout PDWORD      pcbValue
+    __out_bcount_part( *pcbValue, *pcbValue ) TCHAR* const  szValue,        // Must point to valid buffer
+    __inout PDWORD      pcbValue        // How big the buffer is going in; how many bytes written
     )
 {
     const size_t    cchKeyFqPath    = MAX_PATH;
@@ -3437,8 +3834,8 @@ ErrEsetestReadRegistry(
     __in const HKEY     hkeyHive,
     __in const TCHAR*   szKeyPath,
     __in const TCHAR*   szKeyName,
-    __out TCHAR* const  szValue,
-    __inout PDWORD      pcbValue
+    __out TCHAR* const  szValue,        // Must point to valid buffer
+    __inout PDWORD      pcbValue        // How big the buffer is going in; how many bytes written
     )
 {
     JET_ERR err = JET_errSuccess;
@@ -3460,13 +3857,13 @@ ErrEsetestReadRegistry(
     lRc = RegCreateKeyEx(
         hkeyHive,
         szKeyPath,
-        0,
-        _T(""),
+        0,                          // reserved
+        _T(""),                         // lpClass
         REG_OPTION_NON_VOLATILE,
         KEY_READ,
-        NULL,
+        NULL,                       // lpsa
         &hkeyEsentGlobalOs,
-        &disposition
+        &disposition                // REG_CREATED_NEW_KEY || REG_OPENED_EXISTING_KEY
         );
     if ( ERROR_SUCCESS != lRc ) {
         dwGle = GetLastError();
@@ -3503,6 +3900,7 @@ ErrEsetestReadRegistry(
         );
     if ( ERROR_SUCCESS != lRc ) {
         dwGle = GetLastError();
+        // ERROR_ALREADY_EXISTS gets returned if the key exists, but the value does not.
         if ( ERROR_ALREADY_EXISTS != dwGle ) {
             tprintf( "RegQueryValueEx failed with GLE = %d" SZNEWLINE, dwGle );
             err = dwGle;
@@ -3554,6 +3952,7 @@ ErrEsetestCopyKey(
     DWORD dwDisposition;
     LONG lError;
 
+    // Try to open the source key.
     if( ERROR_SUCCESS != ( lError = RegOpenKeyExW( HKEY_LOCAL_MACHINE,
                                                     wszKeySrc,
                                                     0,
@@ -3565,6 +3964,7 @@ ErrEsetestCopyKey(
         goto Cleanup;
     }
 
+    // Try to open the destination key.
     if( ERROR_SUCCESS != ( lError = RegCreateKeyExW( HKEY_LOCAL_MACHINE,
                                                         wszKeyDst,
                                                         0,
@@ -3580,6 +3980,7 @@ ErrEsetestCopyKey(
         goto Cleanup;
     }
 
+    // Should we delete the destination?
     if ( ( REG_OPENED_EXISTING_KEY == dwDisposition ) && fDelDst ){
         if( ERROR_SUCCESS != ( lError = RegDeleteTree( hKeyDst, NULL ) ) ){
             OutputError( "%s(): RegDeleteTree() failed with %ld!" CRLF, __FUNCTION__, lError );
@@ -3608,11 +4009,14 @@ ErrEsetestCopyKey(
         }
     }   
 
+    // Copy the whole tree.
     if( ERROR_SUCCESS != ( lError = RegCopyTreeW( hKeySrc, NULL, hKeyDst) ) ){
         OutputError( "%s(): RegCopyTreeW() failed with %ld!" CRLF, __FUNCTION__, lError );
+        // We must be able to copy.
         goto Cleanup;
     }
 
+    // Should we delete the source?
     if ( fDelSrc ){
         if( ERROR_SUCCESS != ( lError = RegDeleteTree( hKeySrc, NULL ) ) ){
             OutputError( "%s(): RegDeleteTree() failed with %ld!" CRLF, __FUNCTION__, lError );
@@ -3653,6 +4057,9 @@ int
 IEnvironmentVariableSet(
     __in const char* const  szEnvVariable
 )
+// IEnvironmentVariableSet() looks up the specified environment variable
+// and returns the numeric value of it.
+// Returns zero if it does not exist.
 {
     int     iRet;
     const   size_t  cchBuffer   = 30;
@@ -3684,6 +4091,8 @@ bool
 FEnvironmentVariableSet(
     __in const char* const  szEnvVariable
 )
+// FEnvironmentVariableSet() looks up the specified environment variable
+// and returns true if the variable exists and is non-zero.
 {
     bool    fRet;
 
@@ -3697,6 +4106,8 @@ bool
 FEnvironmentVariableDefined(
     __in const char* const  szEnvVariable
 )
+// FEnvironmentVariableDefined() looks up the specified environment variable
+// and returns true if the variable exists.
 {
     const   size_t  cchBuffer   = 30;
     CHAR    tszEnvVarValue[ cchBuffer ];
@@ -3726,10 +4137,10 @@ CustomEseInitTest()
     else {
         tprintf( "%%%s%% was found. About to enable top-down allocation" SZNEWLINE, g_szEnvironmentTopDown );
         err = DynLoadJetSetResourceParam(
-            NULL,
+            NULL,   // all instances
             JET_resoperAllocTopDown,
-            JET_residAll,
-            1
+            JET_residAll,           // Not JET_residMax
+            1                       // TRUE
             );
         if ( JET_errSuccess != err ) {
             tcprintf( ANSI_RED, "Failed to set topdown allocation! JetSetResourceParam returned %d" SZNEWLINE, err );
@@ -3753,19 +4164,26 @@ CustomEsentInitTest()
         if ( FEnvironmentVariableSet( g_szEnvironmentSmallConfig ) )
         {
             tprintf( "Enabling small config." CRLF );
+            // configSmall is 0
             err = DynLoadJetSetSystemParameter( NULL, JET_sesidNil, JET_paramConfiguration, 0, NULL );
             if ( err < JET_errSuccess )
             {
                 tprintf( __FUNCTION__ "(): Failed to set small configuration (may be acceptable)." CRLF );
             }
 
+            // Small Config disables perf counters by default. It's hard to measure its effects if
+            // the perf counters can't be viewed!
             (void) DynLoadJetSetSystemParameter( NULL, JET_sesidNil, JET_paramDisablePerfmon, 0, NULL );
         }
         else
         {
+            // configLegacy is 1
             (void) DynLoadJetSetSystemParameter( NULL, JET_sesidNil, JET_paramConfiguration, 1, NULL );
         }
 
+        // Not needed for Exchange, but ESENT in Longhorn defaults to 'small configuration', which
+        // reduces resource requirements, at the cost of performance
+        // JET_paramConfiguration resets many parameters. So we need to re-enable JET_paramEnableAdvanced.
         (void) DynLoadJetSetSystemParameter( NULL, 0, JET_paramEnableAdvanced, 1, NULL );
     }
 
@@ -3783,7 +4201,7 @@ JET_ERR EsetestShadowLogData(
     __in    void *              pvCallBackCtx )
 
 {
-    JET_PFNEMITLOGDATA pfn = EsetestShadowLogData;
+    JET_PFNEMITLOGDATA pfn = EsetestShadowLogData;  // ensure this function matches callback defn
     JET_ERR err = JET_errSuccess;
 
     Unused( pfn );
@@ -3793,16 +4211,16 @@ JET_ERR EsetestShadowLogData(
 
     if ( pEmitLogDataCtx->grbitOperationalFlags & JET_bitShadowLogEmitFirstCall )
         {
-        g_fUsingShadowLog |= 0x2;
+        g_fUsingShadowLog |= 0x2;   // cheap way to track we've seen this
         }
 
     if ( pEmitLogDataCtx->grbitOperationalFlags & JET_bitShadowLogEmitLastCall )
         {
-        g_fUsingShadowLog |= 0x4;
+        g_fUsingShadowLog |= 0x4;   // cheap way to track we've seen this
         }
 
     err = DynLoadJetConsumeLogData( inst, pEmitLogDataCtx, pvLogData, cbLogData, 0 );
-    if ( err )
+    if ( err )  // short cut for this kind of thing...?
     {
         goto HandleError;
     }
@@ -3811,13 +4229,14 @@ HandleError:
 
     if ( err < JET_errSuccess )
         {
+        // Not sure what to do with this.
         wprintf(L"Shadow Log Callback FAILURE, %d\n", err );
         }
 
     return err;
 }
 
-};
+};  // extern "C"
 
 
 PRIVATE
@@ -3859,6 +4278,7 @@ CustomEseAndEsentInitTest()
         tcprintf( ANSI_RED, "Could not detect version of ESE: EsetestGetEseVersionParts() returned %d." CRLF, err );
     }
 
+    // Read environment var "ESETEST_PAGESIZE", if not present, leave it at default
     JET_API_PTR cbPageSize;
     cbPageSize = IEnvironmentVariableSet(g_szEnvironmentPagesize) * 1024;
     if(cbPageSize)
@@ -3898,10 +4318,13 @@ CustomEseAndEsentInitTest()
         }
     }
 
+// Hmm, this did work before. It is in nturtl.h, but this is the only identifier I need from there.
 #ifndef HEAP_MODE_LFH
 #define HEAP_MODE_LFH                       2
-#endif
+#endif // HEAP_MODE_LFH
 
+    // Enable LFH.
+    // Note that the API is not in Win2000 RTM, but is in SP4.
     HANDLE  hHeap = GetProcessHeap();
     const ULONG             InfoValue               = HEAP_MODE_LFH;
     (void) HeapSetInformation( hHeap,
@@ -3910,6 +4333,7 @@ CustomEseAndEsentInitTest()
         sizeof( InfoValue ) );
     JET_API_PTR paramFileNames;
 
+    // Try the new log file names.
     if ( FEsetestFeaturePresent( EseFeature2GLogs ) )
     {
         if ( FEnvironmentVariableSet( g_szEnvironmentLegacyLogNames ) )
@@ -3938,15 +4362,20 @@ CustomEseAndEsentInitTest()
         }
     }
 
+    // for unicode file path. 
+    // set the g_esetestconfig.m_pctWideApis to the environment var g_szEnvironmentPctWidenApis 
+    // (if unicode file path is not supported, this value will be ignored.)
     if ( FEnvironmentVariableDefined( g_szEnvironmentPctWidenApis  ) )
     {
         EsetestSetWidenParametersPercent( IEnvironmentVariableSet( g_szEnvironmentPctWidenApis ) );
     }
 
+    // Compression configuration.
     if ( FEnvironmentVariableDefined( g_szEnvironmentPctCompression ) ){
         EsetestSetCompressionPercent( IEnvironmentVariableSet( g_szEnvironmentPctCompression ) );
     }
 
+    // Shadow log configuration
     if ( FEnvironmentVariableDefined( g_szEnvironmentShadowLog ) )
     {
         g_fUsingShadowLog = IEnvironmentVariableSet( g_szEnvironmentShadowLog );
@@ -3960,6 +4389,7 @@ CustomEseAndEsentInitTest()
         }
     }
 
+    // Product asserts.
     JET_API_PTR assertaction;
     if ( FEnvironmentVariableDefined( g_szEnvironmentEseAssertAction ) )
     {
@@ -3978,6 +4408,7 @@ CustomEseAndEsentInitTest()
         tprintf( "JET_paramAssertAction set to %#Ix." CRLF, assertaction );
     }
 
+    // Test asserts.
     if ( FEnvironmentVariableDefined( g_szEnvironmentEsetestAssertAction ) )
     {
         assertaction = ( JET_API_PTR )IEnvironmentVariableSet( g_szEnvironmentEsetestAssertAction );
@@ -4007,7 +4438,10 @@ CustomEseAndEsentInitTest()
 
 }
 
+//////////////////////////////////////////////////////////////
 int ChangeResult( int nSuccess )
+//////////////////////////////////////////////////////////////
+// Backs up in results.txt, and overwrites FAILED with PASSED
 {
     int nReturn = FAILURE;
 
@@ -4026,8 +4460,8 @@ int ChangeResult( int nSuccess )
         else
         {
             hr = g_esetestconfig.pfnWTTLogTrace( g_esetestconfig.m_hdevWttLog, WTT_LVL_ERR, fPassed, WTT_ERROR_TYPE_BOOL,
-                __WFILE__,
-                __LINE__,
+                __WFILE__,  // file
+                __LINE__,       // line #
                 __FUNCTION__
             );
         }
@@ -4042,7 +4476,7 @@ int ChangeResult( int nSuccess )
         }
         goto LError;
     }
-#endif
+#endif //BUILD_ENV_IS_NT
 
     if ( g_fEnableWritingToResultsTxt ) {
         DWORD cbWritten = 0;
@@ -4078,15 +4512,22 @@ LError:
 }
 
 
+//////////////////////////////////////////////////////////////
+//  TermTest
+//////////////////////////////////////////////////////////////
 int TermTest(int nSuccess)
 {
     return TermTestMaybeChangeResult( nSuccess, TRUE );
 }
 
+//////////////////////////////////////////////////////////////
+//  TermTestMaybeChangeResult
+//////////////////////////////////////////////////////////////
 int TermTestMaybeChangeResult( int nSuccess, BOOL fChangeResult )
 {
     int nReturn = FAILURE;
 
+    // Check for assert.txt and pass the test if not found
     DWORD dwFileAttr = GetFileAttributes( ASSERT_TXT );
     const bool  fAssertTxtFound = ( INVALID_FILE_ATTRIBUTES == dwFileAttr ) ? false : true;
 
@@ -4100,6 +4541,8 @@ int TermTestMaybeChangeResult( int nSuccess, BOOL fChangeResult )
         AssertM( pcfg->pfnWTTLogStartTest );
         AssertM( pcfg->m_hdevWttLog );
 
+        // It is not allowed to have a NULL wszTestName. Use
+        // GetCommandeLineW() for both WTTLogStartTest and WTTLogEndTest().
         hr = pcfg->pfnWTTLogEndTest( pcfg->m_hdevWttLog, GetCommandLineW(), dwWttResultCode, NULL );
 
         if ( FAILED( hr ) )
@@ -4109,11 +4552,12 @@ int TermTestMaybeChangeResult( int nSuccess, BOOL fChangeResult )
         goto LError;
     }
     else
-#endif
+#endif // BUILD_ENV_IS_NT
     {
         if ( fAssertTxtFound ) {
             tprintf( "%s file was found. %s", ASSERT_TXT, FAIL_STR );
 
+            // Append the assert.txt contents to the logfile
             HANDLE hfileLog = INVALID_HANDLE_VALUE;
             for ( int i =0 ; i < 10 ; i++ ){
                 hfileLog = CreateFile( RESULTS_LOG,
@@ -4164,12 +4608,14 @@ int TermTestMaybeChangeResult( int nSuccess, BOOL fChangeResult )
                 VerifyP( FALSE != CloseHandleP( &hFileAssertTxt ) );
             }
 
+            // Close the file and we are done
             VerifyP( FALSE != CloseHandleP( &hfileLog ) );
             goto LError;
         }
 
         printf("No %s file was found" SZNEWLINE, ASSERT_TXT);
 
+        // Now pass the test if possible
         if ( FAILURE == nSuccess ) {
             goto LError;
         }
@@ -4177,13 +4623,32 @@ int TermTestMaybeChangeResult( int nSuccess, BOOL fChangeResult )
         nReturn = fChangeResult ? ChangeResult( nSuccess ) : SUCCESS;
     }
 
-    
+    /*
+    if ( g_fUsingShadowLog && fChangeResult )
+        {
+        if ( !( g_fUsingShadowLog & 0x2 ) ||
+                !( g_fUsingShadowLog & 0x4 ) )
+            {
+            //  We didn't register both the initial and terminating callbacks...
+            //printf("\n\n\n\t\tSOMEONETODO\n\t\tSOMEONETODO\n\t\tSOMEONETODO\n\t\tSOMEONETODO\n\t\tSOMEONETODO HELLLO!? \n\t\tSOMEONETODO\n\t\tSOMEONETODO\n\t\tSOMEONETODO\n");
+            nReturn = ChangeResult( ERROR_INVALID_PARAMETER );
+            }
+        else
+            {
+            //printf("\n\n\n\t\tSOMEONETODO\n\t\tSOMEONETODO\n\t\tSOMEONETODO\n\t\tSOMEONETODO\n\t\tSOMEONETODO GOODBYE!!!! \n\t\tSOMEONETODO\n\t\tSOMEONETODO\n\t\tSOMEONETODO\n");
+            }
+        }
+    //printf("\n\n\n\t\tSOMEONETODO\n\t\tSOMEONETODO\n\t\tSOMEONETODO\n\t\tSOMEONETODO\n\t\tSOMEONETODO ummm any salutations!? \n\t\tSOMEONETODO\n\t\tSOMEONETODO\n\t\tSOMEONETODO\n");
+    */
 
 LError:
     TermLogging();
     return nReturn;
 }
 
+///////////////////////////////////////////////////////////
+//  Copy File
+///////////////////////////////////////////////////////////
 int AppendToFileHandleFromFileHandle( HANDLE hfileSrc, HANDLE hfileDest )
 {
     DWORD dwRead = 0;
@@ -4212,6 +4677,9 @@ int AppendToFileHandleFromFileHandle( HANDLE hfileSrc, HANDLE hfileDest )
     return SUCCESS;
 }
 
+///////////////////////////////////////////////////////////
+//  Memory string manipulation.
+///////////////////////////////////////////////////////////
 PTCHAR ParseResultsMemory(  const PTCHAR szSrc,
                                 const PTCHAR szToken,
                                 const PTCHAR szTokenBefore,
@@ -4254,6 +4722,9 @@ PTCHAR ParseResultsMemory(  const PTCHAR szSrc,
     return szResult;
 }
 
+///////////////////////////////////////////////////////////
+//  File string manipulation.
+///////////////////////////////////////////////////////////
 PTCHAR ParseResultsFile(    const PTCHAR szFileName,
                             const PTCHAR szToken,
                             const PTCHAR szTokenBefore,
@@ -4295,6 +4766,13 @@ Cleanup:
     return szResult;    
 }
 
+//================================================================
+// Mempry helper functions.
+//================================================================
+//
+///////////////////////////////////////////////////////////
+//  Frees memory.
+///////////////////////////////////////////////////////////
 void FreeParsedStr( PTCHAR szPtr ){
     if ( szPtr ){
         delete []szPtr;
@@ -4319,6 +4797,9 @@ BYTE* EsetestCircularMemCopy( BYTE* pbDst, size_t cbDst, const BYTE* pbSrc, size
 }
 
 
+///////////////////////////////////////////////////////////////
+//  Fill Random
+////////////////////////////////////////////////////////////////
 int FillRandom( BYTE* pbData, ULONG cbData)
 {
     ULONG   cbCurrent   = 0;
@@ -4340,16 +4821,30 @@ int FillRandom( BYTE* pbData, ULONG cbData)
 
 int FillRandomUnaligned( BYTE *pbData, ULONG cbData )
 {
-#pragma warning(disable : 4302)
+#pragma warning(disable : 4302) // 'type cast': truncation from 'BYTE *' to 'char'
     for ( ; ( ( char )pbData & 3 ) && cbData; *pbData++ = ( BYTE )Rand( ), cbData-- );
 #pragma warning(default : 4302)
 
     return cbData && FillRandom( pbData, cbData );
 }
 
+///////////////////////////////////////////////////////////////
+// Random
+////////////////////////////////////////////////////////////////
 
+/*
+** Trying to force serialization of rand()
+** StandardRand() returns a number in the range of
+** 0-(2^31-2). The implementation is straight off
+** the Standard Random number generator proposal
+** in:
+** "Random Number Generators : Good Ones are Hard to Find"
+** Stephen K. Park and Keith W. Miller, CACM v31.No10 pp1195
+**
+** Verified for z(10001)=1043618065 (-1, due to our normalization)
+*/
 
-
+// This is Thread-local
 _declspec( thread ) static long gStandardRandSeed = 1;
 
 long GetStandardSeed( void )
@@ -4388,12 +4883,14 @@ long Rand( void )
 
 long RandRange( long min, long max )
 {
+    // Shouldn't happen, but just in case...
     if ( max < min ){
         const long temp = max;
         max = min;
         min = temp;
     }
 
+    // The delta can overflow, so it can still be negative.
     if ( ( max - min ) == -1  )
     {
         return Rand();
@@ -4411,12 +4908,14 @@ __int64 Rand64( void )
 
 __int64 Rand64Range( __int64 min, __int64 max )
 {
+    // Shouldn't happen, but just in case...
     if ( max < min ){
         const __int64 temp = max;
         max = min;
         min = temp;
     }
 
+    // The delta can overflow, so it can still be negative.
     if ( ( max - min ) == -1  )
     {
         return Rand64();
@@ -4427,6 +4926,9 @@ __int64 Rand64Range( __int64 min, __int64 max )
     }
 }
 
+///////////////////////////////////////////////////////////////////////
+//  Column free memory
+///////////////////////////////////////////////////////////////////////
 void FreeColumnData(JET_SETCOLUMN* pjsetcolumn, LONG ccolumns)
 {
     long    i = 0;
@@ -4460,6 +4962,7 @@ BOOL IsColumnDataEqual(JET_SETCOLUMN* pjsetcolumn, JET_RETRIEVECOLUMN *pjretriev
     AssertM ( NULL != pjretrievecolumn );
     AssertM ( NULL != pjsetcolumn );
 
+    // Compare the data column by column
     for ( i = 0 ; i < ccolumns ; i++ )
     {
         if ( pjretrievecolumn[ i ].cbActual != pjsetcolumn[ i ].cbData )
@@ -4477,6 +4980,9 @@ BOOL IsColumnDataEqual(JET_SETCOLUMN* pjsetcolumn, JET_RETRIEVECOLUMN *pjretriev
     return TRUE;
 }
 
+// Sometimes the errors do not come from ESE, so the
+// 'Error Trap' does not help. Or it's a FRE build, which
+// does not have 'error traps.
 void
 BreakIfUserDesires()
 {
@@ -4486,6 +4992,7 @@ BreakIfUserDesires()
     }
 }
 
+// Has 'expected' as a parameter -- the other ReportErr() does not
 void ReportErr( long err, long expected, unsigned long ulLine, const char *szFileName, const char *szFuncCalled )
 {
     char name[ 256 ] = "Unknown error/warning";
@@ -4546,6 +5053,7 @@ int ReportReceivedErr( JET_ERR received )
 }
 
 #if 0
+// does NOT Have 'expected' as a parameter -- the other ReportErr() does
 int ReportErr( JET_ERR err, ULONG ulLine, const char *szFileName,  const char *szFuncCalled )
 {
     char errName[ 256 ];
@@ -4565,15 +5073,19 @@ int ReportErr( JET_ERR err, ULONG ulLine, const char *szFileName,  const char *s
 }
 #endif
 
+//  ================================================================
+// This is stolen from DBUTLSprintHex().
+// The resultant buffer ends with a newline.
 VOID SprintHex(
     __out CHAR * const      szDest,
     __in_bcount( cbSrc ) const BYTE * const rgbSrc,
     __in const INT          cbSrc,
-    __in const INT          cbWidth     ,
-    __in const INT          cbChunk     ,
-    __in const INT          cbAddress   ,
-    __in const INT          cbStart     
+    __in const INT          cbWidth     /* = 16 */,
+    __in const INT          cbChunk     /* = 4 */,
+    __in const INT          cbAddress   /* = 8 */,
+    __in const INT          cbStart     /* = 0 */
 )
+//  ================================================================
 {
     static const CHAR rgchConvert[ ] = { '0', '1', '2', '3', '4', '5', '6', '7', '8', '9', 'a', 'b', 'c', 'd', 'e', 'f' };
 
@@ -4609,10 +5121,16 @@ VOID SprintHex(
     }
 }
 
+//================================================================
+// Synchronization helper functions.
+//================================================================
+//
+// =============================================================================
 void EsetestWaitForAllObjectsInfinitely(
     __in DWORD cCount,
     __in_ecount( cCount ) const HANDLE* rgHandles
 )
+// =============================================================================
 {
     while( cCount > 0 ){
         DWORD j = ( cCount <= MAXIMUM_WAIT_OBJECTS) ? cCount : MAXIMUM_WAIT_OBJECTS;
@@ -4622,6 +5140,10 @@ void EsetestWaitForAllObjectsInfinitely(
     }
 }
 
+//================================================================
+// Directory manipulation helper functions.
+//================================================================
+//
 BOOL
 EsetestCreateDirectoryA(
     __in PCSTR      szName
@@ -4643,9 +5165,12 @@ EsetestCreateDirectoryW(
     WCHAR wszParentFolder[ MAX_PATH + 1 ];
     size_t cchSubdir = 0;
     
+    // If the path doesn't exist
     if ( !PathFileExistsW( wszName ) ){
+        // Make sure that the parent directory is created
         wcLastIndex = wcsrchr( wszName, '\\' );
         
+        // If the path does not have \ then we just try to create it
         if( wcLastIndex == NULL ){
             return CreateDirectoryW( wszName, NULL );   
         }
@@ -4653,9 +5178,11 @@ EsetestCreateDirectoryW(
         cchSubdir = ( int )( wcLastIndex - wszName );
         wcsncpy_s( wszParentFolder, MAX_PATH + 1, wszName, cchSubdir );
         
+        // Call recursively using the parent directory
         if(EsetestCreateDirectoryW( wszParentFolder ))
         {
             if ( !PathFileExistsW( wszName ) ){
+                // Create the last directory
                 return CreateDirectoryW( wszName, NULL );           
             }
             else
@@ -4665,10 +5192,12 @@ EsetestCreateDirectoryW(
         }
         else
         {
+            // We could not create the parent directory
             return FALSE;
         }
     }
     else{
+        // Directory exists
         return TRUE;
     }
 }
@@ -4696,38 +5225,47 @@ EsetestRemoveDirectoryW(
     WCHAR wszLongNameAppended[ MAX_PATH ];
     WIN32_FIND_DATAW fdFileInfo;
 
+    // Fully-qualified path.
     if ( GetFullPathNameW( wszName, _countof( wszLongName ), wszLongName, NULL ) == 0 ){
         fReturn = FALSE;
     }
 
+    // If the directory does not exist, assume we succeeded in deleting it.
     if ( !PathFileExistsW( wszLongName ) ){
         return TRUE;
     }
 
+    // Search string.
     StringCchPrintfW( wszLongNameSearch,
                         _countof( wszLongNameSearch ),
                         L"%s\\*",
                         wszLongName );
 
+    // First file/subdir.
     HANDLE hSearch = FindFirstFileW( wszLongNameSearch, &fdFileInfo );
     if ( hSearch == INVALID_HANDLE_VALUE ){
+        // Error or didn't find any files?
         if ( GetLastError() != ERROR_NO_MORE_FILES ){
             fReturn = FALSE;
         }
     }
     else{
+        // Rest of the files.
         do{
+            // FindFile returns "." and ".." as well.
             if ( ( fdFileInfo.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY ) &&
                     ( !wcscmp( fdFileInfo.cFileName, L"." ) || !wcscmp( fdFileInfo.cFileName, L".." ) ) ){
                 continue;
             }
             
+            // Append to the current path.
             StringCchPrintfW( wszLongNameAppended,
                             _countof( wszLongNameAppended ),
                             L"%s\\%s",
                             wszLongName,
                             fdFileInfo.cFileName );
             
+            // File or subdir?
             if ( fdFileInfo.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY ){
                 if ( !EsetestRemoveDirectoryW( wszLongNameAppended ) ){
                     fReturn = FALSE;
@@ -4739,16 +5277,19 @@ EsetestRemoveDirectoryW(
                 }
             }
         } while ( FindNextFileW( hSearch, &fdFileInfo ) );
+        // Error or didn't find any files?
         if ( GetLastError() != ERROR_NO_MORE_FILES ){
             fReturn = FALSE;
         }
         FindClose( hSearch );
     }
 
+    // At this point, the directory should be empty.
     if ( !RemoveDirectoryW( wszLongName ) ){
         fReturn = FALSE;
     }
 
+    // The directory can linger on after the delete, if there are handles open to it in other processes (e.g. explorer)
     while ( PathFileExistsW( wszLongName ) ){
         Sleep(100);
     }
@@ -4784,40 +5325,50 @@ EsetestCopyDirectoryW(
     WCHAR wszLongNameDstAppended[ MAX_PATH ];
     WIN32_FIND_DATAW fdFileInfo;
 
+    // Fully-qualified source path.
     if ( GetFullPathNameW( wszNameSrc, _countof( wszLongNameSrc ), wszLongNameSrc, NULL ) == 0 ){
         fReturn = FALSE;
     }
 
+    // If the directory does not exist, promptly fail.
     if ( !PathFileExistsW( wszLongNameSrc ) ){
         return FALSE;
     }
 
+    // Fully-qualified destination path.
     if ( GetFullPathNameW( wszNameDst, _countof( wszLongNameDst ), wszLongNameDst, NULL ) == 0 ){
         fReturn = FALSE;
     }
 
+    // If the directory does not exist, create it.
     if ( !PathFileExistsW( wszLongNameDst ) && !EsetestEnsureFullPathExistsW( wszLongNameDst ) ){
         return FALSE;
     }
 
+    // Search string.
     StringCchPrintfW( wszLongNameSearch,
                         _countof( wszLongNameSearch ),
                         L"%s\\*",
                         wszLongNameSrc );
 
+    // First file/subdir.
     HANDLE hSearch = FindFirstFileW( wszLongNameSearch, &fdFileInfo );
     if ( hSearch == INVALID_HANDLE_VALUE ){
+        // Error or didn't find any files?
         if ( GetLastError() != ERROR_NO_MORE_FILES ){
             fReturn = FALSE;
         }
     }
     else{
+        // Rest of the files.
         do{
+            // FindFile returns "." and ".." as well.
             if ( ( fdFileInfo.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY ) &&
                     ( !wcscmp( fdFileInfo.cFileName, L"." ) || !wcscmp( fdFileInfo.cFileName, L".." ) ) ){
                 continue;
             }
             
+            // Append to the current paths.
             StringCchPrintfW( wszLongNameSrcAppended,
                             _countof( wszLongNameSrcAppended ),
                             L"%s\\%s",
@@ -4829,6 +5380,7 @@ EsetestCopyDirectoryW(
                             wszLongNameDst,
                             fdFileInfo.cFileName );
             
+            // File or subdir?
             if ( fdFileInfo.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY ){
                 if ( !EsetestCopyDirectoryW( wszLongNameSrcAppended, wszLongNameDstAppended ) ){
                     fReturn = FALSE;
@@ -4840,6 +5392,7 @@ EsetestCopyDirectoryW(
                 }
             }
         } while ( FindNextFileW( hSearch, &fdFileInfo ) );
+        // Error or didn't find any files?
         if ( GetLastError() != ERROR_NO_MORE_FILES ){
             fReturn = FALSE;
         }
@@ -5018,6 +5571,10 @@ Cleanup:
     return cbFileSize;
 }
 
+//================================================================
+// Time helper functions.
+//================================================================
+//
 
 static const ULONGLONG qw100NanoSecSince1601in1970 = 0x19db1ded53e8000;
 
@@ -5029,19 +5586,23 @@ SystemTimeToSecondsSince1970(
     FILETIME ft, ftBuffer;
     ULARGE_INTEGER qwft;
 
+    // Converting the date we want.
     if ( !SystemTimeToFileTime( pSystemTime, &ftBuffer ) ){
         OutputError( "%s(): SystemTimeToFileTime() failed with %lu!" CRLF, __FUNCTION__, GetLastError() );
         return 0;
     }
 
+    // Converting local time UTC-based.
     if ( !LocalFileTimeToFileTime( &ftBuffer, &ft ) ){
         OutputError( "%s(): LocalFileTimeToFileTime() failed with %lu!" CRLF, __FUNCTION__, GetLastError() );
         return 0;
     }
 
+    // Copying to a ULONG64 variable.
     qwft.HighPart = ft.dwHighDateTime;
     qwft.LowPart = ft.dwLowDateTime;
 
+    // Computing in seconds, instead of 100-nanoseconds (10^-7).
     return ( DWORD )( ( qwft.QuadPart - qw100NanoSecSince1601in1970 ) / 10000000 );
 }
 
@@ -5054,15 +5615,18 @@ SecondsSince1970ToSystemTime(
     FILETIME ftBuffer, ft;
     ULARGE_INTEGER qwft;
 
+    // Computing 10^-7 seconds since 1601.
     qwft.QuadPart = ( ( ULONGLONG )dwSecondsSince1970 ) * 10000000 + qw100NanoSecSince1601in1970;
     ftBuffer.dwHighDateTime = qwft.HighPart;
     ftBuffer.dwLowDateTime = qwft.LowPart;
 
+    // Converting UTC-based to local time.
     if ( !FileTimeToLocalFileTime( &ftBuffer, &ft ) ){
         OutputError( "%s(): FileTimeToLocalFileTime() failed with %lu!" CRLF, __FUNCTION__, GetLastError() );
         return;
     }   
 
+    // Converting to SystemTime.
     if ( !FileTimeToSystemTime( &ft, pSystemTime ) ){
         OutputError( "%s(): FileTimeToSystemTime() failed with %lu!" CRLF, __FUNCTION__, GetLastError() );
         pSystemTime->wYear = 1970;
@@ -5076,6 +5640,10 @@ SecondsSince1970ToSystemTime(
     }
 }
 
+//================================================================
+// Assert functionality and helper functions.
+//================================================================
+//
 
 PRIVATE
 int UtilMessageBoxW( IN const WCHAR * const wszText, IN const WCHAR * const wszCaption, IN const UINT uType )
@@ -5133,6 +5701,7 @@ void __cdecl OSStrCbFormatA ( __out_bcount(cbBuffer) PSTR szBuffer, size_t cbBuf
     va_end( alist );
     }
 
+//  create a formatted string in a given buffer
 static
 void __cdecl OSStrCbVFormatA ( __out_bcount(cbBuffer) PSTR szBuffer, size_t cbBuffer, __format_string PCSTR szFormat, va_list alist )
     {
@@ -5152,6 +5721,14 @@ static WCHAR                g_wszAssertText[1024];
 static BOOL             g_fSkipAssert = fFalse;
 static BOOL g_fSkipFailFast = fFalse;
 
+// Possible ESE assert actions, as of 2007/12/18:
+// #define JET_AssertExit               0x0000      /* Exit the application */
+// #define JET_AssertBreak              0x0001      /* Break to debugger */
+// #define JET_AssertMsgBox             0x0002      /* Display message box */
+// #define JET_AssertStop               0x0004      /* Alert and stop */
+// #define JET_AssertSkippableMsgBox    0x0008      /* Display skippable message box */
+// #define JET_AssertSkipAll            0x0010      /* Skip all asserts */
+// #define JET_AssertCrash              0x0020      /* AV (*0=0 style) */
 void __stdcall EsetestAssertFail( const char * const szMessageFormat, char const *szFilename, long lLine, ... )
     {
     va_list args;
@@ -5161,22 +5738,32 @@ void __stdcall EsetestAssertFail( const char * const szMessageFormat, char const
 #if 1
     if ( g_esetestconfig.m_esetestAssertAction == JET_AssertSkipAll )
     {
+        //  we immediately return here to allow the SkipAll action to be
+        //  used for disabling asserts during crashdumps
         va_end( args ); 
         return;
     }
 #endif
     CHAR                szAssertText[1024];
 
-    
+    /*      get last error before another system call
+    /**/
     DWORD dwSavedGLE = GetLastError();
 
 #if 0
+    //  allow only one assert/enforce at a time
+    //
     EnterCriticalSection( &g_csError );
 #endif
 
 #if 0
     if ( g_tidAssertFired == DwUtilThreadId() )
         {
+        //  Deal with the case where an assert has gone off in the middle
+        //  of an assert. One case where this can happen is if the assert
+        //  action causes a crash which is then intercepted by the calling 
+        //  application which then calls back into Jet (typically as part
+        //  of a finally block in exception handling).
 
         SetLastError( dwSavedGLE );
         WCHAR wszMessageFormat[ _MAX_PATH ];
@@ -5185,23 +5772,28 @@ void __stdcall EsetestAssertFail( const char * const szMessageFormat, char const
                                       _countof( wszMessageFormat ) );
         HandleNestedAssert( wszMessageFormat, szFilename, lLine );
 
+        //  Ok, blunder on like nothing is wrong.
         LeaveCriticalSection( &g_csError );
         SetLastError( dwSavedGLE );
-        return;
+        return; // this is not the assert we're interested in.
         }
 
     g_tidAssertFired = DwUtilThreadId();
 #endif
     int             id;
 
+//  szFilenameAssert = szFilename;
     lLineAssert = lLine;
 
-    
+    /*      select file name from file path
+    /**/
     szFilename = ( NULL == strrchr( szFilename, chPathDelimiter ) ) ? szFilename : strrchr( szFilename, chPathDelimiter ) + sizeof( CHAR );
 
-    
+    /*      assemble monolithic assert string
+    /**/
 
-    
+    /*  start by putting in the assert message
+    /**/
     OSStrCbFormatA(
         szAssertText + offset,
         sizeof( szAssertText ) - offset * sizeof( szAssertText[0] ),
@@ -5221,7 +5813,8 @@ void __stdcall EsetestAssertFail( const char * const szMessageFormat, char const
         "\r\n" );
     offset = strlen( szAssertText );
 
-    
+    /*  Add the version, file, line and PID/TID info
+    /**/
     OSStrCbFormatA(
         szAssertText + offset,
         sizeof( szAssertText ) - offset,
@@ -5234,10 +5827,11 @@ void __stdcall EsetestAssertFail( const char * const szMessageFormat, char const
     offset = strlen( szAssertText );
 
 #if 0
-    
+    /*  Can't get TLS error state until OS preinit is done */
     if ( FOSLayerUp() )
         {
-        
+        /*  Add the last error info
+        /**/
         OSStrCbFormatA(
             szAssertText + offset,
             sizeof( szAssertText ) - offset,
@@ -5253,7 +5847,8 @@ void __stdcall EsetestAssertFail( const char * const szMessageFormat, char const
 #endif
 
 #if 0
-    
+    /*  Add the assert.txt file
+    /**/
     OSStrCbFormatA(
         szAssertText + offset,
         sizeof( szAssertText ) - offset,
@@ -5265,8 +5860,11 @@ void __stdcall EsetestAssertFail( const char * const szMessageFormat, char const
 #if 0
     OSTrace( JET_tracetagAsserts, szAssertText );
 
-    
-    
+    /******************************************************
+    /**/
+    /*      if event log environment variable set then write
+    /*      assertion to event log.
+    /**/
     if ( !fNoWriteAssertEvent )
         {
         const WCHAR *   rgszT[] = { g_wszAssertText };
@@ -5285,8 +5883,10 @@ void __stdcall EsetestAssertFail( const char * const szMessageFormat, char const
 #endif
 
 #if 0
+    // Log to UTC Telemetry
+    //
     WCHAR           wszIssueSource[ g_cchIssueSourceMax ] = L"FORMAT STRING FAIL";
-    C_ASSERT( _countof( wszIssueSource ) < 260 );
+    C_ASSERT( _countof( wszIssueSource ) < 260 );   //  make sure we stay reasonably small
     ERRFormatIssueSource( wszIssueSource, sizeof( wszIssueSource ), dwSavedGLE, szFilename, lLine );
     OSTelemetryTrackAssertFail( szMessageFormat, wszIssueSource );
 
@@ -5299,7 +5899,28 @@ void __stdcall EsetestAssertFail( const char * const szMessageFormat, char const
     UINT wAssertAction = g_esetestconfig.m_esetestAssertAction;
     BOOL fDevMachine = fTrue;
 #if 0
-    fDevMachine = IsDevMachine();
+    //  if asserts are enabled *and* you are one of the cool kids then always 
+    //  popup an assert dialog that can be optionally dismissed.  
+    //  otherwise, use the configured behavior
+
+    WCHAR   szComputerName[ MAX_COMPUTERNAME_LENGTH + 1 ];
+    DWORD   cchComputerName = _countof( szComputerName );
+    //  GetComputerName() not available in mincore.
+    GetComputerNameW( szComputerName, &cchComputerName );
+    _wcsupr_s( szComputerName, cchComputerName+1 );
+    fDevMachine =   (   szComputerName == wcsstr( szComputerName, L"SOMEONE" )||
+                        szComputerName == wcsstr( szComputerName, L"SOMEONE" )   ||
+                        szComputerName == wcsstr( szComputerName, L"SOMEONE" )   ||
+                        szComputerName == wcsstr( szComputerName, L"SOMEONE" ) ||
+                        szComputerName == wcsstr( szComputerName, L"SOMEONE" ) ||
+                        szComputerName == wcsstr( szComputerName, L"SOMEONE" )  ||
+                        szComputerName == wcsstr( szComputerName, L"SOMEONE" )  ||
+                        szComputerName == wcsstr( szComputerName, L"SOMEONE" )  ||
+                        szComputerName == wcsstr( szComputerName, L"SOMEONE" ) ||
+                        szComputerName == wcsstr( szComputerName, L"SOMEONE" ) ||
+                        szComputerName == wcsstr( szComputerName, L"SOMEONE" )  ||
+                        szComputerName == wcsstr( szComputerName, L"SOMEONE" )||
+                        szComputerName == wcsstr( szComputerName, L"ESE" ) ) ;
 #endif
     if ( fDevMachine && wAssertAction == JET_AssertMsgBox )
         {
@@ -5311,11 +5932,13 @@ void __stdcall EsetestAssertFail( const char * const szMessageFormat, char const
         }
 
 
-    
+    /*      Print out the assert if a debugger is attached
+    /**/
     OSDebugPrint( g_wszAssertText );
 
 #if 1
-    
+    /*      Perform the Assert Action
+    /**/
     if ( wAssertAction == JET_AssertExit )
         {
         TerminateProcess( GetCurrentProcess(), UINT( ~0 ) );
@@ -5330,7 +5953,8 @@ void __stdcall EsetestAssertFail( const char * const szMessageFormat, char const
         {
         for( ; !g_fSkipAssert; )
             {
-            
+            /*  wait for developer, or anyone else, to debug the failure
+            /**/
             Sleep( 100 );
             }
         g_fSkipAssert = fFalse;
@@ -5366,6 +5990,7 @@ void __stdcall EsetestAssertFail( const char * const szMessageFormat, char const
         {
         size_t  cchOffset;
 
+        //  append the debugger message
         
         cchOffset = wcslen( g_wszAssertText );
 
@@ -5390,6 +6015,7 @@ void __stdcall EsetestAssertFail( const char * const szMessageFormat, char const
         }
     else if ( wAssertAction == JET_AssertSkipAll )
         {
+        // Do nothing.
         }
 
 #if 0
@@ -5397,14 +6023,20 @@ void __stdcall EsetestAssertFail( const char * const szMessageFormat, char const
     LeaveCriticalSection( &g_csError );
 #endif
 
-    
+    /* End the var args ... not sure it should be before SetLastError(), but playing it safe.
+    /**/
     va_end( args );
 
-    
+    /* Restore the last error, to avoid affecting other code paths if we ignored the assert(), and to make debuggability better
+    /**/
     SetLastError(dwSavedGLE);
     return;
     }
 
+//================================================================
+// Generic and Wide vs. Narrow API helper functions.
+//================================================================
+//
 
 #pragma warning( default : 4509 )
 
@@ -5511,6 +6143,8 @@ int OutputError( const char *szFormat, ... )
     return nRC;
 }
 
+// Closing NULL or INVALID_HANDLE_VALUE is FINE!!
+// Also, Nullify the input handle
 BOOL CloseHandleP( HANDLE* pH )
 {
     BOOL fRc = TRUE;
@@ -5523,6 +6157,9 @@ BOOL CloseHandleP( HANDLE* pH )
     return fRc;
 }
 
+// --------------
+// The function handles the string with embedded NULL by 
+// calling MultiByteToWideChar().
 wchar_t*
 EsetestWidenCbString(
     __in PSTR   szFunction,
@@ -5541,6 +6178,7 @@ EsetestWidenCbString(
         goto Cleanup;
     }
 
+    //allocate and copy sz
     wsz = new wchar_t[ cchsz ];
     if ( NULL == wsz )
     {
@@ -5574,6 +6212,7 @@ EsetestUnwidenCbString(
     JET_ERR     err     = JET_errSuccess;
     HRESULT         hr;
 
+    // copy sz
     hr = WideCharToMultiByte( CP_ACP, 0, wsz, cchsz, sz, cchsz, NULL, NULL );
     if ( 0 ==  hr )
     {
@@ -5587,6 +6226,7 @@ Cleanup:
     return err;
 }
 
+// If this is the defined special string, I am going to use a real unicode string
 bool IfMySpecialString (
     __in PCSTR  sz
 )
@@ -5609,6 +6249,7 @@ bool IfMySpecialString (
     
 }
 
+// --------------
 char*
 EsetestCopyString(
     __in PSTR   szFunction,
@@ -5622,6 +6263,7 @@ EsetestCopyString(
     if ( szToCopy == NULL ) return NULL;
 
     cchsz   = strlen( szToCopy ) + 1;
+    // Allocate and copy wsz
     sz = new char[ cchsz ];
     if ( NULL == sz )
     {
@@ -5642,6 +6284,7 @@ Cleanup:
     return sz;
 }
 
+// --------------
 wchar_t*
 EsetestCopyWideString(
     __in PSTR   szFunction,
@@ -5655,6 +6298,7 @@ EsetestCopyWideString(
     if ( wszToCopy == NULL ) return NULL;
 
     cchwsz  = wcslen( wszToCopy ) + 1;
+    // Allocate and copy wsz
     wsz = new wchar_t[ cchwsz ];
     if ( NULL == wsz )
     {
@@ -5682,12 +6326,14 @@ EsetestWidenString(
 )
 {
     wchar_t*        wsz     = NULL;
+    //const size_t  cchsz   = strlen( sz ) + 1;
     size_t  cchsz   = 0; 
     HRESULT         hr;
 
     if ( sz == NULL ) return NULL;
 
     cchsz   = strlen( sz ) + 1;
+    // Allocate and copy sz
     wsz = new wchar_t[ cchsz ];
     if ( NULL == wsz )
     {
@@ -5695,7 +6341,16 @@ EsetestWidenString(
         goto Cleanup;
     }
 
+    // create a real unicode for testing. It will be used as an index name for tuplelong.exe
+    // not a good idea, breaks tests
+    //if ( 0 == strcmp ( sz, "PlusUnicode" ) )      
+    //{
+    //  swprintf( wsz, L"\x8fea\x65af\x0000" );
+    //  goto Cleanup;
+    //}
 
+    // another special string
+    //if ( IfMySpecialString ( sz ) ) 
     if ( 0 == strcmp( sz, "RealUnicodeName" ) )
     {
         swprintf( wsz, L"\x8fea\x65af\x0000" );
@@ -5704,7 +6359,9 @@ EsetestWidenString(
     
     if ( 0 == strcmp ( sz, "letusgotodisney.mdb" ) )        
     {
+        //This becomes "disney.mdb" in Chinese (unicode).
         swprintf( wsz, L"\x8fea\x65af\x5c3c\x002e\x006d\x0064\x0062" );
+        //wprintf ( L" wsz is %ws\n", wsz );
         goto Cleanup;
     }
 
@@ -5740,6 +6397,7 @@ EsetestUnwidenStringAlloc(
     if ( wsz == NULL ) return NULL;
 
     cchwsz  = wcslen( wsz ) + 1;
+    // Allocate and copy wsz
     sz = new char[ cchwsz ];
     if ( NULL == sz )
     {
@@ -5783,6 +6441,7 @@ EsetestUnwidenString(
     }
 
     const size_t    cchwsz  = wcslen( wsz ) + 1;    
+    // copy wsz
     hr = StringCchPrintfA( sz, cchwsz, "%ws", wsz );
     if ( FAILED( hr ) )
     {
@@ -5792,11 +6451,15 @@ EsetestUnwidenString(
     }
 
 Cleanup:
+    // should we clean up wsz? (For the time being, yes)
+    // come back here
     mdelete_array( wsz );
 
     return err;
 }
 
+// why do we need both EsetestCleanupWidenString() and
+// EsetestUnwidenString()
 JET_ERR
 EsetestCleanupWidenString(
     __in PSTR   szFunction,
@@ -5811,6 +6474,7 @@ EsetestCleanupWidenString(
 
 }
 
+//----------------StringWithLength
 wchar_t*
 EsetestWidenStringWithLength(
     __in PSTR   szFunction,
@@ -5820,6 +6484,7 @@ EsetestWidenStringWithLength(
 {
     wchar_t*        wsz     = NULL;
     
+    // Allocate and copy sz
     wsz = new wchar_t[ cchsz ];
 
     if ( NULL == wsz )
@@ -5827,6 +6492,9 @@ EsetestWidenStringWithLength(
         tprintf( "%s(): Failed to allocate memory for wsz (%Id bytes requested)" CRLF, szFunction, cchsz );
         goto Cleanup;
     }
+    // we don't need to copy sz to wsz,
+    // becuase wsz will be used as output buffer
+    // but we should initiate it
     wsz[0] = L'\0';
 
 Cleanup:
@@ -5867,6 +6535,7 @@ Cleanup:
 
 }
 
+// --------------DONE
 JET_RSTMAP_W*
 EsetestWidenJET_RSTMAP(
     __in PSTR   szFunction,
@@ -5881,6 +6550,7 @@ EsetestWidenJET_RSTMAP(
     if(rgstmap == NULL)
         goto Cleanup;
 
+    // Allocate and copy rgstmap
     wrgstmap = new JET_RSTMAP_W[ crstfilemap ];
     if ( NULL == wrgstmap )
     {
@@ -5888,8 +6558,10 @@ EsetestWidenJET_RSTMAP(
         goto Cleanup;
     }
 
+    // note: crstfilemap is the total count of  array rgstmap
     for ( int i = 0; i < crstfilemap; i ++ ) {
         
+        // copy  szdatabaseName and szNewDatabaseName
 
         szDatabaseName = rgstmap[ i ].szDatabaseName;
         szNewDatabaseName = rgstmap[ i ].szNewDatabaseName;
@@ -5944,6 +6616,7 @@ EsetestWidenJET_RSTMAP2(
     if(rgstmap == NULL)
         goto Cleanup;
 
+    // Allocate and copy rgstmap
     wrgstmap = new JET_RSTMAP2_W[ crstfilemap ];
     if ( NULL == wrgstmap )
     {
@@ -5951,10 +6624,12 @@ EsetestWidenJET_RSTMAP2(
         goto Cleanup;
     }
 
+    // note: crstfilemap is the total count of  array rgstmap
     for ( int i = 0; i < crstfilemap; i ++ ) {
 
         wrgstmap[ i ].cbStruct = sizeof( JET_RSTMAP2_W );
         
+        // copy  szdatabaseName and szNewDatabaseName
 
         szDatabaseName = rgstmap[ i ].szDatabaseName;
         szNewDatabaseName = rgstmap[ i ].szNewDatabaseName;
@@ -6021,12 +6696,14 @@ EsetestUnwidenJET_RSTMAP(
 
     for ( int i = 0; i < crstfilemap; i ++ ) {
         
+        // copy wszDatabaseName and wszNewDatabaseName
         wszDatabaseName = wrgstmap[ i ].szDatabaseName;
         wszNewDatabaseName = wrgstmap[ i ].szNewDatabaseName;
 
         if ( wszDatabaseName != NULL ) 
         {
 
+            //hr = EsetestUnwidenString( szFunction, wszDatabaseName, rgstmap[ i ].szDatabaseName);
             hr = EsetestCleanupWidenString( szFunction, wszDatabaseName, rgstmap[ i ].szDatabaseName);
             if ( FAILED( hr ) ) 
             {
@@ -6041,6 +6718,7 @@ EsetestUnwidenJET_RSTMAP(
 
         if ( wszNewDatabaseName != NULL ) 
         {
+            //hr = EsetestUnwidenString( szFunction, wszNewDatabaseName, rgstmap[ i ].szNewDatabaseName );
             hr = EsetestCleanupWidenString( szFunction, wszNewDatabaseName, rgstmap[ i ].szNewDatabaseName );
             if ( FAILED( hr ) ) 
             {
@@ -6057,6 +6735,7 @@ EsetestUnwidenJET_RSTMAP(
     }
 
 Cleanup:
+    // free JET_RSTMAP_W
     mdelete_array( wrgstmap );
     return err;
 }
@@ -6085,12 +6764,14 @@ EsetestUnwidenJET_RSTMAP2(
 
         rgstmap[ i ].cbStruct = sizeof( JET_RSTMAP2 );
         
+        // copy wszDatabaseName and wszNewDatabaseName
         wszDatabaseName = wrgstmap[ i ].szDatabaseName;
         wszNewDatabaseName = wrgstmap[ i ].szNewDatabaseName;
 
         if ( wszDatabaseName != NULL ) 
         {
 
+            //hr = EsetestUnwidenString( szFunction, wszDatabaseName, rgstmap[ i ].szDatabaseName);
             hr = EsetestCleanupWidenString( szFunction, wszDatabaseName, rgstmap[ i ].szDatabaseName);
             if ( FAILED( hr ) ) 
             {
@@ -6105,6 +6786,7 @@ EsetestUnwidenJET_RSTMAP2(
 
         if ( wszNewDatabaseName != NULL ) 
         {
+            //hr = EsetestUnwidenString( szFunction, wszNewDatabaseName, rgstmap[ i ].szNewDatabaseName );
             hr = EsetestCleanupWidenString( szFunction, wszNewDatabaseName, rgstmap[ i ].szNewDatabaseName );
             if ( FAILED( hr ) ) 
             {
@@ -6124,11 +6806,13 @@ EsetestUnwidenJET_RSTMAP2(
     }
 
 Cleanup:
+    // free JET_RSTMAP_W
     mdelete_array( wrgstmap );
     return err;
 }
 
 
+//------------DONE
 JET_RSTINFO_W*
 EsetestWidenJET_RSTINFO(
     __in PSTR   szFunction,
@@ -6137,6 +6821,7 @@ EsetestWidenJET_RSTINFO(
 {
     JET_RSTINFO_W* wprstInfo = NULL;
 
+    // Allocate space for wprstInfo
     wprstInfo= new JET_RSTINFO_W;
     
     if ( NULL == wprstInfo )
@@ -6145,6 +6830,7 @@ EsetestWidenJET_RSTINFO(
         goto Cleanup;
     }
 
+    // the only thing that need to be widened inside JET_RSTINFO is rgrstmap
     if ( prstInfo->rgrstmap != NULL ) 
     {
         wprstInfo->rgrstmap = EsetestWidenJET_RSTMAP( szFunction, prstInfo->rgrstmap, prstInfo->crstmap );
@@ -6161,6 +6847,7 @@ EsetestWidenJET_RSTINFO(
         wprstInfo->rgrstmap = NULL;
     }
     
+    // copy the rest of data
     wprstInfo -> cbStruct = prstInfo -> cbStruct;
     wprstInfo -> crstmap = prstInfo -> crstmap;
     wprstInfo -> lgposStop = prstInfo -> lgposStop;
@@ -6183,6 +6870,7 @@ EsetestUnwidenJET_RSTINFO(
 
     if ( wrgstinfo && rgstinfo )
     {
+        // copy rgrstmap
         if ( wrgstinfo->rgrstmap != NULL ) 
         {
             hr = EsetestUnwidenJET_RSTMAP( szFunction, wrgstinfo->rgrstmap, wrgstinfo->crstmap, rgstinfo->rgrstmap );
@@ -6197,6 +6885,7 @@ EsetestUnwidenJET_RSTINFO(
             rgstinfo->rgrstmap = NULL;
         }
 
+        // copy the rest of data
         wrgstinfo -> cbStruct = rgstinfo -> cbStruct;
         wrgstinfo -> crstmap = rgstinfo -> crstmap;
         wrgstinfo -> lgposStop = rgstinfo -> lgposStop;
@@ -6210,6 +6899,7 @@ Cleanup:
 }
 
 
+//------------DONE
 JET_RSTINFO2_W*
 EsetestWidenJET_RSTINFO2(
     __in PSTR   szFunction,
@@ -6218,6 +6908,7 @@ EsetestWidenJET_RSTINFO2(
 {
     JET_RSTINFO2_W* wprstInfo = NULL;
 
+    // Allocate space for wprstInfo
     wprstInfo= new JET_RSTINFO2_W;
     
     if ( NULL == wprstInfo )
@@ -6226,6 +6917,7 @@ EsetestWidenJET_RSTINFO2(
         goto Cleanup;
     }
 
+    // the only thing that need to be widened inside JET_RSTINFO2 is rgrstmap
     if ( prstInfo->rgrstmap != NULL ) 
     {
         wprstInfo->rgrstmap = EsetestWidenJET_RSTMAP2( szFunction, prstInfo->rgrstmap, prstInfo->crstmap );
@@ -6242,6 +6934,7 @@ EsetestWidenJET_RSTINFO2(
         wprstInfo->rgrstmap = NULL;
     }
     
+    // copy the rest of data
     wprstInfo -> cbStruct = prstInfo -> cbStruct;
     wprstInfo -> crstmap = prstInfo -> crstmap;
     wprstInfo -> lgposStop = prstInfo -> lgposStop;
@@ -6265,6 +6958,7 @@ EsetestUnwidenJET_RSTINFO2(
 
     if ( wrgstinfo && rgstinfo )
     {
+        // copy rgrstmap
         if ( wrgstinfo->rgrstmap != NULL ) 
         {
             hr = EsetestUnwidenJET_RSTMAP2( szFunction, wrgstinfo->rgrstmap, wrgstinfo->crstmap, rgstinfo->rgrstmap );
@@ -6279,6 +6973,7 @@ EsetestUnwidenJET_RSTINFO2(
             rgstinfo->rgrstmap = NULL;
         }
 
+        // copy the rest of data
         wrgstinfo -> cbStruct = rgstinfo -> cbStruct;
         wrgstinfo -> crstmap = rgstinfo -> crstmap;
         wrgstinfo -> lgposStop = rgstinfo -> lgposStop;
@@ -6292,6 +6987,7 @@ Cleanup:
     return err;
 }
 
+//----------------DONE
 JET_SETSYSPARAM_W*
 EsetestWidenJET_SETSYSPARAM(
     __in PSTR   szFunction,
@@ -6302,6 +6998,7 @@ EsetestWidenJET_SETSYSPARAM(
     JET_SETSYSPARAM_W* wpsetsysparam = NULL;
     const char* sz = NULL;
     
+    // Allocate space for wpsetsysparam
     wpsetsysparam = new JET_SETSYSPARAM_W[ csetsysparam ];
     if ( NULL == wpsetsysparam )
     {
@@ -6312,6 +7009,7 @@ EsetestWidenJET_SETSYSPARAM(
 
     for ( int i = 0; i < csetsysparam; i++ ) 
     {
+        // copy sz
         sz = psetsysparam[ i ].sz;
         if ( sz != NULL ) {
             wpsetsysparam[ i ].sz = EsetestWidenString( szFunction, sz );       
@@ -6326,6 +7024,7 @@ EsetestWidenJET_SETSYSPARAM(
             {
                 wpsetsysparam[ i ].sz = NULL;
             }
+        // copy the rest of data
         wpsetsysparam [ i ].paramid = psetsysparam [ i ].paramid;
         wpsetsysparam [ i ].lParam = psetsysparam [ i ].lParam ;
         wpsetsysparam [ i ].err = psetsysparam [ i ].err;
@@ -6346,13 +7045,52 @@ EsetestUnwidenJET_SETSYSPARAM(
 {
     JET_ERR err = JET_errSuccess;
 
-          
+    // I don't think we need to copy back sysparam data
+    /*
+    HRESULT         hr;
+    wchar_t *wsz = NULL; 
+    char *lsz = NULL;
+    size_t  cchsz   = 0; 
+
+    for ( int i = 0; i < crstfilemap; i ++ ) {
+    
+        // copy sz
+        //lsz = psetsysparam[ i ].sz ;
+        //hr = EsetestUnwidenString( szFunction, wpsetsysparam[ i ].sz, lsz );
+        hr = EsetestUnwidenString( szFunction, wpsetsysparam[ i ].sz, psetsysparam[ i ].sz );
+        // sz is const char, so we cannot call EsetestUnwidenString 
+        // this is a hack
+        cchsz =  strlen(  psetsysparam[ i ].sz ) + 1;
+        lsz = new char[cchsz];
+
+            hr = StringCchPrintfA( lsz, cchsz, "%ws", wpsetsysparam[ i ].sz);
+        psetsysparam[ i ].sz  = lsz;
+        //wcscpy (wsz, wpsetsysparam[ i ].sz);
+        //hr = EsetestUnwidenString( szFunction, wsz, psetsysparam[ i ].sz );
+        if ( FAILED( hr ) ) 
+        {
+            tprintf( "%s(): Failed to EsetestUnwidenString(), hr = %d" CRLF, __FUNCTION__, hr );
+            err = JET_errTestError;
+            goto Cleanup;
+        }       
+
+
+        // copy the rest of data
+        psetsysparam [ i ].paramid = wpsetsysparam [ i ].paramid;
+        psetsysparam [ i ].lParam = wpsetsysparam [ i ].lParam ;
+        psetsysparam [ i ].err = wpsetsysparam [ i ].err;
+
+    }
+*/      
+    // free 
     mdelete_array( wpsetsysparam );
 
+//Cleanup:
     return err;
 }
 
 
+//----------------DONE
 JET_TABLECREATE_W*
 EsetestWidenJET_TABLECREATE(
     __in PSTR   szFunction,
@@ -6365,6 +7103,7 @@ EsetestWidenJET_TABLECREATE(
     const JET_COLUMNCREATE* rgcolumncreate = NULL;
     const JET_INDEXCREATE* rgindexcreate = NULL;
 
+    // Allocate space for wptablecreate
     wptablecreate = new JET_TABLECREATE_W;
     if ( NULL == wptablecreate )
     {
@@ -6374,6 +7113,7 @@ EsetestWidenJET_TABLECREATE(
 
     szTableName = ptablecreate -> szTableName;
 
+    // copy szTableName 
     wptablecreate -> szTableName = EsetestWidenString( szFunction, szTableName );   
     
     if ( NULL == wptablecreate -> szTableName ) 
@@ -6384,6 +7124,7 @@ EsetestWidenJET_TABLECREATE(
         goto Cleanup;
     }
 
+    // copy szTempleTableName
     szTemplateTableName = ptablecreate -> szTemplateTableName;
     if ( szTemplateTableName != NULL )  
     {
@@ -6401,6 +7142,7 @@ EsetestWidenJET_TABLECREATE(
         wptablecreate -> szTemplateTableName = NULL;
     }
 
+    // copy rgcolumncreate
     rgcolumncreate = ptablecreate -> rgcolumncreate;
     if ( rgcolumncreate != NULL )
     {
@@ -6417,6 +7159,7 @@ EsetestWidenJET_TABLECREATE(
         wptablecreate -> rgcolumncreate = NULL;
     }
 
+    // copy rgindexcreate
     rgindexcreate = ptablecreate -> rgindexcreate;
 
     if ( rgindexcreate != NULL )
@@ -6434,6 +7177,7 @@ EsetestWidenJET_TABLECREATE(
         wptablecreate -> rgindexcreate = NULL;
     }
     
+    //copy the rest of data
     wptablecreate ->cbStruct = sizeof ( JET_TABLECREATE_W );
     wptablecreate ->ulPages = ptablecreate ->ulPages;
     wptablecreate ->ulDensity = ptablecreate ->ulDensity;
@@ -6457,6 +7201,8 @@ EsetestUnwidenJET_TABLECREATE(
     JET_ERR err = JET_errSuccess;
     HRESULT         hr;
 
+    // copy szTableName -> Got AV. SOMEONE feels it is probably read only.
+    // only clean it up
     hr = EsetestCleanupWidenString( szFunction, wptablecreate -> szTableName, ptablecreate -> szTableName );
     if ( FAILED( hr ) ) 
     {
@@ -6465,6 +7211,8 @@ EsetestUnwidenJET_TABLECREATE(
         goto Cleanup;
     }
     
+    // copy szTempleTableName
+    // by the same token, just clean it up
     if ( wptablecreate -> szTemplateTableName != NULL ) 
     {
         hr = EsetestCleanupWidenString( szFunction, wptablecreate -> szTemplateTableName, ptablecreate -> szTemplateTableName );
@@ -6481,6 +7229,7 @@ EsetestUnwidenJET_TABLECREATE(
 
     if ( wptablecreate -> rgcolumncreate != NULL )
     {
+        // copy rgcolumncreate
         hr = EsetestUnwidenJET_COLUMNCREATE( szFunction, wptablecreate -> rgcolumncreate, wptablecreate -> cColumns, ptablecreate -> rgcolumncreate );   
         if ( FAILED( hr ) ) 
         {
@@ -6493,6 +7242,7 @@ EsetestUnwidenJET_TABLECREATE(
         ptablecreate -> rgcolumncreate = NULL;
     }
 
+    // copy rgindexcreate
     if (  wptablecreate -> rgindexcreate != NULL )
     {
         hr = EsetestUnwidenJET_INDEXCREATE( szFunction, wptablecreate -> rgindexcreate, wptablecreate ->cIndexes, ptablecreate -> rgindexcreate );
@@ -6507,6 +7257,7 @@ EsetestUnwidenJET_TABLECREATE(
         ptablecreate -> rgindexcreate = NULL;
     }
 
+    // copy the rest of data
     ptablecreate ->cbStruct = sizeof ( JET_TABLECREATE );
     ptablecreate ->ulPages = wptablecreate ->ulPages;
     ptablecreate ->ulDensity = wptablecreate ->ulDensity;
@@ -6523,6 +7274,7 @@ Cleanup:
 }
 
 
+//----------------
 JET_TABLECREATE2_W*
 EsetestWidenJET_TABLECREATE2(
     __in PSTR   szFunction,
@@ -6537,6 +7289,7 @@ EsetestWidenJET_TABLECREATE2(
     const JET_INDEXCREATE* rgindexcreate = NULL;
     const char* szCallback = NULL;
     
+    // Allocate wptablecreate
     wptablecreate2 = new JET_TABLECREATE2_W;
     if ( NULL == wptablecreate2 )
     {
@@ -6544,6 +7297,7 @@ EsetestWidenJET_TABLECREATE2(
         goto Cleanup;
     }
 
+    // copy szTableName
     szTableName = ptablecreate2 -> szTableName;
     wptablecreate2 -> szTableName = EsetestWidenString( szFunction, szTableName );  
     if ( NULL == wptablecreate2 -> szTableName ) 
@@ -6554,6 +7308,7 @@ EsetestWidenJET_TABLECREATE2(
         goto Cleanup;
     }
 
+    // copy szTempleTableName
     szTemplateTableName = ptablecreate2 -> szTemplateTableName;
     if ( szTemplateTableName != NULL ) 
     {
@@ -6570,6 +7325,7 @@ EsetestWidenJET_TABLECREATE2(
         wptablecreate2 -> szTemplateTableName = NULL;
     }
 
+    // copy rgcolumncreate
     rgcolumncreate = ptablecreate2 -> rgcolumncreate;
     if ( rgcolumncreate != NULL )
     {
@@ -6586,6 +7342,7 @@ EsetestWidenJET_TABLECREATE2(
         wptablecreate2 -> rgcolumncreate = NULL;
     }
 
+    // copy rgindexcreate
     rgindexcreate = ptablecreate2 -> rgindexcreate;
     if ( rgindexcreate != NULL ) 
     {
@@ -6618,6 +7375,7 @@ EsetestWidenJET_TABLECREATE2(
         wptablecreate2 -> szCallback = NULL;
     }
 
+    //copy the rest of data
     wptablecreate2 ->cbStruct = sizeof ( JET_TABLECREATE2_W );
     wptablecreate2 ->ulPages = ptablecreate2 ->ulPages;
     wptablecreate2 ->ulDensity = ptablecreate2 ->ulDensity;
@@ -6643,6 +7401,7 @@ EsetestUnwidenJET_TABLECREATE2(
     JET_ERR err = JET_errSuccess;
     HRESULT         hr;
 
+    // copy szTableName
     hr = EsetestCleanupWidenString( szFunction, wptablecreate2 -> szTableName, ptablecreate2 -> szTableName );
     if ( FAILED( hr ) ) 
     {
@@ -6651,6 +7410,7 @@ EsetestUnwidenJET_TABLECREATE2(
         goto Cleanup;
     }
 
+    // copy szTempleTableName
     if ( wptablecreate2 -> szTemplateTableName != NULL ) {
         hr = EsetestCleanupWidenString( szFunction, wptablecreate2 -> szTemplateTableName, ptablecreate2 -> szTemplateTableName );
         if ( FAILED( hr ) ) 
@@ -6663,6 +7423,7 @@ EsetestUnwidenJET_TABLECREATE2(
         ptablecreate2 -> szTemplateTableName = NULL;
     }
 
+    // copy rgcolumncreate
     if ( wptablecreate2 -> rgcolumncreate != NULL )
     {
         hr = EsetestUnwidenJET_COLUMNCREATE( szFunction, wptablecreate2 -> rgcolumncreate, wptablecreate2 -> cColumns, ptablecreate2 -> rgcolumncreate );   
@@ -6678,6 +7439,7 @@ EsetestUnwidenJET_TABLECREATE2(
         ptablecreate2 -> rgcolumncreate = NULL;
     }
 
+    // copy rgindexcreate
     if ( wptablecreate2 -> rgindexcreate != NULL ) 
     {
         hr = EsetestUnwidenJET_INDEXCREATE( szFunction, wptablecreate2 -> rgindexcreate, wptablecreate2 ->cIndexes, ptablecreate2 -> rgindexcreate );
@@ -6692,8 +7454,11 @@ EsetestUnwidenJET_TABLECREATE2(
         ptablecreate2 -> rgindexcreate = NULL;
     }
 
+    // copy szCallback
     if ( wptablecreate2 -> szCallback != NULL )
     {
+        //hr = EsetestUnwidenString( szFunction, wptablecreate2 -> szCallback, ptablecreate2 -> szCallback );
+        // AV for unwiden, so only cleanup
         hr = EsetestCleanupWidenString( szFunction, wptablecreate2 -> szCallback, ptablecreate2 -> szCallback );
         if ( FAILED( hr ) ) 
         {
@@ -6707,6 +7472,7 @@ EsetestUnwidenJET_TABLECREATE2(
         ptablecreate2 -> szCallback = NULL;
     }
 
+    // copy the rest of data
     ptablecreate2 ->cbStruct = sizeof ( JET_TABLECREATE2 );
     ptablecreate2 ->ulPages = wptablecreate2 ->ulPages;
     ptablecreate2 ->ulDensity = wptablecreate2 ->ulDensity;
@@ -6722,6 +7488,7 @@ Cleanup:
     return err;
 }
 
+//----------------
 JET_TABLECREATE3_W*
 EsetestWidenJET_TABLECREATE3(
     __in PSTR   szFunction,
@@ -6736,6 +7503,7 @@ EsetestWidenJET_TABLECREATE3(
     const JET_INDEXCREATE2* rgindexcreate2 = NULL;
     const char* szCallback = NULL;
     
+    // Allocate wptablecreate
     wptablecreate3 = new JET_TABLECREATE3_W;
     if ( NULL == wptablecreate3 )
     {
@@ -6743,6 +7511,7 @@ EsetestWidenJET_TABLECREATE3(
         goto Cleanup;
     }
 
+    // copy szTableName
     szTableName = ptablecreate3 -> szTableName;
     wptablecreate3 -> szTableName = EsetestWidenString( szFunction, szTableName );  
     if ( NULL == wptablecreate3 -> szTableName ) 
@@ -6753,6 +7522,7 @@ EsetestWidenJET_TABLECREATE3(
         goto Cleanup;
     }
 
+    // copy szTempleTableName
     szTemplateTableName = ptablecreate3 -> szTemplateTableName;
     if ( szTemplateTableName != NULL ) 
     {
@@ -6769,6 +7539,7 @@ EsetestWidenJET_TABLECREATE3(
         wptablecreate3 -> szTemplateTableName = NULL;
     }
 
+    // copy rgcolumncreate
     rgcolumncreate = ptablecreate3 -> rgcolumncreate;
     if ( rgcolumncreate != NULL )
     {
@@ -6785,6 +7556,7 @@ EsetestWidenJET_TABLECREATE3(
         wptablecreate3 -> rgcolumncreate = NULL;
     }
 
+    // copy rgindexcreate2
     rgindexcreate2 = ptablecreate3 -> rgindexcreate;
     if ( rgindexcreate2 != NULL ) 
     {
@@ -6817,6 +7589,7 @@ EsetestWidenJET_TABLECREATE3(
         wptablecreate3 -> szCallback = NULL;
     }
 
+    //copy the rest of data
     wptablecreate3 ->cbStruct = sizeof ( JET_TABLECREATE3_W );
     wptablecreate3 ->ulPages = ptablecreate3 ->ulPages;
     wptablecreate3 ->ulDensity = ptablecreate3 ->ulDensity;
@@ -6845,6 +7618,7 @@ EsetestUnwidenJET_TABLECREATE3(
     JET_ERR err = JET_errSuccess;
     HRESULT         hr;
 
+    // copy szTableName
     hr = EsetestCleanupWidenString( szFunction, wptablecreate3 -> szTableName, ptablecreate3 -> szTableName );
     if ( FAILED( hr ) ) 
     {
@@ -6853,6 +7627,7 @@ EsetestUnwidenJET_TABLECREATE3(
         goto Cleanup;
     }
 
+    // copy szTempleTableName
     if ( wptablecreate3 -> szTemplateTableName != NULL ) {
         hr = EsetestCleanupWidenString( szFunction, wptablecreate3 -> szTemplateTableName, ptablecreate3 -> szTemplateTableName );
         if ( FAILED( hr ) ) 
@@ -6865,6 +7640,7 @@ EsetestUnwidenJET_TABLECREATE3(
         ptablecreate3 -> szTemplateTableName = NULL;
     }
 
+    // copy rgcolumncreate
     if ( wptablecreate3 -> rgcolumncreate != NULL )
     {
         hr = EsetestUnwidenJET_COLUMNCREATE( szFunction, wptablecreate3 -> rgcolumncreate, wptablecreate3 -> cColumns, ptablecreate3 -> rgcolumncreate );   
@@ -6880,6 +7656,7 @@ EsetestUnwidenJET_TABLECREATE3(
         ptablecreate3 -> rgcolumncreate = NULL;
     }
 
+    // copy rgindexcreate2
     if ( wptablecreate3 -> rgindexcreate != NULL ) 
     {
         hr = EsetestUnwidenJET_INDEXCREATE2( szFunction, wptablecreate3 -> rgindexcreate, wptablecreate3 ->cIndexes, ptablecreate3 -> rgindexcreate );
@@ -6894,8 +7671,11 @@ EsetestUnwidenJET_TABLECREATE3(
         ptablecreate3 -> rgindexcreate = NULL;
     }
 
+    // copy szCallback
     if ( wptablecreate3 -> szCallback != NULL )
     {
+        //hr = EsetestUnwidenString( szFunction, wptablecreate3 -> szCallback, ptablecreate3 -> szCallback );
+        // AV for unwiden, so only cleanup
         hr = EsetestCleanupWidenString( szFunction, wptablecreate3 -> szCallback, ptablecreate3 -> szCallback );
         if ( FAILED( hr ) ) 
         {
@@ -6909,6 +7689,7 @@ EsetestUnwidenJET_TABLECREATE3(
         ptablecreate3 -> szCallback = NULL;
     }
 
+    // copy the rest of data
     ptablecreate3 ->cbStruct = sizeof ( JET_TABLECREATE3 );
     ptablecreate3 ->ulPages = wptablecreate3 ->ulPages;
     ptablecreate3 ->ulDensity = wptablecreate3 ->ulDensity;
@@ -6927,6 +7708,7 @@ Cleanup:
     return err;
 }
 
+//----------------
 JET_TABLECREATE5_W*
 EsetestWidenJET_TABLECREATE5(
     __in PSTR   szFunction,
@@ -6941,6 +7723,7 @@ EsetestWidenJET_TABLECREATE5(
     const JET_INDEXCREATE3* rgindexcreate3 = NULL;
     const char* szCallback = NULL;
     
+    // Allocate wptablecreate
     wptablecreate5 = new JET_TABLECREATE5_W;
     if ( NULL == wptablecreate5 )
     {
@@ -6948,6 +7731,7 @@ EsetestWidenJET_TABLECREATE5(
         goto Cleanup;
     }
 
+    // copy szTableName
     szTableName = ptablecreate5 -> szTableName;
     wptablecreate5 -> szTableName = EsetestWidenString( szFunction, szTableName );  
     if ( NULL == wptablecreate5 -> szTableName ) 
@@ -6958,6 +7742,7 @@ EsetestWidenJET_TABLECREATE5(
         goto Cleanup;
     }
 
+    // copy szTempleTableName
     szTemplateTableName = ptablecreate5 -> szTemplateTableName;
     if ( szTemplateTableName != NULL ) 
     {
@@ -6974,6 +7759,7 @@ EsetestWidenJET_TABLECREATE5(
         wptablecreate5 -> szTemplateTableName = NULL;
     }
 
+    // copy rgcolumncreate
     rgcolumncreate = ptablecreate5 -> rgcolumncreate;
     if ( rgcolumncreate != NULL )
     {
@@ -6990,6 +7776,7 @@ EsetestWidenJET_TABLECREATE5(
         wptablecreate5 -> rgcolumncreate = NULL;
     }
 
+    // copy rgindexcreate3
     rgindexcreate3 = ptablecreate5 -> rgindexcreate;
     if ( rgindexcreate3 != NULL ) 
     {
@@ -7022,6 +7809,7 @@ EsetestWidenJET_TABLECREATE5(
         wptablecreate5 -> szCallback = NULL;
     }
 
+    //copy the rest of data
     wptablecreate5 ->cbStruct = sizeof ( JET_TABLECREATE5_W );
     wptablecreate5 ->ulPages = ptablecreate5 ->ulPages;
     wptablecreate5 ->ulDensity = ptablecreate5 ->ulDensity;
@@ -7051,6 +7839,7 @@ EsetestUnwidenJET_TABLECREATE5(
     JET_ERR err = JET_errSuccess;
     HRESULT         hr;
 
+    // copy szTableName
     hr = EsetestCleanupWidenString( szFunction, wptablecreate5 -> szTableName, ptablecreate5 -> szTableName );
     if ( FAILED( hr ) ) 
     {
@@ -7059,6 +7848,7 @@ EsetestUnwidenJET_TABLECREATE5(
         goto Cleanup;
     }
 
+    // copy szTempleTableName
     if ( wptablecreate5 -> szTemplateTableName != NULL ) {
         hr = EsetestCleanupWidenString( szFunction, wptablecreate5 -> szTemplateTableName, ptablecreate5 -> szTemplateTableName );
         if ( FAILED( hr ) ) 
@@ -7071,6 +7861,7 @@ EsetestUnwidenJET_TABLECREATE5(
         ptablecreate5 -> szTemplateTableName = NULL;
     }
 
+    // copy rgcolumncreate
     if ( wptablecreate5 -> rgcolumncreate != NULL )
     {
         hr = EsetestUnwidenJET_COLUMNCREATE( szFunction, wptablecreate5 -> rgcolumncreate, wptablecreate5 -> cColumns, ptablecreate5 -> rgcolumncreate );   
@@ -7086,6 +7877,7 @@ EsetestUnwidenJET_TABLECREATE5(
         ptablecreate5 -> rgcolumncreate = NULL;
     }
 
+    // copy rgindexcreate3
     if ( wptablecreate5 -> rgindexcreate != NULL ) 
     {
         hr = EsetestUnwidenJET_INDEXCREATE3( szFunction, wptablecreate5 -> rgindexcreate, wptablecreate5 ->cIndexes, ptablecreate5 -> rgindexcreate );
@@ -7100,8 +7892,11 @@ EsetestUnwidenJET_TABLECREATE5(
         ptablecreate5 -> rgindexcreate = NULL;
     }
 
+    // copy szCallback
     if ( wptablecreate5 -> szCallback != NULL )
     {
+        //hr = EsetestUnwidenString( szFunction, wptablecreate5 -> szCallback, ptablecreate5 -> szCallback );
+        // AV for unwiden, so only cleanup
         hr = EsetestCleanupWidenString( szFunction, wptablecreate5 -> szCallback, ptablecreate5 -> szCallback );
         if ( FAILED( hr ) ) 
         {
@@ -7115,6 +7910,7 @@ EsetestUnwidenJET_TABLECREATE5(
         ptablecreate5 -> szCallback = NULL;
     }
 
+    // copy the rest of data
     ptablecreate5 ->cbStruct = sizeof ( JET_TABLECREATE5 );
     ptablecreate5 ->ulPages = wptablecreate5 ->ulPages;
     ptablecreate5 ->ulDensity = wptablecreate5 ->ulDensity;
@@ -7134,6 +7930,7 @@ Cleanup:
     return err;
 }
 
+//----------------
 JET_INDEXCREATE_W*
 EsetestWidenJET_INDEXCREATE(
     __in PSTR   szFunction,
@@ -7144,6 +7941,7 @@ EsetestWidenJET_INDEXCREATE(
     JET_INDEXCREATE_W* wpindexcreate = NULL;
     const char* szIndexName = NULL;
 
+    // Allocate wpindexcreate
     wpindexcreate = new JET_INDEXCREATE_W [ cindexes ];
     if ( NULL == wpindexcreate )
     {
@@ -7153,6 +7951,7 @@ EsetestWidenJET_INDEXCREATE(
 
     for ( int i = 0; i < cindexes; i++ ) 
     {
+        // copy szIndexName
         szIndexName = pindexcreate[ i ].szIndexName;
         wpindexcreate[ i ].szIndexName = EsetestWidenString( szFunction, szIndexName );
         if ( NULL == wpindexcreate[ i ].szIndexName ) 
@@ -7163,6 +7962,8 @@ EsetestWidenJET_INDEXCREATE(
             goto Cleanup;
         }
     
+        // copy szKey
+        // Note: use EsetestWidenCbString()
         if ( NULL == pindexcreate[ i ].szKey ) 
         {
             wpindexcreate[ i ].szKey = NULL;
@@ -7181,6 +7982,7 @@ EsetestWidenJET_INDEXCREATE(
         }
 
 
+        // rgconditionalcolumn
         if ( NULL == pindexcreate[ i ].rgconditionalcolumn )
         {
             wpindexcreate[ i ].rgconditionalcolumn = NULL;
@@ -7199,16 +8001,19 @@ EsetestWidenJET_INDEXCREATE(
             }
         }
 
+        // copy the rest of data
         wpindexcreate[ i ].cConditionalColumn = pindexcreate[ i ].cConditionalColumn;
-        wpindexcreate[ i ].cbKey = 2 * pindexcreate[ i ].cbKey;
+        wpindexcreate[ i ].cbKey = 2 * pindexcreate[ i ].cbKey;     // double it
         wpindexcreate[ i ].grbit = pindexcreate[ i ].grbit;
         wpindexcreate[ i ].ulDensity = pindexcreate[ i ].ulDensity ;
         wpindexcreate[ i ].err = pindexcreate[ i ].err;
         wpindexcreate[ i ].pidxunicode = pindexcreate[ i ].pidxunicode;
         wpindexcreate[ i ].ptuplelimits = pindexcreate[ i ].ptuplelimits;
 
+        // cbStruct 
         wpindexcreate[ i ].cbStruct = sizeof( JET_INDEXCREATE_W );
         
+        // cbkeyMost???
 #if ( JET_VERSION >= 0x0600 )
         wpindexcreate[ i ].cbKeyMost = pindexcreate[ i ].cbKeyMost ; 
 #endif
@@ -7233,6 +8038,8 @@ EsetestUnwidenJET_INDEXCREATE(
 
     for ( int i = 0; i < cindexes; i++ ) 
     {
+        // szIndexName
+        //hr = EsetestUnwidenString( szFunction, wpindexcreate[ i ].szIndexName, pindexcreate[ i ].szIndexName ); 
         hr = EsetestCleanupWidenString( szFunction, wpindexcreate[ i ].szIndexName, pindexcreate[ i ].szIndexName ); 
         if ( FAILED( hr ) ) 
         {
@@ -7241,6 +8048,12 @@ EsetestUnwidenJET_INDEXCREATE(
             goto Cleanup;
         }
 
+        // szKey
+        //hr = EsetestUnwidenCbString( szFunction, 
+        //          wpindexcreate[ i ].szKey, 
+        //          wpindexcreate[ i ].cbKey / 2, 
+        //          pindexcreate[ i ].szKey );
+        // unwiden got AV
         hr = EsetestCleanupWidenString( szFunction, wpindexcreate[ i ].szKey, pindexcreate[ i ].szKey );
         if ( FAILED( hr ) ) 
         {
@@ -7249,6 +8062,7 @@ EsetestUnwidenJET_INDEXCREATE(
             goto Cleanup;
         }
 
+        // conditionalcolumn
         hr = EsetestUnwidenJET_CONDITIONALCOLUMN( szFunction, 
                         wpindexcreate[ i ].rgconditionalcolumn,  
                         wpindexcreate[ i ].cConditionalColumn,
@@ -7262,6 +8076,7 @@ EsetestUnwidenJET_INDEXCREATE(
 
         pindexcreate[ i ].cConditionalColumn = wpindexcreate[ i ].cConditionalColumn;
 
+        // copy the rest of data
         pindexcreate[ i ].cbKey = wpindexcreate[ i ].cbKey / 2;
         pindexcreate[ i ].grbit = wpindexcreate[ i ]. grbit;
         pindexcreate[ i ].ulDensity = wpindexcreate[ i ].ulDensity ;
@@ -7269,8 +8084,10 @@ EsetestUnwidenJET_INDEXCREATE(
         pindexcreate[ i ].pidxunicode = wpindexcreate[ i ].pidxunicode;
         pindexcreate[ i ].ptuplelimits = wpindexcreate[ i ].ptuplelimits;
 
+        // cbStruct 
         pindexcreate[ i ].cbStruct = sizeof( JET_INDEXCREATE_A );
 
+        // cbkeyMost???
 #if ( JET_VERSION >= 0x0600 )
         pindexcreate[ i ].cbKeyMost = wpindexcreate[ i ].cbKeyMost ; 
 #endif
@@ -7281,6 +8098,7 @@ Cleanup:
     return err;
 }
 
+//----------------
 JET_INDEXCREATE2_W*
 EsetestWidenJET_INDEXCREATE2(
     __in PSTR   szFunction,
@@ -7291,6 +8109,7 @@ EsetestWidenJET_INDEXCREATE2(
     JET_INDEXCREATE2_W* wpindexcreate2 = NULL;
     const char* szIndexName = NULL;
 
+    // Allocate wpindexcreate2
     wpindexcreate2 = new JET_INDEXCREATE2_W [ cindexes ];
     if ( NULL == wpindexcreate2 )
     {
@@ -7300,6 +8119,7 @@ EsetestWidenJET_INDEXCREATE2(
 
     for ( int i = 0; i < cindexes; i++ ) 
     {
+        // copy szIndexName
         szIndexName = pindexcreate2[ i ].szIndexName;
         wpindexcreate2[ i ].szIndexName = EsetestWidenString( szFunction, szIndexName );
         if ( NULL == wpindexcreate2[ i ].szIndexName ) 
@@ -7310,6 +8130,8 @@ EsetestWidenJET_INDEXCREATE2(
             goto Cleanup;
         }
     
+        // copy szKey
+        // Note: use EsetestWidenCbString()
         if ( NULL == pindexcreate2[ i ].szKey ) 
         {
             wpindexcreate2[ i ].szKey = NULL;
@@ -7328,6 +8150,7 @@ EsetestWidenJET_INDEXCREATE2(
         }
 
 
+        // rgconditionalcolumn
         if ( NULL == pindexcreate2[ i ].rgconditionalcolumn )
         {
             wpindexcreate2[ i ].rgconditionalcolumn = NULL;
@@ -7346,8 +8169,9 @@ EsetestWidenJET_INDEXCREATE2(
             }
         }
 
+        // copy the rest of data
         wpindexcreate2[ i ].cConditionalColumn = pindexcreate2[ i ].cConditionalColumn;
-        wpindexcreate2[ i ].cbKey = 2 * pindexcreate2[ i ].cbKey;
+        wpindexcreate2[ i ].cbKey = 2 * pindexcreate2[ i ].cbKey;       // double it
         wpindexcreate2[ i ].grbit = pindexcreate2[ i ].grbit;
         wpindexcreate2[ i ].ulDensity = pindexcreate2[ i ].ulDensity ;
         wpindexcreate2[ i ].err = pindexcreate2[ i ].err;
@@ -7356,6 +8180,7 @@ EsetestWidenJET_INDEXCREATE2(
         wpindexcreate2[ i ].cbKeyMost = pindexcreate2[ i ].cbKeyMost ; 
         wpindexcreate2[ i ].pSpacehints = pindexcreate2[ i ].pSpacehints ; 
 
+        // cbStruct
         wpindexcreate2[ i ].cbStruct = sizeof( JET_INDEXCREATE2_W );        
     }
 Cleanup:
@@ -7377,6 +8202,8 @@ EsetestUnwidenJET_INDEXCREATE2(
 
     for ( int i = 0; i < cindexes; i++ ) 
     {
+        // szIndexName
+        //hr = EsetestUnwidenString( szFunction, wpindexcreate2[ i ].szIndexName, pindexcreate2[ i ].szIndexName ); 
         hr = EsetestCleanupWidenString( szFunction, wpindexcreate2[ i ].szIndexName, pindexcreate2[ i ].szIndexName ); 
         if ( FAILED( hr ) ) 
         {
@@ -7385,6 +8212,12 @@ EsetestUnwidenJET_INDEXCREATE2(
             goto Cleanup;
         }
 
+        // szKey
+        //hr = EsetestUnwidenCbString( szFunction, 
+        //          wpindexcreate2[ i ].szKey, 
+        //          wpindexcreate2[ i ].cbKey / 2, 
+        //          pindexcreate2[ i ].szKey );
+        // unwiden got AV
         hr = EsetestCleanupWidenString( szFunction, wpindexcreate2[ i ].szKey, pindexcreate2[ i ].szKey );
         if ( FAILED( hr ) ) 
         {
@@ -7393,6 +8226,7 @@ EsetestUnwidenJET_INDEXCREATE2(
             goto Cleanup;
         }
 
+        // conditionalcolumn
         hr = EsetestUnwidenJET_CONDITIONALCOLUMN( szFunction, 
                         wpindexcreate2[ i ].rgconditionalcolumn,  
                         wpindexcreate2[ i ].cConditionalColumn,
@@ -7414,6 +8248,7 @@ EsetestUnwidenJET_INDEXCREATE2(
         pindexcreate2[ i ].cbKeyMost = wpindexcreate2[ i ].cbKeyMost ; 
         pindexcreate2[ i ].pSpacehints = wpindexcreate2[ i ].pSpacehints ; 
 
+        // cbStruct
         pindexcreate2[ i ].cbStruct = sizeof( JET_INDEXCREATE2_A ); 
     }
     
@@ -7422,6 +8257,7 @@ Cleanup:
     return err;
 }
 
+//----------------
 JET_INDEXCREATE3_W*
 EsetestWidenJET_INDEXCREATE3(
     __in PSTR   szFunction,
@@ -7432,6 +8268,7 @@ EsetestWidenJET_INDEXCREATE3(
     JET_INDEXCREATE3_W* wpindexcreate3 = NULL;
     const char* szIndexName = NULL;
 
+    // Allocate wpindexcreate3
     wpindexcreate3 = new JET_INDEXCREATE3_W [ cindexes ];
     if ( NULL == wpindexcreate3 )
     {
@@ -7441,6 +8278,7 @@ EsetestWidenJET_INDEXCREATE3(
 
     for ( int i = 0; i < cindexes; i++ ) 
     {
+        // copy szIndexName
         szIndexName = pindexcreate3[ i ].szIndexName;
         wpindexcreate3[ i ].szIndexName = EsetestWidenString( szFunction, szIndexName );
         if ( NULL == wpindexcreate3[ i ].szIndexName ) 
@@ -7451,6 +8289,8 @@ EsetestWidenJET_INDEXCREATE3(
             goto Cleanup;
         }
     
+        // copy szKey
+        // Note: use EsetestWidenCbString()
         if ( NULL == pindexcreate3[ i ].szKey ) 
         {
             wpindexcreate3[ i ].szKey = NULL;
@@ -7469,6 +8309,7 @@ EsetestWidenJET_INDEXCREATE3(
         }
 
 
+        // rgconditionalcolumn
         if ( NULL == pindexcreate3[ i ].rgconditionalcolumn )
         {
             wpindexcreate3[ i ].rgconditionalcolumn = NULL;
@@ -7487,8 +8328,9 @@ EsetestWidenJET_INDEXCREATE3(
             }
         }
 
+        // copy the rest of data
         wpindexcreate3[ i ].cConditionalColumn = pindexcreate3[ i ].cConditionalColumn;
-        wpindexcreate3[ i ].cbKey = 2 * pindexcreate3[ i ].cbKey;
+        wpindexcreate3[ i ].cbKey = 2 * pindexcreate3[ i ].cbKey;       // double it
         wpindexcreate3[ i ].grbit = pindexcreate3[ i ].grbit;
         wpindexcreate3[ i ].ulDensity = pindexcreate3[ i ].ulDensity ;
         wpindexcreate3[ i ].err = pindexcreate3[ i ].err;
@@ -7497,6 +8339,7 @@ EsetestWidenJET_INDEXCREATE3(
         wpindexcreate3[ i ].cbKeyMost = pindexcreate3[ i ].cbKeyMost ; 
         wpindexcreate3[ i ].pSpacehints = pindexcreate3[ i ].pSpacehints ; 
 
+        // cbStruct
         wpindexcreate3[ i ].cbStruct = sizeof( JET_INDEXCREATE3_W );        
     }
 Cleanup:
@@ -7518,6 +8361,8 @@ EsetestUnwidenJET_INDEXCREATE3(
 
     for ( int i = 0; i < cindexes; i++ ) 
     {
+        // szIndexName
+        //hr = EsetestUnwidenString( szFunction, wpindexcreate3[ i ].szIndexName, pindexcreate3[ i ].szIndexName ); 
         hr = EsetestCleanupWidenString( szFunction, wpindexcreate3[ i ].szIndexName, pindexcreate3[ i ].szIndexName ); 
         if ( FAILED( hr ) ) 
         {
@@ -7526,6 +8371,12 @@ EsetestUnwidenJET_INDEXCREATE3(
             goto Cleanup;
         }
 
+        // szKey
+        //hr = EsetestUnwidenCbString( szFunction, 
+        //          wpindexcreate3[ i ].szKey, 
+        //          wpindexcreate3[ i ].cbKey / 3, 
+        //          pindexcreate3[ i ].szKey );
+        // unwiden got AV
         hr = EsetestCleanupWidenString( szFunction, wpindexcreate3[ i ].szKey, pindexcreate3[ i ].szKey );
         if ( FAILED( hr ) ) 
         {
@@ -7534,6 +8385,7 @@ EsetestUnwidenJET_INDEXCREATE3(
             goto Cleanup;
         }
 
+        // conditionalcolumn
         hr = EsetestUnwidenJET_CONDITIONALCOLUMN( szFunction, 
                         wpindexcreate3[ i ].rgconditionalcolumn,  
                         wpindexcreate3[ i ].cConditionalColumn,
@@ -7555,6 +8407,7 @@ EsetestUnwidenJET_INDEXCREATE3(
         pindexcreate3[ i ].cbKeyMost = wpindexcreate3[ i ].cbKeyMost ; 
         pindexcreate3[ i ].pSpacehints = wpindexcreate3[ i ].pSpacehints ; 
 
+        // cbStruct
         pindexcreate3[ i ].cbStruct = sizeof( JET_INDEXCREATE3_A ); 
     }
     
@@ -7563,6 +8416,7 @@ Cleanup:
     return err;
 }
 
+//----------------DONE
 JET_CONVERT_W*
 EsetestWidenJET_CONVERT(
     __in PSTR   szFunction,
@@ -7572,6 +8426,7 @@ EsetestWidenJET_CONVERT(
     JET_CONVERT_W* wpconvert = NULL;
     const char* szOldDll = NULL;
         
+    // Allocate pconvert
     wpconvert = new JET_CONVERT_W;
     if ( NULL == wpconvert )
     {
@@ -7579,6 +8434,7 @@ EsetestWidenJET_CONVERT(
         goto Cleanup;
     }
 
+    // copy szOldDll
     szOldDll = pconvert -> szOldDll;
     wpconvert -> szOldDll = EsetestWidenString( szFunction, szOldDll ); 
     if ( NULL == wpconvert -> szOldDll) 
@@ -7604,6 +8460,7 @@ EsetestUnwidenJET_CONVERT(
     JET_ERR err = JET_errSuccess;
     HRESULT         hr;
     
+    // copy szOldDll
     hr = EsetestUnwidenString( szFunction, wpconvert-> szOldDll, pconvert-> szOldDll );
     if ( FAILED( hr ) ) 
     {
@@ -7617,6 +8474,7 @@ Cleanup:
     return err;
 }
 
+//----------------DONE
 JET_CONDITIONALCOLUMN_W*
 EsetestWidenJET_CONDITIONALCOLUMN(
     __in PSTR   szFunction,
@@ -7628,6 +8486,7 @@ EsetestWidenJET_CONDITIONALCOLUMN(
 
     tprintf (" widen conditionalcolumn" CRLF );
     
+    // Allocate spce for wrgcolumncreate
     wrgconditionalcolumn = new JET_CONDITIONALCOLUMN_W[ ccolumns ];
     if ( NULL == wrgconditionalcolumn )
     {
@@ -7638,6 +8497,7 @@ EsetestWidenJET_CONDITIONALCOLUMN(
 
     for ( int i = 0; i < ccolumns; i++ ) 
     {
+        // copy szColumnName
         wrgconditionalcolumn[ i ].szColumnName = EsetestWidenString( szFunction, rgconditionalcolumn[ i ].szColumnName );       
         if ( NULL == wrgconditionalcolumn [ i ].szColumnName ) 
         {
@@ -7647,6 +8507,7 @@ EsetestWidenJET_CONDITIONALCOLUMN(
             goto Cleanup;
         }
 
+        // copy the rest of data
         wrgconditionalcolumn[ i ].grbit = rgconditionalcolumn[ i ].grbit; 
         wrgconditionalcolumn[ i ].cbStruct = sizeof( JET_CONDITIONALCOLUMN_W );
 
@@ -7668,6 +8529,7 @@ EsetestUnwidenJET_CONDITIONALCOLUMN(
 
     for ( int i = 0; i < ccolumns; i++ ) 
     {
+        //hr = EsetestUnwidenString( szFunction, wrgconditionalcolumn[ i ].szColumnName,  rgconditionalcolumn[ i ].szColumnName );
         hr = EsetestCleanupWidenString( szFunction, wrgconditionalcolumn[ i ].szColumnName,  rgconditionalcolumn[ i ].szColumnName );
         if ( FAILED( hr ) ) 
         {
@@ -7676,6 +8538,7 @@ EsetestUnwidenJET_CONDITIONALCOLUMN(
             goto Cleanup;
         }
         
+        // copy the rest of data
         rgconditionalcolumn[ i ].grbit = wrgconditionalcolumn[ i ].grbit; 
         rgconditionalcolumn[ i ].cbStruct = sizeof( JET_CONDITIONALCOLUMN_A );
     }
@@ -7685,6 +8548,7 @@ Cleanup:
 }
 
     
+//----------------DONE
 JET_COLUMNCREATE_W*
 EsetestWidenJET_COLUMNCREATE(
     __in PSTR   szFunction,
@@ -7694,6 +8558,7 @@ EsetestWidenJET_COLUMNCREATE(
 {
     JET_COLUMNCREATE_W* wrgcolumncreate;
 
+    // Allocate space for wrgcolumncreate
     wrgcolumncreate = new JET_COLUMNCREATE_W[ ccolumns ];
     if ( NULL == wrgcolumncreate )
     {
@@ -7703,6 +8568,7 @@ EsetestWidenJET_COLUMNCREATE(
 
     for ( int i = 0; i < ccolumns; i++ ) 
     {
+        // copy szColumnName
         wrgcolumncreate[ i ].szColumnName = EsetestWidenString( szFunction, rgcolumncreate[ i ].szColumnName );     
         if ( NULL == wrgcolumncreate[ i ].szColumnName ) 
         {
@@ -7712,6 +8578,7 @@ EsetestWidenJET_COLUMNCREATE(
             goto Cleanup;
         }
 
+        // copy the rest of data
         wrgcolumncreate[ i ].cbStruct = sizeof( JET_COLUMNCREATE_W );
         wrgcolumncreate[ i ].coltyp = rgcolumncreate[ i ].coltyp; 
         wrgcolumncreate[ i ].cbMax = rgcolumncreate[ i ].cbMax; 
@@ -7741,6 +8608,7 @@ EsetestUnwidenJET_COLUMNCREATE(
 
     for ( int i = 0; i < ccolumns; i++ ) 
     {
+        //hr = EsetestUnwidenString( szFunction, wrgcolumncreate[ i ].szColumnName,  rgcolumncreate[ i ].szColumnName );
         hr = EsetestCleanupWidenString( szFunction, wrgcolumncreate[ i ].szColumnName,  rgcolumncreate[ i ].szColumnName );
         if ( FAILED( hr ) ) 
         {
@@ -7749,6 +8617,7 @@ EsetestUnwidenJET_COLUMNCREATE(
             goto Cleanup;
         }
 
+        // copy the rest of data
         rgcolumncreate[ i ].cbStruct = sizeof( JET_COLUMNCREATE_A );
         rgcolumncreate[ i ].coltyp = wrgcolumncreate[ i ].coltyp; 
         rgcolumncreate[ i ].cbMax = wrgcolumncreate[ i ].cbMax; 
@@ -7766,6 +8635,7 @@ Cleanup:
     return err;
 }
 
+// not done yet
 JET_LOGINFO_W*
 EsetestWidenJET_LOGINFO(
     __in PSTR   szFunction,
@@ -7776,6 +8646,7 @@ EsetestWidenJET_LOGINFO(
     JET_LOGINFO_W* wpLogInfo = NULL;
     HRESULT         hr;
         
+    // Allocate memory
     wpLogInfo = new JET_LOGINFO_W;
     if ( NULL == wpLogInfo )
     {
@@ -7783,6 +8654,7 @@ EsetestWidenJET_LOGINFO(
         goto Cleanup;
     }
 
+    //wpLogInfo->szBaseName = EsetestWidenString( szFunction, pLogInfo->szBaseName );
     hr = StringCchPrintfW( wpLogInfo->szBaseName, JET_BASE_NAME_LENGTH + 1 , L"%hs", pLogInfo->szBaseName );
     if ( FAILED( hr ) )
     {
@@ -7827,6 +8699,12 @@ Cleanup:
 }
 
 
+// This function will detect if pindexcreateInUnknownFormat is JET_INDEXCREATE or
+// JET_INDEXCREATEOLD, and then depending on which DLL is loaded, output
+// pindexcreate in the appropraite structure.
+// Return value:
+// true: pindexcreateInUnknownFormat has been converted to pindexcreate.
+// false: pindexcreateInUnknownFormat was acceptable; pindexcreate is NULL.
 JET_ERR
 EsetestAdaptJET_INDEXCREATE(
     __in PSTR   szFunction,
@@ -7849,6 +8727,7 @@ EsetestAdaptJET_INDEXCREATE(
 
     if ( NULL == rgindexcreateInUnknownFormat )
     {
+        // It's not an error to pass in a NULL indexcreate.
         goto Cleanup;
     }
 
@@ -7878,10 +8757,12 @@ EsetestAdaptJET_INDEXCREATE(
             goto Cleanup;
         }
 
+        // Copy the elements over
         for ( size_t i = 0; i < cIndexCreate; ++i )
         {
             C_ASSERT( sizeof( JET_INDEXCREATEOLD ) <= sizeof( JET_INDEXCREATE ) );
             memcpy( &rgindexcreate[ i ], &rgindexcreateInUnknownFormat[ i ], sizeof( rgindexcreate[ 0 ] ) );
+            // Since the old structure does not have cbKey, we only need to fix up the cbStruct
             rgindexcreate[ i ].cbStruct = sizeof( rgindexcreate[ i ] );
         }
         *pfAdapted = true;
@@ -7898,17 +8779,20 @@ Cleanup:
     return err;
 }
 
+// copies info over from pindexcreate to pindexcreateInUnknownFormat
+// pindexcreate will be deleted.
 JET_ERR
 EsetestUnadaptJET_INDEXCREATE(
     __in PSTR   szFunction,
-    __inout_ecount( cIndexCreate ) JET_INDEXCREATE*     pindexcreateNewFormat,
+    __inout_ecount( cIndexCreate ) JET_INDEXCREATE*     pindexcreateNewFormat,      // the user buffer
     unsigned long   cIndexCreate,
-    __inout_ecount( cIndexCreate ) JET_INDEXCREATE**    prgindexcreateOldFormat
+    __inout_ecount( cIndexCreate ) JET_INDEXCREATE**    prgindexcreateOldFormat     // has the new data, will get deleted
 )
 {
     JET_ERR err = JET_errSuccess;
 
     JET_INDEXCREATEOLD* const       rgindexcreate = reinterpret_cast< JET_INDEXCREATEOLD* >( *prgindexcreateOldFormat );
+    // Copy the elements over
     for ( size_t i = 0; i < cIndexCreate; ++i )
     {
         AssertM( rgindexcreate[ i ].cbStruct == sizeof( JET_INDEXCREATEOLD ) );
@@ -7924,6 +8808,7 @@ EsetestUnadaptJET_INDEXCREATE(
         AssertM( pindexcreateNewFormat[ i ].rgconditionalcolumn == rgindexcreate[ i ].rgconditionalcolumn );
         AssertM( pindexcreateNewFormat[ i ].cConditionalColumn == rgindexcreate[ i ].cConditionalColumn );
 
+        // I think err is the only writable field.
         pindexcreateNewFormat[ i ].err = rgindexcreate[ i ].err;
     }
 
@@ -7931,6 +8816,11 @@ EsetestUnadaptJET_INDEXCREATE(
     return err;
 }
 
+ // This function will adapt the JET_TABLECREATE structure to use the proper JET_INDEXCREATE
+// structure.
+// Return value:
+// true: pindexcreateInUnknownFormat has been converted to pindexcreate.
+// false: pindexcreateInUnknownFormat was acceptable; pindexcreate is NULL.
 JET_ERR
 EsetestAdaptJET_TABLECREATE(
     __in PSTR   szFunction,
@@ -7977,6 +8867,7 @@ Cleanup:
                 tprintf( "%s():%d Failed to %s()" CRLF, __FUNCTION__, __LINE__, "EsetestUnadaptJET_INDEXCREATE" );
                 if ( JET_errSuccess == err )
                 {
+                    // Only overwrite err if it's not a success.
                     err = errT;
                 }
             }
@@ -7988,11 +8879,13 @@ Cleanup:
     return err;
 }
 
+// copies info over from ptablecreate to ptablecreateInNewFormat
+// ptablecreate will be deleted.
 JET_ERR
 EsetestUnadaptJET_TABLECREATE(
     __in PSTR   szFunction,
-    __inout JET_TABLECREATE*    ptablecreateInNewFormat,
-    __inout JET_TABLECREATE**   pptablecreate
+    __inout JET_TABLECREATE*    ptablecreateInNewFormat,        // the user buffer
+    __inout JET_TABLECREATE**   pptablecreate                   // has the new data, will get deleted
 )
 {
     JET_ERR     err     = JET_errSuccess;
@@ -8022,15 +8915,22 @@ EsetestUnadaptJET_TABLECREATE(
         &(*pptablecreate)->rgindexcreate
         ) );
 
+    // Was it deleted properly in EsetestUnadaptJET_INDEXCREATE()??
     AssertM( NULL == ptablecreateToRead->rgindexcreate );
 
 Cleanup:
+    // possible leak of rgindexcreate if EsetestUnadaptJET_INDEXCREATE() fails
     mdelete( *pptablecreate );
     return err;
 }
 
 
 
+// This function will adapt the JET_TABLECREATE structure to use the proper JET_INDEXCREATE
+// structure.
+// Return value:
+// true: pindexcreateInUnknownFormat has been converted to pindexcreate.
+// false: pindexcreateInUnknownFormat was acceptable; pindexcreate is NULL.
 JET_ERR
 EsetestAdaptJET_TABLECREATE2(
     __in PSTR   szFunction,
@@ -8077,6 +8977,7 @@ Cleanup:
                 tprintf( "%s():%d Failed to %s()" CRLF, __FUNCTION__, __LINE__, "EsetestUnadaptJET_INDEXCREATE" );
                 if ( JET_errSuccess == err )
                 {
+                    // Only overwrite err if it's not a success.
                     err = errT;
                 }
             }
@@ -8088,11 +8989,13 @@ Cleanup:
     return err;
 }
 
+// copies info over from ptablecreate to ptablecreateInNewFormat
+// ptablecreate will be deleted.
 JET_ERR
 EsetestUnadaptJET_TABLECREATE2(
     __in PSTR   szFunction,
-    __inout JET_TABLECREATE2*   ptablecreateInNewFormat,
-    __inout JET_TABLECREATE2**  pptablecreate
+    __inout JET_TABLECREATE2*   ptablecreateInNewFormat,        // the user buffer
+    __inout JET_TABLECREATE2**  pptablecreate                   // has the new data, will get deleted
 )
 {
     JET_ERR     err     = JET_errSuccess;
@@ -8124,9 +9027,11 @@ EsetestUnadaptJET_TABLECREATE2(
         &(*pptablecreate)->rgindexcreate
         ) );
 
+    // Was it deleted properly in EsetestUnadaptJET_INDEXCREATE()??
     AssertM( NULL == ptablecreateToRead->rgindexcreate );
 
 Cleanup:
+    // possible leak of rgindexcreate if EsetestUnadaptJET_INDEXCREATE() fails
     mdelete( *pptablecreate );
     return err;
 }
@@ -8234,10 +9139,19 @@ JET_ERR JET_API dummyColumnUserCallBack(
 
     memset( pvData, 0xAA, cbData );
         
+    //pvArg1 = NULL;
+    // *pcbActual   = 0;
     printf (" hello from dummy callback\n" );
     return JET_errSuccess;
 }
 
+//================================================================
+//  Helper APIs to compute the Pearson statistical correlation
+//  coefficient between two variables.
+//  These functions are all thread-safe, except for destroying
+//  the object.
+//================================================================
+//
 
 typedef struct
 {
@@ -8277,6 +9191,7 @@ HANDLE PearsonCorrelationCreate()
 {
     bool fSuccess = true;
     
+    //  Allocate the opaque handle.
     EsePerfPearsonCorrelation* pPCor = new EsePerfPearsonCorrelation;
     if ( pPCor == NULL )
     {
@@ -8332,11 +9247,14 @@ double PearsonCorrelationNewSample( HANDLE h, const double x, const double y )
         return 0.0;
     }
 
+    //  We've reached the maximum number of samples, but it doesn't matter. We'll just be slightly
+    //  off when computing the new average.
     if ( pPCor->m_iSample + 2 == 0 )
     {
         pPCor->m_iSample--;
     }
 
+    //  First time, we have to initialize the variables.
     if ( pPCor->m_iSample == 0 )
     {
         pPCor->m_dblSumSqX = 0.0;
@@ -8395,11 +9313,13 @@ PearsonCorrelationStartSampling(
         return false;
     }
 
+    //  Are we already collecting?
     if ( pPCor->m_hThread != NULL )
     {
         goto Cleanup;
     }
 
+    //  Let's create the collection object.
     pPCor->m_hQuery = PerfCountersCreateQuery();
     if ( pPCor->m_hQuery == NULL ||
             !PerfCountersAddLnCounter( pPCor->m_hQuery, szComputerNameX, szPerfObjectX, szPerfCounterX, szInstanceX ) ||
@@ -8408,6 +9328,7 @@ PearsonCorrelationStartSampling(
         goto Cleanup;
     }
 
+    //  Let's create the thread.
     pPCor->m_dwSamplingPeriod = dwPeriod;
     pPCor->m_fThreadRunning = true;
     pPCor->m_hThread = CreateThread( NULL, 0, PearsonCorrelationSampling_, (LPVOID)pPCor, 0, NULL );
@@ -8440,11 +9361,13 @@ PearsonCorrelationStopSampling(
         return false;
     }
 
+    //  Are we collecting?
     if ( pPCor->m_hThread == NULL )
     {
         goto Cleanup;
     }
 
+    //  Let's now signal and wait.
     pPCor->m_fThreadRunning = false;
     (void)WaitForSingleObject( pPCor->m_hThread, INFINITE );
     (void)CloseHandle( pPCor->m_hThread );
@@ -8484,4 +9407,5 @@ void PearsonCorrelationDestroy( HANDLE h )
     delete pPCor;
 }
 
+//*******************************************************************
 

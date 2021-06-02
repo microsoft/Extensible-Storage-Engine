@@ -3,7 +3,9 @@
 
 #pragma once
 
+//  Caching File Header
 
+//  a6ea21e4-7ee7-4abe-aa30-f8ce919253d1
 const BYTE c_rgbCacheHeaderV1[ CBlockCacheHeaderHelpers::cbGuid ] = { 0xE4, 0x21, 0xEA, 0xA6, 0xE7, 0x7E, 0xBE, 0x4A, 0xAA, 0x30, 0xF8, 0xCE, 0x91, 0x92, 0x53, 0xD1 };
 
 #pragma push_macro( "new" )
@@ -11,7 +13,8 @@ const BYTE c_rgbCacheHeaderV1[ CBlockCacheHeaderHelpers::cbGuid ] = { 0xE4, 0x21
 
 #include <pshpack1.h>
 
-class CCacheHeader : CBlockCacheHeaderHelpers
+//PERSISTED
+class CCacheHeader : CBlockCacheHeaderHelpers  // ch
 {
     public:
 
@@ -50,12 +53,12 @@ class CCacheHeader : CBlockCacheHeaderHelpers
 
     private:
 
-        LittleEndian<ULONG>             m_le_ulChecksum;
-        BYTE                            m_rgbHeaderType[ cbGuid ];
-        LittleEndian<VolumeId>          m_le_volumeid;
-        LittleEndian<FileId>            m_le_fileid;
-        BYTE                            m_rgbUniqueId[ cbGuid ];
-        BYTE                            m_rgbCacheType[ cbGuid ];
+        LittleEndian<ULONG>             m_le_ulChecksum;            //  offset 0:  checksum
+        BYTE                            m_rgbHeaderType[ cbGuid ];  //  header type
+        LittleEndian<VolumeId>          m_le_volumeid;              //  volume id when created
+        LittleEndian<FileId>            m_le_fileid;                //  file id when created
+        BYTE                            m_rgbUniqueId[ cbGuid ];    //  unique id
+        BYTE                            m_rgbCacheType[ cbGuid ];   //  cache type
 
         BYTE                            m_rgbPadding1[  ibFileType
                                                         - sizeof( m_le_ulChecksum )
@@ -65,7 +68,7 @@ class CCacheHeader : CBlockCacheHeaderHelpers
                                                         - sizeof( m_rgbUniqueId )
                                                         - sizeof( m_rgbCacheType ) ];
 
-        UnalignedLittleEndian<ULONG>    m_le_filetype;
+        UnalignedLittleEndian<ULONG>    m_le_filetype;                                  //  offset 667:  file type = JET_filetypeCachingFile
 
         BYTE                            m_rgbPadding2[  cbCacheHeader 
                                                         - ibFileType
@@ -217,9 +220,9 @@ INLINE void* CCacheHeader::operator new( _In_ const size_t cb )
 {
 #ifdef MEM_CHECK
     return PvOSMemoryPageAlloc_( cb, NULL, fFalse, SzNewFile(), UlNewLine() );
-#else
+#else  //  !MEM_CHECK
     return PvOSMemoryPageAlloc( cb, NULL );
-#endif
+#endif  //  MEM_CHECK
 }
 
 INLINE void* CCacheHeader::operator new( _In_ const size_t cb, _In_ const void* const pv )

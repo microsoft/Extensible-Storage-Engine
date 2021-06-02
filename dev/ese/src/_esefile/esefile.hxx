@@ -19,21 +19,22 @@
 #include "jet.h"
 #include "tcconst.hxx"
 
-#pragma warning ( disable : 4127 )
-#pragma warning ( disable : 4706 )
+#pragma warning ( disable : 4127 )  // conditional expression is constant
+#pragma warning ( disable : 4706 )  // assignment within conditional expression
 
 const INT g_cpgDBReserved   = 2;
 
 extern INT g_cbPage;
 extern INT g_cpagesPerBlock;
 
-const INT g_cbBufferTotal       = 512 * 1024;
-const INT g_cbReadBuffer        = 256 * 1024;
+const INT g_cbBufferTotal       = 512 * 1024;       //  total buffer size used to read
+const INT g_cbReadBuffer        = 256 * 1024;       //  read size issued to the OS
 
 inline void InitPageSize( const ULONG cbPage )
 {
     g_cbPage = cbPage;
     
+    //  read in 64k chunks for optimum performance
     g_cpagesPerBlock    = g_cbReadBuffer / g_cbPage;
 }
 

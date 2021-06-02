@@ -5,7 +5,9 @@
 #include "collection.hxx"
 
 
+//  ================================================================
 class CountedInvasiveLinkedListTest : public UNITTEST
+//  ================================================================
 {
     private:
         static CountedInvasiveLinkedListTest s_instance;
@@ -50,7 +52,9 @@ bool CountedInvasiveLinkedListTest::FRunUnderESENT() const          { return tru
 bool CountedInvasiveLinkedListTest::FRunUnderESE97() const          { return true; }
 
 
+//  ================================================================
 ERR CountedInvasiveLinkedListTest::ErrTest()
+//  ================================================================
 {
     ERR err = JET_errSuccess;
 

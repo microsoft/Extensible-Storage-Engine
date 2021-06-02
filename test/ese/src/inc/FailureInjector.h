@@ -18,6 +18,12 @@
 
 namespace FailureInjector
 {
+    // The following ifdef block is the standard way of creating macros which make exporting 
+    // from a DLL simpler. All files within this DLL are compiled with the FAILUREINJECTOR_EXPORTS
+    // symbol defined on the command line. this symbol should not be defined on any project
+    // that uses this DLL. This way any other project whose source files include this file see 
+    // FAILUREINJECTOR_API functions as being imported from a DLL, whereas this DLL sees symbols
+    // defined with this macro as being exported.
     #ifdef ESETEST_FAILUREINJECTOR_EXPORTS
     #define FAILUREINJECTOR_API __declspec(dllexport) __stdcall
     #else
@@ -66,12 +72,13 @@ namespace FailureInjector
         IOA_RET_ERROR           = 1,
         IOA_CORRUPT_DATA        = 2,
         IOA_PASSTHROUGH         = 3,
-        IOA_LOST_FLUSH          = 4,
-        IOA_SIM_SECTOR_REMAP    = 5,
+        IOA_LOST_FLUSH          = 4,    // only relevant to write operations, will default to IOA_PASSTHROUGH on read ops
+        IOA_SIM_SECTOR_REMAP    = 5,    // the filter will fail all read ops by returing the user-specified error until a write succeeds. should hook Read+Write for it to work properly
 
+        // These flags can be combined with each other or the ones above
         IOA_LATENCY         = 0x00010000,
         IOA_CALLBACK        = 0x00020000,
-        IOA_CALLBACK_EX     = 0x00060000,
+        IOA_CALLBACK_EX     = 0x00060000,   // CALLBACK bit should be set as well
     };
 
     typedef int IOFAILURE_FILTER_ID;
@@ -89,7 +96,7 @@ namespace FailureInjector
         DWORD               funcFilter;
         DWORD               threadID;
         std::string         filenameFilter;
-        float               probability;
+        float               probability;    // any value smaller than 1 / RAND_MAX will be treated as 0
         INT64               offset_le;
         INT64               offset_ge;
         INT64               length_le;
@@ -98,7 +105,7 @@ namespace FailureInjector
         DWORD               latencyMSec;
         FARPROC             callback;
         LPARAM              lParam;
-        volatile long       hitCount;
+        volatile long       hitCount;   // this variable will be updated atomically on each filter hit
         union
         {
             DWORD       error;
@@ -166,6 +173,8 @@ namespace FailureInjector
         __in_z LPCSTR lpAPIModule,
         __in_z LPCSTR lpProcName);
 
+    //////////////////////////////////////////////////////////////////////////
+    // Code Injection
     typedef int (CALLBACK *INIT_PROC)(LPVOID pData);
 
     HANDLE FAILUREINJECTOR_API InjectCode(

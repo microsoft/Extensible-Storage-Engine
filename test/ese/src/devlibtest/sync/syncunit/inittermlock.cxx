@@ -3,7 +3,9 @@
 
 #include "syncunittest.hxx"
 
+//  ================================================================
 class BasicInitTermLockTest : public UNITTEST
+//  ================================================================
 {
     private:
         static BasicInitTermLockTest s_instance;
@@ -40,30 +42,37 @@ bool BasicInitTermLockTest::FRunUnderESE97() const      { return true; }
 CInitTermLock   g_clock;
 
 
+//  ================================================================
 ERR BasicInitTermLockTest::ErrTest()
+//  ================================================================
 {
 
     wprintf( L"\tTesting basic CInitTermLock() support ...\n");
 
     ERR err = JET_errSuccess;
     
+    //  test trying to init, and failing to finish
 
     TestCheck( CInitTermLock::ERR::errInitBegun == g_clock.ErrInitBegin() );
     g_clock.InitFinish( CInitTermLock::fFailedInit );
 
+    //  test init (and succeeding init)
 
     TestCheck( CInitTermLock::ERR::errInitBegun == g_clock.ErrInitBegin() );
     g_clock.InitFinish( CInitTermLock::fSuccessfulInit);
     TestCheck( g_clock.CConsumers() == 1 ); 
 
+    //  test ref count, skipped init
 
     TestCheck( CInitTermLock::ERR::errSuccess == g_clock.ErrInitBegin() );
     TestCheck( g_clock.CConsumers() == 2 );
 
+    //  test ref count, skipped term
 
     TestCheck( CInitTermLock::ERR::errSuccess == g_clock.ErrTermBegin() );
     TestCheck( g_clock.CConsumers() == 1 );
 
+    //  test term
 
     TestCheck( CInitTermLock::ERR::errTermBegun == g_clock.ErrTermBegin() );
     g_clock.TermFinish();

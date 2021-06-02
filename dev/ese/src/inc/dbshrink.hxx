@@ -4,6 +4,7 @@
 struct ROOTMOVECHILD
     :   public CZeroInit
 {
+    // Ctr./Dtr.
     ROOTMOVECHILD()
         :   CZeroInit( sizeof( ROOTMOVECHILD ) )
     {
@@ -16,11 +17,13 @@ struct ROOTMOVECHILD
     }
     ~ROOTMOVECHILD()
     {
+        // Release latches.
         csrChildFDP.ReleasePage();
 
         ASSERT_VALID_OBJ( dataSphNew );
     }
 
+    // Validation routine.
     VOID AssertValid() const
     {
         Assert( ( dbtimeBeforeChildFDP != dbtimeNil ) && ( dbtimeBeforeChildFDP != dbtimeInvalid ) );
@@ -35,21 +38,24 @@ struct ROOTMOVECHILD
         }
     }
 
-    DBTIME          dbtimeBeforeChildFDP;
-    ULONG           fFlagsBeforeChildFDP;
+    // This dbtime/fFlags pair must be updated atomically so it can be reverted to
+    // a consistent state if neeed.
+    DBTIME          dbtimeBeforeChildFDP;   // Before dbtime of the root page of the child.
+    ULONG           fFlagsBeforeChildFDP;   // Before flags on the root page of the child.
 
-    CSR             csrChildFDP;
-    PGNO            pgnoChildFDP;
-    OBJID           objidChild;
-    SPACE_HEADER    sphNew;
-    DATA            dataSphNew;
+    CSR             csrChildFDP;            // Currency of the root page of the child.
+    PGNO            pgnoChildFDP;           // Pgno of the root page of the child.
+    OBJID           objidChild;             // OBJID of the child.
+    SPACE_HEADER    sphNew;                 // Post-image of the space header.
+    DATA            dataSphNew;             // Points to sphNew.
 
-    ROOTMOVECHILD*  prootMoveChildNext;
+    ROOTMOVECHILD*  prootMoveChildNext;     // Next child tree.
 };
 
 struct ROOTMOVE
     :   public CZeroInit
 {
+    // Ctr./Dtr.
     ROOTMOVE()
         :   CZeroInit( sizeof( ROOTMOVE ) )
     {
@@ -91,6 +97,7 @@ struct ROOTMOVE
         ReleaseResources();
     }
 
+    // Validation routine.
     VOID AssertValid( const BOOL fBeforeMove, const BOOL fRedo ) const
     {
         Assert( ( dbtimeAfter != dbtimeNil ) && ( dbtimeAfter != dbtimeInvalid ) );
@@ -118,6 +125,8 @@ struct ROOTMOVE
                 ( ( csrFDP.Latch() == latchWrite ) && csrFDP.FDirty() ) );
         if ( csrFDP.PagetrimState() != pagetrimTrimmed )
         {
+            // If the page has latchRIW, it's either too new (no need to redo) or too old (added to dbtime mismatch map).
+            // If the page has latchWrite, it must be ready with the new dbtime.
             Assert( ( ( csrFDP.Latch() == latchRIW ) &&
                         ( ( csrFDP.Dbtime() >= dbtimeAfter ) || ( csrFDP.Dbtime() < dbtimeBeforeFDP ) ) ) ||
                     ( ( csrFDP.Latch() == latchWrite ) &&
@@ -256,6 +265,7 @@ struct ROOTMOVE
             }
         }
 
+        // Catalog pages.
         for ( int iCat = 0; iCat < 2; iCat++ )
         {
             Assert( ( dbtimeBeforeCatObj[iCat] != dbtimeNil ) && ( dbtimeBeforeCatObj[iCat] != dbtimeInvalid ) );
@@ -290,6 +300,7 @@ struct ROOTMOVE
             ASSERT_VALID_OBJ( dataNewCatClustIdx[iCat] );
             if ( ( ilineCatClustIdx[iCat] != -1 ) && ( pgnoCatClustIdx[iCat] != pgnoCatObj[iCat] ) )
             {
+                // There is a clustered index object in a different catalog page.
                 Assert( ( dbtimeBeforeCatClustIdx[iCat] != dbtimeNil ) && ( dbtimeBeforeCatClustIdx[iCat] != dbtimeInvalid ) );
 
                 Assert( pgnoCatClustIdx[iCat] != pgnoNull );
@@ -304,6 +315,8 @@ struct ROOTMOVE
 
                 if ( csrCatClustIdx[iCat].PagetrimState() != pagetrimTrimmed )
                 {
+                    // If the page has latchRIW, it's either too new (no need to redo) or too old (added to dbtime mismatch map).
+                    // If the page has latchWrite, it must be ready with the new dbtime.
                     Assert( ( ( csrCatClustIdx[iCat].Latch() == latchRIW ) &&
                                 ( ( csrCatClustIdx[iCat].Dbtime() >= dbtimeAfter ) || ( csrCatClustIdx[iCat].Dbtime() < dbtimeBeforeCatClustIdx[iCat] ) ) ) ||
                             ( ( csrCatClustIdx[iCat].Latch() == latchWrite ) &&
@@ -317,6 +330,7 @@ struct ROOTMOVE
             }
             else if ( ilineCatClustIdx[iCat] == -1 )
             {
+                // There isn't a clustered index object.
                 Assert( pgnoCatClustIdx[iCat] == pgnoNull );
                 Assert( dbtimeBeforeCatClustIdx[iCat] == dbtimeInvalid );
                 Assert( dataBeforeCatClustIdx[iCat].Cb() == 0 );
@@ -325,6 +339,7 @@ struct ROOTMOVE
             }
             else
             {
+                // There is a clustered index object in the same catalog page.
                 Assert( pgnoCatClustIdx[iCat] == pgnoCatObj[iCat] );
                 Assert( dbtimeBeforeCatClustIdx[iCat] == dbtimeBeforeCatObj[iCat] );
 
@@ -345,6 +360,7 @@ struct ROOTMOVE
             }
         }
 
+        // Children objects.
         for ( ROOTMOVECHILD* prmc = prootMoveChildren;
                 prmc != NULL;
                 prmc = prmc->prootMoveChildNext )
@@ -356,6 +372,8 @@ struct ROOTMOVE
 
             if ( prmc->csrChildFDP.PagetrimState() != pagetrimTrimmed )
             {
+                // If the page has latchRIW, it's either too new (no need to redo) or too old (added to dbtime mismatch map).
+                // If the page has latchWrite, it must be ready with the new dbtime.
                 Assert( ( ( prmc->csrChildFDP.Latch() == latchRIW ) && fRedo &&
                             ( ( prmc->csrChildFDP.Dbtime() >= dbtimeAfter ) || ( prmc->csrChildFDP.Dbtime() < prmc->dbtimeBeforeChildFDP ) ) ) ||
                         ( ( prmc->csrChildFDP.Latch() == latchWrite ) && ( prmc->csrChildFDP.Dbtime() == dbtimeAfter ) ) );
@@ -367,65 +385,94 @@ struct ROOTMOVE
         }
     }
 
-    DBTIME          dbtimeAfter;
+    DBTIME          dbtimeAfter;                // After dbtime for all pages involved: root, OE, AE, children roots,
+                                                // affected catalog pages.
 
-    DBTIME          dbtimeBeforeFDP;
-    ULONG           fFlagsBeforeFDP;
+    // This dbtime/fFlags pair must be updated atomically so it can be reverted to
+    // a consistent state if neeed.
+    DBTIME          dbtimeBeforeFDP;            // Before dbtime of the root page.
+    ULONG           fFlagsBeforeFDP;            // Before flags on the root page.
 
-    CSR             csrFDP;
-    CSR             csrNewFDP;
-    DATA            dataBeforeFDP;
-    PGNO            pgnoFDP;
-    PGNO            pgnoNewFDP;
-    OBJID           objid;
+    CSR             csrFDP;                     // Currency of the root page.
+    CSR             csrNewFDP;                  // Currency of the new page where the root page will be moved into.
+    DATA            dataBeforeFDP;              // Pre-image of the root page.
+    PGNO            pgnoFDP;                    // Original pgno of the root page.
+    PGNO            pgnoNewFDP;                 // New pgno of the root page.
+    OBJID           objid;                      // OBJID of the tree.
 
-    DBTIME          dbtimeBeforeOE;
-    ULONG           fFlagsBeforeOE;
+    // This dbtime/fFlags pair must be updated atomically so it can be reverted to
+    // a consistent state if neeed.
+    DBTIME          dbtimeBeforeOE;             // Before dbtime of the OE's root page.
+    ULONG           fFlagsBeforeOE;             // Before flags on the OE's root page.
 
-    CSR             csrOE;
-    CSR             csrNewOE;
-    DATA            dataBeforeOE;
-    PGNO            pgnoOE;
-    PGNO            pgnoNewOE;
+    CSR             csrOE;                      // Currency of the OE's root page.
+    CSR             csrNewOE;                   // Currency of the new page where the OE's root page will be moved into.
+    DATA            dataBeforeOE;               // Pre-image of the OE's root page.
+    PGNO            pgnoOE;                     // Original pgno of the OE's root page.
+    PGNO            pgnoNewOE;                  // New pgno of the OE's root page.
 
-    DBTIME          dbtimeBeforeAE;
-    ULONG           fFlagsBeforeAE;
+    // This dbtime/fFlags pair must be updated atomically so it can be reverted to
+    // a consistent state if neeed.
+    DBTIME          dbtimeBeforeAE;             // Before dbtime of the AE's root page.
+    ULONG           fFlagsBeforeAE;             // Before flags on the AE's root page.
 
-    CSR             csrAE;
-    CSR             csrNewAE;
-    DATA            dataBeforeAE;
-    PGNO            pgnoAE;
-    PGNO            pgnoNewAE;
+    CSR             csrAE;                      // Currency of the AE's root page.
+    CSR             csrNewAE;                   // Currency of the new page where the AE's root page will be moved into.
+    DATA            dataBeforeAE;               // Pre-image of the AE's root page.
+    PGNO            pgnoAE;                     // Original pgno of the AE's root page.
+    PGNO            pgnoNewAE;                  // New pgno of the AE's root page.
 
+    // We need two catalog-related sets of members below because if this is a root object (table), there may
+    // be two nodes describing its root in the catalog: a table object and an index object (clustered index).
+    //
+    // Also, each variable is an array of size 2 because we need to handle the shadow catalog as well.
+    //
+    // Therefore, we may see the two sets below in three different modes:
+    //  1) Tree only has one node in the catalog: csrCatObj gets set, while csrCatClustIdx doesn't. All other "CatObj"
+    //     variables are initialized, while their "CatClustIdx" counterparts aren't.
+    //  2) Tree has two nodes in different pages of the catalog: both and csrCatClustIdx get set. All other "CatObj"
+    //     and "CatClustIdx" variables are initialized.
+    //  3) Tree has two nodes in the same page of the catalog: csrCatObj gets set, while csrCatClustIdx doesn't. All
+    //     other "CatObj" and "CatClustIdx" variables are initialized. This is the crazy - despite common - case!
+    //     Making two replaces to different records on same page is what makes it difficult to just use two CSRs
+    //     (because both will want to hold a latch to the same page), and why we have to have ilines and manual
+    //     replaces instead.
 
-    DBTIME          dbtimeBeforeCatObj[2];
-    ULONG           fFlagsBeforeCatObj[2];
+    // This dbtime/fFlags pair must be updated atomically so it can be reverted to
+    // a consistent state if neeed.
+    DBTIME          dbtimeBeforeCatObj[2];      // Before dbtime of the catalog page which contains the node describing this tree.
+    ULONG           fFlagsBeforeCatObj[2];      // Before flags on the catalog page which contains the node describing this tree.
 
-    CSR             csrCatObj[2];
-    PGNO            pgnoCatObj[2];
-    INT             ilineCatObj[2];
-    DATA            dataBeforeCatObj[2];
-    DATA            dataNewCatObj[2];
+    CSR             csrCatObj[2];               // Currency of the catalog page which contains the node describing this tree.
+    PGNO            pgnoCatObj[2];              // Catalog page which contains the node describing this tree.
+    INT             ilineCatObj[2];             // Specific node within the catalog page which contains the node describing this tree.
+    DATA            dataBeforeCatObj[2];        // Before-image of catalog node we need to update.
+    DATA            dataNewCatObj[2];           // Post-image of catalog node we need to update.
 
-    DBTIME          dbtimeBeforeCatClustIdx[2];
-    ULONG           fFlagsBeforeCatClustIdx[2];
+    // This dbtime/fFlags pair must be updated atomically so it can be reverted to
+    // a consistent state if neeed.
+    DBTIME          dbtimeBeforeCatClustIdx[2]; // Before dbtime of the catalog page which contains the node describing the clustered index of this tree.
+    ULONG           fFlagsBeforeCatClustIdx[2]; // Before flags on the catalog page which contains the node describing the clustered index of this tree.
 
-    CSR             csrCatClustIdx[2];
-    PGNO            pgnoCatClustIdx[2];
-    INT             ilineCatClustIdx[2];
-    DATA            dataBeforeCatClustIdx[2];
-    DATA            dataNewCatClustIdx[2];
+    CSR             csrCatClustIdx[2];          // Currency of the catalog page which contains the node describing the clustered index of this tree.
+    PGNO            pgnoCatClustIdx[2];         // Catalog page which contains the node describing the clustered index of this tree.
+    INT             ilineCatClustIdx[2];        // Specific node within the catalog page which contains the node describing the clustered index of this tree.
+    DATA            dataBeforeCatClustIdx[2];   // Before-image of catalog node we need to update.
+    DATA            dataNewCatClustIdx[2];      // Post-image of catalog node we need to update.
 
-    ROOTMOVECHILD*  prootMoveChildren;
+    ROOTMOVECHILD*  prootMoveChildren;          // Linked list of children trees (e.g., secondary indexes, LV trees).
 
+    // Helper to add a child object.
     VOID AddRootMoveChild( ROOTMOVECHILD* const prmc )
     {
         prmc->prootMoveChildNext = prootMoveChildren;
         prootMoveChildren = prmc;
     }
 
+    // Helper to release all resources.
     VOID ReleaseResources()
     {
+        // Release latches.
         csrFDP.ReleasePage();
         csrNewFDP.ReleasePage();
         csrOE.ReleasePage();
@@ -449,6 +496,7 @@ struct ROOTMOVE
             dataNewCatClustIdx[iCat].Nullify();
         }
 
+        // Free pages.
         ASSERT_VALID_OBJ( dataBeforeFDP );
         BFFree( dataBeforeFDP.Pv() );
         dataBeforeFDP.Nullify();
@@ -459,6 +507,7 @@ struct ROOTMOVE
         BFFree( dataBeforeAE.Pv() );
         dataBeforeAE.Nullify();
 
+        // Free children objects.
         ROOTMOVECHILD* prmc = prootMoveChildren;
         while ( prmc != NULL )
         {
@@ -470,15 +519,20 @@ struct ROOTMOVE
     }
 };
 
+// Iterates over the Avail Extents in the root of the given FMP, shrinking only fully available extents.
+// Assumes exclusive access to root space trees and no concurrency with other threads trying to shrink or extend
+// the database.
 ERR ErrSHKShrinkDbFromEof(
     _In_ PIB *ppib,
     _In_ const IFMP ifmp );
 
+// Moves the FDP, OE and AE roots of a given tree to a new location in the database.
 ERR ErrSHKRootPageMove(
     _In_ PIB* ppib,
     _In_ const IFMP ifmp,
     _In_ const PGNO pgnoFDP );
 
+// Performs a root page move based on state accumulated in the given ROOTMOVE struct.
 VOID SHKPerformRootMove(
     _In_ ROOTMOVE* const prm,
     _In_ PIB* const ppib,

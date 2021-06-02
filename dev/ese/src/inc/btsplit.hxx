@@ -1,6 +1,8 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
+//  types of split
+//
 enum SPLITTYPE  {
     splittypeMin = 0,
     splittypeVertical = 0,
@@ -9,6 +11,8 @@ enum SPLITTYPE  {
     splittypeMax = 3
 };
 
+//  types of merge
+//
 enum MERGETYPE  {
     mergetypeMin = 0,
     mergetypeNone = 0,
@@ -23,6 +27,8 @@ enum MERGETYPE  {
 };
 
 
+//  operation to be performed with split
+//
 enum SPLITOPER  {
     splitoperMin = 0,
     splitoperNone = 0,
@@ -35,29 +41,32 @@ enum SPLITOPER  {
 
 struct LINEINFO
 {
-    ULONG           cbSize;
-    ULONG           cbSizeMax;
+    ULONG           cbSize;             //  size of node
+    ULONG           cbSizeMax;          //  maximum size of node
 
-    ULONG           cbSizeLE;
-    ULONG           cbSizeMaxLE;
+    ULONG           cbSizeLE;           //  sum of size of all nodes
+                                        //  <= this node in page
+    ULONG           cbSizeMaxLE;        //  includes reserved space
+                                        //  in version store
 
-    ULONG           cbCommonPrev;
-    INT             cbPrefix;
+    ULONG           cbCommonPrev;       //  common bytes with previous key
+    INT             cbPrefix;           //  common bytes with prefix
 
     KEYDATAFLAGS    kdf;
-    FLAG32          fVerActive : 1;
+    FLAG32          fVerActive : 1;     //  used by OLC
 };
 
 
 const INT           ilineInvalid = -1;
 
+///typedef struct _prefixinfo
 class PREFIXINFO
 {
     public:
-        INT     ilinePrefix;
-        INT     cbSavings;
-        INT     ilineSegBegin;
-        INT     ilineSegEnd;
+        INT     ilinePrefix;        //  line of optimal prefix [-1 if no prefix]
+        INT     cbSavings;          //  bytes saved due to prefix compression
+        INT     ilineSegBegin;      //  set of lines that contribute
+        INT     ilineSegEnd;        //  to selected prefix
 
     public:
         VOID    Nullify( );
@@ -93,6 +102,8 @@ INLINE VOID PREFIXINFO::operator= ( const PREFIXINFO& prefixinfo )
 }
 
 
+//  split structures
+//
 struct SPLIT
     :   public CZeroInit
 {
@@ -122,8 +133,8 @@ struct SPLIT
 #pragma push_macro( "new" )
 #undef new
 private:
-    void* operator new[]( size_t );
-    void operator delete[]( void* );
+    void* operator new[]( size_t );         //  not supported
+    void operator delete[]( void* );        //  not supported
 public:
     void* operator new( size_t cbAlloc )
     {
@@ -136,44 +147,53 @@ public:
 #pragma pop_macro( "new" )
 
     CSR                 csrNew;
-    CSR                 csrRight;
+    CSR                 csrRight;           //  only for leaf level of horizontal split
     LittleEndian<PGNO>  pgnoSplit;
     PGNO                pgnoNew;
 
-    DBTIME              dbtimeRightBefore;
-    ULONG               fFlagsRightBefore;
+    // This dbtime/fFlags pair must be updated atomically so it can be reverted to
+    // a consistent state if neeed.
+    DBTIME              dbtimeRightBefore;  // dbtime of the right page before dirty
+    ULONG               fFlagsRightBefore;  // flags on the right page before dirty
 
     SPLITPATH*          psplitPath;
 
     SPLITTYPE           splittype:8;
     SPLITOPER           splitoper:8;
-    ULONG               fAllocParent:1;
-    ULONG               fAppend:1;
-    ULONG               fHotpoint:1;
+    ULONG               fAllocParent:1;     //  is kdfParent allocated? [only for leaf pages]
+    ULONG               fAppend:1;          //  append insert
+    ULONG               fHotpoint:1;        //  hotpoint insert
 
-    INT                 ilineOper;
-    INT                 clines;
+    INT                 ilineOper;          //  line of insert/replace
+    INT                 clines;             //  number of lines in rglineinfo
+                                            //   == number of lines in page + 1 for operinsert
+                                            //   == number of lines in page otherwise
 
-    ULONG               fNewPageFlags;
+    ULONG               fNewPageFlags;      //  page flags for split and new pages
     ULONG               fSplitPageFlags;
 
     SHORT               cbUncFreeDest;
     SHORT               cbUncFreeSrc;
 
-    INT                 ilineSplit;
+    INT                 ilineSplit;         //  line to move from
 
-    PREFIXINFO          prefixinfoSplit;
-    DATA                prefixSplitOld;
-    DATA                prefixSplitNew;
+    PREFIXINFO          prefixinfoSplit;    //  info for prefix selected
+                                            //  for split page
+    DATA                prefixSplitOld;     //  old prefix in split page
+    DATA                prefixSplitNew;     //  new prefix for split page
 
-    PREFIXINFO          prefixinfoNew;
+    PREFIXINFO          prefixinfoNew;      //  info for prefix seleceted for
+                                            //  new page
 
-    KEYDATAFLAGS        kdfParent;
+    KEYDATAFLAGS        kdfParent;          //  separator key to insert at parent
 
-    LINEINFO            *rglineinfo;
+    LINEINFO            *rglineinfo;        //  info on all lines in page
+                                            //  plus the line inserted/replaced
 };
 
 
+//  stores csrPath and related split info for split
+//
 struct SPLITPATH
 {
     SPLITPATH()
@@ -201,8 +221,8 @@ struct SPLITPATH
 #pragma push_macro( "new" )
 #undef new
 private:
-    void* operator new[]( size_t );
-    void operator delete[]( void* );
+    void* operator new[]( size_t );         //  not supported
+    void operator delete[]( void* );        //  not supported
 public:
     void* operator new( size_t cbAlloc )
     {
@@ -214,20 +234,28 @@ public:
     }
 #pragma pop_macro( "new" )
 
-    CSR         csr;
+    CSR         csr;                //  page at current level
 
-    DBTIME      dbtimeBefore;
-    ULONG       fFlagsBefore;
+    // This dbtime/fFlags pair must be updated atomically so it can be reverted to
+    // a consistent state if neeed.
+    DBTIME      dbtimeBefore;       //  dbtime of the page before dirty
+    ULONG       fFlagsBefore;       //  flags on the page before dirty
 
-    SPLITPATH*  psplitPathParent;
-    SPLITPATH*  psplitPathChild;
-    SPLIT*      psplit;
+    SPLITPATH*  psplitPathParent;   //  split path to parent level
+    SPLITPATH*  psplitPathChild;    //  split path to child level
+    SPLIT*      psplit;             //  if not NULL, split is occurning
+                                    //  at this level
 };
 
 INLINE BOOL FBTISplitPageBeforeImageRequired( const SPLIT * const psplit )
 {
     BOOL    fDependencyRequired;
 
+    //  if nodes will be moving to the new page, depend the
+    //  new page on the split page so that the data moved
+    //  from the split page to the new page will always be
+    //  available no matter when we crash
+    //
     switch ( psplit->splittype )
     {
         case splittypeAppend:
@@ -239,6 +267,9 @@ INLINE BOOL FBTISplitPageBeforeImageRequired( const SPLIT * const psplit )
                 && psplit->ilineSplit == psplit->ilineOper
                 && psplit->ilineSplit == psplit->clines - 1 )
             {
+                //  this is either a hotpoint split, or a
+                //  natural split where the only node moving
+                //  to the new page is the node being inserted
                 fDependencyRequired = fFalse;
             }
             else
@@ -259,6 +290,8 @@ INLINE BOOL FBTISplitPageBeforeImageRequired( const SPLIT * const psplit )
 }
 
 
+//  merge structure -- only for leaf page
+//
 struct MERGE
     :   public CZeroInit
 {
@@ -284,8 +317,8 @@ struct MERGE
 #pragma push_macro( "new" )
 #undef new
 private:
-    void* operator new[]( size_t );
-    void operator delete[]( void* );
+    void* operator new[]( size_t );         //  not supported
+    void operator delete[]( void* );        //  not supported
 public:
     void* operator new( size_t cbAlloc )
     {
@@ -299,33 +332,38 @@ public:
 
     CSR             csrLeft;
     CSR             csrRight;
-    CSR             csrNew;
+    CSR             csrNew;                 // newly allocated page used for page moves
     PGNO            pgnoNew;
 
-    DBTIME          dbtimeLeftBefore;
-    DBTIME          dbtimeRightBefore;
-    ULONG           fFlagsLeftBefore;
-    ULONG           fFlagsRightBefore;
+    // Each of these dbtime/fFlags pairs must be updated atomically so they can be reverted to
+    // a consistent state if neeed.
+    DBTIME          dbtimeLeftBefore;       // dbtime of the left page before dirty
+    DBTIME          dbtimeRightBefore;      // dbtime of the right page before dirty
+    ULONG           fFlagsLeftBefore;       // flags on the left page before dirty
+    ULONG           fFlagsRightBefore;      // flags on the right page before dirty
 
     MERGEPATH*      pmergePath;
 
-    KEYDATAFLAGS    kdfParentSep;
+    KEYDATAFLAGS    kdfParentSep;       //  separator key to insert at grand parent
+                                        //  only if last page pointer is removed
 
     MERGETYPE       mergetype:8;
-    UINT            fAllocParentSep:1;
+    UINT            fAllocParentSep:1;  //  is kdfParent allocated? [only for internal pages]
 
-    INT             ilineMerge;
+    INT             ilineMerge;     //  line to move from
 
-    INT             cbSavings;
-    INT             cbSizeTotal;
-    INT             cbSizeMaxTotal;
+    INT             cbSavings;      //  savings due to key compression on nodes to move
+    INT             cbSizeTotal;    //  total size of nodes to move
+    INT             cbSizeMaxTotal; //  max size of nodes to move
 
-    INT             cbUncFreeDest;
-    INT             clines;
-    LINEINFO        *rglineinfo;
+    INT             cbUncFreeDest;  //  uncommitted freed space in right page
+    INT             clines;         //  number of lines in merged page
+    LINEINFO        *rglineinfo;    //  info on all lines in page
 };
 
 
+//  stores csrPath and related merge info for merge/empty page operations
+//
 struct MERGEPATH
     :   public CZeroInit
 {
@@ -351,8 +389,8 @@ struct MERGEPATH
 #pragma push_macro( "new" )
 #undef new
 private:
-    void* operator new[]( size_t );
-    void operator delete[]( void* );
+    void* operator new[]( size_t );         //  not supported
+    void operator delete[]( void* );        //  not supported
 public:
     void* operator new( size_t cbAlloc )
     {
@@ -364,19 +402,22 @@ public:
     }
 #pragma pop_macro( "new" )
 
-    CSR             csr;
+    CSR             csr;                //  page at current level
 
-    ULONG           fFlagsBefore;
-    DBTIME          dbtimeBefore;
+    // This dbtime/fFlags pair must be updated atomically so it can be reverted to
+    // a consistent state if neeed.
+    ULONG           fFlagsBefore;       //  flags on the page before dirty
+    DBTIME          dbtimeBefore;       //  dbtime of the page before dirty
 
-    MERGEPATH*      pmergePathParent;
-    MERGEPATH*      pmergePathChild;
-    MERGE*          pmerge;
+    MERGEPATH*      pmergePathParent;   //  merge path to parent level
+    MERGEPATH*      pmergePathChild;    //  merge path to child level
+    MERGE*          pmerge;             //  if not NULL, split is occurring
+                                        //  at this level
 
-    SHORT           iLine;
-    USHORT          fKeyChange:1;
-    USHORT          fDeleteNode:1;
-    USHORT          fEmptyPage:1;
+    SHORT           iLine;              //  seeked node in page
+    USHORT          fKeyChange:1;       //  is there a key change in this page?
+    USHORT          fDeleteNode:1;      //  should node iLine in page be deleted?
+    USHORT          fEmptyPage:1;       //  is this page empty?
 };
 
 INLINE BOOL FRightMerge( const MERGETYPE mergetype )
@@ -407,7 +448,7 @@ struct EMPTYPAGE
 {
     UnalignedLittleEndian<DBTIME>   dbtimeBefore;
     UnalignedLittleEndian<PGNO>     pgno;
-    UnalignedLittleEndian<ULONG>    ulFlags;
+    UnalignedLittleEndian<ULONG>    ulFlags;            //  copy page flags for easier debugging
 };
 
 #include <poppack.h>

@@ -448,14 +448,14 @@ ERR SyncPerformsAtomicExchangeAddPointerBasicOnPvoid::ErrTest()
     void * pvoid = NULL;
     size_t cb = 0;
 
-    TestCheck( NULL == AtomicExchangeAddPointer( &pvoid, this ) );
+    TestCheck( NULL == AtomicExchangeAddPointer( &pvoid, this ) );  //  silly, as this is not the kind of things we use this for
     TestCheck( this == AtomicExchangeAddPointer( &pvoid, (void*)-((SIGNED_PTR)this) ) );
     TestCheck( pvoid == NULL );
 
-    TestCheck( 0 == AtomicExchangeAddPointer( (void**)&cb, (void*)40 ) );
-    TestCheck( 40 == (size_t)AtomicExchangeAddPointer( (void**)&cb, (void*)40 ) );
-    TestCheck( 80 == (size_t)AtomicExchangeAddPointer( (void**)&cb, (void*)40 ) );
-    TestCheck( 120 == (size_t)AtomicExchangeAddPointer( (void**)&cb, (void*)-40 ) );
+    TestCheck( 0 == AtomicExchangeAddPointer( (void**)&cb, (void*)40 ) );               // "alloc"
+    TestCheck( 40 == (size_t)AtomicExchangeAddPointer( (void**)&cb, (void*)40 ) );      // "alloc"
+    TestCheck( 80 == (size_t)AtomicExchangeAddPointer( (void**)&cb, (void*)40 ) );      // "alloc"
+    TestCheck( 120 == (size_t)AtomicExchangeAddPointer( (void**)&cb, (void*)-40 ) );    // "free"
     TestCheck( cb == 80 );
     TestCheck( cb == 0x50 );
 
@@ -478,7 +478,8 @@ ERR SyncPerformsAtomicLinklistBasicOperations::ErrTest()
 
     typedef struct _AStructForLinking {
         ULONG   ulCount;
-        void *  pvNext;
+//      struct _AStructForLinking * pvNext;
+        void *  pvNext; //  just easier to link to next
 } AStructForLinking;
 
     void * pvHead = NULL;
@@ -495,15 +496,16 @@ ERR SyncPerformsAtomicLinklistBasicOperations::ErrTest()
     TestCheck( pvHead == &n2 );
     TestCheck( n2.pvNext == &n1 );
 
-    AtomicAddLinklistNode( &n3, &(n3.pvNext), &pvHead );
+    AtomicAddLinklistNode( &n3, &(n3.pvNext), &pvHead );    //  one more for good measure
 
 {
     AStructForLinking * pvList = (AStructForLinking*)PvAtomicRetrieveLinklist( &pvHead );
-    TestCheck( pvHead == NULL );
+    TestCheck( pvHead == NULL );    // empties list
 
-    TestCheck( NULL == PvAtomicRetrieveLinklist( &pvHead ) );
+    TestCheck( NULL == PvAtomicRetrieveLinklist( &pvHead ) );   // 2nd call gets nothing.
 
 {
+    //  List should be inverted ...
     ULONG i = 3;
     while ( pvList )
     {
@@ -531,20 +533,27 @@ ERR SyncPerformsAtomicCompareExchangeBasicOnLong64::ErrTest()
 
     __int64 i64AtomicMem    = 0;
 
+    //
+    //  Test AtomicCompareExchange() ...
+    //
 
+    //  Test basic compare exchange from 0 to 47 works
 
     TestCheck( 0  == i64AtomicMem );
     TestCheck( 0  == AtomicCompareExchange( &i64AtomicMem, 0, 47 ) );
     TestCheck( 47 == i64AtomicMem );
 
+    //  Test 2nd basic compare exchange with new value works
 
     TestCheck( 47 == AtomicCompareExchange( &i64AtomicMem, 47, 63 ) );
 
+    //  Test bad exchange does not set value
 
     TestCheck( 63 == i64AtomicMem );
     TestCheck( 63 == AtomicCompareExchange( &i64AtomicMem, 47, 80 ) );
     TestCheck( 63 == i64AtomicMem );
 
+    //  Test 64-bit values
 
     TestCheck( 63            == AtomicCompareExchange( &i64AtomicMem, 63, qwMiddleMinus ) );
     TestCheck( qwMiddleMinus == AtomicCompareExchange( &i64AtomicMem, qwMiddleMinus, qwMiddlePlus ) );
@@ -563,7 +572,9 @@ ERR SyncPerformsAtomicExchangeBasicOnLong64::ErrTest()
 {
     ERR err = JET_errSuccess;
     __int64 qwMiddleMinus   = 0x7FFFFFFFFFFFFFF1;
+    //__int64 qwMiddlePlus  = 0x8000000000000002;
     __int64 qwBig           = 0xFFFFFFFFFFFFFFF5;
+    //__int64 qwMax         = 0xffffffffffffffff;
     __int64 i64AtomicMem    = 63;
 
     TestCheck( 63 == i64AtomicMem );

@@ -22,19 +22,23 @@ void AssertDatabaseHeaderConsistent( const DBFILEHDR * const pdbfilehdr,
     
 ERR ErrDBOpenDatabaseByIfmp( PIB *ppib, IFMP ifmp );
 #ifdef DEBUG
+//  This is the no lies minimal DB we can have with ESE's current base schema, and it
+//  is not meant to be used except for Assert()s and in compact and recovery.  So to 
+//  facilitate that design while the function does exist in retail, we do not widely 
+//  expose it.
 CPG CpgDBDatabaseMinMin();
 #endif
 
 ERR ErrDBParseDbParams(
     _In_reads_opt_( csetdbparam )const JET_SETDBPARAM* const    rgsetdbparam,
     _In_ const ULONG                                            csetdbparam,
-    _Out_opt_ CPG* const                                        pcpgDatabaseSizeMax,
-    _Out_opt_ ULONG* const                                      ppctCachePriority,
-    _Out_opt_ JET_GRBIT* const                                  pgrbitShrinkDatabaseOptions,
-    _Out_opt_ LONG* const                                       pdtickShrinkDatabaseTimeQuota,
-    _Out_opt_ CPG* const                                        pcpgShrinkDatabaseSizeLimit,
-    _Out_opt_ BOOL* const                                       pfLeakReclaimerEnabled,
-    _Out_opt_ LONG* const                                       pdtickLeakReclaimerTimeQuota );
+    _Out_opt_ CPG* const                                        pcpgDatabaseSizeMax,                // JET_dbparamDbSizeMaxPages
+    _Out_opt_ ULONG* const                                      ppctCachePriority,                  // JET_dbparamCachePriority
+    _Out_opt_ JET_GRBIT* const                                  pgrbitShrinkDatabaseOptions,        // JET_dbparamShrinkDatabaseOptions
+    _Out_opt_ LONG* const                                       pdtickShrinkDatabaseTimeQuota,      // JET_dbparamShrinkDatabaseTimeQuota
+    _Out_opt_ CPG* const                                        pcpgShrinkDatabaseSizeLimit,        // JET_dbparamShrinkDatabaseSizeLimit
+    _Out_opt_ BOOL* const                                       pfLeakReclaimerEnabled,             // JET_dbparamLeakReclaimerEnabled
+    _Out_opt_ LONG* const                                       pdtickLeakReclaimerTimeQuota );     // JET_dbparamLeakReclaimerTimeQuota
 
 ERR ErrDBCreateDatabase(
     _In_ PIB                                                    *ppib,

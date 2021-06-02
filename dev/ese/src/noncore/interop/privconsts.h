@@ -12,6 +12,7 @@ namespace Exchange
 namespace Isam
 {
 
+// JET_IOPriority
 
 MSINTERNAL enum class MJET_IOPRIORITY
 {

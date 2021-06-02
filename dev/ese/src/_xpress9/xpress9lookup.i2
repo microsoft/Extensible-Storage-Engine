@@ -1,7 +1,24 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
+//
+// This is identical to xpress9lookup.i, except that the labels start with L2_ so we can include this file twice.
+// Also, _uMaxDepth is set to equal uMaxDepth2 instead of uMaxDepth
+//
 
+/*
 
+Parameters:
+    TAIL_T          -- type of "tail" comperand (2 bytes if looking for 3-length match, may be 4 bytes if looking for longer match)
+    pData           -- const UIn8 * pointer to the buffer containing original data
+    uPosition       -- offset in original buffer to the beginning of uncompressed data
+    uDataSize       -- number of bytes in original data bfufer
+    pNext           -- array of references to the next substring beginning of which hashes to the same value
+    uMaxDepth       -- max lookup depth
+    DEEP_SEARCH     -- if uMaxDepth == 1 then it's better to set DEEP_SEARCH to 0, otherwise it should be 1
+    uBestLength     -- length of longest match found so far
+    iBestOffset     -- offset to the beginning of the longest match found so far
+
+*/
 
 
 do {
@@ -9,11 +26,11 @@ do {
     uxint           _uCandidate;
 #if DEEP_LOOKUP
     uxint           _uMaxDepth = uMaxDepth2;
-#endif 
+#endif /* DEEP_LOOKUP */
 
      xint           _iOffset;
     _uCandidate = pNext[uPosition];
-    pNext[0]    = (UInt32) uPosition;
+    pNext[0]    = (UInt32) uPosition; // Important to note that 0 means a NULL pointer i.e. the end of the hash chain.
 
     for (;;)
     {
@@ -30,8 +47,9 @@ do {
                 if (_uMaxDepth == 0)
                     goto L2_Done;
                 --_uMaxDepth;
-#endif 
+#endif /* DEEP_LOOKUP */
 
+                // Any hash chain is such that the indexes are in decreasing order.
 
                 _uCandidate2 = pNext[_uCandidate];
                 if (* (const TAIL_T *) (_pCompare + _uCandidate) == _uTailComperand)
@@ -69,7 +87,7 @@ do {
                 if (* (const TAIL_T *) (_pCompare + _uCandidate2) == _uTailComperand)
                     goto L2_Same2;
                 goto L2_Done;
-#endif 
+#endif /* DEEP_LOOKUP */
             }                                                                           
         }
     L2_Same2:
@@ -77,12 +95,12 @@ do {
     L2_Same1:
 
         if (_uCandidate >= uPosition)
-            goto L2_Done;
+            goto L2_Done; //BUGBUG: why?
 
         pData += uPosition;
 
         {
-            _iOffset  = _uCandidate - uPosition;
+            _iOffset  = _uCandidate - uPosition; // The distance of the match from the current position.
 
             _pCompare = pData;
             while (*_pCompare == _pCompare[_iOffset])
@@ -92,7 +110,9 @@ do {
                     goto L2_DoneEof;
             }
                 
-            _uCandidate2 = (uxint) (_pCompare - pData);
+            // If the length of current match is less than lookup table size, we need to verify that the match is no farther than the value in the 
+            // look up table. The table is used to disallow any matches too far away. BUGBUG: Why?
+            _uCandidate2 = (uxint) (_pCompare - pData);  // The length of the match.
             if (
                 _uCandidate2 > uBestLength &&
                 (_uCandidate2 > sizeof (s_iMaxOffsetByLength) / sizeof (s_iMaxOffsetByLength[0]) - 1 
@@ -110,7 +130,7 @@ do {
         _uCandidate = pNext[_uCandidate];
 #else
         goto L2_Done;
-#endif 
+#endif /* DEEP_LOOKUP */
     }
 L2_DoneEof:
     uBestLength = (uxint) (_pCompare - pData);

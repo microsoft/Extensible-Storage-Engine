@@ -4,18 +4,46 @@
 #ifndef ITERQUERY_HXX_INCLUDED
 #define ITERQUERY_HXX_INCLUDED
 
+// ---------------------------------------------------------------------------
+//
+//  Iteration Query support
+//
+//  Provides a simple iterative query against a set of simple structures, applying 
+//  a predicate query to each entry first, and then applying an action to print,
+//  pick, min, max, collate in some way the results (yes, it supports histograms).
+
+
+// ---------------------------------------------------------------------------
+//  Using Iteration Query facilities
+//
+//  1) #define any of the "Basic Facilities Extensions" points you want.
+//  2) #include "iterquery.hxx" in your .cxx file (NYI for headers).
+//  3) Define your IEntryDescriptor class 
+//      A) And an array of CMemberDescriptor member infos therein.
+//  4) Initialize the query with ErrIQCreateIterQuery[Count]().
+//  5) In your iterator loop, make use of:
+//      A) Call pic->FEvaluatePredicate( qwAddr, pcvEntry )
+//      B) And if returns true, call pic->PerformAction( qwAddr, pcvEntry );
+//  6) Sorry this is so many steps, SOMEONE.
+
+// ---------------------------------------------------------------------------
+
+
+// ---------------------------------------------------------------------------
 
 
 
+// -------------------------------------------------------------
+//
+//  Basic Facilities Extensions
+//
+
+//  The including app may want to specify custom malloc/free/warning facilities
+//  that work better in their scole.
 
 
-
-
-
-
-
-
-
+// In the meant time, for these facilities:
+//    If you can not afford a lawyer, one will be provided for you.
 
 #ifndef FITQUDebugMode
 #define FITQUDebugMode            fTrue
@@ -50,6 +78,10 @@
 #endif
 
 
+// -------------------------------------------------------------
+//
+//  Constants and Errors
+//
 
 enum IQERR
 {
@@ -81,12 +113,20 @@ enum IQERR
             }
 
 
+// -------------------------------------------------------------
+//
+//  Abstract Types the query processes
+//
 
 typedef void *        PvEntry;
 typedef const void *  PcvEntry;
 
 typedef QWORD         QwEntryAddr;
 
+//
+//  Function types for evaluating fields of the Entries.
+//
+//  pVal1 = retrieved member / element (from loop), pVal2 = value from original query string
 typedef INT (*PfnExprEval)( void * pVal1, void * pVal2 );
 typedef BOOL (*PfnFReadVal)( const char * szArg, void ** ppvValue );
 typedef void (*PfnPrintVal)( const void * pVal );
@@ -96,9 +136,16 @@ typedef ERR (*PfnErrMemberFromEntry)( size_t iCtx1, size_t iCtx2, QwEntryAddr qw
 class IEntryDescriptor;
 typedef ERR (*PfnQueryVisitAction)( const IEntryDescriptor * const pied, QwEntryAddr qwEntryAddr, PcvEntry pcvEntry, void * pvContext );
 typedef ERR (*PfnQueryFinalAction)( const IEntryDescriptor * const pied, void * pContext );
+//  Note: while the PfnQuery*Action return an error, these errors are currently ignored ...
 
 
+// -------------------------------------------------------------
+//
+//  Flags for Histo Printing Control 
+//
 
+// QueryTypeHistoInfo 
+//
 #define eNoHistoSupport         (0)
 #define ePerfectHisto           (0x80000000)
 #define ePartialHisto           (0x40000000)
@@ -108,8 +155,14 @@ typedef ERR (*PfnQueryFinalAction)( const IEntryDescriptor * const pied, void * 
 #define mskHistoOptions         (eAttemptContinousPrint)
 #define mskHistoSection         (~(mskHistoType|mskHistoOptions))
 
+// -------------------------------------------------------------
+//
+//  Type Processing (Reading, Comparing, Printing) Functions
+//
 
+//  First some generic helper functions
 
+// Shamefully copied from edbg.cxx, and renamed.
 BOOL FITQUUlFromSz( const char* const sz, ULONG* const pul, const INT base = 16 )
 {
     if( sz && *sz )
@@ -121,6 +174,11 @@ BOOL FITQUUlFromSz( const char* const sz, ULONG* const pul, const INT base = 16 
     return fFalse;
 }
 
+// Shamefully copied from eseioutil.cxx, and renamed.  
+// Note: Also where it was passing base 10, instead of base 16 ... which I find confusing
+// for a QWORD.
+// Also it is wchar there, here it is char.  So need rationalization there too.
+// Note this purposely does not init pnArg, unless it reads an integer.
 BOOL FITQUAddressFromSz( int argc, __in_ecount(argc) const CHAR ** const argv, int iarg, QWORD * pnArg )
     {
     if ( iarg >= argc )
@@ -142,17 +200,19 @@ BOOL FITQUAddressFromSz( int argc, __in_ecount(argc) const CHAR ** const argv, i
 
     if ( *pchEnd == '`' && qw < (QWORD)ulMax )
     {
+        //  This is a weird debugger pointer var, like: 0x0000017b`d118a000
         CHAR * pchMid = pchEnd;
         QWORD qwLow = _strtoui64( pchMid + 1, &pchEnd, 16 );
         
         if ( pchEnd == pchMid )
         {
-            return fTrue;
+            return fTrue; // guess it's just a small 64-bit value followed by a back-tick
         }
 
         qw = ( qw << 32 ) | qwLow;
     }
 
+    // we managed to read something like a number from the string ...
     if ( pnArg )
     {
         *pnArg = qw;
@@ -160,6 +220,7 @@ BOOL FITQUAddressFromSz( int argc, __in_ecount(argc) const CHAR ** const argv, i
     return fTrue;
     }
 
+//  Type specific functions
 
 BOOL BoolReadVal( const char * szBool, void ** ppvValue )
 {
@@ -200,7 +261,7 @@ INT BoolExprEval( void * pVal1, void * pVal2 )
 void BoolPrintVal( const void * pVal )
 {
     BOOL f = *(ULONG*)pVal;
-#ifndef CACHE_QUERY_PRINT_RAW_VALUES
+#ifndef CACHE_QUERY_PRINT_RAW_VALUES    // non-logical values
     if ( f )
     {
         ITQUPrintf( "  fTrue" );
@@ -305,6 +366,7 @@ void UlongPrintVal( const void * pVal )
 BOOL DwordReadVal( const char * szDword, void ** ppvValue )
 {
     DWORD ul;
+    // Amazingly, and disturbingly this consumes "0x1" properly. Also processes "-1".
     if ( !FITQUUlFromSz( szDword, &ul, 16 ) )
     {
         ITQUPrintf( "Could not read DWORD value from arg: %s\n", szDword );
@@ -334,6 +396,7 @@ void DwordPrintVal( const void * pVal )
 BOOL QwordReadVal( const char * szQword, void ** ppvValue )
 {
     QWORD qw;
+    // Amazingly, and disturbingly this consumes "0x1" properly. Also processes "-1".
     if ( 0 == _stricmp( szQword, "NULL" ) ||
         0 == _stricmp( szQword, "0x0" ) ||
         0 == _stricmp( szQword, "0" ) )
@@ -385,6 +448,7 @@ void QwordPrintVal( const void * pVal )
 BOOL PtrReadVal( const char * szPtr, void ** ppvValue )
 {
     void* pv;
+    //  Short circuit "NULL" processing 
     if ( 0 == _stricmp( szPtr, "NULL" ) ||
         0 == _stricmp( szPtr, "0x0" ) ||
         0 == _stricmp( szPtr, "0" ) )
@@ -428,17 +492,24 @@ void PtrPrintVal( const void * pVal )
 }
 
 
+// -------------------------------------------------------------
+//
+//  Member Descriptor
+//
 
 class CMemberDescriptor {
 
 public:
     char *                 szMember;
 
+    //
+    //  Callback/Data for cracking this member from the structure.
+    //
     PfnErrMemberFromEntry  m_pfnErrMemberFromEntry;
     size_t                 m_cbOffset;
     size_t                 m_cbSize;
 
-    DWORD                  m_HistoInfo;
+    DWORD                  m_HistoInfo;    // combo of CMemberDescriptorHistoInfo and low data.
 
     PfnExprEval            m_pfnExprEval;
     void *                 m_pvReservedWasStatsEval;
@@ -453,10 +524,10 @@ public:
 
 };
 
-class IQPredicateSubClause
+class IQPredicateSubClause  //  psc
 {
 
-    enum eCompOp {
+    enum eCompOp {  // rename CompareOperMemberPredicate?  compAll, compGT, compLT ;-
         eCompOpNone = 0,
         eCompOpAll = 1,
         eCompOpMin,
@@ -527,6 +598,9 @@ public:
 
         if ( eCompOpAll == m_eCompOp )
         {
+            // weird, I tried "cachequery * print:ifmp,pgno" and this line didn't fire... what evaluates "*"?
+            //  something else, that's clear. Should've come down here, that would've been better, but its
+            //  clearly shortcut somewhere
             fRet = fTrue;
             return fRet;
         }
@@ -542,6 +616,7 @@ public:
 
         if ( m_eCompOp == eCompOpAnd )
         {
+            //  Bit-Wise AND evaluated separately ...
             QWORD qwMask = *(QWORD*)pVal2;
             return ( qwMask & ullValue1 ) ? fTrue : fFalse;
         }
@@ -580,11 +655,20 @@ public:
 };
 
 
+// -------------------------------------------------------------
+//
+//  Entry Descriptor Interface
+//
 
-class IEntryDescriptor
+class IEntryDescriptor // ied
     {
 public:
+    // Not needed.  Should we define anyways?
+    //virtual IEntryDescriptor() = 0;
+    //virtual ~IEntryDescriptor() = 0;
 
+    //?? create a name for the entry type?
+    //virtual const WCHAR * WszEntryName() const = 0;
 
     virtual ULONG CbEntry( PcvEntry pcvEntry ) const = 0;
 
@@ -596,9 +680,10 @@ public:
     #define SzIQFirstMember ( (CHAR*)0x1 )
     #define SzIQLastMember  ( (CHAR*)0x2 )
 
+    // We can use PmdMatch( SzFirstMember ) and CMembers() to maintain compat with old code.
     virtual ULONG CMembers() const = 0;
 
-};
+};  //  IEntryDescriptor
 
 
 const CMemberDescriptor * PmdMemberDescriptorLookupHelper(
@@ -634,7 +719,12 @@ const CMemberDescriptor * PmdMemberDescriptorLookupHelper(
 }
 
 
+// -------------------------------------------------------------
+//
+//  Member Descriptor Generic Accessor
+//
 
+//  Normal field types ... can be done by size...
 #define QEF(  type, member, histoinfo, expreval, statseval, readval, printval ) \
     { #member, ErrMemberFromStructIbCb, (size_t)&(((type*)NULL)->member), sizeof((((type*)NULL)->member)), histoinfo, expreval, statseval, readval, printval },
 
@@ -669,6 +759,8 @@ ERR ErrMemberFromStructIbCb( size_t ibOffset, size_t cbSize, QwEntryAddr qwEntry
             return IQERR::errInternalError;
     }
 
+    // FITQUDebugMode is too verbose, and it was: g_eDebugMode >= eDebugModeMicroOps - but didn't want to thunk that
+    // out IterationQuery was extricated and generalized from edbg.cxx / CacheQuery.
     if( fFalse )
     {
         ITQUPrintf( " ErrMemberFromStructIbCb()-> val-lu: %lu\n", ullValue1 );
@@ -681,6 +773,10 @@ ERR ErrMemberFromStructIbCb( size_t ibOffset, size_t cbSize, QwEntryAddr qwEntry
 }
 
 
+// -------------------------------------------------------------
+//
+//  Query Actions
+//
 
 typedef struct
 {
@@ -730,7 +826,7 @@ typedef struct
 {
     const CMemberDescriptor *   pmd;
     __int64 *                   pcAccum;
-    __int64                     cAccumImplicit;
+    __int64                     cAccumImplicit; // do not use directly, see pcAccum usage
 } ITQU_ACCUM_CONTEXT;
 
 ERR AccumAction( const IEntryDescriptor * const pied, QwEntryAddr qwEntryAddr, PcvEntry pcvEntry, void * pContext )
@@ -766,7 +862,7 @@ ERR DumpAction( const IEntryDescriptor * const pied, QwEntryAddr qwEntryAddr, Pc
 typedef struct
 {
     const CMemberDescriptor *   pmd;
-    BOOL                        fMin;
+    BOOL                        fMin;   // otherwise max
     ULONGLONG                   ullTarget;
     BOOL                        fDup;
     QwEntryAddr                 qwTargetAddr;
@@ -855,7 +951,9 @@ typedef struct
     CStats *                    phisto;
     DWORD                       cbucketZeroSkipThreshold;
 
+    //  Just to ensure alignment for histogram allocated after this structure.
     void *                      pvAlignment;
+    // Why did I need to go from "[]" to "[1]" when i compiled it in iterqueryunit.exe and not in ese.dll?
     BYTE                        rgbHistoImplicit[1];
 } ITQU_HISTO_CONTEXT;
 
@@ -936,6 +1034,9 @@ inline void IQPrintStats( CStats * pCS, PfnPrintVal pfnPrintValue, const SAMPLE 
     while( CStats::ERR::errSuccess == ( csErr = pCS->ErrGetSampleValues( &sample ) ) )
     {
         CHITS hits;
+        //  We collect samples at higher than sampleMax, b/c if it's a partial histo we won't get a good read of everything
+        //  through the end b/c of the bucketing.  After we collect we truncate sample down to sampleMax, and assert the 
+        //  next go turns up empty with the cHitMax (otherwise we've bailed early and we're mis-reporting things).
         csErr = pCS->ErrGetSampleHits( sample, &hits );
         if ( csErr != CStats::ERR::errSuccess )
         {
@@ -947,13 +1048,14 @@ inline void IQPrintStats( CStats * pCS, PfnPrintVal pfnPrintValue, const SAMPLE 
             cHitMax++;
         }
         ITQUAssertSz( cHitMax <= 1, "Should only be able to hit the max of the type once, something is wrong." );
-        if ( cHitMax > 1 )
+        if ( cHitMax > 1 )  // defense in depth, we should not spin forever
         {
             break;
         }
 
         if ( sampleBucketSize )
         {
+            //  if it's a partial histo (i.e. sampleBucketSize != 0) we should have buckets like this ...
             ITQUAssert( ( ( sample - sampleLast ) % sampleBucketSize ) == 0 || cHitMax );
  
             SAMPLE sampleSkip = sample - sampleLast;
@@ -961,6 +1063,7 @@ inline void IQPrintStats( CStats * pCS, PfnPrintVal pfnPrintValue, const SAMPLE 
 
             if ( sampleSkip == sampleBucketSize )
             {
+                //  this is the normal or hopeful case, some hits in every bucket ...
             }
             else if ( ( ( sampleSkip ) / sampleBucketSize ) < cbucketZeroSkipThreshold )
             {
@@ -989,6 +1092,7 @@ inline void IQPrintStats( CStats * pCS, PfnPrintVal pfnPrintValue, const SAMPLE 
                     sampleLast = sample - sampleBucketSize;
                     pfnPrintValue( &sampleLast );
                     ITQUPrintf( " = %I64u (End Skip, delta = %I64u (buckets = %I64u))\n", (CHITS)0, sampleSkip, ( sampleSkip ) / sampleBucketSize );
+//                  ITQUPrintf( "Warning:    Skipping giant hole in histogram: %I64d buckets, %I64d value long\n", sampleLast - sample, ( sampleLast - sample ) / sampleBucketSize );
                 }
             }
         }
@@ -1028,21 +1132,31 @@ ERR HistoFinalAction( const IEntryDescriptor * const pied, void * pContext )
     return IQERR::errSuccess;
 }
 
+// -------------------------------------------------------------
+//
+//  Query Predicate Evaluator
+//
 
 
-class CIterQuery
+class CIterQuery  //  piq-> / "pick"
 {
 
 private:
 
+    //  Descriptor of the Entries we will be processing.
+    //
     IEntryDescriptor *      m_pied;
 
+    //  The Query's structure and Predicate Sub-Clauses.
+    //
 
     const static int        s_cPscMax = 20;
-    ULONG                   m_cPsc;
+    ULONG                   m_cPsc; // # of predicate sub-clauses in use
     IQPredicateSubClause    m_rgpsc[ s_cPscMax ];
     BOOL                    m_rgPscOrClause[ s_cPscMax ];
 
+    //  The Action Framework.
+    //
 
     PfnQueryVisitAction     m_pfnAction;
     PfnQueryFinalAction     m_pfnFinalAction;
@@ -1050,6 +1164,7 @@ private:
 
 public:
 
+    //  .ctor
 
     CIterQuery( IEntryDescriptor * pied )
     {
@@ -1057,23 +1172,34 @@ public:
         m_pied = pied;
     }
 
+    //  Entry Descriptor accessor
 
     IEntryDescriptor * Pied() const { return m_pied; }
 
+    //  Query Setup
 
     ULONG CAddQuerySubClause( const char * prgArg [], BOOL fOrClause )
     {
 
         if ( FITQUDebugMode )
         {
+            //  Somewhat unsafe, b/c we check these conditions below, but generally
+            //  we expect at least prgArg[0] and prgArg[1] to be non-null.  And note
+            //  prgArg[2] may not even relate to this evaluation if prgArg[1] is a
+            //  unary operator
             ITQUPrintf("CAddQuerySubClause() - Adding clause: fAndOrOr=%d, Args %s, %s, %s\n",
                     fOrClause, prgArg[0],
                     prgArg[1] ? prgArg[1] : "<null>",
                     ( prgArg[1] && prgArg[2] ) ? prgArg[2] : "<null>" );
         }
 
+        //  this is the closest thing to a constructor, so putting some basic compile
+        //  type asserts here...
         C_ASSERT( sizeof(m_rgpsc)/sizeof(m_rgpsc[0]) == sizeof(m_rgPscOrClause)/sizeof(m_rgPscOrClause[0]) );
 
+        //
+        //  Use the next Query Predicate Sub-Clause in the array ...
+        //
         if ( m_cPsc >= _countof(m_rgpsc) )
         {
             ITQUPrintf("CAddQuerySubClause() - Adding too many query clauses, only hard compiled to handle %d clauses\n", _countof(m_rgpsc) );
@@ -1082,15 +1208,20 @@ public:
         IQPredicateSubClause * ppsc = &(m_rgpsc[m_cPsc]);
         m_rgPscOrClause[m_cPsc] = fOrClause;
 
+        //
+        //  Evaluate the element the caller wants to query against.
+        //
 
+        //  Bail early if this is the match all query ...
         if ( 0 == _stricmp( prgArg[0], "*" ) )
         {
             ppsc->pmd = NULL;
             ppsc->ErrSetCompOp( "*" );
             ppsc->pvValue = NULL;
-            return 1;
+            return 1;   // only one arg ...
         }
 
+        //  Select a query type ...
         ppsc->pmd = m_pied->PmdMatch( prgArg[0] );
         if ( ppsc->pmd  == NULL )
         {
@@ -1128,6 +1259,7 @@ public:
         return 0;
     }
 
+    //  Action Setup
 
     void SetCallback( PfnQueryVisitAction pfnAction, PfnQueryFinalAction pfnFinalAction, void * pContext )
     {
@@ -1136,6 +1268,7 @@ public:
         m_pActionContext = pContext;
     }
 
+    //  Tear Down
 
     ~CIterQuery()
     {
@@ -1148,6 +1281,7 @@ public:
         }
     }
 
+    //  Query evaluation functions
 
     bool FPrints( void )
     {
@@ -1159,16 +1293,31 @@ public:
     {
         BOOL fRet = fTrue;
 
+        //
+        //  We only support "and" or "or" clauses for now ...
+        //
         for ( ULONG iPsc = 0; iPsc < m_cPsc; iPsc++ )
         {
             if ( m_rgPscOrClause[iPsc] == fTrue )
             {
+                //  This means we have an "or" in front of this clause, so we
+                //  need to see if we've already evaluated to true, and break.
+                //  if we haven't gotten a true at this point, we need to reset 
+                //  fRet so we return true if this clause is true ...
                 if ( fRet )
                 {
+                    //  first clause before this || evaluated to true, break
+                    //  now, we're done ...
+                    //  Note: This does effectively performs partial / short
+                    //  circuit evaluation for "or" clauses ...
                     break;
                 }
+                //  first clause before this || evaulated to false, reset fRet
+                //  and give second clause after this || to evaluate to true ...
                 fRet = fTrue;
             }
+            //  Note: This does affect partial evaluation for "and"
+            //  clauses ... so should be useful for things like:
             fRet = fRet && m_rgpsc[iPsc].FEvalQueryMember( qwEntryAddr, pcvEntry, m_rgpsc[iPsc].pvValue );
 
         }
@@ -1192,10 +1341,14 @@ public:
         }
     }
 
+    //  Diagnostic helpers
 
     void PrintQuery( void )
     {
         ITQUPrintf("Printing CIterQuery - %p\n  Query:\n    ", this );
+        //
+        //  We only support "and" and "or" clauses for now ...
+        //
         for ( ULONG iPsc = 0; iPsc < m_cPsc; iPsc++ )
         {
             if ( m_rgPscOrClause[iPsc] )
@@ -1204,7 +1357,7 @@ public:
             }
             else
             {
-                if ( iPsc )
+                if ( iPsc )   // first && is implicit
                 {
                     ITQUPrintf("&&");
                 }
@@ -1244,6 +1397,10 @@ public:
 };
 
 
+// -------------------------------------------------------------
+//
+//  Generic Arg processing helpers
+//
 
 void ConsumeArgs( const char ** prgArg, ULONG * pcArg, ULONG cNum )
 {
@@ -1271,6 +1428,10 @@ void ConsumeArgs( const char ** prgArg, ULONG * pcArg, ULONG cNum )
         ITQUPrintf( "arg[%d] = %s\n", iT, arg[iT] != NULL ? arg[iT] : "<NULL>" );  \
     }
 
+//  This creates a duplicate array of args so that they can be "trimmed".  Note
+//  this doesn't unencumber the original args, we still have references from this
+//  array to those string.
+//
 const char ** LocalArgDup( INT argc, const char * const argv [] )
 {
     const char **   prgArg = NULL;
@@ -1296,22 +1457,30 @@ const char ** LocalArgDup( INT argc, const char * const argv [] )
         }
         prgArg[i] = argv[i];
     }
-    prgArg[argc] = NULL;
+    prgArg[argc] = NULL; // as is convention NULL ptr after last arg.
 
     return prgArg;
 }
 
 
+// -------------------------------------------------------------
+//
+//  Predicate Arg to Query Creator
+//
 
 IQERR ErrIQConsumePredicateArgs(
         IEntryDescriptor *      pied,
         const char **           prgArg,
         ULONG *                 pcArg,
         __out CIterQuery **     ppiq )
+//  ================================================================
 {
     IQERR          err = IQERR::errSuccess;
     CIterQuery *   piq = NULL;
 
+    //
+    //  Allocate a new empty CIterQuery.
+    //
     piq = new CIterQuery( pied );
     if ( piq == NULL )
     {
@@ -1319,6 +1488,9 @@ IQERR ErrIQConsumePredicateArgs(
         return IQERR::errOutOfMemory;
     }
 
+    //
+    //  Actually start parsing the args.
+    //
 
     if ( FITQUDebugMode )
     {
@@ -1332,10 +1504,16 @@ IQERR ErrIQConsumePredicateArgs(
         ITQUCall( IQERR::errInvalidParameter );
     }
 
+    //
+    //  Evaluate and add each set of clauses to the CIterQuery ... 
+    //
     BOOL fEvaluateMore = fFalse;
     BOOL fOrClause = fFalse;
     do {
 
+        //
+        //  Add the 2 or 3 part clause to the CIterQuery, and consume the args...
+        //
         ULONG cConsume = piq->CAddQuerySubClause( prgArg, fOrClause );
         if ( 0 == cConsume )
         {
@@ -1350,6 +1528,8 @@ IQERR ErrIQConsumePredicateArgs(
         }
         else
         {
+            //  Check to see if the next argument is an "and" or "or" clause
+            //  and thus we have more query clauses to evaluate.
             fEvaluateMore = _stricmp( prgArg[0], "&&" ) == 0 ||
                             _stricmp( prgArg[0], "||" ) == 0;
             if ( fEvaluateMore )
@@ -1369,7 +1549,7 @@ IQERR ErrIQConsumePredicateArgs(
 
     *ppiq = piq;
     
-    piq = NULL;
+    piq = NULL;     // so not freed
     err = IQERR::errSuccess;
 
 HandleError:
@@ -1382,6 +1562,10 @@ HandleError:
     return err;
 }
 
+// -------------------------------------------------------------
+//
+//  Action Arg Processing
+//
 
 IQERR ErrIQAddAction(
     __inout CIterQuery * const  piq,
@@ -1424,10 +1608,11 @@ IQERR ErrIQAddAction(
         if ( strlen( szAction ) > 6 )
         {
             const char * szCurr = strchr( szAction, ':' );
+            // assert(szCurr)
 
             while ( szCurr && *szCurr != '\0' )
             {
-                szCurr++;
+                szCurr++;   // move past the delimiter ...
 
                 if ( cPrintedMembers >= _countof(rgpmdPrintMembers) )
                 {
@@ -1443,6 +1628,7 @@ IQERR ErrIQAddAction(
                 }
                 cPrintedMembers++;
 
+                //  Move to the next member we want to print.
                 szCurr = strchr( szCurr, ',' );
             }
 
@@ -1451,12 +1637,15 @@ IQERR ErrIQAddAction(
                 ITQUCall( IQERR::errInvalidParameter );
             }
 
+            // Note: This overallocates the array size by one slot / extra CMemberDescriptor * ptr (b/c context
+            // array has size of 1 already).
             pContext = PvITQUAlloc( sizeof( PRINT_ACTION_CONTEXT ) + ( cPrintedMembers * sizeof( CMemberDescriptor * ) ) );
             if ( pContext == NULL )
             {
                 ITQUPrintf( "Out of memory.\n" );
                 ITQUCall( IQERR::errInvalidParameter );
             }
+            // success
             ((PRINT_ACTION_CONTEXT*)pContext)->cPrintedMembers = cPrintedMembers;
             memcpy( ((PRINT_ACTION_CONTEXT*)pContext)->rgpmdPrintedMembers, rgpmdPrintMembers, cPrintedMembers * sizeof(rgpmdPrintMembers[0]) );
 
@@ -1491,6 +1680,7 @@ IQERR ErrIQAddAction(
 
         if ( pcAccum )
         {
+            //  External accumulator, no final / "printing" action
             piq->SetCallback( CountAction, NULL, pcAccum );
         }
         else
@@ -1530,6 +1720,7 @@ IQERR ErrIQAddAction(
             pC->pcAccum = &(pC->cAccumImplicit);
         }
 
+        //  if there is an external accumulator, there is no final / "printing" action
         piq->SetCallback( AccumAction, pcAccum ? NULL : AccumFinalAction, pContext );
 
         cConsumeAction = 1;
@@ -1567,6 +1758,8 @@ IQERR ErrIQAddAction(
         {
             if ( eAttemptContinousPrint & pmd->m_HistoInfo )
             {
+                //  For now, 100 empty buckets seems like a good limitation, but someday
+                //  we may want this to be independently tunable.
                 cZeroBucketSkipThreshold = 100;
             }
             else
@@ -1620,6 +1813,7 @@ IQERR ErrIQAddAction(
             ITQUAssert( pCtx->phisto );
         }
 
+        //  if there is an external histogram, there is no final / "printing" action
         piq->SetCallback( HistoAction, pvResult ? NULL : HistoFinalAction, pContext );
 
         cConsumeAction = 1;
@@ -1702,6 +1896,10 @@ HandleError:
     return err;
 }
 
+// -------------------------------------------------------------
+//
+//  Main Arg Processing Functions (combines Predicate and Action arg processing)
+//
 
 ERR ErrIQCreateIterQuery(
         IEntryDescriptor * pied,
@@ -1713,6 +1911,8 @@ ERR ErrIQCreateIterQuery(
     const char **   prgArg = NULL;
     CIterQuery *       piq = NULL;
 
+    //  Create a copy of the arg ptr array, so that we can "consume" args
+    //  for easy arg parsing ...
     prgArg = LocalArgDup( argc, argv );
     if ( prgArg == NULL )
     {
@@ -1721,11 +1921,20 @@ ERR ErrIQCreateIterQuery(
     }
     ULONG cArgs = argc;
 
+    //
+    //  Create the query with appropriate evaluation clauses.
+    //
     ITQUCall( ErrIQConsumePredicateArgs( pied, prgArg, &cArgs, ppiq ) );
     piq = *ppiq;
 
+    //
+    //  Now add the action clause.
+    //
     ITQUCall( ErrIQAddAction( piq, prgArg, &cArgs ) );
 
+    //
+    //  If not all args process, invalid syntax ...
+    //
     if ( 0 != cArgs )
     {
         ITQUPrintf( "Couldn't process all the args.  Remaining:\n" );
@@ -1739,7 +1948,7 @@ ERR ErrIQCreateIterQuery(
         ITQUPrintf( "\n" );
     }
 
-    piq = NULL;
+    piq = NULL;     // so not freed
     err = IQERR::errSuccess;
 
 HandleError:
@@ -1768,6 +1977,8 @@ ERR ErrIQCreateIterQueryCount(
     const char **   prgArg = NULL;
     CIterQuery *       piq = NULL;
 
+    //  Create a copy of the arg ptr array, so that we can "consume" args
+    //  for easy arg parsing ...
     prgArg = LocalArgDup( argc, argv );
     if ( prgArg == NULL )
     {
@@ -1776,11 +1987,20 @@ ERR ErrIQCreateIterQueryCount(
     }
     ULONG cArgs = argc;
 
+    //
+    //  Create the query with appropriate evaluation clauses.
+    //
     ITQUCall( ErrIQConsumePredicateArgs( pied, prgArg, &cArgs, ppiq ) );
     piq = *ppiq;
 
+    //
+    //  Now add the action clause.
+    //
     ITQUCall( ErrIQAddAction( piq, prgArg, &cArgs, pvResult ) );
 
+    //
+    //  If not all args process, invalid syntax ...
+    //
     if ( 0 != cArgs )
     {
         ITQUPrintf( "Couldn't process all the args.  Remaining:\n" );
@@ -1794,7 +2014,7 @@ ERR ErrIQCreateIterQueryCount(
         ITQUPrintf( "\n" );
     }
 
-    piq = NULL;
+    piq = NULL;     // so not freed
     err = IQERR::errSuccess;
 
 HandleError:
@@ -1812,5 +2032,5 @@ HandleError:
     return err;
 }
 
-#endif
+#endif // ITERQUERY_HXX_INCLUDED
 

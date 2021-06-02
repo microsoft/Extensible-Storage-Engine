@@ -39,11 +39,15 @@ VOID NORMAssertCheckLocaleName( const PCWSTR wszLocaleName )
 }
 
 #ifdef DEBUG
+// These variables will store the last ErrNORMCheckLocale errors for the IsValidLocale
+// call for both the system error (g_errSystemCheckLocale) and the mapped JET err (g_errCheckLocale).
 DWORD               g_errSystemCheckLocale            = S_OK;
 ERR                 g_errCheckLocale                  = JET_errSuccess;
 
 VOID AssertNORMConstants()
 {
+    //  since we now persist LCMapString() flags, we must verify
+    //  that NT doesn't change them from underneath us
     C_ASSERT( LCMAP_SORTKEY == 0x00000400 );
     C_ASSERT( LCMAP_BYTEREV == 0x00000800 );
     C_ASSERT( NORM_IGNORECASE == 0x00000001 );
@@ -63,6 +67,9 @@ VOID AssertNORMConstants()
     C_ASSERT( langidNone == 0 );
     C_ASSERT( lcidNone == 0 );
 
+    // Both of the NLS functions below can fail during shutdown as
+    // the registry is pulled from under us, so we will disconsider
+    // failures when we're shutting down.
     NORMAssertCheckLocaleName( wszLocaleNameDefault );
     Assert( ErrNORMCheckLCMapFlags( NULL, dwLCMapFlagsDefault, fFalse ) == JET_errSuccess );
 }
@@ -73,6 +80,7 @@ const LANGID LangidFromLcid( const LCID lcid )
     return LANGIDFROMLCID( lcid );
 }
 
+//  allocates memory for psz using new []
 LOCAL ERR ErrNORMGetLcidInfo( const LCID lcid, const LCTYPE lctype, __deref_out PWSTR * psz )
 {
     ERR         err         = JET_errSuccess;
@@ -97,6 +105,7 @@ HandleError:
     return err;
 }
 
+//  allocates memory for psz using new []
 LOCAL ERR ErrNORMGetLocaleNameInfo( PCWSTR wszLocaleName, const LCTYPE lctype, __deref_out PWSTR * psz )
 {
     ERR         err         = JET_errSuccess;
@@ -143,6 +152,7 @@ LOCAL VOID NORMReportInvalidLcid( INST * const pinst, const LCID lcid, const ERR
                     0,
                     NULL );
 
+//  these routines allocate memory, remember to free it with delete[]
 
     if ( ErrNORMGetLcidInfo( lcid, LOCALE_SLANGUAGE, &szLanguage ) < JET_errSuccess )
     {
@@ -209,6 +219,7 @@ LOCAL VOID NORMReportInvalidLocaleName( INST * const pinst, PCWSTR wszLocaleName
                     0,
                     NULL );
 
+    //these routines allocate memory, remember to free it with delete[]
     if ( ErrNORMGetLocaleNameInfo( wszLocaleName, LOCALE_SLANGUAGE, &szLanguage ) < JET_errSuccess )
     {
         szLanguage = szFallbackLanguage;
@@ -255,6 +266,7 @@ LOCAL VOID NORMReportInvalidLocaleName( INST * const pinst, PCWSTR wszLocaleName
 NTOSFuncPD( g_pfnGetNLSVersionEx, GetNLSVersionEx );
 
 #ifndef ESENT
+// Used to detect Win10 only
 
 WINBASEAPI
 BOOL
@@ -265,28 +277,34 @@ WaitForDebugEventEx(
     );
 
 NTOSFuncPD( g_pfnWaitForDebugEventEx, WaitForDebugEventEx );
-#endif
+#endif  //  !ESENT
 
+//  ================================================================
 LOCAL ERR ErrLoadNORMFunctions()
+//  ================================================================
 {
     NTOSFuncStdPreinit( g_pfnGetNLSVersionEx, g_mwszzLocalizationLibs, GetNLSVersionEx, oslfExpectedOnWin6 | oslfRequired );
 #ifndef ESENT
     NTOSFuncStdPreinit( g_pfnWaitForDebugEventEx, g_mwszzLocalizationLibs, WaitForDebugEventEx, oslfExpectedOnWin10 );
-#endif
+#endif  //  !ESENT
 
     return JET_errSuccess;
 }
 
 
+//  ================================================================
 LOCAL VOID UnloadNORMFunctions()
+//  ================================================================
 {
 }
 
 
+//  ================================================================
 LOCAL_BROKEN BOOL WINAPI GetNLSNotSupported(
     IN  NLS_FUNCTION     Function,
     IN  LCID             Locale,
     OUT LPNLSVERSIONINFO lpVersionInformation )
+//  ================================================================
 {
     Assert( NULL != lpVersionInformation );
     if( NULL == lpVersionInformation )
@@ -308,10 +326,12 @@ LOCAL_BROKEN BOOL WINAPI GetNLSNotSupported(
     return fFalse;
 }
 
+//  ================================================================
 LOCAL_BROKEN BOOL WINAPI GetNLSExNotSupported(
     IN  NLS_FUNCTION        Function,
     IN  LPCWSTR             LocaleName,
     OUT LPNLSVERSIONINFOEX  lpVersionInformation )
+//  ================================================================
 {
     Assert( NULL != lpVersionInformation );
     if( NULL == lpVersionInformation )
@@ -335,7 +355,12 @@ LOCAL_BROKEN BOOL WINAPI GetNLSExNotSupported(
     return fFalse;
 }
 
+//  ================================================================
 ERR ErrNORMCheckLocaleName( __in INST * const pinst, __in_z PCWSTR const wszLocaleName )
+//  ================================================================
+//  +
+//  Calls GetNLSVersionEx() on the locale name, to verify that it is a valid locale.
+//  -
 {
     ERR err = JET_errSuccess;
     DWORD errSystem = S_OK;
@@ -365,6 +390,7 @@ ERR ErrNORMCheckLocaleName( __in INST * const pinst, __in_z PCWSTR const wszLoca
                     Error( ErrERRCheck( JET_errInvalidLanguageId ) );
 
             default:
+                // For everything else, we assume it is is an invalid language ID.
                 Error( ErrERRCheck( JET_errInvalidLanguageId ) );
         }
     }
@@ -376,10 +402,14 @@ HandleError:
     if ( err < JET_errSuccess )
     {
 #ifdef DEBUG
+        // Record these as forensic information in case we need to debug this.
         g_errSystemCheckLocale = errSystem;
         g_errCheckLocale = err;
 #endif
 
+        // If the locale is not valid or we failed to validate it, we need
+        // to report it in the event log. We will not report JET_errUnicodeLanguageValidationFailure
+        // since it is not actionable for administrators.
         if ( JET_errUnicodeLanguageValidationFailure != err )
         {
             NORMReportInvalidLocaleName( pinst, wszLocaleName, err, errSystem );
@@ -389,8 +419,14 @@ HandleError:
     return err;
 }
 
+//  ================================================================
 ERR ErrNORMCheckLocaleVersion(
     _In_ const NORM_LOCALE_VER* pnlv )
+//  ================================================================
+//  +
+//  Calls LCMapString() on the locale name and versions, to verify that it is a valid locale/version
+// combination.
+//  -
 {
     ERR err = JET_errSuccess;
 
@@ -412,13 +448,20 @@ HandleError:
 }
 
 
+//  ================================================================
 ERR ErrNORMGetSortVersion( __in_z PCWSTR wszLocaleName, __out QWORD * const pqwVersion, __out_opt SORTID * const psortID, __in const BOOL fErrorOnInvalidId )
+//  ================================================================
+//
+//-
 {
     ERR err = JET_errSuccess;
     DWORD errSystem = 0;
     *pqwVersion = 0;
 
 #ifndef RTM
+    //  check registry overrides for this LCID
+    //  the override should be a string of the form version.defined version (e.g. 123.789)
+    //  require LCID to have compatibility with test hooks
     LCID lcid = lcidNone;
     err = ErrNORMLocaleToLcid( wszLocaleName, &lcid );
     if ( err == JET_errSuccess )
@@ -435,7 +478,23 @@ ERR ErrNORMGetSortVersion( __in_z PCWSTR wszLocaleName, __out QWORD * const pqwV
             const WCHAR * const wszDefined  = wcstok_s( NULL, L".", &wszNextToken );
             const DWORD dwNLS               = _wtoi( wszNLS );
             const DWORD dwDefined           = _wtoi( wszDefined );
-            
+            /*
+            _TCHAR                  szMessage[256];
+            const _TCHAR *          rgszT[1]            = { szMessage };
+
+            _stprintf(
+                    szMessage,
+                    _T( "Sort ordering for LCID %d changed through the registry to %d.%d" ),
+                    lcid,
+                    dwNLS,
+                    dwDefined );
+            UtilReportEvent(
+                    eventWarning,
+                    GENERAL_CATEGORY,
+                    PLAIN_TEXT_ID,
+                    1,
+                    rgszT );
+            */
 
             *pqwVersion = QwSortVersionFromNLSDefined( dwNLS, dwDefined );
 
@@ -475,6 +534,8 @@ ERR ErrNORMGetSortVersion( __in_z PCWSTR wszLocaleName, __out QWORD * const pqwV
     else
     {
 #ifndef RTM
+        //  If the testing has specified to either "upgrade" windows NLS version, OR upgrade just
+        //  a specific LCID, we'll give the NLS version a +7 boost in version.
         ULONG ulTestLcid = (ULONG)UlConfigOverrideInjection( 51415, fFalse );
         if ( ulTestLcid == fTrue ||
              ( ulTestLcid == lcid && lcid != lcidNone ) )
@@ -482,6 +543,8 @@ ERR ErrNORMGetSortVersion( __in_z PCWSTR wszLocaleName, __out QWORD * const pqwV
             nlsversioninfoex.dwNLSVersion += 7;
         }
 
+        //  If the testing has specified to either "upgrade" windows NLS sort ID, OR upgrade just
+        //  a specific LCID, we'll give the NLS version a +7 boost in version.
         ulTestLcid = (ULONG)UlConfigOverrideInjection( 43220, fFalse );
         if ( ulTestLcid == fTrue ||
              ( ulTestLcid == lcid && lcid != 0 ) )
@@ -515,23 +578,33 @@ HandleError:
 }
 
 
+//  ================================================================
 BOOL FNORMGetNLSExIsSupported()
+//  ================================================================
 {
     return ( g_pfnGetNLSVersionEx.ErrIsPresent() == JET_errSuccess );
 }
 
-BOOL g_fNormMemoryLeakAcceptable = fFalse;
+BOOL g_fNormMemoryLeakAcceptable = fFalse; // used only as a unit test thunk..
+//  ================================================================
 BOOL FNORMIGetNLSExWithVersionInfoIsSupported()
+//  ================================================================
 {
 #ifndef ESENT
+    // Due to a memory leak in LCMapStringEx on Win8 through some Win10 builds we were forced to disable this
+    // feature on builds less than Win10.  We are forced to detect Win10 indirectly by testing for a new Win32
+    // API because the Win32 version APIs now lie unless the app is properly manifested and we cannot know if
+    // a given application using ESE/ESENT.DLL is properly manifested and this lack of a manifest itself will
+    // not disable this feature.  We only need to test this on ESE as this bug and the code to activate the bug
+    // will not coexist for ESENT.
     if ( g_pfnWaitForDebugEventEx.ErrIsPresent() != JET_errSuccess )
     {
         return g_fNormMemoryLeakAcceptable && FNORMGetNLSExIsSupported();
     }
-#endif
+#endif  //  !ESENT
     
-    Expected( FNORMGetNLSExIsSupported() );
-    return FNORMGetNLSExIsSupported();
+    Expected( FNORMGetNLSExIsSupported() );  // True on Vista+ (when NT API came in) ... so next line is basically: return true; (but do the right thing just in case)
+    return FNORMGetNLSExIsSupported(); // but for defense in depth we'll defer to the other function as a check ..
 }
 
 BOOL FNORMNLSVersionEquals( QWORD qwVersionCreated, QWORD qwVersionCurrent )
@@ -549,16 +622,19 @@ BOOL FNORMNLSVersionEquals( QWORD qwVersionCreated, QWORD qwVersionCurrent )
     dwNLSVersionHighest = dwNLSVersionCreated >= dwNLSVersionCurrent ? dwNLSVersionCreated : dwNLSVersionCurrent;
     dwNLSVersionLowest = dwNLSVersionCreated < dwNLSVersionCurrent ? dwNLSVersionCreated : dwNLSVersionCurrent;
 
+    // OM 3100737: Ignore lowest byte in NLS sort order key for certain OS versions (601.1 - 601.2)
     if ( dwNLSVersionHighest == 0x00060102 && dwNLSVersionLowest == 0x00060101 )
     {
         return fTrue;
     }
 
+    // OM 3100737: Ignore lowest byte in NLS sort order key for certain NLS versions (602.d - 602.e)
     if ( dwNLSVersionHighest == 0x0006020e && dwNLSVersionLowest == 0x0006020d )
     {
         return fTrue;
     }
 
+    // RS4 fixed a CompareString bug and updated version to 0006020F
     if ( dwNLSVersionHighest == 0x0006020f && dwNLSVersionLowest == 0x0006020e )
     {
         return fTrue;
@@ -589,16 +665,21 @@ LOCAL ERR ErrNORMReportInvalidLCMapFlags( INST * const pinst, const DWORD dwLCMa
             NULL,
             pinst );
 
+    // Assert ( fFalse );
     return ErrERRCheck( JET_errInvalidLCMapStringFlags );
 }
 
+//This is a temp fix to make the following ELS flag working on fbl_find_dev
+//Please remove it once the code is built with _WIN32_WINNT_WIN7
 #ifndef SORT_DIGITSASNUMBERS
-#define SORT_DIGITSASNUMBERS 0x00000008
+#define SORT_DIGITSASNUMBERS 0x00000008  // use digits as numbers sort method
 #endif
 
+// IMPORTANT: This function can fail during shutdown as the registry is pulled from under us.
 
 ERR ErrNORMCheckLCMapFlags( _In_ INST * const pinst, _In_ const DWORD dwLCMapFlags, _In_ const BOOL fUppercaseTextNormalization )
 {
+    //  CONSIDER:  Validate flags based on OS version
     const DWORD     dwValidSortKeyFlags = ( LCMAP_BYTEREV
                                         | NORM_IGNORECASE
                                         | NORM_IGNORENONSPACE
@@ -611,6 +692,11 @@ ERR ErrNORMCheckLCMapFlags( _In_ INST * const pinst, _In_ const DWORD dwLCMapFla
                                         | NORM_LINGUISTIC_CASING
                                         | SORT_STRINGSORT );
 
+    // Most people want (the common case) the various "improved linguistic"
+    // support of the above flag, which only working with LCMAP_SORTKEY.
+    // Occasionally people want LCMAP_UPPERCASE (generally to compare file paths)
+    // which must be used without the LCMAP_SORTKEY flag.
+    //
     if ( LCMAP_SORTKEY == ( dwLCMapFlags & ~dwValidSortKeyFlags )
         || ( LCMAP_UPPERCASE == dwLCMapFlags && fUppercaseTextNormalization ) )
     {
@@ -623,9 +709,11 @@ ERR ErrNORMCheckLCMapFlags( _In_ INST * const pinst, _In_ const DWORD dwLCMapFla
 }
 
 
+// IMPORTANT: This function can fail during shutdown as the registry is pulled from under us.
 
 ERR ErrNORMCheckLCMapFlags( _In_ INST * const pinst, _Inout_ DWORD * const pdwLCMapFlags, _In_ const BOOL fUppercaseTextNormalization )
 {
+    //  LCMAP_UPPERCASE can not be combined with LCMAP_SORTKEY.
     if ( LCMAP_UPPERCASE != *pdwLCMapFlags )
     {
         *pdwLCMapFlags |= LCMAP_SORTKEY;
@@ -672,8 +760,11 @@ VOID NORMPrint( const BYTE * const pb, const INT cb )
         printf( "\n" );
     }
 }
-#endif
+#endif  //  DEBUG_NORM
 
+// The combination of dwNLSVersion, and guidCustomVersion
+// identify specific sort behavior, persist those to ensure identical
+// behavior in the future.
 
 INLINE INT CbNORMMapString_(
     _In_ const NORM_LOCALE_VER* const       pnlv,
@@ -690,33 +781,48 @@ INLINE INT CbNORMMapString_(
         Assert( 0 != pnlv->m_dwDefinedNlsVersion );
     }
 
+    // SOMEONEn says:
+    // Basically fill out the NlsVersionInfoEx structure (eg: what it returned
+    // from GetNlsVersionEx()). The important parts are dwNLSVersion
+    // (definedVersion is ignored), and guidCustomVersion if present (otherwise
+    // it uses dwEffectiveId, but that's not perfect, so use the GUID instead,
+    // but there's no GUID before Windows 8).
 
     NLSVERSIONINFO* psortinfoUsed = NULL;
     NLSVERSIONINFOEX sortinfo;
     sortinfo.dwNLSVersionInfoSize = sizeof( sortinfo );
     sortinfo.dwNLSVersion = pnlv->m_dwNlsVersion;
-    sortinfo.dwDefinedVersion = pnlv->m_dwDefinedNlsVersion;
+    sortinfo.dwDefinedVersion = pnlv->m_dwDefinedNlsVersion; // Ignored on Win8+. Used in Win7.
 
-    sortinfo.dwEffectiveId = 0;
+    // These two fields are added in NLSVERSIONINFOEX (ignored on Win7).
+    sortinfo.dwEffectiveId = 0; // SOMEONEn SOMEONE said this is now ignored.
     sortinfo.guidCustomVersion = pnlv->m_sortidCustomSortVersion;
 
     if ( FNORMIGetNLSExWithVersionInfoIsSupported() && ( 0 != pnlv->m_dwNlsVersion ) )
     {
         psortinfoUsed = (NLSVERSIONINFO*) &sortinfo;
 
+        // Must be at least Vista.
         Enforce( DwUtilSystemVersionMajor() >= 6 );
 
+        // If running Vista/Windows 7, NLSVERSIONEX is not supported.
         if ( 6 == DwUtilSystemVersionMajor() && DwUtilSystemVersionMinor() <= 1 )
         {
+            // Win7 didn't know about NLSVERSIONINFOEX.
             sortinfo.dwNLSVersionInfoSize = sizeof( NLSVERSIONINFO );
         }
         else
         {
+            // If the effective NLS version is windows 7 and below, uses
+            // NLSVERSIONINFO as NLSVERSIONEX is not supported.
             if ( sortinfo.dwNLSVersion < 0x00060200 )
             {
                 sortinfo.dwNLSVersionInfoSize = sizeof( NLSVERSIONINFO );
             }
 
+            // Check that it's Win8 or above.
+            // Note that the version will be at most 6.2 unless the executable has opted
+            // in to be version-aware via the executable manifest.
             Assert( ( 6 == DwUtilSystemVersionMajor() && DwUtilSystemVersionMinor() >= 2 ) ||
                     DwUtilSystemVersionMajor() > 6 );
         }
@@ -725,6 +831,18 @@ INLINE INT CbNORMMapString_(
     Assert( ( pnlv->m_dwNormalizationFlags & LCMAP_SORTKEY ) || ( pnlv->m_dwNormalizationFlags == LCMAP_UPPERCASE ) );
     INT cbSize = 0;
 #pragma warning(suppress: 26000)
+    // From MSDN https://msdn.microsoft.com/en-us/library/windows/desktop/dd318702(v=vs.85).aspx
+    // cchDest is cb in case of sort-key and cch otherwise.
+    // -------------------------------------------------------------------------
+    // cchDest [in]
+    // Size, in characters, of the buffer indicated by lpDestStr. If the application is using
+    // the function for string mapping, it supplies a character count for this parameter.
+    // If space for a terminating null character is included in cchSrc, cchDest must also 
+    // include space for a terminating null character.
+    // If the application is using the function to generate a sort key, it supplies a byte
+    // count for the size. This byte count must include space for the sort key 0x00 terminator.
+    // The application can set cchDest to 0. In this case, the function does not use the lpDestStr
+    // parameter and returns the required buffer size for the mapped string or sort key.
     cbSize = LCMapStringEx(
                 pnlv->m_wszLocaleName,
                 pnlv->m_dwNormalizationFlags,
@@ -738,6 +856,7 @@ INLINE INT CbNORMMapString_(
 #pragma warning(suppress: 26000)
     if ( ( pnlv->m_dwNormalizationFlags & LCMAP_SORTKEY ) == 0 )
     {
+        // For non sort key usage scenarios, the returned value is in characters
         cbSize = cbSize * sizeof(WCHAR);
     }
 
@@ -756,7 +875,7 @@ ERR ErrNORMMapString(
     const size_t        cbColumnStack   = 256;
     BYTE            pbColumnStack[cbColumnStack];
     BYTE*           pbColumnAligned = NULL;
-    const size_t        cbColumnAligned = cbColumn + sizeof(wchar_t);
+    const size_t        cbColumnAligned = cbColumn + sizeof(wchar_t);   // reserve space for a null-terminator
     const size_t        cbKeyStack      = cbColumnStack;
     BYTE            rgbKeyStack[ cbKeyStack ];
     BYTE*           rgbKeyAlloc     = NULL;
@@ -772,10 +891,23 @@ ERR ErrNORMMapString(
         Error( ErrERRCheck( JET_errUnicodeNormalizationNotSupported ) );
     }
 
+    //  assert non-zero length unicode string
+    //
     Assert( cbColumn > 0 );
 
+    //  assert that the unicode string length is valid
+    //
     Assert( 0 == ( cbColumn % sizeof( wchar_t ) ) );
 
+    //  NOTE:  at one time, we used to truncate our column data to 256 bytes
+    //  prior to the normalization call.  we now do this at a higher level and
+    //  then only to support legacy index formats.  this changed when we added
+    //  support for max key lengths larger than 255 bytes.  Further, note that
+    //  this old behavior was BROKEN because it is possible that you will need
+    //  more than 256 bytes of Unicode data to generate 255 bytes of sort key
+    //  because there are many cases where a given char will not result in a
+    //  sort weight or that a given pair of chars will result in a single sort
+    //  weight
 
 
     if ( cbColumnAligned <= cbColumnStack )
@@ -791,15 +923,23 @@ ERR ErrNORMMapString(
     *(wchar_t *)(pbColumnAligned + cbColumn) = 0;
     pbColumn = pbColumnAligned;
 
+    //  in the common case, we will be able to fit the normalized source data
+    //  into our stack buffer
+    //
     rgbKey      = rgbKeyStack;
     cbKeyMax    = cbKeyStack;
 
+    //  attempt to normalize the source data using larger buffers until we
+    //  succeed or fail with some other fatal error
+    //
     while ( !( cbKey = CbNORMMapString_(    pnlv,
                                             pbColumn,
                                             cbColumn,
                                             rgbKey,
                                             cbKeyMax ) ) )
     {
+        //  check for failures other than insufficient buffer
+        //
         switch ( GetLastError() )
         {
             case ERROR_INVALID_USER_BUFFER:
@@ -809,15 +949,21 @@ ERR ErrNORMMapString(
                 Error( ErrERRCheck( JET_errOutOfMemory ) );
 
             case ERROR_BADDB:
+                // This has been a common case we have been encountering in
+                // Windows 8. Different circumstances seem to cause the registry
+                // to be pulled under this check, when shutting down.
                 Error( ErrERRCheck( JET_errUnicodeLanguageValidationFailure ) );
             
             default:
                 Error( ErrERRCheck( JET_errUnicodeTranslationFail ) );
 
             case ERROR_INSUFFICIENT_BUFFER:
+                //  exit switch
                 break;
         }
 
+        //  get the amount of buffer we will need to normalize the source data
+        //
         cbKeyMax = CbNORMMapString_(    pnlv,
                                         pbColumn,
                                         cbColumn,
@@ -825,6 +971,8 @@ ERR ErrNORMMapString(
                                         0 );
         if ( 0 == cbKeyMax )
         {
+            //  check for failures other than insufficient buffer
+            //
             const DWORD dwGle = GetLastError();
             switch ( dwGle )
             {
@@ -835,6 +983,9 @@ ERR ErrNORMMapString(
                     Error( ErrERRCheck( JET_errOutOfMemory ) );
             
                 case ERROR_BADDB:
+                    // This has been a common case we have been encountering in
+                    // Windows 8. Different circumstances seem to cause the registry
+                    // to be pulled under this check, when shutting down.
                     Error( ErrERRCheck( JET_errUnicodeLanguageValidationFailure ) );
 
                 default:
@@ -846,13 +997,22 @@ ERR ErrNORMMapString(
             }
         }
 
+        //  allocate enough memory to succeed on the next call
+        //
         OSMemoryHeapFree( rgbKeyAlloc );
         Alloc( rgbKeyAlloc = (BYTE*)PvOSMemoryHeapAlloc( cbKeyMax ) );
         rgbKey = rgbKeyAlloc;
     }
 
+    //  if we have made it this far, then our locale must be valid. The NLS function below
+    //  can fail during shutdown as the registry is pulled from under us, so we will disconsider
+    //  failures when we're shutting down.  Additionally, we will ignore JET_errUnicodeLanguageValidationFailure
+    //  for when for some reason the registry is being made unavailable for the IsValidLocale call.
+    //
     NORMAssertCheckLocaleName( pnlv->m_wszLocaleName );
 
+    //  copy the normalized source data to the output buffer
+    //
     if ( pnlv->m_dwNormalizationFlags == LCMAP_UPPERCASE )
     {
         if ( cbKey > (INT)( cbMax - sizeof( WCHAR ) ) )
@@ -904,6 +1064,7 @@ ERR ErrNORMMapString(
 #endif
 
 HandleError:
+    // if our column didnt fit in the stack buff, we allocated mem from the heap
     if ( cbColumnAligned > cbColumnStack )
     {
         OSMemoryHeapFree( pbColumnAligned );
@@ -913,12 +1074,14 @@ HandleError:
 }
 
 
+//  post-terminate norm subsystem
 
 void OSNormPostterm()
 {
     UnloadNORMFunctions();
 }
 
+//  pre-init norm subsystem
 
 BOOL FOSNormPreinit()
 {
@@ -929,20 +1092,26 @@ BOOL FOSNormPreinit()
 }
 
 
+//  terminate norm subsystem
 
 void OSNormTerm()
 {
     g_fUnicodeSupport = fFalse;
 }
 
+//  init norm subsystem
 
 ERR ErrOSNormInit()
 {
     ERR err = JET_errSuccess;
     
+    //  a unit test for the convenience functions
 
     g_fUnicodeSupport = ( 0 != LCMapStringW( LOCALE_NEUTRAL, LCMAP_LOWERCASE, L"\0", 1, NULL, 0 ) );
 
+    //  This has been a common case we have been encountering in
+    //  Windows 8. Different circumstances seem to cause the registry
+    //  to be pulled under this check, when shutting down.
     if ( !g_fUnicodeSupport &&
         ERROR_BADDB == GetLastError() )
     {
@@ -950,13 +1119,15 @@ ERR ErrOSNormInit()
     }
 
 #ifndef ESENT
+    //  Preload this in a single threaded environment. it will fail if we're before Win10, which
+    //  is what we use it for above. ;-)
 
     (void)g_pfnWaitForDebugEventEx.ErrIsPresent();
-#endif
+#endif  //  !ESENT
 
 #ifdef DEBUG
     AssertNORMConstants();
-#endif
+#endif  //  DEBUG
 
 HandleError:
     return err;
@@ -999,6 +1170,7 @@ HandleError:
     return err;
 }
 
+// Stolen copy of the __ascii_towlower(), _wcsicmp() code ... remarkable irony in the former name.
 #define __ascii_towlower(c)      ( (((c) >= L'A') && ((c) <= L'Z')) ? ((c) - L'A' + L'a') : (c) )
 
 INT __ese_wcsicmp( const wchar_t * wszLocale1, const wchar_t * wszLocale2 )
@@ -1023,6 +1195,7 @@ BOOL FNORMIValidLocaleName( PCWSTR const wszLocale )
     {
         WCHAR wch = wszLocale[ich];
 
+        //  Only valid characters according to NLS team / RFC are A-Z a-z 0-9 '-' '_'
         if ( wch < L'-' )
         {
             return fFalse;
@@ -1071,6 +1244,8 @@ ERR ErrNORMLocaleToLcid(
     ERR err = JET_errSuccess;
     DWORD errSystem = S_OK;
 
+    // Note that there are certain locales (usually newer locales) that
+    // return 0x10000 (LOCALE_CUSTOM_UNSPECIFIED).
     const LCID lcid = LocaleNameToLCID( wszLocale, 0 );
 
     if ( lcid == 0 )
