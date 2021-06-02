@@ -5899,28 +5899,7 @@ void __stdcall EsetestAssertFail( const char * const szMessageFormat, char const
     UINT wAssertAction = g_esetestconfig.m_esetestAssertAction;
     BOOL fDevMachine = fTrue;
 #if 0
-    //  if asserts are enabled *and* you are one of the cool kids then always 
-    //  popup an assert dialog that can be optionally dismissed.  
-    //  otherwise, use the configured behavior
-
-    WCHAR   szComputerName[ MAX_COMPUTERNAME_LENGTH + 1 ];
-    DWORD   cchComputerName = _countof( szComputerName );
-    //  GetComputerName() not available in mincore.
-    GetComputerNameW( szComputerName, &cchComputerName );
-    _wcsupr_s( szComputerName, cchComputerName+1 );
-    fDevMachine =   (   szComputerName == wcsstr( szComputerName, L"SOMEONE" )||
-                        szComputerName == wcsstr( szComputerName, L"SOMEONE" )   ||
-                        szComputerName == wcsstr( szComputerName, L"SOMEONE" )   ||
-                        szComputerName == wcsstr( szComputerName, L"SOMEONE" ) ||
-                        szComputerName == wcsstr( szComputerName, L"SOMEONE" ) ||
-                        szComputerName == wcsstr( szComputerName, L"SOMEONE" )  ||
-                        szComputerName == wcsstr( szComputerName, L"SOMEONE" )  ||
-                        szComputerName == wcsstr( szComputerName, L"SOMEONE" )  ||
-                        szComputerName == wcsstr( szComputerName, L"SOMEONE" ) ||
-                        szComputerName == wcsstr( szComputerName, L"SOMEONE" ) ||
-                        szComputerName == wcsstr( szComputerName, L"SOMEONE" )  ||
-                        szComputerName == wcsstr( szComputerName, L"SOMEONE" )||
-                        szComputerName == wcsstr( szComputerName, L"ESE" ) ) ;
+    fDevMachine = IsDevMachine();
 #endif
     if ( fDevMachine && wAssertAction == JET_AssertMsgBox )
         {

@@ -27,6 +27,7 @@ static void PrintHelp( const WCHAR * const wszApplication )
     fprintf( stderr, "    /DontReplCachePri: traced cache priority should not be input into the simulation. (/Emulate only)\n" );
     fprintf( stderr, "    /ReplNoTouch: no-touch requests should be replayed as normal requests. (/Emulate only)\n" );
     fprintf( stderr, "    /DontReplDbScan: DBM-related requests should not be replayed. (/Emulate only)\n" );
+    fprintf( stderr, "    /DontEvictNextOnShrink: simulation should not evict the next target when shrinking. (/Emulate only)\n" );
     fprintf( stderr, "    /DontReplInitTerm: Init and Term ResMgr events should be ignored. This avoids the simulated cache to be purged on init/term cycles, to simulate very long trace is being processed. (/Emulate only)\n" );
     fprintf( stderr, "    /CacheSize <Size1>[,<Size2>][,<Size3>]...: iterates through all cache sizes, running the simulation with fixed numbers of resources, i.e., not following eviction patterns (/Emulate only, > 0).\n" );
     fprintf( stderr, "    /CacheAge <AgeInSeconds>: sizes the cache accordingly to keep only resources which are newer than a certain age, i.e., eviction does not follow eviction patterns (/Emulate only, > 0).\n" );

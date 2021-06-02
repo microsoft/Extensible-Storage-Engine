@@ -615,12 +615,12 @@ JETUNITTEST ( CPAGE, PageValidationBig )
     CHECK( pgno == validationaction.m_pgnoExpected );
     CHECK( ( 2 * pgno ) == validationaction.m_pgno );
 
-#ifdef DEBUG
+#ifndef RTM
     const bool fPreviouslySet = FNegTestSet( fCorruptingPagePgnos );
 #endif
     CHECK( cpage.PgnoThis() == ( 2 * pgno ) );
     CHECK( cpage.PgnoThis() != pgno );
-#ifdef DEBUG
+#ifndef RTM
     if ( !fPreviouslySet )
     {
         FNegTestUnset( fCorruptingPagePgnos );
@@ -631,11 +631,11 @@ JETUNITTEST ( CPAGE, PageValidationBig )
     cpage.SetPgno( pgno );
     //  modify the buffer, corruping it ...
     pvBuffer[200] = ~pvBuffer[200];
-#ifdef DEBUG
+#ifndef RTM
     FNegTestSet( fCorruptingWithLostFlush );
 #endif
     CHECK( JET_errReadVerifyFailure == cpage.ErrValidatePage( pgvfDoNotCheckForLostFlush, &validationaction ) );
-#ifdef DEBUG
+#ifndef RTM
     FNegTestSet( fPreviouslySet );
 #endif
 
