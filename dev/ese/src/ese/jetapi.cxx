@@ -2322,17 +2322,7 @@ INST::~INST()
 
     delete[] m_rgoldstatDB;
 
-    if( m_prbs )
-    {
-        delete m_prbs;
-        m_prbs = NULL;
-    }
-
-    if ( m_prbscleaner )
-    {
-        delete m_prbscleaner;
-        m_prbscleaner = NULL;
-    }
+    RBSResourcesCleanUpFromInst( this );
 
     delete m_pfsapi;
     delete m_pfsconfig;
@@ -13208,6 +13198,7 @@ JET_ERR
 JetBeginDatabaseIncrementalReseedEx(
     _In_ JET_INSTANCE   instance,
     _In_ JET_PCWSTR     wszDatabase,
+    _In_ unsigned long  genFirstDivergedLog,
     _In_ JET_GRBIT      grbit )
 {
     APICALL_INST    apicall( opBeginDatabaseIncrementalReseed );
@@ -13215,16 +13206,17 @@ JetBeginDatabaseIncrementalReseedEx(
     OSTrace(
         JET_tracetagAPI,
         OSFormat(
-            "Start %s(0x%Ix,0x%p[%s],0x%x)",
+            "Start %s(0x%Ix,0x%p[%s],0x%x, 0x%x)",
             __FUNCTION__,
             instance,
             wszDatabase,
             SzOSFormatStringW( wszDatabase ),
+            genFirstDivergedLog,
             grbit ) );
 
     if ( apicall.FEnterWithoutInit( instance ) )
     {
-        apicall.LeaveAfterCall( ErrIsamBeginDatabaseIncrementalReseed( (JET_INSTANCE)apicall.Pinst(), wszDatabase, grbit ) );
+        apicall.LeaveAfterCall( ErrIsamBeginDatabaseIncrementalReseed( (JET_INSTANCE)apicall.Pinst(), wszDatabase, genFirstDivergedLog, grbit ) );
     }
 
     return apicall.ErrResult();
@@ -13235,10 +13227,11 @@ JET_API
 JetBeginDatabaseIncrementalReseedW(
     _In_ JET_INSTANCE   instance,
     _In_ JET_PCWSTR     wszDatabase,
+    _In_ unsigned long  genFirstDivergedLog,
     _In_ JET_GRBIT      grbit )
 {
     JET_VALIDATE_INSTANCE( instance );
-    JET_TRY( opBeginDatabaseIncrementalReseed, JetBeginDatabaseIncrementalReseedEx( instance, wszDatabase, grbit ) );
+    JET_TRY( opBeginDatabaseIncrementalReseed, JetBeginDatabaseIncrementalReseedEx( instance, wszDatabase, genFirstDivergedLog, grbit ) );
 }
 
 LOCAL
@@ -13246,6 +13239,7 @@ JET_ERR
 JetBeginDatabaseIncrementalReseedExA(
     _In_ JET_INSTANCE   instance,
     _In_ JET_PCSTR      szDatabase,
+    _In_ unsigned long  genFirstDivergedLog,
     _In_ JET_GRBIT      grbit )
 {
     ERR             err             = JET_errSuccess;
@@ -13253,7 +13247,7 @@ JetBeginDatabaseIncrementalReseedExA(
 
     CallR( lwszDatabase.ErrSet( szDatabase ) );
 
-    return JetBeginDatabaseIncrementalReseedEx( instance, lwszDatabase, grbit );
+    return JetBeginDatabaseIncrementalReseedEx( instance, lwszDatabase, genFirstDivergedLog, grbit );
 }
 
 JET_ERR
@@ -13261,10 +13255,11 @@ JET_API
 JetBeginDatabaseIncrementalReseedA(
     _In_ JET_INSTANCE   instance,
     _In_ JET_PCSTR      szDatabase,
+    _In_ unsigned long  genFirstDivergedLog,
     _In_ JET_GRBIT      grbit )
 {
     JET_VALIDATE_INSTANCE( instance );
-    JET_TRY( opBeginDatabaseIncrementalReseed, JetBeginDatabaseIncrementalReseedExA( instance, szDatabase, grbit ) );
+    JET_TRY( opBeginDatabaseIncrementalReseed, JetBeginDatabaseIncrementalReseedExA( instance, szDatabase, genFirstDivergedLog, grbit ) );
 }
 
 LOCAL

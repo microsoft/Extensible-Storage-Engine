@@ -563,6 +563,7 @@
 	EXTERNAL_ERR( -1937,	State,		JET_errRBSRCInvalidDbFormatVersion	 )
 	EXTERNAL_ERR( -1938,	State,		JET_errRBSCannotDetermineDivergence	 )
 	INTERNAL_ERR( -1939,	Unknown,	errRBSRequiredRangeTooLarge	 )
+	INTERNAL_ERR( -1940,	Unknown,	errRBSPatching	 )
 	EXTERNAL_WRN( 2000,	State,		JET_wrnDefragAlreadyRunning	 )
 	EXTERNAL_WRN( 2001,	State,		JET_wrnDefragNotRunning	 )
 	EXTERNAL_WRN( 2002,	State,		JET_wrnDatabaseScanAlreadyRunning	 )

@@ -1039,7 +1039,7 @@ ERR ISAMAPI ErrIsamInit(    JET_INSTANCE    inst,
     {
         // We will initialize the revert snapshot from Rstmap during LGRIInitSession.
         // Also, check if we need to roll the snapshot and roll it if required.
-        CallJ( CRevertSnapshot::ErrRBSInitFromRstmap( pinst ), TermIT );
+        CallJ( CRevertSnapshotForAttachedDbs::ErrRBSInitFromRstmap( pinst ), TermIT );
 
         // If required range was a problem or if db's are not on the required efv m_prbs would be null in ErrRBSInitFromRstmap
         if ( pinst->m_prbs && pinst->m_prbs->FRollSnapshot() )
@@ -1193,23 +1193,7 @@ ERR ISAMAPI ErrIsamTerm( JET_INSTANCE instance, JET_GRBIT grbit )
         err = errT;
     }
 
-    if( pinst->m_prbs )
-    {
-        delete pinst->m_prbs;
-        pinst->m_prbs = NULL;
-    }
-
-    if ( pinst->m_prbscleaner )
-    {
-        delete pinst->m_prbscleaner;
-        pinst->m_prbscleaner = NULL;
-    }
-
-    if ( pinst->m_prbsrc )
-    {
-        delete pinst->m_prbsrc;
-        pinst->m_prbsrc = NULL;
-    }
+    RBSResourcesCleanUpFromInst( pinst );
 
     pinst->m_isdlTerm.Trigger( eTermLogTermDone );
 

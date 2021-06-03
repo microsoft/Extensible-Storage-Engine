@@ -249,6 +249,7 @@ ERR
 ErrIsamBeginDatabaseIncrementalReseed(
     _In_ JET_INSTANCE   jinst,
     _In_ JET_PCWSTR     szDatabase,
+    _In_ ULONG          genFirstDivergedLog,
     _In_ JET_GRBIT      grbit );
 
 ERR

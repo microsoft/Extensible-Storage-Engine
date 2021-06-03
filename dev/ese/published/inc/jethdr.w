@@ -5358,22 +5358,6 @@ typedef JET_ERR (JET_API * JET_PFNEMITLOGDATA)(
 
 #endif // JET_VERSION >= 0x0600
 
-    /* RBS revert states */
-
-#if ( JET_VERSION >= 0x0A01 )
-#define JET_revertstateNone                 0   // Revert has not yet started/default state.
-#define JET_revertstateInProgress           1   // Revert snapshots are currently being applied to the databases.
-#define JET_revertstateCopingLogs           2   // The required logs to bring databases to a clean state are being copied to the log directory after revert.
-#define JET_revertstateBackupSnapshot       3   // Backs up revert snapshots for investigation purposes.
-#define JET_revertstateRemoveSnapshot       4   // Removes the snapshot which have been applied to the databases and backed up.
-#endif // JET_VERSION >= 0x0A01
-
-    /* RBS revert grbits */
-
-#if ( JET_VERSION >= 0x0A01 )
-#define JET_bitDeleteAllExistingLogs  0x00000001  /* Delete all the existing log files at the end of revert. */
-#endif // JET_VERSION >= 0x0A01
-
     /* Column data types */
 
 #define JET_coltypNil               0
@@ -5433,6 +5417,22 @@ typedef JET_ERR (JET_API * JET_PFNEMITLOGDATA)(
 #endif // JET_VERSION >= 0x0A00
 
 // end_PubEsent
+
+    /* RBS revert states */
+
+#if ( JET_VERSION >= 0x0A01 )
+#define JET_revertstateNone                 0   // Revert has not yet started/default state.
+#define JET_revertstateInProgress           1   // Revert snapshots are currently being applied to the databases.
+#define JET_revertstateCopingLogs           2   // The required logs to bring databases to a clean state are being copied to the log directory after revert.
+#define JET_revertstateBackupSnapshot       3   // Backs up revert snapshots for investigation purposes.
+#define JET_revertstateRemoveSnapshot       4   // Removes the snapshot which have been applied to the databases and backed up.
+#endif // JET_VERSION >= 0x0A01
+
+    /* RBS revert grbits */
+
+#if ( JET_VERSION >= 0x0A01 )
+#define JET_bitDeleteAllExistingLogs  0x00000001  /* Delete all the existing log files at the end of revert. */
+#endif // JET_VERSION >= 0x0A01
 
 #if ( JET_VERSION >= 0x0600 )
         /* Info levels for JetGetSessionInfo */
@@ -5600,6 +5600,14 @@ typedef JET_ERR (JET_API * JET_PFNEMITLOGDATA)(
 #define JET_bitEndDatabaseIncrementalReseedCancel       0x00000001      //  Stop an incremental reseed operation prematurely for any (failing) reason.  Database will be left in inconsistent JET_dbstateIncrementalReseedInProgress state.
 
 #endif // JET_VERSION >= 0x0601
+
+#if ( JET_VERSION >= 0x0A01 )
+
+    /* Flags for JetBeginDatabaseIncrementalReseed */
+
+#define JET_bitBeginDatabaseIncrementalReseedPatchRBS   0x00000001      //  Try to patch RBS file as part of increseed. If this flag is not passed, we will lose the RBS files and the ability to revert back to the past.
+
+#endif // JET_VERSION >= 0x0A01
 
 
 // begin_PubEsent
@@ -6542,6 +6550,7 @@ typedef JET_ERR (JET_API * JET_PFNEMITLOGDATA)(
 #define JET_errRBSRCInvalidDbFormatVersion  -1937  /* The database format version for the databases to be reverted doesn't support applying the revert snapshot. */
 #define JET_errRBSCannotDetermineDivergence -1938  /* The required logs for the revert snapshot are missing in log directory and hence we cannot determine if those logs are diverged with the logs in snapshot directory. */
 #define errRBSRequiredRangeTooLarge         -1939  /* RBS was not created as the required range was too large and we don't want to start revert snapshot from such a state. */
+#define errRBSPatching                      -1940  /* RBS was not created as RBS is being attached for patching purposes, usually due to incremental reseed or page patching on the databases attached to the RBS. */
 // begin_PubEsent
 
 #define JET_wrnDefragAlreadyRunning          2000 /* Online defrag already running on specified database */
@@ -11268,12 +11277,14 @@ JET_ERR JET_API
 JetBeginDatabaseIncrementalReseedA(
     _In_ JET_INSTANCE   instance,
     _In_ JET_PCSTR      szDatabase,
+    _In_ unsigned long  genFirstDivergedLog,
     _In_ JET_GRBIT      grbit );
 
 JET_ERR JET_API
 JetBeginDatabaseIncrementalReseedW(
     _In_ JET_INSTANCE   instance,
     _In_ JET_PCWSTR     szDatabase,
+    _In_ unsigned long  genFirstDivergedLog,
     _In_ JET_GRBIT      grbit );
 
 #ifdef JET_UNICODE

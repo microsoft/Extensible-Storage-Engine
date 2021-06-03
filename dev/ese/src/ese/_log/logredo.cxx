@@ -1572,7 +1572,7 @@ ERR LOG::ErrLGRIInitSession(
     {
         // We will initialize the revert snapshot from Rstmap during LGRIInitSession.
         // Also, check if we need to roll the snapshot and roll it if required.
-        Call( CRevertSnapshot::ErrRBSInitFromRstmap( m_pinst ) );
+        Call( CRevertSnapshotForAttachedDbs::ErrRBSInitFromRstmap( m_pinst ) );
 
         // If required range was a problem or if db's are not on the required efv m_prbs would be null in ErrRBSInitFromRstmap
         if ( m_pinst->m_prbs && m_pinst->m_prbs->FRollSnapshot() )
@@ -9444,8 +9444,12 @@ ERR LOG::ErrLGRIRedoScanCheck( const LRSCANCHECK2 * const plrscancheck, BOOL* co
             const OBJID objidPage = cpage.ObjidFDP();
 
             // If either the dbtime from local page or dbtime from log record is dbtimeRevert, we will skip checking the consistency of the page.
+            // We will also consider a page as revert new page, if active is an uninitialized page or a shrunk page but passive is a reverted new page which could happen during increseed.
+            //
             const BOOL fDbtimeRevertedNewPage = 
-                ( CmpLgpos( g_rgfmp[ ifmp ].Pdbfilehdr()->le_lgposCommitBeforeRevert, m_lgposRedo ) > 0 &&
+                ( ( CmpLgpos( g_rgfmp[ ifmp ].Pdbfilehdr()->le_lgposCommitBeforeRevert, m_lgposRedo ) > 0 ||
+                    plrscancheck->DbtimePage() == 0 ||
+                    plrscancheck->DbtimePage() == dbtimeShrunk ) &&
                   CPAGE::FRevertedNewPage( dbtimePage ) ) || 
                 CPAGE::FRevertedNewPage( plrscancheck->DbtimePage() );
 

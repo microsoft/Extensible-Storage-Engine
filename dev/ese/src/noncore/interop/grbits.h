@@ -391,6 +391,7 @@ MSINTERNAL enum class MJET_GRBIT
     TestUninitShrunkPageImage = 0x00000001,
     PatchingCorruptPage = 0x00000002,
     EndDatabaseIncrementalReseedCancel = 0x00000001, // Stop an incremental reseed operation prematurely for any (failing) reason.  Database will be left in inconsistent JET_dbstateIncrementalReseedInProgress state.
+    BeginDatabaseIncrementalReseedPatchRBS = 0x00000001, // Try to patch RBS file as part of increseed. If this flag is not passed, we will lose the RBS files and the ability to revert back to the past.
     CompactStats = 0x00000020, // Dump off-line compaction stats (only when progress meter also specified)
     CompactRepair = 0x00000040, // Don't preread and ignore duplicate keys
     CompactPreserveOriginal = 0x00000100, // Preserve original database

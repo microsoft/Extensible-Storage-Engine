@@ -4473,6 +4473,27 @@ JETUNITTEST( IO, ErrValidateHeaderForIncrementalReseed )
     dbfilehdr.le_cbPageSize     = 4*1024;
 }
 
+LOCAL ERR ErrRBSInvalidateIrsDuringPatch( PCWSTR wszReason, ERR errReason, CRevertSnapshotForPatch* const prbsfp )
+{
+    Assert( prbsfp );
+
+    ERR err = JET_errSuccess;
+    WCHAR wszReasonErr[ 40 ];
+
+    // We will assume error code is less than 9digits.
+    Assert( LOSStrLengthW( wszReason ) + 10 < sizeof( wszReasonErr ) );
+
+    OSStrCbFormatW( wszReasonErr, sizeof( wszReasonErr ), L"%ws: %d", wszReason, errReason );
+
+    OnDebug( Ptls()->fFfbFreePath = fFalse );
+    Call( prbsfp->ErrRBSInvalidateIrs( wszReasonErr ) );
+    OnDebug( Ptls()->fFfbFreePath = fTrue );
+
+HandleError:
+    OnDebug( Ptls()->fFfbFreePath = fTrue );
+    return err;
+}
+
 #define ENABLE_INC_RESEED_TRACING 1
 
 ERR ErrMakeIncReseedTracingNames(
@@ -4673,69 +4694,42 @@ BOOL FIRSFindIrsContext( _In_ const INST * const pinst, const CIrsOpContext * co
     return fFalse;
 }
 
-class CIrsOpContext : public CZeroInit
-{
-private:
-    CPRINTF *                       m_pcprintfIncReSeedTrace;
-    IFileAPI *                      m_pfapiDb;
-    CFlushMapForUnattachedDb *      m_pfm;
-    DBFILEHDR *                     m_pdbfilehdr;
-
-    //  IRS Pgno Diagnostics (updated for proper / non-corruption IRS patching only).
-    //      Note: Importantly we log IRS done event based upon m_cpgPatched != 0.
-    CPG                             m_cpgPatched;
-    PGNO                            m_pgnoMin;
-    PGNO                            m_pgnoMax;
-    TICK                            m_tickStart;
-    TICK                            m_tickFirstPage;
-
-    //  Note: This path is not necessarily a full path, and just used as the "key" to identify 
-    //  the IRS context is matching the one the client originally begun.  Since the three IRS
-    //  functions are generally used in one context, they will all pass the same path, and this
-    //  non-absolute path is not a big deal.  Also if we ever want to support concurrent IRS
-    //  operations, then we can use this to find the correct IRS context.
-    WCHAR                           m_wszOriginalDatabasePath[IFileSystemAPI::cchPathMax];
-
-private:
-    CIrsOpContext() : CZeroInit( sizeof( CIrsOpContext ) ) {}   // NO one should use this one!
-public:
-
-    CIrsOpContext( _In_ CPRINTF * pcprintf, _In_ PCWSTR szOriginalDatabasePath, _In_ IFileAPI * const pfapiDb, CFlushMapForUnattachedDb * const pfm, DBFILEHDR * pdbfilehdr ) :
+CIrsOpContext::CIrsOpContext( _In_ CPRINTF * pcprintf, _In_ PCWSTR szOriginalDatabasePath, _In_ IFileAPI * const pfapiDb, CFlushMapForUnattachedDb * const pfm, DBFILEHDR * pdbfilehdr ) :
         CZeroInit( sizeof( CIrsOpContext ) )
-    {
-        //  Note don't need to check return, because ErrCheckContext() does it for us, right after .ctor.
-        OSStrCbCopyW( m_wszOriginalDatabasePath, sizeof( m_wszOriginalDatabasePath ), szOriginalDatabasePath );
-        m_pcprintfIncReSeedTrace = pcprintf;
-        m_pfapiDb = pfapiDb;
-        m_pfm = pfm;
-        m_pdbfilehdr = pdbfilehdr;
-        m_tickStart = TickOSTimeCurrent();
-        m_pgnoMin = pgnoMax;
+{
+    //  Note don't need to check return, because ErrCheckContext() does it for us, right after .ctor.
+    OSStrCbCopyW( m_wszOriginalDatabasePath, sizeof( m_wszOriginalDatabasePath ), szOriginalDatabasePath );
+    m_pcprintfIncReSeedTrace = pcprintf;
+    m_pfapiDb = pfapiDb;
+    m_pfm = pfm;
+    m_pdbfilehdr = pdbfilehdr;
+    m_tickStart = TickOSTimeCurrent();
+    m_pgnoMin = pgnoMax;
 
-        Assert( PcprintfTrace() == pcprintf );
-        Assert( PfapiDb() == pfapiDb );
-        Assert( Pfm() == pfm );
-        Assert( Pdbfilehdr() == pdbfilehdr );
+    Assert( PcprintfTrace() == pcprintf );
+    Assert( PfapiDb() == pfapiDb );
+    Assert( Pfm() == pfm );
+    Assert( Pdbfilehdr() == pdbfilehdr );
+}
+
+ERR CIrsOpContext::ErrCheckAttachedIrsContext( const INST * const pinst, PCWSTR wszOriginalDatabasePath )
+{
+    ERR err = JET_errSuccess;
+
+    //  Test that valid / current IRS operational context
+
+    if ( !FIRSFindIrsContext( pinst, this ) )
+    {
+        AssertSz( fFalse, "Impossible the outer ErrIRSGetAttachedIrsContext below should've caught this case, is code calling CIrsOpContext::ErrCheck... direclty?  Or have we called an IRS on a 2nd / different instance?" );
+        Error( ErrERRCheck( JET_errDatabaseInvalidIncrementalReseed ) );
     }
 
-    ERR ErrCheckAttachedIrsContext( const INST * const pinst, PCWSTR wszOriginalDatabasePath )
+    //  Check DB path as "key" for operation.
+
+    if ( !wszOriginalDatabasePath )
     {
-        ERR err = JET_errSuccess;
-
-        //  Test that valid / current IRS operational context
-
-        if ( !FIRSFindIrsContext( pinst, this ) )
-        {
-            AssertSz( fFalse, "Impossible the outer ErrIRSGetAttachedIrsContext below should've caught this case, is code calling CIrsOpContext::ErrCheck... direclty?  Or have we called an IRS on a 2nd / different instance?" );
-            Error( ErrERRCheck( JET_errDatabaseInvalidIncrementalReseed ) );
-        }
-
-        //  Check DB path as "key" for operation.
-
-        if ( !wszOriginalDatabasePath )
-        {
-            Error( ErrERRCheck( JET_errInvalidParameter ) );
-        }
+        Error( ErrERRCheck( JET_errInvalidParameter ) );
+    }
 
         if ( 0 != LOSStrCompareW( m_wszOriginalDatabasePath, wszOriginalDatabasePath ) )
         {
@@ -4744,140 +4738,139 @@ public:
             Error( ErrERRCheck( JET_errDatabaseNotFound ) );
         }
 
-        //  
-        //  Double Check DBHFILEHDR matches (not strictly necessary)
-        //
-        DBFILEHDR * pdbfilehdrCheck = NULL;
-        Alloc( pdbfilehdrCheck = (DBFILEHDR*)PvOSMemoryPageAlloc( g_cbPage, NULL ) );
-        err = ErrUtilReadShadowedHeader(    pinst,
-                                            pinst->m_pfsapi,
-                                            m_pfapiDb,
-                                            (BYTE*)pdbfilehdrCheck,
-                                            g_cbPage,
-                                            OffsetOf( DBFILEHDR, le_cbPageSize ) );
-        if ( FErrIsDbHeaderCorruption( err ) || JET_errFileIOBeyondEOF == err )
-        {
-            (*PcprintfTrace())( "Translate Error %d\r\n", err );
-            err = ErrERRCheck( JET_errDatabaseCorrupted );
-        }
-        if ( err >= JET_errSuccess &&
-                //  Serious problem if the DBFILEHDR doesn't match the one we have 'attached' / cached for the IRS operation!
-                0 != memcmp( pdbfilehdrCheck, m_pdbfilehdr, g_cbPage ) )
-        {
-            (*PcprintfTrace())( "DBFILEHDR was updated while we had DB opened exclusively for IRSv2!\r\n" );
-            AssertSz( fFalse, "Huh!?  Even though DB should have been open and attached the whole time, the current 'fake IRS attached' in memory header should definitely match the on on disk!  Something is horribly wrong." );
-            err = ErrERRCheck( JET_errDatabaseInvalidIncrementalReseed );
-        }
-        OSMemoryPageFree( pdbfilehdrCheck );
-        Call( err ); // for ErrUtilReadShadowedHeader + header validate / checksum.
+    //  
+    //  Double Check DBHFILEHDR matches (not strictly necessary)
+    //
+    DBFILEHDR * pdbfilehdrCheck = NULL;
+    Alloc( pdbfilehdrCheck = (DBFILEHDR*)PvOSMemoryPageAlloc( g_cbPage, NULL ) );
+    err = ErrUtilReadShadowedHeader(    pinst,
+                                        pinst->m_pfsapi,
+                                        m_pfapiDb,
+                                        (BYTE*)pdbfilehdrCheck,
+                                        g_cbPage,
+                                        OffsetOf( DBFILEHDR, le_cbPageSize ) );
+    if ( FErrIsDbHeaderCorruption( err ) || JET_errFileIOBeyondEOF == err )
+    {
+        (*PcprintfTrace())( "Translate Error %d\r\n", err );
+        err = ErrERRCheck( JET_errDatabaseCorrupted );
+    }
+    if ( err >= JET_errSuccess &&
+            //  Serious problem if the DBFILEHDR doesn't match the one we have 'attached' / cached for the IRS operation!
+            0 != memcmp( pdbfilehdrCheck, m_pdbfilehdr, g_cbPage ) )
+    {
+        (*PcprintfTrace())( "DBFILEHDR was updated while we had DB opened exclusively for IRSv2!\r\n" );
+        AssertSz( fFalse, "Huh!?  Even though DB should have been open and attached the whole time, the current 'fake IRS attached' in memory header should definitely match the on on disk!  Something is horribly wrong." );
+        err = ErrERRCheck( JET_errDatabaseInvalidIncrementalReseed );
+    }
+    OSMemoryPageFree( pdbfilehdrCheck );
+    Call( err ); // for ErrUtilReadShadowedHeader + header validate / checksum.
         
-        //
-        //  Check all expected handles are open
-        //
-        // Note: You can't check Pfm(), because you may have loaded a DB without a .jfm file.
-        if ( PcprintfTrace() == NULL ||
-                PfapiDb() == NULL ||
-                Pdbfilehdr() == NULL )
-        {
-            (*PcprintfTrace())( "Missing IRS required handle: %p %p %p %p\r\n",
-                PcprintfTrace(), PfapiDb(), Pfm(), Pdbfilehdr() );
-            AssertSz( fFalse, "Missing IRS required handle.  Begin shouldn't have let this happen." );
-            Error( ErrERRCheck( JET_errDatabaseInvalidIncrementalReseed ) );
-        }
+    //
+    //  Check all expected handles are open
+    //
+    // Note: You can't check Pfm(), because you may have loaded a DB without a .jfm file.
+    if ( PcprintfTrace() == NULL ||
+            PfapiDb() == NULL ||
+            Pdbfilehdr() == NULL )
+    {
+        (*PcprintfTrace())( "Missing IRS required handle: %p %p %p %p\r\n",
+            PcprintfTrace(), PfapiDb(), Pfm(), Pdbfilehdr() );
+        AssertSz( fFalse, "Missing IRS required handle.  Begin shouldn't have let this happen." );
+        Error( ErrERRCheck( JET_errDatabaseInvalidIncrementalReseed ) );
+    }
 
-        //  NOTE: Specifically we don't trace anything to m_pcprintfIncReSeedTrace here because this is also
-        //  used for ErrIsamPatchDatabasePages() where the specific trace is designed to be super small, and
-        //  a single line per page.
+    //  NOTE: Specifically we don't trace anything to m_pcprintfIncReSeedTrace here because this is also
+    //  used for ErrIsamPatchDatabasePages() where the specific trace is designed to be super small, and
+    //  a single line per page.
         
-    HandleError:
-        return err;
+HandleError:
+    return err;
+}
+
+ERR CIrsOpContext::ErrFlushAttachedFiles( _In_ INST * pinst, _In_ const IOFLUSHREASON iofr )
+{
+    ERR err = JET_errSuccess;
+
+    (*PcprintfTrace())( "Flushing DB / JFM files.\r\n" );
+
+    // This will be NULL if there is no .jfm file.
+    if ( m_pfm )
+    {
+        Call( m_pfm->ErrFlushMapFlushFileBuffers( iofr ) );
     }
 
-    ERR ErrFlushAttachedFiles( _In_ INST * pinst, _In_ const IOFLUSHREASON iofr )
+    if ( m_fRBSOn )
     {
-        ERR err = JET_errSuccess;
-
-        (*PcprintfTrace())( "Flushing DB / JFM files.\r\n" );
-
-        // This will be NULL if there is no .jfm file.
-        if ( m_pfm )
-        {
-            Call( m_pfm->ErrFlushMapFlushFileBuffers( iofr ) );
-        }
-
-        Call( ErrUtilFlushFileBuffers( m_pfapiDb, iofr ) );
-
-    HandleError:
-        return err;
+        Assert( pinst->m_prbsfp );
+        Assert( pinst->m_prbsfp->FInitialized() );
+        Assert( !pinst->m_prbsfp->FInvalid() );
+        pinst->m_prbsfp->AssertAllFlushed();
     }
 
-    void UpdatePagePatchedStats( const PGNO pgnoStart, const PGNO pgnoEnd )
+    Call( ErrUtilFlushFileBuffers( m_pfapiDb, iofr ) );
+
+HandleError:
+    return err;
+}
+
+VOID CIrsOpContext::UpdatePagePatchedStats( const PGNO pgnoStart, const PGNO pgnoEnd )
+{
+    m_pgnoMin = min( m_pgnoMin, pgnoStart );
+    m_pgnoMax = max( m_pgnoMax, pgnoEnd );
+    m_cpgPatched += ( pgnoEnd - pgnoStart + 1 );
+    if ( m_tickFirstPage == 0 )
     {
-        m_pgnoMin = min( m_pgnoMin, pgnoStart );
-        m_pgnoMax = max( m_pgnoMax, pgnoEnd );
-        m_cpgPatched += ( pgnoEnd - pgnoStart + 1 );
-        if ( m_tickFirstPage == 0 )
-        {
-            m_tickFirstPage = TickOSTimeCurrent();
-        }
+        m_tickFirstPage = TickOSTimeCurrent();
     }
+}
 
-    typedef enum { eIrsDetachClean, eIrsDetachError } IRS_DETACH_STATE;
-    void CloseIrsContext( _In_ const INST * const pinst, _In_ PCWSTR wszOriginalDatabasePath, _In_ const IRS_DETACH_STATE eStopState )
+VOID CIrsOpContext::CloseIrsContext( _In_ const INST * const pinst, _In_ PCWSTR wszOriginalDatabasePath, _In_ const IRS_DETACH_STATE eStopState )
+{
+    Assert( 0 == LOSStrCompareW( m_wszOriginalDatabasePath, wszOriginalDatabasePath ) );
+
+    Assert( m_pfapiDb->CioNonFlushed() == 0 );  // client should have flushed.
+
+    if ( eStopState == eIrsDetachClean )
     {
-        Assert( 0 == LOSStrCompareW( m_wszOriginalDatabasePath, wszOriginalDatabasePath ) );
-
-        Assert( m_pfapiDb->CioNonFlushed() == 0 );  // client should have flushed.
-
-        if ( eStopState == eIrsDetachClean )
+        if ( m_cpgPatched != 0 )
         {
-            if ( m_cpgPatched != 0 )
-            {
-                //  We have patched a page (not as a corruption) so log event that IRS is done.
+            //  We have patched a page (not as a corruption) so log event that IRS is done.
 
-                WCHAR wszCpgPatched[20], wszPgnoRange[100], wszTiming[80];
-                WCHAR wszDatabasePath[OSFSAPI_MAX_PATH] = L"";
+            WCHAR wszCpgPatched[20], wszPgnoRange[100], wszTiming[80];
+            WCHAR wszDatabasePath[OSFSAPI_MAX_PATH] = L"";
 
-                const TICK dtickDurationTotal = DtickDelta( m_tickStart, TickOSTimeCurrent() );
+            const TICK dtickDurationTotal = DtickDelta( m_tickStart, TickOSTimeCurrent() );
 
-                const BOOL fCompletePath = ( m_pfapiDb->ErrPath( wszDatabasePath ) >= JET_errSuccess );
-                OSStrCbFormatW( wszCpgPatched, sizeof(wszCpgPatched), L"%u", m_cpgPatched);
-                OSStrCbFormatW( wszPgnoRange, sizeof(wszPgnoRange), L"%u - %u", m_pgnoMin, m_pgnoMax );
-                OSStrCbFormatW( wszTiming, sizeof(wszTiming), L"%0.03f", (double)dtickDurationTotal / 1000.0 );
+            const BOOL fCompletePath = ( m_pfapiDb->ErrPath( wszDatabasePath ) >= JET_errSuccess );
+            OSStrCbFormatW( wszCpgPatched, sizeof(wszCpgPatched), L"%u", m_cpgPatched);
+            OSStrCbFormatW( wszPgnoRange, sizeof(wszPgnoRange), L"%u - %u", m_pgnoMin, m_pgnoMax );
+            OSStrCbFormatW( wszTiming, sizeof(wszTiming), L"%0.03f", (double)dtickDurationTotal / 1000.0 );
 
-                const WCHAR * rgsz[] = { fCompletePath ? wszDatabasePath : m_wszOriginalDatabasePath, wszCpgPatched, wszPgnoRange, wszTiming };
+            const WCHAR * rgsz[] = { fCompletePath ? wszDatabasePath : m_wszOriginalDatabasePath, wszCpgPatched, wszPgnoRange, wszTiming };
                 
-                UtilReportEvent(
-                        eventInformation,
-                        DATABASE_CORRUPTION_CATEGORY,
-                        DATABASE_INCREMENTAL_RESEED_PATCH_COMPLETE_ID,
-                        _countof(rgsz),
-                        rgsz,
-                        0,
-                        NULL,
-                        pinst,
-                        JET_EventLoggingLevelLow );
-            }
+            UtilReportEvent(
+                    eventInformation,
+                    DATABASE_CORRUPTION_CATEGORY,
+                    DATABASE_INCREMENTAL_RESEED_PATCH_COMPLETE_ID,
+                    _countof(rgsz),
+                    rgsz,
+                    0,
+                    NULL,
+                    pinst,
+                    JET_EventLoggingLevelLow );
         }
-
-        delete m_pfm;
-        m_pfm = NULL;
-        OSMemoryPageFree( m_pdbfilehdr );
-        m_pdbfilehdr = NULL;
-        delete m_pfapiDb;
-        m_pfapiDb = NULL;
-        EndDatabaseIncReseedTracing( &m_pcprintfIncReSeedTrace );
-        Assert( m_pcprintfIncReSeedTrace == NULL );
     }
 
+    delete m_pfm;
+    m_pfm = NULL;
+    OSMemoryPageFree( m_pdbfilehdr );
+    m_pdbfilehdr = NULL;
+    delete m_pfapiDb;
+    m_pfapiDb = NULL;
+    EndDatabaseIncReseedTracing( &m_pcprintfIncReSeedTrace );
+    Assert( m_pcprintfIncReSeedTrace == NULL );
+}
 
-    CPRINTF * PcprintfTrace() const             { return m_pcprintfIncReSeedTrace; }
-    IFileAPI * PfapiDb() const                  { return m_pfapiDb; }
-    CFlushMapForUnattachedDb *  Pfm() const     { return m_pfm; }
-    DBFILEHDR * Pdbfilehdr() const              { return m_pdbfilehdr; }
-
-    PGNO PgnoMax() const                        { return m_pgnoMax; }
-};
 
 ERR ErrIRSGetAttachedIrsContext( _In_ const INST * const pinst, _In_ PCWSTR wszOriginalDatabasePath, _Out_ CIrsOpContext ** ppirs )
 {
@@ -5125,6 +5118,39 @@ void IRSCleanUpAllIrsResources( _In_ INST * const pinst )
     }
 }
 
+LOCAL ERR ErrInitRBSForPatch( _In_ INST* const pinst, CIrsOpContext* const pirs, _In_ const ULONG genFirstDivergedLog )
+{
+    Assert( pinst );
+    Assert( pirs );
+
+    ERR err = JET_errSuccess;
+
+    Call( CRevertSnapshotForPatch::ErrRBSInitForPatch( pinst ) );
+    
+    if ( pinst->m_prbsfp && pinst->m_prbsfp->FInitialized() && !pinst->m_prbsfp->FInvalid() )
+    {
+        RBSFILEHDR* prbsfilehdr = pinst->m_prbsfp->RBSFileHdr();
+
+        // If databases were consistent when we started the snapshot, we can't say for sure if divergence happened before or after. 
+        // For now, lets skip patching RBS is that's the case which should be rare. Consider adding lgposConsistent to RBS.
+        // For phase1, we will be patching RBS only if divergence happened after and outside the snapshot required range.
+        // Passive page patching has no diverged log, so it will pass 0.
+        // TODO VJ: Consider logging an event for skipping the patch for RBS.
+        //
+        if ( prbsfilehdr->rbsfilehdr.le_lGenMaxLogCopied != 0 && ( genFirstDivergedLog == 0 || (ULONG)prbsfilehdr->rbsfilehdr.le_lGenMaxLogCopied < genFirstDivergedLog ) )
+        {
+            Call( pinst->m_prbsfp->ErrRBSInitDB( pirs ) );
+        }
+        else
+        {
+            Call( pinst->m_prbsfp->ErrRBSInvalidateIrs( L"DivergenceBeforeRBS" ) );
+        }
+    }
+
+HandleError:
+    return err;
+}
+
 #define IRSEnforce( pirs, check )   \
     if ( !( check ) )               \
     {                               \
@@ -5152,12 +5178,14 @@ void IRSCleanUpAllIrsResources( _In_ INST * const pinst )
 ERR ErrIsamBeginDatabaseIncrementalReseed(
     _In_ JET_INSTANCE   jinst,
     _In_ JET_PCWSTR     szDatabase,
+    _In_ ULONG          genFirstDivergedLog,
     _In_ JET_GRBIT      grbit )
 {
     ERR                     err             = JET_errSuccess;
     INST* const             pinst           = (INST *)jinst;
     CIrsOpContext *         pirs            = NULL;
     CPRINTF *               pcprintfIncReSeedTrace = NULL;
+    BOOL                    fpatchRBS       = !!( grbit & JET_bitBeginDatabaseIncrementalReseedPatchRBS );
 
     //  Establish connected DB, Flushmap, etc form inst + database name
     //
@@ -5175,7 +5203,7 @@ ERR ErrIsamBeginDatabaseIncrementalReseed(
     //  Validate remaining args
     //
 
-    if ( grbit )
+    if ( grbit && grbit != JET_bitBeginDatabaseIncrementalReseedPatchRBS )
     {
         Error( ErrERRCheck( JET_errInvalidGrbit ) );
     }
@@ -5205,6 +5233,13 @@ ERR ErrIsamBeginDatabaseIncrementalReseed(
         Error( ErrERRCheck( JET_errDatabaseInvalidIncrementalReseed ) );
     }
 
+    //  initialize RBS for patching if possible.
+    //
+    if ( fpatchRBS )
+    {
+        Call( ErrInitRBSForPatch( pinst, pirs, genFirstDivergedLog ) );
+    }
+
     //  update the cached header to reflect that we are now in the incremental reseed in progress state
     //
     pdbfilehdr->SetDbstate( JET_dbstateIncrementalReseedInProgress, lGenerationInvalid, lGenerationInvalid, NULL, fTrue );
@@ -5212,8 +5247,9 @@ ERR ErrIsamBeginDatabaseIncrementalReseed(
     LGIGetDateTime( &pdbfilehdr->logtimeIncrementalReseed );
 
     //  write the header back to the database
+    //  Reset RBSHdrFlush signature only if we are not patching the RBS as part of this increseed operation.
     //
-    Call( ErrUtilWriteUnattachedDatabaseHeaders( pinst, pinst->m_pfsapi, szDatabase, pdbfilehdr, pirs->PfapiDb(), pirs->Pfm() ) );
+    Call( ErrUtilWriteUnattachedDatabaseHeaders( pinst, pinst->m_pfsapi, szDatabase, pdbfilehdr, pirs->PfapiDb(), pirs->Pfm(), !pirs->FRBSOn() ) );
     Assert( pdbfilehdr == pirs->Pdbfilehdr() );
 
     Call( pirs->ErrFlushAttachedFiles( pinst, iofrIncReseedUtil ) );
@@ -5229,7 +5265,7 @@ HandleError:
     {
         //  we will probably continue to patch database pages, so print out the headers ...
         Assert( pcprintfIncReSeedTrace );
-        (*pcprintfIncReSeedTrace)( "Page Patch Records (all numbers in hex): P,p=<Pgno>,i[nitialPageImage]:<objid>,<dbtime>,a[fterPatchedImage]:<objid>,<dbtime>,<errOfPatchOp>\r\n", err );
+        (*pcprintfIncReSeedTrace)( "Page Patch Records (all numbers in hex): P,p=<Pgno>,i[nitialPageImage]:<objid>,<dbtime>,a[fterPatchedImage]:<objid>,<dbtime>,r[bsPageCapture]:<fCaptured>,<dbtimeRBS>,<errOfPatchOp>\r\n", err );
     }
     else
     {
@@ -5969,7 +6005,7 @@ RestartFromLowerLogGeneration:
     (*pirs->PcprintfTrace())( "The database header at end of EndIncReseed:\r\n" );
     pdbfilehdr->DumpLite( pirs->PcprintfTrace(), "\r\n" );  // trace first
 
-    Call( ErrUtilWriteUnattachedDatabaseHeaders( pinst, pfsapi, szDatabase, pdbfilehdr, pirs->PfapiDb(), pirs->Pfm() ) );
+    Call( ErrUtilWriteUnattachedDatabaseHeaders( pinst, pfsapi, szDatabase, pdbfilehdr, pirs->PfapiDb(), pirs->Pfm(), !pirs->FRBSOn() ) );
 
     (*pirs->PcprintfTrace())( "Completed IRSv2 Header Update!\r\n" );
     Call( ErrIRSDetachDatabaseIrsHandles( pinst, pirs, szDatabase, CIrsOpContext::eIrsDetachClean ) );
@@ -6004,13 +6040,14 @@ ErrIsamPatchDatabasePages(
     _In_ ULONG                      cb,
     _In_ JET_GRBIT                  grbit )
 {
-    ERR                     err             = JET_errSuccess;
-    INST * const            pinst           = (INST *)jinst;
-    CIrsOpContext *         pirs            = NULL;
-    BYTE *                  rgb             = NULL;
-#ifdef ENABLE_INC_RESEED_TRACING
-    BYTE *                  pbPrePages      = NULL;
-#endif
+    ERR                 err                     = JET_errSuccess;
+    INST * const        pinst                   = (INST *)jinst;
+    CIrsOpContext *     pirs                    = NULL;
+    BYTE *              rgb                     = NULL;
+    BYTE *              pbPrePages              = NULL;
+    BOOL                fPreImagePages          = fFalse;
+    BOOL                fRBSPreImagesCaptured   = fFalse;
+
     QWORD                   cbSize          = 0;
 
     TraceContextScope tcPatchPage( iorpPatchFix, iorsNone, iortPagePatching );
@@ -6069,15 +6106,27 @@ ErrIsamPatchDatabasePages(
 
     if ( 0 != cpg )
     {
-#ifdef ENABLE_INC_RESEED_TRACING
-        //  allocate space for the pre-images of the pages ...
-        //
-        Alloc( pbPrePages = (BYTE*)PvOSMemoryPageAlloc( cpg * g_cbPage, NULL ) );
+        // We will need preimage of the pages if we are patching the RBS file as part of increseed.
+        if ( pirs->FRBSOn() )
+        {
+            fPreImagePages = fTrue;
+        }
 
-        //  read the pre-images of the pages off disk for tracking purposes ...
-        //
-        const ERR errPreImageRead = pirs->PfapiDb()->ErrIORead( *tcPatchPage, OffsetOfPgno( pgnoStart ), cpg * g_cbPage, pbPrePages, QosSyncDefault( pinst ) );
+#ifdef ENABLE_INC_RESEED_TRACING
+        fPreImagePages = fTrue;
 #endif
+        ERR errPreImageRead = JET_errSuccess;
+
+        if ( fPreImagePages )
+        {
+            //  allocate space for the pre-images of the pages ...
+            //
+            Alloc( pbPrePages = (BYTE*)PvOSMemoryPageAlloc( cpg * g_cbPage, NULL ) );
+
+            //  read the pre-images of the pages off disk for tracking or patching RBS purposes ...
+            //
+            errPreImageRead = pirs->PfapiDb()->ErrIORead( *tcPatchPage, OffsetOfPgno( pgnoStart ), cpg * g_cbPage, pbPrePages, QosSyncDefault( pinst ) );
+        }
 
         //  transfer the given pages to an aligned buffer to facilitate writing them to the database
         //
@@ -6129,36 +6178,92 @@ ErrIsamPatchDatabasePages(
 
             AssertTrack( pgnoT != 0, "IllegalPatchingDbShadowHdrChecksummed" );
 
-#ifdef ENABLE_INC_RESEED_TRACING
-            // should rename this to something more specific like "cpagePreImage;"
-            CPAGE cpagePreT;
-            cpagePreT.LoadPage( ifmpNil, pgnoT, pbPrePages + ( pgnoT - pgnoStart ) * g_cbPage, g_cbPage );
-
-            const ERR errPreImageVerify = cpagePreT.ErrValidatePage( pgvfDoNotCheckForLostFlush, &nullaction );
-
-            // Should we enforce or fail out?  NO!  We might be replacing a bad page ...
-            //Assert( cpageT.PgnoThis() == cpagePreT.PgnoThis() );
-
-            if ( errPreImageRead < JET_errSuccess )
+            if ( fPreImagePages )
             {
-                (*pirs->PcprintfTrace())( "p=%x,i(FailedRead=%d):0,0,a:%x,%I64x", pgnoT, errPreImageRead,
-                                                cpageT.ObjidFDP(), cpageT.Dbtime() );
-            }
-            else if ( errPreImageVerify < JET_errSuccess )
-            {
-                (*pirs->PcprintfTrace())( "p=%x,i(VerifyFailure=%d):%x,%I64x,a:%x,%I64x", pgnoT, errPreImageVerify,
-                                                cpagePreT.ObjidFDP(), cpagePreT.Dbtime(),
-                                                cpageT.ObjidFDP(), cpageT.Dbtime() );
-            }
-            else
-            {
-                (*pirs->PcprintfTrace())( "p=%x,i:%x,%I64x,a:%x,%I64x", pgnoT,
-                                                cpagePreT.ObjidFDP(), cpagePreT.Dbtime(),
-                                                cpageT.ObjidFDP(), cpageT.Dbtime() );
-            }
+                // should rename this to something more specific like "cpagePreImage;"
+                CPAGE cpagePreT;
+                cpagePreT.LoadPage( ifmpNil, pgnoT, pbPrePages + ( pgnoT - pgnoStart ) * g_cbPage, g_cbPage );
 
-            cpagePreT.UnloadPage();
-#endif
+                const ERR errPreImageVerify = cpagePreT.ErrValidatePage( pgvfDoNotCheckForLostFlush, &nullaction );
+
+                // Should we enforce or fail out?  NO!  We might be replacing a bad page ...
+                //Assert( cpageT.PgnoThis() == cpagePreT.PgnoThis() );
+
+                // If we get an error validating the preimage of the page when we are capturing, we will just invalidate RBS.
+                //
+                if ( errPreImageRead < JET_errSuccess )
+                {
+                    ( *pirs->PcprintfTrace() )( "p=%x,i(FailedRead=%d):0,0,a:%x,%I64x", pgnoT, errPreImageRead,
+                        cpageT.ObjidFDP(), cpageT.Dbtime() );
+                }
+                else if ( errPreImageVerify < JET_errSuccess )
+                {
+                    ( *pirs->PcprintfTrace() )( "p=%x,i(VerifyFailure=%d):%x,%I64x,a:%x,%I64x", pgnoT, errPreImageVerify,
+                        cpagePreT.ObjidFDP(), cpagePreT.Dbtime(),
+                        cpageT.ObjidFDP(), cpageT.Dbtime() );
+                }
+                else
+                {
+                    ( *pirs->PcprintfTrace() )( "p=%x,i:%x,%I64x,a:%x,%I64x", pgnoT,
+                        cpagePreT.ObjidFDP(), cpagePreT.Dbtime(),
+                        cpageT.ObjidFDP(), cpageT.Dbtime() );
+                }
+
+                // For now, lets capture the preimage of the page as is, if conditions satisfy.
+                // If the patched page has a dbtime lesser than dbtime of the snapshot (it should be same as dbtime of the image on disk in this case unless there was a corruption in dbtime which will be caught by above checks), 
+                // we don't have to capture the preimage
+                //
+                if ( pirs->FRBSOn() )
+                {
+                    RBS_POS rbsposDummy;
+                    BOOL fPrePageInit = cpagePreT.FPageIsInitialized();
+                    BOOL fPageInit = cpageT.FPageIsInitialized();
+
+                    // If active page dbtime is less than snapshot dbtime, we will always capture and apply active's page as long it is not a new page or a shrunk page.
+                    // This is because if active page dbtime is lesser, then either both the active page and disk page are the same image or
+                    // disk page was updated as part of the diverged log and has dbtime greater than the snapshot.
+                    // Also, we want to pass fRBSPreimageRevertAlways flag because it is possible the disk page was freed earlier and we capture newpage record as part of the diverged logs.
+                    // In such a case, during revert we will end up applying the newpage record which would be wrong.
+                    //
+                    if ( cpageT.Dbtime() <= pirs->DbtimeBeginRBS() && fPageInit && !cpageT.FRevertedNewPage() && !cpageT.FShrunkPage() )
+                    {
+                        Assert( errPreImageRead < JET_errSuccess || errPreImageVerify < JET_errSuccess || cpageT.Dbtime() == cpagePreT.Dbtime() || cpagePreT.Dbtime() > pirs->DbtimeBeginRBS() );
+                        Call( pinst->m_prbsfp->ErrCapturePreimage( pirs->DbidRBS(), pgnoT, (const BYTE *)cpageT.PvBuffer(), g_cbPage, &rbsposDummy, fRBSPreimageRevertAlways ) );
+                        fRBSPreImagesCaptured = fTrue;
+                    }
+                    else if ( errPreImageRead < JET_errSuccess && errPreImageRead != JET_errFileIOBeyondEOF )
+                    {
+                        // If File shrunk, RBS should have already captured page preimage for such a page during the operation which freed the page.
+                        // For any other error, we will invalidate the snapshot.
+                        //
+                        ErrRBSInvalidateIrsDuringPatch( L"IRSPreImageReadError", errPreImageRead, pinst->m_prbsfp );
+                    }
+                    else if ( errPreImageVerify < JET_errSuccess && errPreImageVerify != JET_errPageNotInitialized )
+                    {
+                        // We will invalidate RBS if the preimage is corrupt. This will be similar to losing a lag copy today when we patch the lag copy.
+                        //
+                        ErrRBSInvalidateIrsDuringPatch( L"IRSPreImageVerifyError", errPreImageVerify, pinst->m_prbsfp );
+                    }
+                    else if ( errPreImageRead != JET_errFileIOBeyondEOF && ( cpagePreT.Dbtime() <= pirs->DbtimeBeginRBS() ) )
+                    {
+                        // Capture disk page unless it is an uninitialized, reverted or shrunk page in which case we will capture it as a new page.
+                        // But if both active page and disk page are with dbtime shrunk, skip capturing anything.
+                        //
+                        if ( fPrePageInit && !cpagePreT.FRevertedNewPage() && !cpagePreT.FShrunkPage() )
+                        {
+                            Call( pinst->m_prbsfp->ErrCapturePreimage( pirs->DbidRBS(), pgnoT, (const BYTE *)cpagePreT.PvBuffer(), g_cbPage, &rbsposDummy, 0 ) );
+                            fRBSPreImagesCaptured = fTrue;
+                        }
+                        else if ( !cpageT.FShrunkPage() || !cpagePreT.FShrunkPage() )
+                        {
+                            Call( pinst->m_prbsfp->ErrCaptureNewPage( pirs->DbidRBS(), pgnoT, &rbsposDummy ) );
+                            fRBSPreImagesCaptured = fTrue;
+                        }
+                    }
+                }
+
+                cpagePreT.UnloadPage();
+            }
             
             cpageT.UnloadPage();
         }
@@ -6183,7 +6288,7 @@ ErrIsamPatchDatabasePages(
         //  NOTE:  we write the header first so that we don't get into a state where we patched some
         //  pages but the header doesn't reflect that
         //
-        Call( ErrUtilWriteUnattachedDatabaseHeaders( pinst, pinst->m_pfsapi, szDatabase, pirs->Pdbfilehdr(), pirs->PfapiDb(), pirs->Pfm() ) );
+        Call( ErrUtilWriteUnattachedDatabaseHeaders( pinst, pinst->m_pfsapi, szDatabase, pirs->Pdbfilehdr(), pirs->PfapiDb(), pirs->Pfm(), !pirs->FRBSOn() ) );
 
         if ( pirs->Pfm() != NULL )
         {
@@ -6191,6 +6296,19 @@ ErrIsamPatchDatabasePages(
             //
             Call( pirs->Pfm()->ErrSyncRangeInvalidateFlushType( pgnoStart, cpg ) );
         }
+
+        // If we capture any preimages into RBS, flush the preimages to RBS before we replace the page image on the disk.
+        // This can be every inefficient especially when we patch one page at a time.
+        // TODO: Consider caching the page images before we write it to the disk so that we can flush more preimages together and get more sequential IO.
+        //
+        if ( fRBSPreImagesCaptured )
+        {
+            OnDebug( Ptls()->fFfbFreePath = fFalse );
+            Call( pinst->m_prbsfp->ErrFlushAll() );
+            OnDebug( Ptls()->fFfbFreePath = fTrue );
+        }
+
+        ( *pirs->PcprintfTrace() )( ",r:%d,%I64x", fRBSPreImagesCaptured, pirs->DbtimeBeginRBS() );
 
         //  write the pages to the database
         //
