@@ -272,9 +272,10 @@ LOCAL ERR ErrLGRIReportDbtimeMismatch(
     Assert( FMP::FAllocatedFmp( ifmp ) );
     Assert( dbtimeOnPage != dbtimeBeforeInLogRec );
 
-    const ERR       err         = ErrERRCheck( dbtimeOnPage < dbtimeBeforeInLogRec ? JET_errDbTimeTooOld : JET_errDbTimeTooNew );
+    const ERR       err         = ErrERRCheck( dbtimeOnPage < dbtimeBeforeInLogRec ? JET_errDbTimeTooOld : ( dbtimeOnPage < dbtimeAfterInLogRec ? JET_errDbTimeTooNew : JET_errDbTimeBeyondMaxRequired ) );
     const FMP* const pfmp       = FMP::FAllocatedFmp( ifmp ) ? &g_rgfmp[ ifmp ] : NULL;
     const LGPOS     lgposStop   = pinst->m_plog->LgposLGLogTipNoLock();
+    Assert( err != JET_errDbTimeBeyondMaxRequired || !pfmp->FContainsDataFromFutureLogs() );
 
     OSTraceSuspendGC();
     const WCHAR* wszDatabaseName = pfmp ?
@@ -305,9 +306,8 @@ LOCAL ERR ErrLGRIReportDbtimeMismatch(
         0,
         NULL,
         pinst );
-    OSUHAPublishEvent(  ( err == JET_errDbTimeTooOld ?
-                            HaDbFailureTagLostFlushDbTimeTooOld :
-                            HaDbFailureTagLostFlushDbTimeTooNew ),
+    OSUHAPublishEvent(  ( err == JET_errDbTimeTooOld ? HaDbFailureTagLostFlushDbTimeTooOld :
+                          ( err == JET_errDbTimeTooNew ? HaDbFailureTagLostFlushDbTimeTooNew : HaDbFailureTagLostFlushDbTimeBeyondMaxRequired ) ),
                         pinst,
                         HA_LOGGING_RECOVERY_CATEGORY,
                         HaDbIoErrorNone,

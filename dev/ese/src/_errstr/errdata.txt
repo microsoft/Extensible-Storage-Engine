@@ -254,6 +254,7 @@
 	EXTERNAL_ERR( -622,	State,		JET_errEngineFormatVersionSpecifiedTooLowForLogVersion	 )
 	EXTERNAL_ERR( -623,	State,		JET_errEngineFormatVersionSpecifiedTooLowForDatabaseVersion	 )
 	INTERNAL_ERR( -624, Unknown,    errLogServiceStopped )
+	EXTERNAL_ERR( -625,	Corruption,	JET_errDbTimeBeyondMaxRequired )
 	INTERNAL_ERR( -800,	Unknown,	errBackupAbortByCaller	 )
 	EXTERNAL_ERR( -801,	Operation,	JET_errBackupAbortByServer	 )
 	INTERNAL_ERR( -802,	Resource,	errTooManyPatchRequests	 )

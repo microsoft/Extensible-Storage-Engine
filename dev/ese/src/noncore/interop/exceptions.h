@@ -2331,7 +2331,7 @@ namespace Isam
     public ref class IsamDbTimeTooNewException : public IsamCorruptionException
     {
     public:
-        IsamDbTimeTooNewException() : IsamCorruptionException( "dbtime on page in advance of the dbtimeBefore in record", JET_errDbTimeTooNew)
+        IsamDbTimeTooNewException() : IsamCorruptionException( "dbtime on page in advance of the dbtimeBefore and below dbtimeAfter in record", JET_errDbTimeTooNew)
         {
         }
 
@@ -3042,6 +3042,30 @@ namespace Isam
             System::Runtime::Serialization::StreamingContext context
         )
             : IsamStateException( info, context )
+        {
+        }
+
+    };
+
+    [Serializable]
+    public ref class IsamDbTimeBeyondMaxRequiredException : public IsamCorruptionException
+    {
+    public:
+        IsamDbTimeBeyondMaxRequiredException() : IsamCorruptionException( "dbtime on page greater than or equal to dbtimeAfter in record, but record is outside required range for the database", JET_errDbTimeBeyondMaxRequired)
+        {
+        }
+
+        // Constructor with embedded exception. Does not use the string from esent.h.
+        IsamDbTimeBeyondMaxRequiredException( String ^ description, Exception^ innerException ) :
+            IsamCorruptionException( description, innerException )
+        {
+        }
+
+        IsamDbTimeBeyondMaxRequiredException(
+            System::Runtime::Serialization::SerializationInfo^ info,
+            System::Runtime::Serialization::StreamingContext context
+        )
+            : IsamCorruptionException( info, context )
         {
         }
 
@@ -9005,6 +9029,8 @@ static IsamErrorException^ JetErrToException( const JET_ERR err )
             return gcnew IsamEngineFormatVersionSpecifiedTooLowForLogVersionException;
         case JET_errEngineFormatVersionSpecifiedTooLowForDatabaseVersion:
             return gcnew IsamEngineFormatVersionSpecifiedTooLowForDatabaseVersionException;
+        case JET_errDbTimeBeyondMaxRequired:
+            return gcnew IsamDbTimeBeyondMaxRequiredException;
         case JET_errBackupAbortByServer:
             return gcnew IsamBackupAbortByServerException;
         case JET_errInvalidGrbit:
