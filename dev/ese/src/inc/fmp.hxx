@@ -585,7 +585,7 @@ class FMP
         
         PdbfilehdrReadOnly Pdbfilehdr() const;
         PdbfilehdrReadWrite PdbfilehdrUpdateable();
-        CRevertSnapshot* PRBS();
+        CRevertSnapshotForAttachedDbs* PRBS();
 
 private:
         // all access to this R/W lock must go through wrapper functions below
@@ -1309,7 +1309,7 @@ INLINE CReaderWriterLock& FMP::RwlDetaching()   { return m_rwlDetaching; }
 INLINE CReaderWriterLock& FMP::RwlIBFContext()  { return m_rwlBFContext; }
 INLINE LONG FMP::CbPage() const                 { return (LONG)UlParam( m_pinst, JET_paramDatabasePageSize ); }
 INLINE BOOL FMP::FSmallPageDb() const           { return FIsSmallPage( (LONG)UlParam( m_pinst, JET_paramDatabasePageSize ) ); }
-INLINE CRevertSnapshot * FMP::PRBS()            { return m_pinst->m_prbs; }
+INLINE CRevertSnapshotForAttachedDbs* FMP::PRBS()  { return m_pinst->m_prbs; }
 
 #ifdef DEBUG
 INLINE BOOL FMP::FBFContextReader() const

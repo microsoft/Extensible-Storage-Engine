@@ -1846,6 +1846,7 @@ namespace Isam
         void MJetBeginDatabaseIncrementalReseed(
             MJET_INSTANCE instance,
             String^ pstrDatabase,
+            Int64 genFirstDivergedLog,
             MJET_GRBIT grbit);
 
         /// <summary>
@@ -4589,16 +4590,19 @@ namespace Isam
         virtual void MJetBeginDatabaseIncrementalReseed(
             MJET_INSTANCE instance,
             String^ pstrDatabase,
+            Int64 genFirstDivergedLog,
             MJET_GRBIT grbit)
         {
             ::JET_INSTANCE _instance = GetUnmanagedInst( instance );
             _TCHAR * _szDatabase = 0;
+
+            unsigned long _genFirstDivergedLog   = (unsigned long) genFirstDivergedLog;
             ::JET_GRBIT _grbit = (JET_GRBIT) grbit;
 
             try
             {
                 _szDatabase = GetUnmanagedString( pstrDatabase );
-                Call( ::JetBeginDatabaseIncrementalReseed( _instance, _szDatabase, _grbit ) );
+                Call( ::JetBeginDatabaseIncrementalReseed( _instance, _szDatabase, _genFirstDivergedLog, _grbit ) );
             }
             __finally
             {
@@ -10529,9 +10533,10 @@ HandleError:
         static void MJetBeginDatabaseIncrementalReseed(
             MJET_INSTANCE instance,
             String^ pstrDatabase,
+            Int64 genFirstDivergedLog,
             MJET_GRBIT grbit)
         {
-            Instance->MJetBeginDatabaseIncrementalReseed(instance, pstrDatabase, grbit);
+            Instance->MJetBeginDatabaseIncrementalReseed(instance, pstrDatabase, genFirstDivergedLog, grbit);
         }
 
         /// <summary>

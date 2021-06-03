@@ -41,7 +41,8 @@ struct RBSDbAttachRecord : public RBSRecord
 };
 
 PERSISTED const ULONG fRBSPreimageDehydrated = 0x1;
-PERSISTED const ULONG fRBSPreimageXpress = 0x2;
+PERSISTED const ULONG fRBSPreimageCompressed = 0x2;
+PERSISTED const ULONG fRBSPreimageRevertAlways = 0x4;
 
 PERSISTED
 struct RBSDbPageRecord : public RBSRecord

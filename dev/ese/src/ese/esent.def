@@ -85,10 +85,10 @@ EXPORTS
 	ALIAS2(JetBackupInstanceW,16)
 	ALIAS3(JetBackupInstance,JetBackupInstanceA)
 
-	ALIAS1(JetBeginDatabaseIncrementalReseedA,12)
-	ALIAS2(JetBeginDatabaseIncrementalReseedA,12)
-	ALIAS1(JetBeginDatabaseIncrementalReseedW,12)
-	ALIAS2(JetBeginDatabaseIncrementalReseedW,12)
+	ALIAS1(JetBeginDatabaseIncrementalReseedA,16)
+	ALIAS2(JetBeginDatabaseIncrementalReseedA,16)
+	ALIAS1(JetBeginDatabaseIncrementalReseedW,16)
+	ALIAS2(JetBeginDatabaseIncrementalReseedW,16)
 	ALIAS3(JetBeginDatabaseIncrementalReseed, JetBeginDatabaseIncrementalReseedA)
 
 	ALIAS1(JetBeginExternalBackup,4)

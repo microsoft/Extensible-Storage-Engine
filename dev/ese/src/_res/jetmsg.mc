@@ -3034,6 +3034,12 @@ Language=English
 %1 (%2) %3The revert snapshot file "%4" created on "%5" has grown by "%6 bytes" since "%7". Number of logs generated during this period was "%8".
 .
 
+MessageId=5007
+SymbolicName=RBS_INVALIDATED_ID
+Language=English
+%1 (%2) %3The revert snapshot file at "%4" was invalidated due to "%5".
+.
+
 ;////////////////////////////////////////////////////////////////////////
 ;// DO NOT ADD HERE!  You're in the wrong Place. (well most likely)
 ;////////////////////////////////////////////////////////////////////////

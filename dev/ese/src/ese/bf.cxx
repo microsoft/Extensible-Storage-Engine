@@ -353,7 +353,7 @@ ERR ErrBFICapturePagePreimage( BF *pbf, RBS_POS *prbsposSnapshot )
         return JET_errSuccess;
     }
 
-    ERR err = g_rgfmp[ pbf->ifmp ].PRBS()->ErrCapturePreimage( g_rgfmp[ pbf->ifmp ].Dbid(), pbf->pgno, (const BYTE *)pbf->pv, CbBFIBufferSize( pbf ), prbsposSnapshot );
+    ERR err = g_rgfmp[ pbf->ifmp ].PRBS()->ErrCapturePreimage( g_rgfmp[ pbf->ifmp ].Dbid(), pbf->pgno, (const BYTE *)pbf->pv, CbBFIBufferSize( pbf ), prbsposSnapshot, 0 );
     OSTrace( JET_tracetagRBS, OSFormat(
              "Collecting pre-image dbid:%u,pgno:%lu,dbtime:0x%I64x,dbtimeBegin:0x%I64x,rbspos:%u,%u\n",
              g_rgfmp[ pbf->ifmp ].Dbid(),

@@ -76,9 +76,10 @@ class CShadowLogStream;
 
 class OLDDB_STATUS;
 class DATABASESCANNER;
-class CIrsOpContext;
+class CFlushMapForUnattachedDb;
 
-class CRevertSnapshot;
+class CRevertSnapshotForAttachedDbs;
+class CRevertSnapshotForPatch;
 class RBSCleaner;
 class CRBSRevertContext;
 
@@ -4409,6 +4410,64 @@ private:
 
 };
 
+class CIrsOpContext : public CZeroInit
+{
+private:
+    CPRINTF* m_pcprintfIncReSeedTrace;
+    IFileAPI* m_pfapiDb;
+    CFlushMapForUnattachedDb* m_pfm;
+    DBFILEHDR* m_pdbfilehdr;
+
+    //  IRS Pgno Diagnostics (updated for proper / non-corruption IRS patching only).
+    //      Note: Importantly we log IRS done event based upon m_cpgPatched != 0.
+    CPG                             m_cpgPatched;
+    PGNO                            m_pgnoMin;
+    PGNO                            m_pgnoMax;
+    TICK                            m_tickStart;
+    TICK                            m_tickFirstPage;
+
+    BOOL                            m_fRBSOn;           /*  revert snapshot enabled for db flag */
+    DBID                            m_dbidRBS;          /*  DBID assigned for patching RBS */
+    DBTIME                          m_dbtimeBeginRBS;   /*  max dbtime at the beginning of a revert snapshot */
+
+    //  Note: This path is not necessarily a full path, and just used as the "key" to identify 
+    //  the IRS context is matching the one the client originally begun.  Since the three IRS
+    //  functions are generally used in one context, they will all pass the same path, and this
+    //  non-absolute path is not a big deal.  Also if we ever want to support concurrent IRS
+    //  operations, then we can use this to find the correct IRS context.
+    WCHAR                           m_wszOriginalDatabasePath[ IFileSystemAPI::cchPathMax ];
+
+private:
+    CIrsOpContext() : CZeroInit( sizeof( CIrsOpContext ) ) {}   // NO one should use this one!
+public:
+
+    CIrsOpContext( _In_ CPRINTF* pcprintf, _In_ PCWSTR szOriginalDatabasePath, _In_ IFileAPI* const pfapiDb, CFlushMapForUnattachedDb* const pfm, DBFILEHDR* pdbfilehdr );
+
+    ERR     ErrCheckAttachedIrsContext( const INST* const pinst, PCWSTR wszOriginalDatabasePath );
+    ERR     ErrFlushAttachedFiles( _In_ INST* pinst, _In_ const IOFLUSHREASON iofr );
+    VOID    UpdatePagePatchedStats( const PGNO pgnoStart, const PGNO pgnoEnd );
+
+    typedef enum { eIrsDetachClean, eIrsDetachError } IRS_DETACH_STATE;
+    VOID    CloseIrsContext( _In_ const INST* const pinst, _In_ PCWSTR wszOriginalDatabasePath, _In_ const IRS_DETACH_STATE eStopState );
+
+    CPRINTF* PcprintfTrace() const          { return m_pcprintfIncReSeedTrace; }
+    IFileAPI* PfapiDb() const               { return m_pfapiDb; }
+    CFlushMapForUnattachedDb* Pfm() const   { return m_pfm; }
+    DBFILEHDR* Pdbfilehdr() const           { return m_pdbfilehdr; }
+    WCHAR*     WszDatabasePath()           { return m_wszOriginalDatabasePath; }
+
+    PGNO PgnoMax() const { return m_pgnoMax; }
+
+    UINT FRBSOn() const { return m_fRBSOn; }
+    VOID SetRBSOn()     { m_fRBSOn = fTrue; }
+    VOID ResetRBSOn()   { m_fRBSOn = fFalse; }
+
+    DBID DbidRBS() const                    { return m_dbidRBS; }
+    VOID SetDbidRBS( const DBID dbidRBS )   { m_dbidRBS = dbidRBS; }
+
+    DBTIME  DbtimeBeginRBS() const                  { return m_dbtimeBeginRBS; }
+    VOID    SetDbtimeBeginRBS( const DBTIME dbtime ){ m_dbtimeBeginRBS = dbtime; }
+};
 
 //  Note: the initial beginning sequence must always be 0, and the first done phase
 //  must always be 1.
@@ -4983,8 +5042,9 @@ public:
     BOOL                m_fTrxNewestSetByRecovery;
 
     // RBS related
-    CRevertSnapshot     *m_prbs;                    // revert snapshot instance.
-    RBSCleaner          *m_prbscleaner;             // Manages deleting of older revert snapshots that either age out or have to be removed due to disk space pressure
+    CRevertSnapshotForAttachedDbs       *m_prbs;                    // revert snapshot instance when databases are attached.
+    CRevertSnapshotForPatch             *m_prbsfp;                  // revert snapshot instance when we want to patch the databases as part of incremental reseed or page patching.
+    RBSCleaner                          *m_prbscleaner;             // Manages deleting of older revert snapshots that either age out or have to be removed due to disk space pressure
 
 private:
     volatile TRX        m_trxOldestCached;      // may be out-of-date
