@@ -14252,7 +14252,8 @@ LOCAL VOID SPIReportAnyExtentCacheError(
         // We have values to compare, and they showed a discrepency.  Report it.
         
         OSTraceSuspendGC();
-        const WCHAR * rgwsz[] = { 
+        const WCHAR * rgwsz[] = {
+            PfmpFromIfmp( pfucb->ifmp )->WszDatabaseName(),
             OSFormatW( L"%d", ObjidFDP( pfucb ) ),
             OSFormatW( L"%d", PgnoFDP( pfucb ) ),
             OSFormatW( L"%d", cpgOECounted ),
