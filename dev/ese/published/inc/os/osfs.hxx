@@ -6,5 +6,5 @@
 
 #include "osfsapi.hxx"
 
-#endif
+#endif  //  _OSFS_HXX_INCLUDED
 

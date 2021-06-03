@@ -1,6 +1,9 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
+//  If null bit is 1, then column is null.
+//  Note that the fid passed in should already be converted to an
+//  index (ie. should subtract fidFixedLeast first).
 #define FixedNullBit( ifid )    ( 1 << ( (ifid) % 8 ) )
 INLINE BOOL FFixedNullBit( const BYTE *pbitNullity, const UINT ifid )
 {
@@ -8,15 +11,16 @@ INLINE BOOL FFixedNullBit( const BYTE *pbitNullity, const UINT ifid )
 }
 INLINE VOID SetFixedNullBit( BYTE *pbitNullity, const UINT ifid )
 {
-    *pbitNullity |= FixedNullBit( ifid );
+    *pbitNullity |= FixedNullBit( ifid );   // Set to 1 (null)
 }
 INLINE VOID ResetFixedNullBit( BYTE *pbitNullity, const UINT ifid )
 {
-    *pbitNullity &= ~FixedNullBit( ifid );
+    *pbitNullity &= ~FixedNullBit( ifid );  // Set to 0 (non-null)
 }
 
 INLINE WORD IbVarOffset( const WORD ibVarOffs )
 {
+    // Highest bit is null bit, g_cbPage is limited to 32kiB
     return ibVarOffs & ( WORD(-1) >> 1 );
 }
 INLINE BOOL FVarNullBit( const WORD ibVarOffs )
@@ -25,21 +29,22 @@ INLINE BOOL FVarNullBit( const WORD ibVarOffs )
 }
 INLINE VOID SetVarNullBit( WORD& ibVarOffs )
 {
-    ibVarOffs = WORD( ibVarOffs | 0x8000 );
+    ibVarOffs = WORD( ibVarOffs | 0x8000 ); // Set to 1 (null)
 }
 INLINE VOID SetVarNullBit( UnalignedLittleEndian< WORD >& ibVarOffs )
 {
-    ibVarOffs = WORD( ibVarOffs | 0x8000 );
+    ibVarOffs = WORD( ibVarOffs | 0x8000 ); // Set to 1 (null)
 }
 INLINE VOID ResetVarNullBit( WORD& ibVarOffs )
 {
-    ibVarOffs = WORD( ibVarOffs & 0x7fff );
+    ibVarOffs = WORD( ibVarOffs & 0x7fff ); // Set to 0 (non-null)
 }
 INLINE VOID ResetVarNullBit( UnalignedLittleEndian< WORD >& ibVarOffs )
 {
-    ibVarOffs = WORD( ibVarOffs & 0x7fff );
+    ibVarOffs = WORD( ibVarOffs & 0x7fff ); // Set to 0 (non-null)
 }
 
+// Used to flip highest bit of signed fields when transforming.
 #define maskByteHighBit         ( BYTE( 1 ) << ( sizeof( BYTE ) * 8 - 1 ) )
 #define maskWordHighBit         ( WORD( 1 ) << ( sizeof( WORD ) * 8 - 1 ) )
 #define maskDWordHighBit        ( DWORD( 1 ) << ( sizeof( DWORD ) * 8 - 1 ) )
@@ -56,30 +61,63 @@ typedef JET_RETRIEVEMULTIVALUECOUNT     TAGCOLINFO;
 #include <pshpack1.h>
 
 
+//  internal SetColumn() grbits
 const JET_GRBIT     grbitSetColumnInternalFlagsMask         = 0xf0000000;
 const JET_GRBIT     grbitSetColumnUseDerivedBit             = 0x80000000;
 const JET_GRBIT     grbitSetColumnSeparated                 = 0x40000000;
 const JET_GRBIT     grbitSetColumnCompressed                = 0x20000000;
 const JET_GRBIT     grbitSetColumnEncrypted                 = 0x10000000;
 
+//  internal RetrieveColumn() grbits
 const JET_GRBIT     grbitRetrieveColumnInternalFlagsMask    = 0xf0000000;
 const JET_GRBIT     grbitRetrieveColumnUseDerivedBit        = 0x80000000;
 const JET_GRBIT     grbitRetrieveColumnDDLNotLocked         = 0x40000000;
 
+//  LID Format:
+//  Legacy LIDs were 31-bit integers, with MSB reserved for future use.
+//  New LIDs are 64-bit integers, with the MSB (bit 63) used to distinguish
+//  between a legacy 32-bit or a new 64-bit LID. Since the keys are laid
+//  out in big endian format, inspecting the first byte will give us the MSB,
+//  and will tell us whether the following bytes belong to a LID64 or a LID32.
+//  The high byte is reserved for future use, leaving 56-bits for the actual lid.
+//
+//  lid64Flag is needed to disambiguate LIDs in two cases:
+//  1. Identifying LV roots from a key. A key in an LV tree can be 4, 8 or 12 bytes.
+//     A 4-byte key is always a legacy LV root key.
+//     An 8-byte key is either a new format LV root (if lid64Flag is set), or a legacy LV chunk key.
+//     A 12-byte key is always a new format LV chunk key.
+//  2. The engine always works with 64-bit data types. Legacy format is identified at persistence time
+//     by the absence of lid64Flag. It simplifies implementation and makes it easy to drop legacy
+//     compatibility in the future when it isn't needed.
 
+//  The following table lists all the possible ranges in the LID number space and their use:
+//
+//  Begin                   End                     Usage
+//  -------------------     -------------------     -------------------------
+//  0                       0                       lidMin (never used)
+//  1                       0x7ffffeff              LID32
+//  0x7fffff00              0x7fffffff              LID32 Reserved
+//  0x80000000              0xffffffff              Invalid (can't be used, high bit identifies LID64)
+//  0x00000001.00000000     0x7fffffff.ffffffff     Invalid (can't be used, high bit identifies LID64)
+//  0x80000000.00000000     0x80000000.10000000     LID64 Reserved
+//  0x80000000.10000001     0x80fffffe.ffffffff     LID64
+//  0x80ffffff.00000000     0x80ffffff.ffffffff     LID64 Reserved
+//  0x81000000.00000000     0xffffffff.ffffffff     Reserved (for future use)
 
 typedef ULONG               _LID32;
 typedef unsigned __int64    _LID64;
 
 const _LID32 lidMin         = 0;
 const _LID32 lid32Max       = 0x7fffffff;
-const _LID64 lid64Flag      = 1ULL << 63;
-const _LID64 lid64Reserved  = lid64Flag | ( 0xffULL << 56 );
-const _LID64 lid64First     = lid64Flag | ( lid32Max + 2 );
-const _LID64 lid64Max       = lid64Flag | ~lid64Reserved;
+const _LID64 lid64Flag      = 1ULL << 63;                       // = 0x8000000000000000
+const _LID64 lid64Reserved  = lid64Flag | ( 0xffULL << 56 );    // = 0xff00000000000000, High byte is reserved for future use (bit-63 is already used)
+const _LID64 lid64First     = lid64Flag | ( lid32Max + 2 );     // = 0x8000000010000001
+const _LID64 lid64Max       = lid64Flag | ~lid64Reserved;       // = 0x80ffffffffffffff
 
-const _LID32 lid32MaxAllowed    = lid32Max - 256;
-const _LID64 lid64MaxAllowed    = lid64Max - UINT32_MAX;
+// At this threshold we warn the user ( via an event and a failure item )
+// that they are running out of lids, and return JET_errOutOfLongValueIDs
+const _LID32 lid32MaxAllowed    = lid32Max - 256;                   // = 0x7fffff00 (= dwCounterMax for legacy reasons)
+const _LID64 lid64MaxAllowed    = lid64Max - UINT32_MAX;            // = 0x80ffffff00000000
 
 class LvId
 {
@@ -114,7 +152,7 @@ public:
     static bool FIsLid64( const _LID64 lid )
     {
         bool fLid64 = !!( lid & lid64Flag );
-        Assert( fLid64 || lid <= lid32Max || g_fRepair );
+        Assert( fLid64 || lid <= lid32Max || g_fRepair );   // repair can handle corrupted LIDs
         return fLid64;
     }
 
@@ -139,10 +177,11 @@ public:
     bool FIsLid32() const       { return FIsLid32( m_lid ); }
     bool FValid() const         { return FValid( m_lid ); }
     
+    // returned LID can be a LID64 or a LID32
     operator _LID64() const
     {
         bool fLid64 = !!( m_lid & lid64Flag );
-        Assert( fLid64 || m_lid <= lid32Max || g_fRepair );
+        Assert( fLid64 || m_lid <= lid32Max || g_fRepair ); // repair can handle corrupted LIDs
         return m_lid;
     }
 
@@ -190,7 +229,8 @@ public:
 };
 
 
-
+/*  long value root data format
+/**/
 PERSISTED
 struct LVROOT
 {
@@ -198,6 +238,7 @@ struct LVROOT
     UnalignedLittleEndian< ULONG >      ulSize;
 };
 
+// Introduced with encryption feature, introduced in September, 2015
 PERSISTED
 typedef BYTE    LVROOTFLAGS;
 const   LVROOTFLAGS fLVEncrypted    =   0x01;
@@ -211,6 +252,8 @@ struct LVROOT2
     LVROOTFLAGS                         fFlags;
 };
 
+//  check if Derived bit should be used in TAGFLD -- already know that this is
+//  a template column in a derived table
 INLINE BOOL FRECUseDerivedBitForTemplateColumnInDerivedTable(
     const COLUMNID  columnid,
     const TDB       * const ptdb )
@@ -219,11 +262,15 @@ INLINE BOOL FRECUseDerivedBitForTemplateColumnInDerivedTable(
     Assert( FCOLUMNIDTemplateColumn( columnid ) );
     ptdb->AssertValidDerivedTable();
 
+    //  HACK: treat derived columns in original-format derived table as
+    //  non-derived, because they don't have the fDerived bit set in the TAGFLD
     return ( !ptdb->FESE97DerivedTable()
         || FidOfColumnid( columnid ) >= ptdb->FidTaggedFirst() );
 }
 
 
+//  check if Derived bit should be used in TAGFLD -- don't know yet if this is
+//  a template column in a derived table
 INLINE BOOL FRECUseDerivedBit( const COLUMNID columnid, const TDB * const ptdb )
 {
     Assert( FCOLUMNIDTagged( columnid ) );
@@ -241,8 +288,8 @@ class REC
         ~REC();
 
     public:
-        typedef WORD RECOFFSET;
-        typedef WORD VAROFFSET;
+        typedef WORD RECOFFSET;     // offset relative to start of record
+        typedef WORD VAROFFSET;     // offset relative to beginning of variable data
 
     private:
         PERSISTED
@@ -250,12 +297,21 @@ class REC
         {
             UnalignedLittleEndian< BYTE >       fidFixedLastInRec;
             UnalignedLittleEndian< BYTE >       fidVarLastInRec;
-            UnalignedLittleEndian< RECOFFSET >  ibEndOfFixedData;
+            UnalignedLittleEndian< RECOFFSET >  ibEndOfFixedData;       // offset relative to start of record
         };
 
         RECHDR          m_rechdr;
         BYTE            m_rgbFixed[];
 
+        // Fixed data is followed by:
+        //    - fixed column null-bit array
+        //    - variable offsets table
+        //        - start of variable data has offset zero (ie. offsets are relative
+        //          to the end of the variable offsets table)
+        //        - each entry marks tne end of a variable column
+        //        - the last entry coincides with the beginning of tagged data
+        //    - variable data
+        //    - tagged data
 
 
     public:
@@ -287,11 +343,15 @@ class REC
     public:
         enum { cbRecordHeader = sizeof(RECHDR) };
         enum { cbRecordMin = cbRecordHeader };
+                                // 2 + 2 (for offset of end of fixed data) = 4
 
+        //  Compute the largest record that can fit in a page. To be conservative we will assume
+        //  that the record is prefix compressed. That means we have the overhead
+        //  of cbPrefix and cbSuffix in the record.
         static INLINE LONG CbRecordMost( const LONG cbPage, const LONG cbKeyMost )
         {
             Assert( cbKeyMost >= 0 );
-            Assert( cbKeyMost > 0 );
+            Assert( cbKeyMost > 0 ); // Is cbKeyMost = 0 actually valid?
             Assert( cbKeyMost <= cbKeyMostMost );
 
             if ( !!FIsSmallPage() != FIsSmallPage( cbPage ) )
@@ -302,20 +362,41 @@ class REC
             LONG cbRecordMost;
             if( FIsSmallPage() )
             {
+                // for small page sizes we need to preserve backwards compatibility which means not increasing
+                // the maximum record size. the old size calculation looked like this:
+                //  cbRecordMost = CbNDNodeMost - cbKeyCount - pidb->CbKeyMost()
+                // where cbKeyMost was always at least JET_cbKeyMostMin, but could be configured to be larger
+                //
+                // the problem is that the code above has a bug which shows up when the key size
+                // is 254 bytes or greater. we want to fix that bug while keeping the maximum record size the
+                // same for all records whose primary key is guaranteed to be less than 254 bytes
                 cbRecordMost = CbNDNodeMost( cbPage ) - cbKeyCount - max( JET_cbKeyMostMin, ( cbKeyCount + cbKeyMost ) );
             }
             else
             {
-                cbRecordMost = CbNDNodeMost( cbPage ) - cbKeyCount - cbKeyCount  - cbKeyMost;
+                cbRecordMost = CbNDNodeMost( cbPage ) - cbKeyCount - cbKeyCount /* 2-bytes of prefix key overhead */ - cbKeyMost;
             }
             return cbRecordMost;
         }
         
+        //  CbRecordMost without table or index defn should only be used for the purposes of error checking
+        //  since it assumes a minimum cbKeyMost of 4.  Convenient when proper context not available.
+        //
         static INLINE LONG CbRecordMostCHECK( const LONG cbPage )
         {
             return CbRecordMost( cbPage, sizeof(DBK) );
         }
 
+        //  This is a deprecated global page size using function, needs to be removed complete ... and there are 
+        //  ONLY "four" hits for it!  See:
+        //      ErrRECIRetrieveFixedColumn() - but that function has 111 references.
+        //      ErrRECIRetrieveVarColumn() - another 42 references.
+        //      CbSORTCopyFixedVarColumns() - ugh, sorts.
+        //      TAGFIELDS::TAGFIELDS() .ctor - Only takes dataRec as in arg.
+        //      ErrRECISetIFixedColumn() - Shrink calls with pfucbNil
+        //  First two takes a pfcb that we could promote to a ifmp and then to a CbPage(), BUT the pfcb sometimes 
+        //  is past in as NULL when it wants to skip the DML latch!  So this is a hard g_cbPage ref to remove. First
+        //  three take a TDB ... but I couldn't find a way to make a TDB into an IDB.
         static INLINE LONG CbRecordMostWithGlobalPageSize()
         {
             return CbRecordMost( g_cbPage, sizeof(DBK) );
@@ -323,6 +404,9 @@ class REC
 
         static INLINE LONG CbRecordMost( const LONG cbPage, const IDB * const pidb )
         {
+            // I(SOMEONE) think this pidbNil decision is a bit dicey, because IIRC during recovery we do not have 
+            // such context - and so could mistakenly presume too small a cbKeyMost reserve, leading to too large
+            // of CbRecordMost() value.
             const LONG cbKeyMost = ( pidbNil == pidb ) ? sizeof(DBK) : pidb->CbKeyMost();
             return CbRecordMost( cbPage, cbKeyMost );
         }
@@ -332,6 +416,8 @@ class REC
             Assert( pfcbTable->Ifmp() != 0 );
             Assert( pfcbTable->FTypeTable() || pfcbTable->FTypeTemporaryTable() || pfcbTable->FTypeSort() );
 
+            // proper way to check IDB & pidb->CbKeyMost populated?
+            // Did not hold: Assert( pfcbTable->FInitialized() ); 
             const IDB * const pidbT = pfcbTable->Pidb();
 
             return CbRecordMost( g_rgfmp[ pfcbTable->Ifmp() ].CbPage(), pidbT );
@@ -427,7 +513,7 @@ INLINE REC::RECOFFSET REC::IbEndOfFixedData() const
 }
 INLINE VOID REC::SetIbEndOfFixedData( const RECOFFSET ib )
 {
-    Assert( ib < g_cbPage );
+    Assert( ib < g_cbPage );  // very rough sanity check
     m_rechdr.ibEndOfFixedData = ib;
 }
 
@@ -463,6 +549,8 @@ INLINE REC::VAROFFSET REC::IbVarOffsetStart( const FID fidVar ) const
     Assert( fidVar >= fidVarLeast );
     Assert( fidVar <= (FID)m_rechdr.fidVarLastInRec );
 
+    //  The beginning of the desired column is equivalent to the
+    //  the end of the previous column.
     return ( fidVarLeast == fidVar ?
                 (REC::VAROFFSET)0 :
                 IbVarOffset( PibVarOffsets()[fidVar-fidVarLeast-1] ) );
@@ -486,7 +574,7 @@ INLINE BYTE *REC::PbVarData() const
 INLINE REC::VAROFFSET REC::IbEndOfVarData() const
 {
     if ( FidVarLastInRec() == fidVarLeast-1 )
-        return 0;
+        return 0;       // no variable data
 
     return IbVarOffset( PibVarOffsets()[FidVarLastInRec()-fidVarLeast] );
 }
@@ -526,8 +614,10 @@ INLINE ULONG CbPreferredIntrinsicLVMost( const FCB * pfcbTable )
 
     ULONG cbUserPreferred = pfcbTable->Ptdb()->CbPreferredIntrinsicLV();
 
+    //  0 means use the default ... 
     if ( cbUserPreferred == 0 )
     {
+        //  Use the default heuristic
         return cbLVIntrinsicMost;
     }
     return cbUserPreferred;
@@ -565,13 +655,20 @@ private:
         m_iidxsegMultiValuedMost = -1;
         memcpy( m_rgitag, rgitagBaseKey, sizeof(m_rgitag) );
 
+        //  if index has one or more multi-valued columns,
+        //  then set multi-valuedness of those column(s).
+        //
         if ( m_fMultivalued )
         {
+            //  retrieve each segment in key description
+            //
             if ( pidb->FTemplateIndex() )
             {
                 Assert( pfcb->FDerivedTable() || pfcb->FTemplateTable() );
                 if ( pfcb->FDerivedTable() )
                 {
+                    //  switch to template table
+                    //
                     pfcb = pfcb->Ptdb()->PfcbTemplateTable();
                     Assert( pfcbNil != pfcb );
                     Assert( pfcb->FTemplateTable() );
@@ -582,10 +679,15 @@ private:
                 }
             }
 
+            //  get columnids from index definition
+            //
             pfcb->EnterDML();
             UtilMemCpy( rgidxseg, PidxsegIDBGetIdxSeg( pidb, pfcb->Ptdb() ), m_iidxsegMac * sizeof(IDXSEG) );
             pfcb->LeaveDML();
 
+            //  set columnid properties for all columns,
+            //  and reset multi-valuedness for all columns
+            //
             for ( iidxsegT = 0; iidxsegT < m_iidxsegMac; iidxsegT++ )
             {
                 m_rgcolumnid[iidxsegT] = rgidxseg[iidxsegT].Columnid();
@@ -601,6 +703,8 @@ private:
             }
 #endif
 
+            //  set multi-valuedness for index columns
+            //
             for ( iidxsegT = 0; iidxsegT < m_iidxsegMac; iidxsegT++ )
             {
                 const COLUMNID columnid = rgidxseg[iidxsegT].Columnid();
@@ -610,6 +714,9 @@ private:
 
                 if ( FCOLUMNIDTagged( columnid ) )
                 {
+                    // No need to check column access -- since the column belongs
+                    // to an index, it MUST be available.  It can't be deleted, or
+                    // even versioned deleted.
                     pfcb->EnterDML();
                     field = *( pfcb->Ptdb()->Pfield( columnid ) );
                     pfcb->LeaveDML();
@@ -619,6 +726,10 @@ private:
                         m_rgfMultiValued[iidxsegT] = fTrue;
                         m_iidxsegMultiValuedMost = iidxsegT;
 
+                        //  if cross product index or nested table index, 
+                        //  then recognize multi-valuedness of all multi-valued index columns.
+                        //  Otherwise, recognize only the first.
+                        //
                         if ( !pidb->FCrossProduct() && !pidb->FNestedTable() )
                         {
                             break;
@@ -665,6 +776,8 @@ public:
         Init( pfucb, pidb );
         Reset();
 
+        //  set first multi-valued column itag sequence to given itag
+        //
         if ( itag > 1 && m_iidxsegMultiValuedMost >= 0 )
         {
             Assert( m_iidxsegMultiValuedMost >= 0 );
@@ -687,6 +800,8 @@ public:
     }
 
 
+    //  returns fTrue if m_rgitag selects base key
+    //
     BOOL FBaseKey( void )
     {
         return ( 0 == memcmp( m_rgitag, rgitagBaseKey, sizeof(m_rgitag) ) );
@@ -701,8 +816,17 @@ public:
     {
         INT iidxsegT;
 
+        //  if no specific column returned NULL with itagSequence > 1 then caller will pass -1
+        //  In this case, increment least significant multi-valued column.
+        //
+        //  else rollover case: a multi-valued column returned NULL with an itagSequence > 1.
+        //  Set that columns itagSequence back to 1 and increment next most significant multi-valued column.
+        //
         if ( iidxsegNoRollover == iidxsegRollover )
         {
+            //  nested table indexes roll all multi-value column itagSequences together
+            //  while cross product indexes enumerate every combination.
+            //
             if ( m_fNestedTable )
             {
                 for ( iidxsegT = m_iidxsegMultiValuedMost; iidxsegT >= 0 ; iidxsegT-- )
@@ -723,6 +847,8 @@ public:
         }
         else
         {
+            //  should never increment beyond complete
+            //
             Assert( !m_fKeySequenceComplete );
 
             if ( iidxsegComplete == iidxsegRollover )
@@ -731,6 +857,8 @@ public:
                 return;
             }
 
+            //  find next most signifcant multivalued column and increment it
+            //
             Assert( iidxsegRollover > 0 );
             Assert( iidxsegRollover < JET_ccolKeyMost );
             iidxsegRollover = iidxsegRollover < JET_ccolKeyMost ? iidxsegRollover : JET_ccolKeyMost - 1;
@@ -750,6 +878,8 @@ public:
                 return;
             }
 
+            //  set rollover column, and all less signifant columns back to 1
+            //
             for ( iidxsegT = iidxsegRollover; iidxsegT <= m_iidxsegMultiValuedMost && iidxsegT < JET_ccolKeyMost; iidxsegT++ )
             {
                 m_rgitag[iidxsegT] = 1;
@@ -775,9 +905,13 @@ public:
     {
         INT     iidxsegT;
 
+        //  if index not multivalued, itag must be 1
+        //
         Assert( m_fMultivalued );
         Assert( m_iidxsegMac <= JET_ccolKeyMost );
 
+        //  look for columnid in index
+        //
         for ( iidxsegT = 0; iidxsegT < m_iidxsegMac; iidxsegT++ )
         {
             if ( columnidT == m_rgcolumnid[iidxsegT] )
@@ -793,7 +927,7 @@ public:
 
         return m_rgitag[iidxsegT];
     }
-};
+}; // class KeySequence
 
 INLINE LvId LidOfSeparatedLV( const BYTE * const pbData, const INT cbData )
 {
@@ -817,7 +951,7 @@ INLINE INT CbLVSetLidInRecord( BYTE * const pbData, const INT cbData, const LvId
         else
         {
             FireWall( "NotEnoughSpaceForLid64" );
-            memset( pbData, 0, cbData );
+            memset( pbData, 0, cbData );    // set to invalid lid
             return cbData;
         }
     }
@@ -833,7 +967,7 @@ INLINE INT CbLVSetLidInRecord( BYTE * const pbData, const INT cbData, const LvId
         else
         {
             FireWall( "NotEnoughSpaceForLid32" );
-            memset( pbData, 0, cbData );
+            memset( pbData, 0, cbData ); // set to invalid lid
             return cbData;
         }
     }
@@ -842,8 +976,8 @@ INLINE INT CbLVSetLidInRecord( BYTE * const pbData, const INT cbData, const LvId
 const ULONG fLVReference    = 0;
 const ULONG fLVDereference  = 1;
 
-const SHORT cbFLDBinaryChunk            = 8;
-const SHORT cbFLDBinaryChunkNormalized  = cbFLDBinaryChunk+1;
+const SHORT cbFLDBinaryChunk            = 8;                    // Break up binary data into chunks of this many bytes.
+const SHORT cbFLDBinaryChunkNormalized  = cbFLDBinaryChunk+1;   // Length of one segment of normalised binary data.
 
 ULONG UlChecksum( VOID *pv, ULONG cb );
 ERR ErrRECSetCurrentIndex( FUCB *pfucb, const CHAR *szIndex, const INDEXID *pindexid );
@@ -862,7 +996,7 @@ VOID LVCheckOneNodeWhileWalking(
     LvId        *plidPrev,
     ULONG       *pulSizeCurr,
     ULONG       *pulSizeSeen );
-#endif
+#endif  //  DEBUG
 
 ERR ErrRECISetFixedColumn(
     FUCB            * const pfucb,
@@ -913,6 +1047,7 @@ INLINE ERR ErrRECSetColumn(
     {
         if ( !pfcb->FTemplateTable() )
         {
+            // switch to template table
             pfcb->Ptdb()->AssertValidDerivedTable();
             pfcb = pfcb->Ptdb()->PfcbTemplateTable();
         }
@@ -962,7 +1097,7 @@ ERR ErrRECSetLongField(
     JET_GRBIT           grbit = NO_GRBIT,
     const ULONG         ibLongValue = 0,
     const ULONG         ulMax = 0,
-    ULONG               cbThreshold = 0 );
+    ULONG               cbThreshold = 0 );  // cbThreshold = 0 will use the sizeof LID as threshold based on current format
 
 ERR ErrRECRetrieveSLongField(
     FUCB            *pfucb,
@@ -993,8 +1128,8 @@ ERR ErrRECGetLVSize(
     FUCB * const    pfucb,
     const LvId      lid,
     const BOOL      fLogicalOnly,
-    QWORD * const   pcbLVDataLogical,
-    QWORD * const   pcbLVDataPhysical,
+    QWORD * const   pcbLVDataLogical,   // logical (i.e. uncompressed) size of the data
+    QWORD * const   pcbLVDataPhysical,  // physical (i.e. compressed) size of the data
     QWORD * const   pcbLVOverhead );
 
 ERR ErrRECDoesSLongFieldExist( FUCB * const pfucb, const LvId lid, BOOL* const pfExists );
@@ -1141,6 +1276,7 @@ enum LVAFFECT
     lvaffectReferenceAll,
 };
 
+// cbThreshold = 0 will use the size of LID as threshold based on current format
 ERR ErrRECAffectLongFieldsInWorkBuf( FUCB *pfucb, LVAFFECT lvaffect, ULONG cbThreshold = 0);
 
 ERR ErrRECDereferenceLongFieldsInRecord( FUCB *pfucb );
@@ -1158,6 +1294,8 @@ INLINE BOOL FRECBinaryColumn( JET_COLTYP coltyp )
     return ( coltyp == JET_coltypBinary || coltyp == JET_coltypLongBinary );
 }
 
+//  field extraction
+//
 ERR ErrRECIGetRecord(
     FUCB    *pfucb,
     DATA    **ppdataRec,
@@ -1218,6 +1356,7 @@ INLINE ERR ErrRECRetrieveNonTaggedColumn(
     {
         if ( !pfcb->FTemplateTable() )
         {
+            // switch to template table
             pfcb->Ptdb()->AssertValidDerivedTable();
             pfcb = pfcb->Ptdb()->PfcbTemplateTable();
         }
@@ -1319,6 +1458,10 @@ INLINE COLUMNID ColumnidRECNextTaggedForScan(
 }
 
 
+// Possible return codes are:
+//      JET_errSuccess if column not null
+//      JET_wrnColumnNull if column is null
+//      JET_errColumnNotFound if column not in record
 INLINE ERR ErrRECIFixedColumnInRecord(
     const COLUMNID  columnid,
     FCB             * const pfcb,
@@ -1336,6 +1479,7 @@ INLINE ERR ErrRECIFixedColumnInRecord(
     Assert( prec->FidFixedLastInRec() >= fidFixedLeast-1 );
     Assert( prec->FidFixedLastInRec() <= fidFixedMost );
 
+    // RECIAccessColumn() should have already been called to verify FID.
 #ifdef DEBUG
     Assert( pfcbNil != pfcb );
     pfcb->EnterDML();
@@ -1375,6 +1519,10 @@ INLINE ERR ErrRECIFixedColumnInRecord(
     return err;
 }
 
+// Possible return codes are:
+//      JET_errSuccess if column not null
+//      JET_wrnColumnNull if column is null
+//      JET_errColumnNotFound if column not in record
 INLINE ERR ErrRECIVarColumnInRecord(
     const COLUMNID  columnid,
     FCB             * const pfcb,
@@ -1392,6 +1540,7 @@ INLINE ERR ErrRECIVarColumnInRecord(
     Assert( prec->FidVarLastInRec() >= fidVarLeast-1 );
     Assert( prec->FidVarLastInRec() <= fidVarMost );
 
+    // RECIAccessColumn() should have already been called to verify FID.
 #ifdef DEBUG
     Assert( pfcbNil != pfcb );
     pfcb->EnterDML();
@@ -1420,11 +1569,14 @@ INLINE ERR ErrRECIVarColumnInRecord(
         Assert( prec->PbVarData() + IbVarOffset( pibVarOffs[prec->FidVarLastInRec()-fidVarLeast] )
                 <= (BYTE *)dataRec.Pv() + dataRec.Cb() );
 
+        //  adjust fid to an index
+        //
         const UINT  ifid    = FidOfColumnid( columnid ) - fidVarLeast;
 
         if ( FVarNullBit( pibVarOffs[ifid] ) )
         {
 #ifdef DEBUG
+            //  beginning of current column is end of previous column
             const WORD  ibVarOffset = ( fidVarLeast == FidOfColumnid( columnid ) ?
                                             WORD( 0 ) :
                                             IbVarOffset( pibVarOffs[ifid-1] ) );
@@ -1446,7 +1598,7 @@ INLINE ERR ErrRECIVarColumnInRecord(
 ERR ErrRECIRetrieveSeparatedLongValue(
     FUCB        *pfucb,
     const DATA& dataField,
-    BOOL        fAfterImage,
+    BOOL        fAfterImage,    //  set to fFalse to get before-images of replaces we have done
     ULONG       ibLVOffset,
     const BOOL  fEncrypted,
     VOID        *pv,
@@ -1494,7 +1646,7 @@ INLINE ERR ErrRECIRetrieveTaggedDefaultValue(
     return ErrRECIRetrieveTaggedColumn(
                     pfcb,
                     columnid,
-                    1,
+                    1,              //  itagSequence
                     *pfcb->Ptdb()->PdataDefaultRecord(),
                     pdataField );
 }
@@ -1516,6 +1668,8 @@ INLINE ERR ErrRECIRetrieveDefaultValue(
 }
 
 
+//  key extraction/normalization
+//
 VOID FLDNormalizeFixedSegment(
     const BYTE          *pbField,
     const ULONG         cbField,
@@ -1654,6 +1808,7 @@ ERR ErrRECIRetrieveColumnFromKey(
 
 INLINE VOID RECReleaseKeySearchBuffer( FUCB *pfucb )
 {
+    // release key buffer if one was allocated
     if ( NULL != pfucb->dataSearchKey.Pv() )
     {
         if ( FFUCBUsingTableSearchKeyBuffer( pfucb ) )
@@ -1751,7 +1906,7 @@ INLINE VOID RECIFreeCopyBuffer( FUCB * const pfucb )
     {
         BFFree( pfucb->pvWorkBuf );
         pfucb->pvWorkBuf = NULL;
-        pfucb->dataWorkBuf.SetPv( NULL );
+        pfucb->dataWorkBuf.SetPv( NULL );   //  verify that no one uses BF anymore
     }
 }
 
@@ -1762,6 +1917,8 @@ INLINE BOOL FRECIFirstIndexColumnMultiValued( FUCB * const pfucb, const IDB * co
     Assert( pfcbNil != pfucb->u.pfcb );
     Assert( pidbNil != pidb );
 
+    //  if index has one or more multivalued columns, return if first column is multivalued
+    //
     if ( pidb->FMultivalued() )
     {
         FCB * const     pfcb        = pfucb->u.pfcb;
@@ -1781,9 +1938,12 @@ INLINE BOOL FRECIFirstIndexColumnMultiValued( FUCB * const pfucb, const IDB * co
         return FFIELDMultivalued( ffield );
     }
 
+    //  if index has no multivalued columns, then first column cannot be multivalued
+    //
     return fFalse;
 }
 
+//  Scrub data
 ERR ErrRECScrubLVChunk(
     DATA& data,
     const CHAR chScrub );

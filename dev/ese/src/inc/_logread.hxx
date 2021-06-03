@@ -147,10 +147,15 @@ private:
         const LONG lGeneration
         );
 
+    //  location of last LRCHECKSUM record in the log buffer.
+    //  It either hasn't been written out to disk yet, or it's
+    //  been written to disk on one sector and with a shadow.
+    //  Protected by m_critLGBuf
     BYTE        *m_pbLastChecksum;
+    // Only used for recovery:
     LGPOS       m_lgposLastChecksum;
 
-#endif
+#endif  // ENABLE_LOG_V7_RECOVERY_COMPAT
 
     INST *      m_pinst;
     LOG *       m_pLog;
@@ -158,29 +163,37 @@ private:
 
     LOG_BUFFER *m_pLogBuffer;
 
+    //  in memory log buffer variables for reading log records
     BOOL        m_fReaderInited;
-    BYTE        *m_pbNext;
-    BYTE        *m_pbNextNext;
+    BYTE        *m_pbNext;      // location of current log record
+    BYTE        *m_pbNextNext;  // location of next log record to read
 
+    // copy of assembled fragmented LR - need to maintain 2 copies, one for
+    // normal reading and another for preread
     BYTE *      m_pvAssembledLR[2];
     DWORD       m_cbAssembledLR[2];
     LRNOP       m_lrNop;
 
+    // timestamp of first segment, to assist with recovery IO smoothing
     __int64     m_ftFirstSegment;
     HRT         m_hrtFirstSegment;
 
     BOOL        m_fReadSectorBySector;
-    UINT        m_isecReadStart;
-    UINT        m_csecReader;
-    BOOL    m_fIgnoreNextSectorReadFailure;
-    WCHAR       m_wszReaderLogName[ IFileSystemAPI::cchPathMax ];
+    UINT        m_isecReadStart;    // first sector we have from disk
+    UINT        m_csecReader;       // number of sectors we have from disk
+    BOOL    m_fIgnoreNextSectorReadFailure; // can we ignore the next sector read failure, fixable with shadow sector
+    WCHAR       m_wszReaderLogName[ IFileSystemAPI::cchPathMax ];   // the log that we have in our buffers
 
 #ifdef DEBUG
+    // saved log buffer from last log for debugging purposes
     SAVED_LOG_DATA  m_SavedLogData[NUM_SAVED_LOGS];
     UINT            m_cNextSavedLog;
 #endif
 
+    //  variables for scanning during redo
 
-    LGPOS           m_lgposLastRec;
+    // During redo, if m_lgposLastRec.isec != 0, we don't want to use
+    // any log record whose LGPOS is greater than or equal to m_lgposLastRec.
+    LGPOS           m_lgposLastRec; // sentinal for last log record for redo */
 };
 

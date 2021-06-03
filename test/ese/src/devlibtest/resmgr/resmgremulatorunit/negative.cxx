@@ -3,8 +3,11 @@
 
 #include "resmgremulatorunit.hxx"
 
+// Unit test class
 
+//  ================================================================
 class ResMgrEmulatorNegativeTest : public UNITTEST
+//  ================================================================
 {
     private:
         static ResMgrEmulatorNegativeTest s_instance;
@@ -44,7 +47,9 @@ bool ResMgrEmulatorNegativeTest::FRunUnderESENT() const         { return true; }
 bool ResMgrEmulatorNegativeTest::FRunUnderESE97() const         { return true; }
 
 
+//  ================================================================
 ERR ResMgrEmulatorNegativeTest::ErrTest()
+//  ================================================================
 {
     ERR err = JET_errSuccess;
     
@@ -62,7 +67,9 @@ HandleError:
     return err;
 }
 
+//  ================================================================
 ERR ResMgrEmulatorNegativeTest::ErrConfigSetInvalidParams_()
+//  ================================================================
 {
     ERR err = JET_errSuccess;
 
@@ -86,7 +93,9 @@ HandleError:
     return err;
 }
 
+//  ================================================================
 ERR ResMgrEmulatorNegativeTest::ErrInitContextNull_()
+//  ================================================================
 {
     ERR err = JET_errSuccess;
 
@@ -104,7 +113,9 @@ HandleError:
     return err;
 }
 
+//  ================================================================
 ERR ResMgrEmulatorNegativeTest::ErrInitAlgorithmNull_()
+//  ================================================================
 {
     ERR err = JET_errSuccess;
 
@@ -126,7 +137,9 @@ HandleError:
     return err;
 }
 
+//  ================================================================
 ERR ResMgrEmulatorNegativeTest::ErrInitTwice_()
+//  ================================================================
 {
     ERR err = JET_errSuccess;
 
@@ -150,7 +163,9 @@ HandleError:
     return err;
 }
 
+//  ================================================================
 ERR ResMgrEmulatorNegativeTest::ErrExecuteNoInit_()
+//  ================================================================
 {
     ERR err = JET_errSuccess;
 
@@ -164,7 +179,9 @@ HandleError:
     return err;
 }
 
+//  ================================================================
 ERR ResMgrEmulatorNegativeTest::ErrExecuteTwice_()
+//  ================================================================
 {
     ERR err = JET_errSuccess;
 
@@ -189,7 +206,9 @@ HandleError:
     return err;
 }
 
+//  ================================================================
 ERR ResMgrEmulatorNegativeTest::ErrDumpStatsNoInit_()
+//  ================================================================
 {
     ERR err = JET_errSuccess;
 
@@ -203,7 +222,9 @@ HandleError:
     return err;
 }
 
+//  ================================================================
 ERR ResMgrEmulatorNegativeTest::ErrDumpStatsNoExecute_()
+//  ================================================================
 {
     ERR err = JET_errSuccess;
 
@@ -227,7 +248,9 @@ HandleError:
     return err;
 }
 
+//  ================================================================
 ERR ResMgrEmulatorNegativeTest::ErrDumpStatsTerm_()
+//  ================================================================
 {
     ERR err = JET_errSuccess;
 

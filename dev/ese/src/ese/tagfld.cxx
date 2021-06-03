@@ -3,7 +3,9 @@
 
 #include "std.hxx"
 
+// default values are set based on small pages (2/4/8kiB)
 WORD TAGFLD::fExtendedInfo = 0x4000 ;
+//WORD TAGFLD::fNull = 0x2000;
 WORD TAGFLD::maskIb = 0x1fff;
 
 
@@ -23,6 +25,7 @@ INLINE VOID DeleteEntryAndData(
 
     if( 0 != cbData )
     {
+        //  we have already shifted the data down by cbEntry so pbNextEntry has changes
 
         const BYTE * const      pbMaxNew        = pbMax - cbEntry;
         BYTE * const            pbDataNew       = pbData - cbEntry;
@@ -48,18 +51,20 @@ VOID MULTIVALUES::AddInstance(
     
     Assert( cMultiValuesCurr >= 2 );
 
+    //  shift to make room for new MVOFFSET
     UtilMemMove(
         PbStartOfMVData() + sizeof(MVOFFSET),
         PbStartOfMVData(),
         PbMax() - PbStartOfMVData() );
 
+    //  fix up offsets
     for ( ULONG imv = 0; imv < cMultiValuesCurr; imv++ )
     {
         DeltaIb( imv, sizeof(MVOFFSET) );
     }
 
     MVOFFSET    * const pmvoffAdd   = Rgmvoffs() + imvAdd;
-    *pmvoffAdd = USHORT( sizeof(MVOFFSET) + cbMultiValuesCurr );
+    *pmvoffAdd = USHORT( sizeof(MVOFFSET) + cbMultiValuesCurr );        //  implicitly clears high bit
     if ( fSeparatedLV )
     {
         Assert( Pheader()->FColumnCanBeSeparated() );
@@ -101,9 +106,11 @@ VOID MULTIVALUES::RemoveInstance( const ULONG itagSequence )
         PbMax() );
 
 
+    //  update MULTIVALUES members to reflect deleted instance
     m_cbMultiValues -= sizeof(MVOFFSET) + cbDataDelete;
     m_cMultiValues--;
 
+    //  update offsets
     ULONG imv;
     for ( imv = 0;
         imv < imvDelete;
@@ -121,6 +128,8 @@ VOID MULTIVALUES::RemoveInstance( const ULONG itagSequence )
         DeltaIb( imv, SHORT( -cbMVOffsetAndData ) );
     }
 
+    // only the first entry is compressed. if it is removed then the compression flag
+    // should be reset
     if( 0 == imvDelete )
     {
         Pheader()->ResetFCompressed();
@@ -146,11 +155,13 @@ VOID MULTIVALUES::UpdateInstance(
 
     if ( 0 != delta )
     {
+        //  shift data to accommodate updated instance
         UtilMemMove(
             pbDataReplace + pdataToSet->Cb(),
             pbDataNext,
             PbMax() - pbDataNext );
 
+        //  update offsets to reflect shifted data
         for ( ULONG imv = imvReplace + 1; imv < CMultiValues(); imv++ )
         {
             DeltaIb( imv, (SHORT)delta );
@@ -202,16 +213,19 @@ VOID TWOVALUES::UpdateInstance(
     Assert( 1 == itagSequence || 2 == itagSequence );
     if ( 1 == itagSequence )
     {
+        //  shift second value accordingly
         UtilMemMove(
             PbData() + pdataToSet->Cb(),
             PbData() + CbFirstValue(),
             CbSecondValue() );
 
+        //  copy in updated value
         RECCopyData(
             PbData(),
             pdataToSet,
             coltyp );
 
+        //  update length
         *m_pcbFirstValue = TVLENGTH( pdataToSet->Cb() );
     }
     else
@@ -239,6 +253,8 @@ VOID TAGFIELDS::ConvertTwoValuesToMultiValues(
     Assert( !pheader->FSeparated() );
     Assert( !pheader->FColumnCanBeSeparated() );
 
+    //  must be adding a 3rd instance, so make room for the
+    //  appropriate offsets array
     UtilMemMove(
         pbData + ( 3 * sizeof(MULTIVALUES::MVOFFSET) ) - sizeof(TWOVALUES::TVLENGTH),
         pbData,
@@ -250,6 +266,7 @@ VOID TAGFIELDS::ConvertTwoValuesToMultiValues(
     rgmvoffs[1] = USHORT( rgmvoffs[0] + cbFirstValue );
     rgmvoffs[2] = USHORT( rgmvoffs[1] + cbSecondValue );
 
+    //  copy in new instance
     RECCopyData(
         (BYTE *)rgmvoffs + rgmvoffs[2],
         pdataToSet,
@@ -269,6 +286,8 @@ VOID TAGFIELDS::InsertTagfld(
     const BOOL          fCompressedLV,
     const BOOL          fEncryptedLV )
 {
+    //  if pdataToInsert is NULL, we must be setting a column explicitly
+    //  to NULL to override a default value
     Assert( ( ptagfldInsert->FNull( NULL ) && NULL == pdataToInsert )
         || ( !ptagfldInsert->FNull( NULL ) && NULL != pdataToInsert ) );
     Assert( itagfldInsert <= CTaggedColumns() );
@@ -281,22 +300,26 @@ VOID TAGFIELDS::InsertTagfld(
     {
         const ULONG ibMoveDataFrom = Ptagfld( itagfldInsert )->Ib();
 
+        //  make room for the new tagged data
         BYTE* pbMoveFrom = PbData( itagfldInsert );
         UtilMemMove(
             pbMoveFrom + sizeof(TAGFLD) + cbDataToInsert,
             pbMoveFrom,
             PbMax() - pbMoveFrom );
 
+        //  make room for the new TAGFLD entry
         pbMoveFrom = (BYTE *)Ptagfld( itagfldInsert );
         UtilMemMove(
             pbMoveFrom + sizeof(TAGFLD),
             pbMoveFrom,
             ibMoveDataFrom - ( itagfldInsert * sizeof(TAGFLD) ) );
 
+        //  insert at the point we vacated, after making room for the new TAGFLD entry
         ibTagFld += ibMoveDataFrom;
     }
     else if ( CTaggedColumns() > 0 )
     {
+        //  append to the end, after making room the new TAGFLD entry
         BYTE* pbMoveFrom = PbStartOfTaggedData();
         UtilMemMove(
             pbMoveFrom + sizeof(TAGFLD),
@@ -305,13 +328,18 @@ VOID TAGFIELDS::InsertTagfld(
         ibTagFld += CbTaggedColumns();
     }
 
+    // IMPORTANT!!!!
+    // ptagfldInsert is in small page format, read fNull flag before trash it with SetIb()
+    // 
     BOOL fNullVal = ptagfldInsert->FNull( NULL );
     Assert( ibTagFld == USHORT( ibTagFld ));
     ptagfldInsert->SetIb( USHORT( ibTagFld ) );
 
+    //  update TAGFIELD members to reflect new TAGFLD
     m_cbTaggedColumns += sizeof(TAGFLD) + cbDataToInsert;
     m_cTaggedColumns++;
 
+    //  insert new data
     if ( cbDataToInsert > 0 )
     {
         BYTE    * pbInsert      = PbTaggedColumns() + ptagfldInsert->Ib();
@@ -320,6 +348,7 @@ VOID TAGFIELDS::InsertTagfld(
         Assert( !fNullVal || !FIsSmallPage() );
         if ( ptagfldInsert->FExtendedInfo() )
         {
+            //  reserve byte for extended info
             new( (TAGFLD_HEADER *)pbInsert ) TAGFLD_HEADER( coltyp, fSeparatedLV, fNullVal, fCompressedLV, fEncryptedLV );
             pbInsert += sizeof( TAGFLD_HEADER );
         }
@@ -333,6 +362,7 @@ VOID TAGFIELDS::InsertTagfld(
         }
     }
 
+    //  insert new TAGFLD
     UtilMemCpy(
         Ptagfld( itagfldInsert ),
         ptagfldInsert,
@@ -340,6 +370,7 @@ VOID TAGFIELDS::InsertTagfld(
     Assert( Ptagfld( itagfldInsert )->Ib() >= ( sizeof(TAGFLD) * CTaggedColumns() ) );
     Assert( Ptagfld( itagfldInsert )->Ib() <= CbTaggedColumns() );
     
+    //  just need to update tag array
     ULONG   itagfld;
     for ( itagfld = 0;
         itagfld < itagfldInsert;
@@ -347,7 +378,7 @@ VOID TAGFIELDS::InsertTagfld(
     {
         Ptagfld( itagfld )->DeltaIb( sizeof(TAGFLD) );
     }
-    for ( itagfld++;
+    for ( itagfld++;        //  skip inserted TAGFLD
         itagfld < CTaggedColumns();
         itagfld++ )
     {
@@ -362,6 +393,8 @@ VOID TAGFIELDS::ResizeTagfld(
     Assert( itagfldResize < CTaggedColumns() );
     Assert( 0 != delta );
 
+    //  shift data after this column as needed
+    //  to collapse space or make room
     if ( itagfldResize < CTaggedColumns() - 1 )
     {
         BYTE    * const pbMoveFrom  = PbData( itagfldResize+1 );
@@ -371,8 +404,10 @@ VOID TAGFIELDS::ResizeTagfld(
             CbTaggedColumns() - Ptagfld( itagfldResize+1 )->Ib() );
     }
 
+    //  update TAGFIELDS members to reflect new data
     m_cbTaggedColumns += delta;
 
+    //  update offsets
     for ( ULONG itagfld = itagfldResize+1;
         itagfld < CTaggedColumns();
         itagfld++ )
@@ -421,11 +456,13 @@ VOID TAGFIELDS::ReplaceTagfldData(
 
         if ( fSeparatedLV )
         {
+            //  force fSeparated flag to be set
             Assert( pheader->FColumnCanBeSeparated() );
             pheader->SetFSeparated();
         }
         else
         {
+            //  reset fSeparated flag
             pheader->ResetFSeparated();
         }
 
@@ -473,9 +510,11 @@ VOID TAGFIELDS::DeleteTagfld(
         cbDataDelete,
         PbMax() );
 
+    //  update TAGFLD members to reflect deleted TAGFLD
     m_cbTaggedColumns -= sizeof(TAGFLD) + cbDataDelete;
     m_cTaggedColumns--;
 
+    //  update offsets
     ULONG itagfld;
     for ( itagfld = 0;
         itagfld < itagfldDelete;
@@ -503,13 +542,14 @@ VOID TAGFIELDS::ConvertToTwoValues(
     Assert( itagfld < CTaggedColumns() );
     BYTE            * const pbData      = PbData( itagfld );
     const ULONG     cbDataCurr          = CbData( itagfld );
-    Assert( cbDataCurr <= JET_cbColumnMost );
+    Assert( cbDataCurr <= JET_cbColumnMost );       //  otherwise, it would have been LongText/Binary
 
     Assert( NULL != pdataToSet );
     ResizeTagfld(
         itagfld,
         sizeof(TAGFLD_HEADER) + sizeof(TWOVALUES::TVLENGTH) + pdataToSet->Cb() );
 
+    //  make room for the header and cbFirstValue
     UtilMemMove(
         pbData + sizeof(TAGFLD_HEADER) + sizeof(TWOVALUES::TVLENGTH),
         pbData,
@@ -550,6 +590,8 @@ VOID TAGFIELDS::ConvertToMultiValues(
     Assert( cbDataCurr >= sizeof(TAGFLD_HEADER) );
     const ULONG     cbDataCurrWithoutHeader = cbDataCurr - sizeof(TAGFLD_HEADER);
 
+    //  must already have a header (ie. LongValue or !g_fSmallPage),
+    //  just upgrade it to MultiValues
     Assert( NULL != Pheader( itagfld ) );
     Assert( pheader == Pheader( itagfld ) );
     Assert( pheader->FColumnCanBeSeparated() || !FIsSmallPage() );
@@ -564,6 +606,7 @@ VOID TAGFIELDS::ConvertToMultiValues(
         itagfld,
         ( 2 * sizeof(MULTIVALUES::MVOFFSET) ) + pdataToSet->Cb() );
 
+    //  make room for the offset info
     UtilMemMove(
         pbData + sizeof(TAGFLD_HEADER) + ( 2 * sizeof(MULTIVALUES::MVOFFSET) ),
         pbData + sizeof(TAGFLD_HEADER),
@@ -575,6 +618,8 @@ VOID TAGFIELDS::ConvertToMultiValues(
     rgmvoffs[1] = USHORT( ( 2 * sizeof(MULTIVALUES::MVOFFSET) )
                         + cbDataCurrWithoutHeader );
 
+    //  must be long values, so no need to do endian conversion
+//  RECCopyData( (BYTE *)rgmvoffs + rgmvoffs[1], pdataToSet, coltyp );
     Assert( !( rgmvoffs[0] & MULTIVALUES::maskFlags ) );
     Assert( !( rgmvoffs[1] & MULTIVALUES::maskFlags ) );
     UtilMemCpy(
@@ -629,11 +674,13 @@ ULONG TAGFIELDS::CbConvertTwoValuesToSingleValue(
 
         if ( 1 == itagSequence )
         {
+            //  remove first value, retain second value
             pbDataRemaining = tv.PbData() + tv.CbFirstValue();
             cbDataRemaining = tv.CbSecondValue();
         }
         else
         {
+            //  remove second value, retain first value
             pbDataRemaining = tv.PbData();
             cbDataRemaining = tv.CbFirstValue();
         }
@@ -641,11 +688,14 @@ ULONG TAGFIELDS::CbConvertTwoValuesToSingleValue(
         Assert( cbDataCurr > cbDataRemaining );
         cbShrink    = cbDataCurr - cbDataRemaining;
 
+        //  move remaining data to beginning of this TAGFLD<
+        //  since we have no more need for the TAGFLD_HEADER
         UtilMemMove(
             pbDataCurr,
             pbDataRemaining,
             cbDataRemaining );
 
+        //  shift rest of columns, if necessary
         if ( itagfld < CTaggedColumns() - 1 )
         {
             const BYTE  * const pbDataNextColumn    = PbData( itagfld+1 );
@@ -655,9 +705,11 @@ ULONG TAGFIELDS::CbConvertTwoValuesToSingleValue(
                 PbMax() - pbDataNextColumn );
         }
 
+        //  clear flags
         Assert( Ptagfld( itagfld )->FExtendedInfo() );
         Ptagfld( itagfld )->ResetFExtendedInfo();
 
+        //  update offsets
         for ( ULONG itagfldT = itagfld+1;
             itagfldT < CTaggedColumns();
             itagfldT++ )
@@ -668,8 +720,10 @@ ULONG TAGFIELDS::CbConvertTwoValuesToSingleValue(
     }
     else
     {
+        //  appending NULL, which is a NOP
     }
 
+    //  update size
     m_cbTaggedColumns -= cbShrink;
 
     return cbShrink;
@@ -706,8 +760,9 @@ ULONG TAGFIELDS::CbDeleteMultiValue(
         }
         else
         {
+            //  only one value will be left, so convert to non-multivalue
             Assert( 1 == itagSequence || 2 == itagSequence );
-            const ULONG     imvRemaining        = 2 - itagSequence;
+            const ULONG     imvRemaining        = 2 - itagSequence;     //  calculate remaining itagSequence and convert to imv
             const BOOL      fSeparatedInstance  = mv.FSeparatedInstance( imvRemaining );
             BYTE            * const pbMoveFrom  = mv.PbData( imvRemaining );
             const ULONG     cbMove              = mv.CbData( imvRemaining );
@@ -726,6 +781,8 @@ ULONG TAGFIELDS::CbDeleteMultiValue(
             {
                 if( 1 == itagSequence )
                 {
+                    // itagSequence 1 is the only instance that can be compressed in an MV
+                    // if that is being removed, reset the compression flag
                     pheader->ResetFCompressed();
                 }
                 
@@ -735,12 +792,15 @@ ULONG TAGFIELDS::CbDeleteMultiValue(
                 when the MULTIVALUES structure itself has
                 been separated?
 #else
+                //  if remaining instance is separated,
+                //  must now flag it as such in the
+                //  extended info
                 Assert( pheader->FColumnCanBeSeparated() || !FIsSmallPage() );
                 if ( fSeparatedInstance )
                     pheader->SetFSeparated();
                 else
                 {
-                    Assert( !pheader->FSeparated() );
+                    Assert( !pheader->FSeparated() );       //  should already be unset, but better safe than sorry
                     pheader->ResetFSeparated();
                 }
 #endif
@@ -750,6 +810,7 @@ ULONG TAGFIELDS::CbDeleteMultiValue(
             }
             else
             {
+                //  if no other flags set, then can get rid of header byte
                 Assert( !fSeparatedInstance );
                 Ptagfld( itagfld )->ResetFExtendedInfo();
                 pbMoveTo = (BYTE *)pheader;
@@ -765,6 +826,7 @@ ULONG TAGFIELDS::CbDeleteMultiValue(
         Assert( cbDataRemaining < CbData( itagfld ) );
         cbShrink = CbData( itagfld ) - cbDataRemaining;
 
+        //  shift rest of columns, if necessary
         if ( itagfld < CTaggedColumns() - 1 )
         {
             const BYTE  * const pbDataNextColumn    = PbData( itagfld+1 );
@@ -774,8 +836,10 @@ ULONG TAGFIELDS::CbDeleteMultiValue(
                 PbMax() - pbDataNextColumn );
         }
 
+        //  update size
         m_cbTaggedColumns -= cbShrink;
 
+        //  update offsets
         for ( ULONG itagfldT = itagfld+1;
             itagfldT < CTaggedColumns();
             itagfldT++ )
@@ -787,6 +851,7 @@ ULONG TAGFIELDS::CbDeleteMultiValue(
 
     else
     {
+        //  appending NULL, which is a NOP
     }
 
     return cbShrink;
@@ -896,7 +961,7 @@ ERR TAGFIELDS::ErrCheckUniqueMultiValues(
         && pheader->FMultiValues() )
     {
         Assert( !pheader->FSeparated() );
-        Assert( !pheader->FLongValue() );
+        Assert( !pheader->FLongValue() );           //  long values are handled in ErrFLDSetOneColumn()
         if ( pheader->FTwoValues() )
         {
             TWOVALUES   tv( PbData( itagfld ), CbData( itagfld ) );
@@ -932,6 +997,7 @@ ERR TAGFIELDS::ErrCheckUniqueMultiValues(
     }
     else
     {
+        //  overwriting the only instance, so no need to check anything
     }
 
     return err;
@@ -958,7 +1024,7 @@ ERR TAGFIELDS::ErrCheckUniqueNormalizedMultiValues(
                 dataToSet,
                 dataToSetNorm,
                 pnlv,
-                fFalse, 
+                fFalse, /* GUID collation does not affect uniqueness */
                 &fNormalizedDataToSetIsTruncated ) );
 
     CallR( ErrCheckUniqueMultiValues(
@@ -986,12 +1052,12 @@ ERR TAGFIELDS::ErrSetColumn(
     const BOOL      fUseDerivedBit              = ( grbit & grbitSetColumnUseDerivedBit );
     const BOOL      fEnforceUniqueMultiValues   = ( ( grbit & ( JET_bitSetUniqueMultiValues|JET_bitSetUniqueNormalizedMultiValues ) )
                                                     && NULL != pdataToSet
-                                                    && !FRECLongValue( pfield->coltyp ) );
+                                                    && !FRECLongValue( pfield->coltyp ) );  //  long value uniqueness is checked in ErrFLDSetOneColumn()
     const bool fLargePage = !FIsSmallPage();
-    const ULONG cbTagHeaderDefault = fLargePage ? sizeof( TAGFLD_HEADER ) : 0;
+    const ULONG cbTagHeaderDefault = fLargePage ? sizeof( TAGFLD_HEADER ) : 0;  // default tag header size for given page size
 
 #ifdef DEBUG
-    ULONG flagCodePath = 0;
+    ULONG flagCodePath = 0; // bit field to track code path
 #endif
 
     Assert( ptdbNil != pfucb->u.pfcb->Ptdb() );
@@ -1003,7 +1069,7 @@ ERR TAGFIELDS::ErrSetColumn(
     Assert( itagfld <= CTaggedColumns() );
     Assert( itagfld == CTaggedColumns()
         || !Ptagfld( itagfld )->FNull( this )
-        || cbTagHeaderDefault == CbData( itagfld ) );
+        || cbTagHeaderDefault == CbData( itagfld ) );       // If null, length is 0.
 
     const BOOL      fExists         = ( itagfld < CTaggedColumns()
                                         && Ptagfld( itagfld )->FIsEqual( fid, fUseDerivedBit ) );
@@ -1011,12 +1077,21 @@ ERR TAGFIELDS::ErrSetColumn(
         || itagfld == CTaggedColumns()
         || Ptagfld( itagfld )->FIsGreaterThan( fid, fUseDerivedBit ) );
 
+    //================================================
+    //  Specified column not found, so insert or append new
+    //================================================
     if ( !fExists )
     {
         Assert( flagCodePath |= 0x1 );
 
         ULONG cbField = tagfldNew.FExtendedInfo() ? sizeof( TAGFLD_HEADER ) : 0;
 
+        //  Adding NULL: In most cases, we do nothing.  However, there
+        //  is one specialised case where we have to insert a null entry.
+        //  This is the case where there are currently no instances of this
+        //  column in the record, and where there is also a default value
+        //  for this column.
+        //
         if ( pdataToSet == NULL )
         {
             Assert( flagCodePath |= 0x10 );
@@ -1027,11 +1102,15 @@ ERR TAGFIELDS::ErrSetColumn(
             {
                 Assert( flagCodePath |= 0x100 );
 
+                // INTENTIONALLY treat tagfldNew as small page format, 
+                // so we have an easy place to put fNull flag, later inside InsertTagfld(),
+                // we will grab fNull flag out before call SetIb() to trash it.
                 tagfldNew.SetFNull( NULL );
             }
             else
                 return JET_errSuccess;
         }
+        // add non-null (in JET term, null != empty, null is an empty empty, or a super empty)
         else
         {
             Assert( flagCodePath |= 0x20 );
@@ -1053,6 +1132,8 @@ ERR TAGFIELDS::ErrSetColumn(
             }
         }
 
+        //  will column fit?
+        //
         if ( cbRec + sizeof(TAGFLD) + cbField > (SIZE_T)REC::CbRecordMost( pfucb ) )
             return ErrERRCheck( JET_errRecordTooBig );
 
@@ -1068,6 +1149,9 @@ ERR TAGFIELDS::ErrSetColumn(
         pfucb->dataWorkBuf.DeltaCb( sizeof(TAGFLD) + cbField );
     }
 
+    //================================================
+    // Overwrite with a non-null value.
+    //================================================
     else if ( pdataToSet )
     {
 #ifdef DEBUG
@@ -1086,15 +1170,15 @@ ERR TAGFIELDS::ErrSetColumn(
         if ( fEnforceUniqueMultiValues && !Ptagfld( itagfld )->FNull( this ) )
         {
             ERR     errT;
-            Assert( !FRECLongValue( pfield->coltyp ) );
+            Assert( !FRECLongValue( pfield->coltyp ) );     //  long values are handled in ErrFLDSetOneColumn()
 
             NORM_LOCALE_VER nlv =
             {
-                SORTIDNil,
+                SORTIDNil, // Sort GUID
                 PinstFromPfucb( pfucb )->m_dwLCMapFlagsDefault,
-                0,
-                0,
-                L'\0',
+                0, // NLS Version
+                0, // NLS Defined Version
+                L'\0', // Locale name
             };
             OSStrCbCopyW( &nlv.m_wszLocaleName[0], sizeof(nlv.m_wszLocaleName), PinstFromPfucb( pfucb )->m_wszLocaleNameDefault );
 
@@ -1110,7 +1194,7 @@ ERR TAGFIELDS::ErrSetColumn(
             else
             {
                 errT = ErrCheckUniqueMultiValues(
-                                pfieldNil,
+                                pfieldNil,          //  not normalising, so don't need pfield
                                 *pdataToSet,
                                 itagfld,
                                 itagSequence,
@@ -1125,6 +1209,9 @@ ERR TAGFIELDS::ErrSetColumn(
             || pdataToSet->Cb() <= JET_cbColumnMost );
 
         const TAGFLD_HEADER     * const pheader     = Pheader( itagfld );
+        //--------------------------------
+        // overwrite multivalue with non-null
+        //--------------------------------
         if ( NULL != pheader
             && pheader->FMultiValues() )
         {
@@ -1133,6 +1220,8 @@ ERR TAGFIELDS::ErrSetColumn(
             INT         delta       = pdataToSet->Cb();
             Assert( !pheader->FSeparated() );
 
+            //================
+            // two values
             if ( pheader->FTwoValues() )
             {
                 Assert( flagCodePath |= 0x100 );
@@ -1141,6 +1230,7 @@ ERR TAGFIELDS::ErrSetColumn(
                 
                 TWOVALUES   tv( PbData( itagfld ), CbData( itagfld ) );
 
+                // large page format doesn't use two values
                 Assert( !fLargePage );
                 Assert( !pheader->FColumnCanBeSeparated() );
                 Assert( !( grbit & grbitSetColumnSeparated ) );
@@ -1148,10 +1238,13 @@ ERR TAGFIELDS::ErrSetColumn(
                 {
                     Assert( flagCodePath |= 0x1000 );
 
+                    // updating an existing instance
                     delta -= ( 1 == itagSequence ? tv.CbFirstValue() : tv.CbSecondValue() );
                     if ( cbRec + delta > (SIZE_T)REC::CbRecordMost( pfucb ) )
                         return ErrERRCheck( JET_errRecordTooBig );
 
+                    //  if value is growing, must make room for it
+                    //  if shrinking, cannot resize until after update is done
                     if ( delta > 0 )
                         ResizeTagfld( itagfld, delta );
 
@@ -1173,12 +1266,14 @@ ERR TAGFIELDS::ErrSetColumn(
                 {
                     Assert( flagCodePath |= 0x2000 );
 
+                    //  adding a new instance, so must convert to MULTIVALUES
                     delta += ( ( 3 * sizeof(MULTIVALUES::MVOFFSET) ) - sizeof(TWOVALUES::TVLENGTH) );
                     Assert( delta > 0 );
 
                     if ( cbRec + delta > (SIZE_T)REC::CbRecordMost( pfucb ) )
                         return ErrERRCheck( JET_errRecordTooBig );
 
+                    //  first make room for the new data
                     ResizeTagfld( itagfld, delta );
                     
                     ConvertTwoValuesToMultiValues(
@@ -1187,6 +1282,8 @@ ERR TAGFIELDS::ErrSetColumn(
                             pfield->coltyp );
                 }
             }
+            //================
+            // multivalues
             else
             {
                 Assert( flagCodePath |= 0x200 );
@@ -1196,6 +1293,7 @@ ERR TAGFIELDS::ErrSetColumn(
 
                 if ( 1 != itagSequence && ( grbit & grbitSetColumnCompressed ) )
                 {
+                    // only itag 1 can be compressed
                     return ErrERRCheck( errRECCompressionNotPossible );
                 }
 
@@ -1203,6 +1301,7 @@ ERR TAGFIELDS::ErrSetColumn(
                 {
                     Assert( flagCodePath |= 0x1000 );
 
+                    //  adding a new instance
                     delta += sizeof(MULTIVALUES::MVOFFSET);
                     Assert( delta > 0 );
 
@@ -1220,10 +1319,13 @@ ERR TAGFIELDS::ErrSetColumn(
                 {
                     Assert( flagCodePath |= 0x2000 );
 
+                    // updating an existing instance
                     delta -= mv.CbData( itagSequence-1 );
                     if ( cbRec + delta > (SIZE_T)REC::CbRecordMost( pfucb ) )
                         return ErrERRCheck( JET_errRecordTooBig );
 
+                    //  if value is growing, must make room for it
+                    //  if shrinking, cannot resize until after update is done
                     if ( delta > 0 )
                         ResizeTagfld( itagfld, delta );
 
@@ -1243,10 +1345,16 @@ ERR TAGFIELDS::ErrSetColumn(
 
             pfucb->dataWorkBuf.DeltaCb( delta );
         }
+        //--------------------------------
+        // overwrite single value or turn null to non-null
+        //--------------------------------
         else if ( 1 == itagSequence || Ptagfld( itagfld )->FNull( this ) )
         {
             Assert( flagCodePath |= 0x20 );
 
+            //  overwrite with non-NULL value: have to shift record data
+            //  Compute change in column size.
+            //
             const ULONG     cbTagField      = CbData( itagfld );
             INT             dbFieldData     = pdataToSet->Cb() + cbTagHeaderDefault - cbTagField;
 
@@ -1254,6 +1362,7 @@ ERR TAGFIELDS::ErrSetColumn(
             {
                 if ( FRECLongValue( pfield->coltyp ) )
                 {
+                    //  need header byte
                     dbFieldData += sizeof(TAGFLD_HEADER);
                 }
                 else
@@ -1266,6 +1375,7 @@ ERR TAGFIELDS::ErrSetColumn(
             if ( cbRec + dbFieldData > (SIZE_T)REC::CbRecordMost( pfucb ) )
                 return ErrERRCheck( JET_errRecordTooBig );
 
+            //  this column will no longer be NULL
             
             Ptagfld( itagfld )->ResetFNull( this );
 
@@ -1282,12 +1392,16 @@ ERR TAGFIELDS::ErrSetColumn(
 
             pfucb->dataWorkBuf.DeltaCb( dbFieldData );
         }
+        //--------------------------------
+        // add a 2nd value
+        //--------------------------------
         else
         {
             Assert( !(grbit & grbitSetColumnEncrypted) );
 
             if ( grbit & grbitSetColumnCompressed )
             {
+                // only itag 1 can be compressed
                 return ErrERRCheck( errRECCompressionNotPossible );
             }
             
@@ -1295,6 +1409,8 @@ ERR TAGFIELDS::ErrSetColumn(
 
             ULONG   cbGrow;
 
+            // adding a second instance, so must convert to TWOVALUES/MULTIVALUES
+            // tag column in large page ALWAYS turns into multivalues
             if ( NULL != pheader )
             {
                 Assert( flagCodePath |= 0x100 );
@@ -1307,6 +1423,7 @@ ERR TAGFIELDS::ErrSetColumn(
                 if ( cbRec + cbGrow > (SIZE_T)REC::CbRecordMost( pfucb ) )
                     return ErrERRCheck( JET_errRecordTooBig );
 
+                //  first make room for new data
                 ConvertToMultiValues(
                         itagfld,
                         pdataToSet,
@@ -1324,6 +1441,7 @@ ERR TAGFIELDS::ErrSetColumn(
                 if ( cbRec + cbGrow > (SIZE_T)REC::CbRecordMost( pfucb ) )
                     return ErrERRCheck( JET_errRecordTooBig );
 
+                //  first make room for new data
                 ConvertToTwoValues(
                     itagfld,
                     pdataToSet,
@@ -1336,15 +1454,23 @@ ERR TAGFIELDS::ErrSetColumn(
         }
     }
 
+    //================================================
+    // Overwriting non-null with null
+    //================================================
     else if ( !Ptagfld( itagfld )->FNull( this ) )
     {
         Assert( flagCodePath |= 0x3 );
 
+        // Ensure that we've found a field
+        //
         Assert( itagfld < CTaggedColumns() );
         Assert( Ptagfld( itagfld )->FIsEqual( fid, fUseDerivedBit ) );
 
         TAGFLD_HEADER* const pheader = Pheader( itagfld );
 
+        //--------------------------------
+        // Delete one from multivalues
+        //--------------------------------
         if ( NULL != pheader
             && pheader->FMultiValues() )
         {
@@ -1357,16 +1483,25 @@ ERR TAGFIELDS::ErrSetColumn(
             Assert( cbShrink < cbDataOld );
             pfucb->dataWorkBuf.DeltaCb( 0 - cbShrink );
         }
+        //--------------------------------
+        //  Overwrite single value with NULL
+        //--------------------------------
         else if ( 1 == itagSequence )
         {
             Assert( flagCodePath |= 0x20 );
 
+            //  Overwrite with NULL: In most cases, just delete the occurrence from
+            //  the record.  However, there is one rare case where we have to
+            //  leave behind a null entry.  This is the case where there are no
+            //  other instances of this column for this record, and where this
+            //  column has a default value.
             const ULONG     cbTagField      = CbData( itagfld );
             if ( FFIELDDefault( pfield->ffield )
                 && !( grbit & JET_bitSetRevertToDefaultValue ) )
             {
                 Assert( flagCodePath |= 0x100 );
 
+                // leave a null entry
                 const ULONG cbTagFieldDiff = cbTagField - cbTagHeaderDefault;
                 
                 if ( cbTagFieldDiff > 0 )
@@ -1389,15 +1524,22 @@ ERR TAGFIELDS::ErrSetColumn(
             {
                 Assert( flagCodePath |= 0x200 );
 
+                // delete everything
                 DeleteTagfld( itagfld );
                 pfucb->dataWorkBuf.DeltaCb( 0 - ( sizeof(TAGFLD) + cbTagField ) );
             }
         }
+        //--------------------------------
+        //  appending NULL, which is a NOP
+        //--------------------------------
         else
         {
             Assert( flagCodePath |= 0x30 );
         }
     }
+    //================================================
+    // Overwriting null with null.  Either revert to default or do nothing.
+    //================================================
     else
     {
         Assert( flagCodePath |= 0x4 );
@@ -1416,23 +1558,30 @@ ERR TAGFIELDS::ErrSetColumn(
     }
 
 #ifdef DEBUG
+    //================================
+    // validate this column when it is not deleted
     if ( 0x14 != flagCodePath && 0x223 != flagCodePath )
     {
         const TAGFLD* const ptagfld = Ptagfld( itagfld );
         const TAGFLD_HEADER* const pheader = Pheader( itagfld );
 
+        // tag column in large page MUST have TAGFLD_HEADER
         Assert( FIsSmallPage() || pheader );
 
         if ( pheader )
         {
+            // column type MUST be consistent with fLongValue flag
             Assert( !!FRECLongValue( pfield->coltyp ) == !!pheader->FLongValue() );
         }
         else
         {
+            // without header, long value column must be NULL
             Assert( !FRECLongValue( pfield->coltyp ) || ptagfld->FNull( NULL ) );
         }
     }
 
+    //================================
+    // validate whole record
     const REC   * prec                      = (REC *)pfucb->dataWorkBuf.Pv();
     const BYTE  * pbRecMax                  = (BYTE *)prec + pfucb->dataWorkBuf.Cb();
     const BYTE  * pbStartOfTaggedColumns    = prec->PbTaggedData();
@@ -1467,6 +1616,7 @@ ERR TAGFIELDS::ErrRetrieveColumn(
 
     if ( pfcbNil == pfcb )
     {
+        //  don't need any meta data info if we're not retrieving default values
         Assert( grbit & JET_bitRetrieveIgnoreDefault );
     }
     else
@@ -1478,6 +1628,7 @@ ERR TAGFIELDS::ErrRetrieveColumn(
 
         AssertValid( ptdb );
 
+        // RECIAccessColumn() should have already been called to verify FID.
         if ( fUseDMLLatchDBG )
             pfcb->EnterDML();
         Assert( fid <= ptdb->FidTaggedLast() );
@@ -1492,7 +1643,7 @@ ERR TAGFIELDS::ErrRetrieveColumn(
     Assert( itagfld <= CTaggedColumns() );
     Assert( itagfld == CTaggedColumns()
         || !Ptagfld( itagfld )->FNull( this )
-        || ( FIsSmallPage() ? 0 : sizeof( TAGFLD_HEADER ) ) == CbData( itagfld ) );
+        || ( FIsSmallPage() ? 0 : sizeof( TAGFLD_HEADER ) ) == CbData( itagfld ) );     // If null, length is 0.
 
 
     if ( itagfld < CTaggedColumns()
@@ -1543,6 +1694,8 @@ ERR TAGFIELDS::ErrRetrieveColumn(
                 }
             }
 
+            // If we reached here, our desired occurrence is not in the
+            // record.  Fall through to NullField.
         }
 
         else if ( 1 == itagSequence )
@@ -1566,6 +1719,7 @@ ERR TAGFIELDS::ErrRetrieveColumn(
 
         else
         {
+            //  non-existent itagSequence, so return NULL
         }
     }
 
@@ -1580,6 +1734,7 @@ ERR TAGFIELDS::ErrRetrieveColumn(
         if ( fUseDMLLatch )
             pfcb->EnterDML();
         
+        //  assert no infinite recursion
         Assert( dataRec.Pv() != ptdb->PdataDefaultRecord() );
 
         const FIELDFLAG ffield  = ptdb->PfieldTagged( columnid )->ffield;
@@ -1587,6 +1742,8 @@ ERR TAGFIELDS::ErrRetrieveColumn(
         {
             Assert( FFIELDDefault( ffield ) );
 
+            //  no occurrrences found, but a user-defined default value
+            //  exists and we are retrieving first occcurence.
             
             if ( fUseDMLLatch )
                 pfcb->LeaveDML();
@@ -1597,6 +1754,8 @@ ERR TAGFIELDS::ErrRetrieveColumn(
 
         else if ( FFIELDDefault( ffield ) )
         {
+            //  no occurrrences found, but a default value exists and
+            //  we are retrieving first occcurence.
             const ERR   errT    = ErrRECIRetrieveTaggedDefaultValue(
                                         pfcb,
                                         columnid,
@@ -1613,6 +1772,8 @@ ERR TAGFIELDS::ErrRetrieveColumn(
             pfcb->LeaveDML();
     }
     
+    //  null column common exit point
+    //
     pdataRetrieveBuffer->Nullify();
     return ErrERRCheck( JET_wrnColumnNull );
 }
@@ -1637,6 +1798,7 @@ ULONG TAGFIELDS::UlColumnInstances(
     if ( fUseDMLLatchDBG )
         pfcb->EnterDML();
 
+    // RECIAccessColumn() should have already been called to verify FID.
     Assert( fid >= ptdb->FidTaggedFirst() );
     Assert( fid <= ptdb->FidTaggedLast() );
 
@@ -1659,7 +1821,7 @@ ULONG TAGFIELDS::UlColumnInstances(
     Assert( itagfld <= CTaggedColumns() );
     Assert( itagfld == CTaggedColumns()
         || !Ptagfld( itagfld )->FNull( this )
-        || ( FIsSmallPage() ? 0 : sizeof( TAGFLD_HEADER ) ) == CbData( itagfld ) );
+        || ( FIsSmallPage() ? 0 : sizeof( TAGFLD_HEADER ) ) == CbData( itagfld ) );     // If null, length is 0.
 
     if ( itagfld < CTaggedColumns()
         && Ptagfld( itagfld )->FIsEqual( fid, fUseDerivedBit ) )
@@ -1708,6 +1870,8 @@ ULONG TAGFIELDS::UlColumnInstances(
 
         if ( FFIELDDefault( pfcb->Ptdb()->PfieldTagged( columnid )->ffield ) )
         {
+            //  no occurrrences found, but a default value exists
+            //
             ulInstances = 1;
             Assert( fDefaultValue );
         }
@@ -1744,14 +1908,22 @@ ERR TAGFIELDS::ErrScan(
     {
         Assert( dataRec.Cb() == pfucb->kdfCurr.data.Cb() );
         
+        // Only need to refresh ptagfld if we're accessing the database,
+        // in which case we must have the page latched.  Note that we
+        // may have a page latched, but we may not be accessing the
+        // the database (ie. no refresh needed).
         Assert( Pcsr( pfucb )->FLatched() );
     }
 
+    // Verify we're in a transaction in order to ensure read-consistency
+    // in case we have a page latch and need to release it while scanning/
     Assert( pfucb->ppib->Level() > 0 );
     Assert( pfcb != pfcbNil );
     Assert( pdataField != NULL );
     Assert( pcolumnidRetrieved != NULL );
 
+    // If itagSequence == 0, then we're counting the number of tagged columns
+    // in the record and we will output the result in pitagSequenceRetrieved.
     Assert( itagSequence != 0 || pitagSequenceRetrieved != NULL );
 
     Assert( pfcb->Ptdb() != ptdbNil );
@@ -1789,6 +1961,8 @@ ERR TAGFIELDS::ErrScan(
             }
             if ( fBadColumn )
             {
+                //  log event
+                //
                 FireWall( "BadTaggedFieldId" );
                 UtilReportEvent( eventWarning, REPAIR_CATEGORY, REPAIR_BAD_COLUMN_ID, 0, NULL );
                 break;
@@ -1796,8 +1970,12 @@ ERR TAGFIELDS::ErrScan(
         }
 
 
+        // Check for any "gaps" caused by default values (if we
+        // want default values retrieved).
         if ( fRetrieveDefaults )
         {
+            //  make copy of tagfld so we don't have to worry about losing the page
+            //  latch on column access check
             const TAGFLD    * ptagfldT          = Ptagfld( itagfld );
             TAGFLD          tagfldT( ptagfldT->Fid(), ptagfldT->FDerived() );
 
@@ -1850,6 +2028,7 @@ ERR TAGFIELDS::ErrScan(
                         if ( pitagSequenceRetrieved != NULL )
                             *pitagSequenceRetrieved = 1;
 
+                        //  assert no infinite recursion
                         Assert( dataRec.Pv() != ptdbT->PdataDefaultRecord() );
 
                         if ( fUseDMLLatch )
@@ -1867,6 +2046,7 @@ ERR TAGFIELDS::ErrScan(
                         if ( pitagSequenceRetrieved != NULL )
                             *pitagSequenceRetrieved = 1;
 
+                        //  assert no infinite recursion
                         Assert( dataRec.Pv() != ptdbT->PdataDefaultRecord() );
                         err = ErrRECIRetrieveTaggedDefaultValue( pfcbT, columnidCurr, pdataField );
                         Assert( wrnRECCompressed != err );
@@ -1903,9 +2083,13 @@ ERR TAGFIELDS::ErrScan(
 
             if ( fRefreshNeeded )
             {
+                //  verify pointers didn't change - we should not lose latch
+                //  because we shouldn't have to consult catalog
                 Assert( pfucb->kdfCurr.data == dataSav );
             }
 #endif
+            //  template column obtained from either TDB or from record,
+            //  so it must exist
             err = JET_errSuccess;
         }
         else
@@ -1916,6 +2100,8 @@ ERR TAGFIELDS::ErrScan(
 
             if ( fRefreshNeeded )
             {
+                // We may have invalidated our pointer if we had to give
+                // up the latch. Force refresh.
                 Refresh( pfucb->kdfCurr.data );
             }
         }
@@ -1925,10 +2111,14 @@ ERR TAGFIELDS::ErrScan(
         CallSx( err, JET_errColumnNotFound );
         if ( JET_errColumnNotFound == err )
         {
+            // Column not visible to this session.  Skip to next one.
         }
 
         else if ( Ptagfld( itagfld )->FNull( this ) )
         {
+            // If there's an explicit null entry, it should be the only
+            // occurrence of this fid.  Also the only reason for an explict
+            // null entry is to override a default value.
             Assert( !Ptagfld( itagfld )->FExtendedInfo() || !FIsSmallPage() );
             Assert( ( FIsSmallPage() ? 0 : sizeof( TAGFLD_HEADER ) ) == CbData( itagfld ) );
             Assert( ulNumOccurrences < itagSequence || 0 == itagSequence );
@@ -1938,6 +2128,8 @@ ERR TAGFIELDS::ErrScan(
             pfcb->LeaveDML();
 #endif
 
+            // Only count columns explicitly set to null if the RetrieveNulls
+            // flag is passed.  Otherwise, just skip it.
             if ( fRetrieveNulls && ++ulNumOccurrences == itagSequence )
             {
                 Assert( itagSequence != 0 );
@@ -2011,14 +2203,17 @@ ERR TAGFIELDS::ErrScan(
             }
         }
 
+        //  if we got here, we haven't found the instance we're looking for
         Assert( ulNumOccurrences < itagSequence || 0 == itagSequence );
 
         columnidCurr = ColumnidRECNextTaggedForScan( ptdb, columnidCurr );
-    }
+    }   // while ( itagfld < CTaggedColumns() )
 
 
     if ( fRetrieveDefaults )
     {
+        // Take snapshot of FidTaggedLast.  Even if someone's adding
+        // columns, we don't have access to it anyways.
         FID fidTaggedLast = ptdb->FidTaggedLast();
 
         for( ;
@@ -2070,6 +2265,7 @@ ERR TAGFIELDS::ErrScan(
                     if ( pitagSequenceRetrieved != NULL )
                         *pitagSequenceRetrieved = 1;
 
+                    //  assert no infinite recursion
                     Assert( dataRec.Pv() != ptdbT->PdataDefaultRecord() );
 
                     if ( fUseDMLLatch )
@@ -2087,6 +2283,7 @@ ERR TAGFIELDS::ErrScan(
                     if ( pitagSequenceRetrieved != NULL )
                         *pitagSequenceRetrieved = 1;
 
+                    //  assert no infinite recursion
                     Assert( dataRec.Pv() != ptdbT->PdataDefaultRecord() );
                     err = ErrRECIRetrieveTaggedDefaultValue( pfcbT, columnidCurr, pdataField );
                     Assert( wrnRECCompressed != err );
@@ -2102,10 +2299,13 @@ ERR TAGFIELDS::ErrScan(
         }
     }
 
+    // If we reached here, no more tagged columns.
     *pcolumnidRetrieved = 0;
     if ( pitagSequenceRetrieved != NULL )
         *pitagSequenceRetrieved = ( itagSequence == 0 ? ulNumOccurrences : 0 );
 
+    //  null column common exit point
+    //
     pdataField->Nullify();
     return ErrERRCheck( JET_wrnColumnNull );
 }
@@ -2122,7 +2322,7 @@ ERR TAGFIELDS::ErrAffectLongValuesInWorkBuf(
     BYTE *          pbDataDecrypted = NULL;
 
 #ifdef DEBUG
-    const ULONG     cTaggedColumns  = CTaggedColumns();
+    const ULONG     cTaggedColumns  = CTaggedColumns();     //  snapshot original count for debugging
     const REC       * prec          = (REC *)( pfucb->dataWorkBuf.Pv() );
 
     Unused( cTaggedColumns );
@@ -2137,6 +2337,11 @@ ERR TAGFIELDS::ErrAffectLongValuesInWorkBuf(
     Assert( cbThreshold < (ULONG)g_cbPage );
     Assert( cbThreshold >= (ULONG)LvId::CbLidFromCurrFormat( pfucb ) );
 
+    //  WARNING: This function performs LV updates and also modifies
+    //  the copy buffer, so if this function returns an error and
+    //  the LV updates are rolled back, it is up to the caller to
+    //  ensure that either the copy buffer is discarded or the
+    //  original copy buffer is re-instated
     Assert( pfucb->ppib->Level() > 0 );
     Assert( lvaffectSeparateAll == lvaffect
         || ( lvaffectReferenceAll == lvaffect && FFUCBInsertCopyPrepared( pfucb ) ) );
@@ -2170,12 +2375,23 @@ ERR TAGFIELDS::ErrAffectLongValuesInWorkBuf(
             const ULONG     cbColumnToRemove    = CbData( itagfld );
             Assert( !FCOLUMNIDTemplateColumn( columnidCurr ) );
 
+            //  Case where we must remove the column:
+            //  column not visible to this session.  Since the
+            //  column exists in this session's record, the column
+            //  could not have been version-added by someone else.
+            //  Therefore, it must have been deleted by this session,
+            //  or deleted and committed before this transaction began.
 #ifdef DEBUG
             pfucb->u.pfcb->EnterDML();
             Assert( FFIELDDeleted( ptdb->PfieldTagged( columnidCurr )->ffield ) );
             pfucb->u.pfcb->LeaveDML();
 #endif
 
+            //  if SeparateAll, must first deref all LVs before removing
+            //  them from the record
+            //  if ReferenceAll, don't deref because we're coming
+            //  from InsertCopy and the only ref belongs to the
+            //  original record
             if ( lvaffectSeparateAll == lvaffect
                 && NULL != pheader
                 && pheader->FColumnCanBeSeparated() )
@@ -2195,6 +2411,8 @@ ERR TAGFIELDS::ErrAffectLongValuesInWorkBuf(
                     {
                         if ( mv.FSeparatedInstance( imv ) )
                         {
+                            //  set flag so that on prepCancel, delta RCE
+                            //  will be properly rolled back
                             FUCBSetUpdateSeparateLV( pfucb );
                             LvId lidT = LidOfSeparatedLV( mv.PbData( imv ), mv.CbData( imv ) );
                             Call( ErrRECAffectSeparateLV( pfucb, &lidT, fLVDereference ) );
@@ -2215,6 +2433,9 @@ ERR TAGFIELDS::ErrAffectLongValuesInWorkBuf(
             DeleteTagfld( itagfld );
             pfucb->dataWorkBuf.DeltaCb( 0 - ( sizeof(TAGFLD) + cbColumnToRemove ) );
 
+            //  don't increment itagfld, so we will retrieve whatever
+            //  tagged column now occupies the space vacated by
+            //  the deleted column
             continue;
         }
 
@@ -2228,6 +2449,9 @@ ERR TAGFIELDS::ErrAffectLongValuesInWorkBuf(
             switch ( lvaffect )
             {
                 case lvaffectSeparateAll:
+                    //  note that we do not separate those long values that are
+                    //  so short that they take even less space in a record
+                    //  than a LID for separated long value would.
                     if ( pheader->FMultiValues() )
                     {
                         Assert( !fEncrypted );
@@ -2250,6 +2474,8 @@ ERR TAGFIELDS::ErrAffectLongValuesInWorkBuf(
                                 const ULONG     cbData      = mv.CbData( imv );
                                 BYTE            rgbT[ sizeof( LvId ) ];
                                 
+                                //  set flag so that on prepCancel, insert RCE for
+                                //  this new separated LV will be properly rolled back
                                 FUCBSetUpdateSeparateLV( pfucb );
                         
                                 dataField.SetPv( mv.PbData( imv ) );
@@ -2269,6 +2495,9 @@ ERR TAGFIELDS::ErrAffectLongValuesInWorkBuf(
                                     dataDecompressed.SetPv( pbDecompressed );
                                     dataDecompressed.SetCb( cbActual );
 
+                                    // we are decompressing and then recompressing the data.
+                                    // to optimize this we could just pass the compressed data to 
+                                    // ErrRECSeparatedLV, along with the logical size
                                     err = ErrRECSeparateLV(
                                             pfucb,
                                             &dataDecompressed,
@@ -2293,6 +2522,7 @@ ERR TAGFIELDS::ErrAffectLongValuesInWorkBuf(
                                 }
                                 Assert( JET_wrnCopyLongValue == err );
 
+                                // The newly generated LID should obey the current format
                                 Assert( lid.FLidObeysCurrFormat( pfucb ) );
 
                                 const INT cbLid = CbLVSetLidInRecord( rgbT, sizeof( rgbT ), lid );
@@ -2313,6 +2543,7 @@ ERR TAGFIELDS::ErrAffectLongValuesInWorkBuf(
                         if ( cbColumnShrink > 0 )
                         {
                             ResizeTagfld( itagfld, 0 - cbColumnShrink );
+                            //  update record size
                             pfucb->dataWorkBuf.DeltaCb( 0 - cbColumnShrink );
                         }
                     }
@@ -2325,6 +2556,8 @@ ERR TAGFIELDS::ErrAffectLongValuesInWorkBuf(
 
                         Assert( !fEncrypted == !pheader->FEncrypted() );
 
+                        //  set flag so that on prepCancel, insert RCE for
+                        //  this new separated LV will be properly rolled back
                         FUCBSetUpdateSeparateLV( pfucb );
 
                         dataField.SetPv( PbData( itagfld ) + sizeof(TAGFLD_HEADER) );
@@ -2385,6 +2618,7 @@ ERR TAGFIELDS::ErrAffectLongValuesInWorkBuf(
                         }
                         Assert( JET_wrnCopyLongValue == err );
 
+                        // The newly generated LID should obey the current efv
                         Assert( lid.FLidObeysCurrFormat( pfucb ) );
 
                         if ( pbDataDecrypted )
@@ -2402,6 +2636,7 @@ ERR TAGFIELDS::ErrAffectLongValuesInWorkBuf(
                         pheader->ResetFEncrypted();
                         pheader->SetFSeparated();
 
+                        //  update record size
                         pfucb->dataWorkBuf.DeltaCb( 0 - cbShrink );
                     }
                     break;
@@ -2416,12 +2651,15 @@ ERR TAGFIELDS::ErrAffectLongValuesInWorkBuf(
                         {
                             if ( mv.FSeparatedInstance( imv ) )
                             {
+                                //  set flag so that on prepCancel, delta RCE's will
+                                //  be properly rolled back
                                 FUCBSetUpdateSeparateLV( pfucb );
                                 const LvId lidOld = LidOfSeparatedLV( mv.PbData( imv ), mv.CbData( imv ) );
                                 LvId lidNew = lidOld;
                                 Call( ErrRECAffectSeparateLV( pfucb, &lidNew, fLVReference ) );
                                 if ( JET_wrnCopyLongValue == err )
                                 {
+                                    // long value got burst, update LID
                                     Assert( lidNew > lidOld );
                                     Assert( lidNew.FLidObeysCurrFormat( pfucb ) );
 
@@ -2431,6 +2669,14 @@ ERR TAGFIELDS::ErrAffectLongValuesInWorkBuf(
                                     }
                                     else
                                     {
+                                        // This case is an esoteric artifact of upgrading LIDs from 32-bit to 64-bit.
+                                        // While incrementing refcount on LVs, the LV can potentially be burst returning a new LID.
+                                        // This could cause us to go from a LID32 to a LID64, potentially increasing record size.
+                                        // So we need to move data around and resize the tag field to handle this properly.
+                                        // There is also a possibility now that this code path may return JET_errRecordTooBig.
+                                        // Since we are coming in here from InsertCopy, that would be really weird for clients to
+                                        // suddenly get JET_errRecordTooBig for records that they were able to store previously.
+                                        // But this is the best we can do in this scenario.
                                         BYTE rgbT[ sizeof( LvId ) ];
                                         const INT cbLid = CbLVSetLidInRecord( rgbT, sizeof( rgbT ), lidNew );
                                         const INT cbColumnExpand = cbLid - lidOld.Cb();
@@ -2442,6 +2688,7 @@ ERR TAGFIELDS::ErrAffectLongValuesInWorkBuf(
                                         }
 
                                         ResizeTagfld( itagfld, cbColumnExpand );
+                                        //  update record size
                                         pfucb->dataWorkBuf.DeltaCb( cbColumnExpand );
 
                                         dataField.SetPv( rgbT );
@@ -2454,6 +2701,8 @@ ERR TAGFIELDS::ErrAffectLongValuesInWorkBuf(
                     }
                     else if ( pheader->FSeparated() )
                     {
+                        //  set flag so that on prepCancel, delta RCE's will
+                        //  be properly rolled back
                         FUCBSetUpdateSeparateLV( pfucb );
                         const INT cbData = CbData( itagfld ) - sizeof( TAGFLD_HEADER );
                         const LvId lidOld = LidOfSeparatedLV( PbData( itagfld ) + sizeof(TAGFLD_HEADER), cbData );
@@ -2461,6 +2710,7 @@ ERR TAGFIELDS::ErrAffectLongValuesInWorkBuf(
                         Call( ErrRECAffectSeparateLV( pfucb, &lidNew, fLVReference ) );
                         if ( JET_wrnCopyLongValue == err )
                         {
+                            // long value got burst, update LID
                             Assert( lidNew > lidOld );
                             Assert( lidNew.FLidObeysCurrFormat( pfucb ) );
 
@@ -2470,6 +2720,14 @@ ERR TAGFIELDS::ErrAffectLongValuesInWorkBuf(
                             }
                             else
                             {
+                                // This case is an esoteric artifact of upgrading LIDs from 32-bit to 64-bit.
+                                // While incrementing refcount on LVs, the LV can potentially be burst returning a new LID.
+                                // This could cause us to go from a LID32 to a LID64, potentially increasing record size.
+                                // So we need to move data around and resize the tag field to handle this properly.
+                                // There is also a possibility now that this code path may return JET_errRecordTooBig.
+                                // Since we are coming in here from InsertCopy, that would be really weird for clients to
+                                // suddenly get JET_errRecordTooBig for records that they were able to store previously.
+                                // But this is the best we can do in this scenario.
                                 const INT cbColumnExpand = lidNew.Cb() - lidOld.Cb();
                                 if ( pfucb->dataWorkBuf.Cb() + cbColumnExpand > REC::CbRecordMost( pfucb ) )
                                 {
@@ -2477,6 +2735,7 @@ ERR TAGFIELDS::ErrAffectLongValuesInWorkBuf(
                                 }
 
                                 ResizeTagfld( itagfld, cbColumnExpand );
+                                //  update record size
                                 pfucb->dataWorkBuf.DeltaCb( cbColumnExpand );
 
                                  CbLVSetLidInRecord( PbData( itagfld ) + sizeof( TAGFLD_HEADER ), cbData + cbColumnExpand, lidNew );
@@ -2494,9 +2753,12 @@ ERR TAGFIELDS::ErrAffectLongValuesInWorkBuf(
 
         itagfld++;
 
-    }
+    }   //  while ( itagfld < CTaggedColumns() )
 
 HandleError:
+        //  this function should never increase the size of the record
+        //  unless we are referencing LVs and an the LV was burst
+        //  (in fact, we typically call this function to free up record space)
         Assert( JET_errRecordTooBig != err || lvaffectReferenceAll == lvaffect );
 
         if ( pbDataDecrypted )
@@ -2553,6 +2815,7 @@ ERR TAGFIELDS::ErrDereferenceLongValuesInRecord(
                         CallR( ErrRECAffectSeparateLV( pfucb, &lidToDeref, fLVDereference ) );
                         Assert( JET_wrnCopyLongValue != err );
 
+                        //  re-latch for next iteration
                         CallR( ErrDIRGet( pfucb ) );
                         Refresh( pfucb->kdfCurr.data );
                         mv.Refresh( PbData( itagfld ), CbData( itagfld ) );
@@ -2580,6 +2843,7 @@ ERR TAGFIELDS::ErrDereferenceLongValuesInRecord(
                         Assert( JET_wrnCopyLongValue != err );
                     }
 
+                    //  re-latch for next iteration
                     CallR( ErrDIRGet( pfucb ) );
                     Refresh( pfucb->kdfCurr.data );
                 }
@@ -2621,6 +2885,7 @@ VOID TAGFIELDS::CopyTaggedColumns(
             {
                 if ( ptagfld->FDerived() )
                 {
+                    //  shouldn't have seen yet any derived columns with the derived bit not set
                     Assert( !fESE97DerivedColumnsExist );
                     fESE98DerivedColumnsExist = fTrue;
                 }
@@ -2641,10 +2906,12 @@ VOID TAGFIELDS::CopyTaggedColumns(
                                             (BYTE *)pfucbDest->dataWorkBuf.Pv()
                                             + pfucbDest->dataWorkBuf.Cb() );
 
+    //  verify currently no tagged data
     Assert( (BYTE *)rgtagfldDest
         == ( (REC *)pfucbDest->dataWorkBuf.Pv() )->PbTaggedData() );
 
 
+    //  if both ESE97 and ESE98 derived columns exist, must copy ESE97 derived columns first
     const BOOL  fNeedSeparatePassForESE97DerivedColumns     = ( fESE97DerivedColumnsExist
                                                                 && fESE98DerivedColumnsExist );
     if ( fNeedSeparatePassForESE97DerivedColumns )
@@ -2675,6 +2942,7 @@ VOID TAGFIELDS::CopyTaggedColumns(
                     Assert( mpcolumnidcolumnidTagged[fidSrc-fidTaggedLeast] <= fidSrc );
                     Assert( !ptagfld->FDerived() );
 
+                    //  hit the non-derived columns, so should be no more derived columns left
                     break;
                 }
 
@@ -2682,8 +2950,12 @@ VOID TAGFIELDS::CopyTaggedColumns(
                     == pfucbDest->u.pfcb->Ptdb()->PfcbTemplateTable()->Ptdb()->FidTaggedLast() );
                 Assert( fidSrc <= pfucbDest->u.pfcb->Ptdb()->PfcbTemplateTable()->Ptdb()->FidTaggedLast() );
 
+                //  ignore ESE98 derived columns
                 if ( !ptagfld->FDerived() )
                 {
+                    // If column belongs to base table, then FID will not have changed,
+                    // since base table's DDL is fixed.  Thus, we don't have to bother
+                    // updating the FID in the destination record.
                     new( rgtagfldDest + itagfldToCopy ) TAGFLD( fidSrc, fTrue );
                     Assert( rgtagfldDest[itagfldToCopy].FDerived() );
                     rgtagfldDest[itagfldToCopy].SetIb( ibDataDest );
@@ -2763,6 +3035,7 @@ VOID TAGFIELDS::CopyTaggedColumns(
                         Assert( ptdbSrc->FESE97DerivedTable() );
                         if ( fNeedSeparatePassForESE97DerivedColumns )
                         {
+                            //  ESE97 derived columns were copied in the previous pass
                             continue;
                         }
                     }
@@ -2770,6 +3043,9 @@ VOID TAGFIELDS::CopyTaggedColumns(
                     fDerivedDest = fTrue;
                 }
 
+                // If column belongs to base table, then FID will not have changed,
+                // since base table's DDL is fixed.  Thus, we don't have to bother
+                // updating the FID in the destination record.
                 fidDest = fidSrc;
             }
 
@@ -2860,6 +3136,11 @@ ERR TAGFIELDS::ErrUpdateSeparatedLongValuesAfterCopy(
                                     lidSrc,
                                     &lidDest ) );
 
+                        // During table copy (e.g. defrag), special care is taken to generate an
+                        // LV tree with LIDs that are the same size as the LIDs in the src tree.
+                        // This allows the records to stay the same size and avoid restructuring
+                        // of the tag field.
+                        // Breaking this assumption will cause data corruption !
                         EnforceSz( lidSrc.Cb() == lidDest.Cb(), "DataCorruptionLidSizeMismatch" );
 
                         CbLVSetLidInRecord( pbLid, cbLid, lidDest );
@@ -2885,6 +3166,11 @@ ERR TAGFIELDS::ErrUpdateSeparatedLongValuesAfterCopy(
                                 lidSrc,
                                 &lidDest ) );
 
+                    // During table copy (e.g. defrag), special care is taken to generate an
+                    // LV tree with LIDs that are the same size as the LIDs in the src tree.
+                    // This allows the records to stay the same size and avoid restructuring
+                    // of the tag field.
+                    // Breaking this assumption will cause data corruption !
                     EnforceSz( lidSrc.Cb() == lidDest.Cb(), "DataCorruptionLidSizeMismatch" );
 
                     CbLVSetLidInRecord( pbLid, cbLid, lidDest );
@@ -2966,6 +3252,7 @@ ERR TAGFIELDS::ErrCheckLongValues(
             }
             else
             {
+                //  should be LV
                 Assert( fFalse );
             }
         }
@@ -3063,6 +3350,7 @@ BOOL MULTIVALUES::FValidate(
                 return fFalse;
             }
 
+            // It is safe to access this value now because we have verified ibNext
             const BYTE*     pbLid = PbData( imv );
             const LvId      lid = LidOfSeparatedLV( pbLid, ibNext - ibCurr );
 
@@ -3139,12 +3427,14 @@ BOOL TAGFIELDS::FValidate(
         {
             if ( fSawNonDerived )
             {
+                //  all derived columns must come first
                 (*pcprintf)( "Derived/NonDerived columns out of order.\r\n" );
                 AssertSz( fFalse, "Derived/NonDerived columns out of order." );
                 return fFalse;
             }
             if ( ptagfld->Fid() <= fidPrev )
             {
+                //  FIDs must be monotonically increasing
                 (*pcprintf)( "Columns are not in monotonically-increasing FID order (FID %d <= FID %d).\r\n", ptagfld->Fid(), fidPrev );
                 AssertSz( fFalse, "Columns are not in monotonically-increasing FID order." );
                 return fFalse;
@@ -3154,6 +3444,7 @@ BOOL TAGFIELDS::FValidate(
         {
             if ( ptagfld->Fid() <= fidPrev )
             {
+                //  FIDs must be monotonically increasing
                 (*pcprintf)( "Columns are not in monotonically-increasing FID order (FID %d <= FID %d).\r\n", ptagfld->Fid(), fidPrev );
                 AssertSz( fFalse, "Columns are not in monotonically-increasing FID order." );
                 return fFalse;
@@ -3164,7 +3455,7 @@ BOOL TAGFIELDS::FValidate(
             fSawNonDerived = fTrue;
         }
 
-        fidPrev = ptagfld->Fid();
+        fidPrev = ptagfld->Fid();           //  save off FID for next iteration
         const ULONG ibNext = ( itagfld < ( CTaggedColumns() - 1 ) ? Ptagfld( itagfld + 1 )->Ib() : CbTaggedColumns() );
 
         if ( ptagfld->Ib() > ibNext )
@@ -3174,11 +3465,14 @@ BOOL TAGFIELDS::FValidate(
             return fFalse;
         }
 
+        //  if we needed to extract the length of the current TAGFLD, we can
+        //  now do it because we've validated the ib of this TAGFLD
 
         if ( ptagfld->FNull( this ) )
         {
             if ( ptagfld->FExtendedInfo() && FIsSmallPage() )
             {
+                //  these two bits are mutually exclusive
                 (*pcprintf)( "TAGFLD %d has both NULL and ExtendedInfo flags set.\r\n", ptagfld->Fid() );
                 AssertSz( fFalse, "TAGFLD has both NULL and ExtendedInfo flags set." );
                 return fFalse;
@@ -3194,6 +3488,7 @@ BOOL TAGFIELDS::FValidate(
                 }
                 else
                 {
+                    //  if last column is NULL, it must point to the end of the tagged data
                     ( *pcprintf )( "Last TAGFLD is NULL but does not point to the end of the tagged data.\r\n" );
                     AssertSz( fFalse, "Last TAGFLD is NULL but does not point to the end of the tagged data." );
                     return fFalse;
@@ -3205,12 +3500,14 @@ BOOL TAGFIELDS::FValidate(
         {
             const TAGFLD_HEADER     * const pheader     = Pheader( itagfld );
 
+            //  these are already checked, so just assert
             Assert( NULL != pheader );
             Assert( (BYTE *)pheader >= PbStartOfTaggedData() );
             Assert( (BYTE *)pheader <= PbStartOfTaggedData() + CbTaggedData() );
 
             if ( *(BYTE *)pheader & BYTE( ~TAGFLD_HEADER::maskFlags ) )
             {
+                //  these bits should be unused
                 (*pcprintf)( "TAGFLD header (%x) has invalid bits set.\r\n", *(BYTE*)pheader );
                 AssertSz( fFalse, "TAGFLD header has invalid bits set." );
                 return fFalse;
@@ -3220,6 +3517,9 @@ BOOL TAGFIELDS::FValidate(
                 && !pheader->FMultiValues()
                 && FIsSmallPage() )
             {
+                //  if MultiValues not set, no other reason for non-LV
+                //  column to have a header byte
+                //  except if jet is in large (16/32kiB) page mode (extended info byte always ON for tags)
                 (*pcprintf)( "Column %d has inappropriate header byte.\r\n", ptagfld->Fid() );
                 AssertSz( fFalse, "Column has inappropriate header byte." );
                 return fFalse;
@@ -3234,7 +3534,7 @@ BOOL TAGFIELDS::FValidate(
                     return fFalse;
                 }
                 if ( pheader->FLongValue()
-                    || pheader->FSeparated() )
+                    || pheader->FSeparated() )  //  even with UNLIMITED_MULTIVALUES, we would make this a true MULTIVALUES before separating it
                 {
                     (*pcprintf)( "TAGFLD %d is marked as TwoValues but cannot be a LongValue, or Separated.\r\n", ptagfld->Fid() );
                     AssertSz( fFalse, "A TAGFLD marked as TwoValues cannot be a LongValue, or Separated." );
@@ -3318,6 +3618,7 @@ BOOL TAGFIELDS::FIsValidTagfields(
     const REC   * prec                      = (REC *)dataRec.Pv();
     const BYTE  * pbRecMax                  = (BYTE *)prec + dataRec.Cb();
 
+    //  WARNING: PbTaggedData() could GPF if the record is messed up
     const BYTE  * pbStartOfTaggedColumns    = prec->PbTaggedData();
 
     if ( pbStartOfTaggedColumns < (BYTE *)dataRec.Pv() + REC::cbRecordMin
@@ -3331,9 +3632,10 @@ BOOL TAGFIELDS::FIsValidTagfields(
     const SIZE_T    cbTaggedColumns             = pbRecMax - pbStartOfTaggedColumns;
     if ( cbTaggedColumns > 0 )
     {
+        //  there's at least some tagged data
         const TAGFLD    * const ptagfldFirst    = (TAGFLD *)pbStartOfTaggedColumns;
 
-        if ( ptagfldFirst->Ib() < sizeof(TAGFLD)
+        if ( ptagfldFirst->Ib() < sizeof(TAGFLD)        //  must be at least one TAGFLD
             || ptagfldFirst->Ib() > cbTaggedColumns
             || ptagfldFirst->Ib() % sizeof(TAGFLD) != 0 )
         {
@@ -3343,11 +3645,15 @@ BOOL TAGFIELDS::FIsValidTagfields(
         }
     }
 
+    //  at this point, it should be safe to call the constructor
     TAGFIELDS   tagfields( dataRec );
     return tagfields.FValidate( pcprintf );
 }
 
 
+//  ****************************************************************
+//  TAGFLD_ITERATOR
+//  ****************************************************************
 
 
 TAGFLD_ITERATOR::TAGFLD_ITERATOR()
@@ -3432,6 +3738,9 @@ const BYTE * TAGFLD_ITERATOR::PbData() const
 }
 
 
+//  ****************************************************************
+//  TAGFLD_ITERATOR_INVALID
+//  ****************************************************************
 
 
 class TAGFLD_ITERATOR_INVALID : public TAGFLD_ITERATOR
@@ -3442,6 +3751,9 @@ class TAGFLD_ITERATOR_INVALID : public TAGFLD_ITERATOR
 };
 
 
+//  ****************************************************************
+//  TAGFLD_ITERATOR_NULLVALUE
+//  ****************************************************************
 
 
 class TAGFLD_ITERATOR_NULLVALUE : public TAGFLD_ITERATOR
@@ -3452,6 +3764,9 @@ class TAGFLD_ITERATOR_NULLVALUE : public TAGFLD_ITERATOR
 };
 
 
+//  ****************************************************************
+//  TAGFLD_ITERATOR_SINGLEVALUE
+//  ****************************************************************
 
 
 class TAGFLD_ITERATOR_SINGLEVALUE : public TAGFLD_ITERATOR
@@ -3485,7 +3800,7 @@ class TAGFLD_ITERATOR_SINGLEVALUE : public TAGFLD_ITERATOR
         const INT           m_cbData;
         const BYTE * const  m_pbData;
 
-        INT m_itag;
+        INT m_itag; //  our current location
 };
 
 INT     TAGFLD_ITERATOR_SINGLEVALUE::Ctags()        const { return 1; }
@@ -3583,6 +3898,9 @@ ERR TAGFLD_ITERATOR_SINGLEVALUE::ErrMoveNext()
 }
 
 
+//  ****************************************************************
+//  TAGFLD_ITERATOR_TWOVALUES
+//  ****************************************************************
 
 
 class TAGFLD_ITERATOR_TWOVALUES : public TAGFLD_ITERATOR
@@ -3610,7 +3928,7 @@ class TAGFLD_ITERATOR_TWOVALUES : public TAGFLD_ITERATOR
     private:
 
         const TWOVALUES m_twovalues;
-        INT m_itag;
+        INT m_itag; //  our current location
 };
 
 
@@ -3701,6 +4019,7 @@ INT TAGFLD_ITERATOR_TWOVALUES::Itag() const
     
 BOOL TAGFLD_ITERATOR_TWOVALUES::FSeparated() const
 {
+    //  TWOVALUES are never used for LV columns
     return fFalse;
 }
 
@@ -3753,6 +4072,9 @@ const BYTE * TAGFLD_ITERATOR_TWOVALUES::PbData() const
 }
 
 
+//  ****************************************************************
+//  TAGFLD_ITERATOR_MULTIVALUES
+//  ****************************************************************
 
 
 class TAGFLD_ITERATOR_MULTIVALUES : public TAGFLD_ITERATOR
@@ -3781,7 +4103,7 @@ class TAGFLD_ITERATOR_MULTIVALUES : public TAGFLD_ITERATOR
     private:
 
         const MULTIVALUES m_multivalues;
-        INT m_itag;
+        INT m_itag; //  our current location
         const BOOL m_fCompressed;
 };
 
@@ -3905,6 +4227,9 @@ const BYTE * TAGFLD_ITERATOR_MULTIVALUES::PbData() const
 }
 
 
+//  ****************************************************************
+//  TAGFIELDS_ITERATOR
+//  ****************************************************************
 
 
 TAGFIELDS_ITERATOR::TAGFIELDS_ITERATOR( const DATA& dataRec ) :
@@ -4077,6 +4402,7 @@ VOID TAGFIELDS_ITERATOR::CreateTagfldIterator_()
         if( !m_ptagfldCurr->FExtendedInfo() )
         {
             
+            //  ordinary value
 
             Assert( sizeof( m_rgbTagfldIteratorBuf ) >= sizeof( TAGFLD_ITERATOR_SINGLEVALUE ) );
             new( m_rgbTagfldIteratorBuf ) TAGFLD_ITERATOR_SINGLEVALUE( data, fFalse, fFalse, fFalse );
@@ -4098,6 +4424,7 @@ VOID TAGFIELDS_ITERATOR::CreateTagfldIterator_()
             else
             {
 
+                //  ordinary column with header byte. skip the header byte
                 
                 const BOOL fSeparated = bExtendedInfo & TAGFLD_HEADER::fSeparated;
                 const BOOL fCompressed = bExtendedInfo & TAGFLD_HEADER::fCompressed;

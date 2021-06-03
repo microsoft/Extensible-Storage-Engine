@@ -9,7 +9,7 @@
 
 #if defined( DEBUG ) || defined( PERFDUMP )
 BOOL    g_fDBGPerfOutput = fFalse;
-#endif  
+#endif  /* DEBUG || PERFDUMP */
 
 
 #ifdef DEBUG
@@ -22,12 +22,17 @@ WCHAR* GetDebugEnvValue( __in PCWSTR cwszEnvVar )
     {
         if ( wszBufTemp[0] )
         {
+            // UNDONE  we don't really want to deal with an OutOfMemory
+            // error at this point. Anyway it is debug only.
 
             const LONG cRFSCountdownOld = RFSThreadDisable( 0 );
             ULONG cchBuf = LOSStrLengthW( wszBufTemp ) + 1;
             WCHAR* wszBuf = new WCHAR[ cchBuf ];
             RFSThreadReEnable( cRFSCountdownOld );
 
+            //  if we really are OutOfMemory we return NULL as the EnvVariable is not set
+            //  we do the same also if the one set in Env too long so ...
+            //  and probably we exit soon anyway as we are OutOfMemory
             if ( wszBuf )
             {
                 OSStrCbCopyW( wszBuf, sizeof(WCHAR)*cchBuf, wszBufTemp );
@@ -36,10 +41,12 @@ WCHAR* GetDebugEnvValue( __in PCWSTR cwszEnvVar )
         }
         else
         {
+//          FOSConfigGet() will create the key if it doesn't exist
         }
     }
     else
     {
+        //  UNDONE:  gripe in the event log that the value was too big
     }
 
     return NULL;
@@ -60,12 +67,16 @@ C_ASSERT( _countof( g_rgcwszDebugOptionEnvVar ) == Debug_Max );
 
 static bool g_rgfDebugOptionEnabled[Debug_Max];
 
+//  ================================================================
 bool FExpensiveDebugCodeEnabled( __in_range( Debug_Min, Debug_Max - 1 ) const ExpensiveDebugCode code )
+//  ================================================================
 {
     return g_rgfDebugOptionEnabled[code];
 }
 
+//  ================================================================
 static void ITDBGGetExpensiveDebugOptions()
+//  ================================================================
 {
     for( ExpensiveDebugCode code = Debug_Min; code < Debug_Max; code = (ExpensiveDebugCode)(code + 1) )
     {
@@ -112,7 +123,7 @@ VOID ITDBGSetConstants( INST * pinst )
         profile_detailLevel = _wtoi( wsz );
         delete[] wsz;
     }
-#endif
+#endif // PROFILE_JET_API
 
     if ( ( wsz = GetDebugEnvValue ( L"PERFOUTPUT" ) ) != NULL )
     {
@@ -126,19 +137,20 @@ VOID ITDBGSetConstants( INST * pinst )
 
     ITDBGGetExpensiveDebugOptions();
 }
-#endif
+#endif  //  DEBUG
 
 
 ERR ErrITSetConstants( INST * pinst )
 {
 #ifdef RTM
+    //  Redo Trap is disabled in RTM builds
 #else
 
 #ifdef DEBUG
     ITDBGSetConstants( pinst );
-#endif
+#endif  //  DEBUG
 
-    WCHAR       wszBufRedoTrap[ 30   ];
+    WCHAR       wszBufRedoTrap[ 30 /* more than enough for worst case L"%06X,%04X,%04X" */  ];
 
     if ( FOSConfigGet( wszDEBUGRoot, L"Redo Trap", wszBufRedoTrap, sizeof(wszBufRedoTrap) )
         && 0 != wszBufRedoTrap[0] )
@@ -158,7 +170,7 @@ ERR ErrITSetConstants( INST * pinst )
         g_lgposRedoTrap.ib          = USHORT( ib );
     }
 
-#endif
+#endif  //  RTM
 
     FixDefaultSystemParameters();
 
@@ -167,6 +179,8 @@ ERR ErrITSetConstants( INST * pinst )
     (void)ErrLoadDiagOption( pinst, g_fNodeMiscMemoryTrashedDefenseInDepthTemp );
 #endif
 
+    // Since production builds will be released regularly, the default
+    // will be OFF in retail builds.
 #ifdef DEBUG
     const BOOL fPeriodicTrimEnabledDefault = fTrue;
 #else
@@ -179,38 +193,63 @@ ERR ErrITSetConstants( INST * pinst )
 }
 
 
+//+API
+//  ErrINSTInit
+//  ========================================================
+//  ERR ErrINSTInit( )
+//
+//  Initialize the storage system: page buffers, log buffers, and the
+//  database files.
+//
+//  RETURNS     JET_errSuccess
+//-
 ERR INST::ErrINSTInit( )
 {
     ERR     err;
     BOOL    fFCBInitialized = fFalse;
     VER     *pver           = m_pver;
 
+    //  sleep while initialization is in progress
+    //
     while ( m_fSTInit == fSTInitInProgress )
     {
         UtilSleep( 1000 );
     }
 
+    //  serialize system initialization
+    //
     if ( m_fSTInit == fSTInitDone )
     {
         return JET_errSuccess;
     }
 
+    //  initialization in progress
+    //
     m_fSTInit = fSTInitInProgress;
 
+    //  initialize Global variables
+    //
     Assert( m_ppibGlobal == ppibNil );
 
+    // Set to FALSE (may have gotten set to TRUE by recovery).
     m_fTermAbruptly = fFalse;
 
+    //  initialize subcomponents
+    //
     Call( ErrIOInit( this ) );
 
     CallJ( ErrPIBInit( this ), TermIO )
 
+    // initialize FCB, TDB, and IDB.
 
     CallJ( FCB::ErrFCBInit( this ), TermPIB );
     fFCBInitialized = fTrue;
 
+    // Initialize PRL. (Must be done prior to creating the temp DB,
+    // since AutoHealing might be enabled.)
     CallJ( PagePatching::ErrPRLInit( this ), TermPIB );
 
+    // initialize SCB
 
     CallJ( ErrSCBInit( this ), TermPIB );
 
@@ -218,19 +257,30 @@ ERR INST::ErrINSTInit( )
 
     if ( !FRecovering() )
     {
+        // bit of trickyness in here, we can call this during recovery ... maybe some
+        // day I will do something to handle and track recovery ErrINSTInit/ErrINSTTerm
+        // time, but today is not that day ... as a result this time will be swallowed
+        // by recovery redo / recovery undo.
         m_isdlInit.Trigger( eInitSubManagersDone );
     }
 
+    //  begin backup session
+    //
     CallJ( m_pbackup->ErrBKBackupPibInit(), TermFUCB );
 
+    //  init task manager
+    //
     CallJ( m_taskmgr.ErrTMInit(), CloseBackupPIB );
 
+    //  intialize version store
 
     CallJ( pver->ErrVERInit( this ), TermTM );
 
+    // initialize LV critical section
 
     CallJ( ErrLVInit( this ), TermVER );
 
+    // If revert snapshot cleaner is not initialized, initialize them.
     if ( m_prbscleaner == NULL )
     {
         CallJ( RBSCleanerFactory::ErrRBSCleanerCreate( this, &m_prbscleaner ), TermRBS );
@@ -256,13 +306,15 @@ TermRBS:
     LVTerm( this );
 
 TermVER:
-    m_pver->m_fSyncronousTasks = fTrue;
-    m_pver->VERTerm( fFalse );
+    m_pver->m_fSyncronousTasks = fTrue; // avoid an assert in VERTerm()
+    m_pver->VERTerm( fFalse );  //  not normal
 
 TermTM:
     m_taskmgr.TMTerm();
 
 CloseBackupPIB:
+    //  terminate backup session
+    //
     m_pbackup->BKBackupPibTerm();
 
 TermFUCB:
@@ -275,8 +327,10 @@ TermPIB:
     PIBTerm( this );
 
 TermIO:
-    (VOID)ErrIOTerm( this, fFalse );
+    (VOID)ErrIOTerm( this, fFalse );    //  not normal
 
+    //  must defer FCB temination to the end because IOTerm() will clean up FCB's
+    //  allocated for the temp. database
     if ( fFCBInitialized )
     {
         FCB::Term( this );
@@ -300,12 +354,15 @@ ERR INST::ErrINSTCreateTempDatabase_( void* const pvInst )
                             | JET_bitDbShadowingOff
                             | ( BoolParam( pInst, JET_paramEnableTempTableVersioning ) ? 0 : JET_bitDbVersioningOff );
 
+    //  This function is the only placer to create temp DB, and it's exected only once,
+    //  the temp DB should not be created at this point.
     Assert( pInst->m_mpdbidifmp[ dbidTemp ] >= g_ifmpMax );
 
     OPERATION_CONTEXT opContext = { OCUSER_INTERNAL, 0, 0, 0, 0 };
     Call( ErrPIBBeginSession( pInst, &ppib, procidNil, fTrue ) );
     Call( ppib->ErrSetOperationContext( &opContext, sizeof( opContext ) ) );
 
+    //  Open and set size of temp database
     Call( ErrFaultInjection( 41776 ) );
     Call( ErrDBCreateDatabase(
                 ppib,
@@ -314,7 +371,7 @@ ERR INST::ErrINSTCreateTempDatabase_( void* const pvInst )
                 &ifmp,
                 dbidTemp,
                 (CPG)max( cpgMultipleExtentMin, UlParam( pInst, JET_paramPageTempDBMin ) ),
-                fFalse,
+                fFalse, // fSparseEnabledFile
                 NULL,
                 NULL,
                 0,
@@ -322,8 +379,10 @@ ERR INST::ErrINSTCreateTempDatabase_( void* const pvInst )
     Assert( ifmp != g_ifmpMax );
     Assert( FFMPIsTempDB( ifmp ) );
     
+    //  Temp db flag going from false to true.
     Assert( fFalse == pInst->m_fTempDBCreated );
 
+    //  pInst->m_fTempDBCreated = fTrue;
     AtomicExchange( (LONG *)&(pInst->m_fTempDBCreated), fTrue );
     
 HandleError:
@@ -339,16 +398,23 @@ ERR INST::ErrINSTCreateTempDatabase()
 {
     ERR err = JET_errSuccess;
 
+    //  Only attempt to create temp database if temp tables greater than 0.  Ignore whether
+    //  or not we are not recovering
+    //
     if ( UlParam( this, JET_paramMaxTemporaryTables ) <= 0 )
     {
         return JET_errSuccess;
     }
 
+    //  performance optimization for already created case
+    //
     if ( m_fTempDBCreated )
     {
         return JET_errSuccess;
     }
     
+    //  enter critical section and test condition
+    //
     m_critTempDbCreate.FEnter( cmsecInfinite );
     if ( !m_fTempDBCreated )
     {
@@ -357,6 +423,8 @@ ERR INST::ErrINSTCreateTempDatabase()
     Assert( m_fTempDBCreated );
 
 HandleError:
+    //  leave critical section 
+    //
     m_critTempDbCreate.Leave();
 
     if ( JET_errSuccess != err )
@@ -379,6 +447,18 @@ HandleError:
     return err;
 }
 
+//+api------------------------------------------------------
+//
+//  ErrINSTTerm
+//  ========================================================
+//
+//  ERR ErrITTerm( VOID )
+//
+//  Flush the page buffers to disk so that database file be in
+//  consistent state.  If error in RCCleanUp or in BFFlush, then DO NOT
+//  terminate log, thereby forcing redo on next initialization.
+//
+//----------------------------------------------------------
 
 ERR INST::ErrINSTTerm( TERMTYPE termtype )
 {
@@ -390,19 +470,33 @@ ERR INST::ErrINSTTerm( TERMTYPE termtype )
 
     Assert( m_plog->FRecovering() || m_fTermInProgress || termtypeError == termtype );
 
+    //  Normally we're in here for JetTerm(), but we can also end up in here if JetInit
+    //  fails out at the right point.
 
     Assert( m_isdlTerm.FActiveSequence() || m_isdlInit.FActiveSequence() );
 
+    //  sleep while initialization is in progress
+    //
     while ( m_fSTInit == fSTInitInProgress )
     {
         UtilSleep( 1000 );
     }
 
+    //  make sure no other transactions in progress
+    //
+    //  if write error on page, RCCleanup will return -err
+    //  if write error on buffer, BFFlush will return -err
+    //  -err passed to LGTerm will cause correctness flag to
+    //  be omitted from log thereby forcing recovery on next
+    //  startup, and causing LGTerm to return +err, which
+    //  may be used by JetQuit to show error
+    //
     if ( m_fSTInit == fSTInitNotDone )
     {
         return ErrERRCheck( JET_errNotInitialized );
     }
 
+    // If no error (termtype != termError), then need to check if we can continue.
 
     if ( ( termtype == termtypeCleanUp || termtype == termtypeNoCleanUp ) && m_pbackup->FBKBackupInProgress() )
     {
@@ -421,13 +515,24 @@ ERR INST::ErrINSTTerm( TERMTYPE termtype )
         SPTrimDBTaskStop( this );
     }
 
+    //  we should set DBM so it can start again in the
+    //  case where we're recovering. When recovering,
+    //  DBScan may be trigged if JET_paramEnableDBScanInRecovery is
+    //  specified. Additionally, in the recovery case an explicit
+    //  API call to trigger DBM is not possible, so we need not worry
+    //  with concurrency below.
     DBMScanStopAllScansForInst( this, m_plog->FRecovering() );
     OLDTermInst( this );
 
+    //  force the version store into synchronous-cleanup mode
+    //  (e.g. circumvent TASKMGR because it is about to go away)
     m_pver->m_critRCEClean.FEnter( cmsecInfiniteNoDeadlock );
     m_pver->m_fSyncronousTasks = fTrue;
     m_pver->m_critRCEClean.Leave();
 
+    //  Cleanup all the tasks. Tasks will not be accepted by the TASKMGR
+    //  until it is re-inited
+    //  OLD2 may still issue tasks, which can be ignored safely
     m_taskmgr.TMTerm();
 
     if ( m_isdlTerm.FActiveSequence() )
@@ -435,6 +540,8 @@ ERR INST::ErrINSTTerm( TERMTYPE termtype )
         m_isdlTerm.Trigger( eTermWaitedForSystemWorkerThreads );
     }
     
+    //  clean up all entries
+    //
     err = m_pver->ErrVERRCEClean();
 
     if ( termtype == termtypeCleanUp )
@@ -454,6 +561,8 @@ ERR INST::ErrINSTTerm( TERMTYPE termtype )
         }
         else
         {
+            // allow for improper usage in test (e.g.: terminating the instance
+            // with an outstanding transaction).
             if ( !FNegTest( fInvalidUsage ) )
             {
                 FCBAssertAllClean( this );
@@ -479,8 +588,12 @@ ERR INST::ErrINSTTerm( TERMTYPE termtype )
         m_isdlTerm.Trigger( eTermVersionStoreDone );
     }
 
+    //  once the version store has stopped we can terminate OLD2 as no new tables
+    //  will be registered for OLD2 beyond this point.
     OLD2TermInst( this );
 
+    //  fail if there are still active transactions and we are doing a
+    //  clean shutdown
 
     if ( ( termtype == termtypeCleanUp || termtype == termtypeNoCleanUp ) && TrxOldest( this ) != trxMax )
     {
@@ -494,12 +607,19 @@ ERR INST::ErrINSTTerm( TERMTYPE termtype )
         return ErrERRCheck( JET_errTooManyActiveUsers );
     }
 
+    //  No new threads can come in and find corrupt pages (generating new patch requests)
+    //  so we can now cancel outstanding patch requests.
     PagePatching::TermInst( this );
 
+    //  Enter no-returning point. Once we kill one thread, we kill them all !!!!
+    //
     m_fSTInit = fSTInitNotDone;
 
     m_fTermAbruptly = ( termtype == termtypeNoCleanUp || termtype == termtypeError );
 
+    //  terminate MSysLocales KVP-Store(s) as we can no longer create / delete indices ...
+    //
+    // note: must be term'd before PIBTerm()/FUCBTerm() below because it is using them.
     for ( DBID dbid = dbidMin; dbid < dbidMax; dbid++ )
     {
         const IFMP ifmp = m_mpdbidifmp[ dbid ];
@@ -512,8 +632,13 @@ ERR INST::ErrINSTTerm( TERMTYPE termtype )
         Assert( NULL == pfmp->PkvpsMSysLocales() );
     }
 
+    //  terminate backup session
+    //
     m_pbackup->BKBackupPibTerm();
 
+    //  close LV critical section and remove session
+    //  do not try to insert long values after calling this
+    //
     LVTerm( this );
 
     if ( m_isdlTerm.FActiveSequence() )
@@ -522,8 +647,12 @@ ERR INST::ErrINSTTerm( TERMTYPE termtype )
     }
 
 
+    //  update gen required / waypoint for term
+    //
     if ( termtype == termtypeCleanUp || termtype == termtypeNoCleanUp )
     {
+        // If we have some dirty-keep-cache-alive databases which were never explicitly attached,
+        // allow header updates now so they can be marked clean and we can terminate the instance.
         for ( DBID dbid = dbidMin; dbid < dbidMax; dbid++ )
         {
             const IFMP ifmpT = m_mpdbidifmp[ dbid ];
@@ -547,6 +676,7 @@ ERR INST::ErrINSTTerm( TERMTYPE termtype )
         {
             if ( m_plog->FRecovering() )
             {
+                //  disable log writing
                 m_plog->SetNoMoreLogWrite( err );
             }
             termtype = termtypeError;
@@ -558,6 +688,8 @@ ERR INST::ErrINSTTerm( TERMTYPE termtype )
         }
     }
 
+    //  flush and purge all buffers
+    //
     if ( termtype == termtypeCleanUp || termtype == termtypeNoCleanUp )
     {
         for ( DBID dbid = dbidUserLeast; dbid < dbidMax; dbid++ )
@@ -584,6 +716,7 @@ ERR INST::ErrINSTTerm( TERMTYPE termtype )
     }
     Assert( termtype == termtypeError || termtype == termtypeRecoveryQuitKeepAttachments || FIOCheckUserDbNonFlushedIos( this, cioAllowLogRollHeaderUpdates ) );
 
+    // Verify that all snapshot data is flushed by buffer flush above.
     if ( ( termtype == termtypeCleanUp || termtype == termtypeNoCleanUp ) && m_prbs && m_prbs->FInitialized() )
     {
         m_prbs->AssertAllFlushed();
@@ -596,11 +729,15 @@ ERR INST::ErrINSTTerm( TERMTYPE termtype )
 
     OSTraceWriteRefLog( ostrlSystemFixed, sysosrtlDatapoint|sysosrtlContextInst, this, (PVOID)&(m_iInstance), sizeof(m_iInstance) );
 
+    //  before we term BF, we disable the checkpoint if error occurred
+    //
     if ( errRet < JET_errSuccess || termtype == termtypeError )
     {
         m_plog->LGDisableCheckpoint();
     }
 
+    // only try to retain cache when ABSOLUTELY nothing has gone wrong and
+    // not using file caching.
     if ( termtype != termtypeRecoveryQuitKeepAttachments &&
          ( termtype == termtypeError || errRet < JET_errSuccess || BoolParam( JET_paramEnableViewCache ) ) )
     {
@@ -622,6 +759,8 @@ ERR INST::ErrINSTTerm( TERMTYPE termtype )
 
     OSTraceWriteRefLog( ostrlSystemFixed, sysosrtlDatapoint|sysosrtlContextInst, this, (PVOID)&(m_iInstance), sizeof(m_iInstance) );
     
+    // terminate the version store only after buffer manager as there are links to undo info RCE's
+    // that will point to freed memory if we end the version store before the BF
     m_pver->VERTerm( termtype == termtypeCleanUp || termtype == termtypeNoCleanUp );
 
     if ( m_isdlTerm.FActiveSequence() )
@@ -629,9 +768,11 @@ ERR INST::ErrINSTTerm( TERMTYPE termtype )
         m_isdlTerm.Trigger( eTermVersionStoreDoneAgain );
     }
 
+    //  reset initialization flag
     
     FCB::PurgeAllDatabases( this );
 
+    // Delete any system pib list-entries allocated (and reset linked list)
 
     Assert( 0 == m_cUsedSystemPibs );
     ListNodePPIB *plnppib = m_plnppibEnd->pNext;
@@ -643,13 +784,19 @@ ERR INST::ErrINSTTerm( TERMTYPE termtype )
     }
 #ifdef DEBUG
     m_plnppibEnd->ppib = NULL;
-#endif
+#endif // DEBUG
     m_plnppibEnd->pNext = m_plnppibEnd;
     m_plnppibBegin = m_plnppibEnd;
 
+    // PIBTerm also acts as a form of Sort Purge, similar to FCB::PurgeAllDatabases().
 
     PIBTerm( this );
 
+    // We always purge the temporary database. This is important because the temporary 
+    // database isn't flushed so it will still have dirty pages, and thus is not eligible
+    // for retain cache feature.
+    // Move the purge of temporary database below PIBTerm because, if there is any sort table left
+    // open, PIBTerm will call ErrIsamSortClose which needs to read b-tree pages of sort table.
 
     const IFMP ifmp = m_mpdbidifmp[dbidTemp];
     if( ifmp < g_ifmpMax )
@@ -661,9 +808,11 @@ ERR INST::ErrINSTTerm( TERMTYPE termtype )
     FUCBTerm( this );
     SCBTerm( this );
     
+    //  clean up the fmp entries
 
     if ( termtype == termtypeRecoveryQuitKeepAttachments )
     {
+        // Do not allow any header update until either re-attached either by recovery or explicitly
         for ( DBID dbid = dbidMin; dbid < dbidMax; dbid++ )
         {
             const IFMP ifmpT = m_mpdbidifmp[ dbid ];
@@ -693,13 +842,19 @@ ERR INST::ErrINSTTerm( TERMTYPE termtype )
         }
     }
 
+    //  Mostly pointless as all DBs are detached - EXCEPT if termtype == termtypeRecoveryQuitKeepAttachments  (i.e. RW keep cache alive) ...
     Assert( termtype == termtypeError || termtype == termtypeRecoveryQuitKeepAttachments || FIOCheckUserDbNonFlushedIos( this ) );
 
     OSTraceWriteRefLog( ostrlSystemFixed, sysosrtlDatapoint|sysosrtlContextInst, this, (PVOID)&(m_iInstance), sizeof(m_iInstance) );
 
+    //  terminate FCB
 
     FCB::Term( this );
 
+    //  delete temp file. Temp file should be cleaned up in IOTerm.
+    //
+    //  NOTE: the temp db is now created with FILE_FLAG_DELETE_ON_CLOSE,
+    //  so it should no longer be necessary to manually delete it anymore
 
     if ( m_isdlTerm.FActiveSequence() )
     {

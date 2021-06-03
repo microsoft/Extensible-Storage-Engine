@@ -7,11 +7,18 @@
 #include "os.hxx"
 
 
+//  ================================================================
+//
+//  Helper Tests
+//
+//  ================================================================
 
 #ifdef DEBUG
 
+//  ================================================================
 CUnitTest( LibraryDllWideSubStrCheck, 0, "This test just checks that the case insensitive wide char substr utility for some Assert()s we want to have." );
 ERR LibraryDllWideSubStrCheck::ErrTest()
+//  ================================================================
 {
     JET_ERR err = JET_errSuccess;
 
@@ -52,8 +59,13 @@ HandleError:
     return err;
 }
 
-#endif
+#endif  //DEBUG
 
+//  ================================================================
+//
+//  Auto-Load Function Tests
+//
+//  ================================================================
 
 
 ERR ErrLoadTreatableAsPointer()
@@ -61,7 +73,7 @@ ERR ErrLoadTreatableAsPointer()
     ERR err = JET_errSuccess;
 
     WCHAR * szDlls = L"NonExistantDll.dll\0kernel32.dll\0api-ms-win-core-synch-l1-1-1.dll\0";
-    NTOSFuncPtr( pfnCreateSemaphoreTest, szDlls, CreateSemaphoreExW, oslfExpectedOnWin8  );
+    NTOSFuncPtr( pfnCreateSemaphoreTest, szDlls, CreateSemaphoreExW, oslfExpectedOnWin8 /* faked to avoid pre-loading */ );
 
     OSTestCheck( NULL == pfnCreateSemaphoreTest.SzDllLoaded() );
 
@@ -70,10 +82,10 @@ ERR ErrLoadTreatableAsPointer()
     }
     else
     {
-        OSTestCheck( fFalse );
+        OSTestCheck( fFalse );  // pointer is not working.
     }
 
-    OSTestCheck( szDlls != pfnCreateSemaphoreTest.SzDllLoaded() );
+    OSTestCheck( szDlls != pfnCreateSemaphoreTest.SzDllLoaded() );  // first should not be returned DLL
     OSTestCheck( 0 != wcscmp( pfnCreateSemaphoreTest.SzDllLoaded(), L"NonExistantDll.dll" ) );
     OSTestCheck( 0 == wcscmp( pfnCreateSemaphoreTest.SzDllLoaded(), L"kernel32.dll" ) ||
                  0 == wcscmp( pfnCreateSemaphoreTest.SzDllLoaded(), L"api-ms-win-core-synch-l1-1-1.dll" ) );
@@ -94,14 +106,14 @@ ERR ErrLoadSkipsNonExistantDlls()
     ERR err = JET_errSuccess;
 
     WCHAR * szDlls = L"NonExistantDll.dll\0kernel32.dll\0api-ms-win-core-synch-l1-1-1.dll\0";
-    NTOSFuncPtr( pfnCreateSemaphoreTest, szDlls, CreateSemaphoreExW, oslfExpectedOnWin8  );
+    NTOSFuncPtr( pfnCreateSemaphoreTest, szDlls, CreateSemaphoreExW, oslfExpectedOnWin8 /* faked to avoid pre-loading */ );
 
     OSTestCheck( NULL == pfnCreateSemaphoreTest.SzDllLoaded() );
 
     HANDLE hValid = pfnCreateSemaphoreTest( 0, 1, 100, L"test", 0, SYNCHRONIZE | DELETE );
     OSTestCheck( hValid );
 
-    OSTestCheck( szDlls != pfnCreateSemaphoreTest.SzDllLoaded() );
+    OSTestCheck( szDlls != pfnCreateSemaphoreTest.SzDllLoaded() );  // first should not be returned DLL
     OSTestCheck( 0 != wcscmp( pfnCreateSemaphoreTest.SzDllLoaded(), L"NonExistantDll.dll" ) );
     OSTestCheck( 0 == wcscmp( pfnCreateSemaphoreTest.SzDllLoaded(), L"kernel32.dll" ) ||
                  0 == wcscmp( pfnCreateSemaphoreTest.SzDllLoaded(), L"api-ms-win-core-synch-l1-1-1.dll" ) );
@@ -154,12 +166,12 @@ ERR ErrLoadPresentFailsIfDllPresentButFuncIsNot()
 {
     ERR err = JET_errSuccess;
 
-    NTOSFuncCount( pfnMessageBoxA, L"kernel32.dll\0", MessageBoxA, oslfExpectedOnWin8  );
+    NTOSFuncCount( pfnMessageBoxA, L"kernel32.dll\0", MessageBoxA, oslfExpectedOnWin8 /* fake to avoid assert that feature is expected */ );
 
     Assert( pfnMessageBoxA.ErrIsPresent() < JET_errSuccess );
     if ( pfnMessageBoxA.ErrIsPresent() >= JET_errSuccess )
     {
-        (void) (*pfnMessageBoxA)( NULL, "Junk", "AndStuff", MB_OK );
+        (void) (*pfnMessageBoxA)( NULL, "Junk", "AndStuff", MB_OK );    // this should hang if it actually ran/failed
         OSTestCall( JET_errInvalidParameter );
     }
 
@@ -175,12 +187,12 @@ ERR ErrLoadPresentFailsIfDllIsNotPresent()
 {
     ERR err = JET_errSuccess;
 
-    NTOSFuncCount( pfnMessageBoxA, L"NonExistant.dll\0", MessageBoxA, oslfExpectedOnWin8  );
+    NTOSFuncCount( pfnMessageBoxA, L"NonExistant.dll\0", MessageBoxA, oslfExpectedOnWin8 /* fake to avoid assert that feature is expected */ );
 
     Assert( pfnMessageBoxA.ErrIsPresent() < JET_errSuccess );
     if ( pfnMessageBoxA.ErrIsPresent() >= JET_errSuccess )
     {
-        (void) (*pfnMessageBoxA)( NULL, "Junk", "AndStuff", MB_OK );
+        (void) (*pfnMessageBoxA)( NULL, "Junk", "AndStuff", MB_OK );    // this should hang if it actually ran/failed
         OSTestCall( JET_errInvalidParameter );
     }
 
@@ -198,22 +210,25 @@ ERR ErrLoadTestSpecificDllIsLoaded()
 
     OSVERSIONINFOW osvi = { sizeof( osvi ), 0 };
 
-    NTOSFuncStd( pfnGetVersionExWFirstControl, L"api-ms-win-core-sysinfo-l1-1-1.dll\0kernel32.dll\0", GetVersionExW, oslfExpectedOnWin5x );
+    NTOSFuncStd( pfnGetVersionExWFirstControl, L"api-ms-win-core-sysinfo-l1-1-1.dll\0kernel32.dll\0", GetVersionExW, oslfExpectedOnWin5x ); // control
     WCHAR * szDllListGetVersionExWFromLastDll = L"NonExistantDll.dll\0ntdll.dll\0kernel32.dll\0api-ms-win-core-sysinfo-l1-1-1.dll\0";
     NTOSFuncStd( pfnGetVersionExWFromLastDll, szDllListGetVersionExWFromLastDll, GetVersionExW, oslfExpectedOnWin5x );
 
-    NTOSFuncStd( pfnGetVersionExWGood, L"NonExistantDll.dll\0kernel32.dll\0api-ms-win-core-sysinfo-l1-1-1.dll\0", GetVersionExW, oslfExpectedOnWin5x );
+    NTOSFuncStd( pfnGetVersionExWGood, L"NonExistantDll.dll\0kernel32.dll\0api-ms-win-core-sysinfo-l1-1-1.dll\0", GetVersionExW, oslfExpectedOnWin5x ); // control
     NTOSFuncStd( pfnGetVersionExWBad, L"NonExistantDll.dll\0OtherNonDll.dll\0", GetVersionExW, oslfExpectedOnWin8 );
 
+    //  Check that preconditions we need are satisfied, so we don't fail for an unexpected reason
 
     OSTestCheck( osvi.dwMajorVersion == 0 );
     OSTestCheck( osvi.dwBuildNumber == 0 );
 
+    //  Test that a good DLL, but missing function, doesn't stop searching for the function, and we load the later DLL
+    //
 
-    OSTestCheck( fTrue == pfnGetVersionExWFirstControl( &osvi ) );
+    OSTestCheck( fTrue == pfnGetVersionExWFirstControl( &osvi ) );  // call to trigger loading of DLL
     OSTestCheck( 0 == wcscmp( pfnGetVersionExWFirstControl.SzDllLoaded(), L"kernel32.dll" ) ||
                  0 == wcscmp( pfnGetVersionExWFirstControl.SzDllLoaded(), L"api-ms-win-core-sysinfo-l1-1-1.dll" ) );
-    OSTestCheck( fTrue == pfnGetVersionExWFromLastDll( &osvi ) );
+    OSTestCheck( fTrue == pfnGetVersionExWFromLastDll( &osvi ) );   // call to trigger loading of DLL
     OSTestCheck( 0 == wcscmp( pfnGetVersionExWFromLastDll.SzDllLoaded(), L"kernel32.dll" ) ||
                  0 == wcscmp( pfnGetVersionExWFromLastDll.SzDllLoaded(), L"api-ms-win-core-sysinfo-l1-1-1.dll" ) );
     OSTestCheck( szDllListGetVersionExWFromLastDll != pfnGetVersionExWFromLastDll.SzDllLoaded() );
@@ -223,8 +238,10 @@ ERR ErrLoadTestSpecificDllIsLoaded()
     OSTestCheck( osvi.dwMajorVersion > 0 );
     OSTestCheck( osvi.dwBuildNumber > 0 );
 
+    //  Test if we can't load that the FFailedWithGLE() works correctly.
+    //
 
-    OSTestCheck( fTrue == pfnGetVersionExWGood( &osvi ) );
+    OSTestCheck( fTrue == pfnGetVersionExWGood( &osvi ) );  // check control
     OSTestCheck( 0 == wcscmp( pfnGetVersionExWGood.SzDllLoaded(), L"kernel32.dll" ) ||
                  0 == wcscmp( pfnGetVersionExWGood.SzDllLoaded(), L"api-ms-win-core-sysinfo-l1-1-1.dll" ) );
     OSTestCheck( fFalse == pfnGetVersionExWBad( &osvi ) );
@@ -241,6 +258,7 @@ ERR ErrLoadCheckValidHandleReturn()
 {
     ERR err = JET_errSuccess;
 
+// SOMEONE do OnDebugOrRetail( oslfExpectedOnWin8, oslfExpectedOnWin5x ) here or in one of the previous places to prove the next OSTestCheck() works retail
     NTOSFuncPtr( pfnCreateSemaphoreTest, L"NonExistantDll.dll\0kernel32.dll\0api-ms-win-core-synch-l1-1-1.dll\0", CreateSemaphoreExW, oslfExpectedOnWin8 );
 
     OSTestCheck( NULL == pfnCreateSemaphoreTest.SzDllLoaded() );
@@ -371,20 +389,25 @@ ERR ErrLoadPfnHook()
     NTOSFuncStd( pfnNtCreateEventImplicit, L"ntdll.dll\0", NtCreateEvent, oslfExpectedOnWin5x | oslfRequired | oslfHookable );
     const void* pfnOld = NULL;
 
+    //  Load module.
     hNtDll = GetModuleHandleW( L"ntdll.dll" );
     OSTestCheck( hNtDll != NULL );
 
+    //  Load entry point.
     pfnNtCreateEventExplicit = GetProcAddress( hNtDll, "NtCreateEvent" );
     OSTestCheck( pfnNtCreateEventExplicit != NULL );
 
+    //  Replace.
     pfnOld = pfnNtCreateEventImplicit.PfnLoadHook( pfnReplace1 );
     OSTestCheck( pfnOld == pfnNtCreateEventExplicit );
     OSTestCheck( pfnReplace1 == pfnNtCreateEventImplicit );
 
+    //  Replace again.
     pfnOld = pfnNtCreateEventImplicit.PfnLoadHook( pfnReplace2 );
     OSTestCheck( pfnOld == pfnReplace1 );
     OSTestCheck( pfnReplace2 == pfnNtCreateEventImplicit );
 
+    //  Restore.
     pfnOld = pfnNtCreateEventImplicit.PfnLoadHook( pfnNtCreateEventExplicit );
     OSTestCheck( pfnOld == pfnReplace2 );
     OSTestCheck( pfnNtCreateEventExplicit == pfnNtCreateEventImplicit );
@@ -398,21 +421,25 @@ HandleError:
 
 
 
+//  testing global based pfn var
 NTOSFuncPtr( g_pfnCreateSemaphoreTest, L"kernel32.dll\0api-ms-win-core-sysinfo-l1-1-1.dll\0", CreateSemaphoreExW, oslfExpectedOnWin5x | oslfRequired );
 
 
+//  ================================================================
 CUnitTest( LibraryLoadLibraryTesting, 0, "This tests that the various options of the PFN FunctionLaoder work as expected" );
 ERR LibraryLoadLibraryTesting::ErrTest()
+//  ================================================================
 {
     JET_ERR err = JET_errSuccess;
-    COSLayerPreInit     oslayer;
+    COSLayerPreInit     oslayer;    // FOSPreinit()
 
     if ( !oslayer.FInitd() )
     {
         wprintf( L"ERROR: Out of memory error during OS Layer pre-init." );
-        return JET_errOutOfMemory;
+        return JET_errOutOfMemory;  // can't ErrERRCheck() that would AV w/o preinit done ...
     }
 
+    //  Test global
 
     HANDLE hValid;
     OSTestCheck( hValid = g_pfnCreateSemaphoreTest( 0, 1, 100, L"TestGlobalHandleReturn", 0, SYNCHRONIZE | DELETE ) );

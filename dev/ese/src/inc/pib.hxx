@@ -7,36 +7,57 @@ const DWORD_PTR dwPIBSessionContextUnusable = DWORD_PTR( ~0 );
 const DWORD cchContextStringSize = 32;
 
 
+//  ================================================================
 class TrxidStack
+//  ================================================================
+//
+//  Tracks a stack of transaction IDs and the time the transaction
+//  was started. This is used for logging/reporting so a method
+//  to dump the current stack is provided.
+//
+//-
 {
 public:
     TrxidStack();
     ~TrxidStack();
 
+    // Add an entry to the top of the stack (begin a transaction)
     void Push( const TRXID trxid );
 
+    // Pop an entry off the top of the stack (end a transaction)
     void Pop();
 
+    // Clear all entries on the stack
     void Clear();
 
+    // Dump the entries on the stack. If the buffer is too small
+    // then the buffer is left as empty.
     ERR ErrDump( __out_ecount_z( cchBuf ) PWSTR const szBuf, const size_t cchBuf, const WCHAR * const szLineBreak = L"\r\n" ) const;
 
 private:
+    // Maximum transaction nesting level
     static const INT m_ctrxMax = levelMax+1;
     
+    // A stack of transaction IDs, showing the places
+    // that BeginTransaction was called from.
     TRXID m_rgtrxid[m_ctrxMax];
     
+    // A stack of DateTimes, showing the times BeginTransaction
+    // was called.
     __int64 m_rgtrxtime[m_ctrxMax];
 
+    // Current number of transactions in the stack
     INT m_ctrxCurr;
 
-private:
+private:    // not implemented
     TrxidStack( const TrxidStack& );
     TrxidStack& operator=( const TrxidStack& );
 };
 
 class PIB;
 
+// A functor that gets the engine TraceContext from the cached TLS pointer in PPIB::_tls
+// To be used with PIBTraceContextScope (to reduce calls to GetTlsValue())
 class PIBGetEtcFunctor
 {
     const PIB* m_ppib;
@@ -48,6 +69,8 @@ public:
     TraceContext* operator()() const;
 };
 
+// TraceContextScope that uses the TLS pointer cached on the PIB to get the current engine TraceContext.
+// Improves perf by removing calls to TlsGetValue()
 class PIBTraceContextScope : public _TraceContextScope< PIBGetEtcFunctor >
 {
 public:
@@ -70,6 +93,9 @@ public:
     {}
 };
 
+//
+// Process Information Block
+//
 class PIB
     :   public CZeroInit
 {
@@ -116,6 +142,8 @@ public:
             m_rgpctCachePriority[ dbid ] = g_pctCachePriorityUnassigned;
         }
 
+        // Default user ID, if the user doesn't set one.
+        // Helps us in asserting/trapping invalid trace contexts deep down in the bowels of the engine.
         m_utc.context.dwUserID = OCUSER_UNINIT;
     }
 
@@ -123,11 +151,15 @@ public:
     {
         if ( &m_utc == PutcTLSGetUserContext() )
         {
+            // A dangling pointer to this PIB's utc on the TLS was detected !
+            // We messed up JetEndSession() !
             FireWall( "PibUtcCleanup" );
             TLSSetUserTraceContext( NULL );
         }
     }
 
+    //  It would make a lot sense to make this static, but there are several callers, and that would balloon this 
+    //  change.  For now these are (or should be) effectively friends.
     friend ERR ErrPIBBeginSession( INST *pinst, _Outptr_ PIB **pppib, PROCID procidTarget, BOOL fForCreateTempDatabase );
     friend VOID PIBEndSession( PIB *ppib );
     void PIBGetSessionInfoV1( _Out_ JET_SESSIONINFO * psessinfo ) const
@@ -136,7 +168,7 @@ public:
         psessinfo->ulTrxLevel = Level();
         psessinfo->ulProcid = procid;
         psessinfo->ulTrxContext = dwTrxContext;
-        psessinfo->ulFlags = 0;
+        psessinfo->ulFlags = 0;     //  currently unused
     }
 
     friend VOID PIBReportSessionSharingViolation( const PIB * const ppib );
@@ -144,9 +176,9 @@ public:
 #pragma push_macro( "new" )
 #undef new
 private:
-    void* operator new( size_t );
-    void* operator new[]( size_t );
-    void operator delete[]( void* );
+    void* operator new( size_t );           //  meaningless without INST*
+    void* operator new[]( size_t );         //  meaningless without INST*
+    void operator delete[]( void* );        //  not supported
 public:
     void* operator new( size_t cbAlloc, INST* pinst )
     {
@@ -166,80 +198,91 @@ public:
     VOID    AssertValid() const;
 #endif
 
-    
-    TRX                 trxBegin0;
+    /*  most used field has offset 0
+    /**/
+    TRX                 trxBegin0;              // f  trx id
     TRX                 trxCommit0;
 
     INST                *m_pinst;
 
 private:
-    DWORD_PTR           dwTrxContext;
+    DWORD_PTR           dwTrxContext;           //  default is thread id.
 
     friend VOID PIBSetTrxBegin0( PIB * const ppib );
-    LGPOS               lgposTrxBegin0;
+    LGPOS               lgposTrxBegin0;         //  temporary, only for debugging
 
+    //  flags
     union
     {
         BOOL            m_fFlags;
         struct
         {
-            FLAG32      m_fUserSession:1;
-            FLAG32      m_fAfterFirstBT:1;
-            FLAG32      m_fRecoveringEndAllSessions:1;
-            FLAG32      m_fOLD:1;
-            FLAG32      m_fSystemCallback:1;
+            FLAG32      m_fUserSession:1;                   // f  user session
+            FLAG32      m_fAfterFirstBT:1;                  // f  for redo only
+            FLAG32      m_fRecoveringEndAllSessions:1;      // f  session used for cleanup at end of recovery
+            FLAG32      m_fOLD:1;                           // f  session for online defrag
+            FLAG32      m_fSystemCallback:1;                // f  this is internal session being used for a callback
             FLAG32      m_fCIMCommitted:1;
             FLAG32      m_fCIMDirty:1;
-            FLAG32      m_fSetAttachDB:1;
+            FLAG32      m_fSetAttachDB:1;                   //    set up attachdb.
             FLAG32      m_fUseSessionContextForTrxContext:1;
-            FLAG32      m_fBegin0Logged:1;
-            FLAG32      m_fLGWaiting:1;
-            FLAG32      m_fReadOnlyTrx:1;
-            FLAG32      m_fBatchIndexCreation:1;
-            FLAG32      m_fDistributedTrx:1;
-            FLAG32      m_fPreparedToCommitTrx:1;
-            FLAG32      m_fOLD2:1;
-            FLAG32      m_fMustRollbackToLevel0:1;
-            FLAG32      m_fDBScan:1;
+            FLAG32      m_fBegin0Logged:1;                  //    begin transaction has logged
+            FLAG32      m_fLGWaiting:1;                     //    waiting for log to write
+            FLAG32      m_fReadOnlyTrx:1;                   //    session is in a read-only transaction
+            FLAG32      m_fBatchIndexCreation:1;            //    session is in multi-threaded batch index creation
+            FLAG32      m_fDistributedTrx:1;                //    session is in a distributed transaction
+            FLAG32      m_fPreparedToCommitTrx:1;           //    session has issued a prepare-to-commit of a distributed transaction
+            FLAG32      m_fOLD2:1;                          //    session is for OLD2
+            FLAG32      m_fMustRollbackToLevel0:1;          //    session must rollback to level 0 before being able to commit
+            FLAG32      m_fDBScan:1;                        //    session is for DBSCAN
         };
     };
 
 public:
 
-    LONG                m_cInJetAPI;
+    LONG                m_cInJetAPI;            //  indicates if the session is in use by JET
+//  32 / 40 bytes
 
-    RCE                 *prceNewest;
+    RCE                 *prceNewest;            // f  newest RCE of session
 
-    FUCB                *pfucbOfSession;
+    FUCB                *pfucbOfSession;        // l  list of active fucb of this thread
 
-    PROCID              procid;
+    PROCID              procid;                 // f  thread id
+//  42 / 58 bytes
 
-    USHORT              rgcdbOpen[dbidMax];
+    USHORT              rgcdbOpen[dbidMax];             // f  counter for open databases
+//  56 / 72 bytes
 
     TLS                 *ptlsApi;
 
-    PIB                 *ppibNext;
+    PIB                 *ppibNext;              // l  PIB list
 
 private:
-    LEVEL               m_level;
+    LEVEL               m_level;                // id (!=levelNil) transaction level of this session
 
 public:
-    LEVEL               levelBegin;
-    LEVEL               clevelsDeferBegin;
-    LEVEL               levelRollback;
+    LEVEL               levelBegin;             // f  transaction level when first begin transaction operation
+    LEVEL               clevelsDeferBegin;      // f  count of deferred open transactions
+    LEVEL               levelRollback;          // f  transaction level which must be rolled back
 
     LONG                grbitCommitDefault;
 
-    UPDATEID            updateid;
+    UPDATEID            updateid;               //  the update that this PIB is currently on
 
-    ULONG               cCursors;
+    ULONG               cCursors;               // number of cursors currently opened by this session
+//  80 / 104 bytes
 
+    //  a doubly-linked list of PIBs in trxBegin0 order partitioned by processor
+    //  through this instance's PLS
     CInvasiveList< PIB, OffsetOfTrxOldestILE >::CElement
                         m_ileTrxOldest;
 
-    LGPOS               lgposStart;
-    LGPOS               lgposCommit0;
+    LGPOS               lgposStart;             // f  log time
+    LGPOS               lgposCommit0;           // f  level 0 precommit record position.
+//  104 / 136 bytes
 
+    //  this is the instance PLS containing the head of the list ordered by
+    //  trxBegin0 of which we may be a member (see m_ileTrxOldest above)
     INST::PLS*          m_pplsTrxOldest;
 
 private:
@@ -248,12 +291,14 @@ private:
 
 private:
     VOID                *m_pvRecordFormatConversionBuffer;
+//  120 / 168 bytes
 
 public:
-    CCriticalSection    critCursors;
+    CCriticalSection    critCursors;            // protects session's FUCB list
     CCriticalSection    critConcurrentDDL;
     CCriticalSection    critLogBeginTrx;
     CAutoResetSignal    asigWaitLogWrite;
+//  136 / 200 bytes 
 
     PIB                 *ppibNextWaitWrite;
     PIB                 *ppibPrevWaitWrite;
@@ -262,37 +307,50 @@ public:
     PIB                 *ppibHashOverflow;
 
     TLS                 *ptlsTrxBeginLast;
+//  160 / 232 bytes
 
 private:
+    // these structures are used during recovery
 
+    // a list of RCEIDs that we haven't created yet
     CRedBlackTree<RCEID,PGNO>   m_redblacktreeRceidDeferred;
 
+    // during recovery we need to insert RCEs into the session
+    // list in an out-of-order fashion. this red-black
+    // tree tracks the already inserted RCEs so we can insert
+    // into the list quickly
     CRedBlackTree<RCEID,RCE*>   m_redblacktreePrceOfSession;
 
 private:
     MACRO               *m_pMacroNext;
 
     ERR                 m_errRollbackFailure;
+//  172 / 264 bytes
 
     TrxidStack          m_trxidstack;
+//  376 / 472 bytes
 
     BYTE                m_cbClientCommitContextGeneric;
     BYTE                m_rgbClientCommitContextGeneric[70];
 
     BYTE                m_fCommitContextContainsCustomerData;
+//  448 / 544 bytes
 
-    UserTraceContext    m_utc;
+    UserTraceContext    m_utc;              // Packs together OPERATION_CONTEXT, correlation ID, and exchange specific tracing information
     TICK                m_tickLevel0Begin;
+//  472 / 572 bytes
 
     volatile BOOL       m_fLoggedCheckpointGettingDeep;
 
-    CCriticalSection    m_critCachePriority;
-    WORD                m_pctCachePriority;
-    WORD                m_rgpctCachePriority[dbidMax];
+    CCriticalSection    m_critCachePriority;            // Protects m_pctCachePriority and m_rgpctCachePriority
+    WORD                m_pctCachePriority;             // Default cache priority for this PIB.
+    WORD                m_rgpctCachePriority[dbidMax];  // Resolved (i.e., taking instance, FMP and PIB cache priorities into account) cache priority for each open database.
+                                                        // Consumers of cache priority get cache priority preferrably from this.
 
-    ULONG               m_grbitUserIoPriority;
-    ULONG               m_qosIoPriority;
+    ULONG               m_grbitUserIoPriority;          // The user specified JET_sesparamIOPriority flags.
+    ULONG               m_qosIoPriority;                // The converted QOS flags to pass to IO functions.
 
+//  504 / 608 bytes
 
 public:
     LEVEL               Level() const { return m_level; }
@@ -313,6 +371,7 @@ public:
 
     RCE                 * PrceOldest();
 
+    // Basic trx context, and session context setting, checking, etc.
     VOID                PIBSetTrxContext();
     VOID                PIBResetTrxContext();
     ERR                 ErrPIBCheckCorrectSessionContext() const;
@@ -455,14 +514,15 @@ public:
     VOID DumpOpenTrxUserDetails( _In_ CPRINTF * const pcprintf, _In_ const DWORD_PTR dwOffset = 0, _In_ LONG lgenTip = 0 ) const;
     VOID DumpBasic( CPRINTF * pcprintf, DWORD_PTR dwOffset = 0 ) const;
     VOID Dump( CPRINTF * pcprintf, DWORD_PTR dwOffset = 0 ) const;
-#endif
+#endif  //  DEBUGGER_EXTENSION
 };
 
+//  Be conscious of the size if you're changing it ...
 #ifdef _WIN64
 C_ASSERT( sizeof(PIB) == 608 );
-#else
+#else  //  !_WIN64
 C_ASSERT( sizeof(PIB) == 528 );
-#endif
+#endif  //  _WIN64
 
 INLINE SIZE_T OffsetOfTrxOldestILE()    { return OffsetOf( PIB, m_ileTrxOldest ); }
 
@@ -527,15 +587,21 @@ INLINE ERR PIB::ErrSetMacroGoing( DBTIME dbtime )
         }
     }
 
+    //  allocate another MACRO
+    //
     pMacro = (MACRO *) PvOSMemoryHeapAlloc( sizeof( MACRO ) );
     if ( NULL == pMacro )
     {
         return ErrERRCheck( JET_errOutOfMemory );
     }
 
+    //  set dbtime
+    //
     memset( pMacro, 0, sizeof( MACRO ) );
     pMacro->SetDbtime( dbtime );
 
+    //  link macro to list of macros in session
+    //
     pMacro->SetMacroNext ( m_pMacroNext );
     m_pMacroNext = pMacro;
 
@@ -557,11 +623,15 @@ INLINE VOID PIB::ResetMacroGoing( DBTIME dbtime )
             Assert( m_pMacroNext != NULL );
             if ( m_pMacroNext->PMacroNext() == NULL )
             {
+                //  only macro in session -- leave for later use
+                //
                 pMacro->SetDbtime( dbtimeNil );
                 pMacro->ResetBuffer();
             }
             else
             {
+                //  remove from list and release
+                //
                 if ( NULL == pMacroPrev )
                 {
                     m_pMacroNext = pMacro->PMacroNext();
@@ -608,6 +678,9 @@ INLINE ERR PIB::MACRO::ErrInsertLogrec( const VOID * pv, const ULONG cb )
         BYTE *  rgbLogrecOld    = m_rgbLogrec;
         size_t  cbLogrecMacOld  = m_cbLogrecMac;
 
+        // to don't overflow (we are talking unsigned here)
+        // the result should be bigger then any of the 2 values
+        //
         if (  ( cbLogrecMacOld + cbAlloc < cbLogrecMacOld ) || ( cbLogrecMacOld + cbAlloc < cbAlloc ) )
         {
             return ErrERRCheck( JET_errOutOfMemory );
@@ -699,7 +772,9 @@ INLINE VOID PIB::SetErrRollbackFailure( const ERR err )
 }
 
 
+//  ================================================================
 INLINE ERR PIB::ErrAllocPvRecordFormatConversionBuffer()
+//  ================================================================
 {
     Assert( NULL == m_pvRecordFormatConversionBuffer );
     if( NULL == ( m_pvRecordFormatConversionBuffer = PvOSMemoryPageAlloc( g_cbPage, NULL ) ) )
@@ -709,7 +784,9 @@ INLINE ERR PIB::ErrAllocPvRecordFormatConversionBuffer()
     return JET_errSuccess;
 }
 
+//  ================================================================
 INLINE VOID PIB::FreePvRecordFormatConversionBuffer()
+//  ================================================================
 {
     if ( NULL != m_pvRecordFormatConversionBuffer )
     {
@@ -718,14 +795,16 @@ INLINE VOID PIB::FreePvRecordFormatConversionBuffer()
     m_pvRecordFormatConversionBuffer = NULL;
 }
 
+//  ================================================================
 INLINE ERR PIB::ErrSetClientCommitContextGeneric( const void * const pvCtx, const INT cbCtx )
+//  ================================================================
 {
     if ( cbCtx > sizeof(m_rgbClientCommitContextGeneric) )
     {
         return ErrERRCheck( JET_errInvalidBufferSize );
     }
 
-    Assert( cbCtx < 256 );
+    Assert( cbCtx < 256 );  // size of ppib->m_cbClientCommitContextGeneric
     m_cbClientCommitContextGeneric = (BYTE)cbCtx;
 
     if ( cbCtx )
@@ -736,7 +815,9 @@ INLINE ERR PIB::ErrSetClientCommitContextGeneric( const void * const pvCtx, cons
     return JET_errSuccess;
 }
 
+//  ================================================================
 INLINE ERR PIB::ErrSetCommitContextContainsCustomerData( const void * const pvCtx, const INT cbCtx )
+//  ================================================================
 {
     if ( cbCtx != sizeof( DWORD ) )
     {
@@ -747,8 +828,11 @@ INLINE ERR PIB::ErrSetCommitContextContainsCustomerData( const void * const pvCt
     return JET_errSuccess;
 }
 
+//  =======================================================================
 
+//  ================================================================
 INLINE ERR PIB::ErrSetOperationContext( const void * const pvCtx, const INT cbCtx )
+//  ================================================================
 {
     static_assert( sizeof( JET_OPERATIONCONTEXT ) == sizeof( OPERATION_CONTEXT ), "JET_OPERATIONCONTEXT and OPERATION_CONTEXT should be the same size" );
 
@@ -761,7 +845,9 @@ INLINE ERR PIB::ErrSetOperationContext( const void * const pvCtx, const INT cbCt
     return JET_errSuccess;
 }
 
+//  ================================================================
 INLINE ERR PIB::ErrSetCorrelationID( const void *pvID, const INT cbID )
+//  ================================================================
 {
     if ( cbID != sizeof( m_utc.dwCorrelationID ) )
     {
@@ -773,7 +859,9 @@ INLINE ERR PIB::ErrSetCorrelationID( const void *pvID, const INT cbID )
     return JET_errSuccess;
 }
 
+//  ================================================================
 INLINE ERR PIB::ErrSetIOSESSTraceFlags( const void *pvFlags, const INT cbFlags )
+//  ================================================================
 {
     if ( cbFlags != sizeof( m_utc.dwIOSessTraceFlags ) )
     {
@@ -785,7 +873,9 @@ INLINE ERR PIB::ErrSetIOSESSTraceFlags( const void *pvFlags, const INT cbFlags )
     return JET_errSuccess;
 }
 
+//  ================================================================
 INLINE ERR PIB::ErrSetClientActivityID( const void *pvID, const INT cbID )
+//  ================================================================
 {
     ERR err = JET_errSuccess;
     if ( cbID != sizeof( m_utc.pUserContextDesc->guidActivityId ) )
@@ -798,28 +888,36 @@ INLINE ERR PIB::ErrSetClientActivityID( const void *pvID, const INT cbID )
     return JET_errSuccess;
 }
 
+//  ================================================================
 INLINE ERR PIB::ErrSetClientComponentDesc( const void *pvClientComponent, const INT cb )
+//  ================================================================
 {
     ERR err = JET_errSuccess;
     CallR( m_utc.ErrLazyInitUserContextDesc() );
     return USER_CONTEXT_DESC::ErrCopyDescString( m_utc.pUserContextDesc->szClientComponent, (const char*) pvClientComponent, cb );
 }
 
+//  ================================================================
 INLINE ERR PIB::ErrSetClientActionDesc( const void *pvClientAction, const INT cb )
+//  ================================================================
 {
     ERR err = JET_errSuccess;
     CallR( m_utc.ErrLazyInitUserContextDesc() );
     return USER_CONTEXT_DESC::ErrCopyDescString( m_utc.pUserContextDesc->szClientAction, (const char*) pvClientAction, cb );
 }
 
+//  ================================================================
 INLINE ERR PIB::ErrSetClientActionContextDesc( const void *pvClientActionContext, const INT cb )
+//  ================================================================
 {
     ERR err = JET_errSuccess;
     CallR( m_utc.ErrLazyInitUserContextDesc() );
     return USER_CONTEXT_DESC::ErrCopyDescString( m_utc.pUserContextDesc->szClientActionContext, (const char*) pvClientActionContext, cb );
 }
 
+//  ================================================================
 INLINE ULONG_PTR PIB::PctCachePriorityPibDbid( const DBID dbid ) const
+//  ================================================================
 {
     Assert( dbid < _countof( m_rgpctCachePriority ) );
 
@@ -829,7 +927,9 @@ INLINE ULONG_PTR PIB::PctCachePriorityPibDbid( const DBID dbid ) const
     return pctCachePriority;
 }
 
+//  ================================================================
 INLINE ERR PIB::ErrSetUserIoPriority( const void* const pvUserFlags, const INT cbFlags )
+//  ================================================================
 {
     ERR err = JET_errSuccess;
 
@@ -841,8 +941,13 @@ INLINE ERR PIB::ErrSetUserIoPriority( const void* const pvUserFlags, const INT c
     JET_GRBIT grbitUserIoPriFlagsUnprocessed = *( (JET_GRBIT *) pvUserFlags );
     ULONG qosIo = 0x0;
 
+    //  Double check the mapping of JET API bits match the BF-API pass through masks, and
+    //  match the OS-level IO QOS bits.
+    //
+    // Note that JET_IOPriorityLow != qosIOOSLowPriority so that needs to be translated.
     
 
+    //  First translate (any non-pass-thru bits)
     
     if ( grbitUserIoPriFlagsUnprocessed & JET_IOPriorityLow )
     {
@@ -854,6 +959,7 @@ INLINE ERR PIB::ErrSetUserIoPriority( const void* const pvUserFlags, const INT c
     grbitUserIoPriFlagsUnprocessed &= ~JET_IOPriorityUserClassIdMask;
     grbitUserIoPriFlagsUnprocessed &= ~JET_IOPriorityMarkAsMaintenance;
 
+    //  We allow pass through for a limited number of flags as we flight this feature experimentally.
     qosIo |= ( grbitUserIoPriFlagsUnprocessed & qosIODispatchBackground );
     grbitUserIoPriFlagsUnprocessed &= ~qosIODispatchBackground;
 
@@ -863,6 +969,7 @@ INLINE ERR PIB::ErrSetUserIoPriority( const void* const pvUserFlags, const INT c
         CallR( ErrERRCheck( JET_errInvalidGrbit ) );
     }
 
+    // we've successfully converted all User IoPriority flags into IO QOS flags, so update pib members ...
 
     m_grbitUserIoPriority = *( (JET_GRBIT *) pvUserFlags );
     m_qosIoPriority |= qosIo;
@@ -870,35 +977,47 @@ INLINE ERR PIB::ErrSetUserIoPriority( const void* const pvUserFlags, const INT c
     return JET_errSuccess;
 }
 
+//  ================================================================
 INLINE BFPriority PIB::BfpriPriority( const IFMP ifmpOverride ) const
+//  ================================================================
 {
     Assert( ifmpOverride > 0 );
     Assert( ifmpOverride != ifmpNil );
 
+    //  If this function / line shows up in performance traces, we could pre-compute the 
+    //  entire BFPriority and store it on PIB, so it just gets passed back.
     return BfpriBFMake( PctCachePriorityPibDbid( DbidFromIfmp( ifmpOverride ) ), QosIoPriority() );
 }
 
 
+//  ================================================================
 INLINE PIBTraceContextScope PIB::InitTraceContextScope() const
+//  ================================================================
 {
+    // For any threads entering the JET API through APICALL_SESID, the current user context in the TLS should point to the session's context
     Assert( Putc() == PutcTLSGetUserContext() || m_cInJetAPI == 0 );
 
     return PIBTraceContextScope( this );
 }
 
+//  ================================================================
 INLINE void PIB::SetUserTraceContextInTls() const
+//  ================================================================
 {
     const UserTraceContext* ptcPrev = TLSSetUserTraceContext( Putc() );
     Assert( NULL == ptcPrev );
 }
 
+//  ================================================================
 INLINE void PIB::ClearUserTraceContextInTls() const
+//  ================================================================
 {
     const UserTraceContext* ptcPrev = TLSSetUserTraceContext( NULL );
     Assert( ptcPrev == Putc() );
 }
 
 
+//  =======================================================================
 
 TRX TrxOldest( INST *pinst );
 TRX TrxOldestCached( const INST * const pinst );
@@ -934,7 +1053,8 @@ INLINE BOOL FPIBSessionSystemCleanup( PIB *ppib )
         || ppib->FSessionDBScan() );
 }
 
-
+/*  PIB validation
+/**/
 #define CheckPIB( ppib )    Assert( (ppib)->Level() < levelMax )
 
 #define ErrPIBCheck( ppib ) JET_errSuccess
@@ -946,18 +1066,21 @@ INLINE BOOL FPIBSessionSystemCleanup( PIB *ppib )
 #ifdef DEBUG
 
 
+//  ================================================================
 INLINE VOID PIB::AssertValid( ) const
+//  ================================================================
 {
     CResource::AssertValid( JET_residPIB, this );
     Assert( m_level < levelMax );
 }
 
 
-#endif
+#endif  //  DEBUG
 
 #define FPIBActive( ppib )                      ( (ppib)->level != levelNil )
 
-
+/*  prototypes
+/**/
 ERR ErrPIBBeginSession( INST *pinst, _Outptr_ PIB ** pppib, PROCID procid, BOOL fForCreateTempDatabase );
 VOID PIBEndSession( PIB *ppib );
 ERR ErrPIBOpenTempDatabase( PIB *ppib );
@@ -984,9 +1107,17 @@ INLINE VOID PIBSetLevelRollback( PIB *ppib, LEVEL levelT )
         ppib->levelRollback = levelT;
 }
 
+// increment trxid by 4 each time - this is because no valid trxid can be trxMax (special value) and we need space
+// between normal trxids for the special read-from-passive trxids
 #define TRXID_INCR  4
 
+//  ================================================================
 INLINE VOID PIBSetTrxBegin0( PIB * const ppib )
+//  ================================================================
+//
+//  Used when a transaction starts from level 0 or refreshes
+//
+//-
 {
     INST* const pinst = PinstFromPpib( ppib );
     INST::PLS* const ppls = pinst->Ppls();
@@ -1000,10 +1131,13 @@ INLINE VOID PIBSetTrxBegin0( PIB * const ppib )
     {
         ppib->trxBegin0 = TRX( AtomicExchangeAdd( (LONG *)&pinst->m_trxNewest, TRXID_INCR ) ) + TRXID_INCR;
     }
+    // collect lgpos for debugging purpose
     ppib->lgposTrxBegin0 = pinst->m_plog->LgposLGLogTipNoLock();
 
     ppib->m_pplsTrxOldest = ppls;
 #ifdef DEBUG
+    // This trxBegin0 better not be older than the trxBegin0 of the first session on the invasive list or
+    // TrxOldest calculation will be busted
     PIB* const ppibTrxOldest = ppls->m_ilTrxOldest.PrevMost();
     Assert ( !ppibTrxOldest || ( INT( ppibTrxOldest->trxBegin0 - ppib->trxBegin0 ) <= 0 ) );
 #endif
@@ -1013,7 +1147,13 @@ INLINE VOID PIBSetTrxBegin0( PIB * const ppib )
     ppib->trxCommit0 = trxMax;
 }
 
+//  ================================================================
 INLINE VOID PIBResetTrxBegin0( PIB * const ppib )
+//  ================================================================
+//
+//  Used when a transaction commits or rollsback to level 0
+//
+//-
 {
     Assert( 0 == ppib->Level() );
     Assert( NULL == ppib->prceNewest );
@@ -1031,6 +1171,7 @@ INLINE VOID PIBResetTrxBegin0( PIB * const ppib )
     ppib->ResetFReadOnlyTrx();
     ppib->ResetLoggedCheckpointGettingDeep();
 
+//  trxBegin0 is no longer unique, due to unversioned AddColumn/CreateIndex
 }
 
 
@@ -1072,8 +1213,10 @@ INLINE ERR PIB::ErrPIBCheckCorrectSessionContext() const
     return JET_errSuccess;
 }
 
-INLINE DWORD_PTR  PIB::TidActive() const
+INLINE DWORD_PTR /* Technically a DWORD */ PIB::TidActive() const
 {
+    //  Normally we use the TID for the trx context, except when there is an explicit user session context, in
+    //  which case the TID gets displaced to dwSessionContextThreadId.  Yes, it is confusing.
     return m_fUseSessionContextForTrxContext ? dwSessionContextThreadId : dwTrxContext;
 }
 
@@ -1098,6 +1241,16 @@ INLINE VOID PIB::PIBSetTrxContext()
     m_tickLevel0Begin = TickOSTimeCurrent();
     if ( m_pinst->FRecovering() || this->FBatchIndexCreation() )
     {
+        //  TrxContext is not properly maintained during recovery (not all
+        //  places that could begin a transaction set the TrxContext)
+        //
+        //  TrxContext also not properly maintained during batch index creations
+        //  as multiple worker threads may be using the same PIB
+        //  WARNING: may even make callbacks (eg. jcb.dll) and have multiple
+        //  threads begin transactions and call back into Jet using the same
+        //  session, but I believe it is safe because they are all calling
+        //  back into Jet under the context of batch index creation
+        //
     }
     else if ( dwPIBSessionContextNull == dwSessionContext )
     {
@@ -1119,6 +1272,8 @@ INLINE VOID PIB::PIBResetTrxContext()
     }
 }
 
+//  We use this to prepare for rollback from end session which might be happening from 
+//  term on another thread.
 
 INLINE VOID PIB::PrepareTrxContextForEnd()
 {
@@ -1126,10 +1281,13 @@ INLINE VOID PIB::PrepareTrxContextForEnd()
     {
         Assert( !m_pinst->FRecovering() );
 
+        //  fake out TrxContext to allow us to rollback on behalf of another thread
         dwTrxContext = dwSessionContext;
     }
     else
     {
+        //  not using SessionContext model, so if the transaction wasn't started by
+        //  this thread, the rollback call below will err out with SessionSharingViolation
     }
 }
 
@@ -1137,6 +1295,16 @@ INLINE BOOL PIB::FPIBCheckTrxContext() const
 {
     if ( m_pinst->FRecovering() || this->FBatchIndexCreation() )
     {
+        //  TrxContext is not properly maintained during recovery (not all
+        //  places that could begin a transaction set the TrxContext)
+        //
+        //  TrxContext also not properly maintained during batch index creations
+        //  as multiple worker threads may be using the same PIB
+        //  WARNING: may even make callbacks (eg. jcb.dll) and have multiple
+        //  threads begin transactions and call back into Jet using the same
+        //  session, but I believe it is safe because they are all calling
+        //  back into Jet under the context of batch index creation
+        //
         return fTrue;
     }
     else if ( m_fUseSessionContextForTrxContext )
@@ -1152,11 +1320,13 @@ INLINE BOOL PIB::FPIBCheckTrxContext() const
 
 inline BOOL PIB::FCheckSetLoggedCheckpointGettingDeep()
 {
+    //  Not done from regular PIB thread, only in checkpoint update, so make sure this PIB won't go away.
     Assert( m_pinst->m_critPIB.FOwner() );
     Expected( critLogBeginTrx.FOwner() );
     BOOL fCheck = AtomicCompareExchange( (LONG*)&m_fLoggedCheckpointGettingDeep, fFalse, fTrue );
     if ( fCheck == fFalse )
     {
+        //  we won ...
         return fTrue;
     }
     return fFalse;
@@ -1168,11 +1338,15 @@ INLINE VOID PIB::ResetLoggedCheckpointGettingDeep()
     if ( m_fLoggedCheckpointGettingDeep )
     {
         BOOL fCheck = AtomicCompareExchange( (LONG*)&m_fLoggedCheckpointGettingDeep, fTrue, fFalse );
+        //  can go off from PIBReset / Commit / Rollback IF checkpoint update calls this func because it lost a
+        //  super narrow race (in a RARE error condition).  In practice, nearly impossible.
         Expected( fCheck == fTrue );
     }
 }
 
+//  ================================================================
 INLINE ERR ErrPIBCheckUpdatable( const PIB * ppib )
+//  ================================================================
 {
     ERR     err;
 
@@ -1185,7 +1359,8 @@ INLINE ERR ErrPIBCheckUpdatable( const PIB * ppib )
 }
 
 
-
+/*  JET API flags
+/**/
 INLINE BOOL FPIBVersion( const PIB * const ppib )
 {
     const BOOL  fCIMEnabled = ( ppib->FCIMCommitted() || ppib->FCIMDirty() );
@@ -1218,7 +1393,7 @@ class CSessionHash : public CSimpleHashTable<PIB>
             CSimpleHashTable<PIB>( min( csessions, csessionsMax ), OffsetOf( PIB, ppibHashOverflow ) )      {}
         ~CSessionHash()     {}
 
-        enum    { csessionsMax = 0xFFFF };
+        enum    { csessionsMax = 0xFFFF };      //  max size of hash table
 
         ULONG UlHash( const PROCID procid ) const
         {
@@ -1257,6 +1432,8 @@ class CSessionHash : public CSimpleHashTable<PIB>
 
 INLINE TraceContext* PIBGetEtcFunctor::operator()() const
 {
+    // Get the TraceContext from the TLS pointer cached on the PIB
+    // Eliminates the call to GetTlsValue() which is significant CPU on AD cpu traces
     return m_ppib->ptlsApi != NULL ?
         const_cast<TraceContext*>( PetcTLSGetEngineContextCached( m_ppib->ptlsApi ) ) :
         const_cast<TraceContext*>( PetcTLSGetEngineContext() );

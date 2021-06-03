@@ -5,6 +5,9 @@
 
 #include "PageSizeClean.hxx"
 
+//  store an array of all the librarys we have open, close them at termination
+//  we assume there will be a very small number of callback DLLs used so a relatively
+//  poor memory allocation scheme is used
 
 struct LIBRARYMAP
 {
@@ -18,7 +21,9 @@ LOCAL LIBRARYMAP *  g_rglibrarymap    = NULL;
 LOCAL CCriticalSection g_critCallback( CLockBasicInfo( CSyncBasicInfo( szCritCallbacks ), rankCallbacks, 0 ) );
 
 
+//  ================================================================
 ERR ErrCALLBACKInit()
+//  ================================================================
 {
     g_clibrary = 0;
     g_rglibrarymap = NULL;
@@ -26,7 +31,13 @@ ERR ErrCALLBACKInit()
 }
 
 
+//  ================================================================
 VOID CALLBACKTerm()
+//  ================================================================
+//
+//  Close all the module handles
+//
+//-
 {
     INT ilibrary;
     for( ilibrary = 0; ilibrary < g_clibrary; ++ilibrary )
@@ -38,13 +49,17 @@ VOID CALLBACKTerm()
 }
 
 
+//  ================================================================
 LOCAL BOOL FCALLBACKISearchForLibrary( const WCHAR * const wszLibrary, LIBRARY * plibrary )
+//  ================================================================
 {
+    //  see if the library is already loaded
     INT ilibrary;
     for( ilibrary = 0; ilibrary < g_clibrary; ++ilibrary )
     {
         if( 0 == _wcsicmp( wszLibrary, g_rglibrarymap[ilibrary].wszLibrary ) )
         {
+            // this library is already loaded
             *plibrary = g_rglibrarymap[ilibrary].library;
             return fTrue;
         }
@@ -53,7 +68,9 @@ LOCAL BOOL FCALLBACKISearchForLibrary( const WCHAR * const wszLibrary, LIBRARY *
 }
 
 
+//  ================================================================
 ERR ErrCALLBACKResolve( const CHAR * const szCallback, JET_CALLBACK * pcallback )
+//  ================================================================
 {
     JET_ERR err = JET_errSuccess;
     Assert( pcallback );
@@ -65,6 +82,9 @@ ERR ErrCALLBACKResolve( const CHAR * const szCallback, JET_CALLBACK * pcallback 
 
     ENTERCRITICALSECTION entercritcallback( &g_critCallback );
 
+    //  do not use sizeof(szCallbackT) here because three characters
+    //  are reserved in szCallbackT for '@32'.
+    //
     if ( strlen( szCallback ) > JET_cbColumnMost )
     {
         err = ErrERRCheck( JET_errInvalidParameter );
@@ -91,12 +111,19 @@ ERR ErrCALLBACKResolve( const CHAR * const szCallback, JET_CALLBACK * pcallback 
     {
         if( FUtilLoadLibrary( (WCHAR*)wszLibrary, &library, g_fEseutil ) )
         {
+            //  we were able to load the library. allocate a new rglibrary array
+            //
+            //  swap the arrays so that threads not in the critical section
+            //  can continue to traverse the array.
+            //
             const INT clibraryT = g_clibrary + 1;
             LIBRARYMAP * const rglibrarymapOld = g_rglibrarymap;
             LIBRARYMAP * const rglibrarymapNew = (LIBRARYMAP *)PvOSMemoryHeapAlloc( clibraryT * sizeof( LIBRARYMAP ) );
             ULONG cchLibraryT = LOSStrLengthW( (WCHAR*)wszLibrary ) + 1;
             WCHAR * const wszLibraryT = (WCHAR *)PvOSMemoryHeapAlloc( cchLibraryT * sizeof( WCHAR ) );
 
+            //  check for memory allocation failure
+            //
             if( NULL == rglibrarymapNew || NULL == wszLibraryT )
             {
                 if( NULL != rglibrarymapNew )
@@ -127,6 +154,7 @@ ERR ErrCALLBACKResolve( const CHAR * const szCallback, JET_CALLBACK * pcallback 
         }
         else
         {
+            //  log the fact that we couldn't find the callback
             const WCHAR *rgszT[1];
             rgszT[0] = (WCHAR*)wszLibrary;
             UtilReportEvent( eventError, GENERAL_CATEGORY, FILE_NOT_FOUND_ERROR_ID, 1, rgszT );
@@ -134,6 +162,7 @@ ERR ErrCALLBACKResolve( const CHAR * const szCallback, JET_CALLBACK * pcallback 
         }
     }
 
+    //  we now have the library
     *pcallback = (JET_CALLBACK)PfnUtilGetProcAddress( library, szFunction );
     if( NULL == *pcallback )
     {
@@ -229,6 +258,7 @@ ERR VTAPI ErrIsamGetLS(
         err = ErrGetLS( pfucb, pls, fReset );
     }
 
+    //  if successfully able to retrieve LS, there must be an associated callback
     Assert( err < 0 || NULL != PvParam( PinstFromPpib( ppib ), JET_paramRuntimeCallback ) );
 
     return err;

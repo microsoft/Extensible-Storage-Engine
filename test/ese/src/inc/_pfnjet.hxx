@@ -1,6 +1,7 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
+// needed for JET errors
 #if defined(BUILD_ENV_IS_NT) || defined(BUILD_ENV_IS_WPHONE)
 #include <esent_x.h>
 #endif
@@ -14,6 +15,8 @@
 
 #include <functional>
 
+//  We don't want to depend upon the full OS layer, but we need library.hxx and a few supporting things
+//  for library.hxx to work.
 
 #ifndef Expected
 #define Expected    Assert
@@ -24,20 +27,26 @@
 #ifndef OnDebug
 #ifdef DEBUG
 #define OnDebug( code )             code
-#else
+#else  //   !DEBUG
 #define OnDebug( code )
-#endif
-#else
+#endif //   DEBUG
+#else  //   defined(OnDebug)
 #error "If this is fixed everywhere pfnjet.hxx is used, then remove whole thing, otherwise just strip this #else #error clause."
-#endif
+#endif //   OnDebug
 
 #include "cc.hxx"
 #include "types.hxx"
 #include "library.hxx"
 
+//
+//  Helpers
+//
 
 BOOL FDllLoaded( const CHAR * const szDll );
 
+//
+//  Indirected JET API...
+//
 
 #define FEseDllLoaded()     ( FDllLoaded( "ese.dll" ) | FDllLoaded( "esent.dll" ) )
 
@@ -96,14 +105,22 @@ INLINE Ret ErrFailed( Arg1, Arg2, Arg3, Arg4, Arg5, Arg6, Arg7, Arg8, Arg9 )
     return Ret( ErrThunkNotSupported() );
     }
 
+//  returns JET_ERR, LoadErr returns the standard ERR thunk value - JET_errJetApiLoadFailThunk / -68
 
 #define JetApiFunc( g_pfn, mszzDlls, func, oslf )               \
             FunctionLoader<decltype(&func)> g_pfn( ErrFailed, mszzDlls, #func, oslf );
 
+//  The loader system was really meant to be used for OS-functionality, not ESE functionality, so its
+//  flags aren't 100% sensible for this purpose, it would be good to enhance it, but don't have time
+//  right now, so anyway we need these two odd flags:
+//    - oslfExpectedOnWin5x because you need at least one ExpectedOnXxx flag or it asserts.
+//    - oslfNotExpectedOnCoreSystem because you need to tell it not to assert if a function is not 
+//      present and that returning a failed thunk error is acceptable for this function.
 
 const OSLoadFlags oslfJetApiBasic   = oslfNonSystem|oslfStrictFree|oslfExpectedOnWin5x;
 const OSLoadFlags oslfJetApiNewApi  = oslfNonSystem|oslfStrictFree|oslfNotExpectedOnCoreSystem|oslfExpectedOnWin5x;
 
+//  we call pfnJetSetSystemParameterA.ErrIsPresent() to ensure it is loaded in retail.
 
 #define DECL_JET_API()          \
     JetApiFunc( pfnJetSetSystemParameterA, g_mwszzEse, JetSetSystemParameterA, oslfJetApiBasic );   \

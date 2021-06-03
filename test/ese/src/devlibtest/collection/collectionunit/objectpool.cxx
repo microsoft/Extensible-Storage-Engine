@@ -3,7 +3,9 @@
 
 #include "collectionunittest.hxx"
 
+//  ================================================================
 class ObjectPoolTest : public UNITTEST
+//  ================================================================
 {
     private:
         static ObjectPoolTest s_instance;
@@ -44,6 +46,7 @@ const char * ObjectPoolTest::SzDescription() const
     return "Tests the ObjectPool class";
 }
 
+// allocation returns a non-NULL object
 ERR ObjectPoolTest::ErrAllocateOneObject()
 {
     ERR err = JET_errSuccess;
@@ -57,6 +60,7 @@ HandleError:
     return err;
 }
 
+// alloc,free,alloc should return the same object
 ERR ObjectPoolTest::ErrReallocateObject()
 {
     ERR err = JET_errSuccess;
@@ -72,6 +76,7 @@ HandleError:
     return err;
 }
 
+// alloc,alloc should give different objects
 ERR ObjectPoolTest::ErrAllocateTwoObjects()
 {
     ERR err = JET_errSuccess;
@@ -87,6 +92,7 @@ HandleError:
     return err;
 }
 
+// allocate and free more objects than the pool can hold
 ERR ObjectPoolTest::ErrAllocateManyObjects()
 {
     ERR err = JET_errSuccess;
@@ -108,7 +114,9 @@ HandleError:
     return err;
 }
 
+//  ================================================================
 ERR ObjectPoolTest::ErrTest()
+//  ================================================================
 {   
     if( JET_errSuccess == ErrAllocateOneObject()
         && JET_errSuccess == ErrReallocateObject()

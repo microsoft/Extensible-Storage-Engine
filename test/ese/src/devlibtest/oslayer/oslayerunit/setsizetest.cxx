@@ -5,6 +5,7 @@
 
 enum IOREASONPRIMARY : BYTE
 {
+    // iorpNone publically defined
     iorpInvalid = 0,
 
     iorpOSUnitTest
@@ -50,6 +51,8 @@ ERR TestErrSetSize::ErrTest()
     OSTestCheckErr( pfapi->ErrSize( &dwSize, IFileAPI::filesizeLogical ) );
     OSTestCheck( dwSize == 131072 );
 
+    // Although NTFS has allocated 128k for us on disk, only 64k is "valid data"
+    // and that is what is reported by GetCompressedFileSize on newer OS (8.1)
     OSTestCheckErr( pfapi->ErrSize( &dwSizeOnDisk, IFileAPI::filesizeOnDisk ) );
     OSTestCheck( dwSize == dwSizeOnDisk || dwSizeOnDisk == 65536 );
 
@@ -100,10 +103,14 @@ ERR TestErrSetSize::ErrTest()
         OSTestCheck( memcmp( rgbReadBuffer, rgbTestPattern, sizeof(rgbReadBuffer) ) == 0 );
     }
 
+    // The GetCompressedFileSize API is pretty convoluted and requires checking the
+    // return value against 0xffffffff.
     QWORD cbExpectedHuge = INVALID_FILE_SIZE;
     err = pfapi->ErrSetSize( *TraceContextScope( iorpOSUnitTest ), cbExpectedHuge, fFalse, qosIONormal );
     if ( err == JET_errDiskFull )
     {
+        // This is not ideal, but if the disk doesn't have enough space, we 
+        // won't fail the test.
         err = JET_errSuccess;
     }
     else if ( err == JET_errInvalidParameter )
@@ -132,10 +139,13 @@ ERR TestErrSetSize::ErrTest()
 #endif
     }
 
+    // Add 4 GB to the size and try again.
     cbExpectedHuge = INVALID_FILE_SIZE + 0x100000000LL;
     err = pfapi->ErrSetSize( *TraceContextScope( iorpOSUnitTest ), cbExpectedHuge, fFalse, qosIONormal );
     if ( err == JET_errDiskFull )
     {
+        // This is not ideal, but if the disk doesn't have enough space, we 
+        // won't fail the test.
         err = JET_errSuccess;
     }
     else

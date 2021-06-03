@@ -4,6 +4,7 @@
 #include "logstd.hxx"
 #include "_logredomap.hxx"
 
+// =============================== RedoMapEntry
 
 RedoMapEntry::RedoMapEntry()
 {
@@ -28,6 +29,7 @@ RedoMapEntry::RedoMapEntry(
 }
 
 
+// =============================== CLogRedoMap
 
 ERR CLogRedoMap::ErrToErr( __in const RedoMapTree::ERR err )
 {
@@ -121,7 +123,7 @@ HandleError:
     {
         Assert( !fSet );
     }
-#endif
+#endif  // DEBUG
 
     return fSet;
 }

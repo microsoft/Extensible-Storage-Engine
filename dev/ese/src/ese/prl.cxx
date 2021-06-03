@@ -5,41 +5,86 @@
 
 #include "PageSizeClean.hxx"
 
+/***********************************************************
 
+The Patch Request List keeps track of outstanding patch requests for a
+specific FMP.  A PRL entry is created when a page page record is logged
+and is cleared when a page is dirtied.
 
+Patch requests are synchronized through the buffer latch. When creating
+a page the entries are synchronized in this way:
+
+Latch Page (non-exclusive)
+    Create PRL entry
+
+When a page is dirtied the entry is cleared in this way:
+
+Latch Page (exclusive)
+    Dirty Page
+        Clear PRL entry
+
+Patching a page works like this:
+
+Latch Page (exclusive)
+    If patch request exists:
+        If request is active:
+            Patch Page
+            Dirty Page
+                Clear PRL entry
+
+***********************************************************/
+
+//  ================================================================
 namespace PagePatching
+//  ================================================================
 {
     static const JET_TRACETAG g_tracetag = JET_tracetagOLD;
 }
 
+//  ================================================================
 struct PatchRequestId
+//  ================================================================
 {
     IFMP    ifmp;
     PGNO    pgno;
     DBTIME  dbtime;
 };
 
+//  ================================================================
 class PatchRequest
+//  ================================================================
+//
+//  Describes an outstanding page patch request.
+//
+//-
 {
 public:
+    // Create a new patch request, filling in the output parameter if the request is logged successfully
     static ERR ErrCreateRequest( const IFMP ifmp, const PGNO pgno, __out PatchRequest * const prequest );
 
+    // True if the request is currently active
     bool FRequestIsActive() const { return m_fRequestIsActive; }
 
+    // True if the request is for a page associated with the instance
     bool FRequestIsForThisInst( const INST * const pinst ) const;
     
+    // True if the request is for a page in the specified FMP
     bool FRequestIsForIfmp( const IFMP ifmp) const;
 
+    // True if the request is for the specified ifmp:pgno
     bool FRequestIsForIfmpPgno( const IFMP ifmp, const PGNO pgno ) const;
 
+    // How long (in seconds) this request has been pending for
     ULONG_PTR UlSecAgeOfRequest() const;
 
+    // Patch the page if the request is active and the PatchRequestId matches
     ERR ErrPatchPage(
         const PatchRequestId id,
         BFLatch * const pbfl,
         __in_bcount(cb) const void * const pv,
         const INT cb );
 
+    // Cancel this request. Subsequent calls to ErrPatchPage will fail.
     void CancelRequest();
 
     PatchRequest();
@@ -89,11 +134,17 @@ private:
     ULONG_PTR   m_ulTimeWhenRequestWasLogged;
     bool        m_fRequestIsActive;
 
-private:
+private:    // not implemented
     PatchRequest( const PatchRequest& );
 };
 
+//  ================================================================
 namespace PagePatching
+//  ================================================================
+//
+//  Functions that aren't exposed in the header
+//
+//-
 {
     void IssueCorruptPageCallback( const IFMP ifmp, const PGNO pgno );
     ERR ErrRequestPatch( const IFMP ifmp, const PGNO pgno );
@@ -140,6 +191,11 @@ namespace PagePatching
         LONG        pgno
         );
 
+    // The g_rgrequests object is fairly large (8k) and should  be allocated
+    // dynamically, to avoid allocation for clients that don't need it. This class
+    // manages the lifetime of the array:
+    // -ErrPRLInit() allocates the array, if necessary.
+    // -The destructor frees the array, if necessary.
     class PagePatchingArrayLifetimeManager
     {
     public:
@@ -167,8 +223,13 @@ HandleError:
     private:
     } g_pagepatchingarraycleanup;
 
+    //  ================================================================
+    // It is legal to call ErrPRLInit() multiple times. The internal
+    // page-patching array is allocated the first time an instance is
+    // started with JET_paramEnableExternalAutoHealing already set.
     ERR ErrPRLInit(
         _In_ INST* pinst )
+    //  ================================================================
     {
         ERR err = JET_errSuccess;
 
@@ -184,7 +245,9 @@ HandleError:
 }
 
 
+//  ================================================================
 bool operator== ( const PatchRequestId& id1, const PatchRequestId& id2 )
+//  ================================================================
 {
     return (
         id1.ifmp == id2.ifmp
@@ -192,27 +255,40 @@ bool operator== ( const PatchRequestId& id1, const PatchRequestId& id2 )
         && id1.dbtime == id2.dbtime );
 }
 
+//  ================================================================
 bool operator!= ( const PatchRequestId& id1, const PatchRequestId& id2 )
+//  ================================================================
 {
     return !(id1 == id2);
 }
 
+//  ================================================================
 ERR PatchRequest::ErrCreateRequest( const IFMP ifmp, const PGNO pgno, __out PatchRequest * const prequest )
+//  ================================================================
+//
+//  Create a new patch request. If the request creation succeeds then
+//  *prequest will be filled in with the request.
+//
+//-
 {
     ERR err;
 
+    // Set the output to a null patch request
     *prequest = PatchRequest();
     
     PatchRequest request( ifmp, pgno );
     Call( request.ErrStartPatch_() );
 
+    // The request has been logged, return it
     *prequest = request;
 
 HandleError:
     return err;
 }
 
+//  ================================================================
 PatchRequest::PatchRequest() :
+//  ================================================================
     m_ifmp( ifmpNil ),
     m_pgnoRequest( pgnoNull ),
     m_dbtimeOfPatchRequest( dbtimeNil ),
@@ -222,7 +298,9 @@ PatchRequest::PatchRequest() :
     ASSERT_VALID_RTL( this );
 }
 
+//  ================================================================
 PatchRequest::PatchRequest( const IFMP ifmp, const PGNO pgnoRequest ) :
+//  ================================================================
     m_ifmp( ifmp ),
     m_pgnoRequest( pgnoRequest ),
     m_dbtimeOfPatchRequest( dbtimeNil ),
@@ -232,12 +310,16 @@ PatchRequest::PatchRequest( const IFMP ifmp, const PGNO pgnoRequest ) :
     ASSERT_VALID_RTL( this );
 }
 
+//  ================================================================
 PatchRequest::~PatchRequest()
+//  ================================================================
 {
     CancelRequest();
 }
 
+//  ================================================================
 PatchRequest& PatchRequest::operator=( PatchRequest& rhs)
+//  ================================================================
 {
     ASSERT_VALID_RTL( this );
     ASSERT_VALID_RTL( &rhs );
@@ -255,25 +337,33 @@ PatchRequest& PatchRequest::operator=( PatchRequest& rhs)
     return *this;
 }
 
+//  ================================================================
 bool PatchRequest::FRequestIsForThisInst( const INST * const pinst ) const
+//  ================================================================
 {
     ASSERT_VALID_RTL( this );
     return FRequestIsActive() && Pinst_() == pinst;
 }
 
+//  ================================================================
 bool PatchRequest::FRequestIsForIfmp( const IFMP ifmp) const
+//  ================================================================
 {
     ASSERT_VALID_RTL( this );
     return FRequestIsActive() && Ifmp_() == ifmp;
 }
 
+//  ================================================================
 bool PatchRequest::FRequestIsForIfmpPgno( const IFMP ifmp, const PGNO pgno ) const
+//  ================================================================
 {
     ASSERT_VALID_RTL( this );
     return FRequestIsActive() && FRequestIsForIfmp( ifmp ) && PgnoRequest_() == pgno;
 }
 
+//  ================================================================
 ULONG_PTR PatchRequest::UlSecAgeOfRequest() const
+//  ================================================================
 {
     ASSERT_VALID_RTL( this );
     const ULONG_PTR ulsec = UlUtilGetSeconds() - UlTimeWhenRequestWasLogged_();
@@ -281,11 +371,13 @@ ULONG_PTR PatchRequest::UlSecAgeOfRequest() const
     return ulsec;
 }
 
+//  ================================================================
 ERR PatchRequest::ErrPatchPage(
     const PatchRequestId id,
     BFLatch * const pbfl,
     __in_bcount(cb) const void * const pv,
     const INT cb )
+//  ================================================================
 {
     ASSERT_VALID_RTL( this );
     ERR err;
@@ -316,7 +408,9 @@ HandleError:
     return err;
 }
 
+//  ================================================================
 void PatchRequest::CancelRequest()
+//  ================================================================
 {
     ASSERT_VALID_RTL( this );
     if ( FRequestIsActive() )
@@ -327,7 +421,14 @@ void PatchRequest::CancelRequest()
     ASSERT_VALID_RTL( this );
 }
 
+//  ================================================================
 ERR PatchRequest::ErrStartPatch_()
+//  ================================================================
+//
+//  To start the patch we log a patch request. Rolling the log after
+//  logging the request means it can be answered faster.
+//
+//-
 {
     ERR err;
     Trace_( __FUNCTION__, "starting" );
@@ -345,28 +446,37 @@ HandleError:
 
 #if defined( USE_HAPUBLISH_API )
 
+//  ================================================================
 void PatchRequest::LogFailureItemI_(const HaDbFailureTag haTag, const HaDbIoErrorCategory haCategory) const
+//  ================================================================
 {
     IFileAPI * const pfapi = g_rgfmp[ Ifmp_() ].Pfapi();
     WCHAR wszAbsPath[ IFileSystemAPI::cchPathMax ];
     CallS( pfapi->ErrPath( wszAbsPath ) );
 
     OSUHAPublishEvent(
-        haTag,
-        Pinst_(),
-        HA_GENERAL_CATEGORY,
-        haCategory,
-        wszAbsPath,
-        OffsetOfPgno( PgnoRequest_() ),
-        g_rgfmp[Ifmp_()].CbPage(),
-        0,
-        0,
-        NULL );
+        haTag,                                  // haTag
+        Pinst_(),                               // pinst
+        HA_GENERAL_CATEGORY,                    // dwComponent
+        haCategory,                             // eseCategory
+        wszAbsPath,                             // wszFilename
+        OffsetOfPgno( PgnoRequest_() ),         // qwOffset
+        g_rgfmp[Ifmp_()].CbPage(),              // cbSize
+        0,                                      // dwEventId
+        0,                                      // cParameter
+        NULL );                                 // rgwszParameter
 }
 
 #endif
 
+//  ================================================================
 ERR PatchRequest::ErrLogPatchRequest_()
+//  ================================================================
+//
+//  To start the patch we log a patch request. Rolling the log after
+//  logging the request means it can be answered faster.
+//
+//-
 {
     ERR err;
     Trace_( __FUNCTION__, "logging patch request" );
@@ -382,11 +492,13 @@ HandleError:
     return err;
 }
 
+//  ================================================================
 ERR PatchRequest::ErrValidatePatchArguments_(
         const PatchRequestId id,
         const BFLatch * const pbfl,
         __in_bcount(cb) const void * const pv,
         const INT cb ) const
+//  ================================================================
 {
     ERR err;
     CPAGE cpage;
@@ -418,19 +530,25 @@ HandleError:
     return err;
 }
 
+//  ================================================================
 PatchRequestId PatchRequest::Id_() const
+//  ================================================================
 {
     const PatchRequestId id = { Ifmp_(), PgnoRequest_(), DbtimeOfPatchRequest_() };
     return id;
 }
 
+//  ================================================================
 void PatchRequest::Trace_( const char * const szFunction, const char * const szTrace ) const
+//  ================================================================
 {
     OSTraceFMP( Ifmp_(), m_tracetag,
         OSFormat( "%s [%d:%d:%I64d]: %s", szFunction, (ULONG)Ifmp_(), PgnoRequest_(), DbtimeOfPatchRequest_(), szTrace ) );
 }
 
+//  ================================================================
 void PatchRequest::TraceErr_( const char * const szFunction, const ERR err ) const
+//  ================================================================
 {
     if (err < JET_errSuccess )
     {
@@ -439,13 +557,16 @@ void PatchRequest::TraceErr_( const char * const szFunction, const ERR err ) con
     }
 }
 
+//  ================================================================
 void PatchRequest::AssertValid() const
+//  ================================================================
 {
     AssertRTL( JET_tracetagNull != m_tracetag );
     AssertRTL( JET_tracetagMax != m_tracetag );
 
     if ( ifmpNil == m_ifmp )
     {
+        // a null patch request
         AssertRTL( pgnoNull == m_pgnoRequest );
         AssertRTL( dbtimeNil == m_dbtimeOfPatchRequest );
         AssertRTL( 0 == m_ulTimeWhenRequestWasLogged );
@@ -463,7 +584,9 @@ void PatchRequest::AssertValid() const
     }
 }
 
+//  ================================================================
 INT PagePatching::IndexOfRequest( const IFMP ifmp, const PGNO pgno )
+//  ================================================================
 {
     Assert( g_critPRL.FOwner() );
     for (INT i = 0; i < g_crequests; ++i)
@@ -477,27 +600,35 @@ INT PagePatching::IndexOfRequest( const IFMP ifmp, const PGNO pgno )
     return -1;
 }
 
+//  ================================================================
 bool PagePatching::FHasRequest( const IFMP ifmp, const PGNO pgno )
+//  ================================================================
 {
     ENTERCRITICALSECTION crit( &g_critPRL );
     Assert( g_rgrequests );
     return FHasRequest_( ifmp, pgno );
 }
 
+//  ================================================================
 bool PagePatching::FHasRequest_( const IFMP ifmp, const PGNO pgno )
+//  ================================================================
 {
     Assert( g_critPRL.FOwner() );
     return -1 != IndexOfRequest( ifmp, pgno );
 }
 
+//  ================================================================
 PatchRequest& PagePatching::RequestFor( const IFMP ifmp, const PGNO pgno )
+//  ================================================================
 {
     Assert( g_critPRL.FOwner() );
     Assert( FHasRequest_( ifmp, pgno ) );
     return g_rgrequests[IndexOfRequest(ifmp, pgno)];
 }
 
+//  ================================================================
 INT PagePatching::IndexOfFreeRequest()
+//  ================================================================
 {
     Assert( g_critPRL.FOwner() );
     for (INT i = 0; i < g_crequests; ++i)
@@ -511,13 +642,17 @@ INT PagePatching::IndexOfFreeRequest()
     return -1;
 }
 
+//  ================================================================
 bool PagePatching::FPRLIsFull()
+//  ================================================================
 {
     Assert( g_critPRL.FOwner() );
     return -1 == IndexOfFreeRequest();
 }
 
+//  ================================================================
 void PagePatching::RecalcPatchRequestListState()
+//  ================================================================
 {
     BOOL fFoundActiveRequest = fFalse;
     
@@ -545,13 +680,26 @@ void PagePatching::RecalcPatchRequestListState()
     g_fHasAtLeastOneRequest = (g_iprlMac >= 0);
 }
 
+//  ================================================================
 INLINE BOOL PagePatching::FIsPatchableError( const ERR err )
+//  ================================================================
+// 
+// This determines the policy for correctable / patchable errors.
+//
+//-
 {
     return FErrIsDbCorruption( err ) ||
             JET_errDiskIO == err;
 }
 
+//  ================================================================
 void PagePatching::TryToRequestPatch( const IFMP ifmp, const PGNO pgno )
+//  ================================================================
+// 
+// This can either log a patch request or call the corrupt page
+// callback
+//
+//-
 {
     AssertSz( !g_fRepair, "Page patching should never happen during repair/integrity check." );
 
@@ -563,12 +711,14 @@ void PagePatching::TryToRequestPatch( const IFMP ifmp, const PGNO pgno )
 
     bool fRequestedPatch = false;
 
+    // During runtime we can try logging a patch request
     if ( !plog->FLogDisabled()
         && !plog->FRecovering() )
     {
         err = PagePatching::ErrRequestPatch( ifmp, pgno );
         fRequestedPatch = (JET_errSuccess == err);
     }
+    // During recovery we can try using the corrupt page callback
     else if ( plog->FRecovering() )
     {
         PagePatching::IssueCorruptPageCallback( ifmp, pgno );
@@ -583,6 +733,8 @@ void PagePatching::TryToRequestPatch( const IFMP ifmp, const PGNO pgno )
 
     if (!fRequestedPatch)
     {
+        // We couldn't issue a patch request. Publish a failure event so that
+        // HA can take action.
         Assert( JET_errSuccess != err );
         
         IFileAPI * const pfapi = g_rgfmp[ ifmp ].Pfapi();
@@ -606,27 +758,35 @@ void PagePatching::TryToRequestPatch( const IFMP ifmp, const PGNO pgno )
             pinst );
 
         OSUHAPublishEvent(
-            HaDbFailureTagFailedToRepairActivePagePatch,
-            pinst,
-            HA_GENERAL_CATEGORY,
-            HaDbIoErrorMeta,
-            wszAbsPath,
-            OffsetOfPgno( pgno ),
-            g_rgfmp[ifmp].CbPage(),
-            HA_PATCH_REQUEST_ISSUE_FAILED,
-            _countof( rgcwszT ),
-            rgcwszT );
+            HaDbFailureTagFailedToRepairActivePagePatch, // haTag
+            pinst,                                  // pinst
+            HA_GENERAL_CATEGORY,                    // dwComponent
+            HaDbIoErrorMeta,                        // eseCategory
+            wszAbsPath,                             // wszFilename
+            OffsetOfPgno( pgno ),                   // qwOffset
+            g_rgfmp[ifmp].CbPage(),                 // cbSize
+            HA_PATCH_REQUEST_ISSUE_FAILED,          // dwEventId
+            _countof( rgcwszT ),                    // cParameter
+            rgcwszT );                              // rgwszParameter
     }
 }
 
+//  ================================================================
 VOID PagePatching::TryPatchFromCopy( const IFMP ifmp, const PGNO pgno, VOID *pv, SHORT *perr )
+//  ================================================================
+//
+//  Read from all storage space logical copies until we find a good page to patch with.
+//
+//-
 {
     ERR err = JET_errSuccess;
     BYTE *pvPage = NULL;
 
+    // Note: This pv,perr is actually a pointer to pbf->pv,pbf->err in the BF itself!
+    // Ensure we have the page write latched.
     Assert( FBFWriteLatched( ifmp, pgno ) );
 
-    ENTERCRITICALSECTION crit( &g_critPRL );
+    ENTERCRITICALSECTION crit( &g_critPRL ); // Only do one patch at a time
 
     FMP *pfmp = &g_rgfmp[ ifmp ];
     INST *pinst = pfmp->Pinst();
@@ -652,6 +812,8 @@ VOID PagePatching::TryPatchFromCopy( const IFMP ifmp, const PGNO pgno, VOID *pv,
 
     BFAlloc( bfasTemporary, (VOID **)&pvPage );
 
+    // Need to read and validate page with under latch, so a page from another copy does not get read successfully
+    // and updated underneath us.
     for ( LONG iCopy = 0; iCopy < cCopies; iCopy++ )
     {
         err = pfapi->ErrIORead(
@@ -673,6 +835,7 @@ VOID PagePatching::TryPatchFromCopy( const IFMP ifmp, const PGNO pgno, VOID *pv,
         }
     }
 
+    // Patch BF's pv and err
     if ( err >= JET_errSuccess )
     {
         UtilMemCpy( pv, pvPage, g_rgfmp[ ifmp ].CbPage() );
@@ -685,12 +848,17 @@ VOID PagePatching::TryPatchFromCopy( const IFMP ifmp, const PGNO pgno, VOID *pv,
     BFFree( pvPage );
 }
 
+//  ================================================================
 void PagePatching::CancelPatchRequest( const IFMP ifmp, const PGNO pgno )
+//  ================================================================
 {
     AssertSz( !g_fRepair, "Page patching should never happen during repair/integrity check." );
     Assert( BoolParam( PinstFromIfmp( ifmp ), JET_paramEnableExternalAutoHealing ) );
     Assert( g_rgrequests );
 
+    // Concurrency improvement: if there are no patch requests then don't enter the critical section
+    // as all. If a patch request is being created it won't be for this page because the ifmp:pgno combination
+    // is currently latched (asserted below).
     if( !g_fHasAtLeastOneRequest )
     {
         return;
@@ -700,13 +868,16 @@ void PagePatching::CancelPatchRequest( const IFMP ifmp, const PGNO pgno )
 
 #ifdef DEBUG
     for (INT i = 0; i < g_crequests; ++i)
-#else
+#else // DEBUG
     for (INT i = 0; i <= prlMac; ++i)
-#endif
+#endif // !DEBUG
     {
         AssertSz( !g_rgrequests[i].FRequestIsActive() || i <= prlMac, "There should be no active requests past g_iprlMac." );
         if ( g_rgrequests[i].FRequestIsForIfmpPgno( ifmp, pgno ) )
         {
+            // Since we are already page latched (verified with the assert above for
+            // WAR or Write latch), we only need to lock when we are actually going
+            // to cancel the request.
             ENTERCRITICALSECTION crit( &g_critPRL );
             g_rgrequests[i].CancelRequest();
             
@@ -715,7 +886,9 @@ void PagePatching::CancelPatchRequest( const IFMP ifmp, const PGNO pgno )
     }
 }
 
+//  ================================================================
 void PagePatching::TermFmp( const IFMP ifmp )
+//  ================================================================
 {
     if ( BoolParam( PinstFromIfmp( ifmp ), JET_paramEnableExternalAutoHealing ) )
     {
@@ -735,7 +908,9 @@ void PagePatching::TermFmp( const IFMP ifmp )
     }
 }
 
+//  ================================================================
 void PagePatching::TermInst( INST * const pinst )
+//  ================================================================
 {
     if ( BoolParam( pinst, JET_paramEnableExternalAutoHealing ) )
     {
@@ -755,6 +930,7 @@ void PagePatching::TermInst( INST * const pinst )
     }
 }
 
+//  ================================================================
 ERR PagePatching::ErrDoPatch(
     __in const IFMP                     ifmp,
     __in const PGNO                     pgno,
@@ -764,6 +940,7 @@ ERR PagePatching::ErrDoPatch(
     __in_bcount(cbData) const void *    pvData,
     __in ULONG                  cbData,
     __out BOOL *                        pfPatched )
+//  ================================================================
 {
     ERR err = JET_errSuccess;
 
@@ -788,6 +965,9 @@ ERR PagePatching::ErrDoPatch(
     err = ErrBFLatchStatus( pbfl );
     if( FIsPatchableError( err ) )
     {
+        // We actually expect these errors, that is why we are patching the page in the first place.
+        // If the failure is transient then it is also possible to get back JET_errSuccess. The page
+        // will still be patched in that case.
         err = JET_errSuccess;
     }
     Call( err );
@@ -808,7 +988,8 @@ ERR PagePatching::ErrDoPatch(
     if ( *pfPatched )
     {
         BFDirty( pbfl, bfdfFilthy, *TraceContextScope( iorpNone, iorsNone, iortPagePatching ) );
-        Assert( ErrBFLatchStatus( pbfl ) >= JET_errSuccess );
+        // status should have been reset here
+        Assert( ErrBFLatchStatus( pbfl ) >= JET_errSuccess );   // the status should be OK now, so the page can be used.
         LogPatchEvent( ifmp, pgno );
     }
 
@@ -816,17 +997,22 @@ HandleError:
     return err;
 }
 
+//  ================================================================
 ERR PagePatching::ErrCreateRequest( const INT iprl, const IFMP ifmp, const PGNO pgno )
+//  ================================================================
 {
     ERR err;
     
     Assert( g_critPRL.FOwner() );
     Assert( g_fHasAtLeastOneRequest );
 
+    // We're either creating a new request or we re-issueing an existing request.
     Assert( !g_rgrequests[iprl].FRequestIsActive() || g_rgrequests[iprl].FRequestIsForIfmpPgno( ifmp, pgno ) );
 
     const INT iprlBeforeExpected = g_iprlMac;
 
+    // If we're past g_iprlMac, we have to update it. We may not be over
+    // since there can be gaps (patch requests not active) before.
     if ( iprl > iprlBeforeExpected )
     {
         const INT iprlBefore = AtomicCompareExchange( (LONG*)&g_iprlMac, iprlBeforeExpected, iprl );
@@ -836,6 +1022,8 @@ ERR PagePatching::ErrCreateRequest( const INT iprl, const IFMP ifmp, const PGNO 
     err = PatchRequest::ErrCreateRequest( ifmp, pgno, &g_rgrequests[iprl] );
     AssertSz( err <= JET_errSuccess, "We should only fail or succeeed, no warnings should happen." );
     
+    // If we failed to create the request, we need to put g_iprlMac and g_fHasAtLeastOneRequest back to
+    // what it was.
     if ( err < JET_errSuccess )
     {
         RecalcPatchRequestListState();
@@ -844,7 +1032,9 @@ ERR PagePatching::ErrCreateRequest( const INT iprl, const IFMP ifmp, const PGNO 
     return err;
 }
 
+//  ================================================================
 ERR PagePatching::ErrRequestPatch(const IFMP ifmp, const PGNO pgno)
+//  ================================================================
 {
     if( BoolParam( PinstFromIfmp( ifmp ), JET_paramEnableExternalAutoHealing ) )
     {
@@ -874,6 +1064,7 @@ ERR PagePatching::ErrRequestPatch(const IFMP ifmp, const PGNO pgno)
                     pgno,
                     (ULONG)RequestFor( ifmp, pgno ).UlSecAgeOfRequest() ) );
 
+            // May reset g_fHasAtLeastOneRequest if we fail to add a request.
             return ErrCreateRequest( IndexOfRequest(ifmp, pgno), ifmp, pgno );
         }
         else if ( FPRLIsFull() )
@@ -889,13 +1080,16 @@ ERR PagePatching::ErrRequestPatch(const IFMP ifmp, const PGNO pgno)
                     (ULONG)ifmp,
                     pgno ) );
 
+            // May reset g_fHasAtLeastOneRequest if we fail to add a request.
             return ErrCreateRequest( IndexOfFreeRequest(), ifmp, pgno );
         }
     }
     return JET_errSuccess;
 }
 
+//  ================================================================
 void PagePatching::IssueCorruptPageCallback( const IFMP ifmp, const PGNO pgno )
+//  ================================================================
 {
     OSTrace(
         g_tracetag,
@@ -906,6 +1100,8 @@ void PagePatching::IssueCorruptPageCallback( const IFMP ifmp, const PGNO pgno )
 
     Assert( pinst->FRecovering() );
 
+    // The corrupt page callback feature is only enabled if auto-healing is on
+    // (other client might not be prepared for this new callback)
     if ( pinst->m_pfnInitCallback &&
         BoolParam( pinst, JET_paramEnableExternalAutoHealing ) )
     {
@@ -913,26 +1109,37 @@ void PagePatching::IssueCorruptPageCallback( const IFMP ifmp, const PGNO pgno )
 
         Assert( g_rgrequests );
 
+        //  initialize base structs
+        //
         memset( &snCorruptedPage, 0, sizeof(snCorruptedPage) );
         snCorruptedPage.cbStruct = sizeof(snCorruptedPage);
 
+        //  setup the database identification for the corrupted page
+        //
         snCorruptedPage.dbid = (JET_DBID) ifmp;
+        // UNDONE: would it be better to have a buffer to pass
+        // rather then the FMP member?
         snCorruptedPage.wszDatabase = pfmp->WszDatabaseName();
         FMP::EnterFMPPoolAsWriter();
         C_ASSERT( sizeof(snCorruptedPage.dbinfomisc) == sizeof(JET_DBINFOMISC7) );
         CallS( ErrDBSetUserDbHeaderInfo( pfmp, sizeof(snCorruptedPage.dbinfomisc), &snCorruptedPage.dbinfomisc ) );
         FMP::LeaveFMPPoolAsWriter();
 
+        //  identify the problematic page
+        //
         snCorruptedPage.pageNumber = pgno;
 
         const JET_SNP   snp = JET_snpExternalAutoHealing;
         const JET_SNT   snt = JET_sntCorruptedPage;
         void * const    pv = &snCorruptedPage;
 
+        // The error from this is ignored because the error can be hit on
+        // a non-recovery thread so we have no easy way to error out.
         (void)pinst->m_pfnInitCallback( snp, snt, pv, pinst->m_pvInitCallbackContext );
     }
 }
 
+//  ================================================================
 ERR PagePatching::ErrValidatePatchArguments(
     const IFMP                          ifmp,
     const ULONG                 pgno,
@@ -940,6 +1147,7 @@ ERR PagePatching::ErrValidatePatchArguments(
     const ULONG                 cbToken,
     __in_bcount(cbData) const void *    pvData,
     const ULONG                 cbData)
+//  ================================================================
 {
     ERR err = JET_errSuccess;
 
@@ -978,7 +1186,9 @@ HandleError:
     return err;
 }
 
+//  ================================================================
 PatchRequestId PagePatching::IdFromToken( const IFMP ifmp, const PGNO pgno, const PAGE_PATCH_TOKEN * const ptoken )
+//  ================================================================
 {
     Assert( ptoken );
     Assert( sizeof(PAGE_PATCH_TOKEN) == ptoken->cbStruct );
@@ -991,7 +1201,9 @@ PatchRequestId PagePatching::IdFromToken( const IFMP ifmp, const PGNO pgno, cons
     return id;
 }
 
+//  ================================================================
 void PagePatching::LogPatchEvent( const IFMP ifmp, const PGNO pgno )
+//  ================================================================
 {
     INST * const pinst = PinstFromIfmp( ifmp );
     
@@ -1017,7 +1229,9 @@ void PagePatching::LogPatchEvent( const IFMP ifmp, const PGNO pgno )
         pinst );
 }
 
+//  ================================================================
 void PagePatching::LogFullPatchListEvent( const IFMP ifmp, const PGNO pgno )
+//  ================================================================
 {
     OSTraceFMP( ifmp, g_tracetag,
         OSFormat(
@@ -1040,14 +1254,25 @@ PagePatching::RequestPagePatch_(
 {
     PATCH_DATA *pPatchData = (PATCH_DATA *)pParameter;
     TraceContextScope tcPatchPage( iortPagePatching );
-    tcPatchPage->nParentObjectClass = tceNone;
+    tcPatchPage->nParentObjectClass = tceNone;  //  cannot know the TCE of the page
 
     Assert( BoolParam( PinstFromIfmp( pPatchData->ifmp ), JET_paramEnableExternalAutoHealing ) );
 
+    //
+    // Note that it is possible that BF has a clean page in memory
+    // from before the corruption (and that page may be modified),
+    // in that case, we need to get that page rather than issue a
+    // patch request
+    //
     BFLatch bfl;
     ERR errLatch = ErrBFWriteLatchPage( &bfl, pPatchData->ifmp, pPatchData->pgno, BFLatchFlags( bflfUninitPageOk | bflfNoFaultFail ), BfpriBackgroundRead( pPatchData->ifmp, ppibNil ), *tcPatchPage );
     if ( errLatch >= JET_errSuccess )
     {
+        //
+        // If the in-memory page was corrupted, BF already issued
+        // patch request, else make sure that the clean page
+        // gets written to disk ASAP
+        //
         if ( ErrBFLatchStatus( &bfl ) >= JET_errSuccess )
         {
             BFDirty( &bfl, bfdfFilthy, *tcPatchPage );
@@ -1082,6 +1307,7 @@ PagePatching::RequestPagePatchOnNewThread(
     Call( PinstFromIfmp( ifmp )->Taskmgr().ErrTMPost(
                     RequestPagePatch_,
                     pPatchData ) );
+    // pPatchData now owned by the task
     pPatchData = NULL;
 
 HandleError:
@@ -1090,35 +1316,45 @@ HandleError:
 
 #ifdef ENABLE_JET_UNIT_TEST
 
+//  ================================================================
 JETUNITTEST( PatchRequestId, OperatorEqualsReturnsTrueWhenAllMembersAreEqual )
+//  ================================================================
 {
     const PatchRequestId id1 = { 1, 2, 3 };
     const PatchRequestId id2 = { 1, 2, 3 };
     CHECK(id1 == id2);
 }
 
+//  ================================================================
 JETUNITTEST( PatchRequestId, OperatorEqualsReturnsFalseWhenIfmpIsNotEqual )
+//  ================================================================
 {
     const PatchRequestId id1 = { 1, 2, 3 };
     const PatchRequestId id2 = { 0, 2, 3 };
     CHECK(id1 != id2);
 }
 
+//  ================================================================
 JETUNITTEST( PatchRequestId, OperatorEqualsReturnsFalseWhenPgnoIsNotEqual )
+//  ================================================================
 {
     const PatchRequestId id1 = { 1, 2, 3 };
     const PatchRequestId id2 = { 1, 0, 3 };
     CHECK(id1 != id2);
 }
 
+//  ================================================================
 JETUNITTEST( PatchRequestId, OperatorEqualsReturnsFalseWhenDbtimeIsNotEqual )
+//  ================================================================
 {
     const PatchRequestId id1 = { 1, 2, 3 };
     const PatchRequestId id2 = { 1, 2, 0 };
     CHECK(id1 != id2);
 }
 
+//  ================================================================
 JETUNITTEST( PagePatching, IdFromToken )
+//  ================================================================
 {
     PAGE_PATCH_TOKEN token;
     token.cbStruct = sizeof( token );
@@ -1134,7 +1370,9 @@ JETUNITTEST( PagePatching, IdFromToken )
     CHECK(idExpected == idActual);
 }
 
+//  ================================================================
 class PatchArgumentsTestFixture : public JetTestFixture
+//  ================================================================
 {
     private:
         IFMP m_ifmp;
@@ -1276,9 +1514,11 @@ static const JetTestCaller<PatchArgumentsTestFixture> patf7(
     "PagePatching.ValidateFailsWhenDataIsNull",
     &PatchArgumentsTestFixture::ValidateFailsWhenDataIsNull);
 
-#endif
+#endif // ENABLE_JET_UNIT_TEST
 
+//  ================================================================
 class PatchRequest_FTO : public PatchRequest
+//  ================================================================
 {
 public:
     static void CreateAndStart_FTO( const IFMP ifmp, const PGNO pgno, PatchRequest_FTO * const prequest )
@@ -1305,73 +1545,95 @@ protected:
 
 #ifdef ENABLE_JET_UNIT_TEST
 
+//  ================================================================
 JETUNITTEST( PatchRequest, ConstructorCreatesInactiveRequest )
+//  ================================================================
 {
     PatchRequest_FTO request(1, 567);
     CHECK(false == request.FRequestIsActive());
 }
 
+//  ================================================================
 JETUNITTEST( PatchRequest, CreateAndStartReturnsActiveRequest )
+//  ================================================================
 {
     PatchRequest_FTO request;
     PatchRequest_FTO::CreateAndStart_FTO(1, 32, &request);
     CHECK(true == request.FRequestIsActive());
 }
 
+//  ================================================================
 JETUNITTEST( PatchRequest, FRequestIsForInstReturnsFalseWhenInactive )
+//  ================================================================
 {
     PatchRequest_FTO request(1, 567);
     CHECK(false == request.FRequestIsForThisInst((INST *)0xBADF00D));
 }
 
+//  ================================================================
 JETUNITTEST( PatchRequest, FRequestIsForIfmpReturnsTrueWhenIfmpMatches )
+//  ================================================================
 {
     PatchRequest_FTO request;
     PatchRequest_FTO::CreateAndStart_FTO(1, 32, &request);
     CHECK(true == request.FRequestIsForIfmp(1));
 }
 
+//  ================================================================
 JETUNITTEST( PatchRequest, FRequestIsForIfmpReturnsFalseWhenIfmpDoesNotMatch )
+//  ================================================================
 {
     PatchRequest_FTO request;
     PatchRequest_FTO::CreateAndStart_FTO(1, 32, &request);
     CHECK(false == request.FRequestIsForIfmp(2));
 }
 
+//  ================================================================
 JETUNITTEST( PatchRequest, FRequestIsForIfmpReturnsFalseWhenInactive )
+//  ================================================================
 {
     PatchRequest_FTO request(1, 567);
     CHECK(false == request.FRequestIsForIfmp(1));
 }
 
+//  ================================================================
 JETUNITTEST( PatchRequest, FRequestIsForIfmpPgnoReturnsTrueWhenIfmpAndPgnoBothMatch )
+//  ================================================================
 {
     PatchRequest_FTO request;
     PatchRequest_FTO::CreateAndStart_FTO(1, 567, &request);
     CHECK(true == request.FRequestIsForIfmpPgno(1, 567));
 }
 
+//  ================================================================
 JETUNITTEST( PatchRequest, FRequestIsForIfmpPgnoReturnsFalseWhenIfmpDoesNotMatch )
+//  ================================================================
 {
     PatchRequest_FTO request;
     PatchRequest_FTO::CreateAndStart_FTO(1, 567, &request);
     CHECK(false == request.FRequestIsForIfmpPgno(2, 567));
 }
 
+//  ================================================================
 JETUNITTEST( PatchRequest, FRequestIsForIfmpPgnoReturnsFalseWhenPgnoDoesNotMatch )
+//  ================================================================
 {
     PatchRequest_FTO request;
     PatchRequest_FTO::CreateAndStart_FTO(1, 567, &request);
     CHECK(false == request.FRequestIsForIfmpPgno(1, 566));
 }
 
+//  ================================================================
 JETUNITTEST( PatchRequest, FRequestIsForIfmpPgnoReturnsFalseWhenInactive )
+//  ================================================================
 {
     PatchRequest_FTO request(1, 567);
     CHECK(false == request.FRequestIsForIfmpPgno(1, 567));
 }
 
+//  ================================================================
 JETUNITTEST( PatchRequest, CancelDeactivatesRequest )
+//  ================================================================
 {
     PatchRequest_FTO request;
     PatchRequest_FTO::CreateAndStart_FTO(1, 32, &request);
@@ -1379,7 +1641,9 @@ JETUNITTEST( PatchRequest, CancelDeactivatesRequest )
     CHECK(false == request.FRequestIsActive());
 }
 
+//  ================================================================
 JETUNITTEST( PatchRequest, AssignmentDuplicatesRequest )
+//  ================================================================
 {
     PatchRequest_FTO request;
     PatchRequest_FTO request2;
@@ -1388,7 +1652,9 @@ JETUNITTEST( PatchRequest, AssignmentDuplicatesRequest )
     CHECK(request.Id_FTO() == request2.Id_FTO());
 }
 
+//  ================================================================
 JETUNITTEST( PatchRequest, CopyConstructorDeactivatesOriginalRequest )
+//  ================================================================
 {
     PatchRequest_FTO request;
     PatchRequest_FTO request2;
@@ -1398,7 +1664,9 @@ JETUNITTEST( PatchRequest, CopyConstructorDeactivatesOriginalRequest )
     CHECK(true == request2.FRequestIsActive());
 }
 
+//  ================================================================
 JETUNITTEST( PatchRequest, CancelTwice )
+//  ================================================================
 {
     PatchRequest_FTO request;
     PatchRequest_FTO::CreateAndStart_FTO(1, 32, &request);
@@ -1407,14 +1675,18 @@ JETUNITTEST( PatchRequest, CancelTwice )
     CHECK(false == request.FRequestIsActive());
 }
 
+//  ================================================================
 JETUNITTEST( PatchRequest, AgeOfRequestIsReasonable )
+//  ================================================================
 {
     PatchRequest_FTO request;
     PatchRequest_FTO::CreateAndStart_FTO(1, 32, &request);
     CHECK(request.UlSecAgeOfRequest() < 10);
 }
 
+//  ================================================================
 JETUNITTEST( PatchRequest, IdReturnsRequestId )
+//  ================================================================
 {
     PatchRequest_FTO request;
     PatchRequest_FTO::CreateAndStart_FTO(1, 32, &request);
@@ -1428,5 +1700,5 @@ JETUNITTEST( PatchRequest, IdReturnsRequestId )
     CHECK(idActual == idExpected);
 }
 
-#endif
+#endif // ENABLE_JET_UNIT_TEST
 

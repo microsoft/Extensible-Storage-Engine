@@ -54,7 +54,7 @@ static int huffman_decode_create (uint16 *table, const uchar *length)
 {
   xint i, j, k, last, freq[16], sum[16];
 
-  
+  /* calculate number of codewords                                      */
   memset (freq, 0, sizeof (freq));
   i = HUFF_SIZE >> 1;
   do
@@ -65,7 +65,7 @@ static int huffman_decode_create (uint16 *table, const uchar *length)
   }
   while (i != 0);
 
-  
+  /* handle special case(s) -- 0 and 1 symbols in alphabet; should never happen */
   if (freq[0] >= HUFF_SIZE - 1)
     goto bad;
 #if 0
@@ -84,10 +84,10 @@ static int huffman_decode_create (uint16 *table, const uchar *length)
   }
 #endif
 
-  
+  /* save frequences                    */
   memcpy_s (sum, sizeof(sum), freq, sizeof (freq));
 
-  
+  /* check code correctness             */
   k = 0;
   i = 15;
   do
@@ -100,11 +100,11 @@ static int huffman_decode_create (uint16 *table, const uchar *length)
   if (k != 1)
     goto bad;
 
-  
+  /* sort symbols               */
   k = 0;
   for (i = 1; i < 16; ++i)
     freq[i] = (k += freq[i]);
-  last = freq[15];      
+  last = freq[15];      /* preserve number of symbols in alphabet       */
   i = HUFF_SIZE << 4;
   do
   {
@@ -119,7 +119,7 @@ static int huffman_decode_create (uint16 *table, const uchar *length)
   }
   while (i != 0);
 
-  
+  /* now create decoding table  */
   k = i = (1 << DECODE_BITS) + (HUFF_SIZE << 1);
 
   {
@@ -157,7 +157,7 @@ bad:
 }
 
 
-#endif 
+#endif /* CODING */
 
 #if DEBUG > 1
 #define RET_OK do {printf ("OK @ %d\n", __LINE__); goto ret_ok;} while (0)
@@ -176,7 +176,7 @@ bad:
   dst[4] = src[4]; dst[5] = src[5]; dst[6] = src[6]; dst[7] = src[7]
 
 
-
+/* do not use "memcpy" -- it does not work properly if "dst" and "src" are close (overlap) */
 #define COPY_BLOCK_SLOW(dst,src,len) \
   if (len > 8) do \
   { \
@@ -201,7 +201,7 @@ bad:
 #define COPY_BLOCK_FAST_8(dst,src) \
   ((__unaligned __int64 *) dst)[0] = ((__unaligned __int64 *) src)[0]
 #endif
-#endif 
+#endif /* i386 */
 
 
 #define BIORD(bits) \
@@ -275,8 +275,9 @@ if (Bits < 0)                            \
 #define CAREFUL 1
 #include "xdecode.i"
 
+/* --------------------------------- Signatures -------------------------------- */
 
-
+// define signature only for non-CE platforms
 #undef DECODER_SIGNATURE
 #if (defined (_M_IX86) || defined (_M_AMD64) || defined (_M_IA64)) && (CODING & (CODING_HUFF_ALL | CODING_DIRECT2)) != 0
 #define DECODER_SIGNATURE 1
@@ -359,15 +360,18 @@ XpressDecode
   info->src.end_bitmask2 = info->src.end - (sizeof (bitmask2) - 1);
 
 #ifdef DECODER_SIGNATURE
-  info->signature = XpressDecoderSignature;
-#endif 
+  info->signature = XpressDecoderSignature; // make sure that signature won't be thrown away
+#endif /* DECODER_SIGNATURE */
 
+  // check bounds when we read new mask (at most 8 * sizeof (tag_t)) pointers
 
+  // we may write at most 8 bytes without checks
   #define RESERVE_DST ((8 * 8 + 2) * sizeof (tag_t))
   info->dst.careful = info->dst.beg;
   if (info->dst.stop - info->dst.beg > RESERVE_DST)
     info->dst.careful = info->dst.stop - RESERVE_DST;
 
+  // we may read at most 7 bytes
   #define RESERVE_SRC ((7 * 8 + 2) * sizeof (tag_t))
   info->src.careful = info->src.beg;
   if (info->src.end - info->src.beg > RESERVE_SRC)
@@ -400,8 +404,8 @@ XPRESS_EXPORT
 XpressDecodeStream
 XPRESS_CALL
 XpressDecodeCreate (
-  void          *context,
-  XpressAllocFn *AllocFn
+  void          *context,               // user-defined context info (will  be passed to AllocFn)
+  XpressAllocFn *AllocFn                // memory allocation callback
 )
 {
 #if ALLOCATE_ON_STACK
@@ -426,13 +430,13 @@ XPRESS_EXPORT
 void
 XPRESS_CALL
 XpressDecodeClose (
-  XpressDecodeStream stream,
-  void              *context,
-  XpressFreeFn      *FreeFn
+  XpressDecodeStream stream,    // encoder's workspace
+  void              *context,   // user-defined context info (will  be passed to FreeFn)
+  XpressFreeFn      *FreeFn     // callback that releases the memory
 )
 {
 #if ALLOCATE_ON_STACK
-  
+  /* do nothing */
 #else
   decode_info *info = (decode_info *) stream;
   if (FreeFn != 0 && info != 0 && info->magic == MAGIC_DECODE)

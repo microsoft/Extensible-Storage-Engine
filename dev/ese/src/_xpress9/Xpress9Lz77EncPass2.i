@@ -7,7 +7,7 @@ Xpress9Lz77EncPass2 (
     const void       *pIrStop
 )
 {
-
+/* Encodes the data */
     uxint uBits;
     uxint uValue;
     uxint uSymbol;
@@ -28,7 +28,13 @@ Xpress9Lz77EncPass2 (
 
         if (uSymbol >= 256)
         {
+            //
+            // it is a pointer (explicit or MTF)
+            //
 
+            //
+            // encode length
+            //
             uBits = uSymbol & (LZ77_MAX_SHORT_LENGTH - 1);
             if (uBits >= LZ77_MAX_SHORT_LENGTH - 1)
             {
@@ -61,6 +67,10 @@ Xpress9Lz77EncPass2 (
             if (uSymbol >= 256 + (LZ77_MTF << LZ77_MAX_SHORT_LENGTH_LOG))
 #endif
             {
+                //
+                // encode offset
+                //
+                // uBits corresponds to uMsbOffset in ENCODE_PTR
                 uBits = (uSymbol >> LZ77_MAX_SHORT_LENGTH_LOG) - ((256 >> LZ77_MAX_SHORT_LENGTH_LOG) + LZ77_MTF);
 
                 if (uBits > 16)

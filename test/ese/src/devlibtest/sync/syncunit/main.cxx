@@ -6,7 +6,9 @@
 #include <string.h>
 
 
+//  ================================================================
 static void PrintTests()
+//  ================================================================
 {
     const UNITTEST * punittest = UNITTEST::s_punittestHead;
     while( punittest )
@@ -17,7 +19,9 @@ static void PrintTests()
 }
 
 
+//  ================================================================
 static void PrintHelp( const char * const szApplication )
+//  ================================================================
 {
     fprintf( stderr, "Usage: %s [tests]\r\n", szApplication );
     fprintf( stderr, "\tNo arguments runs all tests.\r\n" );
@@ -26,11 +30,16 @@ static void PrintHelp( const char * const szApplication )
     BstfPrintTests();
 }
 
+//
+//  Test Control
+//
 
 BOOL    g_fCaptureAssert = fFalse;
 CHAR*   g_szCapturedAssert = NULL;
 
+//  ================================================================
 INT __cdecl main( INT argc, _In_count_( argc ) char * argv[] )
+//  ================================================================
 {
     if( argc == 2
         && ( 0 == _stricmp( argv[1], "-h" )

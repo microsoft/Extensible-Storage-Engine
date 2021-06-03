@@ -1,18 +1,23 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
+//  describes exact placement relative to logical currency in bookmark
+//  used only at DIR level
+//
 enum  LOC
-    {   locOnCurBM,
-        locBeforeSeekBM,
-        locAfterSeekBM,
-        locOnSeekBM,
-        locAfterLast,
-        locBeforeFirst,
-        locOnFDPRoot,
-        locDeferMoveFirst
+    {   locOnCurBM,             // cursor is on bookmark
+        locBeforeSeekBM,        // cursor is before bookmark [page should be latched]
+        locAfterSeekBM,         // cursor is after bookmark [page should be latched]
+        locOnSeekBM,            // cursor is on seek bookmark [virtual]
+        locAfterLast,           // after last node in tree
+        locBeforeFirst,         // before first node in tree
+        locOnFDPRoot,           // used to extract prefix headers
+        locDeferMoveFirst       // on first node
 };
 
 
+//  record modification copy buffer status
+//
 typedef BYTE    CBSTAT;
 
 const CBSTAT    fCBSTATNull                                 = 0;
@@ -24,6 +29,9 @@ const CBSTAT    fCBSTATInsertCopyDeleteOriginal             = 0x10;
 const CBSTAT    fCBSTATUpdateForInsertCopyDeleteOriginal    = 0x20;
 const CBSTAT    fCBSTATInsertReadOnlyCopy                   = 0x40;
 
+//  describes structure used to hold before-images of LVs
+//
+//
 struct LVBUF
 {
     LONG    lid;
@@ -33,30 +41,44 @@ struct LVBUF
 };
 
 
+//  describes status of SearchKey buffer
+//
 typedef BYTE    KEYSTAT;
 const KEYSTAT   keystatNull             = 0;
 const KEYSTAT   keystatPrepared         = 0x01;
 const KEYSTAT   keystatTooBig           = 0x02;
 const KEYSTAT   keystatLimit            = 0x04;
 
+//  size of FUCB-local buffer for bookmark
+//
 const UINT cbBMCache                    = 36;
 
 struct MOVE_FILTER_CONTEXT;
 
+//  Move filter callback
+//
+//  Returns:
+//  -  JET_errSuccess:              Current entry is visible
+//  -  wrnBTNotVisibleRejected:     Current entry is not visible because it has been rejected by a move filter
+//  -  wrnBTNotVisibleAccumulated:  Current entry is not visible because it is being accumulated by a move filter
+//
 typedef ERR( *PFN_MOVE_FILTER )( FUCB * const pfucb, MOVE_FILTER_CONTEXT* const pmoveFilterContext );
 
 struct MOVE_FILTER_CONTEXT
 {
-    MOVE_FILTER_CONTEXT*    pmoveFilterContextPrev;
-    PFN_MOVE_FILTER         pfnMoveFilter;
+    MOVE_FILTER_CONTEXT*    pmoveFilterContextPrev; //  higher precedence move filter context (apply first)
+    PFN_MOVE_FILTER         pfnMoveFilter;          //  move filter function to apply during lateral btree navigation
 };
 
+//  File Use Control Block
+//  Used for Table, Temp table and Sort handles
+//
 struct FUCB
     :   public CZeroInit
 {
 #ifdef AMD64
     private:
-        static VOID VerifyOptimalPacking();
+        static VOID VerifyOptimalPacking();    // Just a bunch of static_asserts to verify optimality.
 #endif
     public:
         FUCB( PIB* const ppibIn, const IFMP ifmpIn );
@@ -71,9 +93,9 @@ struct FUCB
 #pragma push_macro( "new" )
 #undef new
     private:
-        void* operator new( size_t );
-        void* operator new[]( size_t );
-        void operator delete[]( void* );
+        void* operator new( size_t );           //  meaningless without INST*
+        void* operator new[]( size_t );         //  meaningless without INST*
+        void operator delete[]( void* );        //  not supported
     public:
         void* operator new( size_t cbAlloc, INST* pinst )
         {
@@ -89,93 +111,153 @@ struct FUCB
         }
 #pragma pop_macro( "new" )
 
-    const VTFNDEF   *pvtfndef;
+    //  dispatch layer
+    const VTFNDEF   *pvtfndef;              // dispatch table. Must be the first field.
 
-    PIB             *ppib;
-    FUCB            *pfucbNextOfSession;
+    //  chaining fields
+    //
+    PIB             *ppib;                  // session that opened this FUCB
+    FUCB            *pfucbNextOfSession;    // Next FUCB of this session
 
     union
     {
-        FCB         *pfcb;
-        SCB         *pscb;
+        FCB         *pfcb;                  // if fFUCBIndex
+        SCB         *pscb;                  // if fFUCBSort
     } u;
 
-    IFMP            ifmp;
+    IFMP            ifmp;                   // database id
 
+    //  flags for FUCB
+    //
     union {
         ULONG       ulFlags;
         struct {
-            UINT    fIndex:1;
-            UINT    fSecondary:1;
-            UINT    fCurrentSecondary:1;
-            UINT    fLV:1;
+            //  used by DIR
+            //
+            UINT    fIndex:1;               // FUCB is for index
+            UINT    fSecondary:1;           // FUCB for secondary index
+            UINT    fCurrentSecondary:1;    // FUCB is for secondary index opened by user (ie. SetCurrentIndex)
+            UINT    fLV:1;                  // FUCB is for long-value tree
 
-            UINT    fSort:1;
+            //  used by SORT & Temp Tables
+            //
+            UINT    fSort:1;                // FUCB is for sort
 
-            UINT    fSystemTable:1;
+            //  used only by IsamCloseTable
+            //
+            UINT    fSystemTable:1;         // system table cursor
 
-            UINT    fWrite:1;
+            //  CONSIDER: should be set by FUCBOpen only
+            UINT    fWrite:1;               // cursor can write
 
-            UINT    fDenyRead:1;
-            UINT    fDenyWrite:1;
+            //  used in rollback, commit & purge to reset domain-level locks
+            //
+            UINT    fDenyRead:1;            // deny read flag
+            UINT    fDenyWrite:1;           // deny write flag
 
+            //  used by Add/DeleteColumn and Create/DeleteIndex to override FCB's
+            //  FCB's FixedDDL flag at CreateTable time.
             UINT    fPermitDDL:1;
 
-            UINT    fDeferClose:1;
-            UINT    fVersioned:1;
+            //  fFUCBDeferClose is set by cursor DIRClose and reset by ErrDIROpen
+            //
+            UINT    fDeferClose:1;          // FUCB is awaiting close
+            UINT    fVersioned:1;           // FUCB made versions
 
-            UINT    fLimstat:1;
+            //  used by DIR, SORT, REC
+            //
+            UINT    fLimstat:1;             // range limit
 
-            UINT    fInclusive:1;
-            UINT    fUpper:1;
+            //  used only when index range is set [fLimstat]
+            //
+            UINT    fInclusive:1;           // inclusive range
+            UINT    fUpper:1;               // upper range limit
 
+            //  used by LV on table cursor to determine if LV cursor may be cached in pfucbLV
+            //
             UINT    fMayCacheLVCursor:1;
 
-            UINT    fUpdateSeparateLV:1;
+            //  used for tracking updates to separated LV's in a Setcolumn
+            //  used to obtain the before image of an LV change
+            //  [only the part that affects an index - first 255 bytes
+            //  lives till commit of transaction or corresponding RECReplace/Insert
+            //
+            UINT    fUpdateSeparateLV:1;    // long value updated
 
 
+            //  has any column been set during the current record update?
+            //
             UINT    fAnyColumnSet:1;
 
-            UINT    fDeferredChecksum:1;
+            //  checksum comparison is deferred for PrepareUpdate w/ noLock
+            //  within a transaction
+            //  checksum is deferred till commit of transaction
+            //  or corresponding RECReplace/Insert
+            //
+            UINT    fDeferredChecksum:1;    // checksum calculation deferred.
 
+            //  set and used by Space
+            //
             UINT    fAvailExt   : 1;
             UINT    fOwnExt     : 1;
 
-            UINT    fSequential     : 1;
-            UINT    fPreread        : 1;
-            UINT    fPrereadBackward: 1;
-            UINT    fPrereadForward: 1;
-            UINT    fOpportuneRead: 1;
+            //  used by BTree for preread
+            //
+            UINT    fSequential     : 1;    //  this cursor will traverse sequentially
+            UINT    fPreread        : 1;    //  we are currently reading ahead
+            UINT    fPrereadBackward: 1;    //  prereading backward in the tree
+            UINT    fPrereadForward: 1; //  prereading forward in the tree
+            UINT    fOpportuneRead: 1;      // attempt to read leaf pages using larger physical IOs
             
+            //  has bookmark already been saved for this currency?
             UINT    fBookmarkPreviouslySaved: 1;
 
+            //  If we need to touch the data page buffers of the saved bookmark
             UINT    fTouch      : 1;
 
+            //  Is this the FUCB for a table that is being repaired?
             UINT    fRepair     : 1;
 
+            //  User-defined-defaults: if this flag is set we will always/never act as though JET_bitRetrieveCopy was
+            //  set for column retrieval. Needed for index updates
             UINT    fAlwaysRetrieveCopy : 1;
             UINT    fNeverRetrieveCopy : 1;
 
+            //  Used to know when we implicitlty modify tagged columns without changing any column value.
+            //  Bursting existing LV in record to free record space for example
+            //  Usefull in logdiff
             UINT    fTagImplicitOp:1;
 
+            //  ********************************************
+            //  WARNING! WARNING! WARNING! WARNING! WARNING!
+            //  ********************************************
+            //  31 bits of this bitfield have now been used
+            //  up. If more bitfields are required, use the
+            //  usFlags variable below
+            //  ********************************************
         };
     };
 
+    //  physical currency
+    //
     CSR             csr;
-    KEYDATAFLAGS    kdfCurr;
+    KEYDATAFLAGS    kdfCurr;                // key-data-flags of current node
 
-    VOID            *pvBMBuffer;
-    BOOKMARK        bmCurr;
-    BYTE            rgbBMCache[cbBMCache];
+    //  logical currency
+    //
+    VOID            *pvBMBuffer;            // allocated bookmark buffer
+    BOOKMARK        bmCurr;                 // bookmark of current location (could be a "virtual" location)
+    BYTE            rgbBMCache[cbBMCache];  // local buffer for bookmark
 
-    LOC             locLogical;
+    LOC             locLogical;             // logical position relative to BM
 
-    FUCB            *pfucbCurIndex;
-    FUCB            *pfucbLV;
+    FUCB            *pfucbCurIndex;         // current secondary index
+    FUCB            *pfucbLV;               // cached LV cursor
 
-    LONG            ispairCurr;
+    LONG            ispairCurr;             // (SORT) current record
 
-    KEYSTAT         keystat;
+    //  search key
+    KEYSTAT         keystat;                //  search key buffer status
     BYTE            cColumnsInSearchKey;
 
     union
@@ -183,53 +265,73 @@ struct FUCB
         USHORT      usFlags;
         struct
         {
+            //  for secondary indexes only, are we "borrowing"
+            //  the table's search key buffer?
+            //  WARNING: don't reset this flag when the
+            //  cursor gets defer-closed because the
+            //  key buffer is not freed on a defer-close
             USHORT  fUsingTableSearchKeyBuffer:1;
 
+            //  During recovery, is this FUCB created by recovery
+            //  (and hence in the CTableHash)?
             USHORT  fInRecoveryTableHash:1;
         };
     };
 
-    DATA            dataSearchKey;
+    DATA            dataSearchKey;          //  search key
 
+    //  transactions
+    //
     RCEID           rceidBeginUpdate;
     UPDATEID        updateid;
-    ULONG           ulChecksum;
+    ULONG           ulChecksum;             //  checksum of record -- used only for optimistic locking
 
-    LEVEL           levelOpen;
-    LEVEL           levelNavigate;
-    LEVEL           levelPrep;
-    LEVEL           levelReuse;
-    CBSTAT          cbstat;
-    BYTE            rgbAlign[3];
+    LEVEL           levelOpen;              //  level at open of FUCB
+    LEVEL           levelNavigate;          //  level of navigation
+    LEVEL           levelPrep;              //  level copy buffer prepared
+    LEVEL           levelReuse;             //  level at reuse of FUCB
+    CBSTAT          cbstat;                 //  copy buffer status
+    BYTE            rgbAlign[3];            //  Padding.
 
-    CPG             cpgPreread;
-    CPG             cpgPrereadNotConsumed;
-    LONG            cbSequentialDataRead;
+    //  preread
+    //
+    CPG             cpgPreread;             //  number of pages to preread in BTDown
+    CPG             cpgPrereadNotConsumed;  //  number of preread pages we have not consumed
+    LONG            cbSequentialDataRead;   //  number of bytes we have retrieved in one direction
 
-    FUCB            *pfucbTable;
-    DATA            dataWorkBuf;
-    VOID            *pvWorkBuf;
-    VOID            *pvRCEBuffer;
+    FUCB            *pfucbTable;            //  for LV/index cursors only, cursor of
+                                            //  owning table (used by rollback only to unlink LV cursor)
+    //  maintained by record manager
+    //
+    DATA            dataWorkBuf;            //  working buffer for Insert/Replace
+    VOID            *pvWorkBuf;             //  working buffer for Insert/Replace
+    VOID            *pvRCEBuffer;           //  allocated RCE before-image buffer
 
-    BYTE            rgbitSet[32];
+    BYTE            rgbitSet[32];           //  bits to track column change
 
+    //  record position of last seek
+    //
     ULONG           ulLTLast;
     ULONG           ulTotalLast;
 
+    //  record position of saved bookmark
+    //
     ULONG           ulLTCurr;
     ULONG           ulTotalCurr;
 
-    CSR             *pcsrRoot;
+    //  used only by space manager
+    //
+    CSR             *pcsrRoot;              //  used by BT to pass cursor on root page
 
-    LSTORE          ls;
+    LSTORE          ls;                     //  local storage
 
-    FUCB            *pfucbHashOverflow;
+    FUCB            *pfucbHashOverflow;     //  hash overflow (used only by recovery)
 
     DWORD           cbEncryptionKey;
-    CPG             cpgSpaceRequestReserve;
+    CPG             cpgSpaceRequestReserve; // Placed here to avoid 4 bytes of padding/wasted space.
     BYTE *          pbEncryptionKey;
 
-    MOVE_FILTER_CONTEXT*    pmoveFilterContext;
+    MOVE_FILTER_CONTEXT*    pmoveFilterContext; //  optional move filter context
 
     CInvasiveConcurrentModSet< FUCB, OffsetOfIAE>::CElement m_iae;
 
@@ -239,9 +341,13 @@ struct FUCB
     VOID Dump( CPRINTF * pcprintf, DWORD_PTR dwOffset = 0 ) const;
 
     const WCHAR * WszFUCBType() const;
-#endif
+#endif  //  DEBUGGER_EXTENSION
 };
 
+// FCB.HXX needs access to FUCB::OffsetOfIAE (a static method of the FUCB struct)
+// to make a CInvasiveThreadsafeArray of FUCBs. However, FUCB.HXX is not usually
+// included until after FCB.HXX.  So, this global function is used to wrap
+// FUCB::OffsetOfIAE, and the function is forward-declared in FCB.HXX.
 inline SIZE_T FUCBOffsetOfIAE()
 {
     return FUCB::OffsetOfIAE();
@@ -253,6 +359,17 @@ inline SIZE_T FUCBOffsetOfIAE()
 
 INLINE VOID FUCB::VerifyOptimalPacking()
 {
+    // Verify optimal packing.  These matter because keeping this structure to a 32 byte boundary
+    // makes it significantly more memory efficient when the resource manager allocates it.
+    // We currently "waste" 27 bytes in rgbAlign[] and rgbAlign2[].  It'd be nice
+    // to find 5 bytes of savings to avoid wasting so much.
+    //
+    // No one ever calls this routine.  It's enough that it compiles cleanly for the static_asserts.
+    //
+    // Note: use a field to take up padding inside the structure.  See rgbReserved.
+    //
+    // Also note that we keep track of 64 byte boundaries as a cache line mark.
+    //
 
 #define _NoWastedSpaceAround(TYPE, FIELDFIRST, FIELDLAST)               \
     (                                                                   \
@@ -337,9 +454,14 @@ INLINE VOID FUCB::VerifyOptimalPacking()
 }
 #endif
 
+//
+//  Resource management
+//
 
 INLINE VOID FUCBTerm( INST *pinst )
 {
+    //  term the FUCB resource manager
+    //
     pinst->m_cresFUCB.Term();
     if ( pinst->FRecovering() )
     {
@@ -351,6 +473,10 @@ INLINE ERR ErrFUCBInit( INST *pinst )
 {
     ERR err = JET_errSuccess;
 
+    //  init the FUCB resource manager
+    //
+    //  NOTE:  if we are recovering, then disable quotas
+    //
     if ( pinst->FRecovering() )
     {
         CallS( ErrRESSetResourceParam( pinst, JET_residFUCB, JET_resoperEnableMaxUse, fFalse ) );
@@ -366,6 +492,8 @@ HandleError:
 }
 
 
+//  Flag managements
+//
 
 INLINE VOID FUCBResetFlags( FUCB *pfucb )
 {
@@ -378,6 +506,8 @@ INLINE BOOL FFUCBSpace( const FUCB *pfucb )
     return pfucb->fAvailExt || pfucb->fOwnExt;
 }
 
+//  does this tree allow duplicates?
+//
 INLINE BOOL FFUCBUnique( const FUCB *pfucb )
 {
     Assert( pfcbNil != pfucb->u.pfcb );
@@ -402,6 +532,10 @@ INLINE BOOL FFUCBUnique( const FUCB *pfucb )
                             || pidbNil == pidb
                             || pidb->FUnique() ) )
         {
+            //  only time uniqueness check should fail is if we're in the middle of
+            //  rolling back a CreateIndex and have lost the IDB, but have yet to
+            //  nullify all the versions on the FCB, and someone else is accessing
+            //  one of those versions
             Assert( pfcb->FTypeSecondaryIndex() );
             Assert( pidbNil == pfcb->Pidb() );
             Assert( !pfcb->FDeletePending() );
@@ -417,6 +551,11 @@ INLINE BOOL FFUCBUnique( const FUCB *pfucb )
     return fUnique;
 }
 
+//
+//  the following flags need to be prevent reuse of cursor
+//  after deferred closed.  This is done to correctly release
+//  domain flags when commit/rollback to transaction level 0.
+//
 INLINE BOOL FFUCBNotReuse( const FUCB *pfucb )
 {
     return ( pfucb->fDenyRead || pfucb->fDenyWrite );
@@ -532,28 +671,36 @@ INLINE VOID FUCBResetTagImplicitOp( FUCB *pfucb )
     pfucb->fTagImplicitOp = 0;
 }
 
+//  ================================================================
 INLINE BOOL FFUCBPreread( const FUCB* pfucb )
+//  ================================================================
 {
     Assert( !(pfucb->fPrereadForward && pfucb->fPrereadBackward) );
     return pfucb->fPreread;
 }
 
 
+//  ================================================================
 INLINE BOOL FFUCBPrereadForward( const FUCB* pfucb )
+//  ================================================================
 {
     Assert( !(pfucb->fPrereadForward && pfucb->fPrereadBackward) );
     return pfucb->fPrereadForward;
 }
 
 
+//  ================================================================
 INLINE BOOL FFUCBPrereadBackward( const FUCB* pfucb )
+//  ================================================================
 {
     Assert( !(pfucb->fPrereadForward && pfucb->fPrereadBackward) );
     return pfucb->fPrereadBackward;
 }
 
 
+//  ================================================================
 INLINE VOID FUCBSetPrereadForward( FUCB *pfucb, CPG cpgPreread )
+//  ================================================================
 {
     pfucb->fPreread                 = fTrue;
     pfucb->fPrereadForward          = fTrue;
@@ -562,7 +709,9 @@ INLINE VOID FUCBSetPrereadForward( FUCB *pfucb, CPG cpgPreread )
 }
 
 
+//  ================================================================
 INLINE VOID FUCBSetPrereadBackward( FUCB *pfucb, CPG cpgPreread )
+//  ================================================================
 {
     pfucb->fPreread                 = fTrue;
     pfucb->fPrereadForward          = fFalse;
@@ -570,7 +719,9 @@ INLINE VOID FUCBSetPrereadBackward( FUCB *pfucb, CPG cpgPreread )
     pfucb->cpgPreread               = cpgPreread;
 }
 
+//  ================================================================
 INLINE VOID FUCBResetPreread( FUCB *pfucb )
+//  ================================================================
 {
     pfucb->fPreread                 = fFalse;
     pfucb->fPrereadForward          = fFalse;
@@ -580,32 +731,44 @@ INLINE VOID FUCBResetPreread( FUCB *pfucb )
     pfucb->cbSequentialDataRead     = 0;
 }
 
+//  ================================================================
 INLINE BOOL FFUCBOpportuneRead( FUCB* pfucb )
+//  ================================================================
 {
     return pfucb->fOpportuneRead;
 }
 
+//  ================================================================
 INLINE VOID FUCBSetOpportuneRead( FUCB* pfucb )
+//  ================================================================
 {
     pfucb->fOpportuneRead = fTrue;
 }
 
+//  ================================================================
 INLINE VOID FUCBResetOpportuneRead( FUCB* pfucb )
+//  ================================================================
 {
     pfucb->fOpportuneRead = fFalse;
 }
 
+//  ================================================================
 INLINE BOOL FFUCBRepair( const FUCB *pfucb )
+//  ================================================================
 {
     return pfucb->fRepair;
 }
 
+//  ================================================================
 INLINE VOID FUCBSetRepair( FUCB *pfucb )
+//  ================================================================
 {
     pfucb->fRepair = 1;
 }
 
+//  ================================================================
 INLINE VOID FUCBResetRepair( FUCB *pfucb )
+//  ================================================================
 {
     pfucb->fRepair = 0;
 }
@@ -711,6 +874,9 @@ INLINE VOID FUCBSetDeferClose( FUCB *pfucb )
     Assert( (pfucb)->ppib->Level() > 0 );
     pfucb->fDeferClose = 1;
 
+    // When we are defering a close for reuse, we need
+    // clear the reuse level as it may now be reused but
+    // at this point it is effectively "closed".
     pfucb->levelReuse = 0;
 }
 
@@ -808,7 +974,7 @@ INLINE VOID FUCBSetVersioned( FUCB *pfucb )
 
 INLINE VOID FUCBResetVersioned( FUCB *pfucb )
 {
-    Assert( 0 == pfucb->ppib->Level() );
+    Assert( 0 == pfucb->ppib->Level() );        //  can only reset once we've committed/rolled back to level 0
     pfucb->fVersioned = 0;
 }
 
@@ -842,34 +1008,46 @@ INLINE VOID FUCBResetSequential( FUCB *pfucb )
     pfucb->fSequential = 0;
 }
 
+//  ================================================================
 INLINE BOOL FFUCBAlwaysRetrieveCopy( const FUCB *pfucb )
+//  ================================================================
 {
     const BOOL fAlwaysRetrieveCopy = pfucb->fAlwaysRetrieveCopy;
     return fAlwaysRetrieveCopy;
 }
 
+//  ================================================================
 INLINE VOID FUCBSetAlwaysRetrieveCopy( FUCB *pfucb )
+//  ================================================================
 {
     pfucb->fAlwaysRetrieveCopy = 1;
 }
 
+//  ================================================================
 INLINE VOID FUCBResetAlwaysRetrieveCopy( FUCB *pfucb )
+//  ================================================================
 {
     pfucb->fAlwaysRetrieveCopy = 0;
 }
 
+//  ================================================================
 INLINE BOOL FFUCBNeverRetrieveCopy( const FUCB *pfucb )
+//  ================================================================
 {
     const BOOL fNeverRetrieveCopy = pfucb->fNeverRetrieveCopy;
     return fNeverRetrieveCopy;
 }
 
+//  ================================================================
 INLINE VOID FUCBSetNeverRetrieveCopy( FUCB *pfucb )
+//  ================================================================
 {
     pfucb->fNeverRetrieveCopy = 1;
 }
 
+//  ================================================================
 INLINE VOID FUCBResetNeverRetrieveCopy( FUCB *pfucb )
+//  ================================================================
 {
     pfucb->fNeverRetrieveCopy = 0;
 }
@@ -932,6 +1110,10 @@ INLINE VOID UpgradeReplaceNoLock( FUCB *pfucb )
 
 INLINE VOID FUCBResetUpdateid( FUCB *pfucb )
 {
+    // Never actually need to reset the updateid, because
+    // it is only used by IsamSetColumn, which must always
+    // be preceded by a PrepareUpdate, which will refresh
+    // the updateid.
     Assert( fFalse );
 
     pfucb->updateid = updateidNil;
@@ -956,6 +1138,7 @@ INLINE BOOL FFUCBInsertCopyDeleteOriginalPrepared( const FUCB *pfucb )
 
 INLINE VOID FUCBSetUpdateForInsertCopyDeleteOriginal( FUCB *pfucb )
 {
+    //  graduate from Prepared mode to Update mode
     Assert( FFUCBInsertCopyDeleteOriginalPrepared( pfucb ) );
     pfucb->cbstat = fCBSTATInsertCopy | fCBSTATUpdateForInsertCopyDeleteOriginal;
     Assert( !FFUCBInsertCopyDeleteOriginalPrepared( pfucb ) );
@@ -1033,6 +1216,12 @@ INLINE VOID FUCBAssertValidSearchKey( FUCB * const pfucb )
 {
     Assert( NULL != pfucb->dataSearchKey.Pv() );
     
+    // in theory, someone can try to seek with a NULL normalized key.
+    // since this happened with the Store.exe and exposed 
+    // a seek bug, we added test for it, hence we need to
+    // disable this assert
+    //
+    //  Assert( pfucb->dataSearchKey.Cb() > 0 );
     Assert( pfucb->dataSearchKey.Cb() <= cbLimitKeyMostMost );
     Assert( pfucb->cColumnsInSearchKey > 0 );
     Assert( pfucb->cColumnsInSearchKey <= JET_ccolKeyMost );
@@ -1097,6 +1286,8 @@ INLINE BOOL FKSLimit( const FUCB *pfucb )
 }
 
 
+//  returns pgnoFDP of this tree
+//
 INLINE PGNO PgnoFDP( const FUCB *pfucb )
 {
     Assert( pfcbNil != pfucb->u.pfcb );
@@ -1105,6 +1296,8 @@ INLINE PGNO PgnoFDP( const FUCB *pfucb )
     return pfucb->u.pfcb->PgnoFDP();
 }
 
+//  returns the latch hint for the pgnoFDP of this tree
+//
 INLINE BFLatch* PBFLatchHintPgnoFDP( const FUCB *pfucb )
 {
     Assert( pfcbNil != pfucb->u.pfcb );
@@ -1137,30 +1330,41 @@ INLINE OBJID ObjidFDP( const FUCB *pfucb )
 }
 
 
+//  returns root page of OwnExt tree
+//
 INLINE PGNO PgnoOE( const FUCB *pfucb )
 {
     Assert( pfcbNil != pfucb->u.pfcb );
     return pfucb->u.pfcb->PgnoOE();
 }
 
+//  returns the latch hint for the root page of OwnExt tree
+//
 INLINE BFLatch* PBFLatchHintPgnoOE( const FUCB *pfucb )
 {
     Assert( pfcbNil != pfucb->u.pfcb );
     return pfucb->u.pfcb->PBFLatchHintPgnoOE();
 }
 
+//  returns root page of AvailExt tree
+//
 INLINE PGNO PgnoAE( const FUCB *pfucb )
 {
     Assert( pfcbNil != pfucb->u.pfcb );
     return pfucb->u.pfcb->PgnoAE();
 }
 
+//  returns the latch hint for the root page of AvailExt tree
+//
 INLINE BFLatch* PBFLatchHintPgnoAE( const FUCB *pfucb )
 {
     Assert( pfcbNil != pfucb->u.pfcb );
     return pfucb->u.pfcb->PBFLatchHintPgnoAE();
 }
 
+//  returns root of tree
+//  if space tree, returns appropriate root page of space tree
+//
 INLINE PGNO PgnoRoot( const FUCB *pfucb )
 {
     PGNO    pgno;
@@ -1182,6 +1386,9 @@ INLINE PGNO PgnoRoot( const FUCB *pfucb )
     return pgno;
 }
 
+//  returns the latch hint for the root of tree
+//  if space tree, returns appropriate root page of space tree
+//
 INLINE BFLatch* PBFLatchHintPgnoRoot( const FUCB *pfucb )
 {
     BFLatch* pbflHint;
@@ -1200,7 +1407,7 @@ INLINE BFLatch* PBFLatchHintPgnoRoot( const FUCB *pfucb )
                         PBFLatchHintPgnoAE( pfucb ) ;
     }
     Assert( NULL != pbflHint );
-    Assert( NULL == pbflHint->pv );
+    Assert( NULL == pbflHint->pv ); // the hints only have a dwContext / pbf.
     return pbflHint;
 }
 
@@ -1233,6 +1440,8 @@ INLINE ERR ErrGetLS( FUCB *pfucb, LSTORE *pls, const BOOL fReset )
 }
 
 
+//  navigate level support
+//
 INLINE LEVEL LevelFUCBNavigate( const FUCB *pfucb )
 {
     return pfucb->levelNavigate;
@@ -1276,7 +1485,9 @@ INLINE VOID CheckFUCB( const PIB *ppib, const FUCB *pfucb )
     Assert( pfucb->u.pfcb != NULL );
 }
 
+//  ================================================================
 INLINE VOID FUCB::AssertValid( ) const
+//  ================================================================
 {
     Assert( FAlignedForThisPlatform( this ) );
     CResource::AssertValid( JET_residFUCB, this );
@@ -1290,12 +1501,12 @@ INLINE VOID CheckSecondary( const FUCB *pfucb )
             FFUCBSecondary( pfucb->pfucbCurIndex ) );
 }
 
-#else   
+#else   /* !DEBUG */
 #define CheckSort( ppib, pfucb )
 #define CheckTable( ppib, pfucb )
 #define CheckFUCB( ppib, pfucb )
 #define CheckSecondary( pfucb )
-#endif  
+#endif  /* !DEBUG */
 
 INLINE CSR *Pcsr( FUCB *pfucb )
 {
@@ -1314,6 +1525,8 @@ INLINE ERR ErrFUCBCheckUpdatable( const FUCB *pfucb )
                 ErrERRCheck( JET_errPermissionDenied );
 }
 
+//  set column bit array macros
+//
 
 INLINE VOID FUCBResetColumnSet( FUCB *pfucb )
 {
@@ -1343,6 +1556,8 @@ INLINE BOOL FFUCBTaggedColumnSet( const FUCB * pfucb )
     const LONG_PTR * const  plMax   = (LONG_PTR *)pfucb->rgbitSet
                                         + ( cbRgbitIndex / sizeof(LONG_PTR) );
 
+    // Verify array is LONG_PTR-aligned and tagged-column portion of
+    // the array is LONG_PTR-aligned.
     Assert( (LONG_PTR)pfucb->rgbitSet % sizeof(LONG_PTR) == 0 );
     Assert( ( cbitFixedVariable/8 ) % sizeof(LONG_PTR) == 0 );
 
@@ -1375,6 +1590,8 @@ INLINE ERR ErrFUCBFromTableid( PIB *ppib, JET_TABLEID tableid, FUCB **ppfucb )
 }
 
 
+//  **************************************************
+//  FUCB API
 
 ERR ErrFUCBOpen( PIB *ppib, IFMP ifmp, FUCB **ppfucb, const LEVEL level = 0 );
 VOID FUCBClose( FUCB *pfucb, FUCB *pfucbPrev = pfucbNil );
@@ -1382,12 +1599,15 @@ VOID FUCBClose( FUCB *pfucb, FUCB *pfucbPrev = pfucbNil );
 INLINE VOID FUCBCloseDeferredClosed( FUCB *pfucb )
 {
 #ifdef DEBUG
+    // Deferred-closed cursors are closed during commit0 or rollback.
     if( NULL != pfucb->ppib->prceNewest )
     {
         Assert( PinstFromPpib( pfucb->ppib )->RwlTrx( pfucb->ppib ).FReader() );
     }
-#endif
+#endif  //  DEBUG
 
+    // Secondary index FCB may have been deallocated by
+    // rollback of CreateIndex or cleanup of DeleteIndex
     if ( pfcbNil != pfucb->u.pfcb )
     {
         if ( FFUCBDenyRead( pfucb ) )
@@ -1432,7 +1652,7 @@ class CTableHash : public CSimpleHashTable<FUCB>
             CSimpleHashTable<FUCB>( min( ctables, ctablesMax ), OffsetOf( FUCB, pfucbHashOverflow ) )   {}
         ~CTableHash()   {}
         
-        enum    { ctablesMax = 0xFFFF };
+        enum    { ctablesMax = 0xFFFF };        //  max size of hash table
 
         ULONG UlHash( const PGNO pgnoFDP, const IFMP ifmp, const PROCID procid ) const
         {

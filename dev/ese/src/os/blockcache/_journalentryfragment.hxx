@@ -3,9 +3,11 @@
 
 #pragma once
 
+//  Journal Entry Fragment
 
 #include <pshpack1.h>
 
+//PERSISTED
 class CJournalEntryFragment
 {
     public:
@@ -26,8 +28,8 @@ class CJournalEntryFragment
 
     private:
 
-        UnalignedLittleEndian<int>  m_le_cbEntryOrCbEntryRem;
-        BYTE                        m_rgbFragment[ 0 ];
+        UnalignedLittleEndian<int>  m_le_cbEntryOrCbEntryRem;   //  entry size of (negative) entry bytes remaining
+        BYTE                        m_rgbFragment[ 0 ];         //  fragment data
 };
 
 #include <poppack.h>

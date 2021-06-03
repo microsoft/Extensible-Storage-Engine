@@ -4,6 +4,10 @@
 #include "std.hxx"
 
 
+//  =======================================================================
+//  class CFixedColumnIter
+//  -----------------------------------------------------------------------
+//
 
 ERR CFixedColumnIter::
 ErrMoveNext()
@@ -152,8 +156,13 @@ HandleError:
     return err;
 }
 
+//  =======================================================================
 
 
+//  =======================================================================
+//  class CVariableColumnIter
+//  -----------------------------------------------------------------------
+//
 
 ERR CVariableColumnIter::
 ErrMoveNext()
@@ -306,8 +315,13 @@ HandleError:
     return err;
 }
 
+//  =======================================================================
 
 
+//  =======================================================================
+//  class CSingleValuedTaggedColumnValueIter
+//  -----------------------------------------------------------------------
+//
 
 ERR CSingleValuedTaggedColumnValueIter::
 ErrGetColumnSize( FUCB* const pfucb, JET_RECSIZE3* const precsize, const JET_GRBIT grbit ) const
@@ -384,6 +398,7 @@ ErrGetColumnSize( FUCB* const pfucb, JET_RECSIZE3* const precsize, const JET_GRB
 
         if ( m_fCompressed )
         {
+            // get the logical size of the data
             Call( ErrPKDecompressData( data, pfucb, NULL, 0, &cbDataActual ) );
             Assert( JET_wrnBufferTruncated == err );
             err = JET_errSuccess;
@@ -391,6 +406,7 @@ ErrGetColumnSize( FUCB* const pfucb, JET_RECSIZE3* const precsize, const JET_GRB
         }
 
         precsize->cbData += cbDataActual;
+        // this is the physical size
         precsize->cbDataCompressed  += m_cbData;
 
         if ( m_fSeparatable )
@@ -442,8 +458,13 @@ HandleError:
     return err;
 }
 
+//  =======================================================================
 
 
+//  =======================================================================
+//  class CDualValuedTaggedColumnValueIter
+//  -----------------------------------------------------------------------
+//
 
 ERR CDualValuedTaggedColumnValueIter::
 ErrGetColumnSize( FUCB* const pfucb, JET_RECSIZE3* const precsize, const JET_GRBIT grbit ) const
@@ -459,7 +480,7 @@ ErrGetColumnSize( FUCB* const pfucb, JET_RECSIZE3* const precsize, const JET_GRB
     precsize->cbDataCompressed  += m_ptwovalues->CbFirstValue() + m_ptwovalues->CbSecondValue();
     precsize->cbOverhead += sizeof(TAGFLD) + sizeof(TAGFLD_HEADER) + sizeof(TWOVALUES::TVLENGTH);
     precsize->cTaggedColumns++;
-    precsize->cMultiValues++;
+    precsize->cMultiValues++;   //  for the purposes of JET_RECSIZE, we only count multi-values beyond the first
 
 HandleError:
     return err;
@@ -502,8 +523,13 @@ HandleError:
     return err;
 }
 
+//  =======================================================================
 
 
+//  =======================================================================
+//  class CMultiValuedTaggedColumnValueIter
+//  -----------------------------------------------------------------------
+//
 
 ERR CMultiValuedTaggedColumnValueIter::
 ErrGetColumnSize( FUCB* const pfucb, JET_RECSIZE3* const precsize, const JET_GRBIT grbit ) const
@@ -527,8 +553,13 @@ ErrGetColumnSize( FUCB* const pfucb, JET_RECSIZE3* const precsize, const JET_GRB
 
     if ( pheader->FColumnCanBeSeparated() )
     {
+        //  initialize counts, then increment them as we iterate
+        //  through the multi-values
+        //
         precsize->cbOverhead += sizeof(TAGFLD) + sizeof(TAGFLD_HEADER) + m_pmultivalues->IbStartOfMVData();
 
+        //  must iterate through and check which ones are separated
+        //
         for ( ULONG imv = 0; imv < cMultiValues; imv++ )
         {
             if ( m_pmultivalues->FSeparatedInstance( imv ) )
@@ -592,7 +623,7 @@ ErrGetColumnSize( FUCB* const pfucb, JET_RECSIZE3* const precsize, const JET_GRB
     precsize->cTaggedColumns++;
 
     Assert( cMultiValues > 1 );
-    precsize->cMultiValues += ( cMultiValues - 1 );
+    precsize->cMultiValues += ( cMultiValues - 1 );     //  for the purposes of JET_RECSIZE, we only count multi-values beyond the first
 
 HandleError:
     return err;
@@ -631,8 +662,8 @@ CbESE97Format() const
 {
     const ULONG cMultiValues    = m_pmultivalues->CMultiValues();
     const BOOL  fSeparatable    = ( m_pmultivalues->Pheader()->FColumnCanBeSeparated() );
-    const ULONG cbMVOverhead    = sizeof(TAGFLD) + ( fSeparatable ? sizeof(BYTE) : 0 );
-    size_t      cbESE97Format   = cbMVOverhead * cMultiValues;
+    const ULONG cbMVOverhead    = sizeof(TAGFLD) + ( fSeparatable ? sizeof(BYTE) : 0 );     //  if separatable, long-value overhead required
+    size_t      cbESE97Format   = cbMVOverhead * cMultiValues;  //  initialise with overhead for each multi-value
 
     for ( ULONG imv = 0; imv < cMultiValues; imv++ )
     {
@@ -640,6 +671,9 @@ CbESE97Format() const
 
         if ( fSeparatable )
         {
+            //  if the column is separatable and the data is greater than sizeof(LID),
+            //  we may force the data to an LV
+            //
             cbESE97Format += min( cbMV, sizeof(_LID32) );
         }
         else
@@ -651,6 +685,7 @@ CbESE97Format() const
     return cbESE97Format;
 }
 
+//  =======================================================================
 
 ERR CTaggedColumnIter::
 ErrMoveNext()
@@ -714,8 +749,11 @@ ErrSeek( const COLUMNID columnid )
         {
             pfcb->Ptdb()->AssertValidDerivedTable();
 
+            //  HACK: treat derived columns in original-format derived table as
+            //  non-derived, because they don't have the fDerived bit set in the TAGFLD
             fUseDerivedBit = FRECUseDerivedBitForTemplateColumnInDerivedTable( columnid, pfcb->Ptdb() );
 
+            // switch to template table
             pfcb = pfcb->Ptdb()->PfcbTemplateTable();
         }
         else
@@ -814,8 +852,13 @@ HandleError:
     return err;
 }
 
+//  =======================================================================
 
 
+//  =======================================================================
+//  class CUnionIter
+//  -----------------------------------------------------------------------
+//
 
 ERR CUnionIter::
 ErrGetWorstCaseColumnCount( size_t* const pcColumn ) const
@@ -948,8 +991,10 @@ HandleError:
     return err;
 }
 
+//  =======================================================================
 
 
+//  =======================================================================
 
 #include <pshpack1.h>
 
@@ -959,8 +1004,8 @@ PERSISTED
 enum ColumnReferenceFormatIdentifiers : ColumnReferenceFormatIdentifier
 {
     crfiInvalid         = 0x00,
-    crfiV1              = 0x01,
-    crfiV2              = 0x02,
+    crfiV1              = 0x01,  // CColumnReferenceFormatV1
+    crfiV2              = 0x02,  // CColumnReferenceFormatV2
     crfiVMaxSupported   = 0x02,
 };
 
@@ -977,25 +1022,28 @@ class CColumnReferenceFormatV1 : public CColumnReferenceFormatCommon
 {
     public:
 
-        UnalignedLittleEndian<USHORT>                           m_cbBookmark;
-        BYTE                                                    m_cbColumnName;
+        UnalignedLittleEndian<USHORT>                           m_cbBookmark;                                                   // 1 - JET_cbBookmarkMostMost
+        BYTE                                                    m_cbColumnName;                                                 // 1 - JET_cbNameMost
         UnalignedLittleEndian<ULONG>                            m_itagSequence;
-        UnalignedLittleEndian<_LID32>                           m_lid;
-        BYTE                                                    m_rgbDatabaseSignature[OffsetOf( SIGNATURE, szComputerName )];
-        BYTE                                                    m_rgbBookmark[0];
+        UnalignedLittleEndian<_LID32>                           m_lid;                                                          // unstable identifier / hint, changes with signature change
+        BYTE                                                    m_rgbDatabaseSignature[OffsetOf( SIGNATURE, szComputerName )];  // szComputeName elided as it is never set
+        BYTE                                                    m_rgbBookmark[0];                                               // m_cbBookmark, normalized key
+        //BYTE                                                  m_rgbColumnName[0];                                             // m_cbColumnName, ASCII chars
 };
 
+// V2 structure is the same except it stores a 64-bit lid.
 PERSISTED
 class CColumnReferenceFormatV2 : public CColumnReferenceFormatCommon
 {
     public:
 
-        UnalignedLittleEndian<USHORT>                           m_cbBookmark;
-        BYTE                                                    m_cbColumnName;
+        UnalignedLittleEndian<USHORT>                           m_cbBookmark;                                                   // 1 - JET_cbBookmarkMostMost
+        BYTE                                                    m_cbColumnName;                                                 // 1 - JET_cbNameMost
         UnalignedLittleEndian<ULONG>                            m_itagSequence;
-        UnalignedLittleEndian<LvId>                             m_lid;
-        BYTE                                                    m_rgbDatabaseSignature[ OffsetOf( SIGNATURE, szComputerName ) ];
-        BYTE                                                    m_rgbBookmark[ 0 ];
+        UnalignedLittleEndian<LvId>                             m_lid;                                                          // unstable identifier / hint, changes with signature change
+        BYTE                                                    m_rgbDatabaseSignature[ OffsetOf( SIGNATURE, szComputerName ) ];    // szComputeName elided as it is never set
+        BYTE                                                    m_rgbBookmark[ 0 ];                                             // m_cbBookmark, normalized key
+        //BYTE                                                  m_rgbColumnName[0];                                             // m_cbColumnName, ASCII chars
 };
 
 #include <poppack.h>
@@ -1018,6 +1066,7 @@ LOCAL ERR ErrRECIParseColumnReference(
     const CColumnReferenceFormatV2* const       pcrfv2  = (const CColumnReferenceFormatV2* const)rgbReference;
 
 {
+    //  init out params for failure
 
     *plid               = lidMin;
     *prgbBookmark       = NULL;
@@ -1026,6 +1075,7 @@ LOCAL ERR ErrRECIParseColumnReference(
     *pcchColumnName     = 0;
     *pitagSequence      = 0;
 
+    //  validate the column reference
 
     if ( rgbReference == NULL )
     {
@@ -1103,6 +1153,7 @@ LOCAL ERR ErrRECIParseColumnReference(
         Error( ErrERRCheck( JET_errInvalidColumnReference ) );
     }
 
+    //  unpack all the values from the column reference
 
     *plid = lid;
     *prgbBookmark = rgbBookmark;
@@ -1111,6 +1162,7 @@ LOCAL ERR ErrRECIParseColumnReference(
     *pcchColumnName = cbColumnName;
     *pitagSequence = itagSequence;
 
+    //  invalidate the LID if we cannot prove that it isn't stale
 
     static_assert( sizeof( pcrfv1->m_rgbDatabaseSignature ) == sizeof( pcrfv2->m_rgbDatabaseSignature ),
                     "Following code expects the crfv1 and crfv2 db signatures to be of the same size" );
@@ -1144,20 +1196,23 @@ ERR ErrRECCreateColumnReference(
     BOOL                        fLeaveDML   = fFalse;
     FIELD*                      pfield      = pfieldNil;
 
+    //  we do not support column references on temp tables
 
     Assert( !FFUCBSort( pfucb ) );
     if ( FFMPIsTempDB( pfucb->ifmp ) )
     {
-        Expected( fFalse );
+        Expected( fFalse ); // API never run on temp DB.
         Error( ErrERRCheck( JET_errInvalidParameter ) );
     }
 
+    //  validate the bookmark length
 
     SIZE_T cbBookmark = pfucb->bmCurr.key.Cb();
     Assert( cbBookmark > 0 );
     Assert( cbBookmark <= ( pfucb->u.pfcb->Pidb() ? pfucb->u.pfcb->Pidb()->CbKeyMost() : sizeof( DBK ) ) );
     Assert( cbBookmark <= wMax );
 
+    //  determine the name of this column
 
     if ( !pfcb->FTemplateTable() )
     {
@@ -1168,13 +1223,21 @@ ERR ErrRECCreateColumnReference(
     CHAR* szColumnName = pfcb->Ptdb()->SzFieldName( pfield->itagFieldName, fFalse );
     SIZE_T cbColumnName = LOSStrLengthA( szColumnName ) * sizeof( CHAR );
 
+    //  validate the column name length
 
     Assert( cbColumnName > 0 );
     Assert( cbColumnName <= JET_cbNameMost );
     Assert( cbColumnName <= bMax );
 
+    // Select the column reference version to use based on efv.
+    // We don't use Ptdb()->FLid64() here deliberately.
+    // Column reference format is independent of the properties of the current table.
+    // This means that we will return crfv2 even for tables with 32-bit LIDs, if the efv is enabled.
+    // This is purely theoretical in the current implementation, because Ptdb()->FLid64() and efv mirror each other.
+    // But that could change easily.
     bool fUseCrfv2 = ( JET_errSuccess == PfmpFromIfmp( pfucb->ifmp )->ErrDBFormatFeatureEnabled( JET_efvLid64 ) );
 
+    //  allocate enough memory to hold the ref
     *pcbReference = ULONG( cbBookmark + cbColumnName +
                     ( fUseCrfv2 ? sizeof( CColumnReferenceFormatV2 ) : sizeof( CColumnReferenceFormatV1 ) ) );
     if ( pfnRealloc )
@@ -1186,6 +1249,7 @@ ERR ErrRECCreateColumnReference(
         Alloc( *prgbReference = new BYTE[*pcbReference] );
     }
 
+    //  generate the ref
     if ( fUseCrfv2 )
     {
         CColumnReferenceFormatV2*   pcrfv2 = (CColumnReferenceFormatV2*) *prgbReference;
@@ -1249,9 +1313,11 @@ LOCAL ERR ErrIsamIResolveColumnFromColumnReference(
 {
     ERR err = JET_errSuccess;
 
+    //  init out params for failure
 
     *pcolumnid = JET_columnidNil;
 
+    //  get the column name from the reference as a null terminated string
 
     CHAR szColumn[JET_cbNameMost + 1];
     if ( cchColumnName > JET_cbNameMost )
@@ -1261,6 +1327,7 @@ LOCAL ERR ErrIsamIResolveColumnFromColumnReference(
     UtilMemCpy( szColumn, rgchColumnName, cchColumnName );
     szColumn[cchColumnName] = 0;
 
+    //  lookup the column id
 
     JET_COLUMNDEF columndef;
     err = ErrIsamGetTableColumnInfo( sesid, tableid, szColumn, NULL, &columndef, sizeof( columndef ), JET_ColInfo, false );
@@ -1269,6 +1336,7 @@ LOCAL ERR ErrIsamIResolveColumnFromColumnReference(
         Error( ErrERRCheck( JET_errStaleColumnReference ) );
     }
 
+    //  this column had better be for a long value
 
     if ( columndef.coltyp != JET_coltypLongBinary && columndef.coltyp != JET_coltypLongText )
     {
@@ -1328,7 +1396,7 @@ HandleError:
 
     return err;
 }
-#endif
+#endif  //  DEBUG
 
 ERR VTAPI ErrIsamRetrieveColumnByReference(
     _In_ const JET_SESID                                            sesid,
@@ -1359,6 +1427,7 @@ ERR VTAPI ErrIsamRetrieveColumnByReference(
     ULONG&      cbActual                = pcbActual ? *pcbActual : cbActualT;
                 cbActual                = 0;
 
+    // validate parameters
 
     if ( ppib == ppibNil || pfucb == pfucbNil )
     {
@@ -1384,12 +1453,14 @@ ERR VTAPI ErrIsamRetrieveColumnByReference(
         Error( ErrERRCheck( JET_errInvalidOperation ) );
     }
 
+    //  only these grbits are supported at this time
 
     if ( grbit & ~( JET_bitRetrievePhysicalSize ) )
     {
         Error( ErrERRCheck( JET_errInvalidGrbit ) );
     }
 
+    //  check our session and table
 
     CallR( ErrPIBCheck( ppib ) );
     CheckFUCB( ppib, pfucb );
@@ -1399,11 +1470,12 @@ ERR VTAPI ErrIsamRetrieveColumnByReference(
     
     if( FFMPIsTempDB( pfucb->ifmp ) )
     {
-        Expected( fFalse );
+        Expected( fFalse ); // API never run on temp DB.
         Error( ErrERRCheck( JET_errInvalidParameter ) );
     }
     
 
+    // begin transaction for read consistency
 
     if ( 0 == ppib->Level() )
     {
@@ -1411,6 +1483,7 @@ ERR VTAPI ErrIsamRetrieveColumnByReference(
         fTransactionStarted = fTrue;
     }
 
+    //  parse the column reference
 
     Call( ErrRECIParseColumnReference(  pfucb,
                                         (const BYTE* const)pvReference,
@@ -1422,10 +1495,14 @@ ERR VTAPI ErrIsamRetrieveColumnByReference(
                                         &cchColumnName,
                                         &itagSequence ) );
 
+    //  if the column reference is current then use its physical identifiers to fetch the column value from its LV
 
     if ( lid != lidMin )
     {
+        //  UNDONE:  the encryption state is in the LV but the code is structured so that we must know this beforehand.
+        //  this seems to be an unnecessary complication that could be handled internally to ErrRECRetrieveSLongField
 
+        //  establish the encryption state of the column
 
         JET_COLUMNID columnid = JET_columnidNil;
         Call( ErrIsamIResolveColumnFromColumnReference( sesid, tableid, rgchColumnName, cchColumnName, &columnid ) );
@@ -1443,13 +1520,18 @@ ERR VTAPI ErrIsamRetrieveColumnByReference(
             Error( ErrERRCheck( JET_errColumnNoEncryptionKey ) );
         }
 
+        //  try to preread the LV before we check its existence.  otherwise we will wait twice:  once for the LV Root
+        //  and once for the specific data we are going to read
 
         Call( ErrLVPrereadLongValue( pfucb, lid, ibData, cbData ) );
 
+        //  verify that the LV still exists without declaring corruption if it doesn't
 
         BOOL fExists = fFalse;
         Call( ErrRECDoesSLongFieldExist( pfucb, lid, &fExists ) );
 
+        //  if the LV still exists then retrieve the requested portion of the requested column value directly from the LV
+        //  tree.  if it doesn't then we will fallback to retrieving it via the record
 
         if ( fExists )
         {
@@ -1478,6 +1560,7 @@ ERR VTAPI ErrIsamRetrieveColumnByReference(
 
 #ifdef DEBUG
 
+                //  verify the value we just fetched
 
                 if ( !(BOOL)UlConfigOverrideInjection( 41988, fFalse ) )
                 {
@@ -1518,12 +1601,13 @@ ERR VTAPI ErrIsamRetrieveColumnByReference(
                     err = errSave;
                 }
 
-#endif
+#endif  //  DEBUG
             }
             fRetrievedValue = fTrue;
         }
     }
 
+    //  if we still don't have the column value then the column reference is stale
 
     if ( !fRetrievedValue )
     {
@@ -1539,7 +1623,7 @@ HandleError:
 
 #ifdef DEBUG
     delete[] rgbDataVerify;
-#endif
+#endif  //  DEBUG
     return err;
 }
 
@@ -1565,6 +1649,7 @@ ERR VTAPI ErrIsamPrereadColumnsByReference(
     ULONG&          cReferencesPreread      = pcReferencesPreread ? *pcReferencesPreread : cReferencesPrereadT;
                     cReferencesPreread      = 0;
 
+    //  validate parameters
 
     if ( ppib == ppibNil || pfucb == pfucbNil || !rgpvReferences || !rgcbReferences )
     {
@@ -1579,12 +1664,14 @@ ERR VTAPI ErrIsamPrereadColumnsByReference(
         Error( ErrERRCheck( JET_errInvalidOperation ) );
     }
 
+    //  only these grbits are supported at this time
 
     if ( grbit & ~( JET_bitPrereadFirstPage ) )
     {
         Error( ErrERRCheck( JET_errInvalidGrbit ) );
     }
 
+    //  check our session and table
 
     CallR( ErrPIBCheck( ppib ) );
     CheckFUCB( ppib, pfucb );
@@ -1594,10 +1681,11 @@ ERR VTAPI ErrIsamPrereadColumnsByReference(
 
     if( FFMPIsTempDB( pfucb->ifmp ) )
     {
-        Expected( fFalse );
+        Expected( fFalse ); // API never run on temp DB.
         Error( ErrERRCheck( JET_errInvalidParameter ) );
     }
     
+    //  parse the column references
 
     for ( ULONG iReference = 0; iReference < cReferences; iReference++ )
     {
@@ -1639,6 +1727,7 @@ ERR VTAPI ErrIsamPrereadColumnsByReference(
         }
     }
 
+    //  for any column references that were current, directly preread the LVs by LID
 
     for ( ULONG ilid = 0; ilid < clid && cPageCacheMaxRemaining; ilid += clidMostPreread )
     {
@@ -1684,6 +1773,7 @@ LOCAL ERR ErrRECIFetchMissingLVs(
     size_t                  iEnumColumn;
     size_t                  iEnumColumnValue;
 
+    //  release our page latch, if any
 
     if ( Pcsr( pfucb )->FLatched() )
     {
@@ -1691,6 +1781,7 @@ LOCAL ERR ErrRECIFetchMissingLVs(
     }
     AssertDIRNoLatch( pfucb->ppib );
 
+    //  walk all column values looking for missing separated LVs
 
     for ( iEnumColumn = 0; iEnumColumn < cEnumColumn; iEnumColumn++ )
     {
@@ -1705,12 +1796,15 @@ LOCAL ERR ErrRECIFetchMissingLVs(
                 Assert( NULL != pEnumColumn );
                 JET_ENUMCOLUMNVALUE* const pEnumColumnValue = &pEnumColumn->rgEnumColumnValue[ iEnumColumnValue ];
 
+                //  if this isn't a missing separated LV then skip it
 
                 if ( pEnumColumnValue->err != wrnRECSeparatedLV && pEnumColumnValue->err != wrnRECSeparatedEncryptedLV )
                 {
                     continue;
                 }
 
+                //  retrieve the LID/fEncrypted from cbData
+                //  cbData is used as an index into rgLidStore (if this column value was a separated LV)
                 Assert( pEnumColumnValue->cbData < rgLidStore.Size() );
                 const LvId lid = rgLidStore[ pEnumColumnValue->cbData ];
                 const BOOL fEncrypted = ( pEnumColumnValue->err == wrnRECSeparatedEncryptedLV );
@@ -1718,6 +1812,7 @@ LOCAL ERR ErrRECIFetchMissingLVs(
                 pEnumColumnValue->err       = JET_errSuccess;
                 pEnumColumnValue->cbData    = 0;
 
+                // if the caller requested a reference then return it instead of the data
 
                 if ( fRetrieveAsRefIfNotInRecord )
                 {
@@ -1733,6 +1828,10 @@ LOCAL ERR ErrRECIFetchMissingLVs(
                 }
                 else
                 {
+                    //  fetch up to the requested maximum column value size of this
+                    //  LV.  note that in this mode, we are retrieving a pointer to
+                    //  a newly allocated buffer containing the LV data NOT the LV
+                    //  data itself
 
                     Call( ErrRECRetrieveSLongField( pfucb,
                                                     lid,
@@ -1746,6 +1845,9 @@ LOCAL ERR ErrRECIFetchMissingLVs(
                                                     pvReallocContext,
                                                     prceNil ) );
 
+                    //  if the returned cbActual is larger than cbDataMost then we
+                    //  obviously only got cbDataMost bytes of data.  warn the caller
+                    //  that they didn't get all the data
 
                     if ( pEnumColumnValue->cbData > cbDataMost )
                     {
@@ -1778,7 +1880,7 @@ LOCAL ERR ErrRECEnumerateAllColumns(
     JET_ENUMCOLUMN*&        rgEnumColumn                = ( prgEnumColumn ? *prgEnumColumn : rgEnumColumnT );
                             rgEnumColumn                = NULL;
     CArray<LvId>            rgEnumLidStore;
-    const INT               iMinGrowthLidStore          = 8;
+    const INT               iMinGrowthLidStore          = 8;    // magic number, grow by 64-bytes (atleast)
 
 
     TDB* const                  ptdb                    = pfucb->u.pfcb->Ptdb();
@@ -1831,6 +1933,7 @@ LOCAL ERR ErrRECEnumerateAllColumns(
     void*                   pvData                      = NULL;
     BYTE *                  pbDataDecrypted             = NULL;
 
+    //  validate parameters
 
     if ( !pcEnumColumn || !prgEnumColumn || !pfnRealloc )
     {
@@ -1849,12 +1952,14 @@ LOCAL ERR ErrRECEnumerateAllColumns(
         Error( ErrERRCheck( JET_errInvalidGrbit ) );
     }
 
+    //  NOCODE:  JET_bitEnumerateLocal is NYI
 
     if ( grbit & JET_bitEnumerateLocal )
     {
         Error( ErrERRCheck( JET_errInvalidGrbit ) );
     }
 
+    //  NOCODE:  integration with user-defined callbacks is NYI
 
     if (    ptdb->FTableHasUserDefinedDefault() &&
             !( grbit & ( JET_bitEnumerateIgnoreDefault | JET_bitEnumerateIgnoreUserDefinedDefault ) ) )
@@ -1862,12 +1967,17 @@ LOCAL ERR ErrRECEnumerateAllColumns(
         Error( ErrERRCheck( JET_errCallbackFailed ) );
     }
 
+    //  these options are mutually exclusive
 
     if ( !!( grbit & JET_bitEnumerateInRecordOnly ) && !!( grbit & JET_bitEnumerateAsRefIfNotInRecord ) )
     {
         Error( ErrERRCheck( JET_errInvalidGrbit ) );
     }
 
+    //  build an iterator tree over all our input data
+    //
+    //  NOTE:  if no input data is needed then the root iterator will be NULL!
+    //  NOTE:  make sure we have enough iterator storage to hold these iterators
 
     fRecord                     = fTrue;
     fDefaultRecord              = !( grbit & JET_bitEnumerateIgnoreDefault ) && ptdb->FTableHasDefault();
@@ -2007,6 +2117,9 @@ LOCAL ERR ErrRECEnumerateAllColumns(
         }
     }
 
+    //  get access to the data we need
+    //
+    //  NOTE:  do not unlatch the page until we are done with the iterators!
 
     if ( fRecord )
     {
@@ -2024,6 +2137,7 @@ LOCAL ERR ErrRECEnumerateAllColumns(
         Call( pciterDefaultRec->ErrSetRecord( *pdataDefaultRec ) );
     }
 
+    //  do not allow retrieve as ref if the storage isn't stable
 
     if (    fRetrieveAsRefIfNotInRecord &&
             ( FFUCBUpdatePrepared( pfucb ) || FFUCBSort( pfucb ) || FFMPIsTempDB( pfucb->ifmp ) ) )
@@ -2031,6 +2145,7 @@ LOCAL ERR ErrRECEnumerateAllColumns(
         Error( ErrERRCheck( JET_errInvalidGrbit ) );
     }
 
+    //  get worst case storage for the column array
 
     Call( pciterRoot->ErrGetWorstCaseColumnCount( &cAlloc ) );
     cbAlloc = cAlloc * sizeof( JET_ENUMCOLUMN );
@@ -2043,18 +2158,23 @@ LOCAL ERR ErrRECEnumerateAllColumns(
     cEnumColumn = (ULONG)cAlloc;
     memset( rgEnumColumn, 0, cbAlloc );
 
+    // Improve the worst possible scenario:
+    // if every column has exactly 1 value which is a lid,
+    // we would end up with a realloc per lid.
     if ( rgEnumLidStore.ErrSetCapacity( cEnumColumn ) != CArray<LvId>::ERR::errSuccess )
     {
         Error( ErrERRCheck( JET_errOutOfMemory ) );
     }
     rgEnumLidStore.SetCapacityGrowth( iMinGrowthLidStore );
 
+    //  walk all columns in the input data
 
     Call( pciterRoot->ErrMoveBeforeFirst() );
     for ( iEnumColumn = 0; iEnumColumn < cEnumColumn; iEnumColumn++ )
     {
         JET_ENUMCOLUMN* const pEnumColumn = &rgEnumColumn[ iEnumColumn ];
 
+        //  if we have walked off the end of the input array then we are done
 
         err = pciterRoot->ErrMoveNext();
         if ( err == errRECNoCurrentColumnValue )
@@ -2065,6 +2185,8 @@ LOCAL ERR ErrRECEnumerateAllColumns(
         }
         Call( err );
 
+        //  if we do not have access to this column then do not include it
+        //  in the output array
 
         Call( pciterRoot->ErrGetColumnId( &pEnumColumn->columnid ) );
 
@@ -2077,9 +2199,11 @@ LOCAL ERR ErrRECEnumerateAllColumns(
         }
         Call( err );
 
+        //  get the properties for this column
 
         Call( pciterRoot->ErrGetColumnValueCount( &cColumnValue ) );
 
+        //  if the column is NULL then include it in the output array
 
         if ( !cColumnValue )
         {
@@ -2087,6 +2211,8 @@ LOCAL ERR ErrRECEnumerateAllColumns(
             continue;
         }
 
+        //  if we are testing for the presence of a column value only then
+        //  return that it is present but do not return any column values
 
         if ( grbit & JET_bitEnumeratePresenceOnly )
         {
@@ -2100,17 +2226,26 @@ LOCAL ERR ErrRECEnumerateAllColumns(
             continue;
         }
 
+        //  if there is only one column value and output compression was
+        //  requested and the caller asked for all column values then we may be
+        //  able to put the column value directly in the JET_ENUMCOLUMN struct
 
         if (    cColumnValue == 1 &&
                 !fEncrypted &&
                 ( grbit & JET_bitEnumerateCompressOutput ) )
         {
+            //  get the properties for this column value
 
             Call( pciterRoot->ErrGetColumnValue( 1, &cbData, &pvData, &fSeparated, &fCompressed ) );
 
+            //  this column value is suitable for compression
+            //
+            //  NOTE:  currently, this criteria equals zero chance of needing
+            //  to return a warning for this column
 
             if ( !fSeparated )
             {
+                //  store the column value in the JET_ENUMCOLUMN struct
 
                 if( fCompressed )
                 {
@@ -2165,6 +2300,7 @@ LOCAL ERR ErrRECEnumerateAllColumns(
                     }
                 }
 
+                //  if this is an escrow update column then adjust it
 
                 if (    FCOLUMNIDFixed( pEnumColumn->columnid ) &&
                         FFIELDEscrowUpdate( fieldFC.ffield ) &&
@@ -2177,11 +2313,13 @@ LOCAL ERR ErrRECEnumerateAllColumns(
                                                         pEnumColumn->cbData ) );
                 }
 
+                //  we're done with this column
 
                 continue;
             }
         }
 
+        //  get storage for the column value array
 
         cAlloc  = cColumnValue;
         cbAlloc = cAlloc * sizeof( JET_ENUMCOLUMNVALUE );
@@ -2196,6 +2334,7 @@ LOCAL ERR ErrRECEnumerateAllColumns(
 
         rgEnumLidStore.SetCapacityGrowth( max( iMinGrowthLidStore, cColumnValue ) );
 
+        //  walk all column values for this column in the input data
 
         for (   iEnumColumnValue = 0;
                 iEnumColumnValue < pEnumColumn->cEnumColumnValue;
@@ -2205,9 +2344,13 @@ LOCAL ERR ErrRECEnumerateAllColumns(
 
             pEnumColumnValue->itagSequence = (ULONG)( iEnumColumnValue + 1 );
 
+            //  get the properties for this column value
 
             Call( pciterRoot->ErrGetColumnValue( pEnumColumnValue->itagSequence, &cbData, &pvData, &fSeparated, &fCompressed ) );
 
+            //  if this column value is a separated long value and we are only
+            //  enumerating data in the record then return that there is a value
+            //  but don't actually fetch it
 
             if ( fSeparated && fInRecordOnly )
             {
@@ -2215,9 +2358,14 @@ LOCAL ERR ErrRECEnumerateAllColumns(
                 continue;
             }
 
+            //  if this column value is a separated long value, then we must
+            //  defer fetching it until after we have iterated the record.
+            //  we will do this by flagging the column value with wrnRECSeparatedLV
+            //  and pointing cbData to the LID stored in rgEnumLidStore.
 
             if ( fSeparated )
             {
+                // Really hacky way to pass on LID/fEncrypted to ErrRECIFetchMissingLVs
                 INT iLid = rgEnumLidStore.Size();
                 if ( rgEnumLidStore.ErrSetEntry( iLid, LidOfSeparatedLV( (BYTE*)pvData, cbData ) ) != CArray<LvId>::ERR::errSuccess )
                 {
@@ -2231,6 +2379,7 @@ LOCAL ERR ErrRECEnumerateAllColumns(
                 continue;
             }
 
+            //  store the column value
 
             if ( fEncrypted &&
                  cbData > 0 )
@@ -2306,6 +2455,7 @@ LOCAL ERR ErrRECEnumerateAllColumns(
                 pbDataDecrypted = NULL;
             }
 
+            //  if this is an escrow update column then adjust it
 
             if (    FCOLUMNIDFixed( pEnumColumn->columnid ) &&
                     FFIELDEscrowUpdate( fieldFC.ffield ) &&
@@ -2320,12 +2470,22 @@ LOCAL ERR ErrRECEnumerateAllColumns(
         }
     }
 
+    //  we should have reached the end of the input data or else the "worst
+    //  case" column count wasn't actually the worst case now was it?
 
     Assert( pciterRoot->ErrMoveNext() == errRECNoCurrentColumnValue );
 
+    //  we need to fixup some missing separated LVs
+    //
+    //  NOTE:  as soon as we do this our iterators are invalid
 
     if ( fSeparatedLV )
     {
+        //  If we are retrieving an after-image or
+        //  haven't replaced a LV we can simply go
+        //  to the LV tree. Otherwise we have to
+        //  perform a more detailed consultation of
+        //  the version store with ErrRECGetLVImage
         const BOOL fAfterImage = fUseCopyBuffer
                                 || !FFUCBUpdateSeparateLV( pfucb )
                                 || !FFUCBReplacePrepared( pfucb );
@@ -2341,6 +2501,7 @@ LOCAL ERR ErrRECEnumerateAllColumns(
                                         fRetrieveAsRefIfNotInRecord ) );
     }
 
+    //  cleanup
 
 HandleError:
     if ( Pcsr( pfucb )->FLatched() )
@@ -2424,7 +2585,7 @@ LOCAL ERR ErrRECEnumerateReqColumns(
     JET_ENUMCOLUMN*&        rgEnumColumn                = ( prgEnumColumn ? *prgEnumColumn : rgEnumColumnT );
                             rgEnumColumn                = NULL;
     CArray<LvId>            rgEnumLidStore;
-    const INT               iMinGrowthLidStore          = 8;
+    const INT               iMinGrowthLidStore          = 8;    // magic number, grow by 64-bytes (atleast)
     BOOL                    fColumnIdError = fFalse;
     BOOL                    fRetColumnIdError           = fFalse;
     BOOL                    fSeparatedLV                = fFalse;
@@ -2458,6 +2619,7 @@ LOCAL ERR ErrRECEnumerateReqColumns(
     void*                   pvData                      = NULL;
     BYTE *                  pbDataDecrypted             = NULL;
 
+    //  validate parameters
 
     if ( !pcEnumColumn || !prgEnumColumn || !pfnRealloc )
     {
@@ -2476,18 +2638,21 @@ LOCAL ERR ErrRECEnumerateReqColumns(
         Error( ErrERRCheck( JET_errInvalidGrbit ) );
     }
 
+    //  NOCODE:  JET_bitEnumerateLocal is NYI
 
     if ( grbit & JET_bitEnumerateLocal )
     {
         Error( ErrERRCheck( JET_errInvalidGrbit ) );
     }
 
+    //  JET_bitEnumerateTaggedOnly is not supported when requesting specific columns
 
     if ( grbit & JET_bitEnumerateTaggedOnly )
     {
         Error( ErrERRCheck( JET_errInvalidGrbit ) );
     }
 
+    //  NOCODE:  integration with user-defined callbacks is NYI
 
     if (    pfucb->u.pfcb->Ptdb()->FTableHasUserDefinedDefault() &&
             !( grbit & ( JET_bitEnumerateIgnoreDefault | JET_bitEnumerateIgnoreUserDefinedDefault ) ) )
@@ -2495,6 +2660,7 @@ LOCAL ERR ErrRECEnumerateReqColumns(
         Error( ErrERRCheck( JET_errCallbackFailed ) );
     }
 
+    //  these options are mutually exclusive
 
     if ( !!( grbit & JET_bitEnumerateInRecordOnly ) && !!( grbit & JET_bitEnumerateAsRefIfNotInRecord ) )
     {
@@ -2504,6 +2670,7 @@ LOCAL ERR ErrRECEnumerateReqColumns(
     fInRecordOnly               = grbit & JET_bitEnumerateInRecordOnly;
     fRetrieveAsRefIfNotInRecord = grbit & JET_bitEnumerateAsRefIfNotInRecord;
 
+    //  get access to the data we need
 
     fUseCopyBuffer = (  (   ( grbit & JET_bitEnumerateCopy ) &&
                             FFUCBUpdatePrepared( pfucb ) &&
@@ -2518,6 +2685,7 @@ LOCAL ERR ErrRECEnumerateReqColumns(
         fNonEscrowDefault = pfucb->u.pfcb->Ptdb()->FTableHasNonEscrowDefault();
     }
 
+    //  do not allow retrieve as ref if the storage isn't stable
 
     if (    fRetrieveAsRefIfNotInRecord &&
             ( FFUCBUpdatePrepared( pfucb ) || FFUCBSort( pfucb ) || FFMPIsTempDB( pfucb->ifmp ) ) )
@@ -2525,6 +2693,7 @@ LOCAL ERR ErrRECEnumerateReqColumns(
         Error( ErrERRCheck( JET_errInvalidGrbit ) );
     }
 
+    //  allocate storage for the column array
 
     cAlloc  = cEnumColumnId;
     cbAlloc = cAlloc * sizeof( JET_ENUMCOLUMN );
@@ -2537,16 +2706,21 @@ LOCAL ERR ErrRECEnumerateReqColumns(
     cEnumColumn = (ULONG)cAlloc;
     memset( rgEnumColumn, 0, cbAlloc );
 
+    // Improve the worst possible scenario:
+    // if every column has exactly 1 value which is a lid,
+    // we would end up with a realloc per lid.
     if ( rgEnumLidStore.ErrSetCapacity( cEnumColumn ) != CArray<LvId>::ERR::errSuccess )
     {
         Error( ErrERRCheck( JET_errOutOfMemory ) );
     }
     rgEnumLidStore.SetCapacityGrowth( iMinGrowthLidStore );
+    //  walk all requested columns
 
     for ( iEnumColumn = 0; iEnumColumn < cEnumColumn; iEnumColumn++ )
     {
         JET_ENUMCOLUMN* const pEnumColumn = &rgEnumColumn[ iEnumColumn ];
 
+        //  if the requested column id is zero then we should skip this column
 
         pEnumColumn->columnid = rgEnumColumnId[ iEnumColumn ].columnid;
 
@@ -2556,6 +2730,9 @@ LOCAL ERR ErrRECEnumerateReqColumns(
             continue;
         }
 
+        //  if we do not have access to the requested column then set the
+        //  appropriate error for this column so that the caller can see
+        //  which column ids were bad
 
         err = ErrRECIAccessColumn( pfucb, pEnumColumn->columnid, &fieldFC, &fEncrypted );
         if ( err == JET_errBadColumnId || err == JET_errColumnNotFound )
@@ -2569,6 +2746,9 @@ LOCAL ERR ErrRECEnumerateReqColumns(
         }
         Call( err );
 
+        //  lookup the value for this column in the record.  if we cannot find
+        //  a value there and we are returning default values then lookup the
+        //  value for this column in the default record
 
         if ( FCOLUMNIDTagged( pEnumColumn->columnid ) )
         {
@@ -2641,6 +2821,7 @@ LOCAL ERR ErrRECEnumerateReqColumns(
             Call( err );
         }
 
+        //  get the properties for this column
 
         if ( err == errRECColumnNotFound )
         {
@@ -2654,6 +2835,9 @@ LOCAL ERR ErrRECEnumerateReqColumns(
             Call( pciter->ErrGetColumnValueCount( &cColumnValue ) );
         }
 
+        //  if the column wasn't found and JET_bitEnumerateIgnoreDefault was
+        //  specified and the caller asked for all column values then return
+        //  that the column is set to the default
 
         if (    !fColumnFound && ( grbit & JET_bitEnumerateIgnoreDefault ) &&
                 !rgEnumColumnId[ iEnumColumn ].ctagSequence )
@@ -2662,6 +2846,8 @@ LOCAL ERR ErrRECEnumerateReqColumns(
             continue;
         }
 
+        //  if the column is explicitly set to NULL and the caller asked for
+        //  all column values then return that the column is NULL
 
         if (    !cColumnValue &&
                 !rgEnumColumnId[ iEnumColumn ].ctagSequence )
@@ -2670,6 +2856,9 @@ LOCAL ERR ErrRECEnumerateReqColumns(
             continue;
         }
 
+        //  if we are testing for the presence of a column value only and
+        //  the caller asked for all column values then return that the column
+        //  is present but do not return any column values
 
         if (    ( grbit & JET_bitEnumeratePresenceOnly ) &&
                 !rgEnumColumnId[ iEnumColumn ].ctagSequence )
@@ -2684,18 +2873,27 @@ LOCAL ERR ErrRECEnumerateReqColumns(
             continue;
         }
 
+        //  if there is only one column value and output compression was
+        //  requested and the caller asked for all column values then we may be
+        //  able to put the column value directly in the JET_ENUMCOLUMN struct
 
         if (    cColumnValue == 1 &&
                 !fEncrypted &&
                 ( grbit & JET_bitEnumerateCompressOutput ) &&
                 !rgEnumColumnId[ iEnumColumn ].ctagSequence )
         {
+            //  get the properties for this column value
 
             Call( pciter->ErrGetColumnValue( 1, &cbData, &pvData, &fSeparated, &fCompressed ) );
 
+            //  this column value is suitable for compression
+            //
+            //  NOTE:  currently, this criteria equals zero chance of needing
+            //  to return a warning for this column
 
             if ( !fSeparated )
             {
+                //  store the column value in the JET_ENUMCOLUMN struct
 
                 if( fCompressed )
                 {
@@ -2750,6 +2948,7 @@ LOCAL ERR ErrRECEnumerateReqColumns(
                     }
                 }
 
+                //  if this is an escrow update column then adjust it
 
                 if (    FCOLUMNIDFixed( pEnumColumn->columnid ) &&
                         FFIELDEscrowUpdate( fieldFC.ffield ) &&
@@ -2762,11 +2961,13 @@ LOCAL ERR ErrRECEnumerateReqColumns(
                                                         pEnumColumn->cbData ) );
                 }
 
+                //  we're done with this column
 
                 continue;
             }
         }
 
+        //  get storage for the column value array
 
         cAlloc = rgEnumColumnId[ iEnumColumn ].ctagSequence;
         if ( !cAlloc )
@@ -2785,6 +2986,8 @@ LOCAL ERR ErrRECEnumerateReqColumns(
 
         rgEnumLidStore.SetCapacityGrowth( max( iMinGrowthLidStore, cAlloc ) );
 
+        //  walk all requested column values
+        //  NOCODE:  JET_wrnColumnMoreTags is NYI
 
         for (   iEnumColumnValue = 0;
                 iEnumColumnValue < pEnumColumn->cEnumColumnValue;
@@ -2792,6 +2995,8 @@ LOCAL ERR ErrRECEnumerateReqColumns(
         {
             JET_ENUMCOLUMNVALUE* const pEnumColumnValue = &pEnumColumn->rgEnumColumnValue[ iEnumColumnValue ];
 
+            //  if the requested itagSequence is zero then we should skip
+            //  this column value
 
             if ( rgEnumColumnId[ iEnumColumn ].ctagSequence )
             {
@@ -2808,6 +3013,10 @@ LOCAL ERR ErrRECEnumerateReqColumns(
                 continue;
             }
 
+            //  if there is no corresponding column value for the requested
+            //  itagSequence and the column was not found and
+            //  JET_bitEnumerateIgnoreDefault was specified then the column
+            //  value is the default
 
             if (    pEnumColumnValue->itagSequence > cColumnValue &&
                     !fColumnFound &&
@@ -2817,6 +3026,8 @@ LOCAL ERR ErrRECEnumerateReqColumns(
                 continue;
             }
 
+            //  if there is no corresponding column value for the requested
+            //  itagSequence then the column value is NULL
 
             if ( pEnumColumnValue->itagSequence > cColumnValue )
             {
@@ -2824,6 +3035,8 @@ LOCAL ERR ErrRECEnumerateReqColumns(
                 continue;
             }
 
+            //  if we are testing for the presence of a column value only then
+            //  return that it is present but do not return the column value
 
             if ( grbit & JET_bitEnumeratePresenceOnly )
             {
@@ -2831,9 +3044,13 @@ LOCAL ERR ErrRECEnumerateReqColumns(
                 continue;
             }
 
+            //  get the properties for this column value
 
             Call( pciter->ErrGetColumnValue( pEnumColumnValue->itagSequence, &cbData, &pvData, &fSeparated, &fCompressed ) );
 
+            //  if this column value is a separated long value and we are only
+            //  enumerating data in the record then return that there is a value
+            //  but don't actually fetch it
 
             if ( fSeparated && fInRecordOnly )
             {
@@ -2841,9 +3058,14 @@ LOCAL ERR ErrRECEnumerateReqColumns(
                 continue;
             }
 
+            //  if this column value is a separated long value, then we must
+            //  defer fetching it until after we have iterated the record.
+            //  we will do this by flagging the column value with wrnRECSeparatedLV
+            //  and pointing cbData to the LID stored in rgEnumLidStore.
 
             if ( fSeparated )
             {
+                // Really hacky way to pass on LID/fEncrypted to ErrRECIFetchMissingLVs
                 INT iLid = rgEnumLidStore.Size();
                 if ( rgEnumLidStore.ErrSetEntry( iLid, LidOfSeparatedLV( (BYTE*) pvData, cbData ) ) != CArray<LvId>::ERR::errSuccess )
                 {
@@ -2857,6 +3079,7 @@ LOCAL ERR ErrRECEnumerateReqColumns(
                 continue;
             }
 
+            //  store the column value
 
             if ( fEncrypted &&
                  cbData > 0 )
@@ -2932,6 +3155,7 @@ LOCAL ERR ErrRECEnumerateReqColumns(
                 pbDataDecrypted = NULL;
             }
 
+            //  if this is an escrow update column then adjust it
 
             if (    FCOLUMNIDFixed( pEnumColumn->columnid ) &&
                     FFIELDEscrowUpdate( fieldFC.ffield ) &&
@@ -2946,9 +3170,15 @@ LOCAL ERR ErrRECEnumerateReqColumns(
         }
     }
 
+    //  we need to fixup some missing separated LVs
 
     if ( fSeparatedLV )
     {
+        //  If we are retrieving an after-image or
+        //  haven't replaced a LV we can simply go
+        //  to the LV tree. Otherwise we have to
+        //  perform a more detailed consultation of
+        //  the version store with ErrRECGetLVImage
         const BOOL fAfterImage = fUseCopyBuffer
                                 || !FFUCBUpdateSeparateLV( pfucb )
                                 || !FFUCBReplacePrepared( pfucb );
@@ -2964,6 +3194,7 @@ LOCAL ERR ErrRECEnumerateReqColumns(
                                         fRetrieveAsRefIfNotInRecord ) );
     }
 
+    //  if there was a column id error then return the first one we see
 
     if ( fColumnIdError )
     {
@@ -2977,6 +3208,7 @@ LOCAL ERR ErrRECEnumerateReqColumns(
         err = JET_errSuccess;
     }
 
+    //  cleanup
 
 HandleError:
     if ( Pcsr( pfucb )->FLatched() )
@@ -3067,6 +3299,8 @@ ERR VTAPI ErrIsamEnumerateColumns(
 
     if ( 0 == ppib->Level() )
     {
+        // Begin transaction for read consistency (in case page
+        // latch must be released in order to validate column).
         Call( ErrDIRBeginTransaction( ppib, 51493, JET_bitTransactionReadOnly ) );
         fTransactionStarted = fTrue;
     }
@@ -3074,6 +3308,7 @@ ERR VTAPI ErrIsamEnumerateColumns(
     AssertDIRNoLatch( ppib );
     Assert( FFUCBSort( pfucb ) || FFUCBIndex( pfucb ) );
 
+    //  if no column list is given then enumerate all columns
 
     if ( !cEnumColumnId )
     {
@@ -3086,6 +3321,7 @@ ERR VTAPI ErrIsamEnumerateColumns(
                                             grbit ) );
     }
 
+    //  if an explicit column list is provided then enumerate those columns
 
     else
     {
@@ -3103,6 +3339,7 @@ ERR VTAPI ErrIsamEnumerateColumns(
 HandleError:
     if ( fTransactionStarted )
     {
+        //  No updates performed, so force success.
         CallS( ErrDIRCommitTransaction( ppib, NO_GRBIT ) );
     }
     AssertDIRNoLatch( ppib );
@@ -3132,6 +3369,13 @@ LOCAL ERR ErrRECIGetRecordSize(
 
     precsize->cbOverhead += CPAGE::cbInsertionOverhead + cbKeyCount + REC::cbRecordHeader;
 
+    //  Compute key size.
+    //  For compatibility with JET_RECISZE2/JET_RECSIZE, cbKey is counted into cbOverhead.
+    //  Key sizes are calculated using the full key (not the compressed key).
+    //  So the actual key size on the page may differ from the reported size.
+    //  JetGetRecordSize() aims for the contract: report the total number of bytes needed to store
+    //  the record. That means we should report uncompressed key size.
+    //
     if ( Pcsr( pfucb )->FLatched() || FFUCBSort( pfucb ) )
     {
         Assert( locOnCurBM == pfucb->locLogical );
@@ -3140,12 +3384,16 @@ LOCAL ERR ErrRECIGetRecordSize(
     }
     else if ( pfucb->cbstat == fCBSTATNull || FFUCBReplacePrepared( pfucb ) )
     {
+        // Currency should be valid and on the current key, if we aren't doing any updates or OR doing a replace.
+        // Current key isn't valid if we are doing an insert (or variants of InsertCopy).
         Assert( locOnCurBM == pfucb->locLogical );
         precsize->cbOverhead += pfucb->bmCurr.key.Cb();
         precsize->cbKey += pfucb->bmCurr.key.Cb();
     }
     else
     {
+        //  key hasn't been formulated yet, so there's no way to know how big it is
+        //
     }
 
     precsize->cbOverhead += prec->CbFixedRecordOverhead() + prec->CbVarRecordOverhead();
@@ -3159,11 +3407,15 @@ LOCAL ERR ErrRECIGetRecordSize(
     Call( citerTC.ErrMoveBeforeFirst() );
     while ( errRECNoCurrentColumnValue != ( err = citerTC.ErrMoveNext() ) )
     {
+        //  process the result of column navigation
+        //
         Call( err );
 
         Call( citerTC.ErrGetColumnSize( pfucb, precsize, grbit ) );
     }
 
+    //  if we have walked off the end of the input array then we are done
+    //
     Assert( errRECNoCurrentColumnValue == err );
     err = JET_errSuccess;
 
@@ -3198,6 +3450,8 @@ ERR VTAPI ErrIsamGetRecordSize(
 
     if ( 0 == ppib->Level() )
     {
+        //  begin transaction for read consistency
+        //
         Call( ErrDIRBeginTransaction( ppib, 45349, JET_bitTransactionReadOnly ) );
         fTransactionStarted = fTrue;
     }
@@ -3207,6 +3461,8 @@ ERR VTAPI ErrIsamGetRecordSize(
 
     Call( ErrRECIGetRecord( pfucb, &pdataRec, fUseCopyBuffer ) );
 
+    // If we are fetching LV sizes, we may need to populate the LV FUCB and that requires taking a lock
+    // with lower rank than a BF latch. So, make a copy of the data and release the latch.
     if ( !fUseCopyBuffer && !( grbit & JET_bitRecordSizeLocal ) )
     {
         VOID *pvAlloc;
@@ -3238,6 +3494,8 @@ HandleError:
 
     if ( fTransactionStarted )
     {
+        //  no updates performed, so force success
+        //
         CallS( ErrDIRCommitTransaction( ppib, NO_GRBIT ) );
     }
     AssertDIRNoLatch( ppib );
@@ -3253,6 +3511,9 @@ HandleError:
     return err;
 }
 
+//  JetStreamRecords record buffer format
+//
+//  We have to presume that someone may persist the stream to read later.
 
 #include <pshpack1.h>
 
@@ -3276,6 +3537,7 @@ struct RECORD_BUFFER_HEADER_V1 : public RECORD_BUFFER_HEADER_COMMON
 {
     Unaligned<ULONG>                        cbHeader;
 
+    //  this space is reserved as working memory for processing the buffer
 
     Unaligned<ULONG>                        ibRead;
     Unaligned<ULONG>                        iRecord;
@@ -3318,6 +3580,7 @@ LOCAL ERR ErrRECIStreamRecordsICommonFilter(
 {
     ERR err = JET_errSuccess;
 
+    //  check any higher priority filter
 
     Call( ErrRECCheckMoveFilter( pfucb, (MOVE_FILTER_CONTEXT* const)pcontext ) );
     if ( err > JET_errSuccess )
@@ -3325,6 +3588,7 @@ LOCAL ERR ErrRECIStreamRecordsICommonFilter(
         goto HandleError;
     }
 
+    //  check the index range before we accumulate any records
 
     if ( FFUCBLimstat( pfucb ) )
     {
@@ -3348,12 +3612,15 @@ LOCAL ERR ErrRECIStreamRecordsIAppendColumnValue(
 {
     ERR err = JET_errSuccess;
 
+    //  check for enough room to copy the column value to the output.  if there isn't enough room then just fail.
+    //  we will correct our output to be on a record boundary later
 
     if ( pcontext->cbDataGenerated + sizeof( RECORD_BUFFER_COLUMN_VALUE ) + cbData > pcontext->cbData )
     {
         Error( ErrERRCheck( JET_errBufferTooSmall ) );
     }
 
+    //  copy the column value to the output
 
     RECORD_BUFFER_COLUMN_VALUE* pcolumnValue = (RECORD_BUFFER_COLUMN_VALUE*)( (BYTE*)pcontext->pvData + pcontext->cbDataGenerated );
     pcontext->cbDataGenerated += sizeof( RECORD_BUFFER_COLUMN_VALUE ) + cbData;
@@ -3427,6 +3694,7 @@ LOCAL NOINLINE ERR ErrRECIStreamRecordsOnPrimaryIndexIGetColumnMetaDataSlowly(
 {
     ERR err = JET_errSuccess;
 
+    //  query the in memory schema for the column meta-data
 
     FIELD fieldFC;
     err = ErrRECIAccessColumn( pfucb, columnid, &fieldFC, pfEncrypted );
@@ -3445,6 +3713,7 @@ LOCAL NOINLINE ERR ErrRECIStreamRecordsOnPrimaryIndexIGetColumnMetaDataSlowly(
     *pfVisible = fTrue;
     *pfEscrow = FCOLUMNIDFixed( columnid ) && FFIELDEscrowUpdate( fieldFC.ffield );
 
+    //  save this column metadata in our cache
 
     pcolumnmetadata->columnid                   = columnid;
     pcolumnmetadata->fVisible                   = *pfVisible;
@@ -3464,6 +3733,7 @@ LOCAL ERR ErrRECIStreamRecordsOnPrimaryIndexIGetColumnMetaData(
     BOOL * const                                    pfEscrow
     )
 {
+    //  try to find the column metadata in our cache
 
     TDB * const ptdb = FCOLUMNIDTemplateColumn( columnid ) ? pcontext->ptdbTemplate : pcontext->ptdb;
 
@@ -3485,6 +3755,7 @@ LOCAL ERR ErrRECIStreamRecordsOnPrimaryIndexIGetColumnMetaData(
         return JET_errSuccess;
     }
 
+    //  we didn't find the column metadata in our cache so fetch it and cache it
 
     return ErrRECIStreamRecordsOnPrimaryIndexIGetColumnMetaDataSlowly(  pcolumnmetadata,
                                                                         pfucb,
@@ -3509,11 +3780,13 @@ LOCAL ERR ErrRECIStreamRecordsOnPrimaryIndexIAppendColumnValues(
     BYTE*   pbDataDecompressed  = NULL;
     BYTE*   pbDataAdjusted      = NULL;
 
+    //  iterate over each column value
 
     Call( pcontext->pciterRoot->ErrGetColumnValueCount( &cColumnValue ) );
 
     for ( ULONG itagSequence = 1; itagSequence <= cColumnValue; itagSequence++ )
     {
+        //  get the current column value and its properties
 
         ERR errData = JET_errSuccess;
         size_t cbData;
@@ -3522,9 +3795,12 @@ LOCAL ERR ErrRECIStreamRecordsOnPrimaryIndexIAppendColumnValues(
         BOOL fCompressed;
         Call( pcontext->pciterRoot->ErrGetColumnValue( itagSequence, &cbData, &pvData, &fSeparated, &fCompressed ) );
 
+        //  handle separated long values
 
         if ( fSeparated )
         {
+            //  emit a column reference for this separated long value.  we cannot fetch the data because we are
+            //  currently scanning a B+ Tree using a move filter.  we cannot access another B+ Tree when doing this
 
             if ( pcontext->grbit & JET_bitStreamColumnReferences )
             {
@@ -3541,6 +3817,7 @@ LOCAL ERR ErrRECIStreamRecordsOnPrimaryIndexIAppendColumnValues(
                 cbData = cbDataReference;
             }
 
+            //  otherwise we will return an indicator that the column value is not available
 
             else
             {
@@ -3550,9 +3827,11 @@ LOCAL ERR ErrRECIStreamRecordsOnPrimaryIndexIAppendColumnValues(
             }
         }
 
+        //  handle all other column values
 
         else
         {
+            //  decrypt the column value if required
 
             if ( fEncrypted && cbData )
             {
@@ -3570,6 +3849,7 @@ LOCAL ERR ErrRECIStreamRecordsOnPrimaryIndexIAppendColumnValues(
                 cbData = cbDataDecryptedActual;
             }
 
+            //  decompress the column value if required
 
             if ( fCompressed )
             {
@@ -3584,6 +3864,7 @@ LOCAL ERR ErrRECIStreamRecordsOnPrimaryIndexIAppendColumnValues(
                 cbData = cbDataDecompressed;
             }
 
+            //  if this is an escrow update column then adjust it to the correct value
 
             if ( fEscrow )
             {
@@ -3600,10 +3881,12 @@ LOCAL ERR ErrRECIStreamRecordsOnPrimaryIndexIAppendColumnValues(
             }
         }
 
+        //  emit this column value
 
         Call( ErrRECIStreamRecordsIAppendColumnValue( pcontext, columnid, errData, cbData, pvData ) );
     }
 
+    //  if there were no column values then emit an explicit null column value
 
     if ( cColumnValue == 0 )
     {
@@ -3627,6 +3910,7 @@ LOCAL ERR ErrRECIStreamRecordsOnPrimaryIndexIFilter(
 {
     ERR err = JET_errSuccess;
 
+    //  perform the common filter check
 
     Call( ErrRECIStreamRecordsICommonFilter( pfucb, (STREAM_RECORDS_COMMON_FILTER_CONTEXT* const)pcontext ) );
     if ( err > JET_errSuccess )
@@ -3634,20 +3918,25 @@ LOCAL ERR ErrRECIStreamRecordsOnPrimaryIndexIFilter(
         goto HandleError;
     }
 
+    //  load the current record into our iterator tree
 
     Call( pcontext->pciterRec->ErrSetRecord( pfucb->kdfCurr.data ) );
 
+    //  append the requested column values from this record
 
     if ( !pcontext->rgcolumnid )
     {
+        //  iterate over all column values in the record
 
         Call( pcontext->pciterRoot->ErrMoveBeforeFirst() );
         while ( ( err = pcontext->pciterRoot->ErrMoveNext() ) >= JET_errSuccess )
         {
+            //  get the columnid of the column value we just found
 
             JET_COLUMNID columnid;
             Call( pcontext->pciterRoot->ErrGetColumnId( &columnid ) );
 
+            //  get the meta-data for this column
 
             BOOL fVisible;
             BOOL fEncrypted;
@@ -3659,12 +3948,14 @@ LOCAL ERR ErrRECIStreamRecordsOnPrimaryIndexIFilter(
                                                                         &fEncrypted,
                                                                         &fEscrow ) );
 
+            //  if this column is not visible to this transaction then do not emit it
 
             if ( !fVisible )
             {
                 continue;
             }
 
+            //  append the column values for this column to the output
 
             Call( ErrRECIStreamRecordsOnPrimaryIndexIAppendColumnValues(    pfucb,
                                                                             pcontext,
@@ -3682,12 +3973,15 @@ LOCAL ERR ErrRECIStreamRecordsOnPrimaryIndexIFilter(
     {
         for ( ULONG icolumnid = 0; icolumnid < pcontext->ccolumnid; icolumnid++ )
         {
+            //  get the columnid of the column values we want to find
 
             JET_COLUMNID columnid = pcontext->rgcolumnid[icolumnid];
 
+            //  look for this columnid in the record
 
             if ( ( err = pcontext->pciterRoot->ErrSeek( columnid ) ) >= JET_errSuccess )
             {
+                //  append the column values for this column to the output
 
                 Call( ErrRECIStreamRecordsOnPrimaryIndexIAppendColumnValues(    pfucb,
                                                                                 pcontext,
@@ -3696,6 +3990,7 @@ LOCAL ERR ErrRECIStreamRecordsOnPrimaryIndexIFilter(
                                                                                 pcontext->rgfEscrow[icolumnid] ) );
             }
 
+            //  if there were no column values then emit an explicit null column value
 
             else if ( err == errRECColumnNotFound )
             {
@@ -3705,14 +4000,17 @@ LOCAL ERR ErrRECIStreamRecordsOnPrimaryIndexIFilter(
         }
     }
 
+    //  we have successfully processed this record.  make it visible in the output buffer
 
     pcontext->cRecords++;
     *pcontext->pcbActual = pcontext->cbDataGenerated;
 
+    //  we have successfully processed this record.  *ignore it* so that we can process the next record
 
     err = wrnBTNotVisibleAccumulated;
 
 HandleError:
+    //  if we ran out of record or buffer quota then we should *not ignore* the record so processing will stop
     if ( err == JET_errBufferTooSmall )
     {
         err = JET_errSuccess;
@@ -3771,15 +4069,21 @@ LOCAL ERR ErrIsamStreamRecordsOnPrimaryIndex(
     ULONG                                   ccolumnmetadata             = 0;
     COLUMN_METADATA *                       rgcolumnmetadata            = NULL;
 
+    //  this should be called on a primary or sequential index
 
     Assert( pfucb->pfucbCurIndex == pfucbNil );
 
+    //  NOCODE:  integration with user-defined callbacks is NYI
 
     if ( ptdb->FTableHasUserDefinedDefault() )
     {
         Error( ErrERRCheck( JET_errCallbackFailed ) );
     }
 
+    //  build an iterator tree over all our input data
+    //
+    //  NOTE:  if no input data is needed then the root iterator will be NULL!
+    //  NOTE:  make sure we have enough iterator storage to hold these iterators
 
     fDefaultRecord          = ptdb->FTableHasDefault();
     fNonEscrowDefault       = ptdb->FTableHasNonEscrowDefault();
@@ -3913,12 +4217,14 @@ LOCAL ERR ErrIsamStreamRecordsOnPrimaryIndex(
         }
     }
 
+    //  do not allow retrieve as ref if the storage isn't stable
 
     if ( fUseColumnReferences && ( FFUCBSort( pfucb ) || FFMPIsTempDB( pfucb->ifmp ) ) )
     {
         Error( ErrERRCheck( JET_errInvalidGrbit ) );
     }
 
+    //  setup access to the default record if needed
 
     if ( fDefaultRecord && pciterDefaultRec )
     {
@@ -3926,6 +4232,7 @@ LOCAL ERR ErrIsamStreamRecordsOnPrimaryIndex(
         Call( pciterDefaultRec->ErrSetRecord( *pdataDefaultRec ) );
     }
 
+    //  preprocess any explicitly requested columns
 
     if ( rgcolumnid )
     {
@@ -3945,6 +4252,8 @@ LOCAL ERR ErrIsamStreamRecordsOnPrimaryIndex(
         rgcolumnidContext = (JET_COLUMNID*)rgcolumnid;
     }
 
+    //  if no column restriction is specified and the total number of columns is small then we will preprocess all
+    //  columns.  otherwise, we will fallback to a column meta-data cache
 
     if ( !rgcolumnid )
     {
@@ -4003,6 +4312,7 @@ LOCAL ERR ErrIsamStreamRecordsOnPrimaryIndex(
         }
     }
 
+    //  add the buffer format header
 
     headerV1.rbfi           = rbfiV1;
     headerV1.cbHeader       = sizeof( headerV1 );
@@ -4019,6 +4329,7 @@ LOCAL ERR ErrIsamStreamRecordsOnPrimaryIndex(
     memcpy( pvData, &headerV1, sizeof( headerV1 ) );
     cbActual += sizeof( headerV1 );
 
+    //  move by one in the opposite direction so that we include the current record in our output
 
     err = ErrIsamMove( ppib, pfucb, ( grbit & JET_bitStreamForward ) ? JET_MovePrevious : JET_MoveNext, NO_GRBIT );
     if ( err == JET_errNoCurrentRecord )
@@ -4027,6 +4338,7 @@ LOCAL ERR ErrIsamStreamRecordsOnPrimaryIndex(
     }
     Call( err );
 
+    //  setup and install our move filter context
 
     context.pvData                      = pvData;
     context.cbData                      = cbData;
@@ -4052,6 +4364,8 @@ LOCAL ERR ErrIsamStreamRecordsOnPrimaryIndex(
 
     RECAddMoveFilter( pfucb, (PFN_MOVE_FILTER)ErrRECIStreamRecordsOnPrimaryIndexIFilter, (MOVE_FILTER_CONTEXT *)&context );
 
+    //  move by one.  this will cause us to build up the output via our move filter.  this will result in the cursor
+    //  being placed on the next row to process not the last row we processed
 
     err = ErrIsamMove( ppib, pfucb, ( grbit & JET_bitStreamForward ) ? JET_MoveNext : JET_MovePrevious, NO_GRBIT );
     if ( err == JET_errNoCurrentRecord )
@@ -4114,6 +4428,7 @@ LOCAL ERR ErrRECIStreamRecordsOnSecondaryIndexIFilter(
     ERR             rgerrPrimary[JET_ccolKeyMost];
     DATA            rgvaluePrimary[JET_ccolKeyMost];
 
+    //  perform the common filter check
 
     Call( ErrRECIStreamRecordsICommonFilter( pfucbIndex, (STREAM_RECORDS_COMMON_FILTER_CONTEXT* const)pcontext ) );
     if ( err > JET_errSuccess )
@@ -4121,6 +4436,7 @@ LOCAL ERR ErrRECIStreamRecordsOnSecondaryIndexIFilter(
         goto HandleError;
     }
 
+    //  denormalize all the key column values that we need from the secondary index key
 
     if ( pcontext->iidxsegSecondaryMax != ulMax )
     {
@@ -4153,6 +4469,7 @@ LOCAL ERR ErrRECIStreamRecordsOnSecondaryIndexIFilter(
         }
     }
 
+    //  denormalize all the key column values that we need from the primary index key / bookmark
 
     if ( pcontext->iidxsegPrimaryMax != ulMax )
     {
@@ -4184,12 +4501,15 @@ LOCAL ERR ErrRECIStreamRecordsOnSecondaryIndexIFilter(
         }
     }
 
+    //  append the requested column values from this record
 
     for ( ULONG icolumnid = 0; icolumnid < pcontext->ccolumnid; icolumnid++ )
     {
+        //  get the columnid of the column values we want to find
 
         JET_COLUMNID columnid = pcontext->rgcolumnid[icolumnid];
 
+        //  look for this columnid in the index key or primary bookmark
 
         const ULONG iidxsegSecondary = pcontext->mpicolumnidiidxsegSecondary[icolumnid];
         if ( iidxsegSecondary != ulMax && !fSecondaryKeyTruncated )
@@ -4225,14 +4545,17 @@ LOCAL ERR ErrRECIStreamRecordsOnSecondaryIndexIFilter(
         }
     }
 
+    //  we have successfully processed this record.  make it visible in the output buffer
 
     pcontext->cRecords++;
     *pcontext->pcbActual = pcontext->cbDataGenerated;
 
+    //  we have successfully processed this record.  *ignore it* so that we can processed the next record
 
     err = wrnBTNotVisibleAccumulated;
 
 HandleError:
+    //  if we ran out of record or buffer quota then we should *not ignore* the record so processing will stop
     if ( err == JET_errBufferTooSmall )
     {
         err = JET_errSuccess;
@@ -4318,27 +4641,35 @@ LOCAL ERR ErrRECIStreamRecordsOnSecondaryIndexIGetKeyColumns(
         memcpy( pfield, ptdb->Pfield( columnid ), sizeof( FIELD ) );
         fCanDenormalize = fTrue;
 
+        //  record any reason why we cannot denormalize this key column
+        //
+        //  NOTE:  these rules are analogous to those in ErrRECIRetrieveFromIndex
 
         if ( FRECTextColumn( pfield->coltyp ) && usUniCodePage == pfield->cp )
         {
             fSawUnicodeTextColumn = fTrue;
         }
 
+        //  any previous key column contains unicode text (embedded nulls derail denormalization)
         if ( fSawUnicodeTextColumn )
         {
             fCanDenormalize = fFalse;
         }
 
+        //  this is a tuple index and this is the tuplized key column (partial data)
         if ( pidb->FTuples() && !iidxseg )
         {
             fCanDenormalize = fFalse;
         }
 
+        //  this is a text key column (data loss on normalization)
         if ( FRECTextColumn( pfield->coltyp ) )
         {
             fCanDenormalize = fFalse;
         }
 
+        //  this is a variable/tagged binary column truncated by VarSegMac and not by the max key length (data loss on
+        //  normalization)
         if (    !FCOLUMNIDFixed( columnid )
                 && FRECBinaryColumn( pfield->coltyp )
                 && pidb->CbVarSegMac() < cbKeyMost
@@ -4348,6 +4679,7 @@ LOCAL ERR ErrRECIStreamRecordsOnSecondaryIndexIGetKeyColumns(
             fCanDenormalize = fFalse;
         }
 
+        //  this is a multi-valued column (cannot compute the itagSequence w/o the record)
         if ( FCOLUMNIDTagged( columnid ) && FFIELDMultivalued( pfield->ffield ) )
         {
             fCanDenormalize = fFalse;
@@ -4418,9 +4750,11 @@ LOCAL ERR ErrIsamStreamRecordsOnSecondaryIndex(
     ULONG                                   ccolumnidContext            = 0;
     JET_COLUMNID*                           rgcolumnidContext           = NULL;
 
+    //  this should be called on a secondary index
 
     Assert( pfucb->pfucbCurIndex != pfucbNil );
 
+    //  get all columns that could be available from the secondary index key or the primary bookmark
 
     Call( ErrRECIStreamRecordsOnSecondaryIndexIGetKeyColumns(   pfucb,
                                                                 pfucb->pfucbCurIndex,
@@ -4448,6 +4782,9 @@ LOCAL ERR ErrIsamStreamRecordsOnSecondaryIndex(
                                                                 &cbKeyTruncatedPrimary ) );
     Alloc( rgbDenormPrimary = new BYTE[cbKeyMostPrimary] );
 
+    //  preprocess column access.  if no columns were requested then we will default to the set of key columns that are
+    //  in the secondary index and the primary index.  we don't have to access check those because they must exist by
+    //  definition
 
     if ( rgcolumnid )
     {
@@ -4520,6 +4857,7 @@ LOCAL ERR ErrIsamStreamRecordsOnSecondaryIndex(
         }
     }
 
+    //  add the buffer format header
 
     headerV1.rbfi           = rbfiV1;
     headerV1.cbHeader       = sizeof( headerV1 );
@@ -4536,6 +4874,7 @@ LOCAL ERR ErrIsamStreamRecordsOnSecondaryIndex(
     memcpy( pvData, &headerV1, sizeof( headerV1 ) );
     cbActual += sizeof( headerV1 );
 
+    //  move by one in the opposite direction so that we include the current record in our output
 
     err = ErrIsamMove( ppib, pfucb, ( grbit & JET_bitStreamForward ) ? JET_MovePrevious : JET_MoveNext, NO_GRBIT );
     if ( err == JET_errNoCurrentRecord )
@@ -4544,6 +4883,7 @@ LOCAL ERR ErrIsamStreamRecordsOnSecondaryIndex(
     }
     Call( err );
 
+    //  setup and install our move filter context
 
     context.pvData                      = pvData;
     context.cbData                      = cbData;
@@ -4583,6 +4923,8 @@ LOCAL ERR ErrIsamStreamRecordsOnSecondaryIndex(
 
     RECAddMoveFilter( pfucb->pfucbCurIndex, (PFN_MOVE_FILTER)ErrRECIStreamRecordsOnSecondaryIndexIFilter, (MOVE_FILTER_CONTEXT *)&context );
 
+    //  move by one.  this will cause us to build up the output via our move filter.  this will result in the cursor
+    //  being placed on the next row to process not the last row we processed
 
     err = ErrIsamMove( ppib, pfucb, ( grbit & JET_bitStreamForward ) ? JET_MoveNext : JET_MovePrevious, NO_GRBIT );
     if ( err == JET_errNoCurrentRecord )
@@ -4630,6 +4972,7 @@ ERR VTAPI ErrIsamStreamRecords(
 
     BOOL        fTransactionStarted = fFalse;
 
+    //  validate parameters
 
     if ( ppib == ppibNil || pfucb == pfucbNil )
     {
@@ -4656,6 +4999,7 @@ ERR VTAPI ErrIsamStreamRecords(
         Error( ErrERRCheck( JET_errInvalidParameter ) );
     }
 
+    //  only these grbits are supported at this time
 
     if ( grbit & ~( JET_bitStreamColumnReferences |
                     JET_bitStreamForward |
@@ -4664,13 +5008,16 @@ ERR VTAPI ErrIsamStreamRecords(
         Error( ErrERRCheck( JET_errInvalidGrbit ) );
     }
 
+    //  validate grbits
 
+    //  the direction must be specified
 
     if ( !!( grbit & JET_bitStreamForward ) == !!( grbit & JET_bitStreamBackward ) )
     {
         Error( ErrERRCheck( JET_errInvalidGrbit ) );
     }
 
+    //  check our session and table
 
     CallR( ErrPIBCheck( ppib ) );
     CheckFUCB( ppib, pfucb );
@@ -4680,10 +5027,11 @@ ERR VTAPI ErrIsamStreamRecords(
 
     if ( FFMPIsTempDB( pfucb->ifmp ) )
     {
-        Expected( fFalse );
+        Expected( fFalse ); // API never run on temp DB.
         Error( ErrERRCheck( JET_errInvalidParameter ) );
     }
 
+    //  begin transaction for read consistency
 
     if ( 0 == ppib->Level() )
     {
@@ -4691,6 +5039,7 @@ ERR VTAPI ErrIsamStreamRecords(
         fTransactionStarted = fTrue;
     }
 
+    //  dispatch to the correct implementation
 
     if ( pfucb->pfucbCurIndex != pfucbNil )
     {
@@ -4722,6 +5071,7 @@ ERR VTAPI ErrIsamRetrieveColumnFromRecordStream(
     ERR                             err         = JET_errSuccess;
     RECORD_BUFFER_HEADER_V1* const  pheaderV1   = (RECORD_BUFFER_HEADER_V1*)pvData;
 
+    //  validate parameters
 
     if ( !pvData )
     {
@@ -4752,6 +5102,7 @@ ERR VTAPI ErrIsamRetrieveColumnFromRecordStream(
         Error( ErrERRCheck( JET_errInvalidParameter ) );
     }
 
+    //  validate buffer header
 
     if ( pheaderV1->rbfi != rbfiV1 )
     {
@@ -4774,6 +5125,7 @@ ERR VTAPI ErrIsamRetrieveColumnFromRecordStream(
         Error( ErrERRCheck( JET_errInvalidParameter ) );
     }
 
+    //  if we are already at the end of the buffer then we are done
 
     if ( pheaderV1->ibRead == cbData )
     {
@@ -4781,6 +5133,7 @@ ERR VTAPI ErrIsamRetrieveColumnFromRecordStream(
         goto HandleError;
     }
 
+    //  validate the next column value to read
 
     if ( cbData - pheaderV1->ibRead < sizeof( RECORD_BUFFER_COLUMN_VALUE ) )
     {
@@ -4796,6 +5149,7 @@ ERR VTAPI ErrIsamRetrieveColumnFromRecordStream(
         Error( ErrERRCheck( JET_errInvalidParameter ) );
     }
 
+    //  read the next column value from the buffer
 
     bool fNewRecord = ( pcolumnValue->iRecordMod2 != 0 ) ^ ( ( pheaderV1->iRecord & 1 ) != 0 );
     pheaderV1->iRecord += fNewRecord ? 1 : 0;
@@ -4803,6 +5157,7 @@ ERR VTAPI ErrIsamRetrieveColumnFromRecordStream(
     pheaderV1->columnid = pcolumnValue->columnid;
     pheaderV1->ibRead += (ULONG)( sizeof( RECORD_BUFFER_COLUMN_VALUE ) + pcolumnValue->cbValue );
 
+    //  return the column value we read
 
     *piRecord = pheaderV1->iRecord;
     *pcolumnid = pheaderV1->columnid;

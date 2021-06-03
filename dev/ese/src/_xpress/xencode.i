@@ -3,11 +3,11 @@
 
 #ifndef ALIGN
 #if DEBUG
-#define ALIGN(n)
+#define ALIGN(n)        // a lot of bugs in early versions of VC caused by align
 #else
 #define ALIGN(n) align n
-#endif 
-#endif 
+#endif /* DEBUG */
+#endif /* ALIGN */
 
 #if CHAIN >= 2 && !defined (i386)
 
@@ -33,7 +33,7 @@ INLINE int find_match (prs *p)
       {
         if (--chain < 0)
           return (v.match.len >= MIN_MATCH);
-#endif 
+#endif /* CHAIN >= 3 */
         k = p->x.z_next[m]; if (*(__unaligned uint16 *) (p1 + m) == c) goto same_m;
         m = p->x.z_next[k]; if (*(__unaligned uint16 *) (p1 + k) == c) goto same_k;
         k = p->x.z_next[m]; if (*(__unaligned uint16 *) (p1 + m) == c) goto same_m;
@@ -49,9 +49,9 @@ INLINE int find_match (prs *p)
 #else
       }
       while (1);
-#endif 
+#endif /* CHAIN < 3 */
 
-#else 
+#else /* !i386compat */
 
     {
 #if CHAIN < 3
@@ -67,7 +67,7 @@ INLINE int find_match (prs *p)
       {
         if (--chain < 0)
           return (v.match.len >= MIN_MATCH);
-#endif 
+#endif /* CHAIN >= 3 */
         k = p->x.z_next[m]; if (p0[m] == c0 && p1[m] == c1) goto same_m;
         m = p->x.z_next[k]; if (p0[k] == c0 && p1[k] == c1) goto same_k;
         k = p->x.z_next[m]; if (p0[m] == c0 && p1[m] == c1) goto same_m;
@@ -83,9 +83,9 @@ INLINE int find_match (prs *p)
 #else
       }
       while (1);
-#endif 
+#endif /* CHAIN < 3 */
 
-#endif 
+#endif /* i386compat */
 
     same_m:
       k = m;
@@ -99,7 +99,7 @@ INLINE int find_match (prs *p)
         return (0);
 #else
         return (v.match.len >= MIN_MATCH);
-#endif 
+#endif /* CHAIN < 3 */
     }
     {
       const uchar *p2;
@@ -117,43 +117,44 @@ INLINE int find_match (prs *p)
         if ((m & 0xffffff) == 0)
 #else
         if ((m & 0xffffff) == 0 && v.match.len <= 3)
-#endif 
+#endif /* CHAIN < 3 */
         {
           v.match.len = 3;
           v.match.pos = k;
 #if CHAIN < 3
           return (1);
-#endif 
+#endif /* CHAIN < 3 */
         }
-#endif 
+#endif /* MIN_MATCH <= 3 */
 
         goto cont;
       }
-#else 
+#else /* !i386compat */
       if (p1[0] != p2[0] || p1[1] != p2[1]
 #if CHAIN >= 3
         || p1[2] != p2[2]
-#endif 
+#endif /* CHAIN >= 3 */
       )
         goto cont;
       if (p1[3] != p2[3])
       {
 #if MIN_MATCH <= 3
         assert (p1 + 3 <= v.orig.end);
+        // if (v.match.len <= 2 && p1 + 3 <= v.orig.end)
 #if CHAIN >= 3
     if (v.match.len <= 2)
-#endif 
+#endif /* CHAIN >= 3 */
         {
           v.match.len = 3;
           v.match.pos = k;
 #if CHAIN < 3
           return (1);
-#endif 
+#endif /* CHAIN < 3 */
         }
-#endif 
+#endif /* MIN_MATCH <= 3 */
         goto cont;
       }
-#endif 
+#endif /* i386compat */
 
       if (p1 <= v.orig.end_16)
       {
@@ -190,7 +191,7 @@ INLINE int find_match (prs *p)
       return (1);
 #else
       return (v.match.len >= MIN_MATCH);
-#endif 
+#endif /* CHAIN < 3 */
     }
   chk:
     SET_LENGTH ();
@@ -201,7 +202,7 @@ INLINE int find_match (prs *p)
 #else
   cont:
     n = v.orig.pos;
-#endif 
+#endif /* CHAIN < 3 */
   }
 }
 
@@ -211,14 +212,14 @@ static void encode_pass1 (prs *p)
   uchar *ptr = v.temp.ptr;
 #if CHAIN < 3
   v.match.len = MIN_MATCH-1;
-#endif 
+#endif /* CHAIN < 3 */
   do
   {
     if (p->x.z_next[v.orig.pos] == 0)
       goto literal;
 #if CHAIN >= 3
     v.match.len = MIN_MATCH-1;
-#endif 
+#endif /* CHAIN >= 3 */
 #if 0
 {
   if (ptr - v.temp.beg == 0x746b)
@@ -255,14 +256,14 @@ static void encode_pass1 (prs *p)
       v.orig.pos += v.match.len;
 #if CHAIN < 3
       v.match.len = MIN_MATCH-1;
-#endif 
+#endif /* CHAIN < 3 */
     }
   }
   while (v.orig.pos < v.orig.stop);
   v.temp.ptr = ptr;
 }
 
-#endif 
+#endif /* CHAIN >= 2 */
 
 
 #if CHAIN < 2 || defined (i386)
@@ -412,7 +413,7 @@ ret:
   v.temp.ptr = ptr;
 }
 
-#else 
+#else /* CODING != CODING_DIRECT2 && CODING != CODING_HUFF_ALL */
 
 #ifndef BITMASK_TABLE_PRESENT
 #define BITMASK_TABLE_PRESENT
@@ -423,7 +424,7 @@ static const int32 bit_mask_table[] = {
   0x1000, 0x2000, 0x4000, 0x8000,
   0x10000
 };
-#endif 
+#endif /* BITMASK_TABLE_PRESENT */
 
 
 static void encode_pass1 (prs *PrsPtr)
@@ -434,14 +435,16 @@ static void encode_pass1 (prs *PrsPtr)
 #define TAG     ebp
 #define TAGW    bp
 
+// access to prs structure fields
 #define V               [PRS - SIZE prs] prs.c
 
 #if CODING == CODING_HUFF_ALL
 #define INC_MASKS_ASM   __asm   inc dword ptr V.stat.masks
 #else
 #define INC_MASKS_ASM
-#endif 
+#endif /* CODING == CODING_HUFF_ALL */
 
+// TAG = tag_mask; adjusts TAG (tag_mask), V.temp.tag_ptr, and OUT (output pointer)
 #define WRITE_TAG_MASK()                        \
         __asm   mov     ecx, V.temp.tag_ptr     \
         __asm   mov     V.temp.tag_ptr, OUT     \
@@ -452,8 +455,10 @@ static void encode_pass1 (prs *PrsPtr)
 
 #if CHAIN <= 0
 
+// access to respective hash table entry
 #define Q_HTABLE(idx)   dword ptr [PRS + idx*4] prs.x.q_last
 
+// evaluate hash sum of [esi] on eax; spoils eax, ecx, TAG
 #define Q_HASH_SUM_ASM()                                                    \
         __asm   movzx   ecx, byte ptr [esi]                                 \
         __asm   movzx   edi, byte ptr [esi+1]                               \
@@ -463,14 +468,17 @@ static void encode_pass1 (prs *PrsPtr)
 
 #else
 
+// access to respective hash table entry
+// access to respective single-linked list entry
 #define Z_NEXT(idx) word ptr [PRS + idx*2] prs.x.z_next
 
 #if CHAIN >= 2
 #define Z_HTABLE(idx)   word ptr [PRS + idx*2 - SIZE prs] prs.x.z_hash
 #else
 #define Z_HTABLE(idx)   word ptr [PRS + idx*2] prs.x.z_next
-#endif 
+#endif /* CHAIN >= 2  */
 
+// evaluate hash sum of [esi] on eax; spoils eax, ecx, edi
 #define Z_HASH_SUM_ASM()                                                    \
         __asm   movzx   eax, byte ptr [esi]                                 \
         __asm   movzx   ecx, byte ptr [esi+1]                               \
@@ -481,63 +489,67 @@ static void encode_pass1 (prs *PrsPtr)
         __asm   xor     eax, ecx                                            \
         __asm   xor     eax, edi
 
-#endif 
+#endif /* CHAIN <= 0 */
 
 __asm
 {
-        push    TAG
+        push    TAG                     // save TAG
 
-        mov     PRS, PrsPtr
+        mov     PRS, PrsPtr             // PRS = PrsPtr (globally)
 
+        // esi = b
+        // edi = b1
+        // OUT = V.prs.temp.ptr
+        // TAG = V.temp.tag_mask
 
-        mov     esi, V.orig.ptr
+        mov     esi, V.orig.ptr         // obtain b, b1, temp.ptr, and temp.mask
         mov     eax, V.orig.stop
         add     eax, esi
-        mov     V.orig.ptr_stop, eax
+        mov     V.orig.ptr_stop, eax    // and set orig.ptr_stop by orig.stop
         add     esi, V.orig.pos
         mov     OUT, V.temp.ptr
         mov     TAG, V.temp.tag_mask
 
-        cmp     esi, V.orig.ptr
-        jne     write_literal_entry
+        cmp     esi, V.orig.ptr         // if beginning of buffer
+        jne     write_literal_entry     // then write literal immediately
 
 #if CHAIN >= 2
     jmp write_literal
-#endif 
+#endif /* CHAIN >= 2 */
 
         ALIGN (16)
 #if CHAIN >= 2
 write_literal_0:
     add esi, ecx
-#endif 
+#endif /* CHAIN >= 2 */
 
 write_literal:
 
 #if CODING == CODING_HUFF_ALL
-    movzx   eax, [esi]
+    movzx   eax, [esi]      // read the literal
 
 #if CHAIN == 2
 write_literal_1:
-#endif 
+#endif /* CHAIN == 2 */
 
-        inc     OUT
-        inc     esi
+        inc     OUT                     // shift dst ptr in advance
+        inc     esi                     // shift src ptr to next character
         inc dword ptr V.stat.freq[eax*4]
-        mov     [OUT-1], al
+        mov     [OUT-1], al             // emit literal
 #else
-        mov     al, [esi]
+        mov     al, [esi]               // read the literal
 
 #if CHAIN == 2
 write_literal_1:
-#endif 
+#endif /* CHAIN == 2 */
 
-        inc     OUT
-        inc     esi
-        mov     [OUT-1], al
-#endif 
+        inc     OUT                     // shift dst ptr in advance
+        inc     esi                     // shift src ptr to next character
+        mov     [OUT-1], al             // emit literal
+#endif /* CODING == CODING_HUFF_ALL */
 
-        add     TAG, TAG
-        jc      write_literal_tag_new
+        add     TAG, TAG                // write tag bit 0
+        jc      write_literal_tag_new   // save tag word if it is full
 write_literal_tag_done:
 
 
@@ -552,30 +564,30 @@ L1:
     add OUT, V.temp.beg
 #endif
 
-        cmp     esi, V.orig.ptr_stop
-        jae     pass1_stop
+        cmp     esi, V.orig.ptr_stop    // processed everything?
+        jae     pass1_stop              // yes, stop
 
 
 #if CHAIN <= 0
-        Q_HASH_SUM_ASM ()
+        Q_HASH_SUM_ASM ()               // evaluate hash sum
 #if MAX_OFFSET < BUFF_SIZE_LOG
-        lea     ecx, [esi - (1 << MAX_OFFSET) + 1]
+        lea     ecx, [esi - (1 << MAX_OFFSET) + 1] // min. allowed left bound
 #endif
-        mov     edi, Q_HTABLE (eax)
-        mov     Q_HTABLE (eax), esi
+        mov     edi, Q_HTABLE (eax)     // edi = candidate ptr
+        mov     Q_HTABLE (eax), esi     // save current ptr
 check_candidate:
 #else
 
 #if CHAIN >= 2
         mov     ecx,V.orig.ptr
-        sub     esi, ecx
-        movzx   edi, Z_NEXT (esi)
+        sub     esi, ecx                // esi = offset to current ptr
+        movzx   edi, Z_NEXT (esi)     // edi = offset to candidate ptr
 #else
-        Z_HASH_SUM_ASM ()
+        Z_HASH_SUM_ASM ()               // evaluate hash sum
         mov     ecx,V.orig.ptr
-        movzx   edi, Z_HTABLE (eax)
-        sub     esi, ecx
-#endif 
+        movzx   edi, Z_HTABLE (eax)     // edi = offset to candidate ptr
+        sub     esi, ecx                // esi = offset to current ptr
+#endif /* CHAIN >= 2 */
 
 #if CHAIN >= 2
     test    edi, edi
@@ -584,48 +596,48 @@ check_candidate:
     mov ax, [ecx + esi + 1]
 
 #if CHAIN >= 3
-    mov Z_NEXT (0), si
+    mov Z_NEXT (0), si      // cycle list in advance
     mov V.match.len, MIN_MATCH-1
-#endif 
+#endif /* CHAIN >= 3 */
 
-    cmp ax, [ecx + edi + 1]
+    cmp ax, [ecx + edi + 1] // 1
     je  CheckMatch_0
 
 #if CHAIN < 3
-    mov Z_NEXT (0), si
-#endif 
+    mov Z_NEXT (0), si      // don't have to do it in advance
+#endif /* CHAIN < 3 */
 
-    movzx   edi, Z_NEXT (edi)
+    movzx   edi, Z_NEXT (edi)   // 2
     cmp ax, [ecx + edi + 1]
     je  CheckMatch
 
-    movzx   edi, Z_NEXT (edi)
+    movzx   edi, Z_NEXT (edi)   // 3
     cmp ax, [ecx + edi + 1]
     je  CheckMatch
 
-    movzx   edi, Z_NEXT (edi)
+    movzx   edi, Z_NEXT (edi)   // 4
     cmp ax, [ecx + edi + 1]
     je  CheckMatch
 
-    movzx   edi, Z_NEXT (edi)
+    movzx   edi, Z_NEXT (edi)   // 5
     cmp ax, [ecx + edi + 1]
     je  CheckMatch
 
-    movzx   edi, Z_NEXT (edi)
+    movzx   edi, Z_NEXT (edi)   // 6
     cmp ax, [ecx + edi + 1]
     je  CheckMatch
 
-    movzx   edi, Z_NEXT (edi)
+    movzx   edi, Z_NEXT (edi)   // 7
     cmp ax, [ecx + edi + 1]
     je  CheckMatch
 
 #if CHAIN == 2
-    movzx   edi, Z_NEXT (edi)
+    movzx   edi, Z_NEXT (edi)   // 8
     cmp ax, [ecx + edi + 1]
     je  CheckMatch
-#endif 
+#endif /* CHAIN == 2 */
 
-    movzx   edi, Z_NEXT (edi)
+    movzx   edi, Z_NEXT (edi)   // 9
     cmp ax, [ecx + edi + 1]
 
 #if CHAIN == 2
@@ -633,14 +645,14 @@ check_candidate:
 #else
     je  CheckMatch
 
-        add esi, ecx
+        add esi, ecx        // esi = current ptr
 continue_search_0:
     mov eax, V.chain
-        add     edi, ecx
+        add     edi, ecx                // edi = candidate ptr
         dec eax
         mov V.temp.chain, eax
     jmp continue_search
-#endif 
+#endif /* CHAIN == 2 */
 
     ALIGN (16)
 CheckMatch:
@@ -650,63 +662,63 @@ CheckMatch:
 CheckMatch_0:
 
 #if CHAIN == 2 && CODING == CODING_HUFF_ALL
-    movzx   eax, [esi + ecx]
+    movzx   eax, [esi + ecx]    // read first character (literal)
 #else
-    mov al, [esi + ecx]
-#endif 
+    mov al, [esi + ecx]     // read first character (literal)
+#endif /* CHAIN == 2 && CODING_HUFF_ALL */
     add esi, ecx
     cmp al, [edi + ecx]
 
 #if CHAIN >= 3
     jne continue_search_0
     mov eax, V.chain
-        add     edi, ecx
+        add     edi, ecx                // edi = candidate ptr
         dec eax
         mov V.temp.chain, eax
 #else
     jne write_literal_1
-        add     edi, ecx
-#endif 
+        add     edi, ecx                // edi = candidate ptr
+#endif /* CHAIN >= 3 */
 
-#else 
+#else /* CHAIN < 2 */
 
-        add     edi, ecx
-        mov     Z_HTABLE (eax), si
-        add     esi, ecx
+        add     edi, ecx                // edi = candidate ptr
+        mov     Z_HTABLE (eax), si      // store current ptr offset
+        add     esi, ecx                // restore current ptr
 
-#endif 
+#endif /* CHAIN >= 2 */
 
 #if MAX_OFFSET < BUFF_SIZE_LOG
-        lea     ecx, [esi - (1 << MAX_OFFSET) + 1]
+        lea     ecx, [esi - (1 << MAX_OFFSET) + 1] // min. allowed left bound
 #endif
-#endif 
+#endif /* CHAIN <= 0 */
 
 #if MAX_OFFSET < BUFF_SIZE_LOG
         cmp     edi, ecx
-#if CHAIN <= 2
-        js      write_literal
+#if CHAIN <= 2                          // candidate is in window?
+        js      write_literal           // no, then emit literal
 #else
-        js      continue_search_1
-#endif 
-#endif 
+        js      continue_search_1       // no, then emit literal
+#endif /* CHAIN <= 2 */
+#endif /* MAX_OFFSET < BUFF_SIZE_LOG */
 
 #if CHAIN <= 0 && FILL_NULL
-        test    edi, edi
-        jz      write_literal
-#endif 
+        test    edi, edi                // is it NULL?
+        jz      write_literal           // emit literal if so
+#endif /* CHAIN <= 0 && FILL_NULL */
 
 #if CHAIN >= 2
     mov al, [esi + 3]
     cmp al, [edi + 3]
     je  length_4
 #else
-        mov     eax, [esi]
-        sub     eax, [edi]
-        je      length_4
+        mov     eax, [esi]              // get first 4 src bytes
+        sub     eax, [edi]              // diff them with first 4 candidate bytes
+        je      length_4                // if no diff then match is at least 4 bytes
 
-        test    eax, 0xffffff
-        jne     write_literal
-#endif 
+        test    eax, 0xffffff           // is there any difference in first 3 bytes?
+        jne     write_literal           // if yes emit literal
+#endif /* CHAIN >= 2 */
 
 #if CHAIN >= 3
     cmp V.match.len, 3
@@ -722,7 +734,7 @@ continue_search:
 
 #if MAX_OFFSET < BUFF_SIZE_LOG && CHAIN >= 3
 continue_search_1:
-#endif 
+#endif /* MAX_OFFSET < BUFF_SIZE_LOG && CHAIN >= 3 */
     mov ecx, V.match.len
     mov ax, [esi + ecx - 1]
     add ecx, V.orig.ptr
@@ -730,35 +742,35 @@ continue_search_1:
     dec ecx
 
 continue_search_loop:
-    movzx   edi, Z_NEXT (edi)
+    movzx   edi, Z_NEXT (edi)   // 1
     cmp ax, [ecx + edi]
     je  continue_CheckMatch
 
-    movzx   edi, Z_NEXT (edi)
+    movzx   edi, Z_NEXT (edi)   // 2
     cmp ax, [ecx + edi]
     je  continue_CheckMatch
 
-    movzx   edi, Z_NEXT (edi)
+    movzx   edi, Z_NEXT (edi)   // 3
     cmp ax, [ecx + edi]
     je  continue_CheckMatch
 
-    movzx   edi, Z_NEXT (edi)
+    movzx   edi, Z_NEXT (edi)   // 4
     cmp ax, [ecx + edi]
     je  continue_CheckMatch
 
-    movzx   edi, Z_NEXT (edi)
+    movzx   edi, Z_NEXT (edi)   // 5
     cmp ax, [ecx + edi]
     je  continue_CheckMatch
 
-    movzx   edi, Z_NEXT (edi)
+    movzx   edi, Z_NEXT (edi)   // 6
     cmp ax, [ecx + edi]
     je  continue_CheckMatch
 
-    movzx   edi, Z_NEXT (edi)
+    movzx   edi, Z_NEXT (edi)   // 7
     cmp ax, [ecx + edi]
     je  continue_CheckMatch
 
-    movzx   edi, Z_NEXT (edi)
+    movzx   edi, Z_NEXT (edi)   // 8
     cmp ax, [ecx + edi]
     je  continue_CheckMatch
 
@@ -778,10 +790,10 @@ continue_CheckMatch:
     jz  write_pointer
 
 #if MAX_OFFSET < BUFF_SIZE_LOG
-        lea     eax, [esi - (1 << MAX_OFFSET) + 1]
-        cmp     edi, eax
-        js      write_pointer
-#endif 
+        lea     eax, [esi - (1 << MAX_OFFSET) + 1] // min. allowed left bound
+        cmp     edi, eax                // candidate is in window?
+        js      write_pointer           // no, then emit literal
+#endif /* MAX_OFFSET < BUFF_SIZE_LOG */
 
     mov eax, [esi]
     sub eax, [edi]
@@ -800,53 +812,53 @@ continue_CheckMatch:
 
     ALIGN (16)
 
-#else 
+#else /* CHAIN >= 3 */
 
-        mov     ecx, 3
-        sub     edi, esi
+        mov     ecx, 3                  // save match ptr of length ECX
+        sub     edi, esi                // edi = -offset
 
-#endif 
+#endif /* CHAIN >= 3 */
 
 write_small_ptr:
 #if CODING == CODING_HUFF_ALL
-    neg edi
-    bsr eax, edi
-    add V.stat.pointers, 3
-    sub edi, bit_mask_table[eax*4]
-    add V.stat.extra, eax
-    shl eax, MAX_LENGTH_LOG
-    add OUT, 3
-    lea eax, [eax + ecx - MIN_MATCH]
-    inc dword ptr V.stat.freq[eax*4+256*4]
-    mov [OUT-3], al
+    neg edi         // edi = offset
+    bsr eax, edi        // eax = most significant bit number of offset
+    add V.stat.pointers, 3  // have 3 more pointer bytes
+    sub edi, bit_mask_table[eax*4]      // edi = remaining offset bits
+    add V.stat.extra, eax   // have "eax" more extra bits to encode
+    shl eax, MAX_LENGTH_LOG // prepare output byte mask
+    add OUT, 3          // adjust output pointer
+    lea eax, [eax + ecx - MIN_MATCH]    // eax = (log_offset : length) packed
+    inc dword ptr V.stat.freq[eax*4+256*4]  // increment respective frequency count
+    mov [OUT-3], al     // write packed (log_offset : length)
 
 write_offset:
-    cmp eax, (9 << MAX_LENGTH_LOG)
-    sbb eax, eax
-    mov [OUT-2], di
-    add OUT, eax
-    add V.stat.pointers, eax
+    cmp eax, (9 << MAX_LENGTH_LOG) // offset is less than 9 bits?
+    sbb eax, eax        // eax = -1 if offset is less than 9 bits, 0 otherwise
+    mov [OUT-2], di     // write offset
+    add OUT, eax        // shift output pointer back if offset is less than 9 bits
+    add V.stat.pointers, eax    // have one less pointer bytes
     stc
-    lea eax, [esi+ecx]
+    lea eax, [esi+ecx]      // eax = end of src match
 #else
-        lea     eax, [esi+ecx]
-        not     edi
-        add     OUT, 2
-        shl     edi, DIRECT2_LEN_LOG
-        inc     esi
-        lea     edi, [edi + ecx - MIN_MATCH]
-        stc
-        mov     [OUT-2], di
+        lea     eax, [esi+ecx]          // eax = end of src match
+        not     edi                     // edi = offset-1
+        add     OUT, 2                  // adjust output ptr in advance
+        shl     edi, DIRECT2_LEN_LOG    // make room for length
+        inc     esi                     // esi = next substring (current already inserted)
+        lea     edi, [edi + ecx - MIN_MATCH]    // combine offset and shoft length
+        stc                             // set carry bit
+        mov     [OUT-2], di             // save packed pointer
 #endif
 
-        adc     TAG, TAG
-        jc      write_pointer_tag_new
+        adc     TAG, TAG                // write tag bit 1
+        jc      write_pointer_tag_new   // write tag word when it is full
 write_pointer_tag_done:
 
 #if CHAIN < 2
-        cmp     eax, V.orig.end_3
-        ja      insert_tail
-#endif 
+        cmp     eax, V.orig.end_3       // is it too close to end of buffer?
+        ja      insert_tail             // if yes process is specially avoiding read overrun
+#endif /* CHAIN < 2 */
 
 #if CHAIN >= 2
 
@@ -857,7 +869,7 @@ write_pointer_tag_done:
 
 #if 1
         push    TAG
-        lea     TAG, [eax-3]
+        lea     TAG, [eax-3]            // eax = end-of-match
 
         movzx   eax, byte ptr [esi]
         movzx   ecx, byte ptr [esi+1]
@@ -879,20 +891,20 @@ write_pointer_tag_done:
 
         pop     TAG
 
-        cmp     esi, V.orig.ptr_stop
-        jae     pass1_stop
+        cmp     esi, V.orig.ptr_stop    // processed everything?
+        jae     pass1_stop              // yes, stop
 
         movzx   ecx, byte ptr [esi+2]
         lea eax, [eax + edi * (1 << (Q_HASH_SH1 - Q_HASH_SH2))]
         lea eax, [ecx + eax * (1 << Q_HASH_SH2)]
 
 #if MAX_OFFSET < BUFF_SIZE_LOG
-        lea     ecx, [esi - (1 << MAX_OFFSET) + 1]
+        lea     ecx, [esi - (1 << MAX_OFFSET) + 1] // min. allowed left bound
 #endif
-        mov     edi, Q_HTABLE (eax)
-        mov     Q_HTABLE (eax), esi
+        mov     edi, Q_HTABLE (eax)     // edi = candidate ptr
+        mov     Q_HTABLE (eax), esi     // save current ptr
 
-        jmp     check_candidate
+        jmp     check_candidate         // process next substring
 
 insert_all_rest:
     lea eax, [ecx + eax * (1 << (Q_HASH_SH1 - Q_HASH_SH2))]
@@ -910,7 +922,7 @@ insert_all_rest:
 
 inserted_all:
         pop     TAG
-        jmp     write_literal_entry
+        jmp     write_literal_entry     // process next substring
 
 
     ALIGN (16)
@@ -944,58 +956,58 @@ insert_all_3:
     jne insert_all_rest
 
         pop     TAG
-        jmp     write_literal_entry
+        jmp     write_literal_entry     // process next substring
 
     ALIGN (16)
 #else
 
         push    OUT
-        mov     OUT, eax
+        mov     OUT, eax                // eax = end-of-match
 insert_all:
-        Q_HASH_SUM_ASM ()
-        mov     Q_HTABLE (eax), esi
-        inc     esi
-        cmp     esi, OUT
-        jne     insert_all
+        Q_HASH_SUM_ASM ()               // evaluate hash sum
+        mov     Q_HTABLE (eax), esi     // save current ptr
+        inc     esi                     // shift to next position
+        cmp     esi, OUT                // inserted all substrings in the match?
+        jne     insert_all              // continue until finished
         pop     OUT
-        jmp     write_literal_entry
+        jmp     write_literal_entry     // process next substring
 
     ALIGN (16)
 #endif
 
-#else 
+#else /* CHAIN == 1 */
 
         push    OUT
         push    TAG
-        mov     OUT, esi
-        mov TAG, eax
-        sub     OUT, V.orig.ptr
+        mov     OUT, esi                // OUT = current ptr
+        mov TAG, eax                 // save end-of-match
+        sub     OUT, V.orig.ptr         // OUT = current ptr offset
 insert_all:
-        Z_HASH_SUM_ASM ()
-        inc     esi
-        mov     Z_HTABLE (eax), bx
-        inc     OUT
-        cmp     esi, TAG
-        jne     insert_all
+        Z_HASH_SUM_ASM ()               // evaluate hash sum
+        inc     esi                     // shift to next position
+        mov     Z_HTABLE (eax), bx      // save current offset
+        inc     OUT                     // increase offset
+        cmp     esi, TAG                // inserted all substrings in the match?
+        jne     insert_all              // continue until finished
         pop     TAG
         pop     OUT
-        jmp     write_literal_entry
+        jmp     write_literal_entry     // process next substring
 
     ALIGN (16)
-#endif 
+#endif /* CHAIN */
 
 length_4:
-#define KNOWN_LENGTH    4
+#define KNOWN_LENGTH    4               // we know that first 4 bytes match
 
 #if (CODING == CODING_DIRECT2 && DIRECT2_MAX_LEN + MIN_MATCH >= 8) || (CODING == CODING_HUFF_ALL && 4 - MIN_MATCH < MAX_LENGTH - 1)
-        mov     eax, [esi+4]
-        sub     eax, [edi+4]
-        jz      length_8
+        mov     eax, [esi+4]            // fetch next 4 bytes
+        sub     eax, [edi+4]            // get the diff between src and candidate
+        jz      length_8                // do long compare if 8+ bytes match
 
-        bsf     ecx, eax
+        bsf     ecx, eax                // ecx = # of first non-zero bit
 
 #if CHAIN >= 3
-        shr     ecx, 3
+        shr     ecx, 3                  // ecx = # of first non-zero byte
 
     add ecx, 4
     cmp ecx, V.match.len
@@ -1005,59 +1017,59 @@ length_4:
     mov V.match.pos, edi
     jmp continue_search
 
-#else 
+#else /* CHAIN >= 3 */
 
-        sub     edi, esi
-        shr     ecx, 3
+        sub     edi, esi                // edi = -offset
+        shr     ecx, 3                  // ecx = # of first non-zero byte
 
 #if CODING == CODING_HUFF_ALL
     add ecx, 4
     jmp write_small_ptr
 #else
-        not     edi
-        add     ecx, 4
-        add     OUT, 2
-        lea     eax, [esi+ecx]
-        shl     edi, DIRECT2_LEN_LOG
-        inc     esi
-        lea     edi,[edi+ecx-MIN_MATCH]
-        stc
-        mov     [OUT-2], di
+        not     edi                     // edi = offset-1
+        add     ecx, 4                  // plus previous 4 matching bytes = match length
+        add     OUT, 2                  // adjust output ptr in advance
+        lea     eax, [esi+ecx]          // eax = end of src match
+        shl     edi, DIRECT2_LEN_LOG    // make room for length
+        inc     esi                     // esi = next substring (current already inserted)
+        lea     edi,[edi+ecx-MIN_MATCH] // combine offset and shoft length
+        stc                             // set carry bit
+        mov     [OUT-2], di             // save packed pointer
 
-        adc     TAG, TAG
-        jnc     write_pointer_tag_done
+        adc     TAG, TAG                // write tag bit 1
+        jnc     write_pointer_tag_done  // write tag word when it is full
 
         WRITE_TAG_MASK ()
         jmp     write_pointer_tag_done
-#endif 
-#endif 
+#endif /* CODING == CODING_HUFF_ALL */
+#endif /* CHAIN >= 3 */
 
 length_8:
 #undef  KNOWN_LENGTH
-#define KNOWN_LENGTH    8
-#endif 
+#define KNOWN_LENGTH    8               // we know that first 8 bytes match
+#endif /* DIRECT2_MAX_LEN + MIN_MATCH >= 8 */
 
-        mov     eax, esi
-        mov     ecx, V.orig.end
-        add     esi, KNOWN_LENGTH
-        add     edi, KNOWN_LENGTH
-        sub     ecx, esi
+        mov     eax, esi                // eax = beginning of the string
+        mov     ecx, V.orig.end         // ecx = end of buffer
+        add     esi, KNOWN_LENGTH       // shift to first untested src byte
+        add     edi, KNOWN_LENGTH       // shift to first untested candidate
+        sub     ecx, esi                // ecx = max compare length
 
-        rep     cmpsb
-        je      match_complete
+        rep     cmpsb                   // compare src and candidate
+        je      match_complete          // if eq then match till end of buffer
 match_complete_done:
 
-        lea     ecx, [esi-1]
+        lea     ecx, [esi-1]            // ecx = end of match
 
 #if CHAIN >= 3
 
-    cmp esi, V.orig.end
+    cmp esi, V.orig.end     // if no data left in buffer, stop search
     ja  stop_search
 
-    mov esi, eax
-    dec edi
-    sub ecx, eax
-    sub edi, ecx
+    mov esi, eax        // esi = src ptr
+    dec edi         // adjust for rep cmpsb behaviour
+    sub ecx, eax        // ecx = match length
+    sub edi, ecx        // edi = candidate
     cmp ecx, V.match.len
     jbe continue_search
 
@@ -1066,16 +1078,16 @@ match_complete_done:
     jmp continue_search
 
 stop_search:
-    mov esi, eax
-    dec edi
-    sub ecx, eax
-    sub edi, ecx
+    mov esi, eax        // esi = src ptr
+    dec edi         // adjust for rep cmpsb behaviour
+    sub ecx, eax        // ecx = match length
+    sub edi, ecx        // edi = candidate
 #if DEBUG
-    cmp ecx, V.match.len
+    cmp ecx, V.match.len    // it should be longest match
     ja  last_length_ok
     int 3
 last_length_ok:
-#endif 
+#endif /* DEBUG */
 
     mov V.match.len, ecx
     mov V.match.pos, edi
@@ -1089,129 +1101,129 @@ write_pointer:
 
     mov edi, V.match.pos
     mov ecx, V.match.len
-    sub edi, esi
+    sub edi, esi        // edi = -offset
 
-#else 
+#else /* CHAIN >= 3 */
 
-        sub     edi, esi
-        sub     ecx, eax
-        mov     esi, eax
+        sub     edi, esi                // edi = -offset
+        sub     ecx, eax                // ecx = match length
+        mov     esi, eax                // esi = src ptr
 
-#endif 
+#endif /* CHAIN >= 3 */
 
 #if CODING == CODING_HUFF_ALL
 
     cmp ecx, MAX_LENGTH + MIN_MATCH - 1
     jb  write_small_ptr
 
-    neg edi
-    sub ecx, MAX_LENGTH + MIN_MATCH - 1
-    bsr eax, edi
-    add V.stat.pointers, 3
-    sub edi, bit_mask_table[eax*4]
-    add V.stat.extra, eax
-    shl eax, MAX_LENGTH_LOG
+    neg edi         // edi = offset
+    sub ecx, MAX_LENGTH + MIN_MATCH - 1 // ecx = output length
+    bsr eax, edi        // eax = most significant bit number of offset
+    add V.stat.pointers, 3  // have 2 more pointer bytes
+    sub edi, bit_mask_table[eax*4]      // edi = remaining offset bits
+    add V.stat.extra, eax   // have "eax" more extra bits to encode
+    shl eax, MAX_LENGTH_LOG // prepare output byte mask
 
-    add OUT, 4
-    add eax, MAX_LENGTH-1
-    inc dword ptr V.stat.freq[eax*4+256*4]
-    mov [OUT-4], al
+    add OUT, 4          // adjust output pointer
+    add eax, MAX_LENGTH-1   // eax = (log_offset : MAX_LENGTH-1) packed
+    inc dword ptr V.stat.freq[eax*4+256*4]  // increment respective frequency count
+    mov [OUT-4], al     // write packed (log_offset : MAX_LENGTH-1)
 
-    mov [OUT-3], cl
+    mov [OUT-3], cl     // write actual length
     cmp ecx, 255
     jb  wrote_length
 
-    add OUT, 2
+    add OUT, 2          // adjust output pointer in advance
     add ecx, MAX_LENGTH-1
-    mov byte ptr [OUT-5], 255
-    mov [OUT-4], cx
+    mov byte ptr [OUT-5], 255   // mark it as long length
+    mov [OUT-4], cx     // write actual length
     sub ecx, MAX_LENGTH-1
 wrote_length:
 
-    add ecx, MAX_LENGTH + MIN_MATCH - 1
+    add ecx, MAX_LENGTH + MIN_MATCH - 1 // restore length
 
     jmp write_offset
 
-write_pointer_tag_new:
+write_pointer_tag_new:                  // write tag word and return to pointers
         WRITE_TAG_MASK ()
         jmp     write_pointer_tag_done
 
-#else 
+#else /* CODING == CODING_DIRECT2 */
 
-        cmp     ecx, DIRECT2_MAX_LEN+MIN_MATCH
-        jb      write_small_ptr
+        cmp     ecx, DIRECT2_MAX_LEN+MIN_MATCH  // small length?
+        jb      write_small_ptr         // write ptr if so
 
-        not     edi
-        lea     eax, [esi+ecx]
-        shl     edi, DIRECT2_LEN_LOG
-        sub     ecx, DIRECT2_MAX_LEN+MIN_MATCH
-        add     edi, DIRECT2_MAX_LEN
-        push    eax
-        mov     [OUT], di
+        not     edi                     // edi = offset-1
+        lea     eax, [esi+ecx]          // eax = end of match
+        shl     edi, DIRECT2_LEN_LOG    // make room for length
+        sub     ecx, DIRECT2_MAX_LEN+MIN_MATCH  // decrease the length
+        add     edi, DIRECT2_MAX_LEN    // mark length as long
+        push    eax                     // save end of match
+        mov     [OUT], di               // write packed pointer
 
-        mov     al, cl
+        mov     al, cl                  // al = (ecx <= 15 ? cl : 15)
         cmp     ecx, 15
         jbe     match_less_15
         mov     al, 15
 match_less_15:
 
-        mov     edi, V.stat.ptr
-        add     OUT, 2
+        mov     edi, V.stat.ptr         // edi = quad_ptr
+        add     OUT, 2                  // wrote 2 bytes, move output ptr
 
-        test    edi, edi
+        test    edi, edi                // if quad_ptr != NULL write upper 4 bits
         jne     match_have_ptr
-        mov     V.stat.ptr, OUT
-        mov     [OUT], al
-        inc     OUT
-        jmp     match_done_ptr
+        mov     V.stat.ptr, OUT         // make new tag_ptr
+        mov     [OUT], al               // write lower 4 bits
+        inc     OUT                     // wrote 1 byte, move output ptr
+        jmp     match_done_ptr          // continue execution
 
 match_have_ptr:
-        shl     al, 4
-        mov     dword ptr V.stat.ptr, 0
-        or      [edi], al
+        shl     al, 4                   // will write into upper 4 bits
+        mov     dword ptr V.stat.ptr, 0 // no more space in this quad_bit[0]
+        or      [edi], al               // write upper 4 bits
 match_done_ptr:
-        sub     ecx, 15
-        jae     match_long_long_length
+        sub     ecx, 15                 // adjusted length < 15?
+        jae     match_long_long_length  // if not continue encoding
 match_finish_2:
-        inc     esi
-        pop     eax
-        stc
-        adc     TAG, TAG
-        jnc     write_pointer_tag_done
+        inc     esi                     // shift to next output position
+        pop     eax                     // restore eax = end-of-match
+        stc                             // set carry flag
+        adc     TAG, TAG                // write tag bit 1
+        jnc     write_pointer_tag_done  // continue execution if do not need to flush
 
-write_pointer_tag_new:
+write_pointer_tag_new:                  // write tag word and return to pointers
         WRITE_TAG_MASK ()
         jmp     write_pointer_tag_done
 
 match_long_long_length:
-        mov     [OUT], cl
-        inc     OUT
-        cmp     ecx, 255
-        jb      match_finish_2
+        mov     [OUT], cl               // write the length as a byte
+        inc     OUT                     // move output ptr
+        cmp     ecx, 255                // adjusted length fits in byte?
+        jb      match_finish_2          // if so ptr is written
 
-        add     ecx, DIRECT2_MAX_LEN+15
-        mov     byte ptr [OUT-1], 255
-        mov     [OUT], cx
-        add     OUT, 2
+        add     ecx, DIRECT2_MAX_LEN+15 // restore full length - MIN_MATCH
+        mov     byte ptr [OUT-1], 255   // mark byte length as "to be continued"
+        mov     [OUT], cx               // write full length
+        add     OUT, 2                  // move output ptr
         jmp     match_finish_2
 
-#endif 
+#endif /* CODING */
 
-write_literal_tag_new:
+write_literal_tag_new:                  // write tag word and return to literals
         WRITE_TAG_MASK ()
         jmp     write_literal_tag_done
 
-match_complete:
-        inc     esi
-        inc     edi
-        jmp     match_complete_done
+match_complete:                         // cmpsb compared till end of buffer
+        inc     esi                     // increase esi
+        inc     edi                     // increase edi
+        jmp     match_complete_done     // resume execution
 
 #if CHAIN < 2
 
     ALIGN (16)
 insert_tail:
         push    OUT
-        push    eax
+        push    eax                     // save end-of-match
         mov OUT, V.orig.end_3
         jmp     insert_tail_1
 
@@ -1219,36 +1231,36 @@ insert_tail_next:
 
 #if CHAIN <= 0
 
-        Q_HASH_SUM_ASM ()
-        mov     Q_HTABLE (eax), esi
+        Q_HASH_SUM_ASM ()               // evaluate hash sum
+        mov     Q_HTABLE (eax), esi     // insert current src pointer
 
 #else
-        Z_HASH_SUM_ASM ()
+        Z_HASH_SUM_ASM ()               // evaluate hash sum
         mov     ecx, esi
-        sub     ecx, V.orig.ptr
+        sub     ecx, V.orig.ptr         // ecx = current ptr offset
 
-        mov     Z_HTABLE (eax), cx
+        mov     Z_HTABLE (eax), cx      // save offset in hash table
 
-#endif 
+#endif /* CHAIN <= 0 */
 
-        inc     esi
-insert_tail_1:
-        cmp     esi, OUT
-        jb      insert_tail_next
-        pop     esi
-        pop OUT
+        inc     esi                     // and move it to next substring
+insert_tail_1:                          // end of match exceeds end_3 -- be careful
+        cmp     esi, OUT                // inserted up to end_3?
+        jb      insert_tail_next        // if not continue
+        pop     esi                     // esi = end of match
+        pop OUT         // restore OUT
         jmp     write_literal_entry
 
-#endif 
+#endif /* CHAIN < 2 */
 
 pass1_stop:
-        mov     V.temp.ptr, OUT
+        mov     V.temp.ptr, OUT         // save register variables
         mov     V.temp.tag_mask, TAG
         sub     esi, V.orig.ptr
         mov     V.orig.pos, esi
 
-        pop     ebp
-} 
+        pop     ebp                     // restore ebp
+} /* __asm */
 }
 
 #undef V
@@ -1261,8 +1273,8 @@ pass1_stop:
 #undef Z_NEXT
 #undef Z_HASH_SUM_ASM
 #undef KNOWN_LENGTH
-#endif 
-#endif 
+#endif /* CODING != CODING_DIRECT2 */
+#endif /* CHAIN < 2 */
 
 
 #undef CHAIN

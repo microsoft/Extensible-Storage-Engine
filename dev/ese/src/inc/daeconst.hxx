@@ -7,19 +7,21 @@ const OBJID objidSystemRoot             = 1;
 const WCHAR wszOn[]                     = L"on";
 
 const WCHAR wszTempDir[]                = L"temp" wszPathDelimiter;
-const WCHAR wszPatExt[]                 = L".pat";
+const WCHAR wszPatExt[]                 = L".pat";          //  patch file
 
-const WCHAR wszOldLogExt[]              = L".log";
-const WCHAR wszNewLogExt[]              = L".jtx";
-const WCHAR wszResLogExt[]              = L".jrs";
-const WCHAR wszOldChkExt[]              = L".chk";
-const WCHAR wszNewChkExt[]              = L".jcp";
-const WCHAR wszSecLogExt[]              = L".jsl";
-const WCHAR wszShrinkArchiveExt[]       = L".jsa";
-const WCHAR wszRBSExt[]                 = L".rbs";
-const WCHAR wszRBSDirRoot[]             = L"Snapshot";
-const WCHAR wszRBSDirBase[]             = L"RBS";
-const WCHAR wszRBSLogDir[]             = L"Logs";
+// UNDONE: Better would be to move these to like private part of log.hxx (or maybe
+// even log.cxx), to ensure isolation...
+const WCHAR wszOldLogExt[]              = L".log";          //  log file extension, deprecated
+const WCHAR wszNewLogExt[]              = L".jtx";          //  log file extension, preferred
+const WCHAR wszResLogExt[]              = L".jrs";          //  reserve log extension
+const WCHAR wszOldChkExt[]              = L".chk";          //  checkpoint file extension, deprecated
+const WCHAR wszNewChkExt[]              = L".jcp";          //  checkpoint file extension, preferred
+const WCHAR wszSecLogExt[]              = L".jsl";          //  shadow|secondary log file extension
+const WCHAR wszShrinkArchiveExt[]       = L".jsa";          //  shrink archive file extension
+const WCHAR wszRBSExt[]                 = L".rbs";          //  revert snapshot file extension
+const WCHAR wszRBSDirRoot[]             = L"Snapshot";      //  revert snapshot static root directory name
+const WCHAR wszRBSDirBase[]             = L"RBS";           //  revert snapshot directory static base name
+const WCHAR wszRBSLogDir[]             = L"Logs";           //  revert snapshot static log directory base name
 const ULONG cMinReserveLogs             = 2;
 const ULONG cMinReserveLogsWithAggresiveRollover    = 10;
 
@@ -30,34 +32,55 @@ const WCHAR wszLogRes[]                 = L"res";
 const WCHAR wszRestoreInstanceName[]        = L"Restore";
 const WCHAR wszRestoreInstanceNamePrefix[]      = L" - Restore";
 
+// Interesting side effect of 0x7FFFFFFF is that we get several integral constant overflows as people
+// try to add 1 or 2 to this to do an assert() or something and the compiler detects and the overflow
+// in a LONG.  We set it a little lower (~2047 lower than 2G, recovery undo can have 512 extra).
 const LONG  lGenerationMaxDuringRecovery    = 0x7FFFFA00;
-const LONG  lGenerationMax                  = lGenerationMaxDuringRecovery - 0x200;
-const LONG  lGenerationMaxWarningThreshold  = 0x40000000;
-const LONG  lGenerationMaxWarningFrequency  = 20000;
-const LONG  lGenerationMaxPanicThreshold    = 0x7FFFF000;
-const LONG  lGenerationMaxPanicFrequency    = 10;
+const LONG  lGenerationMax                  = lGenerationMaxDuringRecovery - 0x200; //  save some logs for recovery-undo
+const LONG  lGenerationMaxWarningThreshold  = 0x40000000;   //  the point at which we start periodically generating warning eventlog messages that we are approaching the max
+const LONG  lGenerationMaxWarningFrequency  = 20000;    //  frequency with which a warning eventlog is generated when we are over the log sequence warning threshold
+const LONG  lGenerationMaxPanicThreshold    = 0x7FFFF000;   //  the point at which we start aggressively generation warning eventlog messages that we are dangerously close to the max
+const LONG  lGenerationMaxPanicFrequency    = 10;       //  frequency with which a warning eventlog is generated when we are dangerously close to the max
 const LONG  lGenerationInvalid              = 0x7FFFFFFF;
 
 const LONG  lGenerationEXXDuringDump        = lGenerationMaxDuringRecovery + 1;
 const LONG  lGenerationInvalidDuringDump    = lGenerationEXXDuringDump + 1;
+// LEGACY ...
+//const LONG    lGenerationMaxDuringRecovery    = 0xFFFFF;
+//const LONG    lGenerationMax                  = lGenerationMaxDuringRecovery - 16; // same some logs for recovery-undo
+//const LONG    lGenerationMaxWarningThreshold  = 0xE0000;  //  the point at which we start periodically generating warning eventlog messages that we are approaching the max
+//const LONG    lGenerationMaxWarningFrequency  = 1000;     //  frequency with which a warning eventlog is generated when we are over the log sequence warning threshold
+//const LONG    lGenerationMaxPanicThreshold    = 0xFF000;  //  the point at which we start aggressively generation warning eventlog messages that we are dangerously close to the max
+//const LONG    lGenerationMaxPanicFrequency    = 10;       //  frequency with which a warning eventlog is generated when we are dangerously close to the max
 
-const LONG  lgenCheckpointTooDeepMin            = 0x20;
-const LONG  lgenCheckpointTooDeepMax            = 0x10000;
-const LONG  cbCheckpointTooDeepUncertainty      = 0x10000;
+//  these numbers are chosen so that even in the worst case of a log file
+//  with 0xFFFF sectors each of 0xFFFF bytes and in the worst case of a
+//  64 proc machine, we will still have enough bits in the OB0 index to
+//  hold the given checkpoint depth in log generations.  you can push these
+//  limits around but you must conserve the total number of significant bits
+//  between Max and Uncertainty.  Min is chosen to allow enough room for
+//  a graceful shutdown in the event of checkpoint too deep
+//
+const LONG  lgenCheckpointTooDeepMin            = 0x20;     //  we must allow at least this many generations between the checkpoint and the current generation
+const LONG  lgenCheckpointTooDeepMax            = 0x10000;  //  max outstanding generations allowed between checkpoint and current generation
+const LONG  cbCheckpointTooDeepUncertainty      = 0x10000;      //  uncertainty in the LGPOS required to match lgenCheckpointTooDeepMax
 
-
+/* the number of pages in the Long Value tree of each table
+/**/
 const INT   cpgLVTree                   = 1;
 
-const CPG   cpgPrereadSequential        = 128;
-const CPG   cpgPrereadPredictive        = 16;
-const CPG   cpgPrereadRangesMax         = 128;
+//  preread constants
+const CPG   cpgPrereadSequential        = 128;  //  number of pages to preread in a table opened sequentially
+const CPG   cpgPrereadPredictive        = 16;   //  number of pages to preread if we guess we are prereading
+const CPG   cpgPrereadRangesMax         = 128;  //  number of pages to preread in an index range
 
 const LONG  cbSequentialDataPrereadThreshold    = 64 * 1024;
 
-
-const ULONG ulFILEDefaultDensity        = 80;
-const ULONG ulFILEDensityLeast          = 20;
-const ULONG ulFILEDensityMost           = 100;
+/*  default density
+/**/
+const ULONG ulFILEDefaultDensity        = 80;       // 80% density
+const ULONG ulFILEDensityLeast          = 20;       // 20% density
+const ULONG ulFILEDensityMost           = 100;      // 100% density
 
 
 const DWORD dwCounterMax                = 0x7fffff00;
@@ -65,27 +88,31 @@ const QWORD qwCounterMax                = 0x7fffffffffffff00;
 
 const OBJID objidNil                    = 0x00000000;
 const OBJID objidFDPMax                 = 0xFFFFFF00;
-const OBJID objidMaxWarningThreshold    = 0x7F000000;
-const ULONG ulObjidMaxWarningFrequency  = 100000;
-const OBJID objidMaxPanicThreshold      = 0xFF000000;
-const ULONG ulObjidMaxPanicFrequency    = 1000;
+const OBJID objidMaxWarningThreshold    = 0x7F000000;   //  the point at which we start periodically generating warning eventlog messages that we are approaching the max
+const ULONG ulObjidMaxWarningFrequency  = 100000;       //  frequency with which a warning eventlog is generated when we are over the ObjidFDP warning threshold
+const OBJID objidMaxPanicThreshold      = 0xFF000000;   //  the point at which we start aggressively generation warning eventlog messages that we are dangerously close to the max
+const ULONG ulObjidMaxPanicFrequency    = 1000;         //  frequency with which a warning eventlog is generated when we are dangerously close to the max
 
 
 const CHAR szNull[]                     = "";
 
-
-const LEVEL levelMax                    = 11;
-const LEVEL levelUserMost               = 7;
+/*  transaction level limits
+/**/
+const LEVEL levelMax                    = 11;       // all level < 11
+const LEVEL levelUserMost               = 7;        // max for user
 const LEVEL levelMin                    = 0;
 
-
+/* Start and max waiting period for WaitTillOldest
+/**/
 const ULONG ulStartTimeOutPeriod        = 20;
-const ULONG ulMaxTimeOutPeriod          = 6000; 
+const ULONG ulMaxTimeOutPeriod          = 6000; /*  6 seconds */
 
-
+/* Version store bucket size (used to be in ver.hxx)
+/**/
 const INT cbBucketLegacy                = 16384;
 
-
+/*  default resource / parameter settings
+/**/
 const LONG cpageDbExtensionDefault      = 256;
 const LONG cpageSEDefault               = 16;
 const LONG cpibDefault                  = 16;
@@ -95,7 +122,7 @@ const LONG cfcbCachedClosedTablesDefault= 64;
 const LONG cscbDefault                  = 20;
 const LONG csecLogBufferDefault         = 126;
 const LONG csecLogFileSizeDefault       = 5120;
-const LONG cbucketDefault               = 1 + ( 1024 * 1024 - 1 ) / cbBucketLegacy;
+const LONG cbucketDefault               = 1 + ( 1024 * 1024 - 1 ) / cbBucketLegacy; // 1MB of version store
 const LONG cpageTempDBMinDefault        = 0;
 const LONG lPageFragmentDefault         = 8;
 const LONG lCacheSizeMinDefault         = 1;
@@ -118,10 +145,17 @@ static_assert( g_pctCachePriorityMax < g_pctCachePriorityMaxMax, "g_pctCachePrio
 static_assert( g_pctCachePriorityMaxMax <= (LONG)wMax, "g_pctCachePriorityMaxMax must be <= wMax (0xFFFF) because that's the size allocated to it in the ResMgr IC and ESE session." );
 static_assert( !FIsCachePriorityValid( g_pctCachePriorityMaxMax ), "g_pctCachePriorityMaxMax must not be a valid priority value." );
 
+//  g_pctCachePriorityNeutral is supposed to be used when a cache priority value is required at a specific
+//  location in the code but the effect of touching/caching the resource with a given priority is not relevant.
+//  When caching a resource, using g_pctCachePriorityMin means the it will be assigned the minimum priority possible
+//  and will be evicted soon.
+//  If the resource is already cached, it'll keep the current priority, since the ResMgr never downgrades priorities.
 const LONG g_pctCachePriorityNeutral    = g_pctCachePriorityMin;
 static_assert( g_pctCachePriorityNeutral == g_pctCachePriorityMin, "If you are changing g_pctCachePriorityNeutral, consider the ramifications and assumptions around it being == g_pctCachePriorityMin." );
 static_assert( FIsCachePriorityValid( g_pctCachePriorityNeutral ), "g_pctCachePriorityNeutral must be valid." );
 
+//  g_pctCachePriorityUnassigned is supposed to be used when a cache priority value is required at a specific
+//  location in the code but the effect of touching/caching the resource with a given priority is not relevant.
 const LONG g_pctCachePriorityUnassigned = wMax;
 static_assert( g_pctCachePriorityUnassigned > g_pctCachePriorityMax, "g_pctCachePriorityUnassigned must be > g_pctCachePriorityMax." );
 static_assert( g_pctCachePriorityUnassigned <= g_pctCachePriorityMaxMax, "g_pctCachePriorityUnassigned must be <= g_pctCachePriorityMaxMax." );
@@ -136,75 +170,99 @@ const LONG cpgBackupChunkDefault        = 16;
 const LONG cBackupReadDefault           = 8;
 const LONG cbPageHintCacheDefault       = 256 * 1024;
 
-
-const LONG cpibSystemFudge              = 64;
-const LONG cpibSystem                   = 5 + cpibSystemFudge;
-const LONG cthreadSystem                = 5;
+/*  system resource requirements
+/**/
+const LONG cpibSystemFudge              = 64;                   // OLD,TTMAPS, async. tasks all use PIBs. This should be enough
+const LONG cpibSystem                   = 5 + cpibSystemFudge;  // RCEClean, LV tree creation, backup, callback, sentinel
+const LONG cthreadSystem                = 5;                    // RCEClean, LGWrite, BFIO, BFClean, perf
 const LONG cbucketSystem                = 2;
 
-
+/*  minimum resource / parameter settings are defined below:
+/**/
 const LONG lLogFileSizeMin              = 32;
 
+/*  maximum resource / parameter settings are defined below:
+/**/
+const LONG cpibMax                      = 32767 - cpibSystem;   //  limited by sync library
 
-const LONG cpibMax                      = 32767 - cpibSystem;
-
-
+/*  wait time for latch/crit conflicts
+/**/
 const ULONG cmsecWaitGeneric            = 100;
 const ULONG cmsecWaitWriteLatch         = 10;
 const ULONG cmsecWaitLogWrite           = 2;
 #ifdef RFS2
-const ULONG cmsecWaitLogWriteMax        = 1000;
+const ULONG cmsecWaitLogWriteMax        = 1000;         // 1 sec
 #else  RFS2
-const ULONG cmsecWaitLogWriteMax        = 300000;
+const ULONG cmsecWaitLogWriteMax        = 300000;       // 5 min
 #endif RFS2
 const ULONG cmsecWaitIOComplete         = 10;
-const ULONG cmsecAsyncBackgroundCleanup = 60000;
-const ULONG cmsecWaitForBackup          = 300000;
+const ULONG cmsecAsyncBackgroundCleanup = 60000;        //  1 min
+const ULONG cmsecWaitForBackup          = 300000;       //  5 min
 #ifdef RTM
-const ULONG csecOLDMinimumPass          = 3600;
+const ULONG csecOLDMinimumPass          = 3600;         //  1 hr
 #else
-const ULONG csecOLDMinimumPass          = 300;
+const ULONG csecOLDMinimumPass          = 300;          //  5 min
 #endif
-const ULONG cmsecMaxReplayDelayDueToReadTrx = 11*1000;
+const ULONG cmsecMaxReplayDelayDueToReadTrx = 11*1000;  //  11 seconds
 
-
+/*  initial thread stack sizes
+/**/
 const ULONG cbBFCleanStack              = 16384;
 
 const LONG lPrereadMost                 = 64;
 
+//  the number of bytes used to store the length of a key
+//  These are not directly persisted values, but they are implicitly built into the structure of NODE offsets in a 
+//  way that is persisted ... changing either would definitely change the format.
 PERSISTED const INT cbKeyCount                    = sizeof(USHORT);
 PERSISTED const INT cbPrefixOverhead              = cbKeyCount;
 
+//  the number of bytes used to store the number of segments in a key
 const INT cbKeySegmentsCount            = sizeof(BYTE);
 
 
+//  the number of instances supported
 const ULONG cMaxInstances                       = 10 * 1024;
 
+//  Reserve one slot for ifmp 0, because some clients are checking ifmp (it's presented as JET_DBID at client side)
+//  against 0 for validation (although they should initialize ifmp to JET_dbidNil and check it against JET_dbidNil).
+//  This reservation became necessary after "Defer Creating Temp DB" feature, because before that feature, ifmp 0
+//  was almost always occupied by temp DB so 0 was rarely (only if paramMaxTemporaryTables set to 0) returned to
+//  clients as user DB ifmp. After "Defer Creating Temp DB" feature, user DB might be created before temp DB is
+//  created, so user DB might get ifmp 0. Reserving slot 0 makes all ifmp start with 1, so it won't break existing
+//  clients' code logic which checks ifmp against 0.
 const ULONG cfmpReserved                        = 1;
 
 const DBID dbidTemp                     = 0;
 const DBID dbidMin                      = 0;
 const DBID dbidUserLeast                = 1;
 
-const DBID dbidMax                      = 7;
-const DBID dbidMask                     = 0x7f;
+const DBID dbidMax                      = 7;        //  limited by the 6 slots we have in the log header for DB paths (temp DB is 7th, not logged).
+const DBID dbidMask                     = 0x7f;     //  WARNING: if increasing dbidMax, consider
+                                                    //  enough to accommodate all attachments
 
-const ULONG cMaxDatabasesPerInstanceDefault     = dbidMax;
+//  the number of DBs supported
+//const ULONG cMaxDatabasesPerInstance          = 0xf0;     //  UNDONE: if we go any higher, need to change DBID from a byte
+const ULONG cMaxDatabasesPerInstanceDefault     = dbidMax;  //  DBIDs current limiting factor
 
-const IFMP ifmpNil                      = 0x7fffffff;
+const IFMP ifmpNil                      = 0x7fffffff;       //  UNDONE: should be using this as a sentinel value instead of g_ifmpMax
 
+//  Maximum I/O sizes to be issued by the engine
 
 const ULONG cbReadSizeMax   = 512 * 1024;
 const ULONG cbWriteSizeMax  = 512 * 1024;
 
 const ULONG JET_IOPriorityMax = ( JET_IOPriorityLow | JET_IOPriorityLowForCheckpoint | JET_IOPriorityLowForScavenge );
 
+//  Batch size of autoInc pool
 
 const LONG  g_ulAutoIncBatchSize        = 1000;
 
+//  Default version bucket page size
 
 const ULONG cbDefaultVerPageSize        = 16384 * sizeof(VOID*) / 4;
 
+//  Lock ranks
 
 const INT rankDBGPrint                  = 0;
 const INT rankBFIssueListSync           = 0;
@@ -212,7 +270,7 @@ const INT rankIOThreadInfoTable         = 0;
 const INT rankDbtime                    = 1;
 #if defined( DEBUG ) && defined( MEM_CHECK )
 const INT rankCALGlobal                 = 10;
-#endif
+#endif  //  DEBUG && MEM_CHECK
 const INT rankVERPerf                   = 10;
 const INT rankLGResFiles                = 10;
 const INT rankLGWaitQ                   = 10;
@@ -301,7 +359,7 @@ const char szCheckpoint[]           = "Checkpoint";
 const char szCritCallbacks[]            = "Callbacks";
 #if defined(DEBUG) && defined(MEM_CHECK)
 const char szCALGlobal[]                = "rgCAL";
-#endif
+#endif  //  DEBUG && MEM_CHECK
 const char szLGBuf[]                    = "LGBuf";
 const char szLGTrace[]              = "LGTrace";
 const char szLGResFiles[]           = "LGResFiles";
@@ -369,10 +427,13 @@ const char szRBSBuf[]               = "RBSBuffer";
 const char szRBSWrite[]             = "RBSWrite";
 const char szRBSFirstValidGen[]     = "RBSFirstValidGen";
 
+//  Internal user IDs for OPERATION_CONTEXT (required to set identifiable context on internal PIBs)
 const DWORD OCUSER_UNINIT           = ( OC_bitInternalUser );
 const DWORD OCUSER_INTERNAL         = ( OC_bitInternalUser | 1 );
+//const DWORD OCUSER_SHADOWLOG      = ( OC_bitInternalUser | 2 );   // deprecated, reuse later
 const DWORD OCUSER_DBSCAN           = ( OC_bitInternalUser | 3 );
 const DWORD OCUSER_BACKUP           = ( OC_bitInternalUser | 4 );
 const DWORD OCUSER_KVPSTORE         = ( OC_bitInternalUser | 5 );
 const DWORD OCUSER_VERSTORE         = ( OC_bitInternalUser | 6 );
+//const DWORD OCUSER_FLUSHMAP           = ( OC_bitInternalUser | 7 );   // deprecated, reuse later
 

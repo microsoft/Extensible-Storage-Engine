@@ -8,7 +8,9 @@
 #include <stdarg.h>
 
 
+//  ==================================================================================================================
 class CPRINTF
+//  ==================================================================================================================
 {
     public:
         CPRINTF() {}
@@ -20,28 +22,40 @@ class CPRINTF
         virtual void __cdecl operator()( const _TCHAR* szFormat, ... ) = 0;
 };
 
+//  ==================================================================================================================
 class CPRINTFNULL : public CPRINTF
+//  ==================================================================================================================
 {
     public:
         void __cdecl operator()( const _TCHAR* szFormat, ... );
         static CPRINTF* PcprintfInstance();
 };
 
+//  ================================================================
 INLINE void __cdecl CPRINTFNULL::operator()( const _TCHAR* szFormat, ... )
+//  ================================================================
 {
     va_list arg_ptr;
     va_start( arg_ptr, szFormat );
     va_end( arg_ptr );
 }
 
+//  ================================================================
 INLINE CPRINTF* CPRINTFNULL::PcprintfInstance()
+//  ================================================================
 {
     extern CPRINTFNULL g_cprintfNull;
     return &g_cprintfNull;
 }
 
 
+//  ==================================================================================================================
 class CPRINTFDBGOUT : public CPRINTF
+//  ==================================================================================================================
+//
+//  Calls OutputDebugString()
+//
+//-
 {
     public:
         void __cdecl operator()( const _TCHAR* szFormat, ... );
@@ -49,20 +63,26 @@ class CPRINTFDBGOUT : public CPRINTF
 };
 
 
+//  ==================================================================================================================
 class CPRINTFSTDOUT : public CPRINTF
+//  ==================================================================================================================
 {
     public:
         void __cdecl operator()( const _TCHAR* szFormat, ... );
         static CPRINTF* PcprintfInstance();
 };
 
+//  ================================================================
 INLINE CPRINTF* CPRINTFSTDOUT::PcprintfInstance()
+//  ================================================================
 {
     extern CPRINTFSTDOUT g_cprintfStdout;
     return &g_cprintfStdout;
 }
 
+//  ================================================================
 INLINE void __cdecl CPRINTFSTDOUT::operator()( const _TCHAR* szFormat, ... )
+//  ================================================================
 {
     va_list arg_ptr;
     va_start( arg_ptr, szFormat );
@@ -71,7 +91,9 @@ INLINE void __cdecl CPRINTFSTDOUT::operator()( const _TCHAR* szFormat, ... )
 }
 
 
+//  ==================================================================================================================
 class CPRINTINTRINBUF : public CPRINTF
+//  ==================================================================================================================
 {
     public:
         CPRINTINTRINBUF();
@@ -85,9 +107,10 @@ class CPRINTINTRINBUF : public CPRINTF
         void __cdecl operator()( const _TCHAR* szFormat, ... );
 
     private:
+        //  probably should templatize this buffer size.
         const static ULONG  s_cchBuffer = 2048;
         CHAR                m_rgchBuffer[ s_cchBuffer ];
-        QWORD               m_cyichAppendMax;
+        QWORD               m_cyichAppendMax;  // CYclic Index count CHaracaters ... as in the real index is % buffer size.
 
         void CPRINTINTRINBUF::Append_( const CHAR * const szPrint );
 
@@ -98,7 +121,7 @@ class CPRINTINTRINBUF : public CPRINTF
             return (ULONG)qw;
         }
 
-    public:
+    public: // private but unit test needs access
 
         class BUFCURSOR
         {
@@ -135,13 +158,18 @@ class CPRINTINTRINBUF : public CPRINTF
 
             const CHAR * SzNext()
             {
+                // Check currency ... if it moved, we have to write some more clever code
+                // to ensure we haven't overwritten the next string we would return.  And
+                // maybe even some locking as well.
                 Assert( m_ichCurrency == m_pprtbuf->m_cyichAppendMax );
 
+                // If we're on a valid character / non-NUL of the current string, increment to try to get to the end.
                 while( m_pprtbuf->m_rgchBuffer[ IchReadNext_() ] != '\0' && m_ichNext < m_ichCurrency )
                 {
                     m_ichNext++;
                 }
 
+                // We are at the end of current string, increment one more time to move to next string (if there is more data).
                 while( m_pprtbuf->m_rgchBuffer[ IchReadNext_() ] == '\0' && m_ichNext < m_ichCurrency )
                 {
                     m_ichNext++;
@@ -154,18 +182,25 @@ class CPRINTINTRINBUF : public CPRINTF
         friend class BUFCURSOR;
 };
 
+//  ================================================================
 INLINE CPRINTINTRINBUF::CPRINTINTRINBUF()
+//  ================================================================
 {
     Reset();
 }
 
+//  ================================================================
 INLINE void CPRINTINTRINBUF::Reset()
+//  ================================================================
 {
+    // We can get away with this instead of full memset(), as long as m_cyichAppendMax = 0.
     m_rgchBuffer[ 0 ] = '\0';
     m_cyichAppendMax = 0;
 }
 
+//  ================================================================
 INLINE void __cdecl CPRINTINTRINBUF::operator()( const _TCHAR* szFormat, ... )
+//  ================================================================
 {
     CHAR rgchBuf[ 1024 ];
 
@@ -177,7 +212,9 @@ INLINE void __cdecl CPRINTINTRINBUF::operator()( const _TCHAR* szFormat, ... )
     Append_( rgchBuf );
 }
 
+//  ================================================================
 INLINE void CPRINTINTRINBUF::Append_( const CHAR * const szPrint )
+//  ================================================================
 {
     Assert( IchAppendNext_() < s_cchBuffer );
 
@@ -186,9 +223,11 @@ INLINE void CPRINTINTRINBUF::Append_( const CHAR * const szPrint )
 
     if ( cbNeeded < cbLeft )
     {
+        // We have enough room, concatonate.
         OSStrCbCopyA( &( m_rgchBuffer[ IchAppendNext_() + 1 ] ), cbLeft, szPrint );
         m_cyichAppendMax += cbNeeded;
 
+        // Now we have to wipe out what ever partial string we have wipped out.
         while( m_rgchBuffer[ IchAppendNext_() ] != '\0' && IchAppendNext_() != 0 )
         {
             m_rgchBuffer[ IchAppendNext_() ] = '\0';
@@ -196,7 +235,8 @@ INLINE void CPRINTINTRINBUF::Append_( const CHAR * const szPrint )
     }
     else
     {
-        Expected( fFalse );
+        Expected( fFalse ); // completely untested
+        // We do not have enough room, wrap around ...
         for( ULONG ich = IchAppendNext_() + 1; ich < s_cchBuffer; ich++ )
         {
             m_rgchBuffer[ ich ] = '\0';
@@ -206,7 +246,9 @@ INLINE void CPRINTINTRINBUF::Append_( const CHAR * const szPrint )
     }
 }
 
+//  ================================================================
 INLINE BOOL CPRINTINTRINBUF::FContains( _In_z_ const CHAR * const szFind )
+//  ================================================================
 {
     BUFCURSOR csr( this );
 
@@ -222,7 +264,11 @@ INLINE BOOL CPRINTINTRINBUF::FContains( _In_z_ const CHAR * const szFind )
     return fFalse;
 }
 
+//  ================================================================
 INLINE ULONG CPRINTINTRINBUF::CContains( _In_z_ const CHAR * const szFind )
+//  ================================================================
+//  Note: returns number of appended strings that contain search string / szFind, but not if there
+//  are multiple hits in a single appended string (i.e. appended by operator()).
 {
     BUFCURSOR csr( this );
 
@@ -240,7 +286,9 @@ INLINE ULONG CPRINTINTRINBUF::CContains( _In_z_ const CHAR * const szFind )
     return cHits;
 }
 
+//  ================================================================
 INLINE void CPRINTINTRINBUF::Print( CPRINTF & cprintf )
+//  ================================================================
 {
     BUFCURSOR csr( this );
 
@@ -259,20 +307,26 @@ INLINE void CPRINTINTRINBUF::Print( CPRINTF & cprintf )
 
 #ifdef DEBUG
 
+//  ==================================================================================================================
 class CPRINTFDEBUG : public CPRINTF
+//  ==================================================================================================================
 {
     public:
         void __cdecl operator()( const _TCHAR* szFormat, ... );
         static CPRINTF* PcprintfInstance();
 };
 
+//  ================================================================
 INLINE CPRINTF* CPRINTFDEBUG::PcprintfInstance()
+//  ================================================================
 {
     extern CPRINTFDEBUG g_cprintfDEBUG;
     return &g_cprintfDEBUG;
 }
 
+//  ================================================================
 INLINE void __cdecl CPRINTFDEBUG::operator()( const _TCHAR* szFormat, ... )
+//  ================================================================
 {
     va_list arg_ptr;
     va_start( arg_ptr, szFormat );
@@ -282,9 +336,11 @@ INLINE void __cdecl CPRINTFDEBUG::operator()( const _TCHAR* szFormat, ... )
 
 #define DBGprintf       (*CPRINTFDEBUG::PcprintfInstance())
 
-#endif
+#endif  //  DEBUG
 
+//  ==================================================================================================================
 class CPRINTFFILE : public CPRINTF
+//  ==================================================================================================================
 {
     public:
         CPRINTFFILE( const WCHAR* wszFile );
@@ -297,12 +353,16 @@ class CPRINTFFILE : public CPRINTF
         void* m_hMutex;
 };
 
+//  ==================================================================================================================
 class CWPRINTFFILE : public CPRINTF
+//  ==================================================================================================================
 {
     public:
         CWPRINTFFILE( const WCHAR* szFile );
         ~CWPRINTFFILE();
 
+    // If _UNICODE is defined, then we only want a single function.
+    // If _UNICODE is not defined, we need two different functions.
 #ifndef _UNICODE
         void __cdecl operator()( const _TCHAR* szFormat, ... );
 #endif
@@ -314,7 +374,9 @@ class CWPRINTFFILE : public CPRINTF
         void* m_hMutex;
 };
 
+//  ==================================================================================================================
 class CPRINTFINDENT : public CPRINTF
+//  ==================================================================================================================
 {
     public:
         CPRINTFINDENT( CPRINTF* pcprintf, const _TCHAR* szPrefix = NULL );
@@ -333,14 +395,18 @@ class CPRINTFINDENT : public CPRINTF
         const _TCHAR* const m_szPrefix;
 };
 
+//  ================================================================
 INLINE CPRINTFINDENT::CPRINTFINDENT( CPRINTF* pcprintf, const _TCHAR* szPrefix ) :
+//  ================================================================
     m_cindent( 0 ),
     m_pcprintf( pcprintf ),
     m_szPrefix( szPrefix )
 {
 }
     
+//  ================================================================
 INLINE void __cdecl CPRINTFINDENT::operator()( const _TCHAR* szFormat, ... )
+//  ================================================================
 {
     _TCHAR rgchBuf[1024];
     va_list arg_ptr;
@@ -360,12 +426,16 @@ INLINE void __cdecl CPRINTFINDENT::operator()( const _TCHAR* szFormat, ... )
     (*m_pcprintf)( _T( "%s" ), rgchBuf );
 }
 
+//  ================================================================
 INLINE void CPRINTFINDENT::Indent()
+//  ================================================================
 {
     ++m_cindent;
 }
 
+//  ================================================================
 INLINE void CPRINTFINDENT::Unindent()
+//  ================================================================
 {
     if( m_cindent > 0 )
     {
@@ -373,7 +443,9 @@ INLINE void CPRINTFINDENT::Unindent()
     }
 }
 
+//  ================================================================
 INLINE CPRINTFINDENT::CPRINTFINDENT( ) :
+//  ================================================================
     m_cindent( 0 ),
     m_pcprintf( 0 ),
     m_szPrefix( 0 )
@@ -381,7 +453,14 @@ INLINE CPRINTFINDENT::CPRINTFINDENT( ) :
 }
     
 
+//  ==================================================================================================================
 class CPRINTFTLSPREFIX : public CPRINTFINDENT
+//  ==================================================================================================================
+//
+//  Prefix all output from a certain thread with a Tls-specific string
+//  to allow the multi-threaded output to be sorted
+//
+//-
 {
     public:
         CPRINTFTLSPREFIX( CPRINTF* pcprintf, const _TCHAR * const szPrefix = NULL );
@@ -398,7 +477,9 @@ class CPRINTFTLSPREFIX : public CPRINTFINDENT
 };
 
 
+//  ==================================================================================================================
 class CPRINTFFN : public CPRINTF
+//  ==================================================================================================================
 {
     public:
         CPRINTFFN( INT (__cdecl *pfnPrintf)(const _TCHAR*, ... ) ) : m_pfnPrintf( pfnPrintf ) {}
@@ -422,10 +503,11 @@ class CPRINTFFN : public CPRINTF
     
 
 
+//  retrieves the current width of stdout
 
 DWORD UtilCprintfStdoutWidth();
 
 
-#endif
+#endif  //  _OS_CPRINTF_HXX_INCLUDED
 
 

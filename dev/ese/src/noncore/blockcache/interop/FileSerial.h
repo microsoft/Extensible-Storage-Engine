@@ -15,8 +15,14 @@ namespace Internal
         {
             namespace Interop
             {
+                /// <summary>
+                /// File Serial Number.
+                /// </summary>
                 public enum class FileSerial : Int32
                 {
+                    /// <summary>
+                    /// An invalid FileSerial.
+                    /// </summary>
                     Invalid = 0,
                 };
             }

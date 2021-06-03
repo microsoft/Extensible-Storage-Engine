@@ -8,15 +8,18 @@
 #include <process.h>
 
 
+//  OS Layer Init / Term functions
 
 extern BOOL FOSPreinit();
 extern void OSIProcessAbort();
 extern void OSPostterm();
 
+//  globals
 
 BOOL            g_fProcessExit = fFalse;
 volatile BOOL   g_fDllUp = fFalse;
 
+//  DLL Entry Point
 
 extern BOOL FINSTSomeInitialized();
 
@@ -47,9 +50,11 @@ extern "C" {
 
                 PreinitTrace( L"Begin DLLEntryPoint( DLL_PROCESS_ATTACH )\n" );
 
+                //  we do not want to see thread notifications
 
                 (void)DisableThreadLibraryCalls( (HMODULE)hinstDLL );
 
+                //  init OS Layer
 
                 #ifdef OS_LAYER_VIOLATIONS
                 OSPrepreinitSetUserTLSSize( ESE_USER_TLS_SIZE );
@@ -57,6 +62,7 @@ extern "C" {
 
                 fResult = fResult && FOSPreinit();
 
+                //  init CRT
 
                 PreinitTrace( L"Begin _CRT_INIT()\n" );
                 fResult = fResult && _CRT_INIT( hinstDLL, fdwReason, lpvReserved );
@@ -74,25 +80,35 @@ extern "C" {
 
                 PreinitTrace( L"Begin DLL'Exit'Point( DLL_PROCESS_DETACH )\n" );
 
+                //  indicate the DLL is down
 
                 g_fDllUp = fFalse;
 
+                //  signals Postterm is result of process exit vs. dynamic DLL unload (i.e. FreeLibrary()).
 
                 g_fProcessExit = (NULL != lpvReserved);
                 
+                //  if JET is still initialized, we are experiencing an abnormal
+                //  termination
 
                 if ( FINSTSomeInitialized() )
                 {
+                    //  All ESE/JET instances not terminated by caller before unloading dll.
                     EnforceSz( g_fProcessExit, "InitdEseInstancesOnDllUnload" );
                     OSIProcessAbort();
+                    //  we bail out here, because we cannot guarantee that the rest of ESE will
+                    //  behave correctly (with all it's various background tasks going off) if we tear
+                    //  down the OS layer out from under it.
                     break;
                 }
 
+                //  terminate CRT
 
                 PreinitTrace( L"Begin _CRT_'TERM'()\n" );
                 (void)_CRT_INIT( hinstDLL, fdwReason, lpvReserved );
                 PreinitTrace( L"Finish _CRT_'TERM'()\n" );
 
+                //  terminate OS Layer
 
                 OSPostterm();
 
@@ -109,13 +125,14 @@ extern "C" {
     {
         if ( fdwReason == DLL_PROCESS_ATTACH )
         {
+            //  init /GS cookie
             __security_init_cookie();
         }
 
         return DLLEntryPoint_( hinstDLL, fdwReason, lpvReserved );
     }
 
-}
+} // extern "C"
 
 BOOL FOSDllUp()
 {

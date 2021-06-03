@@ -341,6 +341,8 @@ namespace Internal
                 template< class TM, class TN >
                 inline const WCHAR * const CFileSystemWrapper<TM,TN>::WszPathFileName( _In_z_ const WCHAR * const wszOptionalFullPath ) const
                 {
+                    // Unfortunately the original method returns a pointer into the input buffer or a string constant.
+                    // We cannot return memory that must be freed so we have to use a code const.  Yuck.
 
                     String^ optionalFullPath = wszOptionalFullPath ? gcnew String( wszOptionalFullPath ) : nullptr;
                     String^ pathFileName = I()->PathFileName( optionalFullPath );
@@ -355,7 +357,7 @@ namespace Internal
                         return wszOptionalFullPath + optionalFullPath->Length - pathFileName->Length;
                     }
 
-                    return L"UNKNOWN.PTH";
+                    return L"UNKNOWN.PTH";  // yuck
                 }
 
                 template< class TM, class TN >

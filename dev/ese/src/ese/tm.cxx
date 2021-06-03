@@ -21,14 +21,16 @@ LONG LUserWaitLastTrxCommitCEFLPv(LONG iInstance,void *pvBuf)
     return 0;
 }
 
-#endif
+#endif // PERFMON_SUPPORT
 
+//  BF needs to know global / multi-inst worst case page size we may use.
 
 LONG CbSYSMaxPageSize()
 {
     return (LONG)UlParam( JET_paramDatabasePageSize );
 }
 
+//  Log needs to know inst-wide what is the worst case page size we may use.
 
 LONG CbINSTMaxPageSize( const INST * const pinst )
 {
@@ -37,6 +39,23 @@ LONG CbINSTMaxPageSize( const INST * const pinst )
 
 
 
+//+api
+//  ErrIsamBeginSession
+//  ========================================================
+//  ERR ErrIsamBeginSession( PIB **pppib )
+//
+//  Begins a session with DAE.  Creates and initializes a PIB for the
+//  user and returns a pointer to it.  Calls system initialization.
+//
+//  PARAMETERS  pppib           Address of a PIB pointer.  On return, *pppib
+//                              will point to the new PIB.
+//
+//  RETURNS     Error code, one of:
+//                  JET_errSuccess
+//                  JET_errOutOfSessions
+//
+//  SEE ALSO        ErrIsamEndSession
+//-
 ERR ISAMAPI ErrIsamBeginSession( JET_INSTANCE inst, JET_SESID *psesid )
 {
     ERR     err;
@@ -47,8 +66,10 @@ ERR ISAMAPI ErrIsamBeginSession( JET_INSTANCE inst, JET_SESID *psesid )
     Assert( sizeof(JET_SESID) == sizeof(PIB *) );
     pppib = (PIB **)psesid;
 
+    //  allocate process information block
+    //
     Call( ErrPIBBeginSession( pinst, pppib, procidNil, fFalse ) );
-    (*pppib)->grbitCommitDefault = pinst->m_grbitCommitDefault;    
+    (*pppib)->grbitCommitDefault = pinst->m_grbitCommitDefault;    /* set default commit flags */
     (*pppib)->SetFUserSession();
 
 HandleError:
@@ -56,6 +77,23 @@ HandleError:
 }
 
 
+//+api
+//  ErrIsamEndSession
+//  =========================================================
+//  ERR ErrIsamEndSession( PIB *ppib, JET_GRBIT grbit )
+//
+//  Ends the session associated with a PIB.
+//
+//  PARAMETERS  ppib        Pointer to PIB for ending session.
+//
+//  RETURNS     JET_errSuccess
+//
+//  SIDE EFFECTS
+//      Rolls back all transaction levels active for this PIB.
+//      Closes all FUCBs for files and sorts open for this PIB.
+//
+//  SEE ALSO    ErrIsamBeginSession
+//-
 ERR ISAMAPI ErrIsamEndSession( JET_SESID sesid, JET_GRBIT grbit )
 {
     ERR     err;
@@ -63,6 +101,7 @@ ERR ISAMAPI ErrIsamEndSession( JET_SESID sesid, JET_GRBIT grbit )
 
     CallR( ErrPIBCheck( ppib ) );
 
+    //  lock session
     err = ppib->ErrPIBSetSessionContext( dwPIBSessionContextUnusable );
     if ( err < 0 )
     {
@@ -73,6 +112,8 @@ ERR ISAMAPI ErrIsamEndSession( JET_SESID sesid, JET_GRBIT grbit )
 
     INST    *pinst  = PinstFromPpib( ppib );
 
+    //  rollback all transactions
+    //
     if ( ppib->Level() > 0 )
     {
         ppib->PrepareTrxContextForEnd();
@@ -82,12 +123,18 @@ ERR ISAMAPI ErrIsamEndSession( JET_SESID sesid, JET_GRBIT grbit )
         Assert( 0 == ppib->Level() );
     }
 
+    //  close all databases for this PIB
+    //
     Call( ErrDBCloseAllDBs( ppib ) );
 
+    //  close all cursors still open
+    //
     while( ppib->pfucbOfSession != pfucbNil )
     {
         FUCB    *pfucb  = ppib->pfucbOfSession;
 
+        //  close materialized or unmaterialized temporary tables
+        //
         if ( FFUCBSort( pfucb ) )
         {
             Assert( !( FFUCBIndex( pfucb ) ) );
@@ -95,10 +142,17 @@ ERR ISAMAPI ErrIsamEndSession( JET_SESID sesid, JET_GRBIT grbit )
         }
         else if ( pinst->FRecovering() )
         {
+            //  If the fucb is used for redo, then it is
+            //  always being opened as a primary FUCB with default index.
+            //  Use DIRClose to close such a fucb.
             DIRClose( pfucb );
         }
         else
         {
+            //  should only be sort and temporary file cursors
+            //  (cursors for user databases should already have
+            //  been closed by the call above to ErrDBCloseAllDBs())
+            //
             Assert( FFMPIsTempDB( pfucb->ifmp ) );
 
             while ( FFUCBSecondary( pfucb ) || FFUCBLongValue( pfucb ) )
@@ -106,6 +160,8 @@ ERR ISAMAPI ErrIsamEndSession( JET_SESID sesid, JET_GRBIT grbit )
                 pfucb = pfucb->pfucbNextOfSession;
                 Assert( FFMPIsTempDB( pfucb->ifmp ) );
 
+                //  a table cursor that owns this index/lv cursor must
+                //  be ahead somewhere
                 AssertRTL( pfucbNil != pfucb );
             }
 
@@ -117,6 +173,8 @@ ERR ISAMAPI ErrIsamEndSession( JET_SESID sesid, JET_GRBIT grbit )
             }
             else
             {
+                //  Open internally, not exported to user
+                //
                 CallS( ErrFILECloseTable( ppib, pfucb ) );
             }
         }
@@ -130,6 +188,7 @@ ERR ISAMAPI ErrIsamEndSession( JET_SESID sesid, JET_GRBIT grbit )
 HandleError:
     Assert( err < 0 );
 
+    //  could not properly terminate session, must leave it in usable state
     ppib->PIBResetSessionContext( fFalse );
 
     return err;
@@ -148,6 +207,8 @@ ERR ErrIsamGetSessionInfo(
     CallR( ErrPIBCheck( ppib ) );
     Assert( ppibNil != ppib );
 
+    //  currently only support JET_SessionInfo
+    //
     if ( JET_SessionInfo == ulInfoLevel )
     {
         if ( cbMax < sizeof(JET_SESSIONINFO) )
@@ -171,20 +232,29 @@ ERR ISAMAPI ErrIsamIdle( JET_SESID sesid, JET_GRBIT grbit )
     ERR     wrnFirst = JET_errSuccess;
 
 #ifndef RTM
+    //  Special verstore test bit 
+    //
+    //  This validates that all the RCE hashes are correct in current verstore state.  
+    //  Note: There is no usage of this in test ese today / May 2017.
     if ( grbit & JET_bitIdleVersionStoreTest )
     {
+        //  return error code for status
         VER *pver = PverFromPpib( (PIB *) sesid );
         Call( pver->ErrInternalCheck() );
     }
-#endif
+#endif  //  !RTM
 
+    //  Handle verstore idle / maintenance tasks
+    //
     if ( grbit & JET_bitIdleStatus )
     {
+        //  return error code for status
         VER *pver = PverFromPpib( (PIB *) sesid );
         Call( pver->ErrVERStatus() );
     }
     else if ( 0 == grbit || JET_bitIdleCompact & grbit  )
     {
+        //  clean all version buckets
         if ( grbit & JET_bitIdleCompactAsync )
         {
             VERSignalCleanup( (PIB *)sesid );
@@ -203,6 +273,9 @@ ERR ISAMAPI ErrIsamIdle( JET_SESID sesid, JET_GRBIT grbit )
     {
         PIB* const ppib = (PIB*)sesid;
 
+        // Test for remaining version store buckets before waiting for DB tasks
+        // because version store cleanup might issue DB tasks and cleanup an RCE
+        // before the DB task is actually completed.
         {
         VER* const pver = PverFromPpib( ppib );
         DWORD_PTR cVerBuckets = 0;
@@ -211,6 +284,7 @@ ERR ISAMAPI ErrIsamIdle( JET_SESID sesid, JET_GRBIT grbit )
         err = ( cVerBuckets != 0 ) ? ErrERRCheck( JET_wrnRemainingVersions ) : JET_errSuccess;
         }
 
+        // Wait for DB tasks to quiesce.
         INST* const pinst = PinstFromPpib( ppib );
         FMP::EnterFMPPoolAsReader();
         for ( DBID dbid = dbidUserLeast; dbid < dbidMax; dbid++ )
@@ -252,8 +326,17 @@ ERR ISAMAPI ErrIsamIdle( JET_SESID sesid, JET_GRBIT grbit )
     Call( err );
     wrnFirst = err;
 
+    //  Handle db cache idle / maintenance tasks
+    //
+    //  Possibly implement on need
+    //      o Triggering + wait avail pool maintenance
+    //      o Triggering avail pool maintenance async
+    //      o Checking checkpoint depth status (other methods for this as well)
+    //      o Triggering + wait checkpoint advancement
+    //      o Triggering checkpoint advancement async
     if ( grbit & JET_bitIdleFlushBuffers )
     {
+        //  flush some dirty buffers
         Call( ErrERRCheck( JET_errInvalidGrbit ) );
     }
     if ( grbit & JET_bitIdleAvailBuffersStatus )
@@ -261,6 +344,7 @@ ERR ISAMAPI ErrIsamIdle( JET_SESID sesid, JET_GRBIT grbit )
         Call( ErrBFCheckMaintAvailPoolStatus() );
         if ( wrnFirst == JET_errSuccess )
         {
+            //  Upgrade warning
             wrnFirst = err;
         }
     }
@@ -283,7 +367,8 @@ ERR VTAPI ErrIsamCapability( JET_SESID vsesid,
 BOOL g_fRepair              = fFalse;
 BOOL g_fEseutil             = fFalse;
 
-BOOL g_fPeriodicTrimEnabled = fFalse;
+// Controls whether periodic database trim is available.
+BOOL g_fPeriodicTrimEnabled = fFalse;   // Configured in ErrITSetConstants()
 
 DWORD g_dwGlobalMajorVersion;
 DWORD g_dwGlobalMinorVersion;
@@ -295,6 +380,9 @@ ERR ISAMAPI ErrIsamSystemInit()
 {
     ERR err;
 
+    //  US English MUST be installed (to ensure
+    //  against different LCMapString() results based on
+    //  whether the specified lcid is installed
     Call( ErrNORMCheckLocaleName( pinstNil, wszLocaleNameDefault ) );
     AssertNORMConstants();
     QWORD qwSortVersion = 0;
@@ -305,20 +393,24 @@ ERR ISAMAPI ErrIsamSystemInit()
     Assert( qwSortVersion != qwMax );
     Assert( qwSortVersion != g_qwUpgradedLocalesTable );
 
+    //  Get OS info, LocalID etc
 
     g_dwGlobalMajorVersion = DwUtilSystemVersionMajor();
     g_dwGlobalMinorVersion = DwUtilSystemVersionMinor();
     g_dwGlobalBuildNumber = DwUtilSystemBuildNumber();
     g_lGlobalSPNumber = DwUtilSystemServicePackNumber();
 
+    //  Set JET constant.
 
     Call( ErrITSetConstants( ) );
 
+    //  Initialize instances
 
     Call( INST::ErrINSTSystemInit() );
 
     CallJ( LGInitTerm::ErrLGSystemInit(), TermInstInit );
 
+    //  initialize file map
 
     CallJ( ErrIOInit(), TermLOGTASK )
 
@@ -423,6 +515,8 @@ VOID ISAMAPI IsamSystemTerm()
     INST::INSTSystemTerm();
 }
 
+//  The contract is that if the function wishes to alter behavior it will set
+//  *perr and return fTrue, otherwise return fFalse for no interest.
 
 BOOL FEnsureLogStreamMustExist( const JET_SNT snt, const JET_RECOVERYCONTROL * const pRecCtrl, __out JET_ERR * const perr )
 {
@@ -431,6 +525,7 @@ BOOL FEnsureLogStreamMustExist( const JET_SNT snt, const JET_RECOVERYCONTROL * c
     {
         AssertRTL( pRecCtrl->MissingLog.lGenMissing == 0 );
 
+        //  Should be default action of success, but we want to fail the application in this case
         Assert( pRecCtrl->errDefault == JET_errSuccess );
         *perr = ErrERRCheckDefault( JET_errFileNotFound );
         return fTrue;
@@ -447,6 +542,7 @@ BOOL FAllowMissingCurrentLog( const JET_SNT snt, const JET_RECOVERYCONTROL * con
                     pRecCtrl->MissingLog.eNextAction == JET_MissingLogContinueToUndo ) &&
                 pRecCtrl->MissingLog.fCurrentLog )
         {
+            //  Should be default action to fail, but if users want, we can continue to recovery        
             AssertRTL( pRecCtrl->errDefault == JET_errMissingLogFile ||
                         pRecCtrl->errDefault == JET_errFileNotFound ||
                         pRecCtrl->errDefault == JET_errSuccess );
@@ -470,6 +566,7 @@ BOOL FReplayIgnoreLostLogs( const JET_SNT snt, const JET_RECOVERYCONTROL * const
                     pRecCtrl->MissingLog.eNextAction == JET_MissingLogContinueToUndo ) &&
                 pRecCtrl->MissingLog.fCurrentLog )
         {
+            //  Should be default action to fail, but we allow loss here, so we want to continue to recovery
             AssertRTL( pRecCtrl->errDefault == JET_errMissingLogFile ||
                         pRecCtrl->errDefault == JET_errFileNotFound ||
                         pRecCtrl->errDefault == JET_errSuccess );
@@ -483,6 +580,8 @@ BOOL FReplayIgnoreLostLogs( const JET_SNT snt, const JET_RECOVERYCONTROL * const
     }
     if ( snt == JET_sntOpenCheckpoint )
     {
+        //  Should be successful, but if we're allowing loss, we want the code to be
+        //  robust so we're just going to ignore the checkpoint and regenerate it.
         AssertRTL( pRecCtrl->errDefault == JET_errSuccess );
     }
 
@@ -494,6 +593,7 @@ BOOL FAllowSoftRecoveryOnBackup( const JET_SNT snt, const JET_RECOVERYCONTROL * 
     if ( snt == JET_sntSignalErrorCondition &&
             pRecCtrl->errDefault == JET_errSoftRecoveryOnBackupDatabase )
     {
+        //  Should be a default action to fail in this case, but allowed if the user specifies it.
         *perr = JET_errSuccess;
         return fTrue;
     }
@@ -506,6 +606,7 @@ BOOL FSkipLostLogsEvent( const JET_SNT snt, const JET_RECOVERYCONTROL * const pR
     if ( snt == JET_sntSignalErrorCondition &&
             pRecCtrl->errDefault == JET_errCommittedLogFilesMissing )
     {
+        //  Default action when this fails we report the event, success squelches the event
         *perr = JET_errSuccess;
         return fTrue;
     }
@@ -521,6 +622,7 @@ struct TM_REC_CTRL_DEFAULT
     JET_PFNINITCALLBACK     pfnUserControl;
     void *                  pvUserContext;
 
+    //  Redo (With Recovery Without Undo) to Undo Transition debugging 
     BOOL                    fSawBeginUndo;
     BOOL                    fSawBeginDo;
     BOOL    FRecoveryWithoutUndo()
@@ -533,10 +635,10 @@ struct TM_REC_CTRL_DEFAULT
 JET_ERR ErrRecoveryControlDefaultCallback(
     __in JET_SNP    snp,
     __in JET_SNT    snt,
-    __in_opt void * pvData,
+    __in_opt void * pvData,             // depends on the snp, snt
     __in_opt void * pvContext )
 {
-    JET_ERR errDefaultAction = JET_wrnNyi;
+    JET_ERR errDefaultAction = JET_wrnNyi;  //  This tracks the default error based upon the grbit options provided.
 
     struct TM_REC_CTRL_DEFAULT * pRecCtrlDefaults = reinterpret_cast<struct TM_REC_CTRL_DEFAULT *>( pvContext );
 
@@ -546,12 +648,19 @@ JET_ERR ErrRecoveryControlDefaultCallback(
     {
         JET_RECOVERYCONTROL * pRecCtrl = reinterpret_cast<JET_RECOVERYCONTROL *>( pvData );
 
+        //  Validation and Processing for Recovery Without Undo is special ...
+        //
 
         switch( snt )
         {
             case JET_sntOpenLog:
+                //  Process Recovery Without Undo special handling ...
+                //
                 if ( pRecCtrl->OpenLog.eReason == JET_OpenLogForDo )
                 {
+                    // It is possible on a clean log we skip undo, so we track that
+                    // we saw "begin do" as well, to validate we don't utilize the
+                    // FRecoveryWithoutUndo() option too early.
                     pRecCtrlDefaults->fSawBeginDo = fTrue;
                     if ( pRecCtrlDefaults->FRecoveryWithoutUndo() )
                     {
@@ -561,16 +670,23 @@ JET_ERR ErrRecoveryControlDefaultCallback(
                 }
                 break;
             case JET_sntOpenCheckpoint:
+                //  We do nothing for this, this is fine.
                 break;
             case JET_sntMissingLog:
+                //  Validation:
+                //
                 if ( pRecCtrl->MissingLog.lGenMissing == 0 )
                 {
                     AssertRTL( pRecCtrl->MissingLog.eNextAction == JET_MissingLogCreateNewLogStream );
                 }
                 break;
             case JET_sntBeginUndo:
+                //  Validation:
+                //
                 AssertRTL( pRecCtrl->errDefault == JET_errSuccess );
                 
+                //  Process Recovery Without Undo special handling ...
+                //
                 pRecCtrlDefaults->fSawBeginUndo = fTrue;
                 Assert( pRecCtrlDefaults->fSawBeginUndo );
                 if ( pRecCtrlDefaults->FRecoveryWithoutUndo() )
@@ -581,6 +697,8 @@ JET_ERR ErrRecoveryControlDefaultCallback(
                 break;
 
             case JET_sntSignalErrorCondition:
+                //  Validation: one of the two expected cases from the code so far
+                //
                 Expected( pRecCtrl->errDefault == JET_errSoftRecoveryOnBackupDatabase ||
                             pRecCtrl->errDefault == JET_errCommittedLogFilesMissing );
                 break;
@@ -593,10 +711,13 @@ JET_ERR ErrRecoveryControlDefaultCallback(
                 break;
 
             default:
+                // our own code should handle all cases
                 AssertSzRTL( fFalse, "Unknown snt = %d for JET_snpRecoveryControl", snt );
                 return ErrERRCheck( JET_wrnNyi );
         }
 
+        //  Processing for all other special behaviors is broken out into sample functions
+        //
 
         JET_ERR errT = JET_wrnNyi;
         
@@ -630,6 +751,7 @@ JET_ERR ErrRecoveryControlDefaultCallback(
             errDefaultAction = errT;
         }
 
+        //  If our grbit processing updated the default action, change the recovery control callback
 
         if ( errDefaultAction != JET_wrnNyi )
         {
@@ -638,6 +760,8 @@ JET_ERR ErrRecoveryControlDefaultCallback(
         }
     }
 
+    //  Changes after this point must be carefully plied, as the user callback may except out of
+    //  this function and be caught by the LOG callback.
 
     JET_ERR errRet = JET_wrnNyi;
 
@@ -645,6 +769,7 @@ JET_ERR ErrRecoveryControlDefaultCallback(
             ( pRecCtrlDefaults->grbit & JET_bitExternalRecoveryControl ||
                 snp != JET_snpRecoveryControl ) )
     {
+        //  perform the user callback
 
         OSTrace( JET_tracetagCallbacks, OSFormat( "ErrRecoveryControlDefaultCallback() issuing user callback\n" ) );
 
@@ -654,17 +779,21 @@ JET_ERR ErrRecoveryControlDefaultCallback(
     }
     else
     {
+        //  no user interest in this callback ...
 
         if ( snp == JET_snpRecoveryControl )
         {
+            //  map the error if necesary ...
             errRet = reinterpret_cast<JET_RECOVERYCONTROL *>( pvData )->errDefault;
         }
         else
         {
+            //  or succeed the callback like nothing is wrong
             errRet = JET_errSuccess;
         }
     }
 
+    //  if we performed the default action error, then we should trap the error here
 
     if ( errDefaultAction != JET_wrnNyi &&
             errDefaultAction != JET_errSuccess &&
@@ -695,18 +824,21 @@ ERR ISAMAPI ErrIsamInit(    JET_INSTANCE    inst,
     Assert( pinst->m_pver );
     Assert( pinst->m_pfsapi );
     Assert( !pinst->FRecovering() );
-    Assert( !FNegTest( fLeakingUnflushedIos ) );
+    Assert( !FNegTest( fLeakingUnflushedIos ) );    // only valid on OS layer or embedded unit tests
 
+    //  create paths now if they do not exist
 
     if ( BoolParam( pinst, JET_paramCreatePathIfNotExist ) )
     {
 
+        //  make the temp path does NOT have a trailing '\' and the log/sys paths do
 
         Assert( !FOSSTRTrailingPathDelimiterW( SzParam( pinst, JET_paramTempPath ) ) );
         Assert( FOSSTRTrailingPathDelimiterW( SzParam( pinst, JET_paramSystemPath ) ) );
         Assert( FOSSTRTrailingPathDelimiterW( SzParam( pinst, JET_paramLogFilePath ) ) );
         Assert( FOSSTRTrailingPathDelimiterW( SzParam( pinst, JET_paramRBSFilePath ) ) );
 
+        //  create paths
 
         CallR( ErrUtilCreatePathIfNotExist( pinst->m_pfsapi, SzParam( pinst, JET_paramTempPath ), NULL, 0 ) );
         CallR( ErrUtilCreatePathIfNotExist( pinst->m_pfsapi, SzParam( pinst, JET_paramSystemPath ), NULL, 0 ) );
@@ -714,33 +846,45 @@ ERR ISAMAPI ErrIsamInit(    JET_INSTANCE    inst,
         CallR( ErrUtilCreatePathIfNotExist( pinst->m_pfsapi, SzParam( pinst, JET_paramRBSFilePath ), NULL, 0 ) );
     }
 
+    //  Get basic global parameters for checking LG parameters
 
     CallR( plog->ErrLGInitSetInstanceWiseParameters( grbit ) );
 
+    //  Check all the system parameter before we continue
 
+    // log file size should be multiple of sector size
     if ( 0 != ( __int64( ( UlParam( pinst, JET_paramLogFileSize ) ) * 1024 ) % plog->CSecLGFile() ) )
     {
         return ErrERRCheck( JET_errInvalidSettings );
     }
 
+    // number of sectors should be correctly set based on sector size
     if ( plog->CbLGSec() != (ULONG) ( __int64( UlParam( pinst, JET_paramLogFileSize ) ) * 1024 / plog->CSecLGFile() ) )
     {
         return ErrERRCheck( JET_errInvalidSettings );
     }
 
+    // cannot delete log files if not doing circular logging
     if ( BoolParam( pinst, JET_paramCleanupMismatchedLogFiles ) && !BoolParam( pinst, JET_paramCircularLog ) )
     {
         return ErrERRCheck( JET_errInvalidSettings );
     }
 
+    // cannot delete log files if dbs still attached (with required range
+    // potentially within those files)
     if ( BoolParam( pinst, JET_paramCleanupMismatchedLogFiles ) && ( grbit & JET_bitKeepDbAttachedAtEndOfRecovery ) )
     {
         return ErrERRCheck( JET_errInvalidSettings );
     }
 
+    //  Set other variables global to this instance
 
     Assert( pinst->m_updateid == updateidMin );
 
+    //  Reserve IOREQ for LOG::LGICreateAsynchIOIssue. Note that we will only do
+    //  asynch creation if we can extend the log file with arbitrarily big
+    //  enough I/Os.
+    //
     if ( BoolParam( pinst, JET_paramLogFileCreateAsynch ) &&
             cbLogExtendPattern >= UlParam( JET_paramMaxCoalesceWriteSize ) &&
             !plog->FLogDisabled() &&
@@ -748,6 +892,8 @@ ERR ISAMAPI ErrIsamInit(    JET_INSTANCE    inst,
     {
         if ( plog->ErrLGInitTmpLogBuffers() < JET_errSuccess )
         {
+            //  we don't need the reserved IOREQ anymore
+            //
             pinst->UnreserveIOREQ();
         }
         else
@@ -756,6 +902,8 @@ ERR ISAMAPI ErrIsamInit(    JET_INSTANCE    inst,
         }
     }
 
+    //  set waypoint depth override if applicable
+    //
     WCHAR   wszBuf[ 16 ]            = { 0 };
     wszBuf[0] = L'\0';
     if (    FOSConfigGet( L"BF", L"Waypoint Depth", wszBuf, sizeof( wszBuf ) ) &&
@@ -764,10 +912,15 @@ ERR ISAMAPI ErrIsamInit(    JET_INSTANCE    inst,
         LONG lWaypointDepth = _wtol( wszBuf );
         if ( lWaypointDepth < 1023 && lWaypointDepth >= 0 )
         {
+            // waypoint between 0 and 1023, set it.
+            //
+            // We can ignore the error, chances are we'll be successful eventually.  Heck can this fail?
             (void)Param( pinst, JET_paramWaypointLatency )->Set( pinst, ppibNil, lWaypointDepth, NULL );
         }
     }
 
+    //  this allows us to actually turn of checkpoint overscanning ... not recommended.
+    //
     wszBuf[0] = L'\0';
     if (    FOSConfigGet( L"BF", L"Checkpoint Dependancy Overscanning", wszBuf, sizeof( wszBuf ) ) &&
             wszBuf[ 0 ] )
@@ -786,7 +939,7 @@ ERR ISAMAPI ErrIsamInit(    JET_INSTANCE    inst,
 
     pinst->m_isdlInit.Trigger( eInitConfigInitDone );
 
-    
+    /*  write jet instance start event */
 
     OSStrCbFormatW( rgwszDw[0], sizeof(rgwszDw[0]), L"%d", IpinstFromPinst( pinst ) );
     OSStrCbFormatW( rgwszDw[1], sizeof(rgwszDw[1]), L"%d", DwUtilImageVersionMajor() );
@@ -810,27 +963,35 @@ ERR ISAMAPI ErrIsamInit(    JET_INSTANCE    inst,
         NULL,
         pinst );
 
-    
+    /*  initialize system according to logging disabled
+    /**/
     pinst->SetStatusRedo();
 
     if ( !plog->FLogDisabled() )
     {
         DBMS_PARAM  dbms_param;
 
-        
+        /*  initialize log manager, and check the last generation
+        /*  of log files to determine if recovery needed.
+        /*  (do not create the reserve logs -- this is done later during soft recovery)
+        /**/
         CallJ( plog->ErrLGInit( &fNewCheckpointFile ), Uninitialize );
         fLGInitIsDone = fTrue;
 
-        
+        /*  store the system parameters
+         */
         pinst->SaveDBMSParams( &dbms_param );
 
         pinst->m_isdlInit.Trigger( eInitBaseLogInitDone );
 
-        
+        /*  recover attached databases to consistent state
+        /**/
         if ( grbit & ( JET_bitExternalRecoveryControl |
+                        // Former bits that are controlled by our ErrRecoveryControlDefaultCallback
                         JET_bitLogStreamMustExist |
                         JET_bitRecoveryWithoutUndo |
-                        JET_bitReplayIgnoreLostLogs |
+                        JET_bitReplayIgnoreLostLogs |   // this one only partially handled by grbits callback.
+                        // New bad behaviors, that we should try to groom out of the system.
                         JET_bitAllowSoftRecoveryOnBackup |
                         JET_bitAllowMissingCurrentLog |
                         JET_bitSkipLostLogsEvent ) )
@@ -859,7 +1020,8 @@ ERR ISAMAPI ErrIsamInit(    JET_INSTANCE    inst,
 
         Assert( plog->CSecLGFile() == __int64( ( UlParam( pinst, JET_paramLogFileSize ) ) * 1024 ) / plog->CbLGSec() );
 
-        
+        /*  add the first log record
+        /**/
         CallJ( ErrLGStart( pinst ), TermLG );
     }
     pinst->m_isdlInit.Trigger( eInitLogInitDone );
@@ -868,13 +1030,18 @@ ERR ISAMAPI ErrIsamInit(    JET_INSTANCE    inst,
 
     OSTraceWriteRefLog( ostrlSystemFixed, sysosrtlDatapoint|sysosrtlContextInst, pinst, (PVOID)&(pinst->m_iInstance), sizeof(pinst->m_iInstance) );
 
-    
+    /*  initialize remaining system
+    /**/
     CallJ( pinst->ErrINSTInit(), TermLG );
     
+    // If we haven't initialized snapshot yet, it is either due to conditions not being met or there was no recovery done. No harm in retrying.
     if ( !pinst->m_prbs )
     {
+        // We will initialize the revert snapshot from Rstmap during LGRIInitSession.
+        // Also, check if we need to roll the snapshot and roll it if required.
         CallJ( CRevertSnapshot::ErrRBSInitFromRstmap( pinst ), TermIT );
 
+        // If required range was a problem or if db's are not on the required efv m_prbs would be null in ErrRBSInitFromRstmap
         if ( pinst->m_prbs && pinst->m_prbs->FRollSnapshot() )
         {
             CallJ( pinst->m_prbs->ErrRollSnapshot( fTrue, fTrue ), TermIT );
@@ -884,7 +1051,8 @@ ERR ISAMAPI ErrIsamInit(    JET_INSTANCE    inst,
     Assert( !pinst->FRecovering() );
     Assert( !fJetLogGeneratedDuringSoftStart || !plog->FLogDisabled() );
 
-    
+    /*  set up FMP from checkpoint.
+    /**/
     if ( !plog->FLogDisabled() )
     {
         WCHAR   wszPathJetChkLog[IFileSystemAPI::cchPathMax];
@@ -894,6 +1062,9 @@ ERR ISAMAPI ErrIsamInit(    JET_INSTANCE    inst,
         if ( JET_errCheckpointFileNotFound == err
             && ( fNewCheckpointFile || fJetLogGeneratedDuringSoftStart ) )
         {
+            //  could not locate checkpoint file, but we had previously
+            //  deemed it necessary to create a new one (either because it
+            //  was missing or because we're beginning from gen 1)
             plog->SetCheckpointEnabled( fTrue );
             (VOID) plog->ErrLGUpdateCheckpointFile( fTrue );
 
@@ -904,6 +1075,8 @@ ERR ISAMAPI ErrIsamInit(    JET_INSTANCE    inst,
                 plog->LGVerifyFileHeaderOnInit();
             }
 
+                //  must make sure we wipe out the JET_errCheckpointFileNotFound that is
+                //  in err.
                 err = JET_errSuccess;
         }
         else
@@ -913,7 +1086,7 @@ ERR ISAMAPI ErrIsamInit(    JET_INSTANCE    inst,
 
         if ( err >= JET_errSuccess )
         {
-            CallS( err );
+            CallS( err );   // ensure we don't clobber a previously returned warning (should be none)
             err = plog->ErrLGMostSignificantRecoveryWarning();
             Assert( err >= JET_errSuccess );
         }
@@ -928,6 +1101,12 @@ TermIT:
     Assert( errT == JET_errSuccess || pinst->m_fTermAbruptly );
 
 TermLG:
+    // there may be databases still attached from recovery - even if this
+    // JetInit call did not pass in JET_bitKeepAttachedAtEndOfRecovery, previous
+    // calls may have done so and we replay those recovery-quit the same way
+    // based on what flag was passed in at that point
+    //
+    // If no dbs are attached, the below code is basically a nop
     plog->LGDisableCheckpoint();
 
     for ( DBID dbid = dbidUserLeast; dbid < dbidMax; dbid++ )
@@ -942,17 +1121,19 @@ TermLG:
         }
     }
 
-    (VOID)ErrIOTerm( pinst, fFalse  );
+    (VOID)ErrIOTerm( pinst, fFalse /* fNormal */ );
 
     if ( fLGInitIsDone )
     {
-        (VOID)plog->ErrLGTerm( fFalse  );
+        (VOID)plog->ErrLGTerm( fFalse /* do not flush log */ );
     }
 
     if ( fJetLogGeneratedDuringSoftStart )
     {
         WCHAR   wszLogName[ IFileSystemAPI::cchPathMax ];
 
+        //  Instead of using m_wszLogName (part of the shared-state monster),
+        //  generate edb.jtx/log's filename now.
         plog->LGMakeLogName( wszLogName, sizeof(wszLogName), eCurrentLog );
         (VOID)pinst->m_pfsapi->ErrFileDelete( wszLogName );
     }
@@ -973,6 +1154,7 @@ ERR ISAMAPI ErrIsamTerm( JET_INSTANCE instance, JET_GRBIT grbit )
     const BOOL  fInstanceUnavailable    = pinst->FInstanceUnavailable();
     TERMTYPE    termtype                = termtypeCleanUp;
 
+    //  select our termination mode
 
     if ( fInstanceUnavailable )
     {
@@ -987,12 +1169,14 @@ ERR ISAMAPI ErrIsamTerm( JET_INSTANCE instance, JET_GRBIT grbit )
         termtype = termtypeNoCleanUp;
     }
 
+    //  term the instance
 
     err = pinst->ErrINSTTerm( termtype );
 
     if ( pinst->m_fSTInit != fSTInitNotDone )
     {
-        
+        /*  before getting an error before reaching no-returning point in ITTerm().
+         */
         Assert( err < 0 );
         pinst->m_isdlTerm.TermSequence();
         return err;
@@ -1029,6 +1213,7 @@ ERR ISAMAPI ErrIsamTerm( JET_INSTANCE instance, JET_GRBIT grbit )
 
     pinst->m_isdlTerm.Trigger( eTermLogTermDone );
 
+    //  term the file-system
 
     delete pinst->m_pfsapi;
     pinst->m_pfsapi = NULL;
@@ -1038,11 +1223,13 @@ ERR ISAMAPI ErrIsamTerm( JET_INSTANCE instance, JET_GRBIT grbit )
     pinst->m_isdlTerm.Trigger( eTermDone );
 
     const ULONG cbTimingResourceDataSequence = pinst->m_isdlTerm.CbSprintTimings();
+    //  let's keep it rational, note we're at 6.8k right now, and while 8k might seem 
+    //  like a lot, we're likely near the top of the stacks.
     Expected( cbTimingResourceDataSequence < 8192 );
     WCHAR * wszTimingResourceDataSequence = (WCHAR *)_alloca( cbTimingResourceDataSequence );
     pinst->m_isdlTerm.SprintTimings( wszTimingResourceDataSequence, cbTimingResourceDataSequence );
 
-    
+    /*  write jet stop event */
     if (    err >= JET_errSuccess && termtypeError != termtype ||
             err == JET_errDirtyShutdown && termtypeError == termtype )
     {
@@ -1070,7 +1257,7 @@ ERR ISAMAPI ErrIsamTerm( JET_INSTANCE instance, JET_GRBIT grbit )
             NULL,
             pinst );
 
-        ULONG rgul[2] = { (ULONG)pinst->m_iInstance, (ULONG)err  };
+        ULONG rgul[2] = { (ULONG)pinst->m_iInstance, (ULONG)err /* for term dirty */ };
         OSTraceWriteRefLog( ostrlSystemFixed, sysosrtlTermSucceed|sysosrtlContextInst, pinst, rgul, sizeof(rgul) );
     }
     else
@@ -1105,6 +1292,22 @@ ERR ISAMAPI ErrIsamTerm( JET_INSTANCE instance, JET_GRBIT grbit )
     return err;
 }
 
+//+api
+//  ErrIsamSetSessionParameter
+//  =========================================================
+//
+//  Allows a client to set a parameter that has a session-only
+//  scope.
+//
+//  PARAMETERS
+//      ppib            pointer to PIB for user
+//      sesparamid      the parameter "ID" that the client is trying to set
+//      pvParam         the value to set in this parameter
+//      cbParam         the size of the value of this parameter
+//
+//  RETURNS     JET_errSuccess | JET_errInvalidParameter
+//
+//-
 
 ERR ErrIsamSetSessionParameter(
     _In_opt_ JET_SESID                          vsesid,
@@ -1114,6 +1317,9 @@ ERR ErrIsamSetSessionParameter(
 {
     PIB     * ppib  = (PIB *)vsesid;
 
+    //  Can do a common check for NULL pvParam, if the cbParam != 0 (essentially 
+    //  saying we have a valid buffer).  The cbParam validity has to be checked
+    //  on a per sesparamid basis below obviously.
     if ( pvParam == NULL && cbParam != 0 )
     {
         return ErrERRCheck( JET_errInvalidParameter );
@@ -1167,13 +1373,29 @@ ERR ErrIsamSetSessionParameter(
         return ppib->ErrSetCommitContextContainsCustomerData( pvParam, cbParam );
 
     default:
-        Expected( ( sesparamid >= JET_sesparamCommitDefault )  && ( sesparamid < ( JET_sesparamCommitDefault + 1024 ) ) );
+        Expected( ( sesparamid >= JET_sesparamCommitDefault ) /* min value */ && ( sesparamid < ( JET_sesparamCommitDefault + 1024 ) ) );   // or they're passing a sysparam or dbparam?
         return ErrERRCheck( JET_errInvalidSesparamId );
     }
 
     return JET_errSuccess;
 }
 
+//+api
+//  ErrIsamGetSessionParameter
+//  =========================================================
+//
+//  Allows a client to retrieve a parameter from the specified
+//  session.
+//
+//  PARAMETERS
+//      ppib            pointer to PIB for user
+//      sesparamid      the parameter "ID" that the client is trying to get
+//      pvParam         the output buffer
+//      cbParamMax      the max size that can be set in the output buffer
+//
+//  RETURNS     JET_errSuccess | JET_errInvalidParameter
+//
+//-
 
 ERR ErrIsamGetSessionParameter(
     _In_opt_ JET_SESID                                          vsesid,
@@ -1197,6 +1419,7 @@ ERR ErrIsamGetSessionParameter(
         {
             *pcbParamActual = sizeof(JET_GRBIT);
         }
+        // Should cbParamMax check for maybe just >= sizeof(JET_GRBIT)? probably fine.
         if ( pvParam && cbParamMax != sizeof(JET_GRBIT) )
         {
             return ErrERRCheck( JET_errInvalidBufferSize );
@@ -1230,6 +1453,10 @@ ERR ErrIsamGetSessionParameter(
         {
             *pcbParamActual = sizeof(LONG);
         }
+        //  note: technically I didn't fix GetTransactionLevel() to refer to this, but in
+        //  that API it's a ULONG_PTR / so 64-bits on 64-bit archs.  Someone should fix this
+        //  if we ever update GetTransactionLevel() - though hoping more we can just deprecate
+        //  that API.
         if ( pvParam && cbParamMax != sizeof(LONG) )
         {
             return ErrERRCheck( JET_errInvalidBufferSize );
@@ -1398,6 +1625,10 @@ ERR ErrIsamGetSessionParameter(
         {
             *pcbParamActual = sizeof(JET_GRBIT);
         }
+        //  note: technically I didn't fix GetTransactionLevel() to refer to this, but in
+        //  that API it's a ULONG_PTR / so 64-bits on 64-bit archs.  Someone should fix this
+        //  if we ever update GetTransactionLevel() - though hoping more we can just deprecate
+        //  that API.
         if ( pvParam && cbParamMax != sizeof(JET_GRBIT) )
         {
             return ErrERRCheck( JET_errInvalidBufferSize );
@@ -1427,7 +1658,7 @@ ERR ErrIsamGetSessionParameter(
     }
 
     default:
-        Expected( ( sesparamid >= JET_sesparamCommitDefault )  && ( sesparamid < ( JET_sesparamCommitDefault + 1024 ) ) );
+        Expected( ( sesparamid >= JET_sesparamCommitDefault ) /* min value */ && ( sesparamid < ( JET_sesparamCommitDefault + 1024 ) ) );   // or they're passing a sysparam or dbparam?
         return ErrERRCheck( JET_errInvalidSesparamId );
     }
 
@@ -1435,6 +1666,24 @@ ERR ErrIsamGetSessionParameter(
 }
 
 
+//+api
+//  ErrIsamBeginTransaction
+//  =========================================================
+//  ERR ErrIsamBeginTransaction( PIB *ppib )
+//
+//  Starts a transaction for the current user.  The user's transaction
+//  level increases by one.
+//
+//  PARAMETERS  ppib            pointer to PIB for user
+//
+//  RETURNS     JET_errSuccess
+//
+//  SIDE EFFECTS
+//      The CSR stack for each active FUCB of this user is copied
+//      to the new transaction level.
+//
+// SEE ALSO     ErrIsamCommitTransaction, ErrIsamRollback
+//-
 ERR ISAMAPI ErrIsamBeginTransaction( JET_SESID vsesid, TRXID trxid, JET_GRBIT grbit )
 {
     PIB     * ppib  = (PIB *)vsesid;
@@ -1452,7 +1701,7 @@ ERR ISAMAPI ErrIsamBeginTransaction( JET_SESID vsesid, TRXID trxid, JET_GRBIT gr
         err = ErrDIRBeginTransaction(
                     ppib,
                     trxid,
-                    ( grbit & grbitsSupported ) );
+                    ( grbit & grbitsSupported ) );  //  filter out unsupported grbits
     }
     else
     {
@@ -1465,6 +1714,25 @@ ERR ISAMAPI ErrIsamBeginTransaction( JET_SESID vsesid, TRXID trxid, JET_GRBIT gr
 
 extern JET_GRBIT g_grbitCommitFlagsMsk;
 
+//+api
+//  ErrIsamCommitTransaction
+//  ========================================================
+//  ERR ErrIsamCommitTransaction( JET_SESID vsesid, JET_GRBIT grbit, DWORD cmsecDurableCommit, JET_COMMIT_ID *pCommitId )
+//
+//  Commits the current transaction for this user.  The transaction level
+//  for this user is decreased by the number of levels committed.
+//
+//  PARAMETERS
+//
+//  RETURNS     JET_errSuccess
+//
+//  SIDE EFFECTS
+//      The CSR stack for each active FUCB of this user is copied
+//      from the old ( higher ) transaction level to the new ( lower )
+//      transaction level.
+//
+//  SEE ALSO    ErrIsamBeginTransaction, ErrIsamRollback
+//-
 ERR ISAMAPI ErrIsamCommitTransaction( JET_SESID vsesid, JET_GRBIT grbit, DWORD cmsecDurableCommit, JET_COMMIT_ID *pCommitId )
 {
     ERR     err;
@@ -1473,13 +1741,18 @@ ERR ISAMAPI ErrIsamCommitTransaction( JET_SESID vsesid, JET_GRBIT grbit, DWORD c
     
     CallR( ErrPIBCheck( ppib ) );
 
+    //  validate grbits
+    //
     if ( grbit & ~g_grbitCommitFlagsMsk )
     {
         return ErrERRCheck( JET_errInvalidGrbit );
     }
 
+    //  may not be in a transaction, but force a new log to be created
+    //
     if ( JET_bitForceNewLog & grbit )
     {
+        //  no other grbits may be specified in conjunction with JET_bitForceNewLog
         if ( JET_bitForceNewLog != grbit )
         {
             return ErrERRCheck( JET_errInvalidGrbit );
@@ -1490,8 +1763,12 @@ ERR ISAMAPI ErrIsamCommitTransaction( JET_SESID vsesid, JET_GRBIT grbit, DWORD c
         return ErrLGWaitForWrite( ppib, &lgpos );
     }
 
+    //  may not be in a transaction, but wait for flush of all
+    //  currently commited transactions.
+    //
     if ( JET_bitWaitAllLevel0Commit & grbit )
     {
+        //  no other grbits may be specified in conjunction with JET_bitWaitAllLevel0Commit
         if ( JET_bitWaitAllLevel0Commit != grbit )
         {
             return ErrERRCheck( JET_errInvalidGrbit );
@@ -1502,15 +1779,24 @@ ERR ISAMAPI ErrIsamCommitTransaction( JET_SESID vsesid, JET_GRBIT grbit, DWORD c
         return ErrLGForceWriteLog( ppib );
     }
 
+    //  may not be in a transaction, but wait for flush of previous
+    //  lazy committed transactions.
+    //
     if ( grbit & JET_bitWaitLastLevel0Commit )
     {
+        //  If we are not at level 0 AND the user succeeds here with a wait last on 
+        //  this session, we would still rollback this open trx if we crash ... this
+        //  would be probably not what the client hoped for.
         Expected( ppib->Level() == 0 || !ppib->FBegin0Logged() );
 
+        //  no other grbits may be specified in conjunction with WaitLastLevel0Commit
         if ( JET_bitWaitLastLevel0Commit != grbit )
         {
             return ErrERRCheck( JET_errInvalidGrbit );
         }
 
+        //  wait for last level 0 commit and rely on good user behavior
+        //
         if ( CmpLgpos( &ppib->lgposCommit0, &lgposMax ) == 0 )
         {
             return JET_errSuccess;
@@ -1536,6 +1822,11 @@ ERR ISAMAPI ErrIsamCommitTransaction( JET_SESID vsesid, JET_GRBIT grbit, DWORD c
 
     err = ErrDIRCommitTransaction( ppib, grbit, cmsecDurableCommit, pCommitId );
 
+    //  reset uncommitted flags on any materialized sorts committed to level 0.
+    //  Base tables are shared objects and have their bits reset when
+    //  operCreateTable is committed to level 0.  Temporary tables are specific
+    //  to a session and do not have operCreateTables and so are reset here.
+    //
     if ( ppib->Level() == 0 )
     {
         for ( pfucb = ppib->pfucbOfSession; pfucb != pfucbNil; pfucb = pfucb->pfucbNextOfSession )
@@ -1557,6 +1848,20 @@ ERR ISAMAPI ErrIsamCommitTransaction( JET_SESID vsesid, JET_GRBIT grbit, DWORD c
 }
 
 
+//+api
+//  ErrIsamRollback
+//  ========================================================
+//  ERR ErrIsamRollback( PIB *ppib, JET_GRBIT grbit )
+//
+//  Rolls back transactions for the current user.  The transaction level of
+//  the current user is decreased by the number of levels aborted.
+//
+//  PARAMETERS  ppib        pointer to PIB for user
+//              grbit       unused
+//
+//  RETURNS
+//      JET_errSuccess
+//-
 ERR ISAMAPI ErrIsamRollback( JET_SESID vsesid, JET_GRBIT grbit )
 {
     ERR         err;
@@ -1565,7 +1870,8 @@ ERR ISAMAPI ErrIsamRollback( JET_SESID vsesid, JET_GRBIT grbit )
     FUCB        * pfucbNext;
 
 
-    
+    /*  check session id before using it
+    /**/
     CallR( ErrPIBCheck( ppib ) );
 
     if ( ppib->Level() == 0 )
@@ -1577,25 +1883,40 @@ ERR ISAMAPI ErrIsamRollback( JET_SESID vsesid, JET_GRBIT grbit )
     {
         const LEVEL levelRollback   = LEVEL( ppib->Level() - 1 );
         
-        
+        /*  get first primary index cusor
+        /**/
         for ( pfucb = ppib->pfucbOfSession;
             pfucb != pfucbNil && ( FFUCBSecondary( pfucb ) || FFUCBLongValue( pfucb ) );
             pfucb = pfucb->pfucbNextOfSession )
             NULL;
 
-        
+        /*  LOOP 1 -- first go through all open cursors, and close them
+        /*  or reset secondary index cursors, if opened in transaction
+        /*  rolled back.  Reset copy buffer status and move before first.
+        /*  Some cursors will be fully closed, if they have not performed any
+        /*  updates.  This will include secondary index cursors
+        /*  attached to primary index cursors, so pfucbNext must
+        /*  always be a primary index cursor, to ensure that it will
+        /*  be valid for the next loop iteration.  Note that no information
+        /*  necessary for subsequent rollback processing is lost, since
+        /*  the cursors will only be released if they have performed no
+        /*  updates including DDL.
+        /**/
         for ( ; pfucb != pfucbNil; pfucb = pfucbNext )
         {
-            
+            /*  get next primary index cusor
+            /**/
             for ( pfucbNext = pfucb->pfucbNextOfSession;
                 pfucbNext != pfucbNil && ( FFUCBSecondary( pfucbNext ) || FFUCBLongValue( pfucbNext ) );
                 pfucbNext = pfucbNext->pfucbNextOfSession )
                 NULL;
 
-            
+            /*  if defer closed then continue
+            /**/
             if ( FFUCBDeferClosed( pfucb ) )
                 continue;
 
+            //  reset copy buffer status for each cursor on rollback
             if ( FFUCBUpdatePreparedLevel( pfucb, pfucb->ppib->Level() ) )
             {
                 RECIFreeCopyBuffer( pfucb );
@@ -1604,7 +1925,12 @@ ERR ISAMAPI ErrIsamRollback( JET_SESID vsesid, JET_GRBIT grbit )
 
             Assert( 0 == pfucb->levelReuse || pfucb->levelReuse >= pfucb->levelOpen );
 
-            
+            /*  if current cursor is a table, and was opened in rolled back
+            /*  transaction, then close cursor. Additionally, if this cursor was
+            /*  reused at higher level than the rollback, we need to close it as
+            /*  well as any opened cursor (opened or dupe'd) needs to be closed
+            /*  when the transaction rolls back.
+            /**/
             if ( FFUCBIndex( pfucb ) && pfucb->u.pfcb->FPrimaryIndex() )
             {
                 if ( pfucb->levelOpen > levelRollback ||
@@ -1616,12 +1942,18 @@ ERR ISAMAPI ErrIsamRollback( JET_SESID vsesid, JET_GRBIT grbit )
                     }
                     else
                     {
+                        //  Open internally, not exported to user.
                         CallS( ErrFILECloseTable( ppib, pfucb ) );
                     }
                     continue;
                 }
                 
-                
+                /*  if primary index cursor, and secondary index set
+                /*  in rolled back transaction, then change index to primary
+                /*  index.  This must be done, since secondary index
+                /*  definition may be rolled back, if the index was created
+                /*  in the rolled back transaction.
+                /**/
                 if ( pfucb->pfucbCurIndex != pfucbNil )
                 {
                     if ( pfucb->pfucbCurIndex->levelOpen > levelRollback )
@@ -1631,6 +1963,7 @@ ERR ISAMAPI ErrIsamRollback( JET_SESID vsesid, JET_GRBIT grbit )
                 }
             }
 
+            //  if LV cursor was opened at this level, close it
             if ( pfucbNil != pfucb->pfucbLV
                 && ( pfucb->pfucbLV->levelOpen > levelRollback ||
                      pfucb->pfucbLV->levelReuse > levelRollback ) )
@@ -1639,7 +1972,9 @@ ERR ISAMAPI ErrIsamRollback( JET_SESID vsesid, JET_GRBIT grbit )
                 pfucb->pfucbLV = pfucbNil;
             }
 
-            
+            /*  if current cursor is a sort, and was opened in rolled back
+            /*  transaction, then close cursor.
+            /**/
             if ( FFUCBSort( pfucb ) )
             {
                 if ( pfucb->levelOpen > levelRollback ||
@@ -1650,7 +1985,9 @@ ERR ISAMAPI ErrIsamRollback( JET_SESID vsesid, JET_GRBIT grbit )
                 }
             }
 
-            
+            /*  if not sort and not index, and was opened in rolled back
+            /*  transaction, then close DIR cursor directly.
+            /**/
             if ( pfucb->levelOpen > levelRollback ||
                 pfucb->levelReuse > levelRollback )
             {
@@ -1659,18 +1996,23 @@ ERR ISAMAPI ErrIsamRollback( JET_SESID vsesid, JET_GRBIT grbit )
             }
         }
 
-        
+        /*  call lower level abort routine
+        /**/
         err = ErrDIRRollback( ppib, grbit );
         if ( JET_errRollbackError == err )
         {
             err = ppib->ErrRollbackFailure();
 
+            // recover the error from rollback here
+            // and return that one
             Assert( err < JET_errSuccess );
         }
         CallR( err );
     }
     while ( ( grbit & JET_bitRollbackAll ) != 0 && ppib->Level() > 0 );
 
+    //  reset must rollback if rolled back all the way to level 0
+    //
     if ( ppib->Level() == 0 )
     {
         ppib->ResetMustRollbackToLevel0();

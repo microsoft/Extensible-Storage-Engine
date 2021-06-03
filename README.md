@@ -29,14 +29,12 @@ No.  Well ... it depends ... the question is not quite correct.  Most people do 
 
 ## Future Plans
 
-### Comments
+### Continuous Commit Push
 
-You may notice the initial code is without comments!  This codebase has a long history of internal development at Microsoft, so, in order to stay on the safe side with the very first release of the source code, we have temporarily removed all comments and excluded certain file types.  We will be pushing enhanced and cleaned up comments as we are able to review them.
-
-### CMake
-
-We also will be pushing build files, codegen scripts, and a little more infrastructure to get a building ESE.  Right now, the code is provided just for instructional purposes only.
+The code as of June 2021 is a single snapshot of the source code. We will be pushing commits from our internal repo as they are made individually, instead of as a periodic monolithic drop. 
 
 ### Tests
 
-We are initially withholding the test code, and, as with the comments and the codegen scripts, we will be gradually releasing the tests, as well as adding Azure pipelines to run them.
+We released the unit tests, but we may in the future release more of the test code.
+
+We will also be adding Azure pipelines to run the tests that are already present in this repo.

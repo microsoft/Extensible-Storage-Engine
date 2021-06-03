@@ -12,6 +12,8 @@ namespace Exchange
 namespace Isam
 {
 
+// JET_objtyp* appears as #defines in jet.h, we rename them slightly (dropping JET_objtyp) to
+// avoid a preprocessor nightmare
 
 MSINTERNAL enum class MJET_OBJTYP
 {

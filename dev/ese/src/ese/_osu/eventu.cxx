@@ -11,16 +11,16 @@ WCHAR WchReportInstState( const INST * const pinst )
 {
     switch( ( pinst == NULL ) ? -1 : pinst->m_perfstatusEvent )
     {
-    case -1:                            return 'G';
-    case 0:                             return 'P';
+    case -1:                            return 'G';  //  Global
+    case 0:                             return 'P';  //  Pre-recovery (sysinit or os init)
     case perfStatusRecoveryRedo:        return 'R';
     case perfStatusRecoveryUndo:        return 'U';
-    case perfStatusRuntime:             return 'D';
+    case perfStatusRuntime:             return 'D';  //  Do-time
     case perfStatusTerm:                return 'T';
-    case perfStatusError:               Expected( fFalse ); return 'E';
+    case perfStatusError:               Expected( fFalse ); return 'E';  //  note we block perfStatusError at set time, so should not see.
     default:                            AssertSz( fFalse, "Unknown perfstatus / eventing state value = %d", pinst->m_perfstatusEvent );
     }
-    return '-';
+    return '-'; //  actually unknown!?
 }
 
 void UtilReportEvent(
@@ -48,11 +48,13 @@ void UtilReportEvent(
 
     const WCHAR** rgpsz = (const WCHAR**)_alloca( sizeof( const WCHAR* ) * ( cString + cAdditionalParam ) );
 
+    //  validate IN args
 
     Assert( catid < MAC_CATEGORY );
     Assert( DWORD( WORD( catid ) ) == catid );
     Assert( DWORD( WORD( cString + 2 ) ) == cString + 2 );
 
+    //  get event source and process ID strings
 
     rgpsz[ 0 ] = pinst != pinstNil ? SzParam( pinst, JET_paramEventSource ) : L"";
     if ( !rgpsz[ 0 ][ 0 ] )
@@ -60,17 +62,26 @@ void UtilReportEvent(
         rgpsz[ 0 ] = WszUtilProcessFriendlyName();
     }
 
-    WCHAR wszStateInfoEx[16 + 2 + 4 + 20];
+    WCHAR wszStateInfoEx[16 + 2 + 4 + 20];  //  PID + Recovery/Undo/Do-time/Term mode + ApiOpCode + Bu.il.dNum.ber
 #ifdef ESENT
+    //  I (SOMEONE) believe that DwUtilImageVersionMajor() and DwUtilImageBuildNumberMajor() reports false numbers for various
+    //  poorly thought out / invalid (*IMNHO*) reasons, would rather not report anything at all than bad / false numbers.
     OSStrCbFormatW( wszStateInfoEx, sizeof(wszStateInfoEx), L"%I32u,%wc,%I32u", DwUtilProcessId(), WchReportInstState( pinst ), OpTraceContext() );
 #else
+    //  Format of Bu.il.dNum.ber copied from FOSSysinfoPreinit() for Exchange.
     OSStrCbFormatW( wszStateInfoEx, sizeof(wszStateInfoEx), L"%I32u,%wc,%I32u,%02I32u.%02I32u.%04I32u.%03I32u", DwUtilProcessId(), WchReportInstState( pinst ), OpTraceContext(),
         DwUtilImageVersionMajor(), DwUtilImageVersionMinor(), DwUtilImageBuildNumberMajor(), DwUtilImageBuildNumberMinor() );
 #endif
     rgpsz[1] = wszStateInfoEx;
 
-    WCHAR wszDisplayName[JET_cbFullNameMost + 3];
-    
+    WCHAR wszDisplayName[JET_cbFullNameMost + 3]; // 3 = sizof(": ") + 1
+    /*
+    IF      m_wszDisplayName exists
+    THEN    display m_wszDisplayName
+    ELSE IF     m_wszInstanceName exists
+         THEN   display m_wszInstanceName
+    ELSE    display nothing
+    */
     if ( pinst && pinst->m_wszDisplayName )
     {
         OSStrCbFormatW( wszDisplayName, sizeof( wszDisplayName ), L"%s: ", pinst->m_wszDisplayName );
@@ -85,9 +96,12 @@ void UtilReportEvent(
     }
     rgpsz[2] = wszDisplayName;
 
+    //  copy in remaining strings
 
+    // size should be 0 if the pointer is NULL
     AssertPREFIX( rgpszString != NULL || cString == 0 );
 
+    // avoid the call if nothing to be done
     if ( cString > 0 )
     {
         Assert( rgpszString != NULL );
@@ -95,6 +109,7 @@ void UtilReportEvent(
     }
 
 
+    //  Get event source key in case we need to open the event source.
 
     const WCHAR* wszEventSourceKey;
     wszEventSourceKey = pinst != pinstNil ? SzParam( pinst, JET_paramEventSourceKey ) : L"";
@@ -103,10 +118,12 @@ void UtilReportEvent(
         wszEventSourceKey = WszUtilImageVersionName();
     }
 
+    //  the event log isn't open
 
     OSEventReportEvent(
             wszEventSourceKey,
             eventfacilityOsDiagTracking | eventfacilityRingBufferCache | eventfacilityOsEventTrace | eventfacilityOsTrace |
+                //  the optional eventfacility ... 
                 ( fSuppressReportOsEvent ? eventfacilityNone : eventfacilityReportOsEvent ),
             type,
             catid,
@@ -119,6 +136,10 @@ void UtilReportEvent(
 }
 
 
+//  reports error event in the context of a category and optionally in the
+//  context of a MessageId.  If the MessageId is 0, then a MessageId is chosen
+//  based on the given error code.  If MessageId is !0, then the appropriate
+//  event is reported
 
 void UtilReportEventOfError(
     const CategoryId    catid,
@@ -133,20 +154,31 @@ void UtilReportEventOfError(
     rgszT[0] = szT;
 
     Assert( 0 != msgid );
+//  the following code is dead, as the
+//  assert above affirms
+//  if ( 0 == msgid && JET_errDiskFull == err )
+//      {
+//      msgid = DISK_FULL_ERROR_ID;
+//      rgszT[0] = pinst->m_plog->m_szJetLog;
+//      }
 
     UtilReportEvent( eventError, catid, msgid, 1, rgszT, 0, NULL, pinst );
 }
 
 
+//  terminate event subsystem
 
 void OSUEventTerm()
 {
+    //  nop
 }
 
 
+//  init event subsystem
 
 ERR ErrOSUEventInit()
 {
+    //  nop
 
     return JET_errSuccess;
 }

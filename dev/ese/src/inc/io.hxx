@@ -21,6 +21,8 @@ bool FLogtimeIsValid( const LOGTIME * const plt );
 __int64 ConvertLogTimeToFileTime( const LOGTIME* plt );
 
 
+//  Reserve first 2 pages of a database.
+//
 const CPG   cpgDBReserved = 2;
 
 INLINE QWORD OffsetOfPgno( PGNO pgno )              { return QWORD( pgno - 1 + cpgDBReserved ) * g_cbPage; }
@@ -68,13 +70,14 @@ VOID IOCloseDatabase( IFMP ifmp );
 
 ERR ErrIODeleteDatabase( IFileSystemAPI *const pfsapi, IFMP ifmp );
 
+//  Force previous writes to Database to disk (and update appropriate trackings)
 ERR ErrIOFlushDatabaseFileBuffers( IFMP ifmp, const IOFLUSHREASON iofr );
 #ifdef DEBUG
-const static __int64 cioAllowLogRollHeaderUpdates = 4;
+const static __int64 cioAllowLogRollHeaderUpdates = 4;  // note: Technically only need two, but gave myself two extra for insurance ...
 BOOL FIOCheckUserDbNonFlushedIos( const INST * const pinst, const __int64 cioPerDbOutstandingLimit = 0, IFMP ifmpTargetedDB = ifmpNil );
 #endif
 
-ERR ErrIOReadDbPages( IFMP ifmp, IFileAPI *pfapi, BYTE *pbData, LONG pgnoStart, LONG pgnoEnd, BOOL fCheckPagesOffset, LONG pgnoMost, const TraceContext& tc, BOOL fExtensiveChecks );
+ERR ErrIOReadDbPages( IFMP ifmp, IFileAPI *pfapi, BYTE *pbData, LONG pgnoStart, LONG pgnoEnd, BOOL fCheckPagesOffset, LONG pgnoMost, const TraceContext& tc, BOOL fExtensiveChecks );           // potential page number of the last page of the recoverying database, might be a patch page (in the form of DB header)
 
 ERR ISAMAPI   ErrIsamGetInstanceInfo( ULONG *pcInstanceInfo, JET_INSTANCE_INFO_W ** paInstanceInfo, const CESESnapshotSession * pSnapshotSession );
 
@@ -93,18 +96,20 @@ ERR ISAMAPI ErrIsamOSSnapshotEnd(   const JET_OSSNAPID snapId, const    JET_GRBI
 
 
 
+//  analagous to THREADSTATS
+//
 struct THREADSTATSCOUNTERS
 {
 #ifdef MINIMAL_FUNCTIONALITY
     DWORD                   dwUnused;
 #else
-    PERFInstanceLiveTotal<>         cPageReferenced;
-    PERFInstanceLiveTotal<>         cPageRead;
-    PERFInstanceLiveTotal<>         cPagePreread;
-    PERFInstanceLiveTotal<>         cPageDirtied;
-    PERFInstanceLiveTotal<>         cPageRedirtied;
-    PERFInstanceLiveTotal<>         cLogRecord;
-    PERFInstanceLiveTotal<QWORD>    cbLogRecord;
+    PERFInstanceLiveTotal<>         cPageReferenced;    //  pages referenced
+    PERFInstanceLiveTotal<>         cPageRead;          //  pages read from disk
+    PERFInstanceLiveTotal<>         cPagePreread;       //  pages preread from disk
+    PERFInstanceLiveTotal<>         cPageDirtied;       //  clean pages modified
+    PERFInstanceLiveTotal<>         cPageRedirtied;     //  dirty pages modified
+    PERFInstanceLiveTotal<>         cLogRecord;         //  log records generated
+    PERFInstanceLiveTotal<QWORD>    cbLogRecord;        //  log record bytes generated
 #endif
 };
 
@@ -130,20 +135,31 @@ class UPDATETHREADSTATSCOUNTERS
             Assert( NULL != m_pinst );
             Assert( NULL != m_ptscounters );
 
+            //  snapshot initial stats
+            //
             memcpy( &m_threadstatsInitial, &Ptls()->threadstats, sizeof( m_threadstatsInitial ) );
         }
         ~UPDATETHREADSTATSCOUNTERS()
         {
+            //  counters automatically tabulated when the object is destructed (ie. goes out of scope)
+            //
             TabulateCounters();
         }
 
+        //  provide means of manually tabulating counters in case you want it to happen
+        //  before the object is destructed
+        //
         VOID TabulateCounters()
         {
             if ( NULL != m_ptscounters )
             {
+                //  snapshot final stats
+                //
                 JET_THREADSTATS threadstatsFinal;
                 memcpy( &threadstatsFinal, &Ptls()->threadstats, sizeof( threadstatsFinal ) );
 
+                //  compare final stats with initial stats in order to update individual counters
+                //
                 PERFOpt( m_ptscounters->cPageReferenced.Add( m_pinst, threadstatsFinal.cPageReferenced - m_threadstatsInitial.cPageReferenced ) );
                 PERFOpt( m_ptscounters->cPageRead.Add( m_pinst, threadstatsFinal.cPageRead - m_threadstatsInitial.cPageRead ) );
                 PERFOpt( m_ptscounters->cPagePreread.Add( m_pinst, threadstatsFinal.cPagePreread - m_threadstatsInitial.cPagePreread ) );
@@ -152,13 +168,17 @@ class UPDATETHREADSTATSCOUNTERS
                 PERFOpt( m_ptscounters->cLogRecord.Add( m_pinst, threadstatsFinal.cLogRecord - m_threadstatsInitial.cLogRecord ) );
                 PERFOpt( m_ptscounters->cbLogRecord.Add( m_pinst, threadstatsFinal.cbLogRecord - m_threadstatsInitial.cbLogRecord ) );
 
+                //  NULL out pointer to signify that counters have already been tabulated (in case
+                //  you want to manually force tabulation of counters before the destructor is called
+                //
                 m_ptscounters = NULL;
             }
         }
-#endif
+#endif  //  MINIMAL_FUNCTIONALITY
 };
 
 
+//  These two functions will affect the qos base value throughout the entire engine.
 
 INLINE OSFILEQOS QosSyncDefault( const INST * const pinst )
 {
@@ -169,17 +189,38 @@ INLINE OSFILEQOS QosSyncDefault( const INST * const pinst )
         qos |= qosIOOSLowPriority;
     }
 
-    
+    /*
+    Can't assume an INST b/c of INSTanceless APIs, such as this:
+        Assertion Failure: pinst != pinstNil || ( 0 == INST::AllocatedInstances() ) || g_rgparam[ paramid ].FGlobal()
+        Rel.828.0, File daedef.hxx, Line 4639, PID: 15944 (0x3e48), TID: 0x4064
+
+        00000099'e06ae530 00007ffb'dd226b92 ESE!Param_+0x68 [f:\src\e16\esecallsign\sources\dev\ese\src\inc\daedef.hxx @ 4645]
+        00000099'e06ae570 00007ffb'dd27da4b ESE!Param+0xc2 [f:\src\e16\esecallsign\sources\dev\ese\src\inc\daedef.hxx @ 4676]
+        00000099'e06ae5a0 00007ffb'dd22883b ESE!PvParam+0x1b [f:\src\e16\esecallsign\sources\dev\ese\src\inc\daedef.hxx @ 4726]
+        00000099'e06ae5d0 00007ffb'dd3ed6a7 ESE!QosSyncDefault+0x4b [f:\src\e16\esecallsign\sources\dev\ese\src\inc\io.hxx @ 197]
+        00000099'e06ae610 00007ffb'dd3ee796 ESE!CFlushMap::ErrReadFmPage_+0x1c7 [f:\src\e16\esecallsign\sources\dev\ese\src\ese\flushmap.cxx @ 1354]
+        00000099'e06ae6e0 00007ffb'dd3e9026 ESE!CFlushMap::ErrSyncReadFmPage_+0x26 [f:\src\e16\esecallsign\sources\dev\ese\src\ese\flushmap.cxx @ 1613]
+        00000099'e06ae710 00007ffb'dd3ec992 ESE!CFlushMap::ErrAttachFlushMap_+0x7f6 [f:\src\e16\esecallsign\sources\dev\ese\src\ese\flushmap.cxx @ 384]
+        00000099'e06aeb00 00007ffb'dd3ec237 ESE!CFlushMap::ErrInitFlushMap+0x532 [f:\src\e16\esecallsign\sources\dev\ese\src\ese\flushmap.cxx @ 2666]
+        00000099'e06aeb90 00007ffb'dd42f114 ESE!CFlushMapForUnattachedDb::ErrGetPersistedFlushMapOrNullObjectIfRuntime+0x2b7 [f:\src\e16\esecallsign\sources\dev\ese\src\ese\flushmap.cxx @ 3459]
+        00000099'e06aee30 00007ffb'dd4965e1 ESE!ErrIsamRemoveLogfile+0xc84 [f:\src\e16\esecallsign\sources\dev\ese\src\ese\io.cxx @ 6235]
+        00000099'e06aefe0 00007ffb'dd496730 ESE!JetRemoveLogfileExW+0x271 [f:\src\e16\esecallsign\sources\dev\ese\src\ese\jetapi.cxx @ 12826]
+        00000099'e06af070 00007ff6'457872ae ESE!JetRemoveLogfileW+0x70 [f:\src\e16\esecallsign\sources\dev\ese\src\ese\jetapi.cxx @ 12858]
+        00000099'e06af0d0 00007ff6'4576e566 eseunittest!TERMDIRTY::ErrTest+0x133e [f:\src\e16\esecallsign\sources\test\ese\src\blue\src\eseunittest\termdirty.cxx @ 550]
+    */
 
     if ( pinst != pinstNil )
     {
-         Expected( ( UlParam( pinst, JET_paramFlight_NewQueueOptions ) & bitUseMetedQ ) == 0 );
+         // Even though this is passed for both writes and reads, it doesn't harm or alter reads which will still be managed
+         // by their main qosIODispatchBackground type arguments.
+         Expected( ( UlParam( pinst, JET_paramFlight_NewQueueOptions ) & bitUseMetedQ ) == 0 ); // deprecated all-on SmoothIO replaces for per-session SmoothIO priorities.
          qos |= ( UlParam( pinst, JET_paramFlight_NewQueueOptions ) & bitUseMetedQ ) ? qosIODispatchWriteMeted : 0x0;
     }
 
     return qos;
 }
 
+//  Used only for ErrBFIPrereadPage and Backup _at the moment_.
 
 inline OSFILEQOS QosAsyncReadDefault( INST * pinst )
 {
@@ -187,7 +228,7 @@ inline OSFILEQOS QosAsyncReadDefault( INST * pinst )
 
     const ULONG grbitNewQueueOptions = (ULONG)UlParam( pinst, JET_paramFlight_NewQueueOptions );
 
-    Expected( ( grbitNewQueueOptions & bitUseMetedQ ) == 0 );
+    Expected( ( grbitNewQueueOptions & bitUseMetedQ ) == 0 ); // deprecated all-on SmoothIO replaces for per-session SmoothIO priorities.
     
     OSFILEQOS qos = ( grbitNewQueueOptions & bitUseMetedQ ) ? qosIODispatchBackground : qosIODispatchImmediate;
 
@@ -199,6 +240,7 @@ inline OSFILEQOS QosAsyncReadDefault( INST * pinst )
     return qos;
 }
 
+//  For background read tasks (DbScan, OLDv1, and Scrub) we may use a different Dispatch Priority.
 
 inline BFPriority BfpriBackgroundRead( const IFMP ifmp, const PIB * const ppib )
 {
@@ -216,8 +258,9 @@ inline BFPriority BfpriBackgroundRead( const IFMP ifmp, const PIB * const ppib )
 
 
 #ifdef MINIMAL_FUNCTIONALITY
-#else
+#else  //  !MINIMAL_FUNCTIONALITY
 
+//  Global and per-instance counters.
 
 extern PERFInstanceDelayedTotal<HRT>        cIOTotalDhrts[iotypeMax][iofileMax];
 extern PERFInstanceDelayedTotal<QWORD>      cIOTotalBytes[iotypeMax][iofileMax];
@@ -225,6 +268,7 @@ extern PERFInstanceDelayedTotal<>           cIOTotal[iotypeMax][iofileMax];
 extern PERFInstanceDelayedTotal<>           cIOInHeap[iotypeMax][iofileMax];
 extern PERFInstanceDelayedTotal<>           cIOAsyncPending[iotypeMax][iofileMax];
 
+//  Per-DB counters.
 
 extern PERFInstance<HRT>        cIOPerDBTotalDhrts[iotypeMax];
 extern PERFInstance<QWORD>      cIOPerDBTotalBytes[iotypeMax];
@@ -239,6 +283,7 @@ extern PERFInstance<QWORD, fFalse>  cIODatabaseMetedQueueDepth[iofileMax];
 extern PERFInstance<QWORD, fFalse>  cIODatabaseMetedOutstandingMax[iofileMax];
 extern PERFInstance<QWORD, fFalse>  cIODatabaseAsyncReadPending[iofileMax];
 
+//  FFB counters.
 
 extern PERFInstanceDelayedTotal<HRT>        cFFBTotalDhrts;
 extern PERFInstanceDelayedTotal<>           cFFBTotal;
@@ -314,6 +359,7 @@ typedef CDynamicHashTable< CIOThreadInfoTableKey, CIOThreadInfoTableEntry > CIOT
 
 INLINE CIOThreadInfoTable::NativeCounter IOThreadInfoTableHashIoContext( DWORD_PTR iocontext )
 {
+    //  this is a TLS* and they are stored on 32 byte aligned boundaries
     return iocontext / 32;
 }
 
@@ -423,6 +469,8 @@ class CIOFilePerf
                 g_iothreadinfotable.WriteUnlockKey( &lock );
             }
 
+            //  only update these stats for a real transfer.  a zero byte transfer could be an error or
+            //  a dummy completion.  don't pollute the stats with these
             if ( cbTransfer )
             {
                 Assert( pinstNil != m_pinst );
@@ -445,11 +493,13 @@ class CIOFilePerf
                             ( qwEngineFileId == qwDefragFileID ) );
                         qwEngineFileId = 0;
                     }
-                    const INT ifmp = (INT)qwEngineFileId;
+                    const INT ifmp = (INT)qwEngineFileId;   // the user file ID is the IFMP for database-type files.
                     PERFOpt( cIOPerDBTotalDhrts[iotypeT].Add( ifmp, dhrtIOElapsed ) );
                     PERFOpt( cIOPerDBTotalBytes[iotypeT].Add( ifmp, cbTransfer ) );
                     PERFOpt( cIOPerDBTotal[iotypeT].Inc( ifmp ) );
 
+                    // perhaps should have done a model (instead of cracking it from pinst and ifmp), just do a SetIoStatHisto() 
+                    // on CIOFilePerf() and then consume it if set?
                     CIoStats * piolatstatDb;
                     IOCATEGORY iocat = iocatUnknown;
                     switch( iofileT )
@@ -469,7 +519,7 @@ class CIOFilePerf
                         if ( piolatstatDb->FStartUpdate() )
                         {
                             Assert( iocat < iocatMax );
-                            Expected( iocat == iocatTransactional || iocat == iocatMaintenance );
+                            Expected( iocat == iocatTransactional || iocat == iocatMaintenance ); // no "Unknown" cases at this time.
 
                             const QWORD cio = piolatstatDb->CioAccumulated();
                             PERFOpt( cIOPerDBLatencyCount[iotypeT][iocat].Set( ifmp, cio ) );
@@ -490,13 +540,15 @@ class CIOFilePerf
                                 PERFOpt( cIOPerDBLatencyP100[iotypeT][iocat].Set( ifmp, 0 ) );
                             }
 
+                            //  Note this clears the stats for the next sample, if we had the cioMinSampleRate worth IOs, otherwise
+                            //  it continues to accumulate IOs.
                             piolatstatDb->FinishUpdate( dwDiskNumber );
                         }
                     }
                 }
                 else
                 {
-                    Assert( iofileDbTotal != iofileT );
+                    Assert( iofileDbTotal != iofileT );  // only virtual file type, constructed here for perf counters, not used.
                 }
             }
         }
@@ -555,6 +607,7 @@ class CIOFilePerf
 
         virtual VOID IncrementFlushFileBuffer( const HRT dhrtElapsed )
         {
+            // Do we want to maintain it per filetype?
             PERFOpt( cFFBTotalDhrts.Add( m_pinst, dhrtElapsed ) );
             PERFOpt( cFFBTotal.Inc( m_pinst ) );
         }
@@ -562,18 +615,21 @@ class CIOFilePerf
         virtual VOID SetCurrentQueueDepths( const LONG cioMetedReadQueue, const LONG cioAllowedMetedOps, const LONG cioAsyncRead )
         {
             const IOFILE    iofileT     = IOFILE( m_dwEngineFileType );
+            //  Should we separate recovery and attached or transactional and maintenance ... remains to be seen.
             if ( iofileDbAttached == iofileT || iofileDbRecovery == iofileT )
             {
                 Assert( cioAllowedMetedOps > 0 );
                 PERFOpt( cIODatabaseMetedQueueDepth[iofileDbTotal].Set( m_pinst->m_iInstance, cioMetedReadQueue ) );
+                // This is usually accurate, but occasionally drops to 0, which should not happen - should stay
+                // at last value set.  Perhaps input is dropping to zero.
                 PERFOpt( cIODatabaseMetedOutstandingMax[iofileDbTotal].Set( m_pinst->m_iInstance, cioAllowedMetedOps ) );
                 PERFOpt( cIODatabaseAsyncReadPending[iofileDbTotal].Set( m_pinst->m_iInstance, cioAsyncRead ) );
             }
         }
 
         static ERR ErrFileOpen(
-                        _In_ IFileSystemAPI * const         pfsapi,
-                        _In_ const INST * const             pinst,
+                        _In_ IFileSystemAPI * const         pfsapi,     // non-const due to volume cache m_critVolumePathCache / m_ilVolumePathCache
+                        _In_ const INST * const             pinst,      // used only for perf counters ->m_iInstance
                         _In_z_ const WCHAR * const          wszPath,
                         _In_ const IFileAPI::FileModeFlags  fmf,
                         _In_ const IOFILE                   iofile,
@@ -581,8 +637,8 @@ class CIOFilePerf
                         _Out_ IFileAPI ** const             ppfapi );
 
         static ERR ErrFileCreate(
-                        _In_ IFileSystemAPI * const         pfsapi,
-                        _In_ const INST * const             pinst,
+                        _In_ IFileSystemAPI * const         pfsapi,     // non-const due to volume cache m_critVolumePathCache / m_ilVolumePathCache
+                        _In_ const INST * const             pinst,      // used only for perf counters ->m_iInstance
                         _In_z_ const WCHAR * const          wszPath,
                         _In_ const IFileAPI::FileModeFlags  fmf,
                         _In_ const IOFILE                   iofile,
@@ -637,8 +693,12 @@ inline ERR CIOFilePerf::ErrFileOpen(
 
     Assert( pinstNil != pinst );
 
+    //  create IFilePerfAPI object
+    //
     Alloc( pfpapi = new CIOFilePerf( pinst, iofile, qwEngineFileId ) );
 
+    //  create IFileAPI object
+    //
     err = pfsapi->ErrFileOpen( wszPath, fmf, &pfapi );
     if ( err < JET_errSuccess )
     {
@@ -648,6 +708,8 @@ inline ERR CIOFilePerf::ErrFileOpen(
         goto HandleError;
     }
 
+    //  register IFilePerfAPI object with IFileAPI object
+    //
     pfapi->RegisterIFilePerfAPI( pfpapi );
 
 HandleError:
@@ -671,8 +733,12 @@ inline ERR CIOFilePerf::ErrFileCreate(
 
     Assert( pinstNil != pinst );
 
+    //  create IFilePerfAPI object
+    //
     Alloc( pfpapi = new CIOFilePerf( pinst, iofile, qwEngineFileId ) );
 
+    //  create IFileAPI object
+    //
     err = pfsapi->ErrFileCreate( wszPath, fmf, &pfapi );
     if ( err < JET_errSuccess )
     {
@@ -680,6 +746,8 @@ inline ERR CIOFilePerf::ErrFileCreate(
         goto HandleError;
     }
 
+    //  register IFilePerfAPI object with IFileAPI object
+    //
     pfapi->RegisterIFilePerfAPI( pfpapi );
     *ppfapi = pfapi;
 

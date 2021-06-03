@@ -8,31 +8,36 @@
 #include <NativeWatson.h>
 #endif
 
+//  globals
 
 #ifdef DEBUG
 BOOL g_fOSUInit = fFalse;
 #endif
 
 
+//  forward decls
 
 void OSUTerm_();
 
 extern BOOL g_fDisablePerfmon;
 static VOID OSUTermProcessorLocalStorage();
 
+//  allocate PLS (Processor Local Storage)
 
 ULONG cPerfinstReserved = 0;
 ULONG cPerfinstCommitted = 0;
 
 static ERR ErrOSUInitProcessorLocalStorage()
 {
-    extern ULONG g_cpinstMax;
-    extern LONG g_cbPlsMemRequiredPerPerfInstance;
+    extern ULONG g_cpinstMax;                       //  set before init is called
+    extern LONG g_cbPlsMemRequiredPerPerfInstance;  //  incremented in static constructors
     ULONG cPerfinstMaxT = 0;
     ULONG cPerfinstMinReqT = 0;
 
     if ( !g_fDisablePerfmon )
     {
+        // The PLS perf counter buffer is used to store ESE-instance, Database and TableClasses performance counters,
+        // so make sure we allocate space to cover the bigger of the three.
 
         if ( runInstModeNoSet == g_runInstMode )
         {
@@ -53,12 +58,14 @@ static ERR ErrOSUInitProcessorLocalStorage()
         }
     }
 
+    //  initialize PLS
 
     if ( !FOSSyncConfigureProcessorLocalStorage( sizeof( PLS ) ) )
     {
         return ErrERRCheck( JET_errOutOfMemory );
     }
 
+    //  FOSSyncPreinit counted the processors when the DLL was attached
 
     const size_t cProcs = (size_t)OSSyncGetProcessorCountMax();
     for ( size_t iProc = 0; iProc < cProcs; iProc++ )
@@ -68,6 +75,7 @@ static ERR ErrOSUInitProcessorLocalStorage()
         new( ppls ) PLS( (ULONG)iProc, g_fDisablePerfmon );
     }
 
+    //  Make sure we have the bare minimum for global and default perf counters.
 
     if ( !g_fDisablePerfmon )
     {
@@ -87,6 +95,7 @@ static ERR ErrOSUInitProcessorLocalStorage()
     return JET_errSuccess;
 }
 
+//  free PLS (Processor Local Storage)
 
 static VOID OSUTermProcessorLocalStorage()
 {
@@ -108,12 +117,16 @@ static VOID OSUTermProcessorLocalStorage()
 }
 
 
+//  Validates Globals are set to sane values.
 
 ERR ErrOSUValidateGlobals()
 {
     ERR err = JET_errSuccess;
 
 
+    // Once initialized, make sure that cPerfinstMax does not shrink from underneath us
+    // Otherwise we may end up overrunning the perf counter memory we allocated based on the
+    // old cPerfinstMax
 
     if ( !g_fDisablePerfmon && ( ( cPerfinstMax > cPerfinstReserved ) || ( CPERFObjectsMinReq() > cPerfinstCommitted ) ) )
     {
@@ -130,7 +143,9 @@ HandleError:
 
 #define DEBUG_ENV_VALUE_LEN         256
 
+//  This routine loads traps, faults (injection), and overrides ...
 
+//  Note: NO EQUIV TERM function, must not allocate data.
 
 ERR ErrOSULoadOverloads()
 {
@@ -173,6 +188,11 @@ ERR ErrOSULoadOverloads()
 #endif
 
 #ifdef DEBUG
+    // The format is "ID, err, ulProb, grbit" so ... "17396,-1011,20,1" is 20% failure for 
+    // LID 17396 ... and the "1" at end indicates 20 is interprited as percentage.  See 
+    // jethdr.w:JET_bitInjection for more details about last param.  -1011 is error to return.
+    // Note this is fairly early, but not early enough to fault inject all things.
+    // Multiple fault injections can be specified by a ';'.
     if ( ( wsz = GetDebugEnvValue( L"Fault Injection" ) ) != NULL )
     {
         ULONG ulID;
@@ -192,6 +212,8 @@ ERR ErrOSULoadOverloads()
         delete[] wsz;
     }
 
+    // The format is "ID, value, ulProb, grbit" so ... "41007,500,100,1" means that
+    // LID 41007 will return a value of 500 100% of the time.
     if ( ( wsz = GetDebugEnvValue( L"Config Override Injection" ) ) != NULL )
     {
         ULONG ulID;
@@ -230,7 +252,7 @@ ERR ErrOSULoadOverloads()
         extern WCHAR g_rgwchTrapOSPath[_MAX_PATH];
         if ( 0 <= ErrOSStrCbCopyW( g_rgwchTrapOSPath+1, sizeof(g_rgwchTrapOSPath)-sizeof(WCHAR), wsz+1 ) )
         {
-            g_rgwchTrapOSPath[0] = wsz[0];
+            g_rgwchTrapOSPath[0] = wsz[0]; // "atomically" update the trap.
         }
         delete[] wsz;
     }
@@ -242,6 +264,10 @@ ERR ErrOSULoadOverloads()
         delete[] wsz;
     }
 
+    //  set this regkey to silence some asserts which
+    //  go off in some error code paths, because the
+    //  test is explicitly trying to generate errors
+    //
     if ( ( wsz = GetDebugEnvValue( L"Negative Testing" ) ) != NULL )
     {
         (void)FNegTestSet( _wtol( wsz ) );
@@ -255,19 +281,32 @@ ERR ErrOSULoadOverloads()
         (void)FNegTestSet( _wtol( wszBuf ) );
     }
 #endif
-#endif
+#endif  // DEBUG
 
     return JET_errSuccess;
 }
 
+//  sets the parameters for the CResource Manager to use
 
+//  Note: NO EQUIV TERM function, must not allocate data.
 
 ERR ErrOSUSetResourceManagerGlobals()
 {
     ERR err = JET_errSuccess;
 
+    //  configure our global page parameters
+    //
     Assert( UlParam( JET_paramDatabasePageSize ) && FPowerOf2( UlParam( JET_paramDatabasePageSize ) ) );
 
+    //  configure our global version bucket parameters
+    //
+    //  NOTE:  we also ensure that the version bucket is large enough to hold
+    //         a record that fills an entire database page
+    //  NOTE:  we also subtract the size of a CResourceSection from the size of
+    //         the bucket to facilitate efficient use of resource memory
+    //  NOTE:  we cannot allow JET_residVERBUCKET to exceed 64kb due to a bug
+    //         in cresmgr
+    //
     DWORD_PTR cbVerPage;
     cbVerPage = max( UlParam( JET_paramVerPageSize ), 2 * (ULONG_PTR)UlParam( JET_paramDatabasePageSize ) );
     cbVerPage = min( cbVerPage, 64 * 1024 );
@@ -275,14 +314,22 @@ ERR ErrOSUSetResourceManagerGlobals()
     Call( ErrRESSetResourceParam( pinstNil, JET_residVERBUCKET, JET_resoperSize, cbVerPage ) );
     Call( ErrRESSetResourceParam( pinstNil, JET_residVERBUCKET, JET_resoperMinUse, UlParam( JET_paramGlobalMinVerPages ) ) );
 
+    //  configure our global LRUK parameters
+    //
     Call( RESLRUKHIST.ErrSetParam( JET_resoperMaxUse, UlParam( JET_paramLRUKHistoryMax ) ) );
 
+    //  if we are running in a small configuration, bypass the resource manager
+    //  and go directly to the heap for all resource allocations
+    //
     for ( JET_RESID residT = JET_RESID( JET_residNull + 1 );
         residT < JET_residMax;
         residT = JET_RESID( residT + 1 ) )
     {
         if ( residT == JET_residPAGE )
         {
+            //  I can't easily remove the JET_residPAGE b/c someone put the resid enums in 
+            //  the jethdr.w / API. :(  But we don't need / use this one anymore, so we'll
+            //  skip it ...
             continue;
         }
         CallS( ErrRESSetResourceParam( pinstNil, residT, JET_resoperAllocFromHeap, FJetConfigLowMemory() || FJetConfigMedMemory() ) );
@@ -293,17 +340,24 @@ HandleError:
     return err;
 }
 
+//  sets globals / constants that the OS Layer consumes
 
+//  Note: NO EQUIV TERM function, must not allocate data.
 
 
 ERR ErrOSUSetOSLayerGlobals()
 {
+    //  init the settings for the OS Layer  from the JET System Parameters
+    //
 
     OSPrepreinitSetUserTLSSize( sizeof( TLS ) );
 
+    //  first reset the defaults in case it is needed
 
     COSLayerPreInit::SetDefaults();
 
+    //  set up debug
+    //
     COSLayerPreInit::SetAssertAction( GrbitParam( JET_paramAssertAction ) );
     COSLayerPreInit::SetExceptionAction( GrbitParam( JET_paramExceptionAction ) );
     COSLayerPreInit::SetCatchExceptionsOnBackgroundThreads( GrbitParam( JET_paramExceptionAction ) != JET_ExceptionNone );
@@ -316,8 +370,12 @@ ERR ErrOSUSetOSLayerGlobals()
         COSLayerPreInit::SetRFSIO( (ULONG)UlParam( JET_paramRFS2IOsPermitted ) );
     }
 
+    //  init event log cache size
+    //
     COSLayerPreInit::SetEventLogCache( (ULONG)UlParam( JET_paramEventLogCache ) );
 
+    //  perfmon
+    //
     if ( BoolParam( JET_paramDisablePerfmon ) )
     {
         COSLayerPreInit::DisablePerfmon();
@@ -327,15 +385,21 @@ ERR ErrOSUSetOSLayerGlobals()
         COSLayerPreInit::EnablePerfmon();
     }
 
+    //  special configuration parameters
+    //
     if ( FJetConfigRunSilent() )
     {
         COSLayerPreInit::DisableTracing();
     }
     COSLayerPreInit::SetRestrictIdleActivity( FJetConfigLowPower() );
 
+    //  set file settings
+    //
 
     COSLayerPreInit::SetIOMaxOutstanding( (ULONG)UlParam( JET_paramOutstandingIOMax ) );
 #ifdef DEBUG
+    //  if default param, mix it up a bit ... though 256 isn't really mixing it up that much ... AND
+    //  the last problem we had with this param was setting it up, NOT down, so adding that ...
     if ( FDefaultParam( JET_paramOutstandingIOMax ) )
     {
         DWORD cioT = 0;
@@ -349,7 +413,7 @@ ERR ErrOSUSetOSLayerGlobals()
         }
         COSLayerPreInit::SetIOMaxOutstanding( min( (ULONG)UlParam( JET_paramOutstandingIOMax ), cioT ) );
     }
-#endif
+#endif // DEBUG
 
     COSLayerPreInit::SetIOMaxOutstandingBackground( (ULONG)UlParam( JET_paramCheckpointIOMax ) );
 
@@ -366,11 +430,15 @@ ERR ErrOSUSetOSLayerGlobals()
 }
 
 
+//  sets globals / constants that the OSU Layer consumes
 
+//  Note: NO EQUIV TERM function, must not allocate data.
 
 ERR ErrOSUSetOSULayerGlobals()
 {
 
+    //  OSU config
+    //
     ULONG cbMaxWriteSize;
     cbMaxWriteSize = (ULONG)UlParam( JET_paramMaxCoalesceWriteSize );
     if ( cbMaxWriteSize < OSMemoryPageCommitGranularity() )
@@ -394,10 +462,16 @@ ERR ErrOSUSetOSULayerGlobals()
     return JET_errSuccess;
 }
 
+//  sets globals for OSU system 
 
+//  Note: this func is idempotent (i.e. calling twice doesn't leak 
+//  anything, just sets the globals again), and as such has no equivalent
+//  "term" func.
 
 ERR ErrOSUSetGlobals()
 {
+    //  detect if we are being invoked by our utilities
+    //
     if ( !_wcsicmp( WszUtilProcessName(), L"ESEUTIL" ) || !_wcsicmp( WszUtilProcessName(), L"ESENTUTL" ) )
     {
         g_fEseutil = fTrue;
@@ -414,6 +488,7 @@ ERR ErrOSUSetGlobals()
     return JET_errSuccess;
 }
 
+//  Perfmon config storage
 
 extern INT g_cInstances;
 extern WCHAR* g_wszInstanceNames;
@@ -427,11 +502,16 @@ extern WCHAR* g_wszDatabaseNamesOut;
 extern ULONG g_cchDatabaseNames;
 extern BYTE* g_rgbDatabaseAggregationIDs;
 
+//  Initialize the perfmon storage
 
+// Note: This was moved here, not because I could prove it had to be done 
+// before ErrOSUInit/ErrOSInit(), but because I couldn't prove it did not
+// need to be done before init.
 ERR ErrOSUInitPerfmonStorage()
 {
     ERR err = JET_errSuccess;
 
+    //  Init the array for the ESE instance names.
 
     Assert( 0 == g_cchInstanceNames );
     Assert( NULL == g_wszInstanceNames );
@@ -484,6 +564,7 @@ ERR ErrOSUInitPerfmonStorage()
     }
     g_cInstances = 0;
 
+    //  Init the array for the database names.
 
     Assert( 0 == g_cchDatabaseNames );
     Assert( NULL == g_wszDatabaseNames );
@@ -544,9 +625,11 @@ HandleError:
     return err;
 }
 
+//  Terminate the perfmon storage
 
 void OSUTermPerfmonStorage()
 {
+    //  free ESE instance names
     delete[] g_wszInstanceNames;
     delete[] g_wszInstanceNamesOut;
     g_wszInstanceNames = NULL;
@@ -556,6 +639,7 @@ void OSUTermPerfmonStorage()
     g_rgbInstanceAggregationIDs = NULL;
     g_cInstances = 0;
 
+    //  free DB names
     delete[] g_wszDatabaseNames;
     delete[] g_wszDatabaseNamesOut;
     g_wszDatabaseNames = NULL;
@@ -567,6 +651,7 @@ void OSUTermPerfmonStorage()
 }
 
 
+//  init OSU subsystem
 
 CInitTermLock   g_OSUInitControl;
 
@@ -580,29 +665,37 @@ const ERR ErrOSUInit()
         Assert( g_fOSUInit );
         Assert( g_OSUInitControl.CConsumers() > 0 );
 
+        //  checks that any global variables and allocations are inline 
+        //  with global settings and policy (and other global variables)
 
-        Call( ErrOSUValidateGlobals() );
+        Call( ErrOSUValidateGlobals() );   //  note returns on error
 
         return JET_errSuccess;
     }
     Assert( CInitTermLock::ERR::errInitBegun == errInit );
 
 #ifdef USE_WATSON_API
+    //  register watson for error reporting.
     RegisterWatson();
 #endif
 
+    //  init global variables, cresmgr args, etc
 
     Call( ErrOSUSetGlobals() );
 
+    //  init perfmon required storage
 
     Call( ErrOSUInitPerfmonStorage() );
 
+    //  init PLS, perfmon (and other things) need this so do it first
 
     Call( ErrOSUInitProcessorLocalStorage() );
 
+    //  init the OS subsystem
 
     Call( ErrOSInit() );
 
+    //  initialize all OSU subsystems in dependency order
 
     Call( ErrOSUTimeInit() );
     Call( ErrOSUConfigInit() );
@@ -611,13 +704,16 @@ const ERR ErrOSUInit()
     Call( ErrOSUFileInit() );
     Call( ErrOSUNormInit() );
 
+    //  configure timeout deadlock detection
     OSSyncConfigDeadlockTimeoutDetection( !FNegTest( fDisableTimeoutDeadlockDetection ) );
 
     OSTraceWriteRefLog( ostrlSystemFixed, sysosrtlOsuInitDone, NULL );
 
+    //  early check that globals are good (so we don't get caught in the fast path out above)
 
     CallS( ErrOSUValidateGlobals() );
 
+    //  complete the OSU initialization
 
     OnDebug( g_fOSUInit = fTrue );
 
@@ -638,12 +734,15 @@ HandleError:
 }
 
 
+//  terminate OSU subsystem
 
 void OSUTerm_()
 {
+    //  Tracking should've been taken care of.
 
     Assert( !g_fOSUInit );
 
+    //  terminate all OSU subsystems in reverse dependency order
 
     OSUNormTerm();
     OSUFileTerm();
@@ -652,21 +751,26 @@ void OSUTerm_()
     OSUConfigTerm();
     OSUTimeTerm();
 
+    //  term the OS subsystem
 
     OSTerm();
 
+    //  terminate PLS last as perfmon uses it
 
     OSUTermProcessorLocalStorage();
 
+    //  terminate the perfmon configuration storage
 
     OSUTermPerfmonStorage();
 
 #ifdef USE_WATSON_API
+    //  unregister watson for error reporting.
     UnregisterWatson();
 #endif
 }
 
 
+//  terminate OSU subsystem (user level)
 
 void OSUTerm()
 {
@@ -683,11 +787,13 @@ void OSUTerm()
 
     OnDebug( g_fOSUInit = fFalse );
 
+    //  terminate all OSU subsystems
 
     OSUTerm_();
 
+    //  complete the OSU termination
 
-    Assert( !g_fOSUInit );
+    Assert( !g_fOSUInit );  // yes we just set it above, but if there is a concurrency issue it could be reset.
 
     g_OSUInitControl.TermFinish();
 

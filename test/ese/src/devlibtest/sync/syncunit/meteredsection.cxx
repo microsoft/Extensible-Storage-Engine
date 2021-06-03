@@ -12,11 +12,13 @@
 #endif
 #endif
 
+//  Used to force an async partition, so the main thread doesn't hang.  Doesn't do anything.
 
 void PartitionAsyncThunk( const DWORD_PTR dw )
 {
 }
 
+//  Validated PartitionDone check
 
 CMeteredSection::Group  g_groupPartitionExpected    = CMeteredSection::groupInvalidNil;
 BOOL            g_fPartitionDone        = fTrue;
@@ -27,7 +29,7 @@ void PartitionDoneGroupCheck( const DWORD_PTR ptr )
     CMeteredSection *       pmsTest = (CMeteredSection*)ptr;
     wprintf( L"\n\t\tPartitioningComplete!\n\n" );
 
-    TestCheck( g_fPartitionDone == fFalse );
+    TestCheck( g_fPartitionDone == fFalse );    // should reset for each partition
     TestCheck( g_groupPartitionExpected == pmsTest->GroupActive() );
     TestCheck( 1 - pmsTest->GroupActive() == pmsTest->GroupInactive() );
 
@@ -36,10 +38,13 @@ void PartitionDoneGroupCheck( const DWORD_PTR ptr )
 
 HandleError:
 
+    //  should be false, but just in case, use this to err out the main thread...
     g_fPartitionDone = fFalse;
 }
 
+//  Test fixture(s).
 
+//  --------------------------------------------------------------------------------------------------
 
 class CMeteredSectionConcurrentBashTest : public UNITTEST
 {
@@ -70,7 +75,7 @@ class CMeteredSectionConcurrentBashTest : public UNITTEST
 CMeteredSectionConcurrentBashTest CMeteredSectionConcurrentBashTest::s_instance;
 
 volatile INT g_cbashphase   = 0;
-INT g_tickPhaseWait     = 10;
+INT g_tickPhaseWait     = 10;   //  could use 0 for fast fast response.
 INT g_cbasephaseDone    = 0x7fffffff;
 
 typedef struct
@@ -82,7 +87,8 @@ typedef struct
 
     INT         cbashphase;
 
-    QWORD           cUnderflowNegThree;
+    // these must be before rgcGroup
+    QWORD           cUnderflowNegThree; //  one to grow on
     QWORD           cUnderflowNegTwo;
     QWORD           cUnderflowNegOne;
     QWORD           rgcGroup[2];
@@ -92,12 +98,13 @@ typedef struct
     QWORD           cSuccessfulLeaves;
     QWORD           cSkippedLeaves;
 
-} THREAD_BLOCK_MSCB;
+} THREAD_BLOCK_MSCB;    // MeteredSectionConcurrentBash
 
 THREAD_BLOCK_MSCB   g_rgtbMscb[3];
 
 #define IthreadMscb( ptb )      ( ptbMscb - g_rgtbMscb )
 
+//  Kinds of threads ... 
 
 #define FEvenThread( ptb )      ( 0 == IthreadMscb( ptb ) )
 
@@ -105,13 +112,14 @@ DWORD WINAPI ConcurrentBashWorker( THREAD_BLOCK_MSCB * const ptbMscb )
 {
     ERR err = JET_errSuccess;
 
-    CMeteredSection * pmsTest = ptbMscb->pmsTest;
+    CMeteredSection * pmsTest = ptbMscb->pmsTest;   // short hand
     DWORD tickStart = GetTickCount();
     wprintf( L"\tConcurrentBashWorker thread [%d]%p started (@%d).\n", IthreadMscb( ptbMscb ), ptbMscb, tickStart );
 
     ptbMscb->cbashphase = 0;
     while( g_cbashphase == 0 )
     {
+        // master thread says wait to coordinate beginning ...
     }
 
     BstfSetVerbosity( bvlPrintTests - 1 );
@@ -123,7 +131,7 @@ DWORD WINAPI ConcurrentBashWorker( THREAD_BLOCK_MSCB * const ptbMscb )
         {
             CMeteredSection::Group groupEnter = pmsTest->GroupEnter();
 
-            TestCheck( groupEnter >= -3 );
+            TestCheck( groupEnter >= -3 );  //  or bad things will happen
             ptbMscb->rgcGroup[groupEnter]++;
 
             if( groupEnter == CMeteredSection::groupTooManyActiveErr )
@@ -164,6 +172,7 @@ DWORD WINAPI ConcurrentBashWorker( THREAD_BLOCK_MSCB * const ptbMscb )
     {
         if ( ptbMscb->rgcGroup[0] == 0 && ptbMscb->rgcGroup[1] == 0 )
         {
+            //  we've completed the phase, wait for main thread to break us out
             Sleep( g_tickPhaseWait );
             continue;
         }
@@ -172,7 +181,7 @@ DWORD WINAPI ConcurrentBashWorker( THREAD_BLOCK_MSCB * const ptbMscb )
         {
             CMeteredSection::Group groupEnter = pmsTest->GroupEnter();
 
-            TestCheck( groupEnter >= -3 );
+            TestCheck( groupEnter >= -3 );  //  or bad things will happen
             ptbMscb->rgcGroup[groupEnter]++;
 
             if( groupEnter == CMeteredSection::groupTooManyActiveErr )
@@ -248,10 +257,10 @@ ERR CMeteredSectionConcurrentBashTest::ErrTest()
     OnRetail( TestCheck( msTest.CActiveUsers() == 0 ) );
     OnRetail( TestCheck( msTest.CQuiescingUsers() == 0 ) );
 
-    g_cbashphase = 0;
+    g_cbashphase = 0;   //  use one if you want threads to start immediate / not coordinate
 
     DWORD tickStart = GetTickCount();
-    memset( g_rgtbMscb, 0, sizeof(g_rgtbMscb) );
+    memset( g_rgtbMscb, 0, sizeof(g_rgtbMscb) );    // should be all zeros anyway, but we depend upon it, so do it ...
     for( ULONG ithread = 0; ithread < _countof(g_rgtbMscb); ithread++ )
     {
         g_rgtbMscb[ithread].pmsTest = &msTest;
@@ -267,13 +276,13 @@ ERR CMeteredSectionConcurrentBashTest::ErrTest()
         }
     }
 
-    Sleep( 10 );
+    Sleep( 10 );    // ensure threads are started ...
     wprintf( L"Threads started (%d ms)\n", GetTickCount() - tickStart );
 
     tickStart = GetTickCount();
     g_cbashphase = 1;
 
-    C_ASSERT( _countof(g_rgtbMscb) == 3 );
+    C_ASSERT( _countof(g_rgtbMscb) == 3 );  //  too lazy
     while( g_rgtbMscb[0].cUnderflowNegTwo == 0 || g_rgtbMscb[0].cUnderflowNegTwo == 0 || g_rgtbMscb[0].cUnderflowNegTwo == 0 )
     {
         Sleep( g_tickPhaseWait );
@@ -285,7 +294,7 @@ ERR CMeteredSectionConcurrentBashTest::ErrTest()
     tickStart = GetTickCount();
     g_cbashphase = 2;
 
-    C_ASSERT( _countof(g_rgtbMscb) == 3 );
+    C_ASSERT( _countof(g_rgtbMscb) == 3 );  //  still too lazy
     while( g_rgtbMscb[0].rgcGroup[0] != 0 || g_rgtbMscb[0].rgcGroup[1] != 0 || 
         g_rgtbMscb[1].rgcGroup[0] != 0 || g_rgtbMscb[1].rgcGroup[1] != 0 || 
         g_rgtbMscb[2].rgcGroup[0] != 0 || g_rgtbMscb[2].rgcGroup[1] != 0 )
@@ -333,6 +342,7 @@ HandleError:
 }
 
 
+//  --------------------------------------------------------------------------------------------------
 
 class CMeteredSectionLimitTest : public UNITTEST
 {
@@ -442,6 +452,8 @@ ERR CMeteredSectionLimitTest::ErrTest()
         if ( iEnters > ( 2 * 0x7fff ) - 10 )
         {
             OnRetail( wprintf( L"\t\t\t\tLeaveResults[%#x] ... %#x / %#x ...\n", iEnters, msTest.CActiveUsers(), msTest.CQuiescingUsers() ) );
+            //OnRetail( wprintf( L"\t\t\t\tLeaveResults[%#x] ... %#x / %#x ... %#x, %d, %d\n", iEnters, msTest.CActiveUsers(), msTest.CQuiescingUsers(),
+            //      iEnters / 2 , iEnters % 2, iEnters % 2 == 0 ) );
         }
 
         OnRetail( TestCheck( (ULONG)msTest.CActiveUsers() == iEnters / 2 ) );
@@ -462,7 +474,7 @@ ERR CMeteredSectionLimitTest::ErrTest()
     g_fPartitionDone = fFalse;
     g_groupPartitionExpected = 1;
 
-    msTest.Leave( groupFirst );
+    msTest.Leave( groupFirst ); //  partition complete
 
     TestCheck( !msTest.FEmpty() );
     TestCheck( msTest.GroupActive() == 1 );
@@ -471,7 +483,7 @@ ERR CMeteredSectionLimitTest::ErrTest()
     OnRetail( TestCheck( msTest.CActiveUsers() == 0x1 ) );
     OnRetail( TestCheck( msTest.CQuiescingUsers() == 0x0 ) );
 
-    msTest.Leave( groupSecond );
+    msTest.Leave( groupSecond );    //  active group empty
 
     TestCheck( msTest.FEmpty() );
     TestCheck( msTest.GroupActive() == 1 );
@@ -488,6 +500,7 @@ HandleError:
 }
 
 
+//  --------------------------------------------------------------------------------------------------
 
 class CMeteredSectionCaptureNonEmptyDtorAssert : public UNITTEST
 {
@@ -535,6 +548,7 @@ ERR CMeteredSectionCaptureNonEmptyDtorAssert::ErrTest()
 
     CMeteredSection * pmsTest = NULL;
 
+    // New metered section, and enter it ...
 
     pmsTest = new CMeteredSection;
     TestCheck( NULL != pmsTest );
@@ -544,13 +558,16 @@ ERR CMeteredSectionCaptureNonEmptyDtorAssert::ErrTest()
     TestCheck( pmsTest->GroupActive() == 0 );
     TestCheck( pmsTest->GroupInactive() == 1 );
 
+    // Check to see we assert on this bad situation
     
     g_fCaptureAssert = fTrue;
     delete pmsTest;
+    //  Can only check this on debug, b/c we don't have asserts in retail ...
     OnDebug( TestCheck( 0 == strcmp( g_szCapturedAssert, "FEmpty() || g_fSyncProcessAbort" ) ) );
     g_fCaptureAssert = fFalse;
     g_szCapturedAssert = NULL;
 
+    // Next try the same steps, but partition it, so the non-empty count is in the quiescing state ...
 
     pmsTest = new CMeteredSection;
     TestCheck( NULL != pmsTest );
@@ -575,6 +592,7 @@ HandleError:
 }
 
 
+//  --------------------------------------------------------------------------------------------------
 
 class CMeteredSectionBasicTest : public UNITTEST
 {
@@ -612,6 +630,11 @@ ERR CMeteredSectionBasicTest::ErrTest()
 
     wprintf( L"\tTesting basic CMeteredSection routines...\n" );
 
+    //  -------------------------------------------------------------------------------------------
+    //  Example code used to generate "Sample Code and State" documentation in sync.hxx
+    // originally had a whole bunch of these, littered through it, but had to make all member vars
+    // public to see them, so removed.
+    //wprintf( L"Data[%d] msTest - %p ... 0x%x { %d, %d, %d, %d } ... %d / %d\n", __LINE__, &msTest, pmsTest->m_cw, pmsTest->m_cCurrent, pmsTest->m_groupCurrent, pmsTest->m_cQuiesced, pmsTest->m_groupQuiesced,pmsTest->ActiveGroup(), pmsTest->FQuiescing() );
 
 
     CMeteredSection     msTest;
@@ -624,7 +647,7 @@ ERR CMeteredSectionBasicTest::ErrTest()
     OnRetail( TestCheck( msTest.CQuiescingUsers() == 0 ) );
 
     const INT i = msTest.Enter();
-    TestCheck( i == 0 );
+    TestCheck( i == 0 );    //  first group after .ctor is 0, not that this is important ...
     TestCheck( i == msTest.Enter() );
     TestCheck( i == msTest.Enter() );
 
@@ -635,8 +658,9 @@ ERR CMeteredSectionBasicTest::ErrTest()
     OnRetail( TestCheck( msTest.CActiveUsers() == 3 ) );
     OnRetail( TestCheck( msTest.CQuiescingUsers() == 0 ) );
 
+    //  by setting -3, it asserts we don't expect an immediate partition ...
     g_groupPartitionExpected = -3;
-    msTest.Partition( PartitionDoneGroupCheck, (DWORD_PTR)&msTest );
+    msTest.Partition( PartitionDoneGroupCheck, (DWORD_PTR)&msTest );    //      - Begin
 
     TestCheck( !msTest.FEmpty() );
     TestCheck( msTest.GroupActive() == 1 );
@@ -672,6 +696,7 @@ ERR CMeteredSectionBasicTest::ErrTest()
     g_fPartitionDone = fFalse;
     g_groupPartitionExpected = 1;
     msTest.Leave( i );
+    //  -> immediately triggers PartitionDoneGroupCheck / .Partition()  - End
     TestCheck( g_fPartitionDone == fTrue );
 
     TestCheck( !msTest.FEmpty() );
@@ -690,7 +715,7 @@ ERR CMeteredSectionBasicTest::ErrTest()
     OnRetail( TestCheck( msTest.CActiveUsers() == 5 ) );
     OnRetail( TestCheck( msTest.CQuiescingUsers() == 0 ) );
 
-    msTest.Partition( PartitionDoneGroupCheck, (DWORD_PTR)&msTest );
+    msTest.Partition( PartitionDoneGroupCheck, (DWORD_PTR)&msTest );    //      - Begin2
 
     TestCheck( !msTest.FEmpty() );
     TestCheck( msTest.GroupActive() == 0 );
@@ -705,8 +730,9 @@ ERR CMeteredSectionBasicTest::ErrTest()
     msTest.Leave( i2 );
 
     g_fPartitionDone = fFalse;
-    g_groupPartitionExpected = 0;
+    g_groupPartitionExpected = 0;   // goes back to group zero
     msTest.Leave( i2 );
+    //  -> immediately triggers PartitionDoneGroupCheck / .Partition()  - End2
 
     TestCheck( msTest.FEmpty() );
     TestCheck( msTest.GroupActive() == 0 );
@@ -715,6 +741,7 @@ ERR CMeteredSectionBasicTest::ErrTest()
     OnRetail( TestCheck( msTest.CActiveUsers() == 0 ) );
     OnRetail( TestCheck( msTest.CQuiescingUsers() == 0 ) );
 
+    //  -------------------------------------------------------------------------------------------
     wprintf( L"\tCMeteredSectionBasicTest done!" );
 
 HandleError:

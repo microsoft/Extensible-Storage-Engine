@@ -24,8 +24,11 @@ const BYTE mpbb[] = {'0', '1', '2', '3', '4', '5', '6', '7', '8',
 #define delIndent()         g_cprintfIndent.Unindent()
 
 
+// numer of bytes to be displayed from the key of each node
 #define MAX_KEY_SIZE_DISPLAY 8
 
+// helps to don't pass as param the dumping mode (all nodes or visible ones)
+// to all the function down the call stack
 
 typedef char * (*PfnFormatNodeInfo)( KEYDATAFLAGS * pNode );
 
@@ -41,6 +44,11 @@ LOCAL VOID ESEDUMPSingleSpaceHeaderDump(SPACE_HEADER &, FUCB * , JET_GRBIT);
 LOCAL ERR ErrESEDUMPMultipleSpaceHeaderDump(SPACE_HEADER & , FUCB *, JET_GRBIT );
 
 
+// main function that dumps the nodes (it's called from the eseutil.cxx)
+// the dump parameters are set according to the command line in pdbutil 
+// Current options: - dump only one table /{x|X}TableName
+//                  - dump visible nodes or all nodes 
+//                    (including those marked as deleted)
 ERR ErrESEDUMPData( JET_SESID sesid, JET_DBUTIL_W *pdbutil )
 {
     ERR         err;
@@ -51,6 +59,7 @@ ERR ErrESEDUMPData( JET_SESID sesid, JET_DBUTIL_W *pdbutil )
     Assert( sizeof(JET_DBUTIL_W) == pdbutil->cbStruct );
     Assert( NULL != pdbutil->szDatabase );
 
+    // attach to the database
     CallR( ErrIsamAttachDatabase(
                 sesid,
                 pdbutil->szDatabase,
@@ -70,6 +79,7 @@ ERR ErrESEDUMPData( JET_SESID sesid, JET_DBUTIL_W *pdbutil )
     
     grbitESEDUMPMode = pdbutil->grbitOptions;
 
+    // just dump the database space info if not "one table dump"
     if (!pdbutil->szTable)
         Call ( ErrESEDUMPDatabaseInfo( (PIB *)sesid, ifmp, grbitESEDUMPMode ) );
 
@@ -77,6 +87,7 @@ ERR ErrESEDUMPData( JET_SESID sesid, JET_DBUTIL_W *pdbutil )
 
     if (!pdbutil->szTable || ( pdbutil->szTable && pdbutil->szTable[0] ) )
     {
+        // dump the tables, if ERR jump to CloseDb and DetachDb
         Call( ErrESEDUMPTables( sesid, ifmp, pdbutil->szTable, grbitESEDUMPMode ) );
     }
 
@@ -92,15 +103,20 @@ HandleError:
 }
 
 
+// Dumps all the tables with nodes, space info, indexes, LV's
+// It makes a loop into the Catalog and
+// for each table call a DumpOneTable function
 LOCAL ERR ErrESEDUMPTables( JET_SESID sesid, JET_DBID ifmp, __in PCWSTR wszTable, JET_GRBIT grbitESEDUMPMode )
 {
     ERR         err;
     FUCB        *pfucbCatalog =     pfucbNil;
     const BYTE  bTrue =             0xff;
 
+    // opens the catalog
     CallR( ErrCATOpen( (PIB *)sesid, ifmp, &pfucbCatalog ) );
     Assert( pfucbNil != pfucbCatalog );
 
+    // set that index in order to "see" only the tables (user and system tabels)
     Call ( ErrIsamSetCurrentIndex(
                 (PIB *)sesid,
                 pfucbCatalog,
@@ -117,6 +133,8 @@ LOCAL ERR ErrESEDUMPTables( JET_SESID sesid, JET_DBID ifmp, __in PCWSTR wszTable
         
         Call( szTableName.ErrSet( wszTable ) );
         
+        // if table name specified
+        // make the key and seek
         Call( ErrIsamMakeKey(
                     pfucbCatalog->ppib,
                     pfucbCatalog,
@@ -142,6 +160,9 @@ LOCAL ERR ErrESEDUMPTables( JET_SESID sesid, JET_DBID ifmp, __in PCWSTR wszTable
     }
     else
     {
+        // if no table specified
+        // move to the first record
+        // it must exist (also JET_errRecordNotFound is error)
         Call ( ErrIsamMove( pfucbCatalog->ppib,
                     pfucbCatalog,
                     JET_MoveFirst,
@@ -159,6 +180,7 @@ LOCAL ERR ErrESEDUMPTables( JET_SESID sesid, JET_DBID ifmp, __in PCWSTR wszTable
             const DATA& dataRec = pfucbCatalog->kdfCurr.data;
             
 
+            // get the table name
             Call( ErrRECIRetrieveVarColumn(
                     pfcbNil,
                     pfucbCatalog->u.pfcb->Ptdb(),
@@ -182,8 +204,10 @@ LOCAL ERR ErrESEDUMPTables( JET_SESID sesid, JET_DBID ifmp, __in PCWSTR wszTable
             Call ( ErrDIRRelease( pfucbCatalog ) );
             Assert( !Pcsr( pfucbCatalog )->FLatched() );
 
+            // dump the table
             Call (ErrESEDUMPOneTable(pfucbCatalog, szTableName, grbitESEDUMPMode));
 
+            // move to the next table
             err = ErrIsamMove(
                         pfucbCatalog->ppib,
                         pfucbCatalog,
@@ -203,11 +227,15 @@ HandleError:
 }
 
 
+// dumps one table with nodes, space info, indexes, LV's
+// szTableName - is the table name
+// pfucbCatalob - get the session and database
 LOCAL ERR ErrESEDUMPOneTable(FUCB *pfucbCatalog, __in PCSTR szTableName, JET_GRBIT grbitESEDUMPMode)
 {
     ERR err =           JET_errSuccess;
     FUCB *pfucbTable =  pfucbNil;
     
+    // open the table
     CallR( ErrFILEOpenTable(
                 pfucbCatalog->ppib,
                 pfucbCatalog->ifmp,
@@ -219,6 +247,8 @@ LOCAL ERR ErrESEDUMPOneTable(FUCB *pfucbCatalog, __in PCSTR szTableName, JET_GRB
     Assert( pfucbTable->u.pfcb->FTypeTable() );
 
 
+    // print the information about ifmp,
+    // page and table name for this table (pageFDP)
     addPBI("\n");
     addPBI("[%d , %d] %s (Table)\n",
                 pfucbCatalog->ifmp,
@@ -229,10 +259,17 @@ LOCAL ERR ErrESEDUMPOneTable(FUCB *pfucbCatalog, __in PCSTR szTableName, JET_GRB
     Call (ErrESEDUMPCheckAndDumpSpaceInfo(pfucbTable, grbitESEDUMPMode));
 
 
+    // the function that dumps the nodes and must conserve
+    // the table root page unlatched
     Call (ErrESEDUMPNodesForOneTree(pfucbTable, grbitESEDUMPMode));
     
+    // the function that dumps all the secondary indexes and must conserve
+    // the table root page unlached
     Call (ErrESEDUMPIndexForOneTable(pfucbTable, grbitESEDUMPMode));
     
+    // dump the LV's, if any
+    // the function that dumps all the secondary indexes and must conserve
+    // the table root page unlached
     Call (ErrESEDUMPLVForOneTable(pfucbTable, grbitESEDUMPMode));
     
 HandleError:
@@ -241,6 +278,7 @@ HandleError:
     return err;
 }
 
+// dump the LV tree (if it exists) for a table
 LOCAL ERR ErrESEDUMPLVForOneTable(FUCB *pfucbTable, JET_GRBIT grbitESEDUMPMode)
 {
     ERR err =       JET_errSuccess;
@@ -252,6 +290,7 @@ LOCAL ERR ErrESEDUMPLVForOneTable(FUCB *pfucbTable, JET_GRBIT grbitESEDUMPMode)
     
     addIndent();
     
+    // get the LV root page handle
     err = ErrFILEOpenLVRoot( pfucbTable, &pfucbLV, fFalse );
     if ( JET_errSuccess == err )
     {
@@ -274,11 +313,13 @@ LOCAL ERR ErrESEDUMPLVForOneTable(FUCB *pfucbTable, JET_GRBIT grbitESEDUMPMode)
         pfucbLV = pfucbNil;
     }
     else
+        // if other error than No LV tree, it's error for good
         if ( wrnLVNoLongValues != err)
         {
             Call (err);
         }
         else
+        // if wrnLVNoLongValues, that's fine
             err = JET_errSuccess;
     
 HandleError:
@@ -295,6 +336,8 @@ HandleError:
 }
 
 
+// dump the indexes
+// iterates trough the secondary index list, if any
 LOCAL ERR ErrESEDUMPIndexForOneTable(FUCB *pfucbTable, JET_GRBIT grbitESEDUMPMode)
 {
     
@@ -307,12 +350,15 @@ LOCAL ERR ErrESEDUMPIndexForOneTable(FUCB *pfucbTable, JET_GRBIT grbitESEDUMPMod
     Assert( Pcsr(pfucbTable ));
     Assert( !Pcsr(pfucbTable )->FLatched() );
 
+    // get the first secondary index
     pfcb = pfucbTable->u.pfcb->PfcbNextIndex();
     
     addIndent();
     
+    // if a secondary index still exists ...    
     while (pfcb)
     {
+        // open it
         Call (ErrDIROpen(
                     pfucbTable->ppib,
                     pfcb->PgnoFDP(),
@@ -323,6 +369,7 @@ LOCAL ERR ErrESEDUMPIndexForOneTable(FUCB *pfucbTable, JET_GRBIT grbitESEDUMPMod
         
         FUCBSetIndex( pfucbIndex );
 
+        // print the name of the index, with ifmp and pageNo.
         USHORT indexNameTag = 0;
         char * szIndexName = (char *)0;
         FCB *pfcbT = pfucbTable->u.pfcb;
@@ -345,13 +392,17 @@ LOCAL ERR ErrESEDUMPIndexForOneTable(FUCB *pfucbTable, JET_GRBIT grbitESEDUMPMod
         flushPB();
         Assert( !Pcsr( pfucbIndex )->FLatched() );
 
+        // dump the space info for the Index tree himself
         Call (ErrESEDUMPCheckAndDumpSpaceInfo(pfucbIndex, grbitESEDUMPMode));
         
+        // dumps the nodes for the index
         Call (ErrESEDUMPNodesForOneTree(pfucbIndex, grbitESEDUMPMode));
 
+        // close the current index
         DIRClose(pfucbIndex);
         pfucbIndex = pfucbNil;
 
+        // move to the next index
         pfcb = pfcb->PfcbNextIndex();
     }
     
@@ -368,6 +419,12 @@ HandleError:
     return err;
 }
 
+// dumps nodes from Btree 
+// If the Btree is a space tree (nodes contains info about extents),
+// the node info is processed in order to show the pages of the extent
+// If the Btree is of other kind (table records, table index, LV) the nodes
+// are dumped adding only info about the page/line/flags/key size/data size
+// and the first part of the key is dumped also (see MAX_KEY_SIZE_DISPLAY)
 LOCAL ERR ErrESEDUMPNodesForOneTree(FUCB *pfucbTable, JET_GRBIT grbitESEDUMPMode, PfnFormatNodeInfo pfnFormat)
 {
     ERR             err         = JET_errSuccess;
@@ -381,10 +438,12 @@ LOCAL ERR ErrESEDUMPNodesForOneTree(FUCB *pfucbTable, JET_GRBIT grbitESEDUMPMode
     
     const BOOL      fSpaceTree  = FFUCBSpace( pfucbTable );
     
+    // start to dump from the first node
     dib.pos     = posFirst;
     dib.dirflag = (grbitESEDUMPMode & JET_bitDBUtilOptionAllNodes)?
                         fDIRAllNode:fDIRNull;
 
+    // HACK: Can't use DIR layer against space cursors.
     if ( fSpaceTree )
     {
         err = ErrBTDown( pfucbTable, &dib, latchReadTouch );
@@ -421,6 +480,8 @@ LOCAL ERR ErrESEDUMPNodesForOneTree(FUCB *pfucbTable, JET_GRBIT grbitESEDUMPMode
     addIndent();
     addPBI("NODES:\n");
     
+    // print the header, there are small differences between 
+    // ordinary and space tree nodes
     addIndent();
     addPBI("********************************"
                 "**********************************\n");
@@ -443,12 +504,15 @@ LOCAL ERR ErrESEDUMPNodesForOneTree(FUCB *pfucbTable, JET_GRBIT grbitESEDUMPMode
 
     flushPB();
 
+    // goes to each node of the tree
+    // Obs: ErrESEDUMPIsamMove will return with 
+    // JET_errRecordDeleted on deleted records
     while ( JET_errSuccess == err )
     {
 
         char *pCustomFormat = NULL;
-        char keyDataPrintBuffer[ max ( MAX_KEY_SIZE_DISPLAY * 3  + 1,
-                                    3 * 12 + 6  + 1 ) ];
+        char keyDataPrintBuffer[ max ( MAX_KEY_SIZE_DISPLAY * 3 /* = space for " %02X" */ + 1,
+                                    3 * 12 + 6 /* = "%lu - %lu (%lu)"*/ + 1 ) ];
         
         keyDataPrintBuffer[0] = 0;
 
@@ -458,6 +522,8 @@ LOCAL ERR ErrESEDUMPNodesForOneTree(FUCB *pfucbTable, JET_GRBIT grbitESEDUMPMode
         {
             pCustomFormat = pfnFormat( &pfucbTable->kdfCurr );
         }
+        // print the extent pages info for space trees
+        // or the key for others
         else if (fSpaceTree)
         {
             PGNO pgnoLast;
@@ -494,6 +560,7 @@ LOCAL ERR ErrESEDUMPNodesForOneTree(FUCB *pfucbTable, JET_GRBIT grbitESEDUMPMode
             *pbT = 0;
         }
 
+        // print the common info of the node and the specific ones at the end
         addPBI( "%7d | %4d |  %c%c%c  | %5ld | %5ld | %s\n",
                     pfucbTable->csr.Pgno(),
                     pfucbTable->csr.ILine(),
@@ -514,10 +581,12 @@ LOCAL ERR ErrESEDUMPNodesForOneTree(FUCB *pfucbTable, JET_GRBIT grbitESEDUMPMode
             Call (ErrDIRRelease( pfucbTable ));
             Assert( !Pcsr( pfucbTable )->FLatched() );
 
+            // move to next node
             err = ErrDIRNext(pfucbTable, dirflag);
         }
     }
 
+    // chech for error, JET_errNoCurrentRecord is not an error
     if (JET_errNoCurrentRecord == err )
     {
         err = JET_errSuccess;
@@ -547,6 +616,11 @@ HandleError:
 }
 
 
+// Check the split buffer (and dump it) for space tree root
+// Call ErrESEDUMPSpaceInfoForOneTree for pages that have 
+// space info (root of tree and not SpaceTrees), where the
+// space header is checked and dumped, if MultiExtent also
+// the Own and Avail trees are dumped
 LOCAL ERR ErrESEDUMPCheckAndDumpSpaceInfo(FUCB *pfucb, JET_GRBIT grbitESEDUMPMode)
 {
     ERR err =           JET_errSuccess;
@@ -558,11 +632,14 @@ LOCAL ERR ErrESEDUMPCheckAndDumpSpaceInfo(FUCB *pfucb, JET_GRBIT grbitESEDUMPMod
     Assert( Pcsr(pfucb ));
     Assert( !Pcsr(pfucb )->FLatched() );
 
+    // Ensure space info has been initialized.
     if ( !pfucb->u.pfcb->FSpaceInitialized() )
     {
         Call( ErrSPDeferredInitFCB( pfucb ) );
     }
 
+    // get the root page (read mode) so that
+    // the flags and buffer/header are accesible
     CallR (ErrBTIGotoRoot( pfucb, latchReadNoTouch ));
     Assert( Pcsr(pfucb )->FLatched() );
 
@@ -574,6 +651,7 @@ LOCAL ERR ErrESEDUMPCheckAndDumpSpaceInfo(FUCB *pfucb, JET_GRBIT grbitESEDUMPMod
         goto HandleError;
     }
     
+    // for space trees (with SPLIT_BUFFER) dump info on that one
     if (fIsSpaceTree)
     {
         NDGetPtrExternalHeader( Pcsr( pfucb )->Cpage(), &line, noderfWhole );
@@ -613,6 +691,10 @@ LOCAL ERR ErrESEDUMPCheckAndDumpSpaceInfo(FUCB *pfucb, JET_GRBIT grbitESEDUMPMod
         }
         else
         {
+            // TODO: Report primary extent size. Since cpgPrimary in the
+            // space header has now been re-purposed, we either need
+            // to grovel the OE for the extent containing the root page,
+            // or we need to persist cpgPrimary in the catalog.
             addPBI("Primary extent size: <unavailable>\n");
             addPBI("Last allocation size: %ld page%s\n", sph.CpgLastAlloc(), sph.CpgLastAlloc() == 1 ? "" : "s");
         }
@@ -641,11 +723,14 @@ HandleError:
 }
 
 
+// Used to check only the database header, print the pagenumber
+// then call the space info function for this page
 LOCAL ERR ErrESEDUMPDatabaseInfo(PIB *ppib, IFMP ifmp, JET_GRBIT grbitESEDUMPMode)
 {
     FUCB *pfucbDb =     pfucbNil;
     ERR err =           JET_errSuccess;
     
+    // open the table
     CallR (ErrDIROpen(
                 ppib,
                 pgnoSystemRoot,
@@ -667,6 +752,7 @@ HandleError:
 }
 
 
+// just dumps a SPLIT_BUFFER
 LOCAL VOID ESEDUMPSplitBufferDump(SPLIT_BUFFER & spb, FUCB * pfucb, JET_GRBIT grbitESEDUMPMode)
 {
     Assert(pfucb);
@@ -703,11 +789,13 @@ LOCAL VOID ESEDUMPSplitBufferDump(SPLIT_BUFFER & spb, FUCB * pfucb, JET_GRBIT gr
     flushPB();
 }
 
+// dumps a SPACE_HEADER with SingleExtent
 LOCAL VOID ESEDUMPSingleSpaceHeaderDump(SPACE_HEADER & sph, FUCB * pfucb, JET_GRBIT grbitESEDUMPMode)
 {
     Assert( sph.FSingleExtent());
     Assert(pfucb);
     
+    // space info are in the same space_header as bit array
     addPBI("Single extent covering pages %d to %d\n",
                 PgnoFDP(pfucb),
                 PgnoFDP(pfucb) + sph.CpgPrimary() - 1 );
@@ -718,7 +806,7 @@ LOCAL VOID ESEDUMPSingleSpaceHeaderDump(SPACE_HEADER & sph, FUCB * pfucb, JET_GR
     
     PGNO pageNo = PgnoFDP(pfucb) + 1;
 
-    char pagesPrintBuffer[ 8*sizeof(UINT) * 12  + 1];
+    char pagesPrintBuffer[ 8*sizeof(UINT) * 12 /* " %lu"  */ + 1];
     pagesPrintBuffer[0] = 0;
     
     CPG cpgAvail = 0;
@@ -738,6 +826,7 @@ LOCAL VOID ESEDUMPSingleSpaceHeaderDump(SPACE_HEADER & sph, FUCB * pfucb, JET_GR
 }
 
 
+// dumps a SPACE_HEADER with MultipleExtent
 LOCAL ERR ErrESEDUMPMultipleSpaceHeaderDump(SPACE_HEADER & sph, FUCB * pfucb, JET_GRBIT grbitESEDUMPMode)
 {
     FUCB *pfucbExtent =     pfucbNil;
@@ -754,6 +843,9 @@ LOCAL ERR ErrESEDUMPMultipleSpaceHeaderDump(SPACE_HEADER & sph, FUCB * pfucb, JE
     addPBI("Avail extent page number : %d\n", sph.PgnoAE());
     flushPB();
 
+    // for each of two trees (own and avail)
+    // we must dump the space tree and the nodes
+    // 2 steps: 0 - Own, 1 - Avail
     for(INT step = 0; step < 2; step++)
     {
         addPBI(step?"[%d , %d] AVAIL EXTENT:\n":"[%d , %d] OWN EXTENT:\n",
@@ -761,6 +853,7 @@ LOCAL ERR ErrESEDUMPMultipleSpaceHeaderDump(SPACE_HEADER & sph, FUCB * pfucb, JE
                     step?sph.PgnoAE():sph.PgnoOE());
         flushPB();
 
+        // open the page of the coresponding space tree
         if ( step )
         {
             Call( ErrSPIOpenAvailExt( pfucb->ppib, pfucb->u.pfcb, &pfucbExtent ) );
@@ -772,6 +865,7 @@ LOCAL ERR ErrESEDUMPMultipleSpaceHeaderDump(SPACE_HEADER & sph, FUCB * pfucb, JE
         Assert( pfucbExtent != pfucbNil );
 
         
+        // We will be traversing the entire tree in order, so preread all the pages.
         FUCBSetSequential( pfucbExtent );
         FUCBSetPrereadForward( pfucbExtent, cpgPrereadSequential );
         
@@ -795,5 +889,5 @@ HandleError:
     return err;
 }
 
-#endif
+#endif  //  MINIMAL_FUNCTIONALITY
 

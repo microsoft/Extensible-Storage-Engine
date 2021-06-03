@@ -45,6 +45,7 @@ QWORD TimeTestController::s_cIterations = 100000000;
 TimeTestController g_ttctrl;
 
 
+// SOMEONE ... consider combinging these perf tests ... 
 
 CUnitTest( OslayerHrtCheckPerfTestLoopBaseline, 0, "Test for perf for  ." );
 ERR OslayerHrtCheckPerfTestLoopBaseline::ErrTest()
@@ -144,6 +145,7 @@ ERR OslayerHrtDblHRTDeltaWorks::ErrTest()
     UtilSleep( ms );
     double dds = DblHRTDelta( hrt, HrtHRTCount() );
     TICK tick = TICK( dds * 1000.0 );
+    //  So I'm giving it 3 time sequences of slop 
     OSTestCheck( tick > ( ms - 48 ) );
     OSTestCheck( tick < ( ms + 48 ) );
 
@@ -163,12 +165,21 @@ ERR OslayerHrtTestHrtCusecTimeSeemsAccurate::ErrTest()
     UtilSleep( (DWORD)cusecTest / 1000 );
     HRT dhrt = HrtHRTCount() - hrtStart;
     const QWORD cusecActual = CusecHRTFromDhrt( dhrt );
+    //  So I'm giving it 3 time sequences of slop 
     OSTestCheck( cusecActual > ( cusecTest - 48 * 1000 ) );
     OSTestCheck( cusecActual < ( cusecTest + 48 * 1000 ) );
     wprintf( L"    TimeMissed = %I64d ( target %I64d, @ %I64d hrz )\n", cusecActual - cusecTest, cusecTest, dhrtFrequence );
 
+    //  Test that sufficiently short dhrts give 0 ...
     OSTestCheck( CusecHRTFromDhrt( 0 ) == 0 );
 
+    //  THIS may hit / go off.
+    //  On my(SOMEONE) system the frequency is 3410069, and so dhrt = 1 at 3.4 M gives like 0.29 usec, so it gets 
+    //  rounded to 0 usec, as would be appropriate.  And a dhrt = 2 gives 1 usec on my system b/c at 3.4 M, that's 
+    //  like ~0.60ish of a usec.
+    //  I think as long as it is above 2 M, this will work out, so if someone hits, this add this if around this 
+    //  next check ...
+    // if ( HrtHRTFreq() > 2000000 )
     OSTestCheck( CusecHRTFromDhrt( 1 ) == 0 );
 
     wprintf( L"    Checking frequence %I64d and HRT latency time tests successful.\n", dhrtFrequence );

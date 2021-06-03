@@ -1,8 +1,33 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
+//
+// Use of this source code is subject to the terms of your Microsoft Windows CE
+// Source Alliance Program license form.  If you did not accept the terms of such
+// a license, you are not authorized to use this source code.
+//
 
+/*
 
+Decoding is splitted into two phases:
+
+1. Fast decoding. Check bounds rarely (when loading new tag and after copying
+   of a long string) and switch into Careful only when we are too close to the
+   end of input or output buffer.
+
+2. Careful decoding. Before performing any memory access all bounds are checked
+   to make sure no buffer overrun or underrun will happen. Careful decoding is
+   usually 1.5 times slower than Fast one, but only last several hundred bytes
+   are decoded this way; all the rest is decoded Fast.
+
+As long as decoding code is essentially the same except for bounds checks that
+differ in Fast and Careful mode, in order to avoid code duplication this file
+is included twice with different setting of CAREFUL macro (first it is 0, then
+1).
+
+Run "cl -EP xdecode.c >xdecode.pp" to see actual code.
+
+*/
 
 
 
@@ -23,7 +48,7 @@
 #undef PREFETCH
 #define PREFETCH(p)
 
-#else 
+#else /* !CAREFUL */
 
 #define LABEL(label) label
 #define CAREFUL_OK_IF(cond)
@@ -52,9 +77,10 @@ static void do_decode (decode_info *info)
 
 
 
+/* ----------------------- CODING_HUFF_ALL ------------------------ */
+/*                         ---------------                          */
 
-
-
+// C code: 26.3 MB/s, asm code: 32.3 MB/s at P3-500
 
 #if CODING == CODING_HUFF_ALL
 
@@ -76,14 +102,17 @@ static void do_decode (decode_info *info)
   if (src >= info->src.careful || dst >= info->dst.careful)
     goto careful_next;
   goto LABEL(next);
-#endif 
+#endif /* CAREFUL */
 
 LABEL(decode_more):
+  // too close to end of buffer? -- switch to careful mode...
   CAREFUL_IF (src >= info->src.careful, decode_more1);
   CAREFUL_IF (dst >= info->dst.careful, decode_more2);
 
+  // input buffer ovverrun? -- corrupted compressed data
   CAREFUL_ERR_IF (src >= info->src.end_bitmask2);
 
+  // read 16 bits more and update Mask&Bits respectively
   bits = Bits;
   ofs = * (__unaligned ubitmask2 *) src;
   bits = (bits_t) (-bits);
@@ -98,7 +127,7 @@ LABEL(decode_more):
   for (;;)
   {
     CAREFUL_OK_IF (dst >= info->dst.stop);
-    *dst = (uchar) len;
+    *dst = (uchar) len;               // copy literal byte to output
     ofs = (uxint) (Mask >> (8 * sizeof (Mask) - DECODE_BITS));
     ++dst;
     len = ((int16 *) info->table)[ofs];
@@ -107,60 +136,63 @@ LABEL(decode_more):
     if (len < 0)
       goto LABEL(long_codeword);
 
+    // short codeword -- already decoded
 
-    bits &= len;
-    len >>= 4;
+    bits &= len;                      // bits = # of bit used in Mask
+    len >>= 4;                        // len = token
 
-    Mask <<= bits;
-    Bits = (bits_t) (Bits - bits);
+    Mask <<= bits;                    // update Mask&Bits
+    Bits = (bits_t) (Bits - bits);    // read more bits if necessary
     if (Bits < 0)
       goto LABEL (decode_more);
 
-    if ((len -= 256) < 0)
+    if ((len -= 256) < 0)             // (len -= 256) < 0 ? literal : pointer
       continue;
     goto LABEL (pointer);
 
-  LABEL(next):
+  LABEL(next):                          // decode next token via lookup table
     ofs = (uxint) (Mask >> (8 * sizeof (Mask) - DECODE_BITS));
     len = ((int16 *) info->table)[ofs];
     bits = 15;
 
     if (len >= 0)
     {
+      // short codeword -- already decoded
 
-      bits &= len;
-      len >>= 4;
+      bits &= len;                      // bits = # of bit used in Mask
+      len >>= 4;                        // len = token
 
-      Mask <<= bits;
-      Bits = (bits_t) (Bits - bits);
+      Mask <<= bits;                    // update Mask&Bits
+      Bits = (bits_t) (Bits - bits);    // read more bits if necessary
       if (Bits < 0)
         goto LABEL (decode_more);
 
-      if ((len -= 256) < 0)
+      if ((len -= 256) < 0)             // (len -= 256) < 0 ? literal : pointer
         continue;
     }
     else
     {
   LABEL (long_codeword):
+    // long codeword -- decode bit by bit
 
-      Mask <<= DECODE_BITS;
+      Mask <<= DECODE_BITS;             // DECODE_BITS alreay parsed
 
       do
       {
-        len += ((bitmask4) Mask) < 0;
-        Mask <<= 1;
+        len += ((bitmask4) Mask) < 0;       // len += MSB (Mask)
+        Mask <<= 1;                     // 1 more bit was used
         len = ((int16 *) info->table)[len + 0x8000];
       }
       while (len < 0);
 
-      bits &= len;
-      len >>= 4;
+      bits &= len;                      // bits = # of bit used in Mask
+      len >>= 4;                        // len = token
 
-      Bits = (bits_t) (Bits - bits);
+      Bits = (bits_t) (Bits - bits);    // read more bits if necessary
       if (Bits < 0)
         goto LABEL (decode_more);
 
-      if ((len -= 256) < 0)
+      if ((len -= 256) < 0)             // (len -= 256) < 0 ? literal : pointer
         continue;
     }
 
@@ -168,59 +200,61 @@ LABEL(decode_more):
 
     CAREFUL_EOF_IF (dst >= info->dst.stop);
 
-    bits = (bits_t) (len >> MAX_LENGTH_LOG);
+    bits = (bits_t) (len >> MAX_LENGTH_LOG);    // # of bits in offset
     ofs = (uxint) ((Mask >> 1) | (((ubitmask4) 1) << (8 * sizeof (Mask) - 1)));
 
-    Mask <<= bits;
+    Mask <<= bits;                      // update Mask and Bits
     Bits = (bits_t) (Bits - bits);
 
-    bits ^= 8 * sizeof (ofs) - 1;
-    len &= MAX_LENGTH - 1;
-    ofs >>= bits;
+    bits ^= 8 * sizeof (ofs) - 1;       // bits = 31 - bits
+    len &= MAX_LENGTH - 1;              // run length - MIN_MATCH
+    ofs >>= bits;                       // ofs = (1<<bits) | (Mask<<(32-bits))
 
-    info->src.last = src;
-    ofs = (uxint) (- (xint) ofs);
+    info->src.last = src;               // save src
+    ofs = (uxint) (- (xint) ofs);       // ofs = real negative offset
 
 #if !CAREFUL && 8-MIN_MATCH < MAX_LENGTH-1
     if (len <= 8-MIN_MATCH)
     {
-      src = dst + (xint) ofs;
+      src = dst + (xint) ofs;           // src = beginning of string
 
-#if defined (i386) || defined (i386compat)
+#if defined (i386) || defined (i386compat)  // unligned access is faster only on x86
       if (ofs < ~2)
       {
-        if (src < info->dst.beg)
+        if (src < info->dst.beg)        // buffer underrun? -- corrupted data
           RET_ERR;
 
-        ofs = ((__unaligned uint32 *) src)[0];
+        ofs = ((__unaligned uint32 *) src)[0];   // copy 8 bytes
         ((__unaligned uint32 *) dst)[0] = ofs;
         ofs = ((__unaligned uint32 *) src)[1];
         ((__unaligned uint32 *) dst)[1] = ofs;
 
-        src = info->src.last;
-        dst = dst + len + MIN_MATCH;
+        src = info->src.last;           // restore src
+        dst = dst + len + MIN_MATCH;    // dst = next output position
 
-        if (Bits >= 0)
+        if (Bits >= 0)                  // have enough Bits in Mask? -- proceed further
           goto LABEL (next);
-        goto LABEL (mask_more);
+        goto LABEL (mask_more);         // otherwise, read more bits
       }
 #endif
 
-      if (src < info->dst.beg)
+      if (src < info->dst.beg)        // buffer underrun? -- corrupted data
         RET_ERR;
 
-      COPY_8_BYTES (dst, src);
-      src = info->src.last;
-      dst = dst + len + MIN_MATCH;
+      COPY_8_BYTES (dst, src);        // copy 8 bytes one by one
+                                      // NB: dst & src may overlap
+      src = info->src.last;           // restore src
+      dst = dst + len + MIN_MATCH;    // dst = next output position
 
-      if (Bits >= 0)
+      if (Bits >= 0)                  // have enough Bits in Mask? -- proceed further
         goto LABEL (next);
-      goto LABEL (mask_more);
+      goto LABEL (mask_more);         // otherwise, read more bits
     }
-#endif 
+#endif /* CAREFUL */
 
-    if (len == MAX_LENGTH - 1)
+    if (len == MAX_LENGTH - 1)          // long length? -- decode it
     {
+      // if input data overrun then compressed data corrupted
       CAREFUL_ERR_IF (src >= info->src.end);
 
       len = *src++ + (MAX_LENGTH-1);
@@ -229,18 +263,18 @@ LABEL(decode_more):
         CAREFUL_ERR_IF (src >= info->src.end_1);
         len = * (__unaligned uint16 *) src;
         src += 2;
-        if (len < 255 + MAX_LENGTH-1)
+        if (len < 255 + MAX_LENGTH-1)   // length should be large enough
           RET_ERR;
       }
 
-      info->src.last = src;
+      info->src.last = src;             // save input buffer pointer
     }
 
-    len += MIN_MATCH;
-    src = dst + (xint) ofs;
-    dst += len;
+    len += MIN_MATCH;                   // len = actual length
+    src = dst + (xint) ofs;             // src = pointer to the beginning of string
+    dst += len;                         // dst = last output position
 
-    if (src < info->dst.beg)
+    if (src < info->dst.beg)            // buffer underrun? -- corrupted data
       RET_ERR;
 
 #if !CAREFUL
@@ -248,36 +282,39 @@ LABEL(decode_more):
       goto careful_check_overrun;
 #else
   careful_check_overrun:
-    if (dst > info->dst.stop)
+    if (dst > info->dst.stop)           // more to copy than necessary?
     {
-      dst -= len;
-      len = (xint) (info->dst.stop - dst);
-      COPY_BLOCK_SLOW (dst, src, len);
-      src = info->src.last;
-      RET_OK;
+      dst -= len;                       // dst = first output position
+      len = (xint) (info->dst.stop - dst); // len = max length to copy
+      COPY_BLOCK_SLOW (dst, src, len);  // copy last run
+      src = info->src.last;             // restore input buffer pointer
+      RET_OK;                           // OK but no EOF mark was found
     }
 #endif
 
-    dst -= len;
+    dst -= len;                         // dst = first output position
 
-    COPY_BLOCK_SLOW (dst, src, len);
+    COPY_BLOCK_SLOW (dst, src, len);    // input & output may overlap -- copy byte by byte
 
-    src = info->src.last;
+    src = info->src.last;               // restore input buffer pointer
 
     CAREFUL_IF (dst >= info->dst.careful, copy1);
 
-    if (Bits >= 0)
-      goto LABEL (next);
+    if (Bits >= 0)                      // enough Bits in Mask?
+      goto LABEL (next);                // decode next token
 
 #if !CAREFUL && 8-MIN_MATCH < MAX_LENGTH-1
 LABEL(mask_more):
 #endif
 
+    // too close to end of buffer? -- switch to careful mode...
     CAREFUL_IF (src >= info->src.careful, decode_more3);
     CAREFUL_IF (dst >= info->dst.careful, decode_more4);
 
+    // have 2 more bytes in input buffer?
     CAREFUL_ERR_IF (src >= info->src.end_bitmask2);
 
+    // read 16 bits more and update Mask&Bits respectively
     bits = Bits;
     ofs = * (__unaligned ubitmask2 *) src;
     bits = (bits_t) (-bits);
@@ -286,9 +323,9 @@ LABEL(mask_more):
     Bits += 8 * sizeof (ubitmask2);
     Mask += (ubitmask4) ofs;
 
-    goto LABEL (next);
+    goto LABEL (next);                  // decode next token
 
-  } 
+  } /* of for(;;) */
 
 #if CAREFUL
 ret_ok_eof:
@@ -303,10 +340,10 @@ ret_ok:
 ret_err:
   info->result = 0;
   return;
-#endif 
+#endif /* CAREFUL */
 
 
-#else 
+#else /* ---------------------- defined i386 --------------------- */
 
 #if !CAREFUL
 
@@ -339,7 +376,7 @@ __asm
         jae     careful_next            ; yes, be careful...
 
         jmp     LABEL (next)
-#endif 
+#endif /* CAREFUL */
 
     align   16
 LABEL(literal):
@@ -506,7 +543,7 @@ LABEL(copy_by_one):
         jmp     LABEL(mask_more)        ; no, need to read in more bits
 
 LABEL(long_string):
-#endif 
+#endif /* CAREFUL */
 
         cmp     eax,MAX_LENGTH-1        ; long length?
         je      LABEL(long_length)      ; yes, decode it
@@ -608,8 +645,8 @@ LABEL(long_length):
 #define DEBUG_LABEL(label) label: mov eax, eax
 #else
 #define DEBUG_LABEL(label) label:
-#endif 
-#endif 
+#endif /* DEBUG */
+#endif /* DEBUG_LABEL */
 
 DEBUG_LABEL(error_pop_1)
 DEBUG_LABEL(error_pop_2)
@@ -649,25 +686,48 @@ ret_common:
         pop     edx
         pop     edi
         pop     esi                     ; and return
-} 
-#endif 
+} /* end of __asm */
+#endif /* CAREFUL */
 
-#endif 
+#endif /* i386 */
 
-#endif 
-
-
+#endif /* -------------------- CODING_HUFF_ALL  ------------------ */
 
 
 
 
+/* ----------------------- CODING_DIRECT2 ------------------------ */
+/*                         --------------                          */
 
 #if CODING == CODING_DIRECT2
 
 #ifndef i386
 
+// C code: 73 MB/s at P3-500; asm code 80.5 MB/s
 
-
+/*
+  Pseudocode:
+  ----------
+  length = NextWord ();
+  offset = length >> DIRECT2_LEN_LOG;
+  length &= DIRECT2_MAX_LEN;
+  if (length == DIRECT2_MAX_LEN)
+  {
+    length = NextQuad ();
+    if (length == 15)
+    {
+      length = NextByte ();
+      if (length == 255)
+        length = NextWord () - 15 - DIRECT2_MAX_LEN;
+      length += 15;
+    }
+    length += DIRECT2_MAX_LEN;
+  }
+  length += MIN_MATCH;
+  ++offset;
+  memcpy (dst, dst - offset, length);
+  dst += length;
+*/
 
 #if !CAREFUL
   tag_t bmask = 0;
@@ -677,37 +737,29 @@ ret_common:
   const uchar *src = info->src.beg;
 
   goto start;
-#endif 
+#endif /* !CAREFUL */
 
 LABEL (copy_byte):
   CAREFUL_OK_IF (dst >= info->dst.stop);
   CAREFUL_ERR_IF (src >= info->src.end);
-  *dst++ = *src++;
+  *dst++ = *src++;            // copy next byte
 
 LABEL (next):
-  if (bmask >= 0) do
+  if (bmask >= 0) do            // while MSB(bmask) == 0
   {
     bmask <<= 1;
     CAREFUL_OK_IF (dst >= info->dst.stop);
     CAREFUL_ERR_IF (src >= info->src.end);
-    *dst++ = *src++;
+    *dst++ = *src++;            // copy next byte
 
-#if defined (_M_ARM)
+#if defined (_M_ARM) // unroll this loop
     if (bmask < 0)
       break;
 
     bmask <<= 1;
     CAREFUL_OK_IF (dst >= info->dst.stop);
     CAREFUL_ERR_IF (src >= info->src.end);
-    *dst++ = *src++;
-
-    if (bmask < 0)
-      break;
-
-    bmask <<= 1;
-    CAREFUL_OK_IF (dst >= info->dst.stop);
-    CAREFUL_ERR_IF (src >= info->src.end);
-    *dst++ = *src++;
+    *dst++ = *src++;            // copy next byte
 
     if (bmask < 0)
       break;
@@ -715,11 +767,19 @@ LABEL (next):
     bmask <<= 1;
     CAREFUL_OK_IF (dst >= info->dst.stop);
     CAREFUL_ERR_IF (src >= info->src.end);
-    *dst++ = *src++;
-#endif 
+    *dst++ = *src++;            // copy next byte
+
+    if (bmask < 0)
+      break;
+
+    bmask <<= 1;
+    CAREFUL_OK_IF (dst >= info->dst.stop);
+    CAREFUL_ERR_IF (src >= info->src.end);
+    *dst++ = *src++;            // copy next byte
+#endif /* _M_ARM */
   } while (bmask >= 0);
 
-  if ((bmask <<= 1) == 0)
+  if ((bmask <<= 1) == 0)       // if bmask == 0 reload it
   {
   START;
     CAREFUL_IF (src >= info->src.careful || dst >= info->dst.careful, restart);
@@ -754,22 +814,22 @@ LABEL (next):
   {
     const uchar *src1 = dst + ofs;
 
-#if (defined (i386) || defined (i386compat)) && !defined (_M_ARM)
+#if (defined (i386) || defined (i386compat)) && !defined (_M_ARM) // unaligned access is faster only on x86
     if (ofs < ~2)
     {
-      if (src1 < info->dst.beg) RET_ERR;
+      if (src1 < info->dst.beg) RET_ERR;         // check for buffer underrun
 
-      ofs = ((__unaligned uint32 *) src1)[0];
+      ofs = ((__unaligned uint32 *) src1)[0];     // quickly copy 8 bytes
       ((__unaligned uint32 *) dst)[0] = ofs;
       ofs = ((__unaligned uint32 *) src1)[1];
       ((__unaligned uint32 *) dst)[1] = ofs;
 
-      dst += len + MIN_MATCH;
-      goto LABEL (next);
+      dst += len + MIN_MATCH;                   // dst = next output position
+      goto LABEL (next);                        // decode next token
     }
 #endif
 
-    if (src1 < info->dst.beg) RET_ERR;
+    if (src1 < info->dst.beg) RET_ERR;          // check for buffer overrun
 
 #if defined (_M_ARM)
     if (ofs < ~2)
@@ -800,23 +860,23 @@ LABEL (next):
     else
     {
       PREFETCH(src1);
-      *dst++ = *src1++;
-      *dst++ = *src1++;
-      *dst++ = *src1++;
+      *dst++ = *src1++; // 0
+      *dst++ = *src1++; // 1
+      *dst++ = *src1++; // 2
       if (--len >= 0)
       {
-        *dst++ = *src1++;
+        *dst++ = *src1++; // 3
         if (--len >= 0)
         {
-          *dst++ = *src1++;
+          *dst++ = *src1++; // 4
           if (--len >= 0)
           {
-            *dst++ = *src1++;
+            *dst++ = *src1++; // 5
             if (--len >= 0)
             {
-              *dst++ = *src1++;
+              *dst++ = *src1++; // 6
               if (--len >= 0)
-                *dst++ = *src1++;
+                *dst++ = *src1++; // 7
             }
           }
         }
@@ -826,12 +886,12 @@ LABEL (next):
     COPY_8_BYTES (dst, src1);
 
     dst += len + MIN_MATCH;
-#endif 
+#endif /* _M_ARM */
     goto LABEL (next);
   }
 #endif
 
-  if (len == DIRECT2_MAX_LEN)
+  if (len == DIRECT2_MAX_LEN)                   // decode long length
   {
     if (ptr == 0)
     {
@@ -883,13 +943,13 @@ careful_copy_tail:
     src = info->src.last;
     RET_OK;
   }
-#endif 
+#endif /* !CAREFUL */
 
   if (src < info->dst.beg) RET_ERR;
 
-  COPY_BLOCK_SLOW (dst, src, len);
+  COPY_BLOCK_SLOW (dst, src, len);      // copy block
 
-  src = info->src.last;
+  src = info->src.last;                 // restore input buffer ptr
   goto LABEL (next);
 
 #if CAREFUL
@@ -906,16 +966,16 @@ ret_ok:
 ret_err:
   info->result = 0;
   return;
-#endif 
+#endif /* CAREFUL */
 
-#else 
+#else /* ------------------------- i386 ---------------------------- */
 
 #if !CAREFUL
 __asm
 {
-        mov     eax,info
+        mov     eax,info        // save info
 
-        push    ebx
+        push    ebx             // save registers
         push    ecx
         push    edx
         push    esi
@@ -932,7 +992,7 @@ __asm
 #define INFO            dword ptr [esp+4*7]
 #define LOCALS          8
 
-        sub     esp,4*LOCALS
+        sub     esp,4*LOCALS            // make room for locals
 
         mov     edx,[eax].dst.stop
         mov     DST_STOP,edx
@@ -946,7 +1006,7 @@ __asm
         mov     SRC_END_1,edx
         mov     edx,[eax].src.end_tag
         mov     SRC_END_TAG,edx
-        xor     edx,edx
+        xor     edx,edx         // ptr = 0
         mov     PTR,edx
         mov     INFO,eax
 
@@ -957,11 +1017,11 @@ __asm
         mov     edi,[eax].dst.beg
         mov     ebx,[eax].src.beg
 
-        xor     eax,eax
+        xor     eax,eax         // bmask = 0
 
         jmp     start
 
-#endif 
+#endif /* !CAREFUL */
 
         align   16
 LABEL (literal_1):
@@ -970,22 +1030,22 @@ LABEL (literal_1):
 LABEL (literal):
 #if CAREFUL
         cmp     edi,DST_STOP
-        jae     ret_ok
+        jae     ret_ok                  // recoded everything?
         cmp     ebx,SRC_END
         jae     LABEL(ret_err_1)
 #endif
 
-        mov     cl,[ebx]
-        add     eax,eax
+        mov     cl,[ebx]                // copy next byte
+        add     eax,eax                 // check most significant bit
         lea ebx, [ebx+1]
         jnc     LABEL (literal_1)
         mov     [edi],cl
         lea edi, [edi+1]
-        jz      LABEL (start)
+        jz      LABEL (start)           // need reloading?
 
 LABEL (pointer):
 #if CAREFUL
-        cmp     edi,DST_STOP
+        cmp     edi,DST_STOP            // decoded all the stuff? -- done
         jae     ret_ok_eof
         cmp     ebx,SRC_END_1
         jae     LABEL(ret_err_2)
@@ -995,15 +1055,15 @@ LABEL (pointer):
         mov     ecx,edx
         shr     edx,DIRECT2_LEN_LOG
         add     ebx,2
-        not     edx
-        and     ecx,DIRECT2_MAX_LEN
+        not     edx                     // edx = -offset
+        and     ecx,DIRECT2_MAX_LEN     // ecx = length - MIN_LENGTH
         lea     esi,[edi+edx]
 
 #if !CAREFUL && (8 - MIN_MATCH < DIRECT2_MAX_LEN)
-        cmp     cl,8 - MIN_MATCH
+        cmp     cl,8 - MIN_MATCH        // length > 8?
         ja      LABEL (long_length)
 
-        cmp     esi,ebp
+        cmp     esi,ebp                 // output buffer underrun?
         jb      LABEL(ret_err_3)
 
         cmp     edx,-3
@@ -1031,9 +1091,9 @@ LABEL (byte_by_byte):
         jmp     LABEL (start)
 
 LABEL (long_length):
-#endif 
+#endif /* !CAREFUL && (8 - MIN_MATCH < DIRECT2_MAX_LEN) */
 
-        cmp     esi,ebp
+        cmp     esi,ebp                 // output buffer underrun?
         jb      LABEL(ret_err_4)
 
         mov     edx,PTR
@@ -1065,25 +1125,25 @@ LABEL(done_quad):
         je      LABEL(len255)
 
 LABEL(done_len):
-        lea     edx,[edi+ecx+MIN_MATCH]
+        lea     edx,[edi+ecx+MIN_MATCH] // edx = end of copy
         add     ecx,MIN_MATCH
 
 #if !CAREFUL
-        cmp     edx,DST_CAREFUL
+        cmp     edx,DST_CAREFUL         // too close to end of buffer?
         jae     careful_copy_tail
 #else
 careful_copy_tail:
-        cmp     edx,DST_STOP
+        cmp     edx,DST_STOP            // ahead of output buffer?
         jbe     LABEL (checked_eob)
         mov     ecx,DST_STOP
-        sub     ecx,edi
-        rep     movsb
+        sub     ecx,edi                 // ecx = corrected length
+        rep     movsb                   // copy substring
 
-        jmp     ret_ok
+        jmp     ret_ok                  // no errors, no EOF mark
 LABEL (checked_eob):
 #endif
 
-        rep     movsb
+        rep     movsb                   // copy substring
 
         add     eax,eax
         jnc     LABEL (literal)
@@ -1092,12 +1152,12 @@ LABEL (checked_eob):
         align   16
 LABEL (start):
 #if !CAREFUL
-        cmp     ebx,SRC_CAREFUL
-        jae     careful_start
+        cmp     ebx,SRC_CAREFUL         // too close to end of buffer(s)?
+        jae     careful_start           // be careful if so
         cmp     edi,DST_CAREFUL
         jae     careful_start
 #else
-        cmp     ebx,SRC_END_TAG
+        cmp     ebx,SRC_END_TAG         // input buffer overrun? -- corrupted data
         jae     LABEL(ret_err_6)
 #endif
         mov     eax,[ebx]
@@ -1135,8 +1195,8 @@ LABEL(len255):
 #define DEBUG_LABEL(label) label: mov eax, eax
 #else
 #define DEBUG_LABEL(label) label:
-#endif 
-#endif 
+#endif /* DEBUG */
+#endif /* DEBUG_LABEL */
 
 DEBUG_LABEL(careful_ret_err_1)
 DEBUG_LABEL(careful_ret_err_2)
@@ -1174,21 +1234,21 @@ ret_common:
         pop     edx
         pop     ecx
         pop     ebx
-} 
-#endif 
+} /* __asm */
+#endif /* CAREFUL */
 
-#endif 
+#endif /* i386 */
 
-#endif 
-
-
+#endif /* ----------------- CODING == CODING_DIRECT2 --------------- */
 
 
 
+/* --------------------------- End of code ------------------------- */
+/*                             -----------                           */
 
 #if CAREFUL
-} 
-#endif 
+} /* end of "do_decode" */
+#endif /* CAREFUL */
 
 
 #undef CAREFUL

@@ -5,11 +5,17 @@
 #define BF_H_INCLUDED
 
 
+// -----------------------------------------------------------------------------------------------
+//
+//      Global Cache Control
+//
 
+//  Init / Term
 
 ERR ErrBFInit( __in const LONG cbPageSizeMax );
 void BFTerm();
 
+//  System Parameters
 
 ERR ErrBFGetCacheSize( ULONG_PTR* const pcpg );
 ERR ErrBFSetCacheSize( const ULONG_PTR cpg );
@@ -19,16 +25,23 @@ LONG LBFICacheCleanPercentage( void );
 LONG LBFICacheSizePercentage( void );
 LONG LBFICachePinnedPercentage( void );
 
+//  Interogation of background/idle (or maint in BF lingo) work status
 
 ERR ErrBFCheckMaintAvailPoolStatus();
 
 
 
+// -----------------------------------------------------------------------------------------------
+//
+//      BF Context Control
+//
 
+//  Context Control - Active State
 
 void BFSetBFFMPContextAttached( IFMP ifmp );
 void BFResetBFFMPContextAttached( IFMP ifmp );
 
+//  Context Control - System Parameters
 
 enum BFConsumeSetting
 {
@@ -38,11 +51,13 @@ enum BFConsumeSetting
 
 ERR ErrBFConsumeSettings( BFConsumeSetting bfcs, const IFMP ifmp );
 
+//  Context Control - Purge / Flush
 
 ERR ErrBFFlush( IFMP ifmp, const OBJID objidFDP = objidNil, const PGNO pgnoFirst = pgnoNull, const PGNO pgnoLast = pgnoNull );
 ERR ErrBFFlushSync( IFMP ifmp );
 void BFPurge( IFMP ifmp, PGNO pgnoFirst = pgnoNull, CPG cpg = 0 );
 
+//  Context - Logging / Recovery Support
 
 void BFGetBestPossibleWaypoint(
     __in    IFMP        ifmp,
@@ -51,24 +66,33 @@ void BFGetBestPossibleWaypoint(
 void BFGetLgposOldestBegin0( IFMP ifmp, LGPOS* plgpos, LGPOS lgposOldestTrx );
 
 
+// -----------------------------------------------------------------------------------------------
+//
+//      BF Priority Hints
+//
 
+//  BFPriority is a unified priority enum that contains the priority for the resource in the 
+//  eviction algorithm as well as the IO priority with with to fault in the resource if not
+//  present in the cache.
 
 const ULONG shfFaultIoPriority = 9;
 
-enum BFPriority
+enum BFPriority // bfpri
 {
-    bfpriCacheResourcePriorityMask     = 0x000003FF,
+    bfpriCacheResourcePriorityMask     = 0x000003FF,  // enough to hold 1 - 1000%, the range of cache resource percentages that we support.
     bfpriFaultIoPriorityMask           = ( ( qosIODispatchMask | qosIOOSLowPriority ) << shfFaultIoPriority ),
     bfpriUserIoPriorityTagMask         = JET_IOPriorityUserClassIdMask | JET_IOPriorityMarkAsMaintenance,
 };
-C_ASSERT( bfpriFaultIoPriorityMask    == 0x00FEE400 );
+// Visually align / check exclusive masks:
+C_ASSERT( bfpriFaultIoPriorityMask    == 0x00FEE400 );  // lined up with above.
 C_ASSERT( bfpriUserIoPriorityTagMask  == 0x4F000000 );
 
+// Double check with math, the masks are exclusive.
 C_ASSERT( ( bfpriCacheResourcePriorityMask & bfpriFaultIoPriorityMask ) == 0 );
 C_ASSERT( ( bfpriCacheResourcePriorityMask & bfpriUserIoPriorityTagMask ) == 0 );
 C_ASSERT( ( bfpriFaultIoPriorityMask & bfpriUserIoPriorityTagMask ) == 0 );
 
-C_ASSERT( ( ~bfpriFaultIoPriorityMask & ( ( qosIODispatchMask | qosIOOSLowPriority ) << shfFaultIoPriority ) ) == 0 );
+C_ASSERT( ( ~bfpriFaultIoPriorityMask & ( ( qosIODispatchMask | qosIOOSLowPriority ) << shfFaultIoPriority ) ) == 0 );  //  ensure no Dispatch bits are outside the bfpri mask.
 
 enum BFTEMPOSFILEQOS : QWORD
 {
@@ -78,15 +102,15 @@ enum BFTEMPOSFILEQOS : QWORD
 INLINE BFPriority BfpriBFMake( const ULONG_PTR pctCachePriority, const BFTEMPOSFILEQOS qosPassed )
 {
     OSFILEQOS qosIoPriority = qosPassed;
-#ifndef ENABLE_JET_UNIT_TEST
+#ifndef ENABLE_JET_UNIT_TEST // unit test attempts bad values
     Assert( pctCachePriority <= 1000 );
-    Assert( ( pctCachePriority & ~bfpriCacheResourcePriorityMask ) == 0 );
+    Assert( ( pctCachePriority & ~bfpriCacheResourcePriorityMask ) == 0 ); // should be no remaining data outside mask.
 #endif
 
-    Assert( ( ( ( qosIoPriority & qosIODispatchMask ) << shfFaultIoPriority ) & ~bfpriFaultIoPriorityMask ) == 0 );
+    Assert( ( ( ( qosIoPriority & qosIODispatchMask ) << shfFaultIoPriority ) & ~bfpriFaultIoPriorityMask ) == 0 ); // should be no remaining bits outside mask.
 
-#ifndef ENABLE_JET_UNIT_TEST
-    Assert( ( qosIoPriority & ~qosIODispatchMask & ~qosIOOSLowPriority & ~bfpriUserIoPriorityTagMask ) == 0 );
+#ifndef ENABLE_JET_UNIT_TEST // unit test attempts bad values
+    Assert( ( qosIoPriority & ~qosIODispatchMask & ~qosIOOSLowPriority & ~bfpriUserIoPriorityTagMask ) == 0 ); // should be no remaining bits outside UserTag, Dispatch priority, or OS Low Pri.
 #endif 
 
     return (BFPriority)( pctCachePriority & bfpriCacheResourcePriorityMask | 
@@ -105,15 +129,19 @@ inline BFTEMPOSFILEQOS QosBFUserAndIoPri( const BFPriority bfpri )
 }
 
 
+// -----------------------------------------------------------------------------------------------
+//
+//          Preread
+//
 
-enum BFPreReadFlags
+enum BFPreReadFlags     //  bfprf
 {
     bfprfNone               = 0x00000000,
     bfprfDefault            = 0x00000000,
 
-    bfprfNoIssue            = 0x00000100,
-    bfprfCombinableOnly     = 0x00000200,
-    bfprfDBScan             = 0x00000400,
+    bfprfNoIssue            = 0x00000100,   //  don't call pfapi->ErrIOIssue(), caller must do it
+    bfprfCombinableOnly     = 0x00000200,   //  only pre-read if the IO operation is combinable with an already building IO
+    bfprfDBScan             = 0x00000400,   //  pre-read operation is coming from DBM
 };
 DEFINE_ENUM_FLAG_OPERATORS_BASIC( BFPreReadFlags );
 
@@ -132,6 +160,10 @@ inline void BFPrereadPageRange( IFMP ifmp, PGNO pgnoFirst, CPG cpg, const BFPreR
     BFPrereadPageRange( ifmp, pgnoFirst, cpg, NULL, NULL, bfprf, bfpri, tc );
 }
 
+//  This class can be used to cooperatively reserve a number of pages
+//  from the avail pool. This can be used by preread functions. Each
+//  object reserved up to cpgWanted pages from the avail pool and other
+//  objects will respect that reservation.
 
 class BFReserveAvailPages
 {
@@ -147,6 +179,8 @@ class BFReserveAvailPages
         static LONG s_cpgReservedTotal;
         
     private:
+        // non-implemented functions. these objects should be allocated off the
+        // stack using the public constructor
 
 #pragma push_macro( "new" )
 #undef new
@@ -169,32 +203,39 @@ INLINE BOOL FBFApiClean()
 #endif
 
 
+// -----------------------------------------------------------------------------------------------
+//
+//      Page Latches
+//
 
-struct BFLatch
+struct BFLatch  //  bfl
 {
     void*       pv;
     DWORD_PTR   dwContext;
 };
 
-enum BFLatchFlags
+enum BFLatchFlags  //  bflf
 {
     bflfNone            = 0x00000000,
     bflfDefault         = 0x00000000,
 
-    bflfNoTouch         = 0x00000100,
-    bflfNoWait          = 0x00000200,
-    bflfNoCached        = 0x00000400,
-    bflfNoUncached      = 0x00000800,
-    bflfNoFaultFail     = 0x00001000,
-    bflfNew             = 0x00002000,
-    bflfHint            = 0x00004000,
-    bflfNoEventLogging  = 0x00008000,
-    bflfUninitPageOk    = 0x00010000,
-    bflfExtensiveChecks = 0x00020000,
+    bflfNoTouch         = 0x00000100,       //  don't touch the page
+    bflfNoWait          = 0x00000200,       //  don't wait to resolve latch conflicts
+    bflfNoCached        = 0x00000400,       //  don't latch cached pages
+    bflfNoUncached      = 0x00000800,       //  don't latch uncached pages
+    bflfNoFaultFail     = 0x00001000,       //  don't unlatch pages that fail IO or page validation
+                                            //    NOTE:  error should be retrieved with ErrBFLatchStatus()
+                                            //    consider: separating to bflfNoIoFail and bflfNoValidationFail cases.
+    bflfNew             = 0x00002000,       //  latch a new page (Write Latch only)
+    bflfHint            = 0x00004000,       //  the provided BFLatch may already point to the
+                                            //    desired IFMP / PGNO
+    bflfNoEventLogging  = 0x00008000,       //  don't log events for -1018/-1019 errors
+    bflfUninitPageOk    = 0x00010000,       //  -1019 errors are expected, don't log an event
+    bflfExtensiveChecks = 0x00020000,       //  do more extensive validation of the page
 
-    bflfDBScan          = 0x00040000,
-    bflfNewIfUncached   = 0x00080000,
-    bflfLatchAbandoned  = 0x00100000,
+    bflfDBScan          = 0x00040000,       //  we're latching a page during DBM
+    bflfNewIfUncached   = 0x00080000,       //  always latches the page, but behaves like bflfNew if the page is not currently cached
+    bflfLatchAbandoned  = 0x00100000,       //  it's legal to latch an abandoned page
 };
 DEFINE_ENUM_FLAG_OPERATORS_BASIC( BFLatchFlags );
 
@@ -257,25 +298,32 @@ BOOL FBFNotLatched( const BFLatch* pbfl );
 BOOL FBFLatched( IFMP ifmp, PGNO pgno );
 BOOL FBFNotLatched( IFMP ifmp, PGNO pgno );
 
-BOOL FBFCurrentLatch( const BFLatch* pbfl, IFMP ifmp, PGNO pgno );
+//  Use only use when latched.
+BOOL FBFCurrentLatch( const BFLatch* pbfl, IFMP ifmp, PGNO pgno );  // this one checks for the most truthiness.
 BOOL FBFCurrentLatch( const BFLatch* pbfl );
 
+//  Use only when latch is RDW or higher latched.
 BOOL FBFUpdatableLatch( const BFLatch* pbfl );
 
-#endif
+#endif  //  DEBUG
 
 
+// -----------------------------------------------------------------------------------------------
+//
+//      Page State and Control
+//
 
+//  Page State
 
 ERR ErrBFLatchStatus( const BFLatch * pbfl );
 
-enum BFDirtyFlags
+enum BFDirtyFlags  //  bfdf
 {
     bfdfMin     = 0,
-    bfdfClean   = 0,
-    bfdfUntidy  = 1,
-    bfdfDirty   = 2,
-    bfdfFilthy  = 3,
+    bfdfClean   = 0,        //  the page will not be written
+    bfdfUntidy  = 1,        //  the page will be written only when idle
+    bfdfDirty   = 2,        //  the page will be written only when necessary
+    bfdfFilthy  = 3,        //  the page will be written as soon as possible
     bfdfMax     = 4,
 };
 
@@ -283,30 +331,38 @@ void BFInitialize( BFLatch* pbfl, const TraceContext& tc );
 void BFDirty( const BFLatch* pbfl, BFDirtyFlags bfdf, const TraceContext& tc );
 BFDirtyFlags FBFDirty( const BFLatch* pbfl );
 
+//  Page Size and Buffer Management
 
 LONG CbBFGetBufferSize( const LONG cbSize );
+//      Note: Subtle difference between these two, one is the size of the page we 
+//      cached, the other is the (potentially) dehydrated size.
 LONG CbBFBufferSize( const BFLatch* pbfl );
 LONG CbBFPageSize( const BFLatch* pbfl );
 void BFSetBufferSize( __inout BFLatch* pbfl, __in const INT cbNewSize );
 
+//  Logging / Recovery
 
 void BFSetLgposModify( const BFLatch* pbfl, LGPOS lgpos );
 void BFSetLgposBegin0( const BFLatch* pbfl, LGPOS lgpos, const TraceContext& tc );
 
+//  Renounce / Abandon
 
 void BFRenouncePage( BFLatch* const pbfl, const BOOL fRenounceDirty = fFalse );
 void BFAbandonNewPage( BFLatch* const pbfl, const TraceContext& tc );
 
+//  Range-locking for external zeroing.
 ERR ErrBFPreparePageRangeForExternalZeroing( const IFMP ifmp, const PGNO pgnoFirst, const CPG cpg, const TraceContext& tc );
 CPG CpgBFGetOptimalLockPageRangeSizeForExternalZeroing( const IFMP ifmp );
 ERR ErrBFLockPageRangeForExternalZeroing( const IFMP ifmp, const PGNO pgnoFirst, const CPG cpg, const BOOL fTrimming, const TraceContext& tc, _Out_ DWORD_PTR* const pdwContext );
 void BFPurgeLockedPageRangeForExternalZeroing( const DWORD_PTR dwContext, const TraceContext& tc );
 void BFUnlockPageRangeForExternalZeroing( const DWORD_PTR dwContext, const TraceContext& tc );
 
+//  Deferred Undo Information
 
 void BFAddUndoInfo( const BFLatch* pbfl, RCE* prce );
 void BFRemoveUndoInfo( RCE* const prce, const LGPOS lgposModify = lgposMin );
 
+//  Page Patching
 
 ERR ErrBFPatchPage(
     __in                        const IFMP      ifmp,
@@ -317,13 +373,17 @@ ERR ErrBFPatchPage(
     __in                        const INT       cbPageImage );
 
 
+// -----------------------------------------------------------------------------------------------
+//
+//      Memory Allocation
+//
 
-enum BFAllocState
+enum BFAllocState  //  bfas
 {
     bfasMin             = 0,
-    bfasTemporary       = 0,
-    bfasForDisk         = 1,
-    bfasIndeterminate   = 2,
+    bfasTemporary       = 0,        //  allocate and free on same thread, CPU bound, temporary
+    bfasForDisk         = 1,        //  allocate for writing / updating disk, semi-temporary
+    bfasIndeterminate   = 2,        //  allocate for an unbounded length of time
     bfasMax             = 3,
 };
 
@@ -331,10 +391,16 @@ void BFAlloc( __in_range( bfasMin, bfasMax - 1 ) const BFAllocState bfas, void**
 void BFFree( void* pv );
 
 
+// -----------------------------------------------------------------------------------------------
+//
+//      Diagnostics / Debug / Test Support
+//
 
 ERR ErrBFConfigureProcessForCrashDump( const JET_GRBIT grbit );
 ERR ErrBFTestEvictPage( _In_ const IFMP ifmp, _In_ const PGNO pgno );
 
+//  this class is required so that CArray can be used
+//  to store an array of pointers
 class CPagePointer
 {
 public:
@@ -360,5 +426,5 @@ private:
     PGNO                m_pgno;
 };
 
-#endif
+#endif  //  BF_H_INCLUDED
 

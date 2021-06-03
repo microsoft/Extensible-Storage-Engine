@@ -4,11 +4,13 @@
 #include "std.hxx"
 
 
+//  This retrieves the auto-inc value from the root page's external header.
+//  NOTE: Returns JET_errColumnNull if the table is not upgraded with noderfIsamAutoInc storage.
 ERR ErrCMPRECGetAutoInc( _Inout_ FUCB * const pfucbAutoIncTable, _Out_ QWORD * pqwAutoIncMax )
 {
     ERR err = JET_errSuccess;
 
-    Expected( !Pcsr( pfucbAutoIncTable )->FLatched() );
+    Expected( !Pcsr( pfucbAutoIncTable )->FLatched() ); // don't want to ruin anyone else's currency
 
     Call( ErrDIRGetRootField( pfucbAutoIncTable, noderfIsamAutoInc, latchRIW ) );
     if ( err >= JET_errSuccess )
@@ -26,11 +28,12 @@ ERR ErrCMPRECGetAutoInc( _Inout_ FUCB * const pfucbAutoIncTable, _Out_ QWORD * p
 
 HandleError:
 
-    Assert( err == JET_errSuccess || err == JET_wrnColumnNull );
+    Assert( err == JET_errSuccess || err == JET_wrnColumnNull );    // later error is for non-upgraded ...
 
     return err;
 }
 
+//  This sets the auto-inc value on the root page's external header.
 ERR ErrCMPRECSetAutoInc( _Inout_ FUCB * const pfucbAutoIncTable, _In_ QWORD qwAutoIncSet )
 {
     ERR err = JET_errSuccess;
@@ -39,7 +42,7 @@ ERR ErrCMPRECSetAutoInc( _Inout_ FUCB * const pfucbAutoIncTable, _In_ QWORD qwAu
     Call( ErrDIRGetRootField( pfucbAutoIncTable, noderfIsamAutoInc, latchRIW ) );
     if ( err == JET_wrnColumnNull )
     {
-        AssertTrack( fFalse, "AutoIncRootHighWaterNull" );
+        AssertTrack( fFalse, "AutoIncRootHighWaterNull" ); // possibly JET_wrnColumnNull if caller didn't avoid older format tables properly
         DIRReleaseLatch( pfucbAutoIncTable );
         Call( ErrERRCheck( errCodeInconsistency ) );
     }
@@ -47,6 +50,7 @@ ERR ErrCMPRECSetAutoInc( _Inout_ FUCB * const pfucbAutoIncTable, _In_ QWORD qwAu
     dataAutoIncSet.SetPv( &qwAutoIncSet );
     dataAutoIncSet.SetCb( sizeof(qwAutoIncSet) );
     err = ErrDIRSetRootField( pfucbAutoIncTable, noderfIsamAutoInc, dataAutoIncSet );
+    //  need to release latch, just fall through to return the error
 
     DIRReleaseLatch( pfucbAutoIncTable );
 
@@ -60,6 +64,7 @@ ERR ErrRECInitAutoIncSpace( _In_ FUCB* const pfucb, QWORD qwAutoInc )
     DATA    dataAutoInc;
     BOOL fTransactionStarted = fFalse;
 
+    // To ensure the format changing is not accidentally performed
     Expected( g_rgfmp[pfucb->ifmp].ErrDBFormatFeatureEnabled( efvExtHdrRootFieldAutoInc ) >= JET_errSuccess );
 
     CallR( ErrDIRGetRootField( pfucb, noderfIsamAutoInc, latchRIW ) );
@@ -67,6 +72,7 @@ ERR ErrRECInitAutoIncSpace( _In_ FUCB* const pfucb, QWORD qwAutoInc )
     dataAutoInc.SetCb( sizeof(qwAutoInc) );
     if ( pfucb->ppib->Level() == 0 )
     {
+        // ErrLGSetExternalHeader, called in ErrNDSetExternalHeader, asks to be in trx
         Call( ErrDIRBeginTransaction( pfucb->ppib, 47054, NO_GRBIT ) );
         fTransactionStarted = fTrue;
     }
@@ -86,6 +92,10 @@ HandleError:
     return err;
 }
 
+// Initialize the new autoInc.
+// If old format, return errNotFound. Caller would fall back to old autoInc.
+// If autoInc is given with parameter, try to set it to the external header
+// Otherwise load autoInc from external header
 LOCAL ERR ErrRECILoadAutoIncBatch( _In_ FUCB* const pfucb, _In_opt_ const QWORD qwAutoInc = 0 )
 {
     ERR         err     = JET_errSuccess;
@@ -111,6 +121,7 @@ LOCAL ERR ErrRECILoadAutoIncBatch( _In_ FUCB* const pfucb, _In_opt_ const QWORD 
 
     if ( qwAutoInc == 0 )
     {
+        // Some other thread may have already increased the max
         if ( ptdb->QwAutoincrement() < ptdb->QwGetAllocatedAutoIncMax() )
         {
             goto HandleError;
@@ -124,21 +135,28 @@ LOCAL ERR ErrRECILoadAutoIncBatch( _In_ FUCB* const pfucb, _In_opt_ const QWORD 
         qwAutoIncStored = *(UnalignedLittleEndian<QWORD>*)pfucb->kdfCurr.data.Pv();
         if ( qwAutoIncStored == 0 )
         {
+            // This is the first time in history we visit the autoInc on this root page
             Assert( ptdb->QwGetAllocatedAutoIncMax() == 0 );
             Assert( ptdb->QwAutoincrement() == 0 );
         }
     }
     else
     {
+        // This happens when we add autoInc column
         Assert( ptdb->QwGetAllocatedAutoIncMax() == 0 );
         Assert( ptdb->QwAutoincrement() == 0 );
+        // We want currently used max autoInc. Caller (fcreate.cxx) passes in next usable autoInc
         qwAutoIncStored = qwAutoInc - 1;
     }
 
     ULONG ulBatchSize = ptdb->DwGetAutoIncBatchSize();
     Assert( ulBatchSize >= 1 );
+    // Batch size starts from 1, but it will be multiplied by 2 with below block,
+    // so batch size effectively starts from 2
     if ( ulBatchSize < g_ulAutoIncBatchSize )
     {
+        // We are quite sure it doesn't overflow because of the value of g_ulAutoIncBatchSize
+        // But let's assert just to make sure.
         Assert( ( ulBatchSize << 1 ) > ulBatchSize );
         ulBatchSize <<= 1;
         if ( ulBatchSize > g_ulAutoIncBatchSize )
@@ -148,13 +166,18 @@ LOCAL ERR ErrRECILoadAutoIncBatch( _In_ FUCB* const pfucb, _In_opt_ const QWORD 
         ptdb->SetAutoIncBatchSize( ulBatchSize );
     }
 
+    // In case the autoInc is nearly used up, decrease the batch
     while ( qwAutoIncStored >= ( qwCounterMax - ulBatchSize ) && ulBatchSize > 1 )
     {
         ulBatchSize >>= 1;
+        // The is the rare case that autoInc is almost used up, and called at most 9 times in the very worest case
+        // at the end of life of a table with AutoInc column. It should be OK to put the set in this loop
+        // in order not to affect the normal scenario.
         ptdb->SetAutoIncBatchSize( ulBatchSize );
     }
     if ( qwAutoIncStored >= ( qwCounterMax - ulBatchSize ) )
     {
+        // Autoinc has been really used up
         OSUHAEmitFailureTag( PinstFromPfucb( pfucb ), HaDbFailureTagAlertOnly, L"d0a09b0c-e038-4f8e-8437-ba448e8080bd" );
         Call( ErrERRCheck( JET_errOutOfAutoincrementValues ) );
     }
@@ -165,6 +188,7 @@ LOCAL ERR ErrRECILoadAutoIncBatch( _In_ FUCB* const pfucb, _In_opt_ const QWORD 
 
     if ( ppib->Level() == 0 )
     {
+        // ErrLGSetExternalHeader, called in ErrNDSetExternalHeader, asks to be in trx
         Call( ErrDIRBeginTransaction( ppib, 36256, NO_GRBIT ) );
         fTransactionStarted = fTrue;
     }
@@ -177,9 +201,14 @@ LOCAL ERR ErrRECILoadAutoIncBatch( _In_ FUCB* const pfucb, _In_opt_ const QWORD 
 
     if ( ptdb->QwAutoincrement() == 0 )
     {
+        // This is the init for this autoInc since this DB is up
         Assert( ptdb->QwGetAllocatedAutoIncMax() == 0 );
+        // Set next usable autoInc in TDB.
+        // qwAutoIncStored was increased by ulBatchSize with some lines above, so
+        // minus ulBatchSize; and we want the next availabe autoInc, so + 1 here.
         ptdb->InitAutoincrement( qwAutoIncStored - ulBatchSize + 1 );
     }
+    // Set max allocated auto inc in TDB
     ptdb->SetAllocatedAutoIncMax( qwAutoIncStored );
 
 HandleError:
@@ -203,6 +232,7 @@ LOCAL ERR ErrRECIGetAndIncrAutoincrement( _In_ FUCB* const pfucb, _In_ QWORD* co
     if ( !ptdb->FAutoIncOldFormat()
       && newAutoInc > ptdb->QwGetAllocatedAutoIncMax() )
     {
+        // At this point, it should has been initialized, batch loaded.
         Assert( ptdb->QwGetAllocatedAutoIncMax() > 0 );
         Call( ErrRECILoadAutoIncBatch( pfucb ) );
     }
@@ -229,6 +259,8 @@ LOCAL ERR ErrRECIInitAutoIncOldFormat( PIB * const ppib, FCB * const pfcb, QWORD
     Assert( ptdb->FAutoIncOldFormat() );
     Assert( 0 != ptdb->FidAutoincrement() );
 
+    //  look for index with first column as autoincrement column
+    //
     pfcb->EnterDML();
     for ( pfcbIdx = ( pidbNil == pfcb->Pidb() ? pfcb->PfcbNextIndex() : pfcb );
         pfcbNil != pfcbIdx;
@@ -237,6 +269,9 @@ LOCAL ERR ErrRECIInitAutoIncOldFormat( PIB * const ppib, FCB * const pfcb, QWORD
         const IDB * const   pidb    = pfcbIdx->Pidb();
         Assert( pidbNil != pidb );
 
+        //  don't use the index if it's potentially not visible to us
+        //  or if not all records may be represented in the index
+        //
         if ( !pidb->FDeleted()
             && !pidb->FVersioned()
             && 0 == pidb->CidxsegConditional()
@@ -253,11 +288,15 @@ LOCAL ERR ErrRECIInitAutoIncOldFormat( PIB * const ppib, FCB * const pfcb, QWORD
     }
     pfcb->LeaveDML();
 
+    // delete nodes might be scrubbed so we wont' find any data
+    // on there: skip them
     dib.dirflag = fDIRAllNode | fDIRAllNodesNoCommittedDeleted;
     dib.pbm = NULL;
 
     if ( pfcbIdx != pfcbNil )
     {
+        //  seek on index to find maximum existing auto-inc value
+        //
         Call( ErrBTOpen( ppib, pfcbIdx, &pfucb ) );
         Assert( pfucbNil != pfucb );
 
@@ -265,6 +304,8 @@ LOCAL ERR ErrRECIInitAutoIncOldFormat( PIB * const ppib, FCB * const pfcb, QWORD
         err = ErrBTDown( pfucb, &dib, latchReadTouch );
         if ( JET_errRecordNotFound == err )
         {
+            //  the index (and therefore the table) is empty
+            //
             Assert( 0 == qwAutoInc );
         }
         else
@@ -278,8 +319,13 @@ LOCAL ERR ErrRECIInitAutoIncOldFormat( PIB * const ppib, FCB * const pfcb, QWORD
 
             dataField.SetPv( &qwAutoInc );
 
+            //  ensure all bytes are zeroed out in case
+            //  we don't use them all (ie. 4-byte auto-inc)
+            //
             Assert( 0 == qwAutoInc );
 
+            //  retrieve auto-inc value from key
+            //
             pfcb->EnterDML();
             err = ErrRECIRetrieveColumnFromKey(
                             ptdb,
@@ -288,15 +334,18 @@ LOCAL ERR ErrRECIInitAutoIncOldFormat( PIB * const ppib, FCB * const pfcb, QWORD
                             columnidAutoInc,
                             &dataField );
             pfcb->LeaveDML();
-            CallS( err );
+            CallS( err );   //  should succeed with non-NULL value
             Call( err );
 
             Assert( (SIZE_T)dataField.Cb() == ( f8BytesAutoInc ? sizeof(QWORD) : sizeof(ULONG) ) );
-            Assert( qwAutoInc > 0 );
+            Assert( qwAutoInc > 0 );        // auto-inc's start numbering at 1
         }
     }
     else
     {
+        //  no appropriate index, so must scan table instead in
+        //  order to find maximum existing auto-inc value
+        //
         Call( ErrBTOpen( ppib, pfcb, &pfucb ) );
         Assert( pfucbNil != pfucb );
 
@@ -307,6 +356,8 @@ LOCAL ERR ErrRECIInitAutoIncOldFormat( PIB * const ppib, FCB * const pfcb, QWORD
         Assert( JET_errNoCurrentRecord != err );
         if ( JET_errRecordNotFound == err )
         {
+            //  the table is empty
+            //
             Assert( 0 == qwAutoInc );
         }
         else
@@ -317,6 +368,8 @@ LOCAL ERR ErrRECIInitAutoIncOldFormat( PIB * const ppib, FCB * const pfcb, QWORD
             {
                 if ( !pfcb->FTemplateTable() )
                 {
+                    // switch to template table
+                    //
                     pfcb->Ptdb()->AssertValidDerivedTable();
                     pfcbT = pfcb->Ptdb()->PfcbTemplateTable();
                 }
@@ -332,6 +385,8 @@ LOCAL ERR ErrRECIInitAutoIncOldFormat( PIB * const ppib, FCB * const pfcb, QWORD
             
             do
             {
+                //  validate result of record navigation
+                //
                 Assert( wrnNDFoundLess != err );
                 Assert( wrnNDFoundGreater != err );
                 Call( err );
@@ -347,9 +402,14 @@ LOCAL ERR ErrRECIInitAutoIncOldFormat( PIB * const ppib, FCB * const pfcb, QWORD
                             pfucb->kdfCurr.data,
                             &dataField ) );
 
+                //  warnings not expected (including NULL, since
+                //  all records must have an auto-inc value)
+                //
                 CallS( err );
                 if ( err == JET_wrnColumnNull )
                 {
+                    //  We shouldn't be here, but we get here from watsons, so we
+                    //  need to handle it gracefully.
                     FireWall( "AutoIncColumnNullOldFormat" );
                     Call( ErrERRCheck( JET_errDatabaseCorrupted ) );
                 }
@@ -366,6 +426,9 @@ LOCAL ERR ErrRECIInitAutoIncOldFormat( PIB * const ppib, FCB * const pfcb, QWORD
                     qwT = *( (UnalignedLittleEndian< ULONG > *)dataField.Pv() );
                 }
                 
+                //  check whether current auto-inc value is greater
+                //  than any we've encountered so far
+                //
                 if ( qwT > qwAutoInc )
                 {
                     qwAutoInc = qwT;
@@ -375,10 +438,16 @@ LOCAL ERR ErrRECIInitAutoIncOldFormat( PIB * const ppib, FCB * const pfcb, QWORD
             }
             while ( JET_errNoCurrentRecord != err );
 
+            //  traversed entire table
+            //
             Assert( JET_errNoCurrentRecord == err );
         }
     }
     
+    //  if there are no records in the table, then the first
+    //  autoincrement value is 1.  Otherwise, set autoincrement
+    //  to next value after maximum found.
+    //
     *pqwAutoInc = ++qwAutoInc;
     err = JET_errSuccess;
 
@@ -397,6 +466,7 @@ ERR ErrRECIInitAutoIncrement( _In_ FUCB* const pfucb, QWORD qwAutoInc )
     TDB* const  ptdb    = pfcb->Ptdb();
     ERR         err     = JET_errSuccess;
 
+    // First try to load from root ext-hdr
     Call( ErrRECILoadAutoIncBatch( pfucb, qwAutoInc ) );
     if ( JET_wrnColumnNull == err )
     {
@@ -409,13 +479,19 @@ ERR ErrRECIInitAutoIncrement( _In_ FUCB* const pfucb, QWORD qwAutoInc )
         }
         else
         {
+            //  If autoincrement is not yet initialized, query table to
+            //  initialize autoincrement value.
+            //
             Call( ErrRECIInitAutoIncOldFormat( pfucb->ppib, pfcb, &qwAutoInc ) );
 
+            // If root ext-hdr auto-inc is configured, upgrade the table now
             const BOOL fExternalHeaderNewFormatEnabled =
                 ( g_rgfmp[pfucb->ifmp].ErrDBFormatFeatureEnabled( efvExtHdrRootFieldAutoInc ) >= JET_errSuccess );
             if ( fExternalHeaderNewFormatEnabled &&
+                 // This can fail if the root page does not have enough space, just keep going
                  ErrRECInitAutoIncSpace( pfucb, qwAutoInc - 1 ) >= JET_errSuccess )
             {
+                // Now load a new batch
                 ptdb->ResetAutoIncOldFormat();
                 err = ErrRECILoadAutoIncBatch( pfucb );
                 CallS( err );
@@ -453,10 +529,15 @@ LOCAL ERR ErrRECISetAutoincrement( FUCB *pfucb )
     Assert( pfcbT != pfcbNil );
 
     Assert( !( pfcbT->FTypeSort()
-            || pfcbT->FTypeTemporaryTable() ) );
+            || pfcbT->FTypeTemporaryTable() ) );    // Don't currently support autoinc with sorts/temp. tables
 
+    //  If autoincrement is not yet initialized, query table to
+    //  initialize autoincrement value.
+    //  
     Call( ptdbT->ErrInitAutoInc( pfucb, 0 ) );
 
+    //  set auto increment column in record
+    //
     Call( ErrRECIGetAndIncrAutoincrement( pfucb, &qwT ) );
     Assert( qwT > 0 );
 
@@ -478,6 +559,7 @@ LOCAL ERR ErrRECISetAutoincrement( FUCB *pfucb )
         Assert( FCOLUMNIDTemplateColumn( columnidT ) );
         if ( !pfcbT->FTemplateTable() )
         {
+            // Switch to template table.
             pfcbT->Ptdb()->AssertValidDerivedTable();
             pfcbT = pfcbT->Ptdb()->PfcbTemplateTable();
         }
@@ -513,6 +595,8 @@ ERR ErrRECSessionWriteConflict( FUCB *pfucb )
     AssertDIRNoLatch( pfucb->ppib );
     for ( pfucbT = pfucb->ppib->pfucbOfSession; pfucbT != pfucbNil; pfucbT = pfucbT->pfucbNextOfSession )
     {
+        //  all cursors in the list should be owned by the same session
+        //
         Assert( pfucbT->ppib == pfucb->ppib );
 
         if ( pfucbT->ifmp == pfucb->ifmp
@@ -570,7 +654,7 @@ ERR ErrRECSessionWriteConflict( FUCB *pfucb )
 
     return JET_errSuccess;
 }
-#endif
+#endif  //  defined( DEBUG ) || !defined( RTM )
 
 
 ERR VTAPI ErrIsamPrepareUpdate( JET_SESID sesid, JET_VTID vtid, ULONG grbit )
@@ -604,6 +688,8 @@ ERR VTAPI ErrIsamPrepareUpdate( JET_SESID sesid, JET_VTID vtid, ULONG grbit )
 
             if( FFUCBUpdateSeparateLV( pfucb ) )
             {
+                //  rollback the operations we did while the update was prepared.
+                //  on insert copy, also rollback refcount increments.
                 Assert( updateidNil != pfucb->updateid );
                 Assert( pfucb->ppib->Level() > 0 );
                 err = ErrVERRollback( pfucb->ppib, pfucb->updateid );
@@ -611,11 +697,18 @@ ERR VTAPI ErrIsamPrepareUpdate( JET_SESID sesid, JET_VTID vtid, ULONG grbit )
                 Call ( err );
             }
 
+            // Ensure empty LV buffer.  Don't put this check inside the
+            // FFUCBUpdateSeparateLV() check above because we may have created
+            // a copy buffer, but cancelled the SetColumn() (eg. write conflict)
+            // before the LV was actually updated (before FUCBSetUpdateSeparateLV()
+            // could be called).
             RECIFreeCopyBuffer( pfucb );
             FUCBResetUpdateFlags( pfucb );
             break;
 
         case JET_prepInsert:
+            //  ensure that table is updatable
+            //
             CallR( ErrFUCBCheckUpdatable( pfucb ) );
             if ( !FFMPIsTempDB(pfucb->ifmp) )
             {
@@ -629,6 +722,8 @@ ERR VTAPI ErrIsamPrepareUpdate( JET_SESID sesid, JET_VTID vtid, ULONG grbit )
             fFreeCopyBufOnErr = fTrue;
             Assert( pfucb->pvWorkBuf != NULL );
 
+            //  initialize record
+            //
             Assert( pfucb != pfucbNil );
             Assert( pfucb->dataWorkBuf.Pv() != NULL );
             Assert( FFUCBIndex( pfucb ) || FFUCBSort( pfucb ) );
@@ -638,13 +733,15 @@ ERR VTAPI ErrIsamPrepareUpdate( JET_SESID sesid, JET_VTID vtid, ULONG grbit )
             {
                 BTPrereadIndexesOfFCB( pfucb );
             }
-#endif
+#endif  //  PREREAD_INDEXES_ON_PREPINSERT
 
             Assert( pfucb->u.pfcb != pfcbNil );
             pfucb->u.pfcb->EnterDML();
 
             if ( NULL == pfucb->u.pfcb->Ptdb()->PdataDefaultRecord() )
             {
+                // Only temporary tables and system tables don't have default records
+                // (ie. all "regular" tables have at least a minimal default record).
                 Assert( ( FFUCBSort( pfucb ) && pfucb->u.pfcb->FTypeSort() )
                     || pfucb->u.pfcb->FTypeTemporaryTable()
                     || FCATSystemTable( pfucb->u.pfcb->Ptdb()->SzTableName() ) );
@@ -657,6 +754,7 @@ ERR VTAPI ErrIsamPrepareUpdate( JET_SESID sesid, JET_VTID vtid, ULONG grbit )
                 TDB     *ptdbT = pfucb->u.pfcb->Ptdb();
                 BOOL    fBurstDefaultRecord;
 
+                // Temp/sort tables and system tables don't have default records.
                 Assert( !FFUCBSort( pfucb ) );
                 Assert( !pfucb->u.pfcb->FTypeSort() );
                 Assert( !pfucb->u.pfcb->FTypeTemporaryTable() );
@@ -666,7 +764,7 @@ ERR VTAPI ErrIsamPrepareUpdate( JET_SESID sesid, JET_VTID vtid, ULONG grbit )
                 Assert( ptdbT->PdataDefaultRecord()->Cb() <= REC::CbRecordMostCHECK( g_rgfmp[ pfucb->ifmp ].CbPage() ) );
                 if ( ptdbT->PdataDefaultRecord()->Cb() > REC::CbRecordMost( pfucb ) )
                 {
-                    FireWall( "PrepInsertDefaultRecTooBig0.2" );
+                    FireWall( "PrepInsertDefaultRecTooBig0.2" ); // Trying to see if we can upgrade to a more restrictive clause in below if
                 }
                 if ( ptdbT->PdataDefaultRecord()->Cb() < REC::cbRecordMin
                     || ptdbT->PdataDefaultRecord()->Cb() > REC::CbRecordMostCHECK( g_rgfmp[ pfucb->ifmp ].CbPage() ) )
@@ -680,6 +778,10 @@ ERR VTAPI ErrIsamPrepareUpdate( JET_SESID sesid, JET_VTID vtid, ULONG grbit )
                 Assert( precDefault->FidFixedLastInRec() <= ptdbT->FidFixedLast() );
                 Assert( precDefault->FidVarLastInRec() <= ptdbT->FidVarLast() );
 
+                // May only burst default record if last fixed and
+                // var columns in the default record are committed.
+                // If they are versioned, there's a risk they might
+                // be rolled back from underneath us.
                 fBurstDefaultRecord = fTrue;
                 if ( precDefault->FidFixedLastInRec() >= fidFixedLeast )
                 {
@@ -687,6 +789,10 @@ ERR VTAPI ErrIsamPrepareUpdate( JET_SESID sesid, JET_VTID vtid, ULONG grbit )
                     const BOOL  fTemplateColumn = ptdbT->FFixedTemplateColumn( fid );
                     FIELD       *pfield         = ptdbT->PfieldFixed( ColumnidOfFid( fid, fTemplateColumn ) );
 
+                    //  if field is versioned or deleted after schema was faulted in, there's
+                    //  a chance the column is in the default record, but we don't have
+                    //  visibility on it, so must must burst columns one-by-one
+                    //
                     if ( FFIELDVersioned( pfield->ffield )
                         || ( FFIELDDeleted( pfield->ffield ) && fid > ptdbT->FidFixedLastInitial() ) )
                         fBurstDefaultRecord = fFalse;
@@ -697,6 +803,10 @@ ERR VTAPI ErrIsamPrepareUpdate( JET_SESID sesid, JET_VTID vtid, ULONG grbit )
                     const BOOL  fTemplateColumn = ptdbT->FVarTemplateColumn( fid );
                     FIELD       *pfield         = ptdbT->PfieldVar( ColumnidOfFid( fid, fTemplateColumn ) );
 
+                    //  if field is versioned or deleted after schema was faulted in, there's
+                    //  a chance the column is in the default record, but we don't have
+                    //  visibility on it, so must must burst columns one-by-one
+                    //
                     if ( FFIELDVersioned( pfield->ffield )
                         || ( FFIELDDeleted( pfield->ffield ) && fid > ptdbT->FidVarLastInitial() ) )
                         fBurstDefaultRecord = fFalse;
@@ -704,6 +814,7 @@ ERR VTAPI ErrIsamPrepareUpdate( JET_SESID sesid, JET_VTID vtid, ULONG grbit )
 
                 if ( fBurstDefaultRecord )
                 {
+                    // Only burst fixed and variable column defaults.
                     pfucb->dataWorkBuf.SetCb( precDefault->PbTaggedData() - (BYTE *)precDefault );
                     Assert( pfucb->dataWorkBuf.Cb() >= REC::cbRecordMin );
                     Assert( pfucb->dataWorkBuf.Cb() <= REC::CbRecordMostCHECK( g_rgfmp[ pfucb->ifmp ].CbPage() ) );
@@ -711,7 +822,7 @@ ERR VTAPI ErrIsamPrepareUpdate( JET_SESID sesid, JET_VTID vtid, ULONG grbit )
                     Assert( pfucb->dataWorkBuf.Cb() <= ptdbT->PdataDefaultRecord()->Cb() );
                     if ( pfucb->dataWorkBuf.Cb() > REC::CbRecordMost( pfucb ) )
                     {
-                        FireWall( "PrepInsertWorkingBufferAllowedRecTooBig1.2" );
+                        FireWall( "PrepInsertWorkingBufferAllowedRecTooBig1.2" ); // Trying to see if we can upgrade to a more restrictive clause in below if
                     }
                     if ( pfucb->dataWorkBuf.Cb() < REC::cbRecordMin
                         || pfucb->dataWorkBuf.Cb() > REC::CbRecordMostCHECK( g_rgfmp[ pfucb->ifmp ].CbPage() )
@@ -729,6 +840,7 @@ ERR VTAPI ErrIsamPrepareUpdate( JET_SESID sesid, JET_VTID vtid, ULONG grbit )
                 }
                 else
                 {
+                    // Try bursting just the fixed columns.
 
                     FID fidBurst;
                     for ( fidBurst = precDefault->FidFixedLastInRec();
@@ -748,10 +860,13 @@ ERR VTAPI ErrIsamPrepareUpdate( JET_SESID sesid, JET_VTID vtid, ULONG grbit )
                         BYTE    *pbRec  = (BYTE *)pfucb->dataWorkBuf.Pv();
                         REC     *prec   = (REC *)pbRec;
 
+                        //  there is at least one non-versioned column. burst it
                         Assert( fidBurst <= fidFixedMost );
                         const INT   cFixedColumnsToBurst = fidBurst - fidFixedLeast + 1;
                         Assert( cFixedColumnsToBurst > 0 );
 
+                        //  get the starting offset of the column ahead of this one
+                        //  add space for the column bitmap
                         Assert( !ptdbT->FInitialisingDefaultRecord() );
                         const INT   ibFixEnd = ptdbT->IbOffsetOfNextColumn( fidBurst );
                         const INT   cbBitMap = ( cFixedColumnsToBurst + 7 ) / 8;
@@ -764,7 +879,7 @@ ERR VTAPI ErrIsamPrepareUpdate( JET_SESID sesid, JET_VTID vtid, ULONG grbit )
                         Assert( pfucb->dataWorkBuf.Cb() <= REC::CbRecordMost( pfucb ) );
                         if ( pfucb->dataWorkBuf.Cb() > REC::CbRecordMost( pfucb ) )
                         {
-                            FireWall( "WorkingBufferAllowedRecTooBig2.2" );
+                            FireWall( "WorkingBufferAllowedRecTooBig2.2" ); // Trying to see if we can upgrade to this in below if.
                         }
                         if ( pfucb->dataWorkBuf.Cb() < REC::cbRecordMin ||
                             pfucb->dataWorkBuf.Cb() > REC::CbRecordMostCHECK( g_rgfmp[ pfucb->ifmp ].CbPage() ) ||
@@ -774,18 +889,21 @@ ERR VTAPI ErrIsamPrepareUpdate( JET_SESID sesid, JET_VTID vtid, ULONG grbit )
                             Error( ErrERRCheck( JET_errDatabaseCorrupted ) );
                         }
 
+                        //  copy the default record values
                         UtilMemCpy( pbRec, (BYTE *)precDefault, cbFixedBurst );
 
                         prec->SetFidFixedLastInRec( fidBurst );
                         prec->SetFidVarLastInRec( fidVarLeast-1 );
                         prec->SetIbEndOfFixedData( (USHORT)cbFixedBurst );
 
+                        //  set the fixed column bitmap
                         BYTE    *pbDefaultBitMap    = precDefault->PbFixedNullBitMap();
                         Assert( pbDefaultBitMap - (BYTE *)precDefault ==
                             ptdbT->IbOffsetOfNextColumn( precDefault->FidFixedLastInRec() ) );
 
                         UtilMemCpy( pbRec + ibFixEnd, pbDefaultBitMap, cbBitMap );
 
+                        //  must nullify bits for columns not in this record
                         BYTE    *pbitNullity = pbRec + cbFixedBurst - 1;
                         Assert( pbitNullity == pbRec + ibFixEnd + ( ( fidBurst - fidFixedLeast ) / 8 ) );
 
@@ -808,8 +926,11 @@ ERR VTAPI ErrIsamPrepareUpdate( JET_SESID sesid, JET_VTID vtid, ULONG grbit )
                     }
                     else
                     {
+                        // all fixed columns are versioned, or no fixed columns
                         pfucb->u.pfcb->LeaveDML();
 
+                        // Start with an empty record.  Columns will be
+                        // burst on an as-needed basis.
                         REC::SetMinimumRecord( pfucb->dataWorkBuf );
                     }
                 }
@@ -817,6 +938,9 @@ ERR VTAPI ErrIsamPrepareUpdate( JET_SESID sesid, JET_VTID vtid, ULONG grbit )
 
             FUCBResetColumnSet( pfucb );
 
+            //  if table has an autoincrement column, then set column
+            //  value now so that it can be retrieved from copy buffer.
+            //
             if ( pfucb->u.pfcb->Ptdb()->FidAutoincrement() != 0 )
             {
                 Call( ErrRECISetAutoincrement( pfucb ) );
@@ -826,6 +950,8 @@ ERR VTAPI ErrIsamPrepareUpdate( JET_SESID sesid, JET_VTID vtid, ULONG grbit )
             break;
 
         case JET_prepReplace:
+            //  ensure that table is updatable
+            //
             CallR( ErrFUCBCheckUpdatable( pfucb ) );
             if ( !FFMPIsTempDB(pfucb->ifmp) )
             {
@@ -835,13 +961,30 @@ ERR VTAPI ErrIsamPrepareUpdate( JET_SESID sesid, JET_VTID vtid, ULONG grbit )
                 return ErrERRCheck( JET_errAlreadyPrepared );
             Assert( !FFUCBUpdatePrepared( pfucb ) );
 
+            //  write lock node.  Note that ErrDIRGetLock also
+            //  gets the current node, so no additional call to ErrDIRGet
+            //  is required.
+            //
+            //  if locking at level 0 then goto JET_prepReplaceNoLock
+            //  since lock cannot be acquired at level 0 and lock flag
+            //  in fucb will prevent locking in update operation required
+            //  for rollback.
+            //
             if ( pfucb->ppib->Level() == 0 )
             {
                 goto ReplaceNoLock;
             }
 
+            //  put assert to catch client's misbehavior. Make sure that
+            //  no such sequence:
+            //      PrepUpdate(t1) PrepUpdate(t2) Update(t1) Update(t2)
+            //  where t1 and t2 happen to be on the same record and on the
+            //  the same table. Client will experience lost update of t1 if
+            //  they have such calling sequence.
+            //
             Call( ErrRECSessionWriteConflict( pfucb ) );
 
+            // Ensure we don't mistakenly set rceidBeginReplace.
             Assert( !FFUCBUpdateSeparateLV( pfucb ) );
 
             Call( ErrDIRGetLock( pfucb, writeLock ) );
@@ -868,6 +1011,8 @@ ERR VTAPI ErrIsamPrepareUpdate( JET_SESID sesid, JET_VTID vtid, ULONG grbit )
             break;
 
         case JET_prepReplaceNoLock:
+            //  ensure that table is updatable
+            //
             CallR( ErrFUCBCheckUpdatable( pfucb ) );
             if ( !FFMPIsTempDB(pfucb->ifmp) )
             {
@@ -879,6 +1024,13 @@ ERR VTAPI ErrIsamPrepareUpdate( JET_SESID sesid, JET_VTID vtid, ULONG grbit )
 ReplaceNoLock:
             Assert( !FFUCBUpdatePrepared( pfucb ) );
 
+            //  put assert to catch client's misbehavior. Make sure that
+            //  no such sequence:
+            //      PrepUpdate(t1) PrepUpdate(t2) Update(t1) Update(t2)
+            //  where t1 and t2 happen to be on the same record and on the
+            //  the same table. Client will experience lost update of t1 if
+            //  they have such calling sequence.
+            //
             Call( ErrRECSessionWriteConflict( pfucb ) );
 
             Call( ErrDIRGet( pfucb ) );
@@ -908,6 +1060,8 @@ ReplaceNoLock:
         case JET_prepInsertCopy:
         case JET_prepInsertCopyDeleteOriginal:
         case JET_prepInsertCopyReplaceOriginal:
+            //  ensure that table is updatable
+            //
             CallR( ErrFUCBCheckUpdatable( pfucb ) );
             if ( !FFMPIsTempDB(pfucb->ifmp) )
             {
@@ -933,14 +1087,25 @@ ReplaceNoLock:
             Call( ErrDIRRelease( pfucb ) );
             FUCBResetColumnSet( pfucb );
 
+            //  if table has an autoincrement column, then set column value now
+            //  so that it can be retrieved from copy buffer.
+            //
             if ( pfucb->u.pfcb->Ptdb()->FidAutoincrement() != 0 )
             {
+                //  if ICRO then keep same autoincrement value
+                //
                 if ( JET_prepInsertCopyReplaceOriginal == grbit )
                 {
+                    //  ICRO does not allocate new autoinc values, and thus does not need
+                    //  autoinc support to be initialized.  However, initializing autoincrement here
+                    //  allows checks during update to work correctly.
+                    //
                     Call( pfucb->u.pfcb->Ptdb()->ErrInitAutoInc( pfucb, 0 ) );
                 }
                 else
                 {
+                    //  update autoinc column in copy buffer
+                    //
                     Call( ErrRECISetAutoincrement( pfucb ) );
                 }
             }
@@ -954,7 +1119,9 @@ ReplaceNoLock:
             {
                 PrepareInsertCopy( pfucb );
 
-                Assert( updateidNil == ppib->updateid );
+                //  increment reference count on long values
+                //
+                Assert( updateidNil == ppib->updateid );        // should not be nested
                 PIBSetUpdateid( ppib, pfucb->updateid );
                 err = ErrRECAffectLongFieldsInWorkBuf( pfucb, lvaffectReferenceAll );
                 PIBSetUpdateid( ppib, updateidNil );
@@ -1032,13 +1199,14 @@ ERR ErrRECICheckUniqueNormalizedTaggedRecordData(
                 dataRecRaw,
                 dataRecNorm,
                 pnlv,
-                fFalse ,
+                fFalse /* GUID collation does not affect uniqueness */,
                 &fNormDataRecTruncated ) );
 
-    CallS( err );
+    CallS( err );       //  shouldn't get warnings
 
     if ( FDataEqual( dataFieldNorm, dataRecNorm ) )
     {
+        //  since data is equal, they should either both be truncated or both not truncated
         if ( fNormDataFieldTruncated || fNormDataRecTruncated )
         {
             Assert( fNormDataFieldTruncated );
@@ -1133,7 +1301,7 @@ LOCAL ERR ErrRECICheckUniqueLVMultiValues(
                                 fFalse,
                                 (BYTE *)dataToSet.Pv(),
                                 dataToSet.Cb(),
-                                NULL ) );
+                                NULL ) );               //  pass NULL to force comparison instead of retrieval
                 }
             }
             else if ( wrnRECCompressed == err )
@@ -1214,6 +1382,10 @@ LOCAL ERR ErrRECICheckUniqueNormalizedLVMultiValues(
     FCB             * const pfcb                    = pfucb->u.pfcb;
     DATA            dataT;
     DATA            dataToSetNorm;
+    //  FUTURE:     unique column values is AD feature and JET_cbKeyMost_OLD is used to ensure backward compatibility
+    //              w/o new forrest mode.  More elegant would be to tie length of uniqueness to index or table
+    //              definition.
+    //
     BYTE            rgbDataToSetNorm[JET_cbKeyMost_OLD];
     BYTE            rgbLVData[JET_cbKeyMost_OLD];
     BOOL            fNormalizedDataToSetIsTruncated;
@@ -1234,7 +1406,7 @@ LOCAL ERR ErrRECICheckUniqueNormalizedLVMultiValues(
                 dataT,
                 dataToSetNorm,
                 pnlv,
-                fFalse ,
+                fFalse /* GUID collation does not affect uniqueness */,
                 &fNormalizedDataToSetIsTruncated );
     pfcb->LeaveDML();
 
@@ -1250,6 +1422,8 @@ LOCAL ERR ErrRECICheckUniqueNormalizedLVMultiValues(
                 fNormalizedDataToSetIsTruncated );
 }
 
+// given the column we are updating and the options passed in, determine which compression flags to use
+///#define FORCE_COLUMN_COMPRESSION_ON
 LOCAL CompressFlags CalculateCompressFlags( FMP* const pfmp, const FIELD * const pfield, const ULONG grbit )
 {
     const BOOL fLongValue = FRECLongValue( pfield->coltyp );
@@ -1257,6 +1431,7 @@ LOCAL CompressFlags CalculateCompressFlags( FMP* const pfmp, const FIELD * const
     CompressFlags compressFlags = compressNone;
     if( fLongValue )
     {
+        // the grbits take priority over the column meta-data
         if( grbit & JET_bitSetCompressed )
         {
             compressFlags = CompressFlags( compress7Bit | compressXpress );
@@ -1312,6 +1487,7 @@ LOCAL ERR ErrFLDSetOneColumn(
     {
         if ( grbit & ( JET_bitSetAppendLV|JET_bitSetOverwriteLV|JET_bitSetSizeLV ) )
         {
+            //  cannot currently combine JET_bitSetUniqueMultiValues with other grbits
             err = ErrERRCheck( JET_errInvalidGrbit );
             return err;
         }
@@ -1334,6 +1510,8 @@ LOCAL ERR ErrFLDSetOneColumn(
     }
 
     if ( ( grbit & JET_bitSetContiguousLV ) &&
+            //  Technically the required should be slightly less than a full page size / i.e how much ever LV
+            //  data overflows a single page.
             ( pdataField->Cb() < g_cbPage ) )
     {
         AssertSz( FNegTest( fInvalidAPIUsage ), "Using JET_bitSetContiguousLV on LV not big enough to warrant contiguous specifier." );
@@ -1347,13 +1525,18 @@ LOCAL ERR ErrFLDSetOneColumn(
         return err;
     }
 
+    // Verify column is visible to us.
     CallR( ErrRECIAccessColumn( pfucb, columnid ) );
 
+    // If pv is NULL, cb should be 0, except if SetSizeLV is specified.
     if ( pdataField->Pv() == NULL && !( grbit & JET_bitSetSizeLV ) )
         pdataField->SetCb( 0 );
 
     Assert ( pdataField->Cb() >= 0 );
 
+    //  Return error if version or autoinc column is being set.  We don't
+    //  need to grab the FCB critical section -- since we can see the
+    //  column, we're guaranteed the FID won't be deleted or rolled back.
     if ( FCOLUMNIDFixed( columnid ) )
     {
 #ifdef DEBUG
@@ -1368,9 +1551,10 @@ LOCAL ERR ErrFLDSetOneColumn(
 
         if ( pfcb->Ptdb()->FidVersion() == FidOfColumnid( columnid ) )
         {
-            Assert( pfcb->Ptdb()->FidAutoincrement() != FidOfColumnid( columnid ) );
+            Assert( pfcb->Ptdb()->FidAutoincrement() != FidOfColumnid( columnid ) );    // Assert mutual-exclusivity.
             Assert( FFIELDVersion( ffield ) );
 
+            // Cannot set a Version field during a replace.
             if ( FFUCBReplacePrepared( pfucb ) )
                 return ErrERRCheck( JET_errInvalidColumnType );
         }
@@ -1378,11 +1562,12 @@ LOCAL ERR ErrFLDSetOneColumn(
         {
             Assert( FFIELDAutoincrement( ffield ) );
 
+            // Can never set an AutoInc field.
             return ErrERRCheck( JET_errInvalidColumnType );
         }
     }
 
-    else if ( FCOLUMNIDTagged( columnid ) )
+    else if ( FCOLUMNIDTagged( columnid ) )     // check for long value
     {
         pfcb->EnterDML();
 
@@ -1406,11 +1591,11 @@ LOCAL ERR ErrFLDSetOneColumn(
             {
                 NORM_LOCALE_VER nlv =
                 {
-                    SORTIDNil,
+                    SORTIDNil, // Sort GUID
                     PinstFromPfucb( pfucb )->m_dwLCMapFlagsDefault,
-                    0,
-                    0,
-                    L'\0',
+                    0, // NLS Version
+                    0, // NLS Defined Version
+                    L'\0', // locale name
                 };
                 OSStrCbCopyW( &nlv.m_wszLocaleName[0], sizeof(nlv.m_wszLocaleName), PinstFromPfucb( pfucb )->m_wszLocaleNameDefault );
 
@@ -1447,12 +1632,16 @@ LOCAL ERR ErrFLDSetOneColumn(
                 cbMaxLen,
                 cbThreshold / 2 );
 
+            //  if column does not fit then try to separate long values and try to set column again
+            //
             if ( JET_errRecordTooBig == err )
             {
                 Assert( (ULONG) g_cbPage == cbThreshold );
                 const ULONG cbLid = LvId::CbLidFromCurrFormat( pfucb );
                 while ( JET_errRecordTooBig == err && cbThreshold > cbLid )
                 {
+                    //  update threshold before next attempt to set long field
+                    //
                     cbThreshold /= 2;
                     if ( cbThreshold < (ULONG) ( g_cbPage / 64 ) )
                     {
@@ -1480,7 +1669,11 @@ LOCAL ERR ErrFLDSetOneColumn(
     }
 
 
+    //  do the actual column operation
+    //
 
+    //  setting value to NULL
+    //
     if ( pdataField->Cb() == 0 && !( grbit & JET_bitSetZeroLength ) )
         pdataField = NULL;
 
@@ -1493,6 +1686,8 @@ LOCAL ERR ErrFLDSetOneColumn(
         const ULONG cbLid = LvId::CbLidFromCurrFormat( pfucb );
         while ( err == JET_errRecordTooBig && cbThreshold > cbLid )
         {
+            //  update threshold before next attempt to set long field
+            //
             cbThreshold /= 2;
             if ( cbThreshold < (ULONG) ( g_cbPage / 64 ) )
             {
@@ -1512,6 +1707,61 @@ HandleError:
 
 
 
+//+API
+//  ErrIsamSetColumn
+//  ========================================================================
+//  ErrIsamSetColumn( PIB *ppib, FUCB *pfucb, FID fid, ULONG itagSequence, DATA *pdataField, JET_GRBIT grbit )
+//
+//  Adds or changes a column value in the record being worked on.
+//  Fixed and variable columns are replaced if they already have values.
+//  A sequence number must be given for tagged columns.  If this is zero,
+//  a new tagged column occurance is added to the record.  If not zero, it
+//  specifies the occurance to change.
+//  A working buffer is allocated if there isn't one already.
+//  If fNewBuf == fTrue, the buffer is initialized with the default values
+//  for the columns in the record.  If fNewBuf == fFalse, and there was
+//  already a working buffer, it is left unaffected;     if a working buffer
+//  had to be allocated, then this new working buffer will be initialized
+//  with either the column values of the current record, or the default column
+//  values (if the user's currency is not on a record).
+//
+//  PARAMETERS  ppib            PIB of user
+//              pfucb           FUCB of data file to which this record
+//                              is being added/updated.
+//              fid             column id: which column to set
+//              itagSequence    Occurance number (for tagged columns):
+//                              which occurance of the column to change
+//                              If zero, it means "add a new occurance"
+//              pdataField      column data to use
+//              grbit           If JET_bitSetZeroLength, the column is set to size 0.
+//
+//  RETURNS     Error code, one of:
+//                   JET_errSuccess             Everything worked.
+//                  -JET_errOutOfBuffers        Failed to allocate a working
+//                                              buffer
+//                  -JET_errInvalidBufferSize
+//
+//                  -ColumnInvalid              The column id given does not
+//                                              corresponding to a defined column
+//                  -NullInvalid                An attempt was made to set a
+//                                              column to NULL which is defined
+//                                              as NotNull.
+//                  -JET_errRecordTooBig        There is not enough room in
+//                                              the record for new column.
+//  COMMENTS    The GET and DELETE commands discard the working buffer
+//              without writing it to the database.  The REPLACE and INSERT
+//              commands may be used to write the working buffer to the
+//              database, but they also discard it when finished (the INSERT
+//              command can be told not to discard it, though;  this is
+//              useful for adding several similar records).
+//              For tagged columns, if the data given is NULL-valued, then the
+//              tagged column occurance specified is deleted from the record.
+//              If there is no tagged column occurance corresponding to the
+//              specified occurance number, a new tagged column is added to
+//              the record, and assumes the new highest occurance number
+//              (unless the data given is NULL-valued, in which case the
+//              record is unaffected).
+//-
 ERR VTAPI ErrIsamSetColumn(
     JET_SESID       sesid,
     JET_VTID        vtid,
@@ -1528,6 +1778,8 @@ ERR VTAPI ErrIsamSetColumn(
     ULONG           itagSequence;
     ULONG           ibLongValue;
 
+    // check for updatable table
+    //
     CallR( ErrFUCBCheckUpdatable( pfucb ) );
     if ( !FFMPIsTempDB(pfucb->ifmp) )
     {
@@ -1544,6 +1796,9 @@ ERR VTAPI ErrIsamSetColumn(
     if ( !FFUCBSetPrepared( pfucb ) )
         return ErrERRCheck( JET_errUpdateNotPrepared );
 
+    //  remember which update we are part of (save off session's current
+    //  updateid because we may be nested if the top-level SetColumn()
+    //  causes catalog updates when creating LV tree).
     const UPDATEID  updateidSave    = ppib->updateid;
     PIBSetUpdateid( ppib, pfucb->updateid );
 
@@ -1594,6 +1849,8 @@ ERR VTAPI ErrIsamSetColumns(
     DATA            dataField;
     JET_SETCOLUMN   *psetcolcurr;
 
+    // check for updatable table
+    //
     CallR( ErrFUCBCheckUpdatable( pfucb ) );
     if ( !FFMPIsTempDB( pfucb->ifmp ) )
     {
@@ -1611,6 +1868,9 @@ ERR VTAPI ErrIsamSetColumns(
         if ( psetcolcurr->cbData > JET_cbLVColumnMost )
             return ErrERRCheck( JET_errInvalidParameter );
         
+    //  remember which update we are part of (save off session's current
+    //  updateid because we may be nested if the top-level SetColumn()
+    //  causes catalog updates when creating LV tree).
     const UPDATEID  updateidSave    = ppib->updateid;
     PIBSetUpdateid( ppib, pfucb->updateid );
 
@@ -1657,6 +1917,8 @@ ERR ErrRECSetDefaultValue( FUCB *pfucbFake, const COLUMNID columnid, VOID *pvDef
         Assert( FCOLUMNIDTagged( columnid ) );
         Assert( FidOfColumnid( columnid ) <= ptdb->FidTaggedLast() );
 
+        //  max. default long value is cbLVIntrinsicMost-1 (one byte
+        //  reserved for fSeparated flag).
         Assert( JET_cbLVDefaultValueMost < cbLVIntrinsicMost );
 
         if ( cbDefault > JET_cbLVDefaultValueMost )
@@ -1671,14 +1933,14 @@ ERR ErrRECSetDefaultValue( FUCB *pfucbFake, const COLUMNID columnid, VOID *pvDef
             err = ErrRECAOIntrinsicLV(
                         pfucbFake,
                         columnid,
-                        NO_ITAG,
+                        NO_ITAG,        // itagSequence == 0 to force new column
                         &dataNullT,
                         &dataField,
                         0,
                         pfield->cbMaxLen,
                         lvopInsert,
-                        compressNone,
-                        fFalse );
+                        compressNone,   // don't compress the in-memory default record
+                        fFalse );       // don't encrypt the in-memory default record
         }
     }
     else
@@ -1695,6 +1957,8 @@ ERR ErrRECSetDefaultValue( FUCB *pfucbFake, const COLUMNID columnid, VOID *pvDef
 }
 
 
+// The engine normally passes an FUCB and the data buffer hanging off the FUCB, except shrink because it has the advantage
+// of knowing it isn't updating any indices and needs to do it directly to a buffer during root moves.
 
 LOCAL ERR ErrRECISetIFixedColumn(
     FUCB            * const pfucb,
@@ -1716,7 +1980,7 @@ LOCAL ERR ErrRECISetIFixedColumn(
     Assert( cbRec <= REC::CbRecordMostWithGlobalPageSize() );
     if ( pfucb && cbRec > REC::CbRecordMost( pfucb ) )
     {
-        FireWall( "SetFixedColumRecTooBig3.2" );
+        FireWall( "SetFixedColumRecTooBig3.2" ); // Trying to upgrade to this check in below if.
     }
     if ( cbRec < REC::cbRecordMin || cbRec > REC::CbRecordMostWithGlobalPageSize() )
     {
@@ -1730,6 +1994,9 @@ LOCAL ERR ErrRECISetIFixedColumn(
 
     if ( fid > ptdb->FidFixedLast() || fid < ptdb->FidFixedFirst() )
     {
+        //  this should be impossible, because the columnid
+        //  should already have been validated by this point
+        //
         Assert( fFalse );
         return ErrERRCheck( JET_errColumnNotFound );
     }
@@ -1739,10 +2006,16 @@ LOCAL ERR ErrRECISetIFixedColumn(
 
     if ( JET_coltypNil == pfield->coltyp )
     {
+        //  this should be impossible, because the columnid
+        //  should already have been validated by this point
+        //
         Assert( fFalse );
         return ErrERRCheck( JET_errColumnNotFound );
     }
 
+    //  for fixed columns, we interpret setting to zero-length as
+    //  the same thing as setting to NULL
+    //
     else if ( ( NULL == pdataField || pdataField->FNull() )
         && FFIELDNotNull( pfield->ffield ) )
     {
@@ -1751,9 +2024,13 @@ LOCAL ERR ErrRECISetIFixedColumn(
 
     if ( pfucb != pfucbNil )
     {
+        //  record the fact that this column has been changed
+        //
         FUCBSetColumnSet( pfucb, fid );
     }
 
+    //  column not represented in record? Make room, make room
+    //
     if ( fid > prec->FidFixedLastInRec() )
     {
         Assert( pfucb != pfucbNil );
@@ -1762,8 +2039,13 @@ LOCAL ERR ErrRECISetIFixedColumn(
         FID         fidLastDefaultToBurst;
         FID         fidT;
 
+        // Verify there's at least one more fid beyond fidFixedLastInRec,
+        // thus enabling us to reference the FIELD structure of the fid
+        // beyond fidFixedLastInRec.
         Assert( fidFixedLastInRec < ptdb->FidFixedLast() );
 
+        //  compute room needed for new column and bitmap
+        //
         const WORD  ibOldFixEnd     = WORD( prec->PbFixedNullBitMap() - pbRec );
         const WORD  ibOldBitMapEnd  = prec->IbEndOfFixedData();
         const INT   cbOldBitMap     = ibOldBitMapEnd - ibOldFixEnd;
@@ -1771,6 +2053,14 @@ LOCAL ERR ErrRECISetIFixedColumn(
         Assert( ibOldFixEnd == ptdb->IbOffsetOfNextColumn( fidFixedLastInRec ) );
         Assert( ibOldBitMapEnd == ibOldFixEnd + cbOldBitMap );
         Assert( (ULONG)cbOldBitMap == prec->CbFixedNullBitMap() );
+        // FUTURE (as of 9/07/2006): Change Assert validations into retail checks:
+        //if ( ( ibOldBitMapEnd < ibOldFixEnd )||
+        //     (    ibOldFixEnd != ptdb->IbOffsetOfNextColumn( fidFixedLastInRec ) ) ||
+        //     ( ibOldBitMapEnd != ibOldFixEnd + cbOldBitMap ) ||
+        //     ( (ULONG)cbOldBitMap != prec->CbFixedNullBitMap() ) )
+        //  {
+        //  return ErrERRCheck( JET_errInvalidBufferSize );
+        //  }
 
         const WORD  ibNewFixEnd     = WORD( pfield->ibRecordOffset + pfield->cbMaxLen );
         const INT   cbNewBitMap     = ( ( fid - fidFixedLeast + 1 ) + 7 ) / 8;
@@ -1785,31 +2075,43 @@ LOCAL ERR ErrRECISetIFixedColumn(
         if ( cbRec + cbShift > REC::CbRecordMost( pfucb ) )
             return ErrERRCheck( JET_errRecordTooBig );
 
+        //  shift rest of record over to make room
+        //
         Assert( cbRec >= ibOldBitMapEnd );
         memmove(
             pbRec + ibNewBitMapEnd,
             pbRec + ibOldBitMapEnd,
             cbRec - ibOldBitMapEnd );
 
+        // fill the new space with predictable data
         memset( pbRec + ibOldBitMapEnd, chRECFill, cbShift );
 
         pdataWorkBuf->DeltaCb( cbShift );
         cbRec = pdataWorkBuf->Cb();
 
+        // set new location of variable/tagged data
         prec->SetIbEndOfFixedData( ibNewBitMapEnd );
 
+        //  shift fixed column bitmap over
+        //
         memmove(
             pbRec + ibNewFixEnd,
             pbRec + ibOldFixEnd,
             cbOldBitMap );
 
+        // fill the new space with predictable data
         memset( pbRec + ibOldFixEnd, chRECFill, ibNewFixEnd - ibOldFixEnd );
 
+        //  clear all new bitmap bits
+        //
 
+        // If there's at least one fixed column currently in the record,
+        // find the nullity bit for the last fixed column and clear the
+        // rest of the bits in that byte.
         BYTE    *prgbitNullity;
         if ( fidFixedLastInRec >= fidFixedLeast )
         {
-            UINT    ifid    = fidFixedLastInRec - fidFixedLeast;
+            UINT    ifid    = fidFixedLastInRec - fidFixedLeast;    // Fid converted to an index.
 
             prgbitNullity = pbRec + ibNewFixEnd + ifid/8;
 
@@ -1824,7 +2126,7 @@ LOCAL ERR ErrRECISetIFixedColumn(
                 SetFixedNullBit( prgbitNullity, ifid );
             }
 
-            prgbitNullity++;
+            prgbitNullity++;        // Advance to next nullity byte.
             Assert( prgbitNullity <= pbRec + ibNewBitMapEnd );
         }
         else
@@ -1833,13 +2135,18 @@ LOCAL ERR ErrRECISetIFixedColumn(
             Assert( prgbitNullity < pbRec + ibNewBitMapEnd );
         }
 
+        // set all NULL bits at once
         memset( prgbitNullity, 0xff, pbRec + ibNewBitMapEnd - prgbitNullity );
 
 
+        // Default values may have to be burst if there are default value columns
+        // between the last one currently in the record and the one we are setting.
+        // (note that if the column being set also has a default value, we have
+        // to set the default value first in case the actual set fails.
         const REC * const   precDefault = ( NULL != ptdb->PdataDefaultRecord() ?
                                                     (REC *)ptdb->PdataDefaultRecord()->Pv() :
                                                     NULL );
-        Assert( NULL == precDefault ||
+        Assert( NULL == precDefault ||  // temp/system tables have no default record.
             ( ptdb->PdataDefaultRecord()->Cb() >= REC::cbRecordMin
             && ptdb->PdataDefaultRecord()->Cb() <= REC::CbRecordMostCHECK( g_rgfmp[ pfucb->ifmp ].CbPage() ) ) );
         if ( NULL != ptdb->PdataDefaultRecord() &&
@@ -1881,6 +2188,9 @@ LOCAL ERR ErrRECISetIFixedColumn(
 
                     Assert( pfieldFixed->coltyp != JET_coltypNil );
 
+                    // Update nullity bit.  Assert that it's currently
+                    // set to null, then set it to non-null in preparation
+                    // of the bursting of the default value.
                     prgbitNullity = pbRec + ibNewFixEnd + (ifid/8);
                     Assert( FFixedNullBit( prgbitNullity, ifid ) );
                     ResetFixedNullBit( prgbitNullity, ifid );
@@ -1888,6 +2198,9 @@ LOCAL ERR ErrRECISetIFixedColumn(
                 }
             }
 
+            // Only burst default values between the last fixed
+            // column currently in the record and the column now
+            // being set.
             Assert( fidLastDefaultToBurst > fidFixedLastInRec );
             if ( fidLastDefaultToBurst <= fid )
             {
@@ -1900,21 +2213,34 @@ LOCAL ERR ErrRECISetIFixedColumn(
             }
         }
 
+        //  increase fidFixedLastInRec
+        //
         prec->SetFidFixedLastInRec( fid );
     }
 
+    //  fid is now definitely represented in
+    //  the record; its data can simply be replaced
+    //
 
+    //  adjust fid to an index
+    //
     const UINT  ifid            = fid - fidFixedLeast;
 
+    //  byte containing bit representing column's nullity
+    //
     BYTE        *prgbitNullity  = prec->PbFixedNullBitMap() + ifid/8;
 
+    //  adding NULL: clear bit
+    //
     if ( NULL == pdataField || pdataField->FNull() )
     {
-        Assert( !FFIELDNotNull( pfield->ffield ) );
+        Assert( !FFIELDNotNull( pfield->ffield ) );     //  already verified above
         SetFixedNullBit( prgbitNullity, ifid );
     }
     else
     {
+        //  adding non-NULL value: set bit, copy value into slot
+        //
         const JET_COLTYP    coltyp = pfield->coltyp;
         ULONG               cbCopy = pfield->cbMaxLen;
 
@@ -1981,6 +2307,7 @@ LOCAL ERR ErrRECISetIFixedColumn(
 
             SetPbDataField( &pbDataField, pdataField, rgb, coltyp );
 
+            //  If the data is converted, then the cbCopy must be the same as pdataField->Cb()
             Assert( pbDataField != pdataField->Pv() || cbCopy == (ULONG)pdataField->Cb() );
 
             UtilMemCpy( pbRec + pfield->ibRecordOffset, pbDataField, cbCopy );
@@ -2029,7 +2356,12 @@ INLINE ULONG CbBurstVarDefaults( TDB *ptdb, FUCB *pfucb, FID fidVarLastInRec, FI
                                                         (REC *)ptdb->PdataDefaultRecord()->Pv() :
                                                         NULL );
 
-    Assert( NULL == precDefault ||
+    // Compute space needed to burst default values.
+    // Default values may have to be burst if there are default value columns
+    // between the last one currently in the record and the one we are setting.
+    // (note that if the column being set also has a default value, we don't
+    // bother setting it, since it will be overwritten).
+    Assert( NULL == precDefault ||  // temp/system tables have no default record.
         ( ptdb->PdataDefaultRecord()->Cb() >= REC::cbRecordMin
         && ptdb->PdataDefaultRecord()->Cb() <= REC::CbRecordMostCHECK( g_rgfmp[ pfucb->ifmp ].CbPage() ) ) );
     if ( NULL != ptdb->PdataDefaultRecord() &&
@@ -2069,8 +2401,10 @@ INLINE ULONG CbBurstVarDefaults( TDB *ptdb, FUCB *pfucb, FID fidVarLastInRec, FI
                 const UINT  ifid = fidT - fidVarLeast;
                 Assert( pfieldVar->coltyp != JET_coltypNil );
 
+                // Don't currently support NULL default values.
                 Assert( !FVarNullBit( pibDefaultVarOffs[ifid] ) );
 
+                //  beginning of current column is end of previous column
                 const WORD  ibVarOffset = ( fidVarLeast == fidT ?
                                                 (WORD)0 :
                                                 IbVarOffset( pibDefaultVarOffs[ifid-1] ) );
@@ -2128,6 +2462,9 @@ ERR ErrRECISetVarColumn(
 
     if ( fid > ptdb->FidVarLast() || fid < ptdb->FidVarFirst() )
     {
+        //  this should be impossible, because the columnid
+        //  should already have been validated by this point
+        //
         Assert( fFalse );
         return ErrERRCheck( JET_errColumnNotFound );
     }
@@ -2136,13 +2473,20 @@ ERR ErrRECISetVarColumn(
     Assert( pfieldNil != pfield );
     if ( JET_coltypNil == pfield->coltyp )
     {
+        //  this should be impossible, because the columnid
+        //  should already have been validated by this point
+        //
         Assert( fFalse );
         return ErrERRCheck( JET_errColumnNotFound );
     }
 
+    //  record the fact that this column has been changed
+    //
     FUCBSetColumnSet( pfucb, fid );
 
-    INT     cbCopy;
+    //  NULL-value check
+    //
+    INT     cbCopy;             // Number of bytes to copy from user's buffer
     if ( NULL == pdataField )
     {
         if ( FFIELDNotNull( pfield->ffield ) )
@@ -2156,6 +2500,8 @@ ERR ErrRECISetVarColumn(
     }
     else if ( (ULONG)pdataField->Cb() > pfield->cbMaxLen )
     {
+        //  column too long
+        //
         cbCopy = pfield->cbMaxLen;
         err = ErrERRCheck( JET_wrnColumnMaxTruncated );
     }
@@ -2165,10 +2511,14 @@ ERR ErrRECISetVarColumn(
     }
     Assert( cbCopy >= 0 );
 
+    //  variable column offsets
+    //
     UnalignedLittleEndian<REC::VAROFFSET>   *pib;
     UnalignedLittleEndian<REC::VAROFFSET>   *pibLast;
     UnalignedLittleEndian<REC::VAROFFSET>   *pibVarOffs;
 
+    //  column not represented in record?  Make room, make room
+    //
     const BOOL      fBurstRecord = ( fid > prec->FidVarLastInRec() );
     if ( fBurstRecord )
     {
@@ -2177,6 +2527,8 @@ ERR ErrRECISetVarColumn(
 
         Assert( !( pdataField == NULL && FFIELDNotNull( pfield->ffield ) ) );
 
+        //  compute space needed for new var column offsets
+        //
         const INT   cbNeed = ( fid - fidVarLastInRec ) * sizeof(REC::VAROFFSET);
         const INT   cbBurstDefaults = CbBurstVarDefaults(
                                             ptdb,
@@ -2190,6 +2542,8 @@ ERR ErrRECISetVarColumn(
 
         pibVarOffs = prec->PibVarOffsets();
 
+        //  shift rest of record over to make room
+        //
         BYTE    *pbVarOffsEnd = prec->PbVarData();
         Assert( pbVarOffsEnd >= (BYTE *)pibVarOffs );
         memmove(
@@ -2197,9 +2551,12 @@ ERR ErrRECISetVarColumn(
                 pbVarOffsEnd,
                 pbRec + cbRec - pbVarOffsEnd );
 
+        // fill the new space with predictable data
         memset( pbVarOffsEnd, chRECFill, cbNeed );
 
 
+        //  set new var offsets to tag offset, making them NULL
+        //
         pib = (UnalignedLittleEndian<REC::VAROFFSET> *)pbVarOffsEnd;
         pibLast = pibVarOffs + ( fid - fidVarLeast );
 
@@ -2214,14 +2571,18 @@ ERR ErrRECISetVarColumn(
             *pib++ = ibTagFields;
         Assert( pib == pibVarOffs + ( fid+1-fidVarLeast ) );
 
+        //  increase record size to reflect addition of entries in the
+        //  variable offsets table.
+        //
         Assert( prec->FidVarLastInRec() == fidVarLastInRec );
         prec->SetFidVarLastInRec( fid );
         Assert( pfucb->dataWorkBuf.Cb() == cbRec );
         cbRec += cbNeed;
 
         Assert( prec->PibVarOffsets() == pibVarOffs );
-        Assert( pibVarOffs[fid-fidVarLeast] == ibTagFields );
+        Assert( pibVarOffs[fid-fidVarLeast] == ibTagFields );   // Includes null-bit comparison.
 
+        // Burst default values if required.
         Assert( cbBurstDefaults == 0
             || ( fidLastDefault > fidVarLastInRec && fidLastDefault < fid ) );
         if ( cbBurstDefaults > 0 )
@@ -2234,12 +2595,15 @@ ERR ErrRECISetVarColumn(
             UnalignedLittleEndian<REC::VAROFFSET>   *pibDefaultVarOffs;
             UnalignedLittleEndian<REC::VAROFFSET>   *pibDefault;
 
+            // Should have changed since last time, since we added
+            // some columns.
             Assert( pbVarData > pbVarOffsEnd );
             Assert( pbVarData > pbRec );
             Assert( pbVarData <= pbRec + cbRec );
 
             pibDefaultVarOffs = precDefault->PibVarOffsets();
 
+            // Make room for the default values to be burst.
             Assert( FVarNullBit( ibTagFields ) );
             Assert( cbRec >= pbVarData + IbVarOffset( ibTagFields ) - pbRec );
             const ULONG     cbTaggedData = cbRec - ULONG( pbVarData + IbVarOffset( ibTagFields ) - pbRec );
@@ -2257,7 +2621,7 @@ ERR ErrRECISetVarColumn(
                     <= ptdb->PdataDefaultRecord()->Cb() );
 
             pib = pibVarOffs + ( fidVarLastInRec + 1 - fidVarLeast );
-            Assert( *pib == ibTagFields );
+            Assert( *pib == ibTagFields );  // Null bit also compared.
             pibDefault = pibDefaultVarOffs + ( fidVarLastInRec + 1 - fidVarLeast );
 
 #ifdef DEBUG
@@ -2271,6 +2635,8 @@ ERR ErrRECISetVarColumn(
                 const BOOL  fTemplateColumn = ptdb->FVarTemplateColumn( fidT );
                 const FIELD *pfieldVar      = ptdb->PfieldVar( ColumnidOfFid( fidT, fTemplateColumn ) );
 
+                // Null bit is initially set when the offsets
+                // table is expanded above.
                 Assert( FVarNullBit( *pib ) );
 
                 if ( FFIELDDefault( pfieldVar->ffield )
@@ -2278,6 +2644,7 @@ ERR ErrRECISetVarColumn(
                 {
                     Assert( JET_coltypNil != pfieldVar->coltyp );
 
+                    // Update offset entry in preparation for the default value.
                     Assert( !FVarNullBit( *pibDefault ) );
 
                     if ( fidVarLeast == fidT )
@@ -2305,12 +2672,15 @@ ERR ErrRECISetVarColumn(
 #endif
                     }
 
+//                  Null bit gets reset when cb is set
+//                  ResetVarNullBit( *pib );
                     Assert( !FVarNullBit( *pib ) );
                 }
                 else if ( fidT > fidVarLeast )
                 {
                     *pib = IbVarOffset( *(pib-1) );
 
+//                  Null bit gets reset when cb is set
                     Assert( !FVarNullBit( *pib ) );
                     SetVarNullBit( *(UnalignedLittleEndian< WORD >*)(pib) );
                 }
@@ -2338,6 +2708,9 @@ ERR ErrRECISetVarColumn(
                 Assert( IbVarOffset( *(pib-1) ) == (WORD)cbBurstDefaults );
             }
 
+            // Offset entries up to the last default have been set.
+            // Update the entries between the last default and the
+            // column being set.
             pibLast = pibVarOffs + ( fid - fidVarLeast );
             for ( ; pib <= pibLast; pib++ )
             {
@@ -2348,6 +2721,7 @@ ERR ErrRECISetVarColumn(
             }
 
 #ifdef DEBUG
+            // Verify null bits vs. offsets.
             pibLast = pibVarOffs + ( fid - fidVarLeast );
             for ( pib = pibVarOffs+1; pib <= pibLast; pib++ )
             {
@@ -2373,13 +2747,20 @@ ERR ErrRECISetVarColumn(
         Assert( prec->FidVarLastInRec() == fid );
     }
 
+    //  fid is now definitely represented in the record;
+    //  its data can be replaced, shifting remainder of record,
+    //  either to the right or left (if expanding/shrinking)
+    //
 
     Assert( JET_errSuccess == err || JET_wrnColumnMaxTruncated == err );
 
 
+    //  compute change in column size and value of null-bit in offset
+    //
     pibVarOffs = prec->PibVarOffsets();
     pib = pibVarOffs + ( fid - fidVarLeast );
 
+    // Calculate size change of column data
     REC::VAROFFSET  ibStartOfColumn;
     if( fidVarLeast == fid )
     {
@@ -2393,13 +2774,18 @@ ERR ErrRECISetVarColumn(
     const REC::VAROFFSET    ibEndOfColumn   = IbVarOffset( *pib );
     const INT               dbFieldData     = cbCopy - ( ibEndOfColumn - ibStartOfColumn );
 
+    //  size changed: must shift rest of record data
+    //
     if ( 0 != dbFieldData )
     {
         BYTE    *pbVarData = prec->PbVarData();
 
+        //  shift data
+        //
         if ( cbRec + dbFieldData > REC::CbRecordMost( pfucb ) )
         {
-            Assert( !fBurstRecord );
+            Assert( !fBurstRecord );        // If record had to be extended, space
+                                            // consumption was already checked.
             return ErrERRCheck( JET_errRecordTooBig );
         }
 
@@ -2417,6 +2803,8 @@ ERR ErrRECISetVarColumn(
         pfucb->dataWorkBuf.DeltaCb( dbFieldData );
         cbRec = pfucb->dataWorkBuf.Cb();
 
+        //  bump affected var column offsets
+        //
         Assert( fid <= prec->FidVarLastInRec() );
         Assert( prec->FidVarLastInRec() >= fidVarLeast );
         pibLast = pibVarOffs + ( prec->FidVarLastInRec() - fidVarLeast );
@@ -2425,9 +2813,12 @@ ERR ErrRECISetVarColumn(
             *pib = WORD( *pib + dbFieldData );
         }
 
+        // Reset for setting of null bit below.
         pib = pibVarOffs + ( fid - fidVarLeast );
     }
 
+    //  data shift complete, if any;  copy new column value in
+    //
     Assert( cbCopy >= 0 );
     if ( cbCopy > 0 )
     {
@@ -2437,6 +2828,8 @@ ERR ErrRECISetVarColumn(
             cbCopy );
     }
 
+    //  set value of null-bit in offset
+    //
     if ( NULL == pdataField )
     {
         SetVarNullBit( *( UnalignedLittleEndian< WORD >*)pib );
@@ -2469,6 +2862,9 @@ ERR ErrRECISetTaggedColumn(
 
     if ( fid > ptdb->FidTaggedLast() || fid < ptdb->FidTaggedFirst() )
     {
+        //  this should be impossible, because the columnid
+        //  should already have been validated by this point
+        //
         Assert( fFalse );
         return ErrERRCheck( JET_errColumnNotFound );
     }
@@ -2477,6 +2873,9 @@ ERR ErrRECISetTaggedColumn(
     Assert( pfieldNil != pfield );
     if ( JET_coltypNil == pfield->coltyp )
     {
+        //  this should be impossible, because the columnid
+        //  should already have been validated by this point
+        //
         Assert( fFalse );
         return ErrERRCheck( JET_errColumnNotFound );
     }
@@ -2485,17 +2884,24 @@ ERR ErrRECISetTaggedColumn(
         return ErrERRCheck( JET_errNullInvalid );
     }
 
+    //  record the fact that this column has been changed
+    //
     FUCBSetColumnSet( pfucb, fid );
 
     const ULONG cbMaxLenPhysical = ( grbit & grbitSetColumnEncrypted ) ? CbOSEncryptAes256SizeNeeded( pfield->cbMaxLen ) : pfield->cbMaxLen;
+    //  check for column too long
+    //
     if ( pfield->cbMaxLen > 0
         && NULL != pdataToSet
         && (ULONG)pdataToSet->Cb() > cbMaxLenPhysical )
     {
+        // Encrypted columns are only set via ErrRECAOSeparateLV which already checks the max logical size
         Assert( !( grbit & grbitSetColumnEncrypted ) );
         return ErrERRCheck( JET_errColumnTooBig );
     }
 
+    //  check fixed size column size
+    //
     if ( NULL != pdataToSet
         && pdataToSet->Cb() > 0 )
     {
@@ -2547,6 +2953,8 @@ ERR ErrRECISetTaggedColumn(
         }
     }
 
+    //  cannot set column more than CbLVIntrinsicTableMost() bytes
+    //
     if ( NULL != pdataToSet
         && (ULONG) pdataToSet->Cb() > CbLVIntrinsicTableMost( pfucb ) )
     {
@@ -2577,6 +2985,7 @@ ERR ErrRECISetTaggedColumn(
 }
 
 
+//  change default value of a non-derived column
 ERR VTAPI ErrIsamSetColumnDefaultValue(
     JET_SESID   vsesid,
     JET_DBID    vdbid,
@@ -2603,12 +3012,14 @@ ERR VTAPI ErrIsamSetColumnDefaultValue(
     COLUMNID    columnid            = JET_columnidNil;
     CHAR        szColumn[JET_cbNameMost+1];
 
+    //  check parameters
+    //
     CallR( ErrPIBCheck( ppib ) );
     CallR( ErrPIBCheckIfmp( ppib, ifmp ) );
 
     if ( FFMPIsTempDB( ifmp ) )
     {
-        Expected( fFalse );
+        Expected( fFalse ); // API never run on temp DB.
         return ErrERRCheck( JET_errInvalidParameter );
     }
 
@@ -2616,6 +3027,8 @@ ERR VTAPI ErrIsamSetColumnDefaultValue(
 
     if ( NULL == pvData || 0 == cbData )
     {
+        //  don't currently support null/zero-length default value
+        //
         return ErrERRCheck( JET_errNullInvalid );
     }
 
@@ -2640,6 +3053,7 @@ ERR VTAPI ErrIsamSetColumnDefaultValue(
         FireWall( "IsamSetColumnDefValRecTooBig5.2" );
     }
 
+    // We should now have exclusive use of the table.
     pfcb = pfucb->u.pfcb;
     objidTable = pfcb->ObjidFDP();
     Assert( pfcbNil != pfcb );
@@ -2647,6 +3061,7 @@ ERR VTAPI ErrIsamSetColumnDefaultValue(
     ptdb = pfcb->Ptdb();
     Assert( ptdbNil != ptdb );
 
+    //  save off old default record in case we have to restore it on error
     Assert( NULL != ptdb->PdataDefaultRecord() );
     pdataDefaultPrev = ptdb->PdataDefaultRecord();
     Assert( NULL != pdataDefaultPrev );
@@ -2666,8 +3081,12 @@ ERR VTAPI ErrIsamSetColumnDefaultValue(
     fInTrx = fTrue;
 
 
+    //  NOTE: Can only change the default value of non-derived columns
+    //  so don't even bother looking for the column in the template
+    //  table's column space
 
     pfcb->EnterDML();
+    //  WARNING: The following function does a LeaveDML() on error  
     err = ErrFILEPfieldFromColumnName(
             ppib,
             pfcb,
@@ -2704,6 +3123,10 @@ ERR VTAPI ErrIsamSetColumnDefaultValue(
     Assert( fucbFake.u.pfcb == &fcbFake );
     Assert( fcbFake.Ptdb() == ptdb );
 
+    //  if adding a default value, the default value
+    //  flag will not be set, so must set it now
+    //  before rebuilding the default record (because
+    //  the rebuild code checks that flag)
     if ( fNeedToSetFlag )
     {
         pfcb->EnterDDL();

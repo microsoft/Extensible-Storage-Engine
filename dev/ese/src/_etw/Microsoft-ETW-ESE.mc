@@ -1,4 +1,4 @@
-﻿<?xml version='1.0' encoding='utf-8' standalone='yes'?>
+<?xml version='1.0' encoding='utf-8' standalone='yes'?>
 
 <!--
 Copyright (c) Microsoft Corporation.
@@ -576,7 +576,7 @@ ESE_PRE_GEN_BASE_FILE:   be pre-processed with eseetw.pl.
           -->
         <templates>
 
-          <!-- This template ... I/BrettSh can't find a reference, means it is uselss right? -->
+          <!-- This template ... I/SOMEONE can't find a reference, means it is uselss right? -->
           <template tid="tStringTrace">
             <data  inType="win:AnsiString"          name="szTrace"            />
           </template>

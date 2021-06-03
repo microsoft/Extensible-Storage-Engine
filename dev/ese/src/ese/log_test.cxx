@@ -5,70 +5,80 @@
 
 #ifndef ENABLE_JET_UNIT_TEST
 #error This file should only be compiled with the unit tests!
-#endif
+#endif // ENABLE_JET_UNIT_TEST
 
+//  ================================================================
 JETUNITTEST( LOG, FormatVersionTests )
+//  ================================================================
 {
 
+    // if ( CmpLogFormatVersion( expected, curr ) < 0 )     //  current is newer than
+    // if ( CmpLogFormatVersion( expected, curr ) > 0 )     //  current is older than
 
+    // if ( CmpLogFormatVersion( curr, expected ) < 0 )     //  current is older than
+    // if ( CmpLogFormatVersion( curr, expected ) > 0 )     //  current is newer than
 
     #define fmtLGVersion_Test1      4,8000,1,333
 
-    CHECK( CmpLogFormatVersion( fmtLGVersion_Test1, 4,8000,1,333 ) == 0 );
+    CHECK( CmpLogFormatVersion( fmtLGVersion_Test1, 4,8000,1,333 ) == 0 );  //  equal
 
+    //  Major testing
 
-    CHECK( CmpLogFormatVersion( fmtLGVersion_Test1, 5,0,0,0 ) < 0 );
-    CHECK( CmpLogFormatVersion( fmtLGVersion_Test1, 5,8000,1,333 ) < 0 );
-    CHECK( CmpLogFormatVersion( fmtLGVersion_Test1, 3,0xFFFF,0xFFFF,0xFFFF ) > 0 );
-    CHECK( CmpLogFormatVersion( fmtLGVersion_Test1, 3,8000,1,333 ) > 0 );
+    CHECK( CmpLogFormatVersion( fmtLGVersion_Test1, 5,0,0,0 ) < 0 );        //  Major is most significant, others don't matter
+    CHECK( CmpLogFormatVersion( fmtLGVersion_Test1, 5,8000,1,333 ) < 0 );   //  ...
+    CHECK( CmpLogFormatVersion( fmtLGVersion_Test1, 3,0xFFFF,0xFFFF,0xFFFF ) > 0 );//   ...
+    CHECK( CmpLogFormatVersion( fmtLGVersion_Test1, 3,8000,1,333 ) > 0 );   //  ...
 
-    CHECK( CmpLogFormatVersion( fmtLGVersion_Test1, 5,7999,1,333 ) < 0 );
-    CHECK( CmpLogFormatVersion( fmtLGVersion_Test1, 5,8001,1,333 ) < 0 );
-    CHECK( CmpLogFormatVersion( fmtLGVersion_Test1, 5,8000,0,333 ) < 0 );
-    CHECK( CmpLogFormatVersion( fmtLGVersion_Test1, 5,8000,2,333 ) < 0 );
-    CHECK( CmpLogFormatVersion( fmtLGVersion_Test1, 5,8000,1,332 ) < 0 );
-    CHECK( CmpLogFormatVersion( fmtLGVersion_Test1, 5,8001,1,334 ) < 0 );
+    CHECK( CmpLogFormatVersion( fmtLGVersion_Test1, 5,7999,1,333 ) < 0 );   //  Major is most significant, Minor doesn't matter
+    CHECK( CmpLogFormatVersion( fmtLGVersion_Test1, 5,8001,1,333 ) < 0 );   //  ...
+    CHECK( CmpLogFormatVersion( fmtLGVersion_Test1, 5,8000,0,333 ) < 0 );   //  ..., UpdateMajor doesn't matter
+    CHECK( CmpLogFormatVersion( fmtLGVersion_Test1, 5,8000,2,333 ) < 0 );   //  ...
+    CHECK( CmpLogFormatVersion( fmtLGVersion_Test1, 5,8000,1,332 ) < 0 );   //  ..., UpdateMinor doesn't matter
+    CHECK( CmpLogFormatVersion( fmtLGVersion_Test1, 5,8001,1,334 ) < 0 );   //  ...
  
-    CHECK( CmpLogFormatVersion( fmtLGVersion_Test1, 3,7999,1,333 ) > 0 );
-    CHECK( CmpLogFormatVersion( fmtLGVersion_Test1, 3,8001,1,333 ) > 0 );
-    CHECK( CmpLogFormatVersion( fmtLGVersion_Test1, 3,8000,0,333 ) > 0 );
-    CHECK( CmpLogFormatVersion( fmtLGVersion_Test1, 3,8000,2,333 ) > 0 );
-    CHECK( CmpLogFormatVersion( fmtLGVersion_Test1, 3,8000,1,332 ) > 0 );
-    CHECK( CmpLogFormatVersion( fmtLGVersion_Test1, 3,8001,1,334 ) > 0 );
+    CHECK( CmpLogFormatVersion( fmtLGVersion_Test1, 3,7999,1,333 ) > 0 );   //  Major is most significant, Minor doesn't matter
+    CHECK( CmpLogFormatVersion( fmtLGVersion_Test1, 3,8001,1,333 ) > 0 );   //  ...
+    CHECK( CmpLogFormatVersion( fmtLGVersion_Test1, 3,8000,0,333 ) > 0 );   //  ..., UpdateMajor doesn't matter
+    CHECK( CmpLogFormatVersion( fmtLGVersion_Test1, 3,8000,2,333 ) > 0 );   //  ...
+    CHECK( CmpLogFormatVersion( fmtLGVersion_Test1, 3,8000,1,332 ) > 0 );   //  ..., UpdateMinor doesn't matter
+    CHECK( CmpLogFormatVersion( fmtLGVersion_Test1, 3,8001,1,334 ) > 0 );   //  ...
 
+    //  Minor testing
 
-    CHECK( CmpLogFormatVersion( fmtLGVersion_Test1, 4,8001,0,0 ) < 0 );
-    CHECK( CmpLogFormatVersion( fmtLGVersion_Test1, 4,8001,1,333 ) < 0 );
-    CHECK( CmpLogFormatVersion( fmtLGVersion_Test1, 4,7999,0xFFFF,0xFFFF ) > 0 );
-    CHECK( CmpLogFormatVersion( fmtLGVersion_Test1, 4,7999,1,333 ) > 0 );
+    CHECK( CmpLogFormatVersion( fmtLGVersion_Test1, 4,8001,0,0 ) < 0 );     //  Minor is most significant, others don't matter
+    CHECK( CmpLogFormatVersion( fmtLGVersion_Test1, 4,8001,1,333 ) < 0 );   //  ...
+    CHECK( CmpLogFormatVersion( fmtLGVersion_Test1, 4,7999,0xFFFF,0xFFFF ) > 0 );// ...
+    CHECK( CmpLogFormatVersion( fmtLGVersion_Test1, 4,7999,1,333 ) > 0 );   //  ...
 
-    CHECK( CmpLogFormatVersion( fmtLGVersion_Test1, 4,8001,0,333 ) < 0 );
-    CHECK( CmpLogFormatVersion( fmtLGVersion_Test1, 4,8001,2,333 ) < 0 );
-    CHECK( CmpLogFormatVersion( fmtLGVersion_Test1, 4,8001,1,332 ) < 0 );
-    CHECK( CmpLogFormatVersion( fmtLGVersion_Test1, 4,8001,1,334 ) < 0 );
+    CHECK( CmpLogFormatVersion( fmtLGVersion_Test1, 4,8001,0,333 ) < 0 );   //  Minor is most significant, UpdateMajor doesn't matter
+    CHECK( CmpLogFormatVersion( fmtLGVersion_Test1, 4,8001,2,333 ) < 0 );   //  ...
+    CHECK( CmpLogFormatVersion( fmtLGVersion_Test1, 4,8001,1,332 ) < 0 );   //  ..., UpdateMinor doesn't matter
+    CHECK( CmpLogFormatVersion( fmtLGVersion_Test1, 4,8001,1,334 ) < 0 );   //  ...
 
-    CHECK( CmpLogFormatVersion( fmtLGVersion_Test1, 4,7999,0,333 ) > 0 );
-    CHECK( CmpLogFormatVersion( fmtLGVersion_Test1, 4,7999,2,333 ) > 0 );
-    CHECK( CmpLogFormatVersion( fmtLGVersion_Test1, 4,7999,1,332 ) > 0 );
-    CHECK( CmpLogFormatVersion( fmtLGVersion_Test1, 4,7999,1,334 ) > 0 );
+    CHECK( CmpLogFormatVersion( fmtLGVersion_Test1, 4,7999,0,333 ) > 0 );   //  Minor is most significant, UpdateMajor doesn't matter
+    CHECK( CmpLogFormatVersion( fmtLGVersion_Test1, 4,7999,2,333 ) > 0 );   //  ...
+    CHECK( CmpLogFormatVersion( fmtLGVersion_Test1, 4,7999,1,332 ) > 0 );   //  ..., UpdateMinor doesn't matter
+    CHECK( CmpLogFormatVersion( fmtLGVersion_Test1, 4,7999,1,334 ) > 0 );   //  ...
 
+    //  UpdateMajor testing
 
-    CHECK( CmpLogFormatVersion( fmtLGVersion_Test1, 4,8000,2,0 ) < 0 );
-    CHECK( CmpLogFormatVersion( fmtLGVersion_Test1, 4,8000,2,333 ) < 0 );
-    CHECK( CmpLogFormatVersion( fmtLGVersion_Test1, 4,8000,0,0xFFFF ) > 0 );
-    CHECK( CmpLogFormatVersion( fmtLGVersion_Test1, 4,8000,0,333 ) > 0 );
+    CHECK( CmpLogFormatVersion( fmtLGVersion_Test1, 4,8000,2,0 ) < 0 );     //  UpdateMajor is most significant, others don't matter
+    CHECK( CmpLogFormatVersion( fmtLGVersion_Test1, 4,8000,2,333 ) < 0 );   //  ...
+    CHECK( CmpLogFormatVersion( fmtLGVersion_Test1, 4,8000,0,0xFFFF ) > 0 );//  ...
+    CHECK( CmpLogFormatVersion( fmtLGVersion_Test1, 4,8000,0,333 ) > 0 );   //  ...
 
-    CHECK( CmpLogFormatVersion( fmtLGVersion_Test1, 4,8000,2,332 ) < 0 );
-    CHECK( CmpLogFormatVersion( fmtLGVersion_Test1, 4,8000,2,334 ) < 0 );
+    CHECK( CmpLogFormatVersion( fmtLGVersion_Test1, 4,8000,2,332 ) < 0 );   //  UpdateMajor is most significant, UpdateMinor doesn't matter
+    CHECK( CmpLogFormatVersion( fmtLGVersion_Test1, 4,8000,2,334 ) < 0 );   //  ...
 
-    CHECK( CmpLogFormatVersion( fmtLGVersion_Test1, 4,8000,0,332 ) > 0 );
-    CHECK( CmpLogFormatVersion( fmtLGVersion_Test1, 4,8000,0,334 ) > 0 );
+    CHECK( CmpLogFormatVersion( fmtLGVersion_Test1, 4,8000,0,332 ) > 0 );   //  UpdateMajor is most significant, UpdateMinor doesn't matter
+    CHECK( CmpLogFormatVersion( fmtLGVersion_Test1, 4,8000,0,334 ) > 0 );   //  ...
 
+    //  UpdateMinor testing
 
-    CHECK( CmpLogFormatVersion( fmtLGVersion_Test1, 4,8000,1,0 ) > 0 );
-    CHECK( CmpLogFormatVersion( fmtLGVersion_Test1, 4,8000,1,332 ) > 0 );
-    CHECK( CmpLogFormatVersion( fmtLGVersion_Test1, 4,8000,1,0xFFFF ) < 0 );
-    CHECK( CmpLogFormatVersion( fmtLGVersion_Test1, 4,8000,1,334 ) < 0 );
+    CHECK( CmpLogFormatVersion( fmtLGVersion_Test1, 4,8000,1,0 ) > 0 );     //  UpdateMinor is al that matters
+    CHECK( CmpLogFormatVersion( fmtLGVersion_Test1, 4,8000,1,332 ) > 0 );   //  ...
+    CHECK( CmpLogFormatVersion( fmtLGVersion_Test1, 4,8000,1,0xFFFF ) < 0 );//  ...
+    CHECK( CmpLogFormatVersion( fmtLGVersion_Test1, 4,8000,1,334 ) < 0 );   //  ...
 }
 
 
@@ -80,7 +90,9 @@ bool FLGIsLVChunkSizeCompatible(
     const ULONG ulVersionMinor,
     const ULONG ulVersionUpdate );
 
+//  ================================================================
 JETUNITTEST( LOG, FLGIsLVChunkSizeCompatible  )
+//  ================================================================
 {
     for( INT i = 2; i <= 32; i *= 2 )
     {
@@ -95,9 +107,11 @@ JETUNITTEST( LOG, FLGIsLVChunkSizeCompatible  )
     CHECK( false == FLGIsLVChunkSizeCompatible( 32*1024, ulLGVersionMajorNewLVChunk, ulLGVersionMinorNewLVChunk, ulLGVersionUpdateNewLVChunk-1 ) );
 }
 
-#endif
+#endif // ENABLE_LOG_V7_RECOVERY_COMPAT
 
+//  ================================================================
 JETUNITTEST( LOGWRITE, SIGGetSignatureReturnsUniqueSignatures )
+//  ================================================================
 {
     SIGNATURE signature[2] = { 0 };
 
@@ -109,7 +123,9 @@ JETUNITTEST( LOGWRITE, SIGGetSignatureReturnsUniqueSignatures )
 }
 
 
+//  ================================================================
 JETUNITTEST( LGFileHelper, LGGetGenerationTests )
+//  ================================================================
 {
     ERR err;
     LONG lgen;
@@ -178,7 +194,9 @@ JETUNITTEST( LGFileHelper, LGGetGenerationTests )
 }
 
 
+//  ================================================================
 JETUNITTEST( LOG, CheckRedoConditionForDatabaseTests )
+//  ================================================================
 {
     BOOL        fReplayIgnoreLogRecordsBeforeMinRequiredLog;
     DBFILEHDR   dbfilehdr;
@@ -206,6 +224,9 @@ JETUNITTEST( LOG, CheckRedoConditionForDatabaseTests )
     CHECK( fExpected == LOG::FLGRICheckRedoConditionForAttachedDb( fReplayIgnoreLogRecordsBeforeMinRequiredLog, pdbfilehdr, lgpos ) );
 
 #ifndef DEBUG
+    // The following test cases assert in DEBUG and unfortunately, we can't bypass the asserts
+    // using ENABLE_JET_UNIT_TEST because the LOG component gets linked into the unit test
+    // DLL via a lib and the lib is not aware of the ENABLE_JET_UNIT_TEST macro.
 
     fReplayIgnoreLogRecordsBeforeMinRequiredLog = fFalse;
     pdbfilehdr = &dbfilehdr;
@@ -257,7 +278,9 @@ JETUNITTEST( LOG, CheckRedoConditionForDatabaseTests )
     CHECK( fExpected == LOG::FLGRICheckRedoConditionForAttachedDb( fReplayIgnoreLogRecordsBeforeMinRequiredLog, pdbfilehdr, lgpos ) );
 }
 
+//  ================================================================
 JETUNITTEST( LGEN_LOGTIME_MAP, CheckLgenLogtimeMap )
+//  ================================================================
 {
     LGEN_LOGTIME_MAP map;
     LOGTIME tm1, tm2, tm3, tmEmpty, tmOut;
@@ -271,18 +294,22 @@ JETUNITTEST( LGEN_LOGTIME_MAP, CheckLgenLogtimeMap )
 
     LONG lGenStart = 42;
 
+    // Add 1st lgen and try to get it
     CHECK( JET_errSuccess == map.ErrAddLogtimeMapping( lGenStart, &tm1 ) );
     map.LookupLogtimeMapping( lGenStart, &tmOut );
     CHECK( memcmp( &tmOut, &tm1, sizeof(tm1) ) == 0 );
 
+    // Try getting an un-added lgen
     map.LookupLogtimeMapping( lGenStart+1, &tmOut );
     CHECK( memcmp( &tmOut, &tmEmpty, sizeof(tmEmpty) ) == 0 );
 
+    // Add some more lgen's, including a gap
     CHECK( JET_errSuccess == map.ErrAddLogtimeMapping( lGenStart+1, &tm2 ) );
-    UINT wAssertActionSaved = COSLayerPreInit::SetAssertAction( JET_AssertSkipAll );
+    UINT wAssertActionSaved = COSLayerPreInit::SetAssertAction( JET_AssertSkipAll );    // Disable assert for gap
     CHECK( JET_errSuccess == map.ErrAddLogtimeMapping( lGenStart+4, &tm3 ) );
-    (void)COSLayerPreInit::SetAssertAction( wAssertActionSaved );
+    (void)COSLayerPreInit::SetAssertAction( wAssertActionSaved );   // reset
 
+    // Check them all, including the gaps
     map.LookupLogtimeMapping( lGenStart, &tmOut );
     CHECK( memcmp( &tmOut, &tm1, sizeof(tm1) ) == 0 );
     map.LookupLogtimeMapping( lGenStart+1, &tmOut );
@@ -296,17 +323,20 @@ JETUNITTEST( LGEN_LOGTIME_MAP, CheckLgenLogtimeMap )
     map.LookupLogtimeMapping( lGenStart+5, &tmOut );
     CHECK( memcmp( &tmOut, &tmEmpty, sizeof(tmEmpty) ) == 0 );
 
+    // Let us trim the list and check values
     map.TrimLogtimeMapping( lGenStart+3);
     map.LookupLogtimeMapping( lGenStart+4, &tmOut );
     CHECK( memcmp( &tmOut, &tm3, sizeof(tm3) ) == 0 );
     map.LookupLogtimeMapping( lGenStart+5, &tmOut );
     CHECK( memcmp( &tmOut, &tmEmpty, sizeof(tmEmpty) ) == 0 );
 
-    wAssertActionSaved = COSLayerPreInit::SetAssertAction( JET_AssertSkipAll );
+    // Add some more with gaps
+    wAssertActionSaved = COSLayerPreInit::SetAssertAction( JET_AssertSkipAll );    // Disable assert for gap
     CHECK( JET_errSuccess == map.ErrAddLogtimeMapping( lGenStart+6, &tm1 ) );
     CHECK( JET_errSuccess == map.ErrAddLogtimeMapping( lGenStart+9, &tm2 ) );
-    (void)COSLayerPreInit::SetAssertAction( wAssertActionSaved );
+    (void)COSLayerPreInit::SetAssertAction( wAssertActionSaved );   // reset
 
+    // Check them
     map.LookupLogtimeMapping( lGenStart+4, &tmOut );
     CHECK( memcmp( &tmOut, &tm3, sizeof(tm3) ) == 0 );
     map.LookupLogtimeMapping( lGenStart+5, &tmOut );
@@ -322,10 +352,11 @@ JETUNITTEST( LGEN_LOGTIME_MAP, CheckLgenLogtimeMap )
     map.LookupLogtimeMapping( lGenStart+10, &tmOut );
     CHECK( memcmp( &tmOut, &tmEmpty, sizeof(tmEmpty) ) == 0 );
 
+    // Backfill a gap and verify it
     map.TrimLogtimeMapping( lGenStart+4);
-    wAssertActionSaved = COSLayerPreInit::SetAssertAction( JET_AssertSkipAll );
+    wAssertActionSaved = COSLayerPreInit::SetAssertAction( JET_AssertSkipAll );    // Disable assert for gap
     CHECK( JET_errSuccess == map.ErrAddLogtimeMapping( lGenStart+7, &tm3 ) );
-    (void)COSLayerPreInit::SetAssertAction( wAssertActionSaved );
+    (void)COSLayerPreInit::SetAssertAction( wAssertActionSaved );   // reset
     map.LookupLogtimeMapping( lGenStart+7, &tmOut );
     CHECK( memcmp( &tmOut, &tm3, sizeof(tm3) ) == 0 );
 }

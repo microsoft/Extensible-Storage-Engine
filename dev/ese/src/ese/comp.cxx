@@ -6,6 +6,7 @@
 
 #include "PageSizeClean.hxx"
 
+// UNDONE:  Do these need to be localised?
 #define wszCompactStatsFile     L"DFRGINFO.TXT"
 #define szCompactAction         "Defragmentation"
 #define szCMPSTATSTableName     "Table Name"
@@ -25,11 +26,21 @@
 #define szCMPSTATSTableTime     "Copy Table Time"
 
 
+//  ================================================================
 class CMEMLIST
+//  ================================================================
+//
+//  Allocate a chunk of memory, keep allocating more. All memory
+//  can be destroyed.
+//
+//  Memory is stored in a singly-linked list. The first 4 bytes
+//  of memory allocated points to the next chunk
+//
+//-
 {
     private:
         VOID * m_pvHead;
-        ULONG  m_cbAllocated;
+        ULONG  m_cbAllocated;   //  includes list overhead
 
     public:
         CMEMLIST();
@@ -41,11 +52,11 @@ class CMEMLIST
     public:
 #ifdef ENABLE_JET_UNIT_TEST
         static void UnitTest();
-#endif
+#endif  //  ENABLE_JET_UNIT_TEST
 
 #ifdef DEBUG
         VOID AssertValid() const ;
-#endif
+#endif  //  DEBUG
 
     private:
         CMEMLIST( const CMEMLIST& );
@@ -53,25 +64,38 @@ class CMEMLIST
 };
 
 
+//  ================================================================
 CMEMLIST::CMEMLIST() :
     m_pvHead( 0 ),
     m_cbAllocated( 0 )
+//  ================================================================
 {
 }
 
 
+//  ================================================================
 CMEMLIST::~CMEMLIST()
+//  ================================================================
 {
-    Assert( NULL == m_pvHead );
-    Assert( 0 == m_cbAllocated );
+    //  Have people call FreeAllMemory to make the code clearer
+    Assert( NULL == m_pvHead ); //  CMEMLIST::FreeAllMemory() not called?
+    Assert( 0 == m_cbAllocated ); //    CMEMLIST::FreeAllMemory() not called?
     FreeAllMemory();
 }
 
 
+//  ================================================================
 VOID * CMEMLIST::PvAlloc( const ULONG cb )
+//  ================================================================
+//
+//  Get a new chunk of memory, put it at the head of the list
+//
+//-
 {
     const ULONG cbActualAllocate = cb + sizeof( VOID* );
 
+    //  if allocation too near numeric limit then fail as though OOM
+    //
     if ( cbActualAllocate < cb )
     {
         return NULL;
@@ -93,7 +117,9 @@ VOID * CMEMLIST::PvAlloc( const ULONG cb )
 }
 
 
+//  ================================================================
 VOID CMEMLIST::FreeAllMemory()
+//  ================================================================
 {
     VOID * pv = m_pvHead;
     while( pv )
@@ -109,7 +135,9 @@ VOID CMEMLIST::FreeAllMemory()
 
 
 #ifdef DEBUG
+//  ================================================================
 VOID CMEMLIST::AssertValid() const
+//  ================================================================
 {
     const VOID * pv = m_pvHead;
     while( pv )
@@ -127,21 +155,28 @@ VOID CMEMLIST::AssertValid() const
         Assert( NULL != m_pvHead );
     }
 }
-#endif
+#endif  //  DEBUG
 
 
 #ifdef ENABLE_JET_UNIT_TEST
+//  ================================================================
 VOID CMEMLIST::UnitTest()
+//  ================================================================
+//
+//  STATIC function
+//
+//-
 {
     CMEMLIST cmemlist;
 
     ULONG   cbAllocated = 0;
     INT     i;
+    //  void    *pvT = NULL;
 
     for( i = 0; i < 64; ++i )
     {
         VOID * const pv = cmemlist.PvAlloc( i );
-        AssertRTL( NULL != pv );
+        AssertRTL( NULL != pv );    //  Out-of-memory is not acceptable during a unit test :-)
         cbAllocated += i + sizeof( VOID* );
         AssertRTL( cbAllocated == cmemlist.m_cbAllocated );
         ASSERT_VALID( &cmemlist );
@@ -153,11 +188,14 @@ VOID CMEMLIST::UnitTest()
     (VOID)cmemlist.PvAlloc( 1024 * 1024 );
     ASSERT_VALID( &cmemlist );
 
+    //  pvT = cmemlist.PvAlloc( 0x7fffffff );   //  try an allocation that fails
+    //  Assert( NULL == pvT );
+    //  ASSERT_VALID( &cmemlist );
 
     cmemlist.FreeAllMemory();
     ASSERT_VALID( &cmemlist );
 }
-#endif
+#endif  //  ENABLE_JET_UNIT_TEST
 
 struct COMPACTINFO
 {
@@ -167,9 +205,10 @@ struct COMPACTINFO
     COLUMNIDINFO    rgcolumnids[ ccolCMPFixedVar ];
     ULONG           ccolSingleValue;
     STATUSINFO      *pstatus;
-    BYTE            rgbBuf[ 64 * 1024 ];
+    BYTE            rgbBuf[ 64 * 1024 ];        // Buffer for copying LV and other misc. usage
 };
 
+//  Giving compact / offline defrag access to this private function, as it's good testing.
 CPG CpgDBDatabaseMinMin();
 
 INLINE ERR ErrCMPOpenDB(
@@ -181,6 +220,9 @@ INLINE ERR ErrCMPOpenDB(
     ERR         err;
     JET_GRBIT   grbitCreateForDefrag    = JET_bitDbRecoveryOff|JET_bitDbVersioningOff;
 
+    //  open the source DB Exclusive and ReadOnly
+    //  UNDONE: JET_bitDbReadOnly currently unsupported
+    //  by OpenDatabase (must be specified with AttachDb)
     CallR( ErrDBOpenDatabase(
                 pcompactinfo->ppib,
                 wszDatabaseSrc,
@@ -192,6 +234,9 @@ INLINE ERR ErrCMPOpenDB(
         grbitCreateForDefrag |= JET_bitDbShadowingOff;
     }
 
+    //  Create and then open the destination database.
+    //  CONSIDER: Should the destination database be deleted
+    //  if it already exists?
     Assert( NULL != pfsapiDest );
     err = ErrDBCreateDatabase(
                 pcompactinfo->ppib,
@@ -199,14 +244,14 @@ INLINE ERR ErrCMPOpenDB(
                 wszDatabaseDest,
                 &pcompactinfo->ifmpDest,
                 dbidMax,
-                CpgDBDatabaseMinMin(),
-                fFalse,
+                CpgDBDatabaseMinMin(),  //  using min-min minimizes DB size, and provides good testing.
+                fFalse, // fSparseEnabledFile
                 NULL,
                 NULL,
                 0,
                 grbitCreateForDefrag );
 
-    Assert( err <= 0 );
+    Assert( err <= 0 );     // No warnings.
     if ( err < 0 )
     {
         (VOID)ErrDBCloseDatabase(
@@ -238,11 +283,12 @@ LOCAL VOID CMPCopyOneIndex(
     Assert( ptdbNil != ptdb );
     Assert( pidbNil != pidb );
 
+    // Derived indexes are inherited at table creation time.
     Assert( !pfcbIndex->FDerivedIndex() );
 
     Assert( sizeof(JET_INDEXCREATE3_A) == pidxcreate->cbStruct );
 
-    pfcbSrc->EnterDML();
+    pfcbSrc->EnterDML();    // Strictly speaking, not needed because defrag is single-threaded
 
     OSStrCbCopyA( pidxcreate->szIndexName, cbIdxCreateIndexName, ptdb->SzIndexName( pidb->ItagIndexName() ) );
 
@@ -276,17 +322,18 @@ LOCAL VOID CMPCopyOneIndex(
             Assert( cb <= JET_cbNameMost );
 
             Assert( szKey[ichKey+cb] == '\0' );
-            ichKey += cb + 1;
+            ichKey += cb + 1;       // +1 for segment's null terminator.
         }
         else
         {
+            //  must be first column in primary index
             Assert( pidb->FPrimary() );
             Assert( 0 == iidxseg );
             Assert( 0 == ichKey );
         }
     }
 
-    szKey[ichKey++] = '\0';
+    szKey[ichKey++] = '\0'; // double-null termination
 
     Assert( ichKey > 2 );
 
@@ -312,6 +359,8 @@ LOCAL VOID CMPCopyOneIndex(
         pidxcreate->cbVarSegMac = pidb->CbVarSegMac();
     }
 
+    //  API requires that key size be no lower than 255
+    //
     if ( pidxcreate->cbKeyMost < JET_cbKeyMost_OLD )
     {
         if ( pidxcreate->cbVarSegMac == pidxcreate->cbKeyMost )
@@ -356,7 +405,7 @@ LOCAL VOID CMPCopyOneIndex(
     pfcbSrc->LeaveDML();
 
     pfcbIndex->GetAPISpaceHints( pjsph );
-    Assert( pidxcreate->pSpacehints == pjsph );
+    Assert( pidxcreate->pSpacehints == pjsph ); // just to make sure.
 
 }
 
@@ -386,29 +435,42 @@ LOCAL ERR ErrCMPCreateTableColumnIndex(
     ULONG           cbRecordMost = REC::CbRecordMost( pfcbSrc );
     ULONG           cbDefaultRecRemaining = cbRecordMost;
 
+    //  all memory allocated from this will be freed at the end of the function
+    //
     CMEMLIST        cmemlist;
 
-    const INT       cbName          = JET_cbNameMost+1;
-    const INT       cbLangid        = sizeof(LANGID)+2;
-    const INT       cbCbVarSegMac   = sizeof(BYTE)+2;
-    const INT       cbKeySegment    = 1+cbName;
-    const INT       cbKey           = ( JET_ccolKeyMost * cbKeySegment ) + 1;
+    const INT       cbName          = JET_cbNameMost+1; // index/column name plus terminator
+    const INT       cbLangid        = sizeof(LANGID)+2; // langid plus double-null terminator
+    const INT       cbCbVarSegMac   = sizeof(BYTE)+2;   // cbVarSegMac plus double-null terminator
+    const INT       cbKeySegment    = 1+cbName;         // +/- prefix plus name
+    const INT       cbKey           = ( JET_ccolKeyMost * cbKeySegment ) + 1;   // plus 1 for double-null terminator
     const INT       cbKeyExtended   = cbKey + cbLangid + cbCbVarSegMac;
 
     Assert( ptablecreate->cCreated == 0 );
 
     
+    // Allocate a pool of memory for:
+    //      1) list of source table columnids
+    //      2) the JET_COLUMNCREATE_A structures
+    //      3) buffer for column names
+    //      4) buffer for default values
+    //      5) the JET_INDEXCREATE structures
+    //      6) buffer for index names
+    //      7) buffer for index keys.
 
     cColumns = pcolumnList->cRecord;
 
+    //  start by allocating space for the source table columnids, adjusted for alignment
     cbColumnids = cColumns * sizeof(JET_COLUMNID);
     cbColumnids = ( ( cbColumnids + sizeof(SIZE_T) - 1 ) / sizeof(SIZE_T) ) * sizeof(SIZE_T);
 
     cbAllocate = cbColumnids +
                     ( cColumns *
-                        ( sizeof(JET_COLUMNCREATE_A) +
-                        cbName ) );
+                        ( sizeof(JET_COLUMNCREATE_A) +  // JET_COLUMNCREATE_A structures
+                        cbName ) );                     // column names
 
+    // Derived indexes will get inherited from template -- don't count
+    // them as ones that need to be created.
     Assert( ( pfcbSrc->FSequentialIndex() && pfcbSrc->Pidb() == pidbNil )
         || ( !pfcbSrc->FSequentialIndex() && pfcbSrc->Pidb() != pidbNil ) );
     cIndexesToCreate = ( pfcbSrc->Pidb() != pidbNil && !pfcbSrc->FDerivedIndex() ? 1 : 0 );
@@ -426,29 +488,46 @@ LOCAL ERR ErrCMPCreateTableColumnIndex(
             cIndexesToCreate++;
     }
 
+    //  ensure primary extent is large enough to at least accommodate the primary index
+    //  and each secondary index
     ptablecreate->ulPages = max( cSecondaryIndexes+1, ptablecreate->ulPages );
 
     cbAllocate +=
         cIndexesToCreate *
             (
-            sizeof( JET_INDEXCREATE3_A )
+            sizeof( JET_INDEXCREATE3_A )    // JET_INDEXCREATE3
             + sizeof( JET_SPACEHINTS )
-            + cbName
-            + cbKeyExtended
+            + cbName                    // index name
+            + cbKeyExtended             // index key, plus langid and cbVarSegmac
             + sizeof( JET_UNICODEINDEX2 )
             + sizeof( JET_TUPLELIMITS )
             );
 
     cbAllocate += cConditionalColumns * ( sizeof( JET_CONDITIONALCOLUMN_A ) + cbKeySegment );
 
-    cbAllocate += cbDefaultRecRemaining;
+    cbAllocate += cbDefaultRecRemaining;        // all default values must fit in an intrinsic record
 
     const ULONG cbLocaleName = sizeof( WCHAR ) * NORM_LOCALE_NAME_MAX_LENGTH;
 
     cbAllocate += ( cIndexesToCreate * cbLocaleName );
 
+    // WARNING: To ensure that columnids and JET_COLUMN/INDEXCREATE
+    // structs are 4-byte aligned, arrange everything in the following
+    // order:
+    //      1) list of source table columnids
+    //      2) JET_COLUMNCREATE_A structures
+    //      3) JET_INDEXCREATE structures
+    //      4) JET_UNICODEINDEX structures
+    //      5) JET_TUPLELIMIT structures
+    //      6) JET_CONDITIONALCOLUMN structures
+    //      7) buffer for column names
+    //      8) buffer for index names
+    //      9) buffer for index keys
+    //      10) buffer for default values
+    //      11) buffer for locale names
 
 
+    // Can we use the buffer hanging off pcompactinfo?
     JET_COLUMNID    *pcolumnidSrc;
     if ( cbAllocate <= sizeof( pcompactinfo->rgbBuf ) )
     {
@@ -464,49 +543,60 @@ LOCAL ERR ErrCMPCreateTableColumnIndex(
     BYTE            * const pbMax = (BYTE *)rgcolumnidSrc + cbAllocate;
     memset( (BYTE *)pcolumnidSrc, 0, cbAllocate );
 
+    // JET_COLUMNCREATE_A structures follow the tagged columnid map.
     JET_COLUMNCREATE_A *pcolcreateCurr      = (JET_COLUMNCREATE_A *)( (BYTE *)rgcolumnidSrc + cbColumnids );
     JET_COLUMNCREATE_A * const rgcolcreate  = pcolcreateCurr;
     Assert( (BYTE *)rgcolcreate < pbMax );
 
+    // JET_INDEXCREATE structures follow the JET_COLUMNCREATE_A structures
     JET_INDEXCREATE3_A  *pidxcreateCurr = (JET_INDEXCREATE3_A *)( rgcolcreate + cColumns );
     JET_INDEXCREATE3_A  * const rgidxcreate = pidxcreateCurr;
     Assert( (BYTE *)rgidxcreate < pbMax );
 
+    // JET_SPACEHINTS structures follow the JET_INDEXCREATE structures
     JET_SPACEHINTS * psphintsCurr = (JET_SPACEHINTS *)( rgidxcreate + cIndexesToCreate );
     JET_SPACEHINTS * const rgsphints = psphintsCurr;
     Assert( (BYTE *)psphintsCurr < pbMax );
 
+    //  JET_UNICODEINDEX structures follow the JET_SPACEHINTS structures
     JET_UNICODEINDEX2   *pidxunicodeCurr        = (JET_UNICODEINDEX2 *)( rgsphints + cIndexesToCreate );
     JET_UNICODEINDEX2   * const rgidxunicode    = pidxunicodeCurr;
     Assert( (BYTE *)rgidxunicode < pbMax );
 
+    //  JET_TUPLELIMITS structures follow the JET_UNICODEINDEX structures
     JET_TUPLELIMITS     *ptuplelimitsCurr       = (JET_TUPLELIMITS *)( rgidxunicode + cIndexesToCreate );
     JET_TUPLELIMITS     * const rgtuplelimits   = ptuplelimitsCurr;
     Assert( (BYTE *)rgtuplelimits < pbMax );
 
+    // JET_CONDITIONALCOLUMN structures follow the JET_TUPLELIMITS structures
     JET_CONDITIONALCOLUMN_A *pconditionalcolumnCurr     = (JET_CONDITIONALCOLUMN_A *)( rgtuplelimits + cIndexesToCreate  );
     JET_CONDITIONALCOLUMN_A * const rgconditionalcolumn = pconditionalcolumnCurr;
     Assert( (BYTE *)rgconditionalcolumn < pbMax );
 
+    // Column names follow the JET_CONDITIONALCOLUMN structures.
     CHAR    *szCurrColumn = (CHAR *)( rgconditionalcolumn + cConditionalColumns );
     CHAR    * const rgszColumns = szCurrColumn;
     Assert( (BYTE *)rgszColumns < pbMax );
 
+    // Index names follow the column names.
     CHAR    *szCurrIndex = (CHAR *)( rgszColumns + ( cColumns * cbName ) );
     CHAR    * const rgszIndexes = szCurrIndex;
     Assert( (BYTE *)rgszIndexes < pbMax );
     ULONG cbIndexNamesLeft = cIndexesToCreate * cbName;
 
+    // Index/Conditional Column keys follow the index names.
     CHAR    *szCurrKey = ( CHAR *)( rgszIndexes + ( cbIndexNamesLeft ) );
     CHAR    * const rgszKeys = szCurrKey;
     Assert( (BYTE *)rgszKeys < pbMax );
     ULONG cbKeysLeft = ( cIndexesToCreate * cbKeyExtended) + ( cConditionalColumns * cbKeySegment );
 
+    // Default values follow the keys.
     BYTE    *pbCurrDefault = (BYTE *)( rgszKeys + cbKeysLeft );
     BYTE    * const rgbDefaultValues = pbCurrDefault;
     Assert( rgbDefaultValues < pbMax );
     ULONG cbDefaultValuesLeft = cbDefaultRecRemaining;
 
+    // Locale Names follow the default values.
     WCHAR   *wszCurLocaleName = ( WCHAR *)( rgbDefaultValues + cbDefaultValuesLeft );
     WCHAR   * const rgwszLocaleName = wszCurLocaleName;
     Assert( (BYTE *)rgwszLocaleName <= pbMax );
@@ -520,14 +610,17 @@ LOCAL ERR ErrCMPCreateTableColumnIndex(
                 JET_MoveFirst,
                 NO_GRBIT );
 
-    
+    /* loop though all the columns in the table for the src tbl and
+    /* copy the information in the destination database
+    /**/
     cColumns = 0;
     while ( err >= 0 )
     {
         memset( pcolcreateCurr, 0, sizeof( JET_COLUMNCREATE_A ) );
         pcolcreateCurr->cbStruct = sizeof(JET_COLUMNCREATE_A);
 
-        
+        /* retrieve info from table and create all the columns
+        /**/
         Assert( (BYTE *)szCurrColumn + JET_cbNameMost + 1 <= (BYTE *)rgszIndexes );
         Call( ErrDispRetrieveColumn(
                     reinterpret_cast<JET_SESID>( ppib ),
@@ -547,6 +640,7 @@ LOCAL ERR ErrCMPCreateTableColumnIndex(
         Assert( (BYTE *)szCurrColumn <= (BYTE *)rgszIndexes );
 
 #ifdef DEBUG
+        // Assert Presentation order no longer supported.
         ULONG   ulPOrder;
         Call( ErrDispRetrieveColumn(
                     reinterpret_cast<JET_SESID>( ppib ),
@@ -605,11 +699,13 @@ LOCAL ERR ErrCMPCreateTableColumnIndex(
                     NULL ) );
         Assert( cbActual == sizeof( USHORT ) );
 
-        
+        /*  retrieve default value.
+        /**/
         if( pcolcreateCurr->grbit & JET_bitColumnUserDefinedDefault )
         {
             JET_USERDEFINEDDEFAULT_A * pudd = NULL;
 
+            //  don't want to pass in NULL
             BYTE b;
             Call( ErrDispRetrieveColumn(
                         reinterpret_cast<JET_SESID>( ppib ),
@@ -636,6 +732,14 @@ LOCAL ERR ErrCMPCreateTableColumnIndex(
             Assert( JET_wrnColumnNull != err );
             Assert( pcolcreateCurr->cbDefault > 0 );
 
+            //  All of the information about a user-defined default is in the default buffer
+            //  ErrINFOGetTableColumnInfo lays it out like this:
+            //
+            //  JET_USERDEFINEDDEFAULT | szCallback | pbUserData | szDependantColumns
+            //
+            //  The pointers in the JET_USERDEFINEDDEFAULT are no longer usable so they have
+            //  to be fixed up. The cbDefault has to be reduced to sizeof( JET_USERDEFINEDDEFAULT )
+            //  because that is what the JET APIs are expecting
 
             pudd = (JET_USERDEFINEDDEFAULT_A *)pcolcreateCurr->pvDefault;
             pudd->szCallback = ((CHAR*)(pcolcreateCurr->pvDefault)) + sizeof( JET_USERDEFINEDDEFAULT_A );
@@ -645,12 +749,13 @@ LOCAL ERR ErrCMPCreateTableColumnIndex(
                 pudd->szDependantColumns = (CHAR *)pudd->pbUserData + pudd->cbUserData;
             }
 
+            //  in order to create the column the pvDefault should point to the JET_USERDEFINEDDEFAULT structure
             Assert( pcolcreateCurr->cbDefault > sizeof( JET_USERDEFINEDDEFAULT_A ) );
             pcolcreateCurr->cbDefault = sizeof( JET_USERDEFINEDDEFAULT_A );
         }
         else
         {
-            Assert( cbDefaultRecRemaining > 0 );
+            Assert( cbDefaultRecRemaining > 0 );        // can never reach cbDefaultRecRemaining, because of record overhead
             Assert( pbCurrDefault + cbDefaultRecRemaining == (BYTE *)rgwszLocaleName );
             Call( ErrDispRetrieveColumn(
                         reinterpret_cast<JET_SESID>( ppib ),
@@ -662,15 +767,16 @@ LOCAL ERR ErrCMPCreateTableColumnIndex(
                         NO_GRBIT,
                         NULL ) );
             Assert( JET_wrnBufferTruncated != err );
-            Assert( pcolcreateCurr->cbDefault < cbDefaultRecRemaining );
+            Assert( pcolcreateCurr->cbDefault < cbDefaultRecRemaining );    // can never reach cbDefaultRecRemaining, because of record overhead
             pcolcreateCurr->pvDefault = pbCurrDefault;
             pbCurrDefault += pcolcreateCurr->cbDefault;
             cbDefaultRecRemaining -= pcolcreateCurr->cbDefault;
-            Assert( cbDefaultRecRemaining > 0 );
+            Assert( cbDefaultRecRemaining > 0 );        // can never reach cbDefaultRecRemaining, because of record overhead
             Assert( pbCurrDefault + cbDefaultRecRemaining == (BYTE *)rgwszLocaleName );
         }
 
-        
+        // Save the source columnid.
+        /* CONSIDER: Should the column id be checked? */
         Call( ErrDispRetrieveColumn(
                     reinterpret_cast<JET_SESID>( ppib ),
                     pcolumnList->tableid,
@@ -719,6 +825,7 @@ LOCAL ERR ErrCMPCreateTableColumnIndex(
     {
         if ( pfcbIndex->Pidb() != pidbNil )
         {
+            // Derived indexes will get inherited from template.
             if ( !pfcbIndex->FDerivedIndex() )
             {
                 Assert( (BYTE *)pidxcreateCurr < (BYTE *)rgsphints );
@@ -744,7 +851,7 @@ LOCAL ERR ErrCMPCreateTableColumnIndex(
                     pfcbIndex,
                     pidxcreateCurr,
                     min( cbName, cbIndexNamesLeft ),
-                    cbKeysLeft,
+                    cbKeysLeft, // better is min() something, but can't work that out
                     ptuplelimitsCurr,
                     pconditionalcolumnCurr,
                     psphintsCurr );
@@ -788,6 +895,7 @@ LOCAL ERR ErrCMPCreateTableColumnIndex(
         }
         else
         {
+            // If IDB is null, must be sequential index.
             Assert( pfcbIndex == pfcbSrc );
             Assert( pfcbIndex->FSequentialIndex() );
         }
@@ -808,6 +916,8 @@ LOCAL ERR ErrCMPCreateTableColumnIndex(
     Assert( ptablecreate->cCreated == 1 + cColumns + cIndexesToCreate );
 
 
+    // If there's at least one tagged column, create an array for the
+    // tagged columnid map.
     if ( cTagged > 0 )
     {
         Assert( FTaggedFid( fidTaggedHighest ) );
@@ -817,6 +927,7 @@ LOCAL ERR ErrCMPCreateTableColumnIndex(
     }
 
 
+    // Update columnid maps.
     for ( pcolcreateCurr = rgcolcreate, pcolumnidSrc = rgcolumnidSrc, cColumns = 0;
         cColumns < pcolumnList->cRecord;
         pcolcreateCurr++, pcolumnidSrc++, cColumns++ )
@@ -847,14 +958,16 @@ LOCAL ERR ErrCMPCreateTableColumnIndex(
         }
         else
         {
-            
+            /*  else add the columnids to the columnid array
+            /**/
             columnidInfo[ccolSingleValue].columnidDest = pcolcreateCurr->columnid;
             columnidInfo[ccolSingleValue].columnidSrc  = *pcolumnidSrc;
             ccolSingleValue++;
-        }
+        }   // if ( columndef.grbit & JET_bitColumnTagged )
     }
 
-    
+    /*  set count of fixed and variable columns to copy
+    /**/
     pcompactinfo->ccolSingleValue = ccolSingleValue;
 
     if ( err == JET_errNoCurrentRecord )
@@ -874,6 +987,7 @@ HandleError:
 
     cmemlist.FreeAllMemory();
 
+    // Set return value.
     *pmpcolumnidcolumnidTagged = mpcolumnidcolumnidTagged;
 
     return err;
@@ -904,12 +1018,12 @@ LOCAL ERR ErrCMPCopyTable(
     JET_TABLECREATE5_A  tablecreate = {
                         sizeof(JET_TABLECREATE5_A),
                         (CHAR *)szObjectName,
-                        NULL,
+                        NULL,                   // Template table
                         ulCMPDefaultPages,
                         ulCMPDefaultDensity,
-                        NULL, 0,
-                        NULL, 0,
-                        NULL, 0,
+                        NULL, 0,                // Columns
+                        NULL, 0,                // Indexes
+                        NULL, 0,                // Callbacks
                         NO_GRBIT,
                         NULL,
                         NULL,
@@ -947,11 +1061,15 @@ LOCAL ERR ErrCMPCopyTable(
         goto HandleError;
     }
 
+    // On error, just use the default values of rgulAllocInfo.
     tablecreate.ulPages = rgulAllocInfo[0];
 
+    // Set the LV chunk size to match original table
     tablecreate.cbLVChunkMax = pfucbSrc->u.pfcb->Ptdb()->CbLVChunkMost();
 
-    
+    /*  if a table create the columns in the Dest Db the same as in
+    /*  the src Db.
+    /**/
     Assert( !( ulFlags & JET_bitObjectSystem ) );
     if ( ulFlags & JET_bitObjectTableTemplate )
     {
@@ -973,6 +1091,7 @@ LOCAL ERR ErrCMPCopyTable(
         {
             Alloc( szTemplateTableName = reinterpret_cast<CHAR *>( PvOSMemoryHeapAlloc( JET_cbNameMost + 1 ) ) );
 
+            // extract name.
             Call( ErrIsamGetTableInfo(
                         reinterpret_cast<JET_SESID>( ppib ),
                         reinterpret_cast<JET_TABLEID>( pfucbSrc ),
@@ -990,7 +1109,8 @@ LOCAL ERR ErrCMPCopyTable(
     Assert( pfcbNil != pfcbSrc );
     Assert( pfcbSrc->FTypeTable() );
 
-    
+    /*  get a table with the column information for the query in it
+    /**/
     Call( ErrIsamGetTableColumnInfo(
                 reinterpret_cast<JET_SESID>( ppib ),
                 reinterpret_cast<JET_TABLEID>( pfucbSrc ),
@@ -1015,10 +1135,12 @@ LOCAL ERR ErrCMPCopyTable(
                 pcompactinfo->rgcolumnids,
                 &mpcolumnidcolumnidTagged );
 
+    // Must use dispatch layer for temp/sort table.
     CallS( ErrDispCloseTable(
                     reinterpret_cast<JET_SESID>( ppib ),
                     columnList.tableid ) );
 
+    // Act on error code returned from CreateTableColumnIndex().
     Call( err );
 
     pfucbDest = reinterpret_cast<FUCB *>( tablecreate.tableid );
@@ -1027,11 +1149,13 @@ LOCAL ERR ErrCMPCopyTable(
 
     if ( pstatus )
     {
-        ULONG   rgcpgExtent[2];
+        ULONG   rgcpgExtent[2];     // OwnExt and AvailExt
 
         Assert( pstatus->pfnStatus );
         Assert( pstatus->snt == JET_sntProgress );
 
+        // tablecreate.cIndexes is only a count of the indexes that were created.  We
+        // also need the number of indexes inherited.
         FCB *pfcbIndex = pfucbDest->u.pfcb;
         Assert( pfcbIndex->FPrimaryIndex() );
         Assert( ( pfcbIndex->FSequentialIndex() && pfcbIndex->Pidb() == pidbNil )
@@ -1062,6 +1186,8 @@ LOCAL ERR ErrCMPCopyTable(
         {
             if ( g_fRepair )
             {
+                //  if failure in space query then default to
+                //  one page owned and no pages available.
                 fCorruption = fTrue;
                 rgcpgExtent[0] = 1;
                 rgcpgExtent[1] = 0;
@@ -1072,8 +1198,11 @@ LOCAL ERR ErrCMPCopyTable(
             }
         }
 
+        // AvailExt always less than OwnExt.
         Assert( rgcpgExtent[1] < rgcpgExtent[0] );
 
+        // cunitProjected is the projected total pages completed once
+        // this table has been copied.
         pstatus->cunitProjected = pstatus->cunitDone + rgcpgExtent[0];
         if ( pstatus->cunitProjected > pstatus->cunitTotal )
         {
@@ -1090,6 +1219,7 @@ LOCAL ERR ErrCMPCopyTable(
         pstatus->cLeafPagesTraversed = 0;
         pstatus->cLVPagesTraversed = 0;
 
+        // If corrupt, suppress progression of meter.
         pstatus->cunitPerProgression =
             ( fCorruption ? 0 : 1 + ( rgcpgExtent[1] / cpgUsed ) );
         pstatus->cTablePagesOwned = rgcpgExtent[0];
@@ -1142,6 +1272,10 @@ LOCAL ERR ErrCMPCopyTable(
                     JET_TblInfoSpaceOwned ) );
     }
 
+    //  set DB extension size to 1% of the current size of the table, up to
+    //  a limit (I somewhat arbitrarily chose the limit to be a number of pages
+    //  equal to the page size)
+    //
     Call( Param( pinst, JET_paramDbExtensionSize )->Set( pinst, ppibNil, max( cpgDbExtensionSizeSave, (CPG)min( g_rgfmp[ pcompactinfo->ifmpSrc ].CbPage(), cpgTableSrc / 100 ) ), NULL ) );
 
     Call( ErrSORTCopyRecords(
@@ -1162,14 +1296,25 @@ LOCAL ERR ErrCMPCopyTable(
     {
         Assert( pfucbDest->u.pfcb->Ptdb()->FidAutoincrement() );
 
-        QWORD qwAutoIncExtHdrMax2 = 0;
+        //  Update the auto-inc max of the table, so that new records will be guranteed to not
+        //  conflict (duplicate key exception) with any previous record.
+        //
+        QWORD qwAutoIncExtHdrMax2 = 0; // pulled from destination after all records are moved.
         Call( ErrCMPRECGetAutoInc( pfucbDest, &qwAutoIncExtHdrMax2 ) );
-        CallSx( err, JET_wrnColumnNull );
+        CallSx( err, JET_wrnColumnNull ); // null indicates legacy (non-external header) auto-inc storage.
         if ( err == JET_errSuccess )
         {
+            //  By maxing in the source's qwAutoIncExtHdrMax we maintain the (new w/ External Header 
+            //  based Auto-Inc) contract that any inc value we gave out, we do not re-give out.
+            //  This contract is much nicer to clients who maintain replication systems, and often 
+            //  get confused if they delete or rollback (and restart) the last auto-inc values and 
+            //  then suddenly ESE starts re-using previously given out values.
             QWORD qwAutoIncSet = max( qwAutoIncRecMax, qwAutoIncExtHdrMax );
-            Expected( qwAutoIncExtHdrMax == 0 || qwAutoIncExtHdrMax2 <= qwAutoIncExtHdrMax + g_ulAutoIncBatchSize );
+            //  Note even this could be larger because of the batches of AutoIncs we request, depending
+            //  upon how many values we migrated ... 
+            Expected( qwAutoIncExtHdrMax == 0 || qwAutoIncExtHdrMax2 <= qwAutoIncExtHdrMax + g_ulAutoIncBatchSize );  // this is just in case we have messed up somehow ... should not happen, but handled.
             Expected( qwAutoIncExtHdrMax2 <= qwAutoIncRecMax + g_ulAutoIncBatchSize );
+            //  ... but to be safe, we'll max it in as well.
             qwAutoIncSet = max( qwAutoIncSet, qwAutoIncExtHdrMax2 );
 
 
@@ -1179,6 +1324,7 @@ LOCAL ERR ErrCMPCopyTable(
 
     if ( err >= 0 )
     {
+        //  copy the callbacks from one database to another
         err = ErrCATCopyCallbacks(
                 ppib,
                 pcompactinfo->ifmpSrc,
@@ -1208,6 +1354,7 @@ LOCAL ERR ErrCMPCopyTable(
 
         if ( err >= 0 || g_fRepair )
         {
+            // Top off progress meter for this table.
             Assert( pstatus->cunitDone <= pstatus->cunitProjected );
             pstatus->cunitDone = pstatus->cunitProjected;
             ERR errT = ErrCMPReportProgress( pstatus );
@@ -1278,7 +1425,7 @@ LOCAL ERR ErrCMPCopySelectedTables(
     {
         Assert( JET_errRecordNotFound != err );
         if ( JET_errNoCurrentRecord == err )
-            err = ErrERRCheck( JET_errDatabaseCorrupted );
+            err = ErrERRCheck( JET_errDatabaseCorrupted );  // MSysObjects shouldn't be empty.
 
         return err;
     }
@@ -1308,12 +1455,16 @@ LOCAL ERR ErrCMPCopySelectedTables(
         {
             if ( !fCopyDerivedTablesOnly )
             {
+                //  Must defer derived tables to a second pass
+                //  (in order to ensure that the base tables are
+                //  created first).
                 *pfEncounteredDerivedTable = fTrue;
                 fProceedWithCopy = fFalse;
             }
         }
         else if ( fCopyDerivedTablesOnly )
         {
+            // Only want derived tables.  If this isn't one, skip it.
             fProceedWithCopy = fFalse;
         }
 
@@ -1322,6 +1473,7 @@ LOCAL ERR ErrCMPCopySelectedTables(
         {
 
 #ifdef DEBUG
+            //  verify this is a column
             Assert( FFixedFid( fidMSO_Type ) );
             Call( ErrRECIRetrieveFixedColumn(
                         pfcbNil,
@@ -1364,7 +1516,7 @@ LOCAL ERR ErrCMPCopySelectedTables(
                 && !FOLDSystemTable( szTableName )
                 && !FSCANSystemTable( szTableName )
                 && !FCATObjidsTable( szTableName )
-                && !FCATLocalesTable( szTableName )
+                && !FCATLocalesTable( szTableName ) // rebuilt by catalog updates
                 && !MSysDBM::FIsSystemTable( szTableName ) )
             {
                 err = ErrCMPCopyTable( pcompactinfo, szTableName, ulFlags );
@@ -1403,6 +1555,7 @@ LOCAL ERR ErrCMPCopySelectedTables(
 HandleError:
     if ( fLatched )
     {
+        //  if still latched at this point, an error must have occurred
         Assert( err < 0 );
         CallS( ErrDIRRelease( pfucbCatalog ) );
     }
@@ -1431,7 +1584,7 @@ INLINE ERR ErrCMPCopyTables( COMPACTINFO *pcompactinfo )
                 fFalse,
                 &fDerivedTables ) );
 
-    if ( fDerivedTables )
+    if ( fDerivedTables )       // Process derived tables on second pass.
     {
         Call( ErrCMPCopySelectedTables(
                     pcompactinfo,
@@ -1503,6 +1656,7 @@ ERR ISAMAPI ErrIsamCompact(
 
     if ( pconvert )
     {
+        //  convert was ripped out in ESE98
         return ErrERRCheck( JET_errFeatureNotAvailable );
     }
 
@@ -1519,7 +1673,7 @@ ERR ISAMAPI ErrIsamCompact(
     if ( NULL != pfnStatus )
     {
         pcompactinfo->pstatus = &statusinfo;
-        memset( pcompactinfo->pstatus, 0, sizeof(STATUSINFO) );
+        memset( pcompactinfo->pstatus, 0, sizeof(STATUSINFO) ); //  just in case = { 0 } doesn't work
 
         pcompactinfo->pstatus->sesid = sesid;
         pcompactinfo->pstatus->pfnStatus = pfnStatus;
@@ -1538,7 +1692,7 @@ ERR ISAMAPI ErrIsamCompact(
         pcompactinfo->pstatus = NULL;
     }
 
-    
+    /* Open and create the databases */
     Call( ErrCMPOpenDB( pcompactinfo, wszDatabaseSrc, pfsapiDest, wszDatabaseDest ) );
     if ( grbit & JET_bitCompactPreserveOriginal )
     {
@@ -1554,7 +1708,7 @@ ERR ISAMAPI ErrIsamCompact(
     {
         Assert( pcompactinfo->pstatus );
 
-        
+        /* Init status meter.  We'll be tracking status by pages processed, */
         err = ErrIsamGetDatabaseInfo(
                     sesid,
                     (JET_DBID) pcompactinfo->ifmpSrc,
@@ -1589,12 +1743,17 @@ ERR ISAMAPI ErrIsamCompact(
             goto HandleError;
         }
 
+        // Don't count unused space in the database;
         Assert( pcompactinfo->pstatus->cDBPagesOwned >= (ULONG)CpgDBDatabaseMinMin() );
         Assert( pcompactinfo->pstatus->cDBPagesAvail < pcompactinfo->pstatus->cDBPagesOwned );
 
+        // Shelved space is not really owned space, but we'll add it to the expected total because
+        // there are asserts and other checks that may fail if we are compacting a database with shelved
+        // space from table-level leaks.
         pcompactinfo->pstatus->cunitTotal =
             pcompactinfo->pstatus->cDBPagesOwned - pcompactinfo->pstatus->cDBPagesAvail + cDBPagesShelved;
 
+        // Approximate the number of pages used by MSysObjects
         pcompactinfo->pstatus->cunitDone = cpgMSOInitial;
         Assert( pcompactinfo->pstatus->cunitDone <= pcompactinfo->pstatus->cunitTotal );
         pcompactinfo->pstatus->cunitProjected = pcompactinfo->pstatus->cunitTotal;
@@ -1640,9 +1799,10 @@ ERR ISAMAPI ErrIsamCompact(
         }
     }
 
+    // Temp is needed here: ErrCMPCopyTables->ErrCMPCopySelectedTables->ErrCMPCopyTable->ErrSORTCopyRecords
     Call( ErrPIBOpenTempDatabase ( pcompactinfo->ppib ) );
     
-    
+    /* Create and copy all non-container objects */
 
     Call( ErrCMPCopyTables( pcompactinfo ) );
 
@@ -1675,7 +1835,9 @@ HandleError:
         if ( errT < JET_errSuccess && err >= JET_errSuccess )
             err = errT;
 
+        //  we can't lock both database headers at the same time so we copy the information out of the old before setting the new
 
+        //  update destination header to preserve repair stats for the database
         if ( err >= JET_errSuccess )
         {
             const ULONG ulRepairCount = g_rgfmp[ pcompactinfo->ifmpSrc ].Pdbfilehdr()->le_ulRepairCount;
@@ -1685,6 +1847,7 @@ HandleError:
             g_rgfmp[ pcompactinfo->ifmpDest ].PdbfilehdrUpdateable()->logtimeRepair       = logtimeRepair;
         }
 
+        //  update destination header to preserve the incremental reseed stats for the database
         if ( err >= JET_errSuccess )
         {
             const ULONG ulIncrementalReseedCount = g_rgfmp[ pcompactinfo->ifmpSrc ].Pdbfilehdr()->le_ulIncrementalReseedCount;
@@ -1705,7 +1868,7 @@ HandleError:
             err = errT;
     }
 
-    if ( NULL != pfnStatus )
+    if ( NULL != pfnStatus )        // top off status meter
     {
         Assert( pcompactinfo->pstatus );
 
@@ -1732,6 +1895,7 @@ ERR ErrIsamTrimDatabase(
 
     PIB* ppib = reinterpret_cast<PIB *>( sesid );
 
+    // Open and create the databases.
     Call( ErrDBOpenDatabase( ppib, wszDatabaseName, &ifmp, JET_bitNil ) );
     fDatabaseOpened = fTrue;
 

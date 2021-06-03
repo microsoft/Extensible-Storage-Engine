@@ -5,7 +5,7 @@
 
 #ifndef ENABLE_JET_UNIT_TEST
 #error This file should only be compiled with the unit tests!
-#endif
+#endif // ENABLE_JET_UNIT_TEST
 
 
 JETUNITTEST( CIsamSequenceDiagLog, Basic )
@@ -42,7 +42,7 @@ JETUNITTEST( CIsamSequenceDiagLog, CanTermSeqTwice )
     wprintf( L"wszT = %ws\n", wszT );
 
     isdl.TermSequence();
-    isdl.TermSequence();
+    isdl.TermSequence();    // Test - should not assert or anything bad.
 }
 
 JETUNITTEST( CIsamSequenceDiagLog, SingleLogSeqStats )

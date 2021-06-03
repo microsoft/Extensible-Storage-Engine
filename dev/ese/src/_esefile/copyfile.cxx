@@ -3,26 +3,38 @@
 
 #include "esefile.hxx"
 
+//  Copy a file
+//  
 
+//  write in 1MB chunks for maximum performance
 
 static const INT cbWrite        = 1024 * 1024;
 
+//  read in 64K chunks for maximum performance
 
 static const INT cbRead         = 64 * 1024;
 
+//  use this many copy blocks
 
 static const INT cblocks        = 16;
 
+// We are using the OS page granularity using the assumption that it will be a multiple of
+// the sector size (usually 512, but as of 2010 4k sector are becoming more common).
 
 static const INT cbPageAlignment        = 4096;
 
+//  ================================================================
 struct COPYFILECONTROL
+//  ================================================================
 {
+    // Configuration variables:
     BOOL            fIgnoreDiskErrors;
 
+    // State:
     QWORD           ibOffset;
     QWORD           cbSize;
 
+    // Statistics:
     QWORD           cbTotalRead;
     QWORD           cbTotalWritten;
     LONG            cReadErrors;
@@ -45,6 +57,7 @@ VOID PrintCopyFileStatistics( COPYFILECONTROL * const pcopyfilecontrol )
                 pcopyfilecontrol->cbTotalWritten,
                 pcopyfilecontrol->cbTotalWritten / 1024 / 1024 );
 
+    // Nothing to print if we bailed out on the first error each time!
     if ( pcopyfilecontrol->fIgnoreDiskErrors )
     {
         wprintf(    L"\tNumber of read errors           = %d\r\n",
@@ -62,7 +75,9 @@ VOID PrintCopyFileStatistics( COPYFILECONTROL * const pcopyfilecontrol )
     }
 }
 
+//  ================================================================
 class CCopyContext
+//  ================================================================
 {
     public:
 
@@ -97,10 +112,12 @@ class CCopyContext
 };
 
 
+//  ================================================================
 static void CollectStatistics(
     CCopyContext * const    pcopycontext,
     const ERR               err,
     const BOOL              fWrite )
+//  ================================================================
 {
     COPYFILECONTROL* const  pcopyfilecontrol    = pcopycontext->pcopyfilecontrol;
 
@@ -206,6 +223,7 @@ static VOID ReadComplete(   ERR                     errIO,
     ERR                 err = JET_errSuccess;
     TraceContextScope   tcScope( iorpDirectAccessUtil );
 
+    //  if this read contains the end of file, ignore that because we will set the proper EOF later
 
     if ( errIO == JET_errFileIOBeyondEOF )
     {
@@ -218,6 +236,7 @@ static VOID ReadComplete(   ERR                     errIO,
         Call( errIO );
     }
 
+    //  if this read failed and we are ignoring errors then do not write the buffer.  move to the next read
 
     if ( errIO >= JET_errSuccess )
     {
@@ -273,10 +292,12 @@ HandleError:
 }
 
 
+//  ================================================================
 JET_ERR ErrCopyFile(
     const wchar_t * const szFileSrc,
     const wchar_t * const szFileDest,
     BOOL fIgnoreDiskErrors )
+//  ================================================================
 {
     ERR                 err             = JET_errSuccess;
 
@@ -294,6 +315,7 @@ JET_ERR ErrCopyFile(
 
     copyfilecontrol.fIgnoreDiskErrors = fIgnoreDiskErrors;
 
+    //  initialize that status bar
 
     wprintf( L"     Source File: %.64ls", ( iswascii( szFileSrc[0] ) ? szFileSrc : L"<unprintable>" ) );
     wprintf( L"\r\n" );
@@ -301,6 +323,7 @@ JET_ERR ErrCopyFile(
     wprintf( L"\r\n\r\n" );
     InitStatus( L"Copy Progress (% complete)" );
 
+    //  create a file system with our desired IO characteristics
 
     class CFileSystemConfiguration : public CDefaultFileSystemConfiguration
     {
@@ -317,18 +340,23 @@ JET_ERR ErrCopyFile(
 
     Call( ErrOSFSCreate( &fsconfig, &pfsapi ) );
 
+    //  open the source file
 
     Call( pfsapi->ErrFileOpen( szFileSrc, IFileAPI::fmfReadOnlyPermissive, &pfapiSrc ) );
 
+    //  get the size of the source file
 
     Call( pfapiSrc->ErrSize( &copyfilecontrol.cbSize, IFileAPI::filesizeLogical ) );
 
+    //  create the destination file
 
     Call( pfsapi->ErrFileCreate( szFileDest, IFileAPI::fmfNone, &pfapiDest ) );
 
+    //  set the size of the destination file to the size of the source file rounded up.
 
     Call( pfapiDest->ErrSetSize( *tcScope, roundup( copyfilecontrol.cbSize, cbPageAlignment ), fFalse, qosIONormal ) );
 
+    //  copy the file using async IO with a fixed queue depth
 
     for ( iblockio = 0; iblockio < cblocks; ++iblockio )
     {
@@ -348,6 +376,8 @@ JET_ERR ErrCopyFile(
 
     Call( pfapiSrc->ErrIOIssue() );
 
+    //  wait until the io is done
+    //  wake up to update the status bar
 
     while ( iblockio > 0 )
     {
@@ -363,9 +393,11 @@ JET_ERR ErrCopyFile(
         }
     }
 
+    //  truncate the size of the destination file to the true size of the source file
 
     Call( pfapiDest->ErrSetSize( *tcScope, copyfilecontrol.cbSize, fFalse, qosIONormal ) );
 
+    //  terminate the status bar
     TermStatus();
 
     PrintCopyFileStatistics( &copyfilecontrol );

@@ -81,6 +81,7 @@ ERR ErrOSRegisterMemoryNotification(
 {
     MEMORY_NOTIFICATION * const pNotification = (MEMORY_NOTIFICATION *)pvNotification;
 
+    // do not allow registering from callback thread
     Assert( pNotification->CallbackThreadId != GetCurrentThreadId() );
 
     if ( pNotification->hRegister != NULL )
@@ -99,6 +100,7 @@ ERR ErrOSRegisterMemoryNotification(
             INFINITE,
             WT_EXECUTEONLYONCE ) )
     {
+        // GetLastError not valid for failure here
         return ErrERRCheck( JET_errOutOfMemory );
     }
 
@@ -126,6 +128,7 @@ VOID OSUnregisterAndDestroyMemoryNotification(
 {
     MEMORY_NOTIFICATION * const pNotification = (MEMORY_NOTIFICATION *)pvNotification;
 
+    // do not allow unregistering from callback thread
     Assert( pNotification->CallbackThreadId != GetCurrentThreadId() );
 
     if ( pNotification->hRegister != NULL )

@@ -3,8 +3,9 @@
 
 #pragma once
 
+//  A cached file table entry for the hashed LRUK cache.
 
-class CHashedLRUKCachedFileTableEntry
+class CHashedLRUKCachedFileTableEntry  //  cfte
     :   public CCachedFileTableEntryBase
 {
     public:

@@ -3,7 +3,9 @@
 
 #include "osunitstd.hxx"
 
+//  ================================================================
 class TLSTESTS : public UNITTEST
+//  ================================================================
 {
     private:
         static TLSTESTS s_instance;
@@ -46,13 +48,16 @@ void SetTLSValue1( ULONG ulValue )
     ptls->i = ulValue;
 }
 
+//  ================================================================
 ERR TLSTESTS::ErrTest()
+//  ================================================================
 {
     JET_ERR         err = JET_errSuccess;
 
     OSPrepreinitSetUserTLSSize( sizeof( TLS ) );
     COSLayerPreInit     oslayer;
 
+    // FOSPreinit()
     if ( !oslayer.FInitd() )
     {
         wprintf( L"Out of memory error during OS Layer pre-init." );
@@ -60,6 +65,10 @@ ERR TLSTESTS::ErrTest()
         goto HandleError;
     }
 
+// Note: The TLS functionality requires preinit, but SHOULD work without / before
+// ErrOSInit() is called, this validates this assumption.
+// FYI - if we don't call preinit, we AV.  So good to know where our boundaries are.
+//  OSTestCall( ErrOSInit() );
 
     wprintf( L"\tTesting TLS functionality ...\n");
 
@@ -72,6 +81,7 @@ ERR TLSTESTS::ErrTest()
 
 HandleError:
 
+//  OSTerm();
 
     return err;
 }

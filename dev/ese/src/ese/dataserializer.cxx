@@ -6,6 +6,13 @@
 #include "PageSizeClean.hxx"
 
 
+//  ================================================================
+//  CPRINTFBUFFER
+//  ================================================================
+//
+//  Prints to an internal buffer, used to test column printing
+//
+//-
 
 class CPRINTFBUFFER : public CPRINTF
 {
@@ -29,11 +36,13 @@ private:
 };
 
 
+//  ================================================================
 void UtilPrintColumnValue(
         const void * const pv,
         const size_t cb,
         const JET_COLTYP coltyp,
               CPRINTF * const pcprintf )
+//  ================================================================
 {
     if( NULL == pv || 0 == cb )
     {
@@ -90,7 +99,11 @@ void UtilPrintColumnValue(
 }
 
 
+//  ================================================================
+//  TableDataStoreFactory
+//  ================================================================
 
+// Namespace members that should not appear in the header file
 namespace TableDataStoreFactory
 {
     ERR ErrOpen_(
@@ -109,7 +122,13 @@ namespace TableDataStoreFactory
 }
 
 
+//  ================================================================
 class TableDataStore : public IDataStore
+//  ================================================================
+//
+//  Set/Retrieve columns in an record of a table.
+//
+//-
 {
 public:
     virtual ~TableDataStore();
@@ -133,7 +152,7 @@ public:
 
     ERR ErrDataStoreUnavailable() const;
 
-private:
+private: // construction has to be done through the factory class
     friend ERR TableDataStoreFactory::ErrOpen_(
         INST * const pinst,
         const wchar_t * wszDatabase,
@@ -159,12 +178,15 @@ private:
     bool m_fInTransaction;
     bool m_fInUpdate;
 
-private:
+private: // not implemented
     TableDataStore( const TableDataStore& );
     TableDataStore& operator=( const TableDataStore& );
 };
 
 
+//  ================================================================
+//  TableDataStore
+//  ================================================================
 
 TableDataStore::TableDataStore( const JET_SESID sesid, const JET_TABLEID tableid ) :
     m_sesid( sesid ),
@@ -176,9 +198,11 @@ TableDataStore::TableDataStore( const JET_SESID sesid, const JET_TABLEID tableid
 
 TableDataStore::~TableDataStore()
 {
+    // we should only be in a transaction/update state if we hit a fatal failure
     Assert( !m_fInTransaction || JET_errSuccess != ErrDataStoreUnavailable() );
     Assert( !m_fInUpdate || JET_errSuccess != ErrDataStoreUnavailable() );
 
+    // If there was a rollback error, we don't need to (and we are not able to) CloseTable/EndSession.
     if( JET_errSuccess == ( ( PIB* )m_sesid )->ErrRollbackFailure() )
     {
         ( void )ErrIsamCloseTable( m_sesid, m_tableid );
@@ -244,9 +268,11 @@ ERR TableDataStore::ErrCreateColumn( const char * const szColumn, const JET_COLT
     
     if( fColumnExists && coltyp == coltypColumn )
     {
+        // the column exists, everything is fine
     }
     else if( fColumnExists && coltyp != coltypColumn )
     {
+        // the column exists, but is the wrong type. 
         AssertSzRTL( fFalse, "Meta-data mismatch. Existing column is the wrong type" );
         Call( ErrERRCheck( JET_errInvalidColumnType ) );
     }
@@ -262,6 +288,7 @@ ERR TableDataStore::ErrCreateColumn( const char * const szColumn, const JET_COLT
     Call( ErrIsamCommitTransaction( m_sesid, JET_bitCommitLazyFlush ) );
     fInTransaction = false;
 
+    // reposition to the proper record
     Call( ErrIsamMove( m_sesid, m_tableid, JET_MoveFirst, NO_GRBIT ) );
 
 HandleError:
@@ -344,8 +371,12 @@ ERR TableDataStore::ErrCancelUpdate()
     Assert( !m_fInUpdate );
 
 HandleError:
+    //If we hit a rollback failure we have some serious problems and
+    //should effectively consider this data store offline
     if ( ( err < JET_errSuccess ) && ( JET_errSuccess != ( ( PIB* )m_sesid )->ErrRollbackFailure() ) )
     {
+        // if we made it in here, it's because there was an error with the rollback, so make
+        // sure that the JET_prepCancel went through
         Assert( !m_fInUpdate );
         m_errDataStoreUnavailable = err;
     }
@@ -372,6 +403,7 @@ ERR TableDataStore::ErrUpdate()
 
     const FUCB * const pfucb = ( FUCB* )m_tableid;
 
+    // Since we have the tableid open, it should be safe to deref the FCB.
     if( ErrBFReadLatchPage( &bfl, pfucb->ifmp, pfucb->u.pfcb->PgnoFDP(), bflfNoWait, ((PIB*)m_sesid)->BfpriPriority( pfucb->ifmp ), *tcScope ) >= JET_errSuccess )
     {
         BFReadUnlatch( &bfl );
@@ -389,6 +421,7 @@ ERR TableDataStore::ErrGetColumnid_( const char * const szColumn, __out JET_COLU
 {
     ERR err;
 
+    // To improve performance we could cache the name/columnid mappings
     
     *pcolumnid = JET_columnidNil;
     
@@ -446,6 +479,9 @@ HandleError:
 }
 
 
+//  ================================================================
+//  TableDataStoreFactory
+//  ================================================================
 
 ERR TableDataStoreFactory::ErrOpenOrCreate(
     INST * const pinst,
@@ -484,10 +520,12 @@ ERR TableDataStoreFactory::ErrOpen_(
 
     Call( ErrIsamBeginSession( inst, &sesid ) );
 
+    // Set tracing info for the session
     Call( ErrIsamSetSessionParameter( sesid, JET_sesparamOperationContext, &operationContext, sizeof( operationContext ) ) );
 
     Call( ErrIsamOpenDatabase( sesid, wszDatabase, NULL, &dbid, NO_GRBIT ) );
 
+    // open or create the table
     err = ErrIsamOpenTable( sesid, dbid, &tableid, szTable, NO_GRBIT );
     if( JET_errObjectNotFound == err && fCreateIfNotFound )
     {
@@ -496,8 +534,11 @@ ERR TableDataStoreFactory::ErrOpen_(
     }
     Call( err );
 
+    // move to the first record
     Call( ErrIsamMove( sesid, tableid, JET_MoveFirst, NO_GRBIT ) );
 
+    // allocate the TableDataStore which will take ownership 
+    // of the sesid and tableid
     Alloc( *ppstore = new TableDataStore( sesid, tableid ) );
     sesid = JET_sesidNil;
     tableid = JET_tableidNil;
@@ -530,6 +571,8 @@ ERR TableDataStoreFactory::ErrCreateTable_(
     tablecreate.szTableName = const_cast<char *>( szTable );
     tablecreate.grbit = JET_bitTableCreateSystemTable;
 
+    // ErrIsamCreateTable can't create a table wth the JET_bitTableCreateSystemTable grbit
+    // So we use ErrFILECreateTable
     
     PIB * const ppib = ( PIB * )sesid;
     const IFMP ifmp = ( IFMP )dbid;
@@ -537,7 +580,9 @@ ERR TableDataStoreFactory::ErrCreateTable_(
     FUCB * const pfucb = ( FUCB * )( tablecreate.tableid );
     pfucb->pvtfndef = &vtfndefIsam;
     
+    // create the first record in the same transaction
     Call( ErrCreateRecord_( sesid, tablecreate.tableid ) );
+    // a newly created table is opened exclusively, so we close it
     Call( ErrIsamCloseTable( sesid, tablecreate.tableid ) );
 
     Call( ErrIsamCommitTransaction( sesid, JET_bitCommitLazyFlush ) );
@@ -584,6 +629,9 @@ HandleError:
 }
 
 
+//  ================================================================
+// DataBinding
+//  ================================================================
 
 void DataBinding::Print( CPRINTF * const pcprintf ) const
 {
@@ -595,6 +643,9 @@ void DataBinding::Print( CPRINTF * const pcprintf ) const
 }
 
 
+//  ================================================================
+// DataBindings
+//  ================================================================
 
 DataBindings::DataBindings() : m_cbindings( 0 )
 {
@@ -622,6 +673,9 @@ DataBindings::iterator DataBindings::end() const
 }
 
 
+//  ================================================================
+// DataSerializer
+//  ================================================================
 
 DataSerializer::DataSerializer( const DataBindings& bindings ) :
     m_bindings( bindings )
@@ -642,6 +696,7 @@ ERR DataSerializer::ErrSaveBindings( IDataStore * const pstore )
     ERR err = JET_errSuccess;
     bool fInUpdate = false;
 
+    // bail early if DataStore operations have beeen failing
     Call( pstore->ErrDataStoreUnavailable() );
 
     Call( ErrCreateAllColumns_( pstore ) );
@@ -686,6 +741,7 @@ ERR DataSerializer::ErrLoadBindings( const IDataStore * const pstore )
     size_t cbMax = 0;
     size_t cbActual;
 
+    // bail early if DataStore operations have beeen failing
     Call( pstore->ErrDataStoreUnavailable() );
 
     cbMax = 64;
@@ -760,6 +816,9 @@ HandleError:
 }
 
 
+//  ================================================================
+//  MemoryDataStore
+//  ================================================================
 
 MemoryDataStore::MemoryDataStore() :
     IDataStore(),
@@ -880,7 +939,11 @@ INT MemoryDataStore::IColumn( const char * const szColumn ) const
 
 #ifdef ENABLE_JET_UNIT_TEST
 
+//  ================================================================
+//  DataBindingOf<> tests
+//  ================================================================
 
+// A column binding object stores the name of the column 
 JETUNITTEST( DataBindingOf, ConstructorSetSzColumn )
 {
     const char * const szColumn = "columnname";
@@ -890,6 +953,7 @@ JETUNITTEST( DataBindingOf, ConstructorSetSzColumn )
     CHECK( 0 == strcmp( szColumn, binding.SzColumn() ) );
 }
 
+// The coltyp of a BYTE is JET_coltypUnsignedByte
 JETUNITTEST( DataBindingOf, ColtypOfByteIsUnsignedByte )
 {
     BYTE b;
@@ -897,6 +961,7 @@ JETUNITTEST( DataBindingOf, ColtypOfByteIsUnsignedByte )
     CHECK( JET_coltypUnsignedByte == binding.Coltyp() );
 }
 
+// The coltyp of a short is JET_coltypShort
 JETUNITTEST( DataBindingOf, ColtypOfShortIsShort )
 {
     SHORT s;
@@ -904,6 +969,7 @@ JETUNITTEST( DataBindingOf, ColtypOfShortIsShort )
     CHECK( JET_coltypShort == binding.Coltyp() );
 }
 
+// The coltyp of a WORD is JET_coltypUnsignedShort
 JETUNITTEST( DataBindingOf, ColtypOfWordIsUnsignedShort )
 {
     WORD w;
@@ -911,6 +977,7 @@ JETUNITTEST( DataBindingOf, ColtypOfWordIsUnsignedShort )
     CHECK( JET_coltypUnsignedShort == binding.Coltyp() );
 }
 
+// The coltyp of an int is JET_coltypLong
 JETUNITTEST( DataBindingOf, ColtypOfIntIsLong )
 {
     INT i;
@@ -918,6 +985,7 @@ JETUNITTEST( DataBindingOf, ColtypOfIntIsLong )
     CHECK( JET_coltypLong == binding.Coltyp() );
 }
 
+// The coltyp of an unsigned int is JET_coltypUnsignedLong
 JETUNITTEST( DataBindingOf, ColtypOfUnsignedIntIsUnsignedLong )
 {
     UINT ui;
@@ -925,6 +993,7 @@ JETUNITTEST( DataBindingOf, ColtypOfUnsignedIntIsUnsignedLong )
     CHECK( JET_coltypUnsignedLong == binding.Coltyp() );
 }
 
+// The coltyp of a long is JET_coltypLong
 JETUNITTEST( DataBindingOf, ColtypOfLongIsLong )
 {
     LONG l;
@@ -932,6 +1001,7 @@ JETUNITTEST( DataBindingOf, ColtypOfLongIsLong )
     CHECK( JET_coltypLong == binding.Coltyp() );
 }
 
+// The coltyp of a DWORD is JET_coltypUnsignedLong
 JETUNITTEST( DataBindingOf, ColtypOfDwordIsUnsignedLong )
 {
     DWORD dw;
@@ -939,6 +1009,7 @@ JETUNITTEST( DataBindingOf, ColtypOfDwordIsUnsignedLong )
     CHECK( JET_coltypUnsignedLong == binding.Coltyp() );
 }
 
+// The coltyp of a 64-bit int is JET_coltypLongLong
 JETUNITTEST( DataBindingOf, ColtypOfInt64IsLongLong )
 {
     __int64 x;
@@ -946,6 +1017,7 @@ JETUNITTEST( DataBindingOf, ColtypOfInt64IsLongLong )
     CHECK( JET_coltypLongLong == binding.Coltyp() );
 }
 
+// The coltyp of a struct (or unknown type) is LongBinary
 JETUNITTEST( DataBindingOf, ColtypOfStructIsLongBinary )
 {
     LOGTIME logtime;
@@ -953,6 +1025,7 @@ JETUNITTEST( DataBindingOf, ColtypOfStructIsLongBinary )
     CHECK( JET_coltypLongBinary == binding.Coltyp() );
 }
 
+// A column binding can turn its variable into a pv/cb pair
 JETUNITTEST( DataBindingOf, GetPvCb )
 {
     INT x;
@@ -966,6 +1039,7 @@ JETUNITTEST( DataBindingOf, GetPvCb )
     CHECK( cb == sizeof( x ) );
 }
 
+// A column binding can set its variable from a pv/cb pair
 JETUNITTEST( DataBindingOf, ErrSetFromPvCb )
 {
     const __int64 value = 15;
@@ -979,6 +1053,7 @@ JETUNITTEST( DataBindingOf, ErrSetFromPvCb )
     CHECK( value == x );
 }
 
+// Setting a column from an invalid buffer fails
 JETUNITTEST( DataBindingOf, ErrSetFromPvCbFailsWithInvalidBuffer )
 {
     char c;
@@ -986,6 +1061,7 @@ JETUNITTEST( DataBindingOf, ErrSetFromPvCbFailsWithInvalidBuffer )
     CHECK( JET_errInvalidBufferSize == binding.ErrSetFromPvCb( &c, 7 ) );
 }
 
+// A column binding can be set to a default value (i.e. 0)
 JETUNITTEST( DataBindingOf, SetToDefault )
 {
     LONG l = 19;
@@ -994,6 +1070,7 @@ JETUNITTEST( DataBindingOf, SetToDefault )
     CHECK( 0 == l );
 }
 
+// A column binding can be printed
 JETUNITTEST( DataBindingOf, Print )
 {
     LONG l = 19;
@@ -1005,7 +1082,11 @@ JETUNITTEST( DataBindingOf, Print )
 }
 
 
+//  ================================================================
+//  DataBindingOf<char*> tests
+//  ================================================================
 
+// A string column binding object stores the name of the column 
 JETUNITTEST( DataBindingOfChar, ConstructorSetSzColumn )
 {
     const char * const szColumn = "columnname";
@@ -1015,6 +1096,7 @@ JETUNITTEST( DataBindingOfChar, ConstructorSetSzColumn )
     CHECK( 0 == strcmp( szColumn, binding.SzColumn() ) );
 }
 
+// The column-type is long-text
 JETUNITTEST( DataBindingOfChar, ColtypIsLongText )
 {
     char sz[64];
@@ -1022,6 +1104,7 @@ JETUNITTEST( DataBindingOfChar, ColtypIsLongText )
     CHECK( JET_coltypLongText == binding.Coltyp() );
 }
 
+// A string column binding can turn its variable into a pv/cb pair
 JETUNITTEST( DataBindingOfChar, GetPvCb )
 {
     char sz[] = "A test string";
@@ -1035,6 +1118,7 @@ JETUNITTEST( DataBindingOfChar, GetPvCb )
     CHECK( cb == strlen( sz ) );
 }
 
+// A string column binding can set its variable from a pv/cb pair
 JETUNITTEST( DataBindingOfChar, ErrSetFromPvCb )
 {
     const char szValue[] = "Another test string";
@@ -1045,6 +1129,7 @@ JETUNITTEST( DataBindingOfChar, ErrSetFromPvCb )
     CHECK( 0 == strcmp( szValue, sz ) );
 }
 
+// Setting a too-long string generates an error
 JETUNITTEST( DataBindingOfChar, ErrSetFromPvCbFailsWithInvalidBuffer )
 {
     const char szValue[] = "This string is far too long";
@@ -1054,6 +1139,7 @@ JETUNITTEST( DataBindingOfChar, ErrSetFromPvCbFailsWithInvalidBuffer )
     CHECK( JET_errInvalidBufferSize == binding.ErrSetFromPvCb( szValue, strlen( szValue ) ) );
 }
 
+// A string column binding can be set to a default value (empty string)
 JETUNITTEST( DataBindingOfChar, SetToDefault )
 {
     char sz[64] = "hello";
@@ -1063,6 +1149,9 @@ JETUNITTEST( DataBindingOfChar, SetToDefault )
 }
 
 
+//  ================================================================
+//  DataBindings tests
+//  ================================================================
 
 JETUNITTEST( DataBindings, NewObjectHasNoBindings )
 {
@@ -1101,6 +1190,9 @@ JETUNITTEST( DataBindings, AddTwoBindings )
     CHECK( &binding2 == *i );
 }
 
+//  ================================================================
+//  MemoryDataStore
+//  ================================================================
 
 JETUNITTEST( MemoryDataStore, NoColumnInNewObject )
 {
@@ -1208,6 +1300,9 @@ JETUNITTEST( MemoryDataStore, DefaultErrDataStoreFailure )
     CHECK( JET_errSuccess == store.ErrDataStoreUnavailable() );
 }
 
+//  ================================================================
+//  DataSerializer tests
+//  ================================================================
 class TestMemoryDataStore : public MemoryDataStore
 {
 public:
@@ -1282,6 +1377,7 @@ JETUNITTEST( DataSerializer, LoadFromData )
     CHECK( 0 == strcmp( szData, sz ) );
 }
 
+// test the expansion of the retrieval buffer in ErrLoadBindings
 JETUNITTEST( DataSerializer, LoadFromLargeData )
 {
     const char * const szColumn = "col1";
@@ -1426,6 +1522,9 @@ JETUNITTEST( DataSerializer, FailuresInDataStore )
     CHECK( -1 == x );
 }
 
+//  ================================================================
+//  UtilPrintColumnValue tests
+//  ================================================================
 
 JETUNITTEST( UtilPrintColumnValue, PrintNullPvColumn )
 {
@@ -1507,5 +1606,5 @@ JETUNITTEST( UtilPrintColumnValue, PrintBinaryColumn )
     CHECK( 0 == strcmp("04 01 FF E1 00 02", cprintf.SzBuffer() ) );
 }
 
-#endif
+#endif // ENABLE_JET_UNIT_TEST
 

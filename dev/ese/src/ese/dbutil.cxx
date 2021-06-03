@@ -13,7 +13,25 @@ LOCAL ERR ErrDBUTLDumpTables( DBCCINFO *pdbccinfo, PFNTABLE pfntable, VOID* pvCt
 
 #if !defined( MINIMAL_FUNCTIONALITY ) || defined( DEBUGGER_EXTENSION )
 
+/*
+The output will be something like the one below:
+000001a0    00326d32 6e383059 04000900 1d7f8002 7f800000 01098023 001d0000 00020001 \ .2m2n80Y...............#........
+000001c0    00000009 00000004 00000000 00000000 0000002a 040080fe 1b005479 70686f6f \ ...................*......Typhoo
+000001e0    6e205665 72696669 63617469 6f6e2043 6f6c756d 6e040009 001e7f80 017f8000 \ n Verification Column...........
+00000200    001e0880 20001e00 00000100 1e000000 8e000000 38000000 00000000 03000000 \ .... ...............8...........
+00000220    ff001900 35315545 486a6c36 44797051 6a544255 6b76557a 454d6a66 42040009 \ ....51UEHjl6DypQjTBUkvUzEMjfB...
+00000240    001e7f80 027f8000 00010980 23001e00 00000200 01000000 09000000 04000000 \ ............#...................
+00000260    00000000 00000000 2a040080 fe1b0054 7970686f 6f6e2056 65726966 69636174 \ ........*......Typhoon Verificat
+00000280    696f6e20 436f6c75 6d6e0400 09001f7f 80017f80 00001f08 8020001f 00000001 \ ion Column............... ......
+000002a0    001f0000 00910000 00350000 00000000 00090000 00ff003c 0064414e 67664135 \ .........5.............<.dANgfA5
+000002c0    62705866 6e717479 426f756e 53663365 72484732 7945744b 386f4d4c 6e315a30 \ bpXfnqtyBounSf3erHG2yEtK8oMLn1Z0
+000002e0    35567361 316f7a75 77645550 7557514b 384c744d 67040009 001f7f80 027f8000 \ 5Vsa1ozuwdUPuWQK8LtMg...........
+00000300    00010980 23001f00 00000200 01000000 09000000 04000000 00000000 00000000 \ ....#...........................
+00000320    2a040080 fe1b0054 7970686f 6f6e2056 65726966 69636174 696f6e20 436f6c75 \ *......Typhoon Verification Colu
+00000340    6d6e0400 0900207f 80017f80 00002008 80200020 00000001 00200000 009a0000 \ mn.... ....... .. . ..... ......
 
+*/
+//  ================================================================
 VOID DBUTLSprintHex(
     __out_bcount(cbDest) CHAR * const       szDest,
     const INT           cbDest,
@@ -23,6 +41,7 @@ VOID DBUTLSprintHex(
     const INT           cbChunk,
     const INT           cbAddress,
     const INT           cbStart)
+//  ================================================================
 {
     static const CHAR rgchConvert[] =   { '0','1','2','3','4','5','6','7','8','9','a','b','c','d','e','f' };
     
@@ -44,6 +63,9 @@ VOID DBUTLSprintHex(
         return;
     }
     
+    // this is the max position we can write to and
+    // we will use it as a marker to stop
+    //
     CHAR * const szDestMax = szDestCurrent + cbDest - 1;
     
     while( pbMax != pb && szDestCurrent < szDestMax )
@@ -62,7 +84,7 @@ VOID DBUTLSprintHex(
         
         CHAR * szCurrentRightSide   = szDestCurrent + cchHexWidth;
         
-        if ( szDestMax <= ( szCurrentRightSide + 2  ) )
+        if ( szDestMax <= ( szCurrentRightSide + 2 /* for left/right separator */ ) )
             break;
             
         *szCurrentRightSide++ = '\\';
@@ -99,7 +121,9 @@ VOID DBUTLSprintHex(
 
 #pragma prefast(push)
 #pragma prefast(disable:6262, "This function uses a lot of stack (33k) because of szBuff[g_cbPageMax].")
+//  ================================================================
 VOID DBUTLDumpRec( const LONG cbPage, const FUCB * const pfucbTable, const VOID * const pv, const INT cb, CPRINTF * pcprintf, const INT cbWidth )
+//  ================================================================
 {
     CHAR szBuf[g_cbPageMax];
     
@@ -108,6 +132,7 @@ VOID DBUTLDumpRec( const LONG cbPage, const FUCB * const pfucbTable, const VOID 
                                     ptdb->PfcbTemplateTable()->Ptdb() :
                                     ptdbNil );
 
+    //  dump the columns of the record
     const REC * const prec = reinterpret_cast<const REC *>( pv );
 
     const CHAR * szColNameSeparator = "  -  ";
@@ -129,6 +154,7 @@ VOID DBUTLDumpRec( const LONG cbPage, const FUCB * const pfucbTable, const VOID 
         const UINT  ifid                    = fid - fidFixedLeast;
         const BYTE  * const prgbitNullity   = prec->PbFixedNullBitMap() + ifid/8;
 
+        // Get the COLUMNID from FID.
         const BOOL fTemplateColumn = ptdbTemplate == ptdbNil ? fFalse : fid <= ptdbTemplate->FidFixedLast() ? fTrue : fFalse;
         const COLUMNID columnid = ColumnidOfFid( fid, fTemplateColumn );
 
@@ -140,7 +166,7 @@ VOID DBUTLDumpRec( const LONG cbPage, const FUCB * const pfucbTable, const VOID 
         {
             fDeleted = ( 0 == pfield->itagFieldName );
             szType   = ( fDeleted ? "<deleted>" : SzColumnType( pfield->coltyp ) );
-            szColumn = ( fDeleted ? "<deleted>" : ( fTemplateColumn ? ptdbTemplate : ptdb )->SzFieldName( pfield->itagFieldName, ptdbTemplate != NULL && !fTemplateColumn  ) );
+            szColumn = ( fDeleted ? "<deleted>" : ( fTemplateColumn ? ptdbTemplate : ptdb )->SzFieldName( pfield->itagFieldName, ptdbTemplate != NULL && !fTemplateColumn /* was: fFalse */ ) );
         }
         const CHAR * const      szHddlSrc   = SzTableColType( ptdbTemplate, fTemplateColumn );
 
@@ -168,7 +194,7 @@ VOID DBUTLDumpRec( const LONG cbPage, const FUCB * const pfucbTable, const VOID 
                         pfieldNil );
                 if ( errRet >= JET_errSuccess )
                 {
-                    Expected( dataCol.Cb() < 257 );
+                    Expected( dataCol.Cb() < 257 ); // think it's even < 128 actually
                     szBuf[0] = 0;
                     DBUTLSprintHex( szBuf, sizeof(szBuf), (BYTE*)dataCol.Pv(), dataCol.Cb(), cbWidth );
                     (*pcprintf)( "%s", szBuf );
@@ -200,6 +226,7 @@ VOID DBUTLDumpRec( const LONG cbPage, const FUCB * const pfucbTable, const VOID 
         const REC::VAROFFSET    ibStartOfColumn = prec->IbVarOffsetStart( fid );
         const REC::VAROFFSET    ibEndOfColumn   = IbVarOffset( pibVarOffs[ifid] );
 
+        // Get the COLUMNID from FID.
         const BOOL fTemplateColumn = ptdbTemplate == ptdbNil ? fFalse : fid <= ptdbTemplate->FidVarLast() ? fTrue : fFalse;
         const COLUMNID columnid = ColumnidOfFid( fid, fTemplateColumn );
 
@@ -211,7 +238,7 @@ VOID DBUTLDumpRec( const LONG cbPage, const FUCB * const pfucbTable, const VOID 
         {
             fDeleted    = ( 0 == pfield->itagFieldName );
             szType      = ( fDeleted ? "<deleted>" : SzColumnType( pfield->coltyp ) );
-            szColumn    = ( fDeleted ? "<deleted>" : ( fTemplateColumn ? ptdbTemplate : ptdb )->SzFieldName( pfield->itagFieldName, ptdbTemplate != NULL && !fTemplateColumn  ) );
+            szColumn    = ( fDeleted ? "<deleted>" : ( fTemplateColumn ? ptdbTemplate : ptdb )->SzFieldName( pfield->itagFieldName, ptdbTemplate != NULL && !fTemplateColumn /* was: fFalse */ ) );
         }
         const CHAR * const      szHddlSrc   = SzTableColType( ptdbTemplate, fTemplateColumn );
 
@@ -252,6 +279,7 @@ VOID DBUTLDumpRec( const LONG cbPage, const FUCB * const pfucbTable, const VOID 
 
     while( JET_errSuccess == ti.ErrMoveNext() )
     {
+        //  we are now on an individual column
 
         const CHAR * szComma = " ";
 
@@ -266,10 +294,20 @@ VOID DBUTLDumpRec( const LONG cbPage, const FUCB * const pfucbTable, const VOID 
         {
             fDeleted    = ( 0 == pfield->itagFieldName );
             szType      = ( fDeleted ? "<deleted>" : SzColumnType( pfield->coltyp ) );
-            szColumn    = ( fDeleted ? "<deleted>" : ( fTemplateColumn ? ptdbTemplate : ptdb )->SzFieldName( pfield->itagFieldName, ptdbTemplate != NULL && !fTemplateColumn  ) );
+            szColumn    = ( fDeleted ? "<deleted>" : ( fTemplateColumn ? ptdbTemplate : ptdb )->SzFieldName( pfield->itagFieldName, ptdbTemplate != NULL && !fTemplateColumn /* was: fFalse */ ) );
 
             Assert( !!ti.FLV() == ( ( pfield->coltyp == JET_coltypLongText ) || ( pfield->coltyp == JET_coltypLongBinary ) ) );
         }
+        //  So ti.FDerived() actually means the column "was derived" from template, so in this context
+        //  it means that it is from the template schema.  More from SOMEONE on the subject:
+        //      TAGFLD doesn't have an FTemplate bit.  It only has an FDerived bit.  So for a 
+        //      TAGFLD, if FDerived==TRUE, it means the column is from the template table (in 
+        //      other words, the column was derived from the template).  If FDerived==FALSE, 
+        //      it means the column was defined just in the derived table (in other words the 
+        //      column was not derived from the template).
+        //  At any rate this: Assert( fTemplateColumn == !ti.FDerived() ); does not hold, so
+        //  I am not sure which is conceptually right.  And/or if the compute of fTemplateColumn
+        //  above for fixed and variable columns is right.
         const CHAR * const      szHddlSrc   = SzTableColType( ptdbTemplate, !ti.FDerived() );
 
         (*pcprintf)( "%u (0x%x):  [%-16hs] %hs%hs", ti.Fid(), ti.Fid(), szType, szColumn, szHddlSrc );
@@ -313,7 +351,7 @@ VOID DBUTLDumpRec( const LONG cbPage, const FUCB * const pfucbTable, const VOID 
                     szBuf,
                     sizeof(szBuf),
                     ti.TagfldIterator().PbData(),
-                    min( ti.TagfldIterator().CbData(), 64 ),
+                    min( ti.TagfldIterator().CbData(), 64 ),    //  only print 64b of compressed/encrypted data
                     cbWidth );
                 (*pcprintf)( "%s%s\r\n", szBuf, ( ti.TagfldIterator().CbData() > 64 ? "...\r\n" : "" ) );
 
@@ -325,7 +363,7 @@ VOID DBUTLDumpRec( const LONG cbPage, const FUCB * const pfucbTable, const VOID 
 
                 CallSx( ErrPKDecompressData(
                     dataCompressed,
-                    NULL,
+                    NULL,  // The pfucb from debugger is half filled, passing NULL here only makes PKDecompress not update perf counters and report events (by deref PinstFromIfmp( pfucb-ifmp )).
                     rgbDecompressed,
                     sizeof(rgbDecompressed),
                     &cbDecompressed ),
@@ -350,7 +388,7 @@ VOID DBUTLDumpRec( const LONG cbPage, const FUCB * const pfucbTable, const VOID 
                     szBuf,
                     sizeof(szBuf),
                     ti.TagfldIterator().PbData(),
-                    min( ti.TagfldIterator().CbData(), cbPrintMax ),
+                    min( ti.TagfldIterator().CbData(), cbPrintMax ),   //  only print cbPrintMax of data to ensure we don't overrun printf buffer
                     cbWidth );
                 (*pcprintf)( "%s%s\r\n", szBuf, ( ti.TagfldIterator().CbData() > cbPrintMax ? "...\r\n" : "" ) );
             }
@@ -359,31 +397,48 @@ VOID DBUTLDumpRec( const LONG cbPage, const FUCB * const pfucbTable, const VOID 
         }
     }
 
-
+/*
+    if ( TAGFIELDS::FIsValidTagfields( cbPage, dataRec, pcprintf ) )
+    {
+        TAGFIELDS   tagfields( dataRec );
+        tagfields.Dump( pcprintf, szBuf, cbWidth );
+    }
+    else
+    {
+        (*pcprintf)( "Tagged column corruption detected.\n" );
+    }
+*/
 
     (*pcprintf)( "\n" );
 }
 #pragma prefast(push)
 
 
-#endif
+#endif  //  !defined( MINIMAL_FUNCTIONALITY ) || defined( DEBUGGER_EXTENSION )
 
 
 #ifdef MINIMAL_FUNCTIONALITY
 #else
 
+//  description of page_info table
 const JET_COLUMNDEF rgcolumndefPageInfoTable[] =
 {
+    //  Pgno
     {sizeof(JET_COLUMNDEF), 0, JET_coltypLong, 0, 0, 0, 0, 0, JET_bitColumnFixed | JET_bitColumnTTKey},
 
+    //  consistency checked
     {sizeof(JET_COLUMNDEF), 0, JET_coltypBit, 0, 0, 0, 0, 0, JET_bitColumnFixed | JET_bitColumnNotNULL},
     
+    //  Avail
     {sizeof(JET_COLUMNDEF), 0, JET_coltypBit, 0, 0, 0, 0, 0, JET_bitColumnFixed },
 
+    //  Space free
     {sizeof(JET_COLUMNDEF), 0, JET_coltypLong, 0, 0, 0, 0, 0, JET_bitColumnFixed},
 
+    //  Pgno left
     {sizeof(JET_COLUMNDEF), 0, JET_coltypLong, 0, 0, 0, 0, 0, JET_bitColumnFixed },
 
+    //  Pgno right
     {sizeof(JET_COLUMNDEF), 0, JET_coltypLong, 0, 0, 0, 0, 0, JET_bitColumnFixed }
 };
 
@@ -400,20 +455,22 @@ LOCAL JET_COLUMNID g_rgcolumnidPageInfoTable[ccolumndefPageInfoTable];
 
 typedef ERR(*PFNDUMP)( PIB *ppib, FUCB *pfucbCatalog, VOID *pfnCallback, VOID *pvCallback );
 
-#endif
+#endif  // !MINIMAL_FUNCTIONALITY
 
 LOCAL ERR ErrDBUTLDump( JET_SESID sesid, const JET_DBUTIL_W *pdbutil );
 
 
+//  ================================================================
 LOCAL VOID DBUTLPrintfIntN( INT iValue, INT ichMax )
+//  ================================================================
 {
-    CHAR    rgchT[17]; 
+    CHAR    rgchT[17]; /* C-runtime max bytes == 17 */
     INT     ichT;
 
     _itoa_s( iValue, rgchT, _countof(rgchT), 10 );
     for ( ichT = 0; ichT < sizeof(rgchT) && rgchT[ichT] != '\0' ; ichT++ )
         ;
-    if ( ichT > ichMax )
+    if ( ichT > ichMax ) //lint !e661
     {
         for ( ichT = 0; ichT < ichMax; ichT++ )
             printf( "#" );
@@ -431,7 +488,7 @@ LOCAL VOID DBUTLPrintfIntN( INT iValue, INT ichMax )
 #else
 
 LOCAL_BROKEN VOID DBUTLPrintfStringN(
-    __in_bcount(ichMax) const CHAR *sz,
+    __in_bcount(ichMax) const CHAR *sz, // not a PCSTR, b/c not nesc. NUL terminated
     INT ichMax )
 {
     INT     ich;
@@ -445,7 +502,9 @@ LOCAL_BROKEN VOID DBUTLPrintfStringN(
 }
 
 
+//  ================================================================
 LOCAL_BROKEN ERR ErrDBUTLRegExt( DBCCINFO *pdbccinfo, PGNO pgnoFirst, CPG cpg, BOOL fAvailT )
+//  ================================================================
 {
     ERR             err = JET_errSuccess;
     PGNO            pgnoLast = (PGNO)( pgnoFirst + cpg - 1 );
@@ -469,7 +528,8 @@ LOCAL_BROKEN ERR ErrDBUTLRegExt( DBCCINFO *pdbccinfo, PGNO pgnoFirst, CPG cpg, B
 
         CallR( ErrIsamBeginTransaction( (JET_SESID) ppib, 41189, NO_GRBIT ) );
 
-        
+        /*  search for page in the table
+        /**/
         CallS( ErrDispMakeKey( sesid, tableid, (BYTE *)&pgno, sizeof(pgno), JET_bitNewKey ) );
         err = ErrDispSeek( sesid, tableid, JET_bitSeekEQ );
         if ( err < 0 && err != JET_errRecordNotFound )
@@ -484,7 +544,8 @@ LOCAL_BROKEN ERR ErrDBUTLRegExt( DBCCINFO *pdbccinfo, PGNO pgnoFirst, CPG cpg, B
             ULONG   cbActual;
             BYTE    fAvailT2;
             
-            
+            /*  is this in availext
+            /**/
             Call( ErrDispRetrieveColumn( sesid,
                 tableid,
                 g_rgcolumnidPageInfoTable[icolumnidPageInfoFAvail],
@@ -500,11 +561,13 @@ LOCAL_BROKEN ERR ErrDBUTLRegExt( DBCCINFO *pdbccinfo, PGNO pgnoFirst, CPG cpg, B
                 Assert( !fAvail || fAvailT2 );
             }
 
-            
+            /*  if fAvail is false, no changes to record
+            /**/
             if ( !fAvail )
                 goto Commit;
 
-            
+            /*  get fChecked [for setting it later]
+            /**/
             Call( ErrDispRetrieveColumn( sesid,
                 tableid,
                 g_rgcolumnidPageInfoTable[icolumnidPageInfoFChecked],
@@ -522,7 +585,8 @@ LOCAL_BROKEN ERR ErrDBUTLRegExt( DBCCINFO *pdbccinfo, PGNO pgnoFirst, CPG cpg, B
         {
             Call( ErrDispPrepareUpdate( sesid, tableid, JET_prepInsert ) );
 
-            
+            /*  pgno
+            /**/
             Call( ErrDispSetColumn( sesid,
                 tableid,
                 g_rgcolumnidPageInfoTable[icolumnidPageInfoPgno],
@@ -532,7 +596,8 @@ LOCAL_BROKEN ERR ErrDBUTLRegExt( DBCCINFO *pdbccinfo, PGNO pgnoFirst, CPG cpg, B
                 NULL ) );
         }
 
-        
+        /*  set FChecked
+        /**/
         Call( ErrDispSetColumn( sesid,
             tableid,
             g_rgcolumnidPageInfoTable[icolumnidPageInfoFChecked],
@@ -541,7 +606,8 @@ LOCAL_BROKEN ERR ErrDBUTLRegExt( DBCCINFO *pdbccinfo, PGNO pgnoFirst, CPG cpg, B
             0,
             NULL ) );
 
-        
+        /*  fAvail set if in AvailExt node
+        /**/
         if ( fAvail )
         {
             Call( ErrDispSetColumn( sesid,
@@ -553,10 +619,12 @@ LOCAL_BROKEN ERR ErrDBUTLRegExt( DBCCINFO *pdbccinfo, PGNO pgnoFirst, CPG cpg, B
                 NULL ) );
         }
 
-        
+        /*  update
+        /**/
         Call( ErrDispUpdate( sesid, tableid, NULL, 0, NULL, 0 ) );
         
-        
+        /*  commit
+        /**/
 Commit:
         Assert( ppib->Level() == 1 );
         Call( ErrIsamCommitTransaction( ( JET_SESID ) ppib, 0 ) );
@@ -571,9 +639,14 @@ HandleError:
 }
 
 
+//  ****************************************************************
+//  DBCC Info Routines
+//  ****************************************************************
 
 
+//  ================================================================
 LOCAL_BROKEN ERR ErrDBUTLPrintPageDump( DBCCINFO *pdbccinfo )
+//  ================================================================
 {
     ERR                 err;
     const JET_SESID     sesid   = (JET_SESID) pdbccinfo->ppib;
@@ -584,6 +657,7 @@ LOCAL_BROKEN ERR ErrDBUTLPrintPageDump( DBCCINFO *pdbccinfo )
 
     Assert( pdbccinfo->grbitOptions & JET_bitDBUtilOptionPageDump );
 
+    //  move to first record
     err = ErrDispMove( sesid, tableid, JET_MoveFirst, 0 );
     if ( JET_errNoCurrentRecord != err )
     {
@@ -595,7 +669,8 @@ LOCAL_BROKEN ERR ErrDBUTLPrintPageDump( DBCCINFO *pdbccinfo )
     printf( "\n\n ***************** PAGE DUMP *******************\n\n" );
     printf( "PGNO\tAVAIL\tCHECK\tLEFT\tRIGHT\tFREESPACE\n" );
 
-    
+    /*  while there are more records, print record
+    /**/
     for( ;
         JET_errSuccess == err;
         err = ErrDispMove( sesid, tableid, JET_MoveNext, 0 ) )
@@ -607,6 +682,7 @@ LOCAL_BROKEN ERR ErrDBUTLPrintPageDump( DBCCINFO *pdbccinfo )
         BYTE    fAvail      = fFalse;
         ULONG   cbFreeSpace = 0;
         
+        //  pgno
         Call( ErrDispRetrieveColumn( sesid,
             tableid,
             g_rgcolumnidPageInfoTable[icolumnidPageInfoPgno],
@@ -617,6 +693,7 @@ LOCAL_BROKEN ERR ErrDBUTLPrintPageDump( DBCCINFO *pdbccinfo )
             NULL ) );
         Assert( sizeof(pgnoThis) == cbT );
         
+        //  FAvail
         Call( ErrDispRetrieveColumn( sesid,
             tableid,
             g_rgcolumnidPageInfoTable[icolumnidPageInfoFAvail],
@@ -627,6 +704,7 @@ LOCAL_BROKEN ERR ErrDBUTLPrintPageDump( DBCCINFO *pdbccinfo )
             NULL ) );
         Assert( sizeof(fAvail) == cbT || JET_wrnColumnNull == err );
         
+        //  FChecked
         Call( ErrDispRetrieveColumn( sesid,
             tableid,
             g_rgcolumnidPageInfoTable[icolumnidPageInfoFChecked],
@@ -638,6 +716,7 @@ LOCAL_BROKEN ERR ErrDBUTLPrintPageDump( DBCCINFO *pdbccinfo )
         Assert( cbT == sizeof(fChecked) );
         Assert( fChecked || fAvail );
         
+        //  left and right pgno
         Call( ErrDispRetrieveColumn( sesid,
             tableid,
             g_rgcolumnidPageInfoTable[icolumnidPageInfoPgnoLeft],
@@ -658,6 +737,7 @@ LOCAL_BROKEN ERR ErrDBUTLPrintPageDump( DBCCINFO *pdbccinfo )
              NULL ) );
         Assert( cbT == sizeof(pgnoRight) );
         
+        //  free space
         Call( ErrDispRetrieveColumn( sesid,
             tableid,
             g_rgcolumnidPageInfoTable[icolumnidPageInfoFreeSpace],
@@ -668,6 +748,7 @@ LOCAL_BROKEN ERR ErrDBUTLPrintPageDump( DBCCINFO *pdbccinfo )
             NULL ) );
         Assert( cbT == sizeof(cbFreeSpace) );
 
+        //  print
         printf( "%u\t%s\t%s", pgnoThis, fAvail ? "FAvail" : "", fChecked ? "FCheck" : "" );
         if( fChecked )
         {
@@ -676,6 +757,7 @@ LOCAL_BROKEN ERR ErrDBUTLPrintPageDump( DBCCINFO *pdbccinfo )
         printf( "\n" );
     }
 
+    //  polymorph expected error to success
     if ( JET_errNoCurrentRecord == err )
         err = JET_errSuccess;
 
@@ -685,7 +767,9 @@ HandleError:
 
 #ifdef DEBUG
 
+//  ================================================================
 LOCAL ERR ErrDBUTLISzToData( const CHAR * const sz, DATA * const pdata )
+//  ================================================================
 {
     DATA& data = *pdata;
     
@@ -693,6 +777,7 @@ LOCAL ERR ErrDBUTLISzToData( const CHAR * const sz, DATA * const pdata )
     if( cch % 2 == 1
         || cch <= 0 )
     {
+        //  no data to insert
         return ErrERRCheck( JET_errInvalidParameter );
     }
     const LONG cbInsert = cch / 2;
@@ -726,6 +811,7 @@ LOCAL ERR ErrDBUTLISzToData( const CHAR * const sz, DATA * const pdata )
 }
 
 
+//  ================================================================
 LOCAL ERR ErrDBUTLIInsertNode(
     PIB * const ppib,
     const IFMP ifmp,
@@ -733,6 +819,7 @@ LOCAL ERR ErrDBUTLIInsertNode(
     const LONG iline,
     const DATA& data,
     CPRINTF * const pcprintf )
+//  ================================================================
 {
     ERR err = JET_errSuccess;
 
@@ -752,6 +839,7 @@ HandleError:
 }
 
 
+//  ================================================================
 LOCAL ERR ErrDBUTLIReplaceNode(
     PIB * const ppib,
     const IFMP ifmp,
@@ -759,6 +847,7 @@ LOCAL ERR ErrDBUTLIReplaceNode(
     const LONG iline,
     const DATA& data,
     CPRINTF * const pcprintf )
+//  ================================================================
 {
     ERR err = JET_errSuccess;
 
@@ -778,6 +867,7 @@ HandleError:
 }
 
 
+//  ================================================================
 LOCAL ERR ErrDBUTLISetNodeFlags(
     PIB * const ppib,
     const IFMP ifmp,
@@ -785,6 +875,7 @@ LOCAL ERR ErrDBUTLISetNodeFlags(
     const LONG iline,
     const INT fFlags,
     CPRINTF * const pcprintf )
+//  ================================================================
 {
     ERR err = JET_errSuccess;
 
@@ -804,12 +895,14 @@ HandleError:
 }
 
 
+//  ================================================================
 LOCAL ERR ErrDBUTLIDeleteNode(
     PIB * const ppib,
     const IFMP ifmp,
     const PGNO pgno,
     const LONG iline,
     CPRINTF * const pcprintf )
+//  ================================================================
 {
     ERR err = JET_errSuccess;
 
@@ -829,12 +922,14 @@ HandleError:
 }
 
 
+//  ================================================================
 LOCAL ERR ErrDBUTLISetExternalHeader(
     PIB * const ppib,
     const IFMP ifmp,
     const PGNO pgno,
     const DATA& data,
     CPRINTF * const pcprintf )
+//  ================================================================
 {
     ERR err = JET_errSuccess;
 
@@ -854,12 +949,14 @@ HandleError:
 }
 
 
+//  ================================================================
 LOCAL ERR ErrDBUTLISetPgnoNext(
     PIB * const ppib,
     const IFMP ifmp,
     const PGNO pgno,
     const PGNO pgnoNext,
     CPRINTF * const pcprintf )
+//  ================================================================
 {
     ERR err = JET_errSuccess;
 
@@ -879,12 +976,14 @@ HandleError:
 }
 
 
+//  ================================================================
 LOCAL ERR ErrDBUTLISetPgnoPrev(
     PIB * const ppib,
     const IFMP ifmp,
     const PGNO pgno,
     const PGNO pgnoPrev,
     CPRINTF * const pcprintf )
+//  ================================================================
 {
     ERR err = JET_errSuccess;
 
@@ -904,12 +1003,14 @@ HandleError:
 }
 
 
+//  ================================================================
 LOCAL ERR ErrDBUTLISetPageFlags(
     PIB * const ppib,
     const IFMP ifmp,
     const PGNO pgno,
     const ULONG fFlags,
     CPRINTF * const pcprintf )
+//  ================================================================
 {
     ERR err = JET_errSuccess;
 
@@ -929,12 +1030,14 @@ HandleError:
 }
 
 
+//  ================================================================
 LOCAL_BROKEN ERR ErrDBUTLMungeDatabase(
     PIB * const ppib,
     const IFMP ifmp,
     const CHAR * const rgszCommand[],
     const INT cszCommand,
     CPRINTF * const pcprintf )
+//  ================================================================
 {
     ERR err = JET_errSuccess;
 
@@ -947,6 +1050,7 @@ LOCAL_BROKEN ERR ErrDBUTLMungeDatabase(
         
         if( 2 != sscanf_s( rgszCommand[1], "%lu:%d", &pgno, &iline ) )
         {
+            //  we didn't get all the arguments we need
             return ErrERRCheck( JET_errInvalidParameter );
         }
         
@@ -964,6 +1068,7 @@ LOCAL_BROKEN ERR ErrDBUTLMungeDatabase(
         
         if( 2 != sscanf_s( rgszCommand[1], "%lu:%d", &pgno, &iline ) )
         {
+            //  we didn't get all the arguments we need
             return ErrERRCheck( JET_errInvalidParameter );
         }
         
@@ -980,6 +1085,7 @@ LOCAL_BROKEN ERR ErrDBUTLMungeDatabase(
         LONG    iline;
         if( 2 != sscanf_s( rgszCommand[1], "%lu:%d", &pgno, &iline ) )
         {
+            //  we didn't get all the arguments we need
             return ErrERRCheck( JET_errInvalidParameter );
         }
 
@@ -996,6 +1102,7 @@ LOCAL_BROKEN ERR ErrDBUTLMungeDatabase(
         
         if( 2 != sscanf_s( rgszCommand[1], "%lu:%d", &pgno, &iline ) )
         {
+            //  we didn't get all the arguments we need
             return ErrERRCheck( JET_errInvalidParameter );
         }
         
@@ -1094,9 +1201,11 @@ LOCAL_BROKEN ERR ErrDBUTLMungeDatabase(
 
     return err;
 }
-#endif
+#endif // DEBUG
 
+//  ================================================================
 LOCAL ERR ErrDBUTLDumpOneColumn( PIB * ppib, FUCB * pfucbCatalog, VOID * pfnCallback, VOID * pvCallback )
+//  ================================================================
 {
     JET_RETRIEVECOLUMN  rgretrievecolumn[10];
     COLUMNDEF           columndef;
@@ -1172,6 +1281,7 @@ LOCAL ERR ErrDBUTLDumpOneColumn( PIB * ppib, FUCB * pfucbCatalog, VOID * pfnCall
                 rgretrievecolumn,
                 iretrievecolumn ) );
 
+    // WARNING: if the order of rgretrievecolumn initialization is changed above this must change too
     columndef.cbDefaultValue    = rgretrievecolumn[iretrievecolumn-1].cbActual;
     columndef.cbCallbackData    = rgretrievecolumn[iretrievecolumn-2].cbActual;
 
@@ -1201,7 +1311,9 @@ LOCAL ERR ErrDBUTLDumpOneColumn( PIB * ppib, FUCB * pfucbCatalog, VOID * pfnCall
 }
 
 
+//  ================================================================
 LOCAL ERR ErrDBUTLDumpOneCallback( PIB * ppib, FUCB * pfucbCatalog, VOID * pfnCallback, VOID * pvCallback )
+//  ================================================================
 {
     JET_RETRIEVECOLUMN  rgretrievecolumn[3];
     CALLBACKDEF         callbackdef;
@@ -1240,7 +1352,9 @@ LOCAL ERR ErrDBUTLDumpOneCallback( PIB * ppib, FUCB * pfucbCatalog, VOID * pfnCa
 }
 
 
+//  ================================================================
 LOCAL ERR ErrDBUTLDumpPage( PIB * ppib, IFMP ifmp, PGNO pgno, PFNPAGE pfnpage, VOID * pvCallback )
+//  ================================================================
 {
     ERR err = JET_errSuccess;
     CSR csr;
@@ -1297,8 +1411,11 @@ HandleError:
     return err;
 }
 
+//  ================================================================
 LOCAL INT PrintCallback( const CALLBACKDEF * pcallbackdef, void * )
+//  ================================================================
 {
+    //  this will only compile if the signatures match
     PFNCALLBACKFN pfncallback = PrintCallback;
 
     Unused( pfncallback );
@@ -1344,10 +1461,12 @@ LOCAL INT PrintCallback( const CALLBACKDEF * pcallbackdef, void * )
     return 0;
 }
 
+//  ================================================================
 LOCAL VOID PrintSpaceHintMetaData(
     __in const CHAR * const szIndent,
     __in const CHAR * const szObjectType,
     __in const JET_SPACEHINTS * const pSpaceHints )
+//  ================================================================
 {
     printf( "%s%s Space Hints:       cbStruct: %d, grbit=0x%x\n", szIndent, szObjectType,
                 pSpaceHints->cbStruct, pSpaceHints->grbit );
@@ -1359,8 +1478,11 @@ LOCAL VOID PrintSpaceHintMetaData(
 }
 
 
+//  ================================================================
 LOCAL INT PrintIndexMetaData( const INDEXDEF * pindexdef, void * )
+//  ================================================================
 {
+    //  this will only compile if the signatures match
     PFNINDEX pfnindex = PrintIndexMetaData;
 
     Unused( pfnindex );
@@ -1415,6 +1537,8 @@ LOCAL INT PrintIndexMetaData( const INDEXDEF * pindexdef, void * )
         printf( "            Locale Name=%ws\n", pindexdef->wszLocaleName );
         printf( "            LCMap flags=0x%08x\n", pindexdef->dwMapFlags );
 
+        //  try to report current sort version. if it has an LCID, convert it to locale and get its sort version. Or
+        //  try to use the indexdef's locale name.
         if ( ( ( 0 != pindexdef->lcid ) &&
                 JET_errSuccess == ErrNORMLcidToLocale( pindexdef->lcid, wszLocaleName, _countof( wszLocaleName ) ) &&
                 JET_errSuccess == ErrNORMGetSortVersion( wszLocaleName, &qwCurrSortVersion, &sortID ) ) ||
@@ -1500,8 +1624,11 @@ LOCAL INT PrintIndexMetaData( const INDEXDEF * pindexdef, void * )
 }
 
     
+//  ================================================================
 LOCAL INT PrintColumn( const COLUMNDEF * pcolumndef, void * )
+//  ================================================================
 {
+    //  this will only compile if the signatures match
     PFNCOLUMN pfncolumn = PrintColumn;
 
     Unused( pfncolumn );
@@ -1530,7 +1657,7 @@ LOCAL INT PrintColumn( const COLUMNDEF * pcolumndef, void * )
     else
     {
         AssertSz( fFalse, "Unknown column type is not fixed, tagged, or variable." );
-        szFVT = "(?)";
+        szFVT = "(?)";  // unknown?  What type of column is this?
     }
     
     switch ( pcolumndef->coltyp )
@@ -1615,6 +1742,10 @@ LOCAL INT PrintColumn( const COLUMNDEF * pcolumndef, void * )
 
         printf("  %-12.12s%3.3s ", szType, szFVT );
 
+        //  only have 7 characters for column length,
+        //  so if it's greater than 7 digits, express
+        //  the length in MB instead of bytes
+        //
         if ( pcolumndef->cbLength > 9999999 )
         {
             DBUTLPrintfIntN( pcolumndef->cbLength / ( 1024 * 1024 ), 5 );
@@ -1678,8 +1809,11 @@ LOCAL INT PrintColumn( const COLUMNDEF * pcolumndef, void * )
     return 0;
 }
 
+//  ================================================================
 LOCAL INT PrintTableMetaData( const TABLEDEF * ptabledef, void * pv )
+//  ================================================================
 {
+    //  this will only compile if the signatures match
     PFNTABLE pfntable = PrintTableMetaData;
 
     Unused( pfntable );
@@ -1690,7 +1824,7 @@ LOCAL INT PrintTableMetaData( const TABLEDEF * ptabledef, void * pv )
     printf( "Table Name        PgnoFDP  ObjidFDP    PgnoLV   ObjidLV     Pages  Density\n"
             "==========================================================================\n"
             "%hs\n", ptabledef->szName );
-    printf( "                 " );
+    printf( "                 " ); // spaces rest to match up with PgnoFDP, ObjidFDP, etc.
     DBUTLPrintfIntN( ptabledef->pgnoFDP, 8 );
     printf( "  " );
     DBUTLPrintfIntN( ptabledef->objidFDP, 8 );
@@ -1785,6 +1919,7 @@ LOCAL INT PrintTableMetaData( const TABLEDEF * ptabledef, void * pv )
 }
 
 
+//  ================================================================
 ERR ErrDBUTLGetIfmpFucbOfPage(
     _Inout_ JET_SESID sesid,
     PCWSTR wszDatabase,
@@ -1795,6 +1930,7 @@ ERR ErrDBUTLGetIfmpFucbOfPage(
     _In_ ULONG cbObjName = 0 );
 #define cbDbutlObjNameMost ( JET_cbNameMost + 40 + 1 )
 ERR ErrDBUTLGetIfmpFucbOfPage( _Inout_ JET_SESID sesid, PCWSTR wszDatabase, _In_ const CPAGE& cpage, _Out_ IFMP * pifmp, _Out_ FUCB ** ppfucbObj, _Out_writes_bytes_opt_(cbObjName) WCHAR * wszObjName, _In_ ULONG cbObjName )
+//  ================================================================
 {
     ERR             err         = JET_errSuccess;
     JET_DBID        jdbid       = JET_dbidNil;
@@ -1802,10 +1938,14 @@ ERR ErrDBUTLGetIfmpFucbOfPage( _Inout_ JET_SESID sesid, PCWSTR wszDatabase, _In_
     *pifmp = ifmpNil;
     *ppfucbObj = pfucbNil;
 
+    //  We really do not know what MIGHT be wrong with this datababase, so let's do all this under
+    //  an exception handle so that node or page or whatever dump can probably continue.
     TRY
     {
+        // Disable index checking as we won't be using any _unicode text_ indexes.
         (void)SetParam( reinterpret_cast<PIB*>( sesid )->m_pinst, NULL, JET_paramEnableIndexChecking, JET_IndexCheckingOff, NULL );
 
+        //  Must open database RO because it is already opened above us to directly read the page data.
         Call( ErrIsamAttachDatabase( sesid, wszDatabase, fFalse, NULL, 0, JET_bitDbReadOnly ) );
         err = ErrIsamOpenDatabase( sesid, wszDatabase, NULL, &jdbid, JET_bitDbReadOnly );
         if ( err < JET_errSuccess )
@@ -1816,6 +1956,9 @@ ERR ErrDBUTLGetIfmpFucbOfPage( _Inout_ JET_SESID sesid, PCWSTR wszDatabase, _In_
         }
         Call( err );
 
+        // Try to do without trx because we want the FUCB not auto-closed by the commit.
+        // Also in DBUTL oper no one is competing - so should be no visibility issues.
+        //Call( ErrDIRBeginTransaction( reinterpret_cast<PIB*>( sesid ), XXXX, JET_bitTransactionReadOnly ) );
         Expected( reinterpret_cast<PIB*>( sesid )->Level() == 0 );
 
         PGNO pgnoFDP = pgnoNull;
@@ -1833,7 +1976,7 @@ ERR ErrDBUTLGetIfmpFucbOfPage( _Inout_ JET_SESID sesid, PCWSTR wszDatabase, _In_
 
         if ( wszObjName )
         {
-            Assert( ( cbDbutlObjNameMost - JET_cbNameMost ) > ( wcslen( L"::LV::[Space Tree]"  ) * 2  ) );
+            Assert( ( cbDbutlObjNameMost - JET_cbNameMost ) > ( wcslen( L"::LV::[Space Tree]" /* worst case from below */ ) * 2 /* sizeof(WCHAR) */ ) );
 
             OSStrCbFormatW( wszObjName, cbObjName, L"%hs", szObjName );
             if ( (*ppfucbObj)->u.pfcb->FTypeLV() )
@@ -1846,9 +1989,11 @@ ERR ErrDBUTLGetIfmpFucbOfPage( _Inout_ JET_SESID sesid, PCWSTR wszDatabase, _In_
             }
         }
 
+        //CallS( ErrDIRCommitTransaction( reinterpret_cast<PIB*>( sesid ), NO_GRBIT ) );
     }
     EXCEPT( efaExecuteHandler )
     {
+        //  Something has gone drastically wrong, but this is only eseutil, so just leak it (to avoid trying to close it)!
         wprintf( L"WARNING: Hit exception or AV trying to attach database or lookup object or table, continuing without detailed info/strings.\n" );
         *pifmp = ifmpNil;
         *ppfucbObj = pfucbNil;
@@ -1870,9 +2015,11 @@ HandleError:
     Assert( *pifmp == ifmpNil );
     Assert( *ppfucbObj == pfucbNil );
 
+    //CallS( ErrDIRCommitTransaction( reinterpret_cast<PIB*>( sesid ), NO_GRBIT ) );
 
     if ( jdbid != JET_dbidNil )
     {
+        //  This shouldn't fail for a RO attach?
         CallS( ErrIsamCloseDatabase( sesid, jdbid, NO_GRBIT ) );
         CallS( ErrIsamDetachDatabase( sesid, NULL, wszDatabase ) );
     }
@@ -1880,11 +2027,13 @@ HandleError:
     return err;
 }
 
+//  ================================================================
 void DBUTLCloseIfmpFucb( _Inout_ JET_SESID sesid, PCWSTR wszDatabase, _In_ IFMP ifmp, _Inout_ FUCB * pfucbObj )
+//  ================================================================
 {
     if ( pfucbObj != pfucbNil )
     {
-        Assert( pfucbObj->u.pfcb->FTypeTable() );
+        Assert( pfucbObj->u.pfcb->FTypeTable() ); // note like a FTypeLV() would be closed with like a DIRClose( pfucbTable );
         CallS( ErrFILECloseTable( reinterpret_cast<PIB*>( sesid ), pfucbObj ) );
     }
     if ( ifmp != ifmpNil )
@@ -1894,7 +2043,9 @@ void DBUTLCloseIfmpFucb( _Inout_ JET_SESID sesid, PCWSTR wszDatabase, _In_ IFMP 
     }
 }
 
+//  ================================================================
 LOCAL ERR ErrDBUTLDumpNode( JET_SESID sesid, IFileSystemAPI *const pfsapi, const WCHAR * const wszFile, const PGNO pgno, const INT iline, const  JET_GRBIT grbit )
+//  ================================================================
 {
     ERR             err         = JET_errSuccess;
     KEYDATAFLAGS    kdf;
@@ -1934,6 +2085,8 @@ LOCAL ERR ErrDBUTLDumpNode( JET_SESID sesid, IFileSystemAPI *const pfsapi, const
     if ( iline < -1 || iline >= cpage.Clines() )
     {
         printf( "Invalid iline: %d\n\n", iline );
+        //  errNDNotFound would be a MUCH better error, but we have a general policy against returning
+        //  internal errors out the JET API.  Perhaps we should relax that for utility \ dumping.
         Call( ErrERRCheck( cpage.FPageIsInitialized() ? JET_errInvalidParameter : JET_errPageNotInitialized ) );
     }
 
@@ -2031,12 +2184,14 @@ LOCAL ERR ErrDBUTLDumpNode( JET_SESID sesid, IFileSystemAPI *const pfsapi, const
             SpacePool sppPool;
 
             Call( ErrSPIGetExtentInfo( &kdf, &pgnoLast, &cpg, &sppPool ) );
+            // PGNO is usigned long. 
             printf( "%d (0x%x) pages ending at %lu (0x%x) in pool %lu (%ws)\n", cpg, cpg, pgnoLast, pgnoLast, (ULONG)sppPool, WszPoolName( sppPool ) );
         }
         else if( cpage.FPrimaryPage() )
         {
             if( cpage.FLongValuePage() )
             {
+                //  UNDONE: dump this
             }
             else
             {
@@ -2045,6 +2200,7 @@ LOCAL ERR ErrDBUTLDumpNode( JET_SESID sesid, IFileSystemAPI *const pfsapi, const
                     tcUtil->iorReason.SetIorp( iorpNone );
                     OnDebug( ERR errT = )ErrDBUTLGetIfmpFucbOfPage( sesid, wszFile, cpage, &ifmp, &pfucbTable );
                     tcUtil->iorReason.SetIorp( iorpDirectAccessUtil );
+                    //  Both valid or both Nil depending on err value
                     Assert( errT < JET_errSuccess || ifmp != ifmpNil );
                     Assert( errT < JET_errSuccess || pfucbTable != pfucbNil );
                     Assert( errT >= JET_errSuccess || ifmp == ifmpNil );
@@ -2148,6 +2304,8 @@ LOCAL ERR ErrDBUTLSeekToKey_(
 
     PGNO                pgnoCurr = pgnoRoot;
 
+    //  validate key length
+    //
     if ( cbPrintedKey % 2 != 0
         || cbPrintedKey > ( cbKeyAlloc * 2 )
         || cbPrintedData % 2 != 0
@@ -2162,6 +2320,9 @@ LOCAL ERR ErrDBUTLSeekToKey_(
     bm.key.suffix.SetPv( szKey );
     bm.key.suffix.SetCb( cbPrintedKey / 2 );
 
+    //  only use data portion of bookmark if we're on a btree
+    //  with non-unique keys
+    //
     if ( cpage.FNonUniqueKeys() && 0 != cbPrintedData )
     {
         bm.data.SetPv( szData );
@@ -2172,6 +2333,8 @@ LOCAL ERR ErrDBUTLSeekToKey_(
 
     AssertPREFIX( sizeof( szKey ) >= cbSuffix );
 
+    //  first, convert the printed key to a real key
+    //
     if ( !FDBUTLPrintedKeyToRealKey(
                 szPrintedKey,
                 szKey,
@@ -2181,10 +2344,14 @@ LOCAL ERR ErrDBUTLSeekToKey_(
         return ErrERRCheck( JET_errInvalidBookmark );
     }
 
+    //  next, convert the printed data (if any) to a real data
+    //
     const INT cbData = bm.data.Cb();
     
     if ( cbData > 0 )
     {
+        //  print a key/data separator
+        //
         printf( " | " );
 
         AssertPREFIX( sizeof( szData ) >= cbData );
@@ -2201,12 +2368,17 @@ LOCAL ERR ErrDBUTLSeekToKey_(
 
     printf( "\"\n" );
 
+    //  now seek down the btree for the bookmark
+    //
     while ( !cpage.FLeafPage() )
     {
         iline = IlineNDISeekGEQInternal( cpage, bm, &compare );
 
         if ( 0 == compare )
         {
+            //  see ErrNDISeekInternalPage() for an
+            //  explanation of why we increment by 1 here
+            //
             iline++;
         }
 
@@ -2244,10 +2416,15 @@ LOCAL ERR ErrDBUTLSeekToKey_(
         pgnoCurr = pgnoChild;
     }
 
+    //  find the first node in the leaf page that's
+    //  greater than or equal to the specified bookmark
+    //
     iline = IlineNDISeekGEQ( cpage, bm, !cpage.FNonUniqueKeys(), &compare );
     Assert( iline < cpage.Clines( ) );
     if ( iline < 0 )
     {
+        //  all nodes in page are less than key
+        //
         iline = cpage.Clines( ) - 1;
     }
 
@@ -2256,6 +2433,7 @@ LOCAL ERR ErrDBUTLSeekToKey_(
     return JET_errSuccess;
 }
 
+//  ================================================================
 LOCAL ERR ErrDBUTLDumpPage(
     INST * const            pinst,
     const WCHAR *           wszFile,
@@ -2263,6 +2441,7 @@ LOCAL ERR ErrDBUTLDumpPage(
     const WCHAR * const     wszPrintedKeyToSeek,
     const WCHAR * const     wszPrintedDataToSeek,
     const JET_GRBIT         grbit )
+//  ================================================================
 {
     ERR                     err         = JET_errSuccess;
     IFileSystemAPI * const  pfsapi      = pinst->m_pfsapi;
@@ -2293,8 +2472,12 @@ LOCAL ERR ErrDBUTLDumpPage(
     cpage.LoadPage( 1, pgno, pvPage, g_cbPage );
 
 
+    //  page integrity check.
+    //
     if (  cpage.Clines() == -1 )
     {
+        //  special pages with all 0 and 0 TAG. 
+        //
         AssertSz( cpage.ObjidFDP() == 0 || cpage.FPreInitPage(), "Odd page (%d):0 TAG page should be all 0s\r\n", cpage.PgnoThis() );
     }
     else
@@ -2350,16 +2533,29 @@ HandleError:
     return err;
 }
 
+//  Helper code to keep track of where we are in a run, and push each run into
+//  the stats structure.
 class CDBUTLIRunCalculator {
 
+    //  Where to accumulate run stats ....  
     CStats *        m_pStats;
     ULONG *         m_pcForwardScans;
 
+    //  For keeping the state of the current run ...
     ULONG           m_cpgCurrRun;
     PGNO            m_pgnoPrevious;
 
 public:
 
+    //
+    //  Order of calls:
+    //      CDBUTLIRunCalculator( pStat )
+    //      ErrProcessPage( pgno ) x N
+    //      [ErrBreak() x M]
+    //      ErrProcessPage( CDBUTLIRunCalculator::pgnoDoneSentinel )
+    //          Note: As of here pStat is now populated with all the runs.
+    //      ~CDBUTLIRunCalculator()
+    //
 
     CDBUTLIRunCalculator( CStats * pStat, ULONG * pcHaltedForwardProgress ) :
         m_pStats( pStat ),
@@ -2374,6 +2570,7 @@ public:
 
     ~CDBUTLIRunCalculator( )
     {
+        //  These asserts means someone forgot to process the pgnoDoneSentinel, and the last run was not added to m_pStats.
         Assert( m_pgnoPrevious == pgnoDoneSentinel );
         Assert( m_cpgCurrRun ==  0 );
         m_pStats = NULL;
@@ -2384,6 +2581,7 @@ public:
     {
         ERR err = JET_errSuccess;
 
+        //  We have a run, add the sample to the stats structure.
         if ( m_cpgCurrRun != 0 )
         {
             if ( m_pStats->ErrAddSample( m_cpgCurrRun ) == CStats::ERR::errOutOfMemory )
@@ -2405,14 +2603,15 @@ public:
         Assert( pgno != 0x0 );
         if ( m_pgnoPrevious == pgnoDoneSentinel )
         {
-            Assert( m_pgnoPrevious != pgnoDoneSentinel );
-            return JET_errSuccess;
+            Assert( m_pgnoPrevious != pgnoDoneSentinel );   // shouldn't happen
+            return JET_errSuccess;  // but handle it anyway.
         }
 
         if ( pgnoDoneSentinel == pgno )
         {
-            Call( ErrBreak() );
+            Call( ErrBreak() ); //  flush the last run.
 
+            //  Account for the last run if the tree isn't completely empty.
             if ( m_pStats->C() )
             {
                 (*m_pcForwardScans)++;
@@ -2421,6 +2620,9 @@ public:
         else
         {
 
+            //  If the current pgno is less than the previous, we have a halt in forward progress
+            //  through the DB, so count a forward scan.  This depends upon m_pgnoPrevious being
+            //  zero initially.
             if ( pgno < m_pgnoPrevious )
             {
                 (*m_pcForwardScans)++;
@@ -2445,9 +2647,11 @@ public:
         return err;
     }
     
-};
+};  // CDBUTLIRunCalculator
 
 
+//  A helper class to manage the stack allocation, and initialization
+//  of these complicated inter related structures for callback.
 class CBTreeStatsManager {
 
     private:
@@ -2464,6 +2668,7 @@ class CBTreeStatsManager {
         CBTreeStatsManager( JET_GRBIT grbit, BTREE_STATS * pbtsParent )
         {
 
+            //  Zero and initialize the cbStruct versions.
             memset( &m_btsBasicCatalog, 0, sizeof(m_btsBasicCatalog) );
             m_btsBasicCatalog.cbStruct = sizeof(m_btsBasicCatalog);
             memset( &m_btsSpaceTrees, 0, sizeof(m_btsSpaceTrees) );
@@ -2477,6 +2682,7 @@ class CBTreeStatsManager {
             memset( &m_btsLvData, 0, sizeof(m_btsLvData) );
             m_btsLvData.cbStruct = sizeof(m_btsLvData);
 
+            //  Setup histograms.
             m_btsParentOfLeaf.phistoIOContiguousRuns    = (JET_HISTO*)&m_rgHistos[0];
 
             m_btsFullWalk.phistoFreeBytes       = (JET_HISTO*)&m_rgHistos[1];
@@ -2502,6 +2708,7 @@ class CBTreeStatsManager {
             m_btsLvData.phistoLVExtraSeeks      = (JET_HISTO*)&m_rgHistos[18];
             m_btsLvData.phistoLVExtraBytes      = (JET_HISTO*)&m_rgHistos[19];
 
+            //  Zero the parent structure of all this.
             memset( &m_bts, 0, sizeof(m_bts) );
             m_bts.cbStruct = sizeof(m_bts);
 
@@ -2588,8 +2795,8 @@ class CBTreeStatsManager {
                 delete [] pbtsST->prgAvailExtents;
                 pbtsST->prgAvailExtents = NULL;
             }
-            Assert( pbtsST->prgOwnedExtents == NULL );
-            Assert( pbtsST->prgAvailExtents == NULL );
+            Assert( pbtsST->prgOwnedExtents == NULL );  // don't leak
+            Assert( pbtsST->prgAvailExtents == NULL );  // don't leak
             memset( pbtsST, 0, sizeof(*pbtsST) );
             pbtsST->cbStruct = sizeof(*pbtsST);
         }
@@ -2617,6 +2824,9 @@ class CBTreeStatsManager {
 
         ~CBTreeStatsManager ()
         {
+            // Do we want to validate anything?
+            //  Note the most important part is we reset all parts, and also that the histos 
+            //  destructor is called so we free allocated memory.
             if ( m_bts.pParentOfLeaf )
             {
                 ResetParentOfLeaf( m_bts.pParentOfLeaf );
@@ -2646,6 +2856,8 @@ LOCAL ERR ErrEnumDataNodes(
     PIB *           ppib,
     const IFMP      ifmp,
     const PGNO      pgnoFDP,
+    // fVistFlags not relevant, we can only visit the leaf
+    //  const ULONG             fVisitFlags,
     PFNVISITPAGE            pfnErrVisitPage,
     void *                  pvVisitPageCtx,
     CPAGE::PFNVISITNODE     pfnErrVisitNode,
@@ -2664,6 +2876,11 @@ LOCAL ERR ErrEnumDataNodes(
     Assert( pfucbNil != pfucb );
     Assert( pfcbNil != pfucb->u.pfcb );
 
+    //  This is shamelessly stolen from the space enumeration/printing code
+    //  that also walks a B-Tree during eseutil /ms, but its not clear if how
+    //  much of what we were doing here is goodness ... I read the lifecycle
+    //  of a FCB/FUCB doc, but it was still not clear.  Haha, just kidding, I
+    //  would've read such a doc if it existed.
     if ( !pfucb->u.pfcb->FInitialized() )
     {
         Assert( pgnoSystemRoot != pgnoFDP );
@@ -2674,6 +2891,9 @@ LOCAL ERR ErrEnumDataNodes(
 
         pfucb->u.pfcb->Lock();
 
+        //  must force FCB to initialized state to allow SPGetInfo() to
+        //  open more cursors on the FCB -- this is safe because no
+        //  other thread should be opening this FCB
         pfucb->u.pfcb->CreateComplete();
 
         pfucb->u.pfcb->Unlock();
@@ -2685,6 +2905,7 @@ LOCAL ERR ErrEnumDataNodes(
             || pgnoFDPMSO_NameIndex == pgnoFDP
             || pgnoFDPMSO_RootObjectIndex == pgnoFDP )
     {
+        //  fine!
     }
 
     BTUp( pfucb );
@@ -2693,10 +2914,12 @@ LOCAL ERR ErrEnumDataNodes(
             pfucb->u.pfcb->FTypeLV() ||
             FFUCBSpace( pfucb ) )
     {
+        //  we will be traversing the entire tree in order, preread all the pages
         FUCBSetSequential( pfucb );
         FUCBSetPrereadForward( pfucb, cpgPrereadSequential );
     }
 
+    // what about fDIRAllNode? it seems like we should be using it...  ?
     dib.dirflag = fDIRNull;
     dib.pos = posFirst;
     err = ErrBTDown( pfucb, &dib, latchReadNoTouch );
@@ -2716,7 +2939,7 @@ LOCAL ERR ErrEnumDataNodes(
 
                 if ( pfnErrVisitPage )
                 {
-                    Call( pfnErrVisitPage( pgnoLastSeen, 0xFFFFFFFF ,
+                    Call( pfnErrVisitPage( pgnoLastSeen, 0xFFFFFFFF /* unknown level */,
                                             &(Pcsr( pfucb )->Cpage()), pvVisitPageCtx ) );
                 }
 
@@ -2751,6 +2974,7 @@ HandleError:
 
         pfucb->u.pfcb->Lock();
 
+        //  force the FCB to be uninitialized so it will be purged by BTClose
 
         pfucb->u.pfcb->CreateCompleteErr( errFCBUnusable );
 
@@ -2761,6 +2985,7 @@ HandleError:
     return err;
 }
 
+//  Forward decl from cpage.
 ERR ErrAccumulatePageStats(
     const CPAGE::PGHDR * const  ppghdr,
     INT                         itag,
@@ -2769,6 +2994,7 @@ ERR ErrAccumulatePageStats(
     void *                      pvCtx
     );
 
+//  ================================================================
 LOCAL ERR ErrDBUTLGetDataPageStats(
     PIB *                       ppib,
     IFMP                        ifmp,
@@ -2776,22 +3002,28 @@ LOCAL ERR ErrDBUTLGetDataPageStats(
     BTREE_STATS_PAGE_SPACE *    pFullWalk,
     BTREE_STATS_LV *            pLvData
     )
+//  ================================================================
 {
     ERR                     err         = JET_errSuccess;
 
     CBTreeStatsManager::ResetFullWalk( pFullWalk );
-    Assert( pFullWalk->phistoFreeBytes );
+    Assert( pFullWalk->phistoFreeBytes );   // just checking one.
     CBTreeStatsManager::ResetLvData( pLvData );
 
     if ( fFalse )
     {
         err = ErrEnumDataNodes( ppib,
                             ifmp, pgnoFDP,
+                            // fVistFlags not relevant, we're visiting the leaf here.
+                            //  const ULONG             fVisitFlags,
                             NULL, NULL,
                             ErrAccumulatePageStats, pFullWalk );
     }
     else
     {
+        //  Even enumerating leaf nodes with this queue based breadth
+        //  first function, uses only 10 MBs of memory for a B-Tree with
+        //  20 GB worth of leaf pages.
 
         if ( pLvData )
         {
@@ -2828,6 +3060,7 @@ LOCAL ERR ErrDBUTLGetDataPageStats(
 }
 
 
+//  Should all this internal knowledge be in ErrSPGetInfo maybe?
 LOCAL ERR ErrDBUTLGetSpaceTreeInfo(
     PIB             *ppib,
     const IFMP      ifmp,
@@ -2857,6 +3090,9 @@ LOCAL ERR ErrDBUTLGetSpaceTreeInfo(
 
         pfucb->u.pfcb->Lock();
 
+        //  must force FCB to initialized state to allow SPGetInfo() to
+        //  open more cursors on the FCB -- this is safe because no
+        //  other thread should be opening this FCB
         pfucb->u.pfcb->CreateComplete();
 
         pfucb->u.pfcb->Unlock();
@@ -2868,6 +3104,7 @@ LOCAL ERR ErrDBUTLGetSpaceTreeInfo(
             || pgnoFDPMSO_NameIndex == pgnoFDP
             || pgnoFDPMSO_RootObjectIndex == pgnoFDP )
     {
+        //  fine!
     }
     
     Call( ErrBTIGotoRoot( pfucb, latchReadNoTouch ) );
@@ -2881,6 +3118,7 @@ LOCAL ERR ErrDBUTLGetSpaceTreeInfo(
     }
     else
     {
+        // Both should be true: Cb is 0 and Pv is NULL
         Assert( pfucb->kdfCurr.data.Cb() == 0 );
         Assert( pfucb->kdfCurr.data.Pv() == NULL );
         pbtsSpaceTree->fAutoIncPresents = fFalse;
@@ -2956,6 +3194,7 @@ HandleError:
 
         pfucb->u.pfcb->Lock();
 
+        //  force the FCB to be uninitialized so it will be purged by BTClose
 
         pfucb->u.pfcb->CreateCompleteErr( errFCBUnusable );
 
@@ -2983,6 +3222,8 @@ ERR EvalInternalPages(
 
     if ( pcpage->FLeafPage() )
     {
+        //  This is a leaf page, this can only happen for a single page B-Tree, because
+        //  we directed ErrBTUTLAcross() to only drive as deep as parent of leaf.
         Assert( pcpage->FRootPage() );
         Assert( pEval->pPOL->cpgInternal == 0 );
         pEval->pPOL->cpgData++;
@@ -2994,9 +3235,13 @@ ERR EvalInternalPages(
     }
     else
     {
+        //  Otherwise this is just an internal B-Tree page.
         pEval->pPOL->cpgInternal++;
 
         #ifdef SPACE_DUMP_ACOUNT_FOR_RUNS_BROKEN_BY_INTERNAL_PAGES
+        //  LB says if a pre-read crosses pages on internal level that the preread
+        //  is broken.  SO we may want to check runs that get broken by internal 
+        //  pages too. :P
         if ( pEval->pRC )
         {
             pEval->pRC->ErrBreak();
@@ -3007,6 +3252,7 @@ ERR EvalInternalPages(
     if ( pEval->pPOL->cDepth == 0 &&
         ( pcpage->FParentOfLeaf() || pcpage->FLeafPage() ) )
     {
+        //  We've gotten a leaf (root) or the parent of leaf page, we can figure out and set the depth of the b-tree...
         pEval->pPOL->cDepth = 1 + ( pcpage->FLeafPage() ? 0 : ( iLevel + 1 ) );
     }
 
@@ -3029,6 +3275,8 @@ ERR EvalInternalPageNodes(
 
     if( !( ppghdr->fFlags & CPAGE::fPageLeaf ) )
     {
+        //  Call through to accumulate stats on internal pages.
+        //
         if ( pEval->pPOL->pInternalPageStats )
         {
             CallR( ErrAccumulatePageStats(
@@ -3040,14 +3288,19 @@ ERR EvalInternalPageNodes(
         }
     }
 
+    //  Now compute b-tree based stats.
+    //
     if ( pkdf == NULL )
     {
-        Assert( itag == 0 );
+        Assert( itag == 0 );    // we don't process the external header as a regular node...
         return JET_errSuccess;
     }
 
     if ( pEval->pPOL->fEmpty )
     {
+        //  Not 100% sure we can know this w/o a full walk... this case means that there
+        //  is at least one node on a single page B-Tree or a child page of root.  Does
+        //  this mean the tree is not empty?
         pEval->pPOL->fEmpty = fFalse;
     }
 
@@ -3168,29 +3421,35 @@ ERR ErrDBUTLEnumSingleSpaceTree(
     ERR err = JET_errSuccess;
 
     Assert( pbts );
-    Assert( pbts->pParent );
+    Assert( pbts->pParent );    // OE/AE have a parent, we should be on a child pbts.
     Assert( pbts->pSpaceTrees );
-    Assert( pbts->pParent->pSpaceTrees->fMultiExtent );
+    Assert( pbts->pParent->pSpaceTrees->fMultiExtent ); // parent should be multi-extent
 
     Assert( eBTType == eBTreeTypeInternalSpaceOE ||
             eBTType == eBTreeTypeInternalSpaceAE );
 
+    //
+    //  First retrieve the root pages of the two (OE & AE) space trees from the parent.
+    //
 
     memset( pbts->pSpaceTrees, 0, sizeof(*(pbts->pSpaceTrees)) );
     pbts->pSpaceTrees->cbStruct = sizeof(*(pbts->pSpaceTrees));
     pbts->pSpaceTrees->pgnoOE = pbts->pParent->pSpaceTrees->pgnoOE;
     pbts->pSpaceTrees->pgnoAE = pbts->pParent->pSpaceTrees->pgnoAE;
 
+    //  Now pick which we're doing based on B Tree type asked for.
     PGNO pgnoFDP = ( eBTType == eBTreeTypeInternalSpaceOE ) ?
                         pbts->pSpaceTrees->pgnoOE :
                         pbts->pSpaceTrees->pgnoAE;
 
+    //  Setup catalog info.
+    //
     if ( pbts->pBasicCatalog )
     {
         pbts->pBasicCatalog->eType = eBTType;
-        pbts->pBasicCatalog->pgnoFDP = pgnoFDP;
+        pbts->pBasicCatalog->pgnoFDP = pgnoFDP; // parent has this.
         Assert( pbts->pBasicCatalog->objidFDP );
-        Assert( pbts->pParent->pBasicCatalog->objidFDP == pbts->pBasicCatalog->objidFDP );
+        Assert( pbts->pParent->pBasicCatalog->objidFDP == pbts->pBasicCatalog->objidFDP );  // should be true for both space trees
         if ( pbts->pBasicCatalog->eType == eBTreeTypeInternalSpaceOE )
         {
             OSStrCbCopyW( pbts->pBasicCatalog->rgName, sizeof(pbts->pBasicCatalog->rgName), L"[Owned Extents]" );
@@ -3203,6 +3462,8 @@ ERR ErrDBUTLEnumSingleSpaceTree(
         pbts->pBasicCatalog->pSpaceHints = NULL;
     }
 
+    //  Setup space tree info.
+    //
     if ( pbts->pSpaceTrees )
     {
         Assert( pbts->pSpaceTrees->cbStruct == sizeof(*(pbts->pSpaceTrees)) );
@@ -3224,11 +3485,15 @@ ERR ErrDBUTLEnumSingleSpaceTree(
 
     }
 
+    //  Parent of leaf
+    //
     if ( pbts->pParentOfLeaf )
     {
         Call( ErrDBUTLGetParentOfLeaf( ifmp, pgnoFDP, pbts->pParentOfLeaf ) );
     }
 
+    //  Full Walk
+    //
     if ( pbts->pFullWalk )
     {
         Call( ErrDBUTLGetDataPageStats(
@@ -3239,6 +3504,8 @@ ERR ErrDBUTLEnumSingleSpaceTree(
                     NULL ) );
     }
 
+    //  Initiate callback.
+    //
     Call( pfnBTreeStatsAnalysisFunc( pbts, pvBTreeStatsAnalysisFuncCtx ) );
 
 HandleError:
@@ -3257,20 +3524,27 @@ ERR ErrDBUTLEnumSpaceTrees(
     ERR err = JET_errSuccess;
 
     Assert( pbts );
-    Assert( pbts->pParent );
+    Assert( pbts->pParent );    // OE/AE have a parent, we should be on a child pbts.
     Assert( pbts->pSpaceTrees );
-    Assert( pbts->pParent->pSpaceTrees->fMultiExtent );
+    Assert( pbts->pParent->pSpaceTrees->fMultiExtent ); // parent should be multi-extent
 
+    //  Generic pieces common to both OE/AE trees...
+    //
     if ( pbts->pBasicCatalog )
     {
+        //  We just did the table, so we should be able to setup this data by copying it
+        //  down from the parent.
         memset( pbts->pBasicCatalog, 0, sizeof(*(pbts->pBasicCatalog)) );
         pbts->pBasicCatalog->cbStruct = sizeof(*(pbts->pBasicCatalog));
         pbts->pBasicCatalog->objidFDP = pbts->pParent->pBasicCatalog->objidFDP;
         Assert( pbts->pParent->pBasicCatalog->objidFDP == objidParent );
-        Assert( pbts->pBasicCatalog->objidFDP == objidParent );
+        Assert( pbts->pBasicCatalog->objidFDP == objidParent ); // lets make really sure.
         pbts->pBasicCatalog->pSpaceHints = NULL;
     }
 
+    //
+    //  Do OE Tree
+    //
 
     Call( ErrDBUTLEnumSingleSpaceTree(
                 ppib,
@@ -3281,6 +3555,9 @@ ERR ErrDBUTLEnumSpaceTrees(
                 pvBTreeStatsAnalysisFuncCtx ) );
 
 
+    //
+    //  Do AE Tree
+    //
 
     Call( ErrDBUTLEnumSingleSpaceTree(
                 ppib,
@@ -3296,8 +3573,11 @@ HandleError:
 }
 
 
+//  ================================================================
 ERR ErrDBUTLEnumIndexSpace( const INDEXDEF * pindexdef, void * pv )
+//  ================================================================
 {
+    //  this will only compile if the signatures match
     PFNINDEX    pfnindex        = ErrDBUTLEnumIndexSpace;
     ERR         err             = JET_errSuccess;
     DBUTIL_ENUM_SPACE_CTX   *pdbues = (DBUTIL_ENUM_SPACE_CTX *)pv;
@@ -3315,9 +3595,12 @@ ERR ErrDBUTLEnumIndexSpace( const INDEXDEF * pindexdef, void * pv )
 
     if ( pindexdef->fPrimary )
     {
+        //  primary index dumped when table was dumped
         return JET_errSuccess;
     }
 
+    //  Setup catalog data.
+    //
     if ( pbts->pBasicCatalog )
     {
         BTREE_STATS_BASIC_CATALOG * pbtsBasicCatalog = pbts->pBasicCatalog;
@@ -3334,6 +3617,8 @@ ERR ErrDBUTLEnumIndexSpace( const INDEXDEF * pindexdef, void * pv )
     CPRINTF * const pcprintf = ( pdbues->grbitDbUtilOptions & JET_bitDBUtilOptionDumpVerbose ) ?
         CPRINTFSTDOUT::PcprintfInstance() : NULL;
 
+    //  Setup other BTree stats data.
+    //
     CallR( ErrDBUTLGetAdditionalSpaceData(
                     ppib,
                     ifmp,
@@ -3342,13 +3627,20 @@ ERR ErrDBUTLEnumIndexSpace( const INDEXDEF * pindexdef, void * pv )
                     pbts,
                     pcprintf ) );
 
+    //  Callback to client.
+    //
     Call( pdbues->pfnBTreeStatsAnalysisFunc( pbts, pdbues->pvBTreeStatsAnalysisFuncCtx ) );
 
 
+    //
+    //  Now do space trees if appropriate.
+    //
     if ( pbts->pSpaceTrees && pbts->pSpaceTrees->fMultiExtent )
     {
         CBTreeStatsManager  btsIdxSpaceTreesManager( pdbues->grbitDbUtilOptions, pbts );
 
+        //  Note this function fills in all data and does the callbacks.
+        //
         Call( ErrDBUTLEnumSpaceTrees(
                     ppib,
                     ifmp,
@@ -3363,8 +3655,11 @@ HandleError:
     return err;
 }
 
+//  ================================================================
 ERR ErrDBUTLEnumTableSpace( const TABLEDEF * ptabledef, void * pv )
+//  ================================================================
 {
+    //  this will only compile if the signatures match
     PFNTABLE pfntable = ErrDBUTLEnumTableSpace;
 
     ERR         err;
@@ -3374,6 +3669,7 @@ ERR ErrDBUTLEnumTableSpace( const TABLEDEF * ptabledef, void * pv )
 
     BTREE_STATS *   pbts = pdbues->pbts;
 
+    //  For children of tables.
     CBTreeStatsManager  btsTableChildrenManager( pdbues->grbitDbUtilOptions, pbts );
 
     Unused( pfntable );
@@ -3381,11 +3677,17 @@ ERR ErrDBUTLEnumTableSpace( const TABLEDEF * ptabledef, void * pv )
     Assert( ptabledef );
 
     Assert( pbts );
-    Assert( pbts->pParent );
+    Assert( pbts->pParent );                        // all tables have a parent
 
+    //
+    //  [1] Setup data and do callback for this table.
+    //
 
+    //  Setup catalog data.
+    //
     if ( pbts->pBasicCatalog )
     {
+        //  User registered interest in this data.
         BTREE_STATS_BASIC_CATALOG * pbtsBasicCatalog = pbts->pBasicCatalog;
 
         pbtsBasicCatalog->cbStruct = sizeof(*pbtsBasicCatalog);
@@ -3406,6 +3708,8 @@ ERR ErrDBUTLEnumTableSpace( const TABLEDEF * ptabledef, void * pv )
     CPRINTF * const pcprintf = ( pdbues->grbitDbUtilOptions & JET_bitDBUtilOptionDumpVerbose ) ?
         CPRINTFSTDOUT::PcprintfInstance() : NULL;
 
+    //  Setup other BTree stats data.
+    //
     Call( ErrDBUTLGetAdditionalSpaceData(
                     ppib,
                     ifmp,
@@ -3414,15 +3718,25 @@ ERR ErrDBUTLEnumTableSpace( const TABLEDEF * ptabledef, void * pv )
                     pbts,
                     pcprintf ) );
 
+    //  Callback to client.
+    //
     Call( pdbues->pfnBTreeStatsAnalysisFunc( pbts, pdbues->pvBTreeStatsAnalysisFuncCtx ) );
 
 
+    //
+    //  Setup ourselves for doing callback on children of this table.
+    //
     pbts = btsTableChildrenManager.Pbts();
 
 
+    //
+    //  [2,3]   The first children we do are the space trees (OE & AE).
+    //
     if ( pbts->pSpaceTrees && pbts->pParent->pSpaceTrees->fMultiExtent )
     {
 
+        //  Note this function fills in all data and does the callbacks.
+        //
         Call( ErrDBUTLEnumSpaceTrees(
                     ppib,
                     ifmp,
@@ -3433,17 +3747,24 @@ ERR ErrDBUTLEnumTableSpace( const TABLEDEF * ptabledef, void * pv )
 
     }
 
+    //
+    //  [4] If the LV exists, we do that child next.
+    //
     if ( pgnoNull != ptabledef->pgnoFDPLongValues )
     {
 
+        //  Fill basic catalog info.
+        //
         if ( pbts->pBasicCatalog )
         {
+            //  User registered interest in this data.
             BTREE_STATS_BASIC_CATALOG * pbtsBasicCatalog = pbts->pBasicCatalog;
             pbtsBasicCatalog->cbStruct = sizeof(*pbtsBasicCatalog);
             pbtsBasicCatalog->eType = eBTreeTypeInternalLongValue;
             OSStrCbCopyW( pbtsBasicCatalog->rgName, sizeof(pbtsBasicCatalog->rgName), L"[Long Values]" );
             pbtsBasicCatalog->objidFDP = ptabledef->objidFDPLongValues;
             pbtsBasicCatalog->pgnoFDP = ptabledef->pgnoFDPLongValues;
+            //  Getting space hints for LV tree.
             pbtsBasicCatalog->pSpaceHints = (JET_SPACEHINTS*) &(ptabledef->spacehintsLV);
         }
 
@@ -3452,6 +3773,8 @@ ERR ErrDBUTLEnumTableSpace( const TABLEDEF * ptabledef, void * pv )
             pbts->pLvData->cbLVChunkMax = ptabledef->cbLVChunkMax;
         }
 
+        //  Fill other data.
+        //
         Call( ErrDBUTLGetAdditionalSpaceData(
                         ppib,
                         ifmp,
@@ -3460,15 +3783,22 @@ ERR ErrDBUTLEnumTableSpace( const TABLEDEF * ptabledef, void * pv )
                         pbts,
                         pcprintf ) );
                         
+        //  Callback to client.
+        //
         Call( pdbues->pfnBTreeStatsAnalysisFunc( pbts, pdbues->pvBTreeStatsAnalysisFuncCtx ) );
 
 
+        //
+        // [4.1,4.2]    If the LV is a multi-extent, do space trees as well.
+        //
 
         CBTreeStatsManager  btsLVSpaceTreesManager( pdbues->grbitDbUtilOptions, pbts );
 
         if ( pbts->pSpaceTrees && pbts->pSpaceTrees->fMultiExtent )
         {
 
+            //  Note this function fills in all data and does the callbacks.
+            //
             Call( ErrDBUTLEnumSpaceTrees(
                         ppib,
                         ifmp,
@@ -3480,12 +3810,17 @@ ERR ErrDBUTLEnumTableSpace( const TABLEDEF * ptabledef, void * pv )
         }
     }
 
+    //
+    //  [5-n]   Finally enumerate all the secondary indices.
+    //
 
     DBUTIL_ENUM_SPACE_CTX dbuesIdx;
     memcpy( &dbuesIdx, pdbues, sizeof(dbuesIdx) );
 
     dbuesIdx.pbts =  btsTableChildrenManager.Pbts();
 
+    //  Everything is reuseable from the original handle, but we want to use 
+    //  the new BTree stats structure set out for the children of tables.
     JET_DBUTIL_W    dbutil;
     memset( &dbutil, 0, sizeof( dbutil ) );
     
@@ -3499,7 +3834,7 @@ ERR ErrDBUTLEnumTableSpace( const TABLEDEF * ptabledef, void * pv )
     dbutil.edbdump      = opEDBDumpIndexes;
     dbutil.grbitOptions = pdbues->grbitDbUtilOptions;
 
-    pdbues->objidCurrentTable = ptabledef->objidFDP;
+    pdbues->objidCurrentTable = ptabledef->objidFDP;    // set this so ErrDBUTLEnumIndexSpace can know parent objid.
 
     err = ErrDBUTLDump( pdbues->ppib, &dbutil );
 
@@ -3509,8 +3844,11 @@ HandleError:
 }
 
 
+//  ================================================================
 LOCAL INT PrintIndexBareMetaData( const INDEXDEF * pindexdef, void * pv )
+//  ================================================================
 {
+    //  this will only compile if the signatures match
     PFNINDEX    pfnindex        = PrintIndexBareMetaData;
 
     Unused( pfnindex );
@@ -3527,8 +3865,11 @@ LOCAL INT PrintIndexBareMetaData( const INDEXDEF * pindexdef, void * pv )
 }
 
 
+//  ================================================================
 LOCAL INT PrintTableBareMetaData( const TABLEDEF * ptabledef, void * pv )
+//  ================================================================
 {
+    //  this will only compile if the signatures match
     PFNTABLE    pfntable        = PrintTableBareMetaData;
     ERR         err;
     JET_DBUTIL_A    *pdbutil    = (JET_DBUTIL_A *)pv;
@@ -3570,7 +3911,9 @@ LOCAL INT PrintTableBareMetaData( const TABLEDEF * ptabledef, void * pv )
     return err;
 }
 
+//  ================================================================
 LOCAL VOID DBUTLDumpDefaultSpaceHints( __inout JET_SPACEHINTS * const pSpacehints, __in const CPG cpgInitial, __in const BOOL fTable )
+//  ================================================================
 {
     if ( 0 == pSpacehints->cbInitial )
     {
@@ -3584,6 +3927,9 @@ LOCAL VOID DBUTLDumpDefaultSpaceHints( __inout JET_SPACEHINTS * const pSpacehint
 
     if ( 0 == pSpacehints->cbMinExtent )
     {
+        // If it's not a table, we must consider if JET_bitSpaceHintsUtilizeParentSpace is not set. This grbit will 
+        // change the allocation behavior so that it will only allocate one page at a time for the index (although it gets 
+        // multiple pages to the parent tables' space and then gives one page to the index).
         if ( fTable || ( 0 == ( pSpacehints->grbit & JET_bitSpaceHintsUtilizeParentSpace ) ) )
         {
             pSpacehints->cbMinExtent = cpgSmallGrow * g_cbPage;
@@ -3596,6 +3942,9 @@ LOCAL VOID DBUTLDumpDefaultSpaceHints( __inout JET_SPACEHINTS * const pSpacehint
 
     if ( 0 == pSpacehints->cbMaxExtent )
     {
+        // If it's not a table, we must consider if JET_bitSpaceHintsUtilizeParentSpace is not set. This grbit will 
+        // change the allocation behavior so that it will only allocate one page at a time for the index (although it gets 
+        // multiple pages to the parent tables' space and then gives one page to the index).
         if ( fTable || ( 0 == ( pSpacehints->grbit & JET_bitSpaceHintsUtilizeParentSpace ) ) )
         {
             pSpacehints->cbMaxExtent = cpageSEDefault * g_cbPage;
@@ -3623,7 +3972,9 @@ ERR ErrCATIUnmarshallExtendedSpaceHints(
     );
 
 
+//  ================================================================
 LOCAL ERR ErrDBUTLDumpOneIndex( PIB * ppib, FUCB * pfucbCatalog, VOID * pfnCallback, VOID * pvCallback )
+//  ================================================================
 {
     JET_RETRIEVECOLUMN  rgretrievecolumn[17];
     BYTE                pbufidxseg[JET_ccolKeyMost*sizeof(IDXSEG)];
@@ -3641,18 +3992,21 @@ LOCAL ERR ErrDBUTLDumpOneIndex( PIB * ppib, FUCB * pfucbCatalog, VOID * pfnCallb
     memset( &indexdef, 0, sizeof( indexdef ) );
     memset( rgretrievecolumn, 0, sizeof( rgretrievecolumn ) );
 
+    //  objectId of owning table
     rgretrievecolumn[iretrievecolumn].columnid      = fidMSO_ObjidTable;
     rgretrievecolumn[iretrievecolumn].pvData        = (BYTE *)&objidTable;
     rgretrievecolumn[iretrievecolumn].cbData        = sizeof(objidTable);
     rgretrievecolumn[iretrievecolumn].itagSequence  = 1;
     ++iretrievecolumn;
 
+    //  pgnoFDP of index tree
     rgretrievecolumn[iretrievecolumn].columnid      = fidMSO_PgnoFDP;
     rgretrievecolumn[iretrievecolumn].pvData        = (BYTE *)&indexdef.pgnoFDP;
     rgretrievecolumn[iretrievecolumn].cbData        = sizeof(indexdef.pgnoFDP);
     rgretrievecolumn[iretrievecolumn].itagSequence  = 1;
     ++iretrievecolumn;
 
+    //  indexId (objidFDP of index tree)
     rgretrievecolumn[iretrievecolumn].columnid      = fidMSO_Id;
     rgretrievecolumn[iretrievecolumn].pvData        = (BYTE *)&indexdef.objidFDP;
     rgretrievecolumn[iretrievecolumn].cbData        = sizeof(indexdef.objidFDP);
@@ -3780,6 +4134,9 @@ LOCAL ERR ErrDBUTLDumpOneIndex( PIB * ppib, FUCB * pfucbCatalog, VOID * pfnCallb
     indexdef.dwDefinedVersion   = (DWORD)( ( qwSortVersion >> 32 ) & 0xFFFFFFFF );
     indexdef.dwNLSVersion       = (DWORD)( qwSortVersion & 0xFFFFFFFF );
 
+    // If this is a secondary index and it is derived as well, we must look at the space hints for
+    // the template index instead. Of course, we only do so when there *are* any space hints
+    // set for this index in the first place - otherwise there is nothing that it could have inherited.
     if ( !indexdef.fPrimary && indexdef.fDerivedIndex )
     {
         const INT cchTableName = JET_cbNameMost + 1;
@@ -3787,6 +4144,7 @@ LOCAL ERR ErrDBUTLDumpOneIndex( PIB * ppib, FUCB * pfucbCatalog, VOID * pfnCallb
         FUCB * pfucbDerivedTable;
         FCB * pfcbDerivedIndex;
 
+        // First we find the table name for this index using its objid...
         CallR( ErrCATSeekTableByObjid(
                 ppib,
                 pfucbCatalog->ifmp,
@@ -3795,6 +4153,7 @@ LOCAL ERR ErrDBUTLDumpOneIndex( PIB * ppib, FUCB * pfucbCatalog, VOID * pfnCallb
                 cchTableName,
                 NULL ) );
 
+        // ... then open it in read-only mode.
         CallR( ErrFILEOpenTable(
                 ppib,
                 pfucbCatalog->u.pfcb->Ifmp(),
@@ -3804,6 +4163,7 @@ LOCAL ERR ErrDBUTLDumpOneIndex( PIB * ppib, FUCB * pfucbCatalog, VOID * pfnCallb
 
         const TDB * ptdbDerivedTable = pfucbDerivedTable->u.pfcb->Ptdb();
 
+        // Let's now find the derived index...
         for ( pfcbDerivedIndex = pfucbDerivedTable->u.pfcb;
             NULL != pfcbDerivedIndex;
             pfcbDerivedIndex = pfcbDerivedIndex->PfcbNextIndex() )
@@ -3820,8 +4180,11 @@ LOCAL ERR ErrDBUTLDumpOneIndex( PIB * ppib, FUCB * pfucbCatalog, VOID * pfnCallb
             CallR( JET_errCatalogCorrupted );
         }
 
+        // ... and then get its space hints. This will contain the already stamped template's
+        // space hints as the FCB above was instantiated already. 
         pfcbDerivedIndex->GetAPISpaceHints( &indexdef.spacehints );
         
+        // Finally close the cursor.
         CallS( ErrFILECloseTable( ppib, pfucbDerivedTable ) );
     }
     else
@@ -3835,6 +4198,7 @@ LOCAL ERR ErrDBUTLDumpOneIndex( PIB * ppib, FUCB * pfucbCatalog, VOID * pfnCallb
         }
     }
 
+    // We now must set the actual values in for the defaults set to zero.
 
     DBUTLDumpDefaultSpaceHints( &indexdef.spacehints, cpgInitialTreeDefault, fFalse );
     
@@ -3854,6 +4218,7 @@ LOCAL ERR ErrDBUTLDumpOneIndex( PIB * ppib, FUCB * pfucbCatalog, VOID * pfnCallb
         for ( iidxseg = 0; iidxseg < indexdef.ccolumnidDef; iidxseg++ )
         {
             const LE_IDXSEG     * const ple_idxseg  = (LE_IDXSEG *)pbufidxseg + iidxseg;
+            //  Endian conversion
             indexdef.rgidxsegDef[iidxseg] = *ple_idxseg;
             Assert( FCOLUMNIDValid( indexdef.rgidxsegDef[iidxseg].Columnid() ) );
         }
@@ -3866,6 +4231,7 @@ LOCAL ERR ErrDBUTLDumpOneIndex( PIB * ppib, FUCB * pfucbCatalog, VOID * pfnCallb
         for ( iidxseg = 0; iidxseg < indexdef.ccolumnidConditional; iidxseg++ )
         {
             const LE_IDXSEG     * const ple_idxsegConditional   = (LE_IDXSEG *)pbufidxsegConditional + iidxseg;
+            //  Endian conversion
             indexdef.rgidxsegConditional[iidxseg] = *ple_idxsegConditional;
             Assert( FCOLUMNIDValid( indexdef.rgidxsegConditional[iidxseg].Columnid() ) );
         }
@@ -3926,6 +4292,7 @@ LOCAL ERR ErrDBUTLDumpOneIndex( PIB * ppib, FUCB * pfucbCatalog, VOID * pfnCallb
     return (*pfnindex)( &indexdef, pvCallback );
 }
 
+// Get LV space hints.
 LOCAL ERR ErrGetSpaceHintsForLV( PIB * ppib, const IFMP ifmp, const OBJID objidTable, JET_SPACEHINTS * const pSpacehints )
 {
     ERR err = JET_errSuccess;
@@ -3934,6 +4301,7 @@ LOCAL ERR ErrGetSpaceHintsForLV( PIB * ppib, const IFMP ifmp, const OBJID objidT
     PGNO pgnoFDP;
     CHAR szTableName[JET_cbNameMost+1];
     
+    // Get table name from objidTable.
     Call( ErrCATSeekTableByObjid(
             ppib,
             ifmp,
@@ -3942,12 +4310,15 @@ LOCAL ERR ErrGetSpaceHintsForLV( PIB * ppib, const IFMP ifmp, const OBJID objidT
             sizeof( szTableName ),
             &pgnoFDP ) );
 
+    // Open the cursor pfucbTable to open LV root and get space hint
     CallR( ErrFILEOpenTable( ppib, ifmp, &pfucbTable, szTableName ) );
 
+    // Open the LV and get the pfucbLV.
     Call( ErrFILEOpenLVRoot( pfucbTable, &pfucbLV, fFalse ) );
 
     if( pfucbLV != pfucbNil )
     {
+        // Get the LV space hint
         pfucbLV->u.pfcb->GetAPISpaceHints( pSpacehints );
     }
 HandleError:
@@ -3965,7 +4336,9 @@ HandleError:
     return err;
 }
 
+//  ================================================================
 LOCAL ERR ErrDBUTLDumpOneTable( PIB * ppib, FUCB * pfucbCatalog, PFNTABLE pfntable, VOID * pvCallback )
+//  ================================================================
 {
     JET_RETRIEVECOLUMN  rgretrievecolumn[11];
     BYTE                pbExtendedSpaceHints[cbExtendedSpaceHints];
@@ -4050,6 +4423,8 @@ LOCAL ERR ErrDBUTLDumpOneTable( PIB * ppib, FUCB * pfucbCatalog, PFNTABLE pfntab
         tabledef.cbLVChunkMax = (LONG)UlParam( JET_paramLVChunkSizeMost );
     }
 
+    // If this is a derived table and it has no space hints of its own, we should look at the template
+    // table for space hints it may be inheriting.
     if ( ( tabledef.fFlags & JET_bitObjectTableDerived ) && ( 0 == rgretrievecolumn[iretcolExtSpaceHints].cbActual ) )
     {
         FUCB    *pfucbTemplateTable;
@@ -4069,6 +4444,7 @@ LOCAL ERR ErrDBUTLDumpOneTable( PIB * ppib, FUCB * pfucbCatalog, PFNTABLE pfntab
 
         pfucbTemplateTable->u.pfcb->GetAPISpaceHints( &tabledef.spacehints );
         
+        // Close the cursor.
         CallS( ErrFILECloseTable( ppib, pfucbTemplateTable ) );
     }
     else
@@ -4092,6 +4468,7 @@ LOCAL ERR ErrDBUTLDumpOneTable( PIB * ppib, FUCB * pfucbCatalog, PFNTABLE pfntab
         }
     }
 
+    // We now must set the actual values in for the defaults set to zero.
 
 
     DBUTLDumpDefaultSpaceHints( &tabledef.spacehints, tabledef.pages, fTrue );
@@ -4103,6 +4480,7 @@ LOCAL ERR ErrDBUTLDumpOneTable( PIB * ppib, FUCB * pfucbCatalog, PFNTABLE pfntab
                 &tabledef.pgnoFDPLongValues,
                 &tabledef.objidFDPLongValues ) );
     
+    // Try to dump the actual LV spacehints out here too.
     err = ErrGetSpaceHintsForLV( ppib, pfucbCatalog->u.pfcb->Ifmp(), tabledef.objidFDP, &tabledef.spacehintsLV );
     if ( err >= JET_errSuccess )
     {
@@ -4110,6 +4488,8 @@ LOCAL ERR ErrDBUTLDumpOneTable( PIB * ppib, FUCB * pfucbCatalog, PFNTABLE pfntab
     }
     else
     {
+        // We may fail to open a table (e.g. has a large number of indices; or has callback DLL not present).
+        // We'll just skip dumping the space hints in that case.
         err = JET_errSuccess;
     }
 
@@ -4119,7 +4499,9 @@ HandleError:
     return err;
 }
 
+//  ================================================================
 LOCAL ERR ErrDBUTLDumpTables( PIB * ppib, IFMP ifmp, __in PCWSTR wszTableName, PFNTABLE pfntable, VOID * pvCallback )
+//  ================================================================
 {
     ERR     err;
     FUCB    *pfucbCatalog   = pfucbNil;
@@ -4131,6 +4513,7 @@ LOCAL ERR ErrDBUTLDumpTables( PIB * ppib, IFMP ifmp, __in PCWSTR wszTableName, P
 
     if ( NULL != wszTableName )
     {
+        //  find the table we want and dump it
         const BYTE  bTrue   = 0xff;
         CAutoSZDDL  szTableName;
         
@@ -4177,6 +4560,7 @@ HandleError:
 }
 
 
+//  ================================================================
 LOCAL ERR ErrDBUTLDumpTableObjects(
     PIB             *ppib,
     const IFMP      ifmp,
@@ -4185,6 +4569,7 @@ LOCAL ERR ErrDBUTLDumpTableObjects(
     PFNDUMP         pfnDump,
     VOID            *pfnCallback,
     VOID            *pvCallback )
+//  ================================================================
 {
     ERR             err;
     FUCB            *pfucbCatalog   = pfucbNil;
@@ -4249,9 +4634,11 @@ HandleError:
     return err;
 }
 
-#endif
+#endif // !MINIMAL_FUNCTIONALITY
 
+//  ================================================================
 LOCAL ERR ErrDBUTLDumpPageUsage( JET_SESID sesid, const JET_DBUTIL_W * pdbutil )
+//  ================================================================
 {
     ERR             err;
     PIB *           ppib        = (PIB *)sesid;
@@ -4260,6 +4647,10 @@ LOCAL ERR ErrDBUTLDumpPageUsage( JET_SESID sesid, const JET_DBUTIL_W * pdbutil )
 
     CallR( ErrPIBCheck( ppib ) );
 
+    //  normally we'd dispatch API calls, so this check wouldn't
+    //  be needed, but since this is just some hack functionality
+    //  I'm throwing in, it's easier just to bypass the dispatch layer
+    //
     if ( JET_tableidNil == pdbutil->tableid || pfucbNil == pfucb )
     {
         CallR( ErrERRCheck( JET_errInvalidTableId ) );
@@ -4270,6 +4661,8 @@ LOCAL ERR ErrDBUTLDumpPageUsage( JET_SESID sesid, const JET_DBUTIL_W * pdbutil )
 
     if ( pdbutil->grbitOptions & JET_bitDBUtilOptionDumpLVPageUsage )
     {
+        //  LV FCB may not yet be linked into the TDB, so just go to the catalog
+        //
         Call( ErrCATAccessTableLV( ppib, pfucb->ifmp, pfucb->u.pfcb->ObjidFDP(), &pgnoFDP ) );
     }
     else
@@ -4288,7 +4681,9 @@ HandleError:
 #ifdef MINIMAL_FUNCTIONALITY
 #else
 
+//  ================================================================
 LOCAL ERR ErrDBUTLDump( JET_SESID sesid, const JET_DBUTIL_W *pdbutil )
+//  ================================================================
 {
     ERR     err;
 
@@ -4353,7 +4748,9 @@ LOCAL ERR ErrDBUTLDump( JET_SESID sesid, const JET_DBUTIL_W *pdbutil )
 }
 
 
+//  ================================================================
 LOCAL ERR ErrDBUTLDumpTables( DBCCINFO *pdbccinfo, PFNTABLE pfntable, VOID * pvCtx )
+//  ================================================================
 {
     JET_SESID   sesid           = (JET_SESID)pdbccinfo->ppib;
     JET_DBID    dbid            = (JET_DBID)pdbccinfo->ifmp;
@@ -4378,9 +4775,11 @@ LOCAL ERR ErrDBUTLDumpTables( DBCCINFO *pdbccinfo, PFNTABLE pfntable, VOID * pvC
 }
 
 
-#endif
+#endif // !MINIMAL_FUNCTIONALITY
 
+//  ================================================================
 LOCAL ERR ErrDBUTLDumpFlushMap( INST* const pinst, const WCHAR* const wszFlushMapFilePath, const FMPGNO fmpgno, const JET_GRBIT grbit )
+//  ================================================================
 {
     if ( grbit & JET_bitDBUtilOptionVerify )
     {
@@ -4392,7 +4791,9 @@ LOCAL ERR ErrDBUTLDumpFlushMap( INST* const pinst, const WCHAR* const wszFlushMa
     }
 }
 
+//  ================================================================
 LOCAL ERR ErrDBUTLDumpSpaceCat( JET_SESID sesid, JET_DBUTIL_W *pdbutil )
+//  ================================================================
 {
     ERR err = JET_errSuccess;
     JET_DBID dbid = JET_dbidNil;
@@ -4458,7 +4859,9 @@ HandleError:
     return err;
 }
 
+//  ================================================================
 LOCAL ERR ErrDBUTLDumpCachedFileHeader( const WCHAR* const wszFilePath, const JET_GRBIT grbit )
+//  ================================================================
 {
     ERR err = JET_errSuccess;
 
@@ -4468,7 +4871,9 @@ HandleError:
     return err;
 }
 
+//  ================================================================
 LOCAL ERR ErrDBUTLDumpCacheFile( const WCHAR* const wszFilePath, const JET_GRBIT grbit )
+//  ================================================================
 {
     ERR err = JET_errSuccess;
 
@@ -4480,7 +4885,9 @@ HandleError:
 
 BOOL g_fDisableDumpPrintF = fFalse;
 
+//  ================================================================
 ERR ISAMAPI ErrIsamDBUtilities( JET_SESID sesid, JET_DBUTIL_W *pdbutil )
+//  ================================================================
 {
     ERR     err     = JET_errSuccess;
     INST    *pinst  = PinstFromPpib( (PIB*)sesid );
@@ -4488,6 +4895,7 @@ ERR ISAMAPI ErrIsamDBUtilities( JET_SESID sesid, JET_DBUTIL_W *pdbutil )
     PIBTraceContextScope tcScope = ( (PIB*)sesid )->InitTraceContextScope();
     tcScope->nParentObjectClass = tceNone;
 
+    //  verify input
 
     Assert( pdbutil );
     Assert( pdbutil->cbStruct == sizeof( JET_DBUTIL_W ) );
@@ -4499,6 +4907,7 @@ ERR ISAMAPI ErrIsamDBUtilities( JET_SESID sesid, JET_DBUTIL_W *pdbutil )
          opDBUTILDumpSpaceCategory     != pdbutil->op && 
          opDBUTILDumpRBSPages          != pdbutil->op )
     {
+        //  the current operation requires szDatabase != NULL
 
         if ( NULL == pdbutil->szDatabase || L'\0' == pdbutil->szDatabase[0] )
         {
@@ -4508,6 +4917,7 @@ ERR ISAMAPI ErrIsamDBUtilities( JET_SESID sesid, JET_DBUTIL_W *pdbutil )
 
     if ( opDBUTILDumpRBSPages == pdbutil->op )
     {
+        //  the current operation requires szDatabase != NULL
 
         if ( NULL == pdbutil->rbsOptions.szDatabase || L'\0' == pdbutil->rbsOptions.szDatabase[0] )
         {
@@ -4519,6 +4929,8 @@ ERR ISAMAPI ErrIsamDBUtilities( JET_SESID sesid, JET_DBUTIL_W *pdbutil )
     {
         if ( pinst->m_plog->FLGFileOpened() || !pinst->FComputeLogDisabled() )
         {
+            // calling this function when there is already a log attached
+            // to the instance is not supported.
             return ErrERRCheck( JET_errInvalidParameter );
         }
     }
@@ -4528,6 +4940,7 @@ ERR ISAMAPI ErrIsamDBUtilities( JET_SESID sesid, JET_DBUTIL_W *pdbutil )
         g_fDisableDumpPrintF = fTrue;
     }
 
+    //  dispatch the work
 
     switch ( pdbutil->op )
     {
@@ -4541,6 +4954,9 @@ ERR ISAMAPI ErrIsamDBUtilities( JET_SESID sesid, JET_DBUTIL_W *pdbutil )
                                          pdbutil->checksumlogfrommemory.cbBuffer );
 
         case opDBUTILDumpLogfile:
+            // szIntegPrefix being overloaded as the variable to put the CSV file name in.
+            // lGeneration is the starting log generation to dump.
+            // isec is being overloaded with the ending log generation to dump.
             return ErrDUMPLog( pinst, pdbutil->szDatabase, pdbutil->lGeneration, pdbutil->isec, pdbutil->grbitOptions, pdbutil->szIntegPrefix );
 
         case opDBUTILDumpFlushMapFile:
@@ -4556,7 +4972,7 @@ ERR ISAMAPI ErrIsamDBUtilities( JET_SESID sesid, JET_DBUTIL_W *pdbutil )
 #ifdef DEBUG
         case opDBUTILSetHeaderState:
             return ErrDUMPFixupHeader( pinst, pdbutil->szDatabase, pdbutil->grbitOptions & JET_bitDBUtilOptionDumpVerbose );
-#endif
+#endif // DEBUG
         case opDBUTILDumpPage:
             return ErrDBUTLDumpPage( pinst, pdbutil->szDatabase, pdbutil->pgno, pdbutil->szIndex, pdbutil->szTable, pdbutil->grbitOptions );
 
@@ -4572,7 +4988,7 @@ ERR ISAMAPI ErrIsamDBUtilities( JET_SESID sesid, JET_DBUTIL_W *pdbutil )
         case opDBUTILDumpCacheFile:
             return ErrDBUTLDumpCacheFile( pdbutil->szDatabase, pdbutil->grbitOptions );
 
-#endif
+#endif  // !MINIMAL_FUNCTIONALITY
 
         case opDBUTILEDBRepair:
             return ErrDBUTLRepair( sesid, pdbutil, CPRINTFSTDOUT::PcprintfInstance() );
@@ -4589,7 +5005,7 @@ ERR ISAMAPI ErrIsamDBUtilities( JET_SESID sesid, JET_DBUTIL_W *pdbutil )
         case opDBUTILDumpPageUsage:
             return ErrDBUTLDumpPageUsage( sesid, pdbutil );
 
-#endif
+#endif  // !MINIMAL_FUNCTIONALITY
 
         case opDBUTILDBDefragment:
         {
@@ -4626,7 +5042,7 @@ ERR ISAMAPI ErrIsamDBUtilities( JET_SESID sesid, JET_DBUTIL_W *pdbutil )
                     if ( err >= JET_errSuccess )
                     {
                         const FormatVersions * pfmtvers = NULL;
-                        err = ErrDBFindHighestMatchingDbMajors( pdbfilehdr->Dbv(), &pfmtvers, fTrue  );
+                        err = ErrDBFindHighestMatchingDbMajors( pdbfilehdr->Dbv(), &pfmtvers, fTrue /* allow bad version, client may try to defrag too high version */ );
                         if ( err >= JET_errSuccess )
                         {
                             efvSourceDb = pfmtvers->efv;
@@ -4722,11 +5138,13 @@ ERR ISAMAPI ErrIsamDBUtilities( JET_SESID sesid, JET_DBUTIL_W *pdbutil )
     JET_DBID    dbid        = JET_dbidNil;
     JET_GRBIT   grbitAttach;
 
+    //  setup DBCCINFO
 
     memset( &dbccinfo, 0, sizeof(DBCCINFO) );
     dbccinfo.tableidPageInfo    = JET_tableidNil;
     dbccinfo.tableidSpaceInfo   = JET_tableidNil;
 
+    //  default to the consistency checker
 
     dbccinfo.op = opDBUTILConsistency;
 
@@ -4734,13 +5152,14 @@ ERR ISAMAPI ErrIsamDBUtilities( JET_SESID sesid, JET_DBUTIL_W *pdbutil )
     {
 #ifdef DEBUG
         case opDBUTILMunge:
-#endif
+#endif  //  DEBUG
         case opDBUTILDumpMetaData:
         case opDBUTILDumpSpace:
             dbccinfo.op = pdbutil->op;
             break;
     }
 
+    //  copy object names
 
     Assert( NULL != pdbutil->szDatabase );
     OSStrCbCopyW( dbccinfo.wszDatabase, sizeof(dbccinfo.wszDatabase), pdbutil->szDatabase );
@@ -4754,6 +5173,7 @@ ERR ISAMAPI ErrIsamDBUtilities( JET_SESID sesid, JET_DBUTIL_W *pdbutil )
         OSStrCbCopyW( dbccinfo.wszIndex, sizeof(dbccinfo.wszIndex), pdbutil->szIndex );
     }
 
+    //  propagate the grbit
 
     if ( pdbutil->grbitOptions & JET_bitDBUtilOptionStats )
     {
@@ -4764,6 +5184,7 @@ ERR ISAMAPI ErrIsamDBUtilities( JET_SESID sesid, JET_DBUTIL_W *pdbutil )
         dbccinfo.grbitOptions |= JET_bitDBUtilOptionDumpVerbose;
     }
     
+    //  attach/open database, table and index
 
     grbitAttach = ( opDBUTILMunge == dbccinfo.op ) ? 0 : JET_bitDbReadOnly;
     CallR( ErrIsamAttachDatabase(   sesid,
@@ -4772,7 +5193,7 @@ ERR ISAMAPI ErrIsamDBUtilities( JET_SESID sesid, JET_DBUTIL_W *pdbutil )
                                     NULL,
                                     0,
                                     grbitAttach ) );
-    Assert( JET_wrnDatabaseAttached != err );
+    Assert( JET_wrnDatabaseAttached != err );   // Since logging/recovery is disabled.
 
     Call( ErrIsamOpenDatabase(      sesid,
                                     dbccinfo.wszDatabase,
@@ -4780,10 +5201,12 @@ ERR ISAMAPI ErrIsamDBUtilities( JET_SESID sesid, JET_DBUTIL_W *pdbutil )
                                     &dbid,
                                     grbitAttach ) );
 
+    //  copy the session and database handles
 
     dbccinfo.ppib = (PIB*)sesid;
     dbccinfo.ifmp = dbid;
 
+    //  check database according to command line args/flags
 
     switch ( dbccinfo.op )
     {
@@ -4795,6 +5218,9 @@ ERR ISAMAPI ErrIsamDBUtilities( JET_SESID sesid, JET_DBUTIL_W *pdbutil )
         {
             if ( NULL == pdbutil->pfnCallback )
             {
+                //  We are causing incompatibility if anyone actually utilizes space 
+                //  dump.  If we really want to preserve, we can move the legacy space
+                //  dump callbacks from eseutil\dbspacedump.cxx to here.
                 Call( ErrERRCheck( JET_errFeatureNotAvailable ) );
             }
 
@@ -4802,7 +5228,7 @@ ERR ISAMAPI ErrIsamDBUtilities( JET_SESID sesid, JET_DBUTIL_W *pdbutil )
             Call( ErrSCANDumpMSysScan( dbccinfo.ppib, dbccinfo.ifmp ) );
             Call( MSysDBM::ErrDumpTable( dbccinfo.ifmp ) );
 
-            CBTreeStatsManager btsDbRootManager( pdbutil->grbitOptions, NULL  );
+            CBTreeStatsManager btsDbRootManager( pdbutil->grbitOptions, NULL /* DbRoot has no parent */ );
             BTREE_STATS * pbts = btsDbRootManager.Pbts();
 
             if ( pbts->pBasicCatalog )
@@ -4832,14 +5258,22 @@ ERR ISAMAPI ErrIsamDBUtilities( JET_SESID sesid, JET_DBUTIL_W *pdbutil )
 
             if ( pbts->pParentOfLeaf )
             {
-                pbts->pParentOfLeaf->cpgData = 1;
+                pbts->pParentOfLeaf->cpgData = 1;   //  CPG of 1 for pgnoSystemRoot (pgno=1) ...
             }
 
+            //  Trigger callback to user to consume the DbRoot information.
+            //
             Call( ((JET_PFNSPACEDATA)pdbutil->pfnCallback)( pbts, (JET_API_PTR)pdbutil->pvCallback ) );
             
+            //
+            //  Setup the BT stats context for all children of DB root (primarily tables)
+            //
             CBTreeStatsManager btsTableManager( pdbutil->grbitOptions, pbts );
 
 
+            //
+            //  [1,2]   Do enumeration of the DbRoot space trees.
+            //
 
             if( pbts->pSpaceTrees )
             {
@@ -4852,6 +5286,9 @@ ERR ISAMAPI ErrIsamDBUtilities( JET_SESID sesid, JET_DBUTIL_W *pdbutil )
                             (JET_API_PTR)pdbutil->pvCallback ) );
             }
 
+            //
+            //  [3-n]   Setup the enumeration context for all tables (children of DB root)
+            //
 
             DBUTIL_ENUM_SPACE_CTX dbues = { 0 };
             dbues.ppib = (JET_SESID)dbccinfo.ppib;
@@ -4876,6 +5313,7 @@ ERR ISAMAPI ErrIsamDBUtilities( JET_SESID sesid, JET_DBUTIL_W *pdbutil )
                 if ( err != JET_errSuccess )
                 {
                     printf( "Failed to dump %hs table with: %d (continuing on ...).\n", szMSLocales, err );
+                    // continue on ...
                 }
                 printf( "******************************************************************************\n" );
             }
@@ -4907,6 +5345,7 @@ ERR ISAMAPI ErrIsamDBUtilities( JET_SESID sesid, JET_DBUTIL_W *pdbutil )
             break;
     }
 
+    //  terminate
 HandleError:
     if ( JET_tableidNil != dbccinfo.tableidPageInfo )
     {
@@ -4923,7 +5362,7 @@ HandleError:
     (VOID)ErrIsamDetachDatabase( sesid, NULL, dbccinfo.wszDatabase );
 
     fflush( stdout );
-#endif
+#endif // !MINIMAL_FUNCTIONALITY
     
     return err;
 }

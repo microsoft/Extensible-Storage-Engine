@@ -3,16 +3,64 @@
 
 #pragma once
 
+//  TJournalSegment:  implementation of IJournalSegment and its derivatives.
+//
+//  I:  IJournalSegment or derivative
+//
+//  This class encapsulates most of the physical format of the journal.  The journal is comprised of a number of
+//  segments each of which is the size of one block and has a fixed size header and a number of regions.  The header
+//  contains the information required to reliably find the tail of the journal and the segments required for replay.
+//  Each region contains part or all of a journal entry which is the minimum atomic unit of information exposed by the
+//  journal.
+//
+//  Each journal segment header contains this information:
+//  -  The ECC of the entire segment
+//  -  The region position of the first region in the segment
+//  -  The unique id of the segment.
+//  -  The unique id of the previous segment (if any).
+//  -  The segment position of the youngest region considered durable when the segment was created
+//  -  The segment position of the oldest region required to replay the journal during mount when the segment was
+//     created
+//
+//  This information is used as follows to find the last segment in the journal:
+//  -  the set of segments in the journal is searched to find the youngest segment (the one with the highest journal
+//     position) that passes validation
+//  -  the last known durably committed segment when this youngest segment was written is found in its header
+//  -  the last known durable segment is read and validated.  if it is corrupt then the journal is corrupt
+//  -  the segments after the last known durable segment and the youngest segment inclusive are scanned
+//     -  if this segment is corrupt then the previous segment is the end of the journal
+//     -  if this segment's position is not one block greater than the previous segment then the previous segment was
+//        the end of the journal
+//     -  if the recorded unique id of the previous segment doesn't match the unique id of the previous segment then
+//        the previous segment was the end of the journal
+//  -  the range of segments need to recover the journal are then determined by the segment position of the segment at
+//     the end of the journal and the oldest region required to replay the journal record in that segment's header
+//
+//  When the regions are scanned for recovering the journal, any regions that correspond to partial journal entries due
+//  to truncation at the start or end of the replay range are ignored.  The former are ignored because they are
+//  irrelevant for replay.  The latter are ignored because they were lost due to an incomplete flush of the journal.
+// 
+//  Once the journal is recovered, this scheme is maintained by requiring that this information is set properly when
+//  adding new segments to the journal.  Specifically, if segment X is the last segment in the journal then:
+//  -  the next appended segment will be at the segment position of segment X plus one block
+//  -  a new unique id is chosen
+//  -  the unique id of the previous segment is recorded
+//  -  the oldest replay segment must be greater than or equal to that indicated in segment X
+//  -  the youngest durable segment will be segment X
+//
+//  Each region is comprised of a size and a raw byte payload of that size.  No other format exists for regions at this
+//  level.  A region of size zero indicates the remainder of a segment is empty.  The region size may be truncated at
+//  the end of the segment.
 
 template < class I >
-class TJournalSegment
+class TJournalSegment  //  js
     :   public I
 {
-    public:
+    public:  //  specialized API
 
         ~TJournalSegment();
 
-    public:
+    public:  //  IJournalSegment
 
         ERR ErrGetPhysicalId( _Out_ QWORD* const pib ) override;
 
@@ -141,6 +189,7 @@ template< class I  >
 INLINE ERR TJournalSegment<I>::ErrVisitRegions( _In_ const IJournalSegment::PfnVisitRegion  pfnVisitRegion,
                                                 _In_ const DWORD_PTR                        keyVisitRegion )
 {
+    //  visit every region in the segment
 
     RegionPosition rpos = m_pjsh->RposFirst();
     for (   const CJournalRegion* pjreg = m_pjsh->Pjreg( rpos );
@@ -157,7 +206,7 @@ INLINE ERR TJournalSegment<I>::ErrVisitRegions( _In_ const IJournalSegment::PfnV
 }
 
 #pragma warning (push)
-#pragma warning (disable: 4815)
+#pragma warning (disable: 4815)  //  zero-sized array in stack object will have no elements (unless the object is an aggregate that has been aggregate initialized)
 
 template< class I  >
 INLINE ERR TJournalSegment<I>::ErrAppendRegion( _In_                const size_t            cjb,
@@ -177,44 +226,53 @@ INLINE ERR TJournalSegment<I>::ErrAppendRegion( _In_                const size_t
     *prpos = rposInvalid;
     *pcbActual = 0;
 
+    //  compute the requested payload size for the region
 
     for ( size_t ijb = 0; ijb < cjb; ijb++ )
     {
         cbPayloadRequested += rgjb[ ijb ].Cb();
     }
 
+    //  we do not allow zero sized appends
 
     if ( !cbPayloadRequested )
     {
         Error( ErrERRCheck( JET_errInvalidParameter ) );
     }
 
+    //  protect our state
 
     m_crit.Enter();
     fLocked = fTrue;
 
+    //  if this segment is already sealed then we can accept none of the payload
 
     if ( m_fSealed )
     {
         Error( JET_errSuccess );
     }
 
+    //  compute how much of the desired payload must fit and how much can fit
 
     cbRegionMin = sizeof( CJournalRegion ) + cbMin;
     cbRegionMax = m_pjsh->CbRegions() - m_ibRegions;
 
+    //  if the minimum payload can fit then append a new region
 
     if ( cbRegionMin <= cbRegionMax )
     {
+        //  compute the offset and size of the new region
 
         ibRegion = m_ibRegions;
         cbPayloadActual = min( cbPayloadRequested, cbRegionMax - sizeof( CJournalRegion ) );
 
+        //  append the journal region header
 
         const CJournalRegion jreg( cbPayloadActual );
         UtilMemCpy( m_pjsh->RgbRegions() + m_ibRegions, &jreg, sizeof( jreg ) );
         m_ibRegions += sizeof( jreg );
 
+        //  append the portion of the payload that will fit
 
         DWORD cbPayloadRemaining = cbPayloadActual;
         for ( size_t ijb = 0; ijb < cjb && cbPayloadRemaining > 0; ijb++ )
@@ -227,6 +285,7 @@ INLINE ERR TJournalSegment<I>::ErrAppendRegion( _In_                const size_t
         }
     }
 
+    //  return the amount of payload we appended and its region position
 
     if ( cbPayloadActual > 0 )
     {
@@ -257,10 +316,12 @@ INLINE ERR TJournalSegment<I>::ErrSeal( _In_opt_ IJournalSegment::PfnSealed pfnS
     TraceContextScope   tcScope( iorpBlockCache );
     IFileFilter* const  pff     = m_pff;
 
+    //  protect our state
 
     m_crit.Enter();
     fLocked = fTrue;
 
+    //  if this segment is already sealed then there is nothing to do but report the previous error
 
     if ( m_fSealed )
     {
@@ -277,21 +338,27 @@ INLINE ERR TJournalSegment<I>::ErrSeal( _In_opt_ IJournalSegment::PfnSealed pfnS
         Error( m_err );
     }
 
+    //  ensure that the segment has no more regions beyond the append point by ensuring it is filled with zeroes.  this
+    //  will cause any parsing of the regions to find a CJournalRegion with a CbRegion() of zero at this offset
 
     memset( m_pjsh->RgbRegions() + m_ibRegions, 0, m_pjsh->CbRegions() - m_ibRegions );
 
+    //  finalize the segment for write (e.g. compute the final checksum)
 
     Call( m_pjsh->ErrFinalize() );
 
+    //  seal the segment
 
     m_fSealed = fTrue;
     m_pfnSealed = pfnSealed;
     m_keySealed = keySealed;
 
+    //  our state is now immutable
 
     m_crit.Leave();
     fLocked = fFalse;
 
+    //  start writing the segment to the backing store
 
     Call( pff->ErrIOWrite(  *tcScope,
                             m_ibSegment,
@@ -304,6 +371,7 @@ INLINE ERR TJournalSegment<I>::ErrSeal( _In_opt_ IJournalSegment::PfnSealed pfnS
     Call( pff->ErrIOIssue() );
     pff->SetNoFlushNeeded();
 
+    //  if no callback was given then wait for the result
 
     if ( !pfnSealed )
     {
@@ -403,11 +471,12 @@ INLINE void TJournalSegment<I>::IOHandoff_( _In_                    const ERR   
 }
 
 
+//  CJournalSegment:  concrete TJournalSegment<IJournalSegment>
 
-class CJournalSegment
+class CJournalSegment  //  js
     :   public TJournalSegment<IJournalSegment>
 {
-    public:
+    public:  //  specialized API
 
         static ERR ErrCreate(   _In_    IFileFilter* const      pff,
                                 _In_    const QWORD             ib,

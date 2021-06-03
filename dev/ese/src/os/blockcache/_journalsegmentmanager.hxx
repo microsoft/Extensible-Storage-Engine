@@ -3,18 +3,34 @@
 
 #pragma once
 
+//  TJournalSegmentManager:  implementation of IJournalSegmentManager and its derivatives.
+//
+//  I:  IJournalSegmentManager or derivative
+//
+//  This class manages the set of segments that belong to a journal.  This implementation is a simple circular queue of
+//  a fixed number of segments.
+//
+//  This class encapsulates the management of the metadata used to determine the set of segments that are currently
+//  part of the visible journal.  Note that this set includes any segments near the tail of the journal that can be
+//  beyond a torn write or any segments that fail validation.
+//
+//  When the journal is mounted, the segments are bsearched by segment position to find the start/end of the circular
+//  queue.  If a corrupt segment is encountered then all segments are enumerated to determine this.
+//
+//  Once the end of the queue has been determined then we will use the steps outlined in TJournalSegment to discover
+//  the set of segments that belong to the journal.  These can then be visited to perform recovery using the journal.
 
 template< class I >
-class TJournalSegmentManager
+class TJournalSegmentManager  //  jsm
     :   public I
 {
-    public:
+    public:  //  specialized API
 
         ~TJournalSegmentManager();
 
         ERR ErrInit();
 
-    public:
+    public:  //  IJournalSegmentManager
 
         ERR ErrGetProperties(   _Out_opt_ SegmentPosition* const    psposReplay,
                                 _Out_opt_ SegmentPosition* const    psposDurable,
@@ -131,21 +147,25 @@ INLINE ERR TJournalSegmentManager<I>::ErrInit()
     IJournalSegment*    pjsLast = NULL;
     BOOL                fEmpty  = fFalse;
 
+    //  try to find the last segment via binary search
 
     Call( ErrFindLastSegmentWithBinarySearch( &ibLast, &pjsLast, &fEmpty ) );
 
+    //  if we could not find it (due to a corrupt block) then fall back to linear search
 
     if ( !pjsLast && !fEmpty )
     {
         Call( ErrFindLastSegmentWithLinearSearch( &ibLast, &pjsLast ) );
     }
 
+    //  if we still could not find it then there are no valid segments so setup an empty journal
 
     if ( !pjsLast )
     {
         Call( ErrInitEmptyJournal() );
     }
 
+    //  if we found a last segment then setup the existing journal
 
     if ( pjsLast )
     {
@@ -196,25 +216,31 @@ INLINE ERR TJournalSegmentManager<I>::ErrVisitSegments( _In_ const IJournalSegme
 
     for ( spos = m_sposFirst; spos <= m_sposLast; spos += cbSegment )
     {
+        //  release any previously loaded segment
 
         delete pjs;
         pjs = NULL;
 
+        //  compute the segment offset
 
         Call( ErrGetSegmentOffset( spos, &ib ) );
 
+        //  try to load the new segment at this offset
 
         Call( ErrLoadSegmentForRecovery( ib, &pjs, &errSegment, &sposActual ) );
 
+        //  validate the segment at this offset
 
         if ( pjs )
         {
+            //  validate the segment id.  if this is wrong then there was a lost write
 
             if ( sposActual != spos )
             {
                 errSegment = ErrERRCheck( JET_errReadVerifyFailure );
             }
 
+            //  validate the unique id.  if this is wrong then this segment is beyond the end of the journal
 
             Call( pjs->ErrGetProperties( NULL, &dwUniqueIdPrev, &dwUniqueIdPrevActual, NULL, NULL, NULL ) );
 
@@ -226,6 +252,7 @@ INLINE ERR TJournalSegmentManager<I>::ErrVisitSegments( _In_ const IJournalSegme
             dwUniqueIdPrevExpected = dwUniqueIdPrev;
         }
 
+        //  ensure that if there are any validation errors that we do not provide the segment
 
         if ( errSegment < JET_errSuccess )
         {
@@ -233,6 +260,7 @@ INLINE ERR TJournalSegmentManager<I>::ErrVisitSegments( _In_ const IJournalSegme
             pjs = NULL;
         }
 
+        //  visit the segment
 
         if ( !pfnVisitSegment( spos, errSegment, pjs, keyVisitSegment ) )
         {
@@ -240,6 +268,7 @@ INLINE ERR TJournalSegmentManager<I>::ErrVisitSegments( _In_ const IJournalSegme
         }
     }
 
+    //  do not fail if we enumerated all the segments
 
     err = JET_errSuccess;
 
@@ -270,6 +299,7 @@ INLINE ERR TJournalSegmentManager<I>::ErrAppendSegment( _In_    const SegmentPos
 
     *ppjs = NULL;
 
+    //  reject invalid parameters or a proposed segment that would violate our recovery scheme
 
     if ( spos == sposInvalid )
     {
@@ -312,9 +342,12 @@ INLINE ERR TJournalSegmentManager<I>::ErrAppendSegment( _In_    const SegmentPos
         Error( ErrERRCheck( JET_errInvalidParameter ) );
     }
 
+    //  compute the offset for the segment
 
     Call( ErrGetSegmentOffset( spos, &ib ) );
 
+    //  determine if it is safe to add the segment w/o running out of space.  the amount of segments needed by the
+    //  journal is the distance between the proposed segment's durable segment's replay segment and the last segment
 
     for (   pseginfoDurable = m_ilSegmentInfo.PrevMost();
             pseginfoDurable != NULL && pseginfoDurable->Spos() != sposDurable;
@@ -349,6 +382,7 @@ INLINE ERR TJournalSegmentManager<I>::ErrAppendSegment( _In_    const SegmentPos
         }
     }
 
+    //  find the unique id of the segment prior to the append segment
 
     if ( m_sposUniqueIdPrev != sposPrev )
     {
@@ -360,9 +394,11 @@ INLINE ERR TJournalSegmentManager<I>::ErrAppendSegment( _In_    const SegmentPos
         m_dwUniqueIdPrev = dwUniqueIdPrev;
     }
 
+    //  create the segment
 
     Call( ErrCreateSegment( ib, spos, m_dwUniqueIdPrev, sposReplay, sposDurable, &pjs ) );
 
+    //  update our state
 
     Alloc( pseginfoAppend = new CSegmentInfo( spos, sposReplay ) );
 
@@ -399,6 +435,7 @@ INLINE ERR TJournalSegmentManager<I>::ErrAppendSegment( _In_    const SegmentPos
 
     pseginfoAppend = NULL;
 
+    //  return the new segment
 
     *ppjs = pjs;
     pjs = NULL;
@@ -459,6 +496,54 @@ INLINE ERR TJournalSegmentManager<I>::ErrFindLastSegmentWithBinarySearch(   _Out
     *ppjsLast = NULL;
     *pfEmpty = fFalse;
 
+    //  Search for the segment with the highest segment position in our circular queue of segments.
+    //
+    //  Each segment can be in one of these states:  corrupt / torn write, uninitialized, lost write, or valid.
+    //
+    //  If we see a corrupt / torn write segment then we cannot do an optimized search.  We fallback to linear search
+    //  in that case.
+    //
+    //  We will only see uninitialized segments on the first cycle through the segments.  If we see an uninitialized
+    //  segment during the search then we will interpret this as if it is a valid old sector with a position between 0
+    //  and the size of the queue.  We will then assign all new segments positions >= the size of the cache.  This will
+    //  collapse the uninitialized segment and lost write segment states into one.
+    //
+    //  This leaves us with valid segments in a circular queue in ascending order by segment position possibly with
+    //  holes showing valid segments from a previous loop through the circular queue due to uninitialized / lost write.
+    //  If we have reused the segments several times then we may see a sequence of segment positions like this:
+    //
+    //      state  L V V V V V V U  (U = uninitialized, L = lost write, V = valid)
+    //      count  1 2 2 1 1 1 1 0  (count = (segment position / segment size) / segment count)
+    //      index  0 1 2 3 4 5 6 7  (index = (segment position / segment size) % segment count)
+    //
+    //  We want to find the valid segment with the highest segment position to recover the journal.  That is because
+    //  this segment contains the pointer to the last known durable segment which in turn contains the pointer to the
+    //  lowest segment needed for replay which is the first segment in the journal.  It is tempting to say that it is
+    //  ok to find the last segment just before any lost write, i.e. one where spos[index] > spos[index + 1].  However
+    //  if there are multiple options and we choose the lowest one then we may land on a segment that has an
+    //  sposDurable that is not the highest for any valid segment.  In that case if we encounter a corruption between
+    //  that sposDurable and the found segment then we may incorrectly conclude it is a torn write when in fact it is a
+    //  journal corruption.  This mistake would allow us to recover the journal but we would lose previously committed
+    //  changes. This can result in the journal being behind the state it is protecting which could lead to corruption.
+    //
+    //  However, it is not possible to distinguish this case from one where there was no subsequent write or it was
+    //  entirely corrupted/lost without remembering in some other way that the previous write was durable.  The only
+    //  tool we have to solve this problem is to keep the journal ahead of its state by more than one durable write.
+    //  So, to avoid this hazard, state write back should only occur when the sposDurable of the last durable segment
+    //  is >= the jpos of the journal entry in question.  An artificial journal entry may need to be added and flushed
+    //  to allow the journal and state to become completely flushed.
+    //
+    //  So, now that we don't care which of the multiple valid segments we find, we can reliably find one via a binary
+    //  search implemented as lower_bound where the less than check is replaced with a check that eliminates the bottom
+    //  half of the queue if we think it is sorted because spos[min] < spos[mid].
+    //
+    //  This is essentially a binary search of an array containing a circular queue of numbers looking for the dividing
+    //  line between the two sets of sorted numbers in the array.  Surprisingly this still works even though lost
+    //  writes can cause the array to be unsorted at multiple points.  The only problem is you won't always land on a
+    //  particular dividing line.  It can be any one of them.
+    //
+    //  The search is also modified slightly to reuse the segment we used as a midpoint for the new min rather than
+    //  loading yet another segment.
 
     Call( ErrLoadSegmentForRecovery( ibMin, &pjsMin, &errSegment, &sposMin ) );
     Call( errSegment == JET_errPageNotInitialized ? JET_errSuccess : errSegment );
@@ -491,9 +576,11 @@ INLINE ERR TJournalSegmentManager<I>::ErrFindLastSegmentWithBinarySearch(   _Out
         }
     }
 
+    //  ibMax now indicates the desired segment.  compute the offset of the last segment
 
     ibLast = ibMax;
 
+    //  fetch the last segment if we don't already have it
 
     if ( ibLast == ibMin && pjsMin )
     {
@@ -511,6 +598,7 @@ INLINE ERR TJournalSegmentManager<I>::ErrFindLastSegmentWithBinarySearch(   _Out
         Call( errSegment == JET_errPageNotInitialized ? JET_errSuccess : errSegment );
     }
 
+    //  return the last segment we found if any
 
     *pibLast = ibLast;
     *ppjsLast = pjsLast;
@@ -547,18 +635,22 @@ INLINE ERR TJournalSegmentManager<I>::ErrFindLastSegmentWithLinearSearch(   _Out
     *pibLast = 0;
     *ppjsLast = NULL;
 
+    //  perform a linear scan of every possible segment
 
     for ( QWORD ib = m_ib; ib < m_ib + m_cb; ib += cbSegment )
     {
+        //  try to load the current segment
 
         Call( ErrLoadSegmentForRecovery( ib, &pjs, &errSegment, &spos ) );
 
+        //  if we couldn't load the segment because it was corrupt then skip it
 
         if ( !pjs && errSegment != JET_errPageNotInitialized )
         {
             continue;
         }
 
+        //  aggregate the segments looking for the last segment by segment position
 
         if ( !pjsLast || sposLast < spos )
         {
@@ -572,11 +664,13 @@ INLINE ERR TJournalSegmentManager<I>::ErrFindLastSegmentWithLinearSearch(   _Out
             pjs = NULL;
         }
 
+        //  release this segment if it wasn't interesting
 
         delete pjs;
         pjs = NULL;
     }
 
+    //  return the last segment we found if any
 
     *pibLast = ibLast;
     *ppjsLast = pjsLast;
@@ -602,6 +696,10 @@ INLINE ERR TJournalSegmentManager<I>::ErrInitEmptyJournal()
     CSegmentInfo*       pseginfo    = NULL;
     IJournalSegment*    pjs         = NULL;
 
+    //  if there are no valid segments in the journal then we will setup the journal to start at the first segment.
+    //  this is required to allow our binary search algorithm to work with a partially used journal because we use
+    //  uninitialized segments to hint us towards the start of the array.  we must also only create segments with a
+    //  segment position >= m_cb to allow us to assign segment positions below that to uninitialized segments
 
     m_sposFirst = (SegmentPosition)m_cb;
     m_ibLast = m_ib;
@@ -640,6 +738,11 @@ INLINE ERR TJournalSegmentManager<I>::ErrInitExistingJournal(   _In_ const QWORD
     QWORD               ibFirst                 = 0;
     CSegmentInfo*       pseginfo                = NULL;
 
+    //  we were given the segment with the highest segment position.  this segment contains the segment position of the
+    //  last known durable segment.  the segment containing the replay pointer in the last durable segment is the
+    //  oldest segment we could possibly have an interest in
+    //
+    //  NOTE:  if the last durable segment cannot be accessed then the journal is corrupt and cannot mount
 
     Call( pjsLast->ErrGetProperties( &sposLast, NULL, NULL, NULL, &sposLastDurable, NULL ) );
 
@@ -727,10 +830,12 @@ INLINE ERR TJournalSegmentManager<I>::ErrLoadSegmentForRecovery(    _In_    cons
     *perrSegment = JET_errSuccess;
     *pspos = sposInvalid;
 
+    //  try to load the segment and ignore all verification errors
 
     errSegment = ErrLoadSegment( ib, &pjs );
     Call( ErrIgnoreVerificationErrors( errSegment ) );
 
+    //  determine the segment position.  compute the value in case it is uninitialized
 
     spos = (SegmentPosition)( ib - m_ib );
     if ( pjs )
@@ -738,6 +843,7 @@ INLINE ERR TJournalSegmentManager<I>::ErrLoadSegmentForRecovery(    _In_    cons
         Call( pjs->ErrGetProperties( &spos, NULL, NULL, NULL, NULL, NULL ) );
     }
 
+    //  return the information
 
     *ppjs = pjs;
     pjs = NULL;
@@ -780,11 +886,12 @@ INLINE ERR TJournalSegmentManager<I>::ErrIgnoreVerificationErrors( _In_ const ER
     return err;
 }
 
+//  CJournalSegmentManager:  concrete TJournalSegmentManager<IJournalSegmentManager>
 
-class CJournalSegmentManager
+class CJournalSegmentManager  //  jsm
     :   public TJournalSegmentManager<IJournalSegmentManager>
 {
-    public:
+    public:  //  specialized API
 
         static ERR ErrMount(    _In_    IFileFilter* const              pff,
                                 _In_    const QWORD                     ib,

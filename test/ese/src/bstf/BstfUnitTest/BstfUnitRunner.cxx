@@ -13,7 +13,11 @@
 
 #ifndef BSTF_AVOID_WIN_DEPENDENCE
 
+//  ================================================================
 ULONG64 QWQueryPerformanceCounter()
+// Returns the number of milliseconds, using QueryPerformanceFrequency()
+// if possible.
+//  ================================================================
     {
         static bool fCheckedForQpfSupport       = false;
         static bool fUseQueryPerformanceCounter = false;
@@ -23,8 +27,10 @@ ULONG64 QWQueryPerformanceCounter()
         if ( !fCheckedForQpfSupport )
         {
             LARGE_INTEGER   liTemp;
+            // Not synchronized, but that shouldn't be a problem.
             if ( QueryPerformanceFrequency( &liTemp ) )
             {
+                // Since we want a result in milliseconds.
                 ulDivisor = liTemp.QuadPart / 1000;
                 fUseQueryPerformanceCounter = true;
             }
@@ -42,9 +48,11 @@ ULONG64 QWQueryPerformanceCounter()
         }
     }
 
-#endif
+#endif // !BSTF_AVOID_WIN_DEPENDENCE
 
+//  ================================================================
 DWORD DWGetTickCount()
+//  ================================================================
     {
 #ifndef ESE_DISABLE_NOT_YET_PORTED
     return (DWORD) QWQueryPerformanceCounter();
@@ -54,7 +62,9 @@ DWORD DWGetTickCount()
     }
 
 
+//  ================================================================
 void BstfPrintTests()
+//  ================================================================
     {
     const UNITTEST * punittest = UNITTEST::s_punittestHead;
     while( punittest )
@@ -79,9 +89,13 @@ void BstfSetVerbosity( QWORD bvl )
 #ifdef _MSC_VER
 #define NOINLINE    __declspec(noinline)
 #else
+//  Hopefully this won't get inlined / optimized on other platforms.
 #define NOINLINE
 #endif
 
+//  Pattern fill 1 KB worth of stack, with a non-repeating pattern (0xFEnnnnnn) of 32-bit values.  No
+//  32-bits will be all zeros.  Try to force it to be a function to clobber the entire stack area of
+//  the next function to be called (namely the test is run right after this).
 
 NOINLINE void BstfTrashTestStackWithPattern()
     {
@@ -90,17 +104,23 @@ NOINLINE void BstfTrashTestStackWithPattern()
 
     for ( ULONG iul = 0; iul < cul; iul++ )
         {
+        //  We are walking the count forward, but we do the array backwards b/c stacks "grow down 
+        //  in memory"... and so it appears it counts backwards from high addresses to low addresses.
         rgul[cul-1-iul] = 0xFE000000 | ( ( iul + 1 ) & 0x00FFFFFF );
         }
 
     printf( "Trashed stack from %p to %p \n", &( rgul[0] ), &( rgul[cul-1] ) );
 #ifndef DEBUG
+    //  The retail compiler is too smart ... you actually have to use the variable for retail
+    //  or the above code completely disappears ... not what we want, but I have to say hats
+    //  off to you compiler team for being so smart!  ;-)
     const ULONG iul = rand() % cul;
     printf( "Trashed stack @ %p to 0x%X for instance\n", &( rgul[iul] ), rgul[iul] );
 #endif
     }
 
 
+//  ================================================================
 static ERR ErrRunTest( UNITTEST * const punittest )
     {
     printf( "==> %s\r\n", punittest->SzName() );
@@ -135,7 +155,9 @@ static ERR ErrRunTest( UNITTEST * const punittest )
     return err;
     }
 
+//  ================================================================
 static ERR ErrRunAllTests( void )
+//  ================================================================
     {
     ERR err = JET_errSuccess;
 
@@ -154,6 +176,7 @@ HandleError:
     }
 
 static ERR ErrRunAllAllTests( void )
+//  ================================================================
     {
     ERR err = JET_errSuccess;
 
@@ -168,7 +191,9 @@ HandleError:
     return err;
     }
 
+//  ================================================================
 static ERR ErrRunOneTest( const char * const szTest )
+//  ================================================================
     {
     UNITTEST * punittest = UNITTEST::s_punittestHead;
     while( punittest )
@@ -187,7 +212,9 @@ static ERR ErrRunOneTest( const char * const szTest )
     }
 
 
+//  ================================================================
 static ERR ErrRunSelectedTests( const char * szTestSpec )
+//  ================================================================
     {
     ERR err = JET_errSuccess;
 
@@ -196,6 +223,7 @@ static ERR ErrRunSelectedTests( const char * szTestSpec )
     const BOOL fSuffixMatch = ( szTestSpec[0] == '*' );
     if ( fPrefixMatch && fSuffixMatch )
         {
+        //  Nope!
         return JET_errInvalidParameter;
         }
 
@@ -246,7 +274,9 @@ QWORD   g_cTests;
 QWORD   g_cTestsSucceeded;
 QWORD   g_cTestsFailed;
 
+//  ================================================================
 ERR ErrBstfRunTests( const int argc, const char * const argv[] )
+//  ================================================================
     {
     ERR err = JET_errSuccess;
 
@@ -282,6 +312,8 @@ ERR ErrBstfRunTests( const int argc, const char * const argv[] )
             const int cch = strlen( argv[isz] );
             if ( argv[isz][0] == '*' || argv[isz][cch-1] == '*' )
                 {
+                //  Wild card cases
+                //wprintf( L"Wildcard selector ... \n");
                 err = ErrRunSelectedTests( argv[isz] );
                 }
             else 

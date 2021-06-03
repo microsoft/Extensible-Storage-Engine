@@ -13,7 +13,14 @@ ERR ErrIsamDatabaseScan(
 
 #ifdef MINIMAL_FUNCTIONALITY
 
+//  ================================================================
 class DATABASESCANNER
+//  ================================================================
+//
+//  A thunked out, empty class to support references to the 
+//  DATABASESCANNER.
+//
+//-
 {
     public:
         DATABASESCANNER()   { }
@@ -25,7 +32,9 @@ class DATABASESCANNER
 
 ERR ErrSCANDumpMSysScan( __in PIB * const ppib, const IFMP ifmp );
 
+//  ================================================================
 struct OBJIDINFO
+//  ================================================================
 {
     OBJID   objidFDP;
     PGNO    pgnoFDP;
@@ -34,45 +43,53 @@ struct OBJIDINFO
     static BOOL CmpObjid( const OBJIDINFO&, const OBJIDINFO& );
 };
 
+//  ================================================================
 struct SCRUBCONSTANTS
+//  ================================================================
 {
     DBTIME      dbtimeLastScrub;
     
     CPRINTF     *pcprintfVerbose;
     CPRINTF     *pcprintfDebug;
 
-    const OBJIDINFO *pobjidinfo;
-    LONG        cobjidinfo;
-    OBJID       objidMax;
+    const OBJIDINFO *pobjidinfo;    //  information on objid's used in database
+    LONG        cobjidinfo;         //  count of OBJIDINFO structures
+    OBJID       objidMax;           //  all objid's >= this are ignored
 };
 
 
+//  ================================================================
 struct SCRUBSTATS
+//  ================================================================
 {
-    LONG        err;
+    LONG        err;                //  error condition from the first thread to encounter an error
 
-    LONG        cpgSeen;
-    LONG        cpgUnused;
-    LONG        cpgUnchanged;
-    LONG        cpgZeroed;
-    LONG        cpgUsed;
-    LONG        cpgUnknownObjid;
-    LONG        cNodes;
-    LONG        cFlagDeletedNodesZeroed;
-    LONG        cFlagDeletedNodesNotZeroed;
-    LONG        cOrphanedLV;
-    LONG        cVersionBitsReset;
+    LONG        cpgSeen;            //  total pages seen
+    LONG        cpgUnused;          //  zeroed pages we encountered
+    LONG        cpgUnchanged;       //  pages with dbtime < dbtimeLastScrub
+    LONG        cpgZeroed;          //  pages we zeroed out completely
+    LONG        cpgUsed;            //  pages being used by the database
+    LONG        cpgUnknownObjid;    //  page whose objid >= objidMax
+    LONG        cNodes;             //  total leaf nodes seen (including flag-deleted)
+    LONG        cFlagDeletedNodesZeroed;    //  flag deleted nodes we zeroed
+    LONG        cFlagDeletedNodesNotZeroed; //  flag deleted nodes not zeroed because of versions
+    LONG        cOrphanedLV;        //  orphaned LVs we zeroed
+    LONG        cVersionBitsReset;  //  version store bits removed from nodes
 };
 
 
+//  ================================================================
 struct SCRUBCONTEXT
+//  ================================================================
 {
     const SCRUBCONSTANTS * pconstants;
     SCRUBSTATS * pstats;
 };
 
 
+//  ================================================================
 class SCRUBTASK : public DBTASK
+//  ================================================================
 {
     public:
         SCRUBTASK( const IFMP ifmp, const PGNO pgnoFirst, const CPG cpg, const SCRUBCONTEXT * const pcontext );
@@ -108,7 +125,9 @@ class SCRUBTASK : public DBTASK
 };
     
 
+//  ================================================================
 class SCRUBDB
+//  ================================================================
 {
     public:
         SCRUBDB( const IFMP ifmp );
@@ -141,4 +160,4 @@ ERR ErrSCRUBZeroLV( PIB * const ppib,
                     CSR * const pcsr,
                     const INT iline );
 
-#endif
+#endif  // !MINIMAL_FUNCTIONALITY

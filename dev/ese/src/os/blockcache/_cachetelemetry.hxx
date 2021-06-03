@@ -5,9 +5,12 @@
 
 #include "_bfconst.hxx"
 
+//  TCacheTelemetry:  core implementation of ICacheTelemetry and its derivatives.
+//
+//  This class provides the capability for emitting cache telemetry.
 
 template< class I >
-class TCacheTelemetry
+class TCacheTelemetry  //  ctm
     :   public I
 {
     public:
@@ -179,10 +182,11 @@ BFRequestTraceFlags TCacheTelemetry<I>::BfrtfReference( _In_ const BOOL fRead, _
                                     ( fCacheIfPossible ? bfrtfNone : bfrtfNoTouch ) );
 }
 
+//  CCacheTelemetry:  concrete TCacheTelemetry<ICacheTelemetry>
 
 class CCacheTelemetry : public TCacheTelemetry<ICacheTelemetry>
 {
-    public:
+    public:  //  specialized API
 
         CCacheTelemetry()
             : TCacheTelemetry<ICacheTelemetry>()

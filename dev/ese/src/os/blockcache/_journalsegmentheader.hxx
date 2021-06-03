@@ -3,13 +3,15 @@
 
 #pragma once
 
+//  Journal Segment Header
 
 #pragma push_macro( "new" )
 #undef new
 
 #include <pshpack1.h>
 
-class CJournalSegmentHeader : CBlockCacheHeaderHelpers
+//PERSISTED
+class CJournalSegmentHeader : CBlockCacheHeaderHelpers  // jsh
 {
     public:
 
@@ -66,13 +68,13 @@ class CJournalSegmentHeader : CBlockCacheHeaderHelpers
 
     private:
 
-        LittleEndian<ULONG>             m_le_ulChecksum;
-        BYTE                            m_rgbZero[ 4 ];
-        LittleEndian<RegionPosition>    m_le_rposFirst;
-        LittleEndian<DWORD>             m_le_dwUniqueId;
-        LittleEndian<DWORD>             m_le_dwUniqueIdPrev;
-        LittleEndian<SegmentPosition>   m_le_sposReplay;
-        LittleEndian<SegmentPosition>   m_le_sposDurable;
+        LittleEndian<ULONG>             m_le_ulChecksum;        //  offset 0:  checksum
+        BYTE                            m_rgbZero[ 4 ];         //  unused because it is not protected by the ECC
+        LittleEndian<RegionPosition>    m_le_rposFirst;         //  region position of the first region in this segment
+        LittleEndian<DWORD>             m_le_dwUniqueId;        //  unique id for this segment
+        LittleEndian<DWORD>             m_le_dwUniqueIdPrev;    //  unique id for the previous segment
+        LittleEndian<SegmentPosition>   m_le_sposReplay;        //  segment position of the last known replay segment
+        LittleEndian<SegmentPosition>   m_le_sposDurable;       //  segment position of the last known durable segment
 
         BYTE                            m_rgbRegions[   cbSegment 
                                                         - sizeof( m_le_ulChecksum )
@@ -208,9 +210,9 @@ INLINE void* CJournalSegmentHeader::operator new( _In_ const size_t cb )
 {
 #ifdef MEM_CHECK
     return PvOSMemoryPageAlloc_( cb, NULL, fFalse, SzNewFile(), UlNewLine() );
-#else
+#else  //  !MEM_CHECK
     return PvOSMemoryPageAlloc( cb, NULL );
-#endif
+#endif  //  MEM_CHECK
 }
 
 INLINE void* CJournalSegmentHeader::operator new( _In_ const size_t cb, _In_ const void* const pv )

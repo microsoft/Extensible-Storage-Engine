@@ -1,27 +1,38 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
+//
+//  OS File System and related support ...
+//
+//
 
+//  This file contains 3 basic objects / sub-systems.
+//
+//      OS File System
+//      OS File Find
+//      OS Volume (global)
+//
 
 #include "osstd.hxx"
 #include <winioctl.h>
 #include <errno.h>
 
+// Prototypes of functions used in this file.
 VOID CalculateCurrentProcessIsPackaged();
 LOCAL ERR ErrOSFSInitDefaultPath();
 
 typedef enum _FSINFOCLASS {
     FileFsVolumeInformation       = 1,
-    FileFsLabelInformation,
-    FileFsSizeInformation,
-    FileFsDeviceInformation,
-    FileFsAttributeInformation,
-    FileFsControlInformation,
-    FileFsFullSizeInformation,
-    FileFsObjectIdInformation,
-    FileFsDriverPathInformation,
-    FileFsVolumeFlagsInformation,
-    FileFsSectorSizeInformation,
+    FileFsLabelInformation,      // 2
+    FileFsSizeInformation,       // 3
+    FileFsDeviceInformation,     // 4
+    FileFsAttributeInformation,  // 5
+    FileFsControlInformation,    // 6
+    FileFsFullSizeInformation,   // 7
+    FileFsObjectIdInformation,   // 8
+    FileFsDriverPathInformation, // 9
+    FileFsVolumeFlagsInformation,// 10
+    FileFsSectorSizeInformation, // 11
     FileFsMaximumInformation
 } FS_INFORMATION_CLASS, *PFS_INFORMATION_CLASS;
 
@@ -63,6 +74,15 @@ NtQueryVolumeInformationFile (
 DWORD g_cbAtomicOverride = 0;
 
 #ifdef DEBUG
+//
+//  This leaves enough from for a max path to be set while in the debugger, or
+//  via the registry "OSPath Trap" in DEBUG section.
+//  Note: This does substring matching, so for instance ".edb" would catch
+//  databases.
+//  BTW, it is amazing how much this goes off, perhaps we should remove it from
+//  ErrPathComplete()/ErrPathBuild()/ErrPathParse().  Or make ourselves a little
+//  more efficient.
+//
 WCHAR g_rgwchTrapOSPath[_MAX_PATH] = L"";
 
 #define OSTrapPath( wsz )   \
@@ -89,18 +109,23 @@ BOOL OSFSRETRY::FRetry( const JET_ERR err )
 
     if ( JET_errFileAccessDenied == err && cmsecAccessDeniedRetryPeriod )
     {
+        // initialize on first retry
         if ( !m_fInitialized )
         {
             m_fInitialized = fTrue;
             m_tickEnd = TickOSTimeCurrent() + cmsecAccessDeniedRetryPeriod;
         }
 
+        // just a tick to let someone else run
         UtilSleep( 2 );
 
+        // retry for limited time
+        // Cmp order is important because m_EndTick may have wrapped
         return TickCmp( TickOSTimeCurrent(), m_tickEnd ) <= 0;
     }
     else
     {
+        // no retry
         return fFalse;
     }
 }
@@ -229,6 +254,7 @@ VOID COSFileSystem::ReportFileErrorInternal(
                     0,
                     NULL );
 
+    // Handles messages with and without a root path
     rgpwsz[ irgpwsz++ ]   = wszAbsSrcPath;
     if (wszDstPath)
     {
@@ -283,6 +309,7 @@ VOID COSFileSystem::ReportFileErrorWithFilter(
     const DWORD rgdwIgnorableErrors[] = {
         ERROR_FILE_NOT_FOUND,
         ERROR_PATH_NOT_FOUND,
+        // add new filtered error code here
     };
 
     for( INT idwError = 0; idwError < _countof( rgdwIgnorableErrors ); ++idwError )
@@ -306,6 +333,7 @@ NTOSFuncNtStd( g_pfnNtQueryVolumeInformationFile, g_mwszzNtdllLibs, NtQueryVolum
 
 ERR COSFileSystem::ErrGetLastError( const DWORD error )
 {
+    //  map Win32 errors to JET API errors
     return ErrOSErrFromWin32Err( error, JET_errDiskIO );
 }
 
@@ -326,6 +354,7 @@ COSFileSystem::CVolumePathCacheEntry * COSFileSystem::GetVolInfoCacheEntry( __in
 }
 
 ERR COSFileSystem::ErrPathRoot( const WCHAR* const  wszPath,
+    // UNDONE_BANAPI:
                                 __out_bcount(OSFSAPI_MAX_PATH*sizeof(WCHAR)) WCHAR* const       wszAbsRootPath )
 {
     ERR                     err         = JET_errSuccess;
@@ -336,12 +365,19 @@ ERR COSFileSystem::ErrPathRoot( const WCHAR* const  wszPath,
     CVolumePathCacheEntry*  pvpce       = NULL;
     WCHAR                   wszRootPath[ IFileSystemAPI::cchPathMax ];
 
+    //  get the absolute path for the given path
 
     Call( ErrPathComplete( wszPath, wszAbsPath ) );
 
+    //  get the folder of the absolute path
 
     Call( ErrPathParse( wszAbsPath, wszFolder, wszFileBase, wszFileExt ) );
 
+    //  GetVolumePathName is *really* expensive, so we will use a cache of
+    //  folder names to volume paths to avoid the call
+    //
+    //  NOTE:  we expire entries after a short period in an attempt to react
+    //  to dynamic volume path changes.  it isn't perfect but it is reasonable
 
     m_critVolumePathCache.Enter();
     pvpce = GetVolInfoCacheEntry( wszFolder );
@@ -352,10 +388,13 @@ ERR COSFileSystem::ErrPathRoot( const WCHAR* const  wszPath,
     }
     m_critVolumePathCache.Leave();
 
+    //  compute the root path in this absolute path
 
     if ( !GetVolumePathNameW( wszAbsPath, wszRootPath, IFileSystemAPI::cchPathMax ) )
     {
+        //   if we encounter ERROR_INVALID_NAME for the GetVolumePathName
         
+        //   call above, this is really an invalid path.
         
         if ( GetLastError() == ERROR_INVALID_NAME )
         {
@@ -365,14 +404,18 @@ ERR COSFileSystem::ErrPathRoot( const WCHAR* const  wszPath,
         Call( ErrGetLastError() );
     }
 
+    //  compute the absolute path for the root path
 
     Call( ErrPathComplete( wszRootPath, wszAbsRootPath ) );
 
+    //  populate the folder to volume path cache with the new result
 
     m_critVolumePathCache.Enter();
     pvpce = GetVolInfoCacheEntry( wszFolder );
     if ( pvpce == NULL )
     {
+        //  if we fail to allocate then we will simply not cache the result
+        //
         if ( pvpce = new CVolumePathCacheEntry( wszFolder ) )
         {
             m_ilVolumePathCache.InsertAsPrevMost( pvpce );
@@ -401,10 +444,12 @@ void COSFileSystem::PathVolumeCanonicalAndDiskId(   const WCHAR* const wszAbsRoo
 {
     Assert( wszAbsRootPath != NULL );
 
+    //  For NTFS, try to use the volume GUID, fallback to the regular root path if it can't retrieve it.
 
     const WCHAR * wszVolumeCanonicalPathToUse = wszAbsRootPath;
     const WCHAR * wszDiskIdToUse = wszAbsRootPath;
 
+    //  Try the cached paths first.
 
     BOOL fGetVolCanonicalPath = fFalse;
     BOOL fGetDiskId = fFalse;
@@ -417,6 +462,7 @@ void COSFileSystem::PathVolumeCanonicalAndDiskId(   const WCHAR* const wszAbsRoo
     {
         m_critVolumePathCache.Leave();
 
+        //  Call the expensive code, if needed.
 
         if ( fGetVolCanonicalPath )
         {
@@ -443,6 +489,7 @@ void COSFileSystem::PathVolumeCanonicalAndDiskId(   const WCHAR* const wszAbsRoo
             }
         }
 
+        //  Enter the lock again. Pehaps someone has just inserted it.
 
         m_critVolumePathCache.Enter();
         pvpce = GetVolInfoCacheEntry( wszAbsRootPath );
@@ -457,6 +504,10 @@ void COSFileSystem::PathVolumeCanonicalAndDiskId(   const WCHAR* const wszAbsRoo
 
         if ( pvpce != NULL )
         {
+            //  We'll override it if it's already there. Treat it as we are refreshing with more recent
+            //  information, although we don't expect this to change, except in cases where we've previously
+            //  failed in retrieving this information due to, for example, out of memory conditions and
+            //  ended up falling back to the default vanilla volume path.
             pvpce->SetVolCanonicalPath( wszVolumeCanonicalPathToUse );
             pvpce->SetDiskId( wszDiskIdToUse );
             pvpce->SetDiskNumber( *pdwDiskNumber );
@@ -470,6 +521,7 @@ void COSFileSystem::PathVolumeCanonicalAndDiskId(   const WCHAR* const wszAbsRoo
     }
     m_critVolumePathCache.Leave();
 
+    //  We may need to copy to the buffer.
 
     Assert( wszVolumeCanonicalPathToUse == wszAbsRootPath || wszVolumeCanonicalPathToUse == wszVolumeCanonicalPath );
     Assert( wszDiskIdToUse == wszAbsRootPath || wszDiskIdToUse == wszDiskId );
@@ -483,6 +535,14 @@ void COSFileSystem::PathVolumeCanonicalAndDiskId(   const WCHAR* const wszAbsRoo
     }
 }
 
+//  CONSIDER:  make this function even cheaper
+//
+//  We talked to NTFS and they said that this actually flushes the NTFS Journal twice.
+//  We can make it flush just once by simply calling SetFileTime on a file opened with
+//  FILE_FLAG_WRITE_THROUGH and with GENERIC_WRITE access.  We should set the Create Time
+//  to a unique value each time (using GetSystemTimeAsFileTime())
+//  What about ReFS?
+//
 ERR COSFileSystem::ErrCommitFSChange( const WCHAR* const wszPath )
 {
     ERR         err                         = JET_errSuccess;
@@ -496,6 +556,8 @@ ERR COSFileSystem::ErrCommitFSChange( const WCHAR* const wszPath )
     HANDLE      hFlushFile                  = INVALID_HANDLE_VALUE;
 
 
+    //  create a dummy file using write through to force NTFS to flush its journal.
+    //  this will force any previous file meta-data operations to be committed
 
     Call( ErrPathComplete( wszPath, wszAbsPath ) );
     Call( ErrPathParse( wszAbsPath, wszFolder, wszFileBase, wszFileExt ) );
@@ -523,10 +585,14 @@ ERR COSFileSystem::ErrCommitFSChange( const WCHAR* const wszPath )
         if ( hFlushFile != INVALID_HANDLE_VALUE ||
                 err != JET_errFileAccessDenied )
         {
+            //  Either we succeeded or we failed with an error that does not
+            //  encourage retry
             break;
         }
     }
 
+    //  if for some reason we were not able to create the dummy file then we
+    //  will fallback to the old method which is much slower but always works
 
     if ( hFlushFile == INVALID_HANDLE_VALUE )
     {
@@ -543,6 +609,7 @@ HandleError:
 
 COSFileSystem::~COSFileSystem()
 {
+    //  free our Volume Path Cache
 
     m_critVolumePathCache.Enter();
     while ( !m_ilVolumePathCache.FEmpty() )
@@ -566,9 +633,11 @@ ERR COSFileSystem::ErrDiskSpace(
     DWORD   error   = ERROR_SUCCESS;
     WCHAR   wszAbsRootPath[ IFileSystemAPI::cchPathMax ];
 
+    //  get the root path for the specified path
 
     Call( ErrPathRoot( wszPath, wszAbsRootPath ) );
 
+    //  RFS:  bad path
 
     if ( !RFSAlloc( OSFileDiskSpace ) )
     {
@@ -576,6 +645,7 @@ ERR COSFileSystem::ErrDiskSpace(
         CallJ( ErrGetLastError( error ), HandleWin32Error );
     }
 
+    //  get the sector size for the root path
 
     if ( !GetDiskFreeSpaceExW( wszAbsRootPath, (PULARGE_INTEGER)pcbFreeForUser, (PULARGE_INTEGER)pcbTotalForUser, (PULARGE_INTEGER)pcbFreeOnDisk ) )
     {
@@ -609,7 +679,7 @@ ERR COSFileSystem::ErrOSFSGetDeviceHandle(
     ERR     err     = JET_errSuccess;
     DWORD   error   = ERROR_SUCCESS;
     const WCHAR wszDevPrefix [] = L"\\\\.\\";
-    WCHAR   wszDeviceName[ IFileSystemAPI::cchPathMax + 4 ];
+    WCHAR   wszDeviceName[ IFileSystemAPI::cchPathMax + 4 ]; // 4 = wcslen( wszDevPrefix )
     wszDeviceName[0] = L'\0';
 
     Assert( phDevice );
@@ -617,6 +687,7 @@ ERR COSFileSystem::ErrOSFSGetDeviceHandle(
 
 #if 0
 {
+    //  caller should've provided the absolute root path of a drive/volume.
     WCHAR wszAbsVolumeRootPathCheck[ IFileSystemAPI::cchPathMax ] = L"";
     if ( JET_errSuccess == ErrPathRoot( wszAbsVolumeRootPath, wszAbsVolumeRootPathCheck ) )
     {
@@ -625,6 +696,9 @@ ERR COSFileSystem::ErrOSFSGetDeviceHandle(
 }
 #endif
 
+    //
+    //  The device name is different from the absolute root path of a drive/volume...
+    //
 
     if ( !GetVolumeNameForVolumeMountPointW( wszAbsVolumeRootPath,
                     wszDeviceName,
@@ -640,12 +714,15 @@ ERR COSFileSystem::ErrOSFSGetDeviceHandle(
         err = JET_errSuccess;
     }
 
+    //  possibly fall back to manual path munging
 
     if ( error != ERROR_SUCCESS )
     {
+        //  No Win32 API present or we failed with volume API, attempt manual path munging...
         if( wszAbsVolumeRootPath[0] == L'\\' &&
             wszAbsVolumeRootPath[1] == L'\\' )
         {
+            // This handles \\?\Volume{guid}\xxx type paths.
             OSStrCbCopyW( wszDeviceName, sizeof(wszDeviceName), wszAbsVolumeRootPath );
         }
         else
@@ -656,6 +733,8 @@ ERR COSFileSystem::ErrOSFSGetDeviceHandle(
         err = JET_errSuccess;
     }
 
+    //  Whether calculated w/ GetVolumeNameForVolumeMountPoint() or manually, CreatFileW()
+    //  expects the trailing backslash to be removed.
     ULONG cchDeviceName = wcslen(wszDeviceName);
     if ( wszDeviceName[cchDeviceName-1] == L'\\' )
     {
@@ -663,6 +742,9 @@ ERR COSFileSystem::ErrOSFSGetDeviceHandle(
         Assert( wszDeviceName[wcslen(wszDeviceName)-1] != L'\\' );
     }
 
+    //
+    //  Open the device handle.
+    //
 
     *phDevice = CreateFileW( wszDeviceName,
                             FILE_READ_ATTRIBUTES,
@@ -672,6 +754,8 @@ ERR COSFileSystem::ErrOSFSGetDeviceHandle(
                             (   FILE_ATTRIBUTE_NORMAL |
                                 FILE_FLAG_BACKUP_SEMANTICS  ),
                             NULL);
+    // note: no retry, can't imagine anti-virus can cause us trouble opening up 
+    // the disk device itself, like all the other file operations ...
     if ( *phDevice == INVALID_HANDLE_VALUE )
     {
         error   = GetLastError();
@@ -702,9 +786,11 @@ ERR COSFileSystem::ErrFileSectorSize(   const WCHAR* const  wszPath,
     Assert( pcbSize );
     *pcbSize = 0;
 
+    //  get the root path for the specified path
 
     Call( ErrPathRoot( wszPath, wszAbsRootPath ) );
 
+    //  RFS:  bad path
 
     if ( !RFSAlloc( OSFileISectorSize ) )
     {
@@ -729,6 +815,7 @@ ERR COSFileSystem::ErrFileSectorSize(   const WCHAR* const  wszPath,
         Assert( err == JET_errSuccess );
     }
 
+    //  get the sector size for the root path
 
     if ( *pcbSize == 0 )
     {
@@ -742,6 +829,8 @@ ERR COSFileSystem::ErrFileSectorSize(   const WCHAR* const  wszPath,
                              NULL );
         if ( hFile != INVALID_HANDLE_VALUE )
         {
+            // issue query for real sector size.
+            // first try new win8 API which works in lowbox
             IO_STATUS_BLOCK                 status_block = {0};
             FILE_FS_SECTOR_SIZE_INFORMATION sector_info = {0};
 
@@ -767,17 +856,57 @@ ERR COSFileSystem::ErrFileSectorSize(   const WCHAR* const  wszPath,
         STORAGE_PROPERTY_QUERY      QueryDesc;
         STORAGE_ACCESS_ALIGNMENT_DESCRIPTOR StorAlignmentDesc = { 0 };
 
+        // the query result's "version" (and also its size) as of Vista Beta2 ...
         #define STORAGE_ACCESS_ALIGNMENT_PROPERTY_MIN_VER  28
 
+        // configure the query params ...
         memset( &QueryDesc, 0, sizeof(QueryDesc) );
         QueryDesc.QueryType = PropertyStandardQuery;
         QueryDesc.PropertyId = StorageAccessAlignmentProperty;
 
+        //
+        //  Getting the real sector size ...
 
+        // Disk manufacturers are starting to produce disks with more than 512 bytes
+        // per physical sector.  Unfortunately for the 20 years DOS/Windows has been
+        // around, no API has reported anything but 512 bytes, ergo it would be too
+        // risky to change the normal APIs to return the real sector size.  This means
+        // we have to crack out the real sector size with an IOCTL_ and
+        // DeviceIoControl().
+        //
+        // The problem with DeviceIoControl() is that it seems to be equivalent to
+        // talking straight to the driver.  And due to experimentation, the drivers
+        // seem to vary greatly to the degree they maintain a good contract.  For
+        // instance the WinXP SP2 inbox pciide.sys driver seems to return success for
+        // this particular DeviceIoControl() call, even though it does nothing to
+        // actually fill out the structure.
+        //
+        // In theory we can query if the device driver can handle this particular IOCTL_
+        // and particular query property ID via this query type:
+        //   QueryDesc.QueryType = PropertyExistsQuery;
+        // ... if that sounds like a good plan, you forgot to read about pciide.sys
+        // above.  So we will just make the query directly.
+        //
+        // Further fun, a widely deployed Intel storage driver reports 3072 / 3 KB when 
+        // a 4 KB sector-sized disk is attached due to some math error in their driver 
+        // for Win7 RTM and earlier.  This is causing ESE to fail (throwing an error
+        // from below) when such disks are attached to Win7 systems.  We haven't 
+        // decided what to do about this yet ... my temptation is to insist intel fix, 
+        // (note: it is fixed in Sp1) as I've seen lots of bad behaviors introduced  
+        // by good intentions while not fixing code at the right layer.  Leading to 
+        // bugs later.
+        //
+        // And another vendor was accidentally returning 512 KB (_kilobytes_!), which
+        // is a power of 2, but probably larger than we could ever performantly handle.
+        // 
+        // Ergo this code must be very defensive, and try to query the real sector
+        // size in a best effort way ...
 
+        // but first we need a handle to the device ...
         err = ErrOSFSGetDeviceHandle( wszAbsRootPath, &hDevice );
         if ( err < JET_errSuccess )
         {
+            // We're going to pretend this isn't a critical failure.
             err = JET_errSuccess;
         }
         else if ( !DeviceIoControl( hDevice,
@@ -789,12 +918,14 @@ ERR COSFileSystem::ErrFileSectorSize(   const WCHAR* const  wszPath,
                                     &cbWritten,
                                     NULL ) )
         {
+            // probably not supported ... and so then we ignore it, and hope for the best ...
             error = ERROR_SUCCESS;
             err = JET_errSuccess;
         }
         else
         {
 
+            // Even on success, we have to be defensive the response makes sense ...
 
             ULONG cbMinFieldRequired = OffsetOf( STORAGE_ACCESS_ALIGNMENT_DESCRIPTOR, BytesPerPhysicalSector )
                                     + sizeof( StorAlignmentDesc.BytesPerPhysicalSector );
@@ -802,10 +933,15 @@ ERR COSFileSystem::ErrFileSectorSize(   const WCHAR* const  wszPath,
             if ( ( cbWritten >= cbMinFieldRequired ) &&
                  ( StorAlignmentDesc.Size >= cbMinFieldRequired ) &&
                  ( StorAlignmentDesc.Version >= STORAGE_ACCESS_ALIGNMENT_PROPERTY_MIN_VER ) &&
-                 ( StorAlignmentDesc.BytesPerPhysicalSector != 0 )
+                 ( StorAlignmentDesc.BytesPerPhysicalSector != 0 ) // just means not filled in ...
                  )
             {
+                //  ok, the alignment desc seems to be reasonably filled out ...
 
+                // The BytesPerPhysicalSector element is what describes the disk devices true
+                // sector size. The BytesPerPhysicalSector element is what describes the disk devices true
+                // sector size / atomic write size.
+                //
                 *pcbSize = StorAlignmentDesc.BytesPerPhysicalSector;
 
             }
@@ -821,16 +957,25 @@ ERR COSFileSystem::ErrFileSectorSize(   const WCHAR* const  wszPath,
         !FPowerOf2( *pcbSize ) )
     {
 #if defined( USE_HAPUBLISH_API )
+        //  indicate that this is a configuration error
+        //
         Pfsconfig()->EmitFailureTag( HaDbFailureTagConfiguration, L"502bb7a1-11eb-470d-aed2-866d30d7a7f9" );
 #endif
 
+        // ESE does not support physical sector sizes of less than 512 or non-
+        // powers of 2.  This is more likely a ridiculous driver issue anyway.
         Error( ErrERRCheck( JET_errSectorSizeNotSupported ) );
     }
 
+    //
+    //  Sector size is tractable, cache result.
+    //
     m_critVolumePathCache.Enter();
     pvpce = GetVolInfoCacheEntry( wszAbsRootPath );
     if ( pvpce == NULL )
     {
+        //  if we fail to allocate then we will simply not cache the result
+        //
         if ( pvpce = new CVolumePathCacheEntry( wszAbsRootPath ) )
         {
             m_ilVolumePathCache.InsertAsPrevMost( pvpce );
@@ -868,10 +1013,32 @@ HandleError:
 ERR COSFileSystem::ErrFileAtomicWriteSize(  const WCHAR* const  wszPath,
                                             DWORD* const        pcbSize )
 {
+    // The atomic write size is the chunk size the disk device can write without 
+    // affecting adjacent data.
+    //
+    // Most modern disk drives checksum (or even ECC these days c 2006) each 
+    // physical sector they write, and this can make a sector unretrievable if 
+    // the computer suffers a power outage in the middle of writing a sector, 
+    // because the sector will have 1/2 a write there, and neither the old nor 
+    // new checksum likely matches the data.  The disk then refuses to return
+    // this data, this makes the sector unretrievable.
+    //
+    // The reason this is important is ESE could issue a write for a section of 
+    // the transaction log, that commits a transaction to disk.  If that section 
+    // ends before the end of the true sector size, and we append more trx log data 
+    // directly, the 2nd write could make the sector unretrievalbe on a power 
+    // outage, and effectively "uncommit" the previous data that we claimed (to 
+    // the ESE client) was durably committed.
+    //
+    // ESE deals with this issue, by using a shadow sector in the transaction
+    // log for any write that is less than the physical sector size / appending 
+    // to previously committed data within a sector.
+    //
     return ErrFileSectorSize( wszPath, pcbSize );
 }
 
 ERR COSFileSystem::ErrPathComplete( _In_z_ const WCHAR* const   wszPath,
+    // UNDONE_BANAPI: Must add count, will require lots of touching ...
                                     _Out_bytecap_c_(cbOSFSAPI_MAX_PATHW) WCHAR* const       wszAbsPath )
 {
     ERR err = JET_errSuccess;
@@ -880,6 +1047,7 @@ ERR COSFileSystem::ErrPathComplete( _In_z_ const WCHAR* const   wszPath,
     const WCHAR* wszPathToComplete = wszPath;
     WCHAR wszRedirectedRelativePath[ OSFSAPI_MAX_PATH ];
 
+    //  RFS:  bad path
 
     if ( !RFSAlloc( OSFilePathComplete ) )
     {
@@ -891,6 +1059,7 @@ ERR COSFileSystem::ErrPathComplete( _In_z_ const WCHAR* const   wszPath,
         BOOL fCanUseRelativePaths = fFalse;
         Call( ErrPathFolderDefault( wszRedirectedRelativePath, sizeof( wszRedirectedRelativePath ), &fCanUseRelativePaths ) );
 
+        // The output should have a trailing backslash already.
 
         Assert( L'\\' == wszRedirectedRelativePath[ LOSStrLengthW( wszRedirectedRelativePath ) - 1 ] );
 
@@ -903,6 +1072,7 @@ ERR COSFileSystem::ErrPathComplete( _In_z_ const WCHAR* const   wszPath,
         {
             Assert( LOSStrLengthW( wszRedirectedRelativePath ) > 2 );
 
+            // Prepend the special default directory.
 
             OSStrCbAppendW( wszRedirectedRelativePath, sizeof( wszRedirectedRelativePath ), wszPath );
             wszPathToComplete = wszRedirectedRelativePath;
@@ -923,6 +1093,7 @@ HandleError:
 }
 
 ERR COSFileSystem::ErrPathParse(    const WCHAR* const  wszPath,
+    // UNDONE_BANAPI:
                                     __out_bcount(OSFSAPI_MAX_PATH*sizeof(WCHAR)) WCHAR* const       wszFolder,
                                     __out_bcount(OSFSAPI_MAX_PATH*sizeof(WCHAR)) WCHAR* const       wszFileBase,
                                     __out_bcount(OSFSAPI_MAX_PATH*sizeof(WCHAR)) WCHAR* const       wszFileExt )
@@ -955,6 +1126,7 @@ ERR COSFileSystem::ErrPathParse(    const WCHAR* const  wszPath,
     switch( err )
     {
         case 0:
+            // success.
             break;
 
         default:
@@ -965,6 +1137,9 @@ ERR COSFileSystem::ErrPathParse(    const WCHAR* const  wszPath,
 
     if ( wszFolder )
     {
+        //  wszFolder already contains the drive, so just append
+        //  the directory to form the complete folder location
+        // UNDONE_BANAPI:
         OSStrCbAppendW( wszFolder, OSFSAPI_MAX_PATH*sizeof(WCHAR), wszFolderT );
         Assert( LOSStrLengthW( wszFolder ) < IFileSystemAPI::cchPathMax );
     }
@@ -1026,6 +1201,8 @@ ERR COSFileSystem::ErrPathFolderNorm(   __inout_bcount(cbSize) PWSTR const  wszF
 
     OSTrapPath( wszFolder );
 
+    // if somehow we were given an empty folder to normalize, it is a
+    // bad, bad path!
     if ( 0 == cch )
     {
         AssertSz( fFalse, "Unexpected empty folder name to be normalized." );
@@ -1044,12 +1221,15 @@ ERR COSFileSystem::ErrPathFolderNorm(   __inout_bcount(cbSize) PWSTR const  wszF
         wszFolder[cch] = wchPathDelimiter;
         wszFolder[cch+1] = L'\0';
     }
+    // else folder path already had folder delimiter ...
 
 
 HandleError:
     return(err);
 }
 
+// Returns whether the input path is absolute or relative.
+// Note that a leading backslash (e.g. \windows\win.ini) is still relative.
 
 BOOL COSFileSystem::FPathIsRelative(
     _In_ PCWSTR wszPath )
@@ -1061,17 +1241,21 @@ BOOL COSFileSystem::FPathIsRelative(
 
     if ( iswalpha( wszPath[ 0 ] ) && L':' == wszPath[ 1 ] && L'\\' == wszPath[ 2 ] )
     {
+        // It's of the form 'd:\'
         return fFalse;
     }
 
     if ( L'\\' == wszPath[ 0 ] && L'\\' == wszPath[ 1 ] )
     {
+        // It's either:
+        // -UNC-style paths are absolute. (Includes the \\?\ style of paths.)
         return fFalse;
     }
 
     return fTrue;
 }
 
+//  Returns whether the specified file/path exists.
 ERR COSFileSystem::ErrPathExists(
     _In_ PCWSTR wszPath,
     _Out_opt_ BOOL* pfIsDirectory )
@@ -1091,6 +1275,8 @@ ERR COSFileSystem::ErrPathExists(
     else
     {
         err = ErrOSErrFromWin32Err( GetLastError(), JET_errFileNotFound );
+        // maintain error compatibility with the existing FindFirstFile based
+        // implementation
         if ( err == JET_errInvalidPath )
         {
             err = ErrERRCheck( JET_errFileNotFound );
@@ -1105,6 +1291,8 @@ const size_t g_cchDefaultPath = IFileSystemAPI::cchPathMax;
 const size_t g_cbDefaultPath = g_cchDefaultPath * sizeof( *g_wszDefaultPath );
 LOCAL BOOL g_fCanProcessUseRelativePaths = TRUE;
 
+// Retrieves the default location that files should be stored.
+// The "." directory (current working dir) is not writeable in new Windows UI.
 
 ERR COSFileSystem::ErrPathFolderDefault(
     _Out_z_bytecap_(cbFolder) PWSTR const   wszFolder,
@@ -1119,6 +1307,8 @@ ERR COSFileSystem::ErrPathFolderDefault(
     Assert( g_wszDefaultPath );
     OSStrCbCopyW( wszFolder, cbFolder, g_wszDefaultPath );
 
+    // If the process is packaged, then the directory shouldn't be the current
+    // working directory.
 
     Assert( FUtilProcessIsPackaged() || 0 == wcscmp( wszFolder, L".\\" ) );
 
@@ -1135,6 +1325,7 @@ ERR COSFileSystem::ErrFolderCreate( const WCHAR* const wszPath )
 
     WCHAR           wszAbsPath[ OSFSAPI_MAX_PATH ];
 
+    //  RFS:  access denied
 
     if ( !RFSAlloc( OSFileCreateDirectory ) )
     {
@@ -1164,6 +1355,7 @@ ERR COSFileSystem::ErrFolderRemove( const WCHAR* const wszPath )
 
     WCHAR           wszAbsPath[ OSFSAPI_MAX_PATH ];
 
+    //  RFS:  access denied
 
     if ( !RFSAlloc( OSFileRemoveDirectory ) )
     {
@@ -1179,6 +1371,7 @@ ERR COSFileSystem::ErrFolderRemove( const WCHAR* const wszPath )
         Call( ErrGetLastError( error ) );
     }
 
+    //(void)ErrCommitFSChange( wszPath );
 
 HandleError:
     if ( err == JET_errFileNotFound )
@@ -1200,12 +1393,15 @@ ERR COSFileSystem::ErrFileFind( const WCHAR* const      wszFind,
     WCHAR           wszAbsFind[ OSFSAPI_MAX_PATH ];
     Call( ErrPathComplete( wszFind, wszAbsFind ) );
 
+    //  allocate the file find iterator
 
     Alloc( posff = new COSFileFind );
 
+    //  initialize the file find iterator
 
     Call( posff->ErrInit( this, wszAbsFind ) );
 
+    //  return the interface to our file find iterator
 
     *ppffapi = posff;
     return JET_errSuccess;
@@ -1226,6 +1422,7 @@ ERR COSFileSystem::ErrFileDelete( const WCHAR* const wszPath )
 
     WCHAR           wszAbsPath[ OSFSAPI_MAX_PATH ];
 
+    //  RFS:  access denied
 
     if ( !RFSAlloc( OSFileDelete ) )
     {
@@ -1248,8 +1445,10 @@ ERR COSFileSystem::ErrFileDelete( const WCHAR* const wszPath )
     while ( OsfsRetry.FRetry( err ) );
     Call( err );
 
+    //(void)ErrCommitFSChange( wszAbsPath );
 
 HandleError:
+    //  we eat any file not found errors
     if ( err == JET_errFileNotFound )
     {
         err = JET_errSuccess;
@@ -1275,6 +1474,7 @@ ERR COSFileSystem::ErrFileMove( const WCHAR* const  wszPathSource,
     Call( ErrPathComplete( wszPathSource, wszAbsPathSource ) );
     Call( ErrPathComplete( wszPathDest, wszAbsPathDest ) );
 
+    //  RFS:  pre-move error
 
     if ( !RFSAlloc( OSFileMove ) )
     {
@@ -1300,7 +1500,9 @@ ERR COSFileSystem::ErrFileMove( const WCHAR* const  wszPathSource,
     while ( OsfsRetryMoveEx.FRetry( err ) );
     Call( err );
 
+    //(void)ErrCommitFSChange( wszPathDest );
 
+    //  RFS:  post-move error
 
     if ( !RFSAlloc( OSFileMove ) )
     {
@@ -1329,6 +1531,7 @@ ERR COSFileSystem::ErrFileCopy( const WCHAR* const  wszPathSource,
     Call( ErrPathComplete( wszPathSource, wszAbsPathSource ) );
     Call( ErrPathComplete( wszPathDest, wszAbsPathDest ) );
 
+    //  RFS:  pre-copy error
 
     if ( !RFSAlloc( OSFileCopy ) )
     {
@@ -1350,6 +1553,7 @@ ERR COSFileSystem::ErrFileCopy( const WCHAR* const  wszPathSource,
 
     (void)ErrCommitFSChange( wszAbsPathDest );
 
+    //  RFS:  post-copy error
 
     if ( !RFSAlloc( OSFileCopy ) )
     {
@@ -1396,9 +1600,11 @@ ERR COSFileSystem::ErrFileCreate(   _In_z_ const WCHAR* const       wszPath,
 
     OSTrapPath( wszPath );
 
+    //  allocate the file object
 
     Alloc( posf = new COSFile );
 
+    //  RFS:  pre-creation error
 
     if ( !RFSAlloc( OSFileCreate ) )
     {
@@ -1406,14 +1612,19 @@ ERR COSFileSystem::ErrFileCreate(   _In_z_ const WCHAR* const       wszPath,
         CallJ( ErrGetLastError( error ), HandleWin32Error );
     }
 
+    //  if we are trying to create a temporary file then attempt to enable
+    //  the volume management privilege so that we can use SetFileValidData
+    //  to extend the file cheaply
 
     if ( fTemporary )
     {
+        //  Make a best-effort attempt at enabling SeManageVolumePrivilege.
         (void) ErrSetPrivilege( WIDEN( SE_MANAGE_VOLUME_NAME ), fTrue, &fDisableManageVolumePrivilege );
     }
 
     Call( ErrPathComplete( wszPath, wszAbsPath ) );
 
+    //  create the file, retrying for a limited time on access denied
 
     do
     {
@@ -1439,6 +1650,7 @@ ERR COSFileSystem::ErrFileCreate(   _In_z_ const WCHAR* const       wszPath,
 
     SetHandleInformation( hFile, HANDLE_FLAG_PROTECT_FROM_CLOSE, HANDLE_FLAG_PROTECT_FROM_CLOSE );
 
+    //  RFS:  post-creation error
 
     if ( !RFSAlloc( OSFileCreate ) )
     {
@@ -1446,6 +1658,7 @@ ERR COSFileSystem::ErrFileCreate(   _In_z_ const WCHAR* const       wszPath,
         CallJ( ErrGetLastError( error ), HandleWin32Error );
     }
 
+    //  get the file's properties
 
     if ( !GetFileInformationByHandle( hFile, &bhfi ) )
     {
@@ -1455,6 +1668,7 @@ ERR COSFileSystem::ErrFileCreate(   _In_z_ const WCHAR* const       wszPath,
     cbFileSize      = ( QWORD( bhfi.nFileSizeHigh ) << 32 ) + bhfi.nFileSizeLow;
     fIsCompressed   = !!( bhfi.dwFileAttributes & FILE_ATTRIBUTE_COMPRESSED );
 
+    //  Get a volume and disk this file ...
 
     IVolumeAPI * pvolapi = NULL;
     Call( ErrOSVolumeConnect( this, wszAbsPath, &pvolapi ) );
@@ -1469,8 +1683,20 @@ ERR COSFileSystem::ErrFileCreate(   _In_z_ const WCHAR* const       wszPath,
         cbSectorSize = 4096;
     }
 
+    //  See MSDN docs on "File Buffering". It says:
+    //  As previously discussed, an application must meet certain requirements when working with files
+    //  opened with FILE_FLAG_NO_BUFFERING. The following specifics apply:
+    //      o File access sizes must be for a number of bytes that is an integer multiple of the volume
+    //          sector size. For example, if the sector size is 512 bytes, an application can request
+    //          reads and writes of 512, 1,024, 1,536, or 2,048 bytes, but not of 335, 981, or 7,171 bytes.
+    //      o File access buffer addresses for read and write operations should be sector-aligned, which
+    //          means aligned on addresses in memory that are integer multiples of the volume sector size.
+    //
     cbIOSize = !fCached ? cbSectorSize : 1;
 
+    //  if the file is compressed then the kernel forces caching on so we can
+    //  not perform atomic writes.  for our purposes, this is not acceptable so
+    //  we will immediately decompress the file if it was created as compressed
 
     if ( fIsCompressed && !fTemporary )
     {
@@ -1478,6 +1704,7 @@ ERR COSFileSystem::ErrFileCreate(   _In_z_ const WCHAR* const       wszPath,
         OVERLAPPED  overlapped          = { 0 };
         DWORD       cbTransferred       = 0;
 
+        //  decompress the newly created, zero-length file
 
         Alloc( hEvent = CreateEventW( NULL, FALSE, FALSE, NULL ) );
         overlapped.hEvent = hEvent;
@@ -1499,6 +1726,7 @@ ERR COSFileSystem::ErrFileCreate(   _In_z_ const WCHAR* const       wszPath,
             CallJ( ErrGetLastError( error ), HandleWin32Error );
         }
 
+        //  reopen the file to ensure caching is disabled
 
         SetHandleInformation( hFile, HANDLE_FLAG_PROTECT_FROM_CLOSE, 0 );
         CloseHandle( hFile );
@@ -1515,21 +1743,33 @@ ERR COSFileSystem::ErrFileCreate(   _In_z_ const WCHAR* const       wszPath,
 
     if ( !( bhfi.dwFileAttributes & FILE_ATTRIBUTE_SPARSE_FILE ) )
     {
+        //  currently this is configured through ErrSetSparseness().
         Assert( 0 == ( fmf & IFileAPI::fmfSparse ) );
     }
     else
     {
+        //  fmfSparse may be set later via ErrSetSparseness(), but we should inform the user 
+        //  that the file is sparse already.
         fmf |= IFileAPI::fmfSparse;
     }
 
+    //  make sure the create file operation is committed
+    //
+    //  NOTE:  if we used FILE_FLAG_WRITE_THROUGH then the change is already
+    //  committed.  if we didn't then we don't care if the file is committed
+    //  because it is a temp file.  so, we don't need to call ErrCommitFSChange
+    //  here
 
+    //(void)ErrCommitFSChange( wszAbsPath );
 
+    //  initialize the file object
 
     Call( posf->ErrInitFile( this, posv, wszAbsPath, hFile, cbFileSize, fmf, cbIOSize, cbSectorSize ) );
     OSTrace( JET_tracetagFile, OSFormat( "ErrFileCreate( %ws, 0x%x ) -> 0x%p{0x%p} )", wszAbsPath, fmf, posf, hFile ) );
     hFile = INVALID_HANDLE_VALUE;
     posv = NULL;
 
+    //  return the interface to our file object
 
     *ppfapi = posf;
 
@@ -1595,9 +1835,11 @@ ERR COSFileSystem::ErrFileOpen( _In_z_ const WCHAR* const       wszPath,
 
     OSTrapPath( wszPath );
 
+    //  allocate the file object
 
     Alloc( posf = new COSFile );
 
+    //  RFS:  access denied
 
     if ( !RFSAlloc( OSFileOpen ) )
     {
@@ -1607,6 +1849,7 @@ ERR COSFileSystem::ErrFileOpen( _In_z_ const WCHAR* const       wszPath,
 
     Call( ErrPathComplete( wszPath, wszAbsPath ) );
 
+    //  create the file, retrying for a limited time on access denied
 
     const DWORD dwDesiredAccess = DwDesiredAccessFromFileModeFlags( fmf );
     const DWORD dwShareMode = DwShareModeFromFileModeFlags( fmf );
@@ -1643,6 +1886,7 @@ ERR COSFileSystem::ErrFileOpen( _In_z_ const WCHAR* const       wszPath,
 
     SetHandleInformation( hFile, HANDLE_FLAG_PROTECT_FROM_CLOSE, HANDLE_FLAG_PROTECT_FROM_CLOSE );
 
+    //  get the file's properties
 
     if ( !GetFileInformationByHandle( hFile, &bhfi ) )
     {
@@ -1652,6 +1896,7 @@ ERR COSFileSystem::ErrFileOpen( _In_z_ const WCHAR* const       wszPath,
     cbFileSize      = ( QWORD( bhfi.nFileSizeHigh ) << 32 ) + bhfi.nFileSizeLow;
     fIsCompressed   = !!( bhfi.dwFileAttributes & FILE_ATTRIBUTE_COMPRESSED );
 
+    //  Get a volume and disk this file ...
 
     IVolumeAPI * pvolapi = NULL;
     Call( ErrOSVolumeConnect( this, wszAbsPath, &pvolapi ) );
@@ -1667,8 +1912,26 @@ ERR COSFileSystem::ErrFileOpen( _In_z_ const WCHAR* const       wszPath,
         cbSectorSize = 4096;
     }
 
+    //  See MSDN docs on "File Buffering". It says:
+    //  As previously discussed, an application must meet certain requirements when working with files
+    //  opened with FILE_FLAG_NO_BUFFERING. The following specifics apply:
+    //      o File access sizes must be for a number of bytes that is an integer multiple of the volume
+    //          sector size. For example, if the sector size is 512 bytes, an application can request
+    //          reads and writes of 512, 1,024, 1,536, or 2,048 bytes, but not of 335, 981, or 7,171 bytes.
+    //      o File access buffer addresses for read and write operations should be sector-aligned, which
+    //          means aligned on addresses in memory that are integer multiples of the volume sector size.
+    //
     cbIOSize = ( dwFlagsAndAttributes & FILE_FLAG_NO_BUFFERING ) ? cbSectorSize : 1;
  
+    //  if the file is compressed then the kernel forces caching on so we can
+    //  not perform atomic writes.  for our purposes, this is not acceptable so
+    //  we will immediately decompress the file if it is currently compressed.
+    //  if the file is too big to convert then we will simply fail the open.
+    //
+    //  If this operation is being performed during setup, then no decompression
+    //  will be attempted.  Instead, decompression will happen the next time
+    //  the OS is cycled.
+    //
     const QWORD cbFileSizeDecompressMax = 128 * 1024 * 1024;
 
     if ( !fReadOnly && fIsCompressed && !FOSSetupRunning() )
@@ -1677,6 +1940,7 @@ ERR COSFileSystem::ErrFileOpen( _In_z_ const WCHAR* const       wszPath,
         OVERLAPPED  overlapped          = { 0 };
         DWORD       cbTransferred       = 0;
 
+        //  decompress the file
 
         Alloc( hEvent = CreateEventW( NULL, FALSE, FALSE, NULL ) );
         overlapped.hEvent = hEvent;
@@ -1724,6 +1988,7 @@ ERR COSFileSystem::ErrFileOpen( _In_z_ const WCHAR* const       wszPath,
             Call( ErrERRCheck( JET_errFileCompressed ) );
         }
 
+        //  reopen the file to ensure caching is disabled
 
         SetHandleInformation( hFile, HANDLE_FLAG_PROTECT_FROM_CLOSE, 0 );
         CloseHandle( hFile );
@@ -1736,19 +2001,24 @@ ERR COSFileSystem::ErrFileOpen( _In_z_ const WCHAR* const       wszPath,
 
     if ( !( bhfi.dwFileAttributes & FILE_ATTRIBUTE_SPARSE_FILE ) )
     {
+        //  currently this is configured through ErrSetSparseness().
         Assert( 0 == ( fmf & IFileAPI::fmfSparse ) );
     }
     else
     {
+        //  fmfSparse may be set later via ErrSetSparseness(), but we should inform the user 
+        //  that the file is sparse already.
         fmf |= IFileAPI::fmfSparse;
     }
 
+    //  initialize the file object
 
     Call( posf->ErrInitFile( this, posv, wszAbsPath, hFile, cbFileSize, fmf, cbIOSize, cbSectorSize ) );
     OSTrace( JET_tracetagFile, OSFormat( "ErrFileOpen( %ws, 0x%x ) -> 0x%p{0x%p} )", wszAbsPath, fmf, posf, hFile ) );
     hFile = INVALID_HANDLE_VALUE;
     posv = NULL;
 
+    //  return the interface to our file object
 
     *ppfapi = posf;
 
@@ -1787,12 +2057,14 @@ ERR COSFileSystem::ErrSetPrivilege( const WCHAR *   wszPriv,
     TOKEN_PRIVILEGES            tpPrev                      = { 0 };
     DWORD                       cbPrev                      = 0;
 
+    // init out param
 
     if ( pfJustChanged )
     {
         *pfJustChanged = fFalse;
     }
 
+    //  initialize the defer loaded functionality
 
     NTOSFuncStd( pfnOpenProcessToken, g_mwszzProcessTokenLibs, OpenProcessToken, oslfExpectedOnWin5x | oslfStrictFree );
     NTOSFuncStd( pfnAdjustTokenPrivileges, g_mwszzAdjPrivLibs, AdjustTokenPrivileges, oslfExpectedOnWin5x | oslfStrictFree );
@@ -1802,16 +2074,19 @@ ERR COSFileSystem::ErrSetPrivilege( const WCHAR *   wszPriv,
     Call( pfnAdjustTokenPrivileges.ErrIsPresent() );
     Call( pfnLookupPrivilegeValueW.ErrIsPresent() );
 
+    //  create the token privileges block
 
     tp.PrivilegeCount               = 1;
     tp.Privileges[ 0 ].Attributes   = fEnable ? SE_PRIVILEGE_ENABLED : 0;
 
+    //  retrieve privilege LUID
 
     if ( !pfnLookupPrivilegeValueW( NULL, wszPriv, &tp.Privileges[ 0 ].Luid ) )
     {
         Call( ErrGetLastError() );
     }
 
+    //  open process token and adjust our privileges
 
     if ( !pfnOpenProcessToken( GetCurrentProcess(), TOKEN_ADJUST_PRIVILEGES | TOKEN_QUERY, &hToken ) ||
          !pfnAdjustTokenPrivileges( hToken, FALSE, &tp, sizeof( tpPrev ), &tpPrev, &cbPrev ) )
@@ -1839,12 +2114,15 @@ ERR COSFileSystem::ErrCommitFSChangeSlowly( const WCHAR* const wszPath )
     HANDLE      hRootPath                   = INVALID_HANDLE_VALUE;
     BOOL        fDisableBackupPrivilege     = fFalse;
 
+    //  get the root path for the specified path
 
     Call( ErrPathRoot( wszPath, wszAbsRootPath ) );
 
+    //  open the root path.  if we get access denied then try to enable backup
+    //  privilege to bypass the access check and try again
 
     hRootPath = CreateFileW(    wszAbsRootPath,
-                                GENERIC_WRITE,
+                                GENERIC_WRITE,  //  required by FlushFileBuffers()
                                 FILE_SHARE_READ | FILE_SHARE_WRITE,
                                 NULL,
                                 OPEN_EXISTING,
@@ -1855,7 +2133,7 @@ ERR COSFileSystem::ErrCommitFSChangeSlowly( const WCHAR* const wszPath )
         if ( ErrSetPrivilege( WIDEN( SE_BACKUP_NAME ), fTrue, &fDisableBackupPrivilege ) >= JET_errSuccess )
         {
             hRootPath = CreateFileW(    wszAbsRootPath,
-                                        GENERIC_WRITE,
+                                        GENERIC_WRITE,  //  required by FlushFileBuffers()
                                         FILE_SHARE_READ | FILE_SHARE_WRITE,
                                         NULL,
                                         OPEN_EXISTING,
@@ -1872,6 +2150,10 @@ ERR COSFileSystem::ErrCommitFSChangeSlowly( const WCHAR* const wszPath )
         Call( ErrGetLastError() );
     }
 
+    //  commit all FS changes made to this root path
+    //
+    //  NOTE:  this call is VERY, VERY EXPENSIVE when performed on the root of
+    //  a volume.  use only as a last resort
 
     Call( ErrCommitFSChangeSlowly( hRootPath ) );
 
@@ -1891,6 +2173,8 @@ ERR COSFileSystem::ErrCommitFSChangeSlowly( const HANDLE hFile )
 {
     ERR err = JET_errSuccess;
 
+    //  flush file buffers will force all changes made to the given file and
+    //  its meta-data to disk
 
     if ( !FlushFileBuffers( hFile ) )
     {
@@ -1924,6 +2208,7 @@ ERR COSFileSystem::ErrDiskId(   const WCHAR* const wszVolumeCanonicalPath,
     BYTE* pbBufferVolume    = NULL;
     BYTE* pbBufferDisk      = NULL;
 
+    //  CreateFile does not like volume paths terminated with '\'.
 
     WCHAR wszVolumeCanonicalPathT[ IFileSystemAPI::cchPathMax ];
     OSStrCbCopyW( wszVolumeCanonicalPathT, sizeof( wszVolumeCanonicalPathT ), wszVolumeCanonicalPath );
@@ -1942,6 +2227,7 @@ ERR COSFileSystem::ErrDiskId(   const WCHAR* const wszVolumeCanonicalPath,
         wszVolumeCanonicalPathT[ cchVolumePathT - 1 ] = L'\0';
     }
 
+    //  Volume handle.
 
     hVolume = CreateFileW( wszVolumeCanonicalPathT,
                             0,
@@ -1958,8 +2244,9 @@ ERR COSFileSystem::ErrDiskId(   const WCHAR* const wszVolumeCanonicalPath,
 
     BOOL fGetVolumeExtents = fFalse;
 
+    //  We need to loop until there's enough space to retrieve valid data.
 
-    size_t cbBufferVolume = sizeof( VOLUME_DISK_EXTENTS );
+    size_t cbBufferVolume = sizeof( VOLUME_DISK_EXTENTS );  //  let's start with enough for 1 extent only.
 
     do
     {
@@ -1993,19 +2280,23 @@ ERR COSFileSystem::ErrDiskId(   const WCHAR* const wszVolumeCanonicalPath,
 
     const VOLUME_DISK_EXTENTS* const pvde = (VOLUME_DISK_EXTENTS*)pbBufferVolume;
 
+    //  We are not interested in volumes with no physical disk extents.
 
     if ( pvde->NumberOfDiskExtents < 1 )
     {
         Call( ErrERRCheck( errNotFound ) );
     }
 
+    //  We are only interested in the first extent.
 
     *pdwDiskNumber = pvde->Extents[ 0 ].DiskNumber;
 
+    //  Now, the disk.
 
     WCHAR wszDiskPath[ IFileSystemAPI::cchPathMax ];
     OSStrCbFormatW( wszDiskPath, sizeof( wszDiskPath ), L"\\\\.\\PhysicalDrive%u", *pdwDiskNumber );
 
+    //  Disk handle.
 
     hDisk = CreateFileW( wszDiskPath,
                             0,
@@ -2022,8 +2313,9 @@ ERR COSFileSystem::ErrDiskId(   const WCHAR* const wszVolumeCanonicalPath,
 
     BOOL fGetDriveLayout = fFalse;
 
+    //  Again, a similar tedious loop.
 
-    size_t cbBufferDisk = sizeof( DRIVE_LAYOUT_INFORMATION_EX ) + sizeof( PARTITION_INFORMATION_EX );
+    size_t cbBufferDisk = sizeof( DRIVE_LAYOUT_INFORMATION_EX ) + sizeof( PARTITION_INFORMATION_EX );   //  let's start with enough for 2 partitions.
 
     do
     {
@@ -2055,6 +2347,7 @@ ERR COSFileSystem::ErrDiskId(   const WCHAR* const wszVolumeCanonicalPath,
     }
     while( !fGetDriveLayout );
 
+    //  Generate the disk ID.
 
     const DRIVE_LAYOUT_INFORMATION_EX* const pdli = (DRIVE_LAYOUT_INFORMATION_EX*)pbBufferDisk;
 
@@ -2121,42 +2414,55 @@ ERR COSFileFind::ErrInit(   COSFileSystem* const    posfs,
 
     OSTrapPath( wszFindPath );
 
+    //  reference the file system object that created this File Find iterator
 
     m_posfs = posfs;
 
+    //  compute the full path of our search criteria
 
     CallJ( m_posfs->ErrPathComplete( wszFindPath, wszAbsFindPath ), DeferredInvalidPath )
 
+    //  copy our original search criteria (the check above
+    //  should ensure the string is a valid length, but be
+    //  defensive just in case)
 
     Assert( LOSStrLengthW( wszFindPath ) < IFileSystemAPI::cchPathMax );
     OSStrCbCopyW( m_wszFindPath, sizeof( m_wszFindPath ), wszFindPath );
     m_wszFindPath[ IFileSystemAPI::cchPathMax - 1 ] = L'\0';
 
+    //  we are searching for a specific folder
 
     pchEnd = wszAbsFindPath + LOSStrLengthW( wszAbsFindPath ) - 1;
     if (    pchEnd > wszAbsFindPath &&
             ( *pchEnd == L'\\' || *pchEnd == L'/' ) )
     {
+        //  strip the trailing delimiter from the path only if the path is not a drive
         AssertPREFIX( pchEnd < wszAbsFindPath + _countof( wszAbsFindPath ) );
         if ( LOSStrLengthW( wszAbsFindPath ) <= 1 || *( pchEnd - 1 ) != L':' )
         {
             *pchEnd = L'\0';
         }
+        //  remember that we expect to see a folder
 
         fExpectFolder = fTrue;
     }
 
+    //  compute the absolute path of the folder we are searching
 
     CallJ( m_posfs->ErrPathParse( wszAbsFindPath, m_wszAbsFindPath, wszT, wszT ), DeferredInvalidPath );
 
+    //  look for the first file or folder that matches our search criteria
 
     WIN32_FIND_DATAW wfd;
     m_hFileFind = FindFirstFileW( wszAbsFindPath, &wfd );
 
+    //  we found something
 
     if ( m_hFileFind != INVALID_HANDLE_VALUE )
     {
 
+        //  setup the iterator to move first on the file or folder that
+        //  we found
 
         WCHAR   wszFile[ IFileSystemAPI::cchPathMax ];
         WCHAR   wszExt[ IFileSystemAPI::cchPathMax ];
@@ -2169,6 +2475,8 @@ ERR COSFileFind::ErrInit(   COSFileSystem* const    posfs,
 
         m_errFirst = JET_errSuccess;
 
+        //  if we should have found a folder but did not then setup the
+        //  iterator to find nothing and return invalid path
 
         if ( fExpectFolder && !m_fFolder )
         {
@@ -2176,11 +2484,15 @@ ERR COSFileFind::ErrInit(   COSFileSystem* const    posfs,
         }
     }
 
+    //  we didn't find something
 
     else
     {
+        //  setup the iterator to move first onto the resulting error
 
+        //  if we encounter ERROR_INVALID_NAME for the FindFirstFileW
         
+        //  call above, this is really an invalid path.
         
         if ( GetLastError() == ERROR_INVALID_NAME )
         {
@@ -2191,18 +2503,23 @@ ERR COSFileFind::ErrInit(   COSFileSystem* const    posfs,
             m_errFirst = m_posfs->ErrGetLastError();
         }
 
+        //  if the path was invalid then we did not find any files
 
         if ( m_errFirst == JET_errInvalidPath )
         {
             m_errFirst = JET_errFileNotFound;
         }
 
+        //  if we failed for some reason other than not finding a file or
+        //  folder that match our search criteria then fail the creation
+        //  of the File Find iterator with that error
 
         if ( m_errFirst != JET_errFileNotFound )
         {
             Call( ErrERRCheck( m_errFirst ) );
         }
 
+        //  the search criteria exactly matches the root of a volume
 
         WCHAR * wszAbsRootPath  = wszT;
         if (    m_posfs->ErrPathRoot( wszAbsFindPath, wszAbsRootPath ) == JET_errSuccess &&
@@ -2210,12 +2527,15 @@ ERR COSFileFind::ErrInit(   COSFileSystem* const    posfs,
                             wszAbsRootPath,
                             max( LOSStrLengthW( wszAbsFindPath ), LOSStrLengthW( wszAbsRootPath ) - 1 ) ) )
         {
+            //  get the attributes of the root
 
             const DWORD dwFileAttributes = GetFileAttributesW( wszAbsFindPath );
 
+            //  we got the attributes of the root
 
             if ( dwFileAttributes != -1 )
             {
+                //  setup the iterator to move first onto this root
 
                 m_fFolder   = !!( dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY );
                 OSStrCbCopyW( m_wszAbsFoundPath, sizeof( m_wszAbsFoundPath ), wszAbsFindPath );
@@ -2225,9 +2545,11 @@ ERR COSFileFind::ErrInit(   COSFileSystem* const    posfs,
                 m_errFirst  = JET_errSuccess;
             }
 
+            //  we failed to get the attributes of the root
 
             else
             {
+                //  setup the iterator to move first onto the resulting error
 
                 m_errFirst = m_posfs->ErrGetLastError();
             }
@@ -2240,6 +2562,7 @@ HandleError:
     return err;
 
 DeferredInvalidPath:
+    //  if the path was invalid then we did not find any files
     m_errFirst = err == JET_errInvalidPath ? JET_errFileNotFound : err;
     return JET_errSuccess;
 }
@@ -2248,6 +2571,7 @@ COSFileFind::~COSFileFind()
 {
     if ( m_posfs )
     {
+        //  unreference our file system object
 
         m_posfs = NULL;
     }
@@ -2265,23 +2589,29 @@ ERR COSFileFind::ErrNext()
 {
     ERR err = JET_errSuccess;
 
+    //  we have yet to move first
 
     if ( m_fBeforeFirst )
     {
         m_fBeforeFirst = fFalse;
 
+        //  setup the iterator to be on the results of the move first that we
+        //  did in ErrInit()
 
         m_errCurrent = m_errFirst;
     }
 
+    //  we can potentially see more files or folders
 
     else if ( m_hFileFind != INVALID_HANDLE_VALUE )
     {
         WIN32_FIND_DATAW wfd;
 
+        //  we found another file or folder
 
         if ( FindNextFileW( m_hFileFind, &wfd ) )
         {
+            //  setup the iterator to be on the file or folder that we found
 
             WCHAR   wszT[ IFileSystemAPI::cchPathMax ];
             WCHAR   wszFile[ IFileSystemAPI::cchPathMax ];
@@ -2296,27 +2626,33 @@ ERR COSFileFind::ErrNext()
             m_errCurrent = JET_errSuccess;
         }
 
+        //  we didn't find another file or folder
 
         else
         {
+            //  setup the iterator to be on the resulting error
 
             m_errCurrent = m_posfs->ErrGetLastError();
         }
     }
 
+    //  we cannot potentially see any more files or folders
 
     else
     {
+        //  setup the iterator to be after last
 
         m_errCurrent = JET_errFileNotFound;
     }
 
+    //  RFS:  file not found
 
     if ( !RFSAlloc( OSFileFindNext ) )
     {
         m_errCurrent = JET_errFileNotFound;
     }
 
+    //  check the error state of the iterator's current entry
 
     if ( m_errCurrent < JET_errSuccess )
     {
@@ -2356,6 +2692,7 @@ ERR COSFileFind::ErrPath( _Out_bytecap_c_(cbOSFSAPI_MAX_PATHW) WCHAR* const wszA
         Call( ErrERRCheck( m_errCurrent ) );
     }
 
+    // UNDONE_BANAPI:
     OSStrCbCopyW( wszAbsFoundPath, OSFSAPI_MAX_PATH*sizeof(WCHAR), m_wszAbsFoundPath );
 
     OSTrapPath( wszAbsFoundPath );
@@ -2363,6 +2700,7 @@ ERR COSFileFind::ErrPath( _Out_bytecap_c_(cbOSFSAPI_MAX_PATHW) WCHAR* const wszA
     return JET_errSuccess;
 
 HandleError:
+    // UNDONE_BANAPI:
     wszAbsFoundPath[0] = L'\0';
     return err;
 }
@@ -2404,10 +2742,13 @@ HandleError:
 }
 
 
+//  initializes an interface to the default OS File System
 
 CDefaultFileSystemConfiguration::CDefaultFileSystemConfiguration()
-    :
+    :   //m_cbZeroExtend( 1024 * 1024 ),
         m_dtickAccessDeniedRetryPeriod( 100 * 1000 ),
+        //m_cIOMaxOutstanding( 1024 ),
+        //m_cIOMaxOutstandingBackground( 32 ),
         m_dtickHungIOThreshhold( 60 * 1024 ),
         m_grbitHungIOActions( JET_bitHungIOEvent ),
         m_cbMaxReadSize( 384 * 1024 ),
@@ -2418,12 +2759,25 @@ CDefaultFileSystemConfiguration::CDefaultFileSystemConfiguration()
 {
 }
 
+//ULONG CDefaultFileSystemConfiguration::CbZeroExtend()
+//{
+//    return m_cbZeroExtend;
+//}
 
 ULONG CDefaultFileSystemConfiguration::DtickAccessDeniedRetryPeriod()
 {
     return m_dtickAccessDeniedRetryPeriod;
 }
 
+//ULONG CDefaultFileSystemConfiguration::CIOMaxOutstanding()
+//{
+//    return m_cIOMaxOutstanding;
+//}
+//
+//ULONG CDefaultFileSystemConfiguration::CIOMaxOutstandingBackground()
+//{
+//    return m_cIOMaxOutstandingBackground;
+//}
 
 ULONG CDefaultFileSystemConfiguration::DtickHungIOThreshhold()
 {
@@ -2519,12 +2873,14 @@ ERR ErrOSFSCreate(  __in IFileSystemConfiguration * const   pfsconfig,
     IFileSystemConfiguration* const pfsconfigT  = pfsconfig ? pfsconfig : &g_fsconfigDefault;
     IFileSystemAPI*                 pfsapi      = NULL;
 
+    //  create the file system
 
     Alloc( pfsapi = new COSFileSystem( pfsconfigT ) );
 
     *ppfsapi = pfsapi;
     pfsapi = NULL;
 
+    //  if the block cache is enabled then wrap this in its file system filter
 
     if ( pfsconfigT->FBlockCacheEnabled() )
     {
@@ -2545,9 +2901,19 @@ HandleError:
 }
 
 
+// A volume is sort of an oddness ... it is 1/2 way between a OS File System and an OS Disk, but
+// today ultimately our concept of a volume is a construction of the Operating System itself, so
+// we are going to put it in the file system component.
 
 
+// =============================================================================================
+//  OS Volume Subsystem
+// =============================================================================================
+//
+//
 
+//  The List of all volumes attached or connected to the engine
+//
 CSXWLatch g_sxwlOSVolume( CLockBasicInfo( CSyncBasicInfo( "OS Volume SXWL" ), rankOSVolumeSXWL, 0 ) );
 
 CInvasiveList< COSVolume, COSVolume::OffsetOfILE >  g_ilVolumeList;
@@ -2564,7 +2930,11 @@ INLINE void SetDiskMappingMode( const OSDiskMappingMode diskMode )
     g_diskMode = diskMode;
 }
 
+// --------------------------------------------
+// COSVolume / OS Volume
+//
 
+//  ctor/dtor
 
 COSVolume::COSVolume() :
     m_cref( 0 ),
@@ -2600,6 +2970,7 @@ ERR COSVolume::ErrInitVolume( __in_z const WCHAR * const wszVolPath, __in_z cons
 void COSVolume::AssertValid()
 {
     Assert( NULL != this );
+    // We only call this on initialized volumes, a few things should be verifiable.
     Assert( CRef() );
     Assert( m_wszVolPath[0] != L'\0' );
     Assert( m_wszVolCanonicalPath[0] != L'\0' );
@@ -2611,6 +2982,7 @@ BOOL COSVolume::FIsVolume( __in_z const WCHAR * const wszTargetVolume ) const
     return ( 0 == LOSStrCompareW( m_wszVolCanonicalPath, wszTargetVolume ) );
 }
 
+//  returns the amount of free/total disk space on the drive hosting the specified path
 
 ERR COSVolume::ErrDiskSpace(    const WCHAR* const  wszPath,
                                     QWORD* const        pcbFreeForUser,
@@ -2622,6 +2994,7 @@ ERR COSVolume::ErrDiskSpace(    const WCHAR* const  wszPath,
 }
 
 
+//  returns the sector size for the specified path
 ERR COSVolume::ErrFileSectorSize(   const WCHAR* const  wszPath,
                                     DWORD* const        pcbSize )
 {
@@ -2629,6 +3002,7 @@ ERR COSVolume::ErrFileSectorSize(   const WCHAR* const  wszPath,
     return ErrERRCheck( JET_wrnNyi );
 }
 
+//  returns the atomic write size for the specified path
 
 ERR COSVolume::ErrFileAtomicWriteSize(  const WCHAR* const  wszPath,
                                             DWORD* const        pcbSize )
@@ -2637,7 +3011,8 @@ ERR COSVolume::ErrFileAtomicWriteSize(  const WCHAR* const  wszPath,
     return ErrERRCheck( JET_wrnNyi );
 }
 
-#ifndef OS_LAYER_VIOLATIONS
+#ifndef OS_LAYER_VIOLATIONS //  for unit testing only ...
+//  We use this to test other pretend system drives.
 WCHAR g_rgwchSysDriveTesting[IFileSystemAPI::cchPathMax] = { 0 };
 #endif
 
@@ -2647,21 +3022,25 @@ BOOL COSVolume::FDiskFixed()
     if ( m_eosDiskType == DRIVE_UNINIT_ESE )
     {
         UINT eosDiskType = GetDriveTypeW( m_wszVolPath );
-        Assert( eosDiskType != DRIVE_UNINIT_ESE );
+        Assert( eosDiskType != DRIVE_UNINIT_ESE );      //  very unlikely the OS would pick this enum for anything
         if ( eosDiskType == DRIVE_UNKNOWN )
         {
             eosDiskType = GetDriveTypeW( m_wszVolCanonicalPath );
-            Assert( eosDiskType != DRIVE_UNINIT_ESE );
+            Assert( eosDiskType != DRIVE_UNINIT_ESE );  //  very unlikely the OS would pick this enum for anything
         }
         if ( eosDiskType == DRIVE_FIXED )
         {
+            //  TURNS OUT that simple USB disks show up as DRIVE_FIXED ... so we're going to pick
+            //  the safest option possible and only let files running of the OS's windows / system
+            //  drive be considered local for now.
 
-            eosDiskType = DRIVE_UNKNOWN;
+            eosDiskType = DRIVE_UNKNOWN;        //  presumed innocent ...
 
             WCHAR wszWinDir[IFileSystemAPI::cchPathMax];
             if ( GetWindowsDirectoryW( wszWinDir, _countof(wszWinDir) ) )
             {
-#ifndef OS_LAYER_VIOLATIONS
+#ifndef OS_LAYER_VIOLATIONS //  for unit testing only ...
+                //  "config" injection of a string, so we can test the ErrOSVolumeConnect() 
                 if ( g_rgwchSysDriveTesting[0] != L'\0' )
                 {
                     OSStrCbCopyW( wszWinDir, sizeof(wszWinDir), g_rgwchSysDriveTesting );
@@ -2677,6 +3056,7 @@ BOOL COSVolume::FDiskFixed()
                     if( ErrOSVolumeConnect( (COSFileSystem*)pfsapi, wszWinDir, &posvDir ) >= JET_errSuccess )
                     {
                         ULONG_PTR ulpDiskIdDir = NULL;
+                        //  SOMEONE, unncessarily made this return an ERR that is always success, fine handle it.
                         if( posvDir->ErrDiskId( &ulpDiskIdDir ) >= JET_errSuccess )
                         {
                             ULONG_PTR ulpDiskIdTarget = NULL;
@@ -2691,7 +3071,9 @@ BOOL COSVolume::FDiskFixed()
                 }
             }
 
-#if defined(DEBUG) && defined(OS_LAYER_VIOLATIONS)
+#if defined(DEBUG) && defined(OS_LAYER_VIOLATIONS)  //  in debug ese.dll/esent.dll
+            //  Override with mostly fixed (66%), so we can test both paths and to allow us to consider an occasional
+            //  network path as fixed, we'll see what that yields in random IO AVs elsewhere in ESE.
             eosDiskType = ( rand() % 3 ) ? DRIVE_FIXED : DRIVE_UNKNOWN;
 #endif
         }
@@ -2701,6 +3083,7 @@ BOOL COSVolume::FDiskFixed()
         OSTrace( JET_tracetagDiskVolumeManagement, OSFormat( "Volume=%ws, eosDiskType = %d, fFixed = %d", m_wszVolPath, eosDiskType, eosDiskType == DRIVE_FIXED ) );
         if ( eosDiskType != DRIVE_FIXED )
         {
+            //  not a true IO problem, but want heightened awareness ...
             OSTrace( JET_tracetagIOProblems, OSFormat( "WARNING: Volume=%ws is not detected as fixed, MemoryMapping operations will all be forcibly COW'd", m_wszVolPath ) );
         }
 
@@ -2737,6 +3120,7 @@ void COSVolume::Release()
     m_cref--;
 }
 
+//  returns the number of referrers
 
 ULONG COSVolume::CRef() const
 {
@@ -2753,6 +3137,7 @@ const WCHAR * COSVolume::WszVolCanonicalPath() const
     return m_wszVolCanonicalPath;
 }
 
+//  this is the name for the one disk in single disk mode.
 
 const WCHAR * const wszLastDiskOnEarth = L"ThereCanBeOnlyOne";
 
@@ -2763,6 +3148,9 @@ ERR COSVolume::ErrGetDisk( COSDisk ** pposd )
 }
 
 
+// --------------------------------------------
+//  OS Volume Global Connect / Disconnect
+//
 
 ERR ErrOSVolumeICreate(
     __in_z const WCHAR * const  wszVolPath,
@@ -2790,6 +3178,7 @@ ERR ErrOSVolumeICreate(
 
     Call( posv->ErrInitVolume( wszVolPath, wszVolCanonicalPath ) );
 
+    //  From this point on, must not fail.
 
     posv->AddRef();
 
@@ -2851,18 +3240,21 @@ ERR ErrOSVolumeConnect(
     COSVolume * posvCreated = NULL;
     *ppvolapi = NULL;
 
+    //  Retrieve root path from file path name.
 
     WCHAR wszVolumePath[OSFSAPI_MAX_PATH];
 
     CallR( ErrFaultInjection( 17380 ) );
     CallR( posfs->ErrPathRoot( wszFilePath, wszVolumePath ) );
 
+    //  Retrieve the volume canonical path and disk ID.
 
     posfs->PathVolumeCanonicalAndDiskId( wszVolumePath,
                                             wszVolumeCanonicalPath, _countof( wszVolumeCanonicalPath ),
                                             wszDiskId, _countof( wszDiskId ),
                                             &dwDiskNumber );
 
+    //  Decide on the volume to use. Possibly override what we had determined.
 
     const WCHAR * wszVolumeCanonicalPathToUse = wszVolumeCanonicalPath;
     
@@ -2945,9 +3337,11 @@ HandleError:
     {
         if ( *ppvolapi )
         {
+            // We've already incremented the ref count.
             ((COSVolume*)(*ppvolapi))->Release();
         }
 
+        //  We created .
         if ( posvCreated )
         {
             Assert( NULL == posvCreated->m_posd );
@@ -2990,6 +3384,7 @@ void OSVolumeDisconnect(
     {
         ASSERT_VALID( posv );
         ASSERT_VALID( posv->m_posd );
+        //  Should remain at least one reference to the disk as the volume is still open.
         Assert( posv->m_posd->CRef() );
         OSTrace( JET_tracetagDiskVolumeManagement, OSFormat( "Del Ref Volume p=%p, Path=%ws, CanonicalPath=%ws, Cref=%d", posv, posv->WszVolPath(), posv->WszVolCanonicalPath(), posv->CRef() ) );
     }
@@ -2998,27 +3393,58 @@ void OSVolumeDisconnect(
 }
 
 
+//  FileModeFlags translation
+//
+//  We basically allow 3 + 1 external modes of concurrent permissioning / operation:
+//  Parts of this are a layering violation, but it is the only way to explain our modes.
+//      Mode A: RW / Exclusive mode [Default = fmfNone]
+//          In this mode we get all _READ, _WRITE AND DELETE access and specify share of 0, so it 
+//          is fully read-write and excludes all other modes.  This is the default behavior and
+//          how we open all our files in do-time, the database, current edb.log, etc.
+//      Mode B: Classic RO Mode / fmfReadOnly
+//          In this mode we are only getting _READ access, and we must also allow the _SHARE_READ 
+//          flag to alow us to operate concurrently with Mode D / HA.
+//          Note: Most simple utilities, extemporaneous file header reads operate off such files.
+//      Mode C: Read-Flush Mode / fmfReadOnlyClient
+//          In this mode we don't really want to do true write IO, but do want to be able to call flush
+//          file buffers (which does require _WRITE access). So we open it with _WRITE and _READ, but
+//          not DELETE access.  We also use same sharing as Mode B, so that we can interop cleanly with
+//          Mode D.
+//          Note: This is primarily used in log recovery redo to force flushes to logs before we consume
+//          them in the database file.
+//      Mode D: Read-Only Permissive Mode / JetGetLogFileInfo / also used external by HA (primarily for HA)
+//          In this mode used by HA external to ESE, they open the file with _READ access, and
+//          with BOTH _SHARE_READ AND _SHARE_WRITE, the later being required to operate while ESE
+//          is has a file open in Mode C / Read-Flush.
+//
+//  Note: You can not use only _SHARE_READ to interop with Mode C, because it opens the file with GENERIC_WRITE
+//  access.
+//
+//  Note: Also using _SHARE_WRITE in Mode C does not allow concurrent operation with Mode A for two reasons
+//  actually, (1) mainly because Mode A passes 0 for dwShareMode, meaning no concurrent access with
+//  anyone, but also (2) Mode A gets DELETE access and Mode C doesn't specify _SHARE_DELETE as well.
+//
 
 DWORD DwDesiredAccessFromFileModeFlags( const IFileAPI::FileModeFlags fmf )
 {
     return ( fmf & IFileAPI::fmfReadOnly ) ?
-        ( GENERIC_READ ) :
+        ( GENERIC_READ ) :                          //  Mode B: Classic RO mode.
         ( fmf & IFileAPI::fmfReadOnlyClient ) ?
-        ( GENERIC_READ | GENERIC_WRITE ) :
+        ( GENERIC_READ | GENERIC_WRITE ) :          //  Mode C: Newer Read-Flush mode.
         ( fmf & IFileAPI::fmfReadOnlyPermissive ) ?
-        ( GENERIC_READ ) :
-        ( GENERIC_READ | GENERIC_WRITE | DELETE );
+        ( GENERIC_READ ) :                          //  Mode D: ReadOnly-Permissive mode.
+        ( GENERIC_READ | GENERIC_WRITE | DELETE );  //  Mode A: RW / Exclusive mode [Default = fmfNone]
 }
 
 DWORD DwShareModeFromFileModeFlags( const IFileAPI::FileModeFlags fmf )
 {
     return ( fmf & IFileAPI::fmfReadOnly ) ?
-        ( FILE_SHARE_READ ) :
+        ( FILE_SHARE_READ ) :                       //  Mode B: Classic RO mode.
         ( fmf & IFileAPI::fmfReadOnlyClient ) ?
-        ( FILE_SHARE_READ ) :
+        ( FILE_SHARE_READ ) :                       //  Mode C: Newer Read-Flush mode.
         ( fmf & IFileAPI::fmfReadOnlyPermissive ) ?
-        ( FILE_SHARE_READ | FILE_SHARE_WRITE ) :
-        ( 0 );
+        ( FILE_SHARE_READ | FILE_SHARE_WRITE ) :    //  Mode D: ReadOnly-Permissive mode.
+        ( 0 );                                      //  Mode A: RW / Exclusive mode [Default = fmfNone]
 }
 
 DWORD DwCreationDispositionFromFileModeFlags( const BOOL fCreate, const IFileAPI::FileModeFlags fmf )
@@ -3041,6 +3467,7 @@ DWORD DwFlagsAndAttributesFromFileModeFlags( const IFileAPI::FileModeFlags fmf )
 
 #ifdef ESENT
 
+// Defined in $(BASE_INC_PATH)
 #include <appmodel.h>
 #include <statemanager.h>
 
@@ -3061,12 +3488,16 @@ typedef enum tag_STATE_PERSIST_ATTRIB
 STATE_PERSIST_ATTRIB;
 
 WINBASEAPI
+// 2012/03/23 Exchange does not yet have SALv2:
+// _Check_return_ _Success_(return != INVALID_STATE_HANDLE)
 HSTATE
 WINAPI
 OpenState(
     );
 
 WINBASEAPI
+// 2012/03/23 Exchange does not yet have SALv2:
+// _Success_(return != FALSE)
 BOOL
 WINAPI
 CloseState(
@@ -3075,6 +3506,8 @@ CloseState(
 
 
 WINBASEAPI
+// 2012/03/23 Exchange does not yet have SALv2:
+// _Check_return_ _Success_(return != FALSE)
 BOOL
 WINAPI
 GetStateFolder(
@@ -3111,6 +3544,7 @@ LOCAL ERR ErrOSFSInitDefaultPath()
             NTOSFuncStd( pfnGetStateFolder, g_mwszzAppModelStateLibs, GetStateFolder, oslfExpectedOnWin8 | oslfStrictFree );
             NTOSFuncHandle( pfnOpenState, g_mwszzAppModelStateLibs, OpenState, oslfExpectedOnWin8 | oslfStrictFree );
 
+            // The State-functions should be present if the OS supports Packaged Processes.
 
             Assert( pfnGetStateFolder.ErrIsPresent() == JET_errSuccess );
             Assert( pfnOpenState.ErrIsPresent() == JET_errSuccess );
@@ -3138,12 +3572,14 @@ LOCAL ERR ErrOSFSInitDefaultPath()
             Assert( NULL == pfsapi || !pfsapi->FPathIsRelative( wszDefaultPath ) );
             OnDebug( delete pfsapi );
 
+            // Append a trailing backslash:
 
             const size_t ichLastChar = cchFolderRequired;
 
             AssertSz( ichLastChar > 0, "GetStateFolder() should have returned a non-null string." );
             if ( ichLastChar > 0 && wszDefaultPath[ ichLastChar - 1 ] != L'\\' )
             {
+                // Append the character and ensure NULL-termination.
 
                 wszDefaultPath[ ichLastChar - 1 ] = L'\\';
                 wszDefaultPath[ ichLastChar ] = L'\0';
@@ -3159,11 +3595,15 @@ LOCAL ERR ErrOSFSInitDefaultPath()
         WCHAR* wszOldValue = (WCHAR*) AtomicCompareExchangePointer( (void**) &g_wszDefaultPath, NULL, wszDefaultPath );
         if ( wszOldValue == NULL )
         {
+            // This means we've successfully transferred our buffer to the global
+            // variable.
 
             wszDefaultPath = NULL;
         }
         else
         {
+            // Some other thread beat us to it. Leave wszDefaultPath as non-NULL,
+            // and the HandleError block below will free it.
         }
     }
 
@@ -3177,6 +3617,7 @@ HandleError:
         }
     }
 
+    // If the function was successful, then wszDefaultPath was pased off to g_wszDefaultPath.
 
     delete [] wszDefaultPath;
 
@@ -3185,17 +3626,22 @@ HandleError:
 
 
 
+//  post-terminate file subsystem
 
 void OSFSPostterm()
 {
+    //  The proper location for this is OSFSTerm(), but the unit tests do not
+    //  always call OSFSTerm(), but they do call OSFSPostterm().
 
     delete [] g_wszDefaultPath;
     g_wszDefaultPath = NULL;
 }
 
+//  pre-init file subsystem
 
 BOOL FOSFSPreinit()
 {
+    //  nop
 
     return fTrue;
 }
@@ -3206,6 +3652,7 @@ ERR ErrOSFSInit()
 
     CalculateCurrentProcessIsPackaged();
 
+    // Calculate the State directory.
 
     Call( ErrOSFSInitDefaultPath() );
 

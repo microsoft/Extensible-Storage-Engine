@@ -3,8 +3,11 @@
 
 #include "resmgremulatorunit.hxx"
 
+// Unit test class
 
+//  ================================================================
 class ResMgrEmulatorLRUKTestTest : public UNITTEST
+//  ================================================================
 {
     private:
         static ResMgrEmulatorLRUKTestTest s_instance;
@@ -54,7 +57,9 @@ bool ResMgrEmulatorLRUKTestTest::FRunUnderESE98() const         { return true; }
 bool ResMgrEmulatorLRUKTestTest::FRunUnderESENT() const         { return true; }
 bool ResMgrEmulatorLRUKTestTest::FRunUnderESE97() const         { return true; }
 
+//  ================================================================
 ERR ResMgrEmulatorLRUKTestTest::ErrTest()
+//  ================================================================
 {
     ERR err = JET_errSuccess;
 
@@ -83,7 +88,9 @@ HandleError:
     return err;
 }
 
+//  ================================================================
 ERR ResMgrEmulatorLRUKTestTest::ErrInitInvalidParameters_()
+//  ================================================================
 {
     ERR err = JET_errSuccess;
 
@@ -112,7 +119,9 @@ HandleError:
     return err;
 }
 
+//  ================================================================
 ERR ResMgrEmulatorLRUKTestTest::ErrInitValidParameters_()
+//  ================================================================
 {
     ERR err = JET_errSuccess;
 
@@ -139,7 +148,9 @@ HandleError:
     return err;
 }
 
+//  ================================================================
 ERR ResMgrEmulatorLRUKTestTest::ErrCacheAlreadyCachedPages_()
+//  ================================================================
 {
     ERR err = JET_errSuccess;
 
@@ -167,7 +178,9 @@ HandleError:
     return err;
 }
 
+//  ================================================================
 ERR ResMgrEmulatorLRUKTestTest::ErrTouchUncachedPages_()
+//  ================================================================
 {
     ERR err = JET_errSuccess;
 
@@ -205,7 +218,9 @@ HandleError:
     return err;
 }
 
+//  ================================================================
 ERR ResMgrEmulatorLRUKTestTest::ErrSupercoldUncachedPages_()
+//  ================================================================
 {
     ERR err = JET_errSuccess;
 
@@ -243,7 +258,9 @@ HandleError:
     return err;
 }
 
+//  ================================================================
 ERR ResMgrEmulatorLRUKTestTest::ErrEvictUncachedPages_()
+//  ================================================================
 {
     ERR err = JET_errSuccess;
 
@@ -273,7 +290,9 @@ HandleError:
     return err;
 }
 
+//  ================================================================
 ERR ResMgrEmulatorLRUKTestTest::ErrEvictNextOnEmptyCache_()
+//  ================================================================
 {
     ERR err = JET_errSuccess;
     QWORD key = 0;
@@ -306,7 +325,9 @@ HandleError:
     return err;
 }
 
+//  ================================================================
 ERR ResMgrEmulatorLRUKTestTest::ErrBasicCacheEvict_()
+//  ================================================================
 {
     ERR err = JET_errSuccess;
     QWORD key = 0;
@@ -343,7 +364,9 @@ HandleError:
     return err;
 }
 
+//  ================================================================
 ERR ResMgrEmulatorLRUKTestTest::ErrBasicCacheTouchEvict_()
+//  ================================================================
 {
     ERR err = JET_errSuccess;
     QWORD key = 0;
@@ -381,7 +404,9 @@ HandleError:
     return err;
 }
 
+//  ================================================================
 ERR ResMgrEmulatorLRUKTestTest::ErrSupercoldWorks_()
+//  ================================================================
 {
     ERR err = JET_errSuccess;
     QWORD key = 0;
@@ -449,7 +474,9 @@ HandleError:
     return err;
 }
 
+//  ================================================================
 ERR ResMgrEmulatorLRUKTestTest::ErrBasicLru2_()
+//  ================================================================
 {
     ERR err = JET_errSuccess;
     QWORD key = 0;
@@ -471,14 +498,17 @@ ERR ResMgrEmulatorLRUKTestTest::ErrBasicLru2_()
     TestCheckErr( lruktest.ErrEvictNextResource( &key, 70 ) );
     TestCheck( key == 0 );
 
+    //  Second touches.
 
     TestCheckErr( lruktest.ErrTouchResource( 12, 80 ) );
     TestCheckErr( lruktest.ErrTouchResource( 13, 90 ) );
     TestCheckErr( lruktest.ErrTouchResource( 14, 100 ) );
 
+    //  Extra cached page (very recent).
 
     TestCheckErr( lruktest.ErrCacheResource( 17, 110, true ) );
 
+    //  Evict single-touches first.
 
     TestCheckErr( lruktest.ErrEvictNextResource( &key, 120 ) );
     TestCheck( key == 15 );
@@ -489,6 +519,7 @@ ERR ResMgrEmulatorLRUKTestTest::ErrBasicLru2_()
     TestCheckErr( lruktest.ErrEvictNextResource( &key, 120 ) );
     TestCheck( key == 17 );
 
+    //  Double-touches now.
 
     TestCheckErr( lruktest.ErrEvictNextResource( &key, 120 ) );
     TestCheck( key == 14 );
@@ -506,7 +537,9 @@ HandleError:
     return err;
 }
 
+//  ================================================================
 ERR ResMgrEmulatorLRUKTestTest::ErrEvictWithinCorrelationInterval_()
+//  ================================================================
 {
     ERR err = JET_errSuccess;
     QWORD key = 0;
@@ -528,21 +561,26 @@ ERR ResMgrEmulatorLRUKTestTest::ErrEvictWithinCorrelationInterval_()
     TestCheckErr( lruktest.ErrEvictNextResource( &key, 70 ) );
     TestCheck( key == 0 );
 
+    //  Second touches.
 
     TestCheckErr( lruktest.ErrTouchResource( 14, 80 ) );
     TestCheckErr( lruktest.ErrTouchResource( 13, 90 ) );
     TestCheckErr( lruktest.ErrTouchResource( 12, 100 ) );
 
+    //  Extra cached page (very recent).
 
     TestCheckErr( lruktest.ErrCacheResource( 17, 110, true ) );
 
+    //  Supercold one of the double-touches.
 
     TestCheckErr( lruktest.ErrMarkResourceAsSuperCold( 17 ) );
 
+    //  Supercold first, even though last touch is within correlation interval.
 
     TestCheckErr( lruktest.ErrEvictNextResource( &key, 120 ) );
     TestCheck( key == 17 );
 
+    //  Evict single-touches first.
 
     TestCheckErr( lruktest.ErrEvictNextResource( &key, 120 ) );
     TestCheck( key == 15 );
@@ -551,12 +589,14 @@ ERR ResMgrEmulatorLRUKTestTest::ErrEvictWithinCorrelationInterval_()
     TestCheckErr( lruktest.ErrEvictNextResource( &key, 120 ) );
     TestCheck( key == 11 );
 
+    //  Double-touches now, except for page 12, which was requested too recently.
 
     TestCheckErr( lruktest.ErrEvictNextResource( &key, 120 ) );
     TestCheck( key == 14 );
     TestCheckErr( lruktest.ErrEvictNextResource( &key, 120 ) );
     TestCheck( key == 13 );
 
+    //  Duoble-touch still within correlation interval, but it's our only option.
 
     TestCheckErr( lruktest.ErrEvictNextResource( &key, 120 ) );
     TestCheck( key == 12 );
@@ -570,7 +610,9 @@ HandleError:
     return err;
 }
 
+//  ================================================================
 ERR ResMgrEmulatorLRUKTestTest::ErrKeepHistory_()
+//  ================================================================
 {
     ERR err = JET_errSuccess;
     QWORD key = 0;
@@ -592,14 +634,17 @@ ERR ResMgrEmulatorLRUKTestTest::ErrKeepHistory_()
     TestCheckErr( lruktest.ErrEvictNextResource( &key, 70 ) );
     TestCheck( key == 0 );
 
+    //  Second touches.
 
     TestCheckErr( lruktest.ErrTouchResource( 12, 80 ) );
     TestCheckErr( lruktest.ErrTouchResource( 13, 90 ) );
     TestCheckErr( lruktest.ErrTouchResource( 14, 100 ) );
 
+    //  Extra cached page (very recent).
 
     TestCheckErr( lruktest.ErrCacheResource( 17, 110, true ) );
 
+    //  Evict single-touches first.
 
     TestCheckErr( lruktest.ErrEvictNextResource( &key, 120 ) );
     TestCheck( key == 15 );
@@ -610,6 +655,7 @@ ERR ResMgrEmulatorLRUKTestTest::ErrKeepHistory_()
     TestCheckErr( lruktest.ErrEvictNextResource( &key, 120 ) );
     TestCheck( key == 17 );
 
+    //  Double-touches now.
 
     TestCheckErr( lruktest.ErrEvictNextResource( &key, 120 ) );
     TestCheck( key == 14 );
@@ -620,6 +666,7 @@ ERR ResMgrEmulatorLRUKTestTest::ErrKeepHistory_()
 
     TestCheck( ( lruktest.ErrEvictNextResource( &key, 120 ) == CLRUKTestResourceUtilityManager<QWORD, TICK>::errNoCurrentResource ) );
 
+    //  Re-cache all pages with history, except for one of them.
 
     TestCheckErr( lruktest.ErrCacheResource( 11, 130, true ) );
     TestCheckErr( lruktest.ErrCacheResource( 12, 140, true ) );
@@ -628,10 +675,12 @@ ERR ResMgrEmulatorLRUKTestTest::ErrKeepHistory_()
     TestCheckErr( lruktest.ErrCacheResource( 16, 170, true ) );
     TestCheckErr( lruktest.ErrCacheResource( 15, 180, true ) );
 
+    //  At this point, all pages should be double-touches, except for the one we didn't keep history via the cache flag.
 
     TestCheckErr( lruktest.ErrEvictNextResource( &key, 190 ) );
     TestCheck( key == 13 );
 
+    //  Double touches now, sorted accordingly.
     
     TestCheckErr( lruktest.ErrEvictNextResource( &key, 190 ) );
     TestCheck( key == 15 );
@@ -653,7 +702,9 @@ HandleError:
     return err;
 }
 
+//  ================================================================
 ERR ResMgrEmulatorLRUKTestTest::ErrExplicitEvictionDoesntKeepHistory_()
+//  ================================================================
 {
     ERR err = JET_errSuccess;
     QWORD key = 0;
@@ -675,14 +726,17 @@ ERR ResMgrEmulatorLRUKTestTest::ErrExplicitEvictionDoesntKeepHistory_()
     TestCheckErr( lruktest.ErrEvictNextResource( &key, 70 ) );
     TestCheck( key == 0 );
 
+    //  Second touches.
 
     TestCheckErr( lruktest.ErrTouchResource( 12, 80 ) );
     TestCheckErr( lruktest.ErrTouchResource( 13, 90 ) );
     TestCheckErr( lruktest.ErrTouchResource( 14, 100 ) );
 
+    //  Extra cached page (very recent).
 
     TestCheckErr( lruktest.ErrCacheResource( 17, 110, true ) );
 
+    //  Evict single-touches first.
 
     TestCheckErr( lruktest.ErrEvictNextResource( &key, 120 ) );
     TestCheck( key == 15 );
@@ -693,6 +747,7 @@ ERR ResMgrEmulatorLRUKTestTest::ErrExplicitEvictionDoesntKeepHistory_()
     TestCheckErr( lruktest.ErrEvictNextResource( &key, 120 ) );
     TestCheck( key == 17 );
 
+    //  Double-touches now.
 
     TestCheckErr( lruktest.ErrEvictNextResource( &key, 120 ) );
     TestCheck( key == 14 );
@@ -702,6 +757,7 @@ ERR ResMgrEmulatorLRUKTestTest::ErrExplicitEvictionDoesntKeepHistory_()
 
     TestCheck( ( lruktest.ErrEvictNextResource( &key, 120 ) == CLRUKTestResourceUtilityManager<QWORD, TICK>::errNoCurrentResource ) );
 
+    //  Re-cache all pages with history.
 
     TestCheckErr( lruktest.ErrCacheResource( 11, 130, true ) );
     TestCheckErr( lruktest.ErrCacheResource( 12, 140, true ) );
@@ -710,10 +766,12 @@ ERR ResMgrEmulatorLRUKTestTest::ErrExplicitEvictionDoesntKeepHistory_()
     TestCheckErr( lruktest.ErrCacheResource( 16, 170, true ) );
     TestCheckErr( lruktest.ErrCacheResource( 15, 180, true ) );
 
+    //  At this point, all pages should be double-touches, except for the one we didn't keep history via eviting explicitly.
 
     TestCheckErr( lruktest.ErrEvictNextResource( &key, 190 ) );
     TestCheck( key == 12 );
 
+    //  Double touches now, sorted accordingly.
     
     TestCheckErr( lruktest.ErrEvictNextResource( &key, 190 ) );
     TestCheck( key == 15 );
@@ -735,7 +793,9 @@ HandleError:
     return err;
 }
 
+//  ================================================================
 ERR ResMgrEmulatorLRUKTestTest::ErrSupercoldDoesntKeepHistory_()
+//  ================================================================
 {
     ERR err = JET_errSuccess;
     QWORD key = 0;
@@ -757,14 +817,17 @@ ERR ResMgrEmulatorLRUKTestTest::ErrSupercoldDoesntKeepHistory_()
     TestCheckErr( lruktest.ErrEvictNextResource( &key, 70 ) );
     TestCheck( key == 0 );
 
+    //  Second touches.
 
     TestCheckErr( lruktest.ErrTouchResource( 12, 80 ) );
     TestCheckErr( lruktest.ErrTouchResource( 13, 90 ) );
     TestCheckErr( lruktest.ErrTouchResource( 14, 100 ) );
 
+    //  Extra cached page (very recent).
 
     TestCheckErr( lruktest.ErrCacheResource( 17, 110, true ) );
 
+    //  Evict single-touches first.
 
     TestCheckErr( lruktest.ErrEvictNextResource( &key, 120 ) );
     TestCheck( key == 15 );
@@ -775,6 +838,7 @@ ERR ResMgrEmulatorLRUKTestTest::ErrSupercoldDoesntKeepHistory_()
     TestCheckErr( lruktest.ErrEvictNextResource( &key, 120 ) );
     TestCheck( key == 17 );
 
+    //  Double-touches now.
 
     TestCheckErr( lruktest.ErrEvictNextResource( &key, 120 ) );
     TestCheck( key == 14 );
@@ -786,6 +850,7 @@ ERR ResMgrEmulatorLRUKTestTest::ErrSupercoldDoesntKeepHistory_()
 
     TestCheck( ( lruktest.ErrEvictNextResource( &key, 120 ) == CLRUKTestResourceUtilityManager<QWORD, TICK>::errNoCurrentResource ) );
 
+    //  Re-cache all pages with history.
 
     TestCheckErr( lruktest.ErrCacheResource( 11, 130, true ) );
     TestCheckErr( lruktest.ErrCacheResource( 12, 140, true ) );
@@ -794,10 +859,12 @@ ERR ResMgrEmulatorLRUKTestTest::ErrSupercoldDoesntKeepHistory_()
     TestCheckErr( lruktest.ErrCacheResource( 16, 170, true ) );
     TestCheckErr( lruktest.ErrCacheResource( 15, 180, true ) );
 
+    //  At this point, all pages should be double-touches, except for the one we didn't keep history via supercolding it.
 
     TestCheckErr( lruktest.ErrEvictNextResource( &key, 190 ) );
     TestCheck( key == 12 );
 
+    //  Double touches now, sorted accordingly.
     
     TestCheckErr( lruktest.ErrEvictNextResource( &key, 190 ) );
     TestCheck( key == 15 );
@@ -819,7 +886,9 @@ HandleError:
     return err;
 }
 
+//  ================================================================
 ERR ResMgrEmulatorLRUKTestTest::ErrBasicLruKMax_()
+//  ================================================================
 {
     ERR err = JET_errSuccess;
     QWORD key = 0;
@@ -831,6 +900,7 @@ ERR ResMgrEmulatorLRUKTestTest::ErrBasicLruKMax_()
     TestCheck( ( CLRUKTestResourceUtilityManager<QWORD, TICK>::KMax == 5 ) );
     TestCheckErr( lruktest.ErrInit( 5, 0.001 ) );
 
+    //  Cache 50 pages.
 
     TICK tick = 10;
     for ( QWORD pgno = 1; pgno <= 50; pgno++ )
@@ -839,6 +909,7 @@ ERR ResMgrEmulatorLRUKTestTest::ErrBasicLruKMax_()
         tick += 10;
     }
 
+    //  Touch first 10-page batch 4 times, second 10-page batch 3 times, etc...
 
     for ( QWORD pgno = 1; pgno <= 50; pgno++ )
     {
@@ -851,6 +922,7 @@ ERR ResMgrEmulatorLRUKTestTest::ErrBasicLruKMax_()
         }
     }
 
+    //  Evict in order they were cached (within the same k-ness).
 
     for ( QWORD pgnoT = 41; pgnoT >= 1; )
     {
@@ -879,7 +951,9 @@ HandleError:
     return err;
 }
 
+//  ================================================================
 ERR ResMgrEmulatorLRUKTestTest::ErrLruKMaxWithMoreTouches_()
+//  ================================================================
 {
     ERR err = JET_errSuccess;
     QWORD key = 0;
@@ -891,6 +965,7 @@ ERR ResMgrEmulatorLRUKTestTest::ErrLruKMaxWithMoreTouches_()
     TestCheck( ( CLRUKTestResourceUtilityManager<QWORD, TICK>::KMax == 5 ) );
     TestCheckErr( lruktest.ErrInit( 5, 0.001 ) );
 
+    //  Cache 7 pages.
 
     TestCheckErr( lruktest.ErrCacheResource( 1, 0, true ) );
     TestCheckErr( lruktest.ErrCacheResource( 2, 100, true ) );
@@ -900,6 +975,7 @@ ERR ResMgrEmulatorLRUKTestTest::ErrLruKMaxWithMoreTouches_()
     TestCheckErr( lruktest.ErrCacheResource( 6, 2000, true ) );
     TestCheckErr( lruktest.ErrCacheResource( 7, 3000, true ) );
 
+    //  Make pgno 1 k-ness 5 + 1 touch.
 
     TestCheckErr( lruktest.ErrTouchResource( 1, 230 ) );
     TestCheckErr( lruktest.ErrTouchResource( 1, 330 ) );
@@ -907,6 +983,7 @@ ERR ResMgrEmulatorLRUKTestTest::ErrLruKMaxWithMoreTouches_()
     TestCheckErr( lruktest.ErrTouchResource( 1, 530 ) );
     TestCheckErr( lruktest.ErrTouchResource( 1, 630 ) );
 
+    //  Make pgno 2 k-ness 5 + 1 touch.
 
     TestCheckErr( lruktest.ErrTouchResource( 2, 210 ) );
     TestCheckErr( lruktest.ErrTouchResource( 2, 310 ) );
@@ -914,6 +991,7 @@ ERR ResMgrEmulatorLRUKTestTest::ErrLruKMaxWithMoreTouches_()
     TestCheckErr( lruktest.ErrTouchResource( 2, 510 ) );
     TestCheckErr( lruktest.ErrTouchResource( 2, 610 ) );
 
+    //  Make pgno 3 k-ness 5 + 1 touch.
 
     TestCheckErr( lruktest.ErrTouchResource( 3, 250 ) );
     TestCheckErr( lruktest.ErrTouchResource( 3, 350 ) );
@@ -921,18 +999,22 @@ ERR ResMgrEmulatorLRUKTestTest::ErrLruKMaxWithMoreTouches_()
     TestCheckErr( lruktest.ErrTouchResource( 3, 550 ) );
     TestCheckErr( lruktest.ErrTouchResource( 3, 650 ) );
 
+    //  Make pgno 4 k-ness 4.
 
     TestCheckErr( lruktest.ErrTouchResource( 4, 315 ) );
     TestCheckErr( lruktest.ErrTouchResource( 4, 415 ) );
     TestCheckErr( lruktest.ErrTouchResource( 4, 515 ) );
 
+    //  Make pgno 5 k-ness 3.
 
     TestCheckErr( lruktest.ErrTouchResource( 5, 1010 ) );
     TestCheckErr( lruktest.ErrTouchResource( 5, 1110 ) );
 
+    //  Make pgno 6 k-ness 2.
 
     TestCheckErr( lruktest.ErrTouchResource( 6, 2010 ) );
 
+    //  Evict according to k-ness.
 
     TestCheckErr( lruktest.ErrEvictNextResource( &key, 4000 ) );
     TestCheck( key == 7 );
@@ -943,9 +1025,11 @@ ERR ResMgrEmulatorLRUKTestTest::ErrLruKMaxWithMoreTouches_()
     TestCheckErr( lruktest.ErrEvictNextResource( &key, 4000 ) );
     TestCheck( key == 4 );
 
+    //  Re-cache page 4, it'll have an eviction timestamp of 215 (due to saved history).
 
     TestCheckErr( lruktest.ErrCacheResource( 4, 4000, true ) );
 
+    //  For the k-ness 5 pages, evict accordingly too.
 
     TestCheckErr( lruktest.ErrEvictNextResource( &key, 5000 ) );
     TestCheck( key == 2 );
@@ -965,7 +1049,9 @@ HandleError:
     return err;
 }
 
+//  ================================================================
 ERR ResMgrEmulatorLRUKTestTest::ErrBoostFromCorrelatedTouchOnTouch_()
+//  ================================================================
 {
     ERR err = JET_errSuccess;
     QWORD key = 0;
@@ -977,6 +1063,7 @@ ERR ResMgrEmulatorLRUKTestTest::ErrBoostFromCorrelatedTouchOnTouch_()
     TestCheck( ( CLRUKTestResourceUtilityManager<QWORD, TICK>::KMax == 5 ) );
     TestCheckErr( lruktest.ErrInit( 5, 0.010 ) );
 
+    //  Cache 7 pages.
 
     TestCheckErr( lruktest.ErrCacheResource( 1, 0, true ) );
     TestCheckErr( lruktest.ErrCacheResource( 2, 100, true ) );
@@ -986,6 +1073,7 @@ ERR ResMgrEmulatorLRUKTestTest::ErrBoostFromCorrelatedTouchOnTouch_()
     TestCheckErr( lruktest.ErrCacheResource( 6, 2000, true ) );
     TestCheckErr( lruktest.ErrCacheResource( 7, 3000, true ) );
 
+    //  Make pgno 1 k-ness 5 + 1 touch.
 
     TestCheckErr( lruktest.ErrTouchResource( 1, 230 ) );
     TestCheckErr( lruktest.ErrTouchResource( 1, 330 ) );
@@ -993,6 +1081,7 @@ ERR ResMgrEmulatorLRUKTestTest::ErrBoostFromCorrelatedTouchOnTouch_()
     TestCheckErr( lruktest.ErrTouchResource( 1, 530 ) );
     TestCheckErr( lruktest.ErrTouchResource( 1, 630 ) );
 
+    //  Make pgno 2 k-ness 5 + 1 touch.
 
     TestCheckErr( lruktest.ErrTouchResource( 2, 210 ) );
     TestCheckErr( lruktest.ErrTouchResource( 2, 310 ) );
@@ -1000,6 +1089,7 @@ ERR ResMgrEmulatorLRUKTestTest::ErrBoostFromCorrelatedTouchOnTouch_()
     TestCheckErr( lruktest.ErrTouchResource( 2, 510 ) );
     TestCheckErr( lruktest.ErrTouchResource( 2, 610 ) );
 
+    //  Make pgno 3 k-ness 5 + 1 touch.
 
     TestCheckErr( lruktest.ErrTouchResource( 3, 250 ) );
     TestCheckErr( lruktest.ErrTouchResource( 3, 350 ) );
@@ -1007,22 +1097,26 @@ ERR ResMgrEmulatorLRUKTestTest::ErrBoostFromCorrelatedTouchOnTouch_()
     TestCheckErr( lruktest.ErrTouchResource( 3, 550 ) );
     TestCheckErr( lruktest.ErrTouchResource( 3, 650 ) );
 
+    //  Make pgno 4 k-ness 5 with correlated touch.
 
     TestCheckErr( lruktest.ErrTouchResource( 4, 315 ) );
     TestCheckErr( lruktest.ErrTouchResource( 4, 415 ) );
     TestCheckErr( lruktest.ErrTouchResource( 4, 515 ) );
-    TestCheckErr( lruktest.ErrTouchResource( 4, 524 ) );
-    TestCheckErr( lruktest.ErrTouchResource( 4, 533 ) );
-    TestCheckErr( lruktest.ErrTouchResource( 4, 535 ) );
+    TestCheckErr( lruktest.ErrTouchResource( 4, 524 ) );    //  boost of 9.
+    TestCheckErr( lruktest.ErrTouchResource( 4, 533 ) );    //  boost of 9.
+    TestCheckErr( lruktest.ErrTouchResource( 4, 535 ) );    //  boost of 2 (total 20).
     TestCheckErr( lruktest.ErrTouchResource( 4, 615 ) );
 
+    //  Make pgno 5 k-ness 3.
 
     TestCheckErr( lruktest.ErrTouchResource( 5, 1010 ) );
     TestCheckErr( lruktest.ErrTouchResource( 5, 1110 ) );
 
+    //  Make pgno 6 k-ness 2.
 
     TestCheckErr( lruktest.ErrTouchResource( 6, 2010 ) );
 
+    //  Evict according to k-ness.
 
     TestCheckErr( lruktest.ErrEvictNextResource( &key, 4000 ) );
     TestCheck( key == 7 );
@@ -1031,6 +1125,7 @@ ERR ResMgrEmulatorLRUKTestTest::ErrBoostFromCorrelatedTouchOnTouch_()
     TestCheckErr( lruktest.ErrEvictNextResource( &key, 4000 ) );
     TestCheck( key == 5 );
 
+    //  For the k-ness 5 pages, evict accordingly too.
 
     TestCheckErr( lruktest.ErrEvictNextResource( &key, 4000 ) );
     TestCheck( key == 2 );
@@ -1050,7 +1145,9 @@ HandleError:
     return err;
 }
 
+//  ================================================================
 ERR ResMgrEmulatorLRUKTestTest::ErrBoostFromCorrelatedTouchOnReCache_()
+//  ================================================================
 {
     ERR err = JET_errSuccess;
     QWORD key = 0;
@@ -1062,6 +1159,7 @@ ERR ResMgrEmulatorLRUKTestTest::ErrBoostFromCorrelatedTouchOnReCache_()
     TestCheck( ( CLRUKTestResourceUtilityManager<QWORD, TICK>::KMax == 5 ) );
     TestCheckErr( lruktest.ErrInit( 5, 0.010 ) );
 
+    //  Cache 7 pages.
 
     TestCheckErr( lruktest.ErrCacheResource( 1, 0, true ) );
     TestCheckErr( lruktest.ErrCacheResource( 2, 100, true ) );
@@ -1071,6 +1169,7 @@ ERR ResMgrEmulatorLRUKTestTest::ErrBoostFromCorrelatedTouchOnReCache_()
     TestCheckErr( lruktest.ErrCacheResource( 6, 2000, true ) );
     TestCheckErr( lruktest.ErrCacheResource( 7, 3000, true ) );
 
+    //  Make pgno 1 k-ness 5 + 1 touch.
 
     TestCheckErr( lruktest.ErrTouchResource( 1, 230 ) );
     TestCheckErr( lruktest.ErrTouchResource( 1, 330 ) );
@@ -1078,6 +1177,7 @@ ERR ResMgrEmulatorLRUKTestTest::ErrBoostFromCorrelatedTouchOnReCache_()
     TestCheckErr( lruktest.ErrTouchResource( 1, 530 ) );
     TestCheckErr( lruktest.ErrTouchResource( 1, 630 ) );
 
+    //  Make pgno 2 k-ness 5 + 1 touch.
 
     TestCheckErr( lruktest.ErrTouchResource( 2, 210 ) );
     TestCheckErr( lruktest.ErrTouchResource( 2, 310 ) );
@@ -1085,6 +1185,7 @@ ERR ResMgrEmulatorLRUKTestTest::ErrBoostFromCorrelatedTouchOnReCache_()
     TestCheckErr( lruktest.ErrTouchResource( 2, 510 ) );
     TestCheckErr( lruktest.ErrTouchResource( 2, 610 ) );
 
+    //  Make pgno 3 k-ness 5 + 1 touch.
 
     TestCheckErr( lruktest.ErrTouchResource( 3, 250 ) );
     TestCheckErr( lruktest.ErrTouchResource( 3, 350 ) );
@@ -1092,21 +1193,25 @@ ERR ResMgrEmulatorLRUKTestTest::ErrBoostFromCorrelatedTouchOnReCache_()
     TestCheckErr( lruktest.ErrTouchResource( 3, 550 ) );
     TestCheckErr( lruktest.ErrTouchResource( 3, 650 ) );
 
+    //  Make pgno 4 k-ness 4 with pending correlated touches.
 
     TestCheckErr( lruktest.ErrTouchResource( 4, 315 ) );
     TestCheckErr( lruktest.ErrTouchResource( 4, 415 ) );
     TestCheckErr( lruktest.ErrTouchResource( 4, 515 ) );
-    TestCheckErr( lruktest.ErrTouchResource( 4, 524 ) );
-    TestCheckErr( lruktest.ErrTouchResource( 4, 533 ) );
-    TestCheckErr( lruktest.ErrTouchResource( 4, 535 ) );
+    TestCheckErr( lruktest.ErrTouchResource( 4, 524 ) );    //  boost of 9.
+    TestCheckErr( lruktest.ErrTouchResource( 4, 533 ) );    //  boost of 9.
+    TestCheckErr( lruktest.ErrTouchResource( 4, 535 ) );    //  boost of 2 (total 20).
 
+    //  Make pgno 5 k-ness 3.
 
     TestCheckErr( lruktest.ErrTouchResource( 5, 1010 ) );
     TestCheckErr( lruktest.ErrTouchResource( 5, 1110 ) );
 
+    //  Make pgno 6 k-ness 2.
 
     TestCheckErr( lruktest.ErrTouchResource( 6, 2010 ) );
 
+    //  Evict according to k-ness.
 
     TestCheckErr( lruktest.ErrEvictNextResource( &key, 4000 ) );
     TestCheck( key == 7 );
@@ -1117,9 +1222,11 @@ ERR ResMgrEmulatorLRUKTestTest::ErrBoostFromCorrelatedTouchOnReCache_()
     TestCheckErr( lruktest.ErrEvictNextResource( &key, 4000 ) );
     TestCheck( key == 4 );
 
+    //  Re-cache page 4, it'll get a boost of 20 from pending correlated touches.
 
     TestCheckErr( lruktest.ErrCacheResource( 4, 4000, true ) );
 
+    //  For the k-ness 5 pages, evict accordingly too.
 
     TestCheckErr( lruktest.ErrEvictNextResource( &key, 5000 ) );
     TestCheck( key == 2 );
@@ -1139,7 +1246,9 @@ HandleError:
     return err;
 }
 
+//  ================================================================
 ERR ResMgrEmulatorLRUKTestTest::ErrBasicIntegrationLruKMax_()
+//  ================================================================
 {
     ERR err = JET_errSuccess;
 
@@ -1149,6 +1258,17 @@ ERR ResMgrEmulatorLRUKTestTest::ErrBasicIntegrationLruKMax_()
     BFFTLContext* pbfftlc = NULL;
     PageEvictionAlgorithmLRUKTest algorithm;
 
+    //  Scenario:
+    //  - Init; (1)
+    //  - Cache 50 pages; (51)
+    //  - Touch first 10-page batch 4 times, second 10-page batch 3 times, etc... (151)
+    //  - Supercold page 25. (152)
+    //  - Evict page 35. (153)
+    //  - Evict/scavenge in order they were cached (within the same k-ness, except for supercolded and explicitly evicted). (202)
+    //  - Cache first 10 pages, but cache page 5 with no-history; (212)
+    //  - Evict/scavenge all 10 pages, note that page 5 will be evicted first because it was cached with no-history. (222)
+    //  - Term; (223)
+    //  - Sentinel. (224)
 
     BFTRACE rgbftrace[ 224 ] = { 0 };
     size_t iTrace = 0;
@@ -1157,6 +1277,7 @@ ERR ResMgrEmulatorLRUKTestTest::ErrBasicIntegrationLruKMax_()
 
     TestCheck( ( CLRUKTestResourceUtilityManager<QWORD, TICK>::KMax == 5 ) );
 
+    //  - Init; (1)
 
     rgbftrace[ iTrace ].tick = tick;
     rgbftrace[ iTrace ].traceid = bftidSysResMgrInit;
@@ -1165,6 +1286,7 @@ ERR ResMgrEmulatorLRUKTestTest::ErrBasicIntegrationLruKMax_()
     iTrace++;
     tick += 10;
 
+    //  - Cache 50 pages; (51)
 
     for ( PGNO pgno = 1; iTrace < 51; iTrace++ )
     {
@@ -1179,6 +1301,7 @@ ERR ResMgrEmulatorLRUKTestTest::ErrBasicIntegrationLruKMax_()
         tick += 10;
     }
 
+    //  - Touch first 10-page batch 4 times, second 10-page batch 3 times, etc... (151)
 
     for ( PGNO pgno = 1; pgno <= 50; pgno++ )
     {
@@ -1199,6 +1322,7 @@ ERR ResMgrEmulatorLRUKTestTest::ErrBasicIntegrationLruKMax_()
         }
     }
 
+    //  - Supercold page 25. (152)
 
     rgbftrace[ iTrace ].tick = tick;
     rgbftrace[ iTrace ].traceid = bftidSuperCold;
@@ -1209,6 +1333,7 @@ ERR ResMgrEmulatorLRUKTestTest::ErrBasicIntegrationLruKMax_()
     tick += 10;
     iTrace++;
 
+    //  - Evict page 35. (153)
 
     rgbftrace[ iTrace ].tick = tick;
     rgbftrace[ iTrace ].traceid = bftidEvict;
@@ -1222,6 +1347,7 @@ ERR ResMgrEmulatorLRUKTestTest::ErrBasicIntegrationLruKMax_()
     tick += 10;
     iTrace++;
 
+    //  - Evict/scavenge in order they were cached (within the same k-ness, except for supercolded and explicitly evicted). (202)
 
     rgbftrace[ iTrace ].tick = tick;
     rgbftrace[ iTrace ].traceid = bftidEvict;
@@ -1267,6 +1393,7 @@ ERR ResMgrEmulatorLRUKTestTest::ErrBasicIntegrationLruKMax_()
         }
     }
 
+    //  - Cache first 10 pages, but cache page 5 with no-history; (212)
 
     for ( PGNO pgno = 1; iTrace < 212; iTrace++ )
     {
@@ -1282,6 +1409,7 @@ ERR ResMgrEmulatorLRUKTestTest::ErrBasicIntegrationLruKMax_()
         tick += 10;
     }
 
+    //  - Evict/scavenge all 10 pages, note that page 5 will be evicted first because it was cached with no-history. (222)
 
     rgbftrace[ iTrace ].tick = tick;
     rgbftrace[ iTrace ].traceid = bftidEvict;
@@ -1315,11 +1443,13 @@ ERR ResMgrEmulatorLRUKTestTest::ErrBasicIntegrationLruKMax_()
         iTrace++;
     }
 
+    //  - Term; (223)
 
     rgbftrace[ iTrace ].tick = tick;
     rgbftrace[ iTrace ].traceid = bftidSysResMgrTerm;
     iTrace++;
 
+    //  - Sentinel. (224)
 
     rgbftrace[ iTrace ].traceid = bftidInvalid;
     iTrace++;
@@ -1328,14 +1458,17 @@ ERR ResMgrEmulatorLRUKTestTest::ErrBasicIntegrationLruKMax_()
 
     const TICK tickEnd = tick;
 
+    //  Init driver.
 
     TestCall( ErrBFFTLInit( rgbftrace, fBFFTLDriverTestMode, &pbfftlc ) );
 
+    //  Fill in database info.
 
     pbfftlc->cIFMP = 2;
     pbfftlc->rgpgnoMax[ 0 ] = 50;
     pbfftlc->rgpgnoMax[ 1 ] = 50;
 
+    //  Init./run.
 
     TestCall( emulator.ErrSetEvictNextOnShrink( false ) );
     TestCall( emulator.ErrInit( pbfftlc, &algorithm ) );

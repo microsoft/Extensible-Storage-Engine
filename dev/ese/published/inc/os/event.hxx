@@ -5,6 +5,7 @@
 #define _OS_EVENT_HXX_INCLUDED
 
 
+//  Event Logging
 
 typedef DWORD CategoryId;
 typedef DWORD MessageId;
@@ -17,10 +18,10 @@ enum EEventType
     eventInformation = 4,
 };
 
-enum EEventFacility
+enum EEventFacility // eventfacility
 {
     eventfacilityNone               = 0x00,
-    eventfacilityReportOsEvent      = 0x01,
+    eventfacilityReportOsEvent      = 0x01, //  the regular OS application (or redirected via source param) event logs
     eventfacilityOsDiagTracking     = 0x02,
     eventfacilityRingBufferCache    = 0x04,
     eventfacilityOsEventTrace       = 0x08,
@@ -43,9 +44,14 @@ void OSEventReportEvent(
 #ifdef OS_LAYER_VIOLATIONS
 #include "eventu.hxx"
 
+//  We further include the jetmsg.h here, because the rest of ESE expects it 
+//  from here, and there were issues moving it around.  Ideally, we would make
+//  make it so this is only included for ESE itself.  Maybe for the oslayer
+//  compile as well, as it throws events.
+//
 #include "_jetmsg.h"
 
 #endif
 
-#endif
+#endif  //  _OS_EVENT_HXX_INCLUDED
 

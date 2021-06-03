@@ -66,6 +66,8 @@ ERR ErrSTATSRetrieveIndexStats(
     LONG        *pcPage );
 
 
+//  This actually belongs in systab.h, 
+//  but then we'd have a cyclic dependency on SR.
 ERR ErrCATStats(
     PIB         *ppib,
     const IFMP  ifmp,

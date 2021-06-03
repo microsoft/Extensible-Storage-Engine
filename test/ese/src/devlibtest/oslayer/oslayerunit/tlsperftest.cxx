@@ -7,7 +7,9 @@ struct TLS {
     ULONG   i;
 };
 
+//  ================================================================
 class TLSPERFTEST : public UNITTEST
+//  ================================================================
 {
     private:
         static TLSPERFTEST s_instance;
@@ -84,7 +86,9 @@ bool TLSPERFTEST::FRunUnderESE98() const        { return true; }
 bool TLSPERFTEST::FRunUnderESENT() const        { return true; }
 bool TLSPERFTEST::FRunUnderESE97() const        { return true; }
 
+//  ================================================================
 JET_ERR TLSPERFTEST::ErrTestLoopPerf()
+//  ================================================================
 {
     JET_ERR err = JET_errSuccess;
     
@@ -103,7 +107,9 @@ HandleError:
     return err;
 }
 
+//  ================================================================
 JET_ERR TLSPERFTEST::ErrPTlsPerf()
+//  ================================================================
 {
     JET_ERR err = JET_errSuccess;
     
@@ -124,7 +130,9 @@ HandleError:
     return err;
 }
 
+//  ================================================================
 JET_ERR TLSPERFTEST::ErrGlePerf()
+//  ================================================================
 {
     JET_ERR err = JET_errSuccess;
     
@@ -145,7 +153,9 @@ HandleError:
     return err;
 }
 
+//  ================================================================
 JET_ERR TLSPERFTEST::ErrSlePerf()
+//  ================================================================
 {
     JET_ERR err = JET_errSuccess;
     
@@ -166,7 +176,9 @@ HandleError:
     return err;
 }
 
+//  ================================================================
 ERR TLSPERFTEST::ErrTest()
+//  ================================================================
 {
     JET_ERR err = JET_errSuccess;
 

@@ -15,8 +15,14 @@ namespace Internal
         {
             namespace Interop
             {
+                /// <summary>
+                /// Segment Position
+                /// </summary>
                 public enum class SegmentPosition : Int64
                 {
+                    /// <summary>
+                    /// An invalid SegmentPosition.
+                    /// </summary>
                     Invalid = Int64::MaxValue,
                 };
             }

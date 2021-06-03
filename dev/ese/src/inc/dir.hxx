@@ -6,52 +6,93 @@
 #endif
 #define DIRAPI_H
 
+/**********************************************************
+/************** DIR STRUCTURES and CONSTANTS **************
+/**********************************************************
+/**/
+/************** DIR API defines and types ******************
+/***********************************************************
+/**/
 
-
-
+//  struture for fractional positioning 
+//
 typedef struct {
     ULONG       ulLT;
     ULONG       ulTotal;
 } FRAC;
 
+//  possible positioning parameters
+//
 enum POS    { posFirst, posLast, posDown, posFrac };
 
+//  no flags
+//
 const DIRFLAG fDIRNull                      = 0x00000000;
 
+//  go back to root after a DIRInsert
+//
 const DIRFLAG fDIRBackToFather              = 0x00000001;
 
+//  used by MoveNext/Prev for implementing MoveKeyNE
+//  used at BT level
+//
 const DIRFLAG fDIRNeighborKey               = 0x00000002;
 
+//  used by BTNext/Prev to walk over all nodes
+//  may not be needed
+//
 const DIRFLAG fDIRAllNode                   = 0x00000004;
 const DIRFLAG fDIRFavourPrev                = 0x00000008;
 const DIRFLAG fDIRFavourNext                = 0x00000010;
 const DIRFLAG fDIRExact                     = 0x00000020;
 
 
+//  set by Space, Ver, OLC, auto-inc and many FDP-level operations
 const DIRFLAG fDIRNoVersion                 = 0x00000040;
 
+//  used to hint Split to append while creating index
+//  change to Append -- as a hint to append
+//  or create a new call BTAppend
+//
 const DIRFLAG fDIRAppend                    = 0x00000080;
 const DIRFLAG fDIRReplace                   = 0x00000100;
 const DIRFLAG fDIRInsert                    = 0x00000200;
 const DIRFLAG fDIRFlagInsertAndReplaceData  = 0x00000400;
 
+//  used by NDDeltaLogs
+//  set at REC & LV
+//
 const DIRFLAG fDIRLogColumnDiffs            = 0x00000800;
 const DIRFLAG fDIRLogChunkDiffs             = 0x00001000;
 
+//  set by SPACE and VER for page operations w/o logging
+//  used by node to turn off logging
+//
 const DIRFLAG fDIRNoLog                     = 0x00002000;
 
+//  used by Undo to not re-dirty the page
+//
 const DIRFLAG fDIRNoDirty                   = 0x00004000;
 
+//  used by LV to specify that a LV should be deleted if its refcount falls to zero
 const DIRFLAG fDIRDeltaDeleteDereferencedLV = 0x00008000;
 
+//  used by Isam to indicate that a finalizable column is being escrowed
 const DIRFLAG fDIREscrowCallbackOnZero      = 0x00010000;
 
+//  used by Isam to indicate that a finalizable column is being escrowed
 const DIRFLAG fDIREscrowDeleteOnZero        = 0x00020000;
 
+//  valid only with fDIRExact on a non-unique index,
+//  return JET_wrnUniqueKey if the specified key value is unique
 const DIRFLAG fDIRCheckUniqueness           = 0x00040000;
 
+//  used by the LV layer to have DIRNext stop if it moves from one LID to another
 const DIRFLAG fDIRSameLIDOnly               = 0x00080000;
 
+// we don't want nodes which are deleted and don't have
+// versions (hence might be scrubbed). Used by ErrRECIInitAutoInc only 
+// and always OR'd with fDIRAllNode
 const DIRFLAG fDIRAllNodesNoCommittedDeleted    = 0x00100000;
 
 struct DIB
@@ -63,6 +104,9 @@ struct DIB
 
 const CPG cpgDIRReserveConsumed  = (CPG)pgnoMax;
 
+//  ************************************************
+//  constructor/destructor
+//
 ERR ErrDIRCreateDirectory(
     FUCB    *pfucb,
     CPG     cpgMin,
@@ -71,6 +115,9 @@ ERR ErrDIRCreateDirectory(
     UINT    fPageFlags,
     BOOL    fSPFlags = 0 );
 
+//  ************************************************
+//  open/close routines
+//
 ERR ErrDIROpen( PIB *ppib, FCB *pfcb, FUCB **ppfucb );
 ERR ErrDIROpenByProxy( PIB *ppib, FCB *pfcb, FUCB **ppfucb, LEVEL level );
 ERR ErrDIROpen( PIB *ppib, PGNO pgnoFDP, IFMP ifmp, FUCB **ppfucb, BOOL fWillInitFCB = fFalse );
@@ -91,11 +138,17 @@ INLINE VOID DIRCloseIfExists( FUCB ** ppfucb )
     }
 }
 
+//  ********************************************
+//  retrieve/release operations
+//
 ERR ErrDIRGet( FUCB *pfucb );
 ERR ErrDIRGetPosition( FUCB *pfucb, ULONG *pulLT, ULONG *pulTotal );
 ERR ErrDIRGetBookmark( FUCB *pfucb, BOOKMARK *pbm );
 ERR ErrDIRRelease( FUCB *pfucb );
 
+//  ************************************************
+//  positioning operations
+//
 ERR ErrDIRGotoBookmark( FUCB *pfucb, const BOOKMARK& bm );
 ERR ErrDIRGotoJetBookmark( FUCB *pfucb, const BOOKMARK& bm, const BOOL fRetainLatch );
 ERR ErrDIRGotoPosition( FUCB *pfucb, ULONG ulLT, ULONG ulTotal );
@@ -114,10 +167,16 @@ INLINE VOID DIRBeforeFirst( FUCB *pfucb )   { pfucb->locLogical = locBeforeFirst
 INLINE VOID DIRAfterLast( FUCB *pfucb )     { pfucb->locLogical = locAfterLast; }
 
 
+//  ********************************************
+//  index range operations
+//
 VOID DIRSetIndexRange( FUCB *pfucb, JET_GRBIT grbit );
 VOID DIRResetIndexRange( FUCB *pfucb );
 ERR ErrDIRCheckIndexRange( FUCB *pfucb );
 
+//  ********************************************
+//  update operations
+//
 VOID DIRSetActiveSpaceRequestReserve( FUCB * const pfucb, const CPG cpgRequired );
 VOID DIRResetActiveSpaceRequestReserve( FUCB * const pfucb );
 
@@ -140,19 +199,32 @@ ERR ErrDIRDelta(
         TDelta          *const pOldValue,
         DIRFLAG         dirflag );
 
+// Explicitly instantiatiate the only allowed legal instances of this template
 template ERR ErrDIRDelta<LONG>( FUCB *pfucb, INT cbOffset, const LONG delta, LONG *const pOldValue, DIRFLAG dirflag );
 template ERR ErrDIRDelta<LONGLONG>( FUCB *pfucb, INT cbOffset, const LONGLONG delta, LONGLONG *const pOldValue, DIRFLAG dirflag );
 
+//  *****************************************
+//  statistical operations
+//  
 ERR ErrDIRIndexRecordCount( FUCB *pfucb, ULONG64 *pullCount, ULONG64 ullCountMost, BOOL fNext );
 ERR ErrDIRComputeStats( FUCB *pfucb, INT *pcitem, INT *pckey, INT *pcpage );
 
+//  *****************************************
+//  transaction operations
+//
 ERR ErrDIRBeginTransaction( PIB *ppib, const TRXID trxid, const JET_GRBIT grbit );
 ERR ErrDIRCommitTransaction( PIB *ppib, JET_GRBIT grbit, DWORD cmsecDurableCommit = 0, JET_COMMIT_ID *pCommitId = NULL );
 ERR ErrDIRRollback( PIB *ppib, JET_GRBIT grbit = 0 );
 
+//  *****************************************
+//  external header operations
+//
 ERR ErrDIRGetRootField( _Inout_ FUCB* const pfucb, _In_ const NodeRootField noderf, _In_ const LATCH latch );
 ERR ErrDIRSetRootField( _In_ FUCB* const pfucb, _In_ const NodeRootField noderf, _In_ const DATA& dataRootField );
 
+//  ***********************************************
+//  debug only routines
+//
 INLINE VOID AssertDIRNoLatch( PIB *ppib )
 {
 #ifdef DEBUG
@@ -163,7 +235,7 @@ INLINE VOID AssertDIRNoLatch( PIB *ppib )
             Assert( !Pcsr( pfucb )->FLatched() );
         }
     }
-#endif
+#endif  //  DEBUG
 }
 
 INLINE VOID AssertDIRGet( FUCB *pfucb )
@@ -173,10 +245,13 @@ INLINE VOID AssertDIRGet( FUCB *pfucb )
     Assert( Pcsr( pfucb )->FLatched() );
     Assert( Pcsr( pfucb )->Cpage().FLeafPage() );
     AssertBTGet( pfucb );
-#endif
+#endif  //  DEBUG
 }
     
 
+//  ***********************************************
+//  INLINE ROUTINES
+//
 INLINE VOID DIRGotoRoot( FUCB *pfucb )
 {
     Assert( !Pcsr( pfucb )->FLatched() );
@@ -192,10 +267,18 @@ INLINE VOID DIRDeferMoveFirst( FUCB *pfucb )
 }
 
 
+//  gets bookmark of current node
+//  returns NoCurrentRecord if none exists
+//  bookmark is copied from cursor bookmark
+//  and is valid till a DIR-level move occurs
+//
 INLINE ERR ErrDIRGetBookmark( FUCB *pfucb, BOOKMARK **ppbm )
 {
     ERR     err;
 
+    //  UNDONE: change this so this is done 
+    //          only when bookmark is already not saved
+    //
     if ( Pcsr( pfucb )->FLatched( ) )
     {
         Assert( pfucb->locLogical == locOnCurBM );
@@ -218,6 +301,8 @@ INLINE ERR ErrDIRGetBookmark( FUCB *pfucb, BOOKMARK **ppbm )
 }
 
 
+//  sets/resets index range
+//
 INLINE VOID DIRSetIndexRange( FUCB *pfucb, JET_GRBIT grbit )
 {
     FUCBSetIndexRange( pfucb, grbit );
@@ -227,6 +312,9 @@ INLINE VOID DIRResetIndexRange( FUCB *pfucb )
     FUCBResetIndexRange( pfucb );
 }
 
+//  **************************************************
+//  SPECIAL DIR level tests
+//
 INLINE BOOL FDIRActiveVersion( FUCB *pfucb, const TRX trxSession )
 {
     Assert( Pcsr( pfucb )->FLatched() );

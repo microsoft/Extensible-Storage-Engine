@@ -40,6 +40,7 @@ VOID LOCAL DUMPRBSHeaderStandard( INST *pinst, __in const DB_HEADER_READER* cons
 {
     RBSFILEHDR* const    prbsfilehdr    = reinterpret_cast<RBSFILEHDR* const>( pdbHdrReader->pbHeader );
 
+    // Print out the fields.
     DUMPPrintF( "\nFields:\n" );
     DUMPPrintF( "        File Type: %s\n", prbsfilehdr->rbsfilehdr.le_filetype == JET_filetypeSnapshot ? "Snapshot" : "UNKNOWN" );
     DUMPPrintF( "         Checksum: 0x%lx\n", LONG( prbsfilehdr->rbsfilehdr.le_ulChecksum ) );
@@ -91,13 +92,14 @@ ERR LOCAL ErrDUMPRBSHeaderStandardDebug( __in const DB_HEADER_READER* const pdbH
     const RBSFILEHDR* const prbsfilehdr = reinterpret_cast<RBSFILEHDR* const>( pdbHdrReader->pbHeader );
     char* szBuf                       = NULL;
 
+    // Print out the fields.
     DUMPPrintF( "\nFields:\n" );
     (VOID)( prbsfilehdr->Dump( CPRINTFSTDOUT::PcprintfInstance() ) );
 
     DUMPPrintF( "\nBinary Dump:\n" );
     const INT cbWidth = UtilCprintfStdoutWidth() >= 116 ? 32 : 16;
 
-    Assert( pdbHdrReader->fNoAutoDetectPageSize );
+    Assert( pdbHdrReader->fNoAutoDetectPageSize );  //  otherwise, pdbHdrReader->cbHeader can't be used below as the page size.
     const INT cbBuffer = pdbHdrReader->cbHeader * 8;
 
     szBuf = new char[ cbBuffer ];
@@ -115,7 +117,7 @@ HandleError:
     return err;
 }
 
-#endif
+#endif  // defined( DEBUGGER_EXTENSION ) && defined ( DEBUG )
 
 ERR LOCAL ErrDUMPRBSHeaderHex( INST *pinst, __in const DB_HEADER_READER* const pdbHdrReader )
 {
@@ -356,6 +358,7 @@ ERR ErrDUMPRBSHeader( INST *pinst, __in PCWSTR wszRBS, const BOOL fVerbose )
     RBSFILEHDR      *prbsfilehdrSecondary    = NULL;
     const DWORD     cbHeader                = sizeof( RBSFILEHDR );
 
+    // TODO SOMEONE: Consider renaming DB_HEADER_READER to something like FILE_HEADER_READER
     DB_HEADER_READER dbHeaderReaderPrimary  =
     {
         headerRequestPrimaryOnly,
@@ -396,6 +399,7 @@ ERR ErrDUMPRBSHeader( INST *pinst, __in PCWSTR wszRBS, const BOOL fVerbose )
     BOOL fRBSUnusable           = fFalse;
     BOOL fCheckPageSize         = fTrue;
 
+    // Primary header.
     Alloc( prbsfilehdrPrimary = ( RBSFILEHDR* )PvOSMemoryPageAlloc( cbHeader, NULL ) );
     dbHeaderReaderPrimary.pbHeader = ( BYTE* )prbsfilehdrPrimary;
     Call( ErrUtilReadSpecificShadowedHeader( pinst, &dbHeaderReaderPrimary ) );
@@ -404,7 +408,7 @@ ERR ErrDUMPRBSHeader( INST *pinst, __in PCWSTR wszRBS, const BOOL fVerbose )
     fMismatchPrimary    = dbHeaderReaderPrimary.checksumActual != dbHeaderReaderPrimary.checksumExpected;
     fZeroPrimary        = dbHeaderReaderPrimary.checksumActual == 0;
 
-    Assert( dbHeaderReaderPrimary.fNoAutoDetectPageSize );
+    Assert( dbHeaderReaderPrimary.fNoAutoDetectPageSize );  //  otherwise, dbHeaderReaderPrimary.cbHeader can't be used below as the page size.
     fSizeMismatchPrimary = dbHeaderReaderPrimary.cbHeaderActual != dbHeaderReaderPrimary.cbHeader;
     
     if ( fVerbose ||
@@ -415,6 +419,7 @@ ERR ErrDUMPRBSHeader( INST *pinst, __in PCWSTR wszRBS, const BOOL fVerbose )
         Call( ErrDUMPRBSHeaderFormat( pinst, &dbHeaderReaderPrimary, fVerbose ) );
     }
 
+    // Shadow header.
     Alloc( prbsfilehdrSecondary = ( RBSFILEHDR* )PvOSMemoryPageAlloc( cbHeader, NULL ) );
     dbHeaderReaderSecondary.pbHeader = ( BYTE* )prbsfilehdrSecondary;
     Call( ErrUtilReadSpecificShadowedHeader( pinst, &dbHeaderReaderSecondary ) );
@@ -423,7 +428,7 @@ ERR ErrDUMPRBSHeader( INST *pinst, __in PCWSTR wszRBS, const BOOL fVerbose )
     fMismatchSecondary      = dbHeaderReaderSecondary.checksumActual != dbHeaderReaderSecondary.checksumExpected;
     fZeroSecondary          = dbHeaderReaderSecondary.checksumActual == 0;
 
-    Assert( dbHeaderReaderSecondary.fNoAutoDetectPageSize );
+    Assert( dbHeaderReaderSecondary.fNoAutoDetectPageSize );    //  otherwise, dbHeaderReaderSecondary.cbHeader can't be used below as the page size.
     fSizeMismatchSecondary  = dbHeaderReaderSecondary.cbHeaderActual != dbHeaderReaderSecondary.cbHeader;
     
     Assert( dbHeaderReaderPrimary.shadowedHeaderStatus == dbHeaderReaderSecondary.shadowedHeaderStatus );
@@ -521,6 +526,7 @@ ERR ErrDUMPRBSPage( INST *pinst, __in PCWSTR wszRBS, PGNO pgnoFirst, PGNO pgnoLa
         Error( ErrERRCheck( JET_errInvalidParameter ) );
     }
 
+    // If last page is not specified we will take end of file as last page.
     pgnoLast = min( pgnoLast, IsegRBSSegmentOfFileOffset( prbs->RBSFileHdr( )->rbsfilehdr.le_cbLogicalFileSize - 1) );
 
     Call ( prbs->ErrSetReadBuffer( pgnoFirst ) );

@@ -1,6 +1,7 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
+// needed for JET errors
 #ifdef BUILD_ENV_IS_NT
 #include <esent_x.h>
 #endif
@@ -14,16 +15,23 @@
 #include <stddef.h>
 
 
+//  Include Native Unit Test Layer (BSTF)
+//
 
 #include "testerr.h"
 #include "bstf.hxx"
 
 
+//  Include OS Layer
+//
+// Note: Not required for resmgr emulation, but because the FTL trace log reader will need it.
 
 #include <tchar.h>
 #include "os.hxx"
 
 
+//  Get the BF FTL tracing driver and requirements
+//
 #include "bfreqs.hxx"
 #include "_bfconst.hxx"
 #include "bfftl.hxx"

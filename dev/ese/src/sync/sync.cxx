@@ -1,6 +1,7 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
+// tchar.h must be above where strsafe.h is includes.
 #pragma prefast(push)
 #pragma prefast(disable:26006, "Dont bother us with tchar, someone else owns that.")
 #pragma prefast(disable:26007, "Dont bother us with tchar, someone else owns that.")
@@ -19,6 +20,7 @@
 #pragma prefast(pop)
 
 
+//  Random Fault Injection
 
 #ifdef DEBUG
 #define FRandomlyFaultTrue()        ( rand() % 2 )
@@ -33,10 +35,11 @@
 #endif
 
 
+//  Performance Monitoring Support
 
 #ifdef MINIMAL_FUNCTIONALITY
 #define PERFOpt( x )
-#else
+#else  //  !MINIMAL_FUNCTIONALITY
 #define PERFOpt( x ) x
 
 LONG g_cOSSYNCThreadBlock;
@@ -61,16 +64,18 @@ LONG LOSSYNCThreadsBlockedCEFLPv( LONG iInstance, void* pvBuf )
     return 0;
 }
 
-#endif
+#endif  //  MINIMAL_FUNCTIONALITY
 
 
 namespace OSSYNC {
 
+//  system is aborting unhappily
 
 BOOL g_fSyncProcessAbort = fFalse;
 
+//  enable/disable timeout deadlock detection
 
-enum SYNCDeadLockTimeOutState
+enum SYNCDeadLockTimeOutState // sdltos
 {
     sdltosDisabled          = 0,
     sdltosEnabled           = 1,
@@ -78,10 +83,12 @@ enum SYNCDeadLockTimeOutState
 };
 SYNCDeadLockTimeOutState g_sdltosState = sdltosEnabled;
 
+//  system max spin count
 
 INT g_cSpinMax;
 
 
+//  Page Memory Allocation
 
 void* PvPageAlloc( const size_t cbSize, void* const pv );
 void* PvPageReserve( const size_t cbSize, void* const pv );
@@ -90,6 +97,7 @@ BOOL FPageCommit( void* const pv, const size_t cb );
 void PageDecommit( void* const pv, const size_t cb );
 
 
+//  Performance Data Dump
 
 void OSSyncStatsDump(   const char*         szTypeName,
                         const char*         szInstanceName,
@@ -103,27 +111,34 @@ void OSSyncStatsDump(   const char*         szTypeName,
                         double              csecHoldElapsed );
 
 
+//  Kernel Semaphore Pool
 
+//  ctor
 
 CKernelSemaphorePool::CKernelSemaphorePool()
 {
 }
 
+//  dtor
 
 CKernelSemaphorePool::~CKernelSemaphorePool()
 {
 }
 
+//  init
 
 const BOOL CKernelSemaphorePool::FInit()
 {
+    //  semaphore pool should be terminated
 
     OSSYNCAssert( !FInitialized() );
 
+    //  reset members
 
     m_mpirksemrksem = NULL;
     m_cksem         = 0;
 
+    //  allocate kernel semaphore array
 
     m_mpirksemrksem = (CReferencedKernelSemaphore*)PvPageReserve( sizeof( CReferencedKernelSemaphore ) * 65536, NULL );
 
@@ -133,6 +148,8 @@ const BOOL CKernelSemaphorePool::FInit()
         return fFalse;
     }
 
+    //  initially commit enough memory for 1k semaphores to mitigate the risk
+    //  that we will trip the Enforce in AllocateNew
 
     if ( !FPageCommit( m_mpirksemrksem, sizeof( m_mpirksemrksem[ 0 ] ) * 1000 ) )
     {
@@ -140,16 +157,20 @@ const BOOL CKernelSemaphorePool::FInit()
         return fFalse;
     }
 
+    //  init successful
 
     return fTrue;
 }
 
+//  term
 
 void CKernelSemaphorePool::Term()
 {
+    //  the kernel semaphore array is allocated
 
     if ( m_mpirksemrksem )
     {
+        //  terminate all initialized kernel semaphores
 
         const LONG cksem = m_cksem;
         for ( m_cksem-- ; m_cksem >= 0; m_cksem-- )
@@ -158,77 +179,94 @@ void CKernelSemaphorePool::Term()
             m_mpirksemrksem[m_cksem].~CReferencedKernelSemaphore();
         }
 
+        //  delete the kernel semaphore array
 
         PageDecommit( m_mpirksemrksem, sizeof( m_mpirksemrksem[ 0 ] ) * cksem );
         PageFree( m_mpirksemrksem );
     }
 
+    //  reset data members
 
     m_mpirksemrksem = 0;
     m_cksem         = 0;
 }
 
+//  Referenced Kernel Semaphore
 
+//  ctor
 
 CKernelSemaphorePool::CReferencedKernelSemaphore::CReferencedKernelSemaphore()
     :   CKernelSemaphore( CSyncBasicInfo( "CKernelSemaphorePool::CReferencedKernelSemaphore" ) )
 {
+    //  reset data members
 
     m_cReference    = 0;
     m_fInUse        = 0;
     m_fAvailable    = 0;
 #ifdef SYNC_VALIDATE_IRKSEM_USAGE
     m_psyncobjUser  = 0;
-#endif
+#endif  //  SYNC_VALIDATE_IRKSEM_USAGE
 }
 
+//  dtor
 
 CKernelSemaphorePool::CReferencedKernelSemaphore::~CReferencedKernelSemaphore()
 {
 }
 
+//  init
 
 const BOOL CKernelSemaphorePool::CReferencedKernelSemaphore::FInit()
 {
+    //  reset data members
 
     m_cReference    = 0;
     m_fInUse        = 0;
     m_fAvailable    = 0;
 #ifdef SYNC_VALIDATE_IRKSEM_USAGE
     m_psyncobjUser  = 0;
-#endif
+#endif  //  SYNC_VALIDATE_IRKSEM_USAGE
 
+    //  initialize the kernel semaphore
 
     return CKernelSemaphore::FInit();
 }
 
+//  term
 
 void CKernelSemaphorePool::CReferencedKernelSemaphore::Term()
 {
+    //  terminate the kernel semaphore
 
     CKernelSemaphore::Term();
 
+    //  reset data members
 
     m_cReference    = 0;
     m_fInUse        = 0;
     m_fAvailable    = 0;
 #ifdef SYNC_VALIDATE_IRKSEM_USAGE
     m_psyncobjUser  = 0;
-#endif
+#endif  //  SYNC_VALIDATE_IRKSEM_USAGE
 }
 
+//  fwd decl because in header it is restricted to !RTM to discourage other users
 
 DWORD OSSYNCAPI DwOSSyncITickTime();
 
+//  allocates a new irksem and adds it to the stack's irksem pool
 
 const CKernelSemaphorePool::IRKSEM CKernelSemaphorePool::AllocateNew()
 {
+    //  atomically allocate a position in the stack's irksem pool for our new
+    //  irksem
 
     const LONG lDelta = 0x00000001;
     const LONG lBI = AtomicExchangeAdd( (LONG*) &m_cksem, lDelta );
 
     const IRKSEM irksem = IRKSEM( lBI );
 
+    //  ensure that the memory backing this irksem is committed
 
     DWORD tickStart = DwOSSyncITickTime();
     BOOL fCommit = fFalse;
@@ -236,13 +274,15 @@ const CKernelSemaphorePool::IRKSEM CKernelSemaphorePool::AllocateNew()
     do
     {
         fCommit = FPageCommit( m_mpirksemrksem, sizeof( m_mpirksemrksem[ 0 ] ) * ( irksem + 1 ) );
+        //  When using GetTickCount, subtraction is safe and returns elapsed time even if DwOSSyncITickTime wraps around
         dwTimeElapsed = (DwOSSyncITickTime() - tickStart);
     }
     while( !fCommit &&
-          ( dwTimeElapsed < ( 3 * 60 * 1000 )  ) );
+          ( dwTimeElapsed < ( 3 * 60 * 1000 ) /* 3 minutes, we're done!  Drop through to enforce. */ ) );
     
     OSSYNCEnforceSz( fCommit, "Could not allocate a Kernel Semaphore" );
 
+    //  initialize this irksem
 
     new ( &m_mpirksemrksem[irksem] ) CReferencedKernelSemaphore;
 
@@ -251,24 +291,29 @@ const CKernelSemaphorePool::IRKSEM CKernelSemaphorePool::AllocateNew()
     do
     {
         fInitKernelSemaphore = m_mpirksemrksem[irksem].FInit();
+        //  When using GetTickCount, subtraction is safe and returns elapsed time even if DwOSSyncITickTime wraps around
         dwTimeElapsed = (DwOSSyncITickTime() - tickStart);
     }
     while( !fInitKernelSemaphore &&
-        ( dwTimeElapsed < ( 3 * 60 * 1000 )  ) );
+        ( dwTimeElapsed < ( 3 * 60 * 1000 ) /* 3 minutes, we're done!  Drop through to enforce. */ ) );
     
 
     OSSYNCEnforceSz( fInitKernelSemaphore, "Could not allocate a Kernel Semaphore" );
 
+    //  return the irksem for use
 
     return irksem;
 }
 
 
+//  Global Kernel Semaphore Pool
 
 CKernelSemaphorePool g_ksempoolGlobal;
 
 
+//  Synchronization Object Performance:  Acquisition
 
+//  ctor
 
 CSyncPerfAcquire::CSyncPerfAcquire()
 {
@@ -277,31 +322,37 @@ CSyncPerfAcquire::CSyncPerfAcquire()
     m_cAcquire = 0;
     m_cContend = 0;
 
-#endif
+#endif  //  SYNC_ANALYZE_PERFORMANCE
 }
 
+//  dtor
 
 CSyncPerfAcquire::~CSyncPerfAcquire()
 {
 }
 
 
+//  Semaphore
 
+//  ctor
 
 CSemaphore::CSemaphore( const CSyncBasicInfo& sbi )
     :   CEnhancedStateContainer< CSemaphoreState, CSyncStateInitNull, CSemaphoreInfo, CSyncBasicInfo >( syncstateNull, sbi )
 {
+    //  further init of CSyncBasicInfo
 
     State().SetTypeName( "CSemaphore" );
     State().SetInstance( (CSyncObject*)this );
 }
 
+//  dtor
 
 CSemaphore::~CSemaphore()
 {
 #ifdef SYNC_ANALYZE_PERFORMANCE
 #ifdef SYNC_DUMP_PERF_DATA
 
+    //  dump performance data
 
     OSSyncStatsDump(    State().SzTypeName(),
                         State().SzInstanceName(),
@@ -314,27 +365,32 @@ CSemaphore::~CSemaphore()
                         0,
                         0 );
 
-#endif
-#endif
+#endif  //  SYNC_DUMP_PERF_DATA
+#endif  //  SYNC_ANALYZE_PERFORMANCE
 }
 
 
+//  Auto-Reset Signal
 
+//  ctor
 
 CAutoResetSignal::CAutoResetSignal( const CSyncBasicInfo& sbi )
     :   CEnhancedStateContainer< CAutoResetSignalState, CSyncStateInitNull, CAutoResetSignalInfo, CSyncBasicInfo >( syncstateNull, sbi )
 {
+    //  further init of CSyncBasicInfo
 
     State().SetTypeName( "CAutoResetSignal" );
     State().SetInstance( (CSyncObject*)this );
 }
 
+//  dtor
 
 CAutoResetSignal::~CAutoResetSignal()
 {
 #ifdef SYNC_ANALYZE_PERFORMANCE
 #ifdef SYNC_DUMP_PERF_DATA
 
+    //  dump performance data
 
     OSSyncStatsDump(    State().SzTypeName(),
                         State().SzInstanceName(),
@@ -347,119 +403,159 @@ CAutoResetSignal::~CAutoResetSignal()
                         0,
                         0 );
 
-#endif
-#endif
+#endif  //  SYNC_DUMP_PERF_DATA
+#endif  //  SYNC_ANALYZE_PERFORMANCE
 }
 
+//  waits for the signal to be set, returning fFalse if unsuccessful in the time
+//  permitted.  Infinite and Test-Only timeouts are supported.
 
 const BOOL CAutoResetSignal::_FWait( const INT cmsecTimeout )
 {
+    //  if we spin, we will spin for the full amount recommended by the OS
 
     INT cSpin = g_cSpinMax;
 
+    //  we start with no kernel semaphore allocated
 
     CKernelSemaphorePool::IRKSEM irksemAlloc = CKernelSemaphorePool::irksemNil;
 
+    //  try forever until we successfully change the state of the signal
 
     OSSYNC_FOREVER
     {
+        //  read the current state of the signal
 
         const CAutoResetSignalState stateCur = (CAutoResetSignalState&) State();
 
+        //  the signal is set
 
         if ( stateCur.FNoWaitAndSet() )
         {
+            //  we successfully changed the signal state to reset with no waiters
 
             if ( State().FChange( stateCur, CAutoResetSignalState( 0 ) ) )
             {
+                //  if we allocated a kernel semaphore, release it
 
                 if ( irksemAlloc != CKernelSemaphorePool::irksemNil )
                 {
                     g_ksempoolGlobal.Unreference( irksemAlloc );
                 }
 
+                //  return success
 
                 State().SetAcquire();
                 return fTrue;
             }
         }
 
+        //  the signal is not set and we still have spins left
 
         else if ( cSpin )
         {
+            //  spin once and try again
 
             cSpin--;
             continue;
         }
 
+        //  the signal is not set and there are no waiters
 
         else if ( stateCur.FNoWaitAndNotSet() )
         {
+            //  allocate and reference a kernel semaphore if we haven't already
 
             if ( irksemAlloc == CKernelSemaphorePool::irksemNil )
             {
                 irksemAlloc = g_ksempoolGlobal.Allocate( this );
             }
 
+            //  we successfully installed ourselves as the first waiter
 
             if ( State().FChange( stateCur, CAutoResetSignalState( 1, irksemAlloc ) ) )
             {
+                //  wait for signal to be set
 
                 State().StartWait();
                 const BOOL fCompleted = g_ksempoolGlobal.Ksem( irksemAlloc, this ).FAcquire( cmsecTimeout );
                 State().StopWait();
 
+                //  our wait completed
 
                 if ( fCompleted )
                 {
+                    //  unreference the kernel semaphore
 
                     g_ksempoolGlobal.Unreference( irksemAlloc );
 
+                    //  we successfully waited for the signal
 
                     State().SetAcquire();
                     return fTrue;
                 }
 
+                //  our wait timed out
 
                 else
                 {
+                    //  try forever until we successfully change the state of the signal
 
                     OSSYNC_INNER_FOREVER
                     {
+                        //  read the current state of the signal
 
                         const CAutoResetSignalState stateAfterWait = (CAutoResetSignalState&) State();
 
+                        //  there are no waiters or the kernel semaphore currently
+                        //  in the signal is not the same as the one we allocated
 
                         if ( stateAfterWait.FNoWait() || stateAfterWait.Irksem() != irksemAlloc )
                         {
+                            //  the kernel semaphore we allocated is no longer in
+                            //  use, so another context released it.  this means that
+                            //  there is a count on the kernel semaphore that we must
+                            //  absorb, so we will
 
+                            //  NOTE:  we could end up blocking because the releasing
+                            //  context may not have released the semaphore yet
 
                             g_ksempoolGlobal.Ksem( irksemAlloc, this ).Acquire();
 
+                            //  unreference the kernel semaphore
 
                             g_ksempoolGlobal.Unreference( irksemAlloc );
 
+                            //  we successfully waited for the signal
 
                             return fTrue;
                         }
 
+                        //  there is one waiter and the kernel semaphore currently
+                        //  in the signal is the same as the one we allocated
 
                         else if ( stateAfterWait.CWait() == 1 )
                         {
                             OSSYNCAssert( stateAfterWait.FWait() );
                             OSSYNCAssert( stateAfterWait.Irksem() == irksemAlloc );
 
+                            //  we successfully changed the signal to the reset with
+                            //  no waiters state
 
                             if ( State().FChange( stateAfterWait, CAutoResetSignalState( 0 ) ) )
                             {
+                                //  unreference the kernel semaphore
 
                                 g_ksempoolGlobal.Unreference( irksemAlloc );
 
+                                //  we did not successfully wait for the signal
 
                                 return fFalse;
                             }
                         }
 
+                        //  there are many waiters and the kernel semaphore currently
+                        //  in the signal is the same as the one we allocated
 
                         else
                         {
@@ -467,12 +563,16 @@ const BOOL CAutoResetSignal::_FWait( const INT cmsecTimeout )
                             OSSYNCAssert( stateAfterWait.FWait() );
                             OSSYNCAssert( stateAfterWait.Irksem() == irksemAlloc );
 
+                            //  we successfully reduced the number of waiters on the
+                            //  signal by one
 
                             if ( State().FChange( stateAfterWait, CAutoResetSignalState( stateAfterWait.CWait() - 1, stateAfterWait.Irksem() ) ) )
                             {
+                                //  unreference the kernel semaphore
 
                                 g_ksempoolGlobal.Unreference( irksemAlloc );
 
+                                //  we did not successfully wait for the signal
 
                                 return fFalse;
                             }
@@ -482,79 +582,108 @@ const BOOL CAutoResetSignal::_FWait( const INT cmsecTimeout )
             }
         }
 
+        //  there are waiters
 
         else
         {
             OSSYNCAssert( stateCur.FWait() );
 
+            //  reference the kernel semaphore already in use
 
             g_ksempoolGlobal.Reference( stateCur.Irksem() );
 
+            //  we successfully added ourself as another waiter
 
             if ( State().FChange( stateCur, CAutoResetSignalState( stateCur.CWait() + 1, stateCur.Irksem() ) ) )
             {
+                //  if we allocated a kernel semaphore, unreference it
 
                 if ( irksemAlloc != CKernelSemaphorePool::irksemNil )
                 {
                     g_ksempoolGlobal.Unreference( irksemAlloc );
                 }
 
+                //  wait for signal to be set
 
                 State().StartWait();
                 const BOOL fCompleted = g_ksempoolGlobal.Ksem( stateCur.Irksem(), this ).FAcquire( cmsecTimeout );
                 State().StopWait();
 
+                //  our wait completed
 
                 if ( fCompleted )
                 {
+                    //  unreference the kernel semaphore
 
                     g_ksempoolGlobal.Unreference( stateCur.Irksem() );
 
+                    //  we successfully waited for the signal
 
                     State().SetAcquire();
                     return fTrue;
                 }
 
+                //  our wait timed out
 
                 else
                 {
+                    //  try forever until we successfully change the state of the signal
 
                     OSSYNC_INNER_FOREVER
                     {
+                        //  read the current state of the signal
 
                         const CAutoResetSignalState stateAfterWait = (CAutoResetSignalState&) State();
 
+                        //  there are no waiters or the kernel semaphore currently
+                        //  in the signal is not the same as the one we waited on
 
                         if ( stateAfterWait.FNoWait() || stateAfterWait.Irksem() != stateCur.Irksem() )
                         {
+                            //  the kernel semaphore we waited on is no longer in
+                            //  use, so another context released it.  this means that
+                            //  there is a count on the kernel semaphore that we must
+                            //  absorb, so we will
 
+                            //  NOTE:  we could end up blocking because the releasing
+                            //  context may not have released the semaphore yet
 
                             g_ksempoolGlobal.Ksem( stateCur.Irksem(), this ).Acquire();
 
+                            //  unreference the kernel semaphore
 
                             g_ksempoolGlobal.Unreference( stateCur.Irksem() );
 
+                            //  we successfully waited for the signal
 
                             return fTrue;
                         }
 
+                        //  there is one waiter and the kernel semaphore currently
+                        //  in the signal is the same as the one we waited on
 
                         else if ( stateAfterWait.CWait() == 1 )
                         {
                             OSSYNCAssert( stateAfterWait.FWait() );
                             OSSYNCAssert( stateAfterWait.Irksem() == stateCur.Irksem() );
 
+                            //  we successfully changed the signal to the reset with
+                            //  no waiters state
 
                             if ( State().FChange( stateAfterWait, CAutoResetSignalState( 0 ) ) )
                             {
+                                //  unreference the kernel semaphore
 
                                 g_ksempoolGlobal.Unreference( stateCur.Irksem() );
 
+                                //  we did not successfully wait for the signal
 
                                 return fFalse;
                             }
                         }
 
+                        //  there are many waiters and the kernel semaphore currently
+                        //  in the signal is the same as the one we waited on
 
                         else
                         {
@@ -562,12 +691,16 @@ const BOOL CAutoResetSignal::_FWait( const INT cmsecTimeout )
                             OSSYNCAssert( stateAfterWait.FWait() );
                             OSSYNCAssert( stateAfterWait.Irksem() == stateCur.Irksem() );
 
+                            //  we successfully reduced the number of waiters on the
+                            //  signal by one
 
                             if ( State().FChange( stateAfterWait, CAutoResetSignalState( stateAfterWait.CWait() - 1, stateAfterWait.Irksem() ) ) )
                             {
+                                //  unreference the kernel semaphore
 
                                 g_ksempoolGlobal.Unreference( stateCur.Irksem() );
 
+                                //  we did not successfully wait for the signal
 
                                 return fFalse;
                             }
@@ -576,62 +709,81 @@ const BOOL CAutoResetSignal::_FWait( const INT cmsecTimeout )
                 }
             }
 
+            //  unreference the kernel semaphore
 
             g_ksempoolGlobal.Unreference( stateCur.Irksem() );
         }
     }
 }
 
+//  sets the signal, releasing up to one waiter.  if a waiter is released, then
+//  the signal will be reset.  if a waiter is not released, the signal will
+//  remain set
 
 void CAutoResetSignal::_Set()
 {
+    //  try forever until we successfully change the state of the signal
 
     OSSYNC_FOREVER
     {
+        //  read the current state of the signal
 
         const CAutoResetSignalState stateCur = (CAutoResetSignalState&) State();
 
+        //  there are no waiters
 
         if ( stateCur.FNoWait() )
         {
+            //  we successfully changed the signal state from reset with no
+            //  waiters to set or from set to set (a nop)
 
             if ( State().FSimpleSet() )
             {
+                //  we're done
 
                 return;
             }
         }
 
+        //  there are waiters
 
         else
         {
             OSSYNCAssert( stateCur.FWait() );
 
+            //  there is only one waiter
 
             if ( stateCur.CWait() == 1 )
             {
+                //  we successfully changed the signal to the reset with no waiters state
 
                 if ( State().FChange( stateCur, CAutoResetSignalState( 0 ) ) )
                 {
+                    //  release the lone waiter
 
                     g_ksempoolGlobal.Ksem( stateCur.Irksem(), this ).Release();
 
+                    //  we're done
 
                     return;
                 }
             }
 
+            //  there is more than one waiter
 
             else
             {
                 OSSYNCAssert( stateCur.CWait() > 1 );
 
+                //  we successfully reduced the number of waiters on the signal by one
 
                 if ( State().FChange( stateCur, CAutoResetSignalState( stateCur.CWait() - 1, stateCur.Irksem() ) ) )
                 {
+                    //  release one waiter
 
                     g_ksempoolGlobal.Ksem( stateCur.Irksem(), this ).Release();
 
+                    //  we're done
 
                     return;
                 }
@@ -641,22 +793,27 @@ void CAutoResetSignal::_Set()
 }
 
 
+//  Manual-Reset Signal
 
+//  ctor
 
 CManualResetSignal::CManualResetSignal( const CSyncBasicInfo& sbi )
     :   CEnhancedStateContainer< CManualResetSignalState, CSyncStateInitNull, CManualResetSignalInfo, CSyncBasicInfo >( syncstateNull, sbi )
 {
+    //  further init of CSyncBasicInfo
 
     State().SetTypeName( "CManualResetSignal" );
     State().SetInstance( (CSyncObject*)this );
 }
 
+//  dtor
 
 CManualResetSignal::~CManualResetSignal()
 {
 #ifdef SYNC_ANALYZE_PERFORMANCE
 #ifdef SYNC_DUMP_PERF_DATA
 
+    //  dump performance data
 
     OSSyncStatsDump(    State().SzTypeName(),
                         State().SzInstanceName(),
@@ -669,115 +826,154 @@ CManualResetSignal::~CManualResetSignal()
                         0,
                         0 );
 
-#endif
-#endif
+#endif  //  SYNC_DUMP_PERF_DATA
+#endif  //  SYNC_ANALYZE_PERFORMANCE
 }
 
+//  waits for the signal to be set, returning fFalse if unsuccessful in the time
+//  permitted.  Infinite and Test-Only timeouts are supported.
 
 const BOOL CManualResetSignal::_FWait( const INT cmsecTimeout )
 {
+    //  if we spin, we will spin for the full amount recommended by the OS
 
     INT cSpin = g_cSpinMax;
 
+    //  we start with no kernel semaphore allocated
 
     CKernelSemaphorePool::IRKSEM irksemAlloc = CKernelSemaphorePool::irksemNil;
 
+    //  try forever until we successfully change the state of the signal
 
     OSSYNC_FOREVER
     {
+        //  read the current state of the signal
 
         const CManualResetSignalState stateCur = (CManualResetSignalState&) State();
 
+        //  the signal is set
 
         if ( stateCur.FNoWaitAndSet() )
         {
+            //  if we allocated a kernel semaphore, release it
 
             if ( irksemAlloc != CKernelSemaphorePool::irksemNil )
             {
                 g_ksempoolGlobal.Unreference( irksemAlloc );
             }
 
+            //  we successfully waited for the signal
 
             State().SetAcquire();
             return fTrue;
         }
 
+        //  the signal is not set and we still have spins left
 
         else if ( cSpin )
         {
+            //  spin once and try again
 
             cSpin--;
             continue;
         }
 
+        //  the signal is not set and there are no waiters
 
         else if ( stateCur.FNoWaitAndNotSet() )
         {
+            //  allocate and reference a kernel semaphore if we haven't already
 
             if ( irksemAlloc == CKernelSemaphorePool::irksemNil )
             {
                 irksemAlloc = g_ksempoolGlobal.Allocate( this );
             }
 
+            //  we successfully installed ourselves as the first waiter
 
             if ( State().FChange( stateCur, CManualResetSignalState( 1, irksemAlloc ) ) )
             {
+                //  wait for signal to be set
 
                 State().StartWait();
                 const BOOL fCompleted = g_ksempoolGlobal.Ksem( irksemAlloc, this ).FAcquire( cmsecTimeout );
                 State().StopWait();
 
+                //  our wait completed
 
                 if ( fCompleted )
                 {
+                    //  unreference the kernel semaphore
 
                     g_ksempoolGlobal.Unreference( irksemAlloc );
 
+                    //  we successfully waited for the signal
 
                     State().SetAcquire();
                     return fTrue;
                 }
 
+                //  our wait timed out
 
                 else
                 {
+                    //  try forever until we successfully change the state of the signal
 
                     OSSYNC_INNER_FOREVER
                     {
+                        //  read the current state of the signal
 
                         const CManualResetSignalState stateAfterWait = (CManualResetSignalState&) State();
 
+                        //  there are no waiters or the kernel semaphore currently
+                        //  in the signal is not the same as the one we allocated
 
                         if ( stateAfterWait.FNoWait() || stateAfterWait.Irksem() != irksemAlloc )
                         {
+                            //  the kernel semaphore we allocated is no longer in
+                            //  use, so another context released it.  this means that
+                            //  there is a count on the kernel semaphore that we must
+                            //  absorb, so we will
 
+                            //  NOTE:  we could end up blocking because the releasing
+                            //  context may not have released the semaphore yet
 
                             g_ksempoolGlobal.Ksem( irksemAlloc, this ).Acquire();
 
+                            //  unreference the kernel semaphore
 
                             g_ksempoolGlobal.Unreference( irksemAlloc );
 
+                            //  we successfully waited for the signal
 
                             return fTrue;
                         }
 
+                        //  there is one waiter and the kernel semaphore currently
+                        //  in the signal is the same as the one we allocated
 
                         else if ( stateAfterWait.CWait() == 1 )
                         {
                             OSSYNCAssert( stateAfterWait.FWait() );
                             OSSYNCAssert( stateAfterWait.Irksem() == irksemAlloc );
 
+                            //  we successfully changed the signal to the reset with
+                            //  no waiters state
 
                             if ( State().FChange( stateAfterWait, CManualResetSignalState( 0 ) ) )
                             {
+                                //  unreference the kernel semaphore
 
                                 g_ksempoolGlobal.Unreference( irksemAlloc );
 
+                                //  we did not successfully wait for the signal
 
                                 return fFalse;
                             }
                         }
 
+                        //  there are many waiters and the kernel semaphore currently
+                        //  in the signal is the same as the one we allocated
 
                         else
                         {
@@ -785,12 +981,16 @@ const BOOL CManualResetSignal::_FWait( const INT cmsecTimeout )
                             OSSYNCAssert( stateAfterWait.FWait() );
                             OSSYNCAssert( stateAfterWait.Irksem() == irksemAlloc );
 
+                            //  we successfully reduced the number of waiters on the
+                            //  signal by one
 
                             if ( State().FChange( stateAfterWait, CManualResetSignalState( stateAfterWait.CWait() - 1, stateAfterWait.Irksem() ) ) )
                             {
+                                //  unreference the kernel semaphore
 
                                 g_ksempoolGlobal.Unreference( irksemAlloc );
 
+                                //  we did not successfully wait for the signal
 
                                 return fFalse;
                             }
@@ -800,79 +1000,108 @@ const BOOL CManualResetSignal::_FWait( const INT cmsecTimeout )
             }
         }
 
+        //  there are waiters
 
         else
         {
             OSSYNCAssert( stateCur.FWait() );
 
+            //  reference the kernel semaphore already in use
 
             g_ksempoolGlobal.Reference( stateCur.Irksem() );
 
+            //  we successfully added ourself as another waiter
 
             if ( State().FChange( stateCur, CManualResetSignalState( stateCur.CWait() + 1, stateCur.Irksem() ) ) )
             {
+                //  if we allocated a kernel semaphore, unreference it
 
                 if ( irksemAlloc != CKernelSemaphorePool::irksemNil )
                 {
                     g_ksempoolGlobal.Unreference( irksemAlloc );
                 }
 
+                //  wait for signal to be set
 
                 State().StartWait();
                 const BOOL fCompleted = g_ksempoolGlobal.Ksem( stateCur.Irksem(), this ).FAcquire( cmsecTimeout );
                 State().StopWait();
 
+                //  our wait completed
 
                 if ( fCompleted )
                 {
+                    //  unreference the kernel semaphore
 
                     g_ksempoolGlobal.Unreference( stateCur.Irksem() );
 
+                    //  we successfully waited for the signal
 
                     State().SetAcquire();
                     return fTrue;
                 }
 
+                //  our wait timed out
 
                 else
                 {
+                    //  try forever until we successfully change the state of the signal
 
                     OSSYNC_INNER_FOREVER
                     {
+                        //  read the current state of the signal
 
                         const CManualResetSignalState stateAfterWait = (CManualResetSignalState&) State();
 
+                        //  there are no waiters or the kernel semaphore currently
+                        //  in the signal is not the same as the one we waited on
 
                         if ( stateAfterWait.FNoWait() || stateAfterWait.Irksem() != stateCur.Irksem() )
                         {
+                            //  the kernel semaphore we waited on is no longer in
+                            //  use, so another context released it.  this means that
+                            //  there is a count on the kernel semaphore that we must
+                            //  absorb, so we will
 
+                            //  NOTE:  we could end up blocking because the releasing
+                            //  context may not have released the semaphore yet
 
                             g_ksempoolGlobal.Ksem( stateCur.Irksem(), this ).Acquire();
 
+                            //  unreference the kernel semaphore
 
                             g_ksempoolGlobal.Unreference( stateCur.Irksem() );
 
+                            //  we successfully waited for the signal
 
                             return fTrue;
                         }
 
+                        //  there is one waiter and the kernel semaphore currently
+                        //  in the signal is the same as the one we waited on
 
                         else if ( stateAfterWait.CWait() == 1 )
                         {
                             OSSYNCAssert( stateAfterWait.FWait() );
                             OSSYNCAssert( stateAfterWait.Irksem() == stateCur.Irksem() );
 
+                            //  we successfully changed the signal to the reset with
+                            //  no waiters state
 
                             if ( State().FChange( stateAfterWait, CManualResetSignalState( 0 ) ) )
                             {
+                                //  unreference the kernel semaphore
 
                                 g_ksempoolGlobal.Unreference( stateCur.Irksem() );
 
+                                //  we did not successfully wait for the signal
 
                                 return fFalse;
                             }
                         }
 
+                        //  there are many waiters and the kernel semaphore currently
+                        //  in the signal is the same as the one we waited on
 
                         else
                         {
@@ -880,12 +1109,16 @@ const BOOL CManualResetSignal::_FWait( const INT cmsecTimeout )
                             OSSYNCAssert( stateAfterWait.FWait() );
                             OSSYNCAssert( stateAfterWait.Irksem() == stateCur.Irksem() );
 
+                            //  we successfully reduced the number of waiters on the
+                            //  signal by one
 
                             if ( State().FChange( stateAfterWait, CManualResetSignalState( stateAfterWait.CWait() - 1, stateAfterWait.Irksem() ) ) )
                             {
+                                //  unreference the kernel semaphore
 
                                 g_ksempoolGlobal.Unreference( stateCur.Irksem() );
 
+                                //  we did not successfully wait for the signal
 
                                 return fFalse;
                             }
@@ -894,6 +1127,7 @@ const BOOL CManualResetSignal::_FWait( const INT cmsecTimeout )
                 }
             }
 
+            //  unreference the kernel semaphore
 
             g_ksempoolGlobal.Unreference( stateCur.Irksem() );
         }
@@ -901,7 +1135,9 @@ const BOOL CManualResetSignal::_FWait( const INT cmsecTimeout )
 }
 
 
+//  Lock Object Basic Information
 
+//  ctor
 
 #ifdef SYNC_ENHANCED_STATE
 
@@ -913,18 +1149,21 @@ CLockBasicInfo::CLockBasicInfo( const CSyncBasicInfo& sbi, const INT rank, const
     m_rank          = rank;
     m_subrank       = subrank;
 
-#endif
+#endif  //  SYNC_DEADLOCK_DETECTION
 }
 
+//  dtor
 
 CLockBasicInfo::~CLockBasicInfo()
 {
 }
 
-#endif
+#endif  //  SYNC_ENHANCED_STATE
 
 
+//  Lock Object Performance:  Hold
 
+//  ctor
 
 CLockPerfHold::CLockPerfHold()
 {
@@ -933,16 +1172,19 @@ CLockPerfHold::CLockPerfHold()
     m_cHold = 0;
     m_qwHRTHoldElapsed = 0;
 
-#endif
+#endif  //  SYNC_ANALYZE_PERFORMANCE
 }
 
+//  dtor
 
 CLockPerfHold::~CLockPerfHold()
 {
 }
 
 
+//  Lock Owner Record
 
+//  ctor
 
 COwner::COwner()
 {
@@ -954,16 +1196,19 @@ COwner::COwner()
     m_pownerLockNext    = NULL;
     m_group             = 0;
 
-#endif
+#endif  //  SYNC_DEADLOCK_DETECTION
 }
 
+//  dtor
 
 COwner::~COwner()
 {
 }
 
 
+//  Lock Object Deadlock Detection Information
 
+//  ctor/dtor
 
 #ifdef SYNC_DEADLOCK_DETECTION
 
@@ -980,6 +1225,7 @@ CLockDeadlockDetectionInfo::~CLockDeadlockDetectionInfo()
     {
         OSSYNCAssertSz( g_fSyncProcessAbort, "There is still an owner for the lock of this object that is being deleted." );
         
+        //  We don't want to keep references to this object in the deadlock detection data structures.
         
         if ( FOwner() )
         {
@@ -988,7 +1234,7 @@ CLockDeadlockDetectionInfo::~CLockDeadlockDetectionInfo()
     }
 }
 
-#else
+#else  //  !SYNC_DEADLOCK_DETECTION
 
 CLockDeadlockDetectionInfo::CLockDeadlockDetectionInfo( const CLockBasicInfo& lbi )
 {
@@ -998,41 +1244,50 @@ CLockDeadlockDetectionInfo::~CLockDeadlockDetectionInfo()
 {
 }
 
-#endif
+#endif  //  SYNC_DEADLOCK_DETECTION
 
 
+//  Critical Section (non-nestable) State
 
+//  ctor
 
 CCriticalSectionState::CCriticalSectionState( const CSyncBasicInfo& sbi )
     :   m_sem( sbi )
 {
 }
 
+//  dtor
 
 CCriticalSectionState::~CCriticalSectionState()
 {
 }
 
 
+//  Critical Section (non-nestable)
 
+//  ctor
 
 CCriticalSection::CCriticalSection( const CLockBasicInfo& lbi )
     :   CEnhancedStateContainer< CCriticalSectionState, CSyncBasicInfo, CCriticalSectionInfo, CLockBasicInfo >( (CSyncBasicInfo&) lbi, lbi )
 {
+    //  further init of CSyncBasicInfo
 
     State().SetTypeName( "CCriticalSection" );
     State().SetInstance( (CSyncObject*)this );
 
+    //  release semaphore
 
     State().Semaphore().Release();
 }
 
+//  dtor
 
 CCriticalSection::~CCriticalSection()
 {
 #ifdef SYNC_ANALYZE_PERFORMANCE
 #ifdef SYNC_DUMP_PERF_DATA
 
+    //  dump performance data
 
     OSSyncStatsDump(    State().SzTypeName(),
                         State().SzInstanceName(),
@@ -1045,12 +1300,14 @@ CCriticalSection::~CCriticalSection()
                         State().CHoldTotal(),
                         State().CsecHoldElapsed() );
 
-#endif
-#endif
+#endif  //  SYNC_DUMP_PERF_DATA
+#endif  //  SYNC_ANALYZE_PERFORMANCE
 }
 
 
+//  Nestable Critical Section State
 
+//  ctor
 
 CNestableCriticalSectionState::CNestableCriticalSectionState( const CSyncBasicInfo& sbi )
     :   m_sem( sbi ),
@@ -1059,31 +1316,38 @@ CNestableCriticalSectionState::CNestableCriticalSectionState( const CSyncBasicIn
 {
 }
 
+//  dtor
 
 CNestableCriticalSectionState::~CNestableCriticalSectionState()
 {
 }
 
 
+//  Nestable Critical Section
 
+//  ctor
 
 CNestableCriticalSection::CNestableCriticalSection( const CLockBasicInfo& lbi )
     :   CEnhancedStateContainer< CNestableCriticalSectionState, CSyncBasicInfo, CNestableCriticalSectionInfo, CLockBasicInfo >( (CSyncBasicInfo&) lbi, lbi )
 {
+    //  further init of CSyncBasicInfo
 
     State().SetTypeName( "CNestableCriticalSection" );
     State().SetInstance( (CSyncObject*)this );
 
+    //  release semaphore
 
     State().Semaphore().Release();
 }
 
+//  dtor
 
 CNestableCriticalSection::~CNestableCriticalSection()
 {
 #ifdef SYNC_ANALYZE_PERFORMANCE
 #ifdef SYNC_DUMP_PERF_DATA
 
+    //  dump performance data
 
     OSSyncStatsDump(    State().SzTypeName(),
                         State().SzInstanceName(),
@@ -1096,48 +1360,62 @@ CNestableCriticalSection::~CNestableCriticalSection()
                         State().CHoldTotal(),
                         State().CsecHoldElapsed() );
 
-#endif
-#endif
+#endif  //  SYNC_DUMP_PERF_DATA
+#endif  //  SYNC_ANALYZE_PERFORMANCE
 }
 
 
+//  Gate State
 
+//  ctor
 
 CGateState::CGateState( const INT cWait, const INT irksem )
 {
+    //  validate IN args
 
     OSSYNCAssert( cWait >= 0 );
     OSSYNCAssert( cWait <= 0x7FFF );
     OSSYNCAssert( irksem >= 0 );
     OSSYNCAssert( irksem <= 0xFFFE );
 
+    //  set waiter count
 
     m_cWait = (USHORT) cWait;
 
+    //  set semaphore
 
     m_irksem = (USHORT) irksem;
 }
 
 
+//  Gate
 
+//  ctor
 
 CGate::CGate( const CSyncBasicInfo& sbi )
     :   CEnhancedStateContainer< CGateState, CSyncStateInitNull, CGateInfo, CSyncBasicInfo >( syncstateNull, sbi )
 {
+    //  further init of CSyncBasicInfo
 
     State().SetTypeName( "CGate" );
     State().SetInstance( (CSyncObject*)this );
 }
 
+//  dtor
 
 CGate::~CGate()
 {
+    //  no one should be waiting
 
+    // if a thread waiting is killed, the CWait() can be != 0
+    // OSSYNCAssert( State().CWait() == 0 );
 
+    //OSSYNCAssert( State().Irksem() == CKernelSemaphorePool::irksemNil );
 
 #ifdef SYNC_ANALYZE_PERFORMANCE
 #ifdef SYNC_DUMP_PERF_DATA
 
+    //  dump performance data
 
     OSSyncStatsDump(    State().SzTypeName(),
                         State().SzInstanceName(),
@@ -1150,39 +1428,51 @@ CGate::~CGate()
                         0,
                         0 );
 
-#endif
-#endif
+#endif  //  SYNC_DUMP_PERF_DATA
+#endif  //  SYNC_ANALYZE_PERFORMANCE
 }
 
+//  waits forever on the gate until released by someone else.  this function
+//  expects to be called while in the specified critical section.  when the
+//  function returns, the caller will NOT be in the critical section
 
 void CGate::Wait( CCriticalSection& crit )
 {
+    //  we must be in the specified critical section
 
     OSSYNCAssert( crit.FOwner() );
 
+    //  there can not be too many waiters on the gate
 
     OSSYNCAssert( State().CWait() < 0x7FFF );
 
+    //  add ourselves as a waiter
 
     const INT cWait = State().CWait() + 1;
     State().SetWaitCount( cWait );
 
+    //  we are the first waiter
 
     CKernelSemaphorePool::IRKSEM irksem;
 #ifdef DEBUG
     irksem = CKernelSemaphorePool::irksemNil;
-#endif
+#endif  //  DEBUG
     if ( cWait == 1 )
     {
+        //  allocate a semaphore for the gate and remember it before leaving
+        //  the critical section
 
         OSSYNCAssert( State().Irksem() == CKernelSemaphorePool::irksemNil );
         irksem = g_ksempoolGlobal.Allocate( this );
         State().SetIrksem( irksem );
     }
 
+    //  we are not the first waiter
 
     else
     {
+        //  reference the semaphore already in the gate and remember it before
+        //  leaving the critical section
 
         OSSYNCAssert( State().Irksem() != CKernelSemaphorePool::irksemNil );
         irksem = State().Irksem();
@@ -1190,113 +1480,156 @@ void CGate::Wait( CCriticalSection& crit )
     }
     OSSYNCAssert( irksem != CKernelSemaphorePool::irksemNil );
 
+    //  leave critical section, never to return
 
     crit.Leave();
 
+    //  wait to be released
 
     State().StartWait();
     g_ksempoolGlobal.Ksem( irksem, this ).Acquire();
     State().StopWait();
 
+    //  unreference the semaphore
 
     g_ksempoolGlobal.Unreference( irksem );
 }
 
+//  releases the specified number of waiters from the gate.  this function
+//  expects to be called while in the specified critical section.  when the
+//  function returns, the caller will NOT be in the critical section
+//
+//  NOTE:  it is illegal to release more waiters than are waiting on the gate
+//         and it is also illegal to release less than one waiter
 
 void CGate::Release( CCriticalSection& crit, const INT cToRelease )
 {
 
+    //  we must be in the specified critical section
 
     OSSYNCAssert( crit.FOwner() );
 
+    //  you must release at least one waiter
 
     OSSYNCAssert( cToRelease > 0 );
 
+    //  we cannot release more waiters than are waiting on the gate
 
     OSSYNCAssert( cToRelease <= State().CWait() );
 
+    //  reduce the waiter count
 
     State().SetWaitCount( State().CWait() - cToRelease );
 
+    //  remember semaphore to release before leaving the critical section
 
     const CKernelSemaphorePool::IRKSEM irksem = State().Irksem();
 
 #ifdef DEBUG
 
+    //  we released all the waiters
 
     if ( State().CWait() == 0 )
     {
+        //  set the semaphore to nil
 
         State().SetIrksem( CKernelSemaphorePool::irksemNil );
     }
 
-#endif
+#endif  //  DEBUG
 
+    //  leave critical section, never to return
 
     crit.Leave();
 
+    //  release the specified number of waiters
 
     g_ksempoolGlobal.Ksem( irksem, this ).Release( cToRelease );
 }
 
+//  releases all the waiters from the gate.  this function expects to be called while 
+//  in the specified critical section.  when the function returns, the caller will NOT be 
+//  in the critical section
 
 void CGate::ReleaseAll( CCriticalSection& crit )
 {
+    //  we must be in the specified critical section
 
     OSSYNCAssert( crit.FOwner() );
 
+    //  retrieve the number of waiters that we need to release
 
     const INT cWaitersToRelease = State().CWait();
 
+    //  consumer must not call this API, unless there is at least one waiter to release
 
     OSSYNCAssert( cWaitersToRelease > 0 );
 
+    //  cToRelease should still be the same as State().CWait() a moment later
 
     OSSYNCAssert( State().CWait() == cWaitersToRelease );
 
+    //  finally release all the waiters (and releases the crit-sec)
 
     Release( crit, cWaitersToRelease );
 }
 
+//  releases the specified number of waiters from the gate.  this function
+//  expects to be called while in the specified critical section.  it is
+//  guaranteed that the caller will remain in the critical section at all times
+//
+//  NOTE:  it is illegal to release more waiters than are waiting on the gate
+//         and it is also illegal to release less than one waiter
 
 void CGate::ReleaseAndHold( CCriticalSection& crit, const INT cToRelease )
 {
+    //  we must be in the specified critical section
 
     OSSYNCAssert( crit.FOwner() );
 
+    //  you must release at least one waiter
 
     OSSYNCAssert( cToRelease > 0 );
 
+    //  we cannot release more waiters than are waiting on the gate
 
     OSSYNCAssert( cToRelease <= State().CWait() );
 
+    //  reduce the waiter count
 
     State().SetWaitCount( State().CWait() - cToRelease );
 
+    //  remember semaphore to release before leaving the critical section
 
     const CKernelSemaphorePool::IRKSEM irksem = State().Irksem();
 
 #ifdef DEBUG
 
+    //  we released all the waiters
 
     if ( State().CWait() == 0 )
     {
+        //  set the semaphore to nil
 
         State().SetIrksem( CKernelSemaphorePool::irksemNil );
     }
 
-#endif
+#endif  //  DEBUG
 
+    //  release the specified number of waiters
 
     g_ksempoolGlobal.Ksem( irksem, this ).Release( cToRelease );
 }
 
 
+//  Null Lock Object State Initializer
 
 const CLockStateInitNull lockstateNull;
 
 
+//  Binary Lock State
 
+//  ctor
 
 CBinaryLockState::CBinaryLockState( const CSyncBasicInfo& sbi )
     :   m_cw( 0 ),
@@ -1306,28 +1639,34 @@ CBinaryLockState::CBinaryLockState( const CSyncBasicInfo& sbi )
 {
 }
 
+//  dtor
 
 CBinaryLockState::~CBinaryLockState()
 {
 }
 
 
+//  Binary Lock
 
+//  ctor
 
 CBinaryLock::CBinaryLock( const CLockBasicInfo& lbi )
     :   CEnhancedStateContainer< CBinaryLockState, CSyncBasicInfo, CBinaryLockInfo, CLockBasicInfo >( (CSyncBasicInfo&) lbi, lbi )
 {
+    //  further init of CSyncBasicInfo
 
     State().SetTypeName( "CBinaryLock" );
     State().SetInstance( (CSyncObject*)this );
 }
 
+//  dtor
 
 CBinaryLock::~CBinaryLock()
 {
 #ifdef SYNC_ANALYZE_PERFORMANCE
 #ifdef SYNC_DUMP_PERF_DATA
 
+    //  dump performance data
 
     for ( INT iGroup = 0; iGroup < 2; iGroup++ )
     {
@@ -1343,10 +1682,12 @@ CBinaryLock::~CBinaryLock()
                             State().CsecHoldElapsed( iGroup ) );
     }
 
-#endif
-#endif
+#endif  //  SYNC_DUMP_PERF_DATA
+#endif  //  SYNC_ANALYZE_PERFORMANCE
 }
 
+//  maps an arbitrary combination of zero and non-zero components into a
+//  valid state number of the invalid state number (-1)
 
 const INT mpindexstate[16] =
 {
@@ -1356,9 +1697,12 @@ const INT mpindexstate[16] =
     -1, -1,  4,  5,
 };
 
+//  returns the state number of the specified control word or -1 if it is not
+//  a legal state
 
 INT CBinaryLock::_StateFromControlWord( const ControlWord cw )
 {
+    //  convert the control word into a state index
 
     INT index = 0;
     index = index | ( ( cw & 0x80000000 ) ? 8 : 0 );
@@ -1366,13 +1710,19 @@ INT CBinaryLock::_StateFromControlWord( const ControlWord cw )
     index = index | ( ( cw & 0x00008000 ) ? 2 : 0 );
     index = index | ( ( cw & 0x00007FFF ) ? 1 : 0 );
 
+    //  convert the state index into a state number
 
     const INT state = mpindexstate[index];
 
+    //  return the computed state number
 
     return state;
 }
 
+//  state transition reachability matrix (starting state is the major axis)
+//
+//  each entry contains bits representing valid reasons for making the
+//  transition (made by oring together the valid TransitionReasons)
 
 #define NO  CBinaryLock::trIllegal
 #define E1  CBinaryLock::trEnter1
@@ -1396,19 +1746,23 @@ const DWORD mpstatestatetrmask[6][6] =
 #undef E2
 #undef L2
 
+//  returns fTrue if the specified control word is in a legal state
 
 BOOL CBinaryLock::_FValidStateTransition( const ControlWord cwBI, const ControlWord cwAI, const TransitionReason tr )
 {
+    //  convert the specified control words into state numbers
 
     const INT stateBI = _StateFromControlWord( cwBI );
     const INT stateAI = _StateFromControlWord( cwAI );
 
+    //  if either state is invalid, the transition is invalid
 
     if ( stateBI < 0 || stateAI < 0 )
     {
         return fFalse;
     }
 
+    //  verify that cOOW2 and cOOW1 only change by +1, 0, -1, or go to 0
 
     const LONG dcOOW2 = ( ( cwAI & 0x7FFF0000 ) >> 16 ) - ( ( cwBI & 0x7FFF0000 ) >> 16 );
     if ( ( dcOOW2 < -1 || dcOOW2 > 1 ) && ( cwAI & 0x7FFF0000 ) != 0 )
@@ -1422,21 +1776,28 @@ BOOL CBinaryLock::_FValidStateTransition( const ControlWord cwBI, const ControlW
         return fFalse;
     }
 
+    //  return the reachability of stateAI from stateBI
 
     OSSYNCAssert( tr == trEnter1 || tr == trLeave1 || tr == trEnter2 || tr == trLeave2 );
     return ( mpstatestatetrmask[stateBI][stateAI] & tr ) != 0;
 }
 
+//  wait for ownership of the lock as a member of Group 1
 
 void CBinaryLock::_Enter1( const ControlWord cwBIOld )
 {
+    //  we just jumped from state 1 to state 3
 
     if ( ( cwBIOld & 0x80008000 ) == 0x00008000 )
     {
+        //  update the quiesced owner count with the owner count that we displaced from
+        //  the control word, possibly releasing waiters.  we update the count as if we
+        //  were a member of Group 2 as members of Group 1 can be released
 
         _UpdateQuiescedOwnerCountAsGroup2( ( cwBIOld & 0x7FFF0000 ) >> 16 );
     }
 
+    //  wait for ownership of the lock on our semaphore
 
     State().AddAsWaiter( 0 );
     State().StartWait( 0 );
@@ -1447,16 +1808,22 @@ void CBinaryLock::_Enter1( const ControlWord cwBIOld )
     State().RemoveAsWaiter( 0 );
 }
 
+//  wait for ownership of the lock as a member of Group 2
 
 void CBinaryLock::_Enter2( const ControlWord cwBIOld )
 {
+    //  we just jumped from state 2 to state 4
 
     if ( ( cwBIOld & 0x80008000 ) == 0x80000000 )
     {
+        //  update the quiesced owner count with the owner count that we displaced from
+        //  the control word, possibly releasing waiters.  we update the count as if we
+        //  were a member of Group 1 as members of Group 2 can be released
 
         _UpdateQuiescedOwnerCountAsGroup1( cwBIOld & 0x00007FFF );
     }
 
+    //  wait for ownership of the lock on our semaphore
 
     State().AddAsWaiter( 1 );
     State().StartWait( 1 );
@@ -1467,24 +1834,33 @@ void CBinaryLock::_Enter2( const ControlWord cwBIOld )
     State().RemoveAsWaiter( 1 );
 }
 
+//  updates the quiesced owner count as a member of Group 1
 
 void CBinaryLock::_UpdateQuiescedOwnerCountAsGroup1( const DWORD cOwnerDelta )
 {
+    //  update the quiesced owner count using the provided delta
 
     const DWORD cOwnerBI = AtomicExchangeAdd( (LONG*)&State().m_cOwner, cOwnerDelta );
     const DWORD cOwnerAI = cOwnerBI + cOwnerDelta;
 
+    //  our update resulted in a zero quiesced owner count
 
     if ( !cOwnerAI )
     {
+        //  we must release the waiters for Group 2 because we removed the last
+        //  quiesced owner count
 
+        //  try forever until we successfully change the lock state
 
         ControlWord cwBI;
         OSSYNC_FOREVER
         {
+            //  read the current state of the control word as our expected before image
 
             const ControlWord cwBIExpected = State().m_cw;
 
+            //  compute the after image of the control word such that we jump from state
+            //  state 4 to state 1 or from state 5 to state 3, whichever is appropriate
 
             #pragma prefast(push)
             #pragma prefast(disable:6297, "Carrying of the high bit is intentional.")
@@ -1493,100 +1869,139 @@ void CBinaryLock::_UpdateQuiescedOwnerCountAsGroup1( const DWORD cOwnerDelta )
                                         0xFFFF0000 ) ^ 0x8000FFFF ) );
             #pragma prefast(pop)
 
+            //  validate the transaction
 
             OSSYNCAssert( _FValidStateTransition( cwBIExpected, cwAI, trLeave1 ) );
 
+            //  attempt to perform the transacted state transition on the control word
 
             cwBI = AtomicCompareExchange( (LONG*)&State().m_cw, cwBIExpected, cwAI );
 
+            //  the transaction failed because another context changed the control word
 
             if ( cwBI != cwBIExpected )
             {
+                //  try again
 
                 continue;
             }
 
+            //  the transaction succeeded
 
             else
             {
+                //  we're done
 
                 break;
             }
         }
 
+        //  we just jumped from state 5 to state 3
 
         if ( cwBI & 0x00007FFF )
         {
+            //  update the quiesced owner count with the owner count that we displaced
+            //  from the control word
+            //
+            //  NOTE:  we do not have to worry about releasing any more waiters because
+            //  either this context owns one of the owner counts or at least one context
+            //  that owns an owner count are currently blocked on the semaphore
 
             const DWORD cOwnerDeltaT = ( cwBI & 0x7FFF0000 ) >> 16;
             AtomicExchangeAdd( (LONG*)&State().m_cOwner, cOwnerDeltaT );
         }
 
+        //  release the waiters for Group 2 that we removed from the lock state
 
         State().m_sem2.Release( ( cwBI & 0x7FFF0000 ) >> 16 );
     }
 }
 
 
+//  updates the quiesced owner count as a member of Group 2
 
 void CBinaryLock::_UpdateQuiescedOwnerCountAsGroup2( const DWORD cOwnerDelta )
 {
+    //  update the quiesced owner count using the provided delta
 
     const DWORD cOwnerBI = AtomicExchangeAdd( (LONG*)&State().m_cOwner, cOwnerDelta );
     const DWORD cOwnerAI = cOwnerBI + cOwnerDelta;
 
+    //  our update resulted in a zero quiesced owner count
 
     if ( !cOwnerAI )
     {
+        //  we must release the waiters for Group 1 because we removed the last
+        //  quiesced owner count
 
+        //  try forever until we successfully change the lock state
 
         ControlWord cwBI;
         OSSYNC_FOREVER
         {
+            //  read the current state of the control word as our expected before image
 
             const ControlWord cwBIExpected = State().m_cw;
 
+            //  compute the after image of the control word such that we jump from state
+            //  state 3 to state 2 or from state 5 to state 4, whichever is appropriate
 
             const ControlWord cwAI =    ControlWord( cwBIExpected &
                                         ( ( ( LONG_PTR( LONG( cwBIExpected + 0x7FFF0000 ) ) >> 31 ) &
                                         0x0000FFFF ) ^ 0xFFFF8000 ) );
 
+            //  validate the transaction
 
             OSSYNCAssert( _FValidStateTransition( cwBIExpected, cwAI, trLeave2 ) );
 
+            //  attempt to perform the transacted state transition on the control word
 
             cwBI = AtomicCompareExchange( (LONG*)&State().m_cw, cwBIExpected, cwAI );
 
+            //  the transaction failed because another context changed the control word
 
             if ( cwBI != cwBIExpected )
             {
+                //  try again
 
                 continue;
             }
 
+            //  the transaction succeeded
 
             else
             {
+                //  we're done
 
                 break;
             }
         }
 
+        //  we just jumped from state 5 to state 4
 
         if ( cwBI & 0x7FFF0000 )
         {
+            //  update the quiesced owner count with the owner count that we displaced
+            //  from the control word
+            //
+            //  NOTE:  we do not have to worry about releasing any more waiters because
+            //  either this context owns one of the owner counts or at least one context
+            //  that owns an owner count are currently blocked on the semaphore
 
             const DWORD cOwnerDeltaT = cwBI & 0x00007FFF;
             AtomicExchangeAdd( (LONG*)&State().m_cOwner, cOwnerDeltaT );
         }
 
+        //  release the waiters for Group 1 that we removed from the lock state
 
         State().m_sem1.Release( cwBI & 0x00007FFF );
     }
 }
 
 
+//  Reader / Writer Lock State
 
+//  ctor
 
 CReaderWriterLockState::CReaderWriterLockState( const CSyncBasicInfo& sbi )
     :   m_cw( 0 ),
@@ -1596,29 +2011,35 @@ CReaderWriterLockState::CReaderWriterLockState( const CSyncBasicInfo& sbi )
 {
 }
 
+//  dtor
 
 CReaderWriterLockState::~CReaderWriterLockState()
 {
 }
 
 
+//  Reader / Writer Lock
 
 
+//  ctor
 
 CReaderWriterLock::CReaderWriterLock( const CLockBasicInfo& lbi )
     :   CEnhancedStateContainer< CReaderWriterLockState, CSyncBasicInfo, CReaderWriterLockInfo, CLockBasicInfo >( (CSyncBasicInfo&) lbi, lbi )
 {
+    //  further init of CSyncBasicInfo
 
     State().SetTypeName( "CReaderWriterLock" );
     State().SetInstance( (CSyncObject*)this );
 }
 
+//  dtor
 
 CReaderWriterLock::~CReaderWriterLock()
 {
 #ifdef SYNC_ANALYZE_PERFORMANCE
 #ifdef SYNC_DUMP_PERF_DATA
 
+    //  dump performance data
 
     for ( INT iGroup = 0; iGroup < 2; iGroup++ )
     {
@@ -1634,10 +2055,12 @@ CReaderWriterLock::~CReaderWriterLock()
                             State().CsecHoldElapsed( iGroup ) );
     }
 
-#endif
-#endif
+#endif  //  SYNC_DUMP_PERF_DATA
+#endif  //  SYNC_ANALYZE_PERFORMANCE
 }
 
+//  maps an arbitrary combination of zero and non-zero components into a
+//  valid state number of the invalid state number (-1)
 
 const INT mpindexstateRW[16] =
 {
@@ -1647,9 +2070,12 @@ const INT mpindexstateRW[16] =
     -1, -1,  4,  5,
 };
 
+//  returns the state number of the specified control word or -1 if it is not
+//  a legal state
 
 INT CReaderWriterLock::_StateFromControlWord( const ControlWord cw )
 {
+    //  convert the control word into a state index
 
     INT index = 0;
     index = index | ( ( cw & 0x80000000 ) ? 8 : 0 );
@@ -1657,13 +2083,19 @@ INT CReaderWriterLock::_StateFromControlWord( const ControlWord cw )
     index = index | ( ( cw & 0x00008000 ) ? 2 : 0 );
     index = index | ( ( cw & 0x00007FFF ) ? 1 : 0 );
 
+    //  convert the state index into a state number
 
     const INT state = mpindexstateRW[index];
 
+    //  return the computed state number
 
     return state;
 }
 
+//  state transition reachability matrix (starting state is the major axis)
+//
+//  each entry contains bits representing valid reasons for making the
+//  transition (made by oring together the valid TransitionReasons)
 
 #define NO  CReaderWriterLock::trIllegal
 #define EW  CReaderWriterLock::trEnterAsWriter
@@ -1687,19 +2119,23 @@ const DWORD mpstatestatetrmaskRW[6][6] =
 #undef ER
 #undef LR
 
+//  returns fTrue if the specified control word is in a legal state
 
 BOOL CReaderWriterLock::_FValidStateTransition( const ControlWord cwBI, const ControlWord cwAI, const TransitionReason tr )
 {
+    //  convert the specified control words into state numbers
 
     const INT stateBI = _StateFromControlWord( cwBI );
     const INT stateAI = _StateFromControlWord( cwAI );
 
+    //  if either state is invalid, the transition is invalid
 
     if ( stateBI < 0 || stateAI < 0 )
     {
         return fFalse;
     }
 
+    //  verify that cOOW2 and cOOW1 only change by +1, 0, -1, or cOOW2 can go to 0
 
     const LONG dcOOW2 = ( ( cwAI & 0x7FFF0000 ) >> 16 ) - ( ( cwBI & 0x7FFF0000 ) >> 16 );
     if ( ( dcOOW2 < -1 || dcOOW2 > 1 ) && ( cwAI & 0x7FFF0000 ) != 0 )
@@ -1713,6 +2149,7 @@ BOOL CReaderWriterLock::_FValidStateTransition( const ControlWord cwBI, const Co
         return fFalse;
     }
 
+    //  return the reachability of stateAI from stateBI
 
     OSSYNCAssert(   tr == trEnterAsWriter ||
             tr == trLeaveAsWriter ||
@@ -1721,16 +2158,22 @@ BOOL CReaderWriterLock::_FValidStateTransition( const ControlWord cwBI, const Co
     return ( mpstatestatetrmaskRW[stateBI][stateAI] & tr ) != 0;
 }
 
+//  wait for ownership of the lock as a writer
 
 void CReaderWriterLock::_EnterAsWriter( const ControlWord cwBIOld )
 {
+    //  we just jumped from state 1 to state 3
 
     if ( ( cwBIOld & 0x80008000 ) == 0x00008000 )
     {
+        //  update the quiesced owner count with the owner count that we displaced from
+        //  the control word, possibly releasing a waiter.  we update the count as if we
+        //  were a reader as a writer can be released
 
         _UpdateQuiescedOwnerCountAsReader( ( cwBIOld & 0x7FFF0000 ) >> 16 );
     }
 
+    //  wait for ownership of the lock on our semaphore
 
     State().AddAsWaiter( 0 );
     State().StartWait( 0 );
@@ -1741,16 +2184,22 @@ void CReaderWriterLock::_EnterAsWriter( const ControlWord cwBIOld )
     State().RemoveAsWaiter( 0 );
 }
 
+//  wait for ownership of the lock as a reader
 
 void CReaderWriterLock::_EnterAsReader( const ControlWord cwBIOld )
 {
+    //  we just jumped from state 2 to state 4 or from state 2 to state 5
 
     if ( ( cwBIOld & 0x80008000 ) == 0x80000000 )
     {
+        //  update the quiesced owner count with the owner count that we displaced from
+        //  the control word, possibly releasing waiters.  we update the count as if we
+        //  were a writer as readers can be released
 
         _UpdateQuiescedOwnerCountAsWriter( 0x00000001 );
     }
 
+    //  wait for ownership of the lock on our semaphore
 
     State().AddAsWaiter( 1 );
     State().StartWait( 1 );
@@ -1761,24 +2210,33 @@ void CReaderWriterLock::_EnterAsReader( const ControlWord cwBIOld )
     State().RemoveAsWaiter( 1 );
 }
 
+//  updates the quiesced owner count as a writer
 
 void CReaderWriterLock::_UpdateQuiescedOwnerCountAsWriter( const DWORD cOwnerDelta )
 {
+    //  update the quiesced owner count using the provided delta
 
     const DWORD cOwnerBI = AtomicExchangeAdd( (LONG*)&State().m_cOwner, cOwnerDelta );
     const DWORD cOwnerAI = cOwnerBI + cOwnerDelta;
 
+    //  our update resulted in a zero quiesced owner count
 
     if ( !cOwnerAI )
     {
+        //  we must release the waiting readers because we removed the last
+        //  quiesced owner count
 
+        //  try forever until we successfully change the lock state
 
         ControlWord cwBI;
         OSSYNC_FOREVER
         {
+            //  read the current state of the control word as our expected before image
 
             const ControlWord cwBIExpected = State().m_cw;
 
+            //  compute the after image of the control word such that we jump from state
+            //  state 4 to state 1 or from state 5 to state 3, whichever is appropriate
 
             #pragma prefast(push)
             #pragma prefast(disable:6297, "Carrying of the high bit is intentional.")
@@ -1787,99 +2245,139 @@ void CReaderWriterLock::_UpdateQuiescedOwnerCountAsWriter( const DWORD cOwnerDel
                                         0xFFFF0000 ) ^ 0x8000FFFF ) );
             #pragma prefast(pop)
 
+            //  validate the transaction
 
             OSSYNCAssert( _FValidStateTransition( cwBIExpected, cwAI, trLeaveAsWriter ) );
 
+            //  attempt to perform the transacted state transition on the control word
 
             cwBI = AtomicCompareExchange( (LONG*)&State().m_cw, cwBIExpected, cwAI );
 
+            //  the transaction failed because another context changed the control word
 
             if ( cwBI != cwBIExpected )
             {
+                //  try again
 
                 continue;
             }
 
+            //  the transaction succeeded
 
             else
             {
+                //  we're done
 
                 break;
             }
         }
 
+        //  we just jumped from state 5 to state 3
 
         if ( cwBI & 0x00007FFF )
         {
+            //  update the quiesced owner count with the owner count that we displaced
+            //  from the control word
+            //
+            //  NOTE:  we do not have to worry about releasing any more waiters because
+            //  either this context owns one of the owner counts or at least one context
+            //  that owns an owner count are currently blocked on the semaphore
 
             const DWORD cOwnerDeltaT = ( cwBI & 0x7FFF0000 ) >> 16;
             AtomicExchangeAdd( (LONG*)&State().m_cOwner, cOwnerDeltaT );
         }
 
+        //  release the waiting readers that we removed from the lock state
 
         State().m_semReader.Release( ( cwBI & 0x7FFF0000 ) >> 16 );
     }
 }
 
 
+//  updates the quiesced owner count as a reader
 
 void CReaderWriterLock::_UpdateQuiescedOwnerCountAsReader( const DWORD cOwnerDelta )
 {
+    //  update the quiesced owner count using the provided delta
 
     const DWORD cOwnerBI = AtomicExchangeAdd( (LONG*)&State().m_cOwner, cOwnerDelta );
     const DWORD cOwnerAI = cOwnerBI + cOwnerDelta;
 
+    //  our update resulted in a zero quiesced owner count
 
     if ( !cOwnerAI )
     {
+        //  we must release a waiting writer because we removed the last
+        //  quiesced owner count
 
+        //  try forever until we successfully change the lock state
 
         ControlWord cwBI;
         OSSYNC_FOREVER
         {
+            //  read the current state of the control word as our expected before image
 
             const ControlWord cwBIExpected = State().m_cw;
 
+            //  compute the after image of the control word such that we jump from state
+            //  state 3 to state 2, from state 5 to state 4, or from state 5 to state 5,
+            //  whichever is appropriate
 
             const ControlWord cwAI =    cwBIExpected + ( ( cwBIExpected & 0x7FFF0000 ) ?
                                             0xFFFFFFFF :
                                             0xFFFF8000 );
 
+            //  validate the transaction
 
             OSSYNCAssert( _FValidStateTransition( cwBIExpected, cwAI, trLeaveAsReader ) );
 
+            //  attempt to perform the transacted state transition on the control word
 
             cwBI = AtomicCompareExchange( (LONG*)&State().m_cw, cwBIExpected, cwAI );
 
+            //  the transaction failed because another context changed the control word
 
             if ( cwBI != cwBIExpected )
             {
+                //  try again
 
                 continue;
             }
 
+            //  the transaction succeeded
 
             else
             {
+                //  we're done
 
                 break;
             }
         }
 
+        //  we just jumped from state 5 to state 4 or from state 5 to state 5
 
         if ( cwBI & 0x7FFF0000 )
         {
+            //  update the quiesced owner count with the owner count that we displaced
+            //  from the control word
+            //
+            //  NOTE:  we do not have to worry about releasing any more waiters because
+            //  either this context owns one of the owner counts or at least one context
+            //  that owns an owner count are currently blocked on the semaphore
 
             AtomicExchangeAdd( (LONG*)&State().m_cOwner, 1 );
         }
 
+        //  release the waiting writer that we removed from the lock state
 
         State().m_semWriter.Release();
     }
 }
 
 
+//  S / X / W Latch State
 
+//  ctor
 
 CSXWLatchState::CSXWLatchState( const CSyncBasicInfo& sbi )
     :   m_cw( 0 ),
@@ -1890,29 +2388,35 @@ CSXWLatchState::CSXWLatchState( const CSyncBasicInfo& sbi )
 {
 }
 
+//  dtor
 
 CSXWLatchState::~CSXWLatchState()
 {
 }
 
 
+//  S / X / W Latch
 
 
+//  ctor
 
 CSXWLatch::CSXWLatch( const CLockBasicInfo& lbi )
     :   CEnhancedStateContainer< CSXWLatchState, CSyncBasicInfo, CSXWLatchInfo, CLockBasicInfo >( (CSyncBasicInfo&) lbi, lbi )
 {
+    //  further init of CSyncBasicInfo
 
     State().SetTypeName( "CSXWLatch" );
     State().SetInstance( (CSyncObject*)this );
 }
 
+//  dtor
 
 CSXWLatch::~CSXWLatch()
 {
 #ifdef SYNC_ANALYZE_PERFORMANCE
 #ifdef SYNC_DUMP_PERF_DATA
 
+    //  dump performance data
 
     for ( INT iGroup = 0; iGroup < 3; iGroup++ )
     {
@@ -1928,26 +2432,38 @@ CSXWLatch::~CSXWLatch()
                             State().CsecHoldElapsed( iGroup ) );
     }
 
-#endif
-#endif
+#endif  //  SYNC_DUMP_PERF_DATA
+#endif  //  SYNC_ANALYZE_PERFORMANCE
 }
 
 
-};
+}; // namespace OSSYNC
 
 
+//////////////////////////////////////////////////
+//  Everything below this line is OS dependent
 
 
+//  We need some lowish level NT-level primitive APIs/structs, so we need to include
+//  either nt.h,ntrtl.h,nturtl.h or winnt.h
+//
+// Windows headers are such a mess ... we can't include nt*.h after windows.h, this
+// causes errors, but we can't include winnt.h before windows.h as this also causes
+// errors.
 
 
 #include <windows.h>
 
 #ifndef ESENT
+//
+//  For non-NT builds, this gets NT-level primities (but no TEB)
+//
 #include <winnt.h>
 #endif
 
 #include <dbgeng.h>
 
+// Until Exchange updates their dbgeng.h file:
 #ifndef DEBUG_OUTCTL_AMBIENT_DML
 #define DEBUG_OUTCTL_AMBIENT_DML       0xfffffffe
 #endif
@@ -1966,23 +2482,51 @@ CSXWLatch::~CSXWLatch()
 namespace OSSYNC {
 
 
+//  Global Synchronization Constants
 
+//    wait time used for testing the state of the kernel object
 
 const INT cmsecTest = 0;
 
+//    wait time used for infinite wait on a kernel object
 
 const INT cmsecInfinite = INFINITE;
 
+//    maximum wait time on a kernel object before a deadlock is suspected
 
-const INT cmsecDeadlock = 600000;
+const INT cmsecDeadlock = 600000; // 10 min
 
+//    wait time used for infinite wait on a kernel object without deadlock
 
 const INT cmsecInfiniteNoDeadlock = INFINITE - 1;
 
+//    cache line size
+//
+//      the following chart describes cache-line configurations for each supported
+//      architecture.
+//
+//      cache line size         = read size (prefetch)
+//      cache line sector size  = write size (flush)
+//
+//
+//      Pocessor    Cache Line Size     Cache Line Sector Size
+//
+//      Pentium         16B                 16B
+//      PPro            32B                 32B
+//      PII             32B                 32B
+//      PIII            32B                 32B
+//      AXP             64B                 64B
+//      Willamette      128B                64B
+//      Merced          128B?               128B?
+//
+//      NOTE:   when changing this, you must fix all structures/classes whose definitions
+//              are based on its present value
+//              (e.g. the object has space rsvd as filler for the rest of the cache line)
 
 const INT cbCacheLine = 32;
 
 
+//  Thread Wait Notifications
 
 static void OSSYNCAPI OSSyncThreadWaitBegin()
 {
@@ -2017,10 +2561,16 @@ void OnThreadWaitEnd()
 }
 
 
+//  Page Memory Allocation
 
+//  reserves and commits a range of virtual addresses of the specifed size,
+//  returning NULL if there is insufficient address space or backing store to
+//  satisfy the request.  Note that the page reserve granularity applies to
+//  this range
 
 void* PvPageAlloc( const size_t cbSize, void* const pv )
 {
+    //  allocate address space and backing store of the specified size
 
     void* const pvRet = VirtualAlloc( pv, cbSize, MEM_COMMIT, PAGE_READWRITE );
     if ( !pvRet )
@@ -2032,9 +2582,13 @@ void* PvPageAlloc( const size_t cbSize, void* const pv )
     return pvRet;
 }
 
+//  reserve a range of virtual addresses of the specified size, returning NULL
+//  if there is insufficient address space to satisfy the request.  Note that
+//  the page reserve granularity applies to this range
 
 void* PvPageReserve( const size_t cbSize, void* const pv )
 {
+    //  allocate address space of the specified size
 
     void* const pvRet = VirtualAlloc( pv, cbSize, MEM_RESERVE, PAGE_READWRITE );
     if ( !pvRet )
@@ -2046,41 +2600,54 @@ void* PvPageReserve( const size_t cbSize, void* const pv )
     return pvRet;
 }
 
+//  free the reserved range of virtual addresses starting at the specified
+//  address, freeing any backing store committed to this range
 
 void PageFree( void* const pv )
 {
     if ( pv )
     {
+        //  free backing store and address space for the specified range
 
         BOOL fMemFreed = VirtualFree( pv, 0, MEM_RELEASE );
         OSSYNCAssert( fMemFreed );
     }
 }
 
+//  commit the specified range of virtual addresses, returning fFalse if there
+//  is insufficient backing store to satisfy the request.  Note that the page
+//  commit granularity applies to this range
 
 BOOL FPageCommit( void* const pv, const size_t cb )
 {
+    //  verify input
 
     if ( !pv )
     {
         return fFalse;
     }
 
+    //  commit the memory
 
     const BOOL fAllocOK = VirtualAlloc( pv, cb, MEM_COMMIT, PAGE_READWRITE ) != NULL;
 
     return fAllocOK;
 }
 
+//  decommit the specified range of virtual addresses, freeing any backing
+//  store committed to this range.  Note that the page commit granularity
+//  applies to this range
 
 void PageDecommit( void* const pv, const size_t cb )
 {
+    //  verify input
 
     if ( !pv )
     {
         return;
     }
 
+    //  free backing store for the specified range
 
 #pragma prefast(suppress:6250, "We specifically are only decommitting, not releasing." )
     const BOOL fFreeOK = VirtualFree( pv, cb, MEM_DECOMMIT );
@@ -2088,19 +2655,22 @@ void PageDecommit( void* const pv, const size_t cb )
 }
 
 
+//  Context Local Storage
 
+//  Internal CLS structure
 
 struct _CLS
 {
-    DWORD               dwContextId;
-    HANDLE              hContext;
+    DWORD               dwContextId;    //  context ID
+    HANDLE              hContext;       //  context handle
 
-    _CLS*               pclsNext;
-    _CLS**              ppclsNext;
+    _CLS*               pclsNext;       //  next CLS in global list
+    _CLS**              ppclsNext;      //  pointer to the pointer to this CLS
 
-    CLS                 cls;
+    CLS                 cls;            //  external CLS structure
 };
 
+//  Global CLS List
 
 CRITICAL_SECTION g_csClsSyncGlobal;
 BOOL g_fcsClsSyncGlobalInit;
@@ -2108,11 +2678,18 @@ _CLS* g_pclsSyncGlobal;
 _CLS* g_pclsSyncCleanGlobal;
 DWORD g_cclsSyncGlobal;
 
+//  Allocated CLS Entries
 
+//NOTE: Cannot initialise this variable because the code that allocates
+//      TLS and uses this variable to store the index executes before
+//      CRTInit, which would subsequently re-initialise the variable
+//      with the value specified here
+//DWORD g_dwClsSyncIndex      = dwClsInvalid;
+//DWORD g_dwClsProcIndex      = dwClsInvalid;
 DWORD       g_dwClsSyncIndex;
 DWORD       g_dwClsProcIndex;
 
-const DWORD dwClsInvalid            = 0xFFFFFFFF;
+const DWORD dwClsInvalid            = 0xFFFFFFFF;       //  this is the value returned by TlsAlloc() on error
 
 const LONG  lOSSyncUnlocked         = 0x7fffffff;
 const LONG  lOSSyncLocked           = 0x80000000;
@@ -2123,16 +2700,19 @@ static BOOL FOSSyncIInit();
 static void OSSyncITerm();
 static void OSSyncIClsFree( _CLS* pcls );
 
+//  registers the given CLS structure as the CLS for this context
 
 BOOL FOSSyncIClsRegister( _CLS* pcls )
 {
     BOOL    fAllocatedCls   = fFalse;
 
+    //  we are the first to register CLS
 
     EnterCriticalSection( &g_csClsSyncGlobal );
 
     if ( NULL == g_pclsSyncGlobal )
     {
+        //  allocate our CLS entries
 
         g_dwClsSyncIndex = TlsAlloc();
         if ( dwClsInvalid == g_dwClsSyncIndex )
@@ -2146,10 +2726,10 @@ BOOL FOSSyncIClsRegister( _CLS* pcls )
         {
             const BOOL  fTLSFreed   = TlsFree( g_dwClsSyncIndex );
 #if !defined(_AMD64_)
-            OSSYNCAssert( fTLSFreed );
-#else
+            OSSYNCAssert( fTLSFreed );      //  leak the TLS entries if we fail
+#else // !_AMD64_
             Unused( fTLSFreed );
-#endif
+#endif // _AMD64_
             g_dwClsSyncIndex = dwClsInvalid;
 
             LeaveCriticalSection( &g_csClsSyncGlobal );
@@ -2162,6 +2742,7 @@ BOOL FOSSyncIClsRegister( _CLS* pcls )
     OSSYNCAssert( dwClsInvalid != g_dwClsSyncIndex );
     OSSYNCAssert( dwClsInvalid != g_dwClsProcIndex );
 
+    //  save the pointer to the given CLS
 
     const BOOL  fTLSPointerSet  = TlsSetValue( g_dwClsSyncIndex, pcls );
     if ( !fTLSPointerSet )
@@ -2174,12 +2755,12 @@ BOOL FOSSyncIClsRegister( _CLS* pcls )
             const BOOL  fTLSFreed2  = TlsFree( g_dwClsProcIndex );
 
 #if !defined(_AMD64_)
-            OSSYNCAssert( fTLSFreed1 );
+            OSSYNCAssert( fTLSFreed1 );     //  leak the TLS entries if we fail
             OSSYNCAssert( fTLSFreed2 );
-#else
+#else // !_AMD64_
             Unused( fTLSFreed1 );
             Unused( fTLSFreed2 );
-#endif
+#endif // _AMD64_
 
             g_dwClsSyncIndex = dwClsInvalid;
             g_dwClsProcIndex = dwClsInvalid;
@@ -2189,6 +2770,7 @@ BOOL FOSSyncIClsRegister( _CLS* pcls )
         return fFalse;
     }
 
+    //  add this CLS into the global list
 
     pcls->pclsNext = g_pclsSyncGlobal;
     if ( pcls->pclsNext )
@@ -2201,23 +2783,28 @@ BOOL FOSSyncIClsRegister( _CLS* pcls )
     OSSYNCEnforceSz(    g_cclsSyncGlobal <= 32768,
                 "Too many threads are attached to the Synchronization Library!" );
 
+    //  try to cleanup two entries in the global CLS list
 
     for ( INT i = 0; i < 2; i++ )
     {
+        //  we have a CLS to clean
 
         _CLS* pclsClean = g_pclsSyncCleanGlobal ? g_pclsSyncCleanGlobal : g_pclsSyncGlobal;
 
         if ( pclsClean )
         {
+            //  set the next CLS to clean
 
             g_pclsSyncCleanGlobal = pclsClean->pclsNext;
 
+            //  we can cleanup this CLS if the thread has exited
 
             DWORD dwExitCode;
             if (    pclsClean->hContext &&
                     GetExitCodeThread( pclsClean->hContext, &dwExitCode ) &&
                     dwExitCode != STILL_ACTIVE )
             {
+                //  detach this CLS
 
                 OSSyncIClsFree( pclsClean );
             }
@@ -2228,19 +2815,23 @@ BOOL FOSSyncIClsRegister( _CLS* pcls )
     return fTrue;
 }
 
+//  unregisters the given CLS structure as the CLS for this context
 
 void OSSyncIClsUnregister( _CLS* pcls )
 {
+    //  there should be CLSs registered
 
     EnterCriticalSection( &g_csClsSyncGlobal );
     OSSYNCAssert( g_pclsSyncGlobal != NULL );
 
+    //  make sure that the clean pointer is not pointing at this CLS
 
     if ( g_pclsSyncCleanGlobal == pcls )
     {
         g_pclsSyncCleanGlobal = pcls->pclsNext;
     }
 
+    //  remove our CLS from the global CLS list
 
     if( pcls->pclsNext )
     {
@@ -2249,9 +2840,11 @@ void OSSyncIClsUnregister( _CLS* pcls )
     *( pcls->ppclsNext ) = pcls->pclsNext;
     g_cclsSyncGlobal--;
 
+    //  we are the last to unregister our CLS
 
     if ( g_pclsSyncGlobal == NULL )
     {
+        //  deallocate CLS entries
 
         OSSYNCAssert( dwClsInvalid != g_dwClsSyncIndex );
         OSSYNCAssert( dwClsInvalid != g_dwClsProcIndex );
@@ -2260,12 +2853,12 @@ void OSSyncIClsUnregister( _CLS* pcls )
         const BOOL  fTLSFreed2  = TlsFree( g_dwClsProcIndex );
 
 #if !defined(_AMD64_)
-        OSSYNCAssert( fTLSFreed1 );
+        OSSYNCAssert( fTLSFreed1 );     //  leak the TLS entries if we fail
         OSSYNCAssert( fTLSFreed2 );
-#else
+#else // !_AMD64_
         Unused( fTLSFreed1 );
         Unused( fTLSFreed2 );
-#endif
+#endif // _AMD64_
 
         g_dwClsSyncIndex = dwClsInvalid;
         g_dwClsProcIndex = dwClsInvalid;
@@ -2274,15 +2867,18 @@ void OSSyncIClsUnregister( _CLS* pcls )
     LeaveCriticalSection( &g_csClsSyncGlobal );
 }
 
+//  attaches to the current context, returning fFalse on failure
 
 static BOOL OSSYNCAPI FOSSyncIClsAlloc()
 {
+    //  we don't yet have any CLS
 
     _CLS* pcls = ( NULL != g_pclsSyncGlobal ?
                         reinterpret_cast<_CLS *>( TlsGetValue( g_dwClsSyncIndex ) ) :
                         NULL );
     if ( NULL == pcls )
     {
+        //  allocate memory for this context's CLS
 
         pcls = (_CLS*) LocalAlloc( LMEM_ZEROINIT, sizeof( _CLS ) );
 
@@ -2291,6 +2887,7 @@ static BOOL OSSYNCAPI FOSSyncIClsAlloc()
             return fFalse;
         }
 
+        //  initialize internal CLS fields
 
         pcls->dwContextId   = GetCurrentThreadId();
         if ( DuplicateHandle(   GetCurrentProcess(),
@@ -2304,6 +2901,7 @@ static BOOL OSSYNCAPI FOSSyncIClsAlloc()
             SetHandleInformation( pcls->hContext, HANDLE_FLAG_PROTECT_FROM_CLOSE, HANDLE_FLAG_PROTECT_FROM_CLOSE );
         }
 
+        //  register our CLS
 
         if ( !FOSSyncIClsRegister( pcls ) )
         {
@@ -2316,6 +2914,7 @@ static BOOL OSSYNCAPI FOSSyncIClsAlloc()
             return fFalse;
         }
 
+        //  set our initial processor number to be defer init
 
         OSSyncSetCurrentProcessor( -1 );
     }
@@ -2323,15 +2922,20 @@ static BOOL OSSYNCAPI FOSSyncIClsAlloc()
     return fTrue;
 }
 
+//  detaches from the specified context
 
 static void OSSyncIClsFree( _CLS* pcls )
 {
 #ifdef SYNC_DEADLOCK_DETECTION
+    //  UNDONE: detect if we're trying to detach
+    //  when this context is holding locks
 #endif
 
+    //  unregister our CLS
 
     OSSyncIClsUnregister( pcls );
 
+    //  close our context handle
 
     if ( pcls->hContext )
     {
@@ -2340,12 +2944,15 @@ static void OSSyncIClsFree( _CLS* pcls )
         OSSYNCAssert( fCloseOK );
     }
 
+    //  free our CLS
 
     const BOOL  fFreedCLSOK = !LocalFree( pcls );
     OSSYNCAssert( fFreedCLSOK );
 }
 
 
+//  returns the pointer to the current context's local storage.  if the context
+//  does not yet have CLS, allocate it.
 
 CLS* const OSSYNCAPI Pcls()
 {
@@ -2368,43 +2975,70 @@ CLS* const OSSYNCAPI Pcls()
 }
 
 
+//  Processor Information
 
+//  returns the maximum number of processors this process can utilize
 
 DWORD g_cProcessorMax;
 
 INT OSSYNCAPI OSSyncGetProcessorCountMax()
 {
+    //  this returns the number of processors that the system had at the time
+    //  that the sync library is initialized.  if the system adds more processors
+    //  later then we will alias those onto existing processor "slots" to hide
+    //  that from the higher levels of the code.  we will use these additional
+    //  processors "inefficiently" until we next refresh this count
+    //
     
     return g_cProcessorMax;
 }
 
+//  returns the current number of processors this process can utilize
 
 DWORD g_cProcessor;
 
 INT OSSYNCAPI OSSyncGetProcessorCount()
 {
+    //  no one uses this correctly right now so set to # system processors
     return OSSyncGetProcessorCountMax();
 }
 
+//  returns the processor number that the current context _MAY_ be executing on
+//
+//  NOTE:  the current context may change processors at any time
 
+//  SKU specific get current processor implmentation
 INT IprocOSSyncIGetCurrentProcessor();
 
 INT OSSYNCAPI OSSyncGetCurrentProcessor()
 {
     INT iProc = 0;
 
+    //  get the current processor number via the favored method
     
     iProc = IprocOSSyncIGetCurrentProcessor();
 
+    //  one of those previous methods should have worked to give us a preferred CPU, but 
+    //  we used to have a fallback using SetThreadIdealProcessor() / *AffinityMask APIs
+    //  to set a TLS variable.  This fallback was removed in Windows DS Depot, sdv 378819.
 
     OSSYNCAssert( iProc != -1 );
 
+    //  we don't know what number to return yet
 
     if ( iProc == -1 )
     {
-        iProc = 0;
+        iProc = 0;          // fall back to single threaded
     }
 
+    //  ensure that the processor number we will return is within the valid
+    //  range indicated by OSSyncGetProcessorCountMax().  this handles the
+    //  case where a processor is added to the system after the sync library is
+    //  initialized.  if the system adds more processors later then we will alias
+    //  those onto existing processor "slots" to hide that from the higher levels
+    //  of the code.  we will use these additional processors "inefficiently"
+    //  until we next refresh this count
+    //
 
     if ( iProc >= OSSyncGetProcessorCountMax() )
     {
@@ -2414,6 +3048,7 @@ INT OSSYNCAPI OSSyncGetCurrentProcessor()
     return iProc;
 }
 
+//  sets the processor number returned by OSSyncGetCurrentProcessor()
 
 void OSSYNCAPI OSSyncSetCurrentProcessor( const INT iProc )
 {
@@ -2422,16 +3057,20 @@ void OSSYNCAPI OSSyncSetCurrentProcessor( const INT iProc )
 }
 
 
+//  Processor Local Storage
 
 void* g_rgPLS[ MAXIMUM_PROCESSORS ];
 
+//  configures the size of processor local storage
 
 BOOL OSSYNCAPI FOSSyncConfigureProcessorLocalStorage( const size_t cbPLS )
 {
+    //  PLS is aligned on very large boundaries to make super sure it's isolated
 
     const size_t    cbAlign     = 256;
     const size_t    cbPLSAlign  = ( ( cbPLS + cbAlign - 1 ) / cbAlign ) * cbAlign;
 
+    //  if PLS already exists then release it
 
     if ( g_rgPLS[ 0 ] )
     {
@@ -2439,6 +3078,7 @@ BOOL OSSYNCAPI FOSSyncConfigureProcessorLocalStorage( const size_t cbPLS )
         memset( g_rgPLS, 0, sizeof( g_rgPLS ) );
     }
 
+    //  allocate room for the new PLS, if requested
 
     if ( cbPLS )
     {
@@ -2456,23 +3096,28 @@ BOOL OSSYNCAPI FOSSyncConfigureProcessorLocalStorage( const size_t cbPLS )
     return cbPLS == 0 || g_rgPLS[ 0 ] != NULL;
 }
 
+//  retrieves a pointer to the current context's processor local storage
 
 void* OSSYNCAPI OSSyncGetProcessorLocalStorage()
 {
     return g_rgPLS[ OSSyncGetCurrentProcessor() ];
 }
 
+//  retrieves a pointer to a given processor's local storage
 
 void* OSSYNCAPI OSSyncGetProcessorLocalStorage( const size_t iProc )
 {
     return iProc < g_cProcessorMax ? g_rgPLS[ iProc ] : NULL;
 }
 
-#ifdef SYNC_ANALYZE_PERFORMANCE
+#ifdef SYNC_ANALYZE_PERFORMANCE // only OSSYNC should depend upon this function, isolate to catch
 
+//  High Resolution Timer
 
 #if defined( _M_IX86 ) && defined( SYNC_USE_X86_ASM )
 
+//    QWORDX - used for 32 bit access to a 64 bit integer
+//    For intel pentium only
 
 union QWORDX {
         QWORD   qw;
@@ -2484,6 +3129,7 @@ union QWORDX {
     };
 #endif
 
+//    High Resolution Timer Type
 
 enum HRTType
 {
@@ -2492,19 +3138,22 @@ enum HRTType
     hrttWin32,
 #if defined( _M_IX86 ) && defined( SYNC_USE_X86_ASM )
     hrttPentium,
-#endif
+#endif  //  _M_IX86 && SYNC_USE_X86_ASM
 } g_hrttSync;
 
+//    HRT Frequency
 
 QWORD qwSyncHRTFreq;
 
 #if defined( _M_IX86 ) && defined( SYNC_USE_X86_ASM )
 
+//    Pentium Time Stamp Counter Fetch
 
 #define rdtsc __asm _emit 0x0f __asm _emit 0x31
 
-#endif
+#endif  //  _MM_IX86 && SYNC_USE_X86_ASM
 
+//  returns fTrue if we are allowed to use RDTSC
 
 BOOL IsRDTSCAvailable()
 {
@@ -2551,19 +3200,23 @@ NoIsProcessorFeaturePresent:
     return fRDTSCAvailable;
 }
 
+//  initializes the HRT subsystem
 
 static void OSSyncHRTIInit()
 {
+    //  Win32 high resolution counter is available
 
     if ( QueryPerformanceFrequency( (LARGE_INTEGER *) &qwSyncHRTFreq ) )
     {
         g_hrttSync = hrttWin32;
     }
 
+    //  Win32 high resolution counter is not available
 
     else
 
     {
+        //  fall back on GetTickCount() (ms since Windows has started)
 
         qwSyncHRTFreq = 1000;
         g_hrttSync = hrttNone;
@@ -2571,9 +3224,11 @@ static void OSSyncHRTIInit()
 
 #if defined( _M_IX86 ) && defined( SYNC_USE_X86_ASM )
 
+    //  can we use the TSC?
 
     if ( IsRDTSCAvailable() )
     {
+        //  use pentium TSC register, but first find clock frequency experimentally
 
         QWORDX qwxTime1a;
         QWORDX qwxTime1b;
@@ -2581,16 +3236,16 @@ static void OSSyncHRTIInit()
         QWORDX qwxTime2b;
         if ( g_hrttSync == hrttWin32 )
         {
-            __asm xchg      eax, edx
+            __asm xchg      eax, edx  //  HACK:  cl 11.00.7022 needs this
             __asm rdtsc
-            __asm mov       qwxTime1a.l,eax
-            __asm mov       qwxTime1a.h,edx
+            __asm mov       qwxTime1a.l,eax //lint !e530
+            __asm mov       qwxTime1a.h,edx //lint !e530
             QueryPerformanceCounter( (LARGE_INTEGER*) &qwxTime1b.qw );
             Sleep( 50 );
-            __asm xchg      eax, edx
+            __asm xchg      eax, edx  //  HACK:  cl 11.00.7022 needs this
             __asm rdtsc
-            __asm mov       qwxTime2a.l,eax
-            __asm mov       qwxTime2a.h,edx
+            __asm mov       qwxTime2a.l,eax //lint !e530
+            __asm mov       qwxTime2a.h,edx //lint !e530
             QueryPerformanceCounter( (LARGE_INTEGER*) &qwxTime2b.qw );
             qwSyncHRTFreq = ( qwSyncHRTFreq * ( qwxTime2a.qw - qwxTime1a.qw ) ) /
                         ( qwxTime2b.qw - qwxTime1b.qw );
@@ -2598,14 +3253,14 @@ static void OSSyncHRTIInit()
         }
         else
         {
-            __asm xchg      eax, edx
+            __asm xchg      eax, edx  //  HACK:  cl 11.00.7022 needs this
             __asm rdtsc
             __asm mov       qwxTime1a.l,eax
             __asm mov       qwxTime1a.h,edx
             qwxTime1b.l = GetTickCount();
             qwxTime1b.h = 0;
             Sleep( 2000 );
-            __asm xchg      eax, edx
+            __asm xchg      eax, edx  //  HACK:  cl 11.00.7022 needs this
             __asm rdtsc
             __asm mov       qwxTime2a.l,eax
             __asm mov       qwxTime2a.h,edx
@@ -2619,10 +3274,11 @@ static void OSSyncHRTIInit()
         g_hrttSync = hrttPentium;
     }
 
-#endif
+#endif  //  _M_IX86 && SYNC_USE_X86_ASM
 
 }
 
+//  returns the current HRT frequency
 
 static QWORD OSSYNCAPI QwOSSyncIHRTFreq()
 {
@@ -2634,6 +3290,7 @@ static QWORD OSSYNCAPI QwOSSyncIHRTFreq()
     return qwSyncHRTFreq;
 }
 
+//  returns the current HRT count
 
 static QWORD OSSYNCAPI QwOSSyncIHRTCount()
 {
@@ -2659,7 +3316,7 @@ static QWORD OSSYNCAPI QwOSSyncIHRTCount()
         case hrttPentium:
         {
             QWORDX qwx;
-            __asm xchg      eax, edx
+            __asm xchg      eax, edx  //  HACK:  cl 11.00.7022 needs this
             __asm rdtsc
             __asm mov       qwx.l,eax
             __asm mov       qwx.h,edx
@@ -2668,7 +3325,7 @@ static QWORD OSSYNCAPI QwOSSyncIHRTCount()
         }
             break;
 
-#endif
+#endif  //  _M_IX86 && SYNC_USE_X86_ASM
 
         default:
             OSSYNCAssert( fFalse );
@@ -2678,10 +3335,12 @@ static QWORD OSSYNCAPI QwOSSyncIHRTCount()
     return qw;
 }
 
-#endif
+#endif  // SYNC_ANALYZE_PERFORMANCE
 
 
+//  Timer
 
+//  returns the current tick count where one tick is one millisecond
 
 DWORD OSSYNCAPI DwOSSyncITickTime()
 {
@@ -2692,6 +3351,7 @@ DWORD OSSYNCAPI DwOSSyncITickTime()
 
 #ifdef SYNC_ENHANCED_STATE
 
+//  Enhanced Synchronization Object State Container
 
 struct MemoryBlock
 {
@@ -2715,9 +3375,9 @@ CRITICAL_SECTION    g_csESMemory;
 BOOL                g_fcsESMemoryInit;
 
 #if defined(_WIN64)
-const LONG_PTR maskDeletedToken = (LONG_PTR)0x8000000000000000;
+const LONG_PTR maskDeletedToken = (LONG_PTR)0x8000000000000000; //  most significant bit
 #else
-const LONG_PTR maskDeletedToken = (LONG_PTR)0x80000000;
+const LONG_PTR maskDeletedToken = (LONG_PTR)0x80000000; //  most significant bit
 #endif
 
 void* OSSYNCAPI ESMemoryNew( size_t cb )
@@ -2741,11 +3401,13 @@ void* OSSYNCAPI ESMemoryNew( size_t cb )
 
     MemoryBlock* pmb = g_pmbRoot;
 
+    //  Is there still some space left in this block?
 
     if ( ( pmb->ibFreeMic + cb ) > g_cbMemoryBlock )
     {
         if ( g_pmbRootFree != &g_mbSentryFree )
         {
+            //  No space left, but there are blocks in the freed list.
 
             pmb = g_pmbRootFree;
 
@@ -2757,6 +3419,7 @@ void* OSSYNCAPI ESMemoryNew( size_t cb )
         }
         else
         {
+            //  We'll have to allocate a new block.
             
             pmb = (MemoryBlock*) VirtualAlloc( NULL, g_cbMemoryBlock, MEM_RESERVE | MEM_COMMIT, PAGE_READWRITE );
             if ( pmb == NULL )
@@ -2804,19 +3467,23 @@ void OSSYNCAPI ESMemoryDelete( void* pv )
 
         EnterCriticalSection( &g_csESMemory );
 
+        //  Tag the token as deallocated by setting its most significant bit.
 
         OSSYNCAssert( ( ((MemoryToken*)pb)->ibFreeMicPrev & maskDeletedToken ) == 0 );
         ((MemoryToken*)pb)->ibFreeMicPrev |= maskDeletedToken;
 
+        //  Free space in this block as long as we can find free blocks, starting at the last one.
 
         for ( MemoryToken* pmt = (MemoryToken*)( (BYTE*)pmb + pmb->ibFreeMicPrev );
                 ( pmb->ibFreeMicPrev > 0 ) && ( ( pmt->ibFreeMicPrev & maskDeletedToken ) != 0 );
                 pmt = (MemoryToken*)( (BYTE*)pmb + pmt->ibFreeMicPrev ) )
         {
+            //  Memory token must be within a valid range in the block.
 
             OSSYNCAssert( (BYTE*)pmt >= ( (BYTE*)pmb + sizeof( MemoryBlock ) ) );
             OSSYNCAssert( (BYTE*)pmt < ( (BYTE*)pmb + g_cbMemoryBlock ) );
 
+            //  Update offsets.
 
             pmt->ibFreeMicPrev &= ~maskDeletedToken;
             pmb->ibFreeMic = pmb->ibFreeMicPrev;
@@ -2824,6 +3491,7 @@ void OSSYNCAPI ESMemoryDelete( void* pv )
         }
         OSSYNCAssert( pmb->ibFreeMicPrev < pmb->ibFreeMic );
 
+        //  We can free the entire block if we've freed all the tokens.
 
         if ( pmb->ibFreeMicPrev == 0 )
         {
@@ -2857,12 +3525,14 @@ void OSSYNCAPI ESMemoryDelete( void* pv )
     }
 }
 
-#endif
+#endif  //  SYNC_ENHANCED_STATE
 
 
+//  Synchronization Object Basic Information
 
 #ifdef SYNC_ENHANCED_STATE
 
+//  ctor
 
 CSyncBasicInfo::CSyncBasicInfo( const char* szInstanceName )
 {
@@ -2871,15 +3541,18 @@ CSyncBasicInfo::CSyncBasicInfo( const char* szInstanceName )
     m_psyncobj          = NULL;
 }
 
+//  dtor
 
 CSyncBasicInfo::~CSyncBasicInfo()
 {
 }
 
-#endif
+#endif  //  SYNC_ENHANCED_STATE
 
 
+//  Synchronization Object Performance:  Wait Times
 
+//  ctor
 
 CSyncPerfWait::CSyncPerfWait()
 {
@@ -2888,38 +3561,46 @@ CSyncPerfWait::CSyncPerfWait()
     m_cWait = 0;
     m_qwHRTWaitElapsed = 0;
 
-#endif
+#endif  //  SYNC_ANALYZE_PERFORMANCE
 }
 
+//  dtor
 
 CSyncPerfWait::~CSyncPerfWait()
 {
 }
 
 
+//  Null Synchronization Object State Initializer
 
 const CSyncStateInitNull syncstateNull;
 
 
+//  Kernel Semaphore
 
+//  ctor
 
 CKernelSemaphore::CKernelSemaphore( const CSyncBasicInfo& sbi )
     :   CEnhancedStateContainer< CKernelSemaphoreState, CSyncStateInitNull, CKernelSemaphoreInfo, CSyncBasicInfo >( syncstateNull, sbi )
 {
+    //  further init of CSyncBasicInfo
 
     State().SetTypeName( "CKernelSemaphore" );
     State().SetInstance( (CSyncObject*)this );
 }
 
+//  dtor
 
 CKernelSemaphore::~CKernelSemaphore()
 {
+    //  semaphore should not be initialized
 
     OSSYNCAssert( !FInitialized() );
 
 #ifdef SYNC_ANALYZE_PERFORMANCE
 #ifdef SYNC_DUMP_PERF_DATA
 
+    //  dump performance data
 
     OSSyncStatsDump(    State().SzTypeName(),
                         State().SzInstanceName(),
@@ -2932,8 +3613,8 @@ CKernelSemaphore::~CKernelSemaphore()
                         0,
                         0 );
 
-#endif
-#endif
+#endif  //  SYNC_DUMP_PERF_DATA
+#endif  //  SYNC_ANALYZE_PERFORMANCE
 }
 
 typedef
@@ -2969,6 +3650,8 @@ PFNCreateSemaphoreExW * g_pfnCreateSemaphoreExW = NULL;
 
 BOOL FKernelSemaphoreICreateILoad()
 {
+    //  attempt to retrieve the DLL / library with the functionality we need
+    //
 
     HMODULE hmodCS = LoadLibraryExW( L"api-ms-win-core-synch-l1-1-0.dll", NULL, LOAD_LIBRARY_SEARCH_SYSTEM32 );
     if ( hmodCS == NULL )
@@ -2977,6 +3660,8 @@ BOOL FKernelSemaphoreICreateILoad()
     }
     OSSYNCAssert( hmodCS );
 
+    //  attempt to retrieve the function
+    //
 
     g_pfnCreateSemaphoreW = (PFNCreateSemaphoreW*)GetProcAddress( hmodCS, "CreateSemaphoreW" );
     g_pfnCreateSemaphoreExW = (PFNCreateSemaphoreExW*)GetProcAddress( hmodCS, "CreateSemaphoreExW" );
@@ -2988,6 +3673,8 @@ HANDLE HKernelSemaphoreICreate( void )
 {
     const LONG lMaxCount = 0x7FFFFFFFL;
 
+    //  fast / post init path
+    //
 
     OSSYNCAssert( g_pfnCreateSemaphoreW != NULL || g_pfnCreateSemaphoreExW != NULL );
 
@@ -3003,12 +3690,15 @@ HANDLE HKernelSemaphoreICreate( void )
     return NULL;
 }
 
+//  initialize the semaphore, returning 0 on failure
 
 const BOOL CKernelSemaphore::FInit()
 {
+    //  semaphore should not be initialized
 
     OSSYNCAssert( !FInitialized() );
 
+    //  allocate kernel semaphore object
 
     State().SetHandle( HKernelSemaphoreICreate() );
 
@@ -3017,37 +3707,50 @@ const BOOL CKernelSemaphore::FInit()
         SetHandleInformation( State().Handle(), HANDLE_FLAG_PROTECT_FROM_CLOSE, HANDLE_FLAG_PROTECT_FROM_CLOSE );
     }
 
+    //  semaphore should have no available counts, if allocated
 
     OSSYNCAssert( State().Handle() == 0 || FReset() );
 
+    //  return result of init
 
     return State().Handle() != 0;
 }
 
+//  terminate the semaphore
 
 void CKernelSemaphore::Term()
 {
+    //  semaphore should be initialized
 
     OSSYNCAssert( FInitialized() );
 
+    //  semaphore should have no available counts
 
     OSSYNCAssert( FReset() || g_fSyncProcessAbort );
 
+    //  deallocate kernel semaphore object
 
     SetHandleInformation( State().Handle(), HANDLE_FLAG_PROTECT_FROM_CLOSE, 0 );
     INT fSuccess = CloseHandle( State().Handle() );
     OSSYNCAssert( fSuccess );
 
+    //  reset state
 
     State().SetHandle( 0 );
 }
 
+//  acquire one count of the semaphore, waiting only for the specified interval.
+//  returns 0 if the wait timed out before a count could be acquired
+//
+//  for negative intervals not related to INF, deadlock detection logic is turned off
 
 const BOOL CKernelSemaphore::FAcquire( const INT cmsecTimeout )
 {
+    //  semaphore should be initialized
 
     OSSYNCAssert( FInitialized() );
 
+    //  wait for semaphore
 
     BOOL fSuccess;
 
@@ -3068,7 +3771,7 @@ const BOOL CKernelSemaphore::FAcquire( const INT cmsecTimeout )
         {
 #ifdef DEBUG
             SYNCDeadLockTimeOutState sdltosStatePre = sdltosEnabled;
-            OSSYNC_FOREVER
+            OSSYNC_FOREVER  // spin until we get a non- check-in-progress state ...
             {
                 C_ASSERT( sizeof(g_sdltosState) == sizeof(LONG) );
                 sdltosStatePre = (SYNCDeadLockTimeOutState)AtomicCompareExchange( (LONG*)&g_sdltosState, sdltosEnabled, sdltosCheckInProgress );
@@ -3082,13 +3785,18 @@ const BOOL CKernelSemaphore::FAcquire( const INT cmsecTimeout )
             SYNCDeadLockTimeOutState sdltosStatePre = sdltosEnabled;
 #endif
 
-            OSSYNCAssertSzRTL( fSuccess  || sdltosStatePre == sdltosDisabled, "Potential Deadlock Detected (Timeout);  FYI ed [dll]!OSSYNC::g_sdltosState to 0 to disable." );
+            OSSYNCAssertSzRTL( fSuccess /* superflous */ || sdltosStatePre == sdltosDisabled, "Potential Deadlock Detected (Timeout);  FYI ed [dll]!OSSYNC::g_sdltosState to 0 to disable." );
 
 #ifdef DEBUG
             if ( sdltosStatePre != sdltosDisabled )
             {
-                OSSYNCAssert( sdltosStatePre != sdltosCheckInProgress );
+                //  needs re-enabling (if SOMEONE/debugger didn't play with state)
+                OSSYNCAssert( sdltosStatePre != sdltosCheckInProgress ); // that'd be wrong on convergence loop above.
 
+                //  while it seems really simple this should alwyas be reset, this is designed to allow the user to kill
+                //  timeout detection dynamically in the debugger by setting g_sdltosState = 0 (i.e. sdltosDisabled) via 
+                //  debugger, thus g_sdltosState won't == sdltosCheckInProgress and we won't reset it to sdltosEnabled / 
+                //  i.e. disabling deadlock detection for all subsequent hits.
 
                 const SYNCDeadLockTimeOutState sdltosCheck = (SYNCDeadLockTimeOutState)AtomicCompareExchange( (LONG*)&g_sdltosState, sdltosCheckInProgress, sdltosEnabled );
                 OSSYNCAssertSzRTL( sdltosCheck != sdltosDisabled, "Devs, the debugger used to set g_sdltosState to 0 and disables further timeout detection asserts!?  Just an FYI.  If you did not, then code is confused." );
@@ -3105,7 +3813,7 @@ const BOOL CKernelSemaphore::FAcquire( const INT cmsecTimeout )
         }
     }
     else
-#endif
+#endif  //  SYNC_DEADLOCK_DETECTION
     {
         const INT cmsecWait =   cmsecInfinite == cmsecTimeout || cmsecInfiniteNoDeadlock == cmsecTimeout ?
                             cmsecInfinite :
@@ -3131,12 +3839,16 @@ const BOOL CKernelSemaphore::FAcquire( const INT cmsecTimeout )
     return fSuccess;
 }
 
+//  releases the given number of counts to the semaphore, waking the appropriate
+//  number of waiters
 
 void CKernelSemaphore::Release( const INT cToRelease )
 {
+    //  semaphore should be initialized
 
     OSSYNCAssert( FInitialized() );
 
+    //  release semaphore
 
     const BOOL fSuccess = ReleaseSemaphore( HANDLE( State().Handle() ), cToRelease, 0 );
     OSSYNCAssert( fSuccess );
@@ -3160,6 +3872,8 @@ const DWORD CSemaphore::_DwOSTimeout( const INT cmsecTimeout )
     }
 }
 
+//  attempts to acquire a count from the semaphore, returning fFalse if unsuccessful
+//  in the time permitted.  Infinite and Test-Only timeouts are supported.
 
 const BOOL CSemaphore::_FAcquire( const DWORD dwTimeout )
 {
@@ -3207,6 +3921,7 @@ const BOOL CSemaphore::_FAcquire( const DWORD dwTimeout )
     return fFalse;
 }
 
+//  releases all waiters on the semaphore
 
 void CSemaphore::ReleaseAllWaiters()
 {
@@ -3234,6 +3949,8 @@ void CSemaphore::ReleaseAllWaiters()
     }
 }
 
+//  releases the given number of counts to the semaphore, waking the appropriate
+//  number of waiters
 
 void CSemaphore::_Release( const INT cToRelease )
 {
@@ -3345,12 +4062,15 @@ const BOOL CSemaphore::_FOSWait( const INT cAvail, const DWORD dwTimeout )
 }
 
 
+//  performance data dumping
 
 #include<stdarg.h>
 #include<stdio.h>
 #include<tchar.h>
 
+//  ================================================================
 class CPrintF
+//  ================================================================
 {
     public:
         CPrintF() {}
@@ -3360,7 +4080,9 @@ class CPrintF
         virtual void __cdecl operator()( const CHAR* szFormat, ... ) = 0;
 };
 
+//  ================================================================
 class CIPrintF : public CPrintF
+//  ================================================================
 {
     public:
         CIPrintF( CPrintF* pprintf );
@@ -3379,14 +4101,18 @@ class CIPrintF : public CPrintF
         BOOL                m_fBOL;
 };
 
+//  ================================================================
 inline CIPrintF::CIPrintF( CPrintF* pprintf ) :
+//  ================================================================
     m_cindent( 0 ),
     m_pprintf( pprintf ),
     m_fBOL( fTrue )
 {
 }
 
+//  ================================================================
 inline void __cdecl CIPrintF::operator()( const CHAR* szFormat, ... )
+//  ================================================================
 {
     CHAR szT[ 1024 ];
     va_list arg_ptr;
@@ -3425,12 +4151,16 @@ inline void __cdecl CIPrintF::operator()( const CHAR* szFormat, ... )
     }
 }
 
+//  ================================================================
 inline void CIPrintF::Indent()
+//  ================================================================
 {
     ++m_cindent;
 }
 
+//  ================================================================
 inline void CIPrintF::Unindent()
+//  ================================================================
 {
     if ( m_cindent > 0 )
     {
@@ -3438,14 +4168,18 @@ inline void CIPrintF::Unindent()
     }
 }
 
+//  ================================================================
 inline CIPrintF::CIPrintF( ) :
+//  ================================================================
     m_cindent( 0 ),
     m_pprintf( 0 ),
     m_fBOL( fTrue )
 {
 }
 
+//  ================================================================
 class CFPrintF : public CPrintF
+//  ================================================================
 {
     public:
         CFPrintF( const WCHAR* szFile );
@@ -3461,6 +4195,7 @@ class CFPrintF : public CPrintF
 CFPrintF::CFPrintF( const WCHAR* szFile )
     : m_hMutex( NULL )
 {
+    //  open the file for append
     m_hFile = (void*)CreateFileW( szFile, GENERIC_WRITE, FILE_SHARE_READ | FILE_SHARE_WRITE, NULL, OPEN_ALWAYS, FILE_ATTRIBUTE_NORMAL, NULL );
 
     if ( INVALID_HANDLE_VALUE == m_hFile )
@@ -3483,6 +4218,7 @@ CFPrintF::CFPrintF( const WCHAR* szFile )
 
 CFPrintF::~CFPrintF()
 {
+    //  close the file
 
     if ( m_hMutex )
     {
@@ -3499,19 +4235,23 @@ CFPrintF::~CFPrintF()
     }
 }
 
+//  ================================================================
 void __cdecl CFPrintF::operator()( const char* szFormat, ... )
+//  ================================================================
 {
     if ( HANDLE( m_hFile ) != INVALID_HANDLE_VALUE )
     {
         const SIZE_T cchBuf = 1024;
         char szBuf[ cchBuf ];
 
+        //  print into a temp buffer, truncating the string if too large
 
         va_list arg_ptr;
         va_start( arg_ptr, szFormat );
         StringCbVPrintfA( szBuf, cchBuf, szFormat, arg_ptr );
         va_end( arg_ptr );
 
+        //  append the string to the file
 
         WaitForSingleObject( HANDLE( m_hMutex ), INFINITE );
 
@@ -3530,6 +4270,7 @@ void __cdecl CFPrintF::operator()( const char* szFormat, ... )
 
 #define LOCAL static
 
+// Allows easier porting from the older wdbgexts-style extensions.
 #define dprintf EDBGPrintf
 
 
@@ -3541,9 +4282,11 @@ LOCAL PDEBUG_SYMBOLS g_DebugSymbols;
 LOCAL PDEBUG_SYSTEM_OBJECTS g_DebugSystemObjects;
 LOCAL PDEBUG_DATA_SPACES g_DebugDataSpaces;
 
+//  ================================================================
 LOCAL BOOL FOSEdbgCreateDebuggerInterface(
 PDEBUG_CLIENT   pdebugClient
 )
+//  ================================================================
 {
     HRESULT hr;
 
@@ -3582,17 +4325,20 @@ PDEBUG_CLIENT   pdebugClient
 HandleError:
     if ( FAILED( hr ) )
     {
+        // Do I have to release the pointers?
         g_DebugClient = NULL;
         g_DebugControl = NULL;
     }
     return SUCCEEDED( hr );
 }
 
+//  ================================================================
 HRESULT
 EDBGPrintf(
     __in PCSTR szFormat,
     ...
 )
+//  ================================================================
 {
     HRESULT hr = S_OK;
     va_list Args;
@@ -3600,6 +4346,7 @@ EDBGPrintf(
     va_start(Args, szFormat);
     if ( g_DebugControl == NULL )
     {
+        // Can't print out a failure message -- it would just recurse.
     }
     else
     {
@@ -3610,11 +4357,13 @@ EDBGPrintf(
     return hr;
 }
 
+//  ================================================================
 HRESULT
 EDBGPrintfDml(
     __in PCSTR szFormat,
     ...
 )
+//  ================================================================
 {
     HRESULT hr = S_OK;
     va_list Args;
@@ -3650,10 +4399,12 @@ EDBGPrintfDml(
     return hr;
 }
 
+//  ================================================================
 ULONG64
 GetExpression(
     __in PCSTR  szExpression
 )
+//  ================================================================
 {
     HRESULT hr = S_OK;
     ULONG EndIdx;
@@ -3671,6 +4422,7 @@ GetExpression(
 
 
 
+//  ================================================================
 BOOL
 FEDBGMemoryRead(
     ULONG64                         ulAddressInDebuggee,
@@ -3678,13 +4430,16 @@ FEDBGMemoryRead(
     __in ULONG                      cbBuffer,
     __out PULONG                    pcbRead
 )
+//  ================================================================
 {
     HRESULT hr;
     hr = g_DebugDataSpaces->ReadVirtual( ulAddressInDebuggee, pbBuffer, cbBuffer, pcbRead );
     return SUCCEEDED( hr );
 }
 
+//  ================================================================
 LOCAL BOOL FUlFromSz( const char* const sz, ULONG* const pul, const INT base = 16 )
+//  ================================================================
 {
     if( sz && *sz )
     {
@@ -3695,8 +4450,10 @@ LOCAL BOOL FUlFromSz( const char* const sz, ULONG* const pul, const INT base = 1
     return fFalse;
 }
 
+//  ================================================================
 template< class T >
 LOCAL BOOL FAddressFromSz( const char* const sz, T** const ppt )
+//  ================================================================
 {
     BOOL f = fFalse;
     if ( sz && *sz )
@@ -3710,8 +4467,10 @@ LOCAL BOOL FAddressFromSz( const char* const sz, T** const ppt )
     return f;
 }
 
+//  ================================================================
 template< class T >
 LOCAL BOOL FAddressFromGlobal( const char* const szGlobal, T** const ppt )
+//  ================================================================
 {
     HRESULT hr = S_OK;
     ULONG EndIdx;
@@ -3724,6 +4483,7 @@ LOCAL BOOL FAddressFromGlobal( const char* const szGlobal, T** const ppt )
     {
         Address = FullValue.I64;
 
+        //  return the address of the symbol
         *ppt = (T*)Address;
     }
 
@@ -3731,8 +4491,10 @@ LOCAL BOOL FAddressFromGlobal( const char* const szGlobal, T** const ppt )
 
 }
 
+//  ================================================================
 template< class T >
 LOCAL BOOL FGlobalFromAddress( T* const pt, __out_bcount(cbMax) PSTR szGlobal, const SIZE_T cbMax, DWORD_PTR* const pdwOffset = NULL )
+//  ================================================================
 {
     ULONG64 ulAddress = (ULONG64) pt;
     DWORD64 dwOffset;
@@ -3755,15 +4517,23 @@ LOCAL BOOL FGlobalFromAddress( T* const pt, __out_bcount(cbMax) PSTR szGlobal, c
     return SUCCEEDED( hr );
 }
 
+//  ================================================================
 template< class T >
 LOCAL BOOL FFetchVariable( T* const rgtDebuggee, T** const prgt, SIZE_T ct = 1 )
+//  ================================================================
 {
+    //  allocate enough storage to retrieve the requested type array
+    // debugger extensions only, not real danger but no regression danger either
+    //
+    // check to see if it fits in a SIZE_T
     if ( ( ~( SIZE_T( 0 ) ) / sizeof( T ) ) <= ct )
     {
         dprintf( "FFetchVariable failed with data overflow\n" );
         return fFalse;
     }
 
+    // it won't overflow a SIZE_T but we need a DWORD
+    //
     if ( SIZE_T( sizeof( T ) * ct ) >= SIZE_T( ~( DWORD( 0 ) ) ) )
     {
         dprintf( "FFetchVariable failed with data too big\n" );
@@ -3780,6 +4550,7 @@ LOCAL BOOL FFetchVariable( T* const rgtDebuggee, T** const prgt, SIZE_T ct = 1 )
         return fFalse;
     }
 
+    //  retrieve the requested type array
 
     if ( !FEDBGMemoryRead( (ULONG64)rgtDebuggee, (void*)*prgt, DWORD( cbrgt ), NULL ) )
     {
@@ -3790,9 +4561,12 @@ LOCAL BOOL FFetchVariable( T* const rgtDebuggee, T** const prgt, SIZE_T ct = 1 )
     return fTrue;
 }
 
+//  ================================================================
 template< class T >
 LOCAL BOOL FFetchGlobal( const char* const szGlobal, T** const prgt, SIZE_T ct = 1 )
+//  ================================================================
 {
+    //  get the address of the global in the debuggee and fetch it
 
     T*  rgtDebuggee;
 
@@ -3806,14 +4580,18 @@ LOCAL BOOL FFetchGlobal( const char* const szGlobal, T** const prgt, SIZE_T ct =
     }
 }
 
+//  ================================================================
 template< class T >
 LOCAL BOOL FFetchSz( T* const szDebuggee, T** const psz )
+//  ================================================================
 {
+    //  scan for the null terminator in the debuggee starting at the given
+    //  address to get the size of the string
 
     const SIZE_T    ctScan              = 256;
     const SIZE_T    cbScan              = ctScan * sizeof( T );
     BYTE            rgbScan[ cbScan ];
-    T*              rgtScan             = (T*)rgbScan;
+    T*              rgtScan             = (T*)rgbScan;  //  because T can be const
     SIZE_T          itScan              = SIZE_T( ~0 );
     SIZE_T          itScanLim           = 0;
 
@@ -3832,33 +4610,40 @@ LOCAL BOOL FFetchSz( T* const szDebuggee, T** const psz )
     }
     while ( itScan < itScanLim && rgtScan[ itScan % ctScan ] );
 
+    //  we found a null terminator
 
     if ( itScan < itScanLim )
     {
+        //  fetch the string using the determined string length
 
         return FFetchVariable( szDebuggee, psz, itScan + 1 );
     }
 
+    //  we did not find a null terminator
 
     else
     {
+        //  fail the operation
 
         return fFalse;
     }
 }
 
+//  ================================================================
 template< class T >
 LOCAL void Unfetch( T* const rgt )
+//  ================================================================
 {
     LocalFree( (void*)rgt );
 }
 
-};
+}; // namespace OSSYM
 
 
 using namespace OSSYM;
 
 
+//  member dumping functions
 
 class CDumpContext
 {
@@ -3886,6 +4671,7 @@ class CDumpContext
 #define SYMBOL_LEN_MAX      24
 #define VOID_CB_DUMP        8
 
+//  ================================================================
 LOCAL VOID SprintHex(
     __in_bcount(cbDest) PSTR const szDest,
     const INT           cbDest,
@@ -3895,6 +4681,7 @@ LOCAL VOID SprintHex(
     const INT           cbChunk,
     const INT           cbAddress,
     const INT           cbStart)
+//  ================================================================
 {
     static const CHAR rgchConvert[] =   { '0','1','2','3','4','5','6','7','8','9','a','b','c','d','e','f' };
 
@@ -4019,11 +4806,13 @@ inline void DumpMemberBF_(  const CDumpContext&     dc,
 #define DumpMemberBF( dc, member ) ( DumpMemberBF_( dc, member, #member ) )
 
 
-LOCAL BOOL      fInit               = fFalse;
-LOCAL ULONG     g_cSymInitFail        = 0;
-const ULONG     cSymInitAttemptsMax = 3;
+LOCAL BOOL      fInit               = fFalse;   //  debugger extensions have geen initialized
+LOCAL ULONG     g_cSymInitFail        = 0;        //  number of times attempts to initialise the symbols sub-system failed
+const ULONG     cSymInitAttemptsMax = 3;        //  max attempts to initialise the symbols sub-system
 
+//  ================================================================
 class CDPrintF : public CPrintF
+//  ================================================================
 {
     public:
         VOID __cdecl operator()( const char * szFormat, ... )
@@ -4042,7 +4831,9 @@ class CDPrintF : public CPrintF
         CDPrintF() {}
 };
 
+//  ================================================================
 CPrintF& CDPrintF::PrintfInstance()
+//  ================================================================
 {
     static CDPrintF s_dprintf;
     return s_dprintf;
@@ -4051,7 +4842,9 @@ CPrintF& CDPrintF::PrintfInstance()
 CIPrintF g_idprintf( &CDPrintF::PrintfInstance() );
 
 
+//  ================================================================
 class CDUMP
+//  ================================================================
 {
     public:
         CDUMP() {}
@@ -4061,8 +4854,10 @@ class CDUMP
 };
 
 
+//  ================================================================
 template< class _STRUCT>
 class CDUMPA : public CDUMP
+//  ================================================================
 {
     public:
         VOID Dump(
@@ -4076,6 +4871,9 @@ template< class _STRUCT>
 CDUMPA<_STRUCT> CDUMPA<_STRUCT>::instance;
 
 
+//  ****************************************************************
+//  PROTOTYPES
+//  ****************************************************************
 
 #define DEBUG_EXT( name )                   \
     LOCAL VOID name(                        \
@@ -4087,11 +4885,14 @@ DEBUG_EXT( EDBGDump );
 DEBUG_EXT( EDBGTest );
 #ifdef SYNC_DEADLOCK_DETECTION
 DEBUG_EXT( EDBGLocks );
-#endif
+#endif  //  SYNC_DEADLOCK_DETECTION
 DEBUG_EXT( EDBGHelp );
 DEBUG_EXT( EDBGHelpDump );
 
 
+//  ****************************************************************
+//  COMMAND DISPATCH
+//  ****************************************************************
 
 
 typedef VOID (*EDBGFUNC)(
@@ -4101,7 +4902,9 @@ typedef VOID (*EDBGFUNC)(
     );
 
 
+//  ================================================================
 struct EDBGFUNCMAP
+//  ================================================================
 {
     const char *    szCommand;
     EDBGFUNC        function;
@@ -4109,7 +4912,9 @@ struct EDBGFUNCMAP
 };
 
 
+//  ================================================================
 struct CSYNCDUMPMAP
+//  ================================================================
 {
     const char *    szCommand;
     CDUMP      *    pcdump;
@@ -4117,7 +4922,9 @@ struct CSYNCDUMPMAP
 };
 
 
+//  ================================================================
 LOCAL const EDBGFUNCMAP rgfuncmap[] = {
+//  ================================================================
 
 {
         "Help",     EDBGHelp,
@@ -4134,7 +4941,7 @@ LOCAL const EDBGFUNCMAP rgfuncmap[] = {
         "Locks [<tid>|* [<OSSYNC::g_pclsSyncGlobal>]]\n\t"
         "                       - List all locks owned by the specified thread or by all threads"
 },
-#endif
+#endif  //  SYNC_DEADLOCK_DETECTION
 {
         "Test",     EDBGTest,
         "Test                   - Test function"
@@ -4146,7 +4953,9 @@ LOCAL const INT cfuncmap = sizeof( rgfuncmap ) / sizeof( EDBGFUNCMAP );
 
 #define DUMPA(_struct)  { #_struct, &(CDUMPA<_struct>::instance), #_struct " <Address> [<Depth>|*]" }
 
+//  ================================================================
 LOCAL const CSYNCDUMPMAP rgcsyncdumpmap[] = {
+//  ================================================================
 
     DUMPA( CAutoResetSignal ),
     DUMPA( CBinaryLock ),
@@ -4164,7 +4973,9 @@ LOCAL const CSYNCDUMPMAP rgcsyncdumpmap[] = {
 LOCAL const INT ccsyncdumpmap = sizeof( rgcsyncdumpmap ) / sizeof( rgcsyncdumpmap[0] );
 
 
+//  ================================================================
 LOCAL BOOL FArgumentMatch( const CHAR * const sz, const CHAR * const szCommand )
+//  ================================================================
 {
     const BOOL fMatch = ( ( strlen( sz ) == strlen( szCommand ) )
             && !( _strnicmp( sz, szCommand, strlen( szCommand ) ) ) );
@@ -4172,7 +4983,9 @@ LOCAL BOOL FArgumentMatch( const CHAR * const sz, const CHAR * const szCommand )
 }
 
 
+//  ================================================================
 DEBUG_EXT( EDBGDump )
+//  ================================================================
 {
     if( argc < 2 )
     {
@@ -4194,7 +5007,9 @@ DEBUG_EXT( EDBGDump )
 }
 
 
+//  ================================================================
 DEBUG_EXT( EDBGHelp )
+//  ================================================================
 {
     for( INT ifuncmap = 0; ifuncmap < cfuncmap; ifuncmap++ )
     {
@@ -4204,7 +5019,9 @@ DEBUG_EXT( EDBGHelp )
 }
 
 
+//  ================================================================
 DEBUG_EXT( EDBGHelpDump )
+//  ================================================================
 {
     dprintf( "Supported objects:\n\n" );
     for( INT icdumpmap = 0; icdumpmap < ccsyncdumpmap; icdumpmap++ )
@@ -4215,7 +5032,9 @@ DEBUG_EXT( EDBGHelpDump )
 }
 
 
+//  ================================================================
 DEBUG_EXT( EDBGTest )
+//  ================================================================
 {
     if ( argc >= 1 )
     {
@@ -4264,25 +5083,32 @@ DEBUG_EXT( EDBGTest )
 
 #ifdef SYNC_DEADLOCK_DETECTION
 
+//  ================================================================
 DEBUG_EXT( EDBGLocks )
+//  ================================================================
 {
+    //  load default arguments
 
     _CLS*   pclsDebuggee                = NULL;
     DWORD   tid                         = 0;
     BOOL    fFoundLock                  = fFalse;
     BOOL    fValidUsage;
 
+    //  load actual arguments
 
     switch ( argc )
     {
         case 0:
+            //  use defaults
             fValidUsage = fTrue;
             break;
         case 1:
+            //  thread-id only
             fValidUsage = ( FUlFromSz( argv[0], &tid )
                             || '*' == argv[0][0] );
             break;
         case 2:
+            //  thread-id followed by <g_pclsSyncGlobal>
             fValidUsage = ( ( FUlFromSz( argv[0], &tid ) || '*' == argv[0][0] )
                             && FAddressFromSz( argv[1], &pclsDebuggee ) );
             break;
@@ -4434,13 +5260,15 @@ DEBUG_EXT( EDBGLocks )
     }
 }
 
-#endif
+#endif  //  SYNC_DEADLOCK_DETECTION
 
+//  ================================================================
 template< class _STRUCT>
 VOID CDUMPA<_STRUCT>::Dump(
     PDEBUG_CLIENT pdebugClient,
     INT argc, const CHAR * const argv[]
     )
+//  ================================================================
 {
     _STRUCT*    ptDebuggee;
     ULONG       cLevelInput;
@@ -4498,6 +5326,8 @@ VOID OSSYNCAPI OSSyncDebuggerExtension(
 
     if ( ( g_DebugClient == NULL  || g_DebugControl == NULL ) && g_cSymInitFail < cSymInitAttemptsMax )
     {
+        //  get our containing image name so that we can look up our variables
+        //
         fInit = FOSEdbgCreateDebuggerInterface( pdebugClient );
 
         if ( fInit )
@@ -4533,6 +5363,7 @@ VOID OSSYNCAPI OSSyncDebuggerExtension(
 }
 
 
+//  custom member dump functions
 
 template<>
 inline void DumpMemberValue< const char* >( const CDumpContext&     dc,
@@ -4559,6 +5390,7 @@ inline void DumpMemberValue< CSemaphore >(  const CDumpContext&     dc,
 }
 
 
+//  Enhanced Synchronization Object State Container Dump Support
 
 template< class CState, class CStateInit, class CInformation, class CInformationInit >
 void CEnhancedStateContainer< CState, CStateInit, CInformation, CInformationInit >::
@@ -4582,17 +5414,18 @@ Dump( const CDumpContext& dc ) const
 
     Unfetch( pes );
 
-#else
+#else  //  !SYNC_ENHANCED_STATE
 
     CEnhancedState* pes = (CEnhancedState*) m_rgbState;
 
     pes->CState::Dump( dc );
     pes->CInformation::Dump( dc );
 
-#endif
+#endif  //  SYNC_ENHANCED_STATE
 }
 
 
+//  Synchronization Object Basic Information Dump Support
 
 void CSyncBasicInfo::Dump( const CDumpContext& dc ) const
 {
@@ -4602,10 +5435,11 @@ void CSyncBasicInfo::Dump( const CDumpContext& dc ) const
     DumpMember( dc, m_szTypeName );
     DumpMember( dc, m_psyncobj );
 
-#endif
+#endif  //  SYNC_ENHANCED_STATE
 }
 
 
+//  Synchronization Object Performance Dump Support
 
 void CSyncPerfWait::Dump( const CDumpContext& dc ) const
 {
@@ -4614,7 +5448,7 @@ void CSyncPerfWait::Dump( const CDumpContext& dc ) const
     DumpMember( dc, m_cWait );
     DumpMember( dc, m_qwHRTWaitElapsed );
 
-#endif
+#endif  //  SYNC_ANALYZE_PERFORMANCE
 }
 
 void CSyncPerfAcquire::Dump( const CDumpContext& dc ) const
@@ -4624,10 +5458,11 @@ void CSyncPerfAcquire::Dump( const CDumpContext& dc ) const
     DumpMember( dc, m_cAcquire );
     DumpMember( dc, m_cContend );
 
-#endif
+#endif  //  SYNC_ANALYZE_PERFORMANCE
 }
 
 
+//  Lock Object Basic Information Dump Support
 
 void CLockBasicInfo::Dump( const CDumpContext& dc ) const
 {
@@ -4638,10 +5473,11 @@ void CLockBasicInfo::Dump( const CDumpContext& dc ) const
     DumpMember( dc, m_rank );
     DumpMember( dc, m_subrank );
 
-#endif
+#endif  //  SYNC_DEADLOCK_DETECTION
 }
 
 
+//  Lock Object Performance Dump Support
 
 void CLockPerfHold::Dump( const CDumpContext& dc ) const
 {
@@ -4650,10 +5486,11 @@ void CLockPerfHold::Dump( const CDumpContext& dc ) const
     DumpMember( dc, m_cHold );
     DumpMember( dc, m_qwHRTHoldElapsed );
 
-#endif
+#endif  //  SYNC_ANALYZE_PERFORMANCE
 }
 
 
+//  Lock Object Deadlock Detection Information Dump Support
 
 void CLockDeadlockDetectionInfo::Dump( const CDumpContext& dc ) const
 {
@@ -4663,10 +5500,11 @@ void CLockDeadlockDetectionInfo::Dump( const CDumpContext& dc ) const
     DumpMember( dc, m_semOwnerList );
     DumpMember( dc, m_ownerHead );
 
-#endif
+#endif  //  SYNC_DEADLOCK_DETECTION
 }
 
 
+//  Kernel Semaphore Dump Support
 
 void CKernelSemaphoreState::Dump( const CDumpContext& dc ) const
 {
@@ -4685,6 +5523,7 @@ void CKernelSemaphore::Dump( const CDumpContext& dc ) const
 }
 
 
+//  Semaphore Dump Support
 
 void CSemaphoreState::Dump( const CDumpContext& dc ) const
 {
@@ -4705,6 +5544,7 @@ void CSemaphore::Dump( const CDumpContext& dc ) const
 }
 
 
+//  Auto-Reset Signal Dump Support
 
 void CAutoResetSignalState::Dump( const CDumpContext& dc ) const
 {
@@ -4732,6 +5572,7 @@ void CAutoResetSignal::Dump( const CDumpContext& dc ) const
 }
 
 
+//  Manual-Reset Signal Dump Support
 
 void CManualResetSignalState::Dump( const CDumpContext& dc ) const
 {
@@ -4759,6 +5600,7 @@ void CManualResetSignal::Dump( const CDumpContext& dc ) const
 }
 
 
+//  Critical Section (non-nestable) Dump Support
 
 void CCriticalSectionState::Dump( const CDumpContext& dc ) const
 {
@@ -4778,6 +5620,7 @@ void CCriticalSection::Dump( const CDumpContext& dc ) const
 }
 
 
+//  Nestable Critical Section Dump Support
 
 void CNestableCriticalSectionState::Dump( const CDumpContext& dc ) const
 {
@@ -4799,6 +5642,7 @@ void CNestableCriticalSection::Dump( const CDumpContext& dc ) const
 }
 
 
+//  Gate Dump Support
 
 void CGateState::Dump( const CDumpContext& dc ) const
 {
@@ -4818,6 +5662,7 @@ void CGate::Dump( const CDumpContext& dc ) const
 }
 
 
+//  Binary Lock Dump Support
 
 void CBinaryLockState::Dump( const CDumpContext& dc ) const
 {
@@ -4859,6 +5704,7 @@ void CBinaryLock::Dump( const CDumpContext& dc ) const
 }
 
 
+//  Reader / Writer Lock Dump Support
 
 void CReaderWriterLockState::Dump( const CDumpContext& dc ) const
 {
@@ -4900,6 +5746,7 @@ void CReaderWriterLock::Dump( const CDumpContext& dc ) const
 }
 
 
+//  Metered Section Dump Support
 
 void CMeteredSection::Dump( const CDumpContext& dc ) const
 {
@@ -4914,6 +5761,7 @@ void CMeteredSection::Dump( const CDumpContext& dc ) const
 }
 
 
+//  S / X / W Latch Dump Support
 
 void CSXWLatchState::Dump( const CDumpContext& dc ) const
 {
@@ -4954,12 +5802,14 @@ void CSXWLatch::Dump( const CDumpContext& dc ) const
     CEnhancedStateContainer< CSXWLatchState, CSyncBasicInfo, CSXWLatchInfo, CLockBasicInfo >::Dump( dc );
 }
 
-#endif
+#endif  //  DEBUGGER_EXTENSION
 
+//  Sync Stats support
 
 CIPrintF*       g_piprintfPerfData;
 CFPrintF*       g_pfprintfPerfData;
 
+//  dump column descriptors
 
 void OSSyncStatsDumpColumns()
 {
@@ -4975,6 +5825,7 @@ void OSSyncStatsDumpColumns()
                             "Hold Time Elapsed\r\n" );
 }
 
+//  dump cooked stats from provided raw stats
 
 void OSSyncStatsDump(   const char*         szTypeName,
                         const char*         szInstanceName,
@@ -4987,6 +5838,7 @@ void OSSyncStatsDump(   const char*         szTypeName,
                         QWORD               cHold,
                         double              csecHoldElapsed )
 {
+    //  dump data, if interesting
 
     if ( cWait || cAcquire || cContend || cHold )
     {
@@ -5002,8 +5854,8 @@ void OSSyncStatsDump(   const char*         szTypeName,
                                 "%f\r\n",
                                 szTypeName,
                                 szInstanceName,
-                                sizeof(LONG_PTR) * 2,
-                                QWORD( LONG_PTR( psyncobj ) ),
+                                sizeof(LONG_PTR) * 2,           //  need 2 hex digits for each byte
+                                QWORD( LONG_PTR( psyncobj ) ),  //  assumes QWORD is largest pointer size we'll ever use
                                 group,
                                 cWait,
                                 csecWaitElapsed,
@@ -5014,25 +5866,29 @@ void OSSyncStatsDump(   const char*         szTypeName,
     }
 }
 
+//  CInitTermLock init/term in progress convergence wait
 
 void CInitTermLock::SleepAwayQuanta()
 {
     Sleep( 0 );
 }
 
-volatile DWORD g_cOSSyncInit;
+volatile DWORD g_cOSSyncInit;  //  assumed init to 0 by the loader
 
+//  cleanup sync subsystem for term (or error on init)
 
 static void OSSYNCAPI OSSyncICleanup()
 {
     OSSYNCAssert( (LONG)g_cOSSyncInit == lOSSyncLockedForTerm
                 || (LONG)g_cOSSyncInit == lOSSyncLockedForInit );
 
+    //  free PLS
 
     FOSSyncConfigureProcessorLocalStorage( 0 );
 
 #ifdef SYNC_DUMP_PERF_DATA
 
+    //  terminate performance data dump context
 
     if ( NULL != g_piprintfPerfData )
     {
@@ -5048,8 +5904,9 @@ static void OSSYNCAPI OSSyncICleanup()
         g_pfprintfPerfData = NULL;
     }
 
-#endif
+#endif  //  SYNC_DUMP_PERF_DATA
 
+    //  terminate the Kernel Semaphore Pool
 
     if ( g_ksempoolGlobal.FInitialized() )
     {
@@ -5058,6 +5915,7 @@ static void OSSYNCAPI OSSyncICleanup()
 
 #ifdef SYNC_ENHANCED_STATE
 
+    //  terminate the CEnhancedState allocator
 
     OSSYNCAssert( g_pmbRoot == &g_mbSentry );
     MemoryBlock* pmb = g_pmbRootFree;
@@ -5082,6 +5940,7 @@ static void OSSYNCAPI OSSyncICleanup()
         g_fcsClsSyncGlobalInit = fFalse;
     }
 
+    //  unlock sync subsystem
 
     OSSYNCAssert( (LONG)g_cOSSyncInit == lOSSyncLockedForTerm
                 || (LONG)g_cOSSyncInit == lOSSyncLockedForInit );
@@ -5089,6 +5948,7 @@ static void OSSYNCAPI OSSyncICleanup()
 }
 
 
+//  init sync subsystem
 
 static BOOL FOSSyncIInit()
 {
@@ -5099,6 +5959,8 @@ static BOOL FOSSyncIInit()
         const LONG  lInitial    = ( g_cOSSyncInit & lOSSyncUnlocked );
         const LONG  lFinal      = ( 0 == lInitial ? lOSSyncLockedForInit : lInitial + 1 );
 
+        //  if multiple threads try to init/term simultaneously, one will win
+        //  and the others will loop until he's done
 
         if ( lInitial == AtomicCompareExchange( (LONG*)&g_cOSSyncInit, lInitial, lFinal ) )
         {
@@ -5107,16 +5969,22 @@ static BOOL FOSSyncIInit()
         }
         else if ( g_cOSSyncInit & lOSSyncLocked )
         {
+            //  our AtomicCompareExchange() appears to have failed because
+            //  the sync subsystem is locked for init/term
+            //  this function is called everytime we call ESMemoryNew(),
+            //  so just give up our timeslice instead of actually sleep
             Sleep( 0 );
         }
     }
 
     if ( fInitRequired )
     {
+        //  reset all pointers
 
         g_piprintfPerfData    = NULL;
         g_pfprintfPerfData    = NULL;
 
+        //  reset global CLS list
 
         if ( !InitializeCriticalSectionAndSpinCount( &g_csClsSyncGlobal, 0 ) )
         {
@@ -5139,6 +6007,7 @@ static BOOL FOSSyncIInit()
 
 #ifdef SYNC_ENHANCED_STATE
 
+        //  initialize the CEnhancedState allocator
 
         SYSTEM_INFO sinf;
         GetSystemInfo( &sinf );
@@ -5161,12 +6030,14 @@ static BOOL FOSSyncIInit()
 
 #endif
 
+        //  initialize the Kernel Semaphore Pool
 
         if ( !g_ksempoolGlobal.FInit() )
         {
             goto HandleError;
         }
 
+        //  cache the processor count
 
 #ifdef MINIMAL_FUNCTIONALITY
         g_cProcessor = 1;
@@ -5197,11 +6068,17 @@ static BOOL FOSSyncIInit()
         }
 #endif
 
+        //  cache system max spin count
+        //
+        //  NOTE:  spins heavily as WaitForSingleObject() is extremely expensive
+        //
+        //  CONSIDER:  get spin count from persistent configuration
 
         g_cSpinMax = g_cProcessor == 1 ? 0 : 256;
 
 #ifdef SYNC_DUMP_PERF_DATA
 
+        //  initialize performance data dump context
 
         char szTempPath[_MAX_PATH];
         if ( !GetTempPath( _MAX_PATH, szTempPath ) )
@@ -5262,9 +6139,10 @@ static BOOL FOSSyncIInit()
 
         OSSyncStatsDumpColumns();
 
-#endif
+#endif  //  SYNC_DUMP_PERF_DATA
 
 
+        //  unlock sync subsystem
 
         OSSYNCAssert( (LONG)g_cOSSyncInit == lOSSyncLockedForInit );
         AtomicExchange( (LONG*)&g_cOSSyncInit, 1 );
@@ -5279,18 +6157,22 @@ HandleError:
 
 BOOL OSSYNCAPI FOSSyncPreinit()
 {
+    //  make sure we are initialized and
+    //  add an initial ref for the process
 
     g_fSyncProcessAbort = fFalse;
     
     return FOSSyncIInit();
 }
 
+//  enable/disable timeout deadlock detection
 
 void OSSYNCAPI OSSyncConfigDeadlockTimeoutDetection( const BOOL fEnable )
 {
     g_sdltosState = fEnable ? sdltosEnabled : sdltosDisabled;
 }
 
+//  terminate sync subsystem
 
 static void OSSyncITerm()
 {
@@ -5299,6 +6181,9 @@ static void OSSyncITerm()
         const LONG  lInitial        = ( g_cOSSyncInit & lOSSyncUnlocked );
         if ( 0 == lInitial )
         {
+            //  sync subsystem not initialised
+            //  (or someone else is already
+            //  terminating it)
             break;
         }
 
@@ -5309,6 +6194,8 @@ static void OSSyncITerm()
 #endif
         const LONG  lFinal          = ( fTermRequired ? lOSSyncLockedForTerm : lInitial - 1 );
 
+        //  if multiple threads try to init/term simultaneously, one will win
+        //  and the others will loop until he's done
 
         if ( lInitial == AtomicCompareExchange( (LONG*)&g_cOSSyncInit, lInitial, lFinal ) )
         {
@@ -5320,6 +6207,10 @@ static void OSSyncITerm()
         }
         else if ( g_cOSSyncInit & lOSSyncLocked )
         {
+            //  our AtomicCompareExchange() appears to have failed because
+            //  the sync subsystem is locked for init/term
+            //  this function is called everytime we call ESMemoryDelete(),
+            //  so just give up our timeslice instead of actually sleep
             Sleep( 0 );
         }
     }
@@ -5332,16 +6223,20 @@ void OSSYNCAPI OSSyncProcessAbort()
 
 void OSSYNCAPI OSSyncPostterm()
 {
+    //  purge our CLS list
 
     while ( NULL != g_pclsSyncGlobal )
     {
         OSSyncIClsFree( g_pclsSyncGlobal );
     }
 
+    //  on a normal shutdown, there should be exactly 1 refcount left,
+    //  but there may also be none if this is being called as
+    //  part of error-handling during init
 #ifdef SYNC_ENHANCED_STATE
-#else
+#else  //  !SYNC_ENHANCED_STATE
     OSSYNCAssert( g_fSyncProcessAbort || 0 == g_cOSSyncInit || 1 == g_cOSSyncInit );
-#endif
+#endif  //  SYNC_ENHANCED_STATE
     OSSyncITerm();
 }
 
@@ -5361,6 +6256,10 @@ void OSSYNCAPI OSSyncTermForES()
 #ifdef SYNC_ENHANCED_STATE
     if ( lOSSyncLockedForTerm == g_cOSSyncInit )
     {
+        //  SPECIAL CASE: we're in the middle of
+        //  terminating the subsystem and end up
+        //  recursively calling OSSyncTermForES
+        //  when we clean up g_ksempoolGlobal
         return;
     }
 
@@ -5368,5 +6267,5 @@ void OSSYNCAPI OSSyncTermForES()
 #endif
 }
 
-};
+}; // namespace OSSYNC
 

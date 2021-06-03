@@ -1,3 +1,5 @@
+;; Copyright (c) Microsoft Corporation.
+;; Licensed under the MIT License.
 ;; esetest.dl
 ;; Will later generate this from a raw input file (or two)
 

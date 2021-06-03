@@ -1,5 +1,9 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
+//================================================================
+// Performance reporting functions.
+//================================================================
+//
 
 #include "ese_common.hxx"
 #define STRSAFE_NO_DEPRECATE
@@ -243,6 +247,7 @@ PerfReportingReportValueW(
     BOOL fReturn            = FALSE;
     char szBufferXml[ 10 * MAX_PATH + 1 ];
 
+    // Build the format strings.
     memset( szBufferXml, 0, sizeof( szBufferXml ) );
     CallVTrue( SUCCEEDED( StringCchPrintfA( szBufferXml, _countof( szBufferXml ),
                                             "\t<Counter Name=\"%S\">%s"
@@ -254,6 +259,7 @@ PerfReportingReportValueW(
                                             wszPrintfFormat, CRLF,
                                             CRLF ) ) );
 
+    // Print the line.
     CallNoWarning( !ILogToXml( hPerfReporting, szBufferXml, dblValue ) );
     fReturn = TRUE;
 

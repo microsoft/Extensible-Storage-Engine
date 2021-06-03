@@ -23,4 +23,4 @@ ERR ErrOSQueryMemoryNotification(
 VOID OSUnregisterAndDestroyMemoryNotification(
     HMEMORY_NOTIFICATION const  pvNotification );
 
-#endif
+#endif // _OS_MEMORY_NOTIFICATION_HXX_
