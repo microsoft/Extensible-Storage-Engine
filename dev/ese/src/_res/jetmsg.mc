@@ -1288,7 +1288,7 @@ Language=English
 MessageId=516
 SymbolicName=DBTIME_MISMATCH_ID
 Language=English
-%1 (%2) %3Database %4: Page %5 failed verification due to a timestamp mismatch at log position %10 (currently replaying log position %12).  The 'before' timestamp persisted to the log record was %6 but the actual timestamp on the page was %7.  The 'after' update timestamp %9 that would have updated the on-page timestamp.  Recovery/restore will fail with error %8.  If this condition persists then please restore the database from a previous backup. This problem is likely due to faulty hardware "losing" one or more flushes on this page some time in the past. Please contact your hardware vendor for further assistance diagnosing the problem.
+%1 (%2) %3Database %4: Page %5 failed verification due to a timestamp mismatch at log position %10 (currently replaying log position %12).  The before/after timestamps in the log record were %6/%9 but the actual timestamp on the page was %7.  Recovery/restore will fail with error %8.  If this condition persists then please restore the database from a previous backup. This problem is likely due to faulty hardware "losing" one or more flushes on this page or the database header at some time in the past. Please contact your hardware vendor for further assistance diagnosing the problem.
 %nAdditional information:
 %n%tWithin initial required range: %11
 %n%tTotal number of pages affected: %13

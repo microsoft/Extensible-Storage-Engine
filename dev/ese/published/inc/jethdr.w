@@ -6092,7 +6092,7 @@ typedef JET_ERR (JET_API * JET_PFNEMITLOGDATA)(
 #define JET_errMissingCurrentLogFiles       -565  /* Some current log files are missing for continuous restore */
 
 #define JET_errDbTimeTooOld                     -566  /* dbtime on page smaller than dbtimeBefore in record */
-#define JET_errDbTimeTooNew                     -567  /* dbtime on page in advance of the dbtimeBefore in record */
+#define JET_errDbTimeTooNew                     -567  /* dbtime on page in advance of the dbtimeBefore and below dbtimeAfter in record */
 // end_PubEsent
 //#define wrnCleanedUpMismatchedFiles                568  /* INTERNAL WARNING: indicates that the redo function cleaned up logs/checkpoint because of a size mismatch (see JET_paramCleanupMismatchedLogFiles) */
 // begin_PubEsent
@@ -6155,10 +6155,11 @@ typedef JET_ERR (JET_API * JET_PFNEMITLOGDATA)(
 #define JET_errEngineFormatVersionParamTooLowForRequestedFeature    -621 /* Thrown by a format feature (not at JetSetSystemParameter) if the client requests a feature that requires a version higher than that set for the JET_paramEngineFormatVersion. */
 #define JET_errEngineFormatVersionSpecifiedTooLowForLogVersion                      -622 /* The specified JET_ENGINEFORMATVERSION is set too low for this log stream, the log files have already been upgraded to a higher version.  A higher JET_ENGINEFORMATVERSION value must be set in the param. */
 #define JET_errEngineFormatVersionSpecifiedTooLowForDatabaseVersion                 -623 /* The specified JET_ENGINEFORMATVERSION is set too low for this database file, the database file has already been upgraded to a higher version.  A higher JET_ENGINEFORMATVERSION value must be set in the param. */
-
 // end_PubEsent
-
 #define errLogServiceStopped                -624  /* Logging has been stopped via JetStopServiceInstance2 JET_bitStopServiceStopAndEmitLog */
+// begin_PubEsent
+#define JET_errDbTimeBeyondMaxRequired      -625  /* dbtime on page greater than or equal to dbtimeAfter in record, but record is outside required range for the database */
+// end_PubEsent
 
 #define errBackupAbortByCaller              -800  /* INTERNAL ERROR: Backup was aborted by client or RPC connection with client failed */
 // begin_PubEsent
