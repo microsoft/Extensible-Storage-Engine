@@ -1455,10 +1455,8 @@ LOCAL ERR ErrLVITryCompress(
                 pbDataEncrypted,
                 &cbDataEncryptedActual,
                 CbPKCompressionBuffer(),
-                pfucbTable->pbEncryptionKey,
-                pfucbTable->cbEncryptionKey,
-                PinstFromPfucb( pfucbTable )->m_iInstance,
-                pfucbLV->u.pfcb->TCE() );
+                pfucbLV,
+                pfucbTable );
         if ( err < JET_errSuccess )
         {
             PKFreeCompressionBuffer( pbDataEncrypted );
@@ -1709,10 +1707,8 @@ LOCAL ERR ErrLVRetrieve(
                     (BYTE*)(BYTE*)dataIn.Pv(),
                     pbDataDecrypted,
                     &cbDataDecryptedActual,
-                    pfucbLV->pfucbTable->pbEncryptionKey,
-                    pfucbLV->pfucbTable->cbEncryptionKey,
-                    PinstFromPfucb( pfucbLV )->m_iInstance,
-                    pfucbLV->u.pfcb->TCE() ) );
+                    pfucbLV,
+                    pfucbLV->pfucbTable ) );
         dataIn.SetPv( pbDataDecrypted );
         dataIn.SetCb( cbDataDecryptedActual );
     }
@@ -1812,10 +1808,8 @@ LOCAL ERR ErrLVCompare(
                     (BYTE*)dataIn.Pv(),
                     pbDataDecrypted,
                     &cbDataDecryptedActual,
-                    pfucbLV->pfucbTable->pbEncryptionKey,
-                    pfucbLV->pfucbTable->cbEncryptionKey,
-                    PinstFromPfucb( pfucbLV )->m_iInstance,
-                    pfucbLV->u.pfcb->TCE() ) );
+                    pfucbLV,
+                    pfucbLV->pfucbTable ) );
         dataIn.SetPv( pbDataDecrypted );
         dataIn.SetCb( cbDataDecryptedActual );
     }
@@ -1899,10 +1893,8 @@ LOCAL ERR ErrLVIGetDataSize(
                     (BYTE*)dataIn.Pv(),
                     pbDataDecrypted,
                     &cbDataDecryptedActual,
-                    pfucbLV->pfucbTable->pbEncryptionKey,
-                    pfucbLV->pfucbTable->cbEncryptionKey,
-                    PinstFromPfucb( pfucbLV )->m_iInstance,
-                    pfucbLV->u.pfcb->TCE() ) );
+                    pfucbLV,
+                    pfucbLV->pfucbTable ) );
         dataIn.SetPv( pbDataDecrypted );
         dataIn.SetCb( cbDataDecryptedActual );
     }
@@ -2537,10 +2529,7 @@ ERR ErrRECSetLongField(
                         (BYTE*)dataRetrieved.Pv(),
                         pbDataDecrypted,
                         &cbDataDecryptedActual,
-                        pfucb->pbEncryptionKey,
-                        pfucb->cbEncryptionKey,
-                        PinstFromPfucb( pfucb )->m_iInstance,
-                        pfucb->u.pfcb->TCE() );
+                        pfucb );
             if ( errT < JET_errSuccess )
             {
                 Call( errT );
@@ -4344,10 +4333,7 @@ ERR ErrRECAOIntrinsicLV(
                     pbDataEncrypted,
                     &cbDataEncryptedActual,
                     cbDataEncryptedMax,
-                    pfucb->pbEncryptionKey,
-                    pfucb->cbEncryptionKey,
-                    PinstFromPfucb( pfucb )->m_iInstance,
-                    pfucb->u.pfcb->TCE() ) );
+                    pfucb ) );
 
         dataSet.SetPv( pbDataEncrypted );
         dataSet.SetCb( cbDataEncryptedActual );

@@ -1562,7 +1562,7 @@ Language=English
 .
 
 MessageId=556
-SymbolicName=DECOMPRESSION_FAILED
+SymbolicName=DECOMPRESSION_FAILED_ID
 Language=English
 %1 (%2) %3Database %4: Data in line %5 on pgno %6 in a B-Tree (ObjectId: %7, PgnoRoot: %8) failed to decompress.
 .
@@ -1636,6 +1636,12 @@ Language=English
 %nAdditional information:
 %n%tWithin initial required range: %9
 %n%tTotal number of pages affected: %10
+.
+
+MessageId=566
+SymbolicName=DECRYPTION_FAILED_ID
+Language=English
+%1 (%2) %3Database %4: Data in line %5 on pgno %6 in a B-Tree (ObjectId: %7, PgnoRoot: %8) failed to decrypt.
 .
 
 

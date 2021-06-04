@@ -3061,7 +3061,7 @@ VOID PKIReportDecompressionFailed(
     UtilReportEvent(
             eventError,
             DATABASE_CORRUPTION_CATEGORY,
-            DECOMPRESSION_FAILED,
+            DECOMPRESSION_FAILED_ID,
             irgsz,
             rgsz,
             0,
