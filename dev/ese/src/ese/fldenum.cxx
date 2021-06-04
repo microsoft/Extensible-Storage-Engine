@@ -389,10 +389,7 @@ ErrGetColumnSize( FUCB* const pfucb, JET_RECSIZE3* const precsize, const JET_GRB
                     (BYTE*)data.Pv(),
                     pbDataDecrypted,
                     (ULONG *)&cbDataActual,
-                    pfucb->pbEncryptionKey,
-                    pfucb->cbEncryptionKey,
-                    PinstFromPfucb( pfucb )->m_iInstance,
-                    pfucb->u.pfcb->TCE() ) );
+                    pfucb ) );
             data.SetPv( pbDataDecrypted );
             data.SetCb( cbDataActual );
         }
@@ -2391,10 +2388,7 @@ LOCAL ERR ErrRECEnumerateAllColumns(
                             (BYTE*)pvData,
                             pbDataDecrypted,
                             (ULONG *)&cbDataDecryptedActual,
-                            pfucb->pbEncryptionKey,
-                            pfucb->cbEncryptionKey,
-                            PinstFromPfucb( pfucb )->m_iInstance,
-                            pfucb->u.pfcb->TCE() ) );
+                            pfucb ) );
                 pvData = pbDataDecrypted;
                 cbData = cbDataDecryptedActual;
             }
@@ -3091,10 +3085,7 @@ LOCAL ERR ErrRECEnumerateReqColumns(
                             (BYTE*)pvData,
                             pbDataDecrypted,
                             (ULONG *)&cbDataDecryptedActual,
-                            pfucb->pbEncryptionKey,
-                            pfucb->cbEncryptionKey,
-                            PinstFromPfucb( pfucb )->m_iInstance,
-                            pfucb->u.pfcb->TCE() ) );
+                            pfucb ) );
                 pvData = pbDataDecrypted;
                 cbData = cbDataDecryptedActual;
             }
@@ -3861,13 +3852,10 @@ LOCAL ERR ErrRECIStreamRecordsOnPrimaryIndexIAppendColumnValues(
                 Alloc( pbDataDecrypted = new BYTE[cbData] );
                 fAllocatedMemory = fTrue;
                 ULONG cbDataDecryptedActual = cbData;
-                Call( ErrOSUDecrypt(    (BYTE*)pvData,
-                                        pbDataDecrypted,
-                                        (ULONG *)&cbDataDecryptedActual,
-                                        pfucb->pbEncryptionKey,
-                                        pfucb->cbEncryptionKey,
-                                        PinstFromPfucb( pfucb )->m_iInstance,
-                                        pfucb->u.pfcb->TCE() ) );
+                Call( ErrOSUDecrypt( (BYTE*)pvData,
+                                     pbDataDecrypted,
+                                     (ULONG *)&cbDataDecryptedActual,
+                                     pfucb ) );
                 pvData = pbDataDecrypted;
                 cbData = cbDataDecryptedActual;
             }

@@ -2572,10 +2572,7 @@ ERR TAGFIELDS::ErrAffectLongValuesInWorkBuf(
                                         (BYTE*)dataField.Pv(),
                                         pbDataDecrypted,
                                         &cbDataDecryptedActual,
-                                        pfucb->pbEncryptionKey,
-                                        pfucb->cbEncryptionKey,
-                                        PinstFromPfucb( pfucb )->m_iInstance,
-                                        pfucb->u.pfcb->TCE() ) );
+                                        pfucb ) );
                             dataField.SetPv( pbDataDecrypted );
                             dataField.SetCb( cbDataDecryptedActual );
                         }

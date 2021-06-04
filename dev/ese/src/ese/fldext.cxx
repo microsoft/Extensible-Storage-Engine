@@ -1989,10 +1989,7 @@ ERR VTAPI ErrIsamRetrieveColumn(
                 (BYTE*)dataRetrieved.Pv(),
                 pbDataDecrypted,
                 &cbDataDecryptedActual,
-                pfucb->pbEncryptionKey,
-                pfucb->cbEncryptionKey,
-                PinstFromPfucb( pfucb )->m_iInstance,
-                pfucb->u.pfcb->TCE() );
+                pfucb );
         if ( errT < JET_errSuccess )
         {
             Call( errT );
@@ -2679,10 +2676,7 @@ LOCAL ERR ErrRECRetrieveColumns(
                     (BYTE*)dataRetrieved.Pv(),
                     pbDataDecrypted,
                     &cbDataDecryptedActual,
-                    pfucb->pbEncryptionKey,
-                    pfucb->cbEncryptionKey,
-                    PinstFromPfucb( pfucb )->m_iInstance,
-                    pfucb->u.pfcb->TCE() );
+                    pfucb );
             if ( errT < JET_errSuccess )
             {
                 Call( errT );
