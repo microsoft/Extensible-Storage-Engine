@@ -3882,7 +3882,7 @@ const BOOL CSemaphore::_FAcquire( const DWORD dwTimeout )
     State().IncWait();
     OSSYNC_FOREVER
     {
-        CSemaphoreState state = State();
+        const CSemaphoreState state = State();
 
         if ( state.CAvail() > 0 )
         {
