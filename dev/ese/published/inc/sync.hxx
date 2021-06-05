@@ -2193,6 +2193,11 @@ inline const BOOL CSemaphore::FAcquire( const INT cmsecTimeout )
 
 inline const BOOL CSemaphore::FWait( const INT cmsecTimeout )
 {
+    if ( State().CAvail() > 0 )
+    {
+        return fTrue;
+    }
+
     if ( _FTryAcquire( 0 ) || _FAcquire( _DwOSTimeout( cmsecTimeout ) ) )
     {
         _Release( 1 );
