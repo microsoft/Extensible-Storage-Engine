@@ -2249,7 +2249,7 @@ inline const INT CSemaphore::CAvail() const
 
 inline const BOOL CSemaphore::_FTryAcquire( const INT cSpin )
 {
-    INT cSpinCount = cSpin;
+    INT cSpinRemaining = cSpin;
 
     OSSYNC_FOREVER
     {
@@ -2259,9 +2259,9 @@ inline const BOOL CSemaphore::_FTryAcquire( const INT cSpin )
         // stealing it from those waiting threads themselves.
         if ( state.CAvail() == 0 || state.CWait() > 0 )
         {
-            if ( cSpinCount )
+            if ( cSpinRemaining )
             {
-                cSpinCount--;
+                cSpinRemaining--;
                 continue;
             }
             else
