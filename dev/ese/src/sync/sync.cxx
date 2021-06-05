@@ -3967,6 +3967,12 @@ void CSemaphore::ReleaseAllWaiters()
 
             continue;
         }
+        else if ( stateCur.CWait() <= 0 )
+        {
+            //  there are no waiters, we're done
+
+            return;
+        }
         else
         {
             //  attempt to change the semaphore to have an available count equal
