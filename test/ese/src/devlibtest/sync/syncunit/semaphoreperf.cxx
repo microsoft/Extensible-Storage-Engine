@@ -751,6 +751,7 @@ ERR CSemaphorePerfTest::ErrTest()
     return JET_errSuccess;
 }
 
+//  Test fixture.
 
 class CSemaphoreFairnessTest : public UNITTEST
 {
