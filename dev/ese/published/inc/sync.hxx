@@ -2225,7 +2225,7 @@ inline const INT CSemaphore::CWait() const
 {
     OSSYNC_FOREVER
     {
-        const CSemaphoreState stateCur = State();
+        const CSemaphoreState stateCur = (CSemaphoreState&) State();
 
         if ( stateCur.CAvail() > 0 && stateCur.CWait() > 0 )
         {
@@ -2253,7 +2253,7 @@ inline const BOOL CSemaphore::_FTryAcquire( const INT cSpin )
 
     OSSYNC_FOREVER
     {
-        const CSemaphoreState stateCur = State();
+        const CSemaphoreState stateCur = (CSemaphoreState&) State();
 
         // Do not acquire the semaphore with waiting threads to avoid inadvertently
         // stealing it from those waiting threads themselves.
