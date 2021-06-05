@@ -2296,7 +2296,7 @@ ERR CRevertSnapshot::ErrWriteBuffers()
         if ( ibOffsetEnd > cbFileSize )
         {
             TraceContextScope tcHeader( iorpRBS, iorsHeader );
-            ULONG cbExtensionSize = (ULONG) max( UlParam( m_pinst, JET_paramDbExtensionSize ), cbRBSBufferSize );
+            ULONG cbExtensionSize = (ULONG) max( UlParam( m_pinst, JET_paramDbExtensionSize ) * g_cbPage, cbRBSBufferSize );
             Call( m_pfapiRBS->ErrSetSize( *tcHeader, cbFileSize + cbExtensionSize, fFalse, qosIONormal ) );
         }
         TraceContextScope tcScope( iorpRBS );
