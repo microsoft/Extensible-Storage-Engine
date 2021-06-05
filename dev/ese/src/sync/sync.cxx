@@ -3854,6 +3854,7 @@ CSemaphore::~CSemaphore()
 #endif  //  SYNC_ANALYZE_PERFORMANCE
 }
 
+//  converts the internal timeout value to an OS level timeout
 
 const DWORD CSemaphore::_DwOSTimeout( const INT cmsecTimeout )
 {
@@ -3872,45 +3873,73 @@ const DWORD CSemaphore::_DwOSTimeout( const INT cmsecTimeout )
 }
 
 //  attempts to acquire a count from the semaphore, returning fFalse if unsuccessful
-//  in the time permitted.  Infinite and Test-Only timeouts are supported.
+//  in the time permitted
 
 const BOOL CSemaphore::_FAcquire( const DWORD dwTimeout )
 {
     const DWORD dwStart = DwOSSyncITickTime();
     DWORD dwRemaining = dwTimeout;
 
+    //  try forever until we successfully change the state of the semaphore
+
     State().IncWait();
     OSSYNC_FOREVER
     {
+        //  read the current state of the semaphore
+
         const CSemaphoreState stateCur = (CSemaphoreState&) State();
+
+        //  see if we have an available count
 
         if ( stateCur.CAvail() > 0 )
         {
+            //  we ourselves are waiting on the semaphore, so there had better be at least
+            //  one waiter in the state
+
             OSSYNCAssert( stateCur.CWait() > 0 );
 
-            // Atomically acquire the semaphore and decrement the waiting counter.
+            //  try to atomically acquire the semaphore and decrement the number of waiters
+
             const CSemaphoreState stateNew( stateCur.CAvail() - 1, stateCur.CWait() - 1 );
+
             if ( State().FChange( stateCur, stateNew ) )
             {
+                //  the transaction succeeded, return success
+
                 return fTrue;
             }
         }
         else if ( dwRemaining == 0 )
         {
+            //  we were unable to acquire the semaphore in the time permitted
+
             break;
         }
         else
         {
+            //  check and update the remaining time
+
             const DWORD dwElapsed = DwOSSyncITickTime() - dwStart;
+
             if ( dwElapsed > dwTimeout )
             {
+                //  we were unable to acquire the semaphore in the time permitted
+
                 break;
             }
 
             dwRemaining = dwTimeout - dwElapsed;
 
+            //  wait for the semaphore counter value to change
+            //
+            //  NOTE:  we may have exited the wait due to a spurious OS level wake up,
+            //  so the state machine ensures that the available count is re-checked on
+            //  each iteration
+
             if ( !_FWait( stateCur.CAvail(), dwRemaining ) )
             {
+                //  we were unable to acquire the semaphore in the time permitted
+
                 break;
             }
         }
@@ -3924,23 +3953,36 @@ const BOOL CSemaphore::_FAcquire( const DWORD dwTimeout )
 
 void CSemaphore::ReleaseAllWaiters()
 {
+    //  try forever until we successfully change the state of the semaphore
+
     OSSYNC_FOREVER
     {
+        //  read the current state of the semaphore
+
         const CSemaphoreState stateCur = (CSemaphoreState&) State();
 
         if ( stateCur.CAvail() > 0 && stateCur.CWait() > 0 )
         {
-            // The existing waiters are in transition.
+            //  the existing waiters are in transition, retry
+
             continue;
         }
         else
         {
+            //  attempt to change the semaphore to have an available count equal
+            //  to the number of waiters
+
             const CSemaphoreState stateNew( stateCur.CWait(), stateCur.CWait() );
+
             if ( State().FChange(stateCur, stateNew ) )
             {
                 volatile void *pv = State().PAvail();
 
+                //  wake all waiting threads
+
                 WakeByAddressAll( (void*)pv );
+
+                //  we're done
 
                 return;
             }
@@ -3958,24 +4000,34 @@ void CSemaphore::_Release( const INT cToRelease )
         return;
     }
 
+    //  release the required number of counts
+
     State().IncAvail( cToRelease );
 
+    //  check to see if we have any waiting threads to wake
+
     const INT cWait = State().CWait();
+
     if ( cWait == 0 )
     {
-        // No one is waiting.
+        //  no one is waiting
     }
     else if ( cWait <= cToRelease )
     {
         volatile void *pv = State().PAvail();
-        // No more waiting threads than `cToRelease`, wake everyone.
+
+        //  no more waiting threads than cToRelease, wake everyone
+
         WakeByAddressAll( (void*)pv );
     }
     else
     {
         volatile void *pv = State().PAvail();
-        // Wake at most `cToRelease` threads.  The benefit from not waking unnecessary
-        // threads is expected to be greater than the loss on extra calls below.
+
+        //  wake at most cToRelease threads, as the benefit from not waking
+        //  unnecessary threads is expected to be greater than the loss on
+        //  extra calls below
+
         for ( INT i = 0; i < cToRelease; i++ )
         {
             WakeByAddressSingle( (void*)pv );
@@ -3983,11 +4035,17 @@ void CSemaphore::_Release( const INT cToRelease )
     }
 }
 
+//  waits until the semaphore counter value changes.  this method has the same
+//  semantics as the WaitOnAddress() function and is guaranteed to return when
+//  the address is signaled, but it is also allowed to return for other reasons.
+//  the caller should compare the new value with the original
 
 const BOOL CSemaphore::_FWait( const INT cAvail, const DWORD dwTimeout )
 {
     PERFOpt( AtomicIncrement( (LONG*)&g_cOSSYNCThreadBlock ) );
     State().StartWait();
+
+    //  wait for semaphore
 
     BOOL fSuccess;
 
@@ -3999,7 +4057,7 @@ const BOOL CSemaphore::_FWait( const INT cAvail, const DWORD dwTimeout )
         {
 #ifdef DEBUG
             SYNCDeadLockTimeOutState sdltosStatePre = sdltosEnabled;
-            OSSYNC_FOREVER
+            OSSYNC_FOREVER  // spin until we get a non- check-in-progress state ...
             {
                 C_ASSERT( sizeof(g_sdltosState) == sizeof(LONG) );
                 sdltosStatePre = (SYNCDeadLockTimeOutState)AtomicCompareExchange( (LONG*)&g_sdltosState, sdltosEnabled, sdltosCheckInProgress );
@@ -4013,13 +4071,18 @@ const BOOL CSemaphore::_FWait( const INT cAvail, const DWORD dwTimeout )
             SYNCDeadLockTimeOutState sdltosStatePre = sdltosEnabled;
 #endif
 
-            OSSYNCAssertSzRTL( fSuccess  || sdltosStatePre == sdltosDisabled, "Potential Deadlock Detected (Timeout);  FYI ed [dll]!OSSYNC::g_sdltosState to 0 to disable." );
+            OSSYNCAssertSzRTL( fSuccess /* superflous */ || sdltosStatePre == sdltosDisabled, "Potential Deadlock Detected (Timeout);  FYI ed [dll]!OSSYNC::g_sdltosState to 0 to disable." );
 
 #ifdef DEBUG
             if ( sdltosStatePre != sdltosDisabled )
             {
-                OSSYNCAssert( sdltosStatePre != sdltosCheckInProgress );
+                //  needs re-enabling (if SOMEONE/debugger didn't play with state)
+                OSSYNCAssert( sdltosStatePre != sdltosCheckInProgress ); // that'd be wrong on convergence loop above.
 
+                //  while it seems really simple this should alwyas be reset, this is designed to allow the user to kill
+                //  timeout detection dynamically in the debugger by setting g_sdltosState = 0 (i.e. sdltosDisabled) via 
+                //  debugger, thus g_sdltosState won't == sdltosCheckInProgress and we won't reset it to sdltosEnabled / 
+                //  i.e. disabling deadlock detection for all subsequent hits.
 
                 const SYNCDeadLockTimeOutState sdltosCheck = (SYNCDeadLockTimeOutState)AtomicCompareExchange( (LONG*)&g_sdltosState, sdltosCheckInProgress, sdltosEnabled );
                 OSSYNCAssertSzRTL( sdltosCheck != sdltosDisabled, "Devs, the debugger used to set g_sdltosState to 0 and disables further timeout detection asserts!?  Just an FYI.  If you did not, then code is confused." );
@@ -4037,7 +4100,7 @@ const BOOL CSemaphore::_FWait( const INT cAvail, const DWORD dwTimeout )
         }
     }
     else
-#endif
+#endif  //  SYNC_DEADLOCK_DETECTION
     {
         fSuccess = _FOSWait( cAvail, dwTimeout );
     }
@@ -4048,6 +4111,10 @@ const BOOL CSemaphore::_FWait( const INT cAvail, const DWORD dwTimeout )
     return fSuccess;
 }
 
+//  performs an OS level wait until the available count of the semaphore changes.
+//  this method is guaranteed to return when the corresponding address is signaled,
+//  but it is also allowed to return for other reasons.  the caller should compare
+//  the new value with the original
 
 const BOOL CSemaphore::_FOSWait( const INT cAvail, const DWORD dwTimeout )
 {

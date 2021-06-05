@@ -316,6 +316,7 @@ extern const INT cbCacheLine;
 
 extern BOOL g_fSyncProcessAbort;
 
+//    system max spin count
 
 extern INT g_cSpinMax;
 
@@ -2030,8 +2031,7 @@ inline const BOOL CSemaphoreState::FChange( const CSemaphoreState& stateCur, con
     return AtomicCompareExchange( (QWORD*)&m_qwState, stateCur.m_qwState, stateNew.m_qwState ) == stateCur.m_qwState;
 }
 
-//  increase the available count on the semaphore by the count given using
-//  a transacted memory compare/exchange operation
+//  atomically increase the available count on the semaphore by the count given
 
 __forceinline void CSemaphoreState::IncAvail( const INT cToInc )
 {
@@ -2043,25 +2043,42 @@ __forceinline void CSemaphoreState::IncAvail( const INT cToInc )
 
 __forceinline const BOOL CSemaphoreState::FDecAvail()
 {
+    //  try forever to change the state of the semaphore
+
     OSSYNC_FOREVER
     {
+        //  get current value
+
         const LONG cAvail = m_cAvail;
+
+        //  see if we have an available count
 
         if ( cAvail == 0 )
         {
+            //  we do not have an available count, return failure
+
             return fFalse;
         }
+
+        //  we have an available count, attempt the transaction
+
         else if ( AtomicCompareExchange( (LONG*)&m_cAvail, cAvail, cAvail - 1 ) == cAvail )
         {
+            //  the transaction succeeded, return success
+
             return fTrue;
         }
     }
 }
 
+//  atomically increment the number of waiters
+
 __forceinline void CSemaphoreState::IncWait()
 {
     AtomicIncrement( (LONG*)&m_cWait );
 }
+
+//  atomically decrement the number of waiters
 
 __forceinline void CSemaphoreState::DecWait()
 {
@@ -2113,18 +2130,13 @@ class CSemaphore
 
         //    manipulators
 
-        // Resolves the internal timeout value to an OS level timeout.
         static const DWORD _DwOSTimeout( const INT cmsecTimeout );
+
+        //  NOTE:  all private methods use the OS level (DWORD) timeout values
 
         const BOOL _FTryAcquire( const INT cSpin );
         const BOOL _FAcquire( const DWORD dwTimeout );
         void _Release( const INT cToRelease );
-
-        // Waits until the semaphore counter value changes.
-        // This method has the same semantics as the WaitOnAddress() function and is
-        // guaranteed to return when the address is signaled, but it is also allowed
-        // to return for other reasons.  The caller should compare the new value with
-        // the original.
         const BOOL _FWait( const INT cAvail, const DWORD dwTimeout );
         const BOOL _FOSWait( const INT cAvail, const DWORD dwTimeout );
 };
@@ -2157,11 +2169,15 @@ inline const BOOL CSemaphore::FTryAcquire()
 {
     if ( _FTryAcquire( 0 ) )
     {
+        //  we successfully acquired the semaphore
+
         State().SetAcquire();
         return fTrue;
     }
     else
     {
+        //  we did not acquire the semaphore, this is a contention
+
         State().SetContend();
         return fFalse;
     }
@@ -2177,11 +2193,15 @@ inline const BOOL CSemaphore::FAcquire( const INT cmsecTimeout )
 
     if ( _FTryAcquire( g_cSpinMax ) || _FAcquire( _DwOSTimeout( cmsecTimeout ) ) )
     {
+        //  we successfully acquired the semaphore
+
         State().SetAcquire();
         return fTrue;
     }
     else
     {
+        //  we did not acquire the semaphore, this is a contention
+
         State().SetContend();
         return fFalse;
     }
@@ -2193,19 +2213,29 @@ inline const BOOL CSemaphore::FAcquire( const INT cmsecTimeout )
 
 inline const BOOL CSemaphore::FWait( const INT cmsecTimeout )
 {
+    //  first try to quickly check for an available count
+
     if ( State().CAvail() > 0 )
     {
         return fTrue;
     }
 
+    //  if that doesn't work, try to grab an available count without spinning.
+    //  if that also doesn't work, attempt acquiring using the full state machine
+
     if ( _FTryAcquire( 0 ) || _FAcquire( _DwOSTimeout( cmsecTimeout ) ) )
     {
+        //  we successfully acquired the semaphore, release it
+
         _Release( 1 );
+
         State().SetAcquire();
         return fTrue;
     }
     else
     {
+        //  we did not acquire the semaphore, this is a contention
+
         State().SetContend();
         return fFalse;
     }
@@ -2223,17 +2253,24 @@ inline void CSemaphore::Release( const INT cToRelease )
 
 inline const INT CSemaphore::CWait() const
 {
+    //  try forever until we get a non-transitional state
+
     OSSYNC_FOREVER
     {
+        //  read the current state of the semaphore
+
         const CSemaphoreState stateCur = (CSemaphoreState&) State();
 
         if ( stateCur.CAvail() > 0 && stateCur.CWait() > 0 )
         {
-            // The existing waiters are in transition.
+            //  the existing waiters are in transition, retry
+
             continue;
         }
         else
         {
+            //  return the waiter count
+
             return stateCur.CWait();
         }
     }
@@ -2246,31 +2283,51 @@ inline const INT CSemaphore::CAvail() const
     return State().CAvail();
 }
 
+//  try to acquire one count of the semaphore, entering a loop which iterates
+//  up to cSpin times.  returns fFalse if a count could not be acquired
 
 inline const BOOL CSemaphore::_FTryAcquire( const INT cSpin )
 {
     INT cSpinRemaining = cSpin;
 
+    //  try forever to acquire the semaphore
+
     OSSYNC_FOREVER
     {
+        //  read the current state of the semaphore
+
         const CSemaphoreState stateCur = (CSemaphoreState&) State();
 
-        // Do not acquire the semaphore with waiting threads to avoid inadvertently
-        // stealing it from those waiting threads themselves.
+        //  see if we have an available count
+        //
+        //  NOTE:  we do not acquire the semaphore with waiting threads to
+        //  avoid stealing it from those waiting threads themselves
+
         if ( stateCur.CAvail() == 0 || stateCur.CWait() > 0 )
         {
             if ( cSpinRemaining )
             {
+                //  we do not have an available count, but can keep spinning
+
                 cSpinRemaining--;
+
                 continue;
             }
             else
             {
+                //  we do not have an available count and have reached the
+                //  spin limit, return failure
+
                 return fFalse;
             }
         }
+
+        //  we have an available count, attempt the transaction
+
         else if ( State().FDecAvail() )
         {
+            //  the transaction succeeded, return success
+
             return fTrue;
         }
     }
