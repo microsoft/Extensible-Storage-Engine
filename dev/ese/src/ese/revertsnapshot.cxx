@@ -4262,7 +4262,7 @@ ERR CRBSDatabaseRevertContext::ErrFlushDBPages( USHORT cbDbPageSize, BOOL fFlush
     Call( ErrUtilFlushFileBuffers( m_pfapiDb, iofrRBSRevertUtil ) );
 
     // Clear the bitmap of cached db pages once we have flushed the pages we had in cache.
-    Call( ErrResetSbmPages( &m_psbmDbPages ) );
+    Call( ErrResetSbmPages( &m_psbmCachedDbPages ) );
 
     *pcpgReverted = cpgTotal;
 
