@@ -2225,16 +2225,16 @@ inline const INT CSemaphore::CWait() const
 {
     OSSYNC_FOREVER
     {
-        const CSemaphoreState state = State();
+        const CSemaphoreState stateCur = State();
 
-        if ( state.CAvail() > 0 && state.CWait() > 0 )
+        if ( stateCur.CAvail() > 0 && stateCur.CWait() > 0 )
         {
             // The existing waiters are in transition.
             continue;
         }
         else
         {
-            return state.CWait();
+            return stateCur.CWait();
         }
     }
 }
@@ -2253,11 +2253,11 @@ inline const BOOL CSemaphore::_FTryAcquire( const INT cSpin )
 
     OSSYNC_FOREVER
     {
-        const CSemaphoreState state = State();
+        const CSemaphoreState stateCur = State();
 
         // Do not acquire the semaphore with waiting threads to avoid inadvertently
         // stealing it from those waiting threads themselves.
-        if ( state.CAvail() == 0 || state.CWait() > 0 )
+        if ( stateCur.CAvail() == 0 || stateCur.CWait() > 0 )
         {
             if ( cSpinRemaining )
             {

@@ -3882,15 +3882,15 @@ const BOOL CSemaphore::_FAcquire( const DWORD dwTimeout )
     State().IncWait();
     OSSYNC_FOREVER
     {
-        const CSemaphoreState state = State();
+        const CSemaphoreState stateCur = State();
 
-        if ( state.CAvail() > 0 )
+        if ( stateCur.CAvail() > 0 )
         {
-            OSSYNCAssert( state.CWait() > 0 );
+            OSSYNCAssert( stateCur.CWait() > 0 );
 
             // Atomically acquire the semaphore and decrement the waiting counter.
-            const CSemaphoreState stateNew( state.CAvail() - 1, state.CWait() - 1 );
-            if ( State().FChange( state, stateNew ) )
+            const CSemaphoreState stateNew( stateCur.CAvail() - 1, stateCur.CWait() - 1 );
+            if ( State().FChange( stateCur, stateNew ) )
             {
                 return fTrue;
             }
@@ -3909,7 +3909,7 @@ const BOOL CSemaphore::_FAcquire( const DWORD dwTimeout )
 
             dwRemaining = dwTimeout - dwElapsed;
 
-            if ( !_FWait( state.CAvail(), dwRemaining ) )
+            if ( !_FWait( stateCur.CAvail(), dwRemaining ) )
             {
                 break;
             }
@@ -3926,17 +3926,17 @@ void CSemaphore::ReleaseAllWaiters()
 {
     OSSYNC_FOREVER
     {
-        const CSemaphoreState state = State();
+        const CSemaphoreState stateCur = State();
 
-        if ( state.CAvail() > 0 && state.CWait() > 0 )
+        if ( stateCur.CAvail() > 0 && stateCur.CWait() > 0 )
         {
             // The existing waiters are in transition.
             continue;
         }
         else
         {
-            const CSemaphoreState stateNew( state.CWait(), state.CWait() );
-            if ( State().FChange(state, stateNew ) )
+            const CSemaphoreState stateNew( stateCur.CWait(), stateCur.CWait() );
+            if ( State().FChange(stateCur, stateNew ) )
             {
                 volatile void *pv = State().PAvail();
 
