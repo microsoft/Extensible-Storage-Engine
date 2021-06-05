@@ -5257,6 +5257,7 @@ BOOL RbsposReadVal( const char * szRbspos, void ** ppvValue )
             ( *pchEnd == ':' || *pchEnd == ',' ) )
         {
             rbspos.iSegment = (USHORT)strtoul( pchEnd+1, &pchEnd, 16 );
+            fRet = !( *pchEnd );
         }
     }
 
