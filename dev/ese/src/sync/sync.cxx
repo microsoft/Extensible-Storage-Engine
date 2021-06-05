@@ -332,44 +332,6 @@ CSyncPerfAcquire::~CSyncPerfAcquire()
 }
 
 
-//  Semaphore
-
-//  ctor
-
-CSemaphore::CSemaphore( const CSyncBasicInfo& sbi )
-    :   CEnhancedStateContainer< CSemaphoreState, CSyncStateInitNull, CSemaphoreInfo, CSyncBasicInfo >( syncstateNull, sbi )
-{
-    //  further init of CSyncBasicInfo
-
-    State().SetTypeName( "CSemaphore" );
-    State().SetInstance( (CSyncObject*)this );
-}
-
-//  dtor
-
-CSemaphore::~CSemaphore()
-{
-#ifdef SYNC_ANALYZE_PERFORMANCE
-#ifdef SYNC_DUMP_PERF_DATA
-
-    //  dump performance data
-
-    OSSyncStatsDump(    State().SzTypeName(),
-                        State().SzInstanceName(),
-                        State().Instance(),
-                        (DWORD)-1,
-                        State().CWaitTotal(),
-                        State().CsecWaitElapsed(),
-                        State().CAcquireTotal(),
-                        State().CContendTotal(),
-                        0,
-                        0 );
-
-#endif  //  SYNC_DUMP_PERF_DATA
-#endif  //  SYNC_ANALYZE_PERFORMANCE
-}
-
-
 //  Auto-Reset Signal
 
 //  ctor
@@ -3854,6 +3816,43 @@ void CKernelSemaphore::Release( const INT cToRelease )
     OSSYNCAssert( fSuccess );
 }
 
+
+//  Semaphore
+
+//  ctor
+
+CSemaphore::CSemaphore( const CSyncBasicInfo& sbi )
+    :   CEnhancedStateContainer< CSemaphoreState, CSyncStateInitNull, CSemaphoreInfo, CSyncBasicInfo >( syncstateNull, sbi )
+{
+    //  further init of CSyncBasicInfo
+
+    State().SetTypeName( "CSemaphore" );
+    State().SetInstance( (CSyncObject*)this );
+}
+
+//  dtor
+
+CSemaphore::~CSemaphore()
+{
+#ifdef SYNC_ANALYZE_PERFORMANCE
+#ifdef SYNC_DUMP_PERF_DATA
+
+    //  dump performance data
+
+    OSSyncStatsDump(    State().SzTypeName(),
+                        State().SzInstanceName(),
+                        State().Instance(),
+                        (DWORD)-1,
+                        State().CWaitTotal(),
+                        State().CsecWaitElapsed(),
+                        State().CAcquireTotal(),
+                        State().CContendTotal(),
+                        0,
+                        0 );
+
+#endif  //  SYNC_DUMP_PERF_DATA
+#endif  //  SYNC_ANALYZE_PERFORMANCE
+}
 
 
 const DWORD CSemaphore::_DwOSTimeout( const INT cmsecTimeout )
