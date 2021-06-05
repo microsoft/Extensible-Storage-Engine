@@ -1,5 +1,9 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
+//================================================================
+// Performance collection functions.
+//================================================================
+//
 
 #include <ese_common.hxx>
 #include <strsafe.h>
@@ -7,6 +11,7 @@
 
 typedef struct
 {
+    //  Actual counters.
     const PerfCollectorCounter* ctrAvg;
     size_t cctrAvg;
     const PerfCollectorCounter* ctrFormatted;
@@ -16,10 +21,12 @@ typedef struct
     const PerfCollectorCustomCounter* ctrCustom;
     size_t cctrCustom;
 
+    //  Queries.
     HANDLE qAvg;
     HANDLE qFormatted;
     HANDLE qRaw;
 
+    //  Internal buffers.
     double* dblAvgMin;
     double* dblAvgMax;
     double* dblAvgAvg;
@@ -28,6 +35,7 @@ typedef struct
     ULONG64* qwRaw1;
     ULONG64* qwRaw2;
 
+    //  Other states.
     void* pvContext;
 } PerfCollector;
 
@@ -162,6 +170,7 @@ void PerfCollectorStart( HANDLE hCollector, const DWORD cmsecSampling )
     CallVTrue( pPerfCollector->qwRaw1 != NULL || pPerfCollector->cctrRaw == 0 );
     CallVTrue( pPerfCollector->qwRaw2 != NULL || pPerfCollector->cctrRaw == 0 );
 
+    //  Avg.
     pPerfCollector->qAvg = PerfCountersCreateQuery();
     CallVTrue( pPerfCollector->qAvg != NULL );
     JET_GRBIT* grbit = new JET_GRBIT[ pPerfCollector->cctrAvg ];
@@ -172,6 +181,7 @@ void PerfCollectorStart( HANDLE hCollector, const DWORD cmsecSampling )
         grbit[ i ] = pPerfCollector->ctrAvg[ i ].grbitStats;
     }
 
+    //  Formatted.
     pPerfCollector->qFormatted = PerfCountersCreateQuery();
     CallVTrue( pPerfCollector->qFormatted != NULL );
     for ( size_t i = 0 ; i < pPerfCollector->cctrFormatted ; i++ )
@@ -179,6 +189,7 @@ void PerfCollectorStart( HANDLE hCollector, const DWORD cmsecSampling )
         CallVTrue( PerfCountersAddLnCounterA( pPerfCollector->qFormatted, NULL, pPerfCollector->ctrFormatted[ i ].szObject, pPerfCollector->ctrFormatted[ i ].szName, pPerfCollector->ctrFormatted[ i ].szInstance ) );
     }
 
+    //  Raw.
     pPerfCollector->qRaw = PerfCountersCreateQuery();
     CallVTrue( pPerfCollector->qRaw != NULL );
     for ( size_t i = 0 ; i < pPerfCollector->cctrRaw ; i++ )
@@ -186,6 +197,7 @@ void PerfCollectorStart( HANDLE hCollector, const DWORD cmsecSampling )
         CallVTrue( PerfCountersAddLnCounterA( pPerfCollector->qRaw, NULL, pPerfCollector->ctrRaw[ i ].szObject, pPerfCollector->ctrRaw[ i ].szName, pPerfCollector->ctrRaw[ i ].szInstance ) );
     }
 
+    //  Custom.
     for ( size_t i = 0 ; i < pPerfCollector->cctrCustom ; i++ )
     {
         pPerfCollector->ctrCustom[ i ].pfnStartStop( hCollector, pPerfCollector->pvContext, &pPerfCollector->ctrCustom[ i ], true );
@@ -241,6 +253,7 @@ void PerfCollectorStopAndReport( HANDLE hCollector, const char* const szLabel )
         CallVTrue( PerfCountersGetCounterValues( pPerfCollector->qFormatted, pPerfCollector->dblFormatted ) );
     }
 
+    //  Report.
     HANDLE hFile = PerfReportingCreateFileA( SzEsetestPerfSummaryXml() );
     CallVTrue( hFile != NULL );
     for ( size_t i = 0 ; i < pPerfCollector->cctrAvg ; i++ )

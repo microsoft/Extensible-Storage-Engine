@@ -5,7 +5,9 @@
 
 #include "stat.hxx"
 
+//  ================================================================
 class LinearHistogramTest : public UNITTEST
+//  ================================================================
 {
     private:
         static LinearHistogramTest s_instance;
@@ -36,7 +38,9 @@ bool LinearHistogramTest::FRunUnderESENT() const        { return true; }
 bool LinearHistogramTest::FRunUnderESE97() const        { return true; }
 
 
+//  ================================================================
 ERR LinearHistogramTest::ErrTest()
+//  ================================================================
 {
     wprintf( L"\tTesting Linear Histogram support ...\n");
 
@@ -58,7 +62,7 @@ ERR LinearHistogramTest::ErrTest()
     CLinearHistogramStats::ERR err = CLinearHistogramStats::ERR::errSuccess;
 
     ULONG iTest = 0;
-    BOOL fResult = fTrue;
+    BOOL fResult = fTrue; // assumed innocent, until proven guilty.
     ULONG fBailOnError = fFalse;
 
     SAMPLE qwMax            = 0xffffffffffffffff;
@@ -80,15 +84,18 @@ ERR LinearHistogramTest::ErrTest()
 
     err = CLinearHistogramStats::ERR::errSuccess;
 
+    //  Test empty class
 
     CallTest( ErrTestZerodHisto( pLHS ) );
 
+    //  Basic tests
 
     CallTest( pLHS->ErrAddSample( 100 ) );
     CallTest( pLHS->ErrAddSample( 90 ) );
     CallTest( pLHS->ErrAddSample( 80 ) );
     CallTest( pLHS->ErrAddSample( 120 ) );
 
+    //  Test the samples are properly distributed to the proper multiples of 30
 
     CallTest( pLHS->ErrGetSampleHits( 0, &chits ) );
     TestTest( 0 == chits );
@@ -100,20 +107,22 @@ ERR LinearHistogramTest::ErrTest()
     TestTest( 2 == chits );
     CallTest( pLHS->ErrGetSampleHits( 120, &chits ) );
     TestTest( 2 == chits );
-    chits = 42;
+    chits = 42; // dirty value
     TestTest( CStats::ERR::wrnOutOfSamples == pLHS->ErrGetSampleHits( 121, &chits ) );
     TestTest( 0 == chits );
-    chits = 42;
+    chits = 42; // dirty value
     TestTest( CStats::ERR::wrnOutOfSamples == pLHS->ErrGetSampleHits( qwMax, &chits ) );
     TestTest( 0 == chits );
 
     CallTest( pLHS->ErrReset() );
 
+    //  Testing mode
 
     TestTest( 90 == linear30histo.Mode() );
 
     pLHS->Zero();
 
+    //  Test edge cases of the linear divisions ...
 
     CallTest( pLHS->ErrAddSample( 1 ) );
     CallTest( pLHS->ErrGetSampleHits( 0, &chits ) );
@@ -124,7 +133,7 @@ ERR LinearHistogramTest::ErrTest()
     TestTest( 0 == chits );
     CallTest( pLHS->ErrGetSampleHits( 30, &chits ) );
     TestTest( 1 == chits );
-    chits = 42;
+    chits = 42; // dirty value
     TestTest( CStats::ERR::wrnOutOfSamples == pLHS->ErrGetSampleHits( 31, &chits ) );
     TestTest( 0 == chits );
     
@@ -151,6 +160,8 @@ ERR LinearHistogramTest::ErrTest()
 
     pLHS->Zero();
 
+    //  Test catch all case
+    //
 
     CallTest( pLHS->ErrAddSample( 0 ) );
     for ( ULONG i = 0; i < 30; i++ )

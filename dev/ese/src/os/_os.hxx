@@ -7,6 +7,6 @@
 extern VOID OnThreadWaitBegin();
 extern VOID OnThreadWaitEnd();
 
-#endif
+#endif  //  __OS_HXX_INCLUDED
 
 

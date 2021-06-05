@@ -1,6 +1,8 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
+//  Access to the ERR data table
+//
 
 #define fErrErr     (0x01)
 #define fErrWrn     (0x02)
@@ -21,6 +23,8 @@ struct ErrData
 const ErrData * PerrdataEntryI( __in const INT iEntry );
 const ErrData * PerrdataLookupErrValue( __in const JET_ERR errLookup );
 
+//  Access to the error message table
+//
 
 struct ERRORMSGDATA
 {
@@ -39,6 +43,8 @@ void JetErrorToString( JET_ERR err, const char **szError, const char **szErrorTe
 const char szUnknownError[]             = "Unknown Error";
 #define FNullError( szErr )     ( NULL == szErr || ( 0 == strcmp( szErr, szUnknownError ) ) )
 
+//  Access to the hierarchy table
+//
 
 bool FERRLookupErrorHierarchy(
     __in JET_ERRCAT             errortype,

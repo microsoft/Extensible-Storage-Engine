@@ -5,6 +5,10 @@
 #define __OSFILE_HXX_INCLUDED
 
 
+//  dummy instance of IFilePerfAPI for OS-layer
+//  because INST and IOFILE are not accessible
+//  from this layer
+//
 class COSFilePerfDummy
     : public IFilePerfAPI
 {
@@ -57,11 +61,13 @@ class COSFilePerfDummy
 extern COSFilePerfDummy     g_cosfileperfDefault;
 
 
+////////////////////////////////////////
+//  Internal OSFile handle
 
 class IOREQ;
 class COSFile;
 
-class _OSFILE
+class _OSFILE  //  _osf
 {
     public:
 
@@ -95,38 +101,42 @@ class _OSFILE
 
     public:
 
-        COSDisk *                   m_posd;
-        COSFile *                   m_posf;
+        COSDisk *                   m_posd;             // The disk object the IO gets delivered against.
+        COSFile *                   m_posf;             // The parent COSFile
 
-        HANDLE                      hFile;
-        PfnFileIOComplete           pfnFileIOComplete;
-        DWORD_PTR                   keyFileIOComplete;
+        HANDLE                      hFile;              //  Win32 file handle
+        PfnFileIOComplete           pfnFileIOComplete;  //  Per-file I/O completion function
+        DWORD_PTR                   keyFileIOComplete;  //  Per-file I/O completion key
 
-        IFileSystemConfiguration*   pfsconfig;
-        IFilePerfAPI *              pfpapi;
+        IFileSystemConfiguration*   pfsconfig;          //  file system configuration
+        IFilePerfAPI *              pfpapi;             //  perf-related stats for this file
 
-        QWORD                       iFile;
-        IOREQ::IOMETHOD             iomethodMost;
-        volatile BOOL               fRegistered;
-        CSemaphore                  semFilePointer;
+        QWORD                       iFile;              //  File Index (for I/O Heap, RedBlackTree Read Q)
+        IOREQ::IOMETHOD             iomethodMost;       //  I/O capability
+        volatile BOOL               fRegistered;        //  fTrue if the file has been registered with the I/O thread
+        CSemaphore                  semFilePointer;     //  Semaphore Protecting the file pointer
 
-        IFileAPI::FileModeFlags     fmfTracing;
+        IFileAPI::FileModeFlags     fmfTracing;         //  Only for tracing
 };
 
 typedef _OSFILE* P_OSFILE;
 
 
+////////////////////////////////////////
+//  COSFile
 
-class COSFile
+class COSFile  //  osf
     :   public IFileAPI
 {
     friend VOID DumpOneIOREQ( const IOREQ * const pioreqDebuggee, const IOREQ * const pioreq );
 
-    public:
+    public:  //  specialized API
 
+        //  ctor
 
         COSFile();
 
+        //  initializes the File handle
 
         ERR ErrInitFile(    COSFileSystem* const                posfs,
                             COSVolume * const                   posv,
@@ -139,17 +149,20 @@ class COSFile
 
         void TraceStationId( const TraceStationIdentificationReason tsidr );
    
+        //  properties
 
         const WCHAR * WszFile() const   { return m_wszAbsPath; }
         HANDLE Handle() const           { return m_hFile; }
 
+        //  debugging support
 
         void Dump( CPRINTF* pcprintf, DWORD_PTR dwOffset = 0 ) const;
 
+        //  configuration
 
         IFileSystemConfiguration* const Pfsconfig() const { return m_posfs->Pfsconfig(); }
 
-    public:
+    public:  //  IFileAPI
 
         virtual ~COSFile();
 
@@ -241,6 +254,16 @@ class COSFile
         {
             Assert( &g_cosfileperfDefault != m_p_osf->pfpapi );
 
+            // it is a bit heavy handed to stop all IO to the disk, but a simple solution to the occasional
+            // undercount perf counter and EngineFileType between head and added mismatch assert in osdisk.cxx:
+            //    Assertion Failure: pioreqHead->p_osf->pfpapi->DwEngineFileType() == pioreqAdded->p_osf->pfpapi->DwEngineFileType()
+            // otherwise we'd have to cache the file type off the file at IOREQ issue time when we do the 
+            // first perf counter update, so we can provide it to the right decrement, and that is just heavy
+            // to maintain and implement.
+            // Since this event (specifically the change of engine file type for DB) is once (or twice - up to six times, depending
+            // upon how many DBs attached to log) per instance lifetime at cross over from redo to do-time, it seems not unwarranted.
+            // Note though this function is called significantly more often to change the qwEngineFileId for log files during both
+            // phases of log roll: current log file to the archive log, and from temp log to current log.
             const BOOL fChangingEngineType = dwEngineFileType != m_p_osf->pfpapi->DwEngineFileType();
             if ( fChangingEngineType )
             {
@@ -293,9 +316,11 @@ class COSFile
 
                 VOID Complete( const ERR err )
                 {
+                    //  save the error code
 
                     m_err = err;
 
+                    //  signal completion of the I/O
 
                     m_signal.Set();
                 }
@@ -348,7 +373,7 @@ class COSFile
                 IOREQ*          m_pioreq;
                 INT             m_group;
                 FullTraceContext m_tc;
-                QWORD           m_ibOffset;
+                QWORD           m_ibOffset;         //  this is the final size requested.
                 DWORD           m_cbData;
                 BYTE*           m_pbData;
                 OSFILEQOS       m_grbitQOS;
@@ -356,16 +381,18 @@ class COSFile
                 DWORD_PTR       m_keyIOComplete;
                 ERR             m_err;
 
+                //  These ticks are for instrumentation/debugging purposes only.
                 
-                TICK            m_tickReqStart;
-                TICK            m_tickReqStep;
-                TICK            m_tickReqComplete;
+                TICK            m_tickReqStart;     //  the request has been created.
+                TICK            m_tickReqStep;      //  if we need to do it in multiple steps, this is the last time a step completed.
+                TICK            m_tickReqComplete;  //  the extension has completed.
         };
 
         typedef CInvasiveList< CExtendingWriteRequest, CExtendingWriteRequest::OffsetOfILE > CDeferList;
 
     private:
 
+        //  I/O support
 
         static void IOComplete_(    IOREQ* const    pioreq,
                                     const ERR       err,
@@ -373,7 +400,7 @@ class COSFile
         void IOComplete( IOREQ* const pioreq, const ERR err );
 
 #ifdef DEBUG
-    public:
+    public: // needed for an Assert() check
 #endif
         static void IOSyncComplete_(    const ERR           err,
                                         COSFile* const      posf,
@@ -395,6 +422,7 @@ class COSFile
                                         CIOComplete* const  piocomplete,
                                         void* const         pioreq );
 
+        // Used as completion function for ASync IOs.
         static void IOASyncComplete_(   const ERR           err,
                                         COSFile* const      posf,
                                         const FullTraceContext& tc,
@@ -464,6 +492,7 @@ class COSFile
         ERR ErrIOSetFileSize( const QWORD cbSize,
                             const BOOL fReportError );
 
+        // Layering violation to refer to HANDLE?
         ERR ErrIOSetFileSparse(
            _In_ const HANDLE hfile,
            _In_ const BOOL fReportError );
@@ -483,17 +512,23 @@ class COSFile
         BOOL FOSFileTestUrgentIo();
 
     public:
+        //  returns true if the IOREQ is a file management operation (such as extending
+        //  the file, zeroing, or change file size request).
 
         static BOOL FOSFileManagementOperation( const IOREQ * const pioreq )
         {
+            //  While the actual implementations of IOZeroingWriteComplete_, etc are private
+            //  whether or not an IOREQ is a OS File Management operation should be public.
             if ( pioreq->pfnCompletion == PFN( COSFile::IOZeroingWriteComplete_ ) ||
                  pioreq->pfnCompletion == PFN( COSFile::IOExtendingWriteComplete_ ) ||
                  pioreq->pfnCompletion == PFN( COSFile::IOChangeFileSizeComplete_ ) )
             {
+                // special file management ops are always singletons (and shouldn't be in VIP - or any queue really)
                 Assert( pioreq->pioreqIorunNext == NULL );
                 Assert( pioreq->pioreqVipList == NULL );
                 return fTrue;
             }
+            // regular ops should always have a cbData
             Assert( pioreq->cbData != 0 );
             return fFalse;
         }
@@ -514,7 +549,7 @@ class COSFile
         QWORD               m_cbFileSize;
         DWORD               m_cbIOSize;
         DWORD               m_cbSectorSize;
-        FileModeFlags       m_fmf;
+        FileModeFlags       m_fmf;  //  tracks all modes: fmfReadOnly, fmfCached, fmfTemporary, etc, etc.
 
         LONG                m_cLogicalCopies;
 
@@ -535,10 +570,12 @@ class COSFile
 
         COSEventTraceIdCheck m_traceidcheckFile;
 
+        //  Debugger access
         friend COSVolume * PosvEDBGAccessor( const COSFile * const posf );
 
 };
 
+//  Turns an Operationg System file system / IO error into a JET_err*.
 
 ERR ErrOSFileIFromWinError_( _In_ const DWORD error, _In_z_ PCSTR szFile, _In_ const LONG lLine );
 #define ErrOSFileIFromWinError( error )     ErrOSFileIFromWinError_( error, __FILE__, __LINE__ )
@@ -553,6 +590,6 @@ VOID OSFileIIOReportError(
     const DWORD errSystem,
     const QWORD cmsecIOElapsed );
 
-#endif
+#endif  //  __OSFILE_HXX_INCLUDED
 
 

@@ -1,6 +1,7 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
+// tchar.h must be above where strsafe.h is includes.
 #pragma prefast(push)
 #pragma prefast(disable:26006, "Dont bother us with tchar, someone else owns that.")
 #pragma prefast(disable:26007, "Dont bother us with tchar, someone else owns that.")
@@ -22,4 +23,4 @@ INT IprocOSSyncIGetCurrentProcessor()
     return Proc.Number;
 }
 
-};
+}; // namespace OSSYNC

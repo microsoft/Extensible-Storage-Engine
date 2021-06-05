@@ -6,41 +6,56 @@
 
 #include "osblockcacheconfig.hxx"
 
+//  File System Configuration
 
-class IFileSystemConfiguration
+class IFileSystemConfiguration  //  fsconfig
 {
+    //  configuration
 
     public:
 
+        //virtual ULONG CbZeroExtend() = 0;
 
+        //  Access denied retry period.
 
         virtual ULONG DtickAccessDeniedRetryPeriod() = 0;
 
+        //virtual ULONG CIOMaxOutstanding() = 0;
+        //virtual ULONG CIOMaxOutstandingBackground() = 0;
 
+        //  Hung IO threshold.
 
         virtual ULONG DtickHungIOThreshhold() = 0;
 
+        //  Hung IO actions.
 
         virtual DWORD GrbitHungIOActions() = 0;
 
+        //  The maximum read size.
 
         virtual ULONG CbMaxReadSize() = 0;
 
+        //  The maximum write size.
 
         virtual ULONG CbMaxWriteSize() = 0;
 
+        //  The maximum read gap size.
 
         virtual ULONG CbMaxReadGapSize() = 0;
 
+        //  Permillage of IO forced to be smooth IO.
 
         virtual ULONG PermillageSmoothIo() = 0;
 
+        //  Indicates if the block cache should be enabled.
 
         virtual BOOL FBlockCacheEnabled() = 0;
 
+        //  Gets the Block Cache Configuration.
 
         virtual ERR ErrGetBlockCacheConfiguration( _Out_ IBlockCacheConfiguration** const ppbcconfig ) = 0;
 
+    //  error reporting
 
     public:
 
@@ -68,6 +83,7 @@ class IFileSystemConfiguration
         virtual const void* const PvTraceContext() = 0;
 };
 
+//  Default File System Configuration.
 
 class CDefaultFileSystemConfiguration : public IFileSystemConfiguration
 {
@@ -75,7 +91,10 @@ class CDefaultFileSystemConfiguration : public IFileSystemConfiguration
 
         CDefaultFileSystemConfiguration();
 
+        //ULONG CbZeroExtend() override;
         ULONG DtickAccessDeniedRetryPeriod() override;
+        //ULONG CIOMaxOutstanding() override;
+        //ULONG CIOMaxOutstandingBackground() override;
         ULONG DtickHungIOThreshhold() override;
         DWORD GrbitHungIOActions() override;
         ULONG CbMaxReadSize() override;
@@ -112,7 +131,10 @@ class CDefaultFileSystemConfiguration : public IFileSystemConfiguration
 
     protected:
 
+        //ULONG m_cbZeroExtend;
         ULONG m_dtickAccessDeniedRetryPeriod;
+        //ULONG m_cIOMaxOutstanding;
+        //ULONG m_cIOMaxOutstandingBackground;
         ULONG m_dtickHungIOThreshhold;
         DWORD m_grbitHungIOActions;
         ULONG m_cbMaxReadSize;
@@ -122,5 +144,5 @@ class CDefaultFileSystemConfiguration : public IFileSystemConfiguration
         BOOL m_fBlockCacheEnabled;
 };
 
-#endif
+#endif  //  _OSFSCONFIG_HXX_INCLUDED
 

@@ -3,7 +3,13 @@
 
 LOCAL const ULONG ulIDInvalid = ~(0UL);
 
+//  ================================================================
 class TESTINJECTION
+//  ================================================================
+//
+//  Represents a LID-based test injection.
+//
+//-
 {
 public:
     TESTINJECTION() :
@@ -37,6 +43,7 @@ public:
         return *this;
     }
 
+    // two TESTINJECTIONs are equal if their IDs are equal
     bool operator==( const TESTINJECTION& rhs ) const
     {
         return( m_ulID == rhs.m_ulID );
@@ -51,6 +58,7 @@ public:
         return m_ulID;
     }
 
+    //  important, call this only once for each "alloc" ...
     bool FProbable()
     {
         AtomicAdd( &m_cEvals, 1 );
@@ -76,15 +84,15 @@ public:
         {
             if ( m_grbit & JET_bitInjectionProbabilityPermanent )
             {
-                return m_cEvals >= (QWORD)m_ulProb;
+                return m_cEvals >= (QWORD)m_ulProb; //  once first is thrown, always trigger...
             }
             else if ( m_grbit & JET_bitInjectionProbabilityFailUntil )
             {
-                return m_cEvals <= (QWORD)m_ulProb;
+                return m_cEvals <= (QWORD)m_ulProb; //  fail the initial n attempts then succeed...
             }
             else
             {
-                return m_cEvals == (QWORD)m_ulProb;
+                return m_cEvals == (QWORD)m_ulProb; //  single shot failure.
             }
         }
 
@@ -125,7 +133,7 @@ public:
 private:
     ULONG   m_ulID;
     JET_API_PTR     m_pv;
-    ULONG   m_ulProb;
+    ULONG   m_ulProb;   // exact meaning is determined by m_grbit
     DWORD           m_grbit;
     QWORD           m_cEvals;
     QWORD           m_cHits;

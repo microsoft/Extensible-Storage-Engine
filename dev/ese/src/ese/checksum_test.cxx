@@ -6,20 +6,27 @@
 
 #ifndef ENABLE_JET_UNIT_TEST
 #error This file should only be compiled with the unit tests!
-#endif
+#endif // ENABLE_JET_UNIT_TEST
 
+// Prototypes for functions defined in dev code.
 
+//  ****************************************************************
+//  page checksum routines
+//  ****************************************************************
 
+//  manipulate bits on the page
 
 inline BOOL FGetBit( const void * const pv, const INT ibitOffset );
 inline void SetBit( void * const pv, const INT ibitOffset );
 inline void FlipBit( void * const pv, const INT ibitOffset );
 
+//  get and set the new checksum format flag
 
 UINT IbitNewChecksumFormatFlag( const PAGETYPE pagetype );
 BOOL    FPageHasNewChecksumFormat( const void * const pv, const PAGETYPE pagetype );
 void        SetNewChecksumFormatFlag( void * const pv, const PAGETYPE pagetype );
 
+//  get and set the checksum 
 
 BOOL            FPageHasLongChecksum( const PAGETYPE pagetype );
 
@@ -39,8 +46,11 @@ PAGECHECKSUM    ComputePageChecksum(
     const UINT cb,
     const PAGETYPE pagetype,
     const ULONG pgno,
+    // set fNew to compute new ECC for a page (R/W wrt the large page!!)
+    // reset fNew to computer ECC for verification purpose (R/O wrt the page)
     const BOOL fNew = fFalse );
 
+//  
 
 void TryFixPage(
     void * const pv,
@@ -55,6 +65,9 @@ void TryFixPage(
 typedef XECHECKSUM( *PFNCHECKSUMNEWFORMAT )( const unsigned char * const, const ULONG, const ULONG, BOOL );
 typedef ULONG( *PFNCHECKSUMOLDFORMAT )( const unsigned char * const, const ULONG );
 
+//  ****************************************************************
+//  XOR checksum routines
+//  ****************************************************************
 
 XECHECKSUM LongChecksumFromShortChecksum( const ULONG xorChecksum, const ULONG pgno );
 
@@ -62,13 +75,18 @@ ULONG ChecksumSelectOldFormat( const unsigned char * const pb, const ULONG cb );
 ULONG ChecksumOldFormatSlowly( const unsigned char * const pb, const ULONG cb );
 ULONG ChecksumOldFormat64Bit( const unsigned char * const pb, const ULONG cb );
 
+//  see comments in checksum_amd64.cxx to see why these are in a separate file
 
 ULONG ChecksumOldFormatSSE( const unsigned char * const pb, const ULONG cb );
 ULONG ChecksumOldFormatSSE2( const unsigned char * const pb, const ULONG cb );
 
+//  ****************************************************************
+//  ECC checksum routines
+//  ****************************************************************
 
 XECHECKSUM ChecksumSelectNewFormat( const unsigned char * const pb, const ULONG cb, const ULONG pgno, BOOL fHeaderBlock = fTrue );
 
+//  see comments in checksum_amd64.cxx to see why these are in a separate file
 
 enum ChecksumParityMaskFunc
 {
@@ -84,7 +102,9 @@ XECHECKSUM ChecksumNewFormatAVX( const unsigned char * const pb, const ULONG cb,
 
 
 
+//  ================================================================
 static void BitRoutinesUnitTest( unsigned char * const pb, UINT cbPageTest )
+//  ================================================================
 {
     pb[3] = 0;
     
@@ -128,7 +148,13 @@ static void BitRoutinesUnitTest( unsigned char * const pb, UINT cbPageTest )
     AssertRTL( 0xBADF00D89ABCDEF == ChecksumFromPage( pb, cbPageTest, databasePage ) );
 }
 
+//  ================================================================
 static void XORChecksumUnitTest( const unsigned char * const pb )
+//  ================================================================
+//
+//  Test all the optimized XOR routines to make sure they return the same results
+//
+//-
 {
     const ULONG dwChecksum4KB           = ChecksumOldFormatSlowly( pb, 4096 );
     const ULONG dwChecksum4KBSSE        = FSSEInstructionsAvailable()  ? ChecksumOldFormatSSE( pb, 4096 ) : dwChecksum4KB;
@@ -153,7 +179,13 @@ static void XORChecksumUnitTest( const unsigned char * const pb )
     AssertRTL( dwChecksum8KB == dwChecksum8KBSelect );
 }
 
+//  ================================================================
 static void ECCChecksumUnitTest( const unsigned char * const pb )
+//  ================================================================
+//
+//  Test all the optimized ECC routines to make sure they return the same results
+//
+//-
 {
     const ULONG pgno                    = 1234;
     
@@ -219,7 +251,13 @@ static void TestECCChecksumSelection()
     }
 }
 
+//  ================================================================
 static void TestChecksumOnePage( unsigned char * const pb, const INT cb, const PAGETYPE pagetype )
+//  ================================================================
+//
+//  Given a page size and type, make sure checksum set and retrieve works
+//
+//-
 {
     SetPageChecksum( pb, cb, pagetype, 0x12 );
     
@@ -242,13 +280,20 @@ static void TestChecksumOnePage( unsigned char * const pb, const INT cb, const P
     AssertRTL( checksumExpected == checksumActual );
 }
 
+//  ================================================================
 static void TestFixOnePage( unsigned char * const pb, const INT cb, const PAGETYPE pagetype, const INT ibitToCorrupt )
+//  ================================================================
+//
+//  Given a page size and type, make sure checksum set and ECC fixup works
+//
+//-
 {
     Assert( ibitToCorrupt >= 0 );
     Assert( ibitToCorrupt < ( cb * 8 ) );
 
     const ULONG pgno = 9876;
     
+    //  set the checksum and save the original value
     
     SetPageChecksum( pb, cb, pagetype, pgno );
     AssertRTL( FPageHasNewChecksumFormat( pb, pagetype ) );
@@ -261,12 +306,14 @@ static void TestFixOnePage( unsigned char * const pb, const INT cb, const PAGETY
 
     const PAGECHECKSUM checksumOriginal = checksumExpected;
 
+    //  flip a bit and confirm that the checksum doesn't match
     
     FlipBit( pb, ibitToCorrupt );
     
     ChecksumPage( pb, cb, pagetype, pgno, &checksumExpected, &checksumActual );
     AssertRTL( checksumExpected != checksumActual );
 
+    //  fix the error and confirm that the checksum is back to the original value
     
     BOOL fCorrectableError;
     INT ibitCorrupted;
@@ -282,13 +329,21 @@ static void TestFixOnePage( unsigned char * const pb, const INT cb, const PAGETY
     AssertRTL( FPageHasNewChecksumFormat( pb, pagetype ) );
 }
 
+//  ================================================================
 static void TestFailToFixOnePage( unsigned char * const pb, const INT cb, const PAGETYPE pagetype, const INT ibitToCorrupt )
+//  ================================================================
+//
+//  Given a page size and type, make sure checksum set works and ECC fixup fails
+//  (because the page type doesn't support ECC or the checksum is corrupted)
+//
+//-
 {
     Assert( ibitToCorrupt >= 0 );
     Assert( ibitToCorrupt < ( cb * 8 ) );
 
     const ULONG pgno = 888888;
     
+    //  set the checksum and save the original value
     
     SetPageChecksum( pb, cb, pagetype, pgno );
 
@@ -298,12 +353,14 @@ static void TestFailToFixOnePage( unsigned char * const pb, const INT cb, const 
     ChecksumPage( pb, cb, pagetype, pgno,  &checksumExpected, &checksumActual );
     AssertRTL( checksumExpected == checksumActual );
 
+    //  flip a bit and confirm that the checksum doesn't match
     
     FlipBit( pb, ibitToCorrupt );
     
     ChecksumPage( pb, cb, pagetype, pgno, &checksumExpected, &checksumActual );
     AssertRTL( checksumExpected != checksumActual );
 
+    //  make sure we don't think the error can be fixed
     
     BOOL fCorrectableError;
     INT ibitCorrupted;
@@ -313,10 +370,17 @@ static void TestFailToFixOnePage( unsigned char * const pb, const INT cb, const 
     AssertRTL( !fCorrectableError );
 }
 
+//  ================================================================
 static void TestCorruptOnePage( unsigned char * const pb, const INT cb, const PAGETYPE pagetype )
+//  ================================================================
+//
+//  Given a page size and type, make sure checksum set and ECC fixup works
+//
+//-
 {
     const ULONG pgno = 1;
     
+    //  set the checksum and save the original value
     
     SetPageChecksum( pb, cb, pagetype, pgno );
 
@@ -326,6 +390,7 @@ static void TestCorruptOnePage( unsigned char * const pb, const INT cb, const PA
     ChecksumPage( pb, cb, pagetype, pgno, &checksumExpected, &checksumActual );
     AssertRTL( checksumExpected == checksumActual );
 
+    //  corrupt a unsigned long and confirm that the checksum doesn't match
 
     const INT           idw     = 365;
     ULONG * const       pdw     = (ULONG *)pb;
@@ -337,6 +402,7 @@ static void TestCorruptOnePage( unsigned char * const pb, const INT cb, const PA
     ChecksumPage( pb, cb, pagetype, pgno, &checksumExpected, &checksumActual );
     AssertRTL( checksumExpected != checksumActual );
     
+    //  make sure we don't think the error can be fixed
     
     BOOL fCorrectableError;
     INT ibitCorrupted;
@@ -346,8 +412,15 @@ static void TestCorruptOnePage( unsigned char * const pb, const INT cb, const PA
     AssertRTL( !fCorrectableError );
 }
 
+//  ================================================================
 static void TestSetAndChecksum( unsigned char * const pb )
+//  ================================================================
+//
+//  Test the page level routines
+//
+//-
 {
+    //  good checksums
     
     TestChecksumOnePage( pb, 8192, databasePage );
     TestChecksumOnePage( pb, 8192, databaseHeader );
@@ -357,20 +430,31 @@ static void TestSetAndChecksum( unsigned char * const pb )
     TestChecksumOnePage( pb, 4096, databaseHeader );
     TestChecksumOnePage( pb, 4096, logfileHeader );
 
+    //  single-bit corruptions on pages with ECC
 
     TestFixOnePage( pb, 8192, databasePage, 100 );
     TestFixOnePage( pb, 8192, databasePage, 129 );
     TestFixOnePage( pb, 8192, databasePage, 3097 );
     TestFixOnePage( pb, 8192, databasePage, ( 8192 * 8 ) - 1 );
 
+    //  we can't deal with a corruption in the first checksum or the format 
+    //  flag. to  avoid that, don't corrupt the v1 header at all (the v1 header 
+    //  is 40 bytes).
 
+    //  Note: everything else on the page should be corruptable, because the 
+    //  2nd, 3rd, and 4th checksums for a 32kb page are in the correctable area 
+    //  of the first page, and this should allow everything on the 2nd, 3rd, 
+    //  and 4th 8192 byte chunks to be corrected.
     
+    //  Note: testing all bits took 2:11.531 minutes, so we'll leave it disabled for now
+//#define CHECKSUM_TEST_ALL_BITS
 #ifdef CHECKSUM_TEST_ALL_BITS
     for( ULONG ibit = 40 * 8; ibit < ( 32 * 1024 * 8 ); ibit++ )
     {
 #else
     for( ULONG i = 0; i < 16; i++ )
     {
+        //           (   any byte but the header   ) * ( bits ) + ( header ) + ( random bit )
         ULONG ibit = ( rand() % ( 32 * 1024 - 40 ) ) * (  8   ) + ( 40 * 8 ) + ( rand() % 8 );
 #endif
         TestFixOnePage( pb, 32 * 1024, databasePage, ibit );
@@ -381,9 +465,12 @@ static void TestSetAndChecksum( unsigned char * const pb )
     TestFixOnePage( pb, 4096, databasePage, 30009 );
     TestFixOnePage( pb, 4096, databasePage, ( 4096 * 8 ) - 1 );
 
+    //  we can't deal with a corruption in the checksum or the format flag. to 
+    //  avoid that, don't corrupt the header at all (the header is 40 bytes)
     
     TestFixOnePage( pb, 4096, databasePage, ( ( rand() % 4000  ) + 40 ) * 8 );
 
+    //  single-bit corruptions ECC can't fix
 
     TestFailToFixOnePage( pb, 8192, databasePage, 0 );
     TestFailToFixOnePage( pb, 8192, databasePage, IbitNewChecksumFormatFlag( databasePage ) );
@@ -391,6 +478,7 @@ static void TestSetAndChecksum( unsigned char * const pb )
     TestFailToFixOnePage( pb, 4096, databasePage, 1 );
     TestFailToFixOnePage( pb, 4096, databasePage, IbitNewChecksumFormatFlag( databasePage ) );
     
+    //  single-bit corruptions on pages without ECC
 
     TestFailToFixOnePage( pb, 8192, databaseHeader, 100 );
     TestFailToFixOnePage( pb, 8192, logfileHeader, 129 );
@@ -404,6 +492,7 @@ static void TestSetAndChecksum( unsigned char * const pb )
     TestFailToFixOnePage( pb, 4096, databaseHeader, IbitNewChecksumFormatFlag( databasePage ) );
     TestFailToFixOnePage( pb, 4096, logfileHeader, ( 4096 * 8 ) - 1 );
 
+    //  multiple-bit corruptions
 
     TestCorruptOnePage( pb, 8192, databasePage );
     TestCorruptOnePage( pb, 8192, databaseHeader );
@@ -414,7 +503,9 @@ static void TestSetAndChecksum( unsigned char * const pb )
     TestCorruptOnePage( pb, 4096, logfileHeader );
 }
 
+//  ================================================================
 static void TestDehydratedPageChecksum( unsigned char * const pb )
+//  ================================================================
 {
     for ( INT cb = 4096; cb <= g_cbPageMax; cb += 4096 )
     {
@@ -423,7 +514,9 @@ static void TestDehydratedPageChecksum( unsigned char * const pb )
     }
 }
 
+//  ================================================================
 VOID KnownPageUnitTest( __out_bcount( cbSize ) unsigned char * const pb, __in_range( 32 * 1024, 32 * 1024 ) INT cbSize )
+//  ================================================================
 {
     INT ib;
 
@@ -436,6 +529,7 @@ VOID KnownPageUnitTest( __out_bcount( cbSize ) unsigned char * const pb, __in_ra
     PAGECHECKSUM checksumExpected;
     PAGECHECKSUM checksumActual;
 
+    //  we know this checksum should be 0x00000000`04042290
 
     const PAGECHECKSUM checksumDatabasePage = 0x0000000004042290;
 
@@ -444,6 +538,7 @@ VOID KnownPageUnitTest( __out_bcount( cbSize ) unsigned char * const pb, __in_ra
     AssertRTL( checksumExpected == checksumActual );
     AssertRTL( checksumDatabasePage == checksumExpected );
 
+    //  make sure the old-format checksum routines work
 
     const DWORD pgno        = 0x12345678;
     const DWORD xorChecksum = 0x89123456;
@@ -453,6 +548,7 @@ VOID KnownPageUnitTest( __out_bcount( cbSize ) unsigned char * const pb, __in_ra
     pdw[1] = pgno;
     AssertRTL( LongChecksumFromShortChecksum( xorChecksum, pgno ) == LongChecksumFromPage( pb, 8192 ) );
 
+    //  we know this checksum should be 0x9f9b9f93
 
     const PAGECHECKSUM checksumDatabaseHeader = 0x9f9b9f93;
 
@@ -462,6 +558,8 @@ VOID KnownPageUnitTest( __out_bcount( cbSize ) unsigned char * const pb, __in_ra
     AssertRTL( checksumDatabaseHeader == checksumExpected );
 
 {
+    //================================  
+    // test a large (32kiB) page
     const UINT cbPageTest = 1024 * 32;
     for( UINT i = 0; i < cbPageTest; ++i )
     {
@@ -481,10 +579,11 @@ VOID KnownPageUnitTest( __out_bcount( cbSize ) unsigned char * const pb, __in_ra
     AssertRTL( checksumDatabasePage32k == checksumActual );
     AssertRTL( checksumExpected == checksumActual );
 
-    const INT ibitFlip0 = CHAR_BIT * 40 + 1;
-    const INT ibitFlip1 = CHAR_BIT * 1024 * 8 + 2;
-    const INT ibitFlip2 = CHAR_BIT * 1024 * 16 + 3;
-    const INT ibitFlip3 = CHAR_BIT * 1024 * 24 + 4;
+    //================================  
+    const INT ibitFlip0 = CHAR_BIT * 40 + 1;                // corrupt a bit in block 0, (hit the expected checksum of block1)
+    const INT ibitFlip1 = CHAR_BIT * 1024 * 8 + 2;          // corrupt a bit in block 1
+    const INT ibitFlip2 = CHAR_BIT * 1024 * 16 + 3;     // corrupt a bit in block 2
+    const INT ibitFlip3 = CHAR_BIT * 1024 * 24 + 4;     // corrupt a bit in block 3
 
     FlipBit( pb, ibitFlip0 );
     FlipBit( pb, ibitFlip1 );
@@ -496,6 +595,7 @@ VOID KnownPageUnitTest( __out_bcount( cbSize ) unsigned char * const pb, __in_ra
     AssertRTL( checksumDatabasePage32k == checksumActual );
     AssertRTL( checksumExpected == checksumActual );
 
+    //================================  
     FlipBit( pb, ibitFlip0 );
     FlipBit( pb, ibitFlip1 );
     FlipBit( pb, ibitFlip2 );
@@ -503,25 +603,25 @@ VOID KnownPageUnitTest( __out_bcount( cbSize ) unsigned char * const pb, __in_ra
 
     ChecksumAndPossiblyFixPage( pb, cbPageTest, databasePage, pgnoLarge, fFalse, &checksumExpected, &checksumActual, &fCorrectableError, &ibitCorrupted );
     AssertRTL( fCorrectableError );
-    AssertRTL( ibitFlip0 == ibitCorrupted );
+    AssertRTL( ibitFlip0 == ibitCorrupted );        // corrupted bit in block 0 reported
     AssertRTL( checksumExpected != checksumActual );
 
     FlipBit( pb, ibitFlip0 );
     ChecksumAndPossiblyFixPage( pb, cbPageTest, databasePage, pgnoLarge, fFalse, &checksumExpected, &checksumActual, &fCorrectableError, &ibitCorrupted );
     AssertRTL( fCorrectableError );
-    AssertRTL( ibitFlip1 == ibitCorrupted );
+    AssertRTL( ibitFlip1 == ibitCorrupted );        // corrupted bit in block 1 reported
     AssertRTL( checksumExpected != checksumActual );
 
     FlipBit( pb, ibitFlip1 );
     ChecksumAndPossiblyFixPage( pb, cbPageTest, databasePage, pgnoLarge, fFalse, &checksumExpected, &checksumActual, &fCorrectableError, &ibitCorrupted );
     AssertRTL( fCorrectableError );
-    AssertRTL( ibitFlip2 == ibitCorrupted );
+    AssertRTL( ibitFlip2 == ibitCorrupted );        // corrupted bit in block 2 reported
     AssertRTL( checksumExpected != checksumActual );
 
     FlipBit( pb, ibitFlip2 );
     ChecksumAndPossiblyFixPage( pb, cbPageTest, databasePage, pgnoLarge, fFalse, &checksumExpected, &checksumActual, &fCorrectableError, &ibitCorrupted );
     AssertRTL( fCorrectableError );
-    AssertRTL( ibitFlip3 == ibitCorrupted );
+    AssertRTL( ibitFlip3 == ibitCorrupted );        // corrupted bit in block 3 reported
     AssertRTL( checksumExpected != checksumActual );
 
     FlipBit( pb, ibitFlip3 );
@@ -531,6 +631,9 @@ VOID KnownPageUnitTest( __out_bcount( cbSize ) unsigned char * const pb, __in_ra
 }
 
 {
+    //================================  
+    // test a large (16kiB) page
+    // reuse bits from the 32k test above
     const UINT cbPageTest = 1024 * 16;
     const PGNO pgnoLarge = 0x98765431;
     SetPageChecksum( pb, cbPageTest, databasePage, pgnoLarge );
@@ -545,10 +648,11 @@ VOID KnownPageUnitTest( __out_bcount( cbSize ) unsigned char * const pb, __in_ra
     AssertRTL( checksumDatabasePage16k == checksumActual );
     AssertRTL( checksumExpected == checksumActual );
 
-    const INT ibitFlip0 = CHAR_BIT * 40 + 1;
-    const INT ibitFlip1 = CHAR_BIT * 1024 * 4 + 2;
-    const INT ibitFlip2 = CHAR_BIT * 1024 * 8 + 3;
-    const INT ibitFlip3 = CHAR_BIT * 1024 * 12 + 4;
+    //================================  
+    const INT ibitFlip0 = CHAR_BIT * 40 + 1;                // corrupt a bit in block 0, (hit the expected checksum of block1)
+    const INT ibitFlip1 = CHAR_BIT * 1024 * 4 + 2;          // corrupt a bit in block 1
+    const INT ibitFlip2 = CHAR_BIT * 1024 * 8 + 3;      // corrupt a bit in block 2
+    const INT ibitFlip3 = CHAR_BIT * 1024 * 12 + 4;     // corrupt a bit in block 3
 
     FlipBit( pb, ibitFlip0 );
     FlipBit( pb, ibitFlip1 );
@@ -562,6 +666,9 @@ VOID KnownPageUnitTest( __out_bcount( cbSize ) unsigned char * const pb, __in_ra
 }
 
 {
+    //================================  
+    // test a large dehydrated (28kiB) page
+    // reuse bits from the 32k test above
     const UINT cbPageTest = 1024 * 28;
     const PGNO pgnoLarge = 0x98765431;
     SetPageChecksum( pb, cbPageTest, databasePage, pgnoLarge );
@@ -576,10 +683,11 @@ VOID KnownPageUnitTest( __out_bcount( cbSize ) unsigned char * const pb, __in_ra
     AssertRTL( checksumDatabasePage28k == checksumActual );
     AssertRTL( checksumExpected == checksumActual );
 
-    const INT ibitFlip0 = CHAR_BIT * 40 + 1;
-    const INT ibitFlip1 = CHAR_BIT * 1024 * 8 + 2;
-    const INT ibitFlip2 = CHAR_BIT * 1024 * 16 + 3;
-    const INT ibitFlip3 = CHAR_BIT * 1024 * 24 + 4;
+    //================================  
+    const INT ibitFlip0 = CHAR_BIT * 40 + 1;                // corrupt a bit in block 0, (hit the expected checksum of block1)
+    const INT ibitFlip1 = CHAR_BIT * 1024 * 8 + 2;          // corrupt a bit in block 1
+    const INT ibitFlip2 = CHAR_BIT * 1024 * 16 + 3;     // corrupt a bit in block 2
+    const INT ibitFlip3 = CHAR_BIT * 1024 * 24 + 4;     // corrupt a bit in block 3
 
     FlipBit( pb, ibitFlip0 );
     FlipBit( pb, ibitFlip1 );
@@ -594,22 +702,29 @@ VOID KnownPageUnitTest( __out_bcount( cbSize ) unsigned char * const pb, __in_ra
 
 }
 
+//  ================================================================
 INT IbitFirstBitToTest()
+//  ================================================================
 {
     return 0;
 }
 
+//  ================================================================
 INT CbChunkSizeToTestRemainingBlocks()
+//  ================================================================
 {
     return sizeof( XECHECKSUM );
 }
 
 INT CbChunkSizeToTestFirstBlock()
+//  ================================================================
 {
     return ( max( sizeof( PAGECHECKSUM ), IbitNewChecksumFormatFlag( databasePage ) / 8 + 1 ) + CbChunkSizeToTestRemainingBlocks() );
 }
 
+//  ================================================================
 INT IbitNextBitToTest( const INT ibitCurrent, const INT cbPageSize )
+//  ================================================================
 {
     const INT ibCurrent = ibitCurrent / 8;
     INT ibitNext = ibitCurrent + 1;
@@ -617,6 +732,7 @@ INT IbitNextBitToTest( const INT ibitCurrent, const INT cbPageSize )
 
     AssertRTL( ibNext <= cbPageSize );
 
+    //  nothing to check if we haven't changed bytes
 
     if ( ibNext == ibCurrent )
     {
@@ -631,9 +747,11 @@ INT IbitNextBitToTest( const INT ibitCurrent, const INT cbPageSize )
     const INT cbChunkRemaining = CbChunkSizeToTestRemainingBlocks();
     const INT cbChunk = ( iBlockCurrent == 0 ) ? cbChunkFirst : cbChunkRemaining;
 
+    //  we'll only check some bytes at the beginning of each page or block
 
     if ( ibNextFromBlock == cbChunk )
     {
+        //  go to the beginning of the next block
 
         ibNext = ibNextFirstInBlock + cbBlock;
         if ( ibNext >= cbPageSize )
@@ -648,12 +766,16 @@ INT IbitNextBitToTest( const INT ibitCurrent, const INT cbPageSize )
     return ibitNext;
 }
 
+//  ================================================================
 VOID AssertPagesAreNotSame( const unsigned char * const pb1, const unsigned char * const pb2, const INT cb )
+//  ================================================================
 {
     AssertRTL( memcmp( pb1, pb2, cb ) != 0 );
 }
 
+//  ================================================================
 VOID AssertPagesAreSame( const unsigned char * const pb1, const unsigned char * const pb2, const INT cb )
+//  ================================================================
 {
     if ( memcmp( pb1, pb2, cb ) == 0 )
     {
@@ -680,7 +802,9 @@ VOID AssertPagesAreSame( const unsigned char * const pb1, const unsigned char * 
     AssertRTL( fFalse );
 }
 
+//  ================================================================
 VOID ExtensiveKnownPageUnitTest( __out_bcount( cbSizeMax ) unsigned char * const pb, __in_range( g_cbPageMin, g_cbPageMax ) INT cbSizeMin, __in_range( g_cbPageMin, g_cbPageMax ) INT cbSizeMax )
+//  ================================================================
 {
     wprintf( L"ExtensiveKnownPageUnitTest starting.\n" );
 
@@ -689,27 +813,33 @@ VOID ExtensiveKnownPageUnitTest( __out_bcount( cbSizeMax ) unsigned char * const
     AssertRTL( pbExpanded != NULL );
     unsigned char* const pbData = pbExpanded + cbSizeMax;
 
+    //  protect on both ends.
 
     OSMemoryPageProtect( pbExpanded, cbSizeMax );
     OSMemoryPageProtect( pbExpanded + 2 * cbSizeMax, cbSizeMax );
 
+    //  go through all page sizes
 
     for ( INT cbSize = cbSizeMin; cbSize <= cbSizeMax; cbSize *= 2 )
     {
+        //  build page first
 
         for( INT ib = 0; ib < cbSize; ib++ )
         {
             pb[ib] = (unsigned char)ib;
         }
 
+        //  compute correct checksum and make a copy of the page
 
         SetPageChecksum( pb, cbSize, databasePage, pgno );
         memcpy( pbData, pb, cbSize );
 
+        //  protect all original data and unchangeable part of local buffer
 
         OSMemoryPageProtect( pb, g_cbPageMax );
         OSMemoryPageProtect( pbData + cbSize, cbSizeMax - cbSize );
 
+        //  test both with single-bit correction on and off
 
         BOOL fFixErrors = fFalse;
         do
@@ -756,11 +886,14 @@ VOID ExtensiveKnownPageUnitTest( __out_bcount( cbSizeMax ) unsigned char * const
             {
                 cbit++;
 
+                //  we currently cannot fix bit flips on the checksum format flag
+                //  we currently cannot fix bit flips on the first block's checksum
 
                 const INT fBitBelongsToFirstChecksum = ( ibit / 8 ) < sizeof( XECHECKSUM );
                 const INT fBitIsChecksumFormatFlag = ibit == (INT)IbitNewChecksumFormatFlag( databasePage );
                 const INT fBitFixableSingleBitError = !( fBitBelongsToFirstChecksum || fBitIsChecksumFormatFlag );
 
+                //  flip one bit
 
                 FlipBit( pbData, ibit );
                 if ( !fFixErrors )
@@ -805,6 +938,7 @@ VOID ExtensiveKnownPageUnitTest( __out_bcount( cbSizeMax ) unsigned char * const
                 }
             }
 
+            //  make sure we cover all cases
 
             AssertRTL( ( cFixed + cUnfixed ) == cbit );
             if ( fFixErrors )
@@ -831,11 +965,14 @@ VOID ExtensiveKnownPageUnitTest( __out_bcount( cbSizeMax ) unsigned char * const
             cbit = 0;
             for ( INT ibit1 = IbitFirstBitToTest(); ibit1 >= 0; ibit1 = IbitNextBitToTest( ibit1, cbSize ) )
             {
+                //  go through all other bits and flip one by one
 
                 for ( INT ibit2 = IbitNextBitToTest( ibit1, cbSize ); ibit2 >= 0; ibit2 = IbitNextBitToTest( ibit2, cbSize ) )
                 {
                     cbit++;
 
+                    //  we currently cannot fix bit flips on the checksum format flag
+                    //  we currently cannot fix bit flips on the first block's checksum
 
                     const INT fBit1BelongsToFirstChecksum = ( ibit1 / 8 ) < sizeof( XECHECKSUM );
                     const INT fBit1IsChecksumFormatFlag = ibit1 == (INT)IbitNewChecksumFormatFlag( databasePage );
@@ -844,6 +981,7 @@ VOID ExtensiveKnownPageUnitTest( __out_bcount( cbSizeMax ) unsigned char * const
                     const INT fBit2IsChecksumFormatFlag = ibit2 == (INT)IbitNewChecksumFormatFlag( databasePage );
                     const INT fBit2FixableSingleBitError = !( fBit2BelongsToFirstChecksum || fBit2IsChecksumFormatFlag );
 
+                    //  flip bits
 
                     FlipBit( pbData, ibit1 );
                     FlipBit( pbData, ibit2 );
@@ -892,7 +1030,7 @@ VOID ExtensiveKnownPageUnitTest( __out_bcount( cbSizeMax ) unsigned char * const
                         else if ( ibitCorrupted == ibit2 )
                         {
                             AssertRTL( fCorrectableError );
-                            AssertRTL( !fBit1FixableSingleBitError );
+                            AssertRTL( !fBit1FixableSingleBitError );   // should have been reported first.
                             AssertRTL( fBit2FixableSingleBitError );
                             cFixable2++;
                         }
@@ -932,6 +1070,7 @@ VOID ExtensiveKnownPageUnitTest( __out_bcount( cbSizeMax ) unsigned char * const
                 }
             }
 
+            //  make sure we cover all cases
 
             AssertRTL( cFixableNone > 0 );
             AssertRTL( ( cFixed + cUnfixed ) == cbit );
@@ -965,7 +1104,9 @@ VOID ExtensiveKnownPageUnitTest( __out_bcount( cbSizeMax ) unsigned char * const
     wprintf( L"ExtensiveKnownPageUnitTest done.\n" );
 }
 
+//  ================================================================
 ERR ErrChecksumUnitTest( INT cIterations )
+//  ================================================================
 {
     ERR err = JET_errSuccess;
 
@@ -1089,17 +1230,23 @@ ERR ErrChecksumPerfTest( PFNCHECKSUMNEWFORMAT pfnChecksumMethod, UINT cbPageTest
 
 
 
+//  ================================================================
 JETUNITTEST( CHECKSUM, FunctionalValidation )
+//  ================================================================
 {
     CallSx( ErrChecksumUnitTest( 5 ), JET_errOutOfMemory );
 }
 
+//  ================================================================
 JETUNITTESTEX( CHECKSUM, ExtendedFunctionalValidation, JetSimpleUnitTest::dwDontRunByDefault )
+//  ================================================================
 {
     CallSx( ErrChecksumUnitTest( 100 * 1000 ), JET_errOutOfMemory );
 }
 
+//  ================================================================
 JETUNITTESTEX( CHECKSUM, Perf, JetSimpleUnitTest::dwDontRunByDefault )
+//  ================================================================
 {
     CHECKSUM_PERF_TEST( ChecksumNewFormat64Bit, 32768, 100 * 1024 * 1024 );
     CHECKSUM_PERF_TEST( ChecksumNewFormatSSE, 32768, 100 * 1024 * 1024 );

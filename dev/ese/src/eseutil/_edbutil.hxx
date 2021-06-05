@@ -38,6 +38,9 @@ enum UTILMODE
     modeCopyFile
 };
 
+//
+//  ESE Shadow Library info
+//
 
 #define ESESHADOW_LOCAL_DEFERRED_DLL
 
@@ -56,7 +59,7 @@ struct UTILOPTS
     WCHAR       *wszRestore;
     WCHAR       *wszBase;
     WCHAR       *wszIntegPrefix;
-    void        *pv;
+    void        *pv;                    // Points to mode-specific structures.
     
     UTILMODE    mode;
     INT         fUTILOPTSFlags;
@@ -73,37 +76,43 @@ struct UTILOPTS
     LONG        pageTempDBMin;
     LONG        lMaxCacheSize;
 
-    LONG            crstmap;
+    LONG            crstmap;                // values for JetInit3
     LONG            irstmap;
     JET_RSTMAP2_W   *prstmap;
 
     JET_GRBIT   grbitShrink;
     BOOL        fRunLeakReclaimer;
 
+    //
+    //  VSS Snapshot
+    //
+    // note: Only valid if fUTILOPTSOperateTempVss
     EseShadowContext    eseShadowContext;
 
     JET_ENGINEFORMATVERSION     efvUserSpecified;
 };
 
 
+// Flags:
 const INT   fUTILOPTSSuppressLogo               = 0x00000001;
-const INT   fUTILOPTSDefragRepair               = 0x00000002;
-const INT   fUTILOPTSPreserveTempDB             = 0x00000004;
-const INT   fUTILOPTSDefragInfo                 = 0x00000008;
-const INT   fUTILOPTSIncrBackup                 = 0x00000010;
-const INT   fUTILOPTSVerbose                    = 0x00000040;
-const INT   fUTILOPTSReportErrors               = 0x00000080;
-const INT   fUTILOPTSDontRepair                 = 0x00000100;
-const INT   fUTILOPTSDumpStats                  = 0x00000200;
-const INT   fUTILOPTSDontBuildIndexes           = 0x00000400;
-const INT   fUTILOPTSDebugMode                  = 0x00000800;
+const INT   fUTILOPTSDefragRepair               = 0x00000002;       // Defrag mode only.
+const INT   fUTILOPTSPreserveTempDB             = 0x00000004;       // Defrag and upgrade modes. In HardRecovery use for KeepLogs
+const INT   fUTILOPTSDefragInfo                 = 0x00000008;       // Defrag and upgrade modes.
+const INT   fUTILOPTSIncrBackup                 = 0x00000010;       // Backup only.
+// const INT    fUTILOPTSInPlaceUpgrade             = 0x00000020;       // Upgrade only.
+const INT   fUTILOPTSVerbose                    = 0x00000040;       // Repair/Integrity only
+const INT   fUTILOPTSReportErrors               = 0x00000080;       // Repair/Integrity only
+const INT   fUTILOPTSDontRepair                 = 0x00000100;       // Repair only
+const INT   fUTILOPTSDumpStats                  = 0x00000200;       // Integrity only
+const INT   fUTILOPTSDontBuildIndexes           = 0x00000400;       // Integrity only
+const INT   fUTILOPTSDebugMode                  = 0x00000800;       // Debug mode. Behavior depends on the primary option.
 const INT   fUTILOPTS8KPage                     = 0x00001000;
-const INT   fUTILOPTSDumpRestoreEnv             = 0x00004000;
-const INT   fUTILOPTSServerSim                  = 0x00008000;
-const INT   fUTILOPTSChecksumEDB                = 0x00010000;
-const INT   fUTILOPTSRepairCheckOnly            = 0x00100000;
+const INT   fUTILOPTSDumpRestoreEnv             = 0x00004000;       // HardRecovery - dump Restore.env
+const INT   fUTILOPTSServerSim                  = 0x00008000;       // HardRecovery - simulate server
+const INT   fUTILOPTSChecksumEDB                = 0x00010000;       // checksum EDB
+const INT   fUTILOPTSRepairCheckOnly            = 0x00100000;       // Repair only
 const INT   fUTILOPTS4KPage                     = 0x00200000;
-const INT   fUTILOPTSDelOutOfRangeLogs          = 0x00400000;
+const INT   fUTILOPTSDelOutOfRangeLogs          = 0x00400000;       // Recovery only
 const INT   fUTILOPTS32KPage                    = 0x00800000;
 const INT   fUTILOPTS16KPage                    = 0x01000000;
 const INT   fUTILOPTS2KPage                     = 0x02000000;
@@ -242,6 +251,9 @@ inline VOID UTILOPTSResetTrimDatabase( _In_ UTILOPTS* const putilopts )         
 #define PUBLIC    extern
 #define INLINE    inline
 
+//
+//  Minimalistic assert() functionality.
+//
 #ifdef DEBUG
 #define assert( expr )              if ( !(expr) )                      \
                                     {                                   \

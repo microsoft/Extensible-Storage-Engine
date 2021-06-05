@@ -12,7 +12,7 @@ CStats::ERR ErrTestZerodHisto( CStats * pHistoClass, const enum TestZeroFlags fZ
     ULONG pct = 0;
 
     ULONG iTest = 0;
-    BOOL fResult = fTrue;
+    BOOL fResult = fTrue; // assumed innocent, until proven guilty.
     ULONG fBailOnError = fFalse;
 
     #define CallTest( func )        if ( CStats::ERR::errSuccess != ( err = (func) ) )      \
@@ -32,6 +32,7 @@ CStats::ERR ErrTestZerodHisto( CStats * pHistoClass, const enum TestZeroFlags fZ
 
     pHistoClass->Zero();
 
+    //  Test basic empty stats ...
 
     TestTest( pHistoClass->Min() == 0xFFFFFFFFFFFFFFFF );
     TestTest( pHistoClass->Ave() == 0 );
@@ -40,6 +41,7 @@ CStats::ERR ErrTestZerodHisto( CStats * pHistoClass, const enum TestZeroFlags fZ
     TestTest( pHistoClass->Total() == 0 );
     TestTest( pHistoClass->DblAve() == 0 );
 
+    //  Test empty sample enumeration ...
 
     if ( !( fZeroTestFlags & fHasExplicitBuckets ) )
     {
@@ -60,6 +62,7 @@ CStats::ERR ErrTestZerodHisto( CStats * pHistoClass, const enum TestZeroFlags fZ
     TestTest( 0 == chits );
     CallTest( pHistoClass->ErrReset() );
 
+    //  Test empty percentile enumeration
 
     if ( !( fZeroTestFlags & fNoPercentileSupport ) )
     {

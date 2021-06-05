@@ -5,7 +5,12 @@
 #define _OSU_EVENT_HXX_INCLUDED
 
 
+//  Event Logging
 
+//  reports error event in the context of a category and optionally
+//  in the context of a IDEvent.  If IDEvent is 0, then an IDEvent
+//  is chosen based on error code.  If IDEvent is !0, then the
+//  appropriate event is reported.
 
 class INST;
 
@@ -18,7 +23,7 @@ void UtilReportEvent(
     const DWORD         cbRawData = 0,
     void *              pvRawData = NULL,
     const INST *        pinst = NULL,
-    const LONG          lEventLoggingLevel = 1 );
+    const LONG          lEventLoggingLevel = 1 );   //  1==JET_EventLoggingLevelMin
 void UtilReportEventOfError(
     const CategoryId    catid,
     const MessageId     msgid,
@@ -50,9 +55,10 @@ public:
     }
     BOOL FNeedToLog( const DWORD dwContextKey )
     {
-        Assert( dwContextKey != 0 );
+        Assert( dwContextKey != 0 ); // or stuff will break down.
         if ( rgdwContextKeys[ _countof(rgdwContextKeys) - 1 ] != 0 )
         {
+            //  Array is full, we can no longer suppress anyone, suppress all subsequent events.
             return fFalse;
         }
 
@@ -68,8 +74,10 @@ public:
         {
             if ( rgdwContextKeys[ictx] == dwContextKey )
             {
+                //  We have lost a race with another thread ...
                 return fFalse;
             }
+            //  whew the update wasn't our context, try next slot
             ictx++;
         }
         return ictx < _countof(rgdwContextKeys) && !fLost;
@@ -77,12 +85,14 @@ public:
 };
 
 
+//  init event subsystem
 
 ERR ErrOSUEventInit();
 
+//  terminate event subsystem
 
 void OSUEventTerm();
 
 
-#endif
+#endif  //  _OSU_EVENT_HXX_INCLUDED
 

@@ -10,9 +10,11 @@
 #include "testerr.h"
 #include "bstf.hxx"
 
-#pragma warning( disable : 4718 )
+#pragma warning( disable : 4718 ) //  recursive call has no side effects, deleting
 
 
+//  ================================================================
+//  collection.hxx required support
 
 inline void COLLUNITEnforceFail( const char* szMessage, const char* szFilename, LONG lLine )
 {
@@ -35,7 +37,7 @@ inline void COLLUNITAssertFail( const char * szMessage, const char * szFilename,
     {                                                       \
         COLLUNITAssertFail( #exp, __FILE__, __LINE__ );     \
     }
-#else
+#else   //  !DEBUG
 #define COLLAssert( exp )
 #endif
 
@@ -45,7 +47,7 @@ inline void COLLUNITAssertFail( const char * szMessage, const char * szFilename,
     {                                                                   \
         COLLUNITAssertFail( sz, __FILE__, __LINE__, __VA_ARGS__ );      \
     }
-#else
+#else   //  !DEBUG
 #define COLLAssertSz( exp, sz, ... )
 #endif
 

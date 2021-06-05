@@ -3,8 +3,11 @@
 
 #include "resmgremulatorunit.hxx"
 
+// Unit test class
 
+//  ================================================================
 class FixedCacheSimulationIteratorTest : public UNITTEST
+//  ================================================================
 {
     private:
         static FixedCacheSimulationIteratorTest s_instance;
@@ -40,7 +43,9 @@ bool FixedCacheSimulationIteratorTest::FRunUnderESENT() const           { return
 bool FixedCacheSimulationIteratorTest::FRunUnderESE97() const           { return true; }
 
 
+//  ================================================================
 ERR FixedCacheSimulationIteratorTest::ErrTest()
+//  ================================================================
 {
     ERR err = JET_errSuccess;
     
@@ -54,7 +59,9 @@ HandleError:
     return err;
 }
 
+//  ================================================================
 ERR FixedCacheSimulationIteratorTest::ErrEmpty_()
+//  ================================================================
 {
     ERR err = JET_errSuccess;
 
@@ -74,7 +81,9 @@ HandleError:
     return err;
 }
 
+//  ================================================================
 ERR FixedCacheSimulationIteratorTest::ErrSingleSample_()
+//  ================================================================
 {
     ERR err = JET_errSuccess;
 
@@ -104,7 +113,9 @@ HandleError:
     return err;
 }
 
+//  ================================================================
 ERR FixedCacheSimulationIteratorTest::ErrConstantFunction_()
+//  ================================================================
 {
     ERR err = JET_errSuccess;
 
@@ -181,7 +192,9 @@ HandleError:
     return err;
 }
 
+//  ================================================================
 ERR FixedCacheSimulationIteratorTest::ErrIncreasingFunction_()
+//  ================================================================
 {
     ERR err = JET_errSuccess;
 
@@ -258,7 +271,9 @@ HandleError:
     return err;
 }
 
+//  ================================================================
 ERR FixedCacheSimulationIteratorTest::ErrDecreasingFunction_()
+//  ================================================================
 {
     ERR err = JET_errSuccess;
 
@@ -336,7 +351,9 @@ HandleError:
 }
 
 
+//  ================================================================
 class CacheFaultLookupSimulationIteratorTest : public UNITTEST
+//  ================================================================
 {
     private:
         static CacheFaultLookupSimulationIteratorTest s_instance;
@@ -372,7 +389,9 @@ bool CacheFaultLookupSimulationIteratorTest::FRunUnderESENT() const         { re
 bool CacheFaultLookupSimulationIteratorTest::FRunUnderESE97() const         { return true; }
 
 
+//  ================================================================
 ERR CacheFaultLookupSimulationIteratorTest::ErrTest()
+//  ================================================================
 {
     ERR err = JET_errSuccess;
     
@@ -386,7 +405,9 @@ HandleError:
     return err;
 }
 
+//  ================================================================
 ERR CacheFaultLookupSimulationIteratorTest::ErrEmpty_()
+//  ================================================================
 {
     ERR err = JET_errSuccess;
 
@@ -406,7 +427,9 @@ HandleError:
     return err;
 }
 
+//  ================================================================
 ERR CacheFaultLookupSimulationIteratorTest::ErrSingleSample_()
+//  ================================================================
 {
     ERR err = JET_errSuccess;
 
@@ -436,7 +459,9 @@ HandleError:
     return err;
 }
 
+//  ================================================================
 ERR CacheFaultLookupSimulationIteratorTest::ErrConstantFunction_()
+//  ================================================================
 {
     ERR err = JET_errSuccess;
 
@@ -475,7 +500,9 @@ HandleError:
     return err;
 }
 
+//  ================================================================
 ERR CacheFaultLookupSimulationIteratorTest::ErrIncreasingFunction_()
+//  ================================================================
 {
     ERR err = JET_errSuccess;
 
@@ -532,7 +559,9 @@ HandleError:
     return err;
 }
 
+//  ================================================================
 ERR CacheFaultLookupSimulationIteratorTest::ErrDecreasingFunction_()
+//  ================================================================
 {
     ERR err = JET_errSuccess;
 
@@ -590,7 +619,9 @@ HandleError:
 }
 
 
+//  ================================================================
 class CacheFaultMinSimulationIteratorTest : public UNITTEST
+//  ================================================================
 {
     private:
         static CacheFaultMinSimulationIteratorTest s_instance;
@@ -628,7 +659,9 @@ bool CacheFaultMinSimulationIteratorTest::FRunUnderESENT() const            { re
 bool CacheFaultMinSimulationIteratorTest::FRunUnderESE97() const            { return true; }
 
 
+//  ================================================================
 ERR CacheFaultMinSimulationIteratorTest::ErrTest()
+//  ================================================================
 {
     ERR err = JET_errSuccess;
     
@@ -644,7 +677,9 @@ HandleError:
     return err;
 }
 
+//  ================================================================
 ERR CacheFaultMinSimulationIteratorTest::ErrEmpty_()
+//  ================================================================
 {
     ERR err = JET_errSuccess;
 
@@ -664,7 +699,9 @@ HandleError:
     return err;
 }
 
+//  ================================================================
 ERR CacheFaultMinSimulationIteratorTest::ErrSingleSampleFirstZero_()
+//  ================================================================
 {
     ERR err = JET_errSuccess;
 
@@ -688,7 +725,9 @@ HandleError:
     return err;
 }
 
+//  ================================================================
 ERR CacheFaultMinSimulationIteratorTest::ErrSingleSampleFirstNonZero_()
+//  ================================================================
 {
     ERR err = JET_errSuccess;
 
@@ -712,7 +751,9 @@ HandleError:
     return err;
 }
 
+//  ================================================================
 ERR CacheFaultMinSimulationIteratorTest::ErrTwoSamplesFirstZero_()
+//  ================================================================
 {
     ERR err = JET_errSuccess;
 
@@ -741,7 +782,9 @@ HandleError:
     return err;
 }
 
+//  ================================================================
 ERR CacheFaultMinSimulationIteratorTest::ErrTwoSamplesFirstNonZero_()
+//  ================================================================
 {
     ERR err = JET_errSuccess;
 
@@ -772,7 +815,9 @@ HandleError:
     return err;
 }
 
+//  ================================================================
 ERR CacheFaultMinSimulationIteratorTest::ErrSampleDiffBelowThreshold_()
+//  ================================================================
 {
     ERR err = JET_errSuccess;
 
@@ -824,7 +869,9 @@ HandleError:
     return err;
 }
 
+//  ================================================================
 ERR CacheFaultMinSimulationIteratorTest::ErrMaxSamples_()
+//  ================================================================
 {
     ERR err = JET_errSuccess;
 
@@ -877,7 +924,9 @@ HandleError:
 }
 
 
+//  ================================================================
 class ChkptDepthSimulationIteratorTest : public UNITTEST
+//  ================================================================
 {
     private:
         static ChkptDepthSimulationIteratorTest s_instance;
@@ -913,7 +962,9 @@ bool ChkptDepthSimulationIteratorTest::FRunUnderESENT() const           { return
 bool ChkptDepthSimulationIteratorTest::FRunUnderESE97() const           { return true; }
 
 
+//  ================================================================
 ERR ChkptDepthSimulationIteratorTest::ErrTest()
+//  ================================================================
 {
     ERR err = JET_errSuccess;
     
@@ -927,7 +978,9 @@ HandleError:
     return err;
 }
 
+//  ================================================================
 ERR ChkptDepthSimulationIteratorTest::ErrEmpty_()
+//  ================================================================
 {
     ERR err = JET_errSuccess;
 
@@ -947,7 +1000,9 @@ HandleError:
     return err;
 }
 
+//  ================================================================
 ERR ChkptDepthSimulationIteratorTest::ErrSingleSample_()
+//  ================================================================
 {
     ERR err = JET_errSuccess;
 
@@ -977,7 +1032,9 @@ HandleError:
     return err;
 }
 
+//  ================================================================
 ERR ChkptDepthSimulationIteratorTest::ErrConstantFunction_()
+//  ================================================================
 {
     ERR err = JET_errSuccess;
 
@@ -1054,7 +1111,9 @@ HandleError:
     return err;
 }
 
+//  ================================================================
 ERR ChkptDepthSimulationIteratorTest::ErrIncreasingFunction_()
+//  ================================================================
 {
     ERR err = JET_errSuccess;
 
@@ -1131,7 +1190,9 @@ HandleError:
     return err;
 }
 
+//  ================================================================
 ERR ChkptDepthSimulationIteratorTest::ErrDecreasingFunction_()
+//  ================================================================
 {
     ERR err = JET_errSuccess;
 

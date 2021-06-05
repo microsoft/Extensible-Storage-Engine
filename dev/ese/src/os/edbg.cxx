@@ -3,10 +3,16 @@
 
 #include "osstd.hxx"
 
+//  we use LoadLibrary in here to test loading our own DLL for EDBGLoad
 #undef LoadLibraryExW
 
+// SOURCE INSIGHT USERS:
+// Add the following to your c.tom file:
+/*
+DEBUG_EXT( name )       VOID name(  const PDEBUG_CLIENT pdebugClient, const INT argc, const CHAR * const argv[]  )
+*/
 
-
+// Needed only for the debugger versioning.
 #if defined(ESENT)
 #include "ntverp.h"
 #elif defined(ESEEX)
@@ -17,10 +23,12 @@
 
 
 #pragma push_macro( "Alloc" )
+// The custom Alloc macro messes up structures in dbgeng.h.
 #undef Alloc
 #include <dbgeng.h>
 #pragma pop_macro( "Alloc" )
 
+// Allows easier porting from the older wdbgexts-style extensions.
 #define dprintf EDBGPrintf
 
 #ifdef DEBUGGER_EXTENSION
@@ -36,10 +44,12 @@
 #include "_logwrite.hxx"
 #include "_logread.hxx"
 
-#include "malloc.h"
+#include "malloc.h" // needed for alloca()
 
+// Not worth fixing FORMAT_xxx macros which generate bit shift warnings.
 #pragma warning(disable:4293)
 
+// Until Exchange updates their dbgeng.h file:
 #ifndef DEBUG_OUTCTL_AMBIENT_DML
 #define DEBUG_OUTCTL_AMBIENT_DML       0xfffffffe
 #endif
@@ -48,8 +58,10 @@
 #define DEBUG_OUTCTL_AMBIENT_TEXT      0xffffffff
 #endif
 
+// We may need to store symbols, including their modules.
 #define MAX_SYMBOL                      (2 * MAX_PATH + 1)
 
+// Pdls() redirected 
 VOID AssertEDBGDebugger();
 
 #ifdef DEBUG
@@ -67,8 +79,11 @@ VOID AssertEDBGDebugger();
 #endif
 
 
+// for now just assert, but some point would love to throw an exception and catch
+// it in the !ese main, so that we don't AV the debugger.
 #define EDBGPanic       AssertEDBG
 
+// for possible future use ...
 
 #define ErrEDBGCheck( err )         ErrERRCheck( err )
 
@@ -103,13 +118,15 @@ namespace OSSYNC
 
 extern TableClassNamesLifetimeManager g_tableclassnames;
 
+// In order to picked up by the DATA export in the DLL, it needs
+// to be marked as extern C.
 extern "C" {
 extern const EDBGGlobals rgEDBGGlobals[];
-}
+} // extern "C"
 
 const EDBGGlobals rgEDBGGlobals[] =
 {
-    EDBGAddGlobal( cEDBGGlobals, NULL ),
+    EDBGAddGlobal( cEDBGGlobals, NULL ),  //  must be the first entry of the array
 
     EDBGAddGlobal( g_tickLastGiven, NULL ),
     EDBGAddGlobal( g_cparam, NULL ),
@@ -182,21 +199,30 @@ const EDBGGlobals rgEDBGGlobals[] =
 
 const SIZE_T cEDBGGlobals = _countof(rgEDBGGlobals);
 
+// Used by INST.
 const EDBGGlobals* rgEDBGGlobalsArray = rgEDBGGlobals;
 
+//  debugger's copy of the globals table
 EDBGGlobals * g_rgEDBGGlobalsDebugger = NULL;
 
 
+//  ****************************************************************
+//  STRUCTURES AND CLASSES
+//  ****************************************************************
 
 
+//  ================================================================
 typedef VOID (*EDBGFUNC)(
+//  ================================================================
     const PDEBUG_CLIENT pdebugClient,
     const INT argc,
     const CHAR * const argv[]
     );
 
 
+//  ================================================================
 class CPRINTFWDBG : public CPRINTF
+//  ================================================================
 {
     public:
         VOID __cdecl operator()( const char * szFormat, ... );
@@ -206,11 +232,13 @@ class CPRINTFWDBG : public CPRINTF
 
     private:
         CPRINTFWDBG() {}
-        static CHAR szBuf[1024];
+        static CHAR szBuf[1024];    //  WARNING: not multi-threaded safe!
 };
 
 
+//  ================================================================
 class CDUMP
+//  ================================================================
 {
     public:
         CDUMP() {}
@@ -219,8 +247,10 @@ class CDUMP
 };
 
 
+//  ================================================================
 template< class _STRUCT>
 class CDUMPA : public CDUMP
+//  ================================================================
 {
     public:
         VOID Dump(
@@ -231,7 +261,9 @@ class CDUMPA : public CDUMP
 };
 
 
+//  ================================================================
 struct EDBGFUNCMAP
+//  ================================================================
 {
     const char *    szCommand;
     EDBGFUNC        function;
@@ -240,7 +272,9 @@ struct EDBGFUNCMAP
 
 #define bitEdbgDumpKeys     (0x10)
 
+//  ================================================================
 struct CDUMPMAP
+//  ================================================================
 {
     const char *    szCommand;
     CDUMP      *    pcdump;
@@ -248,12 +282,17 @@ struct CDUMPMAP
 };
 
 
+//  HACK: declare dummy instances of these classes to allow dumping them
+//
 typedef CDynamicHashTable<DWORD,DWORD>                  CDynamicHashTableEDBG;
 typedef CApproximateIndex<DWORD,DWORD,0>                CApproximateIndexEDBG;
 typedef CInvasiveList<DWORD,0>                          CInvasiveListEDBG;
 typedef CLRUKResourceUtilityManager<2,DWORD,0,DWORD>    CLRUKResourceUtilityManagerEDBG;
 
 
+//  ****************************************************************
+//  PROTOTYPES
+//  ****************************************************************
 
 
 #define VariableNameToString( var ) #var
@@ -341,6 +380,9 @@ extern VOID DBUTLDumpRec( const LONG cbPage, const FUCB * const pfucbTable, cons
 
 
 
+//  ****************************************************************
+//  GLOBALS
+//  ****************************************************************
 
 
 
@@ -350,31 +392,36 @@ LOCAL PDEBUG_SYMBOLS g_DebugSymbols;
 LOCAL PDEBUG_SYSTEM_OBJECTS g_DebugSystemObjects;
 LOCAL PDEBUG_DATA_SPACES g_DebugDataSpaces;
 
+//  EDBG Debugging facilities, which is basically "printf" debugging...
+//
 enum
 {
-    eDebugModeNone      = 0,
-    eDebugModeErrors    = 1,
-    eDebugModeAlternate = 2,
-    eDebugModeBasic     = 3,
-    eDebugModeMore      = 4,
-    eDebugModeVerbose   = 5,
+    eDebugModeNone      = 0,    //
+    eDebugModeErrors    = 1,    //  [Default] Print errors and AssertEDBG()s.
+    eDebugModeAlternate = 2,    //  Use alternate / legacy command implementations.
+    eDebugModeBasic     = 3,    //  Basic debug tracing / stuff.
+    eDebugModeMore      = 4,    //
+    eDebugModeVerbose   = 5,    //
     eDebugModeMicroOps  = 6,
 };
 LOCAL ULONG     g_eDebugMode        = eDebugModeErrors;
 #define         fDebugMode          (g_eDebugMode >= eDebugModeBasic )
 
-LOCAL BOOL      g_fTryInitEDBGGlobals = fFalse;
-LOCAL ULONG     g_cSymInitFail        = 0;
-const ULONG     cSymInitAttemptsMax = 3;
+LOCAL BOOL      g_fTryInitEDBGGlobals = fFalse;   //  debugger extension has tried to auto-load the globals table
+LOCAL ULONG     g_cSymInitFail        = 0;        //  number of times attempts to initialise the symbols sub-system failed
+const ULONG     cSymInitAttemptsMax = 3;        //  max attempts to initialise the symbols sub-system
 
-LOCAL HINSTANCE g_hLibrary            = NULL;
+// REVIEW: Is this obsolete with the new dbgeng functions?
+LOCAL HINSTANCE g_hLibrary            = NULL;     //  if we load outselves
 
 CHAR CPRINTFWDBG::szBuf[1024];
 
 template< class _STRUCT>
 CDUMPA<_STRUCT> CDUMPA<_STRUCT>::instance;
 
+//  ================================================================
 LOCAL const EDBGFUNCMAP rgfuncmap[] = {
+//  ================================================================
 
 {
         "HELP",             EDBGHelp,
@@ -624,7 +671,9 @@ const INT cfuncmap = sizeof( rgfuncmap ) / sizeof( EDBGFUNCMAP );
 #define DUMPAA( _struct, addlargs ) { #_struct, &(CDUMPA<_struct>::instance), #_struct " <address> " addlargs }
 
 
+//  ================================================================
 LOCAL const CDUMPMAP rgcdumpmap[] = {
+//  ================================================================
 
     DUMPA( BACKUP_CONTEXT ),
     DUMPA( BF ),
@@ -659,7 +708,7 @@ LOCAL const CDUMPMAP rgcdumpmap[] = {
     DUMPA( COSFileFind ),
     DUMPA( COSFileSystem ),
     DUMPAA( IOREQ, "[dumpall|norunstats]" ),
-    { "PAGE", &(CDUMPA<CPAGE>::instance),
+    { "PAGE", &(CDUMPA<CPAGE>::instance), 
          "PAGE <pgno> <address|.> [a|b|h|t|*|2|4|8|16|32]   - a=alloc map, b=binary dump, h=header, t=tags, *=all, 2/4/8/16/32=pagesize" },
     DUMPA( CResource ),
     DUMPA( CResourceManager ),
@@ -669,14 +718,27 @@ const INT ccdumpmap = sizeof( rgcdumpmap ) / sizeof( CDUMPMAP );
 
 
 
+//  ****************************************************************
+//  FUNCTIONS
+//  ****************************************************************
 
 
+// strstr() is case sensitive, wanted case insensitive, couldn't find it, wrote it.  stristr() is case insensitive.
+//  ================================================================
 #define stristr( szString, szSearchStr )    strhstr( szString, szSearchStr, fFalse )
+//  ================================================================
 
+// Then I changed stristr() to have heuristic case sensitivity...
+//  Anything the user asks us to match (in szSearchStr) that is capital we match 
+//  exactly, anything lower case (in szSearchStr) we match either case.  This works
+//  much better for strings like "IO" vs. "io" and "Rec" vs. "rec".  Is this just 
+//  going to confuse people?
+//  ================================================================
 const char * const strhstr(
     __in_z const char * const szString,
     __in_z const char * const szSearchStr,
     BOOL fHeuristicCaseSensitivity )
+//  ================================================================
 {
     ULONG i = 0;
     ULONG j = 0;
@@ -692,37 +754,48 @@ const char * const strhstr(
                 ;
             j++)
         {
-            ;
+            ; // do nothing
         }
         if ( szSearchStr[j] == '\0' )
         {
+            // we got to the end of the search string, we have a match!!
             return ( &(szString[i]) );
         }
     }
     return NULL;
 }
 
+//  ================================================================
 inline VOID __cdecl CPRINTFWDBG::operator()( const char * szFormat, ... )
+//  ================================================================
 {
     va_list arg_ptr;
     va_start( arg_ptr, szFormat );
+    // Don't output DML just yet. One of the problems is that the basic DUMP commands
+    // have formats that look like this:
+    // m_rgfmp <0x1033AEF4,  4>:  0x00000000
+    // and the angle brackets <> need to be escaped as &lt; and &gt;
     (void) g_DebugControl->ControlledOutputVaList(
         DEBUG_OUTCTL_AMBIENT_TEXT, DEBUG_OUTPUT_NORMAL, szFormat, arg_ptr);
     va_end( arg_ptr );
 }
 
+//  ================================================================
 CPRINTF * CPRINTFWDBG::PcprintfInstance()
+//  ================================================================
 {
     static CPRINTFWDBG s_CPrintfWdbg;
     return &s_CPrintfWdbg;
 }
 
+//  ================================================================
 LOCAL INT SzToRgsz( __out_ecount( cszMax ) CHAR * rgsz[], __in_z CHAR * const sz, const INT cszMax )
+//  ================================================================
 {
     INT irgsz = 0;
     CHAR * szT = sz;
     CHAR * szNextToken = NULL;
-
+    
     while( NULL != ( rgsz[irgsz] = strtok_s( szT, " \t\n", &szNextToken ) ) )
     {
         ++irgsz;
@@ -736,7 +809,9 @@ LOCAL INT SzToRgsz( __out_ecount( cszMax ) CHAR * rgsz[], __in_z CHAR * const sz
 }
 
 
+//  ================================================================
 LOCAL BOOL FArgumentMatch( const CHAR * const sz, const CHAR * const szCommand )
+//  ================================================================
 {
     const BOOL fMatch = ( ( strlen( sz ) == strlen( szCommand ) )
             && !( _strnicmp( sz, szCommand, strlen( szCommand ) ) ) );
@@ -745,7 +820,9 @@ LOCAL BOOL FArgumentMatch( const CHAR * const sz, const CHAR * const szCommand )
 
 namespace OSSYM {
 
+//  ================================================================
 LOCAL BOOL FUlFromSz( const char* const sz, ULONG* const pul, const INT base = 16 )
+//  ================================================================
 {
     if( sz && *sz )
     {
@@ -756,8 +833,10 @@ LOCAL BOOL FUlFromSz( const char* const sz, ULONG* const pul, const INT base = 1
     return fFalse;
 }
 
+//  ================================================================
 template< class T >
 LOCAL BOOL FAddressFromSz( const char* const sz, T** const ppt )
+//  ================================================================
 {
     BOOL f = fFalse;
 
@@ -765,6 +844,7 @@ LOCAL BOOL FAddressFromSz( const char* const sz, T** const ppt )
     {
         if ( sz[0] == '.' && sz[1] == '\0' )
         {
+            // GetExpression() turns . into a pointer (like 00007ffd88030bb2), but not sure what it relates to.
             return fFalse;
         }
 
@@ -783,8 +863,10 @@ BOOL FHintAddressFromGlobal( const char* const szGlobal, T** const ppt );
 template< class T >
 BOOL FAddressFromGlobal( const char* const szGlobal, T** const ppt );
 
+//  ================================================================
 template< class T >
 LOCAL BOOL FSymbolFromAddress( T* const pt, __out_bcount(cbMax) PSTR szGlobal, const SIZE_T cbMax, DWORD_PTR* const pdwOffset = NULL )
+//  ================================================================
 {
     ULONG64 ulAddress = (ULONG64) pt;
     DWORD64 dwOffset;
@@ -809,8 +891,10 @@ LOCAL BOOL FSymbolFromAddress( T* const pt, __out_bcount(cbMax) PSTR szGlobal, c
     return SUCCEEDED( hr );
 }
 
+//  ================================================================
 template< class T >
 LOCAL BOOL FAddressFromGlobal_( const char* const szGlobal, T** const ppt )
+//  ================================================================
 {
     AssertEDBGDebugger();
 
@@ -830,18 +914,25 @@ LOCAL BOOL FAddressFromGlobal_( const char* const szGlobal, T** const ppt )
     {
         Address = FullValue.I64;
 
-        *ppt = (T*)(DWORD_PTR)Address;
+        //  return the address of the symbol
+        *ppt = (T*)(DWORD_PTR)Address;  //  HACK: cast to DWORD_PTR then to T* in order to permit compiling with /Wp64
     }
 
     return SUCCEEDED( hr );
 }
 
 char g_szNormalizedGlobalPrefix[ MAX_SYMBOL ] = { '\0' };
+//  WARNING: this function is not thread safe!
+//
+//  ================================================================
 template< class T >
 LOCAL_BROKEN BOOL FAddressFromGlobal( const char* const szGlobal, T** const ppt )
+//  ================================================================
 {
     AssertEDBGDebugger();
 
+    //  have we explicitly supplied a module name?
+    //
     if ( strchr( szGlobal, '!' ) != NULL )
     {
         return FAddressFromGlobal_( szGlobal, ppt );
@@ -857,12 +948,18 @@ LOCAL_BROKEN BOOL FAddressFromGlobal( const char* const szGlobal, T** const ppt 
     {
         fRetry = fFalse;
 
+        //  have we done this before?
+        //
         if ( g_szNormalizedGlobalPrefix[ 0 ] != '\0' )
         {
+            //  at least 3 characters (prefix, '!' and suffix).
+            //
             if ( sprintf_s( szNormalizedGlobal, cchNormalizedGlobal, "%s!%s", g_szNormalizedGlobalPrefix, szGlobal ) >= 3 )
             {
                 fSucceeded = FAddressFromGlobal_( szNormalizedGlobal, ppt );
 
+                //  if we failed here, we'll uninitialize the prefix and try again.
+                //
                 if ( !fSucceeded )
                 {
                     g_szNormalizedGlobalPrefix[ 0 ] = '\0';
@@ -877,10 +974,16 @@ LOCAL_BROKEN BOOL FAddressFromGlobal( const char* const szGlobal, T** const ppt 
         }
         else
         {
+            //  perform symbol lookup to try and obtain a module name.
+            //
             fSucceeded = FAddressFromGlobal_( szGlobal, ppt );
 
+            //  use that module name for future symbol lookups.
+            //
             if ( fSucceeded && FSymbolFromAddress( *ppt, g_szNormalizedGlobalPrefix, cbNormalizedPrefix ) )
             {
+                //  now, validate the module name.
+                //
                 char* const pchSuffixEnd = strchr( g_szNormalizedGlobalPrefix, '!' );
                 if ( pchSuffixEnd != NULL )
                 {
@@ -894,17 +997,24 @@ LOCAL_BROKEN BOOL FAddressFromGlobal( const char* const szGlobal, T** const ppt 
     return fSucceeded;
 }
 
+//  ================================================================
 template< class T >
 INLINE BOOL FReadVariable( T* const rgtDebuggee, T* const rgt, const SIZE_T ct = 1 )
+//  ================================================================
 {
     AssertEDBGDebugger();
 
+    // debugger extensions only, not real danger but no regression danger either
+    //
+    // check to see if it fits in a SIZE_T
     if ( ( ~( SIZE_T( 0 ) ) / sizeof( T ) ) <= ct )
     {
         dprintf( "FReadVariable failed with data overflow\n" );
         return fFalse;
     }
 
+    // it won't overflow a SIZE_T but we need a DWORD
+    //
     if ( SIZE_T( sizeof( T ) * ct ) >= SIZE_T( ~( DWORD( 0 ) ) ) )
     {
         dprintf( "FReadVariable failed with data too big\n" );
@@ -919,29 +1029,38 @@ INLINE BOOL FReadVariable( T* const rgtDebuggee, T* const rgt, const SIZE_T ct =
                 &cbRead );
 }
 
+//  ================================================================
 template< class T >
 INLINE BOOL FReadVariable(const T* const rgtDebuggee, T* const rgt, const SIZE_T ct = 1 )
+//  ================================================================
 {
     return FReadVariable( (T* const)rgtDebuggee, rgt, ct );
 }
 
+//  ================================================================
 template< class T >
 LOCAL BOOL FFetchVariable( T* const rgtDebuggee, T** const prgt, SIZE_T ct = 1 )
+//  ================================================================
 {
     AssertEDBGDebugger();
 
+    // debugger extensions only, not real danger but no regression danger either
+    //
+    // check to see if it fits in a SIZE_T
     if ( ( ~( SIZE_T( 0 ) ) / sizeof( T ) ) <= ct )
     {
         dprintf( "FFetchVariable failed with data overflow\n" );
         return fFalse;
     }
 
+    //  allocate enough storage to retrieve the requested type array
 
     if ( !( *prgt = (T*)LocalAlloc( 0, sizeof( T ) * ct ) ) )
     {
         return fFalse;
     }
 
+    //  retrieve the requested type array
 
     if ( !FReadVariable( rgtDebuggee, *prgt, ct ) )
     {
@@ -953,23 +1072,30 @@ LOCAL BOOL FFetchVariable( T* const rgtDebuggee, T** const prgt, SIZE_T ct = 1 )
     return fTrue;
 }
 
+//  ================================================================
 template< class T >
 LOCAL BOOL FFetchAlignedVariable( __in T* const rgtDebuggee, __deref_out_ecount( ct ) T** const prgt, SIZE_T ct = 1 )
+//  ================================================================
 {
     AssertEDBGDebugger();
 
+    // debugger extensions only, not real danger but no regression danger either
+    //
+    // check to see if it fits in a SIZE_T
     if ( ( ~( SIZE_T( 0 ) ) / sizeof( T ) ) <= ct )
     {
         dprintf( "FFetchVariable failed with data overflow\n" );
         return fFalse;
     }
 
+    //  allocate enough storage to retrieve the requested type array
 
     if ( !( *prgt = (T*)VirtualAlloc( 0, sizeof( T ) * ct, MEM_COMMIT, PAGE_READWRITE ) ) )
     {
         return fFalse;
     }
 
+    //  retrieve the requested type array
 
     if ( !FReadVariable( rgtDebuggee, *prgt, ct ) )
     {
@@ -981,11 +1107,14 @@ LOCAL BOOL FFetchAlignedVariable( __in T* const rgtDebuggee, __deref_out_ecount(
     return fTrue;
 }
 
+//  ================================================================
 template< class T >
 LOCAL BOOL FReadGlobal( const CHAR * const szGlobal, T* const rgt, const SIZE_T ct = 1 )
+//  ================================================================
 {
     AssertEDBGDebugger();
 
+    //  get the address of the global in the debuggee and fetch it
 
     T*  rgtDebuggee;
 
@@ -1001,11 +1130,14 @@ LOCAL BOOL FReadGlobal( const CHAR * const szGlobal, T* const rgt, const SIZE_T 
     }
 }
 
+//  ================================================================
 template< class T >
 LOCAL BOOL FReadGlobalAndFetchVariable( const CHAR * const szGlobal, T** const prgt, const SIZE_T ct = 1 )
+//  ================================================================
 {
     AssertEDBGDebugger();
 
+    //  get the address of the global in the debuggee and fetch its contents
 
     T*  rgtDebuggee;
 
@@ -1020,11 +1152,14 @@ LOCAL BOOL FReadGlobalAndFetchVariable( const CHAR * const szGlobal, T** const p
     return fFalse;
 }
 
+//  ================================================================
 template< class T >
 LOCAL BOOL FFetchGlobal( const CHAR * const szGlobal, T** const prgt, SIZE_T ct = 1 )
+//  ================================================================
 {
     AssertEDBGDebugger();
 
+    //  get the address of the global in the debuggee and fetch it
 
     T*  rgtDebuggee;
 
@@ -1040,14 +1175,18 @@ LOCAL BOOL FFetchGlobal( const CHAR * const szGlobal, T** const prgt, SIZE_T ct 
     }
 }
 
+//  ================================================================
 template< class T >
 LOCAL BOOL FFetchSz( __in T* const szDebuggee, __deref_out_z T** const psz )
+//  ================================================================
 {
+    //  scan for the null terminator in the debuggee starting at the given
+    //  address to get the size of the string
 
     const SIZE_T    ctScan              = 256;
     const SIZE_T    cbScan              = ctScan * sizeof( T );
     BYTE            rgbScan[ cbScan ];
-    T*              rgtScan             = (T*)rgbScan;
+    T*              rgtScan             = (T*)rgbScan;  //  because T can be const
     SIZE_T          itScan              = ~( SIZE_T( 0 ) ) ;
     SIZE_T          itScanLim           = 0;
 
@@ -1068,34 +1207,45 @@ LOCAL BOOL FFetchSz( __in T* const szDebuggee, __deref_out_z T** const psz )
     }
     while ( itScan < itScanLim && rgtScan[ itScan % ctScan ] );
 
+    //  we found a null terminator
 
     if ( itScan < itScanLim )
     {
+        //  fetch the string using the determined string length
 
         return FFetchVariable( szDebuggee, psz, itScan + 1 );
     }
 
+    //  we did not find a null terminator
 
     else
     {
+        //  fail the operation
 
         return fFalse;
     }
 }
 
+//  ================================================================
 template< class T >
 LOCAL void Unfetch( T* const rgt )
+//  ================================================================
 {
     LocalFree( (void*)rgt );
 }
 
+//  ================================================================
 template< class T >
 LOCAL void UnfetchAligned( T* const rgt )
+//  ================================================================
 {
     VirtualFree( (void*)rgt, 0, MEM_RELEASE );
 }
 
+//  ================================================================
 
+//  These are declared high, so that PageSizeClean.hxx can be included
+//  as high as possible.
 
 size_t CbEDBGILoadSYSMaxPageSize_()
 {
@@ -1105,6 +1255,7 @@ size_t CbEDBGILoadSYSMaxPageSize_()
 
     if ( !FFetchGlobalParamsArray( &rgparam, &cparam ) )
     {
+        //  Well we tried.
         dprintf( "JET_paramDatabasePageSize = [Error: cannot determine the global page size MAX of debuggee.]\n" );
     }
     else
@@ -1143,13 +1294,14 @@ void EDBGDeprecatedSetGlobalPageSize( _In_ const ULONG cbPage )
 
 #include "..\ese\PageSizeClean.hxx"
 
+//  ================================================================
 
 template <class T>
 class FetchWrap
 {
     private:
         T m_t;
-        FetchWrap &operator=( FetchWrap const & );
+        FetchWrap &operator=( FetchWrap const & ); // forbidden
 
     public:
         FetchWrap() { m_t = NULL; }
@@ -1158,16 +1310,18 @@ class FetchWrap
         BOOL FGlobal( const char * const szGlobal, SIZE_T ct = 1 ) { Unfetch(); return FFetchGlobal( szGlobal, &m_t, ct ); }
         BOOL FSz( T const szDebuggee ) { Unfetch(); return FFetchSz( szDebuggee, &m_t ); }
         VOID Unfetch() { OSSYM::Unfetch( m_t ); }
-        T Release() { T t = m_t; m_t = NULL; return t; }
+        T Release() { T t = m_t; m_t = NULL; return t; }    //      dereference the pointer, so the user will take care to Unfetch
 
         operator T() { return m_t; }
         T operator->() { return m_t; }
 };
 
+//  ================================================================
 template< class T >
 LOCAL_BROKEN BOOL FHintAddressFromGlobal(
     const char* const szGlobal,
     T** const ppt )
+//  ================================================================
 {
     FetchWrap<EDBGGlobals *>    pEG;
     FetchWrap<SIZE_T *>         pcArraySize;
@@ -1175,6 +1329,7 @@ LOCAL_BROKEN BOOL FHintAddressFromGlobal(
 
     AssertEDBGDebugger();
 
+    //  if we can fetch the debuggee table globals
 
     if ( NULL != g_rgEDBGGlobalsDebugger
         && pEG.FVariable( g_rgEDBGGlobalsDebugger )
@@ -1183,17 +1338,22 @@ LOCAL_BROKEN BOOL FHintAddressFromGlobal(
         && 0 == strcmp( szName, "cEDBGGlobals" )
         && pEG.FVariable( g_rgEDBGGlobalsDebugger, *pcArraySize ) )
     {
+        // For the manual string searching, we don't want the module
+        // qualification (e.g. "ese!" or "esent!").
         const char* szGlobalUnqualified = strchr( szGlobal, '!' );
 
         if ( szGlobalUnqualified != NULL )
         {
+            // If there was a "!", then advance beyond that character.
             ++szGlobalUnqualified;
         }
         else
         {
+            // It was an unqualified symbol to begin with!
             szGlobalUnqualified = szGlobal;
         }
 
+        //  search in the table for the particular global name
         SIZE_T i = 0;
         for ( i = 1; i < *pcArraySize; i++ )
         {
@@ -1212,12 +1372,14 @@ LOCAL_BROKEN BOOL FHintAddressFromGlobal(
     return fFalse;
 }
 
+//  ================================================================
 LOCAL BOOL FEDBGDebuggerExecute( PCSTR szCommand )
+//  ================================================================
 {
     return S_OK == g_DebugControl->Execute( DEBUG_OUTCTL_ALL_CLIENTS, szCommand, DEBUG_EXECUTE_ECHO | DEBUG_EXECUTE_NO_REPEAT );
 }
 
-};
+}; // namespace OSSYM
 
 
 #define FCall( x, szError ) { if ( !( x ) ) { dprintf szError; goto HandleError; } }
@@ -1233,12 +1395,18 @@ LOCAL BOOL FEDBGDebuggerExecute( PCSTR szCommand )
 
 using namespace OSSYM;
 
+// ====================================================================================
+//
+//  ESE Debugger Local Store
+//
+// ====================================================================================
 
 class DEBUGGER_LOCAL_STORE
     : CZeroInit
 {
 
 private:
+    // as I understand it debugger ext executes single threaded, but check anyway
     DWORD       tid;
 
     BOOL        m_fLocalProcess;
@@ -1254,6 +1422,7 @@ public:
 
     DWORD DebugTID( )
     {
+        // anything else to assert here? not for now.
         return tid;
     }
 
@@ -1269,10 +1438,14 @@ public:
 
 public:
 
+    //  Init / Term functions ...
     static ERR ErrDlsInit( const BOOL fLocalProcess  );
     static void DlsDestroy( void );
 
 
+    //
+    //  Debugger Thead Support
+    //
 
 public:
     DWORD TidCurrent() const
@@ -1287,6 +1460,9 @@ public:
     }
 
 
+    //
+    //  Debugger Local Alloc state
+    //
 
 private:
     typedef struct _tagPVDLSALLOC {
@@ -1301,6 +1477,7 @@ private:
 
 public:
 
+    //  Initializes the debugger local state for debugger local allocs
 
     ERR ErrDLSInit( void )
     {
@@ -1308,6 +1485,9 @@ public:
         return JET_errSuccess;
     }
 
+    //  This is an allocator that has all it's memory freed at the end of the debugger
+    //  command.  This is a method of convience, kind of like GC but not really, so care
+    //  must be used to ensure that the leak during the command does not get too big.
     #define PvDLSAlloc( cb )    PvDLSAlloc_( cb, __LINE__ )
     void * PvDLSAlloc_( ULONG cb, ULONG ulLine )
     {
@@ -1324,9 +1504,13 @@ public:
         }
         m_pvAllocsHead = pvdlsAlloc;
 
+        //debug: dprintf( "Alloc: %p / %p @ %d", pvdlsAlloc, pvdlsAlloc->rgbData, ulLine );
         return pvdlsAlloc->rgbData;
     }
 
+    //  DFree will free the pointer only if in the current chunk.  Note the free is
+    //  more and more inefficient if there are intermediate allocs.  Optimal if the
+    //  free are in inverse order from the allocs.
     void DLSFree( void * pv )
     {
         if ( pv )
@@ -1345,6 +1529,7 @@ public:
             {
                 pvdlsAlloc->pvNext->pvPrev = pvdlsAlloc->pvPrev;
             }
+            //debug: dprintf( "Free: %p / %p", pvdlsAlloc, pvdlsAlloc->rgbData );
             free( pvdlsAlloc );
         }
     }
@@ -1359,13 +1544,23 @@ public:
             cTotal++;
         }
 
+        // !ese cachesum verbose is up to 411 outstanding allocations!  It's ok as
+        // long as there is no alloc per buffer, which I verified on a datacenter
+        // dump.
         if ( cTotal > 500 )
         {
+            // if you get this warning, the only really important thing is that 
+            // the # of allocations isn't O(n) with a large number of objects that
+            // you are processing ... then it limites the scalability of your debugger
+            // command.
             dprintf( "Warning: This debugger command has %d left over allocations outstanding, this may be inefficient.\n", cTotal );
         }
         AssertEDBG( NULL == m_pvAllocsHead );
     }
 
+    //
+    //  Deferred Warning Facility
+    //
 
 private:
     ULONG       m_cWarningNotes;
@@ -1418,6 +1613,7 @@ public:
             AssertEDBG( m_rgcWarningNotes );
             memcpy( pszNewNotes, m_pszWarningNotes, m_cWarningNotes * sizeof(CHAR*) );
             memcpy( rgcNewNotes, m_rgcWarningNotes, m_cWarningNotes * sizeof(ULONG) );
+            // must NOT fail after this point ...
             free( m_pszWarningNotes );
             free( m_rgcWarningNotes );
         }
@@ -1439,6 +1635,7 @@ public:
     {
         if ( m_cWarningNotes )
         {
+            // if there were warnings, give an extra line return
             dprintf("\n");
         }
         for( ULONG iWarning = 0; iWarning < m_cWarningNotes; iWarning++ )
@@ -1448,6 +1645,7 @@ public:
         }
         if ( m_cWarningNotes )
         {
+            // if there were warnings, give an extra line return
             dprintf("\n");
         }
 
@@ -1459,6 +1657,9 @@ public:
     }
 
 
+    //
+    //  Global stuff
+    //
 
 private:
     TICK        m_tickLastGivenDebuggee;
@@ -1476,6 +1677,7 @@ public:
             if ( !FReadGlobal( "g_tickLastGiven", &m_tickLastGivenDebuggee ) )
             {
                 AssertEDBGSz( fFalse, "Could not retrieve / read g_tickLastGiven" );
+                //  should we just try to go on w/o error?
                 return ErrERRCheck( errCantRetrieveDebuggeeMemory );
             }
         }
@@ -1487,6 +1689,9 @@ public:
         return m_tickLastGivenDebuggee;
     }
 
+    //
+    //  BF Support / Caches
+    //
 
 private:
     size_t      m_cbPageGlobalMax;
@@ -1496,13 +1701,13 @@ private:
 
     VOID **     m_rgpvChunk;
     LONG_PTR    m_cpgChunk;
-
+    
     BF *        m_prgbfLastChunkDebuggee;
     BF *        m_prgbfLastChunk;
 
     size_t CbPageGlobalMax_( )
     {
-        AssertEDBG( !m_fLocalProcess );
+        AssertEDBG( !m_fLocalProcess ); 
 
         if ( 0 == m_cbPageGlobalMax )
         {
@@ -1513,12 +1718,14 @@ private:
 
 public:
 
+    //  Used too often, just make it public.
     LONG_PTR    m_cbfCacheAddressable;
     LONG_PTR    m_cbfCacheSize;
     LONG_PTR    m_cbfInit;
 
     ERR ErrBFDLSInit( void )
     {
+        //  for IbfBFICachePbf().
         m_rgpbfChunk            = NULL;
         m_cbfChunk              = 0;
         m_rgpvChunk             = NULL;
@@ -1529,6 +1736,7 @@ public:
         m_cbPageGlobalMax       = 0;
         m_prgbfLastChunkDebuggee = NULL;;
         m_prgbfLastChunk = NULL;
+        //  page image cache FLatchPageImage() / UnlatchPageImage()
         memset( m_rgpvpvPairs, 0, sizeof( m_rgpvpvPairs ) );
         m_ipvpvNextCache = 0;
         m_pvLastEvictedDebuggee = NULL;
@@ -1537,6 +1745,7 @@ public:
 
     ERR ErrBFInitCacheMap( BF ** rgpbfChunkT, LONG_PTR cbfChunkT, VOID ** rgpvChunkT, LONG_PTR cpgChunkT )
     {
+        //  This version of our ibf/pbf cache init allows manual configuration of parameters.
         AssertEDBG( m_cbfCacheAddressable );
         AssertEDBG( m_cbfCacheSize );
         AssertEDBG( m_cbfInit );
@@ -1547,7 +1756,7 @@ public:
         return JET_errSuccess;
     }
 
-
+    
     ERR ErrBFInitCacheMap( void )
     {
         BF **       rgpbfChunkT         = NULL;
@@ -1558,13 +1767,15 @@ public:
 
         if ( m_fLocalProcess )
         {
-            extern volatile LONG_PTR        cbfCacheAddressable;
-            extern volatile LONG_PTR        cbfCacheSize;
+            extern volatile LONG_PTR        cbfCacheAddressable;    // total all up, for all buffer sizes
+            extern volatile LONG_PTR        cbfCacheSize;           // total, not including quiesced buffers (i.e., dehydrated to zero)
             extern LONG_PTR     cbfInit;
             m_cbfCacheAddressable = cbfCacheAddressable;
             m_cbfCacheSize = cbfCacheSize;
             m_cbfInit = cbfInit;
 
+            //  since we're actually running cachequery in the local process we can
+            //  just initialize ourselves right off the regular cache variables.
             extern BF**         g_rgpbfChunk;
             extern LONG_PTR     g_cbfChunk;
             extern LONG_PTR     g_cpgChunk;
@@ -1584,7 +1795,7 @@ public:
                 dprintf( "DLS_Error: Could not load BF parameters.\n\n" );
                 return ErrEDBGCheck( errCantRetrieveDebuggeeMemory );
             }
-
+            
             return ErrBFInitCacheMap( rgpbfChunkT, cbfChunkT, rgpvChunkT, cpgChunkT );
         }
     }
@@ -1645,25 +1856,31 @@ public:
         return m_cbfInit;
     }
 
+    //  compute the address of the target BF
+    //
     PBF PbfBFCacheIbf( const IBF ibf )
     {
-        AssertEDBG( m_rgpbfChunk );
+        AssertEDBG( m_rgpbfChunk ); // return NULL in this case?
         return m_rgpbfChunk[ ibf / m_cbfChunk ] + ibf % m_cbfChunk;
     }
 
+    //  compute the ibf of the target bf
+    //
     IBF IbfBFCachePbf( const PBF pbfDebuggee, const BOOL fExact = fTrue )
     {
-        PBF pbf = pbfDebuggee;
+        PBF pbf = pbfDebuggee; // done for simplicity, and matching of the code below ...
 
         AssertEDBG( !m_fLocalProcess );
 
         EDBGPanic( m_rgpbfChunk );
         EDBGPanic( m_cbfChunk );
 
+        //  scan the PBF chunk table looking for a chunk that fits in this range
 
         LONG_PTR ibfChunk;
         for ( ibfChunk = 0; ibfChunk < cCacheChunkMax; ibfChunk++ )
         {
+            //  our PBF is part of this chunk and is aligned properly
 
             if (    m_rgpbfChunk[ ibfChunk ] &&
                     m_rgpbfChunk[ ibfChunk ] <= pbf &&
@@ -1672,9 +1889,10 @@ public:
                 if ( !fExact ||
                     ( DWORD_PTR( pbf ) - DWORD_PTR( m_rgpbfChunk[ ibfChunk ] ) ) % sizeof( BF ) == 0 )
                 {
-
+                    //  compute the IBF for this PBF
+                    
                     const IBF ibf = ibfChunk * m_cbfChunk + pbf - m_rgpbfChunk[ ibfChunk ];
-
+                    
                     AssertEDBG( !fExact || PbfBFCacheIbf( ibf ) == pbfDebuggee );
 
                     return ibf;
@@ -1682,17 +1900,22 @@ public:
             }
         }
 
+        //  our PBF isn't part of any chunk so return nil
 
         return ibfNil;
     }
 
+    //  compute the address of the target ipg
+    //
     void * PvBFCacheIpg( const IPG ipg )
     {
         AssertEDBG( !m_fLocalProcess );
-        AssertEDBG( m_rgpvChunk );
+        AssertEDBG( m_rgpvChunk );  // return NULL in this case?
         return (void*) ( (BYTE*)m_rgpvChunk[ ipg / m_cpgChunk ] + ( ipg % m_cpgChunk ) * CbPageGlobalMax_() );
     }
 
+    //  compute the ipg/ibf of the target pv/page/buffer
+    //  
     IBF IpgBFCachePv( const void * pvOffset, const BOOL fExact = fTrue )
     {
         AssertEDBG( !m_fLocalProcess );
@@ -1720,14 +1943,20 @@ public:
         return ipg;
     }
 
+    //  retrieve the pbfDebuggee / pbf from a cached context if possible
+    //
     ERR ErrBFCacheRetrieveNextBF( const IBF ibf, PBF * ppbfDebuggee, PBF * ppbf )
     {
-        AssertEDBG( m_rgpbfChunk );
+        AssertEDBG( m_rgpbfChunk ); // return NULL in this case?
         AssertEDBG( ppbfDebuggee );
         AssertEDBG( ppbf );
 
         if ( NULL == m_prgbfLastChunk )
         {
+            //  NOTE: This is a bit too aggressive of an allocation! :P  We're going to let it fly, and
+            //  see if we survive.  This is 1/128th of RAM from the _target machine_!  So if we were 
+            //  debugging a 128 GB RAM dump, we'd allocate 1 GB here (even if we only had 512 MBs of
+            //  RAM locally).
             m_prgbfLastChunk = (BF*) LocalAlloc( 0, m_cbfChunk * sizeof(BF) );
             if ( NULL == m_prgbfLastChunk )
             {
@@ -1742,12 +1971,14 @@ public:
                 m_prgbfLastChunkDebuggee < *ppbfDebuggee &&
                 *ppbfDebuggee < m_prgbfLastChunkDebuggee + m_cbfChunk )
         {
+            //  Yeah, cached hit ...
 
             *ppbf = m_prgbfLastChunk + ibf % m_cbfChunk;
 
             return JET_errSuccess;
         }
 
+        //  else the m_prgbfLastChunk doesn't have the current chunk, fetch it ...
 
         if ( m_fLocalProcess )
         {
@@ -1782,14 +2013,16 @@ private:
     {
         void *          pvDebuggee;
         void *          pvFetched;
-        ULONG           cLatches;
+        ULONG           cLatches;   // using the term "latch" loosely ...
         ULONG           ulReserved;
     } MEM_CACHE_PAIR;
 
     MEM_CACHE_PAIR  m_rgpvpvPairs[3];
-    ULONG           m_ipvpvNextCache;
-    void *          m_pvLastEvictedDebuggee;
+    ULONG           m_ipvpvNextCache;           // this tracks where the next evict and cache pointer will go
+    void *          m_pvLastEvictedDebuggee;    // debugging variable, not important
 
+    //  "Latches" the requested memory, returns NULL on failure / element
+    //  not present in cache.
 
     void * PvBFGetCached( void * pvDebuggee )
     {
@@ -1798,6 +2031,7 @@ private:
         {
             if ( m_rgpvpvPairs[i].pvDebuggee == pvDebuggee )
             {
+                //  "latch" and return the requested memory
                 m_rgpvpvPairs[i].cLatches++;
                 return m_rgpvpvPairs[i].pvFetched;
             }
@@ -1806,6 +2040,7 @@ private:
         return NULL;
     }
 
+    //  "Unlatches" the previously latched memory.
 
     void BFUngetCached( void * pvLocal )
     {
@@ -1814,12 +2049,15 @@ private:
         {
             if ( m_rgpvpvPairs[i].pvFetched == pvLocal )
             {
+                //  "unlatch" the memory
                 m_rgpvpvPairs[i].cLatches--;
                 return;
             }
         }
     }
 
+    //  evicts a slot in the cache, making it available, returning the memory
+    //  that was allocated there.  No effect if nothing needs evicting.
 
     void * PvBFEvictTarget( void )
     {
@@ -1829,43 +2067,56 @@ private:
         void * pvRet = m_rgpvpvPairs[m_ipvpvNextCache].pvFetched;
         if ( pvRet != NULL )
         {
+            //  we're actually evicting something ...
+            //
             if ( m_rgpvpvPairs[m_ipvpvNextCache].cLatches != 0 )
             {
                 AddWarning( "Our cache of page images is not big enough to hold all latched pages, need to grow.  Most likely very bad things will be happening now.\n" );
             }
-            AssertEDBG( m_rgpvpvPairs[m_ipvpvNextCache].cLatches == 0 );
+            AssertEDBG( m_rgpvpvPairs[m_ipvpvNextCache].cLatches == 0 );    // assert it as well
 
+            //  track what we're evicting for debugging / checking the size of the cache purposes.
             m_pvLastEvictedDebuggee = m_rgpvpvPairs[m_ipvpvNextCache].pvDebuggee;
             AssertEDBG( m_pvLastEvictedDebuggee );
 
+            //  actually evict the target from the cache
             m_rgpvpvPairs[m_ipvpvNextCache].pvDebuggee = NULL;
             m_rgpvpvPairs[m_ipvpvNextCache].pvFetched = NULL;
         }
 
+        //  must return the pvFetched as this memory is externally allocated
+        //  and provided to the cache, and so must be externally freed.
         return pvRet;
     }
 
+    //  takes some allocated memory (pvFetched) and caches it under the lookup
+    //  key (pvDebuggee), so that later latches can have / utilize this memory.
 
     VOID SetBFCached( void * pvDebuggee, void * pvFetched )
     {
         AssertEDBG( !m_fLocalProcess );
         AssertEDBG( m_rgpvpvPairs[m_ipvpvNextCache].pvDebuggee == NULL );
-        AssertEDBG( m_rgpvpvPairs[m_ipvpvNextCache].pvFetched == NULL );
+        AssertEDBG( m_rgpvpvPairs[m_ipvpvNextCache].pvFetched == NULL );    // or we're leaking memory
 
+        //  check cache is big enough, just a debug check
         if( m_pvLastEvictedDebuggee == pvDebuggee )
         {
             AddWarning( "We re-cached a recently evicted pointer, should we increase the number of cache slots / m_rgpvpvPairs?" );
         }
 
+        //  cache the target
         m_rgpvpvPairs[m_ipvpvNextCache].pvDebuggee = pvDebuggee;
         m_rgpvpvPairs[m_ipvpvNextCache].pvFetched = pvFetched;
 
+        //  move the next evict + cache location "forward" 1
         m_ipvpvNextCache = ( ( m_ipvpvNextCache+1 ) % _countof( m_rgpvpvPairs ) );
     }
 
 public:
 
-    enum DLSCachePage { ePageHdrOnly = 1  };
+    //  Retrieves a page, checking a small lookaside cache first, caching it otherwise
+    //
+    enum DLSCachePage { ePageHdrOnly = 1 /* rest NYI */ };
 
     BOOL FLatchPageImage( DLSCachePage ePageStateReq, void * pvPageDebuggee, __out CPAGE::PGHDR ** pppghdr )
     {
@@ -1877,14 +2128,17 @@ public:
         const void * pvCached = PvBFGetCached( pvPageDebuggee );
         if ( pvCached )
         {
+            // debug: AddWarning( "Utilized cached image / cache hit.\n" );
             *pppghdr = (CPAGE::PGHDR *)pvCached;
             return fTrue;
         }
 
+        //debug: AddWarning( "We're getting a new page image / cache fault.\n" );
 
         void * pvEvict = PvBFEvictTarget();
         if ( pvEvict )
         {
+            //debug: AddWarning( "We're evicting a page to make room for a new one.\n" );
             DLSFree( pvEvict );
         }
 
@@ -1904,7 +2158,7 @@ public:
         AssertEDBG( *pppghdr );
         return fTrue;
     }
-
+    
     void UnlatchPageImage( CPAGE::PGHDR * ppghdr )
     {
         AssertEDBG( !m_fLocalProcess );
@@ -1912,6 +2166,9 @@ public:
     }
 
 
+    //
+    //  FMP Info / Caches
+    //
 
 private:
     bool *      m_rgfIsTempDB;
@@ -1928,7 +2185,7 @@ public:
     ERR ErrFMPDLSInit( void )
     {
         FMP *   rgfmpDebuggee               = NULL;
-        ULONG   ifmpMaxDebuggee             = 0;
+        ULONG   ifmpMaxDebuggee             = 0;        //  don't use ifmpNil because its type is IFMP
         ULONG   cfmpMacCommittedDebuggee    = 0;
 
         if ( m_fLocalProcess )
@@ -1950,11 +2207,13 @@ public:
             }
         }
 
+        // be better to trip this by FMP::ifmpMacInUse ...
         m_cfmpCommitted = cfmpMacCommittedDebuggee;
 
         if ( cfmpMacCommittedDebuggee )
         {
             Assert( ifmpMaxDebuggee >= cfmpMacCommittedDebuggee );
+            // over allocate to g_ifmpMax, even though FMP::s_ifmpMacCommitted is all that is allocated by process.
             m_prgfmp = (FMP*)PvDLSAlloc( ifmpMaxDebuggee * sizeof(FMP) );
             if ( NULL == m_prgfmp )
             {
@@ -2028,12 +2287,16 @@ public:
         return &(m_prgfmp[ifmp]);
     }
 
+    //
+    //  Implicit state caches ...
+    //
 
 private:
     BOOL         m_fPii                          = OnDebugOrRetail( fTrue, fFalse );
     IFMP         m_ifmpCurrentImplicit           = ifmpNil;
     ULONG        m_ipinstCurrentImplicit         = IpinstNil();
 
+    //  Need multiple properties for the implicit BT
     const FCB *  m_pfcbImplicitBtTableDebuggee   = pfcbNil;
     const FCB *  m_pfcbImplicitBtSubTreeDebuggee = pfcbNil;
     OBJID        m_objidImplicitBt               = objidNil;
@@ -2064,7 +2327,7 @@ public:
 
     static ULONG IpinstNil()
     {
-        return 0x7ffffff1;
+        return 0x7ffffff1;  //  large, but not -1, or lMax.
     }
 
     void SetImplicitIpinst( __in const ULONG ipinst )
@@ -2111,15 +2374,21 @@ public:
     }
 
 
+    //
+    //  INST Info / Caches
+    //
 
 private:
     ULONG       m_cinstMax;
+    //  All 3 arrays here are tracked by m_cinst.
     INST **     m_rgpinstDebuggee;
-    INST *      m_rginst;
+    INST *      m_rginst;   //  Note we fold the array down to one level from a INST ** / g_rgpinst
     BOOL *      m_rgfInstLoaded;
 
 public:
 
+    //  Designed to be called so that a specific extension can fail if
+    //  this INST cache doesn't load.
 
     ERR ErrINSTDLSInitCheck( void )
     {
@@ -2152,7 +2421,7 @@ public:
             return ErrERRCheck( errNotFound );
         }
 
-        Alloc( m_rginst = (INST*)PvDLSAlloc( sizeof(INST) * m_cinstMax ) );
+        Alloc( m_rginst = (INST*)PvDLSAlloc( sizeof(INST) * m_cinstMax ) ); //  probably a fairly large alloc on large inst server systems.
         memset( m_rginst, 0, sizeof(INST) * m_cinstMax );
 
         Alloc( m_rgfInstLoaded = (BOOL*)PvDLSAlloc( sizeof(BOOL) * m_cinstMax ) );
@@ -2171,7 +2440,7 @@ public:
             m_rgpinstDebuggee = NULL;
             return ErrERRCheck( errNotFound );
         }
-
+        
     HandleError:
 
         return err;
@@ -2217,9 +2486,11 @@ public:
         {
             return &( m_rginst[ipinst] );
         }
-
+        //  else it is not loaded yet, try to load it ...
+        
         if ( PinstDebuggee( ipinst ) == NULL )
         {
+            //  error printed by PinstDebuggee( ipinst )
             return NULL;
         }
 
@@ -2229,7 +2500,7 @@ public:
             return NULL;
         }
 
-        m_rgfInstLoaded[ipinst] = fTrue;
+        m_rgfInstLoaded[ipinst] = fTrue;    //  short cut in future.
         return &( m_rginst[ipinst] );
     }
 
@@ -2240,7 +2511,7 @@ private:
 
     size_t CbPageOfIfmp_( const IFMP ifmpCurr )
     {
-        AssertEDBG( !m_fLocalProcess );
+        AssertEDBG( !m_fLocalProcess ); 
 
         if ( ifmpCurr != ifmpNil && ifmpCurr < CfmpAllocated() )
         {
@@ -2264,6 +2535,7 @@ private:
                             m_mpcbifmpPageSize[ ifmpCurr ] = CbPageOfInst_( pinstDebuggee, pinstTarget );
                         }
                         Unfetch( pinstTarget );
+                        // Note: if cache does not have it, we just leak pinst.
                     }
                 }
             }
@@ -2274,6 +2546,7 @@ private:
             }
         }
 
+        //  Returning 0 is failure ...
 
         return 0;
     }
@@ -2293,7 +2566,7 @@ public:
         cbAlloc = sizeof(size_t) * m_cfmpCommitted;
         Alloc( m_mpcbipinstPageSize = (size_t*)PvDLSAlloc( cbAlloc ) );
         memset( m_mpcbipinstPageSize, 0, cbAlloc );
-
+        
     HandleError:
 
         return err;
@@ -2309,7 +2582,7 @@ public:
 
     size_t CbPage( )
     {
-        AssertEDBG( !m_fLocalProcess );
+        AssertEDBG( !m_fLocalProcess ); 
 
         const IFMP ifmpCurr = IfmpCurrent();
         if ( ifmpCurr != ifmpNil && ifmpCurr < CfmpAllocated() )
@@ -2347,7 +2620,7 @@ public:
 
     size_t CbPage( const IFMP ifmpCurr )
     {
-        AssertEDBG( !m_fLocalProcess );
+        AssertEDBG( !m_fLocalProcess ); 
 
         if ( ifmpCurr != ifmpNil && ifmpCurr < CfmpAllocated() )
         {
@@ -2361,6 +2634,7 @@ public:
 
         if ( ifmpCurr != 0 && ifmpCurr != ifmpNil )
         {
+            //  if we couldn't load our page size, print a warning
 
             AddWarning( "WARNING:  Could not load page size of requested ifmp, falling back to .inst context or even global page size max.\n" );
         }
@@ -2386,6 +2660,8 @@ ERR DEBUGGER_LOCAL_STORE::ErrDlsInit( const BOOL fLocalProcess )
 {
     ERR err = JET_errSuccess;
 
+    //  Note, until the debugger ext TID is set, we can't call Pdls() as it 
+    //  will throw.
 
     if ( g_dls.tid )
     {
@@ -2401,9 +2677,10 @@ ERR DEBUGGER_LOCAL_STORE::ErrDlsInit( const BOOL fLocalProcess )
     Call( g_dls.ErrBFDLSInit() );
     Call( g_dls.ErrINSTDLSInit() );
     Call( g_dls.ErrFMPDLSInit() );
-    Call( g_dls.ErrPAGESIZEDLSInit() );
+    Call( g_dls.ErrPAGESIZEDLSInit() );  //  must be after ErrINSTDLSInit() & ErrFMPDLSInit()
     Call( ErrPKInitCompression( g_cbPageMax, 0, g_cbPageMax ) );
 
+    //  Validate that we succeeded.
     Call( Pdls()->ErrDLSValid() );
     CallS( err );
 
@@ -2427,7 +2704,7 @@ void DEBUGGER_LOCAL_STORE::DlsDestroy( void )
     }
 
     g_dls.tid = 0;
-
+    
     return;
 }
 
@@ -2452,6 +2729,7 @@ INLINE const CHAR * SzType( T** ppt )
         else if constexpr( is_same<T, t>::value )                return #t;
 
     if constexpr( fFalse )  return "FALSE_DOESNT_WORK";
+        //  All the rest of else if ( logically'vartype == TypeX' ) return "TypeX";
         TYPESZTYPE( INST )
         TYPESZTYPE( VER )
         TYPESZTYPE( LOG )
@@ -2472,6 +2750,10 @@ INLINE const CHAR * SzType( T** ppt )
         TYPESZTYPE( FMP )
         TYPESZTYPE( PIB )
 
+    // Do NOT add a default return, since everything is compile time, if you hit an error 
+    // that "SzType<XXXX>" does not a return a value, it means you do not have a proper 
+    // else if constexpr( for XXXX ) type check case above.
+    // return "NO!";
 }
 
 COSVolume * PosvEDBGAccessor( const COSFile * const posf )
@@ -2504,10 +2786,15 @@ DBFILEHDR * PdbfilehdrEDBGAccessor( const FMP * const pfmp )
     return pfmp->m_dbfilehdrLock.m_pdbfilehdr;
 }
 
+// Do _NOT_ implement this function!  It is used as a cheap way to make sure an else clause
+// won't actually be compiled once all the consexpr-based templating is done.
 void * IntentionallyDoesNotLink();
 
+//  This is an enhanced version of FAddressFromSz, that if the arg provided is 'the implicit arg' / i.e. ".", then
+//  the function will (if the type is a singleton per DB or per INST) retrieve the default / implicit version of
+//  that type and return that address.   If the arg is not ".", it will pass through to FAddressFromSz().
 #pragma warning(push)
-#pragma warning(disable: 4702)
+#pragma warning(disable: 4702)     // The last else clause due to the if constexpr's above it is unreachable in some versions of this function.
 template< class T >
 BOOL FAutoAddressFromSz( _In_ const char* const szArg, _Out_ T** const ppt )
 {
@@ -2567,6 +2854,7 @@ BOOL FAutoAddressFromSz( _In_ const char* const szArg, _Out_ T** const ppt )
                 dprintf( "ERROR: We have implicit INST, but could not retrieve LOG object off it, to find your type: %hs\n", szType );
             }
 
+            //  ok we've gotten the inst and fetched the log, now resolve to type requested.
 
             if constexpr( is_same<T, CHECKPOINT>::value )
             {
@@ -2574,7 +2862,7 @@ BOOL FAutoAddressFromSz( _In_ const char* const szArg, _Out_ T** const ppt )
             }
             else if constexpr( is_same<T, LOG_BUFFER>::value )
             {
-                *ppt = (LOG_BUFFER*)PlogbufferEDBGAddrAccessor( plogDebuggee );
+                *ppt = (LOG_BUFFER*)PlogbufferEDBGAddrAccessor( plogDebuggee ); // must be debuggee, b/c this is an embedded type.
             }
             else if constexpr( is_same<T, LOG_STREAM>::value )
             {
@@ -2662,6 +2950,7 @@ BOOL FAutoAddressFromSz( _In_ const char* const szArg, _Out_ T** const ppt )
         const CHAR * szType = SzType( ppt );
         COSFile * posfDebuggee = NULL;
 
+        //  Whether we need a file or a disk, first we do need a file first
         if ( FArgumentMatch( szArg, ".db" ) || FArgumentMatch( szArg, ".edb" ) )
         {
             if ( Pdls()->IfmpCurrent() == ifmpNil )
@@ -2679,6 +2968,7 @@ BOOL FAutoAddressFromSz( _In_ const char* const szArg, _Out_ T** const ppt )
             }
             posfDebuggee = (COSFile*)pfmp->Pfapi();
         }
+        //  else if ( as needed, implement like ".log", ".jfm", etc ) ... but mostly we need the DB.
 
         if ( posfDebuggee )
         {
@@ -2715,6 +3005,7 @@ BOOL FAutoAddressFromSz( _In_ const char* const szArg, _Out_ T** const ppt )
 
             return fTrue;
         }
+        // else we didn't get a .implicit type arg we like, then fall through to FAddressFromSz()
     }
 
     return FAddressFromSz( szArg, ppt );
@@ -2722,6 +3013,9 @@ BOOL FAutoAddressFromSz( _In_ const char* const szArg, _Out_ T** const ppt )
 #pragma warning(pop)
 
 
+//  This is an enhanced version of FUlFromSz, that is specific to IFMPs, and if the arg provided is 'the implicit 
+//  arg' / i.e. ".", then the function will return the default / implicit IFMP / FMP.  If the arg is not ".", it 
+//  will pass through to FUlFromSz().
 LOCAL BOOL FAutoIfmpFromSz( const char* const szArg, ULONG* const pul, const INT base = 16 )
 {
     if ( FImplicitArg( szArg ) )
@@ -2742,7 +3036,7 @@ BOOL FAutoPgnoRootFromSz( const CHAR* const szArg, PGNO * ppgnoRoot )
 {
     if ( FImplicitArg( szArg ) )
     {
-        if ( Pdls()->PfcbCurrentTableDebuggee() == NULL ||
+        if ( Pdls()->PfcbCurrentTableDebuggee() == NULL || 
              Pdls()->PgnoCurrentBt() == pgnoNull )
         {
             dprintf( "ERROR: Tried to select implicit BT / PgnoRoot, but no implicit BT is selected.  Use !ese .bt <TableName>\\<Index> to select.\n" );
@@ -2756,7 +3050,7 @@ BOOL FAutoPgnoRootFromSz( const CHAR* const szArg, PGNO * ppgnoRoot )
     return FUlFromSz( szArg, ppgnoRoot );
 }
 
-class SaveDlsDefaults
+class SaveDlsDefaults // sdd
 {
 private:
     IFMP         m_ifmp;
@@ -2799,6 +3093,8 @@ public:
 };
 
 
+//  Most of the iteration query extensions needed are defined in the DebuggerLocalState / DLS, so this
+//  is the first place we can sensibly include this for now.
 
 #define FITQUDebugMode            fDebugMode
 #define PvITQUAlloc( cb )         ( Pdls()->PvDLSAlloc( cb ) )
@@ -2822,15 +3118,18 @@ ReportEnforceFailure(
     Pdls()->AddWarning( szMessage );
 }
 
+//  indicates some code that is only designed to run in the debugger
 
 VOID AssertEDBGDebugger()
 {
     AssertEDBG( !g_dls.FLocalProcess() );
 }
 
+//  ================================================================
 LOCAL void OSEdbgCreateDebuggerInterface(
 PDEBUG_CLIENT   pdebugClient
 )
+//  ================================================================
 {
     HRESULT hr;
 
@@ -2868,15 +3167,18 @@ PDEBUG_CLIENT   pdebugClient
 HandleError:
     if ( FAILED( hr ) )
     {
+        // Do I have to release the pointers?
         g_DebugClient = NULL;
         g_DebugControl = NULL;
     }
 }
 
+//  ================================================================
 HRESULT
 EDBGPrintfDml(
     __in PCSTR szFormat,
     ...
+//  ================================================================
 )
 {
     HRESULT hr = S_OK;
@@ -2913,10 +3215,12 @@ EDBGPrintfDml(
     return hr;
 }
 
+//  ================================================================
 HRESULT
 EDBGPrintfDmlW(
     __in PCWSTR wszFormat,
     ...
+//  ================================================================
 )
 {
     HRESULT hr = S_OK;
@@ -2953,11 +3257,13 @@ EDBGPrintfDmlW(
     return hr;
 }
 
+//  ================================================================
 HRESULT
 EDBGPrintf(
     __in PCSTR szFormat,
     ...
 )
+//  ================================================================
 {
     HRESULT hr = S_OK;
     va_list Args;
@@ -2965,6 +3271,7 @@ EDBGPrintf(
     va_start(Args, szFormat);
     if ( g_DebugControl == NULL )
     {
+        // Can't print out a failure message -- it would just recurse.
     }
     else
     {
@@ -2975,11 +3282,13 @@ EDBGPrintf(
     return hr;
 }
 
+//  ================================================================
 HRESULT
 EDBGPrintfW(
     __in PCWSTR wszFormat,
     ...
 )
+//  ================================================================
 {
     HRESULT hr = S_OK;
     va_list Args;
@@ -2987,6 +3296,7 @@ EDBGPrintfW(
     va_start(Args, wszFormat);
     if ( g_DebugControl == NULL )
     {
+        // Can't print out a failure message -- it would just recurse.
     }
     else
     {
@@ -2998,8 +3308,10 @@ EDBGPrintfW(
 }
 
 
+//  ================================================================
 BOOL
 FEDBGCheckForCtrlC()
+//  ================================================================
 {
     if ( g_DebugControl->GetInterrupt() == S_OK )
     {
@@ -3012,10 +3324,12 @@ FEDBGCheckForCtrlC()
 }
 
 
+//  ================================================================
 ULONG64
 GetExpression(
     __in PCSTR  szExpression
 )
+//  ================================================================
 {
     HRESULT hr = S_OK;
     ULONG EndIdx;
@@ -3029,6 +3343,7 @@ Cleanup:
     return Address;
 }
 
+//  ================================================================
 BOOL
 FEDBGMemoryRead(
     ULONG64                         ulAddressInDebuggee,
@@ -3036,6 +3351,7 @@ FEDBGMemoryRead(
     __in ULONG                      cbBuffer,
     __out PULONG                    pcbRead
 )
+//  ================================================================
 {
     HRESULT hr;
     hr = g_DebugDataSpaces->ReadVirtual( ulAddressInDebuggee, pbBuffer, cbBuffer, pcbRead );
@@ -3047,7 +3363,9 @@ FEDBGMemoryRead(
     return SUCCEEDED( hr );
 }
 
+//  ================================================================
 BOOL FDuplicateHandle( const HANDLE hSourceProcess, const HANDLE hSource, HANDLE * const phDest )
+//  ================================================================
 {
     const HANDLE hDestinationProcess    = GetCurrentProcess();
     const DWORD dwDesiredAccess         = GENERIC_READ;
@@ -3071,7 +3389,12 @@ BOOL FDuplicateHandle( const HANDLE hSourceProcess, const HANDLE hSource, HANDLE
 }
 
 
+//  ================================================================
 const CHAR * SzEDBGHexDump( const VOID * const pv, const INT cb )
+//  ================================================================
+//
+//  WARNING: not multi-threaded safe
+//
 {
     static CHAR rgchBuf[1024];
     rgchBuf[0] = '\n';
@@ -3096,7 +3419,9 @@ const CHAR * SzEDBGHexDump( const VOID * const pv, const INT cb )
 }
 
 
+//  ================================================================
 DEBUG_EXT( EDBGVersion )
+//  ================================================================
 {
     BOOL        fMemCheck   = fFalse;
 
@@ -3146,7 +3471,9 @@ DEBUG_EXT( EDBGVersion )
 }
 
 
+//  ================================================================
 DEBUG_EXT( EDBGDebug )
+//  ================================================================
 {
     ULONG eDebugMode;
     if ( FUlFromSz( argv[ 0 ], &eDebugMode ) )
@@ -3166,9 +3493,19 @@ DEBUG_EXT( EDBGDebug )
     }
 }
 
+//  This takes a string that may be a hex or a decimal string, or not a number
+//  at all and smartly tries to predict which.
+//     "13"    -> fTrue  / pul = 13
+//     "13 "   -> fTrue  / pul = 13
+//     "13("   -> fTrue  / pul = 13
+//     "0x13"  -> fTrue  / pul = 19
+//     "1f"    -> fTrue  / pul = 31
+//     "base"  -> fFalse / pul = <not-set> ... note it starts with ba, so is sort of a hex number.
+//     "Col"   -> fFalse / pul = <not-set>
+//
 BOOL FGenUlFromSz( _In_z_ const CHAR * const szArg, _Out_ ULONG * pul )
 {
-    AssertEDBG( szArg != NULL );
+    AssertEDBG( szArg != NULL ); // don't be rude!
     if ( szArg == NULL ) return fFalse;
 
     BOOL fHex = fFalse;
@@ -3189,6 +3526,7 @@ BOOL FGenUlFromSz( _In_z_ const CHAR * const szArg, _Out_ ULONG * pul )
     {
         return FUlFromSz( szArg, pul, 16 );
     }
+    // else assume decimal number
 
     return FUlFromSz( szArg, pul, 10 );
 }
@@ -3210,6 +3548,7 @@ BOOL FReadAsIndexArg( _In_z_ const CHAR * const szArg, _Out_ ULONG * pul )
     }
     else
     {
+        //  else - we also allow sloppy straight up ints to be passed, though we may deny this someday.
 
         fRet = FGenUlFromSz( szArg, &ulRead );
     }
@@ -3222,6 +3561,7 @@ BOOL FReadAsIndexArg( _In_z_ const CHAR * const szArg, _Out_ ULONG * pul )
     return fRet;
 }
 
+//  Simple (CRT-based) case-insenstive equal for simple debugger extension checks.
 
 LOCAL BOOL FEqualIW( const WCHAR * const wszArg1, const WCHAR * const wszArg2 )
 {
@@ -3259,19 +3599,23 @@ LOCAL BOOL FMatchISuffixW( const WCHAR * const wszSuffix, const WCHAR * const ws
     return 0 == _wcsicmp( &( wszString[ cchString - cchSuffix ] ), wszSuffix );
 }
 
+//  Tells you if user is asking for HELP!  In nearly any form:
+//     -? /? -h -H /h /H -help /help
 
 LOCAL BOOL FIsHelpArg( const CHAR * const szArg )
 {
     if ( szArg == NULL )
     {
-        return fFalse;
+        return fFalse;  //  though should it be true?
     }
     return ( ( szArg[ 0 ] == '-' ) || ( szArg[ 0 ] == '/' ) ) &&
            ( ( szArg[ 1 ] == '?' ) || ( tolower( szArg[ 0 ] ) == 'h' ) ) &&
            ( ( szArg[ 2 ] == '\0' ) || FEqualIA( &(szArg[ 1 ]), "help" ) );
 }
 
+//  ================================================================
 DEBUG_EXT( EDBGSetPii )
+//  ================================================================
 {
     BOOL fOn = fFalse;
     BOOL fValid = argc == 1 &&
@@ -3286,7 +3630,9 @@ DEBUG_EXT( EDBGSetPii )
     Pdls()->SetPII( fOn );
 }
 
+//  ================================================================
 DEBUG_EXT( EDBGSetImplicitDB )
+//  ================================================================
 {
     if ( argc != 1 || FIsHelpArg( argv[ 0 ] ) )
     {
@@ -3330,6 +3676,7 @@ DEBUG_EXT( EDBGSetImplicitDB )
 
     if ( !FReadAsIndexArg( argv[ 0 ], &ifmpSelected ) )
     {
+        // The argument did not look like an index.
 
         const BOOL fAutoSelect = FImplicitArg( argv[0] );
         WCHAR wszTargetName[ IFileSystemAPI::cchPathMax ];
@@ -3343,10 +3690,12 @@ DEBUG_EXT( EDBGSetImplicitDB )
             WCHAR *      wszDatabaseName     = NULL;
 
             if ( ( pfmp = Pdls()->PfmpCache( ifmp ) ) != NULL &&
+                //  consider: Should we drop FInUse()?
                 ( pfmp->FInUse() && !FFetchSz( pfmp->WszDatabaseName(), &wszDatabaseName ) ) )
             {
                 dprintf( "\n g_rgfmp[0x%x]  Error: Could not fetch FMP or DbName/Path at 0x%N. Aborting.\n", ifmp, pfmp );
 
+                //  force out of loop
                 ifmp = Pdls()->CfmpAllocated();
             }
             else
@@ -3366,7 +3715,7 @@ DEBUG_EXT( EDBGSetImplicitDB )
                             Unfetch( wszDatabaseNameSelected );
                             wszDatabaseNameSelected = NULL;
 
-                            return;
+                            return; // do not set anything.
                         }
 
                         ifmpSelected = ifmp;
@@ -3385,7 +3734,7 @@ DEBUG_EXT( EDBGSetImplicitDB )
                             Unfetch( wszDatabaseNameSelected );
                             wszDatabaseNameSelected = NULL;
 
-                            return;
+                            return; // do not set anything.
                         }
                         ifmpSelected = ifmp;
                         wszDatabaseNameSelected = wszDatabaseName;
@@ -3401,19 +3750,23 @@ DEBUG_EXT( EDBGSetImplicitDB )
     if ( ifmpSelected >= cfmpReserved && ifmpSelected != ifmpNil && ifmpSelected != ulMax && Pdls()->PfmpCache( ifmpSelected ) != NULL )
     {
         const FMP * pfmp = Pdls()->PfmpCache( ifmpSelected );
-        if ( wszDatabaseNameSelected == NULL )
+        if ( wszDatabaseNameSelected == NULL )  // selected by direct index
         {
             (void)FFetchSz( pfmp->WszDatabaseName(), &wszDatabaseNameSelected );
         }
 
+        //  Now, actually set implicit / default FMP!
         dprintf( "Selected implicit FMP --> [%d] %ws\n", ifmpSelected, wszDatabaseNameSelected ? wszDatabaseNameSelected : L"CouldNotLoadDbName" );
         Pdls()->SetImplicitIfmp( ifmpSelected );
 
+        //  And since an FMP implies an INST, set implicit INST as well!
         INST * pinstDebuggee = pfmp->Pinst();
         INST * pinstTarget = NULL;
         if ( FFetchVariable( pinstDebuggee, &pinstTarget ) )
         {
             ULONG ipinstTarget = pinstTarget->m_iInstance - 1;
+            //  If this doesn't hold, can make a Pdls()->IpinstFromPinst( pinstDebuggee ) that walks 
+            //  the DLS's pinst debuggee array to find the right ipinst.
             AssertEDBG( Pdls()->Pinst( ipinstTarget ) != NULL &&
                         ( Pdls()->Pinst( ipinstTarget )->m_iInstance ) == pinstTarget->m_iInstance &&
                         Pdls()->PinstDebuggee( ipinstTarget ) == pinstDebuggee );
@@ -3425,6 +3778,7 @@ DEBUG_EXT( EDBGSetImplicitDB )
                 Pdls()->SetImplicitIpinst( ipinstTarget );
             }
             Unfetch( pinstTarget );
+            // Note: if cache does not have it, we just leak pinst.
         }
     }
     else
@@ -3437,7 +3791,9 @@ DEBUG_EXT( EDBGSetImplicitDB )
     Unfetch( wszDatabaseNameSelected );
 }
 
+//  ================================================================
 DEBUG_EXT( EDBGSetImplicitInst )
+//  ================================================================
 {
     WCHAR * wszInstanceNameSelected = NULL;
     WCHAR * wszDisplayNameSelected = NULL;
@@ -3493,7 +3849,7 @@ DEBUG_EXT( EDBGSetImplicitInst )
         INST * pinst = NULL;
         if ( pinstDebuggee == NULL || !FFetchVariable( pinstDebuggee, &pinst ) )
         {
-            dprintf( "ERROR: The ipinst %d array slot chosen does not seem to be a live instance, or can not load the INST from DLS pinst cache: %p\n",
+            dprintf( "ERROR: The ipinst %d array slot chosen does not seem to be a live instance, or can not load the INST from DLS pinst cache: %p\n", 
                      ipinstSelected, Pdls()->PinstDebuggee( ipinstSelected ) );
             return;
         }
@@ -3506,6 +3862,7 @@ DEBUG_EXT( EDBGSetImplicitInst )
         return;
     }
 
+    // The argument did not look like an index.
 
     WCHAR wszTargetName[ IFileSystemAPI::cchPathMax ];
     OSStrCbFormatW( wszTargetName, sizeof( wszTargetName ), L"%hs", argv[0] );
@@ -3514,7 +3871,7 @@ DEBUG_EXT( EDBGSetImplicitInst )
 
     INST **     rgpinstDebuggee     = NULL;
     INST **     rgpinst             = NULL;
-    ULONG       cpinstMax           = 0;
+    ULONG       cpinstMax           = 0;    //  cMaxInstances is now variable in essence.
 
     if ( cpinstMax == 0 &&
             !FReadGlobal( "g_cpinstMax", &cpinstMax ) )
@@ -3541,6 +3898,7 @@ DEBUG_EXT( EDBGSetImplicitInst )
         {
             INST *  pinst   = NULL;
 
+            //  validate our DLS
             if ( rgpinst[ ipinst ] != Pdls()->PinstDebuggee( ipinst ) )
             {
                 Pdls()->AddWarning( "Debugger DLS - PinstDebuggee() state doesn't match, some debugger extensions not trustable. May happen on live debug though." );
@@ -3552,6 +3910,7 @@ DEBUG_EXT( EDBGSetImplicitInst )
                             ipinst,
                             rgpinst[ipinst] );
 
+                //  force out of loop
                 ipinst = cpinstMax;
             }
             else
@@ -3559,13 +3918,20 @@ DEBUG_EXT( EDBGSetImplicitInst )
                 WCHAR *  wszInstanceName = NULL;
                 WCHAR *  wszDisplayName  = NULL;
 
+                //  validate our DLS
                 if ( ( Pdls()->Pinst( ipinst ) != NULL ) &&
                         ( 0 != memcmp( Pdls()->Pinst( ipinst ), pinst, sizeof(INST) ) ) )
                 {
                     Pdls()->AddWarning( "Debugger DLS - Pinst() state doesn't match, some debugger extensions not trustable. May happen on live debug though." );
                 }
 
-
+                /* Example:
+                    g_rgpinst[0x0]  (INST 0x00000212DE130020)
+                                           m_wszInstanceName : 1ded8fa0-2afb-4d47-8c1e-82cfe4724f46
+                                            m_wszDisplayName : NAMPR10DG140-db124
+                                                      m_pver : 0x00000212E2C50000 (version bucket usage: 2/24578)
+                                                      m_plog : 0x00000212DE810020 (checkpoint: 519 gens [min=0x25bb95f, max=0x25bbb66], rec state: RecNone )
+                */
 
                 if ( FFetchSz( pinst->m_wszInstanceName, &wszInstanceName ) &&
                      FEqualIW( wszInstanceName, wszTargetName ) )
@@ -3581,10 +3947,10 @@ DEBUG_EXT( EDBGSetImplicitInst )
                                  ipinst, wszDisplayName, wszInstanceName );
                         Unfetch( wszInstanceNameSelected );
                         Unfetch( wszDisplayNameSelected );
-                        wszInstanceNameSelected = NULL;
+                        wszInstanceNameSelected = NULL; // for saftey, clobbered immediately
                         wszDisplayNameSelected = NULL;
 
-                        return;
+                        return; // do not set anything.
                     }
                     ipinstSelected = ipinst;
                     wszInstanceNameSelected = wszInstanceName;
@@ -3592,7 +3958,7 @@ DEBUG_EXT( EDBGSetImplicitInst )
                     wszDisplayNameSelected = wszDisplayName;
                     wszDisplayName = NULL;
                 }
-                else if ( FFetchSz( pinst->m_wszDisplayName, &wszDisplayName ) &&
+                else if ( FFetchSz( pinst->m_wszDisplayName, &wszDisplayName ) && 
                           FEqualIW( wszDisplayName, wszTargetName ) )
                 {
                     if ( ipinstSelected != DEBUGGER_LOCAL_STORE::IpinstNil() && ipinstSelected != ipinst )
@@ -3604,10 +3970,10 @@ DEBUG_EXT( EDBGSetImplicitInst )
                                  ipinst, wszDisplayName, wszInstanceName );
                         Unfetch( wszInstanceNameSelected );
                         Unfetch( wszDisplayNameSelected );
-                        wszInstanceNameSelected = NULL;
+                        wszInstanceNameSelected = NULL; // for saftey, clobbered immediately
                         wszDisplayNameSelected = NULL;
 
-                        return;
+                        return; // do not set anything.
                     }
                     ipinstSelected = ipinst;
                     wszInstanceNameSelected = wszInstanceName;
@@ -3628,6 +3994,7 @@ DEBUG_EXT( EDBGSetImplicitInst )
 
     if ( ipinstSelected != DEBUGGER_LOCAL_STORE::IpinstNil() && ipinstSelected != ulMax && Pdls()->Pinst( ipinstSelected ) != NULL )
     {
+        //  Now, actually set implicit / default INST!
         dprintf( "Selected implicit INST --> [%d] %ws \\ %ws\n", ipinstSelected, wszDisplayNameSelected, wszInstanceNameSelected );
         Pdls()->SetImplicitIpinst( ipinstSelected );
     }
@@ -3646,15 +4013,16 @@ LOCAL BOOL FEDBGFetchTableMetaData(
     const FCB * const pfcbTableDebuggee,
     FCB **            ppfcbTable );
 
-enum EdbgSpaceTreeFind
+enum EdbgSpaceTreeFind // edbgsptf
 {
-    edbgsptfNone         = 0,
+    edbgsptfNone         = 0,  //  i.e. the regular tree
     edbgsptfOwnedExtent  = 1,
     edbgsptfAvailExtent  = 2
 };
 
-const CHAR * szLvIndexSelect = "(LV)";
+const CHAR * szLvIndexSelect = "(LV)";  //  Yes, the LV is not an index, but we pass it in the index arg.
 
+//  ================================================================
 LOCAL BOOL FEDBGFindAndSetImplicitBt(
     _In_ const ULONG              ipinstTarget,
     _In_ const IFMP               ifmpTarget,
@@ -3666,6 +4034,7 @@ LOCAL BOOL FEDBGFindAndSetImplicitBt(
     _Out_ FCB **                  ppfcbSubTree,
     _Out_ OBJID *                 pobjidFDP,
     _Out_ PGNO *                  ppgnoFDP )
+//  ================================================================
 {
     INST *                  pinst               = pinstNil;
     ULONG                   cFoundTableFCBs     = 0;
@@ -3694,6 +4063,13 @@ LOCAL BOOL FEDBGFindAndSetImplicitBt(
         goto HandleError;
     }
 
+    //  HACK! HACK!
+    //
+    //  The shadow catalog is always named MSysObjects in the TDB
+    //  (see ErrCATIInitCatalogTDB) so when searching for one
+    //  of the catalog tables, can't use a name match and must
+    //  instead use an objid match
+    //
     const BOOL              fFindCatalog        = szTableSearch && FCATSystemTable( szTableSearch );
     const OBJID             objidFindMSO        = ( fFindCatalog ? ObjidCATTable( szTableSearch ) : objidNil );
 
@@ -3703,6 +4079,8 @@ LOCAL BOOL FEDBGFindAndSetImplicitBt(
         goto HandleError;
     }
 
+    //  scan FCB list of all INST's
+    //
     for ( SIZE_T ipinst = 0; ipinst < Pdls()->Cinst() && !fError; ipinst++ )
     {
         if ( pinstNil == Pdls()->PinstDebuggee( ipinst ) )
@@ -3735,6 +4113,8 @@ LOCAL BOOL FEDBGFindAndSetImplicitBt(
         {
             BOOL    fMatchingTable = fFalse;
 
+            //  retrieve meta-data
+            //
             if ( !FEDBGFetchTableMetaData( pfcbTableDebuggee, &pfcbTable ) )
             {
                 dprintf( "ERROR: Could not retrieve table metadata on pfcb = %p\n", pfcbTableDebuggee );
@@ -3747,16 +4127,20 @@ LOCAL BOOL FEDBGFindAndSetImplicitBt(
                 goto NextFcb;
             }
 
+            //  see if this FCB is a match
+            //
 
             if ( objidSearch != objidNil && pfcbTable->ObjidFDP() == objidSearch )
             {
                 AssertEDBG( szTableSearch == NULL );
+                // may not be actual table ... 
                 if ( !pfcbTable->FTypeTable() )
                 {
+                    // This is either a secondary index or LV, rearrange so the rest of the code works.
                     pfcbSubTree = pfcbTable;
                     pfcbSubTreeDebuggee = pfcbTableDebuggee;
                     pfcbTableDebuggee = pfcbSubTree->PfcbTable();
-
+                    
                     if ( !FEDBGFetchTableMetaData( pfcbTableDebuggee, &pfcbTable ) )
                     {
                         dprintf( "ERROR: Could not retrieve table metad data on pfcb = %p\n", pfcbTableDebuggee );
@@ -3780,11 +4164,11 @@ LOCAL BOOL FEDBGFindAndSetImplicitBt(
                 {
                     if ( fTryPrefixMatch )
                     {
-                        fMatchingTable = ( 0 == _strnicmp( szTableSearch, pfcbTable->Ptdb()->SzTableName(), cchTableName - 1 ) );
+                        fMatchingTable = ( 0 == _strnicmp( szTableSearch, pfcbTable->Ptdb()->SzTableName(), cchTableName - 1 ) );  //  -1 because we don't want to compare the wildcard character
                     }
                     else if ( fTrySuffixMatch )
                     {
-                        fMatchingTable = FMatchISuffixA( &( szTableSearch[ 1 ] ), pfcbTable->Ptdb()->SzTableName() );
+                        fMatchingTable = FMatchISuffixA( &( szTableSearch[ 1 ] ), pfcbTable->Ptdb()->SzTableName() );  //  skip the search term past the * \ wildcard
                     }
                     else
                     {
@@ -3792,7 +4176,7 @@ LOCAL BOOL FEDBGFindAndSetImplicitBt(
                     }
                 }
 
-            }
+            } // szTableSearch && FTypeTable()
 
 
             if ( fMatchingTable )
@@ -3805,7 +4189,7 @@ LOCAL BOOL FEDBGFindAndSetImplicitBt(
 
                 cFoundTableFCBs++;
 
-                if ( pfcbSubTreeDebuggee == NULL &&
+                if ( pfcbSubTreeDebuggee == NULL && // for case where we located this by objid of sub-tree specified above in objidSearch clause.
                      fFindLV && pfcbTable->FTypeTable() )
                 {
                     if ( pfcbTable->Ptdb()->PfcbLV() == NULL )
@@ -3822,7 +4206,7 @@ LOCAL BOOL FEDBGFindAndSetImplicitBt(
                         break;
                     }
 
-                } else if ( pfcbSubTreeDebuggee == NULL &&
+                } else if ( pfcbSubTreeDebuggee == NULL && 
                             szSubTree != NULL ) {
                     FCB * pfcbIndexNextDebuggee = pfcbTable->PfcbNextIndex();
                     while( pfcbIndexNextDebuggee != pfcbNil )
@@ -3870,13 +4254,19 @@ LOCAL BOOL FEDBGFindAndSetImplicitBt(
                     if ( pfcbSubTreeDebuggee == NULL )
                     {
                         dprintf( "ERROR: Found a table %hs / objid=%d you wanted but no matching index: %hs\n", pfcbTable->Ptdb()->SzTableName(), pfcbTable->ObjidFDP(), szSubTree );
+                        //  Should we really set fError?  What if the table name is ambiguous like "MSysObj*" but with index name it 
+                        //  is not:  "MSysObj*\Name" (remember MSysObjectsShadow has no secondary indices).  We'll for now, just force
+                        //  people to fully specify table name (which should create 1 match) to get to right sub-index name.
                         fError = fTrue;
                         goto NextFcb;
                     }
 
-                }
+                } // else just pure-table selection
 
 
+                //
+                //     We have a match, print details and set implicit BT.
+                //
 
                 const BOOL fSelectingSubTree = ( pfcbSubTreeDebuggee != NULL && pfcbSubTree != NULL );
 
@@ -3903,7 +4293,7 @@ LOCAL BOOL FEDBGFindAndSetImplicitBt(
 
                 if ( !fFindLV && szSubTree && pfcbSubTreeDebuggee )
                 {
-                    AssertEDBG( pidbIndex );
+                    AssertEDBG( pidbIndex ); // needed for printing in next dprintf.
                 }
 
                 dprintf( "Selected implicit BT --> 0x%N / %N [ifmp:0x%x, objidFDP:0x%x%hs, pgnoFDP:0x%x] - %hs%hs%hs%hs\n",
@@ -3915,7 +4305,7 @@ LOCAL BOOL FEDBGFindAndSetImplicitBt(
                         *ppgnoFDP,
                         pfcbTable->Ptdb()->SzTableName(),
                         ( pfcbSubTreeDebuggee ) ? "\\" : "",
-                        ( fFindLV && pfcbSubTreeDebuggee ) ?
+                        ( fFindLV && pfcbSubTreeDebuggee ) ? 
                             szLvIndexSelect :
                             ( ( szSubTree && pfcbSubTreeDebuggee ) ?
                                pfcbTable->Ptdb()->SzIndexName( pidbIndex->ItagIndexName(), pfcbSubTree->FDerivedIndex() ) :
@@ -3934,22 +4324,24 @@ LOCAL BOOL FEDBGFindAndSetImplicitBt(
                 Unfetch( pfcbSubTree );
                 pfcbSubTree = NULL;
 
-            }
+            } // fMatchingTable
 
           NextFcb:
 
             pfcbTableDebuggee = pfcbTable->PfcbNextList();
             Unfetch( pfcbTable );
             pfcbTable = NULL;
-        }
+        } // while
 
         Unfetch( pfcbTable );
         pfcbTable = NULL;
 
-    }
+    } // for each inst
 
     if ( 0 == cFoundTableFCBs )
     {
+        //  we did not find the FCB
+        //
         dprintf( "\nERROR: Could not find any FCB's with table name \"%s\".\n", szTableSearch );
         fError = fTrue;
         goto HandleError;
@@ -3957,11 +4349,12 @@ LOCAL BOOL FEDBGFindAndSetImplicitBt(
     else if ( 1 != cFoundTableFCBs )
     {
         dprintf( "\nERROR: Found %d FCB's with table name \"%s\", search specification too ambiguous!\n", cFoundTableFCBs, szTableSearch );
-        Pdls()->SetImplicitBt( pfcbNil, pfcbNil, objidNil, pgnoNull );
+        Pdls()->SetImplicitBt( pfcbNil, pfcbNil, objidNil, pgnoNull ); // reset everything, don't let last FCB we saw linger as implicit state.
         fError = fTrue;
         goto HandleError;
     }
 
+    //  Yay!  We only found one, return success (and set other implicit contexts)
 
     if ( ifmpLastMatch != ifmpNil )
     {
@@ -3983,7 +4376,7 @@ LOCAL BOOL FEDBGFindAndSetImplicitBt(
         if ( pinst->m_wszInstanceName ) (void)FFetchSz( pinst->m_wszInstanceName, &wszInstanceName );
         if ( pinst->m_wszDisplayName )  (void)FFetchSz( pinst->m_wszDisplayName, &wszDisplayName );
         Pdls()->SetImplicitIpinst( (ULONG)ipinstLastMatch );
-        dprintf( "[Also] selecting implicit INST --> [%d] / %p - %ws \\ %ws\n", ipinstLastMatch, Pdls()->PinstDebuggee( ipinstLastMatch ),
+        dprintf( "[Also] selecting implicit INST --> [%d] / %p - %ws \\ %ws\n", ipinstLastMatch, Pdls()->PinstDebuggee( ipinstLastMatch ), 
                  pinst->m_wszDisplayName ? wszDisplayName : L"NULL", pinst->m_wszInstanceName ? wszInstanceName : L"NULL" );
         Unfetch( wszInstanceName != wszInstFetchFail ? wszInstanceName : NULL );
         Unfetch( wszDisplayName != wszDispFetchFail ? wszDisplayName : NULL );
@@ -4026,7 +4419,9 @@ LOCAL BOOL FEDBGFindAndSetImplicitBt(
     return FEDBGFindAndSetImplicitBt( ipinstTarget, ifmpTarget, NULL, NULL, objidSearch, edbgsptf, ppfcbTable, ppfcbSubTree, pobjidFDP, ppgnoFDP );
 }
 
+//  ================================================================
 DEBUG_EXT( EDBGSetImplicitBT )
+//  ================================================================
 {
     ULONG objidSearch = objidNil;
 
@@ -4051,8 +4446,8 @@ DEBUG_EXT( EDBGSetImplicitBT )
 
         if ( Pdls()->ObjidCurrentBt() != 0 )
         {
-            dprintf( "Note:  Current implicit BT -->  ifmp:0x%x, objidFDP:0x%x, pgnoFDP:0x%x, pfcbDebuggee(s)=%p / %p\n",
-                 Pdls()->IfmpCurrent(), Pdls()->ObjidCurrentBt(), Pdls()->PgnoCurrentBt(),
+            dprintf( "Note:  Current implicit BT -->  ifmp:0x%x, objidFDP:0x%x, pgnoFDP:0x%x, pfcbDebuggee(s)=%p / %p\n", 
+                 Pdls()->IfmpCurrent(), Pdls()->ObjidCurrentBt(), Pdls()->PgnoCurrentBt(), 
                  Pdls()->PfcbCurrentTableDebuggee(), Pdls()->PfcbCurrentSubTreeDebuggee() );
         }
         else
@@ -4068,7 +4463,7 @@ DEBUG_EXT( EDBGSetImplicitBT )
         dprintf( "Read objidTree = %d ... is that right? \n\n", objidSearch );
     }
 
-    CHAR szSearchParts[ 300 ];
+    CHAR szSearchParts[ 300 ];  //  this is just much > than two catalog names, ?64 chars?
     OSStrCbCopyA( szSearchParts, sizeof( szSearchParts ), argv[0] );
 
     CHAR * szIndexName = strchr( szSearchParts, '\\' );
@@ -4082,7 +4477,7 @@ DEBUG_EXT( EDBGSetImplicitBT )
         szIndexName[ 0 ] = '\0';
         szIndexName++;
 
-        fLV = FArgumentMatch( szIndexName, szLvIndexSelect );
+        fLV = FArgumentMatch( szIndexName, szLvIndexSelect ); 
     }
     if ( szSpecialTree )
     {
@@ -4101,9 +4496,11 @@ DEBUG_EXT( EDBGSetImplicitBT )
             dprintf( "ERROR: Unexpected special tree specifier.\n" );
             return;
         }
+        //  LV is handled as subtree.
     }
 
     CHAR * szTableName = szSearchParts;
+    // Should be no more special / delimiters left in table name, except wildcard *.
     AssertEDBG( NULL == strchr( szTableName, '\\' ) );
     AssertEDBG( NULL == strchr( szTableName, '[' ) );
     AssertEDBG( NULL == strchr( szTableName, ']' ) );
@@ -4144,7 +4541,9 @@ DEBUG_EXT( EDBGSetImplicitBT )
 }
 
 
+//  ================================================================
 DEBUG_EXT( EDBGTest )
+//  ================================================================
 {
     dprintf( "================================================================\n" );
     dprintf( "fDebugMode = %d\n", fDebugMode );
@@ -4251,7 +4650,9 @@ DEBUG_EXT( EDBGTest )
     dprintf( "\n" );
 }
 
+//  ================================================================
 BOOL FLoadEDBGGlobals( EDBGGlobals * pEGT )
+//  ================================================================
 {
     FetchWrap<EDBGGlobals *>    pEG;
     FetchWrap<SIZE_T *>         pcArraySize;
@@ -4265,11 +4666,13 @@ BOOL FLoadEDBGGlobals( EDBGGlobals * pEGT )
         return fFalse;
     }
     g_rgEDBGGlobalsDebugger = pEGT;
-
+    
     return fTrue;
 }
 
+//  ================================================================
 DEBUG_EXT( EDBGGlobal )
+//  ================================================================
 {
     FetchWrap<EDBGGlobals *>    pEG;
     FetchWrap<SIZE_T *>         pcArraySize;
@@ -4335,7 +4738,9 @@ DEBUG_EXT( EDBGGlobal )
 }
 
 
+//  ================================================================
 DEBUG_EXT( EDBGLoad )
+//  ================================================================
 {
     g_hLibrary = LoadLibraryExW( WszUtilImagePath(), NULL, 0 );
     if ( NULL != g_hLibrary )
@@ -4353,7 +4758,9 @@ DEBUG_EXT( EDBGLoad )
 }
 
 
+//  ================================================================
 DEBUG_EXT( EDBGUnload )
+//  ================================================================
 {
     if( NULL != g_hLibrary )
     {
@@ -4366,7 +4773,9 @@ DEBUG_EXT( EDBGUnload )
 }
 
 
+//  ================================================================
 DEBUG_EXT( EDBGErr )
+//  ================================================================
 {
     LONG lErr;
     if( 1 == argc
@@ -4386,7 +4795,9 @@ DEBUG_EXT( EDBGErr )
 }
 
 
+//  ================================================================
 DEBUG_EXT( EDBGHelp )
+//  ================================================================
 {
     INT ifuncmap;
     for( ifuncmap = 0; ifuncmap < cfuncmap; ifuncmap++ )
@@ -4406,7 +4817,9 @@ namespace OSSYNC
 };
 
 
+//  ================================================================
 DEBUG_EXT( EDBGSync )
+//  ================================================================
 {
     OSSyncDebuggerExtension(    pdebugClient,
                                 argc,
@@ -4415,8 +4828,9 @@ DEBUG_EXT( EDBGSync )
 
 
 DEBUG_EXT( EDBGCacheFind )
+//  ================================================================
 {
-    ULONG       ifmp                    = 0;
+    ULONG       ifmp                    = 0;        //  don't use ifmpNil because its type is IFMP
     ULONG       pgno                    = pgnoNull;
     PBF         pbf                     = pbfNil;
     BF **       rgpbfChunkDebuggee      = NULL;
@@ -4489,13 +4903,16 @@ DEBUG_EXT( EDBGCacheFind )
         return;
     }
 
+    //  scan all valid BFs looking for this IFMP / PGNO
 
     BOOL fFoundBF = fFalse;
     for ( LONG_PTR ibf = 0; ibf < cbfCacheAddressableT; ibf++ )
     {
+        //  compute the address of the target BF
 
         PBF pbfDebuggee = rgpbfChunkT[ ibf / cbfChunkT ] + ibf % cbfChunkT;
 
+        //  we failed to read this BF
 
         if ( !FReadVariable( pbfDebuggee, pbf ) )
         {
@@ -4504,6 +4921,7 @@ DEBUG_EXT( EDBGCacheFind )
             break;
         }
 
+        //  this BF contains this IFMP / PGNO
 
         if (    pbf->ifmp == IFMP( ifmp ) &&
                 pbf->pgno == PGNO( pgno ) )
@@ -4521,6 +4939,7 @@ DEBUG_EXT( EDBGCacheFind )
         }
     }
 
+    //  we did not find the IFMP / PGNO
 
     if ( fFoundBF )
     {
@@ -4531,14 +4950,16 @@ DEBUG_EXT( EDBGCacheFind )
         dprintf( "%X:%08X is not cached.\n\n", ifmp, pgno );
     }
 
+    //  unload BF parameters
 
     LocalFree( pbf );
     Unfetch( rgpbfChunkT );
 }
 
 DEBUG_EXT( EDBGCacheFindOldest )
+//  ================================================================
 {
-    ULONG       ifmp                    = 0;
+    ULONG       ifmp                    = 0;        //  don't use ifmpNil because its type is IFMP
     ULONG       lgen                    = 0;
     PBF         pbf                     = pbfNil;
     BF **       rgpbfChunkDebuggee      = NULL;
@@ -4626,6 +5047,7 @@ DEBUG_EXT( EDBGCacheFindOldest )
         goto HandleError;
     }
 
+    //  scan all valid BFs looking for the oldest lgposBegin0 of this IFMP
 
     if ( lgen > 0 )
     {
@@ -4642,9 +5064,11 @@ DEBUG_EXT( EDBGCacheFindOldest )
 
     for ( LONG_PTR ibf = 0; ibf < cbfCacheAddressableT; ibf++ )
     {
+        //  compute the address of the target BF
 
         PBF pbfDebuggee = rgpbfChunkT[ ibf / cbfChunkT ] + ibf % cbfChunkT;
 
+        //  we failed to read this BF
 
         if ( !FReadVariable( pbfDebuggee, pbf ) )
         {
@@ -4652,6 +5076,7 @@ DEBUG_EXT( EDBGCacheFindOldest )
             goto HandleError;
         }
 
+        //  compare lgposBegin0 of this IFMP / PGNO
 
         if ( pbf->ifmp == IFMP( ifmp )
             && ( pbf->fCurrentVersion || pbf->fOlderVersion ) )
@@ -4677,9 +5102,12 @@ DEBUG_EXT( EDBGCacheFindOldest )
         }
     }
 
+    //  report BF with oldest Begin0
 
     if ( lgen > 0 && !fFoundTargetGen )
     {
+        //  didn't find any BF for this ifmp
+        //
         dprintf( "    <none>\n" );
     }
 
@@ -4696,6 +5124,7 @@ DEBUG_EXT( EDBGCacheFindOldest )
         dprintf( "No pages cached for ifmp 0x%x.\n", ifmp );
     }
 
+    //  unload BF parameters
 HandleError:
     dprintf( "\n" );
 
@@ -4703,7 +5132,15 @@ HandleError:
     Unfetch( rgpbfChunkT );
 }
 
+// -------------------------------------------------------------
+//
+//  Cache IterationQuery / ErrEDBGQueryCache() support 
+//
 
+//  "Special" LGPOS values that get interpeted at query runtime ...
+//
+//  All values should have same lGeneration and isec ...
+// 
 const static LGPOS      lgposEDBGSignalWaypoint     = { 0xff01, 0xfeff, 0x7fffffff };
 
 BOOL LgposReadVal( const char * szLgpos, void ** ppvValue )
@@ -4750,7 +5187,7 @@ BOOL LgposReadVal( const char * szLgpos, void ** ppvValue )
                 fRet = !( *pchEnd );
             }
         }
-
+        
         AssertEDBGSz( 0 != CmpLgpos( &lgposEDBGSignalWaypoint, &lgpos ), "provided LGPOS matches lgposEDBGSignalWaypoint, this will most likely cause not the query you hoped for!" );
     }
 
@@ -4850,6 +5287,8 @@ BOOL BFATReadVal( const char * szBFAT, void ** ppvValue )
     BFAllocType bfat = bfatNone;
     BOOL fRet = fFalse;
 
+    // Note this returns 4
+    //dprintf("Fyi sizeof(BFAllocType) = %d\n", sizeof(BFAllocType));
 
     *ppvValue = Pdls()->PvDLSAlloc(sizeof(BFAllocType));
 
@@ -4937,6 +5376,8 @@ BOOL BFDFReadVal( const char * szBFDF, void ** ppvValue )
     BFDirtyFlags bfdf = bfdfClean;
     BOOL fRet = fFalse;
 
+    // Note this returns 4
+    //dprintf("Fyi sizeof(BFDirtyFlags) = %d\n", sizeof(BFDirtyFlags));
 
     *ppvValue = Pdls()->PvDLSAlloc(sizeof(BFDirtyFlags));
 
@@ -5182,11 +5623,15 @@ void PGFTPrintVal( const void * pVal )
     }
 }
 
+//
+//  Virtual and BitField Member enumerators
+//
 
 enum eBFVirtualMembers
 {
     eBFBFNONE = 0,
 
+    //  first set of bit fields
     eBFBFfLazyIO,
     eBFBFfNewlyEvicted,
     eBFBFfQuiesced,
@@ -5199,10 +5644,13 @@ enum eBFVirtualMembers
     eBFBFfOlderVersion,
     eBFBFfFlushed,
     eBFBFbfls,
+    //  second (atomic) set of bit fields
     eBFBFFDependentPurged,
     eBFBFFImpedingCheckpoint,
     eBFBFFRangeLocked,
+    //  third quasi-bit field
     eBFBFtce,
+    //  fourth quasi-bit field
     eBFBFicbBuffer,
     eBFBFicbPage,
     eBFBFfSuspiciouslySlowRead,
@@ -5210,8 +5658,10 @@ enum eBFVirtualMembers
     eBFBFbfat,
     eBFBFfAbandoned,
 
+    //  hack to allow access to virtual member "ibf"
     eBFibf,
 
+    //  LRU-K invasive context accessors
     eBFLRUKTickLastTouch,
     eBFLRUKTickLastTouchTime,
     eBFLRUKkLrukPool,
@@ -5230,6 +5680,7 @@ enum eBFVirtualMembers
     eBFLRUKDtickMisIndexedRange,
     eBFLRUKFResourceLocked,
 
+    //  SXWL member accessors
     eBFSXWLFLatched,
     eBFSXWLFSharedLatched,
     eBFSXWLFExclusiveLatched,
@@ -5240,6 +5691,7 @@ enum eBFVirtualMembers
     eBFSXWLCWaitWriteLatch,
     eBFSXWLCWaiters,
 
+    //  page member accessors
     eBFCPAGEchecksum,
     eBFCPAGEdbtimeDirtied,
     eBFCPAGEpgnoPrev,
@@ -5250,10 +5702,12 @@ enum eBFVirtualMembers
     eBFCPAGEibMicFree,
     eBFCPAGEitagMicFree,
     eBFCPAGEfFlags,
+    //  extended (large) page member accessors
     eBFCPAGEpgno,
     eBFCPAGErgChecksum2,
     eBFCPAGErgChecksum3,
     eBFCPAGErgChecksum4,
+    //  page flags accessors
     eBFCPAGEFLeafPage,
     eBFCPAGEFInvisibleSons,
     eBFCPAGEFRootPage,
@@ -5271,10 +5725,11 @@ enum eBFVirtualMembers
     eBFCPAGEFNewRecordFormat,
     eBFCPAGEFNewChecksumFormat,
     eBFCPAGEPgft,
-    eBFCPAGECbFreeActual,
+    eBFCPAGECbFreeActual,   //  adjusts for dehydrated buffers by adding the dehydrated space to eBFCPAGEcbFree
     eBFCPAGECbContiguousDehydrateRequired,
     eBFCPAGECbReorganizedDehydrateRequired,
 
+    // virtual members
     eBFVIRTFBFIDatabasePage,
     eBFVIRTCrceUndoInfoNext,
     eBFVIRTCbfTimeDepChainNext,
@@ -5284,6 +5739,9 @@ enum eBFVirtualMembers
 };
 
 
+//
+//  Member extraction routines
+//
 
 ERR ErrBFBitFieldElemFromStruct( size_t eBFMember, size_t cbUnused, QwEntryAddr pvDebuggee, PcvEntry pv, ULONGLONG * pullValue )
 {
@@ -5308,6 +5766,7 @@ ERR ErrBFBitFieldElemFromStruct( size_t eBFMember, size_t cbUnused, QwEntryAddr 
                 ullValue1 = pbf->bfbitfield.fBFFlag();      \
                 break;
 
+        //  first set of bit fields
         ExtrudeBFBitField( fLazyIO )
         ExtrudeBFBitField( fNewlyEvicted )
         ExtrudeBFBitField( fQuiesced )
@@ -5322,6 +5781,7 @@ ERR ErrBFBitFieldElemFromStruct( size_t eBFMember, size_t cbUnused, QwEntryAddr 
         ExtrudeBFBitField( fOlderVersion )
         ExtrudeBFBitField( fFlushed )
 
+        //  second (atomic) set of bit fields
         ExtrudeBFAtomicBitField( FDependentPurged )
         ExtrudeBFAtomicBitField( FImpedingCheckpoint )
         ExtrudeBFAtomicBitField( FRangeLocked )
@@ -5335,6 +5795,7 @@ ERR ErrBFBitFieldElemFromStruct( size_t eBFMember, size_t cbUnused, QwEntryAddr 
 
         ExtrudeBFBitField( fAbandoned )
 
+        //  these three are special, in that they're not booleans, but still bit fields.
         case eBFBFbfdf:
             ullValue1 = (unsigned __int64) pbf->bfdf;
             break;
@@ -5352,10 +5813,12 @@ ERR ErrBFBitFieldElemFromStruct( size_t eBFMember, size_t cbUnused, QwEntryAddr 
             break;
 
 
+        //  other odd cases ...
         case eBFibf:
             ullValue1 = Pdls()->IbfBFCachePbf( pbfDebuggee );
             break;
 
+        //  LRU-K invasive context accessors
         case eBFLRUKTickLastTouch:
             ullValue1 = pbf->lrukic.TickLastTouch();
             break;
@@ -5365,6 +5828,9 @@ ERR ErrBFBitFieldElemFromStruct( size_t eBFMember, size_t cbUnused, QwEntryAddr 
         case eBFLRUKkLrukPool:
             if ( pbf->err == errBFIPageNotVerified )
             {
+                //  SOMEONE had a clever idea of defining pre-read unused as k=0th pool, hard
+                //  to define in resmgr as it has no access to err, but we can define it for
+                //  cache query!
                 ullValue1 = 0;
             }
             else
@@ -5403,13 +5869,13 @@ ERR ErrBFBitFieldElemFromStruct( size_t eBFMember, size_t cbUnused, QwEntryAddr 
             ullValue1 = pbf->lrukic.FCorrelatedTouch();
             break;
         case eBFLRUKDtickCorrelatedRange:
-            ullValue1 = DtickDelta( pbf->lrukic.TickKthTouch( 1 ), pbf->lrukic.TickLastTouch() );
+            ullValue1 = DtickDelta( pbf->lrukic.TickKthTouch( 1 ), pbf->lrukic.TickLastTouch() );   //  generally comes out positive
             break;
         case eBFLRUKDtickTickKRange:
-            ullValue1 = DtickDelta( pbf->lrukic.TickKthTouch( 1 ), pbf->lrukic.TickKthTouch( 2 ) );
+            ullValue1 = DtickDelta( pbf->lrukic.TickKthTouch( 1 ), pbf->lrukic.TickKthTouch( 2 ) ); //  comes out positive
             break;
         case eBFLRUKDtickMisIndexedRange:
-            ullValue1 = DtickDelta( pbf->lrukic.TickIndexTarget(), pbf->lrukic.TickIndex() );
+            ullValue1 = DtickDelta( pbf->lrukic.TickIndexTarget(), pbf->lrukic.TickIndex() );       //  generally comes out zero, or negative
             break;
         case eBFLRUKFResourceLocked:
             ullValue1 = pbf->lrukic.FResourceLocked();
@@ -5454,13 +5920,14 @@ ERR ErrBFPageElemFromStruct( size_t eBFMember, size_t cbUnused, QwEntryAddr pvDe
             !FFetchVariable( (CPAGE::PGHDR2*)pbf->pv, (CPAGE::PGHDR2**)&ppghdr ) )
     {
         Pdls()->AddWarning( "ERROR: Could not fetch page header state for query (skinny dump?), results may be incorrect.\n" );
-        return errBFPageNotCached;
+        return errBFPageNotCached;  // reusing an existing error ...
     }
 #else
+    //  FLatchPageImage() actually knows to get a PGHDR2 if we've a 16+ KB page size
     if ( !Pdls()->FLatchPageImage( DEBUGGER_LOCAL_STORE::ePageHdrOnly, pbf->pv, &ppghdr ) )
     {
         Pdls()->AddWarning( "ERROR: Could not fetch page header state for query (skinny dump?), results may be incorrect.\n" );
-        return errBFPageNotCached;
+        return errBFPageNotCached;  // reusing an existing error ...
     }
 #endif
 
@@ -5472,6 +5939,7 @@ ERR ErrBFPageElemFromStruct( size_t eBFMember, size_t cbUnused, QwEntryAddr pvDe
                 ullValue1 = ppghdr->cpagefield;     \
                 break;
 
+        //  page member accessors
         ExtrudeCPAGEElem( checksum );
         ExtrudeCPAGEElem( dbtimeDirtied );
         ExtrudeCPAGEElem( pgnoPrev );
@@ -5483,6 +5951,7 @@ ERR ErrBFPageElemFromStruct( size_t eBFMember, size_t cbUnused, QwEntryAddr pvDe
         ExtrudeCPAGEElem( itagMicFree );
         ExtrudeCPAGEElem( fFlags );
 
+        //  extended (large) page member accessors
         case eBFCPAGECbFreeActual:
         {
             const USHORT cbFreeActual = (USHORT)( ppghdr->cbFree + ( Pdls()->CbPage() - g_rgcbPageSize[pbf->icbBuffer] ) );
@@ -5509,6 +5978,7 @@ ERR ErrBFPageElemFromStruct( size_t eBFMember, size_t cbUnused, QwEntryAddr pvDe
         case eBFCPAGEpgno:
             if ( Pdls()->CbPage() < 16 * 1024 )
             {
+                //  On "small" pages (aka less than 16 KB), we do not have the extended header
                 Unfetch( ppghdr );
                 return errNotFound;
             }
@@ -5572,6 +6042,8 @@ ERR ErrBFPageElemFromStruct( size_t eBFMember, size_t cbUnused, QwEntryAddr pvDe
         }
             break;
 
+        //  The FPrimaryPage() indicator is a little special in that its the absence of
+        //  several bits.
         case eBFCPAGEFPrimaryPage:
         {
             CPAGE cpage;
@@ -5603,7 +6075,7 @@ ULONGLONG CrceVERICountBFUndoInfo( const RCE * prceDebuggee )
     ULONGLONG crceUndoInfo = 0;
 
     BYTE rgbRceT[ sizeof(RCE) + 16 ] = { 0 };
-    RCE * prceT = (RCE*)roundup( (ULONG_PTR)rgbRceT, 8 );
+    RCE * prceT = (RCE*)roundup( (ULONG_PTR)rgbRceT, 8 );  // not sure I need this re-aligned, but just in case.
 
     while( prceDebuggee )
     {
@@ -5630,7 +6102,7 @@ ULONGLONG CbfBFIVersionsI( const BF * pbf, BOOL fForwardOlder )
 
     Assert( pbf );
     BYTE rgbBfT[ sizeof(BF) + 16 ];
-    BF * pbfT = (BF*)roundup( (ULONG_PTR)rgbBfT, 8 );
+    BF * pbfT = (BF*)roundup( (ULONG_PTR)rgbBfT, 8 );  // not sure I need this re-aligned, but just in case.
     memcpy( pbfT, pbf, sizeof(BF) );
 
     while( fForwardOlder ? pbfT->pbfTimeDepChainNext : pbfT->pbfTimeDepChainPrev )
@@ -5641,6 +6113,7 @@ ULONGLONG CbfBFIVersionsI( const BF * pbf, BOOL fForwardOlder )
         AssertEDBG( f );
         if ( f )
         {
+            //  success.
         }
         else
         {
@@ -5667,6 +6140,10 @@ ULONGLONG CbfBFIAllVersions( BF * pbfDebuggee )
 }
 
 
+//  This routine does not do a pure extraction of members from the BF or page image or 
+//  CSXWLatch and return them, like the other evaulation functions.   It concentrates 
+//  logic that is about the buffer, but not directly represented in the BF itself.
+//
 
 ERR ErrBFVirtualElement( size_t eBFMember, size_t cbUnused, QwEntryAddr pvDebuggee, PcvEntry pv, ULONGLONG * pullValue )
 {
@@ -5710,6 +6187,7 @@ ERR ErrBFVirtualElement( size_t eBFMember, size_t cbUnused, QwEntryAddr pvDebugg
                 ullValue1 = fTrue;
             }
 #else
+            //  FCachePage() actually knows to get a PGHDR2 if we've a 16+ KB page size
             if ( !Pdls()->FLatchPageImage( DEBUGGER_LOCAL_STORE::ePageHdrOnly, pbf->pv, &ppghdr ) )
             {
                 ullValue1 = fTrue;
@@ -5750,7 +6228,9 @@ ERR ErrBFSXWLStateFromStruct( size_t eBFMember, size_t cbUnused, QwEntryAddr pvD
 
     switch ( eBFMember )
     {
+        //  SXWL member accessors
 #ifdef DEBUG
+        //  The debugger state for this case is a pointer off this func.
         case eBFSXWLFLatched:
         case eBFSXWLFSharedLatched:
         case eBFSXWLFExclusiveLatched:
@@ -5761,7 +6241,7 @@ ERR ErrBFSXWLStateFromStruct( size_t eBFMember, size_t cbUnused, QwEntryAddr pvD
         case eBFSXWLCWaitWriteLatch:
         case eBFSXWLCWaiters:
             Unused( pbf );
-
+            
             Pdls()->AddWarning( "ERROR: In debug the sxwl member accessors are unavailable\n" );
             ullValue1 = fFalse;
             return ErrERRCheck( JET_errInternalError );
@@ -5810,6 +6290,9 @@ ERR ErrBFSXWLStateFromStruct( size_t eBFMember, size_t cbUnused, QwEntryAddr pvD
 }
 
 
+//
+//  Querying BFs specifically
+//
 
 #define QBF( type, member, histoinfo, expreval, statseval, readval, printval )  \
     { #member, ErrBFBitFieldElemFromStruct, eBFBF##member, 0x0, histoinfo, expreval, statseval, readval, printval },
@@ -5826,15 +6309,23 @@ ERR ErrBFSXWLStateFromStruct( size_t eBFMember, size_t cbUnused, QwEntryAddr pvD
 CMemberDescriptor const rgmdBfEntryMembers[] =
 {
 
+    // possible add a pbfDebuggee | "this" type elem ... 
+    //{ "this", eBFBFNONE, 0, 0,        NULL, NULL, NULL, NULL }
 
+    //  Special virtual field, index of pbf.
     { "ibf", ErrBFBitFieldElemFromStruct, eBFibf, 0, eNoHistoSupport, UlongExprEval, NULL, UlongReadVal, UlongPrintVal },
 
+    //  Basic Fields
+    //
 
+    // Skipping: ob0ic.
+    // Consider 64KB?
     QEF(   BF, lgposOldestBegin0,   ePartialHisto|eAttemptContinousPrint|262144,    LgposExprEval, NULL, LgposReadVal, LgposPrintVal )
     QEF(   BF, lgposModify,         ePartialHisto|eAttemptContinousPrint|262144,    LgposExprEval, NULL, LgposReadVal, LgposPrintVal )
     QEF(   BF, rbsposSnapshot,      ePartialHisto|eAttemptContinousPrint|262144,    RbsposExprEval, NULL, RbsposReadVal, RbsposPrintVal )
     QEF(   BF, pbfTimeDepChainPrev, eNoHistoSupport,    PtrExprEval, NULL, PtrReadVal, PtrPrintVal )
     QEF(   BF, pbfTimeDepChainNext, eNoHistoSupport,    PtrExprEval, NULL, PtrReadVal, PtrPrintVal )
+    //QEF(   BF, sxwl,                  NULL, NULL, NULL, NULL )
 #ifndef DEBUG
     QL(  SXWL, FLatched,            ePerfectHisto,      BoolExprEval, NULL, BoolReadVal, BoolPrintVal )
     QL(  SXWL, FSharedLatched,      ePerfectHisto,      BoolExprEval, NULL, BoolReadVal, BoolPrintVal )
@@ -5846,6 +6337,7 @@ CMemberDescriptor const rgmdBfEntryMembers[] =
     QL(  SXWL, CWaitWriteLatch,     ePerfectHisto,      UlongExprEval, NULL, UlongReadVal, UlongPrintVal )
     QL(  SXWL, CWaiters,            ePerfectHisto,      UlongExprEval, NULL, UlongReadVal, UlongPrintVal )
 #endif
+    // Note ifmp is 8-bytes on 64-bit architectures, but this is ok I think b/c ifmp's are low values.
     QEF(   BF, ifmp,                ePerfectHisto,      DwordExprEval, NULL, DwordReadVal, DwordPrintVal )
     QEF(   BF, pgno,                ePartialHisto|1024, UlongExprEval, NULL, UlongReadVal, UlongPrintVal )
     QEF(   BF, pv,                  eNoHistoSupport,    PtrExprEval, NULL, PtrReadVal, PtrPrintVal )
@@ -5891,14 +6383,15 @@ CMemberDescriptor const rgmdBfEntryMembers[] =
     QBF(  BF, fQuiesced,            ePerfectHisto,      BoolExprEval, NULL, BoolReadVal, BoolPrintVal )
     QBF(  BF, fAvailable,           ePerfectHisto,      BoolExprEval, NULL, BoolReadVal, BoolPrintVal )
     QBF(  BF, fWARLatch,            ePerfectHisto,      BoolExprEval, NULL, BoolReadVal, BoolPrintVal )
-    QBF(  BF, bfdf,                 ePerfectHisto,      UlongExprEval, NULL, BFDFReadVal, BFDFPrintVal )
+    QBF(  BF, bfdf,                 ePerfectHisto,      UlongExprEval, NULL, BFDFReadVal, BFDFPrintVal )    // 2 bits
     QBF(  BF, fInOB0OL,             ePerfectHisto,      BoolExprEval, NULL, BoolReadVal, BoolPrintVal )
     QBF(  BF, FRangeLocked,         ePerfectHisto,      BoolExprEval, NULL, BoolReadVal, BoolPrintVal )
     QBF(  BF, irangelock,           ePerfectHisto,      ShortExprEval, NULL, ShortReadVal, ShortPrintVal )
     QBF(  BF, fCurrentVersion,      ePerfectHisto,      BoolExprEval, NULL, BoolReadVal, BoolPrintVal )
     QBF(  BF, fOlderVersion,        ePerfectHisto,      BoolExprEval, NULL, BoolReadVal, BoolPrintVal )
     QBF(  BF, fFlushed,             ePerfectHisto,      BoolExprEval, NULL, BoolReadVal, BoolPrintVal )
-    QBF(  BF, bfls,                 ePerfectHisto,      UlongExprEval, NULL, UlongReadVal, UlongPrintVal )
+    // Did not break out bfls enum to strings because bfls will probably go away
+    QBF(  BF, bfls,                 ePerfectHisto,      UlongExprEval, NULL, UlongReadVal, UlongPrintVal )  // 3 bits
     QEF(  BF, tickEligibleForNomination,    ePartialHisto|eAttemptContinousPrint|1000,      UlongExprEval, NULL, UlongReadVal, UlongPrintVal )
     QEF(  BF, bfrs,                 ePerfectHisto,      UlongExprEval, NULL, BFRSReadVal, BFRSPrintVal )
     QEF(  BF, prceUndoInfoNext,     eNoHistoSupport,    PtrExprEval, NULL, PtrReadVal, PtrPrintVal )
@@ -5928,17 +6421,17 @@ CMemberDescriptor const rgmdBfEntryMembers[] =
     QBF(  BF, icbPage,              ePerfectHisto,      UlongExprEval, NULL, UlongReadVal, UlongPrintVal )
     QBF(  BF, fSuspiciouslySlowRead,ePerfectHisto,      BoolExprEval, NULL, BoolReadVal, BoolPrintVal )
     QBF(  BF, fSyncRead,            ePerfectHisto,      BoolExprEval, NULL, BoolReadVal, BoolPrintVal )
-    QBF(  BF, bfat,                 ePerfectHisto,      UlongExprEval, NULL, BFATReadVal, BFATPrintVal )
+    QBF(  BF, bfat,                 ePerfectHisto,      UlongExprEval, NULL, BFATReadVal, BFATPrintVal )    // 2 bits
     QBF(  BF, fAbandoned,           ePerfectHisto,      BoolExprEval, NULL, BoolReadVal, BoolPrintVal )
 
-
+    
      {  "FBFIDatabasePage()",       ErrBFVirtualElement, eBFVIRTFBFIDatabasePage, 0, ePerfectHisto, BoolExprEval, NULL, BoolReadVal, BoolPrintVal },
      {  "CrceUndoInfoNext()",       ErrBFVirtualElement, eBFVIRTCrceUndoInfoNext, 0, ePerfectHisto, UlongExprEval, NULL, UlongReadVal, UlongPrintVal },
      {  "CbfTimeDepChainNext()",    ErrBFVirtualElement, eBFVIRTCbfTimeDepChainNext, 0, ePerfectHisto, UlongExprEval, NULL, UlongReadVal, UlongPrintVal },
      {  "CbfTimeDepChainPrev()",    ErrBFVirtualElement, eBFVIRTCbfTimeDepChainPrev, 0, ePerfectHisto, UlongExprEval, NULL, UlongReadVal, UlongPrintVal },
      {  "CbfTimeDepChain()",        ErrBFVirtualElement, eBFVIRTCbfTimeDepChain, 0, ePerfectHisto, UlongExprEval, NULL, UlongReadVal, UlongPrintVal },
      {  "FExcludedFromDump()",      ErrBFVirtualElement, eBFVIRTFExcludedFromDump, 0, ePerfectHisto, BoolExprEval, NULL, BoolReadVal, BoolPrintVal },
-
+     
 };
 
 
@@ -5951,6 +6444,8 @@ class BfEntryDescriptor : public IEntryDescriptor
     {
         dprintf( "   pbf = %N\n", (void*)qwAddr );
 
+        // Here is how to dump ... from the templated dump func ...
+        //  pt->Dump( CPRINTFWDBG::PcprintfInstance(), (BYTE*)ptDebuggee - (BYTE*)pt );
 
         ((PBF)pcvEntry)->Dump( CPRINTFWDBG::PcprintfInstance(), (BYTE*)qwAddr - (BYTE*)pcvEntry );
         dprintf("\n" );
@@ -5970,12 +6465,18 @@ class BfEntryDescriptor : public IEntryDescriptor
 
 BfEntryDescriptor g_iedBf;
 
+//  Currently the CacheQuery / Iteration Query is implemented with the iteration loop out here
+//  in edbg, instead of in iterquery.hxx.  It would be possible to create a IIterator type
+//  interface that gives each BF to the CCacheQuery predicate evaluator, but I am not sure
+//  it is of value or necessary.  The lion's share of complicated logic has been commonalized
+//  though.
+//
 ERR ErrEDBGQueryCache(
     ULONG       ciq,
     CIterQuery **  rgpiq
     )
 {
-    SaveDlsDefaults sdd;
+    SaveDlsDefaults sdd; // saves here, and then restores the implicit defaults on .dtor.
     ERR err = JET_errSuccess;
     PBF pbf = NULL;
 
@@ -5989,20 +6490,26 @@ ERR ErrEDBGQueryCache(
         fPrints = fPrints ? fTrue : rgpiq[iiq]->FPrints();
     }
 
+    //  scan all valid BFs looking for this IFMP / PGNO
 
     if ( !fPrints )
     {
+        //  If the query action does not print, we'll print status ...
         dprintf( "\t..." );
     }
 
-    C_ASSERT( sizeof( PBF ) <= sizeof( QwEntryAddr )  );
+    C_ASSERT( sizeof( PBF ) <= sizeof( QwEntryAddr )  ); // for FEvalExpr() cast of pbfDebuggee to QwEntryAddr
 
+    // Note we could load cbfCacheAddressable / cbfCacheInit to know how many pbf's we'll be 
+    //  processing, so we could even do a proper [....   ] type progress bar.
     TICK tickCheck = tickStart;
     for ( LONG_PTR ibf = 0; ibf < Pdls()->CbfInit(); ibf++ )
     {
+        //  compute the address of the target BF, and retrieve contents ...
         PBF pbfDebuggee;
         if ( Pdls()->ErrBFCacheRetrieveNextBF( ibf, &pbfDebuggee, &pbf ) )
         {
+            //  we failed to read this BF
             dprintf( "Error: Could not read BF[%d]. Aborting.\n", ibf );
             goto HandleError;
         }
@@ -6010,6 +6517,7 @@ ERR ErrEDBGQueryCache(
         if ( !fPrints &&
                 ( 0 == ibf % 13107 ) )
         {
+            //  a "." of status every 13107 pages (80 dots / 8 GB of cache w/ 8k pages).
             dprintf( "." );
         }
         if ( 0 == ibf % 250 && DtickDelta( tickCheck, TickOSTimeCurrent() ) > 250 )
@@ -6044,6 +6552,7 @@ ERR ErrEDBGQueryCache(
 
 HandleError:
 
+    //  unload BF parameters
 
     Pdls()->BFTermCacheMap();
 
@@ -6089,7 +6598,9 @@ const CHAR * SzReadFormat( const CMemberDescriptor * pmd )
     return "Custom parsing";
 }
 
+//  ================================================================
 DEBUG_EXT( EDBGCacheQuery )
+//  ================================================================
 {
     ERR err = JET_errSuccess;
     CIterQuery * piq = NULL;
@@ -6134,19 +6645,73 @@ HandleError:
         dprintf( "    It is easiest to describe the queries possible with a few examples:\n" );
         dprintf( "        !ese cachequery bfdf >= dirty count /* counts all dirty pages in the cache.*/\n" );
         dprintf( "        !ese cachequery ifmp == 0x2 && bfdf >= dirty count /* counts all dirty pages for IFMP 2 */\n" );
-        dprintf( "        !ese cachequery lgposOldestBegin0 <= 4f4,0800,004d print:ifmp,pgno,lgposModify /* prints the IFMP, pgno and lgposModify for all pbf's that have a oldest begin 0, older than 4f4,0800,004d \n" );
+        dprintf( "        !ese cachequery lgposOldestBegin0 <= 4f4,0800,004d print:ifmp,pgno,lgposModify /* prints the IFMP, pgno and lgposModify for all pbf's that have a oldest begin 0, older than 4f4,0800,004d */\n" );
         dprintf( "        When evaluating a clause with && and ||, the &&'s are higher precedence.\n" );
         dprintf( "    There is a special value that can be used with lgpos valued things:\n" );
-        dprintf( "        !ese cachequery lgposModify > lgposWaypoint print:ifmp,pgno,lgposModify /* prints the IFMP, pgno and lgposModify for all pbf's that have a lgposModify greater than the waypoint value for that DB\n" );
+        dprintf( "        !ese cachequery lgposModify > lgposWaypoint print:ifmp,pgno,lgposModify /* prints the IFMP, pgno and lgposModify for all pbf's that have a lgposModify greater than the waypoint value for that DB */\n" );
         dprintf( "\n" );
     }
 
 }
 
+//  ================================================================
 DEBUG_EXT( EDBGCacheSum )
+//  ================================================================
 {
     ERR err = JET_errSuccess;
     BOOL fVerbose = fFalse;
+
+    /*
+    I have many future thoughts of where this might go ...
+
+    Make first argument an optional ifmp, and then scope all the
+    subsequent queries by ifmp?
+
+    Many of the other query elements I've thought of adding:
+
+        o err != -261 && err != xxx printsz:BadBFError: <- to print out all BFs w/ bad errors in them.
+            o make it a histogram of errors too ...
+
+        o bfdf >= dirty && lgposOldestBegin0 <= x,x,x       <- where x,x,x is the preferred checkpoint, # of dirty buffers past preferred checkpoint
+            o might be interesting (since I have a few per IFMP things I'm debating to
+                figure out a short and long IFMP data ... ergo:
+                    !ese cachesum       -> prints out short per IFMP summary
+                    !ese cachesum v     -> prints out what it does
+                    !ese cachesum 4     -> prints out a long per IFMP summary for ifmp = 4
+                    !ese cachesum *     -> prints out long per IFMP summary for all ifmps.
+                    o OR maybe just make it a different command.
+
+        o * histo:lrukic.TickLastTouch()            <- print lifetime over cache... tricky ...
+                                                        actually maybe not so tricky, grab g_tickLastGiven and start minus'ing from there!
+
+        o make an entry like this for every single attached FMP we have ...
+                ifmp == xxx && lgposModify >= y,y,y     <- where y,y,y is the waypoint for the specific ifmp xxx, gives # of dirty buffers pinned.
+
+        o instead of "* histo:bfdf" we're approximating, one could even enumerate all FMPs, and
+                then ask for ifmp == x histo:bfdf, and then make a cunning two level histogram,
+                ifmp on the vertical, bfdf, along the top also with the length of the cache bar
+                representing the amount of cache that ifmp has ...
+            something like this:
+             ifmp  12345678901234567890123456789012345678901234567890 <-- that's 50 chars...
+             ifmp  |        |         |         |         |         |
+              0x0  cd                                                  [ 1%]
+              0x1  ccccccccuuddddddddddff                              [30%]
+              0x2  ccccccccccccccccccccccccccccccccccccccccccccdddddd  [64%]
+              0x3  cccdddf                                             [ 6%]
+            where IFMP 0x3 has only 7% of the cache and its a little over 50% dirty for it.
+            ? Or put dirty at the other end, so there are effectively two graphs.
+            ? Or do it vertically...
+
+        o be cool to track disassociated DBs (i.e. keep cache alive feature), and % that pertains to that.
+
+        o Be cool to be able to show buffers related to FMPs/Insts in recover and not
+
+        o by checking objid's in page images we could detect how many schema / catalog pages are cached ... this
+            is something we should only do at a higher verbosity ... as the query would take longer
+            x this will be tricky b/c of temp DB pages ... need some sort of "ifmp != #tempdb" like clause ...
+                update: think this is taken care of by the pv-> based accessors
+
+    */
 
     if ( ( argc != 0 ) && ( argc != 1 ) )
     {
@@ -6159,6 +6724,7 @@ DEBUG_EXT( EDBGCacheSum )
         !( fVerbose = ( 0 == _stricmp( argv[0], "v" ) ||
                         0 == _stricmp( argv[0], "verbose" ) ) ) )
     {
+        // whatever that argument was, we don't know about it
         dprintf( "Invalid argument: %hs\n", argv[0] );
         dprintf( "!ese cachesum [verbose]\n" );
         return;
@@ -6192,6 +6758,7 @@ DEBUG_EXT( EDBGCacheSum )
         Alloc( phisto );                                    \
         rgphisto[ chisto++ ] = phisto;                      \
         CHAR * rgsz##phisto []
+// Note: Must cast phisto to CStats * before void* to get the proper virtual interface conversion ...
 #define SetupI( phisto )                                    \
         Call( ErrIQCreateIterQueryCount( &g_iedBf, _countof(rgsz##phisto)-1, rgsz##phisto, (void*)((CStats*)phisto), &(rgpiqCacheSum[cQA++]) ) );
 
@@ -6217,15 +6784,15 @@ DEBUG_EXT( EDBGCacheSum )
     Setup1( cbfAvailTooHigh )      = { "fAvailable", "==", "fTrue", "&&", "ibf", ">=", szCacheQuiesceMin, "count", NULL };
     Setup2( cbfAvailTooHigh );
 
-    Setup1( cbfErrBFIPageFaultPending ) = { "err", "==", "-260" , "count", NULL };
+    Setup1( cbfErrBFIPageFaultPending ) = { "err", "==", "-260" /* errBFIPageFaultPending */, "count", NULL };
     Setup2( cbfErrBFIPageFaultPending );
-    Setup1( cbfErrBFIPageNotVerified )  = { "err", "==", "-261" , "count", NULL };
+    Setup1( cbfErrBFIPageNotVerified )  = { "err", "==", "-261" /* errBFIPageNotVerified  */, "count", NULL };
     Setup2( cbfErrBFIPageNotVerified );
-    Setup1( cbfWrnBFPageFlushPending )  = { "err", "==",  "204" , "&&", "pWriteSignalComplete", "==", "0", "count", NULL };
+    Setup1( cbfWrnBFPageFlushPending )  = { "err", "==",  "204" /* wrnBFPageFlushPending  */, "&&", "pWriteSignalComplete", "==", "0", "count", NULL };
     Setup2( cbfWrnBFPageFlushPending );
-    Setup1( cbfWrnBFPageFlushCompleted )= { "err", "==",  "204" , "&&", "pWriteSignalComplete", "!=", "0", "count", NULL };
+    Setup1( cbfWrnBFPageFlushCompleted )= { "err", "==",  "204" /* wrnBFPageFlushPending  */, "&&", "pWriteSignalComplete", "!=", "0", "count", NULL };
     Setup2( cbfWrnBFPageFlushCompleted );
-    Setup1( cbfWrnBFPageFlushCompletedWithErr )= { "err", "==",  "204" , "&&", "pWriteSignalComplete", "!=", "0", "&&", "pWriteSignalComplete", "!=", "208", "count", NULL };
+    Setup1( cbfWrnBFPageFlushCompletedWithErr )= { "err", "==",  "204" /* wrnBFPageFlushPending  */, "&&", "pWriteSignalComplete", "!=", "0", "&&", "pWriteSignalComplete", "!=", "208", "count", NULL };
     Setup2( cbfWrnBFPageFlushCompletedWithErr );
 
 #ifndef DEBUG
@@ -6268,6 +6835,8 @@ DEBUG_EXT( EDBGCacheSum )
     Setup1( cbfCopyMapped )         = { "ifmp", "!=", "0x7fffffff", "&&", "bfat", "==", "bfatViewMapped", "&&", "bfdf", ">", "bfdfClean", "count", NULL };
     Setup2( cbfCopyMapped );
 
+    // Note: Those with err == 204 are actually "write complete" (and thus remapped already), anything else is just regular copy mapped, consider
+    // separating.
     Setup1( cbfNonCleanNonWriteCompletedMapped )= { "ifmp", "!=", "0x7fffffff", "&&", "bfat", "==", "bfatViewMapped", "&&", "bfdf", ">", "bfdfClean", "&&", "err", "!=", "204", "count", NULL };
     Setup2( cbfNonCleanNonWriteCompletedMapped );
     Setup1( cbfCopyMappedCHECK )= { "bfdf", ">", "bfdfClean", "&&", "fAvailable", "==", "fFalse", "&&", "fQuiesced", "==", "fFalse", "&&", "bfat", "==", "bfatViewMapped", "count", NULL };
@@ -6326,16 +6895,38 @@ DEBUG_EXT( EDBGCacheSum )
     SetupH( phistoErrs )            = { "ifmp", "!=", "0x7fffffff", "histo:err", NULL };
     SetupI( phistoErrs );
 
+    //  All page elements queries, must have the verbose option 
+    //      (because fetching pages is expensive)
+    //
 
+    //  Missed Dehydration opportunities, that we could have handled.
+    //
+    //  These are dehydrations that we could have handled today with
+    //  the code as it exists today.  We know such holes exist in the 
+    //  code due to limitations of what the buffer manager can do today, 
+    //  but we won't worry about it unless this count gets too high.
+    //
     ULONG rgcbfHyperPlainMissed[icbPageMax] = { 0 };
     ULONG rgcbfHyperReorgMissed[icbPageMax] = { 0 };
 
+    //  Enhanced Dehydration opportunities.
+    //
+    //  These are dehydrations that we could perform if we changed 
+    //  the code to handle it.  These require a serious DCR to fix.
+    //
     ULONG rgcbfHyperNonPowerOf2[icbPageMax] = { 0 };
     ULONG rgcbfHyperDirty[icbPageMax] = { 0 };
 
+    //  u-Page Dehydration opportunities
+    //
+    //  Dehydrating to less than the OS commit size.  This requires a
+    //  serious feature to fix.
+    //
     ULONG rgcbfHyperuPages[icbPageMax] = { 0 };
-    ULONG rgcbfHyperUDNPu[icbPageMax] = { 0 };
+    ULONG rgcbfHyperUDNPu[icbPageMax] = { 0 };  // dirty, non-power-of-2, u-Page based... optimal.
 
+    //  we setup the variables here, but only add them to the query / Setup2() if we
+    //  we're approved to do a verbose cache summary
     Setup1( cbfSinglePageTrees )    = { "pv->FRootPage()", "==", "fTrue", "&&", "pv->FLeafPage()", "==", "fTrue", "count", NULL };
     Setup1( cbf2LvlRootPages )      = { "pv->FRootPage()", "==", "fTrue", "&&", "pv->FParentOfLeaf()", "==", "fTrue", "count", NULL };
     Setup1( cbf3LvlRootPages )      = { "pv->FRootPage()", "==", "fTrue", "&&", "pv->FParentOfLeaf()", "==", "fFalse", "&&", "pv->FLeafPage()", "==", "fFalse", "count", NULL };
@@ -6364,18 +6955,23 @@ DEBUG_EXT( EDBGCacheSum )
             OSStrCbFormatA( szRealBufferLimitLow, sizeof(szRealBufferLimitLow), "%d", g_rgcbPageSize[icbRealBufferSizePrevious] );
             OSStrCbFormatA( szLimitHigh, sizeof(szLimitHigh), "%d", g_rgcbPageSize[icb] );
 
+            // this makes sure we only work with buffers ESE can already deal with
 
             if ( g_rgcbPageSize[icb] == CbBFGetBufferSize( g_rgcbPageSize[icb] ) )
             {
 
                 icbRealBufferSizePrevious = icb;
 
+                //  Plain missed dehydrations.
+                //
 
                 if ( Pdls()->CbPage() != (size_t)g_rgcbPageSize[icb] )
                 {
                     CHAR * rgszArgsT[] = {
                                 "FBFIDatabasePage()", "==", "fTrue",
                                     "&&", "bfdf", "<", "bfdfDirty",
+                                    // maybe should be only errBFIPrereadUnverified, but we probably wouldn't 
+                                    // dehydrate buffers in error state
                                     "&&", "err", ">=", "0",
                                     "&&", "pv->CbContiguousDehydrateRequired_()", ">", szRealBufferLimitLow,
                                     "&&", "pv->CbContiguousDehydrateRequired_()", "<=", szLimitHigh,
@@ -6384,6 +6980,8 @@ DEBUG_EXT( EDBGCacheSum )
                 }
                 else
                 {
+                    // For the last bucket we accept all (dirty, err'd) because they're all
+                    // un-dehydratable to any lower ICBPage size.
                     CHAR * rgszArgsT[] = {
                                 "FBFIDatabasePage()", "==", "fTrue",
                                     "&&", "pv->CbContiguousDehydrateRequired_()", ">", szRealBufferLimitLow,
@@ -6391,11 +6989,14 @@ DEBUG_EXT( EDBGCacheSum )
                                 "||", "FBFIDatabasePage()", "==", "fTrue",
                                     "&&", "bfdf", ">=", "bfdfDirty",
                                 "||", "FBFIDatabasePage()", "==", "fTrue",
+                                    // not sure we should have this clause?
                                     "&&", "err", "<", "0",
                                 "count", NULL };
                     Call( ErrIQCreateIterQueryCount( &g_iedBf, _countof(rgszArgsT)-1, rgszArgsT, (void*)&(rgcbfHyperPlainMissed[icb]), &(rgpiqCacheSum[cQA++]) ) );
                 }
 
+                //  Re-org missed dehydrations.
+                //
 
                 if ( Pdls()->CbPage() != (size_t)g_rgcbPageSize[icb] )
                 {
@@ -6417,11 +7018,14 @@ DEBUG_EXT( EDBGCacheSum )
                                 "||", "FBFIDatabasePage()", "==", "fTrue",
                                     "&&", "bfdf", ">=", "bfdfDirty",
                                 "||", "FBFIDatabasePage()", "==", "fTrue",
+                                    // not sure we should have this clause?
                                     "&&", "err", "<", "0",
                                 "count", NULL };
                     Call( ErrIQCreateIterQueryCount( &g_iedBf, _countof(rgszArgsT)-1, rgszArgsT, (void*)&(rgcbfHyperReorgMissed[icb]), &(rgpiqCacheSum[cQA++]) ) );
                 }
 
+                //  Dirty Dehydrations ...
+                //
 
                 if ( Pdls()->CbPage() != (size_t)g_rgcbPageSize[icb] )
                 {
@@ -6441,13 +7045,16 @@ DEBUG_EXT( EDBGCacheSum )
                                     "&&", "pv->CbContiguousDehydrateRequired_()", ">", szRealBufferLimitLow,
                                     "&&", "pv->CbContiguousDehydrateRequired_()", "<=", szLimitHigh,
                                 "||", "FBFIDatabasePage()", "==", "fTrue",
+                                    // not sure we should have this clause?
                                     "&&", "err", "<", "0",
                                 "count", NULL };
                     Call( ErrIQCreateIterQueryCount( &g_iedBf, _countof(rgszArgsT)-1, rgszArgsT, (void*)&(rgcbfHyperDirty[icb]), &(rgpiqCacheSum[cQA++]) ) );
                 }
 
-            }
+            } // existing buffer sizes
 
+            //  Non-PowerOf2
+            //
 
             if ( icb >= icbPage4KB )
             {
@@ -6484,12 +7091,15 @@ DEBUG_EXT( EDBGCacheSum )
                                 "||", "FBFIDatabasePage()", "==", "fTrue",
                                     "&&", "bfdf", ">=", "bfdfDirty",
                                 "||", "FBFIDatabasePage()", "==", "fTrue",
+                                    // not sure we should have this clause?
                                     "&&", "err", "<", "0",
                                 "count", NULL };
                     Call( ErrIQCreateIterQueryCount( &g_iedBf, _countof(rgszArgsT)-1, rgszArgsT, (void*)&(rgcbfHyperNonPowerOf2[icb]), &(rgpiqCacheSum[cQA++]) ) );
                 }
-            }
+            } // 4 KB or greater buffer sizes
 
+            //  u-Pages
+            //
 
             if ( Pdls()->CbPage() != (size_t)g_rgcbPageSize[icb] )
             {
@@ -6506,18 +7116,23 @@ DEBUG_EXT( EDBGCacheSum )
             {
                 CHAR * rgszArgsT[] = {
                             "FBFIDatabasePage()", "==", "fTrue",
+                                // not sure we should have this clause?
                                 "&&", "err", ">=", "0",
                                 "&&", "pv->CbReorganizedDehydrateRequired_()", ">", szLimitLow,
                                 "&&", "pv->CbReorganizedDehydrateRequired_()", "<=", szLimitHigh,
                             "||", "FBFIDatabasePage()", "==", "fTrue",
                                 "&&", "bfdf", ">=", "bfdfDirty",
                             "||", "FBFIDatabasePage()", "==", "fTrue",
+                                // not sure we should have this clause?
                                 "&&", "err", "<", "0",
                             "count", NULL };
                 Call( ErrIQCreateIterQueryCount( &g_iedBf, _countof(rgszArgsT)-1, rgszArgsT, (void*)&(rgcbfHyperuPages[icb]), &(rgpiqCacheSum[cQA++]) ) );
             }
 
+            //  Full Solution: u-Pages, Non-PowerOf2, Dirty (4KB, not-u), no missed cases.
+            //
 
+            //      This will not work for 2 KB page size ... but no one cares about 2 KB pages.
             if ( icb < icbPage4KB )
             {
                 CHAR * rgszArgsT[] = {
@@ -6548,6 +7163,7 @@ DEBUG_EXT( EDBGCacheSum )
             {
                 CHAR * rgszArgsT[] = {
                             "FBFIDatabasePage()", "==", "fTrue",
+                                // not sure we should have this clause?
                                 "&&", "err", ">=", "0",
                                 "&&", "pv->CbReorganizedDehydrateRequired_()", ">", szLimitLow,
                                 "&&", "pv->CbReorganizedDehydrateRequired_()", "<=", szLimitHigh,
@@ -6558,16 +7174,18 @@ DEBUG_EXT( EDBGCacheSum )
             {
                 CHAR * rgszArgsT[] = {
                             "FBFIDatabasePage()", "==", "fTrue",
+                                // not sure we should have this clause?
                                 "&&", "err", ">=", "0",
                                 "&&", "pv->CbReorganizedDehydrateRequired_()", ">", szLimitLow,
                                 "&&", "pv->CbReorganizedDehydrateRequired_()", "<=", szLimitHigh,
                             "||", "FBFIDatabasePage()", "==", "fTrue",
+                                // not sure we should have this clause?
                                 "&&", "err", "<", "0",
                             "count", NULL };
                 Call( ErrIQCreateIterQueryCount( &g_iedBf, _countof(rgszArgsT)-1, rgszArgsT, (void*)&(rgcbfHyperUDNPu[icb]), &(rgpiqCacheSum[cQA++]) ) );
             }
 
-        }
+        } // for each icbBuffer size ...
 
         Setup2( cbfSinglePageTrees );
         Setup2( cbf2LvlRootPages );
@@ -6576,12 +7194,15 @@ DEBUG_EXT( EDBGCacheSum )
         Setup2( cbfLeafPages );
         Setup2( cbfImpossibleFlagCombo1 );
         Setup2( cbfExcludedFromDump );
-    }
+    } // fVerbose
 
+    // Actually perform the query ...
+    //
 
     dprintf("CacheSum is executing %d simultaneous queries.\n", cQA );
 
 #ifndef DEBUG
+    //  One more query ... this is special query clause in that it prints out stuff during the query.
     dprintf( "\n" );
     EDBGPrintfDml("<link cmd=\"!ese cachequery sxwl.FLatched() == fTrue && err != -260 && fAvailable == fFalse && fQuiesced == fFalse || sxw.CWaiters() &gt;= 1 print:ifmp,pgno,err,sxwl.CWaiters(),sxwl.CSharers(),sxwl.FExclusiveLatched(),sxwl.FWriteLatched(),sxwl.CWaitSharedLatch(),sxwl.CWaitExclusiveLatch(),sxwl.CWaitWriteLatch()\">Latched Pages</link>:\n" );
 #ifdef _WIN64
@@ -6591,12 +7212,17 @@ DEBUG_EXT( EDBGCacheSum )
 #endif
     dprintf(      "        ifmp,     pgno,   err, cWaiters, cSharers,fXLatch,fWLatch,cSWaiters,cXWaiters,cWWaiters.\n" );
 
+    //  We dump Latched BFs, BUT exclude BFs that have no waiters AND are 
+    //      1. waiting for pre-reads to complete (err = -260 / errBFIPageFaultPending) OR
+    //      2. an available buffer (note: ESE leaves such buffers w-latched in the avail pool) OR
+    //      3. a quiesced buffer (note: ESE leaves such buffers w-latched in this state)
+    //      ? Do we need something for recently grown buffers / non-resident ?
     CHAR * rgszLatchesOfInterest [] = {
-                "sxwl.FLatched()", "==", "fTrue",
-                    "&&", "err", "!=", "-260",
-                    "&&", "fAvailable", "==", "fFalse",
-                    "&&", "fQuiesced", "==", "fFalse",
-                "||", "sxwl.CWaiters()", ">=", "1",
+                "sxwl.FLatched()", "==", "fTrue",       //  page is in a latched state
+                    "&&", "err", "!=", "-260",          //  not in pre-read
+                    "&&", "fAvailable", "==", "fFalse", //  not available (these are left w-latched)
+                    "&&", "fQuiesced", "==", "fFalse",  //  not quiesced (these are also left w-latched)
+                "||", "sxwl.CWaiters()", ">=", "1",     //  or has 1 or more waiters ...
             "print:ifmp,pgno,err,sxwl.CWaiters(),sxwl.CSharers(),sxwl.FExclusiveLatched(),sxwl.FWriteLatched(),sxwl.CWaitSharedLatch(),sxwl.CWaitExclusiveLatch(),sxwl.CWaitWriteLatch()", NULL };
     Call( ErrIQCreateIterQuery( &g_iedBf, _countof(rgszLatchesOfInterest)-1, rgszLatchesOfInterest, &(rgpiqCacheSum[cQA++]) ) );
 #endif
@@ -6606,6 +7232,8 @@ DEBUG_EXT( EDBGCacheSum )
     Call( ErrEDBGQueryCache( cQA, rgpiqCacheSum ) );
         dprintf("\n" );
 
+    // process results ...
+    //
 
     #define PctOf( Num, Denom )     ( ( Num == 0 && Denom == 0 ) ? 0.0 : ( (float)(Num) / (float)(Denom) * (float)100.0 ) )
 
@@ -6623,23 +7251,25 @@ DEBUG_EXT( EDBGCacheSum )
     {
         dprintf( "                                    WARNING: cbfAvailTooHigh = %8I64d\n", cbfAvailTooHigh );
     }
-    AssertEDBG( cbfCleanMapped == cbfCleanMappedCHECK );
+    AssertEDBG( cbfCleanMapped == cbfCleanMappedCHECK );        //  or the values after clean may be inaccurate, and should be moved.
     EDBGPrintfDml( "               <link cmd=\"!ese cachequery fAvailable == fFalse &amp;&amp; fQuiesced == fFalse &amp;&amp; bfdf == bfdfClean count\">Clean</link>:  %8I64d (%6.2f%%)", cbfClean, PctOf( cbfClean, cbfTotal ) );
     if ( cbfMappedTot )
     {
         EDBGPrintfDml( "   [Mapped = %5I64d / %5.1f%%, PageAlloc = %5I64d, FracCommit = %5I64d]\n",
                         cbfMappedClean, PctOf( cbfMappedClean, cbfClean ),
-                        cbfClean - cbfMappedClean - cbfFracCommitClean,
+                        cbfClean - cbfMappedClean - cbfFracCommitClean, //  that _should_ be ~right?
                         cbfFracCommitClean );
     }
     else
     {
         EDBGPrintfDml( "\n" );
     }
-    AssertEDBG( cbfCopyMapped == cbfCopyMappedCHECK );
+    AssertEDBG( cbfCopyMapped == cbfCopyMappedCHECK );      //  or the values after untidy may be inaccurate, and should be moved.
     EDBGPrintfDml( "              <link cmd=\"!ese cachequery bfdf == bfdfUntidy count\">Untidy</link>:  %8I64d (%6.2f%%)", cbfUntidy, PctOf( cbfUntidy, cbfTotal ) );
     if ( cbfMappedTot )
     {
+        //  Note the JustReMapped category applies both to the fact that they were probably (although not always) recently 
+        //  remapped because they are in the WriteCompleted state, but not actually clean state.  AND 
         EDBGPrintfDml( "   [JustReMapped = %5I64d / %5.1f%%, Copied = %5I64d / %5.1f%%, PageAlloc = %5I64d, FracCommit = %5I64d]\n",
                             cbfMappedUntidyWC, PctOf( cbfMappedUntidyWC, cbfUntidy ),
                             cbfMappedUntidy - cbfMappedUntidyWC, PctOf( cbfMappedUntidy - cbfMappedUntidyWC, cbfUntidy ),
@@ -6725,7 +7355,7 @@ DEBUG_EXT( EDBGCacheSum )
     EDBGPrintfDml( "\n" );
 
     EDBGPrintfDml( "Buffers by IFMP:\n" );
-    IQPrintStats( phistoIfmp, UlongPrintVal , 0, 4, 0, false );
+    IQPrintStats( phistoIfmp, UlongPrintVal /* or DWORDPrintVal? */, 0, 4, 0, false );
     EDBGPrintfDml( "\n" );
 
     CStats::ERR csErr;
@@ -6741,7 +7371,7 @@ DEBUG_EXT( EDBGCacheSum )
         STAT::CHITS cbfK0 = 0;
         STAT::CHITS cbfK1 = 0;
         STAT::CHITS cbfK2 = 0;
-
+        
         csErr = phistoKPool->ErrGetSampleHits( 0, &cbfK0 );
         if ( CStats::ERR::errSuccess != csErr )
         {
@@ -6869,6 +7499,8 @@ DEBUG_EXT( EDBGCacheSum )
 
         AssertEDBG( hits <= cbfTotal - cbfAvail - cbfQuiesced );
 
+        //  Add regular summaries up.
+        //
 
         cbfTotalCheck += (ULONG)hits;
         cbRAMTotal += cbRAM;
@@ -6880,6 +7512,8 @@ DEBUG_EXT( EDBGCacheSum )
             cbfFullPageSized = (ULONG)hits;
         }
 
+        //  Print out totals of buffers and size of buffers at this icbPage size.
+        //
 
         EDBGPrintfDml( "  [%03d] %hs, %6d.%03d, %5d.%03d(%6d)",
                         (ULONG)icb, szBufferSize,
@@ -6918,7 +7552,7 @@ DEBUG_EXT( EDBGCacheSum )
 
             cbfHyperDirtyTotal += rgcbfHyperDirty[icb];
             cbHyperDirtyTotal += CbBuffSize( rgcbfHyperDirty[icb], g_rgcbPageSize[icb] );
-
+            
             cbfHyperuPagesTotal += rgcbfHyperuPages[icb];
             cbHyperuPagesTotal += CbBuffSize( rgcbfHyperuPages[icb], g_rgcbPageSize[icb] );
 
@@ -6926,7 +7560,7 @@ DEBUG_EXT( EDBGCacheSum )
             cbHyperUDNPuTotal += CbBuffSize( rgcbfHyperUDNPu[icb], g_rgcbPageSize[icb] );
         }
         EDBGPrintfDml( "\n" );
-    }
+    }   // for each icb buffer size
 
     EDBGPrintfDml( "\n" );
 
@@ -6945,7 +7579,7 @@ DEBUG_EXT( EDBGCacheSum )
         EDBGPrintfDml( "\n" );
 
         EDBGPrintfDml( "  [%%%%%%] vs. current,      ,            %5.1f%%,           %5.1f%%,           %5.1f%%,           %5.1f%%,           %5.1f%%,           %5.1f%%,           %5.1f%%\n",
-                        100.0,
+                        100.0, // real answer is to accumulate a cbCurrent from the size of all the hyper cached buffers, and check that against cbRAMTotal (should always == 100)
                         PctOf( cbHyperPlainMissedTotal, cbRAMTotal ),
                         PctOf( cbHyperReorgMissedTotal, cbRAMTotal ),
                         PctOf( cbHyperNonPowerOf2Total, cbRAMTotal ),
@@ -6987,6 +7621,7 @@ DEBUG_EXT( EDBGCacheSum )
 
         EDBGPrintfDml( "\n" );
 
+        //  if this doesn't add up, we've probably misssed something
         AssertEDBG( cbfTotalCheck == cbfHyperPlainMissedTotal );
         AssertEDBG( cbfTotalCheck == cbfHyperReorgMissedTotal );
         AssertEDBG( cbfTotalCheck == cbfHyperNonPowerOf2Total );
@@ -6994,6 +7629,7 @@ DEBUG_EXT( EDBGCacheSum )
         AssertEDBG( cbfTotalCheck == cbfHyperuPagesTotal );
         AssertEDBG( cbfTotalCheck == cbfHyperUDNPuTotal );
 
+        //  should be a % / i.e. lower than total
         AssertEDBG( (size_t)g_rgcbPageSize[icbPage] == Pdls()->CbPage() );
         AssertEDBG( cbfTotalCheck - rgcbfHyperPlainMissed[icbPage] <= cbfTotalCheck );
         AssertEDBG( cbfTotalCheck - rgcbfHyperReorgMissed[icbPage] <= cbfTotalCheck );
@@ -7060,15 +7696,16 @@ void EDBGPrintScavengeSequenceFriendly(
         dprintf( "                      |\n" );
     }
 
+    // consider: sampling a couple rgScavenge[i].iRun values, and adjusting to the width of this field as it's the most dynamic
 
     BOOL fFirst = fTrue;
     BOOL fFirstPrint = fTrue;
     ULONG iFirst = IrrNext( iScavengeCurrentRun, cScavenge );
 
-    INT cRunDigits = max( 4, CDigits( rgScavenge[iFirst].iRun ) + 1 );
+    INT cRunDigits = max( 4, CDigits( rgScavenge[iFirst].iRun ) + 1 ); // the +1 is in case we're near a boundary like 9999 runs, about to cross to 10000 runs.
 
     dprintf(     " [%hsiRun/  i]    +druns +xxxxxx ms CacheSize/Visited/Bst(  KB) EvAvPool/EvShrink/EvFromAvPool cbfTarget/cbfStartShr/ShrinkDur AvailPool/AvailLow/AvailHigh/AvailTarget  Flush/FlushSlow/FlushHung PermErrs/...OOM Latched/Dependent/TooRecent/..Tilt Flushed   Hung Stop    err\n",
-                    SzSpace( cRunDigits - 4  ) );
+                    SzSpace( cRunDigits - 4 /* for "iRun" */ ) );
 
     ULONG i;
     for ( i = iFirst; fFirst || i != iFirst; i = IrrNext( i, cScavenge ) )
@@ -7077,9 +7714,12 @@ void EDBGPrintScavengeSequenceFriendly(
 
         if ( rgScavenge[i].iRun == 0 )
         {
+            // blank entry
             continue;
         }
 
+        //         [iRun/  i]    +druns +xxxxxx ms CacheSize/Visited/Bst(  KB) EvAvPool/EvShrink/EvFromAvPool cbfTarget/cbfStartShr/ShrinkDur AvailPool/AvailLow/AvailHigh/AvailTarget  Flush/FlushSlow/FlushHung PermErrs/...OOM Latched/Dependent/TooRecent/..Tilt Flushed   Hung Stop    err
+        //         [0127/021]    +    0 +000000 ms      1000/    100/  1(  32)       10/      15/           3       900/       1200/     1234        20/      10/       20/         15     25/        2/        1        2/     0       1/        0/        0/     0       0      0    4    110
         dprintf( " [%*I64d/%03u]    + %4u +%06u ms  %8d/ %6d/%3d(%4I64d)   %6d/  %6d/      %6d  %8d/   %8d/ %8u  %8d/%8d/ %8d/   %8d %6d/   %6d/   %6d   %6d/%6d  %6d/   %6d/   %6d/%6d  %6d %6d    %1d %6d\n",
                     cRunDigits, rgScavenge[i].iRun,
                     i,
@@ -7156,7 +7796,9 @@ const CHAR * SzBFIScavengeSatisfiedReason( BFIScavengeSatisfiedReason e )
 }
 
 
+//  ================================================================
 DEBUG_EXT( EDBGCacheScavengeRuns )
+//  ================================================================
 {
     ERR err = JET_errSuccess;
 
@@ -7176,7 +7818,7 @@ DEBUG_EXT( EDBGCacheScavengeRuns )
         dprintf( "!ese cachescavengeruns\n" );
         return;
     }
-
+    
     if ( !FReadGlobal( "g_iScavengeTimeSeqLast", &iScavengeTimeSeqLast ) ||
             !FReadGlobal( "g_cScavengeTimeSeq", &cScavengeTimeSeq ) ||
             !FReadGlobal( "g_rgScavengeTimeSeq", &rgScavengeTimeSeqDebuggee ) ||
@@ -7204,6 +7846,7 @@ DEBUG_EXT( EDBGCacheScavengeRuns )
     dprintf( "    sizeof(g_rgScavengeTimeSeqCumulative[%3I64u])      = %I64u bytes\n", (ULONG64)cScavengeTimeSeq, (ULONG64)sizeof(g_rgScavengeTimeSeqCumulative) );
 #endif
 
+    //  first and last ticks ...
 
     ULONG iFirst = IrrPrev( iScavengeTimeSeqLast, cScavengeTimeSeq );
     TICK tickFirst = 0xFEFEFEFE;
@@ -7215,6 +7858,7 @@ DEBUG_EXT( EDBGCacheScavengeRuns )
     }
     else
     {
+        //iFirst already set
         tickFirst = rgScavengeTimeSeq[iFirst].tickStart;
     }
 
@@ -7239,6 +7883,8 @@ DEBUG_EXT( EDBGCacheScavengeRuns )
                 ( (double)tickLast - (double)tickFirst ) / 1000.0, tickLast - tickFirst );
     dprintf( "\n" );
 
+    //  First we print out the longer time sequence series
+    //
 
     dprintf( "Printing out Time Seq decision array:\n" );
     dprintf( "\n" );
@@ -7246,6 +7892,8 @@ DEBUG_EXT( EDBGCacheScavengeRuns )
     dprintf( "\n" );
 
 #ifndef RTM
+    //  Second we print out the cumulative sequence series
+    //
 
     dprintf( "Printing out Time Seq cumulative information:\n" );
     dprintf( "\n" );
@@ -7253,6 +7901,8 @@ DEBUG_EXT( EDBGCacheScavengeRuns )
     dprintf( "\n" );
 #endif
 
+    //  Lastly we print out the last runs series
+    //
 
     dprintf( "Printing out Last %I64u runs:\n", (ULONG64)g_cScavengeLastRuns );
     dprintf( "\n" );
@@ -7272,9 +7922,11 @@ HandleError:
 
 }
 
+//  ================================================================
 LOCAL BOOL FFetchGlobalParamsArray(
     _Deref_out_ CJetParam** prgparam,
     _Out_ size_t* pcparam )
+//  ================================================================
 {
     BOOL        fSucceeded  = fTrue;
     CJetParam * rgparamDebuggee     = NULL;
@@ -7291,9 +7943,11 @@ LOCAL BOOL FFetchGlobalParamsArray(
 }
 
 
+//  ================================================================
 LOCAL BOOL FEDBGFetchTableMetaData(
     const FCB * const pfcbTableDebuggee,
     FCB **            ppfcbTable )
+//  ================================================================
 {
     FCB *       pfcbTable               = pfcbNil;
     TDB *       ptdb                    = ptdbNil;
@@ -7314,6 +7968,8 @@ LOCAL BOOL FEDBGFetchTableMetaData(
 
     if ( !pfcbTable->FTypeTable() || pfcbTable->Ptdb() == NULL )
     {
+        //  not actually a table FCB, so just return the FCB
+        //
         *ppfcbTable = pfcbTable;
         return fTrue;
     }
@@ -7325,8 +7981,12 @@ LOCAL BOOL FEDBGFetchTableMetaData(
         goto HandleError;
     }
 
+    //  adjust buffer by size of MEMPOOL buffer
+    //
     cbAlloc += ptdb->MemPool().CbBufSize();
 
+    //  adjust buffer for initial fields
+    //
 
     cFieldsInitial = ( ptdb->FidFixedLastInitial() + 1 - ptdb->FidFixedFirst() );
     cFieldsInitial += ( ptdb->FidVarLastInitial() + 1 - ptdb->FidVarFirst() );
@@ -7349,14 +8009,20 @@ LOCAL BOOL FEDBGFetchTableMetaData(
             goto HandleError;
         }
 
+        //  adjust buffer by size of template table FCB, TDB, and MEMPOOL buffer
+        //
         cbAlloc += sizeof(FCB) + sizeof(TDB) + ptdbTemplate->MemPool().CbBufSize();
 
+        //  adjust buffer for initial fields
+        //
         cTemplateFieldsInitial = ( ptdbTemplate->FidFixedLastInitial() + 1 - ptdbTemplate->FidFixedFirst() );
         cTemplateFieldsInitial += ( ptdbTemplate->FidVarLastInitial() + 1 - ptdbTemplate->FidVarFirst() );
         cTemplateFieldsInitial += ( ptdbTemplate->FidTaggedLastInitial() + 1 - ptdbTemplate->FidTaggedFirst() );
         cbAlloc += ( cTemplateFieldsInitial * sizeof(FIELD) );
     }
 
+    //  now allocate one big buffer for the table (and template table) FCB, TDB, and MEMPOOL buffer
+    //
     pfcbBuffer = (FCB *)LocalAlloc( 0, cbAlloc );
     if ( NULL == pfcbBuffer )
     {
@@ -7365,11 +8031,17 @@ LOCAL BOOL FEDBGFetchTableMetaData(
         goto HandleError;
     }
 
+    //  copy everything to final buffer
+    //
     memcpy( pfcbBuffer, pfcbTable, sizeof(FCB) );
 
+    //  TDB allocated after the FCB
+    //
     pfcbBuffer->SetPtdb( (TDB *)( pfcbBuffer + 1 ) );
     memcpy( pfcbBuffer->Ptdb(), ptdb, sizeof(TDB) );
 
+    //  MEMPOOL buffer allocated after the TDB
+    //
     pfcbBuffer->Ptdb()->MemPool().SetPbuf( (BYTE *)( pfcbBuffer->Ptdb() + 1 ) );
     if ( !FReadVariable( ptdb->MemPool().Pbuf(), pfcbBuffer->Ptdb()->MemPool().Pbuf(), ptdb->MemPool().CbBufSize() ) )
     {
@@ -7381,6 +8053,8 @@ LOCAL BOOL FEDBGFetchTableMetaData(
         goto HandleError;
     }
 
+    //  buffer for initial fields allocated after MEMPOOL
+    //
     pfcbBuffer->Ptdb()->SetPfieldInitial( (FIELD *)( pfcbBuffer->Ptdb()->MemPool().Pbuf() + pfcbBuffer->Ptdb()->MemPool().CbBufSize() ) );
     if ( !FReadVariable( ptdb->PfieldsInitial(), pfcbBuffer->Ptdb()->PfieldsInitial(), cFieldsInitial ) )
     {
@@ -7394,6 +8068,8 @@ LOCAL BOOL FEDBGFetchTableMetaData(
 
     if ( pfcbNil != pfcbTemplate )
     {
+        //  template table follows derived table
+        //
         FCB *   pfcbT   = (FCB *)( pfcbBuffer->Ptdb()->PfieldsInitial() + cFieldsInitial );
 
         pfcbBuffer->Ptdb()->SetPfcbTemplateTable( pfcbT );
@@ -7425,8 +8101,12 @@ LOCAL BOOL FEDBGFetchTableMetaData(
         }
     }
 
+    //  return the buffer
+    //
     *ppfcbTable = pfcbBuffer;
 
+    //  since we're returning the buffer, ensure it doesn't get freed
+    //
     pfcbBuffer = pfcbNil;
 
 
@@ -7441,6 +8121,11 @@ HandleError:
 }
 
 
+//  UNDONE: should use the existing OBJIDLIST,
+//  but I wasn't sure if the memory allocation
+//  routines used by that class will work when
+//  invoked from debugger extensions
+//
 struct OBJIDLIST_EDBG
 {
     OBJID * rgobjid;
@@ -7448,12 +8133,14 @@ struct OBJIDLIST_EDBG
 };
 
 
+//  ================================================================
 LOCAL BOOL FEDBGFetchTableObjids(
     FCB * const             pfcbTable,
     OBJIDLIST_EDBG * const  pobjidlist )
+//  ================================================================
 {
     FCB *                   pfcb    = pfcbNil;
-    ULONG                   cobjid  = 1;
+    ULONG                   cobjid  = 1;        //  1 for the table
     BOOL                    fError  = fFalse;
 
     if ( NULL != pobjidlist->rgobjid || 0 != pobjidlist->cobjid )
@@ -7463,6 +8150,8 @@ LOCAL BOOL FEDBGFetchTableObjids(
         goto HandleError;
     }
 
+    //  allocate a buffer for the FCB's we'll be examining
+    //
     pfcb = (FCB *)LocalAlloc( 0, sizeof(FCB) );
     if ( NULL == pfcb )
     {
@@ -7471,12 +8160,16 @@ LOCAL BOOL FEDBGFetchTableObjids(
         goto HandleError;
     }
 
+    //  determine if this table has a long-value tree
+    //
     FCB* pfcbLV = pfcbTable->Ptdb()->PfcbLV();
     if ( pfcbNil != pfcbLV )
     {
         cobjid++;
     }
 
+    //  determine the number of secondary indexes owned by this table
+    //
     for ( FCB * pfcbT = pfcbTable->PfcbNextIndex();
         pfcbNil != pfcbT;
         pfcbT = pfcb->PfcbNextIndex() )
@@ -7491,6 +8184,8 @@ LOCAL BOOL FEDBGFetchTableObjids(
         cobjid++;
     }
 
+    //  allocate the list of objid's (caller will free it)
+    //
     pobjidlist->rgobjid = (OBJID *)LocalAlloc( 0, sizeof(OBJID) * cobjid );
     if ( NULL == pobjidlist->rgobjid )
     {
@@ -7501,9 +8196,13 @@ LOCAL BOOL FEDBGFetchTableObjids(
 
     pobjidlist->cobjid = cobjid;
 
+    //  account for table objid
+    //
     cobjid = 0;
     pobjidlist->rgobjid[cobjid++] = pfcbTable->ObjidFDP();
 
+    //  account for LV objid
+    //
     if ( pfcbNil != pfcbLV )
     {
         if ( !FReadVariable( pfcbTable->Ptdb()->PfcbLV(), pfcb ) )
@@ -7516,6 +8215,8 @@ LOCAL BOOL FEDBGFetchTableObjids(
         pobjidlist->rgobjid[cobjid++] = pfcb->ObjidFDP();
     }
 
+    //  account for secondary index objids
+    //
     for ( FCB * pfcbT = pfcbTable->PfcbNextIndex();
         pfcbNil != pfcbT;
         pfcbT = pfcb->PfcbNextIndex() )
@@ -7535,16 +8236,20 @@ LOCAL BOOL FEDBGFetchTableObjids(
     Assert( cobjid == pobjidlist->cobjid );
 
 HandleError:
+    //  free allocated resources
+    //
     LocalFree( pfcb );
 
     return !fError;
 }
 
+//  ================================================================
 LOCAL BOOL FEDBGTableFind(
     const CHAR *            szTableName,
     INST * const            pinstTarget,
     OBJIDLIST_EDBG * const  rgobjidlistFilter,
     const IFMP              ifmpFilter )
+//  ================================================================
 {
     INST *                  pinst               = pinstNil;
     BOOL                    fFoundFCB           = fFalse;
@@ -7552,6 +8257,13 @@ LOCAL BOOL FEDBGTableFind(
     const ULONG             cchTableName        = strlen( szTableName );
     const BOOL              fTryPrefixMatch     = ( ( cchTableName > 0 ) && ( '*' == szTableName[ cchTableName - 1 ] ) );
 
+    //  HACK! HACK!
+    //
+    //  The shadow catalog is always named MSysObjects in the TDB
+    //  (see ErrCATIInitCatalogTDB) so when searching for one
+    //  of the catalog tables, can't use a name match and must
+    //  instead use an objid match
+    //
     const BOOL              fFindCatalog        = FCATSystemTable( szTableName );
     const OBJID             objidFindMSO        = ( fFindCatalog ? ObjidCATTable( szTableName ) : objidNil );
 
@@ -7561,6 +8273,8 @@ LOCAL BOOL FEDBGTableFind(
         goto HandleError;
     }
 
+    //  scan FCB list of all INST's
+    //
     for ( SIZE_T ipinst = 0; ipinst < Pdls()->Cinst(); ipinst++ )
     {
         if ( pinstNil == Pdls()->PinstDebuggee( ipinst ) )
@@ -7582,12 +8296,16 @@ LOCAL BOOL FEDBGTableFind(
             {
                 FCB *   pfcb;
 
+                //  retrieve meta-data
+                //
                 if ( !FEDBGFetchTableMetaData( pfcbDebuggee, &pfcb ) )
                 {
                     fError = fTrue;
                     goto HandleError;
                 }
 
+                //  see if this FCB is a match
+                //
                 if ( pfcb->FTypeTable() )
                 {
                     BOOL    fMatchingTable = fFalse;
@@ -7600,7 +8318,7 @@ LOCAL BOOL FEDBGTableFind(
                     {
                         if ( fTryPrefixMatch )
                         {
-                            fMatchingTable = ( 0 == _strnicmp( szTableName, pfcb->Ptdb()->SzTableName(), cchTableName - 1 ) );
+                            fMatchingTable = ( 0 == _strnicmp( szTableName, pfcb->Ptdb()->SzTableName(), cchTableName - 1 ) );  //  -1 because we don't want to compare the wildcard character
                         }
                         else
                         {
@@ -7657,6 +8375,8 @@ LOCAL BOOL FEDBGTableFind(
 
     if ( !fFoundFCB )
     {
+        //  we did not find the FCB
+        //
         dprintf( "\nCould not find any FCB's with table name \"%s\".\n", szTableName );
         fError = fTrue;
         goto HandleError;
@@ -7667,9 +8387,11 @@ HandleError:
     return !fError;
 }
 
+//  ================================================================
 LOCAL BOOL FEDBGIsObjidInList(
     const OBJID                     objidTarget,
     const OBJIDLIST_EDBG * const    pobjidlistFilter )
+//  ================================================================
 {
     for ( ULONG i = 0; i < pobjidlistFilter->cobjid; i++ )
     {
@@ -7699,8 +8421,8 @@ struct PGCOUNTS
     DWORD_PTR   cpagesPreread;
     DWORD_PTR   cpagesEmpty;
     DWORD_PTR   cpagesPreInit;
-    DWORD_PTR   cpagesVersioned;
-    DWORD_PTR   cpagesUnversioned;
+    DWORD_PTR   cpagesVersioned;        //  fOlderVersion == TRUE
+    DWORD_PTR   cpagesUnversioned;      //  neither fCurrentVersion nor fOlderVersion
     DWORD_PTR   cpagesDirty;
     DWORD_PTR   cpagesCatalog;
     DWORD_PTR   cpagesZeroNodes;
@@ -7768,6 +8490,8 @@ LOCAL VOID EDBGUpdatePgCounts(
     TREELEVELINFO *     ptreelevelinfo;
     PGCOUNTS *          ppgcounts;
 
+    //  determine type of page
+    //
     if ( pcpage->FSpaceTree() )
     {
         treetype = treetypeSpace;
@@ -7782,9 +8506,13 @@ LOCAL VOID EDBGUpdatePgCounts(
     }
     else
     {
+        //  must assume data page
+        //
         treetype = treetypeData;
     }
 
+    //  determine btree level of page
+    //
     ptreelevelinfo = &( pcpage->FRootPage() ?
                             rgtreeinfo[treetype].treelevelinfoRootPages :
                             rgtreeinfo[treetype].treelevelinfoNonRootPages );
@@ -7798,9 +8526,13 @@ LOCAL VOID EDBGUpdatePgCounts(
     }
     else
     {
+        //  must assume internal page
+        //
         ppgcounts = &ptreelevelinfo->pgcountsInternalPages;
     }
 
+    //  increment page counts
+    //
     ppgcounts->cpages++;
     ppgcounts->cnodes += pcpage->Clines();
 
@@ -7836,6 +8568,7 @@ LOCAL VOID EDBGUpdatePgCounts(
 }
 
 DEBUG_EXT( EDBGDumpCacheInfo )
+//  ================================================================
 {
     PBF                 pbf                 = pbfNil;
     DWORD_PTR           ibf;
@@ -7876,6 +8609,7 @@ DEBUG_EXT( EDBGDumpCacheInfo )
                 fValidUsage = fFalse;
                 break;
             }
+            //  FALL THROUGH
         case 1:
             szTableName = argv[ 0 ];
             break;
@@ -7918,6 +8652,8 @@ DEBUG_EXT( EDBGDumpCacheInfo )
         goto HandleError;
     }
 
+    //  if not dumping all cached pages, allocate array to hold filter
+    //
     if ( NULL != szTableName && 0 != strcmp( "*", szTableName ) )
     {
         rgobjidlistFilter = (OBJIDLIST_EDBG *)LocalAlloc( 0, sizeof(OBJIDLIST_EDBG) * ifmpMaxT );
@@ -7929,6 +8665,8 @@ DEBUG_EXT( EDBGDumpCacheInfo )
 
         memset( rgobjidlistFilter, 0, sizeof(OBJIDLIST_EDBG) * ifmpMaxT );
 
+        //  UNDONE: support filtering for just one instance
+        //
         if ( !FEDBGTableFind( szTableName, NULL, rgobjidlistFilter, ifmpFilter ) )
         {
             goto HandleError;
@@ -7951,11 +8689,17 @@ DEBUG_EXT( EDBGDumpCacheInfo )
 
     cpage.LoadPage( pbPageT, cbPageT );
 
+    //  scan all valid BFs
+    //
     dprintf( "\nScanning %d (0x%x) BF's...", cbfCacheAddressableT, cbfCacheAddressableT );
     for ( ibf = 0; (LONG_PTR)ibf < cbfCacheAddressableT; ibf++ )
     {
         if ( ibf % 10000 == 0 && ibf > 0 )
         {
+            //  I'm seeing that it can take a REALLY long time to
+            //  scan through all BF's and read the PGHDR from each
+            //  page, so report progress every once in a while
+            //
             dprintf( "\n\t%d BF's scanned...", ibf );
         }
 
@@ -7965,9 +8709,11 @@ DEBUG_EXT( EDBGDumpCacheInfo )
             break;
         }
 
+        //  compute the address of the target BF
 
         PBF pbfDebuggee = rgpbfChunkT[ ibf / cbfChunkT ] + ibf % cbfChunkT;
 
+        //  we failed to read this BF
 
         if ( !FReadVariable( pbfDebuggee, pbf ) )
         {
@@ -7982,8 +8728,8 @@ DEBUG_EXT( EDBGDumpCacheInfo )
             cAvailBuffers++;
         }
         else if ( NULL == pbf->pv
-            || errBFIPageFaultPending == pbf->err
-            || pbf->fQuiesced )
+            || errBFIPageFaultPending == pbf->err   //  page is being read in
+            || pbf->fQuiesced )                     //  cache is shrinking and this buffer will be eliminated
         {
             cUninitBuffers++;
         }
@@ -8000,10 +8746,13 @@ DEBUG_EXT( EDBGDumpCacheInfo )
         {
             cUninitPages++;
         }
-        else if ( ( NULL == rgobjidlistFilter && ifmpNil == ifmpFilter )
-            || ( NULL == rgobjidlistFilter && pbf->ifmp == ifmpFilter )
-            || ( NULL != rgobjidlistFilter && FEDBGIsObjidInList( cpage.ObjidFDP(), rgobjidlistFilter + pbf->ifmp ) ) )
+        else if ( ( NULL == rgobjidlistFilter && ifmpNil == ifmpFilter )        //  no filter
+            || ( NULL == rgobjidlistFilter && pbf->ifmp == ifmpFilter )         //  ifmp filter
+            || ( NULL != rgobjidlistFilter && FEDBGIsObjidInList( cpage.ObjidFDP(), rgobjidlistFilter + pbf->ifmp ) ) ) //  table filter
         {
+            //  we'll be reading more than just the page header, so must
+            //  load the dehydrated page
+            //
             cpage.LoadDehydratedPage( pbf->ifmp, pbf->pgno, pbPageT, cbBufferT, cbPageT );
             EDBGUpdatePgCounts( rgtreeinfo, pbf, &cpage );
             cFilteredBuffers++;
@@ -8025,6 +8774,8 @@ DEBUG_EXT( EDBGDumpCacheInfo )
         }
     }
 
+    //  report results
+    //
     dprintf( "\n\n" );
 
     dprintf( "Total BF's scanned:   %d\n", ibf );
@@ -8058,6 +8809,7 @@ DEBUG_EXT( EDBGDumpCacheInfo )
 HandleError:
     dprintf( "\n--------------------\n\n" );
 
+    //  unload BF parameters
 
     if ( NULL != rgobjidlistFilter )
     {
@@ -8073,10 +8825,12 @@ HandleError:
 }
 
 
+//  This creates a chain of EDBGIOREQCHUNKs that has the whole set of all allocated
+//  IOREQCHUNKSs (and thus IOREQs) in it.
 
 typedef struct _EDBGIOREQCHUNK
 {
-    IOREQCHUNK *                pioreqchunkDebuggee;
+    IOREQCHUNK *                pioreqchunkDebuggee;    // do not deref
     IOREQCHUNK *                pioreqchunkDebugger;
     struct _EDBGIOREQCHUNK *    pNext;
 } EDBGIOREQCHUNK;
@@ -8112,14 +8866,16 @@ BOOL FFetchIOREQCHUNKSLIST( EDBGIOREQCHUNK ** pedbgioreqchunkHead )
         {
             pedbgioreqchunkT = new EDBGIOREQCHUNK;
         }
+        //  Whoops allocation failure ...
         if ( NULL == pedbgioreqchunkT )
         {
-            return fFalse;
+            return fFalse;  // drip, drip, drip ...
         }
         pedbgioreqchunkT->pNext = NULL;
 
         if ( NULL == *pedbgioreqchunkHead )
         {
+            //  set return value to the very first chunk / g_pioreqchunkRoot.
             *pedbgioreqchunkHead = pedbgioreqchunkT;
         }
 
@@ -8148,7 +8904,9 @@ void UnfetchIOREQCHUNKSLIST( EDBGIOREQCHUNK * pedbgioreqchunkRoot )
 
 
 #if LOCAL_IS_WORKING
+//  ================================================================
 LOCAL_BROKEN DEBUG_EXT( EDBGDumpPendingIO )
+//  ================================================================
 {
     COSFile *           pcosf               = NULL;
     P_OSFILE            posf                = NULL;
@@ -8194,6 +8952,9 @@ LOCAL_BROKEN DEBUG_EXT( EDBGDumpPendingIO )
         {
             IOREQ * const           pioreqT         = &(pedbgioreqchunkT->pioreqchunkDebugger->rgioreq[iioreq]);
 
+            //  still skipping set size and extending write ops ... and I'm not sure
+            //  of this STATUS_PENDING clause, I think it might be throwing out false
+            //  positives ...
             if ( pioreqT->ovlp.Internal != STATUS_PENDING &&
                     !pioreqT->FOSIssuedState() )
                 continue;
@@ -8238,6 +8999,8 @@ LOCAL_BROKEN DEBUG_EXT( EDBGDumpPendingIO )
     }
 
 HandleError:
+    //  unload parameters
+    //
     dprintf( "\n--------------------\n\n" );
     Unfetch( posf );
     Unfetch( pcosf );
@@ -8298,16 +9061,21 @@ SAMPLE MedianHisto( CStats * phisto )
     {
         return ret;
     }
+    // assert?
     return 0;
 }
 
+//  decls from osdisk.cxx
 ULONG CmsecLowWaitFromIOTime( const ULONG ciotime );
 ULONG CmsecHighWaitFromIOTime( const ULONG ciotime );
+//  translate to usec ...
 ULONG CusecLowWaitFromIOTime( const ULONG ciotime )   { return CmsecLowWaitFromIOTime( ciotime ) * 1000; }
 ULONG CusecHighWaitFromIOTime( const ULONG ciotime )  { return CmsecHighWaitFromIOTime( ciotime ) * 1000; }
 
 
+//  ================================================================
 DEBUG_EXT( EDBGDumpIOREQs )
+//  ================================================================
 {
     DWORD               cioOutstandingMaxT  = 0;
     DWORD               cioreqInUseT            = 0;
@@ -8315,7 +9083,7 @@ DEBUG_EXT( EDBGDumpIOREQs )
     EDBGIOREQCHUNK *    pedbgioreqchunkT        = NULL;
     IOREQ::IOREQTYPE    ioreqtypeToDump         = IOREQ::ioreqInAvailPool;
     BOOL                fDumpNotType            = fTrue;
-    const IOREQ::IOREQTYPE ioreqtypeAll         = IOREQ::IOREQTYPE( IOREQ::ioreqMax * 2 + 1 );
+    const IOREQ::IOREQTYPE ioreqtypeAll         = IOREQ::IOREQTYPE( IOREQ::ioreqMax * 2 + 1 );  // impossible value
 
     #define iread  (0)
     #define iwrite (1)
@@ -8361,14 +9129,15 @@ DEBUG_EXT( EDBGDumpIOREQs )
 
             fValidUsage = fDumpAllIOREQs || fDumpAllIOs || fPrintIOs || fPrintIOREQs;
 
+            // fall through to process type of IO to dump or print
         case 1:
             if ( 0 == _stricmp( argv[0], "*" ) )
             {
-                ioreqtypeToDump = ioreqtypeAll;
+                ioreqtypeToDump = ioreqtypeAll; 
             }
             else
             {
-                fDumpNotType = ( argv[0][0] == '-' || argv[0][0] == '!'  );
+                fDumpNotType = ( argv[0][0] == '-' || argv[0][0] == '!' /* b/c it is more intuitive */ );
                 fValidUsage = ( fValidUsage
                                 && FUlFromSz( &( argv[0][fDumpNotType ? 1 : 0] ), (ULONG *)&ioreqtypeToDump )
                                 && ( ioreqtypeToDump < IOREQ::ioreqMax ) );
@@ -8379,7 +9148,7 @@ DEBUG_EXT( EDBGDumpIOREQs )
             fValidUsage = fFalse;
     }
 
-    AssertEDBG( ( fDumpAllIOs + fDumpAllIOREQs + fPrintIOs + fPrintIOREQs ) <= fTrue );
+    AssertEDBG( ( fDumpAllIOs + fDumpAllIOREQs + fPrintIOs + fPrintIOREQs ) <= fTrue ); // expected only 1 print|dump option selected
 
     if ( !fValidUsage )
     {
@@ -8411,7 +9180,7 @@ DEBUG_EXT( EDBGDumpIOREQs )
 
     if ( fPrintIOs || fPrintIOREQs || fDumpAllIOs || fDumpAllIOREQs )
     {
-        dprintf( "Scanning %d IOREQ's for ioreqtype %hs %hs(%d)...\n", cioreqInUseT,
+        dprintf( "Scanning %d IOREQ's for ioreqtype %hs %hs(%d)...\n", cioreqInUseT, 
                     ( ioreqtypeToDump == ioreqtypeAll ) ? "ALL" : ( fDumpNotType ? "NOT" : "" ),
                     mpioreqtypesz[ ioreqtypeToDump ],
                     ioreqtypeToDump );
@@ -8422,13 +9191,13 @@ DEBUG_EXT( EDBGDumpIOREQs )
     }
     if ( fPrintIOs || fPrintIOREQs )
     {
-        EDBGPrintfDml( "\t%hs  typ(head)       ibOffset.cbData    grbitQOS   Queue Wait (usec) / IO Wait (usec) \n",
+        EDBGPrintfDml( "\t%hs  typ(head)       ibOffset.cbData    grbitQOS   Queue Wait (usec) / IO Wait (usec) \n", 
                 ( sizeof(void*) == 4 ) ? "  pioreq  " : "      pioreq      " );
     }
 
 
 
-    QWORD cusecWaitingTotal = 0;
+    QWORD cusecWaitingTotal = 0;    // theoretically could wrap, but unlikely ...
     QWORD cusecLowest = INT_MAX;
     QWORD cusecHighest = 0x0;
     QWORD cusecIoTimeWaitingTotal = 0;
@@ -8446,6 +9215,8 @@ DEBUG_EXT( EDBGDumpIOREQs )
     {
         if ( fDumpAllIOs || fDumpAllIOREQs )
         {
+            //  This is nosiy and rarely useful, so only dump it if we want to see the IOs/IOREQs in the
+            //  list, then we can show where in the IOREQCHUNK chain they are.
             dprintf( "Scanning %d IOREQ's at 0x%p...\n",
                         pedbgioreqchunkT->pioreqchunkDebugger->cioreqMac,
                         pedbgioreqchunkT->pioreqchunkDebuggee->rgioreq );
@@ -8463,9 +9234,10 @@ DEBUG_EXT( EDBGDumpIOREQs )
             {
                 ioreqtypeT = IOREQ::ioreqUnknown;
             }
-
+            
             rgrgcioreqs[!!pioreqT->fWrite][ioreqtypeT]++;
 
+            // YUCK! Just made this O(n^2) b/c we need to know we're the head IOREQ if we're going to count ...
             BOOL fHeadIO = !FExistsPrecursorIOREQ( pioreqTDebuggee, pedbgioreqchunkRoot );
 
             if ( fHeadIO &&
@@ -8478,11 +9250,17 @@ DEBUG_EXT( EDBGDumpIOREQs )
                 rgcioreqHeads[!!pioreqT->fWrite][ioreqtypeT]++;
             }
 
+            //
+            // NOTE: This macro, must be matched with this if statement, or else the math won't work out...
+            //
             #define     COutstandingIOREQs()    ( rgrgcioreqs[iread][IOREQ::ioreqRemovedFromQueue] + rgrgcioreqs[iwrite][IOREQ::ioreqRemovedFromQueue] + \
                                                     rgrgcioreqs[iread][IOREQ::ioreqIssuedSyncIO] + rgrgcioreqs[iwrite][IOREQ::ioreqIssuedSyncIO] + \
                                                     rgrgcioreqs[iread][IOREQ::ioreqIssuedAsyncIO] + rgrgcioreqs[iwrite][IOREQ::ioreqIssuedAsyncIO] + \
                                                     rgrgcioreqs[iread][IOREQ::ioreqSetSize] + rgrgcioreqs[iwrite][IOREQ::ioreqSetSize] + \
                                                     rgrgcioreqs[iread][IOREQ::ioreqExtendingWriteIssued] + rgrgcioreqs[iwrite][IOREQ::ioreqExtendingWriteIssued] )
+                                                    // it is debatable if ioreqAllocFromEwreqLookaside is outstanding, but
+                                                    // it may not be fully or properly initialized ... so rather not risk
+                                                    // interpretation of the not fully init'd IOREQ.
             #define     FQueueWaiting( p )      ( !(p)->FInIssuedState() &&                        \
                                                     (p)->Ioreqtype() != IOREQ::ioreqInAvailPool &&   \
                                                     (p)->Ioreqtype() != IOREQ::ioreqCachedInTLS &&   \
@@ -8508,8 +9286,9 @@ DEBUG_EXT( EDBGDumpIOREQs )
                             dprintf( "Improbable!  An IO or all IOs have been (cumulatively) waiting for more than 6 days ...?  Check math.\n" );
                         }
 
+                        // give IO benefit of the doubt
                         cusecIoTimeWaitingTotal += CusecLowWaitFromIOTime( pioreqT->Ciotime() );
-
+                        
                         if ( cusecWaiting < cusecLowest )
                         {
                             cusecLowest = cusecWaiting;
@@ -8543,7 +9322,7 @@ DEBUG_EXT( EDBGDumpIOREQs )
 
                         AssertEDBG( 0 == !!pioreqT->fWrite || 1 == !!pioreqT->fWrite );
                         rgrghistoIoWait[ !!pioreqT->fWrite ][ ioreqtypeT ].ErrAddSample( cusecWaiting );
-
+                    
                     }
 
                 }
@@ -8551,7 +9330,7 @@ DEBUG_EXT( EDBGDumpIOREQs )
                 {
                     cNonHeadIOREQAdjustment++;
                 }
-            }
+            } // pioreq->FInIssuedState() ...
             else if ( FQueueWaiting( pioreqT ) )
             {
                 Assert( ioreqtypeT == IOREQ::ioreqAllocFromAvail ||
@@ -8565,12 +9344,12 @@ DEBUG_EXT( EDBGDumpIOREQs )
                 {
                     AssertEDBG( 0 == !!pioreqT->fWrite || 1 == !!pioreqT->fWrite );
                     rgrghistoQueueWait[ !!pioreqT->fWrite ][ ioreqtypeT ].ErrAddSample( cusecWaiting );
-                }
+                }                
             }
 
-            if ( ioreqtypeToDump == ioreqtypeAll ||
-                    ( !fDumpNotType && ioreqtypeToDump == ioreqtypeT ) ||
-                    ( fDumpNotType && ioreqtypeToDump != ioreqtypeT ) )
+            if ( ioreqtypeToDump == ioreqtypeAll ||     //  "all" signal"
+                    ( !fDumpNotType && ioreqtypeToDump == ioreqtypeT ) ||    //  exact match
+                    ( fDumpNotType && ioreqtypeToDump != ioreqtypeT ) )      //  inverted match
             {
                 if ( fDumpAllIOs && fHeadIO )
                 {
@@ -8590,27 +9369,29 @@ DEBUG_EXT( EDBGDumpIOREQs )
                 }
                 else if ( ( fPrintIOs && fHeadIO ) || fPrintIOREQs )
                 {
-                    EDBGPrintfDml( "\t<link cmd=\"!ese dump IOREQ %N\">0x%N</link>   %x %s %14I64d.%-7d  0x%08x   Q/IO Wait = %I64d / %I64d \n",
-                        pioreqTDebuggee, pioreqTDebuggee, (DWORD)ioreqtypeT, fHeadIO ? "(head)" : "      ",
+                    EDBGPrintfDml( "\t<link cmd=\"!ese dump IOREQ %N\">0x%N</link>   %x %s %14I64d.%-7d  0x%08x   Q/IO Wait = %I64d / %I64d \n", 
+                        pioreqTDebuggee, pioreqTDebuggee, (DWORD)ioreqtypeT, fHeadIO ? "(head)" : "      ", 
                         pioreqT->ibOffset, pioreqT->cbData,
                         pioreqT->grbitQOS,
-                        FQueueWaiting( pioreqT ) ? cusecWaiting : 0,
+                        FQueueWaiting( pioreqT ) ? cusecWaiting : 0, 
                         pioreqT->FInIssuedState() ? cusecWaiting : 0 );
                 }
             }
-        }
+        } // for each iioreq ...
 
         cChunk++;
         pedbgioreqchunkT = pedbgioreqchunkT->pNext;
     }
 
+    //  report totals
+    //
 
     if ( ioreqtypeToDump != ioreqtypeAll )
     {
         dprintf( "\n" );
-        dprintf( "Total R/W of IOREQTYPE %hs%d: %u / %u\n",
-                    fDumpNotType ? "NOT " : "", ioreqtypeToDump,
-                    fDumpNotType ? ( cIoreqTotal - rgrgcioreqs[ iread ][ ioreqtypeToDump ] ) : rgrgcioreqs[ iread ][ ioreqtypeToDump ],
+        dprintf( "Total R/W of IOREQTYPE %hs%d: %u / %u\n", 
+                    fDumpNotType ? "NOT " : "", ioreqtypeToDump, 
+                    fDumpNotType ? ( cIoreqTotal - rgrgcioreqs[ iread ][ ioreqtypeToDump ] ) : rgrgcioreqs[ iread ][ ioreqtypeToDump ], 
                     fDumpNotType ? ( cIoreqTotal - rgrgcioreqs[ iwrite ][ ioreqtypeToDump ] ) : rgrgcioreqs[ iwrite ][ ioreqtypeToDump ] );
     }
 
@@ -8623,6 +9404,7 @@ DEBUG_EXT( EDBGDumpIOREQs )
 
     CHAR szSpaces [] = "                             ";
 
+    //  print out the summary counts for each IOREQTYPE accumulated ...
 
     for ( IOREQ::IOREQTYPE ioreqtypeT = IOREQ::ioreqUnknown; ioreqtypeT < IOREQ::ioreqMax; ioreqtypeT = (IOREQ::IOREQTYPE) ( ioreqtypeT + 1 ) )
     {
@@ -8644,21 +9426,21 @@ DEBUG_EXT( EDBGDumpIOREQs )
 
             switch( ioreqtypeT )
             {
-            case IOREQ::ioreqInAvailPool:
-            case IOREQ::ioreqCachedInTLS:
-            case IOREQ::ioreqInReservePool:
+            case IOREQ::ioreqInAvailPool:           //  in Avail pool
+            case IOREQ::ioreqCachedInTLS:           //  cached in a ptls
+            case IOREQ::ioreqInReservePool:         //  in the pool of reserved IO
                 AssertEDBGSz( fFalse, "Shouldn't be any extra heads in these states anyways." );
-                break;
+                break; // no extra info worthy of printing out for these.
 
-            case IOREQ::ioreqAllocFromAvail:
-            case IOREQ::ioreqAllocFromEwreqLookaside:
+            case IOREQ::ioreqAllocFromAvail:        //  allocated from Avail pool (though not yet used)
+            case IOREQ::ioreqAllocFromEwreqLookaside:// in the lookaside slot for a deferred extending write
 
-            case IOREQ::ioreqInIOCombiningList:
-                break;
+            case IOREQ::ioreqInIOCombiningList:     //  in I/O combining link list
+                break; // Could / should we track time in Alloc to get into queue??  queue contention time?
 
-            case IOREQ::ioreqEnqueuedInIoHeap:
-            case IOREQ::ioreqEnqueuedInVipList:
-            case IOREQ::ioreqEnqueuedInMetedQ:
+            case IOREQ::ioreqEnqueuedInIoHeap:      //  in I/O heap
+            case IOREQ::ioreqEnqueuedInVipList:     //  in I/O VIP list
+            case IOREQ::ioreqEnqueuedInMetedQ:      //  in I/O lower priority / meted queue
                 if ( rgrghistoQueueWait[ iread ][ ioreqtypeT ].C() || rgrghistoQueueWait[ iwrite ][ ioreqtypeT ].C() )
                 {
                     dprintf( "   Queue Lat: min %I64u / %I64u, ave-med %I64u - %I64u / %I64u - %I64u, max %I64u / %I64u",
@@ -8666,18 +9448,18 @@ DEBUG_EXT( EDBGDumpIOREQs )
                                 rgrghistoQueueWait[ iread ][ ioreqtypeT ].Ave(), MedianHisto( &rgrghistoQueueWait[ iread ][ ioreqtypeT ] ),
                                 rgrghistoQueueWait[ iwrite ][ ioreqtypeT ].Ave(), MedianHisto( &rgrghistoQueueWait[ iwrite ][ ioreqtypeT ] ),
                                 rgrghistoQueueWait[ iread ][ ioreqtypeT ].Max(), rgrghistoQueueWait[ iwrite ][ ioreqtypeT ].Max()
-
+                               
                                );
                 }
                 break;
 
-            case IOREQ::ioreqRemovedFromQueue:
+            case IOREQ::ioreqRemovedFromQueue:      //  removed from queue (heap || VIP) and I/O about to be issued
 
-            case IOREQ::ioreqIssuedSyncIO:
-            case IOREQ::ioreqIssuedAsyncIO:
+            case IOREQ::ioreqIssuedSyncIO:          //  "sync" I/O issued (or about to be issued) from foreground thread
+            case IOREQ::ioreqIssuedAsyncIO:         //  async I/O issued (or about to be issued) from IO thread
 
-            case IOREQ::ioreqSetSize:
-            case IOREQ::ioreqExtendingWriteIssued:
+            case IOREQ::ioreqSetSize:               //  servicing a request to set file size
+            case IOREQ::ioreqExtendingWriteIssued:  //  extending write I/O issued (or about to be issued)
 
                 if ( rgrghistoIoWait[ iread ][ ioreqtypeT ].C() || rgrghistoIoWait[ iwrite ][ ioreqtypeT ].C() )
                 {
@@ -8686,13 +9468,13 @@ DEBUG_EXT( EDBGDumpIOREQs )
                                 rgrghistoIoWait[ iread ][ ioreqtypeT ].Ave(), MedianHisto( &rgrghistoIoWait[ iread ][ ioreqtypeT ] ),
                                 rgrghistoIoWait[ iwrite ][ ioreqtypeT ].Ave(), MedianHisto( &rgrghistoIoWait[ iwrite ][ ioreqtypeT ] ),
                                 rgrghistoIoWait[ iread ][ ioreqtypeT ].Max(), rgrghistoIoWait[ iwrite ][ ioreqtypeT ].Max()
-
+                               
                                );
                 }
                 break;
 
-            case IOREQ::ioreqCompleted:
-                break;
+            case IOREQ::ioreqCompleted:             //  OS completed the IOREQ: processing completion
+                break; // might be something interesting we could print out about this ...
 
             case IOREQ::ioreqMax:
             case IOREQ::ioreqUnknown:
@@ -8712,6 +9494,8 @@ DEBUG_EXT( EDBGDumpIOREQs )
 
     if ( COutstandingIOs() )
     {
+        //  There are outstanding IOs, report stats about them...
+        //
         if ( fHasHRTFreq )
         {
             dprintf( "min/ave/max outstanding IOs(us): %I64u / %I64u / %I64u from %lu dispatched IOs (using %lu IOREQs)\n",
@@ -8750,13 +9534,17 @@ DEBUG_EXT( EDBGDumpIOREQs )
     }
 
 HandleError:
+    //  unload parameters
+    //
     dprintf( "\n--------------------\n\n" );
 
     UnfetchIOREQCHUNKSLIST( pedbgioreqchunkRoot );
 }
 
 
+//  ================================================================
 DEBUG_EXT( EDBGDumpPerfctr )
+//  ================================================================
 {
     ULONG   cbCounter               = sizeof(LONG);
     ULONG   cInstanceMax            = 0;
@@ -8781,6 +9569,7 @@ DEBUG_EXT( EDBGDumpPerfctr )
             fValidUsage = ( fValidUsage
                             && FUlFromSz( argv[1], &cbCounter )
                             && ( sizeof(LONG) == cbCounter || sizeof(QWORD) == cbCounter ) );
+            //  FALL THROUGH to validate rest of args
 
         case 1:
             fValidUsage = ( fValidUsage
@@ -8811,12 +9600,18 @@ DEBUG_EXT( EDBGDumpPerfctr )
         goto HandleError;
     }
 
+    //  UNDONE: we're using a hack to extract m_iOffset, so try to detect
+    //  if PERFInstance ever changes
+    //
     if ( sizeof(PERFInstance<>) != sizeof(LONG) )
     {
         dprintf( "Error: Debugger extension has obsolete PERFInstance definition.\n" );
         goto HandleError;
     }
 
+    //  UNDONE: huge hack here assumes that the counter offset
+    //  is the first (and only) member of the class
+    //
     if ( !FReadVariable( (ULONG *)pvPerfInstance, &ulOffset ) )
     {
         dprintf( "Error: Could not fetch specified performance counter.\n" );
@@ -8841,6 +9636,8 @@ DEBUG_EXT( EDBGDumpPerfctr )
 
     dprintf( "Instances not shown are ZERO.\n" );
 
+    //  go through all instances of this counter
+    //
     for ( ULONG iInstance = 0; iInstance < cInstanceMax; iInstance++ )
     {
         QWORD   qwCounter   = 0;
@@ -8848,6 +9645,8 @@ DEBUG_EXT( EDBGDumpPerfctr )
 
         for ( ULONG iproc = 0; iproc < cProcsT; iproc++ )
         {
+            //  fetch PLS for each proc
+            //
             PLS * pplsDebuggee  = rgPLS[iproc];
             if ( !FReadVariable( (BYTE *)pplsDebuggee, (BYTE *)pplsT, cbPLS ) )
             {
@@ -8855,11 +9654,15 @@ DEBUG_EXT( EDBGDumpPerfctr )
                 goto HandleError;
             }
 
+            //  check if it points to a valid buffer
+            //
             if ( ( pplsT->pbPerfCounters == NULL ) || ( pplsT->cbPerfCountersCommitted == 0 ) )
             {
                 continue;
             }
 
+            //  compute offset and check if it's within the committed region
+            //
             const ULONG ibData = iInstance * cbPlsMemRequiredPerPerfInstanceT + ulOffset;
             const ULONG cbData = ibData + cbCounter;
             if ( cbData > pplsT->cbPerfCountersCommitted )
@@ -8870,6 +9673,8 @@ DEBUG_EXT( EDBGDumpPerfctr )
             BYTE* const pbInstancePerfCountersDebuggee = pplsT->pbPerfCounters + ibData;
             AssertEDBGSz( ( pbInstancePerfCountersDebuggee + cbData ) <= ( pbPerfCountersDebuggee + cbPerfCountersT ) , "Inconsistent performance counter pointers." );
 
+            //  fetch data
+            //
             QWORD data = 0;
             if ( !FReadVariable( (BYTE *)pbInstancePerfCountersDebuggee, (BYTE *)&data, cbCounter ) )
             {
@@ -8904,6 +9709,8 @@ DEBUG_EXT( EDBGDumpPerfctr )
     }
 
 HandleError:
+    //  unload parameters
+    //
     dprintf( "\n--------------------\n\n" );
 
     delete[] (BYTE*)pplsT;
@@ -8911,10 +9718,12 @@ HandleError:
 }
 
 
+//  ================================================================
 LOCAL VOID EDBGDumpIndexMetaData(
     const FCB * const   pfcbIndex,
     const FCB * const   pfcbTable,
     const FCB * const   pfcbIndexDebuggee )
+//  ================================================================
 {
     const TDB * const   ptdb        = pfcbTable->Ptdb();
     IDB *               pidb        = pidbNil;
@@ -8990,9 +9799,11 @@ HandleError:
     Unfetch( pidb );
 }
 
+//  ================================================================
 LOCAL VOID EDBGDumpColumnMetaData(
     const TDB * const       ptdb,
     const COLUMNID          columnid )
+//  ================================================================
 {
     const FIELD * const     pfield      = ptdb->Pfield( columnid );
     const BOOL              fDeleted    = ( 0 == pfield->itagFieldName );
@@ -9022,9 +9833,11 @@ LOCAL VOID EDBGDumpColumnMetaData(
     dprintf( "flags=0x%04x]\n", pfield->ffield );
 }
 
+//  ================================================================
 LOCAL VOID EDBGDumpTableMetaData(
     FCB * const         pfcbDebuggee,
     const TDB * const   ptdbDebuggee )
+//  ================================================================
 {
     FCB *               pfcbTable   = pfcbNil;
     FCB *               pfcbIndex   = pfcbNil;
@@ -9053,6 +9866,8 @@ LOCAL VOID EDBGDumpTableMetaData(
                  jsph.ulMaintDensity, jsph.grbit );
         dprintf( "\n" );
 
+        //  if primary index exists, dump it
+        //
         if ( pidbNil != pfcbTable->Pidb() )
         {
             EDBGDumpIndexMetaData( pfcbTable, pfcbTable, pfcbDebuggee );
@@ -9065,6 +9880,8 @@ LOCAL VOID EDBGDumpTableMetaData(
             goto HandleError;
         }
 
+        //  dump secondary indexes
+        //
         for ( FCB * pfcbT = pfcbTable->PfcbNextIndex();
             pfcbNil != pfcbT;
             pfcbT = pfcbIndex->PfcbNextIndex() )
@@ -9078,6 +9895,8 @@ LOCAL VOID EDBGDumpTableMetaData(
             EDBGDumpIndexMetaData( pfcbIndex, pfcbTable, pfcbT );
         }
 
+        //  dump columns
+        //
         dprintf( "Columns:\n" );
 
         for ( FID fid = ptdb->FidFixedFirst(); fid <= ptdb->FidFixedLast(); fid++ )
@@ -9103,9 +9922,11 @@ HandleError:
 }
 
 
+//  ================================================================
 DEBUG_EXT( EDBGDumpMetaData )
+//  ================================================================
 {
-    SaveDlsDefaults sdd;
+    SaveDlsDefaults sdd; // saves here, and then restores the implicit defaults on .dtor.
 
     FCB *       pfcbDebuggee        = pfcbNil;
     FCB *       pfcb                = pfcbNil;
@@ -9137,6 +9958,7 @@ DEBUG_EXT( EDBGDumpMetaData )
         if ( FEDBGFetchTableMetaData( pfcb->PfcbTable(), &pfcbTable ) )
         {
             EDBGDumpIndexMetaData( pfcb, pfcbTable, pfcbDebuggee );
+            // REVIEW: Unfetch( pfcbTable )?
         }
     }
     else
@@ -9176,17 +9998,21 @@ DEBUG_EXT( EDBGDumpMetaData )
 
 HandleError:
 
+    //  unload parameters
+    //
     dprintf( "\n--------------------\n\n" );
 
     Unfetch( pfcb );
 }
 
 
+//  ================================================================
 LOCAL BOOL FEDBGReadAndCheckFCB(
     FCB * const     pfcbDebuggee,
     FCB * const     pfcb,
     const ULONG     ulFDP,
     BOOL * const    pfFoundFCB )
+//  ================================================================
 {
     const BOOL      fResult     = FReadVariable( pfcbDebuggee, pfcb );
 
@@ -9218,7 +10044,9 @@ LOCAL BOOL FEDBGReadAndCheckFCB(
     return fResult;
 }
 
+//  ================================================================
 DEBUG_EXT( EDBGFCBFind )
+//  ================================================================
 {
     ULONG       ulFDP               = 0;
     INST *      pinstTarget         = NULL;
@@ -9232,6 +10060,7 @@ DEBUG_EXT( EDBGFCBFind )
     {
         case 2:
             fValidUsage = ( fValidUsage && FAddressFromSz( argv[1], &pinstTarget ) );
+            //  FALL THROUGH to validate rest of args
 
         case 1:
             fValidUsage = ( fValidUsage
@@ -9271,6 +10100,8 @@ DEBUG_EXT( EDBGFCBFind )
         goto HandleError;
     }
 
+    //  scan FCB list of all INST's
+    //
     for ( SIZE_T ipinst = 0; ipinst < Pdls()->Cinst(); ipinst++ )
     {
         if ( pinstNil == Pdls()->PinstDebuggee( ipinst ) )
@@ -9295,14 +10126,21 @@ DEBUG_EXT( EDBGFCBFind )
             {
                 FCB *   pfcbIndexes;
 
+                //  check main FCB
+                //
                 if ( !FEDBGReadAndCheckFCB( pfcbDebuggee, pfcb, ulFDP, &fFoundFCB ) )
                 {
                     goto HandleError;
                 }
 
+                //  pfcb variable will be re-used, so save
+                //  off pointer to next FCB in global list
+                //
                 pfcbNextInList = pfcb->PfcbNextList();
                 pfcbIndexes = pfcb->PfcbNextIndex();
 
+                //  check possible LV FCB
+                //
                 if ( NULL != pfcb->Ptdb() )
                 {
                     if ( !FReadVariable( pfcb->Ptdb(), ptdb ) )
@@ -9318,6 +10156,8 @@ DEBUG_EXT( EDBGFCBFind )
                     }
                 }
 
+                //  check possible index FCB's
+                //
                 for ( pfcbDebuggee = pfcbIndexes;
                     pfcbNil != pfcbDebuggee;
                     pfcbDebuggee = pfcb->PfcbNextIndex() )
@@ -9348,12 +10188,16 @@ DEBUG_EXT( EDBGFCBFind )
 
     if ( !fFoundFCB )
     {
+        //  we did not find the FCB
+        //
         dprintf( "\nCould not find any FCB's with an objidFDP or pgnoFDP of %d (0x%x).\n", ulFDP, ulFDP );
     }
 
 
 HandleError:
 
+    //  unload parameters
+    //
     dprintf( "\n--------------------\n\n" );
 
     LocalFree( ptdb );
@@ -9370,6 +10214,7 @@ enum DumpFCBFilter
     dumpfcbfilterAll
 };
 
+//  ================================================================
 LOCAL VOID DumpFCB(
     _In_ const INST * const     pinst,
     _In_ const FCB * const      pfcbDebuggee,
@@ -9377,6 +10222,7 @@ LOCAL VOID DumpFCB(
     _In_ const TDB * const      ptdb,
     _In_ const BOOL             fSubFCB
     )
+//  ================================================================
 {
     if ( fSubFCB )
     {
@@ -9389,13 +10235,15 @@ LOCAL VOID DumpFCB(
     {
         szTableName = "[DbRoot]";
     }
+    //   Ah-hem ... someone made the name of the MSysObjectsShadow in in the TDB == MSysObjects (with 
+    //   no Shadow), see comments in FEDBGTableFind().
     else if ( pfcb->ObjidFDP() == objidFDPMSOShadow )
     {
         szTableName = "MSysObjectsShadow";
     }
 
     IDB *         pidb           = NULL;
-    const CHAR *  szIndexName    = "";
+    const CHAR *  szIndexName    = ""; //  Also for LVs
     const CHAR *  szIndexAppend  = "";
     if ( pfcb->FTypeLV() )
     {
@@ -9413,6 +10261,7 @@ LOCAL VOID DumpFCB(
         }
     }
 
+    //  Now that the name is complete, the type is a bit superflous.
     EDBGPrintfDmlW(
         L"    <link cmd=\"!ese dump FCB 0x%N\">0x%N</link>%ws [ref: %6ld, fInLRU:%d, fPurgeable:%d, "
             L"type: <link cmd=\"!ese dumpmetadata 0x%N\">%24s</link>, ifmp:0x%x, objidFDP:%#5x, pgnoFDP:%#8x, name: %hs%hs%hs%hs ]\n",
@@ -9434,6 +10283,7 @@ LOCAL VOID DumpFCB(
     Unfetch( pidb );
 }
 
+//  ================================================================
 LOCAL VOID CollectFCBInfo(
     __in const FCB * const      pfcb,
     __in ULONG * const          pcFCBs,
@@ -9441,9 +10291,17 @@ LOCAL VOID CollectFCBInfo(
     __inout BOOL * const        pfAvailableFCB,
     __inout_ecount(tceMax) ULONG * const        rgcFCBsByTCE
     )
+//  ================================================================
 {
     FetchWrap<FCB *>    pfcbTable;
 
+    // This function assumes that it is inspecting a tree,
+    // and as such it will mark the entire tree as unavailable
+    // at finding the first FCB in use.
+    //
+    // Likewise, at the moment we find the first unpurgeable,
+    // the whole tree is assume unpurgeable.        
+    //
     if ( pfcb->FDebuggerExtInUse() )
     {
         (*pfAvailableFCB) = fFalse;
@@ -9459,6 +10317,8 @@ LOCAL VOID CollectFCBInfo(
     (*pcFCBs)++;
     if ( rgcFCBsByTCE )
     {
+        // We might need the table FCB in order to compute
+        // the tableclass, so fetch it if present.
         FCB * const     pfcbTableDebuggee   = pfcb->PfcbTable();
         if ( NULL != pfcbTableDebuggee && !pfcbTable.FVariable( pfcbTableDebuggee ) )
         {
@@ -9467,6 +10327,9 @@ LOCAL VOID CollectFCBInfo(
         }
         else
         {
+            // Temporarily re-direct the debugger's copy of the FCB to point
+            // to the debugger's copy of pfcbTable so that we can retrieve the
+            // tableclass for the FCB.
             ( (FCB*)pfcb )->SetPfcbTable( pfcbTable );
             TCE tce = pfcb->TCE();
             if ( tce < tceMax )
@@ -9482,6 +10345,7 @@ LOCAL VOID CollectFCBInfo(
     }
 }
 
+//  ================================================================
 LOCAL VOID CollectFCBTreeInfo(
     __in const INST * const     pinst,
     __in const FCB * const      pfcb,
@@ -9490,14 +10354,22 @@ LOCAL VOID CollectFCBTreeInfo(
     __inout BOOL * const        pfAvailableFCB,
     __inout_ecount(tceMax) ULONG * const        rgcFCBsByTCE
     )
+//  ================================================================
 {
     FCB *                   pfcbNextIndexDebuggee   = pfcbNil;
     FetchWrap<TDB *>        ptdb;
     FetchWrap<FCB *>        pfcbLV;
 
+    // We will consider a tree unpurgeable and available as
+    // we walk through it. CollectFCBInfo will set the tree
+    // as unpurgeable/in-use as it encounters such cases
+    // on a case-by-case inspection of FCBs.
+    //
     (*pfUnpurgeableFCB) = fFalse;
     (*pfAvailableFCB) = fTrue;
 
+    // Inspect the immediate FCB ("root" FCB). 
+    //
     CollectFCBInfo(
         pfcb,
         pcFCBs,
@@ -9505,6 +10377,8 @@ LOCAL VOID CollectFCBTreeInfo(
         pfAvailableFCB,
         rgcFCBsByTCE );
 
+    //  Inspect the LV FCB out of the TDB.
+    //
     if ( NULL != pfcb->Ptdb() )
     {
         if ( !ptdb.FVariable( pfcb->Ptdb() ) )
@@ -9521,6 +10395,8 @@ LOCAL VOID CollectFCBTreeInfo(
                 return;
             }
 
+            // Check how the LV FCB is doing.
+            //
             CollectFCBInfo(
                 pfcbLV,
                 pcFCBs,
@@ -9530,6 +10406,8 @@ LOCAL VOID CollectFCBTreeInfo(
         }
     }
 
+    //  Check possible index FCBs.
+    //
     for ( FCB * pfcbIndexDebuggee = pfcb->PfcbNextIndex();
         pfcbNil != pfcbIndexDebuggee;
         pfcbIndexDebuggee = pfcbNextIndexDebuggee )
@@ -9541,25 +10419,27 @@ LOCAL VOID CollectFCBTreeInfo(
             dprintf( "    Error: Could not read pfcbIndex at 0x%N. Aborting.\n", pfcbIndexDebuggee );
             return;
         }
-
+        
         CollectFCBInfo(
             pfcbIndex,
             pcFCBs,
             pfUnpurgeableFCB,
             pfAvailableFCB,
             rgcFCBsByTCE );
-
+            
         pfcbNextIndexDebuggee = pfcbIndex->PfcbNextIndex();
     }
 }
 
+//  ================================================================
 LOCAL VOID DumpFCBList(
     __in INST * const   pinstDebuggee,
     DumpFCBFilter       edumpFCBFilter
     )
+//  ================================================================
 {
     FetchWrap<INST *>       pinst;
-
+    
     dprintf( "\nScanning all FCB's of instance 0x%N...\n", pinstDebuggee );
     if ( !pinst.FVariable( pinstDebuggee ) )
     {
@@ -9571,6 +10451,8 @@ LOCAL VOID DumpFCBList(
     FCB *   pfcbNextInListDebuggee  = pfcbNil;
     FCB *   pfcbNextIndexDebuggee   = pfcbNil;
 
+    // We'll walk across all the FCBs in the list of the INST.
+    //
     for ( pfcbDebuggee = pinst->m_pfcbList;
         pfcbNil != pfcbDebuggee;
         pfcbDebuggee = pfcbNextInListDebuggee )
@@ -9578,7 +10460,7 @@ LOCAL VOID DumpFCBList(
         FetchWrap<TDB *>        ptdb;
         FetchWrap<FCB *>        pfcb;
         FetchWrap<FCB *>        pfcbLV;
-
+        
         if ( !pfcb.FVariable( pfcbDebuggee ) )
         {
             dprintf( "    Error: Could not read pfcb at 0x%N. Aborting.\n", pfcbDebuggee );
@@ -9587,13 +10469,22 @@ LOCAL VOID DumpFCBList(
 
         pfcbNextInListDebuggee = pfcb->PfcbNextList();
 
+        // If a filter is specified, we need to determine the
+        // FCB tree info and then make a call based on the
+        // filtering.
+        //
         if ( dumpfcbfilterInvalid != edumpFCBFilter &&
             dumpfcbfilterAll != edumpFCBFilter )
         {
+            // We will assume a tree is purgeable and available
+            // unless during the collection below it is shown otherwise.
+            //
             ULONG   cFCBTree = 0;
             BOOL    fUnpurgeableFCB = fFalse;
             BOOL    fAvailableFCB = fTrue;
 
+            // Collect the state of the FCB tree.
+            //
             CollectFCBTreeInfo(
                 pinst,
                 pfcb,
@@ -9610,21 +10501,21 @@ LOCAL VOID DumpFCBList(
                         continue;
                     }
                     break;
-
+            
                 case dumpfcbfilterAvailable:
                     if ( !fAvailableFCB )
                     {
                         continue;
                     }
                     break;
-
+            
                 case dumpfcbfilterPurgeable:
                     if ( !fAvailableFCB || fUnpurgeableFCB )
                     {
                         continue;
                     }
                     break;
-
+            
                 case dumpfcbfilterUnpurgeable:
                     if ( !fAvailableFCB || !fUnpurgeableFCB )
                     {
@@ -9636,17 +10527,21 @@ LOCAL VOID DumpFCBList(
                 case dumpfcbfilterAll:
                     AssertEDBGSz( fFalse, "We should not be filtering if we have no filter." );
                     break;
-
+            
                 default:
                     break;
             }
         }
 
+        // Just the cheapest way to get the table's metadata, including TDB and table name hanging
+        // off that for friendly printing.
         FCB * pfcbWithPtdb = NULL;
         (void)FEDBGFetchTableMetaData( pfcbDebuggee, &pfcbWithPtdb );
 
         DumpFCB( pinst, pfcbDebuggee, pfcb, pfcbWithPtdb->Ptdb(), fFalse );
 
+        //  Check possible LV FCB.
+        //
         if ( NULL != pfcb->Ptdb() )
         {
             if ( !ptdb.FVariable( pfcb->Ptdb() ) )
@@ -9662,11 +10557,13 @@ LOCAL VOID DumpFCBList(
                     dprintf( "    Error: Could not read pfcbLV at 0x%N. Aborting.\n", ptdb->PfcbLV() );
                     return;
                 }
-
+                
                 DumpFCB( pinst, ptdb->PfcbLV(), pfcbLV, pfcbWithPtdb->Ptdb(), fTrue );
             }
         }
 
+        //  check possible index FCB's
+        //
         for ( FCB * pfcbIndexDebuggee = pfcb->PfcbNextIndex();
             pfcbNil != pfcbIndexDebuggee;
             pfcbIndexDebuggee = pfcbNextIndexDebuggee )
@@ -9678,7 +10575,7 @@ LOCAL VOID DumpFCBList(
                 dprintf( "    Error: Could not read pfcbIndex at 0x%N. Aborting.\n", pfcbIndexDebuggee );
                 return;
             }
-
+            
             DumpFCB( pinst, pfcbIndexDebuggee, pfcbIndex, pfcbWithPtdb->Ptdb(), fTrue );
 
             pfcbNextIndexDebuggee = pfcbIndex->PfcbNextIndex();
@@ -9688,10 +10585,12 @@ LOCAL VOID DumpFCBList(
     }
 }
 
+//  ================================================================
 LOCAL DumpFCBFilter ParseEDumpFCBFilter( const CHAR cArg )
+//  ================================================================
 {
     DumpFCBFilter edumpFCBFilter;
-
+    
     switch( cArg )
     {
         case '*':
@@ -9721,8 +10620,10 @@ LOCAL DumpFCBFilter ParseEDumpFCBFilter( const CHAR cArg )
 
     return edumpFCBFilter;
 }
-
+    
+//  ================================================================
 DEBUG_EXT( EDBGDumpFCBs )
+//  ================================================================
 {
     BOOL fValidUsage                    = fTrue;
     INST *  pinst                       = NULL;
@@ -9735,9 +10636,10 @@ DEBUG_EXT( EDBGDumpFCBs )
             {
                 fValidUsage = fFalse;
             }
-
+            
             __fallthrough;
-
+            //  FALL THROUGH to validate rest of args
+    
         case 1:
             edumpFCBFilter = ParseEDumpFCBFilter( argv[0][0] );
 
@@ -9751,12 +10653,12 @@ DEBUG_EXT( EDBGDumpFCBs )
             edumpFCBFilter = dumpfcbfilterAll;
             fValidUsage = fTrue;
             break;
-
+    
         default:
             fValidUsage = fFalse;
             break;
     }
-
+    
     if ( !fValidUsage )
     {
         dprintf( "\nUsage: DUMPFCBS [*|i|a|p|u] [<pinst>]\n\n" );
@@ -9779,7 +10681,7 @@ DEBUG_EXT( EDBGDumpFCBs )
         for ( SIZE_T ipinst = 0; ipinst < Pdls()->Cinst(); ipinst++ )
         {
             INST * pinstDebuggee    = Pdls()->PinstDebuggee( ipinst );
-
+        
             if ( pinstNil == pinstDebuggee )
             {
                 continue;
@@ -9796,16 +10698,18 @@ HandleError:
     dprintf( "\n--------------------\n\n" );
 }
 
+//  ================================================================
 LOCAL VOID DumpInstFCBs(
     __in INST * const pinstDebuggee
     )
+//  ================================================================
 {
     FetchWrap<INST *>               pinst;
     TableClassNamesLifetimeManager  tableclassnames;
     FetchWrap<WCHAR *>              wszTableClassNames;
     WCHAR*                          wszTableClassNamesDebuggee  = NULL;
     SIZE_T                          cchTableClassNamesDebuggee  = 0;
-
+    
     dprintf( "\nScanning all FCB's of instance 0x%N...\n", pinstDebuggee );
     if ( !pinst.FVariable( pinstDebuggee ) )
     {
@@ -9835,6 +10739,8 @@ LOCAL VOID DumpInstFCBs(
     FCB *   pfcbDebuggee                = pfcbNil;
     FCB *   pfcbNextInListDebuggee      = pfcbNil;
 
+    // We'll walk across all the FCBs in the list of the INST.
+    //
     for ( pfcbDebuggee = pinst->m_pfcbList;
         pfcbNil != pfcbDebuggee;
         pfcbDebuggee = pfcbNextInListDebuggee )
@@ -9846,6 +10752,8 @@ LOCAL VOID DumpInstFCBs(
 
         cFCBsInList++;
 
+        //  check main FCB
+        //
         if ( !pfcb.FVariable( pfcbDebuggee ) )
         {
             dprintf( "    Error: Could not read pfcb at 0x%N. Aborting.\n", pfcbDebuggee );
@@ -9862,12 +10770,16 @@ LOCAL VOID DumpInstFCBs(
             &fAvailableFCB,
             rgcFCBsByTCE );
 
+        // We will now consider all the tree's
+        // nodes as a whole as either available,
+        // in-use, purgeable or unpurgeable.
+        //
         cFCBs += cFCBTree;
 
         if ( fAvailableFCB )
         {
             cAvailableFCBs += cFCBTree;
-
+            
             if ( fUnpurgeableFCB )
             {
                 cUnpurgeableFCBs += cFCBTree;
@@ -9878,7 +10790,7 @@ LOCAL VOID DumpInstFCBs(
             cInUseFCBs += cFCBTree;
         }
     }
-
+    
     EDBGPrintfDmlW( L"      Total Number of FCBs in Instance List:       %10ld\n", cFCBsInList);
     EDBGPrintfDmlW( L"      <link cmd=\"!ese dumpfcbs * 0x%N \">Total Number of FCBs</link>:                        %10ld\n", pinstDebuggee, cFCBs );
     EDBGPrintfDmlW( L"          <link cmd=\"!ese dumpfcbs i 0x%N \">In Use</link>:                                  %10ld\n", pinstDebuggee, cInUseFCBs );
@@ -9907,7 +10819,9 @@ LOCAL VOID DumpInstFCBs(
     EDBGPrintfDmlW( L"      (*estimation only, may differ from actual runtime)\n\n" );
 }
 
+//  ================================================================
 DEBUG_EXT( EDBGDumpFCBInfo )
+//  ================================================================
 {
     INST *  pinst                       = NULL;
 
@@ -9929,7 +10843,7 @@ DEBUG_EXT( EDBGDumpFCBInfo )
         for ( SIZE_T ipinst = 0; ipinst < Pdls()->Cinst(); ipinst++ )
         {
             INST * pinstDebuggee    = Pdls()->PinstDebuggee( ipinst );
-
+        
             if ( pinstNil == pinstDebuggee )
             {
                 continue;
@@ -9947,7 +10861,9 @@ HandleError:
     dprintf( "\n--------------------\n\n" );
 }
 
+//  ================================================================
 DEBUG_EXT( EDBGTableFind )
+//  ================================================================
 {
     const CHAR *    szTableName         = NULL;
     INST *          pinstTarget         = NULL;
@@ -9957,6 +10873,7 @@ DEBUG_EXT( EDBGTableFind )
     {
         case 2:
             fValidUsage = ( fValidUsage && FAutoAddressFromSz( argv[1], &pinstTarget ) );
+            //  FALL THROUGH to validate rest of args
 
         case 1:
             szTableName = argv[0];
@@ -9981,21 +10898,28 @@ HandleError:
     dprintf( "\n--------------------\n\n" );
 }
 
+// note: do not reimplement as ErrEDBGQueryCache() query, because this
+// method is lightning fast and cachequery is slow on big caches.
+//  ================================================================
 DEBUG_EXT( EDBGCacheMap )
+//  ================================================================
 {
     ERR                 err                 = JET_errSuccess;
 
     void *pvOffset;
     if ( argc == 1 && FAddressFromSz( argv[ 0 ], &pvOffset ) )
     {
+        //  load BF parameters
 
         Call( Pdls()->ErrBFInitCacheMap() );
 
+        //  lookup this offset in both tables
 
-        const IBF ibf = Pdls()->IbfBFCachePbf( (PBF)pvOffset, fFalse  );
+        const IBF ibf = Pdls()->IbfBFCachePbf( (PBF)pvOffset, fFalse /* non-exact match */ );
 
-        const IPG ipg = Pdls()->IpgBFCachePv( pvOffset, fFalse  );
+        const IPG ipg = Pdls()->IpgBFCachePv( pvOffset, fFalse /* non-exact match */ );
 
+        //  this is a BF
 
         if ( ibf != ibfNil )
         {
@@ -10011,6 +10935,7 @@ DEBUG_EXT( EDBGCacheMap )
                         pvDebuggee );
         }
 
+        //  this is a page pointer
 
         else if ( ipg != ipgNil )
         {
@@ -10026,6 +10951,7 @@ DEBUG_EXT( EDBGCacheMap )
                         pbfDebuggee );
         }
 
+        //  this is an unknown pointer
 
         else
         {
@@ -10033,6 +10959,7 @@ DEBUG_EXT( EDBGCacheMap )
                         pvOffset );
         }
 
+        //  unload BF parameters
 
     }
     else
@@ -10045,13 +10972,15 @@ DEBUG_EXT( EDBGCacheMap )
 HandleError:
 
     Pdls()->BFTermCacheMap();
-
+    
 }
 
+//  ================================================================
 LOCAL VOID DumpFUCB(
     __in const FUCB * const         pfucbDebuggee,
     __in const FUCB * const         pfucb
     )
+//  ================================================================
 {
     EDBGPrintfDmlW(
         L"        <link cmd=\"!ese dump FUCB 0x%N\">0x%N</link> [FCB: <link cmd=\"!ese dump FCB 0x%N\">0x%N</link>, Versioned: %d, levelOpen: %d, levelReuse: %d, fDeferClose:%d, type: %15s]\n",
@@ -10066,15 +10995,17 @@ LOCAL VOID DumpFUCB(
         pfucb->WszFUCBType() );
 }
 
+//  ================================================================
 LOCAL VOID DumpPIB(
     __in const PIB * const      ppibDebuggee,
     __in const PIB * const      ppib
     )
+//  ================================================================
 {
     WCHAR wszTrxStack[128];
     wszTrxStack[0] = L'\0';
     ppib->TrxidStack().ErrDump( wszTrxStack, _countof( wszTrxStack ), L" " );
-
+    
     EDBGPrintfDmlW(
         L"    <link cmd=\"dt %ws!PIB 0x%N\">0x%N</link> [User: %s, Level: %d, Cursors: %3d, TrxStack: %40s, Ctxt: <link cmd=\"~~[0x%N]s\">0x%N</link>]\n",
         WszUtilImageName(),
@@ -10088,9 +11019,11 @@ LOCAL VOID DumpPIB(
         ppib->TidActive() );
 }
 
+//  ================================================================
 LOCAL VOID DumpPIBList(
     __in INST * const   pinstDebuggee
     )
+//  ================================================================
 {
     FetchWrap<INST *>       pinst;
 
@@ -10120,20 +11053,22 @@ LOCAL VOID DumpPIBList(
 
         DumpPIB( ppibDebuggee, ppib );
 
+        // We'll walk across all the FUCBs in the list of the PIB.
+        //
         for ( pfucbDebuggee = ppib->pfucbOfSession;
             pfucbNil != pfucbDebuggee;
             pfucbDebuggee = pfucbNextInListDebuggee )
         {
             FetchWrap<FUCB *>       pfucb;
-
+            
             if ( !pfucb.FVariable( pfucbDebuggee ) )
             {
                 dprintf( "	  Error: Could not read pfucb at 0x%N. Aborting.\n", pfucbDebuggee );
                 return;
             }
-
+        
             pfucbNextInListDebuggee = pfucb->pfucbNextOfSession;
-
+        
             DumpFUCB( pfucbDebuggee, pfucb );
         }
 
@@ -10141,7 +11076,9 @@ LOCAL VOID DumpPIBList(
     }
 }
 
+//  ================================================================
 DEBUG_EXT( EDBGDumpPIBs )
+//  ================================================================
 {
     BOOL fValidUsage                    = fTrue;
     INST *  pinst                       = NULL;
@@ -10158,12 +11095,12 @@ DEBUG_EXT( EDBGDumpPIBs )
         case 0:
             fValidUsage = fTrue;
             break;
-
+    
         default:
             fValidUsage = fFalse;
             break;
     }
-
+    
     if ( !fValidUsage )
     {
         dprintf( "\nUsage: DUMPPIBS [<instance>]\n\n" );
@@ -10181,7 +11118,7 @@ DEBUG_EXT( EDBGDumpPIBs )
         for ( SIZE_T ipinst = 0; ipinst < Pdls()->Cinst(); ipinst++ )
         {
             INST * pinstDebuggee    = Pdls()->PinstDebuggee( ipinst );
-
+        
             if ( pinstNil == pinstDebuggee )
             {
                 continue;
@@ -10199,8 +11136,11 @@ HandleError:
     dprintf( "\n--------------------\n\n" );
 }
 
+//  ================================================================
 DEBUG_EXT( EDBGDumpCacheMap )
+//  ================================================================
 {
+    //  load BF parameters
 
     LONG_PTR    cbfChunkT;
     BF **       rgpbfChunkT = NULL;
@@ -10236,11 +11176,15 @@ DEBUG_EXT( EDBGDumpCacheMap )
         dprintf( "\n" );
     }
 
+    //  unload BF parameters
 
     Unfetch( rgpbfChunkT );
     Unfetch( rgpvChunkT );
 }
 
+//  Fetches the first _TLS structure from the global head pointer.  Must Unfetch when 
+//  done. Optionally gives back the debuggee address of the first _TLS structure if 
+//  desired.
 
 _TLS * P_tlsFetchHead( __out_opt _TLS ** pp_tlsDebuggeeHead = NULL );
 _TLS * P_tlsFetchHead( __out_opt _TLS ** pp_tlsDebuggeeHead )
@@ -10254,7 +11198,7 @@ _TLS * P_tlsFetchHead( __out_opt _TLS ** pp_tlsDebuggeeHead )
     {
         *pp_tlsDebuggeeHead = NULL;
     }
-
+    
     if ( !FAddressFromGlobal( "g_ptlsGlobal", &pp_tlsGlobalDebuggee ) )
     {
         dprintf( "Error: Could not retrieve the symbol ese[nt]!g_ptlsGlobal address.\n" );
@@ -10282,6 +11226,9 @@ _TLS * P_tlsFetchHead( __out_opt _TLS ** pp_tlsDebuggeeHead )
     return p_tlsHead;
 }
 
+//  Fetches the first _TLS structure associated with the specified TID.  Must Unfetch 
+//  when done. Optionally gives back the debuggee address of the first _TLS structure
+//  if desired.
 
 _TLS * P_tlsFetch( __in const ULONG ulTid, __out_opt _TLS ** pp_tlsDebuggee = NULL );
 _TLS * P_tlsFetch( __in const ULONG ulTid, __out_opt _TLS ** pp_tlsDebuggee )
@@ -10299,6 +11246,8 @@ _TLS * P_tlsFetch( __in const ULONG ulTid, __out_opt _TLS ** pp_tlsDebuggee )
     while ( p_tls )
     {
 
+        //  Is this the one we're looking for
+        //
 
         if ( p_tls->dwThreadId == ulTid )
         {
@@ -10309,6 +11258,8 @@ _TLS * P_tlsFetch( __in const ULONG ulTid, __out_opt _TLS ** pp_tlsDebuggee )
             return p_tls;
         }
 
+        //  Move to next TLS
+        //
 
         p_tlsDebuggee = p_tls->ptlsNext;
         Unfetch( p_tls );
@@ -10339,8 +11290,11 @@ void PrintThreadErr( DWORD ulTid )
         goto HandleError;
     }
 
+    //  Try to get the file information.
     FFetchSz( postls->m_efLastErr.SzFile(), &szFileLastErr );
 
+    //  print out thread error state
+    //
 
     EDBGPrintfDmlW( L"Located the TLS(<link cmd=\"dt %ws!_TLS 0x%N\">_TLS</link>,<link cmd=\"dt %ws!OSTLS 0x%N\">OSTLS</link>,<link cmd=\"dt %ws!TLS 0x%N\">TLS</link>) for TID 0x%x\n",
         WszUtilImageName(),
@@ -10440,10 +11394,10 @@ void TESTINJECTION::DumpLite( const ULONG iinj )
     {
         dprintf( "Probability : ID %u  =  Value = %5d,  Prob = %3u%% - %hs,  Hits / Evals = %I64d / %I64d,  Options = JET_bitInjectionProbabilityPct | %hs0x%x",
             m_ulID,
-            (LONGLONG)m_pv,
+            (LONGLONG)m_pv,  // note: Using Pv() will affect other member variable state.
             m_ulProb, SzFaultInjectionState( m_grbit, m_cEvals, m_ulProb, m_cHits ),
             m_cHits, m_cEvals,
-            fSuppressed ? "_JET_bitInjectionProbabilitySuppress_ | " : "",
+            fSuppressed ? "_JET_bitInjectionProbabilitySuppress_ | " : "",  // with underscores to emphasize it
             m_grbit & ~( JET_bitInjectionProbabilityPct | JET_bitInjectionProbabilitySuppress ) );
     }
     else if( m_grbit & JET_bitInjectionProbabilityCount )
@@ -10453,10 +11407,10 @@ void TESTINJECTION::DumpLite( const ULONG iinj )
 
         dprintf( "Count Down  : ID %u  =  Value = %5d, Count = %u/%u  - %hs,  Hits / Evals = %I64d / %I64d,  Options = JET_bitInjectionProbabilityCount | %hs%hs%hs0x%x",
             m_ulID,
-            (LONGLONG)m_pv,
+            (LONGLONG)m_pv,  // note: Using Pv() will affect other member variable state.
             m_cEvals, m_ulProb, SzFaultInjectionState( m_grbit, m_cEvals, m_ulProb, m_cHits ),
             m_cHits, m_cEvals,
-            fSuppressed ? "_JET_bitInjectionProbabilitySuppress_ | " : "",
+            fSuppressed ? "_JET_bitInjectionProbabilitySuppress_ | " : "",  // with underscores to emphasize it
             fProbPermanent ? "JET_bitInjectionProbabilityPermanent | " : "",
             fProbFailUntil ? "JET_bitInjectionProbabilityFailUntil | " : "",
             m_grbit & ~( JET_bitInjectionProbabilityCount | JET_bitInjectionProbabilitySuppress | JET_bitInjectionProbabilityCount | JET_bitInjectionProbabilityPermanent | JET_bitInjectionProbabilityFailUntil ) );
@@ -10468,9 +11422,11 @@ void TESTINJECTION::DumpLite( const ULONG iinj )
     dprintf( "\n" );
 }
 
+//  ================================================================
 DEBUG_EXT( EDBGThreadErr )
+//  ================================================================
 {
-    const DWORD ulTidAll            = 0xFFFFFFFF;
+    const DWORD ulTidAll            = 0xFFFFFFFF;   // signal to print all TIDs
     DWORD       ulTid               = 0;
     BOOL        fValidUsage         = fFalse;
 
@@ -10514,7 +11470,7 @@ DEBUG_EXT( EDBGThreadErr )
     {
         dprintf( "No TID retrieved, can't print thread error.\n" );
     }
-
+    
 #ifdef TEST_INJECTION
     TESTINJECTION rgTestInjections[g_cTestInjectionsMax];
     memset( rgTestInjections, 0, sizeof(rgTestInjections) );
@@ -10541,7 +11497,9 @@ DEBUG_EXT( EDBGThreadErr )
 
 
 
+//  ================================================================
 DEBUG_EXT( EDBGTid2PIB )
+//  ================================================================
 {
     ULONG       ulTid               = 0;
     BOOL        fFoundPIB           = fFalse;
@@ -10596,6 +11554,7 @@ DEBUG_EXT( EDBGTid2PIB )
                     return;
                 }
 
+                // Note this doesn't get the whole TLS, just the OS layer portion, but that is all we need.
                 _TLS* ptlsDebuggee = (_TLS*)ppib->ptlsTrxBeginLast;
 
                 if ( ptlsDebuggee )
@@ -10634,7 +11593,9 @@ DEBUG_EXT( EDBGTid2PIB )
     }
 }
 
+//  ================================================================
 DEBUG_EXT( EDBGTid2TLS )
+//  ================================================================
 {
     ULONG       ulTid               = 0;
     BOOL        fValidUsage         = fFalse;
@@ -10669,7 +11630,7 @@ DEBUG_EXT( EDBGTid2TLS )
             WszUtilImageName(),
             p_tlsDebuggee,
             p_tlsDebuggee );
-
+        
         EDBGPrintfDmlW( L"    OSTLS * = <link cmd=\"dt %ws!OSTLS 0x%p\">0x%p</link>\n",
             WszUtilImageName(),
             PostlsFromIntTLS( p_tlsDebuggee ),
@@ -10689,7 +11650,9 @@ DEBUG_EXT( EDBGTid2TLS )
 
 }
 
+//  ================================================================
 DEBUG_EXT( EDBGChecksum )
+//  ================================================================
 {
     BYTE *  rgbDebuggee;
     PGNO    pgno        = 0;
@@ -10822,6 +11785,7 @@ DEBUG_EXT( EDBGCopyFile )
         return;
     }
 
+    // a "." destination means dump to console
     HANDLE hFileDestination = INVALID_HANDLE_VALUE;
 
     if ( !fConsoleDump )
@@ -10844,7 +11808,7 @@ DEBUG_EXT( EDBGCopyFile )
 
 
 
-    const DWORD cbAlign = 4 * 1024;
+    const DWORD cbAlign = 4 * 1024; // UNDONE: should be disk sector alligned ...
     const DWORD cbBuffer = 16 * cbAlign;
 
     BYTE * rgBuffer = (BYTE *)VirtualAlloc( NULL, cbBuffer, MEM_COMMIT, PAGE_READWRITE);
@@ -10859,6 +11823,7 @@ DEBUG_EXT( EDBGCopyFile )
 
     DWORD cbRead;
 
+    // we start with the offset which we need but we align
     QWORD qwOffsetRead = rounddn( qwOffsetStart, cbAlign );
 
     BOOL fKeepReading = TRUE;
@@ -10874,6 +11839,11 @@ DEBUG_EXT( EDBGCopyFile )
         VirtualFree( rgBuffer, 0, MEM_RELEASE );
         return;
     }
+    //  This is required or the _debuggee_'s completion thread will get a completion packet for
+    //  this IO request with our / debugger's virtual addresses as the completion context, which 
+    //  will then cause it to (best case) crash when it tries to deref it.
+    //  Unknown: How is this handled if the file is opened and not registered for completion port 
+    //  completions like most (all?) of our files.
     overlapped.hEvent = HANDLE( (DWORD_PTR)overlapped.hEvent | hNoCPEvent );
 
     while ( fKeepReading )
@@ -10902,6 +11872,8 @@ DEBUG_EXT( EDBGCopyFile )
 
             if ( ERROR_HANDLE_EOF == gle )
             {
+                // we are ok but we should exit
+                // after processing the current data if any
                 fKeepReading = FALSE;
             }
             else if ( ERROR_SUCCESS != gle)
@@ -10917,6 +11889,7 @@ DEBUG_EXT( EDBGCopyFile )
             DWORD cbStart;
             DWORD cbStop;
 
+            // the offsets in the buffer which is data that we care
             if (qwOffsetRead < qwOffsetStart)
             {
                 cbStart = (DWORD)(qwOffsetStart - qwOffsetRead);
@@ -10937,8 +11910,10 @@ DEBUG_EXT( EDBGCopyFile )
 
             if (fConsoleDump)
             {
+                // display 16 bytes per row
                 const INT cBytesPerRow = 16;
 
+                // text to display the ASCII bytes into
                 char szText[cBytesPerRow + 1];
                 memset( szText, '\0', sizeof( szText ) );
 
@@ -10983,9 +11958,11 @@ DEBUG_EXT( EDBGCopyFile )
 
             }
 
+            // update the read pointer
             qwOffsetRead += (QWORD)cbRead;
         }
 
+            // check if we need to stop due to end of needed range (if present)
             if (fKeepReading && qwOffsetStop && qwOffsetRead >= qwOffsetStop)
             {
                 fKeepReading = FALSE;
@@ -11003,7 +11980,9 @@ DEBUG_EXT( EDBGCopyFile )
     return;
 }
 
+//  ================================================================
 DEBUG_EXT( EDBGDumpLinkedList )
+//  ================================================================
 {
     ULONG           ulOffset                = 0;
     ULONG           cDwordsToDisplay        = 8;
@@ -11021,9 +12000,11 @@ DEBUG_EXT( EDBGDumpLinkedList )
     {
         case 4:
             fValidUsage = ( fValidUsage && FUlFromSz( argv[3], &cMaxElements ) );
+            //  FALL THROUGH to validate rest of args
 
         case 3:
             fValidUsage = ( fValidUsage && FUlFromSz( argv[2], &cDwordsToDisplay ) );
+            //  FALL THROUGH to validate rest of args
 
         case 2:
             fValidUsage = ( fValidUsage
@@ -11050,6 +12031,10 @@ DEBUG_EXT( EDBGDumpLinkedList )
         return;
     }
 
+    //  for each element, we need to ensure we fetch enough
+    //  to read the next pointer and to display the requested
+    //  number of dwords
+    //
     cbToFetch = max( ulOffset + sizeof(VOID *), cDwordsToDisplay * sizeof(DWORD) );
     rgbBuf = (BYTE *)LocalAlloc( 0, cbToFetch );
     if ( NULL == rgbBuf )
@@ -11058,10 +12043,18 @@ DEBUG_EXT( EDBGDumpLinkedList )
         goto HandleError;
     }
 
+    //  cap maximum dwords to display per element
+    //  to ensure we don't dump too much
+    //
     cDwordsToDisplay = min( cDwordsToDisplay, cDwordsToDisplayMax );
 
+    //  cap maximum elements to traverse to ensure
+    //  we don't loop forever
+    //
     cMaxElements = min( cMaxElements, cMaxElementsAbsolute );
 
+    //  traverse linked list and dump each element
+    //
     while ( NULL != pbDebuggee
         && cElements < cMaxElements )
     {
@@ -11087,6 +12080,9 @@ DEBUG_EXT( EDBGDumpLinkedList )
 
         if ( pbDebuggee == *(BYTE **)( rgbBuf + ulOffset ) )
         {
+            //  SPECIAL-CASE: next pointer points back to this element
+            //  (we terminate some linked lists in this fashion)
+            //
             break;
         }
 
@@ -11106,7 +12102,9 @@ HandleError:
 }
 
 
+//  ================================================================
 DEBUG_EXT( EDBGDumpInvasiveList )
+//  ================================================================
 {
     ULONG           ulOffset                = 0;
     ULONG           cDwordsToDisplay        = 8;
@@ -11125,9 +12123,11 @@ DEBUG_EXT( EDBGDumpInvasiveList )
     {
         case 4:
             fValidUsage = ( fValidUsage && FUlFromSz( argv[3], &cMaxElements ) );
+            //  FALL THROUGH to validate rest of args
 
         case 3:
             fValidUsage = ( fValidUsage && FUlFromSz( argv[2], &cDwordsToDisplay ) );
+            //  FALL THROUGH to validate rest of args
 
         case 2:
             fFollowPrevPointer = ( '-' == argv[1][0] );
@@ -11156,6 +12156,10 @@ DEBUG_EXT( EDBGDumpInvasiveList )
         return;
     }
 
+    //  for each element, we need to ensure we fetch enough
+    //  to read the next pointer and to display the requested
+    //  number of dwords
+    //
     cbToFetch = max( ulOffset + sizeof(CInvasiveListEDBG::CElement), cDwordsToDisplay * sizeof(DWORD) );
     rgbBuf = (BYTE *)LocalAlloc( 0, cbToFetch );
     if ( NULL == rgbBuf )
@@ -11164,10 +12168,18 @@ DEBUG_EXT( EDBGDumpInvasiveList )
         goto HandleError;
     }
 
+    //  cap maximum dwords to display per element
+    //  to ensure we don't dump too much
+    //
     cDwordsToDisplay = min( cDwordsToDisplay, cDwordsToDisplayMax );
 
+    //  cap maximum elements to traverse to ensure
+    //  we don't loop forever
+    //
     cMaxElements = min( cMaxElements, cMaxElementsAbsolute );
 
+    //  traverse linked list and dump each element
+    //
     while ( NULL != pbDebuggee
         && cElements < cMaxElements )
     {
@@ -11195,11 +12207,11 @@ DEBUG_EXT( EDBGDumpInvasiveList )
                             rgbBuf
                             + ulOffset
                             + ( fFollowPrevPointer ?
-                                    0 :
-                                    sizeof(VOID *) ) );
+                                    0 :                 //  OffsetOf( CInvasiveList::CElement, m_pilePrev )
+                                    sizeof(VOID *) ) ); //  OffsetOf( CInvasiveList::CElement, m_pileNext )
 
-        if ( NULL == pbDebuggee
-            || (VOID *)-1 == pbDebuggee )
+        if ( NULL == pbDebuggee             //  should be impossible, but just in case
+            || (VOID *)-1 == pbDebuggee )   //  this element is not actually in an invasive list
         {
             break;
         }
@@ -11220,7 +12232,9 @@ HandleError:
 }
 
 
+//  ================================================================
 DEBUG_EXT( EDBGDumpLR )
+//  ================================================================
 {
     LR *    plrDebuggee     = NULL;
     BOOL    fValidUsage     = fTrue;
@@ -11255,6 +12269,7 @@ DEBUG_EXT( EDBGDumpLR )
 
     for ( ULONG crecs = 0; crecs < cMaxRecs; crecs++ )
     {
+        // skip over segment header
         if ( fSkipNewSegmentHeader &&
              (ULONG_PTR)plrDebuggee % LOG_SEGMENT_SIZE == 0 )
         {
@@ -11280,6 +12295,7 @@ DEBUG_EXT( EDBGDumpLR )
             plrDebuggee += sizeof( LGSEGHDR );
         }
 
+        //  get the fixed size of this log record
 
         LR lr( sizeof( LR ) );
         if ( !FReadVariable( plrDebuggee, &lr ) )
@@ -11289,6 +12305,7 @@ DEBUG_EXT( EDBGDumpLR )
         }
         const SIZE_T    cbLRFixed   = CbLGFixedSizeOfRec( &lr );
 
+        //  get the full size of this log record
 
         LR* plrFixed;
         if ( !FFetchVariable( (BYTE*)plrDebuggee, (BYTE**)&plrFixed, cbLRFixed ) )
@@ -11300,6 +12317,7 @@ DEBUG_EXT( EDBGDumpLR )
 
         Unfetch( (BYTE*)plrFixed );
 
+        //  get the full log record
 
         LR* plr;
         if ( !FFetchVariable( (BYTE*)plrDebuggee, (BYTE**)&plr, cbLR ) )
@@ -11310,6 +12328,8 @@ DEBUG_EXT( EDBGDumpLR )
 
         if ( lrtypNOP == plr->lrtyp )
         {
+            //  special handling for NOP's to collapse them all into one
+            //
             SIZE_T  cNOP;
             for ( cNOP = 1;
                   ( (ULONG_PTR)plrDebuggee + cNOP ) % LOG_SEGMENT_SIZE != 0 &&
@@ -11327,13 +12347,18 @@ DEBUG_EXT( EDBGDumpLR )
         }
         else
         {
+            //  dump the log record
 
             dprintf( "0x%N bytes @ 0x%N\n", cbLR, plrDebuggee );
 
+            // every other place to use LOG_REC_STRING_MAX, which is only 1024 right now.
             CHAR        szBuf[ 2048 ];
             LrToSz( plr, szBuf, sizeof(szBuf), NULL );
             dprintf( "%s\n", szBuf );
 
+            //  special-case: for ReplaceD, report
+            //  individual diffs
+            //
             if ( lrtypReplaceD == plr->lrtyp )
             {
                 LGDumpDiff( NULL, plr, CPRINTFWDBG::PcprintfInstance(), 1 );
@@ -11347,7 +12372,9 @@ DEBUG_EXT( EDBGDumpLR )
 }
 
 
+//  ================================================================
 DEBUG_EXT( EDBGDumpRESPointer )
+//  ================================================================
 {
     VOID *pv;
     FetchWrap<CResourceSection *>   pRS;
@@ -11452,7 +12479,7 @@ void FindRM( ULONG resid )
         dprintf( "The ResID is invalid\n" );
         return;
     }
-
+    
     EDBGPrintfDml(  "%s %i: <link cmd=\"dt CResourceManager 0x%N\">0x%N</link> \n",
                     "CResourceManager",
                     resid,
@@ -11460,10 +12487,13 @@ void FindRM( ULONG resid )
                     prmDebuggee );
 }
 
+//  ================================================================
 DEBUG_EXT( EDBGDumpRMResID )
+//  ================================================================
 {
     dprintf( "\n" );
-
+    
+    //  validate arg
     if ( 1 == argc )
     {
         ULONG resid = (ULONG) GetExpression( argv[0] );
@@ -11484,9 +12514,15 @@ DEBUG_EXT( EDBGDumpRMResID )
         return;
     }
 }
-
-
+ 
+/*CResourceChunkInfo.m_pvData
+    ------------------------------------------------------------
+    |m_cbSectionHeader|cbAlignedObject|cbAlignedObject|.........|
+    -------------------------------------------------------------
+*/
+//  ================================================================
 DEBUG_EXT( EDBGDumpRCIOutStandingResObjs )
+//  ================================================================
 {
         CResourceChunkInfo              *pv = NULL;
         FetchWrap<CResourceChunkInfo *> pRCI;
@@ -11518,7 +12554,7 @@ DEBUG_EXT( EDBGDumpRCIOutStandingResObjs )
             dprintf( "pv is invalid pointer to CResourceChunkInfo\n" );
             return;
         }
-
+        
         FCall( pRCI.FVariable( pv ),
             ( "Cannot find CResourceChunkInfo %N\n", pv ) );
 
@@ -11533,7 +12569,7 @@ DEBUG_EXT( EDBGDumpRCIOutStandingResObjs )
             dprintf( "All resource objects are freed\n" );
             return;
         }
-
+    
         FCall( pRS.FVariable( (CResourceSection *)( (DWORD_PTR)pRCI->m_pvData ) ),
             ( "Cannot find section %N\n", (DWORD_PTR)pRCI->m_pvData ) );
 
@@ -11553,16 +12589,17 @@ DEBUG_EXT( EDBGDumpRCIOutStandingResObjs )
         dprintf( "cbSectionHeader: %i\n", cbSectionHeader );
         dprintf( "cbRFOLOffset: %i\n", cbRFOLOffset );
         dprintf( "pvData: <0x%016X>\n", pRCI->m_pvData );
-
+        
 #ifdef RM_DEFERRED_FREE
         pRFO = pRCI->m_pRFOLHead;
-#else
+#else // RM_DEFERRED_FREE
         pRFO = pRCI->m_pRFOL;
-#endif
+#endif // !RM_DEFERRED_FREE
 
         rgfOutstanding = (BYTE *)LocalAlloc( LMEM_ZEROINIT, cObjectsPerChunk );
 
 
+        //Iterate the CResourceFreeObjectList to mark freed objects in the bitMap       
         INT i = 0;
         while( pRFO!= NULL )
         {
@@ -11600,20 +12637,22 @@ HandleError:
         return;
 }
 
+//  ================================================================
 DEBUG_EXT( EDBGDumpRMOutStandingResObjs )
+//  ================================================================
 {
         CResourceManager *              pv = NULL;
         FetchWrap<CResourceManager *>   pRM;
         CResourceChunkInfo*             pCurRCI = NULL;
         CResourceChunkInfo*             pRCI = NULL;
         ERR                             err = JET_errSuccess;
-
+        
         if ( 1 != argc || !FAddressFromSz( argv[ 0 ], &pv ) )
         {
             dprintf( "usage: DUMPRMOUTSTANDINGRESOBJECTS <RMAddress>\n" );
             return;
         }
-
+        
         if ( NULL == pv )
         {
             dprintf( "pv is invalid pointer to CResourceManager\n" );
@@ -11646,7 +12685,9 @@ DEBUG_EXT( EDBGDumpRMOutStandingResObjs )
             return;
 }
 
+//  ================================================================
 DEBUG_EXT( EDBGHash )
+//  ================================================================
 {
     ULONG   ifmp;
     ULONG   pgnoFDP;
@@ -11707,42 +12748,63 @@ DEBUG_EXT( EDBGHash )
         bookmark.data.SetPv( rgbData );
         bookmark.data.SetCb( cbData );
 
+        //  compute the hash value
+        //
         size_t crcehead = pver->m_crceheadHashTable;
         const ULONG ulVERChecksum = UiVERHash( IFMP( ifmp ), PGNO( pgnoFDP ), bookmark, crcehead );
         dprintf( "VER checksum is: %u (0x%08X)\n", ulVERChecksum, ulVERChecksum );
 
+        //  reload the VER structure, but this time include the hash table dangling off the end
+        //
         Unfetch( pver );
         pver = NULL;
         if ( FFetchVariable( (BYTE *)( pinst->m_pver ), (BYTE **)&pver, sizeof(VER) + ( VER::cbrcehead * crcehead ) ) )
         {
+            //  find the RCE chain corresponding to the hash value
+            //
             RCE * prceHead  = pver->GetChain( ulVERChecksum );
             dprintf( "Head of RCE hash chain: 0x%p\n", prceHead );
 
+            //  try to find a matching RCE
+            //
             RCE * prceDebuggee  = prceHead;
             while ( prceNil != prceDebuggee )
             {
+                //  first read in the RCE without any of the trailing data
+                //
                 if ( !FReadVariable( prceDebuggee, (RCE *)rgbRceBuffer ) )
                 {
                     dprintf( "Error: Couldn't read RCE at 0x%p from the debuggee.\n", prceDebuggee );
                     break;
                 }
 
+                //  retrieve the full size of the RCE
+                //
                 const INT cbFullRCE = ( (RCE *)rgbRceBuffer )->CbRceEDBG();
 
+                //  now that we can tell how much data follows the RCE,
+                //  fetch the full RCE
+                //
                 if ( !FFetchVariable( (BYTE *)prceDebuggee, (BYTE **)&prce, cbFullRCE ) )
                 {
                     dprintf( "Error: Couldn't fetch %d-byte RCE at 0x%p from the debuggee.\n", cbFullRCE, prceDebuggee );
                     break;
                 }
 
+                //  see if this RCE matches
+                //
                 if ( prce->FRCECorrectEDBG( IFMP( ifmp ), PGNO( pgnoFDP ), bookmark ) )
                 {
                     dprintf( "Matching RCE: 0x%p\n", prceDebuggee );
                     break;
                 }
 
+                //  not a match, so continue to the next entry in the overflow chain
+                //
                 prceDebuggee = prce->PrceHashOverflowEDBG();
 
+                //  free the current RCE
+                //
                 Unfetch( prce );
                 prce = NULL;
             }
@@ -11777,17 +12839,26 @@ LOCAL BOOL FEDBGLoadPage_(
     PBF         pbfBuf,
     ULONG *     pcbBuffer,
     const ULONG cbPage )
+//  ================================================================
 {
+    //  scan all valid BFs looking for this IFMP / PGNO
+    //
     for ( LONG_PTR ibf = 0; ibf < cbfCacheAddressable; ibf++ )
     {
+        //  compute the address of the target BF
+        //
         PBF pbfDebuggee = g_rgpbfChunk[ ibf / g_cbfChunk ] + ibf % g_cbfChunk;
 
+        //  we failed to read this BF
+        //
         if ( !FReadVariable( pbfDebuggee, pbfBuf ) )
         {
             dprintf( "Error: Could not read BF at 0x%N.\n", pbfDebuggee );
             return fFalse;
         }
 
+        //  see if this BF contains this IFMP / PGNO
+        //
         if ( pbfBuf->ifmp == IFMP( ifmp )
             && pbfBuf->pgno == PGNO( pgno )
             && pbfBuf->fCurrentVersion )
@@ -11809,11 +12880,13 @@ LOCAL BOOL FEDBGLoadPage_(
     return fFalse;
 }
 
+//  ================================================================
 LOCAL VOID EDBGSeek_(
     const IFMP  ifmp,
     const PGNO  pgnoRoot,
     BOOKMARK&   bm,
     const ULONG cbPage )
+//  ================================================================
 {
     CPAGE       cpage;
     INT         compare;
@@ -11845,12 +12918,17 @@ LOCAL VOID EDBGSeek_(
 
     cpage.LoadDehydratedPage( ifmp, pgnoRoot, rgbPageBuf, cbBuffer, cbPage );
 
+    //  now seek down the btree for the bookmark
+    //
     while ( !cpage.FLeafPage() )
     {
         iline = IlineNDISeekGEQInternal( cpage, bm, &compare );
 
         if ( 0 == compare )
         {
+            //  see ErrNDISeekInternalPage() for an
+            //  explanation of why we increment by 1 here
+            //
             iline++;
         }
 
@@ -11882,10 +12960,15 @@ LOCAL VOID EDBGSeek_(
         pgnoCurr = pgnoChild;
     }
 
+    //  find the first node in the leaf page that's
+    //  greater than or equal to the specified bookmark
+    //
     iline = IlineNDISeekGEQ( cpage, bm, !cpage.FNonUniqueKeys(), &compare );
     Assert( iline < cpage.Clines( ) );
     if ( iline < 0 )
     {
+        //  all nodes in page are less than key
+        //
         iline = cpage.Clines( ) - 1;
     }
 
@@ -11906,9 +12989,11 @@ HandleError:
     LocalFree( rgbPageBuf );
 }
 
+//  ================================================================
 DEBUG_EXT( EDBGSeek )
+//  ================================================================
 {
-    ULONG       ifmp                = 0;
+    ULONG       ifmp                = 0;        //  don't use ifmpNil because its type is IFMP
     ULONG       pgnoRoot            = pgnoNull;
     BYTE *      rgbPrefixDebuggee   = NULL;
     BYTE *      rgbPrefix           = NULL;
@@ -11938,6 +13023,7 @@ DEBUG_EXT( EDBGSeek )
                 fBadUsage = fTrue;
                 break;
             }
+            //  FALL THROUGH
         case 6:
             if ( !FAddressFromSz( argv[ 4 ], &rgbSuffixDebuggee )
                 || !FUlFromSz( argv[ 5 ], &cbSuffix ) )
@@ -11945,6 +13031,7 @@ DEBUG_EXT( EDBGSeek )
                 fBadUsage = fTrue;
                 break;
             }
+            //  FALL THROUGH
         case 4:
             if ( FAutoIfmpFromSz( argv[ 0 ], &ifmp )
                 && FAutoPgnoRootFromSz( argv[ 1 ], &pgnoRoot )
@@ -11953,6 +13040,7 @@ DEBUG_EXT( EDBGSeek )
             {
                 break;
             }
+            //  FALL THROUGH
         default:
             fBadUsage = fTrue;
     }
@@ -11984,6 +13072,8 @@ DEBUG_EXT( EDBGSeek )
         cbfCacheSize = cbfCacheSizeT;
         g_rgpbfChunk = rgpbfChunkT;
 
+        //  perform seek to bookmark
+        //
         BOOKMARK bm;
         bm.key.prefix.SetPv( rgbPrefix );
         bm.key.prefix.SetCb( cbPrefix );
@@ -12004,8 +13094,16 @@ DEBUG_EXT( EDBGSeek )
 }
 
 
+/*
+    =============================================
+    VERSTORE helper data structures and functions
+    =============================================
+*/
 
-
+// VERSTORE helper struct to combine a trxBegin0
+//  and a pgnoFDP into a single data structure for
+//  comparison purposes.
+//
 struct TrxBegin0AndPgnoFDP
 {
     TRX         trxBegin0;
@@ -12038,6 +13136,13 @@ struct TrxBegin0AndPgnoFDP
 };
 
 
+//  VERSTORE helper class to track version store usage
+//  by number of entries and by aggregate RCE size.
+//  This class is intended to be used as an abstract
+//  class, and derived classes will define the criteria
+//  by which version store usage will be tracked (e.g.
+//  unique pgnoFDP, unique trxBegin0, etc.).
+//
 class CVersionStoreUsage
 {
     ULONG       m_cEntries;
@@ -12060,6 +13165,11 @@ public:
 };
 
 
+//  VERSTORE helper function to add a entry to
+//  a red-black tree if the key does not already,
+//  exist or update the existing entry if it
+//  already exists.
+//
 template<class CKey>
 ERR ErrAddReference(
     CRedBlackTree<CKey, CVersionStoreUsage> * prbt,
@@ -12074,15 +13184,21 @@ ERR ErrAddReference(
 
     *pfEntryAdded = fFalse;
 
+    //  see if the key already exists
+    //
     const CRedBlackTreeNode<CKey, CVersionStoreUsage> * pnode = prbt->FindNode(key);
     if ( NULL != pnode )
     {
+        //  key already exists, so just update the entry.
+        //
         CVersionStoreUsage  vsusage = pnode->Data();
         vsusage.AddUsage( cbSize );
         const_cast<CRedBlackTreeNode<CKey, CVersionStoreUsage> *>(pnode)->SetData( vsusage );
     }
     else
     {
+        //  key does not yet exist, so add it now
+        //
         CVersionStoreUsage  vsusage( cbSize );
         CRedBlackTree<CKey, CVersionStoreUsage>::ERR errRBT = prbt->ErrInsert( key, vsusage );
         if ( CRedBlackTree<CKey, CVersionStoreUsage>::ERR::errSuccess == errRBT )
@@ -12095,6 +13211,9 @@ ERR ErrAddReference(
 }
 
 
+//  VERSTORE helper class, derived from CVersionStoreUsage
+//  to track version store usage for a single unique pgnoFDP.
+//
 class CPgnoFDPUsage : public CVersionStoreUsage
 {
     IFMPPGNO    m_ifmppgnoFDP;
@@ -12121,6 +13240,9 @@ public:
 };
 
 
+//  VERSTORE helper class, derived from CVersionStoreUsage
+//  to track version store usage for a single unique trxBegin0.
+//
 class CTrxBegin0Usage : public CVersionStoreUsage
 {
     TRX     m_trxBegin0;
@@ -12147,6 +13269,10 @@ public:
 };
 
 
+//  VERSTORE helper class, derived from CVersionStoreUsage
+//  to track version store usage for a signle unique
+//  trxBegin0+pgnoFDP.
+//
 class CTrxBegin0AndPgnoFDPUsage : public CVersionStoreUsage
 {
     TRX         m_trxBegin0;
@@ -12188,6 +13314,11 @@ public:
 };
 
 
+//  VERSTORE helper function to copy the contents of
+//  a node in a red-black tree to an array entry. It
+//  also calls itself recursively in order to process
+//  the child nodes of the current node.
+//
 template<class CEntry, class CKey>
 ERR ErrPopulateUsageArray(CArray<CEntry> * rgUsage, const CRedBlackTreeNode<CKey, CVersionStoreUsage> * const pnode)
 {
@@ -12215,6 +13346,11 @@ HandleError:
 }
 
 
+//  VERSTORE helper function to copy the contents of
+//  a red-black tree to an array. It's useful to copy
+//  the contents to an array because then the array
+//  can be sorted by various different criteria.
+//
 template<class CEntry, class CKey>
 ERR ErrPrepareUsageArray(
     CArray<CEntry> *    rgUsage,
@@ -12239,12 +13375,16 @@ ERR ErrPrepareUsageArray(
         dprintf( "Error 0x%x attempting to populate %s usage array with %d entries. Aborting.\n", err, szDesc, cEntries );
         goto HandleError;
     }
-
+    
 HandleError:
     return err;
 }
 
 
+// VERSTORE helper function to walk the global FCB list
+// hanging off INST and generate a red-black tree to
+// map pgnoFDP's to FCB's.
+//
 ERR ErrBuildPgnoFDPToFCBMap(
     CRedBlackTree<IFMPPGNO, FCB*> * prbtPgnoFDPToFCB,
     INST *  pinst )
@@ -12274,6 +13414,8 @@ ERR ErrBuildPgnoFDPToFCBMap(
         pfcbNil != pfcbDebuggee;
         pfcbDebuggee = pfcbNextInList )
     {
+        //  check main FCB
+        //
         if ( !FReadVariable( pfcbDebuggee, pfcb ) )
         {
             dprintf( "Error: Could not read table FCB at 0x%p. Aborting.\n", pfcbDebuggee );
@@ -12281,6 +13423,9 @@ ERR ErrBuildPgnoFDPToFCBMap(
             goto HandleError;
         }
 
+        //  pfcb variable will be re-used, so save
+        //  off pointer to next FCB in global list
+        //
         pfcbNextInList = pfcb->PfcbNextList();
         pfcbIndexes = pfcb->PfcbNextIndex();
 
@@ -12292,9 +13437,14 @@ ERR ErrBuildPgnoFDPToFCBMap(
             Error( ErrERRCheck( JET_errOutOfMemory ) );
         }
 
+        //  pfcb variable will be re-used, so save
+        //  off pointer to next FCB in global list
+        //
         pfcbNextInList = pfcb->PfcbNextList();
         pfcbIndexes = pfcb->PfcbNextIndex();
 
+        //  check possible LV FCB
+        //
         if ( NULL != pfcb->Ptdb() )
         {
             if ( !FReadVariable( pfcb->Ptdb(), ptdb ) )
@@ -12323,6 +13473,8 @@ ERR ErrBuildPgnoFDPToFCBMap(
             }
         }
 
+        //  check possible index FCB's
+        //
         for ( pfcbDebuggee = pfcbIndexes;
             pfcbNil != pfcbDebuggee;
             pfcbDebuggee = pfcb->PfcbNextIndex() )
@@ -12333,7 +13485,7 @@ ERR ErrBuildPgnoFDPToFCBMap(
                 err = ErrERRCheck( JET_errOutOfMemory );
                 goto HandleError;
             }
-
+            
             IFMPPGNO ifmppgnoFDPIndex( pfcb->Ifmp(), pfcb->PgnoFDP() );
             errRBT = prbtPgnoFDPToFCB->ErrInsert( ifmppgnoFDPIndex, pfcbDebuggee );
             if ( CRedBlackTree<IFMPPGNO, FCB*>::ERR::errSuccess != errRBT )
@@ -12352,6 +13504,9 @@ HandleError:
 }
 
 
+//  VERSTORE helper function to report additional meta-data for a
+//  btree given its ifmp and pgnoFDP
+//
 VOID ReportPgnoFDPInfo(const IFMPPGNO& ifmppgnoFDP, CRedBlackTree<IFMPPGNO, FCB*> * prbtPgnoFDPToFCB, const BOOL fRecovering )
 {
     FCB *       pfcbDebuggee        = pfcbNil;
@@ -12452,6 +13607,8 @@ HandleError:
 
 ERR ErrFetchLogStream( const INST * const pinst, _Outptr_ LOG_STREAM ** pplgstream )
 {
+    //  try to retrieve tip of the log
+    //
     LOG * plog = NULL;
 
     if ( NULL != pinst->m_plog && FFetchVariable( pinst->m_plog, &plog ) )
@@ -12602,6 +13759,7 @@ VOID PIB::DumpOpenTrxUserDetails( _In_ CPRINTF * const pcprintf, _In_ const DWOR
     if ( m_fUseSessionContextForTrxContext )
     {
         (*pcprintf)( "                    UserContext:   %Ix\n", dwTrxContext );
+        //  Currently (2013/02/024) I(SOMEONE) am only like 73% sure of this next assert.
         AssertEDBGSz( dwTrxContext == dwSessionContext, "When in a transaction the session and trx context is supposed to match ... right?" );
     }
     (*pcprintf)( "                          Level:   %d%hs", Level(), m_level ? " (>= 1 means open transaction)" : "" );
@@ -12656,9 +13814,11 @@ VOID PIB::DumpOpenTrxUserDetails( _In_ CPRINTF * const pcprintf, _In_ const DWOR
         AssertEDBGSz( fFalse, "Unexpected that this would fail, should have enough buffer.  Debug, or increase buffer." );
     }
 }
+    
 
-
+//  ================================================================
 DEBUG_EXT( EDBGVerStore )
+//  ================================================================
 {
     ERR         err                     = JET_errSuccess;
     INST *      pinstDebuggee           = NULL;
@@ -12704,6 +13864,8 @@ DEBUG_EXT( EDBGVerStore )
                     case 'P':
                         if ( fFilterByPgnoFDP || !FUlFromSz( argv[iarg] + 2, &pgnoFDPFilter ) )
                         {
+                            //  can't specify multiple pgnoFDP filters
+                            //
                             fBadUsage = fTrue;
                         }
                         else
@@ -12717,6 +13879,8 @@ DEBUG_EXT( EDBGVerStore )
                     case 'T':
                         if ( fFilterByTrxBegin0 || !FUlFromSz( argv[iarg] + 2, &trxBegin0Filter ) )
                         {
+                            //  can't specify multiple trxBegin0 filters
+                            //
                             fBadUsage = fTrue;
                         }
                         else
@@ -12730,6 +13894,8 @@ DEBUG_EXT( EDBGVerStore )
                     case 'O':
                         if ( fFilterByOper || !FUlFromSz( argv[iarg] + 2, (ULONG *)&operFilter ) )
                         {
+                            //  can't specify multiple oper filters
+                            //
                             fBadUsage = fTrue;
                         }
                         else
@@ -12743,6 +13909,8 @@ DEBUG_EXT( EDBGVerStore )
                     case 'U':
                         if ( fComputeTopUsage )
                         {
+                            //  can't specify top-usage flag multiple times
+                            //
                             fBadUsage = fTrue;
                         }
                         else
@@ -12756,6 +13924,8 @@ DEBUG_EXT( EDBGVerStore )
                     case 'D':
                         if ( fDumpMode )
                         {
+                            //  can't specify dump-mode flag multiple times
+                            //
                             fBadUsage = fTrue;
                         }
                         else
@@ -12769,6 +13939,8 @@ DEBUG_EXT( EDBGVerStore )
                     case 'S':
                         if ( fDumpStack )
                         {
+                            //  can't specify dump-mode flag multiple times
+                            //
                             fBadUsage = fTrue;
                         }
                         else
@@ -12829,8 +14001,15 @@ DEBUG_EXT( EDBGVerStore )
         SIZE_T              dwOffset;
         CResourceManager*   prm;
 
+        //  try to determine whether recovery is being run,
+        //  but don't fail if we couldn't fetch LOG (it's
+        //  not crucial because we're only fetching LOG to
+        //  be able to see if the instance is in recovery
+        //  in order to facilitate a bit of reporting).
+        //
         const BOOL          fRecovering     = ( NULL != pinst->m_plog && FFetchVariable( pinst->m_plog, &plog ) && plog->FRecovering() );
 
+        //  dump version store-related members of various structs
 
         dwOffset = (BYTE *)pinstDebuggee - (BYTE *)pinst;
         dprintf( "\n" );
@@ -12882,20 +14061,31 @@ DEBUG_EXT( EDBGVerStore )
         if ( NULL != ppibTrxOldest )
         {
             CHAR szStackDump[ 70 ];
+            //  try to retrieve tip of the log
+            //
             LONG lgenTip = 0;
             const ERR errT = ErrEDBGReadInstLgenTip( pinst, &lgenTip );
             AssertEDBG( errT == JET_errSuccess || lgenTip == 0 );
 
+            //  print basic user info
+            //
             dwOffset = (BYTE *)ppibTrxOldestDebuggee - (BYTE *)ppibTrxOldest;
             EDBGPrintfDmlW( L"OLDEST TRANSACTION: <link cmd=\"!ese dump PIB 0x%N\">0x%N</link>\n", ppibTrxOldestDebuggee, ppibTrxOldestDebuggee );
             ppibTrxOldest->DumpOpenTrxUserDetails( CPRINTFWDBG::PcprintfInstance(), dwOffset, lgenTip );
 
             if ( fDumpStack )
             {
+                //  now also dump the stack
+                //
                 DWORD_PTR tidTrxOldest = ppibTrxOldest->TidActive();
-                OSStrCbFormatA( szStackDump, sizeof( szStackDump ), "~~[0x%I64x]s; k; .loadby sos clr; !clrstack; ~~[0x%I64x]s",
-                    (ULONG64)tidTrxOldest,
-                    (ULONG64)Pdls()->TidCurrent()  );
+                //  NOTE: We're adding !clrstack even though it may not seem necessary because in some dynamic debug scenarios, it
+                //  does not seem to print out with k alone.
+                //  NOTE2: The .loadby sos clr is not needed on BE PROD machines, but is needed locally on really old debuggers
+                //  to see !clrstack.  But the .loadby doesn't seem to cause any harm to !clrstack to work, so leaving it in for
+                //  a while.
+                OSStrCbFormatA( szStackDump, sizeof( szStackDump ), "~~[0x%I64x]s; k; .loadby sos clr; !clrstack; ~~[0x%I64x]s", 
+                    (ULONG64)tidTrxOldest, 
+                    (ULONG64)Pdls()->TidCurrent() /* restores debuggers current thread */ );
                 dprintf( "                      Callstack: %hs\n", szStackDump );
                 const BOOL fT = FEDBGDebuggerExecute( szStackDump );
                 dprintf( "        Done( %hs )\n", fT ? "StackSuccess" : "StackFault" );
@@ -12963,7 +14153,7 @@ DEBUG_EXT( EDBGVerStore )
         const ULONG iSize                       = 1;
         const ULONG iCleanable                  = 0;
         const ULONG iUncleanable                = 1;
-        ULONG_PTR   cRCE[2][2]                  = { 0 };
+        ULONG_PTR   cRCE[2][2]                  = { 0 };    //  first dimension is entries/size, second dimension is cleanable/uncleanable
         ULONG_PTR   cRCEFlagDelete[2][2]        = { 0 };
         ULONG_PTR   cRCEDelta[2][2]             = { 0 };
         ULONG_PTR   cRCEInsert[2][2]            = { 0 };
@@ -13004,8 +14194,12 @@ DEBUG_EXT( EDBGVerStore )
                 break;
             }
 
+            //  determine whether bucket was pre-reserved or
+            //  dynamically allocated and increment appropriate
+            //  counter
             cBuckets++;
 
+            //  scan RCE's in this bucket
             const RCE *         prce            = (RCE *)pbucket->rgb;
             const RCE * const   prceNextNew     = (RCE *)( (BYTE *)pbucket->hdr.prceNextNew - (BYTE *)pbucketDebuggee + (BYTE *)pbucket );
             const BYTE * const  pbLastDelete    = pbucket->hdr.pbLastDelete - (BYTE *)pbucketDebuggee + (BYTE *)pbucket;
@@ -13020,21 +14214,34 @@ DEBUG_EXT( EDBGVerStore )
                     || ( fFilterByTrxBegin0 && prce->TrxBegin0() != trxBegin0Filter )
                     || ( fFilterByOper && prce->Oper() != operFilter ) )
                 {
+                    //  one or more filters were specified and this RCE doesn't
+                    //  meet the criteria, so skip to the next RCE
+                    //
                     goto NextRCE;
                 }
                 else
                 {
+                    //  either no filters are in effect or one or more filters are
+                    //  in effect and this RCE matches the criteria, so go ahead
+                    //  and process it
+                    //
                     if ( fDumpMode )
                     {
                         dprintf( "    0x%p\n", (BYTE *)prce - (BYTE *)pbucket + (BYTE *)pbucketDebuggee );
                     }
 
+                    //  increment total and size counters
                     cRCETotal++;
                     cbRCESizeTotal += cbRCE;
                     cbRCESizeMax = max( cbRCESizeMax, cbRCE );
 
+                    //  if top-usage stats were requested,
+                    //  track various aspects of the RCE
+                    //
                     if ( fComputeTopUsage )
                     {
+                        //  use a red-black tree to track RCE's by unique pgnoFDP
+                        //
                         IFMPPGNO    ifmppgnoFDP( prce->Ifmp(), prce->PgnoFDP() );
                         err = ErrAddReference<IFMPPGNO>( &rbtPgnoFDP, ifmppgnoFDP, cbRCE, &fEntryAdded );
                         if ( JET_errSuccess != err )
@@ -13047,6 +14254,8 @@ DEBUG_EXT( EDBGVerStore )
                             cUniquePgnoFDP++;
                         }
 
+                        //  use a red-black tree to track RCE's by unique trxBegin0
+                        //
                         err = ErrAddReference<TRX>( &rbtTrxBegin0, prce->TrxBegin0(), cbRCE, &fEntryAdded );
                         if ( JET_errSuccess != err )
                         {
@@ -13058,6 +14267,8 @@ DEBUG_EXT( EDBGVerStore )
                             cUniqueTrxBegin0++;
                         }
 
+                        //  use a red-black tree to track RCE's by unique trxBegin0+pgnoFDP
+                        //
                         TrxBegin0AndPgnoFDP trxBegin0AndPgnoFDP = { prce->TrxBegin0(), ifmppgnoFDP };
                         err = ErrAddReference<TrxBegin0AndPgnoFDP>( &rbtTrxBegin0AndPgnoFDP, trxBegin0AndPgnoFDP, cbRCE, &fEntryAdded );
                         if ( JET_errSuccess != err )
@@ -13072,24 +14283,29 @@ DEBUG_EXT( EDBGVerStore )
                     }
                 }
 
+                //  was RCE moved?
                 if ( prce->FMoved() )
                 {
                     cRCEMoved++;
                     cbRCEMoved += cbRCE;
                 }
 
+                //  was RCE created by proxy?
                 if ( prce->FProxy() )
                 {
                     cRCEProxy++;
                     cbRCEProxy += cbRCE;
                 }
 
+                //  was RCE rolled back?
                 if ( prce->FRolledBackEDBG() )
                 {
                     cRCERolledBack++;
                     cbRCERolledBack += cbRCE;
                 }
 
+                //  determine the state of the RCE and increment
+                //  appropriate counters
                 if ( prce->FOperNull() )
                 {
                     cRCENullified++;
@@ -13102,30 +14318,41 @@ DEBUG_EXT( EDBGVerStore )
                 }
                 else
                 {
+                    //  track the committed transaction with the oldest trxBegin0
+                    //
                     if ( TrxCmp( prce->TrxBegin0(), trxBegin0OfCommittedWithOldestBegin0 ) < 0 )
                     {
                         trxBegin0OfCommittedWithOldestBegin0 = prce->TrxBegin0();
                         trxCommit0OfCommittedWithOldestBegin0 = prce->TrxCommittedEDBG();
                     }
 
+                    //  track the committed transaction with the oldest trxCommit0
+                    //
                     if ( TrxCmp( prce->TrxCommittedEDBG(), trxCommit0OfCommittedWithOldestCommit0 ) < 0 )
                     {
                         trxBegin0OfCommittedWithOldestCommit0 = prce->TrxBegin0();
                         trxCommit0OfCommittedWithOldestCommit0 = prce->TrxCommittedEDBG();
                     }
 
+                    //  track the committed transaction with the newest trxBegin0
+                    //
                     if ( TrxCmp( prce->TrxBegin0(), trxBegin0OfCommittedWithNewestBegin0 ) > 0 )
                     {
                         trxBegin0OfCommittedWithNewestBegin0 = prce->TrxBegin0();
                         trxCommit0OfCommittedWithNewestBegin0 = prce->TrxCommittedEDBG();
                     }
 
+                    //  track the committed transaction with the newest trxCommit0
+                    //
                     if ( TrxCmp( prce->TrxCommittedEDBG(), trxCommit0OfCommittedWithNewestCommit0 ) > 0 )
                     {
                         trxBegin0OfCommittedWithNewestCommit0 = prce->TrxBegin0();
                         trxCommit0OfCommittedWithNewestCommit0 = prce->TrxCommittedEDBG();
                     }
 
+                    //  track the widest committed transaction (when computing the widest committed
+                    //  transaction, we need to be careful to handle trx wraparound)
+                    //
                     const ULONG dTrxWidth   = ( prce->TrxCommittedEDBG() > prce->TrxBegin0()
                         ? prce->TrxCommittedEDBG() - prce->TrxBegin0()
                         : prce->TrxCommittedEDBG() - (LONG)prce->TrxBegin0() );
@@ -13141,9 +14368,11 @@ DEBUG_EXT( EDBGVerStore )
                     {
                         cRCE[iEntries][iCleanable]++;
                         cRCE[iSize][iCleanable] += cbRCE;
-
+                    
                         switch ( prce->Oper() )
                         {
+                            //  these are expensive to clean
+                            //
                             case operFlagDelete:
                                 cRCEFlagDelete[iEntries][iCleanable]++;
                                 cRCEFlagDelete[iSize][iCleanable] += cbRCE;
@@ -13152,7 +14381,9 @@ DEBUG_EXT( EDBGVerStore )
                                 cRCEDelta[iEntries][iCleanable]++;
                                 cRCEDelta[iSize][iCleanable] += cbRCE;
                                 break;
-
+                    
+                            //  these are cheap to clean
+                            //
                             case operInsert:
                                 cRCEInsert[iEntries][iCleanable]++;
                                 cRCEInsert[iSize][iCleanable] += cbRCE;
@@ -13173,7 +14404,7 @@ DEBUG_EXT( EDBGVerStore )
                     {
                         cRCE[iEntries][iUncleanable]++;
                         cRCE[iSize][iUncleanable] += cbRCE;
-
+                    
                         switch ( prce->Oper() )
                         {
                             case operFlagDelete:
@@ -13203,6 +14434,8 @@ DEBUG_EXT( EDBGVerStore )
                 }
 
 NextRCE:
+                //  move to next RCE, being careful to account
+                //  for case where we are on the last moved RCE
                 if ( pbNextRce != pbLastDelete )
                 {
                     prce = (RCE *)pbNextRce;
@@ -13295,6 +14528,14 @@ NextRCE:
         {
                 dprintf( "Computing top usage statistics...\n" );
 
+                //  we have some unique pgnoFDP's, so if not recovering
+                //  (because FCB's are not fully hydrated with meta-data
+                //  during recovery), build pgnoFDP-to-FCB map with which
+                //  we'll be able to look up additional meta-data (such
+                //  as btree name and btree type) for reporting purposes
+                //  (NOTE: this can be time-consuming because it walks the
+                //  instance's entire FCB list)
+                //
                 if ( !fRecovering )
                 {
                     err = ErrBuildPgnoFDPToFCBMap( &rbtPgnoFDPToFCB, pinst );
@@ -13312,11 +14553,16 @@ NextRCE:
 
         const ULONG_PTR cTopUsage   = 20;
 
+        //  report top usage by unique pgnoFDP
+        //
         if ( cUniquePgnoFDP > 0 )
         {
             const ULONG_PTR         centriesToReport    = min( cUniquePgnoFDP, cTopUsage );
             CArray<CPgnoFDPUsage>   rgPgnoFDP;
 
+            //  copy the red-black tree containing the list
+            //  of unique pgnoFDP's to an array
+            //
             err = ErrPrepareUsageArray<CPgnoFDPUsage, IFMPPGNO>(
                 &rgPgnoFDP,
                 rbtPgnoFDP.PnodeRoot(),
@@ -13325,8 +14571,12 @@ NextRCE:
             if ( JET_errSuccess != err )
                 goto HandleError;
 
+            //  sort the array by descending number of RCE's
+            //
             rgPgnoFDP.Sort( CPgnoFDPUsage::CmpFrequency );
 
+            //  report top consumers
+            //
             dprintf( "\n" );
             dprintf( "Top %d PgnoFDP by Number of Entries (out of %d unique values):\n", centriesToReport, cUniquePgnoFDP );
             dprintf( "===================================================================\n" );
@@ -13346,6 +14596,8 @@ NextRCE:
             }
             dprintf( "\n\n" );
 
+            //  sort the array by descending aggregate RCE size
+            //
             rgPgnoFDP.Sort( CPgnoFDPUsage::CmpSize );
 
             dprintf( "Top %d PgnoFDP by Aggregate Size (out of %d unique values):\n", centriesToReport, cUniquePgnoFDP );
@@ -13353,6 +14605,8 @@ NextRCE:
             dprintf( "    Entries       Aggregate Size    Ifmp PgnoFDP       B-Tree Name                                 B-Tree Type    FCB*\n" );
             dprintf( "    ----------    --------------    ---- ----------    ----------------------------------------    -----------    ------------------\n" );
 
+            //  report top consumers
+            //
             for ( ULONG_PTR i = 0; i < centriesToReport; i++ )
             {
                 const CPgnoFDPUsage *   pentry  = rgPgnoFDP.PEntry( i );
@@ -13367,11 +14621,16 @@ NextRCE:
             dprintf( "\n\n" );
         }
 
+        //  report top usage by unique trxBegin0
+        //
         if ( cUniqueTrxBegin0 > 0 )
         {
             const ULONG_PTR         centriesToReport    = min( cUniqueTrxBegin0, cTopUsage );
             CArray<CTrxBegin0Usage> rgTrxBegin0;
 
+            //  copy the red-black tree containing the list
+            //  of unique trxBegin0's to an array
+            //
             err = ErrPrepareUsageArray<CTrxBegin0Usage, TRX>(
                 &rgTrxBegin0,
                 rbtTrxBegin0.PnodeRoot(),
@@ -13380,8 +14639,12 @@ NextRCE:
             if ( JET_errSuccess != err )
                 goto HandleError;
 
+            //  sort the array by descending number of RCE's
+            //
             rgTrxBegin0.Sort( CTrxBegin0Usage::CmpFrequency );
 
+            //  report top consumers
+            //
             dprintf( "Top %d TrxBegin0 by Number of Entries (out of %d unique values):\n", centriesToReport, cUniqueTrxBegin0 );
             dprintf( "=====================================================================\n" );
             dprintf( "    Entries       Aggregate Size    TrxBegin0\n" );
@@ -13398,8 +14661,12 @@ NextRCE:
             }
             dprintf( "\n\n" );
 
+            //  sort the array by descending aggregate RCE size
+            //
             rgTrxBegin0.Sort( CTrxBegin0Usage::CmpSize );
 
+            //  report top consumers
+            //
             dprintf( "Top %d TrxBegin0 by Aggregate Size (out of %d unique values):\n", centriesToReport, cUniqueTrxBegin0 );
             dprintf( "==================================================================\n" );
             dprintf( "    Entries       Aggregate Size    TrxBegin0\n" );
@@ -13417,11 +14684,16 @@ NextRCE:
             dprintf( "\n\n" );
         }
 
+        //  report top usage by unique trxBegin0+pgnoFDP
+        //
         if ( cUniqueTrxBegin0AndPgnoFDP > 0 )
         {
             const ULONG_PTR                     centriesToReport    = min( cUniqueTrxBegin0AndPgnoFDP, cTopUsage );
             CArray<CTrxBegin0AndPgnoFDPUsage>   rgTrxBegin0AndPgnoFDP;
 
+            //  copy the red-black tree containing the list
+            //  of unique trxBegin0+pgnoFDP entries to an array
+            //
             err = ErrPrepareUsageArray<CTrxBegin0AndPgnoFDPUsage, TrxBegin0AndPgnoFDP>(
                 &rgTrxBegin0AndPgnoFDP,
                 rbtTrxBegin0AndPgnoFDP.PnodeRoot(),
@@ -13430,8 +14702,12 @@ NextRCE:
             if ( JET_errSuccess != err )
                 goto HandleError;
 
+            //  sort the array by descending number of RCE's
+            //
             rgTrxBegin0AndPgnoFDP.Sort( CTrxBegin0AndPgnoFDPUsage::CmpFrequency );
 
+            //  report top consumers
+            //
             dprintf( "Top %d TrxBegin0+PgnoFDP by Number of Entries (out of %d unique values):\n", centriesToReport, cUniqueTrxBegin0AndPgnoFDP );
             dprintf( "=============================================================================\n" );
             dprintf( "    Entries       Aggregate Size    TrxBegin0     Ifmp PgnoFDP       B-Tree Name                                 B-Tree Type    FCB*\n" );
@@ -13451,8 +14727,12 @@ NextRCE:
             }
             dprintf( "\n\n" );
 
+            //  sort the array by descending aggregate RCE size
+            //
             rgTrxBegin0AndPgnoFDP.Sort( CTrxBegin0AndPgnoFDPUsage::CmpSize );
 
+            //  report top consumers
+            //
             dprintf( "Top %d TrxBegin0+PgnoFDP by Aggregate Size (out of %d unique values):\n", centriesToReport, cUniqueTrxBegin0AndPgnoFDP );
             dprintf( "==========================================================================\n" );
             dprintf( "    Entries       Aggregate Size    TrxBegin0     Ifmp PgnoFDP       B-Tree Name                                 B-Tree Type    FCB*\n" );
@@ -13488,7 +14768,9 @@ HandleError:
     Unfetch( pinst );
 }
 
+//  ================================================================
 VOID EDBGVerHashSum( INST * pinstDebuggee, BOOL fVerbose )
+//  ================================================================
 {
     INST *      pinst                   = NULL;
     VER *       pver                    = NULL;
@@ -13601,6 +14883,7 @@ VOID EDBGVerHashSum( INST * pinstDebuggee, BOOL fVerbose )
         else if ( errStats != CPerfectHistogramStats::ERR::errSuccess )
         {
             Pdls()->AddWarning( "WARNING: Could not add stat value during verhashsum.\n" );
+            //ErrERRCheck( JET_errInternalError );
             goto HandleError;
         }
 
@@ -13616,9 +14899,9 @@ VOID EDBGVerHashSum( INST * pinstDebuggee, BOOL fVerbose )
     dprintf( "  crcechainsNonNull = %d\n", crcechainsNonNull );
     dprintf( "  crcechainsEntries = %d\n", crcechainsEntries );
     dprintf( "  crces = %d\n", crces );
-
+    
     dprintf( "  histoChains:\n" );
-    IQPrintStats( &histoChains, UlongPrintVal , 0, 4, 0, true );
+    IQPrintStats( &histoChains, UlongPrintVal /* or DWORDPrintVal? */, 0, 4, 0, true );
     dprintf( "\n" );
 
 HandleError:
@@ -13628,7 +14911,9 @@ HandleError:
     Unfetch( pinst );
 }
 
+//  ================================================================
 DEBUG_EXT( EDBGVerHashSum )
+//  ================================================================
 {
     INST *      pinstDebuggee           = NULL;
 
@@ -13658,8 +14943,22 @@ DEBUG_EXT( EDBGVerHashSum )
 }
 
 
+//  ================================================================
 LOCAL VOID EDBGPrintResMemUsage( const CHAR * szBucketSpec, DWORD_PTR dwObjectsInUse, __int64 cbCommitted, __int64 cbUsed, DWORD_PTR dwObjectSize )
+//  ================================================================
 {
+    // All sizes take the form of this, which does a good job of showing big numbers, into the multi-GB range, and
+    // conveys small numbers, down to 1 KB granularity (below which is often not of interest).
+    //
+    //  Tables (FCB):
+    //    Objects in use:           0
+    //    MBs committed:       72.312
+    //    MBs used:            12.024   (ave=320 bytes)
+    //  Key buffers (RESKEY):
+    //    Objects in use:           0
+    //    MBs committed:        0.062
+    //    MBs used:             0.000   (ave=2016 bytes)
+    //
 
     const BOOL fOld = fFalse;
     if ( fOld )
@@ -13683,7 +14982,7 @@ LOCAL VOID EDBGPrintResMemUsage( const CHAR * szBucketSpec, DWORD_PTR dwObjectsI
         dprintf( "                                :   (count)       (MBs.KBs)       (MBs.KBs)  (bytes) \n" );
     }
     else
-    {
+    {        
         dprintf( "  %-30hs:  %7d  %10d.%03d  %10d.%03d   %d bytes\n",
                  szBucketSpec,
                  dwObjectsInUse,
@@ -13693,7 +14992,9 @@ LOCAL VOID EDBGPrintResMemUsage( const CHAR * szBucketSpec, DWORD_PTR dwObjectsI
     }
 }
 
+//  ================================================================
 LOCAL VOID EDBGPrintResMemUsage( const CHAR * szBucketSpec, JET_RESID resid, DWORD_PTR dwObjectsInUse )
+//  ================================================================
 {
     CResourceManager    *prm;
     FetchWrap<CResourceManager *> prmFetch;
@@ -13720,8 +15021,8 @@ ERR ErrSumTDB( FCB * const pfcbHead, ULONG_PTR * pcFCBsOnInsts, ULONG_PTR * pcTD
 {
     FCB * pfcbCurrDebuggee = pfcbHead;
 
-    BYTE rgbFcb[sizeof(FCB) + 8 ];
-    BYTE rgbTdb[sizeof(TDB) + 8 ];
+    BYTE rgbFcb[sizeof(FCB) + 8 /* to ensure no unaligned access issues, see rounding next */];     // no default .ctor, cheat ...
+    BYTE rgbTdb[sizeof(TDB) + 8 /* to ensure no unaligned access issues, see rounding next */];     // no default .ctor, cheat ...
     FCB * pfcbCurr = (FCB*)roundup( (__int64)rgbFcb, 8 );
     TDB * ptdbCurr = (TDB*)roundup( (__int64)rgbTdb, 8 );
 
@@ -13744,11 +15045,13 @@ ERR ErrSumTDB( FCB * const pfcbHead, ULONG_PTR * pcFCBsOnInsts, ULONG_PTR * pcTD
             (*pcbTDBMemPools) += ( ptdbCurr->MemPool().CbBufSize() );
         }
 
+        //  increment to next ...
         pfcbCurrDebuggee = pfcbCurr->PfcbNextList();
     }
 
     if ( pfcbCurr != NULL )
     {
+        //  something went wrong, we didn't exhaust the list
         return ErrERRCheck( JET_errOutOfMemory );
     }
 
@@ -13756,11 +15059,13 @@ ERR ErrSumTDB( FCB * const pfcbHead, ULONG_PTR * pcFCBsOnInsts, ULONG_PTR * pcTD
 }
 
 
+//  ================================================================
 LOCAL VOID EDBGUpdateFlushMapMemoryUsage(
     const CFlushMap* const pfm,
     DWORD* const pcbfmdReserved,
     DWORD* const pcbfmdCommitted,
     DWORD* const pcbfmAllocated )
+//  ================================================================
 {
     *pcbfmdReserved += pfm->m_cbfmdReserved;
     *pcbfmdCommitted += pfm->m_cbfmdCommitted;
@@ -13778,7 +15083,9 @@ LOCAL VOID EDBGUpdateFlushMapMemoryUsage(
 }
 
 
+//  ================================================================
 DEBUG_EXT( EDBGMemory )
+//  ================================================================
 {
     DWORD           cAllocHeapT;
     DWORD           cFreeHeapT;
@@ -13841,6 +15148,18 @@ DEBUG_EXT( EDBGMemory )
 
     dprintf( "Virtual Address Space Usage\n" );
     dprintf( "---------------------------\n" );
+    // All sizes take the form of this, which does a good job of showing big numbers, into the multi-GB range, and
+    // conveys small numbers, down to 1 KB granularity (below which is often not of interest).
+    //
+    //  Tables (FCB):
+    //    Objects in use:               0
+    //    MBs committed:           72.312
+    //    MBs used:                12.024   (ave=320 bytes)
+    //  Key buffers (RESKEY):
+    //    Objects in use:               0
+    //    MBs committed:            0.062
+    //    MBs used:                 0.000   (ave=2016 bytes)
+    //
     dprintf( " (All sizes in \"MBs.KBs\" - unless otherwise noted)\n" );
     dprintf( "\n" );
 
@@ -13849,6 +15168,8 @@ DEBUG_EXT( EDBGMemory )
     dprintf( "\n" );
 
 
+    //  break down virtual address space usage
+    //  into its major consumers
 
     ULONG_PTR   cFCBUsed                = 0;
     ULONG_PTR   cTDBUsed                = 0;
@@ -13862,6 +15183,8 @@ DEBUG_EXT( EDBGMemory )
     ULONG_PTR   cTDBsOnFCBs             = 0;
     ULONG_PTR   cbTDBMemPools           = 0;
 
+    //  sum up individual instance totals to
+    //  yield totals for the process
 
     for ( ULONG ipinst = 0; ipinst < Pdls()->Cinst(); ipinst++ )
     {
@@ -13901,6 +15224,7 @@ DEBUG_EXT( EDBGMemory )
         }
     }
 
+    //  sum up some buffer manager totals
 
     ICBPage icbPage = IcbBFIPageSize( (INT)CbEDBGILoadSYSMaxPageSize_() );
 
@@ -13921,6 +15245,7 @@ DEBUG_EXT( EDBGMemory )
         }
     }
 
+    //  flush map related memory
 
     DWORD cbfmdReserved = 0;
     DWORD cbfmdCommitted = 0;
@@ -13950,12 +15275,13 @@ DEBUG_EXT( EDBGMemory )
         }
         ifmpMac = ifmp;
 
+        //AssertEDBG( pfmp->Dbid() != dbidTemp ); // - not sure why anyone thought this would hold.
         if ( pfmp->Dbid() == dbidTemp )
         {
-            AssertEDBG( pfmp->PFlushMap() == NULL );
+            AssertEDBG( pfmp->PFlushMap() == NULL ); // - try this assert instead.
             continue;
         }
-
+        
 
         if ( pfmp->PFlushMap() != NULL )
         {
@@ -13994,6 +15320,7 @@ DEBUG_EXT( EDBGMemory )
     dprintf( "    Flush map pages:                      %17d KB\n", DwKBs( cbfmAllocated ) );
     dprintf( "\n" );
 
+    // Prints headers
     EDBGPrintResMemUsage( NULL, 0, 0, 0, 0 );
 
     EDBGPrintResMemUsage( "Version Store", JET_residVERBUCKET, cVERBucketsUsed );
@@ -14001,7 +15328,7 @@ DEBUG_EXT( EDBGMemory )
 
     EDBGPrintResMemUsage( "Tables (FCB)", JET_residFCB, cFCBUsed );
     EDBGPrintResMemUsage( "Tables (TDB)", JET_residTDB, cTDBUsed );
-    EDBGPrintResMemUsage( "TDB.MemPools", cTDBsOnFCBs, cbTDBMemPools, cbTDBMemPools, cTDBsOnFCBs ? ( cbTDBMemPools / cTDBsOnFCBs ) : 0  );
+    EDBGPrintResMemUsage( "TDB.MemPools", cTDBsOnFCBs, cbTDBMemPools, cbTDBMemPools, cTDBsOnFCBs ? ( cbTDBMemPools / cTDBsOnFCBs ) : 0  ); // faked for TDBs\MemPools
     EDBGPrintResMemUsage( "Indices (IDB)", JET_residIDB, cIDBUsed );
     EDBGPrintResMemUsage( "Sorts+Temp Tables (SCB)", JET_residSCB, cSortsUsed );
     EDBGPrintResMemUsage( "Cursors (FUCB)", JET_residFUCB, cCursorsUsed );
@@ -14053,7 +15380,24 @@ DEBUG_EXT( EDBGMemory )
 
 BOOL FRetrieveInstance( __in_opt const char * const szInstArg, INST ** ppinstDebuggee, INST ** ppinst, BOOL fPrintParseErrors = fTrue );
 
+//  ================================================================
 BOOL FRetrieveInstance( __in_opt const char * const szInstArg, INST ** ppinstDebuggee, INST ** ppinst, BOOL fPrintParseErrors )
+//  ================================================================
+//  This routine takes szInstArg and retrieves an acceptable instance.  If the szInstArg
+//  is a pointer to an instance, then this routine validates the pointer is actually an
+//  instance and retrieves the instance.  If szInstArg is NULL, the routine tries to find
+//  out if the target process has one and only one instance, and then returns that inst
+//  if so.
+//
+//  Caller will recieve a ppinst from the DLS INST cache and should not free the returned
+//  value.
+//
+//  returning fFalse means failure.  On failure pinstDebuggee may be set, but is not
+//  an allocated var, so doesn't matter.
+//
+//  Use fPrintParseErrors = false (default true) if caller is unsure this is an inst arg
+//  and wants to not print anything, except for very odd errors.
+//
 {
     AssertEDBG( ppinst );
     AssertEDBG( ppinstDebuggee );
@@ -14081,8 +15425,10 @@ BOOL FRetrieveInstance( __in_opt const char * const szInstArg, INST ** ppinstDeb
     {
         if ( Pdls()->PinstDebuggee( ipinst ) != pinstNil )
         {
+            // we have an intance ...
             if ( *ppinstDebuggee != NULL )
             {
+                // if user is interested in a specific instance, check if this is it ...
                 if ( Pdls()->PinstDebuggee( ipinst ) == *ppinstDebuggee )
                 {
                     ipinstTarget = ipinst;
@@ -14091,9 +15437,12 @@ BOOL FRetrieveInstance( __in_opt const char * const szInstArg, INST ** ppinstDeb
             }
             else
             {
+                // user wants only one instance 
                 if ( ipinstTarget == cMaxInstances )
                 {
+                    // no instance selected, selec this one ...
                     ipinstTarget = ipinst;
+                    // but continue to allow this to fail if there are two instances.
                 }
                 else
                 {
@@ -14107,8 +15456,10 @@ BOOL FRetrieveInstance( __in_opt const char * const szInstArg, INST ** ppinstDeb
 
     if ( *ppinstDebuggee == NULL )
     {
+        // User wants us to select the instance, but only if there is one and only one inst.
         if ( ipinstTarget == cMaxInstances )
         {
+            // unfortunately we couldn't find an instance, b/c ...
             if ( ipinst == cMaxInstances )
             {
                 dprintf( "Error selecting instance, no instances available.\n" );
@@ -14120,8 +15471,9 @@ BOOL FRetrieveInstance( __in_opt const char * const szInstArg, INST ** ppinstDeb
             return fFalse;
         }
 
+        // we found an single instance.
         *ppinstDebuggee = Pdls()->PinstDebuggee( ipinstTarget );
-
+        
     }
     else
     {
@@ -14129,6 +15481,7 @@ BOOL FRetrieveInstance( __in_opt const char * const szInstArg, INST ** ppinstDeb
 
     AssertEDBG( *ppinstDebuggee );
 
+    // User gave us a target inst...
     if ( ipinstTarget == cMaxInstances )
     {
         if ( fPrintParseErrors )
@@ -14138,16 +15491,20 @@ BOOL FRetrieveInstance( __in_opt const char * const szInstArg, INST ** ppinstDeb
         return fFalse;
     }
 
+    // we think we have an instance pointer the caller will be happy with ... can we actually read it ...
 
     if ( ( *ppinst = Pdls()->Pinst( ipinst ) ) == NULL )
     {
+        // should this be if fPrintParseErrors...?
         dprintf( "Error retrieving the instance 0x%N from debuggee\n", *ppinstDebuggee );
         return fFalse;
     }
     return fTrue;
 }
 
+//  ================================================================
 DEBUG_EXT( EDBGParam )
+//  ================================================================
 {
     size_t          cparam          = NULL;
 
@@ -14158,12 +15515,13 @@ DEBUG_EXT( EDBGParam )
     CJetParam *     rgparam         = NULL;
 
     ULONG           iParam          = 0;
-    INT             iParamGlobal    = 0;
+    INT             iParamGlobal    = 0;    // intentionally an int, not ULONG ...
 
-    BOOL            fPrintHelp      = fTrue;
+    BOOL            fPrintHelp      = fTrue; // set to false if command is successful.
 
     const char *    szParamTar      = NULL;
 
+    //  Get global information ...
     if ( !FAddressFromGlobal( "g_rgparam", &pjpDebuggeeGlobal ) ||
          !FFetchGlobalParamsArray( &rgparamGlobal, &cparam ) )
     {
@@ -14171,15 +15529,24 @@ DEBUG_EXT( EDBGParam )
         goto HandleError;
     }
 
+    //
+    //  Process the args, see we can retrieve all the appropriate information.
+    //
     if ( argc >= 1 )
     {
         INST * pinstDebuggee = NULL;
         INST * pinst = NULL;
-        INT iArgJetParamNames = 1;
+        INT iArgJetParamNames = 1; // assume 2nd arg, set it to 1st arg if 1st arg isn't an inst/rgparam.
 
+        //
+        //  Try to detect the arg specifying the param array to dump ...
+        //
+        // because I'm lazy in the debugger, there is a bit too much heuristic logic here.
+        //
         if ( ( 0 == _stricmp( argv[0], "global" ) ||
               0 == _stricmp( argv[0], "g_rgparam" ) ) )
         {
+            // They ask for the global params table ... 
             pjpDebuggee = pjpDebuggeeGlobal;
             rgparam = rgparamGlobal;
             dprintf( "\n" );
@@ -14188,6 +15555,7 @@ DEBUG_EXT( EDBGParam )
         }
         else if ( FRetrieveInstance( argv[0], &pinstDebuggee, &pinst, fFalse ) )
         {
+            // We think the first arg is an explicit instance pointer get its params ...
 
             pjpDebuggee = pinst->m_rgparam;
 
@@ -14206,6 +15574,7 @@ DEBUG_EXT( EDBGParam )
         }
         else if ( FAddressFromSz( argv[0], &pjpDebuggee ) )
         {
+            // We think the first arg is an rgparam pointer ...
             AssertEDBG( pjpDebuggee );
             if ( FFetchVariable( pjpDebuggee, &rgparam, cparam ) )
             {
@@ -14221,20 +15590,27 @@ DEBUG_EXT( EDBGParam )
         }
         else
         {
+            // The first arg wasn't and instance, assume it was a param name substring arg
             iArgJetParamNames = 0;
         }
 
+        //
+        // See if we have a substring arg for the params names we want to dump out ...
+        //
         if ( argc >= ( iArgJetParamNames + 1 ) )
         {
             szParamTar = argv[iArgJetParamNames];
         }
     }
 
+    // if no rgparam debuggee target at this point, then the arg for rgparam | inst was NULL, so 
+    // see if we can auto-select an instance.
     if ( NULL == pjpDebuggee )
     {
         INST * pinstDebuggee = NULL;
         INST * pinst = NULL;
 
+        // See if there is one, and exactly one instance, and if so, select it.
         if ( !FRetrieveInstance( NULL, &pinstDebuggee, &pinst ) )
         {
             dprintf( "No instance is active, you will have to pass a specific rgparam pointer to the param.\n" );
@@ -14258,8 +15634,10 @@ DEBUG_EXT( EDBGParam )
         }
     }
 
+    // if no param name substring was specified ...
     if ( szParamTar == NULL )
     {
+        // ... this will select / match all _valid_ JET params.
         szParamTar = "JET_param";
     }
 
@@ -14270,6 +15648,9 @@ DEBUG_EXT( EDBGParam )
         goto HandleError;
     }
 
+    //
+    //  Fetch the JET parameter names into the debugger.
+    //
     for ( iParam = 0; iParam < cparam; iParam++ )
     {
         if ( !FFetchSz( rgparamGlobal[iParam].m_szParamName, &(rgparamGlobal[iParam].m_szParamName) ) )
@@ -14280,10 +15661,14 @@ DEBUG_EXT( EDBGParam )
     }
     if ( iParam != cparam )
     {
+        // we failed prematurely to get all the string vars...
         dprintf( "Failed to fetch paramid %d into the debugger, you're on your own.\n", iParam );
         goto HandleError;
     }
 
+    //
+    //  Actually dump all the parameters from the selected parameter table.
+    //
     AssertEDBG( pjpDebuggee );
     AssertEDBG( rgparam );
     AssertEDBG( szParamTar );
@@ -14291,6 +15676,7 @@ DEBUG_EXT( EDBGParam )
     CJetParam::Config configLegacy = rgparam[JET_paramConfiguration].m_valueCurrent & JET_configDefault;
     if ( rgparam[JET_paramConfiguration].m_valueCurrent & ~JET_configDefault )
     {
+        //  if we do have any other config params, warn ...
         dprintf( "WARNING: We have non-base settings, so some of the below claimed defaults may be off!  config = 0x%x\n", rgparam[JET_paramConfiguration].m_valueCurrent );
     }
 
@@ -14300,13 +15686,16 @@ DEBUG_EXT( EDBGParam )
         {
             dprintf( "Uh oh!  The param index doesn't match the paramid!?!?  param table bug.\n" );
         }
-
+        
+        // Note: only the global has the m_szParamName filled in, so we check against the
+        // global array of rgparams.
         if ( !( szParamTar[0] == '*' && szParamTar[1] == '\0' ) &&
              0 == strhstr( rgparamGlobal[iParam].m_szParamName, szParamTar, fTrue ) )
         {
-            continue;
+            continue; // skip this param, doesn't match the hit.
         }
 
+        // if we print at least one param, then help is not needed.
         fPrintHelp = fFalse;
 
         CHAR * szSetSource = NULL;
@@ -14320,6 +15709,8 @@ DEBUG_EXT( EDBGParam )
         }
         else if ( rgparam[iParam].m_fWritten )
         {
+            // this means explicitly set by app (or possibly ESE) code ... as opposed
+            // to just the default value.
             szSetSource = "( fSet)";
         }
         else
@@ -14327,6 +15718,7 @@ DEBUG_EXT( EDBGParam )
             szSetSource = "(     )";
         }
 
+        // Note: only the global has the m_szParamName filled in.
         dprintf( "  [%3d]=%39s  %s ", iParam, rgparamGlobal[iParam].m_szParamName, szSetSource );
         switch ( rgparam[iParam].m_type )
         {
@@ -14347,7 +15739,7 @@ DEBUG_EXT( EDBGParam )
                     rgparam[iParam].m_valueDefault[configLegacy],
                     rgparam[iParam].m_rangeHigh );
                 break;
-
+                
             case JetParam::typeString:
             case JetParam::typeFolder:
             case JetParam::typePath:
@@ -14406,7 +15798,7 @@ HandleError:
     }
     if ( rgparamGlobal )
     {
-        for ( iParamGlobal-- ; iParamGlobal >= 0; iParamGlobal-- )
+        for ( iParamGlobal-- /* iParamGlobal is count, one too high */; iParamGlobal >= 0; iParamGlobal-- )
         {
             if ( rgparamGlobal[iParamGlobal].m_szParamName != NULL )
             {
@@ -14465,11 +15857,15 @@ LOCAL BOOL FEDBGParseDumpPageOptions(
         *pfDumpAllocMap = ( strpbrk( szOptions, "aA*" ) != NULL );
         *pfDumpBinary   = ( strpbrk( szOptions, "bB*" ) != NULL );
 
+        //  default to header dump if no other dumps specified
+        //
         if ( !(*pfDumpAllocMap) && !(*pfDumpBinary) && !(*pfDumpTags) )
             *pfDumpHeader = fTrue;
     }
     else
     {
+        //  no options specified, so default is to dump header
+        //
         *pfDumpHeader = fTrue;
     }
 
@@ -14518,6 +15914,11 @@ LOCAL BOOL FEDBGGetDbDiskPage(
         dprintf( "Error: Could not create event. Error %d (0x%x).\n", error, error );
         goto HandleError;
     }
+    //  This is required or the _debuggee_'s completion thread will get a completion packet for
+    //  this IO request with our / debugger's virtual addresses as the completion context, which 
+    //  will then cause it to (best case) crash when it tries to deref it.
+    //  Unknown: How is this handled if the file is opened and not registered for completion port 
+    //  completions like most (all?) of our files.
     overlapped.hEvent = HANDLE( (DWORD_PTR)overlapped.hEvent | hNoCPEvent );
 
     qwOffset.SetQw( QWORD( pgno + cpgDBReserved - 1 ) * cbPage );
@@ -14555,34 +15956,37 @@ HandleError:
 }
 
 
+//  ===================================
 VOID EDBGDumpRawData(
     CPRINTF *           pcprintf,
     const BYTE * const  pbData,
     const size_t        cbData,
     const BOOL          fShowAddress )
+//  ===================================
 {
     CHAR *              szBuf   = NULL;
     const size_t        cbWidth = 16;
-    const size_t        cbBuf   = ( cbData + cbWidth - 1 ) * 8;
-
+    const size_t        cbBuf   = ( cbData + cbWidth - 1 ) * 8; //  add some padding to cbData to ensure we can print last chunk
+    
+    // enough space to convert page into hex
     if ( ((~(size_t)0) / 8) > cbData)
     {
         szBuf = (CHAR *)LocalAlloc( 0, cbBuf );
     }
-
+    
     if ( szBuf )
     {
         DBUTLSprintHex( (CHAR * const)szBuf, cbBuf, pbData, cbData, cbWidth, 4, ( fShowAddress ? 8 : 0 ) );
-
+    
         CHAR *szNextToken = NULL;
-
+        
         for ( CHAR * szLine = strtok_s( (CHAR * const)szBuf, "\n", &szNextToken );
             NULL != szLine;
             szLine = strtok_s( NULL, "\n", &szNextToken ) )
         {
             (*pcprintf)( "%s\n", szLine );
         }
-
+    
         LocalFree( szBuf );
     }
     else
@@ -14646,7 +16050,9 @@ LOCAL VOID EDBGDumpPage(
 }
 
 
+//  ================================================================
 DEBUG_EXT( EDBGDumpDBDiskPage )
+//  ================================================================
 {
     ULONG       ifmp;
     PGNO        pgno;
@@ -14668,6 +16074,8 @@ DEBUG_EXT( EDBGDumpDBDiskPage )
         || !FAutoIfmpFromSz( argv[0], &ifmp )
         || !FUlFromSz( argv[1], &pgno ) )
     {
+        //  invalid usage
+        //
         dprintf( "Usage: DUMPDBDISKPAGE <ifmp|.> <pgno> [a|b|h|t|*|2|4|8|16|32]\n" );
         dprintf( "    <ifmp|.> is the index to the FMP entry for the desired database file\n" );
         dprintf( "    <pgno> is the desired page number from this FMP\n" );
@@ -14694,22 +16102,27 @@ DEBUG_EXT( EDBGDumpDBDiskPage )
         dprintf( "Error: Could not read global FMP variables for ifmp = %d.\n", ifmp );
         goto HandleError;
     }
-    else if ( pgno < 1 )
+    else if ( pgno < 1 )        //  UNDONE: don't currently support dumping page header
     {
         dprintf( "Error: Invalid pgno.\n" );
         goto HandleError;
     }
     if ( cbPage == 0 )
     {
+        //  Auto loading cbPage based upon ifmp.
         cbPage = Pdls()->CbPage( ifmp );
     }
 
+    //  UNDONE: currently assumes all databases are COSFile
+    //
     if ( !FFetchVariable( (COSFile *)( Pdls()->PfmpCache( ifmp ) )->Pfapi(), &posf ) )
     {
         dprintf( "Error: Could not read COSFile at 0x%N for specified FMP.\n", ( Pdls()->PfmpCache( ifmp ) )->Pfapi() );
         goto HandleError;
     }
 
+    //  VirtualAlloc() the buffer to ensure alignment
+    //
     pbPage = (BYTE *)VirtualAlloc( NULL, cbPage, MEM_COMMIT, PAGE_READWRITE );
     if ( NULL == pbPage )
     {
@@ -14738,7 +16151,7 @@ DEBUG_EXT( EDBGDumpDBDiskPage )
                 pbPage,
                 cbPage,
                 cbPage,
-                DWORD_PTR( QWORD( pgno + cpgDBReserved - 1 ) * cbPage - QWORD( pbPage ) ),
+                DWORD_PTR( QWORD( pgno + cpgDBReserved - 1 ) * cbPage - QWORD( pbPage ) ),  //  UNDONE: offsets may not get reported correctly if greater than 4Gb
                 fDumpHeader,
                 fDumpTags,
                 fDumpAllocMap,
@@ -14755,17 +16168,20 @@ HandleError:
 }
 
 
+//  ===================================
 BOOL FEDBGGetBufferInfoFromPv(
     _In_ const BYTE * const pvOffset,
     _Out_ size_t * const    pcbBuffer,
     _Out_ IFMP * const      pifmp,
     _Out_ PGNO * const      ppgno,
     _Out_ size_t * const    pcbPage )
+//  ===================================
 {
     ERR                 err                 = JET_errSuccess;
 
     Call( Pdls()->ErrBFInitCacheMap() );
 
+    //  Init out param
 
     if ( pifmp )
     {
@@ -14775,19 +16191,23 @@ BOOL FEDBGGetBufferInfoFromPv(
     *ppgno = 0;
     *pcbPage = 0;
 
+    //  Try to find a BF w/ the right ->pv element
 
     IPG ipg = Pdls()->IpgBFCachePv( pvOffset );
 
     if ( ipgNil != ipg )
     {
 
+        // map to PBF from ipg (which is also a ibf)
 
         PBF pbfDebuggee = Pdls()->PbfBFCacheIbf( (IBF)ipg );
 
+        // process results
 
         PBF pbf = NULL;
         if ( !FFetchVariable( pbfDebuggee, &pbf ) )
         {
+            //  we failed to read this BF
             dprintf( "Error: Could not read BF at 0x%N. Aborting.\n", pbfDebuggee );
             goto HandleError;
         }
@@ -14823,6 +16243,7 @@ HandleError:
 }
 
 
+//  =========================================
 ERR ErrEDBGFetchPage(
     _In_ BYTE * const       rgbPageDebuggee,
     _Out_ IFMP * const      pifmp,
@@ -14830,6 +16251,7 @@ ERR ErrEDBGFetchPage(
     _Inout_ size_t * const  pcbPage,
     _Out_ BYTE ** const     prgbPage,
     _Out_ size_t * const    pcbBuffer )
+//  =========================================
 {
     AssertEDBG( NULL != rgbPageDebuggee );
     AssertEDBG( NULL != ppgno );
@@ -14885,7 +16307,9 @@ HandleError:
 }
 
 
+//  ================================================================
 DEBUG_EXT( EDBGDecompress )
+//  ================================================================
 {
     ERR             err                 = JET_errSuccess;
     BYTE *          pbDebuggee          = NULL;
@@ -14897,10 +16321,14 @@ DEBUG_EXT( EDBGDecompress )
 
     dprintf( "\n" );
 
+    //  validate args
+    //
     if ( argc != 2
         || !FAddressFromSz( argv[0], &pbDebuggee )
         || !FUlFromSz( argv[1], (ULONG *)&cbToDecompress ) )
     {
+        //  invalid usage
+        //
         dprintf( "Usage: DECOMPRESS <pb> <cb>\n" );
         dprintf( "    <pb> is the address of the byte stream to decompress\n" );
         dprintf( "    <cb> is the size of the byte stream to decompress\n" );
@@ -14908,6 +16336,8 @@ DEBUG_EXT( EDBGDecompress )
         goto HandleError;
     }
 
+    //  retrieve the compressed byte stream
+    //
     if ( !FFetchVariable( pbDebuggee, (BYTE**)&pbToDecompress, cbToDecompress ) )
     {
         dprintf( "Error: Could not fetch the byte stream to decompress.\n" );
@@ -14917,6 +16347,8 @@ DEBUG_EXT( EDBGDecompress )
     dataToDecompress.SetPv( pbToDecompress );
     dataToDecompress.SetCb( cbToDecompress );
 
+    //  Get the size needed and allocate buffer
+    //
     (void)ErrPKDecompressData( dataToDecompress, NULL, NULL, 0, (INT *)&cbDecompressed );
     pbDecompressed = new BYTE[cbDecompressed];
     if ( NULL == pbDecompressed )
@@ -14926,6 +16358,8 @@ DEBUG_EXT( EDBGDecompress )
         goto HandleError;
     }
 
+    //  decompress the byte stream
+    //
     err = ErrPKDecompressData( dataToDecompress, NULL, pbDecompressed, cbDecompressed, (INT *)&cbDecompressed );
     if ( JET_errSuccess != err )
     {
@@ -14933,16 +16367,20 @@ DEBUG_EXT( EDBGDecompress )
         goto HandleError;
     }
 
+    //  dump the decompressed byte stream
+    //
     dprintf( "%d (0x%x) bytes at 0x%p decompressed to %d (0x%x) bytes:\n\n", cbToDecompress, cbToDecompress, pbDebuggee, cbDecompressed, cbDecompressed );
     EDBGDumpRawData( CPRINTFWDBG::PcprintfInstance(), pbDecompressed, cbDecompressed, fFalse );
-
+    
 HandleError:
     delete[] pbDecompressed;
     Unfetch( pbToDecompress );
     dprintf( "\n" );
 }
 
+//  ================================================================
 DEBUG_EXT( EDBGDecrypt )
+//  ================================================================
 {
     ERR             err                 = JET_errSuccess;
     BYTE *          pbBufferDebuggee    = NULL;
@@ -14960,12 +16398,16 @@ DEBUG_EXT( EDBGDecrypt )
 
     dprintf( "\n" );
 
+    //  validate args
+    //
     if ( ( argc != 4 && argc != 5 )
         || !FAddressFromSz( argv[0], &pbBufferDebuggee )
         || !FUlFromSz( argv[1], &cbBuffer )
         || !FAddressFromSz( argv[2], &pbKeyDebuggee )
         || !FUlFromSz( argv[3], &cbKey ) )
     {
+        //  invalid usage
+        //
         dprintf( "Usage: DECRYPT <pbBuffer> <cbBuffer> <pbKey> <cbKey> [d]\n" );
         dprintf( "    <pbBuffer> is the address of the byte stream to decrypt (and optionally decompress)\n" );
         dprintf( "    <cbBuffer> is the size of the byte stream to decrypt (and optionally decompress)\n" );
@@ -14977,6 +16419,8 @@ DEBUG_EXT( EDBGDecrypt )
     }
     fDecompress = ( argc == 5 );
 
+    //  retrieve the original byte stream
+    //
     if ( !FFetchVariable( pbBufferDebuggee, &pbBuffer, cbBuffer ) ||
          !FFetchVariable( pbKeyDebuggee, &pbKey, cbKey ) )
     {
@@ -14985,6 +16429,8 @@ DEBUG_EXT( EDBGDecrypt )
         goto HandleError;
     }
 
+    //  allocate a buffer to hold the decrypted byte stream
+    //
     cbDecrypted = cbBuffer;
     pbDecrypted = new BYTE[cbDecrypted];
     if ( NULL == pbDecrypted )
@@ -15011,6 +16457,8 @@ DEBUG_EXT( EDBGDecrypt )
 
     if ( fDecompress )
     {
+        //  Get the size needed and allocate buffer
+        //
         (void)ErrPKDecompressData( data, NULL, NULL, 0, (INT *)&cbDecompressed );
         pbDecompressed = new BYTE[cbDecompressed];
         if ( NULL == pbDecompressed )
@@ -15020,6 +16468,8 @@ DEBUG_EXT( EDBGDecrypt )
             goto HandleError;
         }
 
+        //  decompress the byte stream
+        //
         err = ErrPKDecompressData( data, NULL, pbDecompressed, cbDecompressed, (INT *)&cbDecompressed );
         if ( JET_errSuccess != err )
         {
@@ -15031,9 +16481,11 @@ DEBUG_EXT( EDBGDecrypt )
         data.SetCb( cbDecompressed );
     }
 
+    //  dump the decompressed byte stream
+    //
     dprintf( "%d (0x%x) bytes at 0x%p decrypted/decompressed to %d (0x%x) bytes:\n\n", cbBuffer, cbBuffer, pbBufferDebuggee, data.Cb(), data.Cb() );
     EDBGDumpRawData( CPRINTFWDBG::PcprintfInstance(), (BYTE*)data.Pv(), data.Cb(), fFalse );
-
+    
 HandleError:
     delete[] pbDecompressed;
     delete[] pbDecrypted;
@@ -15043,7 +16495,9 @@ HandleError:
 }
 
 
+//  ================================================================
 LOCAL VOID EDBGDumpNodeInfo( CPRINTF * pcprintf, const CPAGE * const pcpage, const INT iline, const BOOL fKeyOnly, const BOOL fVerbose, DWORD_PTR dwOffset )
+//  ================================================================
 {
     KEYDATAFLAGS        kdf;
     BYTE *              rgbPrefix           = NULL;
@@ -15061,6 +16515,8 @@ LOCAL VOID EDBGDumpNodeInfo( CPRINTF * pcprintf, const CPAGE * const pcpage, con
 
     NDIGetKeydataflags( *pcpage, iline, &kdf );
 
+    //  fetch and dump prefix, if any
+    //
     if ( kdf.key.prefix.Cb() > 0 )
     {
         if ( FFetchVariable( (BYTE *)kdf.key.prefix.Pv() + dwOffset, &rgbPrefix, kdf.key.prefix.Cb() ) )
@@ -15078,6 +16534,8 @@ LOCAL VOID EDBGDumpNodeInfo( CPRINTF * pcprintf, const CPAGE * const pcpage, con
         (*pcprintf)( _T( "Prefix: <null>\n" ) );
     }
 
+    //  fetch and dump suffix, if any
+    //
     if ( kdf.key.suffix.Cb() > 0 )
     {
         if ( FFetchVariable( (BYTE *)kdf.key.suffix.Pv() + dwOffset, &rgbSuffix, kdf.key.suffix.Cb() ) )
@@ -15095,6 +16553,9 @@ LOCAL VOID EDBGDumpNodeInfo( CPRINTF * pcprintf, const CPAGE * const pcpage, con
         (*pcprintf)( _T( "Suffix: <null>\n" ) );
     }
 
+    //  only fetch data if not performing key-only dump,
+    //  or if raw data was explicitly requested
+    //
     if ( !fKeyOnly || fDumpRawData )
     {
         if ( kdf.data.Cb() > 0 )
@@ -15112,6 +16573,9 @@ LOCAL VOID EDBGDumpNodeInfo( CPRINTF * pcprintf, const CPAGE * const pcpage, con
         }
     }
 
+    //  dump formatted node data if not performing
+    //  key-only dump
+    //
     if ( !fKeyOnly )
     {
         if ( !pcpage->FLeafPage() )
@@ -15158,12 +16622,12 @@ LOCAL VOID EDBGDumpNodeInfo( CPRINTF * pcprintf, const CPAGE * const pcpage, con
         }
         else
         {
-            SaveDlsDefaults sdd;
+            SaveDlsDefaults sdd; // saves here, and then restores the implicit defaults on .dtor.
 
             FCB * pfcbTable = pfcbNil;
             BYTE rgbFucbBuffer[ sizeof( FUCB ) + 16 ];
             memset( rgbFucbBuffer, 0, sizeof( rgbFucbBuffer ) );
-            FUCB * pfucbSchemaOnly = (FUCB*)roundup( (ULONG_PTR)rgbFucbBuffer, 8 );
+            FUCB * pfucbSchemaOnly = (FUCB*)roundup( (ULONG_PTR)rgbFucbBuffer, 8 ); // probably aligned, but just in case.
             if ( Pdls()->ObjidCurrentBt() != pcpage->ObjidFDP() )
             {
                 FCB * pfcbTableDebuggee = pfcbNil;
@@ -15178,6 +16642,9 @@ LOCAL VOID EDBGDumpNodeInfo( CPRINTF * pcprintf, const CPAGE * const pcpage, con
                 (void)FEDBGFetchTableMetaData( Pdls()->PfcbCurrentTableDebuggee(), &pfcbTable );
 
                 pfucbSchemaOnly->u.pfcb = pfcbTable;
+                // Don't seem to need any csr elements loaded at the moment.
+                //pfucbSchemaOnly->csr.ErrLoadPage( ppibNil, ifmpNil, pgno, pcpage->PvBuffer(), Pdls()->CbPage(), latchNone );
+                //pfucbSchemaOnly->csr.SetILine( iline );
             }
             if ( !pfcbTable )
             {
@@ -15186,12 +16653,16 @@ LOCAL VOID EDBGDumpNodeInfo( CPRINTF * pcprintf, const CPAGE * const pcpage, con
 
             (*pcprintf)( _T( "Data Record (%d bytes):\n"), kdf.data.Cb() );
 
+            // Note: pfcbTable ? pfucbSchemaOnly : NULL is _correct_.  We are just using the pfucbSchemaOnly to 
+            // pass the FCB really, as that's what DBUTLDumpRec() expects.
             DBUTLDumpRec( Pdls()->CbPage(), pfcbTable ? pfucbSchemaOnly : NULL, rgbData, kdf.data.Cb(), pcprintf, 16 );
 
             Unfetch( pfcbTable );
         }
     }
 
+    //  dump raw node data if requested
+    //
     if ( fDumpRawData )
     {
         (*pcprintf)( _T( "Raw Data (%d bytes):\n"), kdf.data.Cb() );
@@ -15206,9 +16677,11 @@ HandleError:
 }
 
 
+//  ================================================================
 DEBUG_EXT( EDBGDumpNode )
+//  ================================================================
 {
-    SaveDlsDefaults sdd;
+    SaveDlsDefaults sdd; // saves here, and then restores the implicit defaults on .dtor.
 
     ERR             err             = JET_errSuccess;
     const CHAR *    pchPageSize     = NULL;
@@ -15231,6 +16704,8 @@ DEBUG_EXT( EDBGDumpNode )
         || !FAddressFromSz( argv[0], &rgbPageDebuggee )
         || (!(fAllNodes = ('*' == argv[1][0])) && !FUlFromSz( argv[1], (ULONG *)&iline ) ) )
     {
+        //  invalid usage
+        //
         dprintf( "Usage: DUMPNODE <pvPage> <iLine> [k|v|2|4|8|16|32]\n" );
         dprintf( "    <pvPage> is the address of the database page\n" );
         dprintf( "    <iLine> is the iLine (NOT itag) of the desired node, or * for all nodes\n" );
@@ -15239,6 +16714,8 @@ DEBUG_EXT( EDBGDumpNode )
         goto HandleError;
     }
 
+    //  parse options, if provided
+    //
     if ( argc > 2 )
     {
         pchPageSize = (CHAR *)strpbrk( argv[2], "12348" );
@@ -15246,6 +16723,8 @@ DEBUG_EXT( EDBGDumpNode )
         fVerbose = ( strpbrk( argv[2], "vV" ) != NULL );
     }
 
+    //  validate page size option, if provided
+    //
     if ( !FEDBGParsePageSizeOption( pchPageSize, &cbPageUser ) )
     {
         dprintf( "ERROR: Did not understand user page option.\n" );
@@ -15253,6 +16732,9 @@ DEBUG_EXT( EDBGDumpNode )
         goto HandleError;
     }
 
+    //  if this is a cached page, retrieve relevant info from BF cache (ifmp, page size, and buffer size) and
+    //  no matter what, get the page buffer itself.
+    //
     IFMP ifmp = 0;
     size_t cbPageAuto = cbPageUser;
     Call( ErrEDBGFetchPage( rgbPageDebuggee, &ifmp, &pgno, &cbPageAuto, &rgbPage, &cbBuffer ) );
@@ -15276,7 +16758,7 @@ DEBUG_EXT( EDBGDumpNode )
     EDBGDeprecatedSetGlobalPageSize( cbPage );
 
     dprintf( "\n" );
-
+    
     dwOffset = rgbPageDebuggee - rgbPage;
 
     if ( fAllNodes )
@@ -15288,6 +16770,8 @@ DEBUG_EXT( EDBGDumpNode )
     }
     else if (iline < 0 || iline > cpage.Clines())
     {
+        //  TODO: can't dump external header
+        //
         dprintf("Error: iLine %d is out-of-range for the specified page.\n", iline);
         err = ErrEDBGCheck( JET_errInvalidParameter );
         goto HandleError;
@@ -15303,7 +16787,9 @@ HandleError:
 }
 
 
+//  ================================================================
 DEBUG_EXT( EDBGHelpDump )
+//  ================================================================
 {
     INT icdumpmap;
     for( icdumpmap = 0; icdumpmap < ccdumpmap; icdumpmap++ )
@@ -15314,7 +16800,9 @@ DEBUG_EXT( EDBGHelpDump )
 }
 
 
+//  ================================================================
 DEBUG_EXT( EDBGDump )
+//  ================================================================
 {
     if( argc < 2 )
     {
@@ -15337,11 +16825,13 @@ DEBUG_EXT( EDBGDump )
 }
 
 
+//  ================================================================
 template< class _STRUCT>
 VOID CDUMPA<_STRUCT>::Dump(
     PDEBUG_CLIENT pdebugClient,
     INT argc, const CHAR * const argv[]
     ) const
+//  ================================================================
 {
     _STRUCT* ptDebuggee = NULL;
     if (    argc != 1 ||
@@ -15363,10 +16853,12 @@ VOID CDUMPA<_STRUCT>::Dump(
 }
 
 
+//  ================================================================
 VOID CDUMPA<CPAGE>::Dump(
     PDEBUG_CLIENT pdebugClient,
     INT argc, const CHAR * const argv[]
     ) const
+//  ================================================================
 {
     ERR     err             = JET_errSuccess;
     PGNO    pgno;
@@ -15387,6 +16879,8 @@ VOID CDUMPA<CPAGE>::Dump(
         || argc > 3
         || !FUlFromSz( argv[0], &pgno ) )
     {
+        //  invalid usage
+        //
         dprintf( "Usage: DUMP PAGE <pgno> <address> [a|b|h|t|*|2|4|8|16|32]\n" );
         dprintf( "    <pgno> is the page number (required for checksumming purposes only)\n" );
         dprintf( "    <address|.> is the pointer to the memory buffer containing the page contents\n" );
@@ -15415,6 +16909,7 @@ VOID CDUMPA<CPAGE>::Dump(
         const IFMP ifmpImplicit = Pdls()->IfmpCurrent();
         if ( cbPage == 0 )
         {
+            //  Auto loading cbPage based upon ifmp.
             cbPage = Pdls()->CbPage( ifmpImplicit );
         }
 
@@ -15427,23 +16922,25 @@ VOID CDUMPA<CPAGE>::Dump(
         CHAR * rgszGetIfmpPage [] = { "ifmp", "==", szIfmp, "&&", "pgno", "==", szPgnoDec, "&&", "fCurrentVersion", "==", "fTrue", "accum:pv" };
         CHAR * rgszGetPage []     =                             { "pgno", "==", szPgnoDec, "&&", "fCurrentVersion", "==", "fTrue", "accum:pv" };
 
-        Call( ErrIQCreateIterQueryCount( &g_iedBf,
+        Call( ErrIQCreateIterQueryCount( &g_iedBf, 
                                          ifmpImplicit != ifmpNil ? _countof(rgszGetIfmpPage) : _countof(rgszGetPage),
-                                         ifmpImplicit != ifmpNil ? rgszGetIfmpPage : rgszGetPage,
+                                         ifmpImplicit != ifmpNil ? rgszGetIfmpPage : rgszGetPage, 
                                          (void*)&qwPagePv,
                                          &(rgpiqPageFind[cpiqPageFind++]) ) );
 
+        // Update the action and add another query
         AssertEDBG( 0 == LOSStrCompareA( rgszGetIfmpPage[ 11 ], "accum:pv" ) );
         AssertEDBG( 0 == LOSStrCompareA( rgszGetPage[ 7 ], "accum:pv" ) );
         rgszGetIfmpPage[ 11 ] = "count";
         rgszGetPage[ 7 ]      = "count";
 
-        Call( ErrIQCreateIterQueryCount( &g_iedBf,
+        Call( ErrIQCreateIterQueryCount( &g_iedBf, 
                                          ifmpImplicit != ifmpNil ? _countof(rgszGetIfmpPage) : _countof(rgszGetPage),
-                                         ifmpImplicit != ifmpNil ? rgszGetIfmpPage : rgszGetPage,
+                                         ifmpImplicit != ifmpNil ? rgszGetIfmpPage : rgszGetPage, 
                                          (void*)&cpgMatches,
                                          &(rgpiqPageFind[cpiqPageFind++]) ) );
 
+        // Cut out the last clause, and update the action and add a last query
         AssertEDBG( 0 == LOSStrCompareA( rgszGetIfmpPage[ 7 ], "&&" ) );
         AssertEDBG( 0 == LOSStrCompareA( rgszGetPage[ 3 ], "&&" ) );
         CHAR * szPrintFields = "print:ifmp,pgno,fCurrentVersion,err,bfdf,pv";
@@ -15452,12 +16949,12 @@ VOID CDUMPA<CPAGE>::Dump(
         rgszGetPage[ 3 ]     = szPrintFields;
         rgszGetPage[ 4 ]     = NULL;
 
-        Call( ErrIQCreateIterQuery( &g_iedBf,
+        Call( ErrIQCreateIterQuery( &g_iedBf, 
                                          ifmpImplicit != ifmpNil ? _countof(rgszGetIfmpPage) - 4 : _countof(rgszGetPage) - 4,
-                                         ifmpImplicit != ifmpNil ? rgszGetIfmpPage : rgszGetPage,
+                                         ifmpImplicit != ifmpNil ? rgszGetIfmpPage : rgszGetPage, 
                                          &(rgpiqPageFind[cpiqPageFind++]) ) );
 
-        AssertEDBG( cpiqPageFind == 3 );
+        AssertEDBG( cpiqPageFind == 3 ); // just an expected
 
         dprintf( "Searching ESE cache ...\n" );
         dprintf( " pcvEntry=      <pbf>     :  %hs\n", szPrintFields );
@@ -15466,6 +16963,7 @@ VOID CDUMPA<CPAGE>::Dump(
 
         if ( cpgMatches != 1 )
         {
+            // We failed to get just one hit ...
             dprintf( "ERROR: Your pgno request returned more or less than 1 page.  Did you run !ese .db to set implicit DB/ifmp?" );
             goto HandleError;
         }
@@ -15491,7 +16989,7 @@ VOID CDUMPA<CPAGE>::Dump(
 
     EDBGDumpPage(
             ifmpNil,
-            pgno,
+            pgno,   //  used solely for checksumming purposes
             rgbPage,
             cbBuffer,
             cbPage,
@@ -15514,19 +17012,21 @@ HandleError:
 }
 
 
+//  ================================================================
 VOID CDUMPA<REC>::Dump(
     PDEBUG_CLIENT pdebugClient,
     INT argc, const CHAR * const argv[]
     ) const
+//  ================================================================
 {
-    SaveDlsDefaults sdd;
+    SaveDlsDefaults sdd; // saves here, and then restores the implicit defaults on .dtor.
     BYTE*           rgbRecDebuggee;
     BYTE*           rgbRec;
     ULONG           cbRec;
 
     FCB *           pfcbTable = NULL;
     BYTE            rgbFucbBuffer[ sizeof( FUCB ) + 16 ];
-    FUCB *          pfucbSchemaOnly = (FUCB*)roundup( (ULONG_PTR)rgbFucbBuffer, 8 );
+    FUCB *          pfucbSchemaOnly = (FUCB*)roundup( (ULONG_PTR)rgbFucbBuffer, 8 ); // probably aligned, but just in case.
     memset( rgbFucbBuffer, 0, sizeof( rgbFucbBuffer ) );
 
     if (    ( argc != 2 && argc != 3 ) ||
@@ -15537,9 +17037,15 @@ VOID CDUMPA<REC>::Dump(
         return;
     }
 
+    //  Alternatively instead of forcing a table name for the best record dump, SOMEONE notes we could do the trick we do 
+    //  in !ese dumpnode, where instead of auto-configuring trying to locate an exact pbf->pv == pvPage, we could search 
+    //  for buffers where pv is contained _within_ the BF page, a sort of: 
+    //  if ( pbf->pv < rgbRecDebuggee && rgbRecDebuggeed < ( pbf->pv + g_rgcbPageSizes[ pbf->icbBuffer ] ) )... set context.
+    //  Nice idea.
 
     if ( argc == 3 )
     {
+        // dev offers a table name, see if we can locate it and load it's schema.
 
         EDBGSetImplicitBT( pdebugClient, 1, &argv[2] );
         if ( Pdls()->ObjidCurrentBt() == 0 || Pdls()->PfcbCurrentTableDebuggee() == pfcbNil )
@@ -15569,6 +17075,8 @@ VOID CDUMPA<REC>::Dump(
 
     dprintf( "\n" );
 
+    // Note: pfcbTable ? pfucbSchemaOnly : NULL is _correct_.  We are just using the pfucbSchemaOnly to 
+    // pass the FCB really, as that's what DBUTLDumpRec() expects.
     DBUTLDumpRec( Pdls()->CbPage(), pfcbTable ? pfucbSchemaOnly : NULL, rgbRec, cbRec, CPRINTFWDBG::PcprintfInstance(), 16 );
 
     Unfetch( rgbRec );
@@ -15576,10 +17084,12 @@ VOID CDUMPA<REC>::Dump(
 }
 
 
+//  ================================================================
 VOID CDUMPA<MEMPOOL>::Dump(
     PDEBUG_CLIENT pdebugClient,
     INT argc, const CHAR * const argv[]
     ) const
+//  ================================================================
 {
     MEMPOOL *   pmempool;
     MEMPOOL *   pmempoolDebuggee;
@@ -15630,6 +17140,7 @@ const static CHAR * const mppagetrimsz[ PAGETRIM::pagetrimMax ] =
 {
     "pagetrimNormal",
     "pagetrimTrimmed",
+//  "pagetrimMax",
 };
 
 const CHAR * const mpdbstatesz[ JET_dbstateDirtyAndPatchedShutdown + 1 ] =
@@ -15644,7 +17155,9 @@ const CHAR * const mpdbstatesz[ JET_dbstateDirtyAndPatchedShutdown + 1 ] =
     "JET_dbstateDirtyAndPatchedShutdown",
 };
 
+//  ================================================================
 VOID CSR::Dump( CPRINTF * pcprintf, DWORD_PTR dwOffset ) const
+//  ================================================================
 {
     (*pcprintf)( FORMAT_INT( CSR, this, m_dbtimeSeen, dwOffset ) );
     (*pcprintf)( FORMAT_INT( CSR, this, m_pgno, dwOffset ) );
@@ -15662,7 +17175,9 @@ VOID CSR::Dump( CPRINTF * pcprintf, DWORD_PTR dwOffset ) const
 }
 
 
+//  ================================================================
 VOID RCE::Dump( CPRINTF * pcprintf, DWORD_PTR dwOffset ) const
+//  ================================================================
 {
     (*pcprintf)( FORMAT_UINT( RCE, this, m_trxBegin0, dwOffset ) );
     (*pcprintf)( FORMAT_UINT( RCE, this, m_trxCommittedInactive, dwOffset ) );
@@ -15714,6 +17229,8 @@ VOID RCE::Dump( CPRINTF * pcprintf, DWORD_PTR dwOffset ) const
 
     (*pcprintf)( FORMAT_0ARRAY( RCE, this, m_rgbData, dwOffset ) );
 
+    //  dump pointer to next RCE in bucket to facilitate debugging
+    //
     const ULONG     cbRCE       = CbRceEDBG();
     const BYTE *    pbNextRCE   = reinterpret_cast<BYTE *>( PvAlignForThisPlatform( (BYTE *)this + dwOffset + cbRCE ) );
 
@@ -15737,18 +17254,24 @@ const static WCHAR * const mpfcbtypenameswsz[FCB::fcbtypeMax] = {
       L"fcbtypeLV",
       };
 
+//  ================================================================
 const WCHAR * FCB::WszFCBType() const
+//  ================================================================
 {
     C_ASSERT( _countof( mpfcbtypenameswsz ) == ( fcbtypeMax - fcbtypeNull ) );
     return mpfcbtypenameswsz[m_fcbtype];
 }
 
+//  ================================================================
 BOOL FCB::FDebuggerExtInUse() const
+//  ================================================================
 {
     return ( 0 != WRefCount() );
 }
 
+//  ================================================================
 BOOL FCB::FDebuggerExtPurgableEstimate() const
+//  ================================================================
 {
     return !FDebuggerExtInUse() &&
         !FDeletePending() &&
@@ -15758,7 +17281,9 @@ BOOL FCB::FDebuggerExtPurgableEstimate() const
         ( prceNil == PrceOldest() );
 }
 
+//  ================================================================
 VOID FCB::Dump( CPRINTF * pcprintf, DWORD_PTR dwOffset ) const
+//  ================================================================
 {
     EDBGPrintfDml(  "--- FCB 0x%p <link cmd=\"!ese dumpmetadata 0x%p\">Dump Metadata</link> (p is %p, N is %N, and dwOffset is %I64x) ---\n",
                 ((char*)(this) + dwOffset), ((char*)(this) + dwOffset)  );
@@ -15856,7 +17381,9 @@ VOID FCB::Dump( CPRINTF * pcprintf, DWORD_PTR dwOffset ) const
 }
 
 
+//  ================================================================
 VOID IDB::Dump( CPRINTF * pcprintf, DWORD_PTR dwOffset ) const
+//  ================================================================
 {
     (*pcprintf)( FORMAT_INT( IDB, this, m_crefCurrentIndex, dwOffset ) );
 
@@ -15873,6 +17400,7 @@ VOID IDB::Dump( CPRINTF * pcprintf, DWORD_PTR dwOffset ) const
     PRINT_METHOD_FLAG( pcprintf, FDerivedIndex );
     PRINT_METHOD_FLAG( pcprintf, FLocalizedText );
     PRINT_METHOD_FLAG( pcprintf, FSortNullsHigh );
+//  PRINT_METHOD_FLAG( pcprintf, FUnicodeFixupOn_Deprecated );
     PRINT_METHOD_FLAG( pcprintf, FCrossProduct );
     PRINT_METHOD_FLAG( pcprintf, FDisallowTruncation );
     PRINT_METHOD_FLAG( pcprintf, FNestedTable );
@@ -15936,12 +17464,14 @@ VOID IDB::Dump( CPRINTF * pcprintf, DWORD_PTR dwOffset ) const
 }
 
 
+//  ================================================================
 VOID MEMPOOL::Dump(
     CPRINTF *       pcprintf,
     const BOOL      fDumpTags,
     const BOOL      fDumpAll,
     const ITAG      itagDump,
     const DWORD_PTR dwOffset )
+//  ================================================================
 {
     (*pcprintf)( FORMAT_POINTER( MEMPOOL, this, m_pbuf, dwOffset ) );
     (*pcprintf)( FORMAT_INT( MEMPOOL, this, m_cbBufSize, dwOffset ) );
@@ -15961,6 +17491,7 @@ VOID MEMPOOL::Dump(
             dprintf( "\n" );
             if ( fDumpAll )
             {
+                //  dump the entire mempool
                 for ( ITAG itag = 0; itag < ItagUnused(); itag++ )
                 {
                     DumpTag( pcprintf, itag, rgbBufDebuggee - rgbBuf );
@@ -15968,6 +17499,7 @@ VOID MEMPOOL::Dump(
             }
             else
             {
+                //  dump just the specified tag
                 DumpTag( pcprintf, itagDump, rgbBufDebuggee - rgbBuf );
             }
             dprintf( "\n--------------------\n\n" );
@@ -15981,24 +17513,30 @@ VOID MEMPOOL::Dump(
 }
 
 
+//  ================================================================
 VOID MEMPOOL::DumpTag( CPRINTF * pcprintf, const ITAG itag, const SIZE_T lOffset ) const
+//  ================================================================
 {
     MEMPOOLTAG  * const rgbTags = (MEMPOOLTAG *)Pbuf();
     if( 0 != rgbTags[itag].cb )
     {
+        //  this tag is used
         (*pcprintf)( "TAG %3d        address:0x%N    cb:0x%04x    ib:0x%04x\n",
                     itag, (BYTE *)(&(rgbTags[itag])) + lOffset, rgbTags[itag].cb, rgbTags[itag].ib );
         (*pcprintf)( "\t%s", SzEDBGHexDump( Pbuf() + rgbTags[itag].ib, min( 32, rgbTags[itag].cb ) ) );
     }
     else
     {
+        //  this is a free tag
         (*pcprintf)( "TAG %3d (FREE) address:0x%N    cb:0x%04x    ib:0x%04x\n",
                     itag, (BYTE *)(&(rgbTags[itag])) + lOffset, rgbTags[itag].cb, rgbTags[itag].ib );
     }
 }
 
 
+//  ================================================================
 VOID PIB::DumpBasic( CPRINTF * pcprintf, DWORD_PTR dwOffset ) const
+//  ================================================================
 {
     (*pcprintf)( FORMAT_UINT( PIB, this, dwTrxContext, dwOffset ) );
     (*pcprintf)( FORMAT_UINT( PIB, this, trxBegin0, dwOffset ) );
@@ -16011,7 +17549,9 @@ VOID PIB::DumpBasic( CPRINTF * pcprintf, DWORD_PTR dwOffset ) const
     (*pcprintf)( FORMAT_UINT( PIB, this, dwSessionContextThreadId, dwOffset ) );
 }
 
+//  ================================================================
 VOID PIB::Dump( CPRINTF * pcprintf, DWORD_PTR dwOffset ) const
+//  ================================================================
 {
     (*pcprintf)( FORMAT_UINT( PIB, this, trxBegin0, dwOffset ) );
     (*pcprintf)( FORMAT_UINT( PIB, this, trxCommit0, dwOffset ) );
@@ -16055,7 +17595,7 @@ VOID PIB::Dump( CPRINTF * pcprintf, DWORD_PTR dwOffset ) const
     }
     if ( cMax == cTotal )
     {
-        (*pcprintf)( "\n" );
+        (*pcprintf)( "\n" );    // normal case
     }
     else
     {
@@ -16103,7 +17643,7 @@ VOID PIB::Dump( CPRINTF * pcprintf, DWORD_PTR dwOffset ) const
     (*pcprintf)( FORMAT_VOID( PIB, this, m_redblacktreeRceidDeferred, dwOffset ) );
 
     (*pcprintf)( FORMAT_VOID( PIB, this, m_redblacktreePrceOfSession, dwOffset ) );
-
+    
     (*pcprintf)( FORMAT_POINTER( PIB, this, m_pMacroNext, dwOffset ) );
 
     (*pcprintf)( FORMAT_INT( PIB, this, m_errRollbackFailure, dwOffset ) );
@@ -16122,7 +17662,9 @@ VOID PIB::Dump( CPRINTF * pcprintf, DWORD_PTR dwOffset ) const
     (*pcprintf)( FORMAT_UINT( PIB, this, m_qosIoPriority, dwOffset ) );
 }
 
+//  ================================================================
 const WCHAR * FUCB::WszFUCBType() const
+//  ================================================================
 {
     if ( fSecondary )
     {
@@ -16147,7 +17689,9 @@ const WCHAR * FUCB::WszFUCBType() const
     }
 }
 
+//  ================================================================
 VOID FUCB::Dump( CPRINTF * pcprintf, DWORD_PTR ulBase ) const
+//  ================================================================
 {
     if( 0 == ulBase )
     {
@@ -16261,7 +17805,9 @@ VOID FUCB::Dump( CPRINTF * pcprintf, DWORD_PTR ulBase ) const
 }
 
 
+//  ================================================================
 VOID TDB::Dump( CPRINTF * pcprintf, DWORD_PTR dwOffset ) const
+//  ================================================================
 {
     (*pcprintf)( FORMAT_INT( TDB, this, m_fidTaggedFirst, dwOffset ) );
     (*pcprintf)( FORMAT_INT( TDB, this, m_fidTaggedLastInitial, dwOffset ) );
@@ -16319,7 +17865,9 @@ VOID TDB::Dump( CPRINTF * pcprintf, DWORD_PTR dwOffset ) const
     (*pcprintf)( FORMAT_INT( TDB, this, m_cbLVChunkMost, dwOffset ) );
 }
 
+//  ================================================================
 VOID INST::Dump( CPRINTF * pcprintf, DWORD_PTR dwOffset ) const
+//  ================================================================
 {
     (*pcprintf)( FORMAT_POINTER( INST, this, m_rgEDBGGlobals, dwOffset ) );
     (*pcprintf)( FORMAT_POINTER( INST, this, m_rgfmp, dwOffset ) );
@@ -16347,7 +17895,7 @@ VOID INST::Dump( CPRINTF * pcprintf, DWORD_PTR dwOffset ) const
                 INT( 2 * sizeof( this ) ),
                 __int64( (char*)(this) + dwOffset + OffsetOf( INST, m_rgparam ) ),
                 __int64( sizeof( (this)->m_rgparam ) ),
-                __int64( (char*)(this) + dwOffset ) ,
+                __int64( (char*)(this) + dwOffset ) /* debugee offset of this, not m_rgparam */,
                 m_rgparam );
 
     (*pcprintf)( FORMAT_INT( INST, this, m_grbitCommitDefault, dwOffset ) );
@@ -16406,7 +17954,7 @@ VOID INST::Dump( CPRINTF * pcprintf, DWORD_PTR dwOffset ) const
         (*pcprintf)( " = { " );
         JET_DBID dbidMac = dbidMax - 1;
         while( dbidMac > 0 && rgpirs[dbidMac] == NULL )
-            dbidMac--;
+            dbidMac--;  // just counting down to first non-null
         dbidMac++;
         for ( JET_DBID dbid = 0; dbid < dbidMac; dbid++ )
         {
@@ -16432,6 +17980,7 @@ VOID INST::Dump( CPRINTF * pcprintf, DWORD_PTR dwOffset ) const
     (*pcprintf)( FORMAT_UINT( INST, this, m_grbitStopped, dwOffset ) );
     (*pcprintf)( FORMAT_BOOL( INST, this, m_fCheckpointQuiesce, dwOffset ) );
 
+    // m_mpdbidifmp
 
     FMP *       rgfmpDebuggee = NULL;
     IFMP        ifmpMaxDebuggee     = g_ifmpMax;
@@ -16443,6 +17992,7 @@ VOID INST::Dump( CPRINTF * pcprintf, DWORD_PTR dwOffset ) const
 
     for ( DBID dbid = 0; dbid < dbidMax; dbid++ )
     {
+        //  Unfortunately g_ifmpMax is the sentinel value used.  We should move to like ifmpNil or something.
         if ( m_mpdbidifmp[dbid] < ifmpMaxDebuggee )
         {
             (*pcprintf)( "\t\t\t [%d] = IFMP:0x%x (FMP:",
@@ -16463,7 +18013,9 @@ VOID INST::Dump( CPRINTF * pcprintf, DWORD_PTR dwOffset ) const
 }
 
 
+//  ================================================================
 VOID FMP::Dump( CPRINTF * pcprintf, DWORD_PTR dwOffset ) const
+//  ================================================================
 {
     (*pcprintf)( FORMAT_WSZ_IN_TARGET( FMP, this, m_wszDatabaseName, dwOffset ) );
     EDBGDumplinkDml( FMP, this, INST, m_pinst, dwOffset );
@@ -16580,9 +18132,10 @@ VOID FMP::Dump( CPRINTF * pcprintf, DWORD_PTR dwOffset ) const
         const RANGELOCK * const prangelockDebuggee = m_rgprangelock[iprangelock];
         RANGELOCK rangelockBase;
 
+        //  Consider not printing prangelockDebuggee out to save space ...
         (*pcprintf)( "[%d-%hs]( ", iprangelock,
                     ( iprangelock == igroup ) ? "Curr" : ( fQuiescing ? "Quiesce" : "Old" ) );
-
+        
         if ( !FReadVariable( (RANGELOCK *)prangelockDebuggee, (RANGELOCK *)&rangelockBase ) )
         {
             (*pcprintf)( "EDBG-FAILED: Reading base rangelock " );
@@ -16590,8 +18143,8 @@ VOID FMP::Dump( CPRINTF * pcprintf, DWORD_PTR dwOffset ) const
         else
         {
             const SIZE_T cbrangelock = sizeof( RANGELOCK ) + rangelockBase.crangeMax * sizeof( RANGE );
-            BYTE rgbRangelockReasonable[sizeof( RANGELOCK ) + 20  * sizeof( RANGE ) ];
-            const RANGELOCK * const prangelock = (RANGELOCK *)rgbRangelockReasonable;
+            BYTE rgbRangelockReasonable[sizeof( RANGELOCK ) + 20 /* that'd be A LOT of range locks */ * sizeof( RANGE ) ];
+            const RANGELOCK * const prangelock = (RANGELOCK *)rgbRangelockReasonable;   // do away with casts distributed through code
 
             (*pcprintf)( "%d/%d ", rangelockBase.crange, rangelockBase.crangeMax );
 
@@ -16604,7 +18157,7 @@ VOID FMP::Dump( CPRINTF * pcprintf, DWORD_PTR dwOffset ) const
             {
                 AssertEDBG( rangelockBase.crange == prangelock->crange );
                 AssertEDBG( rangelockBase.crangeMax == prangelock->crangeMax );
-
+                
                 if ( prangelock->crange )
                 {
                     for( ULONG irange = 0; irange < prangelock->crange; irange++ )
@@ -16619,12 +18172,12 @@ VOID FMP::Dump( CPRINTF * pcprintf, DWORD_PTR dwOffset ) const
                     (*pcprintf)( "[Empty] " );
                 }
             }
-
+            
         }
         (*pcprintf)( ") " );
     }
     (*pcprintf)( "\n" );
-#endif
+#endif  //  DEBUG
 
     (*pcprintf)( FORMAT_POINTER( FMP, this, m_dwBFContext, dwOffset ) );
 
@@ -16693,7 +18246,9 @@ INLINE ERR CHECKPOINT::Dump( CPRINTF* pcprintf, DWORD_PTR dwOffset ) const
     return JET_errSuccess;
 }
 
+//  ================================================================
 VOID LOG::Dump( CPRINTF * pcprintf, DWORD_PTR dwOffset ) const
+//  ================================================================
 {
     EDBGDumplinkDml( LOG, this, INST, m_pinst, dwOffset );
 
@@ -16805,7 +18360,9 @@ VOID LOG::Dump( CPRINTF * pcprintf, DWORD_PTR dwOffset ) const
 }
 
 
+//  ================================================================
 VOID BACKUP_CONTEXT::Dump( CPRINTF * pcprintf, DWORD_PTR dwOffset ) const
+//  ================================================================
 {
     (*pcprintf)( FORMAT_LGPOS( BACKUP_CONTEXT, this, m_lgposFullBackup, dwOffset ) );
     (*pcprintf)( FORMAT_VOID( BACKUP_CONTEXT, this, m_logtimeFullBackup, dwOffset ) );
@@ -16837,12 +18394,14 @@ VOID BACKUP_CONTEXT::Dump( CPRINTF * pcprintf, DWORD_PTR dwOffset ) const
 }
 
 
+//  ================================================================
 VOID LOG_BUFFER::Dump( CPRINTF * pcprintf, DWORD_PTR dwOffset ) const
+//  ================================================================
 {
     (*pcprintf)( FORMAT_UINT( LOG_BUFFER, this, _csecLGBuf, dwOffset ) );
     (*pcprintf)( FORMAT_POINTER( LOG_BUFFER, this, _pbLGBufMin, dwOffset ) );
     (*pcprintf)( FORMAT_POINTER( LOG_BUFFER, this, _pbLGBufMax, dwOffset ) );
-
+    
     (*pcprintf)( FORMAT_UINT( LOG_BUFFER, this, _cbLGBuf, dwOffset ) );
 
     (*pcprintf)( FORMAT_POINTER( LOG_BUFFER, this, _pbEntry, dwOffset ) );
@@ -16856,7 +18415,9 @@ VOID LOG_BUFFER::Dump( CPRINTF * pcprintf, DWORD_PTR dwOffset ) const
     (*pcprintf)( FORMAT_UINT( LOG_BUFFER, this, _isecLGFileEnd, dwOffset ) );
 }
 
+//  ================================================================
 VOID LOG_WRITE_BUFFER::Dump( CPRINTF * pcprintf, DWORD_PTR dwOffset ) const
+//  ================================================================
 {
     (*pcprintf)( FORMAT_BOOL( LOG_WRITE_BUFFER, this, m_fNewLogRecordAdded, dwOffset ) );
     (*pcprintf)( FORMAT_LGPOS( LOG_WRITE_BUFFER, this, m_lgposLogRec, dwOffset ) );
@@ -16870,6 +18431,7 @@ VOID LOG_WRITE_BUFFER::Dump( CPRINTF * pcprintf, DWORD_PTR dwOffset ) const
     (*pcprintf)( FORMAT_VOID( LOG_WRITE_BUFFER, this, m_semWaitForLogBufferSpace, dwOffset ) );
 
     dprintf( "                     m_critLGBuf <                  ,  .>:  m_critLGBuf is a virtual member that redirects to: m_pLogBuffer->_critLGBuf.\n" );
+    //(*pcprintf)( FORMAT_VOID( LOG_WRITE_BUFFER, this, m_critLGBuf, dwOffset ) ); // this crashes debugger, someone should complete the log rewrite and remove refs to m_critLGBuf in LOG_WRITE_BUFFER, then remove #define so this wouldn't compile.
     (*pcprintf)( FORMAT_VOID( LOG_WRITE_BUFFER, this, m_critLGWaitQ, dwOffset ) );
 
     (*pcprintf)( FORMAT_VOID( LOG_WRITE_BUFFER, this, m_msLGPendingCopyIntoBuffer, dwOffset ) );
@@ -16905,7 +18467,9 @@ VOID LOG_WRITE_BUFFER::Dump( CPRINTF * pcprintf, DWORD_PTR dwOffset ) const
 }
 
 
+//  ================================================================
 VOID LOG_STREAM::Dump( CPRINTF * pcprintf, DWORD_PTR dwOffset ) const
+//  ================================================================
 {
     (*pcprintf)( FORMAT_INT( LOG_STREAM, this, m_ls, dwOffset ) );
     (*pcprintf)( FORMAT_BOOL( LOG_STREAM, this, m_fLogSequenceEnd, dwOffset ) );
@@ -16951,7 +18515,9 @@ VOID LOG_STREAM::Dump( CPRINTF * pcprintf, DWORD_PTR dwOffset ) const
 }
 
 
+//  ================================================================
 VOID VER::Dump( CPRINTF * pcprintf, DWORD_PTR dwOffset ) const
+//  ================================================================
 {
     EDBGDumplinkDml( VER, this, INST, m_pinst, dwOffset );
 
@@ -16977,17 +18543,22 @@ VOID VER::Dump( CPRINTF * pcprintf, DWORD_PTR dwOffset ) const
 
     (*pcprintf)( FORMAT_UINT( VER, this, m_crceheadHashTable, dwOffset ) );
     (*pcprintf)( FORMAT_VOID( VER, this, m_rectaskbatcher, dwOffset ) );
+//  (*pcprintf)( FORMAT_VOID( VER, this, m_rgrceheadHashTable, dwOffset ) );
 }
 
 
+//  ================================================================
 VOID CResource::Dump( CPRINTF * pcprintf, DWORD_PTR dwOffset ) const
+//  ================================================================
 {
     (*pcprintf)( FORMAT_POINTER( CResource, this, m_pRM, dwOffset ) );
     (*pcprintf)( FORMAT_VOID( CResource, this, m_quota, dwOffset ) );
 }
 
 
+//  ================================================================
 VOID CResourceManager::Dump( CPRINTF * pcprintf, DWORD_PTR dwOffset ) const
+//  ================================================================
 {
     (*pcprintf)( FORMAT_VOID( CResourceManager, this, m_lookaside, dwOffset ) );
     (*pcprintf)( FORMAT_UINT( CResourceManager, this, m_cAvgCount, dwOffset ) );
@@ -17020,7 +18591,9 @@ VOID CResourceManager::Dump( CPRINTF * pcprintf, DWORD_PTR dwOffset ) const
     (*pcprintf)( FORMAT_VOID( CResourceManager, this, m_critInitTerm, dwOffset ) );
 }
 
+//  ================================================================
 CResourceManager *CRMContainer::EDBGPRMFind( JET_RESID resid )
+//  ================================================================
 {
     FetchWrap<CRMContainer *> pRMC;
     CRMContainer *pRMCNext;
@@ -17050,10 +18623,12 @@ CResourceManager *CRMContainer::EDBGPRMFind( JET_RESID resid )
 }
 
 
+//  ================================================================
 DEBUG_EXT( EDBGDumpAllFMPs )
+//  ================================================================
 {
     FMP *   rgfmpDebuggee               = NULL;
-    ULONG   ifmpMaxDebuggee             = 0;
+    ULONG   ifmpMaxDebuggee             = 0;        //  don't use ifmpNil because its type is IFMP
     ULONG   cfmpMacCommittedDebuggee    = 0;
     BOOL    fDumpAll                    = fFalse;
     BOOL    fValidUsage;
@@ -17061,30 +18636,36 @@ DEBUG_EXT( EDBGDumpAllFMPs )
     switch ( argc )
     {
         case 0:
+            //  use defaults
             fValidUsage = fTrue;
             break;
         case 1:
+            //  '*' only
             fValidUsage = ( '*' == argv[0][0] );
             break;
         case 2:
+            //  <g_rgfmp> and <g_ifmpMax>
             fValidUsage = ( FAddressFromSz( argv[0], &rgfmpDebuggee )
                             && FUlFromSz( argv[1], &ifmpMaxDebuggee ) );
             break;
         case 3:
             if ( '*' == argv[0][0] )
             {
+                //  '*' followed by <g_rgfmp> and <g_ifmpMax>
                 fDumpAll = fTrue;
                 fValidUsage = ( FAddressFromSz( argv[1], &rgfmpDebuggee )
                                 && FUlFromSz( argv[2], &ifmpMaxDebuggee ) );
             }
             else if ( '*' == argv[2][0] )
             {
+                //  <g_rgfmp> and <g_ifmpMax> followed by '*'
                 fDumpAll = fTrue;
                 fValidUsage = ( FAddressFromSz( argv[0], &rgfmpDebuggee )
                                 && FUlFromSz( argv[1], &ifmpMaxDebuggee ) );
             }
             else
             {
+                //  neither first nor third argument is a '*', so must be an error
                 fValidUsage = fFalse;
             }
             break;
@@ -17125,6 +18706,7 @@ DEBUG_EXT( EDBGDumpAllFMPs )
                         ifmp,
                         rgfmpDebuggee + ifmp );
 
+            //  force out of loop
             ifmp = cfmpMacCommittedDebuggee;
         }
         else
@@ -17156,11 +18738,13 @@ DEBUG_EXT( EDBGDumpAllFMPs )
     dprintf( "\n--------------------\n\n" );
 }
 
+//  ================================================================
 DEBUG_EXT( EDBGDumpAllINSTs )
+//  ================================================================
 {
     INST **     rgpinstDebuggee     = NULL;
     INST **     rgpinst             = NULL;
-    ULONG       cpinstMax           = 0;
+    ULONG       cpinstMax           = 0;    //  cMaxInstances is now variable in essence.
 
     if ( 0 != argc
         && ( 1 != argc || !FAddressFromSz( argv[0], &rgpinstDebuggee ) )
@@ -17197,6 +18781,7 @@ DEBUG_EXT( EDBGDumpAllINSTs )
         {
             INST *  pinst   = NULL;
 
+            //  validate our DLS
             if ( rgpinst[ipinst] != Pdls()->PinstDebuggee( ipinst ) )
             {
                 Pdls()->AddWarning( "Debugger DLS - PinstDebuggee() state doesn't match, some debugger extensions not trustable. May happen on live debug though." );
@@ -17208,6 +18793,7 @@ DEBUG_EXT( EDBGDumpAllINSTs )
                             ipinst,
                             rgpinst[ipinst] );
 
+                //  force out of loop
                 ipinst = cpinstMax;
             }
             else
@@ -17221,18 +18807,23 @@ DEBUG_EXT( EDBGDumpAllINSTs )
                 LONG        lgenMin         = 0;
                 LONG        lgenMax         = 0;
 
+                //  validate our DLS
                 if ( ( Pdls()->Pinst( ipinst ) != NULL ) &&
                         ( 0 != memcmp( Pdls()->Pinst( ipinst ), pinst, sizeof(INST) ) ) )
                 {
                     Pdls()->AddWarning( "Debugger DLS - Pinst() state doesn't match, some debugger extensions not trustable. May happen on live debug though." );
                 }
 
+                //  try to retrieve version bucket usage
+                //
                 if ( NULL != pinst->m_pver && FFetchVariable( pinst->m_pver, &pver ) )
                 {
                     CallS( pver->m_cresBucket.ErrGetParam( JET_resoperCurrentUse, &cbucket ) );
                     CallS( pver->m_cresBucket.ErrGetParam( JET_resoperMaxUse, &cbucketMost ) );
                 }
 
+                //  try to retrieve bounds of lgens, recmode, etc.
+                //
                 RECOVERING_MODE recmode = ( NULL != pinst->m_plog &&
                                             FFetchVariable( pinst->m_plog, &plog ) ) ?
                                                 plog->FRecoveringMode() :
@@ -17297,6 +18888,7 @@ DEBUG_EXT( EDBGDumpAllINSTs )
     Unfetch( rgpinst );
 }
 
+//  SPLIT dumping
 
 const CHAR mpsplittypesz[ splittypeMax - splittypeMin ][ 32 ] =
 {
@@ -17313,10 +18905,12 @@ const CHAR mpsplitopersz[ splitoperMax - splitoperMin ][ 64 ] =
     "splitoperFlagInsertAndReplaceData",
 };
 
+//  ================================================================
 VOID CDUMPA<SPLIT>::Dump(
     PDEBUG_CLIENT pdebugClient,
     INT argc, const CHAR * const argv[]
     ) const
+//  ================================================================
 {
     SPLIT *     psplitDebuggee      = NULL;
     SPLIT *     psplit              = NULL;
@@ -17364,10 +18958,13 @@ VOID CDUMPA<SPLIT>::Dump(
     }
 }
 
+// SPLITPATH dumping
+//  ================================================================
 VOID CDUMPA<SPLITPATH>::Dump(
     PDEBUG_CLIENT pdebugClient,
     INT argc, const CHAR * const argv[]
     ) const
+//  ================================================================
 {
     SPLITPATH *     psplitpathDebuggee  = NULL;
     SPLITPATH *     psplitpath          = NULL;
@@ -17398,6 +18995,7 @@ VOID CDUMPA<SPLITPATH>::Dump(
 }
 
 
+//  MERGE dumping
 
 const CHAR mpmergetypesz[ mergetypeMax - mergetypeMin ][ 32 ] =
 {
@@ -17411,10 +19009,12 @@ const CHAR mpmergetypesz[ mergetypeMax - mergetypeMin ][ 32 ] =
     "mergetypePageMove"
 };
 
+//  ================================================================
 VOID CDUMPA<MERGE>::Dump(
     PDEBUG_CLIENT pdebugClient,
     INT argc, const CHAR * const argv[]
     ) const
+//  ================================================================
 {
     MERGE *     pmergeDebuggee      = NULL;
     MERGE *     pmerge              = NULL;
@@ -17455,10 +19055,13 @@ VOID CDUMPA<MERGE>::Dump(
     }
 }
 
+// MERGEPATH dumping
+//  ================================================================
 VOID CDUMPA<MERGEPATH>::Dump(
     PDEBUG_CLIENT pdebugClient,
     INT argc, const CHAR * const argv[]
     ) const
+//  ================================================================
 {
     MERGEPATH *     pmergepathDebuggee  = NULL;
     MERGEPATH *     pmergepath          = NULL;
@@ -17493,10 +19096,13 @@ VOID CDUMPA<MERGEPATH>::Dump(
 }
 
 
+// DBFILEHDR dumping / "DBFILEHDR::Dump"
+//  ================================================================
 VOID CDUMPA<DBFILEHDR>::Dump(
     PDEBUG_CLIENT pdebugClient,
     INT argc, const CHAR * const argv[]
     ) const
+//  ================================================================
 {
     DBFILEHDR *     pdbfilehdrDebuggee  = NULL;
     DBFILEHDR *     pdbfilehdr          = NULL;
@@ -17532,15 +19138,18 @@ VOID CDUMPA<DBFILEHDR>::Dump(
         {
             (VOID)( pdbfilehdr->DumpLite( CPRINTFWDBG::PcprintfInstance(), "\n", dwOffset ) );
         }
-
+        
         Unfetch( pdbfilehdr );
     }
 }
 
+// TrxidStack dumping
+//  ================================================================
 VOID CDUMPA<TrxidStack>::Dump(
     PDEBUG_CLIENT pdebugClient,
     INT argc, const CHAR * const argv[]
     ) const
+//  ================================================================
 {
     TrxidStack *        ptrxidstackDebuggee = NULL;
     TrxidStack *        ptrxidstack         = NULL;
@@ -17571,6 +19180,7 @@ VOID CDUMPA<TrxidStack>::Dump(
     }
 }
 
+// Dump members of CPAGE class
 VOID CPAGE::Dump( CPRINTF* pcprintf, DWORD_PTR dwOffset ) const
 {
     (*pcprintf)( FORMAT_POINTER( CPAGE, this, m_ppib, dwOffset ) );
@@ -17580,6 +19190,7 @@ VOID CPAGE::Dump( CPRINTF* pcprintf, DWORD_PTR dwOffset ) const
 }
 
 
+//  BF Dumping
 
 const CHAR mpbflssz[ bflsMax - bflsMin ][ 16 ] =
 {
@@ -17638,8 +19249,8 @@ void BF::Dump( CPRINTF* pcprintf, DWORD_PTR dwOffset ) const
     (*pcprintf)( FORMAT_ENUM_BF( BF, this, bfrs, dwOffset, mpbfrssz, bfrsMin, bfrsMax ) );
     (*pcprintf)( FORMAT_POINTER( BF, this, pv, dwOffset ) );
     (*pcprintf)( FORMAT_( BF, this, lrukic, dwOffset ) );
-    const INT dtickLastVsK1 = DtickDelta( lrukic.TickKthTouch( 1 ), lrukic.TickLastTouch() );
-    const INT dtickIndexVsIndexTarget = DtickDelta( lrukic.TickIndexTarget(), lrukic.TickIndex() );
+    const INT dtickLastVsK1 = DtickDelta( lrukic.TickKthTouch( 1 ), lrukic.TickLastTouch() );   // k1 should be <= last
+    const INT dtickIndexVsIndexTarget = DtickDelta( lrukic.TickIndexTarget(), lrukic.TickIndex() );     // generally index-target should be >= index, should come out negative
     const BOOL fSC = lrukic.FSuperColded();
     const BOOL fSCConsistent = fSC && lrukic.FSuperColded() && lrukic.FSuperColdedIndex();
     (*pcprintf)( "{ k=%d %hs, [Pri]=%hu, [1]=%u [2]=%u, [Index]=%u, [IndexTarget]=%u, ",
@@ -17665,6 +19276,7 @@ void BF::Dump( CPRINTF* pcprintf, DWORD_PTR dwOffset ) const
                         dtickIndexVsIndexTarget > 0 ? L"+" : ( dtickIndexVsIndexTarget == 0 ? L"-" : L"" ), dtickIndexVsIndexTarget );
     }
 
+    // union of pWriteSignalComplete / pbfNext
     if ( wrnBFPageFlushPending == err )
     {
         (*pcprintf)( FORMAT_POINTER_NOLINE( BF, this, pWriteSignalComplete, dwOffset ) );
@@ -17698,7 +19310,7 @@ void BF::Dump( CPRINTF* pcprintf, DWORD_PTR dwOffset ) const
 
     EDBGDumplinkDml( BF, this, IOREQ, pvIOContext, dwOffset );
     (*pcprintf)( FORMAT_RBSPOS( BF, this, rbsposSnapshot, dwOffset ) );
-#else
+#else  //  !_WIN64
 
     (*pcprintf)( FORMAT_VOID( BF, this, ob0ic, dwOffset ) );
     (*pcprintf)( FORMAT_LGPOS( BF, this, lgposOldestBegin0, dwOffset ) );
@@ -17743,8 +19355,8 @@ void BF::Dump( CPRINTF* pcprintf, DWORD_PTR dwOffset ) const
     (*pcprintf)( FORMAT_BOOL_BF( BF, this, bfbitfield.FDependentPurged(), dwOffset ) );
     (*pcprintf)( FORMAT_BOOL_BF( BF, this, bfbitfield.FImpedingCheckpoint(), dwOffset ) );
     (*pcprintf)( FORMAT_( BF, this, lrukic, dwOffset ) );
-    const INT dtickLastVsK1 = DtickDelta( lrukic.TickKthTouch( 1 ), lrukic.TickLastTouch() );
-    const INT dtickIndexVsIndexTarget = DtickDelta( lrukic.TickIndexTarget(), lrukic.TickIndex() );
+    const INT dtickLastVsK1 = DtickDelta( lrukic.TickKthTouch( 1 ), lrukic.TickLastTouch() );   // k1 should be <= last
+    const INT dtickIndexVsIndexTarget = DtickDelta( lrukic.TickIndexTarget(), lrukic.TickIndex() );     // generally index-target should be >= index, should come out negative
     const BOOL fSC = lrukic.FSuperColded();
     const BOOL fSCConsistent = fSC && lrukic.FSuperColded() && lrukic.FSuperColdedIndex();
     (*pcprintf)( "{ k=%d %hs, [Pri]=%hu, [1]=%u [2]=%u, l=%u (%ws%d) [Index]=%u [IndexTarget]=%u  (%ws%d)}\n",
@@ -17758,6 +19370,7 @@ void BF::Dump( CPRINTF* pcprintf, DWORD_PTR dwOffset ) const
                     lrukic.TickIndex(),
                     lrukic.TickIndexTarget(),
                     dtickIndexVsIndexTarget > 0 ? L"+" : ( dtickIndexVsIndexTarget == 0 ? L"-" : L"" ), dtickIndexVsIndexTarget );
+    // union of pWriteSignalComplete / pbfNext
     if ( wrnBFPageFlushPending == err )
     {
         (*pcprintf)( FORMAT_POINTER_NOLINE( BF, this, pWriteSignalComplete, dwOffset ) );
@@ -17785,7 +19398,7 @@ void BF::Dump( CPRINTF* pcprintf, DWORD_PTR dwOffset ) const
 
     (*pcprintf)( FORMAT_UINT( BF, this, tce, dwOffset ) );
     (*pcprintf)( FORMAT_RBSPOS( BF, this, rbsposSnapshot, dwOffset ) );
-#endif
+#endif  //  _WIN64
 
 }
 
@@ -17838,7 +19451,7 @@ VOID CApproximateIndex< CKey, CEntry, OffsetOfIC >::Dump(
     const DWORD         grbit ) const
 {
     const BOOL fPrintableKeySize = ( sizeof(CKey) == 4 || sizeof(CKey) == 8 );
-
+    
     (*pcprintf)( FORMAT_UINT( CApproximateIndex, this, m_shfKeyPrecision, dwOffset ) );
     (*pcprintf)( FORMAT_UINT( CApproximateIndex, this, m_shfKeyUncertainty, dwOffset ) );
     (*pcprintf)( FORMAT_UINT( CApproximateIndex, this, m_shfBucketHash, dwOffset ) );
@@ -17850,6 +19463,7 @@ VOID CApproximateIndex< CKey, CEntry, OffsetOfIC >::Dump(
     (*pcprintf)( "%d (0x%x)", m_didRangeMost, m_didRangeMost );
     if ( fPrintableKeySize && grbit & bitEdbgDumpKeys )
     {
+        //  we cast it upto a 64-bit number to get consistent printing ...
         const __int64 keyInsertLeast = (__int64)KeyInsertLeast();
         const __int64 keyInsertMost = (__int64)KeyInsertMost();
         (*pcprintf)( "  [KeyRange: %I64d (0x%I64x) - %I64d (0x%I64x)]", keyInsertLeast, keyInsertLeast, keyInsertMost, keyInsertMost );
@@ -17867,7 +19481,7 @@ VOID CApproximateIndex< CKey, CEntry, OffsetOfIC >::Dump(
         (*pcprintf)( "  [Key: %I64d (0x%I64x)]", keyRangeFirst, keyRangeFirst );
     }
     (*pcprintf)( "\n" );
-
+    
     (*pcprintf)( FORMAT_( CApproximateIndex, this, m_idRangeLast, dwOffset ) );
     (*pcprintf)( "%d (0x%x)", m_idRangeLast, m_idRangeLast );
     if ( fPrintableKeySize && grbit & bitEdbgDumpKeys )
@@ -17886,6 +19500,7 @@ VOID CDUMPA<CDynamicHashTableEDBG>::Dump(
     PDEBUG_CLIENT pdebugClient,
     INT                     argc,
     const CHAR * const      argv[] ) const
+//  ================================================================
 {
     CDynamicHashTableEDBG * pdhtDebuggee    = NULL;
     CDynamicHashTableEDBG * pdht            = NULL;
@@ -17914,6 +19529,7 @@ VOID CDUMPA<CApproximateIndexEDBG>::Dump(
     PDEBUG_CLIENT pdebugClient,
     INT                     argc,
     const CHAR * const      argv[] ) const
+//  ================================================================
 {
     CApproximateIndexEDBG * paiDebuggee = NULL;
     CApproximateIndexEDBG * pai         = NULL;
@@ -17938,6 +19554,7 @@ VOID CDUMPA<CApproximateIndexEDBG>::Dump(
     }
 }
 
+// RESMGR::CLRUKResourceUtilityManager< 2, BF , &BF::OffsetOfLRUKIC, IFMPPGNO >
 template< INT m_Kmax, class CResource, PfnOffsetOf OffsetOfIC, class CKey >
 VOID CLRUKResourceUtilityManager< m_Kmax, CResource, OffsetOfIC, CKey >::Dump(
     CPRINTF *           pcprintf,
@@ -17963,7 +19580,7 @@ VOID CLRUKResourceUtilityManager< m_Kmax, CResource, OffsetOfIC, CKey >::Dump(
     (*pcprintf)( FORMAT_UINT( CLRUKResourceUtilityManager, this, m_cSuperCold, dwOffset ) );
 
     (*pcprintf)( FORMAT_UINT( CLRUKResourceUtilityManager, this, m_tickStart, dwOffset ) );
-
+    
     (*pcprintf)( FORMAT_UINT_NOLINE( CLRUKResourceUtilityManager, this, m_tickScanFirstFoundAll, dwOffset ) );
     (*pcprintf)( "   %hs\n", !_FTickSuperColded( m_tickScanFirstFoundAll ) ? "NormalTouch" : "SuperColded (ERR: should be normal touch!)" );
     (*pcprintf)( FORMAT_UINT_NOLINE( CLRUKResourceUtilityManager, this, m_tickScanFirstFoundNormal, dwOffset ) );
@@ -18018,6 +19635,7 @@ VOID CDUMPA<CLRUKResourceUtilityManagerEDBG>::Dump(
     PDEBUG_CLIENT pdebugClient,
     INT                     argc,
     const CHAR * const      argv[] ) const
+//  ================================================================
 {
     CLRUKResourceUtilityManagerEDBG *   paiDebuggee = NULL;
     CLRUKResourceUtilityManagerEDBG *   pai         = NULL;
@@ -18158,8 +19776,12 @@ VOID BFOB0::CBucketTable::Scan( CPRINTF * pcprintf, VOID * pv ) const
         (*pcprintf)( "Scanning all BFOB0 entries [bucket array/bucket/entry]...\n" );
     }
 
+    //  scan each DHT directory entry
+    //
     for ( SIZE_T irgBucket = 0; irgBucket < crgBucket && NULL != m_rgrgBucket[irgBucket]; irgBucket++ )
     {
+        //  number of buckets grows exponentially, with a minimum of 2
+        //
         const PBUCKET   pbucket             = PBUCKET( pbBucket );
         const SIZE_T    cBuckets            = max( 2, 1 << irgBucket );
         BYTE * const    rgbBucketDebuggee   = m_rgrgBucket[irgBucket];
@@ -18170,14 +19792,22 @@ VOID BFOB0::CBucketTable::Scan( CPRINTF * pcprintf, VOID * pv ) const
             goto HandleError;
         }
 
+        //  scan all DHT buckets in this directory entry
+        //
         for ( SIZE_T iBucket = 0; iBucket < cBuckets; iBucket++ )
         {
+            //  scan this bucket and its overflow buckets
+            //
             BOOL        fLastBucketInChain  = fFalse;
             BYTE *      pbBucketDebuggee    = rgbBucketDebuggee + ( iBucket * m_cbBucket );
             while ( !fLastBucketInChain )
             {
                 const CKeyEntry *   pEntryMost;
 
+                //  UNDONE: don't actually need to read the first bucket (it's
+                //  already read in in the bucket array as the head of this
+                //  chain), but it makes the loop easier to code if we do
+                //
                 if ( !FReadVariable( pbBucketDebuggee, pbBucket, m_cbBucket ) )
                 {
                     (*pcprintf)( "Error: Could not read bucket at 0x%N.\n", pbBucketDebuggee );
@@ -18186,15 +19816,22 @@ VOID BFOB0::CBucketTable::Scan( CPRINTF * pcprintf, VOID * pv ) const
 
                 if ( NULL == pbucket->m_pb )
                 {
+                    //  bucket was empty, so end of chain was reached
+                    //
                     fLastBucketInChain = fTrue;
                     pEntryMost = pbucket->m_rgEntry;
                 }
                 else if ( pbucket->m_pb > pbBucketDebuggee
                     && pbucket->m_pb < pbBucketDebuggee + m_cbBucket )
                 {
+                    //  m_pEntryLast is valid, so end of chain was reached
+                    //
                     fLastBucketInChain = fTrue;
                     pEntryMost = (CKeyEntry *)( pbBucket + ( pbucket->m_pb - pbBucketDebuggee ) );
 
+                    //  m_pEntryLast actually points to the last valid entry,
+                    //  so move one past
+                    //
                     pEntryMost++;
                 }
                 else
@@ -18202,11 +19839,15 @@ VOID BFOB0::CBucketTable::Scan( CPRINTF * pcprintf, VOID * pv ) const
                     pEntryMost = pbucket->m_rgEntry + m_centryBucket;
                 }
 
+                //  scan all entries in this bucket
+                //
 
                 for ( CKeyEntry * pEntryThis = pbucket->m_rgEntry;
                     pEntryThis < pEntryMost;
                     pEntryThis++ )
                 {
+                    //  scan invasive list for this entry
+                    //
                     BFOB0::CBucket      listHead;
                     pEntryThis->GetEntry( &listHead );
 
@@ -18261,6 +19902,8 @@ VOID BFOB0::CBucketTable::Scan( CPRINTF * pcprintf, VOID * pv ) const
 
     if ( pifmpgen->lgen > 0 && !fFoundTargetGen )
     {
+        //  didn't find any BF for this ifmp
+        //
         (*pcprintf)( "    <none>\n" );
     }
 
@@ -18401,7 +20044,7 @@ void COSFile::Dump( CPRINTF* pcprintf, DWORD_PTR dwOffset ) const
         {
             EDBGPrintfDml( " = { fRegistered = %u, iomethodMost = %hs }\n",
                 _osf.fRegistered, mpiomethodsz[ _osf.iomethodMost ] );
-            memset( &_osf, 0, sizeof(_osf) );
+            memset( &_osf, 0, sizeof(_osf) ); // defeating .dtor freeing stuff
         }
         else
         {
@@ -18437,30 +20080,38 @@ const VALUESZMAP mpeszDiskState[] =
     MapValue( COSDisk::eOSDiskConnected ),
 };
 
+// temporary until flighting removed
 void FlightConcurrentMetedOps( INT cioOpsMax, INT cioLowThreshold, TICK dtickStarvation );
 
 void COSDisk::Dump( CPRINTF* pcprintf, DWORD_PTR dwOffset ) const
 {
+    //  Basic Disk Id
 
     EDBGPrintfDml( "Dumping COSDisk <link cmd=\"dt %ws!COSDisk %I64x\">0x%0*I64X</link> ...\n", WszUtilImageName(), __int64( (char*)(this) + dwOffset ), INT( 2 * sizeof( this ) ), __int64( (char*)(this) + dwOffset ) );
 
     (*pcprintf)( "\n    Basic Disk Id:\n" );
+    // skip: CInvasiveList< COSDisk, OffsetOfILE >::CElement m_ile;
     (*pcprintf)( FORMAT_UINT_NOLINE( COSDisk, this, m_eState, dwOffset ) );
     PrintFormatFlagsOneLine( pcprintf, m_eState, mpeszDiskState );
     (*pcprintf)( FORMAT_UINT( COSDisk, this, m_dwDiskNumber, dwOffset ) );
+    // skip: COSEventTraceIdCheck   m_traceidcheckDisk;
     (*pcprintf)( FORMAT_WSZ( COSDisk, this, m_wszDiskPathId, dwOffset ) );
     (*pcprintf)( FORMAT_UINT( COSDisk, this, m_hDisk, dwOffset ) );
 
+    //  Disk Hw Info
 
     (*pcprintf)( "\n    Disk Hardware Info:\n" );
     (*pcprintf)( FORMAT_( COSDisk, this, m_osdi, dwOffset ) );
     EDBGPrintfDml( "{ FSeekPenalty() = %d (retail only), StorAdap.MaxTranLen = %0.3f KB, <link cmd=\"dt -r %ws!OSDiskInfo %I64x\">details</link> }\n",
+            // note: Added "retail only" because this fails to tell seek penalty if running with fault injection
+            // and fFakeNoSeekPenalty would be TRUE in debugged binary.
             FSeekPenalty(),
             double( m_osdi.m_ossad.MaximumTransferLength ) / 1024.0,
             WszUtilImageName(), __int64( (char*)(this) + dwOffset + OffsetOf( COSDisk, m_osdi ) ) );
     if ( m_osdi.m_szDiskModelSmart[0] != '\0' &&
             strstr( m_osdi.m_szDiskModelSmart, m_osdi.m_szDiskModel ) != NULL )
     {
+        //  We only print smart model if it's longer / superset of info over disk model.
         (*pcprintf)( FORMAT_SZ( COSDisk, this, m_osdi.m_szDiskModelSmart, dwOffset ) );
     }
     else
@@ -18470,6 +20121,7 @@ void COSDisk::Dump( CPRINTF* pcprintf, DWORD_PTR dwOffset ) const
     (*pcprintf)( FORMAT_SZ( COSDisk, this, m_osdi.m_szDiskFirmwareRev, dwOffset ) );
     (*pcprintf)( FORMAT_SZ( COSDisk, this, m_osdi.m_szDiskSerialNumber, dwOffset ) );
 
+    //  Active I/O
 
     (*pcprintf)( "\n    Active I/O Counts:\n" );
     (*pcprintf)( FORMAT_INT( COSDisk, this, m_cioForeground, dwOffset ) );
@@ -18479,17 +20131,20 @@ void COSDisk::Dump( CPRINTF* pcprintf, DWORD_PTR dwOffset ) const
     (*pcprintf)( FORMAT_BOOL( COSDisk, this, m_fExclusiveIo, dwOffset ) );
     (*pcprintf)( FORMAT_INT( COSDisk, this, m_cFfbOutstanding, dwOffset ) );
 
+    //  "Last" X Tracking ...
 
     (*pcprintf)( "\n    Last Action Times / Info:\n" );
+    // be nice to make this describe it's latency from real time
     (*pcprintf)( FORMAT_UINT( COSDisk, this, m_hrtLastFfb, dwOffset ) );
     (*pcprintf)( FORMAT_UINT( COSDisk, this, m_hrtLastMetedDispatch, dwOffset ) );
     (*pcprintf)( FORMAT_UINT_NOLINE( COSDisk, this, m_tickPerformanceLastMeasured, dwOffset ) );
     LONG dtickOsQdLatency = DtickDelta( m_tickPerformanceLastMeasured, Pdls()->TickDLSCurrent() );
     (*pcprintf)( " ( %d ms old )\n", dtickOsQdLatency );
     (*pcprintf)( FORMAT_UINT_NOLINE( COSDisk, this, m_cioOsQueueDepth, dwOffset ) );
-    (*pcprintf)( " ( %d ms old )\n", dtickOsQdLatency );
+    (*pcprintf)( " ( %d ms old )\n", dtickOsQdLatency ); // dup print b/c not obvious m_cioOsQueueDepth relates to m_tickPerformanceLastMeasured
+    
 
-
+    //  I/O Q
 
     (*pcprintf)( "\n    I/O Queues:\n" );
 
@@ -18500,8 +20155,9 @@ void COSDisk::Dump( CPRINTF* pcprintf, DWORD_PTR dwOffset ) const
     if ( FReadVariable( m_pIOQueue, pIOQueue ) )
     {
         IOQueue * pIOQueueDebuggee = this->m_pIOQueue;
-        ((COSDisk*)this)->m_pIOQueue = pIOQueue;
+        ((COSDisk*)this)->m_pIOQueue = pIOQueue; //  What could go wrong?
 
+        //  Esoteric enough options, not sure of general usage yet ... 
         #define SUB_OBJ_FORMAT_UINT( CLASS, pointer, member, submember, offset, SZEND ) \
                         "\t%*.*s <0x%0*I64X,%3I64u>:  %I64u (0x%I64X)" SZEND, \
                         SYMBOL_LEN_MAX + 4, \
@@ -18530,6 +20186,8 @@ void COSDisk::Dump( CPRINTF* pcprintf, DWORD_PTR dwOffset ) const
         (*pcprintf)( SUB_OBJ_FORMAT_UINT( COSDisk::IOQueue, this, m_pIOQueue, m_cDispatchContinues, dwOffset, "\n" ) );
         (*pcprintf)( FORMAT_UINT( COSDisk, this, m_cioDequeued, dwOffset ) );
 
+        //  From here on out since, we're printing symbols nested below m_pIOQueue->, the names get deep, so
+        //  temporarily double the symbol len max.
         const LONG cchSymMax = SYMBOL_LEN_MAX * 2;
         #pragma push_macro( "SYMBOL_LEN_MAX" )
         #undef SYMBOL_LEN_MAX
@@ -18537,6 +20195,7 @@ void COSDisk::Dump( CPRINTF* pcprintf, DWORD_PTR dwOffset ) const
 
         (*pcprintf)( "\n" );
         (*pcprintf)( "               I/O Heap Config: ---------------------------- \n" );
+        // need bigger symbols names here ... 
         (*pcprintf)( SUB_OBJ_FORMAT_UINT( COSDisk::IOQueue, this, m_pIOQueue, m_cioQosBackgroundMax, dwOffset, "\n" ) );
         (*pcprintf)( SUB_OBJ_FORMAT_UINT( COSDisk::IOQueue, this, m_pIOQueue, m_cioreqQOSBackgroundLow, dwOffset, "\n" ) );
         (*pcprintf)( SUB_OBJ_FORMAT_UINT( COSDisk::IOQueue, this, m_pIOQueue, m_cioQosBackgroundCurrent, dwOffset, "\n" ) );
@@ -18544,23 +20203,34 @@ void COSDisk::Dump( CPRINTF* pcprintf, DWORD_PTR dwOffset ) const
         (*pcprintf)( SUB_OBJ_FORMAT_UINT( COSDisk::IOQueue, this, m_pIOQueue, m_cioQosUrgentBackgroundCurrent, dwOffset, "\n" ) );
 
         (*pcprintf)( SUB_OBJ_FORMAT_UINT( COSDisk::IOQueue, this, m_pIOQueue, m_cioQosBackgroundMax, dwOffset, "\n" ) );
+        // related IO heap, but variable name not obvious ... rename maybe? 
         (*pcprintf)( SUB_OBJ_FORMAT_UINT( COSDisk::IOQueue, this, m_pIOQueue, m_cioreqMax, dwOffset, "\n" ) );
         (*pcprintf)( "               I/O Heap Pos: ------------------------------- \n" );
+        // skip: CCriticalSection * m_pcritIOHeap;
+        // skip: CSemaphore         m_semIOQueue;
         (*pcprintf)( SUB_OBJ_FORMAT_UINT( COSDisk::IOQueue, this, m_pIOQueue, fUseHeapA, dwOffset, "\n" ) );
         (*pcprintf)( SUB_OBJ_FORMAT_UINT( COSDisk::IOQueue, this, m_pIOQueue, iFileCurrent, dwOffset, "\n" ) );
         (*pcprintf)( SUB_OBJ_FORMAT_UINT( COSDisk::IOQueue, this, m_pIOQueue, ibOffsetCurrent, dwOffset, "\n" ) );
 
+        // Note: Be smart to take the HeapA.ipioreqIOAHeapMac & HeapB.ipioreqIOBHeapMic to determine / print
+        // how full, but not sure our old IO heap is long for this world, if I (SOMEONE) have my ways and
+        // move everything to a R/B tree for a more dynamic Q.
         EDBGPrintfDml( SUB_OBJ_FORMAT_POINTER_TYPE_DML( COSDisk::IOQueue, this, m_pIOQueue, "COSDisk::IOQueue::IOHeapA", m_pIOHeapA, dwOffset ) );
         EDBGPrintfDml( SUB_OBJ_FORMAT_POINTER_TYPE_DML( COSDisk::IOQueue, this, m_pIOQueue, "COSDisk::IOQueue::IOHeapB", m_pIOHeapB, dwOffset ) );
 
         (*pcprintf)( "               VIP List: ----------------------------------- \n" );
         (*pcprintf)( SUB_OBJ_FORMAT_UINT( COSDisk::IOQueue, this, m_pIOQueue, m_cioVIPList, dwOffset, "\n" ) );
+        // skip: CLocklessLinkedList<IOREQ>     
+        // dicey - this basically destroys the structure (but in debugger memory ... so only problem is 
+        // someone wants to use VIP list element lower down)
         const IOREQ * pioreqVipHeadDebuggee = m_pIOQueue->m_VIPListHead.AtomicRemoveList();
+        // could add some DML for ese!COLL:CLocklessLinkedList<IOREQ> ...
         (*pcprintf)( "\t%*.*s <0x%0*I64X,--->:  0x%I64X\n", SYMBOL_LEN_MAX + 4, SYMBOL_LEN_MAX + 4, "m_pIOQueue->m_VIPListHead",
                          INT( 2 * sizeof( void* ) - 4 ), &pIOQueueDebuggee->m_VIPListHead, pioreqVipHeadDebuggee );
 
 
         (*pcprintf)( "               Meted Read Q: ------------------------------- \n" );
+        //  To use the meted Q operations, need to setup a little bit of stuff
 
         LONG cioConcurrentMetedOpsMax = 42;
         LONG cioLowQueueThreshold = 43;
@@ -18573,27 +20243,33 @@ void COSDisk::Dump( CPRINTF* pcprintf, DWORD_PTR dwOffset ) const
         }
         else
         {
+            //  Be nice to get the flighted Meted Q flags, but it's in all inst's params.
             (*pcprintf)( "                                     g_cioConcurrentMetedOps <              ,   >:  %d  (max concurrent meted ops allowed)\n", cioConcurrentMetedOpsMax );
             (*pcprintf)( "                                      g_cioLowQueueThreshold <              ,   >:  %d\n", cioLowQueueThreshold );
             (*pcprintf)( "                              g_dtickStarvedMetedOpThreshold <              ,   >:  %d\n", dtickStarvedMetedOpThreshold );
+            //  we set this because it is consumed in some of the member access functions below ...
             FlightConcurrentMetedOps( cioConcurrentMetedOpsMax, cioLowQueueThreshold, dtickStarvedMetedOpThreshold );
         }
-
+    
+        // skip: CCriticalSection *             m_pcritController;
         (*pcprintf)( SUB_OBJ_FORMAT_UINT( COSDisk::IOQueue, this, m_pIOQueue, m_qMetedAsyncReadIo.m_cioEnqueued, dwOffset, "" ) );
         (*pcprintf)( " ( aka cioWaitingQ or CioMetedReadQueue() )\n" );
         (*pcprintf)( SUB_OBJ_FORMAT_UINT( COSDisk::IOQueue, this, m_pIOQueue, m_qMetedAsyncReadIo.m_cioreqEnqueued, dwOffset, "\n" ) );
+        // skip: CSimpleQueue<IOREQ>                m_ilQueue;
+        //  Not sure why I don't need to set FIOThread() to access CioAllowedMetedOps - probably someone turned off asserts in EDBG somewhere.
         (*pcprintf)( "\t%*.*s <0x%0*I64X,--->:  0x%I64X\n", SYMBOL_LEN_MAX + 4, SYMBOL_LEN_MAX + 4, "CioAllowedMetedOps()",
-                INT( 2 * sizeof( void* ) - 4 ), 0, (__int64)CioAllowedMetedOps( m_pIOQueue->CioMetedReadQueue()  ) );
-
+                INT( 2 * sizeof( void* ) - 4 ), 0, (__int64)CioAllowedMetedOps( m_pIOQueue->CioMetedReadQueue() /* note = m_qMetedAsyncReadIo.m_cioEnqueued */ ) );
+        
         const LONG cioOpenSlots = ( m_cioAsyncReadDispatching > CioAllowedMetedOps( m_pIOQueue->CioMetedReadQueue() ) ) ?
                                             0 :
                                             ( CioAllowedMetedOps( m_pIOQueue->CioMetedReadQueue() ) - m_cioAsyncReadDispatching );
         (*pcprintf)( "\t%*.*s <0x%0*I64X,--->:  0x%I64X\n", SYMBOL_LEN_MAX + 4, SYMBOL_LEN_MAX + 4, "CioReadyMetedEnqueued()", INT( 2 * sizeof( void* ) - 4 ), 0, min( m_pIOQueue->CioMetedReadQueue(), cioOpenSlots ) );
 
-        #define ProotIoreqReal( rbt )        ( (SIZE_T)rbt.PnodeRoot() == (SIZE_T)-(LONGLONG)IOREQ::OffsetOfMetedQueueIC() ? NULL : rbt.PnodeRoot() )
+        #define ProotIoreqReal( rbt )        ( (SIZE_T)rbt.PnodeRoot() == (SIZE_T)-(LONGLONG)IOREQ::OffsetOfMetedQueueIC() ? NULL : rbt.PnodeRoot() ) 
 
         const IOREQ * pioreqReadBuildingRoot = ProotIoreqReal( m_pIOQueue->m_qMetedAsyncReadIo.m_irbtBuilding );
         const IOREQ * pioreqReadDrainingRoot = ProotIoreqReal( m_pIOQueue->m_qMetedAsyncReadIo.m_irbtDraining );
+        // could add some DML for ese!COLL::InvasiveRedBlackTree<IFILEIBOFFSET,IOREQ,&IOREQ::OffsetOfMetedQueueIC>
         (*pcprintf)( "\t%*.*s <0x%0*I64X,--->:  0x%I64X\n", SYMBOL_LEN_MAX + 4, SYMBOL_LEN_MAX + 4, "m_pIOQueue->m_qMetedAsyncReadIo.m_irbtBuilding",
                          INT( 2 * sizeof( void* ) - 4 ), &pIOQueueDebuggee->m_qMetedAsyncReadIo.m_irbtBuilding, pioreqReadBuildingRoot );
         (*pcprintf)( "\t%*.*s <0x%0*I64X,--->:  0x%I64X\n", SYMBOL_LEN_MAX + 4, SYMBOL_LEN_MAX + 4, "m_pIOQueue->m_qMetedAsyncReadIo.m_irbtDraining",
@@ -18605,34 +20281,39 @@ void COSDisk::Dump( CPRINTF* pcprintf, DWORD_PTR dwOffset ) const
 
         const IOREQ * pioreqWriteBuilding = ProotIoreqReal( m_pIOQueue->m_qWriteIo.m_irbtBuilding );
         const IOREQ * pioreqWriteDraining = ProotIoreqReal( m_pIOQueue->m_qWriteIo.m_irbtDraining );
-        (*pcprintf)( "\t%*.*s <0x%0*I64X,--->:  0x%I64X\n", SYMBOL_LEN_MAX + 4, SYMBOL_LEN_MAX + 4, "m_pIOQueue->m_qWriteIo.m_irbtBuilding",
+        (*pcprintf)( "\t%*.*s <0x%0*I64X,--->:  0x%I64X\n", SYMBOL_LEN_MAX + 4, SYMBOL_LEN_MAX + 4, "m_pIOQueue->m_qWriteIo.m_irbtBuilding", 
                          INT( 2 * sizeof( void* ) - 4 ), &pIOQueueDebuggee->m_qWriteIo.m_irbtBuilding, pioreqWriteBuilding );
         (*pcprintf)( "\t%*.*s <0x%0*I64X,--->:  0x%I64X\n", SYMBOL_LEN_MAX + 4, SYMBOL_LEN_MAX + 4, "m_pIOQueue->m_qWriteIo.m_irbtDraining",
                          INT( 2 * sizeof( void* ) - 4 ), &pIOQueueDebuggee->m_qWriteIo.m_irbtDraining, pioreqWriteDraining );
 
         #pragma pop_macro( "SYMBOL_LEN_MAX" )
 
-        ((COSDisk*)this)->m_pIOQueue = pIOQueueDebuggee;
+        ((COSDisk*)this)->m_pIOQueue = pIOQueueDebuggee; //  restore it.
     }
     else
     {
         (*pcprintf)( "                       #failed load of m_pIOQueue#\n" );
     }
+    // skip: CCriticalSection       m_critIOQueue;  
 
     (*pcprintf)( "\n" );
 }
 
 const VALUESZMAP rgiorpsz[] =
 {
+        //  Generic OS Layer reasons
     MapValue( iorpInvalid ),
     MapValue( iorpHeader ),
     MapValue( iorpOsLayerTracing ),
+        //  Database I Reasons
     MapValue( iorpBFRead ),
+        //  Database O Reasons
     MapValue( iorpBFCheckpointAdv ),
     MapValue( iorpBFAvailPool ),
     MapValue( iorpBFShrink ),
     MapValue( iorpBFFilthyFlush ),
     MapValue( iorpBFDatabaseFlush ),
+        //  Transaction Log I/O Reasons
     MapValue( iorpLog ),
     MapValue( iorpLGWriteCommit ),
     MapValue( iorpLGWriteNewGen ),
@@ -18640,6 +20321,7 @@ const VALUESZMAP rgiorpsz[] =
     MapValue( iorpLGFlushAll ),
     MapValue( iorpLogRecRedo ),
     MapValue( iorpShadowLog ),
+        //  Specialty reasons ...
     MapValue( iorpCheckpoint ),
     MapValue( iorpDirectAccessUtil ),
     MapValue( iorpBackup ),
@@ -18695,7 +20377,7 @@ VOID DumpOneIOREQ(
             INT( 2 * sizeof( pioreq->p_osf ) ), __int64( pioreq->p_osf ),
             __int64( _osf.m_posd ), WszUtilImageName(), __int64( _osf.m_posd ), __int64( _osf.m_posd ),
             __int64( _osf.hFile ) );
-        memset( &_osf, 0, sizeof( _osf ) );
+        memset( &_osf, 0, sizeof( _osf ) ); // defeat .dtor from trying to free things
     }
     else
     {
@@ -18759,7 +20441,7 @@ VOID DumpOneIOREQ(
     }
     if ( pioreq->grbitQOS & qosIOOptimizeMask )
     {
-        AssertEDBG( 0 == ( pioreq->grbitQOS & ( qosIOOptimizeCombinable | qosIOOptimizeOverrideMaxIOLimits | qosIOOptimizeOverwriteTracing )  ) );
+        AssertEDBG( 0 == ( pioreq->grbitQOS & ( qosIOOptimizeCombinable | qosIOOptimizeOverrideMaxIOLimits | qosIOOptimizeOverwriteTracing ) /* do NOT use qosIOOptimizeMask */ ) );
         dprintf( "IOOptimize = 0x%x (%hs | %hs | %hs), ",
                 pioreq->grbitQOS & qosIOOptimizeMask,
                 pioreq->grbitQOS & qosIOOptimizeCombinable ? "qosIOOptimizeCombinable" : "",
@@ -18815,12 +20497,18 @@ VOID DumpOneIOREQ(
     {
         dprintf( FORMAT_POINTER_NOLINE( IOREQ, pioreq, pfnCompletion, dwOffset ) );
         dprintf( " = %hs\n", szCompletion, dwPfnOffset );
+        // Some hits ... 
+        //      ESE!COSFile::IOSyncComplete_
+        //      ese!BFIAsyncWriteComplete
+        //  Peculiar that one symbol is upper case, and another is lower case.
     }
     else
     {
         dprintf( FORMAT_POINTER( IOREQ, pioreq, pfnCompletion, dwOffset ) );
     }
 
+    //  parse some context from this IO, so we can better print the remaing elements
+    //
     BYTE rgbIOComplete[sizeof(COSFile::CIOComplete)];
     COSFile::CIOComplete * piocomplete = (COSFile::CIOComplete*)rgbIOComplete;
     const BOOL fSyncIOContext = 0 == _stricmp( szIOSyncComplete, szCompletion ) &&
@@ -18828,6 +20516,7 @@ VOID DumpOneIOREQ(
     const BOOL fBF = ( pioreq->m_tc.etc.iorReason.Iorp() == iorpBFRead ) ||
                         ( 0 == _stricmp( szBFIAsyncWriteComplete, szCompletion ) );
 
+    //  dump the completion key if it's sync or not a BF IO
     if ( fSyncIOContext )
     {
         dprintf( FORMAT_POINTER_NOLINE( IOREQ, pioreq, dwCompletionKey, dwOffset ) );
@@ -18847,6 +20536,7 @@ VOID DumpOneIOREQ(
 
     if ( fBF )
     {
+        //  We have an IO mapping to a BF IO / i.e. a page.
 
         ULONG cbPage = Pdls()->CbPage();
 
@@ -18894,10 +20584,11 @@ VOID DumpOneIOREQ(
     else if ( pioreq->m_tc.etc.iorReason.Iorp() == iorpHeader ||
                 pioreq->m_tc.etc.iorReason.Iors() == iorsHeader )
     {
+        //  We have a header of one of the jet file types ...
 
         BYTE * pbHeader = (BYTE*)malloc( pioreq->cbData );
 
-        AssertEDBG( pioreq->ibOffset == 0 );
+        AssertEDBG( pioreq->ibOffset == 0 );    // anything else wouldn't make sense.
         AssertEDBG( pioreq->cbData >= OffsetOf( DBFILEHDR, le_filetype ) );
 
         dprintf( FORMAT_UINT( IOREQ, pioreq, ibOffset, dwOffset ) );
@@ -18926,7 +20617,7 @@ VOID DumpOneIOREQ(
                 case JET_filetypeTempDatabase:
                 case JET_filetypeFTL:
                 case JET_filetypeFlushMap:
-                    dprintf( FORMAT_POINTER( IOREQ, pioreq, pbData, dwOffset ) );
+                    dprintf( FORMAT_POINTER( IOREQ, pioreq, pbData, dwOffset ) );   // could improve
                     break;
 
                 case JET_filetypeStreamingFile:
@@ -18954,6 +20645,7 @@ VOID DumpOneIOREQ(
     else if ( pioreq->m_tc.etc.iorReason.Iorp() >= iorpLog &&
                 pioreq->m_tc.etc.iorReason.Iorp() <= iorpShadowLog )
     {
+        //  We have an IO mapping to a Log IO.
 
         struct LGSEGHDR * plgseghdr = (struct LGSEGHDR *)malloc( pioreq->cbData );
         if ( plgseghdr &&
@@ -18975,6 +20667,8 @@ VOID DumpOneIOREQ(
     }
     else
     {
+        //  catch all for anything we really didn't understand ... could be eseutil / iorpDirectAccessUtil,
+        //  or tasks such as iorpBackup, or iorpShrink, etc.
 
         dprintf( FORMAT_UINT( IOREQ, pioreq, ibOffset, dwOffset ) );
         dprintf( FORMAT_POINTER( IOREQ, pioreq, pbData, dwOffset ) );
@@ -18989,6 +20683,8 @@ VOID CDUMPA<IOREQ>::Dump(
     PDEBUG_CLIENT pdebugClient,
     INT argc, const CHAR * const argv[]
     ) const
+    // Don't understand why there are two versions of Dump type functions?  freaky shtuff going down.
+    //void ::Dump( CPRINTF * pcprintf, DWORD_PTR ulBase ) const
 {
     EDBGIOREQCHUNK *        pedbgioreqchunkRoot = NULL;
 
@@ -19005,7 +20701,7 @@ VOID CDUMPA<IOREQ>::Dump(
     }
 
     BOOL fRunDump   = fFalse;
-    BOOL fRunStats  = fTrue;
+    BOOL fRunStats  = fTrue;    // defaults to on
 
     if ( argc >= 2 )
     {
@@ -19015,6 +20711,7 @@ VOID CDUMPA<IOREQ>::Dump(
         }
         if ( 0 == _stricmp( argv[1], "norunstats" ) )
         {
+            //  using this makes this debugger ext more robust, obviously.
             fRunStats = fFalse;
         }
     }
@@ -19043,6 +20740,7 @@ VOID CDUMPA<IOREQ>::Dump(
 
     if ( !fRunDump && !fRunStats )
     {
+        //  we are done, this is all user asked us to do.
         goto HandleError;
     }
 
@@ -19051,6 +20749,7 @@ VOID CDUMPA<IOREQ>::Dump(
     QWORD ibOffsetEnd   = 0;
     ULONG cbGapTotal    = 0;
 
+    //  validation vars
     IOREQ * pioreqDebuggeeLast = NULL;
     QWORD ibOffsetLast  = 0;
     DWORD cbLast        = 0;
@@ -19105,7 +20804,7 @@ VOID CDUMPA<IOREQ>::Dump(
         ibOffsetLast = pioreqCurr->ibOffset;
         cbLast = pioreqCurr->cbData;
         pioreqDebuggeeLast = pioreqDebuggeeCurr;
-
+    
         pioreqDebuggeeCurr = pioreqCurr->pioreqIorunNext;
         Unfetch( pioreqCurr );
         pioreqCurr = NULL;
@@ -19130,7 +20829,17 @@ HandleError:
 }
 
 DEBUG_EXT( EDBGDumpReferenceLog )
+/*++
 
+Routine Description:
+
+    Dumps the specified reference log
+
+Return Value:
+
+    None.
+
+--*/
 
 {
     ULONGLONG refLogAddress = 0;
@@ -19157,6 +20866,9 @@ DEBUG_EXT( EDBGDumpReferenceLog )
         return;
     }
 
+    //
+    // Read the log header, perform some sanity checks.
+    //
 
     if( !FEDBGMemoryRead(
             refLogAddress,
@@ -19233,6 +20945,9 @@ DEBUG_EXT( EDBGDumpReferenceLog )
         return;
     }
 
+    //
+    // Calculate the starting address and number of entries.
+    //
 
     if( logHeader.NextEntry < logHeader.cLogSize )
     {
@@ -19247,6 +20962,9 @@ DEBUG_EXT( EDBGDumpReferenceLog )
 
     entryAddress = (ULONG_PTR)logHeader.pLogBuffer + (ULONG_PTR)( index * logHeader.cbEntrySize );
 
+    //
+    // Dump the log.
+    //
 
     for( ;
          numEntries > 0;
@@ -19326,7 +21044,7 @@ DEBUG_EXT( EDBGDumpReferenceLog )
                      logHeader.cbEntrySize - sizeof(logEntry) );
         }
     }
-}
+} // DumpReferenceLog
 
 ERR ErrEDBGInitLocal()
 {
@@ -19353,6 +21071,8 @@ ERR ErrEDBGCacheQueryLocal(
 
     Call( ErrEDBGInitLocal() );
 
+    //  there are a couple conditions we would probably not handle well in CacheQuery / Local, so
+    //  trim out and reject those scenarios as a pre-emtive strike.
 
     for( INT iarg = 0; iarg < argc && argv[iarg]; iarg++ )
     {
@@ -19385,9 +21105,9 @@ HandleError:
 
 #pragma warning(default:4293)
 
-#endif
+#endif  //  DEBUGGER_EXTENSION_ESE
 
-#endif
+#endif  //  DEBUGGER_EXTENSION
 
 
 extern UINT g_wAssertAction;
@@ -19396,13 +21116,18 @@ extern VOID (*g_pfnReportEnforceFailure)( const WCHAR * wszContext, const CHAR* 
 
 extern "C" {
 
+//  ================================================================
 HRESULT CALLBACK ese(
     __in PDEBUG_CLIENT  pdebugClient,
     __in PCSTR  lpArgumentString
     )
+//  ================================================================
 {
 
 #if DBG
+    // Compile error if the prototype is incorrect.
+    // Make it debug-only to avoid the PREfast warning of
+    // an unused variable.
     PDEBUG_EXTENSION_CALL pdebugcall = ese;
 
     Unused( pdebugcall );
@@ -19415,6 +21140,7 @@ HRESULT CALLBACK ese(
 
     TRY
     {
+        //  we don't want assertions appearing on the screen during debugging
         if( !fDebugMode )
         {
             g_wAssertAction = JET_AssertSkipAll;
@@ -19433,12 +21159,16 @@ HRESULT CALLBACK ese(
             OSEdbgCreateDebuggerInterface( pdebugClient );
         }
 
+        // disable perf counters
         g_fDisablePerfmon = fTrue;
 
         if ( !g_fTryInitEDBGGlobals )
         {
             EDBGGlobals * pEGT = NULL;
 
+            // The unqualified version will work if the symbols have already been loaded.
+            // Otherwise by explicitly specifying the module, the prefix will be cached
+            // for later.
             CHAR szQUalifiedGlobalsName[ 64 ];
             OSStrCbFormatA( szQUalifiedGlobalsName, sizeof( szQUalifiedGlobalsName ), "%ws!rgEDBGGlobals", WszUtilImageName() );
 
@@ -19509,9 +21239,9 @@ HRESULT CALLBACK ese(
     }
     ENDEXCEPT
 
-#endif
+#endif  //  DEBUGGER_EXTENSION_ESE
 
-#endif
+#endif  //  DEBUGGER_EXTENSION
     return hr;
 }
 
@@ -19521,6 +21251,7 @@ DebugExtensionInitialize(__out PULONG Version,
              __out PULONG Flags)
 {
 #ifdef ESENT
+    //  these constants come from ntverp.h
     const DWORD dwImageVersionMajor = VER_PRODUCTMAJORVERSION;
     const DWORD dwImageVersionMinor = VER_PRODUCTMINORVERSION;
 #else
@@ -19537,16 +21268,23 @@ DebugExtensionInitialize(__out PULONG Version,
 void CALLBACK
 DebugExtensionUninitialize(void)
 {
+    // Do nothing.
     return;
 }
 
 void CALLBACK
 DebugExtensionNotify(
-    __in ULONG ,
-    __in ULONG64
+    __in ULONG /*Notify*/,
+    __in ULONG64 /*Argument*/
 )
 {
+    // Notify can be one of 
+    //    case DEBUG_NOTIFY_SESSION_ACTIVE:
+    //    case DEBUG_NOTIFY_SESSION_INACTIVE:
+    //    case DEBUG_NOTIFY_SESSION_ACCESSIBLE:
+    //    case DEBUG_NOTIFY_SESSION_INACCESSIBLE:
 
+    // Do nothing.
 }
 
 
@@ -19555,6 +21293,9 @@ DebugExtensionNotify(
 
 #ifdef DEBUGGER_EXTENSION_ESE
 
+//  sample callback function
+//
+//  ================================================================
 JET_ERR JET_API YouHaveBadSymbols(
     JET_SESID       sesid,
     JET_DBID        ifmp,
@@ -19564,8 +21305,12 @@ JET_ERR JET_API YouHaveBadSymbols(
     void *          pvArg2,
     void *          pvContext,
     ULONG_PTR       ulUnused )
+//  ================================================================
 {
 #if DBG
+    //  this line should only compile if the signatures match
+    //  Make it debug-only to avoid the PREfast warning of
+    //  an unused variable.
     JET_CALLBACK    callback = YouHaveBadSymbols;
 
     Unused( callback );
@@ -19691,34 +21436,43 @@ JET_ERR JET_API YouHaveBadSymbols(
     return err;
 }
 
-#endif
+#endif  //  DEBUGGER_EXTENSION_ESE
 
-#endif
+#endif  //  DEBUG
 
-}
+} // extern "C"
 
 
+//  post-terminate edbg subsystem
 
 void OSEdbgPostterm()
 {
+    //  nop
 }
 
+//  pre-init edbg subsystem
 
 BOOL FOSEdbgPreinit()
 {
+    //  nop
 
     return fTrue;
 }
 
 
+//  terminate edbg subsystem
 
 void OSEdbgTerm()
 {
+    //  term OSSYM
+    //  nop
 }
 
+//  init edbg subsystem
 
 ERR ErrOSEdbgInit()
 {
+    //  nop
 
     return JET_errSuccess;
 }

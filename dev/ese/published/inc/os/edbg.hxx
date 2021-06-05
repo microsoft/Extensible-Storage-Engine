@@ -3,16 +3,18 @@
 
 extern "C" {
 
+//  Performs a CacheQuery of the local process you are running in.
 
 ERR ErrEDBGCacheQueryLocal(
         __in const INT argc,
         __in_ecount(argc) const CHAR * const argv[],
         __inout void * pvResult );
 
-}
+} // extern "C"
 
 
 #ifdef DEBUGGER_EXTENSION
+//  structure that contains the pointers to all the critical global variables
 struct EDBGGlobals
 {
     const CHAR  *szName;
@@ -31,6 +33,9 @@ struct EDBGGlobals
     }
 };
 
+// Used by INST. By declaring it as an unsized array, two entries appear in the PDB,
+// and the ambiguity is quite annoying when debugging. So we'll define it
+// as a pointer of a different name.
 extern const EDBGGlobals * rgEDBGGlobalsArray;
 
 HRESULT
@@ -39,9 +44,16 @@ EDBGPrintf(
     ...
 )
 ;
-#endif
+#endif // DEBUGGER_EXTENSION
 
 
+//
+// This header file is full of expressions that are always false. These
+// expressions manifest themselves in macros that take unsigned values
+// and make tests, for example, of greater than or equal to zero.
+//
+// Turn off these warnings until the authors fix this code.
+//
 
 #pragma warning(disable:4296)
 
@@ -53,12 +65,18 @@ extern const CHAR * SzEDBGHexDump( const VOID * pv, INT cbMax );
 
 INLINE QWORD QwMaskForSmallerTypes( const size_t cbType )
 {
+    //  if the size of the type is smaller than a qword, provide
+    //  a mask to zero out the high-order bytes
+    //
     return ( cbType < sizeof(QWORD) ?
                     ( ( QWORD( 1 ) << ( cbType * 8 ) ) - 1 ) :
                     QWORD( ~0 ) );
 }
 
 
+// begins the format, printing out the initial offset, member name, but none of 
+// the data and no newline, so more complex printing routines can complete the 
+// output of the type.
 #define FORMAT_( CLASS, pointer, member, offset )   \
     "\t%*.*s <0x%0*I64X,%3I64u>:  ", \
     SYMBOL_LEN_MAX, \
@@ -68,6 +86,7 @@ INLINE QWORD QwMaskForSmallerTypes( const size_t cbType )
     __int64( (char*)(pointer) + offset + OffsetOf( CLASS, member ) ), \
     __int64( sizeof( (pointer)->member ) )
 
+//  the '\n' will be added by SzEDBGHexDump
 #define FORMAT_VOID( CLASS, pointer, member, offset )   \
     "\t%*.*s <0x%0*I64X,%3I64u>:  %s", \
     SYMBOL_LEN_MAX, \
@@ -100,6 +119,10 @@ INLINE QWORD QwMaskForSmallerTypes( const size_t cbType )
     INT( 2 * sizeof( (pointer)->member ) ), \
     __int64( (pointer)->member )
 
+//  Note: !ese dump fmp xxxx is the perfect test because it has one small, and one long / truncated
+//  member.
+//  Note: Since the %*c specifier can't seem to print 0 chars, technically we lost 1 char off truncated
+//  names that are printed this way.  Sad!
 #define FORMAT_POINTER_DUMPLINK_DML( CLASS, pointer, PTRCLASS, member, offset ) \
     "\t%*c<link cmd=\"!ese dump %hs 0x%I64X\">%0.*s</link> &lt;0x%0*I64X,%3I64u&gt;:  <link cmd=\"dt %ws!%hs 0x%0*I64X\">0x%0*I64X</link>\n", \
     max( 0, LONG( SYMBOL_LEN_MAX - strlen( #member ) ) ), \
@@ -118,6 +141,7 @@ INLINE QWORD QwMaskForSmallerTypes( const size_t cbType )
     INT( 2 * sizeof( (pointer)->member ) ), \
     __int64( (pointer)->member )
 
+//  Assumes pcprintf passed in ...
 #define EDBGDumplinkDml( CLASS, pointer, PTRCLASS, member, offset )     \
     if ( g_DebugControl == NULL || (pointer)->member == NULL )          \
     {                                                                   \
@@ -143,6 +167,7 @@ INLINE QWORD QwMaskForSmallerTypes( const size_t cbType )
     INT( 2 * sizeof( (pointer)->member ) ), \
     __int64( (pointer)->member )
 
+// Less prefered than EDBGDumplinkDml if we have a specific !ese dump TYPE extension
 #define EDBGDumptypeDml( CLASS, pointer, PTRCLASS, member, offset )     \
     if ( g_DebugControl == NULL || (pointer)->member == NULL )          \
     {                                                                   \
@@ -153,6 +178,7 @@ INLINE QWORD QwMaskForSmallerTypes( const size_t cbType )
         EDBGPrintfDml( FORMAT_POINTER_DUMPTYPE_DML( CLASS, pointer, PTRCLASS, member, offset ) ); \
     }
 
+//  Assumes dprintf wanted for the output.
 #define EDBGDprintfDumplinkDml( CLASS, pointer, PTRCLASS, member, offset )      \
     if ( g_DebugControl == NULL || (pointer)->member == NULL )          \
     {                                                                   \
@@ -164,6 +190,7 @@ INLINE QWORD QwMaskForSmallerTypes( const size_t cbType )
     }
 
 
+//  for zero-sized array, just print the first few bytes
 #define FORMAT_0ARRAY( CLASS, pointer, member, offset ) \
     "\t%*.*s <0x%0*I64X,  0>\n", \
     SYMBOL_LEN_MAX, \

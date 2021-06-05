@@ -3,12 +3,17 @@
 
 #pragma once
 
+//  TCacheRepository:  core implementation of ICacheRepository and its derivatives.
+//
+//  This class provides a per-process repository of all block caches implementing ICache and backed by a caching file.
+//  The lifecycle of an ICache implementation is maintained via CCacheReference wrappers over the core implementation.
+//  Caches can be accesssed by path or by physical id.
 
 class CCacheReference;
 static SIZE_T CCacheReferenceOffsetOfILE();
 
 template< class I >
-class TCacheRepository
+class TCacheRepository  //  crep
     :   public I
 {
     public:
@@ -29,7 +34,7 @@ class TCacheRepository
         void RemoveCacheReference(  _In_ CCacheReference* const         pcr,
                                     _In_ CCachePathTableEntry* const    pcpte );
 
-    public:
+    public:  //  ICacheRepository
 
         ERR ErrOpen(    _In_    IFileSystemFilter* const        pfsf,
                         _In_    IFileSystemConfiguration* const pfsconfig,
@@ -46,6 +51,7 @@ class TCacheRepository
 
     private:
 
+        //  Wait context for cache miss collisions on the cache path table.
 
         class CWaiter
         {
@@ -68,8 +74,9 @@ class TCacheRepository
 
     public:
 
+        //  A cache path table entry.
 
-        class CCachePathTableEntry
+        class CCachePathTableEntry  //  cpte
         {
             public:
 
@@ -212,31 +219,39 @@ ERR TCacheRepository<I>::ErrOpen(   _In_    IFileSystemFilter* const        pfsf
 
     *ppc = NULL;
 
+    //  only open the cache if it is enabled
 
     if ( (*ppcconfig)->FCacheEnabled() )
     {
+        //  get the absolute path of the cache
 
         (*ppcconfig)->Path( wszAbsPath );
 
+        //  translate the absolute path into an unambiguous file key path
 
         Call( m_pfident->ErrGetFileKeyPath( wszAbsPath, wszKeyPath ) );
 
+        //  wait to lock the entry for this cache
 
         Call( ErrLockCache( wszKeyPath, &sem, &pcpte ) );
 
+        //  if the cache isn't open then open it
 
         if ( !pcpte->Pc() )
         {
             Call( ErrOpenCacheMiss( pfsf, pfsconfig, ppcconfig, wszAbsPath, pcpte, &pcr ) );
         }
 
+        //  the cache is already open
 
         else
         {
+            //  open the already open cache
 
             Call( ErrOpenCacheHit( pcpte, &pcr ) );
         }
 
+        //  return the opened cache
 
         *ppc = pcr;
         pcr = NULL;
@@ -278,6 +293,7 @@ ERR TCacheRepository<I>::ErrOpenById(   _In_                    IFileSystemFilte
 
     *ppc = NULL;
 
+    //  defend against an invalid physical id
 
     if ( volumeid == volumeidInvalid )
     {
@@ -292,42 +308,52 @@ ERR TCacheRepository<I>::ErrOpenById(   _In_                    IFileSystemFilte
         Error( ErrERRCheck( JET_errInvalidParameter ) );
     }
 
+    //  retry until we have opened a cache with the correct file id
 
     while ( volumeidActual != volumeid || fileidActual != fileid )
     {
+        //  if we have retried too many times then fail
 
         if ( ++cAttempt >= cAttemptMax )
         {
             Call( ErrERRCheck( JET_errInternalError ) );
         }
 
+        //  if we have a cache open from a previous attempt then close it
 
         delete *ppc;
         *ppc = NULL;
 
+        //  translate the file id to a file path and the unambiguous file key path
 
         Call( m_pfident->ErrGetFilePathById( volumeid, fileid, wszAnyAbsPath, wszKeyPath ) );
 
+        //  wait to lock the entry for this cache
 
         Call( ErrLockCache( wszKeyPath, &sem, &pcpte ) );
 
+        //  if the cache isn't open then open it
 
         if ( !pcpte->Pc() )
         {
             Call( ErrOpenByIdCacheMiss( pfsf, pfsconfig, pbcconfig, wszAnyAbsPath, pcpte, &pcr ) );
         }
 
+        //  the cache is already open
 
         else
         {
+            //  open the already open cache
 
             Call( ErrOpenCacheHit( pcpte, &pcr ) );
         }
 
+        //  get the physical id for the cache we opened
 
         Call( pcr->ErrGetPhysicalId( &volumeidActual, &fileidActual, rgbUniqueIdActual ) );
     }
 
+    //  verify that the cache we opened matches the requested cache
 
     if ( memcmp( rgbUniqueIdActual, rgbUniqueId, cbGuid ) )
     {
@@ -335,6 +361,7 @@ ERR TCacheRepository<I>::ErrOpenById(   _In_                    IFileSystemFilte
         Call( ErrERRCheck( JET_errDiskIO ) );
     }
 
+    //  return the opened cache
 
     *ppc = pcr;
     pcr = NULL;
@@ -583,19 +610,23 @@ ERR TCacheRepository<I>::ErrOpenCacheMiss(  _In_    IFileSystemFilter* const    
 
     *ppcr = NULL;
 
+    //  retry until we have created/opened the file backing the cache
 
-    err = JET_errFileAlreadyExists;
+    err = JET_errFileAlreadyExists;  //  ErrERRCheck( JET_errFileAlreadyExists ) not appropriate here
     while ( err == JET_errFileAlreadyExists )
     {
+        //  if we have retried too many times then fail
 
         if ( ++cAttempt >= cAttemptMax )
         {
             Call( ErrERRCheck( JET_errInternalError ) );
         }
 
+        //  try to open the file
 
         err = pfsf->ErrFileOpen( wszAbsPath, IFileAPI::fmfStorageWriteBack, (IFileAPI**)&pff );
 
+        //  if we couldn't find the file then try to create it
 
         if ( err == JET_errFileNotFound )
         {
@@ -605,9 +636,11 @@ ERR TCacheRepository<I>::ErrOpenCacheMiss(  _In_    IFileSystemFilter* const    
     }
     Call( err );
 
+    //  mount the cache
 
     Call( ErrMountCache( pcpte, pfsf, pfsconfig, ppcconfig, &pff, fCreated ) );
 
+    //  provide a wrapper for the cache that will release it on the last close
 
     Alloc( *ppcr = new CCacheReference( this, pcpte ) );
 
@@ -639,15 +672,19 @@ ERR TCacheRepository<I>::ErrOpenByIdCacheMiss(  _In_    IFileSystemFilter* const
 
     *ppcr = NULL;
 
+    //  open the file backing the cache
 
     Call( pfsf->ErrFileOpen( wszAnyAbsPath, IFileAPI::fmfStorageWriteBack, (IFileAPI**)&pff ) );
 
+    //  get the cache configuration
 
     Call( pbcconfig->ErrGetCacheConfiguration( pcpte->WszKeyPath(), &pcconfig ) );
 
+    //  mount the cache
 
     Call( ErrMountCache( pcpte, pfsf, pfsconfig, &pcconfig, &pff, fFalse) );
 
+    //  provide a wrapper for the cache that will release it on the last close
 
     Alloc( *ppcr = new CCacheReference( this, pcpte ) );
 
@@ -669,6 +706,7 @@ ERR TCacheRepository<I>::ErrOpenCacheHit( _In_ CCachePathTableEntry* const pcpte
 
     *ppcr = NULL;
 
+    //  provide a wrapper for the cache that will release it on the last close
 
     Alloc( *ppcr = new CCacheReference( this, pcpte ) );
 
@@ -692,6 +730,7 @@ ERR TCacheRepository<I>::ErrMountCache( _In_    CCachePathTableEntry* const     
     ERR     err = JET_errSuccess;
     ICache* pc  = NULL;
 
+    //  create / mount the cache
 
     if ( fCreate )
     {
@@ -702,6 +741,7 @@ ERR TCacheRepository<I>::ErrMountCache( _In_    CCachePathTableEntry* const     
         Call( CCacheFactory::ErrMount( pfsf, m_pfident, pfsconfig, ppcconfig, m_pctm, ppff, &pc ) );
     }
 
+    //  make the cache available for other opens
 
     pcpte->OpenCache( &pc );
 
@@ -752,6 +792,7 @@ void TCacheRepository<I>::ReportCachingFileNotFoundById(    _In_                
                             JET_EventLoggingLevelMin );
 }
 
+//  CCacheRepository:  concrete TCacheRepository<ICacheRepository>
 
 class CCacheRepository : public TCacheRepository<ICacheRepository>
 {
@@ -765,10 +806,11 @@ class CCacheRepository : public TCacheRepository<ICacheRepository>
         virtual ~CCacheRepository() {}
 };
 
+//  CCacheReference:  a reference to an ICache implementation.
 
 class CCacheReference : public TCacheWrapper<ICache>
 {
-    public:
+    public:  //  specialized API
 
         CCacheReference(    _In_ TCacheRepository<ICacheRepository>* const                          pcrep,
                             _In_ TCacheRepository<ICacheRepository>::CCachePathTableEntry* const    pcpte )

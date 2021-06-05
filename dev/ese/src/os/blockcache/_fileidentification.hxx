@@ -3,9 +3,13 @@
 
 #pragma once
 
+//  TFileIdentification:  core implementation of IFileIdentification and its derivatives.
+//
+//  This class provides the capability for mapping file paths to physical identifiers and back.  It also provides a
+//  stable path that can be used to uniquely identify a file.
 
 template< class I >
-class TFileIdentification
+class TFileIdentification  //  fident
     :   public I
 {
     public:
@@ -16,7 +20,7 @@ class TFileIdentification
 
         void Cleanup() { PurgeVolumeHandleCache(); }
 
-    public:
+    public:  //  IFileIdentification
 
         ERR ErrGetFileId(   _In_z_  const WCHAR* const  wszPath,
                             _Out_   VolumeId* const     pvolumeid,
@@ -32,6 +36,7 @@ class TFileIdentification
 
     private:
 
+        //  A volume handle cache entry.
 
         class CVolumeHandleCacheEntry
         {
@@ -122,6 +127,7 @@ ERR TFileIdentification<I>::ErrGetFileId(   _In_z_  const WCHAR* const  wszPath,
     *pvolumeid = volumeidInvalid;
     *pfileid = fileidInvalid;
 
+    //  get the file id by path
 
     Call( ErrGetFileId( wszPath, &hFile, pvolumeid, pfileid ) );
 
@@ -161,6 +167,7 @@ ERR TFileIdentification<I>::ErrGetFileKeyPath(  _In_z_                          
 
     wszKeyPath[ 0 ] = 0;
 
+    //  compute the absolute path and split it into directory and file name, if present
 
     cwchDirPath = GetFullPathNameW( wszPath, cwchDirPathMax, wszDirPath, &wszFileName );
     if ( cwchDirPath == 0 )
@@ -178,14 +185,18 @@ ERR TFileIdentification<I>::ErrGetFileKeyPath(  _In_z_                          
         wszFileName[ 0 ] = 0;
     }
 
+    //  get the volume id of the directory which must exist.  the file if any doesn't need to exist
 
     err = ErrGetFileId( wszDirPath, &hDirectory, &volumeid, &fileid );
     err = err == JET_errFileNotFound ? ErrERRCheck( JET_errInvalidPath ) : err;
     Call( err );
 
+    //  get the volume handle for the volume id
 
     Call( ErrOpenVolumeById( volumeid, &pvhce ) );
 
+    //  generate an absolute path to the file using the volume guid root path to remove ambiguity
+    //  created by possible multiple paths to the same volume
 
     cwchFinalPath = GetFinalPathNameByHandleW( hDirectory, wszFinalPath, cwchFinalPathMax, VOLUME_NAME_NONE );
     if ( cwchFinalPath == 0 )
@@ -206,6 +217,7 @@ ERR TFileIdentification<I>::ErrGetFileKeyPath(  _In_z_                          
         Call( ErrOSStrCbAppendW( wszVolumePath, cbVolumePathMax, wszFileName ) );
     }
 
+    //  generate an unambiguous file key path
 
     Call( ErrMakeKeyPath( wszVolumePath, wszKeyPath ) );
 
@@ -245,6 +257,7 @@ ERR TFileIdentification<I>::ErrGetFilePathById( _In_                            
     wszAnyAbsPath[ 0 ] = 0;
     wszKeyPath[ 0 ] = 0;
 
+    //  defend against illegal values for the volumeid and fileid
 
     if ( volumeid == volumeidInvalid )
     {
@@ -255,10 +268,12 @@ ERR TFileIdentification<I>::ErrGetFilePathById( _In_                            
         Call( ErrERRCheck( JET_errInvalidParameter ) );
     }
 
+    //  get the volume handle for the volume id
 
     err = ErrOpenVolumeById( volumeid, &pvhce );
     Call( err == JET_errInvalidPath ? ErrERRCheck( JET_errFileNotFound ) : err );
 
+    //  open the file by id
 
     fileIdDescriptor.dwSize = sizeof( fileIdDescriptor );
     fileIdDescriptor.Type = ObjectIdType;
@@ -281,6 +296,7 @@ ERR TFileIdentification<I>::ErrGetFilePathById( _In_                            
         Call( ErrGetLastError() );
     }
 
+    //  compute an absolute path to the file.  there may be more than one.  also remove the "\\?\" prefix
 
     cwchFinalPath = GetFinalPathNameByHandleW( hFile, wszFinalPath, cwchFinalPathMax, VOLUME_NAME_DOS );
     if ( cwchFinalPath == 0 )
@@ -294,6 +310,8 @@ ERR TFileIdentification<I>::ErrGetFilePathById( _In_                            
 
     Call( ErrOSStrCbCopyW( wszAnyAbsPath, cbAnyAbsPathMax, wszFinalPath + cwchPrefix ) );
 
+    //  generate an absolute path to the file using the volume guid root path to remove ambiguity
+    //  created by possible multiple paths to the same volume
 
     cwchFinalPath = GetFinalPathNameByHandleW( hFile, wszFinalPath, cwchFinalPathMax, VOLUME_NAME_NONE );
     if ( cwchFinalPath == 0 )
@@ -308,6 +326,7 @@ ERR TFileIdentification<I>::ErrGetFilePathById( _In_                            
     Call( ErrOSStrCbCopyW( wszVolumePath, cbVolumePathMax, pvhce->WszPath() ) );
     Call( ErrOSStrCbAppendW( wszVolumePath, cbVolumePathMax, wszFinalPath ) );
 
+    //  generate an absolute path and an unambiguous file key path
 
     Call( ErrMakeKeyPath( wszVolumePath, wszKeyPath ) );
 
@@ -338,6 +357,7 @@ ERR TFileIdentification<I>::ErrGetFileId(   _In_z_  const WCHAR* const  wszPath,
     *pvolumeid = volumeidInvalid;
     *pfileid = fileidInvalid;
 
+    //  open the file by path
 
     *phFile = CreateFileW(  wszPath,
                             0,
@@ -352,6 +372,7 @@ ERR TFileIdentification<I>::ErrGetFileId(   _In_z_  const WCHAR* const  wszPath,
         Call( ErrGetLastError() );
     }
 
+    //  get the file id of the opened file
 
     fSuccess = GetFileInformationByHandleEx(    *phFile,
                                                 FileIdInfo,
@@ -362,10 +383,12 @@ ERR TFileIdentification<I>::ErrGetFileId(   _In_z_  const WCHAR* const  wszPath,
         Call( ErrGetLastError() );
     }
 
+    //  return the volume id and file id
 
     *pvolumeid = (VolumeId)fileIdInfo.VolumeSerialNumber;
     *pfileid = *((FileId*)fileIdInfo.FileId.Identifier);
 
+    //  defend against illegal values for the volumeid and fileid
 
     if ( *pvolumeid == volumeidInvalid )
     {
@@ -376,6 +399,7 @@ ERR TFileIdentification<I>::ErrGetFileId(   _In_z_  const WCHAR* const  wszPath,
         Call( ErrERRCheck( JET_errInternalError ) );
     }
 
+    //  defend against truncation of the file id because we cannot handle that
 
     FILE_ID_128 fileId;
     memset( fileId.Identifier, 0, _cbrg( fileId.Identifier ) );
@@ -410,6 +434,8 @@ ERR TFileIdentification<I>::ErrMakeKeyPath( _In_z_                              
 
     wszKeyPath[ 0 ] = 0;
 
+    //  convert the path to upper case to allow it to be compared for equality as would be done by
+    //  the file system (NTFS, case preserving, case insensitive)
 
     cwchKeyPath = LCMapStringEx(    LOCALE_NAME_INVARIANT,
                                     LCMAP_UPPERCASE,
@@ -477,6 +503,7 @@ ERR TFileIdentification<I>::ErrOpenVolumeByIdCacheMiss( _In_                cons
     *pwszPath = NULL;
     *phVolume = NULL;
 
+    //  walk all volumes in the system and try to find one that matches the volume id
 
     hFindVolume = FindFirstVolumeW( wszVolume, cwchVolumeMax );
 
@@ -486,6 +513,7 @@ ERR TFileIdentification<I>::ErrOpenVolumeByIdCacheMiss( _In_                cons
     }
 
     do {
+        //  try to determine the serial number for this volume.  note that this might fail if there isn't one!
 
         DWORD volumeSerialNumber;
         BOOL fSucceeded = GetVolumeInformationW( wszVolume, NULL, cwchVolumeMax, &volumeSerialNumber, NULL, NULL, NULL, 0 );
@@ -494,6 +522,7 @@ ERR TFileIdentification<I>::ErrOpenVolumeByIdCacheMiss( _In_                cons
             continue;
         }
 
+        //  if we got the serial number and it matches the volume id then we have a match
 
         if ( volumeSerialNumber == (DWORD)volumeid )
         {
@@ -511,12 +540,14 @@ ERR TFileIdentification<I>::ErrOpenVolumeByIdCacheMiss( _In_                cons
 
     } while ( FindNextVolumeW( hFindVolume, wszVolume, cwchVolumeMax ) );
 
+    //  if we did not find the volume then fail
 
     if ( !wszPath )
     {
         Call( ErrERRCheck( JET_errInvalidPath ) );
     }
 
+    //  open a handle to this volume
 
     hVolume = CreateFileW(  wszPath,
                             0,
@@ -531,6 +562,7 @@ ERR TFileIdentification<I>::ErrOpenVolumeByIdCacheMiss( _In_                cons
         Call( ErrGetLastError() );
     }
 
+    //  return the volume we found
 
     *pwszPath = wszPath;
     wszPath = NULL;
@@ -643,10 +675,11 @@ HandleError:
     return err;
 }
 
+//  CFileIdentification:  concrete TFileIdentification<IFileIdentification>
 
 class CFileIdentification : public TFileIdentification<IFileIdentification>
 {
-    public:
+    public:  //  specialized API
 
         CFileIdentification()
             : TFileIdentification<IFileIdentification>()

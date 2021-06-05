@@ -6,13 +6,19 @@
 
 #include <intrin.h>
 
+//  Pseudo-Function math
 
 #define roundup( val, align ) ( ( ( ( val ) + ( align ) - 1 ) / ( align ) ) * ( align ) )
 #define rounddn( val, align ) ( ( ( val ) / ( align ) ) * ( align ) )
 
+//  roundupdiv rounds up the int division ( num / den ) to the next int.
+//  one common usage of it is to compute the number of fixed chunks required
+//  to fit a given number of elements, in which case you'd do:
+//      roundupdiv( cElements, cElementsPerChunk )
 
 #define roundupdiv( num, den ) ( ( ( num ) + ( den ) - 1 ) / ( den ) )
 
+//  Power-of-2 related helpers.
 
 template<class T>
 inline bool FPowerOf2( T x )
@@ -25,7 +31,7 @@ inline ULONG Log2( ULONG x )
 {
     ULONG log2;
     BYTE ret = _BitScanReverse( &log2, x );
-    return ret > 0 ? log2 : -1;
+    return ret > 0 ? log2 : -1; // log( 0 ) is undefined, represented by -1
 }
 
 #elif defined ( _M_AMD64 ) || defined( _M_ARM64 )
@@ -33,7 +39,7 @@ inline ULONG Log2( unsigned __int64 x )
 {
     ULONG log2;
     BYTE ret = _BitScanReverse64( &log2, x );
-    return ret > 0 ? log2 : -1;
+    return ret > 0 ? log2 : -1; // log( 0 ) is undefined, represented by -1
 }
 
 #else
@@ -79,12 +85,14 @@ inline LONG LNextPowerOf2( LONG l )
     return i;
 }
 
+//  Returns fTrue if ibQuestionable is in the range [ibLow, ibLow+cbRange).
 
 #define FBounded( ibQuestionable, ibLow, cbRange )  FBounded_( (unsigned __int64)(ibQuestionable), (unsigned __int64)(ibLow), (unsigned __int64)(cbRange) )
 inline bool FBounded_( unsigned __int64 ibQuestionable, unsigned __int64 ibLow, unsigned __int64 cbRange )
 {
     if ( ( ibLow + cbRange ) < ibLow )
     {
+        //  overflow means something is wrong
         return false;
     }
     if ( ibQuestionable >= ibLow &&
@@ -95,20 +103,43 @@ inline bool FBounded_( unsigned __int64 ibQuestionable, unsigned __int64 ibLow, 
     return false;
 }
 
+//  Convenient output functions
 
+//  The DwMBs()/DwMBsFracKB() pair of functions does a good job of showing numbers with a large dynamic range, into 
+//  the multi-GB range, and conveys small numbers (down to 1 KB granularity .. below which is often not of interest).
+//  One can also use DblMBs() to achieve similar results, using a simpler format string.
+//  Examples:
+//      printf( "   MBs used:  %10d.%03d\n", DwMBs( xxx ), DwMBsFracKB( xxx ) );
+//      printf( "   MBs used:  %14.3f\n", DblMBs( xxx ) );
+//  yielding something like:
+//
+//  Tables (FCB):
+//    Objects in use:               0
+//    MBs committed:           72.312
+//    MBs used:                12.024   (ave=320 bytes)
+//  Key buffers (RESKEY):
+//    Objects in use:               0
+//    MBs committed:            0.062
+//    MBs used:                 0.000   (ave=2016 bytes)
+//
 
 #define DwMBs( cb )         (DWORD)( ((__int64)cb) / (__int64)1024 / (__int64)1024 )
 #define DwMBsFracKB( cb )   (DWORD)( roundup(((__int64)cb),1024) / (__int64)1024 * (__int64)1000 / (__int64)1024 % (__int64)1000 )
 #define DblMBs( cb )        (double)( ( (double)(cb) ) / ( 1024.0 * 1024.0 ) )
 
+//  However if you really want to know all the bytes, you can use DwKBs()/DwKBsFrac() to get down to byte level
+//  granularity.
 
 #define DwKBs( cb )         (DWORD)( ((__int64)cb) / (__int64)1024 )
 #define DwKBsFrac( cb )     (DWORD)( ((__int64)cb) % (__int64)1024 )
 
 #define CbBuffSize( c, cbPer)   ( ((__int64)c) * ((__int64)cbPer) )
 
+// Hashes an integer into the given amount of bits using a common half avalanche hash
+// Half avalanche hash is defined as: a function where every input bit affects its own position and every higher position in the output.
 inline UINT HalfAvalancheHash( const UINT valueToHash, INT cBits )
 {
+    //Assert( cBits <= sizeof( valueToHash ) * 8 );
     UINT output = valueToHash;
     output = ( output + 0x479ab41d ) + ( output << 8 );
     output = ( output ^ 0xe4aa10ce ) ^ ( output >> 5 );
@@ -119,11 +150,17 @@ inline UINT HalfAvalancheHash( const UINT valueToHash, INT cBits )
     return output >> ( sizeof( valueToHash ) * 8 - cBits );
 }
 
+// Returns a 64-bit hashcode of an array of bytes computed by the FNV-1a hash algorithm
 unsigned __int64 Ui64FNVHash(   _In_reads_bytes_opt_( cb )  const void* const   pv,
                                 _In_                        const INT           cb );
 
+// Chi-squared significance test: Sum [(E - O)^2 / E]
+//   where  E = expected freq
+//          O = observed freq
+// Symbol size = byte
+// Returns the chi-squared statistic
 const INT CHISQUARED_FREQTABLE_SIZE = 256;
 double ChiSquaredSignificanceTest( _In_reads_bytes_( cbSample ) const BYTE* const pbSample, const INT cbSample, _Out_writes_bytes_( sizeof( WORD ) * CHISQUARED_FREQTABLE_SIZE ) WORD* rgwFreqTable );
 
-#endif
+#endif  //  _OS_MATH_HXX_INCLUDED
 

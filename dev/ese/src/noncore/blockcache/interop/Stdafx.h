@@ -8,6 +8,7 @@
 
 #define _CRT_RAND_S
 
+// needed for JET errors
 #if defined(BUILD_ENV_IS_NT) || defined(BUILD_ENV_IS_WPHONE)
 #include <esent_x.h>
 #endif
@@ -34,6 +35,7 @@ using namespace System::Runtime::InteropServices;
 #using <Microsoft.Isam.Esent.Interop.dll> as_friend
 using namespace Microsoft::Isam::Esent::Interop;
 
+//  one last macro for old time's sake
 #define ExCall( f )                             \
 {                                               \
     try                                         \

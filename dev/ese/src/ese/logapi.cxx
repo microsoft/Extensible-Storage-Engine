@@ -5,7 +5,9 @@
 #include <ctype.h>
 #include "_logstream.hxx"
 
+//  ================================================================
 LRPAGEMOVE::LRPAGEMOVE() :
+//  ================================================================
     LRPAGE_( sizeof( *this ) ),
     m_pgnoDest( pgnoNull ),
     m_pgnoLeft( pgnoNull ),
@@ -23,7 +25,9 @@ LRPAGEMOVE::LRPAGEMOVE() :
 {
 }
 
+//  ================================================================
 BOOL LRPAGEMOVE::FUnitTest()
+//  ================================================================
 {
     LRPAGEMOVE lrpagemove;
     lrpagemove.lrtyp = lrtypPageMove;
@@ -65,7 +69,9 @@ BOOL LRPAGEMOVE::FUnitTest()
 }
 
 
+//  ================================================================
 const LRPAGEMOVE * LRPAGEMOVE::PlrpagemoveFromLr( const LR * const plr )
+//  ================================================================
 {
     Assert( plr );
     const LRPAGEMOVE * const plrpagemove = reinterpret_cast<const LRPAGEMOVE *>( plr );
@@ -73,7 +79,14 @@ const LRPAGEMOVE * LRPAGEMOVE::PlrpagemoveFromLr( const LR * const plr )
     return plrpagemove;
 }
 
+//  ================================================================
 VOID LRPAGEMOVE::AssertValid() const
+//  ================================================================
+//
+//  This asserts that all the members have been setup properly so
+//  this should be called after everything is correctly initialized.
+//
+//-
 {
     Assert( lrtypPageMove == lrtyp );
     Assert( pgnoNull != PgnoSource() );
@@ -143,10 +156,15 @@ VOID LRPAGEMOVE::AssertValid() const
     }
 }
 
+//  global log disabled flag
+//
 
 ERR ErrLGIMacroBegin( PIB *ppib, DBTIME dbtime );
 ERR ErrLGIMacroEnd( PIB *ppib, DBTIME dbtime, LRTYP lrtyp, const IFMP ifmp, const PGNO * const rgpgno, CPG cpgno, LGPOS *plgpos );
 
+//********************************************************
+//****     deferred begin transactions                ****
+//********************************************************
 
 LOCAL ERR ErrLGIDeferBeginTransaction( PIB *ppib );
 
@@ -160,7 +178,12 @@ INLINE ERR ErrLGDeferBeginTransaction( PIB *ppib )
 }
 
 
+//********************************************************
+//****     Page Oriented Operations                   ****
+//********************************************************
 
+//  WARNING: If fVersion bit needs to be set, ensure it's set before
+//  calling this function, as it will be reset if necessary.
 INLINE VOID LGISetTrx( PIB *ppib, LRPAGE_ *plrpage, const VERPROXY * const pverproxy = NULL )
 {
     Assert( ppibNil != ppib );
@@ -183,6 +206,10 @@ INLINE VOID LGISetTrx( PIB *ppib, LRPAGE_ *plrpage, const VERPROXY * const pverp
         {
             plrpage->level = 0;
 
+            //  for redo, don't version proxy operations if they have
+            //  already committed (at do time, we still need to version
+            //  them for visibility reasons -- the indexer may not be
+            //  able to see them once he's finished building the index)
             plrpage->ResetFVersioned();
         }
     }
@@ -249,7 +276,8 @@ ERR ErrLGInsert( const FUCB             * const pfucb,
                  const DIRFLAG          dirflag,
                  LGPOS                  * const plgpos,
                  const VERPROXY         * const pverproxy,
-                 const BOOL             fDirtyCSR )
+                 const BOOL             fDirtyCSR )     // true - if we must dirty the page inside (in which case dbtime before is in the CSR
+                                                        // false - record dbtimeInvalid for dbtimeBefore (insert part of split operations)
 {
     ERR             err;
     DATA            rgdata[4];
@@ -285,6 +313,8 @@ ERR ErrLGInsert( const FUCB             * const pfucb,
               pfucbNil != pverproxy->prcePrimary->Pfucb() &&
               ppibNil != pverproxy->prcePrimary->Pfucb()->ppib ) );
 
+    //  must be in a transaction since we will not redo level 0 modifications
+    //
     Assert( ppib->Level() > 0 );
 
     CallR( ErrLGDeferBeginTransaction( ppib ) );
@@ -343,6 +373,7 @@ ERR ErrLGInsert( const FUCB             * const pfucb,
 
     err = plog->ErrLGLogRec( rgdata, 4, fDirtyCSR ? 0 : fLGMacroGoing, ppib->lgposStart.lGeneration, plgpos );
 
+    // on error, return to before dirty dbtime on page
     if ( JET_errSuccess > err && fDirtyCSR )
     {
         Assert ( dbtimeInvalid !=  lrinsert.le_dbtimeBefore && dbtimeNil != lrinsert.le_dbtimeBefore);
@@ -362,7 +393,8 @@ ERR ErrLGFlagInsertAndReplaceData( const FUCB           * const pfucb,
                                    const DIRFLAG        dirflag,
                                    LGPOS                * const plgpos,
                                    const VERPROXY       * const pverproxy,
-                                 const BOOL             fDirtyCSR )
+                                 const BOOL             fDirtyCSR )     // true - if we must dirty the page inside (in which case dbtime before is in the CSR
+                                                                        // false - record dbtimeInvalid for dbtimeBefore (insert part of split operations)
 
 {
     ERR                         err;
@@ -399,6 +431,8 @@ ERR ErrLGFlagInsertAndReplaceData( const FUCB           * const pfucb,
               pfucbNil != pverproxy->prcePrimary->Pfucb() &&
               ppibNil != pverproxy->prcePrimary->Pfucb()->ppib ) );
 
+    //  must be in a transaction since we will not redo level 0 modifications
+    //
     Assert( ppib->Level() > 0 );
 
     CallR( ErrLGDeferBeginTransaction( ppib ) );
@@ -458,6 +492,7 @@ ERR ErrLGFlagInsertAndReplaceData( const FUCB           * const pfucb,
 
     err = plog->ErrLGLogRec( rgdata, 4, fDirtyCSR ? 0 : fLGMacroGoing, ppib->lgposStart.lGeneration, plgpos );
 
+    // on error, return to before dirty dbtime on page
     if ( JET_errSuccess > err && fDirtyCSR )
     {
         Assert ( dbtimeInvalid !=  lrfiard.le_dbtimeBefore && dbtimeNil != lrfiard.le_dbtimeBefore);
@@ -476,7 +511,8 @@ ERR ErrLGFlagInsert( const FUCB             * const pfucb,
                      const DIRFLAG          dirflag,
                      LGPOS                  * const plgpos,
                      const VERPROXY         * const pverproxy ,
-                     const BOOL             fDirtyCSR )
+                     const BOOL             fDirtyCSR )     // true - if we must dirty the page inside (in which case dbtime before is in the CSR
+                                                            // false - record dbtimeInvalid for dbtimeBefore (insert part of split operations)
 {
     ERR             err;
     DATA            rgdata[4];
@@ -512,6 +548,8 @@ ERR ErrLGFlagInsert( const FUCB             * const pfucb,
                         pverproxy->prcePrimary->Pfucb()->ppib :
                         pfucb->ppib;
 
+    //  must be in a transaction since we will not redo level 0 modifications
+    //
     Assert( ppib->Level() > 0 );
 
     CallR( ErrLGDeferBeginTransaction( ppib ) );
@@ -570,6 +608,7 @@ ERR ErrLGFlagInsert( const FUCB             * const pfucb,
 
     err = plog->ErrLGLogRec( rgdata, 4, fDirtyCSR ? 0 : fLGMacroGoing, ppib->lgposStart.lGeneration, plgpos );
 
+    // on error, return to before dirty dbtime on page
     if ( JET_errSuccess > err && fDirtyCSR )
     {
         Assert ( dbtimeInvalid !=  lrflaginsert.le_dbtimeBefore && dbtimeNil != lrflaginsert.le_dbtimeBefore);
@@ -617,6 +656,7 @@ LOCAL INLINE ERR ErrLGISetExternalHeader(
     Assert( g_rgfmp[ifmp].FLogOn() );
     Assert( ppib->Level() > 0 );
 
+    //  Redo only operation
 
     CallR( ErrLGDeferBeginTransaction( ppib ) );
 
@@ -660,6 +700,7 @@ LOCAL INLINE ERR ErrLGISetExternalHeader(
 
     err = plog->ErrLGLogRec( rgdata, 2, fDirtyCSR ? 0 : fLGMacroGoing, ppib->lgposStart.lGeneration, plgpos );
 
+    // on error, return to before dirty dbtime on page
     if ( JET_errSuccess > err && fDirtyCSR )
     {
         Assert ( dbtimeInvalid !=  lrsetextheader.le_dbtimeBefore && dbtimeNil != lrsetextheader.le_dbtimeBefore);
@@ -692,9 +733,38 @@ ERR ErrLGSetExternalHeader(
             dbtimeBefore );
 }
 
+//  Using the algorithm below we can calculate the padding required
+//  in the worst case. 32k pages produce a log record/density of
+//  625 records/logfile in the worst case. For a 1MB logfile that
+//  requires 1,618 bytes of padding.
+//
 static BYTE g_rgbPadding[1618];
 
+//  ================================================================
 LOCAL size_t CbPaddingForLrScrub( INST * const pinst )
+//  ================================================================
+//
+//  LRSCRUB records are very small and are generated very quickly.
+//  That can cause too many pages to be pinned by LLR. To avoid that
+//  these log records have a variable amount of padding. The padding
+//  becomes larger as more records are pinned. This reduces page
+//  reference density so LLR pins fewer pages.
+//
+//  The original spec contained a table like this:
+//
+//  DB Cache % Pinned               | <20   | 20-40 | 40-60 | 60-80
+// ---------------------------------+-------+-------+-------+------
+//  KB worth of Page references/log | 80000 | 60000 | 40000 | 20000 
+//
+//  (We can divide by page size to get the desired page references/log)
+//
+//  We can approximate this by using this equation:
+//
+//  100000 - ( pctPinned * 100000 )
+//
+//  And keeping the result between 80000 and 20000
+//
+//-
 {
     const size_t cbPaddingMin   = 0;
     const size_t cbPaddingMax   = sizeof(g_rgbPadding);
@@ -702,15 +772,24 @@ LOCAL size_t CbPaddingForLrScrub( INST * const pinst )
     const INT pctPinned = LBFICachePinnedPercentage();
     
     const size_t cbPage     = g_cbPage;
-    const size_t cbLogFile  = (size_t)UlParam( pinst, JET_paramLogFileSize ) * 1024;
+    const size_t cbLogFile  = (size_t)UlParam( pinst, JET_paramLogFileSize ) * 1024;    // JET_paramLogFileSize is in KB
 
     size_t cbPagePerLogfile = ( 100000*1024 ) - ( pctPinned * ( 100000*1024 ) );
     cbPagePerLogfile = min( cbPagePerLogfile, 80000*1024 );
     cbPagePerLogfile = max( cbPagePerLogfile, 20000*1024 );
 
+    // we now know how many bytes of pages we want referenced in one logfile
+    // (e.g. 25,600,000 bytes). Divide by the page size to turn into a number
+    // of pages. This is also the number of LRSCRUB records we want in one
+    // logfile.
+    //
     const INT cpgPerLogfile = cbPagePerLogfile / cbPage;
     const size_t cbDesiredLrScrubSize = cbLogFile / cpgPerLogfile;
 
+    // decide how much padding is needed. A LRSCRUB record may have a variable
+    // number of scrub operations. For this calculation we will assume there are none
+    // (the worst case).
+    //
     size_t cbPadding = cbDesiredLrScrubSize - sizeof(LRSCRUB);
     cbPadding = min( cbPadding, cbPaddingMax );
     cbPadding = max( cbPadding, cbPaddingMin );
@@ -754,13 +833,13 @@ ERR ErrLGScrub(
     lrscrub.le_procid   = ppib->procid;
     lrscrub.dbid        = g_rgfmp[ ifmp ].Dbid();
     lrscrub.le_pgno     = pcsr->Pgno();
-    lrscrub.le_pgnoFDP  = 0;
+    lrscrub.le_pgnoFDP  = 0;    // unknown
     lrscrub.le_objidFDP = pcsr->Cpage().ObjidFDP();
 
     Assert( !lrscrub.FVersioned() );
     Assert( !lrscrub.FDeleted() );
-    Assert( !lrscrub.FUnique() );
-    Assert( !lrscrub.FSpace() );
+    Assert( !lrscrub.FUnique() );   // unknown
+    Assert( !lrscrub.FSpace() );    // unknown
     Assert( !lrscrub.FConcCI() );
     Assert( !lrscrub.FSystemTask() );
 
@@ -814,6 +893,7 @@ ERR ErrLGScrub(
     Assert( _countof( rgdata ) == idata );
     err = plog->ErrLGLogRec( rgdata, idata, 0, ppib->lgposStart.lGeneration, plgpos );
 
+    // on error, return to before dirty dbtime on page
     if ( err < JET_errSuccess )
     {
         Assert ( dbtimeInvalid !=  lrscrub.le_dbtimeBefore && dbtimeNil != lrscrub.le_dbtimeBefore);
@@ -885,6 +965,17 @@ ERR ErrLGScanCheck(
     }
     Assert( g_rgfmp[ifmp].FLogOn() );
 
+    //  We have two types of calls:
+    //      pgno != pgnoScanLastSentinel
+    //          Regular case, we're scanning some random page, we expect the:
+    //              pgno is valid
+    //              Page dbtime is obtained from the page
+    //              Current dbtime is obtained from the FMP
+    //              Logged checksum is computed from the page
+    //      pgno == pgnoScanLastSentinel
+    //          We're logging the end of the scan through the sentinel pgno value, we expect:
+    //              Both page and current dbtimes will be set to 0
+    //              Logged checksum will be set to 0
 
 #ifdef DEBUG
     if ( pgno != pgnoScanLastSentinel )
@@ -901,11 +992,13 @@ ERR ErrLGScanCheck(
     {
         Expected( bSource == scsDbScan );
 
+        // The destination/replicas just need the signal of pgnoScanLastSentinel
+        // and don't use any of the other fields.
         Expected( dbtimePage == 0 );
         Expected( dbtimeCurrent == 0 );
         Expected( ulChecksum == 0 );
     }
-#endif
+#endif  // !DEBUG
 
     DATA data;
     LRSCANCHECK2 lrscancheck2;
@@ -920,6 +1013,7 @@ ERR ErrLGScanCheck(
             dbtimeCurrent,
             ulChecksum );
 
+        //  note it can be ==, b/c we don't consume a DBTIME, we just get the last one
         Assert( lrscancheck2.DbtimePage() <= lrscancheck2.DbtimeCurrent() );
 
         data.SetPv( (VOID *)&lrscancheck2 );
@@ -935,6 +1029,7 @@ ERR ErrLGScanCheck(
             dbtimeCurrent,
             (USHORT)ulChecksum );
 
+        //  note it can be ==, b/c we don't consume a DBTIME, we just get the last one
         Assert( lrscancheck.DbtimeBefore() <= lrscancheck.DbtimeAfter() );
 
         data.SetPv( (VOID *)&lrscancheck );
@@ -997,6 +1092,7 @@ LOCAL INLINE ERR ErrLGIPageMove(
     lrpagemove.SetDbtimeSourceBefore( dbtimeSourceBefore );
 
     lrpagemove.SetPgnoDest( pgnoDest );
+    // destination page doesn't have a dbtime before
     
     lrpagemove.SetPgnoParent( pgnoParent );
     if ( pgnoNull != pgnoParent )
@@ -1034,6 +1130,7 @@ LOCAL INLINE ERR ErrLGIPageMove(
         lrpagemove.SetFSystemTask();
     }
 
+    // Setting flags.
     if ( fMoveFlags & LRPAGEMOVE::fRootFDP )
     {
         lrpagemove.SetPageMoveRootFDP();
@@ -1100,6 +1197,8 @@ ERR ErrLGPageMove(
             plgpos );
 }
 
+// We do not have a valid FUCB here because of how root moves work. We do not
+// want an open FUCB on the very table we're moving the root of.
 
 LOCAL ERR ErrLGIPageMoveNoTableInMacro(
     __in    PIB * const     ppib,
@@ -1140,6 +1239,8 @@ LOCAL ERR ErrLGIPageMoveNoTableInMacro(
              plgpos );
 }
 
+// We do not have a valid FUCB here because of how root moves work. We do not
+// want an open FUCB on the very table we're moving the root of.
 
 LOCAL ERR ErrLGIPageMoveRootsInMacro(
     __in    PIB * const         ppib,
@@ -1158,6 +1259,7 @@ LOCAL ERR ErrLGIPageMoveRootsInMacro(
         ULONG fMoveFlags = LRPAGEMOVE::fRootNone;
         if ( ipg == 1 )
         {
+            // Root/FDP.
             pcsrSource = &prm->csrFDP;
             pdataBeforeSource = &prm->dataBeforeFDP;
             pgnoNew = prm->pgnoNewFDP;
@@ -1166,6 +1268,7 @@ LOCAL ERR ErrLGIPageMoveRootsInMacro(
         }
         else if ( ipg == 2 )
         {
+            // OE.
             pcsrSource = &prm->csrOE;
             pdataBeforeSource = &prm->dataBeforeOE;
             pgnoNew = prm->pgnoNewOE;
@@ -1174,6 +1277,7 @@ LOCAL ERR ErrLGIPageMoveRootsInMacro(
         }
         else if ( ipg == 3 )
         {
+            // AE.
             pcsrSource = &prm->csrAE;
             pdataBeforeSource = &prm->dataBeforeAE;
             pgnoNew = prm->pgnoNewAE;
@@ -1185,6 +1289,7 @@ LOCAL ERR ErrLGIPageMoveRootsInMacro(
             Assert( fFalse );
         }
 
+        // Log the move.
         CallR( ErrLGIPageMoveNoTableInMacro(
                 ppib,
                 ifmp,
@@ -1204,6 +1309,9 @@ LOCAL ERR ErrLGIPageMoveRootsInMacro(
                 fMoveFlags,
                 plgpos ) );
 
+        // Update the pre-image with the new (re-organized) version of the source page,
+        // just to make sure we produce the same image during do-time and redo.
+        // Note this is not required for correctness.
         Assert( (ULONG)pdataBeforeSource->Cb() == pcsrSource->Cpage().CbBuffer() );
         Assert( pcsrSource->Cpage().CbPage() == (ULONG)g_cbPage );
         Assert( (ULONG)pdataBeforeSource->Cb() == (ULONG)g_cbPage );
@@ -1216,6 +1324,8 @@ LOCAL ERR ErrLGIPageMoveRootsInMacro(
     return err;
 }
 
+// We do not have a valid FUCB here because of how root moves work. We do not
+// want an open FUCB on the very table we're moving the root of.
 
 LOCAL ERR ErrLGISetExternalHeaderNoTableInMacro(
     PIB* const      ppib,
@@ -1233,8 +1343,8 @@ LOCAL ERR ErrLGISetExternalHeaderNoTableInMacro(
             ifmp,
             pgnoFDP,
             objidFDP,
-            fFalse,
-            fFalse,
+            fFalse, // fUnique: not relevant to setting the external header.
+            fFalse, // fSpace: not relevant to setting the external header.
             pcsr,
             data,
             plgpos,
@@ -1283,6 +1393,8 @@ LOCAL INLINE ERR ErrLGIReplace(
     Assert( !( dirflag & fDIRNoLog ) );
     Assert( g_rgfmp[ifmp].FLogOn() );
 
+    //  must be in a transaction since we will not redo level 0 modifications
+    //
     Assert( ppib->Level() > 0 );
 
     CallR( ErrLGDeferBeginTransaction( ppib ) );
@@ -1361,6 +1473,7 @@ LOCAL INLINE ERR ErrLGIReplace(
 
     err = plog->ErrLGLogRec( rgdata, 2, fDirtyCSR ? 0 : fLGMacroGoing, ppib->lgposStart.lGeneration, plgpos );
 
+    // on error, return to before dirty dbtime on page
     if ( JET_errSuccess > err && fDirtyCSR )
     {
         Assert ( dbtimeInvalid !=  lrreplace.le_dbtimeBefore && dbtimeNil != lrreplace.le_dbtimeBefore);
@@ -1374,6 +1487,8 @@ LOCAL INLINE ERR ErrLGIReplace(
     return err;
 }
 
+// We do not have a valid FUCB here because of how root moves work. We do not
+// want an open FUCB on the very table we're moving the root of.
 
 LOCAL ERR ErrLGIReplaceNoTableInMacro(
     PIB* const          ppib,
@@ -1437,11 +1552,15 @@ ERR ErrLGRootPageMove(
 
     CallR( ErrLGDeferBeginTransaction( ppib ) );
 
+    // Count number of page references and allocate array.
+    //
 
     CPG cpgRef = 0;
 
+    // Root, OE, AE (current and new).
     cpgRef += 6;
 
+    // Children objects.
     for ( ROOTMOVECHILD* prmc = prm->prootMoveChildren;
             prmc != NULL;
             prmc = prmc->prootMoveChildNext )
@@ -1449,6 +1568,7 @@ ERR ErrLGRootPageMove(
         cpgRef++;
     }
 
+    // Catalog pages.
     for ( int iCat = 0; iCat < 2; iCat++ )
     {
         cpgRef++;
@@ -1462,14 +1582,19 @@ ERR ErrLGRootPageMove(
 
     AssumePREFAST( cpgRef >= ( 6 + 2 ) );
 
+    // Allocate array of pages.
     AllocR( rgpgnoRef = new PGNO[ cpgRef ] );
     CPG ipgRef = 0;
 
+    // Log macro begin.
     dbtimeMacro = prm->dbtimeAfter;
     Call( ErrLGIMacroBegin( ppib, dbtimeMacro ) );
     fAbortMacro = fTrue;
 
+    // Log the actual modifications.
+    //
 
+    // Log root page move marker LR.
     {
     LRROOTPAGEMOVE lrrpm;
     lrrpm.SetDbtimeAfter( prm->dbtimeAfter );
@@ -1485,6 +1610,7 @@ ERR ErrLGRootPageMove(
     Call( plog->ErrLGLogRec( &data, 1, fLGMacroGoing, ppib->lgposStart.lGeneration, &lgposThrowAway ) );
     }
 
+    // Log move of the root, OE and AE.
     Call( ErrLGIPageMoveRootsInMacro( ppib, ifmp, prm, &lgposThrowAway ) );
     rgpgnoRef[ipgRef++] = prm->pgnoFDP;
     rgpgnoRef[ipgRef++] = prm->pgnoOE;
@@ -1493,6 +1619,7 @@ ERR ErrLGRootPageMove(
     rgpgnoRef[ipgRef++] = prm->pgnoNewOE;
     rgpgnoRef[ipgRef++] = prm->pgnoNewAE;
 
+    // Log updates to children's external headers.
     for ( ROOTMOVECHILD* prmc = prm->prootMoveChildren;
             prmc != NULL;
             prmc = prmc->prootMoveChildNext )
@@ -1510,6 +1637,7 @@ ERR ErrLGRootPageMove(
         rgpgnoRef[ipgRef++] = prmc->pgnoChildFDP;
     }
 
+    // Log updates to the catalog.
     for ( int iCat = 0; iCat < 2; iCat++ )
     {
         const PGNO pgnoFDP = ( iCat == 0 ) ? pgnoFDPMSO : pgnoFDPMSOShadow;
@@ -1521,8 +1649,8 @@ ERR ErrLGRootPageMove(
                 ifmp,
                 pgnoFDP,
                 objidFDP,
-                fTrue,
-                fFalse,
+                fTrue,  // fUnique
+                fFalse, // fSpace
                 &prm->csrCatObj[iCat],
                 prm->dataBeforeCatObj[iCat],
                 prm->dataNewCatObj[iCat],
@@ -1562,8 +1690,8 @@ ERR ErrLGRootPageMove(
                     ifmp,
                     pgnoFDP,
                     objidFDP,
-                    fTrue,
-                    fFalse,
+                    fTrue,  // fUnique
+                    fFalse, // fSpace
                     pcsr,
                     *pdata,
                     prm->dataNewCatClustIdx[iCat],
@@ -1579,6 +1707,7 @@ ERR ErrLGRootPageMove(
 
     Call( ErrFaultInjection( 41962 ) );
 
+    // Macro end.
     Assert( ipgRef == cpgRef );
     Assert( dbtimeMacro != dbtimeNil );
     Call( ErrLGIMacroEnd( ppib, dbtimeMacro, lrtypMacroCommit, ifmp, rgpgnoRef, ipgRef, plgpos ) );
@@ -1637,6 +1766,7 @@ ERR ErrLGReplace(
             dbtimeBefore );
 }
 
+//  log Deferred Undo Info of given RCE.
 
 ERR ErrLGIUndoInfo( const RCE *prce, LGPOS *plgpos, const BOOL fRetry )
 {
@@ -1650,14 +1780,23 @@ ERR ErrLGIUndoInfo( const RCE *prce, LGPOS *plgpos, const BOOL fRetry )
 
     *plgpos = lgposMin;
 
+    //  NOTE: even during recovering, we might want to record it if
+    //  NOTE: it is logging during undo in LGEndAllSession.
+    //
     Assert( !g_rgfmp[pfucb->ifmp].FLogOn() || !plog->FLogDisabled() );
     if ( !g_rgfmp[pfucb->ifmp].FLogOn() )
     {
         return JET_errSuccess;
     }
 
+    //  Multiple threads may be trying to log UndoInfo (BF when it flushes or
+    //  original thread when transaction is rolled back)
+    //  It doesn't actually matter if multiple UndoInfo's are logged (on
+    //  recovery, any UndoInfo log records beyond the first will cause
+    //  be ignored because version creation will err out with JET_errPreviousVersion).
     if ( pgnoNull == pgnoUndoInfo )
     {
+        //  someone beat us to it, so just bail out
         return JET_errSuccess;
     }
 
@@ -1666,6 +1805,9 @@ ERR ErrLGIUndoInfo( const RCE *prce, LGPOS *plgpos, const BOOL fRetry )
         return ErrERRCheck( JET_errLogDisabledDueToRecoveryFailure );
     }
 
+    //  don't permit logging of undo info during Redo phase of recovery,
+    //  This includes beginning of undo before RecoveryUndo has been logged.
+    //
     if ( plog->FRecovering() &&
          ( fRecoveringRedo == plog->FRecoveringMode() ||
            ( fRecoveringUndo == plog->FRecoveringMode() &&
@@ -1742,11 +1884,11 @@ ERR ErrLGIUndoInfo( const RCE *prce, LGPOS *plgpos, const BOOL fRetry )
 
     if ( !fRetry )
     {
-        err = plog->ErrLGTryLogRec( rgdata, 4, 0, 0 , plgpos );
+        err = plog->ErrLGTryLogRec( rgdata, 4, 0, 0 /*pfucb->ppib->lgposStart.lGeneration*/, plgpos );
     }
     else
     {
-        err = plog->ErrLGLogRec( rgdata, 4, 0, 0 , plgpos );
+        err = plog->ErrLGLogRec( rgdata, 4, 0, 0 /*pfucb->ppib->lgposStart.lGeneration*/, plgpos );
     }
 
     return err;
@@ -1769,7 +1911,8 @@ ERR ErrLGFlagDelete( const FUCB * const pfucb,
                      const DIRFLAG  dirflag,
                      LGPOS      * const plgpos,
                      const VERPROXY * const pverproxy,
-                     const BOOL             fDirtyCSR )
+                     const BOOL             fDirtyCSR )     // true - if we must dirty the page inside (in which case dbtime before is in the CSR
+                                                            // false - record dbtimeInvalid for dbtimeBefore (insert part of split operations)
 
 {
     ERR             err;
@@ -1806,6 +1949,8 @@ ERR ErrLGFlagDelete( const FUCB * const pfucb,
                         pverproxy->prcePrimary->Pfucb()->ppib :
                         pfucb->ppib;
 
+    //  assert in a transaction since will not redo level 0 modifications
+    //
     Assert( ppib->Level() > 0 );
 
     CallR( ErrLGDeferBeginTransaction( ppib ) );
@@ -1850,6 +1995,7 @@ ERR ErrLGFlagDelete( const FUCB * const pfucb,
 
     err = plog->ErrLGLogRec( rgdata, 1, fDirtyCSR ? 0 : fLGMacroGoing, ppib->lgposStart.lGeneration, plgpos );
 
+    // on error, return to before dirty dbtime on page
     if ( JET_errSuccess > err && fDirtyCSR )
     {
         Assert ( dbtimeInvalid !=  lrflagdelete.le_dbtimeBefore && dbtimeNil != lrflagdelete.le_dbtimeBefore);
@@ -1864,7 +2010,8 @@ ERR ErrLGFlagDelete( const FUCB * const pfucb,
 ERR ErrLGDelete(    const FUCB      *pfucb,
                     CSR             *pcsr,
                     LGPOS           *plgpos ,
-                    const BOOL      fDirtyCSR )
+                    const BOOL      fDirtyCSR )     // true - if we must dirty the page inside (in which case dbtime before is in the CSR
+                                                            // false - record dbtimeInvalid for dbtimeBefore (insert part of split operations)
 {
     ERR         err;
     LRDELETE    lrdelete;
@@ -1888,10 +2035,13 @@ ERR ErrLGDelete(    const FUCB      *pfucb,
 
     Assert( g_rgfmp[pfucb->ifmp].FLogOn() );
 
+    //  assert in a transaction since will not redo level 0 modifications
+    //
     PIB     *ppib   = pfucb->ppib;
     Assert( ppib->Level() > 0 );
 
 
+    //  Redo only operation
 
     CallR( ErrLGDeferBeginTransaction( ppib ) );
 
@@ -1930,6 +2080,7 @@ ERR ErrLGDelete(    const FUCB      *pfucb,
 
     err = plog->ErrLGLogRec( rgdata, 1, fDirtyCSR ? 0 : fLGMacroGoing, ppib->lgposStart.lGeneration, plgpos );
 
+    // on error, return to before dirty dbtime on page
     if ( JET_errSuccess > err && fDirtyCSR )
     {
         Assert ( dbtimeInvalid !=  lrdelete.le_dbtimeBefore && dbtimeNil != lrdelete.le_dbtimeBefore);
@@ -1943,7 +2094,8 @@ ERR ErrLGDelete(    const FUCB      *pfucb,
 
 ERR ErrLGUndo(  RCE             *prce,
                 CSR             *pcsr,
-                const BOOL      fDirtyCSR )
+                const BOOL      fDirtyCSR )     // true - if we must dirty the page inside (in which case dbtime before is in the CSR
+                                                // false - record dbtimeInvalid for dbtimeBefore (insert part of split operations)
 {
     ERR             err;
     FUCB *          pfucb           = prce->Pfucb();
@@ -1957,6 +2109,8 @@ ERR ErrLGUndo(  RCE             *prce,
 
     Assert( fDirtyCSR );
 
+    //  NOTE: even during recovering, we want to record it
+    //
     if ( plog->FLogDisabled()
         || ( plog->FRecovering()
             && ( plog->FRecoveringMode() != fRecoveringUndo ) ) )
@@ -1973,9 +2127,13 @@ ERR ErrLGUndo(  RCE             *prce,
         return JET_errSuccess;
     }
 
+    // only undo during normal operations must go this way
+    // in this case the CSR must be the same as in the FUCB (from RCE)
     Assert ( Pcsr( pfucb ) == pcsr );
 
 
+    //  must be in a transaction since we will not redo level 0 modifications
+    //
     PIB     *ppib   = pfucb->ppib;
     Assert( ppib->Level() > 0 );
 
@@ -1993,7 +2151,7 @@ ERR ErrLGUndo(  RCE             *prce,
 
     lrundo.dbid             = g_rgfmp[prce->Pfucb()->ifmp].Dbid();
     lrundo.le_oper          = USHORT( prce->Oper() );
-    Assert( lrundo.le_oper == prce->Oper() );
+    Assert( lrundo.le_oper == prce->Oper() );       // regardless the size
     Assert( lrundo.le_oper != operMaskNull );
 
     Assert( pcsr->ILine() >= 0 );
@@ -2045,6 +2203,7 @@ ERR ErrLGUndo(  RCE             *prce,
     Assert ( JET_errSuccess <= err );
 
 HandleError:
+    // on error, return to before dirty dbtime on page
     if ( JET_errSuccess > err && fDirtyCSR )
     {
         Assert ( dbtimeInvalid !=  lrundo.le_dbtimeBefore && dbtimeNil != lrundo.le_dbtimeBefore);
@@ -2064,7 +2223,8 @@ ERR ErrLGDelta( const FUCB      *pfucb,
                 RCEID           rceid,
                 DIRFLAG         dirflag,
                 LGPOS           *plgpos,
-                const BOOL      fDirtyCSR )
+                const BOOL      fDirtyCSR )     // true - if we must dirty the page inside (in which case dbtime before is in the CSR
+                                                // false - record dbtimeInvalid for dbtimeBefore (insert part of split operations)
 
 {
     DATA                rgdata[4];
@@ -2091,6 +2251,8 @@ ERR ErrLGDelta( const FUCB      *pfucb,
 
     PIB     * const ppib = pfucb->ppib;
 
+    //  must be in a transaction since we will not redo level 0 modifications
+    //
     Assert( ppib->Level() > 0 );
 
     CallR( ErrLGDeferBeginTransaction( ppib ) );
@@ -2151,6 +2313,7 @@ ERR ErrLGDelta( const FUCB      *pfucb,
 
     err = plog->ErrLGLogRec( rgdata, 4, fDirtyCSR ? 0 : fLGMacroGoing, ppib->lgposStart.lGeneration, plgpos );
 
+    // on error, return to before dirty dbtime on page
     if ( JET_errSuccess > err && fDirtyCSR )
     {
         Assert ( dbtimeInvalid !=  lrdelta.le_dbtimeBefore && dbtimeNil != lrdelta.le_dbtimeBefore);
@@ -2161,8 +2324,14 @@ ERR ErrLGDelta( const FUCB      *pfucb,
     return err;
 }
 
+        //**************************************************
+        //     Transaction Operations
+        //**************************************************
 
 
+//  logs deferred open transactions.  No error returned since
+//  failure to log results in termination.
+//
 LOCAL ERR ErrLGIDeferBeginTransaction( PIB *ppib )
 {
     ERR         err;
@@ -2172,8 +2341,14 @@ LOCAL ERR ErrLGIDeferBeginTransaction( PIB *ppib )
     INST *pinst = PinstFromPpib( ppib );
     LOG *plog = pinst->m_plog;
 
+    //  serialise access to this PIB between the
+    //  "real" session and concurrent DDL proxying
+    //  operations on behalf of the session
+    //
     ENTERCRITICALSECTION    enterCritConcurrentDDL( &ppib->critConcurrentDDL );
 
+    //  check again, because if a proxy existed, it may have logged
+    //  the defer-begin for us
     if ( 0 == ppib->clevelsDeferBegin )
     {
         return JET_errSuccess;
@@ -2184,9 +2359,19 @@ LOCAL ERR ErrLGIDeferBeginTransaction( PIB *ppib )
     Assert( ppib->clevelsDeferBegin > 0 );
     Assert( !plog->FRecovering() || fRecoveringUndo == plog->FRecoveringMode() );
 
+    //  if using reserve log space, try to allocate more space
+    //  to resume normal logging.
 
+    //  HACK: use the file-system stored in the INST
+    //        (otherwise, we will need to drill a pfsapi down through to EVERY logged operation that
+    //         begins a deferred operation and that means ALL the B-Tree code will be touched among
+    //         other things)
     CallR( plog->ErrLGCheckState() );
 
+    //  begin transaction may be logged during rollback if
+    //  rollback is from a higher transaction level which has
+    //  not performed any updates.
+    //
     Assert( ppib->procid < 64000 || ppib->procid == procidRCEClean  || ppib->procid == procidRCECleanCallback );
     lrbeginDT.le_procid = (USHORT) ppib->procid;
 
@@ -2201,6 +2386,7 @@ LOCAL ERR ErrLGIDeferBeginTransaction( PIB *ppib )
     if ( 0 == lrbeginDT.levelBeginFrom )
     {
         Assert( ppib->trxBegin0 != trxMax );
+///     Assert( ppib->trxBegin0 != trxMin );    //  wrap-around can make this true
         lrbeginDT.le_trxBegin0 = ppib->trxBegin0;
         lrbeginDT.lrtyp = lrtypBegin0;
         rgdata[0].SetCb( sizeof(LRBEGIN0) );
@@ -2218,6 +2404,9 @@ LOCAL ERR ErrLGIDeferBeginTransaction( PIB *ppib )
     LGPOS lgposLogRec;
     err = plog->ErrLGLogRec( rgdata, 1, 0, ppib->lgposStart.lGeneration, &lgposLogRec, &ppib->critLogBeginTrx );
 
+    //  reset deferred open transaction count
+    //  Also set the ppib->lgposStart if it is begin for level 0.
+    //
     if ( err >= 0 )
     {
         ppib->clevelsDeferBegin = 0;
@@ -2286,7 +2475,7 @@ ERR ErrLGBeginTransaction( PIB * const ppib )
 ERR ErrLGCommitTransaction( PIB *ppib, const LEVEL levelCommitTo, BOOL fFireRedoCallback, TRX *ptrxCommit0, LGPOS *plgposRec )
 {
     ERR         err;
-    DATA        rgdata[3];
+    DATA        rgdata[3];  // 3 to allow for optional lrtypCommitC and user context data
     INT         cdata;
     LRCOMMIT0   lrcommit0;
     LRCOMMITCTX lrcommitC( ppib->CbClientCommitContextGeneric() );
@@ -2324,12 +2513,16 @@ ERR ErrLGCommitTransaction( PIB *ppib, const LEVEL levelCommitTo, BOOL fFireRedo
 
         rgdata[0].SetCb( sizeof(LRCOMMIT0) );
 
+        // if client specified a commit context, add it after the commit0 LR
 
         if ( ppib->CbClientCommitContextGeneric() )
         {
             Assert( lrcommitC.CbCommitCtx() == ppib->CbClientCommitContextGeneric() );
             Expected( lrcommitC.CbCommitCtx() <= cbCommitCtxExpected );
 
+            // Note: While we log the procid so the lrtypCommitCtx log record is separable at
+            // anytime form the lrtypCommit0 LR, we log them together so the two LRs will be
+            // in the same file for ease of processing from dump.
             lrcommitC.SetProcID( ppib->procid );
             if ( fFireRedoCallback )
             {
@@ -2358,6 +2551,7 @@ ERR ErrLGCommitTransaction( PIB *ppib, const LEVEL levelCommitTo, BOOL fFireRedo
     {
         ppib->ResetFBegin0Logged();
         Assert( lrcommit0.le_trxCommit0 != trxMax );
+///     Assert( lrcommit0.le_trxCommit0 != trxMin );    //  wrap-around can make this true
         *ptrxCommit0 = lrcommit0.le_trxCommit0;
     }
 
@@ -2398,12 +2592,16 @@ ERR ErrLGRollback( PIB *ppib, LEVEL levelsRollback, BOOL fRollbackToLevel0, BOOL
     rgdata[0].SetCb( sizeof(LRROLLBACK) );
     cdata = 1;
 
+    // if client specified a commit context, add it after the commit0 LR
 
     if ( fRollbackToLevel0 && ppib->CbClientCommitContextGeneric() )
     {
         Assert( lrcommitC.CbCommitCtx() == ppib->CbClientCommitContextGeneric() );
         Expected( lrcommitC.CbCommitCtx() <= cbCommitCtxExpected );
 
+        // Note: While we log the procid so the lrtypCommitCtx log record is separable at
+        // anytime form the lrtypCommit0 LR, we log them together so the two LRs will be
+        // in the same file for ease of processing from dump.
         lrcommitC.SetProcID( ppib->procid );
         if ( fFireRedoCallback )
         {
@@ -2423,6 +2621,10 @@ ERR ErrLGRollback( PIB *ppib, LEVEL levelsRollback, BOOL fRollbackToLevel0, BOOL
 
     if ( 0 == ppib->Level() )
     {
+        //  transaction is no longee outstanding,
+        //  so MUST reset flag, even on failure
+        //  (otherwise subsequent transaction
+        //  will still have the flag set)
         ppib->ResetFBegin0Logged();
     }
 
@@ -2430,6 +2632,9 @@ ERR ErrLGRollback( PIB *ppib, LEVEL levelsRollback, BOOL fRollbackToLevel0, BOOL
 }
 
 
+//**************************************************
+//     Database Operations
+//**************************************************
 
 ERR ErrLGWaitForWrite( PIB* const ppib, const LGPOS* const plgposLogRec )
 {
@@ -2437,6 +2642,8 @@ ERR ErrLGWaitForWrite( PIB* const ppib, const LGPOS* const plgposLogRec )
     INST* const pinst   = PinstFromPpib( ppib );
     LOG* const  plog    = pinst->m_plog;
 
+    //  wait for the specified lgpos to be flushed to the log
+    //
     Call( plog->ErrLGWaitForWrite( ppib, plgposLogRec ) );
 
 HandleError:
@@ -2455,6 +2662,15 @@ ERR ErrLGWrite( PIB* const ppib )
     INST* const pinst   = PinstFromPpib( ppib );
     LOG* const  plog    = pinst->m_plog;
 
+    //  WARNING: a log flush is not guaranteed,
+    //  because a log flush won't be signalled if
+    //  we can't acquire the right to signal a log
+    //  flush (typically because a log flush is
+    //  already under way, but note that it could
+    //  be at the very end of that process), so
+    //  callers of this function shouldn't expect
+    //  that a log flush will definitely occur
+    //
     plog->FLGSignalWrite();
 
     return err;
@@ -2494,8 +2710,14 @@ ERR ErrLGCreateDB(
     }
 
     Assert( 0 == CmpLgpos( lgposMin, pfmp->LgposAttach() ) );
+    //  HACK: use the file-system stored in the INST
+    //        (otherwise, we will need to drill a pfsapi down through to EVERY logged operation that
+    //         begins a deferred operation and that means ALL the B-Tree code will be touched among
+    //         other things)
     CallR( plog->ErrLGCheckState() );
 
+    //  insert database attachment in log attachments
+    //
     lrcreatedb.lrtyp = lrtypCreateDB;
     Assert( ppib->procid < 64000 );
     lrcreatedb.le_procid = (USHORT) ppib->procid;
@@ -2550,6 +2772,9 @@ ERR ErrLGCreateDB(
 
     CallR( err );
 
+    //  make sure the log is flushed before we change the state
+    //  We must wait on the last log record added, not necessarily the LGPOS returned from
+    //  ErrLGLogRec(), when adding multiple log records in one call.
     LGPOS   lgposStartOfLastRec = *plgposRec;
     plog->LGAddLgpos( &lgposStartOfLastRec, rgdata[0].Cb() + rgdata[1].Cb() + rgdata[2].Cb() - 1 );
     err = ErrLGWaitForWrite( ppib, &lgposStartOfLastRec );
@@ -2579,6 +2804,8 @@ ERR ErrLGCreateDBFinish(
         return JET_errSuccess;
     }
 
+    //  insert database attachment in log attachments
+    //
     lrCreateDBFinish.lrtyp = lrtypCreateDBFinish;
     Assert( ppib->procid < 64000 );
     lrCreateDBFinish.le_procid = (USHORT) ppib->procid;
@@ -2593,6 +2820,9 @@ ERR ErrLGCreateDBFinish(
 
     CallR( plog->ErrLGLogRec( &rgdata, 1, 0, ppib->lgposStart.lGeneration, plgposRec ) );
 
+    //  make sure the log is flushed before we change the state
+    //  We must wait on the last log record added, not necessarily the LGPOS returned from
+    //  ErrLGLogRec(), when adding multiple log records in one call.
     LGPOS   lgposStartOfLastRec = *plgposRec;
     plog->LGAddLgpos( &lgposStartOfLastRec, sizeof( LRCREATEDBFINISH ) - 1 );
     err = ErrLGWaitForWrite( ppib, &lgposStartOfLastRec );
@@ -2627,8 +2857,11 @@ ERR ErrLGAttachDB(
     }
 
     Assert( 0 == CmpLgpos( lgposMin, pfmp->LgposAttach() ) );
+    // we should not start the attachement if we are low on disk space
     CallR( plog->ErrLGCheckState() );
 
+    //  insert database attachment in log attachments
+    //
     lrattachdb.lrtyp = lrtypAttachDB;
     Assert( ppib->procid < 64000 );
     lrattachdb.le_procid = (USHORT) ppib->procid;
@@ -2672,6 +2905,9 @@ ERR ErrLGAttachDB(
     pfmp->RwlDetaching().LeaveAsWriter();
     CallR( err );
 
+    //  make sure the log is flushed before we change the state
+    //  We must wait on the last log record added, not necessarily the LGPOS returned from
+    //  ErrLGLogRec(), when adding multiple log records in one call.
     LGPOS   lgposStartOfLastRec = *plgposRec;
     plog->LGAddLgpos( &lgposStartOfLastRec, rgdata[0].Cb() + rgdata[1].Cb() - 1 );
     err = ErrLGWaitForWrite( ppib, &lgposStartOfLastRec );
@@ -2748,6 +2984,8 @@ ERR ErrLGSetDbVersion(
     Assert( pfmp->FLogOn() );
     Expected( CmpDbVer( pfmp->Pdbfilehdr()->Dbv(), dbvUpdate ) <= 0 );
 
+    //  insert database attachment in log attachments
+    //
     Assert( lrsetdbversion.lrtyp == lrtypSetDbVersion );
 
     lrsetdbversion.SetDbid( pfmp->Dbid() );
@@ -2791,6 +3029,7 @@ ERR ErrLGForceWriteLog( PIB * ppib )
 
     CallR( plog->ErrLGLogRec( rgdata, sizeof(rgdata) / sizeof(rgdata[0]), 0, ppib->lgposStart.lGeneration, &lgposStartOfLastRec ) );
 
+    //  make sure the log is flushed before we return
     plog->LGAddLgpos( &lgposStartOfLastRec, rgdata[0].Cb() - 1 );
     return ErrLGWaitForWrite( ppib, &lgposStartOfLastRec );
 }
@@ -2798,7 +3037,7 @@ ERR ErrLGForceWriteLog( PIB * ppib )
 
 ERR ErrLGForceLogRollover(
     PIB * const         ppib,
-    __in PSTR           szTrace,
+    __in PSTR           szTrace,    //  UNDONE: better to make this PCSTR, but may be impossible b/c we pass it to Data::SetPv()
     LGPOS* const        plgposLogRec )
 {
     INST * const        pinst       = PinstFromPpib( ppib );
@@ -2809,6 +3048,10 @@ ERR ErrLGForceLogRollover(
     DATA                rgdata[ cdata ];
     LRFORCELOGROLLOVER  lrForceLogRollover;
 
+    //  if logging is disabled, don't do anything
+    //
+    //  if recovering, don't do anything
+    //
     if ( plog->FLogDisabled() || plog->FRecovering() )
     {
         return JET_errSuccess;
@@ -2823,7 +3066,7 @@ ERR ErrLGForceLogRollover(
     rgdata[ idata ].SetCb( sizeof( lrForceLogRollover ) );
     idata++;
 
-    if ( cbTrace > 1 )
+    if ( cbTrace > 1 )  //  ignore if string is NULL or empty
     {
         rgdata[ idata ].SetPv( (BYTE *)szTrace );
         rgdata[ idata ].SetCb( cbTrace );
@@ -2881,6 +3124,8 @@ ERR ErrLGDetachDB(
     Assert( !pfmp->FReadOnlyAttach() );
     Assert( 0 != CmpLgpos( lgposMin, pfmp->LgposAttach() ) || NULL == pfmp->Pdbfilehdr() );
 
+    //  delete database attachment in log attachments
+    //
     lrdetachdb.lrtyp = lrtypDetachDB;
     Assert( ppib->procid < 64000 );
     lrdetachdb.le_procid = (USHORT) ppib->procid;
@@ -2897,6 +3142,7 @@ ERR ErrLGDetachDB(
     Assert( pfmp->RwlDetaching().FNotWriter() );
     Assert( pfmp->RwlDetaching().FNotReader() );
 
+    // disable logging twice detach/force detach record
     if ( 0 != CmpLgpos( lgposMin, pfmp->LgposDetach() ) )
     {
         *plgposRec = pfmp->LgposDetach();
@@ -2920,6 +3166,9 @@ ERR ErrLGDetachDB(
         CallR( err );
     }
 
+    //  make sure the log is flushed before we change the state
+    //  We must wait on the last log record added, not necessarily the LGPOS returned from
+    //  ErrLGLogRec(), when adding multiple log records in one call.
     LGPOS   lgposStartOfLastRec = *plgposRec;
     plog->LGAddLgpos( &lgposStartOfLastRec, rgdata[0].Cb() + rgdata[1].Cb() - 1 );
     err = ErrLGWaitForWrite( ppib, &lgposStartOfLastRec );
@@ -2938,6 +3187,7 @@ VOID LGICompressPreImage(
 {
     *pcompressionPerformed = 0;
     INT cbDataCompressedActual = 0;
+    // First try dehydration, only attempt if we can save at least 10%
     if ( cpage.FPageIsDehydratable( (ULONG *)&cbDataCompressedActual, fTrue ) &&
          cbDataCompressedActual <= (cbPage*9)/10 )
     {
@@ -2952,12 +3202,14 @@ VOID LGICompressPreImage(
     }
 
     CompressFlags compressFlags = compressXpress;
+    // If xpress10 is enabled, use that.
     if ( BoolParam( pinst, JET_paramFlight_EnableXpress10Compression ) &&
          pinst->m_plog->ErrLGFormatFeatureEnabled( JET_efvXpress10Compression ) >= JET_errSuccess )
     {
         compressFlags = CompressFlags( compressFlags | compressXpress10 );
     }
 
+    // Now try xpress compression on (the possibly dehydrated) page
     if ( ErrPKCompressData( dataToSet, compressFlags, pinst, pbDataCompressed, cbPage, &cbDataCompressedActual ) >= JET_errSuccess &&
              cbDataCompressedActual < dataToSet.Cb() )
     {
@@ -2967,6 +3219,7 @@ VOID LGICompressPreImage(
     }
     else if ( *pcompressionPerformed & fPreimageDehydrated )
     {
+        // If we did dehydration, but not xpress, need to copy data to the correct buffer
         Enforce( dataToSet.Cb() <= cbPage );
         AssumePREFAST( dataToSet.Cb() <= cbPage );
         const size_t cbToCopy = min( cbPage, dataToSet.Cb() );
@@ -2988,7 +3241,9 @@ ERR ErrLGIDecompressPreimage(
 
 #ifdef ENABLE_JET_UNIT_TEST
 
+//  ================================================================
 JETUNITTESTDB( PreImageCompression, Dehydration, dwOpenDatabase )
+//  ================================================================
 {
     const ULONG cbPage = 32 * 1024;
     CPAGE cpage, cpageT;
@@ -3011,7 +3266,7 @@ JETUNITTESTDB( PreImageCompression, Dehydration, dwOpenDatabase )
     pbDehydrationBuffer = new BYTE[cbPage];
     pbCompressionBuffer = new BYTE[cbPage];
 
-    PKTermCompression();
+    PKTermCompression();    // Compression is initialized with a smaller page size for db tests
     CHECK( JET_errSuccess == ErrPKInitCompression( cbPage, 1024, cbPage ) );
 
     LGICompressPreImage( pfmp->Pinst(), cpage, cbPage, data, pbDehydrationBuffer, pbCompressionBuffer, &compressionPerformed );
@@ -3047,7 +3302,9 @@ JETUNITTESTDB( PreImageCompression, Dehydration, dwOpenDatabase )
 }
 
 
+//  ================================================================
 JETUNITTESTDB( PreImageCompression, DehydrationAndXpress, dwOpenDatabase )
+//  ================================================================
 {
     const ULONG cbPage = 32 * 1024;
     CPAGE cpage, cpageT;
@@ -3073,7 +3330,7 @@ JETUNITTESTDB( PreImageCompression, DehydrationAndXpress, dwOpenDatabase )
     pbDehydrationBuffer = new BYTE[cbPage];
     pbCompressionBuffer = new BYTE[cbPage];
     
-    PKTermCompression();
+    PKTermCompression();    // Compression is initialized with a smaller page size for db tests
     CHECK( JET_errSuccess == ErrPKInitCompression( cbPage, 1024, cbPage ) );
 
     LGICompressPreImage( pfmp->Pinst(), cpage, cbPage, data, pbDehydrationBuffer, pbCompressionBuffer, &compressionPerformed );
@@ -3108,7 +3365,9 @@ JETUNITTESTDB( PreImageCompression, DehydrationAndXpress, dwOpenDatabase )
     delete[] pbDehydrationBuffer;
 }
 
+//  ================================================================
 JETUNITTESTDB( PreImageCompression, Xpress, dwOpenDatabase )
+//  ================================================================
 {
     const ULONG cbPage = 32 * 1024;
     CPAGE cpage;
@@ -3132,7 +3391,7 @@ JETUNITTESTDB( PreImageCompression, Xpress, dwOpenDatabase )
     pbDehydrationBuffer = new BYTE[cbPage];
     pbCompressionBuffer = new BYTE[cbPage];
     
-    PKTermCompression();
+    PKTermCompression();    // Compression is initialized with a smaller page size for db tests
     CHECK( JET_errSuccess == ErrPKInitCompression( cbPage, 1024, cbPage ) );
 
     LGICompressPreImage( pfmp->Pinst(), cpage, cbPage, data, pbDehydrationBuffer, pbCompressionBuffer, &compressionPerformed );
@@ -3149,9 +3408,20 @@ JETUNITTESTDB( PreImageCompression, Xpress, dwOpenDatabase )
     delete[] pbDehydrationBuffer;
 }
 
-#endif
+#endif // ENABLE_JET_UNIT_TEST
 
+//********************************************************
+//****     Split Operations                           ****
+//********************************************************
 
+//  logs the following
+//      --  begin macro
+//          for every split in the split chain [top-down order]
+//              log LRSPLITNEW
+//          leaf-level node operation to be performed atomically with split
+//          end macro
+//  returns lgpos of last log operation
+//
 ERR ErrLGSplit( const FUCB          * const pfucb,
                 _In_ SPLITPATH      * const psplitPathLeaf,
                 const KEYDATAFLAGS& kdfOper,
@@ -3192,21 +3462,26 @@ ERR ErrLGSplit( const FUCB          * const pfucb,
     Assert( !FFMPIsTempDB( pfucb->ifmp ) );
     Assert( ppib->Level() > 0 );
 
+    //  Redo only operation
 
     CallR( ErrLGDeferBeginTransaction( ppib ) );
 
+    //  count pages and navigate to root of splitPath
 
     const SPLITPATH *psplitPath = psplitPathLeaf;
 
+    //  start at three to account for the leaf
 
     CPG cpgno = 3;
     CPG ipgno = 0;
     
     for ( ; psplitPath->psplitPathParent != NULL; psplitPath = psplitPath->psplitPathParent )
     {
+        // Each level of the path touches at most 3 pgnos.
         cpgno += 3;
     }
 
+    //  allocate array of pages
 
     AllocR( rgpgno = new PGNO[ cpgno ] );
 
@@ -3214,6 +3489,7 @@ ERR ErrLGSplit( const FUCB          * const pfucb,
     Call( ErrLGIMacroBegin( ppib, dbtime ) );
     fAbortMacro = fTrue;
 
+    //  log splits top-down
 
     for ( ; psplitPath != NULL; psplitPath = psplitPath->psplitPathChild )
     {
@@ -3223,6 +3499,7 @@ ERR ErrLGSplit( const FUCB          * const pfucb,
 
         lrsplit.lrtyp                   = lrtypSplit2;
 
+        //  dbtime should have been validated in ErrBTISplitUpgradeLatches()
         Assert( dbtime > psplitPath->dbtimeBefore );
 
         lrsplit.le_dbtime               = dbtime;
@@ -3240,9 +3517,9 @@ ERR ErrLGSplit( const FUCB          * const pfucb,
         lrsplit.le_pgnoFDP          = PgnoFDP( pfucb );
         lrsplit.le_objidFDP         = ObjidFDP( pfucb );
 
-        lrsplit.SetILine( 0 );
+        lrsplit.SetILine( 0 );              //  iline member of LRPAGE is unused by split -- see iline members of LRSPLIT_ instead
 
-        Assert( !lrsplit.FVersioned() );
+        Assert( !lrsplit.FVersioned() );    //  version flag will get properly set by node operation causing the split
         Assert( !lrsplit.FDeleted() );
         Assert( !lrsplit.FUnique() );
         Assert( !lrsplit.FSpace() );
@@ -3263,6 +3540,8 @@ ERR ErrLGSplit( const FUCB          * const pfucb,
 
         if ( psplitPath->psplit == NULL )
         {
+            //  UNDONE: spin off separate log operation for parent page
+            //
             lrsplit.le_pgnoNew      = pgnoNull;
 
             lrsplit.le_ilineOper    = USHORT( psplitPath->csr.ILine() );
@@ -3279,6 +3558,7 @@ ERR ErrLGSplit( const FUCB          * const pfucb,
             Assert( psplit->csrNew.Dbtime() == lrsplit.le_dbtime );
             Assert( psplit->csrNew.FDirty() );
 
+            //  dbtime should have been validated in ErrBTISplitUpgradeLatches()
             Assert( pgnoNull == psplit->csrRight.Pgno()
                 || dbtime > psplit->dbtimeRightBefore );
 
@@ -3355,6 +3635,8 @@ ERR ErrLGSplit( const FUCB          * const pfucb,
 
         Call( plog->ErrLGLogRec( rgdata, idata, fLGMacroGoing, ppib->lgposStart.lGeneration, plgpos ) );
 
+        //  remember the pages that were touched in this macro; only
+        //  pgno, pgnoNew, and pgnoRight are accessed by BTISplitSetLgpos.
 
         Assert( ipgno + 3 <= cpgno );
 
@@ -3373,6 +3655,7 @@ ERR ErrLGSplit( const FUCB          * const pfucb,
                    ( dirflag & fDIRInsert ) ),
                  OSFormat( "LgSplitUnexpectedDirFlagChange:%d:%d", (int)dirflagPrevAssertOnly, (int)dirflag ) );
     
+    //  log leaf-level operation
     
     if ( psplitPathLeaf->psplit != NULL &&
          psplitPathLeaf->psplit->splitoper != splitoperNone )
@@ -3382,6 +3665,8 @@ ERR ErrLGSplit( const FUCB          * const pfucb,
 
         switch ( psplit->splitoper )
         {
+            //  log the appropriate operation
+            //
             case splitoperInsert:
                 AssertTrack( ( ( rceidNull == rceid2 ) && ( dirflagPrevAssertOnly == dirflag ) && ( dirflag & fDIRInsert ) ) ||
                              ( ( rceidNull != rceid2 ) && ( dirflagPrevAssertOnly != dirflag ) && ( dirflag & fDIRInsert ) && ( dirflagPrevAssertOnly & fDIRFlagInsertAndReplaceData ) ),
@@ -3408,6 +3693,8 @@ ERR ErrLGSplit( const FUCB          * const pfucb,
                                                      fDontDirtyCSR ) );
                 break;
 
+            //  UNDONE: get the correct dataOld!!!
+            //
             case splitoperReplace:
                 AssertTrack( rceidNull == rceid2, "OpReplaceNonNullRce2" );
                 Assert( NULL == pverproxy );
@@ -3415,7 +3702,7 @@ ERR ErrLGSplit( const FUCB          * const pfucb,
                                     &psplitPathLeaf->csr,
                                     psplit->rglineinfo[psplit->ilineOper].kdf.data,
                                     kdfOper.data,
-                                    NULL,
+                                    NULL,           // UNDONE: logdiff for split
                                     rceid1,
                                     dirflag,
                                     plgpos,
@@ -3448,6 +3735,13 @@ HandleError:
 }
 
 
+//  logs the following
+//      --  begin macro
+//          for every merge in the merge chain
+//              log LRMERGENEW
+//          end macro
+//  returns lgpos of last log operation
+//
 ERR ErrLGMerge( const FUCB *pfucb, MERGEPATH *pmergePathLeaf, LGPOS *plgpos )
 {
     ERR     err = JET_errSuccess;
@@ -3467,9 +3761,11 @@ ERR ErrLGMerge( const FUCB *pfucb, MERGEPATH *pmergePathLeaf, LGPOS *plgpos )
         return JET_errSuccess;
     }
 
+    //  merge always happens at level 1
     Assert( pfucb->ppib->Level() == 1 );
     Assert( !FFMPIsTempDB( pfucb->ifmp ) );
 
+    //  Redo only operations
 
     CallR( ErrLGDeferBeginTransaction( pfucb->ppib ) );
 
@@ -3477,7 +3773,9 @@ ERR ErrLGMerge( const FUCB *pfucb, MERGEPATH *pmergePathLeaf, LGPOS *plgpos )
 
     Assert( pmergePathLeaf->pmerge != NULL );
 
+    //  count pages and navigate to root of mergePath
 
+    //  start at 3 to account for the leaf
 
     CPG cpgno = 3;
     CPG ipgno = 0;
@@ -3485,9 +3783,11 @@ ERR ErrLGMerge( const FUCB *pfucb, MERGEPATH *pmergePathLeaf, LGPOS *plgpos )
     for ( ; pmergePath->pmergePathParent != NULL && latchWrite == pmergePath->pmergePathParent->csr.Latch();
             pmergePath = pmergePath->pmergePathParent )
     {
+        // Each level of the path touches at most 3 pgnos.
         cpgno += 3;
     }
 
+    //  allocate array of pages
 
     AllocR( rgpgno = new PGNO[ cpgno ] );
 
@@ -3495,6 +3795,7 @@ ERR ErrLGMerge( const FUCB *pfucb, MERGEPATH *pmergePathLeaf, LGPOS *plgpos )
     Call( ErrLGIMacroBegin( pfucb->ppib, dbtime ) );
     fAbortMacro = fTrue;
 
+    //  log merges top-down
 
     for ( ; pmergePath != NULL; pmergePath = pmergePath->pmergePathChild )
     {
@@ -3622,6 +3923,9 @@ ERR ErrLGMerge( const FUCB *pfucb, MERGEPATH *pmergePathLeaf, LGPOS *plgpos )
 
         Call( plog->ErrLGLogRec( rgdata, idata, fLGMacroGoing, pfucb->ppib->lgposStart.lGeneration, plgpos ) );
 
+        //  remember the pages that were touched in this macro; only
+        //  pgno, pgnoLeft, pgnoRight and pgnoNew are accessed by BTIMergeSetLgpos. 
+        //  pgnoNew is only for LRPAGEMOVE
 
         Assert( ipgno + 3 <= cpgno );
 
@@ -3722,6 +4026,8 @@ ERR ErrLGEmptyTree(
 
     err = plog->ErrLGLogRec( rgdata, 2, 0, pfucb->ppib->lgposStart.lGeneration, plgpos );
 
+    //  on logging failure, must revert dbtime to ensure page doesn't
+    //  get erroneously flushed with wrong dbtime
     if ( err < 0 )
     {
         Assert( dbtimeInvalid !=  lremptytree.le_dbtimeBefore );
@@ -3734,6 +4040,9 @@ ERR ErrLGEmptyTree(
 }
 
 
+        //**************************************************
+        //     Miscellaneous Operations
+        //**************************************************
 
 
 ERR ErrLGCreateMultipleExtentFDP(
@@ -3762,8 +4071,13 @@ ERR ErrLGCreateMultipleExtentFDP(
     Assert( !plog->FRecovering() );
     Assert( 0 < pfucb->ppib->Level() );
 
+    //  HACK: use the file-system stored in the INST
+    //        (otherwise, we will need to drill a pfsapi down through to EVERY logged operation that
+    //         begins a deferred operation and that means ALL the B-Tree code will be touched among
+    //         other things)
     CallR( plog->ErrLGCheckState() );
 
+    //  Redo only operation
 
     CallR( ErrLGDeferBeginTransaction( pfucb->ppib ) );
 
@@ -3780,6 +4094,7 @@ ERR ErrLGCreateMultipleExtentFDP(
 
     lrcreatemefdp.dbid              = g_rgfmp[ pfucb->ifmp ].Dbid();
     lrcreatemefdp.le_dbtime         = pcsr->Dbtime();
+    // new page, dbtimeBefore has no meaning
     lrcreatemefdp.le_dbtimeBefore = dbtimeNil;
     lrcreatemefdp.le_cpgPrimary     = psph->CpgPrimary();
 
@@ -3829,8 +4144,13 @@ ERR ErrLGCreateSingleExtentFDP(
 
     Assert( 0 < pfucb->ppib->Level() );
 
+    //  HACK: use the file-system stored in the INST
+    //        (otherwise, we will need to drill a pfsapi down through to EVERY logged operation that
+    //         begins a deferred operation and that means ALL the B-Tree code will be touched among
+    //         other things)
     CallR( plog->ErrLGCheckState() );
 
+    //  Redo only operation
 
     CallR( ErrLGDeferBeginTransaction( pfucb->ppib ) );
 
@@ -3847,6 +4167,7 @@ ERR ErrLGCreateSingleExtentFDP(
 
     lrcreatesefdp.dbid              = g_rgfmp[ pfucb->ifmp ].Dbid();
     lrcreatesefdp.le_dbtime         = pcsr->Dbtime();
+    // new page, dbtimeBefore has no meaning
     lrcreatesefdp.le_dbtimeBefore = dbtimeNil;
     lrcreatesefdp.le_cpgPrimary     = psph->CpgPrimary();
 
@@ -3902,8 +4223,13 @@ ERR ErrLGConvertFDP(
 
     Assert( 0 < pfucb->ppib->Level() );
 
+    //  HACK: use the file-system stored in the INST
+    //        (otherwise, we will need to drill a pfsapi down through to EVERY logged operation that
+    //         begins a deferred operation and that means ALL the B-Tree code will be touched among
+    //         other things)
     CallR( plog->ErrLGCheckState() );
 
+    //  Redo only operation
 
     CallR( ErrLGDeferBeginTransaction( pfucb->ppib ) );
 
@@ -3912,7 +4238,7 @@ ERR ErrLGConvertFDP(
     lrconvertfdp.le_pgnoFDPParent       = psph->PgnoParent();
     lrconvertfdp.le_pgno                = PgnoFDP( pfucb );
     lrconvertfdp.le_objidFDP            = ObjidFDP( pfucb );
-    lrconvertfdp.le_pgnoOE              = pgnoSecondaryFirst;
+    lrconvertfdp.le_pgnoOE              = pgnoSecondaryFirst;       //  UNDONE: HUGE assumption here - it would be more elegant to pass this in
     lrconvertfdp.le_pgnoAE              = pgnoSecondaryFirst + 1;
 
     lrconvertfdp.dbid                   = g_rgfmp[ pfucb->ifmp ].Dbid();
@@ -3981,6 +4307,7 @@ ERR ErrLGStart( INST *pinst )
     if ( plog->FLogDisabled() || ( plog->FRecovering() && plog->FRecoveringMode() != fRecoveringUndo ) )
         return JET_errSuccess;
 
+    // we should not start if we are low on disk space
     CallR( plog->ErrLGCheckState() );
 
     lr.lrtyp = lrtypInit2;
@@ -4058,6 +4385,14 @@ ERR ErrLGIMacroEnd( PIB *ppib, DBTIME dbtime, LRTYP lrtyp, const IFMP ifmp, cons
     {
         Assert( rgpgno );
 
+        // emit LRMACROINFO if pages were referenced to support incremental reseed of one database
+        //
+        // NOTE:  LRMACROINFO is being maintained for backwards compat with earlier versions of ExO.  it will be removed
+        // once LRMACROINFO2 is everywhere.  until then we will maintain the legacy behavior which is to report only pages
+        // from dbid 1.  pages from other dbids will be reported via LRMACROINFO2.  we will also change the log dumper to
+        // report LRMACROINFO page refs as dbid 1 rather than dbid 0 (i.e. unknown)
+        //
+        // NOTE:  once LRMACROINFO is extinct be sure to emit page refs for dbid 1 via LRMACROINFO2!
         if ( g_rgfmp[ifmp].Dbid() == 1 )
         {
             lrMacroInfo.SetCountOfPgno( cpgno );
@@ -4071,6 +4406,7 @@ ERR ErrLGIMacroEnd( PIB *ppib, DBTIME dbtime, LRTYP lrtyp, const IFMP ifmp, cons
             cdata++;
         }
 
+        // emit LRMACROINFO2 if pages were referenced to support incremental reseed of multiple databases
         else
         {
             lrMacroInfo2.SetDbid( g_rgfmp[ifmp].Dbid() );
@@ -4086,18 +4422,27 @@ ERR ErrLGIMacroEnd( PIB *ppib, DBTIME dbtime, LRTYP lrtyp, const IFMP ifmp, cons
         }
     }
     
+    //  It is essential that these two log records are in the same log file
+    //  because the MacroCommit effectively modifies a set of pages and only pages 
+    //  referenced by the log file that contain that MacroEnd will be patched by IncReseed.
 
+    //  An alternate solution is just ensure that all contents between the begin and
+    //  end fall into the same log file. This would be a bigger code change and would increase the
+    //  minimum log-file size that we need based on page size. The advantage would be that it
+    //  would eliminate the need for the extra log record.
 
+    //  Another alternate solution is to only have Redo pay attention to the MacroInfo. This would
+    //  require Redo knowing whether the log format was generated with MacroInfos.
 
 
     
 
     Assert( cdata <= _countof( rgdata ) );
-    err = plog->ErrLGLogRec( rgdata,
-                             cdata,
-                             fLGMacroGoing,
-                             ppib->lgposStart.lGeneration,
-                             plgpos );
+    err = plog->ErrLGLogRec( rgdata,        // data
+                             cdata,         // count of elements
+                             fLGMacroGoing, // flags
+                             ppib->lgposStart.lGeneration, // lgenBegin0
+                             plgpos );      // returned lgpos
 
     return err;
 }
@@ -4105,7 +4450,16 @@ ERR ErrLGIMacroEnd( PIB *ppib, DBTIME dbtime, LRTYP lrtyp, const IFMP ifmp, cons
 
 ERR ErrLGMacroAbort( PIB *ppib, DBTIME dbtime, LGPOS *plgpos )
 {
+    // The execution of a MacroAbort means that none of the work in the macro actually 
+    // happens. Thus, if a MacroAbort falls immediately after a divergence, none of the 
+    // pages referenced in the Macro have been touched and thus don't need patching by
+    // IncReseed. So we pass NULL for the array of pages touched.
 
+    // This scenario is barely possible however as the simplest case involves
+    // the following: passive 3 sees the commit at the beginning log file 10, lossy failover
+    // from 1 to 2, passive 3 increseeds, replays and not sees an abort at the head of logfile 11,
+    // lossy failover from 2 to 1, passive 3 increseeds, replays, and now sees a commit at the head
+    // of logfile 10.
     
     return ErrLGIMacroEnd( ppib, dbtime, lrtypMacroAbort, ifmpNil, NULL, 0, plgpos );
 }
@@ -4117,6 +4471,8 @@ ERR ErrLGShutDownMark( INST *pinst, LGPOS *plgposRec )
     LRSHUTDOWNMARK  lr;
     LOG *           plog = pinst->m_plog;
 
+    //  record even during recovery
+    //
     if ( plog->FLogDisabled() || ( plog->FRecovering() && plog->FRecoveringMode() != fRecoveringUndo ) )
     {
         *plgposRec = lgposMin;
@@ -4130,6 +4486,8 @@ ERR ErrLGShutDownMark( INST *pinst, LGPOS *plgposRec )
 
     CallR( plog->ErrLGLogRec( rgdata, 1, 0, 0, plgposRec ) );
 
+    //  make sure the shutdown record is flushed
+    //
     PIB pibFake;
     pibFake.m_pinst = pinst;
     err = ErrLGWaitForWrite( &pibFake, plgposRec );
@@ -4143,6 +4501,7 @@ ERR ErrLGRecoveryUndo( LOG *plog, BOOL fAggressiveRollover )
     DATA            rgdata[1];
     LRRECOVERYUNDO2 lr;
 
+    //  should only be called during undo phase of recovery
     Assert( plog->FRecovering() );
     Assert( fRecoveringUndo == plog->FRecoveringMode() );
 
@@ -4173,6 +4532,8 @@ ERR ErrLGQuitRec( LOG *plog, LRTYP lrtyp, const LE_LGPOS *ple_lgpos, const LE_LG
     DATA        rgdata[1];
     LRTERMREC2  lr;
 
+    //  record even during recovery
+    //
     if ( plog->FLogDisabled() || ( plog->FRecovering() && plog->FRecoveringMode() != fRecoveringUndo ) )
         return JET_errSuccess;
 
@@ -4216,11 +4577,14 @@ ERR ErrLGLogBackup(
     LOGTIME         logtimeStamp;
     LGPOS           lgposLocal;
 
+    //  caller not interested in knowing the lgpos of this LR ...
     if ( plgposLogRec == NULL )
     {
         plgposLogRec = &lgposLocal;
     }
 
+    //  record even during recovery
+    //
     if ( plog->FLogDisabled() || ( plog->FRecovering() && plog->FRecoveringMode() != fRecoveringUndo ) )
     {
         AssertSz( fFalse, "Would be surprised to see this fire" );
@@ -4232,19 +4596,23 @@ ERR ErrLGLogBackup(
 
     Assert( lgenLow == 0 || lgenHigh == 0 || lgenLow <= lgenHigh );
 
+    // phase of backup
     lr.eBackupPhase = BYTE( ePhase );
 
+    // variety of backup
     lr.eBackupType = eType;
     lr.eBackupScope = BYTE( eScope );
 
+    // phase details ...
     lr.phaseDetails.le_genLow = lgenLow;
     lr.phaseDetails.le_genHigh = lgenHigh;
     Assert( plgpos || ePhase != LRLOGBACKUP::fLGBackupPhaseUpdate );
     if ( plgpos )
     {
-        Assert( plogtime );
+        Assert( plogtime ); // should have approximately corresponding logtime
         lr.phaseDetails.le_lgposMark = *plgpos;
     }
+    //  if you can not afford a logtime, one will be assigned to you.
     if ( plogtime == NULL )
     {
         Assert( ePhase == LRLOGBACKUP::fLGBackupPhaseBegin ||
@@ -4258,6 +4626,7 @@ ERR ErrLGLogBackup(
 
     lr.dbid = dbid;
 
+    // the path is not used, ignore it
     lr.le_cbPath = 0;
 
     rgdata[0].SetPv( (BYTE *)&lr );
@@ -4275,6 +4644,7 @@ ERR ErrLGPagePatchRequest( LOG * const plog, const IFMP ifmp, const PGNO pgno, c
     DATA                rgdata[1];
     LRPAGEPATCHREQUEST  lr;
 
+    // Changing the size of the record will break log compatability.
     C_ASSERT(46 == sizeof(LRPAGEPATCHREQUEST));
 
     if ( plog->FLogDisabled() || ( plog->FRecovering() && plog->FRecoveringMode() != fRecoveringUndo ) )
@@ -4318,6 +4688,12 @@ ERR ErrLGExtendDatabase( LOG * const plog, const IFMP ifmp, PGNO pgnoLast, LGPOS
 
     Call( plog->ErrLGLogRec( rgdata, _countof(rgdata), 0, 0, plgposExtend ) );
 
+    // Write out log buffers and flush the log. This makes sure that we don't proceed with the
+    // DB extension without making sure that the LRs associated with it are persisted. This is
+    // necessary because redoing a resize operation is determined by lgposLastResize in the DB
+    // header so we can't have the header be updated without the log record being guaranteed to
+    // be persisted. Quiescing LLR is not required because if a log is lost, lgposLastResize
+    // is fixed up consistently.
     {
     PIB pibFake;
     pibFake.m_pinst = PinstFromIfmp( ifmp );
@@ -4358,6 +4734,12 @@ ERR ErrLGShrinkDatabase( LOG * const plog, const IFMP ifmp, const PGNO pgnoLast,
     }
     Call( plog->ErrLGLogRec( rgdata, _countof(rgdata), 0, 0, plgposShrink ) );
 
+    // Write out log buffers and flush the log. This makes sure that we don't proceed with the
+    // DB truncation without making sure that the LRs associated with it are persisted. This is
+    // necessary because redoing a resize operation is determined by lgposLastResize in the DB
+    // header so we can't have the header be updated without the log record being guaranteed to
+    // be persisted. Quiescing LLR is required and will be taken care of by ErrBFLockPageRangeForExternalZeroing,
+    // which also handles Trim.
     {
     PIB pibFake;
     pibFake.m_pinst = PinstFromIfmp( ifmp );
@@ -4401,6 +4783,7 @@ ERR ErrLGTrimDatabase(
 
     Call( plog->ErrLGLogRec( rgdata, _countof(rgdata), 0, ppib->lgposStart.lGeneration, &lgposStartOfLastRec ) );
 
+    //  make sure the log is flushed before we return
     plog->LGAddLgpos( &lgposStartOfLastRec, rgdata[0].Cb() - 1 );
     Call( ErrLGWaitForWrite( ppib, &lgposStartOfLastRec ) );
 
@@ -4415,6 +4798,7 @@ ERR ErrLGIgnoredRecord( LOG * const plog, const IFMP ifmp, const INT cb )
     DATA            rgdata[2];
     LRIGNORED       lr( lrtypIgnored19 );
 
+    // Changing the size of the record will break log compatibility.
     C_ASSERT( 5 == sizeof(lr) );
 
     if ( plog->FLogDisabled() || ( plog->FRecovering() && plog->FRecoveringMode() != fRecoveringUndo ) )
@@ -4442,9 +4826,11 @@ HandleError:
 
 ERR ErrLGExtentFreed( LOG * const plog, const IFMP ifmp, const PGNO pgnoFirst, const CPG cpgExtent )
 {
+    // This is not logged for all free extent operations, only for those related to deleting a whole space tree.
     DATA                rgdata[1];
     LREXTENTFREED  lr;
 
+    // Changing the size of the record will break log compatability.
     C_ASSERT( 11 == sizeof(LREXTENTFREED) );
 
     if ( plog->FLogDisabled() || ( plog->FRecovering() && plog->FRecoveringMode() != fRecoveringUndo ) )
@@ -4607,6 +4993,8 @@ const char * SzLrtyp( LRTYP lrtyp )
         case lrtypAttachDB:     return szAttachDB;
         case lrtypDetachDB:     return szDetachDB;
 
+        //  debug log records
+        //
         case lrtypRecoveryUndo: return szRecoveryUndo;
         case lrtypRecoveryUndo2:    return szRecoveryUndo;
         case lrtypRecoveryQuit: return szRecoveryQuit;
@@ -4623,6 +5011,8 @@ const char * SzLrtyp( LRTYP lrtyp )
 
         case lrtypShutDownMark: return szShutDownMark;
 
+        //  multi-page updaters
+        //
         case lrtypCreateMultipleExtentFDP:  return szCreateMultipleExtentFDP;
         case lrtypCreateSingleExtentFDP:    return szCreateSingleExtentFDP;
         case lrtypConvertFDP2:              return szConvertFDP;
@@ -4636,6 +5026,8 @@ const char * SzLrtyp( LRTYP lrtyp )
         case lrtypPageMove:     return szPageMove;
         case lrtypRootPageMove: return szRootPageMove;
 
+        //  single-page updaters
+        //
         case lrtypInsert:       return szInsert;
         case lrtypFlagInsert:   return szFlagInsert;
         case lrtypFlagInsertAndReplaceData:
@@ -4665,13 +5057,13 @@ const char * SzLrtyp( LRTYP lrtyp )
 
         case lrtypMacroInfo:        return szMacroInfo;
         case lrtypExtendDB:         return szExtendDB;
-        case lrtypCommitCtx:        return szCommitCtx;
-        case lrtypScanCheck:        return szScanCheck;
+        case lrtypCommitCtx:        return szCommitCtx; // was lrtypIgnored3
+        case lrtypScanCheck:        return szScanCheck; // was lrtypIgnored4
         case lrtypScanCheck2:       return szScanCheck2;
-        case lrtypNOP2:             return szNOP2;
-        case lrtypReAttach:         return szReAttach;
-        case lrtypMacroInfo2:       return szMacroInfo2;
-        case lrtypFreeFDP:          return szFreeFDP;
+        case lrtypNOP2:             return szNOP2; // was lrtypIgnored5
+        case lrtypReAttach:         return szReAttach; // was lrtypIgnored6
+        case lrtypMacroInfo2:       return szMacroInfo2; // was lrtypIgnored7
+        case lrtypFreeFDP:          return szFreeFDP; // was lrtypIgnored8
 
         case lrtypIgnored9:
         case lrtypIgnored10:
@@ -4700,13 +5092,14 @@ const char * SzLrtyp( LRTYP lrtyp )
         default:
             AssertSz( fFalse, "Unknown lrtyp: %d\n", lrtyp );
 
+            // Fall through in retail.
             __fallthrough;
         case lrtypSLVPageAppendOBSOLETE:
         case lrtypSLVSpaceOBSOLETE:
         case lrtypSLVPageMoveOBSOLETE:
         case lrtypForceDetachDBOBSOLETE:
         case 47:
-        case 56:
+        case 56: // lrtypDbList
             return szUnknown;
     }
 }
@@ -4721,8 +5114,12 @@ ERR ErrLrToLogCsvSimple(
     ERR     err = JET_errSuccess;
     enum { eUnprocessed, eConsumed, eNopIgnored, eMax } eProcessed = eUnprocessed;
 
+    // Lets fold the lgpos into the checksum.
     ULONG ulCkSumSeed = ( (lgpos.lGeneration) ^ (lgpos.isec << 16 | lgpos.ib) );
 
+    // First two, defined in dump.cxx, where the header is available.
+    //WCHAR const * szLogHeaderGeneralInfo  ... 
+    //WCHAR const * szLogHeaderAttachInfo   ...
     WCHAR const * szLogRecordChecksumInfo           = L"LRCI";
     WCHAR const * szLogRecordDatabaseInfo           = L"LRDI";
     WCHAR const * szLogRecordPgChangeInfo           = L"LRPI";
@@ -4743,6 +5140,7 @@ ERR ErrLrToLogCsvSimple(
         SIGNATURE   signDb;
     } SIMPLE_CSV_CHG_INFO;
 
+    // stack based vars, for optimal perf
     #define LR_STACK_CSV_LINES   6
     const WCHAR *               rgszLogRecordsCsvFormats[LR_STACK_CSV_LINES] = { 0 };
     SIMPLE_CSV_CHG_INFO         rgChangeInfo[LR_STACK_CSV_LINES] = { 0 };
@@ -4761,11 +5159,333 @@ ERR ErrLrToLogCsvSimple(
     static LGPOS lgposPrev;
 
 
-    
+    /*  Details of divergence between /ml and log buffer dump ...
+
+Output from /ml e06.log /v
+
+>00000023,0149,013D McroBegin (c) 3603
+>00000023,0149,0148 Merge2    3603,35fe,338e:1(c,merge:[1:218:0],right:0,[1:0],left:0,[1:0],parent:0,[1:0],U:NSP:USR:NKC:NEP:D:None,size:0,maxsize:0,uncfree:0,beforeImage:0)
+>00000023,014A,018C Checksum  (0x0,0x0,0x0 checksum [0xFEEDBE5D])
+
+Output from dumplr on log buffer
+    NOTE: The first Merge2 LR is above, but the 2nd one is no where to be found ...
+
+0:000> !ese dumplr 00000000031D8348 9
+Trying to initialize global symbol prefix...
+Found symbol...
+Global symbols will be prefixed with "ESE!" by default.
+Validating global symbol prefix... OK
+JET_paramDatabasePageSize = 4096 (0x1000)
+Note: auto-loaded global table = 0x000007FEF4CB0230
+0x0000000000000060 bytes @ 0x00000000031D8348
+ Merge2    3603,35fe,338e:1(c,merge:[1:218:0],right:0,[1:0],left:0,[1:0],parent:0,[1:0],U:NSP:USR:NKC:NEP:D:None,size:0,maxsize:0,uncfree:0,beforeImage:0)
+0x0000000000000060 bytes @ 0x00000000031D83A8
+ Merge2    3603,3602,338e:1(c,merge:[1:311:0],right:2cfe,[1:312],left:0,[1:0],parent:35fe,[1:218],U:NSP:USR:NKC:EP:ND:EmptyPage,size:0,maxsize:0,uncfree:0,beforeImage:0)
+0x0000000000000184 bytes @ 0x00000000031D8408
+ NOP       (Total: 388)
+0x0000000000000016 bytes @ 0x00000000031D858C
+ Checksum  (0x0,0x0,0x0 checksum [0xFEEDBE5D])
+0x00000000000001EA bytes @ 0x00000000031D85A2
+ NOP       (Total: 490)
+0x0000000000000016 bytes @ 0x00000000031D878C
+ Checksum  (0x0,0x0,0x0 checksum [0xA43DE09A])
+0x000000000000005E bytes @ 0x00000000031D87A2
+ NOP       (Total: 94)
+0x0000000000000004 bytes @ 0x00000000031D8800
+ *UNKNOWN*
+0x0000000000000008 bytes @ 0x00000000031D8804
+ *UNKNOWN*
+
+Dumping the LRs out independantly ...
+
+0:000> db 0x00000000031D8348 l0x60
+00000000`031d8348  3f 0c 00 01 da 00 00 00-03 36 00 00 00 00 00 00  ?........6......
+00000000`031d8358  fe 35 00 00 00 00 00 00-8e 33 00 00 01 00 00 04  .5.......3......
+00000000`031d8368  00 00 00 00 ff ff ff ff-ff ff ff ff 00 00 00 00  ................
+00000000`031d8378  ff ff ff ff ff ff ff ff-00 00 00 00 ff ff ff ff  ................
+00000000`031d8388  ff ff ff ff da 00 00 00-64 00 00 00 00 00 00 00  ........d.......
+00000000`031d8398  00 00 00 00 02 00 00 00-00 00 00 00 00 00 00 00  ................
+0:000> db 0x00000000031D83A8 l0x60
+00000000`031d83a8  3f 0c 00 01 37 01 00 00-03 36 00 00 00 00 00 00  ?...7....6......
+00000000`031d83b8  02 36 00 00 00 00 00 00-8e 33 00 00 01 00 00 04  .6.......3......
+00000000`031d83c8  38 01 00 00 fe 2c 00 00-00 00 00 00 00 00 00 00  8....,..........
+00000000`031d83d8  ff ff ff ff ff ff ff ff-da 00 00 00 fe 35 00 00  .............5..
+00000000`031d83e8  00 00 00 00 da 00 00 00-64 00 00 00 00 00 00 00  ........d.......
+00000000`031d83f8  00 00 00 00 04 01 00 00-00 00 00 00 00 00 00 00  ................
+
+Now looking at log file / LRs in list
+
+00029340  03 36 00 00 00 00 00 00-3F 0C 00 01 DA 00 00 00   <-- 8th byte, is Merge2 #1
+00029350  03 36 00 00 00 00 00 00-FE 35 00 00 00 00 00 00
+00029360  8E 33 00 00 01 00 00 04-00 00 00 00 FF FF FF FF
+00029370  FF FF FF FF 00 00 00 00-FF FF FF FF FF FF FF FF
+00029380  00 00 00 00 FF FF FF FF-FF FF FF FF DA 00 00 00
+00029390  64 00 00 00 00 00 00 00-00 00 00 00 02 00 00 00
+000293A0  00 00 00 00 00 00 00 00-3F 0C 00 01 37 01 00 00   <-- 8th byte, is Merge2 #2
+000293B0  03 36 00 00 00 00 00 00-02 36 00 00 00 00 00 00
+000293C0  8E 33 00 00 01 00 00 04-38 01 00 00 FE 2C 00 00
+000293D0  00 00 00 00 00 00 00 00-FF FF FF FF FF FF FF FF
+000293E0  DA 00 00 00 FE 35 00 00-00 00 00 00 DA 00 00 00
+000293F0  64 00 00 00 00 00 00 00-00 00 00 00 04 01 00 00
+00029400  00 00 00 00 00 00 00 00-00 00 00 00 00 00 00 00   <-- Note first 8th bytes past sector is still the Merge2 #2.
+00029410  00 00 00 00 00 00 00 00-00 00 00 00 00 00 00 00
+00029420  00 00 00 00 00 00 00 00-00 00 00 00 00 00 00 00
+00029430  00 00 00 00 00 00 00 00-00 00 00 00 00 00 00 00
+00029440  00 00 00 00 00 00 00 00-00 00 00 00 00 00 00 00
+00029450  00 00 00 00 00 00 00 00-00 00 00 00 00 00 00 00
+00029460  00 00 00 00 00 00 00 00-00 00 00 00 00 00 00 00
+00029470  00 00 00 00 00 00 00 00-00 00 00 00 00 00 00 00
+00029480  00 00 00 00 00 00 00 00-00 00 00 00 00 00 00 00
+00029490  00 00 00 00 00 00 00 00-00 00 00 00 00 00 00 00
+000294A0  00 00 00 00 00 00 00 00-00 00 00 00 00 00 00 00
+000294B0  00 00 00 00 00 00 00 00-00 00 00 00 00 00 00 00
+000294C0  00 00 00 00 00 00 00 00-00 00 00 00 00 00 00 00
+000294D0  00 00 00 00 00 00 00 00-00 00 00 00 00 00 00 00
+000294E0  00 00 00 00 00 00 00 00-00 00 00 00 00 00 00 00
+000294F0  00 00 00 00 00 00 00 00-00 00 00 00 00 00 00 00
+00029500  00 00 00 00 00 00 00 00-00 00 00 00 00 00 00 00
+00029510  00 00 00 00 00 00 00 00-00 00 00 00 00 00 00 00
+00029520  00 00 00 00 00 00 00 00-00 00 00 00 00 00 00 00
+00029530  00 00 00 00 00 00 00 00-00 00 00 00 00 00 00 00
+00029540  00 00 00 00 00 00 00 00-00 00 00 00 00 00 00 00
+00029550  00 00 00 00 00 00 00 00-00 00 00 00 00 00 00 00
+00029560  00 00 00 00 00 00 00 00-00 00 00 00 00 00 00 00
+00029570  00 00 00 00 00 00 00 00-00 00 00 00 00 00 00 00
+00029580  00 00 00 00 00 00 00 00-00 00 00 00 2A 00 00 00
+00029590  00 00 00 00 00 00 00 00-00 5D BE ED FE 00 00 00   <-- Checksum
+000295A0  00 D1 00 00 00 00 00 00-00 00 00 00 00 00 00 00
+000295B0  00 00 00 00 00 00 00 00-00 00 00 00 00 00 00 00
+000295C0  00 00 00 00 00 00 00 00-00 00 00 00 00 00 00 00
+000295D0  00 00 00 00 00 00 00 00-00 00 00 00 00 00 00 00
+000295E0  00 00 00 00 00 00 00 00-00 00 00 00 00 00 00 00
+000295F0  00 00 00 00 00 00 00 00-00 00 00 00 00 00 00 00
+00029600  00 00 00 00 00 00 00 00-00 00 00 00 00 00 00 00   <-- Shadow sector I think begins here.
+00029610  00 00 00 00 00 00 00 00-00 00 00 00 00 00 00 00
+00029620  00 00 00 00 00 00 00 00-00 00 00 00 00 00 00 00
+00029630  00 00 00 00 00 00 00 00-00 00 00 00 00 00 00 00
+00029640  00 00 00 00 00 00 00 00-00 00 00 00 00 00 00 00
+00029650  00 00 00 00 00 00 00 00-00 00 00 00 00 00 00 00
+00029660  00 00 00 00 00 00 00 00-00 00 00 00 00 00 00 00
+00029670  00 00 00 00 00 00 00 00-00 00 00 00 00 00 00 00
+00029680  00 00 00 00 00 00 00 00-00 00 00 00 00 00 00 00
+00029690  00 00 00 00 00 00 00 00-00 00 00 00 00 00 00 00
+000296A0  00 00 00 00 00 00 00 00-00 00 00 00 00 00 00 00
+000296B0  00 00 00 00 00 00 00 00-00 00 00 00 00 00 00 00
+000296C0  00 00 00 00 00 00 00 00-00 00 00 00 00 00 00 00
+000296D0  00 00 00 00 00 00 00 00-00 00 00 00 00 00 00 00
+000296E0  00 00 00 00 00 00 00 00-00 00 00 00 00 00 00 00
+000296F0  00 00 00 00 00 00 00 00-00 00 00 00 00 00 00 00
+00029700  00 00 00 00 00 00 00 00-00 00 00 00 00 00 00 00
+00029710  00 00 00 00 00 00 00 00-00 00 00 00 00 00 00 00
+00029720  00 00 00 00 00 00 00 00-00 00 00 00 00 00 00 00
+00029730  00 00 00 00 00 00 00 00-00 00 00 00 00 00 00 00
+00029740  00 00 00 00 00 00 00 00-00 00 00 00 00 00 00 00
+00029750  00 00 00 00 00 00 00 00-00 00 00 00 00 00 00 00
+00029760  00 00 00 00 00 00 00 00-00 00 00 00 00 00 00 00
+00029770  00 00 00 00 00 00 00 00-00 00 00 00 00 00 00 00
+00029780  00 00 00 00 00 00 00 00-00 00 00 00 2A 00 00 00
+00029790  00 00 00 00 00 00 00 00-00 9A E0 3D A4 00 00 00   <-- Checksum (shadow sector)
+000297A0  00 D1 00 00 00 00 00 00-00 00 00 00 00 00 00 00
+000297B0  00 00 00 00 00 00 00 00-00 00 00 00 00 00 00 00
+000297C0  00 00 00 00 00 00 00 00-00 00 00 00 00 00 00 00
+000297D0  00 00 00 00 00 00 00 00-00 00 00 00 00 00 00 00
+000297E0  00 00 00 00 00 00 00 00-00 00 00 00 00 00 00 00
+000297F0  00 00 00 00 00 00 00 00-00 00 00 00 00 00 00 00
+00029800  DA DA DA DA DA DA DA DA-DA DA DA DA DA DA DA DA
+00029810  EA DA DA DA DA DA DA DA-DA DA DA DA DA DA DA DA
+00029820  FA DA DA DA DA DA DA DA-DA DA DA DA DA DA DA DA
+00029830  0A DA DA DA DA DA DA DA-DA DA DA DA DA DA DA DA
+00029840  1A DA DA DA DA DA DA DA-DA DA DA DA DA DA DA DA
+00029850  2A DA DA DA DA DA DA DA-DA DA DA DA DA DA DA DA
+
+Question: Why was Merge2 #2 not valid for dumping?  Or recovery?  Confusing.
+
+Here was the dump /ml post recovery
+
+>00000023,0149,013D McroBegin (c) 3603
+>00000023,0149,0148 Merge2    3603,35fe,338e:1(c,merge:[1:218:0],right:0,[1:0],left:0,[1:0],parent:0,[1:0],U:NSP:USR:NKC:NEP:D:None,size:0,maxsize:0,uncfree:0,beforeImage:0)
+>00000023,014A,018C Checksum  (0x0,0x25E,0x277 checksum [0x1D0637A0,0x8C12C507])
+>00000023,014A,01A2 RcvUndo   (11/3/2009 2:54:27)
+>00000023,014A,01AB McroAbort (c) 3603
+>00000023,014A,01B6 Rollback  (c,1)
+>00000023,014A,01BA Rollback  (d,1)
+>00000023,014A,01BE ShutDown
+>00000023,014A,01BF RcvQuit   (11/3/2009 2:54:27)
+      Quit on Soft Restore.
+      RedoFrom:(1B,8,0)
+      UndoRecordFrom:(23,14A,1A2)
+
+>00000023,014A,01D9 Init      (11/3/2009 2:54:27)
+      Env SystemPath:E:\src\e13\eseTester\sources\dev\ese\src\accept\MyBadDBClean\009\
+      Env LogFilePath:E:\src\e13\eseTester\sources\dev\ese\src\accept\MyBadDBClean\009\
+      Env (CircLog,Session,Opentbl,VerPage,Cursors,LogBufs,LogFile,Buffers)
+          (    off,     16,    300,     64,   1024,    126,   2048,2147352543)
+
+>00000023,014C,0019 Checksum  (0x19,0x1B,0x0 checksum [0xEB4F9E25])
+>00000023,014C,002F ShutDown
+>00000023,014C,0030 Term      (11/3/2009 2:54:28)
+
+And here was the list of the log file after recovery
+
+00029320  FE 35 00 00 00 00 00 00-43 10 00 00 00 DA 00 00
+00029330  00 13 02 00 00 B3 01 00-00 14 02 00 00 0B 0C 00
+00029340  03 36 00 00 00 00 00 00-3F 0C 00 01 DA 00 00 00
+00029350  03 36 00 00 00 00 00 00-FE 35 00 00 00 00 00 00
+00029360  8E 33 00 00 01 00 00 04-00 00 00 00 FF FF FF FF
+00029370  FF FF FF FF 00 00 00 00-FF FF FF FF FF FF FF FF
+00029380  00 00 00 00 FF FF FF FF-FF FF FF FF DA 00 00 00
+00029390  64 00 00 00 00 00 00 00-00 00 00 00 02 00 00 00
+000293A0  00 00 00 00 00 00 00 00-3F 0C 00 01 37 01 00 00
+000293B0  03 36 00 00 00 00 00 00-02 36 00 00 00 00 00 00
+000293C0  8E 33 00 00 01 00 00 04-38 01 00 00 FE 2C 00 00
+000293D0  00 00 00 00 00 00 00 00-FF FF FF FF FF FF FF FF
+000293E0  DA 00 00 00 FE 35 00 00-00 00 00 00 DA 00 00 00
+000293F0  64 00 00 00 00 00 00 00-00 00 00 00 04 01 00 00
+00029400  00 00 00 00 00 00 00 00-00 00 00 00 00 00 00 00
+00029410  00 00 00 00 00 00 00 00-00 00 00 00 00 00 00 00
+00029420  00 00 00 00 00 00 00 00-00 00 00 00 00 00 00 00
+00029430  00 00 00 00 00 00 00 00-00 00 00 00 00 00 00 00
+00029440  00 00 00 00 00 00 00 00-00 00 00 00 00 00 00 00
+00029450  00 00 00 00 00 00 00 00-00 00 00 00 00 00 00 00
+00029460  00 00 00 00 00 00 00 00-00 00 00 00 00 00 00 00
+00029470  00 00 00 00 00 00 00 00-00 00 00 00 00 00 00 00
+00029480  00 00 00 00 00 00 00 00-00 00 00 00 00 00 00 00
+00029490  00 00 00 00 00 00 00 00-00 00 00 00 00 00 00 00
+000294A0  00 00 00 00 00 00 00 00-00 00 00 00 00 00 00 00
+000294B0  00 00 00 00 00 00 00 00-00 00 00 00 00 00 00 00
+000294C0  00 00 00 00 00 00 00 00-00 00 00 00 00 00 00 00
+000294D0  00 00 00 00 00 00 00 00-00 00 00 00 00 00 00 00
+000294E0  00 00 00 00 00 00 00 00-00 00 00 00 00 00 00 00
+000294F0  00 00 00 00 00 00 00 00-00 00 00 00 00 00 00 00
+00029500  00 00 00 00 00 00 00 00-00 00 00 00 00 00 00 00
+00029510  00 00 00 00 00 00 00 00-00 00 00 00 00 00 00 00
+00029520  00 00 00 00 00 00 00 00-00 00 00 00 00 00 00 00
+00029530  00 00 00 00 00 00 00 00-00 00 00 00 00 00 00 00
+00029540  00 00 00 00 00 00 00 00-00 00 00 00 00 00 00 00
+00029550  00 00 00 00 00 00 00 00-00 00 00 00 00 00 00 00
+00029560  00 00 00 00 00 00 00 00-00 00 00 00 00 00 00 00
+00029570  00 00 00 00 00 00 00 00-00 00 00 00 00 00 00 00
+00029580  00 00 00 00 00 00 00 00-00 00 00 00 2A 00 00 00
+00029590  00 5E 02 00 00 77 02 00-00 A0 37 06 1D 07 C5 12
+000295A0  8C 9A 33 1B 36 02 03 0B-6D 01 00 0D 0C 00 03 36
+000295B0  00 00 00 00 00 00 07 0C-00 01 07 0D 00 01 17 34
+000295C0  A2 01 4A 01 23 00 00 00-00 00 08 00 1B 00 00 00
+000295D0  00 1B 36 02 03 0B 6D 01-00 31 45 3A 5C 73 72 63
+000295E0  5C 65 31 33 5C 65 73 65-54 65 73 74 65 72 5C 73
+000295F0  6F 75 72 63 65 73 5C 64-65 76 5C 65 73 65 5C 73
+00029600  72 63 5C 61 63 63 65 70-74 5C 4D 79 42 61 64 44
+00029610  42 43 6C 65 61 6E 5C 30-30 39 5C 00 00 00 00 00
+00029620  00 00 00 00 00 00 00 00-00 00 00 00 00 00 00 00
+00029630  00 00 00 00 00 00 00 00-00 00 00 00 00 00 00 00
+00029640  00 00 00 00 00 00 00 00-00 00 00 00 00 00 00 00
+00029650  00 00 00 00 00 00 00 00-00 00 00 00 00 00 00 00
+00029660  00 00 00 00 00 00 00 00-00 00 00 00 00 00 00 00
+00029670  00 00 00 00 00 00 00 00-00 00 00 00 00 00 00 00
+00029680  00 00 00 00 00 00 00 00-00 00 00 00 00 00 00 00
+00029690  00 00 00 00 00 00 00 00-00 00 00 00 00 00 00 00
+000296A0  00 00 00 00 00 00 00 00-00 00 00 00 00 00 00 00
+000296B0  00 00 00 00 00 00 00 00-00 00 00 00 00 00 00 00
+000296C0  00 00 00 00 00 00 00 00-00 00 00 00 00 00 00 00
+000296D0  00 00 00 00 00 00 00 00-00 00 00 00 00 00 00 45
+000296E0  3A 5C 73 72 63 5C 65 31-33 5C 65 73 65 54 65 73
+000296F0  74 65 72 5C 73 6F 75 72-63 65 73 5C 64 65 76 5C
+00029700  65 73 65 5C 73 72 63 5C-61 63 63 65 70 74 5C 4D
+00029710  79 42 61 64 44 42 43 6C-65 61 6E 5C 30 30 39 5C
+00029720  00 00 00 00 00 00 00 00-00 00 00 00 00 00 00 00
+00029730  00 00 00 00 00 00 00 00-00 00 00 00 00 00 00 00
+00029740  00 00 00 00 00 00 00 00-00 00 00 00 00 00 00 00
+00029750  00 00 00 00 00 00 00 00-00 00 00 00 00 00 00 00
+00029760  00 00 00 00 00 00 00 00-00 00 00 00 00 00 00 00
+00029770  00 00 00 00 00 00 00 00-00 00 00 00 00 00 00 00
+00029780  00 00 00 00 00 00 00 00-00 00 00 00 00 00 00 00
+00029790  00 00 00 00 00 00 00 00-00 00 00 00 00 00 00 00
+000297A0  00 00 00 00 00 00 00 00-00 00 00 00 00 00 00 00
+000297B0  00 00 00 00 00 00 00 00-00 00 00 00 00 00 00 00
+000297C0  00 00 00 00 00 00 00 00-00 00 00 00 00 00 00 00
+000297D0  00 00 00 00 00 00 00 00-00 00 00 00 00 00 00 00
+000297E0  00 00 00 00 00 10 00 00-00 2C 01 00 00 40 00 00
+000297F0  00 00 04 00 00 7E 00 00-00 00 08 00 00 DF FF FD
+00029800  7F 00 00 00 00 00 00 00-00 00 00 00 00 00 00 00
+00029810  00 1B 36 02 03 0B 6D 01-00 2A 19 00 00 00 1B 00
+00029820  00 00 00 00 00 00 25 9E-4F EB 00 00 00 00 D1 17
+00029830  32 D9 01 4A 01 23 00 00-00 00 00 00 00 00 00 00
+00029840  00 00 1C 36 02 03 0B 6D-01 00 00 00 00 00 00 00
+00029850  00 00 00 00 00 00 00 00-00 00 00 00 00 00 00 00
+00029860  00 00 00 00 00 00 00 00-00 00 00 00 00 00 00 00
+00029870  00 00 00 00 00 00 00 00-00 00 00 00 00 00 00 00
+00029880  00 00 00 00 00 00 00 00-00 00 00 00 00 00 00 00
+00029890  00 00 00 00 00 00 00 00-00 00 00 00 00 00 00 00
+000298A0  00 00 00 00 00 00 00 00-00 00 00 00 00 00 00 00
+000298B0  00 00 00 00 00 00 00 00-00 00 00 00 00 00 00 00
+000298C0  00 00 00 00 00 00 00 00-00 00 00 00 00 00 00 00
+000298D0  00 00 00 00 00 00 00 00-00 00 00 00 00 00 00 00
+000298E0  00 00 00 00 00 00 00 00-00 00 00 00 00 00 00 00
+000298F0  00 00 00 00 00 00 00 00-00 00 00 00 00 00 00 00
+00029900  00 00 00 00 00 00 00 00-00 00 00 00 00 00 00 00
+00029910  00 00 00 00 00 00 00 00-00 00 00 00 00 00 00 00
+00029920  00 00 00 00 00 00 00 00-00 00 00 00 00 00 00 00
+00029930  00 00 00 00 00 00 00 00-00 00 00 00 00 00 00 00
+00029940  00 00 00 00 00 00 00 00-00 00 00 00 00 00 00 00
+00029950  00 00 00 00 00 00 00 00-00 00 00 00 00 00 00 00
+00029960  00 00 00 00 00 00 00 00-00 00 00 00 00 00 00 00
+00029970  00 00 00 00 00 00 00 00-00 00 00 00 00 00 00 00
+00029980  00 00 00 00 00 00 00 00-00 00 00 00 00 00 00 00
+00029990  00 00 00 00 00 00 00 00-00 00 00 00 00 00 00 00
+000299A0  00 00 00 00 00 00 00 00-00 00 00 00 00 00 00 00
+000299B0  00 00 00 00 00 00 00 00-00 00 00 00 00 00 00 00
+000299C0  00 00 00 00 00 00 00 00-00 00 00 00 00 00 00 00
+000299D0  00 00 00 00 00 00 00 00-00 00 00 00 00 00 00 00
+000299E0  00 00 00 00 00 00 00 00-00 00 00 00 00 00 00 00
+000299F0  00 00 00 00 00 00 00 00-00 00 00 00 00 00 00 00
+00029A00  7F 00 00 00 00 00 00 00-00 00 00 00 00 00 00 00
+00029A10  00 1B 36 02 03 0B 6D 01-00 2A 19 00 00 00 1B 00
+00029A20  00 00 00 00 00 00 E2 C0-9F B1 00 00 00 00 D1 17
+00029A30  32 D9 01 4A 01 23 00 00-00 00 00 00 00 00 00 00
+00029A40  00 00 1C 36 02 03 0B 6D-01 00 00 00 00 00 00 00
+00029A50  00 00 00 00 00 00 00 00-00 00 00 00 00 00 00 00
+00029A60  00 00 00 00 00 00 00 00-00 00 00 00 00 00 00 00
+00029A70  00 00 00 00 00 00 00 00-00 00 00 00 00 00 00 00
+00029A80  00 00 00 00 00 00 00 00-00 00 00 00 00 00 00 00
+00029A90  00 00 00 00 00 00 00 00-00 00 00 00 00 00 00 00
+00029AA0  00 00 00 00 00 00 00 00-00 00 00 00 00 00 00 00
+00029AB0  00 00 00 00 00 00 00 00-00 00 00 00 00 00 00 00
+00029AC0  00 00 00 00 00 00 00 00-00 00 00 00 00 00 00 00
+00029AD0  00 00 00 00 00 00 00 00-00 00 00 00 00 00 00 00
+00029AE0  00 00 00 00 00 00 00 00-00 00 00 00 00 00 00 00
+00029AF0  00 00 00 00 00 00 00 00-00 00 00 00 00 00 00 00
+00029B00  00 00 00 00 00 00 00 00-00 00 00 00 00 00 00 00
+00029B10  00 00 00 00 00 00 00 00-00 00 00 00 00 00 00 00
+00029B20  00 00 00 00 00 00 00 00-00 00 00 00 00 00 00 00
+00029B30  00 00 00 00 00 00 00 00-00 00 00 00 00 00 00 00
+00029B40  00 00 00 00 00 00 00 00-00 00 00 00 00 00 00 00
+00029B50  00 00 00 00 00 00 00 00-00 00 00 00 00 00 00 00
+00029B60  00 00 00 00 00 00 00 00-00 00 00 00 00 00 00 00
+00029B70  00 00 00 00 00 00 00 00-00 00 00 00 00 00 00 00
+00029B80  00 00 00 00 00 00 00 00-00 00 00 00 00 00 00 00
+00029B90  00 00 00 00 00 00 00 00-00 00 00 00 00 00 00 00
+00029BA0  00 00 00 00 00 00 00 00-00 00 00 00 00 00 00 00
+00029BB0  00 00 00 00 00 00 00 00-00 00 00 00 00 00 00 00
+00029BC0  00 00 00 00 00 00 00 00-00 00 00 00 00 00 00 00
+00029BD0  00 00 00 00 00 00 00 00-00 00 00 00 00 00 00 00
+00029BE0  00 00 00 00 00 00 00 00-00 00 00 00 00 00 00 00
+00029BF0  00 00 00 00 00 00 00 00-00 00 00 00 00 00 00 00
+00029C00  DA DA DA DA DA DA DA DA-DA DA DA DA DA DA DA DA
+00029C10  EA DA DA DA DA DA DA DA-DA DA DA DA DA DA DA DA
+00029C20  FA DA DA DA DA DA DA DA-DA DA DA DA DA DA DA DA
+00029C30  0A DA DA DA DA DA DA DA-DA DA DA DA DA DA DA DA
+00029C40  1A DA DA DA DA DA DA DA-DA DA DA DA DA DA DA DA
+00029C50  2A DA DA DA DA DA DA DA-DA DA DA DA DA DA DA DA
+
+    wprintf(L" Data: (Prev: %08x:%04x:%04x, cb=%d)\tNext: %08x:%04x:%04x, cb=%d, p=%p  cNOPs=%d\n",
+            lgposPrev.lGeneration, lgposPrev.isec, lgposPrev.ib, cbLR,
+            lgpos.lGeneration, lgpos.isec, lgpos.ib, CbLGSizeOfRec( plr ),
+            plr, plog->GetNOP() );
+
+    */
 
     Assert( cbLR < 33 * 1024 );
 
-    if ( lgpos.isec != 0 &&
+    if ( lgpos.isec != 0 && // thought this should be 8?  But it worked at zero.
             lgpos.ib != 0 )
     {
         const __int64 cbDelta = plog->CbOffsetLgpos( lgpos, lgposPrev );
@@ -4777,6 +5497,7 @@ ERR ErrLrToLogCsvSimple(
 #else
     ULONG cbLR;
 #endif
+    //  reset the cbLR to an invalid value ...
     cbLR = 34 * 1024;
 
     const static ULONG cchFormatLgposSz = 30;
@@ -4787,6 +5508,9 @@ ERR ErrLrToLogCsvSimple(
     cbLR = CbLGSizeOfRec( plr );
 
 
+    //
+    // Defining some proto-functions for helping set data ...
+    //
 #define SetLogCsvTypeSz(szCsvType) \
     if ( cLogRecordsCsvFormats >= (cCsvLines-1) ) \
     { \
@@ -4796,7 +5520,7 @@ ERR ErrLrToLogCsvSimple(
         pLogRecordsCsvFormats = (const WCHAR**) malloc( (sizeof(WCHAR*) * cCsvLines*2 ) ); \
         if ( pLogRecordsCsvFormats == NULL ) \
         { \
-            pLogRecordsCsvFormats = pCsvFormatsTemp;  \
+            pLogRecordsCsvFormats = pCsvFormatsTemp; /* so this so HandleError doesn't leak */ \
             err = ErrERRCheck( JET_errOutOfMemory ); \
             goto HandleError; \
         } \
@@ -4809,7 +5533,7 @@ ERR ErrLrToLogCsvSimple(
         pChangeInfo = (SIMPLE_CSV_CHG_INFO*) malloc( sizeof(SIMPLE_CSV_CHG_INFO) * cCsvLines*2 ); \
         if ( pChangeInfo == NULL ) \
         { \
-            pChangeInfo = pCsvInfosTemp;   \
+            pChangeInfo = pCsvInfosTemp; /* so this so HandleError doesn't leak */  \
             err = ErrERRCheck( JET_errOutOfMemory ); \
             goto HandleError; \
         } \
@@ -4872,6 +5596,7 @@ ERR ErrLrToLogCsvSimple(
             {
                 plog->IncNOP();
             }
+//#define TEST_IGNORED_NOP_LRS_TO_GET_REAL_LAST_LGPOS
 #ifdef TEST_IGNORED_LRS_TO_GET_REAL_LAST_LGPOS
             SetLogCsvTypeSz( szLogRecordMiscelLrInfo );
             SetLogCsvChecksumInfo( 0, UlChecksumSimpleLR( plr ) );
@@ -4893,6 +5618,8 @@ ERR ErrLrToLogCsvSimple(
         }
             break;
 
+        //  single-page updaters
+        //
 
         case lrtypInsert:
         {
@@ -4974,6 +5701,7 @@ ERR ErrLrToLogCsvSimple(
         }
             break;
 
+        // deferred before image 
         case lrtypUndoInfo:
         {
             const LRUNDOINFO * const plrundoinfo = (LRUNDOINFO *)plr;
@@ -5016,6 +5744,7 @@ ERR ErrLrToLogCsvSimple(
             SetLogCsvTypeSz( szLogRecordMiscelLrInfo );
             if ( plr->lrtyp == lrtypBegin )
             {
+                // Must treat this differently, b/c it's a TRX smaller ...
                 const LRBEGIN       * const plrbegin    = (LRBEGINDT *)plr;
                 SetLogCsvChecksumInfo( 0, UlChecksumSimpleLR( plrbegin ) );
             }
@@ -5104,7 +5833,7 @@ ERR ErrLrToLogCsvSimple(
             const LRCREATEDB * const plrcreatedb = (LRCREATEDB *) plr;
             WCHAR * wszDbPath = NULL;
             BYTE* pb;
-            ULONG cb = ( plrcreatedb->FVersionInfo() ? sizeof(LRCREATEDB::VersionInfo) : 0 );
+            ULONG cb = ( plrcreatedb->FVersionInfo() ? sizeof(LRCREATEDB::VersionInfo) : 0 );   //  older format didn't have version info
 
             pb =  ((BYTE*)( plr ))
                 + sizeof( LRCREATEDB )
@@ -5198,11 +5927,23 @@ ERR ErrLrToLogCsvSimple(
         {
             const LRCREATEMEFDP * const plrcreatemefdp = (LRCREATEMEFDP *)plr;
 
-            
+            // check for LOG::ErrLGIRedoFDPPage and
+            // also from LOG::ErrLGRIRedoSpaceRootPage
+            //   --> SPICreateExtentTree
+            /*
+                const PGNO  pgnoLast    = pgnoFDP + cpgPrimary - 1;
+                const PGNO  pgnoRoot    = fAvail ?
+                                                plrcreatemefdp->le_pgnoAE :
+                                                plrcreatemefdp->le_pgnoOE ;
+                const CPG   cpgExtent   = fAvail ?
+                                            cpgPrimary - 1 - 1 - 1 :
+                                            cpgPrimary;
+            */
 
             const ULONG ulCkSum = UlChecksumSimpleLR( plrcreatemefdp );
 
             SetLogCsvTypeSz( szLogRecordPgChangeInfo );
+            // pgno == pgnoFDP
             SetLogCsvChangeInfo( 0, ulCkSum, (PGNO) plrcreatemefdp->le_pgno, (OBJID) plrcreatemefdp->le_objidFDP,
                 (DBID) plrcreatemefdp->dbid, (DBTIME) plrcreatemefdp->le_dbtimeBefore, (DBTIME) plrcreatemefdp->le_dbtime );
             cLogRecordsCsvFormats++;
@@ -5217,6 +5958,8 @@ ERR ErrLrToLogCsvSimple(
                 (DBID) plrcreatemefdp->dbid, dbtimeNil, (DBTIME) plrcreatemefdp->le_dbtime );
             cLogRecordsCsvFormats++;
 
+            // Are we actually changing anything about the parentFDP?  If we aren't touching it, no need to
+            // make a pg info change records.  Worst case though is we ship extra pages?
             SetLogCsvTypeSz( szLogRecordPgChangeInfo );
             SetLogCsvChangeInfo( 0, ulCkSum, (PGNO) plrcreatemefdp->le_pgnoFDPParent, (OBJID) plrcreatemefdp->le_objidFDP,
                 (DBID) plrcreatemefdp->dbid, dbtimeNil, (DBTIME) plrcreatemefdp->le_dbtime );
@@ -5254,7 +5997,7 @@ ERR ErrLrToLogCsvSimple(
             const LRCONVERTFDP * const plrconvertfdp = (LRCONVERTFDP *)plr;
 
             ULONG ulCkSum;
-            if ( plr->lrtyp == lrtypConvertFDP )
+            if ( plr->lrtyp == lrtypConvertFDP ) // version 1
             {
                 LRCONVERTFDP_OBSOLETE *plrconvertfdpObsolete = (LRCONVERTFDP *)plr;
                 ulCkSum = UlChecksumSimpleLR( plrconvertfdpObsolete );
@@ -5574,6 +6317,7 @@ ERR ErrLrToLogCsvSimple(
         case lrtypShutDownMark:
         case lrtypRecoveryUndo:
         {
+            // These types are actually single byte marks...
             SetLogCsvTypeSz( szLogRecordMiscelLrInfo );
             SetLogCsvChecksumInfo( 0, UlChecksumSimpleLR( plr ) );
             cLogRecordsCsvFormats++;
@@ -5621,6 +6365,8 @@ ERR ErrLrToLogCsvSimple(
         }
             break;
 
+        //  debug log records
+        //
 
         case lrtypJetOp:
         {
@@ -5739,7 +6485,7 @@ ERR ErrLrToLogCsvSimple(
             cb += strlen(sz) +1;
             sz = sz + strlen( sz ) + 1;
             cb += strlen(sz) +1;
-            sz = sz + strlen( sz ) + 1;
+            sz = sz + strlen( sz ) + 1; // should be after LR now.
             SetLogCsvTypeSz( szLogRecordMiscelLrInfo );
             SetLogCsvChecksumInfo( 0, UlChecksumDataLR( plrextrestore, cb ) );
             cLogRecordsCsvFormats++;
@@ -5764,7 +6510,7 @@ ERR ErrLrToLogCsvSimple(
         }
             break;
 
-        case lrtypMacroInfo:
+        case lrtypMacroInfo:    //  was lrtypIgnored1
         {
             const LRIGNORED * const plrIgnored = (LRIGNORED *) plr;
             const LRMACROINFO * const plrmacroinfo = (LRMACROINFO *) plr;
@@ -5778,13 +6524,13 @@ ERR ErrLrToLogCsvSimple(
                 ULONG ulChkSum = UlChecksumDataLR( plrIgnored, plrIgnored->Cb() );
 
                 SetLogCsvChangeInfo(
-                    0,
-                    ulChkSum,
-                    plrmacroinfo->GetPgno( ipgno ),
-                    0,
-                    1,
-                    0,
-                    0 );
+                    0,                              // chk1
+                    ulChkSum,                       // chk2
+                    plrmacroinfo->GetPgno( ipgno ), // pgno
+                    0,                              // objid
+                    1,                              // dbid (== 1 to reflect intent of legacy behavior)
+                    0,                              // dbtimePre
+                    0 );                            // dbtimePost
                 cLogRecordsCsvFormats++;
             }
             
@@ -5792,8 +6538,11 @@ ERR ErrLrToLogCsvSimple(
         }
             break;
 
-        case lrtypExtendDB:
+        case lrtypExtendDB: //  was lrtypIgnored2
         {
+            // no work needs to be rolled back; at worst the file
+            // will be temporarily too large until it is cleaned up when the
+            // OE tree is checked at the end of recovery or at attach
             const LREXTENDDB * const plrextenddb = (LREXTENDDB *)plr;
             SetLogCsvTypeSz( szLogRecordResizeDatabaseInfo );
             SetLogCsvResizeInfo( 0, UlChecksumSimpleLR( plrextenddb ), plrextenddb->Dbid() );
@@ -5802,7 +6551,7 @@ ERR ErrLrToLogCsvSimple(
         }
             break;
 
-        case lrtypCommitCtx:
+        case lrtypCommitCtx:    //  was lrtypIgnored3
         {
             const LRCOMMITCTX * const plrcommitctx = (LRCOMMITCTX *)plr;
             SetLogCsvTypeSz( szLogRecordMiscelLrInfo );
@@ -5812,7 +6561,7 @@ ERR ErrLrToLogCsvSimple(
         }
             break;
 
-        case lrtypScanCheck:
+        case lrtypScanCheck:        // was lrtypIgnored4
         {
             const LRSCANCHECK * const plrscancheck = (LRSCANCHECK *)plr;
             SetLogCsvTypeSz( szLogRecordMiscelLrInfo );
@@ -5832,7 +6581,7 @@ ERR ErrLrToLogCsvSimple(
         }
             break;
 
-        case lrtypReAttach:
+        case lrtypReAttach: //  was lrtypIgnored6
         {
             const LRREATTACHDB * const plrreattach = (LRREATTACHDB *)plr;
             SetLogCsvTypeSz( szLogRecordMiscelLrInfo );
@@ -5842,7 +6591,7 @@ ERR ErrLrToLogCsvSimple(
         }
             break;
 
-        case lrtypMacroInfo2:
+        case lrtypMacroInfo2:   //  was lrtypIgnored7
         {
             const LRIGNORED * const plrIgnored = (LRIGNORED *)plr;
             const LRMACROINFO2 * const plrmacroinfo2 = (LRMACROINFO2 *)plr;
@@ -5856,13 +6605,13 @@ ERR ErrLrToLogCsvSimple(
                 ULONG ulChkSum = UlChecksumDataLR( plrIgnored, plrIgnored->Cb() );
 
                 SetLogCsvChangeInfo(
-                    0,
-                    ulChkSum,
-                    plrmacroinfo2->GetPgno( ipgno ),
-                    0,
-                    plrmacroinfo2->Dbid(),
-                    0,
-                    0 );
+                    0,                                  // chk1
+                    ulChkSum,                           // chk2
+                    plrmacroinfo2->GetPgno( ipgno ),    // pgno
+                    0,                                  // objid
+                    plrmacroinfo2->Dbid(),              // dbid
+                    0,                                  // dbtimePre
+                    0 );                                // dbtimePost
                 cLogRecordsCsvFormats++;
             }
 
@@ -5870,7 +6619,7 @@ ERR ErrLrToLogCsvSimple(
         }
             break;
 
-        case lrtypFreeFDP:
+        case lrtypFreeFDP: //   was lrtypIgnored8
         {
             const LRFREEFDP * const plrfreefdp = (LRFREEFDP *)plr;
             SetLogCsvTypeSz( szLogRecordMiscelLrInfo );
@@ -5880,7 +6629,7 @@ ERR ErrLrToLogCsvSimple(
         }
             break;
 
-        case lrtypNOP2:
+        case lrtypNOP2: //  was lrtypIgnored5
         case lrtypIgnored9:
         case lrtypIgnored10:
         case lrtypIgnored11:
@@ -5892,6 +6641,11 @@ ERR ErrLrToLogCsvSimple(
         case lrtypIgnored17:
         case lrtypIgnored18:
         case lrtypIgnored19:
+            // We don't know what these represent, it is safest to indicate there is some data and 
+            // the checksum of the full LR.
+            // IF YOU ADD SUCH A LR: break it out, and if it is a page modifying LR, make sure to 
+            // do the appropriate thing to record LRPI records in the CSV format.  Although I'm not
+            // sure you can really add such a LR, without breaking upgrade patterns?
         {
             const LRIGNORED * const plrignoreddata = (LRIGNORED *)plr;
             SetLogCsvTypeSz( szLogRecordMiscelLrInfo );
@@ -5903,6 +6657,9 @@ ERR ErrLrToLogCsvSimple(
 
         case lrtypShrinkDB:
         {
+            // no work needs to be rolled back; at worst the file
+            // will be temporarily too small until it is cleaned up when the
+            // OE tree is checked at the end of recovery or at attach
             const LRSHRINKDB * const plrshrinkdb = (LRSHRINKDB *)plr;
             SetLogCsvTypeSz( szLogRecordResizeDatabaseInfo );
             SetLogCsvResizeInfo( 0, UlChecksumSimpleLR( plrshrinkdb ), plrshrinkdb->Dbid() );
@@ -5920,6 +6677,7 @@ ERR ErrLrToLogCsvSimple(
             const PGNO pgnoShrunkFirst = lrshrinkdb.PgnoLast() + 1;
             const PGNO pgnoShrunkLast = lrshrinkdb.PgnoLast() + lrshrinkdb.CpgShrunk();
 
+            // Generate one entry for each page affected by the shrink operation.
             for ( PGNO pgno = pgnoShrunkFirst; pgno <= pgnoShrunkLast; pgno++ )
             {
                 SetLogCsvTypeSz( szLogRecordPgChangeInfo );
@@ -6006,24 +6764,27 @@ ERR ErrLrToLogCsvSimple(
 
     if ( eProcessed == eConsumed )
     {
-        Assert( cLogRecordsCsvFormats > 0 );
+        Assert( cLogRecordsCsvFormats > 0 ); // should be something to print out ...
 
-        Expected( cbLR < g_cbPageMax + 1024 );
+        Expected( cbLR < g_cbPageMax + 1024 ); // I think all LRs have to be less than ~ page size right?
 
         for (ULONG i = 0; i < cLogRecordsCsvFormats; i++)
         {
-            WCHAR   szLR[ 512 ];
-            WCHAR   rgwchBuf[ 512 ];
+            WCHAR   szLR[ 512 ]; // max path + ~250
+            WCHAR   rgwchBuf[ 512 ]; // max path + ~250
 
             Assert( pLogRecordsCsvFormats[i] != NULL );
 
             szLR[0] = L'\0';
             OSStrCbAppendW( szLR, sizeof(szLR), pLogRecordsCsvFormats[i] );
 
+            // Note, these two are handled elsewhere ...
+            //  szLogHeaderGeneralInfo, szLogHeaderAttachInfo
             
             if ( pLogRecordsCsvFormats[i] == szLogRecordChecksumInfo )
             {
                 OSStrCbFormatW( rgwchBuf, sizeof(rgwchBuf),
+                                // note preceding comma, to separate the format string
                                 L"%hs, %4.4X, %8.8X%8.8X",
                                 szLgposLR, cbLR,
                                 pChangeInfo[i].ulChecksum1, pChangeInfo[i].ulChecksum2 );
@@ -6032,7 +6793,7 @@ ERR ErrLrToLogCsvSimple(
             }
             else if ( pLogRecordsCsvFormats[i] == szLogRecordDatabaseInfo )
             {
-                Assert( i == 0 );
+                Assert( i == 0 ); // only one entry for an attach/detach/etc record ... we only have one rgTempDbPath, where we stick the path temporarily.
                 WCHAR rgwchSignBuf[3 * sizeof( pChangeInfo[i].signDb ) + 1];
                 for ( INT j = 0; j < sizeof( pChangeInfo[i].signDb ); j++ )
                 {
@@ -6040,6 +6801,7 @@ ERR ErrLrToLogCsvSimple(
                 }
                 rgwchSignBuf[3 * sizeof( pChangeInfo[i].signDb )] = L'\0';
                 OSStrCbFormatW( rgwchBuf, sizeof( rgwchBuf ),
+                                // note preceding comma, to separate the format string
                                 L"%hs, %4.4X, %8.8X%8.8X, %hs, %d, \"%s\", %s",
                                 szLgposLR, cbLR,
                                 pChangeInfo[i].ulChecksum1, pChangeInfo[i].ulChecksum2,
@@ -6050,6 +6812,7 @@ ERR ErrLrToLogCsvSimple(
             else if ( pLogRecordsCsvFormats[i] == szLogRecordPgChangeInfo )
             {
                 OSStrCbFormatW( rgwchBuf, sizeof(rgwchBuf),
+                                // note preceding comma, to separate the format string
                                 L"%hs, %4.4X, %8.8X%8.8X, %hs, %8.8X, %8.8X, %8.8X, %16.16I64X, %16.16I64X",
                                 szLgposLR, cbLR,
                                 pChangeInfo[i].ulChecksum1, pChangeInfo[i].ulChecksum2,
@@ -6062,6 +6825,7 @@ ERR ErrLrToLogCsvSimple(
             else if ( pLogRecordsCsvFormats[i] == szLogRecordMiscelLrInfo )
             {
                 OSStrCbFormatW( rgwchBuf, sizeof(rgwchBuf),
+                                // note preceding comma, to separate the format string
                                 L"%hs, %4.4X, %8.8X%8.8X, %hs",
                                 szLgposLR, cbLR,
                                 pChangeInfo[i].ulChecksum1, pChangeInfo[i].ulChecksum2,
@@ -6073,6 +6837,7 @@ ERR ErrLrToLogCsvSimple(
                       pLogRecordsCsvFormats[i] == szLogRecordTrimDatabaseInfo )
             {
                 OSStrCbFormatW( rgwchBuf, sizeof(rgwchBuf),
+                                // note preceding comma, to separate the format string
                                 L"%hs, %4.4X, %8.8X%8.8X, %hs, %d",
                                 szLgposLR, cbLR,
                                 pChangeInfo[i].ulChecksum1, pChangeInfo[i].ulChecksum2,
@@ -6086,6 +6851,7 @@ ERR ErrLrToLogCsvSimple(
             }
         
             (*pcwpfCsvOut)( L"\r\n" );
+            // Only print out size with the first csv line for a log record (to avoid double counting)
             cbLR = 0;
         }
 
@@ -6095,6 +6861,8 @@ ERR ErrLrToLogCsvSimple(
         Assert( eProcessed == eNopIgnored );
         Assert( plr->lrtyp == lrtypNOP );
         Assert( cLogRecordsCsvFormats == 0 );
+        // Debugging to see the unprocessed log records
+        // wprintf(L"UnprocessedLR, %hs, %hs (%d)\n", szLgposLR, szLRTyp, (ULONG)plr->lrtyp );
     }
 
 HandleError:
@@ -6115,7 +6883,7 @@ HandleError:
 
 #ifdef DEBUG
 extern const CHAR * const mpopsz[];
-#endif
+#endif // DEBUG
 
 VOID SPrintSign( const SIGNATURE * const psign, UINT cbSz, __out_bcount(cbSz) PSTR  sz )
 {
@@ -6163,6 +6931,10 @@ LOCAL VOID FullDataToSz(
             *pbPrint++ = mpbb[b & 0x0f];
             *pbPrint++ = ' ';
 
+            // if ( isalnum( *pb ) )
+            //     DBGprintf( "%c", *pb );
+            // else
+            //     DBGprintf( "%x", *pb );
         }
 
         *pbPrint = '\0';
@@ -6205,6 +6977,10 @@ VOID ShowData(
 
 
 
+//  Prints log record contents.  If pv == NULL, then data is assumed
+//  to follow log record in contiguous memory.
+//
+// INT cNOP = 0;
 
 const INT   cbLRBuf = 1024 + cbFormattedDataMax;
 
@@ -6215,6 +6991,9 @@ VOID ShowLR( const LR *plr, LOG * plog )
     LrToSz( plr, rgchBuf, sizeof(rgchBuf), plog );
     (*CPRINTFSTDOUT::PcprintfInstance())( "%s\n", rgchBuf );
 
+    //  special-case: for ReplaceD, report
+    //  individual diffs
+    //
     if ( lrtypReplaceD == plr->lrtyp )
     {
         LGDumpDiff( plog, plr, CPRINTFSTDOUT::PcprintfInstance(), 20 );
@@ -6251,7 +7030,7 @@ ERR ErrDownConvertName(
     {
         err = ErrOSSTRUnicodeToAscii( wszName, szName, cchName, NULL, OSSTR_ALLOW_LOSSY );
         Assert( err == JET_errSuccess );
-        CallR( err );
+        CallR( err );   // just in case, if not success, fail ...
         err = wrnLossy;
     }
 
@@ -6292,6 +7071,8 @@ VOID LrToSz(
     char const *szUnique        = "U";
     char const *szNotUnique     = "NU";
 
+    // char const *szPrefix     = "P";
+    // char const *szNoPrefix       = "NP";
 
     char const *szVersion       = "V";
     char const *szNoVersion     = "NV";
@@ -6312,7 +7093,7 @@ VOID LrToSz(
     char const *szNotSpaceTree  = "NSP";
 
     char const *szSystemTask    = "SYS";
-    char const *szNotSystemTask = "USR";
+    char const *szNotSystemTask = "USR";    //  if not system, assume user
 
     char const *rgszMergeType[] = { "None", "EmptyPage", "FullRight", "PartialRight", "EmptyTree", "FullLeft", "PartialLeft", "PageMove" };
 
@@ -6452,6 +7233,9 @@ VOID LrToSz(
             }
             else
             {
+                //  for ReplaceD, caller will dump diffs
+                //  after dumping the ReplaceD log record
+                //
                 NULL;
             }
             break;
@@ -6625,7 +7409,7 @@ VOID LrToSz(
             OSStrCbFormatA( rgchBuf, sizeof(rgchBuf), " (%x) -- %d",
             (PROCID) plrjetop->le_procid,
             (ULONG)( plrjetop->op ) );
-#endif
+#endif // DEBUG
             break;
         }
 
@@ -6713,6 +7497,7 @@ VOID LrToSz(
             {
                 CAutoWSZPATH wszName;
 
+                // it should be enough pre-allocated so we should not get any errors
                 CallS( wszName.ErrSet( plrcreatedb->WszUnalignedNames() ) );
                 
                 CHAR szName[IFileSystemAPI::cchPathMax+1];
@@ -6768,6 +7553,7 @@ VOID LrToSz(
             {
                 CAutoWSZPATH wszName;
 
+                // it should be enough pre-allocated so we should not get any errors
                 CallS( wszName.ErrSet( plrattachdb->WszUnalignedNames() ) );
 
                 CHAR szName[IFileSystemAPI::cchPathMax+1];
@@ -6816,6 +7602,7 @@ VOID LrToSz(
             {
                 CAutoWSZPATH wszName;
 
+                // it should be enough pre-allocated so we should not get any errors
                 CallS( wszName.ErrSet( plrdetachdb->WszUnalignedNames() ) );
 
                 CHAR szName[IFileSystemAPI::cchPathMax+1];
@@ -6974,6 +7761,7 @@ VOID LrToSz(
                                                     "Replace",
                                                     "FlagInsertAndReplaceData" };
 
+                // Verify valid splitoper
                 switch( plrsplit->splitoper )
                 {
                     case splitoperNone:
@@ -7004,7 +7792,7 @@ VOID LrToSz(
                         (PGNO) plrsplit->le_pgno,
                         (USHORT) plrsplit->le_ilineSplit,
                         (USHORT) plrsplit->le_ilineOper,
-                        (USHORT) plrsplit->le_clines-1,
+                        (USHORT) plrsplit->le_clines-1,     // convert to iline
                         (USHORT) plrsplit->dbid,
                         (PGNO) plrsplit->le_pgnoNew,
                         (DBTIME) (pgnoNull != (PGNO) plrsplit->le_pgnoParent ? (DBTIME) plrsplit->le_dbtimeParentBefore: 0),
@@ -7471,7 +8259,10 @@ VOID LrToSz(
                 case DBFILEHDR::backupOSSnapshot:
                     szBackupType = "OSSnapshot";
                     break;
-                
+                /*case backupSnapshot:  (NYI)
+                    szBackupType = "JETSnapshot";
+                    break;
+                */
                 case DBFILEHDR::backupSurrogate:
                     szBackupType = "Surrogate";
                     break;
@@ -7595,6 +8386,7 @@ VOID LrToSz(
             CHAR *          szNames         = reinterpret_cast<CHAR *>( plrextrestore ) + sizeof(LREXTRESTORE);
             CAutoWSZPATH    wszName;
 
+            // it should be enough pre-allocated so we should not get any errors
             CallS( wszName.ErrSet( (UnalignedLittleEndian< WCHAR > *)szNames ) );
             
             OSStrCbFormatA( rgchBuf, sizeof(rgchBuf), " (%ws,", (WCHAR*)wszName );
@@ -7608,12 +8400,13 @@ VOID LrToSz(
             break;
         }
 
-        case lrtypMacroInfo:
+        case lrtypMacroInfo:    //  was lrtypIgnored1
         {
             const LRMACROINFO * const plrmacroinfo = (LRMACROINFO *) plr;
             OSStrCbAppendA( szLR, cbLR, " " );
             for ( CPG ipgno = 0; ipgno < plrmacroinfo->CountOfPgno(); ipgno++ )
             {
+                // LRMACROINFO only reported page refs for dbid 1 (for supported scenarios, ExO HA)
                 OSStrCbFormatA( rgchBuf, sizeof(rgchBuf), "[%u:%lu],", 1, plrmacroinfo->GetPgno( ipgno ) );
                 OSStrCbAppendA( szLR, cbLR, rgchBuf );
             }
@@ -7621,7 +8414,7 @@ VOID LrToSz(
             break;
         }
         
-        case lrtypExtendDB:
+        case lrtypExtendDB: //  was lrtypIgnored2
         {
             const LREXTENDDB * const plrextendb = (LREXTENDDB *) plr;
             OSStrCbFormatA( rgchBuf, sizeof(rgchBuf), " [%u:%lu]", plrextendb->Dbid(), plrextendb->PgnoLast() );
@@ -7629,14 +8422,14 @@ VOID LrToSz(
             break;
         }
 
-        case lrtypCommitCtx:
+        case lrtypCommitCtx:    //  was lrtypIgnored3
         {
             if ( !plog || FLGVersionNewCommitCtx( &plog->m_pLogStream->GetCurrentFileHdr()->lgfilehdr ) )
             {
                 const LRCOMMITCTX * const plrcommitctx = (LRCOMMITCTX *) plr;
                 OSStrCbFormatA( rgchBuf, sizeof(rgchBuf), " (%x) [%s%s]", plrcommitctx->ProcID(), plrcommitctx->FCallbackNeeded() ? "C" : "", plrcommitctx->FContainsCustomerData() ? "P" : "" );
                 OSStrCbAppendA( szLR, cbLR, rgchBuf );
-                Assert( plrcommitctx->CbCommitCtx() <= cbCommitCtxExpected );
+                Assert( plrcommitctx->CbCommitCtx() <= cbCommitCtxExpected );   // should be enough space for this much
                 FullDataToSz( plrcommitctx->PbCommitCtx(), plrcommitctx->CbCommitCtx(), cbCommitCtxExpected, plrcommitctx->FContainsCustomerData() ? plog->IDumpVerbosityLevel() : LOG::ldvlData, rgchBuf, cbLRBuf );
                 OSStrCbAppendA( szLR, cbLR, rgchBuf );
             }
@@ -7645,16 +8438,18 @@ VOID LrToSz(
                 const LRCOMMITCTXOLD * const plrcommitctx = (LRCOMMITCTXOLD *) plr;
                 OSStrCbFormatA( rgchBuf, sizeof(rgchBuf), " (%x) ", plrcommitctx->ProcID() );
                 OSStrCbAppendA( szLR, cbLR, rgchBuf );
-                Assert( plrcommitctx->CbCommitCtx() <= cbCommitCtxExpected );
+                Assert( plrcommitctx->CbCommitCtx() <= cbCommitCtxExpected );   // should be enough space for this much
                 FullDataToSz( plrcommitctx->PbCommitCtx(), plrcommitctx->CbCommitCtx(), cbCommitCtxExpected, plog->IDumpVerbosityLevel(), rgchBuf, cbLRBuf );
                 OSStrCbAppendA( szLR, cbLR, rgchBuf );
             }
             break;
         }
 
-        case lrtypScanCheck:
+        case lrtypScanCheck:    //  was lrtypIgnored4
         {
             const LRSCANCHECK * const plrscancheck = (LRSCANCHECK*)plr;
+            //  this is in "classic after" (current), before (on page at read / "update" time) sort of format like
+            //  other LRs (lrtypInsert, lrtypReplace, etc) ... but remember we don't update any DBTIMEs w/ this LR
             OSStrCbFormatA( rgchBuf, sizeof(rgchBuf), " %I64x,%I64x[%u:%lu]",
                 plrscancheck->DbtimeAfter(),
                 plrscancheck->DbtimeBefore(),
@@ -7667,6 +8462,8 @@ VOID LrToSz(
         case lrtypScanCheck2:
         {
             const LRSCANCHECK2 * const plrscancheck = (LRSCANCHECK2*)plr;
+            //  this is in "classic after" (current), before (on page at read / "update" time) sort of format like 
+            //  other LRs (lrtypInsert, lrtypReplace, etc) ... but remember we don't update any DBTIMEs w/ this LR
             OSStrCbFormatA( rgchBuf, sizeof(rgchBuf), " %I64x,%I64x[%u:%lu],source:%hhu",
                 plrscancheck->DbtimeCurrent(),
                 plrscancheck->DbtimePage(),
@@ -7677,9 +8474,11 @@ VOID LrToSz(
             break;
         }
 
-        case lrtypReAttach:
+        case lrtypReAttach: //  was lrtypIgnored6
         {
             const LRREATTACHDB * const plrreattach = (LRREATTACHDB*)plr;
+            //  this is in "classic after" (current), before (on page at read / "update" time) sort of format like 
+            //  other LRs (lrtypInsert, lrtypReplace, etc) ... but remember we don't update any DBTIMEs w/ this LR
             OSStrCbFormatA( rgchBuf, sizeof(rgchBuf), " [%d:],", (DBID)plrreattach->le_dbid );
             OSStrCbAppendA( szLR, cbLR, rgchBuf );
             OSStrCbFormatA( rgchBuf, sizeof(rgchBuf), " consistent:(%X,%X,%X) attach:(%X,%X,%X) SigDb: ",
@@ -7696,7 +8495,7 @@ VOID LrToSz(
             break;
         }
 
-        case lrtypMacroInfo2:
+        case lrtypMacroInfo2:   //  was lrtypIgnored7
         {
             const LRMACROINFO2 * const plrmacroinfo2 = (LRMACROINFO2 *)plr;
             OSStrCbAppendA( szLR, cbLR, " " );
@@ -7709,7 +8508,7 @@ VOID LrToSz(
             break;
         }
 
-        case lrtypFreeFDP:
+        case lrtypFreeFDP: //   was lrtypIgnored8
         {
             const LRFREEFDP * const plrfreefdp = (LRFREEFDP *)plr;
             OSStrCbFormatA( rgchBuf, sizeof(rgchBuf), " %lx:([%u:%lu] (%c))",
@@ -7722,7 +8521,7 @@ VOID LrToSz(
             break;
         }
 
-        case lrtypNOP2:
+        case lrtypNOP2: //  was lrtypIgnored5
         case lrtypIgnored9:
         case lrtypIgnored10:
         case lrtypIgnored11:
@@ -7761,6 +8560,7 @@ VOID LrToSz(
             const LRTRIMDB * const plrtrimdb = (LRTRIMDB *) plr;
             OSStrCbFormatA( rgchBuf, sizeof(rgchBuf), " [%u:%lu+%ld] (", plrtrimdb->Dbid(), plrtrimdb->PgnoStartZeroes(), plrtrimdb->CpgZeroLength() );
 
+            // Append the first few (32) pages explicitly.
             for ( INT i = 1; i < plrtrimdb->CpgZeroLength() && i < 32; ++i )
             {
                 CHAR rgchPage[ 16 ];
@@ -7827,6 +8627,7 @@ VOID LrToSz(
 
             OSStrCbFormatA( rgchBuf, sizeof(rgchBuf), " [%u:%lu+%ld] (", plrextentfreed->Dbid(), plrextentfreed->PgnoFirst(), plrextentfreed->CpgExtent() );
 
+            // Append the first few (32) pages explicitly.
             for ( INT i = 1; i < plrextentfreed->CpgExtent() && i < 32; ++i )
             {
                 CHAR rgchPage[ 16 ];
@@ -7858,6 +8659,7 @@ ERR  ErrAddPageRef( _In_ const DBID                                             
 {
     ERR err = JET_errSuccess;
 
+    // realloc input buffer if it is too small to accept the new page reference
     const ULONG cPageRefMin = 128;
     const ULONG cPageRefNew = *pcPageRef + 1;
     if ( *prgPageRef == NULL || *pcPageRefAlloc < cPageRefNew )
@@ -7874,6 +8676,7 @@ ERR  ErrAddPageRef( _In_ const DBID                                             
         *prgPageRef = rgPageRefNew;
     }
 
+    // add the new page ref
     ( *prgPageRef )[( *pcPageRef )++] = PageRef( dbid, pgno, fWrite, fRead );
 
 HandleError:
@@ -8036,13 +8839,18 @@ ERR ErrLrToPageRef( _In_ INST* const                                            
 
         case lrtypRootPageMove:
         {
+            // No page references from this LR itself. Pages touched by a root page move come from
+            // lrtypPageMove, lrtypReplace and lrtypSetExternalHeader which are part of the root
+            // page move macro.
             break;
         }
 
-        case lrtypMacroInfo:
+        case lrtypMacroInfo:        // lrtypIgnored1
+            // there are page refs in LRMACROINFO but they are duplicates of previous page refs by design and are only
+            // in the log to support incremental reseed
             break;
 
-        case lrtypScanCheck:
+        case lrtypScanCheck:        // lrtypIgnored4
         {
             const LRSCANCHECK * const   plrscancheck    = (LRSCANCHECK *)plr;
             const DBID                  dbid            = plrscancheck->Dbid();
@@ -8067,14 +8875,16 @@ ERR ErrLrToPageRef( _In_ INST* const                                            
             break;
         }
 
-        case lrtypMacroInfo2:
+        case lrtypMacroInfo2:       // lrtypIgnored7
+            // there are page refs in LRMACROINFO2 but they are duplicates of previous page refs by design and are only
+            // in the log to support incremental reseed
             break;
 
-        case lrtypExtendDB:
-        case lrtypCommitCtx:
-        case lrtypNOP2:
-        case lrtypReAttach:
-        case lrtypFreeFDP:
+        case lrtypExtendDB: // lrtypIgnored2
+        case lrtypCommitCtx:    // lrtypIgnored3
+        case lrtypNOP2: // lrtypIgnored5
+        case lrtypReAttach: // lrtypIgnored6
+        case lrtypFreeFDP: // lrtypIgnored8
         case lrtypIgnored9:
         case lrtypIgnored10:
         case lrtypIgnored11:
@@ -8100,6 +8910,7 @@ ERR ErrLrToPageRef( _In_ INST* const                                            
             const LREXTENTFREED * const   plrextentfreed    = (LREXTENTFREED *)plr;
             const DBID                  dbid                = plrextentfreed->Dbid();
 
+            // TODO VJ: visit, should we consider this as pages read and written even though this would be true only for copy where available lag is enabled.
             PGNO pgnoFirst = plrextentfreed->PgnoFirst();
             CPG  cpgExtent = plrextentfreed->CpgExtent();
 
@@ -8121,13 +8932,17 @@ HandleError:
 
 #if defined( DEBUG ) && defined( ENABLE_JET_UNIT_TEST )
 
+//  ================================================================
 JETUNITTEST( LRPAGEPATCHREQUEST, ConstructorSetsLrtyp )
+//  ================================================================
 {
     LRPAGEPATCHREQUEST lr;
     CHECK(lrtypPagePatchRequest == lr.lrtyp);
 }
 
+//  ================================================================
 JETUNITTEST( LRPAGEPATCHREQUEST, ConstructorZeroesMembers )
+//  ================================================================
 {
     LRPAGEPATCHREQUEST lr;
     CHECK(0 == lr.Dbid());
@@ -8135,6 +8950,7 @@ JETUNITTEST( LRPAGEPATCHREQUEST, ConstructorZeroesMembers )
     CHECK(0 == lr.Dbtime());
 }
 
+// exposes the reserved data for testing
 class TESTLRPAGEPATCHREQUEST : public LRPAGEPATCHREQUEST
 {
 public:
@@ -8142,13 +8958,17 @@ public:
     const INT CbReserved() const { return sizeof(m_rgbReserved); }
 };
 
+//  ================================================================
 JETUNITTEST( LRPAGEPATCHREQUEST, HasReservedData )
+//  ================================================================
 {
     const TESTLRPAGEPATCHREQUEST lr;
     CHECK(lr.CbReserved() > 0);
 }
 
+//  ================================================================
 JETUNITTEST( LRPAGEPATCHREQUEST, ConstructorZeroesReservedData )
+//  ================================================================
 {
     const TESTLRPAGEPATCHREQUEST lr;
     const BYTE * const pb = lr.PbReserved();
@@ -8159,7 +8979,9 @@ JETUNITTEST( LRPAGEPATCHREQUEST, ConstructorZeroesReservedData )
     }
 }
 
+//  ================================================================
 JETUNITTEST( LRPAGEPATCHREQUEST, SetDbid )
+//  ================================================================
 {
     const DBID dbid = 1;
     LRPAGEPATCHREQUEST lr;
@@ -8167,7 +8989,9 @@ JETUNITTEST( LRPAGEPATCHREQUEST, SetDbid )
     CHECK(dbid == lr.Dbid());
 }
 
+//  ================================================================
 JETUNITTEST( LRPAGEPATCHREQUEST, SetPgno )
+//  ================================================================
 {
     const PGNO pgno = 2;
     LRPAGEPATCHREQUEST lr;
@@ -8175,7 +8999,9 @@ JETUNITTEST( LRPAGEPATCHREQUEST, SetPgno )
     CHECK(pgno == lr.Pgno());
 }
 
+//  ================================================================
 JETUNITTEST( LRPAGEPATCHREQUEST, SetDbtime )
+//  ================================================================
 {
     const DBTIME dbtime = 0xABCDABCDF;
     LRPAGEPATCHREQUEST lr;
@@ -8183,7 +9009,9 @@ JETUNITTEST( LRPAGEPATCHREQUEST, SetDbtime )
     CHECK(dbtime == lr.Dbtime());
 }
 
+//  ================================================================
 JETUNITTEST( LRPAGEPATCHREQUEST, LrToSz )
+//  ================================================================
 {
     LRPAGEPATCHREQUEST lr;
     lr.SetDbtime(0x1234a);
@@ -8195,7 +9023,9 @@ JETUNITTEST( LRPAGEPATCHREQUEST, LrToSz )
     CHECK(0 == strcmp(" PagePatch 1234a,[1:2]", szLR));
 }
 
+//  ================================================================
 JETUNITTEST( LREXTENDDB, ConstructorSetsLrtyp )
+//  ================================================================
 {
     LREXTENDDB lr;
     LRIGNORED *plrT = (LRIGNORED *)&lr;
@@ -8203,18 +9033,24 @@ JETUNITTEST( LREXTENDDB, ConstructorSetsLrtyp )
     CHECK( lrtypExtendDB == plrT->lrtyp );
 }
 
+//  ================================================================
 JETUNITTEST( LREXTENDDB, TestForwardCompatibility )
+//  ================================================================
 {
+    // This test verifies that this log record will look OK to 
+    // old versions of ESE that try to replay it.
 
     LREXTENDDB lr;
     LRIGNORED *plrT = (LRIGNORED *)&lr;
     
-    CHECK( plrT->lrtyp >= lrtypMacroInfo );
+    CHECK( plrT->lrtyp >= lrtypMacroInfo );  // lrtypIgnored1
     CHECK( plrT->lrtyp <= lrtypIgnored19 );
     CHECK( plrT->Cb() + sizeof(LRIGNORED) == sizeof(LREXTENDDB) );
 }
 
+//  ================================================================
 JETUNITTEST( LREXTENDDB, SetDbid )
+//  ================================================================
 {
     LREXTENDDB lr;
 
@@ -8223,7 +9059,9 @@ JETUNITTEST( LREXTENDDB, SetDbid )
     CHECK( dbid == lr.Dbid() );
 }
 
+//  ================================================================
 JETUNITTEST( LREXTENDDB, SetPgnoLast )
+//  ================================================================
 {
     LREXTENDDB lr;
 
@@ -8232,7 +9070,9 @@ JETUNITTEST( LREXTENDDB, SetPgnoLast )
     CHECK( pgno == lr.PgnoLast() );
 }
 
+//  ================================================================
 JETUNITTEST( LREXTENDDB, LrToSz )
+//  ================================================================
 {
     LREXTENDDB lr;
 
@@ -8244,21 +9084,27 @@ JETUNITTEST( LREXTENDDB, LrToSz )
     CHECK( 0 == strcmp(" ExtendDB  [7:1234]", szLR ) );
 }
 
+//  ================================================================
 JETUNITTEST( LRSHRINKDB, ConstructorSetsLrtypShrink1 )
+//  ================================================================
 {
     LRSHRINKDB lr( lrtypShrinkDB );
     
     CHECK( lrtypShrinkDB == lr.lrtyp );
 }
 
+//  ================================================================
 JETUNITTEST( LRSHRINKDB, ConstructorSetsLrtypShrink2 )
+//  ================================================================
 {
     LRSHRINKDB lr( lrtypShrinkDB2 );
     
     CHECK( lrtypShrinkDB2 == lr.lrtyp );
 }
 
+//  ================================================================
 JETUNITTEST( LRSHRINKDB3, ConstructorSetsLrtypShrink3 )
+//  ================================================================
 {
     LRSHRINKDB3 lr;
 
@@ -8266,7 +9112,9 @@ JETUNITTEST( LRSHRINKDB3, ConstructorSetsLrtypShrink3 )
     CHECK( dbtimeNil == lr.Dbtime() );
 }
 
+//  ================================================================
 JETUNITTEST( LRSHRINKDB3, CopyConstructorLrtypShrink3SetsLrtypShrink1 )
+//  ================================================================
 {
     LRSHRINKDB lr( lrtypShrinkDB );
     lr.SetDbid( 7 );
@@ -8282,7 +9130,9 @@ JETUNITTEST( LRSHRINKDB3, CopyConstructorLrtypShrink3SetsLrtypShrink1 )
     CHECK( dbtimeNil == lr3.Dbtime() );
 }
 
+//  ================================================================
 JETUNITTEST( LRSHRINKDB3, CopyConstructorLrtypShrink3SetsLrtypShrink2 )
+//  ================================================================
 {
     LRSHRINKDB lr( lrtypShrinkDB2 );
     lr.SetDbid( 7 );
@@ -8298,7 +9148,9 @@ JETUNITTEST( LRSHRINKDB3, CopyConstructorLrtypShrink3SetsLrtypShrink2 )
     CHECK( dbtimeNil == lr3.Dbtime() );
 }
 
+//  ================================================================
 JETUNITTEST( LRSHRINKDB3, CopyConstructorLrtypShrink3SetsLrtypShrink3 )
+//  ================================================================
 {
     LRSHRINKDB3 lr3a;
     lr3a.SetDbid( 7 );
@@ -8315,7 +9167,9 @@ JETUNITTEST( LRSHRINKDB3, CopyConstructorLrtypShrink3SetsLrtypShrink3 )
     CHECK( 8910 == lr3b.Dbtime() );
 }
 
+//  ================================================================
 JETUNITTEST( LRSHRINKDB, SetDbid )
+//  ================================================================
 {
     LRSHRINKDB lr( lrtypShrinkDB2 );
 
@@ -8324,7 +9178,9 @@ JETUNITTEST( LRSHRINKDB, SetDbid )
     CHECK( dbid == lr.Dbid() );
 }
 
+//  ================================================================
 JETUNITTEST( LRSHRINKDB, SetPgnoLast )
+//  ================================================================
 {
     LRSHRINKDB lr( lrtypShrinkDB2 );
 
@@ -8333,7 +9189,9 @@ JETUNITTEST( LRSHRINKDB, SetPgnoLast )
     CHECK( pgno == lr.PgnoLast() );
 }
 
+//  ================================================================
 JETUNITTEST( LRSHRINKDB, SetCpgShrunk )
+//  ================================================================
 {
     LRSHRINKDB lr( lrtypShrinkDB2 );
 
@@ -8342,7 +9200,9 @@ JETUNITTEST( LRSHRINKDB, SetCpgShrunk )
     CHECK( cpg == lr.CpgShrunk() );
 }
 
+//  ================================================================
 JETUNITTEST( LRSHRINKDB3, SetDbtime )
+//  ================================================================
 {
     LRSHRINKDB3 lr;
 
@@ -8351,7 +9211,9 @@ JETUNITTEST( LRSHRINKDB3, SetDbtime )
     CHECK( dbtime == lr.Dbtime() );
 }
 
+//  ================================================================
 JETUNITTEST( LRSHRINKDB, LrToSzShrink1 )
+//  ================================================================
 {
     LRSHRINKDB lr( lrtypShrinkDB );
 
@@ -8364,7 +9226,9 @@ JETUNITTEST( LRSHRINKDB, LrToSzShrink1 )
     CHECK( 0 == strcmp(" ShrinkDB  [7:1234:567]", szLR ) );
 }
 
+//  ================================================================
 JETUNITTEST( LRSHRINKDB, LrToSzShrink2 )
+//  ================================================================
 {
     LRSHRINKDB lr( lrtypShrinkDB2 );
 
@@ -8377,7 +9241,9 @@ JETUNITTEST( LRSHRINKDB, LrToSzShrink2 )
     CHECK( 0 == strcmp(" ShrinkDB2 [7:1234:567]", szLR ) );
 }
 
+//  ================================================================
 JETUNITTEST( LRSHRINKDB3, LrToSzShrink3 )
+//  ================================================================
 {
     LRSHRINKDB3 lr;
 
@@ -8391,14 +9257,18 @@ JETUNITTEST( LRSHRINKDB3, LrToSzShrink3 )
     CHECK( 0 == strcmp(" ShrinkDB3 22ce[7:1234:567]", szLR ) );
 }
 
+//  ================================================================
 JETUNITTEST( LRTRIMDB, ConstructorSetsLrtyp )
+//  ================================================================
 {
     LRTRIMDB lr;
 
     CHECK( lrtypTrimDB == lr.lrtyp );
 }
 
+//  ================================================================
 JETUNITTEST( LRTRIMDB, SetDbid )
+//  ================================================================
 {
     LRTRIMDB lr;
 
@@ -8407,7 +9277,9 @@ JETUNITTEST( LRTRIMDB, SetDbid )
     CHECK( dbid == lr.Dbid() );
 }
 
+//  ================================================================
 JETUNITTEST( LRTRIMDB, SetPgnoStartZeroes )
+//  ================================================================
 {
     LRTRIMDB lr;
 
@@ -8416,7 +9288,9 @@ JETUNITTEST( LRTRIMDB, SetPgnoStartZeroes )
     CHECK( pgno == lr.PgnoStartZeroes() );
 }
 
+//  ================================================================
 JETUNITTEST( LRTRIMDB, SetCpgZeroLength )
+//  ================================================================
 {
     LRTRIMDB lr;
 
@@ -8425,7 +9299,9 @@ JETUNITTEST( LRTRIMDB, SetCpgZeroLength )
     CHECK( pgno == lr.CpgZeroLength() );
 }
 
+//  ================================================================
 JETUNITTEST( LRTRIMDB, LrToSz )
+//  ================================================================
 {
     LRTRIMDB lr;
 
@@ -8439,4 +9315,4 @@ JETUNITTEST( LRTRIMDB, LrToSz )
     CHECK( 0 == strcmp(" TrimDB    [7:1234+5] ([7:1235] [7:1236] [7:1237] [7:1238] )", szLR ) );
 }
 
-#endif
+#endif // defined( DEBUG ) && defined( ENABLE_JET_UNIT_TEST )

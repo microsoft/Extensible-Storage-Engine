@@ -5,6 +5,6 @@
 
 namespace DHT {
 
-};
+}; // namespace DHT
 
 

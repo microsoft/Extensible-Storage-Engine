@@ -5,11 +5,12 @@ void __stdcall EsetestAssertFail( const CHAR* szMessage, const CHAR* szFilename,
 
 
 #ifdef DEBUG
+//#define AssertSz( exp, sz )       ( ( exp ) ? (void) 0 : EsetestAssertFail( _T( sz ), _T( __FILE__ ), __LINE__ ) )
 #define AssertSz( exp, sz )         ( ( exp ) ? (void) 0 : EsetestAssertFail( sz, __FILE__, __LINE__ ) )
 #define VerifySz( exp, sz )         AssertSz( exp, sz )
-#else
+#else  //  !DEBUG
 #define AssertSz( exp, sz )
 #define VerifySz( exp, sz )         ( ( void )( exp ) )
-#endif
+#endif  //  DEBUG
 
 

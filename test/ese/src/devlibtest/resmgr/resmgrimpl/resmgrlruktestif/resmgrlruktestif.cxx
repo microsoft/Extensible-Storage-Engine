@@ -1,10 +1,12 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
+//  Header files.
 
 #include "resmgrlruktestif.hxx"
 
 
+//  class PageEvictionAlgorithmLRUKTest.
 
 PageEvictionAlgorithmLRUKTest::PageEvictionAlgorithmLRUKTest( const bool fBest ) : 
     IPageEvictionAlgorithmImplementation(),
@@ -82,6 +84,7 @@ ERR PageEvictionAlgorithmLRUKTest::ErrEvictNextPage( void* const pv, const BFTRA
     QWORD qwCompactIFMPPGNO = 0;
     CLRUKTestResourceUtilityManagerTypeERR err = m_lruktest.ErrEvictNextResource( &qwCompactIFMPPGNO, RESMGRLRUKTESTGetTickCount() );
 
+    //  Force success if there is nothing to evict.
 
     if ( err == CLRUKTestResourceUtilityManagerType::errNoCurrentResource )
     {
@@ -109,6 +112,7 @@ ERR PageEvictionAlgorithmLRUKTest::ErrGetNextPageToEvict( void* const pv, PageEv
     QWORD qwCompactIFMPPGNO = 0;
     CLRUKTestResourceUtilityManagerTypeERR err = m_lruktest.ErrGetNextResource( &qwCompactIFMPPGNO, RESMGRLRUKTESTGetTickCount() );
 
+    //  Force success if there is nothing to evict.
 
     if ( err == CLRUKTestResourceUtilityManagerType::errNoCurrentResource )
     {

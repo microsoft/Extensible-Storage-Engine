@@ -3,7 +3,9 @@
 
 #pragma once
 
+//  Cached File Header
 
+//  bd07ebca-290c-46bb-8bc8-99041dfe21c6
 const BYTE c_rgbCachedFileHeaderV1[ CBlockCacheHeaderHelpers::cbGuid ] = { 0xCA, 0xEB, 0x07, 0xBD, 0x0C, 0x29, 0xBB, 0x46, 0x8B, 0xC8, 0x99, 0x04, 0x1D, 0xFE, 0x21, 0xC6 };
 
 #pragma push_macro( "new" )
@@ -11,7 +13,8 @@ const BYTE c_rgbCachedFileHeaderV1[ CBlockCacheHeaderHelpers::cbGuid ] = { 0xCA,
 
 #include <pshpack1.h>
 
-class CCachedFileHeader : CBlockCacheHeaderHelpers
+//PERSISTED
+class CCachedFileHeader : CBlockCacheHeaderHelpers  //  cfh
 {
     public:
 
@@ -58,15 +61,15 @@ class CCachedFileHeader : CBlockCacheHeaderHelpers
 
     private:
 
-        LittleEndian<ULONG>             m_le_ulChecksum;
-        BYTE                            m_rgbHeaderType[ cbGuid ];
-        LittleEndian<VolumeId>          m_le_volumeid;
-        LittleEndian<FileId>            m_le_fileid;
-        BYTE                            m_rgbUniqueId[ cbGuid ];
-        LittleEndian<FileSerial>        m_le_serialNumber;
-        LittleEndian<VolumeId>          m_le_volumeidCache;
-        LittleEndian<FileId>            m_le_fileidCache;
-        BYTE                            m_rgbUniqueIdCache[ cbGuid ];
+        LittleEndian<ULONG>             m_le_ulChecksum;                //  offset 0:  checksum
+        BYTE                            m_rgbHeaderType[ cbGuid ];      //  header type
+        LittleEndian<VolumeId>          m_le_volumeid;                  //  volume id when last attached to the caching file
+        LittleEndian<FileId>            m_le_fileid;                    //  file id when last attached to the caching file
+        BYTE                            m_rgbUniqueId[ cbGuid ];        //  unique id
+        LittleEndian<FileSerial>        m_le_serialNumber;              //  serial number
+        LittleEndian<VolumeId>          m_le_volumeidCache;             //  caching file's volume id
+        LittleEndian<FileId>            m_le_fileidCache;               //  caching file's file id
+        BYTE                            m_rgbUniqueIdCache[ cbGuid ];   //  caching file's unique id
 
         BYTE                            m_rgbPadding1[  ibFileType
                                                         - sizeof( m_le_ulChecksum )
@@ -79,7 +82,7 @@ class CCachedFileHeader : CBlockCacheHeaderHelpers
                                                         - sizeof( m_le_fileidCache )
                                                         - sizeof( m_rgbUniqueIdCache ) ];
 
-        UnalignedLittleEndian<ULONG>    m_le_filetype;
+        UnalignedLittleEndian<ULONG>    m_le_filetype;                                      //  offset 667:  file type = JET_filetypeCachedFile
 
         BYTE                            m_rgbPadding2[  cbCachedFileHeader
                                                         - ibFileType
@@ -308,9 +311,9 @@ INLINE void* CCachedFileHeader::operator new( _In_ const size_t cb )
 {
 #ifdef MEM_CHECK
     return PvOSMemoryPageAlloc_( cb, NULL, fFalse, SzNewFile(), UlNewLine() );
-#else
+#else  //  !MEM_CHECK
     return PvOSMemoryPageAlloc( cb, NULL );
-#endif
+#endif  //  MEM_CHECK
 }
 
 INLINE void* CCachedFileHeader::operator new( _In_ const size_t cb, _In_ const void* const pv )

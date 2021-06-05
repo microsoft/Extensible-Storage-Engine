@@ -5,24 +5,31 @@
 #define _OS__TLS_HXX_INCLUDED
 
 
+//  Internal TLS structure
 
 struct _TLS
 {
 
-    DWORD               dwThreadId;
-    HANDLE              hThread;
+    //  Elements used for thread and TLS itself support.
+    //
+    DWORD               dwThreadId;     //  thread ID
+    HANDLE              hThread;        //  thread handle
 
-    _TLS*               ptlsNext;
-    _TLS**              pptlsNext;
+    _TLS*               ptlsNext;       //  next TLS in global list
+    _TLS**              pptlsNext;      //  pointer to the pointer to this TLS
 
-    OSTLS               ostls;
+    //  OS Library TLS support.
+    //
+    OSTLS               ostls;          //  OS Library TLS structure
 
-    BYTE                rgUserTLS[];
+    //  User TLS space.
+    //
+    BYTE                rgUserTLS[];    //  external TLS structure
 
 };
 
 OSTLS* const PostlsFromIntTLS( _TLS * const ptls );
 TLS* const PtlsFromIntTLS( _TLS * const ptls );
 
-#endif
+#endif  //  _OS__TLS_HXX_INCLUDED
 

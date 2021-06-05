@@ -46,6 +46,11 @@
             }   \
         }
 
+// This test performs these operations
+//      Insert pattern: 60, 70, 80, 89, 90 x 2, 100  (but not in this order, in two passes)
+//      Queries values: Anywhere from 55 to 106.
+//          Both for getting sample values, and sample hits.
+//
 CStats::ERR TestSimplePerfectHistogramBehavior( CStats * const phistoTest )
 {
     CStats::ERR err = CStats::ERR::errSuccess;
@@ -57,14 +62,17 @@ CStats::ERR TestSimplePerfectHistogramBehavior( CStats * const phistoTest )
     SAMPLE qwSample = 0;
     CHITS chits = 0;
 
+    //  Test empty class
 
     CallTest( (CStats::ERR)ErrTestZerodHisto( phistoTest, TestZeroFlags( fHasExplicitBuckets | fNoPercentileSupport ) ) );
 
+    //  1st pass of inserts!
 
     CallTest( phistoTest->ErrAddSample( 100 ) );
     CallTest( phistoTest->ErrAddSample( 70 ) );
     CallTest( phistoTest->ErrAddSample( 90 ) );
 
+    //  Do basic sample enumeration.
 
     CallTest( phistoTest->ErrReset() );
     CallTest( phistoTest->ErrGetSampleValues( &qwSample ) );
@@ -81,12 +89,16 @@ CStats::ERR TestSimplePerfectHistogramBehavior( CStats * const phistoTest )
     TestSame( 1, chits );
     CallTest( phistoTest->ErrReset() );
 
+    //  2nd pass of inserts!
 
     CallTest( phistoTest->ErrAddSample( 60 ) );
     CallTest( phistoTest->ErrAddSample( 80 ) );
     CallTest( phistoTest->ErrAddSample( 89 ) );
     CallTest( phistoTest->ErrAddSample( 90 ) );
+    // Diag / debugging 
+    //((CCompoundHistogram*)phistoTest)->Dump();
 
+    //  Do 2nd basic sample enumeration (seeing that things have changed).
 
     CallTest( phistoTest->ErrGetSampleValues( &qwSample ) );
     TestSame( 60, qwSample );
@@ -98,27 +110,35 @@ CStats::ERR TestSimplePerfectHistogramBehavior( CStats * const phistoTest )
     TestSame( 1, chits );
     CallTest( phistoTest->ErrReset() );
 
+    //  Complicated cases.
 
+    //  Check a multi-bucket get hits.
     CallTest( phistoTest->ErrGetSampleHits( 80, &chits ) );
     TestSame( 3, chits );
     CallTest( phistoTest->ErrReset() );
 
+    //  Check empty buckets before.
     CallTest( phistoTest->ErrReset() );
     CallTest( phistoTest->ErrGetSampleHits( 55, &chits ) );
     TestSame( 0, chits );
+    //  Check get all hits.
     CallTest( phistoTest->ErrGetSampleHits( 100, &chits ) );
     TestSame( 7, chits );
-    chits = 42;
+    //  Check no remaining hits, and hits zeroed.
+    chits = 42; // dirty value
     TestFail( CStats::ERR::wrnOutOfSamples, phistoTest->ErrGetSampleHits( 101, &chits ) );
     TestSame( 0, chits );
 
+    //  Check get all hits (without preceding empty bucket get).
     CallTest( phistoTest->ErrReset() );
     CallTest( phistoTest->ErrGetSampleHits( 100, &chits ) );
     TestSame( 7, chits );
+    //  Check get all hits (beyond the range).
     CallTest( phistoTest->ErrReset() );
     CallTest( phistoTest->ErrGetSampleHits( 104, &chits ) );
     TestSame( 7, chits );
 
+    //  Check complete list of all hits for each insert sample.
     CallTest( phistoTest->ErrReset() );
     CallTest( phistoTest->ErrGetSampleHits( 60, &chits ) );
     TestSame( 1, chits );
@@ -130,12 +150,13 @@ CStats::ERR TestSimplePerfectHistogramBehavior( CStats * const phistoTest )
     TestSame( 1, chits );
     CallTest( phistoTest->ErrGetSampleHits( 90, &chits ) );
     TestSame( 2, chits );
-    CallTest( phistoTest->ErrGetSampleHits( 99, &chits ) );
+    CallTest( phistoTest->ErrGetSampleHits( 99, &chits ) ); // note: This one inserted to look for no hits between 90 and 99 (inclusive)
     TestSame( 0, chits );
     CallTest( phistoTest->ErrGetSampleHits( 100, &chits ) );
     TestSame( 1, chits );
     TestFail( CStats::ERR::wrnOutOfSamples, phistoTest->ErrGetSampleHits( 105, &chits ) );
 
+    //  Check complete list of all sample values expected.
     CallTest( phistoTest->ErrReset() );
     CallTest( phistoTest->ErrGetSampleValues( &qwSample ) );
     TestSame( 60, qwSample );
@@ -157,8 +178,10 @@ HandleError:
     return err;
 }
 
+//  ================================================================
 CUnitTest( CompoundHistogramTest, 0, "Tests a three segmented compound histo with a moving split to ensure we don't miss any values at the separations." );
 ERR CompoundHistogramTest::ErrTest()
+//  ================================================================
 {
     wprintf( L"\tTesting Compound Histogram support ...\n");
 
@@ -179,7 +202,18 @@ ERR CompoundHistogramTest::ErrTest()
     if ( fPrintStatus )
         wprintf(L" Testing CCompoundHistogram...\n");
     
-    
+    /* for debugging explicit splits ...
+    ULONG iDebugOne = 55;
+    ULONG iDebugTwo = 102;
+    CCompoundHistogram * pchDebug = new CCompoundHistogram();
+    pchDebug->ErrAddHistoRange( iDebugOne, new CPerfectHistogramStats() );
+    pchDebug->ErrAddHistoRange( iDebugTwo, new CPerfectHistogramStats() );
+    pchDebug->ErrAddHistoRange( qwMax, new CPerfectHistogramStats() );
+    wprintf( L"    Explicit Splits: %d, %d -> %p\n", iDebugOne, iDebugTwo, pchDebug );
+    pchDebug->Zero();
+    TestCall( TestSimplePerfectHistogramBehavior( pchDebug ) );
+    delete pchDebug;
+    //*/
     
     for( ULONG iFirstSplit = 55; iFirstSplit < 106; iFirstSplit++ )
     {

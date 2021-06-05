@@ -3,7 +3,9 @@
 
 #include "statunittest.hxx"
 
+//  ================================================================
 class StatBasicTest : public UNITTEST
+//  ================================================================
 {
     private:
         static StatBasicTest s_instance;
@@ -35,7 +37,9 @@ bool StatBasicTest::FRunUnderESE97() const      { return true; }
 
 
 
+//  ================================================================
 ERR StatBasicTest::ErrTest()
+//  ================================================================
 {
     wprintf( L"\tTesting basic stats support ...\n");
 
@@ -67,7 +71,7 @@ ERR StatBasicTest::ErrTest()
     CStats::ERR err = CStats::ERR::errSuccess;
     ULONG iTest = 0;
     CStats::ERR csErr = CStats::ERR::errSuccess;
-    BOOL fResult = fTrue;
+    BOOL fResult = fTrue; // assumed innocent, until proven guilty.
     ULONG fBailOnError = fFalse;
 
     SAMPLE qwSmall      = 10;
@@ -91,13 +95,15 @@ ERR StatBasicTest::ErrTest()
         goto HandleError;
     }
 
-    pPHS->AssertValid();
+    pPHS->AssertValid();    // we can assert valid outside the lock b/c we know we're single threaded here.
 
+    //  Test empty class
 
     iTest = 1;
 
     CallTest( ErrTestZerodHisto( pPHS ) );
 
+    //  Test basics ...
 
     iTest = 2;
     CallTest( pPHS->ErrAddSample( qwSmall ) );
@@ -122,6 +128,7 @@ ERR StatBasicTest::ErrTest()
     Validate( pPHS->Total() == ( qwSmall + qwMiddleMinus + qwMiddlePlus ) );
     CallTest( pPHS->ErrAddSample( qwBig ) );
     Validate( pPHS->C() == 4 );
+    //  Total and Ave likely went wacky on this case.
     Validate( pPHS->Min() == qwSmall );
     Validate( pPHS->Max() == qwBig );
     pPHS->AssertValid();
@@ -142,6 +149,7 @@ ERR StatBasicTest::ErrTest()
     Validate( pPHS->Total() == ( qwMiddlePlus + qwMiddleMinus ) );
     CallTest( pPHS->ErrAddSample( qwBig ) );
     Validate( pPHS->C() == 3 );
+    //  Total and Ave likely went wacky on this case.
     Validate( pPHS->Min() == qwMiddleMinus );
     Validate( pPHS->Max() == qwBig );
     CallTest( pPHS->ErrAddSample( qwSmall ) );
@@ -230,7 +238,7 @@ ERR StatBasicTest::ErrTest()
     CallTest( pPHS->ErrReset() );
     CallTest( pPHS->ErrGetSampleHits( 1, &cSamples ) );
     Validate( 2 == cSamples );
-    cSamples = 42;
+    cSamples = 42; // dirty value
     csErr = pPHS->ErrGetSampleHits( 2, &cSamples );
     Validate( csErr == CStats::ERR::wrnOutOfSamples );
     Validate( 0 == cSamples );
@@ -244,7 +252,7 @@ ERR StatBasicTest::ErrTest()
     CallTest( pPHS->ErrReset() );
     CallTest( pPHS->ErrAddSample( 0x2A ) );
     ulPercentile = 0;
-    qwSample = 42;
+    qwSample = 42; // dirty value
     csErr = pPHS->ErrGetPercentileHits( &ulPercentile, &qwSample );
     Validate( csErr == CStats::ERR::errInvalidParameter );
     ulPercentile = 1;
@@ -288,11 +296,12 @@ ERR StatBasicTest::ErrTest()
 
     iTest = 12;
 
-    Validate( UlBound( 35, 40, 55 ) == 40 );
-    Validate( UlBound( 35, 20, 30 ) == 30 );
-    Validate( UlBound( 35, 34, 36 )  == 35 );
+    // specific, simple cases.
+    Validate( UlBound( 35, 40, 55 ) == 40 );    // too low
+    Validate( UlBound( 35, 20, 30 ) == 30 );    // too high
+    Validate( UlBound( 35, 34, 36 )  == 35 );   // just right
 
-    iTest = 13;
+    iTest = 13; // test mode
     pPHS->Zero();
     CallTest( pPHS->ErrAddSample( 34 ) );
     CallTest( pPHS->ErrAddSample( 34 ) );
@@ -309,6 +318,7 @@ ERR StatBasicTest::ErrTest()
     if ( fPrintStatus )
         wprintf(L" Stat library unit test completed (successfully)!\n");
 
+    //  Unknown error case got pass the checks, when it should have thrown.
     Validate( fResult );
 
     return JET_errSuccess;  

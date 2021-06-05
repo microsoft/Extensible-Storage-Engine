@@ -3,8 +3,9 @@
 
 #pragma once
 
+//  A cached file table entry for the pass through cache.
 
-class CPassThroughCachedFileTableEntry
+class CPassThroughCachedFileTableEntry  //  cfte
     :   public CCachedFileTableEntryBase
 {
     public:
@@ -51,9 +52,11 @@ INLINE ERR CPassThroughCachedFileTableEntry::ErrOpenCachedFile( _In_ IFileSystem
     IFileFilter*    pffDisplacedData                                        = NULL;
     BOOL            fCreated                                                = fFalse;
 
+    //  call the base implementation first
 
     Call( CCachedFileTableEntryBase::ErrOpenCachedFile( pfsf, pfident, pbcconfig, pffCaching ) );
 
+    //  create/open the file for the storage holding the displaced data.  eventually this will be in the caching file
 
     Call( pffCaching->ErrPath( wszAbsCachingFilePath ) );
     Call( pfsf->ErrPathParse( wszAbsCachingFilePath, wszCachingFileFolder, NULL, NULL ) );
@@ -68,20 +71,23 @@ INLINE ERR CPassThroughCachedFileTableEntry::ErrOpenCachedFile( _In_ IFileSystem
                                 s_wszDisplacedDataExtension,
                                 wszAbsDisplacedDataPath ) );
 
-    err = JET_errFileAlreadyExists;
+    err = JET_errFileAlreadyExists;  //  ErrERRCheck( JET_errFileAlreadyExists ) not appropriate here
     while ( err == JET_errFileAlreadyExists )
     {
+        //  if we have retried too many times then fail
 
         if ( ++cAttempt >= cAttemptMax )
         {
             Call( ErrERRCheck( JET_errInternalError ) );
         }
 
+        //  try to open the file
 
         err = pfsf->ErrFileOpen(    wszAbsDisplacedDataPath, 
                                     IFileAPI::fmfStorageWriteBack,
                                     (IFileAPI**)&pffDisplacedData );
 
+        //  if we couldn't find the file then try to create it
 
         if ( err == JET_errFileNotFound )
         {
@@ -97,6 +103,7 @@ INLINE ERR CPassThroughCachedFileTableEntry::ErrOpenCachedFile( _In_ IFileSystem
     }
     Call( err );
 
+    //  make the displaced data file available for other opens
 
     m_pffDisplacedData = pffDisplacedData;
 

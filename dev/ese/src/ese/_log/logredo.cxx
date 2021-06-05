@@ -1,6 +1,26 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
+//  LOGREDO - logical part of soft/hard recovery
+//  ============================================
+//
+//  ENTRY POINT(S):
+//      ErrLGSoftStart
+//
+//  PURPOSE:
+//      Logical part of soft/hard recovery. Replays logfiles, starting from
+//      the begining of logfile pointed by checkpoint. If there is no checkpoint
+//      starts from the begining of the lowest available log generation file.
+//
+//      Main loop is through ErrLGRIRedoOperations
+//
+//  BASE PROTOTYPES:
+//      class LOG in log.hxx
+//
+//  OFTEN USED PROTOTYPES:
+//      classes LRxxxx in logapi.hxx
+//
+/////////////////////////////////////////////
 
 #include "logstd.hxx"
 #include "_ver.hxx"
@@ -33,6 +53,7 @@ LONG RecoveryStallReadOnlyTimeCEFLPv( LONG iInstance, void *pvBuf )
 
 #endif
 
+// LOG functions.
 
 ERR LOG::ErrGetLgposRedoWithCheck()
 {
@@ -51,8 +72,10 @@ ERR LOG::ErrGetLgposRedoWithCheck()
     AssertSzRTL( CmpLgpos( m_lgposRedo, g_lgposRedoTrap ), "Redo Trap" );
 #endif
 
+    // check for the potential stopping point
     if ( FLGRecoveryLgposStopLogRecord( m_lgposRedo ) )
     {
+        // we hit already the desired log stop position
 
 
         Error( ErrLGISetQuitWithoutUndo( ErrERRCheck( JET_errRecoveredWithoutUndo ) ) );
@@ -76,6 +99,11 @@ LOCAL VOID TraceReplacePageImage( const char * const szOperation, const PGNO pgn
             pgno));
 }
 
+//  replace a page with a before image. used in redo of split and merge
+//  we are given an image of a page at time 'dbtime'. the image is copied
+//  in and then reverted to time 'dbtimeBefore' (this is because the before
+//  image is logged after the page is dirtied).
+//
 LOCAL ERR ErrReplacePageImage(
                         PIB * const ppib,
                         const IFMP ifmp,
@@ -92,6 +120,7 @@ LOCAL ERR ErrReplacePageImage(
     Assert( csr.Pgno() == pgno );
     Assert( dbtime > dbtimeBefore );
 
+    // It should either be a normal page, or Sparse.
     Assert( csr.PagetrimState() == pagetrimNormal || csr.PagetrimState() == pagetrimTrimmed );
 
     if ( pagetrimTrimmed == csr.PagetrimState() )
@@ -107,9 +136,13 @@ LOCAL ERR ErrReplacePageImage(
         Assert( csr.Latch() == latchRIW );
         Expected( csr.Dbtime() != dbtimeBefore );
 
+        // the current version of the page should always be newer than the before image
+        // (otherwise we are moving the page forwards in time), except for when it's going to be 
+        // trimmed in the future, in which case the page must be in the bad dbtime redo map.
         Assert( ( csr.Dbtime() > dbtimeBefore ) ||
                 ( g_rgfmp[ ifmp ].PLogRedoMapBadDbTime() && g_rgfmp[ ifmp ].PLogRedoMapBadDbTime()->FPgnoSet( pgno ) ) );
 
+        // replacing a page image with itself?
         Assert( 0 != memcmp( csr.Cpage().PvBuffer(), pbBeforeImage, cb ) );
 
         {
@@ -132,6 +165,11 @@ LOCAL ERR ErrReplacePageImage(
             Call( ErrERRCheck( JET_errInternalError ) );
         }
 
+        // release the current cached page and allocate a new buffer and copy the before image into 
+        // it. the before image page won't be written to disk even if it is dirtied. this is good
+        // as writing the updated before image to disk causes recovery problems -- we aren't 
+        // guaranteed that all operations against the page since the split/merge will replay as
+        // the modifying transaction's Begin0 record may be older than the checkpoint.
 
         csr.ReleasePage();
     }
@@ -139,6 +177,7 @@ LOCAL ERR ErrReplacePageImage(
     Assert( !csr.FLatched() );
 
     Call( csr.ErrLoadPage( ppib, ifmp, pgno, pbBeforeImage, cb, latchWrite ) );
+    // the before image of the page is logged after the dbtime was updated so we have to restore it
     csr.RestoreDbtime( dbtimeBefore );
     csr.Downgrade( latchRIW );
 
@@ -150,6 +189,8 @@ HandleError:
     return err;
 }
 
+//  rebuild a page with its header/trailer.
+//
 LOCAL VOID RebuildPageImageHeaderTrailer(
     __in_bcount( cbHeader )     const VOID * const pvHeader,
                                 const INT cbHeader,
@@ -170,6 +211,13 @@ LOCAL VOID RebuildPageImageHeaderTrailer(
     UtilMemCpy( pbCurr, pvTrailer, cbTrailer );
 }
 
+//  replace a page with a before image which is broken into header+trailer
+//  (used by page move)
+//
+//  we are given an image of a page at time 'dbtime'. the image is copied
+//  in and then reverted to time 'dbtimeBefore' (this is because the before
+//  image is logged after the page is dirtied).
+//
 LOCAL ERR ErrReplacePageImageHeaderTrailer(
                                 PIB * const ppib,
                                 const IFMP ifmp,
@@ -194,10 +242,13 @@ LOCAL ERR ErrReplacePageImageHeaderTrailer(
     return err;
 }
 
+//  checks if page needs a redo of operation
+//
 INLINE BOOL FLGINeedRedo( const CSR& csr, const DBTIME dbtime )
 {
     if ( pagetrimTrimmed == csr.PagetrimState() )
     {
+        // The CSR's latch state doesn't need to be checked if we won't need to redo the operation.
         return fFalse;
     }
 
@@ -207,6 +258,8 @@ INLINE BOOL FLGINeedRedo( const CSR& csr, const DBTIME dbtime )
     return dbtime > csr.Dbtime();
 }
 
+//  report unexpected dbtime
+//
 LOCAL ERR ErrLGRIReportDbtimeMismatch(
     const INST*     pinst,
     const IFMP      ifmp,
@@ -270,6 +323,10 @@ LOCAL ERR ErrLGRIReportDbtimeMismatch(
     return err;
 }
 
+//  Checks if page needs a redo of operation.
+//  perr contains an error if there is a dbtime-too-(new|old) error.
+//  If the page is trimmed (according to csr), then returns fFalse (and perr = JET_errSuccess).
+//
 INLINE BOOL FLGNeedRedoCheckDbtimeBefore(
     const CSR&      csr,
     const DBTIME    dbtimeAfter,
@@ -289,6 +346,7 @@ INLINE BOOL FLGNeedRedoCheckDbtimeBefore(
             Assert( dbtimeInvalid != dbtimeBefore );
             if ( fRedoNeeded )
             {
+                // dbtimeBefore on page should be the same one as in the record
                 if ( csr.Dbtime() != dbtimeBefore )
                 {
                     FMP* const pfmp = &g_rgfmp[ csr.Cpage().Ifmp() ];
@@ -298,6 +356,10 @@ INLINE BOOL FLGNeedRedoCheckDbtimeBefore(
                     if ( csr.Dbtime() < dbtimeBefore
                          && plog->FRedoMapNeeded( csr.Cpage().Ifmp() ) )
                     {
+                        // We're likely redoing a page operation that will be trimmed or shrunk
+                        // in the future, but we do need to keep track of it just in case
+                        // it isn't (i.e., it's a legitimate DBTIME mismatch from a lost flush or
+                        // a bug in the engine).
                         *perr = pfmp->ErrEnsureLogRedoMapsAllocated();
                         if ( *perr >= JET_errSuccess )
                         {
@@ -313,6 +375,8 @@ INLINE BOOL FLGNeedRedoCheckDbtimeBefore(
                             {
                                 plog->SetPendingRedoMapEntries();
 
+                                // Since this page is missing other updates from the past, we cannot let it
+                                // be updated since it would be missing an indeterminate amount of data.
                                 fRedoNeeded = fFalse;
                             }
                         }
@@ -329,6 +393,7 @@ INLINE BOOL FLGNeedRedoCheckDbtimeBefore(
                             plog->LgposLGLogTipNoLock(),
                             1 );
 
+                        // assert after event log for easier diagnosis ...
                         Assert( csr.Dbtime() == dbtimeBefore || FNegTest( fCorruptingWithLostFlush ) );
                     }
                 }
@@ -336,6 +401,7 @@ INLINE BOOL FLGNeedRedoCheckDbtimeBefore(
             else
             {
                 Assert( dbtimeAfter > dbtimeBefore );
+                // If the page is trimmed, we have no consistency guarantees.
                 Assert( csr.Dbtime() >= dbtimeAfter );
             }
             break;
@@ -352,12 +418,16 @@ INLINE BOOL FLGNeedRedoCheckDbtimeBefore(
     return fRedoNeeded;
 }
 
+//  checks if page needs a redo of operation
+//
 INLINE BOOL FLGNeedRedoPage( const CSR& csr, const DBTIME dbtime )
 {
     return FLGINeedRedo( csr, dbtime );
 }
 
 #ifdef DEBUG
+//  checks if page needs a redo of operation
+//
 INLINE BOOL FAssertLGNeedRedo( const CSR& csr, const DBTIME dbtime, const DBTIME dbtimeBefore )
 {
     ERR         err;
@@ -365,7 +435,7 @@ INLINE BOOL FAssertLGNeedRedo( const CSR& csr, const DBTIME dbtime, const DBTIME
 
     return ( fRedoNeeded && JET_errSuccess == err );
 }
-#endif
+#endif // DEBUG
 
 
 LOCAL
@@ -447,6 +517,13 @@ VOID LGIReportPageDataMissing( const INST* pinst, const IFMP ifmp, const PGNO pg
     OSTraceResumeGC();
 }
 
+//  access page RIW latched
+//  remove dependence
+//
+//  On success, the page is latched with latchRIW.
+//  On failure, the page is not latched.
+//  errSkipLogRedoOperation: the page is not latched, and the Pagetrim State is pagetrimTrimmed.
+//
 INLINE ERR LOG::ErrLGIAccessPage(
     PIB             *ppib,
     CSR             *pcsr,
@@ -464,6 +541,9 @@ INLINE ERR LOG::ErrLGIAccessPage(
     Assert( NULL != ppib );
     Assert( !pcsr->FLatched() );
 
+    //  right off the bat, if the pgno for this redo operation is already
+    //  tracked by the log redo map, we should just skip it instead of
+    //  trying to operate on a page that we know is not up-to-date.
     CLogRedoMap* pLogRedoMapZeroed = g_rgfmp[ifmp].PLogRedoMapZeroed();
     if ( pLogRedoMapZeroed && pLogRedoMapZeroed->FPgnoSet( pgno ) )
     {
@@ -484,6 +564,22 @@ INLINE ERR LOG::ErrLGIAccessPage(
         dbtime = pcsr->Cpage().Dbtime();
     }
 
+    //  If a shrink or trim have happened at any point in the log range we are recovering,
+    //  trying to access a page would either yield JET_errFileIOBeyondEOF or
+    //  JET_errPageNotInitialized if such a page was within the shrunk or trimmed range.
+    //
+    //  JET_errFileIOBeyondEOF is simple to understand: the database has shrunk
+    //  and a redo operation applies to a page in this area. For these operations,
+    //  we must skip them but track them in the redo map.
+    //
+    //  JET_errPageNotInitialized is more interesting of a case. If there is a split
+    //  redo operation for a shrunk range, the database will be extended to accomodate
+    //  such an operation. However, all the pages in this extended range are blank,
+    //  and any further redo operations on them will yield the JET_errPageNotInitialized
+    //  error. We must skip these pages and also track them in the redo map.
+    //
+    //  Treat pages marked as shrunk similarly.
+    //
     fBeyondEofPageOk = fUninitPageOk && g_rgfmp[ifmp].FOlderDemandExtendDb();
     if ( ( ( ( errPage == JET_errFileIOBeyondEOF ) && !fBeyondEofPageOk ) ||
            ( ( errPage == JET_errPageNotInitialized ) && !fUninitPageOk ) ||
@@ -562,6 +658,7 @@ HandleError:
     return err;
 }
 
+//  ================================================================
 ERR LOG::ErrLGIAccessPageCheckDbtimes(
     __in    PIB             * const ppib,
     __in    CSR             * const pcsr,
@@ -571,6 +668,13 @@ ERR LOG::ErrLGIAccessPageCheckDbtimes(
             const DBTIME    dbtimeBefore,
             const DBTIME    dbtimeAfter,
     __out   BOOL * const    pfRedoRequired )
+//  ================================================================
+//
+// Given a page and its dbtimeBefore/After latch the page and determine
+// if redo is required. If redo is required the page is write latched,
+// otherwise it is RIW latched.
+//
+//-
 {
     Assert( ppib );
     Assert( pcsr );
@@ -613,6 +717,7 @@ HandleError:
     {
         if ( errSkipLogRedoOperation == err )
         {
+            // But it's still a success...
             Assert( FRedoMapNeeded( ifmp ) );
             Assert( g_rgfmp[ ifmp ].PLogRedoMapZeroed() && g_rgfmp[ ifmp ].PLogRedoMapZeroed()->FPgnoSet( pgno ) );
 
@@ -626,6 +731,8 @@ HandleError:
 }
 
 
+//  report flush-order dependency violation
+//
 LOCAL ERR ErrLGRIReportFlushDependencyCorrupted(
     const IFMP      ifmp,
     const PGNO      pgnoFlushFirst,
@@ -653,6 +760,8 @@ LOCAL ERR ErrLGRIReportFlushDependencyCorrupted(
     return ErrERRCheck( JET_errDatabaseBufferDependenciesCorrupted );
 }
 
+//  retrieves new page from database
+//
 ERR LOG::ErrLGRIAccessNewPage(
     PIB *               ppib,
     CSR *               pcsrNew,
@@ -662,7 +771,19 @@ ERR LOG::ErrLGRIAccessNewPage(
     const DBTIME        dbtime,
     BOOL *              pfRedoNewPage )
 {
+    //  if database could contain updates from future logs
+    //      access new page
+    //      if page exists
+    //          if page's dbtime < dbtime of oper
+    //              release page
+    //              get new page
+    //      else
+    //          get new page
+    //  else
+    //      get new page
+    //
 
+    //  assume new page needs to be redone
     *pfRedoNewPage = fTrue;
 
     if ( g_rgfmp[ ifmp ].FContainsDataFromFutureLogs() )
@@ -684,6 +805,8 @@ ERR LOG::ErrLGRIAccessNewPage(
 
         if ( err >= 0 )
         {
+            //  get new page if page is older than operation
+            //
             Assert( latchRIW == pcsrNew->Latch() );
 
             *pfRedoNewPage = FLGNeedRedoPage( *pcsrNew, dbtime );
@@ -715,6 +838,7 @@ ERR LOG::ErrLGRIPpibFromProcid( PROCID procid, PIB **pppib )
 
     *pppib = m_pcsessionhash->PpibHashFind( procid );
 
+    //  if we didn't find it, begin a new session for the requested procid
 
     if ( *pppib == ppibNil )
     {
@@ -728,6 +852,9 @@ HandleError:
 }
 
 
+//  creates new fucb with given criteria
+//  links fucb to hash table
+//
 LOCAL ERR ErrLGRICreateFucb(
     PIB         *ppib,
     const IFMP  ifmp,
@@ -744,9 +871,13 @@ LOCAL ERR ErrLGRICreateFucb(
     ULONG       cRetries = 0;
     BOOL        fCreatedNewFCB = fFalse;
 
+    //  create fucb
+    //
     Call( ErrFUCBOpen( ppib, ifmp, &pfucb ) );
     pfucb->pvtfndef = &vtfndefIsam;
 
+    //  set ifmp
+    //
     pfucb->ifmp = ifmp;
 
     Assert( pfcbNil == pfucb->u.pfcb );
@@ -756,10 +887,16 @@ LOCAL ERR ErrLGRICreateFucb(
 Restart:
     AssertTrack( cRetries != 100000, "StalledCreateFucbRetries" );
 
-    pfcb = FCB::PfcbFCBGet( ifmp, pgnoFDP, &fState, fTrue , fTrue );
+    //  get fcb for table, if one exists
+    //
+    pfcb = FCB::PfcbFCBGet( ifmp, pgnoFDP, &fState, fTrue /* FIncrementRefCount */, fTrue /* fInitForRecovery */);
     Assert( pfcbNil == pfcb || fFCBStateInitialized == fState );
     if ( pfcbNil == pfcb )
     {
+        //  there exists no fcb for FDP
+        //      allocate new fcb as a regular table FCB
+        //      and set up for FUCB
+        //
         err = FCB::ErrCreate( ppib, ifmp, pgnoFDP, &pfcb );
         if ( err == errFCBExists )
         {
@@ -791,31 +928,45 @@ Restart:
             pfcb->SetTypeTable();
         }
 
-        Assert( pfcb->FUnique() );
+        //  FCB always initialised as unique, though
+        //  this flag is ignored during recovery
+        //  (uniqueness is strictly determined by
+        //  FUCB's flags)
+        Assert( pfcb->FUnique() );      // FCB always initialised as unique
         if ( !fUnique )
             pfcb->SetNonUnique();
 
         pfcb->Unlock();
 
+        //  link in the FUCB to new FCB
+        //
         Call( pfcb->ErrLink( pfucb ) );
 
+        //  insert the FCB into the global list
 
         pfcb->InsertList();
 
         Assert( pfcb->WRefCount() >= 1 );
 
+        //  complete the creation of this FCB
         pfcb->Lock();
         pfcb->CreateComplete();
         pfcb->Unlock();
     }
     else
     {
+        //  link in the FUCB to new FCB
+        //
         err = pfcb->ErrLink( pfucb );
+        //  release FCB for the PfcbFCBGet() call
+        //
         Assert( pfcb->WRefCount() > 1 );
         pfcb->Release();
         Call( err );
     }
 
+    //  set unique-ness in FUCB if requested
+    //
     Assert( !FFUCBSpace( pfucb ) );
     Assert( ( fUnique && FFUCBUnique( pfucb ) )
         || ( !fUnique && !FFUCBUnique( pfucb ) ) );
@@ -839,14 +990,17 @@ HandleError:
         {
             if ( pfcb == pfucb->u.pfcb )
             {
+                // We managed to link the FUCB to the FCB before we errored.
                 pfcb->Unlink( pfucb );
             }
 
+            //  close the FUCB
             FUCBClose( pfucb );
         }
 
         if ( fCreatedNewFCB )
         {
+            //  synchronously purge the FCB we created but didn't use.
             pfcb->PrepareForPurge( fFalse );
             pfcb->Purge( fFalse );
         }
@@ -857,6 +1011,9 @@ HandleError:
 
 
 
+//  closes all cursors created on database during recovery by given session
+//  releases corresponding table handles
+//
 VOID LGRIPurgeFucbs( PIB * ppib, const IFMP ifmp, CTableHash * pctablehash )
 {
     Assert( NULL != pctablehash );
@@ -882,12 +1039,16 @@ VOID LGRIPurgeFucbs( PIB * ppib, const IFMP ifmp, CTableHash * pctablehash )
             pctablehash->RemoveFucb( pfucb );
             pfucb->fInRecoveryTableHash = fFalse;
 
+            //  unlink and close fucb
+            //
             pfucb->u.pfcb->Unlink( pfucb );
             FUCBClose( pfucb );
         }
     }
 }
 
+//  releases all references to this table
+//
 LOCAL ERR ErrLGRIPurgeFcbs( const IFMP ifmp, const PGNO pgnoFDP, FDPTYPE fFDPType, CTableHash * pctablehash )
 {
     FCB *pfcbTable = NULL;
@@ -921,6 +1082,8 @@ LOCAL ERR ErrLGRIPurgeFcbs( const IFMP ifmp, const PGNO pgnoFDP, FDPTYPE fFDPTyp
         pfcbTable = pfcb->PfcbTable();
         if ( fFDPType == fFDPTypeUnknown )
         {
+            // Found a secondary index FCB that got reused, figure out if the whole table has been deleted, ok to do
+            // logical calls to catalog here because we obviously have a fully hydrated secondary index here.
             PIB *ppib = ppibNil;
             PGNO pgnoLookup;
             CallR( ErrPIBBeginSession( PinstFromIfmp( pfcbTable->Ifmp() ), &ppib,procidNil, fFalse ) );
@@ -950,6 +1113,8 @@ LOCAL ERR ErrLGRIPurgeFcbs( const IFMP ifmp, const PGNO pgnoFDP, FDPTYPE fFDPTyp
             pfcb->Release();
         }
 
+        // Close all recovery cursors on this FCB
+        //
         for ( FCB *pfcbT = pfcbTable; pfcbT != pfcbNil; pfcbT = pfcbT->PfcbNextIndex() )
         {
             pctablehash->PurgeTablesForFCB( pfcbT );
@@ -965,9 +1130,18 @@ LOCAL ERR ErrLGRIPurgeFcbs( const IFMP ifmp, const PGNO pgnoFDP, FDPTYPE fFDPTyp
 
         if ( pfcbTable->Ptdb() != ptdbNil )
         {
+            // Remove from catalog hash so no user session will open this table any more - not needed right now
+            // because catalog hash is disabled during recovery
             Assert( !FCATHashActive( PinstFromIfmp( pfcbTable->Ifmp() ) ) );
-            
+            /*
+            CHAR szTable[JET_cbNameMost+1];
+            pfcbTable->EnterDML();
+            OSStrCbCopyA( szTable, sizeof(szTable), pfcbTable->Ptdb()->SzTableName() );
+            pfcbTable->LeaveDML();
+            CATHashDelete( pfcbTable, szTable );
+            */
 
+            // Setting delete pending/committed.
             pfcbTable->EnterDDL();
 
             for ( FCB *pfcbT = pfcbTable; pfcbT != pfcbNil; pfcbT = pfcbT->PfcbNextIndex() )
@@ -984,6 +1158,7 @@ LOCAL ERR ErrLGRIPurgeFcbs( const IFMP ifmp, const PGNO pgnoFDP, FDPTYPE fFDPTyp
                 fHasFUCB = ( NULL != pfcbT->Pfucb() );
                 pfcbT->Unlock();
                 
+                // If any user cursors are still open, we have to wait for them to close (cannot force close)
                 while ( fHasFUCB )
                 {
                     pfcbTable->LeaveDDL();
@@ -1008,6 +1183,7 @@ LOCAL ERR ErrLGRIPurgeFcbs( const IFMP ifmp, const PGNO pgnoFDP, FDPTYPE fFDPTyp
                     fHasFUCB = (NULL != pfcbLV->Pfucb() );
                     pfcbLV->Unlock();
 
+                    // If any user cursors are still open, we have to wait for them to close (cannot force close)
                     while ( fHasFUCB )
                     {
                         pfcbTable->LeaveDDL();
@@ -1030,6 +1206,8 @@ LOCAL ERR ErrLGRIPurgeFcbs( const IFMP ifmp, const PGNO pgnoFDP, FDPTYPE fFDPTyp
             pfcbTable->Unlock();
         }
 
+        //  Purge the FCB tree
+        //
         for ( FCB *pfcbT = pfcbTable; pfcbT != pfcbNil; pfcbT = pfcbT->PfcbNextIndex() )
         {
             VERNullifyAllVersionsOnFCB( pfcbT );
@@ -1056,6 +1234,8 @@ LOCAL ERR ErrLGRIPurgeFcbs( const IFMP ifmp, const PGNO pgnoFDP, FDPTYPE fFDPTyp
         Assert( pfcb != pfcbTable );
         Assert( pfcb->PfcbTable() == pfcbTable );
 
+        // Close all recovery cursors on this FCB
+        //
         pctablehash->PurgeTablesForFCB( pfcb );
 
         pfcbTable->EnterDDL();
@@ -1067,6 +1247,7 @@ LOCAL ERR ErrLGRIPurgeFcbs( const IFMP ifmp, const PGNO pgnoFDP, FDPTYPE fFDPTyp
         pfcb->SetDeleteCommitted();
         pfcb->Unlock();
 
+        //      update all index mask
         FILESetAllIndexMask( pfcbTable );
 
         pfcbTable->LeaveDDL();
@@ -1093,6 +1274,8 @@ LOCAL ERR ErrLGRIPurgeFcbs( const IFMP ifmp, const PGNO pgnoFDP, FDPTYPE fFDPTyp
     return JET_errSuccess;
 }
 
+//  releases and closes all tables in hash for this FCB
+//
 VOID CTableHash::PurgeTablesForFCB( const FCB * pfcb )
 {
     FUCB *  pfucbNext;
@@ -1109,6 +1292,8 @@ VOID CTableHash::PurgeTablesForFCB( const FCB * pfcb )
                 RemoveFucb( pfucb );
                 pfucb->fInRecoveryTableHash = fFalse;
 
+                //  unlink and close fucb
+                //
                 pfucb->u.pfcb->Unlink( pfucb );
                 FUCBClose( pfucb );
             }
@@ -1117,6 +1302,8 @@ VOID CTableHash::PurgeTablesForFCB( const FCB * pfcb )
 }
 
 
+//  releases and closes all unversioned tables in hash
+//
 VOID CTableHash::PurgeUnversionedTables()
 {
     FUCB *  pfucbNext;
@@ -1133,6 +1320,8 @@ VOID CTableHash::PurgeUnversionedTables()
                 RemoveFucb( pfucb );
                 pfucb->fInRecoveryTableHash = fFalse;
 
+                //  unlink and close fucb
+                //
                 pfucb->u.pfcb->Unlink( pfucb );
                 FUCBClose( pfucb );
             }
@@ -1141,6 +1330,14 @@ VOID CTableHash::PurgeUnversionedTables()
 }
 
 
+//  Returns pfucb for given pib and FDP.
+//
+//  PARAMETERS      ppib    pib of session being redone
+//                  fdp     FDP page for logged page
+//                  ppfucb  out FUCB for open table for logged page
+//
+//  RETURNS         JET_errSuccess or error from called routine
+//
 
 LOCAL ERR ErrLGRIGetFucb(
     CTableHash  *pctablehash,
@@ -1156,8 +1353,12 @@ LOCAL ERR ErrLGRIGetFucb(
 
     Assert( pctablehash != NULL );
 
+    //  allocate an all-purpose fucb for this table, if not already allocated
+    //
     if ( NULL == pfucb )
     {
+        //  fucb not created
+        //
         ERR err = ErrLGRICreateFucb(
                             ppib,
                             ifmp,
@@ -1172,6 +1373,8 @@ LOCAL ERR ErrLGRIGetFucb(
         if ( JET_errTooManyOpenTables == err
             || JET_errOutOfCursors == err )
         {
+            //  release tables without uncommitted versions and retry
+            //
             pctablehash->PurgeUnversionedTables();
             err = ErrLGRICreateFucb(
                             ppib,
@@ -1192,6 +1395,8 @@ LOCAL ERR ErrLGRIGetFucb(
 
     pfucb->bmCurr.Nullify();
 
+    //  reset copy buffer and flags
+    //
     Assert( !FFUCBDeferredChecksum( pfucb ) );
     Assert( !FFUCBUpdateSeparateLV( pfucb ) );
     FUCBResetUpdateFlags( pfucb );
@@ -1241,7 +1446,8 @@ ERR LOG::ErrLGRIInitSession(
     ERR                     err             = JET_errSuccess;
     DBID                    dbid;
 
-    
+    /*  set log stored db environment
+    /**/
     Assert( NULL != pdbms_param );
     m_pinst->RestoreDBMSParams( pdbms_param );
 
@@ -1249,6 +1455,8 @@ ERR LOG::ErrLGRIInitSession(
 
     CallR( m_pinst->ErrINSTInit() );
 
+    //  allocate and initialize global hash for table and session handles
+    //
     if ( NULL == m_pctablehash )
     {
         Alloc( m_pctablehash = new CTableHash( pdbms_param->le_lCursorsMax ) );
@@ -1261,11 +1469,15 @@ ERR LOG::ErrLGRIInitSession(
         Call( m_pcsessionhash->ErrInit() );
     }
 
+    //  restore the attached dbs
     Assert( pbAttach );
     if ( redoattachmodeInitBeforeRedo == redoattachmode )
     {
+        // We will initialize the revert snapshot from Rstmap during LGRIInitSession.
+        // Also, check if we need to roll the snapshot and roll it if required.
         Call( CRevertSnapshot::ErrRBSInitFromRstmap( m_pinst ) );
 
+        // If required range was a problem or if db's are not on the required efv m_prbs would be null in ErrRBSInitFromRstmap
         if ( m_pinst->m_prbs && m_pinst->m_prbs->FRollSnapshot() )
         {
             Call( m_pinst->m_prbs->ErrRollSnapshot( fTrue, fTrue ) );
@@ -1275,7 +1487,8 @@ ERR LOG::ErrLGRIInitSession(
         CallS( err );
         Call( err );
 
-        
+        /*  Make sure all the attached database are consistent!
+         */
         for ( dbid = dbidUserLeast; dbid < dbidMax; dbid++ )
         {
             IFMP        ifmp        = m_pinst->m_mpdbidifmp[ dbid ];
@@ -1294,11 +1507,17 @@ ERR LOG::ErrLGRIInitSession(
 
             Assert( redoattachmodeInitBeforeRedo == redoattachmode );
 
+            // if we have a map (m_irstmapMac check) 
+            // and we are not replaying what is NOT in the map (m_fReplayMissingMapEntryDB)
+            // then we should marked the missing one as Skipped
+            //
+            // SOFT_HARD: not needed, irstmapMac should do it
             if ( ( m_fHardRestore || m_irstmapMac > 0 ) && !m_fReplayMissingMapEntryDB )
             {
                 if ( 0 > IrstmapSearchNewName( wszDbName ) )
                 {
-                    
+                    /*  not in the restore map, set to skip it.
+                     */
                     Assert( pfmp->Pdbfilehdr() == NULL );
                     pfmp->SetSkippedAttach();
                 }
@@ -1333,7 +1552,7 @@ ERR LOG::ErrLGRIInitSession(
 
                 case redoattachCreate:
                 default:
-                    Assert( fFalse );
+                    Assert( fFalse );   //  should be impossible, but as a firewall, set to defer the attachment
                 case redoattachDefer:
                 case redoattachDeferConsistentFuture:
                 case redoattachDeferAccessDenied:
@@ -1342,12 +1561,13 @@ ERR LOG::ErrLGRIInitSession(
                     break;
             }
 
-            
+            /* keep attachment info and update it. */
             Assert( pfmp->Patchchk() != NULL );
         }
     }
     else if ( redoattachmodeInitLR == redoattachmode )
     {
+        // Implicitly reattaching keep-alive databases, allow header updates again
         for ( dbid = dbidMin; dbid < dbidMax; dbid++ )
         {
             const IFMP ifmp = m_pinst->m_mpdbidifmp[ dbid ];
@@ -1370,8 +1590,12 @@ ERR LOG::ErrLGRIInitSession(
 HandleError:
     Assert( err < JET_errSuccess );
 
+    //  disable checkpoint, because we may not have been able to
+    //  completely/accurately build list of attachments
+    //
     LGDisableCheckpoint();
 
+    // clean up instance resources allocated in ErrINSTInit
     m_fLogDisabledDueToRecoveryFailure = fTrue;
     (void)m_pinst->ErrINSTTerm( termtypeError );
     m_fLogDisabledDueToRecoveryFailure = fFalse;
@@ -1394,6 +1618,13 @@ ERR ErrLGICheckDatabaseFileSize( PIB *ppib, IFMP ifmp )
 
     if ( pfmp->Pdbfilehdr()->Dbstate() != JET_dbstateDirtyShutdown )
     {
+        //  When we're in the patched or just-created state we can not adjust the size of the database
+        //  because we may not have a consistent Root OE tree due to a inc-reseed V2
+        //  or passive page patching updating only one page of the larger tree during
+        //  the patch operation ... this means we must replay through the max gen
+        //  required in order to trust the OE tree, and until we play through the max
+        //  gen required the database will be in the patched state so we can 
+        //  distinguish when it is safe to walk the OE tree and resize the database.
         fAdjSize = fFalse;
     }
     else
@@ -1403,6 +1634,9 @@ ERR ErrLGICheckDatabaseFileSize( PIB *ppib, IFMP ifmp )
     }
     if ( JET_errFileNotFound == err )
     {
+        //  UNDONE: The file should be there. Put this code to get around
+        //  UNDONE: such that DS database file that was not detached can
+        //  UNDONE: continue recovering.
         const WCHAR *rgszT[1];
         rgszT[0] = pfmp->WszDatabaseName();
         UtilReportEvent(
@@ -1419,6 +1653,8 @@ ERR ErrLGICheckDatabaseFileSize( PIB *ppib, IFMP ifmp )
     {
         CallS( err );
 
+        //  the current file size does not match what the FMP (and OwnExt) say
+        //  it should be
 
         Assert( 0 != pfmp->CbOwnedFileSize() );
 
@@ -1426,7 +1662,20 @@ ERR ErrLGICheckDatabaseFileSize( PIB *ppib, IFMP ifmp )
         CallR( pfmp->Pfapi()->ErrSize( &cbFileSize, IFileAPI::filesizeLogical ) );
         if ( pfmp->CbOwnedFileSize() != cbFileSize )
         {
+            //  flush/purge the database before adjusting the file size to match the
+            //  space trees to ensure that we don't have any pages cached for the area
+            //  to be affected
+            //
+            //  NOTE:  if we are using a memory mapped cache and we need to shrink
+            //  the file then we will purge the entire database anyway.  we must do
+            //  this or the file shrink operation will fail.
+            // 
+            //  We also have to stop database scanning so that it won't read any pages
+            //  while the shrink is happening. We depend on another attach to restart
+            //  the scan.
+            //
 
+            // allow waypoint advancement to the current gen
             pfmp->SetNoWaypointLatency();
             CallR( ErrBFFlush( ifmp ) );
             pfmp->ResetNoWaypointLatency();
@@ -1453,6 +1702,7 @@ ERR ErrLGICheckDatabaseFileSize( PIB *ppib, IFMP ifmp )
 
             if ( fAdjSize )
             {
+                //  set file size to what the FMP (and OwnExt) says it should be.
                 PIBTraceContextScope tcScope = ppib->InitTraceContextScope();
                 tcScope->iorReason.SetIort( iortRecovery );
                 err = ErrIONewSize( ifmp, *tcScope, pfmp->PgnoLast(), 0, JET_bitNil );
@@ -1465,15 +1715,23 @@ ERR ErrLGICheckDatabaseFileSize( PIB *ppib, IFMP ifmp )
 
 LOCAL VOID LGICleanupTransactionToLevel0( PIB * const ppib, CTableHash * pctablehash )
 {
-    const ULONG ulStartCleanCursorsThreshold    = 64;
-    const ULONG ulStopCleanCursorsThreshold     = 16;
+    const ULONG ulStartCleanCursorsThreshold    = 64;       //  number of cursors open at which point we should start freeing some
+    const ULONG ulStopCleanCursorsThreshold     = 16;       //  minimum number of cursors to leave opened
     const BOOL  fCleanupCursors                 = ( ppib->cCursors > ulStartCleanCursorsThreshold );
     DWORD_PTR   cStaleCursors                   = 0;
     FUCB *      pfucbPrev                       = pfucbNil;
 
+    //  there should be no more RCEs
     Assert( 0 == ppib->Level() );
     Assert( prceNil == ppib->prceNewest );
 
+    //  UNDONE: Is it definitely safe to traverse the cursor
+    //  list without grabbing ppib->critCursors?  Even though
+    //  this code path is only taken on recovery and therefore
+    //  it is single-threaded, I'm a little worried there might
+    //  be some case where an FUCB gets freed as part of version
+    //  cleanup of some operation.
+    //
     for ( FUCB * pfucb = ppib->pfucbOfSession; pfucbNil != pfucb; )
     {
         FUCB * const    pfucbNext   = pfucb->pfucbNextOfSession;
@@ -1484,10 +1742,17 @@ LOCAL VOID LGICleanupTransactionToLevel0( PIB * const ppib, CTableHash * pctable
             && !FFUCBVersioned( pfucb )
             && ++cStaleCursors > ulStopCleanCursorsThreshold )
         {
+            //  accumulating too many cursors for this session,
+            //  so free up ones at the tail end of the list
+            //  that don't appear to have been used (ie. no
+            //  versioned operations)
+            //
             Assert( pfucb->fInRecoveryTableHash );
             pctablehash->RemoveFucb( pfucb );
             pfucb->fInRecoveryTableHash = fFalse;
 
+            //  unlink and close fucb
+            //
             pfucb->u.pfcb->Unlink( pfucb );
             FUCBClose( pfucb, pfucbPrev );
         }
@@ -1505,6 +1770,7 @@ LOCAL VOID LGICleanupTransactionToLevel0( PIB * const ppib, CTableHash * pctable
     ppib->ResetFBegin0Logged();
     VERSignalCleanup( ppib );
 
+    //  empty the list of RCEs
     ppib->RemoveAllDeferredRceid();
     ppib->RemoveAllRceid();
 }
@@ -1541,11 +1807,12 @@ ERR LOG::ErrLGRIEndAllSessionsWithError()
         if ( NULL != pfmp->Pdbfilehdr() &&
              !pfmp->FContainsDataFromFutureLogs() )
         {
+            //  fire callback for the dbs to be detached
             (void)ErrLGDbDetachingCallback( m_pinst, pfmp );
         }
     }
 
-    CallR( ErrLGEndAllSessionsMacro( fFalse  ) );
+    CallR( ErrLGEndAllSessionsMacro( fFalse /* fLogEndMacro */ ) );
 
     (VOID) m_pinst->m_pver->ErrVERRCEClean();
 
@@ -1555,12 +1822,16 @@ ERR LOG::ErrLGRIEndAllSessionsWithError()
     delete m_pcsessionhash;
     m_pcsessionhash = NULL;
 
+    //  checkpoint updating will use m_lgposToFlush as
+    //  the starting point for the checkpoint, so
+    //  set it to the oldest outstanding transaction
+    //
     lgposWriteTip = m_lgposRedo;
     m_pinst->m_critPIB.Enter();
     for ( PIB * ppibT = m_pinst->m_ppibGlobal; ppibT != NULL; ppibT = ppibT->ppibNext )
     {
-        if ( ppibT->FAfterFirstBT()
-            && ppibT->Level() > 0
+        if ( ppibT->FAfterFirstBT()             //  session active
+            && ppibT->Level() > 0                   //  open transaction
             && CmpLgpos( &ppibT->lgposStart, &lgposWriteTip ) < 0 )
         {
             lgposWriteTip = ppibT->lgposStart;
@@ -1569,14 +1840,19 @@ ERR LOG::ErrLGRIEndAllSessionsWithError()
     m_pinst->m_critPIB.Leave();
     m_pLogWriteBuffer->SetLgposWriteTip( lgposWriteTip );
 
+        //  remove all deferred RCEs and inserted RCEs for any session
     for ( ppib = m_pinst->m_ppibGlobal; NULL != ppib; ppib = ppib->ppibNext )
     {
         ppib->RemoveAllDeferredRceid();
         ppib->RemoveAllRceid();
     }
 
+    //  term with checkpoint updates
+    //
     m_fLGFMPLoaded = fTrue;
     const ERR errT = m_pinst->ErrINSTTerm( termtypeError );
+    //  ErrINSTTerm may have already been called before in ErrLGRIEndAllSessions
+    //  then re-entering ErrINSTTerm would get JET_errNotInitialized
     Assert( errT == JET_errSuccess || m_pinst->m_fTermAbruptly || errT == JET_errNotInitialized );
     m_fLGFMPLoaded = fFalse;
 
@@ -1651,10 +1927,21 @@ LOCAL VOID LGReportConsistentTimeMismatch(
 }
 
 
+//  Parameters:
+//      errRedoOrDbHdrCheck - The error returned from running redo,
+//          or if redo was successful the error returned in checking
+//          the attached DBs had their required log ranges ...
 VOID LOG::LGITryCleanupAfterRedoError( ERR errRedoOrDbHdrCheck )
 {
+    //  about to err out, but before doing so, attempt to flush
+    //  as much as possible (except if LLR in effect)
+    //
     OSTraceWriteRefLog( ostrlSystemFixed, sysosrtlDatapoint|sysosrtlContextInst, m_pinst, (PVOID)&(m_pinst->m_iInstance), sizeof(m_pinst->m_iInstance) );
 
+    //  we are specifically NOT triggering this at all ... because
+    //  since we are error'ing out, we never did undo, so skip
+    //  that step (so it shows up as skipped in timing seq).
+    //      m_pinst->m_isdlInit.Trigger( eInitLogRecoveryUndoDone );
 
     m_fLogDisabledDueToRecoveryFailure = fTrue;
     for ( DBID dbid = dbidUserLeast; dbid < dbidMax; dbid++ )
@@ -1665,8 +1952,14 @@ VOID LOG::LGITryCleanupAfterRedoError( ERR errRedoOrDbHdrCheck )
         {
             const BOOL fTestPreimageRedo = !!UlConfigOverrideInjection( 62228, 0 );
 
+            // Avoid the final BFFlush if the test hook is set. This makes it easier for
+            // calling code to call 'JetInit(); ExitProcess()' and get an incomplete Recovery.
             if ( !fTestPreimageRedo && (LONG)UlParam( m_pinst, JET_paramWaypointLatency ) == 0 )
             {
+                //  Note: since we're failing out of recovery, it is quite possible some
+                //  buffers are in an unflushable state, and this function will then return
+                //  a failure (that we ignore), so the flush here is best effort.  We maybe
+                //  should reconsider the real value of this flush?
                 (VOID)ErrBFFlush( ifmp );
             }
 
@@ -1675,6 +1968,10 @@ VOID LOG::LGITryCleanupAfterRedoError( ERR errRedoOrDbHdrCheck )
                 && !m_fReplayingIgnoreMissingDB
                 && !m_fAfterEndAllSessions )
             {
+                //  there are some deferred attachments which we can't
+                //  ignore, so don't update the checkpoint, otherwise
+                //  it will advance beyond those missing attachments
+                //
                 LGDisableCheckpoint();
             }
         }
@@ -1685,6 +1982,8 @@ VOID LOG::LGITryCleanupAfterRedoError( ERR errRedoOrDbHdrCheck )
 
     if ( errRedoOrDbHdrCheck == JET_errInvalidLogSequence )
     {
+        //  In this case we can't trust the value of m_plgfilehdr->lgfilehdr.le_lGeneration,
+        //  which is used in checkpoint calculation (LGIUpdateCheckpoint())
         LGDisableCheckpoint();
     }
 
@@ -1702,12 +2001,14 @@ ERR LOG::ErrLGICheckGenMaxRequiredAfterRedo()
     const ERR   err     = ErrLGCheckGenMaxRequired();
     Assert( m_fIgnoreLostLogs || JET_wrnCommittedLogFilesLost != err );
 
-    if ( err < JET_errSuccess )
+    if ( err < JET_errSuccess )     //  if this clause evaluates to FALSE, cleanup will be performed by the caller
     {
         Assert( err == JET_errCommittedLogFilesMissing ||
                 err == JET_errRequiredLogFilesMissing );
         Assert( !m_fIgnoreLostLogs || err != JET_errCommittedLogFilesMissing );
     
+        //  Flush as much as possible before bail out
+        //
         LGITryCleanupAfterRedoError( err );
     }
 
@@ -1784,6 +2085,7 @@ HandleError:
     return err;
 }
 
+// Terminate each session in the global session list
 ERR LOG::ErrLGRIEndEverySession()
 {
     ERR err = JET_errSuccess;
@@ -1793,8 +2095,14 @@ ERR LOG::ErrLGRIEndEverySession()
     PROCID procidT = 0;
     while( ppib != ppibNil )
     {
+        //  clean up the hash table because we're about to terminate
+        //
         Assert( procidNil != ppib->procid );
         Assert( NULL != m_pcsessionhash );
+        // If the pib is in the instance's session list but not in m_pcsessionhash,
+        // it was created by someone doing read-from-passive, and will be cleaned up
+        // by them, otherwise we need to clean it up
+        //
         if ( m_pcsessionhash->PpibHashFind( ppib->procid ) == ppibNil )
         {
             ppib = ppib->ppibNext;
@@ -1802,6 +2110,12 @@ ERR LOG::ErrLGRIEndEverySession()
         }
         m_pcsessionhash->RemovePib( ppib );
 
+        //  WARNING! WARNING! WARNING!
+        //  The force-detach code assumes that the pib list is in
+        //  monotonically increasing procid order, so that in case
+        //  some databases are force-detached, we will always replay
+        //  the undo's for all sessions in the exact same order
+        //
         Assert( procidT < ppib->procid );
         procidT = ppib->procid;
 
@@ -1815,7 +2129,12 @@ HandleError:
     return err;
 }
 
-
+/*
+ *      Ends redo session.
+ *  If fEndOfLog, then write log records to indicate the operations
+ *  for recovery. If fPass1 is true, then it is for phase1 operations,
+ *  otherwise for phase 2.
+ */
 
 ERR LOG::ErrLGRIEndAllSessions(
     const BOOL              fEndOfLog,
@@ -1828,7 +2147,11 @@ ERR LOG::ErrLGRIEndAllSessions(
     BOOL                    fNeedCallINSTTerm   = fTrue;
     DBID dbid;
 
+    //  UNDONE: is this call needed?
+    //
+    //(VOID)ErrVERRCEClean( );
 
+    //  Set current time to attached db's dbfilehdr
 
     for (dbid = dbidUserLeast; dbid < dbidMax; dbid++ )
     {
@@ -1838,6 +2161,7 @@ ERR LOG::ErrLGRIEndAllSessions(
 
         FMP *pfmp = &g_rgfmp[ ifmp ];
 
+        // If any db is in the middle of CreateDB, it needs to be cleaned up
         if ( fKeepDbAttached && pfmp->FCreatingDB() )
         {
             (VOID)ErrIOTermFMP( pfmp, m_lgposRedo, fFalse );
@@ -1845,6 +2169,9 @@ ERR LOG::ErrLGRIEndAllSessions(
             continue;
         }
 
+        //  If there is no redo operations on an attached db, then
+        //  pfmp->dbtimeCurrent may == 0, i.e. no operation, then do
+        //  not change pdbfilehdr->dbtime
 
         if ( pfmp->Pdbfilehdr() != NULL &&
              pfmp->DbtimeCurrentDuringRecovery() > pfmp->DbtimeLast() )
@@ -1852,16 +2179,21 @@ ERR LOG::ErrLGRIEndAllSessions(
             pfmp->SetDbtimeLast( pfmp->DbtimeCurrentDuringRecovery() );
         }
 
+        //  if we are out of redo, then note that we aren't recovering anything anymore
         if ( !pfmp->FSkippedAttach() &&
                 !pfmp->FDeferredAttach() &&
                 m_fRecoveringMode == fRecoveringUndo )
         {
             Assert( pfmp->Pdbfilehdr() );
 
-            if ( NULL != pfmp->Pdbfilehdr() )
+            if ( NULL != pfmp->Pdbfilehdr() )   // for insurance
             {
                 pfmp->PdbfilehdrUpdateable()->le_lGenRecovering = 0;
                 
+                //  If we've made it all the way to undo, we certainly should not have 
+                //  a DB in the patched state ... we should've bailed out before we started
+                //  undo in ErrLGICheckGenMaxRequiredAfterRedo() / ErrLGCheckGenMaxRequired()
+                //  due to the required log generations not being present.
                 DBEnforce( ifmp, pfmp->Pdbfilehdr()->Dbstate() != JET_dbstateDirtyAndPatchedShutdown );
             }
         }
@@ -1869,25 +2201,30 @@ ERR LOG::ErrLGRIEndAllSessions(
         if ( NULL != pfmp->Pdbfilehdr() &&
              !pfmp->FContainsDataFromFutureLogs() )
         {
+            //  fire callback for the dbs to be detached
 
             Call( ErrLGDbDetachingCallback( m_pinst, pfmp ) );
         }
     }
 
 
+        //  make sure there are no deferred RCEs and and remove all inserted RCEs for any session
     for ( ppib = m_pinst->m_ppibGlobal; NULL != ppib; ppib = ppib->ppibNext )
     {
 #ifndef RTM
         ppib->AssertNoDeferredRceid();
-#endif
+#endif  //  !RTM
         ppib->RemoveAllRceid();
     }
 
     Assert( !fEndOfLog || m_fRecovering );
     Assert( !fEndOfLog || fRecoveringUndo == m_fRecoveringMode );
 
-    Call( ErrLGEndAllSessionsMacro( fTrue  ) );
+    Call( ErrLGEndAllSessionsMacro( fTrue /* fLogEndMacro */ ) );
 
+    //  if last shutdown is dirty, need to force-detach
+    //  any missing databases
+    //
     if ( fEndOfLog )
     {
         Call( ErrLGRICheckForAttachedDatabaseMismatch( m_pinst, !!m_fReplayingIgnoreMissingDB, !!m_fLastLRIsShutdown ) );
@@ -1904,6 +2241,7 @@ ERR LOG::ErrLGRIEndAllSessions(
 
     if ( !fKeepDbAttached )
     {
+        // Set term in progress to allow waypoint advancement to the current gen
         m_pinst->m_fNoWaypointLatency = fTrue;
 
         for ( dbid = dbidUserLeast; dbid < dbidMax; dbid ++ )
@@ -1922,7 +2260,9 @@ ERR LOG::ErrLGRIEndAllSessions(
         }
     }
 
-    
+    /*  Detach all the faked attachment. Detach all the databases that were restored
+     *  to new location. Attach those database with new location.
+     */
     Assert( ppibNil == ppib );
     Call( ErrPIBBeginSession( m_pinst, &ppib, procidNil, fFalse ) );
 
@@ -1940,8 +2280,11 @@ ERR LOG::ErrLGRIEndAllSessions(
         if ( !fKeepDbAttached &&
              pfmp->Pdbfilehdr() )
         {
+            //  We can't keep the hdr lock over ErrLGICheckDatabaseFileSize() because it also
+            //  takes the lock.
             if ( CmpLgpos( &lgposMax, &pfmp->Pdbfilehdr()->le_lgposAttach ) != 0 )
             {
+                //  make sure the attached database's size is consistent with the file size.
 
                 Call( ErrLGICheckDatabaseFileSize( ppib, ifmp ) );
             }
@@ -1949,7 +2292,12 @@ ERR LOG::ErrLGRIEndAllSessions(
 
         if ( fEndOfLog )
         {
-            
+            /*  for each faked attached database, log database detachment
+            /*  This happen only when someone restore a database that was compacted,
+            /*  attached, used, then crashed. When restore, we ignore the compact and
+            /*  attach after compact since the db does not match. At the end of restore
+            /*  we fake a detach since the database is not recovered.
+            /**/
             if ( !pfmp->Pdbfilehdr() && pfmp->Patchchk() )
             {
                 FMP::EnterFMPPoolAsWriter();
@@ -1957,7 +2305,8 @@ ERR LOG::ErrLGRIEndAllSessions(
                 Assert( pfmp->FInUse() );
                 Assert( pfmp->FSkippedAttach() || pfmp->FDeferredAttach() );
 
-                
+                /*  clean up the fmp entry
+                /**/
                 pfmp->ResetFlags();
                 pfmp->Pinst()->m_mpdbidifmp[ pfmp->Dbid() ] = g_ifmpMax;
 
@@ -1988,7 +2337,8 @@ ERR LOG::ErrLGRIEndAllSessions(
 
     if ( fEndOfLog )
     {
-        
+        /*  enable checkpoint updates
+        /**/
         m_fLGFMPLoaded = fTrue;
     }
 
@@ -2001,22 +2351,30 @@ ERR LOG::ErrLGRIEndAllSessions(
 #else
         m_pinst->m_trxNewest = trxMin;
 #endif
+        // We now know for sure what the next trxid we will see in recovery will be
         m_pinst->m_fTrxNewestSetByRecovery = fTrue;
     }
 
-    
+    /*  term with checkpoint updates
+    /**/
     err = m_pinst->ErrINSTTerm( fKeepDbAttached ? termtypeRecoveryQuitKeepAttachments : termtypeNoCleanUp );
     if ( err < JET_errSuccess )
     {
+        // Since ErrINSTTerm/ErrIOTerm have failed to produce a clean db, we should bail now before logging
+        // RecoveryQuit. All other cleanup is already done.
         return err;
     }
     fNeedCallINSTTerm = fFalse;
 
-    
+    /*  stop checkpoint updates
+    /**/
     m_fLGFMPLoaded = fFalse;
 
     if ( m_fRecovering && fRecoveringRedo == m_fRecoveringMode )
     {
+        // If we're in redo mode, we didn't log anything, so there's no need
+        // to try and flush. We don't want to call ErrLGWaitAllFlushed() when
+        // we're in redo mode.
     }
     else if ( fEndOfLog )
     {
@@ -2031,16 +2389,27 @@ ERR LOG::ErrLGRIEndAllSessions(
                     &le_lgposRecoveryUndo,
                     ple_lgposRedoFrom,
                     fKeepDbAttached,
+                    // SOFT_HARD: info flag only, leave it
                     m_fHardRestore,
                     BoolParam( m_pinst, JET_paramAggressiveLogRollover ),
                     &lgposRecoveryQuit ) );
 
         if ( !fKeepDbAttached )
         {
-            
+            /*  Note: flush is needed in case a new generation is generated and
+            /*  the global variable szLogName is set while it is changed to new names.
+            /*  critical section not requested, not needed
+            /**/
 
+            // The above comment is misleading, because we really want to flush the log
+            // so that all our data will hit the disk if we've logged a lrtypRecoveryQuit.
+            // If it doesn't hit the disk, we'll be missing a quit record on disk and we'll
+            // be in trouble. Note that calling ErrLGFlushLog() will not necessarily flush
+            // all of the log buffers.
             Call( m_pLogWriteBuffer->ErrLGWaitAllFlushed( fTrue ) );
 
+            // the last thing to do with the checkpoint is to update it to
+            // the Term log record. This will make determine a clean shutdown
             Call( ErrLGIUpdateCheckpointLgposForTerm( lgposRecoveryQuit ) );
         }
     }
@@ -2051,7 +2420,7 @@ ERR LOG::ErrLGRIEndAllSessions(
 
 HandleError:
 
-    (void)ErrLGEndAllSessionsMacro( fFalse  );
+    (void)ErrLGEndAllSessionsMacro( fFalse /* fLogEndMacro */ );
 
     if ( ppib != ppibNil )
     {
@@ -2081,7 +2450,7 @@ HandleError:
 #ifdef DEBUG
 void LOG::LGRITraceRedo(const LR *plr)
 {
-    
+    /* easier to debug */
     if ( m_fDBGTraceRedo )
     {
         g_critDBGPrint.Enter();
@@ -2140,20 +2509,29 @@ BOOL LOG::FLGRICheckRedoConditionForAttachedDb(
     const DBFILEHDR *   pdbfilehdr,
     const LGPOS&        lgpos )
 {
+    //  Check if the database is open.
 
     if ( NULL == pdbfilehdr )
     {
         return fFalse;
     }
 
+    //  We haven't reached the point where the database is attached.
 
     if ( CmpLgpos( &lgpos, &pdbfilehdr->le_lgposAttach ) <= 0 )
     {
+        // This might happen when prereading pages referenced in the first log to be replayed, before
+        // lgpos has a valid value.
         Expected( CmpLgpos( lgpos, lgposMin ) == 0 );
 
         return fFalse;
     }
 
+    //  optionally skip redo of this log record if it is below the min required log for this database
+    //
+    //  NOTE:  there may be a range of log records [le_lGenMinRequired, le_lGenMinConsistent) where the normal redo
+    //  check will return false.  we must not skip these because the persisted lost flush map is fixed up as a side
+    //  effect of reading the pages to perform these redo checks.
 
     if (    fReplayIgnoreLogRecordsBeforeMinRequiredLog &&
             lgpos.lGeneration < pdbfilehdr->le_lGenMinRequired )
@@ -2181,22 +2559,27 @@ BOOL LOG::FLGRICheckRedoConditionForDb(
             lgpos );
 }
 
+//  Check redo condition to decide if we need to skip redoing
+//  this log record. It does not check the database pages referred
+//  to in the log record; only the database header.
 
 ERR LOG::ErrLGRICheckRedoCondition(
-    const DBID      dbid,
-    DBTIME          dbtime,
-    OBJID           objidFDP,
-    PIB             *ppib,
-    BOOL            fUpdateCountersOnly,
-    BOOL            *pfSkip )
+    const DBID      dbid,                   //  dbid from the log record.
+    DBTIME          dbtime,                 //  dbtime from the log record.
+    OBJID           objidFDP,               //  objid so far,
+    PIB             *ppib,                  //  returned ppib
+    BOOL            fUpdateCountersOnly,    //  if TRUE, operation will NOT be redone, but still need to update dbtimeLast and objidLast counters
+    BOOL            *pfSkip )               //  returned skip flag
 {
     ERR             err;
     INST * const    pinst   = PinstFromPpib( ppib );
     const IFMP      ifmp    = pinst->m_mpdbidifmp[ dbid ];
 
+    //  By default we want to skip it.
 
     *pfSkip = fTrue;
 
+    //  check if we have to redo the database.
 
     if ( ifmp >= g_ifmpMax )
     {
@@ -2205,11 +2588,13 @@ ERR LOG::ErrLGRICheckRedoCondition(
 
     if ( !FLGRICheckRedoConditionForDb( dbid, m_lgposRedo ) )
     {
+        // NOTE:  we must fall through to continue to keep dbtimeLast and objidLast up to date!
         fUpdateCountersOnly = fTrue;
     }
 
     FMP * const pfmp = g_rgfmp + ifmp;
 
+    //  check if database needs opening.
 
     if ( !fUpdateCountersOnly
         && !FPIBUserOpenedDatabase( ppib, dbid ) )
@@ -2222,6 +2607,8 @@ ERR LOG::ErrLGRICheckRedoCondition(
         Assert( ifmpT == ifmp );
     }
 
+    //  Keep track of largest dbtime so far, since the number could be
+    //  logged out of order, we need to check if dbtime > than dbtimeCurrent.
 
     Assert( m_fRecoveringMode == fRecoveringRedo );
     if ( dbtime > pfmp->DbtimeCurrentDuringRecovery() )
@@ -2240,6 +2627,7 @@ ERR LOG::ErrLGRICheckRedoCondition(
     }
     else
     {
+        //  We do need to redo this log record.
         *pfSkip = fFalse;
     }
 
@@ -2249,16 +2637,16 @@ ERR LOG::ErrLGRICheckRedoCondition(
 
 ERR LOG::ErrLGRICheckRedoConditionInTrx(
     const PROCID    procid,
-    const DBID      dbid,
-    DBTIME          dbtime,
+    const DBID      dbid,                   //  dbid from the log record.
+    DBTIME          dbtime,                 //  dbtime from the log record.
     OBJID           objidFDP,
     const LR        *plr,
-    PIB             **pppib,
-    BOOL            *pfSkip )
+    PIB             **pppib,                //  returned ppib
+    BOOL            *pfSkip )               //  returned skip flag
 {
     ERR             err;
     PIB             *ppib;
-    BOOL            fUpdateCountersOnly     = fFalse;
+    BOOL            fUpdateCountersOnly     = fFalse;   //  if TRUE, redo not needed, but must still update dbtimeLast and objidLast counters
 
     *pfSkip = fTrue;
 
@@ -2276,6 +2664,17 @@ ERR LOG::ErrLGRICheckRedoConditionInTrx(
     }
     else
     {
+        //  it's possible that there are no Begin0's between the first and
+        //  last log records, in which case nothing needs to
+        //  get redone.  HOWEVER, the dbtimeLast and objidLast
+        //  counters in the db header would not have gotten
+        //  flushed (they only get flushed on a DetachDb or a
+        //  clean shutdown), so we must still track these
+        //  counters during recovery so that we can properly
+        //  update the database header on RecoveryQuit (since
+        //  we pass TRUE for the fUpdateCountersOnly param to
+        //  ErrLGRICheckRedoCondition() below, that function
+        //  will do nothing but update the counters for us).
         fUpdateCountersOnly = fTrue;
     }
 
@@ -2288,6 +2687,8 @@ ERR LOG::ErrLGRICheckRedoConditionInTrx(
             pfSkip );
 }
 
+//  sets dbtime on write-latched pages
+//
 INLINE VOID LGRIRedoDirtyAndSetDbtime( CSR *pcsr, DBTIME dbtime )
 {
     if ( latchWrite == pcsr->Latch() )
@@ -2324,6 +2725,7 @@ ERR LOG::ErrLGRIRedoFreeEmptyPages(
 
         if ( errSkipLogRedoOperation == err )
         {
+            // If we get errSkipLogRedoOperation, it's important to check the remaining pages in rgemptypage.
             err = JET_errSuccess;
 
             Assert( pagetrimTrimmed == pcsrEmpty->PagetrimState() );
@@ -2344,12 +2746,15 @@ ERR LOG::ErrLGRIRedoFreeEmptyPages(
                                                     rgemptypage[i].dbtimeBefore,
                                                     &err );
 
+        // for the FLGNeedRedoCheckDbtimeBefore error code
         if ( err < 0 )
         {
             pcsrEmpty->ReleasePage();
             goto HandleError;
         }
 
+        //  upgrade latch if needed
+        //
         if ( fRedoNeeded )
         {
             pcsrEmpty->SetILine( 0 );
@@ -2376,7 +2781,7 @@ ERR LOG::ErrLGRIRedoNodeOperation( const LRNODE_ *plrnode, ERR *perr )
     PIB             *ppib;
     const PGNO      pgno        = plrnode->le_pgno;
     const PGNO      pgnoFDP     = plrnode->le_pgnoFDP;
-    const OBJID     objidFDP    = plrnode->le_objidFDP;
+    const OBJID     objidFDP    = plrnode->le_objidFDP; // Debug only info.
     const PROCID    procid      = plrnode->le_procid;
     const DBID      dbid        = plrnode->dbid;
     const DBTIME    dbtime      = plrnode->le_dbtime;
@@ -2399,7 +2804,7 @@ ERR LOG::ErrLGRIRedoNodeOperation( const LRNODE_ *plrnode, ERR *perr )
                 dbid,
                 dbtime,
                 objidFDP,
-                (LR *) plrnode,
+                (LR *) plrnode, //  can be in macro.
                 &ppib,
                 &fSkip ) );
     if ( fSkip )
@@ -2407,12 +2812,18 @@ ERR LOG::ErrLGRIRedoNodeOperation( const LRNODE_ *plrnode, ERR *perr )
 
     if ( ppib->Level() > plrnode->level )
     {
+        //  if operation was performed by concurrent CreateIndex, the
+        //  updater could be at a higher trx level than when the
+        //  indexer logged the operation
+        //  UNDONE: explain why Undo and UndoInfo can have ppib at higher trx
         Assert( plrnode->FConcCI()
             || lrtypUndoInfo == plrnode->lrtyp
             || lrtypUndo == plrnode->lrtyp );
     }
     else
     {
+        //  UNDONE: for lrtypUndoInfo, is it really possible for ppib to
+        //  be at lower level than logged operation?
         Assert( ppib->Level() == plrnode->level
             || lrtypUndoInfo == plrnode->lrtyp );
     }
@@ -2425,6 +2836,8 @@ ERR LOG::ErrLGRIRedoNodeOperation( const LRNODE_ *plrnode, ERR *perr )
 
     Assert( pfucb->ppib == ppib );
 
+    //  reset CSR
+    //
     CSR     csr;
     BOOL    fRedoNeeded;
 
@@ -2432,6 +2845,7 @@ ERR LOG::ErrLGRIRedoNodeOperation( const LRNODE_ *plrnode, ERR *perr )
 
     if ( errSkipLogRedoOperation == err )
     {
+        // If we get errSkipLogRedoOperation, it's important to check the remaining pages in the log record.
         err = JET_errSuccess;
 
         Assert( pagetrimTrimmed == csr.PagetrimState() );
@@ -2450,10 +2864,14 @@ ERR LOG::ErrLGRIRedoNodeOperation( const LRNODE_ *plrnode, ERR *perr )
                                 fFalse :
                                 FLGNeedRedoCheckDbtimeBefore( csr, dbtime, plrnode->le_dbtimeBefore, &err );
 
+    // for the FLGNeedRedoCheckDbtimeBefore error code
     Call( err );
 
     err = JET_errSuccess;
 
+    //  set CSR
+    //  upgrade latch if needed
+    //
     csr.SetILine( plrnode->ILine() );
     if ( fRedoNeeded )
     {
@@ -2492,12 +2910,19 @@ ERR LOG::ErrLGRIRedoNodeOperation( const LRNODE_ *plrnode, ERR *perr )
 
         case lrtypUndoInfo:
         {
+            //  restore undo information in version store
+            //      for a page flushed with uncommitted change
+            //      if RCE already exists for this operation at the same level,
+            //          do nothing
+            //
             LRUNDOINFO  *plrundoinfo = (LRUNDOINFO *) plrnode;
             RCE         *prce;
             const OPER  oper = plrundoinfo->le_oper;
 
             Assert( !fRedoNeeded );
 
+            //  mask PIB fields to logged values for creating version
+            //
             const TRX   trxOld      = ppib->trxBegin0;
             const LEVEL levelOld    = ppib->Level();
 
@@ -2505,9 +2930,12 @@ ERR LOG::ErrLGRIRedoNodeOperation( const LRNODE_ *plrnode, ERR *perr )
 
             if ( 0 == ppib->Level() )
             {
+                //  RCE is not useful, since there is no transaction to roll back
+                //
                 goto HandleError;
             }
 
+            //  remove this RCE from the list of uncreated RCEs
             Call( ppib->ErrDeregisterDeferredRceid( plrundoinfo->le_rceid ) );
 
             Assert( trxOld == plrundoinfo->le_trxBegin0 );
@@ -2516,6 +2944,7 @@ ERR LOG::ErrLGRIRedoNodeOperation( const LRNODE_ *plrnode, ERR *perr )
 
             Assert( trxMax == ppib->trxCommit0 );
 
+            //  force RCE to be recreated at same current level as ppib
             Assert( plrundoinfo->level == verproxy.level );
             verproxy.level = ppib->Level();
 
@@ -2531,6 +2960,8 @@ ERR LOG::ErrLGRIRedoNodeOperation( const LRNODE_ *plrnode, ERR *perr )
             bm.data.SetPv( plrundoinfo->rgbData + plrundoinfo->CbBookmarkKey() );
             bm.data.SetCb( plrundoinfo->CbBookmarkData() );
 
+            //  set up fucb as in do-time
+            //
             if ( operReplace == oper )
             {
                 pfucb->kdfCurr.Nullify();
@@ -2541,11 +2972,14 @@ ERR LOG::ErrLGRIRedoNodeOperation( const LRNODE_ *plrnode, ERR *perr )
                 pfucb->kdfCurr.data.SetCb( plrundoinfo->le_cbData );
             }
 
+            //  create RCE
+            //
             Assert( plrundoinfo->le_pgnoFDP == PgnoFDP( pfucb ) );
 
             CallJ( PverFromPpib( ppib )->ErrVERModify( pfucb, bm, oper, &prce, &verproxy ), RestorePIB );
             Assert( prceNil != prce );
 
+            //  if oper is replace, set verreplace in RCE
             if ( prce->FOperReplace() )
             {
                 VERREPLACE* pverreplace = (VERREPLACE*)prce->PbData();
@@ -2554,6 +2988,7 @@ ERR LOG::ErrLGRIRedoNodeOperation( const LRNODE_ *plrnode, ERR *perr )
                 pverreplace->cbDelta    = 0;
             }
 
+            // Pass pcsrNil to prevent creation of UndoInfo
             VERInsertRCEIntoLists( pfucb, pcsrNil, prce );
 
         RestorePIB:
@@ -2566,6 +3001,8 @@ ERR LOG::ErrLGRIRedoNodeOperation( const LRNODE_ *plrnode, ERR *perr )
             }
             Call( err );
 
+            //  skip to release page
+            //
             goto HandleError;
         }
             break;
@@ -2578,6 +3015,8 @@ ERR LOG::ErrLGRIRedoNodeOperation( const LRNODE_ *plrnode, ERR *perr )
 
             Assert( !ppib->FMacroGoing( dbtime ) );
 
+            //  check transaction level
+            //
             if ( ppib->Level() <= 0 )
             {
                 Assert( fFalse );
@@ -2620,6 +3059,9 @@ ERR LOG::ErrLGRIRedoNodeOperation( const LRNODE_ *plrnode, ERR *perr )
                 kdf.fFlags  |= fNDCompressed;
             }
 
+            //  even if operation is not redone, create version
+            //  for rollback support.
+            //
             if ( plrinsert->FVersioned() )
             {
                 RCE         *prce = prceNil;
@@ -2628,12 +3070,14 @@ ERR LOG::ErrLGRIRedoNodeOperation( const LRNODE_ *plrnode, ERR *perr )
                 NDGetBookmarkFromKDF( pfucb, kdf, &bm );
                 Call( PverFromPpib( ppib )->ErrVERModify( pfucb, bm, operInsert, &prce, &verproxy ) );
                 Assert( prceNil != prce );
+                //  we have the page latched and we are not logging so the NDInsert won't fail
                 VERInsertRCEIntoLists( pfucb, &csr, prce );
             }
 
             if( fRedoNeeded )
             {
                 Assert( plrinsert->ILine() == csr.ILine() );
+                //  no logging of versioning so this can't fail
                 Call( ErrNDInsert( pfucb, &csr, &kdf, dirflag | fDIRRedo, rceidNull, NULL ) );
             }
             else
@@ -2723,10 +3167,14 @@ ERR LOG::ErrLGRIRedoNodeOperation( const LRNODE_ *plrnode, ERR *perr )
                 Call( ErrNDGet( pfucb, &csr ) );
                 Assert( FNDDeleted( pfucb->kdfCurr ) );
 
+                //  page may be reorganized
+                //  copy key from node
+                //
 
                 BYTE *rgb;
                 BFAlloc( bfasTemporary, (VOID **)&rgb );
 
+//              BYTE    rgb[g_cbPageMax];
 
                 pfucb->kdfCurr.key.CopyIntoBuffer( rgb, g_cbPage );
 
@@ -2740,6 +3188,9 @@ ERR LOG::ErrLGRIRedoNodeOperation( const LRNODE_ *plrnode, ERR *perr )
                 {
                     verproxy.rceid = plrfiard->le_rceidReplace;
 
+                    //  we need to create the replace version for undo
+                    //  if we don't need to redo the operation, the undo-info will create
+                    //  the version if necessary
                     BOOKMARK    bm;
                     RCE         *prce   = prceNil;
 
@@ -2770,6 +3221,7 @@ ERR LOG::ErrLGRIRedoNodeOperation( const LRNODE_ *plrnode, ERR *perr )
             }
             else
             {
+                //  add this RCE to the list of uncreated RCEs
                 if ( plrfiard->FVersioned() )
                 {
                     Call( ppib->ErrRegisterDeferredRceid( plrfiard->le_rceidReplace, pgno ) );
@@ -2789,6 +3241,7 @@ ERR LOG::ErrLGRIRedoNodeOperation( const LRNODE_ *plrnode, ERR *perr )
             if ( !fRedoNeeded )
             {
 
+                //  add this RCE to the list of uncreated RCEs
                 if ( plrreplace->FVersioned() )
                 {
                     Call( ppib->ErrRegisterDeferredRceid( plrnode->le_rceid, pgno ) );
@@ -2802,7 +3255,10 @@ ERR LOG::ErrLGRIRedoNodeOperation( const LRNODE_ *plrnode, ERR *perr )
             const UINT      cbNewData = plrreplace->CbNewData();
             DATA            data;
             BYTE            *rgbRecNew = NULL;
+//          BYTE            rgbRecNew[g_cbPageMax];
 
+            //  cache node
+            //
             Assert( plrreplace->ILine() == csr.ILine() );
             Call( ErrNDGet( pfucb, &csr ) );
 
@@ -2829,6 +3285,7 @@ ERR LOG::ErrLGRIRedoNodeOperation( const LRNODE_ *plrnode, ERR *perr )
                 }
                 
                 Assert( cb < (SIZE_T)g_cbPage );
+//              Assert( cb < sizeof( rgbRecNew ) );
                 if ( cb >= (SIZE_T)g_cbPage )
                 {
                     Error( ErrERRCheck( JET_errLogCorrupted ) );
@@ -2848,8 +3305,11 @@ ERR LOG::ErrLGRIRedoNodeOperation( const LRNODE_ *plrnode, ERR *perr )
                 Error( ErrERRCheck( JET_errLogCorrupted ) );
             }
 
+            //  copy bm to pfucb->bmCurr
+            //
             BYTE *rgb;
             BFAlloc( bfasTemporary, (VOID **)&rgb );
+//          BYTE    rgb[g_cbPageMax];
             pfucb->kdfCurr.key.CopyIntoBuffer( rgb, g_cbPage );
 
             Assert( FFUCBUnique( pfucb ) );
@@ -2861,6 +3321,8 @@ ERR LOG::ErrLGRIRedoNodeOperation( const LRNODE_ *plrnode, ERR *perr )
             pfucb->bmCurr.key.suffix.SetPv( rgb + pfucb->kdfCurr.key.prefix.Cb() );
             Assert( CmpKey( pfucb->bmCurr.key, pfucb->kdfCurr.key ) == 0 );
 
+            //  if we have to redo the operation we have to create the version
+            //  the page has the proper before-image on it
             if( plrreplace->FVersioned() )
             {
                 err = PverFromPpib( ppib )->ErrVERModify( pfucb, pfucb->bmCurr, operReplace, &prce, &verproxy );
@@ -2896,7 +3358,9 @@ ERR LOG::ErrLGRIRedoNodeOperation( const LRNODE_ *plrnode, ERR *perr )
             if ( !fRedoNeeded )
             {
 
+                //  we'll create the version using the undo-info if necessary
 
+                //  add this RCE to the list of uncreated RCEs
                 if ( plrflagdelete->FVersioned() )
                 {
                     Call( ppib->ErrRegisterDeferredRceid( plrnode->le_rceid, pgno ) );
@@ -2906,9 +3370,12 @@ ERR LOG::ErrLGRIRedoNodeOperation( const LRNODE_ *plrnode, ERR *perr )
                 goto HandleError;
             }
 
+            //  cache node
+            //
             Assert( plrflagdelete->ILine() == csr.ILine() );
             Call( ErrNDGet( pfucb, &csr ) );
 
+            //  if we have to redo the operation we have to create the version
             if( plrflagdelete->FVersioned() )
             {
                 BOOKMARK    bm;
@@ -2920,6 +3387,8 @@ ERR LOG::ErrLGRIRedoNodeOperation( const LRNODE_ *plrnode, ERR *perr )
                 VERInsertRCEIntoLists( pfucb, &csr, prce );
             }
 
+            //  redo operation
+            //
             err = ErrNDFlagDelete( pfucb, &csr, dirflag | fDIRRedo, rceidNull, NULL );
             CallS( err );
             Call( err );
@@ -2941,6 +3410,8 @@ ERR LOG::ErrLGRIRedoNodeOperation( const LRNODE_ *plrnode, ERR *perr )
             TICK tickEnd;
             while ( fTrue )
             {
+                //  cache node
+                //
                 BOOKMARK    bm;
                 Assert( plrdelete->ILine() == csr.ILine() );
                 Call( ErrNDGet( pfucb, &csr ) );
@@ -2951,8 +3422,10 @@ ERR LOG::ErrLGRIRedoNodeOperation( const LRNODE_ *plrnode, ERR *perr )
                     break;
                 }
 
+                // release page before waiting to avoid deadlock
                 csr.ReleasePage();
 
+                // Assert that we are not holding any locks
                 CLockDeadlockDetectionInfo::AssertCleanApiExit( 0, 0, 0 );
                 m_pinst->m_sigTrxOldestDuringRecovery.FWait( cmsecMaxReplayDelayDueToReadTrx );
 
@@ -2977,6 +3450,7 @@ ERR LOG::ErrLGRIRedoNodeOperation( const LRNODE_ *plrnode, ERR *perr )
                     fEventloggedLongWait = fTrue;
                 }
 
+                // re-acquire page latch
                 Call( ErrLGIAccessPage( ppib, &csr, ifmp, pgno, plrnode->le_objidFDP, fFalse ) );
                 csr.SetILine( plrnode->ILine() );
                 csr.UpgradeFromRIWLatch();
@@ -3007,6 +3481,8 @@ ERR LOG::ErrLGRIRedoNodeOperation( const LRNODE_ *plrnode, ERR *perr )
                 PERFOpt( cLGRecoveryStallReadOnlyTime.Add( m_pinst, tickEnd - tickStart ) );
             }
 
+            //  redo node delete
+            //
             Assert( plrdelete->ILine() == csr.ILine() );
             err = ErrNDDelete( pfucb, &csr, fDIRNull );
             CallS( err );
@@ -3068,6 +3544,8 @@ ERR LOG::ErrLGRIRedoNodeOperation( const LRNODE_ *plrnode, ERR *perr )
     Assert( fRedoNeeded );
     Assert( csr.FDirty() );
 
+    //  the timestamp set in ND operation is not correct so reset it
+    //
     csr.SetDbtime( dbtime );
 
     err = JET_errSuccess;
@@ -3186,33 +3664,53 @@ HandleError:
     return err;
 }
 
+//
+//  This function never returns succes.
+//  This function if the user options do not allow data loss, we will
+//  log events to note we failed and that there is a recovery option.
+//  If the user does allow data loss, it will fix the log stream such
+//  that recovery can continue to create a clean / consistent database.
 ERR LOG::ErrLGEvaluateDestructiveCorrectiveLogOptions(
     __in const LONG lgenBad,
-    __in const ERR errCondition
+    __in const ERR errCondition     // Note: we expect ErrERRCheck() was already called on this param.
     )
 {
     ERR     err = errCondition;
     LONG    lGenFirst = 0;
     LONG    lGenLast = 0;
 
+    //  The errCondition signifies the "type" of badness of the log, either it's missing
+    //  in the case of invalid sequence, or its a corruption error ...
     Assert( errCondition < JET_errSuccess );
     Assert( errCondition == JET_errInvalidLogSequence ||
             FErrIsLogCorruption( errCondition ) );
 
     Call( m_pLogStream->ErrLGGetGenerationRange( m_wszLogCurrent, &lGenFirst, &lGenLast ) );
 
+    //
+    //  Evaluate if the last good generation was sufficient to satisfy all circumstances ...
+    //
     ERR errGenRequiredCheck = ErrLGCheckDBGensRequired( lgenBad - 1 );
     Assert( errGenRequiredCheck != JET_wrnCommittedLogFilesLost );
 
     if ( errGenRequiredCheck != JET_errCommittedLogFilesMissing )
     {
+        //  Nope, we are missing required files for consistency, bail ... we will 
+        //  use the errCondition provided below as there is no way to correct for
+        //  this error condition.
         Call( errCondition );
     }
 
+    //
+    //  ... at this point we know the bad log is only committed, not required.
+    //
 
     if ( !m_fIgnoreLostLogs || !BoolParam( m_pinst, JET_paramDeleteOutOfRangeLogs ) )
     {
+        //  User did not indicate we want to lose data.
 
+        //  We've lost or corrupted a log we can recover from, log an event to indicate 
+        //  admin may be able to manually recover.
 
         if ( FErrIsLogCorruption( errCondition ) )
         {
@@ -3278,11 +3776,17 @@ ERR LOG::ErrLGEvaluateDestructiveCorrectiveLogOptions(
         }
     }
 
+    //
+    //  user has instructed us to take corrective action, do so ...
+    //
 
+    //  Note we are removing committed data, make very very sure we are removing
+    //  only logs we can do without.
 
     Assert( m_fIgnoreLostLogs );
     Assert( lGenFirst < lgenBad );
     Assert( m_pcheckpoint->checkpoint.le_lgposCheckpoint.le_lGeneration < lgenBad );
+    //  If there are more than committed log files missing, quit.
     Assert( ErrLGCheckDBGensRequired( lgenBad - 1 ) == JET_errSuccess ||
             ErrLGCheckDBGensRequired( lgenBad - 1 ) == JET_errCommittedLogFilesMissing );
     if ( !m_fIgnoreLostLogs ||
@@ -3292,12 +3796,16 @@ ERR LOG::ErrLGEvaluateDestructiveCorrectiveLogOptions(
           ErrLGCheckDBGensRequired( lgenBad - 1 ) != JET_errCommittedLogFilesMissing ) )
     {
         AssertSz( fFalse, " This would be an unexpected condition." );
-        Call( errCondition );
+        Call( errCondition );   // punt
     }
 
 
+    //
+    //  Ok we belive we are ok to start removing data ...
+    //
     if ( FErrIsLogCorruption( errCondition ) )
     {
+        //  Corruption event here, missing / out of sequence event in ErrLGRRestartLOGAtLogGen().
         WCHAR szT1[16];
         WCHAR szT2[16];
         WCHAR szT3[16];
@@ -3310,6 +3818,9 @@ ERR LOG::ErrLGEvaluateDestructiveCorrectiveLogOptions(
         OSStrCbFormatW( szT3, sizeof( szT3 ), L"%d", errCondition );
         rgszT[3] = szT3;
         rgszT[4] = m_wszLogCurrent;
+        //  Note we are cheating a little by reporting this event here ... we actually
+        //  don't remove this log file until ErrLGIRemoveCommittedLogs() if its an archive
+        //  log, but I think its ok to pre-log it.
         UtilReportEvent(    eventWarning,
                             LOGGING_RECOVERY_CATEGORY,
                             REDO_CORRUPT_COMMITTED_LOG_REMOVED_ID,
@@ -3322,13 +3833,19 @@ ERR LOG::ErrLGEvaluateDestructiveCorrectiveLogOptions(
 
     CallR( m_pLogStream->ErrLGRRestartLOGAtLogGen( lgenBad, ( errCondition == JET_errInvalidLogSequence ) ) );
     
+    //  So while for backup (above) we remove the remaining archive log files at 
+    //  the very beginning of recovery in ErrLGSoftStart() for LLR based recovery 
+    //  it is easier to do so at the exact discovery of out of sequene log files.
 
     CallR( m_pLogStream->ErrLGRemoveCommittedLogs( lgenBad ) );
 
+    //  We've recovered, cover up error ... 
     m_fLostLogs = fTrue;
 
     err = ErrERRCheck( JET_wrnCommittedLogFilesRemoved );
 
+    // We are not fixing up committed generation in db header(s) here, but ErrLGCheckGenMaxRequired should run later
+    // and fix it.
 
 HandleError:
 
@@ -3338,6 +3855,8 @@ HandleError:
             err != JET_errCommittedLogFilesMissing &&
             err != JET_errCommittedLogFileCorrupt )
     {
+        //  If we failed for any reason except missing or corrupt committed logs, we report 
+        //  the original condition that caused us to try this path ...
         err = errCondition;
     }
 
@@ -3357,33 +3876,37 @@ ERR LOG::ErrLGRedoFill( LR **pplr, BOOL fLastLRIsQuit, INT *pfNSNextStep )
     LOGTIME tmOldLog;
     m_pLogStream->GetCurrentFileGen( &tmOldLog );
     LE_LGPOS   le_lgposFirstT;
-    BOOL    fJetLog = fFalse;
+    BOOL    fJetLog = fFalse;   // this means we've opened the current edb.jtx/log file...
     WCHAR   wszOldLogName[ IFileSystemAPI::cchPathMax ];
     LGPOS   lgposOldLastRec = m_pLogReadBuffer->LgposFileEnd();
     QWORD checksumAccPrevLog = m_pLogStream->GetAccumulatedSectorChecksum();
 
-    
+    /*  end of redoable logfile, read next generation
+    /**/
     if ( m_pLogStream->FLGRedoOnCurrentLog() )
     {
         Assert( m_wszLogCurrent != m_wszRestorePath );
 
-        
+        /*  we have done all the log records
+        /**/
         *pfNSNextStep = fNSGotoDone;
         OnNonRTM( m_fRedidAllLogs = fTrue );
         err = JET_errSuccess;
         goto CheckGenMaxReq;
     }
 
-    
+    /* close current logfile, open next generation */
     m_pLogStream->LGCloseFile();
 
     OSStrCbCopyW( wszOldLogName, sizeof( wszOldLogName ), m_pLogStream->LogName() );
 
     lgen = m_pLogStream->GetCurrentFileGen() + 1;
 
+    // if we replayed all logs from target directory
     if ( m_wszLogCurrent == m_wszTargetInstanceLogPath && m_lGenHighTargetInstance == m_pLogStream->GetCurrentFileGen() )
     {
         Assert ( L'\0' != m_wszTargetInstanceLogPath[0] );
+        // we don't have to try nothing more
         err = ErrERRCheck( JET_errFileNotFound );
         goto NoMoreLogs;
     }
@@ -3399,8 +3922,11 @@ ERR LOG::ErrLGRedoFill( LR **pplr, BOOL fLastLRIsQuit, INT *pfNSNextStep )
         if ( m_wszLogCurrent == m_wszRestorePath || m_wszLogCurrent == m_wszTargetInstanceLogPath )
         {
 NoMoreLogs:
+            // if we have a target instance or we didn't replayed those
+            // try that directory
             if ( m_wszTargetInstanceLogPath[0] && m_wszLogCurrent != m_wszTargetInstanceLogPath )
                 m_wszLogCurrent = m_wszTargetInstanceLogPath;
+            // try instance directory
             else
                 m_wszLogCurrent = SzParam( m_pinst, JET_paramLogFilePath );
 
@@ -3411,6 +3937,7 @@ NoMoreLogs:
 
     if ( err == JET_errFileNotFound )
     {
+        //  open failed, try the current log name (edb.jtx/log)
 
         err = m_pLogStream->ErrLGTryOpenLogFile( JET_OpenLogForRedo, eCurrentLog, lgen );
 
@@ -3422,9 +3949,19 @@ NoMoreLogs:
 
     if ( err < 0 )
     {
+        //  If open next generation fail and we haven't finished
+        //  all the backup logs, then return as abrupt end.
 
         if ( err == JET_errFileNotFound )
         {
+            // if we need to stop at a certain log / position, 
+            // we should not start generating a new log 
+            // Note: becuase we check the existance of the
+            // upper log specified on startup, we won't hit this
+            // unless there is a gap in the log series
+            // (like we have logs 3,4 and 6 (with checkpoint at 3)
+            // and the stop position is set to 6.
+            // 
             if ( FLGRecoveryLgposStop() )
             {
                 Assert( m_lgposRecoveryStop.lGeneration >= ( lgen - 1 ) );
@@ -3433,10 +3970,16 @@ NoMoreLogs:
                 return ErrERRCheck( JET_errMissingLogFile );
             }
 
+            // Also, we should not start a new log if we might hit a gap in the logs, so we need
+            // to check if we actually reached the end (and there is no edb.log)
+            // or we just hit a gap. We will return specific errors as such.
+            // 
             LONG    lgenHigh = 0;
             
             CallR ( m_pLogStream->ErrLGGetGenerationRange( m_wszLogCurrent, NULL, &lgenHigh ) );
 
+            // We can't do this in hard restore/recovery because of the different
+            // path (m_wszTargetInstanceLogPath / m_wszLogCurrent) garbage ...
             if ( !m_fHardRestore && ( lgenHigh == 0 || lgenHigh > lgen ) )
             {
                 WCHAR szT1[16];
@@ -3466,13 +4009,18 @@ NoMoreLogs:
                 return ErrERRCheck( JET_errMissingLogFile );
             }
 
+            // we can not create a new log file if a log file more then the one we
+            // just closed (which is the last we have) is needed
 
+            // SOFT_HARD: ??? do we need the check here? We might need the checks in the functions anyway
             if ( m_fHardRestore || m_fIgnoreLostLogs )
             {
                 err = ErrLGCheckDBGensRequired( lgen - 1 );
                 if ( m_fIgnoreLostLogs &&
                         ( err == JET_errSuccess || err == JET_errCommittedLogFilesMissing ) )
                 {
+                    //  Call it success ...
+                    // we are just missing the last log, so no logs deleted, but lost data.
                     m_pLogStream->ResetRemovedLogs();
                     m_fLostLogs = ( err == JET_errCommittedLogFilesMissing );
                     err = JET_errSuccess;
@@ -3480,6 +4028,10 @@ NoMoreLogs:
                 CallR( err );
             }
 
+            //  Traditionally if we are missing the edbtmp.log in addition to edb.log, then
+            //  we report JET_errMisssingLogFile as NTFS is never supposed to allow us
+            //  to get into that state due to the order of operations in how we roll a
+            //  log file.
             const ERR errMissingCurrentLog = m_fHardRestore || m_pLogStream->FTempLogExists() ? JET_errSuccess : ErrERRCheckDefault( JET_errMissingLogFile );
 
             err = ErrLGOpenLogMissingCallback( m_pinst, m_pLogStream->LogName(), errMissingCurrentLog, lgen, fTrue, JET_MissingLogContinueToUndo );
@@ -3494,11 +4046,13 @@ NoMoreLogs:
             return JET_errSuccess;
         }
 
-        
+        /* Open Fails */
         Assert( !m_pLogStream->FLGFileOpened() );
         return err;
     }
 
+    //  We got the next log to play, but if last one is abruptly ended
+    //  we want to stop here.
 
     if ( m_fAbruptEnd )
     {
@@ -3531,6 +4085,7 @@ AbruptEnd:
         return ErrERRCheck( JET_errRedoAbruptEnded );
     }
 
+    // We might have transitioned to verbose redo (transition to active) while waiting to open this log, verify.
     if ( !m_pinst->m_isdlInit.FTriggeredStep( eInitLogRecoverySilentRedoDone ) )
     {
         BOOL fCallback = ( ErrLGNotificationEventConditionCallback( m_pinst, STATUS_REDO_ID ) >= JET_errSuccess );
@@ -3541,9 +4096,10 @@ AbruptEnd:
         }
     }
 
+    // save the previous log header
     m_pLogStream->SaveCurrentFileHdr();
 
-    
+    /* reset the log buffers */
     CallR( m_pLogStream->ErrLGReadFileHdr( NULL, iorpLogRecRedo, NULL, fCheckLogID ) );
 
     const ULONG ulMajorCurrLog = m_pLogStream->GetCurrentFileHdr()->lgfilehdr.le_ulMajor;
@@ -3551,13 +4107,22 @@ AbruptEnd:
     const ULONG ulUpdateMajorCurrLog = m_pLogStream->GetCurrentFileHdr()->lgfilehdr.le_ulUpdateMajor;
     const ULONG ulUpdateMinorCurrLog = m_pLogStream->GetCurrentFileHdr()->lgfilehdr.le_ulUpdateMinor;
 
+    //  We can not make this invalid log sequence only based on the fact
+    //  that time is the same because the granularity is only 1 second,
+    //  so its possible to have an unexpected log generation that is at
+    //  the same expected time.  We should base this on the fact that
+    //  this generation is +1 from the last generation.
     if ( !FSameTime( &tmOldLog, &m_pLogStream->GetCurrentFileHdr()->lgfilehdr.tmPrevGen ) ||
          ( lgen != m_pLogStream->GetCurrentFileGen() ) )
     {
 
+        //  we found a edb.jtx/log older, which must be deleted if requested by the user
+        //
 
+        //  It wouldn't make sense to use both of these bits at the same time ...
         Assert( !m_fIgnoreLostLogs || !m_fHardRestore );
 
+        // SOFT_HARD: the per SG one should do it
         if ( m_fHardRestore && BoolParam( m_pinst, JET_paramDeleteOutOfRangeLogs ) && fJetLog && m_pLogStream->GetCurrentFileGen() < lgen )
         {
 
@@ -3575,13 +4140,17 @@ AbruptEnd:
 
         CallR( ErrLGEvaluateDestructiveCorrectiveLogOptions( lgen, ErrERRCheck( JET_errInvalidLogSequence ) ) );
 
+        //  If we exited ErrLGEvaluateDestructiveCorrectiveLogOptions() with a non-failing
+        //  err it means we've taken corrective action ... signal done and return.
         Assert( err == JET_wrnCommittedLogFilesRemoved );
+        // Note this is like m_fRedidAllLogs, but we didn't.
         Assert( m_fLostLogs );
         err = JET_errSuccess;
         *pfNSNextStep = fNSGotoDone;
         return err;
     }
 
+    // If the log format supports accumulated segment checksum, then we can check log sequence integrity using the checksum and return error on it.
 
     if ( FLogFormatUnifiedMinorUpdateVersion( ulMajorCurrLog, ulMinorCurrLog, ulUpdateMajorCurrLog, ulUpdateMinorCurrLog ) &&
         ulUpdateMinorCurrLog >= ulLGVersionUpdateMinorPrevGenAllSegmentChecksum &&
@@ -3625,6 +4194,7 @@ AbruptEnd:
             {
                 continue;
             }
+            //  should we insist anything else, like that it is attached?
             FMP * const pfmp = &g_rgfmp[ ifmp ];
             pfmp->SetOlderDemandExtendDb();
         }
@@ -3636,6 +4206,8 @@ AbruptEnd:
 
     m_pLogReadBuffer->ResetLgposFileEnd();
 
+    //  scan the log to find traces of corruption before going record-to-record
+    //  if any corruption is found, an error will be returned
     err = m_pLogReadBuffer->ErrLGCheckReadLastLogRecordFF( &fCloseNormally, fTrue );
     if ( err == JET_errSuccess || FErrIsLogCorruption( err ) )
     {
@@ -3645,8 +4217,11 @@ AbruptEnd:
             err = ErrLGEvaluateDestructiveCorrectiveLogOptions( lgen, ErrERRCheck( err ) );
             if ( err >= JET_errSuccess )
             {
+                //  If we exited ErrLGEvaluateDestructiveCorrectiveLogOptions() with a non-failing
+                //  err it means we've taken corrective action ... signal done and return.
                 Assert( err == JET_wrnCommittedLogFilesRemoved );
                 Assert( m_fLostLogs );
+                // Note this is like m_fRedidAllLogs, but we didn't.
                 *pfNSNextStep = fNSGotoDone;
                 err = JET_errSuccess;
                 return err;
@@ -3661,6 +4236,7 @@ AbruptEnd:
         CallR( err );
     }
 
+    //  Check if abrupt end if the file size is not the same as recorded.
 
     QWORD cbSize;
     CallR( m_pLogStream->ErrFileSize( &cbSize ) );
@@ -3669,12 +4245,20 @@ AbruptEnd:
         m_fAbruptEnd = fTrue;
     }
 
+    //  now scan the first record
+    //  there should be no errors about corruption since they'll be handled by ErrLGCheckReadLastLogRecordFF
     CallR( m_pLogReadBuffer->ErrLGLocateFirstRedoLogRecFF( &le_lgposFirstT, (BYTE **)pplr ) );
+    //  we expect no warnings -- only success at this point
     CallS( err );
     *pfNSNextStep = fNSGotoCheck;
 
+    //  If log is not end properly and we haven't finished
+    //  all the backup logs, then return as abrupt end.
 
+    //  UNDONE: for soft recovery, we need some other way to know
+    //  UNDONE: if the record is played up to the crashing point.
 
+    // SOFT_HARD: ??? what to do here, not a big deal most likely, per SG should be fine
     if ( m_fHardRestore && lgen <= m_lGenHighRestore
          && m_fAbruptEnd )
     {
@@ -3682,6 +4266,7 @@ AbruptEnd:
     }
 
 CheckGenMaxReq:
+    // check the genMaxReq+genMaxCreateTime of this log with all dbs
     if ( m_fRecovering )
     {
         LOGTIME tmEmpty;
@@ -3700,6 +4285,8 @@ CheckGenMaxReq:
             Assert( !pfmpT->FReadOnlyAttach() );
             if ( pfmpT->FSkippedAttach() || pfmpT->FDeferredAttach() )
             {
+                //  skipped attachments is a restore-only concept
+                // SOFT_HARD: whatever, the assert is kind of weak anyway
                 Assert( !pfmpT->FSkippedAttach() || m_fHardRestore || m_irstmapMac || !m_fReplayMissingMapEntryDB );
                 continue;
             }
@@ -3712,6 +4299,7 @@ CheckGenMaxReq:
 
             PdbfilehdrReadOnly pdbfilehdr = pfmpT->Pdbfilehdr();
 
+            // if the time of the log file does not match
             if ( !m_fIgnoreLostLogs &&
                  lGenRequired == lGenCurrent )
             {
@@ -3772,8 +4360,10 @@ CheckGenMaxReq:
         }
     }
 
+    //  we should have success at this point
     CallS( err );
 
+    //  return the error from ErrLGCheckReadLastLogRecordFF
     return errT;
 }
 
@@ -3796,12 +4386,18 @@ ERR LOG::ErrLGRIPreSetupFMPFromAttach(
         Call( wszDbName.ErrSet( (CHAR*)(pAttachInfo->szNames) ) );
     }
 
+    // we are looking into the map for hard restore or if the map is present 
+    // (Note: JetRestore = hard restore and no map)
+    // We will replace the map entry with the names we setup 
 
+    // SOFT_HARD: restore map should be enough
     if ( m_fHardRestore || m_irstmapMac > 0 )
     {
         err = ErrReplaceRstMapEntryBySignature( wszDbName, &pAttachInfo->signDb );
         if ( JET_errFileNotFound == err )
         {
+            //  database not in restore map, so it won't be restored
+            //
             err = JET_errSuccess;
         }
         Call( err );
@@ -3848,9 +4444,17 @@ ERR LOG::ErrLGRISetupFMPFromAttach(
         Call( wszDbName.ErrSet( (CHAR*)(pAttachInfo->szNames) ) );
     }
 
+    //  attach the database specified in restore map.
+    //
     err = ErrGetDestDatabaseName( (WCHAR*)wszDbName, m_wszRestorePath, m_wszNewDestination, pirstmap, plgstat );
     if ( JET_errFileNotFound == err )
     {
+        //  if a restore map was provided but the database could
+        //  not be matched to an entry in the restore map, then
+        //  set to skip it if we are not set to replay at default
+        //  location all the entries missing from the map (which
+        //  is true for JetInit and JetInit2)
+        //
         if ( m_irstmapMac > 0 && !m_fReplayMissingMapEntryDB )
         {
             fSkippedAttach = fTrue;
@@ -3862,24 +4466,28 @@ ERR LOG::ErrLGRISetupFMPFromAttach(
     {
         Call( err );
 
+        // we found a new name, we will use it later
         Assert( *pirstmap >= 0 );
+        // szDbName = m_rgrstmap[irstmap].wszNewDatabaseName;
     }
 
     psrtmap = ( *pirstmap >= 0 ) ? &m_rgrstmap[ *pirstmap ] : NULL;
 
+    //  Process database parameters.
 
     Call( ErrDBParseDbParams(
                 psrtmap ? psrtmap->rgsetdbparam : NULL,
                 psrtmap ? psrtmap->csetdbparam : 0,
-                NULL,
-                &pctCachePriority,
-                &grbitShrinkDatabaseOptions,
-                &dtickShrinkDatabaseTimeQuota,
-                &cpgShrinkDatabaseSizeLimit,
-                &fLeakReclaimerEnabled,
-                &dtickLeakReclaimerTimeQuota
+                NULL,                           // JET_dbparamDbSizeMaxPages (not used here).
+                &pctCachePriority,              // JET_dbparamCachePriority.
+                &grbitShrinkDatabaseOptions,    // JET_dbparamShrinkDatabaseOptions.
+                &dtickShrinkDatabaseTimeQuota,  // JET_dbparamShrinkDatabaseTimeQuota.
+                &cpgShrinkDatabaseSizeLimit,    // JET_dbparamShrinkDatabaseSizeLimit.
+                &fLeakReclaimerEnabled,         // JET_dbparamLeakReclaimerEnabled.
+                &dtickLeakReclaimerTimeQuota    // JET_dbparamLeakReclaimerTimeQuota.
                 ) );
 
+    //  Get one free fmp entry
 
     Call( FMP::ErrNewAndWriteLatch(
                     pifmp,
@@ -3892,8 +4500,15 @@ ERR LOG::ErrLGRISetupFMPFromAttach(
                     fTrue,
                     NULL ) );
 
+    // we should not see double attach
+    // during recovery
+    //
     if ( err == JET_wrnDatabaseAttached )
     {
+        // it is ok to return as there is no
+        // action in ErrNewAndWriteLatch if 
+        // JET_wrnDatabaseAttached was returned
+        //
         Call( ErrERRCheck( JET_errDatabaseDuplicate ) );
     }
 
@@ -3905,6 +4520,7 @@ ERR LOG::ErrLGRISetupFMPFromAttach(
     Assert( pfmpT->FInUse() );
     Assert( pfmpT->Dbid() == pAttachInfo->Dbid() );
 
+    //  get logging/versioning flags (versioning can only be disabled if logging is disabled)
     pfmpT->ResetReadOnlyAttach();
     pfmpT->ResetVersioningOff();
     pfmpT->ResetDeferredAttach();
@@ -3930,6 +4546,7 @@ ERR LOG::ErrLGRISetupFMPFromAttach(
     lgposConsistent = pAttachInfo->le_lgposConsistent;
     lgposAttach = pAttachInfo->le_lgposAttach;
 
+    //  get lgposAttch
     err = ErrLGRISetupAtchchk(
                 *pifmp,
                 &pAttachInfo->signDb,
@@ -3941,6 +4558,7 @@ ERR LOG::ErrLGRISetupFMPFromAttach(
                 pAttachInfo->CpgDatabaseSizeMax(),
                 pAttachInfo->FSparseEnabledFile() );
 
+    //  setup replay options
     if ( psrtmap && ( psrtmap->grbit & JET_bitRestoreMapIgnoreWhenMissing ) )
     {
         pfmpT->SetIgnoreDeferredAttach();
@@ -4018,6 +4636,9 @@ LOCAL VOID LGRIReportUnableToReadDbHeader(
     const ERR           err,
     const WCHAR *       szDbName )
 {
+    //  even though this is a warning, suppress it
+    //  if information events are suppressed
+    //
     if ( !BoolParam( pinst, JET_paramNoInformationEvent ) )
     {
         WCHAR       szT1[16];
@@ -4039,6 +4660,8 @@ LOCAL VOID LGRIReportUnableToReadDbHeader(
     }
 }
 
+//  Redo need access to some private functions in DB to determine / perform a correct
+//  attachment process.
 VOID DBISetHeaderAfterAttach( DBFILEHDR_FIX * const pdbfilehdr, const LGPOS lgposAttach, const LOGTIME * const plogtimeOfGenWithAttach, const IFMP ifmp, const BOOL fKeepBackupInfo );
 ERR ErrDBIValidateUserVersions(
     _In_    const INST* const               pinst,
@@ -4072,6 +4695,7 @@ ERR LOG::ErrLGRICheckRedoCreateDb(
 
     Assert( !pfmp->FReadOnlyAttach() );
 
+    //  presume a deferred attachment
     *predoattach = redoattachDefer;
     reason = eDARUnknown;
 
@@ -4085,12 +4709,16 @@ ERR LOG::ErrLGRICheckRedoCreateDb(
 
     if ( err >= JET_errSuccess && pdbfilehdr->Dbstate() == JET_dbstateJustCreated )
     {
+// ***  deletion now performed in ErrDBCreateDatabase() via JET_bitDbOverwriteExisting
+// ***  CallR( ErrIODeleteDatabase( pfsapi, ifmp ) );
 
         *predoattach = redoattachCreate;
         err = JET_errSuccess;
         goto HandleError;
     }
 
+    //  never replay against a database that is in the middle of an incremental reseed.
+    //
     else if ( err >= JET_errSuccess && pdbfilehdr->Dbstate() == JET_dbstateIncrementalReseedInProgress )
     {
         reason = eDARIncReseedInProgress;
@@ -4106,6 +4734,8 @@ ERR LOG::ErrLGRICheckRedoCreateDb(
             goto HandleError;
         }
     }
+    //  never replay against a database that is in the middle of a revert.
+    //
     else if ( err >= JET_errSuccess && pdbfilehdr->Dbstate() == JET_dbstateRevertInProgress )
     {
         reason = eDARRevertInProgress;
@@ -4127,10 +4757,14 @@ ERR LOG::ErrLGRICheckRedoCreateDb(
             && pdbfilehdr->Dbstate() != JET_dbstateDirtyShutdown
             && pdbfilehdr->Dbstate() != JET_dbstateDirtyAndPatchedShutdown ) )
     {
+        // JET_dbstateJustCreated dealt with above
         Assert( JET_errReadVerifyFailure == err || pdbfilehdr->Dbstate() != JET_dbstateJustCreated );
+        // JET_dbstateIncrementalReseedInProgress dealt with above
         Assert( JET_errReadVerifyFailure == err || pdbfilehdr->Dbstate() != JET_dbstateIncrementalReseedInProgress );
+        // JET_dbstateRevertInProgress dealt with above
         Assert( JET_errReadVerifyFailure == err || pdbfilehdr->Dbstate() != JET_dbstateRevertInProgress );
 
+        //  header checksums incorrectly or invalid state, so go ahead and recreate the db
         *predoattach = redoattachCreate;
         err = JET_errSuccess;
         goto HandleError;
@@ -4143,11 +4777,13 @@ ERR LOG::ErrLGRICheckRedoCreateDb(
         switch ( err )
         {
             case JET_errFileAccessDenied:
+                // File is there but we do not have access, maybe we will not need it by end of recovery, defer the error
                 *predoattach = redoattachDeferAccessDenied;
                 __fallthrough;
 
             case JET_errFileNotFound:
             case JET_errInvalidPath:
+                //  assume database got deleted in the future
                 err = JET_errSuccess;
                 break;
 
@@ -4164,13 +4800,16 @@ ERR LOG::ErrLGRICheckRedoCreateDb(
     {
         if ( !pfmp->FOverwriteOnCreate() )
         {
+            // just as we do for attach, we will simply ignore any db with a mismatched log signature
             reason = eDARLogSignatureMismatch;
             goto HandleError;
         }
         else
         {
+            // delete the old database file
             Call( ErrIODeleteDatabase( m_pinst->m_pfsapi, ifmp ) );
 
+            // setup to create the new database
             *predoattach = redoattachCreate;
             goto HandleError;
         }
@@ -4183,6 +4822,8 @@ ERR LOG::ErrLGRICheckRedoCreateDb(
         {
             if ( CmpLgpos( &patchchk->lgposAttach, &pdbfilehdr->le_lgposConsistent ) <= 0 )
             {
+                //  db was brought to a consistent state in the future, so no
+                //  need to redo operations until then, so attach null
                 *predoattach = redoattachDeferConsistentFuture;
                 reason = eDARConsistentFuture;
             }
@@ -4190,6 +4831,7 @@ ERR LOG::ErrLGRICheckRedoCreateDb(
             {
                 Call( ErrLGRICheckAttachNow( pdbfilehdr, wszDbName ) );
 
+                //  db never brought to consistent state after it was created
                 Assert( 0 == CmpLgpos( &lgposMin, &pdbfilehdr->le_lgposConsistent ) );
                 Assert( JET_dbstateDirtyShutdown == pdbfilehdr->Dbstate() ||
                         JET_dbstateDirtyAndPatchedShutdown == pdbfilehdr->Dbstate() );
@@ -4198,21 +4840,37 @@ ERR LOG::ErrLGRICheckRedoCreateDb(
         }
         else
         {
+            //  database has same log signature and lgposAttach as
+            //  what was logged, but db signature is different - must
+            //  have manipulated the db with logging disabled, which
+            //  causes us to generate a new signDb.
+            //  Defer this attachment.  We will attach later on when
+            //  we hit the AttachDb log record matching this signDb.
 
+            // Consider adding the FireWall back once we figure out that all our
+            // customers are respecting it.
+            // (It is a problem with the current IBS install status)
+            // FireWall( "SignatureMismatchOnRedoCreateDb" );
             reason = eDARDbSignatureMismatch;
         }
     }
     else if ( i > 0 )
     {
+        //  database was attached in the future (if db signatures match)
+        //  or deleted then recreated in the future (if db signatures don't match),
+        //  but in either case, we simply defer attachment to the future
         reason = eDARAttachFuture;
     }
     else
     {
+        //  this must be a different database (but with the same name)
+        //  that was deleted in the past
         reason = eDARDbSignatureMismatch;
         Assert( 0 != memcmp( &pdbfilehdr->signDb, &patchchk->signDb, sizeof(SIGNATURE) ) );
         
         if ( !pfmp->FOverwriteOnCreate() )
         {
+            // we won't overwrite it, rather we report it and keep going ... 
             const WCHAR * rgszT[3];
             WCHAR       szTTime[2][128];
             LOGTIME     tm;
@@ -4232,12 +4890,15 @@ ERR LOG::ErrLGRICheckRedoCreateDb(
                 (SHORT)tm.bHours, (SHORT)tm.bMinutes, (SHORT)tm.bSeconds, (SHORT)tm.Milliseconds() );
             rgszT[2] = szTTime[1];
 
+            //%1 (%2) %3The database %4 created at %5 was not recovered. The recovered database was created at %5.
             UtilReportEvent( eventWarning, LOGGING_RECOVERY_CATEGORY, RESTORE_DATABASE_PARTIALLY_ERROR_ID, 3, rgszT, sizeof( szTTime ), szTTime, m_pinst );
         }
         else
         {
+            // delete the old database file
             Call( ErrIODeleteDatabase( m_pinst->m_pfsapi, ifmp ) );
 
+            // setup to create the new database
             *predoattach = redoattachCreate;
         }
     }
@@ -4282,6 +4943,7 @@ ERR LOG::ErrLGRICheckRedoAttachDb(
 
     Assert( !pfmp->FReadOnlyAttach() );
 
+    //  presume a deferred attachment
     *predoattach = redoattachDefer;
     reason = eDARUnknown;
 
@@ -4293,6 +4955,8 @@ ERR LOG::ErrLGRICheckRedoAttachDb(
             g_cbPage,
             OffsetOf( DBFILEHDR, le_cbPageSize ) );
 
+    //  never replay against a database that is in the middle of an incremental reseed
+    //
     if ( err >= JET_errSuccess && pdbfilehdr->Dbstate() == JET_dbstateIncrementalReseedInProgress )
     {
         reason = eDARIncReseedInProgress;
@@ -4308,6 +4972,8 @@ ERR LOG::ErrLGRICheckRedoAttachDb(
             goto HandleError;
         }
     }
+    //  never replay against a database that is in the middle of a revert.
+    //
     else if ( err >= JET_errSuccess && pdbfilehdr->Dbstate() == JET_dbstateRevertInProgress )
     {
         reason = eDARRevertInProgress;
@@ -4333,6 +4999,7 @@ ERR LOG::ErrLGRICheckRedoAttachDb(
         }
         else
         {
+            // the log file header is corrupt
             OSUHAEmitFailureTag( m_pinst, HaDbFailureTagRecoveryRedoLogCorruption, L"9106f5c1-2f93-479b-a12a-c93c6ab3de68" );
             goto HandleError;
         }
@@ -4341,6 +5008,8 @@ ERR LOG::ErrLGRICheckRedoAttachDb(
     {
         if ( pdbfilehdr->Dbstate() == JET_dbstateJustCreated )
         {
+            // Just-created is equivalent to missing db, may get re-created in
+            // the future
             reason = eDARHeaderStateBad;
             err = JET_errSuccess;
             goto HandleError;
@@ -4357,6 +5026,7 @@ ERR LOG::ErrLGRICheckRedoAttachDb(
             }
             else
             {
+                // the dbstate is unexpected            
                 OSUHAEmitFailureTag( m_pinst, HaDbFailureTagCorruption, L"2bfd590a-d8bc-42a5-a45a-9ca332a91faa" );
                 reason = eDARHeaderStateBad;
                 err = ErrERRCheck( JET_errDatabaseCorrupted );
@@ -4371,11 +5041,13 @@ ERR LOG::ErrLGRICheckRedoAttachDb(
         switch ( err )
         {
             case JET_errFileAccessDenied:
+                // File is there but we do not have access, maybe we will not need it by end of recovery, defer the error
                 *predoattach = redoattachDeferAccessDenied;
                 __fallthrough;
 
             case JET_errFileNotFound:
             case JET_errInvalidPath:
+                //  assume database got deleted in the future
                 err = JET_errSuccess;
                 break;
 
@@ -4392,13 +5064,21 @@ ERR LOG::ErrLGRICheckRedoAttachDb(
     const BOOL  fMatchingSignLog        = ( 0 == memcmp( &pdbfilehdr->signLog, &m_signLog, sizeof(SIGNATURE) ) );
     const BOOL  fMatchingLoggedSignLog  = ( 0 == memcmp( &pdbfilehdr->signLog, psignLogged, sizeof(SIGNATURE) ) );
 
+    //  When we are recovering a dirty-and-patched database, it's possible that lGenMinRequired gets
+    //  stalled due to pending redo map entries. When that happens and there are mulitple attach/detach
+    //  cycles before the redo map entries are resolved, we could have lgposAttach ahead of lGenMinRequired.
+    //  In that case, we need to reset lGenMinRequired and lgposAttach so that we are forced to re-attach
+    //  and rebuild the redo maps. Note that ErrIsamEndDatabaseIncrementalReseed() does something similar to
+    //  force early attaches, so think of this as an inc-reseed fixup/reset.
     if ( ( pdbfilehdr->Dbstate() == JET_dbstateDirtyAndPatchedShutdown ) && !pfmp->FPendingRedoMapEntries() )
     {
+        // Do not override anything if there's no chance of a match anyways.
         if ( !fMatchingSignDb || ( !fMatchingSignLog && !fMatchingLoggedSignLog ) )
         {
             goto PostDirtyAndPatchedFixup;
         }
 
+        // Consistency.
         if ( ( pdbfilehdr->le_lGenMinRequired <= 0 ) ||
              ( 0 == CmpLgpos( &pdbfilehdr->le_lgposAttach, &lgposMin ) ) ||
              ( 0 == CmpLgpos( &patchchk->lgposAttach, &lgposMin ) ) )
@@ -4408,6 +5088,8 @@ ERR LOG::ErrLGRICheckRedoAttachDb(
             goto HandleError;
         }
 
+        // No need to fix it if it's already ahead or below even what we about to stamp on it.
+        // Also, do not patch if we're about to move the header's lgposAttach ahead.
         if ( ( pdbfilehdr->le_lGenMinRequired > pdbfilehdr->le_lgposAttach.le_lGeneration ) ||
              ( pdbfilehdr->le_lGenMinRequired < patchchk->lgposAttach.lGeneration ) ||
              ( CmpLgpos( &patchchk->lgposAttach, &pdbfilehdr->le_lgposAttach ) > 0 ) )
@@ -4416,6 +5098,9 @@ ERR LOG::ErrLGRICheckRedoAttachDb(
                  ( CmpLgpos( &patchchk->lgposAttach, &pdbfilehdr->le_lgposAttach ) > 0 ) &&
                  ( CmpLgpos( &patchchk->lgposConsistent, &pdbfilehdr->le_lgposConsistent ) != 0 ) )
             {
+                // This is unexpected: it means we would need to patch (min. req. < lgposAttach in the header),
+                // but we would move lgposAttached forward. The case in which lgposConsistent matches is legit: it's
+                // the normal case for replaying an attach LR for the first time with pending redo map entries.
                 FireWall( "CheckRedoAttachMinReqTooLow" );
                 reason = eDARHeaderStateBad;
                 err = ErrERRCheck( JET_errDatabaseCorrupted );
@@ -4448,11 +5133,17 @@ PostDirtyAndPatchedFixup:
 
     if ( fMatchingSignLog )
     {
+        //  db is in sync with current log set, so use normal attach logic below
 
+        //  only way logged log signature doesn't match db log signature
+        //  is if we're redoing an attachment
         Assert( fMatchingLoggedSignLog || redoattachmodeAttachDbLR == redoattachmode );
     }
     else if ( fMatchingLoggedSignLog )
     {
+        //  if db matches prev log signature, then it should also match lgposConsistent
+        //  (since dbfilehdr never got updated, it must have both prev log signature
+        //  and prev lgposConsistent)
         if ( 0 == CmpLgpos( &patchchk->lgposConsistent, &pdbfilehdr->le_lgposConsistent ) )
         {
             if ( fMatchingSignDb )
@@ -4460,12 +5151,19 @@ PostDirtyAndPatchedFixup:
                 Assert( !pfmp->FReadOnlyAttach() );
                 Call( ErrLGRICheckAttachNow( pdbfilehdr, wszDbName ) );
 
+                //  the attach operation was logged, but header was not changed.
+                //  set up the header such that it looks like it is set up after
+                //  attach (if this is currently a ReadOnly attach, the header
+                //  update will be deferred to the next non-ReadOnly attach)
                 Assert( redoattachmodeAttachDbLR == redoattachmode );
                 Assert( 0 == CmpLgpos( &patchchk->lgposAttach, &m_lgposRedo ) );
 
+                //  UNDONE: in theory, lgposAttach should already have been set
+                //  when the ATCHCHK was setup, but SOMEONE says he's not 100%
+                //  sure, so to be safe, we definitely set the lgposAttach here
                 Assert( 0 == CmpLgpos( patchchk->lgposAttach, pfmp->LgposAttach() ) );
                 pfmp->SetLgposAttach( patchchk->lgposAttach );
-                DBISetHeaderAfterAttach( pdbfilehdr, patchchk->lgposAttach, NULL, ifmp, fFalse );
+                DBISetHeaderAfterAttach( pdbfilehdr, patchchk->lgposAttach, NULL, ifmp, fFalse /* no keep bkinfo */);
                 Assert( pdbfilehdr->le_objidLast > 0 );
 
                 CFlushMapForUnattachedDb* pfm = NULL;
@@ -4491,6 +5189,12 @@ PostDirtyAndPatchedFixup:
             }
             else
             {
+                //  database has same log signature and lgposConsistent as
+                //  what was logged, but db signature is different - must
+                //  have manipulated the db with logging disabled, which
+                //  causes us to generate a new signDb.
+                //  Defer this attachment.  We will attach later on when
+                //  we hit the AttachDb log record matching this signDb.
 
                 if ( !pfmp->FIgnoreDeferredAttach() )
                 {
@@ -4507,6 +5211,8 @@ PostDirtyAndPatchedFixup:
                 reason = eDARConsistentTimeMismatch;
                 if ( !pfmp->FIgnoreDeferredAttach() )
                 {
+                    //  the database for this log sequence has been rolled back
+                    //  in time (or at least its header has)
                     LGReportConsistentTimeMismatch( m_pinst, wszDbName );
                     err = ErrERRCheck( JET_errConsistentTimeMismatch );
                 }
@@ -4521,6 +5227,8 @@ PostDirtyAndPatchedFixup:
     }
     else
     {
+        //  the database's log signature is not the same as current log set or
+        //  as the log set before it was attached, so just ignore it
         reason = eDARLogSignatureMismatch;
         err = JET_errSuccess;
         goto HandleError;
@@ -4528,6 +5236,9 @@ PostDirtyAndPatchedFixup:
 
     const INT   i   = CmpLgpos( &pdbfilehdr->le_lgposConsistent, &patchchk->lgposConsistent );
 
+    //  if log signature in db header doesn't match logged log signature,
+    //  then comparing lgposConsistent is irrelevant and must instead
+    //  rely on lgposAttach comparison
     if ( !fMatchingLoggedSignLog
         || 0 == i
         || 0 == CmpLgpos( &pdbfilehdr->le_lgposConsistent, &lgposMin ) )
@@ -4539,6 +5250,7 @@ PostDirtyAndPatchedFixup:
             {
                 Call( ErrLGRICheckAttachNow( pdbfilehdr, wszDbName ) );
 
+                //  either lgposAttach also matches, or we're redoing a new attach
                 *predoattach = redoattachNow;
             }
             else if ( j < 0 )
@@ -4552,6 +5264,10 @@ PostDirtyAndPatchedFixup:
                 {
                     if ( !pfmp->FIgnoreDeferredAttach() )
                     {
+                        //  lgposConsistent match, but the lgposAttach in the database is before
+                        //  the logged lgposAttach, which means the attachment was somehow skipped
+                        //  in this database (typically happens when a file copy of the database
+                        //  is copied back in)
                         LGReportAttachedDbMismatch( m_pinst, wszDbName, fFalse );
 
                         FireWall( "AttachedDbMismatchOnRedoAttachDb" );
@@ -4562,6 +5278,13 @@ PostDirtyAndPatchedFixup:
             }
             else
             {
+                // Removed the following assert. The assert where probably here when
+                // the 3rd OR condition (0 == CmpLgpos( &pdbfilehdr->le_lgposConsistent, &lgposMin ) )
+                // was missing.
+                //  only way we could have same lgposConsistent, but lgposAttach
+                //  in db is in the future is if this is a ReadOnly attach
+                //Assert( redoattachmodeAttachDbLR == redoattachmode );
+                //Assert( fReadOnly || !fMatchingLoggedSignLog );
                 reason = eDARAttachFuture;
             }
         }
@@ -4569,12 +5292,25 @@ PostDirtyAndPatchedFixup:
         {
             reason = eDARDbSignatureMismatch;
 #ifdef DEBUG
+            //  database has same log signature and lgposConsistent as
+            //  what was logged, but db signature is different - must
+            //  have recreated db or manipulated it with logging disabled,
+            //  which causes us to generate a new signDb
             if ( 0 == CmpLgpos( &pdbfilehdr->le_lgposConsistent, &lgposMin ) )
             {
+                //  there's a chance we can still hook up with the correct
+                //  signDb in the future
             }
             else
             {
+                //  can no longer replay operations against this database
+                //  because we've hit a point where logging was disabled
+                //  UNDONE: add eventlog entry
 
+                // Consider adding the FireWall back once we figure out that all our
+                // customers are respecting it.
+                // (It is a problem with the current IBS install status)
+                // FireWall( "SignatureMismatchOnRedoAttachDbLoggedSignMismatch" );
             }
 #endif
         }
@@ -4583,6 +5319,10 @@ PostDirtyAndPatchedFixup:
         && ( redoattachmodeInitBeforeRedo == redoattachmode
             || CmpLgpos( &pdbfilehdr->le_lgposConsistent, &m_lgposRedo ) > 0 ) )
     {
+        //  database was brought to a consistent state in the future
+        //  (if db signatures match) or deleted then recreated and
+        //  reconsisted in the future (if db signatures don't match),
+        //  but in either case, we simply defer attachment to the future
         reason = eDARConsistentFuture;
         *predoattach = redoattachDeferConsistentFuture;
         Assert( redoattachmodeInitBeforeRedo == redoattachmode
@@ -4594,10 +5334,34 @@ PostDirtyAndPatchedFixup:
     {
         if ( fMatchingSignDb )
         {
+            //  One way to get here is to do the following:
+            //      - shutdown cleanly
+            //      - make a file copy of the db
+            //      - start up and re-attach
+            //      - make a backup
+            //      - shutdown cleanly
+            //      - copy back original database
+            //      - start up and re-attach
+            //      - shutdown cleanly
+            //      - restore from backup
+            //  When hard recovery hits the attachment to the
+            //  original database, the dbfilehdr's lgposConsistent
+            //  will be greater than the logged one, but less
+            //  than the current lgposRedo.
+            //
+            //  Another way to hit this is if the lgposConsistent
+            //  in the dbfilehdr is less than the logged lgposConsistent.
+            //  This is usually caused when an old copy of the database
+            //  is being played against a more current copy of the log files.
+            //
             reason = eDARConsistentTimeMismatch;
 
             if ( !pfmp->FIgnoreDeferredAttach() )
             {
+                // Consider adding the FireWall back once we figure out that all our
+                // customers are respecting it.
+                // (It is a problem with the current IBS install status)
+                // FireWall( "ConsistentTimeMismatchOnRedoAttachDb" );
                 LGReportConsistentTimeMismatch( m_pinst, wszDbName );
                 err = ErrERRCheck( JET_errConsistentTimeMismatch );
                 goto HandleError;
@@ -4607,7 +5371,15 @@ PostDirtyAndPatchedFixup:
         {
             Assert( 0 != CmpLgpos( &pdbfilehdr->le_lgposConsistent, &lgposMin ) );
 
+            //  database has been manipulated with logging disabled in
+            //  the past.  Therefore, we cannot replay operations
+            //  since we are missing the non-logged operations.
+            //  UNDONE: add eventlog entry
 
+            // Consider adding the FireWall back once we figure out that all our
+            // customers are respecting it.
+            // (It is a problem with the current IBS install status)
+            // FireWall( "UnloggedDbUpdateOnRedoAttachDb" );
             reason = eDARUnloggedDbUpdate;
         }
     }
@@ -4637,7 +5409,7 @@ HandleError:
 
 ERR LOG::ErrLGRICheckAttachedDb(
     const IFMP                  ifmp,
-    const SIGNATURE             *psignLogged,
+    const SIGNATURE             *psignLogged,           //  pass NULL for CreateDb
     REDOATTACH                  *predoattach,
     const REDOATTACHMODE        redoattachmode )
 {
@@ -4652,6 +5424,10 @@ ERR LOG::ErrLGRICheckAttachedDb(
 
     AllocR( pdbfilehdr = (DBFILEHDR *)PvOSMemoryPageAlloc( g_cbPage, NULL ) );
 
+    //  WARNING: must zero out memory, because we may end
+    //  up defer-attaching the database, but still compare
+    //  against stuff in this memory
+    //
     memset( pdbfilehdr, 0, g_cbPage );
 
     Assert( !pfmp->FReadOnlyAttach() );
@@ -4672,6 +5448,8 @@ ERR LOG::ErrLGRICheckAttachedDb(
         Assert( err < 0 || redoattachCreate != *predoattach );
     }
 
+    //  if redoattachCreate, dbfilehdr will be allocated
+    //  when we re-create the db
     if ( err >= 0 && redoattachCreate != *predoattach )
     {
         const ATCHCHK   *patchchk   = pfmp->Patchchk();
@@ -4697,6 +5475,7 @@ ERR LOG::ErrLGRICheckAttachedDb(
         }
         if ( pfmp->FRBSOn() )
         {
+            // This is just an estimate, will get a better value as we replay through the required range
             pfmp->SetDbtimeBeginRBS( pfmp->PRBS()->GetDbtimeForFmp( pfmp ) );
             if ( pfmp->DbtimeBeginRBS() == 0 )
             {
@@ -4725,6 +5504,8 @@ VOID LOG::LGRIReportRequiredLogFilesMissing(
     const LONG  lGenMinRequired = pdbfilehdr->le_lGenMinRequired;
     const LONG  lGenCurrent = m_pLogStream->GetCurrentFileGen();
 
+    // we claim log committed if available, merely because that is what normal 
+    // recovery (w/ no options would require)
     const LONG  lGenMaxRequired = ( pdbfilehdr->le_lGenMaxCommitted != 0 ) ?
         pdbfilehdr->le_lGenMaxCommitted :
         pdbfilehdr->le_lGenMaxRequired;
@@ -4772,6 +5553,7 @@ VOID LOG::LGRIReportDeferredAttach(
     WCHAR       wszT4[64];
     const WCHAR *rgwszT[5];
 
+    //  these deferred attaches are not interesting
     if ( reason == eDARConsistentFuture )
     {
         return;
@@ -4868,6 +5650,8 @@ VOID LOG::LGRIReportDeferredAttach(
     OSDiagTrackDeferredAttach( reason );
 }
 
+//  we've determined this is the correct attachment point,
+//  but first check database header for possible logfile mismatches
 ERR LOG::ErrLGRICheckAttachNow(
     DBFILEHDR   * pdbfilehdr,
     const WCHAR * wszDbName )
@@ -4876,8 +5660,8 @@ ERR LOG::ErrLGRICheckAttachNow(
     const LONG  lGenMinRequired     = pdbfilehdr->le_lGenMinRequired;
     const LONG  lGenCurrent         = m_pLogStream->GetCurrentFileGen();
 
-    if ( lGenMinRequired
-        && JET_dbstateDirtyAndPatchedShutdown != pdbfilehdr->Dbstate()
+    if ( lGenMinRequired            //  0 means db is consistent or this is an ESE97 db
+        && JET_dbstateDirtyAndPatchedShutdown != pdbfilehdr->Dbstate()  // IncReSeed DB recovery can leave lGenMinRequired behind
         && lGenMinRequired < lGenCurrent )
     {
         err = ErrERRCheck( JET_errRequiredLogFilesMissing );
@@ -4886,7 +5670,24 @@ ERR LOG::ErrLGRICheckAttachNow(
     else if ( pdbfilehdr->bkinfoFullCur.le_genLow && !m_fHardRestore )
     {
 
+        // We are adding the option to allow soft recovery on a backup set
+        // predicated on if the client asks us to. (Such as store's/HA's 
+        // log shipping replay which starts from a "seed" / backed up database.
+        // There is no technical reason for this (we could do it all the time)
+        // but we are doing this to: 
+        // - reduce the test impact
+        // - maintain compatibility with the current behaviour, if this is important
+        // ( ie if someone is forgething to check "last backup set" on restore,
+        // they will get a different error other then JET_errSoftRecoveryOnBackupDatabase)
+        //
 
+        // the check for pdbfilehdr->bkinfoFullCur.le_genHigh checks
+        // if we already moved the trailer in the header. 
+        // If so (pdbfilehdr->bkinfoFullCur.le_genHigh !=0 ) then allow restore
+        // because the only way to move it is using "recovery w/o undo".
+        // The bkinfoFullCur will be reset only when replaying a Detach or Term
+        // or when the database is made consistent.
+        //
         CallS( err );
         if ( 0 == pdbfilehdr->bkinfoFullCur.le_genHigh )
         {
@@ -4896,6 +5697,8 @@ ERR LOG::ErrLGRICheckAttachNow(
                 const WCHAR *rgszT[1];
                 rgszT[0] = wszDbName;
                 
+                //  attempting to use a database which did not successfully
+                //  complete conversion
                 UtilReportEvent(
                         eventError,
                         LOGGING_RECOVERY_CATEGORY,
@@ -4909,6 +5712,8 @@ ERR LOG::ErrLGRICheckAttachNow(
                 Error( err );
             }
         }
+        // we should patch the header with gen max required
+        //
         err = ErrDBUpdateHeaderFromTrailer( m_pinst, m_pinst->m_pfsapi, pdbfilehdr, wszDbName, fFalse );
     }
 
@@ -4941,6 +5746,25 @@ ERR LOG::ErrLGRIRedoCreateDb(
     extern CPG cpgLegacyDatabaseDefaultSize;
     CPG CpgDBDatabaseMinMin();
 
+    // With the advent of ESE supporting custom initial DB sizes for Phone 8.1 (so that size of 
+    // of the DB is variable at JetCreateDatabase() time) arose a complication for redo in that
+    // the lrtypCreateDB LR comes to this path with no cpgPrimary that we can pass to 
+    // ErrDBCreateDatabase().  This means that unfortunately we'll call this:
+    //      ErrIONewSize( ifmp, cpgPrimary );
+    // with the cpgPrimary = MinMin size from the below call, which is wrong / not what the DB 
+    // was actually created with.  But due to SOMEONE logging DB create, SUPER conveniently we bail 
+    // before this:
+    //      ErrDBInitDatabase( ppib, ifmp, cpgPrimary ) );
+    // which would have setup a space tree with inaccurate first extent in the DB Root OE!  But 
+    // this still means the DB size will be inaccurate right after we replay the create DB (MinMin
+    // instead of whatever the user specified for the JET_paramDbExtensionSize at JetCreateDatabase()
+    // call).  In Win Threshold we realized a way to make up for this conundrum and now we log a 
+    // lrtypExtendDB for the cpgPrimary size from do-time right after lrtypCreateDB (well, if the 
+    // user specified a larger size than MinMin).  
+    // Note: the alternative of this would have been to rev the CreateDB LR and handle all the 
+    // versioning issues with that.  The two LRs means the DB will be slightly smaller size for a 
+    // very slight time between these two LRs, and that we'll grow in two extents back to back, 
+    // instead of one (acceptable casualties, for not having to rev the minor log version).
     CallR( ErrDBCreateDatabase(
                 ppib,
                 NULL,
@@ -4955,11 +5779,13 @@ ERR LOG::ErrLGRIRedoCreateDb(
                 grbit ) );
     Assert( ifmp == ifmpT );
 
-    
+    /*  close it as it will get reopened on first use
+    /**/
     CallR( ErrDBCloseDatabase( ppib, ifmp, 0 ) );
     CallSx( err, JET_wrnDatabaseAttached );
 
-    
+    /*  restore information stored in database file
+    /**/
     pfmp->PdbfilehdrUpdateable()->bkinfoFullCur.le_genLow = m_lGenLowRestore;
     pfmp->PdbfilehdrUpdateable()->bkinfoFullCur.le_genHigh = m_lGenHighRestore;
 
@@ -4973,6 +5799,9 @@ ERR LOG::ErrLGRIRedoCreateDb(
 
     Assert( pfmp->Pdbfilehdr()->le_objidLast == pfmp->ObjidLast() );
 
+    // now with active logging dbscan, it is unnecessary to initiate a separate dbscan task
+    // unless specified they specially want to override the default follow-active behavior.
+    // start checksum on this database
     if ( UlParam( pfmp->Pinst(), JET_paramEnableDBScanInRecovery ) & bitDBScanInRecoveryPassiveScan )
     {
         CallR( pfmp->ErrStartDBMScan() );
@@ -4998,6 +5827,9 @@ ERR LOG::ErrLGRIRedoAttachDb(
     OSTrace( JET_tracetagDatabases, OSFormat( "[Redo] attaching database %ws [cpgMax=0x%x,grbit=0x%x,sparse=%d]",
                 wszDbName, cpgDatabaseSizeMax, 0x0, fSparseEnabledFile ) );
 
+    //  Do not re-create the database. Simply attach it. Assuming the
+    //  given database is a good one since signature matches.
+    //
     FMP::EnterFMPPoolAsWriter();
     pfmp->ResetFlags();
     pfmp->SetAttached();
@@ -5007,18 +5839,26 @@ ERR LOG::ErrLGRIRedoAttachDb(
     pfmp->SetDatabaseSizeMax( cpgDatabaseSizeMax );
     Assert( pfmp->CpgDatabaseSizeMax() != 0xFFFFFFFF );
 
+    // Versioning flag is not persisted (since versioning off
+    // implies logging off).
     Assert( !pfmp->FVersioningOff() );
     pfmp->ResetVersioningOff();
 
+    // If there's a log record for CreateDatabase(), then logging
+    // must be on.
     FMP::EnterFMPPoolAsWriter();
     Assert( !pfmp->FLogOn() );
     pfmp->SetLogOn();
     FMP::LeaveFMPPoolAsWriter();
 
+    //  Update database file header as necessary
+    //
     Assert( !pfmp->FReadOnlyAttach() );
     BOOL fUpdateHeader = fFalse;
     OnDebug( pfmp->SetDbHeaderUpdateState( FMP::DbHeaderUpdateState::dbhusHdrLoaded ) );
     
+    // If RBS header flush is set in the database header but RBS is not enabled anymore, we will reset the sign in the database header 
+    // and update it so that the next time RBS is enabled the older snapshot would be considered invalid.
     {
     PdbfilehdrReadWrite pdbfilehdr = pfmp->PdbfilehdrUpdateable();
 
@@ -5033,6 +5873,12 @@ ERR LOG::ErrLGRIRedoAttachDb(
     {
         BOOL    fKeepBackupInfo     = fFalse;
 
+        //  if we're replaying an attach during hard recovery, it
+        //  might correspond to the attachment under which the
+        //  backup was made (if the AttachDb log record was in one
+        //  of the logs in the backup set), so in that case, retain
+        //  the backup info
+        //
         if ( g_rgfmp[ifmp].FHardRecovery() )
         {
             const INT   irstmap = IrstmapSearchNewName( wszDbName );
@@ -5043,11 +5889,18 @@ ERR LOG::ErrLGRIRedoAttachDb(
             }
             else
             {
+                //  unless we're performing recovery without undo
+                //  (against a backup database), the database should
+                //  always be in the restore map
+                //
                 Assert( ErrLGSignalErrorConditionCallback( m_pinst, JET_errSoftRecoveryOnBackupDatabase ) == JET_errSuccess );
                 fKeepBackupInfo = fTrue;
             }
         }
 
+        //  UNDONE: in theory, lgposAttach should already have been set
+        //  when the ATCHCHK was setup, but SOMEONE says he's not 100%
+        //  sure, so to be safe, we definitely set the lgposAttach here
         Assert( 0 == CmpLgpos( m_lgposRedo, pfmp->LgposAttach() ) );
         pfmp->SetLgposAttach( m_lgposRedo );
 
@@ -5064,7 +5917,9 @@ ERR LOG::ErrLGRIRedoAttachDb(
         if ( JET_dbstateDirtyShutdown != pdbfilehdr->Dbstate() &&
                 JET_dbstateDirtyAndPatchedShutdown != pdbfilehdr->Dbstate() )
         {
-            FireWall( OSFormat( "InvalidDbStateOnRedoAttachDb:%d", (INT)pdbfilehdr->Dbstate() ) );
+            //  must force inconsistent during recovery (may currently be marked as
+            //  consistent because we replayed a RcvQuit and are now replaying an Init)
+            FireWall( OSFormat( "InvalidDbStateOnRedoAttachDb:%d", (INT)pdbfilehdr->Dbstate() ) );  //  should no longer be possible with forced detach on shutdown
             LOGTIME tmCreate;
             LONG lGenCurrent = m_pLogStream->GetCurrentFileGen( &tmCreate );
             pdbfilehdr->SetDbstate( JET_dbstateDirtyShutdown, lGenCurrent, &tmCreate, fTrue );
@@ -5072,18 +5927,24 @@ ERR LOG::ErrLGRIRedoAttachDb(
         }
     }
 
-    {
+    //  SoftRecoveryOnBackupDatabase check should already have been performed in
+    //  ErrLGRICheckAttachedDb()
+    { // .ctor acquires PdbfilehdrReadOnly
     OnDebug( PdbfilehdrReadOnly pdbfilehdr = pfmp->Pdbfilehdr() );
     Assert( 0 == pdbfilehdr->bkinfoFullCur.le_genLow ||
             m_fHardRestore ||
             ( ErrLGSignalErrorConditionCallback( m_pinst, JET_errSoftRecoveryOnBackupDatabase ) == JET_errSuccess ) ||
             ( 0 != pdbfilehdr->bkinfoFullCur.le_genLow && 0 != pdbfilehdr->bkinfoFullCur.le_genHigh ) );
-    }
+    } // .dtor releases PdbfilehdrReadOnly
 
+    //  check DB versions' compatibility
+    //
     Call( ErrDBIValidateUserVersions( m_pinst, wszDbName, ifmp, pfmp->Pdbfilehdr().get(), NULL ) );
 
+    //  set up other miscellaneous header fields
+    //
     const BOOL fLowerMinReqLogGenOnRedo = ( pfmp->ErrDBFormatFeatureEnabled( JET_efvLowerMinReqLogGenOnRedo ) == JET_errSuccess );
-    {
+    { // .ctor acquires PdbfilehdrReadWrite
 
     PdbfilehdrReadWrite pdbfilehdr = pfmp->PdbfilehdrUpdateable();
     Assert( ( pdbfilehdr->le_lGenMinRequired > 0 ) == ( pdbfilehdr->le_lGenMaxRequired > 0 ) );
@@ -5092,10 +5953,13 @@ ERR LOG::ErrLGRIRedoAttachDb(
     Assert( lGenCurrent > 0 );
     Assert( lGenCurrent >= pdbfilehdr->le_lgposAttach.le_lGeneration );
 
+    // Make sure lgposLastResize does not point to a log that is not required and therefore may have been deleted.
     if ( ( CmpLgpos( pdbfilehdr->le_lgposLastResize, lgposMin ) != 0 ) &&
          ( pdbfilehdr->le_lGenMaxRequired > 0 ) &&
          ( pdbfilehdr->le_lgposLastResize.le_lGeneration > pdbfilehdr->le_lGenMaxRequired ) )
     {
+        // We can assert this because shrink always quiesces LLR, so if le_lgposLastResize points to a non-required log,
+        // it means the last resize must have been an extension.
         Assert( pdbfilehdr->logtimeLastExtend.bYear != 0 );
         Assert( ( pdbfilehdr->logtimeLastShrink.bYear == 0 ) ||
                 ( LOGTIME::CmpLogTime( pdbfilehdr->logtimeLastExtend, pdbfilehdr->logtimeLastShrink ) >= 0 ) );
@@ -5111,6 +5975,11 @@ ERR LOG::ErrLGRIRedoAttachDb(
          !m_fReplayIgnoreLogRecordsBeforeMinRequiredLog &&
          fLowerMinReqLogGenOnRedo )
     {
+        // Bring the required range down so that any potential operations that get redone between the current
+        // lgpos and the current minimum required are guaranteed to be redone in case of a crash. Normally,
+        // nothing would get redone in this range, but there are a few exceptions. Namely: databases with
+        // lost flushes, databases that underwent Shrink, databases that underwent Trim.
+        //
 
         Expected( ( pdbfilehdr->le_lGenPreRedoMinRequired == 0 ) ||
                   ( pdbfilehdr->le_lGenPreRedoMinRequired > pdbfilehdr->le_lGenMinRequired ) );
@@ -5140,13 +6009,17 @@ ERR LOG::ErrLGRIRedoAttachDb(
             fUpdateHeader = fTrue;
         }
     }
+    // Set lGenMinConsistent back to lGenMinRequired because that's our effective initial checkpoint.
+    // In the future, this can be delayed until a DB or flush map page gets dirtied.
     if ( pdbfilehdr->le_lGenMinConsistent != pdbfilehdr->le_lGenMinRequired )
     {
         pdbfilehdr->le_lGenMinConsistent = pdbfilehdr->le_lGenMinRequired;
         fUpdateHeader = fTrue;
     }
-    }
+    } // .dtor releases PdbfilehdrReadWrite
 
+    //  create a flush map for this DB
+    //
     Call( pfmp->ErrCreateFlushMap( JET_bitNil ) );
 
     if ( fUpdateHeader )
@@ -5159,13 +6032,17 @@ ERR LOG::ErrLGRIRedoAttachDb(
     Assert( JET_dbstateDirtyShutdown == dbstate ||
             JET_dbstateDirtyAndPatchedShutdown == dbstate );
 
-    
+    /*  restore information stored in database file
+    /**/
     if ( m_fHardRestore )
     {
         pfmp->PdbfilehdrUpdateable()->bkinfoFullCur.le_genLow = m_lGenLowRestore;
         pfmp->PdbfilehdrUpdateable()->bkinfoFullCur.le_genHigh = m_lGenHighRestore;
     }
 
+    //  We're moving from ErrFileOpen() to ErrIOOpenDatabase() very late in the E14 game,
+    //  and these Expected()s will prove we're effectively doing close to the same thing as we used to do.
+    //  Some of these are obviously trivially true, and can be removed in E15.
     Expected( !FIODatabaseOpen( ifmp ) );
     Expected( !pfmp->FReadOnlyAttach() );
     Expected( pfmp->FLogOn() );
@@ -5180,12 +6057,18 @@ ERR LOG::ErrLGRIRedoAttachDb(
 
     Assert( !pfmp->FReadOnlyAttach() );
 
+    //  since the attach is now reflected in the header (either
+    //  because it existed that way or because we just updated
+    //  it in the fUpdateHeader code path above), we can now
+    //  safely set the waypoint
+    //
     FMP::EnterFMPPoolAsWriter();
     pfmp->SetWaypoint( pfmp->LgposAttach().lGeneration );
     FMP::LeaveFMPPoolAsWriter();
 
     Assert( !pfmp->FContainsDataFromFutureLogs() );
 
+    // Check if the database may contain any pages from the future.
     if ( m_lgposRedo.lGeneration == 0 || m_lgposRedo.lGeneration <= pfmp->Pdbfilehdr()->le_lGenMaxRequired )
     {
         FMP::EnterFMPPoolAsWriter();
@@ -5193,6 +6076,7 @@ ERR LOG::ErrLGRIRedoAttachDb(
         FMP::LeaveFMPPoolAsWriter();
     }
 
+    // we allow header update before starting to log any operation
     pfmp->SetAllowHeaderUpdate();
 
     if ( !pfmp->FContainsDataFromFutureLogs() )
@@ -5205,6 +6089,12 @@ ERR LOG::ErrLGRIRedoAttachDb(
         pfmp->SetOlderDemandExtendDb();
     }
 
+    // now with active logging dbscan, it is unnecessary to initiate a separate dbscan task
+    // unless specified they specially want to override the default follow-active behavior.
+    // start checksum on this database
+    // Putting this in, so if someone runs this, they'll see that testing of this code is 
+    // on them. It should work, because it is the same as the original DbScan in Recovery 
+    // code.
     if ( UlParam( pfmp->Pinst(), JET_paramEnableDBScanInRecovery ) & bitDBScanInRecoveryPassiveScan )
     {
         CallR( pfmp->ErrStartDBMScan() );
@@ -5240,11 +6130,14 @@ VOID LOG::LGRISetDeferredAttachment( const IFMP ifmp, const bool fDeferredAttach
 
     pfmp->RwlDetaching().LeaveAsWriter();
 
+    // Versioning flag is not persisted (since versioning off
+    // implies logging off).
     Assert( !pfmp->FVersioningOff() );
     pfmp->ResetVersioningOff();
 
     Assert( !pfmp->FReadOnlyAttach() );
 
+    //  still have to set fFlags for keep track of the db status.
     FMP::EnterFMPPoolAsWriter();
     pfmp->SetLogOn( );
     FMP::LeaveFMPPoolAsWriter();
@@ -5266,13 +6159,18 @@ ERR LOG::ErrLGRIRedoBackupUpdate(
         return JET_errSuccess;
     }
 
+    //
+    //  Redo the header update ...
+    //
 
     LGPOS lgposT = plrlb->phaseDetails.le_lgposMark;
 
+    //  reset legacy way ...
     m_pinst->m_pbackup->BKSetLgposFullBackup( lgposMin );
     m_pinst->m_pbackup->BKSetLgposIncBackup( lgposMin );
     m_pinst->m_pbackup->BKSetLogsTruncated( fFalse );
 
+    //  redo the header update ...
     BOOL fT = fTrue;
     CallR( m_pinst->m_pbackup->ErrBKUpdateHdrBackupInfo(
                 m_pinst->m_mpdbidifmp[ plrlb->dbid ],
@@ -5350,6 +6248,9 @@ ERR LOG::ErrLGRIRedoSpaceRootPage(  PIB                 *ppib,
 
     SPICreateExtentTree( pfucb, &csr, pgnoLast, cpgExtent, fAvail );
 
+    //  set dbtime to logged dbtime
+    //  release page
+    //
     Assert( latchWrite == csr.Latch() );
     Assert( csr.FDirty() );
     csr.SetDbtime( plrcreatemefdp->le_dbtime );
@@ -5367,6 +6268,8 @@ HandleError:
 }
 
 
+//  redo single extent creation
+//
 ERR LOG::ErrLGIRedoFDPPage( CTableHash *pctablehash, PIB *ppib, const LRCREATESEFDP *plrcreatesefdp )
 {
     ERR             err;
@@ -5407,6 +6310,8 @@ ERR LOG::ErrLGIRedoFDPPage( CTableHash *pctablehash, PIB *ppib, const LRCREATESE
 
     pfucb->u.pfcb->Lock();
 
+    //  UNDONE: I can't tell if it's possible to get a cached FCB that used to belong to
+    //  a different btree, so to be safe, reset the values for objidFDP and fUnique
     pfucb->u.pfcb->SetObjidFDP( objidFDP );
     if ( fUnique )
         pfucb->u.pfcb->SetUnique();
@@ -5415,6 +6320,9 @@ ERR LOG::ErrLGIRedoFDPPage( CTableHash *pctablehash, PIB *ppib, const LRCREATESE
 
     pfucb->u.pfcb->Unlock();
 
+    //  It is okay to call ErrGetNewPreInitPage() instead of ErrGetNewPreInitPageForRedo()
+    //  here because if the new page succeeds, we are guaranteed to make it
+    //  to the code below that updates the dbtime
     Call( ErrSPICreateSingle(
                 pfucb,
                 &csr,
@@ -5426,6 +6334,9 @@ ERR LOG::ErrLGIRedoFDPPage( CTableHash *pctablehash, PIB *ppib, const LRCREATESE
                 fPageFlags,
                 dbtime ) );
 
+    //  set dbtime to logged dbtime
+    //  release page
+    //
     Assert( latchWrite == csr.Latch() );
     csr.SetDbtime( dbtime );
     csr.ReleasePage();
@@ -5435,6 +6346,8 @@ HandleError:
     return err;
 }
 
+//  redo multiple extent creation
+//
 ERR LOG::ErrLGIRedoFDPPage( CTableHash *pctablehash, PIB *ppib, const LRCREATEMEFDP *plrcreatemefdp )
 {
     ERR             err;
@@ -5479,6 +6392,8 @@ ERR LOG::ErrLGIRedoFDPPage( CTableHash *pctablehash, PIB *ppib, const LRCREATEME
 
     pfucb->u.pfcb->Lock();
 
+    //  UNDONE: I can't tell if it's possible to get a cached FCB that used to belong to
+    //  a different btree, so to be safe, reset the values for objidFDP and fUnique
     pfucb->u.pfcb->SetObjidFDP( objidFDP );
     if ( fUnique )
         pfucb->u.pfcb->SetUnique();
@@ -5487,6 +6402,8 @@ ERR LOG::ErrLGIRedoFDPPage( CTableHash *pctablehash, PIB *ppib, const LRCREATEME
 
     pfucb->u.pfcb->Unlock();
 
+    //  get pgnoFDP to initialize in current CSR pgno
+    //
     Call( csr.ErrGetNewPreInitPageForRedo(
                     pfucb->ppib,
                     pfucb->ifmp,
@@ -5498,7 +6415,7 @@ ERR LOG::ErrLGIRedoFDPPage( CTableHash *pctablehash, PIB *ppib, const LRCREATEME
     sph.SetPgnoParent( pgnoParent );
     sph.SetCpgPrimary( cpgPrimary );
 
-    Assert( sph.FSingleExtent() );
+    Assert( sph.FSingleExtent() );  // initialised with these defaults
     Assert( sph.FUnique() );
 
     sph.SetMultipleExtent();
@@ -5513,6 +6430,9 @@ ERR LOG::ErrLGIRedoFDPPage( CTableHash *pctablehash, PIB *ppib, const LRCREATEME
 
     SPIInitPgnoFDP( pfucb, &csr, sph );
 
+    //  set dbtime to logged dbtime
+    //  release page
+    //
     Assert( latchWrite == csr.Latch() );
     Assert( csr.FDirty() );
     csr.SetDbtime( dbtime );
@@ -5551,6 +6471,8 @@ ERR LOG::ErrLGRIRedoConvertFDP( PIB *ppib, const LRCONVERTFDP *plrconvertfdp )
 
     LGRITraceRedo( plrconvertfdp );
 
+    //  get cursor for operation
+    //
     Assert( g_rgfmp[ifmp].Dbid() == dbid );
     Call( ErrLGRIGetFucb( m_pctablehash, ppib, ifmp, pgnoFDP, objidFDP, plrconvertfdp->FUnique(), fTrue, &pfucb ) );
     pfucb->u.pfcb->SetPgnoOE( pgnoOE );
@@ -5569,13 +6491,18 @@ ERR LOG::ErrLGRIRedoConvertFDP( PIB *ppib, const LRCONVERTFDP *plrconvertfdp )
     }
     else
     {
+        //  Check the return code of ErrLGIAccessPage() for other errors.
         Call( err );
 
+        //  Check if the FDP page need be redone, based on dbtime.
+        //
         fRedoRoot = FLGNeedRedoCheckDbtimeBefore( csrRoot, dbtime, plrconvertfdp->le_dbtimeBefore, &err );
 
+        // for the FLGNeedRedoCheckDbtimeBefore error code
         Call ( err );
     }
 
+    //  get AvailExt and OwnExt root pages from db
     Call( ErrLGRIAccessNewPage(
                     ppib,
                     &csrOE,
@@ -5595,6 +6522,8 @@ ERR LOG::ErrLGRIRedoConvertFDP( PIB *ppib, const LRCONVERTFDP *plrconvertfdp )
 
     if ( fRedoRoot || fRedoOE || fRedoAE )
     {
+        //  reconstruct page flags and extent info from log record
+        //
         fPageFlags = plrconvertfdp->le_fCpageFlags;
 
         sph.SetCpgPrimary( plrconvertfdp->le_cpgPrimary );
@@ -5611,15 +6540,22 @@ ERR LOG::ErrLGRIRedoConvertFDP( PIB *ppib, const LRCONVERTFDP *plrconvertfdp )
     }
     else
     {
+        //  no pages need to be redone, so bail
+        //
         err = JET_errSuccess;
         goto HandleError;
     }
 
+    //  force to multiple extent
+    //
     Assert( sph.FSingleExtent() );
     sph.SetMultipleExtent();
     Assert( pgnoOE == pgnoSecondaryFirst );
     sph.SetPgnoOE( pgnoSecondaryFirst );
 
+    //  create new pages for OwnExt and AvailExt root
+    //      if redo is needed
+    //
     if ( fRedoOE )
     {
         Call( csrOE.ErrGetNewPreInitPageForRedo(
@@ -5650,9 +6586,13 @@ ERR LOG::ErrLGRIRedoConvertFDP( PIB *ppib, const LRCONVERTFDP *plrconvertfdp )
         csrRoot.UpgradeFromRIWLatch();
     }
 
+    //  reset flag to silence asserts
+    //
     Assert( FFUCBOwnExt( pfucb ) );
     FUCBResetOwnExt( pfucb );
 
+    //  dirty pages and set dbtime to logged dbtime
+    //
     LGRIRedoDirtyAndSetDbtime( &csrRoot, dbtime );
     LGRIRedoDirtyAndSetDbtime( &csrAE, dbtime );
     LGRIRedoDirtyAndSetDbtime( &csrOE, dbtime );
@@ -5701,6 +6641,9 @@ ERR LOG::ErrLGRIRedoOperation( LR *plr )
         return ErrERRCheck( JET_errLogCorrupted );
     }
 
+    //  ****************************************************
+    //  single-page operations
+    //  ****************************************************
 
     case lrtypInsert:
     case lrtypFlagInsert:
@@ -5718,6 +6661,7 @@ ERR LOG::ErrLGRIRedoOperation( LR *plr )
     {
         err = ErrLGRIRedoNodeOperation( (LRNODE_ * ) plr, &m_errGlobalRedoError );
 
+        //Changing it to use switch so that we can set multiple error codes at the same time..
         switch( err )
         {
             case JET_errReadLostFlushVerifyFailure:
@@ -5758,7 +6702,9 @@ ERR LOG::ErrLGRIRedoOperation( LR *plr )
     }
 
 
-    
+    /****************************************************
+     *     Transaction Operations                       *
+     ****************************************************/
 
     case lrtypBegin:
     case lrtypBegin0:
@@ -5774,7 +6720,8 @@ ERR LOG::ErrLGRIRedoOperation( LR *plr )
 
         Assert( !ppib->FMacroGoing() );
 
-        
+        /*  do BT only after first BT based on level 0 is executed
+        /**/
         if ( ppib->FAfterFirstBT() || 0 == plrbeginDT->levelBeginFrom )
         {
             Assert( ppib->Level() <= plrbeginDT->levelBeginFrom );
@@ -5793,19 +6740,23 @@ ERR LOG::ErrLGRIRedoOperation( LR *plr )
                     AtomicExchange( (LONG *)&m_pinst->m_trxNewest, ppib->trxBegin0 );
                     m_pinst->m_fTrxNewestSetByRecovery = fTrue;
                 }
+                //  at redo time RCEClean can throw away any committed RCE as they are only
+                //  needed for rollback
             }
             else
             {
                 Assert( lrtypBegin == plr->lrtyp );
             }
 
-            
+            /*  issue begin transactions
+            /**/
             while ( ppib->Level() < plrbeginDT->levelBeginFrom + plrbeginDT->clevelsToBegin )
             {
                 VERBeginTransaction( ppib, 61477 );
             }
 
-            
+            /*  assert at correct transaction level
+            /**/
             Assert( ppib->Level() == plrbeginDT->levelBeginFrom + plrbeginDT->clevelsToBegin );
 
             ppib->SetFAfterFirstBT();
@@ -5826,7 +6777,8 @@ ERR LOG::ErrLGRIRedoOperation( LR *plr )
         if ( !ppib->FAfterFirstBT() )
             break;
 
-        
+        /*  imitate a begin transaction.
+         */
         Assert( ppib->Level() <= 1 );
         ppib->SetLevel( 1 );
         ppib->trxBegin0 = plrrefresh->le_trxBegin0;
@@ -5845,6 +6797,9 @@ ERR LOG::ErrLGRIRedoOperation( LR *plr )
 
         if ( !ppib->FAfterFirstBT() )
         {
+            // If we have not seen the Begin0 for this transaction, still need to update
+            // m_trxNewest based on this. We should still be replaying in the initial required
+            // range in this case, so no read-from-passive transactions yet.
             if ( 0 == plrcommit0->levelCommitTo &&
                  ( !m_pinst->m_fTrxNewestSetByRecovery ||
                    TrxCmp( plrcommit0->le_trxCommit0, m_pinst->m_trxNewest ) > 0 ) )
@@ -5856,7 +6811,8 @@ ERR LOG::ErrLGRIRedoOperation( LR *plr )
             break;
         }
 
-        
+        /*  check transaction level
+        /**/
         Assert( !ppib->FMacroGoing() );
         Assert( ppib->Level() >= 1 );
 
@@ -5906,7 +6862,8 @@ ERR LOG::ErrLGRIRedoOperation( LR *plr )
         if ( !ppib->FAfterFirstBT() )
             break;
 
-        
+        /*  check transaction level
+        /**/
         Assert( ppib->Level() >= level );
 
         LGRITraceRedo( plr );
@@ -5926,7 +6883,9 @@ ERR LOG::ErrLGRIRedoOperation( LR *plr )
         break;
     }
 
-    
+    /************************************************************
+     * Operations performed via macro (split, merge, root move) *
+     ************************************************************/
 
     case lrtypSplit:
     case lrtypMerge:
@@ -5971,6 +6930,17 @@ ERR LOG::ErrLGRIRedoOperation( LR *plr )
 
         if ( !ppib->FAfterFirstBT() )
         {
+            //  it's possible that there are no Begin0's between the first and
+            //  last log records, in which case nothing needs to
+            //  get redone.  HOWEVER, the dbtimeLast and objidLast
+            //  counters in the db header would not have gotten
+            //  flushed (they only get flushed on a DetachDb or a
+            //  clean shutdown), so we must still track these
+            //  counters during recovery so that we can properly
+            //  update the database header on RecoveryQuit (since
+            //  we pass TRUE for the fUpdateCountersOnly param to
+            //  ErrLGRICheckRedoCondition() below, that function
+            //  will do nothing but update the counters for us).
 
             BOOL fSkip = fFalse;
             OBJID objidFDP = 0xFFFFFFFF;
@@ -6010,6 +6980,9 @@ ERR LOG::ErrLGRIRedoOperation( LR *plr )
     }
 
 
+    //***************************************************
+    //  Misc Operations
+    //***************************************************
 
     case lrtypCreateMultipleExtentFDP:
     {
@@ -6025,6 +6998,8 @@ ERR LOG::ErrLGRIRedoOperation( LR *plr )
 
         FMP::AssertVALIDIFMP( ifmp );
 
+        //  remove FCBs/FUCBs created on pgnoFDP earlier. This call is only needed if active is running older
+        //  version without lrtypFreeFDP
         if ( NULL != m_pctablehash )
         {
             CallR( ErrLGRIPurgeFcbs( ifmp, plrcreatemefdp->le_pgno, fFDPTypeUnknown, m_pctablehash ) );
@@ -6036,7 +7011,7 @@ ERR LOG::ErrLGRIRedoOperation( LR *plr )
                 dbid,
                 plrcreatemefdp->le_dbtime,
                 plrcreatemefdp->le_objidFDP,
-                NULL,
+                NULL,   //  can not be in macro.
                 &ppib,
                 &fSkip ) );
         if ( fSkip )
@@ -6066,6 +7041,8 @@ ERR LOG::ErrLGRIRedoOperation( LR *plr )
 
         FMP::AssertVALIDIFMP( ifmp );
 
+        //  remove FCBs/FUCBs created on pgnoFDP earlier. This call is only needed if active is running older
+        //  version without lrtypFreeFDP
         if ( NULL != m_pctablehash )
         {
             CallR( ErrLGRIPurgeFcbs( ifmp, pgnoFDP, fFDPTypeUnknown, m_pctablehash ) );
@@ -6083,6 +7060,8 @@ ERR LOG::ErrLGRIRedoOperation( LR *plr )
         if ( fSkip )
             break;
 
+        //  redo FDP page if needed
+        //
         LGRITraceRedo( plrcreatesefdp );
         CallR( ErrLGIRedoFDPPage( m_pctablehash, ppib, plrcreatesefdp ) );
         break;
@@ -6091,6 +7070,8 @@ ERR LOG::ErrLGRIRedoOperation( LR *plr )
     case lrtypConvertFDP:
         FireWall( OSFormat( "DeprecatedLrType:%d", (INT)plr->lrtyp ) );
 
+        //  ErrLGRIRedoConvertFDP() can no longer handle lrtypConvertFDP
+        //
         CallR( ErrERRCheck( JET_errBadLogVersion ) );
     case lrtypConvertFDP2:
     {
@@ -6134,13 +7115,18 @@ ERR LOG::ErrLGRIRedoOperation( LR *plr )
             m_pinst->m_fTrxNewestSetByRecovery = fTrue;
         }
 
+        // First wait for any open transactions which will be able to see the catalog entries for this FDP
+        // to go away.
         TICK tickStart = TickOSTimeCurrent();
         while ( TrxCmp( trxCommitted, TrxOldest( m_pinst ) ) >= 0 )
         {
+            // Assert that we are not holding any locks
             CLockDeadlockDetectionInfo::AssertCleanApiExit( 0, 0, 0 );
             m_pinst->m_sigTrxOldestDuringRecovery.FWait( cmsecMaxReplayDelayDueToReadTrx );
         }
 
+        // Free up all FCBs/FUCBs created against this pgnoFDP as the space can get reused and even though
+        // recovery will not access it, we also do not want read from passive transactions to access it.
         if ( NULL != m_pctablehash )
         {
             CallR( ErrLGRIPurgeFcbs( ifmp, pgnoFDP, fFDPType, m_pctablehash ) );
@@ -6206,6 +7192,8 @@ ERR LOG::ErrLGRIRedoOperation( LR *plr )
 
     case lrtypPagePatchRequest:
     {
+        // If we have a recovery callback then issue a page patch call. By the time we see the patch request
+        // we have replayed all the log records for the page so we can use the current version.
         
         const LRPAGEPATCHREQUEST * const plrpagepatchrequest = (LRPAGEPATCHREQUEST *)plr;
         CallR( ErrLGRIRedoPagePatch( plrpagepatchrequest ) );
@@ -6213,14 +7201,18 @@ ERR LOG::ErrLGRIRedoOperation( LR *plr )
         break;
     }
 
-    case lrtypScanCheck:
+    case lrtypScanCheck:    //  originally lrtypIgnored4
     case lrtypScanCheck2:
     {
         LRSCANCHECK2 lrscancheck;
         lrscancheck.InitScanCheck( plr );
 
-        if ( FLGRICheckRedoScanCheck( &lrscancheck, fFalse  ) )
+        // check whether scanning is enabled and whether this is a
+        // pgno we haven't seen yet in this scan
+        if ( FLGRICheckRedoScanCheck( &lrscancheck, fFalse /* fEvaluatePrereadLogic */ ) )
         {
+            //  we ignore errors if this is DB scan because we do not need to replay this log record to
+            //  continue, and to allow HA to fail over to this node without blocking.
             BOOL fBadPage = fFalse;
             const ERR errT = ErrLGRIRedoScanCheck( &lrscancheck, &fBadPage );
             ExpectedSz( ( lrscancheck.BSource() == scsDbScan ) ||
@@ -6243,10 +7235,11 @@ ERR LOG::ErrLGRIRedoOperation( LR *plr )
         break;
     }
 
-    case lrtypReAttach:
+    case lrtypReAttach:     //  originally lrtypIgnored6
     {
         const LRREATTACHDB * const plrreattach = (LRREATTACHDB *)plr;
 
+        // Databases re-attached (from fast failover)
         IFMP ifmp = m_pinst->m_mpdbidifmp[ plrreattach->le_dbid ];
         if ( ifmp >= g_ifmpMax )
         {
@@ -6257,6 +7250,7 @@ ERR LOG::ErrLGRIRedoOperation( LR *plr )
         Assert( NULL != pfmp );
         Assert( pfmp->FInUse() );
 
+        // deferred and skipped attach databases can be ignored
         if ( pfmp->FSkippedAttach() || pfmp->FDeferredAttach() )
         {
             break;
@@ -6265,12 +7259,13 @@ ERR LOG::ErrLGRIRedoOperation( LR *plr )
         Assert( NULL != pfmp->Pdbfilehdr() );
         Assert( NULL != pfmp->Patchchk() );
 
-        {
+        { // .ctor acquires PdbfilehdrReadWrite
         PdbfilehdrReadWrite pdbfilehdr = pfmp->PdbfilehdrUpdateable();
 
+        // Set re-attach time
         pdbfilehdr->le_lgposLastReAttach  = m_lgposRedo;
         LGIGetDateTime( &pdbfilehdr->logtimeLastReAttach );
-        }
+        } // .dtor releases PdbfilehdrReadWrite
 
         CallR( ErrUtilWriteAttachedDatabaseHeaders( m_pinst, m_pinst->m_pfsapi, pfmp->WszDatabaseName(), pfmp,  pfmp->Pfapi() ) );
 
@@ -6279,6 +7274,10 @@ ERR LOG::ErrLGRIRedoOperation( LR *plr )
             CallR( ErrLGDbAttachedCallback( m_pinst, pfmp ) );
         }
 
+        // now with active logging dbscan, it is unnecessary to initiate a separate dbscan task
+        // unless specified they specially want to override the default follow-active behavior.
+        // start checksum on this database - normally done by
+        // ErrLGRIRedoAttachDb above
         if ( UlParam( m_pinst, JET_paramEnableDBScanInRecovery ) & bitDBScanInRecoveryPassiveScan )
         {
             CallR( pfmp->ErrStartDBMScan() );
@@ -6291,6 +7290,7 @@ ERR LOG::ErrLGRIRedoOperation( LR *plr )
     {
         const LRSIGNALATTACHDB * const plrsattachdb = (LRSIGNALATTACHDB *)plr;
 
+        // Databases re-attached (from fast failover)
         IFMP ifmp = m_pinst->m_mpdbidifmp[ plrsattachdb->Dbid() ];
         if ( ifmp >= g_ifmpMax )
         {
@@ -6301,6 +7301,7 @@ ERR LOG::ErrLGRIRedoOperation( LR *plr )
         Assert( NULL != pfmp );
         Assert( pfmp->FInUse() );
 
+        // deferred and skipped attach databases can be ignored
         if ( pfmp->FSkippedAttach() || pfmp->FDeferredAttach() )
         {
             break;
@@ -6322,7 +7323,7 @@ ERR LOG::ErrLGRIRedoOperation( LR *plr )
         return ErrERRCheck( JET_wrnNyi );
     }
 
-    case lrtypCommitCtx:
+    case lrtypCommitCtx:    // originally lrtypIgnored3
     {
         const LRCOMMITCTX * const plrCommitC = (LRCOMMITCTX *)plr;
         if ( plrCommitC->FCallbackNeeded() )
@@ -6339,8 +7340,8 @@ ERR LOG::ErrLGRIRedoOperation( LR *plr )
         break;
     }
 
-    case lrtypMacroInfo:
-    case lrtypMacroInfo2:
+    case lrtypMacroInfo:    // originally lrtypIgnored1
+    case lrtypMacroInfo2:   // originally lrtypIgnored7
     case lrtypIgnored9:
     case lrtypIgnored10:
     case lrtypIgnored11:
@@ -6360,11 +7361,15 @@ ERR LOG::ErrLGRIRedoOperation( LR *plr )
     case lrtypTrimDB:
     case lrtypExtentFreed:
         AssertSz( fFalse, "lrtyp %d should have been filtered out in ErrLGRIRedoOperations!", (BYTE)plr->lrtyp );
-} 
+} /*** end of switch statement ***/
 
     return JET_errSuccess;
 }
 
+//  reconstructs rglineinfo during recovery
+//      calcualtes kdf and cbPrefix of lineinfo
+//      cbSize info is not calculated correctly since it is not needed in redo
+//
 LOCAL ERR ErrLGIRedoSplitLineinfo( FUCB                 *pfucb,
                                    SPLITPATH            *psplitPath,
                                    DBTIME               dbtime,
@@ -6394,6 +7399,9 @@ LOCAL ERR ErrLGIRedoSplitLineinfo( FUCB                 *pfucb,
     {
         CallS( err );
 
+        //  split page does not need redo but new page needs redo
+        //  set rglineinfo and cbPrefix for appended node
+        //
         Assert( !FBTISplitPageBeforeImageRequired( psplit ) || fDebugHasPageBeforeImage );
         Assert( psplit->clines - 1 == psplit->ilineOper );
         Assert( psplit->ilineSplit == psplit->ilineOper );
@@ -6423,11 +7431,17 @@ LOCAL ERR ErrLGIRedoSplitLineinfo( FUCB                 *pfucb,
         if ( psplit->ilineOper == ilineTo &&
              splitoperInsert == psplit->splitoper )
         {
+            //  place to be inserted node here
+            //
             psplit->rglineinfo[ilineTo].kdf = kdf;
 
+            //  do not increment ilineFrom
+            //
             continue;
         }
 
+        //  get node from page
+        //
         psplitPath->csr.SetILine( ilineFrom );
 
         Call( ErrNDGet( pfucb, &psplitPath->csr ) );
@@ -6435,6 +7449,9 @@ LOCAL ERR ErrLGIRedoSplitLineinfo( FUCB                 *pfucb,
         if ( ilineTo == psplit->ilineOper &&
              splitoperNone != psplit->splitoper )
         {
+            //  get key from node
+            //  and data from parameter
+            //
             Assert( splitoperInsert != psplit->splitoper );
             Assert( splitoperReplace == psplit->splitoper ||
                     splitoperFlagInsertAndReplaceData == psplit->splitoper );
@@ -6453,6 +7470,8 @@ LOCAL ERR ErrLGIRedoSplitLineinfo( FUCB                 *pfucb,
         ilineFrom++;
     }
 
+    //  set cbPrefixes for nodes in split page
+    //
     if ( psplit->prefixinfoSplit.ilinePrefix != ilineInvalid )
     {
         Assert( psplit->prefixSplitNew.Cb() > 0 );
@@ -6478,6 +7497,8 @@ LOCAL ERR ErrLGIRedoSplitLineinfo( FUCB                 *pfucb,
         }
     }
 
+    //  set cbPrefixes for nodes in new page
+    //
     if ( FLGNeedRedoPage( psplit->csrNew, dbtime )
         && ilineInvalid != psplit->prefixinfoNew.ilinePrefix )
     {
@@ -6519,6 +7540,7 @@ ERR ErrLGIDecompressPreimage(
 {
     ERR err;
 
+    // First xpress decompression
     if ( fXpressed )
     {
         INT cbActual = 0;
@@ -6527,8 +7549,10 @@ ERR ErrLGIDecompressPreimage(
         data.SetCb( cbActual );
     }
 
+    // Then rehydration
     if ( fDehydrated )
     {
+        // If xpress also done, then data is already in decompression buffer
         if ( !fXpressed )
         {
             memcpy( pbDataDecompressed, data.Pv(), data.Cb() );
@@ -6550,6 +7574,11 @@ ERR ErrLGIDecompressPreimage(
 }
 
 
+//  reconstructs split structre during recovery
+//      access new page and upgrade to write-latch, if necessary
+//      access right page and upgrade to write-latch, if necessary
+//      update split members from log record
+//
 ERR LOG::ErrLGRIRedoInitializeSplit( PIB * const ppib, const LRSPLIT_ * const plrsplit, SPLITPATH * const psplitPath )
 {
     ERR             err;
@@ -6574,6 +7603,8 @@ ERR LOG::ErrLGRIRedoInitializeSplit( PIB * const ppib, const LRSPLIT_ * const pl
     Assert( pgnoNew != pgnoNull );
     Assert( latchRIW == psplitPath->csr.Latch() || pagetrimTrimmed == psplitPath->csr.PagetrimState() );
 
+    //  allocate split structure
+    //
     AllocR( psplit = new SPLIT );
 
     psplit->pgnoSplit   = pgnoSplit;
@@ -6596,6 +7627,7 @@ ERR LOG::ErrLGRIRedoInitializeSplit( PIB * const ppib, const LRSPLIT_ * const pl
     psplit->prefixinfoSplit.ilinePrefix = plrsplit->le_ilinePrefixSplit;
     psplit->prefixinfoNew.ilinePrefix   = plrsplit->le_ilinePrefixNew;
 
+    //  latch the new-page
 
     psplit->pgnoNew     = plrsplit->le_pgnoNew;
     Assert( g_rgfmp[ifmp].Dbid() == dbid );
@@ -6665,6 +7697,8 @@ ERR LOG::ErrLGRIRedoInitializeSplit( PIB * const ppib, const LRSPLIT_ * const pl
     
     if ( fRedoNewPage )
     {
+        //  create new page
+        //
         Assert( !psplit->csrNew.FLatched() );
         Call( psplit->csrNew.ErrGetNewPreInitPageForRedo(
                                     ppib,
@@ -6676,6 +7710,7 @@ ERR LOG::ErrLGRIRedoInitializeSplit( PIB * const ppib, const LRSPLIT_ * const pl
     }
     else
     {
+        // The Latch state is only valid for pagetrimNormal pages.
         Assert( latchRIW == psplit->csrNew.Latch() || pagetrimNormal != psplit->csrNew.PagetrimState() );
         Assert( !FLGNeedRedoPage( psplit->csrNew, dbtime ) );
     }
@@ -6693,6 +7728,7 @@ ERR LOG::ErrLGRIRedoInitializeSplit( PIB * const ppib, const LRSPLIT_ * const pl
         else
         {
             Call( err );
+            // The Latch state is only valid for pagetrimNormal pages.
             Assert( latchRIW == psplit->csrRight.Latch() || pagetrimNormal != psplit->csrRight.PagetrimState() );
             Assert( dbtimeNil != plrsplit->le_dbtimeRightBefore );
             Assert( dbtimeInvalid != plrsplit->le_dbtimeRightBefore );
@@ -6749,6 +7785,8 @@ ERR LOG::ErrLGRIRedoInitializeSplit( PIB * const ppib, const LRSPLIT_ * const pl
     Assert( plrsplit->le_pgnoNew == psplit->csrNew.Pgno() );
     Assert( plrsplit->le_pgnoRight == psplit->csrRight.Pgno() );
 
+    //  link psplit to psplitPath
+    //
     psplitPath->psplit = psplit;
     psplit->psplitPath = psplitPath;
 
@@ -6758,6 +7796,7 @@ ERR LOG::ErrLGRIRedoInitializeSplit( PIB * const ppib, const LRSPLIT_ * const pl
     }
     else
     {
+        // The Latch state is only valid for pagetrimNormal pages.
         Assert( latchRIW == psplit->csrNew.Latch() || pagetrimNormal != psplit->csrNew.PagetrimState() );
     }
 
@@ -6774,6 +7813,8 @@ HandleError:
 }
 
 
+//  reconstructs splitPath and split
+//
 ERR LOG::ErrLGRIRedoSplitPath( PIB *ppib, const LRSPLIT_ *plrsplit, SPLITPATH **ppsplitPath )
 {
     Assert( lrtypSplit == plrsplit->lrtyp || lrtypSplit2 == plrsplit->lrtyp );
@@ -6786,6 +7827,8 @@ ERR LOG::ErrLGRIRedoSplitPath( PIB *ppib, const LRSPLIT_ *plrsplit, SPLITPATH **
     INST            *pinst = m_pinst;
     IFMP            ifmp = pinst->m_mpdbidifmp[ dbid ];
 
+    //  allocate new splitPath
+    //
     CallR( ErrBTINewSplitPath( ppsplitPath ) );
 
     SPLITPATH *psplitPath = *ppsplitPath;
@@ -6805,6 +7848,8 @@ ERR LOG::ErrLGRIRedoSplitPath( PIB *ppib, const LRSPLIT_ *plrsplit, SPLITPATH **
         Assert( latchRIW == psplitPath->csr.Latch() );
     }
 
+    //  allocate new split if needed
+    //
     if ( pgnoNew != pgnoNull )
     {
         Call( ErrLGRIRedoInitializeSplit( ppib, plrsplit, psplitPath ) );
@@ -6825,6 +7870,11 @@ HandleError:
     return err;
 }
 
+//  allocate and initialize mergePath structure
+//  access merged page
+//  if redo is needed,
+//      upgrade latch
+//
 ERR LOG::ErrLGIRedoMergePath( PIB               *ppib,
                                const LRMERGE_   * const plrmerge,
                                _Outptr_ MERGEPATH       **ppmergePath )
@@ -6836,6 +7886,8 @@ ERR LOG::ErrLGIRedoMergePath( PIB               *ppib,
     INST            *pinst      = PinstFromPpib( ppib );
     IFMP            ifmp        = pinst->m_mpdbidifmp[ dbid ];
 
+    //  initialize merge path
+    //
     CallR( ErrBTINewMergePath( ppmergePath ) );
 
     MERGEPATH *pmergePath = *ppmergePath;
@@ -6870,6 +7922,11 @@ HandleError:
 }
 
 
+//  allocates and initializes leaf-level merge structure
+//  access sibling pages
+//  if redo is needed,
+//      upgrade to write-latch
+//
 ERR LOG::ErrLGRIRedoInitializeMerge( PIB            *ppib,
                                      FUCB           *pfucb,
                                      const LRMERGE_ *plrmerge,
@@ -6898,10 +7955,13 @@ ERR LOG::ErrLGRIRedoInitializeMerge( PIB            *ppib,
     BOOL            fRedoLeftPage       = ( pgnoLeft != pgnoNull );
     BOOL            fRedoRightPage      = ( pgnoRight != pgnoNull );
 
+    // Need to set this so that FBTIMergePageBeforeImageRequired can be called
     pmerge->mergetype       = mergetype;
 
     if ( fRedoLeftPage )
     {
+        //  unlike split, the left page should already exist (unless it's been trimmed), so we
+        //  shouldn't get errors back from AccessPage()
         err = ErrLGIAccessPage( ppib, &pmerge->csrLeft, ifmp, pgnoLeft, plrmerge->le_objidFDP, fFalse );
 
         if ( errSkipLogRedoOperation == err )
@@ -6922,6 +7982,8 @@ ERR LOG::ErrLGRIRedoInitializeMerge( PIB            *ppib,
 
     if ( fRedoRightPage )
     {
+        //  unlike split, the right page should already exist (unless it's been trimmed), so we
+        //  shouldn't get errors back from AccessPage()
         err = ErrLGIAccessPage( ppib, &pmerge->csrRight, ifmp, pgnoRight, plrmerge->le_objidFDP, fFalse );
         if ( errSkipLogRedoOperation == err )
         {
@@ -7055,6 +8117,7 @@ ERR LOG::ErrLGRIRedoInitializeMerge( PIB            *ppib,
     if ( ( pcsrDest == NULL )
          || ( pagetrimNormal == pmergePath->csr.PagetrimState() && pagetrimNormal == pcsrDest->PagetrimState() ) )
     {
+        // Only check this condition if neither of the pages was Trimmed out.
         Assert( !( fRedoDestPage && !fRedoSourcePage && FBTIMergePageBeforeImageRequired( pmerge ) ) );
     }
 
@@ -7082,6 +8145,9 @@ ERR LOG::ErrLGRIRedoInitializeMerge( PIB            *ppib,
     pmerge->cbSizeMaxTotal  = plrmerge->le_cbSizeMaxTotal;
     pmerge->cbUncFreeDest   = plrmerge->le_cbUncFreeDest;
 
+    //  if merged page needs redo
+    //      allocate and initialize rglineinfo
+    //
     if ( fRedoSourcePage )
     {
         CSR * const pcsr = &pmergePath->csr;
@@ -7113,9 +8179,15 @@ ERR LOG::ErrLGRIRedoInitializeMerge( PIB            *ppib,
             Call( ErrNDGet( pfucb, pcsr ) );
             plineinfo->kdf = pfucb->kdfCurr;
 
+            //  cache node
+            //
             BOOKMARK    bm;
             NDGetBookmarkFromKDF( pfucb, plineinfo->kdf, &bm );
 
+            // BTIMergeMoveNodes will delete non-visible flag-deleted nodes, but some of those nodes
+            // may still be visible on passives because of read-only transactions.
+            // We cannot change BTIMergeMoveNodes to move the node on the passive based on visibility,
+            // so we have to stall the move until the nodes are no longer visible to any transaction.
             BOOL fEventloggedLongWait = fFalse;
             TICK tickStart = TickOSTimeCurrent();
             TICK tickEnd;
@@ -7126,6 +8198,8 @@ ERR LOG::ErrLGRIRedoInitializeMerge( PIB            *ppib,
                     break;
                 }
 
+                // Ok to sleep with latches held since we only have RIW latch and not Write latch at this point,
+                // and read-only transactions only need read latch
                 m_pinst->m_sigTrxOldestDuringRecovery.FWait( cmsecMaxReplayDelayDueToReadTrx );
 
                 tickEnd = TickOSTimeCurrent();
@@ -7179,6 +8253,9 @@ ERR LOG::ErrLGRIRedoInitializeMerge( PIB            *ppib,
             {
                 Assert( FAssertLGNeedRedo( *pcsrDest, dbtime, dbtimeDestBefore ) );
 
+                //  calculate cbPrefix for node
+                //  with respect to prefix on right page
+                //
                 const INT cbCommon = CbCommonKey( pfucb->kdfCurr.key, keyPrefix );
 
                 Assert( 0 == plineinfo->cbPrefix );
@@ -7199,6 +8276,8 @@ HandleError:
 }
 
 
+//  reconstructs merge structures and fucb
+//
 ERR LOG::ErrLGRIRedoMergeStructures( PIB        *ppib,
                                      DBTIME     dbtime,
                                      MERGEPATH  **ppmergePathLeaf,
@@ -7209,7 +8288,7 @@ ERR LOG::ErrLGRIRedoMergeStructures( PIB        *ppib,
     const LRMERGE_ * const plrmergeBase     = plrmerge;
     const DBID      dbid        = plrmerge->dbid;
     const PGNO      pgnoFDP     = plrmerge->le_pgnoFDP;
-    const OBJID     objidFDP    = plrmerge->le_objidFDP;
+    const OBJID     objidFDP    = plrmerge->le_objidFDP;    // Debug only info
     const BOOL      fUnique     = plrmerge->FUnique();
     const BOOL      fSpace      = plrmerge->FSpace();
 
@@ -7223,16 +8302,23 @@ ERR LOG::ErrLGRIRedoMergeStructures( PIB        *ppib,
         plrmerge = (LRMERGE_ *) ( (BYTE *) plrmergeBase + ibNextLR );
         Assert( lrtypMerge == plrmerge->lrtyp || lrtypMerge2 == plrmerge->lrtyp );
 
+        //  insert and initialize mergePath for this level
+        //
         err = ErrLGIRedoMergePath( ppib, plrmerge, ppmergePathLeaf );
 
+        // Skipping the whole Merge because of just a single Trimmed page is a bad idea.
         AssertSz( errSkipLogRedoOperation != err, "We should not get errSkipLogRedoOperation at this point." );
 
         Call( err );
     }
 
+    //  get fucb
+    //
     Assert( pfucbNil == *ppfucb );
     Call( ErrLGRIGetFucb( m_pctablehash, ppib, ifmp, pgnoFDP, objidFDP, fUnique, fSpace, ppfucb ) );
 
+    //  initialize rglineinfo for leaf level of merge
+    //
     Assert( NULL != *ppmergePathLeaf );
     Assert( NULL == (*ppmergePathLeaf)->pmergePathChild );
 
@@ -7243,6 +8329,8 @@ HandleError:
 }
 
 
+//  reconstructs split structures, FUCB, dirflag and kdf for split
+//
 ERR LOG::ErrLGIRedoSplitStructures(
     PIB             *ppib,
     DBTIME          dbtime,
@@ -7264,6 +8352,8 @@ ERR LOG::ErrLGIRedoSplitStructures(
 
     Assert( dbtime  == plrsplit->le_dbtime );
 
+    //  split with no oper will use the space fucb
+    //
     BOOL            fUnique         = plrsplit->FUnique();
     BOOL            fSpace          = fTrue;
 
@@ -7289,6 +8379,7 @@ ERR LOG::ErrLGIRedoSplitStructures(
                 Assert( pgnoFDP == plrsplitT->le_pgnoFDP );
                 err = ErrLGRIRedoSplitPath( ppib, plrsplitT, ppsplitPathLeaf );
 
+                // Skipping the whole Split because of just a single Trimmed page is a bad idea.
                 AssertSz( errSkipLogRedoOperation != err, "We should not get errSkipLogRedoOperation at this point." );
 
                 Call( err );
@@ -7350,6 +8441,8 @@ ERR LOG::ErrLGIRedoSplitStructures(
 
         if ( lrtypSplit != plr->lrtyp && lrtypSplit2 != plr->lrtyp )
         {
+            //  get fUnique and dirflag
+            //
             const LRNODE_   *plrnode    = (LRNODE_ *) plr;
 
             Assert( plrnode->le_pgnoFDP == pgnoFDP );
@@ -7366,9 +8459,13 @@ ERR LOG::ErrLGIRedoSplitStructures(
 
     ifmp = PinstFromPpib( ppib )->m_mpdbidifmp[ dbid ];
 
+    //  get fucb
+    //
     Assert( pfucbNil == *ppfucb );
     Call( ErrLGRIGetFucb( m_pctablehash, ppib, ifmp, pgnoFDP, objidFDP, fUnique, fSpace, ppfucb ) );
 
+    //  initialize rglineinfo for every level of split
+    //
     for ( psplitPath = *ppsplitPathLeaf;
           psplitPath != NULL;
           psplitPath = psplitPath->psplitPathParent )
@@ -7406,6 +8503,9 @@ ERR LOG::ErrLGIRedoSplitStructures(
             }
 #endif
 
+            //  if split page needs redo
+            //      allocate and set lineinfo for split page
+            //
             Call( ErrLGIRedoSplitLineinfo(
                         *ppfucb,
                         psplitPath,
@@ -7422,6 +8522,8 @@ HandleError:
 }
 
 
+//  updates dbtime to given value on all write-latched pages
+//
 LOCAL VOID LGIRedoMergeUpdateDbtime( MERGEPATH *pmergePathTip, DBTIME dbtime )
 {
     MERGEPATH   *pmergePath = pmergePathTip;
@@ -7443,6 +8545,8 @@ LOCAL VOID LGIRedoMergeUpdateDbtime( MERGEPATH *pmergePathTip, DBTIME dbtime )
 }
 
 
+//  updates dbtime to given value on all write-latched pages
+//
 LOCAL VOID LGIRedoSplitUpdateDbtime( SPLITPATH *psplitPathLeaf, DBTIME dbtime )
 {
     SPLITPATH   *psplitPath = psplitPathLeaf;
@@ -7463,6 +8567,9 @@ LOCAL VOID LGIRedoSplitUpdateDbtime( SPLITPATH *psplitPathLeaf, DBTIME dbtime )
 }
 
 
+//  creates version for operation performed atomically with split
+//      also links version into appropriate lists
+//
 ERR ErrLGIRedoSplitCreateVersion(
     SPLIT               *psplit,
     FUCB                *pfucb,
@@ -7500,6 +8607,8 @@ ERR ErrLGIRedoSplitCreateVersion(
 
     if ( splitoperReplace == psplit->splitoper )
     {
+        //  create version only if page with oper needs redo
+        //
         if ( !fNeedRedo )
         {
             Assert( pfucb->bmCurr.key.FNull() );
@@ -7520,10 +8629,14 @@ ERR ErrLGIRedoSplitCreateVersion(
         Assert( ( dirflag & fDIRInsert ) ||
                 ( dirflag & fDIRFlagInsertAndReplaceData ) );
 
+        //  create version for insert even if oper needs no redo
+        //
         BOOKMARK    bm;
         NDGetBookmarkFromKDF( pfucb, kdf, &bm );
         Call( PverFromPpib( pfucb->ppib )->ErrVERModify( pfucb, bm, operInsert, &prceOper1, &verproxy ) );
 
+        //  create version for replace if oper needs redo
+        //
         if ( splitoperFlagInsertAndReplaceData == psplit->splitoper
             && fNeedRedo )
         {
@@ -7534,6 +8647,8 @@ ERR ErrLGIRedoSplitCreateVersion(
         }
     }
 
+    //  link RCE(s) to lists
+    //
     Assert( prceNil != prceOper1 );
     Assert( splitoperFlagInsertAndReplaceData == psplit->splitoper &&
                 ( prceNil != prceOper2 || !fNeedRedo ) ||
@@ -7551,11 +8666,16 @@ HandleError:
 }
 
 
+//  upgrades latches on pages that need redo
+//
 LOCAL ERR ErrLGIRedoMergeUpgradeLatches( MERGEPATH *pmergePathLeaf, DBTIME dbtime )
 {
     ERR         err         = JET_errSuccess;
     MERGEPATH*  pmergePath;
 
+    //  go to root
+    //  since we need to latch top-down
+    //
     for ( pmergePath = pmergePathLeaf;
           pmergePath->pmergePathParent != NULL;
           pmergePath = pmergePath->pmergePathParent )
@@ -7582,6 +8702,7 @@ LOCAL ERR ErrLGIRedoMergeUpgradeLatches( MERGEPATH *pmergePathLeaf, DBTIME dbtim
                 }
             }
 
+            // New pages are only consumed during page moves, not merge operations.
             Assert( pmerge->pgnoNew == pgnoNull );
             Assert( !pmerge->csrNew.FLatched() );
             CallS( err );
@@ -7621,7 +8742,9 @@ HandleError:
     return err;
 }
 
+//  ================================================================
 ERR LOG::ErrLGRIRedoNewPage( const LRNEWPAGE * const plrnewpage )
+//  ================================================================
 {
     ERR err = JET_errSuccess;
     PIB *ppib = ppibNil;
@@ -7648,6 +8771,7 @@ ERR LOG::ErrLGRIRedoNewPage( const LRNEWPAGE * const plrnewpage )
     BOOL fRedoNewPage = fFalse;
     CSR csr;
 
+    // Get/latch new page.
     Call( ErrLGRIAccessNewPage(
             ppib,
             &csr,
@@ -7676,7 +8800,9 @@ HandleError:
     return err;
 }
 
+//  ================================================================
 ERR LOG::ErrLGRIIRedoPageMove( __in PIB * const ppib, const LRPAGEMOVE * const plrpagemove )
+//  ================================================================
 {
     Assert( ppib );
     Assert( plrpagemove );
@@ -7685,6 +8811,7 @@ ERR LOG::ErrLGRIIRedoPageMove( __in PIB * const ppib, const LRPAGEMOVE * const p
     
     ERR err;
 
+    // recreate the merge structure
     
     MERGEPATH * pmergePath = NULL;
     
@@ -7769,6 +8896,7 @@ ERR LOG::ErrLGRIIRedoPageMove( __in PIB * const ppib, const LRPAGEMOVE * const p
         }
     }
 
+    // the destination page might not exist (it could be past the end of the DB)
     BOOL fRedoDest = fTrue;
     Call( ErrLGRIAccessNewPage(
             ppib,
@@ -7783,6 +8911,7 @@ ERR LOG::ErrLGRIIRedoPageMove( __in PIB * const ppib, const LRPAGEMOVE * const p
     {
         Assert( !pmergePath->pmerge->csrNew.FLatched() );
 
+        // write-latch the page
         Call( pmergePath->pmerge->csrNew.ErrGetNewPreInitPageForRedo(
                 ppib,
                 ifmp,
@@ -7791,6 +8920,9 @@ ERR LOG::ErrLGRIIRedoPageMove( __in PIB * const ppib, const LRPAGEMOVE * const p
                 plrpagemove->DbtimeAfter() ) );
     }
 
+    // if the destination page requires redo, but the source doesn't copy the
+    // saved before-image into the source page. this reverts the source page
+    // so it needs to be redone as well
     if ( fRedoDest && !fRedoSource )
     {
         Call( ErrReplacePageImageHeaderTrailer(
@@ -7814,6 +8946,7 @@ ERR LOG::ErrLGRIIRedoPageMove( __in PIB * const ppib, const LRPAGEMOVE * const p
     }
     else
     {
+        // The Latch state is only valid for pagetrimNormal pages.
         Assert( latchRIW == pmergePath->csr.Latch() || pagetrimNormal != pmergePath->csr.PagetrimState() );
     }
 
@@ -7824,6 +8957,7 @@ ERR LOG::ErrLGRIIRedoPageMove( __in PIB * const ppib, const LRPAGEMOVE * const p
     }
     else
     {
+        // The Latch state is only valid for pagetrimNormal pages.
         Assert( latchRIW == pmergePath->pmerge->csrNew.Latch() || pagetrimNormal != pmergePath->pmerge->csrNew.PagetrimState() );
     }
     
@@ -7836,7 +8970,9 @@ HandleError:
     return err;
 }
 
+//  ================================================================
 ERR LOG::ErrLGRIRedoPageMove( const LRPAGEMOVE * const plrpagemove )
+//  ================================================================
 {
     Assert( plrpagemove );
     ASSERT_VALID( plrpagemove );
@@ -7862,7 +8998,9 @@ HandleError:
     return err;
 }
 
+//  ================================================================
 ERR LOG::ErrLGRIRedoPagePatch( const LRPAGEPATCHREQUEST * const plrpagepatchrequest )
+//  ================================================================
 {
     Assert( plrpagepatchrequest );
 
@@ -7884,6 +9022,8 @@ ERR LOG::ErrLGRIRedoPagePatch( const LRPAGEPATCHREQUEST * const plrpagepatchrequ
     const PGNO pgno     = plrpagepatchrequest->Pgno();
     const DBTIME dbtime = plrpagepatchrequest->Dbtime();
 
+    //  Keep track of largest dbtime so far, since the number could be
+    //  logged out of order, we need to check if dbtime > than dbtimeCurrent.
 
     Assert( m_fRecoveringMode == fRecoveringRedo );
     if ( dbtime > pfmp->DbtimeCurrentDuringRecovery() )
@@ -7893,11 +9033,14 @@ ERR LOG::ErrLGRIRedoPagePatch( const LRPAGEPATCHREQUEST * const plrpagepatchrequ
 
     BFLatch bfl;
     TraceContextScope tcScope( iortPagePatching );
+    // LOG doesn't know TCE during replay;  will pollute stats for activated passive's cache
     tcScope->nParentObjectClass = tceNone;
 
     err = ErrBFWriteLatchPage( &bfl, ifmp, pgno, bflfUninitPageOk, BfpriBFMake( PctFMPCachePriority( ifmp ), (BFTEMPOSFILEQOS)qosIODispatchImmediate ), *tcScope );
     if ( err == JET_errPageNotInitialized )
     {
+        // empty pages cannot be patched, just ignore - other than dbscan,
+        // active does not care about the patch anyway
         return JET_errSuccess;
     }
     CallR( err );
@@ -7907,6 +9050,7 @@ ERR LOG::ErrLGRIRedoPagePatch( const LRPAGEPATCHREQUEST * const plrpagepatchrequ
     BFAlloc( bfasTemporary, &pvData );
     memcpy( pvData, bfl.pv, g_cbPage );
 
+    // note since we release the write latch, the below callback MUST be synchronous
     BFWriteUnlatch( &bfl );
 
     CPAGE cpage;
@@ -7919,29 +9063,37 @@ ERR LOG::ErrLGRIRedoPagePatch( const LRPAGEPATCHREQUEST * const plrpagepatchrequ
     return JET_errSuccess;
 }
 
+//  ================================================================
 BOOL LOG::FLGRICheckRedoScanCheck( const LRSCANCHECK2 * const plrscancheck, BOOL fEvaluatePrereadLogic )
+//  ================================================================
 {
     Assert( plrscancheck );
 
     const DBID dbid = plrscancheck->Dbid();
 
+    // First, check if the LR is redoable for for the database at this point.
     if ( !FLGRICheckRedoConditionForDb( dbid, m_lgposRedo ) )
     {
         return fFalse;
     }
     else if ( plrscancheck->BSource() != scsDbScan )
     {
+        // Always redo it if we're not under DbScan.
         ExpectedSz( plrscancheck->BSource() == scsDbShrink, "ScanCheck not under Shrink. Please, handle." );
         Assert( plrscancheck->Pgno() != pgnoScanLastSentinel );
         return fTrue;
     }
 
+    // WARNING: from this point on, there are only DBScan-specific checks.
+    //
 
+    // if not running with external healing (a.k.a. page patching), skip it
     if ( !BoolParam( m_pinst, JET_paramEnableExternalAutoHealing ) )
     {
         return fFalse;
     }
 
+    // if running legacy mode, skip it
     if ( UlParam( m_pinst, JET_paramEnableDBScanInRecovery ) & bitDBScanInRecoveryPassiveScan )
     {
         return fFalse;
@@ -7949,6 +9101,8 @@ BOOL LOG::FLGRICheckRedoScanCheck( const LRSCANCHECK2 * const plrscancheck, BOOL
 
     const PGNO pgno = plrscancheck->Pgno();
 
+    // just the DBM-done marker, not a real page (a database this big would probably be an ESE bug).
+    // skip for preread, don't skip for actual processing as there is some logic that's invoked for it
     if ( fEvaluatePrereadLogic && pgno == pgnoScanLastSentinel )
     {
         return fFalse;
@@ -7957,15 +9111,22 @@ BOOL LOG::FLGRICheckRedoScanCheck( const LRSCANCHECK2 * const plrscancheck, BOOL
     const IFMP ifmp = m_pinst->m_mpdbidifmp[ dbid ];
     FMP* const pfmp = &( g_rgfmp[ifmp] );
 
+    // if scanning is turned off or we've already scanned this page, skip it but signal the follower 
+    // code that we are skipping it in case we need to do any special processing (e.g. for start of new pass)
     
     bool fDBMFollowerModeSet = ( UlParam( m_pinst, JET_paramEnableDBScanInRecovery ) & bitDBScanInRecoveryFollowActive );
     if ( !fDBMFollowerModeSet )
     {
+        // Follow-mode is not enabled at the moment, skip the page
         if ( fEvaluatePrereadLogic )
         {
+            // this will update the perf counter and will reset header state if necessary
+            // don't want to double call this, so only call it on the second check
             CDBMScanFollower::SkippedDBMScanCheckRecord( pfmp, pgno );
         }
 
+        //  DBMScan follow active during recovery is off, but we have a follower, which
+        //  means someone disabled the scan mid-way through ...
         if ( pfmp->PdbmFollower() )
         {
             pfmp->PdbmFollower()->DeRegisterFollower( pfmp, CDBMScanFollower::dbmdrrDisabledScan );
@@ -7976,23 +9137,35 @@ BOOL LOG::FLGRICheckRedoScanCheck( const LRSCANCHECK2 * const plrscancheck, BOOL
     }
     else if ( pfmp->Pdbfilehdr()->le_pgnoDbscanHighest >= pgno )
     {
+        // Follow-mode is enabled, but we've already seen this page, skip
+        // unless it's pgno=1
         if ( fEvaluatePrereadLogic )
         {
+            // this will update the perf counter and will reset header state if necessary
+            // don't want to double call this, so only call it on the second check
             CDBMScanFollower::SkippedDBMScanCheckRecord( pfmp, pgno );
         }
 
+        // Special-case pgno=1, it should fall through and return true
+        // because the header will get reset and it will be considered
+        // a page that needs scanning
         if ( pgno != 1 )
         {
             return fFalse;
         }
     }
 
+    // We've made it this far, which means scanning is on and we haven't seen this page before
+    // or it's pgno=1 and we just reset the stats. Either way, below should hold
+    //Assert( plrscancheck->Pgno() > pfmp->Pdbfilehdr()->le_pgnoDbscanHighest );
 
     return fTrue;
 }
 
 
+//  ================================================================
 ERR LOG::ErrLGRIRedoScanCheck( const LRSCANCHECK2 * const plrscancheck, BOOL* const pfBadPage )
+//  ================================================================
 {
     Assert( plrscancheck );
     Assert( pfBadPage );
@@ -8007,6 +9180,7 @@ ERR LOG::ErrLGRIRedoScanCheck( const LRSCANCHECK2 * const plrscancheck, BOOL* co
 
     Assert( ( plrscancheck->Pgno() != pgnoScanLastSentinel ) || fDbScan );
 
+    //  if bad in _any_ way, checksum, dbtime mismatch, db divergence
     *pfBadPage = fFalse;
 
 
@@ -8022,6 +9196,8 @@ ERR LOG::ErrLGRIRedoScanCheck( const LRSCANCHECK2 * const plrscancheck, BOOL* co
     Assert( plrscancheck->DbtimePage() <= plrscancheck->DbtimeCurrent() );
     const DBTIME dbtimePageInLogRec = plrscancheck->DbtimePage();
 
+    //  as long as this is called before first latch attempt, we can tell a page that 
+    //  is newly cached by a preread.
 
     const BOOL fPreviouslyCached = FBFPreviouslyCached( ifmp, plrscancheck->Pgno() );
     const BOOL fInCache = FBFInCache( ifmp, plrscancheck->Pgno() );
@@ -8034,16 +9210,23 @@ ERR LOG::ErrLGRIRedoScanCheck( const LRSCANCHECK2 * const plrscancheck, BOOL* co
             (void)pfmp->PdbmFollower()->ErrDBMScanReadThroughCache( ifmp, plrscancheck->Pgno(), pvPages, 1 );
             OSMemoryPageFree( pvPages );
         }
+        //  Note: We aren't running full DB divergence checking off the disk image ... because
+        //  I believe we can't ... it could be behind the in-cache image which is what we have
+        //  to unfortunately check.  The above however will at least checksum and validate the
+        //  on disk image isn't corrupt from a -1018, -1021, etc perspective.
     }
 
     BFLatch bfl = { 0 };
-    BOOL fLockedNLoaded = fFalse;
-    Assert( fDbScan || fDbShrink );
+    BOOL fLockedNLoaded = fFalse;   // have latch, AND loaded page ...
+    Assert( fDbScan || fDbShrink ); // Handle client type to set trace context below.
     TraceContextScope tcScope( fDbScan ? iortDbScan : ( fDbShrink ? iortDbShrink : iortRecovery ) );
+    // LOG doesn't know TCE during replay;  will pollute stats for activated passive's cache
     tcScope->nParentObjectClass = tceNone;
 
     C_ASSERT( pgnoSysMax < pgnoScanLastSentinel );
 
+    // we should have skipped this in ErrLGRIRedoOperations() if this weren't true
+    //Assert( !fDbScan || ( plrscancheck->Pgno() > pfmp->Pdbfilehdr()->le_pgnoDbscanHighest ) );
 
     if ( plrscancheck->Pgno() < pgnoSysMax )
     {
@@ -8056,6 +9239,10 @@ ERR LOG::ErrLGRIRedoScanCheck( const LRSCANCHECK2 * const plrscancheck, BOOL* co
 
         if ( fDbScan )
         {
+            // Fake the update of PgnoScanMax and PgnoPreReadScanMax, as those as normally updated only during the separate-thread version of DBM.
+            // Since those are only used for optics and asserts, 100% correctness is not required, except for those numbers can't be too low, so
+            // update them even before regardless of latch success/completion as we don't know if the latch path made it to the point where
+            // PgnoLatchedScanMax gets updated.
             pfmp->UpdatePgnoPreReadScanMax( plrscancheck->Pgno() );
             pfmp->UpdatePgnoScanMax( plrscancheck->Pgno() );
         }
@@ -8074,14 +9261,15 @@ ERR LOG::ErrLGRIRedoScanCheck( const LRSCANCHECK2 * const plrscancheck, BOOL* co
 
         if ( err >= JET_errSuccess )
         {
+            //  load the DBTIME from the recovery database, and collect needed information
 
             CPAGE cpage;
             cpage.ReBufferPage( bfl, ifmp, plrscancheck->Pgno(), bfl.pv, (ULONG)UlParam( PinstFromIfmp( ifmp ), JET_paramDatabasePageSize ) );
-            fLockedNLoaded = fTrue;
+            fLockedNLoaded = fTrue; // now we're loaded
             Assert( cpage.CbPage() == UlParam( PinstFromIfmp( ifmp ), JET_paramDatabasePageSize ) );
             const DBTIME dbtimePage = cpage.Dbtime();
             const BOOL fInitDbtimePage = dbtimePage != 0 && dbtimePage != dbtimeShrunk;
-            Expected( fInitDbtimePage || ( dbtimePage == dbtimeShrunk ) );
+            Expected( fInitDbtimePage || ( dbtimePage == dbtimeShrunk ) ); // dbtime 0 only usually comes from a completely uninit page (-1019).
 
             const DBTIME dbtimeCurrentInLogRec = plrscancheck->DbtimeCurrent();
             const DBTIME dbtimeSeed = plrscancheck->DbtimeCurrent();
@@ -8091,25 +9279,31 @@ ERR LOG::ErrLGRIRedoScanCheck( const LRSCANCHECK2 * const plrscancheck, BOOL* co
                 UlDBMGetCompressedLoggedChecksum( cpage, dbtimeSeed );
             const OBJID objidPage = cpage.ObjidFDP();
 
+            // If either the dbtime from local page or dbtime from log record is dbtimeRevert, we will skip checking the consistency of the page.
             const BOOL fDbtimeRevertedNewPage = 
                 ( CmpLgpos( g_rgfmp[ ifmp ].Pdbfilehdr()->le_lgposCommitBeforeRevert, m_lgposRedo ) > 0 &&
                     dbtimePage == dbtimeRevert ) || 
                 plrscancheck->DbtimePage() == dbtimeRevert;
 
+            // Matching uninitialized state is OK, proceed only if at least one of the dbtimes is initialized
+            // If this was a page which was reverted to a new page by RBS, we should ignore dbscan checks till the max log at the time of revert is replayed.
             const BOOL fMayCheckDbtimeConsistency = ( fInitDbtimePageInLogRec || fInitDbtimePage ) && !fDbtimeRevertedNewPage;
 
+            // Dbtime on the page is too advanced compared to the current running dbtime of the databases.
             const BOOL fDbtimePageTooAdvanced = fMayCheckDbtimeConsistency &&
                                                 fInitDbtimePage &&
                                                 ( dbtimePage > dbtimeCurrentInLogRec ) &&
                                                 !fRequiredRange &&
                                                 !fTrimmedDatabase;
 
+            // Mismatched initialized case.
             const BOOL fDbtimeInitMismatch = fMayCheckDbtimeConsistency &&
                                              !fDbtimePageTooAdvanced &&
                                              ( !fInitDbtimePageInLogRec != !fInitDbtimePage ) &&
                                              !fRequiredRange &&
                                              !fTrimmedDatabase;
 
+            // Typical divergence case: both dbtimes are initialized and they diverge.
             const BOOL fDivergentDbtimes = fMayCheckDbtimeConsistency &&
                                            !fDbtimeInitMismatch &&
                                            fInitDbtimePageInLogRec &&
@@ -8154,7 +9348,13 @@ ERR LOG::ErrLGRIRedoScanCheck( const LRSCANCHECK2 * const plrscancheck, BOOL* co
                     }
                     else
                     {
+                        // The common case of the passive being uninitialized (i.e., !fInitDbtimePage) is
+                        // handled further down below in this function, since the page latch attempt would have returned
+                        // JET_errPageNotInitialized. We can only get !fInitDbtimePage here if the page is
+                        // strangely "initialized" (i.e. with some data), but with a dbtime = 0 or dbtimeShrunk.
 
+                        // It is wrong to log it here because the code below logs it with the wrong number and order of
+                        // arguments
                         msgid = DB_DIVERGENCE_UNINIT_PAGE_PASSIVE_DB_ID;
 #ifdef USE_HAPUBLISH_API
                         haMsgid = HA_DB_DIVERGENCE_UNINIT_PAGE_PASSIVE_DB_ID;
@@ -8200,7 +9400,7 @@ ERR LOG::ErrLGRIRedoScanCheck( const LRSCANCHECK2 * const plrscancheck, BOOL* co
                     AssertSz( fFalse, "DbtimesConsistent" );
                 }
 
-                Assert( fLockedNLoaded );
+                Assert( fLockedNLoaded );       //  should be loaded ...
                 if ( fLockedNLoaded )
                 {
                     OSTraceSuspendGC();
@@ -8214,8 +9414,10 @@ ERR LOG::ErrLGRIRedoScanCheck( const LRSCANCHECK2 * const plrscancheck, BOOL* co
                                             dbtimeCurrentInLogRec,
                                             dbtimePage ),
                                         fFalse );
+                    //  (we couldn't do anything w/ the error ... and wouldn't want to stop the later event log)
                     OSTraceResumeGC();
 
+                    //  release the page
                     cpage.UnloadPage();
                     BFRDWUnlatch( &bfl );
                     fLockedNLoaded = fFalse;
@@ -8282,20 +9484,23 @@ ERR LOG::ErrLGRIRedoScanCheck( const LRSCANCHECK2 * const plrscancheck, BOOL* co
                 }
 
                 *pfBadPage = fTrue;
-            }
+            }   // end if DBTIMEs mismatched
 
+            //  Compare checksums only if both pages are initialized and dbtimes match.
             if ( fInitDbtimePageInLogRec && fInitDbtimePage && ( dbtimePageInLogRec == dbtimePage ) )
             {
+                //  DBTIMEs match, so the page contents should match also
                 if ( plrscancheck->UlChecksum() == ulCompressedScanChecksumPassiveDb )
                 {
                     if ( fDbScan )
                     {
+                        //  Everything matched, we've successfully compared two pages, tell perfmon ALL about it!
                         CDBMScanFollower::ProcessedDBMScanCheckRecord( pfmp );
                     }
                 }
                 else
                 {
-                    Assert( fLockedNLoaded );
+                    Assert( fLockedNLoaded );       //  should be loaded ...
                     if ( fLockedNLoaded )
                     {
                         OSTraceSuspendGC();
@@ -8307,11 +9512,14 @@ ERR LOG::ErrLGRIRedoScanCheck( const LRSCANCHECK2 * const plrscancheck, BOOL* co
                                                 ulCompressedScanChecksumPassiveDb,
                                                 plrscancheck->UlChecksum(),
                                                 dbtimeSeed,
+                                                // These last two are less needed here.
                                                 dbtimePageInLogRec,
                                                 dbtimeCurrentInLogRec ),
                                             fFalse );
+                        //  (we couldn't do anything w/ the error ... and wouldn't want to stop the later event log)
                         OSTraceResumeGC();
 
+                        //  release the page
                         cpage.UnloadPage();
                         BFRDWUnlatch( &bfl );
                         fLockedNLoaded = fFalse;
@@ -8364,24 +9572,33 @@ ERR LOG::ErrLGRIRedoScanCheck( const LRSCANCHECK2 * const plrscancheck, BOOL* co
             }
             else if ( !( *pfBadPage ) )
             {
+                //  The DBTIMEs didn't match and it wasn't a bad case / page (mostly likely we're replaying
+                //  records we already replayed due to stop and start / re-init of "replication"), so this means
+                //  we'll be skipping this DBScan record.
+                //  BUT we purposely do not call CDBMScanFollower::SkippedDBMScanCheckRecord( pfmp ), because this
+                //  isn't "a real skip", it doesn't necessarily imply we're missing these scans, we should've done
+                //  it on the previous recovery.
             }
 
             if ( fLockedNLoaded )
             {
+                //  release the page
                 
                 cpage.UnloadPage();
                 BFRDWUnlatch( &bfl );
                 fLockedNLoaded = fFalse;
             }
 
-        }
+        }   // end if got RDW latch
         else
         {
+            //  Handle errors ...
 
             BOOL fPageBeyondEof = fFalse;
             switch( err )
             {
                 case_AllDatabaseStorageCorruptionErrs:
+                    // We shouldn't need to log an event because the RDW latch should've taken care of that.
                     *pfBadPage = fTrue;
                     break;
                 case JET_errFileIOBeyondEOF:
@@ -8415,6 +9632,7 @@ ERR LOG::ErrLGRIRedoScanCheck( const LRSCANCHECK2 * const plrscancheck, BOOL* co
                         OSTraceResumeGC();
                         }
 
+                        // if this becomes a test problem, someone "sin" this out ... 
                         AssertSz( FNegTest( fCorruptingWithLostFlush ), "We hit a page uninitialized mismatch." );
                     }
                     else
@@ -8426,52 +9644,60 @@ ERR LOG::ErrLGRIRedoScanCheck( const LRSCANCHECK2 * const plrscancheck, BOOL* co
                 case JET_errOutOfBuffers:
                     if ( fDbScan )
                     {
-                        CDBMScanFollower::SkippedDBMScanCheckRecord( pfmp );
+                        CDBMScanFollower::SkippedDBMScanCheckRecord( pfmp );    // for now, note it in perfmon
                     }
                     break;
 
                 default:
                     AssertSz( fFalse, "Q: What else wicked this way comes?  A: %d", err );
                     break;
-            }
-        }
+            }   //  switch
+        }   //  else err on RDW latch
 
-        Enforce( !fLockedNLoaded );
+        Enforce( !fLockedNLoaded );     //  did we leak the lock?
         
         if ( fDbScan )
         {
+            //  Register/complete that we've seen this page.
             pfmp->PdbmFollower()->CompletePage( plrscancheck->Pgno(), *pfBadPage );
 
             if ( !fPreviouslyCached )
             {
+                //  since the page was not previously cached, we should super cold it
 
                 BFMarkAsSuperCold( ifmp, plrscancheck->Pgno(), bflfDBScan );
             }
 
+            //  Ideally, we should check for the error returned when latching the page to filter out cases where
+            //  the read operation itself failed, but the inaccuracy in the perf. counter would be minor, since
+            //  those cases should be rare.
             if ( !fInCache )
             {
                 pfmp->PdbmFollower()->UpdateIoTracking( ifmp, 1 );
             }
         }
-    }
+    }   //  end if pgno < pgnoScanLastSentinel
     else if ( plrscancheck->Pgno() == pgnoScanLastSentinel )
     {
         Assert( fDbScan );
 
+        //  No other values should be present if we're at pgnoScanLastSentinel ...
         Expected( plrscancheck->UlChecksum() == 0 && plrscancheck->DbtimePage() == 0 && plrscancheck->DbtimeCurrent() == 0 );
+        //  just in case someone decides to extend the LR later.
         if ( fDbScan && plrscancheck->UlChecksum() == 0 && plrscancheck->DbtimePage() == 0 && plrscancheck->DbtimeCurrent() == 0 )
         {
             pfmp->PdbmFollower()->DeRegisterFollower( pfmp, CDBMScanFollower::dbmdrrFinishedScan );
             pfmp->DestroyDBMScanFollower();
         }
-    }
+    }   //  end if pgno == pgnoScanLastSentinel
     else
     {
         AssertSz( fFalse, "Huh, we got a pgno larger than pgnoSysMax (and that wasn't pgnoScanLastSentinel)??  pgno = %d", plrscancheck->Pgno() );
     }
 
-    Enforce( !fLockedNLoaded );
+    Enforce( !fLockedNLoaded );     //  did we leak the lock?
 
+    // Just in case.
     if ( ( errCorruption < JET_errSuccess ) && ( err >= JET_errSuccess ) )
     {
         Expected( fFalse );
@@ -8484,6 +9710,9 @@ ERR LOG::ErrLGRIRedoScanCheck( const LRSCANCHECK2 * const plrscancheck, BOOL* co
 }
 
 
+//  recovers a merge or an empty page operation
+//      with accompanying node delete operations
+//
 ERR LOG::ErrLGRIRedoMerge( PIB *ppib, DBTIME dbtime )
 {
     ERR             err;
@@ -8510,6 +9739,8 @@ ERR LOG::ErrLGRIRedoMerge( PIB *ppib, DBTIME dbtime )
         return JET_errSuccess;
     }
 
+    //  reconstructs merge structures RIW-latching pages that need redo
+    //
     FUCB            *pfucb = pfucbNil;
 
     Call( ErrLGRIRedoMergeStructures( ppib,
@@ -8522,16 +9753,24 @@ ERR LOG::ErrLGRIRedoMerge( PIB *ppib, DBTIME dbtime )
     Assert( pfucb->bmCurr.key.FNull() );
     Assert( pfucb->bmCurr.data.FNull() );
 
+    //  write latch pages that need redo
+    //
     Call( ErrLGIRedoMergeUpgradeLatches( pmergePathLeaf, dbtime ) );
 
+    //  sets dirty and dbtime on all updated pages
+    //
     LGIRedoMergeUpdateDbtime( pmergePathLeaf, dbtime );
 
+    //  calls BTIPerformMerge
+    //
     BTIPerformMerge( pfucb, pmergePathLeaf );
 
 HandleError:
     AssertSz( errSkipLogRedoOperation != err, "%s() got errSkipLogRedoOperation from ErrLGRICheckRedoCondition(dbtime=%d=%#x).\n",
               __FUNCTION__, dbtime, dbtime );
 
+    //  release latches
+    //
     if ( pmergePathLeaf != NULL )
     {
         BTIReleaseMergePaths( pmergePathLeaf );
@@ -8540,11 +9779,16 @@ HandleError:
     return err;
 }
 
+//  upgrades latches on pages that need redo
+//
 LOCAL ERR ErrLGIRedoSplitUpgradeLatches( SPLITPATH *psplitPathLeaf, DBTIME dbtime )
 {
     ERR         err         = JET_errSuccess;
     SPLITPATH*  psplitPath;
 
+    //  go to root
+    //  since we need to latch top-down
+    //
     for ( psplitPath = psplitPathLeaf;
           psplitPath->psplitPathParent != NULL;
           psplitPath = psplitPath->psplitPathParent )
@@ -8566,6 +9810,8 @@ LOCAL ERR ErrLGIRedoSplitUpgradeLatches( SPLITPATH *psplitPathLeaf, DBTIME dbtim
         SPLIT   *psplit = psplitPath->psplit;
         if ( psplit != NULL )
         {
+            //  new page should already be write-latched if redo is needed
+            //
 #ifdef DEBUG
             if ( FLGNeedRedoPage( psplit->csrNew, dbtime ) )
             {
@@ -8599,6 +9845,12 @@ HandleError:
 }
 
 
+//  recovers split operation
+//      reconstructs split structures write-latching pages that need redo
+//      creates version for operation
+//      calls BTIPerformSplit
+//      sets dbtime on all updated pages
+//
 ERR LOG::ErrLGRIRedoSplit( PIB *ppib, DBTIME dbtime )
 {
     ERR             err;
@@ -8611,6 +9863,9 @@ ERR LOG::ErrLGRIRedoSplit( PIB *ppib, DBTIME dbtime )
 
     const LEVEL     level       = plrsplit->level;
 
+    //  if operation was performed by concurrent CreateIndex, the
+    //  updater could be at a higher trx level than when the
+    //  indexer logged the operation
     Assert( level == ppib->Level()
             || ( level < ppib->Level() && plrsplit->FConcCI() ) );
 
@@ -8630,6 +9885,8 @@ ERR LOG::ErrLGRIRedoSplit( PIB *ppib, DBTIME dbtime )
         return JET_errSuccess;
     }
 
+    //  reconstructs split structures write-latching pages that need redo
+    //
     FUCB            *pfucb              = pfucbNil;
     KEYDATAFLAGS    kdf;
     DIRFLAG         dirflag             = fDIRNull;
@@ -8654,11 +9911,13 @@ ERR LOG::ErrLGRIRedoSplit( PIB *ppib, DBTIME dbtime )
     Assert( pfucb->bmCurr.key.FNull() );
     Assert( pfucb->bmCurr.data.FNull() );
 
+    //  upgrade latches on pages that need redo
+    //
     Call( ErrLGIRedoSplitUpgradeLatches( psplitPathLeaf, dbtime ) );
 
     psplit = psplitPathLeaf->psplit;
 
-    Assert( !fOperNeedsRedo );
+    Assert( !fOperNeedsRedo );      //  initial value
     if ( splitoperNone != psplit->splitoper )
     {
         if ( psplit->ilineOper < psplit->ilineSplit )
@@ -8674,6 +9933,8 @@ ERR LOG::ErrLGRIRedoSplit( PIB *ppib, DBTIME dbtime )
     if ( splitoperReplace == psplitPathLeaf->psplit->splitoper
         && fOperNeedsRedo )
     {
+        //  copy bookmark to FUCB
+        //
         BTISplitGetReplacedNode( pfucb, psplitPathLeaf->psplit );
 
         Assert( FFUCBUnique( pfucb ) );
@@ -8688,6 +9949,8 @@ ERR LOG::ErrLGRIRedoSplit( PIB *ppib, DBTIME dbtime )
         NDGetBookmarkFromKDF( pfucb, kdf, &pfucb->bmCurr );
     }
 
+    //  creates version for operation
+    //
     fVersion = !( dirflag & fDIRNoVersion ) &&
                !g_rgfmp[ pfucb->ifmp ].FVersioningOff() &&
                splitoperNone != psplitPathLeaf->psplit->splitoper;
@@ -8705,11 +9968,17 @@ ERR LOG::ErrLGRIRedoSplit( PIB *ppib, DBTIME dbtime )
                                             level ) );
     }
 
+    //  sets dirty and dbtime on all updated pages
+    //
     LGIRedoSplitUpdateDbtime( psplitPathLeaf, dbtime );
 
+    //  calls BTIPerformSplit
+    //
     BTIPerformSplit( pfucb, psplitPathLeaf, &kdf, dirflag );
 
 HandleError:
+    //  release latches
+    //
     if ( psplitPathLeaf != NULL )
     {
         BTIReleaseSplitPaths( PinstFromPpib( ppib ), psplitPathLeaf );
@@ -8734,6 +10003,7 @@ ERR LOG::ErrLGIRedoRootMoveStructures( PIB* const ppib, const DBTIME dbtime, ROO
     Assert( dbtime != dbtimeNil );
     Assert( prm->dbtimeAfter == dbtimeInvalid );
 
+    // Process LRs in the macro.
     for ( UINT ibNextLR = 0;
           ibNextLR < ppib->CbSizeLogrec( dbtime );
           ibNextLR += CbLGSizeOfRec( plr ) )
@@ -8741,6 +10011,7 @@ ERR LOG::ErrLGIRedoRootMoveStructures( PIB* const ppib, const DBTIME dbtime, ROO
         plr = (LR*)( (BYTE*)ppib->PvLogrec( dbtime ) + ibNextLR );
         switch( plr->lrtyp )
         {
+            // We expect one of these LRs, and the first of the macro.
             case lrtypRootPageMove:
             {
                 const LRROOTPAGEMOVE* const plrrpm = (LRROOTPAGEMOVE*)plr;
@@ -8755,6 +10026,7 @@ ERR LOG::ErrLGIRedoRootMoveStructures( PIB* const ppib, const DBTIME dbtime, ROO
             }
             break;
 
+            // We expect three of these LRs (root, OE, AE), right after LRROOTPAGEMOVE.
             case lrtypPageMove:
             {
                 const LRPAGEMOVE* const plrpm = (LRPAGEMOVE*)plr;
@@ -8808,6 +10080,7 @@ ERR LOG::ErrLGIRedoRootMoveStructures( PIB* const ppib, const DBTIME dbtime, ROO
                 *ppgnoNew = plrpm->PgnoDest();
                 *pdbtimeBefore = plrpm->DbtimeSourceBefore();
 
+                // Latch source page.
                 if ( ( err = ErrLGIAccessPage( ppib, pcsr, ifmp, *ppgno, plrpm->ObjidFDP(), fFalse ) ) == errSkipLogRedoOperation )
                 {
                     Assert( !pcsr->FLatched() );
@@ -8819,6 +10092,7 @@ ERR LOG::ErrLGIRedoRootMoveStructures( PIB* const ppib, const DBTIME dbtime, ROO
                     Assert( pcsr->Latch() == latchRIW );
                 }
 
+                // Get/latch new page.
                 BOOL fRedoNewPage = fFalse;
                 Call( ErrLGRIAccessNewPage(
                         ppib,
@@ -8838,6 +10112,7 @@ ERR LOG::ErrLGIRedoRootMoveStructures( PIB* const ppib, const DBTIME dbtime, ROO
                                         prm->objid,
                                         dbtime ) );
 
+                    // Get source page image.
                     VOID* pv = NULL;
                     BFAlloc( bfasTemporary, &pv, g_cbPage );
                     pdataBefore->SetPv( pv );
@@ -8857,6 +10132,7 @@ ERR LOG::ErrLGIRedoRootMoveStructures( PIB* const ppib, const DBTIME dbtime, ROO
             }
             break;
 
+            // We expect N of these LRs, one for each "child" object (secondary index, LV).
             case lrtypSetExternalHeader:
             {
                 const LRSETEXTERNALHEADER* const plrseh = (LRSETEXTERNALHEADER*)plr;
@@ -8866,6 +10142,7 @@ ERR LOG::ErrLGIRedoRootMoveStructures( PIB* const ppib, const DBTIME dbtime, ROO
                 Assert( prm->dbtimeAfter == dbtime );
                 Assert( plrseh->le_pgno == plrseh->le_pgnoFDP );
 
+                // Allocate and set up child root move object.
                 ROOTMOVECHILD* const prmc = new ROOTMOVECHILD;
                 Alloc( prmc );
                 prm->AddRootMoveChild( prmc );
@@ -8874,6 +10151,7 @@ ERR LOG::ErrLGIRedoRootMoveStructures( PIB* const ppib, const DBTIME dbtime, ROO
                 prmc->pgnoChildFDP = plrseh->le_pgno;
                 prmc->objidChild = plrseh->le_objidFDP;
 
+                // Latch page.
                 if ( ( err = ErrLGIAccessPage( ppib, &prmc->csrChildFDP, ifmp, prmc->pgnoChildFDP, plrseh->le_objidFDP, fFalse ) ) == errSkipLogRedoOperation )
                 {
                     Assert( !prmc->csrChildFDP.FLatched() );
@@ -8884,6 +10162,7 @@ ERR LOG::ErrLGIRedoRootMoveStructures( PIB* const ppib, const DBTIME dbtime, ROO
                     Call( err );
                     Assert( prmc->csrChildFDP.Latch() == latchRIW );
 
+                    // Copy new data.
                     const USHORT cbData = plrseh->CbData();
                     Assert( cbData == sizeof( prmc->sphNew ) );
                     Assert( cbData == prmc->dataSphNew.Cb() );
@@ -8892,6 +10171,8 @@ ERR LOG::ErrLGIRedoRootMoveStructures( PIB* const ppib, const DBTIME dbtime, ROO
             }
             break;
 
+            // We expect either one or two of these LRs, depending on catalog layout and wether or not
+            // the primary index is user-defined or automatic (auto-inc).
             case lrtypReplace:
             {
                 const LRREPLACE* const plrr = (LRREPLACE*)plr;
@@ -8911,6 +10192,7 @@ ERR LOG::ErrLGIRedoRootMoveStructures( PIB* const ppib, const DBTIME dbtime, ROO
                 INT* piline = NULL;
                 BOOL fCatClustIdx = fFalse;
 
+                // Select whether this is the primary object or an index.
                 if ( prm->ilineCatObj[iCat] == -1 )
                 {
                     Assert( prm->ilineCatClustIdx[iCat] == -1 );
@@ -8940,6 +10222,7 @@ ERR LOG::ErrLGIRedoRootMoveStructures( PIB* const ppib, const DBTIME dbtime, ROO
                 *pdbtimeBefore = plrr->le_dbtimeBefore;
                 *piline = plrr->ILine();
 
+                // Latch page.
                 if ( !fCatClustIdx || ( *ppgno != prm->pgnoCatObj[iCat] ) )
                 {
                     if ( ( err = ErrLGIAccessPage( ppib, pcsr, ifmp, *ppgno, objid, fFalse ) ) == errSkipLogRedoOperation )
@@ -8954,6 +10237,7 @@ ERR LOG::ErrLGIRedoRootMoveStructures( PIB* const ppib, const DBTIME dbtime, ROO
                     }
                 }
 
+                // Copy new data if we need to redo.
                 if ( ( ( !fCatClustIdx && pcsr->FLatched() ) ||
                      ( ( fCatClustIdx &&
                        ( ( ( *ppgno != prm->pgnoCatObj[iCat] ) && pcsr->FLatched() ) ||
@@ -8985,6 +10269,7 @@ ERR LOG::ErrLGIRedoRootMoveUpgradeLatches( ROOTMOVE* const prm )
     ERR err = JET_errSuccess;
     const DBTIME dbtimeAfter = prm->dbtimeAfter;
 
+    // Root.
     if ( FLGNeedRedoCheckDbtimeBefore( prm->csrFDP, dbtimeAfter, prm->dbtimeBeforeFDP, &err ) )
     {
         Call ( err );
@@ -8992,6 +10277,7 @@ ERR LOG::ErrLGIRedoRootMoveUpgradeLatches( ROOTMOVE* const prm )
     }
     CallS( err );
 
+    // OE.
     if ( FLGNeedRedoCheckDbtimeBefore( prm->csrOE, dbtimeAfter, prm->dbtimeBeforeOE, &err ) )
     {
         Call ( err );
@@ -8999,6 +10285,7 @@ ERR LOG::ErrLGIRedoRootMoveUpgradeLatches( ROOTMOVE* const prm )
     }
     CallS( err );
 
+    // AE.
     if ( FLGNeedRedoCheckDbtimeBefore( prm->csrAE, dbtimeAfter, prm->dbtimeBeforeAE, &err ) )
     {
         Call ( err );
@@ -9006,6 +10293,7 @@ ERR LOG::ErrLGIRedoRootMoveUpgradeLatches( ROOTMOVE* const prm )
     }
     CallS( err );
 
+    // New pages are supposed to be already write-latched if needed.
     if ( FLGNeedRedoPage( prm->csrNewFDP, dbtimeAfter ) )
     {
         Assert( latchWrite == prm->csrNewFDP.Latch() );
@@ -9042,6 +10330,7 @@ ERR LOG::ErrLGIRedoRootMoveUpgradeLatches( ROOTMOVE* const prm )
         prm->dataBeforeAE.Nullify();
     }
 
+    // Change children objects to point to new root.
     for ( ROOTMOVECHILD* prmc = prm->prootMoveChildren;
             prmc != NULL;
             prmc = prmc->prootMoveChildNext )
@@ -9054,6 +10343,7 @@ ERR LOG::ErrLGIRedoRootMoveUpgradeLatches( ROOTMOVE* const prm )
         CallS( err );
     }
 
+    // Change catalog pages to point to new root.
     for ( int iCat = 0; iCat < 2; iCat++ )
     {
         if ( FLGNeedRedoCheckDbtimeBefore( prm->csrCatObj[iCat], dbtimeAfter, prm->dbtimeBeforeCatObj[iCat], &err ) )
@@ -9100,43 +10390,51 @@ VOID LOG::LGIRedoRootMoveUpdateDbtime( ROOTMOVE* const prm )
 {
     const DBTIME dbtimeAfter = prm->dbtimeAfter;
 
+    // Root.
     if ( FBTIUpdatablePage( prm->csrFDP ) )
     {
         prm->csrFDP.Dirty();
         prm->csrFDP.SetDbtime( dbtimeAfter );
     }
 
+    // OE.
     if ( FBTIUpdatablePage( prm->csrOE ) )
     {
         prm->csrOE.Dirty();
         prm->csrOE.SetDbtime( dbtimeAfter );
     }
 
+    // AE.
     if ( FBTIUpdatablePage( prm->csrAE ) )
     {
         prm->csrAE.Dirty();
         prm->csrAE.SetDbtime( dbtimeAfter );
     }
 
+    // New root.
     if ( FBTIUpdatablePage( prm->csrNewFDP ) )
     {
         Assert( prm->csrNewFDP.FDirty() );
         prm->csrNewFDP.SetDbtime( dbtimeAfter );
     }
 
+    // New OE.
     if ( FBTIUpdatablePage( prm->csrNewOE ) )
     {
         Assert( prm->csrNewOE.FDirty() );
         prm->csrNewOE.SetDbtime( dbtimeAfter );
     }
 
+    // New AE.
     if ( FBTIUpdatablePage( prm->csrNewAE ) )
     {
         Assert( prm->csrNewAE.FDirty() );
         prm->csrNewAE.SetDbtime( dbtimeAfter );
     }
 
+    // IMPORTANT: new pages are updated separately upon page initialization in SHKPerformRootMove().
 
+    // Change children objects to point to new root.
     for ( ROOTMOVECHILD* prmc = prm->prootMoveChildren;
             prmc != NULL;
             prmc = prmc->prootMoveChildNext )
@@ -9148,6 +10446,7 @@ VOID LOG::LGIRedoRootMoveUpdateDbtime( ROOTMOVE* const prm )
         }
     }
 
+    // Change catalog pages to point to new root.
     for ( int iCat = 0; iCat < 2; iCat++ )
     {
         if ( FBTIUpdatablePage( prm->csrCatObj[iCat] ) )
@@ -9167,6 +10466,11 @@ VOID LOG::LGIRedoRootMoveUpdateDbtime( ROOTMOVE* const prm )
 }
 
 
+//  recovers root page move operation
+//      reconstructs root page move structures write-latching pages that need to be redone
+//      performs the necessary changes (SHKPerformRootMove)
+//      sets dbtime on all updated pages
+//
 ERR LOG::ErrLGRIRedoRootPageMove( PIB* const ppib, const DBTIME dbtime )
 {
     ERR err = JET_errSuccess;
@@ -9195,27 +10499,37 @@ ERR LOG::ErrLGRIRedoRootPageMove( PIB* const ppib, const DBTIME dbtime )
     const IFMP ifmp = m_pinst->m_mpdbidifmp[ dbid ];
     FMP* const pfmp = &g_rgfmp[ ifmp ];
 
+    // Fire DetachDB callback.
+    // Read-from-passive clients might be reading from pages/trees we are about to affect with
+    // this root move, so signal a detach callback. Once the overall shrink operation is completed,
+    // we log lrtypSignalAttachDb so that they can re-attach the database.
     Call( ErrLGDbDetachingCallback( m_pinst, pfmp ) );
 
+    // Rebuild structures to perform the move.
     Call( ErrLGIRedoRootMoveStructures( ppib, dbtime, &rm ) );
     Assert( dbtime == rm.dbtimeAfter );
 
+    // Upgrade latches of pages that need to be redone.
     Call( ErrLGIRedoRootMoveUpgradeLatches( &rm ) );
 
+    // Make sure all pages are dirty and have the final dbtime.
     LGIRedoRootMoveUpdateDbtime( &rm );
-    OnDebug( rm.AssertValid( fTrue , fTrue  ) );
+    OnDebug( rm.AssertValid( fTrue /* fBeforeMove */, fTrue /* fRedo */ ) );
 
+    // Purge all FCBs/FUCBs related to this object and the catalogs.
     Call( ErrLGRIPurgeFcbs( ifmp, rm.pgnoFDP, fFDPTypeUnknown, m_pctablehash ) );
     Call( ErrLGRIPurgeFcbs( ifmp, pgnoFDPMSO, fFDPTypeTable, m_pctablehash ) );
     Call( ErrLGRIPurgeFcbs( ifmp, pgnoFDPMSOShadow, fFDPTypeTable, m_pctablehash ) );
 
+    // Perform the actual operation.
     SHKPerformRootMove(
         &rm,
         ppib,
         ifmp,
-        fTrue );
-    OnDebug( rm.AssertValid( fFalse , fTrue  ) );
+        fTrue );    // fRecoveryRedo
+    OnDebug( rm.AssertValid( fFalse /* fBeforeMove */, fTrue /* fRedo */ ) );
 
+    // We must not have reloaded these.
     BOOL fUnused = fFalse;
     Assert( FCB::PfcbFCBGet( ifmp, rm.pgnoFDP, &fUnused ) == pfcbNil );
     Assert( FCB::PfcbFCBGet( ifmp, pgnoFDPMSO, &fUnused ) == pfcbNil );
@@ -9227,6 +10541,9 @@ HandleError:
 }
 
 
+//  redoes macro operation
+//      [either a split or a merge]
+//
 ERR LOG::ErrLGRIRedoMacroOperation( PIB *ppib, DBTIME dbtime )
 {
     ERR     err;
@@ -9259,6 +10576,9 @@ ERR LOG::ErrLGRIRedoMacroOperation( PIB *ppib, DBTIME dbtime )
             break;
     }
 
+    //  when all done with the macro, we'll consider all skipped
+    //  redo operations as success. We registered all the pages
+    //  affected in the redo log map and we can keep recovering.
     if ( errSkipLogRedoOperation == err )
     {
         err = JET_errSuccess;
@@ -9280,6 +10600,7 @@ ERR LOG::ErrLGRIRedoExtendDB( const LREXTENDDB * const plrdbextension )
 
     const IFMP ifmp     = m_pinst->m_mpdbidifmp[ dbid ];
 
+    // if there is no attachment for this database, skip it
     if ( g_ifmpMax == ifmp )
     {
         return JET_errSuccess;
@@ -9288,6 +10609,7 @@ ERR LOG::ErrLGRIRedoExtendDB( const LREXTENDDB * const plrdbextension )
     FMP::AssertVALIDIFMP( ifmp );
     FMP * const pfmp = &g_rgfmp[ ifmp ];
 
+    // deferred and skipped attach databases can be ignored
     if ( pfmp->FSkippedAttach() || pfmp->FDeferredAttach() )
     {
         return JET_errSuccess;
@@ -9310,6 +10632,11 @@ ERR LOG::ErrLGRIRedoExtendDB( const LREXTENDDB * const plrdbextension )
     Assert( !fLgposLastResizeSet || CmpLgpos( pdbfilehdr->le_lgposLastResize, pdbfilehdr->le_lgposAttach ) >= 0 );
     }
 
+    //  Note that we are going to redo the resizing even if the lgposLastResize matches the current value stamped
+    //  in the header (i.e., icmpLgposLastVsCurrent == 0). That is required for correctness of restoring a backup
+    //  that may have been initiated after the physical resizing of the file and the stamping of lgposLastResize to
+    //  the header, but before the logical file size is updated post-OE operation. In that case, not replaying a
+    //  matching lgposLastResize would leave the file with the smaller (logical) size captured by backup-start.
     if ( fMaySkipOlderResize &&
          fLgposLastResizeSet &&
          ( icmpLgposLastVsCurrent > 0 ) )
@@ -9319,8 +10646,11 @@ ERR LOG::ErrLGRIRedoExtendDB( const LREXTENDDB * const plrdbextension )
         return JET_errSuccess;
     }
 
-    CallR( ErrIOResizeUpdateDbHdrCount( ifmp, fTrue  ) );
+    //  this might double-count DB extensions, but the exact count is not really
+    //  important, as this is used for debugging purposes only.
+    CallR( ErrIOResizeUpdateDbHdrCount( ifmp, fTrue /* fExtend */ ) );
 
+    //  resize the database file
     TraceContextScope tcScope( iorpLogRecRedo );
     CallR( ErrIONewSize( ifmp, *tcScope, pgnoLast, 0, JET_bitResizeDatabaseOnlyGrow ) );
     pfmp->SetOwnedFileSize( CbFileSizeOfPgnoLast( pgnoLast ) );
@@ -9330,6 +10660,9 @@ ERR LOG::ErrLGRIRedoExtendDB( const LREXTENDDB * const plrdbextension )
         CallR( ErrIOResizeUpdateDbHdrLgposLast( ifmp, m_lgposRedo ) );
     }
 
+    //  You might think we could use when we started logging lrtypExtendDB, but unfortunately at that time we
+    //  didn't have the extend DB that fixes up the initial DB size after create.  So we must depend upon using
+    //  logs of that revision or later to know we're all fixed up.
 
     if( CmpLogFormatVersion( FmtlgverLGCurrent( this ), fmtlgverInitialDbSizeLoggedMain ) < 0 )
     {
@@ -9344,7 +10677,7 @@ ERR LOG::ErrLGRIRedoShrinkDB( const LRSHRINKDB3 * const plrdbshrink )
     ERR err = JET_errSuccess;
     const DBID dbid = plrdbshrink->Dbid();
     const PGNO pgnoDbLastNew = plrdbshrink->PgnoLast();
-    BOOL fTurnDbmScanBackOn = fFalse;
+    BOOL fTurnDbmScanBackOn = fFalse; // scanning-thread mode.
 
     Assert( pgnoDbLastNew != pgnoNull );
     AssertPREFIX( dbid > dbidTemp );
@@ -9359,11 +10692,18 @@ ERR LOG::ErrLGRIRedoShrinkDB( const LRSHRINKDB3 * const plrdbshrink )
     FMP::AssertVALIDIFMP( ifmp );
     FMP* const pfmp = &g_rgfmp[ ifmp ];
 
+    // Delete any previously saved shrink archive files.
     if ( !BoolParam( m_pinst, JET_paramFlight_EnableShrinkArchiving ) )
     {
         (void)ErrIODeleteShrinkArchiveFiles( ifmp );
     }
 
+    // We don't need to depend on plrdbshrink->CpgShrunk() for algorithmic correctness because
+    // we can always use the actual file size to remove pages from the redo maps. In the past,
+    // for example, there was a bug in the do-time shrink code that would produce too low a cgpShrunk
+    // if we crashed after removing the space from OE/AE, but before logging lrtypShinkDB. In
+    // that scenario, the next time we shrank, cpgShrunk would not account for the previous pages
+    // which got shrunk.
     const CPG cpgShrunkLR = plrdbshrink->CpgShrunk();
 
     PGNO pgnoLastFileSystem = pgnoNull;
@@ -9373,6 +10713,8 @@ ERR LOG::ErrLGRIRedoShrinkDB( const LRSHRINKDB3 * const plrdbshrink )
     const PGNO pgnoShrinkLast = pgnoShrinkFirst + cpgShrunkLR - 1;
     const PGNO pgnoShrinkLastOrEof = UlFunctionalMax( pgnoShrinkLast, pgnoLastFileSystem );
 
+    //  if there is a redo map, for each page in the shrunk range we
+    //  should consider them reconciled and no longer to be tracked.
     if ( pfmp->PLogRedoMapZeroed() )
     {
         pfmp->PLogRedoMapZeroed()->ClearPgno( pgnoShrinkFirst, pgnoShrinkLastOrEof );
@@ -9388,6 +10730,18 @@ ERR LOG::ErrLGRIRedoShrinkDB( const LRSHRINKDB3 * const plrdbshrink )
     Call( ErrFaultInjection( 60418 ) );
 
     {
+    //  Before LgposLastResize tracking, we used to skip the shrink if we were replaying
+    //  the initial required range because we needed to keep pages which had current data
+    //  and was not going to be redone because we could have started redoing beyond its
+    //  begin transaction. LgposLastResize was introduced because the blanket skipping
+    //  was causing problems for full backups (seeds) which got interrupted/resumed or even
+    //  databases being recovered from scratch which failed to replay a log that contained
+    //  multiple shrink operations. In those cases, we would skip the shrink records in
+    //  the required range, which could cause DB divergence errors in later on (one database
+    //  could have regrown and would see zeroes in the region which was shrunk/regrown, while the copy
+    //  that skipped shrink could potentially see non-zeroes).
+    //  Now, we will proceed with replaying the shrink even if in the initial required range if the last
+    //  resize LGPOS is older than the current LGPOS.
     const BOOL fInitialReqRange = pfmp->FContainsDataFromFutureLogs();
     const LGPOS lgposLastResize = pfmp->Pdbfilehdr()->le_lgposLastResize;
     const BOOL fLgposLastResizeSet = ( CmpLgpos( lgposLastResize, lgposMin ) != 0 );
@@ -9398,6 +10752,7 @@ ERR LOG::ErrLGRIRedoShrinkDB( const LRSHRINKDB3 * const plrdbshrink )
     Assert( !fLgposLastResizeSet || CmpLgpos( pdbfilehdr->le_lgposLastResize, pdbfilehdr->le_lgposAttach ) >= 0 );
     }
 
+    // We can assert this because we quiesce LLR on shrink.
     AssertTrack( fInitialReqRange || !fLgposLastResizeSet || ( icmpLgposLastVsCurrent < 0 ), "MatchingShrinkLgposInNonReqRange" );
 
     if ( pfmp->FDBMScanOn() )
@@ -9414,8 +10769,13 @@ ERR LOG::ErrLGRIRedoShrinkDB( const LRSHRINKDB3 * const plrdbshrink )
         pfmp->SetDbtimeCurrentDuringRecovery( dbtimeShrink );
     }
 
-    const BOOL fMustSkipShrinkRedo = ( !fLgposLastResizeSet && fInitialReqRange );
-    const BOOL fMaySkipShrinkRedo = ( fLgposLastResizeSet && ( icmpLgposLastVsCurrent > 0 ) );
+    //  Note that we are going to redo the resizing even if the lgposLastResize matches the current value stamped
+    //  in the header (i.e., icmpLgposLastVsCurrent == 0). That is required for correctness of restoring a backup
+    //  that may have been initiated after the physical resizing of the file and the stamping of lgposLastResize to
+    //  the header, but before the logical file size is updated post-OE operation. In that case, not replaying a
+    //  matching lgposLastResize would leave the file with the smaller (logical) size captured by backup-start.
+    const BOOL fMustSkipShrinkRedo = ( !fLgposLastResizeSet && fInitialReqRange );  // old check (pre JET_efvLgposLastResize), we skip iff we are in the req range.
+    const BOOL fMaySkipShrinkRedo = ( fLgposLastResizeSet && ( icmpLgposLastVsCurrent > 0 ) );  // new check (post JET_efvLgposLastResize), we always skip if we already went through this.
     if ( fMaySkipShrinkRedo || fMustSkipShrinkRedo )
     {
         if ( fMustSkipShrinkRedo )
@@ -9433,10 +10793,14 @@ ERR LOG::ErrLGRIRedoShrinkDB( const LRSHRINKDB3 * const plrdbshrink )
         }
     }
 
+    // Fire DetachDB callback.
+    // Backup-from-passive clients have the file-size cached, so, we need to dump them. Once the overall
+    // shrink operation is completed, we log lrtypSignalAttachDb so that they can re-attach the database.
     Call( ErrLGDbDetachingCallback( m_pinst, pfmp ) );
 
     if ( fMaySkipShrinkRedo )
     {
+        // We'll redo the shrink operation granularly.
         Assert( fDbTimeShrink );
         const PGNO pgnoShrinkLastReset = UlFunctionalMin( pgnoShrinkLast, pgnoLastFileSystem );
 
@@ -9453,6 +10817,7 @@ ERR LOG::ErrLGRIRedoShrinkDB( const LRSHRINKDB3 * const plrdbshrink )
     }
     else
     {
+        // We'll redo the full shrink truncation.
         OSTraceFMP( ifmp, JET_tracetagSpaceManagement,
                     OSFormat( "%hs: Shrinking (truncating) to pgno=%lu",
                               __FUNCTION__, pgnoDbLastNew ) );
@@ -9465,6 +10830,7 @@ HandleError:
     pfmp->ResetPgnoShrinkTarget();
     pfmp->ResetShrinkIsRunning();
 
+    //  Turn DBM back on.
     if ( fTurnDbmScanBackOn )
     {
         (void)pfmp->ErrStartDBMScan();
@@ -9492,6 +10858,7 @@ ERR LOG::ErrLGRIRedoShrinkDBPageReset( const IFMP ifmp, const PGNO pgnoShrinkFir
 
     for ( PGNO pgno = pgnoShrinkFirstReset; pgno <= pgnoShrinkLastReset; pgno++ )
     {
+        // Preread ahead.
         if ( ( pgno >= pgnoPrereadWaypoint ) && ( pgnoPrereadNext <= pgnoShrinkLastReset ) )
         {
             const CPG cpgPrereadCurrent = LFunctionalMin( cpgPrereadMax, (CPG)( pgnoShrinkLastReset - pgnoPrereadNext + 1 ) );
@@ -9506,6 +10873,7 @@ ERR LOG::ErrLGRIRedoShrinkDBPageReset( const IFMP ifmp, const PGNO pgnoShrinkFir
             pgnoPrereadWaypoint = pgnoPrereadNext - ( cpgPrereadCurrent / 2 );
         }
 
+        // Obtain the page.
         Call( ErrBFWriteLatchPage(
                 &bfl,
                 ifmp,
@@ -9521,6 +10889,7 @@ ERR LOG::ErrLGRIRedoShrinkDBPageReset( const IFMP ifmp, const PGNO pgnoShrinkFir
             Call( errPageStatus );
         }
 
+        // Check if we should reset it.
         CPAGE cpageCheck;
         cpageCheck.ReBufferPage( bfl, ifmp, pgno, bfl.pv, (ULONG)g_cbPage );
 
@@ -9529,6 +10898,7 @@ ERR LOG::ErrLGRIRedoShrinkDBPageReset( const IFMP ifmp, const PGNO pgnoShrinkFir
              ( cpageCheck.Dbtime() > 0 ) &&
              ( cpageCheck.Dbtime() < dbtimeShrink ) )
         {
+            // Reset it.
             BFDirty( &bfl, bfdfDirty, *tcScope );
             CPAGE cpageWrite;
             cpageWrite.GetShrunkPage( ifmp, pgno, bfl.pv, g_cbPage );
@@ -9537,18 +10907,23 @@ ERR LOG::ErrLGRIRedoShrinkDBPageReset( const IFMP ifmp, const PGNO pgnoShrinkFir
             pgnoWriteMin = UlFunctionalMin( pgnoWriteMin, pgno );
             pgnoWriteMax = UlFunctionalMax( pgnoWriteMax, pgno );
 
+            // Fix up flush map.
             pfmp->PFlushMap()->SetPgnoFlushType( pgno, CPAGE::pgftUnknown );
         }
 
+        // Unload it.
         cpageCheck.UnloadPage();
         BFWriteUnlatch( &bfl );
         fPageLatched = fFalse;
     }
 
+    // Did we reset at least one page?
     if ( pgnoWriteMin <= pgnoWriteMax )
     {
+        // Flush/write pages.
         Call( ErrBFFlush( ifmp, objidNil, pgnoWriteMin, pgnoWriteMax ) );
 
+        // Write out flush map with fixed up states.
         Call( pfmp->PFlushMap()->ErrFlushAllSections( OnDebug( fTrue ) ) );
     }
 
@@ -9572,14 +10947,20 @@ ERR LOG::ErrLGRIRedoShrinkDBFileTruncation( const IFMP ifmp, const PGNO pgnoDbLa
     Assert( pgnoDbLastNew != pgnoNull );
     Assert( !pfmp->FBeyondPgnoShrinkTarget( pgnoDbLastNew ) );
 
-    Assert( !pfmp->PdbmFollower() );
+    //  DBM follower consumes the last scanned page persisted in the header,
+    //  and that information is fixed up upon initializing the follower, so
+    //  having it already initialized at this point would be a problem.
+    Assert( !pfmp->PdbmFollower() );        // follower mode (shrink happens before DBM starts on the active, so this should be off).
 
+    // Write out any snapshot for pages about to be shrunk
     if ( pfmp->FRBSOn() )
     {
         Call( pfmp->PRBS()->ErrFlushAll() );
     }
 
-    Call( ErrIOResizeUpdateDbHdrCount( ifmp, fFalse  ) );
+    //  this might double-count DB shrinkages, but the exact count is not really
+    //  important, as this is used for debugging purposes only.
+    Call( ErrIOResizeUpdateDbHdrCount( ifmp, fFalse /* fExtend */ ) );
 
     pfmp->SetOwnedFileSize( CbFileSizeOfPgnoLast( pgnoDbLastNew ) );
     Call( ErrIONewSize( ifmp, *tcScope, pgnoDbLastNew, 0, JET_bitResizeDatabaseOnlyShrink ) );
@@ -9609,6 +10990,7 @@ ERR LOG::ErrLGRIRedoTrimDB(
 
     const IFMP ifmp     = m_pinst->m_mpdbidifmp[ dbid ];
 
+    // if there is no attachment for this database, skip it
     if ( g_ifmpMax == ifmp )
     {
         return JET_errSuccess;
@@ -9617,6 +10999,7 @@ ERR LOG::ErrLGRIRedoTrimDB(
     FMP::AssertVALIDIFMP( ifmp );
     FMP * const pfmp = &g_rgfmp[ ifmp ];
 
+    // deferred and skipped attach databases can be ignored
     if ( pfmp->FSkippedAttach() || pfmp->FDeferredAttach() )
     {
         OSTraceFMP( ifmp, JET_tracetagSpaceManagement,
@@ -9625,6 +11008,8 @@ ERR LOG::ErrLGRIRedoTrimDB(
         return JET_errSuccess;
     }
 
+    //  If there is a redo map, for each page in the trimmed range we
+    //  should consider them reconciled and no longer to be tracked.
     if ( pfmp->PLogRedoMapZeroed() )
     {
         pfmp->PLogRedoMapZeroed()->ClearPgno( pgnoStartZeroes, pgnoEndZeroes );
@@ -9634,6 +11019,9 @@ ERR LOG::ErrLGRIRedoTrimDB(
         pfmp->PLogRedoMapBadDbTime()->ClearPgno( pgnoStartZeroes, pgnoEndZeroes );
     }
 
+    //  skip if we're replaying the initial required range because we may need to keep pages
+    //  which have current data that is not going to be redone because we might have started
+    //  redoing beyond its begin transaction.
     if ( pfmp->FContainsDataFromFutureLogs() )
     {
         OSTraceFMP( ifmp, JET_tracetagSpaceManagement,
@@ -9641,6 +11029,8 @@ ERR LOG::ErrLGRIRedoTrimDB(
         return JET_errSuccess;
     }
 
+    //  Do not unintentionally grow the file.
+    //  Get the filesize from the pfapi which has the most current value.
     QWORD cbSize;
     CallR( pfmp->Pfapi()->ErrSize( &cbSize, IFileAPI::filesizeLogical ) );
     Assert( cbSize > 0 );
@@ -9653,10 +11043,13 @@ ERR LOG::ErrLGRIRedoTrimDB(
         return JET_errSuccess;
     }
 
+    //  Trim the database file.
     OSTraceFMP( ifmp, JET_tracetagSpaceManagement,
                 OSFormat( "%hs: Trimming pgno=%lu, cpg=%lu",
                           __FUNCTION__, pgnoStartZeroes, cpgZeroes ) );
 
+    //  this might double-count DB trims, but the exact count is not really
+    //  important, as this is used for debugging purposes only.
     CallR( ErrSPITrimUpdateDatabaseHeader( ifmp ) );
 
     const QWORD ibStartZeroesAligned = OffsetOfPgno( pgnoStartZeroes );
@@ -9666,8 +11059,11 @@ ERR LOG::ErrLGRIRedoTrimDB(
     return err;
 }
 
+//  ================================================================
 ERR LOG::ErrLGRIRedoExtentFreed( const LREXTENTFREED * const plrextentfreed )
+//  ================================================================
 {
+    // This is not logged for all free extent operations, only for those related to deleting a whole space tree.
     Assert( plrextentfreed );
 
     ERR err                 = JET_errSuccess;
@@ -9675,17 +11071,20 @@ ERR LOG::ErrLGRIRedoExtentFreed( const LREXTENTFREED * const plrextentfreed )
 
     const IFMP ifmp         = m_pinst->m_mpdbidifmp[ dbid ];
 
+    // if there is no attachment for this database, skip it
     if ( g_ifmpMax == ifmp )
     {
         return JET_errSuccess;
     }
 
     FMP* const pfmp         = g_rgfmp + ifmp;
+    // deferred and skipped attach databases can be ignored
     if ( pfmp->FSkippedAttach() || pfmp->FDeferredAttach() )
     {
         return JET_errSuccess;
     }
 
+    // If RBS isn't enabled return success.
     if ( !( pfmp->FRBSOn() ) )
     {
         return JET_errSuccess;
@@ -9705,11 +11104,15 @@ ERR LOG::ErrLGRIRedoExtentFreed( const LREXTENTFREED * const plrextentfreed )
         err = ErrBFWriteLatchPage( &bfl, ifmp, pgnoFirst + i, bflfUninitPageOk, BfpriBFMake( PctFMPCachePriority( ifmp ), (BFTEMPOSFILEQOS)qosIODispatchImmediate ), *tcScope );
         if ( err == JET_errPageNotInitialized )
         {
+            // pre image for empty pages cannot be captured, just ignore
+            // and if we rollback this page need not be patched since it is empty.
             BFMarkAsSuperCold( ifmp, pgnoFirst + i );
             continue;
         }
         else if ( err == JET_errFileIOBeyondEOF && pfmp->FContainsDataFromFutureLogs() && CmpLgpos( pfmp->Pdbfilehdr()->le_lgposLastResize, m_lgposRedo ) > 0 )
         {
+            // pre image for page beyond eof cannot be captured, we must have captured
+            // and written it out in the past before shrinking the file.
             BFMarkAsSuperCold( ifmp, pgnoFirst + i );
             continue;
         }
@@ -9721,6 +11124,10 @@ ERR LOG::ErrLGRIRedoExtentFreed( const LREXTENTFREED * const plrextentfreed )
     return JET_errSuccess;
 }
 
+//  Updates the le_lGenRecovering in the attached database headers ... note does not write
+//  the database header out, relies on ErrLGUpdateGenRequired() to do that.  Debate moving 
+//  this function into ErrLGUpdateGenRequired() itself ... problem is that function is called
+//  from do-time and/or undo-time in a variety of ways and is already complicated enough.
 
 ERR LOG::ErrLGIUpdateGenRecovering(
     const LONG              lGenRecovering,
@@ -9758,6 +11165,9 @@ ERR LOG::ErrLGIUpdateGenRecovering(
 
         pfmpT->RwlDetaching().EnterAsReader();
 
+        //  need to check ifmp again. Because the db may be cleaned up
+        //  and FDetachingDB is reset, and so is its ifmp in m_mpdbidifmp.
+        //
         if (   m_pinst->m_mpdbidifmp[ dbidT ] >= g_ifmpMax
             || !pfmpT->FLogOn()
             || pfmpT->FSkippedAttach() || pfmpT->FDeferredAttach()
@@ -9774,6 +11184,9 @@ ERR LOG::ErrLGIUpdateGenRecovering(
             continue;
         }
 
+        //
+        //  Update the lGenRecovering field in the DB header
+        //
         const LONG  lGenRecoveringOld   = pfmpT->Pdbfilehdr()->le_lGenRecovering;
         pfmpT->PdbfilehdrUpdateable()->le_lGenRecovering = max( lGenRecovering, lGenRecoveringOld );
 
@@ -9781,6 +11194,12 @@ ERR LOG::ErrLGIUpdateGenRecovering(
         {
             if ( pfmpT->FContainsDataFromFutureLogs() )
             {
+                // This is the point where we transition from having data from future
+                // logs to where we are redoing operations for the first time.
+                //
+                // In other words, all of the potentially outstanding Shrink or Trim
+                // records must have been replayed, and the redo maps should be empty.
+                //
                 err = ErrLGIVerifyRedoMapForIfmp( ifmp );
 
                 Assert( FMP::FWriterFMPPool() );
@@ -9788,11 +11207,23 @@ ERR LOG::ErrLGIUpdateGenRecovering(
 
                 if ( m_pinst->m_isdlInit.FixedData().sInitData.lgposRecoveryForwardLogs.lGeneration == 0 )
                 {
+                    //  If this goes off, then I didn't quite understand the lifecycle, and the sprinted
+                    //  stats in the end of Init Event / 105 will be wrong ... this is used as the baseline
+                    //  step to know how long the "catch up" recovery phase took.
                     Assert( ( m_pinst->m_isdlInit.FTriggeredStep( eForwardLogBaselineStep ) &&
+                                // Note: "SilentRedo" may be done already or it may not, but verbose redo
+                                // should definitely not be done, and we definitely shouldn't have reopened
+                                // the log for undo.
                                 !m_pinst->m_isdlInit.FTriggeredStep( eInitLogRecoveryVerboseRedoDone ) &&
                                 !m_pinst->m_isdlInit.FTriggeredStep( eInitLogRecoveryReopenDone ) ) ||
                                 m_pinst->m_isdlInit.FFailedAllocate() ||
+                                // JetExternalRestore() doesn't set up the same things and doesn't log the
+                                // 105 event, so doesn't need the previous sequence step triggered.
                                 m_fHardRestore );
+                    //  Also we might think of moving this to actually be once we crest m_lGenMaxCommitted (or
+                    //  maybe even done with le_lGenRecovering), and not m_lgenMaxRequired because that is 
+                    //  where we really are on true future logs ... max req is just where we could make this
+                    //  copy consistent / begin undo.
                     Assert( m_lgposRedo.lGeneration != 0 );
                     m_pinst->m_isdlInit.FixedData().sInitData.lgposRecoveryForwardLogs = m_lgposRedo;
                     m_pinst->m_isdlInit.FixedData().sInitData.hrtRecoveryForwardLogs = HrtHRTCount();
@@ -9804,6 +11235,7 @@ ERR LOG::ErrLGIUpdateGenRecovering(
                     (*pcifmpsAttached)++;
                 }
 
+                // Free the underlying redo maps.
                 pfmpT->FreeLogRedoMaps();
 
                 if ( err >= JET_errSuccess && pfmpT->FNeedUpdateDbtimeBeginRBS() )
@@ -9839,6 +11271,10 @@ HandleError:
     return err;
 }
 
+//  Updated the DBSTATE of the database from JET_dbstateDirtyAndPatchedShutdown to
+//  JET_dbstateDirtyShutdown when we have replayed through the max required log file.
+//  Note does not flush the database header, relies on ErrLGUpdateGenRequired() to do 
+//  that.
 
 ERR LOG::ErrLGIUpdatePatchedDbstate(
     const LONG              lGenSwitchingTo )
@@ -9867,6 +11303,9 @@ ERR LOG::ErrLGIUpdatePatchedDbstate(
 
         pfmpT->RwlDetaching().EnterAsReader();
 
+        //  need to check ifmp again. Because the db may be cleaned up
+        //  and FDetachingDB is reset, and so is its ifmp in m_mpdbidifmp.
+        //
         if (   m_pinst->m_mpdbidifmp[ dbidT ] >= g_ifmpMax
             || !pfmpT->FLogOn()
             || pfmpT->FSkippedAttach() || pfmpT->FDeferredAttach()
@@ -9883,19 +11322,33 @@ ERR LOG::ErrLGIUpdatePatchedDbstate(
             continue;
         }
 
+        //
+        //  Update the dbstate IF we've outrun the required range
+        //
         if ( JET_dbstateDirtyAndPatchedShutdown == pfmpT->Pdbfilehdr()->Dbstate() )
         {
+            //  we have a patched database, next check if we've moved to the right gen to
+            //  remove the patched state.
 
+            //  Note: This transistion (>=) is needed because we could have lrtypRcvQuit /
+            //  lrtypDetach / lrtypTerm2 before the END of the required log.  We could of
+            //  course fix up those LRs to move to dirty as well?  This would be safest.
 
             if ( ( lGenSwitchingTo >= pfmpT->Pdbfilehdr()->le_lGenMaxRequired ) && pfmpT->FRedoMapsEmpty() )
             {
+                //  we've decided we should switch to dirty here, however we must ensure
+                //  to be in a crash consistent state to bring up the gen min required for the
+                //  database to past the last attach (or could be equal as well).
 
+                //  Update the checkpoint (and the gen min on the attached database(s)).
 
                 err = ErrLGIUpdateCheckpointFile( fTrue, NULL );
 
                 if ( ( err >= JET_errSuccess ) &&
                      ( pfmpT->Patchchk()->lgposAttach.lGeneration <= pfmpT->Pdbfilehdr()->le_lGenMinRequired ) )
                 {
+                    //  Yeah, we've consumed the entire required range, now we can move this
+                    //  DB to a regular dirty state.
 
                     pfmpT->PdbfilehdrUpdateable()->SetDbstate( JET_dbstateDirtyShutdown, lGenerationInvalid, lGenerationInvalid, NULL, fTrue );
                 }
@@ -9917,6 +11370,9 @@ ERR LOG::ErrLGIUpdatePatchedDbstate(
 
 
 
+//  Scan from lgposRedoFrom to end of usable log generations.
+//  For each log record, perform operations to redo original operation.
+//
 
 ERR LOG::ErrLGRIRedoOperations(
     const LE_LGPOS *ple_lgposRedoFrom,
@@ -9950,10 +11406,13 @@ ERR LOG::ErrLGRIRedoOperations(
 
     OSTrace( JET_tracetagInitTerm, OSFormat( "[Recovery] Begin redo operations. [pinst=%p, fKeep=%d]", m_pinst, fKeepDbAttached ) );
 
+    //  initialize global variable
+    //
     m_lgposRedoShutDownMarkGlobal = lgposMin;
     m_lgposRedoLastTerm = lgposMin;
     m_lgposRedoLastTermChecksum = lgposMin;
 
+    //  get the size of the log file
 
     Assert( m_pLogStream->FLGFileOpened() );
     QWORD   cbSize;
@@ -9965,18 +11424,20 @@ ERR LOG::ErrLGRIRedoOperations(
     csecSize = UINT( cbSize / m_pLogStream->CbSec() );
     Assert( csecSize > m_pLogStream->CSecHeader() );
 
+    //  setup the log reader
 
     Call( m_pLogReadBuffer->ErrLReaderInit( csecSize ) );
     Call( m_pLogReadBuffer->ErrReaderEnsureLogFile() );
 
+    //  allocate and setup prereader
 
     Assert( m_plpreread == pNil );
     AllocR( m_plpreread = new LogPrereader( m_pinst ) );
 #ifdef DEBUG
     const CPG cpgGrowth = (CPG)( ( cbSize / 1000 ) / sizeof( PGNO ) );
-#else
+#else // !DEBUG
     const CPG cpgGrowth = (CPG)( ( cbSize / 100 ) / sizeof( PGNO ) );
-#endif
+#endif // DEBUG
     Expected( cpgGrowth > 0 );
     m_plpreread->LGPInit( dbidMax, max( cpgGrowth, 1 ) );
 
@@ -9986,6 +11447,7 @@ ERR LOG::ErrLGRIRedoOperations(
     Assert( m_pPrereadWatermarks == pNil );
     AllocR( m_pPrereadWatermarks = new CSimpleQueue<LGPOSQueueNode>() );
 
+    // determine the log generation when all databases are expected to be attached when redo starts
     LONG lgenHighAtStartOfRedo;
     Call( m_pLogStream->ErrLGGetGenerationRange( m_wszLogCurrent, NULL, &lgenHighAtStartOfRedo ) );
     if ( m_pLogStream->FCurrentLogExists() )
@@ -9997,8 +11459,12 @@ ERR LOG::ErrLGRIRedoOperations(
     LoadHighestLgenAttachFromRstmap( &lgenHighAttach );
     lgenHighAtStartOfRedo = max( lgenHighAtStartOfRedo, lgenHighAttach );
 
+    //  scan the log to find traces of corruption before going record-to-record
+    //  if any corruption is found, an error will be returned
     BOOL fDummy;
     err = m_pLogReadBuffer->ErrLGCheckReadLastLogRecordFF( &fDummy, fTrue );
+    //  remember errors about corruption but don't do anything with them yet
+    //  we will go up to the point of corruption and then return the right error
     if ( err == JET_errSuccess || FErrIsLogCorruption( err ) )
     {
         errT = err;
@@ -10009,20 +11475,28 @@ ERR LOG::ErrLGRIRedoOperations(
         Call( err );
     }
 
+    //  now scan the first record
+    //  there should be no errors about corruption since they'll be handled by ErrLGCheckReadLastLogRecordFF
     err = m_pLogReadBuffer->ErrLGLocateFirstRedoLogRecFF( (LE_LGPOS *)ple_lgposRedoFrom, (BYTE **) &plr );
     if ( err == errLGNoMoreRecords )
     {
+        //  no records existed in this log -- this means that the log is corrupt
+        //  translate to the proper corruption message
 
         OSUHAEmitFailureTag( m_pinst, HaDbFailureTagRecoveryRedoLogCorruption, L"1bba029f-b68b-458d-82b8-71fe43b3a0aa" );
 
+        //  what recovery mode are we in?
 
+        // SOFT_HARD: per SG flag should be left here, no big deal
         if ( m_fHardRestore )
         {
 
+            //  we are in hard-recovery mode
 
             if ( m_pLogStream->GetCurrentFileGen() <= m_lGenHighRestore )
             {
 
+                //  this generation is part of a backup set
 
                 Assert( m_pLogStream->GetCurrentFileGen() >= m_lGenLowRestore );
                 Call( ErrERRCheck( JET_errLogCorruptDuringHardRestore ) );
@@ -10030,6 +11504,7 @@ ERR LOG::ErrLGRIRedoOperations(
             else
             {
 
+                //  the current log generation is not part of the backup-set
 
                 Call( ErrERRCheck( JET_errLogCorruptDuringHardRecovery ) );
             }
@@ -10037,6 +11512,7 @@ ERR LOG::ErrLGRIRedoOperations(
         else
         {
 
+            //  we are in soft-recovery mode
 
             Call( ErrERRCheck( JET_errLogFileCorrupt ) );
         }
@@ -10045,12 +11521,16 @@ ERR LOG::ErrLGRIRedoOperations(
     {
         Call( err );
     }
+    //  we don't expect any warnings, so this must be successful
     CallS( err );
 
 #ifdef DEBUG
+//  if ( m_pLogStream->LgposFileEnd().isec )
     {
         LGPOS   lgpos;
         m_pLogReadBuffer->GetLgposOfPbNext( &lgpos );
+        // When the header sector (m_csecHeader=1) is corrupted, m_lgposLastRec( m_pLogReadBuffer->LgposFileEnd() ) 
+        // points to this header and lgpos also points to this header. 
         Assert( CmpLgpos( &lgpos, &m_pLogReadBuffer->LgposFileEnd() ) <= 0 );
     }
 #endif
@@ -10060,6 +11540,8 @@ ERR LOG::ErrLGRIRedoOperations(
         fShowSectorStatus = plgstat->fCountingSectors;
         if ( fShowSectorStatus )
         {
+            //  reset byte counts
+            //
             plgstat->cSectorsSoFar = ple_lgposRedoFrom->le_isec;
             plgstat->cSectorsExpected = m_pLogStream->GetCurrentFileHdr()->lgfilehdr.le_csecLGFile;
         }
@@ -10070,15 +11552,20 @@ ERR LOG::ErrLGRIRedoOperations(
 
     do
     {
-        FMP     *pfmp;
-        DBID    dbid;
+        FMP     *pfmp;          // for db operations
+        DBID    dbid;           // for db operations
         IFMP    ifmp;
 
         if ( errLGNoMoreRecords == err )
         {
             INT fNSNextStep;
 
+            // we report the progress either if this log took too long to replay (at least 5 seconds) or
+            // if the control callback says so ...
+            //
 
+            // Gather throttling/callback delta from the INST timing sequence (depends on INST timing sequence
+            // number not changing since we got the beginning number)
             secInCallbackEnd = m_pinst->m_isdlInit.GetCallbackTime( &cCallbacksEnd );
             secThrottledEnd = m_pinst->m_isdlInit.GetThrottleTime( &cThrottledEnd );
             isdlCurrLog.AddCallbackTime( secInCallbackEnd - secInCallbackBegin, cCallbacksEnd - cCallbacksBegin );
@@ -10100,6 +11587,7 @@ ERR LOG::ErrLGRIRedoOperations(
                 BYTE maxLR = 0;
                 for ( BYTE i=0; i<lrtypMax; i++ )
                 {
+                    // No one cares if these LRs are the most common, we want to know what operation it is
                     if ( i == lrtypBegin || i == lrtypCommit || i == lrtypBegin0 || i == lrtypCommit0 )
                     {
                         continue;
@@ -10118,6 +11606,7 @@ ERR LOG::ErrLGRIRedoOperations(
                 const WCHAR * rgwsz [] = { m_pLogStream->LogName(), wszLogStats, wszLR, wszCount };
                 C_ASSERT( _countof( rgwsz ) == 4 );
 
+                //  log redo progress.
                 UtilReportEvent(
                         eventInformation,
                         LOGGING_RECOVERY_CATEGORY,
@@ -10130,46 +11619,69 @@ ERR LOG::ErrLGRIRedoOperations(
             }
             isdlCurrLog.TermSequence();
 
+            // Move m_lgposRedo past the last log record
             m_lgposRedo = m_pLogReadBuffer->LgposFileEnd();
             if ( fLastLRIsQuit )
             {
                 m_lgposRedoLastTermChecksum = m_lgposRedo;
             }
 
+            //  if we had a corruption error on this generation, do not process other generations
 
             if ( errT != JET_errSuccess )
             {
                 goto Done;
             }
 
+            // check for the potential stopping point. That point might be 
+            // the current log file so don't even try to switch to the
+            // next one. 
+            // It would be easier to allow switching and exit just before we would redo
+            // the first log record (existing code below to check agains m_lgposRedo) BUT 
+            // if we allow switching we might hit a corrupted log because
+            // it might be in the middle of file copy (for log shipping).
+            //
+            // we the stop position is still in the current log now that we are done with
+            // this log, stop here
             if ( m_lgposRecoveryStop.lGeneration == m_lgposRedo.lGeneration )
             {
+                // we hit already the desired log stop position
 
 
                 Error( ErrLGISetQuitWithoutUndo( ErrERRCheck( JET_errRecoveredWithoutUndo ) ) );
             }
 
+            //  bring in the next generation
             err = ErrLGRedoFill( &plr, fLastLRIsQuit, &fNSNextStep );
+            //  remember errors about corruption but don't do anything with them yet
+            //  we will go up to the point of corruption and then return the right error
             if ( FErrIsLogCorruption( err ) )
             {
                 errT = err;
 
+                //  make sure we process this log generation (up to the point of corruption)
 
                 fNSNextStep = fNSGotoCheck;
             }
             else if ( err == errLGNoMoreRecords )
             {
+                //  no records existed in this log because ErrLGLocateFirstRedoLogRecFF returned this error
+                //      this means that the log is corrupt -- setup the proper corruption message
 
                 OSUHAEmitFailureTag( m_pinst, HaDbFailureTagRecoveryRedoLogCorruption, L"f25f16bb-40ce-48a6-a31d-5aa98cf2112a" );
 
+                //  what recovery mode are we in?
 
+                // SOFT_HARD: per SG flag should be left here, no big deal
                 if ( m_fHardRestore )
                 {
 
+                    //  we are in hard-recovery mode
 
                     if ( m_pLogStream->GetCurrentFileGen() <= m_lGenHighRestore )
                     {
 
+                        //  this generation is part of a backup set
 
                         Assert( m_pLogStream->GetCurrentFileGen() >= m_lGenLowRestore );
                         errT = ErrERRCheck( JET_errLogCorruptDuringHardRestore );
@@ -10177,6 +11689,7 @@ ERR LOG::ErrLGRIRedoOperations(
                     else
                     {
 
+                        //  the current log generation is not part of the backup-set
 
                         errT = ErrERRCheck( JET_errLogCorruptDuringHardRecovery );
                     }
@@ -10184,10 +11697,12 @@ ERR LOG::ErrLGRIRedoOperations(
                 else
                 {
 
+                    //  we are in soft-recovery mode
 
                     errT = ErrERRCheck( JET_errLogFileCorrupt );
                 }
 
+                //  make sure we process this log generation
 
                 fNSNextStep = fNSGotoCheck;
             }
@@ -10206,11 +11721,23 @@ ERR LOG::ErrLGRIRedoOperations(
 
                 case fNSGotoCheck:
 
+                    // if the log is corrupted we don't want to update the header
+                    // as in general it will mean that they will need to re-restore
+                    // the database file 
+                    // Still, someone could force the reply up to a certain log 
+                    // position in order to get in the corrupted log as far as 
+                    // possible (like to the last detach)
+                    // 
                     if ( FErrIsLogCorruption( errT ) )
                     {
                         const LONG lGeneration = m_pLogStream->GetCurrentFileGen();
                         
+                        // if this is not the gneration we need to stop at 
+                        // (this includes the case where there is no stop position 
+                        // which would be m_lgposRecoveryStop.lGeneration == 0) 
+                        // 
                         if ( m_lgposRecoveryStop.lGeneration != lGeneration ||
+                            // OR we stop at the current log generation  
                             FLGRecoveryLgposStopLogGeneration( ) )
                         {
                             Error( ErrERRCheck( errT ) );
@@ -10219,6 +11746,10 @@ ERR LOG::ErrLGRIRedoOperations(
 
                     OnNonRTM( m_lgposRedoPreviousLog = m_lgposRedo );
 
+                    // we will get the current lgpos right here
+                    // so we can compare it with the m_lgposRecoveryStop
+                    // before doing the EventLog
+                    //
                     Call( ErrGetLgposRedoWithCheck() );
 
                     secInCallbackBegin = m_pinst->m_isdlInit.GetCallbackTime( &cCallbacksBegin );
@@ -10240,6 +11771,9 @@ ERR LOG::ErrLGRIRedoOperations(
                         cPercentSoFar = (ULONG)
                             ((plgstat->cGensSoFar * 100) / plgstat->cGensExpected);
 
+                        // cPercentSoFar can actually exceed 100% if new logfiles appear while we are
+                        // replaying. This is OK in the recovery-without-undo case, which doesn't require
+                        // and eXX.log. In that case, cap the percentage complete at 100%
                         cPercentSoFar = min( cPercentSoFar, 100 );
 
                         Assert( cPercentSoFar >= psnprog->cunitDone );
@@ -10252,7 +11786,8 @@ ERR LOG::ErrLGRIRedoOperations(
 
                         if ( fShowSectorStatus )
                         {
-                            
+                            /*  reset byte counts
+                            /**/
                             plgstat->cSectorsSoFar = 0;
                             plgstat->cSectorsExpected = m_pLogStream->GetCurrentFileHdr()->lgfilehdr.le_csecLGFile;
                         }
@@ -10260,7 +11795,8 @@ ERR LOG::ErrLGRIRedoOperations(
                     goto ProcessNextRec;
             }
 
-            
+            /*  should never get here
+            /**/
             Assert( fFalse );
         }
 
@@ -10283,9 +11819,10 @@ ProcessNextRec:
         }
 
 #ifdef MINIMAL_FUNCTIONALITY
-#else
+#else  //  !MINIMAL_FUNCTIONALITY
         if ( m_fPreread && !m_fDumpingLogs )
         {
+            //  Consume watermarks.
             LGPOSQueueNode* plgposQueueNode = NULL;
             OnDebug( LGPOS lgposPrev = lgposMax );
             while ( ( ( plgposQueueNode = m_pPrereadWatermarks->Head() ) != NULL ) &&
@@ -10303,23 +11840,35 @@ ProcessNextRec:
             }
         }
 
-#endif
+#endif  //  MINIMAL_FUNCTIONALITY
 
+        //  if initial DbList has not yet been created,
+        //  it must be because we haven't reached
+        //  the DbList (or Init) log record yet
         Assert( !m_fNeedInitialDbList
             || lrtypChecksum == plr->lrtyp
             || lrtypInit2 == plr->lrtyp );
 
+        // update genMaxReq for the databases to avoid the following scenario:
+        // - backup set 3-5, play forward 6-10
+        // - replay up to 8 and crash
+        // - delete logs 7-10
+        // - run hard recovery w/o restoring the files
+        // we also want to update for soft recovery if we have an older than logs database
+        // (like during soft recovery of a offline backup or snapshot)
         if ( m_lgposRedo.lGeneration > lgposLastRedoLogRec.lGeneration )
         {
             IFMP rgifmpsAttached[ dbidMax ];
             ULONG cifmpsAttached = 0;
 
+            // Currently flush log if flush-tip falls too far behind waypoint depth. We could also do it time based etc.
             if ( m_lgposRedo.lGeneration > m_lgposFlushTip.lGeneration + LLGElasticWaypointLatency() )
             {
                 BOOL fFlushed = fFalse;
                 Call( m_pLogStream->ErrLGFlushLogFileBuffers( iofrLogMaxRequired, &fFlushed ) );
                 if ( fFlushed )
                 {
+                    // During recovery redo, consider full log flushed
                     LGPOS lgposNextFlushTip;
                     lgposNextFlushTip.lGeneration = m_lgposRedo.lGeneration;
                     lgposNextFlushTip.isec = lgposMax.isec;
@@ -10328,6 +11877,8 @@ ProcessNextRec:
                 }
             }
 
+            // this code fires every time we roll a log.  Note this code actually fires 
+            // twice, not sure why we're in here twice.
             m_critCheckpoint.Enter();
 
             err = ErrLGIUpdatePatchedDbstate( m_lgposRedo.lGeneration );
@@ -10351,8 +11902,8 @@ ProcessNextRec:
             Assert( m_lgposRedo.lGeneration != 0 );
             err = ErrLGUpdateGenRequired(
                         m_pinst->m_pfsapi,
-                        0,
-                        0,
+                        0, // pass 0 to preserve the existing value
+                        0, // pass 0 to preserve the existing value
                         m_lgposRedo.lGeneration,
                         tmCreate,
                         NULL );
@@ -10360,11 +11911,15 @@ ProcessNextRec:
             m_critCheckpoint.Leave();
             Call( err );
 
+            // During recovery, nothing else can change the attached state of the db, so safe to do the callback outside
+            // the lock
             for ( ULONG i=0 ; i<cifmpsAttached; i++ )
             {
                 Call( ErrLGDbAttachedCallback( m_pinst, &g_rgfmp[rgifmpsAttached[i]] ) );
             }
 
+            // if we are starting to replay a log generation beyond the last consistent gen of all attachments marked
+            // as fail fast, then check for any deferred attachment.  if we find any, then we will fail recovery.
             if ( m_lgposRedo.lGeneration > lgenHighAtStartOfRedo )
             {
                 Call( ErrLGRICheckForAttachedDatabaseMismatchFailFast( m_pinst ) );
@@ -10372,6 +11927,9 @@ ProcessNextRec:
             }
         }
 
+        //  Keep track of last LR to see if it is shutdown mark
+        //  Skip those lr that does nothing material. Do not change
+        //  m_fLastLRIsShutdown if LR is debug only log record.
 
         switch ( plr->lrtyp )
         {
@@ -10384,10 +11942,12 @@ ProcessNextRec:
         case lrtypNOP:
             continue;
 
+            // This may not be optimally efficient to put this
+            // so high on the log record processing.
         case lrtypChecksum:
             continue;
 
-        case lrtypTrace:                    
+        case lrtypTrace:                    /* Debug purpose only log records. */
         case lrtypJetOp:
         case lrtypForceWriteLog:
         case lrtypForceLogRollover:
@@ -10401,12 +11961,12 @@ ProcessNextRec:
             }
             break;
 
-        case lrtypFullBackup:               
+        case lrtypFullBackup:               /* Debug purpose only log records */
             m_pinst->m_pbackup->BKSetLgposFullBackup( m_lgposRedo );
             m_pinst->m_pbackup->BKSetLogsTruncated( fFalse );
             break;
 
-        case lrtypIncBackup:                
+        case lrtypIncBackup:                /* Debug purpose only log records */
             m_pinst->m_pbackup->BKSetLgposIncBackup( m_lgposRedo );
             break;
 
@@ -10457,7 +12017,7 @@ ProcessNextRec:
             break;
         }
 
-        case lrtypShutDownMark:         
+        case lrtypShutDownMark:         /* Last consistency point */
             m_lgposRedoShutDownMarkGlobal = m_lgposRedo;
             m_fLastLRIsShutdown = fTrue;
             break;
@@ -10466,6 +12026,7 @@ ProcessNextRec:
         {
             m_fLastLRIsShutdown = fFalse;
 
+            //  Check the LR that does the real work from here:
 
             switch ( plr->lrtyp )
             {
@@ -10490,11 +12051,16 @@ ProcessNextRec:
 
                 Call( ErrLGRIPpibFromProcid( plrmend->le_procid, &ppib ) );
 
+                //  if it is commit, redo all the recorded log records,
+                //  otherwise, throw away the logs
+                //
                 if ( lrtypMacroCommit == plr->lrtyp && ppib->FAfterFirstBT() )
                 {
                     Call( ErrLGRIRedoMacroOperation( ppib, dbtime ) );
                 }
 
+                //  disable MacroGoing
+                //
                 ppib->ResetMacroGoing( dbtime );
 
                 break;
@@ -10503,7 +12069,8 @@ ProcessNextRec:
             case lrtypInit2:
             case lrtypInit:
             {
-                
+                /*  start mark the jet init. Abort all active seesions.
+                /**/
                 LRINIT2  *plrstart = (LRINIT2 *)plr;
 
                 LGRITraceRedo( plr );
@@ -10521,12 +12088,15 @@ ProcessNextRec:
                     m_lgposRedoLastTermChecksum = lgposMin;
                 }
 
+                // done with all changes from old format, do not need to keep
+                // sector size from old format around
                 if ( !FIsOldLrckLogFormat( m_pLogStream->GetCurrentFileHdr()->lgfilehdr.le_ulMajor ) )
                 {
                     m_pLogStream->ResetOldLrckVersionSecSize();
                 }
 
-                
+                /*  Check Init session for hard restore only.
+                 */
                 Call( ErrLGRIInitSession(
                             &plrstart->dbms_param,
                             pbAttach,
@@ -10540,7 +12110,8 @@ ProcessNextRec:
             case lrtypRecoveryQuitKeepAttachments:
             case lrtypTerm:
             case lrtypTerm2:
-                
+                /*  all records are re/done. all rce entries should be gone now.
+                /**/
 #ifdef DEBUG
                 {
                 PIB *ppib = NULL;
@@ -10556,11 +12127,17 @@ ProcessNextRec:
                 }
 #endif
 
-                
+                /*  quit marks the end of a normal run. All sessions
+                /*  have ended or must be forced to end. Any further
+                /*  sessions will begin with a BeginT.
+                /**/
 #ifdef DEBUG
                 m_fDBGNoLog = fTrue;
 #endif
-                
+                /*  set m_lgposLogRec such that later start/shut down
+                 *  will put right lgposConsistent into dbfilehdr
+                 *  when closing the database.
+                 */
                 if ( !m_fAfterEndAllSessions )
                 {
                     *pfRcvCleanlyDetachedDbs = ( plr->lrtyp != lrtypRecoveryQuitKeepAttachments );
@@ -10574,6 +12151,8 @@ ProcessNextRec:
                     m_lgposRedoLastTermChecksum = m_lgposRedo;
                     m_pLogStream->AddLgpos( &m_lgposRedoLastTermChecksum, sizeof( LRTERMREC2 ) );
                 }
+                // done with all changes from old format, do not need to keep
+                // sector size from old format around
                 if ( !FIsOldLrckLogFormat( m_pLogStream->GetCurrentFileHdr()->lgfilehdr.le_ulMajor ) )
                 {
                     m_pLogStream->ResetOldLrckVersionSecSize();
@@ -10582,9 +12161,9 @@ ProcessNextRec:
                 fLastLRIsQuit = fTrue;
                 continue;
 
-            
-            
-            
+            /****************************************************/
+            /*  Database Operations                          */
+            /****************************************************/
             case lrtypCreateDB:
             {
                 PIB             *ppib;
@@ -10599,7 +12178,10 @@ ProcessNextRec:
                 Call( ErrLGRIPpibFromProcid( plrcreatedb->le_procid, &ppib ) );
 
 
+                // we replay create dbs only on soft recovery so no point
+                // in checking the map on hard recovery
 
+                // SOFT_HARD: leave like this!
                 if ( !m_fHardRestore && m_irstmapMac > 0 )
                 {
                     CAutoWSZ    wszDbName;
@@ -10613,6 +12195,8 @@ ProcessNextRec:
                         err = ErrReplaceRstMapEntryByName( wszDbName, &plrcreatedb->signDb );
                         if ( JET_errFileNotFound == err )
                         {
+                            //  database not in restore map, so it won't be restored
+                            //
                             err = JET_errSuccess;
                         }
                         Call( err );
@@ -10624,6 +12208,8 @@ ProcessNextRec:
                         err = ErrReplaceRstMapEntryByName( wszDbName, &plrcreatedb->signDb );
                         if ( JET_errFileNotFound == err )
                         {
+                            //  database not in restore map, so it won't be restored
+                            //
                             err = JET_errSuccess;
                         }
                         Call( err );
@@ -10631,8 +12217,10 @@ ProcessNextRec:
                 }
 
 
+                // set-up the FMP
                 INT irstmap = -1;
                 {
+                // build an ATTACHINFO based on this log record
                 ATTACHINFO *    pAttachInfo     = NULL;
                 const ULONG     cbAttachInfo    = sizeof(ATTACHINFO) + plrcreatedb->CbPath();
 
@@ -10648,6 +12236,10 @@ ProcessNextRec:
                 pAttachInfo->le_lgposConsistent = lgposMin;
                 memcpy( &pAttachInfo->signDb, &plrcreatedb->signDb, sizeof(SIGNATURE) );
 
+                // We will keep ASCII is needed at this point
+                // becuase the ATTACHINFO has support for both
+                // and we need to deal with both in the below functions
+                // anyway
                 if ( plrcreatedb->FUnicodeNames( ) )
                 {
                     pAttachInfo->SetFUnicodeNames( );
@@ -10667,6 +12259,11 @@ ProcessNextRec:
                     err = ErrLGRISetupFMPFromAttach( ppib, pAttachInfo, plgstat, &ifmpDuplicate, &irstmap );
                     if ( err == JET_errDatabaseDuplicate )
                     {
+                        // if we see a duplicate database during recovery and it is for the same dbid and there is a
+                        // database in the restore map that is flagged as overwrite on create then detach the database
+                        // and allow the create to be processed.  this allows log shipping to replay a delete/create
+                        // database sequence in the log stream that otherwise would have failed purely due to the keep
+                        // cache alive for recovery feature
                         FMP* pfmpDuplicate = &g_rgfmp[ ifmpDuplicate ];
                         if ( pfmpDuplicate->Dbid() == dbid && irstmap >= 0 && ( m_rgrstmap[irstmap].grbit & JET_bitRestoreMapOverwriteOnCreate ) )
                         {
@@ -10696,6 +12293,7 @@ ProcessNextRec:
 
                 if ( fDBPathValid && fDBFileMissing )
                 {
+                    //  database missing, so recreate it
                     redoattach = redoattachCreate;
                 }
                 else
@@ -10710,6 +12308,7 @@ ProcessNextRec:
                                 redoattachmodeCreateDbLR ) );
                     
                     Assert( NULL != pfmp->Pdbfilehdr() || redoattachCreate == redoattach );
+                    // if missing, it is deferred
                     Assert( !fDBFileMissing || redoattachDefer == redoattach );
                 }
 
@@ -10720,6 +12319,9 @@ ProcessNextRec:
                         const JET_SETDBPARAM* const rgsetdbparam = ( irstmap >= 0 ) ? m_rgrstmap[irstmap].rgsetdbparam : NULL;
                         const ULONG csetdbparam = ( irstmap >= 0 ) ? m_rgrstmap[irstmap].csetdbparam : 0;
 
+                        //  we've already pre-determined (in ErrLGRICheckRedoCreateDb())
+                        //  that any existing database needs to be overwritten, so
+                        //  it's okay to unequivocally pass in JET_bitDbOverwriteExisting
                         if ( usDAECreateDbVersion == plrcreatedb->UsVersion() &&
                              usDAECreateDbUpdateMajor >= plrcreatedb->UsUpdateMajor() )
                         {
@@ -10739,6 +12341,15 @@ ProcessNextRec:
                                     m_pLogStream->GetCurrentFileHdr()->lgfilehdr.le_ulMinor == ulLGVersionMinor_Win7 &&
                                     m_pLogStream->GetCurrentFileHdr()->lgfilehdr.le_ulUpdateMajor < ulLGVersionUpdateMajor_Win7 ) )
                         {
+                            // we have a CreateDB with an older engine version.
+                            // It is a problem because the database operations
+                            // during this are not logged so if something
+                            // changed in the creation process between version
+                            // (and it did), we will generate a different image 
+                            // (and have other issues during replay of the next
+                            // operations logged)
+                            // Note that at this point we know how to replay
+                            // win7 CreateDBs and later
 
                             OSUHAEmitFailureTag( m_pinst, HaDbFailureTagUnrecoverable, L"ea07d1c4-4ed1-4c73-9b88-ee4f4a3e06c9" );
                             Call( ErrERRCheck( JET_errInvalidCreateDbVersion ) );
@@ -10768,7 +12379,7 @@ ProcessNextRec:
                         break;
 
                     default:
-                        Assert( fFalse );
+                        Assert( fFalse );   //  should be impossible, but as a firewall, set to defer the attachment
                     case redoattachDefer:
                     case redoattachDeferConsistentFuture:
                     case redoattachDeferAccessDenied:
@@ -10826,7 +12437,9 @@ ProcessNextRec:
 
                 Call( ErrLGRIPpibFromProcid( plrattachdb->le_procid, &ppib ) );
 
+                // set-up the FMP
                 {
+                // build an ATTACHINFO based on this log record
                 ATTACHINFO *    pAttachInfo     = NULL;
                 const ULONG     cbAttachInfo    = sizeof(ATTACHINFO) + plrattachdb->CbPath();
 
@@ -10840,6 +12453,9 @@ ProcessNextRec:
                 pAttachInfo->SetObjidLast( objidNil );
                 pAttachInfo->SetCpgDatabaseSizeMax( plrattachdb->le_cpgDatabaseSizeMax );
                 pAttachInfo->le_lgposAttach = m_lgposRedo;
+                // If lgposConsistent is from the future, it is from a different
+                // log stream, do not use it (maybe attach should not even log
+                // it?)
                 if ( CmpLgpos( plrattachdb->lgposConsistent, m_lgposRedo ) >= 0 )
                 {
                     pAttachInfo->le_lgposConsistent = lgposMin;
@@ -10850,6 +12466,10 @@ ProcessNextRec:
                 }
                 memcpy( &pAttachInfo->signDb, &plrattachdb->signDb, sizeof(SIGNATURE) );
 
+                // We will keep ASCII if needed at this point
+                // becuase the ATTACHINFO has support for both
+                // and we need to deal with both in the below functions
+                // anyway
                 memcpy ( pAttachInfo->szNames, (CHAR *)plrattachdb->rgb, plrattachdb->CbPath() );
 
                 if ( plrattachdb->FUnicodeNames() )
@@ -10903,7 +12523,7 @@ ProcessNextRec:
 
                     case redoattachCreate:
                     default:
-                        Assert( fFalse );
+                        Assert( fFalse );   //  should be impossible, but as a firewall, set to defer the attachment
                     case redoattachDefer:
                     case redoattachDeferConsistentFuture:
                     case redoattachDeferAccessDenied:
@@ -10922,6 +12542,8 @@ ProcessNextRec:
                 Assert( dbid != dbidTemp );
                 ifmp = m_pinst->m_mpdbidifmp[ dbid ];
                 
+                // if there is no attachment for this database, skip it
+                //
                 if( g_ifmpMax == ifmp )
                 {
                     break;
@@ -10938,7 +12560,8 @@ ProcessNextRec:
                         Call( ErrLGDbDetachingCallback( m_pinst, pfmp ) );
                     }
 
-                    
+                    /*  close database for all active user.
+                     */
                     PIB     *ppib = ppibNil;
 
                     for ( ppib = m_pinst->m_ppibGlobal; NULL != ppib; ppib = ppib->ppibNext )
@@ -10947,6 +12570,8 @@ ProcessNextRec:
                         {
                             if ( NULL != m_pctablehash )
                             {
+                                //  close all fucb on this database
+                                //
                                 LGRIPurgeFucbs( ppib, ifmp, m_pctablehash );
                             }
                             Call( ErrDBCloseDatabase( ppib, ifmp, 0 ) );
@@ -10957,15 +12582,23 @@ ProcessNextRec:
                     Call( ErrLGRIPpibFromProcid( plrdetachdb->le_procid, &ppib ) );
                     Assert( !pfmp->FReadOnlyAttach() );
 
+                    //  make sure the attached database's size is consistent with the file size.
 
                     Call( ErrLGICheckDatabaseFileSize( ppib, ifmp ) );
 
+                    //  If there is no redo operations on an attached db, then
+                    //  pfmp->dbtimeCurrent may == 0, then do not change pdbfilehdr->dbtime
 
                     if ( pfmp->DbtimeCurrentDuringRecovery() > pfmp->DbtimeLast() )
                     {
                         pfmp->SetDbtimeLast( pfmp->DbtimeCurrentDuringRecovery() );
                     }
 
+                    //  Do not verify the redo maps if we're still replaying the initial
+                    //  required range because we may still see shrink/trim log records
+                    //  in a subsequent attach. If there are no more attachments, the
+                    //  final call to ErrLGIVerifyRedoMapForIfmp() right before this
+                    //  function returns will handle any pending pages in the map.
 
                     if ( !pfmp->FContainsDataFromFutureLogs() )
                     {
@@ -10979,15 +12612,19 @@ ProcessNextRec:
 
                     if ( pfmp->FRedoMapsEmpty() )
                     {
+                        // Free the underlying redo maps.
                         pfmp->FreeLogRedoMaps();
                     }
 
                     Call( ErrIsamDetachDatabase( (JET_SESID) ppib, NULL, pfmp->WszDatabaseName(), plrdetachdb->Flags() & ~fLRDetachDBUnicodeNames ) );
 
+                    // DO NOT TOUCH THE pfmp. IT IS NOT YOURS ANYMORE
                     pfmp = NULL;
                 }
                 else
                 {
+                    // Cleaning up and releasing an FMP requires multiple steps that
+                    // have to be done atomically.
                     
                     FMP::EnterFMPPoolAsWriter();
                     
@@ -11002,6 +12639,7 @@ ProcessNextRec:
                     
                     FMP::LeaveFMPPoolAsWriter();
 
+                    // DO NOT TOUCH THE pfmp. IT IS NOT YOURS ANYMORE
                     pfmp = NULL;
                 }
 
@@ -11011,9 +12649,10 @@ ProcessNextRec:
 
             case lrtypExtRestore:
             case lrtypExtRestore2:
+                // for tracing only, should be at a new log generation
                 break;
 
-            case lrtypExtendDB:
+            case lrtypExtendDB: // originally lrtypIgnored2
             {
                 const LREXTENDDB * const plrextenddb = (LREXTENDDB *)plr;
                 Call( ErrLGRIRedoExtendDB( plrextenddb ) );
@@ -11035,13 +12674,17 @@ ProcessNextRec:
                 dbid = plrsetdbversion->Dbid();
                 ifmp = m_pinst->m_mpdbidifmp[ dbid ];
 
+                // if there is no attachment for this database, skip it
+                //
                 if( ifmp >= g_ifmpMax )
                 {
-                    Assert( ifmp == g_ifmpMax );
+                    Assert( ifmp == g_ifmpMax );  // other LRs assume this.
                     break;
                 }
                 FMP::AssertVALIDIFMP( ifmp );
 
+                //  or the database is not currently attached
+                //
                 pfmp = &g_rgfmp[ ifmp ];
                 if ( !pfmp->FAttached() )
                 {
@@ -11050,6 +12693,8 @@ ProcessNextRec:
                     {
                         break;
                     }
+                    // note we let creating DB through, as we're before create DB finish and it needs 
+                    // it's version(s) updated.
                 }
 
                 if ( pfmp->Pdbfilehdr() )
@@ -11059,6 +12704,8 @@ ProcessNextRec:
                 }
                 else
                 {
+                    //  Not sure what case this would be where we have a attached or creating DB (and not deferred 
+                    //  or skipped) and it has no file header?
                     FireWall( "RedoSetDbVerNoDbHdr" );
                 }
 
@@ -11074,28 +12721,31 @@ ProcessNextRec:
 
             case lrtypExtentFreed:
             {
+                // This is not logged for all free extent operations, only for those related to deleting a whole space tree.
                 const LREXTENTFREED * const plrextentfreed = (LREXTENTFREED *)plr;
                 CallR( ErrLGRIRedoExtentFreed( plrextentfreed ) );
         
                 break;
             }
 
-            
-            
-            
+            /****************************************************/
+            /*  Operations Using ppib (procid)                  */
+            /****************************************************/
 
             default:
                 err = ErrLGRIRedoOperation( plr );
 
+                //  for every redo operation, if it was skipped,
+                //  we can consider it a success and keep going.
                 if ( errSkipLogRedoOperation == err )
                 {
                     err = JET_errSuccess;
                 }
                 
                 Call( err );
-            } 
-        } 
-    } 
+            } /* switch */
+        } /* outer default */
+    } /* outer switch */
 
 #ifdef DEBUG
         m_fDBGNoLog = fFalse;
@@ -11103,7 +12753,8 @@ ProcessNextRec:
         fLastLRIsQuit = fFalse;
         lgposLastRedoLogRec = m_lgposRedo;
 
-        
+        /*  update sector status, if we moved to a new sector
+        /**/
         Assert( !fShowSectorStatus || m_lgposRedo.isec >= plgstat->cSectorsSoFar );
         Assert( m_lgposRedo.isec != 0 );
         if ( fShowSectorStatus && m_lgposRedo.isec > plgstat->cSectorsSoFar )
@@ -11119,6 +12770,9 @@ ProcessNextRec:
             cPercentSoFar += (ULONG)((plgstat->cSectorsSoFar * 100) /
                 (plgstat->cSectorsExpected * plgstat->cGensExpected));
 
+            // cPercentSoFar can actually exceed 100% if new logfiles appear while we are
+            // replaying. This is OK in the recovery-without-undo case, which doesn't require
+            // and eXX.log. In that case, cap the percentage complete at 100%
             cPercentSoFar = min( cPercentSoFar, 100 );
 
             Assert( cPercentSoFar >= psnprog->cunitDone );
@@ -11132,26 +12786,40 @@ ProcessNextRec:
     while ( ( err = m_pLogReadBuffer->ErrLGGetNextRecFF( (BYTE **) &plr ) ) == JET_errSuccess
             || errLGNoMoreRecords == err );
 
+    //  we have dropped out of the replay loop with an unexpected result
+    //  this should be some types of error
     Assert( err < 0 );
+    //  dispatch the error
     Call( err );
 
 Done:
-    err = errT;
+    err = errT; //JET_errSuccess;
 
 HandleError:
-    
+    /*  assert all operations successful for restore from consistent
+    /*  backups
+    /**/
 #ifndef RFS2
     AssertSz( err >= 0,     "Debug Only, Ignore this Assert");
 #endif
 
+    //  if the redo operations succeeded, we should now inspect the redo map
+    //  to ensure that all redo operations were reconciled.
     if ( err >= JET_errSuccess )
     {
         err = ErrLGIVerifyRedoMaps();
 
+        // Do not clean up redo maps if we failed because checkpoint advancement
+        // might kick in and improperly advance it beyond the generation required
+        // to reproduce the failure.
         if ( err >= JET_errSuccess )
         {
             LGITermRedoMaps();
 
+            // We normally switch from JET_dbstateDirtyAndPatchedShutdown to JET_dbstateDirtyShutdown
+            // when we reach the initial max required lgen, but we may delay it if there are pending
+            // redo map entries by that time. Therefore, fix up the DB state here to avoid letting
+            // DirtyAndPatched leak beyond redo.
             for ( DBID dbid = dbidUserLeast; dbid < dbidMax; dbid++ )
             {
                 const IFMP ifmp = m_pinst->m_mpdbidifmp[ dbid ];
@@ -11194,8 +12862,10 @@ HandleError:
         }
     }
 
+    // Cleanup preread infra.
     LGPrereadTerm();
 
+    // Deallocate preread-related objects.
     delete m_pPrereadWatermarks;
     m_pPrereadWatermarks = pNil;
     delete m_plpreread;
@@ -11203,6 +12873,7 @@ HandleError:
     delete m_plprereadSuppress;
     m_plprereadSuppress = pNil;
 
+    // Deallocate LogReader
     if ( err == JET_errSuccess )
     {
         err = m_pLogReadBuffer->ErrLReaderTerm();
@@ -11257,6 +12928,8 @@ ERR LOG::ErrLGIVerifyRedoMapForIfmp( const IFMP ifmp )
 
     if ( NULL != pLogRedoMapZeroed )
     {
+        //  oh, oh. An operation was not reconciled. We must fail
+        //  recovery accordingly.
         if ( pLogRedoMapZeroed->FAnyPgnoSet() )
         {
             pLogRedoMapZeroed->GetOldestLgposEntry( &pgno, &rme, &cpg );
@@ -11295,6 +12968,8 @@ ERR LOG::ErrLGIVerifyRedoMapForIfmp( const IFMP ifmp )
 
     if ( NULL != pLogRedoMapBadDbTime )
     {
+        //  oh, oh. An operation was not reconciled. We must fail
+        //  recovery accordingly.
         if ( pLogRedoMapBadDbTime->FAnyPgnoSet() )
         {
             pLogRedoMapBadDbTime->GetOldestLgposEntry( &pgno, &rme, &cpg );
@@ -11304,6 +12979,7 @@ ERR LOG::ErrLGIVerifyRedoMapForIfmp( const IFMP ifmp )
             OSTrace( JET_tracetagRecoveryValidation,
                      OSFormat( "IFMP %d: Failed recovery as log redo map of mismatched Dbtimes detected at least one unreconciled entry in pgno: %d.", ifmp, pgno ) );
 
+            // Log the event.
             err = ErrLGRIReportDbtimeMismatch(
                 m_pinst,
                 ifmp,
@@ -11353,7 +13029,12 @@ ERR LOG::ErrLGCheckDatabaseGens(
     {
         return ErrERRCheck( JET_errCommittedLogFilesMissing );
     }
+    // else ...
 
+    //  We would expect when calling this from ErrLGICheckGenMaxRequiredAfterRedo() ->
+    //  ErrLGCheckGenMaxRequired() that we couldn't end with a valid check of lgens and
+    //  the DB state left in the patched state.
+    //
     Assert( JET_dbstateDirtyAndPatchedShutdown != pdbfilehdr->Dbstate() );
 
     return JET_errSuccess;
@@ -11364,8 +13045,9 @@ ERR LOG::ErrLGCheckDBGensRequired( const LONG lGenCurrent )
     ERR errWorst = JET_errSuccess;
     ERR errDbid[dbidMax];
 
-    memset( errDbid, 0, sizeof(errDbid) );
+    memset( errDbid, 0, sizeof(errDbid) );  // set all to JET_errSuccess
 
+    //  Check lGenMaxRequired before any UNDO operations
 
     for ( DBID dbidT = dbidUserLeast; dbidT < dbidMax; dbidT++ )
     {
@@ -11380,10 +13062,13 @@ ERR LOG::ErrLGCheckDBGensRequired( const LONG lGenCurrent )
         if ( pfmpT->FSkippedAttach()
             || pfmpT->FDeferredAttach() )
         {
+            //  skipped attachments is a restore-only (or m_fReplayMissingMapEntryDB analysis flag) concept
+            // SOFT_HARD: use per FMP entry
             Assert( !pfmpT->FSkippedAttach() || m_irstmapMac || !m_fReplayMissingMapEntryDB || pfmpT->FHardRecovery() );
             continue;
         }
 
+        //  returns JET_errSuccess, JET_errRequiredLogFilesMissing, or JET_errCommittedLogFilesMissing
         errDbid[dbidT] = ErrLGCheckDatabaseGens( pfmpT->Pdbfilehdr().get(), lGenCurrent );
 
         if ( errDbid[dbidT] == JET_errRequiredLogFilesMissing )
@@ -11421,6 +13106,8 @@ VOID LOG::LGIReportMissingHighLog( const LONG lGenCurrent, const IFMP ifmp ) con
     const UINT csz = 7;
     const WCHAR *rgszT[csz];
 
+    //  We've lost a log we can't possibly recover from ... we really 
+    //  are pooched.
 
     rgszT[0] = pfmp->WszDatabaseName();
     OSStrCbFormatW( szT1, sizeof(szT1), L"%d", lGenMinRequired );
@@ -11477,6 +13164,8 @@ VOID LOG::LGIReportMissingCommitedLogsButHasLossyRecoveryOption( const LONG lGen
     const UINT  csz = 6;
     const WCHAR *rgwszT[csz];
 
+    //  We've lost a log we can recover from, log an event to indicate 
+    //  admin may be able to manually recover.
 
     rgwszT[0] = pfmp->WszDatabaseName();
     OSStrCbFormatW( wszT1, sizeof(wszT1), L"%d", lGenMinRequired );
@@ -11514,12 +13203,15 @@ VOID LOG::LGIReportCommittedLogsLostButConsistent( const LONG lGenCurrent, const
     const UINT  csz = 6;
     const WCHAR *rgszT[csz];
 
+    //  We lost logs, but it should be ok, they were only committed, not partially
+    //  flushed to the database, and the user wants us to try to recover anyway ...
 
     Assert( m_fIgnoreLostLogs );
 
     rgszT[0] = pfmp->WszDatabaseName();
     OSStrCbFormatW( szT1, sizeof(szT1), L"%d", cMissingLogs );
     rgszT[1] = szT1;
+    //  If we removed current log this is ahead by 1.
     OSStrCbFormatW( szT2, sizeof(szT1), L"%d", lGenCurrent );
     rgszT[2] = szT2;
     OSStrCbFormatW( szT3, sizeof(szT2), L"%d", (LONG) pfmp->Pdbfilehdr()->le_lGenMaxCommitted );
@@ -11550,6 +13242,9 @@ VOID LOG::LGIPossiblyGenerateLogfileMissingEvent(
 
     if ( JET_errRequiredLogFilesMissing == err )
     {
+        //  This would mean we are in trouble, because in recreating a new current log
+        //  and subtracting one here, it means we have a DB that needed a log we actually
+        //  removed.  We have enforce's protecting against this before we delete the log.
         Assert( !m_pLogStream->FRemovedLogs() );
         LGIReportMissingHighLog( lGenCurrent, ifmp );
     }
@@ -11565,6 +13260,8 @@ VOID LOG::LGIPossiblyGenerateLogfileMissingEvent(
             {
                 LGIReportCommittedLogsLostButConsistent( lGenCurrent, lGenEffectiveCurrent, ifmp );
             }
+            // else don't log an event. it is normal for recovery-without-undo to encounter
+            // this condition
         }
     }
 }
@@ -11588,6 +13285,8 @@ VOID LOG::LGIPossiblyGenerateLogfileMissingEvents(
         if ( pfmpT->FSkippedAttach()
             || pfmpT->FDeferredAttach() )
         {
+            //  skipped attachments is a restore-only (or m_fReplayMissingMapEntryDB analysis flag) concept
+            // SOFT_HARD: use per FMP entry
             Assert( !pfmpT->FSkippedAttach() || m_irstmapMac || !m_fReplayMissingMapEntryDB || pfmpT->FHardRecovery() );
         }
         else
@@ -11597,8 +13296,11 @@ VOID LOG::LGIPossiblyGenerateLogfileMissingEvents(
             {
                 LGIPossiblyGenerateLogfileMissingEvent( errWorst, lGenCurrent, lGenEffectiveCurrent, ifmp );
             }
-            else if ( errThisDb < JET_errSuccess )
+            else if ( errThisDb < JET_errSuccess ) // this DB isn't serious enough to log about ...
             {
+                //  This would mean we are in trouble, because in recreating a new current log
+                //  and subtracting one here, it means we have a DB that needed a log we actually
+                //  removed.  We have enforce's protecting against this before we delete the log.
                 Assert( !m_pLogStream->FRemovedLogs() );
             }
         }
@@ -11614,32 +13316,53 @@ ERR LOG::ErrLGCheckGenMaxRequired()
     LONG lGenEffectiveCurrent = lGenCurrent;
     if ( m_fLostLogs && m_pLogStream->FCreatedNewLogFileDuringRedo() )
     {
+        //  If we removed logs before this point, it means we (possibly removed and) 
+        //  recreated the current log meaning the lGenEffectiveCurrent is in fact 1 more 
+        //  than it should be, making up for that here ...
         lGenEffectiveCurrent = lGenEffectiveCurrent - 1;
     }
 
-    Assert( !m_fEventedLLRDatabases );
+    //  m_fLogslost that m_fEventedLLRDatabases is true too...
+    Assert( !m_fEventedLLRDatabases );  // should be called only once w/ fCheckOnly false ... or we'll log events twice ...
 
     errWorst = ErrLGCheckDBGensRequired( lGenEffectiveCurrent );
 
+    //
+    //  bail out if everything is a-ok ...
+    //
     if ( errWorst == JET_errSuccess )
     {
         return JET_errSuccess;
     }
 
 
+    //  Handling error conditions for databases ...
 
+    //
+    //  We now go through the databases and log the appropriate errors
+    //  for the databases which are in the worst state for this log.
+    //
     LGIPossiblyGenerateLogfileMissingEvents( errWorst, lGenCurrent, lGenEffectiveCurrent );
     
+    // The log gen we require replay through depends upon the user specification
+    //  as to whether it is OK to lose log files...
 
     if ( m_fIgnoreLostLogs && errWorst == JET_errCommittedLogFilesMissing )
     {
+        //  In the event it is ok to lose log files, we down cast this error
+        //  to a warning ...
 
+        //  It is far too difficult to weave this warning all the way out
+        //  through recovery, so we set something on LOG, and pick it up
+        //  in the return from ErrLGSoftStart() ...
+        //
         m_fLostLogs = fTrue;
 #ifdef DEBUG
         m_fEventedLLRDatabases = fTrue;
 #endif
         errWorst = JET_wrnCommittedLogFilesLost;
 
+        // Since, we decided to allow loss of committed logs, fixup max committed generation in database header(s)
         for (DBID dbid = dbidUserLeast; dbid < dbidMax; dbid++ )
         {
             IFMP ifmp = m_pinst->m_mpdbidifmp[ dbid ];
@@ -11671,6 +13394,11 @@ ERR LOG::ErrLGCheckGenMaxRequired()
         }
     }
 
+    //  We have a strong contract, either we are 
+    //      A. missing required logs, or
+    //      B. missing committed logs, or
+    //      C. missing committed logs AND user asked for us to try to recovery anyway ...
+    //  in that order of preference.
     Assert( errWorst == JET_errRequiredLogFilesMissing ||
             errWorst == JET_errCommittedLogFilesMissing ||
             errWorst == JET_wrnCommittedLogFilesLost );
@@ -11680,6 +13408,7 @@ ERR LOG::ErrLGCheckGenMaxRequired()
 
 ERR LOG::ErrLGMostSignificantRecoveryWarning( void )
 {
+    //  Shouldn't have removed logs set, w/o lost logs also set ...
     Assert( !m_pLogStream->FRemovedLogs() || m_fLostLogs );
     #ifdef DEBUG
     if ( m_pLogStream->FRemovedLogs() )
@@ -11687,11 +13416,21 @@ ERR LOG::ErrLGMostSignificantRecoveryWarning( void )
         Assert( m_fEventedLLRDatabases );
     }
     #endif
-    return m_pLogStream->FRemovedLogs() ? ErrERRCheck( JET_wrnCommittedLogFilesRemoved ) :
+    return m_pLogStream->FRemovedLogs() ? ErrERRCheck( JET_wrnCommittedLogFilesRemoved ) : // most significant warning
             m_fLostLogs ? ErrERRCheck( JET_wrnCommittedLogFilesLost ) :
             JET_errSuccess;
 }
 
+//  Redoes database operations in log from lgposRedoFrom to end.
+//
+//  GLOBAL PARAMETERS
+//                      szLogName       (IN)        full path to szJetLog (blank if current)
+//                      lgposRedoFrom   (INOUT)     starting/ending lGeneration and ilgsec.
+//
+//  RETURNS
+//                      JET_errSuccess
+//                      error from called routine
+//
 ERR LOG::ErrLGRRedo( BOOL fKeepDbAttached, CHECKPOINT *pcheckpoint, LGSTATUSINFO *plgstat )
 {
     ERR     err;
@@ -11700,9 +13439,11 @@ ERR LOG::ErrLGRRedo( BOOL fKeepDbAttached, CHECKPOINT *pcheckpoint, LGSTATUSINFO
     ERR     errAfterRedo            = JET_errSuccess;
     LGPOS   lgposRedoFrom;
     INT     fStatus;
-    BOOL    fSkipUndo               = fFalse;
+    BOOL    fSkipUndo               = fFalse;   // default is to perform undo
     BOOL    fRcvCleanlyDetachedDbs  = fTrue;
 
+    //  set flag to suppress logging
+    //
     m_fRecovering = fTrue;
     m_fRecoveringMode = fRecoveringRedo;
 
@@ -11714,14 +13455,21 @@ ERR LOG::ErrLGRRedo( BOOL fKeepDbAttached, CHECKPOINT *pcheckpoint, LGSTATUSINFO
 
     Assert( m_fUseRecoveryLogFileSize == fTrue );
 
+    //  open the proper log file
+    //
+    // lgposRedoFrom is based on the checkpoint, which is based on
+    // lgposStart which is based on the beginning of a log
+    // record (beginning of a begin-transaction).
     lgposRedoFrom = pcheckpoint->checkpoint.le_lgposCheckpoint;
 
+    //  Set checkpoint before any logging activity.
 
     m_pcheckpoint->checkpoint.le_lgposCheckpoint = pcheckpoint->checkpoint.le_lgposCheckpoint;
     m_pcheckpoint->checkpoint.le_lgposDbConsistency = pcheckpoint->checkpoint.le_lgposDbConsistency;
 
     Call( m_pLogStream->ErrLGRIOpenRedoLogFile( &lgposRedoFrom, &fStatus ) );
 
+    //  capture the result of ErrLGRIOpenRedoLogFile; it might have a warning from ErrLGCheckReadLastLogRecordFF
     errBeforeRedo = err;
 
     if ( fStatus != fRedoLogFile )
@@ -11732,8 +13480,10 @@ ERR LOG::ErrLGRRedo( BOOL fKeepDbAttached, CHECKPOINT *pcheckpoint, LGSTATUSINFO
 
     Assert( m_pLogStream->FLGFileOpened() );
 
+    // check for the first time agains the potential stopping point
     if ( FLGRecoveryLgposStopLogRecord( lgposRedoFrom ) )
     {
+        // we hit already the desired log stop position
         
 
         Error( ErrLGISetQuitWithoutUndo( ErrERRCheck( JET_errRecoveredWithoutUndo ) ) );
@@ -11741,12 +13491,21 @@ ERR LOG::ErrLGRRedo( BOOL fKeepDbAttached, CHECKPOINT *pcheckpoint, LGSTATUSINFO
     
     Assert( m_fRecoveringMode == fRecoveringRedo );
 
+    // XXX
+    // The flush point should actually be after the current record
+    // because the semantics of m_lgposToFlush are to point to the log
+    // record that has not been flushed to disk.
     m_pLogWriteBuffer->SetLgposWriteTip( lgposRedoFrom );
 
     m_pinst->m_pbackup->BKCopyLastBackupStateFromCheckpoint( &pcheckpoint->checkpoint );
 
+    // the default is that logs didn't got truncated because
+    // it is safer, eventualy a new full is needed before an incremental
+    // or some logs are lingering around until the next full backup
     m_pinst->m_pbackup->BKSetLogsTruncated( fFalse );
 
+    //  Check attached db already. No need to check in LGInitSession.
+    //
     Call( ErrLGRIInitSession(
                 &pcheckpoint->checkpoint.dbms_param,
                 pcheckpoint->rgbAttach,
@@ -11761,6 +13520,8 @@ ERR LOG::ErrLGRRedo( BOOL fKeepDbAttached, CHECKPOINT *pcheckpoint, LGSTATUSINFO
                     fKeepDbAttached,
                     &fRcvCleanlyDetachedDbs,
                     plgstat );
+    //  remember the error code from ErrLGRIRedoOperations() which may have a corruption warning
+    //      from ErrLGCheckReadLastLogRecordFF() which it may eventually call
     errRedo = err;
 
     if ( !m_pinst->m_isdlInit.FTriggeredStep( eInitLogRecoverySilentRedoDone ) )
@@ -11774,6 +13535,10 @@ ERR LOG::ErrLGRRedo( BOOL fKeepDbAttached, CHECKPOINT *pcheckpoint, LGSTATUSINFO
         m_pinst->m_isdlInit.Trigger( eInitLogRecoveryVerboseRedoDone );
     }
 
+    // we can succeed out of redo without triggering the begin undo callback if
+    // the database/log is cleanly terminated ... in such a case we need to make 
+    // sure we do not begin undo as well, so set fSkipUndo if the client 
+    // indicates undo should be skipped from the JET_sntBeginUndo callback.
     if ( err == JET_errRecoveredWithoutUndo )
     {
         Assert( errRedo == JET_errRecoveredWithoutUndo );
@@ -11788,6 +13553,7 @@ ERR LOG::ErrLGRRedo( BOOL fKeepDbAttached, CHECKPOINT *pcheckpoint, LGSTATUSINFO
         fSkipUndo = ( errBeginUndo == JET_errRecoveredWithoutUndo );
         if ( !fSkipUndo )
         {
+            //  Any other error, bail out ...
             err = errBeginUndo;
         }
     }
@@ -11806,10 +13572,28 @@ ERR LOG::ErrLGRRedo( BOOL fKeepDbAttached, CHECKPOINT *pcheckpoint, LGSTATUSINFO
 
     if ( err < 0 )
     {
+        //  LGITryCleanupAfterRedoError is done in HandleError section,
+        //  so we are not calling it here.
+        //
+        //  flush as much as possible before bail out
+        //
+        //  UNDONE: if there are some deferred attachments,
+        //  is the checkpoint going to be erroneously updated
+        //  past the genMin of those attachments??
+        //
+        //  LGITryCleanupAfterRedoError( errRedo );
 
 #ifdef DEBUG
+        //  Recovery should never fail unless some hardware problems
+        //  or out of memory (mainly with RFS enabled)
+        //  NOTE: it can also fail from corruption
         switch( errRedo )
         {
+//
+//  SEARCH-STRING: SecSizeMismatchFixMe
+//
+//          case JET_errLogSectorSizeMismatch:
+//          case JET_errLogSectorSizeMismatchDatabasesConsistent:
             case JET_errDiskFull:
             case JET_errOutOfBuffers:
             case JET_errOutOfMemory:
@@ -11820,33 +13604,46 @@ ERR LOG::ErrLGRRedo( BOOL fKeepDbAttached, CHECKPOINT *pcheckpoint, LGSTATUSINFO
                 Assert( JET_errSuccess != errRedo );
                 break;
         }
-#endif
+#endif  //  DEBUG
 
         goto HandleError;
     }
 
+    //  we should have the right sector size by now or an error that will make redo fail
 
     Assert( m_pLogStream->GetCurrentFileHdr() != NULL );
     Assert( m_pLogStream->CbSec() == m_pLogStream->GetCurrentFileHdr()->lgfilehdr.le_cbSec );
 
+    //  performing recovery without undo is very like erroring out here, but we do a little
+    //  more validation before "erroring" out ...
 
     if ( fSkipUndo &&
             ( !m_fAfterEndAllSessions || JET_errRecoveredWithoutUndo == errRedo ) )
     {
+        //  check lGenMaxRequired to verify we replayed as much as required
+        //
         if ( errRedo != JET_errRecoveredWithoutUndo )
         {
             Call( ErrLGICheckGenMaxRequiredAfterRedo() );
         }
         if ( err != JET_wrnCommittedLogFilesLost )
         {
-            CallS( err );
+            CallS( err );   //  if we saw a 587 / JET_wrnCommittedLogFilesRemoved we probably have a larger issue
         }
 
+        //  if we are recovering with undo then check for deferred attachments
+        //
         if ( errRedo != JET_errRecoveredWithoutUndo )
         {
+            //  since this is not the Undo phase of recovery, no
+            //  force-detach will actually get logged (can't log
+            //  anything during RecoveryRedo)
+            //
             Call( ErrLGRICheckForAttachedDatabaseMismatch( m_pinst, !!m_fReplayingIgnoreMissingDB, !!m_fLastLRIsShutdown ) );
         }
 
+        //  flush as much as possible before bail out
+        //
         LGITryCleanupAfterRedoError( errRedo );
 
         if ( m_fTruncateLogsAfterRecovery )
@@ -11856,6 +13653,8 @@ ERR LOG::ErrLGRRedo( BOOL fKeepDbAttached, CHECKPOINT *pcheckpoint, LGSTATUSINFO
 
         AssertRTL( FLGILgenHighAtRedoStillHolds() );
 
+        //  generate error indicating Undo was not performed
+        //
         Error( ErrERRCheck( JET_errRecoveredWithoutUndo ) );
     }
 
@@ -11869,10 +13668,14 @@ ERR LOG::ErrLGRRedo( BOOL fKeepDbAttached, CHECKPOINT *pcheckpoint, LGSTATUSINFO
 
     OSTrace( JET_tracetagInitTerm, OSFormat( "[Recovery] Begin undo operations. [pinst=%p]", m_pinst ) );
 
+    //  Check lGenMaxRequired/lGenMaxCommitted before any UNDO operations
+    //
     Call( ErrLGICheckGenMaxRequiredAfterRedo() );
     Assert( err == JET_errSuccess ||
                 ( m_fIgnoreLostLogs && ErrLGMostSignificantRecoveryWarning() > JET_errSuccess ) );
 
+    //  Redo considers the whole file flushed, now that undo may be adding records to the file, that is
+    //  obviously not true, so fix that by moving it back to what was actually redone.
     if ( CmpLgpos( m_lgposFlushTip, m_lgposRedo ) > 0 )
     {
         m_pLogWriteBuffer->LockBuffer();
@@ -11880,10 +13683,13 @@ ERR LOG::ErrLGRRedo( BOOL fKeepDbAttached, CHECKPOINT *pcheckpoint, LGSTATUSINFO
         m_pLogWriteBuffer->UnlockBuffer();
     }
 
+    // If the current log was not found during replay, create it now
     if ( !m_pLogStream->FLGRedoOnCurrentLog() )
     {
+        // update sector size for new format if needed
         m_pLogStream->LGResetSectorGeometry( m_fUseRecoveryLogFileSize ? m_lLogFileSizeDuringRecovery : 0 );
 
+        //  re-initialize the log manager's buffer with user settings
         Call( m_LogBuffer.ErrLGInitLogBuffers( m_pinst, m_pLogStream ) );
         Call( m_pLogStream->ErrLGRStartNewLog( m_pLogStream->GetCurrentFileGen() + 1 ) );
     }
@@ -11892,28 +13698,45 @@ ERR LOG::ErrLGRRedo( BOOL fKeepDbAttached, CHECKPOINT *pcheckpoint, LGSTATUSINFO
     m_fDBGNoLog = fFalse;
 #endif
 
+    //  Check that the checkpoint has advanced during recovery.
+    //
     Assert( CmpLgpos( m_pcheckpoint->checkpoint.le_lgposCheckpoint,
                     pcheckpoint->checkpoint.le_lgposCheckpoint )  >= 0 );
 
     BOOL fDummy;
+    // Setup log buffers to have end of the current log file.
     Call( m_pLogReadBuffer->ErrLGCheckReadLastLogRecordFF( &fDummy, fTrue ) );
     CallS( err );
 
+    //  capture the result of this operation
+    //
     errAfterRedo = err;
 
     if ( FIsOldLrckLogFormat( m_pLogStream->GetCurrentFileHdr()->lgfilehdr.le_ulMajor ) )
     {
+        // update sector size for new format if needed
         m_pLogStream->LGResetSectorGeometry( m_fUseRecoveryLogFileSize ? m_lLogFileSizeDuringRecovery : 0 );
     }
 
+    //  re-initialize the log manager's buffer with user settings
     Call( m_LogBuffer.ErrLGInitLogBuffers( m_pinst, m_pLogStream ) );
 
+    // allow flush thread to do flushing now.
     m_pLogWriteBuffer->SetFNewRecordAdded( fTrue );
 
+    //  close and reopen log file in R/W mode
+    //
     Call( m_pLogStream->ErrLGOpenFile() );
 
     m_pinst->m_isdlInit.Trigger( eInitLogRecoveryReopenDone );
 
+    //  Signal detach so users who have open sessions during redo
+    //  can cleanup before we transition to undo. This is necessary
+    //  because some of the calls made from those sessions (backup is
+    //  one example) may try to generate LRs if they are not running
+    //  during fRecoveringRedo, which might happen if we let those
+    //  sessions leak beyond this point.
+    //
     for ( DBID dbid = dbidUserLeast; dbid < dbidMax; dbid++ )
     {
         IFMP ifmp = m_pinst->m_mpdbidifmp[ dbid ];
@@ -11925,27 +13748,36 @@ ERR LOG::ErrLGRRedo( BOOL fKeepDbAttached, CHECKPOINT *pcheckpoint, LGSTATUSINFO
         if ( NULL != pfmp->Pdbfilehdr() &&
              !pfmp->FContainsDataFromFutureLogs() )
         {
+            //  fire callback for the dbs to be detached
             (void)ErrLGDbDetachingCallback( m_pinst, pfmp );
         }
     }
 
 
+    //  switch to undo mode
 
     m_fRecoveringMode = fRecoveringUndo;
 
     OSTraceWriteRefLog( ostrlSystemFixed, sysosrtlUndoBegin|sysosrtlContextInst, m_pinst, (PVOID)&m_pinst->m_iInstance, sizeof(m_pinst->m_iInstance) );
 
+    //  we should be able to establish desired log format at this point (or fail)
 
     const LogVersion * plgvDesired = NULL;
     BOOL fLogVersionNeedsUpdate =
                     ( m_pLogStream->ErrLGGetDesiredLogVersion( (JET_ENGINEFORMATVERSION)UlParam( m_pinst, JET_paramEngineFormatVersion ), &plgvDesired ) >= JET_errSuccess ) &&
                     FLGFileVersionUpdateNeeded( *plgvDesired );
+    //  Signal log rollover if there's log version change
 
+    //  switch from a finished log file to a new one if necessary
+    //  a new log file may be needed if the current log file is full
     Call( m_pLogStream->ErrLGSwitchToNewLogFile( m_pLogWriteBuffer->LgposWriteTip().lGeneration, 0 ) );
 
+    //  we must move the max log required / waypoint up to the current log for undo ...
 
     Call( ErrLGUpdateWaypointIFMP( m_pinst->m_pfsapi ) );
 
+    //  This may not hold if !m_fAfterEndAllSessions can affect something in the code
+    //  above here.
     Assert( FLGILgenHighAtRedoStillHolds() );
 
     Assert( !m_fAfterEndAllSessions || !m_fLastLRIsShutdown );
@@ -11953,14 +13785,23 @@ ERR LOG::ErrLGRRedo( BOOL fKeepDbAttached, CHECKPOINT *pcheckpoint, LGSTATUSINFO
     {
         Assert( !fSkipUndo );
 
+        //  DbList must have been loaded by now
+        //  UNDONE: Is it possible to have the
+        //  RcvUndo as the first log record in
+        //  a log file (eg. crash after creating
+        //  log file, but before anything but
+        //  the header can be flushed?)
         Enforce( !m_fNeedInitialDbList );
 
         if ( !m_fLastLRIsShutdown )
         {
+            //  write a RecoveryUndo record to indicate start to undo
+            //  this corresponds to the RecoveryQuit record that
+            //  will be written out in LGRIEndAllSessions()
             CallR( ErrLGRecoveryUndo(
                         this,
                         fLogVersionNeedsUpdate || BoolParam( m_pinst, JET_paramAggressiveLogRollover ) ) );
-            fLogVersionNeedsUpdate = fFalse;
+            fLogVersionNeedsUpdate = fFalse; // RcvUndo record took care of log version update for us! Yay!
             m_pinst->SetStatusUndo();
             m_lgposRecoveryUndo = m_pLogWriteBuffer->LgposLogTip();
             m_pinst->m_isdlInit.FixedData().sInitData.lgposRecoveryUndoEnd = m_lgposRecoveryUndo;
@@ -11974,6 +13815,10 @@ ERR LOG::ErrLGRRedo( BOOL fKeepDbAttached, CHECKPOINT *pcheckpoint, LGSTATUSINFO
 
         Call( ErrLGRIEndAllSessions(
                     fTrue,
+                    // If we saw a Shutdown but not a Term record, it means that
+                    // it was a lossy failover in the middle of JetTerm and the
+                    // other side may have already cleanly terminated, so do not
+                    // keep db attached at end of recovery
                     fKeepDbAttached && !m_fLastLRIsShutdown,
                     &pcheckpoint->checkpoint.le_lgposCheckpoint,
                     pcheckpoint->rgbAttach ) );
@@ -11994,19 +13839,41 @@ ERR LOG::ErrLGRRedo( BOOL fKeepDbAttached, CHECKPOINT *pcheckpoint, LGSTATUSINFO
 
     Assert( m_pLogStream->FLGFileOpened() || m_pLogStream->FLGProbablyWriting() );
 
+    // ensure that everything hits the disk
     Call( m_pLogWriteBuffer->ErrLGWaitAllFlushed( fTrue ) );
 
+    // the last thing to do with the checkpoint is to update it to
+    // the Term log record. This will make us determine a clean shutdown.
+    // The last term found on redo should be set but still check it
     if ( ( 0 != CmpLgpos( &lgposMin, &m_lgposRedoLastTerm ) ) && fRcvCleanlyDetachedDbs )
     {
+        // check that the last redo is either the same as the last term redone
+        // or it is just a checksum record after it
 #ifdef DEBUG
+        // If you crash us at end of ErrLGSoftStart while recovery the files 
+        // in ShadowLogs in accept DML, AND then recover again, this assert 
+        // goes off ... this is b/c the m_lgposRedoLastTerm is at the end
+        // of the previous file, and we've switched to a new file, so 
+        // m_lgposRedo is at the beginning of it.  Logically it's at the
+        // last term in the previous file though ... so this 3rd big clause
+        // is essentially the same as the 2nd clause, but with a log roll
+        // in-beteween.
         Assert( 0 == CmpLgpos( &m_lgposRedo, &m_lgposRedoLastTerm ) ||
                 0 == CmpLgpos( &m_lgposRedo, &m_lgposRedoLastTermChecksum ) ||
+                //  We should be on the first sector of the next log file after the last term ...
+                //      and the previous log redo should be equal to last term or last term checksum ...
                 ( ( ( m_lgposRedoLastTerm.lGeneration + 1 ) == m_lgposRedo.lGeneration ) &&
                   ( m_lgposRedo.isec == m_pLogStream->CSecHeader() ) &&
                   ( m_lgposRedo.ib == 0 ) &&
                         ( 0 == CmpLgpos( &m_lgposRedoPreviousLog, &m_lgposRedoLastTerm ) ||
                           0 == CmpLgpos( &m_lgposRedoPreviousLog, &m_lgposRedoLastTermChecksum ) ) ) );
 #endif
+        // if we had a clean termination (m_fAfterEndAllSessions is TRUE)
+        // then we need to regenerate the checkpoint with the last
+        // termination position which is the last thing it got redone
+        //  Ignore any error in RTL , because in the worst case, we just end
+        //  up rescanning all the log files only to find out nothing
+        //  needs to be redone.
         ERR errT = JET_errSuccess;
         LogJETCall( errT = ErrLGIUpdateCheckpointLgposForTerm( m_lgposRedoLastTerm ) );
         if ( JET_errSuccess != errT )
@@ -12021,14 +13888,19 @@ ERR LOG::ErrLGRRedo( BOOL fKeepDbAttached, CHECKPOINT *pcheckpoint, LGSTATUSINFO
         m_pLogStream->LGTruncateLogsAfterRecovery();
     }
 
+    //  check the current generation
 
     Assert( lGenerationMax < lGenerationMaxDuringRecovery );
     if ( m_pLogStream->GetCurrentFileGen() >= lGenerationMax )
     {
 
+        //  the current generation is beyond the last acceptable non-recovery generation
+        //      (e.g. we have moved into the reserved generations which are between
+        //       lGenerationMax and lGenerationMaxDuringRecovery)
 
         Assert( m_pLogStream->GetCurrentFileGen() <= lGenerationMaxDuringRecovery );
 
+        //  do not allow any more generations -- user must wipe logs and restart at generation 1
 
         Error( ErrERRCheck( JET_errLogSequenceEndDatabasesConsistent ) );
     }
@@ -12051,10 +13923,14 @@ HandleError:
         OSTraceWriteRefLog( ostrlSystemFixed, sysosrtlRedoUndoFail|sysosrtlContextInst, m_pinst, rgul, sizeof(rgul) );
     }
 
+    //  there are 4 errors to consolidate here: err, errBeforeRedo, errRedo, errAfterRedo
+    //  precedence is as follows: (most) err, errBeforeRedo, errRedo, errAfterRedo (least)
 
+    //  errBeforeRedo can only be success or warning.
 
     Assert( errBeforeRedo >= JET_errSuccess );
 
+    //  If err is JET_errSuccess or warning, neither of errRedo/errAfterRedo should be an error
 
     if ( err >= JET_errSuccess )
     {
@@ -12081,12 +13957,27 @@ HandleError:
         }
     }
 
+    //  We used to call LGITryCleanupAfterRedoError with parameter errRedo.
+    //  In LGITryCleanupAfterRedoErr, if the errRedo parameter passed in is
+    //  JET_errInvalidLogSequence, we disable check point file update.
+    //  Since we moved the LGITryCleanupAfterRedoError here and pass parameter err
+    //  instead of errRedo to LGITryCleanupAfterRedoError, we are making sure the
+    //  case is covered with this assert.
 
     if ( errRedo < JET_errSuccess )
     {
         Assert( err == errRedo );
     }
 
+    //  After ErrLGRIInitSession, we set this flag to fFalse, and set it to fTrue
+    //  after we call ErrLGRIEndAllSessions or ErrLGRIEndAllSessionsWithError.
+    //  What we do in ErrLGRIEndAllSessions/ErrLGRIEndAllSessionsWithError is cleanup work
+    //  such as terminating the instance.
+    //
+    //  We are passing err instead of errRedo as the parameter here, since this
+    //  covers the case that errRedo equals JET_errInvalidLogSequence, and we are
+    //  good to disable check point file update in other cases when err is
+    //  JET_errInvalidLogSequence while errRedo is not.
 
     if ( !m_fAfterEndAllSessions )
     {
@@ -12096,11 +13987,14 @@ HandleError:
 
     Assert( NULL == m_pctablehash );
 
+    //  set flag to suppress logging
+    //
     m_fRecovering = fFalse;
     m_fRecoveringMode = fRecoveringNone;
 
     if ( err >= JET_errSuccess )
     {
+        //  verify the log sector size
 
         Assert( m_pLogStream->GetCurrentFileHdr() != NULL );
         Assert( m_pLogStream->CbSec() == m_pLogStream->GetCurrentFileHdr()->lgfilehdr.le_cbSec );
@@ -12111,7 +14005,9 @@ HandleError:
             Assert( m_pLogStream->CSecHeader() == ( sizeof( LGFILEHDR ) + m_pLogStream->CbSec() - 1 ) / m_pLogStream->CbSec() );
         }
 
+        // Set here, consumed in ErrLGMoveToRunningState ...
         Assert( m_lLogFileSizeDuringRecovery == LONG( ( QWORD( m_pLogStream->GetCurrentFileHdr()->lgfilehdr.le_csecLGFile ) * m_pLogStream->GetCurrentFileHdr()->lgfilehdr.le_cbSec ) / 1024 ) );
+        // just in case ...
         m_lLogFileSizeDuringRecovery = LONG( ( QWORD( m_pLogStream->GetCurrentFileHdr()->lgfilehdr.le_csecLGFile ) *
                                           m_pLogStream->GetCurrentFileHdr()->lgfilehdr.le_cbSec ) / 1024 );
         
@@ -12139,24 +14035,36 @@ ERR LOG::ErrLGMoveToRunningState(
         CallR( ErrERRCheck( errFromErrLGRRedo ) );
     }
 
+    //
+    //  Find any mismatched log parameters 
+    //
+    //  NOTE we can only switch over if we've got circular logging ...
     Assert( m_pLogStream->LogExt() );
     fMismatchedLogChkExt = !FLGIsDefaultExt( fFalse, m_pLogStream->LogExt() );
     fMismatchedLogFileSize = UlParam( m_pinst, JET_paramLogFileSize ) != (ULONG_PTR)m_lLogFileSizeDuringRecovery;
     fMismatchedLogFileVersion = m_pLogStream->FIsOldLrckVersionSeen();
 
+    //
+    //  Decide whether or not to delete log files and upgrade various running log params
+    //
     if ( fMismatchedLogChkExt )
     {
+        //  NOTE we can only switch over if we've got circular logging, and it isn't eseutil running ...
         fDeleteLogs = !g_fEseutil && BoolParam( m_pinst, JET_paramCircularLog );
     }
 
+    //  do not use the recovery log file size anymore
+    //
     m_fUseRecoveryLogFileSize = fFalse;
 
+    //  verify the log file size
 
     Assert( m_lLogFileSizeDuringRecovery != 0 && m_lLogFileSizeDuringRecovery != ~(ULONG)0 );
 
     if ( FDefaultParam( m_pinst, JET_paramLogFileSize ) )
     {
 
+        //  the user never set the log file size, so we will set it on their behalf
 
         Call( Param( m_pinst, JET_paramLogFileSize )->Set( m_pinst, ppibNil,  m_lLogFileSizeDuringRecovery, NULL ) );
 
@@ -12166,28 +14074,46 @@ ERR LOG::ErrLGMoveToRunningState(
 
         if ( !BoolParam( m_pinst, JET_paramCleanupMismatchedLogFiles ) )
         {
+            //  we are not allowed to cleanup the mismatched logfiles
             Error( ErrERRCheck( JET_errLogFileSizeMismatchDatabasesConsistent ) );
         }
 
+        //  the user chose a specific log file size, so we must enforce it
         fDeleteLogs = fTrue;
+        // I am surprised we allow this for non-circular logging though ...
 
     }
 
     if ( fMismatchedLogFileVersion )
     {
         m_pLogStream->ResetOldLrckVersionSecSize();
+        // clean up old version logs now if allowed by the user
         fDeleteLogs = BoolParam( m_pinst, JET_paramCleanupMismatchedLogFiles );
     }
 
+    // update sector size for new format if needed
     m_pLogStream->LGResetSectorGeometry( 0 );
 
+    //
+    //  Delete log files ...
+    //
     if ( fDeleteLogs )
     {
 
+        //  the logfile size or log extension doesn't match
 
+        //  we can cleanup the old logs/checkpoint and start a new sequence
+        //
+        //  if we succeed, we will return JET_errSuccess and the user will be at 
+        //      if cleaning up b/c of log file size, gen 1 
+        //      if cleaning up b/c of log ext change, at the next gen in seq
+        //  if we fail, the user will be forced to delete the remaining logs/checkpoint by hand
 
         Call( m_pLogStream->ErrLGRICleanupMismatchedLogFiles( fMismatchedLogChkExt ) );
 
+        //  we created a new log file, so we should clean it up if we fail
+        //  (leaves us with an empty log set which is ok because we are 100% recovered)
+        //
         if ( pfJetLogGeneratedDuringSoftStart )
         {
             *pfJetLogGeneratedDuringSoftStart = fTrue;
@@ -12195,8 +14121,12 @@ ERR LOG::ErrLGMoveToRunningState(
 
     }
 
+    //  extract the size of the log in sectors (some codepaths don't set this, so we should do it now)
+    //
     m_pLogStream->UpdateCSecLGFile();
 
+    // Make sure that m_trxNewest is in multiples of TRXID_INCR
+    //
     m_pinst->m_trxNewest = roundup( m_pinst->m_trxNewest, TRXID_INCR );
 
 HandleError:
@@ -12208,8 +14138,11 @@ HandleError:
 
 VOID LGFakeCheckpointToLogFile( CHECKPOINT * const pcheckpointT, const LGFILEHDR * const plgfilehdrCurrent, ULONG csecHeader )
 {
+    //  Make the checkpoint point to the start of this log generation so that
+    //  we replay all attachment related log records.
     pcheckpointT->checkpoint.dbms_param = plgfilehdrCurrent->lgfilehdr.dbms_param;
 
+    //  Ensure that the checkpoint never reverts.
     Assert( pcheckpointT->checkpoint.le_lgposCheckpoint.le_lGeneration <= plgfilehdrCurrent->lgfilehdr.le_lGeneration );
     pcheckpointT->checkpoint.le_lgposCheckpoint.le_lGeneration = plgfilehdrCurrent->lgfilehdr.le_lGeneration;
     pcheckpointT->checkpoint.le_lgposCheckpoint.le_isec = (WORD) csecHeader;
@@ -12225,6 +14158,8 @@ ERR LOG::ErrLGICheckClosedNormallyInPreviousLog(
 {
     ERR err = JET_errSuccess;
 
+    //  reopen the highest previous log gen file
+    //
     m_pLogStream->LGMakeLogName( eArchiveLog, lGenPrevious );
 
     err = m_pLogStream->ErrLGOpenFile();
@@ -12238,13 +14173,14 @@ ERR LOG::ErrLGICheckClosedNormallyInPreviousLog(
 
     Assert( m_pLogStream->GetCurrentFileGen() == lGenPrevious );
 
+    //  figure out if it was closed normally
 
     Assert( !m_fRecovering );
     Assert( m_fRecoveringMode == fRecoveringNone );
     m_fRecovering = fTrue;
     m_fRecoveringMode = fRecoveringRedo;
 
-    Call( m_pLogReadBuffer->ErrLGCheckReadLastLogRecordFF( pfCloseNormally ) );
+    Call( m_pLogReadBuffer->ErrLGCheckReadLastLogRecordFF( pfCloseNormally ) ); // don't update accumulated segment checksum
 
     m_fRecovering = fFalse;
     m_fRecoveringMode = fRecoveringNone;
@@ -12256,11 +14192,25 @@ HandleError:
     return err;
 }
 
+//
+//  Soft start tries to start the system from current directory.
+//  The database maybe in one of the following state:
+//  1) no log files.
+//  2) database was shut down normally.
+//  3) database was rolled back abruptly.
+//  In case 1, a new log file is generated.
+//  In case 2, the last log file is opened.
+//  In case 3, soft redo is incurred.
+//  At the end of the function, it a proper szJetLog must exists.
+//
 ERR LOG::ErrLGSoftStart( BOOL fKeepDbAttached, BOOL fInferCheckpointFromRstmapDbs, BOOL *pfNewCheckpointFile, BOOL *pfJetLogGeneratedDuringSoftStart )
 {
     ERR                 err;
     ERR                 errErrLGRRedo = JET_wrnNyi;
     BOOL                fCloseNormally = fTrue;
+    //  Initially pfNewCheckpointFile actually only tells us that earlier in the
+    //  init code path we could not find an existing checkpoint.  So coming in here
+    //  it means we couldn't find a checkpoint (or maybe a valid checkpoint)
     BOOL                fUseCheckpointToStartRedo = !(*pfNewCheckpointFile);
     BOOL                fSoftRecovery = fFalse;
     WCHAR               wszPathJetChkLog[IFileSystemAPI::cchPathMax];
@@ -12269,66 +14219,106 @@ ERR LOG::ErrLGSoftStart( BOOL fKeepDbAttached, BOOL fInferCheckpointFromRstmapDb
     BOOL                fCreatedReserveLogs = fFalse;
     BOOL                fDelLog = fFalse;
 
+    // Create a top level scope for all operations belonging to recovery
     TraceContextScope tcScope( iortRecovery );
+    // LOG doesn't know TCE during replay;  will pollute stats for activated passive's cache
     tcScope->nParentObjectClass = tceNone;
 
+    //  Indicate we are in SoftStart / Recovery so that callbacks can call back 
+    //  into ESE if necessary.
 
     Ptls()->fInSoftStart = fTrue;
 
     OSTraceWriteRefLog( ostrlSystemFixed, sysosrtlSoftStartBegin|sysosrtlContextInst, m_pinst, (PVOID)&(m_pinst->m_iInstance), sizeof(m_pinst->m_iInstance) );
 
+    //  By default we will start at the checkpoint
 
     *pfJetLogGeneratedDuringSoftStart = fFalse;
     m_fAbruptEnd = fFalse;
 
     Assert( !m_fLostLogs && !m_pLogStream->FRemovedLogs() && JET_errSuccess == ErrLGMostSignificantRecoveryWarning() );
 
+    //  use the right log file size for recovery
+    //
     Assert( m_fUseRecoveryLogFileSize == fFalse );
     m_fUseRecoveryLogFileSize = fTrue;
 
+    //  set m_fNewCheckpointFile
+    //
     m_fNewCheckpointFile = *pfNewCheckpointFile;
 
+    //  set m_wszLogCurrent
+    //
     m_wszLogCurrent = SzParam( m_pinst, JET_paramLogFilePath );
 
+    //  if no recovery stop position was set, set it to MAX
     if ( CmpLgpos( &m_lgposRecoveryStop, &lgposMin ) == 0 )
     {
         m_lgposRecoveryStop = lgposMax;
     }
     
+    // also make sure that the lgpos is somehow valid ... 
+    // at least if is not lgposMin, then it should have a valid generation
     if ( CmpLgpos( &m_lgposRecoveryStop, &lgposMin ) != 0 && m_lgposRecoveryStop.lGeneration == 0 )
     {
         Error( ErrERRCheck( JET_errInvalidParameter ) );
     }
     
+    // Stop at certain log means we should not even try to open more logs
+    // after that generation
+    // Note: This means it would be hard to honor JET_paramDeleteOldLogs 
+    // which needs EDB.LOG and also with the need to replay with the ESENT97.DLL (for ESENT)
+    //
+    // Note: This means that JET_paramDeleteOutOfRangeLogs won't be able to
+    // be honor either as we rely on EDB.LOG to find what to delete
+    //
     if ( FLGRecoveryLgposStop() &&
         ( BoolParam( m_pinst, JET_paramDeleteOldLogs ) || BoolParam( m_pinst, JET_paramDeleteOutOfRangeLogs ) ) )
     {
         Error( ErrERRCheck( JET_errInvalidParameter ) );
     }
 
+    //  CONSIDER: for tight check, we may check if all log files are
+    //  CONSIDER: continuous by checking the generation number and
+    //  CONSIDER: previous gen's creation date.
 
+    //  try to open current log file to decide the status of log files.
+    //
     err = m_pLogStream->ErrLGTryOpenJetLog( JET_OpenLogForRecoveryCheckingAndPatching, lGenSignalCurrentID, (m_pLogStream->LogExt() == NULL) );
     if ( err < 0 )
     {
         if ( JET_errFileNotFound != err )
         {
 
+            //  we were unable to open edb.jtx/log or there is a missing edbtmp.jtx/log or unable to 
+            //  move edbXXXXX.jtx/log to edb.jtx/log, where XXXXX is the highest log gen.
+            //  also, the error doesn't reveal whether or not edb.jtx/log and edbtmp.jtx/log even exist
+            //  we'll treat the error as a critical failure during file-open -- we can not proceed with recovery
             goto HandleError;
         }
 
+        //  neither szJetLog nor szJetTmpLog exist. If no old generation
+        //  files exists, gen a new logfile at generation 1 (or m_lgenInitial).
+        //
 
         LONG lgenHigh = 0;
+        //  Hard recovery can hit here, with the m_wszLogExt set, though regular init with an empty 
+        //  log directory, doesn't have the m_wszLogExt set, so set it to the default.
         if ( m_pLogStream->LogExt() == NULL )
         {
             LONG    lgenTLegacy = 0;
             BOOL    fDefaultExt = fTrue;
             Call ( m_pLogStream->ErrLGGetGenerationRange( m_wszLogCurrent, NULL, &lgenTLegacy, fTrue, &fDefaultExt ) );
 
+            // if we found something, then we can try and set the extension to that
+            // 
             if ( lgenTLegacy )
             {
                 m_wszChkExt = fDefaultExt ? WszLGGetDefaultExt( fTrue ) : WszLGGetOtherExt( fTrue );
                 m_pLogStream->LGSetLogExt( FLGIsLegacyExt( fFalse, fDefaultExt ? WszLGGetDefaultExt( fFalse ) : WszLGGetOtherExt( fFalse ) ), fFalse );
                 
+                // also, avoid the range check below
+                //
                 lgenHigh = lgenTLegacy;
             }
             else
@@ -12343,24 +14333,37 @@ ERR LOG::ErrLGSoftStart( BOOL fKeepDbAttached, BOOL fInferCheckpointFromRstmapDb
             Call ( m_pLogStream->ErrLGGetGenerationRange( m_wszLogCurrent, NULL, &lgenHigh ) );
         }
         
-        if ( lgenHigh != 0 )
+        if ( lgenHigh != 0 ) // there exists archive log files ...
         {
             const ERR errMissingCurrentLog = m_pLogStream->FTempLogExists() ? JET_errSuccess : JET_errMissingLogFile;
             Call( ErrLGOpenLogMissingCallback( m_pinst, m_pLogStream->LogName(), errMissingCurrentLog, lgenHigh+1, fTrue, JET_MissingLogContinueToRedo ) );
 
+            // we are ok with a missing edb.log but some logs present if the client
+            // wishes us to continue (such as HA log shipping).
+            // We won't need to patch the named log that we found so we don't need 
+            // to go to "CheckLogs", just go to the checkpoint file logic.
+            // 
 
+            // The last named log doesn't have a clean shutdown as the end so:
+            // 
             fCloseNormally = fFalse;
 
             OSTraceWriteRefLog( ostrlSystemFixed, sysosrtlDatapoint|sysosrtlContextInst, m_pinst, (PVOID)&(m_pinst->m_iInstance), sizeof(m_pinst->m_iInstance) );
 
             goto CheckCheckpoint;
+            // Note I changed the behavior of eseutil /r /a, we used to open the high log 
+            // and jump to "CheckLogs", now we just jump straight to checkpoint validation 
+            // and replay. And /a / JET_bitIgnoreLostLogs uses the callback for 
+            // JET_sntOpenCheckpoint to ignore the checkpoint during recovery.
         }
 
         Call( ErrLGOpenLogMissingCallback( m_pinst, m_pLogStream->LogName(), JET_errSuccess, 0, fFalse, JET_MissingLogCreateNewLogStream ) );
 
+        // Delete the leftover checkpoint file before creating new gen 1 log file
         LGFullNameCheckpoint( wszPathJetChkLog );
         m_pinst->m_pfsapi->ErrFileDelete( wszPathJetChkLog );
 
+        // use the right log file size for generating the new log file
         m_fUseRecoveryLogFileSize = fFalse;
 
         Call( m_pLogStream->ErrLGCreateNewLogStream( pfJetLogGeneratedDuringSoftStart ) );
@@ -12368,19 +14371,30 @@ ERR LOG::ErrLGSoftStart( BOOL fKeepDbAttached, BOOL fInferCheckpointFromRstmapDb
         Assert( *pfJetLogGeneratedDuringSoftStart );
 
     }
-    else
+    else // else err < 0 , where err = ErrLGOpenJetLog()
     {
+        //
+        //  At this point we have an m_pfapiLog on the highest generation.
+        //
+//CheckLogs: old label, left in for the referencing comments above.
         LGPOS lgposLastTerm;
 
+        //  read current log file header
+        //
         Call( m_pLogStream->ErrLGReadFileHdr( NULL, iorpLogRecRedo, NULL, fCheckLogID ) );
 
+        //  if we have only one log file and no checkpoint file then the m_lgenInitial can be too
+        //  high here ... see ErrLGInit().
         if ( (*pfNewCheckpointFile) &&
             m_lgenInitial > m_pLogStream->GetCurrentFileGen() )
         {
             Assert( m_lgenInitial == m_pcheckpoint->checkpoint.le_lgposCheckpoint.le_lGeneration );
+            //  We have a slight problem in that we've already created a checkpoint / at least 
+            //  in memory, and initialized it with m_lgenInitial ... fix this ...
             LGISetInitialGen( m_pLogStream->GetCurrentFileGen() );
         }
 
+        //  verify and patch the current log file
 
         Assert( !m_fRecovering );
         Assert( m_fRecoveringMode == fRecoveringNone );
@@ -12395,6 +14409,8 @@ ERR LOG::ErrLGSoftStart( BOOL fKeepDbAttached, BOOL fInferCheckpointFromRstmapDb
 
         m_pinst->m_isdlInit.Trigger( eInitLogReadAndPatchFirstLog );
 
+        //  eat errors about corruption -- we will go up to the point of corruption
+        //      and then return the right error in ErrLGRRedo()
 
         if ( err == JET_errSuccess || FErrIsLogCorruption( err ) )
         {
@@ -12408,13 +14424,25 @@ ERR LOG::ErrLGSoftStart( BOOL fKeepDbAttached, BOOL fInferCheckpointFromRstmapDb
 
         m_pLogStream->LGCloseFile();
 
+        //  if delete out of range logs is set then delete all out of range logs
+        //
+        //  Why do we not delete out of range log files if m_fIgnoreLostLogs?  Because
+        //  for the m_fIgnoreLostLogs case is easier to handle deep in ErrLGIRedoFill().
+        //
+        //  Aside, I think this should also only be if we're in circular logging case?  Right.
+        //
+        // SOFT_HARD: leave like this, soft recovery only behaviour
         if ( !m_fHardRestore && BoolParam( m_pinst, JET_paramDeleteOutOfRangeLogs ) && !m_fIgnoreLostLogs )
         {
             Assert( !FLGRecoveryLgposStop() );
 
+            //  Note: the current log
             Call ( m_pLogStream->ErrLGDeleteOutOfRangeLogFiles() );
         }
         
+        // if we decided so far that we don't need soft recovery,
+        // we check if the checkpoint and the clean shutdown
+        // really do match
         if ( fCloseNormally && !(*pfNewCheckpointFile) )
         {
             ERR errReadCheckpoint;
@@ -12424,12 +14452,20 @@ ERR LOG::ErrLGSoftStart( BOOL fKeepDbAttached, BOOL fInferCheckpointFromRstmapDb
                 Alloc( pcheckpointT = (CHECKPOINT *)PvOSMemoryPageAlloc( sizeof(CHECKPOINT), NULL ) );
             }
 
+            // build the checkpoint name and open the file.
             LGFullNameCheckpoint( wszPathJetChkLog );
             errReadCheckpoint = ErrLGReadCheckpoint( wszPathJetChkLog, pcheckpointT, fFalse );
 
+            // we opened fine the checkpoint including the check if the signature is matching the log signature
             if ( errReadCheckpoint >= JET_errSuccess )
             {
 
+                // Check if the actual checkpoint and the last shutdown in the log do match.
+                // If they don't, it might be because an older checkpoint is forcing an earlier log start for recovery
+                // (like bringing back older files, including checkpoint with OSSnapshot restore as an exemple).
+                // In this case we will force "not normal close" so we do start soft recovery.
+                // Note: we don't do additional checking at this point (like the checkpoint is ahead)
+                // because the existing code should deal with this already
                 if ( 0 != CmpLgpos( &pcheckpointT->checkpoint.le_lgposCheckpoint, &lgposLastTerm ) )
                 {
                     Assert( fCloseNormally );
@@ -12438,6 +14474,8 @@ ERR LOG::ErrLGSoftStart( BOOL fKeepDbAttached, BOOL fInferCheckpointFromRstmapDb
             }
             else
             {
+                // we have an error reading the checkpoint (like bad signature.
+                // We will just ignore it (the below code will delete the bad checkpoint)
                 (*pfNewCheckpointFile) = fTrue;
                 m_fNewCheckpointFile = fTrue;
             }
@@ -12445,12 +14483,23 @@ ERR LOG::ErrLGSoftStart( BOOL fKeepDbAttached, BOOL fInferCheckpointFromRstmapDb
 
 CheckCheckpoint:
     
+        //  If the edb.jtx/log was not closed normally or the checkpoint file was
+        //  missing and new one is created, then do soft recovery.
+        //
         if ( !fCloseNormally || (*pfNewCheckpointFile) )
         {
+            //  always redo from beginning of a log generation.
+            //  This is needed such that the attach info will be matching
+            //  the with the with the redo point. Note that the attach info
+            //  is not necessarily consistent with the checkpoint.
+            //
             if ( plgfilehdrT == NULL )
             {
                 Alloc( plgfilehdrT = (LGFILEHDR *)PvOSMemoryPageAlloc( sizeof(LGFILEHDR), NULL ) );
                 
+                // we really on the log header below if we had it already opened 
+                // (like we found an EDB.LOG above) so initialize it here to 0 
+                //
                 memset( plgfilehdrT, 0, sizeof(LGFILEHDR) );
             }
 
@@ -12459,8 +14508,11 @@ CheckCheckpoint:
                 Alloc( pcheckpointT = (CHECKPOINT *)PvOSMemoryPageAlloc( sizeof(CHECKPOINT), NULL ) );
             }
 
+            //  did not terminate normally and need to redo from checkpoint
+            //
             LGFullNameCheckpoint( wszPathJetChkLog );
 
+            //  Ask the client if they would like us to use the checkpoint.
             err = ErrLGOpenCheckpointCallback( m_pinst );
             if ( err < JET_errSuccess )
             {
@@ -12472,13 +14524,23 @@ CheckCheckpoint:
 
             if ( !fUseCheckpointToStartRedo )
             {
+                //  Delete the newly created empty checkpoint file.
+                //  Let redo recreate one.
 
                 (VOID)m_pinst->m_pfsapi->ErrFileDelete( wszPathJetChkLog );
             }
 
+            //  if we should use checkpoint and it could be read, start there
+            //  otherwise checkpoint could/should not be read, then revert to redoing
+            //  log from first log record in first log generation file.
+            //
             if ( fUseCheckpointToStartRedo &&
                  ( JET_errSuccess <= ( err = ErrLGReadCheckpoint( wszPathJetChkLog, pcheckpointT, fFalse ) ) ) )
             {
+                // we are opening EDB.LOG only if the checkpoint points to it AND
+                // we are not having an UndoStop position in which case we already
+                // opened that log generation and we have the m_plgfilehdr->lgfilehdr.le_lGeneration set
+                // 
                 if ( (LONG) m_pLogStream->GetCurrentFileGen() == (LONG) pcheckpointT->checkpoint.le_lgposCheckpoint.le_lGeneration )
                 {
                     Call( m_pLogStream->ErrLGOpenJetLog( JET_OpenLogForRedo, pcheckpointT->checkpoint.le_lgposCheckpoint.le_lGeneration ) );
@@ -12488,22 +14550,29 @@ CheckCheckpoint:
                     Call( m_pLogStream->ErrLGOpenLogFile( JET_OpenLogForRedo, eArchiveLog, pcheckpointT->checkpoint.le_lgposCheckpoint.le_lGeneration, JET_errMissingLogFile ) );
                 }
 
+                //  read log file header
+                //
                 Call( m_pLogStream->ErrLGReadFileHdr( NULL, iorpLogRecRedo, plgfilehdrT, fCheckLogID ) );
 
                 if ( pcheckpointT->checkpoint.le_lgposCheckpoint.le_lGeneration != plgfilehdrT->lgfilehdr.le_lGeneration ||
                      !( pcheckpointT->checkpoint.fVersion & fCheckpointAttachInfoPresent ) ||
                      !FLGVersionAttachInfoInCheckpoint( &plgfilehdrT->lgfilehdr ) )
                 {
+                    //  Start checkpoint here so that we replay all attachment related log records.
                     LGFakeCheckpointToLogFile( pcheckpointT, plgfilehdrT, m_pLogStream->CSecHeader() );
                 }
                 else
                 {
+                    // even when using LGPOS/attach from checkpoint, get
+                    // dbms_param which control max sessions etc from log
+                    // (dbms_param should ultimately go away)
                     pcheckpointT->checkpoint.dbms_param = plgfilehdrT->lgfilehdr.dbms_param;
                 }
 
+                //  cleanup opened log file
                 m_pLogStream->LGCloseFile();
             }
-            else
+            else // else of the if error from ErrLGReadCheckpoint(), i.e. err < 0
             {
                 m_fNewCheckpointFile = fTrue;
 
@@ -12518,27 +14587,38 @@ CheckCheckpoint:
                     (void) m_pLogStream->ErrLGGetGenerationRange( SzParam( m_pinst, JET_paramLogFilePath ), &lgenLow, NULL );
                 }
 
+                // if there are no archived logs, we should start with the current
+                // log which we already have in the log header
+                // 
                 if ( lgenLow == 0 )
                 {
+                    // set the initial log gen to something sane.
                     if ( m_lgenInitial > m_pLogStream->GetCurrentFileGen() )
                     {
                         m_lgenInitial = m_pLogStream->GetCurrentFileGen();
                     }
 
+                    //  Start checkpoint here so that we replay all attachment related log records.
                     LGFakeCheckpointToLogFile( pcheckpointT, m_pLogStream->GetCurrentFileHdr(), m_pLogStream->CSecHeader() );
 
                     err = JET_errSuccess;
                 }
                 else
                 {
+                    // set the initial log gen to something sane.
                     m_lgenInitial = ( m_lgenInitial > lgenLow ) ? lgenLow : m_lgenInitial;
 
+                    // start with the lowest numbered archive log
                     Call( m_pLogStream->ErrLGOpenLogFile( JET_OpenLogForRedo, eArchiveLog, lgenLow, JET_errMissingPreviousLogFile ) );
                     
+                    //  read log file header
+                    //
                     Call( m_pLogStream->ErrLGReadFileHdr( NULL, iorpLogRecRedo, plgfilehdrT, fCheckLogID ) );
 
+                    //  Start checkpoint here so that we replay all attachment related log records.
                     LGFakeCheckpointToLogFile( pcheckpointT, plgfilehdrT, m_pLogStream->CSecHeader() );
 
+                    //  cleanup opened log file
                     m_pLogStream->LGCloseFile();
 
                     err = JET_errSuccess;
@@ -12547,10 +14627,15 @@ CheckCheckpoint:
                 (void)ErrLGIUpdateCheckpointLgposForTerm( pcheckpointT->checkpoint.le_lgposCheckpoint );
             }
 
+            // We have a good checkpoint, see if there is a UndoStop point
+            // and where it is compared with the checkpoint
+            //
             if ( FLGRecoveryLgposStop() )
             {
                 const LGPOS lgposCheckpoint = pcheckpointT->checkpoint.le_lgposCheckpoint;
 
+                // if the checkpoint is already past the UndoStop, finish this recovery
+                // 
                 if ( lgposCheckpoint.lGeneration > m_lgposRecoveryStop.lGeneration )
                 {
                     Error( ErrERRCheck( JET_errRecoveredWithoutUndo ) );
@@ -12559,17 +14644,23 @@ CheckCheckpoint:
             
             m_pinst->m_pbackup->BKCopyLastBackupStateFromCheckpoint( &pcheckpointT->checkpoint );
 
+            // set the initial log gen to something sane.
             m_lgenInitial = ( m_lgenInitial > pcheckpointT->checkpoint.le_lgposCheckpoint.le_lGeneration )
                 ?   pcheckpointT->checkpoint.le_lgposCheckpoint.le_lGeneration
                   : m_lgenInitial;
 
             m_pinst->m_isdlInit.FixedData().sInitData.lgposRecoveryStartMin = pcheckpointT->checkpoint.le_lgposCheckpoint;
 
+            //  shouldn't be any errors or warnings at this point
             CallS( err );
+            //  ensure we've setup the checkpoint ...
             Assert( pcheckpointT );
 
+            //  set log path to current directory
+            //
             Assert( m_wszLogCurrent == SzParam( m_pinst, JET_paramLogFilePath ) );
 
+            //  create the reserve logs
 
             Assert( m_fUseRecoveryLogFileSize );
             Assert( (UINT)m_pLogStream->CsecLGFromSize( m_lLogFileSizeDuringRecovery ) == m_pLogStream->CSecLGFile() );
@@ -12588,6 +14679,8 @@ CheckCheckpoint:
                     m_pinst );
             fSoftRecovery = fTrue;
 
+            //  redo from last checkpoint
+            //
             m_fAbruptEnd = fFalse;
             m_errGlobalRedoError = JET_errSuccess;
 
@@ -12603,9 +14696,11 @@ CheckCheckpoint:
     
                 (void) m_pLogStream->ErrLGGetGenerationRange( m_wszLogCurrent, &lGenLow, &lGenHigh );
 
+                // we start from the checkpoint
                 lGenLow = max( lGenLow, pcheckpointT->checkpoint.le_lgposCheckpoint.le_lGeneration);
                 lGenHigh = max( lGenHigh, pcheckpointT->checkpoint.le_lgposCheckpoint.le_lGeneration);
 
+                // we stop at the last log (as determined above) or at the Undo Stop point
                 if ( FLGRecoveryLgposStop( ) )
                 {
                     lGenLow = min( lGenLow, m_lgposRecoveryStop.lGeneration );
@@ -12616,6 +14711,8 @@ CheckCheckpoint:
             }
             else
             {
+                //  zero out to silence the compiler
+                //
                 Assert( NULL == plgstat );
                 memset( &lgstat, 0, sizeof(lgstat) );
             }
@@ -12626,7 +14723,7 @@ CheckCheckpoint:
 
             if ( plgstat )
             {
-                plgstat->snprog.cunitDone = plgstat->snprog.cunitTotal;
+                plgstat->snprog.cunitDone = plgstat->snprog.cunitTotal;     //lint !e644
                 if ( plgstat->pfnCallback )
                 {
                     (plgstat->pfnCallback)(
@@ -12637,8 +14734,9 @@ CheckCheckpoint:
                 }
             }
             Call( err );
-            CallS( err );
+            CallS( err );   //  no other warnings expected
 
+            //  sector-size checking should now be on
 
             fDelLog = fTrue;
 
@@ -12647,6 +14745,9 @@ CheckCheckpoint:
                 Call( ErrERRCheck( JET_errRecoveredWithErrors ) );
             }
 
+            // we don't report the progress if the control callback doesn't
+            // say so ...
+            //
             if ( ErrLGNotificationEventConditionCallback( m_pinst, STOP_REDO_ID ) >= JET_errSuccess )
             {
                 UtilReportEvent(
@@ -12660,38 +14761,71 @@ CheckCheckpoint:
                         m_pinst );
             }
         }
-        else
+        else // fCloseNormally && !(*pfNewCheckpointFile
         {
+            //  we did not need to run recovery
+            //
             errErrLGRRedo = JET_errSuccess;
         }
 
+        //  if we have gotten to here, it means that recovery redo (and
+        //  possibly undo) was successful and so we are continuing to 
+        //  do time, so give the client one more chance to avoid this.
+        //
+        //  if the client was running with the intention of running
+        //  "recovery without undo" (such as Exchange HA log shipping) 
+        //  and would failed the JET_sntBeginUndo callback, then we can
+        //  still have ended up here because the logs have terminated 
+        //  cleanly due to JetTerm() or something.
+        //
+        //  This is where JET_errRecoveredWithoutUndoDatabasesConsistent 
+        //  is typically going to returned.
+        //
+        //  it is a little weird to ask this here and not below (where we 
+        //  actually open the log), but this is where we used to throw this 
+        //  specific error. We could also make a BeginDo callback I suppose, 
+        //  but I'm going to go with this for now ...
 
         Call( ErrLGOpenLogCallback( m_pinst, m_pLogStream->LogName(), JET_OpenLogForDo, 0, fTrue ) );
 
+        //  
+        //  Move to working log state, update the log sec size, and new extension if necessary ...
+        //
         Call( ErrLGMoveToRunningState( errErrLGRRedo, pfJetLogGeneratedDuringSoftStart ) );
         
         Assert( m_pLogStream->FLGFileOpened() || !*pfJetLogGeneratedDuringSoftStart );
         if ( fDelLog || *pfJetLogGeneratedDuringSoftStart )
         {
+            //  close the log file (code below expects it to be closed)
+            //
             m_pLogStream->LGCloseFile();
         }
         
-    }
+    }   // if/else err < 0 , where err = ErrLGOpenJetLog(), also jumps into clause ..
 
+    //  if external recovery control indicated anything other than success for
+    //  begin undo, we should not have gotten here.
 
     AssertRTL( m_errBeginUndo == JET_errSuccess );
 
+    //  we should now be using the right log file size
+    //
     Assert( m_fUseRecoveryLogFileSize == fFalse );
 
     if ( !fCreatedReserveLogs || *pfJetLogGeneratedDuringSoftStart )
     {
+        //  create the reserve logs
+        //
         Assert( m_wszLogCurrent == SzParam( m_pinst, JET_paramLogFilePath ) );
         Call( m_pLogStream->ErrLGInitCreateReserveLogFiles() );
         fCreatedReserveLogs = fTrue;
     }
 
+    //  at this point, we have a szJetLog file, reopen the log files
+    //
     m_fAbruptEnd = fFalse;
 
+    //  disabled flushing while we reinit the log buffers and check the last log file
 
     m_pLogWriteBuffer->SetFNewRecordAdded( fFalse );
 
@@ -12699,6 +14833,8 @@ CheckCheckpoint:
     BOOL fHadToRetry = fFalse;
 RetryOpenLogForDo:
 
+    //  reopen the log file
+    //
     m_pLogStream->LGMakeLogName( eCurrentLog );
     err = m_pLogStream->ErrLGOpenFile();
     if ( err < 0 )
@@ -12713,11 +14849,15 @@ RetryOpenLogForDo:
     }
     else if ( err == JET_errLogSectorSizeMismatch )
     {
+        //
+        //  SEARCH-STRING: SecSizeMismatchFixMe
+        //
         Assert( fFalse );
         err = ErrERRCheck( JET_errLogSectorSizeMismatchDatabasesConsistent );
     }
     Call( err );
 
+    //  set up log variables properly
 
     BOOL fDummy;
 
@@ -12735,14 +14875,18 @@ RetryOpenLogForDo:
     Call( err );
     CallS( err );
 
+    // if that last file was old format, we need to set things back
     if ( FIsOldLrckLogFormat( m_pLogStream->GetCurrentFileHdr()->lgfilehdr.le_ulMajor ) )
     {
+        // update sector size for new format if needed
         m_pLogStream->LGResetSectorGeometry( m_fUseRecoveryLogFileSize ? m_lLogFileSizeDuringRecovery : 0 );
     }
 
+    //  close and reopen log file in R/W mode
 
     Call( m_pLogStream->ErrLGOpenFile() );
 
+    //  re-initialize the log manager's buffer with user settings
     Call( m_LogBuffer.ErrLGInitLogBuffers( m_pinst, m_pLogStream ) );
 
     err = m_pLogStream->ErrLGSwitchToNewLogFile( m_pLogWriteBuffer->LgposWriteTip().lGeneration, 0 );
@@ -12752,6 +14896,9 @@ RetryOpenLogForDo:
     }
     else if ( err == JET_errLogSectorSizeMismatch )
     {
+        //
+        //  SEARCH-STRING: SecSizeMismatchFixMe
+        //
         Assert( fFalse );
         err = ErrERRCheck( JET_errLogSectorSizeMismatchDatabasesConsistent );
     }
@@ -12778,11 +14925,15 @@ RetryOpenLogForDo:
         }
 
         Assert( fCloseNormally );
+        //  Unknown reason to fail to open for logging, most likely
+        //  the file got locked.
         Call( ErrERRCheck( JET_errLogWriteFail ) );
     }
 
     m_pLogStream->ResetOldLrckVersionSecSize();
 
+    //  check for log-sequence-end
+    //
     Assert( m_pLogStream->GetLogSequenceEnd() || m_pLogStream->GetCurrentFileGen() < lGenerationMax );
     if ( m_pLogStream->GetLogSequenceEnd() )
     {
@@ -12821,6 +14972,7 @@ RetryOpenLogForDo:
     }
 
     Assert( m_fRecovering == fFalse );
+    // SOFT_HARD: whatever, leave like this
     Assert( m_fHardRestore == fFalse );
 
     m_pLogWriteBuffer->CheckIsReady();
@@ -12834,8 +14986,12 @@ HandleError:
         ULONG rgul[4] = { (ULONG) m_pinst->m_iInstance, (ULONG) err, PefLastThrow()->UlLine(), UlLineLastCall() };
         OSTraceWriteRefLog( ostrlSystemFixed, sysosrtlSoftStartFail|sysosrtlContextInst, m_pinst, rgul, sizeof(rgul) );
 
+        // SOFT_HARD: whatever, leave like this
         Assert( m_fHardRestore == fFalse );
 
+        // there may be an LGFlush task outstanding (as part of Undo). holding the LGFlush
+        // lock here will ensure that pending tasks will complete *before*
+        // or will early out *after* we null m_pfapiLog.
         
         m_pLogStream->LGCloseFile();
 
@@ -12846,6 +15002,13 @@ HandleError:
             {
                 UtilReportEventOfError( LOGGING_RECOVERY_CATEGORY, RESTORE_DATABASE_FAIL_ID, err, m_pinst );
 
+                // JET_errFileIOBeyondEOF is expected during recovery *if* the page is a new page and we're
+                // replaying a log stream from a time when there wasn't an lrtypExtendDB. If the page
+                // isn't a new page then we need to generate a failure event. We catch the error here instead of
+                // trying to find all the places that can generate this error.
+                //
+                // Most errors (e.g. out of memory) will generate their own failure item at the point of failure
+                // which is why we don't universally generate a failure event when recovery fails.
                 if ( JET_errFileIOBeyondEOF == err )
                 {
                     OSUHAEmitFailureTag( m_pinst, HaDbFailureTagIoHard, L"E82B2003-FB66-4beb-834A-9742E594A629" );

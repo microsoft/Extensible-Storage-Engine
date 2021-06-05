@@ -1,27 +1,38 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
+//  Support for JetEnumerateColumns() and iteration of columns in a record
+//
 
+//  =======================================================================
+//  class IColumnIter
+//  -----------------------------------------------------------------------
+//
 class IColumnIter
 {
     public:
 
+        //  Properties
         
         virtual ERR ErrGetWorstCaseColumnCount( size_t* const pcColumn ) const = 0;
 
+        //  Record Navigation
 
         virtual ERR ErrSetRecord( const DATA& dataRec ) = 0;
 
+        //  Column Navigation
         
         virtual ERR ErrMoveBeforeFirst() = 0;
         virtual ERR ErrMoveNext() = 0;
         virtual ERR ErrSeek( const COLUMNID columnid ) = 0;
 
+        //  Column Properties
 
         virtual ERR ErrGetColumnId( COLUMNID* const pColumnId ) const = 0;
         virtual ERR ErrGetColumnValueCount( size_t* const pcColumnValue ) const = 0;
         virtual ERR ErrGetColumnSize( FUCB* const pfucb, JET_RECSIZE3* const precsize, const JET_GRBIT grbit ) const = 0;
 
+        //  Column Value Properties
 
         virtual ERR ErrGetColumnValue(  const size_t    iColumnValue,
                                         size_t* const   pcbColumnValue,
@@ -32,37 +43,49 @@ class IColumnIter
         virtual const FIELD* const PField() const = 0;
 };
 
+//  =======================================================================
 
 
+//  =======================================================================
+//  class CFixedColumnIter
+//  -----------------------------------------------------------------------
+//
 class CFixedColumnIter
     :   public IColumnIter
 {
     public:
 
+        //  ctor
 
         CFixedColumnIter();
 
+        //  initializes the iterator
 
         ERR ErrInit( FCB* const pfcb );
 
     public:
 
+        //  Properties
         
         virtual ERR ErrGetWorstCaseColumnCount( size_t* const pcColumn ) const;
 
+        //  Record Navigation
 
         virtual ERR ErrSetRecord( const DATA& dataRec );
 
+        //  Column Navigation
         
         virtual ERR ErrMoveBeforeFirst();
         virtual ERR ErrMoveNext();
         virtual ERR ErrSeek( const COLUMNID columnid );
 
+        //  Column Properties
 
         virtual ERR ErrGetColumnId( COLUMNID* const pColumnId ) const;
         virtual ERR ErrGetColumnValueCount( size_t* const pcColumnValue ) const;
         virtual ERR ErrGetColumnSize( FUCB* const pfucb, JET_RECSIZE3* const precsize, const JET_GRBIT grbit ) const;
 
+        //  Column Value Properties
 
         virtual ERR ErrGetColumnValue(  const size_t    iColumnValue,
                                         size_t* const   pcbColumnValue,
@@ -167,37 +190,49 @@ HandleError:
     return err;
 }
 
+//  =======================================================================
 
 
+//  =======================================================================
+//  class CVariableColumnIter
+//  -----------------------------------------------------------------------
+//
 class CVariableColumnIter
     :   public IColumnIter
 {
     public:
 
+        //  ctor
 
         CVariableColumnIter();
 
+        //  initializes the iterator
 
         ERR ErrInit( FCB* const pfcb );
 
     public:
 
+        //  Properties
         
         virtual ERR ErrGetWorstCaseColumnCount( size_t* const pcColumn ) const;
 
+        //  Record Navigation
 
         virtual ERR ErrSetRecord( const DATA& dataRec );
 
+        //  Column Navigation
         
         virtual ERR ErrMoveBeforeFirst();
         virtual ERR ErrMoveNext();
         virtual ERR ErrSeek( const COLUMNID columnid );
 
+        //  Column Properties
 
         virtual ERR ErrGetColumnId( COLUMNID* const pColumnId ) const;
         virtual ERR ErrGetColumnValueCount( size_t* const pcColumnValue ) const;
         virtual ERR ErrGetColumnSize( FUCB* const pfucb, JET_RECSIZE3* const precsize, const JET_GRBIT grbit ) const;
 
+        //  Column Value Properties
 
         virtual ERR ErrGetColumnValue(  const size_t    iColumnValue,
                                         size_t* const   pcbColumnValue,
@@ -301,16 +336,23 @@ HandleError:
     return err;
 }
 
+//  =======================================================================
 
 
+//  =======================================================================
+//  class IColumnValueIter
+//  -----------------------------------------------------------------------
+//
 class IColumnValueIter
 {
     public:
 
+        //  Properties
 
         virtual ERR ErrGetColumnValueCount( size_t* const pcColumnValue ) const = 0;
         virtual ERR ErrGetColumnSize( FUCB* const pfucb, JET_RECSIZE3* const precsize, const JET_GRBIT grbit ) const = 0;
 
+        //  Column Value Properties
 
         virtual ERR ErrGetColumnValue(  const size_t    iColumnValue,
                                         size_t* const   pcbColumnValue,
@@ -320,25 +362,34 @@ class IColumnValueIter
         virtual size_t CbESE97Format() const = 0;
 };
 
+//  =======================================================================
 
 
+//  =======================================================================
+//  class CNullValuedTaggedColumnValueIter
+//  -----------------------------------------------------------------------
+//
 class CNullValuedTaggedColumnValueIter
     :   public IColumnValueIter
 {
     public:
 
+        //  ctor
 
         CNullValuedTaggedColumnValueIter();
 
+        //  initializes the iterator
 
         ERR ErrInit();
 
     public:
 
+        //  Properties
 
         virtual ERR ErrGetColumnValueCount( size_t* const pcColumnValue ) const;
         virtual ERR ErrGetColumnSize( FUCB* const pfucb, JET_RECSIZE3* const precsize, const JET_GRBIT grbit ) const;
 
+        //  Column Value Properties
 
         virtual ERR ErrGetColumnValue(  const size_t    iColumnValue,
                                         size_t* const   pcbColumnValue,
@@ -388,28 +439,37 @@ ErrGetColumnValue(  const size_t    iColumnValue,
 INLINE size_t CNullValuedTaggedColumnValueIter::
 CbESE97Format() const
 {
-    return sizeof(TAGFLD);
+    return sizeof(TAGFLD);  //  still require TAGFLD overhead even for NULL columns
 }
 
+//  =======================================================================
 
 
+//  =======================================================================
+//  class CSingleValuedTaggedColumnValueIter
+//  -----------------------------------------------------------------------
+//
 class CSingleValuedTaggedColumnValueIter
     :   public IColumnValueIter
 {
     public:
 
+        //  ctor
 
         CSingleValuedTaggedColumnValueIter();
 
+        //  initializes the iterator
 
         ERR ErrInit( BYTE* const rgbData, size_t cbData, const BOOL fSeparatable, const BOOL fSeparated, const BOOL fCompressed, const BOOL fEncrypted );
 
     public:
 
+        //  Properties
 
         virtual ERR ErrGetColumnValueCount( size_t* const pcColumnValue ) const;
         virtual ERR ErrGetColumnSize( FUCB* const pfucb, JET_RECSIZE3* const precsize, const JET_GRBIT grbit ) const;
 
+        //  Column Value Properties
 
         virtual ERR ErrGetColumnValue(  const size_t    iColumnValue,
                                         size_t* const   pcbColumnValue,
@@ -427,10 +487,10 @@ class CSingleValuedTaggedColumnValueIter
             BOOL        m_fFlags;
             struct
             {
-                BOOL    m_fSeparatable:1;
-                BOOL    m_fSeparated:1;
-                BOOL    m_fCompressed:1;
-                BOOL    m_fEncrypted:1;
+                BOOL    m_fSeparatable:1;       //  is it possible for the column to be separated?
+                BOOL    m_fSeparated:1;         //  if separatable, is it actually so?
+                BOOL    m_fCompressed:1;        //  is the column stored in compressed form?
+                BOOL    m_fEncrypted:1;         //  is the column stored in encrypted form?
             };
         };
 };
@@ -484,10 +544,16 @@ HandleError:
 INLINE size_t CSingleValuedTaggedColumnValueIter::
 CbESE97Format() const
 {
-    size_t  cbESE97Format   = sizeof(TAGFLD);
+    size_t  cbESE97Format   = sizeof(TAGFLD);   //  initialise with TAGFLD overhead
 
     if ( m_fSeparatable )
     {
+        //  in ESE97, long-values had a header byte indicating
+        //  whether the column was intrinsic or separated
+        //
+        //  if the column is separatable and the data is greater
+        //  than sizeof(LID), we may force the data to an LV
+        //
         cbESE97Format += sizeof(BYTE) + min( m_cbData, sizeof(_LID32) );
     }
     else
@@ -498,25 +564,34 @@ CbESE97Format() const
     return cbESE97Format;
 }
 
+//  =======================================================================
 
 
+//  =======================================================================
+//  class CDualValuedTaggedColumnValueIter
+//  -----------------------------------------------------------------------
+//
 class CDualValuedTaggedColumnValueIter
     :   public IColumnValueIter
 {
     public:
 
+        //  ctor
 
         CDualValuedTaggedColumnValueIter();
 
+        //  initializes the iterator
 
         ERR ErrInit( BYTE* const rgbData, size_t cbData );
 
     public:
 
+        //  Properties
 
         virtual ERR ErrGetColumnValueCount( size_t* const pcColumnValue ) const;
         virtual ERR ErrGetColumnSize( FUCB* const pfucb, JET_RECSIZE3* const precsize, const JET_GRBIT grbit ) const;
 
+        //  Column Value Properties
 
         virtual ERR ErrGetColumnValue(  const size_t    iColumnValue,
                                         size_t* const   pcbColumnValue,
@@ -551,6 +626,7 @@ ErrInit( BYTE* const rgbData, size_t cbData )
     Assert( cbData <= ulMax );
     if ( cbData > ulMax )
     {
+        // This comes from m_ptagfields->CbData(), which is persisted.
         Error( ErrERRCheck( JET_errDatabaseCorrupted ) );
     }
 
@@ -579,31 +655,43 @@ HandleError:
 INLINE size_t CDualValuedTaggedColumnValueIter::
 CbESE97Format() const
 {
+    //  TWOVALUES is a hack which is only used for two non-separatable
+    //  (ie. non-long-value) multi-values
+    //
     return ( sizeof(TAGFLD)
             + m_ptwovalues->CbFirstValue()
             + sizeof(TAGFLD)
             + m_ptwovalues->CbSecondValue() );
 }
 
+//  =======================================================================
 
 
+//  =======================================================================
+//  class CMultiValuedTaggedColumnValueIter
+//  -----------------------------------------------------------------------
+//
 class CMultiValuedTaggedColumnValueIter
     :   public IColumnValueIter
 {
     public:
 
+        //  ctor
 
         CMultiValuedTaggedColumnValueIter();
 
+        //  initializes the iterator
 
         ERR ErrInit( BYTE* const rgbData, size_t cbData, BOOL fCompressed  );
 
     public:
 
+        //  Properties
 
         virtual ERR ErrGetColumnValueCount( size_t* const pcColumnValue ) const;
         virtual ERR ErrGetColumnSize( FUCB* const pfucb, JET_RECSIZE3* const precsize, const JET_GRBIT grbit ) const;
 
+        //  Column Value Properties
 
         virtual ERR ErrGetColumnValue(  const size_t    iColumnValue,
                                         size_t* const   pcbColumnValue,
@@ -640,9 +728,11 @@ ErrInit( BYTE* const rgbData, size_t cbData, BOOL fCompressed )
     Assert( cbData <= ulMax );
     if ( cbData > ulMax )
     {
+        // This comes from m_ptagfields->CbData(), which is persisted.
         Error( ErrERRCheck( JET_errDatabaseCorrupted ) );
     }
 
+    //  For ia64 builds this must be 8-byte / ptr aligned.
     C_ASSERT( 0 == offsetof( CMultiValuedTaggedColumnValueIter, m_rgbMULTIVALUES ) % sizeof( void* ) );
     m_pmultivalues = new( m_rgbMULTIVALUES ) MULTIVALUES( rgbData, (ULONG) cbData );
     m_fCompressed = fCompressed;
@@ -667,8 +757,13 @@ HandleError:
     return err;
 }
 
+//  =======================================================================
 
 
+//  =======================================================================
+//  class CTaggedColumnIter
+//  -----------------------------------------------------------------------
+//
 
 #define SIZEOF_CVITER_MAX                                           \
     max(    max(    sizeof( CNullValuedTaggedColumnValueIter ),     \
@@ -681,30 +776,37 @@ class CTaggedColumnIter
 {
     public:
 
+        //  ctor
 
         CTaggedColumnIter();
 
+        //  initializes the iterator
 
         ERR ErrInit( FCB* const pfcb );
 
     public:
 
+        //  Properties
         
         virtual ERR ErrGetWorstCaseColumnCount( size_t* const pcColumn ) const;
 
+        //  Record Navigation
 
         virtual ERR ErrSetRecord( const DATA& dataRec );
 
+        //  Column Navigation
         
         virtual ERR ErrMoveBeforeFirst();
         virtual ERR ErrMoveNext();
         virtual ERR ErrSeek( const COLUMNID columnid );
 
+        //  Column Properties
 
         virtual ERR ErrGetColumnId( COLUMNID* const pColumnId ) const;
         virtual ERR ErrGetColumnValueCount( size_t* const pcColumnValue ) const;
         virtual ERR ErrGetColumnSize( FUCB* const pfucb, JET_RECSIZE3* const precsize, const JET_GRBIT grbit ) const;
 
+        //  Column Value Properties
 
         virtual ERR ErrGetColumnValue(  const size_t    iColumnValue,
                                         size_t* const   pcbColumnValue,
@@ -878,37 +980,49 @@ HandleError:
     return err;
 }
 
+//  =======================================================================
 
 
+//  =======================================================================
+//  class CUnionIter
+//  -----------------------------------------------------------------------
+//
 class CUnionIter
     :   public IColumnIter
 {
     public:
 
+        //  ctor
 
         CUnionIter();
 
+        //  initializes the iterator
 
         ERR ErrInit( IColumnIter* const pciterLHS, IColumnIter* const pciterRHS );
 
     public:
 
+        //  Properties
         
         virtual ERR ErrGetWorstCaseColumnCount( size_t* const pcColumn ) const;
 
+        //  Record Navigation
 
         virtual ERR ErrSetRecord( const DATA& dataRec );
 
+        //  Column Navigation
         
         virtual ERR ErrMoveBeforeFirst();
         virtual ERR ErrMoveNext();
         virtual ERR ErrSeek( const COLUMNID columnid );
 
+        //  Column Properties
 
         virtual ERR ErrGetColumnId( COLUMNID* const pColumnId ) const;
         virtual ERR ErrGetColumnValueCount( size_t* const pcColumnValue ) const;
         virtual ERR ErrGetColumnSize( FUCB* const pfucb, JET_RECSIZE3* const precsize, const JET_GRBIT grbit ) const;
 
+        //  Column Value Properties
 
         virtual ERR ErrGetColumnValue(  const size_t    iColumnValue,
                                         size_t* const   pcbColumnValue,
@@ -1007,4 +1121,5 @@ ErrGetColumnValue(  const size_t    iColumnValue,
                                             pfColumnValueCompressed );
 }
 
+//  =======================================================================
 

@@ -5,6 +5,7 @@
 
 enum IOREASONPRIMARY : BYTE
 {
+    // iorpNone publically defined
     iorpInvalid = 0,
 
     iorpOSUnitTest
@@ -34,7 +35,7 @@ ERR OslayerHandlesLargeIoMax::ErrTest()
     const wchar_t* szFilename = L"TestFileIoMax.tmp";
     DWORD cbIo = 4096;
 
-    ULONG cioTooMany = 140000;
+    ULONG cioTooMany = 140000;  //  > 2 x 64k ... real limit 32k, but just want to be extra sure ...
 
     IFileSystemAPI * pfsapi = NULL;
     IFileAPI * pfapi = NULL;
@@ -50,6 +51,8 @@ ERR OslayerHandlesLargeIoMax::ErrTest()
     }
 
 #ifdef DEBUG
+    //  we're going to set the IO max to an illegally high value ... the OS layer will
+    //  truncate it to what it can support.
     FNegTestSet( fInvalidUsage );
 #endif
 
@@ -74,11 +77,12 @@ ERR OslayerHandlesLargeIoMax::ErrTest()
     wprintf( L"\t\tDispatching IO writes ..." );
     tickStart = TickOSTimeCurrent();
     LONG cioOutstandingTestIos = 0;
+    //  note it may temporarily oscillate negative, b/c we post ErrIOWrite() do our increment ...
     for( ULONG iio = 0; iio < cioTooMany; iio++ )
     {
         OSTestCheckErr( pfapi->ErrIOWrite( 
                         *TraceContextScope( iorpOSUnitTest ),
-                        iio * cbIo * 2 ,
+                        iio * cbIo * 2 /* skips every other "page" */,
                         cbIo,
                         g_rgbZero,
                         qosIONormal,
@@ -90,6 +94,7 @@ ERR OslayerHandlesLargeIoMax::ErrTest()
             wprintf( L"." );
         }
     }
+    //  ensure any last IOs are issued ...
     OSTestCheckErr( pfapi->ErrIOIssue() );
     wprintf( L"Done(%d ms)\n", TickOSTimeCurrent() - tickStart );
 

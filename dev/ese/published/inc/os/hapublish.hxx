@@ -13,6 +13,7 @@
 #define OSUHAPublishEvent( p0, p1, p2, p3, p4, p5, p6, p7, p8, p9 ) \
     OSUHAPublishEvent_( p0, p1, p2, p3, p4, p5, p6, p7, p8, p9 )
 
+// this function is defined in higher layer where INST internal is understood
 void OSUHAPublishEvent_(
     HaDbFailureTag      haTag,
     const INST*         pinst,
@@ -55,5 +56,6 @@ void OSUHAEmitFailureTag_(
 #endif
 
 
+//================================================
 bool FUtilHaPublishInit();
 

@@ -8,6 +8,11 @@ ULONG   g_cAssertsFound;
 
 void AssertExpectedAsserts()
 {
+    //
+    //  No validation for retail bits. We could have disabled the entire test, but
+    //  running in RETAIL the code that is expected to assert in DEBUG still has
+    //  some value.
+    //
     
 #ifdef DEBUG
     if ( g_cExpectedAsserts != g_cAssertsFound )
@@ -35,6 +40,9 @@ void ResetExpectedAsserts()
     g_cAssertsFound = 0;
 }
 
+//
+//  Support functions needed to link the sync library properly.
+//  
 
 void AssertFail( const char * szMessage, const char * szFilename, LONG lLine, ... )
 {

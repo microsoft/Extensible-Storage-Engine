@@ -1,3 +1,5 @@
+// Copyright (c) Microsoft Corporation.
+// Licensed under the MIT License.
 #define RC_VERSION_FILE_DESCRIPTION 	"Microsoft(R) Exchange Server Database Storage Engine Unit Test\0"
 #define RC_VERSION_INTERNAL_NAME	"OSLAYERUNIT\0"
 #define RC_VERSION_ORIGINAL_FILE_NAME	"OSLAYERUNIT.EXE\0"

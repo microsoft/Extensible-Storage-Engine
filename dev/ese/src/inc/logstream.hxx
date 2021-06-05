@@ -30,11 +30,13 @@ struct LOG_VERIFY_STATE
     ERR ErrVerifyLRCKEnd();
 #endif
 
+    // state for new format
     LOG_VERIFY_STATUS   m_state;
     DWORD               m_cbSeg;
     DWORD               m_iSeg;
 
 #ifdef ENABLE_LOG_V7_RECOVERY_COMPAT
+    // maintains state across multiple file reads
     DWORD               m_cbSeen;
     DWORD               m_ibLRCK;
     ULONG               m_ibChecksumIncremental;

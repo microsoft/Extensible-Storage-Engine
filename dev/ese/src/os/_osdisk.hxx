@@ -7,6 +7,8 @@
 #include <winioctl.h>
 
 
+////////////////////////////////////////
+//  I/O request
 
 class _OSFILE;
 class COSDisk;
@@ -20,6 +22,8 @@ struct IFILEIBOFFSET
 
     const static IFILEIBOFFSET   IfileiboffsetNotFound;
 
+    //  Set of operators required by [Invasive]RedBlackTree
+    //  
     bool operator==( const IFILEIBOFFSET& rhs ) const
     {
         return ( iFile == rhs.iFile && ibOffset == rhs.ibOffset );
@@ -40,6 +44,12 @@ struct IFILEIBOFFSET
 };
 
 
+// Just a simple template to help in creating a class that can be memcopied
+// Used with IOREQ which is almost memcopyable except specific members
+// Usage: Derive from MemCopyable to ensure that memcpy is the first thing that runs on construction
+// Then do any custom initialization as needed
+// WARNING: Any members with custom constructors will overwrite the memcpy because they will run after the base class constructor
+//          Handle them separately.
 
 template< typename T >
 class MemCopyable
@@ -58,6 +68,7 @@ class IOREQ : MemCopyable<IOREQ>
         static SIZE_T OffsetOfAPIC()        { return OffsetOf( IOREQ, m_apic ); }
 
     private:
+        // Since we have a critical section for the object, this operator is now illegal.
         IOREQ& operator=( const IOREQ& ioreq );
         
     public:
@@ -70,33 +81,33 @@ class IOREQ : MemCopyable<IOREQ>
         {
             ioreqUnknown    = 0,
 
-            ioreqInAvailPool,
-            ioreqCachedInTLS,
-            ioreqInReservePool,
+            ioreqInAvailPool,           //  in Avail pool
+            ioreqCachedInTLS,           //  cached in a ptls
+            ioreqInReservePool,         //  in the pool of reserved IO
 
-            ioreqAllocFromAvail,
-            ioreqAllocFromEwreqLookaside,
+            ioreqAllocFromAvail,        //  allocated from Avail pool (though not yet used)
+            ioreqAllocFromEwreqLookaside,// in the lookaside slot for a deferred extending write
 
-            ioreqInIOCombiningList,
+            ioreqInIOCombiningList,     //  in I/O combining link list
 
-            ioreqEnqueuedInIoHeap,
-            ioreqEnqueuedInVipList,
-            ioreqEnqueuedInMetedQ,
+            ioreqEnqueuedInIoHeap,      //  in I/O heap
+            ioreqEnqueuedInVipList,     //  in I/O VIP list
+            ioreqEnqueuedInMetedQ,      //  in I/O lower priority / meted queue
 
-            ioreqRemovedFromQueue,
+            ioreqRemovedFromQueue,      //  removed from queue (heap || VIP) and I/O about to be issued
 
-            ioreqIssuedSyncIO,
-            ioreqIssuedAsyncIO,
+            ioreqIssuedSyncIO,          //  "sync" I/O issued (or about to be issued) from foreground thread
+            ioreqIssuedAsyncIO,         //  async I/O issued (or about to be issued) from IO thread
 
-            ioreqSetSize,
-            ioreqExtendingWriteIssued,
+            ioreqSetSize,               //  servicing a request to set file size
+            ioreqExtendingWriteIssued,  //  extending write I/O issued (or about to be issued)
 
-            ioreqCompleted,
+            ioreqCompleted,             //  OS completed the IOREQ, processing completion
 
             ioreqMax
         };
 
-        enum IOMETHOD
+        enum IOMETHOD // iomethod
         {
             iomethodNone = 0,
             iomethodSync,
@@ -107,32 +118,52 @@ class IOREQ : MemCopyable<IOREQ>
 
     public:
 
+        //
+        //  IOREQ Memeber Variables
+        //
 
+        //
+        //      OS Operational Info
+        //
 
-        OVERLAPPED              ovlp;
+        OVERLAPPED              ovlp;               //  must be first
+            //  20 / 32 bytes
 
+        //
+        //      IOREQ Tracking Info
+        //
 
         CPool< IOREQ, OffsetOfAPIC >::CInvasiveContext      m_apic;
-        IOREQ*                  pioreqIorunNext;
-        LONG                    ipioreqHeap;
+            //  28 / 48
+        IOREQ*                  pioreqIorunNext;            //  same I/O run (while in IO combining list or going throuh I/O path - enqueued, issued, etc)
+        LONG                    ipioreqHeap;                //  only used if IOREQ is in I/O heap
+            //  36 / 60
             
     private:
+        //
+        //      Primary IOREQ State Control
+        //
 
-        volatile DWORD          m_ciotime;
+        volatile DWORD          m_ciotime;                  //  "io time", tracks worst/best case "debugger-adjusted" IO latencies
+            //  40 / 64
 
-        CCriticalSection        m_crit;
+        CCriticalSection        m_crit;                     //  critical section ONLY for IO completion and hung IO processing (but NOT ciotime incrementing)
+            //  48 / 72
 
-        IOREQTYPE               m_ioreqtype:8;
+        IOREQTYPE               m_ioreqtype:8;              //  "IO[REQ] state"
 
-        IOMETHOD                m_iomethod:8;
+        IOMETHOD                m_iomethod:8;               //  type of OS IO method invoked
 
         DWORD                   m_reserved:16;
+            //  52 / 76
 
     public:
 
-        volatile DWORD          m_grbitHungActionsTaken;
+        volatile DWORD          m_grbitHungActionsTaken;    //  hung IO actions taken
+            //  56 / 80
 
     public:
+        //  Individual State Accessor Functions, State Modification is below ...
 
         IOREQTYPE   Ioreqtype() const           { return m_ioreqtype; }
         IOMETHOD    Iomethod() const            { return m_iomethod; }
@@ -141,57 +172,83 @@ class IOREQ : MemCopyable<IOREQ>
 #ifdef DEBUG
         BOOL        FNotOwner() const           { return m_crit.FNotOwner(); }
         BOOL        FOwner() const              { return m_crit.FOwner(); }
-#endif
+#endif  //  DEBUG
 
+        //
+        //      In Progress IO Info
+        //
 
-        HRT                     hrtIOStart;
+        HRT                     hrtIOStart;                 //  HRT start time of an IO
+            //  64 / 88
 
-        COSDisk *               m_posdCurrentIO;
+        COSDisk *               m_posdCurrentIO;            //  to determine if active IOs are from more than one disk for Hung IO detection
+            //  68 / 96
 
+        //
+        //      Various - 
+        //          Basic IO info, IO coallescing, queue / heap reservation and quota, QOS info, 
+        //          completion info, tracking data.
+        //
 
         FLAG32                  fWrite:1;
         INT                     group:2;
         FLAG32                  fCoalesced:1;
-        FLAG32                  fFromReservePool:1;
-        FLAG32                  m_fFromTLSCache:1;
+        FLAG32                  fFromReservePool:1;         //  from the reserve avail pool
+        FLAG32                  m_fFromTLSCache:1;          //  tracking this was gotten from TLS alloc
 
-        FLAG32                  m_fHasHeapReservation:1;
-        FLAG32                  m_fHasBackgroundReservation:1;
-        FLAG32                  m_fHasUrgentBackgroundReservation:1;
+        FLAG32                  m_fHasHeapReservation:1;                //  can be sorted into the heap
+        FLAG32                  m_fHasBackgroundReservation:1;          //  got into the background quota
+        FLAG32                  m_fHasUrgentBackgroundReservation:1;    //  got into the urgent background quota
 
-        FLAG32                  m_fCanCombineIO:1;
+        FLAG32                  m_fCanCombineIO:1;          //  can be combined with TLS IO run / on front end
 
-        static const INT        cRetriesMax = 0x7ffe;
-        INT                     m_cRetries:15;
-        INT                     m_reserved1:7;
+        static const INT        cRetriesMax = 0x7ffe;       //  leave extra 1 off (instead of 0x7fff), just because
+        INT                     m_cRetries:15;              //  number of times OOM or other error has caused a retry (maxes out at 0x3ffe/cRetriesMax)
+        INT                     m_reserved1:7;              //  unused
 
+            //  72 / 100
 
         FullTraceContext        m_tc;
         OSFILEQOS               grbitQOS;
 
+        //  96 / 128
 
+        //
+        //      Basic IO Info (offset, size, and actual data)
+        //
 
         QWORD                   ibOffset;
         const BYTE *            pbData;
         DWORD                   cbData;
+            //  112 / 148
+            //  note: +4 byte void (64-bit)
 
+        //
+        //      Completion Info
+        //
 
         P_OSFILE                p_osf;
         DWORD_PTR               dwCompletionKey;
         PFN                     pfnCompletion;
+            //  124 / 176
 
         static SIZE_T OffsetOfHIIC()                        { return OffsetOf( IOREQ, m_hiic ); }
     private:
-        CInvasiveList< IOREQ, OffsetOfHIIC >::CElement      m_hiic;
+        CInvasiveList< IOREQ, OffsetOfHIIC >::CElement      m_hiic; // invasive context for hung IO
 
     public:
+            //  136 / 192
 
-        DWORD                   m_tidAlloc;
-        TICK                    m_tickAlloc;
+        DWORD                   m_tidAlloc;         //  TID of the thread requesting this IO
+        TICK                    m_tickAlloc;        //  TICK when the IOREQ was allocated (indicates time in IO queue)
 
+            //  144 / 200
 
-        DWORD_PTR               m_iocontext;
+        DWORD_PTR               m_iocontext;        //  IO context for performance tracking via IFilePerfAPI
 
+        //
+        //      IO Qs.
+        //
 
     public:
         static SIZE_T OffsetOfMetedQueueIC()        { return OffsetOf( IOREQ, m_irbticMetedQ ); }
@@ -200,43 +257,70 @@ class IOREQ : MemCopyable<IOREQ>
                                 m_irbticMetedQ;
 
     public:
-        IOREQ*                  pioreqVipList;
+        IOREQ*                  pioreqVipList;      //  next IO run in the VIP list
 
     public:
 
+        //  Should we be filling out to 64 byte cache line size to prevent false sharing?
 
+                //  192 / 264
 
+        //  Debugging / Extra check information
 
 #ifndef RTM
-        FLAG32                  m_fDequeueCombineIO:1;
+        FLAG32                  m_fDequeueCombineIO:1;      //  can be combined at dequeue / i.e. on back end
 
-        FLAG32                  m_fSplitIO:1;
-        FLAG32                  m_fReMergeSplitIO:1;
-        FLAG32                  m_fOutOfMemory:1;
+        FLAG32                  m_fSplitIO:1;               //  set if the IO was deemed to need to be split
+        FLAG32                  m_fReMergeSplitIO:1;        //  set if the IO was split and then later put back together b/c of an IO error
+        FLAG32                  m_fOutOfMemory:1;           //  set if the IO got an out of memory on issue
 
-        INT                     m_cTooComplex:3;
-        FLAG32                  m_reservedNRtm:25;
+        INT                     m_cTooComplex:3;            //  count of the number of times we got invalid parameter and reduced IO functionality
+        FLAG32                  m_reservedNRtm:25;          //  unused
 #endif
 
+        // If we ever need to save space, consider these opportunities:
+        //
+        //  - 2     There are 20 some-odd unused bits in there to boot.
+        //  - 8     We could virtualize ibOffset to IbOffset() and then get the value
+        //              from the OVERLAPPED structure which already has space for this
+        //              info.  Unless it's used for some other purpose?
+        //  - 8(64) Wasting a tiny bit on alignment in 64-bit
+        //  - 2     OSFILEQOS might be compressible to a SHORT if the bits are reordered.
+        //  - 4/8(64) m_hiic only needs a singly linked list, could move to that.
+        //  - 4     May be able to combine m_ciotime with m_grbitHungActionsTaken
+        //  - ?/?   At least a couple empty DWORDs between variables
+        //  - 4/8   May be able to remove m_posdCurrentIO at some point.
+        //  - 4     Move m_ioreqtype and m_iomethod back to the main bit-field.
+        //
+        // NOTE: And that's without going back to the scary unions of like m_apic
+        // and ipioreqHeap.
 
     public:
     
+        //
+        //  Individual State Modification
+        //
     
         VOID ValidateIOREQTypeTransition( const IOREQTYPE ioreqtypeNext );
     
         VOID SetIOREQType( const IOREQTYPE ioreqtypeNext, const IOMETHOD iomethod = iomethodNone );
 
         VOID BeginIO( const IOMETHOD iomethod, const HRT hrtIOStart, const BOOL fHead );
-        typedef enum { CompletedIO  = 1, ReEnqueueingIO = 2 } COMPLETION_STATUS;
+        typedef enum { CompletedIO /* successful or not */ = 1, ReEnqueueingIO = 2 } COMPLETION_STATUS;
         VOID CompleteIO( const COMPLETION_STATUS eCompletionStatus );
 
         VOID IncrementIOTime();
         
 
+        //
+        //  Accessor Functions
+        //
 
+        //  End offset / ib for this specific ioreq (not the whole pioreqIorunNext chain / run)
+        //  Note this is 1 beyond the actual last ib in use, it is a "Max" type value.
         QWORD IbBlockMax() const
         {
-            Assert( ibOffset < (QWORD)llMax );
+            Assert( ibOffset < (QWORD)llMax ); // of course, unfortunately 0 is a valid offset, so can't check != 0
             Assert( cbData != 0 );
             return ibOffset + (QWORD)cbData;
         }
@@ -246,9 +330,11 @@ class IOREQ : MemCopyable<IOREQ>
         void AssertValid( void )  const;
 #endif
 
+        //  Debugger support
 
         friend VOID DumpOneIOREQ( const IOREQ * const pioreqDebuggee, const IOREQ * const pioreq );
 
+        //  The Hung IO Patrol Dog functions must be friends.
 
         friend ERR ErrIOMgrPatrolDogICheckOutIOREQ( __in ULONG ichunk, __in ULONG iioreq, __in IOREQ * pioreq, void * pctx );
         friend DWORD IOMgrIOPatrolDogThread( DWORD_PTR dwContext );
@@ -271,20 +357,26 @@ class IOREQ : MemCopyable<IOREQ>
         INLINE BOOL FExtendingWriteIssued() const               { return ioreqExtendingWriteIssued == m_ioreqtype; }
         INLINE BOOL FCompleted() const                          { return ioreqCompleted == m_ioreqtype; }
 
+        //      Categories of State Accessor Functions...
+        //
 
+        //  These are useful for declaring generic conditions in debugging / diagnostic code, but 
+        //  rather not depend upon these potentially fragile relationships for actual retail code.
 #ifndef RTM
         BOOL FInAvailState() const                          { return FInAvailPool() || FCachedInTLS() || FInReservePool(); }
         BOOL FInPendingState() const                        { return FAllocFromAvail() || FAllocFromEwreqLookaside() || FInIOCombiningList(); }
 #endif
         BOOL FInEnqueuedState() const                       { return FEnqueuedInHeap() || FEnqueuedInVIPList() || FEnqueuedInMetedQ(); }
-        INLINE BOOL FVirtuallyIssuedState() const           { return FRemovedFromQueue() ; }
+        // helpers for FInIssuedState()
+        INLINE BOOL FVirtuallyIssuedState() const           { return FRemovedFromQueue() /* <- this one is "sort of issued" / in process of being issued */; }
         INLINE BOOL FOtherIssuedState() const               { return FSetSize() || FExtendingWriteIssued(); }
         INLINE BOOL FOSIssuedState() const                  { return FIssuedSyncIO() || FIssuedAsyncIO(); }
 
-        BOOL FInIssuedState() const                         { return FVirtuallyIssuedState() ||
+        BOOL FInIssuedState() const                         { return FVirtuallyIssuedState() ||     // <- this one is "sort of issued" / in process of being issued
                                                                                 FOSIssuedState() ||
                                                                                 FOtherIssuedState(); }
 #ifndef RTM
+        //  
         INLINE BOOL FEnqueueable() const                    { return m_fHasHeapReservation || grbitQOS & qosIOPoolReserved; }
 #endif
         INLINE BOOL FUseMetedQ() const                      { return !!( grbitQOS & qosIODispatchBackground ) || !!( grbitQOS & qosIODispatchWriteMeted ); }
@@ -307,6 +399,8 @@ inline INT CmpIOREQOffset( const IOREQ * const pioreq1, const IOREQ * const pior
 
 
 
+////////////////////////////////////////
+//  I/O request pool chunk support
 
 typedef struct _IOREQCHUNK
 {
@@ -320,15 +414,24 @@ typedef struct _IOREQCHUNK
 } IOREQCHUNK;
 
 
+////////////////////////////////////////
+//  I/O servicer (i.e. a Disk)
 
 class COSDisk : public CZeroInit
 {
 
+    //  Glue: Global List of OSDisks
+    //
+    // NOTE: The m_ile must be first or we don't think our list is empty.
+    //  Is global ctor not getting called?
     public:
         static SIZE_T OffsetOfILE() { return OffsetOf( COSDisk, m_ile ); }
     private:
         CInvasiveList< COSDisk, OffsetOfILE >::CElement m_ile;
 
+    //
+    //  OSDisk Lifecycle Functionality
+    //
 
     public:
         COSDisk();
@@ -352,32 +455,41 @@ class COSDisk : public CZeroInit
     private:
         OSDiskState     m_eState;
 
+        //  Number of referrers to this, i.e. files open against the disk and/or IO thread.
         volatile ULONG  m_cref;
 
         DWORD           m_dwDiskNumber;
 
         COSEventTraceIdCheck m_traceidcheckDisk;
 
+        //  The disk path ID. See comments in _osfs.hxx for ErrDiskId() on what to expect for this
+        //  path.
         WCHAR           m_wszDiskPathId[IFileSystemAPI::cchPathMax];
 
+        //  S.M.A.R.T. and other OS identify information
+        //
         #define         szEseNoLoadSmartData        "EseNoLo-S%d-E%d"
-        #define         cchMaxEseNoLoadSmartData    ( 10 + 2  + 12 + 1 + 2  )
+        #define         cchMaxEseNoLoadSmartData    ( 10 + 2 /* for 1st %d */ + 12 + 1 + 2 /* safety */ )
         enum { eSmartLoadDiskOpenFailed = 1, eSmartLoadDiskOpenRoFailed = 2, eSmartLoadDevIoCtrlGetVerFailed = 3, eSmartLoadSmartVersionUnexpected = 4,
                 eSmartLoadSmartRevisionUnexpected = 5, eSmartLoadSmartCmdCapabilityNotSet = 6, eSmartLoadDevIoCtrlRcvDriveDataFailed = 7 };
         void SetSmartEseNoLoadFailed( __in const ULONG iStep, __in const DWORD error, __out_bcount_z(cbIdentifier) CHAR * szIdentifier, __in const ULONG cbIdentifier );
 
         typedef struct OSDiskInfo_
         {
+            //  S.M.A.R.T. Capable
             BYTE            m_bDiskSmartVersion;
             BYTE            m_bDiskSmartRevision;
             BYTE            m_bDiskSmartIdeDevMap;
             DWORD           m_grbitDiskSmartCapabilities;
 
-            CHAR            m_szDiskModel[ max( 50 + 1, cchMaxEseNoLoadSmartData ) ];
-            CHAR            m_szDiskModelSmart[ max( 39 + 1, cchMaxEseNoLoadSmartData ) ];
-            CHAR            m_szDiskSerialNumber[ max( 50 + 1, cchMaxEseNoLoadSmartData ) ];
-            CHAR            m_szDiskFirmwareRev[ 20 + 1 ];
+            //  Disk Product/Serial Identity Info
+            CHAR            m_szDiskModel[ max( 50 + 1, cchMaxEseNoLoadSmartData ) ];        // note: SMART says only needs 39 chars for this field
+            CHAR            m_szDiskModelSmart[ max( 39 + 1, cchMaxEseNoLoadSmartData ) ];   // note: the model from S.M.A.R.T. APIs is longer / more qualified.
+            CHAR            m_szDiskSerialNumber[ max( 50 + 1, cchMaxEseNoLoadSmartData ) ]; // note: SMART says only needs 20 chars for this field
+            CHAR            m_szDiskFirmwareRev[ 20 + 1 ]; // note: SMART says only needs 8 chars for this field
 
+            //  Disk Hardware & Cache Info
+            //      (for each structure, only valid if preceeding matching m_errorVar is 0)
             DWORD                           m_errorOsdci;
             _Field_size_( sizeof(DISK_CACHE_INFORMATION) )
             DISK_CACHE_INFORMATION          m_osdci;
@@ -409,10 +521,14 @@ class COSDisk : public CZeroInit
         void LoadDiskInfo_( __in_z PCWSTR wszDiskPath, __in const DWORD dwDiskNumber );
         void LoadCachePerf_( HANDLE hDisk );
 
+    //
+    //  Accessors for simple info
+    //
     public:
 
         const WCHAR * WszDiskPathId() const;
 
+        //  get disk ID for this disk
         
         ERR ErrDiskId( ULONG_PTR* const pulDiskId ) const;
 
@@ -420,6 +536,9 @@ class COSDisk : public CZeroInit
         
         BOOL FSeekPenalty() const;
 
+    //
+    //  Debug Routines
+    //
 
     public:
 
@@ -428,6 +547,9 @@ class COSDisk : public CZeroInit
 #endif
 
 
+    //
+    //  I/O Run and I/O Run Pool support (helper classes)
+    //
 
     public:
 
@@ -461,6 +583,7 @@ class COSDisk : public CZeroInit
 #endif
                 ULONG CbRun( ) const;
 
+                //  Note this is 1 beyond the actual last ib in use, it is a "Max" type value.
                 QWORD IbRunMax() const              { ASSERT_VALID( this ); Assert( !FEmpty() ); return FEmpty() ? 0 : ( m_storage.Head()->ibOffset + (QWORD)CbRun() ); }
 
                 QWORD IbOffset( ) const             { ASSERT_VALID( this ); Assert( !FEmpty() ); return FEmpty() ? 0 : m_storage.Head()->ibOffset; }
@@ -486,9 +609,9 @@ class COSDisk : public CZeroInit
                             __out BOOL * const                      pfIOOSLowPriority,
                             __inout PFILE_SEGMENT_ELEMENT const     rgfse,
                             __in const DWORD                        cfse );
-                IOREQ * PioreqGetRun();
+                IOREQ * PioreqGetRun();             // destructive version of PioreqHead()
                 
-        };
+        };  // end of IORun
 
         static DWORD CbIOLength( const IOREQ * const    pioreqHead )
         {
@@ -496,6 +619,7 @@ class COSDisk : public CZeroInit
             QWORD           ibOffsetMax = 0;
             DWORD           cbOffsetMaxData = 0;
 
+            //  Due to read gapping we can't just add up the cbData's
 
             for ( const IOREQ * pioreqT = pioreqHead; pioreqT; pioreqT = pioreqT->pioreqIorunNext )
             {
@@ -516,15 +640,17 @@ class COSDisk : public CZeroInit
             return (DWORD)( ibOffsetMax - ibOffsetMin ) + cbOffsetMaxData;
         }
 
+        //  This class manages a pool of (foreground) collaescing ioruns, maintaining a single 
+        //  iorun per file.
 
-        class CIoRunPool
+        class CIoRunPool    // iorunpool
         {
         private:
             static const INT        s_cConcurrentFileIoRuns = 2;
             static const INT        irunNil = -1;
 
-            HRT                     m_rghrtIoRunStarted[ s_cConcurrentFileIoRuns ];
-            IORun                   m_rgiorunIoRuns[ s_cConcurrentFileIoRuns ];
+            HRT                     m_rghrtIoRunStarted[ s_cConcurrentFileIoRuns ];     //  associated file IO runs with the previous handles
+            IORun                   m_rgiorunIoRuns[ s_cConcurrentFileIoRuns ];         //  associated file IO runs with the previous handles
 
             INT IrunIoRunPoolIFindFileRun_( _In_ const _OSFILE * const p_osf ) const;
             IOREQ * PioreqIoRunPoolIRemoveRunSlot_( _In_ const INT irun );
@@ -533,15 +659,22 @@ class COSDisk : public CZeroInit
         public:
 
 #ifdef ENABLE_JET_UNIT_TEST
+            //      Init/Term
             CIoRunPool()
             {
+                //  DO NOT ADD CODE HERE (it is only run in embedded unit test).
+                //      The only reason this code is here, is the OSTLS gives us a zero init'd
+                //      chunk of memory, but the embedded unit test just declares this on the
+                //      stack - so we need to zero it out.
                 memset( m_rgiorunIoRuns, 0, sizeof(m_rgiorunIoRuns) );
                 ASSERT_VALID( &( m_rgiorunIoRuns[0] ) );
                 Expected( m_rgiorunIoRuns[0].PioreqHead() == NULL );
+                //  DO NOT ADD CODE HERE (it is only run in embedded unit test).
             }
 
             ~CIoRunPool()
             {
+                //  DO NOT ADD CODE HERE (it is only run in embedded unit test).
             }
 #endif
 
@@ -554,27 +687,47 @@ class COSDisk : public CZeroInit
                 _In_ const DWORD                cbDataCombine,
                 _In_ const BOOL                 fOverrideIoMax ) const;
 #ifdef DEBUG
+            //  Note: This function doesn't honor IO maxes for writes so we'll leave it debug only (for Asserts)
             BOOL FCanCombineWithExistingRun( _In_ const IOREQ * const pioreq ) const;
+            //  Only needed for testing ...
             INT Cioruns() const;
 #endif
 
 
             BOOL FContainsFileIoRun( _In_ const _OSFILE * const p_osf ) const;
 
+            //  Tests to see if the iorunpool is either completely empty, or has at least
+            //  one empty slot.
 
             enum IoRunPoolEmptyCheck { fCheckAllEmpty = 1, fCheckOneEmpty = 2 };
 
             BOOL FEmpty( _In_ const IoRunPoolEmptyCheck fCheck ) const;
 
+            //  The contract of this function is a little weird, but the simplest way to
+            //  accomplish a limited size pool ... it has two jobs:
+            //   1) It will consume and add the provied pioreqToAdd to the most appropriate
+            //      already existing iorun, OR create a new empty iorun.
+            //   2) It will return any iorun that was forcibly evicted / removed from the
+            //      pool as a side effect of performing job (1).  There are two reasons
+            //      we might see such eviction:
+            //       A) Is is not matching any building files (for any of the ioruns) and 
+            //          there are no empty slots/runs, so much scavenge an existing iorun.
+            //       B) There is a matching file but the offsets couldn't be combined (too
+            //          far apart most likely).
             
             IOREQ * PioreqSwapAddIoreq( _Inout_ IOREQ * const pioreqToAdd );
 
+            //  This function returns (and removes from the iorunpool) all the ioruns for 
+            //  the specified file, or for all ioruns if NULL is passed in.
 
             IOREQ * PioreqEvictFileRuns( _In_ const _OSFILE * const p_osf );
 
-        };
+        };  // end of CIoRunPool
     
 
+    //
+    //  Queue Operation
+    //
 
     public:
 
@@ -625,12 +778,18 @@ class COSDisk : public CZeroInit
         };
 
 
+    //
+    //  I/O Routines
+    //
 
     public:
 
         __int64 IpassBeginDispatchPass()        { return m_pIOQueue->IpassBeginDispatchPass(); }
         __int64 IpassContinuingDispatchPass()   { return m_pIOQueue->IpassContinuingDispatchPass(); }
 
+        //  We must have the alloc take the QOS grbit, because this also reserves the right
+        //  to enqueue or issue an IO at that QOS ... then EnqueueIORun() is guaranteed to
+        //  succeed.
         ERR ErrReserveQueueSpace( __in OSFILEQOS grbitQOS, __inout IOREQ * pioreq );
         ERR ErrAllocIOREQ( __in OSFILEQOS grbitQOS, __in const _OSFILE * p_osf, __in const BOOL fWrite, __in QWORD ibOffsetCombine, __in DWORD cbDataCombine, __out IOREQ ** ppioreq );
         VOID FreeIOREQ( __in IOREQ * pioreq );
@@ -684,6 +843,10 @@ class COSDisk : public CZeroInit
         void TrackOsFfbComplete( const IOFLUSHREASON iofr, const DWORD error, const HRT hrtStart, const QWORD usFfb, const LONG64 cioFlushing, const WCHAR * const wszFileName );
 
     private:
+        //  This is the IO that the IO thread is dispatching or more likely is 
+        //  dispatched.  I called it Dispatch_ing_ just to underscore there is
+        //  a slim timing window where it might not be out to the OS yet. I call
+        //  the accessor CioDispatched() though.
         __int64         m_cioDequeued;
         volatile ULONG  m_cioForeground;
         volatile ULONG  m_cioDispatching;
@@ -695,10 +858,15 @@ class COSDisk : public CZeroInit
         HRT             m_hrtLastMetedDispatch;
 
 
+    //
+    //  IO Queue / Heap
+    //
 
     public:
         class IOQueueToo : CZeroInit
         {
+            //  Constants
+            //
             public:
                 enum QueueInitType
                 {
@@ -706,17 +874,21 @@ class COSDisk : public CZeroInit
                     qitWrite = 0x2,
                 };
 
-                enum QueueFirstIoFlags
+                enum QueueFirstIoFlags // qfif
                 {
                     qfifDraining = 0x1,
                     qfifBuilding = 0x2,
                     qfifEither   = ( qfifDraining | qfifBuilding ),
                 };
 
+            //  Initialization / dtor
+            //
             public:
                 IOQueueToo( CCriticalSection * pcritController, const QueueInitType qitInit );
                 ~IOQueueToo();
 
+            //  The basic enqueue /  dequeue / and interrogation of queue interface
+            //
             public:
                 BOOL FInsertIo( _In_ IOREQ * pioreqHead, _In_ const LONG cioreqRun, _Out_ IOREQ ** ppioreqHeadAccepted );
                 void ExtractIo( _Inout_ COSDisk::QueueOp * const pqop, _Out_ IOREQ ** ppioreqTraceHead, _Inout_ BOOL * pfCycles );
@@ -732,11 +904,13 @@ class COSDisk : public CZeroInit
                 }
                 
             
+            //  Member variables
+            //
             private:
                 OnDebug( QueueInitType          m_qit );
                 OnDebug( CCriticalSection *     m_pcritIoQueue );
                 ULONG                           m_cioEnqueued;
-                ULONG                           m_cioreqEnqueued;
+                ULONG                           m_cioreqEnqueued;   // not really needed
 
                 HRT                             m_hrtBuildingStart;
                 typedef InvasiveRedBlackTree< IFILEIBOFFSET, IOREQ, IOREQ::OffsetOfMetedQueueIC > IRBTQ;
@@ -746,10 +920,13 @@ class COSDisk : public CZeroInit
                 friend void COSDisk::Dump( CPRINTF* pcprintf, DWORD_PTR dwOffset ) const;
         };
 
+    //  Private implementation of our IO queue.
     private:
 
         class IOQueue : CZeroInit
         {
+            //  Initialization / dtor
+            //
             public:
                 IOQueue( CCriticalSection * pcritController );
                 ERR ErrIOQueueInit( __in LONG cIOEnqueuedMax, __in LONG cIOBackgroundMax, __in LONG cIOUrgentBackgroundMax );
@@ -762,6 +939,9 @@ class COSDisk : public CZeroInit
                 void TrackIorunEnqueue( _In_ const IOREQ * const pioreqHead, _In_ const DWORD cbRun, _In_ HRT hrtEnqueueBegin, _In_ OSDiskIoQueueManagement dioqm ) const;
                 void TrackIorunDequeue( _In_ const IOREQ * const pioreqHead, _In_ const DWORD cbRun, _In_ HRT hrtDequeueBegin, _In_ OSDiskIoQueueManagement dioqm, _In_ const USHORT cIorunCombined, _In_ const IOREQ * const pioreqAdded ) const;
 
+            //
+            //  The basic enqueue /  dequeue / and count of queue interface
+            //
             public:
 
                 __int64 IpassBeginDispatchPass();
@@ -782,8 +962,12 @@ class COSDisk : public CZeroInit
                 __int64                 m_cDispatchContinues;
 
 
+            //  private implementation of an oscillating A and B heaps
+            //
             private:
 
+                ////////////////
+                //  I/O Heap A
 
                 class IOHeapA
                 {
@@ -793,8 +977,9 @@ class COSDisk : public CZeroInit
                         IOREQ* volatile *           rgpioreqIOAHeap;
                         LONG                        ipioreqIOAHeapMax;
                         volatile LONG               ipioreqIOAHeapMac;
-                        CCriticalSection * const    m_pcrit;
+                        CCriticalSection * const    m_pcrit;            // used only for validation of locking purposes
 
+                    //  I/O Heap A Functions
 
 
                     private:
@@ -825,8 +1010,10 @@ class COSDisk : public CZeroInit
                     private:
                         void HeapAIUpdate( IOREQ* pioreq );
 
-                };
+                };  // end of IOHeapA
 
+                ////////////////
+                //  I/O Heap B
                 class IOHeapB
                 {
                     private:
@@ -836,6 +1023,7 @@ class COSDisk : public CZeroInit
                         volatile LONG               ipioreqIOBHeapMic;
                         CCriticalSection * const    m_pcrit;
 
+                        //  I/O Heap B Functions
 
                     private:
                         void _HeapBTerm();
@@ -865,31 +1053,40 @@ class COSDisk : public CZeroInit
                         LONG IpioreqHeapBIRightChild( LONG ipioreq ) const;
                         void HeapBIUpdate( IOREQ* pioreq );
 
-                };
+                };  // end of IOHeapB
 
+            //////////////
+            //  I/O Heap Data
 
             private:
 
+                //  critical section protecting the I/O Heap
 
                 CCriticalSection * m_pcritIoQueue;
 
+                //  I/O heap size and protection
 
                 LONG                m_cioreqMax;
                 CSemaphore          m_semIOQueue;
 
+                //  actual I/O heaps
 
 #ifdef DEBUG
+                // .dtor is a friend to for debug code to avoid AV in fault injection 17360 scenario 
                 friend COSDisk::~COSDisk();
 #endif
                 IOHeapA * m_pIOHeapA;
                 IOHeapB * m_pIOHeapB;
 
+                //  I/O Heap usage / cursors
 
                 BOOL    fUseHeapA;
 
                 QWORD   iFileCurrent;
                 QWORD   ibOffsetCurrent;
 
+            //////////////
+            //  I/O Heap Functions
 
             private:
 
@@ -899,6 +1096,8 @@ class COSDisk : public CZeroInit
                 INLINE IOREQ* PioreqIOHeapTop();
 
 
+            //////////////
+            //  Overflow / VIP IO operations list
 
             private:
 
@@ -908,7 +1107,7 @@ class COSDisk : public CZeroInit
 
                 BOOL    FValidVIPList() const
                 {
-                    Assert( m_pcritIoQueue->FOwner() );
+                    Assert( m_pcritIoQueue->FOwner() ); // only valid if we have IO heap crit
 
                     Assert( 0 == m_cioVIPList || !m_VIPListHead.FEmpty() );
                     Assert( 0 != m_cioVIPList || m_VIPListHead.FEmpty() );
@@ -919,21 +1118,30 @@ class COSDisk : public CZeroInit
                     {
                         cioreqT++;
                         Assert( pioreqT->FEnqueuedInVIPList() );
+                        // walk all entries, make sure matches count ...
                         pioreqT = pioreqT->pioreqVipList;
                     }
                     Assert( cioreqT == m_cioVIPList );
+                    //  Lets assert that this slim overflow list does not get used very often.
                     Assert( cioreqT < 100 ||
+                            // cough, we're just going to use this as knowing the client is going
+                            // to potentially overloaded us ... like SOMEONE's 100 inst, 6 DBs test
+                            // to reproduce the exhausted thread pool bug.
                             ( FNegTestSet( fDisableTimeoutDeadlockDetection ) && cioreqT < 800 ) );
                     return fTrue;
                     #endif
                 }
 
 
+            //////////////
+            //  Meted Queue (the new one)
 
             private:
                 IOQueueToo              m_qMetedAsyncReadIo;
                 IOQueueToo              m_qWriteIo;
 
+            //////////////
+            //  QOS Quota data
 
             private:
 
@@ -942,53 +1150,69 @@ class COSDisk : public CZeroInit
                 volatile INT            m_cioQosBackgroundCurrent;
 
                 INT                 m_cioQosUrgentBackgroundMax;
+                // Note:            m_cioreqQOSUrgentBackgroundLow is variable, so no variable controls it
                 volatile INT            m_cioQosUrgentBackgroundCurrent;
 
+                //////////////
+                //  Debug Helper
                 
                 friend void COSDisk::Dump( CPRINTF* pcprintf, DWORD_PTR dwOffset ) const;
 
-        };
+        };  // end of IOQueue
 
     private:
 
+        //  finally the actual IO queue based on the Heap A/B implementation above.
 
         IOQueue *           m_pIOQueue;
 
+        //  critical section protecting the I/O Heap
 
         CCriticalSection    m_critIOQueue;
 
+        //////////////
+        //  Performance
 
     public:
 
+        // Returns the actual physical disk queue depth
 
         INLINE DWORD CioOsQueueDepth();
 
     private:
 
+        //  physical disk handle
 
         HANDLE              m_hDisk;
 
+        //  physical disk performance (updated periodically)
 
         static const TICK   s_dtickPerformancePeriod        = 100;
         TICK                m_tickPerformanceLastMeasured;
         DWORD               m_cioOsQueueDepth;
 
+        // Refreshes the physical disk performance information if necessary
 
         INLINE VOID RefreshDiskPerformance();
 
+        // Queries the performance of the physical disk
 
         VOID QueryDiskPerformance();
 
-};
+};  // end of COSDisk
 
 
+//      Returns an initialized / ref-counted interface to the OS Disk System
 
 ERR ErrOSDiskConnect( __in_z const WCHAR * const wszDiskPathId, __in const DWORD dwDiskNumber, __out IDiskAPI ** ppdiskapi );
 
+//      Disconnects the IO context from the OS Disk System, and deinitializes if necessary.
 
 void OSDiskDisconnect( __inout IDiskAPI * pdiskapi, __in const _OSFILE * p_osf );
 
 
+////////////////////////////////////////
+//  I/O "WatchDog" / PatrolDog Functionality
 
 class PatrolDogSynchronizer
 {
@@ -1001,17 +1225,19 @@ class PatrolDogSynchronizer
             pdsDeactivating
         };
         
-        CAutoResetSignal    m_asigNudgePatrolDog;
+        CAutoResetSignal    m_asigNudgePatrolDog;       //  Signals the PatrolDog thread to wake up
+                                                        //  and check for wait and exit conditions.
 
-        BOOL volatile       m_fPutDownPatrolDog;
+        BOOL volatile       m_fPutDownPatrolDog;        //  Flag to indicate that the patrol dog thread
+                                                        //  must return.
 
-        DWORD volatile      m_cLoiters;
+        DWORD volatile      m_cLoiters;                 //  Number of I/Os currently in-flight.
 
-        THREAD              m_threadPatrolDog;
+        THREAD              m_threadPatrolDog;          //  Thread handle for the PatrolDog thread.
 
-        LONG volatile       m_patrolDogState;
+        LONG volatile       m_patrolDogState;           //  Current state the object is in.
 
-        void*               m_pvContext;
+        void*               m_pvContext;                //  User context.
 
         void InitPatrolDogState_();
 
@@ -1019,32 +1245,55 @@ class PatrolDogSynchronizer
 
     public:
 
+        //  Ctor.
         
         PatrolDogSynchronizer();
 
+        //  Dtor.
 
         ~PatrolDogSynchronizer();
 
+        //  Spawns the pfnPatrolDog thread. The contract is that this thread
+        //  will exit if conditions such that make FCheckForLoiter() return
+        //  fFalse are met. In other words, the thread must bail out once
+        //  TermPatrolDog() is called. The thread receives the pointer to
+        //  the PatrolDogSynchronizer object as its context and can retrieve
+        //  the user context being passed in by calling PvContext().
 
         ERR ErrInitPatrolDog( const PUTIL_THREAD_PROC pfnPatrolDog,
                                 const EThreadPriority priority,
                                 void* const pvContext );
 
+        //  Sets the state such that FCheckForLoiter() will return fFalse
+        //  if called and waits for the PatrolDog thread to exit. It is valid
+        //  to call this function even if the PatrolDog thread is not active.
 
         void TermPatrolDog();
 
+        //  Signals that a work unit needs tracking by the PatrolDog thread.
+        //  This function should only be called between a successful return
+        //  from ErrInitPatrolDog() and a call to TermPatrolDog().
 
         void EnterPerimeter();
 
+        //  Signals that a work unit does not need tracking anymore.
+        //  This function should only be called between a successful return
+        //  from ErrInitPatrolDog() and a call to TermPatrolDog().
 
         void LeavePerimeter();
 
+        //  Waits for a work unit that needs tracking. Returns fFalse
+        //  if the thread should quit. fTrue means that the timeout has expired
+        //  and there are still work units pending.
 
         BOOL FCheckForLoiter( const TICK dtickTimeout );
 
+        //  Returns the user context passed into ErrInitPatrolDog().
 
         void* PvContext() const;
 
+        //  Returns the size of this object. Necessary for preventing the workaround
+        //  used to run unit tests for this class from breaking.        
         
         SIZE_T CbSizeOf() const;
 };
@@ -1052,6 +1301,8 @@ class PatrolDogSynchronizer
 extern PatrolDogSynchronizer g_patrolDogSync;
 
 
+//      Internal glue
+//
 
 QWORD CmsecLatencyOfOSOperation( const IOREQ* const pioreq, const HRT dhrtIOElapsed );
 QWORD CmsecLatencyOfOSOperation( const IOREQ* const pioreq );
@@ -1065,13 +1316,16 @@ void OSDiskIIOThreadIComplete(  const DWORD     dwError,
 VOID OSDiskIIOThreadIRetryIssue();
 
 
+//      Miscellaneous
+//
 
 BOOL GetOverlappedResult_(  HANDLE          hFile,
                             LPOVERLAPPED    lpOverlapped,
                             LPDWORD         lpNumberOfBytesTransferred,
                             BOOL            bWait );
 
+//  used to avoid signaling the completion port on SemiSync IOs ...
 #define hNoCPEvent  ((DWORD_PTR)0x1)
 
-#endif
+#endif  //  __OSDISK_HXX_INCLUDED
 

@@ -3,7 +3,7 @@
 
 #ifdef ISAMAPI_H
 #error ISAMAPI.H already included
-#endif  
+#endif  /* !ISAMAPI_H */
 #define ISAMAPI_H
 
 #define ISAMAPI
@@ -17,16 +17,18 @@ struct CPCOL
 struct STATUSINFO
 {
     JET_SESID       sesid;
-    JET_PFNSTATUS   pfnStatus;
-    JET_SNP         snp;
-    JET_SNT         snt;
-    ULONG           cunitTotal;
-    ULONG           cunitDone;
-    ULONG           cunitPerProgression;
-    ULONG           cunitProjected;
+    JET_PFNSTATUS   pfnStatus;              // address of status notification function
+    JET_SNP         snp;                    // status notification process
+    JET_SNT         snt;                    // status notification type
+    ULONG           cunitTotal;             // total units of work
+    ULONG           cunitDone;              // units of work completed
+    ULONG           cunitPerProgression;    // units of work per unit of progression
+    ULONG           cunitProjected;         // projected units of work for current task
 
-    BOOL            fDumpStats;
-    FILE            *hfCompactStats;
+    // Detailed statistics:
+    BOOL            fDumpStats;             // dump compaction statistics (DEBUG only)
+//  struct _iobuf   *hfCompactStats;        // Use standard C FILE.
+    FILE            *hfCompactStats;        // handle to compaction statistics file
     ULONG           timerInitDB;
     ULONG           timerCopyDB;
     ULONG           timerInitTable;
@@ -34,20 +36,20 @@ struct STATUSINFO
     ULONG           timerRebuildIndexes;
     ULONG           timerCopyTable;
 
-    ULONG           cDBPagesOwned;
-    ULONG           cDBPagesAvail;
-    char            *szTableName;
-    ULONG           cTableFixedVarColumns;
-    ULONG           cTableTaggedColumns;
-    ULONG           cTableInitialPages;
-    ULONG           cTablePagesOwned;
-    ULONG           cTablePagesAvail;
-    QWORD           cbRawData;
-    QWORD           cbRawDataLV;
-    ULONG           cLeafPagesTraversed;
-    ULONG           cLVPagesTraversed;
-    ULONG           cSecondaryIndexes;
-    ULONG           cDeferredSecondaryIndexes;
+    ULONG           cDBPagesOwned;          // owned extents of source DB
+    ULONG           cDBPagesAvail;          // available extents of source DB
+    char            *szTableName;           // name of current table
+    ULONG           cTableFixedVarColumns;  // number of fixed and variable columns in current dest. table
+    ULONG           cTableTaggedColumns;    // number of tagged columns in current dest. table
+    ULONG           cTableInitialPages;     // pages initially allocated to current dest. table
+    ULONG           cTablePagesOwned;       // owned extents of current source table
+    ULONG           cTablePagesAvail;       // available extents of current source table
+    QWORD           cbRawData;              // bytes of non-LV raw data copied
+    QWORD           cbRawDataLV;            // bytes of LV raw data copied
+    ULONG           cLeafPagesTraversed;    // number of leaf pages traversed in current source table
+    ULONG           cLVPagesTraversed;      // number of long value pages traversed in current source table
+    ULONG           cSecondaryIndexes;      // number of secondary indexes in current source table
+    ULONG           cDeferredSecondaryIndexes;  // number of secondary indexes pending to be built
 };
 
 
@@ -111,6 +113,8 @@ ERR ErrIsamPrereadTables( __in JET_SESID sesid, __in JET_DBID vdbid, __in_ecount
 
 ERR ErrIsamCloseDatabase( JET_SESID sesid, JET_DBID vdbid, JET_GRBIT grbit );
 
+//  a number used to identify the callsite that began a transaction
+//  each call to BeginTransaction() should have a unique TRXID
 typedef __int64 TRXID;
 
 ERR ErrIsamSetSessionParameter(
@@ -370,6 +374,7 @@ ERR ErrIsamSetCurrentIndex(
     const ULONG         itagSequence    = 1 );
 
 
+//  non-dispatch function definitions
 
 ERR ErrIsamDefragment(
     JET_SESID       vsesid,
@@ -439,7 +444,7 @@ ERR ErrIsamRBSExecuteRevert(
 ERR ErrIsamRBSCancelRevert(
     __in    JET_INSTANCE   jinst );
 
-}
+} // extern "C"
 
 ERR ErrIsamIntersectIndexes(
     const JET_SESID sesid,
@@ -530,7 +535,8 @@ ERR VTAPI ErrIsamRetrieveColumnFromRecordStream(
     _Out_ ULONG * const                     pibValue,
     _Out_ ULONG * const                     pcbValue );
 
-
+/*  Isam VTFN.
+ */
 #ifndef ESENT
 #pragma prefast(push)
 #pragma prefast(disable:28251, "Inconsistent annotations. Prefast seems unable to deal with the function pointers' annotations.")
@@ -590,6 +596,7 @@ VTFNStreamRecords               ErrIsamStreamRecords;
 #endif
 
 
+// INLINE HACKS
 
 class PIB;
 struct FUCB;

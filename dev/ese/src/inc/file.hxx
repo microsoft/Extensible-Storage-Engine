@@ -6,7 +6,8 @@
 #define fDDLStamp               (1<<2)
 ERR ErrFILEIUpdateFDPData( FUCB *pfucb, ULONG grbit );
 
-
+/*  field and index definition
+/**/
 ERR ErrFILEGetPfieldAndEnterDML(
     PIB             * ppib,
     FCB             * pfcb,
@@ -101,7 +102,7 @@ ERR ErrFILEOpenTable(
 ERR ErrFILECloseTable( PIB *ppib, FUCB *pfucb );
 
 
-const ULONG cFILEIndexBatchSizeDefault  = 16;
+const ULONG cFILEIndexBatchSizeDefault  = 16;   // number of index builds at one time
 
 ERR ErrFILEIndexBatchInit(
     PIB         * const ppib,
@@ -154,12 +155,15 @@ INLINE ERR ErrFILEIAccessIndex(
 
     if ( pidb->FDeleted() )
     {
+        // If an index is deleted, it immediately becomes unavailable, regardless
+        // of whether or not the delete has committed yet.
         Assert( pidb->CrefCurrentIndex() == 0 );
         Assert( pfcbIndex->FDeletePending() );
         err = ErrERRCheck( JET_errIndexNotFound );
     }
     else if ( pidb->FVersioned() )
     {
+        //  Must place definition here because FILE.HXX precedes CAT.HXX
         ERR ErrCATAccessTableIndex(
                     PIB         *ppib,
                     const IFMP  ifmp,
@@ -167,7 +171,7 @@ INLINE ERR ErrFILEIAccessIndex(
                     const OBJID objidIndex );
         
         Assert( dbidTemp != g_rgfmp[ pfcbTable->Ifmp() ].Dbid() );
-        Assert( !pfcbTable->FFixedDDL() );
+        Assert( !pfcbTable->FFixedDDL() );  // Wouldn't be any versions if table's DDL was fixed.
         pidb->IncrementVersionCheck();
         pfcbTable->LeaveDML();
         err = ErrCATAccessTableIndex(
@@ -201,7 +205,7 @@ INLINE ERR ErrFILEIAccessIndexByName(
 
     return ( 0 == cmp ?
                 ErrFILEIAccessIndex( ppib, pfcbTable, pfcbIndex ) :
-                ErrERRCheck( JET_errIndexNotFound ) );
+                ErrERRCheck( JET_errIndexNotFound ) );      //  if name doesn't match, no point continuing
 }
 
 
@@ -220,16 +224,32 @@ INLINE BOOL FFILEIPotentialIndex(
     Assert( pfcbNil != pfcbIndex );
     Assert( pidbNil != pidb );
 
+    // No critical section needed because this function is only called at a time
+    // when Create/DeleteIndex has been quiesced (ie. only called during updates).
     Assert( pfcbTable->IsUnlocked() );
 
     if ( pidb->FDeleted() )
     {
+        //  if index is version-deleted, must check if deletion
+        //  has committed, and it's not enough to check the IDB
+        //  because there's a small window where the committing
+        //  transaction has obtained his trxCommit0 but has yet
+        //  to flag the IDB as committed, so we must check if
+        //  the index deletion WILL BE committed by hunting down
+        //  the RCE for the index deletion and checking the
+        //  TrxCommitted() in the RCE (which will be linked to
+        //  the trxCommit0 of the session performing the index
+        //  deletion)
+        //
         fPotentiallyThere = ( pidb->FVersioned() ?
                                     FFILEIVersionDeletedIndexPotentiallyThere( pfcbTable, pfcbIndex ) :
                                     fFalse );
     }
     else
     {
+        //  index is not marked as deleted, so it's potentially there
+        //  regardless of whether it's versioned or not
+        //
         fPotentiallyThere = fTrue;
     }
 
@@ -249,6 +269,8 @@ INLINE VOID FILEReleaseCurrentSecondary( FUCB *pfucb )
         Assert( pfucb->u.pfcb->PfcbTable()->FPrimaryIndex() );
         FUCBResetCurrentSecondary( pfucb );
 
+        // Don't need refcount on template indexes, since we
+        // know they'll never go away.
         if ( pfucb->u.pfcb->Pidb()->FIDBOwnedByFCB() || ( !pfucb->u.pfcb->FTemplateIndex() && !pfucb->u.pfcb->FDerivedIndex() ) )
         {
             pfucb->u.pfcb->Pidb()->DecrementCurrentIndex();

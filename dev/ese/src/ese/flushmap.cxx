@@ -4,6 +4,7 @@
 #include "std.hxx"
 #include "_dump.hxx"
 
+// Performance counter functions.
 
 PERFInstanceLiveTotal<> cFMPagesWrittenAsync;
 PERFInstanceLiveTotal<> cFMPagesWrittenSync;
@@ -51,8 +52,9 @@ LONG LFMTotalPagesCEFLPv( LONG iInstance, void* pvBuf )
 }
 
 
+// CFlushMap.
 
-const WCHAR* const CFlushMap::s_wszFmFileExtension = L".jfm";
+const WCHAR* const CFlushMap::s_wszFmFileExtension = L".jfm";   // Flush map file extension.
 
 INT CFlushMap::IGetPageLockSubrank_( const FMPGNO fmpgno )
 {
@@ -86,6 +88,7 @@ BOOL CFlushMap::FCheckForDbFmConsistency_(
     const SIGNATURE* const psignDbHdrFlushFromFm,
     const SIGNATURE* const psignFlushMapHdrFlushFromFm )
 {
+    // At least one of the signatures must match and not be uninitialized.
     return ( ( !memcmp( psignDbHdrFlushFromDb, psignDbHdrFlushFromFm, sizeof( SIGNATURE ) ) &&
             FSIGSignSet( psignDbHdrFlushFromDb ) ) ||
             ( !memcmp( psignFlushMapHdrFlushFromDb, psignFlushMapHdrFlushFromFm, sizeof( SIGNATURE ) ) &&
@@ -108,6 +111,8 @@ ERR CFlushMap::ErrGetFmPathFromDbPath(
     Call( ErrOSFSCreate( &pfsapi ) );
     Call( pfsapi->ErrPathParse( wszDbPath, wszDbFolder, wszDbFileName, wszDbExtension ) );
 
+    // ErrPathBuild throws a CRT exception if we pass in invalid parameters. Avoid calling that function
+    // if we know we won't have enough capacity to hold the flush map path.
     cchDbPath = (DWORD)wcslen( wszDbPath );
     cchDbExtension = (DWORD)wcslen( wszDbExtension );
     cchFmExtension = (DWORD)wcslen( s_wszFmFileExtension );
@@ -135,6 +140,7 @@ ERR CFlushMap::ErrChecksumFmPage_(
 {
     Assert( pv != NULL );
     
+    // Check for uninitialized page first.
     if ( !CPAGE::FPageIsInitialized( pv, s_cbFlushMapPageOnDisk ) )
     {
         return ErrERRCheck( JET_errPageNotInitialized );
@@ -187,6 +193,37 @@ CFMPG CFlushMap::CfmpgGetPreferredFmDataPageCount_( const PGNO pgnoReq )
 {
     Assert( pgnoReq <= pgnoSysMax );
 
+    // The logic to compute the preferred flush map data page count is laid out step by step along with the code, but
+    // below are two examples of how typical cases would go. Assume 8 KB flush map pages and 2 bits per flush state, which yields
+    // 32768 database pages per flush map page. In reality, a map page can hold slightly fewer than that because of the page header,
+    // but for simplicity, let's assume no header. Also, assume a 384 KB max write size, which can hold 48 flush map pages.
+    //
+    // o Small clients: 4 KB database pages, 256 pages for DB extension size (1 MB extension).
+    //  - DB size 0 bytes -  128 MB: flush map size is 16 KB (1 header + 1 data page). 1 initial data page.
+    //  - DB size  128 MB -  384 MB: flush map size is 32 KB (1 header + 3 data pages). +2 data pages.
+    //  - DB size  384 MB -  896 MB: flush map size is 64 KB (1 header + 7 data pages). +4 data pages.
+    //  - DB size  896 MB - 1.87 GB: flush map size is 128 KB (1 header + 15 data pages). +8 data pages.
+    //  - DB size 1.87 GB - 3.87 GB: flush map size is 256 KB (1 header + 31 data pages). +16 data pages.
+    //  - DB size 3.87 GB -    6 GB: flush map size is 392 KB (1 header + 48 data pages). Crossed max write size threshold, grow to multiples of that size. 
+    //  - DB size    6 GB -   12 GB: flush map size is 776 KB (1 header + 96 data pages). +48 data pages.
+    //  - DB size   12 GB -   24 GB: flush map size is 1.5 MB (1 header + 192 data pages). +96 data pages.
+    //  - DB size   24 GB -   48 GB: flush map size is 3 MB (1 header + 384 data pages). +192 data pages. 4x the write size, reached the growth threshold.
+    //  - DB size   48 GB -   72 GB: flush map size is 4.5 MB (1 header + 576 data pages). +192 data pages.
+    //  - DB size   72 GB -   96 GB: flush map size is 6 MB (1 header + 768 data pages). +192 data pages.
+    //  - DB size   96 GB -  120 GB: flush map size is 7.5 MB (1 header + 960 data pages). +192 data pages.
+    //  ...
+    //
+    // o Large clients: 32 KB database pages, 4096 pages for DB extension size (128 MB extension).
+    //  - DB size 0 bytes -  48 GB: flush map size is 392 KB (1 header + 48 data pages). 48 initial data pages (max write size).
+    //  - DB size   48 GB -  96 GB: flush map size is 776 KB (1 header + 96 data pages). +48 data pages.
+    //  - DB size   96 GB - 192 GB: flush map size is 1.5 MB (1 header + 192 data pages). +96 data pages.
+    //  - DB size  192 GB - 384 GB: flush map size is 3 MB (1 header + 384 data pages). +192 data pages. 4x the write size, reached the growth threshold.
+    //  - DB size  384 GB - 576 GB: flush map size is 4.5 MB (1 header + 576 data pages). +192 data pages.
+    //  - DB size  576 GB - 768 GB: flush map size is 6 MB (1 header + 768 data pages). +192 data pages.
+    //  - DB size  768 GB - 960 GB: flush map size is 7.5 MB (1 header + 960 data pages). +192 data pages.
+    //  - DB size  960 GB - 1.1 TB: flush map size is 9 MB ( ... )
+    //  - DB size           2.3 TB: flush map size is 18 MB ( ... )
+    //  ...
 
     const ULONG cfmpgRequiredFmDataPageCount = (ULONG)CfmpgGetRequiredFmDataPageCount_( pgnoReq );
     Assert( cfmpgRequiredFmDataPageCount > 0 );
@@ -196,17 +233,24 @@ CFMPG CFlushMap::CfmpgGetPreferredFmDataPageCount_( const PGNO pgnoReq )
     const ULONG cfmpgWriteMax = roundupdiv( (ULONG)UlParam( JET_paramMaxCoalesceWriteSize ), s_cbFlushMapPageOnDisk );
     const ULONG cpgDbExtension = (ULONG)CpgGetDbExtensionSize_();
 
+    // If the flush map is not persisted, we're not concerned about fragmentation, so the preferred
+    // size is strictly the required size, no additional room given.
+    // Also, if the DB extension size is zero, go to the fail-safe path. This is currently used for testing.
     if ( !m_fPersisted || ( cpgDbExtension == 0 ) )
     {
         goto Return;
     }
 
+    // Initially, the file sizes (i.e., pgnoReq) are tipically small, so we'll estimate how large the database might get in the future by
+    // looking at the database extension size. Assume 10x the extension size.
 
     const ULONG cpgActual = pgnoReq + 1;
     ULONG cpgEstimate = 10 * cpgDbExtension;
 
+    // If we are going through the initial DB extensions.
     if ( cpgEstimate > cpgActual )
     {
+        // If the estimate leads to less than one FM page, do not align it to the max write size.
         cfmpgPreferredFmDataPageCount = CfmpgGetRequiredFmDataPageCount_( cpgEstimate - 1 );
         if ( cfmpgPreferredFmDataPageCount >= 2 )
         {
@@ -216,15 +260,19 @@ CFMPG CFlushMap::CfmpgGetPreferredFmDataPageCount_( const PGNO pgnoReq )
         goto Return;
     }
 
+    // We're dealing with the subsequent extensions of both types of client.
+    // In this case, give extra room for 2x the current database size and align it to the max write size.
     cpgEstimate = 2 * cpgActual;
     cfmpgPreferredFmDataPageCount = CfmpgGetRequiredFmDataPageCount_( cpgEstimate - 1 );
 
+    // If it's past the max write size, the align it to that size.
     if ( cfmpgPreferredFmDataPageCount >= cfmpgWriteMax )
     {
         cfmpgPreferredFmDataPageCount = UlFunctionalMax( rounddn( cfmpgPreferredFmDataPageCount, cfmpgWriteMax ), cfmpgRequiredFmDataPageCount );
     }
 
 Return:
+    // Do not let preferred overcome required by more than 4x the write size.
     if ( ( cfmpgPreferredFmDataPageCount > cfmpgRequiredFmDataPageCount ) &&
         ( ( cfmpgPreferredFmDataPageCount - cfmpgRequiredFmDataPageCount ) > ( 4 * cfmpgWriteMax ) ) )
     {
@@ -234,12 +282,13 @@ Return:
     Assert( cfmpgRequiredFmDataPageCount >= 1 );
     Assert( cfmpgPreferredFmDataPageCount >= cfmpgRequiredFmDataPageCount );
 
+    // If estimates of the future database size are above the max pgno (pgnoSysMax), then return the strictly required size.
     return (CFMPG)UlFunctionalMin( cfmpgPreferredFmDataPageCount, (ULONG)CfmpgGetRequiredFmDataPageCount_( pgnoSysMax ) );
 }
 
 QWORD CFlushMap::CbGetRequiredFmFileSize_( const CFMPG cfmpgDataNeeded )
 {
-    return ( (QWORD)( ( cfmpgDataNeeded + 1 ) * s_cbFlushMapPageOnDisk ) );
+    return ( (QWORD)( ( cfmpgDataNeeded + 1 ) * s_cbFlushMapPageOnDisk ) ); // +1 to account for the header.
 }
 
 ERR CFlushMap::ErrAttachFlushMap_()
@@ -254,6 +303,8 @@ ERR CFlushMap::ErrAttachFlushMap_()
             ( m_fReadOnly ? IFileAPI::fmfReadOnly : IFileAPI::fmfNone ) |
             ( fCached ? IFileAPI::fmfCached : IFileAPI::fmfNone ) |
             ( fWriteBack ? IFileAPI::fmfLossyWriteBack : IFileAPI::fmfNone ) |
+            //  Turn on fmfStorageWriteBack if none of the not yet supproted flags are on and
+            //  we're for a real ESE instance (don't care about unit tests).
             ( ( !m_fReadOnly && !fCached && !fWriteBack && ( m_pinst != pinstNil ) && BoolParam( m_pinst, JET_paramUseFlushForWriteDurability ) ) ? IFileAPI::fmfStorageWriteBack : IFileAPI::fmfNone ) );
     WCHAR wszFmFilePath[ IFileSystemAPI::cchPathMax ] = { L'\0' };
     const WCHAR* wszDeletedReason = L"";
@@ -262,6 +313,8 @@ ERR CFlushMap::ErrAttachFlushMap_()
     Assert( m_fPersisted );
     Expected( !m_fmdFmHdr.FValid() );
 
+    // This can fail if the DB full path is already up to the max path size and the DB extension is shorter
+    // than 3 characters. Do not fail the attachment due to that.
     err = ErrGetFmFilePath_( wszFmFilePath );
     if ( err == JET_errInvalidPath )
     {
@@ -315,6 +368,7 @@ ERR CFlushMap::ErrAttachFlushMap_()
                 wszDeletedReason = L"FileOpenFailed";
                 fSuccess = ( errOpen >= JET_errSuccess );
 
+                // OOM is considered a transient error, so avoid invalidating the map in that case.
                 if ( ( m_fDumpMode && !fSuccess ) || ( errOpen == JET_errOutOfMemory ) )
                 {
                     Call( errOpen );
@@ -325,6 +379,7 @@ ERR CFlushMap::ErrAttachFlushMap_()
             {
                 if ( m_pinst != pinstNil )
                 {
+                    // See iofrOpeningFileFlush usage in ErrIOOpenDatabase() for explanation.
                     Call( ErrUtilFlushFileBuffers( m_pfapi, iofrOpeningFileFlush ) );
                 }
                 AllowFlushMapIo_();
@@ -334,6 +389,8 @@ ERR CFlushMap::ErrAttachFlushMap_()
                 fSuccess = ( errHdr >= JET_errSuccess );
                 m_fmdFmHdr.sxwl.ReleaseWriteLatch();
 
+                // The header is the bootstrap. We can't trust this flush map even for dumping.
+                // Also, OOM is considered a transient error, so avoid invalidating the map in that case.
                 if ( ( m_fDumpMode && !fSuccess ) || ( errHdr == JET_errOutOfMemory ) )
                 {
                     Call( errHdr );
@@ -345,7 +402,7 @@ ERR CFlushMap::ErrAttachFlushMap_()
                 m_fmdFmHdr.sxwl.AcquireWriteLatch();
                 FMFILEHDR* const pfmfilehdr = (FMFILEHDR*)( m_fmdFmHdr.pvWriteBuffer );
                 LGIGetDateTime( &pfmfilehdr->logtimeAttach );
-                pfmfilehdr->lGenMinRequired = LGetDbGenMinRequired_();
+                pfmfilehdr->lGenMinRequired = LGetDbGenMinRequired_();  // normally pulled from m_pfmp->Pdbfilehdr()->le_lGenMinRequired (regular DB min required, for attached DBs), where we start out.
                 pfmfilehdr->lGenMinRequiredTarget = 0;
                 pfmfilehdr->ResetClean();
                 m_fmdFmHdr.SetDirty( m_pinst );
@@ -378,8 +435,9 @@ ERR CFlushMap::ErrAttachFlushMap_()
             {
                 fFileValid = fTrue;
                 Assert( m_fmdFmHdr.FValid() );
-                cfmpgActual = (CFMPG)( cbFmFileSizeActual / s_cbFlushMapPageOnDisk ) - 1;
-                Assert( cfmpgActual >= 0 );
+                cfmpgActual = (CFMPG)( cbFmFileSizeActual / s_cbFlushMapPageOnDisk ) - 1;   // -1 to discount the header.
+                Assert( cfmpgActual >= 0 ); // the flush map may have zero data pages if we crashed before completing the first full
+                                            // write of the map to persistent storage.
                 cfmpgActual = max( cfmpgActual, 1 );
 
                 if ( !m_fDumpMode )
@@ -489,6 +547,8 @@ ERR CFlushMap::ErrAttachFlushMap_()
 
         if ( fFileValid )
         {
+            // Pre-allocate enough space to fit one database page.
+            // The flush map owner is responsible for setting the correct capacity post-attach,
             if ( fNewFile )
             {
                 Assert( !m_fReadOnly );
@@ -497,9 +557,10 @@ ERR CFlushMap::ErrAttachFlushMap_()
         }
         else
         {
+            // If we couldn't get a valid file in place at this point, disable persistence altogether.
             m_fPersisted = fFalse;
         }
-    }
+    } // if ( m_fPersisted )
 
     Assert( m_fmdFmHdr.FValid() || !fFileValid );
     Assert( ( m_pfapi != NULL ) || !fFileValid );
@@ -528,12 +589,14 @@ void CFlushMap::TermFlushMap_()
 {
     m_fGetSetAllowed = fFalse;
 
+    // Quiesce I/O, close file.
     if ( m_fPersisted )
     {
         Assert( ( m_pfapi != NULL ) || !m_fInitialized );
 
         if ( m_fInitialized )
         {
+            // Block all async requests.
             if ( !m_fReadOnly )
             {
                 Assert( m_sxwlSectionFlush.FNotOwner() );
@@ -545,6 +608,7 @@ void CFlushMap::TermFlushMap_()
             WaitForFlushMapIoQuiesce_();
             DisallowFlushMapIo_();
 
+            // Grab file name in case we need it below.
             WCHAR wszFmFilePath[ IFileSystemAPI::cchPathMax ] = { L'\0' };
             if ( m_pfapi->ErrPath( wszFmFilePath ) < JET_errSuccess )
             {
@@ -573,9 +637,11 @@ void CFlushMap::TermFlushMap_()
             OnDebug( AssertFlushMapIoDisallowed_() );
         }
 
+        // It should be w-latched with no owner at this point.
         Assert( m_sxwlSectionFlush.FWriteLatched() );
         Assert( m_sxwlSectionFlush.FNotOwner() );
 
+        // All data pages.
         for ( FMPGNO fmpgno = 0; fmpgno < m_cfmpgAllocated; fmpgno++ )
         {
             FlushMapPageDescriptor* pfmd = NULL;
@@ -595,6 +661,7 @@ void CFlushMap::TermFlushMap_()
     m_pfsapi = NULL;
 
 #ifdef DEBUG
+    // Go through all pages to make sure it's truly clean.
     if ( m_fPersisted && m_fCleanForTerm )
     {
         const FMPGNO fmpgnoUsedMax = m_cfmpgAllocated - 1;
@@ -607,12 +674,13 @@ void CFlushMap::TermFlushMap_()
             AssertSz( !pfmd->FDirty(), "Page must be clean." );
         }
     }
-#endif
+#endif  // DEBUG
 
     Assert( !m_critFmdGrowCapacity.FAcquired() );
     Assert( !m_fmdFmHdr.sxwl.FLatched() );
     Assert( !m_fmdFmPg0.sxwl.FLatched() );
     
+    // All page descriptors (except for the first data page, which is always pre-allocated).
     if ( m_rgfmd != NULL )
     {
         Assert( m_cbfmdReserved > 0 );
@@ -637,6 +705,7 @@ void CFlushMap::TermFlushMap_()
             pfmd->~FlushMapPageDescriptor();
         }
 
+        // Free descriptor pages.
         OSMemoryPageFree( m_rgfmd );
         m_rgfmd = NULL;
         m_cfmdCommitted = 0;
@@ -651,9 +720,11 @@ void CFlushMap::TermFlushMap_()
         Assert( m_cfmdCommitted == 0 );
     }
 
+    // It should be w-latched with no owner at this point.
     Assert( m_sxwlSectionFlush.FWriteLatched() );
     Assert( m_sxwlSectionFlush.FNotOwner() );
 
+    // Free flush map data page pointed by the static descriptor.
     if ( m_fmdFmPg0.pv != NULL )
     {
         Assert( m_cfmpgAllocated >= 1 );
@@ -668,11 +739,13 @@ void CFlushMap::TermFlushMap_()
     Assert( m_cbfmAllocated == 0 );
     m_cbfmAllocated = 0;
 
+    // Free header.
     m_fmdFmHdr.ResetDirty( m_pinst );
     FreeFmPage_( &m_fmdFmHdr );
     ( &m_fmdFmHdr )->~FlushMapPageDescriptor();
     new( &m_fmdFmHdr ) FlushMapPageDescriptor( s_fmpgnoHdr );
 
+    // Free write buffer.
     if ( m_pvSectionFlushAsyncWriteBuffer != NULL )
     {
         Assert( !m_fReadOnly );
@@ -692,8 +765,10 @@ void CFlushMap::TermFlushMap_()
         m_cbLogGeneratedAtLastFlushProgress = ullMax;
     }
 
+    // Re-initialize tracking variables.
     m_lgenTargetedMax = 0;
 
+    // Re-initialize other variables.
     m_fPersisted = fFalse;
     m_fCreateNew = fFalse;
     m_fReadOnly = fFalse;
@@ -717,23 +792,27 @@ INLINE ERR CFlushMap::ErrGetDescriptorFromFmPgno_( const FMPGNO fmpgno, FlushMap
 
     Assert( !m_fDumpMode );
 
+    // Invalid range.
     if ( ( fmpgno < 0 ) && !fFmHeaderPage )
     {
         Error( ErrERRCheck( JET_errInvalidParameter ) );
     }
 
+    // Header descriptor is pre-allocated.
     if ( fFmHeaderPage )
     {
         pfmd = &m_fmdFmHdr;
         goto HandleError;
     }
 
+    // First descriptor is pre-allocated.
     if ( fmpgno == 0 )
     {
         pfmd = &m_fmdFmPg0;
         goto HandleError;
     }
 
+    // Invalid range.
     if ( fmpgno >= m_cfmdCommitted )
     {
         Error( ErrERRCheck( JET_errInvalidOperation ) );
@@ -755,6 +834,9 @@ INLINE ERR CFlushMap::ErrGetDescriptorFromPgno_(
     const PGNO pgno,
     FlushMapPageDescriptor** const ppfmd )
 {
+    // Note we are wasting a few bits with DB pgno 0 because we don't track the
+    // flush state of the DB header, but we still have space for it in the flush
+    // map, just to simplify the pgno <-> fmpgno math.
     return ErrGetDescriptorFromFmPgno_( FmpgnoGetFmPgnoFromDbPgno( pgno ), ppfmd );
 }
 
@@ -764,16 +846,19 @@ ERR CFlushMap::ErrAllocateDescriptorsCapacity_( const CFMPG cfmdNeeded )
 
     m_critFmdGrowCapacity.Enter();
 
+    // First one is pre-allocated.
     if ( cfmdNeeded < 2 )
     {
         goto HandleError;
     }
 
+    // Check if we need to grow.
     if ( cfmdNeeded <= m_cfmdCommitted )
     {
         goto HandleError;
     }
 
+    // We may need to run the memory reservation code.
     if ( m_rgfmd == NULL )
     {
         Assert( m_cbfmdReserved == 0 );
@@ -793,6 +878,7 @@ ERR CFlushMap::ErrAllocateDescriptorsCapacity_( const CFMPG cfmdNeeded )
         m_cbfmdCommitted = 0;
     }
 
+    // Check if we need to commit more descriptor pages.
     const DWORD cbfmdCommitted = (DWORD)roundup( m_cfmdCommitted * sizeof( FlushMapPageDescriptor ), m_cbDescriptorPage );
     const DWORD cbfmdCommittedNeeded = (DWORD)roundup( cfmdNeeded * sizeof( FlushMapPageDescriptor ), m_cbDescriptorPage );
     Assert( cbfmdCommitted == m_cbfmdCommitted );
@@ -805,6 +891,7 @@ ERR CFlushMap::ErrAllocateDescriptorsCapacity_( const CFMPG cfmdNeeded )
         Alloc( NULL );
     }
 
+    // Initialize all objects.
     const CFMPG cfmdCommittedNeeded = cbfmdCommittedNeeded / sizeof( FlushMapPageDescriptor );
 
     for ( FMPGNO ifmd = m_cfmdCommitted; ifmd < cfmdCommittedNeeded; ifmd++ )
@@ -828,6 +915,7 @@ ERR CFlushMap::ErrAllocateFmDataPageCapacity_( const CFMPG cfmpgNeeded )
 
     m_critFmdGrowCapacity.Enter();
 
+    // Check if we need to grow.
     if ( cfmpgNeeded <= m_cfmpgAllocated )
     {
         goto HandleError;
@@ -865,6 +953,11 @@ ERR CFlushMap::ErrAllocateFmPage_( FlushMapPageDescriptor* const pfmd )
 
     if ( fFmHeaderPage )
     {
+        // Header pages are special: pvWriteBuffer is used as the buffer from/to which we
+        // do both read/write I/O; pv is used to cache a copy of the header that we know
+        // for sure is successfully persisted to disk. We do this such that we are always
+        // able to quickly return values that are guaranteed to be successfully persisted
+        // without having to wait for any ongoing I/O.
         Alloc( pfmd->pvWriteBuffer = PvOSMemoryPageAlloc( m_cbFmPageInMemory, NULL ) );
         Alloc( pfmd->pv = new BYTE[ sizeof( FMFILEHDR ) ] );
     }
@@ -924,6 +1017,9 @@ void CFlushMap::InitializeFmDataPageCapacity_( const CFMPG cfmpgNeeded )
 {
     BOOL fFoundValid = fFalse;
     
+    // Because this function can't fail and we are taking a lock to initialize the pages,
+    // we just need to scan backwards from the end until we find a page that is already
+    // initialized.
     m_critFmdGrowCapacity.Enter();
     Assert( cfmpgNeeded <= m_cfmpgAllocated );
 
@@ -952,6 +1048,8 @@ void CFlushMap::InitializeFmDataPageCapacity_( const CFMPG cfmpgNeeded )
 
 void CFlushMap::PrereadFlushMap_( const CFMPG cfmpg )
 {
+    // This function is supposed to be used only once to preread the entire flush map into memory
+    // at flush-map attachement. We'll assert that none of the pages are alreday cached.
     Assert( m_fPersisted );
     Assert( !m_fInitialized );
     Assert( cfmpg <= m_cfmpgAllocated );
@@ -960,6 +1058,7 @@ void CFlushMap::PrereadFlushMap_( const CFMPG cfmpg )
     FMPGNO fmpgnoFirst = s_fmpgnoUninit;
     FMPGNO fmpgnoLast = s_fmpgnoUninit;
 
+    // The reads will be broken up in chunks, as errDiskTilt is returned once the maximum read size is reached.
     for ( FMPGNO fmpgno = 0; fmpgno < cfmpg; fmpgno++ )
     {
         const BOOL fLastPage = ( ( fmpgno + 1 ) == cfmpg );
@@ -969,6 +1068,7 @@ void CFlushMap::PrereadFlushMap_( const CFMPG cfmpg )
         Assert( !pfmd->FValid() );
         Assert( !pfmd->FDirty() );
 
+        // Errors issuing the I/O are acceptable and will leave the pages dirty and initialized in memory.
         pfmd->sxwl.AcquireWriteLatch();
         const ERR err = ErrAsyncReadFmPage_( pfmd, ( cfmpgPreread == 0 ) ? 0 : qosIOOptimizeCombinable );
 
@@ -987,7 +1087,7 @@ void CFlushMap::PrereadFlushMap_( const CFMPG cfmpg )
             if ( err == errDiskTilt )
             {
                 Assert( cfmpgPreread > 0 );
-                fmpgno--;
+                fmpgno--;   // Back one page to try again.
             }
             else
             {
@@ -996,10 +1096,12 @@ void CFlushMap::PrereadFlushMap_( const CFMPG cfmpg )
             }
         }
 
+        // Issue if we're about to break out or if we hit a failure.
         if ( ( ( err < JET_errSuccess ) || fLastPage ) && ( cfmpgPreread > 0 ) )
         {
             CallS( m_pfapi->ErrIOIssue() );
 
+            // Don't overwhelm the disk. Wait for the I/Os to complete.
             for ( FMPGNO fmpgnoIoPending = fmpgnoFirst; fmpgnoIoPending <= fmpgnoLast; fmpgnoIoPending++ )
             {
                 FlushMapPageDescriptor* pfmdIoPending = NULL;
@@ -1009,12 +1111,14 @@ void CFlushMap::PrereadFlushMap_( const CFMPG cfmpg )
                 pfmdIoPending->sxwl.ReleaseSharedLatch();
             }
 
+            // Restart building I/Os.
             cfmpgPreread = 0;
             fmpgnoFirst = s_fmpgnoUninit;
             fmpgnoLast = s_fmpgnoUninit;
         }
     }
 
+    // Nothing left to be issued.
     Assert( cfmpgPreread == 0 );
 }
 
@@ -1061,6 +1165,8 @@ void CFlushMap::EnterDbHeaderFlush_( SIGNATURE* const psignDbHdrFlush, SIGNATURE
     Assert( !m_fDumpMode );
     Assert( m_fmdFmHdr.sxwl.FNotOwner() );
 
+    // We'll acquire the exclusive latch to make sure the header is not undergoing a write I/O.
+    // It'll also prevent other DB header writes from coming in.
     m_fmdFmHdr.sxwl.AcquireExclusiveLatch();
     SIGGetSignature( psignDbHdrFlush );
 
@@ -1118,10 +1224,13 @@ ERR CFlushMap::ErrPrepareFmPageForWrite_( FlushMapPageDescriptor* const pfmd, co
     {
         if ( fSync )
         {
+            // Allocate brand new memory.
             pfmd->pvWriteBuffer = PvOSMemoryPageAlloc( m_cbFmPageInMemory, NULL );
         }
         else
         {
+            // Allocate from the pre-reserved buffer. This should be single-threated, so no
+            // concurrency concerns here.
             Assert( m_pvSectionFlushAsyncWriteBuffer != NULL );
             Assert( m_cbSectionFlushAsyncWriteBufferReserved >= m_cbFmPageInMemory );
 
@@ -1160,8 +1269,10 @@ ERR CFlushMap::ErrPrepareFmPageForWrite_( FlushMapPageDescriptor* const pfmd, co
     }
     else
     {
+        // A file header page always keeps its current contents in the write buffer.
         UtilMemCpy( pfmd->pvWriteBuffer, pfmd->pv, s_cbFlushMapPageOnDisk );
         
+        // This should be stable because we have the write latch.
         ( (FlushMapDataPageHdr*)( pfmd->pvWriteBuffer ) )->dbtimeMax = pfmd->dbtimeMax;
     }
 
@@ -1169,6 +1280,9 @@ ERR CFlushMap::ErrPrepareFmPageForWrite_( FlushMapPageDescriptor* const pfmd, co
 
 HandleError:
 
+    // All the state below will be set up regardless of any failures.
+    // The I/O completion function, which gets called even if we've failed
+    // to prepare the page for write, will handle cleaning up the state.
     if ( fSync )
     {
         pfmd->SetSyncWriteInProgress();
@@ -1185,6 +1299,20 @@ HandleError:
 
     if ( !fSync || fFmHeaderPage )
     {
+        // Note we're going to reset the dirty flag prior to issuing/completing the write I/O.
+        // We are doing this because we won't hold the write latch for the whole duration
+        // of the I/O, so further changes to the page would "leak" if we cleaned the page only
+        // on a successful write completion.
+        // The page will be re-dirtied in case of an I/O failure such that we won't incorrectly
+        // claim that the map is clean unless all write I/O succeeds and there are no changes
+        // to the pages.
+        // Also note that the page remains dirty if we're doing a sync I/O. In the context of
+        // the persisted flush map, a sync write is supposed to be an out-of-band occurrence for
+        // cases in which checkpoint advancement is not held by the DB page changes that dirtied
+        // the DB page (thus causing the write and dirtying the flush map). So, if a FM page were
+        // to be cleaned prior to a sync write completion, the single-threaded async flush of the
+        // map  might consider the page "cleared" for checkpoint advancement, which may not be
+        // necessarily true due to timing conditions or if the page later failed the sync write I/O.
         AssertSz( fDirtyExpected == pfmd->FDirty(), "Dirty state must not have changed (before ResetDirty())." );
         pfmd->ResetDirty( m_pinst );
         fDirtyExpected = fFalse;
@@ -1220,6 +1348,8 @@ ERR CFlushMap::ErrReadFmPage_( FlushMapPageDescriptor* const pfmd, const BOOL fS
 
     TraceContextScope tcScope( iorpFlushMap );
 
+    // Note that if this is a header page, we read the data into pvWriteBuffer,a s pv will only
+    // contain what has been successfully read or written to disk.
     err = m_pfapi->ErrIORead( *tcScope,
                                 OffsetOfFmPgno_( pfmd->fmpgno ),
                                 s_cbFlushMapPageOnDisk,
@@ -1295,6 +1425,8 @@ void CFlushMap::OsReadIoComplete_(
     CallS( pfm->ErrGetDescriptorFromFmPgno_( fmpgno, &pfmd ) );
     (void)pfm->ErrReadIoComplete_( errIo, fFalse, pfmd );
     pfm->DecrementFlushMapIoCount_();
+    // WARNING: do not add any references to the CFlushMap object below here because
+    // decrementing the I/O count is what allows the object to be deleted.
 }
 
 void CFlushMap::OsWriteIoComplete_(
@@ -1318,6 +1450,8 @@ void CFlushMap::OsWriteIoComplete_(
     CallS( pfm->ErrGetDescriptorFromFmPgno_( fmpgno, &pfmd ) );
     (void)pfm->ErrWriteIoComplete_( errIo, fFalse, pfmd );
     pfm->DecrementFlushMapIoCount_();
+    // WARNING: do not add any references to the CFlushMap object below here because
+    // decrementing the I/O count is what allows the object to be deleted.
 }
 
 ERR CFlushMap::ErrReadIoComplete_( const ERR errIo, const BOOL fSync, FlushMapPageDescriptor* const pfmd )
@@ -1334,6 +1468,7 @@ ERR CFlushMap::ErrReadIoComplete_( const ERR errIo, const BOOL fSync, FlushMapPa
         pfmd->sxwl.ClaimOwnership( CSXWLatch::iWriteGroup );
     }
 
+    // Check if we can validate the page.
     if ( fIoSuccess )
     {
         const ERR errValidate = fFmHeaderPage ? ErrValidateFmHdr_( pfmd ) : ErrValidateFmDataPage_( pfmd );
@@ -1344,11 +1479,13 @@ ERR CFlushMap::ErrReadIoComplete_( const ERR errIo, const BOOL fSync, FlushMapPa
         }
     }
 
+    // If we've seen an error up to this point, we should initialize and dirty the page.
     if ( ( err >= JET_errSuccess ) || ( fIoSuccess && m_fDumpMode ) )
     {
         fValid = fTrue;
         if ( fFmHeaderPage )
         {
+            // Load the persisted state of the header.
             UtilMemCpy( pfmd->pv, pfmd->pvWriteBuffer, sizeof( FMFILEHDR ) );
         }
         else
@@ -1397,6 +1534,7 @@ ERR CFlushMap::ErrWriteIoComplete_( const ERR errIo, const BOOL fSync, FlushMapP
     Assert( ( pfmd->pvWriteBuffer != NULL ) || ( ( errIo == JET_errOutOfMemory ) && !fFmHeaderPage ) );
     OnDebug( AssertOnIoCompletion_( fSync, fTrue, pfmd ) );
 
+    // Update perf. counters.
     if ( ( errIo >= JET_errSuccess ) && ( m_pinst != pinstNil ) )
     {
         PERFOpt( ( fSync ? cFMPagesWrittenSync : cFMPagesWrittenAsync ).Inc( m_pinst->m_iInstance ) );
@@ -1407,8 +1545,10 @@ ERR CFlushMap::ErrWriteIoComplete_( const ERR errIo, const BOOL fSync, FlushMapP
         pfmd->sxwl.ClaimOwnership( CSXWLatch::iExclusiveGroup );
     }
 
+    // We've failed to write the page, mark it as dirty.
     if ( errIo >= JET_errSuccess )
     {
+        // Refresh the persisted state of the header.
         if ( fFmHeaderPage )
         {
             pfmd->sxwl.UpgradeExclusiveLatchToWriteLatch();
@@ -1459,6 +1599,11 @@ ERR CFlushMap::ErrWriteIoComplete_( const ERR errIo, const BOOL fSync, FlushMapP
 
     if ( !fSync )
     {
+        // Check if we're the last async write completing.
+        // This must be the very last line of the completion function because
+        // that is what releases the latch for new flushes. Releasing it too early
+        // may cause problems when FM termination is going on at the same time because
+        // that code acquires the latch to ensure there isn't I/O going on concurrently.
         Assert( !m_msSectionFlush.FEmpty() );
         m_msSectionFlush.Leave( m_groupSectionFlushWrite );
     }
@@ -1494,6 +1639,7 @@ void CFlushMap::FlushOneSection_( OnDebug2( const BOOL fCleanFlushMap, const BOO
     Assert( m_fmpgnoSectionFlushLast == s_fmpgnoUninit );
     Assert( m_ibSectionFlushAsyncWriteBufferNext == 0 );
 
+    // m_fSectionCheckpointHeaderWrite can only be set at this point if we're retrying a failed final header flush.
     Assert( !m_fSectionCheckpointHeaderWrite || ( ( m_fmpgnoSectionFlushNext == s_fmpgnoHdr ) && !fCleanFlushMap ) );
 
     ERR err = JET_errSuccess;
@@ -1504,11 +1650,18 @@ void CFlushMap::FlushOneSection_( OnDebug2( const BOOL fCleanFlushMap, const BOO
     CFMPG cfmpgWriteMax = 0;
     CFMPG cfmpgWriteGapMax = 0;
 
+    // Add a sentinel pending write to avoid any early completions from running
+    // the section-flush-completed code before we set it all up. 
     Assert( m_msSectionFlush.FEmpty() );
     m_groupSectionFlushWrite = m_msSectionFlush.GroupEnter();
 
+    // A negative number indicates failure, which we can't get here because
+    // we'll never reach the maximum number of users (CMeteredSection::cMaxActive)
+    // by issuing async I/Os, given reasonable maximum I/O and flush map page sizes.
     Assert( m_groupSectionFlushWrite >= 0 );
 
+    // Reflush the header if we're stuck due to previous I/O errors or we might be re-inititating
+    // a full flush from clean term.
     if ( m_fmpgnoSectionFlushNext == s_fmpgnoHdr )
     {
         m_fmdFmHdr.sxwl.AcquireWriteLatch();
@@ -1519,6 +1672,7 @@ void CFlushMap::FlushOneSection_( OnDebug2( const BOOL fCleanFlushMap, const BOO
         goto HandleError;
     }
 
+    // If we're initiating an async file flush, update the FM and DB headers accordingly.
     if ( m_fmpgnoSectionFlushNext == s_fmpgnoUninit )
     {
         const LONG lGenMinDbConsistent = LGetDbGenMinConsistent_();
@@ -1527,6 +1681,7 @@ void CFlushMap::FlushOneSection_( OnDebug2( const BOOL fCleanFlushMap, const BOO
         m_fmdFmHdr.sxwl.AcquireWriteLatch();
         FMFILEHDR* const pfmfilehdrInMemory = (FMFILEHDR*)( m_fmdFmHdr.pvWriteBuffer );
 
+        // Make sure it doesn't go backwards.
         const LONG lGenMinRequiredTargetNew = LFunctionalMax( lGenMinDbConsistent, pfmfilehdrInMemory->lGenMinRequired );
         Assert( ( lGenMinRequiredTargetNew > 0 ) || !m_fRecoverable || fCleanFlushMap );
 
@@ -1545,6 +1700,7 @@ void CFlushMap::FlushOneSection_( OnDebug2( const BOOL fCleanFlushMap, const BOO
 
     fmpgnoUsedMax = m_cfmpgAllocated - 1;
 
+    // Look for the next valid dirty page.
     for ( fmpgnoSectionFlushFirst = m_fmpgnoSectionFlushNext; fmpgnoSectionFlushFirst <= fmpgnoUsedMax; fmpgnoSectionFlushFirst++ )
     {
         FlushMapPageDescriptor* pfmd = NULL;
@@ -1562,8 +1718,14 @@ void CFlushMap::FlushOneSection_( OnDebug2( const BOOL fCleanFlushMap, const BOO
         }
     }
 
+    // Test if we got to the end of the file.
     if ( fmpgnoSectionFlushFirst > fmpgnoUsedMax )
     {
+        // We're about to issue another async header write. If there was one which has not been consumed yet
+        // (i.e., no readers tried to read from the header), make sure it's persisted so we can reuse the flag.
+        // As for changes to the flush states themselves (map data pages), we only need to make sure they are
+        // persisted once the final header write completes, which will be covered by the async write/FFB mechanics
+        // of the final header write.
         if ( m_fmdFmHdr.FRecentlyAsyncWrittenHeader() )
         {
             Call( ErrUtilFlushFileBuffers( m_pfapi, iofrFmFlush ) );
@@ -1586,11 +1748,17 @@ void CFlushMap::FlushOneSection_( OnDebug2( const BOOL fCleanFlushMap, const BOO
         fmpgnoSectionFlushFirst = s_fmpgnoHdr;
         fmpgnoSectionFlushLast = s_fmpgnoHdr;
 
+        // The async write above may go off and complete before this flag gets set,
+        // but that is not a problem because the flag is only consumed by the metered
+        // section partition completion, and that is guaranteed not to run during the
+        // duration of this function because of the sentinel metered section user.
         m_fSectionCheckpointHeaderWrite = fTrue;
 
         goto HandleError;
     }
 
+    // Go through all pages, flush the ones that are dirty and valid, stop on any errors.
+    // May coalesce with clean and valid pages.
     cfmpgWriteMax = (CFMPG)UlFunctionalMax( ( (DWORD)UlParam( JET_paramMaxCoalesceWriteSize ) / s_cbFlushMapPageOnDisk ), 1 );
     cfmpgWriteGapMax = (CFMPG)( ( (DWORD)UlParam( JET_paramMaxCoalesceWriteGapSize ) / s_cbFlushMapPageOnDisk ) );
     fmpgnoSectionFlushLast = fmpgnoSectionFlushFirst - 1;
@@ -1602,6 +1770,7 @@ void CFlushMap::FlushOneSection_( OnDebug2( const BOOL fCleanFlushMap, const BOO
         FlushMapPageDescriptor* pfmd = NULL;
         CallS( ErrGetDescriptorFromFmPgno_( fmpgnoSectionFlushCheck, &pfmd ) );
 
+        // First page should be dirty and valid.
         Assert( ( pfmd->FDirty() && pfmd->FValid() ) || ( fmpgnoSectionFlushCheck > fmpgnoSectionFlushFirst ) );
 
         if ( !pfmd->FValid() )
@@ -1609,8 +1778,10 @@ void CFlushMap::FlushOneSection_( OnDebug2( const BOOL fCleanFlushMap, const BOO
             break;
         }
 
+        // Always flush if it's dirty.
         if ( pfmd->FDirty() )
         {
+            // Write all pages in the range, including clean ones in-between that we may have gap-coalesced.
             FMPGNO fmpgnoSectionFlush;
             for ( fmpgnoSectionFlush = fmpgnoSectionFlushLast + 1; fmpgnoSectionFlush <= fmpgnoSectionFlushCheck; fmpgnoSectionFlush++ )
             {
@@ -1628,6 +1799,7 @@ void CFlushMap::FlushOneSection_( OnDebug2( const BOOL fCleanFlushMap, const BOO
                 cfmpgAsyncWrite++;
             }
 
+            // Early break? Possible if we've failed to write in the loop above.
             if ( fmpgnoSectionFlush <= fmpgnoSectionFlushCheck )
             {
                 break;
@@ -1635,6 +1807,7 @@ void CFlushMap::FlushOneSection_( OnDebug2( const BOOL fCleanFlushMap, const BOO
         }
         else
         {
+            // Check if the gap is acceptable in case the page is clean.
             if ( ( fmpgnoSectionFlushCheck - fmpgnoSectionFlushLast ) > cfmpgWriteGapMax )
             {
                 break;
@@ -1657,6 +1830,7 @@ HandleError:
         m_fmpgnoSectionFlushFirst = fmpgnoSectionFlushFirst;
         m_fmpgnoSectionFlushLast = fmpgnoSectionFlushLast;
 
+        // Open up for completion: partition metered section and leave sentinel.
         m_msSectionFlush.Partition( SectionFlushCompletion_, (DWORD_PTR)this );
         m_sxwlSectionFlush.ReleaseOwnership( CSXWLatch::iWriteGroup );
         m_msSectionFlush.Leave( m_groupSectionFlushWrite );
@@ -1680,6 +1854,8 @@ ERR CFlushMap::ErrFlushAllSections_( OnDebug2( const BOOL fCleanFlushMap, const 
 
     ERR err = JET_errSuccess;
 
+    // We leave m_fmpgnoSectionFlushNext untouched if it is equal to s_fmpgnoUninit
+    // because that is the signal to update the header with the start of the flush.
     if ( m_fmpgnoSectionFlushNext != s_fmpgnoUninit )
     {
         m_fmpgnoSectionFlushNext = s_fmpgnoHdr;
@@ -1690,6 +1866,13 @@ ERR CFlushMap::ErrFlushAllSections_( OnDebug2( const BOOL fCleanFlushMap, const 
         Assert( !m_fSectionCheckpointHeaderWrite );
     }
 
+    // Repeatedly flush sections until done or an error is found.
+    // Note that this function may perform multiple flushes if there are concurrent
+    // async flushers because we're using m_fmpgnoSectionFlushNext below to detect
+    // the end of the full flush, so we might miss the s_fmpgnoUninit signal if the
+    // concurrent flushers move ahead to initiate another flush.
+    // At this moment, this function is only used in single-threaded scenarios so
+    // this non-optimal behavior will not be noticed.
     Expected( fCleanFlushMap || fMapPatching );
     Expected( !( fCleanFlushMap && fMapPatching ) );
     do
@@ -1807,6 +1990,8 @@ void CFlushMap::DecrementFlushMapIoCount_()
     OnDebug( AssertFlushMapIoAllowedAndInFlight_() );
     const LONG cInFlightIo = AtomicDecrement( &m_cInFlightIo );
     Assert( cInFlightIo >= 0 );
+    // WARNING: do not add any references to the CFlushMap object below here because
+    // decrementing the I/O count is what allows the object to be deleted.
 }
 
 #ifdef DEBUG
@@ -1921,7 +2106,7 @@ void CFlushMap::AssertPostIo_( const ERR err, const BOOL fSync, const BOOL fWrit
     }
 }
 
-#endif
+#endif  // DEBUG
 
 ERR CFlushMap::ErrChecksumFmPage_( FlushMapPageDescriptor* const pfmd )
 {
@@ -1938,8 +2123,10 @@ ERR CFlushMap::ErrValidateFmHdr_( FlushMapPageDescriptor* const pfmd )
     WCHAR wszAdditionalInfo[ 512 ] = { L'\0' };
     SIGNATURE signDbHdrFlushFromDb, signFlushMapHdrFlushFromDb;
 
+    // Checksum page.
     Call( ErrChecksumFmPage_( pfmd ) );
 
+    // Check if this is indeed a flush map file.
     if ( pfmfilehdr->filetype != JET_filetypeFlushMap )
     {
         OSStrCbFormatW( wszAdditionalInfo, sizeof(wszAdditionalInfo),
@@ -1948,6 +2135,7 @@ ERR CFlushMap::ErrValidateFmHdr_( FlushMapPageDescriptor* const pfmd )
         Error( ErrERRCheck( JET_errFileInvalidType ) );
     }
 
+    // Check if we support this version.
     if ( ( pfmfilehdr->le_ulFmVersionMajor != ulFMVersionMajorMax ) ||
             ( pfmfilehdr->le_ulFmVersionUpdateMajor > ulFMVersionUpdateMajorMax ) )
     {
@@ -1962,6 +2150,7 @@ ERR CFlushMap::ErrValidateFmHdr_( FlushMapPageDescriptor* const pfmd )
         Error( ErrERRCheck( JET_errFlushMapVersionUnsupported ) );
     }
 
+    // Check for FM/DB consistency.
     if ( !m_fDumpMode )
     {
         GetFlushSignaturesFromDb_( pfmfilehdr, &signDbHdrFlushFromDb, &signFlushMapHdrFlushFromDb );
@@ -1986,6 +2175,7 @@ ERR CFlushMap::ErrValidateFmHdr_( FlushMapPageDescriptor* const pfmd )
         }
     }
 
+    // Check if the flush map is recoverable.
     if ( !m_fDumpMode )
     {
         if ( !( pfmfilehdr->FClean() ||
@@ -2020,6 +2210,7 @@ ERR CFlushMap::ErrValidateFmDataPage_( FlushMapPageDescriptor* const pfmd )
     Assert( !pfmd->FIsFmHeader() );
     ERR err = JET_errSuccess;
 
+    // Checksum page.
     Call( ErrChecksumFmPage_( pfmd ) );
 
 HandleError:
@@ -2043,6 +2234,7 @@ ERR CFlushMap::ErrSetRangePgnoFlushType_( const PGNO pgnoFirst, const CPG cpg, c
     AssertSz( !m_fCleanForTerm, "Setting flush type not allowed with clean map." );
     Expected( cpg > 0 );
 
+    // First, set the flush state in memory.
     for ( PGNO pgno = pgnoFirst; pgno < ( pgnoFirst + cpg ); pgno++ )
     {
         const FlushMapPageDescriptor* const pfmdT = pfmd;
@@ -2062,26 +2254,32 @@ ERR CFlushMap::ErrSetRangePgnoFlushType_( const PGNO pgnoFirst, const CPG cpg, c
 
         const BOOL fValidDbTime = ( ( dbtime != dbtimeNil ) && ( dbtime != dbtimeInvalid ) && ( dbtime != dbtimeShrunk ) && ( dbtime > 0 ) && ( dbtime != dbtimeRevert ) );
         Expected( fValidDbTime ||
-            ( dbtime == dbtimeNil ) ||
-            ( dbtime == 0 ) ||
-            ( dbtime == dbtimeShrunk ) ||
-            ( dbtime == dbtimeRevert ) );
+            ( dbtime == dbtimeNil ) ||      // used whenever the true dbtime can't be obtained.
+            ( dbtime == 0 ) ||              // uninitialized pages.
+            ( dbtime == dbtimeShrunk ) ||   // beyond EOF pages referenced in recovery are initialized with dbtimeShrunk.
+            ( dbtime == dbtimeRevert ) );   // Page which was reverted to a new page by RBS.
 
 #ifndef ENABLE_JET_UNIT_TEST
+        // Real code (i.e., not unit tests) should not be setting valid flush types on ranges.
         Expected( ( cpg == 1 ) || ( pgft == CPAGE::pgftUnknown ) );
 
+        // Real code (i.e., not unit tests) should not be setting valid flush types on ranges.
         Assert( ( cpg == 1 ) || ( dbtime == dbtimeNil ) );
 
+        // Real code (i.e., not unit tests) should not be setting invalid DB times associated to valid flush types.
         Assert( fValidDbTime || ( pgft == CPAGE::pgftUnknown ) );
-#endif
+#endif // !ENABLE_JET_UNIT_TEST
 
+        // Fixup dbtimeMax.
         if ( fValidDbTime )
         {
             AtomicExchangeMax( &pfmd->dbtimeMax, dbtime );
         }
 
+        // Set flush type.
         SetFlushType_( pfmd, pgno, pgft );
 
+        // Fixup runtime flag.
         SetFlushTypeRuntimeState_( pfmd, pgno, fTrue );
 
         pfmd->SetDirty( m_pinst );
@@ -2094,10 +2292,12 @@ ERR CFlushMap::ErrSetRangePgnoFlushType_( const PGNO pgnoFirst, const CPG cpg, c
         fmpgnoLast = pfmd->fmpgno;
     }
 
+    // Now, if requested, make sure all affected pages are written out.
     if ( fWait && m_fPersisted )
     {
         Assert( ( fmpgnoFirst >= 0 ) && ( fmpgnoFirst <= fmpgnoLast ) );
 
+        // Note we'll write one page at a time, for simplicity.
         for ( FMPGNO fmpgno = fmpgnoFirst; fmpgno <= fmpgnoLast; fmpgno++ )
         {
             Call( ErrGetDescriptorFromFmPgno_( fmpgno, &pfmd ) );
@@ -2169,6 +2369,7 @@ INLINE void CFlushMap::SetStateOnBitmap_(
     Assert( ibitInByte <= ( 8 - cbitPerState ) );
     Assert( ( ibitInByte % cbitPerState ) == 0 );
 
+    // Convergence loop to set the actual flush state.
     volatile DWORD* const pdw = (DWORD*)pbBitmap + idwInBitmap;
     OSSYNC_FOREVER
     {
@@ -2425,6 +2626,7 @@ ERR CFlushMap::ErrInitFlushMap()
     Assert( m_sxwlSectionFlush.FWriteLatched() );
     Assert( m_sxwlSectionFlush.FNotOwner() );
 
+    // Tracking variables.
     m_lgenTargetedMax = 0;
 
     m_pinst = PinstGetInst_();
@@ -2433,6 +2635,9 @@ ERR CFlushMap::ErrInitFlushMap()
     m_fRecoverable = FIsRecoverable_();
     m_fReadOnly = FIsReadOnly_();
 
+    // To avoid introducing complexity upfront, we'll not handle cases where the VM page size is larger than the fixed
+    // s_cbFlushMapPageOnDisk flush map page size. If that happens, we'll probably run very inefficiently. The assert will
+    // let us know if such an architecture is introduced (assuming it makes to our labs first).
     m_cbFmPageInMemory = roundup( s_cbFlushMapPageOnDisk, OSMemoryPageCommitGranularity() );
     Expected( m_cbFmPageInMemory == s_cbFlushMapPageOnDisk );
     Assert( m_cbFmPageInMemory >= s_cbFlushMapPageOnDisk );
@@ -2440,7 +2645,7 @@ ERR CFlushMap::ErrInitFlushMap()
     
     m_cbDescriptorPage = OSMemoryPageCommitGranularity();
     m_cDbPagesPerFlushMapPage = (USHORT)( ( 8 * ( s_cbFlushMapPageOnDisk - sizeof( FlushMapDataPageHdr ) ) ) / s_cbitFlushType );
-    m_cbRuntimeBitmapPage = roundup( roundupdiv( 1 * m_cDbPagesPerFlushMapPage, 8 ), OSMemoryPageCommitGranularity() );
+    m_cbRuntimeBitmapPage = roundup( roundupdiv( 1 * m_cDbPagesPerFlushMapPage, 8 ), OSMemoryPageCommitGranularity() ); // 1 bit per DB page.
 
     Assert( m_fmdFmHdr.pvWriteBuffer == NULL );
     Assert( m_fmdFmHdr.pv == NULL );
@@ -2463,6 +2668,8 @@ ERR CFlushMap::ErrInitFlushMap()
         Call( ErrAttachFlushMap_() );
     }
 
+    // Pre-allocate enough memory to fit one database page.
+    // The flush map owner is responsible for setting the correct capacity post-attach,
     if ( !m_fDumpMode && !m_fPersisted )
     {
         Call( ErrSetFlushMapCapacity( 1 ) );
@@ -2482,6 +2689,7 @@ ERR CFlushMap::ErrInitFlushMap()
         Assert( m_cfmpgAllocated > 0 );
     }
 
+    // All allocated pages must be valid.
     for ( FMPGNO fmpgno = 0; fmpgno < m_cfmpgAllocated; fmpgno++ )
     {
         FlushMapPageDescriptor* pfmd = NULL;
@@ -2490,6 +2698,7 @@ ERR CFlushMap::ErrInitFlushMap()
         Assert( pfmd->FValid() );
     }
 
+    // All committed descriptors after the allocated range must be uninitialized.
     for ( FMPGNO fmpgno = m_cfmpgAllocated; fmpgno < m_cfmdCommitted; fmpgno++ )
     {
         FlushMapPageDescriptor* pfmd = NULL;
@@ -2498,7 +2707,7 @@ ERR CFlushMap::ErrInitFlushMap()
         Assert( !pfmd->FValid() );
         Assert( !pfmd->FDirty() );
     }
-#endif
+#endif  // DEBUG
 
 HandleError:
 
@@ -2565,7 +2774,7 @@ ERR CFlushMap::ErrCleanFlushMap()
     m_fmdFmHdr.SetDirty( m_pinst );
 
     err = ErrSyncWriteFmPage_( &m_fmdFmHdr );
-    igroupFmHdr = CSXWLatch::iExclusiveGroup;
+    igroupFmHdr = CSXWLatch::iExclusiveGroup;   // it always downgrades the latch to exclusive.
     fCleanFileState = ( err >= JET_errSuccess );
 
     m_fmdFmHdr.sxwl.ReleaseExclusiveLatch();
@@ -2573,7 +2782,7 @@ ERR CFlushMap::ErrCleanFlushMap()
 
     Call( err );
 
-    Call( ErrUtilFlushFileBuffers( m_pfapi, iofrFmTerm ) );
+    Call( ErrUtilFlushFileBuffers( m_pfapi, iofrFmTerm ) ); // unfortunately, flushing only one page
 
 HandleError:
 
@@ -2589,6 +2798,7 @@ HandleError:
     m_sxwlSectionFlush.ReleaseWriteLatch();
 
 #ifdef DEBUG
+    // Go through all pages to make sure it's truly clean.
     if ( fCleanFileState )
     {
         const FMPGNO fmpgnoUsedMax = m_cfmpgAllocated - 1;
@@ -2601,7 +2811,7 @@ HandleError:
             AssertSz( !pfmd->FDirty(), "Page must be clean." );
         }
     }
-#endif
+#endif  // DEBUG
 
     Assert( m_sxwlSectionFlush.FNotOwner() );
 
@@ -2665,13 +2875,16 @@ CPAGE::PageFlushType CFlushMap::PgftGetPgnoFlushType( __in const PGNO pgno, __in
     Assert( pfmd->sxwl.FNotOwner() );
     pfmd->sxwl.AcquireSharedLatch();
 
+    // Get flush type.
     pgft = PgftGetFlushType_( pfmd, pgno );
 
+    // Get runtime flag.
     if ( pfRuntime != NULL )
     {
         *pfRuntime = FGetFlushTypeRuntime_( pfmd, pgno );
     }
 
+    // Retrieve dbtimeMax.
     dbtimeMax = pfmd->dbtimeMax;
 
     fmpgno = pfmd->fmpgno;
@@ -2679,10 +2892,12 @@ CPAGE::PageFlushType CFlushMap::PgftGetPgnoFlushType( __in const PGNO pgno, __in
 
     if ( ( pgft != CPAGE::pgftUnknown ) && ( dbtime != dbtimeNil ) && ( dbtimeMax != dbtimeNil )  && ( dbtime > dbtimeMax ) )
     {
+        // This represents an inconsistency in the flush map. If persistence is enabled, this might indicate a lost flush to the flush map.
         AssertSz( FNegTest( fCorruptingWithLostFlush ), "Inconsistent DBTIMEs in the flush map (fmpgno = %ld, dbtimeMax = %I64u, pgno = %lu, dbtime = %I64u).", fmpgno, dbtimeMax, pgno, dbtime );
 
         LogEventFmInconsistentDbTime_( fmpgno, dbtimeMax, pgno, dbtime );
 
+        // Invalidate the page. Best effort if it fails.
         pfmd->sxwl.AcquireWriteLatch();
         InitializeFmDataPage_( pfmd );
         pfmd->SetDirty( m_pinst );
@@ -2756,12 +2971,25 @@ BOOL CFlushMap::FRecoverable()
     return m_fRecoverable;
 }
 
+// This function takes the amount of DB transaction logs generated so far, as well as the preferred checkpoint depth.
+// It throttles writes to the flush map by suggesting a write (i.e., by returning fTrue), in such a way that the
+// flush map is completely written one time for every s_pctCheckpointDelay % of the preferred checkpoint depth.
+// For example, if the preferred checkpoint depth is 100MB and s_pctCheckpointDelay is 20, this function throttles
+// writes so that a full map flush is completed for every 20MB worth of logs generated.
+// In cases where DB flushes are being mostly checkpoint-driven (instead of cache-driven), note that we don't expect
+// the flush map's minimum required log generation to change until the amount of log generated reaches the full preferred
+// checkpoint depth. That is because the flush map's minimum required log generation is based on the oldest uncommitted and
+// unflushed transaction (which we call min-consistent). That means that, in the example above, the first five full flush
+// map writes are somewhat useless in terms of moving ahead the flush map restriction to checkpoint advancement. This is a
+// transient state that does not warrant adding complexity to the algorithm below. Especially because the flush map is expected
+// to be mostly or completely clean so a complete write of the map only incurs its header writes.
 
 BOOL CFlushMap::FRequestFmSectionWrite( __in const QWORD cbLogGenerated, __in const QWORD cbPreferredChkptDepth )
 {
     BOOL fRequest = fFalse;
     BOOL fOwnLatch = fFalse;
 
+    // This function must be fast because it's callled on every iteration of checkpoint advancement.
 
     if ( m_sxwlSectionFlush.ErrTryAcquireSharedLatch() != CSXWLatch::ERR::errSuccess )
     {
@@ -2771,16 +2999,19 @@ BOOL CFlushMap::FRequestFmSectionWrite( __in const QWORD cbLogGenerated, __in co
 
     Assert( m_fInitialized && m_fPersisted && !m_fDumpMode && !m_fReadOnly );
 
+    // No need to perform throttled async writes (map will be fully cleaned at map detach-time).
     if ( !m_fRecoverable )
     {
         goto HandleError;
     }
 
+    // No more async writes if we've cleaned the map.
     if ( m_fCleanForTerm )
     {
         goto HandleError;
     }
 
+    // If the checkpoint is zero, avoid aggressive flushing if the log position hasn't changed.
     if ( ( cbPreferredChkptDepth == 0 ) &&
         ( ( m_cbLogGeneratedAtLastFlushProgress != ullMax ) &&
         ( cbLogGenerated <= m_cbLogGeneratedAtLastFlushProgress ) ) ||
@@ -2790,6 +3021,9 @@ BOOL CFlushMap::FRequestFmSectionWrite( __in const QWORD cbLogGenerated, __in co
         goto HandleError;
     }
 
+    // Compare flush progress against log tip progress and suggest a flush if flush progress is behind
+    // in such a way that a complete flush is not on track for a certain percantage of the preferred
+    // checkpoint depth.
     const QWORD cbChkptDepthFlushThreshold = (QWORD)( (double)cbPreferredChkptDepth * ( (double)s_pctCheckpointDelay / 100.0 ) );
     QWORD cbFlushMapFlushedProgress;
     if ( m_cbLogGeneratedAtLastFlushProgress == ullMax )
@@ -2803,6 +3037,8 @@ BOOL CFlushMap::FRequestFmSectionWrite( __in const QWORD cbLogGenerated, __in co
         Assert( m_cbLogGeneratedAtStartOfFlush != ullMax );
         Assert( m_cbLogGeneratedAtStartOfFlush <= m_cbLogGeneratedAtLastFlushProgress );
         
+        // Note that, in addition to the FM's data pages, two additional flushes are required to complete
+        // a full flush: the flush map header is written twice during a full flush of the map.
         ExpectedSz( m_cfmpgAllocated > 0, "A properly initialized flush map should have at least one allocated page." );
         const CFMPG cfmpgTotal = m_cfmpgAllocated + 2;
         const CFMPG cfmpgFlushed = ( ( m_fmpgnoSectionFlushNext >= 0 ) ? m_fmpgnoSectionFlushNext : 0 ) + 1;
@@ -2864,6 +3100,7 @@ void CFlushMap::FlushOneSection( __in const QWORD cbLogGenerated )
         goto HandleError;
     }
 
+    // Initialize it.
     if ( m_cbLogGeneratedAtLastFlushProgress == ullMax )
     {
         m_cbLogGeneratedAtStartOfFlush = cbLogGenerated;
@@ -2895,6 +3132,7 @@ ERR CFlushMap::ErrSetFlushMapCapacity( __in const PGNO pgnoReq )
         Error( ErrERRCheck( JET_errInvalidOperation ) );
     }
 
+    // Resize the actual file, but never shrink it.
     if ( m_fPersisted && !m_fReadOnly )
     {
         QWORD cbFmFileSizeActual = 0;
@@ -2906,6 +3144,7 @@ ERR CFlushMap::ErrSetFlushMapCapacity( __in const PGNO pgnoReq )
 
         if ( cbFmFileSizeNeeded > cbFmFileSizeActual )
         {
+            // Get the preferred size to avoid fragmentation.
             const CFMPG cfmpgPreferredNeeded = CfmpgGetPreferredFmDataPageCount_( pgnoReq );
             Assert( cfmpgPreferredNeeded >= cfmpgNeeded );
             cfmpgNeeded = cfmpgPreferredNeeded;
@@ -2938,7 +3177,7 @@ INLINE FMPGNO CFlushMap::FmpgnoGetFmPgnoFromDbPgno( __in const PGNO pgno )
 
 #ifndef ENABLE_JET_UNIT_TEST
     Expected( pgno >= 1 );
-#endif
+#endif // !ENABLE_JET_UNIT_TEST
 
     return ( pgno / m_cDbPagesPerFlushMapPage );
 }
@@ -2965,6 +3204,7 @@ void CFlushMap::LeaveDbHeaderFlush( __in CFlushMap* const pfm )
 }
 
 
+// CFlushMapForAttachedDb.
 BOOL CFlushMapForAttachedDb::FIsReadOnly_()
 {
     Assert( m_pfmp != NULL );
@@ -3057,6 +3297,7 @@ void CFlushMapForAttachedDb::SetDbFmp( __in FMP* const pfmp )
 }
 
 
+// CFlushMapForUnattachedDb.
 
 BOOL CFlushMapForUnattachedDb::FIsReadOnly_()
 {
@@ -3221,6 +3462,7 @@ ERR CFlushMapForUnattachedDb::ErrGetPersistedFlushMapOrNullObjectIfRuntime(
     Call( CFlushMap::ErrGetFmPathFromDbPath( wszFmFilePath, wszDbFilePath ) );
     Alloc( pfm = new CFlushMapForUnattachedDb() );
 
+    // Prepare the persisted flush map object to check for consistency.
     pfm->SetPersisted( fTrue );
     pfm->SetReadOnly( fTrue );
     pfm->SetFmFilePath( wszFmFilePath );
@@ -3234,6 +3476,9 @@ ERR CFlushMapForUnattachedDb::ErrGetPersistedFlushMapOrNullObjectIfRuntime(
     pfm->SetFmHdrFlushSignaturePointerFromDb( &pdbHdr->signFlushMapHdrFlush );
     Call( pfm->ErrInitFlushMap() );
 
+    // If no errors or mismatches were encountered during initialization of
+    // a read-only flush map, it means the file is usable and consistent with
+    // the database.
     if ( !pfm->m_fPersisted )
     {
         fNullObjectWithSuccess = fTrue;
@@ -3242,9 +3487,11 @@ ERR CFlushMapForUnattachedDb::ErrGetPersistedFlushMapOrNullObjectIfRuntime(
 
     pfm->TermFlushMap();
 
+    // Re-initialize R/W.
     pfm->SetReadOnly( fFalse );
     Call( pfm->ErrInitFlushMap() );
 
+    // Possibly a transient error along the way.
     if ( !pfm->m_fPersisted )
     {
         fNullObjectWithSuccess = fTrue;
@@ -3268,6 +3515,7 @@ HandleError:
 }
 
 
+// CFlushMapForDump.
 
 void CFlushMapForDump::DumpFmHdr_( const FlushMapPageDescriptor* const pfmd )
 {
@@ -3468,6 +3716,7 @@ ERR CFlushMapForDump::ErrChecksumFlushMapFile( __in INST* const pinst, __in cons
         {
             fFinished = fTrue;
             
+            // It would have failed to attach.
             Expected( !fFmHeaderPage );
 
             if ( fFmHeaderPage )
@@ -3481,6 +3730,7 @@ ERR CFlushMapForDump::ErrChecksumFlushMapFile( __in INST* const pinst, __in cons
         }
         else if ( errT == JET_errPageNotInitialized )
         {
+            // It would have failed to attach.
             Expected( !fFmHeaderPage );
 
             if ( !fFmHeaderPage )
@@ -3597,6 +3847,7 @@ ERR CFlushMapForDump::ErrDumpFmPage( __in const FMPGNO fmpgno, __in const BOOL f
     err = ErrReadFmPage_( pfmd, fTrue, 0 );
     pfmd->sxwl.ReleaseWriteLatch();
     
+    // Go ahead and dump the page even if checksumming failed or the page is empty.
     if ( ( err < JET_errSuccess ) && ( err != JET_errReadVerifyFailure ) && ( err != JET_errPageNotInitialized ) )
     {
         Call( err );

@@ -4,6 +4,7 @@
 #ifndef _RESMGRREPLAY_HXX_INCLUDED
 #define _RESMGRREPLAY_HXX_INCLUDED
 
+//  needed for JET errors
 
 #ifdef BUILD_ENV_IS_NT
 #include <esent_x.h>
@@ -19,11 +20,16 @@
 #include <set>
 
 
+//  Include OS Layer
+//
+// Note: Not required for resmgr emulation, but because the FTL trace log reader will need it.
 
 #include <tchar.h>
 #include "os.hxx"
 
 
+//  Get the BF FTL tracing driver and requirements
+//
 #include "bfreqs.hxx"
 #include "_bfconst.hxx"
 #include "bfftl.hxx"
@@ -31,12 +37,16 @@
 #include "bfftldriver.hxx"
 
 
+//  ResMgr Emulator required headers
+//
 #include "rmemulator.hxx"
 #include "resmgrlrutestif\resmgrlrutestif.hxx"
 #include "resmgrlruktestif\resmgrlruktestif.hxx"
 #include "resmgrlrukeseif\resmgrlrukeseif.hxx"
 #include "resmgrbeladysif\resmgrbeladysif.hxx"
 
+//  Supported algorithms
+//
 
 typedef enum _ResMgrReplayAlgorithm
 {
@@ -49,6 +59,8 @@ typedef enum _ResMgrReplayAlgorithm
 } ResMgrReplayAlgorithm;
 
 
+//  Supported emulation modes
+//
 
 typedef enum _ResMgrReplayEmulationMode
 {
@@ -67,14 +79,18 @@ typedef enum _ResMgrReplayEmulationMode
 } ResMgrReplayEmulationMode;
 
 
+//  Constants and defaults.
+//
 
 const USHORT g_cCachedHistoResDefault           = 10;
 const TICK g_dtickLifetimeHistoResDefault       = 10 * 1000;
 
 
+//  Prototypes.
+//
 
 ERR ErrResMgrAccumFtlStats( __in BFFTLContext * const pbfftlc, __in const BOOL fDump );
 ERR ErrResMgrAccumEtlStats( __in BFETLContext * const pbfetlc );
 
-#endif
+#endif  //  _RESMGRREPLAY_HXX_INCLUDED
 

@@ -3,19 +3,20 @@
 
 #pragma once
 
+//  TCacheWrapper:  wrapper of an implementation of ICache or its derivatives.
 
 template< class I >
-class TCacheWrapper
+class TCacheWrapper  //  cw
     :   public I
 {
-    public:
+    public:  //  specialized API
 
         TCacheWrapper( _In_ I* const pi );
         TCacheWrapper( _Inout_ I** const ppi );
 
         virtual ~TCacheWrapper();
 
-    public:
+    public:  //  ICache
 
         ERR ErrCreate() override;
 
@@ -188,10 +189,11 @@ ERR TCacheWrapper<I>::ErrWrite( _In_                    const TraceContext&     
     return m_piInner->ErrWrite( tc, volumeid, fileid, fileserial, ibOffset, cbData, pbData, grbitQOS, cp, pfnComplete, keyComplete );
 }
 
+//  CCacheWrapper:  concrete TCacheWrapper<ICache>.
 
 class CCacheWrapper : public TCacheWrapper<ICache>
 {
-    public:
+    public:  //  specialized API
 
         CCacheWrapper( _Inout_ ICache** const ppc )
             : TCacheWrapper<ICache>( ppc )

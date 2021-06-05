@@ -10,6 +10,7 @@
 #include <Microsoft-ETW-ESE.h>
 
 
+// Either ESE or ESENT.
 
 #ifdef BUILD_ENV_IS_NT
 #define MakeEseEtwSymbolName( name )        (Microsoft_Windows_##name##)
@@ -18,9 +19,10 @@
 #endif
 
 
+// Additional definitions.
 
 DEFINE_GUID
-    ( 
+    ( /* 3d6fa8d1-fe05-11d0-9dda-00c04fd7ba7c */
     MSNT_SystemTrace_Thread_V2,
     0x3d6fa8d1,
     0xfe05,
@@ -36,6 +38,7 @@ static const UCHAR MSNT_SystemTrace_Thread_V2_TDCEnd        = 4;
 static const UCHAR MSNT_SystemTrace_Thread_V2_CSwitch       = 36;
 
 
+// ContextSwitch raw trace.
 
 typedef struct _ContextSwitch
 {
@@ -54,6 +57,7 @@ typedef struct _ContextSwitch
 } ContextSwitch;
 
 
+// ThreadTypeGroup1 raw trace.
 
 typedef struct _ThreadTypeGroup1
 {
@@ -70,12 +74,14 @@ typedef struct _ThreadTypeGroup1
 } ThreadTypeGroup1;
 
 
+// Callback to query for extra size when processing ESE events.
 
 typedef ULONG (__stdcall* PfnCbExtraDataCallback)(
     const BYTE* const pbUserData,
     const size_t cbUserData );
 
 
+// Callback to perform custom processing of extra data when processing ESE events.
 
 typedef DWORD (__stdcall* PfnExtraDataProcessingCallback)(
     EventHeader* const pEventHeader,
@@ -83,6 +89,7 @@ typedef DWORD (__stdcall* PfnExtraDataProcessingCallback)(
     const size_t cbUserData );
 
 
+// Structure to define how each ESE event should be processed.
 
 typedef struct _StandardEseEventProcessor
 {
@@ -94,6 +101,7 @@ typedef struct _StandardEseEventProcessor
 } StandardEseEventProcessor;
 
 
+// Helper functions.
 
 FORCEINLINE EtwEvent* AllocStandardEseEvent(
     __in const EtwEventType etwEvtType,
@@ -173,6 +181,9 @@ FORCEINLINE ULONG SafeCopyString(
     __in const size_t cbData,
     __inout size_t* const pibOffset )
 {
+    // StringCchCopyN() comes close to what we need from this function, but not quite.
+    // It makes sure we won't go past the end of both input/output buffers, but won't
+    // error out we get to the end of input with no null termination.
     
     DWORD dwErrorCode = ERROR_SUCCESS;
 
@@ -199,6 +210,7 @@ FORCEINLINE ULONG UlGetEvtDescriptorId( const EVENT_DESCRIPTOR* const evtDescrip
 }
 
 
+// Helper macros.
 
 #define EtwCollectionAlloc( pv )            \
 {                                           \
@@ -218,6 +230,7 @@ FORCEINLINE ULONG UlGetEvtDescriptorId( const EVENT_DESCRIPTOR* const evtDescrip
 }
 
 
+// Callbacks.
 
 ULONG CbExtraDataTestMarker(
     const BYTE* const pbUserData,
@@ -504,7 +517,16 @@ DWORD ExtraDataProcessingIoCompletion(
             
 HandleError:
     return dwErrorCode;
+/*
+    EseIoCompletion* const pEseEvent = (EseIoCompletion*)pEventHeader;
+    int size = sizeof(EseIoCompletion) - offsetof(EseIoCompletion, ullFileNumber);
+    if ( cbUserData != size )
+    {
+        return ERROR_INTERNAL_ERROR;
+    }
 
+    memcpy(&pEseEvent->ullFileNumber, pbUserData, size);
+    return ERROR_SUCCESS;*/
 }
 
 DWORD ExtraDataProcessingResMgrInit(
@@ -1177,6 +1199,7 @@ HandleError:
     return dwErrorCode;
 }
 
+// Table that maps event descriptors and ESE event processors.
 
 static const StandardEseEventProcessor g_rgEseEvtProc[] =
 {
@@ -1196,11 +1219,12 @@ static const StandardEseEventProcessor g_rgEseEvtProc[] =
     { &ESE_CacheWritePage_Trace,        etwevttEseBfWritePage,              sizeof(EseBfWritePage),             NULL,                   ExtraDataProcessingBfWritePage },
     { &ESE_CacheSetLgposModify_Trace,   etwevttEseBfSetLgposModify,         sizeof(EseBfSetLgposModify),        NULL,                   ExtraDataProcessingBfSetLgposModify },
     { &ESE_CacheNewPage_Trace,          etwevttEseBfNewPage,                sizeof(EseBfNewPage),               NULL,                   ExtraDataProcessingBfPageEvent },
-    { &ESE_CacheReadPage_Trace,         etwevttEseBfReadPage,               sizeof(EseBfReadPage),              NULL,                   ExtraDataProcessingBfPageEvent },
+    { &ESE_CacheReadPage_Trace,         etwevttEseBfReadPage,               sizeof(EseBfReadPage),              NULL,                   ExtraDataProcessingBfPageEvent },   // NewPage and ReadPage are the same events, and processed by the same method
     { &ESE_CachePrereadPage_Trace,      etwevttEseBfPrereadPage,            sizeof(EseBfPrereadPage),           NULL,                   ExtraDataProcessingBfPrereadPage },
 };
 
 
+// Internal implementation.
 
 class EtwEventProcessor
 {
@@ -1209,21 +1233,21 @@ class EtwEventProcessor
         typedef std::unordered_map<ULONG, const StandardEseEventProcessor*> EventDescEseProcessor;
     
     private:
-        HANDLE hEventGo;
-        HANDLE hEventReady;
-        HANDLE hEventStop;
-        HANDLE hThreadCollect;
-        EtwEvent* pEtwEvt;
-        bool fCollecting;
-        TRACEHANDLE hTrace;
-        DWORD dwProcessError;
-        bool fFatalError;
-        bool fBaseTimestampInit;
-        LONGLONG ftBaseTimestamp;
-        PTRACE_EVENT_INFO pEvtInfo;
-        ULONG cbEvtInfo;
-        ThreadIdProcId th2proc;
-        EventDescEseProcessor evtDesc2EseProc;
+        HANDLE hEventGo;                        // Signals the callback to return the next event.
+        HANDLE hEventReady;                     // Signals the user-level API that the event is ready for consumption.
+        HANDLE hEventStop;                      // Signals the collection thread to stop.
+        HANDLE hThreadCollect;                  // Thread to wait on the processing callback.
+        EtwEvent* pEtwEvt;                      // Event processed by the callback and to be returned by the GetNextEvent().
+        bool fCollecting;                       // Flags if collection is currently under way.
+        TRACEHANDLE hTrace;                     // Opaque trace handle.
+        DWORD dwProcessError;                   // Error found during event processing.
+        bool fFatalError;                       // Indicates a fatal error.
+        bool fBaseTimestampInit;                // Whether or not the baseline timestamp is initialized.
+        LONGLONG ftBaseTimestamp;               // Base timestamp.
+        PTRACE_EVENT_INFO pEvtInfo;             // Pointer to a buffer that receives extra event information.
+        ULONG cbEvtInfo;                        // Size of the pEvtInfo buffer.
+        ThreadIdProcId th2proc;                 // Dictionary linking thread IDs to process IDs.
+        EventDescEseProcessor evtDesc2EseProc;  // Dictionary linking event descriptors and ESE event processors.
 
     private:
         void CloseHandle_( __in_opt HANDLE* const pHandle );
@@ -1271,6 +1295,7 @@ EtwEventProcessor::EtwEventProcessor()
     this->pEvtInfo = NULL;
     this->cbEvtInfo = 0;
 
+    // Build dictionary.
     for ( size_t i = 0; i < _countof( g_rgEseEvtProc ); i++ )
     {
         const StandardEseEventProcessor* const processor = &g_rgEseEvtProc[ i ];
@@ -1290,6 +1315,7 @@ bool EtwEventProcessor::OpenTraceFile( __in PCWSTR wszFilePath )
 
     bool fSucceeded = false;
 
+    // First, try to open the trace.
     EVENT_TRACE_LOGFILEW evtTraceLogFile = { 0 };
     evtTraceLogFile.LogFileName = (LPWSTR)wszFilePath;
     evtTraceLogFile.EventRecordCallback = EtwEventProcessor::ProcessEvent;
@@ -1302,12 +1328,14 @@ bool EtwEventProcessor::OpenTraceFile( __in PCWSTR wszFilePath )
         goto HandleError;
     }
 
+    // Create events.
     this->hEventGo = CreateEventW( NULL, TRUE, FALSE, NULL );
     this->hEventReady = CreateEventW( NULL, TRUE, FALSE, NULL );
     this->hEventStop = CreateEventW( NULL, TRUE, FALSE, NULL );
     this->fBaseTimestampInit = false;
     this->ftBaseTimestamp = 0LL;
 
+    // Create and start thread.
     this->hThreadCollect = CreateThread( NULL, 0, EtwEventProcessor::WaitForEvent, this, 0, NULL );
     if ( this->hThreadCollect == NULL )
     {
@@ -1339,12 +1367,14 @@ EtwEvent* EtwEventProcessor::GetNextEvent()
     }
 
 
+    // Reset the acknowlegement and set the "go" signal.
     if ( !ResetEvent( this->hEventReady ) || !SetEvent( this->hEventGo ) )
     {
         this->fFatalError = true;
         return NULL;
     }
 
+    // Wait for the "ready" event.
     const DWORD dwWaitError = WaitForSingleObject( this->hEventReady, INFINITE );
     if ( dwWaitError != WAIT_OBJECT_0 )
     {
@@ -1353,6 +1383,7 @@ EtwEvent* EtwEventProcessor::GetNextEvent()
         return NULL;
     }
 
+    // If the retrieved event is NULL, set last error to cached error.
     if ( this->pEtwEvt == NULL )
     {
         SetLastError( this->dwProcessError );
@@ -1366,14 +1397,17 @@ void EtwEventProcessor::CloseTraceFile()
 {
     this->fCollecting = false;
 
+    // If this was a fatal error, force the thread to terminate.
     if ( this->fFatalError )
     {
+        // Kill the collection thread.
         if ( this->hThreadCollect != NULL )
         {
             (void)TerminateThread( this->hThreadCollect, ERROR_INTERNAL_ERROR );
             this->hThreadCollect = NULL;
         }
 
+        // Set signals that other threads wait on just in case.
         if ( this->hEventGo != NULL )
         {
             (void)SetEvent( this->hEventGo );
@@ -1383,6 +1417,7 @@ void EtwEventProcessor::CloseTraceFile()
             (void)SetEvent( this->hEventStop );
         }
 
+        // Close the handle.
         if ( this->hTrace != INVALID_PROCESSTRACE_HANDLE )
         {
             (void)CloseTrace( this->hTrace );
@@ -1391,8 +1426,10 @@ void EtwEventProcessor::CloseTraceFile()
     }
     else
     {
+        // Try to terminate nicely.
         if ( this->hThreadCollect != NULL )
         {
+            // Set events.
             if ( !SetEvent( this->hEventStop ) || !SetEvent( this->hEventGo ) )
             {
                 this->fFatalError = true;
@@ -1400,6 +1437,7 @@ void EtwEventProcessor::CloseTraceFile()
                 return;
             }
 
+            // Wait for thread to go away (10 seconds maximum).
             const DWORD dwWaitError = WaitForSingleObject( this->hThreadCollect, 10000 );
             if ( dwWaitError != WAIT_OBJECT_0 )
             {
@@ -1408,6 +1446,7 @@ void EtwEventProcessor::CloseTraceFile()
                 return;
             }
 
+            // Close the handle.
             if ( this->hTrace != INVALID_PROCESSTRACE_HANDLE )
             {
                 if ( !CloseTrace( this->hTrace ) )
@@ -1421,6 +1460,7 @@ void EtwEventProcessor::CloseTraceFile()
         }
     }
 
+    // Force-closing other handles.
     this->CloseHandle_( &this->hEventGo );
     this->CloseHandle_( &this->hEventReady);
     this->CloseHandle_( &this->hEventStop );
@@ -1434,6 +1474,7 @@ void EtwEventProcessor::CloseTraceFile()
         this->hTrace = INVALID_PROCESSTRACE_HANDLE;
     }
 
+    // Free memory.
     if ( this->pEvtInfo != NULL )
     {
         delete[] ( (BYTE*)this->pEvtInfo );
@@ -1458,6 +1499,7 @@ DWORD WINAPI EtwEventProcessor::WaitForEvent( __in LPVOID lpParameter )
 {
     EtwEventProcessor* const pEtwEvtProc = (EtwEventProcessor*)lpParameter;
 
+    // This call will block until processing is done.
     const DWORD dwProcessTraceReturn = ProcessTrace( &pEtwEvtProc->hTrace, 1, 0, 0 );
     const DWORD dwProcessTraceError = pEtwEvtProc->dwProcessError;
     DWORD dwNextError = ERROR_SUCCESS;
@@ -1470,6 +1512,8 @@ DWORD WINAPI EtwEventProcessor::WaitForEvent( __in LPVOID lpParameter )
         dwNextError = ( dwProcessTraceReturn != ERROR_SUCCESS ) ? dwProcessTraceReturn : dwProcessTraceError;
     }
 
+    // Even once the function returns, we will continue to respond to signals from the user,
+    // until we get signaled to bail out.
     bool fExitThread = false;
     while ( !fExitThread )
     {
@@ -1482,10 +1526,12 @@ DWORD WINAPI EtwEventProcessor::WaitForEvent( __in LPVOID lpParameter )
 
         if ( iHandle == 0 )
         {
+            // We got signaled to stop.
             fExitThread = true;
         }
         else if ( iHandle == 1 )
         {
+            // We got signaled to collect.
             pEtwEvtProc->dwProcessError = dwNextError;
             if ( !ResetEvent( pEtwEvtProc->hEventGo ) || !SetEvent( pEtwEvtProc->hEventReady ) )
             {
@@ -1510,6 +1556,7 @@ void WINAPI EtwEventProcessor::ProcessEvent( __in PEVENT_RECORD pEvtRecord )
 {
     EtwEventProcessor* const pEtwEvtProc = (EtwEventProcessor*)pEvtRecord->UserContext;
 
+    // First event is always the trace header. Extract the initial timestamp from there.
     if ( !pEtwEvtProc->fBaseTimestampInit )
     {
         if ( IsEqualGUID( pEvtRecord->EventHeader.ProviderId, EventTraceGuid ) &&
@@ -1524,6 +1571,7 @@ void WINAPI EtwEventProcessor::ProcessEvent( __in PEVENT_RECORD pEvtRecord )
 
     DWORD dwErrorCode = ERROR_SUCCESS;
 
+    // Now that the baseline timestamp is initialized, wait for the "go" event.
     const HANDLE rgHandle[] = { pEtwEvtProc->hEventStop, pEtwEvtProc->hEventGo };
     const DWORD dwWaitError = WaitForMultipleObjects( _countof( rgHandle ), rgHandle, FALSE, INFINITE );
     const DWORD iHandle = (DWORD)( dwWaitError - WAIT_OBJECT_0 );
@@ -1531,8 +1579,10 @@ void WINAPI EtwEventProcessor::ProcessEvent( __in PEVENT_RECORD pEvtRecord )
     pEtwEvtProc->pEtwEvt = NULL;
     pEtwEvtProc->dwProcessError = ERROR_SUCCESS;
 
+    // If not the "go" event.
     if ( iHandle != 1 )
     {
+        // We got signaled to stop.
         if ( iHandle == 0 )
         {
             dwErrorCode = ERROR_NO_MORE_ITEMS;
@@ -1546,7 +1596,9 @@ void WINAPI EtwEventProcessor::ProcessEvent( __in PEVENT_RECORD pEvtRecord )
         goto HandleError;
     }
 
+    // At this point, we know that "go" is signaled.
 
+    // Get extra event information.
     DWORD cbEvtInfo = pEtwEvtProc->cbEvtInfo;
     dwErrorCode = TdhGetEventInformation( pEvtRecord, 0, NULL, pEtwEvtProc->pEvtInfo, &cbEvtInfo );
     if ( dwErrorCode == ERROR_INSUFFICIENT_BUFFER )
@@ -1571,6 +1623,7 @@ void WINAPI EtwEventProcessor::ProcessEvent( __in PEVENT_RECORD pEvtRecord )
         }
     }
 
+    // There could be problems with some event schemas, so swallow any possible error here.
     if ( dwErrorCode != ERROR_SUCCESS )
     {
         dwErrorCode = ERROR_SUCCESS;
@@ -1579,6 +1632,7 @@ void WINAPI EtwEventProcessor::ProcessEvent( __in PEVENT_RECORD pEvtRecord )
 
     TRACE_EVENT_INFO* const pEvtInfo = pEtwEvtProc->pEvtInfo;
 
+    // At this point, we have everything we need to process the event.
 
     const LONGLONG dftTimestamp = pEvtRecord->EventHeader.TimeStamp.QuadPart - pEtwEvtProc->ftBaseTimestamp;
     const ULONG ulProcessId = pEvtRecord->EventHeader.ProcessId;
@@ -1586,11 +1640,17 @@ void WINAPI EtwEventProcessor::ProcessEvent( __in PEVENT_RECORD pEvtRecord )
     const BYTE* const pbUserData = (BYTE*)pEvtRecord->UserData;
     const USHORT cbUserData = pEvtRecord->UserDataLength;
 
+    // Determine whether the event is defined by a MOF class, in an
+    // instrumentation manifest, or a WPP template; to use TDH to decode
+    // the event, it must be defined by one of these three sources.
     if ( pEvtInfo->DecodingSource == DecodingSourceWbem )
     {
+        // MOF class.
         
+        // Kernel events.
         if ( IsEqualGUID( pEvtInfo->ProviderGuid, SystemTraceControlGuid ) )
         {
+            // Therad_V2 events.
             if ( IsEqualGUID( pEvtInfo->EventGuid, MSNT_SystemTrace_Thread_V2 ) )
             {
                 switch ( pEvtRecord->EventHeader.EventDescriptor.Opcode )
@@ -1649,6 +1709,9 @@ void WINAPI EtwEventProcessor::ProcessEvent( __in PEVENT_RECORD pEvtRecord )
                     case MSNT_SystemTrace_Thread_V2_TEnd:
                     case MSNT_SystemTrace_Thread_V2_TDCEnd:
                     {
+                        // Some traces have references to the thread even after a TEnd gets traced.
+                        // Keep the dictionary entry intact.
+                        // pEtwEvtProc->th2proc.erase( ... );
                     }
                     break;
                 }
@@ -1657,9 +1720,12 @@ void WINAPI EtwEventProcessor::ProcessEvent( __in PEVENT_RECORD pEvtRecord )
     }
     else if ( pEvtInfo->DecodingSource == DecodingSourceXMLFile ) 
     {
+        // Instrumentation manifest.
         
+        // ESE/ESENT events.
         if ( IsEqualGUID( pEvtInfo->ProviderGuid, MakeEseEtwSymbolName( ESE ) ) )
         {
+            // Try and find matching processor.
             const ULONG ulEvtDesc = UlGetEvtDescriptorId( &pEvtInfo->EventDescriptor );
             const EtwEventProcessor::EventDescEseProcessor::const_iterator eseProcessorIter = pEtwEvtProc->evtDesc2EseProc.find( ulEvtDesc );
             if ( eseProcessorIter == pEtwEvtProc->evtDesc2EseProc.end() )
@@ -1667,6 +1733,7 @@ void WINAPI EtwEventProcessor::ProcessEvent( __in PEVENT_RECORD pEvtRecord )
                 goto HandleError;
             }
 
+            // Found a processor.
             const StandardEseEventProcessor* const eseProcessor = eseProcessorIter->second;
             const ULONG cbExtraData =
                     eseProcessor->pfnCbExtraDataCallback ?
@@ -1681,6 +1748,7 @@ void WINAPI EtwEventProcessor::ProcessEvent( __in PEVENT_RECORD pEvtRecord )
                 ulThreadId,
                 cbExtraData ) );
 
+            // Extra processing.
             if ( eseProcessor->pfnExtraDataProcessingCallback )
             {
                 EventHeader* const pEvtHeader = (EventHeader*)( (BYTE*)pEtwEvtProc->pEtwEvt + pEtwEvtProc->pEtwEvt->ibExtraData );
@@ -1696,10 +1764,12 @@ void WINAPI EtwEventProcessor::ProcessEvent( __in PEVENT_RECORD pEvtRecord )
     }
     else
     {
+        // Not handling the WPP case.
         goto HandleError;
     }
 
 HandleError:
+    // Should we close the trace file?
     if ( dwErrorCode != ERROR_SUCCESS )
     {
         if ( CloseTrace( pEtwEvtProc->hTrace ) )
@@ -1727,6 +1797,7 @@ HandleError:
 }
 
 
+// API implementation.
 
 HANDLE EtwOpenTraceFile( __in PCWSTR wszFilePath )
 {

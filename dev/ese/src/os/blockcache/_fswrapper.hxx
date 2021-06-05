@@ -3,18 +3,22 @@
 
 #pragma once
 
+//  TFileSystemWrapper:  wrapper of an implementation of IFileSystemAPI or its derivatives.
+//
+//  This is a utility class used to enable test dependency injection and as the basis for building the file system
+//  filter used to implement the block cache.
 
 template< class I >
-class TFileSystemWrapper
+class TFileSystemWrapper  //  fsw
     :   public I
 {
-    public:
+    public:  //  specialized API
 
         TFileSystemWrapper( _Inout_ I** const ppi );
 
         virtual ~TFileSystemWrapper();
 
-    public:
+    public:  //  IFileSystemAPI
 
         ERR ErrDiskSpace(   const WCHAR* const  wszPath,
                             QWORD* const        pcbFreeForUser,
@@ -331,10 +335,11 @@ HandleError:
     return err;
 }
 
+//  CFileSystemWrapper:  concrete TFileSystemWrapper<IFileSystemAPI>.
 
 class CFileSystemWrapper : public TFileSystemWrapper<IFileSystemAPI>
 {
-    public:
+    public:  //  specialized API
 
         CFileSystemWrapper( _Inout_ IFileSystemAPI** const ppfsapi )
             :   TFileSystemWrapper<IFileSystemAPI>( ppfsapi )

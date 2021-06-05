@@ -14,6 +14,7 @@ const WCHAR * WszLatchType( BFLatchType bflt )
                         L"bfltPreReadOrVersion" ) ) );
 }
 
+//  Accumulates stats about (and optionally dumps) all the BF FTL traces.
 
 ERR ErrResMgrAccumFtlStats( __in BFFTLContext * const pbfftlc, __in const BOOL fDump )
 {
@@ -128,6 +129,7 @@ HandleError:
 }
 
 
+//  Accumulates stats about all the BF ETL traces.
 
 ERR ErrResMgrAccumEtlStats( __in BFETLContext * const pbfetlc )
 {
@@ -138,6 +140,8 @@ ERR ErrResMgrAccumEtlStats( __in BFETLContext * const pbfetlc )
 
     BFTRACE bftrace;
 
+    //  Just go through all traces, which will cause the ETL driver to accumulate stats, given that the right grbits
+    //  were passed in.
 
     while ( ( err = ErrBFETLGetNext( pbfetlc, &bftrace ) ) >= JET_errSuccess )
     {

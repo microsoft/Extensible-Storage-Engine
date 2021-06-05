@@ -1,7 +1,9 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
+//  ================================================================
 struct TABLEDEF
+//  ================================================================
 {
     ULONG   pgnoFDP;
     ULONG   objidFDP;
@@ -23,7 +25,9 @@ struct TABLEDEF
 };
     
 
+//  ================================================================
 struct INDEXDEF
+//  ================================================================
 {
     ULONG   pgnoFDP;
     ULONG   objidFDP;
@@ -40,7 +44,7 @@ struct INDEXDEF
     LONG            ccolumnidDef;
     LONG            ccolumnidConditional;
     
-    ULONG   fFlags;
+    ULONG   fFlags;         //  the raw flags for the index
 
     union
     {
@@ -81,14 +85,16 @@ struct INDEXDEF
 };
 
 
+//  ================================================================
 struct COLUMNDEF
+//  ================================================================
 {
     JET_COLUMNID    columnid;
     JET_COLTYP      coltyp;
 
-    LONG            cbLength;
-    LONG            cp;
-    LONG            ibRecordOffset;
+    LONG            cbLength;           //  length of column
+    LONG            cp;                 //  code page (for text columns only)
+    LONG            ibRecordOffset;     //  offset of record in column
     LONG            presentationOrder;
     ULONG   cbDefaultValue;
     ULONG   cbCallbackData;
@@ -128,7 +134,9 @@ struct COLUMNDEF
 };
 
 
+//  ================================================================
 struct CALLBACKDEF
+//  ================================================================
 {
     char            szName[JET_cbNameMost + 1];
     JET_CBTYP       cbtyp;
@@ -136,7 +144,9 @@ struct CALLBACKDEF
 };
 
 
+//  ================================================================
 struct PAGEDEF
+//  ================================================================
 {
     __int64         dbtime;
     

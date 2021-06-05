@@ -5,17 +5,21 @@
 #define _SPACE_H_INCLUDED
 
 
- typedef enum class SpacePool : ULONG
+/*PERSISTED*/ typedef enum class SpacePool : ULONG
 {
+    //  Explicit Pools - except the 0 / AvailExtLegacyGeneralPool, these are stored/persisted
+    //  explicitly in the byte at front of 5-byte avail pool key.    
     MinPool                          = 0x00,
-    AvailExtLegacyGeneralPool        = 0x00,
-    ContinuousPool                   = 0x01,
-    ShelvedPool                      = 0x02,
+    AvailExtLegacyGeneralPool        = 0x00, //  General / Legacy Free Pool.
+    ContinuousPool                   = 0x01, //  Reserved for contiguous allocations.
+    ShelvedPool                      = 0x02, //  Shelved page (available space beyond EOF, which can't be used).
     MaxPool,
 
-    PrimaryExt                       = 0x00010000,
-    OwnedTreeAvail                   = 0x00020000,
-    AvailTreeAvail                   = 0x00030000,
+    //   Virtual Pools - these pools exist by the context in where the extent was found, and only used to
+    //     communicate this fact out the space APIs.  They are not persisted.
+    PrimaryExt                       = 0x00010000,   //  Used to mark an extent that is within the primary extent.
+    OwnedTreeAvail                   = 0x00020000,   //  Available pages reserved for use to split (i.e. in spbuf) the Owned Extents Tree.
+    AvailTreeAvail                   = 0x00030000,   //  Available pages reserved for use to split (i.e. in spbuf) the Avail Extents Tree.
 } spp;
 
 static_assert( 0 == (ULONG)spp::AvailExtLegacyGeneralPool, "Persisted and so must be immutable" );
@@ -39,14 +43,18 @@ inline const WCHAR * const WszPoolName( _In_ const SpacePool spp )
     Assert( fFalse );
     if ( spp == spp::MaxPool )
     {
+        // A special case of unknown.  But you shouldn't be asking for the name of this, it
+        // doesn't really have one.
         return L"UnknMax";
     }
 
     return L"Unkn";
 }
 
+// Incrementors for SpacePool (i.e. ++SpacePool and SpacePool++) 
 INLINE SpacePool& operator++( SpacePool &spp )
 {
+    // The value you're incrementing is in the normal range, right?
     Assert( ( spp::MinPool <= spp ) && ( spp::MaxPool > spp) );
 
     using IntType = typename std::underlying_type<SpacePool>::type;
@@ -63,6 +71,8 @@ INLINE SpacePool operator++( SpacePool &spp, int )
 
 
 #ifndef SPACE_ONLY_DIAGNOSTIC_CONSTANTS
+//  internal space functions called by recovery
+//
 VOID SPIInitPgnoFDP(
     FUCB                *pfucb,
     CSR                 *pcsr,
@@ -148,27 +158,28 @@ ERR ErrSPIREPAIRValidateSpaceNode(
     __out       CPG *           pcpgExtent,
     __out       SpacePool *     sppPool );
 
-const CPG   cpgSmallFDP                 = 16;
-const CPG   cpgSmallGrow                = 4;
+const CPG   cpgSmallFDP                 = 16;   //  count of owned pages below which an FDP
+const CPG   cpgSmallGrow                = 4;    //  minimum count of pages to grow a small FDP
 
-const CPG   cpgSmallDbSpaceSize         = 254;
-const PGNO  pgnoSmallDbSpaceStart       = 128;
+const CPG   cpgSmallDbSpaceSize         = 254;  //  use small DB alloc policies, while DB is smaller than this
+const PGNO  pgnoSmallDbSpaceStart       = 128;  //  use small DB alloc policies, when allocation starts in this area of DB
 
-const CPG   cpgSmallSpaceAvailMost      = 32;
+const CPG   cpgSmallSpaceAvailMost      = 32;   //  maximum number of pages allocatable from single extent space format
 
-const CPG   cpgMultipleExtentConvert    = 2;
+const CPG   cpgMultipleExtentConvert    = 2;    //  minimum pages to preallocate when converting to multiple extent
+                                                //  (enough for OE/AE)
 
-const CPG   cpgMaxRootPageSplit         = 2;
-const CPG   cpgPrefRootPageSplit        = 2;
+const CPG   cpgMaxRootPageSplit         = 2;    //  max. theoretical pages required to satisfy split on single-level tree
+const CPG   cpgPrefRootPageSplit        = 2;    //  preferred pages to satisfy split on single-level tree
 
-const CPG   cpgMaxParentOfLeafRootSplit = 3;
-const CPG   cpgPrefParentOfLeafRootSplit = 8;
+const CPG   cpgMaxParentOfLeafRootSplit = 3;    //  max. theoretical pages required to satisfy split on 2-level tree
+const CPG   cpgPrefParentOfLeafRootSplit = 8;   //  preferred pages to satisfy split on 2-level tree
 
-const CPG   cpgMaxSpaceTreeSplit        = 4;
-const CPG   cpgPrefSpaceTreeSplit       = 16;
+const CPG   cpgMaxSpaceTreeSplit        = 4;    //  max. theoretical pages required to satisfy space tree split (because max. depth is 4)
+const CPG   cpgPrefSpaceTreeSplit       = 16;   //  preferred pages to satisfy space tree split
 
-#endif
+#endif // SPACE_ONLY_DIAGNOSTIC_CONSTANTS
 
 
-#endif
+#endif  // _SPACE_H_INCLUDED
 

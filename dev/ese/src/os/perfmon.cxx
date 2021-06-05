@@ -40,6 +40,7 @@ void COSLayerPreInit::EnablePerfmon()
 #include <winperf.h>
 #include <aclapi.h>
 
+//  Init/Term routines for performance monitoring
 
 HANDLE  g_hPERFGDAMMF             = NULL;
 PGDA    g_pgdaPERFGDA             = NULL;
@@ -59,6 +60,13 @@ THREAD  g_threadPERFData          = NULL;
 
 extern DWORD UtilPerfThread( DWORD_PTR dw );
 
+//  Calculate space needed to store instance data.
+//
+//  Please, refer to eseperf.cxx for a detailed description of the data format.
+//  in the following format:
+//
+//  NOTE: If an object has 0 instances, it only has cInstancesTotal
+//      for its data. No PIDs are produced.
 
 LOCAL INLINE DWORD CbPERFGetInstanceCountOffsetDataSize()
 {
@@ -90,7 +98,7 @@ LOCAL INLINE DWORD CbPERFGetHeaderDataSize()
 
 LOCAL INLINE DWORD CbPERFGetAggregationIDArraySize( const DWORD cInstances )
 {
-    return QWORD_MULTIPLE( cInstances );
+    return QWORD_MULTIPLE( cInstances ); //  1 byte per ID.
 }
 
 LOCAL INLINE DWORD CbPERFGetPerformanceDataSize( const LONG* const rgcInstances )
@@ -115,14 +123,15 @@ LOCAL INLINE DWORD CbPERFGetPerformanceDataSize( const LONG* const rgcInstances 
 
 LOCAL LONG g_cInits = 0;
 LOCAL LONG g_cTerms = 0;
-LOCAL LONG g_rgcInstancesMaxAtInit[4];
-LOCAL ULONG g_opJetApiAtInit = 0x100;
+LOCAL LONG g_rgcInstancesMaxAtInit[4]; // == dwPERFNumObjects 
+LOCAL ULONG g_opJetApiAtInit = 0x100;  // seeing a 0 here, may mean FOSDllUp() == fFalse, meaning called during DLL attach somehow.
 #ifdef ENABLE_MICROSOFT_MANAGED_DATACENTER_LEVEL_OPTICS
-LOCAL PVOID g_rgpfnStackAtInit[20];
+LOCAL PVOID g_rgpfnStackAtInit[20]; // 160 bytes - 6 frames standard in ese.dll, 14 for the client.
 #endif
 
 void UtilPerfTerm(void)
 {
+    //  end the performance data thread
 
     if ( g_threadPERFData )
     {
@@ -136,6 +145,7 @@ void UtilPerfTerm(void)
         g_hPERFEndDataThread = NULL;
     }
 
+    //  terminate all counters/objects
 
     if ( g_cbInstanceSize )
     {
@@ -162,6 +172,7 @@ ERR ErrUtilPerfInit(void)
 {
     ERR err;
 
+    //  verify counter offsets and calculate instance size from template data
 
     const PERF_OBJECT_TYPE* ppotObjectSrc = (PPERF_OBJECT_TYPE)&PerfDataTemplateReadOnly;
     g_cbMaxCounterBlockSize = QWORD_MULTIPLE( sizeof( PERF_COUNTER_BLOCK ) );
@@ -190,6 +201,7 @@ ERR ErrUtilPerfInit(void)
     }
     g_cbInstanceSize = cbInstDefMax + g_cbMaxCounterBlockSize;
 
+    //  initialize all objects (perf. counter categories)
 
     LONG* rgcInstancesMax = NULL;
     Alloc( rgcInstancesMax = new LONG[dwPERFNumObjects] );
@@ -197,6 +209,8 @@ ERR ErrUtilPerfInit(void)
     Assert( dwPERFNumObjects == _countof( g_rgcInstancesMaxAtInit ) );
     for ( DWORD dwCurObj = 0; dwCurObj < dwPERFNumObjects; dwCurObj++ )
     {
+        //  cache the maximum number of instances for all of them so we can compute
+        //  the required buffer size afterwards
 
         rgcInstancesMax[dwCurObj] = rgpicfPERFICF[dwCurObj]( ICFInit, NULL, NULL );
         g_rgcInstancesMaxAtInit[dwCurObj] = rgcInstancesMax[dwCurObj];
@@ -210,18 +224,22 @@ ERR ErrUtilPerfInit(void)
     delete[] rgcInstancesMax;
     rgcInstancesMax = NULL;
 
+    //  initialize all perf. counters
 
     for ( DWORD dwCurCtr = 0; dwCurCtr < dwPERFNumCounters; dwCurCtr++ )
     {
+        //  0 means success
         
         if ( rgpcefPERFCEF[dwCurCtr]( CEFInit, NULL ) != 0 )
         {
+            //  terminate all the counters that were successfully initialized
             
             for ( dwCurCtr--; LONG( dwCurCtr ) >= 0; dwCurCtr-- )
             {
                 rgpcefPERFCEF[dwCurCtr]( CEFTerm, NULL );
             }
 
+            //  terminate all the categories
 
             for ( DWORD dwCurObj = dwPERFNumObjects-1; LONG( dwCurObj ) >= 0; dwCurObj-- )
             {
@@ -232,6 +250,7 @@ ERR ErrUtilPerfInit(void)
         }
     }
 
+    //  create our performance data thread
 
     if ( !( g_hPERFEndDataThread = CreateEventW( NULL, FALSE, FALSE, NULL ) ) )
     {
@@ -252,6 +271,7 @@ HandleError:
 
 void UtilPerfThreadTerm(void)
 {
+    //  terminate all resources
 
     if ( g_hPERFReadyEvent )
     {
@@ -308,6 +328,9 @@ void UtilPerfThreadTerm(void)
     }
 }
 
+//  make sure that the performance DLL will check this instance index
+//
+//  NOTE:  protect ourselves from corruption of the GDA
 ERR ErrUtilPerfIEnsureCheckInstanceInstance(
     _In_ const DWORD iInstance )
 {
@@ -374,6 +397,8 @@ ERR ErrUtilPerfThreadInit(void)
     sa.bInheritHandle = FALSE;
     sa.lpSecurityDescriptor = pSD;
 
+    // open/create the shared global data area
+    // retry in case object is closed between calls to create and open
     OSStrCbFormatW( wszT, sizeof( wszT ), L"Global\\GDA:  %ws", wszPERFVersion );
     Enforce( PERF_SIZEOF_GLOBAL_DATA >= sizeof( GDA ) );
     Expected( PERF_SIZEOF_GLOBAL_DATA == roundup( sizeof( GDA ), OSMemoryPageCommitGranularity() ) );
@@ -398,6 +423,8 @@ ERR ErrUtilPerfThreadInit(void)
         Call( ErrERRCheck( JET_errOutOfMemory ) );
     }
 
+    //  find an instance number for which we can successfully gain ownership of
+    //  the instance mutex
 
     DWORD iInstance;
     for ( iInstance = 0; iInstance < PERF_PERFINST_MAX; iInstance++ )
@@ -414,6 +441,8 @@ ERR ErrUtilPerfThreadInit(void)
 
         if ( errWin == WAIT_OBJECT_0 || errWin == WAIT_ABANDONED )
         {
+            //  if the file mapping already exists, the existing size may not be enough to accomomdate
+            //  the currently needed size, if that is the case, skip to the next slot
 
             OSStrCbFormatW( wszT, sizeof( wszT ), L"Global\\IDA%d:  %ws", iInstance, wszPERFVersion );
             g_hPERFIDAMMF = CreateFileMappingW( INVALID_HANDLE_VALUE, &sa, PAGE_READWRITE | SEC_COMMIT, 0, g_cbPERFIDA, wszT );
@@ -447,6 +476,7 @@ ERR ErrUtilPerfThreadInit(void)
         Call( ErrERRCheck( JET_errPermissionDenied ) );
     }
 
+    //  open the shared instance data area
 
     if ( !( g_pidaPERFIDA = PIDA( MapViewOfFile(  g_hPERFIDAMMF,
                                                 FILE_MAP_ALL_ACCESS,
@@ -457,6 +487,7 @@ ERR ErrUtilPerfThreadInit(void)
         Call( ErrERRCheck( JET_errOutOfMemory ) );
     }
 
+    //  allocate our temp instance data area
 
     if ( !( g_pida = PIDA( VirtualAlloc(  NULL,
                                         g_cbPERFIDA,
@@ -466,9 +497,11 @@ ERR ErrUtilPerfThreadInit(void)
         Call( ErrERRCheck( JET_errOutOfMemory ) );
     }
 
+    //  set total allocated size
 
     g_pida->cbIDA = g_cbPERFIDA;
 
+    //  open/create the go event
 
     OSStrCbFormatW( wszT, sizeof( wszT ), L"Global\\Go%d:  %ws", iInstance, wszPERFVersion );
     PERFCreateEvent( g_hPERFGoEvent, sa, wszT );
@@ -478,7 +511,9 @@ ERR ErrUtilPerfThreadInit(void)
     }
     SetHandleInformation( g_hPERFGoEvent, HANDLE_FLAG_PROTECT_FROM_CLOSE, HANDLE_FLAG_PROTECT_FROM_CLOSE );
 
+    //  open/create the ready event
 
+    // This banned API was fixed while looking at the Seattle Center's big fountain.
     OSStrCbFormatW( wszT, sizeof( wszT ), L"Global\\Ready%d:  %ws", iInstance, wszPERFVersion );
     PERFCreateEvent( g_hPERFReadyEvent, sa, wszT );
     if ( !g_hPERFReadyEvent )
@@ -489,6 +524,9 @@ ERR ErrUtilPerfThreadInit(void)
 
     Call( ErrUtilPerfIEnsureCheckInstanceInstance( iInstance ) );
 
+    //  set our connect time
+    //  add the current process ID, to reduce even further the possibility
+    //  of collision across processes starting up at the same time
 
     do
     {
@@ -515,6 +553,7 @@ UINT DwPERFCurPerfObj( void )
 }
 
 
+//  Performance Data thread  */
 
 DWORD UtilPerfThread( DWORD_PTR parm )
 {
@@ -523,6 +562,10 @@ DWORD UtilPerfThread( DWORD_PTR parm )
         return 0;
     }
 
+    //  Retrieve the server process' file name: the offset of the instance count and the process file name
+    //  could be copied only once for the entire chunk of data but, instead, we'll choose to repeat them
+    //  at the beginning of each counter object (i.e., category) so that we simplify the processing algorithm
+    //  in eseperf/esentprf.
     
     const WCHAR* wszProcessFileName = WszPERFGetProcessFileName();
     const DWORD cbProcessFileName = CbPERFGetProcessFileNameDataSize();
@@ -534,13 +577,21 @@ DWORD UtilPerfThread( DWORD_PTR parm )
     DWORD cExceptionRetry = 0;
     for ( ; ; )
     {
+        //  TLS to keep track of what object we are currently gathering data for. This is used
+        //  by PERFInstanceDelayedTotalWithClass::PassTo and PERFIntanceLiveTotalWithClass::PassTo to determine
+        //  if iInstance refers to tableclass instance or Jet Instance.
         Postls()->dwCurPerfObj = PERF_OBJECT_INVALID;
 
+        //  run at least through one collection cycle without waiting if
+        //  we are just starting
         if ( fHasValidData )
         {
+            //  set our ready event to indicate we are done collecting data and / or
+            //  we are ready to collect more data
 
             SetEvent( g_hPERFReadyEvent );
 
+            //  wait to either be killed or to be told to collect data
 
             const size_t    chWait              = 2;
             HANDLE          rghWait[ chWait ]   = { g_hPERFEndDataThread, g_hPERFGoEvent };
@@ -551,6 +602,13 @@ DWORD UtilPerfThread( DWORD_PTR parm )
             ResetEvent( g_hPERFGoEvent );
         }
         
+        //  When wildcards are used to add counters to a given collector, CollectPerformanceData()
+        //  (which triggers g_hPERFGoEvent) gets called approximately as many times as the number of
+        //  matching counters. On a system with many processes/instances, this may be a problem
+        //  and may cause clients to time out waiting for counters to be added, since the entire
+        //  loop below will run potentially thousands of times. To solve that, we are limiting
+        //  the number of times the collection loop is allowed to run per second.
+        //  If the instance list needs refreshing, we will not enforce this optimization.
 
         bool fRefreshInstanceList = false;
         ProcInfoPIFPwszPf( NULL, &fRefreshInstanceList );
@@ -571,6 +629,7 @@ DWORD UtilPerfThread( DWORD_PTR parm )
         }
         cCollectionsLastThreshold++;
 
+        //  collect instances for all objects
 
         for ( DWORD dwCurObj = 0; dwCurObj < dwPERFNumObjects; dwCurObj++ )
         {
@@ -581,14 +640,18 @@ DWORD UtilPerfThread( DWORD_PTR parm )
         const DWORD cbSpaceNeeded = CbPERFGetPerformanceDataSize( rglPERFNumInstances );
         g_pida->cbPerformanceData = cbSpaceNeeded;
 
+        //  verify that we have sufficient store to collect our data
 
         Enforce( g_cbPERFIDA == g_pida->cbIDA );
+        // This shadows the next enforce until this extra debug code is removed.
         EnforceSz( g_cbPERFIDA - sizeof( IDA ) >= cbSpaceNeeded, OSFormat( "PerfIdaBufferTooSmall:opApi:%I32ud\n", g_opJetApiAtInit ) );
         Enforce( g_cbPERFIDA - sizeof( IDA ) >= cbSpaceNeeded );
 
+        //  get a pointer to our data block
 
         LPVOID pvBlock = g_pida->rgbPerformanceData;
 
+        //  loop through all objects, filling our block with instance data
 
         DWORD dwCurCtr = 0;
         PPERF_OBJECT_TYPE ppotObjectSrc = (PPERF_OBJECT_TYPE)&PerfDataTemplateReadOnly;
@@ -596,6 +659,7 @@ DWORD UtilPerfThread( DWORD_PTR parm )
         {
             Postls()->dwCurPerfObj = dwCurObj;
 
+            //  first, write process file name.
 
             Enforce( CbPERFGetInstanceCountOffsetDataSize() == sizeof( ULONG64 ) );
             *( (ULONG64*)pvBlock ) = (ULONG64)ibInstanceCount;
@@ -604,37 +668,46 @@ DWORD UtilPerfThread( DWORD_PTR parm )
             OSStrCbCopyW( (WCHAR*)pvBlock, cbProcessFileName, wszProcessFileName );
             pvBlock = (BYTE*)pvBlock + cbProcessFileName;
 
+            //  write the number of instances for this object to the block
 
             Enforce( CbPERFGetInstanceCountDataSize() == sizeof( ULONG64 ) );
             const DWORD cInstances = (DWORD)rglPERFNumInstances[dwCurObj];
             *( (ULONG64*)pvBlock ) = (ULONG64)cInstances;
             pvBlock = (BYTE*)pvBlock + cbInstanceCount;
 
+            //  write the aggregation IDs.
 
             const DWORD cbAggregationIDs = CbPERFGetAggregationIDArraySize( cInstances );
             memset( pvBlock, 0, cbAggregationIDs );
             UtilMemCpy( pvBlock, (void*)rgpbPERFInstanceAggregationIDs[dwCurObj], cInstances );
             pvBlock = (BYTE*)pvBlock + cbAggregationIDs;
             
+            //  get current instance name list
 
             LPCWSTR lpwszInstName = rgwszPERFInstanceList[dwCurObj];
 
+            //  loop through each instance
 
             const PERF_INSTANCE_DEFINITION* const ppidInstanceSrc = (PPERF_INSTANCE_DEFINITION)( (BYTE*)ppotObjectSrc + ppotObjectSrc->DefinitionLength );
 
             PPERF_INSTANCE_DEFINITION ppidInstanceDest = (PPERF_INSTANCE_DEFINITION)pvBlock;
             for ( DWORD dwCurInst = 0; dwCurInst < cInstances; dwCurInst++ )
             {
+                //  initialize instance/counter block from template data
 
                 UtilMemCpy( (void*)ppidInstanceDest, (void*)ppidInstanceSrc, ppidInstanceSrc->ByteLength );
                 PPERF_COUNTER_BLOCK const ppcbCounterBlockDest = (PPERF_COUNTER_BLOCK)( (BYTE*)ppidInstanceDest + ppidInstanceDest->ByteLength );
                 memset( (void*)ppcbCounterBlockDest, 0, g_cbMaxCounterBlockSize );
                 ppcbCounterBlockDest->ByteLength = g_cbMaxCounterBlockSize;
 
+                //  no unique instance ID
 
                 ppidInstanceDest->UniqueID = PERF_NO_UNIQUE_ID;
 
+                //  NOTE:  performance DLL sets object hierarchy information  */
 
+                //  write instance name to buffer, avoiding overflow and illegal
+                //  characters
 
                 LPWSTR const wszName = (wchar_t*)( (BYTE*)ppidInstanceDest + ppidInstanceDest->NameOffset );
                 DWORD cchName;
@@ -650,6 +723,7 @@ DWORD UtilPerfThread( DWORD_PTR parm )
                 ppidInstanceDest->NameLength = (ULONG)( ( cchName + 1 ) * sizeof( wchar_t ) );
                 lpwszInstName += ( wcslen( lpwszInstName ) + 1 );
 
+                //  collect counter data for this instance
 
                 const PERF_COUNTER_DEFINITION* ppcdCounterSrc = (PERF_COUNTER_DEFINITION*)( (BYTE*)ppotObjectSrc + ppotObjectSrc->HeaderLength );
                 for ( DWORD dwCollectCtr = 0; dwCollectCtr < ppotObjectSrc->NumCounters; dwCollectCtr++ )
@@ -666,6 +740,9 @@ DWORD UtilPerfThread( DWORD_PTR parm )
 
         Postls()->dwCurPerfObj = PERF_OBJECT_INVALID;
 
+        //  copy our generated performance data into the IDA
+        //
+        //  NOTE:  protect ourselves from corruption of the IDA
 
         __try
         {
@@ -694,30 +771,37 @@ DWORD UtilPerfThread( DWORD_PTR parm )
 }
 
 
+//  post-terminate perfmon subsystem
 
 void OSPerfmonPostterm()
 {
+    //  nop
 }
 
+//  pre-init perfmon subsystem
 
 BOOL FOSPerfmonPreinit()
 {
+    //  nop
 
     return fTrue;
 }
 
 
+//  terminate perfmon subsystem
 
 void OSPerfmonTerm()
 {
     UtilPerfTerm();
 }
 
+//  init perfmon subsystem
 
 ERR ErrOSPerfmonInit()
 {
     ERR err = JET_errSuccess;
 
+    //  start perfmon thread if perfmon has not been disabled
 
     if ( !g_fDisablePerfmon )
     {
@@ -728,5 +812,5 @@ HandleError:
     return err;
 }
 
-#endif
+#endif  //  MINIMAL_FUNCTIONALITY
 

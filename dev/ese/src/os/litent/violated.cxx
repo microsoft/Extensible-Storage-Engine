@@ -1,6 +1,9 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
+//  This file gives the oslite.lib an indirection level for a few functions
+//  the OS Layer expects to link against.  These functions are technically
+//  layering violations that we do not have time to fix properly.
 
 #include "osstd.hxx"
 
@@ -14,7 +17,7 @@ void UtilReportEvent(
     const DWORD         cbRawData,
     void *              pvRawData,
     const INST *        pinst,
-    const LONG          lEventLoggingLevel )
+    const LONG          lEventLoggingLevel )    //  1==JET_EventLoggingLevelMin
 {
     return;
 }
@@ -42,6 +45,8 @@ BOOL FINSTSomeInitialized(void)
 #ifndef MINIMAL_FUNCTIONALITY
 void JetErrorToString( JET_ERR err, const char **szError, const char **szErrorText )
 {
+    //*szError = szUnknownError;
+    //*szErrorText = szUnknownError;
     AssertSz( false, "NYI" );
 }
 #endif
@@ -58,9 +63,11 @@ ERR ErrOSRMInit(void)
 }
 void OSRMTerm(void)
 {
+    //  nop
 }
 void OSRMPostterm(void)
 {
+    //  nop
 }
 
 
@@ -70,6 +77,7 @@ void OSRMPostterm(void)
 
 
 
+// Used by retail version of AssertFail to figure out whether to crash on firewall on retail builds
 ULONG_PTR UlParam( const INST* const, const ULONG )
 {
     return 0;

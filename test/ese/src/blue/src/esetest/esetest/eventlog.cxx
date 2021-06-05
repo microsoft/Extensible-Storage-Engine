@@ -1,5 +1,9 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
+//================================================================
+// Event logging helper functions.
+//================================================================
+//
 
 #include "ese_common.hxx"
 #include "eseloadlibrary.hxx"
@@ -31,6 +35,7 @@ typedef struct{
     DWORD               cbBufferSize;
     HANDLE              hObjects[ 2 ];
 
+    // Won't be used after initialization. For debugging purposes only.
     PWSTR               wszEventLog;
     SYSTEMTIME          stTimeMin;
     SYSTEMTIME          stTimeMax;
@@ -40,6 +45,7 @@ typedef struct{
 
 #ifndef BUILD_ENV_IS_WPHONE 
 
+// Global 'functors' to help with the loadlibrary's.
 
 NTOSFuncPtr( g_pfnOpenEventLogW, g_mwszzAdvapi32CoreSystemBroken, OpenEventLogW, oslfExpectedOnWin5x | oslfNotExpectedOnCoreSystem );
 NTOSFuncStd( g_pfnReadEventLogW, g_mwszzAdvapi32CoreSystemBroken, ReadEventLogW, oslfExpectedOnWin5x | oslfNotExpectedOnCoreSystem );
@@ -47,6 +53,7 @@ NTOSFuncStd( g_pfnCloseEventLog, g_mwszzAdvapi32CoreSystemBroken, CloseEventLog,
 NTOSFuncStd( g_pfnNotifyChangeEventLog, g_mwszzAdvapi32CoreSystemBroken, NotifyChangeEventLog, oslfExpectedOnWin5x | oslfNotExpectedOnCoreSystem );
 
 
+// Function implementations.
 
 VOID
 IEventLoggingPrintToFile(
@@ -92,8 +99,11 @@ IEventLoggingProcessEvents(
         goto Cleanup;
     }
 
+    // Process all the events up to EOF.
     while ( ERROR_HANDLE_EOF != dwLastError ){
+        // We've seen access denied here. Retry 10 times.
         for ( DWORD iRetry = 0 ; iRetry < 10 ; iRetry++ ){
+            // Read as many entries as it fits in our buffer.
             fReturn = g_pfnReadEventLogW( hQuery->hEventLog,
                                         EVENTLOG_SEQUENTIAL_READ | EVENTLOG_FORWARDS_READ,
                                         0,
@@ -110,14 +120,17 @@ IEventLoggingProcessEvents(
         if ( fReturn ){
             pBufferAux = hQuery->pBuffer;
 
+            // Process all the events returned.
             while ( ( ( DWORD )( pBufferAux - hQuery->pBuffer ) ) < cbRead ){
                 pelg = ( EVENTLOGRECORD* )pBufferAux;
                 wszEventSource = ( WCHAR* )( pelg + 1 );
                 dwTimeGenerated = pelg->TimeGenerated;
                 wEventType = pelg->EventType;
                 wEventCategory = pelg->EventCategory;
-                dwEventId = (pelg->EventID & 0x0000FFFF);
+                dwEventId = (pelg->EventID & 0x0000FFFF);   // lower 16 bits contain the ID
 
+                // It's time to filter out some events.
+                // First, by event ID.
                 if ( hQuery->pEventIds ){
                     BOOL fFound = FALSE;
                     for ( size_t i = 0 ; i < hQuery->cEventIds ; i++ ){
@@ -131,11 +144,13 @@ IEventLoggingProcessEvents(
                     }
                 }
                 
+                // Now, by time generated.
                 if ( ! (( dwTimeGenerated >= hQuery->dwTimeMin ) &&
                         ( dwTimeGenerated <= hQuery->dwTimeMax ) ) ){
                         goto NextEvent;
                 }
 
+                // Now, by event source.
                 if ( hQuery->pwszEventSources ){
                     BOOL fFound = FALSE;
                     for ( size_t i = 0 ; i < hQuery->cEventSources ; i++ ){
@@ -149,6 +164,7 @@ IEventLoggingProcessEvents(
                     }
                 }
 
+                // Now, by event type.
                 if ( hQuery->pEventTypes ){
                     BOOL fFound = FALSE;
                     for ( size_t i = 0 ; i < hQuery->cEventTypes ; i++ ){
@@ -162,6 +178,7 @@ IEventLoggingProcessEvents(
                     }
                 }
 
+                // Now, by event category.
                 if ( hQuery->pEventCategories ){
                     BOOL fFound = FALSE;
                     for ( size_t i = 0 ; i < hQuery->cEventCategories ; i++ ){
@@ -175,6 +192,7 @@ IEventLoggingProcessEvents(
                     }
                 }
 
+                // At this point, we know that the event matches our constraints.               
                 cStrings = pelg->NumStrings;
                 rgpwszStrings = NULL;
                 if ( cStrings ){
@@ -194,8 +212,10 @@ IEventLoggingProcessEvents(
                 cbRawData = pelg->DataLength;
                 pvRawData = cbRawData ? ( pBufferAux + pelg->DataOffset ) : NULL;
 
+                // Compute the time generated in SYSTEMTIME format.
                 SecondsSince1970ToSystemTime( dwTimeGenerated, &stTimeGenerated );
 
+                // Callback.
                 if ( hQuery->pfnCallback ){
                     hQuery->pfnCallback( hQuery->wszEventLog,
                                             wszEventSource,
@@ -210,6 +230,7 @@ IEventLoggingProcessEvents(
                                             hQuery->pUserData );
                 }
 
+                // Write to the file.
                 if ( INVALID_HANDLE_VALUE != hQuery->hFile ){
                     CHAR szBuffer[ ESETEST_ELHELPER_STRING_BUFFER_SIZE ];
                     IEventLoggingPrintToFile( hQuery->hFile, CRLF );
@@ -330,6 +351,10 @@ IEventLoggingBackgroundListening(
                                                 0 :
                                                 ( ESETEST_ELHELPER_MAXIMUM_WAIT_TIME - dwDeltaTime ) );
         dwTime = GetTickCount();
+        // We'll process event if either we timed-out or we've been notified.
+        // Ideally, we shouldn't need to check for timeouts, but NotifyChangeEventLog() will not call
+        //  PulseEvent() twice in a five-second interval. So, if we process events and then new ones
+        //  are generated, we'll miss them.
         if ( ( WAIT_TIMEOUT == dwReturn ) || ( ( dwReturn - WAIT_OBJECT_0 ) == 1 ) ){
             if ( !IEventLoggingProcessEvents( elq ) ){
                 OutputError( "%s(): IEventLoggingProcessEvents() failed!" CRLF, __FUNCTION__ );
@@ -340,6 +365,7 @@ IEventLoggingBackgroundListening(
         }       
     }
 
+    // Flag that the thread doesn't need to manipulate resources anymore.
     ResetEvent( elq->hObjects[ 0 ] );   
     _endthread();
 }
@@ -364,12 +390,14 @@ EventLoggingCreateQuery(
 {
     BOOL fSuccess = FALSE;
 
+    // First thing, we allocate the object.
     EseEventLoggingQuery* hQuery = new EseEventLoggingQuery;
     if ( NULL == hQuery ){
         OutputError( "%s(): failed to allocate new query object" CRLF, __FUNCTION__ );
         goto Cleanup;
     }
 
+    // Initialize the structure with default values, in case we bail out.
     hQuery->pfnCallback                 = pfnCallback;
     hQuery->hEventLog                   = NULL;
     hQuery->pwszEventSources            = NULL;
@@ -405,7 +433,9 @@ EventLoggingCreateQuery(
         goto Cleanup;
     }
 
+    // Initialize with real values.
 
+    // Event log.
     if ( NULL == wszEventLog ){
         hQuery->wszEventLog                 = EsetestCopyWideString( __FUNCTION__, L"Application" );
     }
@@ -422,6 +452,7 @@ EventLoggingCreateQuery(
         goto Cleanup;
     }
 
+    // Event sources filter.
     if ( NULL != pwszEventSources ){
         if ( cEventSources ){
             hQuery->pwszEventSources = new PWSTR[ cEventSources ];
@@ -441,6 +472,7 @@ EventLoggingCreateQuery(
         }
     }
 
+    // Time filters.
     if ( NULL != pTimeMin ){
         hQuery->dwTimeMin = SystemTimeToSecondsSince1970( pTimeMin );
     }
@@ -450,6 +482,7 @@ EventLoggingCreateQuery(
     }
     SecondsSince1970ToSystemTime( hQuery->dwTimeMax, &hQuery->stTimeMax );
 
+    // Event type filters.
     if ( NULL != pEventTypes ){
         if ( cEventTypes ){
             hQuery->pEventTypes = new WORD[ cEventTypes ];
@@ -462,6 +495,7 @@ EventLoggingCreateQuery(
         }
     }
 
+    // Event category filters.
     if ( NULL != pEventCategories ){
         if ( cEventCategories ){
             hQuery->pEventCategories = new WORD[ cEventCategories ];
@@ -474,6 +508,7 @@ EventLoggingCreateQuery(
         }
     }
 
+    // Event ID filters.
     if ( NULL != pEventIds ){
         if ( cEventIds ){
             hQuery->pEventIds = new DWORD[ cEventIds ];
@@ -486,6 +521,7 @@ EventLoggingCreateQuery(
         }
     }
 
+    // File to log.
     if ( wszLogFile ){
         hQuery->wszLogFile = EsetestCopyWideString( __FUNCTION__, wszLogFile );
         if ( NULL == hQuery->wszLogFile ){
@@ -511,6 +547,7 @@ EventLoggingCreateQuery(
         }
     }
 
+    // Buffer to receive the event log records.
     hQuery->pBuffer = new BYTE[ sizeof( EVENTLOGRECORD ) ];
     if ( NULL == hQuery->pBuffer ){
         OutputError( "%s(): failed to allocate hQuery->pBuffer!" CRLF, __FUNCTION__ );
@@ -518,6 +555,7 @@ EventLoggingCreateQuery(
     }
     hQuery->cbBufferSize = sizeof( EVENTLOGRECORD );
 
+    // Synchronization objects.
     hQuery->hObjects[ 0 ] = CreateEventW( NULL, TRUE, FALSE, NULL );
     hQuery->hObjects[ 1 ] = CreateEventW( NULL, TRUE, FALSE, NULL );
     if ( ( NULL == hQuery->hObjects[ 0 ] ) || ( NULL == hQuery->hObjects[ 1 ] ) ){
@@ -525,23 +563,27 @@ EventLoggingCreateQuery(
         goto Cleanup;
     }
     else{
+        // Notification event for new log records.
         if ( !g_pfnNotifyChangeEventLog( hQuery->hEventLog, hQuery->hObjects[ 1 ] ) ){
             OutputError( "%s(): NotifyChangeEventLog() failed!" CRLF, __FUNCTION__ );
             goto Cleanup;
         }
     }
 
+    // At this point, everything is ready to go. We can even return some events.
     if ( !IEventLoggingProcessEvents( hQuery ) ){
         OutputError( "%s(): IEventLoggingProcessEvents() failed!" CRLF, __FUNCTION__ );
         goto Cleanup;
     }
 
+    // Finally, create the background thread to listen for new events.
     if ( -1L == _beginthread( IEventLoggingBackgroundListening, 0, hQuery ) ){
         OutputError( "%s(): failed to start background listening thread!" CRLF, __FUNCTION__ );
         goto Cleanup;
     }
     hQuery->fThreadActive = TRUE;
 
+    // We got it.
     fSuccess = TRUE;
 
 Cleanup:
@@ -570,38 +612,50 @@ EventLoggingDestroyQuery(
 
     EseEventLoggingQuery* elq = ( EseEventLoggingQuery* )hQuery;
 
+    // Tell background thread to stop.
     if ( elq->fThreadActive ){
         SetEvent( elq->hObjects[ 0 ] );
         while ( WAIT_TIMEOUT != WaitForSingleObject( elq->hObjects[ 0 ], 1 ) );
         elq->fThreadActive = FALSE;
     }
 
+    // Free memory and resources.
 
+    // Event log handle.
     if ( NULL != elq->hEventLog ){
         (void) g_pfnCloseEventLog( elq->hEventLog );
     }
 
+    // Event sources filter.
     for ( size_t i = 0 ; i < elq->cEventSources ; i++ ){
         delete []elq->pwszEventSources[ i ];
     }
     delete []elq->pwszEventSources;
 
+    // Event type filters.
     delete []elq->pEventTypes;
 
+    // Event category filters.
     delete []elq->pEventCategories; 
 
+    // Event ID filters.
     delete []elq->pEventIds;
 
+    // File to log.
     CloseHandleP( &elq->hFile );
 
+    // Buffer.
     delete []elq->pBuffer;
 
+    // Synchronization objects.
     CloseHandleP( &elq->hObjects[ 0 ] );
     CloseHandleP( &elq->hObjects[ 1 ] );
 
+    // Strings.
     delete []elq->wszEventLog;
     delete []elq->wszLogFile;
 
+    // Object itself.
     delete elq;
     
     return TRUE;
@@ -619,6 +673,8 @@ EventLoggingFormatMessage(
     PWSTR wszFormattedMsg;
     DWORD fIgnoreInserts = 0;
 
+    // Since we don't pass the size, we may AV if the string provided by the event generator
+    //  is malformatted.
 IfExcept:
     __try{
         dwReturn = FormatMessageW( FORMAT_MESSAGE_ALLOCATE_BUFFER |
@@ -658,6 +714,7 @@ EventLoggingModuleFromEventSource(
     __in PCWSTR     wszEventSource
 )
 {
+    // Try to match with one of the supported modules.
     if ( !wcscmp( WszEsetestEseEventSource(), wszEventSource ) ){
         return HmodEsetestEseDll();
     }
@@ -713,6 +770,7 @@ EventLoggingPrintEvent(
 }
 
 #else
+//Windows Phone
 HANDLE
 EventLoggingCreateQuery(
     __in_opt PFNEVENTLOGGING                        pfnCallback,

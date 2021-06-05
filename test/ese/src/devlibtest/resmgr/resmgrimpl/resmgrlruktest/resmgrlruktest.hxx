@@ -5,21 +5,27 @@
 #define _RESMGRLRUKTEST_HXX_INCLUDED
 
 
+//  We allow modules using us to override our assert function.
 
 #ifndef RESMGRLRUKTESTAssert
 #define RESMGRLRUKTESTAssert    Assert
-#endif
+#endif  //  RESMGRLRUKTESTAssert
 
 #include <unordered_map>
 #include <map>
 
+//  Implementation of the classic LRU-K algorithm described in
+//  http://www.cs.cmu.edu/~christos/courses/721-resources/p297-o_neil.pdf
 
+//  ================================================================
 template<class CKey, class CTimestamp>
 class CLRUKTestResourceUtilityManager
+//  ================================================================
 {
     public:
         static const BYTE KMax = 5;
 
+        //  API error codes.
 
         enum ERR
         {
@@ -31,15 +37,18 @@ class CLRUKTestResourceUtilityManager
             errNoCurrentResource
         };
 
+        //  Ctor./Dtor.
 
         CLRUKTestResourceUtilityManager();
         ~CLRUKTestResourceUtilityManager();
 
 
+        //  Init./term.
 
         ERR ErrInit( const INT K, const double csecCorrelatedTouch );
         void Term();
 
+        //  Cache/touch/evict.
 
         ERR ErrCacheResource( const CKey key, CTimestamp timestamp, const bool fUseHistory );
         ERR ErrTouchResource( const CKey key, CTimestamp timestamp );
@@ -49,6 +58,7 @@ class CLRUKTestResourceUtilityManager
         ERR ErrGetNextResource( CKey* const pkey, CTimestamp timestamp );
 
     private:
+        //  Custom types (eviction index).
 
         typedef struct
         {
@@ -61,6 +71,7 @@ class CLRUKTestResourceUtilityManager
         typedef std::multimap<CTimestamp, ResourceEntry*> EvictionIndex;
         typedef typename EvictionIndex::iterator EvictionIndexIter;
 
+        //  Custom types (resource hash map).
 
         typedef struct
         {
@@ -70,26 +81,30 @@ class CLRUKTestResourceUtilityManager
         typedef std::unordered_map<CKey, ResourceHashEntry*> ResourceHashMap;
         typedef typename ResourceHashMap::iterator ResourceHashMapIter;
 
+        //  Custom types (resource history hash map).
 
         typedef std::unordered_map<CKey, ResourceEntry*> ResourceHistoryHashMap;
         typedef typename ResourceHistoryHashMap::iterator ResourceHistoryHashMapIter;
 
 
+        //  State.
 
-        BYTE m_K;
+        BYTE m_K;                                   //  K-ness of the algorithm.
 
-        CTimestamp m_dtsCorrelatedTouch;
+        CTimestamp m_dtsCorrelatedTouch;            //  Correlation interval.
 
-        CTimestamp m_time0;
+        CTimestamp m_time0;                         //  First timestamp reported, used as a baseline.
+                                                    //  All timestamps stored will be deltas.
 
-        bool m_fTime0init;
+        bool m_fTime0init;                          //  Whether or not m_time0 is initialized.
 
-        ResourceHashMap m_rhmCached;
+        ResourceHashMap m_rhmCached;                //  Maps resources and their hash entries (cached entries).
 
-        ResourceHistoryHashMap m_rhhmHistory;
+        ResourceHistoryHashMap m_rhhmHistory;       //  Maps resources and their entries (history entries).
 
-        EvictionIndex* m_rgeiCached[ KMax + 1 ];
+        EvictionIndex* m_rgeiCached[ KMax + 1 ];    //  Eviction indexes for cached pages (the 0th entry is the super-cold list).
 
+        //  Helpers.
 
         CTimestamp TSScaleTimestamp( const CTimestamp timestamp );
 
@@ -146,6 +161,7 @@ inline typename CLRUKTestResourceUtilityManager<CKey, CTimestamp>::ERR
 CLRUKTestResourceUtilityManager<CKey, CTimestamp>::
 ErrInit( const INT K, const double csecCorrelatedTouch )
 {
+    //  Input validation.
 
     if ( K < 1 || K > KMax )
     {
@@ -157,6 +173,7 @@ ErrInit( const INT K, const double csecCorrelatedTouch )
         return errInvalidParameter;
     }
 
+    //  Real initialization.
 
     RESMGRLRUKTESTAssert( m_K == 0 );
     m_K = (BYTE)K;
@@ -198,6 +215,7 @@ template<class CKey, class CTimestamp>
 inline void CLRUKTestResourceUtilityManager<CKey, CTimestamp>::
 Term()
 {
+    //  Free up all the stored entries.
 
     for ( size_t i = 0; i <= m_K; i++ )
     {
@@ -221,18 +239,21 @@ Term()
         }
     }
 
+    //  Free up all the stored hash entries.
 
     for ( ResourceHashMapIter iter = m_rhmCached.begin(); iter != m_rhmCached.end(); iter++ )
     {
         delete iter->second;
     }
 
+    //  Free up all the stored history entries.
 
     for ( ResourceHistoryHashMapIter iter = m_rhhmHistory.begin(); iter != m_rhhmHistory.end(); iter++ )
     {
         delete iter->second;
     }
 
+    //  Empty containters.
 
     m_rhmCached.clear();
     m_rhhmHistory.clear();
@@ -248,6 +269,7 @@ ErrCacheResource( const CKey key, CTimestamp timestamp, const bool fUseHistory )
 {
     ResourceHashMapIter iterCached = m_rhmCached.find( key );
 
+    //  It must not be already cached.
 
     if ( iterCached != m_rhmCached.end() )
     {
@@ -265,6 +287,7 @@ ErrCacheResource( const CKey key, CTimestamp timestamp, const bool fUseHistory )
 
     timestamp = TSScaleTimestamp( timestamp );
 
+    //  Try to use the history record.
 
     ResourceEntry* presEntry = NULL;
 
@@ -273,6 +296,7 @@ ErrCacheResource( const CKey key, CTimestamp timestamp, const bool fUseHistory )
 
     if ( iterHistory != m_rhhmHistory.end() )
     {
+        //  Recover from history.
 
         presEntry = iterHistory->second;
         RESMGRLRUKTESTAssert( presEntry != NULL );
@@ -284,6 +308,7 @@ ErrCacheResource( const CKey key, CTimestamp timestamp, const bool fUseHistory )
     }
     else
     {
+        //  Allocate a new entry.
         
         presEntry = new ResourceEntry;
 
@@ -317,6 +342,7 @@ ErrTouchResource( const CKey key, CTimestamp timestamp )
 {
     ResourceHashMapIter iterCached = m_rhmCached.find( key );
 
+    //  It must be already cached.
 
     if ( iterCached == m_rhmCached.end() )
     {
@@ -348,6 +374,7 @@ ErrMarkResourceAsSuperCold( const CKey key )
 {
     ResourceHashMapIter iterCached = m_rhmCached.find( key );
 
+    //  It must be already cached.
 
     if ( iterCached == m_rhmCached.end() )
     {
@@ -359,6 +386,7 @@ ErrMarkResourceAsSuperCold( const CKey key )
     ResourceHashEntry* const presHashEntry = iterCached->second;
     RESMGRLRUKTESTAssert( presHashEntry != NULL );
 
+    //  Perhaps the page is already super-colded.
 
     RESMGRLRUKTESTAssert( presHashEntry->iEvictIndex <= m_K );
     if ( presHashEntry->iEvictIndex == 0 )
@@ -366,6 +394,7 @@ ErrMarkResourceAsSuperCold( const CKey key )
         return errSuccess;
     }
 
+    //  We'll need to move across indexes.
 
     ResourceEntry* const presEntry = presHashEntry->iterevict->second;
     RESMGRLRUKTESTAssert( presEntry != NULL );
@@ -384,6 +413,7 @@ ErrEvictResource( const CKey key )
 {
     ResourceHashMapIter iterCached = m_rhmCached.find( key );
 
+    //  Check if the resource is cached.
 
     if ( iterCached == m_rhmCached.end() )
     {
@@ -444,11 +474,13 @@ UpdateEntryAndCache_(
     RESMGRLRUKTESTAssert( presEntry != NULL );
     RESMGRLRUKTESTAssert( !( fCorrelatedTouch && fSupercold ) );
 
+    //  Update the entry if applicable.
 
     if ( !fSupercold )
     {
         if ( !fCorrelatedTouch )
         {
+            //  Add any additional deltas originated from previous correlated touches.
 
             if ( ( presEntry->kness > 0 ) && ( m_K > 1 ) )
             {
@@ -482,9 +514,11 @@ UpdateEntryAndCache_(
         presEntry->tsLast = timestamp;
     }
 
+    //  Determine which index will receive the entry.
 
     presHashEntry->iEvictIndex = fSupercold ? 0 : presEntry->kness;
 
+    //  Insert it into the appropriate index.
 
     presHashEntry->iterevict = m_rgeiCached[ presHashEntry->iEvictIndex ]->insert(
         std::pair<CTimestamp, ResourceEntry*>(
@@ -497,6 +531,7 @@ inline void
 CLRUKTestResourceUtilityManager<CKey, CTimestamp>::
 EvictResource_( ResourceHashEntry* presHashEntry, ResourceEntry* presEntry, const bool fEvictExplicit )
 {
+    //  Either we've already handled the hash or the indexes.
 
     if ( presHashEntry != NULL )
     {
@@ -523,6 +558,10 @@ EvictResource_( ResourceHashEntry* presHashEntry, ResourceEntry* presEntry, cons
     RESMGRLRUKTESTAssert( presEntry != NULL );
     RESMGRLRUKTESTAssert( presEntry->kness > 0 );
 
+    //  Do not add to history if:
+    //    o It's coming from the supercold queue;
+    //    o We are evicting explicitly;
+    //    o K is 1 (i.e., nothing useful about history).
 
     if ( ( m_K  == 1 ) || ( presHashEntry->iEvictIndex == 0 ) || fEvictExplicit )
     {
@@ -535,6 +574,7 @@ EvictResource_( ResourceHashEntry* presHashEntry, ResourceEntry* presEntry, cons
         m_rhhmHistory.insert( std::pair<CKey, ResourceEntry*>( presEntry->key, presEntry ) );
     }
 
+    //  Always delete the hash entry.
 
     delete presHashEntry;
 }
@@ -544,6 +584,7 @@ inline typename CLRUKTestResourceUtilityManager<CKey, CTimestamp>::ERR
 CLRUKTestResourceUtilityManager<CKey, CTimestamp>::
 ErrEvictNextResource_( CKey* const pkey, CTimestamp timestamp, const bool fEvict )
 {
+    //  We may not have anything to evict.
 
     if ( m_rhmCached.empty() )
     {
@@ -554,6 +595,9 @@ ErrEvictNextResource_( CKey* const pkey, CTimestamp timestamp, const bool fEvict
 
     timestamp = TSScaleTimestamp( timestamp );
 
+    //  Pages touched within the correlation interval are not evicted,
+    //  except if they are in the super-cold queue. The second pass will
+    //  drop this requirement if the first pass can't find anything.
 
     bool fEvictCorrelated = false;
     ResourceEntry* presEntry = NULL;
@@ -562,12 +606,14 @@ ErrEvictNextResource_( CKey* const pkey, CTimestamp timestamp, const bool fEvict
     {
         for ( size_t i = 0; ( ( i <= m_K ) && ( presEntry == NULL ) ); i++ )
         {
+            //  If we've already gone through the correlated cycle, we've already checked super-cold.
 
             if ( ( i == 0 ) && fEvictCorrelated )
             {
                 continue;
             }
 
+            //  Supercold queue is an exception.
 
             const bool fEvictCorrelatedT = fEvictCorrelated || ( i == 0 );
 
@@ -606,5 +652,5 @@ ErrEvictNextResource_( CKey* const pkey, CTimestamp timestamp, const bool fEvict
     return errSuccess;
 }
 
-#endif
+#endif  //  _RESMGRLRUKTEST_HXX_INCLUDED
 

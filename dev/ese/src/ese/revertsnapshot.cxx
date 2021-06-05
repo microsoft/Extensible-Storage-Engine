@@ -98,6 +98,7 @@ LOCAL BOOL FRBSCheckForDbConsistency(
     const SIGNATURE* const psignDbHdrFlushFromRBS,
     const SIGNATURE* const psignRBSHdrFlushFromRBS )
 {
+    // At least one of the signatures must match and not be uninitialized.
     return ( ( FSIGSignSet( psignDbHdrFlushFromDb ) && 
                memcmp( psignDbHdrFlushFromDb, psignDbHdrFlushFromRBS, sizeof( SIGNATURE ) ) == 0 ) ||
              ( FSIGSignSet( psigRBSHdrFlushFromDb ) &&
@@ -165,10 +166,13 @@ HandleError:
         delete pffapi;
     }
 
+    //OSTrace( JET_tracetagRBSCleaner, OSFormat( "\tErrRBSGetDirSize: Directory size (%ls) - %ld, Error - %d\n",  wszDirPath, *pcbSize, err ) );
     return err;
 }
 
-
+/*  Deletes RBS file for a specific RBS generation.
+   caller has to make sure szDir has enough space for appending "*"
+/**/
 LOCAL ERR ErrRBSDeleteAllFiles( IFileSystemAPI *const pfsapi, PCWSTR wszDir, PCWSTR wszFilter, BOOL fRecursive )
 {
     ERR             err     = JET_errSuccess;
@@ -176,6 +180,7 @@ LOCAL ERR ErrRBSDeleteAllFiles( IFileSystemAPI *const pfsapi, PCWSTR wszDir, PCW
 
     Assert( LOSStrLengthW( wszDir ) + 1 + 1 < IFileSystemAPI::cchPathMax );
 
+    //OSTrace( JET_tracetagRBSCleaner, OSFormat( "\tRBSCleaner delete all files (%ls)\n",  wszDir ) );
 
     WCHAR wszPath[ IFileSystemAPI::cchPathMax ];
     Call( ErrOSStrCbCopyW( wszPath, sizeof( wszPath ), wszDir ) );
@@ -190,6 +195,7 @@ LOCAL ERR ErrRBSDeleteAllFiles( IFileSystemAPI *const pfsapi, PCWSTR wszDir, PCW
         Call( ErrOSStrCbAppendW( wszPath, sizeof( wszPath ), wszFilter ) );
     }
 
+    //  iterate over all files in this directory
     Call( pfsapi->ErrFileFind( wszPath, &pffapi ) );
     while ( ( err = pffapi->ErrNext() ) == JET_errSuccess )
     {
@@ -207,12 +213,14 @@ LOCAL ERR ErrRBSDeleteAllFiles( IFileSystemAPI *const pfsapi, PCWSTR wszDir, PCW
         wszDirT[0] = 0;
         Call( pfsapi->ErrPathBuild( wszDirT, wszFileT, wszExtT, wszFileNameT ) );
 
-        
+        /* not . , and .. and not temp
+        /**/
         if (    wcscmp( wszFileNameT, L"." ) != 0 &&
                 wcscmp( wszFileNameT, L".." ) != 0 )
         {
             if ( !fFolder )
             {
+                //OSTrace( JET_tracetagRBSCleaner, OSFormat( "\tRBSCleaner deleting file (%ls)\n",  wszFileName ) );
                 Call( pfsapi->ErrFileDelete( wszFileName ) );
             }
             else if ( fRecursive )
@@ -232,7 +240,8 @@ LOCAL ERR ErrRBSDeleteAllFiles( IFileSystemAPI *const pfsapi, PCWSTR wszDir, PCW
     err = JET_errSuccess;
 
 HandleError:
-    
+    /*  assert restored szDir
+    /**/
     Assert( wszDir[LOSStrLengthW(wszDir)] != L'*' );
 
     if ( pffapi != NULL )
@@ -240,6 +249,7 @@ HandleError:
         delete pffapi;
     }
 
+    //OSTrace( JET_tracetagRBSCleaner, OSFormat( "\tErrRBSDeleteAllFiles error code %d\n",  err ) );
     return err;
 }
 
@@ -254,6 +264,7 @@ LOCAL ERR ErrRBSDirPrefix(
     ERR err = JET_errSuccess;
     Call( ErrOSStrCbCopyW( wszRBSDirPrefix, cbDirPrefix, wszRBSDirBase ) );
 
+    // We will use log base name along with static snapshot directory base name to generate each snapshot directory.
     Call( ErrOSStrCbAppendW( wszRBSDirPrefix, cbDirPrefix, wszLogBaseName ) );
 
 HandleError:
@@ -284,9 +295,11 @@ LOCAL ERR ErrRBSGetLowestAndHighestGen_(
 
     Call( ErrRBSDirPrefix( wszLogBaseName, wszRBSDirPrefix, sizeof( wszRBSDirPrefix ) ) );
 
+    // We will append the snapshot directory base name to the directory path for snapshots and search for all snapshot directories in the given path.
     Call( ErrOSStrCbAppendW( wszSearchPath, sizeof( wszSearchPath ), wszRBSDirPrefix ) );
     Call( ErrOSStrCbAppendW( wszSearchPath, sizeof( wszSearchPath ), L"*" ) );
 
+    //  iterate over all files in this directory
     Call( pfsapi->ErrFileFind( wszSearchPath, &pffapi ) );
     while ( ( err = pffapi->ErrNext() ) == JET_errSuccess )
     {
@@ -298,8 +311,11 @@ LOCAL ERR ErrRBSGetLowestAndHighestGen_(
         Call( pffapi->ErrPath( wszFileName ) );
         Call( pfsapi->ErrPathParse( wszFileName, wszDirT, wszFileT, wszExtT ) );
 
+        // Snapshot directory wouldn't have any extension.
         if ( 0 == LOSStrLengthW( wszExtT ) )
         {
+            // We can reuse the LG gen generation method to extract the snapshot generation from the snapshot directory name. 
+            // TODO SOMEONE: Change this if we our naming convention is going to be different. Naming is specific to Log as well so may be rename or duplicate code?
             err = LGFileHelper::ErrLGGetGeneration( pfsapi, wszFileT, wszRBSDirPrefix, &lRBSGen, wszExtT, &cCurrentRBSDigits);
 
             if ( lRBSGen < *rbsGenMin || *rbsGenMin == 0 )
@@ -324,13 +340,14 @@ HandleError:
     return err;
 }
 
+// TODO SOMEONE: Taken from LGFileHelper::LGSzLogIdAppend. Can't just reuse due to some asserts on base name. We can may be consider modifying that or just create a new one.
 const WCHAR rgwchRBSFileDigits[] =
 {
     L'0', L'1', L'2', L'3', L'4', L'5', L'6', L'7',
     L'8', L'9', L'A', L'B', L'C', L'D', L'E', L'F',
 };
 const LONG lRBSFileBase = sizeof( rgwchRBSFileDigits )/sizeof( rgwchRBSFileDigits[0] );
-const LONG cchRBSDigits = 8;
+const LONG cchRBSDigits = 8; // should we make this configurable?
 
 LOCAL VOID RBSSzIdAppend( __inout_bcount_z( cbFName ) PWSTR wszRBSFileName, size_t cbFName, LONG rbsGeneration )
 {
@@ -339,17 +356,17 @@ LOCAL VOID RBSSzIdAppend( __inout_bcount_z( cbFName ) PWSTR wszRBSFileName, size
 
     Assert( wszRBSFileName );
 
-    ichBase = wcslen( wszRBSFileName );
+    ichBase = wcslen( wszRBSFileName ); // wcslen(wszLogFileName) for log base name or res log base size
 
     Assert( cbFName >= ( ( ichBase+cchRBSDigits+1 )*sizeof(WCHAR) ) );
 
-    ich = cchRBSDigits + ichBase - 1;
+    ich = cchRBSDigits + ichBase - 1;  //  + ichBase name's size - 1 for zero offset
 
     if ( ( sizeof(WCHAR)*( cchRBSDigits+ichBase+1 ) ) > cbFName )
     {
         AssertSz(false, "Someone passed in a path too short for RBSSzIdAppend(), we'll recover, though I don't know how well");
         if ( cbFName >= sizeof(WCHAR) )
-        {
+        { // lets at least make sure it is NUL terminated.
             OSStrCbAppendW( wszRBSFileName, cbFName, L"" );
         }
         return;
@@ -382,6 +399,7 @@ LOCAL ERR ErrRBSFilePathForGen_(
     Assert ( wszRBSFilePath );
     Assert ( wszRBSDirPath );
 
+    // 2 for folder normalization and 1 for delimiter.
     Assert ( ( LOSStrLengthW( cwszPath ) + LOSStrLengthW( wszRBSDirBase ) + LOSStrLengthW( cwszRBSBaseName ) + cchRBSDigits + 2 + 1) * sizeof(WCHAR) < cbDirPath );
 
     Call( ErrOSStrCbCopyW( wszRBSDirPath, cbDirPath, cwszPath ) );
@@ -390,13 +408,16 @@ LOCAL ERR ErrRBSFilePathForGen_(
     Call( ErrOSStrCbAppendW( wszRBSDirPath, cbDirPath, wszRBSDirBase ) );
     Call( ErrOSStrCbAppendW( wszRBSDirPath, cbDirPath, cwszRBSBaseName ) );
 
+    // Fill in the digits part ( either XXXXX | XXXXXXXX ) ...
     RBSSzIdAppend ( wszRBSDirPath, cbDirPath, lRBSGen );
 
     Call( pfsapi->ErrPathFolderNorm( wszRBSDirPath, cbDirPath ) );
 
+    // +1 for null character
     Assert ( sizeof( wszFileName ) > ( LOSStrLengthW( cwszRBSBaseName ) + cchRBSDigits + LOSStrLengthW( wszRBSExt ) + 1 ) * sizeof(WCHAR) ); 
     Call( ErrOSStrCbCopyW( wszFileName, sizeof( wszFileName ), cwszRBSBaseName ) );
     
+    // Fill in the digits part for the file name ( either XXXXX | XXXXXXXX ) ...
     RBSSzIdAppend ( wszFileName, sizeof( wszFileName ), lRBSGen );
 
     Assert ( cbFilePath > ( LOSStrLengthW( wszRBSDirPath ) + LOSStrLengthW( wszFileName ) + LOSStrLengthW( wszRBSExt ) + 1 ) * sizeof(WCHAR) );
@@ -441,6 +462,7 @@ LOCAL ERR ErrRBSInitAttachInfo(
     prbsattachinfo->SetLGenMinRequired( lGenMinRequired );
     prbsattachinfo->SetLGenMaxRequired( lGenMaxRequired );
 
+    // Copy corresponding db signature.
     UtilMemCpy( &prbsattachinfo->signDb, &signDb, sizeof( SIGNATURE ) );
     UtilMemCpy( &prbsattachinfo->signDbHdrFlush, &signDbHdrFlush, sizeof( SIGNATURE ) );
 
@@ -462,6 +484,7 @@ LOCAL VOID RBSLoadRequiredGenerationFromFMP( INST* pinst, _Out_ LONG* plgenLow, 
     *plgenLow = 0;
     *plgenHigh = 0;
 
+    // Find the min and max generation required across all the databases in the instance.
     for ( DBID dbid = dbidUserLeast; dbid < dbidMax; ++dbid )
     {
         IFMP        ifmp    = pinst->m_mpdbidifmp[ dbid ];
@@ -538,9 +561,11 @@ LOCAL ERR ErrRBSCopyRequiredLogs_(
             ( UlParam( pinst, JET_paramLegacyFileNames ) & JET_bitESE98FileNames ) ? wszOldLogExt : wszNewLogExt,
             ( UlParam( pinst, JET_paramLegacyFileNames ) & JET_bitEightDotThreeSoftCompat ) ? 0 : 8 ) );       
 
+        // Last log may need to be copied from exx.log
         if ( lGenToCopy == lLogGenMaxReq &&
             ErrUtilPathExists( pfsapi, wszLogFilePath ) == JET_errFileNotFound )
         {
+            // We don't want to look for current and max log is missing return FileNotFound
             if ( !fCopyCurrentIfMaxMissing )
             {
                 continue;
@@ -636,18 +661,22 @@ LOCAL ERR ErrRBSLoadRbsGen(
 
     Call( ErrUtilReadShadowedHeader( pinst, pinst->m_pfsapi, *ppfapiRBS, (BYTE*) prbshdr, sizeof( RBSFILEHDR ), -1, urhfNoAutoDetectPageSize ) );
 
+    // check filetype
     if (  JET_filetypeSnapshot != prbshdr->rbsfilehdr.le_filetype )
     {
+        // not a rbs file
         Call( ErrERRCheck( JET_errFileInvalidType ) );
     }
 
     if ( prbshdr->rbsfilehdr.le_ulMajor != ulRBSVersionMajor || prbshdr->rbsfilehdr.le_ulMinor > ulRBSVersionMinor )
     {
+        // wrong version
         Call( ErrERRCheck( JET_errBadRBSVersion ) );
     }
 
     if ( !FSIGSignSet( &prbshdr->rbsfilehdr.signRBSHdrFlush ) )
     {
+        // RBS signature not set (intentionally done to invalidate RBS).
         Call( ErrERRCheck( JET_errRBSInvalidSign ) );
     }
 
@@ -703,6 +732,7 @@ LOCAL ERR ErrRBSPerformLogChecks(
 
     for ( LONG lgen = prbsfilehdr->rbsfilehdr.le_lGenMaxLogCopied; lgen >= prbsfilehdr->rbsfilehdr.le_lGenMinLogCopied && lgen > 0; --lgen )
     {
+        // Check if the RBS log directory has all the required logs
         Call( LGFileHelper::ErrLGMakeLogNameBaselessEx(
             wszRBSLogGenPath,
             sizeof( wszRBSLogGenPath ),
@@ -718,6 +748,7 @@ LOCAL ERR ErrRBSPerformLogChecks(
 
         if ( err == JET_errFileNotFound )
         {
+            // If we are checking the max log gen, it is possible it was the E00.log at the time it was copied.
             if ( lgen == prbsfilehdr->rbsfilehdr.le_lGenMaxLogCopied )
             {
                 Call( LGFileHelper::ErrLGMakeLogNameBaselessEx(
@@ -744,6 +775,8 @@ LOCAL ERR ErrRBSPerformLogChecks(
 
         if ( fPerformDivergenceCheck && lgen == prbsfilehdr->rbsfilehdr.le_lGenMaxLogCopied )
         {
+            // Do divergence check with the max required log from the snapshot with corresponding log in log directory
+            // If max required is missing either in the log directory or snapshot directory we will fail as we don't know if we are diverged then.
             Call( LGFileHelper::ErrLGMakeLogNameBaselessEx(
                 wszMaxReqLogPathActual,
                 sizeof( wszMaxReqLogPathActual ),
@@ -757,6 +790,7 @@ LOCAL ERR ErrRBSPerformLogChecks(
 
             err = ErrUtilPathExists( pfsapi, wszMaxReqLogPathActual );
 
+            // The corresponding log is not available in log directory, so we can't confirm if there is divergence.
             if ( err == JET_errFileNotFound )
             {
                 Error( ErrERRCheck( JET_errRBSCannotDetermineDivergence ) );
@@ -809,7 +843,8 @@ ERR CRevertSnapshot::ErrRBSCreateOrLoadRbsGen(
     Call( ErrRBSAbsRootDir( m_pinst, wszAbsDirRootPath, sizeof( wszAbsDirRootPath ) ) );
     Call( ErrRBSFilePathForGen_( wszAbsDirRootPath, wszBaseName, m_pinst->m_pfsapi, wszRBSAbsDirPath, sizeof( wszRBSAbsDirPath ), wszRBSAbsFilePath, cbOSFSAPI_MAX_PATHW, lRBSGen ) );
 
-    Assert ( sizeof( wszRBSAbsLogPath ) > ( LOSStrLengthW( wszRBSAbsDirPath ) + LOSStrLengthW( wszRBSLogDir ) + 1 + 1 ) * sizeof(WCHAR) );
+    // Generate Logs directory for snapshot.
+    Assert ( sizeof( wszRBSAbsLogPath ) > ( LOSStrLengthW( wszRBSAbsDirPath ) + LOSStrLengthW( wszRBSLogDir ) + 1 + 1 ) * sizeof(WCHAR) ); // + 2 for normalization and delimiter
     Call( ErrOSStrCbCopyW( wszRBSAbsLogPath, sizeof( wszRBSAbsLogPath ), wszRBSAbsDirPath ) );
     Call( ErrOSStrCbAppendW( wszRBSAbsLogPath, sizeof( wszRBSAbsLogPath ), wszRBSLogDir ) );
     Call( m_pinst->m_pfsapi->ErrPathFolderNorm( wszRBSAbsLogPath, sizeof( wszRBSAbsLogPath ) ) );
@@ -826,8 +861,12 @@ ERR CRevertSnapshot::ErrRBSCreateOrLoadRbsGen(
 
     if ( !fRBSFileExists )
     {
+        // TODO SOMEONE: Check how is this being used and what params to set.
         TraceContextScope tcHeader( iorpRBS, iorsHeader );
 
+        // TODO SOMEONE: If this is the first snapshot then it is expected. If not, we got interrupted after creating the snapshot directory and before creating the snapshot file. 
+        // How do we handle the interruption case? Need to consider snapshot rolling failure scenarios.
+        // For now just create the snapshot file if doesn't exist.
         Call( CIOFilePerf::ErrFileCreate(
                         m_pinst->m_pfsapi,
                         m_pinst,
@@ -839,6 +878,7 @@ ERR CRevertSnapshot::ErrRBSCreateOrLoadRbsGen(
 
         fRBSFileCreated = true;
 
+        // Set size to store header and shadow header.
         Call( m_pfapiRBS->ErrSetSize( *tcHeader, cbDefaultFileSize, fTrue, qosIONormal ) );
 
         RBSInitFileHdr( lRBSGen, m_prbsfilehdrCurrent, tmPrevGen );
@@ -888,6 +928,8 @@ HandleError:
     return err;
 }
 
+// Find the RBSAttachInfo corresponding to the given database name in our RBS file header
+// If rbs attach info not found we will return the first free slot.
 LOCAL ERR ErrRBSFindAttachInfoForDBName( _In_ RBSFILEHDR* prbsfilehdrCurrent, _In_ PCWSTR wszDatabaseName, _Out_ RBSATTACHINFO** prbsattachinfo )
 {
     Assert( prbsattachinfo );
@@ -904,6 +946,7 @@ LOCAL ERR ErrRBSFindAttachInfoForDBName( _In_ RBSFILEHDR* prbsfilehdrCurrent, _I
             break;
         }
         
+        // Found the corresponding attach info.
         CAutoWSZ wszDatabase;
         CallR( wszDatabase.ErrSet( (*prbsattachinfo)->wszDatabaseName ) );
         if ( UtilCmpFileName( wszDatabaseName, wszDatabase ) == 0 )
@@ -934,6 +977,9 @@ LOCAL ERR ErrRBSRollAttachInfo(
 }
 
 
+// TODO SOMEONE: For now we will just go through all the dbs currently part of this instance. 
+// If some were part of previous instance, but they aren't part of this one anymore, 
+// they will be dropped as we would lack certain information required for RBS consistency.
 LOCAL ERR ErrRBSRollAttachInfos( INST* pinst, RBSFILEHDR* prbsfilehdrCurrent, RBSFILEHDR* prbsfilehdrPrev, BOOL fPrevRBSValid, BOOL fInferFromRstmap )
 {
     Assert( pinst );
@@ -984,8 +1030,12 @@ HandleError:
     return err;
 }
 
+// static
 VOID *CSnapshotBuffer::s_pReserveBuffer = NULL;
 
+//  ================================================================
+//                  CRevertSnapshot
+//  ================================================================
 
 CRevertSnapshot::CRevertSnapshot( __in INST* const pinst )
     : CZeroInit( sizeof( CRevertSnapshot ) ),
@@ -1072,8 +1122,10 @@ ERR CRevertSnapshot::ErrSetDbtimeForFmp( FMP *pfmp, DBTIME dbtime )
     return ErrUtilWriteRBSHeaders( m_pinst, m_pinst->m_pfsapi, NULL, m_prbsfilehdrCurrent, m_pfapiRBS );
 }
 
+// Used to set file api for dumping snapshot
 ERR CRevertSnapshot::ErrSetRBSFileApi( __in IFileAPI *pfapiRBS )
 {
+    // Make sure it hasn't already been initialized to something else.
     Assert( !m_fInitialized );
     Assert( !m_fInvalid );
     Assert( m_pfapiRBS == NULL );
@@ -1094,6 +1146,7 @@ ERR CRevertSnapshot::ErrSetRBSFileApi( __in IFileAPI *pfapiRBS )
 
     Alloc( m_prbsfilehdrCurrent = (RBSFILEHDR *)PvOSMemoryPageAlloc( sizeof(RBSFILEHDR), NULL ) );    
 
+    // Load the header in the snapshot based on the set file api
     Call( ErrUtilReadShadowedHeader( m_pinst, m_pinst->m_pfsapi, m_pfapiRBS, (BYTE*) m_prbsfilehdrCurrent, sizeof( RBSFILEHDR ), -1, urhfNoAutoDetectPageSize | urhfReadOnly | urhfNoEventLogging ) );
     m_fInitialized = fTrue;
 
@@ -1103,7 +1156,10 @@ HandleError:
 
 ERR CRevertSnapshot::ErrRBSInit( BOOL fRBSCreateIfRequired )
 {    
+    //OSTrace( JET_tracetagRBS, OSFormat( "\tErrRBSInit(DBLogPath - %ws, RBSEnabled - %d)\n", SzParam( m_pinst, JET_paramRBSFilePath ), BoolParam( m_pinst, JET_paramEnableRBS ) ) );
     
+    // TODO SOMEONE: Revisit.
+    // For now, we will not init if revert snapshot hasn't been enabled. Enable/disable is only allowed during db attach/create
     if ( !BoolParam( m_pinst, JET_paramEnableRBS ) || m_pinst->m_plog->FLogDisabled() )
     {
         return JET_errSuccess;
@@ -1120,6 +1176,7 @@ ERR CRevertSnapshot::ErrRBSInit( BOOL fRBSCreateIfRequired )
 
     Call( ErrRBSInitPaths_( m_pinst, &m_wszRBSAbsRootDirPath, &m_wszRBSBaseName ) );
 
+    // Create the snapshot directory root path if not already exists. 
     Call( ErrUtilCreatePathIfNotExist( m_pinst->m_pfsapi, m_wszRBSAbsRootDirPath, wszAbsDirRootPath, sizeof ( wszAbsDirRootPath ) ) );
     Call( m_pinst->m_pfsapi->ErrPathFolderNorm( wszAbsDirRootPath, sizeof( wszAbsDirRootPath ) ) );
 
@@ -1130,8 +1187,10 @@ ERR CRevertSnapshot::ErrRBSInit( BOOL fRBSCreateIfRequired )
 
     Call( ErrResetHdr() );
 
+    // We don't have any snapshot directory. Lets create one if allowed.
     if ( rbsGenMax == 0 )
     {
+        // We should not create snapshot if not allowed.
         if ( !fRBSCreateIfRequired )
         {
             RBSLogCreateSkippedEvent( m_pinst, SzParam( m_pinst, JET_paramRBSFilePath ), errRBSRequiredRangeTooLarge, JET_errFileNotFound );
@@ -1143,6 +1202,8 @@ ERR CRevertSnapshot::ErrRBSInit( BOOL fRBSCreateIfRequired )
 
     err = ErrRBSCreateOrLoadRbsGen( rbsGenMax, defaultLogTime, wszRBSAbsFilePath, wszRBSAbsLogDirPath );
     
+    // Current snapshot is corrupted. We can't use any snapshot beyond this point.
+    // We will start a fresh snapshot and let RBSCleaner cleanup any of the older snapshots.
     if ( err == JET_errReadVerifyFailure || err == JET_errFileInvalidType || err == JET_errBadRBSVersion || err == JET_errRBSInvalidSign )
     {
         Call( ErrResetHdr() );
@@ -1155,6 +1216,7 @@ ERR CRevertSnapshot::ErrRBSInit( BOOL fRBSCreateIfRequired )
 
         if ( fRBSCreateIfRequired )
         {
+            // Increase the gen by 1.
             Call( ErrRBSCreateOrLoadRbsGen( rbsGenMax + 1, defaultLogTime, wszRBSAbsFilePath, wszRBSAbsLogDirPath ) );
         }
         else
@@ -1187,6 +1249,7 @@ ERR CRevertSnapshot::ErrRBSInit( BOOL fRBSCreateIfRequired )
     Alloc( m_pActiveBuffer = new (&m_cresRBSBuf) CSnapshotBuffer( m_cNextActiveSegment, &m_cresRBSBuf ) );
     Call( m_pActiveBuffer->ErrAllocBuffer() );
 
+    // Pre-allocate reserve buffer, just in case, it is needed in future.
     CSnapshotBuffer::PreAllocReserveBuffer();
 
     m_fInitialized = fTrue;
@@ -1194,6 +1257,7 @@ ERR CRevertSnapshot::ErrRBSInit( BOOL fRBSCreateIfRequired )
     Assert( m_prbsfilehdrCurrent );
     Assert( m_prbsfilehdrCurrent->rbsfilehdr.le_lGeneration > 0 );
 
+    // tmPrevGen is not set. So should be invalid.
     if ( m_pinst->m_prbscleaner && !m_prbsfilehdrCurrent->rbsfilehdr.tmPrevGen.FIsSet() )
     {
         m_pinst->m_prbscleaner->SetFirstValidGen( m_prbsfilehdrCurrent->rbsfilehdr.le_lGeneration );
@@ -1214,6 +1278,7 @@ ERR CRevertSnapshot::ErrRBSInvalidate()
 {
     Assert( FInitialized() );
 
+    // Reset RBS on all the FMPs before we mark RBS as invalid.
     for ( DBID dbid = dbidUserLeast; dbid < dbidMax; ++dbid )
     {
         IFMP        ifmp    = m_pinst->m_mpdbidifmp[ dbid ];
@@ -1227,6 +1292,7 @@ ERR CRevertSnapshot::ErrRBSInvalidate()
 
     m_fInvalid = fTrue;
 
+    // Reset signature so that next time we load the RBS is considered invalid.
     SIGResetSignature( &m_prbsfilehdrCurrent->rbsfilehdr.signRBSHdrFlush );
     return ErrUtilWriteRBSHeaders( m_pinst, m_pinst->m_pfsapi, NULL, m_prbsfilehdrCurrent, m_pfapiRBS );
 }
@@ -1244,6 +1310,7 @@ VOID CRevertSnapshot::RBSLogSpaceUsage()
     _int64 ftCurrent    = UtilGetCurrentFileTime();
     LONG   lGenCurrent  = m_pinst->m_plog->LGGetCurrentFileGenNoLock();
 
+    // Initialize if not yet initialized.
     if ( m_ftSpaceUsageLastLogged == 0 )
     {
         m_ftSpaceUsageLastLogged        = ftCurrent;
@@ -1252,6 +1319,7 @@ VOID CRevertSnapshot::RBSLogSpaceUsage()
         return;
     }
 
+    // Enough time has passed. Log the space usage stats.
     if ( UtilConvertFileTimeToSeconds( ftCurrent - m_ftSpaceUsageLastLogged ) > csecSpaceUsagePeriodicLog )
     {
         QWORD cbSpaceGrowth = m_prbsfilehdrCurrent->rbsfilehdr.le_cbLogicalFileSize - m_cbFileSizeSpaceUsageLastRun;
@@ -1303,13 +1371,17 @@ ERR CRevertSnapshot::ErrRBSRecordDbAttach( __in FMP* const pfmp )
 {
     ERR err                     = JET_errSuccess;
 
+    //OSTrace( JET_tracetagRBS, OSFormat( "\tErrRBSRecordDbAttach(DBName - %ls, RBSEnabled - %d, m_fInitialized - %d, m_fInvalid - %d)\n", pfmp->WszDatabaseName(), BoolParam( m_pinst, JET_paramEnableRBS ), m_fInitialized, m_fInvalid ) );
 
+    // If database doesn't support the revert snapshot format version, the revert snapshot shouldn't have been initialized to begin with.
+    // TODO SOMEONE: Is it possible for a newly created db to not support even though existing databases support?
     if ( pfmp->ErrDBFormatFeatureEnabled( JET_efvRevertSnapshot ) < JET_errSuccess )
     {
         Assert( !m_fInitialized );
         return JET_errSuccess;
     }
 
+    // Snapshot has been marked as invalid. We will not allow any attach.
     if ( m_fInvalid )
     {
         return JET_errSuccess;
@@ -1327,8 +1399,10 @@ ERR CRevertSnapshot::ErrRBSRecordDbAttach( __in FMP* const pfmp )
     {
     PdbfilehdrReadOnly pdbfilehdr    = pfmp->Pdbfilehdr();
 
+    // FMP should have been initialized from Rstmap unless this is a newly create db in which case we will attach it to snapshot as part of this call.
     if ( err == JET_errSuccess )
     {
+        // If it were inconsistent or if there was signature mismatch, should have been caught and snapshot rolled in ErrRBSInitDBFromRstmap
         Assert( memcmp( &pdbfilehdr->signDb, &prbsattachinfo->signDb, sizeof( SIGNATURE ) ) == 0 );
         Assert( FRBSCheckForDbConsistency( &pdbfilehdr->signDbHdrFlush, &pdbfilehdr->signRBSHdrFlush, &prbsattachinfo->signDbHdrFlush,  &m_prbsfilehdrCurrent->rbsfilehdr.signRBSHdrFlush ) );
     }
@@ -1346,6 +1420,7 @@ ERR CRevertSnapshot::ErrRBSRecordDbAttach( __in FMP* const pfmp )
         }
         Assert( prbsattachinfo->FPresent() == 0 );
 
+        //OSTrace( JET_tracetagRBS, OSFormat( "\tErrRBSRecordDbAttach copied logs(DBName - %ls, Min - %ld, Max - %ld)\n", pfmp->WszDatabaseName(), (LONG) pdbfilehdr->le_lGenMinRequired, (LONG) pdbfilehdr->le_lGenMaxRequired ) );
 
         Call( ErrRBSInitAttachInfo( prbsattachinfo, pfmp->WszDatabaseName(), pdbfilehdr->le_lGenMinRequired, pdbfilehdr->le_lGenMaxRequired, 0, pdbfilehdr->signDb, pdbfilehdr->signDbHdrFlush ) );
         Call( ErrUtilWriteRBSHeaders( m_pinst, m_pinst->m_pfsapi, NULL, m_prbsfilehdrCurrent, m_pfapiRBS ) );
@@ -1360,6 +1435,7 @@ ERR CRevertSnapshot::ErrRBSRecordDbAttach( __in FMP* const pfmp )
     Call( ErrFlushAll() );
 
 HandleError:
+    //OSTrace( JET_tracetagRBS, OSFormat( "\tErrRBSRecordDbAttach Err %d, DBName - %ls\n", err, pfmp->WszDatabaseName() ) );
     return err;
 }
 
@@ -1377,6 +1453,7 @@ ERR CRevertSnapshot::ErrRBSInitDBFromRstmap( __in const RSTMAP* const prstmap, L
 
     ERR err                     = JET_errSuccess;
 
+    //OSTrace( JET_tracetagRBS, OSFormat( "\tErrRBSInitDBFromRstmap(DBName - %ls, RBSEnabled - %d )\n", prstmap->wszNewDatabaseName, BoolParam( m_pinst, JET_paramEnableRBS ) ) );
 
     RBSATTACHINFO* prbsattachinfo   = NULL;
 
@@ -1394,6 +1471,7 @@ ERR CRevertSnapshot::ErrRBSInitDBFromRstmap( __in const RSTMAP* const prstmap, L
              Error( ErrERRCheck( JET_errRBSDbMismatch ) );
         }
 
+        //OSTrace( JET_tracetagRBS, OSFormat( "\tErrRBSInitDBFromRstmap Found attach info for %ls\n", prstmap->wszNewDatabaseName ) );
     }
     else
     {
@@ -1407,12 +1485,14 @@ ERR CRevertSnapshot::ErrRBSInitDBFromRstmap( __in const RSTMAP* const prstmap, L
         }
         Assert( prbsattachinfo->FPresent() == 0 );
 
+        //OSTrace( JET_tracetagRBS, OSFormat( "\tErrRBSInitDBFromRstmap copied logs(DBName - %ls, Min - %ld, Max - %ld)\n", prstmap->wszNewDatabaseName, (LONG) prstmap->lGenMinRequired, (LONG) prstmap->lGenMaxRequired ) );
 
         Call( ErrRBSInitAttachInfo( prbsattachinfo, prstmap->wszNewDatabaseName, prstmap->lGenMinRequired, prstmap->lGenMaxRequired, 0, prstmap->signDatabase, prstmap->signDatabaseHdrFlush ) );
         Call( ErrUtilWriteRBSHeaders( m_pinst, m_pinst->m_pfsapi, NULL, m_prbsfilehdrCurrent, m_pfapiRBS ) );
     }
 
 HandleError:
+    //OSTrace( JET_tracetagRBS, OSFormat( "\tErrRBSInitDBFromRstmap Err %d, DBName - %ls\n", err, prstmap->wszNewDatabaseName ) );
     return err;
 }
 
@@ -1420,7 +1500,7 @@ ERR CRevertSnapshot::ErrRBSInitFromRstmap( INST* pinst )
 {
     Assert( pinst );
     Assert( pinst->m_plog );
-    Assert( !pinst->m_prbs );
+    Assert( !pinst->m_prbs ); // revert snapshot shouldn't have been initialized
 
     ERR err = JET_errSuccess;
     LONG lgenLow = 0;
@@ -1432,6 +1512,8 @@ ERR CRevertSnapshot::ErrRBSInitFromRstmap( INST* pinst )
         !BoolParam( pinst, JET_paramEnableRBS ) || 
         !pinst->m_plog->FRBSFeatureEnabledFromRstmap() )
     {
+        // We will skip setting up the revert snapshot if either it is not enabled, not supported or if the required range is too wide.
+        // Enable/disable is only allowed during db attach/create
         return JET_errSuccess;
     }
 
@@ -1460,8 +1542,10 @@ ERR CRevertSnapshot::ErrRBSInitFromRstmap( INST* pinst )
 
         err = prbs->ErrRBSInitDBFromRstmap( prstmap, lgenLow, lgenHigh );
 
+        // If some DB's attach info doesn't match with db info from rst map, we will roll snapshot if allowed.
         if ( err == JET_errRBSDbMismatch )
         {
+            // all prev RBS generations are invalid.
             if ( pinst->m_prbscleaner && prbs->FInitialized() )
             {
                 LONG lRBSCurrentGen = prbs->RBSFileHdr()->rbsfilehdr.le_lGeneration;
@@ -1495,6 +1579,7 @@ HandleError:
         prbs = NULL;
     }
 
+    // No current usable snapshot and we don't want to create a new one at this point. So just return success.
     if ( err == errRBSRequiredRangeTooLarge )
     {
         err = JET_errSuccess;
@@ -1517,6 +1602,7 @@ VOID RBSICompressPreImage(
     INT cbDataCompressedActual = 0;
 
 #if 0
+    // Uncomment to have each page being capture go through data checksum to make sure there is no corruption
     {
     CPAGE cpageT;
     if ( dataToSet.Cb() == cbPage )
@@ -1532,6 +1618,7 @@ VOID RBSICompressPreImage(
     }
 #endif
 
+    // First try dehydration (may already be dehydrated)
     if ( dataToSet.Cb() == cbPage )
     {
         memcpy( pbDataDehydrated, dataToSet.Pv(), dataToSet.Cb() );
@@ -1553,11 +1640,13 @@ VOID RBSICompressPreImage(
     }
 
     CompressFlags compressFlags = compressXpress;
+    // If xpress10 is enabled, use that.
     if ( BoolParam( pinst, JET_paramFlight_EnableXpress10Compression ) )
     {
         compressFlags = CompressFlags( compressFlags | compressXpress10 );
     }
 
+    // Now try xpress compression on (the possibly dehydrated) page
     if ( ErrPKCompressData( dataToSet, compressFlags, pinst, pbDataCompressed, CbPKCompressionBuffer(), &cbDataCompressedActual ) >= JET_errSuccess &&
          cbDataCompressedActual < dataToSet.Cb() )
     {
@@ -1576,6 +1665,7 @@ ERR ErrRBSDecompressPreimage(
 {
     ERR err;
 
+    // First xpress decompression
     if ( fFlags & fRBSPreimageXpress )
     {
         INT cbActual = 0;
@@ -1585,8 +1675,10 @@ ERR ErrRBSDecompressPreimage(
         data.SetCb( cbActual );
     }
 
+    // Then rehydration
     if ( ( fFlags & fRBSPreimageDehydrated ) || data.Cb() < cbPage )
     {
+        // If xpress also done, then data is already in decompression buffer
         if ( fFlags & fRBSPreimageXpress )
         {
             Assert( data.Pv() == pbDataDecompressed );
@@ -1631,7 +1723,9 @@ JETUNITTEST( FRBSCheckForDbConsistency, Test )
     CHECK( FRBSCheckForDbConsistency( &signDbHdrFlushFromDb, &sigRBSHdrFlushFromDb, &signDbHdrFlushFromRBS, &signRBSHdrFlushFromRBS ) == fTrue );
 }
 
+//  ================================================================
 JETUNITTESTDB( RBSPreImageCompression, Dehydration, dwOpenDatabase )
+//  ================================================================
 {
     const ULONG cbPage = 32 * 1024;
     CPAGE cpage, cpageT;
@@ -1654,7 +1748,7 @@ JETUNITTESTDB( RBSPreImageCompression, Dehydration, dwOpenDatabase )
     pbDehydrationBuffer = new BYTE[cbPage];
     pbCompressionBuffer = new BYTE[cbPage];
 
-    PKTermCompression();
+    PKTermCompression();    // Compression is initialized with a smaller page size for db tests
     CHECK( JET_errSuccess == ErrPKInitCompression( cbPage, 1024, cbPage ) );
 
     RBSICompressPreImage( pfmp->Pinst(), pfmp->Ifmp(), cpage.PgnoThis(), cbPage, data, pbDehydrationBuffer, pbCompressionBuffer, &compressionPerformed );
@@ -1690,7 +1784,9 @@ JETUNITTESTDB( RBSPreImageCompression, Dehydration, dwOpenDatabase )
 }
 
 
+//  ================================================================
 JETUNITTESTDB( RBSPreImageCompression, DehydrationAndXpress, dwOpenDatabase )
+//  ================================================================
 {
     const ULONG cbPage = 32 * 1024;
     CPAGE cpage, cpageT;
@@ -1716,7 +1812,7 @@ JETUNITTESTDB( RBSPreImageCompression, DehydrationAndXpress, dwOpenDatabase )
     pbDehydrationBuffer = new BYTE[cbPage];
     pbCompressionBuffer = new BYTE[cbPage];
     
-    PKTermCompression();
+    PKTermCompression();    // Compression is initialized with a smaller page size for db tests
     CHECK( JET_errSuccess == ErrPKInitCompression( cbPage, 1024, cbPage ) );
 
     RBSICompressPreImage( pfmp->Pinst(), pfmp->Ifmp(), cpage.PgnoThis(), cbPage, data, pbDehydrationBuffer, pbCompressionBuffer, &compressionPerformed );
@@ -1751,7 +1847,9 @@ JETUNITTESTDB( RBSPreImageCompression, DehydrationAndXpress, dwOpenDatabase )
     delete[] pbDehydrationBuffer;
 }
 
+//  ================================================================
 JETUNITTESTDB( RBSPreImageCompression, Xpress, dwOpenDatabase )
+//  ================================================================
 {
     const ULONG cbPage = 32 * 1024;
     CPAGE cpage;
@@ -1775,7 +1873,7 @@ JETUNITTESTDB( RBSPreImageCompression, Xpress, dwOpenDatabase )
     pbDehydrationBuffer = new BYTE[cbPage];
     pbCompressionBuffer = new BYTE[cbPage];
     
-    PKTermCompression();
+    PKTermCompression();    // Compression is initialized with a smaller page size for db tests
     CHECK( JET_errSuccess == ErrPKInitCompression( cbPage, 1024, cbPage ) );
 
     RBSICompressPreImage( pfmp->Pinst(), pfmp->Ifmp(), cpage.PgnoThis(), cbPage, data, pbDehydrationBuffer, pbCompressionBuffer, &compressionPerformed );
@@ -1792,7 +1890,7 @@ JETUNITTESTDB( RBSPreImageCompression, Xpress, dwOpenDatabase )
     delete[] pbDehydrationBuffer;
 }
 
-#endif
+#endif // ENABLE_JET_UNIT_TEST
 
 ERR CRevertSnapshot::ErrCapturePreimage(
         DBID dbid,
@@ -1811,6 +1909,7 @@ ERR CRevertSnapshot::ErrCapturePreimage(
     DATA dataRec;
     dataRec.SetPv( (VOID *)pbImage );
     dataRec.SetCb( cbImage );
+    // This image may not be checksummed (if dirty), should we checksum it here before writing to snapshot?
 
     Alloc( pbDataDehydrated = PbPKAllocCompressionBuffer() );
     Alloc( pbDataCompressed = PbPKAllocCompressionBuffer() );
@@ -1934,6 +2033,7 @@ ERR CRevertSnapshot::ErrCaptureRec(
 {
     ERR err;
 
+    // Pre-allocate reserve buffer in case we need it below.
     CSnapshotBuffer::PreAllocReserveBuffer();
 
     ENTERCRITICALSECTION critBuf( &m_critBufferLock );
@@ -1947,6 +2047,7 @@ ERR CRevertSnapshot::ErrCaptureRec(
 
     do
     {
+        // If this buffer is full, queue it to be written and get a fresh one
         if ( m_pActiveBuffer == NULL ||
              m_pActiveBuffer->m_pBuffer == NULL ||
              m_pActiveBuffer->m_ibNextRecord >= cbRBSBufferSize )
@@ -1960,10 +2061,12 @@ ERR CRevertSnapshot::ErrCaptureRec(
         Assert( cbSegmentSpaceRemaining >= sizeof( RBSFragBegin ) );
         Assert( cbSegmentSpaceRemaining <= cbRBSSegmentSize - sizeof( RBSSEGHDR ) );
 
+        // On first pass, either copy full record or start fragmenting
         if ( fFirstPass )
         {
             if ( cbSegmentSpaceRemaining >= cbRemaining )
             {
+                // Enough space to copy full record
                 UtilMemCpy( m_pActiveBuffer->m_pBuffer + m_pActiveBuffer->m_ibNextRecord, pRec, cbRec );
                 UtilMemCpy( m_pActiveBuffer->m_pBuffer + m_pActiveBuffer->m_ibNextRecord + cbRec, pExtraData->Pv(), pExtraData->Cb() );
                 m_pActiveBuffer->m_ibNextRecord += cbRemaining;
@@ -1972,6 +2075,7 @@ ERR CRevertSnapshot::ErrCaptureRec(
             }
             else
             {
+                // Copy first fragment with fragment begin header
                 RBSFragBegin fragBeginRec;
                 fragBeginRec.m_bRecType = rbsrectypeFragBegin;
                 fragBeginRec.m_usRecLength = (USHORT)cbSegmentSpaceRemaining;
@@ -2003,6 +2107,7 @@ ERR CRevertSnapshot::ErrCaptureRec(
         }
         else
         {
+            // Continue copying remaining fragment with the fragment continue header
             Assert( cbSegmentSpaceRemaining == cbRBSSegmentSize - sizeof ( RBSSEGHDR ) );
 
             RBSFragContinue fragContdRec;
@@ -2013,6 +2118,7 @@ ERR CRevertSnapshot::ErrCaptureRec(
             m_pActiveBuffer->m_ibNextRecord += sizeof( RBSFragContinue );
             cbSegmentSpaceRemaining -= sizeof( RBSFragContinue );
 
+            // If any of the original record remains uncopied, copy it now
             if ( cbRemaining > (ULONG)pExtraData->Cb() )
             {
                 UtilMemCpy( m_pActiveBuffer->m_pBuffer + m_pActiveBuffer->m_ibNextRecord, (BYTE *)pRec + cbRec - ( cbRemaining - pExtraData->Cb() ), cbRemaining - pExtraData->Cb() );
@@ -2020,6 +2126,7 @@ ERR CRevertSnapshot::ErrCaptureRec(
                 cbSegmentSpaceRemaining -= cbRemaining - pExtraData->Cb();
                 cbRemaining = pExtraData->Cb();
             }
+            // Now copy the extra data
             ULONG cbToCopy = min( cbRemaining, cbSegmentSpaceRemaining );
             UtilMemCpy( m_pActiveBuffer->m_pBuffer + m_pActiveBuffer->m_ibNextRecord, (BYTE *)pExtraData->Pv() + pExtraData->Cb() - cbRemaining, cbToCopy );
             m_pActiveBuffer->m_ibNextRecord += cbToCopy;
@@ -2027,14 +2134,18 @@ ERR CRevertSnapshot::ErrCaptureRec(
             cbRemaining -= cbToCopy;
         }
 
+        // If all data is copied, return which segment the last piece of data resides int
         if ( cbRemaining == 0 )
         {
             prbsposRecord->lGeneration = m_prbsfilehdrCurrent->rbsfilehdr.le_lGeneration;
             prbsposRecord->iSegment = m_pActiveBuffer->m_cStartSegment + CsegRBSCountSegmentOfOffset( m_pActiveBuffer->m_ibNextRecord + cbSegmentSpaceRemaining ) - 1;
         }
 
+        // If segment is full, checksum it.
+        // TODO: SOMEONE - Earlier checksumming allows better detection of in-memory corruption, but doing it under buffer lock is probably not nice.
         if ( cbSegmentSpaceRemaining < sizeof( RBSFragBegin ) )
         {
+            // first fill unused section with 0s
             if ( cbSegmentSpaceRemaining > 0 )
             {
                 memset( m_pActiveBuffer->m_pBuffer + m_pActiveBuffer->m_ibNextRecord, 0, cbSegmentSpaceRemaining );
@@ -2062,6 +2173,7 @@ ERR CRevertSnapshot::ErrSetReadBuffer( ULONG iStartSegment )
     Assert( m_fInitialized );
     Assert( !m_fInvalid );
 
+    // Free the existing read buffer
     if ( m_pReadBuffer != NULL )
     {
         delete m_pReadBuffer;
@@ -2117,6 +2229,8 @@ ERR CRevertSnapshot::ErrGetNextRecord( RBSRecord **ppRecord, RBS_POS* rbsposRecS
     PCWSTR wszReason = L"Unknown";
     PAGECHECKSUM checksumExpected, checksumActual;
     
+    // For dumping purposes we will allow to start dumping records from any particular page.
+    // If the first record on the page we are starting from has a FragContinue record, we want to keep moving on till we find the first valid record.
     BOOL fValidRecFound = fFalse;
 
     *ppRecord = NULL;
@@ -2287,6 +2401,7 @@ HandleError:
     return err;
 }
 
+// static
 DWORD CRevertSnapshot::WriteBuffers_( VOID *pvThis )
 {
     CRevertSnapshot *pSnapshot = (CRevertSnapshot *)pvThis;
@@ -2307,6 +2422,7 @@ ERR CRevertSnapshot::ErrWriteBuffers()
     ENTERCRITICALSECTION critWrite( &m_critWriteLock );
     while ( fTrue )
     {
+        // ErrCaptureRec can only add and not remove from the list, so only need to take buffer lock if list is empty
         pBuffer = m_pBuffersToWrite;
         if ( pBuffer == NULL )
         {
@@ -2357,6 +2473,7 @@ ERR CRevertSnapshot::ErrWriteBuffers()
     delete pBufferToDelete;
     pBufferToDelete = NULL;
 
+    // TODO: SOMEONE: make flush interval configurable?
     if ( m_cNextFlushSegment - m_cNextWriteSegment >= ( cbRBSSegmentsInBuffer ) * 2 )
     {
         Call( ErrFlush() );
@@ -2370,6 +2487,7 @@ ERR CRevertSnapshot::ErrWriteBuffers()
     }
 
 HandleError:
+    // There is already a file I/O event, any more specific event here?
     return err;
 }
 
@@ -2383,6 +2501,7 @@ ERR CRevertSnapshot::ErrFlush()
     ULONG cNextWriteSegment = m_cNextWriteSegment;
     if ( m_cNextFlushSegment < cNextWriteSegment )
     {
+        // First flush out update to the snapshot before flushing out the header update to point to it
         Call( ErrUtilFlushFileBuffers( m_pfapiRBS, iofrRBS ) );
 
         m_prbsfilehdrCurrent->rbsfilehdr.le_cbLogicalFileSize = IbRBSFileOffsetOfSegment( cNextWriteSegment );
@@ -2414,10 +2533,12 @@ ERR CRevertSnapshot::ErrFlushAll()
             Assert( ibOffset >= sizeof( RBSSEGHDR ) );
             if ( ibOffset == sizeof( RBSSEGHDR ) )
             {
+                // No partial sector
                 m_pActiveBuffer->m_cbValidData = m_pActiveBuffer->m_ibNextRecord - ibOffset;
             }
             else
             {
+                // checksum partial sector (first fill unused section with 0s)
                 RBSSEGHDR *pHdr = (RBSSEGHDR *)( m_pActiveBuffer->m_pBuffer + m_pActiveBuffer->m_ibNextRecord - ibOffset );
                 memset( (BYTE *)pHdr + ibOffset, 0, cbRBSSegmentSize - ibOffset );
                 pHdr->le_iSegment = m_pActiveBuffer->m_cStartSegment + CsegRBSCountSegmentOfOffset((ULONG)( (BYTE *)pHdr - m_pActiveBuffer->m_pBuffer ));
@@ -2429,6 +2550,7 @@ ERR CRevertSnapshot::ErrFlushAll()
 
             if ( m_pActiveBuffer->m_cbValidData > 0 )
             {
+                // Move filled segments to write buffer
                 if ( m_pBuffersToWrite == NULL )
                 {
                     m_pBuffersToWrite = m_pBuffersToWriteLast = m_pActiveBuffer;
@@ -2460,6 +2582,7 @@ HandleError:
 
 ERR CRevertSnapshot::ErrRBSSetRequiredLogs( BOOL fInferFromRstmap )
 {
+    // Already set so return.
     if ( !m_fInitialized || 
         m_prbsfilehdrCurrent->rbsfilehdr.bLogsCopied || 
         m_prbsfilehdrCurrent->rbsfilehdr.le_lGenMinLogCopied > 0 )
@@ -2494,6 +2617,7 @@ ERR CRevertSnapshot::ErrRBSCopyRequiredLogs( BOOL fInferFromRstmap )
 
     JET_ERR err = JET_errSuccess;
 
+    // If we already collected range of logs to copy but just didn't finish copying them, skip to copying
     if ( m_prbsfilehdrCurrent->rbsfilehdr.le_lGenMinLogCopied )
     {
         goto CopyLogs;
@@ -2502,6 +2626,7 @@ ERR CRevertSnapshot::ErrRBSCopyRequiredLogs( BOOL fInferFromRstmap )
     Call( ErrRBSSetRequiredLogs( fInferFromRstmap ) );
 
 CopyLogs:
+    // This should really be asynchronous (especially when we start rolling snapshots)
     Call( ErrRBSCopyRequiredLogs_( 
         m_pinst,
         m_prbsfilehdrCurrent->rbsfilehdr.le_lGenMinLogCopied, 
@@ -2526,11 +2651,14 @@ ERR CRevertSnapshot::ErrRollSnapshot( BOOL fPrevRBSValid, BOOL fInferFromRstmap 
     WCHAR   wszRBSAbsLogDirPath[ IFileSystemAPI::cchPathMax ];
     JET_ERR err = JET_errSuccess;
 
+    // Use the current header to carry over some information.
     RBSFILEHDR* prbsfilehdrPrev = m_prbsfilehdrCurrent;
     LOGTIME defaultLogTime      = { 0 };
     LOGTIME logtimePrevGen      = fPrevRBSValid ? prbsfilehdrPrev->rbsfilehdr.tmCreate : defaultLogTime;
     LONG    lRBSGen             = prbsfilehdrPrev->rbsfilehdr.le_lGeneration + 1;
 
+    // TODO: SOMEONE - if rolling snapshot when live, need to atomically update each FMPs DbtimeBeginSnapshot and
+    // update state so ErrCaptureRec starts collecting records for the next snapshot.
 
     if ( fPrevRBSValid )
     {
@@ -2539,9 +2667,12 @@ ERR CRevertSnapshot::ErrRollSnapshot( BOOL fPrevRBSValid, BOOL fInferFromRstmap 
 
     Alloc( m_prbsfilehdrCurrent = (RBSFILEHDR *)PvOSMemoryPageAlloc( sizeof(RBSFILEHDR), NULL ) );
 
+    // Go through all dbs corresponding to this instance and add their corresponding rbs attach infos.
     Call( ErrRBSRollAttachInfos( m_pinst, m_prbsfilehdrCurrent, prbsfilehdrPrev, fPrevRBSValid, fInferFromRstmap ) );
 
+    //OSTrace( JET_tracetagRBS, OSFormat( "\tErrRollSnapshot(NewGen - %ld, PrevValid - %d)\n", lRBSGen, fPrevRBSValid ) );
 
+    // Free previous instances.
     delete m_pfapiRBS;
     m_pfapiRBS = NULL;
     FreeCurrentFilePath();
@@ -2549,6 +2680,7 @@ ERR CRevertSnapshot::ErrRollSnapshot( BOOL fPrevRBSValid, BOOL fInferFromRstmap 
     OSMemoryPageFree( prbsfilehdrPrev );
     prbsfilehdrPrev = NULL;
 
+    // TODO SOMEONE: Copy any required data from the previous snapshot.
     Call( ErrRBSCreateOrLoadRbsGen( 
         lRBSGen,
         logtimePrevGen, 
@@ -2566,6 +2698,8 @@ ERR CRevertSnapshot::ErrRollSnapshot( BOOL fPrevRBSValid, BOOL fInferFromRstmap 
 
     Call( ErrRBSCopyRequiredLogs( fInferFromRstmap ) );
 
+    // Reset space usage last logged when we roll a snapshot. 
+    // We will start timer when we do the first flush.
     m_ftSpaceUsageLastLogged = 0;
 
 HandleError:
@@ -2582,6 +2716,7 @@ BOOL CRevertSnapshot::FRollSnapshot()
     const __int64 cSecSinceFileCreate = UtilConvertFileTimeToSeconds( ConvertLogTimeToFileTime( &( m_prbsfilehdrCurrent->rbsfilehdr.tmCreate ) ) );
     const __int64 cSecCurrentTime = UtilConvertFileTimeToSeconds( UtilGetCurrentFileTime( ) );
 
+    //OSTrace( JET_tracetagRBS, OSFormat( "\tFRollSnapshot(cSecCurrentTime - %lld, cSecSinceFileCreate - %lld, JET_paramFlight_RBSRollIntervalSec - %ld)\n", cSecCurrentTime, cSecSinceFileCreate, (ULONG) UlParam( JET_paramFlight_RBSRollIntervalSec ) ) );
 
     if( cSecCurrentTime - cSecSinceFileCreate > ( (ULONG) UlParam( m_pinst, JET_paramFlight_RBSRollIntervalSec ) ) )
     {
@@ -2591,7 +2726,12 @@ BOOL CRevertSnapshot::FRollSnapshot()
     return fFalse;
 }
 
+//  ================================================================
+//                  RBSCleaner
+//  ================================================================
 
+// Create a cleaner object for automatic cleanup of RBS.
+// This doesn't start the cleaner thread.
 ERR RBSCleanerFactory::ErrRBSCleanerCreate( INST*  pinst, __out RBSCleaner ** prbscleaner)
 {
      ERR err = JET_errSuccess;
@@ -2768,6 +2908,7 @@ DWORD RBSCleaner::DwRBSCleaner()
         ErrDoOneCleanupPass();
         m_prbscleanerstate->CompletedPass();
 
+        // ErrDoOneCleanupPass can ask for the thread to stop. So we will remove the unnecessary wait time and break early.
         if ( m_msigRBSCleanerStop.FIsSet() || FMaxPassesReached() )
         {
             break;
@@ -2787,7 +2928,8 @@ void RBSCleaner::WaitForMinPassTime()
 
     if ( csecBeforeNextPassCanStart > 0 )
     {
-        Assert( csecBeforeNextPassCanStart <= ( INT_MAX / 1000 ) );
+        // negative wait time turns off deadlock detection
+        Assert( csecBeforeNextPassCanStart <= ( INT_MAX / 1000 ) ); // overflow?
         ( void )m_msigRBSCleanerStop.FWait( -1000 * ( INT )csecBeforeNextPassCanStart );
     }
 }
@@ -2804,13 +2946,16 @@ VOID RBSCleaner::ComputeFirstValidRBSGen()
     RBSFILEHDR  rbsfilehdr;
     ERR         err = JET_errSuccess;
 
+    // First valid gen has already been computed. 
     if ( m_fValidRBSGenSet )
     {
         return;
     }
 
+    // Lets find the lowest and highest snapshot generation we have.
     Call( m_prbscleaneriooperator->ErrRBSGetLowestAndHighestGen( &lRBSGenMin, &lRBSGenMax ) );
 
+    // We will let the main instance thread which creates/loads RBS check if the generation before max is invalid since it computes the info anyways.
     lRBSGenMax = BoolParam( m_pinst, JET_paramEnableRBS ) ? lRBSGenMax - 1 : lRBSGenMax;
 
     for ( LONG lRBSGen = lRBSGenMax; lRBSGen >= lRBSGenMin && !m_fValidRBSGenSet; --lRBSGen )
@@ -2818,6 +2963,7 @@ VOID RBSCleaner::ComputeFirstValidRBSGen()
         Call( m_prbscleaneriooperator->ErrRBSFilePathForGen( wszRBSAbsDirPath, sizeof( wszRBSAbsDirPath ), wszRBSAbsFilePath, sizeof( wszRBSAbsFilePath ), lRBSGen ) );
         Call( m_prbscleaneriooperator->ErrRBSFileHeader( wszRBSAbsFilePath, &rbsfilehdr ) );
 
+        // The RBS create time doesn't match the prev RBS time set on the next snapshot. So, we can't use the snapshot.
         if ( tmPrevRBSCreate.FIsSet() && LOGTIME::CmpLogTime( rbsfilehdr.rbsfilehdr.tmCreate, tmPrevRBSCreate ) != 0 )
         {
             SetFirstValidGen( lRBSGen );
@@ -2826,6 +2972,7 @@ VOID RBSCleaner::ComputeFirstValidRBSGen()
 
         memcpy( &tmPrevRBSCreate, &rbsfilehdr.rbsfilehdr.tmPrevGen, sizeof( LOGTIME ) );
 
+        // If prev RBS log time isn't set, it must have been invalid. So set current RBS gen as valid generation.
         if ( !tmPrevRBSCreate.FIsSet() )
         {
             SetFirstValidGen( lRBSGen );
@@ -2850,8 +2997,11 @@ ERR RBSCleaner::ErrDoOneCleanupPass()
 
     m_prbscleanerstate->SetPassStartTime();
 
+    // Find the amount of free user space on the disk hosting the snapshots based on provided snapshot root directory.
     Call( m_prbscleaneriooperator->ErrRBSDiskSpace( &cbFreeRBSDisk ) );
 
+    // Find the amount of space on the disk taken up by the revert snapshots.
+    // We will exit this pass if we are unable to get RBS directory size.
     Call( m_prbscleaneriooperator->ErrGetDirSize( m_prbscleaneriooperator->WSZRBSAbsRootDirPath(), &cbTotalRBSDiskSpace ) );
 
     while ( !m_msigRBSCleanerStop.FIsSet( ) )
@@ -2864,15 +3014,19 @@ ERR RBSCleaner::ErrDoOneCleanupPass()
         __int64     ftCreate            = 0;
         RBSFILEHDR  rbsfilehdr;
 
+        // Lets find the lowest snapshot generation we have.
         Call( m_prbscleaneriooperator->ErrRBSGetLowestAndHighestGen( &lRBSGenMin, &lRBSGenMax ) );
         
+        //OSTrace( JET_tracetagRBSCleaner, OSFormat( "\tIsValidGen(Min - %ld, Max - %ld, %d)\n", lRBSGenMin, lRBSGenMax, FGenValid( lRBSGenMin ) ) );
 
+        // RBS max gen is 0 and RBS isn't enabled for this instance. No point in running the thread further.
         if ( lRBSGenMax == 0 && !BoolParam( m_pinst, JET_paramEnableRBS ) )
         {
             m_msigRBSCleanerStop.Set();
             goto HandleError;
         }
 
+        // We will not remove the only snapshot directory we have.
         if ( lRBSGenMin != lRBSGenMax )
         {
             fRBSCleanupMinGen = !FGenValid( lRBSGenMin );
@@ -2889,6 +3043,7 @@ ERR RBSCleaner::ErrDoOneCleanupPass()
 
                 if( err == JET_errSuccess ||  err == JET_errReadVerifyFailure )
                 {
+                    // If we are unable to read the header, we will clean up the snapshot since the snapshot is not usable.
                     if ( err == JET_errReadVerifyFailure )
                     {
                         fRBSCleanupMinGen = fTrue;
@@ -2930,6 +3085,7 @@ ERR RBSCleaner::ErrDoOneCleanupPass()
             }
             else
             {
+                // Nothing to delete in this pass. Exit this pass.
                 goto HandleError;
             }
         }
@@ -2940,7 +3096,9 @@ ERR RBSCleaner::ErrDoOneCleanupPass()
     }
 
 HandleError:
+    //OSTrace( JET_tracetagRBSCleaner, OSFormat( "\tError %d", err ) );
     
+    // We have file not found error and RBS isn't enabled. Let's terminate cleanup for this instance.
     if ( err == JET_errFileNotFound && !BoolParam( m_pinst, JET_paramEnableRBS ) )
     {
         m_msigRBSCleanerStop.Set();
@@ -2984,6 +3142,9 @@ VOID RBSCleaner::TermCleaner()
     Assert( !FIsCleanerRunning() );
 }
 
+//  ================================================================
+//                  CRBSDatabaseRevertContext
+//  ================================================================
 
 CRBSDatabaseRevertContext::CRBSDatabaseRevertContext( __in INST* const pinst )
     : CZeroInit( sizeof( CRBSDatabaseRevertContext ) ),
@@ -3041,6 +3202,7 @@ CRBSDatabaseRevertContext::~CRBSDatabaseRevertContext()
         {
             if ( m_rgRBSDbPage->Entry( i ).DwPage() )
             {
+                // Free the memory here after flushing the page.
                 OSMemoryPageFree( (void*) m_rgRBSDbPage->Entry( i ).DwPage() );
             }
 
@@ -3062,6 +3224,8 @@ CRBSDatabaseRevertContext::~CRBSDatabaseRevertContext()
     m_pcprintfIRSTrace = NULL;
 }
 
+// Reset the spare bit map of the pages we maintain by freeing and reallocating memory.
+//
 ERR CRBSDatabaseRevertContext::ErrResetSbmDbPages()
 {
     ERR err = JET_errSuccess;
@@ -3073,6 +3237,7 @@ ERR CRBSDatabaseRevertContext::ErrResetSbmDbPages()
         m_psbmDbPages = NULL;
     }
 
+    // Reserve bitmap space for maximum number of pages the database is allowed to have.
     Alloc( m_psbmDbPages = new CSparseBitmap() );
     errBM = m_psbmDbPages->ErrInitBitmap( pgnoSysMax );
 
@@ -3086,6 +3251,8 @@ HandleError:
     return err;
 }
 
+// Initialize the database revert context.
+//
 ERR CRBSDatabaseRevertContext::ErrRBSDBRCInit( RBSATTACHINFO* prbsattachinfo, SIGNATURE* psignRBSHdrFlush, CPG cacheSize )
 {
     ERR     err = JET_errSuccess;
@@ -3096,13 +3263,18 @@ ERR CRBSDatabaseRevertContext::ErrRBSDBRCInit( RBSATTACHINFO* prbsattachinfo, SI
     Alloc( m_wszDatabaseName );
     Call( ErrOSStrCbCopyW( m_wszDatabaseName, wszDatabaseName.Cb() + 2, wszDatabaseName ) );
 
+    //  open the requested database
+    //
     Call( m_pinst->m_pfsapi->ErrFileOpen( 
                 m_wszDatabaseName,  
                 BoolParam( JET_paramEnableFileCache ) ? IFileAPI::fmfCached : IFileAPI::fmfNone, 
                 &m_pfapiDb ) );
 
+    //  get some other resources together
     Alloc( m_pdbfilehdr = (DBFILEHDR*)PvOSMemoryPageAlloc( g_cbPage, NULL ) );
 
+    //  read in the header of this database
+    //
     err = ErrUtilReadShadowedHeader(    
             m_pinst,
             m_pinst->m_pfsapi,
@@ -3118,6 +3290,7 @@ ERR CRBSDatabaseRevertContext::ErrRBSDBRCInit( RBSATTACHINFO* prbsattachinfo, SI
 
     Call( err );
 
+    // We will allow for FRBSCheckForDbConsistency to fail if we are already in the process of applying revert snapshot.
     if ( memcmp( &m_pdbfilehdr->signDb, &prbsattachinfo->signDb, sizeof( SIGNATURE ) ) != 0 ||
          !FRBSCheckForDbConsistency( &m_pdbfilehdr->signDbHdrFlush, &m_pdbfilehdr->signRBSHdrFlush, &prbsattachinfo->signDbHdrFlush,  psignRBSHdrFlush ) )
     {
@@ -3135,12 +3308,16 @@ ERR CRBSDatabaseRevertContext::ErrRBSDBRCInit( RBSATTACHINFO* prbsattachinfo, SI
 
     Call( ErrResetSbmDbPages() ); 
 
+    //  initialize persisted flush map
+    //
     Call( CFlushMapForUnattachedDb::ErrGetPersistedFlushMapOrNullObjectIfRuntime( m_wszDatabaseName, m_pdbfilehdr, m_pinst, &m_pfm ) );
 
 HandleError:
     return err;
 }
 
+// Prepares the database for revert.
+//
 ERR CRBSDatabaseRevertContext::ErrSetDbstateForRevert( ULONG rbsrchkstate, LOGTIME logtimeRevertTo )
 {
     Assert( m_pdbfilehdr );
@@ -3154,6 +3331,8 @@ ERR CRBSDatabaseRevertContext::ErrSetDbstateForRevert( ULONG rbsrchkstate, LOGTI
         return ErrERRCheck( JET_errRBSRCBadDbState );
     }
 
+    //  update the cached header to reflect that we are now in the revert in progress state
+    //
     if ( m_pdbfilehdr->Dbstate() != JET_dbstateRevertInProgress )
     {
         m_pdbfilehdr->SetDbstate( JET_dbstateRevertInProgress, lGenerationInvalid, lGenerationInvalid, NULL, fTrue );
@@ -3162,8 +3341,10 @@ ERR CRBSDatabaseRevertContext::ErrSetDbstateForRevert( ULONG rbsrchkstate, LOGTI
         m_pdbfilehdr->le_ulRevertPageCount = 0;
     }
 
+    // This time might change if the a revert fails and if the user decide to revert to further in the past.
     memcpy( &m_pdbfilehdr->logtimeRevertTo, &logtimeRevertTo, sizeof( LOGTIME ) );
 
+    //  write the header back to the database
     Call( ErrUtilWriteUnattachedDatabaseHeaders( m_pinst, m_pinst->m_pfsapi, m_wszDatabaseName, m_pdbfilehdr, m_pfapiDb, m_pfm, fFalse ) );
     Call( ErrUtilFlushFileBuffers( m_pfapiDb, iofrRBSRevertUtil ) );
 
@@ -3171,6 +3352,8 @@ HandleError:
     return err;
 }
 
+// Sets database state once revert is done.
+//
 ERR CRBSDatabaseRevertContext::ErrSetDbstateAfterRevert( ULONG rbsrchkstate )
 {
     Assert( rbsrchkstate == JET_revertstateCopingLogs );
@@ -3195,13 +3378,18 @@ ERR CRBSDatabaseRevertContext::ErrSetDbstateAfterRevert( ULONG rbsrchkstate )
         }
         else
         {
+            // fixup DB header state
+            //
             m_pfm->SetDbGenMinRequired( m_pdbfilehdrFromRBS->le_lGenMinRequired );
             m_pfm->SetDbGenMinConsistent( m_pdbfilehdrFromRBS->le_lGenMinConsistent );
 
+            // flush the flush map
+            //
             Call( m_pfm->ErrFlushAllSections( OnDebug( fTrue ) ) );
         }
     }
 
+    //  write the header back to the database
     Call( ErrUtilWriteUnattachedDatabaseHeaders( m_pinst, m_pinst->m_pfsapi, m_wszDatabaseName, m_pdbfilehdrFromRBS, m_pfapiDb, m_pfm ) );
     Call( ErrUtilFlushFileBuffers( m_pfapiDb, iofrRBSRevertUtil ) );
 
@@ -3209,8 +3397,11 @@ HandleError:
     return err;
 }
 
+// Copies db header from the rbs record to the actual database, but retains values of a few fields
+//
 ERR CRBSDatabaseRevertContext::ErrRBSCaptureDbHdrFromRBS( RBSDbHdrRecord* prbsdbhdrrec, BOOL* pfGivenDbfilehdrCaptured )
 {
+    // Already captured the appropriate header from RBS.
     if ( m_pdbfilehdrFromRBS )
     {
         return JET_errSuccess;
@@ -3223,6 +3414,7 @@ ERR CRBSDatabaseRevertContext::ErrRBSCaptureDbHdrFromRBS( RBSDbHdrRecord* prbsdb
 
     Alloc( m_pdbfilehdrFromRBS = (DBFILEHDR*)PvOSMemoryPageAlloc( g_cbPage, NULL ) );
 
+    // Change some db header states as per current db header.
     DBFILEHDR* pdbfilehdr               = (DBFILEHDR*) prbsdbhdrrec->m_rgbHeader;
 
     Assert( m_pdbfilehdr->le_dbstate == JET_dbstateRevertInProgress );
@@ -3238,6 +3430,8 @@ HandleError:
     return err;
 }
 
+// Whether the page is already capture in the bitmap
+//
 BOOL CRBSDatabaseRevertContext::FPageAlreadyCaptured( PGNO pgno )
 {
     BOOL fPageAlreadyCaptured;
@@ -3248,6 +3442,8 @@ BOOL CRBSDatabaseRevertContext::FPageAlreadyCaptured( PGNO pgno )
     return fPageAlreadyCaptured;
 }
 
+// Add the given page to our array and mark it in our page bitmap
+//
 ERR CRBSDatabaseRevertContext::ErrAddPage( void* pvPage, PGNO pgno )
 {
     Assert( pvPage );
@@ -3266,17 +3462,21 @@ ERR CRBSDatabaseRevertContext::ErrAddPage( void* pvPage, PGNO pgno )
         return ErrERRCheck( JET_errOutOfMemory );
     }
 
+    // Set the corresponding bit in the bitmap.
     errbm = m_psbmDbPages->ErrSet( pgno, fTrue );
     Assert( errbm == IBitmapAPI::ERR::errSuccess );
 
     return JET_errSuccess;
 }
 
+// Comparer to allow sorting of pages in our array to try and get sequential writes.
+//
 INLINE INT __cdecl CRBSDatabaseRevertContext::ICRBSDatabaseRevertContextCmpPgRec( const CPagePointer* ppg1, const CPagePointer* ppg2 )
 {
     Assert( ppg1 );
     Assert( ppg2 );
 
+    // Duplicates shouldn't be put in the array as we want to capture only the first page image from the snapshot.
     Assert( ppg1->PgNo() != ppg2->PgNo() );
 
     return ( ( ppg1->PgNo() < ppg2->PgNo() ) ? -1 : +1 );
@@ -3320,11 +3520,14 @@ ERR CRBSDatabaseRevertContext::ErrFlushDBPage( void* pvPage, PGNO pgno, USHORT c
     dbtimePage = cpageT.Dbtime();
     cpageT.UnloadPage();
 
+    // if any part of the page range is beyond EOF, extend the database to accommodate the page
+    // it is possible db shrunk and we reverting back to unshrunk state.
     Call( m_pfapiDb->ErrSize( &cbSize, IFileAPI::filesizeLogical ) );
 
     const QWORD cbNewSize   = OffsetOfPgno( pgno ) + cbDbPageSize;
     if ( cbNewSize > cbSize )
     {
+        //  extend the database, zero-filled
         const QWORD cbNewSizeEffective = roundup( cbNewSize, (QWORD)UlParam( m_pinst, JET_paramDbExtensionSize ) * g_cbPage );
         Call( m_pfapiDb->ErrSetSize( *tcRevertPage, cbNewSizeEffective, fTrue, QosSyncDefault( m_pinst ) ) );
     }
@@ -3372,8 +3575,10 @@ ERR CRBSDatabaseRevertContext::ErrFlushDBPages( USHORT cbDbPageSize, BOOL fFlush
 
             if ( err == errDiskTilt )
             {
+                // Last IOWrite failed. Decrement the write pending counter.
                 AtomicDecrement( &m_cpgWritePending );
 
+                // Issue the I/O.
                 Call( m_pfapiDb->ErrIOIssue() );
 
                 break;
@@ -3384,13 +3589,17 @@ ERR CRBSDatabaseRevertContext::ErrFlushDBPages( USHORT cbDbPageSize, BOOL fFlush
             }
         }
 
+        // If there are still writes pending and if we haven't received a signal to continue lets wait till we get the signal.
+        // negative wait time turns off deadlock detection
         m_asigWritePossible.FWait( -1000 );
     }
 
+    // Issue the remaining outstanding I/Os and wait for the number of writes to get to 0.
     Call( m_pfapiDb->ErrIOIssue() );
 
     while ( m_cpgWritePending != 0 )
     {
+        // negative wait time turns off deadlock detection
         m_asigWritePossible.FWait( -1000 );
     }
 
@@ -3400,6 +3609,7 @@ ERR CRBSDatabaseRevertContext::ErrFlushDBPages( USHORT cbDbPageSize, BOOL fFlush
     {
         CPagePointer ppTempPage( m_rgRBSDbPage->Entry( i ) );
 
+        // Free the memory here after flushing the page. Same memory pointer as the one stored in the array entry.
         OSMemoryPageFree( (void*) ppTempPage.DwPage() );
         errArray = m_rgRBSDbPage->ErrSetEntry( i, NULL );
 
@@ -3418,8 +3628,12 @@ ERR CRBSDatabaseRevertContext::ErrFlushDBPages( USHORT cbDbPageSize, BOOL fFlush
         Error( ErrERRCheck( JET_errOutOfMemory ) );
     }
 
+    // This will be NULL if there is no .jfm file.
     if ( m_pfm )
     {
+        // flush the flush map
+        // Temporarily set min req and min consistent as per the current header. We will update it to the right values at end of the revert.
+        //
         m_pfm->SetDbGenMinRequired( max( 1, m_pdbfilehdr->le_lGenMinRequired ) );
         m_pfm->SetDbGenMinConsistent( max( 1, m_pdbfilehdr->le_lGenMinConsistent ) );
 
@@ -3445,6 +3659,9 @@ ERR CRBSDatabaseRevertContext::ErrBeginTracingToIRS()
     return ErrBeginDatabaseIncReseedTracing( m_pinst->m_pfsapi, m_wszDatabaseName, &m_pcprintfIRSTrace );
 }
 
+//  ================================================================
+//                  CRBSRevertContext
+//  ================================================================
 
 CRBSRevertContext::CRBSRevertContext( __in INST* const pinst )
     : CZeroInit( sizeof( CRBSRevertContext ) ),
@@ -3519,6 +3736,7 @@ ERR CRBSRevertContext::ErrMakeRevertTracingNames(
     WCHAR * szRevertRawExt = L".RBSRC.RAW";
     WCHAR * szRevertRawBackupExt = L".RBSRC.RAW.Prev";
 
+    // init out params
 
     wszRBSRCRawPath[0] = L'\0';
     wszRBSRCRawBackupPath[0] = L'\0';
@@ -3544,8 +3762,10 @@ ERR CRBSRevertContext::ErrBeginRevertTracing( bool fDeleteOldTraceFile )
     IFileAPI *      pfapiSizeCheck  = NULL;
     IFileSystemAPI* pfsapi          = m_pinst->m_pfsapi;
 
+    //  initialize to NULL tracer, in case we fail ...
     m_pcprintfRevertTrace = CPRINTFNULL::PcprintfInstance();
 
+    //  create the tracing path names
     Call( ErrMakeRevertTracingNames( pfsapi, sizeof(wszRBSRCRawFile), wszRBSRCRawFile, sizeof(wszRBSRCRawBackupFile), wszRBSRCRawBackupFile ) );
 
     if ( fDeleteOldTraceFile )
@@ -3559,7 +3779,7 @@ ERR CRBSRevertContext::ErrBeginRevertTracing( bool fDeleteOldTraceFile )
     {
         QWORD cbSize;
         Call( pfapiSizeCheck->ErrSize( &cbSize, IFileAPI::filesizeLogical ) );
-        delete pfapiSizeCheck;
+        delete pfapiSizeCheck;  // delete here b/c we may be about rename it
         pfapiSizeCheck = NULL;
 
         if ( cbSize > ( 50 * 1024 * 1024 )  )
@@ -3569,9 +3789,11 @@ ERR CRBSRevertContext::ErrBeginRevertTracing( bool fDeleteOldTraceFile )
         }
     }
 
+    //  create the tracing file
     CPRINTF * const pcprintfAlloc = new CPRINTFFILE( wszRBSRCRawFile );
-    Alloc( pcprintfAlloc );
+    Alloc( pcprintfAlloc ); // avoid clobbering the default / NULL tracer
 
+    //  set tracing to goto the tracing file
     m_pcprintfRevertTrace = pcprintfAlloc;
 
     (*m_pcprintfRevertTrace)( "Please ignore this file.  This is a tracing file for available lag revert information.  You can delete this file if it bothers you.\r\n" );
@@ -3587,6 +3809,8 @@ HandleError:
     return err;
 }
 
+// Checks whether the given database name already exists in our list of database revert context.
+//
 BOOL CRBSRevertContext::FRBSDBRC( PCWSTR wszDatabaseName, IRBSDBRC* pirbsdbrc )
 {
     for ( IRBSDBRC irbsdbrc = 0; irbsdbrc <= m_irbsdbrcMaxInUse; ++irbsdbrc )
@@ -3605,6 +3829,8 @@ BOOL CRBSRevertContext::FRBSDBRC( PCWSTR wszDatabaseName, IRBSDBRC* pirbsdbrc )
     return fFalse;
 }
 
+// Initializes the checkpoint we will be maintaining for the revert to persist the revert context.
+//
 ERR CRBSRevertContext::ErrRevertCheckpointInit()
 {
     Assert( m_wszRBSAbsRootDirPath );
@@ -3643,6 +3869,7 @@ ERR CRBSRevertContext::ErrRevertCheckpointInit()
 
         if ( err < JET_errSuccess )
         {
+            // Assume we don't have a checkpoint if checkpoint file is corrupt.
             memset( m_prbsrchk, 0, sizeof( RBSREVERTCHECKPOINT ) );
         }
     }
@@ -3686,6 +3913,8 @@ ERR CRBSRevertContext::ErrRevertCheckpointCleanup()
     return m_pinst->m_pfsapi->ErrFileDelete( wszChkFullName );
 }
 
+// Initialize database revert context from the RBS attach info only if database revert context for that database doesn't exist already.
+//
 ERR CRBSRevertContext::ErrRBSDBRCInitFromAttachInfo( const BYTE* pbRBSAttachInfo, SIGNATURE* psignRBSHdrFlush )
 {
     ERR err                 = JET_errSuccess;
@@ -3717,6 +3946,8 @@ ERR CRBSRevertContext::ErrRBSDBRCInitFromAttachInfo( const BYTE* pbRBSAttachInfo
         }
         else if ( m_rgprbsdbrcAttached[ irbsdbrc ]->DbTimePrevDirtied() != prbsattachinfo->DbtimeDirtied() )
         {
+            // If a future RBS with the current db's attach info didn't have previous db time set, it probably means that db was created around that time or the previous one was invalid.
+            // If created around that time, we shouldn't have past attach infos.
             Error( ErrERRCheck( JET_errRBSRCInvalidRBS ) );
         }
         else
@@ -3729,6 +3960,8 @@ HandleError:
     return err;
 }
 
+// Calculates the RBS generation range to apply to revert the databases beyond the expected time.
+//
 ERR CRBSRevertContext::ErrComputeRBSRangeToApply( LOGTIME ltRevertExpected, LOGTIME* pltRevertActual )
 {
     Assert( m_prbsrchk );
@@ -3752,11 +3985,14 @@ ERR CRBSRevertContext::ErrComputeRBSRangeToApply( LOGTIME ltRevertExpected, LOGT
 
         if ( LOGTIME::CmpLogTime( rbsfilehdr.rbsfilehdr.tmCreate, ltRevertExpected ) > 0 )
         {
+            // If there is no previous RBS gen time set, the previous RBS gen is probably invalid, so we can't revert past this point.
             if ( !rbsfilehdr.rbsfilehdr.tmPrevGen.FIsSet() )
             {
                 Error( ErrERRCheck( JET_errRBSRCInvalidRBS ) );
             }
 
+            // If this is not the max RBS gen, we should have captured tmPrevGen from the next RBS gen. 
+            // We will compare it with that time with the tmCreate on RBS gen for validation.
             if ( rbsGen != lRBSGenMax )
             {
                 if ( LOGTIME::CmpLogTime( rbsfilehdr.rbsfilehdr.tmCreate, tmPrevRBSGen ) != 0 )
@@ -3765,6 +4001,7 @@ ERR CRBSRevertContext::ErrComputeRBSRangeToApply( LOGTIME ltRevertExpected, LOGT
                 }
             }
             
+             // We will capture the previous RBS gen time set
             tmPrevRBSGen = rbsfilehdr.rbsfilehdr.tmPrevGen;
         }
         else
@@ -3803,6 +4040,9 @@ HandleError:
     return err;
 }
 
+// Adjust the expected revert time if we are already in the middle of a revert. 
+// We will look at the revert checkpoint to determine that.
+//
 ERR CRBSRevertContext::ErrUpdateRevertTimeFromCheckpoint( LOGTIME* pltRevertExpected )
 {
     Assert( m_prbsrchk );
@@ -3811,12 +4051,17 @@ ERR CRBSRevertContext::ErrUpdateRevertTimeFromCheckpoint( LOGTIME* pltRevertExpe
     {
         INT fCompare = LOGTIME::CmpLogTime( m_prbsrchk->rbsrchkfilehdr.tmCreateCurrentRBSGen, *pltRevertExpected );
         
+        // If we are already in reverting state and revert time of current RBS gen being applied is lower than expected revert time
+        // we will use the former as our expected revert time since we have already gone beyond the point we want to revert to.
         if ( fCompare < 0 )
         {
             UtilMemCpy( pltRevertExpected, &m_prbsrchk->rbsrchkfilehdr.tmCreateCurrentRBSGen, sizeof( LOGTIME ) );
         }
         else if ( m_prbsrchk->rbsrchkfilehdr.le_rbsrevertstate == JET_revertstateCopingLogs && fCompare > 0 )
         {
+            // If we are in copying logs state, we will only allow revert to the current RBS for which we are copying logs for. 
+            // We won't allow going further behind as we might have already copied logs partially.
+            // TODO SOMEONE: If user pass delete logs flag we should be able to allow, but requires extra handling from checkpoint file as we delete logs only at the end of revert.
             return ErrERRCheck( JET_errRBSRCCopyLogsRevertState );
         }
     }
@@ -3824,6 +4069,8 @@ ERR CRBSRevertContext::ErrUpdateRevertTimeFromCheckpoint( LOGTIME* pltRevertExpe
     return JET_errSuccess;
 }
 
+// Update RBS range based on revert checkpoint file as we might have already applied certain generations.
+//
 VOID CRBSRevertContext::UpdateRBSGenToApplyFromCheckpoint()
 {
     Assert( m_prbsrchk );
@@ -3835,6 +4082,8 @@ VOID CRBSRevertContext::UpdateRBSGenToApplyFromCheckpoint()
     }
 }
 
+// Update revert checkpoint to the given state and RBSPOS.
+//
 ERR CRBSRevertContext::ErrUpdateRevertCheckpoint( ULONG revertstate, RBS_POS rbspos, LOGTIME tmCreateCurrentRBSGen, BOOL fUpdateRevertedPageCount )
 {
     Assert( revertstate != JET_revertstateNone );
@@ -3864,6 +4113,7 @@ ERR CRBSRevertContext::ErrUpdateRevertCheckpoint( ULONG revertstate, RBS_POS rbs
     {
         m_prbsrchk->rbsrchkfilehdr.le_cSecInRevert = m_prbsrchk->rbsrchkfilehdr.le_cSecInRevert + UtilConvertFileTimeToSeconds( ftSinceLastUpdate );
 
+        // Update after each time we flush the checkpoint.
         m_ftRevertLastUpdate = UtilGetCurrentFileTime();
     }
 
@@ -3879,6 +4129,7 @@ ERR CRBSRevertContext::ErrUpdateRevertCheckpoint( ULONG revertstate, RBS_POS rbs
                 Assert( lgenMinReqDb <= lgenMaxReqDb );
                 Assert( ( lgenMinReqDb != 0 && lgenMaxReqDb !=0 ) || lgenMinReqDb == lgenMaxReqDb );
                 
+                // If db was clean shutdown we will set min and max required to be the last consistent state as we need this main for reporting purpose.
                 if ( lgenMinReqDb == 0 )
                 {
                     lgenMinReqDb = m_rgprbsdbrcAttached[ irbsdbrc ]->LgenLastConsistent();
@@ -3909,7 +4160,7 @@ ERR CRBSRevertContext::ErrUpdateRevertCheckpoint( ULONG revertstate, RBS_POS rbs
     {
         LittleEndian<QWORD> le_cpgRevertedCurRBSGen = m_cPagesRevertedCurRBSGen;
         m_prbsrchk->rbsrchkfilehdr.le_cPagesReverted += le_cpgRevertedCurRBSGen;
-        m_cPagesRevertedCurRBSGen = 0;
+        m_cPagesRevertedCurRBSGen = 0; // Reset the counter.
     }
 
     Assert( m_prbsrchk->rbsrchkfilehdr.le_rbsposCheckpoint.le_lGeneration >= rbspos.lGeneration ||  
@@ -3931,6 +4182,8 @@ ERR CRBSRevertContext::ErrUpdateRevertCheckpoint( ULONG revertstate, RBS_POS rbs
                 m_pfapirbsrchk );
 }
 
+// Initializes RBS revert context based on the expected time we want to revert to.
+//
 ERR CRBSRevertContext::ErrInitContext( LOGTIME ltRevertExpected, LOGTIME* pltRevertActual, CPG cpgCache, BOOL fDeleteExistingLogs )
 {
     ERR err = JET_errSuccess;
@@ -3939,6 +4192,7 @@ ERR CRBSRevertContext::ErrInitContext( LOGTIME ltRevertExpected, LOGTIME* pltRev
 
     Call( ErrRBSInitPaths_( m_pinst, &m_wszRBSAbsRootDirPath, &m_wszRBSBaseName ) );
 
+    // Make sure they are initialized to valid paths.
     Assert( m_wszRBSBaseName );
     Assert( m_wszRBSBaseName[ 0 ] );
 
@@ -3956,12 +4210,15 @@ ERR CRBSRevertContext::ErrInitContext( LOGTIME ltRevertExpected, LOGTIME* pltRev
     m_ltRevertTo            = *pltRevertActual;
     m_fDeleteExistingLogs   = fDeleteExistingLogs;
 
+    // We will rerun the log checks even though we do this in the prepare stage as the state could have changed between the time we prepared and completed revert.
     Call( ErrRBSPerformLogChecks( m_pinst, m_wszRBSAbsRootDirPath, m_wszRBSBaseName, m_lRBSMinGenToApply, !fDeleteExistingLogs, &rbsfilehdr, wszRBSAbsLogPath ) );
 
 HandleError:
     return err;
 }
 
+// Create and initalize RBS revert context for the given instance.
+//
 ERR CRBSRevertContext::ErrRBSRevertContextInit( 
                 INST*       pinst, 
         __in    LOGTIME     ltRevertExpected,
@@ -3990,6 +4247,8 @@ HandleError:
     return err;
 }
 
+// Add the given page record to the corresponding database's revert context.
+//
 ERR CRBSRevertContext::ErrAddPageRecord( void* pvPage, DBID dbid, PGNO pgno )
 {
     Assert( m_mpdbidirbsdbrc[ dbid ] != irbsdbrcInvalid );
@@ -4005,6 +4264,8 @@ HandleError:
     return err;
 }
 
+// Check if a page is already capture in pages' corresonding database revert context.
+//
 BOOL CRBSRevertContext::FPageAlreadyCaptured( DBID dbid, PGNO pgno )
 {
     Assert( m_mpdbidirbsdbrc[ dbid ] != irbsdbrcInvalid );
@@ -4014,6 +4275,10 @@ BOOL CRBSRevertContext::FPageAlreadyCaptured( DBID dbid, PGNO pgno )
     return m_rgprbsdbrcAttached[ m_mpdbidirbsdbrc[ dbid ] ]->FPageAlreadyCaptured( pgno );
 }
 
+// Apply the given RBS record to the databases.
+//
+// fDbHeaderOnly - We will go through the just to capture the database header. fDbHeaderOnly should be passed only for the lowest RBS gen we applied.
+//                 We will need this only if we were in the final phase of revert (CopyingLogs) and we hit a failure
 ERR CRBSRevertContext::ErrApplyRBSRecord( RBSRecord* prbsrec, BOOL fCaptureDbHdrFromRBS, BOOL fDbHeaderOnly, BOOL* pfGivenDbfilehdrCaptured )
 {
     BYTE                bRecType        = prbsrec->m_bRecType;
@@ -4027,8 +4292,10 @@ ERR CRBSRevertContext::ErrApplyRBSRecord( RBSRecord* prbsrec, BOOL fCaptureDbHdr
 
     switch ( bRecType )
     {
+        // No action to be taken for database header.
         case rbsrectypeDbHdr:
         {
+            // TODO SOMEONE: Once we have checkpoint for specific RBS position we need to probably capture this in our Revert checkpoint file.
             if ( !fCaptureDbHdrFromRBS )
             {
                 break;
@@ -4052,6 +4319,7 @@ ERR CRBSRevertContext::ErrApplyRBSRecord( RBSRecord* prbsrec, BOOL fCaptureDbHdr
             break;
         }
 
+        // For db attach record, map dbid to the corresponding RBS DB revert context index as dbid might have been different before.
         case rbsrectypeDbAttach:
         {
             IRBSDBRC irbsdbrc                   = irbsdbrcInvalid;
@@ -4071,6 +4339,7 @@ ERR CRBSRevertContext::ErrApplyRBSRecord( RBSRecord* prbsrec, BOOL fCaptureDbHdr
             Assert( prbsdbrc );
             Assert( prbsdbatchrec->m_dbid < dbidMax );
 
+            // Set the dbid to irbsdbrc mapping based on the dbid from the attach info.
             if ( prbsdbatchrec->m_dbid != prbsdbrc->DBIDCurrent() )
             {
                 if ( prbsdbrc->DBIDCurrent() == dbidMax )
@@ -4079,11 +4348,13 @@ ERR CRBSRevertContext::ErrApplyRBSRecord( RBSRecord* prbsrec, BOOL fCaptureDbHdr
                 }
                 else if ( m_mpdbidirbsdbrc[ prbsdbrc->DBIDCurrent() ] == irbsdbrc )
                 {
+                    // the dbid for the database has changed. Set the old dbid to irbsdbrc mapping to invalid
                     m_mpdbidirbsdbrc[ prbsdbrc->DBIDCurrent() ] = irbsdbrcInvalid;
                 }
 
                 if ( m_mpdbidirbsdbrc[ prbsdbatchrec->m_dbid ] != irbsdbrcInvalid )
                 {
+                    // There is a different db with this dbid. Let's reset the dbid of that database.
                     m_rgprbsdbrcAttached[ m_mpdbidirbsdbrc[ prbsdbatchrec->m_dbid ] ]->SetDBIDCurrent( dbidMax ); 
                 }
 
@@ -4121,6 +4392,7 @@ ERR CRBSRevertContext::ErrApplyRBSRecord( RBSRecord* prbsrec, BOOL fCaptureDbHdr
                 }
                 else
                 {
+                    // If not decompressing copy the page dage directly into the buffer.
                     UtilMemCpy( pvPage, prbsdbpgrec->m_rgbData, dataImage.Cb() );
                 }
 
@@ -4155,6 +4427,8 @@ ERR CRBSRevertContext::ErrApplyRBSRecord( RBSRecord* prbsrec, BOOL fCaptureDbHdr
                 cpage.GetRevertedNewPage( prbsdbnewpgrec->m_pgno, pvPage, m_cbDbPageSize );
                 Assert( cpage.Pgft() == CPAGE::PageFlushType::pgftUnknown );
 
+                // For new page record type, we don't store the preimage of the page since it indicates that it was a new page before it was updated.
+                // We will just write out an empty page for such a page.
                 Call( ErrAddPageRecord( pvPage, prbsdbnewpgrec->m_dbid, prbsdbnewpgrec->m_pgno ) );
             }
 
@@ -4178,6 +4452,7 @@ HandleError:
 
 ERR CRBSRevertContext::ErrFlushPages( BOOL fFlushDbHdr )
 {
+    // TODO SOMEONE: Can perform async flush across HDD/SSD.
     ERR err = JET_errSuccess;
     
     for ( IRBSDBRC irbsdbrc = 0; irbsdbrc <= m_irbsdbrcMaxInUse; ++irbsdbrc )
@@ -4187,12 +4462,17 @@ ERR CRBSRevertContext::ErrFlushPages( BOOL fFlushDbHdr )
         m_cPagesRevertedCurRBSGen += cpgReverted;
     }
 
+    // Reset the number of pages currently cached once we flush the pages in the current cache.
     m_cpgCached = 0;
 
 HandleError:
     return err;
 }
 
+// Apply given RBS gen to the databases.
+//
+// fDbHeaderOnly - We will go through the just to capture the database header. fDbHeaderOnly should be passed only for the lowest RBS gen we applied.
+//                 We will need this only if we were in the final phase of revert (CopyingLogs) and we hit a failure
 ERR CRBSRevertContext::ErrRBSGenApply( LONG lRBSGen, BOOL fDbHeaderOnly )
 {
     ERR              err = JET_errSuccess;
@@ -4220,11 +4500,13 @@ ERR CRBSRevertContext::ErrRBSGenApply( LONG lRBSGen, BOOL fDbHeaderOnly )
 
     Assert( prbs->RBSFileHdr() );    
 
+    // Don't need to update checkpoint if we are just trying to capture the database header.
     if ( !fDbHeaderOnly )
     {
         Call( ErrUpdateRevertCheckpoint( JET_revertstateInProgress, rbspos, prbs->RBSFileHdr()->rbsfilehdr.tmCreate, fTrue ) );
     }
 
+    // Fault injection to test checkpoint helps in skipping applying RBS generation again and we don't hit any issues continuing from checkpoint.
     if ( lRBSGen < m_lRBSMaxGenToApply )
     {
         Call( ErrFaultInjection( 50123 ) );
@@ -4248,6 +4530,8 @@ ERR CRBSRevertContext::ErrRBSGenApply( LONG lRBSGen, BOOL fDbHeaderOnly )
             Error( ErrERRCheck( JET_errRBSRCRevertCancelled ) );
         }
 
+        // We just want to go through the RBS till we capture the database header for all the databases attached.
+        // If the current record was db file header record and was captured, we will check if we are done and break out of the loop.
         if ( fDbHeaderOnly && fGivenDbfilehdrCaptured )
         {
             BOOL fAllCaptured = fTrue;
@@ -4268,6 +4552,8 @@ ERR CRBSRevertContext::ErrRBSGenApply( LONG lRBSGen, BOOL fDbHeaderOnly )
 
     if ( err == JET_wrnNoMoreRecords && !fDbHeaderOnly )
     {
+        // We will update revert page count in db header at the end of generation since we might crash and have wrong numbers.
+        // 
         Call( ErrFlushPages( fTrue ) );
         err = JET_errSuccess;
     }
@@ -4275,12 +4561,14 @@ ERR CRBSRevertContext::ErrRBSGenApply( LONG lRBSGen, BOOL fDbHeaderOnly )
 HandleError:
     if ( prbs )
     {
+        // This should the delete the file handle as well.
         delete prbs;
         prbs = NULL;
     }
 
     if ( m_pcprintfRevertTrace )
     {
+        //  trace the error status ... 
         TraceFuncComplete( m_pcprintfRevertTrace, __FUNCTION__, err );
     }
 
@@ -4302,6 +4590,7 @@ ERR CRBSRevertContext::ErrUpdateDbStatesAfterRevert()
 
     Assert( m_pinst->m_pfsapi );
 
+    // Delete the checkpoint file.
     err = m_pinst->m_pfsapi->ErrFileDelete( wszPathJetChkLog );
 
     Call( err == JET_errFileNotFound ? JET_errSuccess : err );
@@ -4317,6 +4606,9 @@ HandleError:
     return err;
 }
 
+// Manage the revert context at the end of revert.
+// Manage logs, database state, checkpoint file
+//
 ERR CRBSRevertContext::ErrManageStateAfterRevert( LONG* pLgenNewMinReq, LONG* pLgenNewMaxReq )
 {
     WCHAR wszRBSAbsLogPath[ IFileSystemAPI::cchPathMax ];
@@ -4324,6 +4616,7 @@ ERR CRBSRevertContext::ErrManageStateAfterRevert( LONG* pLgenNewMinReq, LONG* pL
 
     ERR     err         = JET_errSuccess;
 
+    // We will rerun the log checks even though we do this in the prepare stage as the state could have changed between the time we prepared and completed revert.
     Call( ErrRBSPerformLogChecks( m_pinst, m_wszRBSAbsRootDirPath, m_wszRBSBaseName, m_lRBSMinGenToApply, !m_fDeleteExistingLogs, &rbsfilehdr, wszRBSAbsLogPath ) );
  
     if ( m_fDeleteExistingLogs )
@@ -4334,11 +4627,17 @@ ERR CRBSRevertContext::ErrManageStateAfterRevert( LONG* pLgenNewMinReq, LONG* pL
         Call( ErrRBSDeleteAllFiles( m_pinst->m_pfsapi, SzParam( m_pinst, JET_paramLogFilePath ), wszLogDeleteFilter, fFalse ) );
     }
 
+    // We will keep rest of the states the same and update only the state.
+    // We might already be in copying logs state due to a crash. We will skip updating checkpoint again, if so.
     if ( m_prbsrchk->rbsrchkfilehdr.le_rbsrevertstate != JET_revertstateCopingLogs )
     {
         Call( ErrUpdateRevertCheckpoint( JET_revertstateCopingLogs, m_prbsrchk->rbsrchkfilehdr.le_rbsposCheckpoint, m_prbsrchk->rbsrchkfilehdr.tmCreateCurrentRBSGen, fFalse ) );
     }
 
+    // Now copy logs from RBS log directory to actual log directory.
+    // We will try to find eCurrent log if max numbered log is missing in the case when we are deleting logs from target directory.
+    // If we are not deleting, target directory should have a more complete version of the current log and we do a subset check for the same above.
+    // But in case we are deleting, we should copy the current log if max numbered log is missing.
     Call( ErrRBSCopyRequiredLogs_(
         m_pinst,
         rbsfilehdr.rbsfilehdr.le_lGenMinLogCopied,
@@ -4348,6 +4647,7 @@ ERR CRBSRevertContext::ErrManageStateAfterRevert( LONG* pLgenNewMinReq, LONG* pL
         fFalse,
         m_fDeleteExistingLogs ) );
 
+    // Fault injection to test continuing copying logs state.
     Call( ErrFaultInjection( 50124 ) );
 
     Call( ErrUpdateDbStatesAfterRevert() );
@@ -4365,6 +4665,7 @@ ERR CRBSRevertContext::ErrManageStateAfterRevert( LONG* pLgenNewMinReq, LONG* pL
 HandleError:
     if ( err < JET_errSuccess && m_pcprintfRevertTrace )
     {
+        //  if we managed to at least getting tracing up, trace the issue ... 
         TraceFuncComplete( m_pcprintfRevertTrace, __FUNCTION__, err );
     }
 
@@ -4389,6 +4690,7 @@ ERR CRBSRevertContext::ErrExecuteRevert( JET_GRBIT grbit, JET_RBSREVERTINFOMISC*
 
     ERR err = JET_errSuccess;
 
+    // Delete old trace files if starting a new revert operation.
     Call( ErrBeginRevertTracing( m_prbsrchk->rbsrchkfilehdr.le_rbsrevertstate == JET_revertstateNone || m_prbsrchk->rbsrchkfilehdr.le_rbsrevertstate == JET_revertstateCompleted ) );
 
     TraceFuncBegun( m_pcprintfRevertTrace, __FUNCTION__ );
@@ -4402,6 +4704,7 @@ ERR CRBSRevertContext::ErrExecuteRevert( JET_GRBIT grbit, JET_RBSREVERTINFOMISC*
 
     if ( m_prbsrchk->rbsrchkfilehdr.le_rbsrevertstate != JET_revertstateCopingLogs )
     {
+        // Set all required databases' state to JET_dbstateRevertInProgress
         for ( IRBSDBRC irbsdbrc = 0; irbsdbrc <= m_irbsdbrcMaxInUse; ++irbsdbrc )
         {
             Call( m_rgprbsdbrcAttached[ irbsdbrc ]->ErrSetDbstateForRevert( m_prbsrchk->rbsrchkfilehdr.le_rbsrevertstate, m_ltRevertTo ) );
@@ -4411,6 +4714,7 @@ ERR CRBSRevertContext::ErrExecuteRevert( JET_GRBIT grbit, JET_RBSREVERTINFOMISC*
         {
             Call( ErrRBSGenApply( lRBSGen, fFalse ) );
 
+            // Reset bit map state once we have completed applying a revert snapshot.
             for ( IRBSDBRC irbsdbrc = 0; irbsdbrc <= m_irbsdbrcMaxInUse; ++irbsdbrc )
             {
                 Call( m_rgprbsdbrcAttached[ irbsdbrc ]->ErrResetSbmDbPages() );
@@ -4424,6 +4728,7 @@ ERR CRBSRevertContext::ErrExecuteRevert( JET_GRBIT grbit, JET_RBSREVERTINFOMISC*
     }
     else
     {
+        // Since we have already reached the copying logs stage, we need to re-capture the database header alone from the lowest RBS gen being applied.
         Call( ErrRBSGenApply( m_lRBSMinGenToApply, fTrue ) );
     }
     
@@ -4443,6 +4748,7 @@ ERR CRBSRevertContext::ErrExecuteRevert( JET_GRBIT grbit, JET_RBSREVERTINFOMISC*
 
     TraceFuncComplete( m_pcprintfRevertTrace, __FUNCTION__, JET_errSuccess );
 
+    // Set revert complete on all the databases' IRS raw files.
     for ( IRBSDBRC irbsdbrc = 0; irbsdbrc <= m_irbsdbrcMaxInUse; ++irbsdbrc )
     {
         TraceFuncComplete( m_rgprbsdbrcAttached[ irbsdbrc ]->CprintfIRSTrace(), __FUNCTION__, JET_errSuccess );
@@ -4487,9 +4793,11 @@ HandleError:
     {
         if ( m_pcprintfRevertTrace )
         {
+            //  if we managed to at least getting tracing up, trace the issue ... 
             TraceFuncComplete( m_pcprintfRevertTrace, __FUNCTION__, err );
         }
 
+        // Set revert complete on all the databases' IRS raw files.
         for ( IRBSDBRC irbsdbrc = 0; irbsdbrc <= m_irbsdbrcMaxInUse; ++irbsdbrc )
         {
             if ( m_rgprbsdbrcAttached[ irbsdbrc ]->CprintfIRSTrace() )

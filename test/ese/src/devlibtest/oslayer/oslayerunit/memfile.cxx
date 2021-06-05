@@ -5,6 +5,7 @@
 
 enum IOREASONPRIMARY : BYTE
 {
+    //iorpNone = 0, defined generically by OS layer
     iorpInvalid = 0,
 
     iorpDefault,
@@ -12,15 +13,19 @@ enum IOREASONPRIMARY : BYTE
 
 enum IOREASONSECONDARY : BYTE
 {
+    //iorsNone = 0, defined generically by OS layer
     };
 
 enum IOREASONFLAGS : BYTE
 {
+    //iorfNone = 0, defined generically by OS layer
     };
 
 
 
+//  ================================================================
 class MEMFILE: public UNITTEST
+//  ================================================================
 {
     private:
         static MEMFILE s_instance;
@@ -53,7 +58,9 @@ bool MEMFILE::FRunUnderESENT() const        { return true; }
 bool MEMFILE::FRunUnderESE97() const        { return true; }
 
 
+//  ================================================================
 ERR MEMFILE::ErrTest()
+//  ================================================================
 {
     JET_ERR         err     = JET_errSuccess;
     IFileAPI        *pfile  = NULL;
@@ -81,10 +88,12 @@ ERR MEMFILE::ErrTest()
         return JET_errOutOfMemory;
     }
 
+    // Test path
     WCHAR wszPathReturned[OSFSAPI_MAX_PATH]; 
     OSTestCheck( pfile->ErrPath( wszPathReturned ) == JET_errSuccess );
     OSTestCheck( memcmp( wszPath, wszPathReturned, sizeof( wszPath ) ) == 0 );
 
+    // Check size
     QWORD cbSizeReturned;
     OSTestCheck( pfile->ErrSize( &cbSizeReturned, IFileAPI::filesizeLogical ) == JET_errSuccess );
     QWORD cbSizeReturnedOnDisk;
@@ -92,15 +101,18 @@ ERR MEMFILE::ErrTest()
     OSTestCheckErr( pfile->ErrSize( &cbSizeReturnedOnDisk, IFileAPI::filesizeOnDisk ) );
     OSTestCheck( cbSizeReturned == cbSizeReturnedOnDisk );
 
+    // Check state
     BOOL fReadOnly = fFalse;
     OSTestCheck( pfile->ErrIsReadOnly( &fReadOnly ) == JET_errSuccess );
     OSTestCheck( fReadOnly == fTrue );
     
+    // Read data
     BYTE dataReturned[200];
     err = pfile->ErrIORead( *TraceContextScope( iorpDefault ), 0, sizeof( data ), dataReturned, qosIONormal );
     OSTestCheck( err == JET_errSuccess );
     OSTestCheck( memcmp( data, dataReturned, sizeof( data ) ) == 0 );
 
+    // Read past end
     err = pfile->ErrIORead( *TraceContextScope( iorpDefault ), 1, sizeof( data ), dataReturned, qosIONormal );
     OSTestCheck( err == JET_errFileIOBeyondEOF );
 

@@ -4,13 +4,15 @@
 #include "sync.hxx"
 #include "types.hxx"
 
-#include "jet.h"
+#include "jet.h"            //  Public JET API definitions
 
-#include "errdata.hxx"
-
-
+#include "errdata.hxx"      //  header for this library
 
 
+
+
+//  Define the table entry translations.
+//
 
 #define ERR_DATA_DEFN( flags, cat, errNum, errSym, errStr ) { flags, errNum, errSym, errStr, JET_errcat ## cat },
 
@@ -23,6 +25,8 @@
 #define OBSOLETE_ERR( errNum, cat, errSym )     ERR_DATA_DEFN( fErrObsolete | fErrErr,  cat, errNum, errSym, #errSym )
 #define OBSOLETE_WRN( errNum, cat, errSym )     ERR_DATA_DEFN( fErrObsolete | fErrWrn,  cat, errNum, errSym, #errSym )
 
+//  Begin the list of actual error data structures.
+//
 
 static ErrData rgerrdata [] =
 {
@@ -30,6 +34,7 @@ static ErrData rgerrdata [] =
 };
 
 
+//  Looks up the ErrData via an index value.  If index is beyond table size, NULL is returned.
 
 const ErrData * PerrdataEntryI( __in const INT iEntry )
 {
@@ -41,6 +46,7 @@ const ErrData * PerrdataEntryI( __in const INT iEntry )
     return &( rgerrdata[iEntry] );
 }
 
+//  Looks up the ErrData entry via an JET_ERR.
 
 const ErrData * PerrdataLookupErrValue( __in const JET_ERR errLookup )
 {

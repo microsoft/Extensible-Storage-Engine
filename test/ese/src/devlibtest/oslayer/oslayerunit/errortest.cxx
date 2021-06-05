@@ -3,14 +3,20 @@
 
 #include "osunitstd.hxx"
 
+//  ACHTUNG! This test is (unfortuately necessarily) VERY sensitive to code 
+//  motility, try to only append to the test, to avoid breaking previous test
+//  cases.  We also put in some buffer, and spacing to allow changes later.
+
+// buffer...
 
 
 
 
 
 
-
+//  ================================================================
 class ERRORHANDLING : public UNITTEST
+//  ================================================================
 {
 
     private:
@@ -58,6 +64,7 @@ bool ERRORHANDLING::FRunUnderESE97() const      { return true; }
 
 
 #ifdef DEBUG
+    // The TLS info is only valid in checked / debug builds ...
     const BOOL g_fDebug = true;
 #else
     const BOOL g_fDebug = false;
@@ -75,7 +82,7 @@ bool FTestCallR()
 
     wprintf( L"\t\tTesting CallR()\n");
 
-    Call( ErrFunction( JET_errSuccess ) );
+    Call( ErrFunction( JET_errSuccess ) );  // line 86 according to notepad.exe
     OSTestCheck( JET_errSuccess == err );
     OSTestCheck( !g_fDebug || fTrue );
 
@@ -89,7 +96,9 @@ HandleError:
 
 
 
+//  ================================================================
 ERR ERRORHANDLING::ErrTest()
+//  ================================================================
 {
     JET_ERR err = JET_errSuccess;
 
@@ -97,6 +106,7 @@ ERR ERRORHANDLING::ErrTest()
 
     COSLayerPreInit     oslayer;
 
+    // FOSPreinit()
     if ( !oslayer.FInitd() )
     {
         wprintf( L"Out of memory error during OS Layer pre-init." );
@@ -104,18 +114,26 @@ ERR ERRORHANDLING::ErrTest()
         goto HandleError;
     }
 
+    //  Important: By not calling ErrOSInit() we are asserting that the
+    //  OS Layer error handling facilities work pre-ErrOSInit().
+    //OSTestCall( ErrOSInit() );
 
+    // We use FXxxx, instead of ErrXxxx, b/c there is alot of errors 
+    // flying around here....
     OSTestCheck( FTestCallR() );
 
 HandleError:
 
+//  OSTerm();
 
     return err;
 }
 
 
 
+//  ================================================================
 class SzSourceFileNameFuncValidation : public UNITTEST
+//  ================================================================
 {
 
     private:
@@ -162,13 +180,18 @@ bool SzSourceFileNameFuncValidation::FRunUnderESENT() const     { return true; }
 bool SzSourceFileNameFuncValidation::FRunUnderESE97() const     { return true; }
 
 
+//  someone defined JETUNITTEST() at the ESE layer, not the OS Layer, so we'll define tests
+//  here for now, until it can be moved.
 
+//  ================================================================
 ERR SzSourceFileNameFuncValidation::ErrTest()
+//  ================================================================
 {
     JET_ERR err = JET_errSuccess;
 
     COSLayerPreInit     oslayer;
 
+    // FOSPreinit()
     if ( !oslayer.FInitd() )
     {
         wprintf( L"Out of memory error during OS Layer pre-init." );
@@ -176,6 +199,7 @@ ERR SzSourceFileNameFuncValidation::ErrTest()
         goto HandleError;
     }
 
+    //  "good" cases
 
     OSTestCheck( 0 == strcmp( "blah.cxx", SzSourceFileName( "C:\\mysrc\\blah.cxx" ) ) );
     OSTestCheck( 0 == strcmp( "blah", SzSourceFileName( "C:\\mysrc\\blah" ) ) );
@@ -183,10 +207,12 @@ ERR SzSourceFileNameFuncValidation::ErrTest()
     OSTestCheck( 0 == strcmp( "b", SzSourceFileName( "\\a\\b" ) ) );
     OSTestCheck( 0 == strcmp( "blah.cxx", SzSourceFileName( "blah.cxx" ) ) );
 
+    //  "null" / empty file name cases
 
     OSTestCheck( 0 == strcmp( "", SzSourceFileName( "" ) ) );
-    OSTestCheck( 0 == strcmp( "", SzSourceFileName( NULL ) ) );
+    OSTestCheck( 0 == strcmp( "", SzSourceFileName( NULL ) ) ); // should not AV
 
+    //  "bad" cases
 
     UINT wAssertActionSaved = COSLayerPreInit::SetAssertAction( JET_AssertSkipAll );
 

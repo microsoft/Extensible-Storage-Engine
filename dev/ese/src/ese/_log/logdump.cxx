@@ -4,7 +4,7 @@
 #include "logstd.hxx"
 #include "_dump.hxx"
 
-
+/* in-memory log buffer. */
 #define         csecLGBufSize 100
 
 VOID DUMPIAttachInfo( const ATCHCHK * const patchchk )
@@ -29,7 +29,10 @@ VOID DUMPIAttachInfo( const ATCHCHK * const patchchk )
 }
 
 
+// Dump the ATTACHINFO from DbList
+//  ================================================================
 VOID DUMPIAttachInfo( const ATTACHINFO * const pattachinfo )
+//  ================================================================
 {
     const DBTIME    dbtime  = pattachinfo->Dbtime();
     DUMPPrintF( "		 dbtime: %I64u (%u-%u)\n",
@@ -141,6 +144,8 @@ ERR LOG::ErrLGDumpCheckpoint( __in PCWSTR wszCheckpoint )
                 }
                 else
                 {
+                    //  should never be NULL
+                    //
                     Assert( fFalse );
                 }
             }
@@ -148,6 +153,8 @@ ERR LOG::ErrLGDumpCheckpoint( __in PCWSTR wszCheckpoint )
     }
 
 HandleError:
+    //  if ( NULL != g_rgfmp )
+    //      FMP::Term();
     OSMemoryPageFree( pcheckpoint );
 
     return err;
@@ -155,17 +162,19 @@ HandleError:
 
 struct DIRLOGGENERATIONINFO
 {
-    ULONG   ulgenMax;
-    ULONG   ulgenMin;
-    ULONG   cMaxLogDigits;
-    BOOL    fLogDigitsChanged;
-    BOOL    fCurrentLog;
+    ULONG   ulgenMax;           // Maximum archive generation id
+    ULONG   ulgenMin;           // Minimum archive generation id
+    ULONG   cMaxLogDigits;      // Maximum digits (either 0, 5, or 8) for log files
+    BOOL    fLogDigitsChanged;  // Does the number of digits in log file change?
+    BOOL    fCurrentLog;            // Does the current log exist?
 };
 
-
+/*
+ * Get the log generation information from the specified directory
+ */
 LOCAL ERR ErrGetDirLogGenerationInfo(
         INST *pinst,
-        _In_z_count_c_( OSFSAPI_MAX_PATH ) PCWSTR wszFind,
+        _In_z_count_c_( OSFSAPI_MAX_PATH /*IFileSystemAPI::cchPathMax*/) PCWSTR wszFind,
         LONG lgenStart,
         DIRLOGGENERATIONINFO *pDirLogGenInfo )
 {
@@ -196,6 +205,7 @@ LOCAL ERR ErrGetDirLogGenerationInfo(
         WCHAR   wszExtT[IFileSystemAPI::cchPathMax];
         LONG    lGen = 0;
 
+        //  get file name and extension
         Call( pffapi->ErrNext() );
         Call( pffapi->ErrPath( wszFileName ) );
         Call( pfsapi->ErrPathParse( wszFileName, wszDirT, wszFNameT, wszExtT ) );
@@ -211,6 +221,7 @@ LOCAL ERR ErrGetDirLogGenerationInfo(
                     pDirLogGenInfo->ulgenMin = min( pDirLogGenInfo->ulgenMin, (ULONG)lGen );
                     if ( 0 != pDirLogGenInfo->cMaxLogDigits && cCurrentLogDigits != pDirLogGenInfo->cMaxLogDigits )
                     {
+                        // log digits changed
                         Assert( 5 == cCurrentLogDigits || 8 == cCurrentLogDigits );
                         pDirLogGenInfo->fLogDigitsChanged = fTrue;
                     }
@@ -219,6 +230,7 @@ LOCAL ERR ErrGetDirLogGenerationInfo(
             }
             else if ( 3 == LOSStrLengthW( wszFNameT ) && 0 == _wcsicmp( wszFNameT, SzParam( pinst, JET_paramBaseName ) ) )
             {
+                //  found <inst>.[log|.jtx]
                 pDirLogGenInfo->fCurrentLog = fTrue;
             }
         }
@@ -243,7 +255,11 @@ HandleError:
     return err;
 }
 
-
+/*
+ * Giving a generation number, this function will return the next one which has corresponding log file
+ * Exchange12 146373: Use the obtained maximum/minimum generation to speed up nexgen
+ * with complexity O(N)
+ */
 LOCAL ERR ErrFindNextGen(
         INST *pinst,
         const DIRLOGGENERATIONINFO * const pDirLogGenInfo,
@@ -272,12 +288,15 @@ LOCAL ERR ErrFindNextGen(
 
     wszLogFile[0] = L'\0';
 
+    // Set the initial next generation number to exactly 1 ahead the current generation number
     ULONG ulgenNext = (ULONG)max( (ULONG)( *plgen + 1 ), pDirLogGenInfo->ulgenMin );
 
     forever
     {
         if ( ulgenNext > ( lGenerationEXXDuringDump ) )
         {
+            // we have run past the allowable limit, did not find log file
+            // caller expect file to be empty string, so set here.
             ulgenNext = lGenerationInvalidDuringDump;
             cLogDigits = 0;
             wszLogFile[0] = L'\0';
@@ -286,6 +305,8 @@ LOCAL ERR ErrFindNextGen(
         }
         else if ( ulgenNext > pDirLogGenInfo->ulgenMax )
         {
+            // Next gen falls into (pDirLogGenInfo->ulgenMax, lGenerationEXXDuringDump]
+            // Caller expects (lGenerationEXXDuringDump) as the generation number to be returned for the current log
             ulgenNext = lGenerationEXXDuringDump;
             if ( pDirLogGenInfo->fCurrentLog )
             {
@@ -315,6 +336,7 @@ LOCAL ERR ErrFindNextGen(
         }
         else
         {
+            // Next gen falls into (pDirLogGenInfo->ulgenMin, pDirLogGenInfo->ulgenMax], must be archived log file
 
             cLogDigits = pDirLogGenInfo->cMaxLogDigits;
             Assert( 5 == cLogDigits || 8 == cLogDigits );
@@ -333,6 +355,8 @@ LOCAL ERR ErrFindNextGen(
 
             if ( JET_errFileNotFound == err && fTrue == pDirLogGenInfo->fLogDigitsChanged )
             {
+                // There has log digits change. We have tried with maximum log digits, if we still have digits changes,
+                // the former turn must used 8 for the digits length
                 Assert ( 8 == cLogDigits );
 
                 cLogDigits = 5;
@@ -358,6 +382,7 @@ LOCAL ERR ErrFindNextGen(
 
             if ( JET_errSuccess == err )
             {
+                //  get file name
                 Call( pffapi->ErrPath( wszFileName ) );
                 OSStrCbCopyW( wszLogFile, cbLogFile, wszFileName );
                 break;
@@ -392,6 +417,8 @@ HandleError:
     return err;
 }
 
+//  report a corrupt or missing logfile
+//
 LOCAL VOID LGIReportLogfileCorrupt(
         const WCHAR * const wszLog,
         const ERR           err,
@@ -418,10 +445,12 @@ LOCAL VOID LGIReportLogfileCorrupt(
             pinst );
 }
 
+//  report a missing logfile or range of missing logfiles
+//
 LOCAL VOID LGIReportLogfilesMissing(
         const WCHAR * const wszPathedBaseName,
         const WCHAR * const wszGenBegin,
-        const WCHAR * const wszGenEnd,
+        const WCHAR * const wszGenEnd,  //  pass NULL if only one logfile is missing
         const WCHAR * const wszLogExt,
         const ERR           err,
         const INST * const  pinst )
@@ -437,6 +466,8 @@ LOCAL VOID LGIReportLogfilesMissing(
     Assert( NULL != wszLogExt );
     Assert( NULL != pinst );
 
+    //  compose fully-pathed logfile name
+    //
     Assert( wcslen( wszPathedBaseName ) + wcslen( wszGenBegin ) + wcslen( wszLogExt ) < sizeof(wszPathedLogfileBegin) );
     OSStrCbCopyW( wszPathedLogfileBegin, sizeof(wszPathedLogfileBegin), wszPathedBaseName );
     OSStrCbAppendW( wszPathedLogfileBegin, sizeof(wszPathedLogfileBegin), wszGenBegin );
@@ -445,6 +476,8 @@ LOCAL VOID LGIReportLogfilesMissing(
 
     if ( NULL != wszGenEnd )
     {
+        //  compose fully-pathed logfile name
+        //
         Assert( wcslen( wszPathedBaseName ) + wcslen( wszGenEnd ) + wcslen( wszLogExt ) < sizeof(wszPathedLogfileEnd) );
         OSStrCbCopyW( wszPathedLogfileEnd, sizeof(wszPathedLogfileEnd), wszPathedBaseName );
         OSStrCbAppendW( wszPathedLogfileEnd, sizeof(wszPathedLogfileEnd), wszGenEnd );
@@ -480,6 +513,7 @@ ERR ErrDUMPLogFromMemory( INST *pinst, __in PCWSTR wszLog, __in_bcount( cbBuffer
         CallR( ErrERRCheck( JET_errOutOfMemory ) );
     }
 
+    // Set up some global state to make it possible to call this logging function
 
     err = pinst->m_plog->ErrLGDumpLog( pfapi, &logdumpOp );
 
@@ -522,6 +556,9 @@ ERR ErrDUMPLog( INST *pinst, __in PCWSTR wszLog, const LONG lgenStart, const LON
     if ( 3 == LOSStrLengthW( wszLogFileName ) && 0 == LOSStrLengthW( wszLogFileExt ) )
     {
 
+        //
+        // This is dumping a series of log, by the specified log extension.
+        //
 
         LONG    lgen = 0;
         LONG    lgenLast = 0;
@@ -532,7 +569,7 @@ ERR ErrDUMPLog( INST *pinst, __in PCWSTR wszLog, const LONG lgenStart, const LON
         logdumpOp.m_loghdr = LOG::LOGDUMP_LOGHDR_INVALID;
         if ( grbit & JET_bitDBUtilOptionDumpLogInfoCSV )
         {
-            Assert( wszCsvDataFile );
+            Assert( wszCsvDataFile ); // otherwise we won't be printing to any file.
             logdumpOp.m_pcwpfCsvOut = &cpfCsvOut;
 
             DUMPPrintF( "\n      Csv file: %ws\n", wszCsvDataFile );
@@ -557,45 +594,69 @@ ERR ErrDUMPLog( INST *pinst, __in PCWSTR wszLog, const LONG lgenStart, const LON
         DUMPPrintF( "Verifying log files...\n" );
         DUMPPrintF( "     %sBase name: %ws\n", ( logdumpOp.m_iVerbosityLevel != LOG::ldvlBasic ) ? " " : "", SzParam( pinst, JET_paramBaseName ) );
 
+        //  sanitise starting generation
+        //
         if ( lgenStart > 0 && lgenStart <= lGenerationMaxDuringRecovery )
         {
             lgenStartSanitised = lgenStart;
         }
         else
         {
+            //  illegal starting generation, so just start from the first generation
+            //
             lgenStartSanitised = 1;
         }
 
+        //  sanitise ending generating
+        //
         if ( lgenEnd > 0 && lgenEnd <= lGenerationMaxDuringRecovery )
         {
+            //  ensure ending generation is at least as much as the
+            //  starting generation
+            //
             lgenEndSanitised = max( lgenStartSanitised, lgenEnd );
         }
         else
         {
+            //  illegal ending generation, so just set to the max
+            //
             lgenEndSanitised = lGenerationEXXDuringDump;
         }
 
+        //  if both starting and ending generation are 0, then the caller
+        //  didn't care to specify a log generation range, so don't bother
+        //  reporting it
+        //
         if ( lgenStart != 0 || lgenEnd != 0 )
         {
             DUMPPrintF( "     %sLog generation range: 0x%X-0x%X\n", ( logdumpOp.m_iVerbosityLevel != LOG::ldvlBasic ) ? " " : "", lgenStartSanitised, lgenEndSanitised );
         }
 
 TryAnotherExtension:
+        //  -1 because ErrFindNextGen() below will look for lgen+1
+        //
         lgen = lgenStartSanitised - 1;
 
+        //  form template for FileFind
+        //
         LGFileHelper::ErrLGMakeLogNameBaselessEx( wszLogFindTemplate, sizeof(wszLogFindTemplate), pinst->m_pfsapi,
-                wszLogFileDir, SzParam( pinst, JET_paramBaseName ), eArchiveLog, 0,
+                wszLogFileDir, SzParam( pinst, JET_paramBaseName ), eArchiveLog, 0, // <-- 0 means wildcard
                 wszLogExt, 0 );
         Call( ErrGetDirLogGenerationInfo( pinst, wszLogFindTemplate, lgen, &dirloginfo ) );
 
         Call( ErrFindNextGen( pinst, &dirloginfo, wszLogFileDir, wszLogExt, &lgen, &cLogDigits, wszLogFileName, sizeof(wszLogFileName) ) );
 
+        // If lgen is this high, it means ErrFindNextGen() found no items ...
         if ( 0 == _wcsicmp( wszLogExt, wszNewLogExt ) && lGenerationInvalidDuringDump == lgen )
         {
+            // We found no logs, sooo try the other extension ... 
             wszLogExt = wszOldLogExt;
             goto TryAnotherExtension;
         }
 
+        // we still haven't found any logs even with the old extension
+        // we should error out at this point
+        //
         if ( 0 ==_wcsicmp( wszLogExt, wszOldLogExt ) && lGenerationInvalidDuringDump == lgen )
         {
             Error( ErrERRCheck( JET_errFileNotFound ) );
@@ -635,6 +696,7 @@ TryAnotherExtension:
             }
             else if ( logdumpOp.m_iVerbosityLevel == LOG::ldvlBasic )
             {
+                //  just verifying, so report that logfile is OK
                 DUMPPrintF( " - OK\n" );
             }
 
@@ -643,10 +705,13 @@ TryAnotherExtension:
             if ( ( cLogDigits == 0 || cLogDigits == 5 || cLogDigits == 8 ) &&
                     (cLogDigitsCurr == 8 || cLogDigitsCurr == 5) )
             {
+                // The first log returns zero digits.
                 cLogDigits = cLogDigitsCurr;
             }
+            // If we changed log digits (between 8 and 5), notice it.  Ignore it for other digitnesses.
             Assert( (cLogDigitsCurr != 8 && cLogDigitsCurr != 5) || (cLogDigitsCurr == cLogDigits) );
 
+            //  if it is not jet.jtx/log file
             if ( lgen < lGenerationEXXDuringDump )
             {
                 if ( lgen != lgenLast+1 )
@@ -660,15 +725,15 @@ TryAnotherExtension:
                         DUMPPrintF( "\n\n" );
                     if ( lgen == lgenLast + 2 )
                     {
-                        WCHAR  wszT[12] = L"tla";
+                        WCHAR  wszT[12] = L"tla"; // next func requires base name, though we won't use it below ...
                         LGFileHelper::LGSzLogIdAppend( wszT, sizeof(wszT), lgenLast+1, cLogDigits);
                         DUMPPrintF( "      Missing log file: %ws%ws%ws\n", wszLog, &(wszT[3]), wszLogExt );
                         LGIReportLogfilesMissing( wszLog, wszT + 3, NULL, wszLogExt, JET_errMissingLogFile, pinst );
                     }
                     else
                     {
-                        WCHAR  wszT[12] = L"tla";
-                        WCHAR  wszTT[12] = L"tla";
+                        WCHAR  wszT[12] = L"tla"; // next func requires base name, though we won't use it below ...
+                        WCHAR  wszTT[12] = L"tla"; // next func requires base name, though we won't use it below ...
                         LGFileHelper::LGSzLogIdAppend( wszT, sizeof(wszT), lgenLast+1, cLogDigits);
                         LGFileHelper::LGSzLogIdAppend( wszTT, sizeof(wszTT), lgen-1, cLogDigits);
                         DUMPPrintF( "      Missing log files: %ws{%ws - %ws}%ws\n", wszLog, &(wszT[3]), &(wszTT[3]), wszLogExt );
@@ -692,6 +757,7 @@ TryAnotherExtension:
         }
         else
         {
+            //  for checksum mode, eseutil will generate the whitespace on error
         }
 
         if (logdumpOp.m_pcwpfCsvOut
@@ -705,9 +771,14 @@ TryAnotherExtension:
     else
     {
 
+        //
+        // This is dumping a single specified log.
+        //
 
         logdumpOp.m_loghdr = LOG::LOGDUMP_LOGHDR_NOHDR;
 
+        // if verify, we don't print any output.
+        // also verbose will be ignored
         if ( grbit & JET_bitDBUtilOptionVerify )
         {
             Assert( !( grbit & JET_bitDBUtilOptionDumpVerbose ) );
@@ -717,7 +788,7 @@ TryAnotherExtension:
         }
         else if ( grbit & JET_bitDBUtilOptionDumpLogInfoCSV )
         {
-            Assert( wszCsvDataFile );
+            Assert( wszCsvDataFile ); // otherwise we won't be printing to any file.
             logdumpOp.m_pcwpfCsvOut = &cpfCsvOut;
         }
         else
@@ -734,6 +805,7 @@ TryAnotherExtension:
                 }
             }
 
+            // Dump IO summary table
             if ( grbit & JET_bitDBUtilOptionDumpLogSummary )
             {
                 logdumpOp.m_fSummary = 1;
@@ -777,11 +849,12 @@ TryAnotherExtension:
         }
         else
         {
+            //  for checksum mode, eseutil will generate the necessary whitespace
         }
     }
 
 HandleError:
-    logdumpOp.m_pcwpfCsvOut = NULL;
+    logdumpOp.m_pcwpfCsvOut = NULL; // stack var will be freed ...
     if ( NULL != plgfilehdr )
     {
         OSMemoryPageFree( plgfilehdr );
@@ -905,10 +978,14 @@ ERR LOG::ErrLGDumpLog( __in PCWSTR wszLog, LOGDUMP_OP * const plogdumpOp, LGFILE
         CallS( m_pinst->m_pfsapi->ErrPathParse( wszLog, wszJetCheckpointFile, wszJetCheckpointFileName, wszJetCheckpointFileExt ) );
         wszJetCheckpointFileName[JET_BASE_NAME_LENGTH] = 0;
 
+        //  first try new checkpoint extension
+        //
         CallS( m_pinst->m_pfsapi->ErrPathBuild( SzParam( m_pinst, JET_paramSystemPath ), wszJetCheckpointFileName, wszNewChkExt, wszJetCheckpointFile ) );
         err = ErrLGReadCheckpoint( wszJetCheckpointFile, pcheckpoint, fTrue );
         if ( JET_errCheckpointFileNotFound == err )
         {
+            //  now try old checkpoint extension
+            //
             CallS( m_pinst->m_pfsapi->ErrPathBuild( SzParam( m_pinst, JET_paramSystemPath ), wszJetCheckpointFileName, wszOldChkExt, wszJetCheckpointFile ) );
             err = ErrLGReadCheckpoint( wszJetCheckpointFile, pcheckpoint, fTrue );
         }
@@ -967,6 +1044,7 @@ ERR LOG::ErrLGDumpLog( IFileAPI *const pfapi, LOGDUMP_OP * const plogdumpOp, LGF
     const INT           loghdr              = plogdumpOp->m_loghdr;
     INT                 logRecPosCurr       = 0;
     const BOOL          fRecoveringSaved    = m_fRecovering;
+    // WCHAR const *        szLogTrailerCorruptLog      = L"LTCL\r\n";
     WCHAR const *       szLogTrailerEndOfLog        = L"LTEL\r\n";
 
     ULONG               rgclrtyp[ lrtypMax ];
@@ -977,17 +1055,25 @@ ERR LOG::ErrLGDumpLog( IFileAPI *const pfapi, LOGDUMP_OP * const plogdumpOp, LGF
 
     if ( LOGDUMP_LOGHDR_VALIDADJACENT == loghdr )
     {
+        //  if we fail reading next header will keep the current one
         plogdumpOp->m_loghdr = LOGDUMP_LOGHDR_VALID;
     }
 
+    //  initialize the sector sizes
 
-    m_fRecovering = fTrue;      
+    //  NOTE: m_cbSec, m_csecHeader, and m_csecLGFile will be setup
+    //        when we call LOG::ErrLGReadFileHdr()
+    m_fRecovering = fTrue;      /* behave like doing recovery */
 
+    // point ourselves to the new log file and remember the name
+    // which is necessary for distintinguishing between the last active
+    // log and archived logs
     m_pLogStream->SetPfapi( pfapi );
 
-    
+    /* dump file header */
     Call( m_pLogStream->ErrLGInit() );
 
+    // HACK:  pretend we are not init so we can auto-set logfile size after init
     m_pinst->m_fSTInit = fSTInitInProgress;
     err = m_pLogStream->ErrLGReadFileHdr( NULL, iorpDirectAccessUtil, NULL, fNoCheckLogID, fTrue );
     m_pinst->m_fSTInit = fSTInitDone;
@@ -999,12 +1085,14 @@ ERR LOG::ErrLGDumpLog( IFileAPI *const pfapi, LOGDUMP_OP * const plogdumpOp, LGF
 
     if ( LOGDUMP_LOGHDR_VALIDADJACENT == loghdr && m_pLogStream->GetCurrentFileGen() != plgfilehdr->lgfilehdr.le_lGeneration + 1 )
     {
+        //  edb.jtx/log is not the correct generation number (all other missing log file cases are caught in ErrDUMPLog())
         DUMPPrintF( "\n                ERROR: Missing log file(s). Log file is generation %lu (0x%lX), but expected generation is %u (0x%lX).\n",
                 (ULONG)m_pLogStream->GetCurrentFileGen(), (LONG)m_pLogStream->GetCurrentFileGen(),
                 (ULONG)(plgfilehdr->lgfilehdr.le_lGeneration + 1), (LONG)(plgfilehdr->lgfilehdr.le_lGeneration + 1) );
         Call( ErrERRCheck( JET_errMissingLogFile ) );
     }
 
+    // dump checkpoint file lgpos information
     if ( fPrint )
     {
         DUMPPrintF( "\n      lGeneration: %u (0x%X)\n", (ULONG)m_pLogStream->GetCurrentFileGen(), (LONG)m_pLogStream->GetCurrentFileGen() );
@@ -1115,9 +1203,9 @@ ERR LOG::ErrLGDumpLog( IFileAPI *const pfapi, LOGDUMP_OP * const plogdumpOp, LGF
 
     if( plogdumpOp->m_pcwpfCsvOut )
     {
-        CHAR szLogSig[128];
-        WCHAR wszLogCreate[128];
-        WCHAR wszPrevLogCreate[128];
+        CHAR szLogSig[128]; // plenty of space
+        WCHAR wszLogCreate[128]; // plenty of space
+        WCHAR wszPrevLogCreate[128]; // plenty of space
 
         SigToSz( &m_pLogStream->GetCurrentFileHdr()->lgfilehdr.signLog, szLogSig, sizeof(szLogSig) );
 
@@ -1228,25 +1316,29 @@ ERR LOG::ErrLGDumpLog( IFileAPI *const pfapi, LOGDUMP_OP * const plogdumpOp, LGF
 
     if ( LOGDUMP_LOGHDR_NOHDR != plogdumpOp->m_loghdr )
     {
+        //  we can set new current header for sure
         Assert( NULL != plgfilehdr );
         Assert( NULL != pLastSegChecksum );
         plogdumpOp->m_loghdr = LOGDUMP_LOGHDR_VALIDADJACENT;
     }
 
-    
+    /*  set buffer
+    /**/
     m_pLogStream->LGSetSectorGeometry( m_pLogStream->GetCurrentFileHdr()->lgfilehdr.le_cbSec, m_pLogStream->CSecLGFile() );
 
     m_pLogWriteBuffer->SetFNewRecordAdded( fFalse );
 
+    // doing what we're doing here is similar to recovery in redo mode.
+    // Quell UlComputeChecksum()'s checking to see if we're in m_critLGBuf
     m_fRecoveringMode = fRecoveringRedo;
 
     Call( m_pLogReadBuffer->ErrLReaderInit( m_pLogStream->GetCurrentFileHdr()->lgfilehdr.le_csecLGFile ) );
     Call( m_pLogReadBuffer->ErrReaderEnsureLogFile() );
     err = m_pLogReadBuffer->ErrLGCheckReadLastLogRecordFF(
             &fCloseNormally,
-            fTrue,
-            !plogdumpOp->m_fPermitPatching,
-            ( plogdumpOp->m_fPermitPatching ? NULL : &fIsPatchable ) );
+            fTrue,                                                          //  compute accumulated segment checksum
+            !plogdumpOp->m_fPermitPatching,                                 //  open read-only unless patching permitted
+            ( plogdumpOp->m_fPermitPatching ? NULL : &fIsPatchable ) );     //  if patching permitted, we don't care if it's patchable (we'll just go ahead and patch it)
 
     m_fRecoveringMode = fRecoveringNone;
 
@@ -1263,6 +1355,8 @@ ERR LOG::ErrLGDumpLog( IFileAPI *const pfapi, LOGDUMP_OP * const plogdumpOp, LGF
         fCorrupt = fTrue;
         errCorrupt = err;
 
+        //  keep going to try to print out
+        //  as many log records as possible
         err = JET_errSuccess;
     }
 
@@ -1283,6 +1377,7 @@ ERR LOG::ErrLGDumpLog( IFileAPI *const pfapi, LOGDUMP_OP * const plogdumpOp, LGF
         DUMPPrintF( "      Accumulated segment checksum: 0x%016I64x\n", m_pLogStream->GetAccumulatedSectorChecksum());
     }
 
+    // initialize other variables
     memset( rgclrtyp, 0, sizeof( rgclrtyp ) );
     memset( rgcb, 0, sizeof( rgcb ) );
 
@@ -1290,7 +1385,7 @@ ERR LOG::ErrLGDumpLog( IFileAPI *const pfapi, LOGDUMP_OP * const plogdumpOp, LGF
     m_fDBGTraceRedo = fTrue;
     if ( plogdumpOp->m_iVerbosityLevel != ldvlBasic )
         DUMPPrintF( "\n" );
-#endif
+#endif  //  DEBUG
 
     le_lgposFirstT.le_lGeneration = m_pLogStream->GetCurrentFileGen();
     le_lgposFirstT.le_isec = (WORD) m_pLogStream->CSecHeader();
@@ -1360,11 +1455,18 @@ ERR LOG::ErrLGDumpLog( IFileAPI *const pfapi, LOGDUMP_OP * const plogdumpOp, LGF
 
     if (plogdumpOp->m_pcwpfCsvOut)
     {
+        // SOMEONE doesn't want the added dev/test cost of parsing LTCL along with LTEL and <nothing>.
+        // So, a csv dump will end with LTEL (good log) or <nothing> (bad log or problems with csv file).
+        // SOMEONE believes LTCL is needed because the corruption may have occcured after
+        // the DB was updated with info past the corruption in the log. But SOMEONE's current design
+        // doesn't need this refinement and so I am disabling LTCL at his request.
+        // (*plogdumpOp->m_pcwpfCsvOut)((fCorrupt) ? szLogTrailerCorruptLog : szLogTrailerEndOfLog);
         if (!fCorrupt)
         {
             (*plogdumpOp->m_pcwpfCsvOut)(szLogTrailerEndOfLog);
         }
     }
+    //  verbose dump
     if ( plogdumpOp->m_iVerbosityLevel != ldvlBasic )
     {
         if ( fCorrupt )
@@ -1389,7 +1491,7 @@ ERR LOG::ErrLGDumpLog( IFileAPI *const pfapi, LOGDUMP_OP * const plogdumpOp, LGF
         {
             CheckEndOfNOPList( NULL, this );
         }
-#endif
+#endif // DEBUG
 
         DUMPPrintF( "\n" );
 
@@ -1410,16 +1512,19 @@ ERR LOG::ErrLGDumpLog( IFileAPI *const pfapi, LOGDUMP_OP * const plogdumpOp, LGF
 
         for ( INT i = 0; i < lrtypMax; i++ )
         {
+            //  Temporary hack
+            //  Do not print replaced lrtyps
             if ( lrtypInit == i || lrtypTerm == i || lrtypRecoveryUndo == i || lrtypRecoveryQuit == i )
             {
                 continue;
             }
 #ifndef DEBUG
+            //  Do not print the LRs with zero occurrence in retail build
             if ( rgclrtyp[i] == 0 )
             {
                 continue;
             }
-#endif
+#endif // DEBUG
             const char *szLrTyp = SzLrtyp( (LRTYP)i );
             const BOOL fUnknown = !_stricmp( szLrTyp, szUnknown );
             if ( rgclrtyp[i] || !fUnknown )
@@ -1491,6 +1596,8 @@ ERR LOG::ErrLGDumpLog( IFileAPI *const pfapi, LOGDUMP_OP * const plogdumpOp, LGF
                                     || (ULONG64)( pagerefCurr.pgno - pagerefLastRead.pgno - 1 ) * cbPage > UlParam( JET_paramMaxCoalesceReadGapSize )
                                     || (ULONG64)( pagerefCurr.pgno - pagerefRunStartRead.pgno + 1 ) * cbPage > UlParam( JET_paramMaxCoalesceReadSize ) )
                             {
+                                // this page is not contiguous and is either too far away to combine into one IO via over-read
+                                // or exceeds our max read length so this counts as a new read
                                 pagerefRunStartRead = pagerefCurr;
                                 cRead++;
                                 rgcRead[pagerefCurr.dbid]++;
@@ -1499,6 +1606,7 @@ ERR LOG::ErrLGDumpLog( IFileAPI *const pfapi, LOGDUMP_OP * const plogdumpOp, LGF
                             }
                             else
                             {
+                                // this page is not contiguous and is near enough to combine into one IO via over-read
                                 cpgRead += pagerefCurr.pgno - pagerefLastRead.pgno;
                                 rgcpgRead[pagerefCurr.dbid] += pagerefCurr.pgno - pagerefLastRead.pgno;
                             }
@@ -1507,11 +1615,13 @@ ERR LOG::ErrLGDumpLog( IFileAPI *const pfapi, LOGDUMP_OP * const plogdumpOp, LGF
                         {
                             if ( (ULONG64)( pagerefCurr.pgno - pagerefRunStartRead.pgno + 1 ) * cbPage > UlParam( JET_paramMaxCoalesceReadSize ) )
                             {
+                                // this page is contiguous but exceeds our max read length so this counts as a new read
                                 pagerefRunStartRead = pagerefCurr;
                                 cRead++;
                                 rgcRead[pagerefCurr.dbid]++;
                             }
 
+                            // this page is contiguous
                             cpgRead++;
                             rgcpgRead[pagerefCurr.dbid]++;
                         }
@@ -1526,6 +1636,8 @@ ERR LOG::ErrLGDumpLog( IFileAPI *const pfapi, LOGDUMP_OP * const plogdumpOp, LGF
                                     || pagerefCurr.pgno != pagerefLastWrite.pgno
                                     || (ULONG64)( pagerefCurr.pgno - pagerefRunStartWrite.pgno + 1 ) * cbPage > UlParam( JET_paramMaxCoalesceWriteSize ) )
                             {
+                                // this page is not contiguous and exceeds our max write length so this counts as a new write
+                                // NOTE:  we do not model write gaps because that requires us to model the cache to fill the gap
                                 pagerefRunStartWrite = pagerefCurr;
                                 cWrite++;
                                 rgcWrite[pagerefCurr.dbid]++;
@@ -1534,6 +1646,7 @@ ERR LOG::ErrLGDumpLog( IFileAPI *const pfapi, LOGDUMP_OP * const plogdumpOp, LGF
                             }
                             else
                             {
+                                // this page is not contiguous and is near enough to combine into one IO via over-write
                                 cpgWrite += pagerefCurr.pgno - pagerefLastWrite.pgno;
                                 rgcpgWrite[pagerefCurr.dbid] += pagerefCurr.pgno - pagerefLastWrite.pgno;
                             }
@@ -1542,11 +1655,13 @@ ERR LOG::ErrLGDumpLog( IFileAPI *const pfapi, LOGDUMP_OP * const plogdumpOp, LGF
                         {
                             if ( (ULONG64)( pagerefCurr.pgno - pagerefRunStartWrite.pgno + 1 ) * cbPage > UlParam( JET_paramMaxCoalesceWriteSize ) )
                             {
+                                // this page is contiguous but exceeds our max write length so this counts as a new write
                                 pagerefRunStartWrite = pagerefCurr;
                                 cWrite++;
                                 rgcWrite[pagerefCurr.dbid]++;
                             }
 
+                            // this page is contiguous
                             cpgWrite++;
                             rgcpgWrite[pagerefCurr.dbid]++;
                         }

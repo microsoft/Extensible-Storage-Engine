@@ -6,4 +6,4 @@
 
 extern BOOL IsDevMachine();
 
-#endif
+#endif  //  __DEV_HXX_INCLUDED

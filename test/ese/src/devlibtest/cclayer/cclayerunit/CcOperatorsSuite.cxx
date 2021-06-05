@@ -3,6 +3,7 @@
 
 #include "CcLayerUnit.hxx"
 
+//  Shouldn't _countof() be included in cc.hxx
 #include <stdlib.h>
 
 
@@ -49,7 +50,7 @@ ERR CcOffsetOfReturnsCorrectOffsets::ErrTest()
 } AStructForImplicitInit;
 
     TestCheck( 0 == OffsetOf( AStructForImplicitInit, ulOne ) );
-    TestCheck( 8 == OffsetOf( AStructForImplicitInit, qwTwo ) );
+    TestCheck( 8 == OffsetOf( AStructForImplicitInit, qwTwo ) );    //  note: skips one for alignment
     TestCheck( 16 == OffsetOf( AStructForImplicitInit, lZero ) );
     TestCheck( 24 == OffsetOf( AStructForImplicitInit, lZeroToo ) );
 

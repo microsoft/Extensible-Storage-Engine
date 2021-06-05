@@ -3,7 +3,9 @@
 
 #include "collectionunittest.hxx"
 
+//  ================================================================
 class TableTest : public UNITTEST
+//  ================================================================
 {
     private:
         static TableTest s_instance;
@@ -59,17 +61,22 @@ inline INT CTestTable::CKeyEntry:: Cmp( const CTestTable::CKeyEntry& keyentry ) 
     return Cmp( keyentry.m_id );
 }
 
+//  ================================================================
 ERR TableTest::ErrTest()
+//  ================================================================
 {
     ERR err = JET_errSuccess;
 
     wprintf( L"\tTesting table (CTable) ...\n");
 
+    // create table
     CTestTable table;
     CTestTable tableClone;
 
+    // test size
     TestCheck( 0 == table.Size() );
 
+    // test load
     TableEntry data[] = {
         TableEntry( 90 ),
         TableEntry( 40 ),
@@ -85,6 +92,7 @@ ERR TableTest::ErrTest()
     table.ErrLoad( _countof( data ), data );
     TestCheck( _countof( data ) == table.Size() );
 
+    // test clone
     tableClone.ErrClone( table );
     TestCheck( _countof( data ) == tableClone.Size() );
     for ( INT i = 0; i < _countof( data ); i++ )
@@ -92,6 +100,7 @@ ERR TableTest::ErrTest()
         TestCheck( table.PEntry( i )->m_id == tableClone.PEntry( i )->m_id );
     }
 
+    // test seek
     TestCheck( 50 == table.SeekLT( 55 )->m_id );
 
     TestCheck( 50 == table.SeekLE( 55 )->m_id );
@@ -107,6 +116,7 @@ ERR TableTest::ErrTest()
 
     TestCheck( 60 == table.SeekGT( 50 )->m_id );
 
+    // test clear
     tableClone.~CTestTable();
     TestCheck( 0 == tableClone.Size() );
 

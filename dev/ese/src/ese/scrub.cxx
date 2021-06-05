@@ -5,7 +5,9 @@
 
 LOCAL const CHAR szMSysScan[] = "MSysScan1";
 
+//  ================================================================
 BOOL FSCANSystemTable( const CHAR * const szTableName )
+//  ================================================================
 {
     return ( 0 == UtilCmpName( szTableName, szMSysScan ) );
 }
@@ -13,6 +15,7 @@ BOOL FSCANSystemTable( const CHAR * const szTableName )
 
 #ifdef MINIMAL_FUNCTIONALITY
 
+//  ================================================================
 ERR ErrIsamDatabaseScan(
     const JET_SESID         vsesid,
     const JET_DBID          vdbid,
@@ -20,6 +23,7 @@ ERR ErrIsamDatabaseScan(
     const ULONG             cmsecSleep,
     const JET_CALLBACK      pfnCallback,
     const JET_GRBIT         grbit )
+//  ================================================================
 {
     return ErrERRCheck( JET_errDisabledFunctionality );
 }
@@ -33,7 +37,7 @@ LOCAL ERR ErrSCRUBGetObjidsFromCatalog(
         LONG * pcobjidinfo );
 
 #ifdef PERFMON_SUPPORT
-extern PERFInstanceDelayedTotal<> perfctrDBMPagesZeroed;
+extern PERFInstanceDelayedTotal<> perfctrDBMPagesZeroed;    // borrowed from DBMaint ...
 
 PERFInstanceDelayedTotal<> cSCANPagesRead;
 
@@ -42,9 +46,13 @@ LONG LSCANPagesReadCEFLPv( LONG iInstance, VOID * pvBuf )
     cSCANPagesRead.PassTo( iInstance, pvBuf );
     return 0;
 }
-#endif
+#endif // PERFMON_SUPPORT
 
+// All columns in MSysScan are JET_coltypLongLong
 
+// Every column name in the next section should be placed in rgszMSysScanColumns
+// We assert that the number of lines in the next section is equal to the number
+// of entries in rgszMSysScanColumns so don't put any extra lines in.
 
 static const INT clineFirstMSysScanColumnName = __LINE__;
 LOCAL const CHAR szMsysScanPassUpdateDateTime[]         = "LastUpdateDateTime";
@@ -118,7 +126,9 @@ LOCAL const CHAR * const rgszMSysScanColumns[] =
 LOCAL const INT ccolMsysScan = _countof(rgszMSysScanColumns);
 
 
+//  ================================================================
 void DBMLogStartFailure( const IFMP ifmp, const ERR err )
+//  ================================================================
 {
     const INT       cszMax = 2;
     const WCHAR *   rgcwszT[cszMax];
@@ -156,6 +166,7 @@ JET_ERR JET_API NullCallback(
     return JET_errSuccess;
 }
 
+//  ================================================================
 ERR ErrIsamDatabaseScan(
     const JET_SESID         vsesid,
     const JET_DBID          vdbid,
@@ -163,6 +174,7 @@ ERR ErrIsamDatabaseScan(
     const ULONG             cmsecSleep,
     const JET_CALLBACK      pfnCallback,
     const JET_GRBIT         grbit )
+//  ================================================================
 {
     ERR             err     = JET_errSuccess;
     PIB * const     ppib    = (PIB *)vsesid;
@@ -180,6 +192,14 @@ ERR ErrIsamDatabaseScan(
         Error( ErrERRCheck( JET_errInvalidGrbit ) );
     }
 
+    // When starting continous DBM directly (as opposed to of implicitly during
+    // log replay or database attach), the contract is that it will behave just
+    // like continuous DBM started implicitly, i.e., callbacks and other fine-tune
+    // parameters (such as throttling) will not be honored. Instead, the DBM engine
+    // will consume the respective DBM-related JET_params.
+    //
+    // To try and catch cases of the user trying to set those, we'll fail this call
+    // in case non-zeroed values are passed in.
 
     if ( fStartContinuousScan &&
         ( ( ( pcsecMax != NULL ) && ( *pcsecMax != 0 ) ) || ( cmsecSleep != 0 ) || ( pfnCallback != NULL ) ) )
@@ -220,7 +240,9 @@ HandleError:
 }
 
 
+//  ================================================================
 LOCAL COLUMNID ColumnidFromMSysScanColumnName( const CHAR * const szColumn )
+//  ================================================================
 {
     for( INT iColumn = 0; iColumn < ccolMsysScan; ++iColumn )
     {
@@ -235,10 +257,12 @@ LOCAL COLUMNID ColumnidFromMSysScanColumnName( const CHAR * const szColumn )
 }
 
 
+//  ================================================================
 LOCAL ERR ErrSCANDumpOneMSysDefragColumn(
     __in PIB * const ppib,
     __in FUCB * const pfucb,
     const CHAR * const szColumn)
+//  ================================================================
 {
     ERR err;
     __int64 qw = 12345678;
@@ -265,6 +289,7 @@ LOCAL ERR ErrSCANDumpOneMSysDefragColumn(
 
     if( 0 != qw && NULL != strstr( szColumn, "DateTime" ) )
     {
+        // Column name contains 'DateTime', format it as such
         size_t cchRequired;
         
         Call( ErrUtilFormatFileTimeAsDate(
@@ -308,9 +333,11 @@ HandleError:
 }
 
 
+//  ================================================================
 LOCAL ERR ErrSCANDumpMSysDefragColumns(
     __in PIB * const ppib,
     __in FUCB * const pfucb )
+//  ================================================================
 {
     ERR err = JET_errSuccess;
 
@@ -324,7 +351,9 @@ HandleError:
 }
 
 
+//  ================================================================
 ERR ErrSCANDumpMSysScan( __in PIB * const ppib, const IFMP ifmp )
+//  ================================================================
 {
     ERR err;
     FUCB * pfucbScan = pfucbNil;
@@ -332,6 +361,7 @@ ERR ErrSCANDumpMSysScan( __in PIB * const ppib, const IFMP ifmp )
     err = ErrFILEOpenTable( ppib, ifmp, &pfucbScan, szMSysScan );
     if ( JET_errObjectNotFound == err )
     {
+        // no table to dump
         err = JET_errSuccess;
         goto HandleError;
     }
@@ -339,6 +369,8 @@ ERR ErrSCANDumpMSysScan( __in PIB * const ppib, const IFMP ifmp )
 
     wprintf( L"********************************* MSysScan DUMP ************************************\n" );
 
+    // move to the first (and only) record. the record should always exist as
+    // it is created in the same transaction that creates the table
     
     err = ErrIsamMove( ppib, pfucbScan, JET_MoveFirst, NO_GRBIT );
     Assert( JET_errNoCurrentRecord != err );
@@ -357,7 +389,9 @@ HandleError:
 }
 
 
+//  ================================================================
 LOCAL_BROKEN ERR ErrSCANCreateMSysScan( __in PIB * const ppib, const IFMP ifmp )
+//  ================================================================
 {
     C_ASSERT( ccolMsysScan == clinesMSysScanColumnNames );
     
@@ -387,7 +421,7 @@ LOCAL_BROKEN ERR ErrSCANCreateMSysScan( __in PIB * const ppib, const IFMP ifmp )
         sizeof(JET_TABLECREATE5_A),
         (CHAR *)szMSysScan,
         NULL,
-        1,
+        1,  // only 1 record so only 1 page is needed
         100,
         rgjccMSysScan,
         ccolMsysScan,
@@ -410,6 +444,7 @@ LOCAL_BROKEN ERR ErrSCANCreateMSysScan( __in PIB * const ppib, const IFMP ifmp )
     Call( ErrFILECreateTable( ppib, ifmp, &jtcMSysScan ) );
 
 #ifdef DEBUG
+    // make sure the columnids were assigned correctly
     for( INT iColumn = 0; iColumn < ccolMsysScan; ++iColumn )
     {
         const COLUMNID columnid = fidFixedLeast+iColumn;
@@ -441,13 +476,17 @@ HandleError:
 }
 
 
+//  ================================================================
 BOOL OBJIDINFO::CmpObjid( const OBJIDINFO& left, const OBJIDINFO& right )
+//  ================================================================
 {
     return left.objidFDP < right.objidFDP;
 }
 
 
+//  ================================================================
 ERR ErrDBUTLScrub( JET_SESID sesid, const JET_DBUTIL_W *pdbutil )
+//  ================================================================
 {
     ERR err = JET_errSuccess;
     PIB * const ppib = reinterpret_cast<PIB *>( sesid );
@@ -461,6 +500,9 @@ ERR ErrDBUTLScrub( JET_SESID sesid, const JET_DBUTIL_W *pdbutil )
 
     Call( ErrIsamAttachDatabase( sesid, pdbutil->szDatabase, fFalse, NULL, 0, NO_GRBIT ) );
 
+    //  WARNING: must set ifmp to 0 to ensure high-dword is
+    //  initialised on 64-bit, because we'll be casting this
+    //  to a JET_DBID, which is a dword
     IFMP ifmp;
     ifmp = 0;
     Call( ErrIsamOpenDatabase(
@@ -593,8 +635,10 @@ HandleError:
 }
 
 
+//  ================================================================
 SCRUBDB::SCRUBDB( const IFMP ifmp ) :
     m_ifmp( ifmp )
+//  ================================================================
 {
     m_constants.dbtimeLastScrub = 0;
     m_constants.pcprintfVerbose = CPRINTFSTDOUT::PcprintfInstance();
@@ -621,19 +665,25 @@ SCRUBDB::SCRUBDB( const IFMP ifmp ) :
 }
 
 
+//  ================================================================
 SCRUBDB::~SCRUBDB()
+//  ================================================================
 {
     delete [] m_constants.pobjidinfo;
 }
 
 
+//  ================================================================
 volatile const SCRUBSTATS& SCRUBDB::Scrubstats() const
+//  ================================================================
 {
     return m_stats;
 }
 
 
+//  ================================================================
 ERR SCRUBDB::ErrInit( PIB * const ppib, const INT cThreads )
+//  ================================================================
 {
     ERR err;
     
@@ -641,11 +691,15 @@ ERR SCRUBDB::ErrInit( PIB * const ppib, const INT cThreads )
 
 #ifdef DEBUG
     INT cLoop = 0;
-#endif
+#endif  //  DEBUG
 
     Call( m_taskmgr.ErrInit( pinst, cThreads ) );
 
     CallS( ErrDIRBeginTransaction( ppib, 33829, JET_bitTransactionReadOnly ) );
+    //  get an objidMax
+    //  wait until this is the oldest transaction in the system
+    //  at which point all objids < objidMax have been committed to
+    //  the catalog. then commit the transaction and read the catalog
     m_constants.objidMax = g_rgfmp[m_ifmp].ObjidLast();
     while( TrxOldest( pinst ) != ppib->trxBegin0 )
     {
@@ -670,7 +724,9 @@ HandleError:
 }
 
 
+//  ================================================================
 ERR SCRUBDB::ErrTerm()
+//  ================================================================
 {
     ERR err;
     
@@ -685,7 +741,9 @@ ERR SCRUBDB::ErrTerm()
 }
 
 
+//  ================================================================
 ERR SCRUBDB::ErrScrubPages( const PGNO pgnoFirst, const CPG cpg )
+//  ================================================================
 {
     SCRUBTASK * ptask = new SCRUBTASK( m_ifmp, pgnoFirst, cpg, &m_context );
     if( NULL == ptask )
@@ -695,12 +753,14 @@ ERR SCRUBDB::ErrScrubPages( const PGNO pgnoFirst, const CPG cpg )
     const ERR err = m_taskmgr.ErrPostTask( TASK::Dispatch, (ULONG_PTR)ptask );
     if( err < JET_errSuccess )
     {
+        //  The task was not enqued successfully.
         delete ptask;
     }
     return err;
 }
 
 
+//  ================================================================
 SCRUBTASK::SCRUBTASK( const IFMP ifmp, const PGNO pgnoFirst, const CPG cpg, const SCRUBCONTEXT * const pcontext ) :
     DBTASK( ifmp ),
     m_pgnoFirst( pgnoFirst ),
@@ -708,17 +768,24 @@ SCRUBTASK::SCRUBTASK( const IFMP ifmp, const PGNO pgnoFirst, const CPG cpg, cons
     m_pcontext( pcontext ),
     m_pobjidinfoCached( NULL ),
     m_objidNotFoundCached( objidNil )
+//  ================================================================
 {
+    //  don't fire off async tasks on the temp. database because the
+    //  temp. database is simply not equipped to deal with concurrent access
     AssertRTL( !FFMPIsTempDB( ifmp ) );
 }
 
     
+//  ================================================================
 SCRUBTASK::~SCRUBTASK()
+//  ================================================================
 {
 }
 
         
+//  ================================================================
 ERR SCRUBTASK::ErrExecuteDbTask( PIB * const ppib )
+//  ================================================================
 {
     ERR err = JET_errSuccess;
 
@@ -732,6 +799,7 @@ ERR SCRUBTASK::ErrExecuteDbTask( PIB * const ppib )
         err = csr.ErrGetRIWPage( ppib, m_ifmp, pgno, bflfUninitPageOk );
         if ( JET_errPageNotInitialized == err )
         {
+            //  this page is already zeroed out
             AtomicIncrement( &( m_pcontext->pstats->cpgUnused ) );
             err = JET_errSuccess;
         }
@@ -754,17 +822,22 @@ HandleError:
 }
 
 
+//  ================================================================
 VOID SCRUBTASK::HandleError( const ERR err )
+//  ================================================================
 {
 }
 
 
+//  ================================================================
 ERR SCRUBTASK::ErrProcessPage_(
         PIB * const ppib,
         CSR * const pcsr )
+//  ================================================================
 {
     const OBJID objid = pcsr->Cpage().ObjidFDP();
 
+    // do not scrub space tree pages
     if ( pcsr->Cpage().FSpaceTree() )
     {
         return JET_errSuccess;
@@ -785,6 +858,7 @@ ERR SCRUBTASK::ErrProcessPage_(
     }
     else if( objidSystemRoot == objid )
     {
+        //  this is not in the catalog
         return JET_errSuccess;
     }
     else
@@ -813,6 +887,8 @@ ERR SCRUBTASK::ErrProcessPage_(
 
     if( pcsr->Cpage().Dbtime() < m_pcontext->pconstants->dbtimeLastScrub )
     {
+        //  this page should not have been empty the last time we saw it
+        //  if so we would have zeroed it out and never should have ended up here
         AtomicIncrement( &( m_pcontext->pstats->cpgUnchanged ) );
         return JET_errSuccess;
     }
@@ -831,9 +907,17 @@ ERR SCRUBTASK::ErrProcessPage_(
 }
 
 
+//  ================================================================
 ERR SCRUBTASK::ErrProcessUnusedPage_(
         PIB * const ppib,
         CSR * const pcsr )
+//  ================================================================
+//
+//  Can't call CPAGE::ResetHeader because of concurrency issues
+//  we don't want to lose our latch on the page, let someone else
+//  use the page and then zero it out
+//
+//-
 {
     pcsr->UpgradeFromRIWLatch();
 
@@ -841,8 +925,11 @@ ERR SCRUBTASK::ErrProcessUnusedPage_(
     tcScope->nParentObjectClass = tceNone;
     tcScope->iorReason.SetIort( iortScrubbing );
 
+    //  Don't call CSR::Dirty() or CPAGE::Dirty() because we don't
+    //  want the dbtime on the page changed
     BFDirty( pcsr->Cpage().PBFLatch(), bfdfDirty, *tcScope );
 
+    //  Delete all the data on the page
     const INT clines = pcsr->Cpage().Clines();
     INT iline;
     for( iline = 0; iline < clines; ++iline )
@@ -850,6 +937,7 @@ ERR SCRUBTASK::ErrProcessUnusedPage_(
         pcsr->Cpage().Delete( 0 );
     }
     
+    //  reorganize the page and zero all unused data
     pcsr->Cpage().OverwriteUnusedSpace( chSCRUBLegacyUnusedPageFill );
     
     pcsr->Downgrade( latchReadNoTouch );
@@ -860,7 +948,9 @@ ERR SCRUBTASK::ErrProcessUnusedPage_(
 }
 
 
+//  ================================================================
 BOOL SCRUBTASK::FNodeHasVersions_( const OBJID objidFDP, const KEYDATAFLAGS& kdf, const TRX trxOldest ) const
+//  ================================================================
 {
     Assert( m_pobjidinfoCached->objidFDP == objidFDP );
 
@@ -880,9 +970,17 @@ BOOL SCRUBTASK::FNodeHasVersions_( const OBJID objidFDP, const KEYDATAFLAGS& kdf
 }
 
 
+//  ================================================================
 ERR SCRUBTASK::ErrProcessUsedPage_(
         PIB * const ppib,
         CSR * const pcsr )
+//  ================================================================
+//
+//  for each node on the page
+//    if it is flag-deleted zero out the data
+//    check for an orphaned LV
+//
+//-
 {
     Assert( m_pobjidinfoCached->objidFDP == pcsr->Cpage().ObjidFDP() );
     
@@ -898,6 +996,8 @@ ERR SCRUBTASK::ErrProcessUsedPage_(
     tcScope->nParentObjectClass = tceNone;
     tcScope->iorReason.SetIort( iortScrubbing );
 
+    //  Don't call CSR::Dirty() or CPAGE::Dirty() because we don't
+    //  want the dbtime on the page changed
     BFDirty( pcsr->Cpage().PBFLatch(), bfdfDirty, *tcScope );
 
     if( pcsr->Cpage().FLeafPage() )
@@ -917,9 +1017,13 @@ ERR SCRUBTASK::ErrProcessUsedPage_(
                 if( !FNDVersion( kdf )
                     || !FNodeHasVersions_( pcsr->Cpage().ObjidFDP(), kdf, trxOldest ) )
                 {
+                    //  don't zero out the data for non-unique indexes
+                    //  the data is part of the bookmark and can't be removed or the sort order
+                    //  will be wrong
                     if( m_pobjidinfoCached->fUnique )
                     {
                         ++cFlagDeletedNodesZeroed;
+                        //  the kdf is pointing directly into the page
                         memset( kdf.data.Pv(), chSCRUBLegacyDeletedDataFill, kdf.data.Cb() );
                     }
 
@@ -959,12 +1063,14 @@ ERR SCRUBTASK::ErrProcessUsedPage_(
             }
         }
 
+        //  report stats for all nodes at one time to reduce contention
         AtomicExchangeAdd( &( m_pcontext->pstats->cNodes ), pcsr->Cpage().Clines() );
         AtomicExchangeAdd( &( m_pcontext->pstats->cVersionBitsReset ), cVersionBitsReset );
         AtomicExchangeAdd( &( m_pcontext->pstats->cFlagDeletedNodesZeroed ), cFlagDeletedNodesZeroed );
         AtomicExchangeAdd( &( m_pcontext->pstats->cFlagDeletedNodesNotZeroed ), cFlagDeletedNodesNotZeroed );
     }
     
+    //  reorganize the page and zero all unused data
     pcsr->Cpage().OverwriteUnusedSpace( chSCRUBLegacyUsedPageFreeFill );
     
 HandleError:
@@ -974,11 +1080,13 @@ HandleError:
 }
 
 
+//  ================================================================
 LOCAL ERR ErrSCRUBGetObjidsFromCatalog(
         PIB * const ppib,
         const IFMP ifmp,
         const OBJIDINFO ** ppobjidinfo,
         LONG * pcobjidinfo )
+//  ================================================================
 {
     FUCB * pfucbCatalog = pfucbNil;
     ERR err;
@@ -1030,11 +1138,14 @@ LOCAL ERR ErrSCRUBGetObjidsFromCatalog(
             case sysobjNil:
             case sysobjColumn:
             case sysobjCallback:
+                //  These are not B-trees
                 break;
                 
             case sysobjTable:
             case sysobjIndex:
             case sysobjLongValue:
+                //  These are B-trees
+                //  Obtain their objids and pgnoFDPs
                 fBtree = fTrue;
                 
                 Assert( FFixedFid( fidMSO_Id ) );
@@ -1066,6 +1177,7 @@ LOCAL ERR ErrSCRUBGetObjidsFromCatalog(
                 break;
         }
 
+        //  we need a list of unique objids for version store lookups
         fUnique         = fTrue;
         fPrimaryIndex   = fFalse;
         if( sysobjIndex == sysobj )
@@ -1088,6 +1200,7 @@ LOCAL ERR ErrSCRUBGetObjidsFromCatalog(
 
         Call( ErrDIRRelease( pfucbCatalog ) );
 
+        //  the primary index is already recorded as the B-Tree
         if( fBtree && !fPrimaryIndex )
         {
             if( iobjidinfoNext >= cobjidinfoAllocated )
@@ -1146,5 +1259,5 @@ HandleError:
     return err;
 }
 
-#endif
+#endif  //  MINIMAL_FUNCTIONALITY
 

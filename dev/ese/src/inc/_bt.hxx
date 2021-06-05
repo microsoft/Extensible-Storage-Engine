@@ -1,10 +1,14 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
+//  used only space and BT
+//
 ERR ErrBTIOpenAndGotoRoot( PIB *ppib, const PGNO pgnoFDP, const IFMP ifmp, FUCB **ppfucb );
 
 ERR ErrBTIIRefresh( FUCB *pfucb, LATCH latch );
 
+//  used by recovery
+//
 ERR ErrBTINewSplitPath( SPLITPATH **ppsplitPath );
 VOID BTIReleaseSplitPaths( INST *pinst, SPLITPATH *psplitPathLeaf );
 
@@ -23,11 +27,19 @@ ERR ErrBTINewMerge( MERGEPATH *pmergePath );
 VOID BTIReleaseMergePaths( MERGEPATH *pmergePathLeaf );
 VOID BTIPerformMerge( FUCB *pfucb, MERGEPATH *pmergePathLeaf );
 
+//  refreshes currency
+//  based on physical currency in CSR
+//  used by DIR level functions re-entering BT to establish currency
+//  functions internal to BT do not refresh currency
+//
 INLINE
 ERR ErrBTIRefresh( FUCB *pfucb, LATCH latch = latchReadNoTouch )
 {
     if ( Pcsr( pfucb )->FLatched() )
     {
+        //  page is already accessed and latched
+        //  currency must be valid
+        //
         AssertNDCursorOnPage( pfucb, Pcsr( pfucb ) );
         AssertNDGet( pfucb );
         return JET_errSuccess;
@@ -39,6 +51,8 @@ ERR ErrBTIRefresh( FUCB *pfucb, LATCH latch = latchReadNoTouch )
 
 INLINE BOOL FBTIUpdatablePage( const CSR& csr )
 {
+    //  if recovering and we don't need to redo the page, we keep the page RIW-latched,
+    //  Or if we're recovering, and the page is trimmed, then we don't care about the latch state.
     Assert( ( pagetrimTrimmed == csr.PagetrimState() )
             || ( PinstFromIfmp( csr.Cpage().Ifmp() )->FRecovering() && latchRIW == csr.Latch() )
             || latchWrite == csr.Latch() );
@@ -46,6 +60,8 @@ INLINE BOOL FBTIUpdatablePage( const CSR& csr )
 }
 
 
+//  assert data in ilineOper is pgnoSplit at lower level
+//
 INLINE VOID AssertBTIVerifyPgnoSplit( FUCB *pfucb, SPLITPATH *psplitPath )
 {
 #ifdef DEBUG
@@ -65,16 +81,22 @@ INLINE VOID AssertBTIVerifyPgnoSplit( FUCB *pfucb, SPLITPATH *psplitPath )
 
     if ( psplit->ilineOper >= psplit->ilineSplit )
     {
+        //  page pointer to new page falls in new page
+        //
         pcsr = &psplit->csrNew;
         pcsr->SetILine( psplit->ilineOper - psplit->ilineSplit );
     }
     else
     {
+        //  page pointer falls in split page
+        //
         Assert( splittypeVertical != psplit->splittype );
         pcsr = &psplit->psplitPath->csr;
         pcsr->SetILine( psplit->ilineOper );
     }
 
+    //  current page pointer should point to pgnoSplit
+    //
     if ( FBTIUpdatablePage( *pcsr ) )
     {
         NDGet( pfucb, pcsr );

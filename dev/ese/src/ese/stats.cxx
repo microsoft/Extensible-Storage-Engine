@@ -16,7 +16,8 @@ ERR ErrSTATSComputeIndexStats( PIB *ppib, FCB *pfcbIdx, FUCB *pfucbTable )
     Assert( pfucbIdx != pfucbNil );
     FUCBSetIndex( pfucbIdx );
 
-    
+    /*  initialize stats record
+    /**/
     sr.cPages = sr.cItems = sr.cKeys = 0L;
     UtilGetDateTime( &dt );
     UtilMemCpy( &sr.dtWhenRun, &dt, sizeof sr.dtWhenRun );
@@ -53,7 +54,8 @@ ERR ErrSTATSComputeIndexStats( PIB *ppib, FCB *pfcbIdx, FUCB *pfucbTable )
                                 reinterpret_cast<INT *>( &sr.cPages ) ) );
     FUCBResetSecondary( pfucbIdx );
 
-    
+    /*  write stats
+    /**/
     Call( ErrCATStats(
             ppib,
             pfucbIdx->ifmp,
@@ -63,6 +65,7 @@ ERR ErrSTATSComputeIndexStats( PIB *ppib, FCB *pfcbIdx, FUCB *pfucbTable )
             fTrue ) );
 
 HandleError:
+    //  set secondary for cursor reuse support
     if ( !pfcbIdx->FPrimaryIndex() )
         FUCBSetSecondary( pfucbIdx );
     DIRClose( pfucbIdx );
@@ -82,15 +85,18 @@ ERR VTAPI ErrIsamComputeStats( JET_SESID sesid, JET_VTID vtid )
     CallR( ErrPIBCheck( ppib ) );
     CheckTable( ppib, pfucb );
 
+    // filters do not apply to stats
     if ( pfucb->pmoveFilterContext )
     {
         return ErrERRCheck( JET_errFilteredMoveNotSupported );
     }
 
-    
+    /*  start a transaction, in case anything fails
+    /**/
     CallR( ErrDIRBeginTransaction( ppib, 63525, NO_GRBIT ) );
 
-    
+    /*  compute stats for each index
+    /**/
     pfcbTable = pfucb->u.pfcb;
     Assert( pfcbTable != pfcbNil );
 
@@ -117,13 +123,16 @@ ERR VTAPI ErrIsamComputeStats( JET_SESID sesid, JET_VTID vtid )
         else
         {
             pfcbTable->LeaveDML();
+            // Because we're in a transaction, this guarantees that the FCB won't
+            // be cleaned up while we're trying to retrieve stats.
             Call( ErrSTATSComputeIndexStats( ppib, pfcbIdx, pfucb ) );
             pfcbTable->EnterDML();
         }
     }
     pfcbTable->LeaveDML();
 
-    
+    /*  commit transaction if everything went OK
+    /**/
     Call( ErrDIRCommitTransaction( ppib, JET_bitCommitLazyFlush ) );
 
     return err;
@@ -135,7 +144,22 @@ HandleError:
 }
 
 
+/*=================================================================
+ErrSTATSRetrieveStats
 
+Description: Returns the number of records and pages used for a table
+
+Parameters:     ppib                pointer to PIB for current session or ppibNil
+                ifmp                database id or 0
+                pfucb               cursor or pfucbNil
+                szTableName         the name of the table or NULL
+                pcRecord            pointer to count of records
+                pcPage              pointer to count of pages
+
+Errors/Warnings:
+                JET_errSuccess or error from called routine.
+
+=================================================================*/
 ERR ErrSTATSRetrieveTableStats(
     PIB         * ppib,
     const IFMP  ifmp,
@@ -158,7 +182,8 @@ ERR ErrSTATSRetrieveTableStats(
                 &sr,
                 fFalse));
 
-    
+    /*  set output variables
+    /**/
     if ( pcRecord )
         *pcRecord = sr.cItems;
     if ( pcPage )
@@ -185,6 +210,7 @@ ERR ErrSTATSRetrieveIndexStats(
     ERR     err;
     SR      sr;
 
+    // The name is assumed to be valid.
 
     CallR( ErrCATStats(
                 pfucbTable->ppib,
@@ -194,7 +220,8 @@ ERR ErrSTATSRetrieveIndexStats(
                 &sr,
                 fFalse ) );
 
-    
+    /*  set output variables
+    /**/
     if ( pcItem )
         *pcItem = sr.cItems;
     if ( pcPage )
@@ -217,6 +244,7 @@ ErrIsamGetRecordPosition( JET_SESID vsesid, JET_VTID vtid, JET_RECPOS *precpos, 
     PIB *ppib = (PIB *)vsesid;
     FUCB *pfucb = (FUCB *)vtid;
 
+    // filters do not apply to getting current record's approximate position
     if ( pfucb->pmoveFilterContext )
     {
         Error( ErrERRCheck( JET_errFilteredMoveNotSupported ) );
@@ -230,6 +258,7 @@ ErrIsamGetRecordPosition( JET_SESID vsesid, JET_VTID vtid, JET_RECPOS *precpos, 
         return ErrERRCheck( JET_errInvalidParameter );
     precpos->cbStruct = sizeof(JET_RECPOS);
 
+    //  get position of secondary or primary cursor
     if ( pfucb->pfucbCurIndex != pfucbNil )
     {
         Call( ErrDIRGetPosition( pfucb->pfucbCurIndex, &ulLT, &ulTotal ) );
@@ -240,6 +269,7 @@ ErrIsamGetRecordPosition( JET_SESID vsesid, JET_VTID vtid, JET_RECPOS *precpos, 
     }
 
     precpos->centriesLT = ulLT;
+    //  CONSIDER:   remove this bogus field
     precpos->centriesInRange = 1;
     precpos->centriesTotal = ulTotal;
 
@@ -257,9 +287,11 @@ ERR ISAMAPI ErrIsamIndexRecordCount( JET_SESID sesid, JET_TABLEID tableid, ULONG
 
     CallR( ErrPIBCheck( ppib ) );
 
-    
+    /*  get pfucb from tableid
+    /**/
     CallR( ErrFUCBFromTableid( ppib, tableid, &pfucb ) );
 
+    // filters do not apply to getting total record count
     if ( pfucb->pmoveFilterContext )
     {
         return ErrERRCheck( JET_errFilteredMoveNotSupported );
@@ -267,7 +299,8 @@ ERR ISAMAPI ErrIsamIndexRecordCount( JET_SESID sesid, JET_TABLEID tableid, ULONG
 
     CheckTable( ppib, pfucb );
 
-    
+    /*  get cursor for current index
+    /**/
     if ( pfucb->pfucbCurIndex != pfucbNil )
         pfucbIdx = pfucb->pfucbCurIndex;
     else

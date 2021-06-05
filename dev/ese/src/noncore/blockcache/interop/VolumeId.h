@@ -15,8 +15,14 @@ namespace Internal
         {
             namespace Interop
             {
+                /// <summary>
+                /// Volume ID
+                /// </summary>
                 public enum class VolumeId : int
                 {
+                    /// <summary>
+                    /// An invalid VolumeId.
+                    /// </summary>
                     Invalid = 0,
                 };
             }

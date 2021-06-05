@@ -1,9 +1,17 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
+//1// ese_common.hxx
+//2// Why this file?
+// This file includes niceties like 'Call' and NO_GRBIT. It's a superset of esetest.h If I changed esetest.h directly, I'd have to
+// change ALL the tests at once. This allows a phase-in.
+//
+//2// Why not esetest.h?
+// esetest.h needs to be 100% backwards compatible
 
 #pragma once
 
-#pragma warning( disable : 4127 )
+// As long as you use Call() family, you need to disable 4127
+#pragma warning( disable : 4127 )       // conditional expression is constant
 
 #include "esetest.h"
 #include <stdio.h>
@@ -33,11 +41,14 @@ if ( ptr != 0 ) {               \
         expr;               \
     }
 
+// moved to esetest.cpp
 void ReportErr( long err, long expected, unsigned long ulLine, const char *szFileName, const char *szFuncCalled );
 int ReportWarn( long warn, long expected, unsigned long ulLine, const char *szFileName, const char *szFuncCalled );
 int ReportExpectedErr( JET_ERR expError );
 int ReportReceivedErr( JET_ERR expError );
 
+// if error is specified, then fn() MUST return error. If JET_errSuccess is acceptable, then write a different macro
+// Munge the return code to JET_errTestError so it won't slip by without us noticing.
 #define CallJ( fn, label, experr )                                          \
 do {                                                                        \
     if ( ( experr != ( err = fn ) ) && ( err <= JET_errSuccess ) ) {        \
@@ -107,6 +118,7 @@ do {                                                                            
     }                                                                           \
 } while ( 0 )
 
+// Do not change "global" jErr
 #define CALLJET_TERMINATE( func )                                               \
 do {                                                                            \
     JET_ERR jErr = ( func );                                                    \
@@ -129,24 +141,40 @@ do {                                                                            
 #endif
 #define JET_colidNil        0
 
+// We steal constant -64 as JET_errTestError
+// If jetdevs have to use -64 later, we will get into some trouble
 #define JET_errTestError    -64
 
+// This has to be defined in some real header file somewhere, right?
 #define CODE_PAGE_UNICODE       1200
 #define CODE_PAGE_ANSI          1252
+// 0x409 or 0n1033:
 const DWORD LCID_USENGLISH = MAKELCID ( MAKELANGID ( LANG_ENGLISH, SUBLANG_ENGLISH_US), SORT_DEFAULT );
 
+// 0x0:
 const DWORD LCID_NONE = MAKELCID( MAKELANGID( LANG_NEUTRAL, SUBLANG_NEUTRAL ), SORT_DEFAULT );
 
+// 0x7f or 0n127:
 const DWORD LCID_INVARIANT = MAKELCID( MAKELANGID( LANG_INVARIANT, SUBLANG_NEUTRAL ), SORT_DEFAULT );
 
+//================================================================
+// <SOMEONE>
+//================================================================
+// Error handling helpers
+//================================================================
 #define FailIf( x, y )      Call( ( y, x ) ? JET_errTestError : JET_errSuccess )
 #define TestP( x, y )       Call( ( y, x ) ? JET_errSuccess : JET_errTestError )
+//================================================================
+// vector delete with clear
+//================================================================
 template<typename T> inline void pdelete_v( T*& rpT ) { delete[ ] rpT; rpT = NULL; }
 template<typename T> inline void pdelete( T*& rpT ) { delete rpT; rpT = NULL; }
+//================================================================
 #define CountedLoop( i, init, final, body )                                     \
 do {                                                                            \
     for ( size_t i = ( init ); i < ( size_t )( final ); ++i ) { body; }                     \
 } while ( 0 )
+//================================================================
 inline BOOL pclose( HANDLE& h )
 {
     BOOL rc = !0;
@@ -156,6 +184,7 @@ inline BOOL pclose( HANDLE& h )
     }
     return rc;
 }
+//================================================================
 #define HrCallJ( fn, label ) \
 do { \
     if ( FAILED( hr = ( fn ) ) ) { \
@@ -166,14 +195,31 @@ do { \
 } while ( 0 )
 
 #define HrCall( fn )    HrCallJ( fn, Cleanup )
+//================================================================
+// sizeof2() works out the capacity of an array, behavior is undefined for other types
+// NOTE: _countof() is a more typesafe-version.
 #define sizeof2( x )    ( sizeof( x ) / sizeof( *( x ) ) )
+//================================================================
+// temporarily borrowed from jet.h for exchange, we can delete this after SOMEONE merge codebase
+// Text token to easily search:
+// ESE_HEADER_CONSTANT_CONSOLIDATION
 JET_ERR JET_API JetOSSnapshotEnd( const JET_OSSNAPID snapId, const JET_GRBIT grbit );
 
+//================================================================
+// </SOMEONE>
+//================================================================
 
 
+//================================================================
+// Various constants
 
+// It will be interesting to change this to a different number. But some of the multi-executable tests
+// require the numbers to be in sync, so expect some random test failures will have to be worked
+// out.
 const JET_API_PTR   g_esetestckbLogFile = 5120;
 
+//================================================================
+// Behaviour of the abstraction layer
 
 bool
 FEsetestWidenParameters()
@@ -183,6 +229,7 @@ bool
 FEsetestAlwaysNarrow()
 ;
 
+// returns an HMODULE to ese.dll or esent.dll (as appropriate)
 HMODULE
 HmodEsetestEseDll()
 ;
@@ -193,6 +240,8 @@ QWEsetestQueryPerformanceCounter()
 
 
 #if 1
+//================================================================
+// Implementation of the abstraction layer (NOT exported in the DLL!)
 wchar_t*
 EsetestWidenString(
     __in PSTR   szFunction,
@@ -217,6 +266,7 @@ EsetestCleanupWidenString(
 )
 ;
 
+//----------------StringWithLength
 wchar_t*
 EsetestWidenStringWithLength(
     __in PSTR   szFunction,
@@ -234,6 +284,7 @@ EsetestUnwidenStringWithLength(
 )
 ;
 
+//----------------CbString
 wchar_t*
 EsetestWidenCbString(
     __in PSTR   szFunction,
@@ -251,6 +302,7 @@ EsetestUnwidenCbString(
 )
 ;
 
+//----------------
 JET_RSTMAP_W*
 EsetestWidenJET_RSTMAP(
     __in PSTR   szFunction,
@@ -268,6 +320,7 @@ EsetestUnwidenJET_RSTMAP(
 )
 ;
 
+//----------------
 JET_RSTINFO_W*
 EsetestWidenJET_RSTINFO(
     __in PSTR   szFunction,
@@ -283,6 +336,7 @@ EsetestUnwidenJET_RSTINFO(
 )
 ;
 
+//----------------
 JET_RSTINFO2_W*
 EsetestWidenJET_RSTINFO2(
     __in PSTR   szFunction,
@@ -298,6 +352,7 @@ EsetestUnwidenJET_RSTINFO2(
 )
 ;
 
+//----------------
 JET_SETSYSPARAM_W*
 EsetestWidenJET_SETSYSPARAM(
     __in PSTR   szFunction,
@@ -316,6 +371,7 @@ EsetestUnwidenJET_SETSYSPARAM(
 ;
 
 
+//----------------
 JET_TABLECREATE_W*
 EsetestWidenJET_TABLECREATE(
     __in PSTR   szFunction,
@@ -331,6 +387,7 @@ EsetestUnwidenJET_TABLECREATE(
 )
 ;
 
+//----------------
 JET_TABLECREATE2_W*
 EsetestWidenJET_TABLECREATE2(
     __in PSTR   szFunction,
@@ -346,6 +403,7 @@ EsetestUnwidenJET_TABLECREATE2(
 )
 ;
 
+//----------------
 JET_TABLECREATE3_W*
 EsetestWidenJET_TABLECREATE3(
     __in PSTR   szFunction,
@@ -361,6 +419,7 @@ EsetestUnwidenJET_TABLECREATE3(
 )
 ;
 
+//----------------
 JET_TABLECREATE5_W*
 EsetestWidenJET_TABLECREATE5(
     __in PSTR   szFunction,
@@ -376,6 +435,7 @@ EsetestUnwidenJET_TABLECREATE5(
 )
 ;
 
+//----------------
 JET_INDEXCREATE_W*
 EsetestWidenJET_INDEXCREATE(
     __in PSTR   szFunction,
@@ -393,6 +453,7 @@ EsetestUnwidenJET_INDEXCREATE(
 )
 ;
 
+//----------------
 JET_INDEXCREATE2_W*
 EsetestWidenJET_INDEXCREATE2(
     __in PSTR   szFunction,
@@ -410,6 +471,7 @@ EsetestUnwidenJET_INDEXCREATE2(
 )
 ;
 
+//----------------
 JET_INDEXCREATE3_W*
 EsetestWidenJET_INDEXCREATE3(
     __in PSTR   szFunction,
@@ -427,6 +489,7 @@ EsetestUnwidenJET_INDEXCREATE3(
 )
 ;
 
+//----------------
 JET_CONVERT_W*
 EsetestWidenJET_CONVERT(
     __in PSTR   szFunction,
@@ -442,6 +505,7 @@ EsetestUnwidenJET_CONVERT(
 )
 ;
 
+//----------------
 JET_CONDITIONALCOLUMN_W*
 EsetestWidenJET_CONDITIONALCOLUMN(
     __in PSTR   szFunction,
@@ -459,6 +523,7 @@ EsetestUnwidenJET_CONDITIONALCOLUMN(
 )
 ;
 
+//----------------
 JET_COLUMNCREATE_W*
 EsetestWidenJET_COLUMNCREATE(
     __in PSTR   szFunction,
@@ -489,9 +554,15 @@ EsetestUnwidenJET_LOGINFO(
 )
 ;
 
-#endif
+#endif // ESETEST_UNICODE_SUPPORTED
 
 
+// This function will detect if pindexcreateInUnknownFormat is JET_INDEXCREATE or
+// JET_INDEXCREATEOLD, and then depending on which DLL is loaded, output
+// pindexcreate in the appropraite structure.
+// Return value:
+// true: pindexcreateInUnknownFormat has been converted to pindexcreate.
+// false: pindexcreateInUnknownFormat was acceptable; pindexcreate is NULL.
 JET_ERR
 EsetestAdaptJET_INDEXCREATE(
     __in PSTR   szFunction,
@@ -502,6 +573,8 @@ EsetestAdaptJET_INDEXCREATE(
 )
 ;
 
+// copies info over from pindexcreate to pindexcreateInUnknownFormat
+// pindexcreate will be deleted.
 JET_ERR
 EsetestUnadaptJET_INDEXCREATE(
     __in PSTR   szFunction,
@@ -510,6 +583,11 @@ EsetestUnadaptJET_INDEXCREATE(
     __inout_ecount( cIndexCreate ) JET_INDEXCREATE**    prgindexcreate
 )
 ;
+ // This function will adapt the JET_TABLECREATE structure to use the proper JET_INDEXCREATE
+// structure.
+// Return value:
+// true: pindexcreateInUnknownFormat has been converted to pindexcreate.
+// false: pindexcreateInUnknownFormat was acceptable; pindexcreate is NULL.
 JET_ERR
 EsetestAdaptJET_TABLECREATE(
     __in PSTR   szFunction,
@@ -519,6 +597,8 @@ EsetestAdaptJET_TABLECREATE(
 )
 ;
 
+// copies info over from ptablecreate to ptablecreateInNewFormat
+// ptablecreate will be deleted.
 JET_ERR
 EsetestUnadaptJET_TABLECREATE(
     __in PSTR   szFunction,
@@ -527,6 +607,11 @@ EsetestUnadaptJET_TABLECREATE(
 )
 ;
 
+// This function will adapt the JET_TABLECREATE2 structure to use the proper JET_INDEXCREATE
+// structure.
+// Return value:
+// true: pindexcreateInUnknownFormat has been converted to pindexcreate.
+// false: pindexcreateInUnknownFormat was acceptable; pindexcreate is NULL.
 JET_ERR
 EsetestAdaptJET_TABLECREATE2(
     __in PSTR   szFunction,
@@ -536,6 +621,8 @@ EsetestAdaptJET_TABLECREATE2(
 )
 ;
 
+// copies info over from ptablecreate to ptablecreateInNewFormat
+// ptablecreate will be deleted.
 JET_ERR
 EsetestUnadaptJET_TABLECREATE2(
     __in PSTR   szFunction,
@@ -544,7 +631,10 @@ EsetestUnadaptJET_TABLECREATE2(
 )
 ;
 
+//----------------
 
+// These functions will change column definitions and data setting in regards to compression,
+// based on the compression percentage defined in the environment.
 JET_COLUMNDEF*
 EsetestCompressJET_COLUMNDEF(
     __in const JET_COLUMNDEF*   pcolumndef,
@@ -568,7 +658,9 @@ EsetestCompressJET_SETCOLUMN(
 )
 ;
 
+//----------------
 
+// user defined callback
 JET_ERR JET_API dummyColumnUserCallBack(
     JET_SESID       sesid,
     JET_DBID        dbid,

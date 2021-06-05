@@ -2,6 +2,7 @@
 // Licensed under the MIT License.
 #include "osunitstd.hxx"
 
+// Needed for WAIT_OBJECT_0
 typedef __success(return >= 0) LONG NTSTATUS;
 
 CSemaphore g_semStress( CSyncBasicInfo( "SchedulingTimerStress::g_semStress" ) );
@@ -13,7 +14,11 @@ DWORD g_cCancelled = 0;
 const DWORD g_dtickRuntime = 5000;
 
 
+//
+//  SelfRescheduler support / config / infra
+//
 
+//      Timer Tasks storage / init / term
 
 POSTIMERTASK    g_rgposttTesters[5];
 
@@ -47,35 +52,38 @@ VOID RandSleep()
     }
     if ( g_dtickRandSleepMax == 0 )
     {
-        Sleep( 0 );
+        Sleep( 0 ); // no point in below and will get a div by 0 exception
         return;
     }
     switch( rand() % 20 )
     {
-        case 19:
+        case 19:    // 5%
             tickSleep = rand() % g_dtickRandSleepMax;
             break;
-        case 18:
+        case 18:    // 5%
             tickSleep = rand() % min( 300, g_dtickRandSleepMax );
             break;
-        case 17:
+        case 17:    // 25%
         case 16:
         case 15:
         case 14:
         case 13:
             tickSleep = rand() % min( 50, g_dtickRandSleepMax );
             break;
-        case 12:
+        case 12:    // 10%
         case 11:
             tickSleep = rand() % min( 14, g_dtickRandSleepMax );
             break;
-        default:
+        default:    // 50%
             tickSleep = rand() % min( 3, g_dtickRandSleepMax );
             break;
-        case 0:
+        case 0:     // 5%, no wait
+            //wprintf( L"\tNO SLEEP FOR YOU!!!\n" );
             return;
     }
+    //wprintf( L"\tSleeping( %d ms )...", tickSleep );
     Sleep( tickSleep );
+    //wprintf( L"done.\n", tickSleep );
 }
 
 VOID ScheduleTimerStress( const TICK dtickDelay, VOID* const pvRuntimeContext )
@@ -118,7 +126,7 @@ VOID CancelTimerStress( PfnTimerTask pfnTask )
     Enforce( g_semStress.CAvail() <= 1 );
 }
 
-#include "NTSecAPI.h"
+#include "NTSecAPI.h" // for NTSTATUS
 
 NTSTATUS
 WINAPI
@@ -198,7 +206,11 @@ JET_ERR ErrSchedulingTimerStress_( const PfnTimerTask pfnTask )
 }
 
 
+//
+//  Test Callbacks
+//
 
+//  Semaphore releasing callbacks, as a simple way to count callbacks & provide synchronization
         
 VOID OSTimerTestGroupCtxSemaphoreReleaser( VOID * pvGroupContext, VOID * pvRuntimeContext )
 {
@@ -221,7 +233,7 @@ VOID OSTimerTestGroupCtxSemaphoreReleaserRuntimeCtxIncrementerRandSleep( VOID * 
     psemaphore->Release();
 }
 
-VOID OSTimerTestGroupCtxSemaphoreTryReleaser( VOID * pvGroupContext, VOID * pvRuntimeContext )
+VOID OSTimerTestGroupCtxSemaphoreTryReleaser( VOID * pvGroupContext, VOID * pvRuntimeContext )  // provided to avoid conflict
 {
     CSemaphore *psemaphore = (CSemaphore*)pvGroupContext;
 
@@ -324,6 +336,7 @@ VOID SelfSchedulingOsTimerStressTask( VOID* const pvGroupContext, VOID* const pv
     Enforce( (DWORD)AtomicExchange( (LONG*)&g_fRunning, 0 ) == 1 );
 }
 
+//      Test rescheduler config and impl
 
 BOOL            g_fRandomizedDelays = fFalse;
 TICK            g_dtickDelayMax = 0;
@@ -342,6 +355,7 @@ VOID OSTimerTestSelfRescheduler( VOID * pvGroupContext, VOID * pvRuntimeContext 
     const TICK dtickDelay   = g_fRandomizedDelays ? ( 1 + rand() % g_dtickDelayMax ) : g_dtickDelayMax;
     const TICK dtickFuzz    = g_fRandomizedDelays ? ( 1 + rand() % g_dtickFuzzMax ) : g_dtickFuzzMax;
 
+    //wprintf( L"Run[%d] [Re]Sched: %d / %p ... resched ...\n", g_cRuns, DwUtilThreadId(), pv );
 
     OSTimerTaskScheduleTask( g_rgposttTesters[0], NULL, dtickDelay, dtickFuzz );
 }
@@ -350,10 +364,12 @@ VOID OSTimerTestCrossScheduler( VOID * pvGroupContext, VOID * pvRuntimeContext )
 {
     g_cRuns++;
 
+    //wprintf( L"Run[%d] [Re]Sched: %d / %p ... resched ...\n", g_cRuns, DwUtilThreadId(), pv );
 
     OSTimerTaskScheduleTask( g_rgposttTesters[0], NULL, 100, 10 );
 }
 
+//  note it releases the runtime context if it is non-null, otherwise releases the group context
 
 VOID OSTimerTestSelfReschedulerAndReleaser( VOID * pvGroupContext, VOID * pvRuntimeContext )
 {
@@ -371,11 +387,13 @@ VOID OSTimerTestSelfReschedulerAndReleaser( VOID * pvGroupContext, VOID * pvRunt
     const TICK dtickDelay   = g_fRandomizedDelays ? ( 1 + rand() % g_dtickDelayMax ) : g_dtickDelayMax;
     const TICK dtickFuzz    = g_fRandomizedDelays ? ( 1 + rand() % g_dtickFuzzMax ) : g_dtickFuzzMax;
 
+    //wprintf( L"Run[%d] [Re]Sched: %d / %p ... resched ...\n", g_cRuns, DwUtilThreadId(), pv );
 
     OSTimerTaskScheduleTask( g_rgposttTesters[0], NULL, dtickDelay, dtickFuzz );
 }
 
 
+//      Test rescheduler helper
 
 JET_ERR ErrOSTimerTestRun( const TICK dtickRunTime, const TICK dtickInitialDelay, const TICK dtickInitialFuzz, const TICK dtickSubsequentDelayMax, const TICK dtickSubsequentFuzzMax )
 {
@@ -407,7 +425,7 @@ INT CSemaphoreCollect( CSemaphore * psemaphore )
         cAcquired++;
     }
 
-    UtilSleep( 16 );
+    UtilSleep( 16 );    //  To ensure all are collected
     Expected( psemaphore->FTryAcquire() == fFalse );    
     Expected( psemaphore->CAvail() == 0 );
 
@@ -418,8 +436,10 @@ INT CSemaphoreWaitCollect( CSemaphore * psemaphore, const TICK dtickMaxInterimWa
 {
     INT cAcquired = 0;
 
-    Assert( dtickMaxInterimWait > 10 );
+    Assert( dtickMaxInterimWait > 10 ); //  or bad div below
 
+    // turning this to true would trim a dtickMaxInterimWait off the end, consider passing this in if
+    // we want to use it, because both modes are interesting ...
 #ifdef DEBUG
     const BOOL fQuickOut = fFalse;
 #else
@@ -431,6 +451,7 @@ INT CSemaphoreWaitCollect( CSemaphore * psemaphore, const TICK dtickMaxInterimWa
         TICK tickStartNextWait = TickOSTimeCurrent();
 
         BOOL fIncrementAcquired = fFalse;
+        //  See if we can go for the interim wait without any new releases ...
         while( !( fIncrementAcquired = psemaphore->FTryAcquire() ) )
         {
             UtilSleep( dtickMaxInterimWait / 10 );
@@ -442,16 +463,19 @@ INT CSemaphoreWaitCollect( CSemaphore * psemaphore, const TICK dtickMaxInterimWa
         }
         if( !fIncrementAcquired )
         {
+            //  we waited an interim time out with no progress (no new releases), so assume we're done 
+            //  collecting threads and return our cAcquired count ...
             break;
         }
         cAcquired++;
         if( fQuickOut && cAcquired == cExpected )
         {
+            // we got the expected count ...
             break;
         }
     }
 
-    UtilSleep( 16 );
+    UtilSleep( 16 );    //  Weak double check all are collected
     Expected( psemaphore->FTryAcquire() == fFalse );    
     Expected( psemaphore->CAvail() == 0 );
 
@@ -459,12 +483,15 @@ INT CSemaphoreWaitCollect( CSemaphore * psemaphore, const TICK dtickMaxInterimWa
 }
 
 
+//
+//  Some very basic tests
+//
 
 CUnitTest( OSTimerTaskTestCancelWinsOverScheduledTask, 0, "Tests that a timer task that is scheduled far in the future will lose out (without getting run) when cancel is called before the scheduled tick delay." );
 ERR OSTimerTaskTestCancelWinsOverScheduledTask::ErrTest()
 {
     OSTestTimerPreamble();
-    Call( ErrOSTimerTaskCreate( (PfnTimerTask)OSTimerTestSelfRescheduler, NULL, &g_rgposttTesters[0]  ) );
+    Call( ErrOSTimerTaskCreate( (PfnTimerTask)OSTimerTestSelfRescheduler, NULL, &g_rgposttTesters[0] /* what OSTimerTestSelfRescheduler uses */ ) );
 
     OSTestCall( ErrOSTimerTestRun( 2000, 3000, 1500, 1000, 1000 ) );
     OSTestCheck( g_cRuns == 0 );
@@ -484,21 +511,26 @@ ERR OSTimerTaskOneShotTimerFiresOnceGroupCtx::ErrTest()
 
     Call( ErrOSTimerTaskCreate( (PfnTimerTask)OSTimerTestGroupCtxSemaphoreReleaser, &semTimerShot, &g_rgposttTesters[0] ) );
 
+    //  wait to ensure it doesn't prematurely fire.
 
     RandSleep();
     OSTestCheck( semTimerShot.CAvail() == 0 );
 
+    //  schedule
 
     printf( "\t%s\n", __FUNCTION__ );
 
     OSTimerTaskScheduleTask( g_rgposttTesters[0], NULL, 0, 0 );
 
+    //  wait for the callbacks to go off
 
     semTimerShot.Acquire();
 
+    //  wait to make sure it doesn't go off again.
     RandSleep();
     OSTestCheck( semTimerShot.CAvail() == 0 );
 
+    //  The task may still be returning from the callback, so make sure it is cancelled.
 
     OSTimerTaskCancelTask( g_rgposttTesters[0] );
     OSTestCheck( semTimerShot.CAvail() == 0 );
@@ -516,21 +548,26 @@ ERR OSTimerTaskOneShotTimerFiresOnceRuntimeCtx::ErrTest()
 
     Call( ErrOSTimerTaskCreate( (PfnTimerTask)OSTimerTestRuntimeCtxSemaphoreReleaser, NULL, &g_rgposttTesters[0] ) );
 
+    //  wait to ensure it doesn't prematurely fire.
 
     RandSleep();
     OSTestCheck( semTimerShot.CAvail() == 0 );
 
+    //  schedule
 
     printf( "\t%s\n", __FUNCTION__ );
 
     OSTimerTaskScheduleTask( g_rgposttTesters[0], &semTimerShot, 0, 0 );
 
+    //  wait for the callbacks to go off
 
     semTimerShot.Acquire();
 
+    //  wait to make sure it doesn't go off again.
     RandSleep();
     OSTestCheck( semTimerShot.CAvail() == 0 );
 
+    //  The task may still be returning from the callback, so make sure it is cancelled.
 
     OSTimerTaskCancelTask( g_rgposttTesters[0] );
     OSTestCheck( semTimerShot.CAvail() == 0 );
@@ -549,19 +586,23 @@ ERR OSTimerTaskTwoTaskTimerFiresTwiceGroupCtx::ErrTest()
     Call( ErrOSTimerTaskCreate( (PfnTimerTask)OSTimerTestGroupCtxSemaphoreReleaser, &semTimerShot, &g_rgposttTesters[0] ) );
     Call( ErrOSTimerTaskCreate( (PfnTimerTask)OSTimerTestGroupCtxSemaphoreTryReleaser, &semTimerShot, &g_rgposttTesters[1] ) );
 
+    //  schedule
 
     printf( "\t%s\n", __FUNCTION__ );
 
     OSTimerTaskScheduleTask( g_rgposttTesters[0], NULL, 0, 0 );
     OSTimerTaskScheduleTask( g_rgposttTesters[1], NULL, 0, 0 );
 
+    //  wait for the callbacks to go off
 
     semTimerShot.Acquire();
     semTimerShot.Acquire();
 
+    //  wait to make sure it doesn't go off again.
     RandSleep();
     OSTestCheck( semTimerShot.CAvail() == 0 );
 
+    //  The task may still be returning from the callback, so make sure it is cancelled.
 
     OSTimerTaskCancelTask( g_rgposttTesters[0] );
     OSTimerTaskCancelTask( g_rgposttTesters[1] );
@@ -581,19 +622,23 @@ ERR OSTimerTaskTwoTaskTimerFiresTwiceRuntimeCtx::ErrTest()
     Call( ErrOSTimerTaskCreate( (PfnTimerTask)OSTimerTestRuntimeCtxSemaphoreReleaser, NULL, &g_rgposttTesters[0] ) );
     Call( ErrOSTimerTaskCreate( (PfnTimerTask)OSTimerTestRuntimeCtxSemaphoreTryReleaser, NULL, &g_rgposttTesters[1] ) );
 
+    //  schedule
 
     printf( "\t%s\n", __FUNCTION__ );
 
     OSTimerTaskScheduleTask( g_rgposttTesters[0], &semTimerShot, 0, 0 );
     OSTimerTaskScheduleTask( g_rgposttTesters[1], &semTimerShot, 0, 0 );
 
+    //  wait for the callbacks to go off
 
     semTimerShot.Acquire();
     semTimerShot.Acquire();
 
+    //  wait to make sure it doesn't go off again.
     RandSleep();
     OSTestCheck( semTimerShot.CAvail() == 0 );
 
+    //  The task may still be returning from the callback, so make sure it is cancelled.
 
     OSTimerTaskCancelTask( g_rgposttTesters[0] );
     OSTimerTaskCancelTask( g_rgposttTesters[1] );
@@ -613,19 +658,23 @@ ERR OSTimerTaskTwoTaskTimerFiresTwiceMixedCtx::ErrTest()
     Call( ErrOSTimerTaskCreate( (PfnTimerTask)OSTimerTestGroupCtxSemaphoreReleaser, &semTimerShot, &g_rgposttTesters[0] ) );
     Call( ErrOSTimerTaskCreate( (PfnTimerTask)OSTimerTestRuntimeCtxSemaphoreTryReleaser, NULL, &g_rgposttTesters[1] ) );
 
+    //  schedule
 
     printf( "\t%s\n", __FUNCTION__ );
 
-    OSTimerTaskScheduleTask( g_rgposttTesters[0], &semTimerShot , 0, 0 );
+    OSTimerTaskScheduleTask( g_rgposttTesters[0], &semTimerShot /* not used */, 0, 0 );
     OSTimerTaskScheduleTask( g_rgposttTesters[1], &semTimerShot, 0, 0 );
 
+    //  wait for the callbacks to go off
 
     semTimerShot.Acquire();
     semTimerShot.Acquire();
 
+    //  wait to make sure it doesn't go off again.
     RandSleep();
     OSTestCheck( semTimerShot.CAvail() == 0 );
 
+    //  The task may still be returning from the callback, so make sure it is cancelled.
 
     OSTimerTaskCancelTask( g_rgposttTesters[0] );
     OSTimerTaskCancelTask( g_rgposttTesters[1] );
@@ -640,10 +689,11 @@ CUnitTest( OSTimerTaskTestReasonableRuns, 0, "Tests that a timer task gets sever
 ERR OSTimerTaskTestReasonableRuns::ErrTest()
 {
     OSTestTimerPreamble();
-    Call( ErrOSTimerTaskCreate( (PfnTimerTask)OSTimerTestSelfRescheduler, NULL, &g_rgposttTesters[0]  ) );
+    Call( ErrOSTimerTaskCreate( (PfnTimerTask)OSTimerTestSelfRescheduler, NULL, &g_rgposttTesters[0] /* what OSTimerTestSelfRescheduler uses */ ) );
 
     OSTestCall( ErrOSTimerTestRun( 2100, 100, 500, 100, 500 ) );
 
+    // The maximum allowed for g_cRuns is 21.
     OSTestCheck( g_cRuns >= 3 && g_cRuns <= 21 );
 
 HandleError:
@@ -652,18 +702,21 @@ HandleError:
 }
 
 
+//  Simple test for "periodic" timers.
 
 BOOL FOSPeriodicTimerTestRun( POSTIMERTASK postt, CSemaphore * psemCallback, const BOOL fWithInitialDelay, const ULONG iPeriodicSpeedSlowness )
 {
     BOOL        fSuccess = fTrue;
     BOOL        fCancelNeeded = fFalse;
 
+    //  expected that the postt provided is w/ callback OSTimerTestSelfReschedulerAndReleaser, so set 
+    //  the callback controlling functions to run with 300 ms delay
 
-    g_dtickDelayMax = 100 * iPeriodicSpeedSlowness;
+    g_dtickDelayMax = 100 * iPeriodicSpeedSlowness; // we will scale down how aggressive based upon this variable
     g_dtickFuzzMax = 0;
     g_cRuns = 0;
 
-    const TICK  dtickCheckFuzziness = g_dtickDelayMax / 10;
+    const TICK  dtickCheckFuzziness = g_dtickDelayMax / 10; // expect max 10% penalty
 
     #define Check( fCheck )                 \
         if ( !( fSuccess = ( fCheck ) ) )   \
@@ -681,6 +734,7 @@ BOOL FOSPeriodicTimerTestRun( POSTIMERTASK postt, CSemaphore * psemCallback, con
     OSTimerTaskScheduleTask( postt, NULL, dtickInitial, 0 );
     fCancelNeeded = fTrue;
 
+    //  Wait to make sure it goes off multiple times.
 
     for( INT i = 0; i < 6; i++ )
     {
@@ -696,11 +750,12 @@ BOOL FOSPeriodicTimerTestRun( POSTIMERTASK postt, CSemaphore * psemCallback, con
         Check( (INT)( ( i * g_dtickDelayMax ) + dtickInitial + dtickCheckFuzziness ) > DtickDelta( tickStart, tickEnd ) );
     }
 
+    //  The task may still be returning from the callback, so make sure it is cancelled.
 
     OSTimerTaskCancelTask( postt );
     fCancelNeeded = fFalse;
     
-    Check( g_cRuns >= 6 && g_cRuns < 7  );
+    Check( g_cRuns >= 6 && g_cRuns < 7 /* 7 just in case */ );
 
     wprintf( L"\tSucceeded on run %d: Initial: %d ms, Subsequent: %d ms delay, ran correctly for %d runs over %d ms with a %d ms inaccuracy\n", iPeriodicSpeedSlowness, dtickInitial, g_dtickDelayMax, g_cRuns, DtickDelta( tickStart, tickFinal ), dtickCheckFuzziness );
 
@@ -708,6 +763,7 @@ HandleError:
 
     if ( fCancelNeeded )
     {
+        //  The task may still be returning from the callback, so make sure it is cancelled.
 
         OSTimerTaskCancelTask( postt );
         fCancelNeeded = fFalse;
@@ -724,14 +780,18 @@ ERR OSTimerTaskTestPeriodicEmulation::ErrTest()
 
     printf( "\t%s\n", __FUNCTION__ );
 
-    Call( ErrOSTimerTaskCreate( (PfnTimerTask)OSTimerTestSelfReschedulerAndReleaser, &semTimerShot, &g_rgposttTesters[0]  ) );
+    Call( ErrOSTimerTaskCreate( (PfnTimerTask)OSTimerTestSelfReschedulerAndReleaser, &semTimerShot, &g_rgposttTesters[0] /* what OSTimerTestSelfReschedulerReleaser uses */ ) );
 
     const ULONG cRuns = 100;
     for( ULONG i = 0; i < cRuns; i++ )
     {
+        //  This is the effective test check ... but the real test failure is from FOSPeriodicTimerTestRun() though 
+        //  ... this test means we've run cRuns without succeeding (slowing down our aggressiveness on subsequent
+        //  runs ), something has gone wrong ...
 
         OSTestCheck( i < ( cRuns - 1 ) );
 
+        //  we will scale down our aggressiveness of the periodic timer test on every 4th run
 
         wprintf( L"\n\t[%d]", i );
         if ( FOSPeriodicTimerTestRun( g_rgposttTesters[0], &semTimerShot, fFalse, 1+i/4 ) )
@@ -753,14 +813,18 @@ ERR OSTimerTaskTestPeriodicEmulationWithInitial::ErrTest()
 
     printf( "\t%s\n", __FUNCTION__ );
 
-    Call( ErrOSTimerTaskCreate( (PfnTimerTask)OSTimerTestSelfReschedulerAndReleaser, &semTimerShot, &g_rgposttTesters[0]  ) );
+    Call( ErrOSTimerTaskCreate( (PfnTimerTask)OSTimerTestSelfReschedulerAndReleaser, &semTimerShot, &g_rgposttTesters[0] /* what OSTimerTestSelfReschedulerAndReleaser uses */ ) );
 
     const ULONG cRuns = 100;
     for( ULONG i = 0; i < cRuns; i++ )
     {
+        //  This is the effective test check ... but the real test failure is from FOSPeriodicTimerTestRun() though 
+        //  ... this test means we've run cRuns without succeeding (slowing down our aggressiveness on subsequent
+        //  runs ), something has gone wrong ...
 
         OSTestCheck( i < ( cRuns - 1 ) );
 
+        //  we will scale down our aggressiveness of the periodic timer test on every 4th run
 
         wprintf( L"\n\t[%d]", i );
         if ( FOSPeriodicTimerTestRun( g_rgposttTesters[0], &semTimerShot, fTrue, 1+i/4 ) )
@@ -785,10 +849,12 @@ ERR OSTimerTaskTestOneShotWithExternalReschedule::ErrTest()
 
     Call( ErrOSTimerTaskCreate( (PfnTimerTask)OSTimerTestGroupCtxSemaphoreReleaser, &semTimerShot, &g_rgposttTesters[0] ) );
 
+    //  wait to ensure it doesn't prematurely fire.
 
     RandSleep();
     OSTestCheck( semTimerShot.CAvail() == 0 );
 
+    //  schedule multiple times for 2 times the timeout.
 
     const TICK tickInitial = GetTickCount();
     while ( ( GetTickCount() - tickInitial ) <= ( 2 * dtickTimeout ) )
@@ -797,16 +863,20 @@ ERR OSTimerTaskTestOneShotWithExternalReschedule::ErrTest()
         OSTimerTaskScheduleTask( g_rgposttTesters[0], NULL, dtickTimeout, 0 );
     }
 
+    //  can't have gone off yet.
 
     OSTestCheck( semTimerShot.CAvail() == 0 );
 
+    //  wait for the callback to go off.
 
     semTimerShot.Acquire();
 
+    //  wait for 2 times the timeout and make sure it doesn't go off again.
 
     Sleep( 2 * dtickTimeout );
     OSTestCheck( semTimerShot.CAvail() == 0 );
 
+    //  Cancel just in case.
 
     OSTimerTaskCancelTask( g_rgposttTesters[0] );
     OSTestCheck( semTimerShot.CAvail() == 0 );
@@ -826,11 +896,13 @@ ERR OSTimerTaskTestConcurrentBackedUpCallbacksStatesWorkFine::ErrTest()
 
     Call( ErrOSTimerTaskCreate( (PfnTimerTask)OSTimerTestGroupCtxSemaphoreReleaserThenNapTime, &semTimerShot, &g_rgposttTesters[0] ) );
 
+    //  wait to ensure it doesn't prematurely fire.
 
     RandSleep();
     ULONG cAcquired = 0;
     OSTestCheck( semTimerShot.CAvail() == 0 );
 
+    //  schedule and race to reschedule ...
 
     OSTimerTaskScheduleTask( g_rgposttTesters[0], NULL, 0, 0 );
 
@@ -840,6 +912,7 @@ ERR OSTimerTaskTestConcurrentBackedUpCallbacksStatesWorkFine::ErrTest()
 
     wprintf( L"Done.\n" );
 
+    //  wait for the callback to go off.
 
     UtilSleep( 100 );
 
@@ -853,6 +926,7 @@ ERR OSTimerTaskTestConcurrentBackedUpCallbacksStatesWorkFine::ErrTest()
     Assert( semTimerShot.CAvail() == 0 );
     wprintf( L"\tHad %d callbacks.\n", cAcquired );
 
+    //  Cancel just in case.
 
     OSTimerTaskCancelTask( g_rgposttTesters[0] );
     OSTestCheck( semTimerShot.CAvail() == 0 );
@@ -872,11 +946,13 @@ ERR OSTimerTaskTestConcurrentDoubleBackedUpCallbacksStatesWorkFine::ErrTest()
 
     Call( ErrOSTimerTaskCreate( (PfnTimerTask)OSTimerTestGroupCtxSemaphoreReleaserThenNapTime, &semTimerShot, &g_rgposttTesters[0] ) );
 
+    //  wait to ensure it doesn't prematurely fire.
 
     RandSleep();
     ULONG cAcquired = 0;
     OSTestCheck( semTimerShot.CAvail() == 0 );
 
+    //  schedule and race to reschedule ...
 
     OSTimerTaskScheduleTask( g_rgposttTesters[0], NULL, 0, 0 );
 
@@ -884,24 +960,26 @@ ERR OSTimerTaskTestConcurrentDoubleBackedUpCallbacksStatesWorkFine::ErrTest()
     cAcquired++;
 
     OSTimerTaskScheduleTask( g_rgposttTesters[0], NULL, 0, 0 );
-    C_ASSERT( g_dtickSleepyNapTimeMax / 4 > 30 );
-    UtilSleep( g_dtickSleepyNapTimeMax / 4 );
+    C_ASSERT( g_dtickSleepyNapTimeMax / 4 > 30 );   // just enough room to 
+    UtilSleep( g_dtickSleepyNapTimeMax / 4 );       //  give the prev sched time to callback ...
     OSTimerTaskScheduleTask( g_rgposttTesters[0], NULL, 0, 0 );
 
-    UtilSleep( g_dtickSleepyNapTimeMax / 4 );
+    UtilSleep( g_dtickSleepyNapTimeMax / 4 );   //  should still be active after less than nap time sleep
     OnDebug( OSTestCheck( FOSTimerTaskActive( g_rgposttTesters[0] ) ) );
 
     wprintf( L"Done.\n" );
 
+    //  wait for the callback to go off.
 
     UtilSleep( g_dtickSleepyNapTimeMax + 100 );
 
     cAcquired = cAcquired + CSemaphoreCollect( &semTimerShot );
-    OSTestCheck( 2 == cAcquired );
+    OSTestCheck( 2 == cAcquired ); // one of the above is rescheduled
     Assert( semTimerShot.FTryAcquire() == 0 );
     Assert( semTimerShot.CAvail() == 0 );
     wprintf( L"\tHad %d callbacks.\n", cAcquired );
 
+    //  Cancel just in case.
 
     OSTimerTaskCancelTask( g_rgposttTesters[0] );
     OSTestCheck( semTimerShot.CAvail() == 0 );
@@ -921,11 +999,13 @@ ERR OSTimerTaskTestConcurrentTripleBackedUpCallbacksStatesWorkFine::ErrTest()
 
     Call( ErrOSTimerTaskCreate( (PfnTimerTask)OSTimerTestGroupCtxSemaphoreReleaserThenNapTime, &semTimerShot, &g_rgposttTesters[0] ) );
 
+    //  wait to ensure it doesn't prematurely fire.
 
     RandSleep();
     ULONG cAcquired = 0;
     OSTestCheck( semTimerShot.CAvail() == 0 );
 
+    //  schedule and race to reschedule ...
 
     OSTimerTaskScheduleTask( g_rgposttTesters[0], NULL, 0, 0 );
 
@@ -933,16 +1013,18 @@ ERR OSTimerTaskTestConcurrentTripleBackedUpCallbacksStatesWorkFine::ErrTest()
     cAcquired++;
 
     OSTimerTaskScheduleTask( g_rgposttTesters[0], NULL, 0, 0 );
-    C_ASSERT( g_dtickSleepyNapTimeMax / 4 > 30 );
-    UtilSleep( g_dtickSleepyNapTimeMax / 4 );
+    C_ASSERT( g_dtickSleepyNapTimeMax / 4 > 30 );   // just enough room to 
+    UtilSleep( g_dtickSleepyNapTimeMax / 4 );       //  give the prev sched time to callback ...
     OSTimerTaskScheduleTask( g_rgposttTesters[0], NULL, 0, 0 );
 
-    UtilSleep( g_dtickSleepyNapTimeMax / 4 );
+    UtilSleep( g_dtickSleepyNapTimeMax / 4 );   //  should still be active after less than nap time sleep
     OnDebug( OSTestCheck( FOSTimerTaskActive( g_rgposttTesters[0] ) ) );
 
+    //  triple backed up
     OSTimerTaskScheduleTask( g_rgposttTesters[0], NULL, 0, 0 );
     OnDebug( OSTestCheck( FOSTimerTaskActive( g_rgposttTesters[0] ) ) );
 
+    //  randomly quadruple back it up ... but state should be same as triple backup 
     if( ( rand() % 2 ) == 0 )
     {
         OSTimerTaskScheduleTask( g_rgposttTesters[0], NULL, 0, 0 );
@@ -951,15 +1033,17 @@ ERR OSTimerTaskTestConcurrentTripleBackedUpCallbacksStatesWorkFine::ErrTest()
 
     wprintf( L"Done.\n" );
 
+    //  wait for the callback to go off.
 
     UtilSleep( g_dtickSleepyNapTimeMax + 100 );
 
     cAcquired = cAcquired + CSemaphoreCollect( &semTimerShot );
-    OSTestCheck( 2 == cAcquired );
+    OSTestCheck( 2 == cAcquired ); // one of the above is rescheduled
     Assert( semTimerShot.FTryAcquire() == 0 );
     Assert( semTimerShot.CAvail() == 0 );
     wprintf( L"\tHad %d callbacks.\n", cAcquired );
 
+    //  Cancel just in case.
 
     OSTimerTaskCancelTask( g_rgposttTesters[0] );
     OSTestCheck( semTimerShot.CAvail() == 0 );
@@ -973,17 +1057,19 @@ CUnitTest( OSTimerTaskTestScheduleSmallStress, 0x0, "Tests 'concurrent' or at le
 ERR OSTimerTaskTestScheduleSmallStress::ErrTest()
 {
     CSemaphore semTimerShot( CSyncBasicInfo( "StressCallbacksReleases" ) );
-    const TICK dtickScheduleMax = 40;
+    const TICK dtickScheduleMax = 40;   // the state assert in the callback repros 50/50 at 30, and always at 40 on my machine
     OSTestTimerPreamble();
 
     printf( "\t%s\n", __FUNCTION__ );
 
     Call( ErrOSTimerTaskCreate( (PfnTimerTask)OSTimerTestGroupCtxSemaphoreReleaser, &semTimerShot, &g_rgposttTesters[0] ) );
 
+    //  wait to ensure it doesn't prematurely fire.
 
     RandSleep();
     OSTestCheck( semTimerShot.CAvail() == 0 );
 
+    //  schedule and race to reschedule ...
 
     wprintf( L"\tStart schedule race:" );
     BOOL fCancelled = fFalse;
@@ -1009,15 +1095,18 @@ ERR OSTimerTaskTestScheduleSmallStress::ErrTest()
     }
     wprintf( L"Done.\n" );
 
+    //  wait for the callback to go off.
 
     UtilSleep( 2 * dtickScheduleMax );
     ULONG cCallbacks = CSemaphoreCollect( &semTimerShot );
     wprintf( L"\tHad %d callbacks.\n", cCallbacks );
 
+    //  wait for 2 times the timeout and make sure it doesn't go off again.
 
     Sleep( 2 * dtickScheduleMax );
     OSTestCheck( semTimerShot.CAvail() == 0 );
 
+    //  Cancel just in case.
 
     if ( !fCancelled )
     {
@@ -1035,20 +1124,22 @@ CUnitTest( OSTimerTaskTestScheduleSmallStressAgainstSlowCallback, 0, "Tests 'con
 ERR OSTimerTaskTestScheduleSmallStressAgainstSlowCallback::ErrTest()
 {
     CSemaphore semTimerShot( CSyncBasicInfo( "SlowCallbacksReleases" ) );
-    const TICK dtickScheduleMax = 20;
+    const TICK dtickScheduleMax = 20;   // the state assert in the callback repros always at 20 with a slight sleep
     const TICK dtickRandSleepMaxSaved = g_dtickRandSleepMax;
     OSTestTimerPreamble();
 
-    g_dtickRandSleepMax = dtickScheduleMax * 2;
+    g_dtickRandSleepMax = dtickScheduleMax * 2; // want it to sleep, but not too long
 
     printf( "\t%s\n", __FUNCTION__ );
 
     Call( ErrOSTimerTaskCreate( (PfnTimerTask)OSTimerTestGroupCtxSemaphoreReleaserRuntimeCtxIncrementerRandSleep, &semTimerShot, &g_rgposttTesters[0] ) );
 
+    //  wait to ensure it doesn't prematurely fire.
 
     RandSleep();
     OSTestCheck( semTimerShot.CAvail() == 0 );
 
+    //  schedule and race to reschedule ...
 
     wprintf( L"\tStart schedule race:" );
     for( TICK dtickSchedule = 0; dtickSchedule < dtickScheduleMax; dtickSchedule++ )
@@ -1062,15 +1153,18 @@ ERR OSTimerTaskTestScheduleSmallStressAgainstSlowCallback::ErrTest()
     }
     wprintf( L"Done.\n" );
 
+    //  wait for the callback to go off.
 
     UtilSleep( 2 * dtickScheduleMax + g_dtickRandSleepMax );
     ULONG cCallbacks = CSemaphoreCollect( &semTimerShot );
     wprintf( L"\tHad %d callbacks.\n", cCallbacks );
 
+    //  wait for 2 times the timeout and make sure it doesn't go off again.
 
     Sleep( 2 * dtickScheduleMax );
     OSTestCheck( semTimerShot.CAvail() == 0 );
 
+    //  Cancel just in case.
 
     OSTimerTaskCancelTask( g_rgposttTesters[0] );
     OSTestCheck( semTimerShot.CAvail() == 0 );
@@ -1083,6 +1177,9 @@ HandleError:
 
 
 
+//
+//  Advanced Scenarios
+//
 
 CUnitTest( OSTimerTaskTestCanMoveUp, 0, "Tests that rescheduling a timer earlier takes nearly immediate effect both in timing and context." );
 ERR OSTimerTaskTestCanMoveUp::ErrTest()
@@ -1093,12 +1190,13 @@ ERR OSTimerTaskTestCanMoveUp::ErrTest()
 
     printf( "\t%s\n", __FUNCTION__ );
 
-    Call( ErrOSTimerTaskCreate( (PfnTimerTask)OSTimerTestSelfReschedulerAndReleaser, &semGlobal, &g_rgposttTesters[0]  ) );
+    Call( ErrOSTimerTaskCreate( (PfnTimerTask)OSTimerTestSelfReschedulerAndReleaser, &semGlobal, &g_rgposttTesters[0] /* what OSTimerTestSelfReschedulerAndReleaser uses */ ) );
 
     TICK dtickCheckFuzziness = 30;
-    g_dtickDelayMax = 50000;
+    g_dtickDelayMax = 50000;    // infinitely long, turninig it one shot effectively
     g_cRuns = 0;
 
+    //  Try global schedule, then local schedule faster ....
     
     const TICK tickStart = TickOSTimeCurrent();
 
@@ -1125,6 +1223,7 @@ ERR OSTimerTaskTestCanMoveUp::ErrTest()
     
     OSTimerTaskCancelTask( g_rgposttTesters[0] );
 
+    //  Now try it in the reverse order of contexts/schedules and w/ immediate reschedule ....
 
     dtickCheckFuzziness = 20;
 
@@ -1196,44 +1295,46 @@ ERR OSTimerTaskTestRescheduleBeforeExecuteSupplantsRuntimeContext::ErrTest()
 
     idPreviousRunCancelled = idStackTrash;
     wprintf( L"\t\tSchedule[1]: 0x%x, 0x%x (expecting NULL) -->", idWillNeverGetToRun, idPreviousRunCancelled );
-    OSTimerTaskScheduleTask( g_rgposttTesters[0], (void*)idWillNeverGetToRun, 100, 0, (const void**)&idPreviousRunCancelled );
+    OSTimerTaskScheduleTask( g_rgposttTesters[0], (void*)idWillNeverGetToRun/* runtime context */, 100, 0, (const void**)&idPreviousRunCancelled );
     wprintf( L" 0x%x.\n", idPreviousRunCancelled );
     OSTestCheck( idPreviousRunCancelled != idStackTrash );
-    OSTestCheck( idPreviousRunCancelled != idWillNeverGetToRun );
-    OSTestCheck( idPreviousRunCancelled == NULL );
+    OSTestCheck( idPreviousRunCancelled != idWillNeverGetToRun );   // shouldn't be what we just passed in either
+    OSTestCheck( idPreviousRunCancelled == NULL );                  // but MOST specifically -> should be NULL / zero.
 
-    idPreviousRunCancelled = idStackTrash;
+    idPreviousRunCancelled = idStackTrash; // reset
     wprintf( L"\t\tSchedule[2]: 0x%x, 0x%x (expecting cancel = 0x%x) -->", idWillNeverGetToRun, idWillGetToRun, idWillNeverGetToRun );
-    OSTimerTaskScheduleTask( g_rgposttTesters[0], (void*)idWillGetToRun , 14, 0, (const void**)&idPreviousRunCancelled );
+    OSTimerTaskScheduleTask( g_rgposttTesters[0], (void*)idWillGetToRun /* runtime context */, 14, 0, (const void**)&idPreviousRunCancelled );
     wprintf( L" 0x%x.\n", idPreviousRunCancelled );
     OSTestCheck( idPreviousRunCancelled != idStackTrash );
-    OSTestCheck( idPreviousRunCancelled != idWillGetToRun );
-    OSTestCheck( idPreviousRunCancelled == idWillNeverGetToRun );
+    OSTestCheck( idPreviousRunCancelled != idWillGetToRun );        // shouldn't be what we just passed in either
+    OSTestCheck( idPreviousRunCancelled == idWillNeverGetToRun );   // but MOST specifically -> should be equal to previous (and thus cancelled contex)
 
-    OSTestCheck( semTimerShot.CAvail() == 0 || semTimerShot.CAvail() == 1  );
+    OSTestCheck( semTimerShot.CAvail() == 0 || semTimerShot.CAvail() == 1 /* at only 14 ms, can end up running before this */ );
 
     Sleep( 32 );
 
     if ( semTimerShot.CAvail() == 1 )
     {
-        Sleep( 50 );
+        Sleep( 50 );    // was scheduled at 14 ms, perhaps 32 was too quick, give another 50 ms ..
         OSTestCheck( semTimerShot.CAvail() == 1 );
     }
 
     OSTestCheck( semTimerShot.CAvail() == 1 );
-    semTimerShot.Acquire();
+    semTimerShot.Acquire(); // clear CAvail()
 
-    idPreviousRunCancelled = idStackTrash;
+    idPreviousRunCancelled = idStackTrash; // reset
     wprintf( L"\t\tSchedule[2]: 0x%x, 0x%x (expecting no cancel of previous / NULL, as we're after firing) -->", idWillNeverGetToRun, idWillGetToRun );
-    OSTimerTaskScheduleTask( g_rgposttTesters[0], (void*)fTrue , 0, 0, (const void**)&idPreviousRunCancelled );
+    OSTimerTaskScheduleTask( g_rgposttTesters[0], (void*)fTrue /* runtime context */, 0, 0, (const void**)&idPreviousRunCancelled );
     wprintf( L" 0x%x.\n", idPreviousRunCancelled );
     OSTestCheck( idPreviousRunCancelled != idStackTrash );
-    OSTestCheck( idPreviousRunCancelled != idWillNeverGetToRun );
-    OSTestCheck( idPreviousRunCancelled != idWillGetToRun );
-    OSTestCheck( idPreviousRunCancelled == NULL );
+    OSTestCheck( idPreviousRunCancelled != idWillNeverGetToRun );   // shouldn't be what we just passed in either
+    OSTestCheck( idPreviousRunCancelled != idWillGetToRun );        //  <-- the most important check, or implies we didn't reset runtime context (and it would be reused - that's bad)
+    OSTestCheck( idPreviousRunCancelled == NULL );                  // but MOST even stronger -> should be NULL / zero.
 
+    //  wait for callback
     semTimerShot.Acquire();
 
+    //  cancel
 
     OSTimerTaskCancelTask( g_rgposttTesters[0] );
     OSTestCheck( semTimerShot.CAvail() == 0 );
@@ -1254,28 +1355,34 @@ ERR OSTimerTaskTestConcurrentCancelStopsCallbackAndScrubsRuntimeContext::ErrTest
 
     Call( ErrOSTimerTaskCreate( (PfnTimerTask)OSTimerTestGroupCtxSemaphoreReleaserThenNapTime, &semTimerShot, &g_rgposttTesters[0] ) );
 
+    //  wait to ensure it doesn't prematurely fire.
 
     RandSleep();
     ULONG cAcquired = 0;
     OSTestCheck( semTimerShot.CAvail() == 0 );
 
+    //  schedule and race to reschedule ...
 
     OSTimerTaskScheduleTask( g_rgposttTesters[0], &rgulSignals[0], 0, 0 );
 
+    //  wait for the callback to go off.
 
     UtilSleep( 100 );
 
+    //  schedule again
 
     ULONG * pul = NULL;
     OSTimerTaskScheduleTask( g_rgposttTesters[0], &rgulSignals[1], 0, 0, (const void**)&pul );
     OSTestCheck( pul == NULL );
 
+    //  cancel, and check cancelled runtime context ...
 
     pul = NULL;
     OSTimerTaskCancelTask( g_rgposttTesters[0], (const void**)&pul );
     OSTestCheck( pul == &rgulSignals[1] );
     UtilSleep( 100 );
 
+    //  due to cancel, should only have 1 released slot ...
 
     while( cAcquired < 1 )
     {
@@ -1287,6 +1394,7 @@ ERR OSTimerTaskTestConcurrentCancelStopsCallbackAndScrubsRuntimeContext::ErrTest
     Assert( semTimerShot.CAvail() == 0 );
     wprintf( L"\tHad %d callbacks.\n", cAcquired );
 
+    //  Cancel just in case.
 
     OSTestCheck( semTimerShot.CAvail() == 0 );
 
@@ -1296,8 +1404,76 @@ HandleError:
 }
 
 
+/* Disabled tests
 
+The first test can be re-enabled and expanded to other tests to support group of tasks keyed off group contexts.
+The second test will never work, though we could probably enable it via test sin.
 
+CUnitTest( OSTimerTaskCrossSchedulerWithMatchingGroupContexts, 0, "Simple test for two one-shot timers work right using both group and runtime context." );
+ERR OSTimerTaskCrossSchedulerWithMatchingGroupContexts::ErrTest()
+{
+    CSemaphore semTimerShot( CSyncBasicInfo( "TwoShotSemaphore" ) );
+    OSTestTimerPreamble();
+
+    Call( ErrOSTimerTaskCreate( (PfnTimerTask)OSTimerTestSelfRescheduler, &semTimerShot, &g_rgposttTesters[0] /* what OSTimerTestSelfRescheduler uses * / ) );
+    Call( ErrOSTimerTaskCreate( (PfnTimerTask)OSTimerTestCrossScheduler, &semTimerShot /* matches * /, &g_rgposttTesters[1] ) );
+
+    //  schedule
+
+    printf( "\t%s\n", __FUNCTION__ );
+
+    OSTimerTaskScheduleTask( g_rgposttTesters[0], NULL, 0, 0 );
+    OSTimerTaskScheduleTask( g_rgposttTesters[1], NULL, 0, 0 );
+
+    Sleep( 100 );   // give time for reschedulers to run
+
+    OSTimerTaskCancelTask( g_rgposttTesters[1] );   // must close cross scheduler first!
+    OSTimerTaskCancelTask( g_rgposttTesters[0] );
+
+    RandSleep();
+    OSTestCheck( !FOSTimerTaskActive( g_rgposttTesters[0] ) );
+    OSTestCheck( !FOSTimerTaskActive( g_rgposttTesters[1] ) );
+
+HandleError:
+    OSTestTimerCleanup( 2 );
+    return err;
+}
+
+CUnitTest( OSTimerTaskMixedGroupContextsFail, 0, "Simple test for two one-shot timers work right using both group and runtime context." );
+ERR OSTimerTaskMixedGroupContextsFail::ErrTest()
+{
+    CSemaphore semTimerShot( CSyncBasicInfo( "TwoShotSemaphore" ) );
+    OSTestTimerPreamble();
+
+    Call( ErrOSTimerTaskCreate( (PfnTimerTask)OSTimerTestSelfRescheduler, &semTimerShot, &g_rgposttTesters[0] /* what OSTimerTestSelfRescheduler uses * / ) );
+    Call( ErrOSTimerTaskCreate( (PfnTimerTask)OSTimerTestCrossScheduler, NULL /* NOT matching * /, &g_rgposttTesters[1] ) );
+
+    //  schedule
+
+    printf( "\t%s\n", __FUNCTION__ );
+
+    OSTimerTaskScheduleTask( g_rgposttTesters[0], NULL, 0, 0 );
+    OSTimerTaskScheduleTask( g_rgposttTesters[1], NULL, 0, 0 );
+
+    Sleep( 100 );   // give time for reschedulers to run
+
+    OSTimerTaskCancelTask( g_rgposttTesters[1] );   // must close cross scheduler first!
+    OSTimerTaskCancelTask( g_rgposttTesters[0] );
+
+    RandSleep();
+    OSTestCheck( !FOSTimerTaskActive( g_rgposttTesters[0] ) );
+    OSTestCheck( !FOSTimerTaskActive( g_rgposttTesters[1] ) );
+
+HandleError:
+    OSTestTimerCleanup( 2 );
+    return err;
+}
+
+//*/
+
+//
+//  Stress Tests
+//
 
 
 const WCHAR * WszBool( _In_ const BOOL fBool )
@@ -1316,7 +1492,7 @@ JET_ERR ErrStressSchedule( POSTIMERTASK postt, CSemaphore * psemCtx, _In_ const 
     {
         const ULONG crunMax = 201;
         const LONG crunCheckNoOverrun = -9;
-        LONG rgcruns[ 201 * 2] = { 0 };
+        LONG rgcruns[ 201 * 2/*just in case*/] = { 0 };
         rgcruns[crunMax] = crunCheckNoOverrun;
         C_ASSERT( crunMax < _countof( rgcruns ) );
         ULONG csched = 0;
@@ -1345,8 +1521,13 @@ JET_ERR ErrStressSchedule( POSTIMERTASK postt, CSemaphore * psemCtx, _In_ const 
         }
         wprintf( L" enter collect callbacks phase ..." );
 
+        //  You can't just wait for one sleep and then use CSemaphoreCollect( psemCtx ) to collect the
+        //  count because if multiple of the RandSleep() in the callback happened to wait the longest
+        //  time possible the callbacks might not all quiesce / fall out until multiple g_dtickRandSleepMax
+        //  times ... I guess you could wait 200 * g_dtickRandSleepMax, but that'd be an egregious wait.
         ULONG cruns = CSemaphoreWaitCollect( psemCtx, 
                             dtickScheduleMax * 2 + dtickDeltaDelta * 2 + dtickSlop * 2 + g_dtickRandSleepMax,
+                            // Note: csupplanted only updated if fCheckedRuntimeContext is fTrue
                             fCheckedRuntimeContext ? ( csched - csupplanted ) : 0 );
         OnDebug( OSTestCheck( !FOSTimerTaskActive( postt ) ) );
 
@@ -1354,7 +1535,7 @@ JET_ERR ErrStressSchedule( POSTIMERTASK postt, CSemaphore * psemCtx, _In_ const 
         if ( fCheckedRuntimeContext )
         {
             wprintf( L" (checking runs - " );
-            OSTestCheck( rgcruns[crunMax] == crunCheckNoOverrun );
+            OSTestCheck( rgcruns[crunMax] == crunCheckNoOverrun ); // no overflow past 200 runs
             for( ULONG isched = 0; isched < csched; isched++ )
             {
                 OSTestCheck( rgcruns[isched] == 1 );
@@ -1381,10 +1562,12 @@ ERR OSTimerTaskTestVariousDelaysLongStress::ErrTest()
 
     Call( ErrOSTimerTaskCreate( (PfnTimerTask)OSTimerTestGroupCtxSemaphoreReleaserRuntimeCtxIncrementerRandSleep, &semTimerShot, &g_rgposttTesters[0] ) );
 
+    //  wait to ensure it doesn't prematurely fire.
 
     RandSleep();
     OSTestCheck( semTimerShot.CAvail() == 0 );
 
+    //  schedule and race to reschedule ...
 
     wprintf( L"\tStart schedule race:" );
     for( BOOL fCheckedRuntimeContext = fFalse; fCheckedRuntimeContext < 2; fCheckedRuntimeContext++ )
@@ -1400,25 +1583,28 @@ ERR OSTimerTaskTestVariousDelaysLongStress::ErrTest()
             {
                 g_dtickRandSleepMax = rgtickCallbackMaxSleep[i];
                 wprintf( L"\n\t\tg_dtickRandSleepMax(=%d):", g_dtickRandSleepMax );
-                for( TICK dtickSlop = 0; dtickSlop < 12; dtickSlop = dtickSlop * 2 + 1 )
+                for( TICK dtickSlop = 0; dtickSlop < 12; dtickSlop = dtickSlop * 2 + 1 )    // 0, 1, 3, 7
                 {
                     if ( fSloppySleep == fFalse && dtickSlop != 0 )
                     {
+                        //  No need to retry different slops when it its not sloppy ...
                         continue;
                     }
 
                     err = ErrStressSchedule( g_rgposttTesters[0], &semTimerShot, fCheckedRuntimeContext, dtickSlop );
                     OSTestCall( err );
-                }
-            }
+                } // dtickSlop
+            } // dtickMaxCallbackSleep
         }
     }
     wprintf( L"\n\tDone.\n" );
 
+    //  wait for 2 times the timeout and make sure it doesn't go off again.
 
     Sleep( 2 * dtickTimeout );
     OSTestCheck( semTimerShot.CAvail() == 0 );
 
+    //  Cancel just in case.
 
     OSTimerTaskCancelTask( g_rgposttTesters[0] );
     OSTestCheck( semTimerShot.CAvail() == 0 );
@@ -1429,11 +1615,12 @@ HandleError:
     return err;
 }
 
+//  38 second test - so explicit only
 CUnitTest( OSTimerTaskConcurrentRescheduleStress, bitExplicitOnly, "Tests that a timer task can cancel a task concurrent w/ the task trying to reschedule itself and the cancel always wins." );
 ERR OSTimerTaskConcurrentRescheduleStress::ErrTest()
 {
     OSTestTimerPreamble();
-    Call( ErrOSTimerTaskCreate( (PfnTimerTask)OSTimerTestSelfRescheduler, NULL, &g_rgposttTesters[0]  ) );
+    Call( ErrOSTimerTaskCreate( (PfnTimerTask)OSTimerTestSelfRescheduler, NULL, &g_rgposttTesters[0] /* what OSTimerTestSelfRescheduler uses */ ) );
 
     g_cRuns = 0;
 
@@ -1450,7 +1637,7 @@ ERR OSTimerTaskConcurrentRescheduleStress::ErrTest()
         OnDebug( OSTestCheck( !FOSTimerTaskActive( g_rgposttTesters[0] ) ) );
     }
     wprintf( L"RESULTS: For immediate schedule/cancel, got %d runs\n", g_cRuns );
-    OSTestCheck( g_cRuns < 50 );
+    OSTestCheck( g_cRuns < 50 );    // hopefully this holds, typically 0 to 5, but up to 22 runs once ... very racey! :)
 
     g_cRuns = 0;
     for( ULONG i = 0; i < 100; i++ )
@@ -1462,6 +1649,8 @@ ERR OSTimerTaskConcurrentRescheduleStress::ErrTest()
         OnDebug( OSTestCheck( !FOSTimerTaskActive( g_rgposttTesters[0] ) ) );
     }
     wprintf( L"RESULTS: For Sleep(0) schedule/cancel, got %d runs\n", g_cRuns );
+    // can hit by compiling concurrently
+    //OSTestCheck( g_cRuns > 10 );  // hopefully this holds, typically 80 to 100 runs ...
 
     g_cRuns = 0;
     for( ULONG i = 0; i < 100; i++ )
@@ -1473,7 +1662,7 @@ ERR OSTimerTaskConcurrentRescheduleStress::ErrTest()
         OnDebug( OSTestCheck( !FOSTimerTaskActive( g_rgposttTesters[0] ) ) );
     }
     wprintf( L"RESULTS: For Sleep(1) schedule/cancel, got %d runs\n", g_cRuns );
-    OSTestCheck( g_cRuns > 20 );
+    OSTestCheck( g_cRuns > 20 );    // hopefully this holds, typically 100 runs ...
 
     g_cRuns = 0;
     for( ULONG i = 0; i < 100; i++ )
@@ -1485,7 +1674,7 @@ ERR OSTimerTaskConcurrentRescheduleStress::ErrTest()
         OnDebug( OSTestCheck( !FOSTimerTaskActive( g_rgposttTesters[0] ) ) );
     }
     wprintf( L"RESULTS: For Sleep(rand()) schedule/cancel, got %d runs\n", g_cRuns );
-    OSTestCheck( g_cRuns > 20 );
+    OSTestCheck( g_cRuns > 20 );    // hopefully this holds, typically 100 runs ...
 
     g_cRuns = 0;
     for( ULONG i = 0; i < 100; i++ )
@@ -1497,8 +1686,8 @@ ERR OSTimerTaskConcurrentRescheduleStress::ErrTest()
         OnDebug( OSTestCheck( !FOSTimerTaskActive( g_rgposttTesters[0] ) ) );
     }
     wprintf( L"RESULTS: For Sleep(rand()) schedule/cancel, with rand initial wait, got %d runs\n", g_cRuns );
-    OSTestCheck( g_cRuns > 1 );
-    OSTestCheck( g_cRuns < 99 );
+    OSTestCheck( g_cRuns > 1 );     // hopefully this holds, typically got ~50 +/- 20 runs ...
+    OSTestCheck( g_cRuns < 99 );    // hopefully this holds, typically got ~50 +/- 20 runs ...
 
     g_cRuns = 0;
     for( ULONG i = 0; i < 100; i++ )
@@ -1521,8 +1710,8 @@ ERR OSTimerTaskConcurrentRescheduleStress::ErrTest()
         OnDebug( OSTestCheck( !FOSTimerTaskActive( g_rgposttTesters[0] ) ) );
     }
     wprintf( L"RESULTS: For Sleep(rand()) schedule/cancel, with rand initial and subsequent waits, got %d runs\n", g_cRuns );
-    OSTestCheck( g_cRuns > 1 );
-    OSTestCheck( g_cRuns < 99 );
+    OSTestCheck( g_cRuns > 1 );     // hopefully this holds, typically got ~30 +/- 20 runs ...
+    OSTestCheck( g_cRuns < 99 );    // hopefully this holds, typically got ~30 +/- 20 runs ...
 
 HandleError:
     OSTestTimerCleanup( 1 );

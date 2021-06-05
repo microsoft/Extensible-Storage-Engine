@@ -3,6 +3,7 @@
 
 #pragma once
 
+//  Block Cache Header Helpers
 
 class CBlockCacheHeaderHelpers
 {
@@ -351,12 +352,15 @@ INLINE ERR CBlockCacheHeaderHelpers::ErrRepairHeader<CBlockCacheHeaderHelpers::C
 {
     ERR err = JET_errSuccess;
 
+    //  determine if we have a correctable error
 
     if ( FECCErrorIsCorrectable( cbData, ulChecksumExpected, ulChecksumActual ) )
     {
+        //  try to use the ECC to determine the location of a single bit error
 
         const UINT ibitCorrupted = IbitCorrupted( cbData, ulChecksumExpected, ulChecksumActual );
 
+        //  if we think we found a single bit error then flip it back
 
         const UINT ib = ibitCorrupted / 8;
 
@@ -366,6 +370,7 @@ INLINE ERR CBlockCacheHeaderHelpers::ErrRepairHeader<CBlockCacheHeaderHelpers::C
         }
     }
 
+    //  recompute the ECC and fail if we haven't succeeded in fixing the error
 
     const DWORD ulChecksumCurrent = GenerateChecksum<CBlockCacheHeaderHelpers::ChecksumType::checksumECC>( pvData, cbData );
     Call( ErrRepairHeader<CBlockCacheHeaderHelpers::ChecksumType::checksumDefault>( pvData,

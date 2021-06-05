@@ -1,12 +1,16 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
+// BookStoreSample.c : console application sample of ESE
+//
 
 #include <windows.h>
 #include <stdio.h>
 
 #include <esent.h>
 
+//  CallJ and Call both expect a local variable err, and a lable HandleError to be defined
+//
 #define CallJ( fn, label )  {                                           \
                             if ( ( err = (fn) ) < 0 )                       \
                                 {                                   \
@@ -19,6 +23,8 @@
 #define CP_ANSI                                 1252
 #define CP_UNICODE                          1200
 
+//  user name and password are ignored by ESE and can be any string value including the empty string
+//
 char szUser []                              = "";
 char szPassword []                          = "";
 
@@ -49,6 +55,10 @@ char szBookIDIndex []                       = "BookID";
 char szBookAuthorsIndex []                  = "BookAuthors";
 char szBookTitleAuthorsIndex []             = "BookTitleAuthors";
 
+//  index definitions, each index segment is followed by a string terminator, \0, and 
+//  the whole index definition is also followed by a string terminator, \0.  This is why
+//  each index definition ends in \0\0.  Counts of characters include all terminators.
+//
 char rgbCustomerIDIndex []                  = "+CustomerID\0\0";
 int cchCustomerIDIndex                      = 13;
 char rgbCustomerNameIndex []                = "+CustomerName\0\0";
@@ -64,6 +74,11 @@ int cchBookAuthorsIndex                 = 14;
 char rgbBookTitleAuthorsIndex []                = "+BookTitle\0+BookAuthors\0\0";
 int cchBookTitleAuthorsIndex                = 25;
 
+////////////////////////////////////////////////////////////
+//  DATA
+//
+//  Customers
+//
 char szCustomerName1 []                 = "Owen May";
 
 char szCustomerName2 []                 = "Darrin DeYoung";
@@ -75,8 +90,12 @@ char szCustomerName4 []                 = "Mathias Kjeldsen";
 char szCustomerName5 []                 = "Pentti Hietalahti";
 
 
+//  Books
+//
 wchar_t wszBookTitle1 []                    = L"All About Coffee";
 wchar_t wszBookAuthor1 []               = L"William Harrison Ukers";
+//  currency units are 10,000ths of cents
+//
 __int64 llBookPrice1                        = 4250000;
 wchar_t wszBookDescription1 []          = L"Published in 1935";
 
@@ -91,6 +110,8 @@ wchar_t wszBookAuthor3 []               = L"Kenneth Davids";
 __int64 llBookPrice3                        = 117100;
 wchar_t wszBookDescription3 []          = L"A great historical, cultural and sensual review of the brew";
 
+//  Orders
+//
 long lOrderCustomerID1                  = 5;
 long rglOrderItems1[]                       = { 1 };
 
@@ -104,8 +125,16 @@ long lOrderCustomerID4                  = 4;
 long rglOrderItems4[]                       = { 1, 2, 3 };
 
 
+////////////////////////////////////////////////////////////
+//
 
 
+//  column ids are like global constants after they are set.
+//  They can even be made constants for a stable schema and then
+//  asserted in startup.  The addition of subsequent columns to
+//  an existing schema does not change the column ids of pre-existing
+//  columns.
+//
 JET_COLUMNID columnidCustomerID     = 0;
 JET_COLUMNID columnidCustomerName       = 0;
 JET_COLUMNID columnidOrderID            = 0;
@@ -130,13 +159,21 @@ JET_ERR ErrCreateTablesColumnsAndIndexes( JET_SESID sesidT, JET_DBID dbidDatabas
     JET_INDEXCREATE         rgindexcreateT[10];
     JET_CONDITIONALCOLUMN   rgconditionalcolumnT[3];
         
+    //  perform all DDL operations in single transaction so either all tables, columns and indexes are created,
+    //  or none are created.
+    //
     err = JetBeginTransaction( sesidT );
     if ( err < 0 )
     {
         return err;
     }
     
+    //  Customers table
+    //
     
+    //  column for customer id
+    //  autoincrement column ensures unique value for each row
+    //
     rgcolumncreateT[0].cbStruct = sizeof(rgcolumncreateT[0]);
     rgcolumncreateT[0].szColumnName = szCustomerID;
     rgcolumncreateT[0].coltyp = JET_coltypLong;
@@ -148,6 +185,9 @@ JET_ERR ErrCreateTablesColumnsAndIndexes( JET_SESID sesidT, JET_DBID dbidDatabas
     rgcolumncreateT[0].columnid = 0;
     rgcolumncreateT[0].err = JET_errSuccess;
 
+    //  customer name column
+    //  non-unicode text
+    //
     rgcolumncreateT[1].cbStruct = sizeof(rgcolumncreateT[1]);
     rgcolumncreateT[1].szColumnName = szCustomerName;
     rgcolumncreateT[1].coltyp = JET_coltypText;
@@ -159,6 +199,8 @@ JET_ERR ErrCreateTablesColumnsAndIndexes( JET_SESID sesidT, JET_DBID dbidDatabas
     rgcolumncreateT[1].columnid = 0;
     rgcolumncreateT[1].err = JET_errSuccess;
 
+    //  primary index on CustomerID
+    //
     rgindexcreateT[0].cbStruct = sizeof(rgindexcreateT[0]);
     rgindexcreateT[0].szIndexName = szCustomerIDIndex;
     rgindexcreateT[0].szKey = rgbCustomerIDIndex;
@@ -171,6 +213,9 @@ JET_ERR ErrCreateTablesColumnsAndIndexes( JET_SESID sesidT, JET_DBID dbidDatabas
     rgindexcreateT[0].cConditionalColumn = 0;
     rgindexcreateT[0].err = JET_errSuccess;
     
+    //  secondary index on CustomerName
+    //  with ignore NULL to remove defunct customers
+    //
     rgindexcreateT[1].cbStruct = sizeof(rgindexcreateT[0]);
     rgindexcreateT[1].szIndexName = szCustomerNameIndex;
     rgindexcreateT[1].szKey = rgbCustomerNameIndex;
@@ -197,8 +242,15 @@ JET_ERR ErrCreateTablesColumnsAndIndexes( JET_SESID sesidT, JET_DBID dbidDatabas
     tablecreateT.cCreated = 0;
 
     Call( JetCreateTableColumnIndex( sesidT, dbidDatabase, &tablecreateT ) );
+    //  close open table handle implicitly created by create table
+    //
     Call( JetCloseTable( sesidT, tablecreateT.tableid ) );
 
+    //  Orders table
+    //
+    //  column for order id
+    //  autoincrement column ensures unique value for each row
+    //
     rgcolumncreateT[0].cbStruct = sizeof(rgcolumncreateT[0]);
     rgcolumncreateT[0].szColumnName = szOrderID;
     rgcolumncreateT[0].coltyp = JET_coltypLong;
@@ -210,6 +262,9 @@ JET_ERR ErrCreateTablesColumnsAndIndexes( JET_SESID sesidT, JET_DBID dbidDatabas
     rgcolumncreateT[0].columnid = 0;
     rgcolumncreateT[0].err = JET_errSuccess;
 
+    //  column for order customer id
+    //  non-NULL
+    //
     rgcolumncreateT[1].cbStruct = sizeof(rgcolumncreateT[1]);
     rgcolumncreateT[1].szColumnName = szOrderCustomerID;
     rgcolumncreateT[1].coltyp = JET_coltypLong;
@@ -221,6 +276,9 @@ JET_ERR ErrCreateTablesColumnsAndIndexes( JET_SESID sesidT, JET_DBID dbidDatabas
     rgcolumncreateT[1].columnid = 0;
     rgcolumncreateT[1].err = JET_errSuccess;
 
+    //  column for order completion date time
+    //
+    //
     rgcolumncreateT[2].cbStruct = sizeof(rgcolumncreateT[2]);
     rgcolumncreateT[2].szColumnName = szOrderDate;
     rgcolumncreateT[2].coltyp = JET_coltypDateTime;
@@ -232,6 +290,9 @@ JET_ERR ErrCreateTablesColumnsAndIndexes( JET_SESID sesidT, JET_DBID dbidDatabas
     rgcolumncreateT[2].columnid = 0;
     rgcolumncreateT[2].err = JET_errSuccess;
 
+    //  column for order amount
+    //
+    //
     rgcolumncreateT[3].cbStruct = sizeof(rgcolumncreateT[3]);
     rgcolumncreateT[3].szColumnName = szOrderAmount;
     rgcolumncreateT[3].coltyp = JET_coltypCurrency;
@@ -243,6 +304,9 @@ JET_ERR ErrCreateTablesColumnsAndIndexes( JET_SESID sesidT, JET_DBID dbidDatabas
     rgcolumncreateT[3].columnid = 0;
     rgcolumncreateT[3].err = JET_errSuccess;
 
+    //  column for order cancelled
+    //  tagged becuase it is usually NULL
+    //
     rgcolumncreateT[4].cbStruct = sizeof(rgcolumncreateT[4]);
     rgcolumncreateT[4].szColumnName = szOrderCancelled;
     rgcolumncreateT[4].coltyp = JET_coltypBit;
@@ -254,6 +318,9 @@ JET_ERR ErrCreateTablesColumnsAndIndexes( JET_SESID sesidT, JET_DBID dbidDatabas
     rgcolumncreateT[4].columnid = 0;
     rgcolumncreateT[4].err = JET_errSuccess;
 
+    //  column for order items
+    //  multi-valued since order can contain multiple items
+    //
     rgcolumncreateT[5].cbStruct = sizeof(rgcolumncreateT[5]);
     rgcolumncreateT[5].szColumnName = szOrderItems;
     rgcolumncreateT[5].coltyp = JET_coltypLong;
@@ -265,6 +332,8 @@ JET_ERR ErrCreateTablesColumnsAndIndexes( JET_SESID sesidT, JET_DBID dbidDatabas
     rgcolumncreateT[5].columnid = 0;
     rgcolumncreateT[5].err = JET_errSuccess;
 
+    //  primary index on OrderID
+    //
     rgindexcreateT[0].cbStruct = sizeof(rgindexcreateT[0]);
     rgindexcreateT[0].szIndexName = szOrderIDIndex;
     rgindexcreateT[0].szKey = rgbOrderIDIndex;
@@ -277,6 +346,9 @@ JET_ERR ErrCreateTablesColumnsAndIndexes( JET_SESID sesidT, JET_DBID dbidDatabas
     rgindexcreateT[0].cConditionalColumn = 0;
     rgindexcreateT[0].err = JET_errSuccess;
 
+    //  secondary index on OrderName
+    //  with ignore NULL to remove defunct customers
+    //
     rgconditionalcolumnT[0].cbStruct = sizeof(rgconditionalcolumnT[0]);
     rgconditionalcolumnT[0].szColumnName = szOrderCancelled;
     rgconditionalcolumnT[0].grbit = JET_bitIndexColumnMustBeNull;
@@ -307,9 +379,16 @@ JET_ERR ErrCreateTablesColumnsAndIndexes( JET_SESID sesidT, JET_DBID dbidDatabas
     tablecreateT.cCreated = 0;
 
     Call( JetCreateTableColumnIndex( sesidT, dbidDatabase, &tablecreateT ) );
+    //  close open table handle implicitly created by create table
+    //
     Call( JetCloseTable( sesidT, tablecreateT.tableid ) );
 
+    //  Books table
+    //
     
+    //  column for book id
+    //  autoincrement column ensures unique value for each row
+    //
     rgcolumncreateT[0].cbStruct = sizeof(rgcolumncreateT[0]);
     rgcolumncreateT[0].szColumnName = szBookID;
     rgcolumncreateT[0].coltyp = JET_coltypLong;
@@ -321,6 +400,8 @@ JET_ERR ErrCreateTablesColumnsAndIndexes( JET_SESID sesidT, JET_DBID dbidDatabas
     rgcolumncreateT[0].columnid = 0;
     rgcolumncreateT[0].err = JET_errSuccess;
 
+    //  column for book title
+    //
     rgcolumncreateT[1].cbStruct = sizeof(rgcolumncreateT[1]);
     rgcolumncreateT[1].szColumnName = szBookTitle;
     rgcolumncreateT[1].coltyp = JET_coltypText;
@@ -332,6 +413,9 @@ JET_ERR ErrCreateTablesColumnsAndIndexes( JET_SESID sesidT, JET_DBID dbidDatabas
     rgcolumncreateT[1].columnid = 0;
     rgcolumncreateT[1].err = JET_errSuccess;
 
+    //  column for book author
+    //  multi-valued
+    //
     rgcolumncreateT[2].cbStruct = sizeof(rgcolumncreateT[1]);
     rgcolumncreateT[2].szColumnName = szBookAuthors;
     rgcolumncreateT[2].coltyp = JET_coltypText;
@@ -343,6 +427,9 @@ JET_ERR ErrCreateTablesColumnsAndIndexes( JET_SESID sesidT, JET_DBID dbidDatabas
     rgcolumncreateT[2].columnid = 0;
     rgcolumncreateT[2].err = JET_errSuccess;
 
+    //  column for book cover
+    //
+    //
     rgcolumncreateT[3].cbStruct = sizeof(rgcolumncreateT[2]);
     rgcolumncreateT[3].szColumnName = szBookCover;
     rgcolumncreateT[3].coltyp = JET_coltypLongBinary;
@@ -354,6 +441,9 @@ JET_ERR ErrCreateTablesColumnsAndIndexes( JET_SESID sesidT, JET_DBID dbidDatabas
     rgcolumncreateT[3].columnid = 0;
     rgcolumncreateT[3].err = JET_errSuccess;
 
+    //  column for book price
+    //
+    //
     rgcolumncreateT[4].cbStruct = sizeof(rgcolumncreateT[3]);
     rgcolumncreateT[4].szColumnName = szBookPrice;
     rgcolumncreateT[4].coltyp = JET_coltypCurrency;
@@ -365,6 +455,9 @@ JET_ERR ErrCreateTablesColumnsAndIndexes( JET_SESID sesidT, JET_DBID dbidDatabas
     rgcolumncreateT[4].columnid = 0;
     rgcolumncreateT[4].err = JET_errSuccess;
 
+    //  column for book description
+    //
+    //
     rgcolumncreateT[5].cbStruct = sizeof(rgcolumncreateT[4]);
     rgcolumncreateT[5].szColumnName = szBookDescription;
     rgcolumncreateT[5].coltyp = JET_coltypLongText;
@@ -376,6 +469,8 @@ JET_ERR ErrCreateTablesColumnsAndIndexes( JET_SESID sesidT, JET_DBID dbidDatabas
     rgcolumncreateT[5].columnid = 0;
     rgcolumncreateT[5].err = JET_errSuccess;
 
+    //  primary index on BookID
+    //
     rgindexcreateT[0].cbStruct = sizeof(rgindexcreateT[0]);
     rgindexcreateT[0].szIndexName = szBookIDIndex;
     rgindexcreateT[0].szKey = rgbBookIDIndex;
@@ -388,6 +483,9 @@ JET_ERR ErrCreateTablesColumnsAndIndexes( JET_SESID sesidT, JET_DBID dbidDatabas
     rgindexcreateT[0].cConditionalColumn = 0;
     rgindexcreateT[0].err = JET_errSuccess;
 
+    //  secondary index on BookAuthors
+    //
+    //
     rgindexcreateT[1].cbStruct = sizeof(rgindexcreateT[0]);
     rgindexcreateT[1].szIndexName = szBookAuthorsIndex;
     rgindexcreateT[1].szKey = rgbBookAuthorsIndex;
@@ -400,6 +498,9 @@ JET_ERR ErrCreateTablesColumnsAndIndexes( JET_SESID sesidT, JET_DBID dbidDatabas
     rgindexcreateT[1].cConditionalColumn = 0;
     rgindexcreateT[1].err = JET_errSuccess;
 
+    //  secondary index on BookTitle, BookAuthors
+    //
+    //
     rgindexcreateT[2].cbStruct = sizeof(rgindexcreateT[2]);
     rgindexcreateT[2].szIndexName = szBookTitleAuthorsIndex;
     rgindexcreateT[2].szKey = rgbBookTitleAuthorsIndex;
@@ -426,8 +527,13 @@ JET_ERR ErrCreateTablesColumnsAndIndexes( JET_SESID sesidT, JET_DBID dbidDatabas
     tablecreateT.cCreated = 0;
 
     Call( JetCreateTableColumnIndex( sesidT, dbidDatabase, &tablecreateT ) );
+    //  close table handle opened implicitly by create table
+    //
     Call( JetCloseTable( sesidT, tablecreateT.tableid ) );
 
+    //  here JET_bitCommitLazyFlush is used to commit the transaction without synchronously flushing the log.
+    //  This is a means of ensuring write ordering without incurring the cost of flushing changes synchronously.
+    //
     Call( JetCommitTransaction( sesidT, JET_bitCommitLazyFlush) );
 
 HandleError:
@@ -440,6 +546,8 @@ HandleError:
 }
 
 
+//  helper function, converts local time to little-endian 8 byte integer
+//
 void GetLocalTimeAsLongLong( unsigned char *rgbLocalTime )
 {
     SYSTEMTIME  st;
@@ -449,6 +557,8 @@ void GetLocalTimeAsLongLong( unsigned char *rgbLocalTime )
 
     msecT = (((((st.wHour * 60) + st.wMinute) * 60) + st.wSecond) * 1000) + st.wMilliseconds;
 
+    //  normalize local time into little-endian binary
+    //
     rgbLocalTime[7]=(unsigned char)(st.wYear>>8);
     rgbLocalTime[6]=(unsigned char)(st.wYear&0xff);
     rgbLocalTime[5]=(unsigned char)(st.wMonth&0xff);
@@ -480,15 +590,28 @@ JET_ERR ErrProcessOrder( JET_SESID sesidT, JET_TABLEID tableidOrders, JET_TABLEI
         return err;
     }
 
+    //  set table handle on Books table to be on BookID index, e.g. the primary index
+    //
     Call( JetSetCurrentIndex2( sesidT, tableidBooks, szBookIDIndex, NO_GRBIT ) );
 
+    //  begin to create order record.  As we go through all the items computing the sum
+    //  we will also add each item to the forming record.  Records are constructed in a copy buffer
+    //  before being added to the table.
+    //
     Call( JetPrepareUpdate( sesidT, tableidOrders, JET_prepInsert ) );
     Call( JetSetColumn( sesidT, tableidOrders, columnidOrderCustomerID, &lCustomerID, sizeof(lCustomerID), 0, NULL ) );
 
+    //  compute sum total amount for order by seeking into Books table for book price
+    //  As each item is summed, the item itself is set in the order copy buffer.
+    //
     for ( ; ilT < clItems; ilT++ )
     {
+        //  seek into Books table and retrieve book price, and add it to order sum total amount
+        //
         Call( JetMakeKey( sesidT, tableidBooks, &rglItems[ilT], sizeof(rglItems[0]), JET_bitNewKey ) );
         Call( JetSeek( sesidT, tableidBooks, JET_bitSeekEQ ) );
+        //  should have found equal
+        //
         if ( JET_errSuccess != err )
         {
             goto HandleError;
@@ -505,15 +628,23 @@ JET_ERR ErrProcessOrder( JET_SESID sesidT, JET_TABLEID tableidOrders, JET_TABLEI
             NULL ) );
         llSumTotalAmount += llBookPrice;
 
+        //  add item to Order record
+        //  itagSequence is 1 based, so must add 1 to 0 based offset. 
+        //
         setinfoT.itagSequence = ilT + 1;
         Call( JetSetColumn( sesidT, tableidOrders, columnidOrderItems, &rglItems[ilT], sizeof(rglItems[0]), 0, &setinfoT ) );
     }
     
+    //  set sum total amount in Order record and insert Order record
+    //
     Call( JetSetColumn( sesidT, tableidOrders, columnidOrderAmount, &llSumTotalAmount, sizeof(llSumTotalAmount), 0, NULL ) );
     GetLocalTimeAsLongLong( rgbDate );
     Call( JetSetColumn( sesidT, tableidOrders, columnidOrderDate, rgbDate, sizeof(rgbDate), 0, NULL ) );
     Call( JetUpdate( sesidT, tableidOrders, NULL, 0, NULL ) );
 
+    //  here JET_bitCommitLazyFlush is not used because we may want to ensure that an update will be made as soon as we see
+    //  success returned from this function.
+    //
     Call( JetCommitTransaction( sesidT, NO_GRBIT ) );
 
 HandleError:
@@ -529,6 +660,8 @@ JET_ERR ErrAddDataToTables( JET_SESID sesidT, JET_DBID dbidDatabase, JET_TABLEID
 {
     JET_ERR                 err = JET_errSuccess;
     
+    //  common variable for data backing
+    //
     JET_SETCOLUMN           rgsetcolumnT[10];
     unsigned char               rgbBookCoverT[32768];
 
@@ -540,6 +673,9 @@ JET_ERR ErrAddDataToTables( JET_SESID sesidT, JET_DBID dbidDatabase, JET_TABLEID
         return err;
     }
 
+    //  create five customers
+    //  use per-column set column operation since only one column is being set
+    //
     Call( JetPrepareUpdate( sesidT, tableidCustomers, JET_prepInsert ) );
     Call( JetSetColumn( sesidT, tableidCustomers, columnidCustomerName, szCustomerName1, sizeof(szCustomerName1), 0, NULL ) );
     Call( JetUpdate( sesidT, tableidCustomers, NULL, 0, NULL ) );
@@ -561,6 +697,9 @@ JET_ERR ErrAddDataToTables( JET_SESID sesidT, JET_DBID dbidDatabase, JET_TABLEID
     Call( JetUpdate( sesidT, tableidCustomers, NULL, 0, NULL ) );
 
 
+    //  create three books
+    //  use multi-column set columns operation since multiple columns will be set
+    //
     Call( JetPrepareUpdate( sesidT, tableidBooks, JET_prepInsert ) );
     rgsetcolumnT[0].columnid = columnidBookTitle;
     rgsetcolumnT[0].pvData = (void *)wszBookTitle1;
@@ -620,7 +759,7 @@ JET_ERR ErrAddDataToTables( JET_SESID sesidT, JET_DBID dbidDatabase, JET_TABLEID
     rgsetcolumnT[2].cbData = sizeof(wszBookAuthor2Second);
     rgsetcolumnT[2].grbit = NO_GRBIT;
     rgsetcolumnT[2].ibLongValue = 0;
-    rgsetcolumnT[2].itagSequence = 2 ;
+    rgsetcolumnT[2].itagSequence = 2 /* itagSequence set to 2 to set second value of multi-valued column */;
     rgsetcolumnT[2].err = JET_errSuccess;
     rgsetcolumnT[3].columnid = columnidBookCover;
     rgsetcolumnT[3].pvData = (void *)rgbBookCoverT;
@@ -685,6 +824,8 @@ JET_ERR ErrAddDataToTables( JET_SESID sesidT, JET_DBID dbidDatabase, JET_TABLEID
     Call( JetSetColumns( sesidT, tableidBooks, rgsetcolumnT, 5 ) );
     Call( JetUpdate( sesidT, tableidBooks, NULL, 0, NULL ) );
     
+    //  process four orders
+    //
     Call( ErrProcessOrder( sesidT, tableidOrders, tableidBooks, lOrderCustomerID1, rglOrderItems1, sizeof(rglOrderItems1)/sizeof(rglOrderItems1[0]) ) );
     Call( ErrProcessOrder( sesidT, tableidOrders, tableidBooks, lOrderCustomerID2, rglOrderItems2, sizeof(rglOrderItems2)/sizeof(rglOrderItems2[0]) ) );
     Call( ErrProcessOrder( sesidT, tableidOrders, tableidBooks, lOrderCustomerID3, rglOrderItems3, sizeof(rglOrderItems3)/sizeof(rglOrderItems3[0]) ) );
@@ -701,6 +842,8 @@ HandleError:
 }
 
 
+//  dump Customer table information to output screen.
+//
 JET_ERR ErrDumpCustomersToScreen( JET_SESID sesidT, JET_TABLEID tableidCustomers )
 {
     JET_ERR                 err = JET_errSuccess;
@@ -727,12 +870,17 @@ JET_ERR ErrDumpCustomersToScreen( JET_SESID sesidT, JET_TABLEID tableidCustomers
     rgretrievecolumnT[1].columnidNextTagged = 0;
     rgretrievecolumnT[1].err = JET_errSuccess;
 
+    //  open transaction to get consistent view of data
+    //
     err = JetBeginTransaction( sesidT );
     if ( err < 0 )
     {
         return err;
     }
 
+    //  Customers table
+    //  dump data in alphabetical order
+    //
     printf( "Dump of %s table.\n\n", szCustomersTable );
     printf( "Customer Name\t\t\tCustomer ID\n" );
     printf( "--------------------------------------------------------\n" );
@@ -753,6 +901,8 @@ JET_ERR ErrDumpCustomersToScreen( JET_SESID sesidT, JET_TABLEID tableidCustomers
     printf( "\n\n" );
 
 HandleError:
+    //  no need to rollback on failure since no changes made.  However, rollback if commit fails.
+    //
     err = JetCommitTransaction( sesidT, 0 );
     if ( err < 0 )
     {
@@ -768,6 +918,8 @@ JET_ERR ErrQueryTopThreeOrdersByOrderAmount( JET_SESID sesidT, JET_DBID dbidData
 {
     JET_ERR     err = JET_errSuccess;
 
+    //  order amount is not indexed, and a temporary table is used to sort the data in descending order amount order
+    //
     JET_RETRIEVECOLUMN      rgretrievecolumnT[10];
     long                        lOrderID                                = 0;
     long                        lOrderCustomerID                        = 0;
@@ -777,6 +929,8 @@ JET_ERR ErrQueryTopThreeOrdersByOrderAmount( JET_SESID sesidT, JET_DBID dbidData
     unsigned long               ulT                                     = 0;
     int                     iCustomer                               = 0;
 
+    //  result table variables
+    //
     JET_TABLEID             tableidTemp                             = JET_tableidNil;
     JET_COLUMNDEF           rgcolumndefTemp[10];
     JET_COLUMNID            rgcolumnidTemp[10];
@@ -793,6 +947,13 @@ JET_ERR ErrQueryTopThreeOrdersByOrderAmount( JET_SESID sesidT, JET_DBID dbidData
         return err;
         }
 
+    //  create temporary table to sort by szOrderAmount
+    //
+    //  columns in temporary table include:
+    //      order amount
+    //      order ID (uniquifier for order amount)
+    //      customer ID
+    //
     rgcolumndefTemp[0].cbStruct = sizeof( JET_COLUMNDEF );
     rgcolumndefTemp[0].cp           = 0;
     rgcolumndefTemp[0].langid       = 0;
@@ -817,6 +978,8 @@ JET_ERR ErrQueryTopThreeOrdersByOrderAmount( JET_SESID sesidT, JET_DBID dbidData
 
     Call( JetOpenTempTable( sesidT, rgcolumndefTemp, 3, 0, &tableidTemp, rgcolumnidTemp ) );
     
+    //  create set column array to efficiently set data in TT
+    //
     rgsetcolumnTemp[0].columnid = rgcolumnidTemp[icolumndefOrderAmount];
     rgsetcolumnTemp[0].pvData = &llOrderAmount;
     rgsetcolumnTemp[0].cbData = sizeof(llOrderAmount);
@@ -840,6 +1003,8 @@ JET_ERR ErrQueryTopThreeOrdersByOrderAmount( JET_SESID sesidT, JET_DBID dbidData
     rgsetcolumnTemp[2].err = 0;
 
     
+    //  create retrieve column array which retrieves all columns at once
+    //
     rgretrievecolumnT[0].columnid = columnidOrderID;
     rgretrievecolumnT[0].pvData = &lOrderID;
     rgretrievecolumnT[0].cbData = sizeof(lOrderID);
@@ -877,6 +1042,9 @@ JET_ERR ErrQueryTopThreeOrdersByOrderAmount( JET_SESID sesidT, JET_DBID dbidData
     rgretrievecolumnT[3].columnidNextTagged = 0;
     rgretrievecolumnT[3].err = JET_errSuccess;
 
+    //  since we don't have the index we want, browse in clustered index order to optimize cache locality.
+    //  Skip orders that have been cancelled.
+    //
     Call( JetSetCurrentIndex2( sesidT, tableidOrders, szOrderIDIndex, NO_GRBIT ) );
     for( err = JetMove( sesidT, tableidOrders, JET_MoveFirst, NO_GRBIT );
         JET_errNoCurrentRecord != err;
@@ -886,8 +1054,12 @@ JET_ERR ErrQueryTopThreeOrdersByOrderAmount( JET_SESID sesidT, JET_DBID dbidData
         
         Call( JetRetrieveColumns( sesidT, tableidOrders, rgretrievecolumnT, 4 ) );
 
+        //  process only if order is not cancelled
+        //
         if ( rgretrievecolumnT[3].err == JET_wrnColumnNull )
             {
+            //  for each row found, insert the retreived columns as a new row in the temporary table
+            //
             Call( JetPrepareUpdate( sesidT, tableidTemp, JET_prepInsert ) );
             Call( JetSetColumns( sesidT, tableidTemp, rgsetcolumnTemp, 3 ) );
             Call( JetUpdate( sesidT, tableidTemp, NULL, 0, NULL ) );
@@ -895,6 +1067,8 @@ JET_ERR ErrQueryTopThreeOrdersByOrderAmount( JET_SESID sesidT, JET_DBID dbidData
     }
     err = JET_errSuccess;
 
+    //  dump result to screen
+    //
     rgretrievecolumnTemp[0].columnid = rgcolumnidTemp[icolumndefOrderAmount];
     rgretrievecolumnTemp[0].pvData = &llOrderAmount;
     rgretrievecolumnTemp[0].cbData = sizeof(llOrderAmount);
@@ -918,17 +1092,29 @@ JET_ERR ErrQueryTopThreeOrdersByOrderAmount( JET_SESID sesidT, JET_DBID dbidData
     printf( "\n\nTop Three Orders by Order Amount.\n\n" );
     printf( "Customer Name\t\t\tAmount\n" );
     printf( "--------------------------------------------------------\n" );
+    //  actual sort occurs on first move here
+    //
+    //  set table handle on Books table to be on BookID index, e.g. the primary index
+    //
     Call( JetSetCurrentIndex2( sesidT, tableidCustomers, szCustomerIDIndex, 0 ) );
     for ( iCustomer = 0, err = JetMove( sesidT, tableidTemp, JET_MoveFirst, NO_GRBIT );
         JET_errNoCurrentRecord != err && iCustomer < 3;
          err = JetMove( sesidT, tableidTemp, JET_MoveNext, NO_GRBIT ) )
     {
+        //  check other errors from JetMove
+        //
         Call( err );
 
+        //  retrieve all desired columns
+        //
         Call( JetRetrieveColumns( sesidT, tableidTemp, rgretrievecolumnTemp, 2 ) );
 
+        //  join to Customers table to get customer name from OrderCustomerID
+        //
         Call( JetMakeKey( sesidT, tableidCustomers, &lOrderCustomerID, sizeof(lOrderCustomerID), JET_bitNewKey ) );
         Call( JetSeek( sesidT, tableidCustomers, JET_bitSeekEQ ) );
+        //  should have found equal
+        //
         if ( JET_errSuccess != err )
         {
             goto HandleError;
@@ -977,27 +1163,67 @@ void __cdecl main(int argc, char ** argv)
     JET_SESID               sesidT                                  = JET_sesidNil;
     JET_DBID                dbidDatabase                            = JET_dbidNil;
 
+    //  table variables
+    //
     JET_TABLEID                 tableidCustomers                        = JET_tableidNil;
     JET_TABLEID                 tableidOrders                           = JET_tableidNil;
     JET_TABLEID                 tableidBooks                            = JET_tableidNil;
     JET_COLUMNDEF           columndefT;
 
+    ////////////////////////////////////////////////////////
+    //  INITIALIZATION
+    //
 
+    //  some system parameters must be set prior to calling JetInit
+    //
     Call( JetSetSystemParameter( &instance, 0, JET_paramSystemPath, 0, ".\\" ) );
     Call( JetSetSystemParameter( &instance, 0, JET_paramTempPath, 0, ".\\" ) );
     Call( JetSetSystemParameter( &instance, 0, JET_paramLogFilePath, 0, ".\\" ) );
     Call( JetSetSystemParameter( &instance, 0, JET_paramBaseName, 0, "edb" ) );
     Call( JetSetSystemParameter( &instance, 0, JET_paramEventSource, 0, "query.exe" ) );
 
+    //  set logging option such that logs unneeded for crash recovery are automatically deleted.
+    //  This prevents replaying a backup all the way to the current point in time 
+    //  but reduces the need for regular backup to remove log files.
+    //
     Call( JetSetSystemParameter( &instance, 0, JET_paramCircularLog, 1, NULL ) );
 
+    //  below system parameters should not need to be set in most cases
+    //
+    //  Call( JetSetSystemParameter( &instance, 0, JET_paramMaxSessions, 16, NULL ) );
+    //  Call( JetSetSystemParameter( &instance, 0, JET_paramMaxOpenTables, 300, NULL ) );
+    //  Call( JetSetSystemParameter( &instance, 0, JET_paramMaxCursors, 1024, NULL ) );
+    //  Call( JetSetSystemParameter( &instance, 0, JET_paramMaxVerPages, 64, NULL ) );
+    //  Call( JetSetSystemParameter( &instance, 0, JET_paramPreferredVerPages, 64, NULL ) );
+    //  Call( JetSetSystemParameter( &instance, 0, JET_paramGlobalMinVerPages, 64, NULL ) );
+    //  Call( JetSetSystemParmaeter( &instance, 0, JET_paramVersionStoreTaskQueueMax, 32, NULL ) );
+    //  Call( JetSetSystemParameter( &instance, 0, JET_paramMaxTemporaryTables, 30, NULL ) );
+    //  Call( JetSetSystemParameter( &instance, 0, JET_paramLogFileSize, 5120, NULL ) );
+    //  Call( JetSetSystemParameter( &instance, 0, JET_paramLogBuffers, 80, NULL ) );
+    //
+    //  note skip JET_paramStartFlushThreshold, JET_paramStopFlushThreshold, and JetSetSystemParameter
+    //  since they are now set automatically via dynamic buffer allocation algorithm in ESE/NT.
+    //
+    //  Call( JetSetSystemParameter( &instance, 0, JET_paramCommitDefault, 0, NULL ) );
 
+    //  call JetInit to initialize ESE
+    //
     Call( JetInit( &instance ) );
 
+    //  one or more sessions should be begun since all subsequent ESE operations are performed in the context of a session.
+    //  A separate session should be opened for each thread using ESE.
+    //
     Call( JetBeginSession( instance, &sesidT, szUser, szPassword ) );
 
 
+    ////////////////////////////////////////////////////////
+    //  DATA DEFINITION
+    //
+    //  create schema as required
+    //
 
+    //  look for database and create if not found
+    //
     err = JetAttachDatabase( sesidT, szDatabase, 0 );
     if ( JET_errFileNotFound == err )
     {
@@ -1009,6 +1235,8 @@ void __cdecl main(int argc, char ** argv)
         Call( JetOpenDatabase( sesidT, szDatabase, "", &dbidDatabase, 0 ) );
         }
 
+    //  look for table and create if not found
+    //
     err = JetOpenTable( sesidT, dbidDatabase, szCustomersTable, NULL, 0, 0L, &tableidCustomers );
     if ( JET_errObjectNotFound == err )
     {
@@ -1017,6 +1245,9 @@ void __cdecl main(int argc, char ** argv)
     }
     Call( err );
 
+    //  by now all tables, columns and indexes should exist.  
+    //  Open tables to get open table handle, and set column ids for all columns.
+    //
     Call( JetGetTableColumnInfo(
         sesidT,
         tableidCustomers,
@@ -1135,14 +1366,23 @@ void __cdecl main(int argc, char ** argv)
     columnidBookDescription = columndefT.columnid;
 
 
+    ////////////////////////////////////////////////////////
+    //  DATA MANIPULATION
+    //
+    //  create data as required
+    //
     err = JetMove( sesidT, tableidCustomers, JET_MoveFirst, NO_GRBIT );
     if ( JET_errNoCurrentRecord == err )
     {
         Call( ErrAddDataToTables( sesidT, dbidDatabase, tableidCustomers, tableidOrders, tableidBooks ) );
     }
 
+    //  dump data to screen
+    //
     Call( ErrDumpCustomersToScreen( sesidT, tableidCustomers ) );
 
+    //  query data
+    //
     Call( ErrQueryTopThreeOrdersByOrderAmount( sesidT, dbidDatabase, tableidCustomers, tableidOrders, tableidBooks ) );
 
 HandleError:
@@ -1155,6 +1395,9 @@ HandleError:
         printf( "Sample succeeded.\n" );
     }
 
+    ////////////////////////////////////////////////////////
+    //  TERMINATION
+    //
     if ( JET_tableidNil != tableidBooks )
     {
         JetCloseTable( sesidT, tableidBooks );
@@ -1185,7 +1428,9 @@ HandleError:
         sesidT = JET_sesidNil;
     }
 
-    if ( 0  != instance )
+    //  always call JetTerm!!!
+    //
+    if ( 0 /* JET_instanceNil */ != instance )
     {
         JetTerm( instance );
         instance = 0;

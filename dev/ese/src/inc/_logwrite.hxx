@@ -76,8 +76,11 @@ public:
     
     VOID CheckIsReady() const
     {
+        //  should be set properly
+        //
         Assert( m_isecWrite != 0 );
 
+        //  m_pbEntry and m_pbWrite were set for next record in LocateLastLogRecord
 
         Assert( m_pbWrite == m_pLogStream->PbSecAligned( m_pbWrite, m_pbLGBufMin ) );
         Assert( m_pbWrite <= m_pbEntry );
@@ -149,7 +152,7 @@ public:
 
 #ifdef DEBUGGER_EXTENSION
     VOID Dump( CPRINTF * pcprintf, DWORD_PTR dwOffset = 0 ) const;
-#endif
+#endif  //  DEBUGGER_EXTENSION
 
 private:
     BOOL FLGIAddLogRec(
@@ -158,6 +161,7 @@ private:
         BOOL                fAllocOnly,
         __deref BYTE**      ppbET );
 
+    // AKR_TODO
     BOOL FWakeWaitingQueue(
         const LGPOS* const plgposToWrite
         );
@@ -201,41 +205,70 @@ private:
 
     BYTE *          m_pvPartialSegment;
 
-    LGPOS           m_lgposLogRec;
+    LGPOS           m_lgposLogRec;          //  last log record entry, updated by ErrLGLogRec
 
-    LGPOS           m_lgposLogRecBasis;
+    LGPOS           m_lgposLogRecBasis;     //  log record used as basis for log bytes generated, updated by ErrLGLogRec
 
-    BOOL            m_fNewLogRecordAdded;
+    BOOL            m_fNewLogRecordAdded;   // protected by m_critLGBuf
 
+    //  Protected by m_critLGWrite.
+    //  Whether we have a shadow sector on disk at sector ( m_isecWrite + 1 ).
+    //  We use this to determine whether we need to split a multi-sector
+    //  full sector write into 2 I/Os instead of doing it as 1 I/O.
     BOOL            m_fHaveShadow;
 
+    //  sync mechanism for initiating a log write
 
     CSemaphore      m_semLogSignal;
     CSemaphore      m_semLogWrite;
 
+    //  semaphore used to wait for available log buffer space
 
     CSemaphore      m_semWaitForLogBufferSpace;
 
+    //  crit sequence: m_critLGWrite->m_critLGBuf->m_critLGWaitQ
 
     CCriticalSection    m_critLGWaitQ;
 
+    //  sync mechanism for copying data into log buffers
+    //  and writing that data to the logs
 
     CMeteredSection     m_msLGPendingCopyIntoBuffer;
 
+    //  count of users waiting for log write
 
+    // AKR_TODO
     PIB             *m_ppibLGWriteQHead;
     PIB             *m_ppibLGWriteQTail;
 
+    //  Perfmon stuff: also monitoring statistics
 
+    // Number of times we've used the VM wraparound trick.
+    // Also the number of I/Os we've saved by using it.
     ULONG   m_cLGWrapAround;
 
+    //  if TRUE, log write thread should set
+    //  m_fAboutToWriteSnapshot to TRUE to
+    //  preclude further log writes (until
+    //  it gets reset)
+    //
     BOOL            m_fStopOnNewLogGeneration;
 
+    //  if TRUE, only the thread requesting to stop
+    //  on a new log generation may enter log records
+    //  into the log buffer
+    //
     BOOL            m_fWaitForLogRecordAfterStopOnNewGen;
 
+    //  if TRUE, log write thread should bail immediately
+    //  because a snapshot backup is going to be taken
+    //
+    //  note that this flag will get reset once the snapshot
+    //  backup is thawed
+    //
     BOOL                m_fLogPaused;
 
-    CManualResetSignal  m_sigLogPaused;
+    CManualResetSignal  m_sigLogPaused;             //  signal that space request loop has terminated
 
 #ifdef DEBUG
     LGPOS           m_lgposLastLogRec;

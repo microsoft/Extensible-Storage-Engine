@@ -3,6 +3,7 @@
 
 #include "osstd.hxx"
 
+//  we use this LoadLibrary to load the external HA message DLL for reporting failure items.
 #undef LoadLibraryExW
 
 #if defined( USE_HAPUBLISH_API )
@@ -18,6 +19,9 @@ static CRITICAL_SECTION g_csHaPublish;
 static BOOL g_fcsHaPublishInit;
 
 
+//================================================
+// GUID utilities
+//================================================
 inline unsigned char wcstouc( WCHAR wc1, WCHAR wc2 )
 {
     Assert( iswxdigit( wc1 ) && iswxdigit( wc2 ) );
@@ -34,6 +38,7 @@ static bool FIsGUID( const WCHAR* wsz )
 
     const char* sz = "e981a9c7-4934-450d-892f-3a335645223d";
 
+    // make sure we have computed the right constants.
     Assert( s_cch == strlen( sz ) );
     Assert( 0 <= s_i0 && s_i0 < s_i1 && s_i1 < s_i2 && s_i2 < s_i3 && s_i3 < s_cch );
     Assert( '-' == sz[ s_i0 ] && '-' == sz[ s_i1 ] && '-' == sz[ s_i2 ] && '-' == sz[ s_i3 ] );
@@ -82,6 +87,9 @@ static GUID ParseGuid( const WCHAR* const wsz )
     return guid;
 }
 
+//================================================
+// main Ha publish function
+//================================================
 void OSUHAPublishEventImpl(
     HaDbFailureTag      haTag,
     const WCHAR*        wszDbGuid,
@@ -112,6 +120,7 @@ void OSUHAPublishEventImpl(
         haDbFailureItem.m_tag               = haTag;
         haDbFailureItem.m_dbGuid            = ParseGuid( wszDbGuid );
         haDbFailureItem.m_dbInstanceName    = wszDbInstanceName;
+        // TODO: add ESE component name based on HA_*_CATEGORY
         haDbFailureItem.m_componentName = L"";
         haDbFailureItem.m_ioError           = &haDbIoErrorInfo;
         haDbFailureItem.m_notifyEventInfo   = &haDbNotificationEventInfo;
@@ -122,6 +131,9 @@ void OSUHAPublishEventImpl(
 #endif
 
 
+//================================================
+// global init/term
+//================================================
 bool FOSHaPublishPreinit()
 {
 #if defined( USE_HAPUBLISH_API )
@@ -159,6 +171,9 @@ void OSHaPublishPostterm()
 }
 
 
+//================================================
+// instance init
+//================================================
 bool FUtilHaPublishInit()
 {
 #if defined( USE_HAPUBLISH_API )
@@ -174,6 +189,7 @@ bool FUtilHaPublishInit()
         _wmakepath_s( wszPath, _countof( wszPath ), wszDrive, wszDir, HAPUBLISHLIBNAME, HAPUBLISHLIBEXT );
         g_hmodHaPublish = LoadLibraryExW( wszPath, NULL, 0 );
 
+        //  If that fails, let LoadLibrary() do the lookup.
         if ( g_hmodHaPublish == NULL )
         {
             _wmakepath_s( wszPath, _countof( wszPath ), NULL, NULL, HAPUBLISHLIBNAME, HAPUBLISHLIBEXT );

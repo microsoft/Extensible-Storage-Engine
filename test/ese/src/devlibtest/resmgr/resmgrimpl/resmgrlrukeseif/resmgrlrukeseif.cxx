@@ -1,10 +1,12 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
+//  Header files.
 
 #include "resmgrlrukeseif.hxx"
 
 
+//  class PageEvictionAlgorithmLRUTest.
 
 PageEvictionAlgorithmLRUKESE::PageEvictionAlgorithmLRUKESE() : 
     IPageEvictionAlgorithmImplementation(),
@@ -138,6 +140,7 @@ ERR PageEvictionAlgorithmLRUKESE::ErrEvictNextPage_( void* const pv, const BFTRA
     m_lruk.BeginResourceScan( &lockLRUK );
     errLRUK = m_lruk.ErrGetNextResource( &lockLRUK, (BFRESMGRLRUKESE**)pppage );
 
+    //  Force success if there is nothing to evict.
 
     if ( errLRUK == BFLRUK::ERR::errNoCurrentResource )
     {

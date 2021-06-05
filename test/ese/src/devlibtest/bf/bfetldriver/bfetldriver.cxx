@@ -11,16 +11,17 @@
 #include "jet.h"
 #endif
 
-#include "bfreqs.hxx"
-#include "_bfconst.hxx"
-#include "bfftl.hxx"
-#include "bfetldriver.hxx"
-#include "bfftldriver.hxx"
+#include "bfreqs.hxx"       // requisite thunked out types
+#include "_bfconst.hxx"     // BF constants and simple types we need
+#include "bfftl.hxx"        // BF trace data and IDs
+#include "bfetldriver.hxx"  // header for this library
+#include "bfftldriver.hxx"  // header for the FTL library
 #include "EtwCollection.hxx"
 
 #include <list>
 
 
+//  Gets the size of a file. Returns -1 if any error occurs.
 
 static __int64 CbGetFileSize( __in const WCHAR* const wszFilePath )
 {
@@ -52,6 +53,7 @@ HandleError:
 }
 
 
+//  Calculates the recommended buffer size for the ETL driver.
 
 static ERR ErrGetOptimalETLDriverBufferSize( __in const WCHAR* const wszEtlFilePath, __out DWORD* const pcEventsBufferedMax )
 {
@@ -62,6 +64,8 @@ static ERR ErrGetOptimalETLDriverBufferSize( __in const WCHAR* const wszEtlFileP
         return JET_errInternalError;
     }
 
+    //  Estimate number of entries based on the size of the FTL struct.
+    //  We'll shoot for 10% of the file size (always between 1MB and 1GB).
 
     *pcEventsBufferedMax = (DWORD)( max( min( ( 10 * cbGetFileSize ) / 100, 1 * 1024 * 1024 * 1024 ), 1 * 1024 * 1024 ) / sizeof (BFTRACE) );
 
@@ -69,6 +73,7 @@ static ERR ErrGetOptimalETLDriverBufferSize( __in const WCHAR* const wszEtlFileP
 }
 
 
+//  Gets the BFRESMGR event from the raw ETW event.
 
 static inline const EseBfResMgrEvent* GetEseBFResMgrEventFromEtwEvent( __in const EtwEvent* const pEtwEvent )
 {
@@ -78,6 +83,7 @@ static inline const EseBfResMgrEvent* GetEseBFResMgrEventFromEtwEvent( __in cons
 }
 
 
+//  Gets the IFMP summary to be stamped in the FTL file header for a given PID.
 
 CFastTraceLog::BFFTLFilePostProcessHeader& BFETLContext::bfftlPostProcHdr( const DWORD dwPID ) const
 {
@@ -85,6 +91,8 @@ CFastTraceLog::BFFTLFilePostProcessHeader& BFETLContext::bfftlPostProcHdr( const
 }
 
 
+//  Gets the IFMP summary to be stamped in the FTL file header for the PID under collection.
+//  Only valid if only one PID is being collected.
 
 CFastTraceLog::BFFTLFilePostProcessHeader& BFETLContext::bfftlPostProcHdr() const
 {
@@ -93,6 +101,7 @@ CFastTraceLog::BFFTLFilePostProcessHeader& BFETLContext::bfftlPostProcHdr() cons
 }
 
 
+//  Initializes the BF trace driver's handle / context.
 
 ERR ErrBFETLInit(
     __in const void* pvTraceProvider,
@@ -107,12 +116,14 @@ ERR ErrBFETLInit(
     const BOOL fCollectBfStats = ( grbit & fBFETLDriverCollectBFStats ) != 0;
     const size_t cPids = pids.size();
 
+    //  Paramater validation.
 
     if ( !pvTraceProvider || !ppbfetlc || ( ( cEventsBufferedMax < 1 ) && fTestMode ) )
     {
         Error( JET_errInvalidParameter );
     }
 
+    //  Block passing PID 0 with other PIDs. Also block no PIDs.
 
     if ( ( ( pids.count( 0 ) != 0 ) && ( cPids > 1 ) ) || ( cPids == 0 ) )
     {
@@ -124,12 +135,14 @@ ERR ErrBFETLInit(
     Alloc( pbfetlc->pids = new std::set<DWORD>( pids ) );
     Assert( pbfetlc->pids->size() == pids.size() );
 
+    //  Get optimal size if none was passed.
 
     if ( cEventsBufferedMax == 0 )
     {
         Call( ErrGetOptimalETLDriverBufferSize( (WCHAR*)pvTraceProvider, &cEventsBufferedMax ) );
     }
 
+    //  Initialize some elements explicitly.
 
     pbfetlc->pvTraceProvider = pvTraceProvider;
     pbfetlc->fTestMode = fTestMode;
@@ -146,6 +159,7 @@ ERR ErrBFETLInit(
 
     if ( !pbfetlc->fTestMode )
     {
+        //  Real trace file.
 
         Alloc( pbfetlc->hETW = EtwOpenTraceFile( (WCHAR*)pbfetlc->pvTraceProvider ) );
     }
@@ -168,6 +182,7 @@ HandleError:
 }
 
 
+//  Same functionality as above, but it takes a single PID.
 
 ERR ErrBFETLInit(
     __in const void* pvTraceProvider,
@@ -183,15 +198,18 @@ ERR ErrBFETLInit(
 }
 
 
+//  Shuts down and frees the BF trace drivers context.
 
 void BFETLTerm( __in BFETLContext* const pbfetlc )
 {
+    //  Nothing to de-allocate.
 
     if ( !pbfetlc )
     {
         return;
     }
 
+    //  Close ETW file.
     
     if ( pbfetlc->hETW )
     {
@@ -203,6 +221,7 @@ void BFETLTerm( __in BFETLContext* const pbfetlc )
         pbfetlc->hETW = NULL;
     }
 
+    //  Free cached elements.
 
     BFETLContext::ListEtwEvent* const pListEtwEvent = pbfetlc->pListEtwEvent;
     if ( pListEtwEvent )
@@ -223,6 +242,7 @@ void BFETLTerm( __in BFETLContext* const pbfetlc )
         pbfetlc->pListEtwEvent = NULL;
     }
 
+    //  Free PID stats.
 
     BFETLContext::HashPidStats* const pHashPidStats = pbfetlc->pHashPidStats;
     if ( pHashPidStats )
@@ -240,9 +260,11 @@ void BFETLTerm( __in BFETLContext* const pbfetlc )
         pbfetlc->pHashPidStats = NULL;
     }
 
+    //  Free per-PID IFMP summary.
 
     delete[] pbfetlc->rgbfftlPostProcHdr;
 
+    //  Free PID list.
 
     delete pbfetlc->pids;
 
@@ -250,6 +272,9 @@ void BFETLTerm( __in BFETLContext* const pbfetlc )
 }
 
 
+//  Gets the next trace record in the ETL trace file, returning JET_errInternalSuccess if we were
+//  able to get the trace, errNotFound if we're done with the trace file, and an JET_errInternalError
+//  in case of an unexpected error.
 
 ERR ErrBFETLGetNext( __in BFETLContext* const pbfetlc, __out BFTRACE* const pbftrace, __out DWORD* const pdwPID )
 {
@@ -262,6 +287,7 @@ ERR ErrBFETLGetNext( __in BFETLContext* const pbfetlc, __out BFTRACE* const pbft
 
     const BOOL fCollectPid0 = ( pbfetlc->pids->count( 0 ) != 0 );
 
+    //  Loop until there are no more traces or we've reached the desired number of buffered elements (+1 to be returned).
 
     BFETLContext::ListEtwEvent* const pListEtwEvent = pbfetlc->pListEtwEvent;
     EtwEvent* pEtwEvent = NULL;
@@ -288,6 +314,7 @@ ERR ErrBFETLGetNext( __in BFETLContext* const pbfetlc, __out BFTRACE* const pbft
             pEtwEvent = EtwGetNextEvent( pbfetlc->hETW );
         }
 
+        //  Reached EOF.
 
         if ( !pEtwEvent )
         {
@@ -295,6 +322,7 @@ ERR ErrBFETLGetNext( __in BFETLContext* const pbfetlc, __out BFTRACE* const pbft
             continue;
         }
 
+        //  Determine if it's one of the traces of interest.
 
         if ( ( pEtwEvent->etwEvtType != etwevttEseResMgrInit ) &&
             ( pEtwEvent->etwEvtType != etwevttEseResMgrTerm ) &&
@@ -311,6 +339,8 @@ ERR ErrBFETLGetNext( __in BFETLContext* const pbfetlc, __out BFTRACE* const pbft
 
         const EventHeader* const pEventHeader = (EventHeader*)( (BYTE*)pEtwEvent + pEtwEvent->ibExtraData );
 
+        //  Check if the non-ZERO PID is within the list. Also proceed with collection if we're collecting
+        //  PID ZERO ("collect-all").
 
         if ( ( pbfetlc->pids->count( pEventHeader->ulProcessId ) == 0 ) && !fCollectPid0 )
         {
@@ -321,6 +351,7 @@ ERR ErrBFETLGetNext( __in BFETLContext* const pbfetlc, __out BFTRACE* const pbft
 
         const TICK tickCurrent = pEseBfResMgrEvent->tick;
 
+        //  Initialize tracking ticks.
 
         if ( pListEtwEvent->empty() )
         {
@@ -330,6 +361,7 @@ ERR ErrBFETLGetNext( __in BFETLContext* const pbfetlc, __out BFTRACE* const pbft
             pbfetlc->tickMax = tickCurrent;
         }
 
+        //  The most common is for the new trace to go to the back on the list.
 
         if ( TickCmp( tickCurrent, pbfetlc->tickMax ) >= 0 )
         {
@@ -341,6 +373,7 @@ ERR ErrBFETLGetNext( __in BFETLContext* const pbfetlc, __out BFTRACE* const pbft
 
         pbfetlc->cTracesOutOfOrder++;
 
+        //  Short-circuit the error case where we already returned traces and the buffer is too small.
 
         if ( TickCmp( tickCurrent, pbfetlc->tickMin ) < 0 )
         {
@@ -362,8 +395,9 @@ ERR ErrBFETLGetNext( __in BFETLContext* const pbfetlc, __out BFTRACE* const pbft
             }
         }
 
+        //  We were out of luck. Proceed to expensive search, start from the back.
 
-        Assert( pListEtwEvent->size() > 1 );
+        Assert( pListEtwEvent->size() > 1 );    //  Covered by the conditions above.
         BOOL fFound = fFalse;
         for ( BFETLContext::ListEtwEventIter etwEventIter = ( --( pListEtwEvent->end() ) );
             true;
@@ -373,6 +407,7 @@ ERR ErrBFETLGetNext( __in BFETLContext* const pbfetlc, __out BFTRACE* const pbft
             
             if ( TickCmp( tickCurrent, pEseBfResMgrEventIter->tick ) >= 0 )
             {
+                //  Insert at previous position, i.e., the next one in the iterator.
 
                 pListEtwEvent->insert( ++etwEventIter, pEtwEvent );
                 pEtwEvent = NULL;
@@ -395,12 +430,14 @@ ERR ErrBFETLGetNext( __in BFETLContext* const pbfetlc, __out BFTRACE* const pbft
         pEtwEvent = NULL;
     }
 
+    //  We may not have anything to return.
 
     if ( pListEtwEvent->empty() )
     {
         Error( errNotFound );
     }
 
+    //  The front of the list is what we need to return.
 
     EtwEvent* const pEtwEventReturn = pListEtwEvent->front();
     const EseBfResMgrEvent* const pEseBfResMgrEvent = GetEseBFResMgrEventFromEtwEvent( pEtwEventReturn );
@@ -408,9 +445,11 @@ ERR ErrBFETLGetNext( __in BFETLContext* const pbfetlc, __out BFTRACE* const pbft
     const EventHeader* const pEventHeader = (EventHeader*)pEseBfResMgrEvent;
     const DWORD dwPID = pEventHeader->ulProcessId;
 
+    //  Can't fail from here.
 
     pbfetlc->cTracesProcessed++;
 
+    //  Adjust last tick returned (assert always ascending).
 
     Assert( ( pbfetlc->cTracesProcessed == 1 ) || ( TickCmp( tickCurrent, pbfetlc->tickLast ) >= 0 ) );
     pbfetlc->tickLast = tickCurrent;
@@ -418,6 +457,7 @@ ERR ErrBFETLGetNext( __in BFETLContext* const pbfetlc, __out BFTRACE* const pbft
     memset( pbftrace, 0, sizeof(*pbftrace) );
     pbftrace->tick = tickCurrent;
 
+    //  Accumulate per-PID stats.
 
     BFTraceStats bftstatsPIDDummy;
     BFTraceStats* pbftstatsPID = NULL;
@@ -441,6 +481,7 @@ ERR ErrBFETLGetNext( __in BFETLContext* const pbfetlc, __out BFTRACE* const pbft
         pbftstatsPID = &bftstatsPIDDummy;
     }
 
+    //  Process the trace.
 
     LONG ifmp = -1;
     ULONG pgno = 0;
@@ -466,6 +507,7 @@ ERR ErrBFETLGetNext( __in BFETLContext* const pbfetlc, __out BFTRACE* const pbft
 
         case etwevttEseResMgrTerm:
         {
+            //const EseResMgrTerm* const pEseResMgrTerm = (EseResMgrTerm*)pEseBfResMgrEvent;
             pbftrace->traceid = bftidSysResMgrTerm;
 
             pbfetlc->bftstats.cSysResMgrTerm++;
@@ -619,6 +661,7 @@ ERR ErrBFETLGetNext( __in BFETLContext* const pbfetlc, __out BFTRACE* const pbft
             AssertSz( fFalse, "We should have filtered out unknown events before." );
     }
 
+    //  Remove and free object.
 
     pListEtwEvent->pop_front();
 
@@ -627,6 +670,7 @@ ERR ErrBFETLGetNext( __in BFETLContext* const pbfetlc, __out BFTRACE* const pbft
         EtwFreeEvent( pEtwEventReturn );
     }
 
+    //  Adjust IFMP array.
 
     Assert( ( ifmp >= 0 ) || ( pgno == 0 ) );
     if ( ifmp >= 0 )
@@ -650,6 +694,7 @@ ERR ErrBFETLGetNext( __in BFETLContext* const pbfetlc, __out BFTRACE* const pbft
         }
     }
 
+    //  Adjust tracking ticks.
 
     if ( pListEtwEvent->empty() )
     {
@@ -661,6 +706,7 @@ ERR ErrBFETLGetNext( __in BFETLContext* const pbfetlc, __out BFTRACE* const pbft
         pbfetlc->tickMin = GetEseBFResMgrEventFromEtwEvent( pListEtwEvent->front() )->tick;
     }
 
+    //  PID.
 
     if ( pdwPID != NULL )
     {
@@ -673,6 +719,7 @@ HandleError:
 }
 
 
+//  Overload of the function above that does not return a PID.
 
 ERR ErrBFETLGetNext( __in BFETLContext* const pbfetlc, __out BFTRACE* const pbftrace )
 {
@@ -680,6 +727,7 @@ ERR ErrBFETLGetNext( __in BFETLContext* const pbfetlc, __out BFTRACE* const pbft
 }
 
 
+//  Gets BFTraceStats specific to a process ID.
 
 const BFTraceStats* PbftsBFETLStatsByPID( __in const BFETLContext* const pbfetlc, __inout DWORD* const pdwPID )
 {
@@ -730,6 +778,7 @@ public:
     }
 } g_fsconfigETL;
 
+//  Converts an ETL file into an FTL post-processed file.
 
 ERR ErrBFETLConvertToFTL(
     __in const WCHAR* const wszEtlFilePath,
@@ -740,16 +789,18 @@ ERR ErrBFETLConvertToFTL(
     BFETLContext* pbfetlc = NULL;
     std::unordered_map<DWORD, CFastTraceLog*> pbfftls;
     __int64 cTracesConv = 0;
-    IOREASON iorBFTraceFile( (IOREASONPRIMARY) 24 );
+    IOREASON iorBFTraceFile( (IOREASONPRIMARY) 24 );    //  iorpOsLayerTracing = 24.
     BFTRACE bftrace;
     DWORD dwPID = 0;
     const BOOL fCollectPid0 = ( pids.count( 0 ) != 0 );
     const BOOL fCollectSinglePid = ( pids.size() == 1 );
 
+    //  Initialize ETL.
 
     Call( ErrBFETLInit( wszEtlFilePath, pids, 0, fBFETLDriverCollectBFStats, &pbfetlc ) );
     Assert( !fCollectPid0 || fCollectSinglePid );
 
+    //  Initialize FTL.
 
     for ( auto pidIter = pids.begin(); pidIter != pids.end(); pidIter++ )
     {
@@ -798,6 +849,7 @@ ERR ErrBFETLConvertToFTL(
         Call( pbfftl->ErrFTLInitWriter( wszFtlFilePathT, &iorBFTraceFile, CFastTraceLog::ftlifNewlyCreated ) );
     }
 
+    //  Go through all the events.
 
     printf( "\r\n" );
     while ( ( err = ErrBFETLGetNext( pbfetlc, &bftrace, &dwPID ) ) >= JET_errSuccess )
@@ -916,6 +968,7 @@ HandleError:
 }
 
 
+//  Compares an ETL against an FTL file. Returns JET_errDatabaseCorrupted if they are not the same.
 
 ERR ErrBFETLFTLCmp(
     __in const void* pvTraceProviderEtl,
@@ -933,6 +986,7 @@ ERR ErrBFETLFTLCmp(
     DWORD cEventsBufferedMax = fTestMode ? 100 : 0;
     __int64 cTracesCmp = 0;
 
+    //  Initialize ETL.
 
     Call( ErrBFETLInit(
         pvTraceProviderEtl,
@@ -941,12 +995,14 @@ ERR ErrBFETLFTLCmp(
         fTestMode ? fBFETLDriverTestMode : 0,
         &pbfetlc ) );
 
+    //  Initialize FTL.
 
     Call( ErrBFFTLInit(
         pvTraceProviderFtl,
         fBFFTLDriverResMgrTraces | ( fTestMode ? fBFFTLDriverTestMode : 0 ),
         &pbfftlc ) );
 
+    //  Go through all the events.
 
     printf( "\r\n" );
     while ( ( err = ErrBFETLGetNext( pbfetlc, &bftraceFromETL ) ) >= JET_errSuccess )
@@ -995,6 +1051,7 @@ ERR ErrBFETLFTLCmp(
 
     Call( err );
 
+    //  Compare post-processeed header.
 
     const ULONG cEtlIfmp = pbfetlc->bfftlPostProcHdr().le_cifmp;
     const ULONG cFtlIfmp = (ULONG)( pbfftlc->cIFMP );
@@ -1044,9 +1101,11 @@ HandleError:
 }
 
 
+//  Dump stats related to the ETL file.
 
 ERR ErrBFETLDumpStats( __in const BFETLContext* const pbfetlc, __in const DWORD grbit )
 {
+    //  Dump general stats.
 
     printf( "Total traces processed: %I64d\r\n", pbfetlc->cTracesProcessed );
     printf( "Traces out of order: %I64d\r\n", pbfetlc->cTracesOutOfOrder );
@@ -1071,6 +1130,7 @@ ERR ErrBFETLDumpStats( __in const BFETLContext* const pbfetlc, __in const DWORD 
         printf( "\r\n" );
     }
 
+    //  Dump BF stats.
 
     if ( grbit & fBFETLDriverCollectBFStats )
     {

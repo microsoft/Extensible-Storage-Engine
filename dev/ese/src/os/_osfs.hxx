@@ -1,23 +1,80 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
+//  Architecture of the OS Abstraction Layer's object / sub-system relationships.
+//
+//                                  o
+//                                  |
+//   |-----------------------------------------------|    o
+//   |                                               |    |
+//   |                   o      OS File System       |---------|
+//   |                   |                           | OS File |
+//   |      |----------------------------------|     |  Find   |
+//   |      |                                  |     |         |
+//   |      |  OS File                         |     |         |
+//   |      |                                  |     |         |
+//   |      |                                  |     |         |
+//   |  |----------------------|               |     |         |
+//   |  |                      |               |     |         |
+//   |--|      OS Volume       |               |     |         |
+//      |                      |               |     |         |
+//      |----------------------------|         |     |         |
+//      |                            |         |     |         |
+//      |   OS Disk                  |         |     |         |
+//      |                            |         |     |         |
+//      |    |------+---+----------| |         |     |         |
+//      |    | Mete | V | I/O Heap | |         |     |         |
+//      |    |  Q2  | I |    A/B   | |         |     |         |
+//      |    |      | P |          | |         |     |         |
+//      |    |------+---+----------| |         |     |         |
+//      |                            |         |     |         |
+//      |     |---------------------------|    |     |         |
+//      |     |                           |    |     |         |
+//      |     |  IOREQ Pool               |    |     |         |
+//      |     |                           |    |     |         |
+//      |     |---------------------------|    |     |         |
+//      |                            |         |     |         |
+//      |   o                        |     o   |  o  |    o    |
+//      |   |                        |     |   |  |  |    |    |
+//    |-----------------------------------------------------------|
+//    |  NT File System and IO APIs                               |
+//    |-----------------------------------------------------------|
+//
+//  osfs.cxx
+//      OS File System
+//      OS File Find
+//      OS Volume
+//  osfile.cxx
+//      OS File
+//  osdisk.cxx
+//      OS Disk
+//      IO Heap / IO Queue
+//      IOREQ Pool
+//
+// Be nice to add a representation of the IO Thread to this representation,
+// even though it doesn't technically have an object.
 
 #ifndef __OSFS_HXX_INCLUDED
 #define __OSFS_HXX_INCLUDED
 
 
+//  OS File System
+//
 
-class COSFileSystem
+class COSFileSystem  //  osfs
     :   public IFileSystemAPI
 {
-    public:
+    public:  //  specialized API
 
+        //  ctor
 
         COSFileSystem( IFileSystemConfiguration * const pfsconfig );
 
+        //  Error Conversion
 
         ERR ErrGetLastError( const DWORD error = GetLastError() );
 
+        //  Path Manipulation
 
         ERR ErrPathRoot(    const WCHAR* const  wszPath,
                             __out_bcount(OSFSAPI_MAX_PATH*sizeof(WCHAR)) WCHAR* const       wszAbsRootPath );
@@ -29,19 +86,23 @@ class COSFileSystem
                                             __in const DWORD cchDiskId,
                                             __out DWORD *pdwDiskNumber );
 
+        //  Commit all changes to the File System
 
         ERR ErrCommitFSChange( const WCHAR* const wszPath );
 
+        //  Get device handle for a specific file
 
         ERR ErrOSFSGetDeviceHandle( __in PCWSTR wszAbsVolumeRootPath, __out HANDLE* phDevice );
 
+        //  debugging support
 
         void Dump( CPRINTF* pcprintf, DWORD_PTR dwOffset = 0 ) const;
 
+        //  configuration
 
         IFileSystemConfiguration* const Pfsconfig() const { return m_pfsconfig; }
 
-    public:
+    public:  //  IFileSystemAPI
 
         virtual ~COSFileSystem();
 
@@ -105,6 +166,7 @@ class COSFileSystem
 
     public:
 
+        //  Error reporting.
 
         VOID ReportDiskError( const MessageId msgid,
             const WCHAR * const wszPath,
@@ -135,11 +197,25 @@ class COSFileSystem
         ERR ErrCommitFSChangeSlowly( const WCHAR* const wszPath );
         ERR ErrCommitFSChangeSlowly( const HANDLE hFile );
 
+        //  This function returns a path in the form of "\\?\Volume{GUID}\" for NTFS.
+        //
 
         ERR ErrPathVolumeCanonical( const WCHAR* const wszAbsRootPath,
                                     __out_ecount(cchVolumeCanonicalPath) WCHAR* const wszVolumeCanonicalPath,
                                     __in const DWORD cchVolumeCanonicalPath );
 
+        //  This function returns a path in the form of "<PartitionStyle>:<ID>", which is NOT a valid path
+        //  from the OS' perspective. It is used merely to identify our disks internally as strings.
+        //  Example: "MBR:CABECADA-DADA-DAD0-CAB0-FACAD0BEBAD0", "GPT:DEADBEEF".
+        //
+        //  The ID is obtained by using IOCTL_DISK_GET_DRIVE_LAYOUT_EX and is defined as:
+        //      o For MBR volumes -  DRIVE_LAYOUT_INFORMATION_EX.Mbr.Signature, which is a DWORD;
+        //      o For GPT volumes -  DRIVE_LAYOUT_INFORMATION_EX.Gpt.DiskId, which is a GUID.
+        //
+        //  If the volume has more than one extent (i.e., expands across multiple OS disks), the ID
+        //  will be defined as the ID of the first extent. This is the best we can do in this scenario,
+        //  since we don't have an M-to-N mapping between COSDisk and COSVolume.
+        //
 
         ERR ErrDiskId(  const WCHAR* const wszVolumeCanonicalPath,
                         __out_ecount(cchDiskId) WCHAR* const wszDiskId,
@@ -167,15 +243,21 @@ class COSFileSystem
 
                 static SIZE_T OffsetOfILE() { return OffsetOf( CVolumePathCacheEntry, m_ile ); }
 
-                enum { dtickRefresh = 100 * 1000 };
+                enum { dtickRefresh = 100 * 1000 };  //  100 seconds
 
                 void ResetCaches( void )
                 {
+                    // Reset the cached items here ...
                     m_wszVolumePath[0] = L'\0';
                     m_wszVolumeCanonicalPath[0] = L'\0';
                     m_wszDiskId[0] = L'\0';
                     m_cbVolSecSize = 0;
                     m_dwDiskNumber = 0;
+                    // Resetting the refresh here, means that the call to get the value(s)
+                    // that must be cached is counted against the cache refresh period.
+                    // Alternatively we could set the refresh in Set{VolPath|SecSize}(),
+                    // but then we can end up caching for 2x the cache refresh period.
+                    // half a dozen of one or half a dozen of the other?
                     m_tickRefresh = TickOSTimeCurrent() + CVolumePathCacheEntry::dtickRefresh;
                 }
 
@@ -303,22 +385,25 @@ class COSFileSystem
 };
 
 
-class COSFileFind
+class COSFileFind  //  osff
     :   public IFileFindAPI
 {
-    public:
+    public:  //  specialized API
 
+        //  ctor
 
         COSFileFind();
 
+        //  initializes the File Find iterator
 
         ERR ErrInit(    COSFileSystem* const    posfs,
                         const WCHAR* const      wszFindPath );
 
+        //  debugging support
 
         void Dump( CPRINTF* pcprintf, DWORD_PTR dwOffset = 0 ) const;
 
-    public:
+    public:  //  IFileFindAPI
 
         virtual ~COSFileFind();
 
@@ -348,40 +433,61 @@ class COSFileFind
 };
 
 
+////////////////////////////////////////
+//  OS Volume
 
-class COSVolume
+class COSVolume //  osdiskapi
     :   public IVolumeAPI
 {
 
+    //  Glue: Global List of OSVolumes
+    //
+    // NOTE: The m_ile must be first or we don't think our list is empty.
+    //  Is global ctor not getting called?
     public:
         static SIZE_T OffsetOfILE() { return OffsetOf( COSVolume, m_ile ); }
     private:
         CInvasiveList< COSVolume, OffsetOfILE >::CElement m_ile;
 
 
+    //
+    //  OSVolume Lifecycle Functionality
+    //
     public:
 
         COSVolume();
         ERR ErrInitVolume( __in_z const WCHAR * const wszVolPath, __in_z const WCHAR * const wszVolCanonicalPath );
 
-    public:
+    public:  //  IDiskAPI
 
+        //  dtor
         virtual ~COSVolume();
 
+        //  returns the number of referrers
 
+//      virtual ULONG CRef();
 
-    public:
+    public: //  ref counts
         void AddRef();
         void Release();
+        //  returns the number of referrers
         virtual ULONG CRef() const;
 
+    //
+    //  Debugging
+    //
     public:
         void AssertValid();
         BOOL FIsVolume( __in_z const WCHAR * const wszTargetVolume ) const;
 
-    public:
+    //
+    //  Accessors / Properties
+    //
+    public: // IVolumeAPI
 
+        //  Properties
 
+        //  returns the amount of free/total disk space on the drive hosting the specified path
 
         virtual ERR ErrDiskSpace(   const WCHAR* const  wszPath,
                                     QWORD* const        pcbFreeForUser,
@@ -389,51 +495,66 @@ class COSVolume
                                     QWORD* const        pcbFreeOnDisk = NULL );
 
 
+        //  returns the sector size for the specified path
 
         virtual ERR ErrFileSectorSize(  const WCHAR* const  wszPath,
                                         DWORD* const        pcbSize );
 
+        //  returns the atomic write size for the specified path
 
         virtual ERR ErrFileAtomicWriteSize( const WCHAR* const  wszPath,
                                             DWORD* const        pcbSize );
 
+        //  get if disk is fixed (and therefore unlikely to suddenly disappear)
         
         virtual BOOL FDiskFixed();
 
+        //  get disk ID for this file
         
         virtual ERR ErrDiskId( ULONG_PTR* const pulDiskId ) const;
 
+        //  get seek penalty (in order to identify SSD)
 
         virtual BOOL FSeekPenalty() const
         {
             return m_posd->FSeekPenalty();
         }
 
-    public:
+    public: // specialized
 
 
+        //  returns the path of the volume
 
         const WCHAR * WszVolPath() const;
 
+        //  returns the canonical path of the volume
 
         const WCHAR * WszVolCanonicalPath() const;
 
+        //  returns the COSDisk managing the volume, adding a reference to the disk
 
         ERR ErrGetDisk( COSDisk ** pposd );
 
+    //
+    //  Data
+    //
     private:
 
+        //  we are going to bet that the OS will never return this value 
+        //  very unlikely the OS would pick this enum for anything
         const static UINT DRIVE_UNINIT_ESE = 0xFFFFFF01;
+        //  and at least double check the most basic constants aren't this value
         C_ASSERT( DRIVE_UNINIT_ESE != DRIVE_UNKNOWN );
         C_ASSERT( DRIVE_UNINIT_ESE != DRIVE_FIXED );
 
         ULONG       m_cref;
         WCHAR       m_wszVolPath[IFileSystemAPI::cchPathMax];
         WCHAR       m_wszVolCanonicalPath[IFileSystemAPI::cchPathMax];
-        COSDisk *   m_posd;
+        COSDisk *   m_posd; // The default disk.
         UINT        m_eosDiskType;
 
 
+    //  We give these 2 access, allows them to play with m_posd.
 
     friend ERR ErrOSVolumeConnect(
             __in COSFileSystem * const      posfs,
@@ -442,10 +563,17 @@ class COSVolume
     friend void OSVolumeDisconnect(
             __inout IVolumeAPI *            pvolapi );
 
+    //  ONLY should be used for our debugger extension, regular users should use OSDiskConnect which
+    //  properly ref counts things.
     friend COSDisk * PosdEDBGGetDisk( _In_ const COSVolume * const posv );
 
 };
 
+//
+// OSFSRETRY
+// Retry JET_errFileAccessDenied for a limited time
+// Use just once after declaration (timer is not reset)
+//
 class OSFSRETRY
 {
     public:
@@ -459,6 +587,7 @@ class OSFSRETRY
         TICK                            m_tickEnd;
 };
 
+//  Volume Connect / Disconnect APIs
 
 ERR ErrOSVolumeConnect(
     __in COSFileSystem * const      posfs,
@@ -475,12 +604,15 @@ inline COSVolume * PosvFromVolAPI( __inout IVolumeAPI *                     pvol
 }
 
 
+//  Describes the file or volume to disk mapping mode.
+//
 enum OSDiskMappingMode {
     eOSDiskInvalidMode = 0,
-    eOSDiskLastDiskOnEarthMode,
-    eOSDiskOneDiskPerVolumeMode,
-    eOSDiskOneDiskPerPhysicalDisk,
-    eOSDiskMonogamousMode,
+    eOSDiskLastDiskOnEarthMode,     //  there is only one OS Disk, all OS Volumes and OS Files have to play with that OS Disk - test
+    eOSDiskOneDiskPerVolumeMode,    //  one-to-one relationship, every OS Volume gets its own OS Disk, like a marriage of sorts - fallback and test
+    eOSDiskOneDiskPerPhysicalDisk,  //  promiscuous relationship, there can be multiple volumes sharing the same disk - default
+    eOSDiskMonogamousMode,          //  different kind of one-to-one relationship, every OS File gets its own OS Disk - test
+    // Had another interesting, possibly useful mode, one disk per folder...
 };
 
 
@@ -488,12 +620,13 @@ INLINE OSDiskMappingMode GetDiskMappingMode();
 INLINE extern void SetDiskMappingMode( const OSDiskMappingMode diskMode );
 
 
+//  FileModeFlags translation
 
 DWORD DwDesiredAccessFromFileModeFlags( const IFileAPI::FileModeFlags fmf );
 DWORD DwShareModeFromFileModeFlags( const IFileAPI::FileModeFlags fmf );
 DWORD DwCreationDispositionFromFileModeFlags( const BOOL fCreate, const IFileAPI::FileModeFlags fmf );
 DWORD DwFlagsAndAttributesFromFileModeFlags( const IFileAPI::FileModeFlags fmf );
 
-#endif
+#endif  //  __OSFS_HXX_INCLUDED
 
 

@@ -3,7 +3,9 @@
 
 #include "statunittest.hxx"
 
+//  ================================================================
 class SegmentedHistogramTest : public UNITTEST
+//  ================================================================
 {
     private:
         static SegmentedHistogramTest s_instance;
@@ -40,6 +42,10 @@ class CSegmentedHistoInPlaceTest
 {
     private:
 
+//      const SAMPLE    rgHistoSamples [28] = { 0, 1, 5, 8, 10, 12, 16, 20, 30, 40, 50, 100, 200, 300, 400, 500, 1000, 2000, 3000, 
+//                                                  4000, 5000, 10000, 20000, 30000, 60000, 90000, 0xffffffff, 0xffffffffffffffff };
+//      static SAMPLE   rgHistoSamples [28] = { 0, 1, 5, 8, 10, 12, 16, 20, 30, 40, 50, 100, 200, 300, 400, 500, 1000, 2000, 3000, 
+//                                                  4000, 5000, 10000, 20000, 30000, 60000, 90000, 0xffffffff, 0xffffffffffffffff };
         BYTE                    rgbHistoStorage[CbCSegmentedHistogram(g_rgHistoSamplesEx1)];
         CSegmentedHistogram *   phisto;
 
@@ -85,7 +91,9 @@ class CDoubleInPlace
 };
 
 
+//  ================================================================
 ERR SegmentedHistogramTest::ErrTest()
+//  ================================================================
 {
     void * pvHistoStorage = NULL;
     CSegmentedHistoInPlaceTest inplace;
@@ -111,7 +119,7 @@ ERR SegmentedHistogramTest::ErrTest()
     CSegmentedHistogram::ERR err = CSegmentedHistogram::ERR::errSuccess;
 
     ULONG iTest = 0;
-    BOOL fResult = fTrue;
+    BOOL fResult = fTrue; // assumed innocent, until proven guilty.
     ULONG fBailOnError = fFalse;
 
     SAMPLE qwMax            = 0xffffffffffffffff;
@@ -121,6 +129,9 @@ ERR SegmentedHistogramTest::ErrTest()
     if ( fPrintStatus )
         wprintf(L" Testing CSegmentedHistogram...\n");
 
+    //  improperly ctor'd histo ...
+    //CSegmentedHistogram * pSHSBad = new CSegmentedHistogram();
+    // Tested, does not compile.
 
 
     SAMPLE rgLimitedSegments [] = { 0, 10, 20, 40, 100 };
@@ -135,9 +146,11 @@ ERR SegmentedHistogramTest::ErrTest()
 
     err = CSegmentedHistogram::ERR::errSuccess;
 
+    //  Test empty class
 
     CallTest( ErrTestZerodHisto( pSHS, TestZeroFlags( fHasExplicitBuckets | fNoPercentileSupport ) ) );
 
+    //  Test basics
 
     CallTest( pSHS->ErrAddSample( 100 ) );
     CallTest( pSHS->ErrAddSample( 90 ) );
@@ -150,10 +163,12 @@ ERR SegmentedHistogramTest::ErrTest()
     TestTest( 0 == chits );
     CallTest( pSHS->ErrGetSampleHits( 100, &chits ) );
     TestTest( 3 == chits );
-    chits = 42;
+    chits = 42; // dirty value
     TestTest( CStats::ERR::wrnOutOfSamples == pSHS->ErrGetSampleHits( 101, &chits ) );
     TestTest( 0 == chits );
 
+    //  Testing mode
+    //
     CallTest( pSHS->ErrAddSample( 34 ) );
     CallTest( pSHS->ErrAddSample( 34 ) );
     CallTest( pSHS->ErrAddSample( 34 ) );
@@ -166,6 +181,8 @@ ERR SegmentedHistogramTest::ErrTest()
 
     pSHS = NULL;
 
+    //  2nd set of tests, using a malloc()'d chunk of memory
+    //
 
     ULONG cbHisto = CbCSegmentedHistogram( rgLimitedSegments );
     pvHistoStorage = malloc( cbHisto );
@@ -177,6 +194,8 @@ ERR SegmentedHistogramTest::ErrTest()
     }
     pSHS = new (pvHistoStorage) CSegmentedHistogram( rgLimitedSegments, _countof( rgLimitedSegments ), pvHistoStorage, cbHisto );
 
+    //  Testing we can do in-place "alloc-less" creation / initialization
+    //
 
     if ( !inplace.FRunInPlaceTest() )
     {
@@ -194,6 +213,8 @@ ERR SegmentedHistogramTest::ErrTest()
         STATAssertSz( fFalse, "HaltTest" );     \
     }
 
+    //  Test catch all case
+    //
 
     SAMPLE rgThreeCoveringSegments [] = { 0, 1, qwMax };
 

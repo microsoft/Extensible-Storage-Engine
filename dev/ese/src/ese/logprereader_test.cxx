@@ -5,13 +5,20 @@
 
 #ifndef ENABLE_JET_UNIT_TEST
 #error This file should only be compiled with the unit tests!
-#endif
+#endif // ENABLE_JET_UNIT_TEST
 
 
+//  ================================================================
+//  LogPrereader test class and tests
+//  ================================================================
 
+//  Implementation of LogPrereaderTest.
 
 ERR LogPrereaderTest::ErrLGPIPrereadPage( _In_range_( dbidUserLeast, dbidMax - 1 ) const DBID dbid, const PGNO pgno, const BFPreReadFlags bfprf )
 {
+    //  For the test class, we will pretend that every page that is a multiple of 3 (dbid 0) or 5 (dbid 1) causes
+    //  the IO to split, unless we pass bfprfCombinableOnly in.
+    //  Also, page 13 will return JET_errOutOfMemory and page 17 will return errBFPageCached.
 
     Assert( FLGPDBEnabled( dbid ) );
 
@@ -33,9 +40,11 @@ ERR LogPrereaderTest::ErrLGPIPrereadPage( _In_range_( dbidUserLeast, dbidMax - 1
     }
     else
     {
+        //  Binary search won't work here because we're nulling pages out.
         const size_t ipg = IpgLGPIGetUnsorted( dbid, pgno );
         Assert( ipg != CArray<PGNO>::iEntryNotFound );
 
+        //  Null it out so that the test can verify that it was successfully preread.
         const ERR errSetEntry = ErrLGPISetEntry( dbid, ipg, pgnoNull );
         Assert( errSetEntry == JET_errSuccess );
 
@@ -81,6 +90,7 @@ BOOL LogPrereaderTest::FLGPTestPgnosPresent( const DBID dbid, const PGNO* const 
 }
 
 
+// test that the initial state is consistent
 JETUNITTEST( LogPrereader, InitialStateConsistent )
 {
     LogPrereaderTest logprereader;
@@ -90,6 +100,7 @@ JETUNITTEST( LogPrereader, InitialStateConsistent )
     CHECK( !logprereader.FLGPDBEnabled( 1 ) );
 }
 
+// test term without init
 JETUNITTEST( LogPrereader, TermNoInit )
 {
     LogPrereaderTest logprereader;
@@ -100,6 +111,7 @@ JETUNITTEST( LogPrereader, TermNoInit )
     CHECK( !logprereader.FLGPDBEnabled( 1 ) );
 }
 
+// test init/term
 JETUNITTEST( LogPrereader, InitTerm )
 {
     LogPrereaderTest logprereader;
@@ -115,6 +127,7 @@ JETUNITTEST( LogPrereader, InitTerm )
     CHECK( !logprereader.FLGPDBEnabled( 1 ) );
 }
 
+// test disable without enable
 JETUNITTEST( LogPrereader, DisableNoEnable )
 {
     LogPrereaderTest logprereader;
@@ -132,6 +145,7 @@ JETUNITTEST( LogPrereader, DisableNoEnable )
     CHECK( !logprereader.FLGPDBEnabled( 1 ) );
 }
 
+// test enable without disable
 JETUNITTEST( LogPrereader, EnableNoDisable )
 {
     LogPrereaderTest logprereader;
@@ -149,6 +163,7 @@ JETUNITTEST( LogPrereader, EnableNoDisable )
     CHECK( !logprereader.FLGPDBEnabled( 1 ) );
 }
 
+// test enable/disable
 JETUNITTEST( LogPrereader, EnableDisable )
 {
     LogPrereaderTest logprereader;
@@ -171,6 +186,7 @@ JETUNITTEST( LogPrereader, EnableDisable )
     CHECK( !logprereader.FLGPDBEnabled( 1 ) );
 }
 
+// test oprations on disabled dbid
 JETUNITTEST( LogPrereader, OpsOnDisabledDb )
 {
     LogPrereaderTest logprereader;
@@ -216,6 +232,7 @@ JETUNITTEST( LogPrereader, OpsOnDisabledDb )
     CHECK( !logprereader.FLGPDBEnabled( 1 ) );
 }
 
+// test enabling twice
 JETUNITTEST( LogPrereader, EnablingTwice )
 {
     LogPrereaderTest logprereader;
@@ -240,6 +257,7 @@ JETUNITTEST( LogPrereader, EnablingTwice )
     logprereader.LGPTerm();
 }
 
+// test no pages
 JETUNITTEST( LogPrereader, NoPages )
 {
     LogPrereaderTest logprereader;
@@ -256,6 +274,7 @@ JETUNITTEST( LogPrereader, NoPages )
     logprereader.LGPTerm();
 }
 
+// test single-page success
 JETUNITTEST( LogPrereader, SinglePageSuccess )
 {
     LogPrereaderTest logprereader;
@@ -284,6 +303,7 @@ JETUNITTEST( LogPrereader, SinglePageSuccess )
     logprereader.LGPTerm();
 }
 
+// test single-page cached
 JETUNITTEST( LogPrereader, SinglePageCached )
 {
     LogPrereaderTest logprereader;
@@ -311,6 +331,7 @@ JETUNITTEST( LogPrereader, SinglePageCached )
     logprereader.LGPTerm();
 }
 
+// test single-page out-of-memory
 JETUNITTEST( LogPrereader, SinglePageOutOfMemory )
 {
     LogPrereaderTest logprereader;
@@ -338,6 +359,7 @@ JETUNITTEST( LogPrereader, SinglePageOutOfMemory )
     logprereader.LGPTerm();
 }
 
+// test single-page success almost tilt
 JETUNITTEST( LogPrereader, SinglePageSuccessAlmostTilt )
 {
     LogPrereaderTest logprereader;
@@ -366,6 +388,7 @@ JETUNITTEST( LogPrereader, SinglePageSuccessAlmostTilt )
     logprereader.LGPTerm();
 }
 
+// test multi-page tilt at both ends, starting at the middle, with pgnoNull pages
 JETUNITTEST( LogPrereader, MultiPageTiltBothStartMiddleWithPgnoNull )
 {
     LogPrereaderTest logprereader;
@@ -394,6 +417,7 @@ JETUNITTEST( LogPrereader, MultiPageTiltBothStartMiddleWithPgnoNull )
     logprereader.LGPTerm();
 }
 
+// test multi-page tilt at both ends, starting at the left
 JETUNITTEST( LogPrereader, MultiPageTiltBothStartLeft )
 {
     LogPrereaderTest logprereader;
@@ -423,6 +447,7 @@ JETUNITTEST( LogPrereader, MultiPageTiltBothStartLeft )
 }
 
 
+// test multi-page tilt at both ends, starting at the right
 JETUNITTEST( LogPrereader, MultiPageTiltBothStartRight )
 {
     LogPrereaderTest logprereader;
@@ -451,6 +476,7 @@ JETUNITTEST( LogPrereader, MultiPageTiltBothStartRight )
     logprereader.LGPTerm();
 }
 
+// test multi-page tilt at both ends, starting at the middle of an almost-tilted page
 JETUNITTEST( LogPrereader, MultiPageTiltBothStartAlmostTilt )
 {
     LogPrereaderTest logprereader;
@@ -497,6 +523,7 @@ JETUNITTEST( LogPrereader, MultiPageTiltBothStartAlmostTilt )
     logprereader.LGPTerm();
 }
 
+// test multi-page errBFPageCached at the right, and JET_errOutOfMemory at the left.
 JETUNITTEST( LogPrereader, MultiPageCachedAndOutOfMemory )
 {
     LogPrereaderTest logprereader;
@@ -510,6 +537,7 @@ JETUNITTEST( LogPrereader, MultiPageCachedAndOutOfMemory )
 
     logprereader.LGPInit( 1, 1 );
 
+    //  Starting in the middle.
     logprereader.LGPDBEnable( 0 );
     CHECK( logprereader.CpgLGPGetArrayPgnosSize( 0 ) == 0 );
 
@@ -524,6 +552,7 @@ JETUNITTEST( LogPrereader, MultiPageCachedAndOutOfMemory )
     CHECK( logprereader.CpgLGPGetArrayPgnosSize( 0 ) == cpg );
     CHECK( logprereader.FLGPTestPgnosPresent( 0, rgpgnoIssued, cpg ) );
 
+    //  Starting at the left.
     logprereader.LGPDBEnable( 0 );
     CHECK( logprereader.CpgLGPGetArrayPgnosSize( 0 ) == 0 );
 
@@ -539,6 +568,7 @@ JETUNITTEST( LogPrereader, MultiPageCachedAndOutOfMemory )
     CHECK( logprereader.CpgLGPGetArrayPgnosSize( 0 ) == cpg );
     CHECK( logprereader.FLGPTestPgnosPresent( 0, rgpgnoIssued2, cpg ) );
 
+    //  Starting at the right.
     logprereader.LGPDBEnable( 0 );
     CHECK( logprereader.CpgLGPGetArrayPgnosSize( 0 ) == 0 );
 
@@ -558,6 +588,7 @@ JETUNITTEST( LogPrereader, MultiPageCachedAndOutOfMemory )
     logprereader.LGPTerm();
 }
 
+// test multi-page errBFPageCached first
 JETUNITTEST( LogPrereader, MultiPageCachedFirst )
 {
     LogPrereaderTest logprereader;
@@ -585,6 +616,7 @@ JETUNITTEST( LogPrereader, MultiPageCachedFirst )
     logprereader.LGPTerm();
 }
 
+// test multi-page JET_errOutOfMemory first.
 JETUNITTEST( LogPrereader, MultiPageOutOfMemoryFirst )
 {
     LogPrereaderTest logprereader;
@@ -612,6 +644,7 @@ JETUNITTEST( LogPrereader, MultiPageOutOfMemoryFirst )
     logprereader.LGPTerm();
 }
 
+// test multi-page success.
 JETUNITTEST( LogPrereader, MultiPageSuccess )
 {
     LogPrereaderTest logprereader;
@@ -625,6 +658,7 @@ JETUNITTEST( LogPrereader, MultiPageSuccess )
 
     logprereader.LGPInit( 2, 1 );
 
+    //  starting at the middle-left.
     logprereader.LGPDBEnable( 1 );
     CHECK( logprereader.CpgLGPGetArrayPgnosSize( 1 ) == 0 );
 
@@ -639,6 +673,7 @@ JETUNITTEST( LogPrereader, MultiPageSuccess )
     CHECK( logprereader.FLGPTestPgnosPresent( 1, rgpgnoIssued, cpg ) );
     CHECK( logprereader.CpgLGPGetArrayPgnosSize( 1 ) == cpg );
 
+    //  starting at the middle-right.
     logprereader.LGPDBEnable( 1 );
     CHECK( logprereader.CpgLGPGetArrayPgnosSize( 1 ) == 0 );
 
@@ -653,6 +688,7 @@ JETUNITTEST( LogPrereader, MultiPageSuccess )
     CHECK( logprereader.FLGPTestPgnosPresent( 1, rgpgnoIssued, cpg ) );
     CHECK( logprereader.CpgLGPGetArrayPgnosSize( 1 ) == cpg );
 
+    //  starting at the left.
     logprereader.LGPDBEnable( 1 );
     CHECK( logprereader.CpgLGPGetArrayPgnosSize( 1 ) == 0 );
 
@@ -667,6 +703,7 @@ JETUNITTEST( LogPrereader, MultiPageSuccess )
     CHECK( logprereader.FLGPTestPgnosPresent( 1, rgpgnoIssued, cpg ) );
     CHECK( logprereader.CpgLGPGetArrayPgnosSize( 1 ) == cpg );
 
+    //  starting at the right.
     logprereader.LGPDBEnable( 1 );
     CHECK( logprereader.CpgLGPGetArrayPgnosSize( 1 ) == 0 );
 

@@ -6,6 +6,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 
+//  Simple compile-time test
 
 C_ASSERT( (BYTE)fFalse != (BYTE)fTrue );
 
@@ -40,6 +41,8 @@ BOOL FTestMemForUlong( void * pvSearchTarget, const ULONG cbSearchTarget, const 
     return fFalse;
 }
 
+//  returns true if all chars are the target ch
+//      Note: stolen from cpage_test.cxx
 
 BOOL memchk( _In_ const void * pv, _In_ char ch, _In_ const ULONG cb )
 {
@@ -56,12 +59,14 @@ BOOL memchk( _In_ const void * pv, _In_ char ch, _In_ const ULONG cb )
 }
 
 CUnitTest( CcBasicStructImplicitZeroInit, btcfForceStackTrash, "Validates that a certain coding practice I've seen generates a correctly initialized structure." );
-#pragma warning(disable: 4700)
+#pragma warning(disable: 4700)  //  Never, ever, ever, EVER disable this error.  This error catches usage of uninit variable and is always indicates bad code case.  A bad code case we happen to be testing here.
 ERR CcBasicStructImplicitZeroInit::ErrTest()
 {
     ERR err = JET_errSuccess;
 
+    //  burn some space to ensure the below variables are in unused stack space
     ULONG rgulStuff[16];
+    //  NOTE:  the use of volatile prevents the compiler from enregistering these structs
     ( (volatile ULONG*)rgulStuff )[0] += 0;
 
     typedef struct _AStructForImplicitInit {
@@ -76,6 +81,7 @@ ERR CcBasicStructImplicitZeroInit::ErrTest()
     AStructForImplicitInit  sMostInit = { 1, 2, 0 };
     AStructForImplicitInit  sZero = { 0 };
 
+    //  NOTE:  the use of volatile prevents the compiler from enregistering these structs
     ( (volatile ULONG*)&sUninit.ulOne )[0] += 0;
     ( (volatile ULONG*)&sHalfInit.ulOne )[0] += 0;
     ( (volatile ULONG*)&sMostInit.ulOne )[0] += 0;
@@ -104,15 +110,17 @@ ERR CcBasicStructImplicitZeroInit::ErrTest()
 HandleError:
     return JET_errSuccess;
 }
-#pragma warning(default: 4700)
+#pragma warning(default: 4700)  // and definitely restore the default!
 
 CUnitTest( CcBasicArrayImplicitZeroInit, btcfForceStackTrash, "Validates that a certain coding practice I've seen generates a correctly initialized array." );
-#pragma warning(disable: 4700)
+#pragma warning(disable: 4700)  //  Never, ever, ever, EVER disable this error.  This error catches usage of uninit variable and is always indicates bad code case.  A bad code case we happen to be testing here.
 ERR CcBasicArrayImplicitZeroInit::ErrTest()
 {
     ERR err = JET_errSuccess;
 
+    //  burn some space to ensure the below variables are in unused stack space
     ULONG rgulStuff[16];
+    //  NOTE:  the use of volatile prevents the compiler from enregistering these structs
     ( (volatile ULONG*)rgulStuff )[0] += 0;
 
     ULONG   ul;
@@ -123,7 +131,7 @@ ERR CcBasicArrayImplicitZeroInit::ErrTest()
 
     ULONG   rgulImplZeros[10] = { 0x1, 0x2, };
 
-    ULONG   rgulImplZerosV2[10] = { 0x1, 0x2, 0x0, };
+    ULONG   rgulImplZerosV2[10] = { 0x1, 0x2, 0x0, };       // some previous coders though the last thing was repeated ... fall back to this if the above doesn't hold everywhere.
     ULONG   rgulImplOnes[10] = { 0x1, 0x2, 0x7F7F7F7F, };
 
     TestCheck( ul != 0 );
@@ -131,9 +139,9 @@ ERR CcBasicArrayImplicitZeroInit::ErrTest()
     TestCheck( sizeof(rgul) == 120 );
     TestCheck( !FTestMemForUlong( rgul, sizeof(rgul), 0 ) );
 #ifdef _WIN64
-    TestCheck( FTestMemForUlong( rgul, sizeof(rgul), 0xfe000012 ) );
+    TestCheck( FTestMemForUlong( rgul, sizeof(rgul), 0xfe000012 ) );    //  one of the known patterns used in BstfTrashTestStackWithPattern()
 #else
-    TestCheck( FTestMemForUlong( rgul, sizeof(rgul), 0xfe000034 ) );
+    TestCheck( FTestMemForUlong( rgul, sizeof(rgul), 0xfe000034 ) );    //  one of the known patterns used in BstfTrashTestStackWithPattern()
 #endif
 
     TestCheck( !FTestMemForByte( rgulOneTwoThree, sizeof(rgulOneTwoThree), 0xFF ) );
@@ -143,21 +151,23 @@ ERR CcBasicArrayImplicitZeroInit::ErrTest()
 
     TestCheck( FTestMemForUlong( rgulImplZeros, sizeof(rgulImplZeros), 0x1 ) );
     TestCheck( FTestMemForUlong( rgulImplZeros, sizeof(rgulImplZeros), 0x2 ) );
-    TestCheck( FTestMemForUlong( rgulImplZeros+2, sizeof(rgulImplZeros)-2*sizeof(rgulImplZeros[0]), 0x0 ) );
-    TestCheck( memchk( rgulImplZeros+2, 0x0, sizeof(rgulImplZeros)-2*sizeof(rgulImplZeros[0]) ) );
+    TestCheck( FTestMemForUlong( rgulImplZeros+2, sizeof(rgulImplZeros)-2*sizeof(rgulImplZeros[0]), 0x0 ) );        //  a zero
+    TestCheck( memchk( rgulImplZeros+2, 0x0, sizeof(rgulImplZeros)-2*sizeof(rgulImplZeros[0]) ) );                  //  all zeros
 
     TestCheck( FTestMemForUlong( rgulImplZerosV2, sizeof(rgulImplZerosV2), 0x1 ) );
     TestCheck( FTestMemForUlong( rgulImplZerosV2, sizeof(rgulImplZerosV2), 0x2 ) );
-    TestCheck( FTestMemForUlong( rgulImplZerosV2+2, sizeof(rgulImplZerosV2)-2*sizeof(rgulImplZerosV2[0]), 0x0 ) );
-    TestCheck( memchk( rgulImplZeros+2, 0x0, sizeof(rgulImplZerosV2)-2*sizeof(rgulImplZerosV2[0]) ) );
+    TestCheck( FTestMemForUlong( rgulImplZerosV2+2, sizeof(rgulImplZerosV2)-2*sizeof(rgulImplZerosV2[0]), 0x0 ) );  //  a zero
+    TestCheck( memchk( rgulImplZeros+2, 0x0, sizeof(rgulImplZerosV2)-2*sizeof(rgulImplZerosV2[0]) ) );              //  all zeros
     TestCheck( FTestMemForUlong( rgulImplOnes, sizeof(rgulImplOnes), 0x1 ) );
     TestCheck( FTestMemForUlong( rgulImplOnes, sizeof(rgulImplOnes), 0x2 ) );
-    TestCheck( FTestMemForUlong( rgulImplOnes+2, sizeof(rgulImplOnes)-2*sizeof(rgulImplOnes[0]), 0x7F7F7F7F ) );
+    TestCheck( FTestMemForUlong( rgulImplOnes+2, sizeof(rgulImplOnes)-2*sizeof(rgulImplOnes[0]), 0x7F7F7F7F ) );    //  a zero
+    //  Does NOT work as that coder expected.
+    //TestCheck( memchk( rgulImplOnes+2, 0x7F, sizeof(rgulImplOnes)-2*sizeof(rgulImplOnes[0]) ) );                  //  all ones
 
 HandleError:
     return err; 
 }
-#pragma warning(default: 4700)
+#pragma warning(default: 4700)  // and definitely restore the default!
 
 
 CUnitTest( CcFlagBitFieldSetting, 0x0, "Tests that single-bit bit fields will operate as normal BOOL-like variables." );
@@ -167,6 +177,9 @@ ERR CcFlagBitFieldSetting::ErrTest()
 
     wprintf( L"\tTesting FLAG32 behaves as expected ...\n" );
 
+    // NOTE: Interesting discovery ... if FLAG32 is typedef'd as a unsigned char, this 
+    // structure balloons to 12 bytes!  So bit-fields have to match the size of their
+    // previous type.
     typedef struct TestBitFieldStruct_
     {
         INT     iFullField1:14;
@@ -183,7 +196,7 @@ ERR CcFlagBitFieldSetting::ErrTest()
     TestCheck( 4 == sizeof( test2 ) );
 
     test.iFullField1 = 0x44;
-    test.fTester = fFalse;
+    test.fTester = fFalse;	// opposite order of values of test2.
     test.fTesty = fTrue;
     test.iFullField2 = 0x45;
 
@@ -197,6 +210,8 @@ ERR CcFlagBitFieldSetting::ErrTest()
     TestCheck( test.fTesty == test2.fTesty );
     TestCheck( test.fTester == test2.fTester );
 
+    // This compiles.  It should not.  Retry on new compiler, where we think it throws such errors.
+    //test.fTesty = 0x2;
 
 HandleError:
     return err; 
@@ -210,6 +225,9 @@ ERR CcFlagBitFieldSettingWithUnion::ErrTest()
 
     wprintf( L"\tTesting FLAG32 behaves as expected ...\n" );
 
+    // NOTE: Interesting discovery ... if FLAG32 is typedef'd as a unsigned char, this 
+    // structure balloons to 12 bytes!  So bit-fields have to match the size of their
+    // previous type.
     typedef struct TestBitFieldStruct_
     {
         union
@@ -239,6 +257,7 @@ ERR CcFlagBitFieldSettingWithUnion::ErrTest()
     TestCheck( test.fTesty );
     TestCheck( test.iFullField1 == 0x46 );
     TestCheck( test.iFullField2 == 0x47 );
+    // Only valid on little-endian systems
     TestCheck( test.flags == 0x00478046 );
 
     test2 = test;
@@ -257,6 +276,9 @@ ERR CcSupportsAcceptable32BitLong::ErrTest()
 {
     ERR err = JET_errSuccess;
 
+// Manual compile test that warning:default yields an error again ...
+//  ULONG   ul;
+//  TestCheck( ul != 0x0 );
 
     wprintf( L"\tTesting LONG behaves as expected ...\n" );
 
@@ -268,7 +290,7 @@ ERR CcSupportsAcceptable32BitLong::ErrTest()
     TestCheck( (QWORD)0x1FFFE == ( lUshortMax + lUshortMax ) );
 
     TestCheck( -2 == ( lLongMax + lLongMax ) );
-    TestCheck( 0xFFFFFFFE == ( lLongMax + lLongMax ) );
+    TestCheck( 0xFFFFFFFE == ( lLongMax + lLongMax ) ); //  same
 
     TestCheck( -2 == ( lUlongMax + lUlongMax ) );
     TestCheck( 0xFFFFFFFE == ( lUlongMax + lUlongMax ) );
@@ -352,7 +374,8 @@ ERR CcBasicTypesAreRightSizes::ErrTest()
     TestCheck( sizeof(DWORD) == 4 );
     TestCheck( sizeof(QWORD) == 8 );
 
-    if ( sizeof(void*) == 8 )
+    //  This is where it gets tricky.
+    if ( sizeof(void*) == 8 )   //  should work on most platforms
     {
         const QWORD cbPointer = 8;
         printf( "\t\tDetected 64-bit platform, testing expected variant sized type against %d bytes.\n", cbPointer );

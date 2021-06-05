@@ -45,7 +45,7 @@ JETUNITTEST( IoRunQop, TestWriteRunBasicProperties )
     CHECK( !iorun.FEmpty() );
     OnDebug( CHECK( iorun.Cioreq() == 1 ) );
     OnDebug( CHECK( iorun.FRunMember( &ioreq1 ) ) );
-    CHECK( iorun.FWrite() == fTrue );
+    CHECK( iorun.FWrite() == fTrue ); // FWrite() returns 2 if empty (and asserts).
 #ifndef IoRunTQopSuite
     CHECK( iorun.P_OSF() == &_osfB );
     CHECK( iorun.IbOffset() == 65536 );
@@ -108,7 +108,7 @@ JETUNITTEST( IoRunQop, TestWriteCombiningInOrder )
     CHECK( iorun.IbRunMax() == 4096 + 3 * 2048 + 2048 );
     CHECK( iorun.FMultiBlock() );
 #endif
-    CHECK( iorun.CbRun() == 8192  );
+    CHECK( iorun.CbRun() == 8192 /* 4 x 2 KB IOs */ );
     OnDebug( CHECK( iorun.Cioreq() == 4 ) );
 }
 
@@ -144,16 +144,20 @@ JETUNITTEST( IoRunQop, TestReadCantGapFillOverlappingBlockOffsets )
         CHECK( iorun.CbRun() == 4096 );
         OnDebug( const ULONG cioreqBefore = iorun.Cioreq() );
 
-        InitIoreq( &ioreq3, _osfA, fReadIo, 7168, 2048 );   CHECK( !iorun.FAddToRun( &ioreq3 ) );
-        InitIoreq( &ioreq3, _osfA, fReadIo, 8192, 1024 );   CHECK( !iorun.FAddToRun( &ioreq3 ) );
-        InitIoreq( &ioreq3, _osfA, fReadIo, 9216, 1024 );   CHECK( !iorun.FAddToRun( &ioreq3 ) );
-        InitIoreq( &ioreq3, _osfA, fReadIo, 10240, 1024 );  CHECK( !iorun.FAddToRun( &ioreq3 ) );
-        InitIoreq( &ioreq3, _osfA, fReadIo, 10240, 2048 );  CHECK( !iorun.FAddToRun( &ioreq3 ) );
-        InitIoreq( &ioreq3, _osfA, fReadIo, 10240, 4096 );  CHECK( !iorun.FAddToRun( &ioreq3 ) );
-        InitIoreq( &ioreq3, _osfA, fReadIo, 7168, 13312 );  CHECK( !iorun.FAddToRun( &ioreq3 ) );
+        //  uncombinable IOREQ(s)
+        //                                                                             First Test IO      |--------------|
+        //                                                                            Second Test IO      |----|    |----|
+        InitIoreq( &ioreq3, _osfA, fReadIo, 7168, 2048 );   CHECK( !iorun.FAddToRun( &ioreq3 ) );  // |------|
+        InitIoreq( &ioreq3, _osfA, fReadIo, 8192, 1024 );   CHECK( !iorun.FAddToRun( &ioreq3 ) );  //     |--|
+        InitIoreq( &ioreq3, _osfA, fReadIo, 9216, 1024 );   CHECK( !iorun.FAddToRun( &ioreq3 ) );  //         |--|
+        InitIoreq( &ioreq3, _osfA, fReadIo, 10240, 1024 );  CHECK( !iorun.FAddToRun( &ioreq3 ) );  //             |--|
+        InitIoreq( &ioreq3, _osfA, fReadIo, 10240, 2048 );  CHECK( !iorun.FAddToRun( &ioreq3 ) );  //             |------|
+        InitIoreq( &ioreq3, _osfA, fReadIo, 10240, 4096 );  CHECK( !iorun.FAddToRun( &ioreq3 ) );  //             |--------------|
+        InitIoreq( &ioreq3, _osfA, fReadIo, 7168, 13312 );  CHECK( !iorun.FAddToRun( &ioreq3 ) );  // |----------------------| (totally subsuming)
 
         OnDebug( CHECK( !iorun.FRunMember( &ioreq3 ) ) );
 
+        //  Nothing should've changed from above ...
         CHECK( !iorun.FEmpty() );
         OnDebug( CHECK( iorun.Cioreq() == cioreqBefore ) );
         CHECK( iorun.FWrite() == fFalse );
@@ -198,21 +202,25 @@ JETUNITTEST( IoRunQop, TestWriteCantOverlappingBlockOffsets )
         OnDebug( const ULONG cioreqBefore = iorun.Cioreq() );
 
         FNegTestSet( fInvalidUsage );
-        InitIoreq( &ioreq3, _osfA, fReadIo, 7168, 2048 );    CHECK( !iorun.FAddToRun( &ioreq3 ) );
-        InitIoreq( &ioreq3, _osfA, fReadIo, 8192, 1024 );    CHECK( !iorun.FAddToRun( &ioreq3 ) );
-        InitIoreq( &ioreq3, _osfA, fReadIo, 8704, 1024 );    CHECK( !iorun.FAddToRun( &ioreq3 ) );
-        InitIoreq( &ioreq3, _osfA, fReadIo, 9216, 1024 );    CHECK( !iorun.FAddToRun( &ioreq3 ) );
-        InitIoreq( &ioreq3, _osfA, fReadIo, 10240, 1024 );    CHECK( !iorun.FAddToRun( &ioreq3 ) );
-        InitIoreq( &ioreq3, _osfA, fReadIo, 10240, 2048 );    CHECK( !iorun.FAddToRun( &ioreq3 ) );
-        InitIoreq( &ioreq3, _osfA, fReadIo, 10752, 1024 );    CHECK( !iorun.FAddToRun( &ioreq3 ) );
-        InitIoreq( &ioreq3, _osfA, fReadIo, 10752, 2048 );    CHECK( !iorun.FAddToRun( &ioreq3 ) );
-        InitIoreq( &ioreq3, _osfA, fReadIo, 10240, 4096 );    CHECK( !iorun.FAddToRun( &ioreq3 ) );
-        InitIoreq( &ioreq3, _osfA, fReadIo, 7168, 13312 );    CHECK( !iorun.FAddToRun( &ioreq3 ) );
+        //  uncombinable IOREQ(s)
+        //                                                                               First Test IO      |--------------|
+        //                                                                              Second Test IO      |------||------|
+        InitIoreq( &ioreq3, _osfA, fReadIo, 7168, 2048 );    CHECK( !iorun.FAddToRun( &ioreq3 ) );  // |------|
+        InitIoreq( &ioreq3, _osfA, fReadIo, 8192, 1024 );    CHECK( !iorun.FAddToRun( &ioreq3 ) );  //      |--|
+        InitIoreq( &ioreq3, _osfA, fReadIo, 8704, 1024 );    CHECK( !iorun.FAddToRun( &ioreq3 ) );  //        |--|
+        InitIoreq( &ioreq3, _osfA, fReadIo, 9216, 1024 );    CHECK( !iorun.FAddToRun( &ioreq3 ) );  //          |--|
+        InitIoreq( &ioreq3, _osfA, fReadIo, 10240, 1024 );    CHECK( !iorun.FAddToRun( &ioreq3 ) );  //             |--|
+        InitIoreq( &ioreq3, _osfA, fReadIo, 10240, 2048 );    CHECK( !iorun.FAddToRun( &ioreq3 ) );  //             |------|
+        InitIoreq( &ioreq3, _osfA, fReadIo, 10752, 1024 );    CHECK( !iorun.FAddToRun( &ioreq3 ) );  //               |--|
+        InitIoreq( &ioreq3, _osfA, fReadIo, 10752, 2048 );    CHECK( !iorun.FAddToRun( &ioreq3 ) );  //               |------|
+        InitIoreq( &ioreq3, _osfA, fReadIo, 10240, 4096 );    CHECK( !iorun.FAddToRun( &ioreq3 ) );  //             |--------------|
+        InitIoreq( &ioreq3, _osfA, fReadIo, 7168, 13312 );    CHECK( !iorun.FAddToRun( &ioreq3 ) );  // |----------------------| (totally subsuming)
 
         FNegTestUnset( fInvalidUsage );
 
         OnDebug( CHECK( !iorun.FRunMember( &ioreq3 ) ) );
 
+        //  Nothing should've changed from above ...
         CHECK( !iorun.FEmpty() );
         OnDebug( CHECK( iorun.Cioreq() == cioreqBefore ) );
         CHECK( iorun.FWrite() == fFalse );
@@ -239,16 +247,17 @@ JETUNITTEST( IoRunQop, TestReadAndWriteCombiningRejectDifferentFiles )
     InitIoreq( &ioreq4, _osfB, fWriteIo, 8192 + 1024, 1024 );
 
     CHECK( iorun.FAddToRun( &ioreq1 ) );
-    Postls()->fIOThread = fTrue;
+    Postls()->fIOThread = fTrue; // only IO thread is supposed to do this, asserts otherwise
     CHECK( !iorun.FAddToRun( &ioreq2 ) );
     Postls()->fIOThread = fFalse;
     CHECK( iorun.CbRun() == 1024 );
 
+    //  empties the iorun
     (void)iorun.PioreqGetRun();
     CHECK( iorun.FEmpty() );
 
     CHECK( iorun.FAddToRun( &ioreq3 ) );
-    Postls()->fIOThread = fTrue;
+    Postls()->fIOThread = fTrue; // only IO thread is supposed to do this, asserts otherwise
     CHECK( !iorun.FAddToRun( &ioreq4 ) );
     Postls()->fIOThread = fFalse;
     CHECK( iorun.CbRun() == 1024 );
@@ -267,6 +276,7 @@ JETUNITTEST( IoRunQop, TestReadCombiningHonorsMaxIoLimits )
     InitIoreq( &ioreq2, _osfA, fReadIo, 8192 + 1 * 1024, 62 * 1024 );
     InitIoreq( &ioreq3, _osfA, fReadIo, 8192 + 63 * 1024, 1024 );
 
+    //  uncombinable IOREQ(s) - note IO limits set at top of file in INIT_IOREQ_JUNK
     InitIoreq( &ioreq4, _osfA, fReadIo, 8192 + 64 * 1024, 1024 );
 
     CHECK( iorun.FAddToRun( &ioreq1 ) );
@@ -315,17 +325,20 @@ JETUNITTEST( IoRunQop, TestReadCombiningReadGappingStillHonorsMaxIoLimits )
     IORunT iorun;
 
     InitIoreq( &ioreq1, _osfA, fReadIo, 8192, 1024 );
+    //InitIoreq( &ioreq2, _osfA, fReadIo, 8192 + 1 * 1024, 62 * 1024 );
     InitIoreq( &ioreq3, _osfA, fReadIo, 8192 + 63 * 1024, 1024 );
 
+    //  uncombinable IOREQ(s)
     InitIoreq( &ioreq4, _osfA, fReadIo, 8192 + 64 * 1024, 1024 );
 
     CHECK( iorun.FAddToRun( &ioreq1 ) );
+    //CHECK( iorun.FAddToRun( &ioreq2 ) );
     CHECK( iorun.FAddToRun( &ioreq3 ) );
     CHECK( iorun.CbRun() == 64 * 1024 );
 
     CHECK( !iorun.FAddToRun( &ioreq4 ) );
     OnDebug( CHECK( !iorun.FRunMember( &ioreq4 ) ) );
-    OnDebug( CHECK( iorun.FRunMember( &ioreq1 ) ) );
+    OnDebug( CHECK( iorun.FRunMember( &ioreq1 ) ) );  // should still be in run unaffected
     OnDebug( CHECK( iorun.FRunMember( &ioreq3 ) ) );
 
     OnDebug( CHECK( iorun.Cioreq() == 2 ) );
@@ -350,7 +363,7 @@ JETUNITTEST( IoRunQop, TestReadCombiningReadGappingAllowsReadFillingNonContiguou
     CHECK( iorun.FAddToRun( &ioreq3 ) );
 
     OnDebug( CHECK( iorun.FRunMember( &ioreq1 ) ) );
-    OnDebug( CHECK( iorun.FRunMember( &ioreq2 ) ) );
+    OnDebug( CHECK( iorun.FRunMember( &ioreq2 ) ) );  // should still be in run unaffected
     OnDebug( CHECK( iorun.FRunMember( &ioreq3 ) ) );
     OnDebug( CHECK( iorun.Cioreq() == 3 ) );
     CHECK( iorun.CbRun() == 8 * 1024 );
@@ -365,6 +378,7 @@ JETUNITTEST( IoRunQop, TestReadCombiningReadGappingAllowsReadFillingContiguousFi
     INIT_IOREQ_JUNK;
     IORunT iorun;
 
+    //  Test contiguous filling (i.e. a perfect fit gap filling)
     InitIoreq( &ioreq1, _osfA, fReadIo, 8192, 1024 );
     InitIoreq( &ioreq2, _osfA, fReadIo, 8192 + 2 * 1024, 1024 );
     InitIoreq( &ioreq3, _osfA, fReadIo, 8192 + 1 * 1024, 1024 );
@@ -376,7 +390,7 @@ JETUNITTEST( IoRunQop, TestReadCombiningReadGappingAllowsReadFillingContiguousFi
     OnDebug( CHECK( iorun.Cioreq() == 3 ) );
     CHECK( iorun.CbRun() == 3 * 1024 );
 
-    (void)iorun.PioreqGetRun();
+    (void)iorun.PioreqGetRun(); // empties the iorun
     Assert( iorun.FEmpty() );
 }
 
@@ -389,6 +403,7 @@ JETUNITTEST( IoRunQop, TestReadCombiningReadGappingAllowsReadFillingWithUnevenBl
     INIT_IOREQ_JUNK;
     IORunT iorun;
 
+    //  Test contiguous filling of un-even sizes just for giggles
     InitIoreq( &ioreq1, _osfA, fReadIo, 8192, 1024 );
     InitIoreq( &ioreq2, _osfA, fReadIo, 8192 + 3 * 1024, 1024 + 512 );
     InitIoreq( &ioreq3, _osfA, fReadIo, 8192 + 1 * 1024, 2 * 1024 );
@@ -410,10 +425,12 @@ JETUNITTEST( IoRunQop, TestReadCombiningReadGappingReadFillingCantOverlap )
     INIT_IOREQ_JUNK;
     IORunT iorun;
 
+    //  Test contiguous filling (i.e. a perfect fit gap filling)
     InitIoreq( &ioreq1, _osfA, fReadIo, 8192, 1024 );
     InitIoreq( &ioreq2, _osfA, fReadIo, 8192 + 2 * 1024, 1024 );
 
-    InitIoreq( &ioreq3, _osfA, fReadIo, 8192 + 1 * 1024, 1024 + 512 );
+    //  illegal IOREQ(s)
+    InitIoreq( &ioreq3, _osfA, fReadIo, 8192 + 1 * 1024, 1024 + 512 ); // the 512 overlaps ioreq2,
 
     CHECK( iorun.FAddToRun( &ioreq1 ) );
     CHECK( iorun.FAddToRun( &ioreq2 ) );
@@ -435,9 +452,11 @@ JETUNITTEST( IoRunQop, TestReadCombiningTwoExactInterleavedIoruns )
     IORunT iorun;
     IORunT iorunAdd;
 
+    //  Prepare 1st run
     InitIoreq( &ioreq1, _osfA, fReadIo, 8192, 1024 );            CHECK( iorun.FAddToRun( &ioreq1 ) );
     InitIoreq( &ioreq2, _osfA, fReadIo, 8192 + 2 * 1024, 1024 ); CHECK( iorun.FAddToRun( &ioreq2 ) );
 
+    //  2nd Run ...
     InitIoreq( &ioreq3, _osfA, fReadIo, 8192 + 1 * 1024, 1024 ); CHECK( iorunAdd.FAddToRun( &ioreq3 ) );
     InitIoreq( &ioreq4, _osfA, fReadIo, 8192 + 3 * 1024, 1024 ); CHECK( iorunAdd.FAddToRun( &ioreq4 ) );
 
@@ -462,9 +481,11 @@ JETUNITTEST( IoRunQop, TestReadCombiningTwoExactInterleavedIorunsReversed )
     IORunT iorun;
     IORunT iorunAdd;
 
+    //  Prepare 1st run
     InitIoreq( &ioreq3, _osfA, fReadIo, 8192 + 1 * 1024, 1024 ); CHECK( iorunAdd.FAddToRun( &ioreq3 ) );
     InitIoreq( &ioreq4, _osfA, fReadIo, 8192 + 3 * 1024, 1024 ); CHECK( iorunAdd.FAddToRun( &ioreq4 ) );
 
+    //  2nd Run ...
     InitIoreq( &ioreq1, _osfA, fReadIo, 8192, 1024 );            CHECK( iorun.FAddToRun( &ioreq1 ) );
     InitIoreq( &ioreq2, _osfA, fReadIo, 8192 + 2 * 1024, 1024 ); CHECK( iorun.FAddToRun( &ioreq2 ) );
 
@@ -489,10 +510,12 @@ JETUNITTEST( IoRunQop, TestReadCombiningIntoLongerInterleavedIoruns )
     IORunT iorun;
     IORunT iorunAdd;
 
+    //  Prepare 1st run
     InitIoreq( &ioreq1, _osfA, fReadIo, 8192, 1024 );            CHECK( iorun.FAddToRun( &ioreq1 ) );
     InitIoreq( &ioreq2, _osfA, fReadIo, 8192 + 2 * 1024, 1024 ); CHECK( iorun.FAddToRun( &ioreq2 ) );
     InitIoreq( &ioreq3, _osfA, fReadIo, 8192 + 4 * 1024, 1024 ); CHECK( iorun.FAddToRun( &ioreq3 ) );
 
+    //  2nd Run ...
     InitIoreq( &ioreq4, _osfA, fReadIo, 8192 + 1 * 1024, 1024 ); CHECK( iorunAdd.FAddToRun( &ioreq4 ) );
     InitIoreq( &ioreq5, _osfA, fReadIo, 8192 + 3 * 1024, 1024 ); CHECK( iorunAdd.FAddToRun( &ioreq5 ) );
 
@@ -517,9 +540,11 @@ JETUNITTEST( IoRunQop, TestReadCombiningExpandingInterleavingIoruns )
     IORunT iorun;
     IORunT iorunAdd;
 
+    //  Prepare 1st run
     InitIoreq( &ioreq1, _osfA, fReadIo, 8192 + 1 * 1024, 1024 ); CHECK( iorun.FAddToRun( &ioreq1 ) );
     InitIoreq( &ioreq2, _osfA, fReadIo, 8192 + 3 * 1024, 1024 ); CHECK( iorun.FAddToRun( &ioreq2 ) );
 
+    //  2nd Run ...
     InitIoreq( &ioreq3, _osfA, fReadIo, 8192, 1024 );            CHECK( iorunAdd.FAddToRun( &ioreq3 ) );
     InitIoreq( &ioreq4, _osfA, fReadIo, 8192 + 2 * 1024, 1024 ); CHECK( iorunAdd.FAddToRun( &ioreq4 ) );
     InitIoreq( &ioreq5, _osfA, fReadIo, 8192 + 4 * 1024, 1024 ); CHECK( iorunAdd.FAddToRun( &ioreq5 ) );
@@ -545,9 +570,11 @@ JETUNITTEST( IoRunQop, TestReadCombiningTwoIorunsWithGaps )
     IORunT iorun;
     IORunT iorunAdd;
 
+    //  Prepare 1st run
     InitIoreq( &ioreq1, _osfA, fReadIo, 8192, 1024 );            CHECK( iorun.FAddToRun( &ioreq1 ) );
     InitIoreq( &ioreq2, _osfA, fReadIo, 8192 + 3 * 1024, 1024 ); CHECK( iorun.FAddToRun( &ioreq2 ) );
 
+    //  2nd Run ...
     InitIoreq( &ioreq3, _osfA, fReadIo, 8192 + 1 * 1024, 1024 ); CHECK( iorunAdd.FAddToRun( &ioreq3 ) );
     InitIoreq( &ioreq4, _osfA, fReadIo, 8192 + 4 * 1024, 1024 ); CHECK( iorunAdd.FAddToRun( &ioreq4 ) );
 
@@ -576,6 +603,7 @@ JETUNITTEST( IoRunQop, TestWriteCombiningHonorsMaxIoLimits )
     InitIoreq( &ioreq2, _osfA, fWriteIo, 8192 + 1 * 1024, 62 * 1024 );
     InitIoreq( &ioreq3, _osfA, fWriteIo, 8192 + 63 * 1024, 1024 );
 
+    //  uncombinable IOREQ(s)
     InitIoreq( &ioreq4, _osfA, fWriteIo, 8192 + 64 * 1024, 1024 );
 
     CHECK( iorun.FAddToRun( &ioreq1 ) );
@@ -591,6 +619,7 @@ JETUNITTEST( IoRunQop, TestWriteCombiningHonorsMaxIoLimits )
     CHECK( iorun.CbRun() == 64 * 1024 );
 }
 
+// note: but clean page overwrite / write gapping is done at higher (BF layer) in ESE.
 #ifndef IoRunTQopSuite
 JETUNITTEST( IoRunNative, TestWriteCombiningCantSupportGapping )
 #else
@@ -603,6 +632,7 @@ JETUNITTEST( IoRunQop, TestWriteCombiningCantSupportGapping )
 
     InitIoreq( &ioreq1, _osfA, fWriteIo, 8192, 1024 );
 
+    //  uncombinable IOREQ(s)
     InitIoreq( &ioreq2, _osfA, fWriteIo, 8192 + 3 * 1024, 1024 );
 
     CHECK( iorun.FAddToRun( &ioreq1 ) );

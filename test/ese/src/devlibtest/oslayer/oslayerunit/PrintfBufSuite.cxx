@@ -7,6 +7,7 @@ CUnitTest( CprintBufBasicAppend, 0, "Tests that OS Layer CPRINTFBUF can append d
 ERR CprintBufBasicAppend::ErrTest()
 {
     ERR err = JET_errSuccess;
+    // should not need preinit: COSLayerPreInit oslayer; // FOSPreinit()
 
     CPRINTINTRINBUF prtbuf;
 
@@ -75,7 +76,7 @@ ERR CprintBufCContainsCountsProperlyTest::ErrTest()
     prtbuf( szTest3 );
     prtbuf( szTest3 );
     prtbuf( szTest1 );
-    prtbuf( "LastTextLastTextLastText"  );
+    prtbuf( "LastTextLastTextLastText" /* = szTest3 concatonated w/ szTest3 TWICE - but will count as 1 hit */ );
     prtbuf( szTest2 );
 
     OSTestCheck( 2 == prtbuf.CContains( szTest1 ) );
@@ -103,8 +104,8 @@ ERR CprintBufCContainsDoubleCountsProperlyTest::ErrTest()
     prtbuf( szTest2 );
     prtbuf( szTest3 );
 
-    prtbuf( "LastTextLastText"  );
-    prtbuf( "ThisIsSomeTextAsWell." );
+    prtbuf( "LastTextLastText" /* = szTest3 concatonated w/ szTest3 */ ); // extra count of 3
+    prtbuf( "ThisIsSomeTextAsWell." );   // extra count of both 1 and 2 (sneaky and overlapping as well).
 
     OSTestCheck( 2 == prtbuf.CContains( szTest1 ) );
     OSTestCheck( 2 == prtbuf.CContains( szTest2 ) );
@@ -130,8 +131,10 @@ ERR CprintBufSecondaryPrintsProperly::ErrTest()
     prtbuf( szTest2 );
     prtbuf( szTest3 );
 
+    // What we want to do is check that it is printed out correctly, but I don't want to try to 
+    // process STDOUT, so we'll prove this commutatively.
 
-    prtbuf.Print( *CPRINTFSTDOUT::PcprintfInstance() );
+    prtbuf.Print( *CPRINTFSTDOUT::PcprintfInstance() ); // to stdout once just to make sure it doesn't crash.
 
     CPRINTINTRINBUF prtbuf2;
 
@@ -148,3 +151,6 @@ HandleError:
 }
 
 
+// SOMEONE more tests ...
+//   SOMEONE overflow 
+//   SOMEONE ???

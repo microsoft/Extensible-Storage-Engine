@@ -9,11 +9,18 @@ extern const CHAR   szMSOIdIndex[];
 extern const CHAR   szMSONameIndex[];
 extern const CHAR   szMSORootObjectsIndex[];
 
+//  Database maintenance needs to look up information on a b-tree using its objid. 
+//  Unfortunately the catalog doesn't have an index which can be used for that lookup.
+//  Dynamically upgrading the catalog is extremely hard so we add a secondary table
+//  which functions like a secondary index on the catalog.
 extern const CHAR   szMSObjids[];
 
 extern const CHAR   szMSLocales[];
 
 
+//  WARNING: Don't change the order of these constants.  There are implicit assumptions that
+//  for a particular table, the table record comes first, followed by the column records,
+//  index records, and the LV record.
 typedef USHORT  SYSOBJ;
 const SYSOBJ    sysobjNil               = 0;
 const SYSOBJ    sysobjTable             = 1;
@@ -21,23 +28,40 @@ const SYSOBJ    sysobjColumn            = 2;
 const SYSOBJ    sysobjIndex             = 3;
 const SYSOBJ    sysobjLongValue         = 4;
 const SYSOBJ    sysobjCallback          = 5;
+// const SYSOBJ sysobjSLVAvail          = 6;    // obsolete
+// const SYSOBJ sysobjSLVOwnerMap       = 7;    // obsolete
 
+//
+//  Adding a column to the catalog.
+//
+//  1. Define a iMSO_*
+//  2. Increment idataMSOMax
+//  3. Define a fidMSO_* constant at the end of fixed, var, or tagged FID sections
+//  4. Increment fidMSO_FixedLast or _VarLast or _TaggedLast depending
+//  5. Add the actual column definition to _cat.cxx:rgcdescMSO
+//  6. Then add code to set it in the catalog in one of the various places, such as:
+//          ErrCATAddTable, ErrCATAddTableColumn, ErrCATAddTableIndex, 
+//          ErrCATAddTableLV, ErrCATAddTableCallback, etc.
+//  7. And of rcourse add code to get it back out of the catalog from somewhere, e.g.:
+//          ErrCATIInitTDB, ErrCATIInitIDB, ErrCATIInitCallbacks, or ErrCATInitFCB
+//  ? anything else ?
 
+// index into rgcdescMSO
 const ULONG iMSO_ObjidTable             = 0;
 const ULONG iMSO_Type                   = 1;
 const ULONG iMSO_Id                     = 2;
 const ULONG iMSO_Name                   = 3;
-const ULONG iMSO_Coltyp                 = 4;
-const ULONG iMSO_PgnoFDP                = 4;
-const ULONG iMSO_SpaceUsage             = 5;
+const ULONG iMSO_Coltyp                 = 4;    // overloaded (sysobjColumn)
+const ULONG iMSO_PgnoFDP                = 4;    // overloaded (everything else ...)
+const ULONG iMSO_SpaceUsage             = 5;    // overloaded (sysobjColum = max field legnth, table = initial pages)
 const ULONG iMSO_Flags                  = 6;
-const ULONG iMSO_Localization           = 7;
-const ULONG iMSO_Pages                  = 7;
+const ULONG iMSO_Localization           = 7;    // overloaded (sysobjColumn and sysobjIndex)
+const ULONG iMSO_Pages                  = 7;    // overloaded (everything else ...)
 const ULONG iMSO_Stats                  = 8;
 const ULONG iMSO_RootFlag               = 9;
-const ULONG iMSO_TemplateTable          = 10;
-const ULONG iMSO_Callback               = 10;
-const ULONG iMSO_RecordOffset           = 11;
+const ULONG iMSO_TemplateTable          = 10;   // overloaded (sysobjTable)
+const ULONG iMSO_Callback               = 10;   // overloaded (sysobjColumn and sysobjCallback)
+const ULONG iMSO_RecordOffset           = 11;   // overloaded
 const ULONG iMSO_DefaultValue           = 12;
 const ULONG iMSO_KeyFldIDs              = 13;
 const ULONG iMSO_VarSegMac              = 14;
@@ -55,20 +79,21 @@ const ULONG iMSO_SpaceLVDeferredHints   = 25;
 const ULONG iMSO_LocaleName             = 26;
 const ULONG iMSO_LVChunkMax             = 27;
 
+//  max number of columns to set when inserting a record into the catalog
 const ULONG idataMSOMax                 = 28;
 
 
 const FID   fidMSO_ObjidTable           = fidFixedLeast;
 const FID   fidMSO_Type                 = fidFixedLeast+1;
 const FID   fidMSO_Id                   = fidFixedLeast+2;
-const FID   fidMSO_Coltyp               = fidFixedLeast+3;
-const FID   fidMSO_PgnoFDP              = fidFixedLeast+3;
+const FID   fidMSO_Coltyp               = fidFixedLeast+3;  // overloaded
+const FID   fidMSO_PgnoFDP              = fidFixedLeast+3;  // overloaded
 const FID   fidMSO_SpaceUsage           = fidFixedLeast+4;
 const FID   fidMSO_Flags                = fidFixedLeast+5;
-const FID   fidMSO_Pages                = fidFixedLeast+6;
-const FID   fidMSO_Localization         = fidFixedLeast+6;
+const FID   fidMSO_Pages                = fidFixedLeast+6;  // overloaded
+const FID   fidMSO_Localization         = fidFixedLeast+6;  // overloaded
 const FID   fidMSO_RootFlag             = fidFixedLeast+7;
-const FID   fidMSO_RecordOffset         = fidFixedLeast+8;
+const FID   fidMSO_RecordOffset         = fidFixedLeast+8;  // overloaded
 const FID   fidMSO_LCMapFlags           = fidFixedLeast+9;
 const FID   fidMSO_KeyMost              = fidFixedLeast+10;
 const FID   fidMSO_LVChunkMax           = fidFixedLeast+11;
@@ -77,8 +102,8 @@ const FID   fidMSO_FixedLast            = fidMSO_LVChunkMax;
 
 const FID   fidMSO_Name                 = fidVarLeast;
 const FID   fidMSO_Stats                = fidVarLeast+1;
-const FID   fidMSO_TemplateTable        = fidVarLeast+2;
-const FID   fidMSO_Callback             = fidVarLeast+2;
+const FID   fidMSO_TemplateTable        = fidVarLeast+2;    // overloaded
+const FID   fidMSO_Callback             = fidVarLeast+2;    // overloaded
 const FID   fidMSO_DefaultValue         = fidVarLeast+3;
 const FID   fidMSO_KeyFldIDs            = fidVarLeast+4;
 const FID   fidMSO_VarSegMac            = fidVarLeast+5;
@@ -98,9 +123,13 @@ const FID   fidMSO_LocaleName           = fidTaggedLeast+5;
 
 const FID   fidMSO_TaggedLast           = fidMSO_LocaleName;
 
+//
+//  System OBJIDs
+//
 
-extern const OBJID  objidFDPMSO;
-extern const OBJID  objidFDPMSOShadow;
+// objidSystemRoot /* from daeconst.hxx */      // 1
+extern const OBJID  objidFDPMSO;                // 2
+extern const OBJID  objidFDPMSOShadow;          // 3
 const OBJID objidFDPMSO_NameIndex               = 4;
 const OBJID objidFDPMSO_RootObjectIndex         = 5;
 
@@ -109,18 +138,26 @@ INLINE BOOL FCATISystemObjid( OBJID objid )
     return objid <= objidFDPMSO_RootObjectIndex;
 }
 
+// Returns true if the given objid is a fixed system index.
 INLINE BOOL FCATMsysObjectsTableIndex( _In_ const OBJID objidTable )
 {
     return ( objidTable == objidFDPMSO_NameIndex || objidTable == objidFDPMSO_RootObjectIndex );
 }
 
 
+//  hard-coded initial page allocation
 
+//  Note: that cpgMSOInitial is like 9 - 11 pages too big (depending upon page size), but
+//  it can't be changed without messing up the value of pgnoFDPMSOShadow, and then a ripple
+//  effect of code to fix, cleanup, test, etc.
 const CPG   cpgMSOInitial                       = 20;
 const PGNO  pgnoFDPMSO                          = 4;
 const PGNO  pgnoFDPMSO_NameIndex                = 7;
 const PGNO  pgnoFDPMSO_RootObjectIndex          = 10;
 
+//  By reducing this, we simultaneously help our DB stay smaller and also help alignment for
+//  the initial tables allocated after the ESE catalog.
+//const CPG cpgMSOShadowInitial             = 9;    //  original legacy value moved to cat.cxx
 const CPG   cpgMSOShadowInitial2K               = 6;
 const CPG   cpgMSOShadowInitial4K               = 5;
 const CPG   cpgMSOShadowInitial8K               = 5;
@@ -128,6 +165,7 @@ const PGNO  pgnoFDPMSOShadow                    = 24;
 
 INLINE CPG CpgCATShadowInitial( const ULONG cbPage )
 {
+    // return cpgMSOShadowInitial;  //  was 9
     switch( cbPage )
     {
     case 2 * 1024:
@@ -135,9 +173,11 @@ INLINE CPG CpgCATShadowInitial( const ULONG cbPage )
     case 4 * 1024:
         return cpgMSOShadowInitial4K;
     }
+    //  default
     return cpgMSOShadowInitial8K;
 }
 
+//  One of the base system FDPs.
 INLINE BOOL FCATBaseSystemFDP( const PGNO pgnoT )
 {
     if ( pgnoT == pgnoSystemRoot ||
@@ -175,7 +215,10 @@ INLINE BOOL FCATHasExtendedHints(  __in const SYSOBJ sysobj, const JET_SPACEHINT
 }
 
 
+//  Space Hint helper variables.
 
+//  Should be ~4 (or 12 if fDeferredLongValueHints is not specified) bytes 
+//  more buffer than we need.
 const ULONG cbExtendedSpaceHints = 1 + sizeof( JET_SPACEHINTS );
 
 PERSISTED
@@ -183,10 +226,11 @@ const BYTE  bCATExtendedSpaceHintsVersion = 1;
 
 enum
 {
-    eJSPHDefaultCatalog = 0,
-    eJSPHDefaultUserTable = 0,
-    eJSPHDefaultUserIndex = 0,
-    eJSPHDefaultHeavyWater = 1,
+    eJSPHDefaultCatalog = 0,        // special case for catalog, can't handle cbInitial being non-zero.
+    //  Currently the same as catalog, may not last ...
+    eJSPHDefaultUserTable = 0,      // typical default, 80% density, 1 page initially
+    eJSPHDefaultUserIndex = 0,      // typical default, 80% density, 1 page initially
+    eJSPHDefaultHeavyWater = 1,     // for denser tables, 100% dense, 1 page initially
     eJSPHDefaultMax
 };
 
@@ -197,6 +241,7 @@ extern const JET_SPACEHINTS g_jsphSystemDefaults[ eJSPHDefaultMax ];
 
 
 
+//  we don't know the pgnoFDP for MSU as its created dynamically
 
 INLINE BOOL FCATUnicodeFixupTable( IN const CHAR * const szTableName )
 {
@@ -596,6 +641,8 @@ ERR ErrCATGetNextObjectByPgnoFDP(
     _Out_ OBJID* const      pobjid,
     _Out_ SYSOBJ* const     psysobj );
 
+// Gets pgnoFDP and cursor from the object and its parent.
+// CATFreeCursorsFromObjid() MUST be used to free the objects returned by this function.
 ERR ErrCATGetCursorsFromObjid(
     _In_ PIB* const ppib,
     _In_ const IFMP ifmp,
@@ -607,6 +654,7 @@ ERR ErrCATGetCursorsFromObjid(
     _Out_ FUCB** const ppfucb,
     _Out_ FUCB** const ppfucbParent );
 
+// Releases the objects returned by ErrCATGetCursorsFromObjid().
 VOID CATFreeCursorsFromObjid( _In_ FUCB* const pfucb, _In_ FUCB* const pfucbParent );
 
 ERR ErrCATDeleteDbObject(
@@ -752,14 +800,14 @@ ERR ErrCATInitCatalogFCB( FUCB *pfucbTable );
 ERR ErrCATInitTempFCB( FUCB *pfucbTable );
 ERR ErrCATInitFCB( FUCB *pfucbTable, OBJID objidTable );
 
-enum CATCheckIndicesFlags
+enum CATCheckIndicesFlags  //  catcif
 {
-    catcifReadOnly = 0x1,
-    catcifDeleteOutOfDateSecondaryIndices = 0x2,
-    catcifReportOnlyOutOfDateSecondaryIndices = 0x4,
-    catcifUpdateEmptyIndices = 0X8,
-    catcifForceDeleteIndices = 0x10,
-    catcifAllowValidOutOfDateVersions = 0x20,
+    catcifReadOnly = 0x1,                           // Use defaults: Look for out-of-date indices, returning error if any were found.
+    catcifDeleteOutOfDateSecondaryIndices = 0x2,    // Attempt to delete out-of-date indices (default is to return an error).
+    catcifReportOnlyOutOfDateSecondaryIndices = 0x4, // Look for out-of-date indices, but still return a warning if any were found.
+    catcifUpdateEmptyIndices = 0X8,                 // Update empty indices, no index deletion and still return a warning if any were found.
+    catcifForceDeleteIndices = 0x10,                // Force delete the localized text index unconditionally.
+    catcifAllowValidOutOfDateVersions = 0x20,       // Allow indices with sort versions which are out-of-date but valid
 };
 
 DEFINE_ENUM_FLAG_OPERATORS_BASIC( CATCheckIndicesFlags )
@@ -871,6 +919,7 @@ ERR ErrCATInit();
 void CATTerm();
 
 
+//  hash-function for munging an IFMP and a table-name into an integer
 
 INLINE UINT UiHashIfmpName( IFMP ifmp, const CHAR* const szName )
 {
@@ -907,6 +956,7 @@ INLINE UINT UiHashIfmpName( IFMP ifmp, const CHAR* const szName )
 }
 
 
+//  key for uniquely identifying an entry in the catalog hash
 
 class CATHashKey
 {
@@ -947,6 +997,7 @@ class CATHashKey
 };
 
 
+//  entry in the catalog hash
 
 class CATHashEntry
 {
@@ -973,7 +1024,7 @@ class CATHashEntry
             m_objidFDPDBG = pfcbIn->ObjidFDP();
             m_ifmpDBG = pfcbIn->Ifmp();
             OSStrCbCopyA( m_szNameDBG, sizeof( m_szNameDBG ), pfcbIn->Ptdb()->SzTableName() );
-#endif
+#endif  //  DEBUG
             pfcbIn->LeaveDML();
         }
 
@@ -986,7 +1037,7 @@ class CATHashEntry
             m_objidFDPDBG = src.m_objidFDPDBG;
             m_ifmpDBG = src.m_ifmpDBG;
             OSStrCbCopyA( m_szNameDBG, sizeof( m_szNameDBG ), src.m_szNameDBG );
-#endif
+#endif  //  DEBUG
 
             return *this;
         }
@@ -996,14 +1047,16 @@ class CATHashEntry
         UINT    m_uiHashIfmpName;
         FCB     *m_pfcb;
 #ifdef DEBUG
+        //  keep local copies in case the fcb has been freed prematurely
         PGNO    m_pgnoFDPDBG;
         OBJID   m_objidFDPDBG;
         IFMP    m_ifmpDBG;
         CHAR    m_szNameDBG[JET_cbNameMost+1];
-#endif
+#endif  //  DEBUG
 };
 
 
+//  defs/code for the catalog hash
 
 typedef CDynamicHashTable< CATHashKey, CATHashEntry > CATHash;
 
@@ -1021,7 +1074,7 @@ INLINE CATHash::NativeCounter CATHash::CKeyEntry::Hash() const
     m_entry.m_pfcb->EnterDML();
     Assert( m_entry.m_uiHashIfmpName == UiHashIfmpName( m_entry.m_pfcb->Ifmp(), m_entry.m_pfcb->Ptdb()->SzTableName() ) );
     m_entry.m_pfcb->LeaveDML();
-#endif
+#endif  //  DEBUG
     return CATHash::NativeCounter( m_entry.m_uiHashIfmpName );
 }
 
@@ -1031,6 +1084,9 @@ INLINE BOOL CATHash::CKeyEntry::FEntryMatchesKey( const CATHashKey &key ) const
     Assert( pfcbNil != m_entry.m_pfcb );
     Assert( ptdbNil != m_entry.m_pfcb->Ptdb() );
 
+    //  we can check these two because they don't require a lock
+    //  they will almost certainly give use a positive/negative result by themselves making it
+    //      necessary to only lock when we are 99.99% certain we have the entry that we want
 
     if ( m_entry.m_uiHashIfmpName == key.m_uiHashIfmpName && m_entry.m_pfcb->Ifmp() == key.m_ifmp )
     {
@@ -1060,18 +1116,22 @@ extern CATHash g_cathash;
 
 #ifdef DEBUG
 
+//  verifies that the catalog hash does not contain any entries for the given IFMP/pgnoFDP pair
 
 VOID CATHashAssertCleanIfmpPgnoFDP( const IFMP ifmp, const PGNO pgnoFDP );
 
+//  verifies that the catalog hash does not contain any entries for the given IFMP
 
 VOID CATHashAssertCleanIfmp( const IFMP ifmp );
 
+//  verifies that the catalog hash does not contain any entries
 
 VOID CATHashAssertClean();
 
-#endif
+#endif  //  DEBUG
 
 
+//  look up an entry in the catalog hash (called by FCATHashLookup)
 
 BOOL FCATHashILookup(
     IFMP            ifmp,
@@ -1079,24 +1139,32 @@ BOOL FCATHashILookup(
     PGNO            *ppgnoTableFDP,
     OBJID           *pobjidTable );
 
+//  insert an entry into the catalog hash (called by CATHashInsert)
 
 VOID CATHashIInsert( FCB *pfcb, __in PCSTR const szTable );
 
+//  delete an entry from the catalog hash (called by CATHashDelete)
 
 VOID CATHashIDelete( FCB *pfcb, __in PCSTR const szTable );
 
 
+//  returns fTrue when catalog hash is "active"
 
 INLINE BOOL FCATHashActive( INST *pinst )
 {
 
+    //  we do not allow the catalog hash-table to operate
+    //      during recovery or repair
 
     return  !pinst->FRecovering() &&
+            // SOFT_HARD: we can remove this, m_fRecovering should be set if m_fHardRestore
+            // at we are at this point
             !pinst->m_plog->FHardRestore() &&
             !g_fRepair;
 }
 
 
+//  wrapper for the real lookup function
 
 INLINE BOOL FCATHashLookup(
     IFMP            ifmp,
@@ -1113,6 +1181,7 @@ INLINE BOOL FCATHashLookup(
 }
 
 
+//  wrapper for the real insert function
 
 INLINE VOID CATHashInsert( FCB *pfcb, __in PCSTR const szTable )
 {
@@ -1126,6 +1195,7 @@ INLINE VOID CATHashInsert( FCB *pfcb, __in PCSTR const szTable )
 }
 
 
+//  wrapper for the real delete function
 
 INLINE VOID CATHashDelete( FCB *pfcb, __in PCSTR const szTable )
 {
@@ -1238,6 +1308,7 @@ ERR ErrCATISeekTableType(
     _In_ const ULONG    cbIndex );
 
 
+//  maximum size of a SORTID string representation for printing to the screen/
 #define PERSISTED_SORTID_MAX_LENGTH 37
 
 INLINE VOID WszCATFormatSortID(
