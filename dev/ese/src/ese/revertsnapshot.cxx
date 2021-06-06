@@ -4,6 +4,15 @@
 #include "std.hxx"
 #include "_dump.hxx"
 
+#ifdef PERFMON_SUPPORT
+PERFInstanceDelayedTotal<> cSnapshotStall;
+LONG LSnapshotStallCEFLPv(LONG iInstance,void *pvBuf)
+{
+    cSnapshotStall.PassTo( iInstance, pvBuf );
+    return 0;
+}
+#endif
+
 const RBS_POS rbsposMin = { 0x0,  0x0 };
 
 ERR ErrBeginDatabaseIncReseedTracing( _In_ IFileSystemAPI* pfsapi, _In_ JET_PCWSTR wszDatabase, _Out_ CPRINTF** ppcprintf );
@@ -1052,6 +1061,7 @@ HandleError:
 
 // static
 VOID *CSnapshotBuffer::s_pReserveBuffer = NULL;
+LONG CSnapshotBuffer::s_cAllocatedBuffers = 0;
 
 //  ================================================================
 //                  CRevertSnapshot
@@ -1063,6 +1073,7 @@ CRevertSnapshot::CRevertSnapshot( _In_ INST* const pinst ) :
     m_critBufferLock( CLockBasicInfo( CSyncBasicInfo( szRBSBuf ), rankRBSBuf, 0 ) ),
     m_critWriteLock( CLockBasicInfo( CSyncBasicInfo( szRBSWrite ), rankRBSWrite, 0 ) )
 {
+    PERFOpt( cSnapshotStall.Clear( m_pinst ) );
     Assert( pinst );
     m_wszRBSAbsRootDirPath  = NULL;
     m_wszRBSBaseName        = NULL;
@@ -1087,6 +1098,8 @@ CRevertSnapshot::CRevertSnapshot( _In_ INST* const pinst ) :
 
 CRevertSnapshot::~CRevertSnapshot( )
 {
+    PERFOpt( cSnapshotStall.Clear( m_pinst ) );
+
     FreeFileApi( );
     FreeHdr( );
     FreePaths( );
@@ -1884,6 +1897,13 @@ ERR CRevertSnapshot::ErrCaptureRec(
               RBS_POS   * prbsposRecord )
 {
     ERR err;
+
+    LONG cMaxBuffers = (LONG)UlParam( m_pinst, JET_paramFlight_MaxRBSBuffers );
+    while ( AtomicRead( &CSnapshotBuffer::s_cAllocatedBuffers ) > cMaxBuffers )
+    {
+        PERFOpt( cSnapshotStall.Inc( m_pinst ) );
+        UtilSleep(1);
+    }
 
     // Pre-allocate reserve buffer in case we need it below.
     CSnapshotBuffer::PreAllocReserveBuffer();

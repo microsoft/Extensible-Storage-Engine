@@ -214,7 +214,6 @@ struct CSnapshotBuffer
     void* operator new( size_t cbAlloc, CResource *pcresRBSBuf )
     {
         Assert( cbAlloc == sizeof(CSnapshotBuffer) );
-        // Consider capping usage of this resource, and add retry.
         return pcresRBSBuf->PvRESAlloc_( SzNewFile(), UlNewLine() );
     }
     void operator delete( void* pv )
@@ -241,6 +240,7 @@ struct CSnapshotBuffer
                 OSMemoryPageFree( m_pBuffer );
             }
             m_pBuffer = NULL;
+            AtomicDecrement( &s_cAllocatedBuffers );
         }
     }
 
@@ -261,6 +261,7 @@ struct CSnapshotBuffer
         {
             AllocR( m_pBuffer = (BYTE *)PvOSMemoryPageAlloc( cbRBSBufferSize, NULL ) );
         }
+        AtomicIncrement( &s_cAllocatedBuffers );
         return JET_errSuccess;
     }
 
@@ -294,6 +295,7 @@ struct CSnapshotBuffer
     }
 
     static VOID *s_pReserveBuffer;
+    static LONG s_cAllocatedBuffers;
 };
 
 struct CSnapshotReadBuffer : public CSnapshotBuffer
