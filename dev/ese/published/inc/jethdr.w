@@ -3974,10 +3974,13 @@ typedef enum
 #if ( JET_VERSION >= 0x0A01 )
 
 #define JET_paramFlight_RBSForceRollIntervalSec                 80  // Time after which we should force roll into new revert snapshot by raising failure item and letting HA remount. This is temporary till we have live roll.
+
 #define JET_paramFlight_NewQueueOptions                         84  //  Controls options for new Meted IO Queue
 #define JET_paramFlight_ConcurrentMetedOps                      85  //  Controls how many IOs we leave out at once for the new Meted IO Queue.
 #define JET_paramFlight_LowMetedOpsThreshold                    86  //  Controls the transition from 1 meted op to JET_paramFlight_ConcurrentMetedOps (which is the max).
 #define JET_paramFlight_MetedOpStarvedThreshold                 87  //  Milliseconds until a meted IO op is considered starved and dispatched no matter what.
+
+#define JET_paramFlight_MaxRBSBuffers                           88  //  Max number of buffers to allocate for revert snapshot.
 
 #define JET_paramFlight_EnableShrinkArchiving                   89  //  Turns on archiving truncated data when shrinking a database (subject to efv).
 

@@ -158,6 +158,7 @@ MSINTERNAL enum class MJET_PARAM
     Flight_ConcurrentMetedOps = 85, // Controls how many IOs we leave out at once for the new Meted IO Queue.
     Flight_LowMetedOpsThreshold = 86, // Controls the transition from 1 meted op to JET_paramFlight_ConcurrentMetedOps (which is the max).
     Flight_MetedOpStarvedThreshold = 87, // Milliseconds until a meted IO op is considered starved and dispatched no matter what.
+    Flight_MaxRBSBuffers = 88, // Max number of buffers to allocate for revert snapshot.
     Flight_EnableShrinkArchiving = 89, // Turns on archiving truncated data when shrinking a database (subject to efv).
     Flight_EnableBackupDuringRecovery = 90, // Turns on backup during recovery (i.e. seed from passive copy).
     Flight_RBSRollIntervalSec = 91, // Time after which we should roll into new revert snapshot.

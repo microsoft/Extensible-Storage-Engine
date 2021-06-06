@@ -136,17 +136,18 @@
 ;	294 - 2019/03/05 - Removed "Database Page Allocation File Shrink Stalls/sec".
 ;	295 - 2019/04/01 - dbtask log bytes/sec counter.
 ;	296 - 2019/10/10 - Remove FPGA compression related counters.
-;	297 - 2010/01/31 - Add Xpress10 software compression related counters.
-;	298 - 2010/02/26 - Add counters to measure cost ofcollecting snapshot of FDPDelete/NewPage.
+;	297 - 2020/01/31 - Add Xpress10 software compression related counters.
+;	298 - 2020/02/26 - Add counters to measure cost ofcollecting snapshot of FDPDelete/NewPage.
 ;	299 - 2020/04/17 - Remove Redundant replace counter.
-;	300 - 2010/05/01 - Add Xpress10 corsica compression related counters.
-;	301 - 2010/09/23 - Add Snapshot related counters.
-;	302 - 2011/03/26 - Remove Xpress9 counters.
+;	300 - 2020/05/01 - Add Xpress10 corsica compression related counters.
+;	301 - 2020/09/23 - Add Snapshot related counters.
+;	302 - 2021/03/26 - Remove Xpress9 counters.
+;   303 - 2021/06/04 - Add Snapshot Stall counter.
 
 
 [ModuleInfo]
 MaxInstNameSize=64
-SchemaVersion=302
+SchemaVersion=303
 ; we will subst later $PerformanceObjectName$ with either ESE or ESENT version
 PerformanceObjectName_ESE=MSExchange Database
 PerformanceObjectName_ESENT=Database
@@ -4989,6 +4990,19 @@ EvaluationFunction=LBFCacheSizeUnusedCEFLPv
 009_Help= database cache manager to hold information from the database file(s)
 009_Help= that may be used in the near future but that hasn't yet been
 009_Help= referenced.  [Dev Only]
+
+[SnapshotStallPerSec]
+Type=Counter
+Object=ESE
+DetailLevel=PERF_DETAIL_DEVONLY | PERF_DETAIL_DEFAULT
+DefaultScale=0
+CounterType=PERF_COUNTER_COUNTER
+EvaluationFunction=LSnapshotStallCEFLPv
+009_Name=Revert Snapshot Stalls/sec
+009_Help=Revert Snapshot Stalls/sec is the number of times per second that
+009_Help= collecting pre-image for a page for revert snapshot was stalled
+009_Help= because of running out of snapshot buffers potentially stalling
+009_Help= updates to the database.  [Dev Only]
 
 
 ;===========================================================
@@ -10585,6 +10599,19 @@ CounterType=PERF_COUNTER_COUNTER
 EvaluationFunction=LSPDeletedTreeFreedExtentsCEFLPv
 009_Name=Space Trees Deleted Freed Extents/sec
 009_Help=Space Trees Deleted Freed Extents/sec is the number of extents freed by space trees deletes per second.  [Dev Only]
+
+[ISnapshotStallPerSec]
+Type=Counter
+Object=Instances
+DetailLevel=PERF_DETAIL_DEVONLY | PERF_DETAIL_DEFAULT
+DefaultScale=0
+CounterType=PERF_COUNTER_COUNTER
+EvaluationFunction=LSnapshotStallCEFLPv
+009_Name=Revert Snapshot Stalls/sec
+009_Help=Revert Snapshot Stalls/sec is the number of times per second that
+009_Help= collecting pre-image for a page for revert snapshot was stalled
+009_Help= because of running out of snapshot buffers potentially stalling
+009_Help= updates to the database.  [Dev Only]
 
 
 ;===========================================================
