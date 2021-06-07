@@ -211,7 +211,7 @@ ERR TPassThroughCache<I>::ErrRead(  _In_                    const TraceContext& 
     //  create our request context
 
     Alloc( prequest = new( fAsync ? new Buffer<CRequest>() : _alloca( sizeof( CRequest ) ) )
-           CRequest(   fAsync,
+           CRequest(    fAsync,
                         fTrue,
                         this,
                         tc,
@@ -235,7 +235,8 @@ ERR TPassThroughCache<I>::ErrRead(  _In_                    const TraceContext& 
 
     if ( offsets.FOverlaps( s_offsetsCachedFileHeader ) )
     {
-        cbHeaderRead = (DWORD)min( cbData, s_offsetsCachedFileHeader.IbEnd() - offsets.IbStart() + 1 );
+        cbHeaderRead = (DWORD)COffsets( offsets.IbStart(), min( offsets.IbEnd(), s_offsetsCachedFileHeader.IbEnd() ) ).Cb();
+        cbHeaderRead = min( cbHeaderRead, cbData );
     }
 
     if ( cbHeaderRead > 0 )
@@ -308,7 +309,7 @@ ERR TPassThroughCache<I>::ErrWrite( _In_                    const TraceContext& 
     //  create our request context
 
     Alloc( prequest = new( fAsync ? new Buffer<CRequest>() : _alloca( sizeof( CRequest ) ) )
-           CRequest(   fAsync,
+           CRequest(    fAsync,
                         fFalse,
                         this,
                         tc,
@@ -334,7 +335,8 @@ ERR TPassThroughCache<I>::ErrWrite( _In_                    const TraceContext& 
 
     if ( offsets.FOverlaps( s_offsetsCachedFileHeader ) )
     {
-        cbHeaderWritten = (DWORD)min( cbData, s_offsetsCachedFileHeader.IbEnd() - offsets.IbStart() + 1 );
+        cbHeaderWritten = (DWORD)COffsets( offsets.IbStart(), min( offsets.IbEnd(), s_offsetsCachedFileHeader.IbEnd() ) ).Cb();
+        cbHeaderWritten = min( cbHeaderWritten, cbData );
     }
 
     if ( cbHeaderWritten > 0 )
