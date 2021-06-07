@@ -1823,19 +1823,19 @@ BOOL LOG::FWaypointLatencyEnabled() const
     return fTrue;
 }
 
-LONG LOG::LLGElasticWaypointLatency() const
+VOID LOG::LGElasticWaypointLatency( LONG *plWaypointLatency, LONG *plElasticWaypointLatency ) const
 {
-    LONG lElasticWaypointDepth;
-    if ( FWaypointLatencyEnabled() && UlParam( m_pinst, JET_paramFlight_ElasticWaypointLatency ) )
+    if ( FWaypointLatencyEnabled() )
     {
-        lElasticWaypointDepth = (LONG)UlParam( m_pinst, JET_paramWaypointLatency ) + (LONG)UlParam( m_pinst, JET_paramFlight_ElasticWaypointLatency );
+        *plWaypointLatency = (LONG)UlParam( m_pinst, JET_paramWaypointLatency );
+        *plElasticWaypointLatency = (LONG)UlParam( m_pinst, JET_paramFlight_ElasticWaypointLatency );
     }
     else
     {
-        lElasticWaypointDepth = FWaypointLatencyEnabled() ? (LONG)UlParam( m_pinst, JET_paramWaypointLatency ) : 0;
+        *plWaypointLatency = 0;
+        // No elastic LLR without LLR
+        *plElasticWaypointLatency = 0;
     }
-
-    return lElasticWaypointDepth;
 }
 
 VOID LOG::LGIGetEffectiveWaypoint(

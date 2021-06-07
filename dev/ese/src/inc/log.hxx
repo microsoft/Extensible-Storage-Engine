@@ -1260,7 +1260,7 @@ public:
 
     ERR ErrLGUpdateWaypointIFMP( IFileSystemAPI *const pfsapi, _In_ const IFMP ifmpTarget = ifmpNil );
     ERR ErrLGQuiesceWaypointLatencyIFMP( _In_ const IFMP ifmpTarget );
-    LONG LLGElasticWaypointLatency() const;
+    VOID LGElasticWaypointLatency( LONG *plWaypointLatency, LONG *plElasticWaypointLatency ) const;
     BOOL FWaypointLatencyEnabled() const;
 
     //  ================================================================

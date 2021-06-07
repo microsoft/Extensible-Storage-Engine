@@ -2727,11 +2727,12 @@ ERR LOG_STREAM::ErrLGIFinishNewLogFile( IFileAPI * const pfapiTmpLog )
     pfapiTmpLog->UpdateIFilePerfAPIEngineFileTypeId( iofileLog, QwInstFileID( qwLogFileID, m_pinst->m_iInstance, m_plgfilehdrT->lgfilehdr.le_lGeneration ) );
     Call( pfapiTmpLog->ErrRename( wszPathJetLog ) );
 
-    LONG lElasticWaypointDepth = m_pLog->LLGElasticWaypointLatency();
+    LONG lWaypointDepth, lElasticWaypointDepth;
+    m_pLog->LGElasticWaypointLatency( &lWaypointDepth, &lElasticWaypointDepth );
     LGPOS lgposFlushTip;
     m_pLog->LGFlushTip( &lgposFlushTip );
     // Currently flush log if flush-tip falls too far behind waypoint depth. We could also do it time based etc.
-    if ( m_plgfilehdrT->lgfilehdr.le_lGeneration > lgposFlushTip.lGeneration + lElasticWaypointDepth )
+    if ( m_plgfilehdrT->lgfilehdr.le_lGeneration > lgposFlushTip.lGeneration + lWaypointDepth + lElasticWaypointDepth )
     {
         BOOL fFlushed = fFalse;
         Call( ErrLGIFlushLogFileBuffers( pfapiTmpLog, iofrLogMaxRequired, &fFlushed ) );
@@ -2739,7 +2740,7 @@ ERR LOG_STREAM::ErrLGIFinishNewLogFile( IFileAPI * const pfapiTmpLog )
         if ( fFlushed )
         {
             // After the flush, the flush-tip can either point to end of last log or beginning of this log. With no LLR,
-            // make it point to this log so it can be added to required range, otherwise leave it on previous log.
+            // make it point to this log so it can be added to required range, otherwise leave it behind by configured LLR depth.
             if ( lElasticWaypointDepth == 0 )
             {
                 lgposFlushTip.lGeneration = m_plgfilehdrT->lgfilehdr.le_lGeneration;
@@ -2748,7 +2749,13 @@ ERR LOG_STREAM::ErrLGIFinishNewLogFile( IFileAPI * const pfapiTmpLog )
             }
             else
             {
-                lgposFlushTip.lGeneration = m_plgfilehdrT->lgfilehdr.le_lGeneration - 1;
+                // Setting flush-tip LLR logs back with LLR matches what we do in redo-time in LOG::ErrLGRIRedoOperations
+                // and it prevents this scenario, with, say LLR=l, ElasticLLR=e.
+                // Current FlushTip=N, once lgenRedo reaches N+l+e+1, we would move FlushTip to N+l+e+1 and lgenMaxRequired to N+e+1.
+                // On the next l log roll, we would again move lgenMaxRequired since FlushTip includes that.
+                // So, in effect, we would update lgenMaxRequired l+1 times per l+e+1 logs, rather than once per e+1 logs like we meant to.
+                // Keeping FlushTip LLR logs back fixes that, lgenMaxRequired would then only move every e+1 logs.
+                lgposFlushTip.lGeneration = m_plgfilehdrT->lgfilehdr.le_lGeneration - lWaypointDepth;
                 lgposFlushTip.isec        = lgposMax.isec;
                 lgposFlushTip.ib          = lgposMax.ib;
             }
