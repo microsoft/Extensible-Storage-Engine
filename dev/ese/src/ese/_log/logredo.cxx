@@ -12091,15 +12091,24 @@ ProcessNextRec:
             ULONG cifmpsAttached = 0;
 
             // Currently flush log if flush-tip falls too far behind waypoint depth. We could also do it time based etc.
-            if ( m_lgposRedo.lGeneration > m_lgposFlushTip.lGeneration + LLGElasticWaypointLatency() )
+            LONG lWaypointDepth, lElasticWaypointDepth;                                 
+            LGElasticWaypointLatency( &lWaypointDepth, &lElasticWaypointDepth );
+            if ( m_lgposRedo.lGeneration > m_lgposFlushTip.lGeneration + lWaypointDepth + lElasticWaypointDepth )
             {
                 BOOL fFlushed = fFalse;
                 Call( m_pLogStream->ErrLGFlushLogFileBuffers( iofrLogMaxRequired, &fFlushed ) );
                 if ( fFlushed )
                 {
-                    // During recovery redo, consider full log flushed
+                    // During recovery redo, consider full log flushed (except when using LLR)
+                    //
+                    // Setting flush-tip LLR logs back with LLR matches what we do in do-time in LOG_STREAM::ErrLGIFinishNewLogFile
+                    // and it prevents this scenario, with, say LLR=l, ElasticLLR=e.
+                    // Current FlushTip=N, once lgenRedo reaches N+l+e+1, we would move FlushTip to N+l+e+1 and lgenMaxRequired to N+e+1.
+                    // On the next l log roll, we would again move lgenMaxRequired since FlushTip includes that.
+                    // So, in effect, we would update lgenMaxRequired l+1 times per l+e+1 logs, rather than once per e+1 logs like we meant to.
+                    // Keeping FlushTip LLR logs back fixes that, lgenMaxRequired would then only move every e+1 logs.
                     LGPOS lgposNextFlushTip;
-                    lgposNextFlushTip.lGeneration = m_lgposRedo.lGeneration;
+                    lgposNextFlushTip.lGeneration = lElasticWaypointDepth ? m_lgposRedo.lGeneration - lWaypointDepth : m_lgposRedo.lGeneration;
                     lgposNextFlushTip.isec = lgposMax.isec;
                     lgposNextFlushTip.ib   = lgposMax.ib;
                     LGSetFlushTip( lgposNextFlushTip );
