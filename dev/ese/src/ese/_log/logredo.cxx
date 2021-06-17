@@ -5961,7 +5961,6 @@ ERR LOG::ErrLGRIRedoAttachDb(
     //  Update database file header as necessary
     //
     Assert( !pfmp->FReadOnlyAttach() );
-    BOOL fUpdateHeader = fFalse;
     OnDebug( pfmp->SetDbHeaderUpdateState( FMP::DbHeaderUpdateState::dbhusHdrLoaded ) );
     
     // If RBS header flush is set in the database header but RBS is not enabled anymore, we will reset the sign in the database header 
@@ -5972,7 +5971,6 @@ ERR LOG::ErrLGRIRedoAttachDb(
     if ( FSIGSignSet( &pdbfilehdr->signRBSHdrFlush ) && !pfmp->FRBSOn() )
     {
         SIGResetSignature( &pdbfilehdr->signRBSHdrFlush );
-        fUpdateHeader = fTrue;
     }
     }
 
@@ -6016,7 +6014,6 @@ ERR LOG::ErrLGRIRedoAttachDb(
         DBISetHeaderAfterAttach( pdbfilehdr.get(), m_lgposRedo, NULL, ifmp, fKeepBackupInfo );
         }
         Assert( pfmp->LgposWaypoint().lGeneration <= pfmp->LgposAttach().lGeneration );
-        fUpdateHeader = fTrue;
     }
     else
     {
@@ -6030,7 +6027,6 @@ ERR LOG::ErrLGRIRedoAttachDb(
             LOGTIME tmCreate;
             LONG lGenCurrent = m_pLogStream->GetCurrentFileGen( &tmCreate );
             pdbfilehdr->SetDbstate( JET_dbstateDirtyShutdown, lGenCurrent, &tmCreate, fTrue );
-            fUpdateHeader = fTrue;
         }
     }
 
@@ -6099,7 +6095,6 @@ ERR LOG::ErrLGRIRedoAttachDb(
             }
 
             pdbfilehdr->le_lGenMinRequired = lGenCurrent;
-            fUpdateHeader = fTrue;
         }
 
         Expected( ( pdbfilehdr->le_lGenPreRedoMinConsistent == 0 ) ||
@@ -6113,7 +6108,6 @@ ERR LOG::ErrLGRIRedoAttachDb(
             }
 
             pdbfilehdr->le_lGenMinConsistent = lGenCurrent;
-            fUpdateHeader = fTrue;
         }
     }
     // Set lGenMinConsistent back to lGenMinRequired because that's our effective initial checkpoint.
@@ -6121,7 +6115,6 @@ ERR LOG::ErrLGRIRedoAttachDb(
     if ( pdbfilehdr->le_lGenMinConsistent != pdbfilehdr->le_lGenMinRequired )
     {
         pdbfilehdr->le_lGenMinConsistent = pdbfilehdr->le_lGenMinRequired;
-        fUpdateHeader = fTrue;
     }
     } // .dtor releases PdbfilehdrReadWrite
 
@@ -6129,11 +6122,8 @@ ERR LOG::ErrLGRIRedoAttachDb(
     //
     Call( pfmp->ErrCreateFlushMap( JET_bitNil ) );
 
-    if ( fUpdateHeader )
-    {
-        Assert( pfmp->Pdbfilehdr()->le_objidLast > 0 );
-        Call( ErrUtilWriteAttachedDatabaseHeaders( m_pinst, m_pinst->m_pfsapi, wszDbName, pfmp ) );
-    }
+    Assert( pfmp->Pdbfilehdr()->le_objidLast > 0 );
+    Call( ErrUtilWriteAttachedDatabaseHeaders( m_pinst, m_pinst->m_pfsapi, wszDbName, pfmp ) );
 
     OnDebug( const ULONG dbstate = pfmp->Pdbfilehdr()->Dbstate() );
     Assert( JET_dbstateDirtyShutdown == dbstate ||
@@ -6164,10 +6154,8 @@ ERR LOG::ErrLGRIRedoAttachDb(
 
     Assert( !pfmp->FReadOnlyAttach() );
 
-    //  since the attach is now reflected in the header (either
-    //  because it existed that way or because we just updated
-    //  it in the fUpdateHeader code path above), we can now
-    //  safely set the waypoint
+    //  since the attach is now reflected in the header,
+    //  we can now safely set the waypoint
     //
     FMP::EnterFMPPoolAsWriter();
     pfmp->SetWaypoint( pfmp->LgposAttach().lGeneration );
