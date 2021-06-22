@@ -3107,7 +3107,7 @@ Repeat:
     if ( m_pLogStream->FLogEndEmitted() )
     {
         Assert( m_pLog->FNoMoreLogWrite( &err ) && err == errLogServiceStopped );
-        AssertTrack( m_pbWrite == m_pbEntry, "LogBufferNonEmptyAfterLogEndEmitted" );
+        EnforceSz( m_pbWrite == m_pbEntry, "LogBufferNonEmptyAfterLogEndEmitted" );
         Assert( m_pbLGFileEnd == NULL || m_pbLGFileEnd == m_pbWrite );
         m_critLGBuf.Leave();
         err = JET_errSuccess;
