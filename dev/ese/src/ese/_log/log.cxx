@@ -3491,11 +3491,9 @@ ERR LOG::ErrLGUpdateWaypointIFMP( IFileSystemAPI *const pfsapi, _In_ const IFMP 
         &fSkippedAttachDetach,
         ifmpTarget ) );
 
-    if ( fSkippedAttachDetach )
-    {
-        Assert( ifmpTarget == ifmpNil ); // only can happen if we're trying to update all IFMPs.
-        Error( ErrERRCheck( JET_errInternalError ) );
-    }
+    // fSkippedAttachDetach can happen if we're trying to update all IFMPs and some of them
+    // have not yet been reattached.
+    Assert( !fSkippedAttachDetach || ifmpTarget == ifmpNil );
 
 HandleError:
     if ( fOwnsChkptCritSec )
