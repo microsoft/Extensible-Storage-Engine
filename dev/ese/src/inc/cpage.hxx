@@ -1403,7 +1403,7 @@ struct PATCHHDR                                                 //  PATCHHDR -- 
 {
     CPAGE::PGHDR                    m_hdrNormalPage;
 
-    BKINFO                          bkinfo;                     // the backup information stored in the patch page
+    BKINFO                          bkinfo;                     //  the backup information stored in the patch page
     SIGNATURE                       signDb;                     //  (28 bytes) signature of the db (incl. creation time)
     SIGNATURE                       signLog;                    //  log signature
     UnalignedLittleEndian< ULONG >  lgenMinReq;                 //  databases's min lgen required, captured at the end of backup
@@ -1426,12 +1426,14 @@ C_ASSERT( sizeof( PATCHHDR ) <= g_cbPageMin );
 // Notes on PageAssertTrack():
 //  1. Since we are not passing OnErrorFireWall we will not have an HA failure item, so no drastic action will be taken.
 //  2. Double logs as AssertTrack assert / Event 901, and as DATABASE_PAGE_LOGICALLY_CORRUPT_ID in "capture".  Do we care?
-#define PageAssertTrack( cpage, exp, szType, ... )                            \
-    {                                                                          \
-    const bool fExp = ( exp );                                                  \
-    if ( !fExp )                                                                 \
-    {                                                                             \
-        (cpage).ErrCaptureCorruptedPageInfo( CPAGE::OnErrorReturnError, szType );  \
-        AssertTrackSz( fExp, szType, __VA_ARGS__ );                                 \
-    }                                                                                \
+#define PageAssertTrack( cpage, exp, szType, ... )                                                          \
+    {                                                                                                       \
+    const bool fExp = ( exp );                                                                              \
+    if ( !fExp )                                                                                            \
+    {                                                                                                       \
+        OSTraceSuspendGC();                                                                                 \
+        (cpage).ErrCaptureCorruptedPageInfo( CPAGE::OnErrorReturnError, OSFormat( szType, __VA_ARGS__ ) );  \
+        OSTraceResumeGC();                                                                                  \
+        AssertTrackSz( fExp, szType, __VA_ARGS__ );                                                         \
+    }                                                                                                       \
     }

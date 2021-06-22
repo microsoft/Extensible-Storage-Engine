@@ -1477,12 +1477,12 @@ INLINE VOID CPAGE::GetPtr_( INT itag, LINE * pline, _Out_opt_ ERR * perrNoEnforc
 
             if ( perrNoEnforce != NULL )
             {
-                PageAssertTrack( *this, FNegTest( fCorruptingPageLogically ), "TagPtrOffPage%hs", (ULONG_PTR)ptag < pbPageDataStart ? "" : "HighImpossible" );
+                PageAssertTrack( *this, FNegTest( fCorruptingPageLogically ), "TagPtrOffPage:%hs", (ULONG_PTR)ptag < pbPageDataStart ? "" : "HighImpossible" );
                 *perrNoEnforce = ErrERRCheck( JET_errPageTagCorrupted );
             }
             else
             {
-                PageAssertTrack( *this, fFalse, "TagPtrOffPage%hs", (ULONG_PTR)ptag < pbPageDataStart ? "NoErrRet" : "HighImpossibleNoErrRet" );
+                PageAssertTrack( *this, fFalse, "TagPtrOffPage:%hs", (ULONG_PTR)ptag < pbPageDataStart ? "NoErrRet" : "HighImpossibleNoErrRet" );
             }
             return;
         }
@@ -1577,7 +1577,7 @@ INLINE VOID CPAGE::GetPtr_( INT itag, LINE * pline, _Out_opt_ ERR * perrNoEnforc
                 if ( perrNoEnforce != NULL )
                 {
                     PageAssertTrack( *this, pbLine < pbPageDataEnd || FNegTest( fCorruptingPageLogically ), "LineStartsOffDataEnd" );
-                    PageAssertTrack( *this, pbLineLastByte <= pbPageDataEnd || FNegTest( fCorruptingPageLogically ), "LineStartsOff%hs", pbLine >= pbPageDataEnd ? "DataEnd" : "TrailsOffDataEnd" );
+                    PageAssertTrack( *this, pbLineLastByte <= pbPageDataEnd || FNegTest( fCorruptingPageLogically ), "LineStartsOff:%hs", pbLine >= pbPageDataEnd ? "DataEnd" : "TrailsOffDataEnd" );
                     *perrNoEnforce = ErrERRCheck( JET_errPageTagCorrupted );
                 }
                 else
@@ -4610,10 +4610,10 @@ ERR CPAGE::ErrCheckPage(
             {
                 // catch all
                 CHAR szGetLineErr[40];
-                OSStrCbFormatA( szGetLineErr, sizeof( szGetLineErr ), "GetLineFailed%d\n", errGetLine );
+                OSStrCbFormatA( szGetLineErr, sizeof( szGetLineErr ), "GetLineFailed:%d\n", errGetLine );
                 (*pcprintf)( "UNCAUGHT: page corruption (%d): TAG %d ErrGetPtr() failed or got line off page (ib=%d, cb=%d, err=%d,f=%d).\r\n", m_pgno, itag, ib, cb, errGetLine, FOnData( line.pv, line.cb ) );
                 //  there should not be too many errors coming from ErrGetLine() that we can't embed the err in the corruption type.
-                PageAssertTrack( *this, FNegTest( fCorruptingPageLogically ), "GetLineFailed%d", errGetLine );
+                PageAssertTrack( *this, FNegTest( fCorruptingPageLogically ), "GetLineFailed:%d", errGetLine );
 #ifdef DEBUG
                 Error( ErrCaptureCorruptedPageInfo( mode, szGetLineErr ) );
 #endif
@@ -4708,9 +4708,9 @@ ERR CPAGE::ErrCheckPage(
                 {
                     CHAR szGetKdfErr [40];
                     //  there should not be too many errors coming from ErrNDIGetKeydataflags() that we can't embed the err in the corruption type.
-                    OSStrCbFormatA( szGetKdfErr, sizeof( szGetKdfErr ), "NdiGetKdfFailed%d\n", errGetKdf );
+                    OSStrCbFormatA( szGetKdfErr, sizeof( szGetKdfErr ), "NdiGetKdfFailed:%d", errGetKdf );
                     (*pcprintf)( "page corruption (%d): TAG %d failed to load NDIGetKeydataFlags with %d\r\n", errGetKdf );
-                    PageAssertTrack( *this, FNegTest( fCorruptingPageLogically ), "NdiGetKdfFailed%d\n", errGetKdf );
+                    PageAssertTrack( *this, FNegTest( fCorruptingPageLogically ), "NdiGetKdfFailed:%d", errGetKdf );
 #ifdef DEBUG
                     Error( ErrCaptureCorruptedPageInfo_( mode, szGetKdfErr, NULL, szGetKdfSourceFile, ulGetKdfSourceLine, fTrue ) );
 #endif
