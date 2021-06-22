@@ -3058,7 +3058,11 @@ ERR COSDisk::ErrInitDisk( __in_z const WCHAR * const wszDiskPathId, _In_ const D
                             NULL );
 
     //  Best effort (at least some of this will not work / load if not admin or system)
-    LoadDiskInfo_( wszDiskPath, dwDiskNumber );
+    //  Disabling because of contention seen in repl because of repeated calls
+    //  LoadDiskInfo_( wszDiskPath, dwDiskNumber );
+    SetSmartEseNoLoadFailed( eSmartLoadDiskOpenFailed, ERROR_CALL_NOT_IMPLEMENTED, m_osdi.m_szDiskModel, sizeof(m_osdi.m_szDiskModel) );
+    SetSmartEseNoLoadFailed( eSmartLoadDiskOpenFailed, ERROR_CALL_NOT_IMPLEMENTED, m_osdi.m_szDiskSerialNumber, sizeof(m_osdi.m_szDiskSerialNumber) );
+    OSStrCbCopyA( m_osdi.m_szDiskFirmwareRev, sizeof(m_osdi.m_szDiskFirmwareRev), "EseNoLo" );
 
     m_eState = eOSDiskConnected;
 
