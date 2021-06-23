@@ -1956,24 +1956,22 @@ ERR FMP::ErrIAddRangeLock( const PGNO pgnoStart, const PGNO pgnoEnd )
     //  get the pointers to the pointers to the current and new range locks so
     //  that we can manipulate them easily
 
-    RANGELOCK** pprangelockCur = &m_rgprangelock[ m_msRangeLock.GroupActive() ];
-    RANGELOCK** pprangelockNew = &m_rgprangelock[ m_msRangeLock.GroupInactive() ];
+    RANGELOCK** pprangelockCur  = &m_rgprangelock[ m_msRangeLock.GroupActive() ];
+    RANGELOCK** pprangelockNew  = &m_rgprangelock[ m_msRangeLock.GroupInactive() ];
+    const SIZE_T crangeNew      = (*pprangelockCur)->crange + 1;
 
     //  the new range lock doesn't have enough room to store all the ranges we need
 
-    if ( (*pprangelockNew)->crangeMax < (*pprangelockCur)->crange + 1 )
+    if ( (*pprangelockNew)->crangeMax < crangeNew )
     {
         //  double the size of the new range lock
 
-        SIZE_T              crangeMax   = 2 * (*pprangelockNew)->crangeMax;
-        SIZE_T              cbrangelock = sizeof( RANGELOCK ) + crangeMax * sizeof( RANGE );
+        const LONG          crangeMaxT      = LNextPowerOf2( (LONG)crangeNew );
+        const SIZE_T        crangeMax       = ( ( crangeMaxT >= 0 ) && ( (SIZE_T)crangeMaxT >= crangeNew ) ) ? (SIZE_T)crangeMaxT : crangeNew;
+        const SIZE_T        cbrangelock     = sizeof( RANGELOCK ) + crangeMax * sizeof( RANGE );
 
-        RANGELOCK * const   prangelock  = (RANGELOCK*)PvOSMemoryHeapAlloc( cbrangelock + 0x80);
-
-        if ( !prangelock )
-        {
-            Error( ErrERRCheck( JET_errOutOfMemory ) );
-        }
+        RANGELOCK * const   prangelock      = (RANGELOCK*)PvOSMemoryHeapAlloc( cbrangelock );
+        Alloc( prangelock )
 
         prangelock->crangeMax = crangeMax;
 
@@ -1981,6 +1979,8 @@ ERR FMP::ErrIAddRangeLock( const PGNO pgnoStart, const PGNO pgnoEnd )
 
         *pprangelockNew = prangelock;
     }
+
+    Assert( (*pprangelockNew)->crangeMax >= crangeNew );
 
     //  copy the state of the current range lock to the new range lock
 
@@ -1998,7 +1998,7 @@ ERR FMP::ErrIAddRangeLock( const PGNO pgnoStart, const PGNO pgnoEnd )
 
     //  set the number of ranges in the new range lock
 
-    (*pprangelockNew)->crange = (*pprangelockCur)->crange + 1;
+    (*pprangelockNew)->crange = crangeNew;
 
     //  cause new writers to see the new range lock and wait until all writers
     //  that saw the old range lock are done writing
@@ -2056,6 +2056,7 @@ VOID FMP::IRemoveRangeLock( const PGNO pgnoStart, const PGNO pgnoEnd )
 
     //  set the number of ranges in the new range lock
 
+    Assert( (*pprangelockNew)->crangeMax >= irangeDest );
     (*pprangelockNew)->crange = irangeDest;
 
     //  cause new writers to see the new range lock and wait until all writers
