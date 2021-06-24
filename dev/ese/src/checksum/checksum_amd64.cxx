@@ -13,7 +13,7 @@
 #if 1
 
 #include <intrin.h>
-#if ( defined _M_AMD64 || defined _M_IX86  )
+#if ( defined _M_AMD64 || defined _M_IX86 ) && !defined _ARM64EC_
 #include <emmintrin.h>
 #endif
 
@@ -93,7 +93,7 @@ ULONG ChecksumOldFormatSSE( const unsigned char * const pb, const ULONG cb )
 
     while ( ( cbT -= cbStep ) >= 0 )
     {
-#if (defined _M_AMD64 || defined _M_IX86  )
+#if (defined _M_AMD64 || defined _M_IX86 ) && !defined _ARM64EC_
 #if 1
         _mm_prefetch ( (char *)(pdw + 16), _MM_HINT_NTA );
 #else
@@ -129,7 +129,7 @@ ULONG ChecksumOldFormatSSE2( const unsigned char * const pb, const ULONG cb )
 
     Unused( pfn );
 
-#if (defined _M_AMD64 || defined _M_IX86  )
+#if (defined _M_AMD64 || defined _M_IX86 ) && !defined _ARM64EC_
 
     __m128i owChecksum              = _mm_setzero_si128();
     const   __m128i * pow           = (__m128i *)pb;
@@ -862,7 +862,7 @@ XECHECKSUM ChecksumNewFormatSSE( const unsigned char * const pb, const ULONG cb,
             pT1 = pdw[ i + 1 ];
 Start:
 
-#if (defined _M_AMD64 || defined _M_IX86  )
+#if (defined _M_AMD64 || defined _M_IX86 ) && !defined _ARM64EC_
 #if 1
             _mm_prefetch( ( char *)&( pdw[ i + 32 ] ), _MM_HINT_NTA );
 #else
@@ -982,7 +982,7 @@ enum ChecksumParityMaskFunc
     ParityMaskFuncPopcnt,
 };
 
-#if ( defined _M_AMD64 || defined _M_IX86  ) && !defined _CHPE_X86_ARM64_
+#if ( defined _M_AMD64 || defined _M_IX86 ) && !defined _CHPE_X86_ARM64_ && !defined _ARM64EC_
 
 //  ================================================================
 inline __m128i operator^( const __m128i dq0, const __m128i dq1 )

@@ -1790,7 +1790,7 @@ INLINE CPAGE::TAG * CPAGE::PtagFromItag_( INT itag ) const
 
     TAG * ptag = (TAG *)( (BYTE*)m_bfl.pv + m_platchManager->CbBuffer( m_bfl ) );
     ptag -= itag + 1;
-#if !defined(_M_ARM) && !defined(_M_ARM64)
+#if !defined(_M_ARM) && !defined(_M_ARM64) && !defined(_ARM64EC_)
     _mm_prefetch( (char*)ptag, _MM_HINT_T0 );   //  almost always this will be immediately useful ...
 #endif
     Assert( NULL != ptag );

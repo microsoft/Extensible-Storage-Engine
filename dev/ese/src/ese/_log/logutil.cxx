@@ -1815,8 +1815,8 @@ ERR LOG::ErrCompareLogs( PCWSTR wszLog1, PCWSTR wszLog2, const BOOL fAllowSubset
     cbRemaining = cbLog1;
 
     cbRead = min( cbMaxRead, cbRemaining );
-    pvLog1 = PvOSMemoryPageAlloc( cbRead, NULL );
-    pvLog2 = PvOSMemoryPageAlloc( cbRead, NULL );
+    pvLog1 = PvOSMemoryPageAlloc( (size_t) cbRead, NULL );
+    pvLog2 = PvOSMemoryPageAlloc( (size_t) cbRead, NULL );
         
     while ( cbRemaining > 0 )
     {
@@ -1824,7 +1824,7 @@ ERR LOG::ErrCompareLogs( PCWSTR wszLog1, PCWSTR wszLog2, const BOOL fAllowSubset
         Call( pfapiLog1->ErrIORead( *tcScope, cbLog1 - cbRemaining, (DWORD) cbRead, (BYTE*) pvLog1, QosSyncDefault( pinstNil ) ) );
         Call( pfapiLog2->ErrIORead( *tcScope, cbLog1 - cbRemaining, (DWORD) cbRead, (BYTE*) pvLog2, QosSyncDefault( pinstNil ) ) );
 
-        if ( memcmp( pvLog1, pvLog2, cbRead ) != 0 )
+        if ( memcmp( pvLog1, pvLog2, (size_t) cbRead ) != 0 )
         {
             *pfLogsDiverged = fTrue;
             break;

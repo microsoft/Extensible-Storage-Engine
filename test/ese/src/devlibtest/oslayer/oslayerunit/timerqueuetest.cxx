@@ -2,9 +2,6 @@
 // Licensed under the MIT License.
 #include "osunitstd.hxx"
 
-// Needed for WAIT_OBJECT_0
-typedef __success(return >= 0) LONG NTSTATUS;
-
 CSemaphore g_semStress( CSyncBasicInfo( "SchedulingTimerStress::g_semStress" ) );
 POSTIMERTASK g_posttStressTask = NULL;
 DWORD g_fScheduled = 0;

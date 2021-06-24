@@ -434,12 +434,14 @@ class CLRUKResourceUtilityManager
                 BOOL FSuperColded() const                       { return _FTickSuperColded( m_tickIndexTarget ); }
                 BOOL FResourceLocked() const                    { return _FTickLocked( m_tickLast ); }
 
+                // used only for tracing and debugger ext
+                WORD PctCachePriority() const                   { return m_pctCachePriority; }
+
 #ifdef DEBUGGER_EXTENSION
                 TICK TickLastTouch() const                      { return m_tickLast; }
                 TICK TickIndex() const                          { return m_tickIndex; }
                 TICK TickIndexTime() const                      { return _TickIndexTime( m_tickIndex ); }   //  extracts the "normal" time part of m_tickIndex (i.e., supercold/normal bit masked off)
                 BOOL FSuperColdedIndex() const                  { return _FTickSuperColded( m_tickIndex ); }
-                WORD PctCachePriority() const                   { return m_pctCachePriority; }
 #endif
 
 #ifdef MINIMAL_FUNCTIONALITY    // required for BF perfmon counters

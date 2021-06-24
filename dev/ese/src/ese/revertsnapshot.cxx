@@ -1771,7 +1771,7 @@ ERR CRevertSnapshot::ErrCapturePreimage(
     RBSICompressPreImage( m_pinst, ifmp, pgno, g_cbPage, dataRec, pbDataDehydrated, pbDataCompressed, &fFlagsCompression );
 
     dbRec.m_bRecType = rbsrectypeDbPage;
-    dbRec.m_usRecLength = sizeof( RBSDbPageRecord ) + dataRec.Cb();
+    dbRec.m_usRecLength = sizeof( RBSDbPageRecord ) + (USHORT)dataRec.Cb();
     dbRec.m_dbid = dbid;
     dbRec.m_pgno = pgno;
     dbRec.m_fFlags = fFlags | fFlagsCompression;
@@ -1816,7 +1816,7 @@ ERR CRevertSnapshot::ErrCaptureDbAttach( WCHAR* wszDatabaseName, const DBID dbid
     RBSDbAttachRecord dbRec;
     dbRec.m_bRecType = rbsrectypeDbAttach;
     dbRec.m_dbid = dbid;
-    dbRec.m_usRecLength = sizeof( RBSDbAttachRecord ) + dataRec.Cb();
+    dbRec.m_usRecLength = sizeof( RBSDbAttachRecord ) + (USHORT)dataRec.Cb();
 
     return ErrCaptureRec( &dbRec, &dataRec, &dummy );
 }
@@ -1984,7 +1984,7 @@ ERR CRevertSnapshot::ErrCaptureRec(
 
             RBSFragContinue fragContdRec;
             fragContdRec.m_bRecType = rbsrectypeFragContinue;
-            fragContdRec.m_usRecLength = min( sizeof( RBSFragContinue ) + cbRemaining, cbSegmentSpaceRemaining );
+            fragContdRec.m_usRecLength = (USHORT)min( sizeof( RBSFragContinue ) + cbRemaining, cbSegmentSpaceRemaining );
 
             UtilMemCpy( m_pActiveBuffer->m_pBuffer + m_pActiveBuffer->m_ibNextRecord, &fragContdRec, sizeof( RBSFragContinue ) );
             m_pActiveBuffer->m_ibNextRecord += sizeof( RBSFragContinue );

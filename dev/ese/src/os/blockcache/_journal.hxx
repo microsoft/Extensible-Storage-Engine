@@ -225,9 +225,9 @@ class TJournal  //  j
 
     private:
 
-        void WaitForAppend( _In_ const size_t cbEntry, _In_ CWaiter* const pwaiterForAppend );
-        void PrepareToWaitForAppend( _In_ const size_t cbEntry, _In_ CWaiter* const pwaiterForAppend );
-        void ReleaseAppender(   _In_    const size_t    cbEntry,
+        void WaitForAppend( _In_ const QWORD cbEntry, _In_ CWaiter* const pwaiterForAppend );
+        void PrepareToWaitForAppend( _In_ const QWORD cbEntry, _In_ CWaiter* const pwaiterForAppend );
+        void ReleaseAppender(   _In_    const QWORD    cbEntry,
                                 _In_    CWaiter* const  pwaiterForAppend,
                                 _Out_   CWaiter** const ppwaiterNextAppender,
                                 _Out_   CWaiter** const ppwaiterNextSealer );
@@ -867,7 +867,7 @@ HandleError:
 }
 
 template< class I >
-void TJournal<I>::WaitForAppend( _In_ const size_t cbEntry, _In_ CWaiter* const pwaiterForAppend )
+void TJournal<I>::WaitForAppend( _In_ const QWORD cbEntry, _In_ CWaiter* const pwaiterForAppend )
 {
     Assert( m_crit.FOwner() );
 
@@ -896,7 +896,7 @@ void TJournal<I>::WaitForAppend( _In_ const size_t cbEntry, _In_ CWaiter* const 
     //  compute the size of the append queue
 
     const size_t cbEntryAppended = m_ilSegmentsToSeal.FEmpty() ? 0 : m_ilSegmentsToSeal.NextMost()->CbEntryAppended();
-    const size_t cbEntryAppendQ = roundup( cbEntryAppended + cbEntry, cbSegment );
+    const QWORD cbEntryAppendQ = roundup( cbEntryAppended + cbEntry, cbSegment );
 
     //  compute the segment that should be sealed to make progress on writing our cache but is still below our maximum
     //  cache size
@@ -921,7 +921,7 @@ void TJournal<I>::WaitForAppend( _In_ const size_t cbEntry, _In_ CWaiter* const 
 }
 
 template< class I >
-void TJournal<I>::PrepareToWaitForAppend( _In_ const size_t cbEntry, _In_ CWaiter* const pwaiterForAppend )
+void TJournal<I>::PrepareToWaitForAppend( _In_ const QWORD cbEntry, _In_ CWaiter* const pwaiterForAppend )
 {
     Assert( m_crit.FOwner() );
 
@@ -942,7 +942,7 @@ void TJournal<I>::PrepareToWaitForAppend( _In_ const size_t cbEntry, _In_ CWaite
 }
 
 template< class I >
-void TJournal<I>::ReleaseAppender(  _In_    const size_t    cbEntry,
+void TJournal<I>::ReleaseAppender(  _In_    const QWORD    cbEntry,
                                     _In_    CWaiter* const  pwaiterForAppend,
                                     _Out_   CWaiter** const ppwaiterNextAppender,
                                     _Out_   CWaiter** const ppwaiterNextSealer )
