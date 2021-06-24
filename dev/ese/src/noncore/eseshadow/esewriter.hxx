@@ -6,6 +6,17 @@
 #ifndef _ESEWRITER_
 #define _ESEWRITER_
 
+#pragma prefast(push)
+#pragma prefast(disable:26006, "Dont bother us with tchar, someone else owns that.")
+#pragma prefast(disable:26007, "Dont bother us with tchar, someone else owns that.")
+#pragma prefast(disable:28718, "Dont bother us with tchar, someone else owns that.")
+#pragma prefast(disable:28726, "Dont bother us with tchar, someone else owns that.")
+#include <tchar.h>
+#pragma prefast(pop)
+
+#include <objidlbase.h>
+#include "_jethdr.h"
+#include "os.hxx"
 #include <windows.h>
 
 #pragma prefast(push)

@@ -12,17 +12,6 @@
 #pragma prefast(pop)
 
 #pragma prefast(push)
-#pragma prefast(disable:26006, "Dont bother us with tchar, someone else owns that.")
-#pragma prefast(disable:26007, "Dont bother us with tchar, someone else owns that.")
-#pragma prefast(disable:28718, "Dont bother us with tchar, someone else owns that.")
-#pragma prefast(disable:28726, "Dont bother us with tchar, someone else owns that.")
-#include <tchar.h>
-#pragma prefast(pop)
-
-#include "_jethdr.h"
-#include "os.hxx"
-
-#pragma prefast(push)
 #pragma prefast(disable:28196, "Do not bother us with strsafe, someone else owns that.")
 #pragma prefast(disable:28205, "Do not bother us with strsafe, someone else owns that.")
 #include <strsafe.h>

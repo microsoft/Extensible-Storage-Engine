@@ -196,7 +196,7 @@ struct INDEX_ENTRY_CALLBACK_CONTEXT
     };
 };
 
-typedef ERR ( __cdecl INDEX_ENTRY_CALLBACK )(
+typedef ERR ( INDEX_ENTRY_CALLBACK )(
     FUCB *,
     KEY &,
     const KEY &,
@@ -2996,7 +2996,7 @@ public:
 #undef STATE
     }
 
-    static int Comp(
+    static int __cdecl Comp(
         const void *pvVal1,
         const void *pvVal2
         )

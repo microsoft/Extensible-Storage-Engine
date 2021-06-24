@@ -20,7 +20,7 @@ inline XECHECKSUM MakeChecksumFromECCXORAndPgno(
     return ( high | low );
 }
 
-#if ( defined _M_AMD64 || defined _M_IX86 ) && !defined _CHPE_X86_ARM64_
+#if ( defined _M_AMD64 || defined _M_IX86 ) && !defined _CHPE_X86_ARM64_ && !defined _ARM64EC_
 
 #include <intrin.h>
 #include <emmintrin.h>

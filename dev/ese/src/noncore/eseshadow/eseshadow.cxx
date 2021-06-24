@@ -184,7 +184,7 @@ static PWSTR WcsDupNew(
     _In_ PCWSTR szOld
 )
 {
-    const size_t cchOld = wcslen( szOld ) + 1;
+    const size_t cchOld = LOSStrLengthW( szOld ) + 1;
     const size_t cbOld = cchOld * sizeof( szOld[ 0 ] );
     PWSTR szNew = new WCHAR[ cchOld ];
     if ( szNew == NULL )
@@ -638,7 +638,7 @@ EseShadowCreateShadow(
     g_eseRecoveryWriterConfig.m_fIgnoreMissingDb = fIgnoreMissingDb;
     g_eseRecoveryWriterConfig.m_fIgnoreLostLogs = fIgnoreLostLogs;
 
-    size_t databasePathLen = szDatabaseFile ? wcslen( szDatabaseFile ) + 1 : 0;
+    size_t databasePathLen = szDatabaseFile ? LOSStrLengthW( szDatabaseFile ) + 1 : 0;
     if ( databasePathLen > 0 )
     {
         pesi->m_databaseFile = new WCHAR[ databasePathLen ];
@@ -668,7 +668,7 @@ EseShadowCreateShadow(
             *pchLastBackslash = L'\0';
         }
 
-        databasePathLen = g_eseRecoveryWriterConfig.m_szDatabasePath ? wcslen( g_eseRecoveryWriterConfig.m_szDatabasePath ) + 1 : 0;
+        databasePathLen = g_eseRecoveryWriterConfig.m_szDatabasePath ? LOSStrLengthW( g_eseRecoveryWriterConfig.m_szDatabasePath ) + 1 : 0;
     }
     else
     {
@@ -681,7 +681,7 @@ EseShadowCreateShadow(
     PCWSTR szLogPath = NULL;
     if ( szLogDirectory )
     {
-        logPathLength = wcslen( szLogDirectory ) + 1;
+        logPathLength = LOSStrLengthW( szLogDirectory ) + 1;
         szLogPath = szLogDirectory;
     }
     else
@@ -707,7 +707,7 @@ EseShadowCreateShadow(
     PCWSTR szSystemPath = NULL;
     if ( szSystemDirectory )
     {
-        systemPathLength = wcslen( szSystemDirectory ) + 1;
+        systemPathLength = LOSStrLengthW( szSystemDirectory ) + 1;
         szSystemPath = szSystemDirectory;
     }
     else
@@ -780,7 +780,7 @@ EseShadowCreateSimpleShadow(
     }
     pvbc = pesi->m_pvbc;
 
-    size_t databasePathLen = szArbitraryFile ? wcslen( szArbitraryFile ) + 1 : 0;
+    size_t databasePathLen = szArbitraryFile ? LOSStrLengthW( szArbitraryFile ) + 1 : 0;
 
     if ( databasePathLen > 0 )
     {

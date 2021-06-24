@@ -131,7 +131,7 @@ ULONG ChecksumSelectOldFormat( const unsigned char * const pb, const ULONG cb )
 {
     PFNCHECKSUMOLDFORMAT pfn = ChecksumSelectOldFormat;
 
-#if defined _M_IX86  && defined _CHPE_X86_ARM64_
+#if (defined(_M_IX86) && defined(_CHPE_X86_ARM64_)) || (defined(_M_AMD64) && defined(_ARM64EC_))
     pfn = ChecksumOldFormatSlowly;
 #else
     if( FSSEInstructionsAvailable() )
@@ -267,7 +267,7 @@ XECHECKSUM ChecksumSelectNewFormat( const unsigned char * const pb, const ULONG 
 {
     PFNCHECKSUMNEWFORMAT pfn = ChecksumSelectNewFormat;
 
-#if defined _M_IX86  && defined _CHPE_X86_ARM64_
+#if (defined(_M_IX86)  && defined(_CHPE_X86_ARM64_)) || (defined(_M_AMD64) && defined(_ARM64EC_))
     pfn = ChecksumNewFormatSlowly;
 #else
     if( FAVXEnabled() && FPopcntAvailable() )
