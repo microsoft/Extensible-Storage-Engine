@@ -429,7 +429,7 @@ VOID *CLookaside::PvFlush()
     {
         return NULL;
     }
-    
+
     //  % can be avoided if m_cItems is power of two
     VOID    *pvResult   = NULL;
     VOID    * volatile *ppvData             = m_ppvData;
@@ -550,7 +550,7 @@ ERR CResourceManager::ErrSetParam(
             case JET_resoperAlign:
                 lTemp = m_cbObjectAlign;
                 m_cbObjectAlign = (LONG)dwParam;
-                
+
                 if ( sizeof( DWORD_PTR ) > (LONG)dwParam || CalcObjectsPerSection() == 0 || !FPowerOf2( dwParam ) )
                 {
                     m_cbObjectAlign = lTemp;
@@ -872,7 +872,7 @@ VOID CResourceManager::Term( BOOL fDuringInit )
     }
 
     const BOOL fMayLeakResource = FRFSKnownResourceLeak() || FUtilProcessAbort();
-    
+
     AssertRTL( fMayLeakResource || 0 == m_cCResourceLinks );
     if ( m_lookaside.FInit() )
     {
@@ -899,9 +899,9 @@ VOID CResourceManager::Term( BOOL fDuringInit )
                 &pRCI->m_pRFOLHead,
                 &pRCI->m_pRFOLTail,
                 (CHAR *)pv + m_cbRFOLOffset );
-            
+
             pRCI->m_cDeferredFrees++;
-            
+
             pRCI->m_critAlloc.Leave();
 #else // RM_DEFERRED_FREE
             CResourceFreeObjectList::RFOLAddObject( &pRCI->m_pRFOL, (CHAR *)pv + m_cbRFOLOffset );
@@ -919,7 +919,7 @@ VOID CResourceManager::Term( BOOL fDuringInit )
 
         //  WARNING: overly clever code here: pRCI starts out invalid with pRCI->m_pRCINext pointing
         //  to the head of the list.
-        
+
         pRCI = (CResourceChunkInfo *)( (CHAR *)&m_pRCIList - OffsetOf( CResourceChunkInfo, m_pRCINext ) );
         while ( NULL != pRCI->m_pRCINext )
         {
@@ -931,7 +931,7 @@ VOID CResourceManager::Term( BOOL fDuringInit )
 
                 //  number of allocations that could be in the RFOL list
                 INT cAllocs = pRCITemp->m_cNextAlloc;
-                
+
                 //  number of allocations that have been handed out
                 INT cUsed = pRCITemp->m_cUsed;
 
@@ -947,7 +947,7 @@ VOID CResourceManager::Term( BOOL fDuringInit )
                 }
                 AssertRTL( pRFOL == NULL );
             }
-            
+
             // if pvData is allocated, free it
             if ( 0 == pRCITemp->m_cUsed )
             {
@@ -956,7 +956,7 @@ VOID CResourceManager::Term( BOOL fDuringInit )
                 pRCITemp->m_pvData = NULL;
                 m_cFreeRCI++;
             }
-            
+
             // if we're done with the RCI, free it
             if ( cRCIIsFree == pRCITemp->m_cUsed )
             {
@@ -1098,7 +1098,7 @@ VOID CResourceManager::Free( VOID * const pv )
     }
 
     m_cUsedObjects--;
-    
+
     //  we are redirecting all object allocations to the heap
     //
     if ( m_fAllocFromHeap )
@@ -1162,7 +1162,7 @@ VOID CResourceManager::Free( VOID * const pv )
 #else // RM_DEFERRED_FREE
         CResourceFreeObjectList::RFOLAddObject( &pRCI->m_pRFOL, (CHAR *)pv + m_cbRFOLOffset );
 #endif // !RM_DEFERRED_FREE
-        
+
         cUsedInChunk = AtomicDecrement( const_cast<LONG *>( &pRCI->m_cUsed ) );
 
         Assert( 0 <= cUsedInChunk );
@@ -1410,13 +1410,13 @@ VOID *CResourceManager::PvRFOLAlloc_( CResourceChunkInfo * const pRCI )
     pRFOL = CResourceFreeObjectList::PRFOLRemoveObject(
                 &pRCI->m_pRFOLHead,
                 &pRCI->m_pRFOLTail );
-    
+
     pRCI->m_cDeferredFrees--;
-    
+
 #else // RM_DEFERRED_FREE
     pRFOL = CResourceFreeObjectList::PRFOLRemoveObject( &pRCI->m_pRFOL );
 #endif // !RM_DEFERRED_FREE
-    
+
     pRCI->m_critAlloc.Leave();
     return (VOID *)((CHAR *)pRFOL-m_cbRFOLOffset);
 }
@@ -1744,7 +1744,7 @@ INLINE ULONG_PTR CResourceManager::CbQuota() const
 INT CResourceManager::CalcObjectsPerSection(INT *pcbSectionHeader) const
 {
     Assert( m_cbObjectSize > 0 );
-    
+
     const INT cbAlignedObject = AlignUpMask( m_cbObjectSize, m_cbObjectAlign );
     Assert( 0 != cbAlignedObject );
     const INT cbSection = (INT)( cbSectionSize - ( m_fGuarded ? OSMemoryPageCommitGranularity() : 0 ) );
@@ -2091,7 +2091,7 @@ BOOL CResource::FCloseToQuota()
     {
         return fFalse;
     }
-    
+
     // An instance that is in recovery has no
     // quota.
     if ( m_pinst != NULL &&
@@ -2099,7 +2099,7 @@ BOOL CResource::FCloseToQuota()
     {
         return fFalse;
     }
-    
+
     LONG cQuotaFree = m_quota.GetQuotaFree();
 
     // If we have less than 20% free of the quota, we're close
@@ -2108,7 +2108,7 @@ BOOL CResource::FCloseToQuota()
     {
         return fTrue;
     }
-    
+
     return fFalse;
 }
 
@@ -2198,7 +2198,7 @@ VOID *CResource::PvAlloc_(
     {
         //  indicate that we should remount the database to clear the out of quota condition
         //
-        
+
         char    szTag[ JET_resTagSize + 1 ]     = { 0 };
         wchar_t wszAdditional[ 64 ]             = { 0 };
         (void)ErrGetParam( JET_resoperTag, (DWORD_PTR *)szTag );
@@ -2208,7 +2208,7 @@ VOID *CResource::PvAlloc_(
 
         //  output the name of the tag and the current quota setting to improve diagnostics
         OSStrCbFormatW( wszAdditional, sizeof( wszAdditional ), L"%hs %I64u", szTag, (QWORD)cQuotaMax );
-        
+
         OSUHAEmitFailureTagEx( m_pinst, HaDbFailureTagRemount, L"d0cec001-e80a-4a13-9bec-8f16fe41102e", wszAdditional );
     }
     return pv;
@@ -2250,7 +2250,7 @@ BOOL CResource::FCallingProgramPassedValidJetHandle( _In_ const JET_RESID resid,
     {
         return fFalse;
     }
-    
+
     //  if ANYONE is allocating from the heap then we can not definitively say
     //  that a given resource is valid.  we can only say that it is definitely
     //  invalid if it has the signature of a freed block.  so we will skip all
@@ -2519,23 +2519,23 @@ class CResourceTestFixture : public JetTestFixture
     public:
         CResourceTestFixture() { memset( m_rgpv, 0, sizeof(m_rgpv) ); }
         ~CResourceTestFixture() {}
-        
+
     protected:
-    
+
         virtual bool SetUp_()
         {
             // Register the resid. The test resource manager may already be initialized
             // so we have to tear it down first.
 
             TearDown_();
-            
+
             if ( !CRMContainer::FAdd( m_resid ) )
                 return false;
 
             CResourceManager * const prm = CRMContainer::PRMFind( m_resid );
             if ( !prm )
                 return false;
-            
+
             ERR err;
             Call( prm->ErrSetParam( JET_resoperTag, (DWORD_PTR)"test" ) );
             Call( prm->ErrSetParam( JET_resoperSize, 64 ) );
@@ -2547,7 +2547,7 @@ class CResourceTestFixture : public JetTestFixture
             Call( prm->ErrSetParam( JET_resoperMinUse, 0 ) );
 
             Call( prm->ErrInit() );
-            
+
             return true;
 
         HandleError:
@@ -2566,15 +2566,15 @@ class CResourceTestFixture : public JetTestFixture
                     m_rgpv[i] = NULL;
                 }
             }
-            
+
             m_resource.Term();
             CResourceManager * const prm = CRMContainer::PRMFind( m_resid );
             if ( prm )
                 prm->Term();
-            
+
             CRMContainer::Delete( m_resid );
         }
-        
+
     public:
 
         // Allocating more objects than allowed by the quota fails
@@ -2635,12 +2635,12 @@ class CResourceTestFixture : public JetTestFixture
                 UtilSleep( 1 );
             }
         }
-        
+
         static void TestOneCreateFree( CResourceTestFixture *pThis )
         {
             const INT cHoard = 1000;
             void *rgpv[ cHoard ];
-            
+
             for ( INT i = 0; i < cHoard; i++ )
             {
                 rgpv[ i ] = pThis->m_resource.PvRESAlloc();
@@ -2666,7 +2666,7 @@ class CResourceTestFixture : public JetTestFixture
             void * pv = m_resource.PvRESAlloc();
             m_resource.Free( pv );
 
-            // Ignore the double free assert that will fire here to try to catch the invalid case of a 
+            // Ignore the double free assert that will fire here to try to catch the invalid case of a
             // block being given out of use twice after being double free'd.
             m_resource.Free( pv );
             void * pv2 = m_resource.PvRESAlloc();
@@ -2813,9 +2813,9 @@ INLINE VOID CRMContainer::CalcUsedObjects( JET_RESID resid, void* pvBuf )
 
         *( (unsigned __int64*) pvBuf ) = pRM->CbUsed();
     }
-    
+
     HandleError:
-    
+
     if ( !fOSRMPreinitPostTerm )
     {
         s_critAddDelete.Leave();
@@ -2840,9 +2840,9 @@ INLINE VOID CRMContainer::CalcQuotaObjects( JET_RESID resid, void* pvBuf )
 
         *( (unsigned __int64*) pvBuf ) = pRM->CbQuota();
     }
-    
+
 HandleError:
-    
+
     if ( !fOSRMPreinitPostTerm )
     {
         s_critAddDelete.Leave();
@@ -3127,7 +3127,7 @@ BOOL FOSRMPreinit()
     EnforceSz( 0 == ( cbRESHeader % cbCacheLine ), "NonCacheAlignedCbRESHeader" );
 
     Assert( cbBucketLegacy > cbRESHeader );
-    
+
     cbSectionSize = OSMemoryPageReserveGranularity();
     Assert( 0 < cbSectionSize );
     Assert( FPowerOf2( cbSectionSize ) );
@@ -3144,7 +3144,7 @@ BOOL FOSRMPreinit()
         fGuardOverride = fTrue;
         fGuardPage = _wtol (wszBuffer) != 0? fTrue: fFalse;
     }
-    
+
     //  initialize the resource managers with their default parameters
     for ( i = 0; i < sizeof( RMDefaults ) / sizeof( RMDefaults[0] ); i++ )
     {
