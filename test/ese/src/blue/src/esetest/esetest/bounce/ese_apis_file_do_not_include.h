@@ -1,6 +1,6 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
-    // FORMAT:
+// FORMAT:
 // lines beginning with a slash are comments. Comments MUST end with a semi-colon!
 // <type> <API>;
 // where type is one of:
