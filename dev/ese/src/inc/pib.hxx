@@ -141,7 +141,8 @@ public:
             m_level( 0 ),
             m_critCachePriority( CLockBasicInfo( CSyncBasicInfo( szPIBCachePriority ), rankPIBCachePriority, 0 ) ),
             m_pctCachePriority( g_pctCachePriorityUnassigned ),
-            m_fCommitContextContainsCustomerData( fTrue )
+            m_fCommitContextContainsCustomerData( fTrue ),
+            m_critTrx( CLockBasicInfo( CSyncBasicInfo( szPIBTrx ), rankPIBTrx, 0 ) )
     {
         for ( DBID dbid = 0; dbid < _countof( m_rgpctCachePriority ); dbid++ )
         {
@@ -368,7 +369,8 @@ private:
     ULONG               m_grbitUserIoPriority;          // The user specified JET_sesparamIOPriority flags.
     ULONG               m_qosIoPriority;                // The converted QOS flags to pass to IO functions.
 
-//  440 / 548 bytes
+    CCriticalSection    m_critTrx;                      // Used for synchronization between concurrent create-index adding RCEs for this PIB and the normal operations on this PIB
+//  448 / 556 bytes
 
 public:
     LEVEL               Level() const { return m_level; }
@@ -517,6 +519,7 @@ public:
     BOOL                FCheckSetLoggedCheckpointGettingDeep();
     VOID                ResetLoggedCheckpointGettingDeep();
 
+    CCriticalSection&   CritTrx() { return m_critTrx; }
 private:
     VOID                ResolveCachePriorityForDb_( const DBID dbid );
 
@@ -548,9 +551,9 @@ public:
 //  Be conscious of the size if you're changing it ...
 /*
 #ifdef _WIN64
-C_ASSERT( sizeof(PIB) == 548 );
+C_ASSERT( sizeof(PIB) == 556 );
 #else  //  !_WIN64
-C_ASSERT( sizeof(PIB) == 440 );
+C_ASSERT( sizeof(PIB) == 448 );
 #endif  //  _WIN64
 */
 

@@ -600,7 +600,7 @@ ERR ErrBTOpenByProxy( PIB *ppib, FCB *pfcb, FUCB **ppfucb, const LEVEL level )
     ERR     err;
     FUCB    *pfucb;
 
-    Assert( PinstFromPpib( ppib )->RwlTrx( ppib ).FWriter() );
+    Assert( ppib->CritTrx().FOwner() );
 
     Assert( level > 0 );
     Assert( pfcb != pfcbNil );
