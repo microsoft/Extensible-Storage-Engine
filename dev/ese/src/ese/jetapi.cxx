@@ -2373,8 +2373,6 @@ INST::~INST()
     }
     OSMemoryPageFree( m_rgpls );
 
-    m_rwlpoolPIBTrx.Term();
-
     Assert( m_rgparam != g_rgparam );
     delete [] m_rgparam;
 }
@@ -3549,12 +3547,6 @@ ERR ErrNewInst(
         Error( ErrERRCheck( JET_errOutOfMemory ) );
     }
     if ( !pinst->FSetDisplayName( wszDisplayName ) )
-    {
-        Error( ErrERRCheck( JET_errOutOfMemory ) );
-    }
-
-    //  this allocates 64 critTrx per processor (/4 req'd by pool code)
-    if ( !pinst->m_rwlpoolPIBTrx.FInit( 64 * OSSyncGetProcessorCount() / 4, rankPIBTrx, szPIBTrx ) )
     {
         Error( ErrERRCheck( JET_errOutOfMemory ) );
     }

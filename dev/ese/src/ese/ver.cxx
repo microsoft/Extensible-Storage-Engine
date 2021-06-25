@@ -903,12 +903,12 @@ BOOL RCE::FAssertCritFCBRCEList_() const
 
 
 //  ================================================================
-BOOL RCE::FAssertRwlPIB_() const
+BOOL RCE::FAssertCritPIB_() const
 //  ================================================================
 {
     Assert( !FFullyCommitted() );
     Assert( !::FOperNull( m_oper ) );
-    return ( PinstFromPpib( m_pfucb->ppib )->RwlTrx( m_pfucb->ppib ).FReader() || Ptls()->fAddColumn );
+    return ( m_pfucb->ppib->CritTrx().FOwner() || Ptls()->fAddColumn );
 }
 
 
@@ -1225,7 +1225,7 @@ INLINE VOID RCE::SetPrcePrevOfNode( RCE * prce )
 INLINE VOID RCE::FlagRolledBack()
 //  ================================================================
 {
-    Assert( FAssertRwlPIB_() );
+    Assert( FAssertCritPIB_() );
     m_fRolledBack = fTrue;
 }
 
@@ -1258,7 +1258,7 @@ INLINE VOID RCE::SetPrceNextOfSession( RCE * prce )
 INLINE VOID RCE::SetLevel( LEVEL level )
 //  ================================================================
 {
-    Assert( FAssertRwlPIB_() || PinstFromIfmp( m_ifmp )->m_plog->FRecovering() );
+    Assert( FAssertCritPIB_() || PinstFromIfmp( m_ifmp )->m_plog->FRecovering() );
     Assert( m_level > level );  // levels are always decreasing
     m_level = level;
 }
@@ -1269,7 +1269,7 @@ INLINE VOID RCE::SetTrxCommitted( const TRX trx )
 //  ================================================================
 {
     Assert( !FOperInHashTable() || FAssertRwlHashAsWriter_() );
-    Assert( FAssertRwlPIB_() || PinstFromIfmp( m_ifmp )->m_plog->FRecovering() );
+    Assert( FAssertCritPIB_() || PinstFromIfmp( m_ifmp )->m_plog->FRecovering() );
     Assert( FAssertCritFCBRCEList_()  );
     Assert( prceNil == m_prcePrevOfSession );   //  only uncommitted RCEs in session list
     Assert( prceNil == m_prceNextOfSession );
@@ -2162,13 +2162,13 @@ INLINE VOID VERIInsertRCEIntoSessionList( PIB * const ppib, RCE * const prce, RC
 //  NEVER inserts at the head (since the insert occurs after an existing
 //  RCE), so no possibility of conflict with regular session inserts, and
 //  therefore no critical section needed.  However, may conflict with
-//  other concurrent create indexers, which is why we must obtain rwlTrx
+//  other concurrent create indexers, which is why we must obtain critTrx
 //  (to ensure only one concurrent create indexer is processing the parent
 //  at a time.
 //
 //-
 {
-    Assert( PinstFromPpib( ppib )->RwlTrx( ppib ).FWriter() );
+    Assert( ppib->CritTrx().FOwner() );
 
     Assert( !PinstFromPpib( ppib )->m_plog->FRecovering() );
 
@@ -2406,7 +2406,7 @@ LOCAL VOID VERINullifyRolledBackRCE(
                                                     && prceToNullify->FOperAffectsSecondaryIndex();
 
 
-    Assert( PinstFromPpib( ppib )->RwlTrx( ppib ).FReader() );
+    Assert( ppib->CritTrx().FOwner() );
 
     if ( fOperInHashTable )
     {
@@ -2459,9 +2459,9 @@ LOCAL VOID VERINullifyRolledBackRCE(
 
         if ( NULL != pprceNextToNullify )
         {
-            PinstFromPpib( ppib )->RwlTrx( ppib ).LeaveAsReader();
+            ppib->CritTrx().Leave();
             UtilSleep( cmsecWaitGeneric );
-            PinstFromPpib( ppib )->RwlTrx( ppib ).EnterAsReader();
+            ppib->CritTrx().Enter();
 
             //  restart RCE scan
             *pprceNextToNullify = ppib->prceNewest;
@@ -2566,7 +2566,7 @@ VOID VERNullifyAllVersionsOnFCB( FCB * const pfcb )
         if ( prce->FOperInHashTable() )
         {
             const UINT  uiHash          = prce->UiHash();
-            const BOOL  fNeedRwlTrx     = ( prce->TrxCommitted() == trxMax
+            const BOOL  fNeedCritTrx    = ( prce->TrxCommitted() == trxMax
                                             && !FFMPIsTempDB( prce->Ifmp() ) );
             PIB         *ppib;
 
@@ -2574,11 +2574,11 @@ VOID VERNullifyAllVersionsOnFCB( FCB * const pfcb )
                 || plog->FRecovering()
                 || ( prce->FMoved() && operFlagDelete == prce->Oper() ) );
 
-            if ( fNeedRwlTrx )
+            if ( fNeedCritTrx )
             {
-                // If uncommitted, must grab rwlTrx to ensure that
+                // If uncommitted, must grab critTrx to ensure that
                 // RCE does not commit or rollback on us while
-                // nullifying.  Note that we don't need rwlTrx
+                // nullifying.  Note that we don't need critTrx
                 // if this is a temp table because we're the
                 // only ones who have access to it.
                 Assert( prce->Pfucb() != pfucbNil );
@@ -2598,10 +2598,9 @@ VOID VERNullifyAllVersionsOnFCB( FCB * const pfcb )
             {
                 pver->m_critRCEClean.Enter();
             }
-            ENTERREADERWRITERLOCK   enterRwlPIBTrx(
-                                        fNeedRwlTrx ? &PinstFromPpib( ppib )->RwlTrx( ppib ) : NULL,
-                                        fFalse,
-                                        fNeedRwlTrx );
+            ENTERCRITICALSECTION    enterCritPIBTrx(
+                                        fNeedCritTrx ? &ppib->CritTrx() : NULL,
+                                        fNeedCritTrx );
             ENTERREADERWRITERLOCK   enterRwlHashAsWriter( &( pver->RwlRCEChain( uiHash ) ), fFalse );
 
             pfcb->CritRCEList().Enter();
@@ -2639,7 +2638,7 @@ VOID VERNullifyAllVersionsOnFCB( FCB * const pfcb )
             pver->m_critRCEClean.Enter();
             pfcb->CritRCEList().Enter();
 
-            // rwlTrx not needed, since we're the only ones
+            // critTrx not needed, since we're the only ones
             // who should have access to this FCB.
 
             // Verify no one nullified the RCE while we were
@@ -4511,7 +4510,7 @@ ERR VER::ErrVERModify(
             }
             else
             {
-                Assert( PinstFromPpib( prcePrimary->Pfucb()->ppib )->RwlTrx( prcePrimary->Pfucb()->ppib ).FWriter() );
+                Assert( prcePrimary->Pfucb()->ppib->CritTrx().FOwner() );
 
                 level = prcePrimary->Level();
 
@@ -5242,7 +5241,7 @@ INLINE VOID VERIUnlinkDefunctSecondaryIndex(
         else
         {
             BOOL fDoUnlink = fFalse;
-            PinstFromPpib( ppibT )->RwlTrx( ppibT ).EnterAsWriter();
+            ppibT->CritTrx().Enter();
 
             //  if undoing CreateIndex, we know other session must be
             //  in a transaction if it has a link to this FCB because
@@ -5268,7 +5267,7 @@ INLINE VOID VERIUnlinkDefunctSecondaryIndex(
                 pfucbT->u.pfcb->Unlink( pfucbT );
             }
 
-            PinstFromPpib( ppibT )->RwlTrx( ppibT ).LeaveAsWriter();
+            ppibT->CritTrx().Leave();
         }
 
         pfcb->Lock();
@@ -7573,8 +7572,8 @@ LOCAL VOID VERIUndoCreateTable( PIB * const ppib, RCE * const prce )
     Assert( pfcb->FTypeTable() || pfcb->FTypeTemporaryTable() );
     Assert( pfcb->FPrimaryIndex() );
 
-    // Need to leave RwlTrx to wait for tasks to complete
-    PinstFromPpib( ppib )->RwlTrx( ppib ).LeaveAsReader();
+    // Need to leave critTrx to wait for tasks to complete
+    ppib->CritTrx().Leave();
 
     for ( FCB *pfcbT = pfcb; pfcbT != pfcbNil; pfcbT = pfcbT->PfcbNextIndex() )
     {
@@ -7589,7 +7588,7 @@ LOCAL VOID VERIUndoCreateTable( PIB * const ppib, RCE * const prce )
         }
     }
 
-    PinstFromPpib( ppib )->RwlTrx( ppib ).EnterAsReader();
+    ppib->CritTrx().Enter();
 
     pfcb->Lock();
     //  set FDeleteCommitted flag to silence asserts in ErrSPFreeFDP()
@@ -7904,12 +7903,12 @@ LOCAL VOID VERIUndoCreateLV( PIB *ppib, const RCE * const prce )
     {
         FCB * const pfcbLV = prce->Pfcb()->Ptdb()->PfcbLV();
 
-        // Need to leave RwlTrx to wait for tasks to complete
-        PinstFromPpib( ppib )->RwlTrx( ppib ).LeaveAsReader();
+        // Need to leave critTrx to wait for tasks to complete
+        ppib->CritTrx().Leave();
 
         VERIWaitForTasks( PverFromPpib( ppib ), pfcbLV, fTrue, fFalse );
 
-        PinstFromPpib( ppib )->RwlTrx( ppib ).EnterAsReader();
+        ppib->CritTrx().Enter();
 
         //  if we rollback the creation of the LV tree, unlink the LV FCB
         //  the FCB will be lost (memory leak)
@@ -7952,10 +7951,10 @@ LOCAL VOID VERIUndoCreateIndex( PIB *ppib, const RCE * const prce )
         Assert( pfcb->Pidb() != pidbNil );
 
         //  Normally, we grab the updating/indexing latch before we grab
-        //  the ppib's rwlTrx, but in this case, we are already in the
-        //  ppib's rwlTrx (because we are rolling back) and we need the
+        //  the ppib's critTrx, but in this case, we are already in the
+        //  ppib's critTrx (because we are rolling back) and we need the
         //  updating/indexing latch.  We can guarantee that this will not
-        //  cause a deadlock because the only person that grabs rwlTrx
+        //  cause a deadlock because the only person that grabs critTrx
         //  after grabbing the updating/indexing latch is concurrent create
         //  index, which quiesces all rollbacks before it begins.
         CLockDeadlockDetectionInfo::NextOwnershipIsNotADeadlock();
@@ -7993,10 +7992,10 @@ LOCAL VOID VERIUndoCreateIndex( PIB *ppib, const RCE * const prce )
         pfcbTable->LeaveDDL();
         pfcbTable->ResetIndexing();
 
-        //  must leave rwlTrx because we may enter the rwlTrx
+        //  must leave critTrx because we may enter the critTrx
         //  of other sessions when we try to remove their RCEs
         //  or cursors on this index
-        PinstFromPpib( ppib )->RwlTrx( ppib ).LeaveAsReader();
+        ppib->CritTrx().Leave();
 
         // Index FCB has been unlinked from table, so we're
         // guaranteed no further versions will occur on this
@@ -8023,7 +8022,7 @@ LOCAL VOID VERIUndoCreateIndex( PIB *ppib, const RCE * const prce )
         
         VERIUnlinkDefunctSecondaryIndex( prce->Pfucb()->ppib, pfcb );
 
-        PinstFromPpib( ppib )->RwlTrx( ppib ).EnterAsReader();
+        ppib->CritTrx().Enter();
 
         // The table's version count will prevent the
         // table FCB (and thus this secondary index FCB)
@@ -8184,7 +8183,7 @@ INLINE VOID VERIUndoNonLoggedOper( PIB *ppib, RCE * const prce, RCE **pprceNextT
         case operCreateIndex:
             VERIUndoCreateIndex( ppib, prce );
             //  refresh prceNextToUndo in case RCE list was
-            //  updated when we lost rwlTrx
+            //  updated when we lost critTrx
             *pprceNextToUndo = prce->PrcePrevOfSession();
             break;
         case operDeleteIndex:
@@ -8256,7 +8255,7 @@ ERR ErrVERRollback( PIB *ppib )
     
     if ( prceNil != ppib->prceNewest )
     {
-        ENTERREADERWRITERLOCK rwlTrx( &PinstFromPpib( ppib )->RwlTrx( ppib ), fTrue );
+        ENTERCRITICALSECTION critTrx( &ppib->CritTrx() );
     
         RCE *prceToUndo;
         RCE *prceNextToUndo;
@@ -8394,7 +8393,7 @@ ERR ErrVERRollback( PIB *ppib, UPDATEID updateid )
     INT     cRepeat = 0;
     ERR err = JET_errSuccess;
 
-    PinstFromPpib( ppib )->RwlTrx( ppib ).EnterAsReader();
+    ppib->CritTrx().Enter();
 
     RCE *prceToUndo;
     RCE *prceNextToUndo;
@@ -8476,7 +8475,7 @@ ERR ErrVERRollback( PIB *ppib, UPDATEID updateid )
     }
 
 HandleError:
-    PinstFromPpib( ppib )->RwlTrx( ppib ).LeaveAsReader();
+    ppib->CritTrx().Leave();
 
     return err;
 }

@@ -1794,7 +1794,7 @@ ERR ErrDIRComputeStats( FUCB *pfucb, INT *pcnode, INT *pckey, INT *pcpage )
 ERR ErrDIRBeginTransaction( PIB *ppib, const TRXID trxid, const JET_GRBIT grbit )
 {
     ERR         err         = JET_errSuccess;
-    BOOL        fInRwlTrx   = fFalse;
+    BOOL        fInCritTrx  = fFalse;
     INST        * pinst     = PinstFromPpib( ppib );
 
     //  The critical section ensure that the deferred begin trx level
@@ -1846,9 +1846,9 @@ ERR ErrDIRBeginTransaction( PIB *ppib, const TRXID trxid, const JET_GRBIT grbit 
     }
     else if( prceNil != ppib->prceNewest )
     {
-        pinst->RwlTrx( ppib ).EnterAsReader();
+        ppib->CritTrx().Enter();
         Assert( !( ppib->FReadOnlyTrx() ) );
-        fInRwlTrx = fTrue;
+        fInCritTrx = fTrue;
     }
     else
     {
@@ -1879,11 +1879,11 @@ ERR ErrDIRBeginTransaction( PIB *ppib, const TRXID trxid, const JET_GRBIT grbit 
     }
 
 HandleError:
-    if ( fInRwlTrx )
+    if ( fInCritTrx )
     {
         Assert( prceNil != ppib->prceNewest );
         Assert( !( ppib->FReadOnlyTrx() ) );
-        pinst->RwlTrx( ppib ).LeaveAsReader();
+        ppib->CritTrx().Leave();
     }
 
     return err;
@@ -1922,10 +1922,10 @@ ERR ErrDIRCommitTransaction( PIB *ppib, JET_GRBIT grbit, DWORD cmsecDurableCommi
         return ErrERRCheck( JET_errSessionSharingViolation );
     }
 
-    // This reader writer lock ensures that we don't commit RCE's from underneath CreateIndex.
+    // This critical section ensures that we don't commit RCE's from underneath CreateIndex.
     if( fSessionHasRCE )
     {
-        pinst->RwlTrx( ppib ).EnterAsReader();
+        ppib->CritTrx().Enter();
     }
 
     //  perf stats
@@ -2175,7 +2175,7 @@ ERR ErrDIRCommitTransaction( PIB *ppib, JET_GRBIT grbit, DWORD cmsecDurableCommi
 HandleError:
     if( fSessionHasRCE )
     {
-        pinst->RwlTrx( ppib ).LeaveAsReader();
+        ppib->CritTrx().Leave();
     }
 
 #ifdef DEBUG
@@ -2355,7 +2355,7 @@ ERR ErrDIRRollback( PIB *ppib, JET_GRBIT grbit )
         //  if rollback to level 0 then close deferred closed cursors
         //  if cursor was opened at this level, close it
         //
-        ENTERREADERWRITERLOCK enterRwlTrx( &pinst->RwlTrx( ppib ), fTrue, fSessionHasRCE );
+        ENTERCRITICALSECTION enterCritTrx( &ppib->CritTrx(), fSessionHasRCE );
         for ( pfucb = ppib->pfucbOfSession; pfucb != pfucbNil; )
         {
             FUCB * const    pfucbNext                   = pfucb->pfucbNextOfSession;

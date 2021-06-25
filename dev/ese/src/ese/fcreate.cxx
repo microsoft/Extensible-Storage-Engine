@@ -6544,12 +6544,12 @@ LOCAL ERR ErrFILEIProcessRCE( PIB *ppib, FUCB *pfucbTable, FUCB *pfucbIndex, RCE
 
         // This ensures that the RCE is not committed from underneath us.
         // Note that even if the RCE has since been committed and the
-        // PIB freed, we are still able to use the rwlTrx member of
+        // PIB freed, we are still able to use the critTrx member of
         // the PIB because we never actually release the PIB memory
         // (we just put it on the free PIB list).
         // UNDONE: Optimise by blocking only Commit, not all other CreateIndex
         // threads working on an RCE belonging to this session as well.
-        PinstFromPpib( ppib )->RwlTrx( ppibProxy ).EnterAsWriter();
+        ppibProxy->CritTrx().Enter();
 
         // Decrement PreventRollback count.  The RCEChain critical section now
         // protects the RCE from being deleted.
@@ -6571,7 +6571,7 @@ LOCAL ERR ErrFILEIProcessRCE( PIB *ppib, FUCB *pfucbTable, FUCB *pfucbIndex, RCE
         {
             Assert( TrxCmp( prce->TrxCommitted(), ppib->trxBegin0 ) > 0 );
 
-            PinstFromPpib( ppib )->RwlTrx( ppibProxy ).LeaveAsWriter();
+            ppibProxy->CritTrx().Leave();
             fUncommittedRCE = fFalse;
         }
     }
@@ -6606,7 +6606,7 @@ HandleError:
     if ( fUncommittedRCE )
     {
         Assert( ppibNil != ppibProxy );
-        PinstFromPpib( ppib )->RwlTrx( ppibProxy ).LeaveAsWriter();
+        ppibProxy->CritTrx().Leave();
     }
 
     return err;
