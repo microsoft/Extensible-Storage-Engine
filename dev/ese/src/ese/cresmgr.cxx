@@ -2011,7 +2011,10 @@ ERR CResource::ErrGetParam( JET_RESOPER resop, DWORD_PTR * const pdwParam ) cons
     ERR err = JET_errSuccess;
     if ( NULL != pdwParam )
     {
-        *pdwParam = 0;
+        if ( JET_resoperTag != resop )
+        {
+            *pdwParam = 0;
+        }
         switch ( resop )
         {
             case JET_resoperTag:
