@@ -17712,6 +17712,7 @@ VOID FUCB::Dump( CPRINTF * pcprintf, DWORD_PTR ulBase ) const
     EDBGDumplinkDml( FUCB, this, PIB, ppib, ulBase );
     EDBGDumplinkDml( FUCB, this, FUCB, pfucbNextOfSession, ulBase );
     EDBGDumplinkDml( FUCB, this, FCB, u.pfcb, ulBase );
+    EDBGDumplinkDml( FUCB, this, FUCB, pfucbLatchHolderForSpace, ulBase );
     (*pcprintf)( FORMAT_POINTER( FUCB, this, u.pscb, ulBase ) );
     (*pcprintf)( FORMAT_INT( FUCB, this, ifmp, ulBase ) );
 
