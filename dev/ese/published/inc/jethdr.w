@@ -3500,6 +3500,7 @@ typedef JET_ERR (JET_API *JET_PFNDURABLECOMMITCALLBACK)(
     _In_ JET_GRBIT      grbit );
 
 #endif // JET_VERSION >= 0x0602
+// end_PubEsent
 
 typedef struct
 {
@@ -3526,7 +3527,12 @@ typedef struct
 
     unsigned long long      cSecRevert;                 // Total secs spent in revert process.
     unsigned long long      cPagesReverted;             // Total pages reverted across all the database files as part of the revert.
+
+    long                    lGenRBSMaxApplied;          // Max revert snapshot generation applied during revert.
+    long                    lGenRBSMinApplied;          // Min revert snapshot generation applied during revert.
 } JET_RBSREVERTINFOMISC;
+
+// begin_PubEsent
 
 /************************************************************************/
 /*************************     JET CONSTANTS     ************************/
