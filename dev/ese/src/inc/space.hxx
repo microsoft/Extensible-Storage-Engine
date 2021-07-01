@@ -365,8 +365,6 @@ ERR ErrSPCreateMultiple(
     const CPG   cpgPrimary,
     const BOOL  fUnique,
     const ULONG fPageFlags );
-ERR ErrSPIOpenAvailExt( PIB *ppib, FCB *pfcb, FUCB **ppfucbAE );
-ERR ErrSPIOpenOwnExt( PIB *ppib, FCB *pfcb, FUCB **ppfucbOE );
 ERR ErrSPReserveSPBufPagesForSpaceTree( FUCB *pfucb, FUCB *pfucbSpace, FUCB *pfucbParent );
 ERR ErrSPReserveSPBufPages(
     FUCB* const pfucbSpace,

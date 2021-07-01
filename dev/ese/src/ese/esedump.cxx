@@ -856,11 +856,11 @@ LOCAL ERR ErrESEDUMPMultipleSpaceHeaderDump(SPACE_HEADER & sph, FUCB * pfucb, JE
         // open the page of the coresponding space tree
         if ( step )
         {
-            Call( ErrSPIOpenAvailExt( pfucb->ppib, pfucb->u.pfcb, &pfucbExtent ) );
+            Call( ErrSPIOpenAvailExt( pfucb, &pfucbExtent ) );
         }
         else
         {
-            Call( ErrSPIOpenOwnExt( pfucb->ppib, pfucb->u.pfcb, &pfucbExtent ) );
+            Call( ErrSPIOpenOwnExt( pfucb, &pfucbExtent ) );
         }
         Assert( pfucbExtent != pfucbNil );
 

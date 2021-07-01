@@ -1252,26 +1252,36 @@ ERR ErrCATGetExtentPageCounts(
     CPG * const pcpgOE,
     CPG * const pcpgAE );
 
-INLINE BOOL FCATExtentPageCountsCached( const FUCB * const pfucb )
+INLINE ERR ErrCATExtentPageCountsCached( const FUCB * const pfucb )
 {
-    switch ( ErrCATGetExtentPageCounts(
-                 pfucb->ppib,
-                 pfucb->ifmp,
-                 pfucb->u.pfcb->ObjidFDP(),
-                 NULL,
-                 NULL ) )
+    ERR err;
+    err = ErrCATGetExtentPageCounts(
+        pfucb->ppib,
+        pfucb->ifmp,
+        pfucb->u.pfcb->ObjidFDP(),
+        NULL,
+        NULL );
 
+    switch ( err )
     {
-        case JET_errRecordNotFound:
-        case JET_errNotInitialized:
-            return fFalse;
+    case JET_errSuccess:
+        // Definitively know the value is there.
+        return JET_errSuccess;
 
-        case JET_errSuccess:
-            return fTrue;
+    case JET_errRecordNotFound:
+    case JET_errNotInitialized:
+        // Definitively know the value is not there.
+        return JET_errRecordNotFound;
 
-        default:
-            AssertSz( fFalse, "Failed to find object in cache in unepxected way.");
-            return fFalse;
+        // Don't definitively know anything.
+        // Explicitly listing the error values we've seen just to aid in finding
+        // unexpected conditions.
+    case JET_errOutOfCursors:          // Low resource condition.
+        return JET_errInternalError;
+        
+    default:
+        AssertSz( fFalse, "Unexpected case in switch." );
+        return JET_errInternalError;
     }
 }
 

@@ -133,9 +133,17 @@ ERR ErrSPIOpenAvailExt(
     FCB     *pfcb,
     FUCB    **ppfucbAE );
 
+ERR ErrSPIOpenAvailExt(
+    FUCB *pfucb,
+    FUCB **ppfucbAE );
+
 ERR ErrSPIOpenOwnExt(
     PIB     *ppib,
     FCB     *pfcb,
+    FUCB    **ppfucbOE );
+
+ERR ErrSPIOpenOwnExt(
+    FUCB    *pfucb,
     FUCB    **ppfucbOE );
 
 ERR ErrSPIGetExtentInfo(

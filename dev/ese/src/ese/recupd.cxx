@@ -1287,13 +1287,17 @@ LOCAL ERR ErrRECIInsert(
     ULONG           iidxsegT;
     BOOL            fInNewTransaction       = fFalse;
 
-    //  if table itself created in same transaction then allow application
-    //  to update table without creating separate versions for each update.
-    //  It is expected that any error returned from any update operation
-    //  to lead to the table creation being rolled back.
+    //  If the table itself is created in the same transaction then allow
+    //  the application to update the table without creating separate versions
+    //  for each update.  It is expected that any error returned from any update
+    //  operation will lead to the table creation being rolled back.
     //
+    //  If we're doing a versionless update for the extent page count cache,
+    //  we don't check for uncommitted tables, and we allow errors without
+    //  forcing a table creation rollback.
     DIRFLAG fDIRFlags = fDIRNull;
     BOOL    fNoVersionUpdate = fFalse;
+    BOOL    fRollbackOnNoVersionUpdateError = fTrue;
 
     FID     fidVersion;
 
@@ -1331,6 +1335,7 @@ LOCAL ERR ErrRECIInsert(
         }
 
         fDIRFlags = fDIRNoVersion;
+        fRollbackOnNoVersionUpdateError = fFalse;
     }
     else
     {
@@ -1696,7 +1701,7 @@ HandleError:
     //  if no version update failed then table may be corrupt.
     //  Session must roll back to level 0 to delete table.
     //
-    if ( fNoVersionUpdate )
+    if ( fNoVersionUpdate && fRollbackOnNoVersionUpdateError )
     {
         Assert( ppib->Level() > 0 );
         Assert( pfcbTable->FUncommitted() );

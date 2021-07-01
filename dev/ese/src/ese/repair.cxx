@@ -8217,7 +8217,7 @@ LOCAL ERR ErrREPAIRRepairGlobalSpace(
     Call( ErrDIROpen( ppib, pgnoSystemRoot, ifmp, &pfucb ) );
 
     //  The tree has only one node so we can insert ths node without splitting
-    Call( ErrSPIOpenOwnExt( ppib, pfucb->u.pfcb, &pfucbOE ) );
+    Call( ErrSPIOpenOwnExt( pfucb, &pfucbOE ) );
 
     (*popts->pcprintfDebug)( "Global OwnExt:  %d pages ending at %d\r\n", cpgOwned, pgnoLast );
     Call( ErrREPAIRInsertRunIntoSpaceTree(
@@ -8576,7 +8576,7 @@ LOCAL ERR ErrREPAIRRepairCatalogs(
             // pfucbCatalog->u.pfcb->SetCpgOE( cpgMultipleExtentMin );
             // But, we don't track Cpg for sort tables.
         }
-        Call( ErrSPIOpenOwnExt( ppib, pfucbCatalog->u.pfcb, &pfucbSpace ) );
+        Call( ErrSPIOpenOwnExt( pfucbCatalog, &pfucbSpace ) );
 #ifdef REPAIR_DEBUG_VERBOSE_SPACE
         (*popts->pcprintfDebug)( "%s OwnExt: %d pages ending at %d\r\n", szMSO, cpgOwned, pgnoLast );
 #endif  //  REPAIR_DEBUG_VERBOSE_SPACE
@@ -9013,7 +9013,7 @@ LOCAL ERR ErrREPAIRCopyTempTableToCatalog(
         // pfucbCatalog->u.pfcb->SetCpgOE( cpgMultipleExtentMin );
         // But, we don't track Cpg for sort tables.
     }
-    Call( ErrSPIOpenOwnExt( ppib, pfucbCatalog->u.pfcb, &pfucbSpace ) );
+    Call( ErrSPIOpenOwnExt( pfucbCatalog, &pfucbSpace ) );
 #ifdef REPAIR_DEBUG_VERBOSE_SPACE
     (*popts->pcprintfDebug)( "%s OwnExt: %d pages ending at %d\r\n", szMSO, cpgOwned, pgnoLast );
 #endif  //  REPAIR_DEBUG_VERBOSE_SPACE
@@ -9859,7 +9859,7 @@ LOCAL ERR ErrREPAIRRebuildSpace(
         Assert( pcsrNil == pfucbParent->pcsrRoot );
     }
 
-    Call( ErrSPIOpenOwnExt( ppib, pfucb->u.pfcb, &pfucbOE ) );
+    Call( ErrSPIOpenOwnExt( pfucb, &pfucbOE ) );
 
 #ifdef DEBUG
     pgnoPrev = pgnoNull;

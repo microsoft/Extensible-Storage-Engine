@@ -4,6 +4,7 @@
 #include "std.hxx"
 
 #include "PageSizeClean.hxx"
+#include "_space.hxx"
 
 //  ****************************************************************
 //  TASK
