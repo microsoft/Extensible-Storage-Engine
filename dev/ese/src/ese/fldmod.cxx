@@ -591,19 +591,36 @@ HandleError:
 ERR ErrRECSessionWriteConflict( FUCB *pfucb )
 {
     FUCB    *pfucbT;
-
+    
     AssertDIRMaybeNoLatch( pfucb->ppib, pfucb );
+    
+    if ( ( ObjidFDP( pfucb ) == PfmpFromIfmp( pfucb->ifmp )->ObjidExtentPageCountCacheFDP() &&
+           pfucb->ppib->FBatchIndexCreation()                                           ) )
+    {
+        // During batch index create, we update the Extent Page Count Cache from multiple
+        // threads using the same session.  This results in us reading state here from many threads'
+        // FUCBs without enough locking.  For example, the other thread could simultaneously be
+        // changing its bookmark or its prepared replace state.  This causes race conditions
+        // leading to false positives.  The false positives are all in the Extent Page Count Cache,
+        // and are known to be false because of the locking in the space tree code that synchronizes
+        // updates to the cache.  So, just don't check for write conflicts in that circumstance.
+        Assert( objidNil != ObjidFDP( pfucb ) );
+        return JET_errSuccess;
+    }
+
+    ENTERCRITICALSECTION critCursors( &(pfucb->ppib->critCursors), pfucb->ppib->FBatchIndexCreation() );
+    
     for ( pfucbT = pfucb->ppib->pfucbOfSession; pfucbT != pfucbNil; pfucbT = pfucbT->pfucbNextOfSession )
     {
         //  all cursors in the list should be owned by the same session
         //
         Assert( pfucbT->ppib == pfucb->ppib );
-
+        
         if ( pfucbT->ifmp == pfucb->ifmp
-            && FFUCBReplacePrepared( pfucbT )
-            && PgnoFDP( pfucbT ) == PgnoFDP( pfucb )
-            && pfucbT != pfucb
-            && 0 == CmpBM( pfucbT->bmCurr, pfucb->bmCurr ) )
+             && FFUCBReplacePrepared( pfucbT )
+             && PgnoFDP( pfucbT ) == PgnoFDP( pfucb )
+             && pfucbT != pfucb
+             && 0 == CmpBM( pfucbT->bmCurr, pfucb->bmCurr ) )
         {
             WCHAR       szSession[32];
             WCHAR       szThreadID[16];
@@ -622,31 +639,31 @@ ERR ErrRECSessionWriteConflict( FUCB *pfucb )
                                                 szConflictTableID2,
                                                 szBookmarkLength,
                                                 szTransactionIds };
-
+            
             OSStrCbFormatW( szSession, sizeof(szSession), L"0x%p", pfucb->ppib );
             OSStrCbFormatW( szThreadID, sizeof(szThreadID), L"0x%08lX", DwUtilThreadId() );
             OSStrCbFormatW( szTableName, sizeof(szTableName), L"%hs", pfucb->u.pfcb->Ptdb()->SzTableName() );
             OSStrCbFormatW( szConflictTableID1, sizeof(szConflictTableID1), L"0x%p", pfucb );
             OSStrCbFormatW( szConflictTableID2, sizeof(szConflictTableID2), L"0x%p", pfucbT );
             OSStrCbFormatW( szBookmarkLength, sizeof(szBookmarkLength), L"0x%lX/0x%lX",
-                pfucb->bmCurr.key.prefix.Cb(), pfucb->bmCurr.key.suffix.Cb() );
-
+                            pfucb->bmCurr.key.prefix.Cb(), pfucb->bmCurr.key.suffix.Cb() );
+            
             Assert( pfucb->bmCurr.key.Cb() < sizeof( pbRawData ) );
             Assert( pfucb->bmCurr.data.FNull() );
             pfucb->bmCurr.key.CopyIntoBuffer(pbRawData, sizeof(pbRawData) );
             Assert( cbRawData <= sizeof(pbRawData) );
-
+            
             (void)pfucb->ppib->TrxidStack().ErrDump( szTransactionIds, _countof( szTransactionIds ) );
-
+            
             UtilReportEvent(
-                    eventError,
-                    TRANSACTION_MANAGER_CATEGORY,
-                    SESSION_WRITE_CONFLICT_ID,
-                    _countof(rgszT),
-                    rgszT,
-                    cbRawData,
-                    pbRawData,
-                    PinstFromPfucb( pfucb ) );
+                eventError,
+                TRANSACTION_MANAGER_CATEGORY,
+                SESSION_WRITE_CONFLICT_ID,
+                _countof(rgszT),
+                rgszT,
+                cbRawData,
+                pbRawData,
+                PinstFromPfucb( pfucb ) );
             FireWall( "SessionWriteConflict" );
             return ErrERRCheck( JET_errSessionWriteConflict );
         }

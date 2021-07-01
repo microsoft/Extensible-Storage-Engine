@@ -44,17 +44,55 @@
 
 //
 //
-// Threading
+// Threading/Latching
 //
 //
 //   Updates to space trees are not versioned and do not participate in transactions.
 //   They cannot be rolled back.  They are done immediately and are visible to all threads.
-//   A write or riw latch on the root page of the tree that owns a space tree is used to
-//   make space tree operations thread safe.  For example, for a table, before you
-//   update the AE tree for the table, you must have a write latch on the root page
-//   of the table.
-
+//   When actually updating a space tree, calls must be made to:
+//   * SPIWrappedNDInsert()
+//   * ErrSPIWrappedNDSetExternalHeader()
+//   * ErrSPIWrappedBTFlagDelete()
+//   * ErrSPIWrappedBTReplace()
+//   * ErrSPIWrappedBTInsert
 //
+//   A write or riw latch on the root page of the tree that owns a space tree is used to
+//   make space tree operations thread safe, and such a latch must be held when calling
+//   the *SPIWrapped* functions.  Also, when calling these functions, one must NOT
+//   hold a similar latch on the parent of the tree being updated.  For example, for a table
+//   whose parent is the DBRoot, before you update the AE tree for the table, you must have
+//   a write latch on the root page of the table and must NOT have a write latch on the root
+//   of the DB.  This restriction on the parent latch is most obvious when releasing pages 
+//   from a tree to its parent.  You must hold the latch on the table as you remove the
+//   extent from the space tree for the table, but must not hold the latch on the parent
+//   until after you've removed the pages from the child.  Similarly, when taking pages from
+//   a parent to give to a child, you must hold the latch on the parent when you take pages
+//   from it (whether you hold the latch on the child at this point is unrestricted), but you
+//   must release the latch on the parent and hold a latch on the child before you add the
+//   extent to the child.  The same restrictions apply during split buffer and space tree
+//   manipulations that need to get new extents from the parent for use in the space trees
+//   themselves.  Such operations occur intermingled with the "outer" operation that is
+//   causing the space tree change in the first place.
+//
+//   A design pattern is to never have pfucbParent latched when you pass both pfucb and
+//   pfucbParent to a routine.  PfucbParent is passed largely to avoid conditions such
+//   as repeatedly opening and closing a parent FUCB inside a loop, not as a carrier of
+//   a latch that provides thread safety.  All routines that accept pfucbParent should
+//   call AssertSPIPfucbNullOrUnlatched(pfucbParent) to validate this.  When a routine
+//   does take a latch on pfucbParent, it should be very careful to release the latch
+//   before returning.
+//
+//   The restriction to only update space trees via the *SPIWrapped* functions is to
+//   guarantee that the Extent Page Count Cache is kept up to date.
+//
+//   The restriction to not hold a latch on the parent of a tree is to avoid deadlocks in
+//   the Extent Page Count Cache.
+//
+//   Some exceptions to the locking requirements are made during repair, recovery, and 
+//   when a database is open exclusively by one session (e.g. shrink makes some exceptions).
+//   AssertSPIWrappedLatches() makes a unified and complicated set of assertions for all
+//   *SPIWrapped* functions.
+
 //
 // Pools
 //
@@ -315,7 +353,7 @@ LOCAL ERR ErrSPIValidFDP(
 
 LOCAL ERR ErrSPIReserveSPBufPages(
     FUCB* const pfucb,
-    FUCB* const pfucbParent,
+    FUCB* const pfucbParent = pfucbNil,
     const CPG   cpgAddlReserveOE = 0,
     const CPG   cpgAddlReserveAE = 0,
     const PGNO  pgnoReplace = pgnoNull );
@@ -361,6 +399,97 @@ LOCAL VOID SPIValidateCpgOwnedAndAvail(
 #define SPIValidateCpgOwnedAndAvail( X )
 #endif
 
+INLINE VOID AssertSPIWrappedLatches( FUCB *pfucb, CSR *pcsr = pcsrNil )
+{
+#ifdef DEBUG
+    // Single routine to verify the required latching before any update to a space tree.
+
+    if ( PfmpFromIfmp( pfucb->ifmp)->FExclusiveBySession( pfucb->ppib ) )
+    {
+        // We take shortcuts when we have exclusive access and don't take some
+        // latches.  Unfortunately, we don't have enough info in this case to
+        // verify the latches we are NOT supposed to be holding.
+        return;
+    }
+
+    if ( pcsrNil != pcsr )
+    {
+        // We don't do the same asserts for this as for the other SPIWrapped calls
+        // because it uses the pfucb differently.
+        Assert( pcsr->Latch() == latchWrite );
+
+        LOG *plog = PinstFromIfmp( pfucb->ifmp )->m_plog;
+        // We don't need the FDP latch during repair or redo.
+        Assert( g_fRepair                                                             || 
+                ( plog->FRecovering() && fRecoveringRedo == plog->FRecoveringMode() ) ||
+                FBFWriteLatched( pfucb->ifmp, pfucb->u.pfcb->PgnoFDP() )              ||
+                FBFRDWLatched( pfucb->ifmp, pfucb->u.pfcb->PgnoFDP() )                   );
+
+        // Note we don't/can't assert on parent not being latched.  Or can we?  If
+        // pcsr->Pgno() == pfucb->u.pfcb->PgnoFDP(), and the latch is there, we
+        // could read the external header.  But is it accurate at this point?
+    }
+    else
+    {
+        FUCB *pfucbLatchHolder;
+
+        // Sometimes we're here with the FUCB for the main tree, sometimes
+        // we're here with a FUCB for the space tree inside the main tree.
+        if ( FFUCBSpace( pfucb ) )
+        {
+            if ( pfucbNil == pfucb->pfucbLatchHolderForSpace )
+            {
+                AssertSz( fFalse, "Space FUCB has no latch holder recorded, no assertions possible." );
+                return;
+            }
+            Assert( pfucb->u.pfcb == pfucb->pfucbLatchHolderForSpace->u.pfcb );
+            pfucbLatchHolder = pfucb->pfucbLatchHolderForSpace;
+        }
+        else
+        {
+            pfucbLatchHolder = pfucb;
+        }
+        
+        // If we don't have exclusive access by our session, we ensure we're the only
+        // one writing to the space tree by holding a latch on the FDP (not just the
+        // root of the space tree).
+        if ( pcsrNil != pfucbLatchHolder->pcsrRoot )
+        {
+            switch ( pfucbLatchHolder->pcsrRoot->Latch() )
+            {
+                case latchRIW:
+                case latchWrite:
+                    break;
+                default:
+                    AssertSz( fFalse, "Unexpected latch type." );
+                    break;
+            }
+            
+            // We want to make sure we don't have a latch on the parent of whatever tree we're
+            // updating.  The Extent Page Count Cache requires it (at least for the specific
+            // case where the parent is the DB root), so validate.
+            KEYDATAFLAGS kdf;
+            const SPACE_HEADER *psph;
+            PGNO pgnoParent;
+            
+            Assert( pfucbLatchHolder->pcsrRoot->Pgno() == pfucbLatchHolder->u.pfcb->PgnoFDP() );
+            
+            NDGetExternalHeader( &kdf, pfucbLatchHolder->pcsrRoot, noderfSpaceHeader );
+            Assert( sizeof( SPACE_HEADER ) == kdf.data.Cb() );
+            psph = reinterpret_cast <const SPACE_HEADER *> ( kdf.data.Pv() );
+            pgnoParent = psph->PgnoParent();
+            kdf.Nullify();
+
+            Assert( pgnoNull == pgnoParent || FBFNotLatched( pfucbLatchHolder->ifmp, pgnoParent ) );
+        }
+        else
+        {
+            AssertSz( fFalse, "Latch Holder has no root page pointer, no assertions possible." );
+        }
+    }
+#endif
+}
+
 //
 // Wrappers around updates on space trees to force you to think about the
 // ExtentPageCountCache.
@@ -379,8 +508,10 @@ SPIWrappedNDInsert(
     BOOL fOpenedTransaction = fFalse;
     BOOL fUpdateCache = ( ( cpgDeltaOE != 0 ) || ( cpgDeltaAE != 0 ) );
 
+    AssertSPIWrappedLatches( pfucb, pcsr );
+
     // This routine is in a code path that is not allowed to fail.  The actual
-    // call to NDInsert can't fail, so that's good.  But the calls to the begin
+    // call to NDInsert can't fail, so that's good.  But the calls to begin
     // and end a transaction and the call to prepare the Extent Page Count Cache
     // for an update CAN fail.  Unfortunately if those calls fail, the best we
     // can do is log that we couldn't update the cache and we'll have to fix it
@@ -504,6 +635,8 @@ ErrSPIWrappedNDSetExternalHeader(
     BOOL fOpenedTransaction = fFalse;
     BOOL fUpdateCache = ( ( cpgDeltaOE != 0 ) || ( cpgDeltaAE != 0 ) );
 
+    AssertSPIWrappedLatches( pfucb, pcsr );
+
     if ( fUpdateCache )
     {
         if ( 0 == ppib->Level() )
@@ -572,6 +705,8 @@ ErrSPIWrappedBTFlagDelete(
     BOOL fOpenedTransaction = fFalse;
     BOOL fUpdateCache = ( ( cpgDeltaOE != 0 ) || ( cpgDeltaAE != 0 ) );
 
+    AssertSPIWrappedLatches( pfucb );
+
     Assert( fDIRNoVersion & fDIRFlag );
 
     if ( fUpdateCache )
@@ -639,6 +774,8 @@ ErrSPIWrappedBTReplace(
     PIB  *ppib = pfucb->ppib;
     BOOL fOpenedTransaction = fFalse;
     BOOL fUpdateCache = ( ( cpgDeltaOE != 0 ) || ( cpgDeltaAE != 0 ) );
+
+    AssertSPIWrappedLatches( pfucb );
 
     Assert( fDIRNoVersion & fDIRFlag );
 
@@ -709,6 +846,8 @@ ErrSPIWrappedBTInsert(
     PIB  *ppib = pfucb->ppib;
     BOOL fOpenedTransaction = fFalse;
     BOOL fUpdateCache = ( ( cpgDeltaOE != 0 ) || ( cpgDeltaAE != 0 ) );
+
+    AssertSPIWrappedLatches( pfucb );
 
     Assert( fDIRNoVersion & fDIRFlag );
 
@@ -802,41 +941,57 @@ VOID SPTerm()
     Assert( g_semSPTrimDBScheduleCancel.CAvail() == 0 );
 }
 
+
+#ifdef DEBUG
 INLINE VOID AssertSPIPfucbOnRoot( const FUCB * const pfucb )
 {
-#ifdef  DEBUG
-    //  check to make sure that FUCB
-    //  passed in is on root page
-    //  and has page RIW latched
-    //
     Assert( pfucb->pcsrRoot != pcsrNil );
     Assert( pfucb->pcsrRoot->Pgno() == PgnoFDP( pfucb ) );
-    Assert( pfucb->pcsrRoot->Latch() == latchRIW
-        || pfucb->pcsrRoot->Latch() == latchWrite );
+
     Assert( !FFUCBSpace( pfucb ) );
-#endif
+
+    switch ( pfucb->pcsrRoot->Latch() )
+    {
+    case latchRIW:
+    case latchWrite:
+        break;
+    default:
+        AssertSz( fFalse, "Unexpected latch type." );
+        break;
+    }
 }
 
-INLINE VOID AssertSPIPfucbOnRootOrNull( const FUCB * const pfucb )
+INLINE VOID AssertSPIPfucbNullOrUnlatched( const FUCB * const pfucb )
 {
-#ifdef  DEBUG
-    if ( pfucb != pfucbNil )
+    if ( pfucb == pfucbNil )
     {
-        AssertSPIPfucbOnRoot( pfucb );
+        return;
     }
-#endif
+
+    Assert( !FFUCBSpace( pfucb ) );
+
+    Assert( pfucb->pcsrRoot == pcsrNil );
+    if ( pfucb->pcsrRoot != pcsrNil )
+    {
+        Assert( pfucb->pcsrRoot->Pgno() == PgnoFDP( pfucb ) );
+        Assert( latchNone == pfucb->pcsrRoot->Latch() );
+        AssertSz( fFalse, "Does this happen?" );
+    }
 }
 
 INLINE VOID AssertSPIPfucbOnSpaceTreeRoot( FUCB *pfucb, CSR *pcsr )
 {
-#ifdef  DEBUG
     Assert( FFUCBSpace( pfucb ) );
     Assert( pcsr->FLatched() );
     Assert( pcsr->Pgno() == PgnoRoot( pfucb ) );
     Assert( pcsr->Cpage().FRootPage() );
     Assert( pcsr->Cpage().FSpaceTree() );
-#endif
 }
+#else
+#define AssertSPIPfucbOnRoot( X )
+#define AssertSPIPfucbNullOrUnlatched( X )
+#define AssertSPIPfucbOnSpaceTreeRoot( X, Y )
+#endif
 
 INLINE BOOL FSPValidPGNO( _In_ const PGNO pgno )
 {
@@ -2067,8 +2222,22 @@ ERR ErrSPIOpenAvailExt( PIB *ppib, FCB *pfcb, FUCB **ppfucbAE )
     CallR( ErrBTOpen( ppib, pfcb, ppfucbAE, fFalse ) );
     FUCBSetAvailExt( *ppfucbAE );
     FUCBSetIndex( *ppfucbAE );
+    (*ppfucbAE)->pfucbLatchHolderForSpace = pfucbNil;
     Assert( pfcb->FSpaceInitialized() );
     Assert( pfcb->PgnoAE() != pgnoNull );
+
+    return err;
+}
+
+
+ERR ErrSPIOpenAvailExt( FUCB *pfucb, FUCB **ppfucbAE )
+{
+    ERR err = ErrSPIOpenAvailExt( pfucb->ppib, pfucb->u.pfcb, ppfucbAE );
+
+    if ( err >= JET_errSuccess )
+    {
+        (*ppfucbAE)->pfucbLatchHolderForSpace = pfucb;
+    }
 
     return err;
 }
@@ -2088,8 +2257,24 @@ ERR ErrSPIOpenOwnExt( PIB *ppib, FCB *pfcb, FUCB **ppfucbOE )
     CallR( ErrBTOpen( ppib, pfcb, ppfucbOE, fFalse ) );
     FUCBSetOwnExt( *ppfucbOE );
     FUCBSetIndex( *ppfucbOE );
+    (*ppfucbOE)->pfucbLatchHolderForSpace = pfucbNil;
     Assert( pfcb->FSpaceInitialized() );
     Assert( !FSPIIsSmall( pfcb ) );
+
+    return err;
+}
+
+
+ERR ErrSPIOpenOwnExt(
+    FUCB *pfucb,
+    FUCB **ppfucbOE )
+{
+    ERR err = ErrSPIOpenOwnExt( pfucb->ppib, pfucb->u.pfcb, ppfucbOE );
+
+    if ( err >= JET_errSuccess )
+    {
+        (*ppfucbOE)->pfucbLatchHolderForSpace = pfucb;
+    }
 
     return err;
 }
@@ -2143,7 +2328,7 @@ ERR ErrSPGetLastExtent( _Inout_ PIB * ppib, _In_ const IFMP ifmp, _Out_ EXTENTIN
     Assert( pfucb->u.pfcb->FSpaceInitialized() );
     Assert( pfucb->u.pfcb->PgnoOE() != pgnoNull );
 
-    Call( ErrSPIOpenOwnExt( ppib, pfucb->u.pfcb, &pfucbOE ) );
+    Call( ErrSPIOpenOwnExt( pfucb, &pfucbOE ) );
 
     dib.dirflag = fDIRNull;
     dib.pos     = posLast;
@@ -5750,7 +5935,6 @@ LOCAL ERR ErrSPIGetExt(
 
     CSPExtentInfo cspaei;
 
-#ifdef DEBUG
     //  check parameters.  If setting up new FDP, increment requested number of
     //  pages to account for consumption of first page to make FDP.
     //
@@ -5761,7 +5945,6 @@ LOCAL ERR ErrSPIGetExt(
     Assert( *pcpgReq >= cpgMin );
     Assert( !FFUCBSpace( pfucbSrc ) );
     AssertSPIPfucbOnRoot( pfucbSrc );
-#endif
 
 #ifdef SPACECHECK
     Assert( !( ErrSPIValidFDP( ppib, pfucbParent->ifmp, PgnoFDP( pfucbParent ) ) < 0 ) );
@@ -5855,7 +6038,7 @@ LOCAL ERR ErrSPIGetExt(
     //
     //  move to available extents
     //
-    CallR( ErrSPIOpenAvailExt( ppib, pfcb, &pfucbAE ) );
+    CallR( ErrSPIOpenAvailExt( pfucbSrc, &pfucbAE ) );
     Assert( pfcb == pfucbAE->u.pfcb );
 
     SPIValidateCpgOwnedAndAvail( pfucbSrc );
@@ -6939,7 +7122,7 @@ ERR ErrSPIAEGetPage(
     //
     SPIValidateCpgOwnedAndAvail( pfucb );
 
-    CallR( ErrSPIOpenAvailExt( pfucb->ppib, pfcb, &pfucbAE ) );
+    CallR( ErrSPIOpenAvailExt( pfucb, &pfucbAE ) );
     Assert( pfcb == pfucbAE->u.pfcb );
     Assert( pfucb->ppib == pfucbAE->ppib );
 
@@ -7228,7 +7411,7 @@ LOCAL ERR ErrSPIFreeSEToParent(
 
     Assert( pfcbNil != pfcb );
     AssertSPIPfucbOnRoot( pfucb );
-    AssertSPIPfucbOnRootOrNull( pfucbParent );
+    AssertSPIPfucbNullOrUnlatched( pfucbParent );
 
     // Can't do this because pfucbAE and pfucbOE have their root pages locked, and
     // we would need to BTDown() in those trees deeper in the stack.
@@ -7304,14 +7487,21 @@ LOCAL ERR ErrSPIFreeSEToParent(
 
     //  free extent to parent FDP
     //
-    //  open cursor on parent
-    //  access root page with RIW latch
-    //
     if ( pfucbParentLocal == pfucbNil )
     {
         Call( ErrBTIOpenAndGotoRoot( pfucb->ppib, pgnoParentFDP, pfucb->ifmp, &pfucbParentLocal ) );
     }
-    Call( ErrSPFreeExt( pfucbParentLocal, pgnoLast - cpgSize + 1, cpgSize, "FreeToParent" ) );
+    else
+    {
+        Call( ErrBTIGotoRoot( pfucbParentLocal, latchRIW ) );
+        pfucbParentLocal->pcsrRoot = Pcsr( pfucbParentLocal );
+    }
+
+    err = ErrSPFreeExt( pfucbParentLocal, pgnoLast - cpgSize + 1, cpgSize, "FreeToParent" );
+
+    pfucbParentLocal->pcsrRoot->ReleasePage();
+    pfucbParentLocal->pcsrRoot = pcsrNil;
+    Call( err );
 
     //  count pages freed by a table
     //
@@ -7323,14 +7513,17 @@ LOCAL ERR ErrSPIFreeSEToParent(
 
 HandleError:
     AssertSPIPfucbOnRoot( pfucb );
-    AssertSPIPfucbOnRootOrNull( pfucbParent );
+    AssertSPIPfucbNullOrUnlatched( pfucbParent );
 
     if ( ( pfucbParentLocal != pfucbNil ) && ( pfucbParentLocal != pfucbParent ) )
     {
         Expected( pfucbParent == pfucbNil );
-        AssertSPIPfucbOnRoot( pfucbParentLocal );
-        pfucbParentLocal->pcsrRoot->ReleasePage();
-        pfucbParentLocal->pcsrRoot = pcsrNil;
+        if ( pcsrNil != pfucbParentLocal->pcsrRoot )
+        {
+            Expected( fFalse );
+            pfucbParentLocal->pcsrRoot->ReleasePage();
+            pfucbParentLocal->pcsrRoot = pcsrNil;
+        }
         BTClose( pfucbParentLocal );
         pfucbParentLocal = pfucbNil;
     }
@@ -7808,7 +8001,6 @@ LOCAL ERR ErrSPIAEFreeExt(
     _In_ FUCB * const pfucbParent = pfucbNil )
 {
     ERR         err                 = errCodeInconsistency;
-    PIB         * const ppib        = pfucb->ppib;
     FCB         * const pfcb        = pfucb->u.pfcb;
     PGNO        pgnoLast            = pgnoFirst + cpgSize - 1;
     BOOL        fCoalesced          = fFalse;
@@ -7839,7 +8031,7 @@ LOCAL ERR ErrSPIAEFreeExt(
     #endif
 
     AssertSPIPfucbOnRoot( pfucb );
-    AssertSPIPfucbOnRootOrNull( pfucbParent );
+    AssertSPIPfucbNullOrUnlatched( pfucbParent );
 
     //  If this is the DB root, we could be releasing shelved pages.
     //  This is the case in which we are freeing space which had been previously shelved.
@@ -7870,7 +8062,7 @@ LOCAL ERR ErrSPIAEFreeExt(
 
     //  open owned extent tree
     //
-    Call( ErrSPIOpenOwnExt( ppib, pfcb, &pfucbOE ) );
+    Call( ErrSPIOpenOwnExt( pfucb, &pfucbOE ) );
     Assert( pfcb == pfucbOE->u.pfcb );
 
     //  find bounds of owned extent which contains extent to be freed
@@ -7903,7 +8095,7 @@ LOCAL ERR ErrSPIAEFreeExt(
     //  and augmenting size.
     //  Coalesce right extent replacing size of right extent.
     //
-    Call( ErrSPIOpenAvailExt( ppib, pfcb, &pfucbAE ) );
+    Call( ErrSPIOpenAvailExt( pfucb, &pfucbAE ) );
     Assert( pfcb == pfucbAE->u.pfcb );
 
     if ( pgnoLast == cspoeContaining.PgnoLast()
@@ -8236,7 +8428,7 @@ HandleError:
     Assert( FSPExpectedError( err ) );
 
     AssertSPIPfucbOnRoot( pfucb );
-    AssertSPIPfucbOnRootOrNull( pfucbParent );
+    AssertSPIPfucbNullOrUnlatched( pfucbParent );
 
     if ( pfucbAE != pfucbNil )
     {
@@ -8536,7 +8728,6 @@ ERR ErrSPTryCoalesceAndFreeAvailExt( FUCB* const pfucb, const PGNO pgnoInExtent,
     Assert( !FFUCBSpace( pfucb ) );
 
     ERR err = JET_errSuccess;
-    PIB* const ppib = pfucb->ppib;
     FCB* const pfcb = pfucb->u.pfcb;
     FUCB* pfucbOE = pfucbNil;
     FUCB* pfucbAE = pfucbNil;
@@ -8555,8 +8746,8 @@ ERR ErrSPTryCoalesceAndFreeAvailExt( FUCB* const pfucb, const PGNO pgnoInExtent,
     SPIValidateCpgOwnedAndAvail( pfucb );
 
     // Open cursors to space trees.
-    Call( ErrSPIOpenOwnExt( ppib, pfcb, &pfucbOE ) );
-    Call( ErrSPIOpenAvailExt( ppib, pfcb, &pfucbAE ) );
+    Call( ErrSPIOpenOwnExt( pfucb, &pfucbOE ) );
+    Call( ErrSPIOpenAvailExt( pfucb, &pfucbAE ) );
 
     // Figure out the owning extent.
     err = ErrSPIFindExtOE( pfucbOE, pgnoInExtent, &speiContaining );
@@ -8691,7 +8882,7 @@ ERR ErrSPTryCoalesceAndFreeAvailExt( FUCB* const pfucb, const PGNO pgnoInExtent,
         PGNO pgno = pgnoOeFirst;
         while ( pgno <= pgnoOeLast )
         {
-            Call( ErrSPIReserveSPBufPages( pfucb, pfucbNil ) );
+            Call( ErrSPIReserveSPBufPages( pfucb ) );
 
             CSPExtentInfo speiAE;
             err = ErrSPIFindExtAE( pfucbAE, pgno, sppAvailPool, &speiAE );
@@ -8753,7 +8944,7 @@ ERR ErrSPTryCoalesceAndFreeAvailExt( FUCB* const pfucb, const PGNO pgnoInExtent,
         }
     }
 
-    Call( ErrSPIReserveSPBufPages( pfucb, pfucbNil ) );
+    Call( ErrSPIReserveSPBufPages( pfucb ) );
 
     // Free it to the parent.
     Call( ErrSPIFreeSEToParent(
@@ -8814,9 +9005,9 @@ ERR ErrSPShelvePage( PIB* const ppib, const IFMP  ifmp, const PGNO pgno )
     FUCB* pfucbAE = pfucbNil;
 
     Call( ErrBTIOpenAndGotoRoot( ppib, pgnoSystemRoot, ifmp, &pfucbRoot ) );
-    Call( ErrSPIOpenAvailExt( ppib, pfucbRoot->u.pfcb, &pfucbAE ) );
+    Call( ErrSPIOpenAvailExt( pfucbRoot, &pfucbAE ) );
 
-    Call( ErrSPIReserveSPBufPages( pfucbRoot, pfucbNil ) );
+    Call( ErrSPIReserveSPBufPages( pfucbRoot ) );
 
     Call( ErrSPIAddToAvailExt( pfucbAE, pgno, 1, spp::ShelvedPool ) );
     Assert( Pcsr( pfucbAE )->FLatched() );
@@ -8940,11 +9131,11 @@ ERR ErrSPIUnshelvePagesInRange( FUCB* const pfucbRoot, const PGNO pgnoFirst, con
 
     PGNO pgno = pgnoFirst;
 
-    Call( ErrSPIOpenAvailExt( pfucbRoot->ppib, pfucbRoot->u.pfcb, &pfucbAE ) );
+    Call( ErrSPIOpenAvailExt( pfucbRoot, &pfucbAE ) );
     while ( pgno <= pgnoLast )
     {
         pgnoLastDbRootPrev = pgnoLastDbRoot;
-        Call( ErrSPIReserveSPBufPages( pfucbRoot, pfucbNil ) );
+        Call( ErrSPIReserveSPBufPages( pfucbRoot ) );
         pgnoLastDbRoot = pfmp->PgnoLast();
         Assert( pgnoLastDbRoot >= pgnoLastDbRootPrev );
 
@@ -10034,6 +10225,8 @@ INLINE ERR ErrSPIFreeOwnedExtentsInList(
 {
     ERR         err;
 
+    AssertSPIPfucbNullOrUnlatched( pfucbParent );
+
     for ( size_t i = 0; i < cExtents; i++ )
     {
         const CPG   cpgSize = rgextinfo[i].CpgExtent();
@@ -10043,6 +10236,8 @@ INLINE ERR ErrSPIFreeOwnedExtentsInList(
         CallR( ErrSPCaptureSnapshot( pfucbParent, pgnoFirst, cpgSize ) );
         CallR( ErrSPFreeExt( pfucbParent, pgnoFirst, cpgSize, "FreeFdpLarge" ) );
     }
+
+    AssertSPIPfucbNullOrUnlatched( pfucbParent );
 
     return JET_errSuccess;
 }
@@ -10059,6 +10254,8 @@ LOCAL ERR ErrSPIFreeAllOwnedExtents( FUCB *pfucbParent, FCB *pfcb, const BOOL fP
     CPG         cpgOwned    = 0;
 
     Assert( pfcb != pfcbNil );
+
+    AssertSPIPfucbNullOrUnlatched( pfucbParent );
 
     //  open owned extent tree of freed FDP
     //  free each extent in owned extent to parent FDP.
@@ -10204,6 +10401,8 @@ LOCAL ERR ErrSPIFreeAllOwnedExtents( FUCB *pfucbParent, FCB *pfcb, const BOOL fP
     PERFOpt( cSPDeletedTreeFreedExtents.Add( PinstFromPfucb( pfucbParent ), cExtents ) );
 
 HandleError:
+    AssertSPIPfucbNullOrUnlatched( pfucbParent );
+
     pOEListCurr = pOEList;
     while ( pOEListCurr != NULL )
     {
@@ -10389,7 +10588,7 @@ ERR ErrSPFreeFDP(
     }
 
     // We expect this to fail to find the FCB in the cache if we're deleting it.
-    Assert( fPreservePrimaryExtent || !FCATExtentPageCountsCached( pfucb ) );
+    Assert( fPreservePrimaryExtent || ( JET_errSuccess != ErrCATExtentPageCountsCached( pfucb ) ) );
 
     //  if single extent format, then free extent in external header
     //
@@ -10496,10 +10695,6 @@ INLINE ERR ErrSPIAddExtent(
     Assert( !Pcsr( pfucb )->FLatched() );
     Assert( pcspextnode->CpgExtent() > 0 );
 
-    // We ensure we're the only one wrtiting to the space tree by holding a latch on the FDP.
-    Assert( FBFWriteLatched( pfucb->ifmp, pfucb->u.pfcb->PgnoFDP() ) ||
-            FBFRDWLatched( pfucb->ifmp, pfucb->u.pfcb->PgnoFDP() )      );
-
     //  Insist valid data before we insert it into the DB.
     Assert( pcspextnode->FValid() );
 
@@ -10601,7 +10796,7 @@ LOCAL ERR ErrSPIAddToOwnExt(
 
     //  open cursor on owned extent
     //
-    CallR( ErrSPIOpenOwnExt( pfucb->ppib, pfucb->u.pfcb, &pfucbOE ) );
+    CallR( ErrSPIOpenOwnExt( pfucb, &pfucbOE ) );
     Assert( FFUCBOwnExt( pfucbOE ) );
 
     //  coalescing OWNEXT is done only for temp database,
@@ -10865,7 +11060,7 @@ LOCAL ERR ErrSPIAddSecondaryExtent(
         }
         Assert( !Pcsr( pfucbAE )->FLatched() );
 
-        Call( ErrSPIReserveSPBufPages( pfucb, pfucbNil ) );
+        Call( ErrSPIReserveSPBufPages( pfucb ) );
         Assert( !Pcsr( pfucbAE )->FLatched() );
     }
 
@@ -10882,7 +11077,7 @@ LOCAL ERR ErrSPIAddSecondaryExtent(
                 pgnoLast - cpgAvailable ) );
         Assert( !Pcsr( pfucbAE )->FLatched() );
 
-        Call( ErrSPIReserveSPBufPages( pfucb, pfucbNil ) );
+        Call( ErrSPIReserveSPBufPages( pfucb ) );
         Assert( !Pcsr( pfucbAE )->FLatched() );
     }
 
@@ -10908,7 +11103,7 @@ INLINE ERR ErrSPICheckSmallFDP( FUCB *pfucb, BOOL *pfSmallFDP )
     CPG     cpgOwned    = 0;
     DIB     dib;
 
-    CallR( ErrSPIOpenOwnExt( pfucb->ppib, pfucb->u.pfcb, &pfucbOE ) );
+    CallR( ErrSPIOpenOwnExt( pfucb, &pfucbOE ) );
     Assert( pfucbNil != pfucbOE );
 
     //  determine if this FDP owns a lot of space [> cpgSmallFDP]
@@ -11217,7 +11412,7 @@ LOCAL ERR ErrSPIExtendDB(
         }
     }
 
-    Call( ErrSPIOpenOwnExt( pfucbRoot->ppib, pfucbRoot->u.pfcb, &pfucbOE ) );
+    Call( ErrSPIOpenOwnExt( pfucbRoot, &pfucbOE ) );
 
     dib.pos = posLast;
     dib.dirflag = fDIRNull;
@@ -11247,7 +11442,7 @@ LOCAL ERR ErrSPIExtendDB(
     //  also need to return any in-between segments which need to be made available so that the
     //  callers can release them as available space.
     //
-    Call( ErrSPIOpenAvailExt( pfucbRoot->ppib, pfucbRoot->u.pfcb, &pfucbAE ) );
+    Call( ErrSPIOpenAvailExt( pfucbRoot, &pfucbAE ) );
     Call( ErrSPISeekRootAE( pfucbAE, pgnoSELastAdj + 1, spp::ShelvedPool, &speiAEShelved ) );
     Assert( !speiAEShelved.FIsSet() || !g_rgfmp[ pfucbRoot->ifmp ].FIsTempDB() );
     while ( ( ( pgnoSELastAdj + cpgSEMin ) <= pgnoSysMax ) && speiAEShelved.FIsSet() )
@@ -11400,7 +11595,7 @@ ERR ErrSPExtendDB(
     tcScope->nParentObjectClass = TceFromFUCB( pfucbDbRoot );
     Assert( objidSystemRoot == ObjidFDP( pfucbDbRoot ) );
 
-    Call( ErrSPIOpenAvailExt( pfucbDbRoot->ppib, pfucbDbRoot->u.pfcb, &pfucbAE ) );
+    Call( ErrSPIOpenAvailExt( pfucbDbRoot, &pfucbAE ) );
     tcScope->nParentObjectClass = TceFromFUCB( pfucbAE );
     Assert( objidSystemRoot == ObjidFDP( pfucbAE ) );
 
@@ -11579,8 +11774,8 @@ ERR ErrSPShrinkTruncateLastExtent(
     // Open space trees.
     Call( ErrBTIOpenAndGotoRoot( ppib, pgnoSystemRoot, ifmp, &pfucbRoot ) );
 
-    Call( ErrSPIOpenOwnExt( pfucbRoot->ppib, pfucbRoot->u.pfcb, &pfucbOE ) );
-    Call( ErrSPIOpenAvailExt( pfucbRoot->ppib, pfucbRoot->u.pfcb, &pfucbAE ) );
+    Call( ErrSPIOpenOwnExt( pfucbRoot, &pfucbOE ) );
+    Call( ErrSPIOpenAvailExt( pfucbRoot, &pfucbAE ) );
 
     // OE.
     Call( ErrSPISeekRootOELast( pfucbOE, &speiLastOE ) );
@@ -12124,6 +12319,10 @@ LOCAL ERR ErrSPIReserveSPBufPagesForSpaceTree(
     errFaultAddToOe = fUpdatingDbRoot ? ErrFaultInjection( 60394 ) : ErrFaultInjection( 35818 );
     OnDebug( fForcePostAddToOwnExtDbgOnly = ( ( errFaultAddToOe == JET_errSuccess ) && ( rand() % 4 ) == 0 ) );
 #endif  // DEBUG
+
+    // Parent is not latched, we'll latch it when we need to.
+    AssertSPIPfucbNullOrUnlatched( pfucbParent );
+
     forever
     {
         BOOL fSingleAndAvailableEnough = fFalse;
@@ -12135,7 +12334,8 @@ LOCAL ERR ErrSPIReserveSPBufPagesForSpaceTree(
         OnDebug( crepeat++ );
 
         AssertSPIPfucbOnRoot( pfucb );
-        AssertSPIPfucbOnRootOrNull( pfucbParent );
+        // Parent is still not latched, we'll latch it when we need to.
+        AssertSPIPfucbNullOrUnlatched( pfucbParent );
 
         // Latch space FUCB and get split buffer pointer.
         Call( ErrBTIGotoRoot( pfucbSpace, latchRIW ) );
@@ -12369,6 +12569,14 @@ LOCAL ERR ErrSPIReserveSPBufPagesForSpaceTree(
             {
                 PGNO pgnoFirst = pgnoNull;
                 cpgNewSpace = cpgRequest;
+
+                AssertSPIPfucbNullOrUnlatched( pfucbParent );
+
+                Call( ErrBTIGotoRoot( pfucbParent, latchRIW ) );
+                pfucbParent->pcsrRoot = Pcsr( pfucbParent );
+
+                AssertSPIPfucbOnRoot( pfucbParent );
+
                 err = ErrSPIGetExt(
                             pfucb->u.pfcb,
                             pfucbParent,
@@ -12382,8 +12590,11 @@ LOCAL ERR ErrSPIReserveSPBufPagesForSpaceTree(
                             NULL,
                             fMayViolateMaxSize );
 
+                BTUp( pfucbParent );
+                pfucbParent->pcsrRoot = pcsrNil;
+
                 AssertSPIPfucbOnRoot( pfucb );
-                AssertSPIPfucbOnRoot( pfucbParent );
+                AssertSPIPfucbNullOrUnlatched( pfucbParent );
                 AssertSPIPfucbOnSpaceTreeRoot( pfucbSpace, Pcsr( pfucbSpace ) );
                 Call( err );
                 cpgAvailable = cpgNewSpace;
@@ -12601,7 +12812,7 @@ HandleError:
     pspbuf = NULL;
 
     AssertSPIPfucbOnRoot( pfucb );
-    AssertSPIPfucbOnRootOrNull( pfucbParent );
+    AssertSPIPfucbNullOrUnlatched( pfucbParent );
 
     return err;
 }
@@ -12617,24 +12828,19 @@ ERR ErrSPReserveSPBufPagesForSpaceTree( FUCB *pfucb, FUCB *pfucbSpace, FUCB *pfu
     Expected( g_fRepair );
     Assert( !Pcsr( pfucb )->FLatched() );
     Assert( pcsrNil == pfucb->pcsrRoot );
-    Assert( !Pcsr( pfucbParent )->FLatched() );
-    Assert( pcsrNil == pfucbParent->pcsrRoot );
+    AssertSPIPfucbNullOrUnlatched( pfucbParent );
 
     Call( ErrBTIGotoRoot( pfucb, latchRIW ) );
     pfucb->pcsrRoot = Pcsr( pfucb );
 
-    Call( ErrBTIGotoRoot( pfucbParent, latchRIW ) );
-    pfucbParent->pcsrRoot = Pcsr( pfucbParent );
-
     Call( ErrSPIReserveSPBufPagesForSpaceTree( pfucb, pfucbSpace, pfucbParent ) );
 
 HandleError:
-    BTUp( pfucbParent );
-    pfucbParent->pcsrRoot = pcsrNil;
-
+    AssertSPIPfucbNullOrUnlatched( pfucbParent );
+    
     BTUp( pfucb );
     pfucb->pcsrRoot = pcsrNil;
-
+    
     return err;
 }
 
@@ -12680,16 +12886,13 @@ ERR ErrSPReplaceSPBuf(
     ERR err = JET_errSuccess;
 
     Assert( pfucb != pfucbNil );
+    Assert( !Pcsr( pfucb )->FLatched() );
+    Assert( pcsrNil == pfucb->pcsrRoot );
+
+    AssertSPIPfucbNullOrUnlatched( pfucbParent );
 
     Call( ErrBTIGotoRoot( pfucb, latchRIW ) );
     pfucb->pcsrRoot = Pcsr( pfucb );
-
-    // The DB root does not have a parent.
-    if ( pfucbParent != pfucbNil )
-    {
-        Call( ErrBTIGotoRoot( pfucbParent, latchRIW ) );
-        pfucbParent->pcsrRoot = Pcsr( pfucbParent );
-    }
 
     Call( ErrSPIReserveSPBufPages(
             pfucb,
@@ -12699,12 +12902,7 @@ ERR ErrSPReplaceSPBuf(
             pgnoReplace ) );
 
 HandleError:
-    if ( ( pfucbParent != pfucbNil ) && ( pfucbParent->pcsrRoot != pcsrNil ) )
-    {
-        pfucbParent->pcsrRoot->ReleasePage();
-        pfucbParent->pcsrRoot = pcsrNil;
-    }
-
+    AssertSPIPfucbNullOrUnlatched( pfucbParent );
     if ( pfucb->pcsrRoot != pcsrNil )
     {
         pfucb->pcsrRoot->ReleasePage();
@@ -12732,14 +12930,28 @@ LOCAL ERR ErrSPIReserveSPBufPages(
     const PGNO pgnoParentFDP = PsphSPIRootPage( pfucb )->PgnoParent();
     const PGNO pgnoLastBefore = g_rgfmp[ pfucb->ifmp ].PgnoLast();
 
+    AssertSPIPfucbOnRoot( pfucb );
+    AssertSPIPfucbNullOrUnlatched( pfucbParent );
+
     Assert( ( pgnoParentFDP != pgnoNull ) || ( pfucbParent == pfucbNil ) );
     if ( ( pfucbParentLocal == pfucbNil ) && ( pgnoParentFDP != pgnoNull ) )
     {
-        Call( ErrBTIOpenAndGotoRoot( pfucb->ppib, pgnoParentFDP, pfucb->ifmp, &pfucbParentLocal ) );
+        // Open cursor on parent FDP to get space from.  Don't GotoRoot yet, we don't want to be latched
+        // while calling ErrSPIReserveSPBufPages.
+        //
+        Call( ErrBTIOpen(
+                  pfucb->ppib,
+                  pfucb->ifmp,
+                  pgnoParentFDP,
+                  objidNil,
+                  openNormal,
+                  &pfucbParentLocal,
+                  fFalse ) );
+        Assert( pcsrNil == pfucbParentLocal->pcsrRoot );
     }
 
-    Call( ErrSPIOpenOwnExt( pfucb->ppib, pfcb, &pfucbOE ) );
-    Call( ErrSPIOpenAvailExt( pfucb->ppib, pfcb, &pfucbAE ) );
+    Call( ErrSPIOpenOwnExt( pfucb, &pfucbOE ) );
+    Call( ErrSPIOpenAvailExt( pfucb, &pfucbAE ) );
 
     while ( fNeedRefill )
     {
@@ -12804,12 +13016,18 @@ HandleError:
         BTClose( pfucbAE );
     }
 
+    AssertSPIPfucbNullOrUnlatched( pfucbParent );
+    
     if ( ( pfucbParentLocal != pfucbNil ) && ( pfucbParentLocal != pfucbParent ) )
     {
         Expected( pfucbParent == pfucbNil );
-        AssertSPIPfucbOnRoot( pfucbParentLocal );
-        pfucbParentLocal->pcsrRoot->ReleasePage();
-        pfucbParentLocal->pcsrRoot = pcsrNil;
+        AssertSPIPfucbNullOrUnlatched( pfucbParentLocal );
+        if ( pcsrNil != pfucbParentLocal->pcsrRoot )
+        {
+            Expected( fFalse );
+            pfucbParentLocal->pcsrRoot->ReleasePage();
+            pfucbParentLocal->pcsrRoot = pcsrNil;
+        }
         BTClose( pfucbParentLocal );
         pfucbParentLocal = pfucbNil;
     }
@@ -12991,7 +13209,6 @@ LOCAL ERR ErrSPIGetSe(
 {
     ERR             err;
     PIB             *ppib                   = pfucb->ppib;
-    FUCB            *pfucbParent            = pfucbNil;
     CPG             cpgSEReq;
     CPG             cpgSEMin;
     PGNO            pgnoSELast;
@@ -13143,46 +13360,63 @@ LOCAL ERR ErrSPIGetSe(
         cpgSEReq = cpgReq;
     }
 
-    //  open cursor on parent FDP to get space from
-    //
-    Call( ErrBTIOpenAndGotoRoot( pfucb->ppib, pgnoParentFDP, pfucb->ifmp, &pfucbParent ) );
-
-    if ( pfucbParent->u.pfcb->FSpaceInitialized() )
-    {
-        SPIValidateCpgOwnedAndAvail( pfucbParent );
-    }
-
-    Call( ErrSPIReserveSPBufPages( pfucb, pfucbParent ) );
-
-    //  allocate extent
-    //
-    err = ErrSPIGetExt(
-                pfucb->u.pfcb,
-                pfucbParent,
-                &cpgSEReq,
-                cpgSEMin,
-                &pgnoSEFirst,
-                fSPFlags & ( fSplitting | fSPExactExtent ),
-                0,
-                NULL,
-                NULL,
-                NULL,
-                fMayViolateMaxSize );
-    AssertSPIPfucbOnRoot( pfucbParent );
     AssertSPIPfucbOnRoot( pfucb );
-    Call( err );
+    {
+        FUCB *pfucbParentLocal = pfucbNil;
 
-    // We've taken an extent from the parent.  Doing so was not versioned; there's no way to undo it.
-    // The parent has a consistent and stable view of its remaining extents, so we can release
-    // the parent; we don't rely on any latches there for the rest of this routine.  Furthermore,
-    // the call to ErrSPIAddSecondaryExtent below may update the Extent Page Count Cache,
-    // and that's not deadlock-safe if the root of the DB is latched, and the parent may
-    // be the root.
-    pfucbParent->pcsrRoot->ReleasePage();
-    pfucbParent->pcsrRoot = pcsrNil;
-    Assert( !Pcsr( pfucbParent )->FLatched() );
-    BTClose( pfucbParent );
-    pfucbParent = pfucbNil;
+        // Open cursor on parent FDP to get space from.  Don't GotoRoot yet, we don't want to be latched
+        // while calling ErrSPIReserveSPBufPages, but it can be a time savings to already have an FUCB
+        // that we can use for multiple calls.
+        //
+        Call( ErrBTIOpen(
+                  pfucb->ppib,
+                  pfucb->ifmp,
+                  pgnoParentFDP,
+                  objidNil,
+                  openNormal,
+                  &pfucbParentLocal,
+                  fFalse ) );
+        Assert( pcsrNil == pfucbParentLocal->pcsrRoot );
+
+        CallJ( ErrSPIReserveSPBufPages( pfucb, pfucbParentLocal ), CloseParent );
+
+        // Now GotoRoot to latch the page.
+        CallJ( ErrBTIGotoRoot( pfucbParentLocal, latchRIW ), CloseParent );
+
+        pfucbParentLocal->pcsrRoot = Pcsr( pfucbParentLocal );
+
+        AssertSPIPfucbOnRoot( pfucbParentLocal );
+
+        //  allocate extent
+        //
+        CallJ( ErrSPIGetExt(
+                   pfucb->u.pfcb,
+                   pfucbParentLocal,
+                   &cpgSEReq,
+                   cpgSEMin,
+                   &pgnoSEFirst,
+                   fSPFlags & ( fSplitting | fSPExactExtent ),
+                   0,
+                   NULL,
+                   NULL,
+                   NULL,
+                   fMayViolateMaxSize ), CloseParent );
+
+        AssertSPIPfucbOnRoot( pfucbParentLocal );
+
+    CloseParent:
+        if ( pfucbParentLocal->pcsrRoot != pcsrNil )
+        {
+            pfucbParentLocal->pcsrRoot->ReleasePage();
+            pfucbParentLocal->pcsrRoot = pcsrNil;
+            Assert( !Pcsr( pfucbParentLocal )->FLatched() );
+        }
+        BTClose( pfucbParentLocal );
+        pfucbParentLocal = pfucbNil;
+
+        Call( err );
+    }
+    AssertSPIPfucbOnRoot( pfucb );
 
     SPIValidateCpgOwnedAndAvail( pfucb );
 
@@ -13231,18 +13465,6 @@ LOCAL ERR ErrSPIGetSe(
     Assert( cpgSEReq >= cpgSEMin );
 
 HandleError:
-    if ( pfucbNil != pfucbParent )
-    {
-        if ( pcsrNil != pfucbParent->pcsrRoot )
-        {
-            pfucbParent->pcsrRoot->ReleasePage();
-            pfucbParent->pcsrRoot = pcsrNil;
-        }
-
-        Assert( !Pcsr( pfucbParent )->FLatched() );
-        BTClose( pfucbParent );
-    }
-
     OSTraceFMP(
         pfucb->ifmp,
         JET_tracetagSpaceInternal,
@@ -13464,7 +13686,7 @@ LOCAL ERR ErrSPIGetFsSe(
 
     Assert( !Ptls()->fNoExtendingDuringCreateDB );
 
-    Call( ErrSPIReserveSPBufPages( pfucb, pfucbNil ) );
+    Call( ErrSPIReserveSPBufPages( pfucb ) );
     Assert( pgnoPreLast <= g_rgfmp[ pfucb->ifmp ].PgnoLast() || g_fRepair );
 
     OSTraceFMP(
@@ -14799,7 +15021,7 @@ ERR ErrSPGetInfo(
             //
             FUCB    *pfucbOE = pfucbNil;
 
-            Call( ErrSPIOpenOwnExt( ppib, pfucbT->u.pfcb, &pfucbOE ) );
+            Call( ErrSPIOpenOwnExt( pfucbT, &pfucbOE ) );
 
             if( pcprintf )
             {
@@ -14958,7 +15180,7 @@ ERR ErrSPGetInfo(
             //
             FUCB    *pfucbAE = pfucbNil;
 
-            Call( ErrSPIOpenAvailExt( ppib, pfucbT->u.pfcb, &pfucbAE ) );
+            Call( ErrSPIOpenAvailExt( pfucbT, &pfucbAE ) );
 
             if( pcprintf )
             {
@@ -14971,7 +15193,7 @@ ERR ErrSPGetInfo(
             //  open cursor on owned extent tree, to get split buffer ...
             FUCB    *pfucbOE = pfucbNil;
 
-            err = ErrSPIOpenOwnExt( ppib, pfucbT->u.pfcb, &pfucbOE );
+            err = ErrSPIOpenOwnExt( pfucbT, &pfucbOE );
             if ( err >= JET_errSuccess )
             {
                 err = ErrSPIGetSPBufUnlatched( pfucbOE, &spbufOnOE );
@@ -15513,7 +15735,7 @@ ERR ErrSPGetExtentInfo(
             //
             FUCB    *pfucbOE = pfucbNil;
 
-            Call( ErrSPIOpenOwnExt( ppib, pfucbT->u.pfcb, &pfucbOE ) );
+            Call( ErrSPIOpenOwnExt( pfucbT, &pfucbOE ) );
 
             Call( ErrSPIExtGetExtentListInfo( pfucbOE, &prgext, &cextMax, &cextMac ) );
 
@@ -15615,7 +15837,7 @@ ERR ErrSPGetExtentInfo(
             //
             FUCB    *pfucbAE = pfucbNil;
 
-            Call( ErrSPIOpenAvailExt( ppib, pfucbT->u.pfcb, &pfucbAE ) );
+            Call( ErrSPIOpenAvailExt( pfucbT, &pfucbAE ) );
 
             //  Get the split buffers ...
             //
@@ -15623,7 +15845,7 @@ ERR ErrSPGetExtentInfo(
             //  open cursor on owned extent tree, to get split buffer ...
             FUCB    *pfucbOE = pfucbNil;
 
-            err = ErrSPIOpenOwnExt( ppib, pfucbT->u.pfcb, &pfucbOE );
+            err = ErrSPIOpenOwnExt( pfucbT, &pfucbOE );
             if ( err >= JET_errSuccess )
             {
                 err = ErrSPIGetSPBufUnlatched( pfucbOE, &spbufOnOE );
@@ -15887,7 +16109,7 @@ ERR ErrSPTrimRootAvail(
 
     //  open cursor on available extent tree
     //
-    Call( ErrSPIOpenAvailExt( ppib, pfucbT->u.pfcb, &pfucbAE ) );
+    Call( ErrSPIOpenAvailExt( pfucbT, &pfucbAE ) );
 
     //  Get the split buffers ...
     //

@@ -335,7 +335,13 @@ struct FUCB
 
     CInvasiveConcurrentModSet< FUCB, OffsetOfIAE>::CElement m_iae;
 
-    BYTE           rgbAlign2[24];
+    //  set and used by Space
+    //  Space tree use requires a latch on the FDP of the FDP related to the space tree.
+    //  If this is a space tree, this holds a pointer to the FUCB that has that latch.
+    //  It's not always maintained, but is accurate if it's non NULL.
+    // 
+    FUCB           *pfucbLatchHolderForSpace;
+    BYTE           rgbAlign2[16];
 
 #ifdef DEBUGGER_EXTENSION
     VOID Dump( CPRINTF * pcprintf, DWORD_PTR dwOffset = 0 ) const;
@@ -451,6 +457,8 @@ INLINE VOID FUCB::VerifyOptimalPacking()
     static_assert( NoWastedSpace( FUCB, cpgSpaceRequestReserve,pbEncryptionKey) );
     static_assert( NoWastedSpace( FUCB, pbEncryptionKey,       pmoveFilterContext) );
     static_assert( NoWastedSpace( FUCB, pmoveFilterContext,    m_iae) );
+    static_assert( NoWastedSpace( FUCB, m_iae,                 pfucbLatchHolderForSpace) );
+    static_assert( NoWastedSpace( FUCB, pfucbLatchHolderForSpace, rgbAlign2) );
 }
 #endif
 

@@ -13229,88 +13229,88 @@ BOOL FCATIExtentPageCountCacheCacheableObject(
 
     switch ( objid )
     {
-        case objidSystemRoot:
-            // We don't track the System Root in the ExtentPageCountCache.  This is because
-            // when we need to split in the ExtentPageCountCache table, we need to get a
-            // secondary extent from the system root and add it to the ExtentPageCountCache table.
-            // This would cause a recursive call back into the ExtentPageCountCache table to track
-            // those extents while we already have various pages latched in the ExtentPageCountCache
-            // table. This is not supported.
-            // However, we have special casing for the root in that we cache values in the FMP
-            // for the database.  It's not persisted, solely volatile in memory.  It's maintained
-            // in the same code that maintains the ExtentPageCountCache.
-            return fTrue;
+    case objidSystemRoot:
+        // We don't track the System Root in the ExtentPageCountCache.  This is because
+        // when we need to split in the ExtentPageCountCache table, we need to get a
+        // secondary extent from the system root and add it to the ExtentPageCountCache table.
+        // This would cause a recursive call back into the ExtentPageCountCache table to track
+        // those extents while we already have various pages latched in the ExtentPageCountCache
+        // table. This is not supported.
+        // However, we have special casing for the root in that we cache values in the FMP
+        // for the database.  It's not persisted, solely volatile in memory.  It's maintained
+        // in the same code that maintains the ExtentPageCountCache.
+        return fTrue;
 
-        case objidFDPMSO:
-            // We don't track the catalog because we need to have the
-            // catalog unlocked and available for ErrFILEOpenTable( szMSExtentPageCountCache ).
-            *ppReasonNotUpdatable = L"CATALOG";
-            return fFalse;
+    case objidFDPMSO:
+        // We don't track the catalog because we need to have the
+        // catalog unlocked and available for ErrFILEOpenTable( szMSExtentPageCountCache ).
+        *ppReasonNotUpdatable = L"CATALOG";
+        return fFalse;
 
-        case objidFDPMSOShadow:
-            // We don't track this because it's not very interesting to know the number of pages it
-            // uses.  Also, in a fresh DB create, we create this before we have the ExtentPageCountCache
-            // table created, so we can't easily track space for this table from the beginning.
-            *ppReasonNotUpdatable = L"SHADOW";
-            return fFalse;
+    case objidFDPMSOShadow:
+        // We don't track this because it's not very interesting to know the number of pages it
+        // uses.  Also, in a fresh DB create, we create this before we have the ExtentPageCountCache
+        // table created, so we can't easily track space for this table from the beginning.
+        *ppReasonNotUpdatable = L"SHADOW";
+        return fFalse;
 
-        case objidFDPMSO_NameIndex:
-            // We don't track this because it's not very interesting to know the number of pages it
-            // uses.  Also, in a fresh DB create, we create this before we have the ExtentPageCountCache
-            // table created, so we can't easily track space for this table from the beginning.
-            *ppReasonNotUpdatable = L"NAME_INDEX";
-            return fFalse;
+    case objidFDPMSO_NameIndex:
+        // We don't track this because it's not very interesting to know the number of pages it
+        // uses.  Also, in a fresh DB create, we create this before we have the ExtentPageCountCache
+        // table created, so we can't easily track space for this table from the beginning.
+        *ppReasonNotUpdatable = L"NAME_INDEX";
+        return fFalse;
 
-        case objidFDPMSO_RootObjectIndex:
-            // We don't track this because it's not very interesting to know the number of pages it
-            // uses.  Also, in a fresh DB create, we create this before we have the ExtentPageCountCache
-            // table created, so we can't easily track space for this table from the beginning.
-            *ppReasonNotUpdatable = L"OBJECT_INDEX";
-            return fFalse;
+    case objidFDPMSO_RootObjectIndex:
+        // We don't track this because it's not very interesting to know the number of pages it
+        // uses.  Also, in a fresh DB create, we create this before we have the ExtentPageCountCache
+        // table created, so we can't easily track space for this table from the beginning.
+        *ppReasonNotUpdatable = L"OBJECT_INDEX";
+        return fFalse;
 
-        default:
-            // Check for the dynamic objids we don't track.
+    default:
+        // Check for the dynamic objids we don't track.
 
-            if ( objidNil == PfmpFromIfmp( ifmp )->ObjidExtentPageCountCacheFDP() )
+        if ( objidNil == PfmpFromIfmp( ifmp )->ObjidExtentPageCountCacheFDP() )
+        {
+            // No ExtentPageCountCache is available yet.
+
+            if ( PfmpFromIfmp( ifmp )->FAttached() )
             {
-                // No ExtentPageCountCache is available yet.
-
-                if ( PfmpFromIfmp( ifmp )->FAttached() )
-                {
-                    // Looks like we're not going to have a ExtentPageCountCache table ever.
-                    *ppReasonNotUpdatable = L"NOT_ENABLED";
-                }
-                else
-                {
-                    // We are still attaching/creating.  The only reason we expect
-                    // to be here in that case is if we're creating the MSObjids
-                    // table or the ExtentPageCountCache table itself, and we don't track
-                    // those tables in the ExtentPageCountCache.
-
-                    // Hardcoded transaction for creating a table in ErrFILECreateTable()
-                    Assert( ppib->TrxidStack().Peek() == 42277 );
-
-                    // Hardcoded transaction for creating MSObjids in ErrCATCreateMSObjids
-                    // or transaction for creating ExtentPageCountCache in ErrCATCreateMSExtentPageCountCache(
-                    Assert( ppib->TrxidStack().Peek0() == 51941 || ppib->TrxidStack().Peek0() == 40670 );
-
-                    *ppReasonNotUpdatable = L"NOT_INITIALIZED";
-                }
-                return fFalse;
+                // Looks like we're not going to have a ExtentPageCountCache table ever.
+                *ppReasonNotUpdatable = L"NOT_ENABLED";
             }
-
-            if ( objid == PfmpFromIfmp( ifmp )->ObjidExtentPageCountCacheFDP() )
+            else
             {
-                // We don't track the ExtentPageCountCache table itself for much the same
-                // reason we don't track the system root; if we need to split the
-                // table while we're updating in the table, we run afoul of
-                // existing latches.
-                //
-                *ppReasonNotUpdatable = L"CACHE";
-                return fFalse;
-            }
+                // We are still attaching/creating.  The only reason we expect
+                // to be here in that case is if we're creating the MSObjids
+                // table or the ExtentPageCountCache table itself, and we don't track
+                // those tables in the ExtentPageCountCache.
 
-            break;
+                // Hardcoded transaction for creating a table in ErrFILECreateTable()
+                Assert( ppib->TrxidStack().Peek() == 42277 );
+
+                // Hardcoded transaction for creating MSObjids in ErrCATCreateMSObjids
+                // or transaction for creating ExtentPageCountCache in ErrCATCreateMSExtentPageCountCache(
+                Assert( ppib->TrxidStack().Peek0() == 51941 || ppib->TrxidStack().Peek0() == 40670 );
+
+                *ppReasonNotUpdatable = L"NOT_INITIALIZED";
+            }
+            return fFalse;
+        }
+
+        if ( objid == PfmpFromIfmp( ifmp )->ObjidExtentPageCountCacheFDP() )
+        {
+            // We don't track the ExtentPageCountCache table itself for much the same
+            // reason we don't track the system root; if we need to split the
+            // table while we're updating in the table, we run afoul of
+            // existing latches.
+            //
+            *ppReasonNotUpdatable = L"CACHE";
+            return fFalse;
+        }
+
+        break;
     }
 
     return fTrue;
@@ -13353,7 +13353,7 @@ VOID CATIPossiblyResetUpdatingExtentPageCountCacheFlag(
         // needing to do DB operations.
         return;
     }
-    
+
     ppib->ResetFUpdatingExtentPageCountCache();
     Assert( !ppib->FUpdatingExtentPageCountCache() );
 #endif
@@ -13558,52 +13558,52 @@ VOID CATSetExtentPageCounts(
 
     switch ( err )
     {
-        case JET_errSuccess:
-            Call( ErrIsamRetrieveColumn(
-                      ppib,
-                      pfucbExtentPageCountCache,
-                      columnidMSExtentPageCountCache_epccesFlag,
-                      &epccesFlag,
-                      sizeof( epccesFlag ),
-                      NULL,
-                      NO_GRBIT,
-                      NULL ) );
-            Assert( JET_errSuccess == err );
-            switch ( epccesFlag )
-            {
-            case epcces::Valid:
-                wszNote = L"DUPLICATE";
-                Error( ErrERRCheck( JET_errObjectDuplicate ) );
-
-            case epcces::Prepared:
-                wszNote = L"PREPARED";
-                fReplace = fTrue;
-                break;
-
-            case epcces::FlagDelete:
-                wszNote = L"FLAG_DELETE";
-                fReplace = fTrue;
-                break;
-
-            default:
-                AssertSz( fFalse, "Unexpected case in switch.");
-                Error( ErrERRCheck( JET_errInternalError ) );
-            }
+    case JET_errSuccess:
+        Call( ErrIsamRetrieveColumn(
+                  ppib,
+                  pfucbExtentPageCountCache,
+                  columnidMSExtentPageCountCache_epccesFlag,
+                  &epccesFlag,
+                  sizeof( epccesFlag ),
+                  NULL,
+                  NO_GRBIT,
+                  NULL ) );
+        Assert( JET_errSuccess == err );
+        switch ( epccesFlag )
+        {
+        case epcces::Valid:
+            wszNote = L"DUPLICATE";
+            Error( ErrERRCheck( JET_errObjectDuplicate ) );
+            
+        case epcces::Prepared:
+            wszNote = L"PREPARED";
+            fReplace = fTrue;
             break;
-
-        case JET_errRecordNotFound:
-            // Expected case.
-            err = JET_errSuccess;
+            
+        case epcces::FlagDelete:
+            wszNote = L"FLAG_DELETE";
+            fReplace = fTrue;
             break;
 
         default:
-            AssertSz( fFalse, "Unexpected case in switch." );
-            wszNote = L"UNEXPECTED";
-            if ( err > JET_errSuccess )
-            {
-                err = ErrERRCheck( JET_errInternalError );
-            }
-            Call( err );
+            AssertSz( fFalse, "Unexpected case in switch.");
+            Error( ErrERRCheck( JET_errInternalError ) );
+        }
+        break;
+
+    case JET_errRecordNotFound:
+        // Expected case.
+        err = JET_errSuccess;
+        break;
+
+    default:
+        AssertSz( fFalse, "Unexpected case in switch." );
+        wszNote = L"UNEXPECTED";
+        if ( err > JET_errSuccess )
+        {
+            err = ErrERRCheck( JET_errInternalError );
+        }
+        Call( err );
     }
 
     epccesFlag = epcces::Valid;
@@ -13762,25 +13762,29 @@ VOID CATResetExtentPageCounts(
 
     switch ( err )
     {
-        case JET_errSuccess:
-            pfucbExtentPageCountCache->locLogical = locOnCurBM;
-            // Found it to delete.
-            break;
+    case JET_errSuccess:
+        pfucbExtentPageCountCache->locLogical = locOnCurBM;
+        // Found it to delete.
+        break;
 
-        case JET_errRecordNotFound:
-            err = JET_errSuccess;
-            wszNote = L"NOT_FOUND";
-            goto HandleError;
+    case JET_errRecordNotFound:
+        err = JET_errSuccess;
+        wszNote = L"NOT_FOUND";
+        goto HandleError;
 
-        default:
-            AssertSz( fFalse, "Unexpected case in switch." );
-            wszNote = L"UNEXPECTED";
-            if ( err > JET_errSuccess )
-            {
-                err = ErrERRCheck( JET_errInternalError );
-            }
-            Call( err );
+        // Calling out some specific "unexpected" errors we've seen that are actually "normal".
+    case JET_errDiskIO:
+        break;
+
+    default:
+        AssertSz( fFalse, "Unexpected case in switch." );
+        wszNote = L"UNEXPECTED";
+        if ( err > JET_errSuccess )
+        {
+            err = ErrERRCheck( JET_errInternalError );
+        }
     }
+    Call( err );
 
     Call( ErrIsamRetrieveColumns(
               (JET_SESID)ppib,
@@ -13903,13 +13907,14 @@ ERR _ErrCATAdjustExtentPageCountsPrepare(
     //  extent from the system root).  T1 holds that latch, so T2 blocks.
     // T1 finds it needs to update an entry on the root page of the Cache table and tries
     //  to take a latch on that page.  T2 holds that latch, so T1 blocks.
-    //
-    // Turn off temporarily while fixing a known code path that triggers this assert.
-    // Assert ( FBFNotLatched( ifmp, pgnoSystemRoot ) );
+    // None of this matters if this matters if we have exclusive use of the DB so there
+    // won't be anyone else running to deadlock with.
+    Assert( pfmp->FExclusiveBySession( pfucb->ppib ) || FBFNotLatched( ifmp, pgnoSystemRoot ) );
 
     // If we're actually going to do something to the DB, we should be in a transaction.
     Assert( 0 != ppib->Level() );
 
+    // The ExtentPageCountCache needs to be in use (shown by the FDP value being there in pfmp)
     // and the FDP of the ExtentPageCountCache needs to not be latched, since we'll be taking latches here.
     // Again, we don't yet have a CSR that's current for that page so we go directly to
     // FBFNotLatched().
@@ -13947,23 +13952,23 @@ ERR _ErrCATAdjustExtentPageCountsPrepare(
 
     switch ( err )
     {
-        case JET_errSuccess:
-            break;
+    case JET_errSuccess:
+        break;
 
-        case JET_errRecordNotFound:
-            // Didn't find the value to adjust.
-            err = JET_errSuccess;
-            wszNote = L"NOT_FOUND";
-            goto HandleError;
+    case JET_errRecordNotFound:
+        // Didn't find the value to adjust.
+        err = JET_errSuccess;
+        wszNote = L"NOT_FOUND";
+        goto HandleError;
 
-        default:
-            AssertSz( fFalse, "Unexpected case in switch.");
-            wszNote = L"UNEXPECTED";
-            if ( err > JET_errSuccess )
-            {
-                err = ErrERRCheck( JET_errInternalError );
-            }
-            Call( err );
+    default:
+        AssertSz( fFalse, "Unexpected case in switch.");
+        wszNote = L"UNEXPECTED";
+        if ( err > JET_errSuccess )
+        {
+            err = ErrERRCheck( JET_errInternalError );
+        }
+        Call( err );
     }
 
     Call( ErrIsamRetrieveColumn(
@@ -13997,13 +14002,13 @@ ERR _ErrCATAdjustExtentPageCountsPrepare(
         // This entry is permanently invalid until set(), so nothing to do.
         goto HandleError;
     }
-    
+
     Call( ErrIsamPrepareUpdate(
               ppib,
               pfucbExtentPageCountCache,
               JET_prepReplaceNoLock ) );
     Assert( JET_errSuccess == err );
-    
+
     Call( ErrIsamSetColumn(
               ppib,
               pfucbExtentPageCountCache,
@@ -14013,7 +14018,7 @@ ERR _ErrCATAdjustExtentPageCountsPrepare(
               NO_GRBIT,
               NULL ) );
     Assert( JET_errSuccess == err );
-    
+
     Call( ErrIsamUpdate(
               ppib,
               pfucbExtentPageCountCache,
@@ -14143,9 +14148,9 @@ VOID CATAdjustExtentPageCounts(
     //  extent from the system root).  T1 holds that latch, so T2 blocks.
     // T1 finds it needs to update an entry on the root page of the Cache table and tries
     //  to take a latch on that page.  T2 holds that latch, so T1 blocks.
-    //
-    // Turn off temporarily while fixing a known code path that triggers this assert.
-    // Assert ( FBFNotLatched( ifmp, pgnoSystemRoot ) );
+    // None of this matters if this matters if we have exclusive use of the DB so there
+    // won't be anyone else running to deadlock with.
+    Assert( pfmp->FExclusiveBySession( pfucb->ppib ) || FBFNotLatched( ifmp, pgnoSystemRoot ) );
 
     // If we're actually going to do something to the DB, we should be in a transaction.
     Assert( 0 != ppib->Level() );
@@ -14186,23 +14191,23 @@ VOID CATAdjustExtentPageCounts(
 
     switch ( err )
     {
-        case JET_errSuccess:
-            break;
+    case JET_errSuccess:
+        break;
 
-        case JET_errRecordNotFound:
-            // Didn't find the value to adjust.
-            err = JET_errSuccess;
-            wszNote = L"NOT_FOUND";
-            goto HandleError;
+    case JET_errRecordNotFound:
+        // Didn't find the value to adjust.
+        err = JET_errSuccess;
+        wszNote = L"NOT_FOUND";
+        goto HandleError;
 
-        default:
-            AssertSz( fFalse, "Unexpected case in switch.");
-            wszNote = L"UNEXPECTED";
-            if ( err > JET_errSuccess )
-            {
-                err = ErrERRCheck( JET_errInternalError );
-            }
-            Call( err );
+    default:
+        AssertSz( fFalse, "Unexpected case in switch.");
+        wszNote = L"UNEXPECTED";
+        if ( err > JET_errSuccess )
+        {
+            err = ErrERRCheck( JET_errInternalError );
+        }
+        Call( err );
     }
 
     Call( ErrIsamRetrieveColumns(
@@ -14226,10 +14231,10 @@ VOID CATAdjustExtentPageCounts(
         wszNote = L"REPLACE";
         epccesFlag = epcces::Valid;
         Assert( cpgOEBefore >= cpgAEBefore );
-        
+
         cpgOEAfter = cpgOEBefore + lAddCpgOE;
         cpgAEAfter = cpgAEBefore + lAddCpgAE;
-        
+
         Assert( cpgOEAfter >= cpgAEAfter );
 
         break;
@@ -14390,19 +14395,19 @@ ERR ErrCATGetExtentPageCounts(
 
     switch ( err )
     {
-        case JET_errSuccess:
-            break;
+    case JET_errSuccess:
+        break;
 
-        case JET_errRecordNotFound:
-            break;
+    case JET_errRecordNotFound:
+        break;
 
-        default:
-            AssertSz( fFalse, "Unexpected case in switch.");
-            if ( err > JET_errSuccess )
-            {
-                err = ErrERRCheck( JET_errInternalError );
-            }
-            break;
+    default:
+        AssertSz( fFalse, "Unexpected case in switch.");
+        if ( err > JET_errSuccess )
+        {
+            err = ErrERRCheck( JET_errInternalError );
+        }
+        break;
     }
     Call( err );
 
@@ -14466,7 +14471,7 @@ HandleError:
     CATIPossiblyResetUpdatingExtentPageCountCacheFlag( ppib );
 
     Assert( pfucbNil == pfucbExtentPageCountCache );
-    
+
     return err;
 }
 
@@ -14636,19 +14641,19 @@ ERR ErrCATDeleteMSExtentPageCountCache(
 
     switch ( err )
     {
-        case JET_errSuccess:
-            break;
+    case JET_errSuccess:
+        break;
 
-        case JET_errObjectNotFound:
-            err = JET_errSuccess;
-            goto HandleError;
+    case JET_errObjectNotFound:
+        err = JET_errSuccess;
+        goto HandleError;
 
-        default:
-            AssertSz( fFalse, "Unexpected case in switch");
-            Call( err );
-            // Got a warning.  Didn't expect one, not sure what happened, but presumably the
-            // table is there.
-            break;
+    default:
+        AssertSz( fFalse, "Unexpected case in switch");
+        Call( err );
+        // Got a warning.  Didn't expect one, not sure what happened, but presumably the
+        // table is there.
+        break;
     }
 
     // Table exists
@@ -14672,18 +14677,18 @@ ERR ErrCATDeleteMSExtentPageCountCache(
 
     switch ( ecdrReason )
     {
-        case EXTENT_CACHE_DELETE_REASON::FeatureOff:
-            pwszReason = L"FEATURE_OFF";
-            break;
+    case EXTENT_CACHE_DELETE_REASON::FeatureOff:
+        pwszReason = L"FEATURE_OFF";
+        break;
 
-        case EXTENT_CACHE_DELETE_REASON::Repair:
-            pwszReason = L"DATABASE_REPAIR";
-            break;
+    case EXTENT_CACHE_DELETE_REASON::Repair:
+        pwszReason = L"DATABASE_REPAIR";
+        break;
 
-        default:
-            OSStrCbFormatW( rgwReason, sizeof(rgwReason), L"REASON_%d", ecdrReason );
-            pwszReason = rgwReason;
-            break;
+    default:
+        OSStrCbFormatW( rgwReason, sizeof(rgwReason), L"REASON_%d", ecdrReason );
+        pwszReason = rgwReason;
+        break;
     }
 
     const WCHAR * rgwsz[] = { pfmp->WszDatabaseName(), pwszReason };
