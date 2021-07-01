@@ -1249,6 +1249,20 @@ ERR VTAPI ErrIsamSetTableInfo(
     }
 }
 
+// Helper routine used by ErrIsamGetTableInfo
+INLINE LOCAL VOID INFOGetTableName(
+    FUCB *pfucb,
+    CHAR *szTableName,
+    ULONG cbTableName
+    )
+{
+    Assert( pfucb->u.pfcb->Ptdb() != ptdbNil );
+    pfucb->u.pfcb->EnterDML();
+    Assert( strlen( pfucb->u.pfcb->Ptdb()->SzTableName() ) <= JET_cbNameMost );
+    OSStrCbCopyA( szTableName, cbTableName, pfucb->u.pfcb->Ptdb()->SzTableName() );
+    pfucb->u.pfcb->LeaveDML();
+}
+
 ERR VTAPI ErrIsamGetTableInfo(
     JET_SESID       vsesid,
     JET_VTID        vtid,
@@ -1275,255 +1289,226 @@ ERR VTAPI ErrIsamGetTableInfo(
             pfucb->u.pfcb->ObjidFDP(),
             lInfoLevel ) );
 
-    /* if OLCStats info/reset can be done now
-    /**/
+    // Assume success.
+    err = JET_errSuccess;
+
     switch( lInfoLevel )
     {
-        case JET_TblInfo:
-        case JET_TblInfoName:
-        case JET_TblInfoTemplateTableName:
-        case JET_TblInfoDbid:
-            break;
-
-        case JET_TblInfoOLC:
-        case JET_TblInfoResetOLC:
-            return ErrERRCheck( JET_errFeatureNotAvailable );
-
-        case JET_TblInfoSpaceAlloc:
-            /*  number of pages and density
-            /**/
-            Assert( cbMax >= sizeof(ULONG) * 2);
-            err = ErrCATGetTableAllocInfo(
-                    ppib,
-                    pfucb->ifmp,
-                    pfucb->u.pfcb->ObjidFDP(),
-                    (ULONG *)pvResult,
-                    ((ULONG *)pvResult) + 1);
-            return err;
-
-        case JET_TblInfoSpaceUsage:
-        {
-            BYTE    fSPExtents = fSPOwnedExtent|fSPAvailExtent;
-
-            if ( cbMax > 2 * sizeof(CPG) )
-                fSPExtents |= fSPExtentList;
-
-            err = ErrSPGetInfo(
-                        ppib,
-                        pfucb->ifmp,
-                        pfucb,
-                        static_cast<BYTE *>( pvResult ),
-                        cbMax,
-                        fSPExtents,
-                        gci::Allow );
-            return err;
-        }
-
-        case JET_TblInfoSpaceOwned:
-            err = ErrSPGetInfo(
-                        ppib,
-                        pfucb->ifmp,
-                        pfucb,
-                        static_cast<BYTE *>( pvResult ),
-                        cbMax,
-                        fSPOwnedExtent,
-                        gci::Allow );
-            return err;
-
-        case JET_TblInfoSpaceAvailable:
-            err = ErrInfoGetTableAvailSpace(
-                    ppib,
-                    pfucb,
-                    pvResult,
-                    cbMax );
-            return err;
-
-        case JET_TblInfoDumpTable:
-            Assert( fFalse );
-            return ErrERRCheck( JET_errFeatureNotAvailable );
-
-        case JET_TblInfoLVChunkMax:
-            if ( cbMax < sizeof(LONG) )
-            {
-                return ErrERRCheck( JET_errBufferTooSmall );
-            }
-            *(LONG *)pvResult = pfucb->u.pfcb->Ptdb()->CbLVChunkMost();
-            return JET_errSuccess;
-
-        case JET_TblInfoEncryptionKey:
-            if ( cbMax < pfucb->cbEncryptionKey )
-            {
-                return ErrERRCheck( JET_errBufferTooSmall );
-            }
-#ifdef DEBUG
-            if ( pfucb->cbEncryptionKey > 0 )
-            {
-                err = ErrOSEncryptionVerifyKey( pfucb->pbEncryptionKey, pfucb->cbEncryptionKey );
-                if ( err < JET_errSuccess )
-                {
-                    AssertSz( fFalse, "Client should not have been able to save a bad encryption key" );
-                }
-            }
-#endif
-            memcpy( pvResult, pfucb->pbEncryptionKey, pfucb->cbEncryptionKey );
-            // Weird that we cannot tell the caller the size of data copied
-            return JET_errSuccess;
-
-        default:
-            Assert( fFalse );
-            return ErrERRCheck( JET_errFeatureNotAvailable );
-    }
-
-
-    Assert( pfucb->u.pfcb->Ptdb() != ptdbNil );
-    pfucb->u.pfcb->EnterDML();
-    Assert( strlen( pfucb->u.pfcb->Ptdb()->SzTableName() ) <= JET_cbNameMost );
-    OSStrCbCopyA( szTableName, sizeof(szTableName), pfucb->u.pfcb->Ptdb()->SzTableName() );
-    pfucb->u.pfcb->LeaveDML();
-
-    switch ( lInfoLevel )
+    case JET_TblInfo:
     {
-        case JET_TblInfo:
+        JET_OBJECTINFO  objectinfo;
+        LONG            cRecord;
+        LONG            cPage;
+        
+        // check buffer size
+        if ( cbMax < sizeof( JET_OBJECTINFO ) )
         {
-            JET_OBJECTINFO  objectinfo;
-            LONG            cRecord;
-            LONG            cPage;
-
-            /* check buffer size
-            /**/
-            if ( cbMax < sizeof( JET_OBJECTINFO ) )
-            {
-                err = ErrERRCheck( JET_errBufferTooSmall );
-                goto HandleError;
-            }
-
-            if ( pfucb->u.pfcb->FTypeTemporaryTable() )
-            {
-                err = ErrERRCheck( JET_errObjectNotFound );
-                goto HandleError;
-            }
-
-            Assert( !FFMPIsTempDB( pfucb->u.pfcb->Ifmp() ) );
-
-            /* set data to return
-            /**/
-            objectinfo.cbStruct = sizeof(JET_OBJECTINFO);
-            objectinfo.objtyp   = JET_objtypTable;
-            objectinfo.flags    = 0;
-
-            if ( FCATSystemTable( pfucb->u.pfcb->PgnoFDP() ) )
-                objectinfo.flags |= JET_bitObjectSystem;
-            else if ( FOLDSystemTable( szTableName ) )
-                objectinfo.flags |= JET_bitObjectSystemDynamic;
-            else if ( FCATUnicodeFixupTable( szTableName ) )
-                objectinfo.flags |= JET_bitObjectSystemDynamic;
-            else if ( FSCANSystemTable( szTableName ) )
-                objectinfo.flags |= JET_bitObjectSystemDynamic;
-            else if ( FCATObjidsTable( szTableName ) )
-                objectinfo.flags |= JET_bitObjectSystemDynamic;
-            else if ( MSysDBM::FIsSystemTable( szTableName ) )
-                objectinfo.flags |= JET_bitObjectSystemDynamic;
-            else if ( FCATLocalesTable( szTableName ) )
-                objectinfo.flags |= JET_bitObjectSystemDynamic;
-
-            if ( pfucb->u.pfcb->FFixedDDL() )
-                objectinfo.flags |= JET_bitObjectTableFixedDDL;
-
-            //  hierarchical DDL not currently nestable
-            Assert( !( pfucb->u.pfcb->FTemplateTable() && pfucb->u.pfcb->FDerivedTable() ) );
-            if ( pfucb->u.pfcb->FTemplateTable() )
-                objectinfo.flags |= JET_bitObjectTableTemplate;
-            else if ( pfucb->u.pfcb->FDerivedTable() )
-                objectinfo.flags |= JET_bitObjectTableDerived;
-
-            /*  set base table capability bits
-            /**/
-            objectinfo.grbit = JET_bitTableInfoBookmark | JET_bitTableInfoRollback;
-            if ( FFUCBUpdatable( pfucb ) )
-                objectinfo.grbit |= JET_bitTableInfoUpdatable;
-
-            Call( ErrSTATSRetrieveTableStats(
-                        pfucb->ppib,
-                        pfucb->ifmp,
-                        szTableName,
-                        &cRecord,
-                        NULL,
-                        &cPage ) );
-
-            objectinfo.cRecord  = cRecord;
-            objectinfo.cPage    = cPage;
-
-            memcpy( pvResult, &objectinfo, sizeof( JET_OBJECTINFO ) );
-
-            break;
+            Error( ErrERRCheck( JET_errBufferTooSmall ) );
         }
-
-        case JET_TblInfoRvt:
-            err = ErrERRCheck( JET_errQueryNotSupported );
-            break;
-
-        case JET_TblInfoName:
-        case JET_TblInfoMostMany:
-            //  UNDONE: add support for most many
-            if ( pfucb->u.pfcb->FTypeTemporaryTable() )
+        
+        if ( pfucb->u.pfcb->FTypeTemporaryTable() )
+        {
+            Error( ErrERRCheck( JET_errObjectNotFound ) );
+        }
+        
+        Assert( !FFMPIsTempDB( pfucb->u.pfcb->Ifmp() ) );
+        
+        // set data to return
+        objectinfo.cbStruct = sizeof(JET_OBJECTINFO);
+        objectinfo.objtyp   = JET_objtypTable;
+        objectinfo.flags    = 0;
+        
+        // Get the table name.
+        INFOGetTableName( pfucb, szTableName, sizeof( szTableName ) );
+        
+        if ( FCATSystemTable( pfucb->u.pfcb->PgnoFDP() ) )
+            objectinfo.flags |= JET_bitObjectSystem;
+        else if ( FOLDSystemTable( szTableName ) )
+            objectinfo.flags |= JET_bitObjectSystemDynamic;
+        else if ( FCATUnicodeFixupTable( szTableName ) )
+            objectinfo.flags |= JET_bitObjectSystemDynamic;
+        else if ( FSCANSystemTable( szTableName ) )
+            objectinfo.flags |= JET_bitObjectSystemDynamic;
+        else if ( FCATObjidsTable( szTableName ) )
+            objectinfo.flags |= JET_bitObjectSystemDynamic;
+        else if ( MSysDBM::FIsSystemTable( szTableName ) )
+            objectinfo.flags |= JET_bitObjectSystemDynamic;
+        else if ( FCATLocalesTable( szTableName ) )
+            objectinfo.flags |= JET_bitObjectSystemDynamic;
+        
+        if ( pfucb->u.pfcb->FFixedDDL() )
+            objectinfo.flags |= JET_bitObjectTableFixedDDL;
+        
+        //  hierarchical DDL not currently nestable
+        Assert( !( pfucb->u.pfcb->FTemplateTable() && pfucb->u.pfcb->FDerivedTable() ) );
+        if ( pfucb->u.pfcb->FTemplateTable() )
+            objectinfo.flags |= JET_bitObjectTableTemplate;
+        else if ( pfucb->u.pfcb->FDerivedTable() )
+            objectinfo.flags |= JET_bitObjectTableDerived;
+        
+        //  set base table capability bits
+        objectinfo.grbit = JET_bitTableInfoBookmark | JET_bitTableInfoRollback;
+        if ( FFUCBUpdatable( pfucb ) )
+            objectinfo.grbit |= JET_bitTableInfoUpdatable;
+        
+        Call( ErrSTATSRetrieveTableStats(
+                  pfucb->ppib,
+                  pfucb->ifmp,
+                  szTableName,
+                  &cRecord,
+                  NULL,
+                  &cPage ) );
+        
+        objectinfo.cRecord  = cRecord;
+        objectinfo.cPage    = cPage;
+        
+        memcpy( pvResult, &objectinfo, sizeof( JET_OBJECTINFO ) );
+        
+        break;
+    }
+    
+    case JET_TblInfoName:
+        if ( pfucb->u.pfcb->FTypeTemporaryTable() )
+        {
+            Error( ErrERRCheck( JET_errInvalidOperation ) );
+        }
+        
+        // Get the table name.
+        INFOGetTableName( pfucb, szTableName, sizeof( szTableName ) );
+        
+        if ( strlen( szTableName ) >= cbMax )
+        {
+            Error( ErrERRCheck( JET_errBufferTooSmall ) );
+        }
+        
+        OSStrCbCopyA( static_cast<CHAR *>( pvResult ), cbMax, szTableName );
+        break;
+        
+    case JET_TblInfoTemplateTableName:
+        if ( pfucb->u.pfcb->FTypeTemporaryTable() )
+        {
+            Error( ErrERRCheck( JET_errInvalidOperation ) );
+        }
+        
+        // Need at least JET_cbNameMost, plus 1 for null-terminator.
+        if ( cbMax <= JET_cbNameMost )
+        {
+            Error( ErrERRCheck( JET_errBufferTooSmall ) );
+        }
+        
+        if ( pfucb->u.pfcb->FDerivedTable() )
+        {
+            FCB     *pfcbTemplateTable = pfucb->u.pfcb->Ptdb()->PfcbTemplateTable();
+            Assert( pfcbNil != pfcbTemplateTable );
+            Assert( pfcbTemplateTable->FFixedDDL() );
+            Assert( strlen( pfcbTemplateTable->Ptdb()->SzTableName() ) <= JET_cbNameMost );
+            OSStrCbCopyA( (CHAR *)pvResult, cbMax, pfcbTemplateTable->Ptdb()->SzTableName() );
+        }
+        else
+        {
+            //  table was not derived from a template -- return NULL
+            *( (CHAR *)pvResult ) = '\0';
+        }
+        break;
+        
+    case JET_TblInfoDbid:
+        if ( pfucb->u.pfcb->FTypeTemporaryTable() )
+        {
+            Error( ErrERRCheck( JET_errInvalidOperation ) );
+        }
+        
+        if ( cbMax < sizeof(JET_DBID) )
+        {
+            // check buffer size
+            Error( ErrERRCheck( JET_errBufferTooSmall ) );
+        }
+        
+        *(JET_DBID *)pvResult = (JET_DBID)pfucb->ifmp;
+        break;
+        
+    case JET_TblInfoSpaceAlloc:
+        //  number of pages and density
+        if ( cbMax < 2 * sizeof(ULONG) )
+        {
+            // check buffer size
+            Error( ErrERRCheck( JET_errBufferTooSmall ) );
+        }
+        
+        Call( ErrCATGetTableAllocInfo(
+                  ppib,
+                  pfucb->ifmp,
+                  pfucb->u.pfcb->ObjidFDP(),
+                  (ULONG *)pvResult,
+                  ((ULONG *)pvResult) + 1) );
+        break;
+        
+    case JET_TblInfoSpaceUsage:
+    {
+        BYTE    fSPExtents = fSPOwnedExtent | fSPAvailExtent;
+        
+        if ( cbMax > 2 * sizeof(CPG) )
+            fSPExtents |= fSPExtentList;
+        
+        Call( ErrSPGetInfo(
+                  ppib,
+                  pfucb->ifmp,
+                  pfucb,
+                  static_cast<BYTE *>( pvResult ),
+                  cbMax,
+                  fSPExtents,
+                  gci::Allow ) );
+        break;
+    }
+    
+    case JET_TblInfoSpaceOwned:
+        Call( ErrSPGetInfo(
+                  ppib,
+                  pfucb->ifmp,
+                  pfucb,
+                  static_cast<BYTE *>( pvResult ),
+                  cbMax,
+                  fSPOwnedExtent,
+                  gci::Allow ) );
+        break;
+        
+    case JET_TblInfoSpaceAvailable:
+        Call( ErrInfoGetTableAvailSpace(
+                  ppib,
+                  pfucb,
+                  pvResult,
+                  cbMax ) );
+        break;
+        
+    case JET_TblInfoLVChunkMax:
+        if ( cbMax < sizeof(LONG) )
+        {
+            Error( ErrERRCheck( JET_errBufferTooSmall ) );
+        }
+        *(LONG *)pvResult = pfucb->u.pfcb->Ptdb()->CbLVChunkMost();
+        break;
+        
+    case JET_TblInfoEncryptionKey:
+        if ( cbMax < pfucb->cbEncryptionKey )
+        {
+            Error( ErrERRCheck( JET_errBufferTooSmall ) );
+        }
+#ifdef DEBUG
+        if ( pfucb->cbEncryptionKey > 0 )
+        {
+            ERR errT = ErrOSEncryptionVerifyKey( pfucb->pbEncryptionKey, pfucb->cbEncryptionKey );
+            if ( errT < JET_errSuccess )
             {
-                err = ErrERRCheck( JET_errInvalidOperation );
-                goto HandleError;
+                AssertSz( fFalse, "Client should not have been able to save a bad encryption key" );
             }
-            if ( strlen( szTableName ) >= cbMax )
-                err = ErrERRCheck( JET_errBufferTooSmall );
-            else
-            {
-                OSStrCbCopyA( static_cast<CHAR *>( pvResult ), cbMax, szTableName );
-            }
-            break;
-
-        case JET_TblInfoDbid:
-            if ( pfucb->u.pfcb->FTypeTemporaryTable() )
-            {
-                err = ErrERRCheck( JET_errInvalidOperation );
-                goto HandleError;
-            }
-            /* check buffer size
-            /**/
-            if ( cbMax < sizeof(JET_DBID) )
-            {
-                err = ErrERRCheck( JET_errBufferTooSmall );
-                goto HandleError;
-            }
-            else
-            {
-                *(JET_DBID *)pvResult = (JET_DBID)pfucb->ifmp;
-            }
-            break;
-
-        case JET_TblInfoTemplateTableName:
-            if ( pfucb->u.pfcb->FTypeTemporaryTable() )
-            {
-                err = ErrERRCheck( JET_errInvalidOperation );
-                goto HandleError;
-            }
-
-            // Need at least JET_cbNameMost, plus 1 for null-terminator.
-            if ( cbMax <= JET_cbNameMost )
-                err = ErrERRCheck( JET_errBufferTooSmall );
-            else if ( pfucb->u.pfcb->FDerivedTable() )
-            {
-                FCB     *pfcbTemplateTable = pfucb->u.pfcb->Ptdb()->PfcbTemplateTable();
-                Assert( pfcbNil != pfcbTemplateTable );
-                Assert( pfcbTemplateTable->FFixedDDL() );
-                Assert( strlen( pfcbTemplateTable->Ptdb()->SzTableName() ) <= JET_cbNameMost );
-                OSStrCbCopyA( (CHAR *)pvResult, cbMax, pfcbTemplateTable->Ptdb()->SzTableName() );
-            }
-            else
-            {
-                //  table was not derived from a template -- return NULL
-                *( (CHAR *)pvResult ) = '\0';
-            }
-            break;
-
-        default:
-            err = ErrERRCheck( JET_errInvalidParameter );
+        }
+#endif
+        memcpy( pvResult, pfucb->pbEncryptionKey, pfucb->cbEncryptionKey );
+        // Weird that we cannot tell the caller the size of data copied
+        break;
+        
+    default:
+        Expected( fFalse );
+        return ErrERRCheck( JET_errFeatureNotAvailable );
     }
 
 HandleError:
@@ -2389,6 +2374,9 @@ ERR ErrINFOGetTableIndexInfo(
 {
     ERR             err = JET_errSuccess;
     CHAR            szIndexName[JET_cbNameMost+1];
+    FCB             *pfcbT = pfcbNil;
+    INT             cIndexes;
+    LCID            lcid;
     bool            fTransactionStarted = false;
 
     /*  validate the arguments
@@ -2427,152 +2415,153 @@ ERR ErrINFOGetTableIndexInfo(
         fTransactionStarted = fTrue;
     }
 
+    // Note that this relies on cbMax already being checked in JetGetTableIndexInfoEx and JetGetIndexInfoEx
     switch ( lInfoLevel )
     {
-        case JET_IdxInfo:
-        case JET_IdxInfoList:
-            Call( ErrINFOGetTableIndexInfo( ppib, pfucb, szIndexName, pb, cbMax, fUnicodeNames ) );
-            break;
-        case JET_IdxInfoIndexId:
-            Assert( sizeof(JET_INDEXID) <= cbMax );
-            Call( ErrINFOGetTableIndexIdInfo( ppib, pfucb, szIndexName, (INDEXID *)pb ) );
-            break;
-        case JET_IdxInfoSpaceAlloc:
-            Assert( sizeof(ULONG) == cbMax );
-            Call( ErrCATGetIndexAllocInfo(
-                        ppib,
-                        ifmp,
-                        objidTable,
-                        szIndexName,
-                        (ULONG *)pb ) );
-            break;
-        case JET_IdxInfoLCID:
-        {
-            LCID    lcid    = lcidNone;
-            Assert( sizeof(LANGID) == cbMax
-                || sizeof(LCID) == cbMax );
-            Call( ErrCATGetIndexLcid(
-                        ppib,
-                        ifmp,
-                        objidTable,
-                        szIndexName,
-                        &lcid ) );
-            if ( cbMax < sizeof(LCID) )
-            {
-                *(LANGID *)pb = LangidFromLcid( lcid );
-            }
-            else
-            {
-                *(LCID *)pb = lcid;
-            }
-        }
-            break;
-        case JET_IdxInfoLocaleName:
-        {
-            WCHAR* wszLocaleName = (WCHAR*) pb;
+    case JET_IdxInfo:
+    case JET_IdxInfoList:
+        Call( ErrINFOGetTableIndexInfo( ppib, pfucb, szIndexName, pb, cbMax, fUnicodeNames ) );
+        break;
+        
+    case JET_IdxInfoIndexId:
+        Assert( sizeof(JET_INDEXID) <= cbMax );
+        Call( ErrINFOGetTableIndexIdInfo( ppib, pfucb, szIndexName, (INDEXID *)pb ) );
+        break;
+        
+    case JET_IdxInfoSpaceAlloc:
+        Assert( sizeof(ULONG) == cbMax );
+        Call( ErrCATGetIndexAllocInfo(
+                  ppib,
+                  ifmp,
+                  objidTable,
+                  szIndexName,
+                  (ULONG *)pb ) );
+        break;
 
-            Call( ErrCATGetIndexLocaleName(
-                        ppib,
-                        ifmp,
-                        objidTable,
-                        szIndexName,
-                        wszLocaleName,
-                        cbMax ) );
-        }
-            break;
-        case JET_IdxInfoSortVersion:
+    case JET_IdxInfoLCID:
+        Assert( sizeof(LANGID) == cbMax || sizeof(LCID) == cbMax );
+        lcid    = lcidNone;
+        Call( ErrCATGetIndexLcid(
+                  ppib,
+                  ifmp,
+                  objidTable,
+                  szIndexName,
+                  &lcid ) );
+        if ( cbMax < sizeof(LCID) )
         {
-            Call( ErrCATGetIndexSortVersion(
-                        ppib,
-                        ifmp,
-                        objidTable,
-                        szIndexName,
-                        (DWORD*) pb ) );
+            *(LANGID *)pb = LangidFromLcid( lcid );
         }
-            break;
-        case JET_IdxInfoDefinedSortVersion:
+        else
         {
-            Call( ErrCATGetIndexDefinedSortVersion(
-                        ppib,
-                        ifmp,
-                        objidTable,
-                        szIndexName,
-                        (DWORD*) pb ) );
+            *(LCID *)pb = lcid;
         }
-            break;
-        case JET_IdxInfoSortId:
-        {
-            Call( ErrCATGetIndexSortid(
-                        ppib,
-                        ifmp,
-                        objidTable,
-                        szIndexName,
-                        (SORTID*) pb ) );
-        }
-            break;
-        case JET_IdxInfoVarSegMac:
-            Assert( sizeof(USHORT) == cbMax );
-            Call( ErrCATGetIndexVarSegMac(
-                        ppib,
-                        ifmp,
-                        objidTable,
-                        szIndexName,
-                        (USHORT *)pb ) );
-            break;
-        case JET_IdxInfoKeyMost:
-            Assert( sizeof(USHORT) == cbMax );
-            Call( ErrCATGetIndexKeyMost(
-                        ppib,
-                        ifmp,
-                        objidTable,
-                        szIndexName,
-                        (USHORT *)pb ) );
-            break;
-        case JET_IdxInfoCount:
-        {
-            INT cIndexes = 1;       // the first index is the primary/sequential index
-            FCB *pfcbT;
-            FCB * const pfcbTable = pfucb->u.pfcb;
+        break;
 
-            pfcbTable->EnterDML();
-            for ( pfcbT = pfcbTable->PfcbNextIndex();
+    case JET_IdxInfoLocaleName:
+        Call( ErrCATGetIndexLocaleName(
+                  ppib,
+                  ifmp,
+                  objidTable,
+                  szIndexName,
+                  (WCHAR*) pb,
+                  cbMax ) );
+        break;
+
+    case JET_IdxInfoSortVersion:
+        Assert( sizeof( DWORD ) <= cbMax );
+        Call( ErrCATGetIndexSortVersion(
+                  ppib,
+                  ifmp,
+                  objidTable,
+                  szIndexName,
+                  (DWORD*) pb ) );
+        break;
+
+    case JET_IdxInfoDefinedSortVersion:
+        Assert( sizeof( DWORD ) <= cbMax );
+        Call( ErrCATGetIndexDefinedSortVersion(
+                  ppib,
+                  ifmp,
+                  objidTable,
+                  szIndexName,
+                  (DWORD*) pb ) );
+        break;
+
+    case JET_IdxInfoSortId:
+        Assert( sizeof( SORTID ) <= cbMax );
+        Call( ErrCATGetIndexSortid(
+                  ppib,
+                  ifmp,
+                  objidTable,
+                  szIndexName,
+                  (SORTID*) pb ) );
+        break;
+
+    case JET_IdxInfoVarSegMac:
+        Assert( sizeof(USHORT) == cbMax );
+        Call( ErrCATGetIndexVarSegMac(
+                  ppib,
+                  ifmp,
+                  objidTable,
+                  szIndexName,
+                  (USHORT *)pb ) );
+        break;
+
+    case JET_IdxInfoKeyMost:
+        Assert( sizeof(USHORT) == cbMax );
+        Call( ErrCATGetIndexKeyMost(
+                  ppib,
+                  ifmp,
+                  objidTable,
+                  szIndexName,
+                  (USHORT *)pb ) );
+        break;
+        
+    case JET_IdxInfoCount:
+        Assert( sizeof(INT) == cbMax );
+        cIndexes = 1;       // the first index is the primary/sequential index
+        
+        pfucb->u.pfcb->EnterDML();
+        for ( pfcbT = pfucb->u.pfcb->PfcbNextIndex();
                 pfcbT != pfcbNil;
-                pfcbT = pfcbT->PfcbNextIndex() )
+              pfcbT = pfcbT->PfcbNextIndex() )
+        {
+            err = ErrFILEIAccessIndex( pfucb->ppib, pfucb->u.pfcb, pfcbT );
+            switch ( min( err, JET_errSuccess ) ) // Ignore warnings.
             {
-                err = ErrFILEIAccessIndex( pfucb->ppib, pfcbTable, pfcbT );
-                if ( err < 0 )
-                {
-                    if ( JET_errIndexNotFound != err )
-                    {
-                        pfcbTable->LeaveDML();
-                        goto HandleError;
-                    }
-                }
-                else
-                {
-                    cIndexes++;
-                }
+            case JET_errSuccess:
+                Expected( JET_errSuccess == err ); // But don't expect warnings.
+                cIndexes++;
+                break;
+
+            case JET_errIndexNotFound:
+                // Ignore indices we can't see.
+                err = JET_errSuccess;
+                break;
+
+            default:
+                pfucb->u.pfcb->LeaveDML();
+                Call( err );
             }
-            pfcbTable->LeaveDML();
-
-            Assert( sizeof(INT) == cbMax );
-            *( (INT *)pb ) = cIndexes;
-
-            err = JET_errSuccess;
-            break;
         }
-        case JET_IdxInfoCreateIndex:
-        case JET_IdxInfoCreateIndex2:
-        case JET_IdxInfoCreateIndex3:
-            Call( ErrINFOGetTableIndexInfoForCreateIndex( ppib, pfucb, szIndexName, pb, cbMax, fUnicodeNames, lInfoLevel ) );
-            break;
-        case JET_IdxInfoSysTabCursor:
-        case JET_IdxInfoOLC:
-        case JET_IdxInfoResetOLC:
-        default:
-            Assert( fFalse );       // should be impossible (filtered out by JetGetTableIndexInfo())
-            err = ErrERRCheck( JET_errInvalidParameter );
-            break;
+        pfucb->u.pfcb->LeaveDML();
+        
+        *( (INT *)pb ) = cIndexes;
+        break;
+
+    case JET_IdxInfoCreateIndex:
+    case JET_IdxInfoCreateIndex2:
+    case JET_IdxInfoCreateIndex3:
+        Call( ErrINFOGetTableIndexInfoForCreateIndex( ppib, pfucb, szIndexName, pb, cbMax, fUnicodeNames, lInfoLevel ) );
+        break;
+
+    case JET_IdxInfoSysTabCursor:
+    case JET_IdxInfoOLC:
+    case JET_IdxInfoResetOLC:
+    default:
+        Assert( fFalse );       // should be impossible (filtered out by JetGetTableIndexInfo())
+        err = ErrERRCheck( JET_errInvalidParameter );
+        break;
     }
 
 HandleError:
