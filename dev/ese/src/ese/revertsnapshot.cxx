@@ -5587,6 +5587,8 @@ ERR CRBSRevertContext::ErrExecuteRevert( JET_GRBIT grbit, JET_RBSREVERTINFOMISC*
     prbsrevertinfo->lGenMaxRevertStart  = m_prbsrchk->rbsrchkfilehdr.le_lGenMaxRevertStart;
     prbsrevertinfo->lGenMinRevertEnd    = rbsfilehdr.rbsfilehdr.le_lGenMinLogCopied;
     prbsrevertinfo->lGenMaxRevertEnd    = rbsfilehdr.rbsfilehdr.le_lGenMaxLogCopied;
+    prbsrevertinfo->lGenRBSMaxApplied   = m_lRBSMaxGenToApply;
+    prbsrevertinfo->lGenRBSMinApplied   = m_lRBSMinGenToApply;
 
     TraceFuncComplete( m_pcprintfRevertTrace, __FUNCTION__, JET_errSuccess );
 
