@@ -81,7 +81,7 @@ JetParam g_rgparamRaw[] =
     NORMAL_PARAM(JET_paramDisableCallbacks, CJetParam::typeBoolean, 0,  0,  0, 1, 0, -1, 0),
     IGNORED_PARAM(JET_paramBackupChunkSize, CJetParam::typeInteger, 1,  0,  0, 1, 1, 2147483647, 16),
     IGNORED_PARAM(JET_paramBackupOutstandingReads, CJetParam::typeInteger, 1,  0,  0, 1, 1, 2147483647, 8),
-    NORMAL_PARAM(JET_paramFlight_CheckRedoNeededBeyondRequiredRange, CJetParam::typeBoolean, 1,  0,  0, 1, 0, -1, 1),
+    ILLEGAL_PARAM(68),
     NORMAL_PARAM(JET_paramLogFileCreateAsynch, CJetParam::typeBoolean, 1,  0,  0, 1, 0, -1, fTrue),
     CUSTOM_PARAM(JET_paramErrorToString, CJetParam::typeUserDefined, 0,  1,  0, 0, GetErrorToString, CJetParam::IllegalSet, CJetParam::CloneDefault),
     NORMAL_PARAM(JET_paramZeroDatabaseDuringBackup, CJetParam::typeBoolean, 0,  0,  0, 1, 0, -1, 0),
@@ -310,7 +310,7 @@ static_assert( JET_paramDatabasePageSize == 64, "The order of defintion for JET_
 static_assert( JET_paramDisableCallbacks == 65, "The order of defintion for JET_paramDisableCallbacks in sysparam.xml must follow the numerical ordering of its value (as defined in jethdr.w)." );
 static_assert( JET_paramBackupChunkSize == 66, "The order of defintion for JET_paramBackupChunkSize in sysparam.xml must follow the numerical ordering of its value (as defined in jethdr.w)." );
 static_assert( JET_paramBackupOutstandingReads == 67, "The order of defintion for JET_paramBackupOutstandingReads in sysparam.xml must follow the numerical ordering of its value (as defined in jethdr.w)." );
-static_assert( JET_paramFlight_CheckRedoNeededBeyondRequiredRange == 68, "The order of defintion for JET_paramFlight_CheckRedoNeededBeyondRequiredRange in sysparam.xml must follow the numerical ordering of its value (as defined in jethdr.w)." );
+static_assert( 68 == 68, "The order of defintion for 68 in sysparam.xml must follow the numerical ordering of its value (as defined in jethdr.w)." );
 static_assert( JET_paramLogFileCreateAsynch == 69, "The order of defintion for JET_paramLogFileCreateAsynch in sysparam.xml must follow the numerical ordering of its value (as defined in jethdr.w)." );
 static_assert( JET_paramErrorToString == 70, "The order of defintion for JET_paramErrorToString in sysparam.xml must follow the numerical ordering of its value (as defined in jethdr.w)." );
 static_assert( JET_paramZeroDatabaseDuringBackup == 71, "The order of defintion for JET_paramZeroDatabaseDuringBackup in sysparam.xml must follow the numerical ordering of its value (as defined in jethdr.w)." );
