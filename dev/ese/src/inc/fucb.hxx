@@ -1610,7 +1610,7 @@ INLINE VOID FUCBCloseDeferredClosed( FUCB *pfucb )
     // Deferred-closed cursors are closed during commit0 or rollback.
     if( NULL != pfucb->ppib->prceNewest )
     {
-        Assert( pfucb->ppib->CritTrx().FOwner() );
+        Assert( PinstFromPpib( pfucb->ppib )->RwlTrx( pfucb->ppib ).FReader() );
     }
 #endif  //  DEBUG
 

@@ -351,6 +351,153 @@ INLINE CCriticalSection& CRITPOOL<T>::Crit( const T* const pt )
 }
 
 
+//  Reader Writer lock Pool
+
+class RWLPOOL
+{
+    public:
+        RWLPOOL( void );
+        ~RWLPOOL( void );
+        RWLPOOL& operator=( RWLPOOL& );  //  disallowed
+
+        BOOL FInit( const LONG cThread, const LONG cbObjectSize, const INT rank, const _TCHAR* szName );
+        void Term( void );
+
+        CReaderWriterLock& Rwl( const VOID* const pObj );
+
+    private:
+        LONG                m_crwl;
+        CReaderWriterLock*  m_rgrwl;
+        LONG                m_cShift;
+        LONG                m_mask;
+        LONG                m_cMaskShift;
+};
+    
+//  constructor
+
+INLINE RWLPOOL::RWLPOOL( void )
+{
+    //  reset all members
+
+    m_crwl = 0;
+    m_rgrwl = NULL;
+    m_cShift = 0;
+    m_mask = 0;
+    m_cMaskShift = 0;
+}
+
+//  destructor
+
+INLINE RWLPOOL::~RWLPOOL( void )
+{
+    //  ensure that we have freed our resources
+
+    Term();
+}
+
+//  initializes the reader writer lock pool for use by cThread threads, returning
+//  fTrue on success or fFalse on failure
+
+INLINE BOOL RWLPOOL::FInit( const LONG cThread, const LONG cbObjectSize, const INT rank, const _TCHAR* szName )
+{
+    //  ensure that Term() was called or ErrInit() was never called
+
+    Assert( m_crwl == 0 );
+    Assert( m_rgrwl == NULL );
+    Assert( m_cShift == 0 );
+    Assert( m_mask == 0 );
+    Assert( m_cMaskShift == 0 );
+
+    //  ensure that we have a valid number of threads
+
+    Assert( cThread > 0 );
+
+    //  we will use the next higher power of two than the number of
+    //  threads that will use the reader writer lock pool
+
+    m_crwl = LNextPowerOf2( cThread );
+
+    //  the mask is one less ( x & ( n - 1 ) is cheaper than x % n if n
+    //  is a power of two )
+    
+    m_mask = m_crwl - 1;
+    m_cMaskShift = Log2( m_crwl );
+
+    //  the hash shift const is the largest power of two that can divide the
+    //  size of object evenly so that the step we use through the RWL array
+    //  and the size of the array are relatively prime, ensuring that we use
+    //  all the RWLs
+
+    LONG n;
+    for ( m_cShift = -1, n = 1; cbObjectSize % n == 0; m_cShift++, n *= 2 );
+
+    //  allocate RWL storage, but not as RWLs (no default initializer)
+
+    if ( !( m_rgrwl = (CReaderWriterLock *)( new BYTE[m_crwl * sizeof( CReaderWriterLock )] ) ) )
+    {
+        goto HandleError;
+    }
+
+    //  initialize all RWLs using placement new operator
+
+    LONG irwl;
+    for ( irwl = 0; irwl < m_crwl; irwl++ )
+    {
+        new( m_rgrwl + irwl ) CReaderWriterLock( CLockBasicInfo( CSyncBasicInfo( szName ), rank, irwl ) );
+    }
+
+    return fTrue;
+
+HandleError:
+    Term();
+    return fFalse;
+}
+
+//  terminates the reader writer lock pool
+
+INLINE void RWLPOOL::Term( void )
+{
+    //  we must explicitly call each CReaderWriterLock's destructor due to use of placement new
+
+    // ErrInit can fail in m_rgrwl allocation and Term() is called from HandleError with m_rgrwl NULL
+    if (NULL != m_rgrwl)
+    {
+        LONG irwl;
+        for ( irwl = 0; irwl < m_crwl; irwl++ )
+        {
+            m_rgrwl[irwl].~CReaderWriterLock();
+        }
+
+        //  free CReaderWriterLock storage
+
+        delete [] (BYTE *)m_rgrwl;
+    }
+
+    //  reset all members
+
+    m_crwl = 0;
+    m_rgrwl = NULL;
+    m_cShift = 0;
+    m_mask = 0;
+    m_cMaskShift = 0;
+}
+
+//  returns the reader write lock associated with the given instance of T
+
+INLINE CReaderWriterLock& RWLPOOL::Rwl( const VOID* const pObj )
+{
+    LONG_PTR dwValue = LONG_PTR( pObj ) >> m_cShift;
+    LONG dwHash = 0;
+    while ( dwValue != 0 )
+    {
+        dwHash = dwHash ^ (dwValue & m_mask);
+        dwValue = dwValue >> m_cMaskShift;
+    }
+    Assert( dwHash < m_crwl );
+    return m_rgrwl[ dwHash ];
+}
+
+
 //  Processor Local Storage
 
 typedef struct BF* PBF;

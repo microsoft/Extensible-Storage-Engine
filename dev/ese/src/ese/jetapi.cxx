@@ -2373,6 +2373,8 @@ INST::~INST()
     }
     OSMemoryPageFree( m_rgpls );
 
+    m_rwlpoolPIBTrx.Term();
+
     Assert( m_rgparam != g_rgparam );
     delete [] m_rgparam;
 }
@@ -3547,6 +3549,13 @@ ERR ErrNewInst(
         Error( ErrERRCheck( JET_errOutOfMemory ) );
     }
     if ( !pinst->FSetDisplayName( wszDisplayName ) )
+    {
+        Error( ErrERRCheck( JET_errOutOfMemory ) );
+    }
+
+    //  this allocates 64 rwlTrx per processor
+    //  pass PIB size rounded up to allocation alignment used by cresmgr
+    if ( !pinst->m_rwlpoolPIBTrx.FInit( 64 * OSSyncGetProcessorCount(), roundup( sizeof(PIB), 32 ), rankPIBTrx, szPIBTrx ) )
     {
         Error( ErrERRCheck( JET_errOutOfMemory ) );
     }

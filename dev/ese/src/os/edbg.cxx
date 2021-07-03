@@ -17668,8 +17668,6 @@ VOID PIB::Dump( CPRINTF * pcprintf, DWORD_PTR dwOffset ) const
 
     (*pcprintf)( FORMAT_UINT( PIB, this, m_grbitUserIoPriority, dwOffset ) );
     (*pcprintf)( FORMAT_UINT( PIB, this, m_qosIoPriority, dwOffset ) );
-
-    (*pcprintf)( FORMAT_VOID( PIB, this, m_critTrx, dwOffset ) );
 }
 
 //  ================================================================
@@ -17926,6 +17924,7 @@ VOID INST::Dump( CPRINTF * pcprintf, DWORD_PTR dwOffset ) const
     (*pcprintf)( FORMAT_INT( INST, this, m_updateid, dwOffset ) );
 
     (*pcprintf)( FORMAT_VOID( INST, this, m_critPIB, dwOffset ) );
+    (*pcprintf)( FORMAT_VOID( INST, this, m_rwlpoolPIBTrx, dwOffset ) );
     (*pcprintf)( FORMAT_VOID( INST, this, m_cresPIB, dwOffset ) );
     EDBGDumplinkDml( INST, this, PIB, m_ppibGlobal, dwOffset );
     (*pcprintf)( FORMAT_INT( INST, this, m_trxNewest, dwOffset ) );
