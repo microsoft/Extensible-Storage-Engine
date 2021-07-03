@@ -115,8 +115,8 @@ ERR ErrFUCBOpen( PIB *ppib, IFMP ifmp, FUCB **ppfucb, const LEVEL level )
     // (ie. concurrent CreateIndex).
     if ( level > 0 )
     {
-        // If opening by proxy, then proxy should already have obtained critTrx.
-        Assert( ppib->CritTrx().FOwner() );
+        // If opening by proxy, then proxy should already have obtained rwlTrx.
+        Assert( PinstFromPpib( ppib )->RwlTrx( ppib ).FWriter() );
         pfucb->levelOpen = level;
 
         // Must have these flags set BEFORE linking into session list to

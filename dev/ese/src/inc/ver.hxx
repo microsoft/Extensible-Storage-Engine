@@ -597,7 +597,7 @@ class RCE
         BOOL    FAssertRwlHash_() const;
         BOOL    FAssertRwlHashAsWriter_() const;
         BOOL    FAssertCritFCBRCEList_() const;
-        BOOL    FAssertCritPIB_() const;
+        BOOL    FAssertRwlPIB_() const;
         BOOL    FAssertReadable_() const;
 #endif  //  DEBUG
 
