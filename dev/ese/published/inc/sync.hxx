@@ -1999,7 +1999,7 @@ class CSemaphoreState
 
         const INT CAvail() const { return (INT)m_cAvail; }
         const INT CWait() const { return (INT)m_cWait; }
-        volatile void * PAvail() { return &m_cAvail; }
+        volatile DWORD * GetAvailAddress() { return &m_cAvail; }
 
         //    debugging support
 
@@ -2137,8 +2137,8 @@ class CSemaphore
         const BOOL _FTryAcquire( const INT cSpin );
         const BOOL _FAcquire( const DWORD dwTimeout );
         void _Release( const INT cToRelease );
-        const BOOL _FWait( const INT cAvail, const DWORD dwTimeout );
-        const BOOL _FOSWait( const INT cAvail, const DWORD dwTimeout );
+        const BOOL _FWait( const DWORD cAvail, const DWORD dwTimeout );
+        const BOOL _FOSWait( const DWORD cAvail, const DWORD dwTimeout );
 };
 
 //  acquire one count of the semaphore, waiting forever if necessary

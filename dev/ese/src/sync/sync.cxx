@@ -3936,7 +3936,7 @@ const BOOL CSemaphore::_FAcquire( const DWORD dwTimeout )
             //  so the state machine ensures that the available count is re-checked on
             //  each iteration
 
-            if ( !_FWait( stateCur.CAvail(), dwRemaining ) )
+            if ( !_FWait( (DWORD)stateCur.CAvail(), dwRemaining ) )
             {
                 //  we were unable to acquire the semaphore in the time permitted
 
@@ -3982,11 +3982,11 @@ void CSemaphore::ReleaseAllWaiters()
 
             if ( State().FChange(stateCur, stateNew ) )
             {
-                volatile void *pv = State().PAvail();
+                volatile DWORD *pdwAvail = State().GetAvailAddress();
 
                 //  wake all waiting threads
 
-                WakeByAddressAll( (void*)pv );
+                WakeByAddressAll( (void*)pdwAvail );
 
                 //  we're done
 
@@ -4020,15 +4020,15 @@ void CSemaphore::_Release( const INT cToRelease )
     }
     else if ( cWait <= cToRelease )
     {
-        volatile void *pv = State().PAvail();
+        volatile DWORD *pdwAvail = State().GetAvailAddress();
 
         //  no more waiting threads than cToRelease, wake everyone
 
-        WakeByAddressAll( (void*)pv );
+        WakeByAddressAll( (void*)pdwAvail );
     }
     else
     {
-        volatile void *pv = State().PAvail();
+        volatile DWORD *pdwAvail = State().GetAvailAddress();
 
         //  wake at most cToRelease threads, as the benefit from not waking
         //  unnecessary threads is expected to be greater than the loss on
@@ -4036,7 +4036,7 @@ void CSemaphore::_Release( const INT cToRelease )
 
         for ( INT i = 0; i < cToRelease; i++ )
         {
-            WakeByAddressSingle( (void*)pv );
+            WakeByAddressSingle( (void*)pdwAvail );
         }
     }
 }
@@ -4046,7 +4046,7 @@ void CSemaphore::_Release( const INT cToRelease )
 //  the address is signaled, but it is also allowed to return for other reasons.
 //  the caller should compare the new value with the original
 
-const BOOL CSemaphore::_FWait( const INT cAvail, const DWORD dwTimeout )
+const BOOL CSemaphore::_FWait( const DWORD cAvail, const DWORD dwTimeout )
 {
     PERFOpt( AtomicIncrement( (LONG*)&g_cOSSYNCThreadBlock ) );
     State().StartWait();
@@ -4122,12 +4122,14 @@ const BOOL CSemaphore::_FWait( const INT cAvail, const DWORD dwTimeout )
 //  but it is also allowed to return for other reasons.  the caller should compare
 //  the new value with the original
 
-const BOOL CSemaphore::_FOSWait( const INT cAvail, const DWORD dwTimeout )
+const BOOL CSemaphore::_FOSWait( const DWORD cAvail, const DWORD dwTimeout )
 {
-    volatile void *pv = State().PAvail();
+    volatile DWORD *pdwAvail = State().GetAvailAddress();
+
+    static_assert( sizeof(*pdwAvail) == sizeof(cAvail), "Should be of the same size." );
 
     OnThreadWaitBegin();
-    BOOL fSuccess = WaitOnAddress( pv, (PVOID)&cAvail, sizeof(cAvail), dwTimeout );
+    BOOL fSuccess = WaitOnAddress( pdwAvail, (PVOID)&cAvail, sizeof(cAvail), dwTimeout );
     OnThreadWaitEnd();
 
     return fSuccess;
