@@ -4129,7 +4129,7 @@ const BOOL CSemaphore::_FOSWait( const DWORD cAvail, const DWORD dwTimeout )
     static_assert( sizeof(*pdwAvail) == sizeof(cAvail), "Should be of the same size." );
 
     OnThreadWaitBegin();
-    BOOL fSuccess = WaitOnAddress( pdwAvail, (PVOID)&cAvail, sizeof(cAvail), dwTimeout );
+    BOOL fSuccess = WaitOnAddress( pdwAvail, (void*)&cAvail, sizeof(cAvail), dwTimeout );
     OnThreadWaitEnd();
 
     return fSuccess;
