@@ -4873,6 +4873,11 @@ ERR CRBSRevertContext::ErrInitContext( LOGTIME ltRevertExpected, LOGTIME* pltRev
     Call( ErrRBSPerformLogChecks( m_pinst, wszRBSAbsRootDirPath, m_wszRBSBaseName, m_lRBSMinGenToApply, !fDeleteExistingLogs, wszRBSAbsLogPath ) );
 
 HandleError:
+    if ( err == JET_errInvalidPath )
+    {
+        err = ErrERRCheck( JET_errRBSRCInvalidRBS );
+    }
+
     return err;
 }
 
