@@ -3980,7 +3980,7 @@ void CSemaphore::ReleaseAllWaiters()
 
             const CSemaphoreState stateNew( stateCur.CWait(), stateCur.CWait() );
 
-            if ( State().FChange(stateCur, stateNew ) )
+            if ( State().FChange( stateCur, stateNew ) )
             {
                 volatile DWORD *pdwAvail = State().GetAvailAddress();
 
