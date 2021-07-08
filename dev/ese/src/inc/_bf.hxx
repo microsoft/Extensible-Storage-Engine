@@ -409,7 +409,7 @@ C_ASSERT( sizeof( BF::bfbitfield ) == sizeof( FLAG32 ) );
 #ifdef _WIN64
 C_ASSERT( sizeof(BF) == 192 );
 #else  //  !_WIN64
-C_ASSERT( sizeof(BF) == 160 );
+C_ASSERT( sizeof(BF) == 176 );
 #endif  //  _WIN64
 
 //  Buffer Manager Global Flags
