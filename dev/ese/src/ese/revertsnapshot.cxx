@@ -3943,7 +3943,18 @@ ERR CRBSDatabaseRevertContext::ErrSetDbstateAfterRevert( SIGNATURE* psignRbsHdrF
     m_pdbfilehdrFromRBS->le_ulRevertCount                           = m_pdbfilehdr->le_ulRevertCount;
     m_pdbfilehdrFromRBS->le_ulRevertPageCount                       = m_pdbfilehdr->le_ulRevertPageCount;
     m_pdbfilehdrFromRBS->le_lgposCommitBeforeRevert                 = lgposMax;
-    m_pdbfilehdrFromRBS->le_lgposCommitBeforeRevert.le_lGeneration  = m_pdbfilehdr->le_lGenMaxCommitted;
+
+    // lGenMaxCommitted is now flushed only when max required range is updated.
+    // But it is possible we have snapshotted new pages in the LLR range.
+    // So we will adjust lgposCommitBeforeRevert to account for LLR.
+    // 
+    // We will also do the max of lgposCommitBeforeRevert currently set on db header and the newly computed value 
+    // to account for back to back reverts taking place close to each other.
+    //
+    m_pdbfilehdrFromRBS->le_lgposCommitBeforeRevert.le_lGeneration  = 
+        max( m_pdbfilehdr->le_lgposCommitBeforeRevert.le_lGeneration, 1 + m_pdbfilehdr->le_lGenMaxRequired + (LONG)UlParam( m_pinst, JET_paramFlight_ElasticWaypointLatency ) );
+
+    Assert( m_pdbfilehdrFromRBS->le_lgposCommitBeforeRevert.le_lGeneration >= m_pdbfilehdr->le_lGenMaxCommitted );
 
     memcpy( &m_pdbfilehdrFromRBS->logtimeRevertFrom, &m_pdbfilehdr->logtimeRevertFrom, sizeof( LOGTIME ) );
     memcpy( &m_pdbfilehdrFromRBS->logtimeRevertTo, &m_pdbfilehdr->logtimeRevertTo, sizeof( LOGTIME ) );
