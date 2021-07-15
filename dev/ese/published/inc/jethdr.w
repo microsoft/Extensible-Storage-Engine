@@ -3960,7 +3960,6 @@ typedef enum
 // end_PubEsent
 #define JET_paramFlight_EnableReattachRaceBugFix 74 //  Enable bug fix for race between dirty-cache-keep-alive database reattach and checkpoint update
 // #define JET_paramSLVDefragFreeThreshold      74  //  chunks whose free % is > this will be allocated from
-#define JET_paramFlight_EnableLz4Compression    75 //  Enable Lz4 compression
 // #define JET_paramSLVDefragMoveThreshold      75  //  chunks whose free % is > this will be relocated
 #define JET_paramEnableSortedRetrieveColumns    76  //  internally sort (in a dynamically allocated parallel array) JET_RETRIEVECOLUMN structures passed to JetRetrieveColumns()
 // begin_PubEsent
