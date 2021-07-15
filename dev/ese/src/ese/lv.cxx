@@ -1335,7 +1335,6 @@ LOCAL CompressFlags LVIAddCompressionFlagsIfEnabled(
 
     // If user asks for xpress and lz4 is enabled, use that.
     if ( (compressFlags & compressXpress) &&
-         BoolParam( pinst, JET_paramFlight_EnableLz4Compression ) &&
          g_rgfmp[ ifmp ].ErrDBFormatFeatureEnabled( JET_efvLz4Compression ) >= JET_errSuccess )
     {
         return CompressFlags( compressFlags | compressLz4 );
