@@ -8424,6 +8424,30 @@ namespace Isam
     };
 
     [Serializable]
+    public ref class IsamRBSDeleteTableTooBigException : public IsamStateException
+    {
+    public:
+        IsamRBSDeleteTableTooBigException() : IsamStateException( "The table being deleted is bigger than the configured max size to delete while activated on RBS copy, retry delete when activated on another copy", JET_errRBSDeleteTableTooBig)
+        {
+        }
+
+        // Constructor with embedded exception. Does not use the string from esent.h.
+        IsamRBSDeleteTableTooBigException( String ^ description, Exception^ innerException ) :
+            IsamStateException( description, innerException )
+        {
+        }
+
+        IsamRBSDeleteTableTooBigException(
+            System::Runtime::Serialization::SerializationInfo^ info,
+            System::Runtime::Serialization::StreamingContext context
+        )
+            : IsamStateException( info, context )
+        {
+        }
+
+    };
+
+    [Serializable]
     public ref class IsamDatabaseAlreadyRunningMaintenanceException : public IsamUsageException
     {
     public:
@@ -9477,6 +9501,8 @@ static IsamErrorException^ JetErrToException( const JET_ERR err )
             return gcnew IsamRBSRCInvalidDbFormatVersionException;
         case JET_errRBSCannotDetermineDivergence:
             return gcnew IsamRBSCannotDetermineDivergenceException;
+        case JET_errRBSDeleteTableTooBig:
+            return gcnew IsamRBSDeleteTableTooBigException;
         case JET_errDatabaseAlreadyRunningMaintenance:
             return gcnew IsamDatabaseAlreadyRunningMaintenanceException;
         case JET_errCallbackFailed:

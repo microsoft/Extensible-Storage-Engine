@@ -139,6 +139,7 @@ MSINTERNAL enum class MJET_PARAM
     AbortRetryFailCallback = 108, // I/O error callback (JET_ABORTRETRYFAILCALLBACK)
     BackupChunkSize = 66, // backup read size in pages
     BackupOutstandingReads = 67, // backup maximum reads outstanding
+    Flight_RBSMaxTableDeletePages = 68, // Maximum table delete size (in pages) to allow if we are activated on the RBS copy
     LogFileCreateAsynch = 69, // prepares next log file while logging to the current one to smooth response time
     ErrorToString = 70, // turns a JET_err into a string (taken from the comment in jet.h)
     ZeroDatabaseDuringBackup = 71, // Overwrite deleted records/LVs during backup
