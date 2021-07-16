@@ -3946,6 +3946,8 @@ typedef enum
 #define JET_paramBackupChunkSize                66  //  backup read size in pages
 #define JET_paramBackupOutstandingReads         67  //  backup maximum reads outstanding
 
+#define JET_paramFlight_RBSMaxTableDeletePages  68  //  Maximum table delete size (in pages) to allow if we are activated on the RBS copy
+
 // begin_PubEsent
 #define JET_paramLogFileCreateAsynch            69  //  prepares next log file while logging to the current one to smooth response time
 #endif // JET_VERSION >= 0x0501
@@ -6558,6 +6560,7 @@ typedef JET_ERR (JET_API * JET_PFNEMITLOGDATA)(
 #define JET_errRBSCannotDetermineDivergence -1938  /* The required logs for the revert snapshot are missing in log directory and hence we cannot determine if those logs are diverged with the logs in snapshot directory. */
 #define errRBSRequiredRangeTooLarge         -1939  /* RBS was not created as the required range was too large and we don't want to start revert snapshot from such a state. */
 #define errRBSPatching                      -1940  /* RBS was not created as RBS is being attached for patching purposes, usually due to incremental reseed or page patching on the databases attached to the RBS. */
+#define JET_errRBSDeleteTableTooBig         -1941  /* The table being deleted is bigger than the configured max size to delete while activated on RBS copy, retry delete when activated on another copy */
 // begin_PubEsent
 
 #define JET_wrnDefragAlreadyRunning          2000 /* Online defrag already running on specified database */

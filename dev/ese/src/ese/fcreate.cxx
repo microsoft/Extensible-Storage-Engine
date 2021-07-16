@@ -8218,6 +8218,27 @@ ERR ErrFILEDeleteTable( PIB *ppib, IFMP ifmp, const CHAR *szName, BOOL fAllowTab
         goto HandleError;
     }
 
+    // If we are activated on the available lag copy, cap the size of table to
+    // be deleted to prevent version store cleanup being bogged down by collection
+    // of pre-images of the pages freed.
+    if ( g_rgfmp[ ifmp ].FRBSOn() &&
+         UlParam( PinstFromIfmp( ifmp ), JET_paramFlight_RBSMaxTableDeletePages ) != 0 )
+    {
+        CPG cpgOwned;
+        Call( ErrSPGetInfo(
+                  ppib,
+                  ifmp,
+                  pfucb,
+                  (BYTE *)&cpgOwned,
+                  sizeof( cpgOwned ),
+                  fSPOwnedExtent,
+                  gci::Allow ) );
+        if ( cpgOwned > UlParam( PinstFromIfmp( ifmp ), JET_paramFlight_RBSMaxTableDeletePages ) )
+        {
+            Error( ErrERRCheck( JET_errRBSDeleteTableTooBig ) );
+        }
+    }
+
     //  the following assert(s) goes off when we reuse a cursor that
     //  was defer closed by us -- it has been disabled for now
     //
