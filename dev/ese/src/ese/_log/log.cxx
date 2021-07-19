@@ -1957,13 +1957,14 @@ ERR LOG::ErrLGUpdateGenRequired(
             continue;
         }
 
-
         if ( !pfmpT->FAllowHeaderUpdate() )
         {
             if ( pfSkippedAttachDetach )
             {
                 *pfSkippedAttachDetach = fTrue;
             }
+            // Do not trim LGEN_LOGTIME_MAP list
+            lGenMaxRequiredMin = 0;
             pfmpT->RwlDetaching().LeaveAsReader();
             continue;
         }
