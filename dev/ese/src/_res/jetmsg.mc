@@ -2073,6 +2073,8 @@ SymbolicName=EXTENT_PAGE_COUNT_CACHE_EXTENSIVE_VALIDATION_FAILED_ID
 Language=English
 %1 (%2) %3Extra validation of the Extent Page Count Cache table failed.%n
 Database: %4%n
+Table: %11%n
+ObjName: %12%n
 Objid: %5%n
 PgnoFDP: %6%n
 Counted CpgOE: %7%n

@@ -14452,88 +14452,209 @@ LOCAL VOID SPIReportAnyExtentCacheError(
     CPG cpgAECounted
     )
 {
-    BOOL fOESizeMismatch = fFalse;
-    BOOL fAESizeMismatch = fFalse;
+    PSTR szNameOfObject;
+    FCB *pfcbTable;
+    FCB *pfcbIndex;
+    
+    //  WARNING! WARNING!  This code currently does not grab the DML latch,
+    //  so there doesn't appear to be any guarantee that the table and index
+    //  name won't be relocated from underneath us
 
-    // cpgNil on input is used to represent "Don't know"
-
-    if ( ( cpgOECached != cpgOECounted ) && ( cpgOECached != cpgNil ) && ( cpgOECounted != cpgNil ) )
+    if( pfucb->u.pfcb->FTypeTable() )
     {
-        // We know the OE values, and they don't match.
-        fOESizeMismatch = fTrue;
-    }
-
-    if ( ( cpgAECached != cpgAECounted ) && ( cpgAECached != cpgNil ) && ( cpgAECounted != cpgNil ) )
-    {
-        // We know the AE values, and they don't match.
-        fAESizeMismatch = fTrue;
-    }
-
-    if ( fAESizeMismatch || fOESizeMismatch )
-    {
-        // We have values to compare, and they showed a discrepency.  Report it.
+        pfcbTable = pfucb->u.pfcb;
+        pfcbIndex = pfucb->u.pfcb;
         
-        OSTraceSuspendGC();
-        const WCHAR * rgwsz[] = {
-            PfmpFromIfmp( pfucb->ifmp )->WszDatabaseName(),
-            OSFormatW( L"%d", ObjidFDP( pfucb ) ),
-            OSFormatW( L"%d", PgnoFDP( pfucb ) ),
-            OSFormatW( L"%d", cpgOECounted ),
-            OSFormatW( L"%d", cpgAECounted ),
-            OSFormatW( L"%d", cpgOECached ),
-            OSFormatW( L"%d", cpgOECached )
-        };
-
-        // TC == Tree count, CC == Cache count.
-        OSTraceFMP(
-            pfucb->ifmp,
-            JET_tracetagSpaceInternal,
-            OSFormat(
-                "%hs: Size mismatch: TC{%d:%d} CC{%d:%d} [0x%x:0x%x:%lu].",
-                __FUNCTION__,
-                cpgOECounted,
-                cpgAECounted,
-                cpgOECached,
-                cpgAECached,
-                pfucb->ifmp,
-                ObjidFDP( pfucb ),
-                PgnoFDP( pfucb ) ) );
-
-        UtilReportEvent(
-            eventError,
-            SPACE_MANAGER_CATEGORY,
-            EXTENT_PAGE_COUNT_CACHE_EXTENSIVE_VALIDATION_FAILED_ID,
-            _countof( rgwsz ),
-            rgwsz,
-            0,
-            PinstFromPfucb( pfucb ) );
-        OSTraceResumeGC();
-
-        // This happens too often under completely normal conditions
-        // to safely Assert anything.  We get here when the amount read
-        // from the cache didn't match what we read by counting a table,
-        // and as there is no locking there, mismatches happen.  Maybe
-        // we can do some kind of assert based on how big the mismatch
-        // is?  Later...
-        //  AssertTrack( fFalse, "Size mismatch OE and/or AE." );
+        if ( pfcbIndex->FSequentialIndex() )
+        {
+            szNameOfObject = "<SEQUENTIAL>";
+        }
+        else if ( pfcbTable && pfcbTable->Ptdb() && pfcbIndex->Pidb() )
+        {
+            szNameOfObject = pfcbTable->Ptdb()->SzIndexName(
+                pfcbIndex->Pidb()->ItagIndexName(),                                                                                                                   
+                pfcbIndex->FDerivedIndex() );
+        }
+        else
+        {
+            // I don't think this is supposed to happen, but just in case I missed a
+            // case where it does.
+            szNameOfObject = "<PRIMARY>";
+        }
+    }
+    else if( pfucb->u.pfcb->FTypeSecondaryIndex() )
+    {
+        pfcbTable = pfucb->u.pfcb->PfcbTable();
+        pfcbIndex = pfucb->u.pfcb;
+        
+        if ( pfcbTable && pfcbTable->Ptdb() && pfcbIndex->Pidb() )
+        {
+            szNameOfObject = pfcbTable->Ptdb()->SzIndexName(
+                pfcbIndex->Pidb()->ItagIndexName(),                                                                                                                   
+                pfcbIndex->FDerivedIndex() );
+        }
+        else
+        {
+            // I don't think this is supposed to happen, but just in case I missed a
+            // case where it does.
+            szNameOfObject = "<SECONDARY>";
+        }
+    }
+    else if( pfucb->u.pfcb->FTypeLV() )
+    {
+        szNameOfObject = "<LV>";
     }
     else
     {
-        // No detected error to report.
+        szNameOfObject = "<Unknown>";
+    }
+
+    // cpgNil on input is used to represent "Don't know"
+    if ( ( ( cpgOECached == cpgOECounted ) || ( cpgOECached == cpgNil ) || ( cpgOECounted == cpgNil ) ) &&
+         ( ( cpgAECached == cpgAECounted ) || ( cpgAECached == cpgNil ) || ( cpgAECounted == cpgNil ) )    )
+    {
+        // Sizes, where known, match.  No detected error to report.
+        // N = Name of Table, NO = Name of object
         OSTraceFMP(
             pfucb->ifmp,
             JET_tracetagSpaceInternal,
             OSFormat(
-                "%hs: Validated C{%d:%d} [0x%x:0x%x:%lu]",
+                "%hs: Validation succeeded N{%hs} NO{%hs} C{%d:%d} [0x%x:0x%x:%lu]",
                 __FUNCTION__,
+                SzNameOfTable( pfucb ),
+                szNameOfObject,
                 cpgOECached,
                 cpgAECached,
                 pfucb->ifmp,
                 ObjidFDP( pfucb ),
                 PgnoFDP( pfucb ) ) );
+        return;
+    }        // 
+        
+    //
+    // We have values to compare, and they showed a discrepency.
+    //
+    ERR err;
+    CPG cpgOECached2;
+    CPG cpgAECached2;
+    PSTR szReasonNotValidated = NULL;
+    
+    // There's a decent chance this is a false positive and that we're the victim of a race condition.
+    // Lets try to decrease the number of false positives.  Sleep to yield to another thread.
+    // In practice, this triggers less than 10ish times a day on production servers, so don't worry about
+    // the brief delay.
+    UtilSleep( 50 );
+    err = ErrCATGetExtentPageCounts(
+        pfucb->ppib,
+        pfucb->ifmp,
+        pfucb->u.pfcb->ObjidFDP(),
+        &cpgOECached2,
+        &cpgAECached2 );
+    
+    switch ( err )
+    {
+    case JET_errSuccess:
+        if ( ( cpgOECached != cpgOECached2 ) || ( cpgAECached != cpgAECached2 ) )
+        {
+            // Cached values changed; things are in flux.  We can't trust anything enough
+            // to positively identify an error.  The value we got from counting may have changed
+            // also (although we're not going to take the time to read it again).  We could
+            // validate the freshly read cached values against the potentially stale counted
+            // values, but I don't suspect that would actually catch errors.
+            szReasonNotValidated = "Updated";
+        }
+        break;
+        
+    case JET_errRecordNotFound:
+        // Must now be marked as invalid, which is a form of a race.
+        szReasonNotValidated = "Marked";
+        break;
+        
+    case JET_errNotInitialized:
+        // Hmm.  We found it in the cache, but now the cache says it can't be in the cache.
+        // That's not supposed to happen.
+        AssertSz( fFalse, "Found in cache, now can not be found in cache." );
+        szReasonNotValidated = "Unexpected";
+        break;
+        
+    default:
+        AssertSz( fFalse, "Unexpected case in switch." );
+        szReasonNotValidated = "Unknown";
+        break;
     }
-}
 
+    if ( szReasonNotValidated )
+    {
+        // A race (or something).  Skip reporting.
+        OSTraceFMP(
+            pfucb->ifmp,
+            JET_tracetagSpaceInternal,
+            OSFormat(
+                "%hs: Validation skipped: N{%hs} NO{%hs} R{%hs} C{%d:%d} [0x%x:0x%x:%lu]",
+                __FUNCTION__,
+                SzNameOfTable( pfucb ),
+                szNameOfObject,
+                szReasonNotValidated,
+                cpgOECached,
+                cpgAECached,
+                pfucb->ifmp,
+                ObjidFDP( pfucb ),
+                PgnoFDP( pfucb ) ) );
+        return;
+    }
+
+    //
+    // Apparantly no race (although not _absolutely_ ruled out), and yet a mismatch.
+    //
+    
+    // TC == Tree count, CC == Cache count.
+    OSTraceFMP(
+        pfucb->ifmp,
+        JET_tracetagSpaceInternal,
+        OSFormat(
+            "%hs: Validation Failed: N{%hs} NO{%hs} TC{%d:%d} CC{%d:%d} [0x%x:0x%x:%lu].",
+            __FUNCTION__,
+            SzNameOfTable( pfucb ),
+            szNameOfObject,
+            cpgOECounted,
+            cpgAECounted,
+            cpgOECached,
+            cpgAECached,
+            pfucb->ifmp,
+            ObjidFDP( pfucb ),
+            PgnoFDP( pfucb ) ) );
+
+    OSTraceSuspendGC();
+    const WCHAR * rgwsz[] = {
+        PfmpFromIfmp( pfucb->ifmp )->WszDatabaseName(),
+        OSFormatW( L"%d",  ObjidFDP( pfucb ) ),
+        OSFormatW( L"%d",  PgnoFDP( pfucb ) ),
+        OSFormatW( L"%d",  cpgOECounted ),
+        OSFormatW( L"%d",  cpgAECounted ),
+        OSFormatW( L"%d",  cpgOECached ),
+        OSFormatW( L"%d",  cpgAECached ),
+        OSFormatW( L"%hs", SzNameOfTable( pfucb ) ),
+        OSFormatW( L"%hs", szNameOfObject ),
+    };
+
+    UtilReportEvent(
+        eventError,
+        SPACE_MANAGER_CATEGORY,
+        EXTENT_PAGE_COUNT_CACHE_EXTENSIVE_VALIDATION_FAILED_ID,
+        _countof( rgwsz ),
+        rgwsz,
+        0,
+        PinstFromPfucb( pfucb ) );
+    OSTraceResumeGC();
+
+    // This happens too often under completely normal conditions
+    // to safely Assert anything.  We get here when the amount read
+    // from the cache didn't match what we read by counting a table,
+    // and as there is no locking there, mismatches happen.  Maybe
+    // we can do some kind of assert based on how big the mismatch
+    // is?  Later...
+    // AssertTrack( fFalse, "Size mismatch OE and/or AE." );
+}
 
 //  gets owned and avail space info for database.  Speed repeated calls by caching data in FMP and maintaining this information from space.
 //
