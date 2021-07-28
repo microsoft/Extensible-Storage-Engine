@@ -943,7 +943,8 @@ private:
 #define m_critLGBuf m_pLogBuffer->_critLGBuf
 };
 
-#define NUM_WASTAGE_SLOTS       20
+// Number of slots to divide checkpoint depth into to measure something per checkpoint depth
+#define NUM_CHKPT_SLOTS       20
 
 class LOG
     :   public CZeroInit
@@ -1462,6 +1463,8 @@ public:
 
     VOID LGAddUsage( const ULONG cbUsage );
     VOID LGAddWastage( const ULONG cbWastage );
+    VOID LGAddFreePages( const ULONG cFreePages );
+    BOOL FTooManyFreePagesInChkptDepth();
 
     VOID ResetLgenLogtimeMapping()
     {
@@ -1636,13 +1639,22 @@ private:
     LGPOS           m_lgposRedoPreviousLog;
 #endif
 
+    // ****************** members for calculating things per checkpoint depth ******************
+
+    ULONG           m_iNextChkptSlot;
+    ULONG           m_cbCurrentUsage;
+
     // ****************** members for wastage calculation ******************
 
-    ULONG           m_rgWastages[ NUM_WASTAGE_SLOTS ];
-    ULONG           m_iNextWastageSlot;
-    ULONG           m_cbCurrentUsage;
+    ULONG           m_rgWastages[ NUM_CHKPT_SLOTS ];
     ULONG           m_cbCurrentWastage;
     LONG            m_cbTotalWastage;
+
+    // ****************** members for DeleteTable calculation ******************
+
+    ULONG           m_rgFreePages[ NUM_CHKPT_SLOTS ];
+    ULONG           m_cCurrentFreePages;
+    LONG            m_cTotalFreePages;
 
     // ****************** members for redo ******************
 

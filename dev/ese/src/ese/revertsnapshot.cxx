@@ -2511,7 +2511,13 @@ BOOL CRevertSnapshotForAttachedDbs::FRBSRaiseFailureItemIfNeeded()
 
     // If either RBS file size is greater than what is allowed and enough time has passed to warrant a roll or if the RBS has reached its max allowed time, 
     // raise a failure item so that HA can take appropriate action to do a roll of the RBS.
+    // Unless we have too many FreeExt's in the checkpoint range, which would mean the copy would take a long time to replay back the required range, in which case, do the roll later.
     // Note: This is temporary solution to roll RBS till we have live roll available.
+    if ( m_pinst->m_plog->FTooManyFreePagesInChkptDepth() )
+    {
+        return fFalse;
+    }
+
     if ( ( UtilConvertFileTimeToSeconds( ftCurrent - ConvertLogTimeToFileTime( &m_prbsfilehdrCurrent->rbsfilehdr.tmCreate ) ) > (long long) UlParam( m_pinst, JET_paramFlight_RBSForceRollIntervalSec ) ||
         m_prbsfilehdrCurrent->rbsfilehdr.le_cbLogicalFileSize > cbMaxRBSSizeAllowed ) && 
         FRollSnapshot() )
