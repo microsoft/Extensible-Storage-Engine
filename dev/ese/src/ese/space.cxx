@@ -8479,6 +8479,7 @@ ERR ErrSPCaptureSnapshot( FUCB* const pfucb, const PGNO pgnoFirst, const CPG cpg
         if ( g_rgfmp[ pfucb->ifmp ].FRBSOn() ) 
         {
             BFPrereadPageRange( pfucb->ifmp, pgnoFirst + cpgT, cpgRead, bfprfDefault, pfucb->ppib->BfpriPriority( pfucb->ifmp ), *tcScope );
+            PinstFromPfucb( pfucb )->m_plog->LGAddFreePages( cpgRead );
 
             BFLatch bfl;
 

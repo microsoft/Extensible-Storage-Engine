@@ -11262,6 +11262,7 @@ ERR LOG::ErrLGRIRedoExtentFreed( const LREXTENTFREED * const plrextentfreed )
 
     const PGNO pgnoFirst    = plrextentfreed->PgnoFirst();
     const CPG cpgExtent     = plrextentfreed->CpgExtent();
+    LGAddFreePages( cpgExtent );
 
     Assert( m_fRecoveringMode == fRecoveringRedo );
 

@@ -4166,9 +4166,20 @@ VOID LOG::LGAddWastage( const ULONG cbWastage )
     m_cbCurrentWastage += cbWastage;
 }
 
+VOID LOG::LGAddFreePages( const ULONG cFreePages )
+{
+    m_cCurrentFreePages += cFreePages;
+}
+
+BOOL LOG::FTooManyFreePagesInChkptDepth()
+{
+    return ( UlParam( m_pinst, JET_paramFlight_RBSMaxTableDeletePages ) != 0 &&
+             ( m_cTotalFreePages + m_cCurrentFreePages ) > UlParam( m_pinst, JET_paramFlight_RBSMaxTableDeletePages ) );
+}
+
 VOID LOG::LGAddUsage( const ULONG cbUsage )
 {
-    const ULONG cbChkptDepthSlot = (ULONG)( UlParam( m_pinst, JET_paramCheckpointDepthMax ) / NUM_WASTAGE_SLOTS );
+    const ULONG cbChkptDepthSlot = (ULONG)( UlParam( m_pinst, JET_paramCheckpointDepthMax ) / NUM_CHKPT_SLOTS );
     if ( cbChkptDepthSlot == 0 )
     {
         return;
@@ -4177,11 +4188,17 @@ VOID LOG::LGAddUsage( const ULONG cbUsage )
     m_cbCurrentUsage += cbUsage;
     while ( m_cbCurrentUsage >= cbChkptDepthSlot )
     {
-        m_cbTotalWastage += m_cbCurrentWastage - m_rgWastages[ m_iNextWastageSlot ];
+        m_cbTotalWastage += m_cbCurrentWastage - m_rgWastages[ m_iNextChkptSlot ];
         Assert( m_cbTotalWastage >= 0 );
-        m_rgWastages[ m_iNextWastageSlot ] = m_cbCurrentWastage;
-        m_iNextWastageSlot = ( m_iNextWastageSlot + 1 ) % NUM_WASTAGE_SLOTS;
+        m_rgWastages[ m_iNextChkptSlot ] = m_cbCurrentWastage;
         m_cbCurrentWastage = 0;
+
+        m_cTotalFreePages += m_cCurrentFreePages - m_rgFreePages[ m_iNextChkptSlot ];
+        Assert( m_cTotalFreePages >= 0 );
+        m_rgFreePages[ m_iNextChkptSlot ] = m_cCurrentFreePages;
+        m_cCurrentFreePages = 0;
+
+        m_iNextChkptSlot = ( m_iNextChkptSlot + 1 ) % NUM_CHKPT_SLOTS;
         m_cbCurrentUsage -= cbChkptDepthSlot;
     }
 }
