@@ -319,7 +319,7 @@ typedef struct tagDBUTIL_A
     JET_GRBIT       grbitOptions;
 
     // When adding to this union; you must use
-    // fewer bytes than legacy to maintain forward/backward 
+    // fewer bytes than legacy to maintain forward/backward
     // compatibility for all clients that use it.
 
     union
@@ -341,18 +341,18 @@ typedef struct tagDBUTIL_A
             long            isec;
             long            ib;
 
-            long            cRetry;         
+            long            cRetry;
 
             void *          pfnCallback;
             void *          pvCallback;
         };
-            
+
         // ChecksumLogFromMemory
         struct
         {
             char            *szLog;     // Name of the Log file
             char            *szBase;    // Base name used e.g. "edb" or "E01"
-            void            *pvBuffer;  // Pointer to buffer containing the log 
+            void            *pvBuffer;  // Pointer to buffer containing the log
             long             cbBuffer;  // Length of buffer
         } checksumlogfrommemory;
 
@@ -391,9 +391,9 @@ typedef struct tagDBUTIL_W
     JET_GRBIT       grbitOptions;
 
     // When adding to this union; you must use
-    // fewer bytes than legacy to maintain forward/backward 
+    // fewer bytes than legacy to maintain forward/backward
     // compatibility for all clients that use it.
-    
+
     union
     {
         // legacy elements
@@ -413,18 +413,18 @@ typedef struct tagDBUTIL_W
             long            isec;
             long            ib;
 
-            long            cRetry;         
+            long            cRetry;
 
             void           *pfnCallback;
             void           *pvCallback;
-        }; 
-            
+        };
+
         // ChecksumLogFromMemory
         struct
         {
             WCHAR           *szLog;     // Name of the Log file
             WCHAR           *szBase;    // Base name used e.g. "edb" or "E01"
-            void            *pvBuffer;  // Pointer to buffer containing the log 
+            void            *pvBuffer;  // Pointer to buffer containing the log
             long             cbBuffer;  // Length of buffer
         } checksumlogfrommemory;
 
@@ -539,7 +539,7 @@ typedef void (JET_API *JET_SPCATCALLBACK)( _In_ const unsigned long pgno, _In_ c
 
 // begin_PubEsent
 
-//  Configuration Store 
+//  Configuration Store
 //
 //  ESE has the ability to use an external config store for ESE database engine and instance
 //  settings.
@@ -548,9 +548,9 @@ typedef void (JET_API *JET_SPCATCALLBACK)( _In_ const unsigned long pgno, _In_ c
 //
 //      JET_paramConfigStoreSpec    "reg:HKEY_LOCAL_MACHINE\SOFTWARE\Microsoft\PopServer(Inst1)"
 //
-//          where "PopServer(Inst1)" is just an exaple name, you should pick a different name or 
-//          even a different part of the registry if appropriate.  You are limited however to 
-//          beginning under: HKEY_LOCAL_MACHINE or HKEY_CURRENT_USER.               
+//          where "PopServer(Inst1)" is just an exaple name, you should pick a different name or
+//          even a different part of the registry if appropriate.  You are limited however to
+//          beginning under: HKEY_LOCAL_MACHINE or HKEY_CURRENT_USER.
 //
 //      And configuring the registry thusly:
 //
@@ -572,7 +572,7 @@ typedef void (JET_API *JET_SPCATCALLBACK)( _In_ const unsigned long pgno, _In_ c
 //  and opens the database, otherwise there is a possible Escalation of Privilege attack.
 //
 
-//  The JET_wszConfigStoreReadControl in the registry are registry values under the root 
+//  The JET_wszConfigStoreReadControl in the registry are registry values under the root
 //  registry key passed to JET_paramConfigStoreSpec.
 
 #define JET_wszConfigStoreReadControl                           L"CsReadControl"
@@ -595,7 +595,7 @@ typedef void (JET_API *JET_SPCATCALLBACK)( _In_ const unsigned long pgno, _In_ c
 #define JET_bitConfigStorePopulateControlOn                     0x01
 // begin_PubEsent
 
-//  The JET_wszConfigStoreRelPathSysParamDefault and JET_wszConfigStoreRelPathSysParamOverride in 
+//  The JET_wszConfigStoreRelPathSysParamDefault and JET_wszConfigStoreRelPathSysParamOverride in
 //  the registry are registry sub-keys under the root registry key passed to JET_paramConfigStoreSpec.
 #define JET_wszConfigStoreRelPathSysParamDefault        L"SysParamDefault"
 #define JET_wszConfigStoreRelPathSysParamOverride       L"SysParamOverride"
@@ -639,8 +639,8 @@ typedef void (JET_API *JET_SPCATCALLBACK)( _In_ const unsigned long pgno, _In_ c
 #define JET_efvExchange2016Cu1Rtm                8920               //  More of a .1 release, as its not just QFEs. CU1 forked 2015/01/05 - 15.1.396.
 #define JET_efvWindows19H1Rtm                    8920               //  Last pre-efv version, shipped in windows 10 until 19H1
 #define JET_efvSetDbVersion                                 8940    //  Added lrtypSetDbVersion to log DB version updates, and a UpdateMinor and a efv"LastAttached" version to the DB file header.
-                                                                    //      Notes: Guarantees via recovery that a DB version representative of what the transaction log 
-                                                                    //      has redone to the DB file (layering violation info: and most importantly to fix replicas 
+                                                                    //      Notes: Guarantees via recovery that a DB version representative of what the transaction log
+                                                                    //      has redone to the DB file (layering violation info: and most importantly to fix replicas
                                                                     //      in Exchange).
 #define JET_efvExtHdrRootFieldAutoIncStorageReleased        8960    //  Moves to retail the extend node/page's extended header to have multiple root fields values therein; And store the max Auto-Increment Column value used in a new extended header root field.
 #define JET_efvXpress9Compression                           8980    //  Adds support for compressing/decompressing data using Xpress9.
@@ -743,7 +743,7 @@ typedef void (JET_API *JET_SPCATCALLBACK)( _In_ const unsigned long pgno, _In_ c
 #define JET_cbtypOnlineDefragProgress           0x00002000  /* online defragmentation has made progress */
 //  callback for JetDefragment2 actions (testing only)
 //  pvArg1 is ptr to table name, pvArg2 is ptr to action code JET_bitOld2Start, etc...
-#define JET_cbtypOld2Action          0x00004000  
+#define JET_cbtypOld2Action          0x00004000
 
 // begin_PubEsent
 
@@ -1231,7 +1231,7 @@ typedef struct tagJET_TUPLELIMITS
 //  table, index, or the internal long values tree.
 typedef struct tagJET_SPACEHINTS
 {
-    unsigned long       cbStruct;           //  size of this structure 
+    unsigned long       cbStruct;           //  size of this structure
     unsigned long       ulInitialDensity;   //  density at (append) layout.
     unsigned long       cbInitial;          //  initial size (in bytes).
 
@@ -1412,7 +1412,7 @@ typedef struct tagJET_INDEXCREATE2_A
     unsigned long           cConditionalColumn;     // number of conditional columns
     JET_ERR                 err;                    // returned error code
     unsigned long           cbKeyMost;              // size of key preserved in index, e.g. without truncation (if JET_bitIndexKeyMost specified)
-    JET_SPACEHINTS *        pSpacehints;            // space allocation, maintenance, and usage hints 
+    JET_SPACEHINTS *        pSpacehints;            // space allocation, maintenance, and usage hints
 } JET_INDEXCREATE2_A;
 
 typedef struct tagJET_INDEXCREATE2_W
@@ -1472,7 +1472,7 @@ typedef struct tagJET_INDEXCREATE3_A
     unsigned long           cConditionalColumn;     // number of conditional columns
     JET_ERR                 err;                    // returned error code
     unsigned long           cbKeyMost;              // size of key preserved in index, e.g. without truncation (if JET_bitIndexKeyMost specified)
-    JET_SPACEHINTS *        pSpacehints;            // space allocation, maintenance, and usage hints 
+    JET_SPACEHINTS *        pSpacehints;            // space allocation, maintenance, and usage hints
 } JET_INDEXCREATE3_A;
 
 typedef struct tagJET_INDEXCREATE3_W
@@ -1608,7 +1608,7 @@ typedef struct tagJET_TABLECREATE3_A
     char                *szCallback;            // callback to use for this table
     JET_CBTYP           cbtyp;                  // when the callback should be called
     JET_GRBIT           grbit;
-    JET_SPACEHINTS *    pSeqSpacehints;         // space allocation, maintenance, and usage hints for default sequential index 
+    JET_SPACEHINTS *    pSeqSpacehints;         // space allocation, maintenance, and usage hints for default sequential index
     JET_SPACEHINTS *    pLVSpacehints;          // space allocation, maintenance, and usage hints for Separated LV tree.
     unsigned long       cbSeparateLV;           // heuristic size to separate a intrinsic LV from the primary record
 
@@ -1630,7 +1630,7 @@ typedef struct tagJET_TABLECREATE3_W
     WCHAR               *szCallback;            // callback to use for this table
     JET_CBTYP           cbtyp;                  // when the callback should be called
     JET_GRBIT           grbit;
-    JET_SPACEHINTS *    pSeqSpacehints;         // space allocation, maintenance, and usage hints for default sequential index 
+    JET_SPACEHINTS *    pSeqSpacehints;         // space allocation, maintenance, and usage hints for default sequential index
     JET_SPACEHINTS *    pLVSpacehints;          // space allocation, maintenance, and usage hints for Separated LV tree.
     unsigned long       cbSeparateLV;           // heuristic size to separate a intrinsic LV from the primary record
     JET_TABLEID         tableid;                // returned tableid.
@@ -1660,7 +1660,7 @@ typedef struct tagJET_TABLECREATE4_A
     char                *szCallback;            // callback to use for this table
     JET_CBTYP           cbtyp;                  // when the callback should be called
     JET_GRBIT           grbit;
-    JET_SPACEHINTS *    pSeqSpacehints;         // space allocation, maintenance, and usage hints for default sequential index 
+    JET_SPACEHINTS *    pSeqSpacehints;         // space allocation, maintenance, and usage hints for default sequential index
     JET_SPACEHINTS *    pLVSpacehints;          // space allocation, maintenance, and usage hints for Separated LV tree.
     unsigned long       cbSeparateLV;           // heuristic size to separate a intrinsic LV from the primary record
 
@@ -1682,7 +1682,7 @@ typedef struct tagJET_TABLECREATE4_W
     WCHAR               *szCallback;            // callback to use for this table
     JET_CBTYP           cbtyp;                  // when the callback should be called
     JET_GRBIT           grbit;
-    JET_SPACEHINTS *    pSeqSpacehints;         // space allocation, maintenance, and usage hints for default sequential index 
+    JET_SPACEHINTS *    pSeqSpacehints;         // space allocation, maintenance, and usage hints for default sequential index
     JET_SPACEHINTS *    pLVSpacehints;          // space allocation, maintenance, and usage hints for Separated LV tree.
     unsigned long       cbSeparateLV;           // heuristic size to separate a intrinsic LV from the primary record
 
@@ -1714,7 +1714,7 @@ typedef struct tagJET_TABLECREATE5_A
     char                *szCallback;            // callback to use for this table
     JET_CBTYP           cbtyp;                  // when the callback should be called
     JET_GRBIT           grbit;
-    JET_SPACEHINTS *    pSeqSpacehints;         // space allocation, maintenance, and usage hints for default sequential index 
+    JET_SPACEHINTS *    pSeqSpacehints;         // space allocation, maintenance, and usage hints for default sequential index
     JET_SPACEHINTS *    pLVSpacehints;          // space allocation, maintenance, and usage hints for Separated LV tree.
     unsigned long       cbSeparateLV;           // heuristic size to separate a intrinsic LV from the primary record
     unsigned long       cbLVChunkMax;           // Maximum chunk size to use for Separated LVs
@@ -1737,7 +1737,7 @@ typedef struct tagJET_TABLECREATE5_W
     WCHAR               *szCallback;            // callback to use for this table
     JET_CBTYP           cbtyp;                  // when the callback should be called
     JET_GRBIT           grbit;
-    JET_SPACEHINTS *    pSeqSpacehints;         // space allocation, maintenance, and usage hints for default sequential index 
+    JET_SPACEHINTS *    pSeqSpacehints;         // space allocation, maintenance, and usage hints for default sequential index
     JET_SPACEHINTS *    pLVSpacehints;          // space allocation, maintenance, and usage hints for Separated LV tree.
     unsigned long       cbSeparateLV;           // heuristic size to separate a intrinsic LV from the primary record
     unsigned long       cbLVChunkMax;           // Maximum chunk size to use for Separated LVs
@@ -2697,7 +2697,7 @@ typedef struct
     unsigned long   ulVersionMinorDeprecated;       //  deprecated
 
     unsigned __int64    checksumPrevLogAllSegments;
-    
+
 } JET_LOGINFOMISC3;
 
 #endif
@@ -2708,12 +2708,12 @@ typedef struct
 #if ( JET_VERSION >= 0x0A00 )
 
 //
-//  This is the list of callback sequences you could get when using JetInit4() 
+//  This is the list of callback sequences you could get when using JetInit4()
 //  with JET_bitExternalRecoveryControl
 //  Note: For all such sequences JET_snpRecoveryControl will be the JET_SNP value.
 //
 //  In an empty log directory:
-//      
+//
 //      JET_sntOpenLog, JET_OpenLogForRecoveryCheckingAndPatching, fCurrent         // pre-check
 //      JET_sntMissingLog, JET_MissingLogContinueToRedo
 //      JET_sntMissingLog, JET_MissingLogCreateNewLogStream                         JET_bitLogStreamMustExist -> JET_errMissingLogFile
@@ -2737,14 +2737,14 @@ typedef struct
 //      JET_sntBeginUndo
 //      JET_sntOpenLog, JET_OpenLogForUndo
 //
-//  Once a decision has been made to either fail out or succeed (and continue) from 
+//  Once a decision has been made to either fail out or succeed (and continue) from
 //  the JET_sntBeginUndo it is irrevocable.  The logs may be changed from that point
 //  on.  If you've decided to fail JET_sntBeginUndo with JET_errRecoveredWithoutUndo
 //  then you should also fail JET_sntOpenLog+JET_OpenLogForUndo with the other
 //  JET_errRecoveredWithoutUndoDatabasesConsistent error for recovery without undo.
-//  Or another way ... once you've decided to fail out "without undo", then you 
+//  Or another way ... once you've decided to fail out "without undo", then you
 //  should both return to JET_sntBeginUndo with JET_errRecoveredWithoutUndo and you
-//  should also fail JET_sntOpenLog+JET_OpenLogForUndo with the other 
+//  should also fail JET_sntOpenLog+JET_OpenLogForUndo with the other
 //  JET_errRecoveredWithoutUndoDatabasesConsistent error for consistent results.
 //
 
@@ -3172,7 +3172,7 @@ typedef enum
 //          o eBTreeTypeUserSecondaryIndex x M times (i.e. user defined indices)
 //              o eBTreeTypeInternalSpaceOE (optional)
 //              o eBTreeTypeInternalSpaceAE (optional)
-//      o ...more eBTreeTypeUserClusteredIndex 
+//      o ...more eBTreeTypeUserClusteredIndex
 //          o eBTreeTypeInternalSpaceOE (optional)
 //          o eBTreeTypeInternalSpaceAE (optional)
 //          o eBTreeTypeInternalLongValue (optional)
@@ -3183,7 +3183,7 @@ typedef enum
 //              o eBTreeTypeInternalSpaceAE (optional)
 //
 // Note: When we say user defined tables and indices, its just where they would get
-// called, but the callbacks for the BTree types will happen for system tables as 
+// called, but the callbacks for the BTree types will happen for system tables as
 // well such as the catalog, defrag table, etc.
 //
 
@@ -3241,7 +3241,7 @@ typedef struct
     JET_HISTO *                     phistoKeyCompression;       // per compressed node
     JET_HISTO *                     phistoUnreclaimedBytes;     // per deleted node
 #if ( JET_VERSION >= 0x0602 )
-    __int64                         cVersionedNodes;            // node accumulation    
+    __int64                         cVersionedNodes;            // node accumulation
 #endif
 } BTREE_STATS_PAGE_SPACE;
 
@@ -3346,7 +3346,7 @@ typedef JET_ERR (JET_API *JET_PFNSPACEDATA)(
 //    |     |-- JET_errcatIO                //  bad IO issues, may or may not be transient.
 //    |     |-- JET_errcatResource
 //    |           |-- JET_errcatMemory      //  out of memory (all variants)
-//    |           |-- JET_errcatQuota   
+//    |           |-- JET_errcatQuota
 //    |           |-- JET_errcatDisk        //  out of disk space (all variants)
 //    |-- JET_errcatData
 //    |     |-- JET_errcatCorruption
@@ -3363,7 +3363,7 @@ typedef JET_ERR (JET_API *JET_PFNSPACEDATA)(
 
 // A brief description of each error type
 //
-//  Operation(al) - Errors that can usually happen any time due to uncontrollable 
+//  Operation(al) - Errors that can usually happen any time due to uncontrollable
 //                  conditions.  Frequently temporary, but not always.
 //
 //                  Recovery: Probably retry, or eventually inform the operator.
@@ -3396,23 +3396,23 @@ typedef JET_ERR (JET_API *JET_PFNSPACEDATA)(
 //
 //          Disk    Out of disk conditions.
 //
-//                  Recovery: Can retry later in the hope more space is available, or 
+//                  Recovery: Can retry later in the hope more space is available, or
 //                  ask the operator to free some disk space.
 //  Data
 //
 //      Corruption  My hard drive ate my homework.  Classic corruption issues, frequently
 //                  permanent without corrective action.
 //
-//                  Recovery: Restore from backup, perhaps the ese utilities repair 
+//                  Recovery: Restore from backup, perhaps the ese utilities repair
 //                  operation (which only salvages what data is left / lossy).  Also
 //                  in the case of recovery(JetInit) perhaps recovery can be performed
 //                  by allowing data loss.
 //
 //      Inconsistent This is similar to Corruption in that the database and/or log files
-//                  are in a state that is inconsistent and unreconcilable with each 
+//                  are in a state that is inconsistent and unreconcilable with each
 //                  other. Often this is caused by application/administrator mishandling.
 //
-//                  Recovery: Restore from backup, perhaps the ese utilities repair 
+//                  Recovery: Restore from backup, perhaps the ese utilities repair
 //                  operation (which only salvages what data is left / lossy).  Also
 //                  in the case of recovery(JetInit) perhaps recovery can be performed
 //                  by allowing data loss.
@@ -3452,7 +3452,7 @@ typedef enum
     JET_errcatIO,           //      bad IO issues, may or may not be transient.
     JET_errcatResource,
     JET_errcatMemory,       //      out of memory (all variants)
-    JET_errcatQuota,    
+    JET_errcatQuota,
     JET_errcatDisk,         //      out of disk space (all variants)
     JET_errcatData,
     JET_errcatCorruption,
@@ -3462,7 +3462,7 @@ typedef enum
     JET_errcatUsage,
     JET_errcatState,
     JET_errcatObsolete,
-    JET_errcatMax,  
+    JET_errcatMax,
 } JET_ERRCAT;
 
 // Output structure for JetGetErrorInfoW(). Not all fields may
@@ -3919,7 +3919,7 @@ typedef enum
 
 // end_PubEsent
 #if ( JET_VERSION >= 0x0A01 )
-#define JET_paramFlight_SmoothIoTestPermillage  55  //  The per mille of total (or one thousandths, or tenths of a percent) of IO should be made smooth.  Ex(s): 995‰ = 99.5% smooth, 10‰ = 1%, etc.  0 = disabled.
+#define JET_paramFlight_SmoothIoTestPermillage  55  //  The per mille of total (or one thousandths, or tenths of a percent) of IO should be made smooth.  Ex(s): 995(/1000) = 99.5% smooth, 10(/1000) = 1%, etc.  0 = disabled.
 #define JET_paramFlight_ElasticWaypointLatency  56  //  Amount of extra elastic waypoint latency
 #define JET_paramFlight_SynchronousLVCleanup    57  //  Perform synchronous cleanup (actual delete) of LVs instead of flag delete with cleanup happening later
 #define JET_paramFlight_RBSRevertIOUrgentLevel  58  // IO urgent level for reverting the databases using RBS. Used to decide how many outstanding I/Os will be allowed.
@@ -3993,7 +3993,7 @@ typedef enum
 #define JET_paramFlight_EnableBackupDuringRecovery              90  //  Turns on backup during recovery (i.e. seed from passive copy).
 
 #define JET_paramFlight_RBSRollIntervalSec                      91 // Time after which we should roll into new revert snapshot.
-#define JET_paramFlight_RBSMaxRequiredRange                     92 // Max required range allowed for revert snapshot. If combined required range of the dbs is greater than this we will skip creating the revert snapshot 
+#define JET_paramFlight_RBSMaxRequiredRange                     92 // Max required range allowed for revert snapshot. If combined required range of the dbs is greater than this we will skip creating the revert snapshot
 #define JET_paramFlight_RBSCleanupEnabled                       93 // Turns on clean up for revert snapshot.
 #define JET_paramFlight_RBSLowDiskSpaceThresholdGb              94 // Low disk space in gigabytes at which we will start cleaning up RBS aggressively.
 #define JET_paramFlight_RBSMaxSpaceWhenLowDiskSpaceGb           95 // Max alloted space in gigabytes for revert snapshots when the disk space is low.
@@ -4653,7 +4653,7 @@ typedef struct
 // end_PubEsent
 // These are not persisted anywhere. These are bits used by the 'Isam layer', a simpler C#-based
 // interface to access ESE databases.
-// 
+//
 // #define JET_bitIndexAllowTruncation          0x01000000  // Isam-layer only. Specifies that index keys may be truncated (default in ESE is to allow truncation).
 
 // begin_PubEsent
@@ -4796,7 +4796,7 @@ typedef struct
 #if ( JET_VERSION >= 0x0601 )
     /*  Space Hint Flags / JET_SPACEHINTS   */
 
-//  Generic 
+//  Generic
 #define JET_bitSpaceHintsUtilizeParentSpace         0x00000001  //  This changes the internal allocation policy to get space hierarchically from a B-Tree's immediate parent.
 //  Create
 #define JET_bitCreateHintAppendSequential           0x00000002  //  This bit will enable Append split behavior to grow according to the growth dynamics of the table (set by cbMinExtent, ulGrowth, cbMaxExtent).
@@ -4926,15 +4926,15 @@ typedef struct
 #define JET_bitRetrieveCopyIntrinsic        0x00002000  /*  retrieves size of data that can be added to a record before offloading LONG columns.  Fixed sized columns return 0 or column size. */
 
 //  Has no effect on non-separate long value retrievals.  On separated long values,
-//  initiate read of separate long value data without waiting for read to complete.  
+//  initiate read of separate long value data without waiting for read to complete.
 //  cbActual will be 0 becuase no data is read for separate LVs.
-//  Currently only reads one chunk at ibOffset given and will not read all data based on cbMax. 
+//  Currently only reads one chunk at ibOffset given and will not read all data based on cbMax.
 //  If cbMax greater than single chunk given then JET_wrnNyi returned.
 //
 #define JET_bitRetrievePrereadOnly          0x00004000
 //  Causes more pages to be preread than might be needed in an effort to improve performance.
 //
-#define JET_bitRetrievePrereadMany          0x00008000  
+#define JET_bitRetrievePrereadMany          0x00008000
 #if ( JET_VERSION >= 0x0603 )
 #define JET_bitRetrievePhysicalSize         0x00010000  /* retrieves compressed size only in cbActual; no data is retrieved */
 #endif // JET_VERSION >= 0x0603
@@ -5034,7 +5034,7 @@ typedef struct
     union
     {
         struct /* err != JET_wrnColumnSingleValue */
-        { 
+        {
             unsigned long           cEnumColumnValue;
             JET_ENUMCOLUMNVALUE*    rgEnumColumnValue;
         };
@@ -5238,7 +5238,7 @@ typedef struct tagJET_PAGEINFO2
 
     /* Information context surrounded data emitted from JET_PFNEMITLOGDATA */
 
-typedef struct tag_JET_EMITDATACTX 
+typedef struct tag_JET_EMITDATACTX
 {
     unsigned long               cbStruct;
     unsigned long               dwVersion;
@@ -5785,8 +5785,8 @@ typedef JET_ERR (JET_API * JET_PFNEMITLOGDATA)(
 #define JET_bitStopServiceBackgroundUserTasks       0x00000002  //  Stops restartable client specificed background maintenance tasks (B+ Tree Defrag for example).
 #define JET_bitStopServiceQuiesceCaches             0x00000004  //  Quiesces all dirty caches to disk. Asynchronous. Cancellable.
 
-// Warning: This bit can only be used to resume StopServiceBackgroundUserTasks and JET_bitStopServiceQuiesceCaches, if you 
-// previously called with JET_bitStopServiceAll, attempting to use JET_bitStopServiceResume will fail. 
+// Warning: This bit can only be used to resume StopServiceBackgroundUserTasks and JET_bitStopServiceQuiesceCaches, if you
+// previously called with JET_bitStopServiceAll, attempting to use JET_bitStopServiceResume will fail.
 #define JET_bitStopServiceResume                    0x80000000  //  Resumes previously issued StopService operations, i.e. "restarts service".  Can be combined with above grbits to Resume specific services, or with JET_bitStopServiceAll to Resume all previously stopped services.
 #endif // JET_VERSION >= 0x0602
 
@@ -10782,7 +10782,7 @@ JET_ERR JET_API JetEndSurrogateBackup(
 #define JetExternalRestoreA JetExternalRestore
 #endif
 
-#pragma region Desktop Family or Esent Package 
+#pragma region Desktop Family or Esent Package
 #if WINAPI_FAMILY_PARTITION(WINAPI_PARTITION_DESKTOP | WINAPI_PARTITION_PKG_ESENT)
 
 JET_ERR JET_API
@@ -10801,7 +10801,7 @@ JetExternalRestoreA(
 
 #if ( JET_VERSION >= 0x0600 )
 
-#pragma region Desktop Family or Esent Package 
+#pragma region Desktop Family or Esent Package
 #if WINAPI_FAMILY_PARTITION(WINAPI_PARTITION_DESKTOP | WINAPI_PARTITION_PKG_ESENT)
 
 JET_ERR JET_API
@@ -10831,7 +10831,7 @@ JetExternalRestoreW(
 #define JetExternalRestore2A JetExternalRestore2
 #endif
 
-#pragma region Desktop Family or Esent Package 
+#pragma region Desktop Family or Esent Package
 #if WINAPI_FAMILY_PARTITION(WINAPI_PARTITION_DESKTOP | WINAPI_PARTITION_PKG_ESENT)
 
 JET_ERR JET_API
@@ -10852,7 +10852,7 @@ JetExternalRestore2A(
 
 #if ( JET_VERSION >= 0x0600 )
 
-#pragma region Desktop Family or Esent Package 
+#pragma region Desktop Family or Esent Package
 #if WINAPI_FAMILY_PARTITION(WINAPI_PARTITION_DESKTOP | WINAPI_PARTITION_PKG_ESENT)
 
 JET_ERR JET_API
@@ -11246,7 +11246,7 @@ JetOnlinePatchDatabasePage(
     _In_ JET_DBID                               dbid,
     _In_ unsigned long                          pgno,
     _In_reads_bytes_(cbToken) const void *          pvToken,
-    _In_ unsigned long                          cbToken,    
+    _In_ unsigned long                          cbToken,
     _In_reads_bytes_(cbData)    const void *            pvData,
     _In_ unsigned long                          cbData,
     _In_ JET_GRBIT                              grbit );
@@ -11381,7 +11381,7 @@ JetGetRBSFileInfoW(
 #define JetGetRBSFileInfo JetGetRBSFileInfoA
 #endif
 
-JET_ERR JET_API 
+JET_ERR JET_API
 JetRBSPrepareRevert(
     _In_    JET_INSTANCE    instance,
     _In_    JET_LOGTIME     jltRevertExpected,
@@ -11389,7 +11389,7 @@ JetRBSPrepareRevert(
     _In_    JET_GRBIT       grbit,
     _Out_   JET_LOGTIME*    pjltRevertActual );
 
-JET_ERR JET_API 
+JET_ERR JET_API
 JetRBSExecuteRevert(
     _In_    JET_INSTANCE    instance,
     _In_    JET_GRBIT       grbit,
@@ -11624,7 +11624,7 @@ typedef struct tagJET_TESTHOOKEVICTCACHE
 
 #define JET_mskTestHookCorruptDataType      ( JET_bitTestHookCorruptPageChksumRand | JET_bitTestHookCorruptPageChksumSafe | JET_bitTestHookCorruptPageSingleFld | JET_bitTestHookCorruptPageRemoveNode | JET_bitTestHookCorruptPageDbtimeDelta )
 
-//  Following usable only with JET_bitTestHookCorruptNodePrefix | JET_bitTestHookCorruptNodeSuffix    
+//  Following usable only with JET_bitTestHookCorruptNodePrefix | JET_bitTestHookCorruptNodeSuffix
 #define JET_bitTestHookCorruptSizeLargerThanNode    0x00010000  //  adds a cb that is just larger than the node / line.cb size.
 #define JET_bitTestHookCorruptSizeShortWrapSmall    0x00020000  //  adds 0x8000 to the cb.
 #define JET_bitTestHookCorruptSizeShortWrapLarge    0x00040000  //  adds 0xF000 to the cb.
@@ -11674,7 +11674,7 @@ typedef struct tagJET_TESTHOOKCORRUPT
 #define JET_ibfieldDbFileHdrUpdateMinor                     0x284   //  Sets or alters the DAE Update Minor version value.
 
 
-typedef struct tagJET_TESTHOOKALTERDBFILEHDR 
+typedef struct tagJET_TESTHOOKALTERDBFILEHDR
 {
     JET_PWSTR           szDatabase;
     unsigned long       ibField;
