@@ -14456,7 +14456,7 @@ LOCAL VOID SPIReportAnyExtentCacheError(
     PSTR szNameOfObject;
     FCB *pfcbTable;
     FCB *pfcbIndex;
-    
+
     //  WARNING! WARNING!  This code currently does not grab the DML latch,
     //  so there doesn't appear to be any guarantee that the table and index
     //  name won't be relocated from underneath us
@@ -14648,13 +14648,34 @@ LOCAL VOID SPIReportAnyExtentCacheError(
         PinstFromPfucb( pfucb ) );
     OSTraceResumeGC();
 
-    // This happens too often under completely normal conditions
-    // to safely Assert anything.  We get here when the amount read
-    // from the cache didn't match what we read by counting a table,
-    // and as there is no locking there, mismatches happen.  Maybe
-    // we can do some kind of assert based on how big the mismatch
-    // is?  Later...
-    // AssertTrack( fFalse, "Size mismatch OE and/or AE." );
+    // OK, it was wrong, we reported it.  Reset so we don't keep reporting it.  This will
+    // give us a chance to set the correct value next time.  Early rollout of this feature
+    // set the initial value with an inherent race condition between setting the value and
+    // modifying space trees that resulted in some incorrect values being set.
+
+    // We may or may not already be in a transaction, but CATResetExtentPageCounts expects
+    // to be in one.
+    BOOL fStartedTransaction = fFalse;
+    if ( pfucb->ppib->Level() == 0 )
+    {
+        err = ErrDIRBeginTransaction( pfucb->ppib, 54166, NO_GRBIT );
+        if ( JET_errSuccess > err )
+        {
+            return;
+        }
+        fStartedTransaction = fTrue;
+    }
+
+    CATResetExtentPageCounts(
+        pfucb->ppib,
+        pfucb->ifmp,
+        pfucb->u.pfcb->ObjidFDP() );
+
+    if ( fStartedTransaction )
+    {
+        err = ErrDIRCommitTransaction( pfucb->ppib, NO_GRBIT );
+        Assert( JET_errSuccess <= err );
+    }
 }
 
 //  gets owned and avail space info for database.  Speed repeated calls by caching data in FMP and maintaining this information from space.
@@ -15060,7 +15081,18 @@ ERR ErrSPGetInfo(
     }
 
 
-    Call( ErrBTIGotoRoot( pfucbT, latchReadTouch ) );
+
+    if ( fSetCachedValue )
+    {
+        // Since we're going to write a value to the cache if we can, we need to hold a write
+        // or RIW latch on the root page in order to have the cache and the space trees be
+        // consistent.
+        Call( ErrBTIGotoRoot( pfucbT, latchRIW ) );
+    }
+    else
+    {
+        Call( ErrBTIGotoRoot( pfucbT, latchReadTouch ) );
+    }
     Assert( pcsrNil == pfucbT->pcsrRoot );
     pfucbT->pcsrRoot = Pcsr( pfucbT );
 
@@ -15440,9 +15472,6 @@ ERR ErrSPGetInfo(
             fStartedTransaction = fTrue;
         }
 
-        // This is not quite threadsafe.  We're not holding a write lock on the FDP of the FCB,
-        // so someone else may be updating ExtentPageCountCache right this very moment.
-        //
         // Note that we're removing any pages that were in the split buffers but were added
         // to Avail.  This means that if you get the page count from the cache, it will
         // NOT include those pages, which gives you a different answer from the cache than
