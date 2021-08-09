@@ -9028,7 +9028,6 @@ LOCAL ERR ErrCATIDeleteOrUpdateLocalizedIndexesInTable(
     ERR         err;
     FCB         *pfcbIndex;
     CHAR        szIndexName[JET_cbNameMost+1];
-    const WCHAR *rgsz[3];
     BOOL        fInTrx          = fFalse;
     const BOOL fReadOnly = !!( catcifFlags & catcifReadOnly );
     const BOOL fUpdateEmptyIndex = !!( catcifFlags & catcifUpdateEmptyIndices );
@@ -9172,14 +9171,30 @@ LOCAL ERR ErrCATIDeleteOrUpdateLocalizedIndexesInTable(
                 CAutoWSZDDL     lszIndexName;
                 CAutoWSZDDL     lszTableName;
 
-                rgsz[0] = g_rgfmp[ifmp].WszDatabaseName();
-
                 // should not fail as the allocation is made
                 // and the name to convert is checked
                 CallS( lszIndexName.ErrSet( szIndexName ) );
                 CallS( lszTableName.ErrSet( szTableName ) );
+
+                const WCHAR *rgsz[8];
+                QWORD qwVersionCurrent;
+                SORTID sortIdCurrent;
+                WCHAR wszVersionIndex[32], wszVersionCurrent[32], wszSortIDIndex[ PERSISTED_SORTID_MAX_LENGTH ], wszSortIDCurrent[ PERSISTED_SORTID_MAX_LENGTH ];
+
+                (VOID)ErrNORMGetSortVersion( pidb->WszLocaleName(), &qwVersionCurrent, &sortIdCurrent, fFalse );
+
+                rgsz[0] = g_rgfmp[ifmp].WszDatabaseName();
                 rgsz[1] = (WCHAR*)lszIndexName;
                 rgsz[2] = (WCHAR*)lszTableName;
+                rgsz[3] = pidb->WszLocaleName();
+                WszCATFormatSortID( *pidb->PsortidCustomSortVersion(), wszSortIDIndex, _countof( wszSortIDIndex ) );
+                rgsz[4] = wszSortIDIndex;
+                OSStrCbFormatW( wszVersionIndex, sizeof(wszVersionIndex), L"%016I64X", pidb->QwSortVersion() );
+                rgsz[5] = wszVersionIndex;
+                WszCATFormatSortID( sortIdCurrent, wszSortIDCurrent, _countof( wszSortIDCurrent ) );
+                rgsz[6] = wszSortIDCurrent;
+                OSStrCbFormatW( wszVersionCurrent, sizeof(wszVersionCurrent), L"%016I64X", qwVersionCurrent );
+                rgsz[7] = wszVersionCurrent;
 
                 // -------------------------------------------------------------
                 // No entries in index
@@ -9218,7 +9233,7 @@ LOCAL ERR ErrCATIDeleteOrUpdateLocalizedIndexesInTable(
                     UtilReportEvent(
                             eventWarning,
                             DATA_DEFINITION_CATEGORY,
-                            PRIMARY_INDEX_OUT_OF_DATE_ERROR_ID, 3, rgsz, 0, NULL, PinstFromPpib( ppib ) );
+                            PRIMARY_INDEX_OUT_OF_DATE_ERROR_ID, _countof( rgsz ), rgsz, 0, NULL, PinstFromPpib( ppib ) );
 
                     OSUHAPublishEvent(
                         HaDbFailureTagAlertOnly, PinstFromPpib( ppib ), HA_DATA_DEFINITION_CATEGORY,
@@ -9233,7 +9248,7 @@ LOCAL ERR ErrCATIDeleteOrUpdateLocalizedIndexesInTable(
                     UtilReportEvent(
                             eventWarning,
                             DATA_DEFINITION_CATEGORY,
-                            SECONDARY_INDEX_OUT_OF_DATE_ERROR_ID, 3, rgsz, 0, NULL, PinstFromPpib( ppib ) );
+                            SECONDARY_INDEX_OUT_OF_DATE_ERROR_ID, _countof( rgsz ), rgsz, 0, NULL, PinstFromPpib( ppib ) );
 
                     OSUHAPublishEvent(
                         HaDbFailureTagAlertOnly, PinstFromPpib( ppib ), HA_DATA_DEFINITION_CATEGORY,
@@ -9247,7 +9262,7 @@ LOCAL ERR ErrCATIDeleteOrUpdateLocalizedIndexesInTable(
                     UtilReportEvent(
                             eventInformation,
                             DATA_DEFINITION_CATEGORY,
-                            DO_SECONDARY_INDEX_CLEANUP_ID, 3, rgsz, 0, NULL, PinstFromPpib( ppib ) );
+                            DO_SECONDARY_INDEX_CLEANUP_ID, _countof( rgsz ), rgsz, 0, NULL, PinstFromPpib( ppib ) );
                     *pfIndexesDeleted = fTrue;
 
                     //  Ensure that we can always delete the index - same reason as above case.
