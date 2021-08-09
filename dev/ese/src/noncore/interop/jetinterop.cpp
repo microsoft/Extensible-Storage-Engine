@@ -7592,6 +7592,7 @@ namespace Isam
         }
 #endif
 
+#pragma warning (disable: 4702) // C4702: unreachable code
 #if (ESENT_WINXP)
 #else
         /// <summary>
@@ -7633,6 +7634,7 @@ namespace Isam
 
             return;
             }
+#pragma warning (default: 4702)
 #endif
 
 #endif
@@ -8202,6 +8204,7 @@ namespace Isam
         }
 #endif // ESENT_PUBLICONLY
 
+#pragma warning (disable: 4702) // C4702: unreachable code
         /// <summary>
         /// </summary>
         virtual void MJetStopServiceInstance2(
@@ -8223,6 +8226,7 @@ namespace Isam
 
             return;
         }
+#pragma warning (default: 4702)
 
 #ifdef INTERNALUSE
         /// <summary>

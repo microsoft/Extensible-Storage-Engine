@@ -13,6 +13,7 @@ class IFileSystemConfiguration  //  fsconfig
     //  configuration
 
     public:
+        virtual ~IFileSystemConfiguration() {}
 
         //virtual ULONG CbZeroExtend() = 0;
 

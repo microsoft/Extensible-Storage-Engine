@@ -558,7 +558,7 @@ class CFlushMap
 
         // Constructor/destructor.
         CFlushMap();
-        ~CFlushMap();
+        virtual ~CFlushMap();
 
         // Configuration functions.
         void SetPersisted( _In_ const BOOL fPersisted );
