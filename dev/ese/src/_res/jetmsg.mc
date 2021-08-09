@@ -1722,7 +1722,7 @@ Language=English
 MessageId=611
 SymbolicName=DO_SECONDARY_INDEX_CLEANUP_ID
 Language=English
-%1 (%2) %3Database '%4': The secondary index '%5' of table '%6' will be rebuilt as a precautionary measure after the Windows version upgrade of this system. This message is informational and does not indicate a problem in the database.
+%1 (%2) %3Database '%4': The secondary index '%5' of table '%6' for locale '%7' is out of date with sorting libraries, index sort version: (SortId=%8, Version=%9), current sort version: (SortId=%10, Version=%11), and will be rebuilt. This message is informational and does not indicate a problem in the database.
 .
 
 MessageId=612
@@ -1734,13 +1734,13 @@ Language=English
 MessageId=613
 SymbolicName=PRIMARY_INDEX_OUT_OF_DATE_ERROR_ID
 Language=English
-%1 (%2) %3Database '%4': The primary index '%5' of table '%6' is out of date with sorting libraries. If used in this state (i.e. not rebuilt), it may appear corrupt or get further corrupted. If there is no later event showing the index being rebuilt, then please defragment the database to rebuild the index.
+%1 (%2) %3Database '%4': The primary index '%5' of table '%6' for locale '%7' is out of date with sorting libraries, index sort version: (SortId=%8, Version=%9), current sort version: (SortId=%10, Version=%11). If used in this state (i.e. not rebuilt), it may appear corrupt or get further corrupted. If there is no later event showing the index being rebuilt, then please defragment the database to rebuild the index.
 .
 
 MessageId=614
 SymbolicName=SECONDARY_INDEX_OUT_OF_DATE_ERROR_ID
 Language=English
-%1 (%2) %3Database '%4': The secondary index '%5' of table '%6' is out of date with sorting libraries. If used in this state (i.e. not rebuilt), it may appear corrupt or get further corrupted. If there is no later event showing the index being rebuilt, then please defragment the database to rebuild the index.
+%1 (%2) %3Database '%4': The secondary index '%5' of table '%6' for locale '%7' is out of date with sorting libraries, index sort version: (SortId=%8, Version=%9), current sort version: (SortId=%10, Version=%11). If used in this state (i.e. not rebuilt), it may appear corrupt or get further corrupted. If there is no later event showing the index being rebuilt, then please defragment the database to rebuild the index.
 .
 
 MessageId=615
