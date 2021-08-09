@@ -34,7 +34,7 @@ namespace Internal
                             [Out] String^% anyAbsPath,
                             [Out] String^% keyPath );
                 };
-
+#pragma warning (disable: 4702) // C4702: unreachable code
                 template< class TM, class TN, class TW >
                 inline void FileIdentificationBase<TM, TN, TW>::GetFileId(
                     String^ path, 
