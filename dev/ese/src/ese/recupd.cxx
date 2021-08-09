@@ -1956,7 +1956,7 @@ ERR VTAPI ErrIsamDelete(
 
     CheckTable( ppib, pfucb );
     CheckSecondary( pfucb );
-    AssertDIRNoLatch( ppib );
+    AssertDIRMaybeNoLatch( ppib, pfucb );
 
     //  ensure that table is updatable
     //
@@ -2078,7 +2078,7 @@ ERR VTAPI ErrIsamDelete(
 
         err = ErrDIRDelete( pfucb, fDIRNull );
     }
-    AssertDIRNoLatch( ppib );
+    AssertDIRMaybeNoLatch( ppib, pfucb );
 
     Assert( fLogIsDone == ( !PinstFromPpib( ppib )->m_plog->FLogDisabled() && !PinstFromPpib( ppib )->m_plog->FRecovering() && g_rgfmp[pfucb->ifmp].FLogOn() ) );
 
@@ -2113,7 +2113,7 @@ ERR VTAPI ErrIsamDelete(
         }
     }
 
-    AssertDIRNoLatch( ppib );
+    AssertDIRMaybeNoLatch( ppib, pfucb );
 
     // Do the AfterDelete callback
     CallS( ErrRECCallback( ppib, pfucb, JET_cbtypAfterDelete, 0, NULL, NULL, 0 ) );

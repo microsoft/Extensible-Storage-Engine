@@ -6123,7 +6123,7 @@ ERR ErrRECDereferenceLongFieldsInRecord( FUCB *pfucb )
     //  only called by ErrIsamDelete(), which always begins a transaction
     Assert( pfucb->ppib->Level() > 0 );
 
-    AssertDIRNoLatch( pfucb->ppib );
+    AssertDIRMaybeNoLatch( pfucb->ppib, pfucb );
 
     CallR( ErrDIRGet( pfucb ) );
     Expected( !pfucb->kdfCurr.data.FNull() );
@@ -6147,7 +6147,7 @@ HandleError:
     {
         CallS( ErrDIRRelease( pfucb ) );
     }
-    AssertDIRNoLatch( pfucb->ppib );
+    AssertDIRMaybeNoLatch( pfucb->ppib, pfucb );
     return err;
 }
 
