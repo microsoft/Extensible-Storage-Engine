@@ -15032,10 +15032,13 @@ ERR ErrSPGetInfo(
         switch ( err )
         {
             case JET_errSuccess:
-#ifdef USE_EXTENT_PAGE_COUNT_CACHE_RATHER_THAN_VERIFY_IT
-                // We're not compiled to actually return the value from the cache,
-                // but rather to compare the cached value against the the normally
-                // counted value and report any difference.
+                if ( BoolParam( PinstFromIfmp( ifmp ), JET_paramFlight_ExtentPageCountCacheVerifyOnly ) )
+                {
+                    // Don't return the values we just read.  Calculate the values the
+                    // long way and double check against what we just read.
+                    break;
+                }
+                
                 if ( FSPOwnedExtent( fSPExtents ) )
                 {
                     *pcpgOwnExtTotal = cpgOECached;
@@ -15045,8 +15048,6 @@ ERR ErrSPGetInfo(
                     *pcpgAvailExtTotal = cpgAECached;
                 }
                 goto HandleError;
-#endif
-                break;
 
             case JET_errRecordNotFound:
                 // This objid is a value that COULD be cached, but isn't.  Make sure we read both

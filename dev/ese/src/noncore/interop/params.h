@@ -179,6 +179,7 @@ MSINTERNAL enum class MJET_PARAM
     IndexTuplesLengthMax = 111, // for tuple indexes, maximum length of a tuple
     IndexTuplesToIndexMax = 112, // for tuple indexes, maximum number of characters in a given string to index
     AlternateDatabaseRecoveryPath = 113, // recovery-only - search for dirty-shutdown databases in specified location only
+    Flight_ExtentPageCountCacheVerifyOnly = 114, // Verify values read from the Extent Page Count Cache rather than just returning them.
     IndexTupleIncrement = 132, // for tuple indexes, offset increment for each succesive tuple
     IndexTupleStart = 133, // for tuple indexes, offset to start tuple indexing
     KeyMost = 134, // read only maximum settable key length before key trunctation occurs
