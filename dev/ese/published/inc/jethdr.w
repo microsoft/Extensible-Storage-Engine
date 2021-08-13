@@ -4036,6 +4036,9 @@ typedef enum
 #define JET_paramAlternateDatabaseRecoveryPath  113 //  recovery-only - search for dirty-shutdown databases in specified location only
 #endif // JET_VERSION >= 0x0502
 // end_PubEsent
+
+#define JET_paramFlight_ExtentPageCountCacheVerifyOnly  114  //  Verify values read from the Extent Page Count Cache rather than just returning them.
+
 //                                              120 //  JET_paramDBAPageAvailMin
 //                                              121 //  JET_paramDBAPageAvailThreshold
 //                                              122 //  JET_paramDBAK1
