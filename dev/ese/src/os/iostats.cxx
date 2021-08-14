@@ -103,7 +103,7 @@ public:
             Assert( pct > m_pctLast );
 
             ULONG pctT = pct;
-            SAMPLE qwPctSample;
+            SAMPLE qwPctSample = 0;
             CStats::ERR errStats = m_histoLatencies.ErrGetPercentileHits( &pctT, &qwPctSample );
             Assert( errStats == CStats::ERR::errSuccess );
 

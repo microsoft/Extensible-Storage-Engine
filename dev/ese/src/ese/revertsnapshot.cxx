@@ -4027,7 +4027,7 @@ HandleError:
 //
 BOOL CRBSDatabaseRevertContext::FPageAlreadyCaptured( PGNO pgno )
 {
-    BOOL fPageAlreadyCaptured;
+    BOOL fPageAlreadyCaptured = fFalse;
 
     IBitmapAPI::ERR errbm = m_psbmDbPages->ErrGet( pgno, &fPageAlreadyCaptured );    
     Assert( errbm == IBitmapAPI::ERR::errSuccess );
