@@ -64,7 +64,7 @@ JetParam g_rgparamRaw[] =
     NORMAL_PARAM(JET_paramAccessDeniedRetryPeriod, CJetParam::typeInteger, 0,  1,  0, 0, 0, -1, 10000),
     NORMAL_PARAM(JET_paramEnableIndexCleanup, CJetParam::typeBoolean, 0,  0,  0, 0, 0, -1, 1),
     NORMAL_PARAM(JET_paramFlight_SmoothIoTestPermillage, CJetParam::typeInteger, 1,  0,  0, 1, 0, 1000, 0),
-    NORMAL_PARAM(JET_paramFlight_ElasticWaypointLatency, CJetParam::typeInteger, 1,  0,  0, 0, 0, 10, JET_paramFlight_ElasticWaypointLatency_DEFAULT),
+    NORMAL_PARAM(JET_paramElasticWaypointLatency, CJetParam::typeInteger, 1,  0,  0, 0, 0, 10, JET_paramElasticWaypointLatency_DEFAULT),
     NORMAL_PARAM(JET_paramFlight_SynchronousLVCleanup, CJetParam::typeBoolean, 1,  0,  0, 0, 0, -1, 0),
     NORMAL_PARAM(JET_paramFlight_RBSRevertIOUrgentLevel, CJetParam::typeInteger, 1,  0,  0, 0, 0, 127, 8),
     NORMAL_PARAM(JET_paramFlight_EnableXpress10Compression, CJetParam::typeBoolean, 1,  0,  0, 0, 0, -1, 0),
@@ -96,7 +96,7 @@ JetParam g_rgparamRaw[] =
     NORMAL_PARAM(JET_paramFlight_RBSForceRollIntervalSec, CJetParam::typeInteger, 1,  0,  0, 0, 0, 2147483647, 172800),
     NORMAL_PARAM2(JET_paramGlobalMinVerPages, CJetParam::typeInteger, 1,  1,  1, 1, 1, 2147483647, 1, 64),
     NORMAL_PARAM(JET_paramOSSnapshotTimeout, CJetParam::typeInteger, 0,  1,  0, 0, 0, 2147483647, 70000),
-    NORMAL_PARAM(JET_paramFlight_SkipDbHeaderWriteForLgenCommittedUpdate, CJetParam::typeBoolean, 1,  0,  0, 0, 0, -1, JET_paramFlight_SkipDbHeaderWriteForLgenCommittedUpdate_DEFAULT),
+    ILLEGAL_PARAM(83),
     NORMAL_PARAM(JET_paramFlight_NewQueueOptions, CJetParam::typeInteger, 0,  0,  0, 0, 0, bitNewQueueOptionsMask, grbitEseSkuQueueOptionDefault),
     NORMAL_PARAM(JET_paramFlight_ConcurrentMetedOps, CJetParam::typeInteger, 0,  0,  0, 1, 0, 1024, 2),
     NORMAL_PARAM(JET_paramFlight_LowMetedOpsThreshold, CJetParam::typeInteger, 0,  0,  0, 1, 0, 1024, 40),
@@ -298,7 +298,7 @@ static_assert( JET_paramDeleteOutOfRangeLogs == 52, "The order of defintion for 
 static_assert( JET_paramAccessDeniedRetryPeriod == 53, "The order of defintion for JET_paramAccessDeniedRetryPeriod in sysparam.xml must follow the numerical ordering of its value (as defined in jethdr.w)." );
 static_assert( JET_paramEnableIndexCleanup == 54, "The order of defintion for JET_paramEnableIndexCleanup in sysparam.xml must follow the numerical ordering of its value (as defined in jethdr.w)." );
 static_assert( JET_paramFlight_SmoothIoTestPermillage == 55, "The order of defintion for JET_paramFlight_SmoothIoTestPermillage in sysparam.xml must follow the numerical ordering of its value (as defined in jethdr.w)." );
-static_assert( JET_paramFlight_ElasticWaypointLatency == 56, "The order of defintion for JET_paramFlight_ElasticWaypointLatency in sysparam.xml must follow the numerical ordering of its value (as defined in jethdr.w)." );
+static_assert( JET_paramElasticWaypointLatency == 56, "The order of defintion for JET_paramElasticWaypointLatency in sysparam.xml must follow the numerical ordering of its value (as defined in jethdr.w)." );
 static_assert( JET_paramFlight_SynchronousLVCleanup == 57, "The order of defintion for JET_paramFlight_SynchronousLVCleanup in sysparam.xml must follow the numerical ordering of its value (as defined in jethdr.w)." );
 static_assert( JET_paramFlight_RBSRevertIOUrgentLevel == 58, "The order of defintion for JET_paramFlight_RBSRevertIOUrgentLevel in sysparam.xml must follow the numerical ordering of its value (as defined in jethdr.w)." );
 static_assert( JET_paramFlight_EnableXpress10Compression == 59, "The order of defintion for JET_paramFlight_EnableXpress10Compression in sysparam.xml must follow the numerical ordering of its value (as defined in jethdr.w)." );
@@ -325,7 +325,7 @@ static_assert( JET_paramRecoveryCurrentLogfile == 79, "The order of defintion fo
 static_assert( JET_paramFlight_RBSForceRollIntervalSec == 80, "The order of defintion for JET_paramFlight_RBSForceRollIntervalSec in sysparam.xml must follow the numerical ordering of its value (as defined in jethdr.w)." );
 static_assert( JET_paramGlobalMinVerPages == 81, "The order of defintion for JET_paramGlobalMinVerPages in sysparam.xml must follow the numerical ordering of its value (as defined in jethdr.w)." );
 static_assert( JET_paramOSSnapshotTimeout == 82, "The order of defintion for JET_paramOSSnapshotTimeout in sysparam.xml must follow the numerical ordering of its value (as defined in jethdr.w)." );
-static_assert( JET_paramFlight_SkipDbHeaderWriteForLgenCommittedUpdate == 83, "The order of defintion for JET_paramFlight_SkipDbHeaderWriteForLgenCommittedUpdate in sysparam.xml must follow the numerical ordering of its value (as defined in jethdr.w)." );
+static_assert( 83 == 83, "The order of defintion for 83 in sysparam.xml must follow the numerical ordering of its value (as defined in jethdr.w)." );
 static_assert( JET_paramFlight_NewQueueOptions == 84, "The order of defintion for JET_paramFlight_NewQueueOptions in sysparam.xml must follow the numerical ordering of its value (as defined in jethdr.w)." );
 static_assert( JET_paramFlight_ConcurrentMetedOps == 85, "The order of defintion for JET_paramFlight_ConcurrentMetedOps in sysparam.xml must follow the numerical ordering of its value (as defined in jethdr.w)." );
 static_assert( JET_paramFlight_LowMetedOpsThreshold == 86, "The order of defintion for JET_paramFlight_LowMetedOpsThreshold in sysparam.xml must follow the numerical ordering of its value (as defined in jethdr.w)." );

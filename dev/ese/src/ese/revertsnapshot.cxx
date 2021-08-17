@@ -3953,7 +3953,7 @@ ERR CRBSDatabaseRevertContext::ErrSetDbstateAfterRevert( SIGNATURE* psignRbsHdrF
     // to account for back to back reverts taking place close to each other.
     //
     m_pdbfilehdrFromRBS->le_lgposCommitBeforeRevert.le_lGeneration  = 
-        max( m_pdbfilehdr->le_lgposCommitBeforeRevert.le_lGeneration, 1 + m_pdbfilehdr->le_lGenMaxRequired + (LONG)UlParam( m_pinst, JET_paramFlight_ElasticWaypointLatency ) );
+        max( m_pdbfilehdr->le_lgposCommitBeforeRevert.le_lGeneration, 1 + m_pdbfilehdr->le_lGenMaxRequired + (LONG)UlParam( m_pinst, JET_paramElasticWaypointLatency ) );
 
     Assert( m_pdbfilehdrFromRBS->le_lgposCommitBeforeRevert.le_lGeneration >= m_pdbfilehdr->le_lGenMaxCommitted );
 

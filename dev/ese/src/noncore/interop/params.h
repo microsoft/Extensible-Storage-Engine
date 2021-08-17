@@ -128,7 +128,7 @@ MSINTERNAL enum class MJET_PARAM
     EnableIndexChecking = 45, // Enable checking OS version for indexes (false by default).
     EnableIndexCleanup = 54, // Enable cleanup of out-of-date index entries (Windows 2003 through Windows 7); Does NLS version checking (Windows 2003 and later).
     Flight_SmoothIoTestPermillage = 55, // The per mille of total (or one thousandths, or tenths of a percent) of IO should be made smooth.  Ex(s): 995‰ = 99.5% smooth, 10‰ = 1%, etc.  0 = disabled.
-    Flight_ElasticWaypointLatency = 56, // Amount of extra elastic waypoint latency
+    ElasticWaypointLatency = 56, // Amount of extra elastic waypoint latency
     Flight_SynchronousLVCleanup = 57, // Perform synchronous cleanup (actual delete) of LVs instead of flag delete with cleanup happening later
     Flight_RBSRevertIOUrgentLevel = 58, // IO urgent level for reverting the databases using RBS. Used to decide how many outstanding I/Os will be allowed.
     Flight_EnableXpress10Compression = 59, // Enable Xpress10 compression using corsica hardware
@@ -151,7 +151,6 @@ MSINTERNAL enum class MJET_PARAM
     RecordUpgradeDirtyLevel = 78, // how aggresively should pages with their record format converted be flushed (0-3)
     RecoveryCurrentLogfile = 79, // which generation is currently being replayed (read only)
     OSSnapshotTimeout = 82, // timeout for the freeze period in msec
-    Flight_SkipDbHeaderWriteForLgenCommittedUpdate = 83, // Skip database header write only for lgenCommitted update (lgenMinRequired and lgenMaxRequired updates would still trigger the write)
     Flight_RBSForceRollIntervalSec = 80, // Time after which we should force roll into new revert snapshot by raising failure item and letting HA remount. This is temporary till we have live roll.
     Flight_NewQueueOptions = 84, // Controls options for new Meted IO Queue
     Flight_ConcurrentMetedOps = 85, // Controls how many IOs we leave out at once for the new Meted IO Queue.

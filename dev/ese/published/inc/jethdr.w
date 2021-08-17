@@ -3920,7 +3920,7 @@ typedef enum
 // end_PubEsent
 #if ( JET_VERSION >= 0x0A01 )
 #define JET_paramFlight_SmoothIoTestPermillage  55  //  The per mille of total (or one thousandths, or tenths of a percent) of IO should be made smooth.  Ex(s): 995(/1000) = 99.5% smooth, 10(/1000) = 1%, etc.  0 = disabled.
-#define JET_paramFlight_ElasticWaypointLatency  56  //  Amount of extra elastic waypoint latency
+#define JET_paramElasticWaypointLatency         56  //  Amount of extra elastic waypoint latency
 #define JET_paramFlight_SynchronousLVCleanup    57  //  Perform synchronous cleanup (actual delete) of LVs instead of flag delete with cleanup happening later
 #define JET_paramFlight_RBSRevertIOUrgentLevel  58  // IO urgent level for reverting the databases using RBS. Used to decide how many outstanding I/Os will be allowed.
 #define JET_paramFlight_EnableXpress10Compression 59 //  Enable Xpress10 compression using corsica hardware
@@ -3975,7 +3975,6 @@ typedef enum
 //                                              81  //  JET_paramGlobalMinVerPages defined above
 #define JET_paramOSSnapshotTimeout              82  //  timeout for the freeze period in msec
 // end_PubEsent
-#define JET_paramFlight_SkipDbHeaderWriteForLgenCommittedUpdate 83  //  Skip database header write only for lgenCommitted update (lgenMinRequired and lgenMaxRequired updates would still trigger the write)
 
 #if ( JET_VERSION >= 0x0A01 )
 
