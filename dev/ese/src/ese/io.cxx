@@ -5020,7 +5020,8 @@ ERR ErrIRSAttachDatabaseForIrsV2( _Inout_ INST * const pinst, _In_ PCWSTR wszDat
     //
     Alloc( pinst->m_rgpirs[ipirsAvailable] = new CIrsOpContext( pcprintfIncReSeedTrace, wszDatabase, pfapiDb, pfm, pdbfilehdr ) );
 
-    CallS( ErrIRSGetAttachedIrsContext( pinst, wszDatabase, &pirsCheck ) );
+    // Even though we just added the context, below reads the db header and can fail because of that causing a crash below.
+    Call( ErrIRSGetAttachedIrsContext( pinst, wszDatabase, &pirsCheck ) );
     Assert( pirsCheck );
     Assert( pirsCheck == pinst->m_rgpirs[ipirsAvailable] );
 
@@ -5192,7 +5193,8 @@ ERR ErrIsamBeginDatabaseIncrementalReseed(
 
     Call( ErrIRSAttachDatabaseForIrsV2( pinst, szDatabase ) );
 
-    CallS( ErrIRSGetAttachedIrsContext( pinst, szDatabase, &pirs ) );
+    // Even though we just added the context, below reads the db header and can fail because of that causing a crash below.
+    Call( ErrIRSGetAttachedIrsContext( pinst, szDatabase, &pirs ) );
 
     TraceFuncBegun( pirs->PcprintfTrace(), __FUNCTION__ );  // must be after ErrIRSAttachDatabaseForIrsV2() - so trace file initialized.
 
