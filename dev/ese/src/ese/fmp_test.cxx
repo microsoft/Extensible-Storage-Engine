@@ -291,7 +291,8 @@ JETUNITTEST( FMP, NewAndWriteLatch )
     INST* rgpinst[ cFmps ] = { 0 };
     PIB* rgppib[ cFmps ] = { 0 };
     size_t i;
-
+    CPG cpgAvail;
+    
     // ErrFMPInit() hasn't been called yet.
     CHECK( g_ifmpMax == 0 );
 
@@ -480,6 +481,30 @@ JETUNITTEST( FMP, NewAndWriteLatch )
         pfmp->ResetLeakReclaimerIsRunning();
         CHECK( !pfmp->FLeakReclaimerIsRunning() );
 
+        // Test the helpers that maintain the cached CpgAvail total.
+        CHECK( !pfmp->FGetCpgAvail( &cpgAvail ) );
+        pfmp->SetCpgAvail( 5 );
+        CHECK( pfmp->FGetCpgAvail( &cpgAvail ) );
+        CHECK( 5 == cpgAvail );
+        pfmp->AdjustCpgAvail( 10 );
+        CHECK( pfmp->FGetCpgAvail( &cpgAvail ) );
+        CHECK( 15 == cpgAvail );
+        pfmp->AdjustCpgAvail( -7 );
+        CHECK( pfmp->FGetCpgAvail( &cpgAvail ) );
+        CHECK( 8 == cpgAvail );
+        pfmp->ResetCpgAvail();
+        CHECK( !pfmp->FGetCpgAvail( &cpgAvail ) );
+        pfmp->AdjustCpgAvail( 10 );
+        CHECK( !pfmp->FGetCpgAvail( &cpgAvail ) );
+        pfmp->SetCpgAvail( 3 );
+        CHECK( pfmp->FGetCpgAvail( &cpgAvail ) );
+        CHECK( 3 == cpgAvail );
+        pfmp->SetCpgAvail( 3 ); // Setting the same value twice is allowed.
+        CHECK( pfmp->FGetCpgAvail( &cpgAvail ) );
+        CHECK( 3 == cpgAvail );
+        pfmp->ResetCpgAvail();
+        CHECK( !pfmp->FGetCpgAvail( &cpgAvail ) );
+        
         // Verify PgnoMax tracking initial values.
         CHECK( 0 == pfmp->PgnoHighestWriteLatched() );
         CHECK( 0 == pfmp->PgnoDirtiedMax() );

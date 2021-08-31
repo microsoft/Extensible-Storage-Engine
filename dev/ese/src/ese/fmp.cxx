@@ -1535,6 +1535,7 @@ ERR FMP::ErrInitializeOneFmp(
     pfmp->SetLeakReclaimerTimeQuota( -1 );
     pfmp->ResetLeakReclaimerIsRunning();
     pfmp->ResetPgnoMaxTracking();
+    pfmp->ResetCpgAvail();
 
     pfmp->SetDbtimeBeginRBS( 0 );
     pfmp->ResetRBSOn();

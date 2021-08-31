@@ -14677,123 +14677,16 @@ LOCAL VOID SPIReportAnyExtentCacheError(
         Assert( JET_errSuccess <= err );
     }
 }
-
-//  gets owned and avail space info for database.  Speed repeated calls by caching data in FMP and maintaining this information from space.
-//
-ERR ErrSPGetDatabaseInfo(
-    PIB         *ppib,
-    const IFMP  ifmp,
-    __out_bcount(cbMax) BYTE        *pbResult,
-    const ULONG cbMax,
-    const ULONG fSPExtents,
-    bool fUseCachedResult,
-    CPRINTF * const pcprintf )
-{
-    ERR             err = JET_errSuccess;
-    CPG             *pcpgT = (CPG *)pbResult;
-    ULONG           cbMaxReq = 0;
-
-    PIBTraceContextScope tcScope = ppib->InitTraceContextScope();
-    tcScope->iorReason.SetIort( iortSpace );
-
-    //  we need to specify at least one of these supported options
-    //  
-    if ( ( fSPExtents & ( fSPOwnedExtent | fSPAvailExtent | fSPShelvedExtent ) ) == 0 )
-    {
-        return ErrERRCheck( JET_errInvalidParameter );
-    }
-
-    //  we can't specify anything outside of these supported options
-    //
-    if ( ( fSPExtents & ~( fSPOwnedExtent | fSPAvailExtent | fSPShelvedExtent ) ) != 0 )
-    {
-        return ErrERRCheck( JET_errInvalidParameter );
-    }
-
-    Assert( FSPOwnedExtent( fSPExtents ) || FSPAvailExtent( fSPExtents ) || FSPShelvedExtent( fSPExtents ) );
-
-    //  getting shelved space is currently only used internally by utilities so we expect it
-    //  to be queried along with avilable space (contract imposed by ErrSPGetInfo() below) and
-    //  without caching
-    //
-    if ( FSPShelvedExtent( fSPExtents ) )
-    {
-        Assert( FSPAvailExtent( fSPExtents ) );
-        if ( fUseCachedResult )
-        {
-            return ErrERRCheck( JET_errInvalidParameter );
-        }
-    }
-
-    //  buffer size checks
-    //
-    if ( FSPOwnedExtent( fSPExtents ) )
-    {
-        cbMaxReq += sizeof( CPG );
-    }
-    if ( FSPAvailExtent( fSPExtents ) )
-    {
-        cbMaxReq += sizeof( CPG );
-    }
-    if ( FSPShelvedExtent( fSPExtents ) )
-    {
-        cbMaxReq += sizeof( CPG );
-    }
-
-    if ( cbMax < cbMaxReq )
-    {
-        AssertSz( fFalse, "Called without the necessary buffer allocated for extents." );
-        return ErrERRCheck( JET_errInvalidParameter );
-    }
     
-    //  check inputs
-    //
-    CallR( ErrSPCheckInfoBuf( cbMax, fSPExtents ) );
-    memset( pbResult, 0, cbMax );
-
-    int ipg = 0;
-    const int ipgOwned = FSPOwnedExtent( fSPExtents ) ? ipg++ : -1;
-    const int ipgAvail = FSPAvailExtent( fSPExtents ) ? ipg++ : -1;
-    const int ipgShelved = FSPShelvedExtent( fSPExtents ) ? ipg++ : -1;
-
-    if ( !fUseCachedResult ||
-         ( FSPAvailExtent( fSPExtents ) && !g_rgfmp[ifmp].FCacheAvail() ) )
-    {
-        Call( ErrSPGetInfo( ppib,
-                            ifmp, 
-                            pfucbNil, 
-                            pbResult, 
-                            cbMax, 
-                            fSPExtents, 
-                            fUseCachedResult ? gci::Require : gci::Forbid, 
-                            pcprintf ) );
-
-        if ( FSPAvailExtent( fSPExtents ) )
-        {
-            Assert( ipgAvail >= 0 );
-            g_rgfmp[ifmp].SetCpgAvail( *( pcpgT + ipgAvail ) );
-        }
-    }
-    else
-    {
-        if ( ipgOwned >= 0 )
-        {
-            *( pcpgT + ipgOwned ) = g_rgfmp[ifmp].PgnoLast();
-        }
-        if ( ipgAvail >= 0 )
-        {
-            *( pcpgT + ipgAvail ) = g_rgfmp[ifmp].CpgAvail();
-        }
-        Assert( ipgShelved < 0 );
-    }
-
-HandleError:
-    return err;
-}
-
-
 //  Retrieves space info, like the owned # of pages, avail # of pages.
-
+//  NOTE:  Guaranteed contract, if you ask for info on multiple extent types, the
+//  returned info in this order (skipping any not requested):
+//  1) OWNED
+//  2) AVAILABLE
+//  3) RESERVED
+//  4) SHELVED
+//  5) LIST
+//
 ERR ErrSPGetInfo(
     PIB                       *ppib,
     const IFMP                ifmp,
@@ -14823,46 +14716,59 @@ ERR ErrSPGetInfo(
     CPG           cpgAvailExtTotalDummy;
     CPG           cpgOECached = cpgNil;
     CPG           cpgAECached = cpgNil;
+    ULONG         fSPExtentsRequired; // One of these must be specified.
+    ULONG         fSPExtentsAllowed;  // Any of these may be specified.
 
     PIBTraceContextScope tcScope = ppib->InitTraceContextScope();
     tcScope->iorReason.SetIort( iortSpace );
 
-    // Can only specify things we know.
-    if ( ( fSPExtents & ~( fSPOwnedExtent | fSPAvailExtent | fSPShelvedExtent | fSPReservedExtent | fSPExtentList ) ) != 0 )
+    // Have to specify either owned or available when you call this routine.
+    fSPExtentsRequired = fSPOwnedExtent | fSPAvailExtent;
+    if ( ( pfucbNil == pfucb ) || ( ObjidFDP( pfucb ) == pgnoSystemRoot ) )
     {
-        return ErrERRCheck( JET_errInvalidParameter );
+        // Can only additionally get Shelved extent info for the DBRoot, not reserved or extent list.
+        fSPExtentsAllowed = fSPOwnedExtent | fSPAvailExtent | fSPShelvedExtent;
+    }
+    else
+    {
+        // Can only additionally get Reserved and ExtentList for any other tree.
+        fSPExtentsAllowed = fSPOwnedExtent | fSPAvailExtent | fSPReservedExtent | fSPExtentList;
     }
 
-    //  Must specify either owned extent or available extent (or both) to retrieve anything.
-    //
-    if ( !( FSPOwnedExtent( fSPExtents ) || FSPAvailExtent( fSPExtents ) ) )
+    //  At least one required extent type specified?
+    if ( ( fSPExtents & fSPExtentsRequired ) == 0 )
     {
-        return ErrERRCheck( JET_errInvalidParameter );
+        Error( ErrERRCheck( JET_errInvalidParameter ) );
+    }
+
+    // Only allowed extent types specified?
+    if ( ( fSPExtents & ~fSPExtentsAllowed ) != 0 )
+    {
+        Error( ErrERRCheck( JET_errInvalidParameter ) );
     }
 
     if ( FSPExtentList( fSPExtents ) )
     {
         AssertSz( fFalse, "This is painfully limited, let's see if we can deprecate it.");
 
-        if ( pfucbNil == pfucb )
-        {
-            ExpectedSz( fFalse, "This is the DBRoot.  It doesn't support getting extent list." );
-            return ErrERRCheck( JET_errInvalidParameter );
-        }
+        //  ExtentList is used at least internally in comp.cxx (in ErrCMPCopyTable()), although
+        //  not widely used elsewhere (at least, not hit in any normal testing).
+        //
+        //  It is triggered by someone asking for ErrIsamGetTableInfo(JET_TblInfoSpaceUsage) and
+        //  giving us a buffer that's bigger than 2 * sizeof(CPG) (i.e. bigger than own + avail),
+        //  so it's not like we can go looking for the use of some grbit or other.
+        //
+        //  Perhaps AssertTrack() to see if it's hitting outside of test, but in a monitored
+        //  environment?  It would be nice to clean this up so you had to explicitly ask for it
+        //  rather than piggy back off of someone simply supplying a buffer that's big enough.
     }
 
     if ( FSPReservedExtent( fSPExtents ) )
     {
-        if ( pfucbNil == pfucb )
-        {
-            ExpectedSz( fFalse, "This is the DBRoot.  It doesn't support getting reserved." );
-            return ErrERRCheck( JET_errInvalidParameter );
-        }
-
         if ( !FSPAvailExtent( fSPExtents ) )
         {
             ExpectedSz( fFalse, "initially we won't support getting reserved w/o avail." );
-            return ErrERRCheck( JET_errInvalidParameter );
+            Error( ErrERRCheck( JET_errInvalidParameter ) );
         }
     }
 
@@ -14871,7 +14777,7 @@ ERR ErrSPGetInfo(
         if ( !FSPAvailExtent( fSPExtents ) )
         {
             ExpectedSz( fFalse, "initially we won't support getting shelved w/o avail." );
-            return ErrERRCheck( JET_errInvalidParameter );
+            Error( ErrERRCheck( JET_errInvalidParameter ) );
         }
     }
 
@@ -14903,13 +14809,13 @@ ERR ErrSPGetInfo(
             }
             else
             {
-                return ErrERRCheck( JET_errInvalidParameter );
+                Error( ErrERRCheck( JET_errInvalidParameter ) );
             }
             break;
 
         default:
             AssertSz( fFalse, "Unexpected case in switch.");
-            return ErrERRCheck( JET_errInvalidParameter );
+            Error( ErrERRCheck( JET_errInvalidParameter ) );
     }
 
     if ( FSPOwnedExtent( fSPExtents ) )
@@ -14932,7 +14838,7 @@ ERR ErrSPGetInfo(
     if ( cbMax < cbMaxReq )
     {
         AssertSz( fFalse, "Called without the necessary buffer allocated for extents." );
-        return ErrERRCheck( JET_errInvalidParameter );
+        Error( ErrERRCheck( JET_errInvalidParameter ) );
     }
 
     CallR( ErrSPCheckInfoBuf( cbMax, fSPExtents ) );
@@ -15005,6 +14911,71 @@ ERR ErrSPGetInfo(
         Assert( cext >= cextSentinelsRemaining );
     }
 
+    if ( fReadCachedValue )
+    {
+        Assert( FSPOwnedExtent( fSPExtents ) || FSPAvailExtent( fSPExtents ) );
+
+        err = ErrCATGetExtentPageCounts(
+            ppib,
+            ifmp,
+            ( ( pfucbNil == pfucb ) ? objidSystemRoot : ObjidFDP( pfucb ) ),
+            &cpgOECached,
+            &cpgAECached );
+
+        switch ( err )
+        {
+        case JET_errSuccess:
+            if ( ( pfucbNil != pfucb ) &&
+                 ( objidSystemRoot != ObjidFDP( pfucb ) ) &&
+                 ( BoolParam( PinstFromIfmp( ifmp ), JET_paramFlight_ExtentPageCountCacheVerifyOnly ) ) )
+            {
+                // For objects other than system root, don't return the values we just read.
+                // Calculate the values the long way and double check against what we just read.
+                break;
+            }
+
+            if ( FSPOwnedExtent( fSPExtents ) )
+            {
+                *pcpgOwnExtTotal = cpgOECached;
+            }
+            if ( FSPAvailExtent( fSPExtents ) )
+            {
+                *pcpgAvailExtTotal = cpgAECached;
+            }
+            goto HandleError;
+
+        case JET_errRecordNotFound:
+            // This objid is a value that COULD be cached, but isn't.  Make sure we read both
+            // owned and available (even if the caller only wanted one), in order to initialize
+            // the cached value.
+            if ( !FSPOwnedExtent( fSPExtents ) )
+            {
+                Assert( NULL == pcpgOwnExtTotal );
+                pcpgOwnExtTotal = &cpgOwnExtTotalDummy;
+                fSPExtents |= fSPOwnedExtent;
+            }
+            if ( !FSPAvailExtent( fSPExtents ) )
+            {
+                pcpgAvailExtTotal = &cpgAvailExtTotalDummy;
+                fSPExtents |= fSPAvailExtent;
+            }
+
+            fSetCachedValue = fTrue;
+
+            // Now go read the slow way.
+            break;
+
+        case JET_errNotInitialized:
+            // This objid is a value that CAN NOT be cached at this time, perhaps not ever.
+            // Now go read the slow way.
+            break;
+
+        default:
+            Call( err );
+            break;
+        }
+    }
+
     if ( pfucbNil == pfucb )
     {
         err = ErrBTOpen( ppib, pgnoSystemRoot, ifmp, &pfucbT );
@@ -15017,70 +14988,6 @@ ERR ErrSPGetInfo(
     Assert( pfucbNil != pfucbT );
     tcScope->nParentObjectClass = TceFromFUCB( pfucbT );
     tcScope->SetDwEngineObjid( ObjidFDP( pfucbT ) );
-
-    if ( fReadCachedValue )
-    {
-        Assert( FSPOwnedExtent( fSPExtents ) || FSPAvailExtent( fSPExtents ) );
-
-        err = ErrCATGetExtentPageCounts(
-            ppib,
-            ifmp,
-            pfucbT->u.pfcb->ObjidFDP(),
-            &cpgOECached,
-            &cpgAECached );
-
-        switch ( err )
-        {
-            case JET_errSuccess:
-                if ( BoolParam( PinstFromIfmp( ifmp ), JET_paramFlight_ExtentPageCountCacheVerifyOnly ) )
-                {
-                    // Don't return the values we just read.  Calculate the values the
-                    // long way and double check against what we just read.
-                    break;
-                }
-                
-                if ( FSPOwnedExtent( fSPExtents ) )
-                {
-                    *pcpgOwnExtTotal = cpgOECached;
-                }
-                if ( FSPAvailExtent( fSPExtents ) )
-                {
-                    *pcpgAvailExtTotal = cpgAECached;
-                }
-                goto HandleError;
-
-            case JET_errRecordNotFound:
-                // This objid is a value that COULD be cached, but isn't.  Make sure we read both
-                // owned and available (even if the caller only wanted one), in order to initialize
-                // the cached value.
-                if ( !FSPOwnedExtent( fSPExtents ) )
-                {
-                    Assert( NULL == pcpgOwnExtTotal );
-                    pcpgOwnExtTotal = &cpgOwnExtTotalDummy;
-                    fSPExtents |= fSPOwnedExtent;
-                }
-                if ( !FSPAvailExtent( fSPExtents ) )
-                {
-                    pcpgAvailExtTotal = &cpgAvailExtTotalDummy;
-                    fSPExtents |= fSPAvailExtent;
-                }
-
-                fSetCachedValue = fTrue;
-
-                // Now go read the slow way.
-                break;
-
-            case JET_errNotInitialized:
-                // This objid is a value that CAN NOT be cached at this time, perhaps not ever.
-                // Now go read the slow way.
-                break;
-
-            default:
-                Call( err );
-                break;
-        }
-    }
-
 
 
     if ( fSetCachedValue )
@@ -15491,9 +15398,6 @@ ERR ErrSPGetInfo(
     }
 
 HandleError:
-
-    Expected( pfucbNil != pfucbT ); //  codepaths up to (inclusive) opening the cursor return immediately (i.e., no HandleError cleanup).
-
     if ( pfucbT != pfucbNil )
     {
         pfucbT->pcsrRoot = pcsrNil;

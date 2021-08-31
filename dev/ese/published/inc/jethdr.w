@@ -5304,7 +5304,7 @@ typedef JET_ERR (JET_API * JET_PFNEMITLOGDATA)(
 #if ( JET_VERSION >= 0x0A01 )
 #define dbInfoSpaceShelved          22  /*  INTERNAL USE ONLY */
 #endif
-#define JET_DbInfoUseCachedResult   0x40000000
+#define JET_DbInfoUseCachedResult   0x40000000   /* Obsolete, this behavior is now always on */
 
     /* Info parameter for JetGetLogFileInfo */
 

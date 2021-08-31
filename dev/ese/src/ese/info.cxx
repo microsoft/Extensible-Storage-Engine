@@ -3832,7 +3832,6 @@ ERR VDBAPI ErrIsamGetDatabaseInfo(
     WORD            cp          = usEnglishCodePage;
     WORD            wCountry    = countryDefault;
     WORD            wCollate    = 0;
-    bool            fUseCachedResult = 0;
     ULONG           ulT         = 0;
     
     
@@ -3857,9 +3856,8 @@ ERR VDBAPI ErrIsamGetDatabaseInfo(
         goto HandleError;
     }
 
-    //  save refresh cache flag and remove from info level
+    //  Remove obsolete but allowable grbit.
     //
-    fUseCachedResult = (bool)((ulInfoLevel & JET_DbInfoUseCachedResult) ? 1 : 0 );
     ulT = (ulInfoLevel & ~(JET_DbInfoUseCachedResult));
     switch ( ulT )
     {
@@ -3993,28 +3991,29 @@ ERR VDBAPI ErrIsamGetDatabaseInfo(
             if ( cbMax != sizeof(ULONG) )
                 return ErrERRCheck( JET_errInvalidBufferSize );
 
-            err = ErrSPGetDatabaseInfo(
+            err = ErrSPGetInfo(
                         ppib,
                         ifmp,
+                        pfucbNil,
                         static_cast<BYTE *>( pvResult ),
                         cbMax,
                         fSPOwnedExtent,
-                        fUseCachedResult );
+                        gci::Allow );
             return err;
 
         case JET_DbInfoSpaceAvailable:
-            err = ErrSPGetDatabaseInfo(
+            err = ErrSPGetInfo(
                         ppib,
                         ifmp,
+                        pfucbNil,
                         static_cast<BYTE *>( pvResult ),
                         cbMax,
                         fSPAvailExtent,
-                        fUseCachedResult );
+                        gci::Allow );
             return err;
 
         case dbInfoSpaceShelved:
         {
-            Expected( !fUseCachedResult );
             ULONG rgcpg[2] = { 0 };
 
             // Return file size in terms of pages.
@@ -4023,13 +4022,15 @@ ERR VDBAPI ErrIsamGetDatabaseInfo(
                 return ErrERRCheck( JET_errInvalidBufferSize );
             }
 
-            err = ErrSPGetDatabaseInfo(
+            err = ErrSPGetInfo(
                         ppib,
                         ifmp,
+                        pfucbNil,
                         (BYTE*)rgcpg,
                         sizeof(rgcpg),
                         fSPAvailExtent | fSPShelvedExtent,  // need fSPAvailExtent to retrive fSPShelvedExtent
-                        fFalse );
+                        gci::Allow );
+            // Note that this requires ErrSPGetInfo to return data in a specific order.
             *( (ULONG*)pvResult ) = rgcpg[1];
             return err;
         }

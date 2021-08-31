@@ -18052,7 +18052,6 @@ VOID FMP::Dump( CPRINTF * pcprintf, DWORD_PTR dwOffset ) const
     (*pcprintf)( FORMAT_BOOL_BF( FMP, this, m_fCopiedPatchHeader, dwOffset ) );
     (*pcprintf)( FORMAT_BOOL_BF( FMP, this, m_fEDBBackupDone, dwOffset ) );
     (*pcprintf)( FORMAT_BOOL_BF( FMP, this, m_fDontRegisterOLD2Tasks, dwOffset ) );
-    (*pcprintf)( FORMAT_BOOL_BF( FMP, this, m_fCacheAvail, dwOffset ) );
     (*pcprintf)( FORMAT_BOOL_BF( FMP, this, m_fMaintainMSObjids, dwOffset ) );
     (*pcprintf)( FORMAT_BOOL_BF( FMP, this, m_fNoWaypointLatency, dwOffset ) );
     (*pcprintf)( FORMAT_BOOL_BF( FMP, this, m_fAttachedForRecovery, dwOffset ) );

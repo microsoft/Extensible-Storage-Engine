@@ -1763,7 +1763,7 @@ ERR ISAMAPI ErrIsamCompact(
                     (JET_DBID) pcompactinfo->ifmpSrc,
                     &pcompactinfo->pstatus->cDBPagesAvail,
                     sizeof(pcompactinfo->pstatus->cDBPagesAvail),
-                    JET_DbInfoSpaceAvailable | JET_DbInfoUseCachedResult );
+                    JET_DbInfoSpaceAvailable );
         if ( err < 0 )
         {
             goto HandleError;
