@@ -247,8 +247,6 @@ class FMP
 
                 UINT        m_fDontRegisterOLD2Tasks:1; /*  f ErrOLDRegisterTableForOLD2() shouldn't register tasks on this FMP */
 
-                UINT        m_fCacheAvail:1;    /*  f Is FMP tracking database Avail space */
-
                 UINT        m_fMaintainMSObjids:1;  /*  f Update MSObjids when creating or destroying b-trees */
                 UINT        m_fNoWaypointLatency:1; /* allow waypoint to advance to current position */
                 UINT        m_fAttachedForRecovery:1; /* attached for recovery */
@@ -267,7 +265,7 @@ class FMP
                 //
                 UINT        m_fOlderDemandExtendDb:1;
 
-                // 30 bits used.
+                // 29 bits used.
                 // Don't forget to update edbg.cxx!
             };
         };
@@ -378,7 +376,7 @@ class FMP
         // a count of asynch IO that are pending to this ifmp without taking a BF lock (ViewCache case)
         volatile LONG       m_cAsyncIOForViewCachePending;
 
-        //  cached value for owned space; only valid if m_fCacheAvail true
+        //  cached value for available space.  -1 indicates no value is cached.
         //
         CPG                 m_cpgAvail;
 
@@ -855,10 +853,6 @@ public:
         VOID SetFDontStartTrimTask()        { m_fDontStartTrimTask = fTrue; }
         VOID ResetFDontStartTrimTask()      { m_fDontStartTrimTask = fFalse; }
 
-        BOOL FCacheAvail() const                    { return m_fCacheAvail; }
-        VOID SetFCacheAvail()                   { m_fCacheAvail = fTrue; }
-        VOID ResetFCacheAvail()                 { m_fCacheAvail = fFalse; }
-
         BOOL FMaintainMSObjids() const      { return m_fMaintainMSObjids; }
         VOID SetFMaintainMSObjids()         { m_fMaintainMSObjids = fTrue; }
         VOID ResetFMaintainMSObjids()       { m_fMaintainMSObjids = fFalse; }
@@ -1031,28 +1025,63 @@ public:
         VOID FreeHeaderSignature();
         VOID SnapshotHeaderSignature();
 
-    CPG CpgAvail() const
+    BOOL FGetCpgAvail( CPG *pcpgAvail ) const
     {
-        Assert( FCacheAvail() );
-        return m_cpgAvail;
+        // m_cpgAvail uses the value '-1' to indicate no value is cached.
+        CPG cpgAvailStored;
+
+        cpgAvailStored = AtomicRead( (ULONG *)&m_cpgAvail );
+        if ( -1 == cpgAvailStored )
+        {
+            return fFalse;
+        }
+
+        *pcpgAvail = cpgAvailStored;
+        return fTrue;
     }
     
     VOID SetCpgAvail( CPG cpgAvail )
     {
-        m_cpgAvail = cpgAvail;
-        SetFCacheAvail();
+        // m_cpgAvail uses the value '-1' to indicate no value is cached.
+        CPG cpgAvailStored;
+
+        cpgAvailStored = AtomicCompareExchange( &m_cpgAvail, -1, cpgAvail );
+
+        Assert( -1 == cpgAvailStored || cpgAvail == cpgAvailStored );
     }
     
     VOID ResetCpgAvail()
     {
-        ResetFCacheAvail();
-        m_cpgAvail = 0;
+        // m_cpgAvail uses the value '-1' to indicate no value is cached.
+        AtomicExchange( &m_cpgAvail, -1 );
     }
-    
-    void AdjustCpgAvail( LONG lAvailAdd )
+
+    VOID AdjustCpgAvail( LONG lAvailAdd )
     {
-        Assert( FCacheAvail() );
-        (void)AtomicExchangeAdd( &m_cpgAvail, lAvailAdd );
+        // m_cpgAvail uses the value '-1' to indicate no value is cached.
+        CPG cpgAvailStoredInitial;
+        CPG cpgAvailStoredFinal;
+        CPG cpgAvailToStore;
+
+        // Apply lAvailAdd unless -1 is stored.
+        for (;;)
+        {
+            cpgAvailStoredInitial = AtomicRead( &m_cpgAvail );
+
+            if ( -1 == cpgAvailStoredInitial )
+            {
+                return;
+            }
+
+            cpgAvailToStore = cpgAvailStoredInitial + lAvailAdd;
+
+            cpgAvailStoredFinal = AtomicCompareExchange( &m_cpgAvail, cpgAvailStoredInitial, cpgAvailToStore );
+
+            if (cpgAvailStoredFinal == cpgAvailStoredInitial || cpgAvailStoredFinal == -1 )
+            {
+                return;
+            }
+        }
     }
 
     VOID SetPgnoShrinkTarget( const PGNO pgnoShrinkTarget )

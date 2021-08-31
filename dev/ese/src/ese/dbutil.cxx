@@ -3072,7 +3072,7 @@ LOCAL ERR ErrDBUTLGetSpaceTreeInfo(
     ERR             err;
     FUCB            *pfucb          = pfucbNil;
     BOOL            fForceInit      = fFalse;
-    CPG             rgcpgExtent[4];
+    CPG             rgcpgExtent[3];
 
     CallR( ErrBTOpen( ppib, pgnoFDP, ifmp, &pfucb ) );
     Assert( pfucbNil != pfucb );
@@ -3155,20 +3155,42 @@ LOCAL ERR ErrDBUTLGetSpaceTreeInfo(
 
     BTUp( pfucb );
 
-    Call( ErrSPGetInfo(
-                ppib,
-                ifmp,
-                pfucb,
-                (BYTE *)rgcpgExtent,
-                sizeof(rgcpgExtent),
-                fSPOwnedExtent | fSPAvailExtent | fSPReservedExtent | fSPShelvedExtent,
-                gci::Allow,
-                pcprintf ) );
+    ULONG fSPExtents = fSPOwnedExtent | fSPAvailExtent;
+    if ( ObjidFDP( pfucb ) == pgnoSystemRoot )
+    {
+        // Shelved only for dbroot.
+        fSPExtents |= fSPShelvedExtent;
+    }
+    else
+    {
+        // Reserved only for non-dbroot.
+        fSPExtents |= fSPReservedExtent;
+    }
 
+    Call( ErrSPGetInfo(
+              ppib,
+              ifmp,
+              pfucb,
+              (BYTE *)rgcpgExtent,
+              sizeof(rgcpgExtent),
+              fSPExtents,
+              gci::Forbid, // Get the real values, not the cached values.
+              pcprintf ) );
+    
     pbtsSpaceTree->cpgOwned = rgcpgExtent[0];
     pbtsSpaceTree->cpgAvailable = rgcpgExtent[1];
-    pbtsSpaceTree->cpgReserved = rgcpgExtent[2];
-    pbtsSpaceTree->cpgShelved = rgcpgExtent[3];
+    if ( ObjidFDP( pfucb ) == pgnoSystemRoot )
+    {
+        // We read shelved, not reserved.
+        pbtsSpaceTree->cpgReserved = 0;
+        pbtsSpaceTree->cpgShelved = rgcpgExtent[2];
+    }
+    else
+    {
+        // We read reserved, not shelved.
+        pbtsSpaceTree->cpgReserved = rgcpgExtent[2];
+        pbtsSpaceTree->cpgShelved = 0;
+    }
 
     Call( ErrSPGetExtentInfo(
                 ppib,

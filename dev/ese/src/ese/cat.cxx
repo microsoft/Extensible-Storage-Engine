@@ -13525,10 +13525,8 @@ VOID CATSetExtentPageCounts(
     // Special case, we cache the DBRoot in memory only.
     if ( objidSystemRoot == objid )
     {
-        Assert( !pfmp->FCacheAvail() );
         Assert( (CPG)pfmp->PgnoLast() == cpgOE );
         pfmp->SetCpgAvail( cpgAE );
-        pfmp->SetFCacheAvail();
         wszNote = L"DB_ROOT";
         err = JET_errSuccess;
         goto HandleError;
@@ -13732,7 +13730,7 @@ VOID CATResetExtentPageCounts(
     if ( objidSystemRoot == objid )
     {
         AssertSz( fFalse, "Why are you trying to reset the DBRoot value?" );
-        pfmp->ResetFCacheAvail();
+        pfmp->ResetCpgAvail();
         wszNote = L"DELETE_ROOT";
         err = JET_errSuccess;
         goto HandleError;
@@ -13899,17 +13897,10 @@ ERR _ErrCATAdjustExtentPageCountsPrepare(
     // Special case.  This is cached in memory.
     if ( objidSystemRoot == objid )
     {
-        if ( pfmp->FCacheAvail() )
-        {
-            // We don't actually have to mark this as invalid, since the invalid mark is
-            // to maintain consistency in the face of a crash and a log replay.  Since
-            // this is only in-memory, that's not an issue.
-            wszNote = L"NOP_ROOT";
-        }
-        else
-        {
-            wszNote = L"NOT_FOUND_ROOT";
-        }
+        // We don't actually have to mark this as invalid, since the invalid mark is
+        // to maintain consistency in the face of a crash and a log replay.  Since
+        // this is only in-memory, that's not an issue.
+        wszNote = L"NOP_ROOT";
         err = JET_errSuccess;
         goto HandleError;
     }
@@ -14140,17 +14131,10 @@ VOID CATAdjustExtentPageCounts(
     // Special case.  This is cached in memory.
     if ( objidSystemRoot == objid )
     {
-        if ( pfmp->FCacheAvail() )
-        {
-            // There's nothing to do with lAddCpgOE.  We don't directly cache that,
-            // we return pfmp->PgnoLast() when someone asks.
-            pfmp->AdjustCpgAvail( lAddCpgAE );
-            wszNote = L"REPLACE_ROOT";
-        }
-        else
-        {
-            wszNote = L"NOT_FOUND_ROOT";
-        }
+        // There's nothing to do with lAddCpgOE.  We don't directly cache that,
+        // we return pfmp->PgnoLast() when someone asks.
+        pfmp->AdjustCpgAvail( lAddCpgAE );
+        wszNote = L"ROOT";
         err = JET_errSuccess;
         goto HandleError;
     }
@@ -14354,11 +14338,6 @@ ERR ErrCATGetExtentPageCounts(
             { columnidMSExtentPageCountCache_epccesFlag, &epccesFlag, sizeof( epccesFlag ), 0, NO_GRBIT, 0, 1, 0, JET_errSuccess },
         };
 
-    if( pgnoNull == pfmp->PgnoExtentPageCountCacheFDP() )
-    {
-        Error( ErrERRCheck( JET_errNotInitialized ) );
-    }
-
     if( !FCATIExtentPageCountCacheCacheableObject( ppib, ifmp, objid, &wszNote ) )
     {
         Error( ErrERRCheck( JET_errNotInitialized ) );
@@ -14367,10 +14346,9 @@ ERR ErrCATGetExtentPageCounts(
     // Special case.  This is cached in memory.
     if ( objidSystemRoot == objid )
     {
-        if ( pfmp->FCacheAvail() )
+        if ( pfmp->FGetCpgAvail( pcpgAE ) )
         {
             *pcpgOE = pfmp->PgnoLast();
-            *pcpgAE = pfmp->CpgAvail();
             err = JET_errSuccess;
             goto HandleError;
         }
@@ -14644,8 +14622,6 @@ ERR ErrCATDeleteMSExtentPageCountCache(
     {
         *pfTableExisted = fFalse;
     }
-
-    pfmp->ResetFCacheAvail();
 
     Call( ErrDBOpenDatabase( ppib, pfmp->WszDatabaseName(), &ifmpT, NO_GRBIT ) );
     Assert( ifmp == ifmpT );
