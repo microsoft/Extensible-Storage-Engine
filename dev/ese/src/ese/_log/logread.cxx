@@ -972,8 +972,8 @@ LOCAL VOID LGIReportChecksumMismatch(
     PCWSTR          wszLogName,
     const USHORT    isecLastValid,
     const USHORT    isecCurrent,
-    const _int64    checksumExpected,
-    const _int64    checksumActual,
+    const _int64    checksumStored,
+    const _int64    checksumCalculated,
     const ERR       err,
     const eLogCorruptReason reason )
 {
@@ -981,22 +981,22 @@ LOCAL VOID LGIReportChecksumMismatch(
     DWORD           irgpsz      = 0;
     WCHAR           szLastValid[ 8 ];
     WCHAR           szCurrent[ 8 ];
-    WCHAR           szChecksumExpected[ 64 ];
-    WCHAR           szChecksumActual[ 64 ];
+    WCHAR           szChecksumStored[ 64 ];
+    WCHAR           szChecksumCalculated[ 64 ];
     WCHAR           szError[ 32 ];
 
     OSStrCbFormatW( szLastValid, sizeof(szLastValid), L"%hu", isecLastValid );
     OSStrCbFormatW( szCurrent, sizeof(szCurrent), L"%hu", isecCurrent );
-    OSStrCbFormatW( szChecksumExpected, sizeof(szChecksumExpected), L"%I64u (0x%I64x)", checksumExpected, checksumExpected );
-    OSStrCbFormatW( szChecksumActual, sizeof(szChecksumActual), L"%I64u (0x%I64x)", checksumActual, checksumActual );
+    OSStrCbFormatW( szChecksumStored, sizeof(szChecksumStored), L"%I64u (0x%I64x)", checksumStored, checksumStored );
+    OSStrCbFormatW( szChecksumCalculated, sizeof(szChecksumCalculated), L"%I64u (0x%I64x)", checksumCalculated, checksumCalculated );
     OSStrCbFormatW( szError, sizeof(szError), L"%i (0x%08x)", err, err );
     
     rgpszT[ irgpsz++ ] = wszLogName;
     rgpszT[ irgpsz++ ] = g_rgwszLogCorruptReason[ reason < eLCMax ? reason : 0 ];
     rgpszT[ irgpsz++ ] = szLastValid;
     rgpszT[ irgpsz++ ] = szCurrent;
-    rgpszT[ irgpsz++ ] = szChecksumExpected;
-    rgpszT[ irgpsz++ ] = szChecksumActual;
+    rgpszT[ irgpsz++ ] = szChecksumStored;
+    rgpszT[ irgpsz++ ] = szChecksumCalculated;
     rgpszT[ irgpsz++ ] = szError;
     
     UtilReportEvent(
@@ -1021,8 +1021,8 @@ LOG_VERIFY_STATE::ErrVerifyHeader( INST * pinst, IFileAPI * pfapi, __deref_in_bc
 {
     ERR err = JET_errSuccess;
 
-    PAGECHECKSUM    checksumExpected    = 0;
-    PAGECHECKSUM    checksumActual      = 0;
+    PAGECHECKSUM    checksumStored      = 0;
+    PAGECHECKSUM    checksumCalculated  = 0;
 
     if ( *pcb < sizeof( LGFILEHDR ) )
     {
@@ -1035,10 +1035,10 @@ LOG_VERIFY_STATE::ErrVerifyHeader( INST * pinst, IFileAPI * pfapi, __deref_in_bc
                 sizeof( LGFILEHDR ),
                 logfileHeader,
                 0,
-                &checksumExpected,
-                &checksumActual );
+                &checksumStored,
+                &checksumCalculated );
 
-    if ( checksumExpected != checksumActual )
+    if ( checksumStored != checksumCalculated )
     {
         WCHAR szAbsPath[ IFileSystemAPI::cchPathMax ];
         szAbsPath[0] = 0;
@@ -1047,8 +1047,8 @@ LOG_VERIFY_STATE::ErrVerifyHeader( INST * pinst, IFileAPI * pfapi, __deref_in_bc
                 pinst,
                 szAbsPath,
                 0, 0,
-                checksumExpected.rgChecksum[ 0 ],
-                checksumActual.rgChecksum[ 0 ],
+                checksumStored.rgChecksum[ 0 ],
+                checksumCalculated.rgChecksum[ 0 ],
                 JET_errSuccess,
                 eLCCorruptHeader );
 
@@ -1087,8 +1087,8 @@ LOG_VERIFY_STATE::ErrVerifyLogSegments(
     DWORD   cbBuffer )
 {
     ERR err = JET_errSuccess;
-    PAGECHECKSUM checksumExpected;
-    PAGECHECKSUM checksumActual;
+    PAGECHECKSUM checksumStored;
+    PAGECHECKSUM checksumCalculated;
     BOOL fCorrectableError;
     INT ibitCorrupted;
 
@@ -1111,11 +1111,11 @@ LOG_VERIFY_STATE::ErrVerifyLogSegments(
                 logfilePage,
                 m_iSeg,
                 fTrue,
-                &checksumExpected,
-                &checksumActual,
+                &checksumStored,
+                &checksumCalculated,
                 &fCorrectableError,
                 &ibitCorrupted );
-            if ( checksumExpected != checksumActual )
+            if ( checksumStored != checksumCalculated )
             {
                 ChecksumAndPossiblyFixPage(
                     pb,
@@ -1123,11 +1123,11 @@ LOG_VERIFY_STATE::ErrVerifyLogSegments(
                     logfilePage,
                     m_iSeg - 1,
                     fTrue,
-                    &checksumExpected,
-                    &checksumActual,
+                    &checksumStored,
+                    &checksumCalculated,
                     &fCorrectableError,
                     &ibitCorrupted );
-                if ( checksumExpected != checksumActual )
+                if ( checksumStored != checksumCalculated )
                 {
                     Error( ErrERRCheck( JET_errLogReadVerifyFailure ) );
                 }
@@ -1295,8 +1295,8 @@ LOG_READ_BUFFER::ErrLGCheckReadLastLogRecordFF(
     BOOL fCorrectableError;
     INT ibitCorrupted;
     BOOL fFileOpenedForWrite = fFalse;
-    PAGECHECKSUM checksumExpected, checksumExpectedT;
-    PAGECHECKSUM checksumActual, checksumActualT;
+    PAGECHECKSUM checksumStored, checksumStoredT;
+    PAGECHECKSUM checksumCalculated, checksumCalculatedT;
     LONG lLine = 0;
     BOOL fIsTornWrite = fFalse;
     BYTE *pbLR;
@@ -1455,11 +1455,11 @@ LOG_READ_BUFFER::ErrLGCheckReadLastLogRecordFF(
                     logfilePage,
                     lgposCurrent.isec,
                     fTrue,
-                    &checksumExpected,
-                    &checksumActual,
+                    &checksumStored,
+                    &checksumCalculated,
                     &fCorrectableError,
                     &ibitCorrupted );
-            if ( checksumExpected != checksumActual )
+            if ( checksumStored != checksumCalculated )
             {
                 if ( lgposCurrent.isec != m_pLogStream->CSecHeader() )
                 {
@@ -1470,11 +1470,11 @@ LOG_READ_BUFFER::ErrLGCheckReadLastLogRecordFF(
                             logfilePage,
                             lgposCurrent.isec - 1,
                             fTrue,
-                            &checksumExpectedT,
-                            &checksumActualT,
+                            &checksumStoredT,
+                            &checksumCalculatedT,
                             &fCorrectableError,
                             &ibitCorrupted );
-                    if ( checksumExpectedT == checksumActualT )
+                    if ( checksumStoredT == checksumCalculatedT )
                     {
                         if ( fCorrectableError )
                         {
@@ -1583,11 +1583,11 @@ LOG_READ_BUFFER::ErrLGCheckReadLastLogRecordFF(
                     logfilePage,
                     lgposCurrent.isec,
                     fTrue,
-                    &checksumExpectedT,
-                    &checksumActualT,
+                    &checksumStoredT,
+                    &checksumCalculatedT,
                     &fCorrectableError,
                     &ibitCorrupted );
-            if ( checksumExpectedT != checksumActualT ||
+            if ( checksumStoredT != checksumCalculatedT ||
                  CmpLgpos( &pSegHdr->le_lgposSegment, &lgposCurrent ) != 0 )
             {
                 // This is not the shadow sector we are looking for
@@ -1739,8 +1739,8 @@ ReportCorruption:
             m_pLogStream->LogName(),
             lgposLastValidSegment.isec,
             lgposCurrent.isec,
-            checksumExpected.rgChecksum[ 0 ],
-            checksumActual.rgChecksum[ 0 ],
+            checksumStored.rgChecksum[ 0 ],
+            checksumCalculated.rgChecksum[ 0 ],
             err,
             reason );
             

@@ -7188,7 +7188,7 @@ VOID LrToSz(
                     (OBJID) plrinsert->le_objidFDP );
             OSStrCbAppendA( szLR, cbLR, rgchBuf );
 
-            DataToSz( pb, cb, plog->IDumpVerbosityLevel(), rgchBuf, cbLRBuf );
+            DataToSz( pb, cb, iVerbosityLevel, rgchBuf, cbLRBuf );
             OSStrCbAppendA( szLR, cbLR, rgchBuf );
             break;
         }
@@ -7253,7 +7253,7 @@ VOID LrToSz(
             OSStrCbAppendA( szLR, cbLR, rgchBuf );
             if ( lrtypReplace == plr->lrtyp )
             {
-                DataToSz( pb, cb, plog->IDumpVerbosityLevel(), rgchBuf, cbLRBuf );
+                DataToSz( pb, cb, iVerbosityLevel, rgchBuf, cbLRBuf );
                 OSStrCbAppendA( szLR, cbLR, rgchBuf );
             }
             else
@@ -7296,7 +7296,7 @@ VOID LrToSz(
                 (OBJID) plrfiard->le_objidFDP );
             OSStrCbAppendA( szLR, cbLR, rgchBuf );
 
-            DataToSz( pb, cb, plog->IDumpVerbosityLevel(), rgchBuf, cbLRBuf );
+            DataToSz( pb, cb, iVerbosityLevel, rgchBuf, cbLRBuf );
             OSStrCbAppendA( szLR, cbLR, rgchBuf );
             break;
         }
@@ -7366,7 +7366,7 @@ VOID LrToSz(
                 );
             OSStrCbAppendA( szLR, cbLR, rgchBuf );
 
-            DataToSz( plrundoinfo->rgbData, plrundoinfo->CbBookmarkKey() + plrundoinfo->CbBookmarkData() + plrundoinfo->le_cbData, plog->IDumpVerbosityLevel(), rgchBuf, cbLRBuf );
+            DataToSz( plrundoinfo->rgbData, plrundoinfo->CbBookmarkKey() + plrundoinfo->CbBookmarkData() + plrundoinfo->le_cbData, iVerbosityLevel, rgchBuf, cbLRBuf );
             OSStrCbAppendA( szLR, cbLR, rgchBuf );
             break;
         }
@@ -7892,7 +7892,7 @@ VOID LrToSz(
                 szXpress);
             OSStrCbAppendA( szLR, cbLR, rgchBuf );
 
-            DataToSz( pb, cb, plog->IDumpVerbosityLevel(), rgchBuf, cbLRBuf );
+            DataToSz( pb, cb, iVerbosityLevel, rgchBuf, cbLRBuf );
             OSStrCbAppendA( szLR, cbLR, rgchBuf );
 
             break;
@@ -7990,7 +7990,7 @@ VOID LrToSz(
                 plremptytree->CbEmptyPageList() );
             OSStrCbAppendA( szLR, cbLR, rgchBuf );
 
-            DataToSz( plremptytree->rgb, plremptytree->CbEmptyPageList(), plog->IDumpVerbosityLevel(), rgchBuf, cbLRBuf );
+            DataToSz( plremptytree->rgb, plremptytree->CbEmptyPageList(), iVerbosityLevel, rgchBuf, cbLRBuf );
             OSStrCbAppendA( szLR, cbLR, rgchBuf );
             break;
         }
@@ -8015,7 +8015,7 @@ VOID LrToSz(
                         plrsetexternalheader->CbData() );
             OSStrCbAppendA( szLR, cbLR, rgchBuf );
 
-            DataToSz( pb, cb, plog->IDumpVerbosityLevel(), rgchBuf, cbLRBuf );
+            DataToSz( pb, cb, iVerbosityLevel, rgchBuf, cbLRBuf );
             OSStrCbAppendA( szLR, cbLR, rgchBuf );
             break;
         }
@@ -8041,7 +8041,7 @@ VOID LrToSz(
                         plrscrub->CscrubOper(),
                         plrscrub->CbData() );
             OSStrCbAppendA( szLR, cbLR, rgchBuf );
-            DataToSz( pb, cb, plog->IDumpVerbosityLevel(), rgchBuf, cbLRBuf );
+            DataToSz( pb, cb, iVerbosityLevel, rgchBuf, cbLRBuf );
             OSStrCbAppendA( szLR, cbLR, rgchBuf );
             break;
         }
@@ -8454,7 +8454,7 @@ VOID LrToSz(
                 const LRCOMMITCTX * const plrcommitctx = (LRCOMMITCTX *) plr;
                 OSStrCbFormatA( rgchBuf, sizeof(rgchBuf), " (%x) [%s%s%s]", plrcommitctx->ProcID(), plrcommitctx->FCallbackNeeded() ? "C" : "", plrcommitctx->FPreCommitCallbackNeeded() ? "R" : "", plrcommitctx->FContainsCustomerData() ? "P" : "" );
                 OSStrCbAppendA( szLR, cbLR, rgchBuf );
-                DataToSz( plrcommitctx->PbCommitCtx(), plrcommitctx->CbCommitCtx(), plrcommitctx->FContainsCustomerData() ? plog->IDumpVerbosityLevel() : LOG::ldvlData, rgchBuf, cbLRBuf );
+                DataToSz( plrcommitctx->PbCommitCtx(), plrcommitctx->CbCommitCtx(), plrcommitctx->FContainsCustomerData() ? iVerbosityLevel : LOG::ldvlData, rgchBuf, cbLRBuf );
                 OSStrCbAppendA( szLR, cbLR, rgchBuf );
             }
             else
@@ -8462,7 +8462,7 @@ VOID LrToSz(
                 const LRCOMMITCTXOLD * const plrcommitctx = (LRCOMMITCTXOLD *) plr;
                 OSStrCbFormatA( rgchBuf, sizeof(rgchBuf), " (%x) ", plrcommitctx->ProcID() );
                 OSStrCbAppendA( szLR, cbLR, rgchBuf );
-                DataToSz( plrcommitctx->PbCommitCtx(), plrcommitctx->CbCommitCtx(), plog->IDumpVerbosityLevel(), rgchBuf, cbLRBuf );
+                DataToSz( plrcommitctx->PbCommitCtx(), plrcommitctx->CbCommitCtx(), iVerbosityLevel, rgchBuf, cbLRBuf );
                 OSStrCbAppendA( szLR, cbLR, rgchBuf );
             }
             break;

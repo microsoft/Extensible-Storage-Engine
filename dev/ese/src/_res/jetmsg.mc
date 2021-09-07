@@ -1537,7 +1537,7 @@ Language=English
 MessageId=552
 SymbolicName=LOG_CORRUPT_ID
 Language=English
-%1 (%2) %3The log file at "%4" is corrupt with reason '%5'. Last valid segment was %6, current segment is %7. The expected checksum was %8 and the actual checksum was %9. The read completed with error-code %10.  If this condition persists then please restore the logfile from a previous backup.
+%1 (%2) %3The log file at "%4" is corrupt with reason '%5'. Last valid segment was %6, current segment is %7. The stored checksum was %8 and the computed checksum was %9. The read completed with error-code %10.  If this condition persists then please restore the logfile from a previous backup.
 .
 
 MessageId=553
