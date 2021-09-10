@@ -659,15 +659,12 @@ ERR INST::ErrINSTTerm( TERMTYPE termtype )
             if ( ifmpT >= g_ifmpMax )
                 continue;
 
-            if ( BoolParam( this, JET_paramFlight_EnableReattachRaceBugFix ) )
+            FMP * const pfmp = &g_rgfmp[ ifmpT ];
+            if ( pfmp->FAttachedForRecovery() && !pfmp->FAllowHeaderUpdate() )
             {
-                FMP * const pfmp = &g_rgfmp[ ifmpT ];
-                if ( pfmp->FAttachedForRecovery() && !pfmp->FAllowHeaderUpdate() )
-                {
-                    pfmp->RwlDetaching().EnterAsWriter();
-                    pfmp->SetAllowHeaderUpdate();
-                    pfmp->RwlDetaching().LeaveAsWriter();
-                }
+                pfmp->RwlDetaching().EnterAsWriter();
+                pfmp->SetAllowHeaderUpdate();
+                pfmp->RwlDetaching().LeaveAsWriter();
             }
         }
 
@@ -819,13 +816,10 @@ ERR INST::ErrINSTTerm( TERMTYPE termtype )
             if ( ifmpT >= g_ifmpMax )
                 continue;
 
-            if ( BoolParam( this, JET_paramFlight_EnableReattachRaceBugFix ) )
-            {
-                FMP * const pfmp = &g_rgfmp[ ifmpT ];
-                pfmp->RwlDetaching().EnterAsWriter();
-                pfmp->ResetAllowHeaderUpdate();
-                pfmp->RwlDetaching().LeaveAsWriter();
-            }
+            FMP * const pfmp = &g_rgfmp[ ifmpT ];
+            pfmp->RwlDetaching().EnterAsWriter();
+            pfmp->ResetAllowHeaderUpdate();
+            pfmp->RwlDetaching().LeaveAsWriter();
         }
     }
     else
