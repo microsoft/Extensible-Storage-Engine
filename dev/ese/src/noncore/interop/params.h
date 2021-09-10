@@ -127,7 +127,7 @@ MSINTERNAL enum class MJET_PARAM
     AccessDeniedRetryPeriod = 53, // Number of milliseconds to retry when about to fail with AccessDenied
     EnableIndexChecking = 45, // Enable checking OS version for indexes (false by default).
     EnableIndexCleanup = 54, // Enable cleanup of out-of-date index entries (Windows 2003 through Windows 7); Does NLS version checking (Windows 2003 and later).
-    Flight_SmoothIoTestPermillage = 55, // The per mille of total (or one thousandths, or tenths of a percent) of IO should be made smooth.  Ex(s): 995‰ = 99.5% smooth, 10‰ = 1%, etc.  0 = disabled.
+    Flight_SmoothIoTestPermillage = 55, // The per mille of total (or one thousandths, or tenths of a percent) of IO should be made smooth.  Ex(s): 995(/1000) = 99.5% smooth, 10(/1000) = 1%, etc.  0 = disabled.
     ElasticWaypointLatency = 56, // Amount of extra elastic waypoint latency
     Flight_SynchronousLVCleanup = 57, // Perform synchronous cleanup (actual delete) of LVs instead of flag delete with cleanup happening later
     Flight_RBSRevertIOUrgentLevel = 58, // IO urgent level for reverting the databases using RBS. Used to decide how many outstanding I/Os will be allowed.
@@ -145,7 +145,6 @@ MSINTERNAL enum class MJET_PARAM
     ZeroDatabaseDuringBackup = 71, // Overwrite deleted records/LVs during backup
     UnicodeIndexDefault = 72, // default LCMapString() lcid and flags to use for CreateIndex() and unique multi-values check
     RuntimeCallback = 73, // pointer to runtime-only callback function
-    Flight_EnableReattachRaceBugFix = 74, // Enable bug fix for race between dirty-cache-keep-alive database reattach and checkpoint update
     EnableSortedRetrieveColumns = 76, // internally sort (in a dynamically allocated parallel array) JET_RETRIEVECOLUMN structures passed to JetRetrieveColumns()
     CleanupMismatchedLogFiles = 77, // instead of erroring out after a successful recovery with JET_errLogFileSizeMismatchDatabasesConsistent, ESE will silently delete the old log files and checkpoint file and continue operations
     RecordUpgradeDirtyLevel = 78, // how aggresively should pages with their record format converted be flushed (0-3)
@@ -160,7 +159,7 @@ MSINTERNAL enum class MJET_PARAM
     Flight_EnableShrinkArchiving = 89, // Turns on archiving truncated data when shrinking a database (subject to efv).
     Flight_EnableBackupDuringRecovery = 90, // Turns on backup during recovery (i.e. seed from passive copy).
     Flight_RBSRollIntervalSec = 91, // Time after which we should roll into new revert snapshot.
-    Flight_RBSMaxRequiredRange = 92, // Max required range allowed for revert snapshot. If combined required range of the dbs is greater than this we will skip creating the revert snapshot 
+    Flight_RBSMaxRequiredRange = 92, // Max required range allowed for revert snapshot. If combined required range of the dbs is greater than this we will skip creating the revert snapshot
     Flight_RBSCleanupEnabled = 93, // Turns on clean up for revert snapshot.
     Flight_RBSLowDiskSpaceThresholdGb = 94, // Low disk space in gigabytes at which we will start cleaning up RBS aggressively.
     Flight_RBSMaxSpaceWhenLowDiskSpaceGb = 95, // Max alloted space in gigabytes for revert snapshots when the disk space is low.

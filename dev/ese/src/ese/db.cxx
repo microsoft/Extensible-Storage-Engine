@@ -4281,13 +4281,10 @@ ERR ISAMAPI ErrIsamAttachDatabase(
 
             pfmp->InitializeDbtimeOldest();
 
-            if ( BoolParam( pinst, JET_paramFlight_EnableReattachRaceBugFix ) )
-            {
-                Assert( !pfmp->FAllowHeaderUpdate() );
-                pfmp->RwlDetaching().EnterAsWriter();
-                pfmp->SetAllowHeaderUpdate();
-                pfmp->RwlDetaching().LeaveAsWriter();
-            }
+            Assert( !pfmp->FAllowHeaderUpdate() );
+            pfmp->RwlDetaching().EnterAsWriter();
+            pfmp->SetAllowHeaderUpdate();
+            pfmp->RwlDetaching().LeaveAsWriter();
 
             {
             //  set the last page of the database and resize it (we normally do it at the end of recovery,

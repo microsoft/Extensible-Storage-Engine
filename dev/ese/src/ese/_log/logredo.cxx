@@ -1667,13 +1667,10 @@ ERR LOG::ErrLGRIInitSession(
             if ( ifmp >= g_ifmpMax )
                 continue;
 
-            if ( BoolParam( m_pinst, JET_paramFlight_EnableReattachRaceBugFix ) )
-            {
-                FMP * const pfmp = &g_rgfmp[ ifmp ];
-                pfmp->RwlDetaching().EnterAsWriter();
-                pfmp->SetAllowHeaderUpdate();
-                pfmp->RwlDetaching().LeaveAsWriter();
-            }
+            FMP * const pfmp = &g_rgfmp[ ifmp ];
+            pfmp->RwlDetaching().EnterAsWriter();
+            pfmp->SetAllowHeaderUpdate();
+            pfmp->RwlDetaching().LeaveAsWriter();
         }
     }
 
