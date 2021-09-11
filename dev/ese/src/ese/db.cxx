@@ -4862,9 +4862,7 @@ PostAttachTasks:
             }
             else if ( objidFDP != objidNil )
             {
-                evtId = EXTENT_PAGE_COUNT_CACHE_IN_USE_ID;
-                fcT = fc::NotSpecified;
-                rgwsz[1] = L"REQUEST_PARAM_MATCHES_STATE";
+                // Too verbose, don't log anything. This is steady state when feature is on everywhere.
             }
             else
             {
