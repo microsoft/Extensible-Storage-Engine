@@ -1146,7 +1146,7 @@ public:
 private:
     bool FContainsObjid_( const OBJID objid ) const;
     INT IndexOfObjid_( const OBJID objid ) const;
-    INT IndexOfLeastRecentlyUsedObject_() const;
+    INT IndexOfLeastRecentlyUsedObject_( const OBJID objidIgnore = objidNil ) const;
     void CloseObjectAt_( const INT index );
     
 private:
@@ -4190,11 +4190,31 @@ void DBMObjectCache::CacheObjectFucb( FUCB * const pfucb, const OBJID objid )
 {
     Assert( objidNil != objid );
     Assert( pfucbNil != pfucb );
-
+    
     INT index = IndexOfObjid_( objid );
     if ( index < 0 )
     {
-        index = IndexOfLeastRecentlyUsedObject_();
+#ifndef ENABLE_JET_UNIT_TEST
+        BOOL fIsLV = pfucb->u.pfcb->FTypeLV();
+        Assert( fIsLV ? ( NULL != pfucb->u.pfcb->PfcbTable() ) : ( NULL == pfucb->u.pfcb->PfcbTable() ) );
+#else
+        // Unit tests occasionally get here with a non-null but bad pfucb->u.pfcb.  None of the
+        // unit tests rely on the specific LV tree behavior.
+        BOOL fIsLV = fFalse;
+#endif
+        // Not already cached.
+        if ( fIsLV )
+        {
+            // If we're caching an LV tree, we need to already have the table in the cache, and
+            // we can't evict it.
+            const OBJID objidTableForLVTree = pfucb->u.pfcb->PfcbTable()->ObjidFDP();
+            Assert( ois::Valid == OisGetObjidState( objidTableForLVTree ) );
+            index = IndexOfLeastRecentlyUsedObject_( objidTableForLVTree );
+        }
+        else
+        {
+            index = IndexOfLeastRecentlyUsedObject_();
+        }
         CloseObjectAt_( index );
     }
     else
@@ -4280,13 +4300,20 @@ INT DBMObjectCache::IndexOfObjid_( const OBJID objid ) const
     return -1;
 }
 
-INT DBMObjectCache::IndexOfLeastRecentlyUsedObject_() const
+INT DBMObjectCache::IndexOfLeastRecentlyUsedObject_( const OBJID objidIgnore ) const
 {
+    static_assert( 1 != m_cobjectsMax, "Algorithm assumes at least two entries" );
     const __int64 ftMax = 0x7FFFFFFFFFFFFFFF;
     __int64 ftLeast = ftMax;
     INT indexLeast = -1;
     for( INT i = 0; i < m_cobjectsMax; ++i )
     {
+        if ( ( objidIgnore != objidNil ) && ( objidIgnore == m_rgstate[i].objid ) )
+        {
+            // We don't want to find this one.
+            continue;
+        }
+        
         if( ( m_rgstate[i].ftAccess == 0 ) || ( m_rgstate[i].ftAccess < ftLeast ) )
         {
             indexLeast = i;
@@ -4320,7 +4347,28 @@ void DBMObjectCache::CloseObjectAt_( const INT index )
         }
         else
         {
-            Assert( m_rgstate[index].pfucb->u.pfcb->FTypeTable() );
+            const FCB *pfcb = m_rgstate[index].pfucb->u.pfcb;
+            Assert( pfcb->FTypeTable() );
+
+            const TDB *ptdb = pfcb->Ptdb();
+            Assert( ptdb );
+            if ( NULL != ptdb )
+            {
+                // If we're closing a table with an LV tree that is also cached, we need to
+                // close the LV tree also.  If we don't, we end up with problems if someone deletes
+                // the table (deleting the the LV tree), leaving an orphaned FUCB for the LV tree
+                // here that points to an FCB that may have been purged.
+                const FCB *pfcbLV = ptdb->PfcbLV();
+                if ( NULL != pfcbLV )
+                {
+                    // If this is cached, we need to close it also.
+                    INT indexLV = IndexOfObjid_( pfcbLV->ObjidFDP() );
+                    if ( -1 != indexLV )
+                    {
+                        CloseObjectAt_( indexLV );
+                    }
+                }
+            }
             CallS( ErrFILECloseTable( m_rgstate[index].pfucb->ppib, m_rgstate[index].pfucb ) );
         }
 #endif // ENABLE_JET_UNIT_TEST
