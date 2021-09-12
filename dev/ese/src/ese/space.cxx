@@ -14702,12 +14702,10 @@ ERR ErrSPGetInfo(
     CPG           *pcpgAvailExtTotal;
     CPG           *pcpgReservedExtTotal;
     CPG           *pcpgShelvedExtTotal;
-    CPG           cpgAvailExtAdjustForSplitBuffers = 0;
+    CPG           *pcpgSplitBuffersTotal;
     EXTENTINFO    *rgext;
     FUCB          *pfucbT = pfucbNil;
     INT           iext;
-    SPLIT_BUFFER  spbufOnOE;
-    SPLIT_BUFFER  spbufOnAE;
     ULONG         cbMaxReq = 0;
     BOOL          fReadCachedValue;
     BOOL          fSetCachedValue = fFalse;
@@ -14722,17 +14720,19 @@ ERR ErrSPGetInfo(
     PIBTraceContextScope tcScope = ppib->InitTraceContextScope();
     tcScope->iorReason.SetIort( iortSpace );
 
-    // Have to specify either owned or available when you call this routine.
-    fSPExtentsRequired = fSPOwnedExtent | fSPAvailExtent;
+    // Have to specify either owned, available, or split buffers when you call this routine.
+    fSPExtentsRequired = fSPOwnedExtent | fSPAvailExtent | fSPSplitBuffers;
+
+    fSPExtentsAllowed = fSPExtentsRequired;
     if ( ( pfucbNil == pfucb ) || ( ObjidFDP( pfucb ) == pgnoSystemRoot ) )
     {
         // Can only additionally get Shelved extent info for the DBRoot, not reserved or extent list.
-        fSPExtentsAllowed = fSPOwnedExtent | fSPAvailExtent | fSPShelvedExtent;
+        fSPExtentsAllowed |= ( fSPShelvedExtent );
     }
     else
     {
         // Can only additionally get Reserved and ExtentList for any other tree.
-        fSPExtentsAllowed = fSPOwnedExtent | fSPAvailExtent | fSPReservedExtent | fSPExtentList;
+        fSPExtentsAllowed |= ( fSPReservedExtent | fSPExtentList );
     }
 
     //  At least one required extent type specified?
@@ -14788,12 +14788,9 @@ ERR ErrSPGetInfo(
             break;
 
         case gci::Allow:
-            //
-            // Only Owned and Available are in the cache.  If you want anything else, we must walk
-            // through the appropriate space tree.
-            //
-            if ( !FSPReservedExtent( fSPExtents ) && !FSPShelvedExtent( fSPExtents ) && !FSPExtentList( fSPExtents ) )
+            if ( FSPOnlyCachedExtents( fSPExtents ) )
             {
+                // Only requesting cached info.
                 fReadCachedValue = fTrue;
             }
             else
@@ -14803,8 +14800,9 @@ ERR ErrSPGetInfo(
             break;
 
         case gci::Require:
-            if ( !FSPReservedExtent( fSPExtents ) && !FSPShelvedExtent( fSPExtents ) && !FSPExtentList( fSPExtents ) )
+            if ( FSPOnlyCachedExtents( fSPExtents ) )
             {
+                // Only requesting cached info.
                 fReadCachedValue = fTrue;
             }
             else
@@ -14834,7 +14832,10 @@ ERR ErrSPGetInfo(
     {
         cbMaxReq += sizeof( CPG );
     }
-
+    if ( FSPSplitBuffers( fSPExtents ) )
+    {
+        cbMaxReq += sizeof( CPG );
+    }
     if ( cbMax < cbMaxReq )
     {
         AssertSz( fFalse, "Called without the necessary buffer allocated for extents." );
@@ -14845,15 +14846,13 @@ ERR ErrSPGetInfo(
 
     memset( pbResult, '\0', cbMax );
 
-    memset( (void*)&spbufOnOE, 0, sizeof(spbufOnOE) );
-    memset( (void*)&spbufOnAE, 0, sizeof(spbufOnAE) );
-
     //  setup up return information.  owned extent is followed by available extent.
     //  This is followed by extent list for both trees
     //
     CPG * pcpgT = (CPG *)pbResult;
     pcpgOwnExtTotal = NULL;
     pcpgAvailExtTotal = NULL;
+    pcpgSplitBuffersTotal = NULL;
     pcpgReservedExtTotal = NULL;
     pcpgShelvedExtTotal = NULL;
     if ( FSPOwnedExtent( fSPExtents ) )
@@ -14864,6 +14863,11 @@ ERR ErrSPGetInfo(
     if ( FSPAvailExtent( fSPExtents ) )
     {
         pcpgAvailExtTotal = pcpgT;
+        pcpgT++;
+    }
+    if ( FSPSplitBuffers( fSPExtents ) )
+    {
+        pcpgSplitBuffersTotal = pcpgT;
         pcpgT++;
     }
     if ( FSPReservedExtent( fSPExtents ) )
@@ -15249,68 +15253,16 @@ ERR ErrSPGetInfo(
                 (*pcprintf)( "\n%s: AVAILEXT\n", SzNameOfTable( pfucbT ) );
             }
 
-            //  Get the split buffers ...
-            //
-
-            //  open cursor on owned extent tree, to get split buffer ...
-            FUCB    *pfucbOE = pfucbNil;
-
-            err = ErrSPIOpenOwnExt( pfucbT, &pfucbOE );
-            if ( err >= JET_errSuccess )
-            {
-                err = ErrSPIGetSPBufUnlatched( pfucbOE, &spbufOnOE );
-            }
-
-            if ( pfucbOE != pfucbNil )
-            {
-                BTClose( pfucbOE );
-            }
-
-            if ( err >= JET_errSuccess )
-            {
-                err = ErrSPIGetSPBufUnlatched( pfucbAE, &spbufOnAE );
-            }
-
-            //  Owned Extent Tree Split Buffer
-            //
-            SPDumpSplitBufExtent( pcprintf, SzNameOfTable( pfucbAE ), "OE", pfucbAE->u.pfcb->PgnoOE(), &spbufOnOE );
-
-            //  Avail Extent Tree Split Buffer
-            //
-            SPDumpSplitBufExtent( pcprintf, SzNameOfTable( pfucbAE ), "AE", pfucbAE->u.pfcb->PgnoAE(), &spbufOnAE );
-
-            if ( err >= JET_errSuccess )
-            {
-                err = ErrSPIGetInfo(
-                    pfucbAE,
-                    pcpgAvailExtTotal,
-                    pcpgReservedExtTotal,
-                    pcpgShelvedExtTotal,
-                    &iext,
-                    cext,
-                    rgext,
-                    &cextSentinelsRemaining,
-                    pcprintf );
-
-                //  Now process the info from the space tree split buffers collected above ...
-
-                const CPG cpgSplitBufferReserved = spbufOnOE.CpgBuffer1() +
-                    spbufOnOE.CpgBuffer2() +
-                    spbufOnAE.CpgBuffer1() +
-                    spbufOnAE.CpgBuffer2();
-                cpgAvailExtAdjustForSplitBuffers = cpgSplitBufferReserved;
-
-                if ( FSPAvailExtent( fSPExtents ) )
-                {
-                    Assert( NULL != pcpgAvailExtTotal );
-                    *pcpgAvailExtTotal += cpgSplitBufferReserved;
-                }
-                if ( FSPReservedExtent( fSPExtents ) )
-                {
-                    Assert( NULL != pcpgReservedExtTotal );
-                    *pcpgReservedExtTotal += cpgSplitBufferReserved;
-                }
-            }
+            err = ErrSPIGetInfo(
+                pfucbAE,
+                pcpgAvailExtTotal,
+                pcpgReservedExtTotal,
+                pcpgShelvedExtTotal,
+                &iext,
+                cext,
+                rgext,
+                &cextSentinelsRemaining,
+                pcprintf );
 
             Assert( pfucbAE != pfucbNil );
             BTClose( pfucbAE );
@@ -15324,6 +15276,54 @@ ERR ErrSPGetInfo(
         Assert( !FSPReservedExtent( fSPExtents )
             || ( *pcpgReservedExtTotal <= *pcpgAvailExtTotal ) );
     }
+
+    if ( FSPSplitBuffers( fSPExtents ) )
+    {
+        Assert( NULL != pcpgSplitBuffersTotal );
+
+        //  if single extent format, then there are no split buffers
+        //
+        if ( FSPIIsSmall( pfucbT->u.pfcb ) )
+        {
+            *pcpgSplitBuffersTotal = 0;
+        }
+        else
+        {
+            //  Get the split buffers ...
+            //
+            FUCB    *pfucbAE = pfucbNil;
+            FUCB    *pfucbOE = pfucbNil;
+            SPLIT_BUFFER  spbufOnOE;
+            SPLIT_BUFFER  spbufOnAE;
+            memset( (void*)&spbufOnOE, 0, sizeof(spbufOnOE) );
+            memset( (void*)&spbufOnAE, 0, sizeof(spbufOnAE) );
+
+            CallJ( ErrSPIOpenAvailExt( pfucbT, &pfucbAE ), HandleSplitBuffersError );
+            CallJ( ErrSPIOpenOwnExt( pfucbT, &pfucbOE ), HandleSplitBuffersError );
+            CallJ( ErrSPIGetSPBufUnlatched( pfucbOE, &spbufOnOE ), HandleSplitBuffersError );
+            CallJ( ErrSPIGetSPBufUnlatched( pfucbAE, &spbufOnAE ), HandleSplitBuffersError );
+
+            SPDumpSplitBufExtent( pcprintf, SzNameOfTable( pfucbAE ), "OE", pfucbAE->u.pfcb->PgnoOE(), &spbufOnOE );
+            SPDumpSplitBufExtent( pcprintf, SzNameOfTable( pfucbAE ), "AE", pfucbAE->u.pfcb->PgnoAE(), &spbufOnAE );
+
+            *pcpgSplitBuffersTotal = spbufOnOE.CpgBuffer1() +
+                spbufOnOE.CpgBuffer2() +
+                spbufOnAE.CpgBuffer1() +
+                spbufOnAE.CpgBuffer2();
+
+        HandleSplitBuffersError:
+            if ( pfucbAE != pfucbNil )
+            {
+                BTClose( pfucbAE );
+            }
+            if ( pfucbOE != pfucbNil )
+            {
+                BTClose( pfucbOE );
+            }
+            Call( err );
+        }
+    }
+
 
     Assert( 0 == cextSentinelsRemaining );
 
@@ -15346,9 +15346,7 @@ ERR ErrSPGetInfo(
 
         if ( pcpgAvailExtTotal )
         {
-            // The counted value for AE includes the split buffers, the cached
-            // value doesn't.
-            cpgAECounted = *pcpgAvailExtTotal - cpgAvailExtAdjustForSplitBuffers;
+            cpgAECounted = *pcpgAvailExtTotal;
         }
 
         SPIReportAnyExtentCacheError(
@@ -15389,7 +15387,7 @@ ERR ErrSPGetInfo(
             ifmp,
             pfucbT->u.pfcb->ObjidFDP(),
             *pcpgOwnExtTotal,
-            (*pcpgAvailExtTotal - cpgAvailExtAdjustForSplitBuffers) );
+            *pcpgAvailExtTotal );
 
         if ( fStartedTransaction )
         {
