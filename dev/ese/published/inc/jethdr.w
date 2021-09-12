@@ -3219,6 +3219,7 @@ typedef struct _BTREE_STATS_SPACE_TREES
     unsigned long                   pgnoAE;
     unsigned long                   cpgOwned;
     unsigned long                   cpgAvailable;
+    unsigned long                   cpgSpaceTreeAvailable;
     unsigned long                   cpgReserved;
     unsigned long                   cpgShelved;
     int                             fAutoIncPresents;
@@ -5303,6 +5304,7 @@ typedef JET_ERR (JET_API * JET_PFNEMITLOGDATA)(
 #if ( JET_VERSION >= 0x0A01 )
 #define dbInfoSpaceShelved          22  /*  INTERNAL USE ONLY */
 #endif
+#define JET_DbInfoSplitBuffers      23
 #define JET_DbInfoUseCachedResult   0x40000000   /* Obsolete, this behavior is now always on */
 
     /* Info parameter for JetGetLogFileInfo */
@@ -5465,23 +5467,24 @@ typedef JET_ERR (JET_API * JET_PFNEMITLOGDATA)(
 
     /* Info levels for JetGetTableInfo/JetSetTableInfo */
 
-#define JET_TblInfo             0U
-#define JET_TblInfoName         1U
-#define JET_TblInfoDbid         2U
-#define JET_TblInfoMostMany     3U
-#define JET_TblInfoRvt          4U
-#define JET_TblInfoOLC          5U
-#define JET_TblInfoResetOLC     6U
-#define JET_TblInfoSpaceUsage   7U
-#define JET_TblInfoDumpTable    8U
-#define JET_TblInfoSpaceAlloc   9U
-#define JET_TblInfoSpaceOwned   10U                 // OwnExt
-#define JET_TblInfoSpaceAvailable       11U         // AvailExt
-#define JET_TblInfoTemplateTableName    12U
+#define JET_TblInfo                    0U
+#define JET_TblInfoName                1U
+#define JET_TblInfoDbid                2U
+#define JET_TblInfoMostMany            3U
+#define JET_TblInfoRvt                 4U
+#define JET_TblInfoOLC                 5U
+#define JET_TblInfoResetOLC            6U
+#define JET_TblInfoSpaceUsage          7U
+#define JET_TblInfoDumpTable           8U
+#define JET_TblInfoSpaceAlloc          9U
+#define JET_TblInfoSpaceOwned         10U         // OwnExt
+#define JET_TblInfoSpaceAvailable     11U         // AvailExt
+#define JET_TblInfoTemplateTableName  12U
 // end_PubEsent
 #if ( JET_VERSION >= 0x0A01 )
-#define JET_TblInfoLVChunkMax   13U
-#define JET_TblInfoEncryptionKey    14U
+#define JET_TblInfoLVChunkMax         13U
+#define JET_TblInfoEncryptionKey      14U
+#define JET_TblInfoSplitBuffers       15U
 #endif
 // begin_PubEsent
 

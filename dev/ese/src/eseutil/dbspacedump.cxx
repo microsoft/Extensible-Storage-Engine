@@ -215,6 +215,9 @@ typedef enum
     eSPFieldAvailCPG,
     eSPFieldAvailMB,
     eSPFieldAvailPctOfTable,
+    eSPFieldSplitBuffersCPG,
+    eSPFieldSplitBuffersMB,
+    eSPFieldSplitBuffersPctOfTable,
     eSPFieldSpaceTreeReservedCPG,
     eSPFieldAutoInc,
     eSPFieldReservedCPG,
@@ -457,6 +460,9 @@ ESEUTIL_SPACE_FIELDS rgSpaceFields [] =
     { eSPFieldAvailCPG,                 10,         L"Available",               NULL,   JET_bitDBUtilSpaceInfoSpaceTrees    },  // legacy
     { eSPFieldAvailMB,                  8 + 4,      L"Avail(MB)",               NULL,   JET_bitDBUtilSpaceInfoSpaceTrees    },
     { eSPFieldAvailPctOfTable,          9,          L"Avail%Tbl",               NULL,   JET_bitDBUtilSpaceInfoSpaceTrees    },
+    { eSPFieldSplitBuffersCPG,          10,         L"SPBuffers",               NULL,   JET_bitDBUtilSpaceInfoSpaceTrees    },
+    { eSPFieldSplitBuffersMB,           8 + 4,      L"SPBuf(MB)",               NULL,   JET_bitDBUtilSpaceInfoSpaceTrees    },
+    { eSPFieldSplitBuffersPctOfTable,   9,          L"SPBuf%Tbl",               NULL,   JET_bitDBUtilSpaceInfoSpaceTrees    },
     { eSPFieldSpaceTreeReservedCPG,     10,         L"SpcReserve",              NULL,   JET_bitDBUtilSpaceInfoSpaceTrees    },
     { eSPFieldAutoInc,                  10,         L"AutoInc",                 NULL,   JET_bitDBUtilSpaceInfoSpaceTrees    },
     { eSPFieldReservedCPG,              10,         L"Reserved",                NULL,   JET_bitDBUtilSpaceInfoSpaceTrees    },  // legacy
@@ -1005,8 +1011,29 @@ JET_ERR ErrPrintField(
             assert( pBTStats->pSpaceTrees );
             if ( pBTStats->pBasicCatalog->eType != eBTreeTypeInternalDbRootSpace && pespCtx->cpgCurrentTableOwned )
             {
-                //assert( pespCtx->cpgCurrentTableOwned );
                 double pct = ((double)pBTStats->pSpaceTrees->cpgAvailable) / ((double)pespCtx->cpgCurrentTableOwned) * 100;
+                wprintf(L"%*.*f%%", rgSpaceFields[eField].cchFieldSize-1, 2, pct );
+            }
+            else
+            {
+                PrintNullField( pespCtx, eField );
+            }
+            break;
+        case eSPFieldSplitBuffersCPG:
+            assert( pBTStats->pSpaceTrees );
+            wprintf(L"%*d", rgSpaceFields[eField].cchFieldSize, pBTStats->pSpaceTrees->cpgSpaceTreeAvailable );
+            break;
+        case eSPFieldSplitBuffersMB:
+            assert( pBTStats->pSpaceTrees );
+            wprintf(L"%*d.%03d", rgSpaceFields[eField].cchFieldSize-4,
+                                CmbFromCpg(pBTStats->pSpaceTrees->cpgSpaceTreeAvailable),
+                                CkbDecimalFromCpg(pBTStats->pSpaceTrees->cpgSpaceTreeAvailable) );
+            break;
+        case eSPFieldSplitBuffersPctOfTable:
+            assert( pBTStats->pSpaceTrees );
+            if ( pBTStats->pBasicCatalog->eType != eBTreeTypeInternalDbRootSpace && pespCtx->cpgCurrentTableOwned )
+            {
+                double pct = ((double)pBTStats->pSpaceTrees->cpgSpaceTreeAvailable) / ((double)pespCtx->cpgCurrentTableOwned) * 100;
                 wprintf(L"%*.*f%%", rgSpaceFields[eField].cchFieldSize-1, 2, pct );
             }
             else
@@ -2592,7 +2619,7 @@ void EseutilTrackSpace(
         pespCtx->cpgCurrTableUnAccountedFor = pBTreeStats->pSpaceTrees->cpgOwned;
         pespCtx->cpgCurrTableUnAccountedForEof = CpgSpaceDumpGetExtPagesEof( pespCtx, pBTreeStats->pSpaceTrees->prgOwnedExtents, pBTreeStats->pSpaceTrees->cOwnedExtents );
         //  Remove space we've correctly tracked in AE tree.
-        pespCtx->cpgCurrTableUnAccountedFor -= pBTreeStats->pSpaceTrees->cpgAvailable;
+        pespCtx->cpgCurrTableUnAccountedFor -= ( pBTreeStats->pSpaceTrees->cpgAvailable + pBTreeStats->pSpaceTrees->cpgSpaceTreeAvailable );
         pespCtx->cpgCurrTableUnAccountedForEof -= CpgSpaceDumpGetExtPagesEof( pespCtx, pBTreeStats->pSpaceTrees->prgAvailExtents, pBTreeStats->pSpaceTrees->cAvailExtents );
         //  Subtract primary B-Tree's internal + data pages.
         pespCtx->cpgCurrTableUnAccountedFor -= pBTreeStats->pParentOfLeaf->cpgInternal;
@@ -2657,7 +2684,7 @@ void EseutilTrackSpace(
         pespCtx->cpgCurrIdxLvUnAccountedFor = pBTreeStats->pSpaceTrees->cpgOwned;
         pespCtx->cpgCurrIdxLvUnAccountedForEof = CpgSpaceDumpGetExtPagesEof( pespCtx, pBTreeStats->pSpaceTrees->prgOwnedExtents, pBTreeStats->pSpaceTrees->cOwnedExtents );
         //  Remove space we've correctly tracked in AE tree.
-        pespCtx->cpgCurrIdxLvUnAccountedFor -= pBTreeStats->pSpaceTrees->cpgAvailable;
+        pespCtx->cpgCurrIdxLvUnAccountedFor -= ( pBTreeStats->pSpaceTrees->cpgAvailable + pBTreeStats->pSpaceTrees->cpgSpaceTreeAvailable );
         pespCtx->cpgCurrIdxLvUnAccountedForEof -= CpgSpaceDumpGetExtPagesEof( pespCtx, pBTreeStats->pSpaceTrees->prgAvailExtents, pBTreeStats->pSpaceTrees->cAvailExtents );
         //  Subtract primary B-Tree's internal + data pages.
         pespCtx->cpgCurrIdxLvUnAccountedFor -= pBTreeStats->pParentOfLeaf->cpgInternal;
@@ -2741,9 +2768,9 @@ JET_ERR EseutilEvalBTreeData(
             pespCtx->cpgDbRootUnAccountedForEof = pespCtx->cpgTotalShelved;
 
             //  Remove avail from unaccounted for.
-            pespCtx->cpgDbRootUnAccountedFor -= pBTreeStats->pSpaceTrees->cpgAvailable;
+            pespCtx->cpgDbRootUnAccountedFor -= ( pBTreeStats->pSpaceTrees->cpgAvailable + pBTreeStats->pSpaceTrees->cpgSpaceTreeAvailable );
             //  Accumulate total avail
-            pespCtx->cpgTotalAvailExt += pBTreeStats->pSpaceTrees->cpgAvailable;
+            pespCtx->cpgTotalAvailExt += ( pBTreeStats->pSpaceTrees->cpgAvailable + pBTreeStats->pSpaceTrees->cpgSpaceTreeAvailable );
             // Do not update pgnoMin/pgnoMax with the root OE tree data here, so it is only "in-use" pgnos at end ...
             pespCtx->pgnoUsedMin = ulMax;
             pespCtx->pgnoUsedMax = 0;
@@ -2832,7 +2859,7 @@ JET_ERR EseutilEvalBTreeData(
             pespCtx->cpgCurrentTableOwned = pBTreeStats->pSpaceTrees->cpgOwned;
         }
         //  We accumulate avail pages across whole DB ...
-        pespCtx->cpgTotalAvailExt += pBTreeStats->pSpaceTrees->cpgAvailable;
+        pespCtx->cpgTotalAvailExt += ( pBTreeStats->pSpaceTrees->cpgAvailable + pBTreeStats->pSpaceTrees->cpgSpaceTreeAvailable );
         const ULONG pgnoMinFound = PgnoMinOwned( pBTreeStats->pSpaceTrees );
         if ( pgnoMinFound != 0 )
         {
@@ -3269,7 +3296,7 @@ JET_ERR ErrLegacySpaceDumpEvalBTreeData(
 
     //  Accumulate stats.
     //
-    *pcpgAvailTotal += pBTreeStats->pSpaceTrees->cpgAvailable;
+    *pcpgAvailTotal += ( pBTreeStats->pSpaceTrees->cpgAvailable + pBTreeStats->pSpaceTrees->cpgSpaceTreeAvailable );
 
 
     //  Print out other B-Tree space info.
@@ -3296,7 +3323,7 @@ JET_ERR ErrLegacySpaceDumpEvalBTreeData(
             
             DBUTLPrintfIntN( pBTreeStats->pSpaceTrees->cpgOwned, 10 );
             printf( " " );
-            DBUTLPrintfIntN( pBTreeStats->pSpaceTrees->cpgAvailable, 10 );
+            DBUTLPrintfIntN( (pBTreeStats->pSpaceTrees->cpgAvailable + pBTreeStats->pSpaceTrees->cpgSpaceTreeAvailable), 10 );
             printf( "\n" );
             printf( "\n" );
             break;
@@ -3331,7 +3358,7 @@ JET_ERR ErrLegacySpaceDumpEvalBTreeData(
             
             DBUTLPrintfIntN( pBTreeStats->pSpaceTrees->cpgOwned, 10 );
             printf( " " );
-            DBUTLPrintfIntN( pBTreeStats->pSpaceTrees->cpgAvailable, 10 );
+            DBUTLPrintfIntN( (pBTreeStats->pSpaceTrees->cpgAvailable + pBTreeStats->pSpaceTrees->cpgSpaceTreeAvailable ), 10 );
             printf( "\n" );
             break;
 

@@ -3072,7 +3072,7 @@ LOCAL ERR ErrDBUTLGetSpaceTreeInfo(
     ERR             err;
     FUCB            *pfucb          = pfucbNil;
     BOOL            fForceInit      = fFalse;
-    CPG             rgcpgExtent[3];
+    CPG             rgcpgExtent[4];
 
     CallR( ErrBTOpen( ppib, pgnoFDP, ifmp, &pfucb ) );
     Assert( pfucbNil != pfucb );
@@ -3155,7 +3155,7 @@ LOCAL ERR ErrDBUTLGetSpaceTreeInfo(
 
     BTUp( pfucb );
 
-    ULONG fSPExtents = fSPOwnedExtent | fSPAvailExtent;
+    ULONG fSPExtents = fSPOwnedExtent | fSPAvailExtent | fSPSplitBuffers;
     if ( ObjidFDP( pfucb ) == pgnoSystemRoot )
     {
         // Shelved only for dbroot.
@@ -3179,16 +3179,17 @@ LOCAL ERR ErrDBUTLGetSpaceTreeInfo(
     
     pbtsSpaceTree->cpgOwned = rgcpgExtent[0];
     pbtsSpaceTree->cpgAvailable = rgcpgExtent[1];
+    pbtsSpaceTree->cpgSpaceTreeAvailable = rgcpgExtent[2];
     if ( ObjidFDP( pfucb ) == pgnoSystemRoot )
     {
         // We read shelved, not reserved.
         pbtsSpaceTree->cpgReserved = 0;
-        pbtsSpaceTree->cpgShelved = rgcpgExtent[2];
+        pbtsSpaceTree->cpgShelved = rgcpgExtent[3];
     }
     else
     {
         // We read reserved, not shelved.
-        pbtsSpaceTree->cpgReserved = rgcpgExtent[2];
+        pbtsSpaceTree->cpgReserved = rgcpgExtent[3];
         pbtsSpaceTree->cpgShelved = 0;
     }
 
@@ -3494,6 +3495,7 @@ ERR ErrDBUTLEnumSingleSpaceTree(
         pbts->pSpaceTrees->cpgPrimary = 1;
         Assert( ( pbts->pSpaceTrees->pgnoOE + 1 ) == pbts->pSpaceTrees->pgnoAE );
         pbts->pSpaceTrees->cpgAvailable = 0;
+        pbts->pSpaceTrees->cpgSpaceTreeAvailable = 0;
 
         BTREE_STATS_PARENT_OF_LEAF  btsSpaceTree = { 0 };
         EVAL_INT_PAGE_CTX ctx = { NULL, &btsSpaceTree };

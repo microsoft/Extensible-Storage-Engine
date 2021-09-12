@@ -8,13 +8,16 @@
 #define fSPExtentList           (1<<2)
 #define fSPReservedExtent       (1<<3)
 #define fSPShelvedExtent        (1<<4)
+#define fSPSplitBuffers         (1<<5)
 
 #define FSPOwnedExtent( fSPExtents )        ( (fSPExtents) & fSPOwnedExtent )
 #define FSPAvailExtent( fSPExtents )        ( (fSPExtents) & fSPAvailExtent )
 #define FSPExtentList( fSPExtents )         ( (fSPExtents) & fSPExtentList )
 #define FSPReservedExtent( fSPExtents )     ( (fSPExtents) & fSPReservedExtent )
 #define FSPShelvedExtent( fSPExtents )      ( (fSPExtents) & fSPShelvedExtent )
+#define FSPSplitBuffers( fSPExtents )       ( (fSPExtents) & fSPSplitBuffers )
 
+#define FSPOnlyCachedExtents( fSPExtents )  ( ( (fSPExtents) & ~( fSPOwnedExtent | fSPAvailExtent ) ) == 0 )
 //  structure of SPACE external header
 //
 

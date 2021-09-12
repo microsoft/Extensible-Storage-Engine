@@ -1479,6 +1479,17 @@ ERR VTAPI ErrIsamGetTableInfo(
                   cbMax ) );
         break;
         
+    case JET_TblInfoSplitBuffers:
+        Call( ErrSPGetInfo(
+                  ppib,
+                  pfucb->ifmp,
+                  pfucb,
+                  static_cast<BYTE *>( pvResult ),
+                  cbMax,
+                  fSPSplitBuffers,
+                  gci::Forbid ) );
+        break;
+
     case JET_TblInfoLVChunkMax:
         if ( cbMax < sizeof(LONG) )
         {
@@ -4035,6 +4046,17 @@ ERR VDBAPI ErrIsamGetDatabaseInfo(
             return err;
         }
 
+        case JET_DbInfoSplitBuffers:
+            err = ErrSPGetInfo(
+                        ppib,
+                        ifmp,
+                        pfucbNil,
+                        static_cast<BYTE *>( pvResult ),
+                        cbMax,
+                        fSPSplitBuffers,
+                        gci::Forbid );
+            return err;
+            
         default:
             return ErrERRCheck( JET_errInvalidParameter );
     }
