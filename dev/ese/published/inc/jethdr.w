@@ -3218,7 +3218,9 @@ typedef struct _BTREE_STATS_SPACE_TREES
     unsigned long                   pgnoOE;
     unsigned long                   pgnoAE;
     unsigned long                   cpgOwned;
+    unsigned long                   cpgOwnedCache;
     unsigned long                   cpgAvailable;
+    unsigned long                   cpgAvailableCache;
     unsigned long                   cpgSpaceTreeAvailable;
     unsigned long                   cpgReserved;
     unsigned long                   cpgShelved;
