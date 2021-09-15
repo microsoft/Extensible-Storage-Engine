@@ -3193,6 +3193,36 @@ LOCAL ERR ErrDBUTLGetSpaceTreeInfo(
         pbtsSpaceTree->cpgShelved = 0;
     }
 
+    err = ErrSPGetInfo(
+        ppib,
+        ifmp,
+        pfucb,
+        (BYTE *)rgcpgExtent,
+        sizeof(rgcpgExtent),
+        fSPOwnedExtent | fSPAvailExtent,
+        gci::Require,
+        pcprintf );
+
+    switch ( err )
+    {
+        case JET_errSuccess:
+            pbtsSpaceTree->cpgOwnedCache = rgcpgExtent[0];
+            pbtsSpaceTree->cpgAvailableCache = rgcpgExtent[1];
+            break;
+            
+        case JET_errObjectNotFound:
+            pbtsSpaceTree->cpgOwnedCache = (ULONG)-1;
+            pbtsSpaceTree->cpgAvailableCache = (ULONG)-1;
+            break;
+            
+        default:
+            // If there was an error, return it.
+            Call( err );
+            
+            ExpectedSz( fFalse, "Unexpected warning from ErrSPGetInfo" );
+            Error( ErrERRCheck( JET_errInternalError ) );
+    }
+    
     Call( ErrSPGetExtentInfo(
                 ppib,
                 ifmp,

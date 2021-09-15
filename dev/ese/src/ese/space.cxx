@@ -14683,9 +14683,10 @@ LOCAL VOID SPIReportAnyExtentCacheError(
 //  returned info in this order (skipping any not requested):
 //  1) OWNED
 //  2) AVAILABLE
-//  3) RESERVED
-//  4) SHELVED
-//  5) LIST
+//  3) SPLITBUFFERS
+//  4) RESERVED
+//  5) SHELVED
+//  6) LIST
 //
 ERR ErrSPGetInfo(
     PIB                       *ppib,
@@ -14931,10 +14932,13 @@ ERR ErrSPGetInfo(
         case JET_errSuccess:
             if ( ( pfucbNil != pfucb ) &&
                  ( objidSystemRoot != ObjidFDP( pfucb ) ) &&
+                 ( gci::Require != gciType ) &&
                  ( BoolParam( PinstFromIfmp( ifmp ), JET_paramFlight_ExtentPageCountCacheVerifyOnly ) ) )
             {
-                // For objects other than system root, don't return the values we just read.
-                // Calculate the values the long way and double check against what we just read.
+                // Don't return the values we just read.  Calculate the values the
+                // long way and double check against what we just read.  Exception
+                // made for system root and those cases where the caller explicitly
+                // asked for the cached value.
                 break;
             }
 
@@ -14949,9 +14953,16 @@ ERR ErrSPGetInfo(
             goto HandleError;
 
         case JET_errRecordNotFound:
-            // This objid is a value that COULD be cached, but isn't.  Make sure we read both
-            // owned and available (even if the caller only wanted one), in order to initialize
-            // the cached value.
+            // This objid is a value that COULD be cached, but isn't.
+
+            if ( gci::Require == gciType )
+            {
+                // Caller only wanted us to read the value from the cache, and it's not there.
+                Error( ErrERRCheck( JET_errObjectNotFound ) );
+            }
+
+            // Make sure we read both owned and available (even if the caller only wanted one),
+            // in order to initialize the cached value.
             if ( !FSPOwnedExtent( fSPExtents ) )
             {
                 Assert( NULL == pcpgOwnExtTotal );
@@ -14971,11 +14982,30 @@ ERR ErrSPGetInfo(
 
         case JET_errNotInitialized:
             // This objid is a value that CAN NOT be cached at this time, perhaps not ever.
+
+            if ( gci::Require == gciType )
+            {
+                // Caller only wanted us to read the value from the cache, and it's not there.
+                Error( ErrERRCheck( JET_errObjectNotFound ) );
+            }
+
             // Now go read the slow way.
             break;
 
         default:
+            // If we got a real error, not a warning, return it.
             Call( err );
+
+            ExpectedSz( fFalse, "Unexpected warning return from ErrCATGetExtentPageCounts()" );
+
+            if ( gci::Require == gciType )
+            {
+                // Caller only wanted us to read the value from the cache, and we didn't
+                // cleanly do that.
+                Error( ErrERRCheck( JET_errInvalidParameter ) );
+            }
+
+            // Now go read the slow way.
             break;
         }
     }

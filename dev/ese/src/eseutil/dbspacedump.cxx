@@ -205,6 +205,7 @@ typedef enum
     eSPFieldOwnedPgnoMax,
     eSPFieldOwnedExts,
     eSPFieldOwnedCPG,
+    eSPFieldOwnedCPGCache,
     eSPFieldOwnedMB,
     eSPFieldOwnedPctOfDb,
     eSPFieldOwnedPctOfTable,
@@ -213,6 +214,7 @@ typedef enum
     eSPFieldDataPctOfDb,
     eSPFieldAvailExts,
     eSPFieldAvailCPG,
+    eSPFieldAvailCPGCache,
     eSPFieldAvailMB,
     eSPFieldAvailPctOfTable,
     eSPFieldSplitBuffersCPG,
@@ -449,6 +451,7 @@ ESEUTIL_SPACE_FIELDS rgSpaceFields [] =
     { eSPFieldOwnedPgnoMax,             10,         L"OwnPgnoMax",              NULL,   JET_bitDBUtilSpaceInfoSpaceTrees    },
     { eSPFieldOwnedExts,                10,         L"OwnedExts",               NULL,   JET_bitDBUtilSpaceInfoSpaceTrees    },
     { eSPFieldOwnedCPG,                 10,         L"Owned",                   NULL,   JET_bitDBUtilSpaceInfoSpaceTrees    },  // legacy
+    { eSPFieldOwnedCPGCache,            12,         L"Owned(Cache)",           NULL,   JET_bitDBUtilSpaceInfoSpaceTrees    },
     { eSPFieldOwnedMB,                  8 + 4,      L"Owned(MB)",               NULL,   JET_bitDBUtilSpaceInfoSpaceTrees    },
     { eSPFieldOwnedPctOfDb,             9,          L"O%OfDb",                  NULL,   JET_bitDBUtilSpaceInfoSpaceTrees    },
     { eSPFieldOwnedPctOfTable,          9,          L"O%OfTable",               NULL,   JET_bitDBUtilSpaceInfoSpaceTrees    },
@@ -458,6 +461,7 @@ ESEUTIL_SPACE_FIELDS rgSpaceFields [] =
 
     { eSPFieldAvailExts,                10,         L"AvailExts",               NULL,   JET_bitDBUtilSpaceInfoSpaceTrees    },
     { eSPFieldAvailCPG,                 10,         L"Available",               NULL,   JET_bitDBUtilSpaceInfoSpaceTrees    },  // legacy
+    { eSPFieldAvailCPGCache,            12,         L"Avail(Cache)",            NULL,   JET_bitDBUtilSpaceInfoSpaceTrees    },
     { eSPFieldAvailMB,                  8 + 4,      L"Avail(MB)",               NULL,   JET_bitDBUtilSpaceInfoSpaceTrees    },
     { eSPFieldAvailPctOfTable,          9,          L"Avail%Tbl",               NULL,   JET_bitDBUtilSpaceInfoSpaceTrees    },
     { eSPFieldSplitBuffersCPG,          10,         L"SPBuffers",               NULL,   JET_bitDBUtilSpaceInfoSpaceTrees    },
@@ -945,6 +949,10 @@ JET_ERR ErrPrintField(
             assert( pBTStats->pSpaceTrees );
             wprintf(L"%*d", rgSpaceFields[eField].cchFieldSize, pBTStats->pSpaceTrees->cpgOwned );
             break;
+        case eSPFieldOwnedCPGCache:
+            assert( pBTStats->pSpaceTrees );
+            wprintf(L"%*d", rgSpaceFields[eField].cchFieldSize, pBTStats->pSpaceTrees->cpgOwnedCache );
+            break;
         case eSPFieldOwnedMB:
             assert( pBTStats->pSpaceTrees );
             wprintf(L"%*d.%03d", rgSpaceFields[eField].cchFieldSize-4,
@@ -1000,6 +1008,10 @@ JET_ERR ErrPrintField(
         case eSPFieldAvailCPG:
             assert( pBTStats->pSpaceTrees );
             wprintf(L"%*d", rgSpaceFields[eField].cchFieldSize, pBTStats->pSpaceTrees->cpgAvailable );
+            break;
+        case eSPFieldAvailCPGCache:
+            assert( pBTStats->pSpaceTrees );
+            wprintf(L"%*d", rgSpaceFields[eField].cchFieldSize, pBTStats->pSpaceTrees->cpgAvailableCache );
             break;
         case eSPFieldAvailMB:
             assert( pBTStats->pSpaceTrees );
