@@ -6141,7 +6141,10 @@ ErrIsamPatchDatabasePages(
                 CPAGE cpage;
                 const bool fPreviouslySet = FNegTestSet( fInvalidUsage );  // avoid Assert( ifmp != ifmpNil )
                 cpage.GetShrunkPage( ifmpNil, pgnoT, rgb + g_cbPage * ( pgnoT - pgnoStart ), g_cbPage );
-                FNegTestSet( fPreviouslySet );
+                if ( !fPreviouslySet )
+                {
+                    FNegTestUnset( fInvalidUsage );
+                }
             }
         }
         else

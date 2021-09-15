@@ -1127,7 +1127,7 @@ class COSDisk : public CZeroInit
                             // cough, we're just going to use this as knowing the client is going
                             // to potentially overloaded us ... like SOMEONE's 100 inst, 6 DBs test
                             // to reproduce the exhausted thread pool bug.
-                            ( FNegTestSet( fDisableTimeoutDeadlockDetection ) && cioreqT < 800 ) );
+                            ( FNegTest( fDisableTimeoutDeadlockDetection ) && cioreqT < 800 ) );
                     return fTrue;
                     #endif
                 }

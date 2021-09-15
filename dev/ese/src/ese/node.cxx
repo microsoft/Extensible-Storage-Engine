@@ -406,7 +406,7 @@ VOID NDIGetKeydataflags( const CPAGE& cpage, INT iline, KEYDATAFLAGS * pkdf, _Ou
             if ( !fKdfCbOnPage )
             {
                 OnDebug( g_condGetKdfBadGetPtrOffPage.Hit( line.pv != NULL ) );
-                PageAssertTrack( cpage, FNegTestSet( fCorruptingPageLogically ), "NodeKeyCbPrefixOrSuffixOffPage" );
+                PageAssertTrack( cpage, FNegTest( fCorruptingPageLogically ), "NodeKeyCbPrefixOrSuffixOffPage" );
 
                 pkdf->Nullify();
                 return;
