@@ -334,7 +334,7 @@ ERR CShadowLogStream::ErrWriteLogData_(
     Call( m_pfapiCurrent->ErrSize( &cbLogFileSize, IFileAPI::filesizeLogical ) );
     if ( ibOffset + cbLogData > cbLogFileSize )
     {
-        Assert( FNegTestSet( fCorruptingLogFiles ) || ibOffset + cbLogData > cbLogFileSize );
+        Assert( FNegTest( fCorruptingLogFiles ) || ibOffset + cbLogData <= cbLogFileSize );
         Error( ErrERRCheck( JET_errFileIOBeyondEOF ) );
     }
 
@@ -442,7 +442,7 @@ ERR CShadowLogStream::ErrWriteAndResetLogBuff( WriteFlags flags /* = ffNone */ )
     //
     m_ibLogBuffPending = m_cbLogBuffPending = m_ibExtendedFile = 0;
     memset( m_rgbLogBuff, 0, m_cbLogBuffMax );
-    Expected( FNegTestSet( fCorruptingLogFiles ) || !m_fWriteLogBuffScheduled );    // the write task is expected to be quiesced (but negative tests can mess with it)
+    Expected( FNegTest( fCorruptingLogFiles ) || !m_cbLogBuffPending );    // we should have written out all the buffers
 
 HandleError:
     m_critLogBuff.Leave();
@@ -675,7 +675,7 @@ ERR CShadowLogStream::ErrAddData(
         ULONG ibOffset = IbFromLgpos( m_pinst, lgposLogData );
         if ( ibOffset + cbLogData > m_cbLogBuffMax )
         {
-            Assert( FNegTestSet( fCorruptingLogFiles ) || ibOffset + cbLogData <= m_cbLogBuffMax );
+            Assert( FNegTest( fCorruptingLogFiles ) || ibOffset + cbLogData <= m_cbLogBuffMax );
             Error( ErrERRCheck( JET_errInvalidLogDataSequence ) );
         }
 
@@ -725,7 +725,7 @@ ERR CShadowLogStream::ErrAddData(
         //  This basically does nothing in this case, which is what we want and eventually
         //  we will transition to a new log and things will get in wack.
 
-        Assert( FNegTestSet( fCorruptingLogFiles ) || bInNewSequence || bInSequencePerfect || bInSequenceSectorOverwrite || bMidSequenceFirstData );
+        Assert( FNegTest( fCorruptingLogFiles ) || bInNewSequence || bInSequencePerfect || bInSequenceSectorOverwrite || bMidSequenceFirstData );
         err = ErrERRCheck( JET_errInvalidLogDataSequence );
     }
 

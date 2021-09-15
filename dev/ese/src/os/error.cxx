@@ -1938,7 +1938,7 @@ BOOL FRFSAnyFailureDetected()
         }
     }
 
-    if ( FNegTestSet( fDiskIOError ) || FNegTestSet( fOutOfMemory ) )
+    if ( FNegTest( fDiskIOError ) || FNegTest( fOutOfMemory ) )
     {
         return fTrue;
     }
