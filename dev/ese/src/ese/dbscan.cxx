@@ -4279,6 +4279,14 @@ void DBMObjectCache::CloseAllCachedObjects()
 {
     for( INT i = 0; i < m_cobjectsMax; ++i )
     {
+#ifndef ENABLE_JET_UNIT_TEST
+        // Some unit tests get here with a non-NULL but garbage pfucb in m_rgstate.  This hang
+        // injection is not used in unit tests.
+        if ( ( pfucbNil != m_rgstate[i].pfucb ) && ( m_rgstate[i].pfucb->u.pfcb->FTypeLV() ) )
+        {
+            HangInjection( 41270 );
+        }
+#endif
         CloseObjectAt_( i );
     }
 }
