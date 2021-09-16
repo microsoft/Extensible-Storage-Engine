@@ -2132,13 +2132,6 @@ class LRCOMMITCTX
     public:
         LRCOMMITCTX( const INT cbClientCommitContext ) : LRIGNORED( lrtypCommitCtx )
         {
-            // By setting this CB just so, we trick new and old
-            // versions of ESE to correctly both understand that 
-            // this is a variable length structure and keeps the code
-            // simple by looking like a fixed length structure.
-
-            Expected( cbClientCommitContext < 80 ); // just a reasonable limit
-
             SetCb( sizeof(LRCOMMITCTX) - sizeof(LRIGNORED) + cbClientCommitContext );
             m_fCtxFlags = 0;
         }
