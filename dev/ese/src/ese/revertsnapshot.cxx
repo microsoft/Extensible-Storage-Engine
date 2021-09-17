@@ -4833,7 +4833,7 @@ ERR CRBSRevertContext::ErrComputeRBSRangeToApply( PCWSTR wszRBSAbsRootDirPath, L
     Assert( m_lRBSMinGenToApply > 0 );
 
 HandleError:
-    if ( err == JET_errReadVerifyFailure || err == JET_errFileInvalidType || err == JET_errBadRBSVersion || err == JET_errRBSInvalidSign )
+    if ( err == JET_errReadVerifyFailure || err == JET_errFileInvalidType || err == JET_errBadRBSVersion || err == JET_errRBSInvalidSign || err == JET_errFileNotFound )
     {
         err = ErrERRCheck( JET_errRBSRCInvalidRBS );
     }
