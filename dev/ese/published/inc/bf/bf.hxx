@@ -399,6 +399,13 @@ void BFFree( void* pv );
 ERR ErrBFConfigureProcessForCrashDump( const JET_GRBIT grbit );
 ERR ErrBFTestEvictPage( _In_ const IFMP ifmp, _In_ const PGNO pgno );
 
+// -----------------------------------------------------------------------------------------------
+//
+//      Miscellaneous Support
+//
+
+BOOL CmpPgno( _In_ const PGNO& pgno1, _In_ const PGNO& pgno2 );
+
 //  this class is required so that CArray can be used
 //  to store an array of pointers
 class CPagePointer

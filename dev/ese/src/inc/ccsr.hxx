@@ -58,7 +58,7 @@ class CSR
         DBTIME  Dbtime( )       const;
         VOID    SetDbtime( const DBTIME dbtime );
         VOID    RevertDbtime( const DBTIME dbtime, const ULONG fFlags );
-        VOID    RestoreDbtime( const DBTIME dbtime );
+        VOID    RestoreDbtime( const DBTIME dbtime, const BOOL fPageFDPDeleteBefore );
         BOOL    FLatched( )     const;
         LATCH   Latch( )        const;
         PGNO    Pgno( )         const;
@@ -443,11 +443,11 @@ VOID CSR::RevertDbtime( const DBTIME dbtime, const ULONG fFlags )
 }
 
 INLINE
-VOID CSR::RestoreDbtime( const DBTIME dbtime )
+VOID CSR::RestoreDbtime( const DBTIME dbtime, const BOOL fPageFDPDeleteBefore )
 {
     Assert( m_cpage.FLoadedPage() );
     Assert( PinstFromIfmp( m_cpage.Ifmp() )->m_plog->FRecoveringMode() == fRecoveringRedo );
-    OverrideDbtime_( dbtime, m_cpage.FFlags() );
+    OverrideDbtime_( dbtime, m_cpage.FFlags() | ( fPageFDPDeleteBefore ? CPAGE::fPageFDPDelete : 0 ) );
 }
 
 

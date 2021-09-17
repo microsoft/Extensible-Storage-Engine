@@ -5759,7 +5759,11 @@ ERR VER::ErrVERICleanOneRCE( RCE * const prce )
         {
             INT         fState;
             const IFMP  ifmp                = prce->Ifmp();
-            const PGNO  pgnoFDPTable        = *(PGNO*)prce->PbData();
+            const PGNO  pgnoFDPTable        = ( (VERDELETETABLEDATA*) prce->PbData() )->pgnoFDP;
+            const PGNO  fRevertableDelete   = ( (VERDELETETABLEDATA*) prce->PbData() )->fRevertableTableDelete;
+
+            // Will be set only for non-revertable deletes.
+            const PGNO  pgnoLVRoot          = ( (VERDELETETABLEDATA*) prce->PbData() )->pgnoFDPLV;
             FCB         * const pfcbTable   = FCB::PfcbFCBGet(
                                                     ifmp,
                                                     pgnoFDPTable,
@@ -5828,7 +5832,10 @@ ERR VER::ErrVERICleanOneRCE( RCE * const prce )
                 (VOID)ErrSPFreeFDP(
                             m_ppibRCEClean,
                             pfcbTable,
-                            pgnoSystemRoot );
+                            pgnoSystemRoot,
+                            fFalse,
+                            fRevertableDelete,
+                            pgnoLVRoot );
             }
 
             if ( fFCBStateInitialized == fState )

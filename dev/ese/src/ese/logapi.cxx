@@ -4849,7 +4849,7 @@ HandleError:
     return err;
 }
 
-ERR ErrLGExtentFreed( LOG * const plog, const IFMP ifmp, const PGNO pgnoFirst, const CPG cpgExtent )
+ERR ErrLGExtentFreed( LOG * const plog, const IFMP ifmp, const PGNO pgnoFirst, const CPG cpgExtent, const BOOL fTableRootPage, const BOOL fEmptyPageFDPDeleted )
 {
     // This is not logged for all free extent operations, only for those related to deleting a whole space tree.
     DATA                rgdata[1];
@@ -4868,6 +4868,16 @@ ERR ErrLGExtentFreed( LOG * const plog, const IFMP ifmp, const PGNO pgnoFirst, c
     lr.SetDbid( g_rgfmp[ifmp].Dbid() );
     lr.SetPgnoFirst( pgnoFirst );
     lr.SetCpgExtent( cpgExtent );
+
+    if ( fTableRootPage )
+    {
+        lr.SetTableRootPage();
+    }
+
+    if ( fEmptyPageFDPDeleted )
+    {
+        lr.SetEmptyPageFDPDeleted();
+    }
 
     rgdata[0].SetPv( (BYTE *)&lr );
     rgdata[0].SetCb( sizeof(lr) );
@@ -8648,7 +8658,12 @@ VOID LrToSz(
         {
             const LREXTENTFREED * const plrextentfreed = (LREXTENTFREED*)plr;
 
-            OSStrCbFormatA( rgchBuf, sizeof(rgchBuf), " [%u:%lu+%ld] (", plrextentfreed->Dbid(), plrextentfreed->PgnoFirst(), plrextentfreed->CpgExtent() );
+            OSStrCbFormatA( rgchBuf, sizeof(rgchBuf), " [%u:%lu+%ld],[%s%s] (",
+                plrextentfreed->Dbid(),
+                plrextentfreed->PgnoFirst(),
+                plrextentfreed->CpgExtent(),
+                ( plrextentfreed->FTableRootPage() ? "R" : "" ),
+                ( plrextentfreed->FEmptyPageFDPDeleted() ? "E" : "" ) );
 
             // Append the first few (32) pages explicitly.
             for ( INT i = 1; i < plrextentfreed->CpgExtent() && i < 32; ++i )

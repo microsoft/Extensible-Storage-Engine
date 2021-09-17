@@ -953,7 +953,7 @@ ERR VTAPI ErrIsamOpenTable(
     }
 
     // ErrFILEIOpenTable() can return warnings as well.
-    Call( ErrFILEIOpenTable( ppib, ifmp, &pfucb, szPath, grbit ) );
+    Call( ErrFILEIOpenTable( ppib, ifmp, &pfucb, szPath, grbit | JET_bitAllowPgnoFDPLastSetTime ) );
 
 #ifdef DEBUG
     if ( g_rgfmp[ifmp].FReadOnlyAttach() || ( grbit & JET_bitTableReadOnly ) || PinstFromPpib( ppib )->FRecovering() )
@@ -1709,7 +1709,7 @@ ERR ErrFILEIOpenTable(
                 
                 //  initialize the table's FCB
                 //
-                Call( ErrCATInitFCB( pfucb, objidTable ) );
+                Call( ErrCATInitFCB( pfucb, objidTable, !( grbit & JET_bitAllowPgnoFDPLastSetTime ) ) );
                 
                 const ULONG cPageReadAfter = Ptls()->threadstats.cPageRead;
                 const ULONG cPagePrereadAfter = Ptls()->threadstats.cPagePreread;

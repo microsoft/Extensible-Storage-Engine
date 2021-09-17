@@ -359,6 +359,7 @@ FMP::~FMP()
     Assert( NULL == m_pLogRedoMapZeroed );
     Assert( NULL == m_pLogRedoMapBadDbtime );
     Assert( NULL == m_pLogRedoMapDbtimeRevert );
+    Assert( NULL == m_pLogRedoMapDbtimeRevertIgnore );
 }
 
 /******************************************************************/
@@ -2285,12 +2286,13 @@ ERR FMP::ErrEnsureLogRedoMapsAllocated()
 
     Assert( ( m_pLogRedoMapZeroed == NULL ) == ( m_pLogRedoMapBadDbtime == NULL ) );
     Assert( ( m_pLogRedoMapDbtimeRevert == NULL ) == ( m_pLogRedoMapBadDbtime == NULL ) );
+    Assert( ( m_pLogRedoMapDbtimeRevert == NULL ) == ( m_pLogRedoMapDbtimeRevertIgnore == NULL ) );
 
     Assert( m_pinst->FRecovering() && ( m_pinst->m_plog->FRecoveringMode() == fRecoveringRedo ) );
 
     ERR err = JET_errSuccess;
 
-    if ( ( m_pLogRedoMapZeroed != NULL ) && ( m_pLogRedoMapBadDbtime != NULL ) && ( m_pLogRedoMapDbtimeRevert != NULL ) )
+    if ( ( m_pLogRedoMapZeroed != NULL ) && ( m_pLogRedoMapBadDbtime != NULL ) && ( m_pLogRedoMapDbtimeRevert != NULL ) && ( m_pLogRedoMapDbtimeRevertIgnore != NULL ) )
     {
         m_sxwlRedoMaps.ReleaseExclusiveLatch();
         return JET_errSuccess;
@@ -2314,6 +2316,12 @@ ERR FMP::ErrEnsureLogRedoMapsAllocated()
     {
         Alloc( m_pLogRedoMapDbtimeRevert = new CLogRedoMap() );
         Call( m_pLogRedoMapDbtimeRevert->ErrInitLogRedoMap( Ifmp() ) );
+    }
+
+    if ( m_pLogRedoMapDbtimeRevertIgnore == NULL )
+    {
+        Alloc( m_pLogRedoMapDbtimeRevertIgnore = new CLogRedoMap() );
+        Call( m_pLogRedoMapDbtimeRevertIgnore->ErrInitLogRedoMap( Ifmp() ) );
     }
 
 HandleError:
@@ -2340,9 +2348,12 @@ VOID FMP::FreeLogRedoMaps( const BOOL fAllocCleanup )
         Assert( m_sxwlRedoMaps.FOwnWriteLatch() );
     }
 
-    Assert( fAllocCleanup || ( ( m_pLogRedoMapZeroed == NULL ) == ( m_pLogRedoMapBadDbtime == NULL ) && ( m_pLogRedoMapBadDbtime == NULL ) == ( m_pLogRedoMapDbtimeRevert == NULL ) ) );
+    Assert( fAllocCleanup ||
+            ( ( m_pLogRedoMapZeroed == NULL ) == ( m_pLogRedoMapBadDbtime == NULL ) &&
+              ( m_pLogRedoMapBadDbtime == NULL ) == ( m_pLogRedoMapDbtimeRevert == NULL ) &&
+              ( m_pLogRedoMapDbtimeRevert == NULL ) == ( m_pLogRedoMapDbtimeRevertIgnore == NULL ) ) );
 
-    if ( ( m_pLogRedoMapZeroed == NULL ) && ( m_pLogRedoMapBadDbtime == NULL ) && ( m_pLogRedoMapDbtimeRevert == NULL ) )
+    if ( ( m_pLogRedoMapZeroed == NULL ) && ( m_pLogRedoMapBadDbtime == NULL ) && ( m_pLogRedoMapDbtimeRevert == NULL ) && ( m_pLogRedoMapDbtimeRevertIgnore == NULL ) )
     {
         if ( !fAllocCleanup )
         {
@@ -2378,6 +2389,13 @@ VOID FMP::FreeLogRedoMaps( const BOOL fAllocCleanup )
         m_pLogRedoMapDbtimeRevert = NULL;
     }
 
+    if ( m_pLogRedoMapDbtimeRevertIgnore != NULL )
+    {
+        m_pLogRedoMapDbtimeRevertIgnore->TermLogRedoMap();
+        delete m_pLogRedoMapDbtimeRevertIgnore;
+        m_pLogRedoMapDbtimeRevertIgnore = NULL;
+    }
+
     if ( !fAllocCleanup )
     {
         m_sxwlRedoMaps.ReleaseWriteLatch();
@@ -2394,10 +2412,12 @@ BOOL FMP::FRedoMapsEmpty()
 
     Assert( ( m_pLogRedoMapZeroed == NULL ) == ( m_pLogRedoMapBadDbtime == NULL ) );
     Assert( ( m_pLogRedoMapDbtimeRevert == NULL ) == ( m_pLogRedoMapBadDbtime == NULL ) );
+    Assert( ( m_pLogRedoMapDbtimeRevertIgnore == NULL ) == ( m_pLogRedoMapBadDbtime == NULL ) );    
 
     const BOOL fRedoMapsEmpty = ( ( m_pLogRedoMapZeroed == NULL ) || ( !m_pLogRedoMapZeroed->FAnyPgnoSet() ) ) &&
                                 ( ( m_pLogRedoMapBadDbtime == NULL ) || ( !m_pLogRedoMapBadDbtime->FAnyPgnoSet() ) ) &&
-                                ( ( m_pLogRedoMapDbtimeRevert == NULL ) || ( !m_pLogRedoMapDbtimeRevert->FAnyPgnoSet() ) );
+                                ( ( m_pLogRedoMapDbtimeRevert == NULL ) || ( !m_pLogRedoMapDbtimeRevert->FAnyPgnoSet() ) ) &&
+                                ( ( m_pLogRedoMapDbtimeRevertIgnore == NULL ) || ( !m_pLogRedoMapDbtimeRevertIgnore->FAnyPgnoSet() ) );
 
     m_sxwlRedoMaps.ReleaseSharedLatch();
 
@@ -2964,7 +2984,8 @@ ERR FMP::FPgnoInZeroedOrRevertedMaps( const PGNO pgno ) const
 //  ================================================================
 {
     return ( PLogRedoMapZeroed() && PLogRedoMapZeroed()->FPgnoSet( pgno ) ) || 
-           ( PLogRedoMapDbtimeRevert() && PLogRedoMapDbtimeRevert()->FPgnoSet( pgno ) );
+           ( PLogRedoMapDbtimeRevert() && PLogRedoMapDbtimeRevert()->FPgnoSet( pgno ) ) ||
+           ( PLogRedoMapDbtimeRevert() && PLogRedoMapDbtimeRevertIgnore()->FPgnoSet( pgno ) );
 }
 
 //  ================================================================

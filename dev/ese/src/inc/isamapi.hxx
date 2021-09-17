@@ -296,7 +296,8 @@ ERR ErrIsamDeleteTable(
     JET_SESID vsesid,
     JET_DBID vdbid,
     const CHAR *szName,
-    BOOL fAllowTableDeleteSensitive = fFalse );
+    const BOOL fAllowTableDeleteSensitive = fFalse,
+    const JET_GRBIT grbit = 0 );
 
 ERR ErrIsamRenameTable( JET_SESID vsesid, JET_DBID vdbid,
     const CHAR *szName, const CHAR *szNameNew );

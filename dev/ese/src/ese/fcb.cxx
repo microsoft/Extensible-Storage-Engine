@@ -2701,6 +2701,12 @@ ERR FCB::ErrLink( FUCB *pfucb )
     // Examine this to make sure we're correctly locking.
     CheckFCBLockingForLink_();
 
+    // The FDP is about to be deleted. No operations should be allowed on such a table unless requested to skip the error.
+    if ( FRevertedFDPToDelete() && !FPpibAllowRBSFDPDeleteReadByMe( pfucb->ppib ) )
+    {
+        return ErrERRCheck( JET_errRBSFDPToBeDeleted );
+    }
+
     return ErrIncrementRefCountAndLink_( pfucb );
 }
 

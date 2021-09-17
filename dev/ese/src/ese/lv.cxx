@@ -581,7 +581,9 @@ ERR ErrFILEOpenLVRoot( FUCB *pfucb, FUCB **ppfucbLV, BOOL fCreate )
 {
     ERR         err;
     PIB         *ppib;
-    PGNO        pgnoLV = pgnoNull;
+    PGNO        pgnoLV          = pgnoNull;
+    OBJID       objidLV         = objidNil;
+    __int64     ftPgnoLVLastSet = 0;
 
     Assert( pfcbNil != pfucb->u.pfcb );
     Assert( pfucb->ppib != PinstFromPfucb(pfucb)->m_ppibLV );
@@ -650,7 +652,7 @@ ERR ErrFILEOpenLVRoot( FUCB *pfucb, FUCB **ppfucbLV, BOOL fCreate )
     Assert( pgnoNull == pgnoLV );   // initial value
     if ( !fTemp )
     {
-        Call( ErrCATAccessTableLV( ppib, pfucb->ifmp, pfucb->u.pfcb->ObjidFDP(), &pgnoLV ) );
+        Call( ErrCATAccessTableLV( ppib, pfucb->ifmp, pfucb->u.pfcb->ObjidFDP(), &pgnoLV, &objidLV, &ftPgnoLVLastSet ) );
     }
     else
     {
@@ -670,6 +672,11 @@ ERR ErrFILEOpenLVRoot( FUCB *pfucb, FUCB **ppfucbLV, BOOL fCreate )
     if( pgnoNull != pgnoLV )
     {
         err = ErrFILEIInitLVRoot( pfucb, pgnoLV, ppfucbLV );
+
+        if ( ftPgnoLVLastSet != 0 && *ppfucbLV != pfucbNil )
+        {
+            ( *ppfucbLV )->u.pfcb->SetFileTimePgnoFDPLastSet( ftPgnoLVLastSet );
+        }
     }
     else
     {

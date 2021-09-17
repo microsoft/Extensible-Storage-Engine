@@ -1388,7 +1388,6 @@ ERR ErrBFIVersionPage( PBF pbf, PBF* ppbfOld, const BOOL fWait = fTrue );
 ERR ErrBFIVersionCopyPage( PBF pbfOrigOld, PBF* ppbfNewCurr, const BOOL fWait, _In_ const BOOL fOwnsWrite );
 void BFICleanVersion( PBF pbf, BOOL fTearDownFMP );
 
-BOOL CmpPgno( _In_ const PGNO& pgno1, _In_ const PGNO& pgno2 );
 ERR ErrBFIPrereadPage( IFMP ifmp, PGNO pgno, const BFPreReadFlags bfprf, const BFPriority bfpri, const TraceContext& tc );
 INLINE void BFIMarkAsSuperCold( PBF pbf, const BOOL fUser );
 INLINE void BFITouchResource(

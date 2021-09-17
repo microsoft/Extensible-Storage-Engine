@@ -162,6 +162,8 @@ const char * const szNewPage            = "NewPage";
 
 const char* const szEmptyPages          = "EmptyPages";
 
+const char* const szEmptyPages2         = "EmptyPages2";
+
 const char * szRBSRecUnknown            = "*UNKNOWN*";
 
 const INT   cbRBSRecBuf = 1024 + cbFormattedDataMax;
@@ -176,6 +178,7 @@ const char * SzRBSRec( BYTE bRBSRecType )
         case rbsrectypeDbPage:          return szDbPage;
         case rbsrectypeDbNewPage:       return szNewPage;
         case rbsrectypeDbEmptyPages:    return szEmptyPages;
+        case rbsrectypeDbEmptyPages2:   return szEmptyPages2;
         default:                        return szRBSRecUnknown;
     }
 }
@@ -246,12 +249,13 @@ VOID RBSRecToSz( const RBSRecord *prbsrec, __out_bcount(cbRBSRec) PSTR szRBSRec,
                 dbtime = pHdr->dbtimeDirtied;
             }
 
-            OSStrCbFormatA( rgchBuf, sizeof(rgchBuf), " [%u:%lu],[%s%s],objid:%d,dbtime:%I64x",
+            OSStrCbFormatA( rgchBuf, sizeof(rgchBuf), " [%u:%lu],[%s%s%s%s],objid:%d,dbtime:%I64x",
                 (DBID)  prbsdbpgrec->m_dbid,
                 (ULONG) prbsdbpgrec->m_pgno,
                 ( prbsdbpgrec->m_fFlags & fRBSPreimageCompressed ) ? "X" : "",
                 ( prbsdbpgrec->m_fFlags & fRBSPreimageDehydrated ) ? "D" : "",
                 ( prbsdbpgrec->m_fFlags & fRBSPreimageRevertAlways ) ? "A" : "",
+                ( prbsdbpgrec->m_fFlags & fRBSDeletedTableRootPage ) ? "R" : "",
                 objid, dbtime );
             OSStrCbAppendA( szRBSRec, cbRBSRec, rgchBuf );
             OSMemoryPageFree( pbDataDecompressed );
@@ -268,13 +272,16 @@ VOID RBSRecToSz( const RBSRecord *prbsrec, __out_bcount(cbRBSRec) PSTR szRBSRec,
             break;
         }
         case rbsrectypeDbEmptyPages:
+        case rbsrectypeDbEmptyPages2:
         {
             RBSDbEmptyPagesRecord* prbsdbpgrec = ( RBSDbEmptyPagesRecord* ) prbsrec;
+            ULONG fFlags                       = bRecType == rbsrectypeDbEmptyPages2 ? ( ( RBSDbEmptyPages2Record* ) prbsrec )->m_fFlags : 0;
 
-            OSStrCbFormatA( rgchBuf, sizeof(rgchBuf), " [%u:%lu:%lu]",
+            OSStrCbFormatA( rgchBuf, sizeof(rgchBuf), " [%u:%lu:%lu],[%s]",
                 (DBID)  prbsdbpgrec->m_dbid,
                 (ULONG) prbsdbpgrec->m_pgnoFirst,
-                (CPG)   prbsdbpgrec->m_cpg );
+                (CPG)   prbsdbpgrec->m_cpg,
+                ( fFlags & fRBSFDPNonRevertableDelete ) ? "D" : "" );
             OSStrCbAppendA( szRBSRec, cbRBSRec, rgchBuf );
             break;
         }

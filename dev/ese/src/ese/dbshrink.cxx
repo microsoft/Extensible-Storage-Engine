@@ -418,6 +418,7 @@ LOCAL ERR ErrSHKIMoveLastExtent(
                 // Make sure the page does not have any useful data.
                 if ( ( errPageStatus != JET_errPageNotInitialized ) &&
                      ( ( dbtimeOnPage != dbtimeShrunk ) || ( clines != 0 ) ) &&
+                     ( ( dbtimeOnPage != dbtimeRevert ) || ( clines != 0 ) ) &&
                      ( !fPreInitPage || ( clines > 0 ) ) &&
                      ( !fEmptyPage || ( clines != 0 ) ) )
                 {
@@ -542,7 +543,7 @@ LOCAL ERR ErrSHKIMoveLastExtent(
                 if ( FSPSpaceCatLeaked( spcatfCurrent ) )
                 {
                     // Release page to its owner and re-evaluate the page.
-                    Call( ErrSPCaptureSnapshot( pSpCatCtx->pfucb, pgnoCurrent, 1 ) );
+                    Call( ErrSPCaptureSnapshot( pSpCatCtx->pfucb, pgnoCurrent, 1, fFalse ) );
                     Call( ErrSPFreeExt( pSpCatCtx->pfucb, pgnoCurrent, 1, "PageUnleak" ) );
                     cpgUnleaked++;
                     fMovedPage = fTrue;
@@ -1285,6 +1286,8 @@ LOCAL ERR ErrSHKIRootMoveSetCatRecPostImage(
     const PGNO pgnoNewFDP )
 {
     VOID* pv = NULL;
+    ERR err  = JET_errSuccess;
+
     BFAlloc( bfasTemporary, &pv, pdataPreImage->Cb() );
     pdataPostImage->SetPv( pv );
     pdataPreImage->CopyInto( *pdataPostImage );
@@ -1293,11 +1296,40 @@ LOCAL ERR ErrSHKIRootMoveSetCatRecPostImage(
     dataField.SetPv( (void*)( &pgnoNewFDP ) );
     dataField.SetCb( sizeof( pgnoNewFDP ) );
 
-    return ErrRECISetFixedColumnInLoadedDataBuffer(
+    Call( ErrRECISetFixedColumnInLoadedDataBuffer(
                 pdataPostImage,
                 pfucbCatalog->u.pfcb->Ptdb(),
                 fidMSO_PgnoFDP,
-                &dataField );
+                &dataField ) );
+
+    // If PgnoFDPLastSetTime column is already part of the record, lets modify it since we are setting a new pgnofdp.
+    // If not a part of the record, it will be set to current time the next time the table is accessed.
+    if ( BoolParam( PinstFromPfucb( pfucbCatalog ), JET_paramFlight_EnablePgnoFDPLastSetTime ) && 
+         g_rgfmp[ pfucbCatalog->ifmp ].ErrDBFormatFeatureEnabled( JET_efvRBSNonRevertableTableDeletes ) >= JET_errSuccess )
+    {
+        __int64 ftCurrent   = UtilGetCurrentFileTime();
+        const FID  fid      = FidOfColumnid( fidMSO_PgnoFDPLastSetTime );
+        Assert( fid.FFixed() );
+
+        BYTE        *pbRec  = (BYTE *)pdataPostImage->Pv();
+        REC         *prec   = (REC *)pbRec;
+
+        if ( fid <= prec->FidFixedLastInRec() )
+        {
+            DATA dataFieldFt;
+            dataFieldFt.SetPv( (void*) ( &ftCurrent ) );
+            dataFieldFt.SetCb( sizeof( __int64 ) );
+
+            Call( ErrRECISetFixedColumnInLoadedDataBuffer(
+                pdataPostImage,
+                pfucbCatalog->u.pfcb->Ptdb(),
+                fidMSO_PgnoFDPLastSetTime,
+                &dataFieldFt ) );
+        }
+    }
+
+HandleError:
+    return err;
 }
 
 LOCAL ERR ErrSHKICreateRootMove( ROOTMOVE* const prm, FUCB* const pfucb, const OBJID objidTable )

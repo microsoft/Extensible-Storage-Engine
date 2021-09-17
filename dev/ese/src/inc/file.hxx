@@ -76,7 +76,7 @@ ERR ErrFILEIInitializeFCB(
     _Out_ FCB * pfcbTemplate );
 
 VOID FILESetAllIndexMask( FCB *pfcbTable );
-ERR ErrFILEDeleteTable( PIB *ppib, IFMP ifmp, const CHAR *szTable, BOOL fAllowTableDeleteSensitive = fFalse );
+ERR ErrFILEDeleteTable( PIB *ppib, IFMP ifmp, const CHAR *szTable, const BOOL fAllowTableDeleteSensitive = fFalse, const JET_GRBIT grbit = NO_GRBIT );
 
 FIELD *PfieldFCBFromColumnName( FCB *pfcb, _In_ PCSTR szColumnName );
     

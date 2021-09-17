@@ -7,9 +7,11 @@ struct TABLEDEF
 {
     ULONG   pgnoFDP;
     ULONG   objidFDP;
+    __int64 ftPgnoFDPLastSet;
     
     ULONG   pgnoFDPLongValues;
     ULONG   objidFDPLongValues;
+    __int64 ftPgnoFDPLongValuesLastSet;
     
     LONG            pages;
     LONG            density;
@@ -31,6 +33,7 @@ struct INDEXDEF
 {
     ULONG   pgnoFDP;
     ULONG   objidFDP;
+    __int64 ftPgnoFDPLastSet;
 
     LONG            density;
     ULONG   lcid;

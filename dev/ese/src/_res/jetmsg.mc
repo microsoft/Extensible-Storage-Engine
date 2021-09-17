@@ -2508,6 +2508,17 @@ Language=English
 %6 of those outstanding tasks have not started.%n
 .
 
+MessageId=753
+SymbolicName=DBSCAN_REDELETE_REVERTED_TABLE_SUCCESS
+Language=English
+%1 (%2) %3Db scan successfully deleted table at root page %4 with objid %5 as it was marked for delete by revert operation.
+.
+
+MessageId=754
+SymbolicName=DBSCAN_REDELETE_REVERTED_TABLE_FAILURE
+Language=English
+%1 (%2) %3Db scan failed to delete table at root page %4 with objid %5 which was marked for delete by revert operation with error %6.
+.
 
 ;// !!! ARE YOU SURE you're adding this in the right place !!! ???
 

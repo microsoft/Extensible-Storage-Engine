@@ -3211,7 +3211,7 @@ LOCAL ERR ErrREPAIRICheckCatalogEntryPgnoFDPs(
     for(ulpgno = 0; pgnoNull != prgpgno[ulpgno]; ulpgno++ )
     {
         //  check the root page of an index
-        OBJID objidIndexFDP = 0;
+        OBJID objidIndexFDP     = 0;
         CSR csr;
 
         err = csr.ErrGetReadPage(
@@ -3226,7 +3226,7 @@ LOCAL ERR ErrREPAIRICheckCatalogEntryPgnoFDPs(
         }
         else
         {
-            objidIndexFDP = csr.Cpage().ObjidFDP();
+            objidIndexFDP       = csr.Cpage().ObjidFDP();
         }
         csr.ReleasePage( fTrue );
 
@@ -3295,7 +3295,7 @@ LOCAL ERR ErrREPAIRCheckFixCatalogLogical(
     BOOL            fSeenCorruptedTable         = fFalse;
     ULONG           objidLastCorruptedTable     = 0x7fffffff;
     BOOL            fSeenCorruptedIndex         = fFalse;
-
+    
     INFOLIST    *   pColInfo        = NULL;
     INFOLIST    *   pIdxInfo        = NULL;
     TEMPLATEINFOLIST    *   pTemplateInfoList = NULL;
@@ -4764,7 +4764,6 @@ LOCAL ERR ErrREPAIRCheckOneTable(
 
     Call( err );
 
-
     //  preread the indexes of the table
 
     REPAIRIPrereadIndexesOfFCB( ppib, pfcbTable );
@@ -4779,6 +4778,36 @@ LOCAL ERR ErrREPAIRCheckOneTable(
                                         max( cpgLVTree, CpgMinRepairSequentialPreread( g_rgfmp[ifmp].CbPage() ) ) );
         BFPrereadPageRange( ifmp, pgnoLV, cpgToPrereadLV, bfprfDefault, ppib->BfpriPriority( ifmp ), *TcRepair() );
         Call( ttmapLVRefcountsFromLV.ErrInit( PinstFromPpib( ppib ) ) );
+    }
+
+    BOOL fPageFDPRootDelete = fFalse;
+    {
+        CSR csr;
+
+        // It is possible RBS doesn't revert some deleted table but only reverts table root page and space tree pages to allow for re-deletion.
+        // In such a case the integrity checks are bound to fail as the pages owned by the table might be in an unexpected state.
+        // TODO: See if we can do some specific checks instead of ignoring all of them.
+        err = csr.ErrGetReadPage(
+            ppib,
+            ifmp,
+            pfcbTable->PgnoFDP(),
+            bflfNoTouch );
+        if ( err < 0 )
+        {
+            ( *popts->pcprintfError )( "error %d trying to read page %d\r\n", err, pfcbTable->PgnoFDP() );
+            Call( err );
+        }
+        else
+        {
+            fPageFDPRootDelete = csr.Cpage().FPageFDPRootDelete();
+        }
+
+        csr.ReleasePage();
+    }
+
+    if ( fPageFDPRootDelete )
+    {
+        goto HandleError;
     }
 
     Call( ttmapLVRefcountsFromTable.ErrInit( PinstFromPpib( ppib ) ) );

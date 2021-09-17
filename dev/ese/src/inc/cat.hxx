@@ -80,9 +80,10 @@ const ULONG iMSO_SpaceHint              = 24;
 const ULONG iMSO_SpaceLVDeferredHints   = 25;
 const ULONG iMSO_LocaleName             = 26;
 const ULONG iMSO_LVChunkMax             = 27;
+const ULONG iMSO_PgnoFDPLastSetTime     = 28;
 
 //  max number of columns to set when inserting a record into the catalog
-const ULONG idataMSOMax                 = 28;
+const ULONG idataMSOMax                 = 29;
 
 
 const FID   fidMSO_ObjidTable           = FID( fidtypFixed, 0 );
@@ -99,8 +100,9 @@ const FID   fidMSO_RecordOffset         = FID( fidtypFixed, 8 );
 const FID   fidMSO_LCMapFlags           = FID( fidtypFixed, 9 );
 const FID   fidMSO_KeyMost              = FID( fidtypFixed, 10 );
 const FID   fidMSO_LVChunkMax           = FID( fidtypFixed, 11 );
+const FID   fidMSO_PgnoFDPLastSetTime   = FID( fidtypFixed, 12 );
 
-const FID   fidMSO_FixedLast            = fidMSO_LVChunkMax;
+const FID   fidMSO_FixedLast            = fidMSO_PgnoFDPLastSetTime;
 
 const FID   fidMSO_Name                 = FID( fidtypVar, 0 );
 const FID   fidMSO_Stats                = FID( fidtypVar, 1 );
@@ -703,7 +705,9 @@ ERR ErrCATAccessTableLV(
     const IFMP      ifmp,
     const OBJID     objidTable,
     PGNO            *ppgnoLVFDP,
-    OBJID           *pobjidLV = NULL );
+    OBJID           *pobjidLV = NULL,
+    __int64         *pftPgnoLVFDPLastSet = NULL,
+    const BOOL      fSkipPgnoFDPLastSetTime = fFalse );
 
 ERR ErrCATGetTableInfoCursor(
     PIB             *ppib,
@@ -805,7 +809,7 @@ ERR ErrCATGetColumnCallbackInfo(
 
 ERR ErrCATInitCatalogFCB( FUCB *pfucbTable );
 ERR ErrCATInitTempFCB( FUCB *pfucbTable );
-ERR ErrCATInitFCB( FUCB *pfucbTable, OBJID objidTable );
+ERR ErrCATInitFCB( FUCB *pfucbTable, OBJID objidTable, const BOOL fSkipPgnoFDPLastSetTime = fFalse );
 
 enum CATCheckIndicesFlags : ULONG  //  catcif
 {

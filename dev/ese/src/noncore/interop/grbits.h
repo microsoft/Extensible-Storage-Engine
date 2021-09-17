@@ -251,6 +251,7 @@ MSINTERNAL enum class MJET_GRBIT
     TablePreread = 0x00000040, // assume the table is probably not in the buffer cache
     TableOpportuneRead = 0x00000080, // attempt to opportunely read physically adjacent leaf pages using larger physical IOs
     TableAllowOutOfDate = 0x00000100, // allow opening with indexes using out-of-date (but valid) sort versions
+    AllowPgnoFDPLastSetTime = 0x00000200, // allow changing pgnofdp last set time in catalog while opening the table
     TableSequential = 0x00008000, // assume the table will be scanned sequentially
     TableTryPurgeOnClose = 0x01000000, // INTERNAL USE ONLY: attempt to cleanup resources when table is closed
     TableAllowSensitiveOperation = 0x08000000, // INTERNAL USE ONLY
@@ -387,6 +388,8 @@ MSINTERNAL enum class MJET_GRBIT
     ShadowLogEmitDataBuffers = 0x00000008, // callback emits some portion of the log buffer and position in log
     ShadowLogEmitLogComplete = 0x00000010, // callback emits signal that the current log file is completed
     DeleteAllExistingLogs = 0x00000001, // Delete all the existing log files at the end of revert.
+    NonRevertableTableDelete = 0x00000001, // If set, doesn't capture page preimages to allow for reverting the table to a state where it still existed using RBS.
+    RevertableTableDeleteIfTooSoon = 0x00000002, // If set, we will do a revertable table even if NonRevertableTableDelete flag is passed provided NonRevertable delete is failing due to JET_errRBSDeleteTableTooSoon.
     PageInfoNoStructureChecksum = 0x00000001, // Do not compute structure checksum
     TestUninitShrunkPageImage = 0x00000001,
     PatchingCorruptPage = 0x00000002,

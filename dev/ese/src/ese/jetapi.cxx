@@ -675,7 +675,7 @@ ERR VTAPI ErrInvalidDeleteColumn(
 
 
 ERR VTAPI ErrInvalidDeleteIndex(JET_SESID vsesid, JET_VTID vtid,
-    const char  *szIndexName)
+    const char  *szIndexName )
 {
     return ErrERRCheck( JET_errInvalidTableId );
 }
@@ -15695,51 +15695,66 @@ JET_ERR JET_API JetCreateTableColumnIndex5W(
     JET_TRY( opCreateTableColumnIndex, JetCreateTableColumnIndexEx5W( sesid, dbid, ptablecreate ) );
 }
 
-LOCAL JET_ERR JetDeleteTableEx( _In_ JET_SESID sesid, _In_ JET_DBID dbid, _In_ JET_PCSTR szName )
+LOCAL JET_ERR JetDeleteTableEx( _In_ JET_SESID sesid, _In_ JET_DBID dbid, _In_ JET_PCSTR szName, _In_ const JET_GRBIT grbit )
 {
     APICALL_SESID   apicall( opDeleteTable );
 
     OSTrace(
         JET_tracetagAPI,
         OSFormat(
-            "Start %s(0x%Ix,0x%x,0x%p[%s])",
+            "Start %s(0x%Ix,0x%x,0x%p[%s],0x%x)",
             __FUNCTION__,
             sesid,
             dbid,
             szName,
-            OSFormatString( szName ) ) );
+            OSFormatString( szName ),
+            grbit ) );
 
     if ( apicall.FEnter( sesid, dbid ) )
     {
         apicall.LeaveAfterCall( ErrIsamDeleteTable(
                                         sesid,
                                         dbid,
-                                        (CHAR *)szName ) );
+                                        (CHAR *)szName,
+                                        fFalse,
+                                        grbit ) );
     }
 
     return apicall.ErrResult();
 }
 
-LOCAL JET_ERR JetDeleteTableExW( _In_ JET_SESID sesid, _In_ JET_DBID dbid, _In_ JET_PCWSTR wszName )
+LOCAL JET_ERR JetDeleteTableExW( _In_ JET_SESID sesid, _In_ JET_DBID dbid, _In_ JET_PCWSTR wszName, _In_ const JET_GRBIT grbit )
 {
     ERR         err             = JET_errSuccess;
     CAutoSZDDL  lszName;
 
     CallR( lszName.ErrSet( wszName ) );
 
-    return JetDeleteTableEx( sesid, dbid, lszName );
+    return JetDeleteTableEx( sesid, dbid, lszName, grbit );
 }
 
 JET_ERR JET_API JetDeleteTableA( _In_ JET_SESID sesid, _In_ JET_DBID dbid, _In_ JET_PCSTR szName )
 {
     JET_VALIDATE_SESID( sesid );
-    JET_TRY( opDeleteTable, JetDeleteTableEx( sesid, dbid, szName ) );
+    JET_TRY( opDeleteTable, JetDeleteTableEx( sesid, dbid, szName, NO_GRBIT ) );
 }
 
 JET_ERR JET_API JetDeleteTableW( _In_ JET_SESID sesid, _In_ JET_DBID dbid, _In_ JET_PCWSTR wszName )
 {
     JET_VALIDATE_SESID( sesid );
-    JET_TRY( opDeleteTable, JetDeleteTableExW( sesid, dbid, wszName ) );
+    JET_TRY( opDeleteTable, JetDeleteTableExW( sesid, dbid, wszName, NO_GRBIT ) );
+}
+
+JET_ERR JET_API JetDeleteTable2A( _In_ JET_SESID sesid, _In_ JET_DBID dbid, _In_ JET_PCSTR szName, _In_ const JET_GRBIT grbit )
+{
+    JET_VALIDATE_SESID( sesid );
+    JET_TRY( opDeleteTable, JetDeleteTableEx( sesid, dbid, szName, grbit ) );
+}
+
+JET_ERR JET_API JetDeleteTable2W( _In_ JET_SESID sesid, _In_ JET_DBID dbid, _In_ JET_PCWSTR wszName, _In_ const JET_GRBIT grbit )
+{
+    JET_VALIDATE_SESID( sesid );
+    JET_TRY( opDeleteTable, JetDeleteTableExW( sesid, dbid, wszName, grbit ) );
 }
 
 LOCAL JET_ERR JetRenameTableEx(
@@ -16499,9 +16514,9 @@ JET_ERR JET_API JetCreateIndex4W(
 
 
 LOCAL JET_ERR JetDeleteIndexEx(
-    _In_ JET_SESID      sesid,
-    _In_ JET_TABLEID    tableid,
-    _In_ JET_PCSTR      szIndexName )
+    _In_ JET_SESID          sesid,
+    _In_ JET_TABLEID        tableid,
+    _In_ JET_PCSTR          szIndexName )
 {
     APICALL_SESID   apicall( opDeleteIndex );
 
@@ -16527,9 +16542,9 @@ LOCAL JET_ERR JetDeleteIndexEx(
 }
 
 LOCAL JET_ERR JetDeleteIndexExW(
-    _In_ JET_SESID      sesid,
-    _In_ JET_TABLEID    tableid,
-    _In_ JET_PCWSTR     wszIndexName )
+    _In_ JET_SESID          sesid,
+    _In_ JET_TABLEID        tableid,
+    _In_ JET_PCWSTR         wszIndexName )
 {
     ERR         err;
     CAutoSZDDL  lszIndexName;

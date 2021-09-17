@@ -298,6 +298,12 @@ EXPORTS
 	ALIAS2(JetDeleteTableW,12)
 	ALIAS3(JetDeleteTable,JetDeleteTableA)
 
+	ALIAS1(JetDeleteTable2A,16)
+	ALIAS2(JetDeleteTable2A,16)
+	ALIAS1(JetDeleteTable2W,16)
+	ALIAS2(JetDeleteTable2W,16)
+	ALIAS3(JetDeleteTable2,JetDeleteTable2A)
+
 	ALIAS1(JetDetachDatabaseA,8)
 	ALIAS2(JetDetachDatabaseA,8)
 	ALIAS1(JetDetachDatabaseW,8)
