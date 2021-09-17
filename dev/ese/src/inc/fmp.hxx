@@ -492,6 +492,12 @@ class FMP
         // this erroneous page.
         CLogRedoMap *       m_pLogRedoMapDbtimeRevert;
 
+        // Keeps track of which pages have a dbtime equal to dbtimerevert but should be ignored while reconciling.
+        // dbtimerevert indicates a page which was reverted back to a new page using revert snapshot.
+        // This map implies that any page in this should be skipped for redo and won't be reconciled in required range.
+        // This can happen when we do a non-revertable delete outside the required range.
+        CLogRedoMap *       m_pLogRedoMapDbtimeRevertIgnore;
+
     // =====================================================================
     // Member retrieval..
     public:
@@ -683,9 +689,10 @@ public:
 
         // Redo maps.
         //
-        CLogRedoMap* PLogRedoMapZeroed() const        { return m_pLogRedoMapZeroed; };
-        CLogRedoMap* PLogRedoMapBadDbTime() const     { return m_pLogRedoMapBadDbtime; };
-        CLogRedoMap* PLogRedoMapDbtimeRevert() const  { return m_pLogRedoMapDbtimeRevert; };
+        CLogRedoMap* PLogRedoMapZeroed() const              { return m_pLogRedoMapZeroed; };
+        CLogRedoMap* PLogRedoMapBadDbTime() const           { return m_pLogRedoMapBadDbtime; };
+        CLogRedoMap* PLogRedoMapDbtimeRevert() const        { return m_pLogRedoMapDbtimeRevert; };
+        CLogRedoMap* PLogRedoMapDbtimeRevertIgnore() const  { return m_pLogRedoMapDbtimeRevertIgnore; };
 
     // =====================================================================
     // Member manipulation.

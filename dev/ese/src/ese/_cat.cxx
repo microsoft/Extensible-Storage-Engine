@@ -141,7 +141,7 @@ LOCAL const CDESC   rgcdescMSO[]    =
     //  Space hint-related items. 
     //  These are for the threshold for separating LVs, space hints for the B-Tree, and
     //  for the table deferred LV space hints.
-    "SeparateLV",           fidMSO_SeparateLVThreshold, JET_coltypLongBinary,           JET_bitColumnTagged,
+    "SeparateLV",           fidMSO_SeparateLVThreshold, JET_coltypLongBinary,   JET_bitColumnTagged,
     "SpaceHints",           fidMSO_SpaceHints,          JET_coltypLongBinary,   JET_bitColumnTagged,
     "SpaceDeferredLVHints", fidMSO_SpaceLVDeferredHints, JET_coltypLongBinary,  JET_bitColumnTagged,
 
@@ -149,6 +149,15 @@ LOCAL const CDESC   rgcdescMSO[]    =
     "LocaleName",           fidMSO_LocaleName,          JET_coltypLongBinary,   JET_bitColumnTagged,
 
     "LVChunkMax",           fidMSO_LVChunkMax,          JET_coltypLong,         NO_GRBIT,
+
+    //  DateTime for when the FDP root page was last moved. If never moved after creation, should be the same as FDP creation time.
+    //  For FDP already existing, should be the time when we first touch the table in future.
+    //  This time is currently used only in context of revert snapshots when we don't want to snapshot pages for table delete. 
+    //  The main reason this is needed is that root page could be moving around before the table being deleted (either due to table just being created or dbshrink moving the root page).
+    //  So for example, let's consider the root page moves, the table then deleted, and lets say we capture the table root page as part of delete.
+    //  Now, when we revert to a point before the root page moved, we would have no ways of knowing which page should get the special flag to block operations on such a reverted table. So we use this to block table deletes.
+    //  So for this reason, we will block table delete if JET_bitNonRevertableTableDelete flag is passed and if table root page was moved during the last JET_paramFlight_RBSMaxTimeSpanSec (=7days).
+    "PgnoFDPLastSetTime",   fidMSO_PgnoFDPLastSetTime,  JET_coltypDateTime,     NO_GRBIT,
 
     //  IMPORTANT: The entries here must match the same order as the iMSO_* constants in cat.hxx
 };

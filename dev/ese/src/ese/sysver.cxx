@@ -78,6 +78,10 @@ const FormatVersions g_rgfmtversEngine[] = {
     { JET_efvApplyRevertSnapshot, /* 9380 */            { 1568,190,420 }, { 8,90,200 }, { 3,0,0 } }, // [2020/12/01]
     { JET_efvExtentPageCountCache, /* 9400 */           { 1568,200,440 }, { 8,90,200 }, { 3,0,0 } }, // [2021/01/15]
     { JET_efvLz4Compression, /* 9420 */                 { 1568,210,460 }, { 8,100,220 }, { 3,0,0 } }, // [2021/03/26]
+
+    // Skipped below efv due to regression and reverted bad build.
+    // { JET_efvRBSNonRevertableTableDeletes, /* 9440 */   { 1568,210,480 }, { 8,100,220 }, { 3,0,0 } }, // [2021/07/29]
+    { JET_efvRBSNonRevertableTableDeletes, /* 9460 */   { 1568,230,500 }, { 8,100,220 }, { 3,0,0 } }, // [2021/09/08]
 };
 
 const INT g_cfmtversEngine = _countof( g_rgfmtversEngine );

@@ -260,7 +260,8 @@ class CPAGE
         //  indicate a page reverted to a new page as part of revert operation using RBS.
         VOID GetRevertedNewPage     (   const PGNO pgno,
                                         VOID * const pv,
-                                        const ULONG cb );
+                                        const ULONG cb,
+                                        const BOOL fMarkPageFDPDelete = fFalse );
 
         //  this LoadPage method allocates memory and copies the given page into it
         //  the memory is freed when the page is released
@@ -369,6 +370,9 @@ class CPAGE
         BOOL    FNewChecksumFormat  ( ) const;
         BOOL    FLastNodeHasNullKey( ) const;
 
+        BOOL    FPageFDPDelete( ) const;
+        BOOL    FPageFDPRootDelete( ) const;
+
         BOOL        FShrunkPage         ( ) const;
         BOOL        FRevertedNewPage    ( ) const;
         static BOOL FRevertedNewPage    ( const DBTIME dbtime ) { return dbtimeRevert == dbtime; }
@@ -400,6 +404,7 @@ class CPAGE
         VOID    ResetParentOfLeaf   ( );
         VOID    SetFEmpty    ( );
         VOID    SetFNewRecordFormat ( );
+        VOID    SetPageFDPDelete( const BOOL fValue );
 
         //  bulk line flag manipulation
         VOID    ResetAllFlags( INT fFlags );
@@ -640,6 +645,11 @@ class CPAGE
         //  (all 0s in its data portion).
 
         enum    { fPagePreInit              = 0x20000 };
+
+        //  Special flag used by RBS after reverting a deleted FDP's page.
+        //  Only the FDP root page and its space tree pages are valid and the only action allowed for the FDP is delete.
+
+        enum    { fPageFDPDelete            = 0x40000 };
 
         //  this is the logical inference we can make on the flush type
         //      state about a given page.
@@ -1181,6 +1191,20 @@ INLINE BOOL CPAGE::FNewChecksumFormat ( ) const
 //  ================================================================
 {
     return FFlags() & fPageNewChecksumFormat;
+}
+
+//  ================================================================
+INLINE BOOL CPAGE::FPageFDPDelete( ) const
+//  ================================================================
+{
+    return FFlags() & fPageFDPDelete;
+}
+
+//  ================================================================
+INLINE BOOL CPAGE::FPageFDPRootDelete( ) const
+//  ================================================================
+{
+    return FRootPage() && FPageFDPDelete();
 }
 
 //  ================================================================

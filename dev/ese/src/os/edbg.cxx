@@ -18223,6 +18223,7 @@ VOID FMP::Dump( CPRINTF * pcprintf, DWORD_PTR dwOffset ) const
     (*pcprintf)( FORMAT_POINTER( FMP, this, m_pLogRedoMapZeroed, dwOffset ) );
     (*pcprintf)( FORMAT_POINTER( FMP, this, m_pLogRedoMapBadDbtime, dwOffset ) );
     (*pcprintf)( FORMAT_POINTER( FMP, this, m_pLogRedoMapDbtimeRevert, dwOffset ) );
+    (*pcprintf)( FORMAT_POINTER( FMP, this, m_pLogRedoMapDbtimeRevertIgnore, dwOffset ) );
 }
 
 INLINE ERR CHECKPOINT::Dump( CPRINTF* pcprintf, DWORD_PTR dwOffset ) const

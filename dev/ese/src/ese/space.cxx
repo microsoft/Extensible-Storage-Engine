@@ -239,6 +239,13 @@ LONG LSPDeletedTreeFreedPagesCEFLPv( LONG iInstance, VOID *pvBuf )
     return 0;
 }
 
+PERFInstanceLiveTotal<> cSPDeletedTreeSnapshottedPages;
+LONG LSPDeletedTreeSnapshottedPagesCEFLPv( LONG iInstance, VOID *pvBuf )
+{
+    cSPDeletedTreeSnapshottedPages.PassTo( iInstance, pvBuf );
+    return 0;
+}
+
 PERFInstanceLiveTotal<> cSPDeletedTreeFreedExtents;
 LONG LSPDeletedTreeFreedExtentsCEFLPv( LONG iInstance, VOID *pvBuf )
 {
@@ -8444,6 +8451,202 @@ HandleError:
     return err;
 }
 
+// If FDP is a table, capture table root page and all the associated indices and LV tree root page else capture the FDP root page
+// in RBS with special flags to indicate that the only action allowed on the table after revert is delete.
+// Also, logs LREXTENTFREED
+//
+ERR ErrSPCaptureNonRevertableFDPRootPage( PIB *ppib, FCB* pfcbFDPToFree, const PGNO pgnoLVRoot, CPG* const pcpgCaptured )
+{
+    Assert( ppib );
+    Assert( pfcbFDPToFree );
+    Assert( pfcbFDPToFree->PgnoFDP() != pgnoNull );
+
+    FUCB* pfucb     = pfucbNil;
+    ERR err         = JET_errSuccess;
+    CPG cpgCaptured = 0;
+    PIBTraceContextScope tcScope = ppib->InitTraceContextScope();
+
+    Call( ErrBTOpen( ppib, pfcbFDPToFree, &pfucb ) );
+
+    Assert( pfucbNil != pfucb );
+    Assert( pfucb->u.pfcb->FInitialized() );
+    Assert( !FFUCBSpace( pfucb ) );
+
+    BOOL fEfvEnabled = ( g_rgfmp[pfucb->ifmp].FLogOn() && PinstFromPfucb( pfucb )->m_plog->ErrLGFormatFeatureEnabled( JET_efvRevertSnapshot ) >= JET_errSuccess );
+
+    tcScope->nParentObjectClass = TceFromFUCB( pfucb );
+    tcScope->SetDwEngineObjid( ObjidFDP( pfucb ) );
+    tcScope->iorReason.SetIort( iortFreeExtSnapshot );
+
+    // Capture the preimage of the table root and pass flag to indicate this is a delete table so that we special mark this table when reverted.
+    // We should generally not be touching the table pages before table delete.
+    // But in case we did due to some bug or some unexpected scenario, we will pass fRBSPreimageRevertAlways to make sure we always keep the table deleted.
+    Call( ErrRBSRDWLatchAndCapturePreImage(
+        pfucb->ifmp,
+        PgnoRoot( pfucb ),
+        fRBSDeletedTableRootPage,
+        pfucb->ppib->BfpriPriority( pfucb->ifmp ),
+        *tcScope ) );
+    cpgCaptured++;
+
+    if ( fEfvEnabled )
+    {
+        // Log extent being freed with special flag indicating rootpage of deleted table so available lag can capture the pre-image.
+        Call( ErrLGExtentFreed( PinstFromPfucb( pfucb )->m_plog, pfucb->ifmp, PgnoRoot( pfucb ), 1, fTrue ) );
+    }
+
+    // Now capture all the associated indices and LV tree root page if the FDP being freed is a primary table.
+    if ( pfcbFDPToFree->FTypeTable() )
+    {
+        for ( const FCB* pfcbT = pfcbFDPToFree->PfcbNextIndex(); pfcbT != pfcbNil; pfcbT = pfcbT->PfcbNextIndex() )
+        {
+            Call( ErrRBSRDWLatchAndCapturePreImage(
+                pfucb->ifmp,
+                pfcbT->PgnoFDP(),
+                fRBSDeletedTableRootPage,
+                pfucb->ppib->BfpriPriority( pfucb->ifmp ),
+                *tcScope ) );
+            cpgCaptured++;
+
+            if ( fEfvEnabled )
+            {
+                // Log extent being freed with special flag indicating rootpage of deleted table so available lag can capture the pre-image.
+                Call( ErrLGExtentFreed( PinstFromPfucb( pfucb )->m_plog, pfucb->ifmp, pfcbT->PgnoFDP(), 1, fTrue ) );
+            }
+        }
+
+        if ( pgnoLVRoot != pgnoNull )
+        {
+            Call( ErrRBSRDWLatchAndCapturePreImage(
+                pfucb->ifmp,
+                pgnoLVRoot,
+                fRBSDeletedTableRootPage,
+                pfucb->ppib->BfpriPriority( pfucb->ifmp ),
+                *tcScope ) );
+            cpgCaptured++;
+
+            if ( fEfvEnabled )
+            {
+                // Log extent being freed with special flag indicating rootpage of deleted table so available lag can capture the pre-image.
+                Call( ErrLGExtentFreed( PinstFromPfucb( pfucb )->m_plog, pfucb->ifmp, pgnoLVRoot, 1, fTrue ) );
+            }
+        }
+    }
+
+    if ( pcpgCaptured != NULL )
+    {
+        *pcpgCaptured = cpgCaptured;
+    }
+
+HandleError:
+    if ( pfucbNil != pfucb )
+    {
+        pfucb->pcsrRoot = pcsrNil;
+        BTClose( pfucb );
+    }
+
+    return err;
+}
+
+ERR ErrSPCaptureSpaceTreePages( FUCB* const pfucbParent, FCB* pfcb, CPG* pcpgSnapshotted )
+{
+    FUCB* pfucbOE   = pfucbNil;
+    ERR err         = JET_errSuccess;
+
+    //  open owned extent tree of freed FDP
+    CallR( ErrSPIOpenOwnExt( pfucbParent->ppib, pfcb, &pfucbOE ) );
+
+    Assert( pfucbOE );
+    Assert( pfucbOE->fOwnExt );
+
+    // Set the start bookmark to 0 and end bookmark to last possible key so that we get all the space tree pages.
+    CSPExtentKeyBM spoebmStart( SPEXTKEY::fSPExtentTypeOE, 0, SpacePool::MinPool );
+    CSPExtentKeyBM spoebmEnd( SPEXTKEY::fSPExtentTypeOE, pgnoSysMax, SpacePool::AvailExtLegacyGeneralPool );
+    LONG cbmPreread;
+    PGNO* rgPgnos = NULL;
+    CPG   cpgno   = 0;
+
+    PIBTraceContextScope tcScope = pfucbOE->ppib->InitTraceContextScope();
+    tcScope->nParentObjectClass = TceFromFUCB( pfucbOE );
+    tcScope->SetDwEngineObjid( ObjidFDP( pfucbOE ) );
+    tcScope->iorReason.SetIort( iortFreeExtSnapshot );
+
+    PrereadContext context( pfucbOE->ppib, pfucbOE );
+    Call( context.ErrPrereadBookmarkRanges(
+        spoebmStart.Pbm( pfucbOE),
+        spoebmEnd.Pbm( pfucbOE ),
+        1,
+        &cbmPreread,
+        lMax,
+        lMax,
+        JET_bitPrereadForward | bitPrereadSkip | bitIncludeNonLeafRead,
+        NULL ) );
+
+    PGNO* rgLeafPgnos       = context.RgPgno( PrereadContext::PrereadPgType::LeafPages );
+    PGNO* rgNonLeafPgnos    = context.RgPgno( PrereadContext::PrereadPgType::NonLeafPages );
+    CPG   cpgLeafPgnos      = context.CPgnos( PrereadContext::PrereadPgType::LeafPages );
+    CPG   cpgNonLeafPgnos   = context.CPgnos( PrereadContext::PrereadPgType::NonLeafPages );
+
+    // Last element in array should be pgnoNull
+    Assert( rgLeafPgnos[cpgLeafPgnos - 1] == pgnoNull );
+    Assert( rgNonLeafPgnos[cpgNonLeafPgnos - 1] == pgnoNull );
+
+    cpgno   = cpgLeafPgnos + cpgNonLeafPgnos - 2;
+    rgPgnos = new PGNO[cpgno];
+
+    // Ignore the pgnoNull
+    memcpy( rgPgnos, rgNonLeafPgnos, ( cpgNonLeafPgnos - 1 ) * sizeof( PGNO ) );
+    memcpy( rgPgnos + cpgNonLeafPgnos - 1, rgLeafPgnos, ( cpgLeafPgnos - 1 ) * sizeof( PGNO ) );
+
+    std::sort( rgPgnos, rgPgnos + cpgno - 1, CmpPgno );
+
+    PGNO pgnoFirst = pgnoNull;
+    LONG cpgExtent = 0;
+
+    // Find if there is any continuous extent in space tree. Also capture preimage if needed.
+    for ( LONG ipg = 0; ipg < cpgno; ++ipg )
+    {
+        Assert( rgPgnos[ipg] != pgnoNull );
+
+        if ( pgnoFirst == pgnoNull )
+        {
+            pgnoFirst = rgPgnos[ipg];
+            cpgExtent = 1;
+        }
+        else if ( rgPgnos[ipg - 1] + 1 == rgPgnos[ipg] )
+        {
+            // Contiguous page. Consider it as part of the current extent being tracked.
+            cpgExtent++;
+        }
+        else
+        {
+            Call( ErrSPCaptureSnapshot( pfucbOE, pgnoFirst, cpgExtent, fFalse ) );
+            pgnoFirst = rgPgnos[ipg];
+            cpgExtent = 1;
+        }
+    }
+
+    // Capture any extents we haven't captured yet.
+    Assert( cpgExtent > 0 );
+    Call( ErrSPCaptureSnapshot( pfucbOE, pgnoFirst, cpgExtent, fFalse ) );
+
+    *pcpgSnapshotted = cpgno;
+
+HandleError:
+    if ( pfucbOE != pfucbNil )
+    {
+        pfucbOE->pcsrRoot = pcsrNil;
+        BTClose( pfucbOE );
+    }
+
+    if ( rgPgnos )
+    {
+        delete[] rgPgnos;
+    }
+
+    return err;
+}
+
 //  ErrSPCaptureSnapshot
 //  ========================================================================
 //  Capture snapshot of a set of pages, used to capture pages freed without
@@ -8460,7 +8663,7 @@ HandleError:
 //  SIDE EFFECTS
 //  COMMENTS
 //-
-ERR ErrSPCaptureSnapshot( FUCB* const pfucb, const PGNO pgnoFirst, const CPG cpgSize )
+ERR ErrSPCaptureSnapshot( FUCB* const pfucb, const PGNO pgnoFirst, const CPG cpgSize, const BOOL fMarkExtentEmptyFDPDeleted )
 {
     ERR err = JET_errSuccess;
     BOOL fEfvEnabled = ( g_rgfmp[pfucb->ifmp].FLogOn() && PinstFromPfucb( pfucb )->m_plog->ErrLGFormatFeatureEnabled( JET_efvRevertSnapshot ) >= JET_errSuccess );
@@ -8470,41 +8673,65 @@ ERR ErrSPCaptureSnapshot( FUCB* const pfucb, const PGNO pgnoFirst, const CPG cpg
     tcScope->SetDwEngineObjid( ObjidFDP( pfucb ) );
     tcScope->iorReason.SetIort( iortFreeExtSnapshot );
 
-    // Break it up into I/O read size for reduce preread load on both passive and active
-    for ( CPG cpgT = 0; cpgT < cpgSize; cpgT += cpgPrereadMax )
+    // We don't have to break it down as per preread chunk since we are not reading the preimages instead just marking it to be reverted to a new page state with some special flags.
+    if ( fMarkExtentEmptyFDPDeleted )
     {
-        CPG cpgRead = LFunctionalMin( cpgSize - cpgT, cpgPrereadMax );
-
-        // If lag is the active here we will capture preimages of the freed extent here before the extent is freed.
-        if ( g_rgfmp[ pfucb->ifmp ].FRBSOn() ) 
+        // If lag is the active here we will capture preimages of the freed extent but mark it as empty page since FDP being deleted is non-revertable.
+        if ( g_rgfmp[ pfucb->ifmp ].Dbid() != dbidTemp && g_rgfmp[ pfucb->ifmp ].FRBSOn() )
         {
-            BFPrereadPageRange( pfucb->ifmp, pgnoFirst + cpgT, cpgRead, bfprfDefault, pfucb->ppib->BfpriPriority( pfucb->ifmp ), *tcScope );
-            PinstFromPfucb( pfucb )->m_plog->LGAddFreePages( cpgRead );
+            // Capture all freed but non-revertable extent pages as if they need to be reverted to empty pages when RBS is applied with special flag fRBSFDPDeleted.
+            // If we already captured a preimage for one of those pages in the extent, the revert to an empty page will be ignored for that page when we apply the snapshot.
+            CallR( g_rgfmp[ pfucb->ifmp ].PRBS()->ErrCaptureEmptyPages( g_rgfmp[ pfucb->ifmp ].Dbid(), pgnoFirst, cpgSize, fRBSFDPNonRevertableDelete ) );
 
-            BFLatch bfl;
-
-            for( int i = 0; i < cpgRead; ++i )
-            {
-                err = ErrBFWriteLatchPage( &bfl, pfucb->ifmp, pgnoFirst + cpgT + i, bflfUninitPageOk, pfucb->ppib->BfpriPriority( pfucb->ifmp ), *tcScope );
-
-                // It is fine if page is not initialized as there is no preimage to capture for it.
-                if ( err == JET_errPageNotInitialized )
-                {
-                    BFMarkAsSuperCold( pfucb->ifmp, pgnoFirst + cpgT + i );
-                    continue;
-                }
-                // Should we still allow operation to succeed and collect rest of snapshot?
-                CallR( err );
-                BFMarkAsSuperCold( &bfl );
-                BFWriteUnlatch( &bfl );
-            }
+            // We need to make sure we flush our snapshot records else we might go out of required range without flushing and fail to snapshot them as empty pages.
+            CallR( g_rgfmp[ pfucb->ifmp ].PRBS()->ErrFlushAll() );
         }
 
         if ( fEfvEnabled )
         {
             // Log extent being freed so available lag can capture the pre-image.
             // Tight loop here can cause contention on log buffer.
-            CallR( ErrLGExtentFreed( PinstFromPfucb( pfucb )->m_plog, pfucb->ifmp, pgnoFirst + cpgT, cpgRead ) );
+            CallR( ErrLGExtentFreed( PinstFromPfucb( pfucb )->m_plog, pfucb->ifmp, pgnoFirst, cpgSize, fFalse, fTrue ) );
+        }
+    }
+    else
+    {
+        // Break it up into I/O read size for reduce preread load on both passive and active
+        for ( CPG cpgT = 0; cpgT < cpgSize; cpgT += cpgPrereadMax )
+        {
+            CPG cpgRead = LFunctionalMin( cpgSize - cpgT, cpgPrereadMax );
+
+            // If lag is the active here we will capture preimages of the freed extent here before the extent is freed.
+            if ( g_rgfmp[ pfucb->ifmp ].FRBSOn() )
+            {
+                BFPrereadPageRange( pfucb->ifmp, pgnoFirst + cpgT, cpgRead, bfprfDefault, pfucb->ppib->BfpriPriority( pfucb->ifmp ), *tcScope );
+                PinstFromPfucb( pfucb )->m_plog->LGAddFreePages( cpgRead );
+
+                BFLatch bfl;
+
+                for ( int i = 0; i < cpgRead; ++i )
+                {
+                    err = ErrBFWriteLatchPage( &bfl, pfucb->ifmp, pgnoFirst + cpgT + i, bflfUninitPageOk, pfucb->ppib->BfpriPriority( pfucb->ifmp ), *tcScope );
+
+                    // It is fine if page is not initialized as there is no preimage to capture for it.
+                    if ( err == JET_errPageNotInitialized )
+                    {
+                        BFMarkAsSuperCold( pfucb->ifmp, pgnoFirst + cpgT + i );
+                        continue;
+                    }
+                    // Should we still allow operation to succeed and collect rest of snapshot?
+                    CallR( err );
+                    BFMarkAsSuperCold( &bfl );
+                    BFWriteUnlatch( &bfl );
+                }
+            }
+
+            if ( fEfvEnabled )
+            {
+                // Log extent being freed so available lag can capture the pre-image.
+                // Tight loop here can cause contention on log buffer.
+                CallR( ErrLGExtentFreed( PinstFromPfucb( pfucb )->m_plog, pfucb->ifmp, pgnoFirst + cpgT, cpgRead ) );
+            }
         }
     }
 
@@ -10028,7 +10255,7 @@ ERR ErrSPReclaimSpaceLeaks( PIB* const ppib, const IFMP ifmp )
         if ( pgnoFirstToReclaim <= pgnoLastInitial )
         {
             Assert( pgnoLastToReclaimBelowEof >= pgnoFirstToReclaim );
-            Call( ErrSPCaptureSnapshot( pfucbRoot, pgnoFirstToReclaim, pgnoLastToReclaimBelowEof - pgnoFirstToReclaim + 1 ) );
+            Call( ErrSPCaptureSnapshot( pfucbRoot, pgnoFirstToReclaim, pgnoLastToReclaimBelowEof - pgnoFirstToReclaim + 1, fFalse ) );
         }
         Call( ErrSPFreeExt( pfucbRoot, pgnoFirstToReclaim, cpgToReclaim, "LeakReclaimer" ) );
         cpgReclaimed += cpgToReclaim;
@@ -10222,7 +10449,8 @@ INLINE VOID OWNEXT_LIST::AddExtentInfoEntry(
 INLINE ERR ErrSPIFreeOwnedExtentsInList(
     FUCB        *pfucbParent,
     EXTENTINFO  *rgextinfo,
-    const ULONG cExtents )
+    const ULONG cExtents,
+    const BOOL  fFDPRevertable )
 {
     ERR         err;
 
@@ -10234,7 +10462,7 @@ INLINE ERR ErrSPIFreeOwnedExtentsInList(
         const PGNO  pgnoFirst = rgextinfo[i].PgnoLast() - cpgSize + 1;
 
         Assert( !FFUCBSpace( pfucbParent ) );
-        CallR( ErrSPCaptureSnapshot( pfucbParent, pgnoFirst, cpgSize ) );
+        CallR( ErrSPCaptureSnapshot( pfucbParent, pgnoFirst, cpgSize, !fFDPRevertable ) );
         CallR( ErrSPFreeExt( pfucbParent, pgnoFirst, cpgSize, "FreeFdpLarge" ) );
     }
 
@@ -10244,7 +10472,7 @@ INLINE ERR ErrSPIFreeOwnedExtentsInList(
 }
 
 
-LOCAL ERR ErrSPIFreeAllOwnedExtents( FUCB *pfucbParent, FCB *pfcb, const BOOL fPreservePrimaryExtent )
+LOCAL ERR ErrSPIFreeAllOwnedExtents( FUCB* pfucbParent, FCB* pfcb, const BOOL fPreservePrimaryExtent, const BOOL fRevertableFDP )
 {
     ERR         err;
     FUCB        *pfucbOE;
@@ -10273,10 +10501,10 @@ LOCAL ERR ErrSPIFreeAllOwnedExtents( FUCB *pfucbParent, FCB *pfcb, const BOOL fP
     Assert( wrnNDFoundLess != err );
     Assert( wrnNDFoundGreater != err );
 
-    EXTENTINFO  extinfo[cOEListEntriesInit];
-    OWNEXT_LIST *pOEList        = NULL;
-    OWNEXT_LIST *pOEListCurr    = NULL;
-    ULONG       cOEListEntries  = 0;
+    EXTENTINFO  extinfo[ cOEListEntriesInit ];
+    OWNEXT_LIST *pOEList = NULL;
+    OWNEXT_LIST *pOEListCurr = NULL;
+    ULONG       cOEListEntries = 0;
 
     //  Collect all Own extent and free them all at once.
     //  Note that the pages kept tracked by own extent tree contains own
@@ -10385,7 +10613,8 @@ LOCAL ERR ErrSPIFreeAllOwnedExtents( FUCB *pfucbParent, FCB *pfcb, const BOOL fP
     Call( ErrSPIFreeOwnedExtentsInList(
             pfucbParent,
             extinfo,
-            min( cOEListEntries, cOEListEntriesInit ) ) );
+            min( cOEListEntries, cOEListEntriesInit ),
+            fRevertableFDP ) );
 
     for ( pOEListCurr = pOEList;
         pOEListCurr != NULL;
@@ -10395,7 +10624,13 @@ LOCAL ERR ErrSPIFreeAllOwnedExtents( FUCB *pfucbParent, FCB *pfcb, const BOOL fP
         Call( ErrSPIFreeOwnedExtentsInList(
                 pfucbParent,
                 pOEListCurr->RgExtentInfo(),
-                pOEListCurr->CEntries() ) );
+                pOEListCurr->CEntries(),
+                fRevertableFDP ) );
+    }
+
+    if ( fRevertableFDP )
+    {
+        PERFOpt( cSPDeletedTreeSnapshottedPages.Add( PinstFromPfucb( pfucbParent ), cpgOwned ) );
     }
 
     PERFOpt( cSPDeletedTreeFreedPages.Add( PinstFromPfucb( pfucbParent ), cpgOwned ) );
@@ -10512,22 +10747,34 @@ ERR ErrSPFreeFDP(
     PIB         *ppib,
     FCB         *pfcbFDPToFree,
     const PGNO  pgnoFDPParent,
-    const BOOL  fPreservePrimaryExtent )
+    const BOOL  fPreservePrimaryExtent,
+    const BOOL  fRevertableFDP,
+    const PGNO  pgnoLVRoot )
 {
     ERR         err;
     const IFMP  ifmp            = pfcbFDPToFree->Ifmp();
     const PGNO  pgnoFDPFree     = pfcbFDPToFree->PgnoFDP();
     FUCB        *pfucbParent    = pfucbNil;
     FUCB        *pfucb          = pfucbNil;
+    CPG         cpgRootCaptured = 0;
+    BOOL        fBeginTrx   = fFalse;
 
     PIBTraceContextScope tcScope = ppib->InitTraceContextScope();
     tcScope->nParentObjectClass = pfcbFDPToFree->TCE( fTrue );
     tcScope->SetDwEngineObjid( pfcbFDPToFree->ObjidFDP() );
     tcScope->iorReason.SetIort( iortSpace );
 
+    // It's possible we are redeleting a reverted deleted FDP. Skip throwing error when we try to read root page of such a table.
+    pfcbFDPToFree->SetPpibAllowRBSFDPDeleteRead( ppib );
+
+    // Capture table root page in RBS with special flags to indicate that the only action allowed on the table after revert is delete.
+    if ( !fRevertableFDP )
+    {
+        Call( ErrSPCaptureNonRevertableFDPRootPage( ppib, pfcbFDPToFree, pgnoLVRoot, &cpgRootCaptured ) );
+    }
+
     //  begin transaction if one is already not begun
     //
-    BOOL    fBeginTrx   = fFalse;
     if ( ppib->Level() == 0 )
     {
         CallR( ErrDIRBeginTransaction( ppib, 47141, NO_GRBIT ) );
@@ -10616,7 +10863,19 @@ ERR ErrSPFreeFDP(
             pfucb = pfucbNil;
 
             Assert( !FFUCBSpace( pfucbParent ) );
-            Call( ErrSPCaptureSnapshot( pfucbParent, pgnoFDPFree, cpgPrimary ) );
+
+            Call( ErrSPCaptureSnapshot( pfucbParent, pgnoFDPFree, cpgPrimary, !fRevertableFDP ) );
+
+            if ( fRevertableFDP )
+            {
+                PERFOpt( cSPDeletedTreeSnapshottedPages.Add( PinstFromPfucb( pfucbParent ), cpgPrimary ) );
+            }
+            else
+            {
+                // Just snapshotted the FDP root page.
+                PERFOpt( cSPDeletedTreeSnapshottedPages.Add( PinstFromPfucb( pfucbParent ), cpgRootCaptured ) );
+            }
+
             Call( ErrSPFreeExt( pfucbParent, pgnoFDPFree, cpgPrimary, "FreeFdpSmall" ) );
             PERFOpt( cSPDeletedTreeFreedPages.Add( PinstFromPfucb( pfucbParent ), cpgPrimary ) );
             PERFOpt( cSPDeletedTreeFreedExtents.Inc( PinstFromPfucb( pfucbParent ) ) );
@@ -10632,6 +10891,8 @@ ERR ErrSPFreeFDP(
         BTClose( pfucb );
         pfucb = pfucbNil;
 
+        CPG cpgSnapshotted = 0;
+
         //  This function call could be a non-trivial amount of effort just to report a 
         //  small piece of data ... so we will use the trace tag its traced under to 
         //  calling this function.
@@ -10641,13 +10902,24 @@ ERR ErrSPFreeFDP(
             Call( ErrSPIReportAEsFreedWithFDP( ppib, pfcb ) );
         }
 
-        Call( ErrSPIFreeAllOwnedExtents( pfucbParent, pfcb, fPreservePrimaryExtent ) );
+        if ( !fRevertableFDP )
+        {
+            Call( ErrSPCaptureSpaceTreePages( pfucbParent, pfcb, &cpgSnapshotted ) );
+
+            // Number of space tree pages snapshotted + FDP root page
+            PERFOpt( cSPDeletedTreeSnapshottedPages.Add( PinstFromPfucb( pfucbParent ), cpgSnapshotted + cpgRootCaptured ) );
+        }
+
+        Call( ErrSPIFreeAllOwnedExtents( pfucbParent, pfcb, fPreservePrimaryExtent, fRevertableFDP ) );
+
         Assert( !Pcsr( pfucbParent )->FLatched() );
     }
 
     PERFOpt( cSPDeletedTrees.Inc( PinstFromPfucb( pfucbParent ) ) );
 
 HandleError:
+    pfcbFDPToFree->ResetPpibAllowRBSFDPDeleteRead();
+
     if ( pfucbNil != pfucb )
     {
         pfucb->pcsrRoot = pcsrNil;
@@ -11207,7 +11479,7 @@ LOCAL ERR ErrSPINewSize(
             {
                 // Capture all shrunk pages as if they need to be reverted to empty pages when RBS is applied.
                 // If we already captured a preimage for one of those shrunk pages, the revert to an empty page will be ignored for that page when we apply the snapshot.
-                Call( g_rgfmp[ ifmp ].PRBS()->ErrCaptureEmptyPages( g_rgfmp[ ifmp ].Dbid(), pgnoLastCurr + cpgReq + 1, -1 * cpgReq ) );
+                Call( g_rgfmp[ ifmp ].PRBS()->ErrCaptureEmptyPages( g_rgfmp[ ifmp ].Dbid(), pgnoLastCurr + cpgReq + 1, -1 * cpgReq, 0 ) );
                 Call( g_rgfmp[ifmp].PRBS()->ErrFlushAll() );
             }
 
@@ -11981,7 +12253,7 @@ ERR ErrSPShrinkTruncateLastExtent(
         else
         {
             Assert( speiAE.SppPool() == spp::ShelvedPool );
-            Call( ErrSPCaptureSnapshot( pfucbRoot, speiAE.PgnoFirst(), speiAE.CpgExtent() ) );
+            Call( ErrSPCaptureSnapshot( pfucbRoot, speiAE.PgnoFirst(), speiAE.CpgExtent(), fFalse ) );
             cAeExtShelved++;
         }
 

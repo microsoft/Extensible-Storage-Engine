@@ -10613,6 +10613,15 @@ EvaluationFunction=LSnapshotStallCEFLPv
 009_Help= because of running out of snapshot buffers potentially stalling
 009_Help= updates to the database.  [Dev Only]
 
+[ISPDeletedTreeSnapshottedPages]
+Type=Counter
+Object=Instances
+DetailLevel=PERF_DETAIL_DEVONLY | PERF_DETAIL_DEFAULT
+DefaultScale=0
+CounterType=PERF_COUNTER_COUNTER
+EvaluationFunction=LSPDeletedTreeSnapshottedPagesCEFLPv
+009_Name=Space Trees Deleted Snapshotted Pages/sec
+009_Help=Space Trees Deleted Snapshotted Pages/sec is the number of pages freed by space trees deletes and captured by revert snapshot per second.  [Dev Only]
 
 ;===========================================================
 ;

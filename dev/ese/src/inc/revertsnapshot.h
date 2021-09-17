@@ -702,7 +702,8 @@ class CRevertSnapshot
     ERR ErrCaptureEmptyPages(
             DBID dbid,
             PGNO pgnoFirst,
-            CPG  cpg );
+            CPG  cpg,
+            ULONG flags );
 
     RBS_POS RbsposFlushPoint() const
     {
@@ -1018,14 +1019,17 @@ private:
     CPG                         m_cpgWritePending;                  // Number of writes pending. We coalesce pages and issue write for them together. We will wait for write pending to be 0 before we continue writing.
                                                                     // We will just let one outstanding I/O to be there.
 
-    CAutoResetSignal            m_asigWritePossible;               // Signal to indicate whether a write is possible. Will be set each time a write completes and reset every time we hit disk tilt error.
+    CAutoResetSignal            m_asigWritePossible;                // Signal to indicate whether a write is possible. Will be set each time a write completes and reset every time we hit disk tilt error.
     
     CPRINTF*                    m_pcprintfRevertTrace; 
 
     CPRINTF*                    m_pcprintfIRSTrace;                 // We will log the begin and complete time of the revert alone to the IRS file to have important details in a single place.
 
+    BYTE *                      m_pbDiskPageRead;                   // For table root page, we might have to read the disk image to see if has been marked for delete. We will allocate temp buffer and keep reusing that.
+
 private:
     ERR ErrFlushDBPage( void* pvPage, PGNO pgno, USHORT cbDbPageSize, const OSFILEQOS qos );
+    ERR ErrDBDiskPageFDPRootDelete( void* pvPage, PGNO pgno, BOOL fCheckPageFDPRootDelete, BOOL fSetExistingPageFDPRootDelete, USHORT cbDbPageSize, BOOL* pfPgnoFDPRootDelete );    
     static INT __cdecl ICRBSDatabaseRevertContextCmpPgRec( const CPagePointer* pppg1, const CPagePointer* pppg2 );
     static INT __cdecl ICRBSDatabaseRevertContextPgEquals( const CPagePointer* pppg1, const CPagePointer* pppg2 );
     static void OsWriteIoComplete(
@@ -1045,7 +1049,7 @@ public:
     ERR ErrSetDbstateForRevert( ULONG rbsrchkstate, LOGTIME logtimeRevertTo );
     ERR ErrSetDbstateAfterRevert( SIGNATURE* psignRbsHdrFlush );
     ERR ErrRBSCaptureDbHdrFromRBS( RBSDbHdrRecord* prbsdbhdrrec, BOOL* pfGivenDbfilehdrCaptured );
-    ERR ErrAddPage( void* pvPage, PGNO pgno, BOOL fReplaceCached, BOOL* pfPageAddedToCache );
+    ERR ErrAddPage( void* pvPage, PGNO pgno, BOOL fReplaceCached, BOOL fCheckPageFDPRootDelete, BOOL fSetExistingPageFDPRootDelete, USHORT cbDbPageSize, BOOL* pfPageAddedToCache );
     ERR ErrResetSbmPages( IBitmapAPI** ppsbm );
     ERR ErrFlushDBPages( USHORT cbDbPageSize, BOOL fFlushDbHdr, CPG* pcpgReverted );
     BOOL FPageAlreadyCaptured( PGNO pgno );
@@ -1113,7 +1117,7 @@ private:
     ERR ErrRBSGenApply( LONG lRBSGen, RBSFILEHDR* prbsfilehdr, BOOL fDbHeaderOnly, BOOL fUseBackupDir );
     ERR ErrApplyRBSRecord( RBSRecord* prbsrec, BOOL fCaptureDBHdrFromRBS, BOOL fDbHeaderOnly, BOOL* pfGivenDbfilehdrCaptured );
     ERR ErrCheckApplyRBSContinuation();
-    ERR ErrAddRevertedNewPage( DBID dbid, PGNO pgnoRevertNew );
+    ERR ErrAddRevertedNewPage( DBID dbid, PGNO pgnoRevertNew, const BOOL fPageFDPNonRevertableDelete );
 
     ERR ErrRevertCheckpointInit();
     ERR ErrRevertCheckpointCleanup();
@@ -1127,7 +1131,7 @@ private:
     ERR ErrUpdateDbStatesAfterRevert( SIGNATURE* psignRbsHdrFlush );
     ERR ErrSetLogExt( PCWSTR wszRBSLogDirPath );
 
-    ERR ErrAddPageRecord( void* pvPage, DBID dbid, PGNO pgno, BOOL fReplaceCached );
+    ERR ErrAddPageRecord( void* pvPage, DBID dbid, PGNO pgno, BOOL fReplaceCached, BOOL fCheckPageFDPRootDelete, BOOL fSetExistingPageFDPRootDelete, USHORT cbDbPageSize );
     ERR ErrFlushPages( BOOL fFlushDbHdr );
     BOOL FPageAlreadyCaptured( DBID dbid, PGNO pgno );
 
@@ -1162,3 +1166,4 @@ public:
 
 VOID UtilLoadRBSinfomiscFromRBSfilehdr( JET_RBSINFOMISC* prbsinfomisc, const ULONG cbrbsinfomisc, const RBSFILEHDR* prbsfilehdr );
 VOID RBSResourcesCleanUpFromInst( _In_ INST * const pinst );
+ERR ErrRBSRDWLatchAndCapturePreImage( _In_ const IFMP ifmp, _In_ const PGNO pgno, ULONG fPreImageFlags, _In_ const BFPriority bfpri, _In_ const TraceContext& tc );

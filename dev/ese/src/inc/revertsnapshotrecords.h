@@ -17,7 +17,8 @@
 #define     rbsrectypeFragContinue      5
 #define     rbsrectypeDbNewPage         6
 #define     rbsrectypeDbEmptyPages      7
-#define     rbsrectypeMax               8
+#define     rbsrectypeDbEmptyPages2     8
+#define     rbsrectypeMax               9
 
 PERSISTED
 struct RBSRecord
@@ -43,6 +44,9 @@ struct RBSDbAttachRecord : public RBSRecord
 PERSISTED const ULONG fRBSPreimageDehydrated = 0x1;
 PERSISTED const ULONG fRBSPreimageCompressed = 0x2;
 PERSISTED const ULONG fRBSPreimageRevertAlways = 0x4;
+PERSISTED const ULONG fRBSDeletedTableRootPage = 0x8;
+
+PERSISTED const ULONG fRBSFDPNonRevertableDelete = 0x1;
 
 PERSISTED
 struct RBSDbPageRecord : public RBSRecord
@@ -66,6 +70,12 @@ struct RBSDbEmptyPagesRecord : public RBSRecord
     UnalignedLittleEndian<DBID>     m_dbid;
     UnalignedLittleEndian<PGNO>     m_pgnoFirst;
     UnalignedLittleEndian<CPG>      m_cpg;
+};
+
+PERSISTED
+struct RBSDbEmptyPages2Record : public RBSDbEmptyPagesRecord
+{
+    UnalignedLittleEndian<ULONG>    m_fFlags;
 };
 
 ERR ErrRBSDecompressPreimage(
@@ -105,6 +115,8 @@ CbRBSRecFixed( BYTE bRecType )
             return sizeof( RBSDbNewPageRecord );
         case rbsrectypeDbEmptyPages:
             return sizeof( RBSDbEmptyPagesRecord );
+        case rbsrectypeDbEmptyPages2:
+            return sizeof( RBSDbEmptyPages2Record );
         default:
            Assert( fFalse );
         case rbsrectypeNOP:

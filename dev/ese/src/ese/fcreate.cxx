@@ -8082,7 +8082,7 @@ HandleError:
 //+API
 // ErrIsamDeleteTable
 // ========================================================================
-// ERR ErrIsamDeleteTable( JET_SESID vsesid, JET_DBID vdbid, CHAR *szName )
+// ERR ErrIsamDeleteTable( JET_SESID vsesid, JET_DBID vdbid, CHAR *szName, BOOL fAllowTableDeleteSensitive, JET_GRBIT grbit )
 //
 // Calls ErrFILEIDeleteTable to
 // delete a file and all indexes associated with it.
@@ -8091,7 +8091,7 @@ HandleError:
 //
 // SEE ALSO     ErrIsamCreateTable
 //-
-ERR VTAPI ErrIsamDeleteTable( JET_SESID vsesid, JET_DBID vdbid, const CHAR *szName, BOOL fAllowTableDeleteSensitive )
+ERR VTAPI ErrIsamDeleteTable( JET_SESID vsesid, JET_DBID vdbid, const CHAR *szName, const BOOL fAllowTableDeleteSensitive, const JET_GRBIT grbit )
 {
     ERR     err;
     PIB     *ppib = (PIB *)vsesid;
@@ -8118,9 +8118,77 @@ ERR VTAPI ErrIsamDeleteTable( JET_SESID vsesid, JET_DBID vdbid, const CHAR *szNa
     {
         CallR( ErrPIBCheckUpdatable( ppib ) );
         
-        err = ErrFILEDeleteTable( ppib, ifmp, szName, fAllowTableDeleteSensitive );
+        err = ErrFILEDeleteTable( ppib, ifmp, szName, fAllowTableDeleteSensitive, grbit );
     }
 
+    return err;
+}
+
+LOCAL ERR ErrRBSNonRevertableDeleteTooSoon( __int64 ftPgnoFDPLastSet, INT cSecReqSinceLastTouch )
+{
+    // If it has been less than cSecReqSinceLastTouch since PgnoFDPLastSetTime we will block table delete.
+    // We might skip setting pgnoFDPLastSet if skipping the error was requested.
+    if ( ftPgnoFDPLastSet == 0 || UtilConvertFileTimeToSeconds( UtilGetCurrentFileTime() - ftPgnoFDPLastSet ) < cSecReqSinceLastTouch )
+    {
+        return JET_errRBSDeleteTableTooSoon;
+    }
+
+    return JET_errSuccess;
+}
+
+LOCAL ERR ErrRBSNonRevertableDeleteTooSoon( PIB* ppib, IFMP ifmp, FUCB* pfucb, PGNO* ppgnoFDPLV, const BOOL fSkipPgnoFDPLastSetTime )
+{
+    FCB* pfcb   = pfucb->u.pfcb;
+    ERR  err    = JET_errSuccess;
+
+    // We will use the same time as lag time to block a non-revertable delete on a table which was either created or 
+    // whose root page was moved by dbshrink during that time period.
+    INT  cSecReqSinceLastTouch = (INT) UlParam( PinstFromPpib( ppib ), JET_paramFlight_RBSMaxTimeSpanSec );
+
+    PGNO pgnoFDPLV              = pgnoNull;
+    OBJID objidFDPLV            = objidNil;
+    __int64 ftPgnoFDPLastSetLV  = { 0 };
+
+    // Running below operation to avoid short circuiting the setting of PgnoFDPLastSetTime for LV table due to possible errors.
+    if ( pfcb->FTypeTable() )
+    {
+        // Finally check for the LV table. If not already initialized in FCB get it from catalog.
+        if ( pfcb->Ptdb() == NULL || pfcb->Ptdb()->PfcbLV() == NULL || pfcb->Ptdb()->PfcbLV()->ObjidFDP() == objidNil || pfcb->Ptdb()->PfcbLV()->FileTimePgnoFDPLastSet() == 0 )
+        {
+            Call( ErrCATAccessTableLV( ppib, ifmp, pfcb->ObjidFDP(), &pgnoFDPLV, &objidFDPLV, &ftPgnoFDPLastSetLV, fSkipPgnoFDPLastSetTime ) );
+        }
+        else
+        {
+            pgnoFDPLV = pfcb->Ptdb()->PfcbLV()->PgnoFDP();
+            ftPgnoFDPLastSetLV = pfcb->Ptdb()->PfcbLV()->FileTimePgnoFDPLastSet();
+            objidFDPLV = pfcb->Ptdb()->PfcbLV()->ObjidFDP();
+        }
+
+        if ( ppgnoFDPLV != NULL )
+        {
+            *ppgnoFDPLV = pgnoFDPLV;
+        }
+    }
+
+    // Check for the table being deleted first.
+    Call( ErrRBSNonRevertableDeleteTooSoon( pfcb->FileTimePgnoFDPLastSet(), cSecReqSinceLastTouch ) );
+
+    // Check for all the index tables and LV if the deleted type is a table
+    if ( pfcb->FTypeTable() )
+    {
+        for ( const FCB* pfcbT = pfcb->PfcbNextIndex(); pfcbNil != pfcbT; pfcbT = pfcbT->PfcbNextIndex() )
+        {
+            Call( ErrRBSNonRevertableDeleteTooSoon( pfcbT->FileTimePgnoFDPLastSet(), cSecReqSinceLastTouch ) );
+        }
+
+        // Its possible LV table doesn't exist.
+        if ( objidFDPLV != objidNil )
+        {
+            Call( ErrRBSNonRevertableDeleteTooSoon( ftPgnoFDPLastSetLV, cSecReqSinceLastTouch ) );
+        }
+    }
+
+HandleError:
     return err;
 }
 
@@ -8142,18 +8210,23 @@ ERR VTAPI ErrIsamDeleteTable( JET_SESID vsesid, JET_DBID vdbid, const CHAR *szNa
 //
 // SEE ALSO     ErrIsamCreateTable
 //-
-ERR ErrFILEDeleteTable( PIB *ppib, IFMP ifmp, const CHAR *szName, BOOL fAllowTableDeleteSensitive )
+ERR ErrFILEDeleteTable( PIB *ppib, IFMP ifmp, const CHAR *szName, const BOOL fAllowTableDeleteSensitive, const JET_GRBIT grbit )
 {
     ERR     err;
     FUCB    *pfucb              = pfucbNil;
     FUCB    *pfucbParent        = pfucbNil;
     FCB     *pfcb               = pfcbNil;
-    PGNO    pgnoFDP;
     OBJID   objidTable;
     CHAR    szTable[JET_cbNameMost+1];
     BOOL    fInUseBySystem;
     BOOL    fInUseBySystemOrig;
     VER     *pver;
+
+    // If either JET_bitNonRevertableTableDelete is not set or if db efv doesn't support non-revertable table deletes yet, we will do a revertable table delete.
+    BOOL    fRevertableTableDelete          = !( grbit & JET_bitNonRevertableTableDelete ) || ( g_rgfmp[ ifmp ].ErrDBFormatFeatureEnabled( JET_efvRBSNonRevertableTableDeletes ) < JET_errSuccess );
+    BOOL    fRevertableTableDeleteIfTooSoon = !!( grbit & JET_bitRevertableTableDeleteIfTooSoon );
+
+    VERDELETETABLEDATA  verdeletetabledata;
 
     CheckPIB( ppib );
     CheckDBID( ppib, ifmp );
@@ -8163,6 +8236,9 @@ ERR ErrFILEDeleteTable( PIB *ppib, IFMP ifmp, const CHAR *szName, BOOL fAllowTab
         AssertSz( fFalse, "Don't call DeleteTable on temp tables; use CloseTable instead." );
         return ErrERRCheck( JET_errCannotDeleteTempTable );
     }
+
+    Assert( !g_fRepair || fRevertableTableDelete );
+    Assert( !g_fRepair || !g_rgfmp[ ifmp ].FLogOn() );
     
     //  must normalise for CAT hash deletion
     //  PERF UNDONE: the name will be normalised again in FILEOpenTable()
@@ -8186,23 +8262,44 @@ ERR ErrFILEDeleteTable( PIB *ppib, IFMP ifmp, const CHAR *szName, BOOL fAllowTab
     Call( ErrDIROpen( ppib, pgnoSystemRoot, ifmp, &pfucbParent ) );
 
     {
-    JET_GRBIT grbit = JET_bitTableDelete|JET_bitTableDenyRead ;
+    JET_GRBIT grbitOpen = JET_bitTableDelete|JET_bitTableDenyRead ;
     if ( fAllowTableDeleteSensitive )
     {
-        grbit |= JET_bitTableAllowSensitiveOperation;
+        grbitOpen |= JET_bitTableAllowSensitiveOperation;
+    }
+    if ( !fRevertableTableDelete && !fRevertableTableDeleteIfTooSoon )
+    {
+        grbitOpen |= JET_bitAllowPgnoFDPLastSetTime;
     }
     Call( ErrFILEOpenTable(
                 ppib,
                 ifmp,
                 &pfucb,
                 szName,
-                grbit ) );
+                grbitOpen ) );
     fInUseBySystemOrig = ( JET_wrnTableInUseBySystem == err );
+    }
+
+    if ( !fRevertableTableDelete )
+    {
+        // We need root pgno of LV tree (if exists) before it gets removed from the catalog so that RBS can capture preimage of the LV root page.
+        err = ErrRBSNonRevertableDeleteTooSoon( ppib, ifmp, pfucb, &verdeletetabledata.pgnoFDPLV, fRevertableTableDeleteIfTooSoon );
+
+        // If non-revertable delete is failing due to JET_errRBSDeleteTableTooSoon and we are allowed to switch to revertable delete in such a case, do so.
+        if ( err == JET_errRBSDeleteTableTooSoon && fRevertableTableDeleteIfTooSoon )
+        {
+            fRevertableTableDelete  = fTrue;
+            err                     = JET_errSuccess;
+        }
+
+        Call( err );
     }
 
     // We should now have exclusive use of the table.
     pfcb = pfucb->u.pfcb;
-    pgnoFDP = pfcb->PgnoFDP();
+    verdeletetabledata.pgnoFDP                  = pfcb->PgnoFDP();
+    verdeletetabledata.fRevertableTableDelete   = fRevertableTableDelete;
+
     objidTable = pfcb->ObjidFDP();
 
     Assert( pfcb->FTypeTable() );
@@ -8218,24 +8315,43 @@ ERR ErrFILEDeleteTable( PIB *ppib, IFMP ifmp, const CHAR *szName, BOOL fAllowTab
         goto HandleError;
     }
 
-    // If we are activated on the available lag copy, cap the size of table to
-    // be deleted to prevent version store cleanup being bogged down by collection
-    // of pre-images of the pages freed.
-    if ( g_rgfmp[ ifmp ].FRBSOn() &&
-         UlParam( PinstFromIfmp( ifmp ), JET_paramFlight_RBSMaxTableDeletePages ) != 0 )
+    pfcb->SetPpibAllowRBSFDPDeleteRead( ppib );
+
+    // Repair might delete some system table while trying to repair the database.
+    // We will skip the below checks to avoid on any corruption we might hit in the deleted tables.
+    if ( fRevertableTableDelete && !g_fRepair )
     {
-        CPG cpgOwned;
-        Call( ErrSPGetInfo(
-                  ppib,
-                  ifmp,
-                  pfucb,
-                  (BYTE *)&cpgOwned,
-                  sizeof( cpgOwned ),
-                  fSPOwnedExtent,
-                  gci::Allow ) );
-        if ( cpgOwned > UlParam( PinstFromIfmp( ifmp ), JET_paramFlight_RBSMaxTableDeletePages ) )
+        Call( ErrBTIGotoRoot( pfucb, latchReadTouch ) );
+
+        // This table was already deleted in non-revertable way and reverted back.
+        // It is now being delete with revertable flag. We cannot allow this.
+        if ( pfcb->FRevertedFDPToDelete() )
         {
-            Error( ErrERRCheck( JET_errRBSDeleteTableTooBig ) );
+            Error( ErrERRCheck( JET_errRBSRevertableDeleteNotPossible ) );
+        }
+
+         Assert( Pcsr( pfucb )->FLatched() );
+         Pcsr( pfucb )->ReleasePage();
+
+        // If we are activated on the available lag copy, cap the size of table to
+        // be deleted to prevent version store cleanup being bogged down by collection
+        // of pre-images of the pages freed.
+        if ( g_rgfmp[ ifmp ].FRBSOn() &&
+            UlParam( PinstFromIfmp( ifmp ), JET_paramFlight_RBSMaxTableDeletePages ) != 0 )
+        {
+            CPG cpgOwned;
+            Call( ErrSPGetInfo(
+                ppib,
+                ifmp,
+                pfucb,
+                (BYTE*) &cpgOwned,
+                sizeof( cpgOwned ),
+                fSPOwnedExtent,
+                gci::Allow ) );
+            if ( cpgOwned > UlParam( PinstFromIfmp( ifmp ), JET_paramFlight_RBSMaxTableDeletePages ) )
+            {
+                Error( ErrERRCheck( JET_errRBSDeleteTableTooBig ) );
+            }
         }
     }
 
@@ -8246,7 +8362,7 @@ ERR ErrFILEDeleteTable( PIB *ppib, IFMP ifmp, const CHAR *szName, BOOL fAllowTab
     Assert( pfcb->FDomainDenyReadByUs( ppib ) );
 
     pver = PverFromIfmp( pfucb->ifmp );
-    err = pver->ErrVERFlag( pfucbParent, operDeleteTable, &pgnoFDP, sizeof(pgnoFDP) );
+    err = pver->ErrVERFlag( pfucbParent, operDeleteTable, &verdeletetabledata, sizeof(verdeletetabledata) );
     if ( err < 0 )
     {
         // Must close FUCB first in case sentinel exists.  Set to pfucbNil
@@ -8258,7 +8374,7 @@ ERR ErrFILEDeleteTable( PIB *ppib, IFMP ifmp, const CHAR *szName, BOOL fAllowTab
         goto HandleError;
     }
 
-    Assert( pfcb->PgnoFDP() == pgnoFDP );
+    Assert( pfcb->PgnoFDP() == verdeletetabledata.pgnoFDP );
     Assert( pfcb->Ifmp() == ifmp );
 
     // UNDONE: Is it necessary to grab critical section, since we have
@@ -8315,7 +8431,9 @@ ERR ErrFILEDeleteTable( PIB *ppib, IFMP ifmp, const CHAR *szName, BOOL fAllowTab
             {
                 //  don't care about RCE clean, because any outstanding versions will be cleaned
                 //  before the DeleteTable version is cleaned.
-                if( !FPIBSessionRCEClean(pfucbT->ppib ) )
+                //  We will now allow db scan to redelete a partially reverted deleted table by RBS.
+                //  So if delete is called from DbScan session and the given FUCB is held by dbscan session, we will allow it.
+                if( !FPIBSessionRCEClean( pfucbT->ppib ) && ( !pfucbT->ppib->FSessionDBScan() || pfucbT != pfucb ) )
                 {
                     //  the DeletePending flag for this table has now been set, forcing
                     //  OLD2/DBSCAN to exit at its earliest convenience. Wait for it.
@@ -8353,6 +8471,8 @@ ERR ErrFILEDeleteTable( PIB *ppib, IFMP ifmp, const CHAR *szName, BOOL fAllowTab
     }
 #endif
 
+    Assert( pfcb != pfcbNil );
+    pfcb->ResetPpibAllowRBSFDPDeleteRead();
     DIRClose( pfucb );
     pfucb = pfucbNil;
 
@@ -8373,6 +8493,11 @@ HandleError:
         ifmp,
         JET_tracetagDDLWrite,
         OSFormat( "Finished deletion of table '%s' with error %d (0x%x)", szTable, err, err ) );
+
+    if ( pfcb != pfcbNil )
+    {
+        pfcb->ResetPpibAllowRBSFDPDeleteRead();
+    }
 
     if ( pfucb != pfucbNil )
     {

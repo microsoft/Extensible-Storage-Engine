@@ -1732,6 +1732,42 @@ JETUNITTESTDB( RBSPreImageCompression, Xpress, dwOpenDatabase )
 
 #endif // ENABLE_JET_UNIT_TEST
 
+ERR ErrRBSRDWLatchAndCapturePreImage( _In_ const IFMP ifmp, _In_ const PGNO pgno, ULONG fPreImageFlags, _In_ const BFPriority bfpri, _In_ const TraceContext& tc )
+{
+    if ( g_rgfmp[ifmp].Dbid() == dbidTemp ||
+        !g_rgfmp[ifmp].FRBSOn() )
+    {
+        return JET_errSuccess;
+    }
+
+    ERR err = JET_errSuccess;
+    RBS_POS rbspos;
+    CPAGE cpageT;
+    BFLatch bfl;
+
+    //  get exclusive latch.
+    Call( ErrBFRDWLatchPage( &bfl, ifmp, pgno, bflfDefault, bfpri, tc ) );
+
+    Call( g_rgfmp[ifmp].PRBS()->ErrCapturePreimage( 
+        g_rgfmp[ifmp].Dbid(),
+        pgno,
+        (const BYTE *)bfl.pv,
+        CbBFBufferSize( &bfl ),
+        &rbspos,
+        fPreImageFlags ) );
+
+    OSTrace( JET_tracetagRBS, OSFormat(
+        "Collecting pre-image for RDW latched page - dbid:%u,pgno:%lu,dbtime:0x%I64x\n",
+        g_rgfmp[ifmp].Dbid(),
+        pgno,
+        (DBTIME)((CPAGE::PGHDR *)bfl.pv)->dbtimeDirtied ) );
+
+    BFRDWUnlatch( &bfl );
+
+HandleError:
+    return err;
+}
+
 ERR CRevertSnapshot::ErrCapturePreimage(
         DBID dbid,
         PGNO pgno,
@@ -1742,7 +1778,6 @@ ERR CRevertSnapshot::ErrCapturePreimage(
 {
     Assert( m_fInitialized );
     Assert( !m_fInvalid );
-    Assert( fFlags == 0 || fFlags == fRBSPreimageRevertAlways );
 
     ERR err = JET_errSuccess;
     BYTE *pbDataDehydrated = NULL, *pbDataCompressed = NULL;
@@ -1819,24 +1854,27 @@ ERR CRevertSnapshot::ErrCaptureDbAttach( WCHAR* wszDatabaseName, const DBID dbid
 ERR CRevertSnapshot::ErrCaptureEmptyPages(
     DBID dbid,
     PGNO pgnoFirst,
-    CPG  cpg )
+    CPG  cpg,
+    ULONG fFlags )
 {
     Assert( m_fInitialized );
     Assert( !m_fInvalid );
     Assert( pgnoFirst > 0 );
     Assert( dbid != dbidTemp );
     Assert( cpg > 0 );
+    Assert( fFlags == 0 || fFlags == fRBSFDPNonRevertableDelete );
 
     RBS_POS rbspos;
     DATA dataDummy;
     dataDummy.Nullify();
 
-    RBSDbEmptyPagesRecord dbRec;
-    dbRec.m_bRecType    = rbsrectypeDbEmptyPages;
-    dbRec.m_usRecLength = sizeof( RBSDbEmptyPagesRecord );
+    RBSDbEmptyPages2Record dbRec;
+    dbRec.m_bRecType    = rbsrectypeDbEmptyPages2;
+    dbRec.m_usRecLength = sizeof( RBSDbEmptyPages2Record );
     dbRec.m_dbid        = dbid;
     dbRec.m_pgnoFirst   = pgnoFirst;
     dbRec.m_cpg         = cpg;
+    dbRec.m_fFlags      = fFlags;
 
     return ErrCaptureRec( &dbRec, &dataDummy, &rbspos );
 }
@@ -2573,8 +2611,8 @@ VOID CRevertSnapshotForAttachedDbs::RBSCheckSpaceUsage()
             ErrUtilFormatFileTimeAsTimeWithSeconds( m_ftSpaceUsageLastLogged, wszTimePrevRun, _countof( wszTimePrevRun ), &cchRequired );
             ErrUtilFormatFileTimeAsDate( m_ftSpaceUsageLastLogged, wszDatePrevRun, _countof( wszDatePrevRun ), &cchRequired );
 
-            OSStrCbFormatW( wszSizeGrown, sizeof( wszSizeGrown ), L"%I64u", cbSpaceGrowth ),
-                OSStrCbFormatW( wszNumLogs, sizeof( wszNumLogs ), L"%d", cLogsGrowth );
+            OSStrCbFormatW( wszSizeGrown, sizeof( wszSizeGrown ), L"%I64u", cbSpaceGrowth );
+            OSStrCbFormatW( wszNumLogs, sizeof( wszNumLogs ), L"%d", cLogsGrowth );
 
             m_cbFileSizeSpaceUsageLastRun   = m_prbsfilehdrCurrent->rbsfilehdr.le_cbLogicalFileSize;
             m_lGenSpaceUsageLastRun         = lGenCurrent;
@@ -3803,6 +3841,12 @@ CRBSDatabaseRevertContext::~CRBSDatabaseRevertContext()
     }
 
     m_pcprintfIRSTrace = NULL;
+
+    if ( m_pbDiskPageRead )
+    {
+        OSMemoryPageFree( m_pbDiskPageRead );
+        m_pbDiskPageRead = NULL;
+    }
 }
 
 // Reset the spare bit map of the pages by freeing and reallocating memory.
@@ -4035,19 +4079,81 @@ BOOL CRBSDatabaseRevertContext::FPageAlreadyCaptured( PGNO pgno )
     return fPageAlreadyCaptured;
 }
 
+// Whether the given page on disk has fPageFDPDelete flag set.
+//
+ERR CRBSDatabaseRevertContext::ErrDBDiskPageFDPRootDelete( void* pvPage, PGNO pgno, BOOL fCheckPageFDPRootDelete, BOOL fSetExistingPageFDPRootDelete, USHORT cbDbPageSize, BOOL* pfPgnoFDPRootDelete )
+{
+    ERR err = JET_errSuccess;
+
+    TraceContextScope tcRevertPage( iorpRevertPage );
+
+    // There can be only read at a time. So don't have to worry about the buffer being used by someone else.
+    if ( m_pbDiskPageRead == NULL )
+    {
+        Alloc( m_pbDiskPageRead = (BYTE*) PvOSMemoryPageAlloc( cbDbPageSize, NULL ) );
+    }
+
+    //  read the table root page from disk.
+    err = m_pfapiDb->ErrIORead( *tcRevertPage, OffsetOfPgno( pgno ), 1 * cbDbPageSize, m_pbDiskPageRead, QosSyncDefault( m_pinst ) );
+
+    // The page doesn't exist on disk.
+    if ( err == JET_errPageNotInitialized || err == JET_errFileIOBeyondEOF )
+    {
+        *pfPgnoFDPRootDelete = fFalse;
+        return JET_errSuccess;
+    }
+
+    Call( err );
+
+    {
+        if ( fCheckPageFDPRootDelete )
+        {
+            CPAGE cpageDisk;
+            cpageDisk.LoadPage( ifmpNil, pgno, (void*) m_pbDiskPageRead, cbDbPageSize );
+
+            // This page on disk is marked as a reverted new page or a shrunk page.
+            if ( cpageDisk.FRevertedNewPage() || cpageDisk.FShrunkPage() )
+            {
+                *pfPgnoFDPRootDelete = fFalse;
+                return JET_errSuccess;
+            }
+
+            if ( cpageDisk.FPageFDPRootDelete() )
+            {
+                *pfPgnoFDPRootDelete = fTrue;
+                return JET_errSuccess;
+            }
+        }
+        else
+        {
+            Assert( fSetExistingPageFDPRootDelete );
+
+            // Copy disk image to the pvpage we are going to flush and just mark it to set fPageFDPDelete
+            UtilMemCpy( pvPage, (void*) m_pbDiskPageRead, cbDbPageSize );
+            *pfPgnoFDPRootDelete = fTrue;
+            return JET_errSuccess;
+        }
+    }
+
+HandleError:
+    return err;
+}
+
 // Add the given page to our array and mark it in our page bitmap
 //
-ERR CRBSDatabaseRevertContext::ErrAddPage( void* pvPage, PGNO pgno, BOOL fReplaceCached, BOOL* pfPageAddedToCache )
+ERR CRBSDatabaseRevertContext::ErrAddPage( void* pvPage, PGNO pgno, BOOL fReplaceCached, BOOL fCheckPageFDPRootDelete, BOOL fSetExistingPageFDPRootDelete, USHORT cbDbPageSize, BOOL* pfPageAddedToCache )
 {
     Assert( pvPage );
     Assert( m_rgRBSDbPage );
     Assert( m_rgRBSDbPage->Size() < m_rgRBSDbPage->Capacity() );
     
+    ERR                         err             = JET_errSuccess;
     BOOL                        fPageInCache    = fFalse;
     IBitmapAPI::ERR             errbm           = IBitmapAPI::ERR::errSuccess;
     CArray< CPagePointer >::ERR errArray        = CArray< CPagePointer >::ERR::errSuccess;
     size_t ientry                               = m_rgRBSDbPage->Size();
     size_t ientryExisting                       = CArray< CPagePointer >::iEntryNotFound;
+    BOOL   fMarkPgnoFDPRootDelete               = fFalse;
     CPagePointer pageptr( (DWORD_PTR) pvPage, pgno );
 
     *pfPageAddedToCache = fTrue;
@@ -4071,6 +4177,28 @@ ERR CRBSDatabaseRevertContext::ErrAddPage( void* pvPage, PGNO pgno, BOOL fReplac
 
             CPagePointer ppTempPage( m_rgRBSDbPage->Entry( ientryExisting ) );
 
+            if ( fCheckPageFDPRootDelete )
+            {
+                Assert( ppTempPage.DwPage() );
+
+                CPAGE cpageTemp;
+                cpageTemp.LoadPage( ifmpNil, ppTempPage.PgNo(), (void*) ppTempPage.DwPage(), cbDbPageSize );
+
+                if ( cpageTemp.FPageFDPRootDelete() )
+                {
+                    fMarkPgnoFDPRootDelete = fTrue;
+                }
+
+                fCheckPageFDPRootDelete = fFalse;
+            }
+            else if ( fSetExistingPageFDPRootDelete )
+            {
+                // We will capture existing preimage and just set the fPageFDPDelete flag
+                UtilMemCpy( pvPage, (void*) ppTempPage.DwPage(), cbDbPageSize );
+                fSetExistingPageFDPRootDelete   = fFalse;
+                fMarkPgnoFDPRootDelete          = fTrue;
+            }
+
             // Free the memory here after getting the existing page from cache and replace it with the given page image.
             OSMemoryPageFree( (void*) ppTempPage.DwPage() );
             errArray = m_rgRBSDbPage->ErrSetEntry( ientryExisting, NULL );
@@ -4084,6 +4212,28 @@ ERR CRBSDatabaseRevertContext::ErrAddPage( void* pvPage, PGNO pgno, BOOL fReplac
             ientry = ientryExisting;
             *pfPageAddedToCache = fFalse;
         }
+    }
+
+    // The current FDP might have been marked for delete using a flag on root page. It isn't in cache but might have been flushed to disk.
+    // Let's pull the page from disk and check if we need to mark it for delete and not overwrite the flag.
+    if ( fCheckPageFDPRootDelete || fSetExistingPageFDPRootDelete )
+    {
+        Assert( !fMarkPgnoFDPRootDelete );
+        Call( ErrDBDiskPageFDPRootDelete( pvPage, pgno, fCheckPageFDPRootDelete, fSetExistingPageFDPRootDelete, cbDbPageSize, &fMarkPgnoFDPRootDelete ) );
+    }
+
+    // If either another preimage of the root page exists in our cache or if the disk image of this page exists and it has been marked for delete
+    // but the given image hasn't, mark the given image with the flag as well, to indicate that this table has been deleted and we shouldn't allow any other operation on it.
+    if ( fMarkPgnoFDPRootDelete )
+    {
+        CPAGE cpageGiven;
+        cpageGiven.LoadPage( ifmpNil, pgno, pvPage, cbDbPageSize );
+
+        Assert( cpageGiven.FRootPage() );
+        cpageGiven.SetPageFDPDelete( fTrue );
+
+        cpageGiven.PreparePageForWrite( CPAGE::PageFlushType::pgftUnknown, fTrue, fTrue );
+        cpageGiven.UnloadPage();
     }
 
     errArray = m_rgRBSDbPage->ErrSetEntry( ientry, pageptr );
@@ -4101,7 +4251,8 @@ ERR CRBSDatabaseRevertContext::ErrAddPage( void* pvPage, PGNO pgno, BOOL fReplac
     errbm = m_psbmCachedDbPages->ErrSet( pgno, fTrue );
     Assert( errbm == IBitmapAPI::ERR::errSuccess );
 
-    return JET_errSuccess;
+HandleError:
+    return err;
 }
 
 // Comparer to allow sorting of pages in our array to try and get sequential writes.
@@ -4154,6 +4305,7 @@ ERR CRBSDatabaseRevertContext::ErrFlushDBPage( void* pvPage, PGNO pgno, USHORT c
 
     QWORD cbSize = 0;
     DBTIME dbtimePage;
+    BOOL   fPageFDPDelete;
 
     CPAGE cpageT;
     cpageT.LoadPage( ifmpNil, pgno, pvPage, cbDbPageSize );
@@ -4164,6 +4316,7 @@ ERR CRBSDatabaseRevertContext::ErrFlushDBPage( void* pvPage, PGNO pgno, USHORT c
     }
 
     dbtimePage = cpageT.Dbtime();
+    fPageFDPDelete = cpageT.FPageFDPDelete();
     cpageT.UnloadPage();
 
     // if any part of the page range is beyond EOF, extend the database to accommodate the page
@@ -4191,7 +4344,7 @@ ERR CRBSDatabaseRevertContext::ErrFlushDBPage( void* pvPage, PGNO pgno, USHORT c
 
     m_pdbfilehdr->le_ulRevertPageCount++;
 
-    (*m_pcprintfRevertTrace)( "Pg %ld,%I64x\r\n", pgno, dbtimePage );
+    (*m_pcprintfRevertTrace)( "Pg %ld,%I64x,[%s]\r\n", pgno, dbtimePage, fPageFDPDelete ? "D" : "" );
 
 HandleError:
     return err;
@@ -4925,7 +5078,7 @@ HandleError:
 
 // Add the given page record to the corresponding database's revert context.
 //
-ERR CRBSRevertContext::ErrAddPageRecord( void* pvPage, DBID dbid, PGNO pgno, BOOL fReplaceCached )
+ERR CRBSRevertContext::ErrAddPageRecord( void* pvPage, DBID dbid, PGNO pgno, BOOL fReplaceCached, BOOL fCheckPageFDPRootDelete, BOOL fSetExistingPageFDPRootDelete, USHORT cbDbPageSize )
 {
     Assert( m_mpdbidirbsdbrc[ dbid ] != irbsdbrcInvalid );
     Assert( m_mpdbidirbsdbrc[ dbid ] <= m_irbsdbrcMaxInUse );
@@ -4934,7 +5087,7 @@ ERR CRBSRevertContext::ErrAddPageRecord( void* pvPage, DBID dbid, PGNO pgno, BOO
     ERR err = JET_errSuccess;
     BOOL fPageAddedToCache = fTrue;
 
-    Call( m_rgprbsdbrcAttached[ m_mpdbidirbsdbrc[ dbid ] ]->ErrAddPage( pvPage, pgno, fReplaceCached, &fPageAddedToCache ) );
+    Call( m_rgprbsdbrcAttached[ m_mpdbidirbsdbrc[ dbid ] ]->ErrAddPage( pvPage, pgno, fReplaceCached, fCheckPageFDPRootDelete, fSetExistingPageFDPRootDelete, cbDbPageSize, &fPageAddedToCache ) );
 
     if ( fPageAddedToCache )
     {
@@ -4958,7 +5111,7 @@ BOOL CRBSRevertContext::FPageAlreadyCaptured( DBID dbid, PGNO pgno )
 
 // Adds the given pgno as a reverted new page to the list of pages to reverted for the given database.
 //
-ERR CRBSRevertContext::ErrAddRevertedNewPage( DBID dbid, PGNO pgnoRevertNew )
+ERR CRBSRevertContext::ErrAddRevertedNewPage( DBID dbid, PGNO pgnoRevertNew, const BOOL fPageFDPNonRevertableDelete )
 {
     ERR err         = JET_errSuccess;
     void*   pvPage  = NULL;
@@ -4969,12 +5122,12 @@ ERR CRBSRevertContext::ErrAddRevertedNewPage( DBID dbid, PGNO pgnoRevertNew )
         Alloc( pvPage );
 
         CPAGE cpage;
-        cpage.GetRevertedNewPage( pgnoRevertNew, pvPage, m_cbDbPageSize );
+        cpage.GetRevertedNewPage( pgnoRevertNew, pvPage, m_cbDbPageSize, fPageFDPNonRevertableDelete );
         Assert( cpage.Pgft() == CPAGE::PageFlushType::pgftUnknown );
 
         // For new page/multi new page record type, we don't store the preimage of the page since it indicates that it was a new page before it was updated.
         // We will just write out an empty page for such a page.
-        Call( ErrAddPageRecord( pvPage, dbid, pgnoRevertNew, fFalse ) );
+        Call( ErrAddPageRecord( pvPage, dbid, pgnoRevertNew, fFalse, fFalse, fFalse, m_cbDbPageSize ) );
     }
 
 HandleError:
@@ -5114,11 +5267,13 @@ ERR CRBSRevertContext::ErrApplyRBSRecord( RBSRecord* prbsrec, BOOL fCaptureDbHdr
             dataImage.SetPv( prbsdbpgrec->m_rgbData );
             dataImage.SetCb( prbsdbpgrec->m_usRecLength - sizeof(RBSDbPageRecord) );
 
-            BOOL fPageAlreadyCaptured = FPageAlreadyCaptured( prbsdbpgrec->m_dbid, prbsdbpgrec->m_pgno );
+            BOOL fPageAlreadyCaptured               = FPageAlreadyCaptured( prbsdbpgrec->m_dbid, prbsdbpgrec->m_pgno );
+            BOOL fCheckPageFDPRootDelete            = fFalse;
+            BOOL fSetExistingPageFDPRootDelete      = fFalse;
 
             // If either revert always flag is set or if we have not already captured page preimage to revert to, capture the page record.
-            //
-            if ( prbsdbpgrec->m_fFlags & fRBSPreimageRevertAlways || !fPageAlreadyCaptured )
+            // If fRBSDeletedTableRootPage is set but page was already capture as part of this snapshot, we will still open the cache page or disk page and stamp the flag on it.
+            if ( prbsdbpgrec->m_fFlags & fRBSPreimageRevertAlways || prbsdbpgrec->m_fFlags & fRBSDeletedTableRootPage || !fPageAlreadyCaptured )
             {
                 pvPage = PvOSMemoryPageAlloc( m_cbDbPageSize, NULL );
                 Alloc( pvPage );
@@ -5137,10 +5292,28 @@ ERR CRBSRevertContext::ErrApplyRBSRecord( RBSRecord* prbsrec, BOOL fCaptureDbHdr
 
                 CPAGE cpage;
                 cpage.LoadPage( ifmpNil, prbsdbpgrec->m_pgno, pvPage, m_cbDbPageSize );
+
+                if ( prbsdbpgrec->m_fFlags & fRBSDeletedTableRootPage )
+                {
+                    Assert( cpage.FRootPage() );
+                    cpage.SetPageFDPDelete( fTrue );
+                }
+
                 cpage.PreparePageForWrite( CPAGE::PageFlushType::pgftUnknown, fTrue, fTrue );
+
+                // We will check the root page for fPageFDPDelete, if it is a root page and fPageFDPDelete is not set on the preimage and
+                // no other preimage was capture as part of this snapshot. If one was captured, we should have done the check for fPageFDPDelete then.
+                fCheckPageFDPRootDelete = cpage.FRootPage() && !cpage.FPageFDPDelete() && !fPageAlreadyCaptured;
+
+                // We will set fPageFDPDelete on the existing page if it is a root page and fPageFDPDelete is set on the preimage and
+                // already another preimage has been captured for the page. We want to keep the capture preimage but set the flag on it.
+                fSetExistingPageFDPRootDelete = cpage.FPageFDPRootDelete() && fPageAlreadyCaptured;
+
+                Assert( !( fCheckPageFDPRootDelete && fSetExistingPageFDPRootDelete ) );
+
                 cpage.UnloadPage();
 
-                Call( ErrAddPageRecord( pvPage, prbsdbpgrec->m_dbid, prbsdbpgrec->m_pgno, fPageAlreadyCaptured ) );
+                Call( ErrAddPageRecord( pvPage, prbsdbpgrec->m_dbid, prbsdbpgrec->m_pgno, fPageAlreadyCaptured, fCheckPageFDPRootDelete, fSetExistingPageFDPRootDelete, m_cbDbPageSize ) );
             }
 
             break;
@@ -5154,11 +5327,12 @@ ERR CRBSRevertContext::ErrApplyRBSRecord( RBSRecord* prbsrec, BOOL fCaptureDbHdr
             }
 
             RBSDbNewPageRecord* prbsdbnewpgrec = ( RBSDbNewPageRecord* ) prbsrec;
-            Call( ErrAddRevertedNewPage( prbsdbnewpgrec->m_dbid, prbsdbnewpgrec->m_pgno ) );
+            Call( ErrAddRevertedNewPage( prbsdbnewpgrec->m_dbid, prbsdbnewpgrec->m_pgno, fFalse ) );
             break;
         }
 
         case rbsrectypeDbEmptyPages:
+        case rbsrectypeDbEmptyPages2:
         {
             if ( fDbHeaderOnly )
             {
@@ -5166,11 +5340,12 @@ ERR CRBSRevertContext::ErrApplyRBSRecord( RBSRecord* prbsrec, BOOL fCaptureDbHdr
             }
 
             RBSDbEmptyPagesRecord* prbsdbemptypgrec = ( RBSDbEmptyPagesRecord* ) prbsrec;
+            ULONG fFlags                            = bRecType == rbsrectypeDbEmptyPages2 ? ( ( RBSDbEmptyPages2Record* ) prbsrec )->m_fFlags : 0;
             PGNO pgnoLast = prbsdbemptypgrec->m_pgnoFirst + prbsdbemptypgrec->m_cpg - 1;
 
             for ( PGNO pgno = prbsdbemptypgrec->m_pgnoFirst; pgno <= pgnoLast; ++pgno )
             {
-                Call( ErrAddRevertedNewPage( prbsdbemptypgrec->m_dbid, pgno ) );
+                Call( ErrAddRevertedNewPage( prbsdbemptypgrec->m_dbid, pgno, !!( fFlags & fRBSFDPNonRevertableDelete ) ) );
                 Call( ErrCheckApplyRBSContinuation() );
             }
 

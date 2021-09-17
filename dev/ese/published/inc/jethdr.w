@@ -666,6 +666,8 @@ typedef void (JET_API *JET_SPCATCALLBACK)( _In_ const unsigned long pgno, _In_ c
 #define JET_efvApplyRevertSnapshot                          9380    //  Added le_lgposCommitBeforeRevert to the database header which captures the last commit lgpos before revert was done and is used to ignore JET_errDbTimeTooOld errors on pasive copies.
 #define JET_efvExtentPageCountCache                         9400    //  Adds support for the ExtentPageCountCache table.
 #define JET_efvLz4Compression                               9420    //  Adds support for compressing/decompressing data using Lz4.
+// 9440 being skipped due to revert of a bad deployed build
+#define JET_efvRBSNonRevertableTableDeletes                 9460    //  Adds support for non-revertable table deletes. The active will stop logging extent freed LR for all freed extent but if available lag doesn't support it yet, shouldn't be allowed.
 
 // Special format specifiers here
 #define JET_efvUseEngineDefault             (0x40000001)    //  Instructs the engine to use the maximal default supported Engine Format Version. (default)
@@ -3322,6 +3324,7 @@ typedef struct _BTREE_STATS
 #if ( JET_VERSION >= 0x0602 )
     BTREE_STATS_LV *                pLvData;
 #endif
+    unsigned long                   fPgnoFDPRootDelete;
 } BTREE_STATS;
 
 typedef JET_ERR (JET_API *JET_PFNSPACEDATA)(
@@ -4036,9 +4039,11 @@ typedef enum
 #if ( JET_VERSION >= 0x0502 )
 #define JET_paramAlternateDatabaseRecoveryPath  113 //  recovery-only - search for dirty-shutdown databases in specified location only
 #endif // JET_VERSION >= 0x0502
+
 // end_PubEsent
 
 #define JET_paramFlight_ExtentPageCountCacheVerifyOnly  114  //  Verify values read from the Extent Page Count Cache rather than just returning them.
+#define JET_paramFlight_EnablePgnoFDPLastSetTime        115 //  whether we want to enable setting PgnoPFDSetTime in the system table for a table entry.
 
 //                                              120 //  JET_paramDBAPageAvailMin
 //                                              121 //  JET_paramDBAPageAvailThreshold
@@ -4680,6 +4685,7 @@ typedef struct
 // end_PubEsent
 #if ( JET_VERSION >= 0x0A01 )
 #define JET_bitTableAllowOutOfDate      0x00000100  /*  allow opening with indexes using out-of-date (but valid) sort versions */
+#define JET_bitAllowPgnoFDPLastSetTime  0x00000200  /*  allow changing pgnofdp last set time in catalog while opening the table */
 #endif
 // begin_PubEsent
 #define JET_bitTableSequential          0x00008000  /*  assume the table will be scanned sequentially */
@@ -4749,10 +4755,14 @@ typedef struct
 // end_PubEsent
 #define bitPrereadSingletonRanges   0x00000010  /*  Internal: All ranges are singleton ranges */
 #define bitPrereadDoNotDoOLD2       0x00000020  /*  Internal: Do not perform OLD2 if fragmentation detected, used by delete cleanup task */
-// begin_PubEsent
+#if ( JET_VERSION >= 0x0A01 )
+#define bitPrereadSkip              0x00000040  /*  Internal: Just figure out the pages which needs to be preread but skip the actual preread */
+#define bitIncludeNonLeafRead       0x00000080  /*  Internal: Include the non-leaf nodes in the list of pgnos read as well */
+#endif // JET_VERSION >= 0x0A01
 #endif // JET_VERSION >= 0x0602
 #endif // JET_VERSION >= 0x0601
 
+// begin_PubEsent
     /* Flags for JetOpenTempTable */
 
 #define JET_bitTTIndexed            0x00000001  /* Allow seek */
@@ -5432,20 +5442,22 @@ typedef JET_ERR (JET_API * JET_PFNEMITLOGDATA)(
 
 // end_PubEsent
 
-    /* RBS revert states */
-
 #if ( JET_VERSION >= 0x0A01 )
+
+    /* RBS revert states */
 #define JET_revertstateNone                 0   // Revert has not yet started/default state.
 #define JET_revertstateInProgress           1   // Revert snapshots are currently being applied to the databases.
 #define JET_revertstateCopingLogs           2   // The required logs to bring databases to a clean state are being copied to the log directory after revert.
 #define JET_revertstateBackupSnapshot       3   // Backs up revert snapshots for investigation purposes.
 #define JET_revertstateRemoveSnapshot       4   // Removes the snapshot which have been applied to the databases and backed up.
-#endif // JET_VERSION >= 0x0A01
 
     /* RBS revert grbits */
+#define JET_bitDeleteAllExistingLogs        0x00000001  /* Delete all the existing log files at the end of revert. */
 
-#if ( JET_VERSION >= 0x0A01 )
-#define JET_bitDeleteAllExistingLogs  0x00000001  /* Delete all the existing log files at the end of revert. */
+    /* Delete table grbit */
+#define JET_bitNonRevertableTableDelete         0x00000001  // If set, doesn't capture page preimages to allow for reverting the table to a state where it still existed using RBS.
+#define JET_bitRevertableTableDeleteIfTooSoon   0x00000002  // If set, we will do a revertable table even if NonRevertableTableDelete flag is passed provided NonRevertable delete is failing due to JET_errRBSDeleteTableTooSoon.
+
 #endif // JET_VERSION >= 0x0A01
 
 #if ( JET_VERSION >= 0x0600 )
@@ -6567,6 +6579,9 @@ typedef JET_ERR (JET_API * JET_PFNEMITLOGDATA)(
 #define errRBSRequiredRangeTooLarge         -1939  /* RBS was not created as the required range was too large and we don't want to start revert snapshot from such a state. */
 #define errRBSPatching                      -1940  /* RBS was not created as RBS is being attached for patching purposes, usually due to incremental reseed or page patching on the databases attached to the RBS. */
 #define JET_errRBSDeleteTableTooBig         -1941  /* The table being deleted is bigger than the configured max size to delete while activated on RBS copy, retry delete when activated on another copy */
+#define JET_errRBSDeleteTableTooSoon        -1942  /* The table was created or the root page of table being deleted was moved in the last few days and hence a non-revertable delete cannot be attempted right now. */
+#define JET_errRBSFDPToBeDeleted            -1943  /* The FDP is about to be deleted. The table was originally deleted using non-revertable flag and the database was then reverted to a previous state using RBS causing the table's pages to not be reverted but table root page and space tree pages were reverted to assist in catalog cleanup. */
+#define JET_errRBSRevertableDeleteNotPossible -1944  /* The table being deleted with revertable delete flag is not possible as this table was previously deleted with non-revertable flag and partially reverted by RBS. */
 // begin_PubEsent
 
 #define JET_wrnDefragAlreadyRunning          2000 /* Online defrag already running on specified database */
@@ -7929,8 +7944,33 @@ JetDeleteTableW(
 #define JetDeleteTable JetDeleteTableA
 #endif
 #endif
+// end_PubEsent
 
+#if ( JET_VERSION > 0x0A01 )
 
+JET_ERR JET_API
+JetDeleteTable2A(
+    _In_ JET_SESID          sesid,
+    _In_ JET_DBID           dbid,
+    _In_ JET_PCSTR          szTableName,
+    _In_ const JET_GRBIT    grbit );
+
+JET_ERR JET_API
+JetDeleteTable2W(
+    _In_ JET_SESID          sesid,
+    _In_ JET_DBID           dbid,
+    _In_ JET_PCWSTR         wszTableName,
+    _In_ const JET_GRBIT    grbit );
+
+#ifdef JET_UNICODE
+#define JetDeleteTable2 JetDeleteTable2A
+#else
+#define JetDeleteTable2 JetDeleteTable2W
+#endif
+
+#endif // JET_VERSION >= 0x0A01
+
+// begin_PubEsent
 #if ( JET_VERSION < 0x0600 )
 #define JetRenameTableA JetRenameTable
 #endif

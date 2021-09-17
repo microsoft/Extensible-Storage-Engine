@@ -1620,6 +1620,13 @@ LOCAL INT PrintIndexMetaData( const INDEXDEF * pindexdef, void * )
         }
     }
 
+    LOGTIME tmPgnoFDPLastSet = { 0 };
+    ConvertFileTimeToLogTime( pindexdef->ftPgnoFDPLastSet, &tmPgnoFDPLastSet );
+
+    printf("        IndexPgnoFDPLastSetTime=" );
+    DUMPPrintLogTime( &tmPgnoFDPLastSet );
+    printf( "\n" );
+
     return 0;
 }
 
@@ -1838,6 +1845,17 @@ LOCAL INT PrintTableMetaData( const TABLEDEF * ptabledef, void * pv )
     DBUTLPrintfIntN( ptabledef->density, 6 );
     printf( "%%\n" );
 
+    LOGTIME tmPgnoFDPLastSet = { 0 };
+    LOGTIME tmPgnoFDPLongValuesLastSet = { 0 };
+    ConvertFileTimeToLogTime( ptabledef->ftPgnoFDPLastSet, &tmPgnoFDPLastSet );
+    ConvertFileTimeToLogTime( ptabledef->ftPgnoFDPLongValuesLastSet, &tmPgnoFDPLongValuesLastSet );
+
+    printf("PgnoFDPLastSetTime=" );
+    DUMPPrintLogTime( &tmPgnoFDPLastSet );
+    printf( "\n" );
+    printf("PgnoFDPLongValuesLastSetTime=" );
+    DUMPPrintLogTime( &tmPgnoFDPLongValuesLastSet );
+    printf( "\n" );
     printf( "    LV ChunkSize=%d\n", ptabledef->cbLVChunkMax );
 
     if ( ptabledef->fFlags & JET_bitObjectSystem )
@@ -3765,13 +3783,20 @@ ERR ErrDBUTLEnumTableSpace( const TABLEDEF * ptabledef, void * pv )
 
     //  Setup other BTree stats data.
     //
-    Call( ErrDBUTLGetAdditionalSpaceData(
+    err = ErrDBUTLGetAdditionalSpaceData(
                     ppib,
                     ifmp,
                     ptabledef->objidFDP,
                     ptabledef->pgnoFDP,
                     pbts,
-                    pcprintf ) );
+                    pcprintf );
+
+    if ( err == JET_errRBSFDPToBeDeleted )
+    {
+        pbts->fPgnoFDPRootDelete = fTrue;
+        Call( pdbues->pfnBTreeStatsAnalysisFunc( pbts, pdbues->pvBTreeStatsAnalysisFuncCtx ) );
+        return JET_errSuccess;
+    }
 
     //  Callback to client.
     //
@@ -3937,6 +3962,11 @@ LOCAL INT PrintTableBareMetaData( const TABLEDEF * ptabledef, void * pv )
     DBUTLPrintfIntN( ptabledef->objidFDP, 10 );
     printf( " " );
     DBUTLPrintfIntN( ptabledef->pgnoFDP, 10 );
+    printf( "    " );
+
+    LOGTIME tmPgnoFDPLastSet = { 0 };
+    ConvertFileTimeToLogTime( ptabledef->ftPgnoFDPLastSet, &tmPgnoFDPLastSet );
+    DUMPPrintLogTime( &tmPgnoFDPLastSet );
     printf( "\n" );
 
     if ( pgnoNull != ptabledef->pgnoFDPLongValues )
@@ -3945,6 +3975,11 @@ LOCAL INT PrintTableBareMetaData( const TABLEDEF * ptabledef, void * pv )
         DBUTLPrintfIntN( ptabledef->objidFDPLongValues, 10 );
         printf( " " );
         DBUTLPrintfIntN( ptabledef->pgnoFDPLongValues, 10 );
+        printf( "    " );
+
+        LOGTIME tmPgnoFDPLongValuesLastSet = { 0 };
+        ConvertFileTimeToLogTime( ptabledef->ftPgnoFDPLongValuesLastSet, &tmPgnoFDPLongValuesLastSet );
+        DUMPPrintLogTime( &tmPgnoFDPLongValuesLastSet );
         printf( "\n" );
     }
     
@@ -4031,7 +4066,7 @@ ERR ErrCATIUnmarshallExtendedSpaceHints(
 LOCAL ERR ErrDBUTLDumpOneIndex( PIB * ppib, FUCB * pfucbCatalog, VOID * pfnCallback, VOID * pvCallback )
 //  ================================================================
 {
-    JET_RETRIEVECOLUMN  rgretrievecolumn[17];
+    JET_RETRIEVECOLUMN  rgretrievecolumn[18];
     BYTE                pbufidxseg[JET_ccolKeyMost*sizeof(IDXSEG)];
     BYTE                pbufidxsegConditional[JET_ccolKeyMost*sizeof(IDXSEG)];
     BYTE                pbExtendedSpaceHints[cbExtendedSpaceHints];
@@ -4154,6 +4189,12 @@ LOCAL ERR ErrDBUTLDumpOneIndex( PIB * ppib, FUCB * pfucbCatalog, VOID * pfnCallb
     rgretrievecolumn[iretrievecolumn].columnid      = fidMSO_SpaceHints;
     rgretrievecolumn[iretrievecolumn].pvData        = pbExtendedSpaceHints;
     rgretrievecolumn[iretrievecolumn].cbData        = sizeof(pbExtendedSpaceHints);
+    rgretrievecolumn[iretrievecolumn].itagSequence  = 1;
+    ++iretrievecolumn;
+
+    rgretrievecolumn[iretrievecolumn].columnid      = fidMSO_PgnoFDPLastSetTime;
+    rgretrievecolumn[iretrievecolumn].pvData        = (BYTE *)&indexdef.ftPgnoFDPLastSet;
+    rgretrievecolumn[iretrievecolumn].cbData        = sizeof(indexdef.ftPgnoFDPLastSet);
     rgretrievecolumn[iretrievecolumn].itagSequence  = 1;
     ++iretrievecolumn;
 
@@ -4467,6 +4508,12 @@ LOCAL ERR ErrDBUTLDumpOneTable( PIB * ppib, FUCB * pfucbCatalog, PFNTABLE pfntab
     rgretrievecolumn[iretrievecolumn].itagSequence  = 1;
     ++iretrievecolumn;
 
+    rgretrievecolumn[iretrievecolumn].columnid      = fidMSO_PgnoFDPLastSetTime;
+    rgretrievecolumn[iretrievecolumn].pvData        = (BYTE *)&tabledef.ftPgnoFDPLastSet;
+    rgretrievecolumn[iretrievecolumn].cbData        = sizeof( tabledef.ftPgnoFDPLastSet );
+    rgretrievecolumn[iretrievecolumn].itagSequence  = 1;
+    ++iretrievecolumn;
+
     Call( ErrIsamRetrieveColumns(
                 (JET_SESID)ppib,
                 (JET_TABLEID)pfucbCatalog,
@@ -4533,7 +4580,8 @@ LOCAL ERR ErrDBUTLDumpOneTable( PIB * ppib, FUCB * pfucbCatalog, PFNTABLE pfntab
                 pfucbCatalog->u.pfcb->Ifmp(),
                 tabledef.objidFDP,
                 &tabledef.pgnoFDPLongValues,
-                &tabledef.objidFDPLongValues ) );
+                &tabledef.objidFDPLongValues,
+                &tabledef.ftPgnoFDPLongValuesLastSet ) );
     
     // Try to dump the actual LV spacehints out here too.
     err = ErrGetSpaceHintsForLV( ppib, pfucbCatalog->u.pfcb->Ifmp(), tabledef.objidFDP, &tabledef.spacehintsLV );
@@ -5380,8 +5428,8 @@ ERR ISAMAPI ErrIsamDBUtilities( JET_SESID sesid, JET_DBUTIL_W *pdbutil )
             }
             else
             {
-                printf( "Name                                               Type    ObjidFDP    PgnoFDP\n" );
-                printf( "==============================================================================\n" );
+                printf( "Name                                               Type    ObjidFDP    PgnoFDP             PgnoFDPLastSetTime\n" );
+                printf( "=============================================================================================================\n" );
                 printf( "%-51.5ws Db   ", dbccinfo.wszDatabase );
                 DBUTLPrintfIntN( objidSystemRoot, 10 );
                 printf( " " );

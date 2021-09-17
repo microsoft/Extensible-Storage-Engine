@@ -201,7 +201,14 @@ ERR ErrSPGetPage(
 ERR ErrSPCaptureSnapshot(
     FUCB* const pfucb,
     const PGNO pgnoFirst,
-    const CPG cpgSize );
+    const CPG cpgSize,
+    const BOOL fMarkExtentEmpty );
+
+ERR ErrSPCaptureNonRevertableFDPRootPage(
+    PIB* ppib,
+    FCB* pfcbFDPToFree,
+    const PGNO pgnoLVRoot,
+    CPG* const pcpgCaptured = NULL );
 
 ERR ErrSPFreeExt(
     FUCB* const pfucb,
@@ -221,7 +228,9 @@ ERR ErrSPFreeFDP(
     PIB         *ppib,
     FCB         *pfcbFDPToFree,
     const PGNO  pgnoFDPParent,
-    const BOOL  fPreservePrimaryExtent = fFalse );
+    const BOOL  fPreservePrimaryExtent = fFalse,
+    const BOOL  fRevertableFDP = fTrue,
+    const PGNO  pgnoLVRoot = 0 );
 
 typedef enum class GET_CACHED_INFO {
     Allow,

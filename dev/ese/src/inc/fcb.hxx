@@ -653,6 +653,8 @@ private:
         static const ULONG mskFCBValidatedValidLocales = 0x1000000;
         // Do we always allow IsamUpdate( JET_bitNoVersion ). Used by ExtentPageCountCache.
         static const ULONG mskFCBVersioningOff = 0x2000000;
+        // The table FDP represented by the FCB was reverted partially by RBS and is to be deleted.
+        static const ULONG mskFCBRevertedFDPToDelete = 0x4000000;
 
 
         TABLECLASS  m_tableclass;
@@ -678,7 +680,10 @@ private:
         //  Only first void* in these structures actually used, (wasting the other 8 bytes ).
         BFLatch             m_bflPgnoFDP;   //  latch hint for pgnoFDP
         BFLatch             m_bflPgnoAE;    //  latch hint for pgnoAE
-        BYTE                rgbReserved2[8]; // Padding for alignment.
+
+        //  Last time pgno FDP was set for the FDP. Set during create, but shrink can move the root page which will update this time.
+        __int64             m_ftPgnoFDPLastSet;
+
         BFLatch             m_bflPgnoOE;    //  latch hint for pgnoOE
 
         INT                 m_ctasksActive; //  # tasks active on this FCB
@@ -711,6 +716,9 @@ private:
                 QWORD   m_cMNVNPagesVisitedSinceLastReported:21;
             };
         };
+
+        const PIB       *m_ppibAllowRBSFDPDeleteRead;   //  ppib of process requesting to allow reading root page marked with special flag fPageFDPDelete
+        BYTE            rgbReserved2[24];               // Padding for alignment.
 
     public:
         TABLECLASS Tableclass() const
@@ -768,6 +776,7 @@ private:
         ERR ErrErrInit() const;
         VOID GetAPISpaceHints( _Out_ JET_SPACEHINTS * pjsph ) const;
         const FCB_SPACE_HINTS * Pfcbspacehints() const;
+        __int64 FileTimePgnoFDPLastSet() const;
 
 #ifdef DEBUGGER_EXTENSION
         VOID Dump( CPRINTF * pcprintf, DWORD_PTR dwOffset = 0 ) const;
@@ -802,6 +811,8 @@ private:
 
         VOID SetSortSpace( const PGNO pgno, const OBJID objid );
         VOID ResetSortSpace();
+
+        VOID SetFileTimePgnoFDPLastSet( const __int64 ftPgnoFDPLastSet );
 
     // =====================================================================
 
@@ -961,6 +972,13 @@ private:
         //  no set routines, handled through m_spacehints::SetSpaceHints().
 
         BOOL FUseOLD2();
+
+        BOOL FRevertedFDPToDelete() const;
+        VOID SetRevertedFDPToDelete();
+
+        BOOL FPpibAllowRBSFDPDeleteReadByMe( const PIB* const ppib ) const;
+        VOID SetPpibAllowRBSFDPDeleteRead( const PIB* const ppib );
+        VOID ResetPpibAllowRBSFDPDeleteRead();
 
     // =====================================================================
 
@@ -1325,9 +1343,9 @@ INLINE VOID FCB::VerifyOptimalPacking()
 #define CacheLineMark(TYPE, FIELD, NUM)                                     \
      ( OffsetOf( TYPE, FIELD ) == ( 64 * NUM ) ), "Cache line marker"
 
-    static_assert( sizeof( FCB ) == 352, "Current size" );
+    static_assert( sizeof( FCB ) == 384, "Current size" );
     
-    static_assert( NoWastedSpaceAround( FCB, m_precdangling, m_qwMNVN ) );
+    static_assert( NoWastedSpaceAround( FCB, m_precdangling, rgbReserved2 ) );
     
     static_assert( CacheLineMark( FCB, m_precdangling,         0 ) );
     static_assert( NoWastedSpace( FCB, m_precdangling,         m_ls) );
@@ -1368,8 +1386,8 @@ INLINE VOID FCB::VerifyOptimalPacking()
     static_assert( NoWastedSpace( FCB, m_szInitFile,           m_psplitbufdangling) );
     static_assert( NoWastedSpace( FCB, m_psplitbufdangling,    m_bflPgnoFDP) );
     static_assert( NoWastedSpace( FCB, m_bflPgnoFDP,           m_bflPgnoAE) );
-    static_assert( NoWastedSpace( FCB, m_bflPgnoAE,            rgbReserved2) );
-    static_assert( NoWastedSpace( FCB, rgbReserved2,           m_bflPgnoOE) );
+    static_assert( NoWastedSpace( FCB, m_bflPgnoAE,            m_ftPgnoFDPLastSet) );
+    static_assert( NoWastedSpace( FCB, m_ftPgnoFDPLastSet,     m_bflPgnoOE) );
     
     static_assert( CacheLineMark( FCB, m_bflPgnoOE,            4 ) );
     static_assert( NoWastedSpace( FCB, m_bflPgnoOE,            m_ctasksActive) );
@@ -1381,6 +1399,8 @@ INLINE VOID FCB::VerifyOptimalPacking()
     static_assert( CacheLineMark( FCB, m_spacehints,           5 ) );
     static_assert( NoWastedSpace( FCB, m_spacehints,           m_tickMNVNLastReported) );
     static_assert( NoWastedSpace( FCB, m_tickMNVNLastReported, m_qwMNVN) );
+    static_assert( NoWastedSpace( FCB, m_qwMNVN,               m_ppibAllowRBSFDPDeleteRead) );
+    static_assert( NoWastedSpace( FCB, m_ppibAllowRBSFDPDeleteRead, rgbReserved2) );
 }
 #endif
 // =========================================================================
@@ -1428,6 +1448,7 @@ INLINE VOID FCB::GetAPISpaceHints( _Out_ JET_SPACEHINTS * pjsph ) const
 }
 INLINE const FCB_SPACE_HINTS * FCB::Pfcbspacehints() const  { return &(m_spacehints); }
 INLINE ULONG FCB::UlDensity() const             { return m_spacehints.UlDensityFromReservedBytes( m_spacehints.m_cbDensityFree ); }
+INLINE __int64 FCB::FileTimePgnoFDPLastSet() const      { return m_ftPgnoFDPLastSet; }
 
 // =========================================================================
 
@@ -1489,6 +1510,8 @@ INLINE VOID FCB::ResetSortSpace()
     ResetSpaceInitialized();
     Unlock();
 }
+
+INLINE VOID FCB::SetFileTimePgnoFDPLastSet( const __int64 ftPgnoFDPLastSet ) { m_ftPgnoFDPLastSet = ftPgnoFDPLastSet; }
 
 // =========================================================================
 
@@ -1651,6 +1674,12 @@ INLINE BOOL FCB::FContiguousHotpoint() const        { return FCreateHintHotpoint
                                                                     FDeleteHintTableSequential() ); }
 INLINE INT FCB::PctMaintenanceDensity() const   { return m_spacehints.m_pctMaintDensity; }
 
+INLINE BOOL FCB::FPpibAllowRBSFDPDeleteReadByMe( const PIB* const ppib ) const  { return m_ppibAllowRBSFDPDeleteRead != ppibNil && m_ppibAllowRBSFDPDeleteRead == ppib; }
+INLINE VOID FCB::SetPpibAllowRBSFDPDeleteRead( const PIB* const ppib )          { m_ppibAllowRBSFDPDeleteRead = ppib; }
+INLINE VOID FCB::ResetPpibAllowRBSFDPDeleteRead()                               { m_ppibAllowRBSFDPDeleteRead = ppibNil; }
+
+INLINE BOOL FCB::FRevertedFDPToDelete() const   { return !!(m_ulFCBFlags & mskFCBRevertedFDPToDelete ); }
+INLINE VOID FCB::SetRevertedFDPToDelete()       { AtomicExchangeSet( &m_ulFCBFlags, mskFCBRevertedFDPToDelete ); }
 
 #ifdef DEBUG
 INLINE BOOL FCB::FWRefCountOK_()

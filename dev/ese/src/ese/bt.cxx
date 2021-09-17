@@ -2477,116 +2477,30 @@ VOID BTPrereadIndexesOfFCB( FUCB * const pfucb )
 }
 
 //  ================================================================
-class PrereadContext
-//  ================================================================
-{
-public:
-    PrereadContext( PIB * const ppib, FUCB * const pfucb );
-    ~PrereadContext();
-
-    ERR ErrPrereadKeys(
-        __in_ecount(ckeys) const void * const * const   rgpvKeys,
-        __in_ecount(ckeys) const ULONG * const  rgcbKeys,
-        const LONG                                      ckeys,
-        _Out_ LONG * const                              pckeysPreread,
-        const JET_GRBIT                                 grbit );
-
-    ERR ErrPrereadBookmarkRanges(
-        __in_ecount(cbm) const BOOKMARK * const rgbmStart,
-        __in_ecount(cbm) const BOOKMARK * const rgbmEnd,
-        const LONG                              cbm,
-        _Out_ LONG * const                      pcbmRangesPreread,
-        _In_ const ULONG                        cPageCacheMin,
-        _In_ const ULONG                        cPageCacheMax,
-        const JET_GRBIT                         grbit,
-        __out_opt ULONG * const                 pcPageCacheActual );
-
-    ERR ErrPrereadKeyRanges(
-        __in_ecount(cRanges) const void *   const * const   rgpvKeysStart,
-        __in_ecount(cRanges) const ULONG * const    rgcbKeysStart,
-        __in_ecount(cRanges) const void *   const * const   rgpvKeysEnd,
-        __in_ecount(cRanges) const ULONG * const    rgcbKeysEnd,
-        const LONG                                          cRanges,
-        __deref_out_range( 0, cRanges ) LONG * const        pcKeyRangesPreread,
-        _In_ const ULONG                            cPageCacheMin,
-        _In_ const ULONG                            cPageCacheMax,
-        const JET_GRBIT                                     grbit,
-        __out_opt ULONG * const                     pcPageCacheActual );
-
-private:
-    PIB * const m_ppib;
-    FUCB * const m_pfucb;
-    const IFMP m_ifmp;
-    PIBTraceContextScope m_tcScope;
-
-    PGNO * m_rgpgnoPreread;
-    CPG m_cpgPrereadAlloc;
-    CPG m_cpgPreread;
-    CPG m_cpgPrereadMax;
-
-    bool m_fSawFragmentedSpace;
-
-    void CheckSpaceFragmentation( const CSR& csr );
-    void CheckSpaceFragmentation_( const CSR& csr );
-
-    ERR ErrProcessSubtreeRangesForward(
-        _In_ const BOOKMARK * const                     rgbmStart,
-        _In_ const BOOKMARK * const                     rgbmEnd,
-        _In_count_(csubtrees) const PGNO * const        rgpgnoSubtree,
-        _In_count_(csubtrees) const LONG * const        rgibmMin,
-        _In_count_(csubtrees) const LONG * const        rgibmMax,
-        const LONG                                      csubtrees,
-        _Out_ LONG * const                              pcbmRangesPreread );
-
-    ERR ErrProcessSubtreeRangesBackward(
-        _In_ const BOOKMARK * const                     rgbmStart,
-        _In_ const BOOKMARK * const                     rgbmEnd,
-        _In_count_(csubtrees) const PGNO * const        rgpgnoSubtree,
-        _In_count_(csubtrees) const LONG * const        rgibmMin,
-        _In_count_(csubtrees) const LONG * const        rgibmMax,
-        const LONG                                      csubtrees,
-        _Out_ LONG * const                              pcbmRangesPreread );
-
-    ERR ErrPrereadRangesForward(
-        const CSR&                                      csr,
-        __in_ecount(cbm) const BOOKMARK * const         rgbmStart,
-        __in_ecount(cbm) const BOOKMARK * const         rgbmEnd,
-        const LONG                                      cbm,
-        _Out_ LONG * const                              pcbmRangesPreread );
-
-    ERR ErrPrereadRangesBackward(
-        const CSR&                                      csr,
-        __in_ecount(cbm) const BOOKMARK * const         rgbmStart,
-        __in_ecount(cbm) const BOOKMARK * const         rgbmEnd,
-        const LONG                                      cbm,
-        _Out_ LONG * const                              pcbmRangesPreread );
-
-    ERR ErrAddPrereadCandidate( const PGNO pgno );
-
-private:    // not implemented
-    PrereadContext( const PrereadContext& );
-    PrereadContext& operator=( const PrereadContext& );
-};
-
-//  ================================================================
 PrereadContext::PrereadContext( PIB * const ppib, FUCB * const pfucb ) :
 //  ================================================================
     m_ppib( ppib ),
     m_pfucb( pfucb ),
     m_ifmp( pfucb->ifmp ),
     m_tcScope( TcBTICreateCtxScope( pfucb, iorsBTPreread ) ),
-    m_rgpgnoPreread( NULL ),
-    m_cpgPrereadAlloc( 0 ),
-    m_cpgPreread( 0 ),
     m_cpgPrereadMax( 0 )
 {
+    for ( int i = 0; i < 2; ++i )
+    {
+        m_cpgPreread[ i ]       = 0;
+        m_cpgPrereadAlloc[ i ]  = 0;
+        m_rgpgnoPreread[ i ]    = NULL;
+    }
 }
 
 //  ================================================================
 PrereadContext::~PrereadContext()
 //  ================================================================
 {
-    delete[] m_rgpgnoPreread;
+    for ( int i = 0; i < 2; ++i )
+    {
+        delete[] m_rgpgnoPreread[i];
+    }
 }
 
 //  ================================================================
@@ -2645,7 +2559,8 @@ ERR PrereadContext::ErrProcessSubtreeRangesForward(
     _In_count_(csubtrees) const LONG * const        rgibmMin,
     _In_count_(csubtrees) const LONG * const        rgibmMax,
     const LONG                                      csubtrees,
-    _Out_ LONG * const                              pcbmRangesPreread )
+    _Out_ LONG * const                              pcbmRangesPreread,
+    _In_ BOOL const                                 fIncludeNonLeafPg )
 //  ================================================================
 {
     ERR err = JET_errSuccess;
@@ -2658,7 +2573,7 @@ ERR PrereadContext::ErrProcessSubtreeRangesForward(
     // compared to I/O latency doing that probably wouldn't help much
     
     CSR csrChild;
-    for ( INT isubtree = 0; isubtree < csubtrees && m_cpgPreread < m_cpgPrereadMax; ++isubtree )
+    for ( INT isubtree = 0; isubtree < csubtrees && m_cpgPreread[PrereadPgType::LeafPages] < m_cpgPrereadMax; ++isubtree )
     {
         const PGNO pgno = rgpgnoSubtree[isubtree];
         const INT ibmMin = rgibmMin[isubtree];
@@ -2673,7 +2588,8 @@ ERR PrereadContext::ErrProcessSubtreeRangesForward(
                 rgbmStart+ibmMin,
                 rgbmEnd+ibmMin,
                 ibmMax-ibmMin,
-                pcbmRangesPreread );
+                pcbmRangesPreread,
+                fIncludeNonLeafPg );
         *pcbmRangesPreread += ibmMin;
         csrChild.ReleasePage();
         Call( err );
@@ -2691,7 +2607,8 @@ ERR PrereadContext::ErrProcessSubtreeRangesBackward(
     _In_count_(csubtrees) const LONG * const        rgibmMin,
     _In_count_(csubtrees) const LONG * const        rgibmMax,
     const LONG                                      csubtrees,
-    _Out_ LONG * const                              pcbmRangesPreread )
+    _Out_ LONG * const                              pcbmRangesPreread,
+    _In_ BOOL const                                 fIncludeNonLeafPg )
 //  ================================================================
 {
     ERR err = JET_errSuccess;
@@ -2704,7 +2621,7 @@ ERR PrereadContext::ErrProcessSubtreeRangesBackward(
     // compared to I/O latency doing that probably wouldn't help much
     
     CSR csrChild;
-    for ( INT isubtree = 0; isubtree < csubtrees && m_cpgPreread < m_cpgPrereadMax; ++isubtree )
+    for ( INT isubtree = 0; isubtree < csubtrees && m_cpgPreread[PrereadPgType::LeafPages] < m_cpgPrereadMax; ++isubtree )
     {
         const PGNO pgno = rgpgnoSubtree[isubtree];
         const INT ibmMin = rgibmMin[isubtree];
@@ -2719,7 +2636,8 @@ ERR PrereadContext::ErrProcessSubtreeRangesBackward(
                 rgbmStart+ibmMin,
                 rgbmEnd+ibmMin,
                 ibmMax-ibmMin,
-                pcbmRangesPreread );
+                pcbmRangesPreread,
+                fIncludeNonLeafPg );
         *pcbmRangesPreread += ibmMin;
         csrChild.ReleasePage();
         Call( err );
@@ -2736,7 +2654,8 @@ ERR PrereadContext::ErrPrereadRangesForward(
     __in_ecount(cbm) const BOOKMARK * const         rgbmStart,
     __in_ecount(cbm) const BOOKMARK * const         rgbmEnd,
     const LONG                                      cbm,
-    _Out_ LONG * const                              pcbmRangesPreread )
+    _Out_ LONG * const                              pcbmRangesPreread,
+    _In_ BOOL const                                 fIncludeNonLeafPg )
 //  ================================================================
 //
 //  Preread all the leaf pages containing the given bookmarks
@@ -2748,7 +2667,7 @@ ERR PrereadContext::ErrPrereadRangesForward(
     if( csr.Cpage().FLeafPage() )
     {
         // this can happen if the tree has a depth of 1
-        Assert( csr.Cpage().FFDPPage() );
+        Assert( csr.Cpage().FRootPage() );
         *pcbmRangesPreread = cbm;
         return JET_errSuccess;
     }
@@ -2790,7 +2709,7 @@ ERR PrereadContext::ErrPrereadRangesForward(
     //
     for(
         INT iline = 0;
-        iline < csr.Cpage().Clines() && ibm < cbm && m_cpgPreread < m_cpgPrereadMax;
+        iline < csr.Cpage().Clines() && ibm < cbm && m_cpgPreread[PrereadPgType::LeafPages] < m_cpgPrereadMax;
         ++iline )
     {
         // if this iline points to a subtree we want to preread these variables will point
@@ -2933,6 +2852,14 @@ ERR PrereadContext::ErrPrereadRangesForward(
                 {
                     rgpgnoSubtree[isubtree] = pgnoNull;
 
+                    // Even non-leaf pages are requested to be added to the m_rgpgnoPreread buffer.
+                    // So lets add the array of subtree pages about to be read.
+                    // Note: Currently this flag is used only to identify space tree pages needed for available lag during table deletes.
+                    if ( fIncludeNonLeafPg )
+                    {
+                        Call( ErrAddPrereadCandidates( rgpgnoSubtree, isubtree, PrereadPgType::NonLeafPages ) );
+                    }
+
                     BFPrereadPageList( m_ifmp, rgpgnoSubtree, bfprfDefault, m_ppib->BfpriPriority( m_ifmp ), TcCurr() );
                     Call( ErrProcessSubtreeRangesForward(
                             rgbmStart,
@@ -2941,7 +2868,8 @@ ERR PrereadContext::ErrPrereadRangesForward(
                             rgibmMin,
                             rgibmMax,
                             isubtree,
-                            pcbmRangesPreread ) );
+                            pcbmRangesPreread,
+                            fIncludeNonLeafPg ) );
                     isubtree = 0;
                 }
             }
@@ -2954,6 +2882,14 @@ ERR PrereadContext::ErrPrereadRangesForward(
     {
         rgpgnoSubtree[isubtree] = pgnoNull;
 
+        // Even non-leaf pages are requested to be added to the m_rgpgnoPreread buffer.
+        // So lets add the array of subtree pages about to be read.
+        // Note: Currently this flag is used only to identify space tree pages needed for available lag during table deletes.
+        if ( fIncludeNonLeafPg )
+        {
+            Call( ErrAddPrereadCandidates( rgpgnoSubtree, isubtree, PrereadPgType::NonLeafPages ) );
+        }
+
         BFPrereadPageList( m_ifmp, rgpgnoSubtree, bfprfDefault, m_ppib->BfpriPriority( m_ifmp ), TcCurr() );
         Call( ErrProcessSubtreeRangesForward(
                 rgbmStart,
@@ -2962,7 +2898,8 @@ ERR PrereadContext::ErrPrereadRangesForward(
                 rgibmMin,
                 rgibmMax,
                 isubtree,
-                pcbmRangesPreread ) );
+                pcbmRangesPreread,
+                fIncludeNonLeafPg ) );
         isubtree = 0;
     }
 
@@ -2976,7 +2913,8 @@ ERR PrereadContext::ErrPrereadRangesBackward(
     __in_ecount(cbm) const BOOKMARK * const         rgbmStart,
     __in_ecount(cbm) const BOOKMARK * const         rgbmEnd,
     const LONG                                      cbm,
-    _Out_ LONG * const                              pcbmRangesPreread )
+    _Out_ LONG * const                              pcbmRangesPreread,
+    _In_ BOOL const                                 fIncludeNonLeafPg )
 //  ================================================================
 //
 //  Preread all the leaf pages containing the given bookmarks
@@ -3029,7 +2967,7 @@ ERR PrereadContext::ErrPrereadRangesBackward(
     //
     for(
         INT iline = csr.Cpage().Clines() - 1;
-        iline >= 0 && ibm < cbm && m_cpgPreread < m_cpgPrereadMax;
+        iline >= 0 && ibm < cbm && m_cpgPreread[PrereadPgType::LeafPages] < m_cpgPrereadMax;
         --iline )
     {
         // if this iline points to a subtree we want to preread these variables will point
@@ -3174,6 +3112,14 @@ ERR PrereadContext::ErrPrereadRangesBackward(
                 {
                     rgpgnoSubtree[isubtree] = pgnoNull;
 
+                    // Even non-leaf pages are requested to be added to the m_rgpgnoPreread buffer.
+                    // So lets add the array of subtree pages about to be read.
+                    // Note: Currently this flag is used only to identify space tree pages needed for available lag during table deletes.
+                    if ( fIncludeNonLeafPg )
+                    {
+                        Call( ErrAddPrereadCandidates( rgpgnoSubtree, isubtree, PrereadPgType::NonLeafPages ) );
+                    }
+
                     BFPrereadPageList( m_ifmp, rgpgnoSubtree, bfprfDefault, m_ppib->BfpriPriority( m_ifmp ), TcCurr() );
                     Call( ErrProcessSubtreeRangesBackward(
                             rgbmStart,
@@ -3182,7 +3128,8 @@ ERR PrereadContext::ErrPrereadRangesBackward(
                             rgibmMin,
                             rgibmMax,
                             isubtree,
-                            pcbmRangesPreread ) );
+                            pcbmRangesPreread,
+                            fIncludeNonLeafPg ) );
                     isubtree = 0;
                 }
             }
@@ -3195,6 +3142,14 @@ ERR PrereadContext::ErrPrereadRangesBackward(
     {
         rgpgnoSubtree[isubtree] = pgnoNull;
 
+        // Even non-leaf pages are requested to be added to the m_rgpgnoPreread buffer.
+        // So lets add the array of subtree pages about to be read.
+        // Note: Currently this flag is used only to identify space tree pages needed for available lag during table deletes.
+        if ( fIncludeNonLeafPg )
+        {
+            Call( ErrAddPrereadCandidates( rgpgnoSubtree, isubtree, PrereadPgType::NonLeafPages ) );
+        }
+
         BFPrereadPageList( m_ifmp, rgpgnoSubtree, bfprfDefault, m_ppib->BfpriPriority( m_ifmp ), TcCurr() );
         Call( ErrProcessSubtreeRangesBackward(
                 rgbmStart,
@@ -3203,7 +3158,8 @@ ERR PrereadContext::ErrPrereadRangesBackward(
                 rgibmMin,
                 rgibmMax,
                 isubtree,
-                pcbmRangesPreread ) );
+                pcbmRangesPreread,
+                fIncludeNonLeafPg ) );
         isubtree = 0;
     }
 
@@ -3212,30 +3168,50 @@ HandleError:
 }
 
 //  ================================================================
-ERR PrereadContext::ErrAddPrereadCandidate( const PGNO pgno )
+ERR PrereadContext::ErrAddPrereadCandidate(
+    const PGNO                  pgno,
+    _In_ PrereadPgType const    prpgtyp )
 //  ================================================================
 {
     ERR err = JET_errSuccess;
 
     // realloc preread page buffer if it is too small to accept the new page
     const CPG cpgPrereadAllocMin = 128;
-    const CPG cpgPrereadNew = m_cpgPreread + 1;
-    if ( m_rgpgnoPreread == NULL || m_cpgPrereadAlloc < cpgPrereadNew )
+    const CPG cpgPrereadNew = m_cpgPreread[prpgtyp] + 1;
+    if ( m_rgpgnoPreread[prpgtyp] == NULL || m_cpgPrereadAlloc[prpgtyp] < cpgPrereadNew )
     {
-        CPG     cpgPrereadAllocNew  = max( cpgPrereadAllocMin, max( cpgPrereadNew, m_cpgPrereadAlloc * 2 ) );
+        CPG     cpgPrereadAllocNew  = max( cpgPrereadAllocMin, max( cpgPrereadNew, m_cpgPrereadAlloc[prpgtyp] * 2 ) );
         PGNO*   rgpgnoPrereadNew    = NULL;
         Alloc( rgpgnoPrereadNew = new PGNO[cpgPrereadAllocNew] );
-        if ( m_rgpgnoPreread != NULL )
+        if ( m_rgpgnoPreread[prpgtyp] != NULL )
         {
-            memcpy( rgpgnoPrereadNew, m_rgpgnoPreread, sizeof( PGNO ) * m_cpgPrereadAlloc );
-            delete[] m_rgpgnoPreread;
+            memcpy( rgpgnoPrereadNew, m_rgpgnoPreread[prpgtyp], sizeof( PGNO ) * m_cpgPrereadAlloc[prpgtyp] );
+            delete[] m_rgpgnoPreread[prpgtyp];
         }
-        m_cpgPrereadAlloc = cpgPrereadAllocNew;
-        m_rgpgnoPreread = rgpgnoPrereadNew;
+        m_cpgPrereadAlloc[prpgtyp] = cpgPrereadAllocNew;
+        m_rgpgnoPreread[prpgtyp] = rgpgnoPrereadNew;
     }
 
     // add the new page ref
-    m_rgpgnoPreread[m_cpgPreread++] = pgno;
+    m_rgpgnoPreread[prpgtyp][m_cpgPreread[prpgtyp]++] = pgno;
+
+HandleError:
+    return err;
+}
+
+//  ================================================================
+ERR PrereadContext::ErrAddPrereadCandidates(
+    _In_count_(cpgnos) const PGNO * const   rgpgno,
+    const LONG                              cpgnos,
+    _In_ PrereadPgType const                prpgtyp )
+    //  ================================================================
+{
+    ERR err = JET_errSuccess;
+
+    for ( CPG cpg = 0; cpg < cpgnos; cpg++ )
+    {
+        Call ( ErrAddPrereadCandidate( rgpgno[ cpg ], prpgtyp ) );
+    }
 
 HandleError:
     return err;
@@ -3348,7 +3324,12 @@ ERR PrereadContext::ErrPrereadBookmarkRanges(
 {
     ERR     err             = JET_errSuccess;
     CSR     csrRoot;
-    BOOL    fEligibleForOLD2 = !( grbit & bitPrereadDoNotDoOLD2 );
+    BOOL    fEligibleForOLD2        = !( grbit & bitPrereadDoNotDoOLD2 );
+    BOOL    fSkipPreread            = !!( grbit & bitPrereadSkip );
+    BOOL    fIncludeNonLeafPages    = !!( grbit & bitIncludeNonLeafRead );
+
+    // bitIncludeNonLeafRead and fSkipPreread are only to capture space tree preimages for RBS
+    Assert( !fSkipPreread || ( fSkipPreread && fIncludeNonLeafPages ) );
 
     *pcbmRangesPreread      = 0;
     m_fSawFragmentedSpace   = false;
@@ -3406,6 +3387,20 @@ ERR PrereadContext::ErrPrereadBookmarkRanges(
             PBFLatchHintPgnoRoot( m_pfucb )
             ) );
 
+    // Should we just remove this condition and consider the rootpage as preread if its leaf page? The preread cache ignores if the page is already in BF cache
+    // So doesn't really matter if we add to the preread array or not. For legacy reasons, lets do this only if non-leaf pages are requested to be included.
+    if ( fIncludeNonLeafPages )
+    {
+        if ( csrRoot.Cpage().FLeafPage() )
+        {
+            Call( ErrAddPrereadCandidate( csrRoot.Pgno(), PrereadPgType::LeafPages ) );
+        }
+        else
+        {
+            Call( ErrAddPrereadCandidate( csrRoot.Pgno(), PrereadPgType::NonLeafPages ) );
+        }
+    }
+
     //  compute the list of pages to read
     if( fForward )
     {
@@ -3414,7 +3409,8 @@ ERR PrereadContext::ErrPrereadBookmarkRanges(
                 rgbmStart,
                 rgbmEnd,
                 cbm,
-                pcbmRangesPreread ) );
+                pcbmRangesPreread,
+                fIncludeNonLeafPages ) );
     }
     else
     {
@@ -3423,57 +3419,63 @@ ERR PrereadContext::ErrPrereadBookmarkRanges(
                 rgbmStart,
                 rgbmEnd,
                 cbm,
-                pcbmRangesPreread ) );
+                pcbmRangesPreread,
+                fIncludeNonLeafPages ) );
     }
+
+    // We shouldn't have added any non leaf page candidates unless requested
+    Assert( m_cpgPreread[PrereadPgType::NonLeafPages] == 0 || fIncludeNonLeafPages );
 
     // add a null terminator to the candidate list
-    Call( ErrAddPrereadCandidate( pgnoNull ) );
+    Call( ErrAddPrereadCandidate( pgnoNull, PrereadPgType::NonLeafPages ) );
+    Call( ErrAddPrereadCandidate( pgnoNull, PrereadPgType::LeafPages ) );
 
-{
-    //  cooperatively throttle this preread request with other requests
-    BFReserveAvailPages bfreserveavailpages( m_cpgPreread - 1 );
-    CPG cpgPrereadRequested = min( m_cpgPreread - 1, max( cpgPrereadMin, bfreserveavailpages.CpgReserved() ) );
+    if ( !fSkipPreread )
+    {
+        //  cooperatively throttle this preread request with other requests
+        BFReserveAvailPages bfreserveavailpages( m_cpgPreread[PrereadPgType::LeafPages] - 1 );
+        CPG cpgPrereadRequested = min( m_cpgPreread[PrereadPgType::LeafPages] - 1, max( cpgPrereadMin, bfreserveavailpages.CpgReserved() ) );
     
-    // save the actual number of pages pre-read
-    if ( pcPageCacheActual )
-    {
-        *pcPageCacheActual = cpgPrereadRequested;
+        // save the actual number of pages pre-read
+        if ( pcPageCacheActual )
+        {
+            *pcPageCacheActual = cpgPrereadRequested;
+        }
+
+        //  try to preread the selected portion of the list
+        PGNO pgnoPrereadSave = m_rgpgnoPreread[PrereadPgType::LeafPages][cpgPrereadRequested];
+        m_rgpgnoPreread[PrereadPgType::LeafPages][cpgPrereadRequested] = pgnoNull;
+
+        GetCurrUserTraceContext getutc;
+        auto tc = TcCurr();
+        BFPrereadPageList( m_ifmp, m_rgpgnoPreread[PrereadPgType::LeafPages], bfprfDefault, m_ppib->BfpriPriority( m_ifmp ), tc );
+
+        m_rgpgnoPreread[PrereadPgType::LeafPages][cpgPrereadRequested] = pgnoPrereadSave;
+
+        //  trace the preread requests and if they were ignored or not
+        for ( CPG ipg = 0; ipg < m_cpgPreread[PrereadPgType::LeafPages] - 1; ipg++ )
+        {
+            //  use only the least significant bit in case we want to add more flags later
+            const BYTE fOpFlags = ipg < cpgPrereadRequested && FBFInCache( m_ifmp, m_rgpgnoPreread[PrereadPgType::LeafPages][ipg] ) ? 0 : 1;
+
+            ETBTreePrereadPageRequest(
+                m_ifmp,
+                m_rgpgnoPreread[PrereadPgType::LeafPages][ipg],
+                getutc->context.dwUserID,
+                getutc->context.nOperationID,
+                getutc->context.nOperationType,
+                getutc->context.nClientType,
+                getutc->context.fFlags,
+                getutc->dwCorrelationID,
+                tc.iorReason.Iorp(),
+                tc.iorReason.Iors(),
+                tc.iorReason.Iort(),
+                tc.iorReason.Ioru(),
+                tc.iorReason.Iorf(),
+                tc.nParentObjectClass,
+                fOpFlags );
+        }
     }
-
-    //  try to preread the selected portion of the list
-    PGNO pgnoPrereadSave = m_rgpgnoPreread[cpgPrereadRequested];
-    m_rgpgnoPreread[cpgPrereadRequested] = pgnoNull;
-
-    GetCurrUserTraceContext getutc;
-    auto tc = TcCurr();
-    BFPrereadPageList( m_ifmp, m_rgpgnoPreread, bfprfDefault, m_ppib->BfpriPriority( m_ifmp ), tc );
-
-    m_rgpgnoPreread[cpgPrereadRequested] = pgnoPrereadSave;
-
-    //  trace the preread requests and if they were ignored or not
-    for ( CPG ipg = 0; ipg < m_cpgPreread - 1; ipg++ )
-    {
-        //  use only the least significant bit in case we want to add more flags later
-        const BYTE fOpFlags = ipg < cpgPrereadRequested && FBFInCache( m_ifmp, m_rgpgnoPreread[ipg] ) ? 0 : 1;
-
-        ETBTreePrereadPageRequest(
-            m_ifmp,
-            m_rgpgnoPreread[ipg],
-            getutc->context.dwUserID,
-            getutc->context.nOperationID,
-            getutc->context.nOperationType,
-            getutc->context.nClientType,
-            getutc->context.fFlags,
-            getutc->dwCorrelationID,
-            tc.iorReason.Iorp(),
-            tc.iorReason.Iors(),
-            tc.iorReason.Iort(),
-            tc.iorReason.Ioru(),
-            tc.iorReason.Iorf(),
-            tc.nParentObjectClass,
-            fOpFlags );
-    }
-}
 
     //  if we saw fragmented space while computing the list of pages to preread then
     //  try to register this index for defragmentation for contiguity
@@ -7729,6 +7731,25 @@ ERR ErrBTIGotoRoot( FUCB *pfucb, LATCH latch )
                                       ) );
     Pcsr( pfucb )->SetILine( 0 );
 
+    // If fPageFDPDelete flag is set on the root page, we need to prevent any actions apart from delete on the table which was originally deleted using non-revertable flag
+    // and the database was then reverted to a previous state using RBS causing the table's pages to not be reverted
+    // but table root page and space tree pages were reverted to assist in catalog and space tree cleanup.
+    //
+    if ( Pcsr( pfucb )->Cpage().FPageFDPRootDelete() )
+    {
+        // TODO: Lots of space operations call this. Should those be handled separately or allowed to fail?
+        if ( pfucb->u.pfcb->FPpibAllowRBSFDPDeleteReadByMe( pfucb->ppib ) )
+        {
+            pfucb->u.pfcb->SetRevertedFDPToDelete();
+        }
+        else
+        {
+            // Unlatch the page so that closing FUCB doesn't leak the latch.
+            Pcsr( pfucb )->ReleasePage( fTrue );
+            return ErrERRCheck( JET_errRBSFDPToBeDeleted );
+        }
+    }
+
     return JET_errSuccess;
 }
 
@@ -11711,9 +11732,18 @@ VOID BTIPerformSplit( FUCB          *pfucb,
                 Assert( latchWrite == pcsrRoot->Latch() );
                 Assert( pcsrRoot->Cpage().FRootPage() );
 
+                BOOL    fPageFDPDeleteBefore = pcsrRoot->Cpage().FPageFDPDelete();
+
                 //  set parent page to non-leaf
                 //
                 pcsrRoot->Cpage().SetFlags( psplit->fSplitPageFlags );
+
+                // If page had fPageFDPDelete flag set before, set it back.
+                // It is possible this is the available lag and it was reverted back with a deleted table.
+                if ( fPageFDPDeleteBefore )
+                {
+                    pcsrRoot->Cpage().SetPageFDPDelete( fTrue );
+                }
 
                 //  insert page pointer in root zero-sized key
                 //

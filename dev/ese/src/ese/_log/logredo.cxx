@@ -115,6 +115,7 @@ LOCAL ERR ErrReplacePageImage(
                         const DBTIME dbtimeBefore )
 {
     ERR err;
+    BOOL fPageFDPDeleteBefore = fFalse;
 
     Assert( cb == g_cbPage );
     Assert( csr.Pgno() == pgno );
@@ -156,6 +157,7 @@ LOCAL ERR ErrReplacePageImage(
         BFFree( pvPage );
         }
 #endif
+        fPageFDPDeleteBefore = csr.Cpage().FPageFDPDelete();
 
         if( cb != g_cbPage
             || pgno != csr.Pgno()
@@ -176,9 +178,14 @@ LOCAL ERR ErrReplacePageImage(
     Assert( !csr.FLatched() );
 
     Call( csr.ErrLoadPage( ppib, ifmp, pgno, pbBeforeImage, cb, latchWrite ) );
+
     // the before image of the page is logged after the dbtime was updated so we have to restore it
-    csr.RestoreDbtime( dbtimeBefore );
+    // Its also possible we are replaying a log on an available lag on a table which was deleted and reverted with fPageFDPDelete.
+    // We do not want to overwrite that flag.
+    csr.RestoreDbtime( dbtimeBefore, fPageFDPDeleteBefore );
     csr.Downgrade( latchRIW );
+
+    Assert( csr.Cpage().FPageFDPDelete() == fPageFDPDeleteBefore );
 
     Assert( csr.Pgno() == pgno );
     Assert( csr.Latch() == latchRIW );
@@ -602,6 +609,7 @@ INLINE ERR LOG::ErrLGIAccessPage(
     BOOL fBeyondEofPageOk = fFalse;
     PIBTraceContextScope tcScope = ppib->InitTraceContextScope();
     BOOL fRevertedNewPage = fFalse;
+    BOOL fPageFDPDelete   = fFalse;
 
     Assert( pgnoNull != pgno );
     Assert( NULL != ppib );
@@ -630,7 +638,8 @@ INLINE ERR LOG::ErrLGIAccessPage(
     if ( errPage >= JET_errSuccess )
     {
         dbtime = pcsr->Cpage().Dbtime();
-        fRevertedNewPage = pcsr->Cpage().FRevertedNewPage();
+        fRevertedNewPage    = pcsr->Cpage().FRevertedNewPage();
+        fPageFDPDelete      = pcsr->Cpage().FPageFDPDelete();
     }
 
     //  If a shrink or trim have happened at any point in the log range we are recovering,
@@ -677,7 +686,11 @@ INLINE ERR LOG::ErrLGIAccessPage(
 
         Call( g_rgfmp[ifmp].ErrEnsureLogRedoMapsAllocated() );
 
-        CLogRedoMap* const pLogRedoMapToSet = fRevertedNewPage ? g_rgfmp[ ifmp ].PLogRedoMapDbtimeRevert() : g_rgfmp[ ifmp ].PLogRedoMapZeroed();
+        // Its possible we have a reverted new page due to a non-revertable table delete in the future. Such a reverted new page won't be reconciled
+        // within the required range. We will ignore such pages since we know such a page's FDP is going to redeleted anyways.
+        CLogRedoMap* const pLogRedoMapToSet = fRevertedNewPage ?
+                    ( fPageFDPDelete ? g_rgfmp[ ifmp ].PLogRedoMapDbtimeRevertIgnore() : g_rgfmp[ ifmp ].PLogRedoMapDbtimeRevert() ) :
+                    g_rgfmp[ ifmp ].PLogRedoMapZeroed();
 
         Call( pLogRedoMapToSet->ErrSetPgno(
             pgno,
@@ -11121,7 +11134,7 @@ ERR LOG::ErrLGRIRedoShrinkDBFileTruncation( const IFMP ifmp, const PGNO pgnoDbLa
     {
         // Capture all shrunk pages as if they need to be reverted to empty pages when RBS is applied.
         // If we already captured a preimage for one of those shrunk pages, the revert to an empty page will be ignored for that page when we apply the snapshot.
-        Call( pfmp->PRBS()->ErrCaptureEmptyPages( pfmp->Dbid(), pgnoDbLastNew + 1, cpgShrunkLR ) );
+        Call( pfmp->PRBS()->ErrCaptureEmptyPages( pfmp->Dbid(), pgnoDbLastNew + 1, cpgShrunkLR, 0 ) );
         Call( pfmp->PRBS()->ErrFlushAll() );
     }
 
@@ -11257,36 +11270,76 @@ ERR LOG::ErrLGRIRedoExtentFreed( const LREXTENTFREED * const plrextentfreed )
         return JET_errSuccess;
     }
 
-    const PGNO pgnoFirst    = plrextentfreed->PgnoFirst();
-    const CPG cpgExtent     = plrextentfreed->CpgExtent();
+    const PGNO pgnoFirst            = plrextentfreed->PgnoFirst();
+    const CPG  cpgExtent            = plrextentfreed->CpgExtent();
+    const BOOL fTableRootPage       = plrextentfreed->FTableRootPage();
+    const BOOL fEmptyPageFDPDeleted = plrextentfreed->FEmptyPageFDPDeleted();
+
+    Assert( !fTableRootPage || cpgExtent == 1 );
+    Assert( !( fTableRootPage && fEmptyPageFDPDeleted ) );
+
     LGAddFreePages( cpgExtent );
 
     Assert( m_fRecoveringMode == fRecoveringRedo );
 
-    for( int i = 0; i < cpgExtent; ++i )
+    if ( dbid == dbidTemp || !pfmp->FRBSOn() )
     {
-        BFLatch bfl;
-
-        err = ErrBFWriteLatchPage( &bfl, ifmp, pgnoFirst + i, bflfUninitPageOk, BfpriBFMake( PctFMPCachePriority( ifmp ), (BFTEMPOSFILEQOS)qosIODispatchImmediate ), TcCurr() );
-        if ( err == JET_errPageNotInitialized )
-        {
-            // pre image for empty pages cannot be captured, just ignore
-            // and if we rollback this page need not be patched since it is empty.
-            BFMarkAsSuperCold( ifmp, pgnoFirst + i );
-            continue;
-        }
-        else if ( err == JET_errFileIOBeyondEOF && pfmp->FContainsDataFromFutureLogs() && CmpLgpos( pfmp->Pdbfilehdr()->le_lgposLastResize, m_lgposRedo ) > 0 )
-        {
-            // pre image for page beyond eof cannot be captured, we must have captured
-            // and written it out in the past before shrinking the file.
-            BFMarkAsSuperCold( ifmp, pgnoFirst + i );
-            continue;
-        }
-        CallR( err );
-        BFMarkAsSuperCold( &bfl );
-        BFWriteUnlatch( &bfl );
+        goto ClearLogRedoMapDbtimeRevert;
     }
 
+    if ( fTableRootPage )
+    {
+        // Capture the preimage of the table root and pass flag to indicate this is a delete table so that we special mark this table when reverted.
+        // We should generally not be touching the table pages before table delete.
+        // But in case we did due to some bug or some unexpected scenario, we will pass fRBSPreimageRevertAlways to make sure we always keep the table deleted.
+        CallR( ErrRBSRDWLatchAndCapturePreImage(
+                ifmp,
+                pgnoFirst,
+                fRBSDeletedTableRootPage,
+                BfpriBFMake( PctFMPCachePriority( ifmp ), (BFTEMPOSFILEQOS) qosIODispatchImmediate ),
+                TcCurr() ) );
+    }
+    else if ( fEmptyPageFDPDeleted )
+    {
+        // Write out any snapshot for pages about to be shrunk
+        if ( g_rgfmp[ ifmp ].Dbid() != dbidTemp && g_rgfmp[ ifmp ].FRBSOn() )
+        {
+            // Capture all freed but non-revertable extent pages as if they need to be reverted to empty pages when RBS is applied with special flag fRBSFDPDeleted.
+            // If we already captured a preimage for one of those pages in the extent, the revert to an empty page will be ignored for that page when we apply the snapshot.
+            CallR( g_rgfmp[ ifmp ].PRBS()->ErrCaptureEmptyPages( g_rgfmp[ ifmp ].Dbid(), pgnoFirst, cpgExtent, fRBSFDPNonRevertableDelete ) );
+
+            // We need to make sure we flush our snapshot records else we might go out of required range without flushing and fail to snapshot them as empty pages.
+            CallR( g_rgfmp[ ifmp ].PRBS()->ErrFlushAll() );
+        }
+    }
+    else 
+    {
+        for ( int i = 0; i < cpgExtent; ++i )
+        {
+            BFLatch bfl;
+
+            err = ErrBFWriteLatchPage( &bfl, ifmp, pgnoFirst + i, bflfUninitPageOk, BfpriBFMake( PctFMPCachePriority( ifmp ), (BFTEMPOSFILEQOS) qosIODispatchImmediate ), TcCurr() );
+            if ( err == JET_errPageNotInitialized )
+            {
+                // pre image for empty pages cannot be captured, just ignore
+                // and if we rollback this page need not be patched since it is empty.
+                BFMarkAsSuperCold( ifmp, pgnoFirst + i );
+                continue;
+            }
+            else if ( err == JET_errFileIOBeyondEOF && pfmp->FContainsDataFromFutureLogs() && CmpLgpos( pfmp->Pdbfilehdr()->le_lgposLastResize, m_lgposRedo ) > 0 )
+            {
+                // pre image for page beyond eof cannot be captured, we must have captured
+                // and written it out in the past before shrinking the file.
+                BFMarkAsSuperCold( ifmp, pgnoFirst + i );
+                continue;
+            }
+            CallR( err );
+            BFMarkAsSuperCold( &bfl );
+            BFWriteUnlatch( &bfl );
+        }
+    }
+
+ ClearLogRedoMapDbtimeRevert:
     // Clear the page from dbtimerevert redo map since the pages in the given extent are being freed.
     // Any future operation on this page should be a new page operation and we shouldn't have to worry about dbtime.
     //
@@ -13148,6 +13201,7 @@ ERR LOG::ErrLGIVerifyRedoMapForIfmp( const IFMP ifmp )
     const CLogRedoMap* const pLogRedoMapZeroed = g_rgfmp[ ifmp ].PLogRedoMapZeroed();
     const CLogRedoMap* const pLogRedoMapBadDbTime = g_rgfmp[ ifmp ].PLogRedoMapBadDbTime();
     const CLogRedoMap* const pLogRedoMapDbtimeRevert = g_rgfmp[ ifmp ].PLogRedoMapDbtimeRevert();
+    CLogRedoMap* const pLogRedoMapDbtimeRevertIgnore = g_rgfmp[ ifmp ].PLogRedoMapDbtimeRevertIgnore();
 
     if ( NULL != pLogRedoMapZeroed )
     {
@@ -13241,6 +13295,12 @@ ERR LOG::ErrLGIVerifyRedoMapForIfmp( const IFMP ifmp )
                 rme.lgpos,
                 cpg );
         }
+    }
+
+    // This redo map is to just ignore redo operations. Clear the redomap at the end of verify.
+    if ( NULL != pLogRedoMapDbtimeRevertIgnore )
+    {
+        pLogRedoMapDbtimeRevertIgnore->TermLogRedoMap();
     }
 
     Assert( ( ( err == JET_errSuccess ) && g_rgfmp[ ifmp ].FRedoMapsEmpty() ) ||

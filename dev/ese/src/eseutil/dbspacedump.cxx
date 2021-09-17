@@ -436,7 +436,7 @@ ESEUTIL_SPACE_FIELDS rgSpaceFields [] =
     { eSPFieldNone,                     3,          L"N/A",                     NULL,   0x0                         },
 
     // Note: 2-levels of indenting is the worst case for a long name, b/c under an Idx/LV the OE/AE trees would have short names.
-    { eSPFieldNameFull,                 64 + 4,     L"FullName",                NULL,   JET_bitDBUtilSpaceInfoBasicCatalog  },
+    { eSPFieldNameFull,                 64 + 13,    L"FullName",                NULL,   JET_bitDBUtilSpaceInfoBasicCatalog  },
     { eSPFieldOwningTableName,          64 + 4,     L"OwningTableName",         NULL,   JET_bitDBUtilSpaceInfoBasicCatalog  },
     { eSPFieldType,                     4,          L"Type",                    NULL,   JET_bitDBUtilSpaceInfoBasicCatalog  },  // legacy
     { eSPFieldObjid,                    10,         L"ObjidFDP",                NULL,   JET_bitDBUtilSpaceInfoBasicCatalog  },  // legacy
@@ -834,9 +834,18 @@ JET_ERR ErrPrintField(
                 assert( rgSpaceFields[eField].cchFieldSize >= ( cchFieldAdjust + LOSStrLengthW(pBTStats->pBasicCatalog->rgName) ) );
             }
 
-            wprintf(L"%-*.*ws", rgSpaceFields[eField].cchFieldSize-cchFieldAdjust,
-                            rgSpaceFields[eField].cchFieldSize-cchFieldAdjust,
-                            pBTStats->pBasicCatalog->rgName );
+            if ( pBTStats->fPgnoFDPRootDelete )
+            {
+                wprintf(L"%-*.*ws", rgSpaceFields[eField].cchFieldSize-cchFieldAdjust,
+                    rgSpaceFields[eField].cchFieldSize-cchFieldAdjust,
+                    OSFormatW( L"%ws%ws", pBTStats->pBasicCatalog->rgName, L"[Deleted]" ) );
+            }
+            else
+            {
+                wprintf(L"%-*.*ws", rgSpaceFields[eField].cchFieldSize-cchFieldAdjust,
+                                rgSpaceFields[eField].cchFieldSize-cchFieldAdjust,
+                                pBTStats->pBasicCatalog->rgName );
+            }
         }
             break;
         case eSPFieldOwningTableName:
@@ -913,7 +922,7 @@ JET_ERR ErrPrintField(
                     cpgFirstExt = pext->cpgExtent;
                 }
             }
-            Assert( cpgFirstExt );  // should be impossible now
+            Assert( cpgFirstExt || pBTStats->fPgnoFDPRootDelete );  // should be impossible now except for a table marked to be de deleted
             Assert( pBTStats->pSpaceTrees->cpgPrimary == 0 || pBTStats->pSpaceTrees->cpgPrimary == cpgFirstExt );
             wprintf(L"%*d", rgSpaceFields[eField].cchFieldSize, cpgFirstExt );
         }
@@ -2846,6 +2855,12 @@ JET_ERR EseutilEvalBTreeData(
     //  Every other entry after the DbRoot should have a parent ...
     assert( pBTreeStats->pParent );
 
+    //  Check if this is a deleted table and just print that the table is deleted with some basic info and return.
+    if ( pBTreeStats->fPgnoFDPRootDelete )
+    {
+        Call( EseutilPrintSpecifiedSpaceFields( pespCtx, pBTreeStats ) );
+        return JET_errSuccess;
+    }
 
     //
     //          Accumulate interesting data.

@@ -335,6 +335,118 @@ ERR ErrBTFindFragmentedRange(
     _Out_ BOOKMARK * const pbmStart,
     _Out_ BOOKMARK * const pbmEnd);
 
+//  ================================================================
+class PrereadContext
+//  ================================================================
+{
+public:
+    PrereadContext( PIB * const ppib, FUCB * const pfucb );
+    ~PrereadContext();
+
+    enum PrereadPgType
+    {
+        LeafPages = 0,
+        NonLeafPages = 1
+    };
+
+    ERR ErrPrereadKeys(
+        __in_ecount(ckeys) const void * const * const   rgpvKeys,
+        __in_ecount(ckeys) const ULONG * const  rgcbKeys,
+        const LONG                                      ckeys,
+        _Out_ LONG * const                              pckeysPreread,
+        const JET_GRBIT                                 grbit );
+
+    ERR ErrPrereadBookmarkRanges(
+        __in_ecount(cbm) const BOOKMARK * const rgbmStart,
+        __in_ecount(cbm) const BOOKMARK * const rgbmEnd,
+        const LONG                              cbm,
+        _Out_ LONG * const                      pcbmRangesPreread,
+        _In_ const ULONG                        cPageCacheMin,
+        _In_ const ULONG                        cPageCacheMax,
+        const JET_GRBIT                         grbit,
+        __out_opt ULONG * const                 pcPageCacheActual );
+
+    ERR ErrPrereadKeyRanges(
+        __in_ecount(cRanges) const void *   const * const   rgpvKeysStart,
+        __in_ecount(cRanges) const ULONG * const    rgcbKeysStart,
+        __in_ecount(cRanges) const void *   const * const   rgpvKeysEnd,
+        __in_ecount(cRanges) const ULONG * const    rgcbKeysEnd,
+        const LONG                                          cRanges,
+        __deref_out_range( 0, cRanges ) LONG * const        pcKeyRangesPreread,
+        _In_ const ULONG                            cPageCacheMin,
+        _In_ const ULONG                            cPageCacheMax,
+        const JET_GRBIT                                     grbit,
+        __out_opt ULONG * const                     pcPageCacheActual );
+
+    PGNO* RgPgno( const PrereadPgType prpgtyp ) const { return m_rgpgnoPreread[ prpgtyp ]; }
+    CPG CPgnos( const PrereadPgType prpgtyp ) const   { return m_cpgPreread[ prpgtyp ]; }
+
+private:
+    PIB * const m_ppib;
+    FUCB * const m_pfucb;
+    const IFMP m_ifmp;
+    PIBTraceContextScope m_tcScope;
+
+    PGNO * m_rgpgnoPreread[2];
+    CPG m_cpgPrereadAlloc[2];
+    CPG m_cpgPreread[2];
+    CPG m_cpgPrereadMax;
+
+    bool m_fSawFragmentedSpace;
+
+    void CheckSpaceFragmentation( const CSR& csr );
+    void CheckSpaceFragmentation_( const CSR& csr );
+
+    ERR ErrProcessSubtreeRangesForward(
+        _In_ const BOOKMARK * const                     rgbmStart,
+        _In_ const BOOKMARK * const                     rgbmEnd,
+        _In_count_(csubtrees) const PGNO * const        rgpgnoSubtree,
+        _In_count_(csubtrees) const LONG * const        rgibmMin,
+        _In_count_(csubtrees) const LONG * const        rgibmMax,
+        const LONG                                      csubtrees,
+        _Out_ LONG * const                              pcbmRangesPreread,
+        _In_ BOOL const                                 fIncludeNonLeafPg = fFalse );
+
+    ERR ErrProcessSubtreeRangesBackward(
+        _In_ const BOOKMARK * const                     rgbmStart,
+        _In_ const BOOKMARK * const                     rgbmEnd,
+        _In_count_(csubtrees) const PGNO * const        rgpgnoSubtree,
+        _In_count_(csubtrees) const LONG * const        rgibmMin,
+        _In_count_(csubtrees) const LONG * const        rgibmMax,
+        const LONG                                      csubtrees,
+        _Out_ LONG * const                              pcbmRangesPreread,
+        _In_ BOOL const                                 fIncludeNonLeafPg = fFalse );
+
+    ERR ErrPrereadRangesForward(
+        const CSR&                                      csr,
+        __in_ecount(cbm) const BOOKMARK * const         rgbmStart,
+        __in_ecount(cbm) const BOOKMARK * const         rgbmEnd,
+        const LONG                                      cbm,
+        _Out_ LONG * const                              pcbmRangesPreread,
+        _In_ BOOL const                                 fIncludeNonLeafPg = fFalse );
+
+    ERR ErrPrereadRangesBackward(
+        const CSR&                                      csr,
+        __in_ecount(cbm) const BOOKMARK * const         rgbmStart,
+        __in_ecount(cbm) const BOOKMARK * const         rgbmEnd,
+        const LONG                                      cbm,
+        _Out_ LONG * const                              pcbmRangesPreread,
+        _In_ BOOL const                                 fIncludeNonLeafPg = fFalse );
+
+    ERR ErrAddPrereadCandidate( 
+        const PGNO      pgno, 
+        _In_ PrereadPgType const prpgtyp = LeafPages );
+
+    ERR ErrAddPrereadCandidates( 
+        _In_count_(cpgnos) const PGNO * const   rgpgno,
+        const LONG                              cpgnos,
+        _In_ PrereadPgType const                prpgtyp = LeafPages );
+
+private:    // not implemented
+    PrereadContext( const PrereadContext& );
+    PrereadContext& operator=( const PrereadContext& );
+};
+
 //  **************************************
 //  PREREAD FUNCTIONS
 //

@@ -1092,8 +1092,12 @@ typedef enum class ObjidState
     Valid,      // The object is known to still exist. It is expected that the accompanying
                 // FUCB* is not pfucbNil.
 
-    Invalid     // The object is known to have been deleted. It is expected that the accompanying
+    Invalid,    // The object is known to have been deleted. It is expected that the accompanying
                 // FUCB* is pfucbNil.
+
+    ToBeDeleted // The object is to be deleted soon, so we can skip any cleanup opeartions.
+                // This happens when we revert a deleted table but just the root page and space tree pages.
+                // It is expected that the accompanying FUCB* is pfucbNil.
 } ois;
 
 //  ================================================================
@@ -1139,7 +1143,9 @@ public:
 
     void CacheObjectFucb( FUCB * const pfucb, const OBJID objid );
     void MarkCacheObjectInvalid( const OBJID objid );
+    void MarkCacheObjectToBeDeleted( const OBJID objid );
 
+    void CloseCachedObjectWithObjid( const OBJID objid );
     void CloseCachedObjectsWithPendingDeletes();
     void CloseAllCachedObjects();
 
@@ -1227,6 +1233,8 @@ protected:
 
     ERR ErrCleanupPrimaryPage_( CSR * const pcsr );
     ERR ErrCleanupIndexPage_( CSR * const pcsr );
+
+    VOID RedeleteRevertedFDP_( CSR * const pcsr );
 
 protected:
     PIB * m_ppib;
@@ -3246,14 +3254,33 @@ void DBMScanObserverCleanup::ReadPage_( const IDBMScanState * const pstate, cons
 
         case ois::Invalid:
             // Important: this call may release the page in case of failure.
-            Call( ErrCleanupUnusedPage_( &csr ) );
+            //
+            // Now that we are processing table root pages as well for redeleting reverted FDPs, we will check once again before we try to clean up.
+            if ( csr.Cpage().FLeafPage() )
+            {
+                Call( ErrCleanupUnusedPage_( &csr ) );
+            }
+            break;
+
+        case ois::ToBeDeleted:
+            // Currently possible to be set for a LV table which was deleted and later reverted by RBS.
+            //
+            // TODO: Should we get the table objid and attempt to delete here? For now, we will delete when we read the table root page.
+            //       Can ErrFILEOpenLVRoot be improved to not touch the root page by using DirOpenNoTouch instead?
             break;
 
         case ois::Valid:
             // Save the page-level stats for this page
             const_cast<IDBMScanState *>( pstate )->CalculatePageLevelStats( csr.Cpage() );
 
-            if ( csr.Cpage().Dbtime() >= g_rgfmp[m_ifmp].DbtimeOldestGuaranteed() )
+            if ( csr.Cpage().FPageFDPRootDelete() )
+            {
+                // Need to delete the table which was reverted back by RBS partially
+                // i.e., the table was deleted but then reverted back. Only root page and space tree pages are reverted though.
+                // We will just initiate a best effort delete on the table.
+                RedeleteRevertedFDP_( &csr );
+            }
+            else if ( csr.Cpage().Dbtime() >= g_rgfmp[m_ifmp].DbtimeOldestGuaranteed() )
             {
                 // updates on this page are recent enough that we won't process it
                 // runtime cleanup should deal with this page, otherwise we will
@@ -3358,9 +3385,9 @@ bool DBMScanObserverCleanup::FIgnorablePage_( const CSR& csr ) const
 {
     const OBJID objid = csr.Cpage().ObjidFDP();
 
-    if( !csr.Cpage().FLeafPage() )
+    if ( !csr.Cpage().FLeafPage() && ( !csr.Cpage().FPageFDPRootDelete() || !csr.Cpage().FPrimaryPage() ) )
     {
-        // non-leaf pages aren't cleanable
+        // non-leaf pages aren't cleanable, unless it is a table root page marked to be deleted in which case dbscan will try to clean up the table.
         return true;
     }
     else if( csr.Cpage().FSpaceTree() )
@@ -3397,6 +3424,12 @@ bool DBMScanObserverCleanup::FIgnorablePage_( const CSR& csr ) const
         // for a long time
         return true;
     }
+    else if ( csr.Cpage().FPageFDPRootDelete() && ( !csr.Cpage().FPrimaryPage() || csr.Cpage().FLongValuePage() ) )
+    {
+        // For now, we will only allow reverted deleted table cleanup from table's root pages
+        return true;
+    }
+
     return false;
 }
 
@@ -3432,7 +3465,7 @@ ObjidState DBMScanObserverCleanup::OisGetObjectIdState_( CSR& csr )
             // The table doesn't exist, the objid is less than the committed max, and the page
             // has data on it. Clean the page
             Assert( objid <= m_objidMaxCommitted );
-            Assert( csr.Cpage().FLeafPage() );
+            Assert( csr.Cpage().FLeafPage() || csr.Cpage().FPageFDPRootDelete() );
             if ( oisCached == ois::Unknown )
             {
                 m_objectCache.MarkCacheObjectInvalid( objid );
@@ -3548,6 +3581,11 @@ HandleError:
         {
             Assert( ois == oisCached );
         }
+    }
+    else if ( err == JET_errRBSFDPToBeDeleted )
+    {
+        // TODO: This is thrown when we try to open LV root. Should OpenLVRoot be fixed to do DirOpenNoTouch?
+        m_objectCache.MarkCacheObjectToBeDeleted( objid );
     }
     else
     {
@@ -4038,6 +4076,103 @@ HandleError:
     return err;
 }
 
+VOID DBMScanObserverCleanup::RedeleteRevertedFDP_( CSR* const pcsr )
+{
+    // Only the root page of the table should be marked with this special flag warranting redelete.
+    Assert( pcsr->Cpage().FRootPage() );
+    Assert( pcsr->Cpage().FPrimaryPage() );
+    Assert( !FCATSystemTableByObjid( pcsr->Cpage().ObjidFDP() ) );
+
+    Assert( FPIBSessionSystemCleanup( m_ppib ) );
+
+    BOOL fFDPExists     = fTrue;
+    BOOL fInTransaction = fFalse;
+    ERR err             = JET_errSuccess;
+    OBJID objidTable    = pcsr->Cpage().ObjidFDP();
+
+    CHAR szTableName[ JET_cbNameMost + 1 ];
+    PGNO pgnoTable          = pcsr->Cpage().PgnoThis();
+    PGNO pgnoTableFromCat   = pgnoNull;
+
+    // Close any FUCBs we have open for the table we are about to delete.
+    m_objectCache.CloseCachedObjectWithObjid( objidTable );
+    Assert( m_objectCache.PfucbGetCachedObject( objidTable ) == pfucbNil );
+
+    // Lets pull information needed for FDP delete operation.
+    Call( ErrDIRBeginTransaction( m_ppib, 54684, NO_GRBIT ) );
+    fInTransaction = fTrue;
+
+    // The given page should be a table root page since for LV and Secondary Index table root pages we ignore clean up.
+    Assert( !pcsr->Cpage().FLongValuePage() );
+    Assert( !pcsr->Cpage().FIndexPage() );
+
+    // Release page, so that delete table can operate on it.
+    pcsr->ReleasePage();
+    pcsr->Reset();
+
+    err = ErrCATSeekTableByObjid(
+        m_ppib,
+        m_ifmp,
+        objidTable,
+        szTableName,
+        sizeof( szTableName ),
+        &pgnoTableFromCat );
+
+    Assert( pgnoTableFromCat == pgnoTable );
+
+    if ( err == JET_errObjectNotFound )
+    {
+        // Table already cleaned up.
+        fFDPExists = fFalse;
+        err = JET_errSuccess;
+        goto HandleError;
+    }
+
+    // Re-deleting table.
+    const JET_SESID sesid = (JET_SESID) m_ppib;
+    const JET_DBID  dbid = (JET_DBID) m_ifmp;
+
+    Call( ErrIsamDeleteTable( sesid, dbid, szTableName, fFalse, JET_bitNonRevertableTableDelete ) );
+    Call( ErrDIRCommitTransaction( m_ppib, NO_GRBIT ) );
+    fInTransaction = fFalse;
+
+    // We have marked table for delete. Mark cached object invalid, if it exists.
+    Assert( m_objectCache.PfucbGetCachedObject( objidTable ) == pfucbNil );
+
+HandleError:
+    if ( fFDPExists )
+    {
+        WCHAR wszPgnoTable[16], wszObjidTable[16], wszErr[16];
+        OSStrCbFormatW( wszPgnoTable, sizeof(wszPgnoTable), L"%I64u", pgnoTable );
+        OSStrCbFormatW( wszObjidTable, sizeof(wszObjidTable), L"%I64u", objidTable );
+        OSStrCbFormatW( wszErr, sizeof(wszErr), L"%d", err );
+
+        BOOL fSuccess = err >= JET_errSuccess;
+
+        const WCHAR* rgcwsz[] =
+        {
+            wszPgnoTable,
+            wszObjidTable,
+            wszErr
+        }; 
+
+        UtilReportEvent(
+            fSuccess ? eventInformation : eventError,
+            GENERAL_CATEGORY,
+            fSuccess ? DBSCAN_REDELETE_REVERTED_TABLE_SUCCESS : DBSCAN_REDELETE_REVERTED_TABLE_FAILURE,
+            3,
+            rgcwsz,
+            0,
+            NULL,
+            m_ppib->m_pinst );
+    }
+
+    if( fInTransaction )
+    {
+        CallSx( ErrDIRRollback( m_ppib ), JET_errRollbackError );
+    }
+}
+
 // Begin a transaction, upgrade the latch and call ErrNDScrubOneUsedPage
 // 
 // Important: this call may release the page in case of failure.
@@ -4262,6 +4397,50 @@ void DBMObjectCache::MarkCacheObjectInvalid( const OBJID objid )
     Assert( FContainsObjid_( objid ) );
     Assert( pfucbNil == PfucbGetCachedObject( objid ) );
     Assert( ois::Invalid == OisGetObjidState( objid ) );
+}
+
+void DBMObjectCache::MarkCacheObjectToBeDeleted( const OBJID objid )
+{
+    Assert( objidNil != objid );
+
+    INT index = IndexOfObjid_( objid );
+    if ( index < 0 )
+    {
+        index = IndexOfLeastRecentlyUsedObject_();
+        CloseObjectAt_( index );
+    }
+    else
+    {
+        Assert( m_rgstate[index].objid == objid );
+        Assert( m_rgstate[index].ois != ois::Valid );
+        Assert( m_rgstate[index].pfucb == pfucbNil );
+    }
+
+    m_rgstate[index].objid = objid;
+    m_rgstate[index].ois = ois::ToBeDeleted;
+    m_rgstate[index].pfucb = pfucbNil;
+    m_rgstate[index].ftAccess = UtilGetCurrentFileTime();
+    Assert( FContainsObjid_( objid ) );
+    Assert( pfucbNil == PfucbGetCachedObject( objid ) );
+    Assert( ois::ToBeDeleted == OisGetObjidState( objid ) );
+}
+
+void DBMObjectCache::CloseCachedObjectWithObjid( const OBJID objid )
+{
+    Assert( objidNil != objid );
+
+    INT index = IndexOfObjid_( objid );
+
+    if ( index < 0 )
+    {
+        return;
+    }
+
+    Assert( m_rgstate[index].objid == objid );
+    Assert( m_rgstate[index].ois == ois::Valid );
+    Assert( m_rgstate[index].pfucb != pfucbNil );
+
+    CloseObjectAt_( index );
 }
 
 void DBMObjectCache::CloseCachedObjectsWithPendingDeletes()
@@ -5498,6 +5677,28 @@ JETUNITTEST( DBMObjectCache, CloseObjects )
 }
 
 //  ================================================================
+JETUNITTEST( DBMObjectCache, CloseObjectWithObjid )
+//  ================================================================
+{
+    DBMObjectCache cache;
+    cache.CacheObjectFucb( (FUCB*)0x12345678, 1 );
+    cache.CacheObjectFucb( (FUCB*)0x12345678 - 1, 2 );
+    cache.CacheObjectFucb( (FUCB*)0x12345678 - 2, 3 );
+
+    cache.CloseCachedObjectWithObjid( 1 );
+    cache.CloseCachedObjectWithObjid( 3 );
+
+    CHECK( ois::Unknown == cache.OisGetObjidState( 1 ) );
+    CHECK( pfucbNil == cache.PfucbGetCachedObject( 1 ) );
+
+    CHECK( ois::Valid == cache.OisGetObjidState( 2 ) );
+    CHECK( ( (FUCB*)0x12345678 - 1 ) == cache.PfucbGetCachedObject( 2 ) );
+
+    CHECK( ois::Unknown == cache.OisGetObjidState( 3 ) );
+    CHECK( pfucbNil == cache.PfucbGetCachedObject( 3 ) );
+}
+
+//  ================================================================
 JETUNITTEST( DBMObjectCache, SetObjidToInvalid )
 //  ================================================================
 {
@@ -5511,6 +5712,20 @@ JETUNITTEST( DBMObjectCache, SetObjidToInvalid )
 }
 
 //  ================================================================
+JETUNITTEST( DBMObjectCache, SetObjidToBeDeleted )
+//  ================================================================
+{
+    DBMObjectCache cache;
+    cache.CacheObjectFucb( (FUCB*)0x12345678, 1 );
+    cache.CloseAllCachedObjects();
+    cache.MarkCacheObjectToBeDeleted( 1 );
+
+    CHECK( ois::ToBeDeleted == cache.OisGetObjidState( 1 ) );
+    CHECK( pfucbNil == cache.PfucbGetCachedObject( 1 ) );
+}
+
+
+//  ================================================================
 JETUNITTEST( DBMObjectCache, SetMultipleObjids )
 //  ================================================================
 {
@@ -5519,6 +5734,7 @@ JETUNITTEST( DBMObjectCache, SetMultipleObjids )
     cache.MarkCacheObjectInvalid( 2 );
     cache.CacheObjectFucb( (FUCB*)0x12345678 - 2, 3 );
     cache.MarkCacheObjectInvalid( 4 );
+    cache.MarkCacheObjectToBeDeleted( 5 );
 
     CHECK( ois::Valid == cache.OisGetObjidState( 1 ) );
     CHECK( (FUCB*)0x12345678 - 1 == cache.PfucbGetCachedObject( 1 ) );
@@ -5528,8 +5744,10 @@ JETUNITTEST( DBMObjectCache, SetMultipleObjids )
     CHECK( (FUCB*)0x12345678 - 2 == cache.PfucbGetCachedObject( 3 ) );
     CHECK( ois::Invalid == cache.OisGetObjidState( 4 ) );
     CHECK( pfucbNil == cache.PfucbGetCachedObject( 4 ) );
-    CHECK( ois::Unknown == cache.OisGetObjidState( 5 ) );
+    CHECK( ois::ToBeDeleted == cache.OisGetObjidState( 5 ) );
     CHECK( pfucbNil == cache.PfucbGetCachedObject( 5 ) );
+    CHECK( ois::Unknown == cache.OisGetObjidState( 6 ) );
+    CHECK( pfucbNil == cache.PfucbGetCachedObject( 6 ) );
 }
 
 //  ================================================================

@@ -337,6 +337,9 @@ ERR ErrBFCheckMaintAvailPoolStatus()
     return JET_errSuccess;
 }
 
+///////////////////////
+//  RBS Helper functions
+
 ERR ErrBFICapturePagePreimage( BF *pbf, RBS_POS *prbsposSnapshot )
 {
     // If page has already been dirtied once since the start of the snapshot, we do not need to collect pre-image again.

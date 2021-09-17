@@ -8448,6 +8448,78 @@ namespace Isam
     };
 
     [Serializable]
+    public ref class IsamRBSDeleteTableTooSoonException : public IsamStateException
+    {
+    public:
+        IsamRBSDeleteTableTooSoonException() : IsamStateException( "The table was created or the root page of table being deleted was moved in the last few days and hence a non-revertable delete cannot be attempted right now.", JET_errRBSDeleteTableTooSoon)
+        {
+        }
+
+        // Constructor with embedded exception. Does not use the string from esent.h.
+        IsamRBSDeleteTableTooSoonException( String ^ description, Exception^ innerException ) :
+            IsamStateException( description, innerException )
+        {
+        }
+
+        IsamRBSDeleteTableTooSoonException(
+            System::Runtime::Serialization::SerializationInfo^ info,
+            System::Runtime::Serialization::StreamingContext context
+        )
+            : IsamStateException( info, context )
+        {
+        }
+
+    };
+
+    [Serializable]
+    public ref class IsamRBSFDPToBeDeletedException : public IsamStateException
+    {
+    public:
+        IsamRBSFDPToBeDeletedException() : IsamStateException( "The FDP is about to be deleted. The table was originally deleted using non-revertable flag and the database was then reverted to a previous state using RBS causing the table's pages to not be reverted but table root page and space tree pages were reverted to assist in catalog cleanup.", JET_errRBSFDPToBeDeleted)
+        {
+        }
+
+        // Constructor with embedded exception. Does not use the string from esent.h.
+        IsamRBSFDPToBeDeletedException( String ^ description, Exception^ innerException ) :
+            IsamStateException( description, innerException )
+        {
+        }
+
+        IsamRBSFDPToBeDeletedException(
+            System::Runtime::Serialization::SerializationInfo^ info,
+            System::Runtime::Serialization::StreamingContext context
+        )
+            : IsamStateException( info, context )
+        {
+        }
+
+    };
+
+    [Serializable]
+    public ref class IsamRBSRevertableDeleteNotPossibleException : public IsamStateException
+    {
+    public:
+        IsamRBSRevertableDeleteNotPossibleException() : IsamStateException( "The table being deleted with revertable delete flag is not possible as this table was previously deleted with non-revertable flag and partially reverted by RBS.", JET_errRBSRevertableDeleteNotPossible)
+        {
+        }
+
+        // Constructor with embedded exception. Does not use the string from esent.h.
+        IsamRBSRevertableDeleteNotPossibleException( String ^ description, Exception^ innerException ) :
+            IsamStateException( description, innerException )
+        {
+        }
+
+        IsamRBSRevertableDeleteNotPossibleException(
+            System::Runtime::Serialization::SerializationInfo^ info,
+            System::Runtime::Serialization::StreamingContext context
+        )
+            : IsamStateException( info, context )
+        {
+        }
+
+    };
+
+    [Serializable]
     public ref class IsamDatabaseAlreadyRunningMaintenanceException : public IsamUsageException
     {
     public:
@@ -9503,6 +9575,12 @@ static IsamErrorException^ JetErrToException( const JET_ERR err )
             return gcnew IsamRBSCannotDetermineDivergenceException;
         case JET_errRBSDeleteTableTooBig:
             return gcnew IsamRBSDeleteTableTooBigException;
+        case JET_errRBSDeleteTableTooSoon:
+            return gcnew IsamRBSDeleteTableTooSoonException;
+        case JET_errRBSFDPToBeDeleted:
+            return gcnew IsamRBSFDPToBeDeletedException;
+        case JET_errRBSRevertableDeleteNotPossible:
+            return gcnew IsamRBSRevertableDeleteNotPossibleException;
         case JET_errDatabaseAlreadyRunningMaintenance:
             return gcnew IsamDatabaseAlreadyRunningMaintenanceException;
         case JET_errCallbackFailed:

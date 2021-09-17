@@ -2682,7 +2682,8 @@ VOID CPAGE::GetShrunkPage(
 VOID CPAGE::GetRevertedNewPage(
     const PGNO pgno,
     VOID * const pv,
-    const ULONG cb )
+    const ULONG cb,
+    const BOOL fMarkPageFDPDelete )
     //  ================================================================
 {
     Assert( 0 != cb );
@@ -2695,7 +2696,9 @@ VOID CPAGE::GetRevertedNewPage(
     Assert( g_loadedPageLatchManager.FIsLoadedPage( &m_bfl ) );
 
     PreInitializeNewPage_( ppibNil, ifmpNil, pgno, objidNil, dbtimeRevert );
-    ConsumePreInitPage( 0 );
+
+    ULONG fPageFlags = fMarkPageFDPDelete ? fPageFDPDelete : 0;
+    ConsumePreInitPage( fPageFlags );
 
     SetPageChecksum( (BYTE *)m_bfl.pv, CbPage(), databasePage, m_pgno );
 }
@@ -2868,6 +2871,24 @@ VOID CPAGE::SetDbtime( const DBTIME dbtime )
     ((PGHDR*)m_bfl.pv)->dbtimeDirtied = dbtime;
 }
 
+//  ================================================================
+VOID CPAGE::SetPageFDPDelete( const BOOL fValue )
+//  ================================================================
+{
+#ifdef DEBUG_PAGE
+    ASSERT_VALID( this );
+#endif
+
+    const ULONG ulFlags = ((PGHDR*)m_bfl.pv)->fFlags;
+    if ( fValue )
+    {
+        ((PGHDR*)m_bfl.pv)->fFlags = ulFlags | fPageFDPDelete;
+    }
+    else
+    {
+        ((PGHDR*)m_bfl.pv)->fFlags = ulFlags & ~fPageFDPDelete;
+    }
+}
 
 //  ================================================================
 VOID CPAGE::RevertDbtime( const DBTIME dbtime, const ULONG fFlags )
@@ -2886,11 +2907,17 @@ VOID CPAGE::RevertDbtime( const DBTIME dbtime, const ULONG fFlags )
     // We also revert the scrubbed flag, as this is party of the "dirtied"/dbtime
     // state with the way scrubbed was implemented embedded in ::Dirty() and ::DirtyForScrub().
     // Still, we don't expect any other flags to change other than fPageScrubbed.
+    //
+    // Its also possible we are replaying a log on an available lag on a table which was deleted and reverted with fPageFDPDelete.
+    // We do not want to overwrite that flag. So we might be restoring that flag.
+    //
     // If the FireWall() below goes off, it doesn't necessarily mean we have
     // a corruption problem, but it means there will be a divergence between
     // copies in a replicated system that may triger a DB divergence error.
 #ifndef ENABLE_JET_UNIT_TEST
-    if ( ( FFlags() | fPageScrubbed ) != ( fFlags | fPageScrubbed ) )
+    if ( ( FFlags() | fPageScrubbed ) != ( fFlags | fPageScrubbed ) &&
+         ( FFlags() | fPageFDPDelete ) != ( fFlags | fPageFDPDelete ) &&
+         ( FFlags() | fPageScrubbed |  fPageFDPDelete ) != ( fFlags | fPageScrubbed | fPageFDPDelete ) )
     {
         FireWall( OSFormat( "RevertDbtime:0x%I32x:0x%I32x", fFlags, FFlags() ) );
     }
@@ -2899,6 +2926,14 @@ VOID CPAGE::RevertDbtime( const DBTIME dbtime, const ULONG fFlags )
     if ( !FScrubbed() != !fScrubbedBefore )
     {
         SetFScrubbedValue_( fScrubbedBefore );
+    }
+
+    // If existing root page had been marked for FDP delete but current root page isn't, mark it again.
+    const BOOL fPageFDPDeleteBefore = ( fFlags & fPageFDPDelete );
+    if ( fPageFDPDeleteBefore && !FPageFDPDelete() )
+    {
+        Assert( FRootPage() );
+        SetPageFDPDelete( fPageFDPDeleteBefore );
     }
 }
 
@@ -3817,6 +3852,7 @@ PAGECHECKSUM CPAGE::LoggedDataChecksum() const
 //      all version flags
 //      unused space on the page
 //      the data in flag deleted nodes
+//      page fdp root delete bit
 //
 //  In addition we should allow the nodes to be organized in any fashion,
 //  currently this isn't strictly necessary but may be desirable in the future
@@ -3843,7 +3879,8 @@ PAGECHECKSUM CPAGE::LoggedDataChecksum() const
     pghdr2T.pghdr.ibMicFree         = 0;
     //  flush bit can flip-flop regardless of logging / replay
     //  checksum is not summed in, neither needs bit (which changes/upgrades from dehydration)
-    pghdr2T.pghdr.fFlags            &= ~( maskFlushType | fPageNewChecksumFormat );
+    //  Page FDP delete might be set only on a copy reverted by RBS.
+    pghdr2T.pghdr.fFlags            &= ~( maskFlushType | fPageNewChecksumFormat | fPageFDPDelete );
     memset( pghdr2T.rgChecksum, 0, sizeof( pghdr2T.rgChecksum ) );
     memset( pghdr2T.rgbReserved, 0, sizeof( pghdr2T.rgbReserved ) );
     checksum = UpdateLoggedDataChecksum_( checksum, ( const BYTE* )&pghdr2T, CbPageHeader() );
@@ -6775,6 +6812,15 @@ ERR CPAGE::DumpHeader( CPRINTF * pcprintf, DWORD_PTR dwOffset ) const
     if( FScrubbed() )
     {
         (*pcprintf)( _T( "\t\tScrubbed\n" ) );
+    }
+
+    if ( FPageFDPRootDelete() )
+    {
+        (*pcprintf)( _T( "\t\tFDP Root Delete Page\n" ) );
+    }
+    else if ( FPageFDPDelete() )
+    {
+        (*pcprintf)( _T( "\t\tFDP Delete Page\n" ) );
     }
 
     (*pcprintf)( _T( "\t\tPageFlushType = %d\n" ), Pgft() );
