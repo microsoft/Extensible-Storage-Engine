@@ -3,6 +3,11 @@
 
 #include "std.hxx"
 
+#ifndef ENABLE_JET_UNIT_TEST
+// This is not safe to do in unit tests where NULL and non-NULL but bad pointers are used.
+#define ENABLE_FUCB_IN_DBSCAN_CACHE_PROTECTION 1
+#endif
+
 //  ****************************************************************
 //  Performance Counters
 //  ****************************************************************
@@ -4359,9 +4364,14 @@ void DBMObjectCache::CacheObjectFucb( FUCB * const pfucb, const OBJID objid )
         Assert( m_rgstate[index].pfucb == pfucbNil );
     }
 
-#ifndef ENABLE_JET_UNIT_TEST
-    // There are tests that get here with a NULL pointer.
+#ifdef ENABLE_FUCB_IN_DBSCAN_CACHE_PROTECTION
+    // Need the lock so we don't race with someone growing or reordering the FucbList.
+    pfucb->u.pfcb->Lock();
+    pfucb->u.pfcb->FucbList().LockForEnumeration();
+    Assert( !pfucb->m_iae.FProtected() );
     pfucb->m_iae.SetProtected();
+    pfucb->u.pfcb->FucbList().UnlockForEnumeration();
+    pfucb->u.pfcb->Unlock();
 #endif
 
     m_rgstate[index].objid = objid;
@@ -4524,10 +4534,17 @@ void DBMObjectCache::CloseObjectAt_( const INT index )
     {
         Assert( ois::Valid == m_rgstate[index].ois );
 
-#ifndef ENABLE_JET_UNIT_TEST
+#ifdef ENABLE_FUCB_IN_DBSCAN_CACHE_PROTECTION
+        // Need the lock so we don't race with someone growing or reordering the FucbList.
+        m_rgstate[index].pfucb->u.pfcb->Lock();
+        m_rgstate[index].pfucb->u.pfcb->FucbList().LockForEnumeration();
         Assert( m_rgstate[index].pfucb->m_iae.FProtected() );
         m_rgstate[index].pfucb->m_iae.ResetProtected();
-        
+        m_rgstate[index].pfucb->u.pfcb->FucbList().UnlockForEnumeration();
+        m_rgstate[index].pfucb->u.pfcb->Unlock();
+#endif
+
+#ifndef ENABLE_JET_UNIT_TEST
         if ( m_rgstate[index].pfucb->u.pfcb->FTypeLV() )
         {
             DIRClose( m_rgstate[index].pfucb );
