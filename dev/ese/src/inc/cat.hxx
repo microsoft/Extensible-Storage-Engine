@@ -809,7 +809,7 @@ ERR ErrCATGetColumnCallbackInfo(
 
 ERR ErrCATInitCatalogFCB( FUCB *pfucbTable );
 ERR ErrCATInitTempFCB( FUCB *pfucbTable );
-ERR ErrCATInitFCB( FUCB *pfucbTable, OBJID objidTable, const BOOL fSkipPgnoFDPLastSetTime = fFalse );
+ERR ErrCATInitFCB( FUCB *pfucbTable, OBJID objidTable, const BOOL fSkipPgnoFDPLastSetTime );
 
 enum CATCheckIndicesFlags : ULONG  //  catcif
 {
@@ -1413,3 +1413,10 @@ INLINE VOID WszCATFormatSortID(
     __out_ecount( cch ) WCHAR * wsz,
     _In_ INT cch );
 
+ERR ErrCATChangePgnoFDPLastSetTime( 
+    _In_ PIB* const         ppib,
+    _In_ const IFMP         ifmp,
+    _In_ const OBJID        objidTable,
+    _In_ const OBJID        objid,
+    _In_ const SYSOBJ       sysobj,
+    _In_ const __int64      ftCurrent );

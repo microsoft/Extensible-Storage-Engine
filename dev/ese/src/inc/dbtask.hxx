@@ -382,4 +382,35 @@ class RECTASKBATCHER
         RECTASKBATCHER& operator=( const RECTASKBATCHER& );
 };
 
+//  ================================================================
+class DBPGNOFDPLASTSETTIMETASK : public DBTASK
+//  ================================================================
+//
+//  This task is used to change the pgno FDP last set time for a given objid in the catalog asynchronously.
+//
+//
+{
+public:
+    ERR ErrExecuteDbTask( PIB * const ppib );
+    VOID HandleError( const ERR err );
+
+public:
+    DBPGNOFDPLASTSETTIMETASK(
+        const IFMP      ifmp,
+        const OBJID     objidTable,
+        const OBJID     objid,
+        const USHORT    sysobj,
+        const __int64   ftCurrent );
+
+private:
+    const OBJID   m_objidTable;
+    const OBJID   m_objid;
+    const USHORT  m_sysobj;
+    const __int64 m_ftCurrent;
+
+private:    // not implemented
+    DBPGNOFDPLASTSETTIMETASK( const DBPGNOFDPLASTSETTIMETASK& );
+    DBPGNOFDPLASTSETTIMETASK& operator=( const DBPGNOFDPLASTSETTIMETASK& );
+};
+
 #pragma warning(pop)
