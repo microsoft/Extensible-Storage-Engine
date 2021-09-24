@@ -4110,29 +4110,13 @@ LOCAL BOOL FCATChangePgnoFDPLastSetTime( __int64 ftCurrentSet, USHORT cdbOpen, I
         g_rgfmp[ ifmp ].ErrDBFormatFeatureEnabled( JET_efvRBSNonRevertableTableDeletes ) >= JET_errSuccess;
 }
 
-struct CATChangePgnoFDPLastSetTime
-{
-    INST*   m_pinst;
-    IFMP    m_ifmp;
-    DBID    m_dbid;
-    OBJID   m_objidTable;
-    OBJID   m_objid;
-    SYSOBJ  m_sysobj;
-    __int64 m_ftCurrent;
-
-    CATChangePgnoFDPLastSetTime( INST* pinst, IFMP ifmp, DBID dbid, OBJID objidTable, OBJID objid, SYSOBJ sysobj, __int64 ftCurrent )
-    {
-        m_pinst         = pinst;
-        m_ifmp          = ifmp;
-        m_dbid          = dbid;
-        m_objidTable    = objidTable;
-        m_objid         = objid;
-        m_sysobj        = sysobj;
-        m_ftCurrent     = ftCurrent;
-    }
-};
-
-LOCAL ERR ErrCATChangePgnoFDPLastSetTime( INST * pinst, IFMP ifmp, DBID dbid, OBJID objidTable, OBJID objid, SYSOBJ sysobj, __int64 ftCurrent )
+ERR ErrCATChangePgnoFDPLastSetTime(
+    _In_ PIB* const         ppib,
+    _In_ const IFMP         ifmp,
+    _In_ const OBJID        objidTable,
+    _In_ const OBJID        objid,
+    _In_ const SYSOBJ       sysobj,
+    _In_ const __int64      ftCurrent )
 {
     ERR         err             = JET_errSuccess;
     FUCB *      pfucbCatalog    = pfucbNil;
@@ -4141,15 +4125,8 @@ LOCAL ERR ErrCATChangePgnoFDPLastSetTime( INST * pinst, IFMP ifmp, DBID dbid, OB
     ULONG       cbBookmark;
 
     BOOL    fBeginTrx           = fFalse;
-    PIB *   ppib                = NULL;
-
-    // We will use our own session to change the PgnoFDPLastSetTime.
-    // This is to avoid rollbacks in case of using an existing session.
-    // Does it make sense to create a reusuable session saved in FMP? But what happens if multiple operations happen at same time?
-    // For now, starting a new session for each such update.
-    Call( ErrPIBBeginSession( pinst, &ppib, procidNil, fFalse ) );
-
-    ppib->rgcdbOpen[ dbid ] = 1;
+    JET_GRBIT grbitCommitBefore = ppib->grbitCommitDefault;
+    ppib->grbitCommitDefault    = 0;
 
     //  begin transaction if one is already not begun
     //
@@ -4228,31 +4205,41 @@ HandleError:
             }
         }
 
-        // Reset to allow end session cleanly. This session doesn't open dbs explicitly anyways.
-        ppib->rgcdbOpen[ dbid ] = 0;
-
-        PIBEndSession( ppib );
+        ppib->grbitCommitDefault = grbitCommitBefore;
     }
 
     return err;
 }
 
-LOCAL DWORD ErrCATChangePgnoFDPLastSetTime_( VOID* pvThis )
+LOCAL VOID RegisterPgnoFDPLastSetTimeTask(
+    const IFMP      ifmp,
+    const OBJID     objidTable,
+    const OBJID     objid,
+    const USHORT    sysobj,
+    const __int64   ftCurrent )
 {
-    CATChangePgnoFDPLastSetTime* pcatChangePgnoFDPLastSetTime = (CATChangePgnoFDPLastSetTime*) pvThis;
-    Assert( pcatChangePgnoFDPLastSetTime );
+    ERR err = JET_errSuccess;
+    DBPGNOFDPLASTSETTIMETASK * ptask    = NULL;
 
-    (VOID) ErrCATChangePgnoFDPLastSetTime(
-        pcatChangePgnoFDPLastSetTime->m_pinst,
-        pcatChangePgnoFDPLastSetTime->m_ifmp,
-        pcatChangePgnoFDPLastSetTime->m_dbid,
-        pcatChangePgnoFDPLastSetTime->m_objidTable,
-        pcatChangePgnoFDPLastSetTime->m_objid,
-        pcatChangePgnoFDPLastSetTime->m_sysobj,
-        pcatChangePgnoFDPLastSetTime->m_ftCurrent );
+    if ( PinstFromIfmp( ifmp )->m_pver->m_fSyncronousTasks || g_rgfmp[ ifmp ].FDetachingDB() )
+    {
+        // don't start the task because the task manager is no longer running
+        // and we can't run it synchronously because it will deadlock.
+        return;
+    }
 
-    delete pcatChangePgnoFDPLastSetTime;
-    return 0;
+    Alloc( ptask = new DBPGNOFDPLASTSETTIMETASK( ifmp, objidTable, objid, sysobj, ftCurrent ) );
+    Call( PinstFromIfmp( ifmp )->Taskmgr().ErrTMPost( TASK::DispatchGP, ptask ) );
+    ptask = NULL;
+
+HandleError:
+
+    if ( err < JET_errSuccess && ptask )
+    {
+        delete ptask;
+    }
+
+    return;
 }
 
 ERR ErrCATAccessTableLV(
@@ -4269,10 +4256,8 @@ ERR ErrCATAccessTableLV(
     BOOL            fInTransaction  = fFalse;
     OBJID           objidLV;
 
-
-    CATChangePgnoFDPLastSetTime* pcatChangePgnoFDPLastSetTime   = NULL;
-    __int64 ftPgnoFDPLastSet                                     = 0;
-    __int64 ftCurrent                                            = UtilGetCurrentFileTime();
+    __int64 ftPgnoFDPLastSet            = 0;
+    __int64 ftCurrent                   = UtilGetCurrentFileTime();
 
     Call( ErrDIRBeginTransaction( ppib, 34324, NO_GRBIT ) );
     fInTransaction = fTrue;
@@ -4369,10 +4354,7 @@ ERR ErrCATAccessTableLV(
             BTUp( pfucbCatalog );
             Assert( !Pcsr( pfucbCatalog )->FLatched() );
 
-            Alloc( pcatChangePgnoFDPLastSetTime = new CATChangePgnoFDPLastSetTime( PinstFromPpib( ppib ), ifmp, g_rgfmp[ ifmp ].Dbid(), objidTable, objidLV, sysobjLongValue, ftCurrent ) );
-            Call( PinstFromPpib( ppib )->Taskmgr().ErrTMPost( ErrCATChangePgnoFDPLastSetTime_, pcatChangePgnoFDPLastSetTime ) );
-            pcatChangePgnoFDPLastSetTime = NULL;
-
+            RegisterPgnoFDPLastSetTimeTask( ifmp, objidTable, objidLV, sysobjLongValue, ftCurrent );
             ftPgnoFDPLastSet = ftCurrent;
         }
 
@@ -4386,11 +4368,6 @@ HandleError:
     if ( pfucbCatalog != pfucbNil )
     {
         CallS( ErrCATClose( ppib, pfucbCatalog ) );
-    }
-
-    if ( pcatChangePgnoFDPLastSetTime )
-    {
-        delete pcatChangePgnoFDPLastSetTime;
     }
 
     if ( fInTransaction )
@@ -7871,7 +7848,7 @@ HandleError:
 }
 
 
-LOCAL ERR ErrCATIInitIndexPgnoFDPLastSetTime(
+LOCAL VOID CATIInitIndexPgnoFDPLastSetTime(
     PIB* ppib,
     IFMP ifmp,
     const OBJID objidTable,
@@ -7879,10 +7856,6 @@ LOCAL ERR ErrCATIInitIndexPgnoFDPLastSetTime(
     BOOL fPrimaryPgnoFDPLastSetRequired )
 {
     __int64 ftCurrent = UtilGetCurrentFileTime();
-    
-    ERR err = JET_errSuccess;
-
-    CATChangePgnoFDPLastSetTime* pcatChangePgnoFDPLastSetTime = NULL;
 
     // For primary index, lets set it to the same time as the table pgnoFDP.
     if ( fPrimaryPgnoFDPLastSetRequired && FCATChangePgnoFDPLastSetTime( 0, ppib->rgcdbOpen[ g_rgfmp[ ifmp ].Dbid() ], ifmp, PinstFromPpib( ppib ) ) )
@@ -7891,9 +7864,7 @@ LOCAL ERR ErrCATIInitIndexPgnoFDPLastSetTime(
         Assert( pfcb->ObjidFDP() > 0 );
         Assert( pfcb->FileTimePgnoFDPLastSet() != 0 );
 
-        Alloc( pcatChangePgnoFDPLastSetTime = new CATChangePgnoFDPLastSetTime( PinstFromPpib( ppib ), ifmp, g_rgfmp[ ifmp ].Dbid(), objidTable, objidTable, sysobjIndex, pfcb->FileTimePgnoFDPLastSet() ) );
-        Call( PinstFromPpib( ppib )->Taskmgr().ErrTMPost( ErrCATChangePgnoFDPLastSetTime_, pcatChangePgnoFDPLastSetTime ) );
-        pcatChangePgnoFDPLastSetTime = NULL;
+        RegisterPgnoFDPLastSetTimeTask( ifmp, objidTable, objidTable, sysobjIndex, pfcb->FileTimePgnoFDPLastSet() );
     }
 
     for ( FCB * pfcbT = pfcb->PfcbNextIndex(); pfcbNil != pfcbT; pfcbT = pfcbT->PfcbNextIndex() )
@@ -7903,21 +7874,10 @@ LOCAL ERR ErrCATIInitIndexPgnoFDPLastSetTime(
             Assert( pfcbT->PgnoFDP() > 0 );
             Assert( pfcbT->ObjidFDP() > 0 );
 
-            Alloc( pcatChangePgnoFDPLastSetTime = new CATChangePgnoFDPLastSetTime( PinstFromPpib( ppib ), ifmp, g_rgfmp[ ifmp ].Dbid(), objidTable, pfcbT->ObjidFDP(), sysobjIndex, ftCurrent ) );
-            Call( PinstFromPpib( ppib )->Taskmgr().ErrTMPost( ErrCATChangePgnoFDPLastSetTime_, pcatChangePgnoFDPLastSetTime ) );
-            pcatChangePgnoFDPLastSetTime = NULL;
-
+            RegisterPgnoFDPLastSetTimeTask( ifmp, objidTable, pfcbT->ObjidFDP(), sysobjIndex, ftCurrent );
             pfcbT->SetFileTimePgnoFDPLastSet( ftCurrent );
         }
     }
-
-HandleError:
-    if ( pcatChangePgnoFDPLastSetTime )
-    {
-        delete pcatChangePgnoFDPLastSetTime;
-    }
-
-    return err;
 }
 
 
@@ -8239,8 +8199,6 @@ ERR ErrCATInitFCB( FUCB *pfucbTable, OBJID objidTable, const BOOL fSkipPgnoFDPLa
     BOOL        fSetDeferredLVSpacehints            = fFalse;
     BOOL        fPrimaryIndexPgnoFDPLastSetRequired = fFalse;
     BOOL        fAnySecIndexPgnoFDPLastSetRequired  = fFalse;
-
-    CATChangePgnoFDPLastSetTime* pcatChangePgnoFDPLastSetTime = NULL;
 
     __int64 ftPgnoFDPLastSet = 0;
     __int64 ftCurrent        = UtilGetCurrentFileTime();
@@ -8623,10 +8581,7 @@ ERR ErrCATInitFCB( FUCB *pfucbTable, OBJID objidTable, const BOOL fSkipPgnoFDPLa
     {
         Assert( !Pcsr( pfucbCatalog )->FLatched() );
 
-        Alloc( pcatChangePgnoFDPLastSetTime = new CATChangePgnoFDPLastSetTime( PinstFromPpib( ppib ), ifmp, g_rgfmp[ ifmp ].Dbid(), objidTable, objidTable, sysobjTable, ftCurrent ) );
-        Call( PinstFromPpib( ppib )->Taskmgr().ErrTMPost( ErrCATChangePgnoFDPLastSetTime_, pcatChangePgnoFDPLastSetTime ) );
-        pcatChangePgnoFDPLastSetTime = NULL;
-
+        RegisterPgnoFDPLastSetTimeTask( ifmp, objidTable, objidTable, sysobjTable, ftCurrent );
         ftPgnoFDPLastSet = ftCurrent;
     }
 
@@ -8635,7 +8590,7 @@ ERR ErrCATInitFCB( FUCB *pfucbTable, OBJID objidTable, const BOOL fSkipPgnoFDPLa
     if ( !fSkipPgnoFDPLastSetTime && ( fPrimaryIndexPgnoFDPLastSetRequired || fAnySecIndexPgnoFDPLastSetRequired ) )
     {
         Assert( !Pcsr( pfucbCatalog )->FLatched() );
-        Call( ErrCATIInitIndexPgnoFDPLastSetTime( ppib, ifmp, objidTable, pfcb, fPrimaryIndexPgnoFDPLastSetRequired ) );
+        CATIInitIndexPgnoFDPLastSetTime( ppib, ifmp, objidTable, pfcb, fPrimaryIndexPgnoFDPLastSetRequired );
     }
 
     err = JET_errSuccess;
@@ -8659,11 +8614,6 @@ HandleError:
             pfcb->ReleasePidb();
             pfcb->SetPidb( pidbNil );
         }
-    }
-
-    if ( pcatChangePgnoFDPLastSetTime )
-    {
-        delete pcatChangePgnoFDPLastSetTime;
     }
 
     if ( pfcbTemplateTable != pfcbNil )
@@ -8924,6 +8874,11 @@ ERR ErrCATChangePgnoFDP( PIB * ppib, IFMP ifmp, OBJID objidTable, OBJID objid, S
     BYTE        *pbBookmark     = NULL;
     ULONG       cbBookmark;
 
+    BOOL fUpdatePgnoFDPLastSetTime  = BoolParam( PinstFromPpib( ppib ), JET_paramFlight_EnablePgnoFDPLastSetTime ) &&
+                    g_rgfmp[ ifmp ].ErrDBFormatFeatureEnabled( JET_efvRBSNonRevertableTableDeletes ) >= JET_errSuccess;
+
+    __int64         ftCurrent       = UtilGetCurrentFileTime();
+
     Call( ErrCATOpen( ppib, ifmp, &pfucbCatalog, fFalse ) );
     Call( ErrCATISeekTableObject( ppib, pfucbCatalog, objidTable, sysobj, objid ) );
     Assert( Pcsr( pfucbCatalog )->FLatched() );
@@ -8951,6 +8906,20 @@ ERR ErrCATChangePgnoFDP( PIB * ppib, IFMP ifmp, OBJID objidTable, OBJID objid, S
                 sizeof(PGNO),
                 NO_GRBIT,
                 NULL ) );
+
+    // If pgno fdp is being changed, we will also update pgnofdp last set time.
+    if ( fUpdatePgnoFDPLastSetTime )
+    {
+        Call( ErrIsamSetColumn(
+            ppib,
+            pfucbCatalog,
+            fidMSO_PgnoFDPLastSetTime,
+            (BYTE *)&ftCurrent,
+            sizeof( __int64 ),
+            NO_GRBIT,
+            NULL ) );
+    }
+
     Call( ErrIsamUpdate( ppib, pfucbCatalog, NULL, 0, NULL, NO_GRBIT ) );
 
     CallS( ErrCATClose( ppib, pfucbCatalog ) );
@@ -8969,6 +8938,20 @@ ERR ErrCATChangePgnoFDP( PIB * ppib, IFMP ifmp, OBJID objidTable, OBJID objid, S
                 sizeof(PGNO),
                 NO_GRBIT,
                 NULL ) );
+
+    // If pgno fdp is being changed, we will also update pgnofdp last set time.
+    if ( fUpdatePgnoFDPLastSetTime )
+    {
+        Call( ErrIsamSetColumn(
+            ppib,
+            pfucbCatalog,
+            fidMSO_PgnoFDPLastSetTime,
+            (BYTE *)&ftCurrent,
+            sizeof( __int64 ),
+            NO_GRBIT,
+            NULL ) );
+    }
+
     Call( ErrIsamUpdate( ppib, pfucbCatalog, NULL, 0, NULL, NO_GRBIT ) );
 
 HandleError:

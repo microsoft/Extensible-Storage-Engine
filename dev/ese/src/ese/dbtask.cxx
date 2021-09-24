@@ -1343,3 +1343,26 @@ ERR RECTASKBATCHER::ErrPostOneBatch( const INT ipbatchtask )
     return err;
 }
 
+//  ****************************************************************
+//  DBPGNOFDPLASTSETTIMETASK
+//  ****************************************************************
+
+DBPGNOFDPLASTSETTIMETASK::DBPGNOFDPLASTSETTIMETASK(
+        const IFMP      ifmp,
+        const OBJID     objidTable,
+        const OBJID     objid,
+        const USHORT    sysobj,
+        const __int64   ftCurrent ) :
+        DBTASK( ifmp ), m_objidTable( objidTable ), m_objid( objid ), m_sysobj( sysobj ), m_ftCurrent( ftCurrent )
+{
+}
+
+ERR DBPGNOFDPLASTSETTIMETASK::ErrExecuteDbTask( _In_opt_ PIB *const ppib )
+{
+    return ErrCATChangePgnoFDPLastSetTime( ppib, m_ifmp, m_objidTable, m_objid, m_sysobj, m_ftCurrent );
+}
+
+void DBPGNOFDPLASTSETTIMETASK::HandleError( const ERR err )
+{
+    // ignore errors. we'll re-register the table later
+}
