@@ -2947,6 +2947,12 @@ CopyLogs:
         fTrue,
         fTrue ) );
 
+    // We will flush the buffers to the disk before we set LogsCopied to true in the file header
+    if ( m_pfapiRBS != NULL )
+    {
+        Call( ErrUtilFlushFileBuffers( m_pfapiRBS, iofrRBS ) );
+    }
+
     m_prbsfilehdrCurrent->rbsfilehdr.bLogsCopied = 1;
     Call( ErrUtilWriteRBSHeaders( m_pinst, m_pinst->m_pfsapi, NULL, m_prbsfilehdrCurrent, m_pfapiRBS ) );
 
