@@ -1645,7 +1645,7 @@ ERR COSFileSystem::ErrFileCopy( const WCHAR* const  wszPathSource,
     {
         err = JET_errSuccess;
         error = ERROR_SUCCESS;
-        if ( !CopyFileExW( wszAbsPathSource, wszAbsPathDest, NULL, NULL, NULL, fOverwriteExisting ? 0 : COPY_FILE_FAIL_IF_EXISTS ) )
+        if ( !CopyFileExW( wszAbsPathSource, wszAbsPathDest, NULL, NULL, NULL, ( fOverwriteExisting ? 0 : COPY_FILE_FAIL_IF_EXISTS ) | COPY_FILE_NO_BUFFERING ) )
         {
             error = GetLastError();
             err = ErrGetLastError( error );
