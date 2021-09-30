@@ -14920,34 +14920,10 @@ LOCAL VOID SPIReportAnyExtentCacheError(
         PinstFromPfucb( pfucb ) );
     OSTraceResumeGC();
 
-    // OK, it was wrong, we reported it.  Reset so we don't keep reporting it.  This will
-    // give us a chance to set the correct value next time.  Early rollout of this feature
-    // set the initial value with an inherent race condition between setting the value and
-    // modifying space trees that resulted in some incorrect values being set.
-
-    // We may or may not already be in a transaction, but CATResetExtentPageCounts expects
-    // to be in one.
-    BOOL fStartedTransaction = fFalse;
-    if ( pfucb->ppib->Level() == 0 )
-    {
-        err = ErrDIRBeginTransaction( pfucb->ppib, 54166, NO_GRBIT );
-        if ( JET_errSuccess > err )
-        {
-            return;
-        }
-        fStartedTransaction = fTrue;
-    }
-
-    CATResetExtentPageCounts(
-        pfucb->ppib,
-        pfucb->ifmp,
-        pfucb->u.pfcb->ObjidFDP() );
-
-    if ( fStartedTransaction )
-    {
-        err = ErrDIRCommitTransaction( pfucb->ppib, NO_GRBIT );
-        Assert( JET_errSuccess <= err );
-    }
+    // We used to reset the page count to the new value here, which helped fix up
+    // some existing problematic database instances.  That doesn't seem to be happening
+    // anymore, so don't reset.  That way we'll see if the reported error is repeatable,
+    // or the result of a race condition.
 }
     
 //  Retrieves space info, like the owned # of pages, avail # of pages.
