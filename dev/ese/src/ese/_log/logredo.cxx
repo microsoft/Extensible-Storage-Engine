@@ -4586,6 +4586,10 @@ ERR LOG::ErrLGRISetupFMPFromAttach(
     psrtmap = ( *pirstmap >= 0 ) ? &m_rgrstmap[ *pirstmap ] : NULL;
 
     //  Process database parameters.
+    //  Only DB parameters that impact recovery behavior are relevant to be obtained here
+    //  and set below in the FMP. Once recovery is finished, the DB needs to go through
+    //  JetAttachDatabase anyways, so all DB parameters be parsed and consumed then.
+    //
 
     Call( ErrDBParseDbParams(
                 psrtmap ? psrtmap->rgsetdbparam : NULL,
@@ -4597,7 +4601,8 @@ ERR LOG::ErrLGRISetupFMPFromAttach(
                 &cpgShrinkDatabaseSizeLimit,    // JET_dbparamShrinkDatabaseSizeLimit.
                 &fLeakReclaimerEnabled,         // JET_dbparamLeakReclaimerEnabled.
                 &dtickLeakReclaimerTimeQuota,   // JET_dbparamLeakReclaimerTimeQuota.
-                NULL                            // JET_dbparamMaintainExtentPageCountCache (not used here).
+                NULL,                           // JET_dbparamMaintainExtentPageCountCache (not used here).
+                NULL                            // JET_dbparamFlight_SelfAllocSpBufReservationEnabled (not used here).
                 ) );
 
     //  Get one free fmp entry

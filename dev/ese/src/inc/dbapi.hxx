@@ -48,7 +48,8 @@ ERR ErrDBParseDbParams(
     _Out_opt_ CPG* const                                        pcpgShrinkDatabaseSizeLimit,        // JET_dbparamShrinkDatabaseSizeLimit
     _Out_opt_ BOOL* const                                       pfLeakReclaimerEnabled,             // JET_dbparamLeakReclaimerEnabled
     _Out_opt_ LONG* const                                       pdtickLeakReclaimerTimeQuota,       // JET_dbparamLeakReclaimerTimeQuota
-    _Out_opt_ FEATURECONTROL* const                             pfcMaintainExtentPageCountCache );  // JET_dbparamMaintainExtentPageCountCache
+    _Out_opt_ FEATURECONTROL* const                             pfcMaintainExtentPageCountCache,    // JET_dbparamMaintainExtentPageCountCache
+    _Out_opt_ BOOL* const                                       pfSelfAllocSpBufReservation);       // JET_dbparamFlight_SelfAllocSpBufReservationEnabled
 
 ERR ErrDBCreateDatabase(
     _In_ PIB                                                    *ppib,
