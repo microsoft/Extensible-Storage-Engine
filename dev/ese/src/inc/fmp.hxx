@@ -459,6 +459,8 @@ class FMP
         BOOL                m_fLeakReclaimerEnabled;
         LONG                m_dtickLeakReclaimerTimeQuota;
 
+        BOOL                m_fSelfAllocSpBufReservationEnabled;
+
         CIoStats *          m_rgpiostats[iotypeMax];
 
         CSXWLatch           m_sxwlRedoMaps;
@@ -662,7 +664,8 @@ public:
                                     const LONG dtickShrinkDatabaseTimeQuota,
                                     const CPG cpgShrinkDatabaseSizeLimit,
                                     const BOOL fLeakReclaimerEnabled,
-                                    const LONG dtickLeakReclaimerTimeQuota );
+                                    const LONG dtickLeakReclaimerTimeQuota,
+                                    const BOOL fSelfAllocSpBufReservationEnabled );
 
         // Max DB size.
         UINT CpgDatabaseSizeMax() const;
@@ -686,6 +689,9 @@ public:
         VOID SetLeakReclaimerTimeQuota( const LONG dtickLeakReclaimerTimeQuota );
         BOOL FLeakReclaimerEnabled() const;
         LONG DtickLeakReclaimerTimeQuota() const;
+        // Self-alloc split-buffer reservation.
+        VOID SetSelfAllocSpBufReservationEnabled( const BOOL fSelfAllocSpBufReservationEnabled );
+        BOOL FSelfAllocSpBufReservationEnabled() const;
 
         // Redo maps.
         //
@@ -1474,7 +1480,8 @@ INLINE VOID FMP::SetRuntimeDbParams( const CPG cpgDatabaseSizeMax,
                                         const LONG dtickShrinkDatabaseTimeQuota,
                                         const CPG cpgShrinkDatabaseSizeLimit,
                                         const BOOL fLeakReclaimerEnabled,
-                                        const LONG dtickLeakReclaimerTimeQuota )
+                                        const LONG dtickLeakReclaimerTimeQuota,
+                                        const BOOL fSelfAllocSpBufReservationEnabled )
 {
     SetDatabaseSizeMax( cpgDatabaseSizeMax );
     SetPctCachePriorityFmp( pctCachePriority );
@@ -1483,6 +1490,7 @@ INLINE VOID FMP::SetRuntimeDbParams( const CPG cpgDatabaseSizeMax,
     SetShrinkDatabaseSizeLimit( cpgShrinkDatabaseSizeLimit );
     SetLeakReclaimerEnabled( fLeakReclaimerEnabled );
     SetLeakReclaimerTimeQuota( dtickLeakReclaimerTimeQuota );
+    SetSelfAllocSpBufReservationEnabled( fSelfAllocSpBufReservationEnabled );
 }
 
 INLINE UINT FMP::CpgDatabaseSizeMax() const     { return m_cpgDatabaseSizeMax; }
@@ -1577,6 +1585,16 @@ INLINE BOOL FMP::FLeakReclaimerEnabled() const
 INLINE LONG FMP::DtickLeakReclaimerTimeQuota() const
 {
     return m_dtickLeakReclaimerTimeQuota;
+}
+
+INLINE VOID FMP::SetSelfAllocSpBufReservationEnabled( const BOOL fSelfAllocSpBufReservationEnabled )
+{
+    m_fSelfAllocSpBufReservationEnabled = fSelfAllocSpBufReservationEnabled;
+}
+
+INLINE BOOL FMP::FSelfAllocSpBufReservationEnabled() const
+{
+    return m_fSelfAllocSpBufReservationEnabled;
 }
 
 // =====================================================================

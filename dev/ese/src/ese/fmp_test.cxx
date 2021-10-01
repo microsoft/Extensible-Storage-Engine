@@ -481,6 +481,13 @@ JETUNITTEST( FMP, NewAndWriteLatch )
         pfmp->ResetLeakReclaimerIsRunning();
         CHECK( !pfmp->FLeakReclaimerIsRunning() );
 
+        // Self-alloc split-buffer reservation.
+        CHECK( !pfmp->FSelfAllocSpBufReservationEnabled() );
+        pfmp->SetSelfAllocSpBufReservationEnabled( fTrue );
+        CHECK( pfmp->FSelfAllocSpBufReservationEnabled() );
+        pfmp->SetSelfAllocSpBufReservationEnabled( fFalse );
+        CHECK( !pfmp->FSelfAllocSpBufReservationEnabled() );
+
         // Test the helpers that maintain the cached CpgAvail total.
         CHECK( !pfmp->FGetCpgAvail( &cpgAvail ) );
         pfmp->SetCpgAvail( 5 );

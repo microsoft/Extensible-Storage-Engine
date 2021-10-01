@@ -12765,8 +12765,7 @@ LOCAL ERR ErrSPIReserveSPBufPagesForSpaceTree(
             Assert( cpgRequired > 0 );
             cpgRequest = CpgSPICpgPrefFromCpgRequired( cpgRequired, cpgMinForSplit );
 
-
-            if ( pfmp->FShrinkIsRunning() && fUpdatingDbRoot )
+            if ( fUpdatingDbRoot && ( pfmp->FShrinkIsRunning() || pfmp->FSelfAllocSpBufReservationEnabled() ) )
             {
                 // First, we're going to try and get space from the AE tree itself.
                 // To avoid infinite recursion and deadlocks, we'll prevent ErrSPIGetExt() from getting

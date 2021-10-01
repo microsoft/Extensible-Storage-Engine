@@ -1534,6 +1534,7 @@ ERR FMP::ErrInitializeOneFmp(
     pfmp->SetShrinkDatabaseSizeLimit( 0 );
     pfmp->SetLeakReclaimerEnabled( fFalse );
     pfmp->SetLeakReclaimerTimeQuota( -1 );
+    pfmp->SetSelfAllocSpBufReservationEnabled( fFalse );
     pfmp->ResetLeakReclaimerIsRunning();
     pfmp->ResetPgnoMaxTracking();
     pfmp->ResetCpgAvail();

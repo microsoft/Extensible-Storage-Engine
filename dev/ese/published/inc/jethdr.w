@@ -7237,7 +7237,9 @@ JetIdle(
                                                      //  If zero, the ExtentPageCountCache table will be removed, if it exists.
                                                      //  The default value is 0 (i.e. remove unless explicitly told to keep).
 
-#define JET_dbparamMaxValueInvalid          8201     //  This is not a valid database parameter. It can change from release to release!
+#define JET_dbparamFlight_SelfAllocSpBufReservationEnabled 8201 //  Enable self-allocation of space to refill root split buffers.
+
+#define JET_dbparamMaxValueInvalid          8202     //  This is not a valid database parameter. It can change from release to release!
 
 
 // Values for JET_dbparamShrinkDatabaseOptions.
