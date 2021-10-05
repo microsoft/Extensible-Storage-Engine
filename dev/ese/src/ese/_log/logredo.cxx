@@ -4535,11 +4535,6 @@ ERR LOG::ErrLGRISetupFMPFromAttach(
     RSTMAP*     psrtmap                         = NULL;
     ULONG       pctCachePriority                = g_pctCachePriorityUnassigned;
     JET_GRBIT   grbitShrinkDatabaseOptions      = NO_GRBIT;
-    LONG        dtickShrinkDatabaseTimeQuota    = -1;
-    CPG         cpgShrinkDatabaseSizeLimit      = 0;
-    BOOL        fLeakReclaimerEnabled           = fFalse;
-    LONG        dtickLeakReclaimerTimeQuota     = -1;
-
 
     pifmp = pifmp ? pifmp : &ifmp;
     pirstmap = pirstmap ? pirstmap : &irstmap;
@@ -4588,7 +4583,7 @@ ERR LOG::ErrLGRISetupFMPFromAttach(
     //  Process database parameters.
     //  Only DB parameters that impact recovery behavior are relevant to be obtained here
     //  and set below in the FMP. Once recovery is finished, the DB needs to go through
-    //  JetAttachDatabase anyways, so all DB parameters be parsed and consumed then.
+    //  JetAttachDatabase anyways, so all DB parameters will be parsed and consumed then.
     //
 
     Call( ErrDBParseDbParams(
@@ -4597,10 +4592,10 @@ ERR LOG::ErrLGRISetupFMPFromAttach(
                 NULL,                           // JET_dbparamDbSizeMaxPages (not used here).
                 &pctCachePriority,              // JET_dbparamCachePriority.
                 &grbitShrinkDatabaseOptions,    // JET_dbparamShrinkDatabaseOptions.
-                &dtickShrinkDatabaseTimeQuota,  // JET_dbparamShrinkDatabaseTimeQuota.
-                &cpgShrinkDatabaseSizeLimit,    // JET_dbparamShrinkDatabaseSizeLimit.
-                &fLeakReclaimerEnabled,         // JET_dbparamLeakReclaimerEnabled.
-                &dtickLeakReclaimerTimeQuota,   // JET_dbparamLeakReclaimerTimeQuota.
+                NULL,                           // JET_dbparamShrinkDatabaseTimeQuota (not used here).
+                NULL,                           // JET_dbparamShrinkDatabaseSizeLimit (not used here).
+                NULL,                           // JET_dbparamLeakReclaimerEnabled (not used here).
+                NULL,                           // JET_dbparamLeakReclaimerTimeQuota (not used here).
                 NULL,                           // JET_dbparamMaintainExtentPageCountCache (not used here).
                 NULL                            // JET_dbparamFlight_SelfAllocSpBufReservationEnabled (not used here).
                 ) );
@@ -4645,10 +4640,6 @@ ERR LOG::ErrLGRISetupFMPFromAttach(
 
     pfmpT->SetPctCachePriorityFmp( pctCachePriority );
     pfmpT->SetShrinkDatabaseOptions( grbitShrinkDatabaseOptions );
-    pfmpT->SetShrinkDatabaseTimeQuota( dtickShrinkDatabaseTimeQuota );
-    pfmpT->SetShrinkDatabaseSizeLimit( cpgShrinkDatabaseSizeLimit );
-    pfmpT->SetLeakReclaimerEnabled( fLeakReclaimerEnabled );
-    pfmpT->SetLeakReclaimerTimeQuota( dtickLeakReclaimerTimeQuota );
 
     FMP::EnterFMPPoolAsWriter();
     pfmpT->SetLogOn();
