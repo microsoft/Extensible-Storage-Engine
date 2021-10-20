@@ -12791,11 +12791,16 @@ LOCAL ERR ErrSPIReserveSPBufPagesForSpaceTree(
                     pgnoLast = pgnoFirst + cpgNewSpace - 1;
                     fAlreadyOwn = fTrue;
                 }
-                else if ( err == errSPNoSpaceForYou )
+                else
                 {
-                    err = JET_errSuccess;
+                    // Failing to allocate space for root split buffers may lead to extensive space
+                    // leakage. Ignore any errors so that we can try again by getting space from the file
+                    // system (i.e., by growing the file).
+
+                    AssertTrack( ( err == errSPNoSpaceForYou ) || FRFSAnyFailureDetected(), OSFormat( "SpBufSelfAllocError:%d", err ) );
                 }
-                Call( err );
+
+                err = JET_errSuccess;
 
                 // Re-latch space FUCB and get split buffer pointer. We don't expect
                 // the contents to have changed because we have the root FUCB latched
