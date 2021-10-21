@@ -3607,21 +3607,39 @@ ERR ErrBFPreparePageRangeForExternalZeroing( const IFMP ifmp, const PGNO pgnoFir
     }
 
     // Go through each page in the range.
+    const BFLatchFlags bflf = BFLatchFlags( bflfNoTouch | bflfNoUncached | bflfNoFaultFail | bflfUninitPageOk | bflfLatchAbandoned );
+    const BFPriority bfpri = BfpriBFMake( g_pctCachePriorityNeutral, (BFTEMPOSFILEQOS)0 /* should not matter - NoUncached */ );
     const PGNO pgnoLast = pgnoFirst + cpg - 1;
     for ( PGNO pgno = pgnoFirst; pgno <= pgnoLast; pgno++ )
     {
-        const ERR errLatch = ErrBFILatchPage(
+        ERR errLatch = ErrBFILatchPage(
                                 &bfl,
                                 ifmp,
                                 pgno,
-                                BFLatchFlags( bflfNoTouch | bflfNoUncached | bflfNoFaultFail | bflfUninitPageOk | bflfLatchAbandoned ),
+                                bflf,
                                 bfltWrite,
-                                BfpriBFMake( g_pctCachePriorityNeutral, (BFTEMPOSFILEQOS)0 /* should not matter - NoUncached */ ),
+                                bfpri,
                                 tc );
 
         if ( errLatch == errBFPageNotCached )
         {
-            continue;
+            // Perhaps it isn't in the cache yet, but the I/O is in-flight. Try again and wait.
+            if ( FBFInCache( ifmp, pgno ) )
+            {
+                errLatch = ErrBFILatchPage(
+                            &bfl,
+                            ifmp,
+                            pgno,
+                            bflf & ~bflfNoUncached,
+                            bfltWrite,
+                            bfpri,
+                            tc );
+                Assert( errLatch != errBFPageNotCached );
+            }
+            else
+            {
+                continue;
+            }
         }
 
         Call( errLatch );
@@ -3831,48 +3849,67 @@ ERR ErrBFLockPageRangeForExternalZeroing( const IFMP ifmp, const PGNO pgnoFirst,
         BOOL fCachedNewPage = fFalse;
         const BOOL fWithinOwnedDbSize = ( pgno <= pbfprl->pgnoDbLast );
         const BFLatchFlags bflfUncachedBehavior = fWithinOwnedDbSize ? bflfNewIfUncached : bflfNoUncached;
+        const BFLatchFlags bflf = BFLatchFlags( bflfUncachedBehavior | bflfNoTouch | bflfNoFaultFail | bflfUninitPageOk | bflfLatchAbandoned );
+        const BFPriority bfpri = BfpriBFMake( g_pctCachePriorityNeutral, (BFTEMPOSFILEQOS)0 /* should not matter - NewIfUncached */ );
         Expected( !!fWithinOwnedDbSize == !!fTrimming );
 
         err = ErrBFILatchPage(
                 &pbfprl->rgbfl[ ipgno ],
                 pbfprl->ifmp,
                 pgno,
-                BFLatchFlags( bflfUncachedBehavior | bflfNoTouch | bflfNoFaultFail | bflfUninitPageOk | bflfLatchAbandoned ),
+                bflf,
                 bfltWrite,
-                BfpriBFMake( g_pctCachePriorityNeutral, (BFTEMPOSFILEQOS)0 /* should not matter - NewIfUncached */ ),
+                bfpri,
                 tc,
                 &fCachedNewPage );
 
         if ( err == errBFPageNotCached )
         {
             Assert( bflfUncachedBehavior == bflfNoUncached );
-            pbfprl->rgfLatched[ ipgno ] = fFalse;
-            pbfprl->rgfUncached[ ipgno ] = fTrue;
-            err = JET_errSuccess;
-        }
-        else
-        {
-            Call( err );
 
-            Assert( !fCachedNewPage || ( bflfUncachedBehavior == bflfNewIfUncached ) );
-            pbfprl->rgfLatched[ ipgno ] = fTrue;
-            pbfprl->rgfUncached[ ipgno ] = fCachedNewPage;
-            err = JET_errSuccess;
-
-            BF* const pbf = PBF( pbfprl->rgbfl[ ipgno ].dwContext );
-            Assert( pbf->sxwl.FOwnWriteLatch() );
-
-            pbf->fAbandoned = fTrue;
-
-            // If the page is uncached (and therefore was latched as a new page above), clobber it in memory
-            // as an empty (zeroed out) page. This is necessary because we may lose the lock later when purging pages and
-            // we don't want a page hanging around in an unknown state in the cache.
-            if ( pbfprl->rgfUncached[ ipgno ] )
+            // Perhaps it isn't in the cache yet, but the I/O is in-flight. Try again and wait.
+            if ( FBFInCache( ifmp, pgno ) )
             {
-                Assert( pbf->bfdf == bfdfClean );
-                memset( pbf->pv, 0, g_rgcbPageSize[ pbf->icbBuffer ] );
-                pbf->err = SHORT( ErrERRCheck( JET_errPageNotInitialized ) );
+                err = ErrBFILatchPage(
+                        &pbfprl->rgbfl[ ipgno ],
+                        pbfprl->ifmp,
+                        pgno,
+                        bflf & ~bflfNoUncached,
+                        bfltWrite,
+                        bfpri,
+                        tc,
+                        &fCachedNewPage );
+                Assert( err != errBFPageNotCached );
             }
+            else
+            {
+                pbfprl->rgfLatched[ ipgno ] = fFalse;
+                pbfprl->rgfUncached[ ipgno ] = fTrue;
+                err = JET_errSuccess;
+                continue;
+            }
+        }
+
+        Call( err );
+
+        Assert( !fCachedNewPage || ( bflfUncachedBehavior == bflfNewIfUncached ) );
+        pbfprl->rgfLatched[ ipgno ] = fTrue;
+        pbfprl->rgfUncached[ ipgno ] = fCachedNewPage;
+        err = JET_errSuccess;
+
+        BF* const pbf = PBF( pbfprl->rgbfl[ ipgno ].dwContext );
+        Assert( pbf->sxwl.FOwnWriteLatch() );
+
+        pbf->fAbandoned = fTrue;
+
+        // If the page is uncached (and therefore was latched as a new page above), clobber it in memory
+        // as an empty (zeroed out) page. This is necessary because we may lose the lock later when purging pages and
+        // we don't want a page hanging around in an unknown state in the cache.
+        if ( pbfprl->rgfUncached[ ipgno ] )
+        {
+            Assert( pbf->bfdf == bfdfClean );
+            memset( pbf->pv, 0, g_rgcbPageSize[ pbf->icbBuffer ] );
+            pbf->err = SHORT( ErrERRCheck( JET_errPageNotInitialized ) );
         }
     }
 
@@ -19991,6 +20028,14 @@ ERR ErrBFILatchPage(    _Out_ BFLatch* const    pbfl,
             //  this is a cache miss if the found BF is currently undergoing I/O
 
             fCacheMiss = fCacheMiss || pgnopbf.pbf->err == errBFIPageFaultPending;
+
+            //  if we are not latching uncached pages, bail without waiting
+
+            if ( fCacheMiss && ( bflfT & bflfNoUncached ) )
+            {
+                g_bfhash.ReadUnlockKey( &lock );
+                return ErrERRCheck( errBFPageNotCached );
+            }
 
             //  latch the page
 
