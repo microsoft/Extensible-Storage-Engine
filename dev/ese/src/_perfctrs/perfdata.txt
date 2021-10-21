@@ -24,130 +24,131 @@
 ;MaxInstanceNameSize=max significant chars of each instance name returned
 ;                    by an Instance Catalog Function (default is 32 wchar_t's)
 ;SchemaVersion=version of this performance data (increment on every change)
-;	41 - added VERAsyncCleanupDispatched, VERSyncCleanupDispatched, VERCleanupDiscarded, VERCleanupFailed
-;	42 - removed OLDSLVChunkSize
-;	43 - removed IVERcrceHashUsage
-;	44 - added FCBAllocWaitForRCEClean and VERBucketAllocWaitForRCEClean
-;	45 - added OSFileAbnormalReadIOLatency and OSFileAbnormalWriteIOLatency
-;	46 - change checkpoint depth counter to be qword-sized
-;	47 - added FCBPurgeOnClose
-;	48 - add a new regular counter for the checkpoint depth in log files
-;	60 - bump for LH, add log buffer free/used counters, and remove "MS Exchange DB" from all descriptions
-;	61 - add read/write I/O latency counters
-;	62 - break up Database Pages Read counter into Async/Sync
-;	63 - add THREADSTATS counters, Backup Read Pages counter, and False Index Column Updates counters
-;	64 - add BTNextNonVisibleNodesSkipped and BTPrevNonVisibleNodesSkipped counters
-;	65 - reserve space in case new counters get added to Ti
-;	70 - added about three dozen new counters, mostly related to record/index/lv operations
-;	71 - added tableclass counters
-;	72 - removed Auto Evict counters
-;	73 - make rgbPerformanceData the same across archs so 32bit MOM works on 64bit
-;	74 - add checkpoint too deep and waypoint latency counters
-;	75 - add cLGLogFileGenerated, cLGLogFileGeneratedPrematurely and cLGLogFileCurrentGeneration counters
-;	76 - remove SLV counters
-;	77 - added instance-wide versions of OLDPagesFreed, OLDPagesMerged, PagesScannedSec,
+;   41 - added VERAsyncCleanupDispatched, VERSyncCleanupDispatched, VERCleanupDiscarded, VERCleanupFailed
+;   42 - removed OLDSLVChunkSize
+;   43 - removed IVERcrceHashUsage
+;   44 - added FCBAllocWaitForRCEClean and VERBucketAllocWaitForRCEClean
+;   45 - added OSFileAbnormalReadIOLatency and OSFileAbnormalWriteIOLatency
+;   46 - change checkpoint depth counter to be qword-sized
+;   47 - added FCBPurgeOnClose
+;   48 - add a new regular counter for the checkpoint depth in log files
+;   60 - bump for LH, add log buffer free/used counters, and remove "MS Exchange DB" from all descriptions
+;   61 - add read/write I/O latency counters
+;   62 - break up Database Pages Read counter into Async/Sync
+;   63 - add THREADSTATS counters, Backup Read Pages counter, and False Index Column Updates counters
+;   64 - add BTNextNonVisibleNodesSkipped and BTPrevNonVisibleNodesSkipped counters
+;   65 - reserve space in case new counters get added to Ti
+;   70 - added about three dozen new counters, mostly related to record/index/lv operations
+;   71 - added tableclass counters
+;   72 - removed Auto Evict counters
+;   73 - make rgbPerformanceData the same across archs so 32bit MOM works on 64bit
+;   74 - add checkpoint too deep and waypoint latency counters
+;   75 - add cLGLogFileGenerated, cLGLogFileGeneratedPrematurely and cLGLogFileCurrentGeneration counters
+;   76 - remove SLV counters
+;   77 - added instance-wide versions of OLDPagesFreed, OLDPagesMerged, PagesScannedSec,
 ;            PagesScannedTotal, PagesZeroedSec and PagesZeroedTotal.
-;	78 - added full/partial left merges and page moves
-;	79 - OLD tasks counters
-;	80 - added BFCacheRequestsPerSec
-;	81 - added instance-wide BFPctPinned
-;	82 - re-enabled Database Cache % Resident counter and fixed up _DEVONLY for all counters
-;	83 - added BFCleanPagesWrittenPerSec, BFOpportuneWriteIssued
-;	84 - added VersionCopyPage / "inverted VersionPage" counters
-;	85 - added some new BF and LG perf counters for Ex14 R3
-;	86 - added a checkpoint advancement aggressiveness counter
-;	87 - added BFCacheSizeEffectiveMB, BFCacheSizeEffective, BFPctDehydrated, BFCacheSizeTarget
+;   78 - added full/partial left merges and page moves
+;   79 - OLD tasks counters
+;   80 - added BFCacheRequestsPerSec
+;   81 - added instance-wide BFPctPinned
+;   82 - re-enabled Database Cache % Resident counter and fixed up _DEVONLY for all counters
+;   83 - added BFCleanPagesWrittenPerSec, BFOpportuneWriteIssued
+;   84 - added VersionCopyPage / "inverted VersionPage" counters
+;   85 - added some new BF and LG perf counters for Ex14 R3
+;   86 - added a checkpoint advancement aggressiveness counter
+;   87 - added BFCacheSizeEffectiveMB, BFCacheSizeEffective, BFPctDehydrated, BFCacheSizeTarget
 ;            and BFCacheSizeTargetMB
-;	88 - refactored perf counters to reflect actual buffer manager flushing mechanisms
-;	89 - added (Attached) and (Recovery) specific I/O Database counters
-;	90 - tweaks and fixes to the DB Maintenance performance counters
-;	91 - Fixed Dev Only perf counter to be public
-;	92 - Added perf counters for page reorganization during page dehydration
-;	93 - Added additional FCB counters 
-;	94 - Added perf counters for Table Open IO (Catalog IO)
-;	95 - Making % Dehydrated, FULLY public.  Incrementing version just in case.
-;	------------ Ex15 Fork / Ex14 RTM Branch --------------
-;	200 - 2010/08/10 - Exchange 15 Beginning
-;	201 - 2010/08/10 - Big round of long requested buffer manager related perf counters.
-;	202 - 2010/10/27 - Changing default scales on things, when it doubt, version bump.
-;	203 - 2010/11/30 - Rename collection function
-;	204 - 2010/12/13 - Track full/partial sector flushes
-;	205 - 2011/01/26 - Track the Durable vs. Lazy commits / sec, as well as skipped flushes.
-;	206 - 2011/03/07 - Track full/partial sector flushes per instance
-;	207 - 2011/03/10 - Database Page Allocation File Shrink Stalls/sec.
-;	208 - 2011/06/28 - Added Database Cache Memory Committed, Database Cache Memory
+;   88 - refactored perf counters to reflect actual buffer manager flushing mechanisms
+;   89 - added (Attached) and (Recovery) specific I/O Database counters
+;   90 - tweaks and fixes to the DB Maintenance performance counters
+;   91 - Fixed Dev Only perf counter to be public
+;   92 - Added perf counters for page reorganization during page dehydration
+;   93 - Added additional FCB counters 
+;   94 - Added perf counters for Table Open IO (Catalog IO)
+;   95 - Making % Dehydrated, FULLY public.  Incrementing version just in case.
+;   ------------ Ex15 Fork / Ex14 RTM Branch --------------
+;   200 - 2010/08/10 - Exchange 15 Beginning
+;   201 - 2010/08/10 - Big round of long requested buffer manager related perf counters.
+;   202 - 2010/10/27 - Changing default scales on things, when it doubt, version bump.
+;   203 - 2010/11/30 - Rename collection function
+;   204 - 2010/12/13 - Track full/partial sector flushes
+;   205 - 2011/01/26 - Track the Durable vs. Lazy commits / sec, as well as skipped flushes.
+;   206 - 2011/03/07 - Track full/partial sector flushes per instance
+;   207 - 2011/03/10 - Database Page Allocation File Shrink Stalls/sec.
+;   208 - 2011/06/28 - Added Database Cache Memory Committed, Database Cache Memory
 ;                          Committed (MB), Database Cache Memory Reserved and Database Cache
 ;                          Memory Reserved (MB).
-;	209 - 2011/08/12 - Adds counters for database page preread stalls / sec
-;	210 - 2011/09/16 - Adds counter for the max used LID
-;	211 - 2011/09/27 - Implements counter aggregation.
-;	212 - 2011/09/30 - Process information callback returns whether or not instance list needs updating.
-;	213 - 2011/09/05 - Adds counters for dbscan re-read
-;	214 - 2011/09/25 - Adds counter for nodes filtered during JetMove
-;	215 - 2012/04/13 - Adds "Program Marker", a counter for testing purposes only (as requested by SOMEONE).
-;	216 - 2012/07/31 - Adds "Database Cache Sizing Duration".
-;	------------ Ex15 Service GA / Ex15 Sp1 / WinBlue Fork Branch --------------
-;	250 - 2012/08/12 - Service GA Branch Beginning (still Utah)
-;	251 - 2012/08/12 - Adds ResMgr perf counters for tracking the various cache lifetimes, and scavenging progress.
-;	252 - 2012/12/17 - Allocates custom-sized buffers and shared memory sections, based upon engine system parameters.
-;	253 - 2013/02/06 - New perf counter for space wasted in filling partial sectors with NOPs
-;	254 - 2013/02/12 - Adds counters for Trimming database files
-;	255 - 2013/03/06 - New perf counter for current log buffer size in bytes.
-;	256 - 2013/06/17 - New perf counters for noting skipped ScanCheck LRs.
-;	257 - 2013/07/02 - Changes in server/client synchronization (strictly connection logic, not perfdata.txt change).
-;	258 - 2013/07/18 - New perf counter for LVs with zero ref-count deleted during database maintenance.
-;	259 - 2013/08/06 - New perf counter for pages with flag deleted LVs reclaimed during database maintenance.
-;	260 - 2013/10/06 - New perf counter for passive stall because of read-from-passive transactions.
-;	261 - 2014/02/26 - Add a perf counter to know how many pages DB Divergence has compared.
-;	262 - 2014/05/09 - Add a perf counter for passive throttling for IO smoothing.
-;	263 - 2014/06/24 - Added DB Divergence rate counters, removed DB Divergence global counters.
-;	264 - 2014/10/06 - Added Database Cache Miss (Attached) Average Latency counters.
-;	265 - 2014/10/14 - Added Database Cache Size Unused counters.
-;	266 - 2015/02/03 - Renamed 'Defragmentation Tasks Discarded' to 'Defragmentation Tasks Postponed'.
-;	267 - 2015/02/25 - Added counters for persisted flush map.
-;	268 - 2015/09/16 - Added counters for encryption/decryption.
-;	269 - 2015/10/09 - Removed the FCB Sentinel counters.
-;	270 - 2015/10/14 - Removed dirty-page trimming counters.
-;	271 - 2016/01/06 - Added counters for compression/decompression.
-;	272 - 2015/04/08 - Removed Record Failed Compression Bytes/sec
-;	273 - 2016/04/25 - Added counters for xpress9 compression/decompression.
-;	274 - 2016/08/02 - Added counters for fpga based compression/decompression.
-;	275 - 2016/10/10 - Rename some encryption/decryption counters.
-;	276 - 2016/12/08 - Refactored database cache lifetime counters.
-;	277 - 2017/02/03 - Changed Log recovery throttling counters to rate counters.
-;	278 - 2017/03/01 - Added FlushFileBuffers counters
-;	279 - 2017/03/30 - Changed "Database Cache % Hit (Uncorrelated)" to "Database Cache % Hit (Unique)".
+;   209 - 2011/08/12 - Adds counters for database page preread stalls / sec
+;   210 - 2011/09/16 - Adds counter for the max used LID
+;   211 - 2011/09/27 - Implements counter aggregation.
+;   212 - 2011/09/30 - Process information callback returns whether or not instance list needs updating.
+;   213 - 2011/09/05 - Adds counters for dbscan re-read
+;   214 - 2011/09/25 - Adds counter for nodes filtered during JetMove
+;   215 - 2012/04/13 - Adds "Program Marker", a counter for testing purposes only (as requested by SOMEONE).
+;   216 - 2012/07/31 - Adds "Database Cache Sizing Duration".
+;   ------------ Ex15 Service GA / Ex15 Sp1 / WinBlue Fork Branch --------------
+;   250 - 2012/08/12 - Service GA Branch Beginning (still Utah)
+;   251 - 2012/08/12 - Adds ResMgr perf counters for tracking the various cache lifetimes, and scavenging progress.
+;   252 - 2012/12/17 - Allocates custom-sized buffers and shared memory sections, based upon engine system parameters.
+;   253 - 2013/02/06 - New perf counter for space wasted in filling partial sectors with NOPs
+;   254 - 2013/02/12 - Adds counters for Trimming database files
+;   255 - 2013/03/06 - New perf counter for current log buffer size in bytes.
+;   256 - 2013/06/17 - New perf counters for noting skipped ScanCheck LRs.
+;   257 - 2013/07/02 - Changes in server/client synchronization (strictly connection logic, not perfdata.txt change).
+;   258 - 2013/07/18 - New perf counter for LVs with zero ref-count deleted during database maintenance.
+;   259 - 2013/08/06 - New perf counter for pages with flag deleted LVs reclaimed during database maintenance.
+;   260 - 2013/10/06 - New perf counter for passive stall because of read-from-passive transactions.
+;   261 - 2014/02/26 - Add a perf counter to know how many pages DB Divergence has compared.
+;   262 - 2014/05/09 - Add a perf counter for passive throttling for IO smoothing.
+;   263 - 2014/06/24 - Added DB Divergence rate counters, removed DB Divergence global counters.
+;   264 - 2014/10/06 - Added Database Cache Miss (Attached) Average Latency counters.
+;   265 - 2014/10/14 - Added Database Cache Size Unused counters.
+;   266 - 2015/02/03 - Renamed 'Defragmentation Tasks Discarded' to 'Defragmentation Tasks Postponed'.
+;   267 - 2015/02/25 - Added counters for persisted flush map.
+;   268 - 2015/09/16 - Added counters for encryption/decryption.
+;   269 - 2015/10/09 - Removed the FCB Sentinel counters.
+;   270 - 2015/10/14 - Removed dirty-page trimming counters.
+;   271 - 2016/01/06 - Added counters for compression/decompression.
+;   272 - 2015/04/08 - Removed Record Failed Compression Bytes/sec
+;   273 - 2016/04/25 - Added counters for xpress9 compression/decompression.
+;   274 - 2016/08/02 - Added counters for fpga based compression/decompression.
+;   275 - 2016/10/10 - Rename some encryption/decryption counters.
+;   276 - 2016/12/08 - Refactored database cache lifetime counters.
+;   277 - 2017/02/03 - Changed Log recovery throttling counters to rate counters.
+;   278 - 2017/03/01 - Added FlushFileBuffers counters
+;   279 - 2017/03/30 - Changed "Database Cache % Hit (Uncorrelated)" to "Database Cache % Hit (Unique)".
 ;                          Deleted "Database Page Touches..." counters.
-;	280 - 2017/04/06 - Renamed Log Flush counters to Log Write.
-;	281 - 2017/06/08 - Removed some unused counters.
-;	282 - 2017/06/12 - Added "==> Databases" performance counters.
-;	283 - 2017/06/15 - Per-database I/O counters.
-;	284 - 2017/06/16 - Per-database unique cache hit counters.
-;	285 - 2017/08/21 - OLD/OLD2 log bytes/sec counter.
-;	286 - 2017/10/12 - Database oldest transaction.
-;	287 - 2017/10/04 - Making a deposit in Bank of SOMEONE's Perf Counters allowed.  Trims 100 of the 875 counters (11.4%).
-;	288 - 2017/10/03 - Add percentile (P50, P90, P99, etc) and related IO perf counters to Databases object.
-;	289 - 2017/11/07 - Renamed some counters and updated descriptions to reflect the fact that now buffer
+;   280 - 2017/04/06 - Renamed Log Flush counters to Log Write.
+;   281 - 2017/06/08 - Removed some unused counters.
+;   282 - 2017/06/12 - Added "==> Databases" performance counters.
+;   283 - 2017/06/15 - Per-database I/O counters.
+;   284 - 2017/06/16 - Per-database unique cache hit counters.
+;   285 - 2017/08/21 - OLD/OLD2 log bytes/sec counter.
+;   286 - 2017/10/12 - Database oldest transaction.
+;   287 - 2017/10/04 - Making a deposit in Bank of SOMEONE's Perf Counters allowed.  Trims 100 of the 875 counters (11.4%).
+;   288 - 2017/10/03 - Add percentile (P50, P90, P99, etc) and related IO perf counters to Databases object.
+;   289 - 2017/11/07 - Renamed some counters and updated descriptions to reflect the fact that now buffer
 ;                          scavenging is used for both available pool maintenance and cache shrinkage.
-;	290 - 2017/11/27 - Removed idle-flush counters.
-;	291 - 2017/01/03 - Add Meted Q / Active IO counters.
-;	292 - 2017/11/28 - Changed LID counters to 64-bit numbers.
-;	293 - 2018/04/12 - Changed recovery stall for RO trx counters to rate counters.
-;	294 - 2019/03/05 - Removed "Database Page Allocation File Shrink Stalls/sec".
-;	295 - 2019/04/01 - dbtask log bytes/sec counter.
-;	296 - 2019/10/10 - Remove FPGA compression related counters.
-;	297 - 2020/01/31 - Add Xpress10 software compression related counters.
-;	298 - 2020/02/26 - Add counters to measure cost ofcollecting snapshot of FDPDelete/NewPage.
-;	299 - 2020/04/17 - Remove Redundant replace counter.
-;	300 - 2020/05/01 - Add Xpress10 corsica compression related counters.
-;	301 - 2020/09/23 - Add Snapshot related counters.
-;	302 - 2021/03/26 - Remove Xpress9 counters.
+;   290 - 2017/11/27 - Removed idle-flush counters.
+;   291 - 2017/01/03 - Add Meted Q / Active IO counters.
+;   292 - 2017/11/28 - Changed LID counters to 64-bit numbers.
+;   293 - 2018/04/12 - Changed recovery stall for RO trx counters to rate counters.
+;   294 - 2019/03/05 - Removed "Database Page Allocation File Shrink Stalls/sec".
+;   295 - 2019/04/01 - dbtask log bytes/sec counter.
+;   296 - 2019/10/10 - Remove FPGA compression related counters.
+;   297 - 2020/01/31 - Add Xpress10 software compression related counters.
+;   298 - 2020/02/26 - Add counters to measure cost ofcollecting snapshot of FDPDelete/NewPage.
+;   299 - 2020/04/17 - Remove Redundant replace counter.
+;   300 - 2020/05/01 - Add Xpress10 corsica compression related counters.
+;   301 - 2020/09/23 - Add Snapshot related counters.
+;   302 - 2021/03/26 - Remove Xpress9 counters.
 ;   303 - 2021/06/04 - Add Snapshot Stall counter.
+;   304 - 2021/09/16 - Add Space Trees Deleted Snapshotted Pages counter.
 
 
 [ModuleInfo]
 MaxInstNameSize=64
-SchemaVersion=303
+SchemaVersion=304
 ; we will subst later $PerformanceObjectName$ with either ESE or ESENT version
 PerformanceObjectName_ESE=MSExchange Database
 PerformanceObjectName_ESENT=Database
@@ -227,7 +228,7 @@ InstanceCatalogFunction=LDatabaseNamesICFLPwszPpb
 
 ;===========================================================
 ;
-;	Global counters (e.g., "Database")
+;   Global counters (e.g., "Database")
 ;
 ;===========================================================
 
@@ -5007,7 +5008,7 @@ EvaluationFunction=LSnapshotStallCEFLPv
 
 ;===========================================================
 ;
-;	Counters per Extended Table Class (e.g., "Database ==> TableClasses")
+;   Counters per Extended Table Class (e.g., "Database ==> TableClasses")
 ;
 ;===========================================================
 
@@ -6364,7 +6365,7 @@ EvaluationFunction=LDecryptionCEFLPv
 
 ;===========================================================
 ;
-;	Counters per ESE instance (e.g., "Database ==> Instances")
+;   Counters per ESE instance (e.g., "Database ==> Instances")
 ;
 ;===========================================================
 
@@ -10625,7 +10626,7 @@ EvaluationFunction=LSPDeletedTreeSnapshottedPagesCEFLPv
 
 ;===========================================================
 ;
-;	Counters per DB (e.g., "Database ==> Databases")
+;   Counters per DB (e.g., "Database ==> Databases")
 ;
 ;===========================================================
 
