@@ -3204,109 +3204,80 @@ ERR ErrRECIReplaceInIndex(
     Assert( pfcbIdx->FTypeSecondaryIndex() );
     Assert( pidbNil != pidb );
 
-    if ( pidb->FTuples() )
+    // Track all the old keys for potential deletion.
+    TrackContext.m_eCurrentAction = TRACK_INDEX_ENTRY_DATA::ACTION::Delete;
+    Call( ErrRECIEnumerateKeys(
+              pfucb,
+              pfucbIdx,
+              pbmPrimary,
+              prcePrimary,
+              ( fReplaceByProxy ? keyLocationRCE : keyLocationRecord_RetrieveLVBeforeImg ),
+              fFalse,
+              &fIndexUpdated,
+              &TrackContext,
+              ErrRECITrackIndexEntry ) );
+    Assert( fFalse == fIndexUpdated );
+    
+    // Track all the new keys for potential insertion.
+    TrackContext.m_eCurrentAction = TRACK_INDEX_ENTRY_DATA::ACTION::Insert;
+    Call( ErrRECIEnumerateKeys(
+              pfucb,
+              pfucbIdx,
+              pbmPrimary,
+              prcePrimary,
+              keyLocationCopyBuffer,
+              fTrue,
+              &fIndexUpdated,
+              &TrackContext,
+              ErrRECITrackIndexEntry ) );
+    Assert( fFalse == fIndexUpdated );
+    
+    if ( 0 != TrackContext.m_cDataUsed )
     {
-        // Delete all the old keys.
-        Call ( ErrRECIEnumerateKeys(
-                   pfucb,
-                   pfucbIdx,
-                   pbmPrimary,
-                   prcePrimary,
-                   ( fReplaceByProxy ? keyLocationRCE : keyLocationRecord_RetrieveLVBeforeImg ),
-                   fFalse,
-                   &fIndexUpdated,
-                   &DeleteContext,
-                   ErrRECIDeleteIndexEntry ) );
-
-        // Insert all the new keys.
-        DIRGotoRoot( pfucbIdx );
-        Call ( ErrRECIEnumerateKeys(
-                   pfucb,
-                   pfucbIdx,
-                   pbmPrimary,
-                   prcePrimary,
-                   keyLocationCopyBuffer,
-                   fTrue,
-                   &fIndexUpdated,
-                   &InsertContext,
-                   ErrRECIInsertIndexEntry ) );
-    }
-    else {
-        // Track all the old keys for potential deletion.
-        TrackContext.m_eCurrentAction = TRACK_INDEX_ENTRY_DATA::ACTION::Delete;
-        Call( ErrRECIEnumerateKeys(
-                  pfucb,
-                  pfucbIdx,
-                  pbmPrimary,
-                  prcePrimary,
-                  ( fReplaceByProxy ? keyLocationRCE : keyLocationRecord_RetrieveLVBeforeImg ),
-                  fFalse,
-                  &fIndexUpdated,
-                  &TrackContext,
-                  ErrRECITrackIndexEntry ) );
-        Assert( fFalse == fIndexUpdated );
-
-        // Track all the new keys for potential insertion.
-        TrackContext.m_eCurrentAction = TRACK_INDEX_ENTRY_DATA::ACTION::Insert;
-        Call( ErrRECIEnumerateKeys(
-                  pfucb,
-                  pfucbIdx,
-                  pbmPrimary,
-                  prcePrimary,
-                  keyLocationCopyBuffer,
-                  fTrue,
-                  &fIndexUpdated,
-                  &TrackContext,
-                  ErrRECITrackIndexEntry ) );
-        Assert( fFalse == fIndexUpdated );
-
-        if ( 0 != TrackContext.m_cDataUsed )
+        //
+        // We tracked keys to post process.
+        TrackContext.CleanActionList();
+        
+        //
+        // Do the resulting actions.
+        //
+        for ( ULONG i = 0; i < TrackContext.m_cDataUsed; i++ )
         {
-            //
-            // We tracked keys to post process.
-            TrackContext.CleanActionList();
-
-            //
-            // Do the resulting actions.
-            //
-            for ( ULONG i = 0; i < TrackContext.m_cDataUsed; i++ )
+            switch (TrackContext.m_pData[i].Action())
             {
-                switch (TrackContext.m_pData[i].Action())
-                {
-                    case TRACK_INDEX_ENTRY_DATA::ACTION::Skip:
-                        // Key either was in both old and new record AND/OR was present in old or new
-                        // more than once.  We act only once on a key.
-                        continue;
-
-                    case TRACK_INDEX_ENTRY_DATA::ACTION::Delete:
-                        Call( ErrRECIDeleteIndexEntry(
-                                  pfucbIdx,
-                                  TrackContext.m_pData[i].Key(),
-                                  pbmPrimary->key,
-                                  prcePrimary,
-                                  fFalse,
-                                  &fIndexUpdated,
-                                  &DeleteContext ) );
-                        break;
-
-                    case TRACK_INDEX_ENTRY_DATA::ACTION::Insert:
-                        // Necessary on the first ACTION::Insert, cheap on all the others.
-                        DIRGotoRoot( pfucbIdx );
-
-                        Call( ErrRECIInsertIndexEntry(
-                                  pfucbIdx,
-                                  TrackContext.m_pData[i].Key(),
-                                  pbmPrimary->key,
-                                  prcePrimary,
-                                  fFalse,
-                                  &fIndexUpdated,
-                                  &InsertContext ) );
-                        break;
-
-                    default:
-                        AssertSz( fFalse, "Can't happen.");
-                        break;
-                }
+                case TRACK_INDEX_ENTRY_DATA::ACTION::Skip:
+                    // Key either was in both old and new record AND/OR was present in old or new
+                    // more than once.  We act only once on a key.
+                    continue;
+                    
+                case TRACK_INDEX_ENTRY_DATA::ACTION::Delete:
+                    Call( ErrRECIDeleteIndexEntry(
+                              pfucbIdx,
+                              TrackContext.m_pData[i].Key(),
+                              pbmPrimary->key,
+                              prcePrimary,
+                              fFalse,
+                              &fIndexUpdated,
+                              &DeleteContext ) );
+                    break;
+                    
+                case TRACK_INDEX_ENTRY_DATA::ACTION::Insert:
+                    // Necessary on the first ACTION::Insert, cheap on all the others.
+                    DIRGotoRoot( pfucbIdx );
+                    
+                    Call( ErrRECIInsertIndexEntry(
+                              pfucbIdx,
+                              TrackContext.m_pData[i].Key(),
+                              pbmPrimary->key,
+                              prcePrimary,
+                              fFalse,
+                              &fIndexUpdated,
+                              &InsertContext ) );
+                    break;
+                    
+                default:
+                    AssertSz( fFalse, "Can't happen.");
+                    break;
             }
         }
     }
