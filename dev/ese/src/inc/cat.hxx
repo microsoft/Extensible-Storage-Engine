@@ -1275,17 +1275,17 @@ INLINE ERR ErrCATExtentPageCountsCached( const FUCB * const pfucb )
     case JET_errRecordNotFound:
     case JET_errNotInitialized:
         // Definitively know the value is not there.
-        return JET_errRecordNotFound;
+        return ErrERRCheck( JET_errRecordNotFound );
 
         // Don't definitively know anything.
         // Explicitly listing the error values we've seen just to aid in finding
         // unexpected conditions.
     case JET_errOutOfCursors:          // Low resource condition.
-        return JET_errInternalError;
+        return ErrERRCheck( JET_errInternalError );
         
     default:
         AssertSz( fFalse, "Unexpected case in switch." );
-        return JET_errInternalError;
+        return ErrERRCheck( JET_errInternalError );
     }
 }
 

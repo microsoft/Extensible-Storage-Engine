@@ -8130,7 +8130,7 @@ LOCAL ERR ErrRBSNonRevertableDeleteTooSoon( __int64 ftPgnoFDPLastSet, INT cSecRe
     // We might skip setting pgnoFDPLastSet if skipping the error was requested.
     if ( ftPgnoFDPLastSet == 0 || UtilConvertFileTimeToSeconds( UtilGetCurrentFileTime() - ftPgnoFDPLastSet ) < cSecReqSinceLastTouch )
     {
-        return JET_errRBSDeleteTableTooSoon;
+        return ErrERRCheck( JET_errRBSDeleteTableTooSoon );
     }
 
     return JET_errSuccess;
