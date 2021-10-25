@@ -3,6 +3,8 @@
 
 #include "std.hxx"
 
+LOCAL VOID RECIReportIndexCorruption( const FCB * const pfcbIdx );
+
 enum RECOPER
 {
     recoperInsert,
@@ -190,9 +192,15 @@ struct INDEX_ENTRY_CALLBACK_CONTEXT
 {
     RECOPER m_recoper;
 
-    INDEX_ENTRY_CALLBACK_CONTEXT( RECOPER Recoper )
+    ULONG m_cModified; // How many entries have been modified using this context?
+
+    BOOL m_fErrorOnNullSegViolation;
+
+    INDEX_ENTRY_CALLBACK_CONTEXT( RECOPER Recoper, BOOL fErrorOnNullSegViolation )
     {
         m_recoper = Recoper;
+        m_cModified = 0;
+        m_fErrorOnNullSegViolation = fErrorOnNullSegViolation;
     };
 };
 
@@ -201,7 +209,7 @@ struct INSERT_INDEX_ENTRY_CONTEXT : INDEX_ENTRY_CALLBACK_CONTEXT
     DIRFLAG m_dirflag;
 
     INSERT_INDEX_ENTRY_CONTEXT( RECOPER Recoper, DIRFLAG Dirflag )
-        : INDEX_ENTRY_CALLBACK_CONTEXT( Recoper )
+        : INDEX_ENTRY_CALLBACK_CONTEXT( Recoper, fTrue )
     {
         m_dirflag = Dirflag;
     }
@@ -209,9 +217,12 @@ struct INSERT_INDEX_ENTRY_CONTEXT : INDEX_ENTRY_CALLBACK_CONTEXT
 
 struct DELETE_INDEX_ENTRY_CONTEXT : INDEX_ENTRY_CALLBACK_CONTEXT
 {
-    DELETE_INDEX_ENTRY_CONTEXT( RECOPER Recoper )
-        : INDEX_ENTRY_CALLBACK_CONTEXT( Recoper )
+    BOOL m_fErrorOnNotFound;
+
+    DELETE_INDEX_ENTRY_CONTEXT( RECOPER Recoper, BOOL fErrorOnNotFound )
+        : INDEX_ENTRY_CALLBACK_CONTEXT( Recoper, fFalse )
     {
+        m_fErrorOnNotFound = fErrorOnNotFound;
     }
 };
 
@@ -373,7 +384,7 @@ struct TRACK_INDEX_ENTRY_CONTEXT : INDEX_ENTRY_CALLBACK_CONTEXT
     TRACK_INDEX_ENTRY_DATA         m_DataLocal[TRACK_INDEX_ENTRY_CONTEXT::m_cLocalStorage];
 
     TRACK_INDEX_ENTRY_CONTEXT( RECOPER Recoper )
-        : INDEX_ENTRY_CALLBACK_CONTEXT( Recoper )
+        : INDEX_ENTRY_CALLBACK_CONTEXT( Recoper, fTrue )
     {
         m_eCurrentAction = TRACK_INDEX_ENTRY_DATA::ACTION::Skip;
         m_cDataUsed = 0;
@@ -473,8 +484,6 @@ typedef ERR ( INDEX_ENTRY_CALLBACK )(
     KEY &,
     const KEY &,
     RCE *,
-    const BOOL,
-    BOOL *,
     INDEX_ENTRY_CALLBACK_CONTEXT *);
 
 INDEX_ENTRY_CALLBACK ErrRECIInsertIndexEntry;
@@ -487,8 +496,6 @@ ERR ErrRECIEnumerateKeys(
     const BOOKMARK               *pbmPrimary,
     RCE                          *prcePrimary,
     KEY_LOCATION                 eKeyLocation,
-    BOOL                         fErrorOnNullSegViolation,    
-    BOOL                         *pfIndexUpdated,
     INDEX_ENTRY_CALLBACK_CONTEXT *pIndexEntryCallbackContext,
     INDEX_ENTRY_CALLBACK         *pfnIndexEntryCallback
     )
@@ -519,7 +526,6 @@ ERR ErrRECIEnumerateKeys(
 
     Assert( NULL != pIndexEntryCallbackContext );
     Assert( NULL != pfnIndexEntryCallback );
-    Assert( NULL != pfIndexUpdated );
 
     Alloc( pbReadKey = (BYTE *)RESKEY.PvRESAlloc() );
     keyRead.prefix.Nullify();
@@ -578,7 +584,7 @@ ERR ErrRECIEnumerateKeys(
                     case wrnFLDNullFirstSeg:
                     case wrnFLDNullSeg:
                         // A NoNullSeg requirement violation.
-                        if ( fErrorOnNullSegViolation )
+                        if ( pIndexEntryCallbackContext->m_fErrorOnNullSegViolation )
                         {
                             Call( ErrERRCheck( JET_errNullKeyDisallowed ) );
                         }
@@ -655,24 +661,11 @@ ERR ErrRECIEnumerateKeys(
                     break;
             }
 
-            //  Is it possible that the index entry may already have been deleted/inserted
-            //  as a result of a previous tuple-value (from this or another value
-            //  of a multi-valued column) generating the same index entry as the
-            //  current tuple-value?
-            //  We use this as an overly broad correction for DeleteKey failing with
-            //  KeyNotPresent or InsertKey failing with KeyAlreadyPresent.
-            //  We assume that the only reason to get these kinds of errors is that
-            //  we've already inserted this/deleted key, but we can't be sure.
-            const BOOL  fMayHaveAlreadyBeenModified  = ( !( ksRead.FBaseKey() && ( 0 == ulTuple ) )
-                                                          && !fUnique
-                                                          && *pfIndexUpdated );
             Call( pfnIndexEntryCallback(
                       pfucbIdx,
                       keyRead,
                       pbmPrimary->key,
                       prcePrimary,
-                      fMayHaveAlreadyBeenModified,
-                      pfIndexUpdated,
                       pIndexEntryCallbackContext ) );
 
             // We've dealt with any error cases; reset to success as it's a loop control criterion.
@@ -1616,7 +1609,7 @@ LOCAL ERR ErrRECIInsert(
 
         CallR( ErrDIRBeginTransaction( ppib, 52005, NO_GRBIT ) );
         fInNewTransaction = fTrue;
-        
+
         //  insert unversioned if requested, and if table uncommitted.
         //  Any error should result in client application rolling backt transaction
         //  which created table, since table may be left inconsistent.
@@ -1721,7 +1714,7 @@ LOCAL ERR ErrRECIInsert(
         const COLUMNID  columnidT       = ColumnidOfFid( ptdb->FidAutoincrement(), fTemplateColumn );
         DATA            dataT;
 
-        //  AutoInc column id not set in JET_prepInsertCopyReplaceOriginal.  
+        //  AutoInc column id not set in JET_prepInsertCopyReplaceOriginal.
         //  FFUCBUpdateForInsertCopyDeleteOriginalPrepared is set both for this grbit and also for JET_prepInsertCopyReplaceOriginal.
         //
         Assert( FFUCBColumnSet( pfucb, FidOfColumnid( columnidT ) ) || FFUCBUpdateForInsertCopyDeleteOriginal( pfucb ) );
@@ -2028,8 +2021,6 @@ ERR ErrRECIInsertIndexEntry(
     KEY&                         keyToInsert,
     const KEY&                   keyPrimary,
     RCE *                        prcePrimary,
-    const BOOL                   fMayHaveAlreadyBeenInserted,
-    BOOL *                       pfIndexEntryInserted,
     INDEX_ENTRY_CALLBACK_CONTEXT *pContext )
 {
     ERR         err;
@@ -2052,33 +2043,21 @@ ERR ErrRECIInsertIndexEntry(
         keyPrimary.suffix,
         pInsertContext->m_dirflag,
         prcePrimary );
-    switch ( err )
+
+    // Deal with JET_errMultiValuedIndexViolation
+    if ( err == JET_errMultiValuedIndexViolation )
     {
-        case JET_errSuccess:
-            break;
-
-        case JET_errMultiValuedIndexViolation:
-            if ( fMayHaveAlreadyBeenInserted )
-            {
-                //  must have been record with multi-value column
-                //  or tuples with sufficiently similar values
-                //  (ie. the indexed portion of the multi-values
-                //  or tuples were identical) to produce redundant
-                //  index entries.
-                //
-                err = JET_errSuccess;
-                break;
-            }
-
-            RECIReportIndexCorruption( pfcbIdx );
-            AssertSz( fFalse, "JET_errSecondaryIndexCorrupted during an insert" );
-            err = ErrERRCheck( JET_errSecondaryIndexCorrupted );
-            break;
-
-        default:
-            break;
+        RECIReportIndexCorruption( pfcbIdx );
+        AssertSz( fFalse, "JET_errSecondaryIndexCorrupted during an insert" );
+        Error( ErrERRCheck( JET_errSecondaryIndexCorrupted ) );
     }
 
+    // And now deal with any other error that occurred while inserting the value.
+    Call( err );
+
+    pInsertContext->m_cModified++;
+
+HandleError:
     OSTraceFMP(
         pfcbIdx->Ifmp(),
         JET_tracetagDMLWrite,
@@ -2094,10 +2073,6 @@ ERR ErrRECIInsertIndexEntry(
             err,
             err ) );
 
-    Call( err );
-    *pfIndexEntryInserted = fTrue;
-
-HandleError:
     return err;
 }
 
@@ -2126,7 +2101,6 @@ ERR ErrRECIAddToIndex(
     ERR         err;
     const FCB   * const pfcbIdx         = pfucbIdx->u.pfcb;
     const IDB   * const pidb            = pfcbIdx->Pidb();
-    BOOL        fIndexUpdated           = fFalse;
 
     AssertDIRNoLatch( pfucb->ppib );
 
@@ -2135,12 +2109,19 @@ ERR ErrRECIAddToIndex(
     Assert( pidbNil != pidb );
 
     //  unversioned inserts into a secondary index are dangerous as if this fails the
-    //  record will not be removed from the primary index.  
+    //  record will not be removed from the primary index.
     //  Uncommitted tables that suffer an update failure must be rolled back.
     //
     Assert( !( dirflag & fDIRNoVersion ) || pfucb->u.pfcb->FUncommitted() );
 
-    INSERT_INDEX_ENTRY_CONTEXT Context( recoperInsert, dirflag );
+    INSERT_INDEX_ENTRY_CONTEXT InsertContext( recoperInsert, dirflag );
+    TRACK_INDEX_ENTRY_CONTEXT TrackContext( recoperInsert );
+
+    // Track all the new keys for potential insertion.  Do it this way
+    // rather than directly using EnumerateKeys to insert so we have a chance to deal
+    // with duplicate keys from this one record.  That way, if we find duplicate
+    // keys later, we'll know for sure that there is an index corruption.
+    TrackContext.m_eCurrentAction = TRACK_INDEX_ENTRY_DATA::ACTION::Insert;
 
     Call ( ErrRECIEnumerateKeys(
                pfucb,
@@ -2148,12 +2129,47 @@ ERR ErrRECIAddToIndex(
                pbmPrimary,
                prcePrimary,
                keyLocationCopyBuffer,
-               fTrue,
-               &fIndexUpdated,
-               &Context,
-               ErrRECIInsertIndexEntry ) );
+               &TrackContext,
+               ErrRECITrackIndexEntry ) );
 
-    if ( fIndexUpdated )
+    if ( 0 != TrackContext.m_cDataUsed )
+    {
+        //
+        // We tracked keys to post process.
+        TrackContext.CleanActionList();
+
+        //
+        // Do the resulting actions.
+        //
+        for ( ULONG i = 0; i < TrackContext.m_cDataUsed; i++ )
+        {
+            switch (TrackContext.m_pData[i].Action())
+            {
+            case TRACK_INDEX_ENTRY_DATA::ACTION::Skip:
+                // Key was present more than once.  We act only once on a key.
+                continue;
+
+            case TRACK_INDEX_ENTRY_DATA::ACTION::Insert:
+                // Necessary on the first ACTION::Insert, cheap on all the others.
+                DIRGotoRoot( pfucbIdx );
+
+                Call( ErrRECIInsertIndexEntry(
+                          pfucbIdx,
+                          TrackContext.m_pData[i].Key(),
+                          pbmPrimary->key,
+                          prcePrimary,
+                          &InsertContext ) );
+                break;
+
+            default:
+                AssertSz( fFalse, "Can't happen.");
+                break;
+            }
+        }
+    }
+
+    // Ignore any warnings from ErrRECIEnumerateKeys
+    if ( 0 != InsertContext.m_cModified )
     {
         err = ErrERRCheck( wrnFLDIndexUpdated );
     }
@@ -2314,7 +2330,7 @@ ERR VTAPI ErrIsamDelete(
     }
 
     //  do not touch LV data if we are doing an insert-copy-delete-original
-    //  
+    //
     if ( !FFUCBUpdateForInsertCopyDeleteOriginal( pfucb ) )
     {
         //  delete record long values
@@ -2414,8 +2430,6 @@ ERR ErrRECIDeleteIndexEntry(
     KEY&                         keyToDelete,
     const KEY&                   keyPrimary,
     RCE *                        prcePrimary,
-    const BOOL                   fMayHaveAlreadyBeenDeleted,
-    BOOL *                       pfIndexEntryDeleted,
     INDEX_ENTRY_CALLBACK_CONTEXT *pContext )
 {
     ERR         err;
@@ -2448,42 +2462,56 @@ ERR ErrRECIDeleteIndexEntry(
     dib.pbm     = &bmSeek;
 
     err = ErrDIRDown( pfucbIdx, &dib );
-    switch ( err )
+    // Deal with any warnings.
+    if ( err > JET_errSuccess )
     {
-        case JET_errRecordNotFound:
-            if ( fMayHaveAlreadyBeenDeleted )
-            {
-                //  must have been record with multi-value column
-                //  or tuples with sufficiently similar values
-                //  (ie. the indexed portion of the multi-values
-                //  or tuples were identical) to produce redundant
-                //  index entries.
-                //
+        switch ( err )
+        {
+            case wrnNDFoundLess:
+            case wrnNDFoundGreater:
+                // We found an entry but not the one we wanted and got a page latched.  Let go of all that.
+                DIRUp( pfucbIdx );
+                err = JET_errRecordNotFound;
+                break;
+
+            default:
+                // We don't expect any warnings except the ones filtered out above, but ignore them.
+                CallS( err );
                 err = JET_errSuccess;
                 break;
-            }
-            __fallthrough;
+        }
+    }
 
-        case wrnNDFoundLess:
-        case wrnNDFoundGreater:
+    // Deal with JET_errRecordNotFound
+    if ( JET_errRecordNotFound == err )
+    {
+        if ( pDeleteContext->m_fErrorOnNotFound )
+        {
             RECIReportIndexCorruption( pfcbIdx );
             AssertSz( fFalse, "JET_errSecondaryIndexCorrupted during a delete" );
-            err = ErrERRCheck( JET_errSecondaryIndexCorrupted );
-            break;
-
-        default:
-            CallR( err );
-            CallS( err );   //  don't expect any warnings except the ones filtered out above
-
-            //  PERF: we should be able to avoid the release and call
-            //  ErrDIRDelete with the page latched
-            //
-            CallR( ErrDIRRelease( pfucbIdx ) );
-            CallR( ErrDIRDelete( pfucbIdx, fDIRNull, prcePrimary ) );
-            fThisIndexEntryDeleted = fTrue;
-            *pfIndexEntryDeleted = fTrue;
-            break;
+            Error( ErrERRCheck( JET_errSecondaryIndexCorrupted ) );
+        }
+        else
+        {
+            // Ignore the error (although we don't count this as a modification)
+            err = JET_errSuccess;
+            goto HandleError;
+        }
     }
+
+    // And now deal with any other error that occurred while finding the value to delete.
+    Call( err );
+
+    //  PERF: we should be able to avoid the release and call
+    //  ErrDIRDelete with the page latched
+    //
+    Call( ErrDIRRelease( pfucbIdx ) );
+    Call( ErrDIRDelete( pfucbIdx, fDIRNull, prcePrimary ) );
+    pDeleteContext->m_cModified++;
+    fThisIndexEntryDeleted = fTrue;
+
+HandleError:
+    Assert( !Pcsr( pfucbIdx )->FLatched() );
 
     OSTraceFMP(
         pfcbIdx->Ifmp(),
@@ -2529,7 +2557,6 @@ ERR ErrRECIDeleteFromIndex(
     const FCB       * const pfcbIdx    = pfucbIdx->u.pfcb;
     const IDB       * const pidb       = pfcbIdx->Pidb();
     const BOOL      fDeleteByProxy     = ( prcePrimary != prceNil );
-    BOOL            fIndexUpdated      = fFalse;
 
     AssertDIRNoLatch( pfucb->ppib );
 
@@ -2537,21 +2564,59 @@ ERR ErrRECIDeleteFromIndex(
     Assert( pfcbIdx->FTypeSecondaryIndex() );
     Assert( pidbNil != pidb );
 
-    //  delete all keys from this index for dying data record
-    //
-    DELETE_INDEX_ENTRY_CONTEXT Context( recoperDelete );
-    Call( ErrRECIEnumerateKeys(
+    DELETE_INDEX_ENTRY_CONTEXT DeleteContext( recoperDelete, fTrue );
+    TRACK_INDEX_ENTRY_CONTEXT TrackContext( recoperDelete );
+
+    // Track all the expected keys for deletion.  Do it this way rather than
+    // directly using EnumerateKeys to delete so we have a chance to deal
+    // with duplicate keys from this one record.  That way, if we fail to find
+    // a key later, we'll know for sure that there is an index corruption.
+    TrackContext.m_eCurrentAction = TRACK_INDEX_ENTRY_DATA::ACTION::Delete;
+
+    Call ( ErrRECIEnumerateKeys(
                pfucb,
                pfucbIdx,
                pbmPrimary,
                prcePrimary,
                ( fDeleteByProxy ? keyLocationCopyBuffer : keyLocationRecord ),
-               fFalse,
-               &fIndexUpdated,
-               &Context,
-               ErrRECIDeleteIndexEntry ) );
+               &TrackContext,
+               ErrRECITrackIndexEntry ) );
 
-    if ( fIndexUpdated )
+    if ( 0 != TrackContext.m_cDataUsed )
+    {
+        //
+        // We tracked keys to post process.
+        TrackContext.CleanActionList();
+
+        //
+        // Do the resulting actions.
+        //
+        for ( ULONG i = 0; i < TrackContext.m_cDataUsed; i++ )
+        {
+            switch (TrackContext.m_pData[i].Action())
+            {
+            case TRACK_INDEX_ENTRY_DATA::ACTION::Skip:
+                // Key was present more than once.  We act only once on a key.
+                continue;
+
+            case TRACK_INDEX_ENTRY_DATA::ACTION::Delete:
+                Call( ErrRECIDeleteIndexEntry(
+                          pfucbIdx,
+                          TrackContext.m_pData[i].Key(),
+                          pbmPrimary->key,
+                          prcePrimary,
+                          &DeleteContext ) );
+                break;
+
+            default:
+                AssertSz( fFalse, "Can't happen.");
+                break;
+            }
+        }
+    }
+
+    // Ignore any warnings from ErrRECIEnumerateKeys
+    if ( 0 != DeleteContext.m_cModified )
     {
         err = ErrERRCheck( wrnFLDIndexUpdated );
     }
@@ -2831,7 +2896,7 @@ LOCAL ERR ErrRECIReplace( FUCB *pfucb, const JET_GRBIT grbit )
 
         CallR( ErrDIRBeginTransaction( ppib, 62245, NO_GRBIT ) );
         fBeganTransaction = fTrue;
-        
+
         //  NoVersion replace operations are not yet supported.
         //
         if ( ( 0 != (grbit & JET_bitUpdateNoVersion) ) )
@@ -3144,8 +3209,6 @@ ERR ErrRECITrackIndexEntry(
     KEY&        keyRead,
     const KEY&  keyPrimary,
     RCE *       prcePrimary,
-    const BOOL  fMayHaveAlreadyBeenModified,
-    BOOL *      pfIndexUpdated,
     INDEX_ENTRY_CALLBACK_CONTEXT *pContext )
 {
     ERR                       err;
@@ -3192,9 +3255,8 @@ ERR ErrRECIReplaceInIndex(
     const FCB       * const pfcbIdx         = pfucbIdx->u.pfcb;
     const IDB       * const pidb            = pfcbIdx->Pidb();
     const BOOL      fReplaceByProxy         = ( prcePrimary != prceNil );
-    BOOL            fIndexUpdated           = fFalse;
 
-    DELETE_INDEX_ENTRY_CONTEXT DeleteContext( recoperReplace );
+    DELETE_INDEX_ENTRY_CONTEXT DeleteContext( recoperReplace, fTrue );
     INSERT_INDEX_ENTRY_CONTEXT InsertContext( recoperReplace, fDIRBackToFather );
     TRACK_INDEX_ENTRY_CONTEXT TrackContext( recoperReplace );
 
@@ -3212,12 +3274,9 @@ ERR ErrRECIReplaceInIndex(
               pbmPrimary,
               prcePrimary,
               ( fReplaceByProxy ? keyLocationRCE : keyLocationRecord_RetrieveLVBeforeImg ),
-              fFalse,
-              &fIndexUpdated,
               &TrackContext,
               ErrRECITrackIndexEntry ) );
-    Assert( fFalse == fIndexUpdated );
-    
+
     // Track all the new keys for potential insertion.
     TrackContext.m_eCurrentAction = TRACK_INDEX_ENTRY_DATA::ACTION::Insert;
     Call( ErrRECIEnumerateKeys(
@@ -3226,18 +3285,15 @@ ERR ErrRECIReplaceInIndex(
               pbmPrimary,
               prcePrimary,
               keyLocationCopyBuffer,
-              fTrue,
-              &fIndexUpdated,
               &TrackContext,
               ErrRECITrackIndexEntry ) );
-    Assert( fFalse == fIndexUpdated );
-    
+
     if ( 0 != TrackContext.m_cDataUsed )
     {
         //
         // We tracked keys to post process.
         TrackContext.CleanActionList();
-        
+
         //
         // Do the resulting actions.
         //
@@ -3245,44 +3301,40 @@ ERR ErrRECIReplaceInIndex(
         {
             switch (TrackContext.m_pData[i].Action())
             {
-                case TRACK_INDEX_ENTRY_DATA::ACTION::Skip:
-                    // Key either was in both old and new record AND/OR was present in old or new
-                    // more than once.  We act only once on a key.
-                    continue;
-                    
-                case TRACK_INDEX_ENTRY_DATA::ACTION::Delete:
-                    Call( ErrRECIDeleteIndexEntry(
-                              pfucbIdx,
-                              TrackContext.m_pData[i].Key(),
-                              pbmPrimary->key,
-                              prcePrimary,
-                              fFalse,
-                              &fIndexUpdated,
-                              &DeleteContext ) );
-                    break;
-                    
-                case TRACK_INDEX_ENTRY_DATA::ACTION::Insert:
-                    // Necessary on the first ACTION::Insert, cheap on all the others.
-                    DIRGotoRoot( pfucbIdx );
-                    
-                    Call( ErrRECIInsertIndexEntry(
-                              pfucbIdx,
-                              TrackContext.m_pData[i].Key(),
-                              pbmPrimary->key,
-                              prcePrimary,
-                              fFalse,
-                              &fIndexUpdated,
-                              &InsertContext ) );
-                    break;
-                    
-                default:
-                    AssertSz( fFalse, "Can't happen.");
-                    break;
+            case TRACK_INDEX_ENTRY_DATA::ACTION::Skip:
+                // Key either was in both old and new record AND/OR was present in old or new
+                // more than once.  We act only once on a key.
+                continue;
+
+            case TRACK_INDEX_ENTRY_DATA::ACTION::Delete:
+                Call( ErrRECIDeleteIndexEntry(
+                          pfucbIdx,
+                          TrackContext.m_pData[i].Key(),
+                          pbmPrimary->key,
+                          prcePrimary,
+                          &DeleteContext ) );
+                break;
+
+            case TRACK_INDEX_ENTRY_DATA::ACTION::Insert:
+                // Necessary on the first ACTION::Insert, cheap on all the others.
+                DIRGotoRoot( pfucbIdx );
+
+                Call( ErrRECIInsertIndexEntry(
+                          pfucbIdx,
+                          TrackContext.m_pData[i].Key(),
+                          pbmPrimary->key,
+                          prcePrimary,
+                          &InsertContext ) );
+                break;
+
+            default:
+                AssertSz( fFalse, "Can't happen.");
+                break;
             }
         }
     }
 
-    if ( fIndexUpdated )
+    if ( ( 0 != DeleteContext.m_cModified ) || ( 0 != InsertContext.m_cModified ) )
     {
         err = ErrERRCheck( wrnFLDIndexUpdated );
     }
