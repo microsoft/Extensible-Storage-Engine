@@ -3580,6 +3580,9 @@ ERR VTAPI ErrIsamGotoPosition( JET_SESID sesid, JET_VTID vtid, JET_RECPOS *precp
     ERR     err;
     FUCB    *pfucbSecondary;
 
+    ULONGLONG centriesLT;
+    ULONGLONG centriesTotal;
+
     // filters do not apply to fractional moves
     if ( pfucb->pmoveFilterContext )
     {
@@ -3591,7 +3594,35 @@ ERR VTAPI ErrIsamGotoPosition( JET_SESID sesid, JET_VTID vtid, JET_RECPOS *precp
     CheckTable( ppib, pfucb );
     CheckSecondary( pfucb );
 
-    if ( precpos->centriesLT > precpos->centriesTotal )
+    switch ( precpos->cbStruct )
+    {
+        case sizeof( JET_RECPOS ):
+            centriesLT = precpos->centriesLT;
+            centriesTotal = precpos->centriesTotal;
+            break;
+
+        case sizeof( JET_RECPOS2 ):
+        {
+            JET_RECPOS2 *precpos2 = reinterpret_cast< JET_RECPOS2 * >( precpos );
+
+            // We're going to use the ULONGLONG values, the ULONG values have to be 0.
+            if ( ( 0 != precpos2->centriesLTDeprecated ) || ( 0 != precpos2->centriesTotalDeprecated ) )
+            {
+                err = ErrERRCheck( JET_errInvalidParameter );
+                return err;
+            }
+
+            centriesLT = precpos2->centriesLT;
+            centriesTotal = precpos2->centriesTotal;
+            break;
+        }
+
+        default:
+            err = ErrERRCheck( JET_errInvalidParameter );
+            return err;
+    }
+
+    if ( centriesLT > centriesTotal )
     {
         err = ErrERRCheck( JET_errInvalidParameter );
         return err;
@@ -3622,7 +3653,7 @@ ERR VTAPI ErrIsamGotoPosition( JET_SESID sesid, JET_VTID vtid, JET_RECPOS *precp
         //
         DIRGotoRoot( pfucb );
 
-        err = ErrDIRGotoPosition( pfucb, precpos->centriesLT, precpos->centriesTotal );
+        err = ErrDIRGotoPosition( pfucb, centriesLT, centriesTotal );
 
         if ( err >= 0 )
         {
@@ -3639,7 +3670,7 @@ ERR VTAPI ErrIsamGotoPosition( JET_SESID sesid, JET_VTID vtid, JET_RECPOS *precp
         //
         DIRGotoRoot( pfucbSecondary );
 
-        err = ErrDIRGotoPosition( pfucbSecondary, precpos->centriesLT, precpos->centriesTotal );
+        err = ErrDIRGotoPosition( pfucbSecondary, centriesLT, centriesTotal );
 
         //  if the movement was successful and a secondary index is
         //  in use, then position primary index to record.

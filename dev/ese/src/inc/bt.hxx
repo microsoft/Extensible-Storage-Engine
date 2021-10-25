@@ -131,7 +131,7 @@ ERR ErrBTPerformOnSeekBM( FUCB * const pfucb, const DIRFLAG dirflag );
 //  direct access routines
 //
 ERR ErrBTGotoBookmark( FUCB *pfucb, const BOOKMARK& bm, LATCH latch, BOOL fExactPosition = fTrue );
-ERR ErrBTGetPosition( FUCB *pfucb, ULONG *pulLT, ULONG *pulTotal );
+ERR ErrBTGetPosition( FUCB *pfucb, ULONGLONG *pullLT, ULONGLONG *pulTotal );
 
 //  release memory allocated for bookmark in cursor
 //

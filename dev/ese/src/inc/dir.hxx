@@ -17,8 +17,8 @@
 //  struture for fractional positioning 
 //
 typedef struct {
-    ULONG       ulLT;
-    ULONG       ulTotal;
+    ULONGLONG       ullLT;
+    ULONGLONG       ullTotal;
 } FRAC;
 
 //  possible positioning parameters
@@ -142,7 +142,7 @@ INLINE VOID DIRCloseIfExists( FUCB ** ppfucb )
 //  retrieve/release operations
 //
 ERR ErrDIRGet( FUCB *pfucb );
-ERR ErrDIRGetPosition( FUCB *pfucb, ULONG *pulLT, ULONG *pulTotal );
+ERR ErrDIRGetPosition( FUCB *pfucb, ULONGLONG *pullLT, ULONGLONG *pullTotal );
 ERR ErrDIRGetBookmark( FUCB *pfucb, BOOKMARK *pbm );
 ERR ErrDIRRelease( FUCB *pfucb );
 
@@ -151,7 +151,7 @@ ERR ErrDIRRelease( FUCB *pfucb );
 //
 ERR ErrDIRGotoBookmark( FUCB *pfucb, const BOOKMARK& bm );
 ERR ErrDIRGotoJetBookmark( FUCB *pfucb, const BOOKMARK& bm, const BOOL fRetainLatch );
-ERR ErrDIRGotoPosition( FUCB *pfucb, ULONG ulLT, ULONG ulTotal );
+ERR ErrDIRGotoPosition( FUCB *pfucb, ULONGLONG ullLT, ULONGLONG ullTotal );
 
 ERR ErrDIRDown( FUCB *pfucb, DIB *pdib );
 ERR ErrDIRDownKeyData( FUCB *pfucb, const KEY& key, const DATA& data );

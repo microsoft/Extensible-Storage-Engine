@@ -17794,10 +17794,10 @@ VOID FUCB::Dump( CPRINTF * pcprintf, DWORD_PTR ulBase ) const
 
     EDBGDumplinkDml( FUCB, this, FUCB, pfucbTable, ulBase );
 
-    (*pcprintf)( FORMAT_UINT( FUCB, this, ulLTLast, ulBase ) );
-    (*pcprintf)( FORMAT_UINT( FUCB, this, ulTotalLast, ulBase ) );
-    (*pcprintf)( FORMAT_UINT( FUCB, this, ulLTCurr, ulBase ) );
-    (*pcprintf)( FORMAT_UINT( FUCB, this, ulTotalCurr, ulBase ) );
+    (*pcprintf)( FORMAT_UINT( FUCB, this, ullLTLast, ulBase ) );
+    (*pcprintf)( FORMAT_UINT( FUCB, this, ullTotalLast, ulBase ) );
+    (*pcprintf)( FORMAT_UINT( FUCB, this, ullLTCurr, ulBase ) );
+    (*pcprintf)( FORMAT_UINT( FUCB, this, ullTotalCurr, ulBase ) );
 
     EDBGDumplinkDml( FUCB, this, CSR, pcsrRoot, ulBase );
 

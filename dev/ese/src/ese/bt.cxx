@@ -918,8 +918,8 @@ ERR ErrBTRelease( FUCB  *pfucb )
         {
             AssertBTIBookmarkSaved( pfucb );
         }
-        pfucb->ulLTCurr = pfucb->ulLTLast;
-        pfucb->ulTotalCurr = pfucb->ulTotalLast;
+        pfucb->ullLTCurr = pfucb->ullLTLast;
+        pfucb->ullTotalCurr = pfucb->ullTotalLast;
 
         // release page anyway, return previous error
         Pcsr( pfucb )->ReleasePage( pfucb->u.pfcb->FNoCache() );
@@ -953,8 +953,8 @@ ERR ErrBTDeferGotoBookmark( FUCB *pfucb, const BOOKMARK& bm, BOOL fTouch )
 
     //  purge our cached key position
 
-    pfucb->ulLTCurr = 0;
-    pfucb->ulTotalCurr = 0;
+    pfucb->ullLTCurr = 0;
+    pfucb->ullTotalCurr = 0;
 
     return err;
 }
@@ -1679,9 +1679,9 @@ Start:
 
         //  adjust key position
         //
-        if ( pfucb->ulTotalLast )
+        if ( pfucb->ullTotalLast )
         {
-            pfucb->ulLTLast++;
+            pfucb->ullLTLast++;
         }
     }
     else
@@ -1690,8 +1690,8 @@ Start:
 
         //  reset key position
         //
-        pfucb->ulLTLast = 0;
-        pfucb->ulTotalLast = 0;
+        pfucb->ullLTLast = 0;
+        pfucb->ullTotalLast = 0;
 
         //  next node not in current page
         //  get next page and continue
@@ -2057,9 +2057,9 @@ Start:
 
         //  adjust key position
         //
-        if ( pfucb->ulTotalLast )
+        if ( pfucb->ullTotalLast )
         {
-            pfucb->ulLTLast--;
+            pfucb->ullLTLast--;
         }
     }
     else
@@ -2068,8 +2068,8 @@ Start:
 
         //  reset key position
         //
-        pfucb->ulLTLast = 0;
-        pfucb->ulTotalLast = 0;
+        pfucb->ullLTLast = 0;
+        pfucb->ullTotalLast = 0;
 
         //  prev node not in current page
         //  get prev page and continue
@@ -4044,7 +4044,7 @@ ERR ErrBTDown( FUCB *pfucb, DIB *pdib, LATCH latch )
     {
         // calculate the fraction desired for the initial iteration of the loop.
         const FRAC *const pfrac = (FRAC *)(pdib->pbm);
-        dblCurrentFrac = (double)pfrac->ulLT / (double)pfrac->ulTotal;
+        dblCurrentFrac = (double)pfrac->ullLT / (double)pfrac->ullTotal;
         if ( dblCurrentFrac > 1.0 )
         {
             // Somehow we were called with ulLT > ulTotal.  Bad form, but
@@ -4124,8 +4124,8 @@ ERR ErrBTDown( FUCB *pfucb, DIB *pdib, LATCH latch )
 
     //  setup to compute our record position
     //
-    pfucb->ulLTLast = 0;
-    pfucb->ulTotalLast = 1;
+    pfucb->ullLTLast = 0;
+    pfucb->ullTotalLast = 1;
 
     //  seek to key
     //
@@ -4204,9 +4204,12 @@ ERR ErrBTDown( FUCB *pfucb, DIB *pdib, LATCH latch )
 
         //  adjust number of records and key position
         //  for this tree level
+        //  With 64 bit variables, we really don't expect to overflow.
         //
-        pfucb->ulLTLast = pfucb->ulLTLast * clines + iline;
-        pfucb->ulTotalLast = pfucb->ulTotalLast * clines;
+        Expected( pfucb->ullLTLast <= pfucb->ullLTLast * clines + iline ) ;
+        Expected( pfucb->ullTotalLast <= pfucb->ullTotalLast * clines );
+        pfucb->ullLTLast = pfucb->ullLTLast * clines + iline;
+        pfucb->ullTotalLast = pfucb->ullTotalLast * clines;
 
         if ( pcsr->Cpage().FLeafPage() )
         {
@@ -4638,11 +4641,11 @@ ERR ErrBTPerformOnSeekBM( FUCB * const pfucb, const DIRFLAG dirflag )
 //  ulTotal is estimated total number of records in tree
 //  ulLT is estimated number of nodes lesser than given node
 //
-ERR ErrBTGetPosition( FUCB *pfucb, ULONG *pulLT, ULONG *pulTotal )
+ERR ErrBTGetPosition( FUCB *pfucb, ULONGLONG *pullLT, ULONGLONG *pullTotal )
 {
-    ERR     err;
-    UINT    ulLT = 0;
-    UINT    ulTotal = 1;
+    ERR        err;
+    ULONGLONG  ullLT = 0;
+    ULONGLONG  ullTotal = 1;
     PIBTraceContextScope tcScope = TcBTICreateCtxScope( pfucb, iorsBTSeek );
 
     //  no latch should be held by cursor on tree
@@ -4654,8 +4657,8 @@ ERR ErrBTGetPosition( FUCB *pfucb, ULONG *pulLT, ULONG *pulTotal )
     //
     if ( pfucb->locLogical == locOnSeekBM )
     {
-        pfucb->ulLTCurr = 0;
-        pfucb->ulTotalCurr = 0;
+        pfucb->ullLTCurr = 0;
+        pfucb->ullTotalCurr = 0;
     }
     else
     {
@@ -4670,10 +4673,10 @@ ERR ErrBTGetPosition( FUCB *pfucb, ULONG *pulLT, ULONG *pulTotal )
 
     //  if we have a cached key position then return that
     //
-    if ( pfucb->ulTotalCurr )
+    if ( pfucb->ullTotalCurr )
     {
-        *pulLT = pfucb->ulLTCurr;
-        *pulTotal = pfucb->ulTotalCurr;
+        *pullLT = pfucb->ullLTCurr;
+        *pullTotal = pfucb->ullTotalCurr;
         return JET_errSuccess;
     }
 
@@ -4695,9 +4698,12 @@ ERR ErrBTGetPosition( FUCB *pfucb, ULONG *pulLT, ULONG *pulTotal )
 
         //  adjust number of records and key position
         //  for this tree level
+        //  With 64 bit variables, we really don't expect to overflow.
         //
-        ulLT = ulLT * clines + Pcsr( pfucb )->ILine();
-        ulTotal = ulTotal * clines;
+        Expected( ullLT <= ullLT * clines + Pcsr( pfucb )->ILine());
+        Expected( ullTotal <= ullTotal * clines );
+        ullLT = ullLT * clines + Pcsr( pfucb )->ILine();
+        ullTotal = ullTotal * clines;
 
         if ( !Pcsr( pfucb )->Cpage().FInvisibleSons( ) )
         {
@@ -4720,9 +4726,9 @@ ERR ErrBTGetPosition( FUCB *pfucb, ULONG *pulLT, ULONG *pulTotal )
         }
     }
 
-    *pulLT = ulLT;
-    *pulTotal = ulTotal;
-    Assert( ulTotal >= ulLT );
+    *pullLT = ullLT;
+    *pullTotal = ullTotal;
+    Assert( ullTotal >= ullLT );
 
     err = JET_errSuccess;
 
