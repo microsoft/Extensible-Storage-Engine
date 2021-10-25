@@ -238,9 +238,9 @@ ERR ErrSTATSRetrieveIndexStats(
 ERR VTAPI
 ErrIsamGetRecordPosition( JET_SESID vsesid, JET_VTID vtid, JET_RECPOS *precpos, ULONG cbRecpos )
 {
-    ERR     err;
-    ULONG   ulLT;
-    ULONG   ulTotal;
+    ERR         err;
+    ULONGLONG   ullLT;
+    ULONGLONG   ullTotal;
     PIB *ppib = (PIB *)vsesid;
     FUCB *pfucb = (FUCB *)vtid;
 
@@ -254,24 +254,47 @@ ErrIsamGetRecordPosition( JET_SESID vsesid, JET_VTID vtid, JET_RECPOS *precpos, 
     CheckTable( ppib, pfucb );
     Assert( FFUCBIndex( pfucb ) );
 
-    if ( cbRecpos < sizeof(JET_RECPOS) )
+    C_ASSERT( sizeof( JET_RECPOS ) < sizeof( JET_RECPOS2 ) );
+
+    if ( cbRecpos < sizeof( JET_RECPOS ) )
+    {
         return ErrERRCheck( JET_errInvalidParameter );
-    precpos->cbStruct = sizeof(JET_RECPOS);
+    }
 
     //  get position of secondary or primary cursor
     if ( pfucb->pfucbCurIndex != pfucbNil )
     {
-        Call( ErrDIRGetPosition( pfucb->pfucbCurIndex, &ulLT, &ulTotal ) );
+        Call( ErrDIRGetPosition( pfucb->pfucbCurIndex, &ullLT, &ullTotal ) );
     }
     else
     {
-        Call( ErrDIRGetPosition( pfucb, &ulLT, &ulTotal ) );
+        Call( ErrDIRGetPosition( pfucb, &ullLT, &ullTotal ) );
     }
 
-    precpos->centriesLT = ulLT;
-    //  CONSIDER:   remove this bogus field
-    precpos->centriesInRange = 1;
-    precpos->centriesTotal = ulTotal;
+    // Give back the biggest struct we can.
+    if ( cbRecpos < sizeof( JET_RECPOS2 ) )
+    {
+        Expected( cbRecpos == sizeof( JET_RECPOS ) );
+
+        // Note we ignore overflow because that's the historic behavior.
+        // Perhaps we should return an error?
+        precpos->cbStruct = sizeof( JET_RECPOS );
+        precpos->centriesLT = ( ULONG )ullLT;
+        precpos->centriesTotal = ( ULONG )ullTotal;
+        precpos->centriesInRange = 1;
+    }
+    else
+    {
+        // For the benefit of people who inadvertently requested a JET_RECPOS2
+        // when they really wanted a JET_RECPOS, fill out the fields they expect.
+        JET_RECPOS2 *precpos2 = reinterpret_cast< JET_RECPOS2 * >( precpos );
+        precpos2->cbStruct = sizeof( JET_RECPOS2 );
+        precpos2->centriesLTDeprecated = ( ULONG )ullLT;
+        precpos2->centriesTotalDeprecated = ( ULONG )ullTotal;
+        precpos2->centriesInRangeDeprecated = 1;
+        precpos2->centriesLT = ullLT;
+        precpos2->centriesTotal = ullTotal;
+    }
 
 HandleError:
     return err;

@@ -1810,6 +1810,19 @@ typedef struct
     unsigned long   centriesTotal;
 } JET_RECPOS;
 
+// On input to JetGotoPosition, centriesLTDeprecated and centriesTotalDeprecated must be 0.
+// On output from JetGetRecordPositon, centriesLTDeprecated and centriesTotalDeprecated
+// hold potentially truncated versions of centriesLT and centriesTotal.
+typedef struct
+{
+    unsigned long        cbStruct;
+    unsigned long        centriesLTDeprecated;
+    unsigned long        centriesInRangeDeprecated;
+    unsigned long        centriesTotalDeprecated;
+    unsigned long long   centriesLT;
+    unsigned long long   centriesTotal;
+} JET_RECPOS2;
+
 typedef struct
 {
     unsigned long   cbStruct;

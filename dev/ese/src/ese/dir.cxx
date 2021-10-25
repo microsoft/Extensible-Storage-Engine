@@ -408,11 +408,11 @@ HandleError:
 
 //  gets fractional postion of current node in directory
 //
-ERR ErrDIRGetPosition( FUCB *pfucb, ULONG *pulLT, ULONG *pulTotal )
+ERR ErrDIRGetPosition( FUCB *pfucb, ULONGLONG *pullLT, ULONGLONG *pullTotal )
 {
-    ERR     err;
-    ULONG   ulLT;
-    ULONG   ulTotal;
+    ERR         err;
+    ULONGLONG   ullLT;
+    ULONGLONG   ullTotal;
 
     CheckFUCB( pfucb->ppib, pfucb );
     Assert( !Pcsr( pfucb )->FLatched() );
@@ -435,12 +435,12 @@ ERR ErrDIRGetPosition( FUCB *pfucb, ULONG *pulLT, ULONG *pulTotal )
 
     //  get approximate position of node.
     //
-    Call( ErrBTGetPosition( pfucb, &ulLT, &ulTotal ) );
+    Call( ErrBTGetPosition( pfucb, &ullLT, &ullTotal ) );
     CallS( err );
 
-    Assert( ulLT <= ulTotal );
-    *pulLT = ulLT;
-    *pulTotal = ulTotal;
+    Assert( ullLT <= ullTotal );
+    *pullLT = ullLT;
+    *pullTotal = ullTotal;
 
 HandleError:
     Assert( !Pcsr( pfucb )->FLatched() );
@@ -627,7 +627,7 @@ ERR ErrDIRGotoBookmark( FUCB *pfucb, const BOOKMARK& bm )
 
 //  goes to fractional position in directory
 //
-ERR ErrDIRGotoPosition( FUCB *pfucb, ULONG ulLT, ULONG ulTotal )
+ERR ErrDIRGotoPosition( FUCB *pfucb, ULONGLONG ullLT, ULONGLONG ullTotal )
 {
     ERR     err;
     DIB     dib;
@@ -656,10 +656,10 @@ ERR ErrDIRGotoPosition( FUCB *pfucb, ULONG ulLT, ULONG ulTotal )
     dib.pos     = posFrac;
     dib.pbm     = reinterpret_cast<BOOKMARK *>( &frac );
 
-    Assert( ulLT <= ulTotal );
+    Assert( ullLT <= ullTotal );
 
-    frac.ulLT       = ulLT;
-    frac.ulTotal    = ulTotal;
+    frac.ullLT       = ullLT;
+    frac.ullTotal    = ullTotal;
 
     //  position fractionally on node.  Move up preserving currency
     //  in case down fails.
