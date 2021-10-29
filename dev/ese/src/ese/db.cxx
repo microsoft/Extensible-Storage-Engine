@@ -2225,6 +2225,8 @@ ERR ErrDBCreateDatabase(
         err = pfmp->ErrStartDBMScan();
         if( err < JET_errSuccess )
         {
+            pfmp->m_isdlCreate.TermSequence();
+
             const ERR errDetach = ErrIsamDetachDatabase( (JET_SESID) ppib, NULL, wszDatabaseName );
             if ( ( errDetach >= JET_errSuccess ) )
             {
@@ -2585,6 +2587,8 @@ ErrDBCreateDBFinish(
         err = pfmp->ErrStartDBMScan();
         if( err < JET_errSuccess )
         {
+            pfmp->m_isdlCreate.TermSequence();
+
             const ERR errDetach = ErrIsamDetachDatabase( (JET_SESID) ppib, NULL, pfmp->WszDatabaseName() );
             if ( ( errDetach >= JET_errSuccess ) )
             {
