@@ -14,7 +14,6 @@
 #include "cc.hxx"
 #include "math.hxx"
 
-#define PERF_COLLECTION_FREQ_MAX    10      //  Maximum number of times collection can be triggered per second.
 #define PERF_TIMEOUT                100     //  Timeout waiting for server processes to respond.
 #define PERF_COPY_RETRY             1000    //  Number of times we should retry copying data to shared memory (defense-in-depth).
 #define PERF_PERFINST_MAX           256     //  Maximum number of server processes.
@@ -220,6 +219,7 @@ extern const ULONG dwPERFMaxIndex;
 
 #ifdef PERFMON_SUPPORT
 extern BOOL g_fDisablePerfmon;
+extern TICK g_dtickRefreshInterval;
 #define PERFOptDeclare( x ) x
 #define PERFOpt( x ) \
     if ( !g_fDisablePerfmon ) \

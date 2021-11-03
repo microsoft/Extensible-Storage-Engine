@@ -382,7 +382,7 @@ ERR ErrOSUSetOSLayerGlobals()
     }
     else
     {
-        COSLayerPreInit::EnablePerfmon();
+        COSLayerPreInit::EnablePerfmon( (TICK)UlParam( JET_paramPerfmonRefreshInterval ) );
     }
 
     //  special configuration parameters

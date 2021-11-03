@@ -406,7 +406,7 @@ void COSLayerPreInit::SetDefaults()
 
     SetEventLogCache( 0 );  // event log cache disabled by default
 #ifdef PERFMON_SUPPORT
-    EnablePerfmon();        // by default we use perfmon.
+    EnablePerfmon( 100 );   // by default we use perfmon.
 #endif
 
     //  performance data

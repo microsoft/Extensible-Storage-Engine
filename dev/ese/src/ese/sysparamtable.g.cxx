@@ -236,6 +236,7 @@ JetParam g_rgparamRaw[] =
     NORMAL_PARAM(JET_paramUseFlushForWriteDurability, CJetParam::typeBoolean, 1,  0,  0, 1, 0, 1, 1),
     NORMAL_PARAM(JET_paramEnableRBS, CJetParam::typeBoolean, 1,  0,  0, 0, 0, 1, 0),
     NORMAL_PARAM(JET_paramRBSFilePath, CJetParam::typeFolder, 0,  0,  0, 1, 0, 246, L".\\"),
+    NORMAL_PARAM(JET_paramPerfmonRefreshInterval, CJetParam::typeInteger, 0,  1,  1, 1, 0, 1 * 24 * 60 * 60 * 1000, 100),
     ILLEGAL_PARAM(JET_paramMaxValueInvalid),
 };
 
@@ -459,4 +460,5 @@ static_assert( JET_paramRecordSizeMost == 213, "The order of defintion for JET_p
 static_assert( JET_paramUseFlushForWriteDurability == 214, "The order of defintion for JET_paramUseFlushForWriteDurability in sysparam.xml must follow the numerical ordering of its value (as defined in jethdr.w)." );
 static_assert( JET_paramEnableRBS == 215, "The order of defintion for JET_paramEnableRBS in sysparam.xml must follow the numerical ordering of its value (as defined in jethdr.w)." );
 static_assert( JET_paramRBSFilePath == 216, "The order of defintion for JET_paramRBSFilePath in sysparam.xml must follow the numerical ordering of its value (as defined in jethdr.w)." );
-static_assert( JET_paramMaxValueInvalid == 217, "The order of defintion for JET_paramMaxValueInvalid in sysparam.xml must follow the numerical ordering of its value (as defined in jethdr.w)." );
+static_assert( JET_paramPerfmonRefreshInterval == 217, "The order of defintion for JET_paramPerfmonRefreshInterval in sysparam.xml must follow the numerical ordering of its value (as defined in jethdr.w)." );
+static_assert( JET_paramMaxValueInvalid == 218, "The order of defintion for JET_paramMaxValueInvalid in sysparam.xml must follow the numerical ordering of its value (as defined in jethdr.w)." );

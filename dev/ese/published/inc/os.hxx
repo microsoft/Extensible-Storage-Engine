@@ -201,8 +201,8 @@ class COSLayerPreInit
         //  analysis sub-systems, logging, perfmon, etc...
         //
         static void SetProcessFriendlyName( const WCHAR* const wszProcessFriendlyName );
-        static void SetEventLogCache( ULONG cbEventCache ); //
-        static void EnablePerfmon();                            // by default perfmon is enabled
+        static void SetEventLogCache( ULONG cbEventCache );
+        static void EnablePerfmon( const TICK dtickRefreshInterval );
         static void DisablePerfmon();
         static void DisableTracing();
         static void SetRestrictIdleActivity( const BOOL fRestrictIdleActivity );
