@@ -230,7 +230,8 @@ MSINTERNAL enum class MJET_PARAM
     UseFlushForWriteDurability = 214, // This controls whether ESE uses Flush or FUA to make sure a write to disk is durable.
     EnableRBS = 215, // Turns on revert snapshot. Not an ESE flight as we will let the variant be controlled outside ESE (like HA can enable this when lag is disabled)
     RBSFilePath = 216, // path to the revert snapshot directory
-    MaxValueInvalid = 217, // This is not a valid parameter. It can change from release to release!
+    PerfmonRefreshInterval = 217, // Interval, in units of msec, used by the Permormance Monitor to refresh values for collection.
+    MaxValueInvalid = 218, // This is not a valid parameter. It can change from release to release!
 };
 
 }

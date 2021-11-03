@@ -144,11 +144,12 @@
 ;   302 - 2021/03/26 - Remove Xpress9 counters.
 ;   303 - 2021/06/04 - Add Snapshot Stall counter.
 ;   304 - 2021/09/16 - Add Space Trees Deleted Snapshotted Pages counter.
+;   305 - 2021/10/26 - Removed bogus BFPageScannedTotal, as it wasn't being used as intended.
 
 
 [ModuleInfo]
 MaxInstNameSize=64
-SchemaVersion=304
+SchemaVersion=305
 ; we will subst later $PerformanceObjectName$ with either ESE or ESENT version
 PerformanceObjectName_ESE=MSExchange Database
 PerformanceObjectName_ESENT=Database
@@ -3276,16 +3277,6 @@ EvaluationFunction=LBFPageScannedOutOfOrderCEFLPv
 009_Help= pages are considered for eviction from the database page cache in a
 009_Help= priority counter to the page replacement algorithm.  [Dev Only]
 
-[BFPageScannedTotal]
-Type=Counter
-Object=ESE
-DetailLevel=PERF_DETAIL_DEVONLY | PERF_DETAIL_DEFAULT
-DefaultScale=0
-CounterType=PERF_SAMPLE_BASE
-EvaluationFunction=LBFPageScannedCEFLPv
-009_Name=
-009_Help=
-
 [RESMGRScanFoundEntries]
 Type=Counter
 Object=ESE
@@ -3532,7 +3523,7 @@ Object=ESE
 DetailLevel=PERF_DETAIL_DEVONLY | PERF_DETAIL_DEFAULT
 DefaultScale=-1
 EvaluationFunction=LOLDPartialMergesCEFLPv
-CounterType=PERF_COUNTER_COUNTER 
+CounterType=PERF_COUNTER_COUNTER
 009_Name=Online Defrag Data Moves/sec
 009_Help=Data Moves/sec is the number of times per second
 009_Help= that data is moved from one page to another by
@@ -3544,7 +3535,7 @@ Object=ESE
 DetailLevel=PERF_DETAIL_DEVONLY | PERF_DETAIL_DEFAULT
 DefaultScale=-1
 EvaluationFunction=LOLDPagesMovedCEFLPv
-CounterType=PERF_COUNTER_COUNTER 
+CounterType=PERF_COUNTER_COUNTER
 009_Name=Online Defrag Pages Moved/sec
 009_Help=Online Defrag Pages Moved/sec is the number of times per second
 009_Help= that data is moved from one page to a new page by
@@ -8784,7 +8775,7 @@ Object=Instances
 DetailLevel=PERF_DETAIL_DEVONLY | PERF_DETAIL_DEFAULT
 DefaultScale=-1
 EvaluationFunction=LOLDPartialMergesCEFLPv
-CounterType=PERF_COUNTER_COUNTER 
+CounterType=PERF_COUNTER_COUNTER
 009_Name=Online Defrag Data Moves/sec
 009_Help=Data Moves/sec is the number of times per second
 009_Help= that data is moved from one page to another by
@@ -8796,7 +8787,7 @@ Object=Instances
 DetailLevel=PERF_DETAIL_DEVONLY | PERF_DETAIL_DEFAULT
 DefaultScale=-1
 EvaluationFunction=LOLDPagesMovedCEFLPv
-CounterType=PERF_COUNTER_COUNTER 
+CounterType=PERF_COUNTER_COUNTER
 009_Name=Online Defrag Pages Moved/sec
 009_Help=Online Defrag Pages Moved/sec is the number of times per second
 009_Help= that data is moved from one page to a new page by

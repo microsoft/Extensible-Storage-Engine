@@ -4197,13 +4197,15 @@ typedef enum
 #if ( JET_VERSION >= 0x0A01 )
 #define JET_paramUseFlushForWriteDurability     214 //  This controls whether ESE uses Flush or FUA to make sure a write to disk is durable.
 
-#define JET_paramEnableRBS                      215 // Turns on revert snapshot. Not an ESE flight as we will let the variant be controlled outside ESE (like HA can enable this when lag is disabled)
-#define JET_paramRBSFilePath                    216 // path to the revert snapshot directory
+#define JET_paramEnableRBS                      215 //  Turns on revert snapshot. Not an ESE flight as we will let the variant be controlled outside ESE (like HA can enable this when lag is disabled)
+#define JET_paramRBSFilePath                    216 //  path to the revert snapshot directory
+
+#define JET_paramPerfmonRefreshInterval         217 //  Interval, in units of msec, used by the Permormance Monitor to refresh values for collection.
 
 #endif // JET_VERSION >= 0x0A01
 
 
-#define JET_paramMaxValueInvalid                217 //  This is not a valid parameter. It can change from release to release!
+#define JET_paramMaxValueInvalid                218 //  This is not a valid parameter. It can change from release to release!
 
 // end_PubEsent
 #if ( JET_VERSION >= 0x0A01 )

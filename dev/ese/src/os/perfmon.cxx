@@ -3,11 +3,13 @@
 
 #include "osstd.hxx"
 
-BOOL g_fDisablePerfmon;
+BOOL g_fDisablePerfmon = fTrue;
+TICK g_dtickRefreshInterval = 0;
 
 void COSLayerPreInit::DisablePerfmon()
 {
     g_fDisablePerfmon = fTrue;
+    g_dtickRefreshInterval = 0;
 }
 
 #ifndef PERFMON_SUPPORT
@@ -24,16 +26,17 @@ UINT DwPERFCurPerfObj( void )
 }
 
 
-void COSLayerPreInit::EnablePerfmon()
+void COSLayerPreInit::EnablePerfmon( const TICK dtickRefreshInterval )
 {
     AssertSz( fFalse, "No perfmon support enabled / compiled in" );
 }
 
 #else
 
-void COSLayerPreInit::EnablePerfmon()
+void COSLayerPreInit::EnablePerfmon( const TICK dtickRefreshInterval )
 {
     g_fDisablePerfmon = fFalse;
+    g_dtickRefreshInterval = dtickRefreshInterval;
 }
 
 #include <wchar.h>
@@ -571,9 +574,9 @@ DWORD UtilPerfThread( DWORD_PTR parm )
     const DWORD cbProcessFileName = CbPERFGetProcessFileNameDataSize();
     const DWORD ibInstanceCount = CbPERFGetHeaderDataSize();
 
-    TICK tickLastThreshold = TickOSTimeCurrent();
-    DWORD cCollectionsLastThreshold = 0;
-    BOOL fHasValidData = fFalse;
+    TICK tickLastValidRefresh = TickOSTimeCurrent() - g_dtickRefreshInterval;
+    bool fValidCollection = false;
+    bool fStaleInstanceList = true;
     DWORD cExceptionRetry = 0;
     for ( ; ; )
     {
@@ -584,7 +587,7 @@ DWORD UtilPerfThread( DWORD_PTR parm )
 
         //  run at least through one collection cycle without waiting if
         //  we are just starting
-        if ( fHasValidData )
+        if ( fValidCollection )
         {
             //  set our ready event to indicate we are done collecting data and / or
             //  we are ready to collect more data
@@ -607,27 +610,22 @@ DWORD UtilPerfThread( DWORD_PTR parm )
         //  matching counters. On a system with many processes/instances, this may be a problem
         //  and may cause clients to time out waiting for counters to be added, since the entire
         //  loop below will run potentially thousands of times. To solve that, we are limiting
-        //  the number of times the collection loop is allowed to run per second.
+        //  the number of times the collection loop is allowed to run.
+        //  There are also systems which collect counters at a higher then needed frequency, even
+        //  though the data is further averaged to produce lower resolution data.
         //  If the instance list needs refreshing, we will not enforce this optimization.
 
         bool fRefreshInstanceList = false;
         ProcInfoPIFPwszPf( NULL, &fRefreshInstanceList );
 
-        if ( !fRefreshInstanceList && ( cCollectionsLastThreshold >= PERF_COLLECTION_FREQ_MAX ) )
+        const TICK tickNow = TickOSTimeCurrent();
+        const bool fStaleData = (TICK)DtickDelta( tickLastValidRefresh, tickNow ) >= g_dtickRefreshInterval;
+        const bool fRefreshCounters = fStaleInstanceList || fRefreshInstanceList || fStaleData;
+        if ( !fRefreshCounters )
         {
-            const TICK tickNow = TickOSTimeCurrent();
-            const TICK dtickSinceLastThreshold = DtickDelta( tickLastThreshold, tickNow );
-            if ( ( dtickSinceLastThreshold > 0 ) && ( dtickSinceLastThreshold < 1000 ) )
-            {
-                continue;
-            }
-            else
-            {
-                tickLastThreshold = tickNow;
-                cCollectionsLastThreshold = 0;
-            }
+            Assert( fValidCollection );
+            continue;
         }
-        cCollectionsLastThreshold++;
 
         //  collect instances for all objects
 
@@ -744,10 +742,11 @@ DWORD UtilPerfThread( DWORD_PTR parm )
         //
         //  NOTE:  protect ourselves from corruption of the IDA
 
+        const bool fValidCollectionLast = fValidCollection;
         __try
         {
             memcpy( g_pidaPERFIDA, g_pida, sizeof( IDA ) + g_pida->cbPerformanceData );
-            fHasValidData = fTrue;
+            fValidCollection = true;
             cExceptionRetry = 0;
         }
         __except( EXCEPTION_EXECUTE_HANDLER )
@@ -760,8 +759,22 @@ DWORD UtilPerfThread( DWORD_PTR parm )
                 break;
             }
             
-            fHasValidData = fFalse;
+            fValidCollection = false;
             UtilSleep( PERF_TIMEOUT );
+        }
+
+        if ( fValidCollection && fValidCollectionLast )
+        {
+            fStaleInstanceList = false;
+
+            if ( fStaleData )
+            {
+                tickLastValidRefresh = tickNow;
+            }
+        }
+        else
+        {
+            fStaleInstanceList = fStaleInstanceList || fRefreshInstanceList;
         }
     }
 
