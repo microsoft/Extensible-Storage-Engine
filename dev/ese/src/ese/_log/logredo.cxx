@@ -593,7 +593,8 @@ VOID LGIReportBadRevertedPage( const INST* pinst, const IFMP ifmp, const PGNO pg
 //
 //  On success, the page is latched with latchRIW.
 //  On failure, the page is not latched.
-//  errSkipLogRedoOperation: the page is not latched, and the Pagetrim State is pagetrimTrimmed unless fSkipSetRedoMapDbtimeRevert is set and dbtime of page is dbtimeRevert.
+//  errSkipLogRedoOperation: the page is not latched, and the Pagetrim State is pagetrimTrimmed unless
+//                          fSkipRecoveryOnDbtimeRevert is set and dbtime of page is dbtimeRevert in which case we won't set it to pagetrimTrimmed.
 //
 INLINE ERR LOG::ErrLGIAccessPage(
     PIB             *ppib,
@@ -602,7 +603,7 @@ INLINE ERR LOG::ErrLGIAccessPage(
     const PGNO      pgno,
     const OBJID     objid,
     const BOOL      fUninitPageOk,
-    const BOOL      fSkipSetRedoMapDbtimeRevert )
+    const BOOL      fSkipRecoveryOnDbtimeRevert )
 {
     ERR err = JET_errSuccess, errPage = JET_errSuccess;
     DBTIME dbtime = 0;
@@ -616,7 +617,7 @@ INLINE ERR LOG::ErrLGIAccessPage(
     Assert( !pcsr->FLatched() );
 
     // Both fUninitPageOk and fSkipSetRedoMapDbtimeRevert shouldn't be true.
-    Assert( !( fUninitPageOk && fSkipSetRedoMapDbtimeRevert ) );
+    Assert( !( fUninitPageOk && fSkipRecoveryOnDbtimeRevert ) );
 
     //  right off the bat, if the pgno for this redo operation is already
     //  tracked by the log redo map, we should just skip it instead of
@@ -678,7 +679,7 @@ INLINE ERR LOG::ErrLGIAccessPage(
         // For that LR, we will skip redo operation if the dbtime of the page is set to dbtimeRevert.
         // We don't want to add it to redomap as nothing is going to remove it as it was freed earlier.
         //
-        if ( fRevertedNewPage && fSkipSetRedoMapDbtimeRevert )
+        if ( fRevertedNewPage && fSkipRecoveryOnDbtimeRevert )
         {
             Error( ErrERRCheck( errSkipLogRedoOperation ) );
         }
@@ -712,6 +713,15 @@ INLINE ERR LOG::ErrLGIAccessPage(
         if ( ( errPage >= JET_errSuccess ) && ( pcsr->Cpage().FShrunkPage() || fRevertedNewPage ) )
         {
             pcsr->ReleasePage();
+
+            // fSkipRecoveryOnDbtimeRevert is set to true only for ScrubLR right now.
+            // We don't want return recovery verify failure as the page is already in a new page state and we can simply skip scrubbing the page.
+            //
+            if ( fRevertedNewPage && fSkipRecoveryOnDbtimeRevert )
+            {
+                Error( ErrERRCheck( errSkipLogRedoOperation ) );
+            }
+
             Error( ErrERRCheck( JET_errRecoveryVerifyFailure ) );
         }
 
@@ -9423,6 +9433,7 @@ ERR LOG::ErrLGRIRedoScanCheck( const LRSCANCHECK2 * const plrscancheck, BOOL* co
             Assert( cpage.CbPage() == UlParam( PinstFromIfmp( ifmp ), JET_paramDatabasePageSize ) );
             const DBTIME dbtimePage = cpage.Dbtime();
             const BOOL fInitDbtimePage = dbtimePage != 0 && dbtimePage != dbtimeShrunk;
+            const BOOL fPageFDPDelete = cpage.FPageFDPDelete();
             Expected( fInitDbtimePage || ( dbtimePage == dbtimeShrunk ) ); // dbtime 0 only usually comes from a completely uninit page (-1019).
 
             const DBTIME dbtimeCurrentInLogRec = plrscancheck->DbtimeCurrent();
@@ -9439,7 +9450,8 @@ ERR LOG::ErrLGRIRedoScanCheck( const LRSCANCHECK2 * const plrscancheck, BOOL* co
             const BOOL fDbtimeRevertedNewPage = 
                 ( ( CmpLgpos( g_rgfmp[ ifmp ].Pdbfilehdr()->le_lgposCommitBeforeRevert, m_lgposRedo ) > 0 ||
                     plrscancheck->DbtimePage() == 0 ||
-                    plrscancheck->DbtimePage() == dbtimeShrunk ) &&
+                    plrscancheck->DbtimePage() == dbtimeShrunk ||
+                    ( plrscancheck->FObjidInvalid() && fPageFDPDelete ) ) &&
                   CPAGE::FRevertedNewPage( dbtimePage ) ) || 
                 CPAGE::FRevertedNewPage( plrscancheck->DbtimePage() );
 
@@ -9591,7 +9603,8 @@ ERR LOG::ErrLGRIRedoScanCheck( const LRSCANCHECK2 * const plrscancheck, BOOL* co
                     OSFormatW( L"0x%I64x", dbtimePageInLogRec ),
                     OSFormatW( L"0x%I64x", dbtimeCurrentInLogRec ),
                     OSFormatW( L"(%08X,%04X,%04X)", m_lgposRedo.lGeneration, m_lgposRedo.isec, m_lgposRedo.ib ),
-                    OSFormatW( L"%hhu", plrscancheck->BSource() )
+                    OSFormatW( L"%hhu", plrscancheck->BSource() ),
+                    OSFormatW( L"%d", (INT)plrscancheck->FObjidInvalid() )
                 };
 
                 const WCHAR* rgwszDefault[] =
@@ -9604,7 +9617,8 @@ ERR LOG::ErrLGRIRedoScanCheck( const LRSCANCHECK2 * const plrscancheck, BOOL* co
                     OSFormatW( L"0x%I64x", dbtimeCurrentInLogRec ),
                     OSFormatW( L"(%08X,%04X,%04X)", m_lgposRedo.lGeneration, m_lgposRedo.isec, m_lgposRedo.ib ),
                     OSFormatW( L"%hhu", plrscancheck->BSource() ),
-                    OSFormatW( L"%u", objidPage )
+                    OSFormatW( L"%u", objidPage ),
+                    OSFormatW( L"%d", (INT)plrscancheck->FObjidInvalid() ),
                 };
 
                 const WCHAR** const rgwsz = ( msgid == DB_DIVERGENCE_UNINIT_PAGE_PASSIVE_DB_ID ) ? rgwszUninitPagePassive : rgwszDefault;
@@ -9695,7 +9709,8 @@ ERR LOG::ErrLGRIRedoScanCheck( const LRSCANCHECK2 * const plrscancheck, BOOL* co
                         OSFormatW( L"0x%I64x", dbtimeSeed ),
                         OSFormatW( L"(%08X,%04X,%04X)", m_lgposRedo.lGeneration, m_lgposRedo.isec, m_lgposRedo.ib ),
                         OSFormatW( L"%hhu", plrscancheck->BSource() ),
-                        OSFormatW( L"%u", objidPage )
+                        OSFormatW( L"%u", objidPage ),
+                        OSFormatW( L"%d", (INT)plrscancheck->FObjidInvalid() ),
                     };
 
                     UtilReportEvent(
@@ -9775,7 +9790,8 @@ ERR LOG::ErrLGRIRedoScanCheck( const LRSCANCHECK2 * const plrscancheck, BOOL* co
                             OSFormatW( L"0x%I64x", dbtimePageInLogRec ),
                             OSFormatW( L"0x%I64x", plrscancheck->DbtimeCurrent() ),
                             OSFormatW( L"(%08X,%04X,%04X)", m_lgposRedo.lGeneration, m_lgposRedo.isec, m_lgposRedo.ib ),
-                            OSFormatW( L"%hhu", plrscancheck->BSource() )
+                            OSFormatW( L"%hhu", plrscancheck->BSource() ),
+                            OSFormatW( L"%d", (INT)plrscancheck->FObjidInvalid() )
                         };
                         UtilReportEvent(
                             eventError,
@@ -12992,7 +13008,7 @@ ProcessNextRec:
             {
                 // This is not logged for all free extent operations, only for those related to deleting a whole space tree.
                 const LREXTENTFREED * const plrextentfreed = (LREXTENTFREED *)plr;
-                CallR( ErrLGRIRedoExtentFreed( plrextentfreed ) );
+                Call( ErrLGRIRedoExtentFreed( plrextentfreed ) );
         
                 break;
             }

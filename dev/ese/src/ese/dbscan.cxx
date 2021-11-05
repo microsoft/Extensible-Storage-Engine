@@ -162,7 +162,7 @@ public:
 
     // actually read one page. can return a checksum error, 
     // I/O error or EOF
-    virtual ERR ErrReadPage( const PGNO pgno ) = 0;
+    virtual ERR ErrReadPage( const PGNO pgno, PIB* const ppib, DBMObjectCache* const pdbmObjectCache ) = 0;
 
     // indicate that pre-read page is no long needed
     virtual void DoneWithPreread( const PGNO pgno ) = 0;
@@ -260,7 +260,7 @@ public:
     void SuspendedPass( const IDBMScanState * const pstate );
     void NotifyStats( const IDBMScanState * const pstate );
 
-    void ReadPage( const IDBMScanState * const pstate, const PGNO pgno );
+    void ReadPage( const IDBMScanState * const pstate, const PGNO pgno, DBMObjectCache* const pdbmObjectCache );
     void BadChecksum( const IDBMScanState * const pstate, const PGNO pgnoBadChecksum );
 
 protected:
@@ -269,7 +269,7 @@ protected:
     virtual void PrepareToTerm_( const IDBMScanState * const pstate ) = 0;
     virtual void FinishedPass_( const IDBMScanState * const pstate ) = 0;
     virtual void SuspendedPass_( const IDBMScanState * const pstate ) = 0;
-    virtual void ReadPage_( const IDBMScanState * const pstate, const PGNO pgno ) = 0;
+    virtual void ReadPage_( const IDBMScanState * const pstate, const PGNO pgno, DBMObjectCache* const pdbmObjectCache ) = 0;
     virtual void BadChecksum_( const IDBMScanState * const pstate, const PGNO pgnoBadChecksum ) = 0;
     virtual void NotifyStats_( const IDBMScanState * const pstate ) {}
     
@@ -308,7 +308,7 @@ private:
 
 public:
     // these objects will be owned and deleted by the DBMScan
-    DBMScan( IDBMScanState * const pscanstate, IDBMScanReader * const pscanreader, IDBMScanConfig * const pscanconfig );
+    DBMScan( IDBMScanState * const pscanstate, IDBMScanReader * const pscanreader, IDBMScanConfig * const pscanconfig, PIB* const ppib );
     ~DBMScan();
 
     // once added, the observer will be owned and deleted by the DBMScan
@@ -372,6 +372,10 @@ private:
         void ( DBMScanObserver::* const pfn )( const IDBMScanState * const, const Arg ),
         const Arg arg ) const;
 
+    template<class Arg, class Arg1> void ForEachObserverCall_(
+        void ( DBMScanObserver::* const pfn )( const IDBMScanState * const, const Arg, const Arg1 ),
+        const Arg arg, const Arg1 arg1 ) const;
+
     bool FTimeLimitReached_() const;
     INT CMSecBeforeTimeLimit_() const;
     bool FMaxScansReached_() const;
@@ -383,8 +387,15 @@ private:
     // state and observers
     static const INT            m_cscanobserversMax = 8;
     INT m_cscanobservers;
-    unique_ptr<IDBMScanState>     m_pscanstate;
-    unique_ptr<DBMScanObserver>   m_rgpscanobservers[m_cscanobserversMax];
+
+    PIB*                        m_ppib;
+
+    // Caches both open regular table clustered indices and open LV trees, in addition
+    // to validity information about secondary indices.
+    DBMObjectCache              m_objectCache;
+
+    unique_ptr<IDBMScanState>   m_pscanstate;
+    unique_ptr<DBMScanObserver> m_rgpscanobservers[m_cscanobserversMax];
 
     // thread and concurrency control
     THREAD                      m_threadDBMScan;
@@ -607,7 +618,7 @@ public:
 
     ERR InitDBMScanReader();
     void PrereadPages( const PGNO pgnoFirst, const CPG cpg );
-    ERR ErrReadPage( const PGNO pgno );
+    ERR ErrReadPage( const PGNO pgno, PIB* const ppib, DBMObjectCache* const pdbmObjectCache );
     void DoneWithPreread( const PGNO pgno );
     PGNO PgnoLast() const;
 
@@ -619,6 +630,7 @@ private:
     BYTE       m_rgfPageAlreadyCached[IDBMScanReader::cpgPrereadMax];
     BYTE *     m_pvPages;
     BOOL       m_fPagesReRead;
+    OBJID      m_objidMSysObjids;
 };
 
 
@@ -904,7 +916,7 @@ protected:
     virtual void StartedPass_( const IDBMScanState * const ) {}
     virtual void ResumedPass_( const IDBMScanState * const )  {}
     virtual void SuspendedPass_( const IDBMScanState * const ) {}
-    virtual void ReadPage_( const IDBMScanState * const, const PGNO ) {}
+    virtual void ReadPage_( const IDBMScanState * const, const PGNO, DBMObjectCache* const pdbmObjectCache ) {}
     virtual void BadChecksum_( const IDBMScanState * const, const PGNO ) {}
     
     virtual void PrepareToTerm_( const IDBMScanState * const ) {}
@@ -932,7 +944,7 @@ protected:
     virtual void StartedPass_( const IDBMScanState * const );
     virtual void ResumedPass_( const IDBMScanState * const )  {}
     virtual void SuspendedPass_( const IDBMScanState * const ) {}
-    virtual void ReadPage_( const IDBMScanState * const, const PGNO ) {}
+    virtual void ReadPage_( const IDBMScanState * const, const PGNO, DBMObjectCache* const pdbmObjectCache ) {}
     virtual void BadChecksum_( const IDBMScanState * const, const PGNO ) {}
     
     virtual void PrepareToTerm_( const IDBMScanState * const ) {}
@@ -958,7 +970,7 @@ public:
 
 protected:
     virtual void SuspendedPass_( const IDBMScanState * const );
-    virtual void ReadPage_( const IDBMScanState * const, const PGNO );
+    virtual void ReadPage_( const IDBMScanState * const, const PGNO, DBMObjectCache* const pdbmObjectCache );
     virtual void BadChecksum_( const IDBMScanState * const, const PGNO );
     
     virtual void StartedPass_( const IDBMScanState * const pstate );
@@ -1001,7 +1013,7 @@ protected:
     virtual void PrepareToTerm_( const IDBMScanState * const ) {}
     virtual void FinishedPass_( const IDBMScanState * const );
     virtual void SuspendedPass_( const IDBMScanState * const );
-    virtual void ReadPage_( const IDBMScanState * const, const PGNO );
+    virtual void ReadPage_( const IDBMScanState * const, const PGNO, DBMObjectCache* const pdbmObjectCache );
     virtual void BadChecksum_( const IDBMScanState * const, const PGNO pgnoBadChecksum ) {}
 
 private:
@@ -1035,7 +1047,7 @@ protected:
     virtual void ResumedPass_( const IDBMScanState * const pstate );
     virtual void PrepareToTerm_( const IDBMScanState * const ) {}
     virtual void FinishedPass_( const IDBMScanState * const pstate );
-    virtual void ReadPage_( const IDBMScanState * const pstate, const PGNO );
+    virtual void ReadPage_( const IDBMScanState * const pstate, const PGNO, DBMObjectCache* const pdbmObjectCache );
 
 private:
     FMP * Pfmp_() const { return m_pfmp; }
@@ -1085,96 +1097,8 @@ protected:
     virtual void FinishedPass_( const IDBMScanState * const ) { printf("%s\n", __FUNCTION__ ); }
     virtual void SuspendedPass_( const IDBMScanState * const ) { printf("%s\n", __FUNCTION__ ); }
     virtual void BadChecksum_( const IDBMScanState * const, const PGNO ) { printf("%s\n", __FUNCTION__ ); }
-    virtual void ReadPage_( const IDBMScanState * const, const PGNO ) { printf("%s\n", __FUNCTION__ ); }
+    virtual void ReadPage_( const IDBMScanState * const, const PGNO, DBMObjectCache* const pdbmObjectCache ) { printf("%s\n", __FUNCTION__ ); }
 };
-
-typedef enum class ObjidState
-{
-    Unknown,    // In the object cache, it's the uninitialized state of an entry. In the calling code,
-                // it is used to signal that we don't know about the object's existence and it need
-                // to look it up in MSysObjids. It is expected that the accompanying FUCB* is pfucbNil.
-
-    Valid,      // The object is known to still exist. It is expected that the accompanying
-                // FUCB* is not pfucbNil.
-
-    Invalid,    // The object is known to have been deleted. It is expected that the accompanying
-                // FUCB* is pfucbNil.
-
-    ToBeDeleted // The object is to be deleted soon, so we can skip any cleanup opeartions.
-                // This happens when we revert a deleted table but just the root page and space tree pages.
-                // It is expected that the accompanying FUCB* is pfucbNil.
-} ois;
-
-//  ================================================================
-class DBMObjectCache
-//  ================================================================
-//
-//  Cache object FUCBs for tables and LVs, and validity information for indices
-//  that DBM is working on.
-//
-//  Even though secondary indices are also maintained in the cache, we don't
-//  keep FUCBs for those objects cached, for two reasons:
-//
-//    1 - DBM does not need, at any point, to open an FUCB to a secondary index
-//        to do its work.
-//
-//    2 - Index deletion might fail to the client because its FCB will have been
-//        referenced by the cache. A similar situation exists for tables but, in
-//        that case, table deletion handles it by waiting until all FUCBs have been
-//        closed, which happens when DBM senses that a deletion is pending.
-//
-//  Also, note that, because FUCBs against secondary indices are not cached, there
-//  is no way for this cache to detect that an index deletion is pending. That means
-//  that a secondary index entry in the cache is useful to short-circuit looking for
-//  the object when the index has already been deleted, but not the other way around.
-//  This causes an MSysObjids lookup every time a secondary index page is found, which
-//  is not as expensive as loading up an FUCB for a table, for example, and chances are
-//  those few MSysObjids pages will remain in the cache. Clients that control progress
-//  of DBM via suspend/resume already lose the entire cache in-between batches, so we
-//  already have to refresh the cache periodically anyways.
-//
-//-
-{
-public:
-    DBMObjectCache();
-
-    // the destructor closes all the cached objects
-    ~DBMObjectCache();
-
-    ObjidState OisGetObjidState( const OBJID objid );
-
-    // Returns NULL if there is no cached FUCB
-    FUCB * PfucbGetCachedObject( const OBJID objid );
-
-    void CacheObjectFucb( FUCB * const pfucb, const OBJID objid );
-    void MarkCacheObjectInvalid( const OBJID objid );
-    void MarkCacheObjectToBeDeleted( const OBJID objid );
-
-    void CloseCachedObjectWithObjid( const OBJID objid );
-    void CloseCachedObjectsWithPendingDeletes();
-    void CloseAllCachedObjects();
-
-private:
-    bool FContainsObjid_( const OBJID objid ) const;
-    INT IndexOfObjid_( const OBJID objid ) const;
-    INT IndexOfLeastRecentlyUsedObject_( const OBJID objidIgnore = objidNil ) const;
-    void CloseObjectAt_( const INT index );
-    
-private:
-    static const INT m_cobjectsMax = 64;
-    struct
-    {
-        OBJID objid;
-        ObjidState ois;
-        FUCB * pfucb;
-        __int64 ftAccess;
-    } m_rgstate[m_cobjectsMax];
-
-private:    // not implemented
-    DBMObjectCache( const DBMObjectCache& );
-    DBMObjectCache& operator=( const DBMObjectCache& );
-};
-
 
 //  ================================================================
 namespace DBMScanObserverCleanupFactory
@@ -1183,7 +1107,7 @@ namespace DBMScanObserverCleanupFactory
     // Create a DBMScanObserverCleanup object. This involves allocating
     // a new PIB.
     ERR ErrCreateDBMScanObserverCleanup(
-            INST * const pinst,
+            PIB * const ppib,
             const IFMP ifmp,
             _Out_ DBMScanObserver ** pobserver );
 }
@@ -1206,11 +1130,11 @@ protected:
     virtual void FinishedPass_( const IDBMScanState * const );
     virtual void SuspendedPass_( const IDBMScanState * const );
     virtual void BadChecksum_( const IDBMScanState * const, const PGNO ) {}
-    virtual void ReadPage_( const IDBMScanState * const, const PGNO );
+    virtual void ReadPage_( const IDBMScanState * const, const PGNO, DBMObjectCache* const pdbmObjectCache );
 
 protected:
     friend ERR DBMScanObserverCleanupFactory::ErrCreateDBMScanObserverCleanup(
-            INST * const pinst,
+            PIB * const ppib,
             const IFMP ifmp,
             _Out_ DBMScanObserver ** pobserver );
     DBMScanObserverCleanup( PIB * const ppib, const IFMP ifmp );
@@ -1219,7 +1143,7 @@ protected:
     ERR ErrOpenTableGetFucb_( const OBJID objid, BOOL* const pfExists, FUCB ** ppfucbTable );
 
     bool FIgnorablePage_( const CSR& csr ) const;
-    ObjidState OisGetObjectIdState_( CSR& csr );
+    ObjidState OisGetObjectIdState_( CSR& csr, DBMObjectCache* const pdbmObjectCache );
     ERR ErrCleanupUnusedPage_( CSR * const pcsr );
     ERR ErrCleanupDeletedNodes_( CSR * const pcsr );
     ERR ErrScrubOneUsedPage(
@@ -1228,7 +1152,7 @@ protected:
             const INT cscrubOper );
 
     ERR ErrDeleteZeroRefCountLV( FCB *pfcbLV, const BOOKMARK& bm );
-    ERR ErrCleanupLVPage_( CSR * const pcsr );
+    ERR ErrCleanupLVPage_( CSR * const pcsr, DBMObjectCache* const pdbmObjectCache );
     ERR ErrZeroLV_( CSR * const pcsr, const INT iline );
     ERR ErrZeroLVChunks_(
             _In_ CSR * const    pcsrRoot,
@@ -1236,19 +1160,15 @@ protected:
             const LvId          lid,
             const ULONG         ulSize );
 
-    ERR ErrCleanupPrimaryPage_( CSR * const pcsr );
+    ERR ErrCleanupPrimaryPage_( CSR * const pcsr, DBMObjectCache* const pdbmObjectCache );
     ERR ErrCleanupIndexPage_( CSR * const pcsr );
 
-    VOID RedeleteRevertedFDP_( CSR * const pcsr );
+    VOID RedeleteRevertedFDP_( CSR * const pcsr, DBMObjectCache* const pdbmObjectCache );
 
 protected:
     PIB * m_ppib;
     const IFMP m_ifmp;
     OBJID m_objidMaxCommitted;
-
-    // Caches both open regular table clustered indices and open LV trees, in addition
-    // to validity information about secondary indices.
-    DBMObjectCache m_objectCache;
 
     bool m_fPrepareToTerm;
 
@@ -1361,7 +1281,8 @@ ERR DBMScanFactory::ErrPdbmScanCreateForRecovery_( const IFMP ifmp, _Out_ IDBMSc
     Alloc( pscan = new DBMScan(
             pstate.get(),
             preader.get(),
-            pconfig.get() ) );
+            pconfig.get(),
+            ppibNil ) );
     pstate.release();
     preader.release();
     pconfig.release();
@@ -1387,12 +1308,15 @@ ERR DBMScanFactory::ErrPdbmScanCreate_( const IFMP ifmp, _Out_ IDBMScan ** pdbms
     INST * const pinst = PinstFromIfmp( ifmp );
     FMP * const pfmp = g_rgfmp+ifmp;
     const wchar_t * const wszDatabase = pfmp->WszDatabaseName();
-    
+
+    PIB * ppib = ppibNil;
+    OPERATION_CONTEXT ocDbScan = { OCUSER_DBSCAN, 0, 0, 0, 0 };
+
     unique_ptr<IDBMScanConfig>    pconfig( new DBMScanConfig( pinst, pfmp ) );
     unique_ptr<IDBMScanReader>    preader( new DBMScanReader( ifmp ) );
     unique_ptr<DBMScanObserver>   pevents( new DBMScanObserverEvents(
-                                                pfmp,
-                                                ( INT )UlParam( pinst, JET_paramDbScanIntervalMaxSec ) ) );
+        pfmp,
+        ( INT )UlParam( pinst, JET_paramDbScanIntervalMaxSec ) ) );
     unique_ptr<DBMScanObserver>   pperfmon( new DBMScanObserverPerfmon( pinst ) );
     unique_ptr<DBMScanObserver>   pfilecheck( new DBMScanObserverFileCheck( ifmp ) );
 
@@ -1407,8 +1331,14 @@ ERR DBMScanFactory::ErrPdbmScanCreate_( const IFMP ifmp, _Out_ IDBMScan ** pdbms
     Alloc( pperfmon.get() );
     Alloc( pfilecheck.get() );
 
+    Call( ErrPIBBeginSession( pinst, &ppib, procidNil, fFalse ) );
+    Call( ppib->ErrSetOperationContext( &ocDbScan, sizeof( ocDbScan ) ) );
+    Call( ErrDBOpenDatabaseByIfmp( ppib, ifmp ) );
+
+    ppib->SetFSessionDBScan();
+
     DBMScanObserver * pcleanupT;
-    Call( DBMScanObserverCleanupFactory::ErrCreateDBMScanObserverCleanup( pinst, ifmp, &pcleanupT ) );
+    Call( DBMScanObserverCleanupFactory::ErrCreateDBMScanObserverCleanup( ppib, ifmp, &pcleanupT ) );
     pcleanup = unique_ptr<DBMScanObserver>( pcleanupT );
 
     IDataStore * pstoreT;
@@ -1425,7 +1355,8 @@ ERR DBMScanFactory::ErrPdbmScanCreate_( const IFMP ifmp, _Out_ IDBMScan ** pdbms
     Alloc( pscan = new DBMScan(
             pstate.get(),
             preader.get(),
-            pconfig.get() ) );
+            pconfig.get(),
+            ppib ) );
     pstate.release();
     preader.release();
     pconfig.release();
@@ -1436,8 +1367,16 @@ ERR DBMScanFactory::ErrPdbmScanCreate_( const IFMP ifmp, _Out_ IDBMScan ** pdbms
     pscan->AddObserver( pfilecheck.release() );
 
     *pdbmscan = pscan;
-    
+
+    // The PIB is now owned by the DBMScan
+    ppib = ppibNil;
+
 HandleError:
+    if ( ppibNil != ppib )
+    {
+        CallS( ErrDBCloseAllDBs( ppib ) );
+        PIBEndSession( ppib );
+    }
     return err;
 }
 
@@ -1458,7 +1397,10 @@ ERR DBMScanFactory::ErrPdbmScanCreateSingleScan(
     INST * const pinst = PinstFromIfmp( ifmp );
     FMP * const pfmp = g_rgfmp+ifmp;
     const wchar_t * const wszDatabase = pfmp->WszDatabaseName();
-    
+
+    PIB * ppib = ppibNil;
+    OPERATION_CONTEXT ocDbScan = { OCUSER_DBSCAN, 0, 0, 0, 0 };
+
     unique_ptr<IDBMScanConfig>    pconfig( new DBMSingleScanConfig( pinst, pfmp, csecMax, cmsecSleep ) );
     unique_ptr<IDBMScanReader>    preader( new DBMScanReader( ifmp ) );
     unique_ptr<DBMScanObserver>   pevents( new DBMScanObserverEvents( pfmp ) );
@@ -1478,8 +1420,14 @@ ERR DBMScanFactory::ErrPdbmScanCreateSingleScan(
     Alloc( pcallback.get() );
     Alloc( pfilecheck.get() );
 
+    Call( ErrPIBBeginSession( pinst, &ppib, procidNil, fFalse ) );
+    Call( ppib->ErrSetOperationContext( &ocDbScan, sizeof( ocDbScan ) ) );
+    Call( ErrDBOpenDatabaseByIfmp( ppib, ifmp ) );
+
+    ppib->SetFSessionDBScan();
+
     DBMScanObserver * pcleanupT;
-    Call( DBMScanObserverCleanupFactory::ErrCreateDBMScanObserverCleanup( pinst, ifmp, &pcleanupT ) );
+    Call( DBMScanObserverCleanupFactory::ErrCreateDBMScanObserverCleanup( ppib, ifmp, &pcleanupT ) );
     pcleanup = unique_ptr<DBMScanObserver>( pcleanupT );
 
     IDataStore * pstoreT;
@@ -1496,7 +1444,8 @@ ERR DBMScanFactory::ErrPdbmScanCreateSingleScan(
     Alloc( pscan = new DBMScan(
             pstate.get(),
             preader.get(),
-            pconfig.get() ) );
+            pconfig.get(),
+            ppib ) );
     pstate.release();
     preader.release();
     pconfig.release();
@@ -1509,7 +1458,16 @@ ERR DBMScanFactory::ErrPdbmScanCreateSingleScan(
     
     *pdbmscan = pscan;
     
+    // The PIB is now owned by the DBMScan
+    ppib = ppibNil;
+
 HandleError:
+    if ( ppibNil != ppib )
+    {
+        CallS( ErrDBCloseAllDBs( ppib ) );
+        PIBEndSession( ppib );
+    }
+
     return err;
 }
 
@@ -1584,10 +1542,10 @@ void DBMScanObserver::NotifyStats( const IDBMScanState * const pstate )
 }
 
 // Called when a page is read. Call the protected method that subclasses override
-void DBMScanObserver::ReadPage( const IDBMScanState * const pstate, const PGNO pgno )
+void DBMScanObserver::ReadPage( const IDBMScanState * const pstate, const PGNO pgno, DBMObjectCache* const pdbmObjectCache )
 {
     Assert( FScanInProgress_() );
-    ReadPage_( pstate, pgno );
+    ReadPage_( pstate, pgno, pdbmObjectCache );
 }
 
 // Called when a bad checksum is found. Call the protected method that subclasses override
@@ -1665,7 +1623,8 @@ DBMScanReader::DBMScanReader( const IFMP ifmp ) :
     m_pgnoLastPreread( 0 ),
     m_cpgLastPreread( 0 ),
     m_pvPages( NULL ),
-    m_fPagesReRead( fFalse )
+    m_fPagesReRead( fFalse ),
+    m_objidMSysObjids( objidNil )
 {
 }
 
@@ -1999,7 +1958,7 @@ VOID CDBMScanFollower::CompletePage( const PGNO pgno, const BOOL fBadPage )
     Assert( m_pstate->PgnoHighestChecked() >= pgno );
 
     //  Log an event if we are taking too long in this scan
-    m_pscanobsLgriEvents->ReadPage( m_pstate, pgno );
+    m_pscanobsLgriEvents->ReadPage( m_pstate, pgno, NULL );
 
     // We will only update state if we incremented by 1 page, meaning we have continuously covered
     // every page.  This has some ramifications, the most significant is, if redo (i.e. repl) crashes, 
@@ -2012,7 +1971,7 @@ VOID CDBMScanFollower::CompletePage( const PGNO pgno, const BOOL fBadPage )
 
     Assert( m_pstate->PgnoContinuousHighWatermark() == m_pgnoHighestContigCompleted );
 
-    m_pscanobsPerfmon->ReadPage( m_pstate, pgno );
+    m_pscanobsPerfmon->ReadPage( m_pstate, pgno, NULL );
 
     if ( fBadPage )
     {
@@ -2065,7 +2024,7 @@ VOID CDBMScanFollower::ProcessedDBMScanCheckRecord( const FMP * const pfmp )
 }
 
 // Try to read a page.
-ERR DBMScanReader::ErrReadPage( const PGNO pgno )
+ERR DBMScanReader::ErrReadPage( const PGNO pgno, PIB* const ppib, DBMObjectCache* const pdbmObjectCache )
 {
     ERR err;
 
@@ -2074,6 +2033,7 @@ ERR DBMScanReader::ErrReadPage( const PGNO pgno )
     Assert( pgno < m_pgnoLastPreread + m_cpgLastPreread );
     Assert( m_rgfPageAlreadyCached[pgno - m_pgnoLastPreread] == fTrue ||
            m_rgfPageAlreadyCached[pgno - m_pgnoLastPreread] == fFalse );
+    Assert( ppib != ppibNil || PinstFromIfmp( m_ifmp )->FRecovering() );
 
     g_rgfmp[ m_ifmp ].UpdatePgnoScanMax( pgno );
 
@@ -2085,6 +2045,13 @@ ERR DBMScanReader::ErrReadPage( const PGNO pgno )
 
     TraceContextScope tcScope( iortDbScan );
     tcScope->nParentObjectClass = tceNone;
+
+    // If we aren't aware of the objid of MsysObjids we will compute it before we latch the page to avoid deadlocking.
+    if ( m_objidMSysObjids == objidNil && !PinstFromIfmp( m_ifmp )->FRecovering() )
+    {
+        Call( ErrCATSeekTable( ppib, m_ifmp, szMSObjids, NULL, &m_objidMSysObjids ) );
+        Assert( m_objidMSysObjids != objidNil );
+    }
 
     BFLatch bfl;
     Call( ErrBFRDWLatchPage( &bfl, m_ifmp, pgno, BFLatchFlags( bflfNoTouch | bflfNoFaultFail | bflfUninitPageOk | bflfExtensiveChecks | bflfDBScan ), BfpriBackgroundRead( m_ifmp, ppibNil ), *tcScope ) );
@@ -2115,16 +2082,54 @@ ERR DBMScanReader::ErrReadPage( const PGNO pgno )
         cpage.ReBufferPage( bfl, m_ifmp, pgno, bfl.pv, ( ULONG )UlParam( PinstFromIfmp( m_ifmp ), JET_paramDatabasePageSize ) );
         Assert( cpage.CbPage() == UlParam( PinstFromIfmp( m_ifmp ), JET_paramDatabasePageSize ) );
         Assert( !fPageUninit || cpage.Dbtime() == 0 /* must be zero if page is non-init, for redo code to work */ );
-        Assert( cpage.Dbtime() > 0 || cpage.Dbtime() == dbtimeShrunk || fPageUninit );
-        Assert( cpage.Dbtime() > dbtimeStart || cpage.Dbtime() == dbtimeShrunk || fPageUninit );
+        Assert( cpage.Dbtime() > 0 || cpage.Dbtime() == dbtimeShrunk || cpage.Dbtime() == dbtimeRevert || fPageUninit );
+        Assert( cpage.Dbtime() > dbtimeStart || cpage.Dbtime() == dbtimeShrunk || cpage.Dbtime() == dbtimeRevert || fPageUninit );
         Assert( cpage.Dbtime() != dbtimeNil );
         Assert( cpage.Dbtime() != dbtimeInvalid );
+        Assert( cpage.ObjidFDP() != objidNil || cpage.Dbtime() == dbtimeShrunk || cpage.Dbtime() == dbtimeRevert || fPageUninit );
+        OBJID objid             = cpage.ObjidFDP();
+        ObjidState objidState   = ois::Unknown;
+
+        if ( objid != objidNil )
+        {
+            if ( FCATISystemObjid( objid ) || objid == m_objidMSysObjids )
+            {
+                objidState = ois::ValidNoFUCB;
+            }
+            else
+            {
+                objidState = pdbmObjectCache->OisGetObjidState( objid );
+
+                if ( objidState == ois::Unknown )
+                {
+                    OBJID objidTable = objidNil;
+                    SYSOBJ sysobj = sysobjNil;
+
+                    Call( ErrCATGetObjidMetadata( ppib, m_ifmp, objid, &objidTable, &sysobj ) );
+                    if ( sysobj != sysobjNil )
+                    {
+                        pdbmObjectCache->MarkCacheObjectValidNoFUCB( objid );
+                        objidState = ois::ValidNoFUCB;
+                    }
+                    else
+                    {
+                        objidState = ois::Invalid;
+                    }
+                }
+            }
+        }
+        else
+        {
+            // Page has no objid set. We will consider the objidState as invalid.
+            objidState = ois::Invalid;
+        }
 
         (void)ErrDBMEmitDivergenceCheck(
             m_ifmp,
             pgno,
             scsDbScan,
-            &cpage );
+            &cpage,
+            objidState );
 
         cpage.UnloadPage();
     }
@@ -2658,7 +2663,7 @@ void DBMScanObserverEvents::SuspendedPass_( const IDBMScanState * const )
 {
 }
 
-void DBMScanObserverEvents::ReadPage_( const IDBMScanState * const, const PGNO pgno )
+void DBMScanObserverEvents::ReadPage_( const IDBMScanState * const, const PGNO pgno, DBMObjectCache* const pdbmObjectCache )
 {
     Assert( pgno != 0 );
     if ( m_pgnoStart == 0 )
@@ -3020,7 +3025,7 @@ void DBMScanObserverRecoveryEvents::FinishedPass_( const IDBMScanState * const p
         Pinst_() );
 }
 
-void DBMScanObserverRecoveryEvents::ReadPage_( const IDBMScanState * const pstate, const PGNO pgno )
+void DBMScanObserverRecoveryEvents::ReadPage_( const IDBMScanState * const pstate, const PGNO pgno, DBMObjectCache* const pdbmObjectCache )
 {
     if ( m_pgnoStart == 0 )
     {
@@ -3139,7 +3144,7 @@ void DBMScanObserverPerfmon::SuspendedPass_( const IDBMScanState * const )
     }
 }
 
-void DBMScanObserverPerfmon::ReadPage_( const IDBMScanState * const, const PGNO )
+void DBMScanObserverPerfmon::ReadPage_( const IDBMScanState * const, const PGNO, DBMObjectCache* const pdbmObjectCache )
 {
     PERFOpt( perfctrDBMPagesRead.Add( Pinst_(), 1 ) );
     
@@ -3156,33 +3161,15 @@ void DBMScanObserverPerfmon::ReadPage_( const IDBMScanState * const, const PGNO 
 //  ================================================================
 
 ERR DBMScanObserverCleanupFactory::ErrCreateDBMScanObserverCleanup(
-        INST * const pinst,
+        PIB * const ppib,
         const IFMP ifmp,
         _Out_ DBMScanObserver ** pobserver )
 {
     ERR err;
-    PIB * ppib = ppibNil;
-    OPERATION_CONTEXT ocDbScan = { OCUSER_DBSCAN, 0, 0, 0, 0 };
-
-    *pobserver = NULL;
-
-    Call( ErrPIBBeginSession( pinst, &ppib, procidNil, fFalse ) );
-    Call( ppib->ErrSetOperationContext( &ocDbScan, sizeof( ocDbScan ) ) );
-    Call( ErrDBOpenDatabaseByIfmp( ppib, ifmp ) );
-
-    ppib->SetFSessionDBScan();
 
     Alloc( *pobserver = new DBMScanObserverCleanup( ppib, ifmp ) );
-
-    // The PIB is now owned by the DBMScanObserver
-    ppib = ppibNil;
     
 HandleError:
-    if ( ppibNil != ppib )
-    {
-        CallS( ErrDBCloseAllDBs( ppib ) );
-        PIBEndSession( ppib );
-    }
     return err;
 }
 
@@ -3203,10 +3190,8 @@ DBMScanObserverCleanup::DBMScanObserverCleanup(
 
 DBMScanObserverCleanup::~DBMScanObserverCleanup()
 {
+    // Session is owned by DBMScan which will end it.
     Assert( ppibNil != m_ppib );
-    m_objectCache.CloseAllCachedObjects();
-    CallS( ErrDBCloseAllDBs( m_ppib ) );
-    PIBEndSession( m_ppib );
     m_ppib = ppibNil;
 }
 
@@ -3217,17 +3202,15 @@ void DBMScanObserverCleanup::PrepareToTerm_( const IDBMScanState * const )
 
 void DBMScanObserverCleanup::FinishedPass_( const IDBMScanState * const )
 {
-    m_objectCache.CloseAllCachedObjects();
 }
 
 void DBMScanObserverCleanup::SuspendedPass_( const IDBMScanState * const )
 {
-    m_objectCache.CloseAllCachedObjects();
 }
 
 // Called when Database Maintenance has read and verified a page. The cleanup
 // code will latch the page and then perform the cleanup.
-void DBMScanObserverCleanup::ReadPage_( const IDBMScanState * const pstate, const PGNO pgno )
+void DBMScanObserverCleanup::ReadPage_( const IDBMScanState * const pstate, const PGNO pgno, DBMObjectCache* pdbmObjectCache )
 {
     ERR err;
     CSR csr;
@@ -3236,7 +3219,7 @@ void DBMScanObserverCleanup::ReadPage_( const IDBMScanState * const pstate, cons
     tcRef->nParentObjectClass = tceNone;
     tcRef->iorReason.SetIort( iortScrubbing );
 
-    m_objectCache.CloseCachedObjectsWithPendingDeletes();
+    pdbmObjectCache->CloseCachedObjectsWithPendingDeletes();
     
     if ( objidNil == m_objidMaxCommitted )
     {
@@ -3248,7 +3231,7 @@ void DBMScanObserverCleanup::ReadPage_( const IDBMScanState * const pstate, cons
     ObjidState ois = ois::Unknown;
     if ( !FIgnorablePage_( csr ) )
     {
-        ois = OisGetObjectIdState_( csr );
+        ois = OisGetObjectIdState_( csr, pdbmObjectCache );
     }
 
     switch ( ois )
@@ -3283,7 +3266,7 @@ void DBMScanObserverCleanup::ReadPage_( const IDBMScanState * const pstate, cons
                 // Need to delete the table which was reverted back by RBS partially
                 // i.e., the table was deleted but then reverted back. Only root page and space tree pages are reverted though.
                 // We will just initiate a best effort delete on the table.
-                RedeleteRevertedFDP_( &csr );
+                RedeleteRevertedFDP_( &csr, pdbmObjectCache );
             }
             else if ( csr.Cpage().Dbtime() >= g_rgfmp[m_ifmp].DbtimeOldestGuaranteed() )
             {
@@ -3294,11 +3277,11 @@ void DBMScanObserverCleanup::ReadPage_( const IDBMScanState * const pstate, cons
             else if ( csr.Cpage().FLongValuePage() )
             {
                 // Important: this call may release the page in case of failure.
-                Call( ErrCleanupLVPage_( &csr ) );
+                Call( ErrCleanupLVPage_( &csr, pdbmObjectCache ) );
             }
             else if ( csr.Cpage().FPrimaryPage() )
             {
-                Call( ErrCleanupPrimaryPage_( &csr ) );
+                Call( ErrCleanupPrimaryPage_( &csr, pdbmObjectCache ) );
             }
             else
             {
@@ -3439,7 +3422,7 @@ bool DBMScanObserverCleanup::FIgnorablePage_( const CSR& csr ) const
 }
 
 // See if the objid has been deleted. This method also caches the FUCB for the table.
-ObjidState DBMScanObserverCleanup::OisGetObjectIdState_( CSR& csr )
+ObjidState DBMScanObserverCleanup::OisGetObjectIdState_( CSR& csr, DBMObjectCache* const pdbmObjectCache )
 {
     ERR err = JET_errSuccess;
     ObjidState ois = ois::Unknown;
@@ -3448,8 +3431,10 @@ ObjidState DBMScanObserverCleanup::OisGetObjectIdState_( CSR& csr )
     Assert( objid > objidNil ); // otherwise I think this is an empty page ...
 
     const bool fCacheCheck = (bool)UlConfigOverrideInjection( 51678, false );
-    const ObjidState oisCached = m_objectCache.OisGetObjidState( objid );
-    if ( oisCached != ois::Unknown )
+    const ObjidState oisCached = pdbmObjectCache->OisGetObjidState( objid );
+
+    // If cached object states indicates there is no associated FUCB, we will try to initialize one.
+    if ( oisCached != ois::Unknown && oisCached != ois::ValidNoFUCB )
     {
         if ( !fCacheCheck )
         {
@@ -3471,9 +3456,9 @@ ObjidState DBMScanObserverCleanup::OisGetObjectIdState_( CSR& csr )
             // has data on it. Clean the page
             Assert( objid <= m_objidMaxCommitted );
             Assert( csr.Cpage().FLeafPage() || csr.Cpage().FPageFDPRootDelete() );
-            if ( oisCached == ois::Unknown )
+            if ( oisCached == ois::Unknown || oisCached == ois::ValidNoFUCB )
             {
-                m_objectCache.MarkCacheObjectInvalid( objid );
+                pdbmObjectCache->MarkCacheObjectInvalid( objid );
             }
             ois = ois::Invalid;
             err = JET_errSuccess;
@@ -3482,9 +3467,9 @@ ObjidState DBMScanObserverCleanup::OisGetObjectIdState_( CSR& csr )
         {
             Assert( fExists );
             Assert( pfucbTable != pfucbNil );
-            if ( oisCached == ois::Unknown )
+            if ( oisCached == ois::Unknown || oisCached == ois::ValidNoFUCB )
             {
-                m_objectCache.CacheObjectFucb( pfucbTable, objid );
+                pdbmObjectCache->CacheObjectFucb( pfucbTable, objid );
             }
             else
             {
@@ -3511,12 +3496,12 @@ ObjidState DBMScanObserverCleanup::OisGetObjectIdState_( CSR& csr )
             Assert( objidTable != objid );
             Assert( ( sysobj == sysobjLongValue ) || ( sysobj == sysobjIndex ) );
 
-            if ( oisCached == ois::Unknown )
+            if ( oisCached == ois::Unknown || oisCached == ois::ValidNoFUCB )
             {
                 FUCB * pfucbTable = pfucbNil;
 
                 // Get table fucb.
-                if ( pfucbNil == ( pfucbTable = m_objectCache.PfucbGetCachedObject( objidTable ) ) )
+                if ( pfucbNil == ( pfucbTable = pdbmObjectCache->PfucbGetCachedObject( objidTable ) ) )
                 {
                     BOOL fExists = fTrue;
                     Call( ErrOpenTableGetFucb_( objidTable, &fExists, &pfucbTable ) );
@@ -3527,7 +3512,7 @@ ObjidState DBMScanObserverCleanup::OisGetObjectIdState_( CSR& csr )
 
                     Assert( pfucbTable != pfucbNil );
                     Assert( objidTable == pfucbTable->u.pfcb->ObjidFDP() );
-                    m_objectCache.CacheObjectFucb( pfucbTable, objidTable );
+                    pdbmObjectCache->CacheObjectFucb( pfucbTable, objidTable );
                 }
 
                 if ( sysobj == sysobjLongValue )
@@ -3544,7 +3529,7 @@ ObjidState DBMScanObserverCleanup::OisGetObjectIdState_( CSR& csr )
                     Call( ErrFILEOpenLVRoot( pfucbTable, &pfucbLV, fFalse ) );
                     Assert( pfucbLV != pfucbNil );
 
-                    m_objectCache.CacheObjectFucb( pfucbLV, objid );
+                    pdbmObjectCache->CacheObjectFucb( pfucbLV, objid );
 
                     Call( csr.ErrGetRIWPage( m_ppib, m_ifmp, pgno, BFLatchFlags( bflfNoTouch | bflfNoEventLogging | bflfDBScan ) ) );
                     const DBTIME dbtimeRelatch = csr.Dbtime();
@@ -3568,9 +3553,9 @@ ObjidState DBMScanObserverCleanup::OisGetObjectIdState_( CSR& csr )
         }
         else
         {
-            if ( oisCached == ois::Unknown )
+            if ( oisCached == ois::Unknown || oisCached == ois::ValidNoFUCB )
             {
-                m_objectCache.MarkCacheObjectInvalid( objid );
+                pdbmObjectCache->MarkCacheObjectInvalid( objid );
             }
             ois = ois::Invalid;
         }
@@ -3582,7 +3567,7 @@ HandleError:
     Assert( err <= JET_errSuccess );
     if ( err == JET_errSuccess )
     {
-        if ( oisCached != ois::Unknown )
+        if ( oisCached != ois::Unknown && oisCached != ois::ValidNoFUCB )
         {
             Assert( ois == oisCached );
         }
@@ -3590,7 +3575,7 @@ HandleError:
     else if ( err == JET_errRBSFDPToBeDeleted )
     {
         // TODO: This is thrown when we try to open LV root. Should OpenLVRoot be fixed to do DirOpenNoTouch?
-        m_objectCache.MarkCacheObjectToBeDeleted( objid );
+        pdbmObjectCache->MarkCacheObjectToBeDeleted( objid );
     }
     else
     {
@@ -3672,7 +3657,7 @@ HandleError:
 // Cleanup an LV page. All versions on the page are committed
 // 
 // Important: this call may release the page in case of failure.
-ERR DBMScanObserverCleanup::ErrCleanupLVPage_( CSR * const pcsr )
+ERR DBMScanObserverCleanup::ErrCleanupLVPage_( CSR * const pcsr, DBMObjectCache* pdbmObjectCache )
 {
     Assert( pcsr->FLatched() );
     Assert( pcsr->Cpage().FLongValuePage() );
@@ -3738,7 +3723,7 @@ ERR DBMScanObserverCleanup::ErrCleanupLVPage_( CSR * const pcsr )
         pcsr->ReleasePage();
         pcsr->Reset();
 
-        pfucbLV = m_objectCache.PfucbGetCachedObject( objidLV );
+        pfucbLV = pdbmObjectCache->PfucbGetCachedObject( objidLV );
         Assert( pfucbLV != pfucbNil );
 
         if ( arrLid.Size() > 0 )
@@ -3936,7 +3921,7 @@ HandleError:
 
 
 // Cleanup a primary index page. All versions on the page are committed.
-ERR DBMScanObserverCleanup::ErrCleanupPrimaryPage_( CSR * const pcsr )
+ERR DBMScanObserverCleanup::ErrCleanupPrimaryPage_( CSR * const pcsr, DBMObjectCache* const pdbmObjectCache )
 {
     Assert( pcsr->Cpage().FPrimaryPage() );
     Assert( pcsr->Cpage().Dbtime() < g_rgfmp[m_ifmp].DbtimeOldestGuaranteed() );
@@ -3948,7 +3933,7 @@ ERR DBMScanObserverCleanup::ErrCleanupPrimaryPage_( CSR * const pcsr )
 
     if ( pcsr->Cpage().FAnyLineHasFlagSet( fNDDeleted ) )
     {
-        pfucbTable = m_objectCache.PfucbGetCachedObject( objid );
+        pfucbTable = pdbmObjectCache->PfucbGetCachedObject( objid );
         Assert( pfucbTable != pfucbNil );
         for ( INT iline = 0; iline < pcsr->Cpage().Clines(); ++iline )
         {
@@ -4081,7 +4066,7 @@ HandleError:
     return err;
 }
 
-VOID DBMScanObserverCleanup::RedeleteRevertedFDP_( CSR* const pcsr )
+VOID DBMScanObserverCleanup::RedeleteRevertedFDP_( CSR* const pcsr, DBMObjectCache* const pdbmObjectCache )
 {
     // Only the root page of the table should be marked with this special flag warranting redelete.
     Assert( pcsr->Cpage().FRootPage() );
@@ -4100,8 +4085,8 @@ VOID DBMScanObserverCleanup::RedeleteRevertedFDP_( CSR* const pcsr )
     PGNO pgnoTableFromCat   = pgnoNull;
 
     // Close any FUCBs we have open for the table we are about to delete.
-    m_objectCache.CloseCachedObjectWithObjid( objidTable );
-    Assert( m_objectCache.PfucbGetCachedObject( objidTable ) == pfucbNil );
+    pdbmObjectCache->CloseCachedObjectWithObjid( objidTable );
+    Assert( pdbmObjectCache->PfucbGetCachedObject( objidTable ) == pfucbNil );
 
     // Lets pull information needed for FDP delete operation.
     Call( ErrDIRBeginTransaction( m_ppib, 54684, NO_GRBIT ) );
@@ -4142,7 +4127,7 @@ VOID DBMScanObserverCleanup::RedeleteRevertedFDP_( CSR* const pcsr )
     fInTransaction = fFalse;
 
     // We have marked table for delete. Mark cached object invalid, if it exists.
-    Assert( m_objectCache.PfucbGetCachedObject( objidTable ) == pfucbNil );
+    Assert( pdbmObjectCache->PfucbGetCachedObject( objidTable ) == pfucbNil );
 
 HandleError:
     if ( fFDPExists )
@@ -4360,7 +4345,7 @@ void DBMObjectCache::CacheObjectFucb( FUCB * const pfucb, const OBJID objid )
     else
     {
         Assert( m_rgstate[index].objid == objid );
-        Assert( m_rgstate[index].ois == ois::Unknown );
+        Assert( m_rgstate[index].ois == ois::Unknown || m_rgstate[index].ois == ois::ValidNoFUCB );
         Assert( m_rgstate[index].pfucb == pfucbNil );
     }
 
@@ -4433,6 +4418,32 @@ void DBMObjectCache::MarkCacheObjectToBeDeleted( const OBJID objid )
     Assert( FContainsObjid_( objid ) );
     Assert( pfucbNil == PfucbGetCachedObject( objid ) );
     Assert( ois::ToBeDeleted == OisGetObjidState( objid ) );
+}
+
+void DBMObjectCache::MarkCacheObjectValidNoFUCB( const OBJID objid )
+{
+    Assert( objidNil != objid );
+
+    INT index = IndexOfObjid_( objid );
+    if ( index < 0 )
+    {
+        index = IndexOfLeastRecentlyUsedObject_();
+        CloseObjectAt_( index );
+    }
+    else
+    {
+        Assert( m_rgstate[index].objid == objid );
+        Assert( m_rgstate[index].ois != ois::Valid );
+        Assert( m_rgstate[index].pfucb == pfucbNil );
+    }
+
+    m_rgstate[index].objid = objid;
+    m_rgstate[index].ois = ois::ValidNoFUCB;
+    m_rgstate[index].pfucb = pfucbNil;
+    m_rgstate[index].ftAccess = UtilGetCurrentFileTime();
+    Assert( FContainsObjid_( objid ) );
+    Assert( pfucbNil == PfucbGetCachedObject( objid ) );
+    Assert( ois::ValidNoFUCB == OisGetObjidState( objid ) );
 }
 
 void DBMObjectCache::CloseCachedObjectWithObjid( const OBJID objid )
@@ -4591,11 +4602,13 @@ void DBMObjectCache::CloseObjectAt_( const INT index )
 DBMScan::DBMScan(
         IDBMScanState * const pscanstate,
         IDBMScanReader * const pscanreader,
-        IDBMScanConfig * const pscanconfig ) :
+        IDBMScanConfig * const pscanconfig,
+        PIB* ppib ) :
     IDBMScan(),
     m_pscanstate( pscanstate ),
     m_pscanreader( pscanreader ),
     m_pscanconfig( pscanconfig ),
+    m_ppib( ppib ),
     m_cscanobservers( 0 ),
     m_threadDBMScan( 0 ),
     m_critSignalControl( CLockBasicInfo( CSyncBasicInfo( _T("DBMScan::m_critSignalControl" ) ), rankDBMScanSignalControl, 0 ) ),
@@ -4614,6 +4627,15 @@ DBMScan::DBMScan(
 DBMScan::~DBMScan()
 {
     TermDBMScan_();
+
+    m_objectCache.CloseAllCachedObjects();
+
+    if ( m_ppib != ppibNil )
+    {
+        CallS( ErrDBCloseAllDBs( m_ppib ) );
+        PIBEndSession( m_ppib );
+        m_ppib = ppibNil;
+    }
 }
 
 void DBMScan::AddObserver( DBMScanObserver * const pscanobserver )
@@ -4857,7 +4879,7 @@ void DBMScan::DoOnePass_()
                     PGNO pgno = pgnoNull;
                     for ( pgno = pgnoFirst; pgno < pgnoFirst + cpgScan; ++pgno )
                     {
-                        const ERR err = m_pscanreader->ErrReadPage( pgno );
+                        const ERR err = m_pscanreader->ErrReadPage( pgno, m_ppib, &m_objectCache );
                         switch ( err )
                         {
                             case JET_errFileIOBeyondEOF:
@@ -4951,6 +4973,7 @@ void DBMScan::FinishPass_()
 {
     ++m_cscansFinished;
     m_pscanstate->FinishedPass();
+    m_objectCache.CloseAllCachedObjects();
     ForEachObserverCall_( &DBMScanObserver::FinishedPass );
     m_fNeedToSuspendPass = false;
 }
@@ -4958,6 +4981,7 @@ void DBMScan::FinishPass_()
 void DBMScan::SuspendPass_()
 {
     m_pscanstate->SuspendedPass();
+    m_objectCache.CloseAllCachedObjects();
     ForEachObserverCall_( &DBMScanObserver::SuspendedPass );
 }
 
@@ -4977,7 +5001,7 @@ void DBMScan::PassReadPage_( const PGNO pgno )
 {
     const CPG cpgRead = 1;
     m_pscanstate->ReadPages( pgno, cpgRead );
-    ForEachObserverCall_( &DBMScanObserver::ReadPage, pgno );
+    ForEachObserverCall_( &DBMScanObserver::ReadPage, pgno, &m_objectCache );
 }
 
 void DBMScan::ForEachObserverCall_( void ( DBMScanObserver::* const pfn )( const IDBMScanState * const ) ) const
@@ -5000,6 +5024,19 @@ void DBMScan::ForEachObserverCall_(
     {
         DBMScanObserver * const pobserver = m_rgpscanobservers[iscanobserver].get();
         ( pobserver->*pfn )( pstate, arg );
+    }
+}
+
+template<class Arg, class Arg1>
+void DBMScan::ForEachObserverCall_(
+    void ( DBMScanObserver::* const pfn )( const IDBMScanState * const, const Arg, const Arg1 ),
+    const Arg arg, const Arg1 arg1 ) const
+{
+    const IDBMScanState * const pstate = m_pscanstate.get();
+    for( INT iscanobserver = 0; iscanobserver < m_cscanobservers; ++iscanobserver )
+    {
+        DBMScanObserver * const pobserver = m_rgpscanobservers[iscanobserver].get();
+        ( pobserver->*pfn )( pstate, arg, arg1 );
     }
 }
 
@@ -5533,7 +5570,8 @@ ERR ErrDBMEmitDivergenceCheck(
     const IFMP ifmp,
     const PGNO pgno,
     const ScanCheckSource scs,
-    const CPAGE* const pcpage )
+    const CPAGE* const pcpage,
+    const ObjidState objidState )
 //  ================================================================
 {
     Assert( ( scs != scsInvalid ) && ( scs < scsMax ) );
@@ -5541,6 +5579,7 @@ ERR ErrDBMEmitDivergenceCheck(
     Assert( pgno != pgnoScanLastSentinel );
     Assert( pgno != pgnoMax );
     Assert( pcpage != NULL );
+    Assert( objidState != ois::Unknown );
 
     // In order to ensure we can compare the same version of page, we must have RDW
     // latch so that the page dbtime is serialized for us (and to get a stable checksum as well).
@@ -5569,11 +5608,11 @@ ERR ErrDBMEmitDivergenceCheck(
                         dbtimePage,
                         dbtimeCurrent,
                         ulChecksum,
-                        fScanCheck2Supported,
+                        objidState == ObjidState::Invalid,
                         &lgposLogRec );
 
     // Check if the persisted dbtime is ahead of the running dbtime.
-    if ( ( dbtimePage != 0 ) && ( dbtimePage != dbtimeShrunk ) && ( dbtimePage > dbtimeCurrent ) )
+    if ( ( dbtimePage != 0 ) && ( dbtimePage != dbtimeShrunk )  && ( dbtimePage != dbtimeRevert ) && ( dbtimePage > dbtimeCurrent ) )
     {
         OSTraceSuspendGC();
         const WCHAR* rgwsz[] =
@@ -5584,7 +5623,8 @@ ERR ErrDBMEmitDivergenceCheck(
             OSFormatW( L"0x%I64x", dbtimePage ),
             OSFormatW( L"0x%I64x", dbtimeCurrent ),
             OSFormatW( L"%hhu", scs ),
-            OSFormatW( L"%u", pcpage->ObjidFDP() )
+            OSFormatW( L"%u", pcpage->ObjidFDP() ),
+            OSFormatW( L"%d", (INT)( objidState == ObjidState::Invalid ) )
         };
 
         UtilReportEvent(
@@ -5627,7 +5667,7 @@ ERR ErrDBMEmitEndScan( const IFMP ifmp )
             0, // dbtimePage
             0, // dbtimeCurrent
             0, // ulChecksum
-            g_rgfmp[ifmp].FEfvSupported( JET_efvScanCheck2 ) ); // fScanCheck2Supported
+            fFalse );   // objidInvalid
 
 }
 
@@ -5741,6 +5781,18 @@ JETUNITTEST( DBMObjectCache, SetObjidToBeDeleted )
     CHECK( pfucbNil == cache.PfucbGetCachedObject( 1 ) );
 }
 
+//  ================================================================
+JETUNITTEST( DBMObjectCache, SetObjidValidNoFucb )
+//  ================================================================
+{
+    DBMObjectCache cache;
+    cache.CacheObjectFucb( (FUCB*)0x12345678, 1 );
+    cache.CloseAllCachedObjects();
+    cache.MarkCacheObjectValidNoFUCB( 1 );
+
+    CHECK( ois::ValidNoFUCB == cache.OisGetObjidState( 1 ) );
+    CHECK( pfucbNil == cache.PfucbGetCachedObject( 1 ) );
+}
 
 //  ================================================================
 JETUNITTEST( DBMObjectCache, SetMultipleObjids )
@@ -5752,6 +5804,7 @@ JETUNITTEST( DBMObjectCache, SetMultipleObjids )
     cache.CacheObjectFucb( (FUCB*)0x12345678 - 2, 3 );
     cache.MarkCacheObjectInvalid( 4 );
     cache.MarkCacheObjectToBeDeleted( 5 );
+    cache.MarkCacheObjectValidNoFUCB( 6 );
 
     CHECK( ois::Valid == cache.OisGetObjidState( 1 ) );
     CHECK( (FUCB*)0x12345678 - 1 == cache.PfucbGetCachedObject( 1 ) );
@@ -5763,8 +5816,10 @@ JETUNITTEST( DBMObjectCache, SetMultipleObjids )
     CHECK( pfucbNil == cache.PfucbGetCachedObject( 4 ) );
     CHECK( ois::ToBeDeleted == cache.OisGetObjidState( 5 ) );
     CHECK( pfucbNil == cache.PfucbGetCachedObject( 5 ) );
-    CHECK( ois::Unknown == cache.OisGetObjidState( 6 ) );
+    CHECK( ois::ValidNoFUCB == cache.OisGetObjidState( 6 ) );
     CHECK( pfucbNil == cache.PfucbGetCachedObject( 6 ) );
+    CHECK( ois::Unknown == cache.OisGetObjidState( 7 ) );
+    CHECK( pfucbNil == cache.PfucbGetCachedObject( 7 ) );
 }
 
 //  ================================================================
@@ -6644,7 +6699,7 @@ protected:
     virtual void FinishedPass_( const IDBMScanState * const );
     virtual void SuspendedPass_( const IDBMScanState * const ) { m_fSuspendedPassCalled = true; }
     virtual void PrepareToTerm_( const IDBMScanState * const ) { m_fPrepareToTermCalled = true; }
-    virtual void ReadPage_( const IDBMScanState * const, const PGNO ) { m_cpgRead += 1; }
+    virtual void ReadPage_( const IDBMScanState * const, const PGNO, DBMObjectCache* const pdbmObjectCache ) { m_cpgRead += 1; }
     virtual void BadChecksum_( const IDBMScanState * const, const PGNO pgnoBadChecksum )
     {
         m_pgnoBadChecksum = pgnoBadChecksum;
@@ -6750,7 +6805,7 @@ JETUNITTEST( DBMScanObserver, ReadPages )
     observer.StartedPass( NULL );
 
     const PGNO pgnoToRead = 12;
-    observer.ReadPage( NULL, pgnoToRead );
+    observer.ReadPage( NULL, pgnoToRead, NULL );
     CHECK( 1 == observer.CpgRead() );
 }
 
@@ -7016,7 +7071,7 @@ public:
     virtual ~TestDBMScanReader() {}
     ERR InitDBMScanReader() { return JET_errSuccess; }
     void PrereadPages( const PGNO pgnoFirst, const CPG cpg );
-    ERR ErrReadPage( const PGNO pgno );
+    ERR ErrReadPage( const PGNO pgno, PIB* const ppib, DBMObjectCache* const pdbmObjectCache );
     void DoneWithPreread( const PGNO pgno );
     PGNO PgnoLast() const;
 
@@ -7075,7 +7130,7 @@ void TestDBMScanReader::PrereadPages( const PGNO pgnoFirst, const CPG cpg )
     m_cpgPrereadTotal += cpg;
 }
 
-ERR TestDBMScanReader::ErrReadPage( const PGNO pgno )
+ERR TestDBMScanReader::ErrReadPage( const PGNO pgno, PIB* const ppib, DBMObjectCache* const pdbmObjectCache )
 {
     if ( pgno < m_pgnoLastPreread )
     {
@@ -7136,24 +7191,24 @@ PGNO TestDBMScanReader::PgnoLast() const
 JETUNITTEST( TestDBMScanReader, InfiniteReadPages )
 {
     TestDBMScanReader reader;
-    CHECK( JET_errSuccess == reader.ErrReadPage( 1 ) );
-    CHECK( JET_errSuccess == reader.ErrReadPage( 1000 ) );
-    CHECK( JET_errSuccess == reader.ErrReadPage( 1000000000 ) );
+    CHECK( JET_errSuccess == reader.ErrReadPage( 1, NULL, NULL ) );
+    CHECK( JET_errSuccess == reader.ErrReadPage( 1000, NULL, NULL ) );
+    CHECK( JET_errSuccess == reader.ErrReadPage( 1000000000, NULL, NULL ) );
 }
 
 JETUNITTEST( TestDBMScanReader, ChecksumError )
 {
     PGNO pgno = 700;
     TestDBMScanReader reader( pgno*10, pgno );
-    CHECK( JET_errSuccess == reader.ErrReadPage( pgno-1 ) );
-    CHECK( JET_errReadVerifyFailure == reader.ErrReadPage( pgno ) );
-    CHECK( JET_errSuccess == reader.ErrReadPage( pgno+1 ) );
+    CHECK( JET_errSuccess == reader.ErrReadPage( pgno-1, NULL, NULL ) );
+    CHECK( JET_errReadVerifyFailure == reader.ErrReadPage( pgno, NULL, NULL ) );
+    CHECK( JET_errSuccess == reader.ErrReadPage( pgno+1, NULL, NULL ) );
 }
 
 JETUNITTEST( TestDBMScanReader, VerifyReadsWithoutPrereadsSetsFInError )
 {
     TestDBMScanReader reader;
-    CHECK( JET_errSuccess == reader.ErrReadPage( 1 ) );
+    CHECK( JET_errSuccess == reader.ErrReadPage( 1, NULL, NULL ) );
     CHECK( reader.FInError() == fTrue );
 }
 
@@ -7163,7 +7218,7 @@ JETUNITTEST( TestDBMScanReader, VerifyReadsBeforePrereadsSetsFInError )
     TestDBMScanReader reader;
 
     reader.PrereadPages( pgno, 10 );
-    CHECK( JET_errSuccess == reader.ErrReadPage( 99 ) );
+    CHECK( JET_errSuccess == reader.ErrReadPage( 99, NULL, NULL ) );
     
     CHECK( reader.FInError() == fTrue );
 }
@@ -7174,7 +7229,7 @@ JETUNITTEST( TestDBMScanReader, VerifyReadsAfterPrereadsSetsFInError )
     TestDBMScanReader reader;
 
     reader.PrereadPages( pgno, 10 );
-    CHECK( JET_errSuccess == reader.ErrReadPage( 111 ) );
+    CHECK( JET_errSuccess == reader.ErrReadPage( 111, NULL, NULL ) );
     
     CHECK( reader.FInError() == fTrue );
 }
@@ -7186,13 +7241,13 @@ JETUNITTEST( TestDBMScanReader, VerifyMultipleReadsWithinPrereadIsOk )
 
     reader.PrereadPages( pgno, 10 );
 
-    CHECK( JET_errSuccess == reader.ErrReadPage( pgno ) );
+    CHECK( JET_errSuccess == reader.ErrReadPage( pgno, NULL, NULL ) );
     CHECK( reader.FInError() == fFalse );
 
-    CHECK( JET_errSuccess == reader.ErrReadPage( pgno ) );
+    CHECK( JET_errSuccess == reader.ErrReadPage( pgno, NULL, NULL ) );
     CHECK( reader.FInError() == fFalse );
 
-    CHECK( JET_errSuccess == reader.ErrReadPage( pgno ) );
+    CHECK( JET_errSuccess == reader.ErrReadPage( pgno, NULL, NULL ) );
     CHECK( reader.FInError() == fFalse );
 }
 
@@ -7203,7 +7258,7 @@ JETUNITTEST( TestDBMScanReader, VerifyOutOfOrderReadsSetsErrorSimple )
 
     reader.PrereadPages( pgno, 10 );
 
-    CHECK( JET_errSuccess == reader.ErrReadPage( pgno + 1 ) );
+    CHECK( JET_errSuccess == reader.ErrReadPage( pgno + 1, NULL, NULL ) );
     CHECK( reader.FInError() == fTrue );
 }
 
@@ -7213,11 +7268,11 @@ JETUNITTEST( TestDBMScanReader, VerifyOutOfOrderReadsSetsErrorComplex )
     TestDBMScanReader reader;
 
     reader.PrereadPages( pgno, 10 );
-    CHECK( JET_errSuccess == reader.ErrReadPage( pgno ) );
+    CHECK( JET_errSuccess == reader.ErrReadPage( pgno, NULL, NULL ) );
     CHECK( reader.FInError() == fFalse );
-    CHECK( JET_errSuccess == reader.ErrReadPage( pgno + 1 ) );
+    CHECK( JET_errSuccess == reader.ErrReadPage( pgno + 1, NULL, NULL ) );
     CHECK( reader.FInError() == fFalse );
-    CHECK( JET_errSuccess == reader.ErrReadPage( pgno + 3 ) );
+    CHECK( JET_errSuccess == reader.ErrReadPage( pgno + 3, NULL, NULL ) );
     CHECK( reader.FInError() == fTrue );
 }
 
@@ -7249,7 +7304,7 @@ JETUNITTEST( TestDBMScanReader, VerifyDoneCalledOnNonLastPageSetsError )
     TestDBMScanReader reader;
 
     reader.PrereadPages( pgno, 10 );
-    CHECK( JET_errSuccess == reader.ErrReadPage( pgno ) );
+    CHECK( JET_errSuccess == reader.ErrReadPage( pgno, NULL, NULL ) );
     CHECK( reader.FInError() == fFalse );
     
     reader.DoneWithPreread( pgno + 1 );
@@ -7268,13 +7323,13 @@ JETUNITTEST( TestDBMScanReader, PrereadTest )
 
     for ( pgno; pgno < 710; pgno++ )
     {
-        CHECK( JET_errSuccess == reader.ErrReadPage( pgno ) );
+        CHECK( JET_errSuccess == reader.ErrReadPage( pgno, NULL, NULL ) );
         CHECK( reader.FInError() == fFalse );
-        CHECK( JET_errSuccess == reader.ErrReadPage( pgno ) );
+        CHECK( JET_errSuccess == reader.ErrReadPage( pgno, NULL, NULL ) );
         CHECK( reader.FInError() == fFalse );
-        CHECK( JET_errSuccess == reader.ErrReadPage( pgno ) );
+        CHECK( JET_errSuccess == reader.ErrReadPage( pgno, NULL, NULL ) );
         CHECK( reader.FInError() == fFalse );
-        CHECK( JET_errSuccess == reader.ErrReadPage( pgno ) );
+        CHECK( JET_errSuccess == reader.ErrReadPage( pgno, NULL, NULL ) );
         reader.DoneWithPreread( pgno );
         CHECK( reader.FInError() == fFalse );
     }
@@ -7297,7 +7352,8 @@ JETUNITTEST( DBMScan, StartScanCallsObservers )
     unique_ptr<DBMScan> pscan( new DBMScan(
         new TestDBMScanState(),
         preader,
-        new TestDBMScanConfig() ) );
+        new TestDBMScanConfig(),
+        ppibNil ) );
     pscan->AddObserver( new TestDBMScanObserver() );
     TestDBMScanObserver * pobserver = new TestDBMScanObserver();
     pscan->AddObserver( pobserver );
@@ -7316,7 +7372,8 @@ JETUNITTEST( DBMScan, StartScanUpdatesState )
     unique_ptr<DBMScan> pscan( new DBMScan(
         pstate,
         preader,
-        new TestDBMScanConfig() ) );
+        new TestDBMScanConfig(),
+        ppibNil ) );
 
     CHECK( JET_errSuccess == pscan->ErrStartDBMScan() );
     preader->WaitForFirstPageRead();
@@ -7332,7 +7389,8 @@ JETUNITTEST( DBMScan, FinishedScanUpdateState )
     unique_ptr<DBMScan> pscan( new DBMScan(
         pstate,
         new TestDBMScanReader( 10 ),
-        pconfig.release() ) );
+        pconfig.release(),
+        ppibNil ) );
     TestDBMScanObserver * pobserver = new TestDBMScanObserver();
     pscan->AddObserver( pobserver );
 
@@ -7351,7 +7409,8 @@ JETUNITTEST( DBMScan, StartScanTwiceReturnsError )
     unique_ptr<DBMScan> pscan( new DBMScan(
         new TestDBMScanState(),
         new TestDBMScanReader(),
-        new TestDBMScanConfig() ) );
+        new TestDBMScanConfig(),
+        ppibNil ) );
     CHECK( JET_errSuccess == pscan->ErrStartDBMScan() );
     
     CHECK( JET_errDatabaseAlreadyRunningMaintenance == pscan->ErrStartDBMScan() );
@@ -7364,7 +7423,8 @@ JETUNITTEST( DBMScan, StopScanCallsSuspend )
     unique_ptr<DBMScan> pscan( new DBMScan(
         new TestDBMScanState(),
         preader,
-        new TestDBMScanConfig() ) );
+        new TestDBMScanConfig(),
+        ppibNil ) );
     TestDBMScanObserver * pobserver = new TestDBMScanObserver();
     pscan->AddObserver( pobserver );
     CHECK( JET_errSuccess == pscan->ErrStartDBMScan() );
@@ -7384,7 +7444,8 @@ JETUNITTEST( DBMScan, StopScanUpdatesPgnoLastRead )
     unique_ptr<DBMScan> pscan( new DBMScan(
         pstate,
         preader,
-        new TestDBMScanConfig() ) );
+        new TestDBMScanConfig(),
+        ppibNil ) );
     CHECK( JET_errSuccess == pscan->ErrStartDBMScan() );
     preader->WaitForFirstPageRead();
 
@@ -7404,7 +7465,8 @@ JETUNITTEST( DBMScan, ScanDoesNotGoBeyondEof )
     unique_ptr<DBMScan> pscan( new DBMScan(
         pstate,
         preader,
-        pconfig ) );
+        pconfig,
+        ppibNil ) );
 
     TestDBMScanObserver * pobserver = new TestDBMScanObserver();
     pscan->AddObserver( pobserver );
@@ -7420,7 +7482,8 @@ JETUNITTEST( DBMScan, ScanRepeats )
     unique_ptr<DBMScan> pscan( new DBMScan(
         new TestDBMScanState(),
         new TestDBMScanReader( 100 ),
-        new TestDBMScanConfig() ) );
+        new TestDBMScanConfig(),
+        ppibNil ) );
     TestDBMScanObserver * pobserver = new TestDBMScanObserver();
     pscan->AddObserver( pobserver );
 
@@ -7441,7 +7504,8 @@ JETUNITTEST( DBMScan, BadChecksumCallsObservers )
     unique_ptr<DBMScan> pscan( new DBMScan(
         new TestDBMScanState(),
         preader,
-        new TestDBMScanConfig() ) );
+        new TestDBMScanConfig(),
+        ppibNil ) );
     TestDBMScanObserver * pobserver = new TestDBMScanObserver();
     pscan->AddObserver( pobserver );
 
@@ -7457,7 +7521,8 @@ JETUNITTEST( DBMScan, StartAfterStop )
     unique_ptr<DBMScan> pscan( new DBMScan(
         new TestDBMScanState(),
         new TestDBMScanReader(),
-        new TestDBMScanConfig() ) );
+        new TestDBMScanConfig(),
+        ppibNil ) );
     CHECK( JET_errSuccess == pscan->ErrStartDBMScan() );
     
     pscan->StopDBMScan();
@@ -7478,7 +7543,8 @@ JETUNITTEST( DBMScan, StartWaitsForScanInterval )
     unique_ptr<DBMScan> pscan( new DBMScan(
         pstate.release(),
         new TestDBMScanReader(),
-        pconfig.release() ) );
+        pconfig.release(),
+        ppibNil ) );
 
     TestDBMScanObserver * pobserver = new TestDBMScanObserver();
     pscan->AddObserver( pobserver );
@@ -7503,7 +7569,8 @@ JETUNITTEST( DBMScan, MaxScans )
     unique_ptr<DBMScan> pscan( new DBMScan(
         new TestDBMScanState(),
         new TestDBMScanReader( 500 ),
-        pconfig.release() ) );
+        pconfig.release(),
+        ppibNil ) );
 
     TestDBMScanObserver * pobserver = new TestDBMScanObserver();
     pscan->AddObserver( pobserver );
@@ -7538,7 +7605,8 @@ JETUNITTEST( DBMScan, ResumeScanCallsObserver )
     unique_ptr<DBMScan> pscan( new DBMScan(
         pstate.release(),
         new TestDBMScanReader( 500 ),
-        pconfig.release() ) );
+        pconfig.release(),
+        ppibNil ) );
 
     TestDBMScanObserver * pobserver = new TestDBMScanObserver();
     pscan->AddObserver( pobserver );
@@ -7566,7 +7634,8 @@ JETUNITTEST( DBMScan, CpgBatchIsUsed )
     unique_ptr<DBMScan> pscan( new DBMScan(
         new TestDBMScanState(),
         preader,
-        pconfig.release() ) );
+        pconfig.release(),
+        ppibNil ) );
     
     CHECK( JET_errSuccess == pscan->ErrStartDBMScan() );
     preader->WaitForFirstPageRead();
@@ -7592,7 +7661,8 @@ JETUNITTEST( DBMScan, PrereadPagesAreReleased )
     unique_ptr<DBMScan> pscan( new DBMScan(
         pstate,
         preader,
-        pconfig.release() ) );
+        pconfig.release(),
+        ppibNil ) );
 
     TestDBMScanObserver * pobserver = new TestDBMScanObserver();
     pscan->AddObserver( pobserver );

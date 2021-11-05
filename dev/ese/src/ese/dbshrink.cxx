@@ -407,6 +407,8 @@ LOCAL ERR ErrSHKIMoveLastExtent(
                 const OBJID objidFDP = cpage.ObjidFDP();
                 const ULONG fPageFlags = cpage.FFlags();
                 const DBTIME dbtimeOnPage = cpage.Dbtime();
+                BOOL fObjidExistsCheckRun = fFalse;
+                BOOL fObjidExists = fFalse;
 
                 // Unlatch page, as we may need to search the catalog below and the latches might collide,
                 // though it is not expected, since we are looking at a leaked or indeterminate page, so
@@ -426,7 +428,7 @@ LOCAL ERR ErrSHKIMoveLastExtent(
                     Assert( objidPage != objidNil );
 
                     // Check if the object exists.
-                    BOOL fObjidExists = ( objidPage == objidSystemRoot );
+                    fObjidExists = ( objidPage == objidSystemRoot );
                     if ( !fObjidExists )
                     {
                         OBJID objidTable = objidNil;
@@ -434,6 +436,8 @@ LOCAL ERR ErrSHKIMoveLastExtent(
                         Call( ErrCATGetObjidMetadata( ppib, ifmp, objidFDP, &objidTable, &sysobj ) );
                         fObjidExists = ( sysobj != sysobjNil );
                     }
+
+                    fObjidExistsCheckRun = fTrue;
 
                     if ( fObjidExists || ( objidPage == objidNil ) )
                     {
@@ -480,6 +484,21 @@ LOCAL ERR ErrSHKIMoveLastExtent(
                         fRolledLogOnScanCheck = fTrue;
                     }
 
+                    // In case we didn't run the objidExists check in the above if, we will run it here to be able to get the objid state.
+                    if ( !fObjidExistsCheckRun && objidFDP != objidNil )
+                    {
+                        // Check if the object exists.
+                        fObjidExists = FCATISystemObjid( objidFDP );
+                        
+                        if ( !fObjidExists )
+                        {
+                            OBJID objidTable = objidNil;
+                            SYSOBJ sysobj = sysobjNil;
+                            Call( ErrCATGetObjidMetadata( ppib, ifmp, objidFDP, &objidTable, &sysobj ) );
+                            fObjidExists = ( sysobj != sysobjNil );
+                        }
+                    }
+
                     // Latch the page again.
                     Call( ErrBFRDWLatchPage(
                             &bfl,
@@ -524,7 +543,7 @@ LOCAL ERR ErrSHKIMoveLastExtent(
                         goto HandleError;
                     }
 
-                    Call( ErrDBMEmitDivergenceCheck( ifmp, pgnoCurrent, scsDbShrink, &cpage ) );
+                    Call( ErrDBMEmitDivergenceCheck( ifmp, pgnoCurrent, scsDbShrink, &cpage, fObjidExists ? ObjidState::Valid : ObjidState::Invalid ) );
 
                     // Unlatch.
                     cpage.UnloadPage();

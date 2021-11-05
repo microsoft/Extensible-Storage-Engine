@@ -516,6 +516,16 @@ class LRSCANCHECK final  // Prevent this class from being inherited. Please use 
         USHORT UsChecksum() const       { return le_uschksum; }
 };
 
+
+PERSISTED const BYTE fLRScanObjidInvalid = 0x80;
+const BYTE maskLRScanFlags = 0x80;
+const BYTE maskLRScanUnused = 0x7C;
+const BYTE maskLRScanSources = 0x03;
+
+static_assert( !( fLRScanObjidInvalid & ~maskLRScanFlags ), "Bit represented by fLRScanObjidInvalid should be on in maskLRScanFlags." );
+static_assert( !( maskLRScanFlags & maskLRScanUnused & maskLRScanSources ), "maskLRScanFlags, maskLRScanUnused and maskLRScanSources should be mutually exclusive." );
+static_assert( ( scsMax - 1 ) <= maskLRScanSources, "The highest value of ScanCheckSource should not be greater than maskLRScanSources" );
+
 PERSISTED
 class LRSCANCHECK2
     : public LR
@@ -527,21 +537,23 @@ class LRSCANCHECK2
             lrtyp = lrtypScanCheck2;
         }
 
-    private:
-        UnalignedLittleEndian< DBID >       le_dbid;            // dbid.
-        UnalignedLittleEndian< PGNO >       le_pgno;            // Pgno.
-        UnalignedLittleEndian< BYTE >       le_bSource;         // Source of the ScanCheck2 log record.
-        UnalignedLittleEndian< DBTIME >     le_dbtimePage;      // Current dbtime of page scanned.
-        UnalignedLittleEndian< DBTIME >     le_dbtimeCurrent;   // Current global dbtime of the database.
-        UnalignedLittleEndian< ULONG >      le_ulChksum;        // A compressed version of the LoggedDataChecksum() from the page.
+        LRSCANCHECK2( const size_t cb ) : LR( cb ) {}
 
     protected:
+        UnalignedLittleEndian< DBID >       le_dbid;                // dbid.
+        UnalignedLittleEndian< PGNO >       le_pgno;                // Pgno.
+        UnalignedLittleEndian< BYTE >       le_bFlagsAndScs;        // Highest bit represents flag for ObjidInvalid, next 5 bits are unused, last 2 bits represent ScanCheckSource
+        UnalignedLittleEndian< DBTIME >     le_dbtimePage;          // Current dbtime of page scanned.
+        UnalignedLittleEndian< DBTIME >     le_dbtimeCurrent;       // Current global dbtime of the database.
+        UnalignedLittleEndian< ULONG >      le_ulChksum;            // A compressed version of the LoggedDataChecksum() from the page.
+
         VOID InitScanCheckFromLegacyScanCheck( const LRSCANCHECK* const plrscancheck )
         {
             InitScanCheck(
                 plrscancheck->Dbid(),
                 plrscancheck->Pgno(),
                 scsDbScan,
+                fFalse,
                 plrscancheck->DbtimeBefore(),
                 plrscancheck->DbtimeAfter(),
                 plrscancheck->UsChecksum() );
@@ -553,14 +565,25 @@ class LRSCANCHECK2
                 const DBID dbid,
                 const PGNO pgno,
                 const BYTE bSource,
+                const BOOL fObjidInvalid,
                 const DBTIME dbtimePage,
                 const DBTIME dbtimeCurrent,
                 const ULONG ulCompLogicalPageChecksum )
         {
-            static_assert( sizeof( ScanCheckSource ) == sizeof( le_bSource ), "ScanCheckSource's size must match le_bSource's." );
+            Assert( bSource < scsMax );
+            Assert( !( bSource & ~maskLRScanSources ) );
+
             le_dbid          = dbid;
             le_pgno          = pgno;
-            le_bSource       = bSource;
+            le_bFlagsAndScs  = bSource & maskLRScanSources;
+
+            if ( fObjidInvalid )
+            {
+                le_bFlagsAndScs |= fLRScanObjidInvalid;
+            }
+
+            Assert( !( le_bFlagsAndScs & maskLRScanUnused ) );
+
             le_dbtimePage    = dbtimePage;
             le_dbtimeCurrent = dbtimeCurrent;
             le_ulChksum      = ulCompLogicalPageChecksum;
@@ -576,16 +599,19 @@ class LRSCANCHECK2
             else
             {
                 UtilMemCpy( this, plr, sizeof( *this ) );
+                Assert( !( le_bFlagsAndScs & maskLRScanUnused ) );
             }
         }
 
         DBID Dbid() const                   { return le_dbid; }
         PGNO Pgno() const                   { return le_pgno; }
-        BYTE BSource() const                { return le_bSource; }
+        BYTE BSource() const                { return le_bFlagsAndScs & maskLRScanSources; }
         DBTIME DbtimePage() const           { return le_dbtimePage; }
         DBTIME DbtimeCurrent() const        { return le_dbtimeCurrent; }
         ULONG UlChecksum() const            { return le_ulChksum; }
+        BOOL FObjidInvalid( void ) const    { return !!( le_bFlagsAndScs & fLRScanObjidInvalid ); }
 };
+
 
 PERSISTED
 class LRINSERT
@@ -2684,7 +2710,7 @@ ERR ErrLGScanCheck(
     _In_    const DBTIME    dbtimePage,
     _In_    const DBTIME    dbtimeCurrent,
     _In_    const ULONG     ulChecksum,
-    _In_    const BOOL      fScanCheck2Supported,
+    _In_    const BOOL      fObjidInvalid,
     _In_    LGPOS* const    plgposLogRec = NULL );
 
 ERR ErrLGPageMove(

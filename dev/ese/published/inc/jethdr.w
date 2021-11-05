@@ -652,7 +652,7 @@ typedef void (JET_API *JET_SPCATCALLBACK)( _In_ const unsigned long pgno, _In_ c
 #define JET_efvShrinkEof                                    9100    //  Added lrtypShrinkDB2, which changes the the meaning of cpgShrunk in the existing lrtypShrinkDB and how it is replayed.
 #define JET_efvLogNewPage                                   9120    //  Added lrtypNewPage, which logs new page operations to better handle rolling page incomplete operations that require new pages.
 #define JET_efvRootPageMove                                 9140    //  Added support for moving tree roots and their respective space tree roots (including new lrtypRootPageMove and lrtypSignalAttachDb).
-#define JET_efvScanCheck2                                   9160    //  Added new log record lrtypScanCheck2 to allow for for reporting of the initiator of the ScanCheck log record.
+#define JET_efvScanCheck2                                   9160    //  Added new log record lrtypScanCheck2 to allow for reporting of the initiator of the ScanCheck log record.
 #define JET_efvLgposLastResize                              9180    //  Stamps the log position of the last database resize operation to the database header.
 #define JET_efvShelvedPages                                 9200    //  Added the concept of shelved pages (available or leaked pages beyond EOF).
 #define JET_efvShelvedPagesRevert                           9220    //  Reverts JET_efvShelvedPages, with additional code to make it a safe revert.
@@ -668,6 +668,7 @@ typedef void (JET_API *JET_SPCATCALLBACK)( _In_ const unsigned long pgno, _In_ c
 #define JET_efvLz4Compression                               9420    //  Adds support for compressing/decompressing data using Lz4.
 // 9440 being skipped due to revert of a bad deployed build
 #define JET_efvRBSNonRevertableTableDeletes                 9460    //  Adds support for non-revertable table deletes. The active will stop logging extent freed LR for all freed extent but if available lag doesn't support it yet, shouldn't be allowed.
+#define JET_efvScanCheck2Flags                              9480    //  The byte le_bSource in ScanCheck2 LR is split into 3 components and changed to le_bFlagsAndScs. The highest bit is used for objidInvalid flag. The next 5 bits are left unused (for now) and the lower 2 bits are used for ScanCheckSource.
 
 // Special format specifiers here
 #define JET_efvUseEngineDefault             (0x40000001)    //  Instructs the engine to use the maximal default supported Engine Format Version. (default)
@@ -4055,8 +4056,9 @@ typedef enum
 
 // end_PubEsent
 
-#define JET_paramFlight_ExtentPageCountCacheVerifyOnly  114  //  Verify values read from the Extent Page Count Cache rather than just returning them.
+#define JET_paramFlight_ExtentPageCountCacheVerifyOnly  114 //  Verify values read from the Extent Page Count Cache rather than just returning them.
 #define JET_paramFlight_EnablePgnoFDPLastSetTime        115 //  whether we want to enable setting PgnoPFDSetTime in the system table for a table entry.
+#define JET_paramFlight_EnableScanCheck2Flags           116 //  whether we want to enable logging flags in ScanCheck2 log record.
 
 //                                              120 //  JET_paramDBAPageAvailMin
 //                                              121 //  JET_paramDBAPageAvailThreshold
