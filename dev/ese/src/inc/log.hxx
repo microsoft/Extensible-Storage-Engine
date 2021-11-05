@@ -1911,7 +1911,7 @@ private:
         const PGNO      pgno,
         const OBJID     objid,
         const BOOL      fUninitPageOk,
-        const BOOL      fSkipSetRedoMapDbtimeRevert = false );
+        const BOOL      fSkipRecoveryOnDbtimeRevert = false );
     
     ERR ErrLGIAccessPageCheckDbtimes(
         _In_    PIB             * const ppib,

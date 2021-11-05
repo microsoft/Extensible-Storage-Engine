@@ -95,6 +95,96 @@ public:
     static VOID ProcessedDBMScanCheckRecord( const FMP * const pfmp );
 };
 
+typedef enum class ObjidState
+{
+    Unknown,    // In the object cache, it's the uninitialized state of an entry. In the calling code,
+                // it is used to signal that we don't know about the object's existence and it need
+                // to look it up in MSysObjids. It is expected that the accompanying FUCB* is pfucbNil.
+
+    Valid,      // The object is known to still exist. It is expected that the accompanying
+                // FUCB* is not pfucbNil.
+
+    ValidNoFUCB,// The object is known to still exist. But the accompanying FUCB* is pfucbNil.
+
+    Invalid,    // The object is known to have been deleted. It is expected that the accompanying
+                // FUCB* is pfucbNil.
+
+    ToBeDeleted // The object is to be deleted soon, so we can skip any cleanup opeartions.
+                // This happens when we revert a deleted table but just the root page and space tree pages.
+                // It is expected that the accompanying FUCB* is pfucbNil.
+} ois;
+
+//  ================================================================
+class DBMObjectCache
+    //  ================================================================
+    //
+    //  Cache object FUCBs for tables and LVs, and validity information for indices
+    //  that DBM is working on.
+    //
+    //  Even though secondary indices are also maintained in the cache, we don't
+    //  keep FUCBs for those objects cached, for two reasons:
+    //
+    //    1 - DBM does not need, at any point, to open an FUCB to a secondary index
+    //        to do its work.
+    //
+    //    2 - Index deletion might fail to the client because its FCB will have been
+    //        referenced by the cache. A similar situation exists for tables but, in
+    //        that case, table deletion handles it by waiting until all FUCBs have been
+    //        closed, which happens when DBM senses that a deletion is pending.
+    //
+    //  Also, note that, because FUCBs against secondary indices are not cached, there
+    //  is no way for this cache to detect that an index deletion is pending. That means
+    //  that a secondary index entry in the cache is useful to short-circuit looking for
+    //  the object when the index has already been deleted, but not the other way around.
+    //  This causes an MSysObjids lookup every time a secondary index page is found, which
+    //  is not as expensive as loading up an FUCB for a table, for example, and chances are
+    //  those few MSysObjids pages will remain in the cache. Clients that control progress
+    //  of DBM via suspend/resume already lose the entire cache in-between batches, so we
+    //  already have to refresh the cache periodically anyways.
+    //
+    //-
+{
+public:
+    DBMObjectCache();
+
+    // the destructor closes all the cached objects
+    ~DBMObjectCache();
+
+    ObjidState OisGetObjidState( const OBJID objid );
+
+    // Returns NULL if there is no cached FUCB
+    FUCB * PfucbGetCachedObject( const OBJID objid );
+
+    void CacheObjectFucb( FUCB * const pfucb, const OBJID objid );
+    void MarkCacheObjectInvalid( const OBJID objid );
+    void MarkCacheObjectToBeDeleted( const OBJID objid );
+    void MarkCacheObjectValidNoFUCB( const OBJID objid );
+
+    void CloseCachedObjectWithObjid( const OBJID objid );
+    void CloseCachedObjectsWithPendingDeletes();
+    void CloseAllCachedObjects();
+
+private:
+    bool FContainsObjid_( const OBJID objid ) const;
+    INT IndexOfObjid_( const OBJID objid ) const;
+    INT IndexOfLeastRecentlyUsedObject_( const OBJID objidIgnore = objidNil ) const;
+    void CloseObjectAt_( const INT index );
+
+private:
+    static const INT m_cobjectsMax = 64;
+    struct
+    {
+        OBJID objid;
+        ObjidState ois;
+        FUCB * pfucb;
+        __int64 ftAccess;
+    } m_rgstate[m_cobjectsMax];
+
+private:    // not implemented
+    DBMObjectCache( const DBMObjectCache& );
+    DBMObjectCache& operator=( const DBMObjectCache& );
+};
+
 //  ================================================================
 namespace DBMScanFactory
 //  ================================================================
@@ -127,6 +217,8 @@ ERR ErrDBMInit();
 void DBMTerm();
 
 //  Types and helpers for ScanCheck consumers.
+//  LRSCANCHECK2 uses only 2 bits for source. So scsMax shouldn't cross 3.
+//  Update LRSCANCHECK2 and use a new efv if we want to add more sources than that.
 //
 PERSISTED
 enum ScanCheckSource : BYTE
@@ -141,7 +233,8 @@ ERR ErrDBMEmitDivergenceCheck(
     const IFMP ifmp,
     const PGNO pgno,
     const ScanCheckSource scs,
-    const CPAGE* const pcpage );
+    const CPAGE* const pcpage,
+    const ObjidState objidState );
 ERR ErrDBMEmitEndScan( const IFMP ifmp );
 USHORT UsDBMGetCompressedLoggedChecksum( const CPAGE& cpage, const DBTIME dbtimeSeed );
 ULONG UlDBMGetCompressedLoggedChecksum( const CPAGE& cpage, const DBTIME dbtimeSeed );

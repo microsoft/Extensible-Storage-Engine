@@ -179,6 +179,7 @@ MSINTERNAL enum class MJET_PARAM
     AlternateDatabaseRecoveryPath = 113, // recovery-only - search for dirty-shutdown databases in specified location only
     Flight_ExtentPageCountCacheVerifyOnly = 114, // Verify values read from the Extent Page Count Cache rather than just returning them.
     Flight_EnablePgnoFDPLastSetTime = 115, // whether we want to enable setting PgnoPFDSetTime in the system table for a table entry.
+    Flight_EnableScanCheck2Flags = 116, // whether we want to enable logging flags in ScanCheck2 log record.
     IndexTupleIncrement = 132, // for tuple indexes, offset increment for each succesive tuple
     IndexTupleStart = 133, // for tuple indexes, offset to start tuple indexing
     KeyMost = 134, // read only maximum settable key length before key trunctation occurs

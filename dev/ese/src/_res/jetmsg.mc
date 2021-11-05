@@ -1441,6 +1441,7 @@ Language=English
 %1 (%2) %3Database %4: Page %5 in a B-Tree (ObjectId: %12) failed verification due to a timestamp mismatch at log position %10.  The remote ("before") timestamp persisted to the log record was %6 but the actual timestamp on the page was %7 (note: DbtimeCurrent = %9). This indicates the active node lost a flush (error %8). This problem is likely due to faulty hardware "losing" one or more flushes on this page sometime in the past on the active node. Please contact your hardware vendor for further assistance diagnosing the problem.%n
 Additional information:%n
 %tSource: %11%n
+%tSourceObjidInvalid: %13%n
 .
 
 MessageId=539
@@ -1449,6 +1450,7 @@ Language=English
 %1 (%2) %3Database %4: Page %5 in a B-Tree (ObjectId: %12) failed verification due to a timestamp mismatch at log position %10.  The remote ("before") timestamp persisted to the log record was %6 but the actual timestamp on the page was %7 (note: DbtimeCurrent = %9). This indicates the passive node lost a flush (error %8). This problem is likely due to faulty hardware "losing" one or more flushes on this page sometime in the past on the passive node. Please contact your hardware vendor for further assistance diagnosing the problem.%n
 Additional information:%n
 %tSource: %11%n
+%tSourceObjidInvalid: %13%n
 .
 
 MessageId=540
@@ -1457,6 +1459,7 @@ Language=English
 %1 (%2) %3Database %4: Page %5 in a B-Tree (ObjectId: %11) logical data checksum %6 failed to match logged scan check %7 checksum (seed %8) at log position %9.%n
 Additional information:%n
 %tSource: %10%n
+%tSourceObjidInvalid: %12%n
 .
 
 MessageId=541
@@ -1465,6 +1468,7 @@ Language=English
 %1 (%2) %3Database %4: Page %5 appears to be uninitialized at log position %8 on the current node.  The remote ("before") timestamp persisted to the log record was %6 (note: DbtimeCurrent = %7). This indicates the passive node lost a flush. This problem is likely due to faulty hardware "losing" one or more flushes on this page sometime in the past on the passive node. Please contact your hardware vendor for further assistance diagnosing the problem.%n
 Additional information:%n
 %tSource: %9%n
+%tSourceObjidInvalid: %10%n
 .
 
 MessageId=542
@@ -1495,6 +1499,7 @@ Language=English
 %1 (%2) %3Database %4: Page %5 in a B-Tree (ObjectId: %12) appears to be uninitialized at log position %10 on the remote node.  The remote ("before") timestamp persisted to the log record was %6 but the actual timestamp on the page was %7 (note: DbtimeCurrent = %9). This indicates the active node lost a flush (error %8). This problem is likely due to faulty hardware "losing" one or more flushes on this page sometime in the past on the active node. Please contact your hardware vendor for further assistance diagnosing the problem.%n
 Additional information:%n
 %tSource: %11%n
+%tSourceObjidInvalid: %13%n
 .
 
 MessageId=546
@@ -1573,6 +1578,7 @@ Language=English
 %1 (%2) %3Database %4: Page %5 was shown to be beyond the end of file at log position %8, while the remote ("before") timestamp persisted to the log record was %6 (note: DbtimeCurrent = %7).%n
 Additional information:%n
 %tSource: %9%n
+%tSourceObjidInvalid: %10%n
 .
 
 MessageId=558
@@ -1589,6 +1595,7 @@ Additional information:%n
 %tTimestamp persisted to the page: %7%n
 %tGlobal timestamp of the database: %8%n
 %tSource: %9%n
+%tSourceObjidInvalid: %11%n
 .
 
 MessageId=560
@@ -1601,6 +1608,7 @@ Additional information:%n
 %tTimestamp persisted to the log record: %6%n
 %tError code: %8%n
 %tSource: %11%n
+%tSourceObjidInvalid: %13%n
 .
 
 MessageId=561

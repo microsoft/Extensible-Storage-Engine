@@ -953,7 +953,7 @@ ERR ErrLGScanCheck(
     _In_    const DBTIME    dbtimePage,
     _In_    const DBTIME    dbtimeCurrent,
     _In_    const ULONG     ulChecksum,
-    _In_    const BOOL      fScanCheck2Supported,
+    _In_    const BOOL      fObjidInvalid,
     _In_    LGPOS* const    plgposLogRec )
 {
     INST * const pinst = PinstFromIfmp( ifmp );
@@ -1000,15 +1000,20 @@ ERR ErrLGScanCheck(
     }
 #endif  // !DEBUG
 
+    const BOOL fScanCheck2Supported         = g_rgfmp[ifmp].FEfvSupported( JET_efvScanCheck2 );
+    const BOOL fScanCheck2FlagsSupported    = g_rgfmp[ ifmp ].FEfvSupported( JET_efvScanCheck2Flags ) && BoolParam( pinst, JET_paramFlight_EnableScanCheck2Flags );
+
     DATA data;
     LRSCANCHECK2 lrscancheck2;
     LRSCANCHECK lrscancheck;
+
     if ( fScanCheck2Supported )
     {
         lrscancheck2.InitScanCheck(
-            (USHORT)g_rgfmp[ ifmp ].Dbid(),
+            (USHORT) g_rgfmp[ ifmp ].Dbid(),
             pgno,
             bSource,
+            fScanCheck2FlagsSupported ? fObjidInvalid : fFalse,
             dbtimePage,
             dbtimeCurrent,
             ulChecksum );
@@ -7130,6 +7135,9 @@ VOID LrToSz(
     char const *szSystemTask    = "SYS";
     char const *szNotSystemTask = "USR";    //  if not system, assume user
 
+    char const *szInvalidObjid      = "IVO";
+    char const *szNotInvalidObjid   = "VO";
+
     char const *rgszMergeType[] = { "None", "EmptyPage", "FullRight", "PartialRight", "EmptyTree", "FullLeft", "PartialLeft", "PageMove" };
 
     char const *szLossyUnicodePath  = " - LOST UNICODE CHARACTERS UNPRINTED";
@@ -8497,12 +8505,13 @@ VOID LrToSz(
             const LRSCANCHECK2 * const plrscancheck = (LRSCANCHECK2*)plr;
             //  this is in "classic after" (current), before (on page at read / "update" time) sort of format like 
             //  other LRs (lrtypInsert, lrtypReplace, etc) ... but remember we don't update any DBTIMEs w/ this LR
-            OSStrCbFormatA( rgchBuf, sizeof(rgchBuf), " %I64x,%I64x[%u:%lu],source:%hhu",
+            OSStrCbFormatA( rgchBuf, sizeof(rgchBuf), " %I64x,%I64x[%u:%lu],source:%hhu,%s",
                 plrscancheck->DbtimeCurrent(),
                 plrscancheck->DbtimePage(),
                 plrscancheck->Dbid(),
                 plrscancheck->Pgno(),
-                plrscancheck->BSource() );
+                plrscancheck->BSource(),
+                plrscancheck->FObjidInvalid() ? szInvalidObjid : szNotInvalidObjid );
             OSStrCbAppendA( szLR, cbLR, rgchBuf );
             break;
         }
