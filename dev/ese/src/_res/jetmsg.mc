@@ -1652,6 +1652,14 @@ Language=English
 %1 (%2) %3Database %4: Data in line %5 on pgno %6 in a B-Tree (ObjectId: %7, PgnoRoot: %8) failed to decrypt.
 .
 
+MessageId=567
+SymbolicName=REDO_REQUIRED_LOG_CORRUPT
+Language=English
+%1 (%2) %3The log file %4 in required range is damaged, invalid, or inaccessible (error %5) and cannot be used.
+%nDetails:
+%n%tLog directory: %6
+.
+
 
 ;// !!! ARE YOU SURE you're adding this in the right place !!! ???
 
