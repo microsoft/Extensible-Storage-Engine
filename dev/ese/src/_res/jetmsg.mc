@@ -3075,6 +3075,12 @@ Language=English
 %1 (%2) %3The revert snapshot file at "%4" was invalidated due to "%5".
 .
 
+MessageId=5008
+SymbolicName=RBS_LAG_AVAILABILITY_ID
+Language=English
+%1 (%2) %3The min RBS gen for given instance is %4 and max RBS gen is %5 and the oldest time we could revert to is %6. Total RBS disk space consumed is %7 and the free disk space is %8.
+.
+
 ;////////////////////////////////////////////////////////////////////////
 ;// DO NOT ADD HERE!  You're in the wrong Place. (well most likely)
 ;////////////////////////////////////////////////////////////////////////

@@ -4133,8 +4133,8 @@ HandleError:
     if ( fFDPExists )
     {
         WCHAR wszPgnoTable[16], wszObjidTable[16], wszErr[16];
-        OSStrCbFormatW( wszPgnoTable, sizeof(wszPgnoTable), L"%I64u", pgnoTable );
-        OSStrCbFormatW( wszObjidTable, sizeof(wszObjidTable), L"%I64u", objidTable );
+        OSStrCbFormatW( wszPgnoTable, sizeof(wszPgnoTable), L"%ld", pgnoTable );
+        OSStrCbFormatW( wszObjidTable, sizeof(wszObjidTable), L"%ld", objidTable );
         OSStrCbFormatW( wszErr, sizeof(wszErr), L"%d", err );
 
         BOOL fSuccess = err >= JET_errSuccess;

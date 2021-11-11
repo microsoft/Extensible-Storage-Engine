@@ -249,7 +249,7 @@ VOID RBSRecToSz( const RBSRecord *prbsrec, __out_bcount(cbRBSRec) PSTR szRBSRec,
                 dbtime = pHdr->dbtimeDirtied;
             }
 
-            OSStrCbFormatA( rgchBuf, sizeof(rgchBuf), " [%u:%lu],[%s%s%s%s],objid:%d,dbtime:%I64x",
+            OSStrCbFormatA( rgchBuf, sizeof(rgchBuf), " [%u:%lu],[%s%s%s%s],objid:%ld,dbtime:%I64x",
                 (DBID)  prbsdbpgrec->m_dbid,
                 (ULONG) prbsdbpgrec->m_pgno,
                 ( prbsdbpgrec->m_fFlags & fRBSPreimageCompressed ) ? "X" : "",
