@@ -4706,6 +4706,7 @@ public:
         HRT             hrtRecoveryForwardLogs;
         LGPOS           lgposRecoveryForwardLogs;
         INT             cReInits;                           //  Tells us how many times we see an init LR.
+        BOOL            fRBSOn;                             //  Tells us whether RBS was on during init.
 
         // Other things I can imagine being interesting:
         //  cdbAttachedMax - as in actually concurrently attached, 1 for most clients, 2 for Ex + MCDB for instance.
@@ -5263,6 +5264,7 @@ public:
 
     BOOL FRecovering() const;
     BOOL FComputeLogDisabled();
+    BOOL FComputeRBSOn() const;
 
     FCB **PpfcbAvailMRU()                       { return &m_pfcbAvailMRU; }
     FCB **PpfcbAvailLRU()                       { return &m_pfcbAvailLRU; }

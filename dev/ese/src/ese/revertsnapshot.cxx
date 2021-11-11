@@ -1136,6 +1136,12 @@ ERR CRevertSnapshot::ErrResetHdr( )
     FreeHdr( );
     Alloc( m_prbsfilehdrCurrent = (RBSFILEHDR *)PvOSMemoryPageAlloc( sizeof(RBSFILEHDR), NULL ) );
 
+    // Reset the file time create of current RBS gen on the cleaner.
+    if ( m_pinst->m_prbscleaner != NULL )
+    {
+        m_pinst->m_prbscleaner->SetFileTimeCreateCurrentRBS( 0 );
+    }
+
 HandleError:
     return err;
 }
@@ -1178,6 +1184,13 @@ ERR CRevertSnapshot::ErrSetRBSFileApi( _In_ IFileAPI *pfapiRBS )
 
     // Load the header in the snapshot based on the set file api
     Call( ErrUtilReadShadowedHeader( m_pinst, m_pinst->m_pfsapi, m_pfapiRBS, (BYTE*) m_prbsfilehdrCurrent, sizeof( RBSFILEHDR ), -1, urhfNoAutoDetectPageSize | urhfReadOnly | urhfNoEventLogging ) );
+
+    // Set the file time create of current RBS gen on the cleaner.
+    if ( m_pinst->m_prbscleaner != NULL )
+    {
+        m_pinst->m_prbscleaner->SetFileTimeCreateCurrentRBS( ConvertLogTimeToFileTime( &m_prbsfilehdrCurrent->rbsfilehdr.tmCreate ) );
+    }
+
     m_fInitialized = fTrue;
 
 HandleError:
@@ -1257,6 +1270,12 @@ ERR CRevertSnapshot::ErrRBSCreateOrLoadRbsGen(
     else
     {
         Call( ErrRBSLoadRbsGen( m_pinst, wszRBSAbsFilePath, lRBSGen, m_prbsfilehdrCurrent, &m_pfapiRBS ) );
+    }
+
+    // Set the file time create of current RBS gen on the cleaner.
+    if ( m_pinst->m_prbscleaner != NULL )
+    {
+        m_pinst->m_prbscleaner->SetFileTimeCreateCurrentRBS( ConvertLogTimeToFileTime( &m_prbsfilehdrCurrent->rbsfilehdr.tmCreate ) );
     }
 
     m_cNextFlushSegment = m_cNextWriteSegment = m_cNextActiveSegment = IsegRBSSegmentOfFileOffset( m_prbsfilehdrCurrent->rbsfilehdr.le_cbLogicalFileSize );
@@ -1425,6 +1444,13 @@ ERR CRevertSnapshot::ErrRBSInvalidate()
 
     // Reset signature so that next time we load the RBS is considered invalid.
     SIGResetSignature( &m_prbsfilehdrCurrent->rbsfilehdr.signRBSHdrFlush );
+
+    // Reset the file time create of current RBS gen on the cleaner.
+    if ( m_pinst->m_prbscleaner != NULL )
+    {
+        m_pinst->m_prbscleaner->SetFileTimeCreateCurrentRBS( 0 );
+    }
+
     return ErrUtilWriteRBSHeaders( m_pinst, m_pinst->m_pfsapi, NULL, m_prbsfilehdrCurrent, m_pfapiRBS );
 }
 
@@ -3599,14 +3625,16 @@ HandleError:
 
 ERR RBSCleaner::ErrDoOneCleanupPass()
 {
-    QWORD       cbFreeRBSDisk;
-    QWORD       cbTotalRBSDiskSpace;
+    QWORD       cbFreeRBSDisk               = 0;
+    QWORD       cbTotalRBSDiskSpace         = 0;
     ERR         err                         = JET_errSuccess;
     QWORD       cbMaxRBSSpaceLowDiskSpace   = m_prbscleanerconfig->CbMaxSpaceForRBSWhenLowDiskSpace();
     QWORD       cbLowDiskSpace              = m_prbscleanerconfig->CbLowDiskSpaceThreshold();
+    LONG        lRBSGenMax                  = 0;
+    LONG        lRBSGenMin                  = 0;
 
-    LONG        lRBSGenMax;
-    LONG        lRBSGenMin;
+    // Assume there is no lagness if there are no RBS.
+    __int64 ftOldestRevertPossible          = m_ftCreateCurrentRBS == 0 ? UtilGetCurrentFileTime() : m_ftCreateCurrentRBS;
 
     m_prbscleanerstate->SetPassStartTime();
 
@@ -3700,6 +3728,7 @@ ERR RBSCleaner::ErrDoOneCleanupPass()
             else
             {
                 // Nothing to delete in this pass. Exit this pass.
+                ftOldestRevertPossible = ConvertLogTimeToFileTime( &(rbsfilehdr.rbsfilehdr.tmCreate) );
                 goto HandleError;
             }
         }
@@ -3714,12 +3743,38 @@ ERR RBSCleaner::ErrDoOneCleanupPass()
         }
     }
 
-HandleError:
-    //OSTrace( JET_tracetagRBSCleaner, OSFormat( "\tError %d", err ) );
-    
-    // We have file not found error and RBS isn't enabled. Let's terminate cleanup for this instance.
-    if ( err == JET_errFileNotFound && !BoolParam( m_pinst, JET_paramEnableRBS ) )
+HandleError:  
+    if ( BoolParam( m_pinst, JET_paramEnableRBS ) )
     {
+        WCHAR wszTimeRevertPossible[ 32 ], wszDateRevertPossible[ 32 ];
+        size_t  cchRequired;
+
+        ErrUtilFormatFileTimeAsTimeWithSeconds( ftOldestRevertPossible, wszTimeRevertPossible, _countof( wszTimeRevertPossible ), &cchRequired );
+        ErrUtilFormatFileTimeAsDate( ftOldestRevertPossible, wszDateRevertPossible, _countof( wszDateRevertPossible ), &cchRequired );
+
+        // Log event for lagness of available lag.
+        const WCHAR* rgcwsz[] =
+        {
+            OSFormatW( L"%ld", lRBSGenMin ),
+            OSFormatW( L"%ld", lRBSGenMax ),
+            OSFormatW( L"%ws %ws", wszTimeRevertPossible, wszDateRevertPossible ),
+            OSFormatW( L"%I64u", cbTotalRBSDiskSpace ),
+            OSFormatW( L"%I64u", cbFreeRBSDisk )
+        };
+
+        UtilReportEvent(
+            eventInformation,
+            GENERAL_CATEGORY,
+            RBS_LAG_AVAILABILITY_ID,
+            5,
+            rgcwsz,
+            0,
+            NULL,
+            m_pinst );
+    }
+    else if ( err == JET_errFileNotFound )
+    {
+        // We have file not found error and RBS isn't enabled. Let's terminate cleanup for this instance.
         m_msigRBSCleanerStop.Set();
     }
 

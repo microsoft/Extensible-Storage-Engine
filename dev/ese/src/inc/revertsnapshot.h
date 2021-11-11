@@ -620,6 +620,7 @@ public:
 
     ERR ErrStartCleaner( );
     VOID SetFirstValidGen( long lrbsgen );
+    VOID SetFileTimeCreateCurrentRBS( __int64 ftCreate );
     BOOL FIsCleanerRunning( ) const { return ( NULL != m_threadRBSCleaner ); }
 
 private:
@@ -628,6 +629,8 @@ private:
 
     volatile LONG                       m_lFirstValidRBSGen;
     volatile BOOL                       m_fValidRBSGenSet;
+
+    __int64                             m_ftCreateCurrentRBS;
 
     unique_ptr<IRBSCleanerIOOperator>   m_prbscleaneriooperator;
     unique_ptr<IRBSCleanerState>        m_prbscleanerstate;
@@ -661,6 +664,13 @@ INLINE VOID RBSCleaner::SetFirstValidGen( long lrbsgen )
         m_lFirstValidRBSGen = lrbsgen;
         m_fValidRBSGenSet = fTrue;
     }
+}
+
+// Set by main RBS thread when we create/roll/invalidate a snapshot
+//
+INLINE VOID RBSCleaner::SetFileTimeCreateCurrentRBS( __int64 ftCreate )
+{
+    m_ftCreateCurrentRBS = ftCreate;
 }
 
 INLINE BOOL RBSCleaner::FGenValid( long lrbsgen )

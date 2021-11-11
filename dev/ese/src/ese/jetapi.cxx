@@ -1864,7 +1864,14 @@ void CIsamSequenceDiagLog::SprintFixedData( _Out_writes_bytes_(cbFixedData) WCHA
             if ( FixedData().sInitData.cReInits )
             {
                 OSStrCbFormatW( pwszCurr, cbCurrLeft, L"cReInits = %d\n", FixedData().sInitData.cReInits );
+
+                cchUsed = LOSStrLengthW( pwszCurr );
+                pwszCurr += cchUsed;
+                cbCurrLeft -= ( cchUsed * 2 );
             }
+
+            OSStrCbFormatW( pwszCurr, cbCurrLeft, L"RBSOn = %d\n", (int) FixedData().sInitData.fRBSOn );
+
             cchUsed = LOSStrLengthW( pwszCurr );
             pwszCurr += cchUsed;
             cbCurrLeft -= ( cchUsed * 2 );
@@ -4634,6 +4641,26 @@ VOID INST::INSTSystemTerm()
 #endif
 }
 
+INLINE BOOL INST::FComputeRBSOn() const
+{
+    if ( !BoolParam( this, JET_paramEnableRBS ) )
+    {
+        return fFalse;
+    }
+
+    for ( DBID dbid = dbidUserLeast; dbid < dbidMax; dbid++ )
+    {
+        if ( m_mpdbidifmp[ dbid ] >= g_ifmpMax )
+            continue;
+
+        if ( g_rgfmp[ m_mpdbidifmp[ dbid ] ].FRBSOn() )
+        {
+            return fTrue;
+        }
+    }
+
+    return fFalse;
+}
 
 //  ICF for our JET instance names
 
@@ -21285,6 +21312,8 @@ LOCAL JET_ERR JetInitEx(
     CallJ( ErrInitComplete( JET_INSTANCE( pinst ),
                             prstInfo,
                             grbit ), TermAlloc );
+
+    pinst->m_isdlInit.FixedData().sInitData.fRBSOn = pinst->FComputeRBSOn();
 
     Assert( err >= 0 );
 
