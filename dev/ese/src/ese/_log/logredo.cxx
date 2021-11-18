@@ -1592,6 +1592,7 @@ ERR LOG::ErrLGRIInitSession(
         // We will initialize the revert snapshot from Rstmap during LGRIInitSession.
         // Also, check if we need to roll the snapshot and roll it if required.
         Call( CRevertSnapshotForAttachedDbs::ErrRBSInitFromRstmap( m_pinst ) );
+        Call( ErrFaultInjection( 72130 ) );
 
         // If required range was a problem or if db's are not on the required efv m_prbs would be null in ErrRBSInitFromRstmap
         if ( m_pinst->m_prbs && m_pinst->m_prbs->FRollSnapshot() )

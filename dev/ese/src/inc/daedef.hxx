@@ -3119,7 +3119,7 @@ INLINE VOID DBFILEHDR::SetDbstate( const ULONG dbstate, const LONG lGenMin, cons
         case JET_dbstateCleanShutdown:
             AssertRTL( 0 == lGenMin );
             AssertRTL( 0 == lGenMax );
-            AssertRTL( NULL == plogtimeCurrent );
+            AssertRTL( NULL == plogtimeCurrent || !plogtimeCurrent->FIsSet() );
             break;
         case JET_dbstateBeingConverted:
             AssertRTL( 0 == lGenMin );

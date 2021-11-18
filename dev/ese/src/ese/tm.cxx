@@ -1040,6 +1040,7 @@ ERR ISAMAPI ErrIsamInit(    JET_INSTANCE    inst,
         // We will initialize the revert snapshot from Rstmap during LGRIInitSession.
         // Also, check if we need to roll the snapshot and roll it if required.
         CallJ( CRevertSnapshotForAttachedDbs::ErrRBSInitFromRstmap( pinst ), TermIT );
+        CallJ( ErrFaultInjection( 72130 ), TermIT );
 
         // If required range was a problem or if db's are not on the required efv m_prbs would be null in ErrRBSInitFromRstmap
         if ( pinst->m_prbs && pinst->m_prbs->FRollSnapshot() )

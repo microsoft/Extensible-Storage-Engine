@@ -3939,7 +3939,7 @@ HandleError:
 
 // Initialize the database revert context.
 //
-ERR CRBSDatabaseRevertContext::ErrRBSDBRCInit( RBSATTACHINFO* prbsattachinfo, SIGNATURE* psignRBSHdrFlush, CPG cacheSize )
+ERR CRBSDatabaseRevertContext::ErrRBSDBRCInit( RBSATTACHINFO* prbsattachinfo, SIGNATURE* psignRBSHdrFlush, CPG cacheSize, BOOL fSkipHdrFlushCheck )
 {
     ERR     err = JET_errSuccess;
     CAutoWSZ wszDatabaseName;
@@ -3978,7 +3978,8 @@ ERR CRBSDatabaseRevertContext::ErrRBSDBRCInit( RBSATTACHINFO* prbsattachinfo, SI
 
     // We will allow for FRBSCheckForDbConsistency to fail if we are already in the process of applying revert snapshot.
     if ( memcmp( &m_pdbfilehdr->signDb, &prbsattachinfo->signDb, sizeof( SIGNATURE ) ) != 0 ||
-         !FRBSCheckForDbConsistency( &m_pdbfilehdr->signDbHdrFlush, &m_pdbfilehdr->signRBSHdrFlush, &prbsattachinfo->signDbHdrFlush,  psignRBSHdrFlush ) )
+         ( !FRBSCheckForDbConsistency( &m_pdbfilehdr->signDbHdrFlush, &m_pdbfilehdr->signRBSHdrFlush, &prbsattachinfo->signDbHdrFlush,  psignRBSHdrFlush ) &&
+           !fSkipHdrFlushCheck ) )
     {
         Error( ErrERRCheck( JET_errRBSRCInvalidRBS ) );
     }
@@ -4005,7 +4006,7 @@ HandleError:
 
 // Prepares the database for revert.
 //
-ERR CRBSDatabaseRevertContext::ErrSetDbstateForRevert( ULONG rbsrchkstate, LOGTIME logtimeRevertTo )
+ERR CRBSDatabaseRevertContext::ErrSetDbstateForRevert( ULONG rbsrchkstate, LOGTIME logtimeRevertTo, SIGNATURE* psignRBSHdrFlushMaxGen )
 {
     Assert( m_pdbfilehdr );
     Assert( m_wszDatabaseName );
@@ -4022,10 +4023,19 @@ ERR CRBSDatabaseRevertContext::ErrSetDbstateForRevert( ULONG rbsrchkstate, LOGTI
     //
     if ( m_pdbfilehdr->Dbstate() != JET_dbstateRevertInProgress )
     {
+        m_currentDbHeaderState = m_pdbfilehdr->Dbstate();
         m_pdbfilehdr->SetDbstate( JET_dbstateRevertInProgress, lGenerationInvalid, lGenerationInvalid, NULL, fTrue );
         m_pdbfilehdr->le_ulRevertCount++;
         LGIGetDateTime( &m_pdbfilehdr->logtimeRevertFrom );
         m_pdbfilehdr->le_ulRevertPageCount = 0;
+
+        // Usually db header should have it set unless we crashed before the first flush on db header after the snapshot was created. 
+        // After we do the below update to db header state, dbhdr flush will mismatch. So we need to make sure RBSHdr flush signature still matches.
+        if ( !FSIGSignSet( &m_pdbfilehdr->signRBSHdrFlush ) )
+        {
+            Assert( FSIGSignSet( psignRBSHdrFlushMaxGen ) );
+            UtilMemCpy( &m_pdbfilehdr->signRBSHdrFlush, psignRBSHdrFlushMaxGen, sizeof( SIGNATURE ) );
+        }
     }
 
     // This time might change if the a revert fails and if the user decide to revert to further in the past.
@@ -4044,11 +4054,55 @@ HandleError:
 ERR CRBSDatabaseRevertContext::ErrSetDbstateAfterRevert( SIGNATURE* psignRbsHdrFlush )
 {
     Assert( m_pdbfilehdr );
-    Assert( m_pdbfilehdrFromRBS );
 
-    m_pdbfilehdrFromRBS->le_ulRevertCount                           = m_pdbfilehdr->le_ulRevertCount;
-    m_pdbfilehdrFromRBS->le_ulRevertPageCount                       = m_pdbfilehdr->le_ulRevertPageCount;
-    m_pdbfilehdrFromRBS->le_lgposCommitBeforeRevert                 = lgposMax;
+    // It is possible we crashed at the end of revert just after setting dbheader for one of the dbs.
+    // So we will skip setting it for this db and proceed with the next.
+    if ( m_pdbfilehdr->le_dbstate != JET_dbstateRevertInProgress )
+    {
+        return JET_errSuccess;
+    }
+
+    ERR err                                 = JET_errSuccess;
+    DBFILEHDR*  dbfilehdrToSet              = m_pdbfilehdrFromRBS == NULL ? m_pdbfilehdr : m_pdbfilehdrFromRBS;
+    LONG        lgenCommitBeforeRevertPrev  = m_pdbfilehdr->le_lgposCommitBeforeRevert.le_lGeneration;
+    LONG        lGenMaxRequiredPrev         = m_pdbfilehdr->le_lGenMaxRequired;
+
+    if ( m_pdbfilehdrFromRBS == NULL )
+    {
+        Call( ErrFaultInjection( 62138 ) );
+
+        // Possible if we revert was interrupted after we started the revert.
+        // We will have to generate the db state for this case.
+        // Since it is already rare for m_pdbfilehdrFromRBS to be not set, we won't go to the extra effort of having db state info in revert checkpoint file.
+        if ( m_currentDbHeaderState == JET_dbstateRevertInProgress || ( m_currentDbHeaderState == 0 && m_pdbfilehdr->Dbstate() == JET_dbstateRevertInProgress ) )
+        {
+            if ( m_pdbfilehdr->le_lGenMaxRequired == 0 )
+            {
+                Assert( m_pdbfilehdr->le_lGenMinRequired == 0 );
+                m_currentDbHeaderState = JET_dbstateCleanShutdown;
+            }
+            else
+            {
+                m_currentDbHeaderState = JET_dbstateDirtyShutdown;
+            }
+        }
+
+        m_pdbfilehdr->SetDbstate( m_currentDbHeaderState, m_pdbfilehdr->le_lGenMinRequired, m_pdbfilehdr->le_lGenMaxRequired, &m_pdbfilehdr->logtimeGenMaxRequired, fTrue );
+    }
+    else
+    {
+        Call( ErrFaultInjection( 23171 ) );
+
+        dbfilehdrToSet->le_ulRevertCount            = m_pdbfilehdr->le_ulRevertCount;
+        dbfilehdrToSet->le_ulRevertPageCount        = m_pdbfilehdr->le_ulRevertPageCount;
+
+        memcpy( &dbfilehdrToSet->logtimeRevertFrom, &m_pdbfilehdr->logtimeRevertFrom, sizeof( LOGTIME ) );
+        memcpy( &dbfilehdrToSet->logtimeRevertTo, &m_pdbfilehdr->logtimeRevertTo, sizeof( LOGTIME ) );
+    }
+
+    memcpy( &dbfilehdrToSet->signRBSHdrFlush, psignRbsHdrFlush, sizeof( SIGNATURE ) );
+
+    dbfilehdrToSet->le_lgposCommitBeforeRevert  = lgposMax;
 
     // lGenMaxCommitted is now flushed only when max required range is updated.
     // But it is possible we have snapshotted new pages in the LLR range.
@@ -4056,21 +4110,16 @@ ERR CRBSDatabaseRevertContext::ErrSetDbstateAfterRevert( SIGNATURE* psignRbsHdrF
     // 
     // We will also do the max of lgposCommitBeforeRevert currently set on db header and the newly computed value 
     // to account for back to back reverts taking place close to each other.
+    // (+1 is for JET_paramWaypointLatency)
     //
-    m_pdbfilehdrFromRBS->le_lgposCommitBeforeRevert.le_lGeneration  = 
-        max( m_pdbfilehdr->le_lgposCommitBeforeRevert.le_lGeneration, 1 + m_pdbfilehdr->le_lGenMaxRequired + (LONG)UlParam( m_pinst, JET_paramElasticWaypointLatency ) );
+    dbfilehdrToSet->le_lgposCommitBeforeRevert.le_lGeneration  =
+        max( lgenCommitBeforeRevertPrev, 1 + lGenMaxRequiredPrev + (LONG)UlParam( m_pinst, JET_paramElasticWaypointLatency ) );
 
-    Assert( m_pdbfilehdrFromRBS->le_lgposCommitBeforeRevert.le_lGeneration >= m_pdbfilehdr->le_lGenMaxCommitted );
-
-    memcpy( &m_pdbfilehdrFromRBS->logtimeRevertFrom, &m_pdbfilehdr->logtimeRevertFrom, sizeof( LOGTIME ) );
-    memcpy( &m_pdbfilehdrFromRBS->logtimeRevertTo, &m_pdbfilehdr->logtimeRevertTo, sizeof( LOGTIME ) );
-    memcpy( &m_pdbfilehdrFromRBS->signRBSHdrFlush, psignRbsHdrFlush, sizeof( SIGNATURE ) );
-
-    ERR err = JET_errSuccess;
+    Assert( dbfilehdrToSet->le_lgposCommitBeforeRevert.le_lGeneration >= m_pdbfilehdr->le_lGenMaxCommitted );
 
     if ( m_pfm )
     {
-        if ( m_pdbfilehdrFromRBS->Dbstate() == JET_dbstateCleanShutdown )
+        if ( dbfilehdrToSet->Dbstate() == JET_dbstateCleanShutdown )
         {
             Call( m_pfm->ErrCleanFlushMap() );
         }
@@ -4078,8 +4127,8 @@ ERR CRBSDatabaseRevertContext::ErrSetDbstateAfterRevert( SIGNATURE* psignRbsHdrF
         {
             // fixup DB header state
             //
-            m_pfm->SetDbGenMinRequired( m_pdbfilehdrFromRBS->le_lGenMinRequired );
-            m_pfm->SetDbGenMinConsistent( m_pdbfilehdrFromRBS->le_lGenMinConsistent );
+            m_pfm->SetDbGenMinRequired( dbfilehdrToSet->le_lGenMinRequired );
+            m_pfm->SetDbGenMinConsistent( dbfilehdrToSet->le_lGenMinConsistent );
 
             // flush the flush map
             //
@@ -4088,8 +4137,10 @@ ERR CRBSDatabaseRevertContext::ErrSetDbstateAfterRevert( SIGNATURE* psignRbsHdrF
     }
 
     //  write the header back to the database
-    Call( ErrUtilWriteUnattachedDatabaseHeaders( m_pinst, m_pinst->m_pfsapi, m_wszDatabaseName, m_pdbfilehdrFromRBS, m_pfapiDb, m_pfm, fFalse ) );
+    Call( ErrUtilWriteUnattachedDatabaseHeaders( m_pinst, m_pinst->m_pfsapi, m_wszDatabaseName, dbfilehdrToSet, m_pfapiDb, m_pfm, fFalse ) );
     Call( ErrUtilFlushFileBuffers( m_pfapiDb, iofrRBSRevertUtil ) );
+
+    Call( ErrFaultInjection( 82173 ) );
 
 HandleError:
     return err;
@@ -4114,8 +4165,6 @@ ERR CRBSDatabaseRevertContext::ErrRBSCaptureDbHdrFromRBS( RBSDbHdrRecord* prbsdb
 
     // Change some db header states as per current db header.
     DBFILEHDR* pdbfilehdr               = (DBFILEHDR*) prbsdbhdrrec->m_rgbHeader;
-
-    Assert( m_pdbfilehdr->le_dbstate == JET_dbstateRevertInProgress );
 
     UtilMemCpy( m_pdbfilehdrFromRBS, pdbfilehdr, sizeof( DBFILEHDR ) );
 
@@ -4804,7 +4853,9 @@ ERR CRBSRevertContext::ErrRBSDBRCInitFromAttachInfo( const BYTE* pbRBSAttachInfo
 
             m_rgprbsdbrcAttached[ ++m_irbsdbrcMaxInUse ] = prbsdbrc;
 
-            Call( prbsdbrc->ErrRBSDBRCInit( prbsattachinfo, psignRBSHdrFlush, m_cpgCacheMax ) );
+            // It's possible we crash right after we set RBS hdr flush on db header in which case the hdr won't match and we won't be able to complete revert.
+            // So we will skip hdr flush checks if we are already in the final step of the revert.
+            Call( prbsdbrc->ErrRBSDBRCInit( prbsattachinfo, psignRBSHdrFlush, m_cpgCacheMax, m_prbsrchk->rbsrchkfilehdr.le_rbsrevertstate == JET_revertstateRemoveSnapshot ) );
             prbsdbrc->SetDbTimePrevDirtied( prbsattachinfo->DbtimePrevDirtied() );
         }
         else if ( m_rgprbsdbrcAttached[ irbsdbrc ]->DbTimePrevDirtied() != prbsattachinfo->DbtimeDirtied() )
@@ -4847,6 +4898,11 @@ ERR CRBSRevertContext::ErrComputeRBSRangeToApply( PCWSTR wszRBSAbsRootDirPath, L
         Call( ErrRBSLoadRbsGen( m_pinst, wszRBSAbsFilePath, rbsGen, &rbsfilehdr, &pfileapi ) );
         Call( ErrRBSDBRCInitFromAttachInfo( rbsfilehdr.rgbAttach, &rbsfilehdr.rbsfilehdr.signRBSHdrFlush ) );
 
+        if ( rbsGen == lRBSGenMax )
+        {
+            UtilMemCpy( &m_signRBSHdrFlushMaxGen, &rbsfilehdr.rbsfilehdr.signRBSHdrFlush, sizeof( SIGNATURE ) );
+        }
+
         if ( LOGTIME::CmpLogTime( rbsfilehdr.rbsfilehdr.tmCreate, ltRevertExpected ) > 0 )
         {
             // If there is no previous RBS gen time set, the previous RBS gen is probably invalid, so we can't revert past this point.
@@ -4873,8 +4929,9 @@ ERR CRBSRevertContext::ErrComputeRBSRangeToApply( PCWSTR wszRBSAbsRootDirPath, L
         }
         else
         {
-            m_lRBSMinGenToApply = rbsfilehdr.rbsfilehdr.le_lGeneration;
-            m_lRBSMaxGenToApply = lRBSGenMax;
+            m_lRBSMinGenToApply     = rbsfilehdr.rbsfilehdr.le_lGeneration;
+            m_lRBSMaxGenToApply     = lRBSGenMax;
+            m_lRBSCurrentGenToApply = lRBSGenMax;
             UtilMemCpy( pltRevertActual, &rbsfilehdr.rbsfilehdr.tmCreate, sizeof( LOGTIME ) );
             break;
         }
@@ -4944,8 +5001,9 @@ VOID CRBSRevertContext::UpdateRBSGenToApplyFromCheckpoint()
 
     if ( m_prbsrchk->rbsrchkfilehdr.le_rbsrevertstate != JET_revertstateNone )
     {
-        m_lRBSMaxGenToApply = m_prbsrchk->rbsrchkfilehdr.le_rbsposCheckpoint.le_lGeneration;
-        Assert( m_lRBSMaxGenToApply >= m_lRBSMinGenToApply );
+        m_lRBSCurrentGenToApply = m_prbsrchk->rbsrchkfilehdr.le_rbsposCheckpoint.le_lGeneration;
+        Assert( m_lRBSMaxGenToApply >= m_lRBSCurrentGenToApply );
+        Assert( m_lRBSCurrentGenToApply >= m_lRBSMinGenToApply );
     }
 }
 
@@ -5243,7 +5301,7 @@ ERR CRBSRevertContext::ErrApplyRBSRecord( RBSRecord* prbsrec, BOOL fCaptureDbHdr
         case rbsrectypeDbHdr:
         {
             // TODO SOMEONE: Once we have checkpoint for specific RBS position we need to probably capture this in our Revert checkpoint file.
-            if ( !fCaptureDbHdrFromRBS )
+            if ( !fCaptureDbHdrFromRBS && !fDbHeaderOnly )
             {
                 break;
             }
@@ -5447,6 +5505,19 @@ HandleError:
     return err;
 }
 
+// Checks whether all the DB reverts have their respective headers captured.
+BOOL CRBSRevertContext::FAllDbHeaderCaptured()
+{
+    BOOL fAllCaptured = fTrue;
+
+    for ( IRBSDBRC irbsdbrc = 0; irbsdbrc <= m_irbsdbrcMaxInUse; ++irbsdbrc )
+    {
+        fAllCaptured = fAllCaptured && ( m_rgprbsdbrcAttached[ irbsdbrc ]->PDbfilehdrFromRBS() != NULL );
+    }
+
+    return fAllCaptured;
+}
+
 // Apply given RBS gen to the databases.
 //
 // fDbHeaderOnly - We will go through the just to capture the database header. fDbHeaderOnly should be passed only for the lowest RBS gen we applied.
@@ -5467,7 +5538,7 @@ ERR CRBSRevertContext::ErrRBSGenApply( LONG lRBSGen, RBSFILEHDR* prbsfilehdr, BO
     RBS_POS             rbspos                  = { 0, lRBSGen };
     BOOL                fGivenDbfilehdrCaptured = fFalse;
 
-    Assert( lRBSGen == m_lRBSMinGenToApply || !fDbHeaderOnly );
+    Assert( !fDbHeaderOnly || !FAllDbHeaderCaptured() );
     Assert( m_irbsdbrcMaxInUse >= 0 );
 
     (*m_pcprintfRevertTrace)( "RBSGen - %ld, DbHeaderOnly - %ld, UseBackupDir - %ld.\r\n", lRBSGen, fDbHeaderOnly, fUseBackupDir );
@@ -5488,9 +5559,8 @@ ERR CRBSRevertContext::ErrRBSGenApply( LONG lRBSGen, RBSFILEHDR* prbsfilehdr, BO
     Assert( prbs->RBSFileHdr() );
 
     // We will copy and return rbs file header for the last snapshot we are applying.
-    if ( lRBSGen == m_lRBSMinGenToApply )
+    if ( lRBSGen == m_lRBSMinGenToApply && prbsfilehdr != NULL )
     {
-        Assert( prbsfilehdr );
         UtilMemCpy( prbsfilehdr, prbs->RBSFileHdr(), sizeof( RBSFILEHDR ) );
     }
 
@@ -5517,19 +5587,9 @@ ERR CRBSRevertContext::ErrRBSGenApply( LONG lRBSGen, RBSFILEHDR* prbsfilehdr, BO
 
         // We just want to go through the RBS till we capture the database header for all the databases attached.
         // If the current record was db file header record and was captured, we will check if we are done and break out of the loop.
-        if ( fDbHeaderOnly && fGivenDbfilehdrCaptured )
+        if ( fDbHeaderOnly && fGivenDbfilehdrCaptured && FAllDbHeaderCaptured() )
         {
-            BOOL fAllCaptured = fTrue;
-
-            for ( IRBSDBRC irbsdbrc = 0; irbsdbrc <= m_irbsdbrcMaxInUse; ++irbsdbrc )
-            {
-                fAllCaptured = fAllCaptured && m_rgprbsdbrcAttached[ irbsdbrc ]->PDbfilehdrFromRBS();
-            }
-
-            if ( fAllCaptured )
-            {
-                break;
-            }
+            break;
         }
 
         err = prbs->ErrGetNextRecord( &prbsRecord, &rbsposRecStart, wszErrorReason );
@@ -5585,9 +5645,15 @@ ERR CRBSRevertContext::ErrUpdateDbStatesAfterRevert( SIGNATURE* psignRbsHdrFlush
     Assert( m_prbsrchk );
     Assert( m_prbsrchk->rbsrchkfilehdr.le_rbsrevertstate == JET_revertstateRemoveSnapshot );
 
+    // We are the end of the revert and some databases don't have their header captured. We will go through the next RBS generation and capture it from that.
+    for ( LONG lRBSGen = m_lRBSMinGenToApply; lRBSGen <= m_lRBSMaxGenToApply && !FAllDbHeaderCaptured(); ++lRBSGen )
+    {
+        Call( ErrRBSGenApply( lRBSGen, NULL, fTrue, fTrue ) );
+    }
+
     for ( IRBSDBRC irbsdbrc = 0; irbsdbrc <= m_irbsdbrcMaxInUse; ++irbsdbrc )
     {
-        m_rgprbsdbrcAttached[ irbsdbrc ]->ErrSetDbstateAfterRevert( psignRbsHdrFlush );
+        Call( m_rgprbsdbrcAttached[ irbsdbrc ]->ErrSetDbstateAfterRevert( psignRbsHdrFlush ) );
     }
 
 HandleError:
@@ -5726,9 +5792,10 @@ HandleError:
 
 ERR CRBSRevertContext::ErrExecuteRevert( JET_GRBIT grbit, JET_RBSREVERTINFOMISC* prbsrevertinfo )
 {
-    Assert( m_lRBSMaxGenToApply > 0 );
+    Assert( m_lRBSMaxGenToApply >= m_lRBSCurrentGenToApply );
+    Assert( m_lRBSCurrentGenToApply > 0 );
     Assert( m_lRBSMinGenToApply > 0 );
-    Assert( m_lRBSMinGenToApply <= m_lRBSMaxGenToApply );
+    Assert( m_lRBSMinGenToApply <= m_lRBSCurrentGenToApply );
 
     size_t  cchRequired;
     LittleEndian<QWORD> le_cPagesRevertedCurRBSGen;
@@ -5771,12 +5838,12 @@ ERR CRBSRevertContext::ErrExecuteRevert( JET_GRBIT grbit, JET_RBSREVERTINFOMISC*
             // Set all required databases' state to JET_dbstateRevertInProgress
             for ( IRBSDBRC irbsdbrc = 0; irbsdbrc <= m_irbsdbrcMaxInUse; ++irbsdbrc )
             {
-                Call( m_rgprbsdbrcAttached[ irbsdbrc ]->ErrSetDbstateForRevert( m_prbsrchk->rbsrchkfilehdr.le_rbsrevertstate, m_ltRevertTo ) );
+                Call( m_rgprbsdbrcAttached[ irbsdbrc ]->ErrSetDbstateForRevert( m_prbsrchk->rbsrchkfilehdr.le_rbsrevertstate, m_ltRevertTo, &m_signRBSHdrFlushMaxGen ) );
             }
 
-            for ( LONG lRBSGen = m_lRBSMaxGenToApply; lRBSGen >= m_lRBSMinGenToApply; --lRBSGen )
+            while( m_lRBSCurrentGenToApply >= m_lRBSMinGenToApply )
             {
-                Call( ErrRBSGenApply( lRBSGen, &rbsfilehdr, fFalse, fFalse ) );
+                Call( ErrRBSGenApply( m_lRBSCurrentGenToApply, &rbsfilehdr, fFalse, fFalse ) );
 
                 // Reset bit map state once we have completed applying a revert snapshot.
                 for ( IRBSDBRC irbsdbrc = 0; irbsdbrc <= m_irbsdbrcMaxInUse; ++irbsdbrc )
@@ -5788,6 +5855,8 @@ ERR CRBSRevertContext::ErrExecuteRevert( JET_GRBIT grbit, JET_RBSREVERTINFOMISC*
                 {
                     Error( ErrERRCheck( JET_errRBSRCRevertCancelled ) );
                 }
+
+                --m_lRBSCurrentGenToApply;
             }
 
             // We will keep rest of the states the same and update only the state.
