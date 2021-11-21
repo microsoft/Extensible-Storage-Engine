@@ -1912,7 +1912,7 @@ DWORD IOMgrIOPatrolDogThread( DWORD_PTR dwContext )
         Assert( HungIOCtx.cmsecLongestOutstanding == 0 );
         // we happen to know the first element should be OffsetOfHIIC(), check that as
         // to be sure the CInvasiveList .ctor is getting called on our struct.
-        Expected( IOREQ::OffsetOfHIIC() == (size_t) *((void**)(&(HungIOCtx.ilHungIOs))) );
+        Expected( HungIOCtx.ilHungIOs.FEmpty() );
 
         //  Process all IOREQs in the pool
         //
