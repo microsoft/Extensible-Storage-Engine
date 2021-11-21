@@ -12215,16 +12215,14 @@ DEBUG_EXT( EDBGDumpInvasiveList )
                             rgbBuf
                             + ulOffset
                             + ( fFollowPrevPointer ?
-                                    0 :                 //  OffsetOf( CInvasiveList::CElement, m_pilePrev )
-                                    sizeof(VOID *) ) ); //  OffsetOf( CInvasiveList::CElement, m_pileNext )
+                                    0 :                 //  OffsetOf( CInvasiveList::CElement, m_pobjPrev )
+                                    sizeof(VOID *) ) ); //  OffsetOf( CInvasiveList::CElement, m_pobjNext )
 
         if ( NULL == pbDebuggee             //  should be impossible, but just in case
             || (VOID *)-1 == pbDebuggee )   //  this element is not actually in an invasive list
         {
             break;
         }
-
-        pbDebuggee -= ulOffset;
     }
 
     dprintf( "\nElements traversed: %d\n", cElements );

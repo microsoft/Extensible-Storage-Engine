@@ -1406,10 +1406,10 @@ class CInvasiveList
 
                 //  ctor / dtor
 
-                CElement() : m_pilePrev( (CElement*)-1 ), m_pileNext( (CElement*)-1 ) {}
+                CElement() : m_pobjPrev( (CObject*)-1 ), m_pobjNext( (CObject*)-1 ) {}
                 ~CElement() {}
 
-                BOOL FUninitialized() const { return ( ( m_pilePrev == (CElement*)-1 ) && ( m_pileNext == (CElement*)-1 ) ); }
+                BOOL FUninitialized() const { return ( ( m_pobjPrev == (CObject*)-1 ) && ( m_pobjNext == (CObject*)-1 ) ); }
 
             private:
 
@@ -1417,8 +1417,8 @@ class CInvasiveList
 
                 friend class CInvasiveList< CObject, OffsetOfILE >;
 
-                CElement*   m_pilePrev;
-                CElement*   m_pileNext;
+                CObject*    m_pobjPrev;
+                CObject*    m_pobjNext;
         };
 
     public:
@@ -1452,8 +1452,6 @@ class CInvasiveList
 
         void Empty();
 
-        CObject* Pnil() const { return _PobjFromPile( (COLL::CInvasiveList<CObject,OffsetOfILE>::CElement *)-1 ); }
-
     private:
 
         //  internal functions
@@ -1463,8 +1461,8 @@ class CInvasiveList
 
     private:
 
-        CElement*   m_pilePrevMost;
-        CElement*   m_pileNextMost;
+        CObject*    m_pobjPrevMost;
+        CObject*    m_pobjNextMost;
 };
 
 //  ctor
@@ -1492,8 +1490,8 @@ template< class CObject, PfnOffsetOf OffsetOfILE >
 inline CInvasiveList< CObject, OffsetOfILE >& CInvasiveList< CObject, OffsetOfILE >::
 operator=( const CInvasiveList& il )
 {
-    m_pilePrevMost  = il.m_pilePrevMost;
-    m_pileNextMost  = il.m_pileNextMost;
+    m_pobjPrevMost  = il.m_pobjPrevMost;
+    m_pobjNextMost  = il.m_pobjNextMost;
     return *this;
 }
 
@@ -1503,7 +1501,7 @@ template< class CObject, PfnOffsetOf OffsetOfILE >
 inline BOOL CInvasiveList< CObject, OffsetOfILE >::
 FEmpty() const
 {
-    return m_pilePrevMost == _PileFromPobj( NULL );
+    return m_pobjPrevMost == NULL;
 }
 
 //  returns fTrue if the specified object is a member of this list
@@ -1525,7 +1523,7 @@ FMember( const CObject* const pobj ) const
 
 #else  //  !DEBUG
 
-    return _PileFromPobj( pobj )->m_pilePrev != (CElement*)-1;
+    return _PileFromPobj( pobj )->m_pobjPrev != (CObject*)-1;
 
 #endif  //  DEBUG
 }
@@ -1536,7 +1534,7 @@ template< class CObject, PfnOffsetOf OffsetOfILE >
 inline CObject* CInvasiveList< CObject, OffsetOfILE >::
 Prev( CObject* const pobj ) const
 {
-    return _PobjFromPile( _PileFromPobj( pobj )->m_pilePrev );
+    return _PileFromPobj( pobj )->m_pobjPrev;
 }
 
 //  returns the next object to the given object in the list
@@ -1545,7 +1543,7 @@ template< class CObject, PfnOffsetOf OffsetOfILE >
 inline CObject* CInvasiveList< CObject, OffsetOfILE >::
 Next( CObject* const pobj ) const
 {
-    return _PobjFromPile( _PileFromPobj( pobj )->m_pileNext );
+    return _PileFromPobj( pobj )->m_pobjNext;
 }
 
 //  returns the prev-most object to the given object in the list
@@ -1554,7 +1552,7 @@ template< class CObject, PfnOffsetOf OffsetOfILE >
 inline CObject* CInvasiveList< CObject, OffsetOfILE >::
 PrevMost() const
 {
-    return _PobjFromPile( m_pilePrevMost );
+    return m_pobjPrevMost;
 }
 
 //  returns the next-most object to the given object in the list
@@ -1563,7 +1561,7 @@ template< class CObject, PfnOffsetOf OffsetOfILE >
 inline CObject* CInvasiveList< CObject, OffsetOfILE >::
 NextMost() const
 {
-    return _PobjFromPile( m_pileNextMost );
+    return m_pobjNextMost;
 }
 
 //  inserts the given object as the prev-most object in the list
@@ -1580,20 +1578,20 @@ InsertAsPrevMost( CObject* const pobj )
 
     //  this object had better not already be in any list
 
-    COLLAssert( pile->m_pilePrev == (CElement*)-1 );
-    COLLAssert( pile->m_pileNext == (CElement*)-1 );
+    COLLAssert( pile->m_pobjPrev == (CObject*)-1 );
+    COLLAssert( pile->m_pobjNext == (CObject*)-1 );
 
     //  the list is empty
 
-    if ( m_pilePrevMost == _PileFromPobj( NULL ) )
+    if ( m_pobjPrevMost == NULL )
     {
         //  insert this element as the only element in the list
 
-        pile->m_pilePrev            = _PileFromPobj( NULL );
-        pile->m_pileNext            = _PileFromPobj( NULL );
+        pile->m_pobjPrev    = NULL;
+        pile->m_pobjNext    = NULL;
 
-        m_pilePrevMost              = pile;
-        m_pileNextMost              = pile;
+        m_pobjPrevMost      = _PobjFromPile( pile );
+        m_pobjNextMost      = _PobjFromPile( pile );
     }
 
     //  the list is not empty
@@ -1602,12 +1600,12 @@ InsertAsPrevMost( CObject* const pobj )
     {
         //  insert this element at the prev-most position in the list
 
-        pile->m_pilePrev            = _PileFromPobj( NULL );
-        pile->m_pileNext            = m_pilePrevMost;
+        pile->m_pobjPrev                            = NULL;
+        pile->m_pobjNext                            = m_pobjPrevMost;
 
-        m_pilePrevMost->m_pilePrev  = pile;
+        _PileFromPobj( m_pobjPrevMost )->m_pobjPrev = _PobjFromPile( pile );
 
-        m_pilePrevMost              = pile;
+        m_pobjPrevMost                              = _PobjFromPile( pile );
     }
 }
 
@@ -1625,20 +1623,20 @@ InsertAsNextMost( CObject* const pobj )
 
     //  this object had better not already be in any list
 
-    COLLAssert( pile->m_pilePrev == (CElement*)-1 );
-    COLLAssert( pile->m_pileNext == (CElement*)-1 );
+    COLLAssert( pile->m_pobjPrev == (CObject*)-1 );
+    COLLAssert( pile->m_pobjNext == (CObject*)-1 );
 
     //  the list is empty
 
-    if ( m_pileNextMost == _PileFromPobj( NULL ) )
+    if ( m_pobjNextMost == NULL )
     {
         //  insert this element as the only element in the list
 
-        pile->m_pilePrev            = _PileFromPobj( NULL );
-        pile->m_pileNext            = _PileFromPobj( NULL );
+        pile->m_pobjPrev    = NULL;
+        pile->m_pobjNext    = NULL;
 
-        m_pilePrevMost              = pile;
-        m_pileNextMost              = pile;
+        m_pobjPrevMost      = _PobjFromPile( pile );
+        m_pobjNextMost      = _PobjFromPile( pile );
     }
 
     //  the list is not empty
@@ -1647,12 +1645,12 @@ InsertAsNextMost( CObject* const pobj )
     {
         //  insert this element at the next-most position in the list
 
-        pile->m_pilePrev            = m_pileNextMost;
-        pile->m_pileNext            = _PileFromPobj( NULL );
+        pile->m_pobjPrev                            = m_pobjNextMost;
+        pile->m_pobjNext                            = NULL;
 
-        m_pileNextMost->m_pileNext  = pile;
+        _PileFromPobj( m_pobjNextMost )->m_pobjNext = _PobjFromPile( pile );
 
-        m_pileNextMost              = pile;
+        m_pobjNextMost                              = _PobjFromPile( pile );
     }
 }
 
@@ -1667,11 +1665,11 @@ Insert( CObject* const pobj, CObject* const pobjNext )
 
     //  the next object had better already be in the list or the NULL object (insert as NextMost)
 
-    COLLAssert( ( pileNext == _PileFromPobj( NULL ) ) || FMember( pobjNext ) );
+    COLLAssert( pobjNext == NULL || FMember( pobjNext ) );
 
     //  insert as NextMost
 
-    if ( pileNext == _PileFromPobj( NULL ) )
+    if ( pobjNext == NULL )
     {
         InsertAsNextMost( pobj );
     }
@@ -1679,7 +1677,7 @@ Insert( CObject* const pobj, CObject* const pobjNext )
     {
         //  insert as PrevMost
 
-        if ( pileNext == m_pilePrevMost )
+        if ( pobjNext == m_pobjPrevMost )
         {
             InsertAsPrevMost( pobj );
         }
@@ -1695,18 +1693,18 @@ Insert( CObject* const pobj, CObject* const pobjNext )
 
             //  this object had better not already be in any list
 
-            COLLAssert( pile->m_pilePrev == (CElement*)-1 );
-            COLLAssert( pile->m_pileNext == (CElement*)-1 );
+            COLLAssert( pile->m_pobjPrev == (CObject*)-1 );
+            COLLAssert( pile->m_pobjNext == (CObject*)-1 );
 
             //  prev
 
-            pile->m_pilePrev = pileNext->m_pilePrev;
-            pile->m_pilePrev->m_pileNext = pile;
+            pile->m_pobjPrev = pileNext->m_pobjPrev;
+            _PileFromPobj( pile->m_pobjPrev )->m_pobjNext = pobj;
 
             //  next
 
-            pile->m_pileNext = pileNext;
-            pileNext->m_pilePrev = pile;
+            pile->m_pobjNext = pobjNext;
+            pileNext->m_pobjPrev = pobj;
         }
     }
 }
@@ -1725,38 +1723,38 @@ Remove( CObject* const pobj )
 
     //  there is an element after us in the list
 
-    if ( pile->m_pileNext != _PileFromPobj( NULL ) )
+    if ( pile->m_pobjNext != NULL )
     {
         //  fix up its prev element to be our prev element (if any)
 
-        pile->m_pileNext->m_pilePrev    = pile->m_pilePrev;
+        _PileFromPobj( pile->m_pobjNext )->m_pobjPrev = pile->m_pobjPrev;
     }
     else
     {
         //  set the next-most element to be our prev element (if any)
 
-        m_pileNextMost                  = pile->m_pilePrev;
+        m_pobjNextMost = pile->m_pobjPrev;
     }
 
     //  there is an element before us in the list
 
-    if ( pile->m_pilePrev != _PileFromPobj( NULL ) )
+    if ( pile->m_pobjPrev != NULL )
     {
         //  fix up its next element to be our next element (if any)
 
-        pile->m_pilePrev->m_pileNext    = pile->m_pileNext;
+        _PileFromPobj( pile->m_pobjPrev )->m_pobjNext = pile->m_pobjNext;
     }
     else
     {
         //  set the prev-most element to be our next element (if any)
 
-        m_pilePrevMost                  = pile->m_pileNext;
+        m_pobjPrevMost = pile->m_pobjNext;
     }
 
     //  mark ourself as not in any list
 
-    pile->m_pilePrev                    = (CElement*)-1;
-    pile->m_pileNext                    = (CElement*)-1;
+    pile->m_pobjPrev                    = (CObject*)-1;
+    pile->m_pobjNext                    = (CObject*)-1;
 }
 
 //  resets the list to the empty state
@@ -1765,8 +1763,8 @@ template< class CObject, PfnOffsetOf OffsetOfILE >
 inline void CInvasiveList< CObject, OffsetOfILE >::
 Empty()
 {
-    m_pilePrevMost  = _PileFromPobj( NULL );
-    m_pileNextMost  = _PileFromPobj( NULL );
+    m_pobjPrevMost  = NULL;
+    m_pobjNextMost  = NULL;
 }
 
 //  converts a pointer to an ILE to a pointer to the object
