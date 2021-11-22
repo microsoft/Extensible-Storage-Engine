@@ -11387,6 +11387,11 @@ ERR LOG::ErrLGRIRedoExtentFreed( const LREXTENTFREED * const plrextentfreed )
         g_rgfmp[ ifmp ].PLogRedoMapDbtimeRevert()->ClearPgno( pgnoFirst, pgnoFirst + cpgExtent - 1 );
     }
 
+    if ( g_rgfmp[ ifmp ].PLogRedoMapDbtimeRevertIgnore() )
+    {
+        g_rgfmp[ ifmp ].PLogRedoMapDbtimeRevertIgnore()->ClearPgno( pgnoFirst, pgnoFirst + cpgExtent - 1 );
+    }
+
     return JET_errSuccess;
 }
 
