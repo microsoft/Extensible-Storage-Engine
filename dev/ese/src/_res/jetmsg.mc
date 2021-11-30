@@ -1656,8 +1656,6 @@ MessageId=567
 SymbolicName=REDO_REQUIRED_LOG_CORRUPT
 Language=English
 %1 (%2) %3The log file %4 in required range is damaged, invalid, or inaccessible (error %5) and cannot be used.
-%nDetails:
-%n%tLog directory: %6
 .
 
 

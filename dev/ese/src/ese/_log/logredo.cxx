@@ -3824,28 +3824,31 @@ ERR LOG::ErrLGEvaluateDestructiveCorrectiveLogOptions(
         //  Nope, we are missing required files for consistency, bail ... we will 
         //  use the errCondition provided below as there is no way to correct for
         //  this error condition.
-        WCHAR szT1[16];
-        const WCHAR * rgszT[3];
-        rgszT[0] = m_pLogStream->LogName();
-        OSStrCbFormatW( szT1, sizeof( szT1 ), L"%d", errCondition );
-        rgszT[1] = szT1;
-        rgszT[2] = m_wszLogCurrent;
-        UtilReportEvent(    eventError,
-                            LOGGING_RECOVERY_CATEGORY,
-                            REDO_REQUIRED_LOG_CORRUPT,
-                            _countof( rgszT ),
-                            rgszT,
-                            0,
-                            NULL,
-                            m_pinst );
-        
-        OSUHAPublishEvent(  HaDbFailureTagCorruption,
-                            m_pinst,
-                            HA_LOGGING_RECOVERY_CATEGORY,
-                            HaDbIoErrorNone, NULL, 0, 0,
-                            HA_REDO_REQUIRED_LOG_CORRUPT,
-                            _countof( rgszT ),
-                            rgszT );
+        if ( !FErrIsLogCorruption( errCondition ) )
+        {
+            // Log corruption errors already have a better event and failure item, so do not raise this.
+            WCHAR szT1[16];
+            const WCHAR * rgszT[2];
+            rgszT[0] = m_pLogStream->LogName();
+            OSStrCbFormatW( szT1, sizeof( szT1 ), L"%d", errCondition );
+            rgszT[1] = szT1;
+            UtilReportEvent(    eventError,
+                                LOGGING_RECOVERY_CATEGORY,
+                                REDO_REQUIRED_LOG_CORRUPT,
+                                _countof( rgszT ),
+                                rgszT,
+                                0,
+                                NULL,
+                                m_pinst );
+
+            OSUHAPublishEvent(  HaDbFailureTagCorruption,
+                                m_pinst,
+                                HA_LOGGING_RECOVERY_CATEGORY,
+                                HaDbIoErrorNone, NULL, 0, 0,
+                                HA_REDO_REQUIRED_LOG_CORRUPT,
+                                _countof( rgszT ),
+                                rgszT );
+        }
 
         Call( errCondition );
     }
