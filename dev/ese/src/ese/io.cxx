@@ -4532,7 +4532,7 @@ ERR ErrBeginDatabaseIncReseedTracing_( _In_ IFileSystemAPI * pfsapi, _In_ JET_PC
     WCHAR wszIrsRawFile[ IFileSystemAPI::cchPathMax ]   = { 0 };
     WCHAR wszIrsRawBackupFile[ IFileSystemAPI::cchPathMax ] = { 0 };
 
-    IFileAPI * pfapiSizeCheck = NULL;
+    IFileFindAPI * pffapi = NULL;
 
     //  initialize to NULL tracer, in case we fail ...
 
@@ -4559,15 +4559,15 @@ ERR ErrBeginDatabaseIncReseedTracing_( _In_ IFileSystemAPI * pfsapi, _In_ JET_PC
 
     //  next we rotate the laundry if necessary ...
 
-    err = pfsapi->ErrFileOpen( wszIrsRawFile, IFileAPI::fmfNone, &pfapiSizeCheck );
-    if ( JET_errSuccess == err )
+    Call( pfsapi->ErrFileFind( wszIrsRawFile, &pffapi ) );
+    err = pffapi->ErrNext();
+    if ( err >= JET_errSuccess )
     {
         QWORD cbSize;
-        Call( pfapiSizeCheck->ErrSize( &cbSize, IFileAPI::filesizeLogical ) );
-        delete pfapiSizeCheck;  // delete here b/c we may be about rename it
-        pfapiSizeCheck = NULL;
 
-        if ( cbSize > ( 50 * 1024 * 1024 )  )
+        Call( pffapi->ErrSize( &cbSize, IFileAPI::filesizeLogical ) );
+
+        if ( cbSize > ( 50 * 1024 * 1024 ) )
         {
             //  clear the dryer out
 
@@ -4578,6 +4578,8 @@ ERR ErrBeginDatabaseIncReseedTracing_( _In_ IFileSystemAPI * pfsapi, _In_ JET_PC
             Call( pfsapi->ErrFileMove( wszIrsRawFile, wszIrsRawBackupFile ) );
         }
     }
+
+    Call( err == JET_errFileNotFound ? JET_errSuccess : err );
 
     //  create the tracing file
 
@@ -4594,11 +4596,7 @@ ERR ErrBeginDatabaseIncReseedTracing_( _In_ IFileSystemAPI * pfsapi, _In_ JET_PC
 
 HandleError:
 
-    if ( pfapiSizeCheck )
-    {
-        delete pfapiSizeCheck;
-        pfapiSizeCheck = NULL;
-    }
+    delete pffapi;
 
     return err;
 }

@@ -1207,6 +1207,10 @@ __out_bcount( cbData )  BYTE* const         pbData,
             //  This one is lucky, mark an urgent IO.
             grbitQOS = ( grbitQOS & ~qosIODispatchBackground ) | qosIODispatchImmediate;
         }
+        else if ( !pfnIOComplete && FIOThread() )
+        {
+            //  do not convert sync to async IO on the IO thread
+        }
         else
         {
             //  This one not so much, house usually wins - mark an background IO.
