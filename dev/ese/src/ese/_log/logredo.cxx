@@ -11334,12 +11334,21 @@ ERR LOG::ErrLGRIRedoExtentFreed( const LREXTENTFREED * const plrextentfreed )
         // Capture the preimage of the table root and pass flag to indicate this is a delete table so that we special mark this table when reverted.
         // We should generally not be touching the table pages before table delete.
         // But in case we did due to some bug or some unexpected scenario, we will pass fRBSPreimageRevertAlways to make sure we always keep the table deleted.
-        CallR( ErrRBSRDWLatchAndCapturePreImage(
+        err = ErrRBSRDWLatchAndCapturePreImage(
                 ifmp,
                 pgnoFirst,
                 fRBSDeletedTableRootPage,
                 BfpriBFMake( PctFMPCachePriority( ifmp ), (BFTEMPOSFILEQOS) qosIODispatchImmediate ),
-                TcCurr() ) );
+                TcCurr() );
+
+        if ( err == JET_errFileIOBeyondEOF && pfmp->FContainsDataFromFutureLogs() && CmpLgpos( pfmp->Pdbfilehdr()->le_lgposLastResize, m_lgposRedo ) > 0 )
+        {
+            // pre image for page beyond eof cannot be captured, we must have captured
+            // and written it out in the past before shrinking the file.
+            BFMarkAsSuperCold( ifmp, pgnoFirst );
+            err = JET_errSuccess;
+        }
+        CallR( err );
     }
     else if ( fEmptyPageFDPDeleted )
     {
