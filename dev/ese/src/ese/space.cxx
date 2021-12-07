@@ -8663,7 +8663,7 @@ HandleError:
 //  SIDE EFFECTS
 //  COMMENTS
 //-
-ERR ErrSPCaptureSnapshot( FUCB* const pfucb, const PGNO pgnoFirst, const CPG cpgSize, const BOOL fMarkExtentEmptyFDPDeleted )
+ERR ErrSPCaptureSnapshot( FUCB* const pfucb, const PGNO pgnoFirst, CPG cpgSize, const BOOL fMarkExtentEmptyFDPDeleted )
 {
     ERR err = JET_errSuccess;
     BOOL fEfvEnabled = ( g_rgfmp[pfucb->ifmp].FLogOn() && PinstFromPfucb( pfucb )->m_plog->ErrLGFormatFeatureEnabled( JET_efvRevertSnapshot ) >= JET_errSuccess );
@@ -8672,6 +8672,24 @@ ERR ErrSPCaptureSnapshot( FUCB* const pfucb, const PGNO pgnoFirst, const CPG cpg
     tcScope->nParentObjectClass = TceFromFUCB( pfucb );
     tcScope->SetDwEngineObjid( ObjidFDP( pfucb ) );
     tcScope->iorReason.SetIort( iortFreeExtSnapshot );
+
+    Assert( !PinstFromPfucb( pfucb )->FRecovering() );
+
+    const PGNO pgnoLastFMP = g_rgfmp[ pfucb->ifmp ].PgnoLast();
+
+    // The pages we want to capture are beyond the last page owned by this database.
+    // This is possible if we have some shelved pages due to shrink and later the table being deleted.
+    // Table deletion would try to log ExtentFreed during delete for the shelved pages which might be beyond EOF.
+    // We should be able to safely ignore their pages as should have been captured when they were shelved.
+    if ( pgnoFirst > pgnoLastFMP )
+    {
+        return JET_errSuccess;
+    }
+    else if ( pgnoFirst + cpgSize - 1 > pgnoLastFMP )
+    {
+        AssertTrack( fFalse, "CaptureSnapshotCrossEof" );
+        cpgSize = pgnoLastFMP - pgnoFirst + 1;
+    }
 
     // We don't have to break it down as per preread chunk since we are not reading the preimages instead just marking it to be reverted to a new page state with some special flags.
     if ( fMarkExtentEmptyFDPDeleted )
