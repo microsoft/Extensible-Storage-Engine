@@ -740,7 +740,7 @@ ERR COSFile::ErrFlushFileBuffers( const IOFLUSHREASON iofr )
         //  concerned.
         m_critDefer.Enter();
         Assert( m_cioFlushing == 0 );
-        m_cioUnflushed = 0;
+        SetNoFlushNeeded();
         m_critDefer.Leave();
 
         m_p_osf->m_posd->TrackOsFfbBegin( IOFLUSHREASON( iofr | iofrOsFakeFlushSkipped ), (QWORD)m_hFile );
@@ -751,11 +751,9 @@ ERR COSFile::ErrFlushFileBuffers( const IOFLUSHREASON iofr )
 
     m_critDefer.Enter();
 
-    const LONG64 ciosDelta = AtomicRead( &m_cioUnflushed );
+    const LONG64 ciosDelta = AtomicExchange( &m_cioUnflushed, 0 );
     AtomicAdd( (QWORD*)&m_cioFlushing, ciosDelta );
-    AtomicAdd( (QWORD*)&m_cioUnflushed, -ciosDelta );
 
-    Assert( m_cioUnflushed >= 0 );      // note: NOT guaranteed this is zero, due to new IO completing concurrently incrementing count.
     Assert( m_cioFlushing >= ciosDelta );
 
     m_critDefer.Leave();
@@ -881,7 +879,7 @@ LONG64 COSFile::CioNonFlushed() const
 
 void COSFile::SetNoFlushNeeded()
 {
-    m_cioUnflushed = 0;
+    AtomicExchange( &m_cioUnflushed, 0 );
 }
 
 ERR COSFile::ErrSetSize(
@@ -2079,7 +2077,7 @@ void COSFile::IOComplete( IOREQ* const pioreq, const ERR err )
 
     if ( pioreq->fWrite )
     {
-        m_cioUnflushed++;
+        AtomicAdd( (QWORD*)&m_cioUnflushed, 1 );
     }
     
     TraceStationId( tsidrPulseInfo );
