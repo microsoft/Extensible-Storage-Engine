@@ -11652,6 +11652,105 @@ HandleError:
     return err;
 }
 
+LOCAL VOID SPILogEventOversizedDb(
+    FUCB* const pfucbRoot,
+    const PGNO  pgnoLast,
+    const PGNO  pgnoMaxDbSize,
+    const CPG   cpgMinReq,
+    const CPG   cpgPrefReq,
+    const CPG   cpgMinReqAdj,
+    const CPG   cpgPrefReqAdj )
+{
+    ERR err = JET_errSuccess;
+    FUCB *pfucbAE = pfucbNil;
+    const FMP* const pfmp = &g_rgfmp[ pfucbRoot->ifmp ];
+    const ULONGLONG cbInitialSize = CbFileSizeOfPgnoLast( pgnoLast );
+    const ULONGLONG cbSizeLimit = CbFileSizeOfPgnoLast( pgnoMaxDbSize );
+    const ULONGLONG cbFinalSize = CbFileSizeOfPgnoLast( pgnoLast + cpgPrefReqAdj );
+    CSPExtentInfo speiAE;
+    CPG cpgExtSmallest = lMax;
+    CPG cpgExtLargest = 0;
+    ULONG cext = 0;
+    CPG cpgAvail = 0;
+
+    // Collect available space stats.
+    Assert( pfucbRoot->u.pfcb->PgnoFDP() == pgnoSystemRoot );
+    AssertSPIPfucbOnRoot( pfucbRoot );
+    Call( ErrSPIOpenAvailExt( pfucbRoot, &pfucbAE ) );
+    Call( ErrSPISeekRootAE( pfucbAE, 1, spp::AvailExtLegacyGeneralPool, &speiAE ) );
+    while ( speiAE.FIsSet() )
+    {
+        Assert( speiAE.SppPool() == spp::AvailExtLegacyGeneralPool );
+        Assert( speiAE.PgnoLast() <= pgnoLast );
+
+        const CPG cpg = speiAE.CpgExtent();
+        Assert( cpg > 0 );
+
+        cpgExtSmallest = LFunctionalMin( cpgExtSmallest, cpg );
+        cpgExtLargest = LFunctionalMax( cpgExtLargest, cpg );
+        cext++;
+        cpgAvail += cpg;
+
+        speiAE.Unset();
+        err = ErrBTNext( pfucbAE, fDIRNull );
+        if ( err >= JET_errSuccess )
+        {
+            speiAE.Set( pfucbAE );
+            if ( speiAE.SppPool() != spp::AvailExtLegacyGeneralPool )
+            {
+                speiAE.Unset();
+            }
+        }
+        else if ( err == JET_errNoCurrentRecord )
+        {
+            err = JET_errSuccess;
+        }
+        Call( err );
+    }
+
+HandleError:
+    if ( pfucbAE != pfucbNil )
+    {
+        BTClose( pfucbAE );
+        pfucbAE = pfucbNil;
+    }
+
+    if ( ( err < JET_errSuccess ) || ( cext == 0 ) )
+    {
+        cpgExtSmallest = 0;
+        cpgExtLargest = 0;
+        cext = 0;
+        cpgAvail = 0;
+    }
+
+    OSTraceSuspendGC();
+    const WCHAR* rgwsz[] =
+    {
+        pfmp->WszDatabaseName(),
+        OSFormatW( L"%I64u", cbInitialSize ), OSFormatW( L"%d", pfmp->CpgOfCb( cbInitialSize ) ),
+        OSFormatW( L"%I64u", cbSizeLimit ), OSFormatW( L"%d", pfmp->CpgOfCb( cbSizeLimit ) ),
+        OSFormatW( L"%I64u", cbFinalSize ), OSFormatW( L"%d", pfmp->CpgOfCb( cbFinalSize ) ),
+        OSFormatW( L"%I64u", pfmp->CbOfCpg( cpgMinReq ) ), OSFormatW( L"%d", cpgMinReq ),
+        OSFormatW( L"%I64u", pfmp->CbOfCpg( cpgPrefReq ) ), OSFormatW( L"%d", cpgPrefReq ),
+        OSFormatW( L"%I64u", pfmp->CbOfCpg( cpgMinReqAdj ) ), OSFormatW( L"%d", cpgMinReqAdj ),
+        OSFormatW( L"%I64u", pfmp->CbOfCpg( cpgPrefReqAdj ) ), OSFormatW( L"%d", cpgPrefReqAdj ),
+        OSFormatW( L"%I64u", pfmp->CbOfCpg( cpgExtSmallest ) ), OSFormatW( L"%d", cpgExtSmallest ),
+        OSFormatW( L"%I64u", pfmp->CbOfCpg( cpgExtLargest ) ), OSFormatW( L"%d", cpgExtLargest ),
+        OSFormatW( L"%I32u", cext ),
+        OSFormatW( L"%I64u", pfmp->CbOfCpg( cpgAvail ) ), OSFormatW( L"%d", cpgAvail )
+    };
+    UtilReportEvent(
+        eventWarning,
+        GENERAL_CATEGORY,
+        DB_EXTENSION_OVERSIZED_DB_ID,
+        _countof( rgwsz ),
+        rgwsz,
+        0,
+        NULL,
+        pfmp->Pinst() );
+    OSTraceResumeGC();
+}
+
 LOCAL ERR ErrSPIExtendDB(
     FUCB        *pfucbRoot,
     const CPG   cpgSEMin,
@@ -11815,12 +11914,27 @@ LOCAL ERR ErrSPIExtendDB(
         cpgAsyncExtension = cpgSEReq;
     }
 
+    // Issue event if we violated the max DB size.
+    if ( ( pgnoSELast + cpgSEReqAdj ) > pgnoSEMaxAdj )
+    {
+        Assert( pgnoSEMaxAdj < pgnoSysMax );
+        SPILogEventOversizedDb(
+            pfucbRoot,
+            pgnoSELast,
+            pgnoSEMaxAdj,
+            cpgSEMin,
+            cpgSEReq,
+            cpgSEMinAdj,
+            cpgSEReqAdj );
+    }
+
+    // Resize the database. Try smaller extensions if extending by the preferred size fails.
     err = ErrSPINewSize( TcCurr(), pfucbRoot->ifmp, pgnoSELast, cpgSEReqAdj, cpgAsyncExtension );
 
     if ( err < JET_errSuccess )
     {
         err = ErrSPINewSize( TcCurr(), pfucbRoot->ifmp, pgnoSELast, cpgSEMinAdj, 0 );
-        if( err < JET_errSuccess )
+        if ( err < JET_errSuccess )
         {
             //  we have failed to do a "big" allocation
             //  drop down to small allocations and see if we can succeed
