@@ -2534,6 +2534,23 @@ Language=English
 %1 (%2) %3Db scan failed to delete table at root page %4 with objid %5 which was marked for delete by revert operation with error %6.
 .
 
+MessageId=755
+SymbolicName=DB_EXTENSION_OVERSIZED_DB_ID
+Language=English
+%1 (%2) %3Database '%4' will be extended beyond its configured maximum size limit to prevent space leakage.%n
+Initial database size: %5 bytes (%6 page(s)).%n
+Maximum size limit: %7 bytes (%8 page(s)).%n
+Final database size: %9 bytes (%10 page(s)).%n
+Minimum requested size: %11 bytes (%12 page(s)).%n
+Preferred requested size: %13 bytes (%14 page(s)).%n
+Adjusted minimum requested size: %15 bytes (%16 page(s)).%n
+Adjusted preferred requested size: %17 bytes (%18 page(s)).%n
+Smallest available extent size: %19 bytes (%20 page(s)).%n
+Largest available extent size: %21 bytes (%22 page(s)).%n
+Number of available extents: %23.%n
+Total available space: %24 bytes (%25 page(s)).%n
+.
+
 ;// !!! ARE YOU SURE you're adding this in the right place !!! ???
 
 
