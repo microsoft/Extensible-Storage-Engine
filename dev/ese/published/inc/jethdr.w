@@ -668,7 +668,7 @@ typedef void (JET_API *JET_SPCATCALLBACK)( _In_ const unsigned long pgno, _In_ c
 #define JET_efvLz4Compression                               9420    //  Adds support for compressing/decompressing data using Lz4.
 // 9440 being skipped due to revert of a bad deployed build
 #define JET_efvRBSNonRevertableTableDeletes                 9460    //  Adds support for non-revertable table deletes. The active will stop logging extent freed LR for all freed extent but if available lag doesn't support it yet, shouldn't be allowed.
-#define JET_efvScanCheck2Flags                              9480    //  The byte le_bSource in ScanCheck2 LR is split into 3 components and changed to le_bFlagsAndScs. The highest bit is used for objidInvalid flag. The next 5 bits are left unused (for now) and the lower 2 bits are used for ScanCheckSource.
+#define JET_efvScanCheck2Flags                              9480    //  The byte le_bSource in ScanCheck2 LR is split into 3 components and changed to le_bFlagsAndScs. The highest bit is used for objidInvalid flag and the bit next to highest is used for emptypage flag. The next 4 bits are left unused (for now) and the lower 2 bits are used for ScanCheckSource.
 
 // Special format specifiers here
 #define JET_efvUseEngineDefault             (0x40000001)    //  Instructs the engine to use the maximal default supported Engine Format Version. (default)

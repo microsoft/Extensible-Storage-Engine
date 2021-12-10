@@ -9481,7 +9481,7 @@ ERR LOG::ErrLGRIRedoScanCheck( const LRSCANCHECK2 * const plrscancheck, BOOL* co
                 ( ( CmpLgpos( g_rgfmp[ ifmp ].Pdbfilehdr()->le_lgposCommitBeforeRevert, m_lgposRedo ) > 0 ||
                     plrscancheck->DbtimePage() == 0 ||
                     plrscancheck->DbtimePage() == dbtimeShrunk ||
-                    ( plrscancheck->FObjidInvalid() && fPageFDPDelete ) ) &&
+                    ( ( plrscancheck->FObjidInvalid() ||  plrscancheck->FEmptyPage() ) && fPageFDPDelete ) ) &&
                   CPAGE::FRevertedNewPage( dbtimePage ) ) || 
                 CPAGE::FRevertedNewPage( plrscancheck->DbtimePage() );
 
@@ -9634,7 +9634,8 @@ ERR LOG::ErrLGRIRedoScanCheck( const LRSCANCHECK2 * const plrscancheck, BOOL* co
                     OSFormatW( L"0x%I64x", dbtimeCurrentInLogRec ),
                     OSFormatW( L"(%08X,%04X,%04X)", m_lgposRedo.lGeneration, m_lgposRedo.isec, m_lgposRedo.ib ),
                     OSFormatW( L"%hhu", plrscancheck->BSource() ),
-                    OSFormatW( L"%d", (INT)plrscancheck->FObjidInvalid() )
+                    OSFormatW( L"%d", (INT)plrscancheck->FObjidInvalid() ),
+                    OSFormatW( L"%d", (INT)plrscancheck->FEmptyPage() )
                 };
 
                 const WCHAR* rgwszDefault[] =
@@ -9649,6 +9650,7 @@ ERR LOG::ErrLGRIRedoScanCheck( const LRSCANCHECK2 * const plrscancheck, BOOL* co
                     OSFormatW( L"%hhu", plrscancheck->BSource() ),
                     OSFormatW( L"%u", objidPage ),
                     OSFormatW( L"%d", (INT)plrscancheck->FObjidInvalid() ),
+                    OSFormatW( L"%d", (INT)plrscancheck->FEmptyPage() ),
                 };
 
                 const WCHAR** const rgwsz = ( msgid == DB_DIVERGENCE_UNINIT_PAGE_PASSIVE_DB_ID ) ? rgwszUninitPagePassive : rgwszDefault;
@@ -9741,6 +9743,7 @@ ERR LOG::ErrLGRIRedoScanCheck( const LRSCANCHECK2 * const plrscancheck, BOOL* co
                         OSFormatW( L"%hhu", plrscancheck->BSource() ),
                         OSFormatW( L"%u", objidPage ),
                         OSFormatW( L"%d", (INT)plrscancheck->FObjidInvalid() ),
+                        OSFormatW( L"%d", (INT)plrscancheck->FEmptyPage() ),
                     };
 
                     UtilReportEvent(
@@ -9821,7 +9824,8 @@ ERR LOG::ErrLGRIRedoScanCheck( const LRSCANCHECK2 * const plrscancheck, BOOL* co
                             OSFormatW( L"0x%I64x", plrscancheck->DbtimeCurrent() ),
                             OSFormatW( L"(%08X,%04X,%04X)", m_lgposRedo.lGeneration, m_lgposRedo.isec, m_lgposRedo.ib ),
                             OSFormatW( L"%hhu", plrscancheck->BSource() ),
-                            OSFormatW( L"%d", (INT)plrscancheck->FObjidInvalid() )
+                            OSFormatW( L"%d", (INT)plrscancheck->FObjidInvalid() ),
+                            OSFormatW( L"%d", (INT)plrscancheck->FEmptyPage() ),
                         };
                         UtilReportEvent(
                             eventError,

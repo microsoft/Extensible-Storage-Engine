@@ -518,11 +518,13 @@ class LRSCANCHECK final  // Prevent this class from being inherited. Please use 
 
 
 PERSISTED const BYTE fLRScanObjidInvalid = 0x80;
-const BYTE maskLRScanFlags = 0x80;
-const BYTE maskLRScanUnused = 0x7C;
+PERSISTED const BYTE fLRScanEmptyPage = 0x40;
+const BYTE maskLRScanFlags = 0xC0;
+const BYTE maskLRScanUnused = 0x3C;
 const BYTE maskLRScanSources = 0x03;
 
 static_assert( !( fLRScanObjidInvalid & ~maskLRScanFlags ), "Bit represented by fLRScanObjidInvalid should be on in maskLRScanFlags." );
+static_assert( !( fLRScanEmptyPage & ~maskLRScanFlags ), "Bit represented by fLRScanEmptyPage should be on in maskLRScanFlags." );
 static_assert( !( maskLRScanFlags & maskLRScanUnused & maskLRScanSources ), "maskLRScanFlags, maskLRScanUnused and maskLRScanSources should be mutually exclusive." );
 static_assert( ( scsMax - 1 ) <= maskLRScanSources, "The highest value of ScanCheckSource should not be greater than maskLRScanSources" );
 
@@ -542,7 +544,7 @@ class LRSCANCHECK2
     protected:
         UnalignedLittleEndian< DBID >       le_dbid;                // dbid.
         UnalignedLittleEndian< PGNO >       le_pgno;                // Pgno.
-        UnalignedLittleEndian< BYTE >       le_bFlagsAndScs;        // Highest bit represents flag for ObjidInvalid, next 5 bits are unused, last 2 bits represent ScanCheckSource
+        UnalignedLittleEndian< BYTE >       le_bFlagsAndScs;        // Highest bit represents flag for ObjidInvalid, bit next to highest is used for Emptypage, next 4 bits are unused, last 2 bits represent ScanCheckSource
         UnalignedLittleEndian< DBTIME >     le_dbtimePage;          // Current dbtime of page scanned.
         UnalignedLittleEndian< DBTIME >     le_dbtimeCurrent;       // Current global dbtime of the database.
         UnalignedLittleEndian< ULONG >      le_ulChksum;            // A compressed version of the LoggedDataChecksum() from the page.
@@ -553,6 +555,7 @@ class LRSCANCHECK2
                 plrscancheck->Dbid(),
                 plrscancheck->Pgno(),
                 scsDbScan,
+                fFalse,
                 fFalse,
                 plrscancheck->DbtimeBefore(),
                 plrscancheck->DbtimeAfter(),
@@ -566,6 +569,7 @@ class LRSCANCHECK2
                 const PGNO pgno,
                 const BYTE bSource,
                 const BOOL fObjidInvalid,
+                const BOOL fEmptyPage,
                 const DBTIME dbtimePage,
                 const DBTIME dbtimeCurrent,
                 const ULONG ulCompLogicalPageChecksum )
@@ -580,6 +584,11 @@ class LRSCANCHECK2
             if ( fObjidInvalid )
             {
                 le_bFlagsAndScs |= fLRScanObjidInvalid;
+            }
+
+            if ( fEmptyPage )
+            {
+                le_bFlagsAndScs |= fLRScanEmptyPage;
             }
 
             Assert( !( le_bFlagsAndScs & maskLRScanUnused ) );
@@ -599,7 +608,6 @@ class LRSCANCHECK2
             else
             {
                 UtilMemCpy( this, plr, sizeof( *this ) );
-                Assert( !( le_bFlagsAndScs & maskLRScanUnused ) );
             }
         }
 
@@ -610,6 +618,7 @@ class LRSCANCHECK2
         DBTIME DbtimeCurrent() const        { return le_dbtimeCurrent; }
         ULONG UlChecksum() const            { return le_ulChksum; }
         BOOL FObjidInvalid( void ) const    { return !!( le_bFlagsAndScs & fLRScanObjidInvalid ); }
+        BOOL FEmptyPage( void ) const       { return !!( le_bFlagsAndScs & fLRScanEmptyPage ); }
 };
 
 
@@ -2711,6 +2720,7 @@ ERR ErrLGScanCheck(
     _In_    const DBTIME    dbtimeCurrent,
     _In_    const ULONG     ulChecksum,
     _In_    const BOOL      fObjidInvalid,
+    _In_    const BOOL      fEmptyPage,
     _In_    LGPOS* const    plgposLogRec = NULL );
 
 ERR ErrLGPageMove(

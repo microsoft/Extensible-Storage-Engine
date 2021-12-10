@@ -1442,6 +1442,7 @@ Language=English
 Additional information:%n
 %tSource: %11%n
 %tSourceObjidInvalid: %13%n
+%tSourcePageEmpty: %14%n
 .
 
 MessageId=539
@@ -1451,6 +1452,7 @@ Language=English
 Additional information:%n
 %tSource: %11%n
 %tSourceObjidInvalid: %13%n
+%tSourcePageEmpty: %14%n
 .
 
 MessageId=540
@@ -1460,6 +1462,7 @@ Language=English
 Additional information:%n
 %tSource: %10%n
 %tSourceObjidInvalid: %12%n
+%tSourcePageEmpty: %13%n
 .
 
 MessageId=541
@@ -1469,6 +1472,7 @@ Language=English
 Additional information:%n
 %tSource: %9%n
 %tSourceObjidInvalid: %10%n
+%tSourcePageEmpty: %11%n
 .
 
 MessageId=542
@@ -1500,6 +1504,7 @@ Language=English
 Additional information:%n
 %tSource: %11%n
 %tSourceObjidInvalid: %13%n
+%tSourcePageEmpty: %14%n
 .
 
 MessageId=546
@@ -1579,6 +1584,7 @@ Language=English
 Additional information:%n
 %tSource: %9%n
 %tSourceObjidInvalid: %10%n
+%tSourcePageEmpty: %11%n
 .
 
 MessageId=558
@@ -1596,6 +1602,7 @@ Additional information:%n
 %tGlobal timestamp of the database: %8%n
 %tSource: %9%n
 %tSourceObjidInvalid: %11%n
+%tSourcePageEmpty: %12%n
 .
 
 MessageId=560
@@ -1609,6 +1616,7 @@ Additional information:%n
 %tError code: %8%n
 %tSource: %11%n
 %tSourceObjidInvalid: %13%n
+%tSourcePageEmpty: %14%n
 .
 
 MessageId=561
