@@ -5596,6 +5596,7 @@ ERR ErrDBMEmitDivergenceCheck(
                                 UsDBMGetCompressedLoggedChecksum( *pcpage, dbtimeCurrent );
 
     const DBTIME dbtimePage = pcpage->Dbtime();
+    const BOOL fEmptyPage   = pcpage->FEmptyPage();
     Assert( ( dbtimePage == 0 && pcpage->ObjidFDP() == 0 ) || /* zero'd page */
             ( pcpage->PgnoThis() == pgno ) /* or the pgno should match */ );
     Assert( ( dbtimePage != dbtimeShrunk ) || ( pcpage->ObjidFDP() == 0 ) );
@@ -5609,6 +5610,7 @@ ERR ErrDBMEmitDivergenceCheck(
                         dbtimeCurrent,
                         ulChecksum,
                         objidState == ObjidState::Invalid,
+                        fEmptyPage,
                         &lgposLogRec );
 
     // Check if the persisted dbtime is ahead of the running dbtime.
@@ -5667,7 +5669,8 @@ ERR ErrDBMEmitEndScan( const IFMP ifmp )
             0, // dbtimePage
             0, // dbtimeCurrent
             0, // ulChecksum
-            fFalse );   // objidInvalid
+            fFalse,     // objidInvalid
+            fFalse );   // EmptyPage
 
 }
 

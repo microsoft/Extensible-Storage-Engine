@@ -954,6 +954,7 @@ ERR ErrLGScanCheck(
     _In_    const DBTIME    dbtimeCurrent,
     _In_    const ULONG     ulChecksum,
     _In_    const BOOL      fObjidInvalid,
+    _In_    const BOOL      fEmptyPage,
     _In_    LGPOS* const    plgposLogRec )
 {
     INST * const pinst = PinstFromIfmp( ifmp );
@@ -1014,6 +1015,7 @@ ERR ErrLGScanCheck(
             pgno,
             bSource,
             fScanCheck2FlagsSupported ? fObjidInvalid : fFalse,
+            fScanCheck2FlagsSupported ? fEmptyPage : fFalse,
             dbtimePage,
             dbtimeCurrent,
             ulChecksum );
@@ -8505,13 +8507,14 @@ VOID LrToSz(
             const LRSCANCHECK2 * const plrscancheck = (LRSCANCHECK2*)plr;
             //  this is in "classic after" (current), before (on page at read / "update" time) sort of format like 
             //  other LRs (lrtypInsert, lrtypReplace, etc) ... but remember we don't update any DBTIMEs w/ this LR
-            OSStrCbFormatA( rgchBuf, sizeof(rgchBuf), " %I64x,%I64x[%u:%lu],source:%hhu,%s",
+            OSStrCbFormatA( rgchBuf, sizeof(rgchBuf), " %I64x,%I64x[%u:%lu],source:%hhu,%s,%s",
                 plrscancheck->DbtimeCurrent(),
                 plrscancheck->DbtimePage(),
                 plrscancheck->Dbid(),
                 plrscancheck->Pgno(),
                 plrscancheck->BSource(),
-                plrscancheck->FObjidInvalid() ? szInvalidObjid : szNotInvalidObjid );
+                plrscancheck->FObjidInvalid() ? szInvalidObjid : szNotInvalidObjid,
+                plrscancheck->FEmptyPage() ? szEmptyPage : szNotEmptyPage);
             OSStrCbAppendA( szLR, cbLR, rgchBuf );
             break;
         }

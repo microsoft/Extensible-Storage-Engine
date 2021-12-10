@@ -4065,6 +4065,7 @@ ERR CRBSDatabaseRevertContext::ErrSetDbstateAfterRevert( SIGNATURE* psignRbsHdrF
     ERR err                                 = JET_errSuccess;
     DBFILEHDR*  dbfilehdrToSet              = m_pdbfilehdrFromRBS == NULL ? m_pdbfilehdr : m_pdbfilehdrFromRBS;
     LONG        lgenCommitBeforeRevertPrev  = m_pdbfilehdr->le_lgposCommitBeforeRevert.le_lGeneration;
+    LONG        lgenConsistentPrev          = m_pdbfilehdr->le_lgposConsistent.le_lGeneration;
     LONG        lGenMaxRequiredPrev         = m_pdbfilehdr->le_lGenMaxRequired;
 
     if ( m_pdbfilehdrFromRBS == NULL )
@@ -4112,8 +4113,10 @@ ERR CRBSDatabaseRevertContext::ErrSetDbstateAfterRevert( SIGNATURE* psignRbsHdrF
     // to account for back to back reverts taking place close to each other.
     // (+1 is for JET_paramWaypointLatency)
     //
+    // If is possible db was clean shutdown when revert started in which case lGenMaxRequiredPrev would be 0. We should use lgenConsistent in that case.
+    //
     dbfilehdrToSet->le_lgposCommitBeforeRevert.le_lGeneration  =
-        max( lgenCommitBeforeRevertPrev, 1 + lGenMaxRequiredPrev + (LONG)UlParam( m_pinst, JET_paramElasticWaypointLatency ) );
+        max( lgenCommitBeforeRevertPrev, max( lgenConsistentPrev, 1 + lGenMaxRequiredPrev + (LONG)UlParam( m_pinst, JET_paramElasticWaypointLatency ) ) );
 
     Assert( dbfilehdrToSet->le_lgposCommitBeforeRevert.le_lGeneration >= m_pdbfilehdr->le_lGenMaxCommitted );
 
