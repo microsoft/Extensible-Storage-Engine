@@ -75,6 +75,11 @@ VOID AssertNORMConstants()
 }
 #endif
 
+BOOL FNORMLCMapFlagsHasUpperCase( DWORD dwMapFlags )
+{
+    return !!( dwMapFlags & LCMAP_UPPERCASE );
+}
+
 const LANGID LangidFromLcid( const LCID lcid )
 {
     return LANGIDFROMLCID( lcid );

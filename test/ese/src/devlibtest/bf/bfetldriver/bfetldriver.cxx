@@ -3,6 +3,7 @@
 
 
 #include <tchar.h>
+#include <Windows.h>
 #include "os.hxx"
 
 #ifdef BUILD_ENV_IS_NT

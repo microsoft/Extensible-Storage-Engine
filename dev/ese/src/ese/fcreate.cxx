@@ -1640,11 +1640,11 @@ LOCAL ERR ErrFILEIValidateCreateIndex(
 
         // Check the incoming LCMap Flags, possibly adding necessary flags.
         DWORD dwLCMapFlags = pidb->DwLCMapFlags();
-        if ( dwLCMapFlags & LCMAP_UPPERCASE )
-    {
+        if ( FNORMLCMapFlagsHasUpperCase( dwLCMapFlags ) )
+        {
             CallR( g_rgfmp[ifmp].ErrDBFormatFeatureEnabled( JET_efvUppercaseTextNormalization ) );
             fUppercaseTextNormalization = fTrue;
-    }
+        }
     
         CallR( ErrNORMCheckLCMapFlags( pinst, &dwLCMapFlags, fUppercaseTextNormalization ) );
 

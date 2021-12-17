@@ -2272,3 +2272,21 @@ const CHAR * SzSourceFileName( const CHAR * szFilePath )
     return strrchr( szFilePath, chPathDelimiter ) + sizeof( CHAR );
 }
 
+VOID OSErrorPrintLastError( const WCHAR * const szMessage )
+{
+    DWORD dwGLE = GetLastError();
+    PVOID lpMsgBuf = NULL;
+    if( FormatMessage(
+            FORMAT_MESSAGE_ALLOCATE_BUFFER | FORMAT_MESSAGE_FROM_SYSTEM,
+            NULL,
+            dwGLE,
+            MAKELANGID(LANG_NEUTRAL, SUBLANG_DEFAULT),
+            (LPTSTR) &lpMsgBuf,
+            0,
+            NULL ) )
+    {
+        (void)fwprintf( stderr, L"%ls (%d), %ls", szMessage, dwGLE, (wchar_t *)lpMsgBuf );
+    }
+
+    LocalFree( lpMsgBuf );
+}

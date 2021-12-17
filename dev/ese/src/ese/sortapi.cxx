@@ -252,7 +252,7 @@ LOCAL ERR ErrSORTTableOpen(
 
         if ( NULL != pidxunicode )
         {
-            const BOOL fUppercaseTextNormalization = ( pidxunicode->dwMapFlags & LCMAP_UPPERCASE ) &&
+            const BOOL fUppercaseTextNormalization = ( FNORMLCMapFlagsHasUpperCase( pidxunicode->dwMapFlags ) ) &&
                 ( g_rgfmp[pfucb->ifmp].ErrDBFormatFeatureEnabled( JET_efvUppercaseTextNormalization ) >= JET_errSuccess );
 
             Call( ErrNORMCheckLocaleName( pinst, pidxunicode->szLocaleName ) );

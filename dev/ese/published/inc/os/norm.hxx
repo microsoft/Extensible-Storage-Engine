@@ -28,6 +28,8 @@ extern const DWORD  dwLCMapFlagsDefaultOBSOLETE;
 extern const DWORD  dwLCMapFlagsDefault;
 
 
+BOOL FNORMLCMapFlagsHasUpperCase( DWORD dwMapFlags );
+
 ERR ErrNORMCheckLocaleName( _In_ INST * const pinst, __in_z const PCWSTR wszLocaleName );
 ERR ErrNORMCheckLCMapFlags( _In_ INST * const pinst, _In_ const DWORD dwLCMapFlags, _In_ const BOOL fUppercaseTextNormalization );
 ERR ErrNORMCheckLCMapFlags( _In_ INST * const pinst, _Inout_ DWORD * const pdwLCMapFlags, _In_ const BOOL fUppercaseTextNormalization );

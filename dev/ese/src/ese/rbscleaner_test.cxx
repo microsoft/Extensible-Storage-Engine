@@ -243,11 +243,11 @@ ERR RBSCleanerTestIOOperator::ErrRBSFilePathForGen( __out_bcount ( cbDirPath ) W
 
         if ( fBackupDir )
         {
-            swprintf_s( wszRBSGen, ARRAYSIZE(wszRBSGen), L"B%d", lRBSGen);
+            swprintf_s( wszRBSGen, _countof(wszRBSGen), L"B%d", lRBSGen);
         }
         else
         {
-            swprintf_s( wszRBSGen, ARRAYSIZE(wszRBSGen), L"%d", lRBSGen);
+            swprintf_s( wszRBSGen, _countof(wszRBSGen), L"%d", lRBSGen);
         }
 
         Call( ErrOSStrCbCopyW( wszRBSDirPath, cbDirPath, wszRBSGen ) );

@@ -1633,7 +1633,7 @@ INLINE VOID FUCBRemoveEncryptionKey( FUCB *pfucb )
 {
     if ( pfucb->pbEncryptionKey != NULL )
     {
-        SecureZeroMemory( pfucb->pbEncryptionKey, pfucb->cbEncryptionKey );
+        OSMemorySecureZero( pfucb->pbEncryptionKey, pfucb->cbEncryptionKey );
         OSMemoryHeapFree( pfucb->pbEncryptionKey );
     }
     pfucb->pbEncryptionKey = NULL;
