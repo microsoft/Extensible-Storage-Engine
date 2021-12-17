@@ -4044,3 +4044,10 @@ size_t IbUtilLastNonZeroed( __in_bcount(cbData) const BYTE * pbData, _In_ const 
     return cbData;
 }
 
+
+// Securely Zero the specified chunk of memory.
+void OSMemorySecureZero( PVOID pv, SIZE_T cnt )
+{
+    SecureZeroMemory( pv, cnt );
+}
+

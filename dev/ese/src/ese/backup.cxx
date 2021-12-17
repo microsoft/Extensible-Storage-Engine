@@ -167,7 +167,7 @@ ERR BACKUP_CONTEXT::ErrBKIReadPages(
 
     /*  determine if we are scrubbing the database
     /**/
-    CONST BOOL fScrub = BoolParam( m_pinst, JET_paramZeroDatabaseDuringBackup );
+    const BOOL fScrub = BoolParam( m_pinst, JET_paramZeroDatabaseDuringBackup );
 
     if ( fScrub && m_pinst->FRecovering() )
     {

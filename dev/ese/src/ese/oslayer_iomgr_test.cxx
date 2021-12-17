@@ -3,6 +3,12 @@
 
 #include "std.hxx"
 
+// This reaches out directly to code in the OS directory, which is non-portable stuff.  It has to 
+// include Windows.h
+#ifndef WIN32_LEAN_AND_MEAN
+#define WIN32_LEAN_AND_MEAN
+#endif  //  WIN32_LEAN_AND_MEAN
+#include <Windows.h>
 #include "_ostls.hxx"
 #include "_osfs.hxx"
 #include "_osfile.hxx"
@@ -1779,4 +1785,3 @@ JETUNITTEST( IoQueue, TestQueueIODispatchMixedEmptiesVipOpsFirst )
 
 
 #pragma warning( pop ) // Unreferenced variables in Unit Tests.
-

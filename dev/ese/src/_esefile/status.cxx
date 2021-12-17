@@ -9,21 +9,7 @@ static INT iLastPercentage;
 void PrintWindowsError( const wchar_t * const szMessage )
 //  ================================================================
 {
-    DWORD dwGLE = GetLastError();
-    LPVOID lpMsgBuf = NULL;
-    if( FormatMessage(
-            FORMAT_MESSAGE_ALLOCATE_BUFFER | FORMAT_MESSAGE_FROM_SYSTEM,
-            NULL,
-            dwGLE,
-            MAKELANGID(LANG_NEUTRAL, SUBLANG_DEFAULT),
-            (LPTSTR) &lpMsgBuf,
-            0,
-            NULL ) )
-    {
-        (void)fwprintf( stderr, L"%ls (%d), %ls", szMessage, dwGLE, (wchar_t *)lpMsgBuf );
-    }
-
-    LocalFree( lpMsgBuf );
+    OSErrorPrintLastError( szMessage );
 }
 
 void InitStatus( const wchar_t * const szOperation )

@@ -236,6 +236,8 @@ void* PvOSMemoryHeapAllocAlign_( const size_t cbSize, const size_t cbAlign, __in
 void OSMemoryHeapFree( void* const pv );
 void OSMemoryHeapFreeAlign( void* const pv );
 
+// Securely Zero the specified chunk of memory.
+void OSMemorySecureZero( PVOID pv, SIZE_T cnt );
 
 //  Test hooks
 

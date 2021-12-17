@@ -88,6 +88,7 @@
 #undef VOID
 typedef void VOID;
 #pragma pop_macro( "VOID" )
+typedef VOID * PVOID;
 
 //  Boolean types
 //
@@ -115,19 +116,21 @@ typedef unsigned int            FLAG32;
 //
 
 typedef char                CHAR;
+typedef CHAR                *LPSTR;
+
 
 //  Basic integer types
 //
 
 #ifdef _MSC_VER
-    typedef short               SHORT;
-    typedef unsigned short      USHORT;
-    typedef int                 INT;
-    typedef unsigned int        UINT;
-    typedef long                LONG;
-    typedef unsigned long       ULONG;
-    typedef long long           LONGLONG;
-    typedef unsigned long long  ULONGLONG;
+    typedef short               SHORT, *PSHORT;
+    typedef unsigned short      USHORT, *PUSHORT;
+    typedef int                 INT, *PINT;
+    typedef unsigned int        UINT, *PUINT;
+    typedef long                LONG, *PLONG;
+    typedef unsigned long       ULONG, *PULONG;
+    typedef long long           LONGLONG, *PLONGLONG;
+    typedef unsigned long long  ULONGLONG, *PULONGLONG;
 #else
     // On most other platforms, int and long are 64-bit on 64-bit platforms, but the ESE format
     // is dependent upon LONG being 32-bits.
@@ -141,16 +144,13 @@ typedef char                CHAR;
     typedef uint64_t            ULONGLONG;
 #endif
 
-typedef LONGLONG            LONG64;
-typedef ULONGLONG           ULONG64;
-
 //  Machine word types
 //
 
-typedef unsigned char       BYTE;
-typedef USHORT              WORD;
-typedef ULONG               DWORD;
-typedef ULONGLONG           QWORD;
+typedef unsigned char       BYTE, *PBYTE;
+typedef USHORT              WORD, *PWORD;
+typedef ULONG               DWORD, *PDWORD;
+typedef ULONGLONG           QWORD, *PQWORD;
 
 //  Pointer types
 //
@@ -167,6 +167,12 @@ typedef ULONGLONG           QWORD;
     typedef unsigned long           UNSIGNED_PTR;
     typedef long                    SIGNED_PTR;
 #endif
+
+
+typedef LONGLONG            LONG64;
+typedef unsigned int        DWORD32;
+typedef unsigned int        ULONG32;
+typedef ULONGLONG           ULONG64;
 
 
 //typedef long long         INT64;

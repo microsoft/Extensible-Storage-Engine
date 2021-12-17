@@ -944,3 +944,5 @@ public:
 BOOL FUtilRepairIntegrityMsgBox( const WCHAR * const wszMsg );
 
 VOID OSErrorRegisterForWer( VOID *pv, DWORD cb );
+
+VOID OSErrorPrintLastError( const WCHAR * const szMessage );

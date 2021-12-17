@@ -11685,7 +11685,7 @@ ERR LOG::ErrLGRIRedoOperations(
     secInCallbackBegin = m_pinst->m_isdlInit.GetCallbackTime( &cCallbacksBegin );
     secThrottledBegin = m_pinst->m_isdlInit.GetThrottleTime( &cThrottledBegin );
     isdlCurrLog.InitSingleStep( isdltypeLogFile, rgb, sizeof(rgb) );
-    ZeroMemory( cLRs, sizeof(cLRs) );
+    OSMemorySecureZero( cLRs, sizeof(cLRs) );
 
     *pfRcvCleanlyDetachedDbs = fTrue;
 
@@ -12077,7 +12077,7 @@ ERR LOG::ErrLGRIRedoOperations(
                     secInCallbackBegin = m_pinst->m_isdlInit.GetCallbackTime( &cCallbacksBegin );
                     secThrottledBegin = m_pinst->m_isdlInit.GetThrottleTime( &cThrottledBegin );
                     isdlCurrLog.InitSingleStep( isdltypeLogFile, rgb, sizeof(rgb) );
-                    ZeroMemory( cLRs, sizeof(cLRs) );
+                    OSMemorySecureZero( cLRs, sizeof(cLRs) );
 
                     if ( !plgstat )
                     {

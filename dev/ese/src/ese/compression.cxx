@@ -7,6 +7,18 @@
 #include "xpress9.h"
 #endif
 #ifdef XPRESS10_COMPRESSION
+// A conundrum.  XPRESS10 is "external" to ESE engine core.  It's also Windows only, and so
+// it wants to return HRESULTs and use WIN32 errors.  ESE core, however, is intended to be
+// portable code, not tied to any particular OS (that's why we have an OS abstraction layer).
+// So, we don't want to included Windows specific headers here.  The reluctant solution is
+// to play games with a limited set of #defines taken from Windows just and only so we can
+// consume XPRESS10.  These #defines implement unchanging behavior from the WIN32 API, so
+// we can be confident that this is safe, if distasteful.
+#define HRESULT LONG
+#define HRESULT_FROM_WIN32( X ) ( 0x80070000 | ( X ) )
+#define ERROR_NOT_ENOUGH_MEMORY    8
+#define ERROR_INSUFFICIENT_BUFFER  122
+#define ERROR_DATA_CHECKSUM_ERROR  323
 #include "xpress10sw.h"
 #include "xpress10corsica.h"
 #endif
@@ -2415,7 +2427,7 @@ ERR CDataCompressor::ErrDecompressXpress9_(
 
     // start a decoding session
     Call( ErrXpress9DecodeOpen_( &decode ) );
-    Xpress9DecoderStartSession( &status, decode, TRUE );
+    Xpress9DecoderStartSession( &status, decode, fTrue );
     Call( ErrXpress9StatusToJetErr( status ) );
 
     // decompress the requested portion of the data

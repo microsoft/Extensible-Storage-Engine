@@ -158,7 +158,7 @@ static BOOL FIsPageInitialized(
     {
         if ( memcmp ( pbAddrToCompare, rgbZeroMem, sizeof ( rgbZeroMem ) ) != 0 )
         {
-            return TRUE;
+            return fTrue;
         }
     }
     //  There might be some bytes less than sizeof(rgbZeroMem) not compared in the loop
@@ -166,7 +166,7 @@ static BOOL FIsPageInitialized(
     {
         return ( memcmp ( pbAddrToCompare, rgbZeroMem, pbPageEnd - pbAddrToCompare ) != 0 );
     }
-    return FALSE;
+    return fFalse;
 }
 
 //  ================================================================
@@ -364,7 +364,7 @@ static ERR ErrIssueNextIO( CChecksumContext* const pchecksumcontext )
     ERR                 err     = JET_errSuccess;
     TraceContextScope   tcScope( iorpDirectAccessUtil );
 
-    const QWORD iblock = InterlockedIncrement( &cblockCurr ) - 1;
+    const QWORD iblock = AtomicIncrement( &cblockCurr ) - 1;
 
     if ( iblock >= cblockMax )
     {
@@ -396,7 +396,7 @@ BOOL FChecksumFile(
     BOOL * const            pfBadPagesDetected )
 //  ================================================================
 {
-    BOOL                fSuccess            = FALSE;
+    BOOL                fSuccess            = fFalse;
     ERR                 err                 = JET_errSuccess;
 
     CTaskManager        taskmgr;
@@ -511,15 +511,15 @@ BOOL FChecksumFile(
 
     fSuccess = FChecksumCorrect( &checksumstats );
 
-    //  by default we return FALSE if a checksum mismatch was detected,
+    //  by default we return fFalse if a checksum mismatch was detected,
     //  but if a separate flag was passed in to detect checksum
-    //  mismatches, then always return TRUE if we got this far,
+    //  mismatches, then always return fTrue if we got this far,
     //  and report checksum mismatches in the flag
     //
     if ( NULL != pfBadPagesDetected )
     {
         *pfBadPagesDetected = !fSuccess;
-        fSuccess = TRUE;
+        fSuccess = fTrue;
     }
 
 HandleError:
