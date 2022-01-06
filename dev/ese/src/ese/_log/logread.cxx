@@ -2506,7 +2506,8 @@ LOG::LGPrereadExecute(
 
         for ( DBID dbid = dbidUserLeast; dbid < dbidMax; dbid++ )
         {
-            if ( FLGRICheckRedoConditionForDb( dbid, lgposPbNext ) )
+            if ( FLGRICheckRedoConditionForDb( dbid, lgposPbNext ) &&
+                 ( !BoolParam( m_pinst, JET_paramFlight_DisableReplayPrereadForSsd ) || g_rgfmp[ m_pinst->m_mpdbidifmp[ dbid ] ].FSeekPenalty() ) )
             {
                 //  Enabling an already-enabled database will wipe out the
                 //  current list.
