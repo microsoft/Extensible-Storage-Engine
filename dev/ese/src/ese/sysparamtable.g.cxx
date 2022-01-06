@@ -87,7 +87,7 @@ JetParam g_rgparamRaw[] =
     NORMAL_PARAM(JET_paramZeroDatabaseDuringBackup, CJetParam::typeBoolean, 0,  0,  0, 1, 0, -1, 0),
     CUSTOM_PARAM(JET_paramUnicodeIndexDefault, CJetParam::typeUserDefined, 0,  0,  0, 1, GetUnicodeIndexDefault, SetUnicodeIndexDefault, CloneUnicodeIndexDefault),
     NORMAL_PARAM(JET_paramRuntimeCallback, CJetParam::typePointer, 0,  0,  0, 1, 0, -1, NULL),
-    ILLEGAL_PARAM(74),
+    NORMAL_PARAM(JET_paramFlight_DisableReplayPrereadForSsd, CJetParam::typeBoolean, 1,  0,  0, 0, 0, -1, 0),
     ILLEGAL_PARAM(75),
     IGNORED_PARAM(JET_paramEnableSortedRetrieveColumns, CJetParam::typeBoolean, 0,  0,  0, 1, 0, -1, 0),
     NORMAL_PARAM(JET_paramCleanupMismatchedLogFiles, CJetParam::typeBoolean, 0,  0,  0, 1, 0, -1, 0),
@@ -317,7 +317,7 @@ static_assert( JET_paramErrorToString == 70, "The order of defintion for JET_par
 static_assert( JET_paramZeroDatabaseDuringBackup == 71, "The order of defintion for JET_paramZeroDatabaseDuringBackup in sysparam.xml must follow the numerical ordering of its value (as defined in jethdr.w)." );
 static_assert( JET_paramUnicodeIndexDefault == 72, "The order of defintion for JET_paramUnicodeIndexDefault in sysparam.xml must follow the numerical ordering of its value (as defined in jethdr.w)." );
 static_assert( JET_paramRuntimeCallback == 73, "The order of defintion for JET_paramRuntimeCallback in sysparam.xml must follow the numerical ordering of its value (as defined in jethdr.w)." );
-static_assert( 74 == 74, "The order of defintion for 74 in sysparam.xml must follow the numerical ordering of its value (as defined in jethdr.w)." );
+static_assert( JET_paramFlight_DisableReplayPrereadForSsd == 74, "The order of defintion for JET_paramFlight_DisableReplayPrereadForSsd in sysparam.xml must follow the numerical ordering of its value (as defined in jethdr.w)." );
 static_assert( 75 == 75, "The order of defintion for 75 in sysparam.xml must follow the numerical ordering of its value (as defined in jethdr.w)." );
 static_assert( JET_paramEnableSortedRetrieveColumns == 76, "The order of defintion for JET_paramEnableSortedRetrieveColumns in sysparam.xml must follow the numerical ordering of its value (as defined in jethdr.w)." );
 static_assert( JET_paramCleanupMismatchedLogFiles == 77, "The order of defintion for JET_paramCleanupMismatchedLogFiles in sysparam.xml must follow the numerical ordering of its value (as defined in jethdr.w)." );
