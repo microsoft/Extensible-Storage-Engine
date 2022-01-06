@@ -19,6 +19,8 @@
 #include "jet.h"
 #include "tcconst.hxx"
 
+#include "checksum.hxx"
+
 #pragma warning ( disable : 4127 )  // conditional expression is constant
 #pragma warning ( disable : 4706 )  // assignment within conditional expression
 
