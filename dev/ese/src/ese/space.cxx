@@ -8484,6 +8484,7 @@ ERR ErrSPCaptureNonRevertableFDPRootPage( PIB *ppib, FCB* pfcbFDPToFree, const P
     Call( ErrRBSRDWLatchAndCapturePreImage(
         pfucb->ifmp,
         PgnoRoot( pfucb ),
+        dbtimeNil,
         fRBSDeletedTableRootPage,
         pfucb->ppib->BfpriPriority( pfucb->ifmp ),
         *tcScope ) );
@@ -8503,6 +8504,7 @@ ERR ErrSPCaptureNonRevertableFDPRootPage( PIB *ppib, FCB* pfcbFDPToFree, const P
             Call( ErrRBSRDWLatchAndCapturePreImage(
                 pfucb->ifmp,
                 pfcbT->PgnoFDP(),
+                dbtimeNil,
                 fRBSDeletedTableRootPage,
                 pfucb->ppib->BfpriPriority( pfucb->ifmp ),
                 *tcScope ) );
@@ -8520,6 +8522,7 @@ ERR ErrSPCaptureNonRevertableFDPRootPage( PIB *ppib, FCB* pfcbFDPToFree, const P
             Call( ErrRBSRDWLatchAndCapturePreImage(
                 pfucb->ifmp,
                 pgnoLVRoot,
+                dbtimeNil,
                 fRBSDeletedTableRootPage,
                 pfucb->ppib->BfpriPriority( pfucb->ifmp ),
                 *tcScope ) );

@@ -1185,4 +1185,4 @@ public:
 
 VOID UtilLoadRBSinfomiscFromRBSfilehdr( JET_RBSINFOMISC* prbsinfomisc, const ULONG cbrbsinfomisc, const RBSFILEHDR* prbsfilehdr );
 VOID RBSResourcesCleanUpFromInst( _In_ INST * const pinst );
-ERR ErrRBSRDWLatchAndCapturePreImage( _In_ const IFMP ifmp, _In_ const PGNO pgno, ULONG fPreImageFlags, _In_ const BFPriority bfpri, _In_ const TraceContext& tc );
+ERR ErrRBSRDWLatchAndCapturePreImage( _In_ const IFMP ifmp, _In_ const PGNO pgno, _In_ const DBTIME dbtimeLast, ULONG fPreImageFlags, _In_ const BFPriority bfpri, _In_ const TraceContext& tc );

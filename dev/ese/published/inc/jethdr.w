@@ -669,6 +669,7 @@ typedef void (JET_API *JET_SPCATCALLBACK)( _In_ const unsigned long pgno, _In_ c
 // 9440 being skipped due to revert of a bad deployed build
 #define JET_efvRBSNonRevertableTableDeletes                 9460    //  Adds support for non-revertable table deletes. The active will stop logging extent freed LR for all freed extent but if available lag doesn't support it yet, shouldn't be allowed.
 #define JET_efvScanCheck2Flags                              9480    //  The byte le_bSource in ScanCheck2 LR is split into 3 components and changed to le_bFlagsAndScs. The highest bit is used for objidInvalid flag and the bit next to highest is used for emptypage flag. The next 4 bits are left unused (for now) and the lower 2 bits are used for ScanCheckSource.
+#define JET_efvExtentFreed2                                 9500    //  Adds support for ExtentFreed2 LR which adds dbtime of the database to the existing ExtentFreed LR.
 
 // Special format specifiers here
 #define JET_efvUseEngineDefault             (0x40000001)    //  Instructs the engine to use the maximal default supported Engine Format Version. (default)
@@ -4060,6 +4061,7 @@ typedef enum
 #define JET_paramFlight_ExtentPageCountCacheVerifyOnly  114 //  Verify values read from the Extent Page Count Cache rather than just returning them.
 #define JET_paramFlight_EnablePgnoFDPLastSetTime        115 //  whether we want to enable setting PgnoPFDSetTime in the system table for a table entry.
 #define JET_paramFlight_EnableScanCheck2Flags           116 //  whether we want to enable logging flags in ScanCheck2 log record.
+#define JET_paramFlight_EnableExtentFreed2              117 //  whether we want to enable logging ExtentFreed2 LR after the efv upgrade.
 
 //                                              120 //  JET_paramDBAPageAvailMin
 //                                              121 //  JET_paramDBAPageAvailThreshold

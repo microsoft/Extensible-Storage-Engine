@@ -45,6 +45,7 @@ class LOG_WRITE_BUFFER;
 class LRCREATESEFDP;
 class LREMPTYTREE;
 class LREXTENTFREED;
+class LREXTENTFREED2;
 template< typename TDelta > class _LRDELTA;
 struct VERPROXY;
 
@@ -2118,7 +2119,7 @@ private:
     ERR ErrLGIRedoFDPPage( CTableHash *pctablehash, PIB *ppib, const LRCREATEMEFDP *plrcreatemefdp );
     ERR ErrLGRIRedoFreeEmptyPages( FUCB * const pfucb, LREMPTYTREE * const plremptytree );
     ERR ErrLGIRedoMergePath( PIB * ppib, const LRMERGE_  * const plrmerge, _Outptr_ MERGEPATH ** ppmergePath );
-    ERR ErrLGRIRedoExtentFreed( const LREXTENTFREED * const plrextentfreed );
+    ERR ErrLGRIRedoExtentFreed( const LREXTENTFREED2 * const plrextentfreed );
 
     template< typename TDelta >
     ERR ErrLGRIRedoDelta(

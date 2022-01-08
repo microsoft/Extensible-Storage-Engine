@@ -267,8 +267,9 @@ const LRTYP lrtypSignalAttachDb                 = 97;
 const LRTYP lrtypScanCheck2                     = 98;
 const LRTYP lrtypShrinkDB3                      = 99;
 const LRTYP lrtypExtentFreed                    = 100;
+const LRTYP lrtypExtentFreed2                   = 101;
 
-const LRTYP lrtypMax                            = 101;
+const LRTYP lrtypMax                            = 102;
 
 const LRTYP lrtypMaxMax                         = 128;
 C_ASSERT( lrtypMax < lrtypMaxMax ); // You are using the high bit of LRTYPE!!! Time to expand to 2 bytes?!?!?!
@@ -2493,37 +2494,29 @@ class LREXTENTFREED
             m_fFlags = 0;
         }
 
+    protected:
+        LREXTENTFREED( const LRTYP lrtypEF, const size_t cblrExtentFreed )
+            : LR( cblrExtentFreed )
+        {
+            lrtyp = lrtypEF;
+            Assert( cblrExtentFreed >= CbLGSizeOfRec( this ) );
+            Assert( cblrExtentFreed >= sizeof( LREXTENTFREED ) );
+            Assert( ( lrtypEF == lrtypExtentFreed ) || ( lrtypEF == lrtypExtentFreed2 ) );
+        }
+
+    private:
         enum Flags
         {
             fTableRootPage = 0x1,
             fEmptyPageFDPDeleted = 0x2,
         };
 
-    private:
         UnalignedLittleEndian< DBID >       le_dbid;            // dbid.
         UnalignedLittleEndian< PGNO >       le_pgnoFirst;       // First Pgno of the extent.
         UnalignedLittleEndian< CPG >        le_cpgExtent;       // Count of pages in the freed extent.
         BYTE                                m_fFlags;           // Flags
 
     public:
-        VOID InitExtentFreed(
-                const DBID  dbid,
-                const PGNO  pgno,
-                const CPG   cpgExtent,
-                const BYTE  fFlags )
-        {
-            le_dbid         = dbid;
-            le_pgnoFirst    = pgno;
-            le_cpgExtent    = cpgExtent;
-            m_fFlags        = fFlags;
-        }
-
-        VOID InitExtentFreed( const LR* const plr )
-        {
-            Assert( ( plr->lrtyp == lrtypExtentFreed ) );
-            UtilMemCpy( this, plr, sizeof( *this ) );
-        }
-
         DBID Dbid( ) const                          { return le_dbid; }
         void SetDbid(const DBID dbid)               { le_dbid = dbid; }
 
@@ -2533,12 +2526,49 @@ class LREXTENTFREED
         CPG  CpgExtent( ) const                     { return le_cpgExtent; }
         void SetCpgExtent( const CPG cpgExtent)     { le_cpgExtent = cpgExtent; }
 
-        BOOL FTableRootPage( void ) const           { return m_fFlags & Flags::fTableRootPage; }
+        BOOL FTableRootPage( void ) const           { return !!(m_fFlags & Flags::fTableRootPage); }
         void SetTableRootPage( void )               { m_fFlags |= ( BYTE ) Flags::fTableRootPage; }
 
-        BOOL FEmptyPageFDPDeleted( void ) const     { return m_fFlags & Flags::fEmptyPageFDPDeleted; }
+        BOOL FEmptyPageFDPDeleted( void ) const     { return !!(m_fFlags & Flags::fEmptyPageFDPDeleted); }
         void SetEmptyPageFDPDeleted( void )         { m_fFlags |= ( BYTE ) Flags::fEmptyPageFDPDeleted; }
 };
+
+class LREXTENTFREED2 :
+    public LREXTENTFREED
+{
+public:
+    LREXTENTFREED2() :
+        LREXTENTFREED( lrtypExtentFreed2, sizeof( *this ) )
+    {
+        le_dbtime = dbtimeNil;
+    }
+
+    LREXTENTFREED2( const LREXTENTFREED* const plrextentfreed ) :
+        LREXTENTFREED( plrextentfreed->lrtyp, sizeof( *this ) )
+    {
+        le_dbtime = dbtimeNil;
+
+        // CbLGSizeOfRec will return the size of LREXTENTFREED or LREXTENTFREED2 based on the lrtyp.
+        // So if lrtyp is LREXTENTFREED we will just copy fields of LREXTENTFREED and dbtime will be dbtimeNil.
+        UtilMemCpy( this, plrextentfreed, CbLGSizeOfRec( plrextentfreed ) );
+    }
+
+public:
+    void SetDbtime( const DBTIME dbtime )
+    {
+        Assert( dbtime > 0 );
+        le_dbtime = dbtime;
+    }
+    DBTIME Dbtime() const
+    {
+        Assert( ( le_dbtime > 0 ) || ( le_dbtime == dbtimeNil ) );
+        return le_dbtime;
+    }
+
+private:
+    UnalignedLittleEndian< DBTIME > le_dbtime;
+};
+
 
 #include <poppack.h>
 

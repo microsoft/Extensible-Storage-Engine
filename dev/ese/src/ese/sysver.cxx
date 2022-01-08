@@ -84,6 +84,7 @@ const FormatVersions g_rgfmtversEngine[] = {
     { JET_efvRBSNonRevertableTableDeletes, /* 9460 */   { 1568,230,500 }, { 8,100,220 }, { 3,0,0 } }, // [2021/09/08]
 
     { JET_efvScanCheck2Flags, /* 9480 */                { 1568,230,500 }, { 8,110,240 }, { 3,0,0 } }, // [2021/10/22]
+    { JET_efvExtentFreed2, /* 9500 */                   { 1568,230,500 }, { 8,120,260 }, { 3,0,0 } }, // [2021/12/21]
 };
 
 const INT g_cfmtversEngine = _countof( g_rgfmtversEngine );
