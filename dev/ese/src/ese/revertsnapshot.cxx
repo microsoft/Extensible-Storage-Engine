@@ -1758,7 +1758,7 @@ JETUNITTESTDB( RBSPreImageCompression, Xpress, dwOpenDatabase )
 
 #endif // ENABLE_JET_UNIT_TEST
 
-ERR ErrRBSRDWLatchAndCapturePreImage( _In_ const IFMP ifmp, _In_ const PGNO pgno, ULONG fPreImageFlags, _In_ const BFPriority bfpri, _In_ const TraceContext& tc )
+ERR ErrRBSRDWLatchAndCapturePreImage( _In_ const IFMP ifmp, _In_ const PGNO pgno, _In_ const DBTIME dbtimeLast, ULONG fPreImageFlags, _In_ const BFPriority bfpri, _In_ const TraceContext& tc )
 {
     if ( g_rgfmp[ifmp].Dbid() == dbidTemp ||
         !g_rgfmp[ifmp].FRBSOn() )
@@ -1773,6 +1773,16 @@ ERR ErrRBSRDWLatchAndCapturePreImage( _In_ const IFMP ifmp, _In_ const PGNO pgno
 
     //  get exclusive latch.
     Call( ErrBFRDWLatchPage( &bfl, ifmp, pgno, bflfDefault, bfpri, tc ) );
+
+    // Don't capture preimage if dbtimeLast is behind the dbtime of the page.
+    // This is because when we are trying to capture root page of a deleted table within required range,
+    // it is possible the page was reused by another table and flushed to disk. 
+    // If we capture preimage for such a page, we might wrong mark as deleted when we revert.
+    if ( dbtimeLast != dbtimeNil && ( fPreImageFlags & fRBSDeletedTableRootPage ) && ((CPAGE::PGHDR*)bfl.pv)->dbtimeDirtied > dbtimeLast )
+    {
+        BFRDWUnlatch( &bfl );
+        return JET_errSuccess;
+    }
 
     Call( g_rgfmp[ifmp].PRBS()->ErrCapturePreimage( 
         g_rgfmp[ifmp].Dbid(),

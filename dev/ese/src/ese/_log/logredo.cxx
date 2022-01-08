@@ -11286,7 +11286,7 @@ ERR LOG::ErrLGRIRedoTrimDB(
 }
 
 //  ================================================================
-ERR LOG::ErrLGRIRedoExtentFreed( const LREXTENTFREED * const plrextentfreed )
+ERR LOG::ErrLGRIRedoExtentFreed( const LREXTENTFREED2 * const plrextentfreed )
 //  ================================================================
 {
     // This is not logged for all free extent operations, only for those related to deleting a whole space tree.
@@ -11320,6 +11320,7 @@ ERR LOG::ErrLGRIRedoExtentFreed( const LREXTENTFREED * const plrextentfreed )
     const CPG  cpgExtent            = plrextentfreed->CpgExtent();
     const BOOL fTableRootPage       = plrextentfreed->FTableRootPage();
     const BOOL fEmptyPageFDPDeleted = plrextentfreed->FEmptyPageFDPDeleted();
+    const DBTIME dbtimeLast         = plrextentfreed->Dbtime();
 
     Assert( !fTableRootPage || cpgExtent == 1 );
     Assert( !( fTableRootPage && fEmptyPageFDPDeleted ) );
@@ -11341,6 +11342,7 @@ ERR LOG::ErrLGRIRedoExtentFreed( const LREXTENTFREED * const plrextentfreed )
         err = ErrRBSRDWLatchAndCapturePreImage(
                 ifmp,
                 pgnoFirst,
+                dbtimeLast,
                 fRBSDeletedTableRootPage,
                 BfpriBFMake( PctFMPCachePriority( ifmp ), (BFTEMPOSFILEQOS) qosIODispatchImmediate ),
                 TcCurr() );
@@ -13053,10 +13055,11 @@ ProcessNextRec:
             }
 
             case lrtypExtentFreed:
+            case lrtypExtentFreed2:
             {
                 // This is not logged for all free extent operations, only for those related to deleting a whole space tree.
-                const LREXTENTFREED * const plrextentfreed = (LREXTENTFREED *)plr;
-                Call( ErrLGRIRedoExtentFreed( plrextentfreed ) );
+                const LREXTENTFREED2 lrextentfreed( (LREXTENTFREED *)plr );
+                Call( ErrLGRIRedoExtentFreed( &lrextentfreed ) );
         
                 break;
             }

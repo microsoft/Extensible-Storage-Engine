@@ -2824,10 +2824,11 @@ ERR LOG::ErrLGIPrereadExecute( const BOOL fPgnosOnly )
             }
 
             case lrtypExtentFreed:
+            case lrtypExtentFreed2:
             {
                 // This is not logged for all free extent operations, only for those related to deleting a whole space tree.
-                LREXTENTFREED lrextentfreed;
-                lrextentfreed.InitExtentFreed( plr );
+                LREXTENTFREED2 lrextentfreed( (LREXTENTFREED *) plr );
+
                 const DBID dbid         = lrextentfreed.Dbid();
                 const PGNO pgnofirst    = lrextentfreed.PgnoFirst();
                 const CPG  cpgextent    = lrextentfreed.CpgExtent();
@@ -3169,6 +3170,7 @@ const LRD mplrtyplrd[ ] = {
     {   /*  98  ScanCheck2 */       sizeof( LRSCANCHECK2 ),         0   },
     {   /*  99  ShrinkDB3 */        sizeof( LRSHRINKDB3 ),          0   },
     {   /*  100 ExtentFreed */      sizeof( LREXTENTFREED ),        0   },
+    {   /*  101 ExtentFreed2 */     sizeof( LREXTENTFREED2 ),       0   },
 };
 
 
@@ -3532,6 +3534,7 @@ const SHORT mplrtypn[ ] =
     sizeof( LRSCANCHECK2 ),
     sizeof( LRSHRINKDB3 ),
     sizeof( LREXTENTFREED ),
+    sizeof( LREXTENTFREED2 ),
 };
 
 UINT CbLGFixedSizeOfRec( const LR * const plr )

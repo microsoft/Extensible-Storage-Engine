@@ -4859,11 +4859,16 @@ HandleError:
 ERR ErrLGExtentFreed( LOG * const plog, const IFMP ifmp, const PGNO pgnoFirst, const CPG cpgExtent, const BOOL fTableRootPage, const BOOL fEmptyPageFDPDeleted )
 {
     // This is not logged for all free extent operations, only for those related to deleting a whole space tree.
-    DATA                rgdata[1];
-    LREXTENTFREED  lr;
+    DATA        rgdata[1];
+    const BOOL  fExtentFreed2Supported  = g_rgfmp[ ifmp ].FEfvSupported( JET_efvExtentFreed2 ) && BoolParam( PinstFromIfmp( ifmp ), JET_paramFlight_EnableExtentFreed2 );
+    ERR         err                     = JET_errSuccess;
+
+    LREXTENTFREED*  plr  = fExtentFreed2Supported ? ( new LREXTENTFREED2() ) : new LREXTENTFREED();
+    Assert( plr );
 
     // Changing the size of the record will break log compatability.
     C_ASSERT( 11 == sizeof(LREXTENTFREED) );
+    C_ASSERT( 19 == sizeof(LREXTENTFREED2) );
 
     if ( plog->FLogDisabled() || ( plog->FRecovering() && plog->FRecoveringMode() != fRecoveringUndo ) )
     {
@@ -4872,24 +4877,33 @@ ERR ErrLGExtentFreed( LOG * const plog, const IFMP ifmp, const PGNO pgnoFirst, c
 
     Assert( g_rgfmp[ifmp].FLogOn() );
 
-    lr.SetDbid( g_rgfmp[ifmp].Dbid() );
-    lr.SetPgnoFirst( pgnoFirst );
-    lr.SetCpgExtent( cpgExtent );
+    plr->SetDbid( g_rgfmp[ifmp].Dbid() );
+    plr->SetPgnoFirst( pgnoFirst );
+    plr->SetCpgExtent( cpgExtent );
 
     if ( fTableRootPage )
     {
-        lr.SetTableRootPage();
+        plr->SetTableRootPage();
     }
 
     if ( fEmptyPageFDPDeleted )
     {
-        lr.SetEmptyPageFDPDeleted();
+        plr->SetEmptyPageFDPDeleted();
     }
 
-    rgdata[0].SetPv( (BYTE *)&lr );
-    rgdata[0].SetCb( sizeof(lr) );
+    if ( fExtentFreed2Supported )
+    {
+        ( (LREXTENTFREED2*)plr )->SetDbtime( g_rgfmp[ ifmp ].DbtimeLast() );
+    }
 
-    return plog->ErrLGLogRec( rgdata, 1, 0, 0, pNil );
+    rgdata[ 0 ].SetPv( (BYTE*) plr );
+    rgdata[ 0 ].SetCb( fExtentFreed2Supported ? sizeof( LREXTENTFREED2 ) : sizeof( LREXTENTFREED ) );
+
+    Call( plog->ErrLGLogRec( rgdata, 1, 0, 0, pNil ) );
+
+HandleError:
+    delete plr;
+    return err;
 }
 
 
@@ -5001,7 +5015,8 @@ const char * const szNewPage                    = "NewPage  ";
 
 const char * const szSignalAttachDb             = "SAttachDB";
 
-const char * const szExtentFreed                = "ExtentFreed";
+const char * const szExtentFreed                = "ExtFreed ";
+const char * const szExtentFreed2               = "ExtFreed2";
 
 const char * szUnknown                          = "*UNKNOWN*";
 
@@ -5130,6 +5145,7 @@ const char * SzLrtyp( LRTYP lrtyp )
         case lrtypNewPage:          return szNewPage;
         case lrtypSignalAttachDb:   return szSignalAttachDb;
         case lrtypExtentFreed:      return szExtentFreed;
+        case lrtypExtentFreed2:     return szExtentFreed2;
 
         default:
             AssertSz( fFalse, "Unknown lrtyp: %d\n", lrtyp );
@@ -6788,6 +6804,7 @@ And here was the list of the log file after recovery
             break;
 
         case lrtypExtentFreed:
+        case lrtypExtentFreed2:
         {
             const LREXTENTFREED * const plrextentfreed = (LREXTENTFREED *)plr;
             SetLogCsvTypeSz( szLogRecordMiscelLrInfo );
@@ -8667,10 +8684,12 @@ VOID LrToSz(
         }
 
         case lrtypExtentFreed:
+        case lrtypExtentFreed2:
         {
-            const LREXTENTFREED * const plrextentfreed = (LREXTENTFREED*)plr;
+            const LREXTENTFREED* const plrextentfreed = (LREXTENTFREED *)plr;
 
-            OSStrCbFormatA( rgchBuf, sizeof(rgchBuf), " [%u:%lu+%ld],[%s%s] (",
+            OSStrCbFormatA( rgchBuf, sizeof(rgchBuf), " %I64x [%u:%lu+%ld],[%s%s] (",
+                plr->lrtyp == lrtypExtentFreed2 ? ((LREXTENTFREED2 *)plr)->Dbtime() : dbtimeNil,
                 plrextentfreed->Dbid(),
                 plrextentfreed->PgnoFirst(),
                 plrextentfreed->CpgExtent(),
@@ -8956,8 +8975,9 @@ ERR ErrLrToPageRef( _In_ INST* const                                            
             break;
 
         case lrtypExtentFreed:
+        case lrtypExtentFreed2:
         {
-            const LREXTENTFREED * const   plrextentfreed    = (LREXTENTFREED *)plr;
+            const LREXTENTFREED * const plrextentfreed    = (LREXTENTFREED *)plr;
             const DBID                  dbid                = plrextentfreed->Dbid();
 
             // TODO VJ: visit, should we consider this as pages read and written even though this would be true only for copy where available lag is enabled.
@@ -9363,6 +9383,112 @@ JETUNITTEST( LRTRIMDB, LrToSz )
     LrToSz( (LR *)&lr, szLR, sizeof(szLR), NULL );
     printf( "((%s))\n", szLR );
     CHECK( 0 == strcmp(" TrimDB    [7:1234+5] ([7:1235] [7:1236] [7:1237] [7:1238] )", szLR ) );
+}
+
+JETUNITTEST( LREXTENTFREED, ConstructorAndSetFields )
+//  ================================================================
+{
+    LREXTENTFREED lr;
+    lr.SetDbid( 1 );
+    lr.SetPgnoFirst( 100 );
+    lr.SetCpgExtent( 16 );
+    lr.SetTableRootPage();
+
+    CHECK( lrtypExtentFreed == lr.lrtyp );
+    CHECK( 1 == lr.Dbid() );
+    CHECK( 100 == lr.PgnoFirst() );
+    CHECK( 16 == lr.CpgExtent() );
+    CHECK( fTrue == lr.FTableRootPage() );
+    CHECK( fFalse == lr.FEmptyPageFDPDeleted() );
+}
+
+JETUNITTEST( LREXTENTFREED, LrToSz )
+//  ================================================================
+{
+    LREXTENTFREED lr;
+    lr.SetDbid( 1 );
+    lr.SetPgnoFirst( 100 );
+    lr.SetCpgExtent( 1 );
+    lr.SetTableRootPage();
+
+    char szLR[1024];
+    LrToSz( (LR *)&lr, szLR, sizeof(szLR), NULL );
+    printf( "((%s))\n", szLR );
+    CHECK( 0 == strcmp(" ExtFreed  ffffffffffffffff [1:100+1],[R] ()", szLR ) );
+}
+
+JETUNITTEST( LREXTENTFREED2, ConstructorAndSetFields )
+//  ================================================================
+{
+    LREXTENTFREED2 lr;
+    lr.SetDbid( 2 );
+    lr.SetPgnoFirst( 50 );
+    lr.SetCpgExtent( 8 );
+    lr.SetEmptyPageFDPDeleted();
+    lr.SetDbtime( 151238 );
+
+    CHECK( lrtypExtentFreed2 == lr.lrtyp );
+    CHECK( 2 == lr.Dbid() );
+    CHECK( 50 == lr.PgnoFirst() );
+    CHECK( 8 == lr.CpgExtent() );
+    CHECK( fFalse == lr.FTableRootPage() );
+    CHECK( fTrue == lr.FEmptyPageFDPDeleted() );
+    CHECK( 151238 == lr.Dbtime() );
+}
+
+JETUNITTEST( LREXTENTFREED2, LrToSz )
+//  ================================================================
+{
+    LREXTENTFREED2 lr;
+    lr.SetDbid( 2 );
+    lr.SetPgnoFirst( 50 );
+    lr.SetCpgExtent( 8 );
+    lr.SetEmptyPageFDPDeleted();
+    lr.SetDbtime( 151238 );
+
+    char szLR[1024];
+    LrToSz( (LR *)&lr, szLR, sizeof(szLR), NULL );
+    printf( "((%s))\n", szLR );
+    CHECK( 0 == strcmp(" ExtFreed2 24ec6 [2:50+8],[E] ([2:51] [2:52] [2:53] [2:54] [2:55] [2:56] [2:57] )", szLR ) );
+}
+
+JETUNITTEST( LREXTENTFREED2, ConstructorWithExtentFreedLR )
+//  ================================================================
+{
+    LREXTENTFREED lr;
+    lr.SetDbid( 2 );
+    lr.SetPgnoFirst( 50 );
+    lr.SetCpgExtent( 8 );
+    lr.SetEmptyPageFDPDeleted();
+
+    LREXTENTFREED2 lr2( &lr );
+    
+    CHECK( lrtypExtentFreed == lr2.lrtyp );
+    CHECK( 50 == lr2.PgnoFirst() );
+    CHECK( 8 == lr2.CpgExtent() );
+    CHECK( fFalse == lr2.FTableRootPage() );
+    CHECK( fTrue == lr2.FEmptyPageFDPDeleted() );
+    CHECK( dbtimeNil == lr2.Dbtime() );
+}
+
+JETUNITTEST( LREXTENTFREED2, ConstructorWithExtentFreedLR2 )
+//  ================================================================
+{
+    LREXTENTFREED2 lr;
+    lr.SetDbid( 2 );
+    lr.SetPgnoFirst( 50 );
+    lr.SetCpgExtent( 8 );
+    lr.SetEmptyPageFDPDeleted();
+    lr.SetDbtime( 1213541 );
+
+    LREXTENTFREED2 lr2( &lr );
+
+    CHECK( lrtypExtentFreed2 == lr2.lrtyp );
+    CHECK( 50 == lr2.PgnoFirst() );
+    CHECK( 8 == lr2.CpgExtent() );
+    CHECK( fFalse == lr2.FTableRootPage() );
+    CHECK( fTrue == lr2.FEmptyPageFDPDeleted() );
+    CHECK( 1213541 == lr2.Dbtime() );
 }
 
 #endif // defined( DEBUG ) && defined( ENABLE_JET_UNIT_TEST )
