@@ -2,6 +2,7 @@
 // Licensed under the MIT License.
 
 #include "osunitstd.hxx"
+#include <rpc.h>
 
 //  ================================================================
 class NORMTESTS : public UNITTEST
