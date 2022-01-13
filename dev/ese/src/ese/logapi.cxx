@@ -4858,22 +4858,23 @@ HandleError:
 
 ERR ErrLGExtentFreed( LOG * const plog, const IFMP ifmp, const PGNO pgnoFirst, const CPG cpgExtent, const BOOL fTableRootPage, const BOOL fEmptyPageFDPDeleted )
 {
+    if ( plog->FLogDisabled() || ( plog->FRecovering() && plog->FRecoveringMode() != fRecoveringUndo ) )
+    {
+        return JET_errSuccess;
+    }
+
     // This is not logged for all free extent operations, only for those related to deleting a whole space tree.
     DATA        rgdata[1];
     const BOOL  fExtentFreed2Supported  = g_rgfmp[ ifmp ].FEfvSupported( JET_efvExtentFreed2 ) && BoolParam( PinstFromIfmp( ifmp ), JET_paramFlight_EnableExtentFreed2 );
     ERR         err                     = JET_errSuccess;
 
-    LREXTENTFREED*  plr  = fExtentFreed2Supported ? ( new LREXTENTFREED2() ) : new LREXTENTFREED();
-    Assert( plr );
+    LREXTENTFREED* const plr            = fExtentFreed2Supported ? ( new LREXTENTFREED2() ) : ( new LREXTENTFREED() );
+    Alloc( plr );
 
     // Changing the size of the record will break log compatability.
     C_ASSERT( 11 == sizeof(LREXTENTFREED) );
     C_ASSERT( 19 == sizeof(LREXTENTFREED2) );
 
-    if ( plog->FLogDisabled() || ( plog->FRecovering() && plog->FRecoveringMode() != fRecoveringUndo ) )
-    {
-        return JET_errSuccess;
-    }
 
     Assert( g_rgfmp[ifmp].FLogOn() );
 
