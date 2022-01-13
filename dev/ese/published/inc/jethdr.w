@@ -4779,10 +4779,11 @@ typedef struct
 #define bitPrereadSkip              0x00000040  /*  Internal: Just figure out the pages which needs to be preread but skip the actual preread */
 #define bitIncludeNonLeafRead       0x00000080  /*  Internal: Include the non-leaf nodes in the list of pgnos read as well */
 #endif // JET_VERSION >= 0x0A01
+
+// begin_PubEsent
 #endif // JET_VERSION >= 0x0602
 #endif // JET_VERSION >= 0x0601
 
-// begin_PubEsent
     /* Flags for JetOpenTempTable */
 
 #define JET_bitTTIndexed            0x00000001  /* Allow seek */

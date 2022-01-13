@@ -266,10 +266,8 @@ XECHECKSUM ChecksumSelectNewFormat( const unsigned char * const pb, const ULONG 
 //-
 {
     PFNCHECKSUMNEWFORMAT pfn = ChecksumSelectNewFormat;
-
-#if (defined(_M_IX86)  && defined(_CHPE_X86_ARM64_)) || (defined(_M_AMD64) && defined(_ARM64EC_))
-    pfn = ChecksumNewFormatSlowly;
-#else
+    // TODO: ARM64X: Can we let ARM64EC use SSE here?
+#if (defined (_M_AMD64) && !defined(_ARM64EC_)) || (defined(_M_IX86) && !defined(_CHPE_X86_ARM64_))
     if( FAVXEnabled() && FPopcntAvailable() )
     {
         pfn = ChecksumNewFormatAVX;
@@ -292,15 +290,20 @@ XECHECKSUM ChecksumSelectNewFormat( const unsigned char * const pb, const ULONG 
             pfn = ChecksumNewFormatSSE;
         }
     }
-    else if( sizeof( DWORD_PTR ) == sizeof( ULONG ) * 2 )
-    {
-        pfn = ChecksumNewFormat64Bit;
-    }
-    else
-    {
-        pfn = ChecksumNewFormatSlowly;
-    }
 #endif
+
+    if (pfn == ChecksumSelectNewFormat)
+    {
+        if (sizeof(DWORD_PTR) == sizeof(ULONG) * 2)
+        {
+            pfn = ChecksumNewFormat64Bit;
+        }
+        else
+        {
+            pfn = ChecksumNewFormatSlowly;
+        }
+    }
+
 
     pfnChecksumNewFormat = pfn;
 
