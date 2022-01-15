@@ -11844,7 +11844,7 @@ LOCAL ERR ErrSPIExtendDB(
         const CPG cpgAvail = (CPG)( speiAEShelved.PgnoFirst() - pgnoSELastAdj - 1 );
         if ( cpgAvail >= cpgSEMin )
         {
-            cpgSEMaxAdj = cpgAdj + cpgAvail;
+            cpgSEMaxAdj = min( cpgSEMaxAdj, cpgAdj + cpgAvail );
             break;
         }
 
@@ -11908,7 +11908,7 @@ LOCAL ERR ErrSPIExtendDB(
     Assert( cpgAdj >= 0 );
 
     cpgSEMinAdj = cpgSEMin + cpgAdj;
-    cpgSEReqAdj = max( cpgSEMinAdj, min( cpgSEReq, cpgSEMaxAdj ) );
+    cpgSEReqAdj = max( cpgSEMinAdj, min( cpgSEMinAdj + ( cpgSEReq - cpgSEMin ), cpgSEMaxAdj ) );
     Assert( cpgSEMinAdj >= cpgSEMin );
     Assert( cpgSEReqAdj >= cpgSEMinAdj );
 
