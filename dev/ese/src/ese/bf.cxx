@@ -10803,6 +10803,7 @@ ERR ErrBFIMaintScavengeIScavengePages( const char* const szContextTraceOnly, con
     statsCurrRun.iRun = g_rgScavengeLastRuns[g_iScavengeLastRun].iRun + 1;
     statsCurrRun.fSync = fSync;
     statsCurrRun.tickStart = TickOSTimeCurrent();
+    const DWORD cbfNewlyEvictedUsedStart = g_cbfNewlyEvictedUsed;
 
     //  Shrink from the avail pool first.
     //
@@ -11209,6 +11210,8 @@ ERR ErrBFIMaintScavengeIScavengePages( const char* const szContextTraceOnly, con
 
     }// end while ( fTrue ) - for each target resource loop.
 
+    const DWORD cbfNewlyEvictedUsedEnd = g_cbfNewlyEvictedUsed;
+
 #ifdef DEBUG
     Assert( statsCurrRun.eStopReason != eScavengeInvalid );
     Assert( ( errLRUK == BFLRUK::ERR::errNoCurrentResource ) || ( statsCurrRun.eStopReason != eScavengeVisitedAllLrukEntries ) );
@@ -11219,6 +11222,8 @@ ERR ErrBFIMaintScavengeIScavengePages( const char* const szContextTraceOnly, con
     cbfCacheUsedMax = UlpFunctionalMax( cbfCacheUsedMax, cbfCacheUsed );
 
     const LONG cbfSuperColdedFinal = g_bflruk.CSuperColdSuccesses();
+
+    const DWORD cbfNewlyEvictedUsed = cbfNewlyEvictedUsedEnd - cbfNewlyEvictedUsedStart;
 
     // The purpose of this code is to catch bugs where we scan too  too many resources (i.e., return
     // the same resources multiple times). It is only an Expected() because I can't prove that it is
@@ -11239,7 +11244,7 @@ ERR ErrBFIMaintScavengeIScavengePages( const char* const szContextTraceOnly, con
             Expected( ( statsCurrRun.cbfVisited + cbfSuperColded ) >= ( cbfCacheUsedMin - cbfCacheUsedMin / 4 ) );
         }
 
-        Expected( statsCurrRun.cbfVisited <= ( cbfCacheUsedMax + cbfCacheUsedMax / 4 ) );
+        Expected( statsCurrRun.cbfVisited <= cbfCacheUsedMax + max( cbfCacheUsedMax / 4, cbfNewlyEvictedUsed ) );
     }
 #endif // DEBUG
 
