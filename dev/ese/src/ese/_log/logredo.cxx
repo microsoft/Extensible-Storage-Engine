@@ -9429,7 +9429,8 @@ ERR LOG::ErrLGRIRedoScanCheck( const LRSCANCHECK2 * const plrscancheck, BOOL* co
         const BOOL fRequiredRange = g_rgfmp[ifmp].FContainsDataFromFutureLogs();
         const BOOL fTrimmedDatabase = pfmp->Pdbfilehdr()->le_ulTrimCount > 0;
         const BOOL fInitDbtimePageInLogRec = plrscancheck->DbtimePage() != 0 && plrscancheck->DbtimePage() != dbtimeShrunk;
-        const BOOL fUninitPossible = fRequiredRange || !fInitDbtimePageInLogRec || fTrimmedDatabase;
+        const BOOL fRevertedDbtimePageInLogRec = CPAGE::FRevertedNewPage( plrscancheck->DbtimePage() );
+        const BOOL fUninitPossible = fRequiredRange || !fInitDbtimePageInLogRec || fTrimmedDatabase || fRevertedDbtimePageInLogRec;
 
         if ( fDbScan )
         {
@@ -9483,7 +9484,7 @@ ERR LOG::ErrLGRIRedoScanCheck( const LRSCANCHECK2 * const plrscancheck, BOOL* co
                     plrscancheck->DbtimePage() == dbtimeShrunk ||
                     ( ( plrscancheck->FObjidInvalid() ||  plrscancheck->FEmptyPage() ) && fPageFDPDelete ) ) &&
                   CPAGE::FRevertedNewPage( dbtimePage ) ) || 
-                CPAGE::FRevertedNewPage( plrscancheck->DbtimePage() );
+                fRevertedDbtimePageInLogRec;
 
             // Matching uninitialized state is OK, proceed only if at least one of the dbtimes is initialized
             // If this was a page which was reverted to a new page by RBS, we should ignore dbscan checks till the max log at the time of revert is replayed.
@@ -9810,7 +9811,7 @@ ERR LOG::ErrLGRIRedoScanCheck( const LRSCANCHECK2 * const plrscancheck, BOOL* co
                 case JET_errFileIOBeyondEOF:
                     fPageBeyondEof = fTrue;
                 case JET_errPageNotInitialized:
-                    if ( fInitDbtimePageInLogRec && !fRequiredRange && ( !fTrimmedDatabase || fPageBeyondEof ) )
+                    if ( fInitDbtimePageInLogRec && !fRevertedDbtimePageInLogRec && !fRequiredRange && ( !fTrimmedDatabase || fPageBeyondEof ) )
                     {
                         *pfBadPage = fTrue;
 
