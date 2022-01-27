@@ -982,10 +982,11 @@ ERR ErrLGScanCheck(
     if ( pgno != pgnoScanLastSentinel )
     {
         Assert( pgno != pgnoNull );
-        Assert( ( dbtimePage >= 0 ) || ( dbtimePage == dbtimeShrunk ) );
+        Assert( ( dbtimePage >= 0 ) || ( dbtimePage == dbtimeShrunk ) || ( dbtimePage == dbtimeRevert ) );
         Assert( dbtimePage != dbtimeInvalid );
         Assert( dbtimeCurrent > 0 );
         Assert( dbtimeCurrent != dbtimeShrunk );
+        Assert( dbtimeCurrent != dbtimeRevert );
         Assert( dbtimeCurrent != dbtimeInvalid );
         Expected( ( bSource == scsDbScan ) || ( bSource == scsDbShrink ) );
     }
