@@ -4,7 +4,6 @@
 #include <cstdio>
 #include <stdlib.h>
 
-#include "cc.hxx"
 #include "testerr.h"
 
 #define BSTF_AVOID_WIN_DEPENDENCE 1

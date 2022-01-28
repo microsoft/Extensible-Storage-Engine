@@ -16,6 +16,9 @@
 #include "esetest.h"
 #include <stdio.h>
 
+// Take one definition from event.hxx needed by jetmsg to avoid extra includes.
+typedef DWORD MessageId;
+
 #define mdelete( ptr )          \
 if ( ptr != 0 ) {               \
   delete ptr;                   \

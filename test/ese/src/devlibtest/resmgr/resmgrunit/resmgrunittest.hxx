@@ -55,7 +55,7 @@ _inline void AssertFail( const char * szMessage, const char * szFilename, LONG l
 // TODO: Layering yuckiness. Considering making this explicit in the LRUK constructor or template parameters
 const LONG g_pctCachePriorityMin        = 0;
 const LONG g_pctCachePriorityMax        = 1000;
-const LONG g_pctCachePriorityMaxMax     = (LONG)wMax;
+const LONG g_pctCachePriorityMaxMax     = (LONG)USHRT_MAX;
 const LONG g_pctCachePriorityDefault    = 100;
 #define FIsCachePriorityValid( pctCachePriority )   ( ( (LONG)(pctCachePriority) >= g_pctCachePriorityMin ) && ( (LONG)(pctCachePriority) <= g_pctCachePriorityMax ) )
 

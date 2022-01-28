@@ -1,12 +1,13 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-// Includes the header files from the dev code to get the LoadLibrary functors working.
+// Copy a few things from other ESE dev headers we need for library.hxx.  Include library.hxx in order
+//     to get LoadLibrary functors working.
+
 
 #pragma once
 
-// types.hxx needs _lrotl.
-#include <stdlib.h>
+#include <strsafe.h>
 
 #pragma push_macro( "Assert" )
 #pragma push_macro( "OnDebug" )
@@ -35,13 +36,39 @@
 #define OnDebug( code )
 #endif  //  DEBUG
 
-// types.hxx has a nameless struct/union (QWORDX).
-#pragma warning( push )
-#pragma warning ( disable : 4201 )
-#include "cc.hxx"
-#include "types.hxx"
-#pragma warning( pop )
-#include "string.hxx"
+
+// From cc.hxx
+typedef int       BOOL;
+typedef INT       ERR;
+
+#define fFalse  BOOL( 0 )
+
+
+// From types.hxx
+typedef ULONG_PTR LIBRARY;
+typedef INT_PTR   (*PFN)();
+
+#define INLINE inline
+
+#define DEFINE_ENUM_FLAG_OPERATORS_BASIC(ENUMTYPE)  \
+    extern "C++" {                                  \
+        inline ENUMTYPE operator | (ENUMTYPE a, ENUMTYPE b) { return ENUMTYPE(((INT)a) | ((INT)b)); }               \
+        inline ENUMTYPE operator & (ENUMTYPE a, ENUMTYPE b) { return ENUMTYPE(((INT)a) & ((INT)b)); }               \
+        inline ENUMTYPE operator ~ (ENUMTYPE a) { return ENUMTYPE(~((INT)a)); }                                     \
+    }      
+
+
+// From string.hxx
+#ifndef OSStrCbCopyW  // We might have already picked this one up.
+#define OSStrCbCopyW( wszDst, cbDst, wszSrc )                           \
+    {                                                                   \
+        if( SEC_E_OK != ( StringCbCopyW( wszDst, cbDst, wszSrc ) ) )    \
+        {                                                               \
+            AssertSz( fFalse, "Success expected");                      \
+        }                                                               \
+    }
+#endif
+
 #include "library.hxx"
 
 #pragma pop_macro( "Assert" )
