@@ -1,9 +1,6 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-#include "cc.hxx"   //  include ERR definition
-
-
 //  This is a range of errors that ESE test defines for it's own usage in the JET ERR number
 //  space.
 

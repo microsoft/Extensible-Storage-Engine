@@ -15,28 +15,7 @@
 
 #include <functional>
 
-//  We don't want to depend upon the full OS layer, but we need library.hxx and a few supporting things
-//  for library.hxx to work.
-
-#ifndef Expected
-#define Expected    Assert
-#else
-#error "If this is fixed everywhere pfnjet.hxx is used, then remove whole thing, otherwise just strip this #else #error clause."
-#endif
-
-#ifndef OnDebug
-#ifdef DEBUG
-#define OnDebug( code )             code
-#else  //   !DEBUG
-#define OnDebug( code )
-#endif //   DEBUG
-#else  //   defined(OnDebug)
-#error "If this is fixed everywhere pfnjet.hxx is used, then remove whole thing, otherwise just strip this #else #error clause."
-#endif //   OnDebug
-
-#include "cc.hxx"
-#include "types.hxx"
-#include "library.hxx"
+#include "eseloadlibrary.hxx"
 
 //
 //  Helpers

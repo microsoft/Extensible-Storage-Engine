@@ -3,8 +3,6 @@
 
 #include "IterQueryUnitTest.hxx"
 
-#include "cc.hxx"
-
 #include "stat.hxx"
 #include "iterquery.hxx"
 

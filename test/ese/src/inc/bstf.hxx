@@ -30,8 +30,25 @@
 //
 //  Hint: There should be only one.
 
-#include "cc.hxx"
 
+
+// Copy some definitions from ESE dev headers rather than include them.  We really don't need much.
+//  We could also get this from Windows headers, but we're avoiding that, too.
+typedef long                LONG;
+typedef unsigned long       ULONG;
+typedef long long           LONGLONG;
+typedef unsigned long long  ULONGLONG;
+typedef int                 INT;
+typedef char                CHAR;
+
+typedef ULONG               DWORD;
+typedef ULONGLONG           QWORD;
+
+typedef INT                 ERR;
+
+//const QWORD     wMax    = 0xFFFF;
+
+#define fFalse  BOOL( 0 )
 
 // ---------------------------------------------------------------------------------
 //
