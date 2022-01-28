@@ -4,6 +4,7 @@
 #ifndef _OS_TYPES_HXX_INCLUDED
 #define _OS_TYPES_HXX_INCLUDED
 
+#include <type_traits>
 #include <guiddef.h>
 
 //  build options
@@ -150,37 +151,110 @@ typedef DWORD (*PUTIL_THREAD_PROC)( DWORD_PTR );
 typedef DWORD_PTR THREAD;
 
 
-//  binary operator translation templates
+//  binary operator translation templates for enumerations
+//  The fancy templates are to check that T or T1 is an enumeration
+//  and that T2 makes sense to use for the operation (e.g. can be cast
+//  to that enumeration when using the |= operator) and causes no
+//  bit truncation.
+//
+//  Note: using these can force you to think about sign extension.
 
+template< class T1, class T2>
+using enable_if_convertible_to_enum = std::enable_if<
+    std::is_convertible<T2, typename std::underlying_type<T1>::type>::value, T2>;
+
+// Prefix increment
 template< class T >
-inline T& operator++( T& t )
+inline typename std::enable_if<std::is_enum<T>::value, T>::type
+operator++( T& t )
 {
-    t = t + 1;
+    t = static_cast<T>( t + 1 );
     return t;
 }
 
+// Postfix increment
 template< class T >
-inline T operator++( T& t, const INT not_used )
+inline typename std::enable_if<std::is_enum<T>::value, T>::type
+operator++( T& t, const INT not_used )
 {
     T tOld = t;
-    t = t + 1;
+    t = static_cast<T>( t + 1 );
     return tOld;
 }
 
+// Prefix decrement
 template< class T >
-inline T& operator--( T& t )
+inline typename std::enable_if<std::is_enum<T>::value, T>::type
+operator--( T& t )
 {
-    t = t - 1;
+    t = static_cast<T>( t - 1 );
     return t;
 }
 
+// Postfix increment
 template< class T >
-inline T operator--( T& t, const INT not_used )
+inline typename std::enable_if<std::is_enum<T>::value, T>::type
+operator--( T& t, const INT not_used )
 {
     T tOld = t;
-    t = t - 1;
+    t = static_cast<T>( t - 1 );
     return tOld;
 }
+
+template< class T1, class T2, typename enable_if_convertible_to_enum<T1, T2>::type* = nullptr >
+inline typename std::enable_if<std::is_enum<T1>::value, T1>::type
+operator+=( T1& t1,
+            const T2& t2 )
+{
+    static_assert( sizeof( T2 ) <= sizeof( T1 ), "Narrowing conversion not allowed" );
+    t1 = static_cast<T1>( t1 + t2 );
+    return t1;
+}
+
+template< class T1, class T2, typename enable_if_convertible_to_enum<T1, T2>::type* = nullptr >
+inline typename std::enable_if<std::is_enum<T1>::value, T1>::type
+operator-=( T1& t1,
+            const T2& t2 )
+{
+    static_assert( sizeof( T2 ) <= sizeof( T1 ), "Narrowing conversion not allowed" );
+    t1 = static_cast<T1>( t1 - t2 );
+    return t1;
+}
+
+template< class T1, class T2, typename enable_if_convertible_to_enum<T1, T2>::type* = nullptr >
+inline typename std::enable_if<std::is_enum<T1>::value, T1>::type
+operator&=( T1& t1,
+            const T2& t2 )
+{
+    static_assert( sizeof( T2 ) <= sizeof( T1 ), "Narrowing conversion not allowed" );
+    t1 = static_cast<T1>( t1 & t2 );
+    return t1;
+}
+
+template< class T1, class T2, typename enable_if_convertible_to_enum<T1, T2>::type* = nullptr >
+inline typename std::enable_if<std::is_enum<T1>::value, T1>::type
+operator^=( T1& t1,
+            const T2& t2 )
+{
+    static_assert( sizeof( T2 ) <= sizeof( T1 ), "Narrowing conversion not allowed" );
+    t1 = static_cast<T1>( t1 ^ t2 );
+    return t1;
+}
+
+template< class T1, class T2, typename enable_if_convertible_to_enum<T1, T2>::type* = nullptr >
+inline typename std::enable_if<std::is_enum<T1>::value, T1>::type
+operator|=( T1& t1,
+            const T2& t2 )
+{
+    static_assert( sizeof( T2 ) <= sizeof( T1 ), "Narrowing conversion not allowed" );
+    t1 = static_cast<T1>( t1 | t2 );
+    return t1;
+}
+
+/*
+//
+// These operators are not needed at this time.
+//
 
 template< class T1, class T2 >
 inline T1& operator%=( T1& t1, const T2& t2 )
@@ -190,30 +264,9 @@ inline T1& operator%=( T1& t1, const T2& t2 )
 }
 
 template< class T1, class T2 >
-inline T1& operator&=( T1& t1, const T2& t2 )
-{
-    t1 = t1 & t2;
-    return t1;
-}
-
-template< class T1, class T2 >
 inline T1& operator*=( T1& t1, const T2& t2 )
 {
     t1 = t1 * t2;
-    return t1;
-}
-
-template< class T1, class T2 >
-inline T1& operator+=( T1& t1, const T2& t2 )
-{
-    t1 = t1 + t2;
-    return t1;
-}
-
-template< class T1, class T2 >
-inline T1& operator-=( T1& t1, const T2& t2 )
-{
-    t1 = t1 - t2;
     return t1;
 }
 
@@ -237,20 +290,7 @@ inline T1& operator>>=( T1& t1, const T2& t2 )
     t1 = t1 >> t2;
     return t1;
 }
-
-template< class T1, class T2 >
-inline T1& operator^=( T1& t1, const T2& t2 )
-{
-    t1 = t1 ^ t2;
-    return t1;
-}
-
-template< class T1, class T2 >
-inline T1& operator|=( T1& t1, const T2& t2 )
-{
-    t1 = t1 | t2;
-    return t1;
-}
+*/
 
 //  host endian-ness
 
@@ -418,10 +458,110 @@ inline T ReverseBytesOnBE( const T t )
 }
 
 
+// A utility class to extract the type arguments of a templated type
+// This is the basic case (i.e. when the inspected type isn't a template)
+template <class T>
+struct extract_typearg
+{
+    using TArg = T;
+};
+
+// Specialization of the above template for a template type with 1 type param
+template< template<typename> class X, typename T >
+struct extract_typearg< X<T> >
+{
+    using TArg = T;
+};
+
+// A base class providing operator overloads for aligned data.
+// Requires the use of CRTP pattern to invoke static polymorphism for selecting the right conversion functions.
+// Requires the derived class to provide conversion functions to/from an integral type.
+//
+// Note that we don't need to worry about whether the data is aligned or not.  The line:
+//   TArg converted = (TArg) static_cast<TDerived&>( *this );
+// makes an aligned copy on the stack of the underlying T datatype, regardless of whether
+// this OperatorOverload template is being used as the base for aligned OR unaligned data.
+template <class TDerived>
+class COperatorOverloads
+{
+    using TArg = typename extract_typearg<TDerived>::TArg;
+
+public:
+    TDerived operator++( )
+    {
+        // Prefix increment
+        TArg converted = (TArg) static_cast<TDerived&>( *this );
+        TArg result = converted + 1;
+        static_cast<TDerived&>( *this ) = result;
+        return TDerived( result );
+    }
+
+    TDerived operator++( const int unused )
+    {
+        // Postfix increment
+        TArg converted = (TArg) static_cast<TDerived&>( *this );
+        TArg result = converted + 1;
+        static_cast<TDerived&>( *this ) = result;
+        return TDerived( converted );
+    }
+
+    TDerived operator--( )
+    {
+        // Prefix decrement
+        TArg converted = (TArg) static_cast<TDerived&>( *this );
+        TArg result = converted - 1;
+        static_cast<TDerived&>( *this ) = result;
+        return TDerived( result );
+    }
+
+    TDerived operator--( const int unused )
+    {
+        // Postfix decrement
+        TArg converted = (TArg) static_cast<TDerived&>( *this );
+        TArg result = converted - 1;
+        static_cast<TDerived&>( *this ) = result;
+        return TDerived( converted );
+    }
+
+    TDerived operator|=( const TDerived& tOperand )
+    {
+        TArg converted = (TArg) static_cast<TDerived&>( *this );
+        TArg result = converted | tOperand;
+        static_cast<TDerived&>( *this ) = result;
+        return TDerived( result );
+    }
+
+    TDerived operator&=( const TDerived& tOperand )
+    {
+        TArg converted = (TArg) static_cast<TDerived&>( *this );
+        TArg result = converted & tOperand;
+        static_cast<TDerived&>( *this ) = result;
+        return TDerived( result );
+    }
+
+    TDerived operator+=( const TDerived& tOperand )
+    {
+        TArg converted = (TArg) static_cast<TDerived&>( *this );
+        TArg result = converted + tOperand;
+        static_cast<TDerived&>( *this ) = result;
+        return TDerived( result );
+    }
+
+    TDerived operator-=( const TDerived& tOperand )
+    {
+        TArg converted = (TArg) static_cast<TDerived&>( *this );
+        TArg result = converted - tOperand;
+        static_cast<TDerived&>( *this ) = result;
+        return TDerived( result );
+    }
+
+};
+
 //  big endian type template
 
+
 template< class T >
-class BigEndian
+class BigEndian : public COperatorOverloads< BigEndian<T> >
 {
     public:
         BigEndian< T >() {};
@@ -435,12 +575,16 @@ class BigEndian
 
     private:
         T m_t;
+
 };
 
 template< class T >
 inline BigEndian< T >::BigEndian( const BigEndian< T >& be_t )
     :   m_t( be_t.m_t )
 {
+    static_assert(
+        ( sizeof( T ) == sizeof( *this ) ),
+        "This template formalizes access, but doesn't change size." );
 }
 
 template< class T >
@@ -475,7 +619,7 @@ inline BigEndian< T >& BigEndian< T >::operator=( const T& t )
 //  little endian type template
 
 template< class T >
-class LittleEndian
+class LittleEndian : public COperatorOverloads< LittleEndian<T> >
 {
     public:
         LittleEndian< T >() {};
@@ -489,12 +633,16 @@ class LittleEndian
 
     private:
         T m_t;
+
 };
 
 template< class T >
 inline LittleEndian< T >::LittleEndian( const LittleEndian< T >& le_t )
     :   m_t( le_t.m_t )
 {
+    static_assert(
+        ( sizeof( T ) == sizeof( *this ) ),
+        "This template formalizes access, but doesn't change size." );
 }
 
 template< class T >
@@ -532,12 +680,14 @@ inline LittleEndian< T >& LittleEndian< T >::operator=( const T& t )
 #define PERMIT_UNALIGNED_ACCESS
 #endif
 
+
+
 //  unaligned type template
 
 #define UCAST(T) *(T PERMIT_UNALIGNED_ACCESS *)
 
 template< class T >
-class Unaligned
+class Unaligned : public COperatorOverloads< Unaligned<T> >
 {
     public:
         Unaligned< T >() PERMIT_UNALIGNED_ACCESS {};
@@ -545,7 +695,7 @@ class Unaligned
         Unaligned< T >( const T& t ) PERMIT_UNALIGNED_ACCESS;
 
         operator T() PERMIT_UNALIGNED_ACCESS const;
-        
+
         Unaligned< T >& operator=( const Unaligned< T >& u_t ) PERMIT_UNALIGNED_ACCESS;
         Unaligned< T >& operator=( const T& t ) PERMIT_UNALIGNED_ACCESS;
 
@@ -556,6 +706,9 @@ class Unaligned
 template< class T >
 inline Unaligned< T >::Unaligned( const Unaligned< T >& u_t ) PERMIT_UNALIGNED_ACCESS
 {
+    static_assert(
+        ( sizeof( T ) == sizeof( *this ) ),
+        "This template formalizes access, but doesn't change size." );
     UCAST(T)&m_t = UCAST(T)&u_t.m_t;
 }
 
@@ -591,7 +744,7 @@ inline Unaligned< T >& Unaligned< T >::operator=( const T& t ) PERMIT_UNALIGNED_
 //  unaligned big endian type template
 
 template< class T >
-class UnalignedBigEndian
+class UnalignedBigEndian : public COperatorOverloads< UnalignedBigEndian<T> >
 {
     public:
         UnalignedBigEndian< T >() PERMIT_UNALIGNED_ACCESS {};
@@ -610,6 +763,9 @@ class UnalignedBigEndian
 template< class T >
 inline UnalignedBigEndian< T >::UnalignedBigEndian( const UnalignedBigEndian< T >& ube_t ) PERMIT_UNALIGNED_ACCESS
 {
+    static_assert(
+        ( sizeof( T ) == sizeof( *this ) ),
+        "This template formalizes access, but doesn't change size." );
     UCAST(T)&m_t = UCAST(T)&ube_t.m_t;
 }
 
@@ -646,7 +802,7 @@ inline UnalignedBigEndian< T >& UnalignedBigEndian< T >::operator=( const T& t )
 //  unaligned little endian type template
 
 template< class T >
-class UnalignedLittleEndian
+class UnalignedLittleEndian : public COperatorOverloads< UnalignedLittleEndian<T> >
 {
     public:
         UnalignedLittleEndian< T >() PERMIT_UNALIGNED_ACCESS {};
@@ -665,6 +821,9 @@ class UnalignedLittleEndian
 template< class T >
 inline UnalignedLittleEndian< T >::UnalignedLittleEndian( const UnalignedLittleEndian< T >& ule_t ) PERMIT_UNALIGNED_ACCESS
 {
+    static_assert(
+        ( sizeof( T ) == sizeof( *this ) ),
+        "This template formalizes access, but doesn't change size." );
     UCAST(T)&m_t = UCAST(T)&ule_t.m_t;
 }
 
@@ -709,16 +868,16 @@ inline UnalignedLittleEndian< T >& UnalignedLittleEndian< T >::operator=( const 
 //  Compressed Endian Types
 //
 //  These are types like BigEndian<> and LittleEndian<> that are suitable for storage on
-//  any platform, but these types take up variable space depending upon the value stored 
+//  any platform, but these types take up variable space depending upon the value stored
 //  and the probability to be an expected (and thus compressable) value.
 //
 //  Compression Schemes
 //
 //      Random values can never be compressed because they have no higher probability to
-//      be one value than another.  The key is to pick / create a compression scheme that 
+//      be one value than another.  The key is to pick / create a compression scheme that
 //      can map smaller set of bytes to the most probable of values.
 //
-//      LowSp   - This "Low Spread" method expects values that have a high tendency to 
+//      LowSp   - This "Low Spread" method expects values that have a high tendency to
 //                cluster towards low numerical values.
 //                Good For: Code enums, flags, small cb (like cb of a single field)
 //
@@ -736,13 +895,13 @@ inline UnalignedLittleEndian< T >& UnalignedLittleEndian< T >::operator=( const 
 //          CompEndianLowSpLos16b( TYPE us ) :
 //          CompEndianLowSpLos16b( __in_bcount( cbBufferMax ) const BYTE * pbe_us, ULONG cbBufferMax )
 //
-//      And after constructing from the native type (uncompressed var) or from the 
+//      And after constructing from the native type (uncompressed var) or from the
 //      buffer (compressed var) respectively, then both the value can be retrieved
 //      or the CopyTo buffer routing can be called.  Also the size of the buffer
 //      will be available.
 
-//  A low spread compressed unsigned short helper class. We lose only a single bit of 16b USHORT and 
-//  can represent values from 0 to 32767 (i.e. 2^15 - 1) with the ability to store values below 128 
+//  A low spread compressed unsigned short helper class. We lose only a single bit of 16b USHORT and
+//  can represent values from 0 to 32767 (i.e. 2^15 - 1) with the ability to store values below 128
 //  in a single byte.
 
 #ifdef DEBUG
@@ -824,7 +983,7 @@ private:
 
 public:
 
-    //  initializes a compressed USHORT object, expected user would copy out to buffer 
+    //  initializes a compressed USHORT object, expected user would copy out to buffer
     //  of Cb() bytes with CopyTo().
 
     INLINE CompEndianLowSpLos16b( USHORT us ) :

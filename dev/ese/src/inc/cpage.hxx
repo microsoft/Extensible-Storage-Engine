@@ -599,57 +599,62 @@ class CPAGE
     //  ****************************************************************
     //  Page Level Flags
     //  ****************************************************************
+    
+        // It's somewhat odd that all these bit-flag values are defined
+        // as separate nameless enums.  Declaring them as specificaly
+        // derived from ULONGs so they work well with the fFlags field
+        // in a PGHDR, which is derived from a ULONG.
 
         //  where we are in the BTree
-        enum    { fPageRoot                 = 0x0001    };
-        enum    { fPageLeaf                 = 0x0002    };
-        enum    { fPageParentOfLeaf         = 0x0004    };
+        enum : ULONG     { fPageRoot                 = 0x0001    };
+        enum : ULONG     { fPageLeaf                 = 0x0002    };
+        enum : ULONG     { fPageParentOfLeaf         = 0x0004    };
 
         //  special flags
-        enum    { fPageEmpty                = 0x0008    };
-        enum    { fPageRepair               = 0x0010    };
+        enum : ULONG     { fPageEmpty                = 0x0008    };
+        enum : ULONG     { fPageRepair               = 0x0010    };
 
         //  what type of tree we are in
-        enum    { fPagePrimary              = 0x0000    };
-        enum    { fPageSpaceTree            = 0x0020    };
-        enum    { fPageIndex                = 0x0040    };
-        enum    { fPageLongValue            = 0x0080    };
-        // enum { fPageSLVAvail             = 0x0100    }; // obsolete
-        // enum { fPageSLVOwnerMap          = 0x0200    }; // obsolete
+        enum : ULONG     { fPagePrimary              = 0x0000    };
+        enum : ULONG     { fPageSpaceTree            = 0x0020    };
+        enum : ULONG     { fPageIndex                = 0x0040    };
+        enum : ULONG     { fPageLongValue            = 0x0080    };
+        // enum : ULONG  { fPageSLVAvail             = 0x0100    }; // obsolete
+        // enum : ULONG  { fPageSLVOwnerMap          = 0x0200    }; // obsolete
 
         //  type of BTree key validation
-        enum    { fPageNonUniqueKeys        = 0x0400    };
+        enum : ULONG     { fPageNonUniqueKeys        = 0x0400    };
 
         //  upgrade info
-        enum    { fPageNewRecordFormat      = 0x0800    };
+        enum : ULONG     { fPageNewRecordFormat      = 0x0800    };
 
         //  the ECC checksum flag is only used by the checksum
         //  generation and verification code. don't change
         //  this flag without updating the checksum code as
         //  there are not accessor functions for it
 
-        enum    { fPageNewChecksumFormat    = 0x2000    };
+        enum : ULONG     { fPageNewChecksumFormat    = 0x2000    };
 
         //  this flag is set when the page is scrubbed and reset
         //  on any other dirties
 
-        enum    { fPageScrubbed             = 0x4000    };
+        enum : ULONG     { fPageScrubbed             = 0x4000    };
 
         //  technically, this is not a flag but rather two bits to
         //  represent the flush type of the page.
 
-        enum    { maskFlushType             = 0x18000 };
+        enum : ULONG     { maskFlushType             = 0x18000 };
 
         //  pre-initialized page, i.e., a page that was new'd, but not consumed
         //  yet. Should have a header with a fresh dbtime and objid, but nothing else
         //  (all 0s in its data portion).
 
-        enum    { fPagePreInit              = 0x20000 };
+        enum : ULONG     { fPagePreInit              = 0x20000 };
 
         //  Special flag used by RBS after reverting a deleted FDP's page.
         //  Only the FDP root page and its space tree pages are valid and the only action allowed for the FDP is delete.
 
-        enum    { fPageFDPDelete            = 0x40000 };
+        enum : ULONG     { fPageFDPDelete            = 0x40000 };
 
         //  this is the logical inference we can make on the flush type
         //      state about a given page.

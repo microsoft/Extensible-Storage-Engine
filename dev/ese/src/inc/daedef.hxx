@@ -330,6 +330,46 @@ public:
         return m_fidVal;
     }
 
+    // It would be good to check that the math here results in valid FIDs, although I suspect
+    // there is code that loops until it gets to an invalid FID via ++.  Those places should
+    // be changed to use a FID_ITERATOR.
+
+    // Prefix increment
+    inline FID& operator++()
+    {
+        m_fidVal = m_fidVal + 1;
+        return *this;
+    }
+
+    // Postfix increment
+    inline FID operator++( const INT not_used )
+    {
+        FID fidOld = *this;
+        m_fidVal = m_fidVal + 1;
+        return fidOld;
+    }
+
+    // Prefix decrement
+    inline FID& operator--( )
+    {
+        m_fidVal = m_fidVal - 1;
+        return *this;
+    }
+
+    // Postfix decrement
+    inline FID operator--( const INT not_used )
+    {
+        FID fidOld = *this;
+        m_fidVal = m_fidVal - 1;
+        return fidOld;
+    }
+
+    INLINE FID operator+=( const WORD& addend )
+    {
+        m_fidVal = m_fidVal + addend;
+        return *this;
+    }
+
     INLINE FIDTYP Fidtyp() const
     {
         if ( FFixed() )
