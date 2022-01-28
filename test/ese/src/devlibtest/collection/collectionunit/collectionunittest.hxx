@@ -8,6 +8,7 @@
 #include <tchar.h>
 
 #include "testerr.h"
+#pragma warning ( disable : 4100 )  //  unreferenced formal parameter - we removed cc.hxx from bstf.hxx temporarily, and it was providing this support here.
 #include "bstf.hxx"
 
 #pragma warning( disable : 4718 ) //  recursive call has no side effects, deleting
