@@ -4681,6 +4681,11 @@ ERR ErrBFFlush( IFMP ifmp, const OBJID objidFDP, const PGNO pgnoFirst, const PGN
             AssertTrack( !pbf->fAvailable && !pbf->fQuiesced, "EvictedBufferInOB0" );
             AssertTrack( pbf->icbBuffer != icbPage0, "FullyDehydratedBufferInOB0" );
 
+            if ( err < JET_errSuccess || pbf->bfdf == bfdfClean )
+            {
+                continue;
+            }
+
             //  if we're only flushing pages from a specific btree of this IFMP
             //  or from a specific range, skip any that don't match
             //
@@ -4694,7 +4699,7 @@ ERR ErrBFFlush( IFMP ifmp, const OBJID objidFDP, const PGNO pgnoFirst, const PGN
                 continue;
             }
 
-            Enforce( err < JET_errSuccess || pbf->bfdf == bfdfClean );
+            EnforceSz( fFalse, "BFFlushDirtyBufferInOB0" );
         }
         pbffmp->bfob0.UnlockKeyPtr( &lockOB0 );
 
@@ -4704,6 +4709,11 @@ ERR ErrBFFlush( IFMP ifmp, const OBJID objidFDP, const PGNO pgnoFirst, const PGN
         {
             pbfNext = pbffmp->bfob0ol.Next( pbf );
 
+            if ( err < JET_errSuccess || pbf->bfdf == bfdfClean )
+            {
+                continue;
+            }
+
             //  if we're only flushing pages from a specific btree of this IFMP
             //  or from a specific range, skip any that don't match
             //
@@ -4717,7 +4727,7 @@ ERR ErrBFFlush( IFMP ifmp, const OBJID objidFDP, const PGNO pgnoFirst, const PGN
                 continue;
             }
 
-            Enforce( err < JET_errSuccess || pbf->bfdf == bfdfClean );
+            EnforceSz( fFalse, "BFFlushDirtyBufferInOB0OL" );
         }
         pbffmp->critbfob0ol.Leave();
 
