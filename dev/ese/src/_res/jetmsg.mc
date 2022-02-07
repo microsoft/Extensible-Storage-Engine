@@ -1666,6 +1666,12 @@ Language=English
 %1 (%2) %3The log file %4 in required range is damaged, invalid, or inaccessible (error %5) and cannot be used.
 .
 
+MessageId=568
+SymbolicName=ACTIVE_BAD_OPERATION_REVERTED_FDP_TO_DELETE_ID
+Language=English
+%1 (%2) %3An illegal operation is being performed on root page %4 of table (%5) with objid %6 on database %7 which was reverted by RBS. Only delete operation should be performed on such a table.
+.
+
 
 ;// !!! ARE YOU SURE you're adding this in the right place !!! ???
 

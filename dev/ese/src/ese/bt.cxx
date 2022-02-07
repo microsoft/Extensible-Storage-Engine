@@ -7765,6 +7765,9 @@ ERR ErrBTIGotoRoot( FUCB *pfucb, LATCH latch )
         }
         else
         {
+            const OBJID objidFDP = pfucb->u.pfcb->ObjidFDP();
+            FUCBIllegalOperationFDPToBeDeleted( pfucb, objidFDP == 0 ? Pcsr( pfucb )->Cpage().ObjidFDP() : objidFDP );
+
             // Unlatch the page so that closing FUCB doesn't leak the latch.
             Pcsr( pfucb )->ReleasePage( fTrue );
             return ErrERRCheck( JET_errRBSFDPToBeDeleted );

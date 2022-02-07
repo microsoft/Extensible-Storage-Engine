@@ -2704,6 +2704,7 @@ ERR FCB::ErrLink( FUCB *pfucb )
     // The FDP is about to be deleted. No operations should be allowed on such a table unless requested to skip the error.
     if ( FRevertedFDPToDelete() && !FPpibAllowRBSFDPDeleteReadByMe( pfucb->ppib ) )
     {
+        FUCBIllegalOperationFDPToBeDeleted( pfucb, pfucb->u.pfcb->ObjidFDP() );
         return ErrERRCheck( JET_errRBSFDPToBeDeleted );
     }
 
