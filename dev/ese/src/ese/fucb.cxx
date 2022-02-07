@@ -368,3 +368,44 @@ ERR ErrFUCBCheckIndexRange( FUCB *pfucb, const KEY& key )
     return err;
 }
 
+VOID FUCBIllegalOperationFDPToBeDeleted(
+    FUCB        * const pfucb,
+    const OBJID         objidFDP )
+{
+    //  only report the error if not repairing
+    if ( !g_fRepair )
+    {
+        OSTraceSuspendGC();
+        WCHAR szTableName[JET_cbNameMost+1] = L"";
+
+        if ( pfucb->u.pfcb->PfcbTable() != NULL && pfucb->u.pfcb->PfcbTable()->Ptdb() != NULL && pfucb->u.pfcb->PfcbTable()->Ptdb()->SzTableName() != NULL )
+        {
+            OSStrCbFormatW( szTableName, sizeof(szTableName), L"%hs", pfucb->u.pfcb->Ptdb()->SzTableName() );
+        }
+
+        const WCHAR* rgwsz[] =
+        {
+            OSFormatW( L"%I32u", pfucb->u.pfcb->PgnoFDP() ),
+            szTableName,
+            OSFormatW( L"%I32u", objidFDP ),
+            g_rgfmp[pfucb->u.pfcb->Ifmp()].WszDatabaseName(),
+        };
+        UtilReportEvent(
+            eventError,
+            DATABASE_CORRUPTION_CATEGORY,
+            ACTIVE_BAD_OPERATION_REVERTED_FDP_TO_DELETE_ID,
+            _countof( rgwsz ),
+            rgwsz,
+            0,
+            NULL,
+            PinstFromPfucb( pfucb ) );
+
+        OSUHAPublishEvent(
+            HaDbFailureTagCorruption, PinstFromPfucb( pfucb ), HA_DATABASE_CORRUPTION_CATEGORY,
+            HaDbIoErrorNone, g_rgfmp[pfucb->u.pfcb->Ifmp()].WszDatabaseName(), 0, 0,
+            HA_ACTIVE_BAD_OPERATION_REVERTED_FDP_TO_DELETE_ID, _countof( rgwsz ), rgwsz );
+
+        OSTraceResumeGC();
+    }
+}
+

@@ -1648,6 +1648,7 @@ VOID FUCBCloseAllCursorsOnFCB(
 VOID FUCBSetIndexRange( FUCB *pfucb, JET_GRBIT grbit );
 VOID FUCBResetIndexRange( FUCB *pfucb );
 ERR ErrFUCBCheckIndexRange( FUCB *pfucb, const KEY& key );
+VOID FUCBIllegalOperationFDPToBeDeleted( FUCB *pfucb, const OBJID objidFDP );
 
 
 class CTableHash : public CSimpleHashTable<FUCB>
