@@ -7635,7 +7635,7 @@ inline ERR ErrSetSystemParameter(
 
     Call( pjetparam->Set( pinst, ppib, ulParam, wszParam ) );
 
-    if ( fLoadedOverride )
+    if ( fLoadedOverride && !pjetparam->m_fRegOverride )
     {
         pjetparam->m_fRegOverride = fLoadedOverride;
 
