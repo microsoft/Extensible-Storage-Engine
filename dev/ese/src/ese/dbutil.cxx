@@ -1850,10 +1850,10 @@ LOCAL INT PrintTableMetaData( const TABLEDEF * ptabledef, void * pv )
     ConvertFileTimeToLogTime( ptabledef->ftPgnoFDPLastSet, &tmPgnoFDPLastSet );
     ConvertFileTimeToLogTime( ptabledef->ftPgnoFDPLongValuesLastSet, &tmPgnoFDPLongValuesLastSet );
 
-    printf("PgnoFDPLastSetTime=" );
+    printf("    PgnoFDPLastSetTime=" );
     DUMPPrintLogTime( &tmPgnoFDPLastSet );
     printf( "\n" );
-    printf("PgnoFDPLongValuesLastSetTime=" );
+    printf("    PgnoFDPLVLastSetTime=" );
     DUMPPrintLogTime( &tmPgnoFDPLongValuesLastSet );
     printf( "\n" );
     printf( "    LV ChunkSize=%d\n", ptabledef->cbLVChunkMax );
