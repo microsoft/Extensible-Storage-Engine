@@ -5765,6 +5765,7 @@ ERR COSDisk::IOQueue::ErrReserveQueueSpace( _In_ OSFILEQOS grbitQOS, __inout IOR
     if ( !m_semIOQueue.FTryAcquire() )
     {
 
+        COSDisk::EnqueueDeferredIORun( NULL );
         OSDiskIOThreadStartIssue( NULL );
 
         // Should we wait for qosIODispatchBackground and qosIODispatchUrgentBackground
