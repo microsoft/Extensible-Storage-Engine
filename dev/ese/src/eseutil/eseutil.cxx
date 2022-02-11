@@ -315,6 +315,7 @@ LOCAL VOID EDBUTLHelpRecovery( _In_ PCWSTR wszAppName )
     wprintf( L"                  /e                - Do not specify JET_paramLogStreamMustExist.%c", wchNewLine );
     wprintf( L"                  /c(5|8)           - Force using 5 or 8 digit log sequence number on the log stream.%c", wchNewLine );
 #endif
+    wprintf( L"                  /w<#>             - Specify Waypoint Latency (LLR) to use during recovery.%c", wchNewLine );
     wprintf( L"                  /o                - suppress logo.%c", wchNewLine );
 #ifdef DEBUG
     wprintf( L"          NOTES:  1) Soft recovery is always performed unless the /b switch is%c", wchNewLine );
@@ -1911,6 +1912,7 @@ LOCAL BOOL FEDBUTLParseRecovery( _In_ PCWSTR arg, UTILOPTS *popts )
             break;
 
         case L'c':
+        case L'C':
             if ( arg[2] == L'5' )
             {
                 popts->cLogDigits = 5;
@@ -1954,6 +1956,12 @@ LOCAL BOOL FEDBUTLParseRecovery( _In_ PCWSTR arg, UTILOPTS *popts )
             }
             popts->fRunLeakReclaimer = fTrue;
             fResult = FEDBUTLParsePath( arg + 2, &popts->wszSourceDB, L"database to run space leakage reclaimer on" );
+            break;
+
+        case L'w':
+        case L'W':
+            popts->cWaypointLatency = _wtol( arg + 2 );
+            fResult = fTrue;
             break;
 
         default:
@@ -5825,6 +5833,8 @@ INT __cdecl wmain( INT argc, __in_ecount(argc) LPWSTR argv[] )
             {
                 Call( JetSetSystemParameter( &instance, 0, JET_paramLegacyFileNames, JET_bitESE98FileNames, NULL ) );
             }
+
+            Call( JetSetSystemParameter( &instance, 0, JET_paramWaypointLatency, opts.cWaypointLatency, NULL ) );
 
             if ( opts.wszBackup == NULL )
             {
