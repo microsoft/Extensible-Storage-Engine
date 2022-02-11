@@ -75,6 +75,7 @@ struct UTILOPTS
     LONG        lDirtyLevel;
     LONG        pageTempDBMin;
     LONG        lMaxCacheSize;
+    LONG        cWaypointLatency;
 
     LONG            crstmap;                // values for JetInit3
     LONG            irstmap;
