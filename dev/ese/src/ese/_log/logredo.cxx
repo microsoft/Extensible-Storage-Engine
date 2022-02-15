@@ -11311,12 +11311,6 @@ ERR LOG::ErrLGRIRedoExtentFreed( const LREXTENTFREED2 * const plrextentfreed )
         return JET_errSuccess;
     }
 
-    // If RBS isn't enabled return success.
-    if ( !( pfmp->FRBSOn() ) )
-    {
-        return JET_errSuccess;
-    }
-
     const PGNO pgnoFirst            = plrextentfreed->PgnoFirst();
     const CPG  cpgExtent            = plrextentfreed->CpgExtent();
     const BOOL fTableRootPage       = plrextentfreed->FTableRootPage();
@@ -11326,14 +11320,15 @@ ERR LOG::ErrLGRIRedoExtentFreed( const LREXTENTFREED2 * const plrextentfreed )
     Assert( !fTableRootPage || cpgExtent == 1 );
     Assert( !( fTableRootPage && fEmptyPageFDPDeleted ) );
 
-    LGAddFreePages( cpgExtent );
-
-    Assert( m_fRecoveringMode == fRecoveringRedo );
-
+    // If RBS isn't enabled, clear redo map and return success.
     if ( dbid == dbidTemp || !pfmp->FRBSOn() )
     {
         goto ClearLogRedoMapDbtimeRevert;
     }
+
+    LGAddFreePages( cpgExtent );
+
+    Assert( m_fRecoveringMode == fRecoveringRedo );
 
     if ( fTableRootPage )
     {
