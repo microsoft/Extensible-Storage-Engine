@@ -11441,26 +11441,6 @@ HandleError:
 }
 
 
-LOCAL VOID SPReportMaxDbSizeExceeded( const IFMP ifmp, const CPG cpg )
-{
-    //  Log event to tell user that it reaches the database size limit.
-
-    WCHAR       wszCurrentSizeMb[16];
-    const WCHAR * rgcwszT[2]          = { g_rgfmp[ifmp].WszDatabaseName(), wszCurrentSizeMb };
-
-    OSStrCbFormatW( wszCurrentSizeMb, sizeof(wszCurrentSizeMb), L"%d", (ULONG)(( (QWORD)cpg * (QWORD)( g_cbPage >> 10 /* Kb */ ) ) >> 10 /* Mb */) );
-
-    UtilReportEvent(
-            eventWarning,
-            SPACE_MANAGER_CATEGORY,
-            SPACE_MAX_DB_SIZE_REACHED_ID,
-            2,
-            rgcwszT,
-            0,
-            NULL,
-            PinstFromIfmp( ifmp ) );
-}
-
 LOCAL ERR ErrSPINewSize(
     const TraceContext& tc,
     const IFMP  ifmp,
@@ -11656,20 +11636,22 @@ HandleError:
 }
 
 LOCAL VOID SPILogEventOversizedDb(
-    FUCB* const pfucbRoot,
-    const PGNO  pgnoLast,
-    const PGNO  pgnoMaxDbSize,
-    const CPG   cpgMinReq,
-    const CPG   cpgPrefReq,
-    const CPG   cpgMinReqAdj,
-    const CPG   cpgPrefReqAdj )
+    const MessageId msgid,
+    FUCB* const     pfucbRoot,
+    const PGNO      pgnoLastInitial,
+    const PGNO      pgnoLastFinal,
+    const PGNO      pgnoMaxDbSize,
+    const CPG       cpgMinReq,
+    const CPG       cpgPrefReq,
+    const CPG       cpgMinReqAdj,
+    const CPG       cpgPrefReqAdj )
 {
     ERR err = JET_errSuccess;
     FUCB *pfucbAE = pfucbNil;
     const FMP* const pfmp = &g_rgfmp[ pfucbRoot->ifmp ];
-    const ULONGLONG cbInitialSize = CbFileSizeOfPgnoLast( pgnoLast );
+    const ULONGLONG cbInitialSize = CbFileSizeOfPgnoLast( pgnoLastInitial );
     const ULONGLONG cbSizeLimit = CbFileSizeOfPgnoLast( pgnoMaxDbSize );
-    const ULONGLONG cbFinalSize = CbFileSizeOfPgnoLast( pgnoLast + cpgPrefReqAdj );
+    const ULONGLONG cbFinalSize = CbFileSizeOfPgnoLast( pgnoLastFinal );
     CSPExtentInfo speiAE;
     CPG cpgExtSmallest = lMax;
     CPG cpgExtLargest = 0;
@@ -11684,7 +11666,7 @@ LOCAL VOID SPILogEventOversizedDb(
     while ( speiAE.FIsSet() )
     {
         Assert( speiAE.SppPool() == spp::AvailExtLegacyGeneralPool );
-        Assert( speiAE.PgnoLast() <= pgnoLast );
+        Assert( speiAE.PgnoLast() <= pgnoLastInitial );
 
         const CPG cpg = speiAE.CpgExtent();
         Assert( cpg > 0 );
@@ -11744,8 +11726,8 @@ HandleError:
     };
     UtilReportEvent(
         eventWarning,
-        GENERAL_CATEGORY,
-        DB_EXTENSION_OVERSIZED_DB_ID,
+        SPACE_MANAGER_CATEGORY,
+        msgid,
         _countof( rgwsz ),
         rgwsz,
         0,
@@ -11884,21 +11866,6 @@ LOCAL ERR ErrSPIExtendDB(
     BTClose( pfucbAE );
     pfucbAE = pfucbNil;
 
-    // Check for violation of max size.
-    // Currently, there are two codepaths that can extend a database: split buffer refill and
-    // extent allocation from space requests trickling up. The split buffer path must succeed,
-    // even if it violates the max DB size, because not doing so may cause space to leak, as
-    // replenished split buffers are a requirement to adding new space. If we are even violating
-    // pgnoSysMax, we'll need to fail out and leak, as pgnos >= pgnoSysMax are not supported
-    // in the engine.
-    if ( ( ( pgnoSELastAdj + cpgSEMin ) > pgnoSEMaxAdj ) &&
-         ( !fMayViolateMaxSize || ( pgnoSEMaxAdj >= pgnoSysMax ) ) )
-    {
-        AssertTrack( !fMayViolateMaxSize, "ExtendDbMaxSizeBeyondPgnoSysMax" );
-        SPReportMaxDbSizeExceeded( pfucbRoot->ifmp, (CPG)pgnoSELastAdj );
-        Error( ErrERRCheck( JET_errOutOfDatabaseSpace ) );
-    }
-
     // We must not have left a potentially relevant shelved extent behind.
     AssertTrack( !speiAEShelved.FIsSet() ||
                  ( ( speiAEShelved.PgnoFirst() > pgnoSELastAdj ) &&
@@ -11912,6 +11879,32 @@ LOCAL ERR ErrSPIExtendDB(
     Assert( cpgSEMinAdj >= cpgSEMin );
     Assert( cpgSEReqAdj >= cpgSEMinAdj );
 
+    // Check for violation of max size.
+    // Currently, there are two codepaths that can extend a database: split buffer refill and
+    // extent allocation from space requests trickling up. The split buffer path must succeed,
+    // even if it violates the max DB size, because not doing so may cause space to leak, as
+    // replenished split buffers are a requirement to adding new space. If we are even violating
+    // pgnoSysMax, we'll need to fail out and leak, as pgnos >= pgnoSysMax are not supported
+    // in the engine.
+    if ( ( ( pgnoSELastAdj + cpgSEMin ) > pgnoSEMaxAdj ) &&
+         ( !fMayViolateMaxSize || ( pgnoSEMaxAdj >= pgnoSysMax ) ) )
+    {
+        AssertTrack( !fMayViolateMaxSize, "ExtendDbMaxSizeBeyondPgnoSysMax" );
+
+        SPILogEventOversizedDb(
+            SPACE_MAX_DB_SIZE_REACHED_ID,
+            pfucbRoot,
+            pgnoSELast,
+            pgnoSELast,
+            pgnoSEMaxAdj,
+            cpgSEMin,
+            cpgSEReq,
+            cpgSEMinAdj,
+            cpgSEReqAdj );
+
+        Error( ErrERRCheck( JET_errOutOfDatabaseSpace ) );
+    }
+
     if ( fPermitAsyncExtension && ( ( pgnoSELast + cpgSEReqAdj + cpgSEReq ) <= pgnoSEMaxAdj ) )
     {
         cpgAsyncExtension = cpgSEReq;
@@ -11922,8 +11915,10 @@ LOCAL ERR ErrSPIExtendDB(
     {
         Assert( pgnoSEMaxAdj < pgnoSysMax );
         SPILogEventOversizedDb(
+            DB_EXTENSION_OVERSIZED_DB_ID,
             pfucbRoot,
             pgnoSELast,
+            pgnoSELast + cpgSEReqAdj,
             pgnoSEMaxAdj,
             cpgSEMin,
             cpgSEReq,

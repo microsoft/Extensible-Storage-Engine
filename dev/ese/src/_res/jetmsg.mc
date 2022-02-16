@@ -870,7 +870,18 @@ Language=English
 MessageId=445
 SymbolicName=SPACE_MAX_DB_SIZE_REACHED_ID
 Language=English
-%1 (%2) %3The database %4 has reached its maximum size of %5 MB. If the database cannot be restarted, an offline defragmentation may be performed to reduce its size.
+%1 (%2) %3Database '%4' has reached its maximum size. If the database cannot be restarted, an offline defragmentation may be performed to reduce its size.%n
+Initial database size: %5 bytes (%6 page(s)).%n
+Maximum size limit: %7 bytes (%8 page(s)).%n
+Final database size: %9 bytes (%10 page(s)).%n
+Minimum requested size: %11 bytes (%12 page(s)).%n
+Preferred requested size: %13 bytes (%14 page(s)).%n
+Adjusted minimum requested size: %15 bytes (%16 page(s)).%n
+Adjusted preferred requested size: %17 bytes (%18 page(s)).%n
+Smallest available extent size: %19 bytes (%20 page(s)).%n
+Largest available extent size: %21 bytes (%22 page(s)).%n
+Number of available extents: %23.%n
+Total available space: %24 bytes (%25 page(s)).%n
 .
 
 MessageId=446
