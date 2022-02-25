@@ -314,8 +314,8 @@ LOCAL VOID EDBUTLHelpRecovery( _In_ PCWSTR wszAppName )
 #ifdef DEBUG
     wprintf( L"                  /e                - Do not specify JET_paramLogStreamMustExist.%c", wchNewLine );
     wprintf( L"                  /c(5|8)           - Force using 5 or 8 digit log sequence number on the log stream.%c", wchNewLine );
-#endif
     wprintf( L"                  /w<#>             - Specify Waypoint Latency (LLR) to use during recovery.%c", wchNewLine );
+#endif
     wprintf( L"                  /o                - suppress logo.%c", wchNewLine );
 #ifdef DEBUG
     wprintf( L"          NOTES:  1) Soft recovery is always performed unless the /b switch is%c", wchNewLine );
@@ -5456,6 +5456,10 @@ INT __cdecl wmain( INT argc, __in_ecount(argc) LPWSTR argv[] )
 
     InitArg( argc, argv );
     opts.lDirtyLevel = 2;
+#ifndef DEBUG
+    // In retail, default to LLR being on, cannot do it in debug because of conflict with Trim
+    opts.cWaypointLatency = 1;
+#endif
     memset( &dbutil, 0, sizeof(JET_DBUTIL_W) );
     dbutil.cbStruct = sizeof( dbutil );
 
