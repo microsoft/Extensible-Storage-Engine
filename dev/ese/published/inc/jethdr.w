@@ -6666,6 +6666,14 @@ typedef JET_ERR (JET_API * JET_PFNEMITLOGDATA)(
 #define wrnIOSlow                       4010 /* IO completed but took abnormally long to return from the OS */
 // begin_PubEsent
 
+/** CLIENT RESERVED ERROR SPACE.
+    An unused errors/warnings section.  JET will never generate values in this space.  Clients may use this space
+        without conflicting with ESE.  Note that the warnings are reserved as well as the errors.  That is, the
+        range from -10,000 to -11,999 is reserved as well as the range from 10,000 to 11,999.
+ **/
+#define JET_errClientSpaceBegin             -10000 /* Begin of the error space reserved for JET client use */
+#define JET_errClientSpaceEnd               -11999 /* End of the error space reserved for JET client use */
+
 /**********************************************************************/
 /***********************     PROTOTYPES      **************************/
 /**********************************************************************/
