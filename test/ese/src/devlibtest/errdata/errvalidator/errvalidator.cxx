@@ -80,6 +80,23 @@ JET_ERR ErrCheckErrorSpaceConsistent( _In_ const INT cerrData, _In_ const INT ce
 
         const ErrData * perrdata = PerrdataLookupErrValue( errCheck );
 
+        if ( ( abs( errCheck ) > abs( JET_errClientSpaceBegin ) ) &&
+             ( abs( errCheck ) < abs( JET_errClientSpaceEnd ) ) )
+        {
+            // This space is reserved for client use and should never resolve
+            // to any recognizable errors.
+            if ( !FNullError( pszError ) )
+            {
+                wprintf( L"\n\tReserved client space error in error string table (from jethdr.w). errCheck = %d\n", errCheck );
+                return errCodeInconsistency;
+            }
+            if ( NULL != perrdata )
+            {
+                wprintf( L"\n\tReserved client space error in errdata.txt. errCheck = %d\n", errCheck );
+                return errCodeInconsistency;
+            }
+        }
+        
         if ( NULL != perrdata )
         {
             cerrDataCheck++;
@@ -137,8 +154,11 @@ JET_ERR ErrCheckErrorDataSelfConsistent( _In_ const INT cerr )
             return errCodeInconsistency;
         }
 
-        if ( perrdata->errOrdinal < -4096 || perrdata->errOrdinal > 4096 )
+        if ( ( perrdata->errOrdinal < -4096 || perrdata->errOrdinal > 4096 ) &&
+             ( perrdata->errOrdinal != JET_errClientSpaceBegin ) &&
+             ( perrdata->errOrdinal != JET_errClientSpaceEnd ) )
         {
+            // This is OK for the end-markers of the error space reserved for client use.
             wprintf( L"\n\terrdata.txt error value (%d) is outside of reasonable error range!", perrdata->errOrdinal );
             return errCodeInconsistency;
         }
@@ -147,11 +167,11 @@ JET_ERR ErrCheckErrorDataSelfConsistent( _In_ const INT cerr )
             wprintf( L"\n\terrdata.txt error value (%d) is outside of acceptable error range!", perrdata->errOrdinal );
             return errCodeInconsistency;
         }
-
+        
         if ( perrdata->flags & fErrErr )
         {
             if ( perrdata->errOrdinal != JET_errSuccess &&
-                    perrdata->errOrdinal >= JET_errSuccess )
+                 perrdata->errOrdinal >= JET_errSuccess )
             {
                 wprintf( L"\n\terrdata.txt error value (%d) is positive error value!  error values should be negative.", perrdata->errOrdinal );
                 return errCodeInconsistency;

@@ -598,7 +598,7 @@
 	EXTERNAL_ERR( -4005,	Usage,		JET_errFileCompressed	 )	// or could view as a lighter version of Inconsistent.
 	INTERNAL_ERR( -4006,	Resource,	errDiskTilt	 )
 	INTERNAL_WRN( 4007,	State,		4007 /* wrnDiskGameOn */	 )   // Tag:CodeInComments
-	INTERNAL_WRN( 4009,	State,	wrnIOPending	)
-	INTERNAL_WRN( 4010,	IO,	wrnIOSlow	)
-
-
+	INTERNAL_WRN( 4009,	State,		wrnIOPending	)
+	INTERNAL_WRN( 4010,	IO,		wrnIOSlow	)
+	EXTERNAL_ERR( -10000,	Usage,		JET_errClientSpaceBegin	)
+	EXTERNAL_ERR( -11999,	Usage,		JET_errClientSpaceEnd	)

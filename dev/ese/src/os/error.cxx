@@ -1284,7 +1284,11 @@ ERR ErrERRCheck_( const ERR err, const CHAR* szFile, const LONG lLine )
     //  before another system call clobbers it.
     DWORD dwSavedGLE = GetLastError();
 
-    AssertRTL( err > -65536 && err < 65536 );
+    // 64K is arbitrary.  The Client space carve out is an API contract.
+    AssertSz( ( ( err > -65536 && err < JET_errClientSpaceEnd ) ||
+                ( err > JET_errClientSpaceBegin && err < (- JET_errClientSpaceBegin ) ) ||
+                ( err > (- JET_errClientSpaceEnd ) && err < 65536 ) ),
+              "Error value out of bounds." );
 
     if ( FOSRefTraceErrors() )
     {

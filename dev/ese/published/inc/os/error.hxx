@@ -530,7 +530,6 @@ __forceinline CErrFrameSimple * PefLastThrow();
 __forceinline ERR ErrERRSetLastThrow( _In_ const CHAR* szFile, _In_ const LONG lLine, _In_ const ERR err )
 {
     PefLastThrow()->Set( szFile, lLine, err );
-    AssertRTL( err > -65536 && err < 65536 );
     return err;
 }
 
@@ -579,7 +578,6 @@ __forceinline ERR ErrERRCheck_( _In_ const ERR err, _In_ const CHAR* szFile, _In
     {
         KernelDebugBreakPoint();
     }
-    AssertRTL( err > -65536 && err < 65536 );
     return err;
 }
 
@@ -601,7 +599,6 @@ void ERRSetLastCall( _In_ const CHAR * szFile, _In_ const LONG lLine, _In_ const
 #define CallR( func )                                   \
 {                                                       \
     LogJETCall( err = (func) );                         \
-    AssertRTL( err > -65536 && err < 65536 );           \
     if ( err < 0 )                                      \
     {                                                   \
         ERRSetLastCall( __FILE__, __LINE__, err );      \
@@ -614,7 +611,6 @@ void ERRSetLastCall( _In_ const CHAR * szFile, _In_ const LONG lLine, _In_ const
 #define CallJ( func, label )                            \
 {                                                       \
     LogJETCall( err = (func) );                         \
-    AssertRTL( err > -65536 && err < 65536 );           \
     if ( err < 0 )                                      \
     {                                                   \
         ERRSetLastCall( __FILE__, __LINE__, err );      \
@@ -664,7 +660,6 @@ void ERRSetLastCall( _In_ const CHAR * szFile, _In_ const LONG lLine, _In_ const
 #define CallA( func )                                   \
 {                                                       \
     LogJETCall( err = (func) );                         \
-    AssertRTL( err > -65536 && err < 65536 );           \
     Assert( err >= 0 );                                 \
     if ( err < 0 )                                      \
     {                                                   \
