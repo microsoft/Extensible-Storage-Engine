@@ -4132,7 +4132,7 @@ ERR ErrCATChangePgnoFDPLastSetTime(
     //
     if ( ppib->Level() == 0 )
     {
-        CallR( ErrDIRBeginTransaction( ppib, 49567, NO_GRBIT ) );
+        Call( ErrDIRBeginTransaction( ppib, 49567, NO_GRBIT ) );
         fBeginTrx   = fTrue;
     }
 
@@ -4165,7 +4165,7 @@ ERR ErrCATChangePgnoFDPLastSetTime(
         NULL ) );
     Call( ErrIsamUpdate( ppib, pfucbCatalog, NULL, 0, NULL, NO_GRBIT ) );
 
-    CallS( ErrCATClose( ppib, pfucbCatalog ) );
+    Call( ErrCATClose( ppib, pfucbCatalog ) );
     pfucbCatalog = pfucbNil;
 
     Call( ErrCATOpen( ppib, ifmp, &pfucbCatalog, fTrue ) );     //  shadow catalog
