@@ -1104,7 +1104,7 @@ HandleError:
     {
         if ( pfucbNil != pfucb )
         {
-            if ( pfcb == pfucb->u.pfcb )
+            if ( pfcb == pfucb->u.pfcb && pfcb != pfcbNil )
             {
                 // We managed to link the FUCB to the FCB before we errored.
                 pfcb->Unlink( pfucb );
