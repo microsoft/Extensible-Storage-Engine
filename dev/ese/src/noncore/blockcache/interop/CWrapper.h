@@ -13,54 +13,56 @@ namespace Internal
         {
             namespace Interop
             {
-                template< class TM, class TN, class TW >
-                ERR ErrWrap( TM^% tm, TN** const pptn )
+                template< class TM, class TN, class TW, class TR >
+                static ERR ErrWrap( TM^% tm, TN** const pptn )
                 {
-                    ERR err = JET_errSuccess;
+                    ERR err         = JET_errSuccess;
+                    TM^ remotable   = nullptr;
+                    TN* ptn         = NULL;
 
                     *pptn = NULL;
 
                     if ( tm )
                     {
-                        Alloc( *pptn = new TW( tm ) );
-                        tm = nullptr;
+                        remotable = tm;
+
+                        if ( dynamic_cast<MarshalByRefObject^>( remotable ) == nullptr )
+                        {
+                            remotable = gcnew TR( remotable );
+                        }
+
+                        Alloc( ptn = new TW( remotable ) );
                     }
 
+                    *pptn = ptn;
+                    ptn = NULL;
+
                 HandleError:
+                    delete ptn;
                     if ( err < JET_errSuccess )
                     {
-                        delete *pptn;
+                        delete* pptn;
                         *pptn = NULL;
                     }
                     return err;
                 }
+
 
                 template< class TM, class TN >
                 public class CWrapper : public TN
                 {
                     public:
 
-                        CWrapper( TM^ tm ) : m_container( tm ) { }
+                        CWrapper( [Out] TM^% tm )
+                            :   m_container( tm )
+                        {
+                            tm = nullptr;
+                        }
 
                         TM^ I() const
                         {
-                            return m_container.I();
+                            return (TM^)m_container.O();
                         }
-
-                    private:
-
-                        class CContainer
-                        {
-                            public:
-
-                                CContainer( TM^ tm ) : m_tm( tm ) { }
-
-                                TM^ I() const { return m_tm.get(); }
-
-                            private:
-
-                                mutable msclr::auto_gcroot<TM^> m_tm;
-                        };
 
                     private:
 

@@ -13,12 +13,12 @@ namespace Internal
         {
             namespace Interop
             {
-                ref class Sealed
+                ref class Sealed : MarshalByRefObject
                 {
                     public:
 
-                        Sealed( const ::IJournalSegment::PfnSealed  pfnSealed,
-                                const DWORD_PTR                     keySealed )
+                        Sealed( _In_ const ::IJournalSegment::PfnSealed pfnSealed,
+                                _In_ const DWORD_PTR                    keySealed )
                             :   pfnSealed( pfnSealed ),
                                 keySealed( keySealed )
                         {

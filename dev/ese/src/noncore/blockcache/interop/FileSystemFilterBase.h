@@ -32,7 +32,7 @@ namespace Internal
                             FileSerial fileserial,
                             FileModeFlags fileModeFlags );
 
-                        virtual void FileRename( IFile^ f, String^ pathDest, bool overwriteExisting );
+                        virtual void FileRename( File^ f, String^ pathDest, bool overwriteExisting );
 
                     protected:
 
@@ -67,22 +67,18 @@ namespace Internal
                 }
 
                 template< class TM, class TN, class TW >
-                inline void FileSystemFilterBase<TM,TN,TW>::FileRename( IFile^ f, String^ pathDest, bool overwriteExisting )
+                inline void FileSystemFilterBase<TM,TN,TW>::FileRename( File^ f, String^ pathDest, bool overwriteExisting )
                 {
-                    ERR         err     = JET_errSuccess;
-                    IFileAPI*   pfapi   = NULL;
+                    ERR err = JET_errSuccess;
 
-                    Call( File::ErrWrap( f, &pfapi ) );
                     pin_ptr<const Char> wszPathDest = PtrToStringChars( pathDest );
-                    Call( Pi->ErrFileRename(    pfapi,
+                    Call( Pi->ErrFileRename(    f->Pi,
                                                 (const WCHAR*)wszPathDest,
                                                 overwriteExisting ? fTrue : fFalse ) );
 
-                    delete pfapi;
                     return;
 
                 HandleError:
-                    delete pfapi;
                     throw EseException( err );
                 }
 

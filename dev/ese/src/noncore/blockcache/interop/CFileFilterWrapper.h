@@ -32,10 +32,10 @@ namespace Internal
                                         _Out_writes_( cbData )  BYTE* const                     pbData,
                                         _In_                    const OSFILEQOS                 grbitQOS,
                                         _In_                    const ::IFileFilter::IOMode     iom,
-                                        _In_                    const IFileAPI::PfnIOComplete   pfnIOComplete,
-                                        _In_                    const DWORD_PTR                 keyIOComplete,
-                                        _In_                    const IFileAPI::PfnIOHandoff    pfnIOHandoff,
-                                        _In_                    const VOID *                    pioreq ) override;
+                                        _In_opt_                const IFileAPI::PfnIOComplete   pfnIOComplete,
+                                        _In_opt_                const DWORD_PTR                 keyIOComplete,
+                                        _In_opt_                const IFileAPI::PfnIOHandoff    pfnIOHandoff,
+                                        _In_opt_                const VOID *                    pioreq ) override;
 
                         ERR ErrWrite(   _In_                    const TraceContext&             tc,
                                         _In_                    const QWORD                     ibOffset,
@@ -43,11 +43,13 @@ namespace Internal
                                         _In_reads_( cbData )    const BYTE* const               pbData,
                                         _In_                    const OSFILEQOS                 grbitQOS,
                                         _In_                    const ::IFileFilter::IOMode     iom,
-                                        _In_                    const IFileAPI::PfnIOComplete   pfnIOComplete,
-                                        _In_                    const DWORD_PTR                 keyIOComplete,
-                                        _In_                    const IFileAPI::PfnIOHandoff    pfnIOHandoff ) override;
+                                        _In_opt_                const IFileAPI::PfnIOComplete   pfnIOComplete,
+                                        _In_opt_                const DWORD_PTR                 keyIOComplete,
+                                        _In_opt_                const IFileAPI::PfnIOHandoff    pfnIOHandoff ) override;
 
                         ERR ErrIssue( _In_ const ::IFileFilter::IOMode iom ) override;
+
+                        ERR ErrFlush( _In_ const IOFLUSHREASON iofr, _In_ const ::IFileFilter::IOMode iom ) override;
                 };
 
                 template< class TM, class TN >
@@ -87,13 +89,15 @@ namespace Internal
                                                                 _Out_writes_( cbData )  BYTE* const                     pbData,
                                                                 _In_                    const OSFILEQOS                 grbitQOS,
                                                                 _In_                    const ::IFileFilter::IOMode     iom,
-                                                                _In_                    const IFileAPI::PfnIOComplete   pfnIOComplete,
-                                                                _In_                    const DWORD_PTR                 keyIOComplete,
-                                                                _In_                    const IFileAPI::PfnIOHandoff    pfnIOHandoff,
-                                                                _In_                    const VOID *                    pioreq )
+                                                                _In_opt_                const IFileAPI::PfnIOComplete   pfnIOComplete,
+                                                                _In_opt_                const DWORD_PTR                 keyIOComplete,
+                                                                _In_opt_                const IFileAPI::PfnIOHandoff    pfnIOHandoff,
+                                                                _In_opt_                const VOID *                    pioreq )
                 {
                     ERR             err         = JET_errSuccess;
-                    array<byte>^    buffer      = gcnew array<byte>( cbData );
+                    array<byte>^    buffer      = !pbData ? nullptr : gcnew array<byte>( cbData );
+                    pin_ptr<byte>   rgbData     = ( !pbData || !cbData ) ? nullptr : &buffer[ 0 ];
+                    MemoryStream^   stream      = !pbData ? nullptr : gcnew MemoryStream( buffer, true );
                     IOComplete^     iocomplete  = ( pfnIOComplete || pfnIOHandoff ) ?
                                                         gcnew IOComplete(   this,
                                                                             false, 
@@ -103,11 +107,13 @@ namespace Internal
                                                                             pfnIOHandoff ) :
                                                         nullptr;
 
-                    pin_ptr<byte> rgbDataIn = &buffer[ 0 ];
-                    UtilMemCpy( (BYTE*)rgbDataIn, pbData, cbData );
+                    if ( cbData )
+                    {
+                        UtilMemCpy( (BYTE*)rgbData, pbData, cbData );
+                    }
 
                     ExCall( I()->Read(  ibOffset,
-                                        ArraySegment<byte>( buffer ),
+                                        stream,
                                         (FileQOS)grbitQOS,
                                         (Internal::Ese::BlockCache::Interop::IOMode)iom,
                                         pfnIOComplete ?
@@ -118,9 +124,8 @@ namespace Internal
                                             nullptr ) );
 
                 HandleError:
-                    if ( !pfnIOComplete )
+                    if ( !pfnIOComplete && cbData )
                     {
-                        pin_ptr<const byte> rgbData = &buffer[ 0 ];
                         UtilMemCpy( pbData, (const BYTE*)rgbData, cbData );
                     }
                     return err;
@@ -133,12 +138,14 @@ namespace Internal
                                                                     _In_reads_( cbData )    const BYTE* const               pbData,
                                                                     _In_                    const OSFILEQOS                 grbitQOS,
                                                                     _In_                    const ::IFileFilter::IOMode     iom,
-                                                                    _In_                    const IFileAPI::PfnIOComplete   pfnIOComplete,
-                                                                    _In_                    const DWORD_PTR                 keyIOComplete,
-                                                                    _In_                    const IFileAPI::PfnIOHandoff    pfnIOHandoff )
+                                                                    _In_opt_                const IFileAPI::PfnIOComplete   pfnIOComplete,
+                                                                    _In_opt_                const DWORD_PTR                 keyIOComplete,
+                                                                    _In_opt_                const IFileAPI::PfnIOHandoff    pfnIOHandoff )
                 {
                     ERR             err         = JET_errSuccess;
-                    array<byte>^    buffer      = gcnew array<byte>( cbData );
+                    array<byte>^    buffer      = !pbData ? nullptr : gcnew array<byte>( cbData );
+                    pin_ptr<byte>   rgbData     = ( !pbData || !cbData ) ? nullptr : &buffer[ 0 ];
+                    MemoryStream^   stream      = !pbData ? nullptr : gcnew MemoryStream( buffer, false );
                     IOComplete^     iocomplete  = ( pfnIOComplete || pfnIOHandoff ) ?
                                                         gcnew IOComplete(   this,
                                                                             true, 
@@ -148,11 +155,13 @@ namespace Internal
                                                                             pfnIOHandoff ) :
                                                         nullptr;
 
-                    pin_ptr<byte> rgbData = &buffer[ 0 ];
-                    UtilMemCpy( (BYTE*)rgbData, pbData, cbData );
+                    if ( cbData )
+                    {
+                        UtilMemCpy( (BYTE*)rgbData, pbData, cbData );
+                    }
 
                     ExCall( I()->Write( ibOffset,
-                                        ArraySegment<byte>( buffer ),
+                                        stream,
                                         (FileQOS)grbitQOS,
                                         (Internal::Ese::BlockCache::Interop::IOMode)iom,
                                         pfnIOComplete ?
@@ -172,6 +181,18 @@ namespace Internal
                     ERR err = JET_errSuccess;
 
                     ExCall( I()->Issue( (Internal::Ese::BlockCache::Interop::IOMode)iom ) );
+
+                HandleError:
+                    return err;
+                }
+
+                template< class TM, class TN >
+                inline ERR CFileFilterWrapper<TM, TN>::ErrFlush(    _In_ const IOFLUSHREASON            iofr,
+                                                                    _In_ const ::IFileFilter::IOMode    iom )
+                {
+                    ERR err = JET_errSuccess;
+
+                    ExCall( I()->Flush( (Internal::Ese::BlockCache::Interop::IOMode)iom ) );
 
                 HandleError:
                     return err;

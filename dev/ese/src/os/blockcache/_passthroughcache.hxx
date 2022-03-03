@@ -46,8 +46,8 @@ class TPassThroughCache
                         _Out_writes_( cbData )  BYTE* const                 pbData,
                         _In_                    const OSFILEQOS             grbitQOS,
                         _In_                    const ICache::CachingPolicy cp,
-                        _In_                    const ICache::PfnComplete   pfnComplete,
-                        _In_                    const DWORD_PTR             keyComplete ) override;
+                        _In_opt_                const ICache::PfnComplete   pfnComplete,
+                        _In_opt_                const DWORD_PTR             keyComplete ) override;
 
         ERR ErrWrite(   _In_                    const TraceContext&         tc,
                         _In_                    const VolumeId              volumeid,
@@ -58,8 +58,8 @@ class TPassThroughCache
                         _In_reads_( cbData )    const BYTE* const           pbData,
                         _In_                    const OSFILEQOS             grbitQOS,
                         _In_                    const ICache::CachingPolicy cp,
-                        _In_                    const ICache::PfnComplete   pfnComplete,
-                        _In_                    const DWORD_PTR             keyComplete ) override;
+                        _In_opt_                const ICache::PfnComplete   pfnComplete,
+                        _In_opt_                const DWORD_PTR             keyComplete ) override;
 
         ERR ErrIssue(   _In_ const VolumeId     volumeid,
                         _In_ const FileId       fileid,
@@ -85,10 +85,6 @@ class TPassThroughCache
                                             ppch )
         {
         }
-
-    private:
-
-        const COffsets s_offsetsCachedFileHeader = COffsets( 0, sizeof( CCachedFileHeader ) - 1 );
 };
 
 template< class I >
@@ -142,23 +138,62 @@ ERR TPassThroughCache<I>::ErrInvalidate(    _In_ const VolumeId     volumeid,
                                             _In_ const QWORD        cbData )
 {
     ERR                                 err                 = JET_errSuccess;
+    const QWORD                         ibStart             = ibOffset;
+    const QWORD                         ibEnd               = ibOffset >= qwMax - cbData ? qwMax : ibOffset - 1 + cbData;
+    COffsets                            offsets             = COffsets( ibStart, ibEnd );
     CPassThroughCachedFileTableEntry*   pcfte               = NULL;
-    const COffsets                      offsets             = COffsets( ibOffset, ibOffset + cbData - 1 );
+    QWORD                               cbCachedFile        = 0;
+    ULONG                               cbPinned            = 0;
+    COffsets                            offsetsPinned;
     DWORD                               cbHeaderInvalidated = 0;
     BYTE*                               rgbZero             = NULL;
     TraceContextScope                   tcScope( iorpBlockCache );
 
     //  trivial implementation:  invalidate the displaced data
-   
+
     //  get the cached file
 
     Call( ErrGetCachedFile( volumeid, fileid, fileserial, fFalse, &pcfte ) );
 
+    //  ignore empty requests
+
+    if ( !cbData )
+    {
+        Error( JET_errSuccess );
+    }
+
+    //  if this request is not aligned to cached file blocks then fail
+
+    if ( offsets.IbStart() % pcfte->CbBlockSize() != 0 )
+    {
+        Error( ErrERRCheck( JET_errInvalidParameter ) );
+    }
+    if ( offsets.IbEnd() != qwMax && offsets.Cb() % pcfte->CbBlockSize() != 0 )
+    {
+        Error( ErrERRCheck( JET_errInvalidParameter ) );
+    }
+
+    //  determine the current cached file size.  we only need to invalidate up to that file size
+
+    Call( pcfte->Pff()->ErrSize( &cbCachedFile, IFileAPI::filesizeLogical ) );
+
+    if ( !cbCachedFile )
+    {
+        Error( JET_errSuccess );
+    }
+
+    offsets = COffsets( ibOffset, min( ibEnd, roundup( cbCachedFile, cbCachedBlock ) - 1 ) );
+
+    //  compute the offsets protected from overwrite
+
+    cbPinned = roundup( pcfte->Pcfconfig()->UlPinnedHeaderSizeInBytes(), pcfte->Pcfconfig()->CbBlockSize() );
+    offsetsPinned = COffsets( 0, cbPinned - 1 );
+
     //  if we are invalidating the data displaced by the header then explicitly clear the displaced data
 
-    if ( offsets.FOverlaps( s_offsetsCachedFileHeader ) && cbData > 0 )
+    if ( offsets.FOverlaps( offsetsPinned ) && offsets.Cb() > 0 )
     {
-        cbHeaderInvalidated = (DWORD)min( cbData, s_offsetsCachedFileHeader.IbEnd() - offsets.IbStart() + 1 );
+        cbHeaderInvalidated = (DWORD)min( offsets.Cb(), offsetsPinned.IbEnd() - offsets.IbStart() + 1 );
 
         Alloc( rgbZero = (BYTE*)PvOSMemoryPageAlloc( roundup( cbHeaderInvalidated, OSMemoryPageCommitGranularity() ), NULL ) );
         Call( pcfte->PffDisplacedData()->ErrIOWrite(    *tcScope,
@@ -187,12 +222,14 @@ ERR TPassThroughCache<I>::ErrRead(  _In_                    const TraceContext& 
                                     _In_                    const OSFILEQOS             grbitQOS,
                                     _In_                    const ICache::CachingPolicy cp,
                                     _In_opt_                const ICache::PfnComplete   pfnComplete,
-                                    _In_                    const DWORD_PTR             keyComplete )
+                                    _In_opt_                const DWORD_PTR             keyComplete )
 {
     ERR                                 err             = JET_errSuccess;
     CCacheThreadLocalStorageBase*       pctls           = NULL;
     CPassThroughCachedFileTableEntry*   pcfte           = NULL;
-    const COffsets                      offsets         = COffsets( ibOffset, ibOffset + cbData - 1 );
+    ULONG                               cbPinned        = 0;
+    COffsets                            offsetsPinned;
+    const COffsets                      offsets         = COffsets( ibOffset, ibOffset - 1 + cbData );
     DWORD                               cbHeaderRead    = 0;
     const BOOL                          fAsync          = pfnComplete != NULL;
     CRequest*                           prequest        = NULL;
@@ -208,21 +245,35 @@ ERR TPassThroughCache<I>::ErrRead(  _In_                    const TraceContext& 
 
     Call( ErrGetCachedFile( volumeid, fileid, fileserial, fFalse, &pcfte ) );
 
+    //  compute the offsets protected from overwrite
+
+    cbPinned = roundup( pcfte->Pcfconfig()->UlPinnedHeaderSizeInBytes(), pcfte->Pcfconfig()->CbBlockSize() );
+    offsetsPinned = COffsets( 0, cbPinned - 1 );
+
+    //  if this request is not aligned to cached file blocks then fail
+
+    Call( ErrValidateOffsets( pcfte, ibOffset, cbData ) );
+
+    //  the pass through cache doesn't support arbitrary pinning
+
+    if ( cp == cpPinned && !offsetsPinned.FContains( offsets ) )
+    {
+        Error( ErrERRCheck( JET_errInvalidOperation ) );
+    }
+
     //  create our request context
 
-    Alloc( prequest = new( fAsync ? new Buffer<CRequest>() : _alloca( sizeof( CRequest ) ) )
-           CRequest(    fAsync,
-                        fTrue,
-                        this,
-                        tc,
-                        &pcfte,
-                        ibOffset, 
-                        cbData,
-                        pbData,
-                        grbitQOS,
-                        cp,
-                        pfnComplete, 
-                        keyComplete ) );
+    Alloc( prequest = new CRequest( fTrue,
+                                    this,
+                                    tc,
+                                    &pcfte,
+                                    ibOffset,
+                                    cbData, 
+                                    pbData,
+                                    grbitQOS,
+                                    cp,
+                                    pfnComplete, 
+                                    keyComplete ) );
 
     //  trivial implementation:  simply pass the IO on to the cached file as a cache miss, except the displaced header
 
@@ -233,9 +284,9 @@ ERR TPassThroughCache<I>::ErrRead(  _In_                    const TraceContext& 
     //  if this read is accessing the data displaced by the header then redirect that portion of the IO to the
     //  displaced data
 
-    if ( offsets.FOverlaps( s_offsetsCachedFileHeader ) )
+    if ( offsets.FOverlaps( offsetsPinned ) )
     {
-        cbHeaderRead = (DWORD)COffsets( offsets.IbStart(), min( offsets.IbEnd(), s_offsetsCachedFileHeader.IbEnd() ) ).Cb();
+        cbHeaderRead = (DWORD)COffsets( offsets.IbStart(), min( offsets.IbEnd(), offsetsPinned.IbEnd() ) ).Cb();
         cbHeaderRead = min( cbHeaderRead, cbData );
     }
 
@@ -262,16 +313,18 @@ ERR TPassThroughCache<I>::ErrRead(  _In_                    const TraceContext& 
                                     cbData - cbHeaderRead,
                                     pbData + cbHeaderRead,
                                     iomCacheMiss ) );
+
+        if ( fAsync )
+        {
+            Call( prequest->Pcfte()->Pff()->ErrIssue( iomCacheMiss ) );
+        }
     }
 
 HandleError:
-    if ( prequest )
-    {
-        prequest->Release( err );
-    }
+    err = CRequest::ErrRelease( &prequest, err );
     ReleaseCachedFile( &pcfte );
     CCacheThreadLocalStorageBase::Release( &pctls );
-    return fAsync && prequest ? JET_errSuccess : err;
+    return err;
 }
 
 template< class I >
@@ -285,12 +338,14 @@ ERR TPassThroughCache<I>::ErrWrite( _In_                    const TraceContext& 
                                     _In_                    const OSFILEQOS             grbitQOS,
                                     _In_                    const ICache::CachingPolicy cp,
                                     _In_opt_                const ICache::PfnComplete   pfnComplete,
-                                    _In_                    const DWORD_PTR             keyComplete )
+                                    _In_opt_                const DWORD_PTR             keyComplete )
 {
     ERR                                 err             = JET_errSuccess;
     CCacheThreadLocalStorageBase*       pctls           = NULL;
     CPassThroughCachedFileTableEntry*   pcfte           = NULL;
-    const COffsets                      offsets         = COffsets( ibOffset, ibOffset + cbData - 1 );
+    ULONG                               cbPinned        = 0;
+    COffsets                            offsetsPinned;
+    const COffsets                      offsets         = COffsets( ibOffset, ibOffset - 1 + cbData );
     DWORD                               cbHeaderWritten = 0;
     const BOOL                          fAsync          = pfnComplete != NULL;
     CRequest*                           prequest        = NULL;
@@ -306,21 +361,35 @@ ERR TPassThroughCache<I>::ErrWrite( _In_                    const TraceContext& 
 
     Call( ErrGetCachedFile( volumeid, fileid, fileserial, fFalse, &pcfte ) );
 
+    //  compute the offsets protected from overwrite
+
+    cbPinned = roundup( pcfte->Pcfconfig()->UlPinnedHeaderSizeInBytes(), pcfte->Pcfconfig()->CbBlockSize() );
+    offsetsPinned = COffsets( 0, cbPinned - 1 );
+
+    //  if this request is not aligned to cached file blocks then fail
+
+    Call( ErrValidateOffsets( pcfte, ibOffset, cbData ) );
+
+    //  the pass through cache doesn't support arbitrary pinning
+
+    if ( cp == cpPinned && !offsetsPinned.FContains( offsets ) )
+    {
+        Error( ErrERRCheck( JET_errInvalidOperation ) );
+    }
+
     //  create our request context
 
-    Alloc( prequest = new( fAsync ? new Buffer<CRequest>() : _alloca( sizeof( CRequest ) ) )
-           CRequest(    fAsync,
-                        fFalse,
-                        this,
-                        tc,
-                        &pcfte,
-                        ibOffset, 
-                        cbData,
-                        pbData,
-                        grbitQOS,
-                        cp,
-                        pfnComplete, 
-                        keyComplete ) );
+    Alloc( prequest = new CRequest( fFalse,
+                                    this,
+                                    tc,
+                                    &pcfte,
+                                    ibOffset,
+                                    cbData,
+                                    pbData,
+                                    grbitQOS,
+                                    cp,
+                                    pfnComplete, 
+                                    keyComplete ) );
 
     //  trivial implementation:  simply pass the IO on to the cached file as a write through, except the displaced header
 
@@ -333,9 +402,9 @@ ERR TPassThroughCache<I>::ErrWrite( _In_                    const TraceContext& 
     //  if the write is accessing the data displaced by the header then redirect that portion of the IO to the
     //  displaced data
 
-    if ( offsets.FOverlaps( s_offsetsCachedFileHeader ) )
+    if ( offsets.FOverlaps( offsetsPinned ) )
     {
-        cbHeaderWritten = (DWORD)COffsets( offsets.IbStart(), min( offsets.IbEnd(), s_offsetsCachedFileHeader.IbEnd() ) ).Cb();
+        cbHeaderWritten = (DWORD)COffsets( offsets.IbStart(), min( offsets.IbEnd(), offsetsPinned.IbEnd() ) ).Cb();
         cbHeaderWritten = min( cbHeaderWritten, cbData );
     }
 
@@ -364,16 +433,18 @@ ERR TPassThroughCache<I>::ErrWrite( _In_                    const TraceContext& 
                                     cbData - cbHeaderWritten,
                                     pbData + cbHeaderWritten,
                                     iomCacheWriteThrough ) );
+
+        if ( fAsync )
+        {
+            Call( prequest->Pcfte()->Pff()->ErrIssue( iomCacheWriteThrough ) );
+        }
     }
 
 HandleError:
-    if ( prequest )
-    {
-        prequest->Release( err );
-    }
+    err = CRequest::ErrRelease( &prequest, err );
     ReleaseCachedFile( &pcfte );
     CCacheThreadLocalStorageBase::Release( &pctls );
-    return fAsync && prequest ? JET_errSuccess : err;
+    return err;
 }
 
 template<class I>

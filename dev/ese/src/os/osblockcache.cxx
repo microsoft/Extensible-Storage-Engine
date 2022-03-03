@@ -10,7 +10,8 @@ CDefaultCachedFileConfiguration::CDefaultCachedFileConfiguration()
         m_wszAbsPathCachingFile( L"" ),
         m_cbBlockSize( 4096 ),
         m_cConcurrentBlockWriteBackMax( 100 ),
-        m_lCacheTelemetryFileNumber( dwMax )
+        m_ulCacheTelemetryFileNumber( dwMax ),
+        m_ulPinnedHeaderSizeInBytes( 4096 )
 {
 }
 
@@ -34,18 +35,31 @@ ULONG CDefaultCachedFileConfiguration::CConcurrentBlockWriteBackMax()
     return m_cConcurrentBlockWriteBackMax;
 }
 
-ULONG CDefaultCachedFileConfiguration::LCacheTelemetryFileNumber()
+ULONG CDefaultCachedFileConfiguration::UlCacheTelemetryFileNumber()
 {
-    return m_lCacheTelemetryFileNumber;
+    return m_ulCacheTelemetryFileNumber;
+}
+
+ULONG CDefaultCachedFileConfiguration::UlPinnedHeaderSizeInBytes()
+{
+    return m_ulPinnedHeaderSizeInBytes;
 }
 
 CDefaultCacheConfiguration::CDefaultCacheConfiguration()
     :   m_fCacheEnabled( fFalse ),
         m_wszAbsPathCachingFile( L"" ),
         m_cbMaximumSize( 16 * 1024 * 1024 ),
-        m_pctWrite( 100 )
+        m_pctWrite( 100 ),
+        m_cbJournalSegmentsMaximumSize( 2 * 1024 * 1024 ),
+        m_pctJournalSegmentsInUse( 75 ),
+        m_cbJournalSegmentsMaximumCacheSize( 1 * 1024 * 1024 ),
+        m_cbJournalClustersMaximumSize( 2 * 1024 * 1024 ),
+        m_cbCachingFilePerSlab( 1 * 102 * 4096 ),
+        m_cbCachedFilePerSlab( 0 ),
+        m_cbSlabMaximumCacheSize( 1 * 1024 * 1024 ),
+        m_fAsyncWriteBackEnabled( fTrue )
 {
-    memcpy( m_rgbCacheType, CPassThroughCache::RgbCacheType(), cbGuid );
+    memcpy( m_rgbCacheType, CHashedLRUKCache::RgbCacheType(), cbGuid );
 }
 
 BOOL CDefaultCacheConfiguration::FCacheEnabled()
@@ -71,6 +85,46 @@ QWORD CDefaultCacheConfiguration::CbMaximumSize()
 double CDefaultCacheConfiguration::PctWrite()
 {
     return m_pctWrite;
+}
+
+QWORD CDefaultCacheConfiguration::CbJournalSegmentsMaximumSize()
+{
+    return m_cbJournalSegmentsMaximumSize;
+}
+
+double CDefaultCacheConfiguration::PctJournalSegmentsInUse()
+{
+    return m_pctJournalSegmentsInUse;
+}
+
+QWORD CDefaultCacheConfiguration::CbJournalSegmentsMaximumCacheSize()
+{
+    return m_cbJournalSegmentsMaximumCacheSize;
+}
+
+QWORD CDefaultCacheConfiguration::CbJournalClustersMaximumSize()
+{
+    return m_cbJournalClustersMaximumSize;
+}
+
+QWORD CDefaultCacheConfiguration::CbCachingFilePerSlab()
+{
+    return m_cbCachingFilePerSlab;
+}
+
+QWORD CDefaultCacheConfiguration::CbCachedFilePerSlab()
+{
+    return m_cbCachedFilePerSlab;
+}
+
+QWORD CDefaultCacheConfiguration::CbSlabMaximumCacheSize()
+{
+    return m_cbSlabMaximumCacheSize;
+}
+
+BOOL CDefaultCacheConfiguration::FAsyncWriteBackEnabled()
+{
+    return m_fAsyncWriteBackEnabled;
 }
 
 CDefaultBlockCacheConfiguration::CDefaultBlockCacheConfiguration()
@@ -99,448 +153,144 @@ HandleError:
     return err;
 }
 
-//  Factory methods
 
-ERR ErrOSBCCreateFileSystemWrapper( _Inout_ IFileSystemAPI** const  ppfsapiInner,
-                                    _Out_   IFileSystemAPI** const  ppfsapi )
+//  Cached Block Slot
+
+void CCachedBlockSlot::Pin( _In_    const CCachedBlockSlot& slot,
+                            _Out_   CCachedBlockSlot* const pslot )
 {
-    ERR             err     = JET_errSuccess;
-    IFileSystemAPI* pfsapi  = NULL;
-
-    *ppfsapi = NULL;
-
-    //  create the file system wrapper
-
-    Alloc( pfsapi = new CFileSystemWrapper( ppfsapiInner ) );
-
-    *ppfsapi = pfsapi;
-    pfsapi = NULL;
-
-HandleError:
-    delete pfsapi;
-    if ( err < JET_errSuccess )
-    {
-        delete *ppfsapi;
-        *ppfsapi = NULL;
-    }
-    return err;
+    new ( pslot ) CCachedBlockSlot( slot.IbSlab(),
+                                    slot.Chno(),
+                                    slot.Slno(),
+                                    CCachedBlock(   slot.Cbid(),
+                                                    slot.Clno(),
+                                                    slot.DwECC(),
+                                                    slot.Tono0(),
+                                                    slot.Tono1(),
+                                                    slot.FValid(),
+                                                    fTrue,
+                                                    slot.FDirty(),
+                                                    slot.FEverDirty(),
+                                                    slot.FPurged(),
+                                                    slot.Updno() ) );
 }
 
-ERR ErrOSBCCreateFileSystemFilter(  _In_    IFileSystemConfiguration* const pfsconfig,
-                                    _Inout_ IFileSystemAPI** const          ppfsapiInner,
-                                    _In_    IFileIdentification* const      pfident,
-                                    _In_    ICacheTelemetry* const          pctm,
-                                    _In_    ICacheRepository* const         pcrep,
-                                    _Out_   IFileSystemFilter** const       ppfsf )
+void CCachedBlockSlot::SwapClusters(    _In_    const CCachedBlockSlot& slotA,
+                                        _In_    const CCachedBlockSlot& slotB,
+                                        _Out_   CCachedBlockSlot* const pslotA,
+                                        _Out_   CCachedBlockSlot* const pslotB )
 {
-    ERR                 err     = JET_errSuccess;
-    IFileSystemFilter*  pfsf    = NULL;
-
-    *ppfsf = NULL;
-
-    //  create the file system filter
-
-    Alloc( pfsf = new CFileSystemFilter( pfsconfig, ppfsapiInner, pfident, pctm, pcrep ) );
-
-    *ppfsf = pfsf;
-    pfsf = NULL;
-
-HandleError:
-    delete pfsf;
-    if ( err < JET_errSuccess )
-    {
-        delete *ppfsf;
-        *ppfsf = NULL;
-    }
-    return err;
+    new ( pslotA ) CCachedBlockSlot(    slotA.IbSlab(),
+                                        slotA.Chno(),
+                                        slotA.Slno(),
+                                        CCachedBlock(   slotA.Cbid(),
+                                                        slotB.Clno(),  //  swap
+                                                        slotA.DwECC(),
+                                                        slotA.Tono0(),
+                                                        slotA.Tono1(),
+                                                        slotA.FValid(),
+                                                        slotA.FPinned(),
+                                                        slotA.FDirty(),
+                                                        slotA.FEverDirty(),
+                                                        slotA.FPurged(),
+                                                        slotA.Updno() ) );
+    new ( pslotB ) CCachedBlockSlot(    slotB.IbSlab(),
+                                        slotB.Chno(),
+                                        slotB.Slno(),
+                                        CCachedBlock(   slotB.Cbid(),
+                                                        slotA.Clno(),  //  swap
+                                                        slotB.DwECC(),
+                                                        slotB.Tono0(),
+                                                        slotB.Tono1(),
+                                                        slotB.FValid(),
+                                                        slotB.FPinned(),
+                                                        slotB.FDirty(),
+                                                        slotB.FEverDirty(),
+                                                        slotB.FPurged(),
+                                                        slotB.Updno() ) );
 }
 
-ERR ErrOSBCCreateFileWrapper(   _Inout_ IFileAPI** const    ppfapiInner,
-                                _Out_   IFileAPI** const    ppfapi )
+const char* OSFormat( _In_ const CCachedBlockSlot& slot )
 {
-    ERR         err     = JET_errSuccess;
-    IFileAPI*   pfapi   = NULL;
-
-    *ppfapi = NULL;
-
-    //  create the file wrapper
-
-    Alloc( pfapi = new CFileWrapper( ppfapiInner ) );
-
-    *ppfapi = pfapi;
-    pfapi = NULL;
-
-HandleError:
-    delete pfapi;
-    if ( err < JET_errSuccess )
-    {
-        delete *ppfapi;
-        *ppfapi = NULL;
-    }
-    return err;
+    return OSFormat(    "0x%016I64x,0x%01x,0x%02x %s,0x%08x 0x%08x (0x%08x) %c%c%c%c%c v%d",
+                        slot.IbSlab(),
+                        slot.Chno(),
+                        slot.Slno(),
+                        OSFormat(   slot.Cbid().Volumeid(),
+                                    slot.Cbid().Fileid(),
+                                    slot.Cbid().Fileserial() ),
+                        slot.Cbid().Cbno(),
+                        slot.Clno(),
+                        slot.DwECC(),
+                        slot.FValid() ? 'V' : '_',
+                        slot.FPinned() ? 'P' : '_',
+                        slot.FDirty() ? 'D' : '_',
+                        slot.FEverDirty() ? 'E' : '_',
+                        slot.FPurged() ? 'X' : '_',
+                        slot.Updno() );
 }
 
-ERR ErrOSBCCreateFileFilter(    _Inout_                     IFileAPI** const                    ppfapiInner,
-                                _In_                        IFileSystemFilter* const            pfsf,
-                                _In_                        IFileSystemConfiguration* const     pfsconfig,
-                                _In_                        ICacheTelemetry* const              pctm,
-                                _In_                        const VolumeId                      volumeid,
-                                _In_                        const FileId                        fileid,
-                                _Inout_                     ICachedFileConfiguration** const    ppcfconfig,
-                                _Inout_                     ICache** const                      ppc,
-                                _In_reads_opt_( cbHeader )  const BYTE* const                   pbHeader,
-                                _In_                        const int                           cbHeader,
-                                _Out_                       IFileFilter** const                 ppff )
+void CCachedBlockSlot::Dump(    _In_ const CCachedBlockSlot&    slot,
+                                _In_ CPRINTF* const             pcprintf,
+                                _In_ IFileIdentification* const pfident )
 {
-    ERR                 err     = JET_errSuccess;
-    IFileFilter*        pff     = NULL;
-    CCachedFileHeader*  pcfh    = NULL;
+    OSTraceSuspendGC();
+    (*pcprintf)( OSFormat( slot ) );
+    OSTraceResumeGC();
 
-    *ppff = NULL;
-
-    //  marshal the cached file header.  note that an expected case is not getting a valid header
-
-    if ( pbHeader )
+    if ( slot.Cbid().Cbno() != cbnoInvalid )
     {
-        (void)CCachedFileHeader::ErrLoad( pfsconfig, pbHeader, cbHeader, &pcfh );
+        WCHAR   wszAnyAbsPath[ IFileSystemAPI::cchPathMax ] = { };
+        WCHAR   wszKeyPath[ IFileSystemAPI::cchPathMax ]    = { };
+
+        (void)pfident->ErrGetFilePathById(  slot.Cbid().Volumeid(),
+                                            slot.Cbid().Fileid(),
+                                            wszAnyAbsPath,
+                                            wszKeyPath );
+
+        (*pcprintf)(    _T( "  // file %ws at offset 0x%016I64x for 0x%08x bytes" ),
+                        wszAnyAbsPath[0] ? wszAnyAbsPath : L"<unknown>",
+                        (QWORD)slot.Cbid().Cbno() * cbCachedBlock,
+                        cbCachedBlock );
     }
-
-    //  create the file filter
-
-    Alloc( pff = new CFileFilter( ppfapiInner, pfsf, pfsconfig, pctm, volumeid, fileid, ppcfconfig, ppc, &pcfh ) );
-
-    //  return the file filter
-
-    *ppff = pff;
-    pff = NULL;
-
-HandleError:
-    delete pff;
-    delete pcfh;
-    if ( err < JET_errSuccess )
-    {
-        delete *ppff;
-        *ppff = NULL;
-    }
-    return err;
 }
 
-ERR ErrOSBCCreateFileFilterWrapper( _Inout_ IFileFilter** const         ppffInner,
-                                    _In_    const IFileFilter::IOMode   iom,
-                                    _Out_   IFileFilter** const         ppff )
-{
-    ERR             err = JET_errSuccess;
-    IFileFilter*    pff = NULL;
+//  Block Cache Factory
 
-    *ppff = NULL;
+COSBlockCacheFactoryImpl g_bcf;
 
-    //  create the file filter wrapper
-
-    Alloc( pff = new CFileFilterWrapper( ppffInner, iom ) );
-
-    *ppff = pff;
-    pff = NULL;
-
-HandleError:
-    delete pff;
-    if ( err < JET_errSuccess )
-    {
-        delete *ppff;
-        *ppff = NULL;
-    }
-    return err;
-}
-
-ERR ErrOSBCCreateFileIdentification( _Out_ IFileIdentification** const ppfident )
+ERR COSBlockCacheFactory::ErrCreate( _Out_ IBlockCacheFactory** const ppbcf )
 {
     ERR err = JET_errSuccess;
+    IBlockCacheFactory* pbcf = NULL;
 
-    *ppfident = NULL;
+    *ppbcf = NULL;
 
-    //  create the file identification
+    Alloc( pbcf = new CBlockCacheFactoryWrapper( &g_bcf ) );
 
-    Alloc( *ppfident = new CFileIdentification() );
+    *ppbcf = pbcf;
+    pbcf = NULL;
 
 HandleError:
+    delete pbcf;
     if ( err < JET_errSuccess )
     {
-        delete *ppfident;
-        *ppfident = NULL;
+        delete *ppbcf;
+        *ppbcf = NULL;
     }
     return err;
 }
 
-ERR ErrOSBCCreateCache( _In_    IFileSystemFilter* const        pfsf,
-                        _In_    IFileIdentification* const      pfident,
-                        _In_    IFileSystemConfiguration* const pfsconfig,
-                        _Inout_ ICacheConfiguration** const     ppcconfig,
-                        _In_    ICacheTelemetry* const          pctm,
-                        _Inout_ IFileFilter** const             ppff,
-                        _Out_   ICache** const                  ppc )
+
+//  Init / Term
+
+BOOL FOSBlockCachePreinit()
 {
-    ERR     err = JET_errSuccess;
-    ICache* pc  = NULL;
-
-    *ppc = NULL;
-
-    //  create the cache
-
-    Call( CCacheFactory::ErrCreate( pfsf, pfident, pfsconfig, ppcconfig, pctm, ppff, &pc ) );
-
-    //  return the cache
-
-    *ppc = pc;
-    pc = NULL;
-
-HandleError:
-    delete pc;
-    if ( err < JET_errSuccess )
-    {
-        delete *ppc;
-        *ppc = NULL;
-    }
-    return err;
+    return fTrue;
 }
 
-ERR ErrOSBCCreateCacheWrapper(  _Inout_ ICache** const  ppcInner,
-                                _Out_   ICache** const  ppc )
+void OSBlockCachePostterm()
 {
-    ERR     err = JET_errSuccess;
-    ICache* pc  = NULL;
-
-    *ppc = NULL;
-
-    //  create the cache wrapper
-
-    Alloc( pc = new CCacheWrapper( ppcInner ) );
-
-    *ppc = pc;
-    pc = NULL;
-
-HandleError:
-    delete pc;
-    if ( err < JET_errSuccess )
-    {
-        delete *ppc;
-        *ppc = NULL;
-    }
-    return err;
-}
-
-ERR ErrOSBCCreateCacheRepository(   _In_    IFileIdentification* const      pfident,
-                                    _In_    ICacheTelemetry* const          pctm,
-                                    _Out_   ICacheRepository** const        ppcrep )
-{
-    ERR err = JET_errSuccess;
-
-    *ppcrep = NULL;
-
-    //  create the cache repository
-
-    Alloc( *ppcrep = new CCacheRepository( pfident, pctm ) );
-
-HandleError:
-    if ( err < JET_errSuccess )
-    {
-        delete *ppcrep;
-        *ppcrep = NULL;
-    }
-    return err;
-}
-
-ERR ErrOSBCCreateCacheTelemetry( _Out_ ICacheTelemetry** const ppctm )
-{
-    ERR err = JET_errSuccess;
-
-    *ppctm = NULL;
-
-    //  create the cache telemetry
-
-    Alloc( *ppctm = new CCacheTelemetry() );
-
-HandleError:
-    if ( err < JET_errSuccess )
-    {
-        delete * ppctm;
-        *ppctm = NULL;
-    }
-    return err;
-}
-
-extern CFileIdentification g_fident;
-extern CCacheTelemetry g_ctm;
-
-ERR ErrOSBCDumpCachedFileHeader(    _In_z_  const WCHAR* const  wszFilePath,
-                                    _In_    const ULONG         grbit,
-                                    _In_    CPRINTF* const      pcprintf )
-{
-    ERR             err     = JET_errSuccess;
-    IFileSystemAPI* pfsapi  = NULL;
-    IFileFilter*    pff     = NULL;
-
-    class CFileSystemConfiguration : public CDefaultFileSystemConfiguration
-    {
-        public:
-
-            CFileSystemConfiguration()
-            {
-                m_dtickAccessDeniedRetryPeriod = 0;
-                m_fBlockCacheEnabled = fTrue;
-            }
-    } fsconfig;
-
-    Call( ErrOSFSCreate( &fsconfig, &pfsapi ) );
-
-    Call( pfsapi->ErrFileOpen( wszFilePath, IFileAPI::fmfNone, (IFileAPI**)&pff ) );
-
-    Call( CCachedFileHeader::ErrDump( &fsconfig, &g_fident, pff, CPRINTFSTDOUT::PcprintfInstance() ) );
-
-HandleError:
-    delete pff;
-    delete pfsapi;
-    return err;
-}
-
-ERR ErrOSBCDumpCacheFile(   _In_z_  const WCHAR* const  wszFilePath, 
-                            _In_    const ULONG         grbit,
-                            _In_    CPRINTF* const      pcprintf )
-{
-    ERR                     err         = JET_errSuccess;
-    ICacheConfiguration*    pcconfig    = NULL;
-    IFileSystemFilter*      pfsf        = NULL;
-    IFileFilter*            pff         = NULL;
-
-    class CFileSystemConfiguration : public CDefaultFileSystemConfiguration
-    {
-        public:
-
-            CFileSystemConfiguration()
-            {
-                m_dtickAccessDeniedRetryPeriod = 0;
-                m_fBlockCacheEnabled = fTrue;
-            }
-    } fsconfig;
-    
-    class CCacheConfiguration : public CDefaultCacheConfiguration
-    {
-        public:
-
-            CCacheConfiguration()
-            {
-            }
-    };
-    Alloc( pcconfig = new CCacheConfiguration() );
-
-    Call( ErrOSFSCreate( &fsconfig, (IFileSystemAPI**)&pfsf ) );
-
-    Call( pfsf->ErrFileOpen( wszFilePath, IFileAPI::fmfNone, (IFileAPI**)&pff ) );
-
-    Call( CCacheFactory::ErrDump( pfsf, &g_fident, &fsconfig, &pcconfig, &g_ctm, &pff, CPRINTFSTDOUT::PcprintfInstance() ) );
-
-HandleError:
-    delete pff;
-    delete pfsf;
-    delete pcconfig;
-    return err;
-}
-
-ERR ErrOSBCCreateJournalSegment(    _In_    IFileFilter* const      pff,
-                                    _In_    const QWORD             ib,
-                                    _In_    const SegmentPosition   spos,
-                                    _In_    const DWORD             dwUniqueIdPrev,
-                                    _In_    const SegmentPosition   sposReplay,
-                                    _In_    const SegmentPosition   sposDurable,
-                                    _Out_   IJournalSegment** const ppjs )
-{
-    ERR                 err = JET_errSuccess;
-    IJournalSegment*    pjs = NULL;
-
-    *ppjs = NULL;
-
-    Call( CJournalSegment::ErrCreate( pff, ib, spos, dwUniqueIdPrev, sposReplay, sposDurable, &pjs ) );
-
-    *ppjs = pjs;
-    pjs = NULL;
-
-HandleError:
-    delete pjs;
-    if ( err < JET_errSuccess )
-    {
-        delete *ppjs;
-        *ppjs = NULL;
-    }
-    return err;
-}
-
-ERR ErrOSBCLoadJournalSegment(  _In_    IFileFilter* const      pff,
-                                _In_    const QWORD             ib,
-                                _Out_   IJournalSegment** const ppjs )
-{
-    ERR                 err = JET_errSuccess;
-    IJournalSegment*    pjs = NULL;
-
-    *ppjs = NULL;
-
-    Call( CJournalSegment::ErrLoad( pff, ib, &pjs ) );
-
-    *ppjs = pjs;
-    pjs = NULL;
-
-HandleError:
-    delete pjs;
-    if ( err < JET_errSuccess )
-    {
-        delete *ppjs;
-        *ppjs = NULL;
-    }
-    return err;
-}
-
-ERR ErrOSBCCreateJournalSegmentManager( _In_    IFileFilter* const              pff,
-                                        _In_    const QWORD                     ib,
-                                        _In_    const QWORD                     cb,
-                                        _Out_   IJournalSegmentManager** const  ppjsm )
-{
-    ERR                     err     = JET_errSuccess;
-    IJournalSegmentManager* pjsm    = NULL;
-
-    *ppjsm = NULL;
-
-    Call( CJournalSegmentManager::ErrMount( pff, ib, cb, &pjsm ) );
-
-    *ppjsm = pjsm;
-    pjsm = NULL;
-
-HandleError:
-    delete pjsm;
-    if ( err < JET_errSuccess )
-    {
-        delete *ppjsm;
-        *ppjsm = NULL;
-    }
-    return err;
-}
-
-ERR ErrOSBCCreateJournal(   _Inout_ IJournalSegmentManager** const  ppjsm,
-                            _In_    const size_t                    cbCache,
-                            _Out_   IJournal** const                ppj )
-{
-    ERR         err = JET_errSuccess;
-    IJournal*   pj  = NULL;
-
-    *ppj = NULL;
-
-    Call( CJournal::ErrMount( ppjsm, cbCache, &pj ) );
-
-    *ppj = pj;
-    pj = NULL;
-
-HandleError:
-    delete pj;
-    if ( err < JET_errSuccess )
-    {
-        delete *ppj;
-        *ppj = NULL;
-    }
-    return err;
+    CFileWrapper::Cleanup();
+    CFileFilter::Cleanup();
 }

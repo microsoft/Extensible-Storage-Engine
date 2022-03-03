@@ -58,7 +58,7 @@ namespace Internal
                                         _In_                    const OSFILEQOS                 grbitQOS,
                                         _In_                    const ::ICache::CachingPolicy   cp,
                                         _In_opt_                const ::ICache::PfnComplete     pfnComplete,
-                                        _In_                    const DWORD_PTR                 keyComplete ) override;
+                                        _In_opt_                const DWORD_PTR                 keyComplete ) override;
 
                         ERR ErrWrite(   _In_                    const TraceContext&             tc,
                                         _In_                    const ::VolumeId                volumeid,
@@ -70,7 +70,7 @@ namespace Internal
                                         _In_                    const OSFILEQOS                 grbitQOS,
                                         _In_                    const ::ICache::CachingPolicy   cp,
                                         _In_opt_                const ::ICache::PfnComplete     pfnComplete,
-                                        _In_                    const DWORD_PTR                 keyComplete ) override;
+                                        _In_opt_                const DWORD_PTR                 keyComplete ) override;
 
                         ERR ErrIssue(   _In_                    const ::VolumeId                volumeid,
                                         _In_                    const ::FileId                  fileid,
@@ -115,7 +115,7 @@ namespace Internal
 
                     array<Byte>^ cacheTypeBytes = cacheType.ToByteArray();
                     pin_ptr<Byte> cacheTypeBytesT = &cacheTypeBytes[ 0 ];
-                    memcpy( rgbCacheType, cacheTypeBytesT, cbGuid );
+                    UtilMemCpy( rgbCacheType, cacheTypeBytesT, cbGuid );
 
                 HandleError:
                     if ( err < JET_errSuccess )
@@ -146,7 +146,7 @@ namespace Internal
 
                     array<Byte>^ uniqueIdBytes = guid.ToByteArray();
                     pin_ptr<Byte> uniqueId = &uniqueIdBytes[ 0 ];
-                    memcpy( rgbUniqueId, uniqueId, cbGuid );
+                    UtilMemCpy( rgbUniqueId, uniqueId, cbGuid );
 
                 HandleError:
                     if ( err < JET_errSuccess )
@@ -210,22 +210,26 @@ namespace Internal
                                                             _In_                    const OSFILEQOS                 grbitQOS,
                                                             _In_                    const ::ICache::CachingPolicy   cp,
                                                             _In_opt_                const ::ICache::PfnComplete     pfnComplete,
-                                                            _In_                    const DWORD_PTR                 keyComplete )
+                                                            _In_opt_                const DWORD_PTR                 keyComplete )
                 {
                     ERR             err         = JET_errSuccess;
-                    array<byte>^    buffer      = gcnew array<byte>( cbData );
+                    array<byte>^    buffer      = !pbData ? nullptr : gcnew array<byte>( cbData );
+                    pin_ptr<byte>   rgbData     = ( !pbData || !cbData ) ? nullptr : &buffer[ 0 ];
+                    MemoryStream^   stream      = !pbData ? nullptr : gcnew MemoryStream( buffer, true );
                     Complete^       complete    = pfnComplete ?
                                                         gcnew Complete( false, pbData, pfnComplete, keyComplete ) :
                                                         nullptr;
 
-                    pin_ptr<byte> rgbDataIn = &buffer[ 0 ];
-                    UtilMemCpy( (BYTE*)rgbDataIn, pbData, cbData );
+                    if ( cbData )
+                    {
+                        UtilMemCpy( (BYTE*)rgbData, pbData, cbData );
+                    }
 
                     ExCall( I()->Read(  (VolumeId)volumeid,
                                         (FileId)fileid,
                                         (FileSerial)fileserial,
                                         ibOffset,
-                                        ArraySegment<byte>( buffer ),
+                                        stream,
                                         (FileQOS)grbitQOS,
                                         (Internal::Ese::BlockCache::Interop::CachingPolicy)cp,
                                         pfnComplete ?
@@ -233,9 +237,8 @@ namespace Internal
                                             nullptr ) );
 
                 HandleError:
-                    if ( !pfnComplete )
+                    if ( !pfnComplete && cbData )
                     {
-                        pin_ptr<const byte> rgbData = &buffer[ 0 ];
                         UtilMemCpy( pbData, (const BYTE*)rgbData, cbData );
                     }
                     return err;
@@ -252,10 +255,12 @@ namespace Internal
                                                             _In_                    const OSFILEQOS                 grbitQOS,
                                                             _In_                    const ::ICache::CachingPolicy   cp,
                                                             _In_opt_                const ::ICache::PfnComplete     pfnComplete,
-                                                            _In_                    const DWORD_PTR                 keyComplete )
+                                                            _In_opt_                const DWORD_PTR                 keyComplete )
                 {
                     ERR             err         = JET_errSuccess;
-                    array<byte>^    buffer      = gcnew array<byte>( cbData );
+                    array<byte>^    buffer      = !pbData ? nullptr : gcnew array<byte>( cbData );
+                    pin_ptr<byte>   rgbData     = ( !pbData || !cbData ) ? nullptr : &buffer[ 0 ];
+                    MemoryStream^   stream      = !pbData ? nullptr : gcnew MemoryStream( buffer, false );
                     Complete^       complete    = pfnComplete ?
                                                         gcnew Complete( true, 
                                                                         const_cast<BYTE*>( pbData ), 
@@ -263,14 +268,16 @@ namespace Internal
                                                                         keyComplete ) :
                                                         nullptr;
 
-                    pin_ptr<byte> rgbData = &buffer[ 0 ];
-                    UtilMemCpy( (BYTE*)rgbData, pbData, cbData );
+                    if ( cbData )
+                    {
+                        UtilMemCpy( (BYTE*)rgbData, pbData, cbData );
+                    }
 
                     ExCall( I()->Write( (VolumeId)volumeid,
                                         (FileId)fileid,
                                         (FileSerial)fileserial,
                                         ibOffset,
-                                        ArraySegment<byte>( buffer ),
+                                        stream,
                                         (FileQOS)grbitQOS,
                                         (Internal::Ese::BlockCache::Interop::CachingPolicy)cp,
                                         pfnComplete ?

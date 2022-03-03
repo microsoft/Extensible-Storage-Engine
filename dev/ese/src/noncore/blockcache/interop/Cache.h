@@ -19,7 +19,7 @@ namespace Internal
 
                         static ERR ErrWrap( ICache^% c, ::ICache** const ppc )
                         {
-                            return Internal::Ese::BlockCache::Interop::ErrWrap<ICache, ::ICache, CCacheWrapper<ICache, ::ICache>>( c, ppc );
+                            return Internal::Ese::BlockCache::Interop::ErrWrap<ICache, ::ICache, CCacheWrapper<ICache, ::ICache>, CacheRemotable>( c, ppc );
                         }
 
                     public:

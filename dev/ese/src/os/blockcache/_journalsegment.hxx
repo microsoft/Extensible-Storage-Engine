@@ -78,9 +78,11 @@ class TJournalSegment  //  js
                                 _In_reads_( cjb )   CJournalBuffer* const   rgjb,
                                 _In_                const DWORD             cbMin,
                                 _Out_               RegionPosition* const   prpos,
+                                _Out_               RegionPosition* const   prposEnd,
                                 _Out_               DWORD* const            pcbActual ) override;
 
-        ERR ErrSeal( _In_opt_ const IJournalSegment::PfnSealed pfnSealed, _In_ const DWORD_PTR keySealed ) override;
+        ERR ErrSeal(    _In_opt_ const IJournalSegment::PfnSealed   pfnSealed,
+                        _In_opt_ const DWORD_PTR                    keySealed ) override;
 
     protected:
 
@@ -115,8 +117,6 @@ class TJournalSegment  //  js
                                 _In_                    void* const             pvIOContext );
 
     private:
-
-        enum { cbSegment = sizeof( CJournalSegmentHeader ) };
 
         IFileFilter* const              m_pff;
         const QWORD                     m_ibSegment;
@@ -196,7 +196,7 @@ INLINE ERR TJournalSegment<I>::ErrVisitRegions( _In_ const IJournalSegment::PfnV
             pjreg && pjreg->CbPayload();
             pjreg = m_pjsh->Pjreg( rpos += pjreg->CbRegion() ) )
     {
-        if ( !pfnVisitRegion( rpos, pjreg->JbPayload(), keyVisitRegion ) )
+        if ( !pfnVisitRegion( rpos, rpos + pjreg->CbRegion() - 1, pjreg->JbPayload(), keyVisitRegion ) )
         {
             break;
         }
@@ -213,6 +213,7 @@ INLINE ERR TJournalSegment<I>::ErrAppendRegion( _In_                const size_t
                                                 _In_reads_( cjb )   CJournalBuffer* const   rgjb,
                                                 _In_                const DWORD             cbMin,
                                                 _Out_               RegionPosition* const   prpos,
+                                                _Out_               RegionPosition* const   prposEnd,
                                                 _Out_               DWORD* const            pcbActual )
 {
     ERR     err                 = JET_errSuccess;
@@ -224,6 +225,7 @@ INLINE ERR TJournalSegment<I>::ErrAppendRegion( _In_                const size_t
     DWORD   cbPayloadActual     = 0;
 
     *prpos = rposInvalid;
+    *prposEnd = rposInvalid;
     *pcbActual = 0;
 
     //  compute the requested payload size for the region
@@ -290,6 +292,7 @@ INLINE ERR TJournalSegment<I>::ErrAppendRegion( _In_                const size_t
     if ( cbPayloadActual > 0 )
     {
         *prpos = m_pjsh->RposFirst() + ibRegion;
+        *prposEnd = m_pjsh->RposFirst() + m_ibRegions - 1;
         *pcbActual = cbPayloadActual;
     }
 
@@ -301,6 +304,7 @@ HandleError:
     if ( err < JET_errSuccess )
     {
         *prpos = rposInvalid;
+        *prposEnd = rposInvalid;
         *pcbActual = 0;
     }
     return err;
@@ -309,7 +313,8 @@ HandleError:
 #pragma warning (pop)
 
 template< class I  >
-INLINE ERR TJournalSegment<I>::ErrSeal( _In_opt_ const IJournalSegment::PfnSealed pfnSealed, _In_ const DWORD_PTR keySealed )
+INLINE ERR TJournalSegment<I>::ErrSeal( _In_opt_ const IJournalSegment::PfnSealed   pfnSealed, 
+                                        _In_opt_ const DWORD_PTR                    keySealed )
 {
     ERR                 err     = JET_errSuccess;
     BOOL                fLocked = fFalse;
@@ -362,7 +367,7 @@ INLINE ERR TJournalSegment<I>::ErrSeal( _In_opt_ const IJournalSegment::PfnSeale
 
     Call( pff->ErrIOWrite(  *tcScope,
                             m_ibSegment,
-                            cbSegment,
+                            sizeof( *m_pjsh ),
                             (const BYTE*)m_pjsh,
                             qosIONormal, 
                             IOComplete_, 
@@ -514,7 +519,7 @@ INLINE ERR CJournalSegment::ErrCreate(  _In_    IFileFilter* const      pff,
 
     *ppjs = NULL;
 
-    Call( CJournalSegmentHeader::ErrCreate( spos, dwUniqueIdPrev, sposReplay, sposDurable, &pjsh ) );
+    Call( CJournalSegmentHeader::ErrCreate( ib, spos, dwUniqueIdPrev, sposReplay, sposDurable, &pjsh ) );
 
     Alloc( pjs = new CJournalSegment( pff, ib, &pjsh, fFalse ) );
 

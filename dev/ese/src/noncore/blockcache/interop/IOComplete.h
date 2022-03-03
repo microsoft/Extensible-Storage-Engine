@@ -13,7 +13,7 @@ namespace Internal
         {
             namespace Interop
             {
-                ref class IOComplete
+                ref class IOComplete : MarshalByRefObject
                 {
                     public:
 
@@ -37,14 +37,52 @@ namespace Internal
                             IFile^ file,
                             FileQOS fileQOS,
                             Int64 offsetInBytes,
-                            ArraySegment<byte> data );
+                            MemoryStream^ data )
+                        {
+                            ERR                 err     = ex == nullptr ? JET_errSuccess : (ERR)ex->Error;
+                            FullTraceContext    fullTc;
+
+                            if ( !this->isWrite && data != nullptr && data->Length > 0 )
+                            {
+                                array<byte>^ bytes = data->ToArray();
+                                pin_ptr<const byte> rgbData = &bytes[0];
+                                UtilMemCpy( this->pbData, (const BYTE*)rgbData, bytes->Length );
+                            }
+
+                            this->pfnIOComplete(    err,
+                                                    this->pfapi,
+                                                    fullTc,
+                                                    (OSFILEQOS)fileQOS,
+                                                    offsetInBytes,
+                                                    data == nullptr ? 0 : (DWORD)data->Length,
+                                                    this->pbData,
+                                                    this->keyIOComplete );
+                        }
 
                         void Handoff(
                             EsentErrorException^ ex,
                             IFile^ file,
                             FileQOS fileQOS,
                             Int64 offsetInBytes,
-                            ArraySegment<byte> data );
+                            MemoryStream^ data )
+                        {
+                            ERR err = ex == nullptr ? JET_errSuccess : (ERR)ex->Error;
+
+                            if ( this->pfnIOHandoff )
+                            {
+                                FullTraceContext fullTc;
+
+                                this->pfnIOHandoff( err,
+                                                    this->pfapi,
+                                                    fullTc,
+                                                    (OSFILEQOS)fileQOS,
+                                                    offsetInBytes,
+                                                    data == nullptr ? 0 : (DWORD)data->Length,
+                                                    this->pbData,
+                                                    this->keyIOComplete,
+                                                    NULL );
+                            }
+                        }
 
                     private:
 

@@ -25,9 +25,11 @@ namespace Internal
                     public:
 
                         virtual void GetProperties(
+                            [Out] SegmentPosition% segmentPositionFirst,
                             [Out] SegmentPosition% segmentPositionReplay,
                             [Out] SegmentPosition% segmentPositionDurable,
-                            [Out] SegmentPosition% segmentPositionLast );
+                            [Out] SegmentPosition% segmentPositionLast,
+                            [Out] SegmentPosition% segmentPositionFull );
 
                         virtual void VisitSegments( IJournalSegmentManager::VisitSegment^ visitSegment );
 
@@ -41,31 +43,41 @@ namespace Internal
 
                 template< class TM, class TN, class TW >
                 inline void JournalSegmentManagerBase<TM, TN, TW>::GetProperties(
+                    [Out] SegmentPosition% segmentPositionFirst,
                     [Out] SegmentPosition% segmentPositionReplay,
                     [Out] SegmentPosition% segmentPositionDurable,
-                    [Out] SegmentPosition% segmentPositionLast )
+                    [Out] SegmentPosition% segmentPositionLast,
+                    [Out] SegmentPosition% segmentPositionFull )
                 {
                     ERR                 err         = JET_errSuccess;
+                    ::SegmentPosition   sposFirst   = ::sposInvalid;
                     ::SegmentPosition   sposReplay  = ::sposInvalid;
                     ::SegmentPosition   sposDurable = ::sposInvalid;
                     ::SegmentPosition   sposLast    = ::sposInvalid;
+                    ::SegmentPosition   sposFull    = ::sposInvalid;
 
+                    segmentPositionFirst = SegmentPosition::Invalid;
                     segmentPositionReplay = SegmentPosition::Invalid;
                     segmentPositionDurable = SegmentPosition::Invalid;
                     segmentPositionLast = SegmentPosition::Invalid;
+                    segmentPositionFull = SegmentPosition::Invalid;
 
-                    Call( Pi->ErrGetProperties( &sposReplay, &sposDurable, &sposLast ) );
+                    Call( Pi->ErrGetProperties( &sposFirst, &sposReplay, &sposDurable, &sposLast, &sposFull ) );
 
+                    segmentPositionFirst = (SegmentPosition)sposFirst;
                     segmentPositionReplay = (SegmentPosition)sposReplay;
                     segmentPositionDurable = (SegmentPosition)sposDurable;
                     segmentPositionLast = (SegmentPosition)sposLast;
+                    segmentPositionFull = (SegmentPosition)sposFull;
 
                     return;
 
                 HandleError:
+                    segmentPositionFirst = SegmentPosition::Invalid;
                     segmentPositionReplay = SegmentPosition::Invalid;
                     segmentPositionDurable = SegmentPosition::Invalid;
                     segmentPositionLast = SegmentPosition::Invalid;
+                    segmentPositionFull = SegmentPosition::Invalid;
                     throw EseException( err );
                 }
 
@@ -73,15 +85,19 @@ namespace Internal
                 inline void JournalSegmentManagerBase<TM, TN, TW>::VisitSegments(
                     IJournalSegmentManager::VisitSegment^ visitSegment )
                 {
-                    ERR             err             = JET_errSuccess;
-                    CVisitSegment*  pvisitsegment   = NULL;
+                    ERR                     err                 = JET_errSuccess;
+                    VisitSegmentInverse^    visitSegmentInverse = nullptr;
 
-                    Alloc( pvisitsegment = new CVisitSegment( visitSegment ) );
+                    if ( visitSegment != nullptr )
+                    {
+                        visitSegmentInverse = gcnew VisitSegmentInverse( visitSegment );
+                    }
 
-                    Call( Pi->ErrVisitSegments( ::IJournalSegmentManager::PfnVisitSegment( CVisitSegment::VisitSegment_ ),
-                                                DWORD_PTR( pvisitsegment ) ) );
+                    Call( Pi->ErrVisitSegments( visitSegmentInverse == nullptr ? NULL : visitSegmentInverse->PfnVisitSegment,
+                                                visitSegmentInverse == nullptr ? NULL : visitSegmentInverse->KeyVisitSegment ) );
+
                 HandleError:
-                    delete pvisitsegment;
+                    delete visitSegmentInverse;
                     if ( err < JET_errSuccess )
                     {
                         throw EseException( err );

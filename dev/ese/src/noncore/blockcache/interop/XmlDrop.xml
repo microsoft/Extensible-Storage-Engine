@@ -1,0 +1,29 @@
+<?xml version="1.0" encoding="utf-8"?>
+<ROOT xsi:noNamespaceSchemaLocation="XMLDrop.xsd" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
+  <FILEBUILD filename="Internal.Ese.BlockCache.Interop.dll" ownername="ESE/ESENT Development Team" owneralias="SOMEONE">
+    <DELIVERABLES_SET>
+      <PRODUCT>
+        <DESTINATIONS>
+          <DEST>Setup\ServerRoles\Common</DEST>
+        </DESTINATIONS>
+      </PRODUCT>
+      <PRODUCT_TEST>
+        <DESTINATIONS>
+          <DEST>Exchange12TestSuite\StandaloneFuzzer</DEST>
+          <DEST>Exchange12TestSuite\ESE\esetest\bin\dev</DEST>
+        </DESTINATIONS>
+      </PRODUCT_TEST>
+      <DATACENTER>
+        <DESTINATIONS>
+          <DEST>FFO\TEC\Bin</DEST>
+          <DEST>FFO\ActiveMonitoring\Package\WorkItems</DEST>
+        </DESTINATIONS>
+      </DATACENTER>
+      <CORE>
+        <DESTINATIONS>
+          <DEST>bin</DEST>
+        </DESTINATIONS>
+      </CORE>
+    </DELIVERABLES_SET>
+  </FILEBUILD>
+</ROOT>

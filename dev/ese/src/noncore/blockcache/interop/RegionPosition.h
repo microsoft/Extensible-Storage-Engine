@@ -23,7 +23,7 @@ namespace Internal
                     /// <summary>
                     /// An invalid RegionPosition.
                     /// </summary>
-                    Invalid = Int64::MaxValue,
+                    Invalid = (Int64)::rposInvalid,
                 };
             }
         }

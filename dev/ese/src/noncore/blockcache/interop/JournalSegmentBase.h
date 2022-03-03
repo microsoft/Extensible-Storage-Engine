@@ -38,10 +38,10 @@ namespace Internal
 
                         virtual void VisitRegions( IJournalSegment::VisitRegion^ visitRegion );
 
-                        virtual void AppendRegion(
+                        virtual RegionPosition AppendRegion(
                             array<ArraySegment<byte>>^ payload,
                             Int32 minimumAppendSizeInBytes,
-                            [Out] RegionPosition% regionPosition,
+                            [Out] RegionPosition% regionPositionEnd,
                             [Out] Int32% payloadAppendedInBytes );
 
                         virtual void Seal( IJournalSegment::Sealed^ sealed );
@@ -109,16 +109,19 @@ namespace Internal
                 template<class TM, class TN, class TW>
                 inline void JournalSegmentBase<TM, TN, TW>::VisitRegions( IJournalSegment::VisitRegion^ visitRegion )
                 {
-                    ERR             err             = JET_errSuccess;
-                    CVisitRegion*   pvisitregion    = NULL;
+                    ERR                 err                 = JET_errSuccess;
+                    VisitRegionInverse^ visitRegionInverse  = nullptr;
 
-                    Alloc( pvisitregion = new CVisitRegion( visitRegion ) );
+                    if ( visitRegion != nullptr )
+                    {
+                        visitRegionInverse = gcnew VisitRegionInverse( visitRegion );
+                    }
 
-                    Call( Pi->ErrVisitRegions(  ::IJournalSegment::PfnVisitRegion( CVisitRegion::VisitRegion_ ),
-                                                DWORD_PTR( pvisitregion ) ) );
+                    Call( Pi->ErrVisitRegions(  visitRegionInverse == nullptr ? NULL : visitRegionInverse->PfnVisitRegion,
+                                                visitRegionInverse == nullptr ? NULL : visitRegionInverse->KeyVisitRegion ) );
 
                 HandleError:
-                    delete pvisitregion;
+                    delete visitRegionInverse;
                     if ( err < JET_errSuccess )
                     {
                         throw EseException( err );
@@ -126,19 +129,20 @@ namespace Internal
                 }
 
                 template<class TM, class TN, class TW>
-                inline void JournalSegmentBase<TM, TN, TW>::AppendRegion(
+                inline RegionPosition JournalSegmentBase<TM, TN, TW>::AppendRegion(
                     array<ArraySegment<byte>>^ payload, 
                     Int32 minimumAppendSizeInBytes, 
-                    RegionPosition% regionPosition, 
+                    RegionPosition% regionPositionEnd, 
                     Int32% payloadAppendedInBytes )
                 {
                     ERR                 err         = JET_errSuccess;
                     const size_t        cjb         = payload == nullptr ? 0 : payload->Length;
                     CJournalBuffer*     rgjb        = NULL;
                     ::RegionPosition    rpos        = ::rposInvalid;
+                    ::RegionPosition    rposEnd     = ::rposInvalid;
                     DWORD               cbActual    = 0;
 
-                    regionPosition = RegionPosition::Invalid;
+                    regionPositionEnd = RegionPosition::Invalid;
                     payloadAppendedInBytes = 0;
 
                     if ( payload != nullptr )
@@ -165,13 +169,13 @@ namespace Internal
                         }
                     }
 
-                    Call( Pi->ErrAppendRegion( cjb, rgjb, minimumAppendSizeInBytes, &rpos, &cbActual ) );
+                    Call( Pi->ErrAppendRegion( cjb, rgjb, minimumAppendSizeInBytes, &rpos, &rposEnd, &cbActual ) );
 
-                    regionPosition = (RegionPosition)rpos;
+                    regionPositionEnd = (RegionPosition)rposEnd;
                     payloadAppendedInBytes = cbActual;
                     
                 HandleError:
-                    if ( rgjb != NULL )
+                    if ( rgjb )
                     {
                         for ( int ijb = 0; ijb < cjb; ijb++ )
                         {
@@ -181,31 +185,34 @@ namespace Internal
                     delete[] rgjb;
                     if ( err < JET_errSuccess )
                     {
-                        regionPosition = RegionPosition::Invalid;
+                        regionPositionEnd = RegionPosition::Invalid;
                         payloadAppendedInBytes = 0;
                         throw EseException( err );
                     }
+
+                    return (RegionPosition)rpos;
                 }
 
                 template<class TM, class TN, class TW>
                 inline void JournalSegmentBase<TM, TN, TW>::Seal( IJournalSegment::Sealed^ sealed )
                 {
-                    ERR         err     = JET_errSuccess;
-                    CSealed*    psealed = NULL;
+                    ERR             err             = JET_errSuccess;
+                    SealedInverse^  sealedInverse   = nullptr;
 
                     if ( sealed != nullptr )
                     {
-                        Alloc( psealed = new CSealed( sealed ) );
+                        sealedInverse = gcnew SealedInverse( sealed );
                     }
 
-                    Call( Pi->ErrSeal(  sealed != nullptr ? ::IJournalSegment::PfnSealed( CSealed::Sealed_ ) : NULL,
-                                        DWORD_PTR( psealed ) ) );
-
-                    return;
+                    Call( Pi->ErrSeal(  sealedInverse == nullptr ? NULL : sealedInverse->PfnSealed,
+                                        sealedInverse == nullptr ? NULL : sealedInverse->KeySealed ) );
 
                 HandleError:
-                    delete psealed;
-                    throw EseException( err );
+                    if ( err < JET_errSuccess )
+                    {
+                        delete sealedInverse;
+                        throw EseException( err );
+                    }
                 }
             }
         }

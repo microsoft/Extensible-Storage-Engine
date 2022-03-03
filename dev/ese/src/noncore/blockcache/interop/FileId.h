@@ -23,7 +23,7 @@ namespace Internal
                     /// <summary>
                     /// An invalid FileId.
                     /// </summary>
-                    Invalid = 0,
+                    Invalid = (Int64)::fileidInvalid,
                 };
             }
         }

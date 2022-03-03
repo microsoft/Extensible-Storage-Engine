@@ -13,12 +13,12 @@ namespace Internal
         {
             namespace Interop
             {
-                ref class VisitSegment
+                ref class VisitSegment : MarshalByRefObject
                 {
                     public:
 
-                        VisitSegment(   const ::IJournalSegmentManager::PfnVisitSegment pfnVisitSegment,
-                                        const DWORD_PTR                                 keyVisitSegment )
+                        VisitSegment(   _In_ const ::IJournalSegmentManager::PfnVisitSegment    pfnVisitSegment,
+                                        _In_ const DWORD_PTR                                    keyVisitSegment )
                             :   pfnVisitSegment( pfnVisitSegment ),
                                 keyVisitSegment( keyVisitSegment )
                         {

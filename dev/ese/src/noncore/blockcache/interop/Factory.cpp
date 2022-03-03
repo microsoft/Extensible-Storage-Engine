@@ -15,6 +15,25 @@ namespace Internal
                 {
                     public:
 
+                        static IDisposable^ CreateOSLayer()
+                        {
+                            return gcnew OSLayer();
+                        }
+
+                        static FileSystem^ CreateFileSystem( FileSystemConfiguration^ fsconfig )
+                        {
+                            ERR             err     = JET_errSuccess;
+                            IFileSystemAPI* pfsapi  = NULL;
+
+                            Call( ErrOSFSCreate( fsconfig->Pi, &pfsapi ) );
+
+                            return gcnew FileSystem( &pfsapi );
+
+                        HandleError:
+                            delete pfsapi;
+                            throw EseException( err );
+                        }
+
                         static FileSystemConfiguration^ WrapFileSystemConfiguration( IFileSystemConfiguration^ ifsconfig )
                         {
                             ERR                         err         = JET_errSuccess;
@@ -169,238 +188,6 @@ namespace Internal
                             throw EseException( err );
                         }
 
-                        static IDisposable^ CreateOSLayer()
-                        {
-                            return gcnew OSLayer();
-                        }
-
-                        static FileSystem^ CreateFileSystem( FileSystemConfiguration^ fsconfig )
-                        {
-                            ERR             err     = JET_errSuccess;
-                            IFileSystemAPI* pfsapi  = NULL;
-
-                            Call( ErrOSFSCreate( fsconfig->Pi, &pfsapi ) );
-
-                            return gcnew FileSystem( &pfsapi );
-
-                        HandleError:
-                            delete pfsapi;
-                            throw EseException( err );
-                        }
-
-                        static FileSystem^ CreateFileSystemWrapper( IFileSystem^ ifsInner )
-                        {
-                            ERR             err         = JET_errSuccess;
-                            IFileSystemAPI* pfsapiInner = NULL;
-                            IFileSystemAPI* pfsapi      = NULL;
-
-                            Call( FileSystem::ErrWrap( ifsInner, &pfsapiInner ) );
-
-                            Call( ErrOSBCCreateFileSystemWrapper( &pfsapiInner, &pfsapi ) );
-
-                            return gcnew FileSystem( &pfsapi );
-
-                        HandleError:
-                            delete pfsapi;
-                            delete pfsapiInner;
-                            throw EseException( err );
-                        }
-
-                        static FileSystemFilter^ CreateFileSystemFilter(    FileSystemConfiguration^ fsconfig,
-                                                                            IFileSystem^ ifsInner,
-                                                                            FileIdentification^ fident,
-                                                                            CacheTelemetry^ ctm,
-                                                                            CacheRepository^ crep )
-                        {
-                            ERR                     err         = JET_errSuccess;
-                            IFileSystemAPI*         pfsapiInner = NULL;
-                            ::IFileSystemFilter*    pfsf        = NULL;
-
-                            Call( FileSystem::ErrWrap( ifsInner, &pfsapiInner ) );
-
-                            Call( ErrOSBCCreateFileSystemFilter(    fsconfig->Pi,
-                                                                    &pfsapiInner, 
-                                                                    fident->Pi, 
-                                                                    ctm->Pi,
-                                                                    crep->Pi, 
-                                                                    &pfsf ) );
-
-                            return gcnew FileSystemFilter( &pfsf );
-
-                        HandleError:
-                            delete pfsapiInner;
-                            delete pfsf;
-                            throw EseException( err );
-                        }
-
-                        static File^ CreateFileWrapper( IFile^ ifInner )
-                        {
-                            ERR         err         = JET_errSuccess;
-                            IFileAPI*   pfapiInner  = NULL;
-                            IFileAPI*   pfapi       = NULL;
-
-                            Call( File::ErrWrap( ifInner, &pfapiInner ) );
-
-                            Call( ErrOSBCCreateFileWrapper( &pfapiInner, &pfapi ) );
-
-                            return gcnew File( &pfapi );
-
-                        HandleError:
-                            delete pfapiInner;
-                            delete pfapi;
-                            throw EseException( err );
-                        }
-
-                        static FileFilter^ CreateFileFilter(    IFile^ fInner,
-                                                                FileSystemFilter^ fsf, 
-                                                                FileSystemConfiguration^ fsconfig,
-                                                                CacheTelemetry^ ctm,
-                                                                VolumeId volumeid,
-                                                                FileId fileid,
-                                                                ICachedFileConfiguration^ icfconfig,
-                                                                ICache^ ic,
-                                                                ArraySegment<byte> header )
-                        {
-                            ERR                         err         = JET_errSuccess;
-                            IFileAPI*                   pfapiInner  = NULL;
-                            ::ICachedFileConfiguration* pcfconfig   = NULL;
-                            ::ICache*                   pc          = NULL;
-                            ::IFileFilter*              pff         = NULL;
-
-                            Call( File::ErrWrap( fInner, &pfapiInner ) );
-                            Call( CachedFileConfiguration::ErrWrap( icfconfig, &pcfconfig ) );
-                            Call( Cache::ErrWrap( ic, &pc ) );
-
-                            pin_ptr<const byte> pbHeader = header.Count == 0 ? nullptr : &header.Array[ header.Offset ];
-                            int cbHeader = header.Count;
-
-                            Call( ErrOSBCCreateFileFilter(  &pfapiInner,
-                                                            fsf->Pi,
-                                                            fsconfig->Pi,
-                                                            ctm->Pi,
-                                                            (::VolumeId)volumeid,
-                                                            (::FileId)fileid,
-                                                            &pcfconfig,
-                                                            &pc,
-                                                            pbHeader, 
-                                                            cbHeader,
-                                                            &pff ) );
-
-                            return gcnew FileFilter( &pff );
-
-                        HandleError:
-                            delete pff;
-                            delete pcfconfig;
-                            delete pc;
-                            delete pfapiInner;
-                            throw EseException( err );
-                        }
-
-                        static FileFilter^ CreateFileFilterWrapper( IFileFilter^ iffInner, IOMode ioMode )
-                        {
-                            ERR             err         = JET_errSuccess;
-                            ::IFileFilter*  pffInner    = NULL;
-                            ::IFileFilter*  pff         = NULL;
-
-                            Call( FileFilter::ErrWrap( iffInner, &pffInner ) );
-
-                            Call( ErrOSBCCreateFileFilterWrapper( &pffInner, (::IFileFilter::IOMode)ioMode, &pff ) );
-
-                            return gcnew FileFilter( &pff );
-
-                        HandleError:
-                            delete pffInner;
-                            delete pff;
-                            throw EseException( err );
-                        }
-
-                        static FileIdentification^ CreateFileIdentification()
-                        {
-                            ERR                     err     = JET_errSuccess;
-                            ::IFileIdentification*  pfident = NULL;
-
-                            Call( ErrOSBCCreateFileIdentification( &pfident ) );
-
-                            return gcnew FileIdentification( &pfident );
-
-                        HandleError:
-                            delete pfident;
-                            throw EseException( err );
-                        }
-
-                        static Cache^ CreateCache(  FileSystemFilter^ fsf,
-                                                    FileIdentification^ fident,
-                                                    FileSystemConfiguration^ fsconfig,
-                                                    ICacheConfiguration^ cconfig,
-                                                    CacheTelemetry^ ctm,
-                                                    IFileFilter^ iff )
-                        {
-                            ERR                     err         = JET_errSuccess;
-                            ::ICacheConfiguration*  pcconfig    = NULL;
-                            ::IFileFilter*          pff         = NULL;
-                            ::ICache*               pc          = NULL;
-
-                            Call( CacheConfiguration::ErrWrap( cconfig, &pcconfig ) );
-                            Call( FileFilter::ErrWrap( iff, &pff ) );
-
-                            Call( ErrOSBCCreateCache( fsf->Pi, fident->Pi, fsconfig->Pi, &pcconfig, ctm->Pi, &pff, &pc ) );
-
-                            return gcnew Cache( &pc );
-
-                        HandleError:
-                            delete pff;
-                            delete pcconfig;
-                            delete pc;
-                            throw EseException( err );
-                        }
-
-                        static Cache^ CreateCacheWrapper( ICache^ icInner )
-                        {
-                            ERR         err     = JET_errSuccess;
-                            ::ICache*   pcInner = NULL;
-                            ::ICache*   pc      = NULL;
-
-                            Call( Cache::ErrWrap( icInner, &pcInner ) );
-
-                            Call( ErrOSBCCreateCacheWrapper( &pcInner, &pc ) );
-
-                            return gcnew Cache( &pc );
-
-                        HandleError:
-                            delete pcInner;
-                            delete pc;
-                            throw EseException( err );
-                        }
-
-                        static CacheRepository^ CreateCacheRepository(  FileIdentification^ fident,
-                                                                        CacheTelemetry^ ctm )
-                        {
-                            ERR                 err     = JET_errSuccess;
-                            ::ICacheRepository* pcrep   = NULL;
-
-                            Call( ErrOSBCCreateCacheRepository( fident->Pi, ctm->Pi, &pcrep ) );
-
-                            return gcnew CacheRepository( &pcrep );
-
-                        HandleError:
-                            delete pcrep;
-                            throw EseException( err );
-                        }
-
-                        static CacheTelemetry^ CreateCacheTelemetry()
-                        {
-                            ERR                 err     = JET_errSuccess;
-                            ::ICacheTelemetry*  pctm    = NULL;
-
-                            Call( ErrOSBCCreateCacheTelemetry( &pctm ) );
-
-                            return gcnew CacheTelemetry( &pctm );
-
-                        HandleError:
-                            delete pctm;
-                            throw EseException( err );
-                        }
-
                         static CacheTelemetry^ WrapCacheTelemetry( ICacheTelemetry^ ictm )
                         {
                             ERR                 err     = JET_errSuccess;
@@ -412,48 +199,6 @@ namespace Internal
 
                         HandleError:
                             delete pctm;
-                            throw EseException( err );
-                        }
-                        
-                        static JournalSegment^ CreateJournalSegment(
-                            FileFilter^ ff,
-                            Int64 offsetInBytes,
-                            SegmentPosition segmentPosition,
-                            Int32 uniqueIdPrevious,
-                            SegmentPosition segmentPositionReplay,
-                            SegmentPosition segmentPositionDurable )
-                        {
-                            ERR                 err = JET_errSuccess;
-                            ::IJournalSegment*  pjs = NULL;
-
-                            Call( ErrOSBCCreateJournalSegment(  ff->Pi,
-                                                                offsetInBytes,
-                                                                (::SegmentPosition)segmentPosition,
-                                                                uniqueIdPrevious,
-                                                                (::SegmentPosition)segmentPositionReplay,
-                                                                (::SegmentPosition)segmentPositionDurable,
-                                                                &pjs ) );
-
-                            return gcnew JournalSegment( &pjs );
-
-                        HandleError:
-                            delete pjs;
-                            throw EseException( err );
-                        }
-                        
-                        static JournalSegment^ LoadJournalSegment(
-                            FileFilter^ ff,
-                            Int64 offsetInBytes )
-                        {
-                            ERR                 err = JET_errSuccess;
-                            ::IJournalSegment*  pjs = NULL;
-
-                            Call( ErrOSBCLoadJournalSegment( ff->Pi, offsetInBytes, &pjs ) );
-
-                            return gcnew JournalSegment( &pjs );
-
-                        HandleError:
-                            delete pjs;
                             throw EseException( err );
                         }
                         
@@ -471,26 +216,6 @@ namespace Internal
                             throw EseException( err );
                         }
                         
-                        static JournalSegmentManager^ CreateJournalSegmentManager(
-                            FileFilter^ ff,
-                            Int64 offsetInBytes,
-                            Int64 sizeInBytes )
-                        {
-                            ERR                         err     = JET_errSuccess;
-                            ::IJournalSegmentManager*   pjsm    = NULL;
-
-                            Call( ErrOSBCCreateJournalSegmentManager(   ff->Pi,
-                                                                        offsetInBytes,
-                                                                        sizeInBytes,
-                                                                        &pjsm ) );
-
-                            return gcnew JournalSegmentManager( &pjsm );
-
-                        HandleError:
-                            delete pjsm;
-                            throw EseException( err );
-                        }
-                        
                         static JournalSegmentManager^ WrapJournalSegmentManager( IJournalSegmentManager^ ijsm )
                         {
                             ERR                         err     = JET_errSuccess;
@@ -501,28 +226,6 @@ namespace Internal
                             return gcnew JournalSegmentManager( &pjsm );
 
                         HandleError:
-                            delete pjsm;
-                            throw EseException( err );
-                        }
-                        
-                        static Journal^ CreateJournal(
-                            IJournalSegmentManager^ ijsm,
-                            Int64 cacheSizeInBytes )
-                        {
-                            ERR                         err     = JET_errSuccess;
-                            ::IJournalSegmentManager*   pjsm    = NULL;
-                            ::IJournal*                 pj      = NULL;
-
-                            Call( JournalSegmentManager::ErrWrap( ijsm, &pjsm ) );
-
-                            Call( ErrOSBCCreateJournal( &pjsm,
-                                                        cacheSizeInBytes,
-                                                        &pj ) );
-
-                            return gcnew Journal( &pj );
-
-                        HandleError:
-                            delete pj;
                             delete pjsm;
                             throw EseException( err );
                         }
@@ -539,6 +242,264 @@ namespace Internal
                         HandleError:
                             delete pj;
                             throw EseException( err );
+                        }
+
+                        static CachedBlockWriteCountsManager^ WrapCachedBlockWriteCountsManager( ICachedBlockWriteCountsManager^ icbwcm )
+                        {
+                            ERR                                 err     = JET_errSuccess;
+                            ::ICachedBlockWriteCountsManager*   pcbwcm  = NULL;
+
+                            Call( CachedBlockWriteCountsManager::ErrWrap( icbwcm, &pcbwcm ) );
+
+                            return gcnew CachedBlockWriteCountsManager( &pcbwcm );
+
+                        HandleError:
+                            delete pcbwcm;
+                            throw EseException( err );
+                        }
+
+                        static CachedBlockSlab^ WrapCachedBlockSlab( ICachedBlockSlab^ icbs )
+                        {
+                            ERR                 err     = JET_errSuccess;
+                            ::ICachedBlockSlab* pcbs    = NULL;
+
+                            Call( CachedBlockSlab::ErrWrap( icbs, &pcbs ) );
+
+                            return gcnew CachedBlockSlab( &pcbs );
+
+                        HandleError:
+                            delete pcbs;
+                            throw EseException( err );
+                        }
+
+                        static CachedBlockSlabManager^ WrapCachedBlockSlabManager( ICachedBlockSlabManager^ icbsm )
+                        {
+                            ERR                         err     = JET_errSuccess;
+                            ::ICachedBlockSlabManager*  pcbsm   = NULL;
+
+                            Call( CachedBlockSlabManager::ErrWrap( icbsm, &pcbsm ) );
+
+                            return gcnew CachedBlockSlabManager( &pcbsm );
+
+                        HandleError:
+                            delete pcbsm;
+                            throw EseException( err );
+                        }
+
+                        static FileSystem^ CreateFileSystemWrapper( IFileSystem^ ifsInner )
+                        {
+                            return factory->CreateFileSystemWrapper( ifsInner );
+                        }
+
+                        static FileSystemFilter^ CreateFileSystemFilter(    FileSystemConfiguration^ fsconfig,
+                                                                            IFileSystem^ ifsInner,
+                                                                            FileIdentification^ fident,
+                                                                            CacheTelemetry^ ctm,
+                                                                            CacheRepository^ crep )
+                        {
+                            return factory->CreateFileSystemFilter( fsconfig, ifsInner, fident, ctm, crep );
+                        }
+
+                        static File^ CreateFileWrapper( IFile^ ifInner )
+                        {
+                            return factory->CreateFileWrapper( ifInner );
+                        }
+
+                        static FileFilter^ CreateFileFilter(    IFile^ fInner,
+                                                                FileSystemFilter^ fsf,
+                                                                FileSystemConfiguration^ fsconfig,
+                                                                CacheTelemetry^ ctm,
+                                                                VolumeId volumeid,
+                                                                FileId fileid,
+                                                                ICachedFileConfiguration^ icfconfig,
+                                                                ICache^ ic,
+                                                                ArraySegment<byte> header )
+                        {
+                            return factory->CreateFileFilter( fInner, fsf, fsconfig, ctm, volumeid, fileid, icfconfig, ic, header );
+                        }
+
+                        static FileFilter^ CreateFileFilterWrapper( IFileFilter^ iffInner, IOMode ioMode )
+                        {
+                            return factory->CreateFileFilterWrapper( iffInner, ioMode );
+                        }
+
+                        static FileIdentification^ CreateFileIdentification()
+                        {
+                            return factory->CreateFileIdentification();
+                        }
+
+                        static Cache^ CreateCache(  FileSystemFilter^ fsf,
+                                                    FileIdentification^ fident,
+                                                    FileSystemConfiguration^ fsconfig,
+                                                    ICacheConfiguration^ cconfig,
+                                                    CacheTelemetry^ ctm,
+                                                    IFileFilter^ iff )
+                        {
+                            return factory->CreateCache( fsf, fident, fsconfig, cconfig, ctm, iff );
+                        }
+
+                        static Cache^ MountCache(   FileSystemFilter^ fsf,
+                                                    FileIdentification^ fident,
+                                                    FileSystemConfiguration^ fsconfig,
+                                                    ICacheConfiguration^ cconfig,
+                                                    CacheTelemetry^ ctm,
+                                                    IFileFilter^ iff )
+                        {
+                            return factory->MountCache( fsf, fident, fsconfig, cconfig, ctm, iff );
+                        }
+
+                        static Cache^ CreateCacheWrapper( ICache^ icInner )
+                        {
+                            return factory->CreateCacheWrapper( icInner );
+                        }
+
+                        static CacheRepository^ CreateCacheRepository(  FileIdentification^ fident,
+                                                                        CacheTelemetry^ ctm )
+                        {
+                            return factory->CreateCacheRepository( fident, ctm );
+                        }
+
+                        static CacheTelemetry^ CreateCacheTelemetry()
+                        {
+                            return factory->CreateCacheTelemetry();
+                        }
+
+                        static JournalSegment^ CreateJournalSegment(    FileFilter^ ff,
+                                                                        Int64 offsetInBytes,
+                                                                        SegmentPosition segmentPosition,
+                                                                        Int32 uniqueIdPrevious,
+                                                                        SegmentPosition segmentPositionReplay,
+                                                                        SegmentPosition segmentPositionDurable )
+                        {
+                            return factory->CreateJournalSegment(   ff,
+                                                                    offsetInBytes,
+                                                                    segmentPosition, 
+                                                                    uniqueIdPrevious, 
+                                                                    segmentPositionReplay, 
+                                                                    segmentPositionDurable );
+                        }
+
+                        static JournalSegment^ LoadJournalSegment(  FileFilter^ ff,
+                                                                    Int64 offsetInBytes )
+                        {
+                            return factory->LoadJournalSegment( ff, offsetInBytes );
+                        }
+
+                        static JournalSegmentManager^ CreateJournalSegmentManager(  FileFilter^ ff,
+                                                                                    Int64 offsetInBytes,
+                                                                                    Int64 sizeInBytes )
+                        {
+                            return factory->CreateJournalSegmentManager( ff, offsetInBytes, sizeInBytes );
+                        }
+
+                        static Journal^ CreateJournal(  IJournalSegmentManager^ ijsm,
+                                                        Int64 cacheSizeInBytes )
+                        {
+                            return factory->CreateJournal( ijsm, cacheSizeInBytes );
+                        }
+
+                        static CachedBlockWriteCountsManager^ LoadCachedBlockWriteCountsManager(
+                            FileFilter^ ff,
+                            Int64 offsetInBytes,
+                            Int64 sizeInBytes )
+                        {
+                            return factory->LoadCachedBlockWriteCountsManager( ff, offsetInBytes, sizeInBytes );
+                        }
+
+                        static CachedBlockSlab^ LoadCachedBlockSlab(
+                            FileFilter^ ff,
+                            Int64 offsetInBytes,
+                            Int64 sizeInBytes,
+                            CachedBlockWriteCountsManager^ cbwcm,
+                            Int64 cachedBlockWriteCountNumberBase,
+                            ClusterNumber clusterNumberMin,
+                            ClusterNumber clusterNumberMax,
+                            bool ignoreVerificationErrors )
+                        {
+                            return factory->LoadCachedBlockSlab(
+                                ff,
+                                offsetInBytes, 
+                                sizeInBytes, 
+                                cbwcm, 
+                                cachedBlockWriteCountNumberBase, 
+                                clusterNumberMin, 
+                                clusterNumberMax,
+                                ignoreVerificationErrors );
+                        }
+
+                        static CachedBlockSlab^ CreateCachedBlockSlabWrapper( ICachedBlockSlab^ icbsInner )
+                        {
+                            return factory->CreateCachedBlockSlabWrapper( icbsInner );
+                        }
+
+                        static CachedBlockSlabManager^ LoadCachedBlockSlabManager(
+                            FileFilter^ ff,
+                            Int64 cachingFilePerSlab,
+                            Int64 cachedFilePerSlab,
+                            Int64 offsetInBytes,
+                            Int64 sizeInBytes,
+                            CachedBlockWriteCountsManager^ cbwcm,
+                            Int64 cachedBlockWriteCountNumberBase,
+                            ClusterNumber clusterNumberMin,
+                            ClusterNumber clusterNumberMax )
+                        {
+                            return factory->LoadCachedBlockSlabManager(
+                                ff,
+                                cachingFilePerSlab,
+                                cachedFilePerSlab,
+                                offsetInBytes,
+                                sizeInBytes,
+                                cbwcm,
+                                cachedBlockWriteCountNumberBase,
+                                clusterNumberMin,
+                                clusterNumberMax );
+                        }
+
+                        static CachedBlock^ CreateCachedBlock(
+                            CachedBlockId^ cachedBlockId,
+                            ClusterNumber clusterNumber,
+                            bool isValid,
+                            bool isPinned,
+                            bool isDirty,
+                            bool wasEverDirty,
+                            bool wasPurged,
+                            UpdateNumber updateNumber )
+                        {
+                            return factory->CreateCachedBlock(
+                                cachedBlockId,
+                                clusterNumber,
+                                isValid,
+                                isPinned,
+                                isDirty,
+                                wasEverDirty,
+                                wasPurged,
+                                updateNumber );
+                        }
+
+                        static CachedBlockSlot^ CreateCachedBlockSlot(
+                            UInt64 offsetInBytes,
+                            ChunkNumber chunkNumber,
+                            SlotNumber slotNumber,
+                            CachedBlock^ cachedBlock )
+                        {
+                            return factory->CreateCachedBlockSlot( offsetInBytes, chunkNumber, slotNumber, cachedBlock );
+                        }
+
+                        static CachedBlockSlotState^ CreateCachedBlockSlotState(
+                            CachedBlockSlot^ slot,
+                            bool isSlabUpdated,
+                            bool isChunkUpdated,
+                            bool isSlotUpdated,
+                            bool isClusterUpdated,
+                            bool isSuperceded )
+                        {
+                            return factory->CreateCachedBlockSlotState(
+                                slot,
+                                isSlabUpdated,
+                                isChunkUpdated,
+                                isSlotUpdated,
+                                isClusterUpdated,
+                                isSuperceded );
                         }
 
                     private:
@@ -563,6 +524,30 @@ namespace Internal
                                 }
                         };
 
+
+                        static BlockCacheFactory^ CreateBlockCacheFactory()
+                        {
+                            ERR                     err     = JET_errSuccess;
+                            ::IBlockCacheFactory*   pbcf    = NULL;
+
+                            Call( COSBlockCacheFactory::ErrCreate( &pbcf ) );
+
+                            WCHAR wszBuf[ 256 ] = { };
+                            if (    IsDebuggerPresent() &&
+                                    FOSConfigGet( L"DEBUG", L"Error Trap", wszBuf, sizeof( wszBuf ) ) &&
+                                    wszBuf[0] )
+                            {
+                                (void)ErrERRSetErrTrap( _wtol( wszBuf ) );
+                            }
+
+                            return gcnew BlockCacheFactory( &pbcf );
+
+                        HandleError:
+                            delete pbcf;
+                            throw EseException( err );
+                        }
+
+                        static BlockCacheFactory^ factory = CreateBlockCacheFactory();
                 };
             }
         }

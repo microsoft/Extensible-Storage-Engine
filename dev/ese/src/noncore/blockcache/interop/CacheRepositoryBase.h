@@ -27,7 +27,7 @@ namespace Internal
                         virtual ICache^ Open(
                             IFileSystemFilter^ fsf,
                             IFileSystemConfiguration^ fsconfig,
-                            ICacheConfiguration^ cconf );
+                            ICacheConfiguration^ cconfig );
 
                         virtual ICache^ OpenById(
                             IFileSystemFilter^ fsf,
@@ -42,7 +42,7 @@ namespace Internal
                 inline ICache^ CacheRepositoryBase<TM, TN, TW>::Open(
                     IFileSystemFilter^ fsf,
                     IFileSystemConfiguration^ fsconfig,
-                    ICacheConfiguration^ cconf )
+                    ICacheConfiguration^ cconfig )
                 {
                     ERR                         err         = JET_errSuccess;
                     ::IFileSystemFilter*        pfsf        = NULL;
@@ -53,7 +53,7 @@ namespace Internal
 
                     Call( FileSystemFilter::ErrWrap( fsf, &pfsf ) );
                     Call( FileSystemConfiguration::ErrWrap( fsconfig, &pfsconfig ) );
-                    Call( CacheConfiguration::ErrWrap( cconf, &pcconfig ) );
+                    Call( CacheConfiguration::ErrWrap( cconfig, &pcconfig ) );
                     Call( Pi->ErrOpen( pfsf, pfsconfig, &pcconfig, &pc ) );
 
                     c = pc ? gcnew Cache( &pc ) : nullptr;

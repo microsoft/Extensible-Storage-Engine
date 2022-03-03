@@ -19,7 +19,7 @@ namespace Internal
 
                         static ERR ErrWrap( ICachedFileConfiguration^% cfconfig, ::ICachedFileConfiguration** const ppcfconfig )
                         {
-                            return Internal::Ese::BlockCache::Interop::ErrWrap<ICachedFileConfiguration, ::ICachedFileConfiguration, CCachedFileConfigurationWrapper<ICachedFileConfiguration, ::ICachedFileConfiguration>>( cfconfig, ppcfconfig );
+                            return Internal::Ese::BlockCache::Interop::ErrWrap<ICachedFileConfiguration, ::ICachedFileConfiguration, CCachedFileConfigurationWrapper<ICachedFileConfiguration, ::ICachedFileConfiguration>, CachedFileConfigurationRemotable>( cfconfig, ppcfconfig );
                         }
 
                     public:

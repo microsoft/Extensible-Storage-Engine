@@ -90,7 +90,7 @@ INLINE ERR CCacheFactory::ErrCreate(    _In_    IFileSystemFilter* const        
     Call( (*ppffCaching)->ErrSize( &cbSize, IFileAPI::filesizeLogical ) );
     if ( cbSize != 0 )
     {
-        Error( ErrERRCheck( JET_errInternalError ) );
+        BlockCacheInternalError( "DestroyExistingCache" );
     }
 
     //  initialize the caching file header
@@ -286,7 +286,7 @@ INLINE ERR CCacheFactory::ErrGetFactory(    _In_reads_( cbGuid )    const BYTE* 
 
     if ( *ppfnFactory == NULL )
     {
-        Error( ErrERRCheck( JET_errInternalError ) );
+        BlockCacheInternalError( "UnknownCacheType" );
     }
 
 HandleError:

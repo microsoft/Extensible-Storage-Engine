@@ -3264,6 +3264,36 @@ class CInstanceFileSystemConfiguration : public CDefaultFileSystemConfiguration
                     }
 
                     m_fCachingEnabled = m_wszAbsPathCachingFile[ 0 ] != 0;
+
+                    if (    UtilCmpFileName(    rgwszExt,
+                                                ( UlParam( pinst, JET_paramLegacyFileNames ) & JET_bitESE98FileNames ) ?
+                                                    wszOldLogExt : 
+                                                    wszNewLogExt ) == 0 ||
+                            UtilCmpFileName( rgwszExt, wszResLogExt ) == 0 ||
+                            UtilCmpFileName( rgwszExt, wszSecLogExt ) == 0 ||
+                            UtilCmpFileName( rgwszExt, wszRBSExt ) == 0 )
+                    {
+                        m_cbBlockSize = cbLogFileHeader;
+                        m_ulPinnedHeaderSizeInBytes = 1 * m_cbBlockSize;
+                    }
+                    else if ( UtilCmpFileName(  rgwszExt,
+                                                ( UlParam( pinst, JET_paramLegacyFileNames ) & JET_bitESE98FileNames ) ?
+                                                    wszOldChkExt : 
+                                                    wszNewChkExt ) == 0 )
+                    {
+                        m_cbBlockSize = cbCheckpoint;
+                        m_ulPinnedHeaderSizeInBytes = 2 * m_cbBlockSize;
+                    }
+                    else if ( UtilCmpFileName( rgwszExt, L".jfm" ) == 0 )  //  CFlushMap::s_wszFmFileExtension
+                    {
+                        m_cbBlockSize = 8192;  //  CFlushMap::s_cbFlushMapPageOnDisk
+                        m_ulPinnedHeaderSizeInBytes = 1 * m_cbBlockSize;
+                    }
+                    else
+                    {
+                        m_cbBlockSize = (ULONG)UlParam( JET_paramDatabasePageSize );
+                        m_ulPinnedHeaderSizeInBytes = 2 * m_cbBlockSize;
+                    }
                 }
         };
 
@@ -3276,6 +3306,8 @@ class CInstanceFileSystemConfiguration : public CDefaultFileSystemConfiguration
                     GetCachingFileFromInst( pinst, m_wszAbsPathCachingFile );
 
                     m_fCacheEnabled = m_wszAbsPathCachingFile[ 0 ] != 0;
+
+                    m_cbCachedFilePerSlab = (ULONG)UlParam( JET_paramDatabasePageSize );
                 }
         };
 

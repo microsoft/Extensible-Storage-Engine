@@ -11,7 +11,7 @@ class CBlockCacheHeaderHelpers
 
         enum { ibFileType = 667 };
         enum { cbGuid = sizeof(GUID) };
-        enum { cbBlock = 4096 };
+        enum { cbBlock = cbCachedBlock };
 
         enum class ChecksumType
         {
@@ -129,12 +129,12 @@ INLINE ERR CBlockCacheHeaderHelpers::ErrVerifyFileId(   _In_    IFileSystemConfi
     if ( volumeidActual != volumeidExpected )
     {
         ReportFileIdMismatch( pfsconfig, pff, volumeidExpected, fileidExpected, volumeidActual, fileidActual );
-        Call( ErrERRCheck( JET_errDiskIO ) );
+        Error( ErrERRCheck( JET_errDiskIO ) );
     }
     if ( fileidActual != fileidExpected )
     {
         ReportFileIdMismatch( pfsconfig, pff, volumeidExpected, fileidExpected, volumeidActual, fileidActual );
-        Call( ErrERRCheck( JET_errDiskIO ) );
+        Error( ErrERRCheck( JET_errDiskIO ) );
     }
 
 HandleError:
@@ -256,7 +256,7 @@ INLINE ERR CBlockCacheHeaderHelpers::ErrLoadHeader( _In_reads_( cbHeader )  cons
 
     Alloc( pvData = PvOSMemoryPageAlloc( sizeof( T ), NULL ) );
 
-    memcpy( pvData, pbHeader, min( sizeof( T ), cbHeader ) );
+    UtilMemCpy( pvData, pbHeader, min( sizeof( T ), cbHeader ) );
 
     Call( ErrValidateHeader( (T*)pvData ) );
 

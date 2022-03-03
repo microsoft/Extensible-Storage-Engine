@@ -3,6 +3,10 @@
 
 #pragma once
 
+//  Journal Segment Size
+
+const size_t cbJournalSegment = CBlockCacheHeaderHelpers::cbBlock;
+
 //  Journal Segment Header
 
 #pragma push_macro( "new" )
@@ -15,7 +19,8 @@ class CJournalSegmentHeader : CBlockCacheHeaderHelpers  // jsh
 {
     public:
 
-        static ERR ErrCreate(   _In_    const SegmentPosition           spos,
+        static ERR ErrCreate(   _In_    const QWORD                     ib,
+                                _In_    const SegmentPosition           spos,
                                 _In_    const DWORD                     dwUniqueIdPrev,
                                 _In_    const SegmentPosition           sposReplay,
                                 _In_    const SegmentPosition           sposDurable,
@@ -29,12 +34,12 @@ class CJournalSegmentHeader : CBlockCacheHeaderHelpers  // jsh
 
         ERR ErrFinalize();
 
-        void operator delete( _In_ void* const pv );
+        void operator delete( _In_opt_ void* const pv );
 
         RegionPosition RposFirst() const { return m_le_rposFirst; }
         SegmentPosition Spos() const
         {
-            return (SegmentPosition)rounddn( (QWORD)RposFirst(), cbSegment );
+            return (SegmentPosition)rounddn( (QWORD)RposFirst(), cbJournalSegment );
         }
         DWORD DwUniqueId() const { return m_le_dwUniqueId; }
         DWORD DwUniqueIdPrev() const { return m_le_dwUniqueIdPrev; }
@@ -58,28 +63,28 @@ class CJournalSegmentHeader : CBlockCacheHeaderHelpers  // jsh
 
         friend class CBlockCacheHeaderHelpers;
 
-        enum { cbSegment = cbBlock };
-
         CJournalSegmentHeader();
 
         void* operator new( _In_ const size_t cb );
         void* operator new( _In_ const size_t cb, _In_ const void* const pv );
         
-        ERR ErrValidate();
+        ERR ErrValidate( _In_ const QWORD ib );
 
     private:
 
         LittleEndian<ULONG>             m_le_ulChecksum;        //  offset 0:  checksum
         BYTE                            m_rgbZero[ 4 ];         //  unused because it is not protected by the ECC
+        LittleEndian<ClusterNumber>     m_le_clno;              //  location of this segment
         LittleEndian<RegionPosition>    m_le_rposFirst;         //  region position of the first region in this segment
         LittleEndian<DWORD>             m_le_dwUniqueId;        //  unique id for this segment
         LittleEndian<DWORD>             m_le_dwUniqueIdPrev;    //  unique id for the previous segment
         LittleEndian<SegmentPosition>   m_le_sposReplay;        //  segment position of the last known replay segment
         LittleEndian<SegmentPosition>   m_le_sposDurable;       //  segment position of the last known durable segment
 
-        BYTE                            m_rgbRegions[   cbSegment 
+        BYTE                            m_rgbRegions[   cbJournalSegment 
                                                         - sizeof( m_le_ulChecksum )
                                                         - sizeof( m_rgbZero )
+                                                        - sizeof( m_le_clno )
                                                         - sizeof( m_le_rposFirst )
                                                         - sizeof( m_le_dwUniqueId )
                                                         - sizeof( m_le_dwUniqueIdPrev )
@@ -99,10 +104,11 @@ struct CBlockCacheHeaderTraits<CJournalSegmentHeader>
 INLINE CJournalSegmentHeader::CJournalSegmentHeader()
 {
     C_ASSERT( 0 == offsetof( CJournalSegmentHeader, m_le_ulChecksum ) );
-    C_ASSERT( cbSegment == sizeof( CJournalSegmentHeader ) );
+    C_ASSERT( cbJournalSegment == sizeof( CJournalSegmentHeader ) );
 }
 
-INLINE ERR CJournalSegmentHeader::ErrCreate(    _In_    const SegmentPosition           spos,
+INLINE ERR CJournalSegmentHeader::ErrCreate(    _In_    const QWORD                     ib,
+                                                _In_    const SegmentPosition           spos,
                                                 _In_    const DWORD                     dwUniqueIdPrev,
                                                 _In_    const SegmentPosition           sposReplay,
                                                 _In_    const SegmentPosition           sposDurable,
@@ -116,6 +122,7 @@ INLINE ERR CJournalSegmentHeader::ErrCreate(    _In_    const SegmentPosition   
 
     Alloc( pjsh = new CJournalSegmentHeader() );
 
+    pjsh->m_le_clno = ClusterNumber( ib / cbCachedBlock );
     pjsh->m_le_rposFirst = (RegionPosition)spos + offsetof( CJournalSegmentHeader, m_rgbRegions );
     rand_s( &uiUniqueId );
     pjsh->m_le_dwUniqueId = uiUniqueId;
@@ -147,7 +154,7 @@ INLINE ERR CJournalSegmentHeader::ErrLoad(  _In_    IFileFilter* const          
 
     Call( ErrLoadHeader( pff, ib, &pjsh ) );
 
-    Call( pjsh->ErrValidate() );
+    Call( pjsh->ErrValidate( ib ) );
 
     *ppjsh = pjsh;
     pjsh = NULL;
@@ -171,7 +178,7 @@ INLINE ERR CJournalSegmentHeader::ErrDump(  _In_ IFileFilter* const pff,
 
     Call( ErrLoadHeader( pff, ib, &pjsh ) );
 
-    Call( pjsh->ErrValidate() );
+    Call( pjsh->ErrValidate( ib ) );
 
     Call( pjsh->ErrDump( pcprintf ) );
 
@@ -182,22 +189,25 @@ HandleError:
 
 INLINE ERR CJournalSegmentHeader::ErrFinalize()
 {
+    memset( m_rgbZero, 0, _cbrg( m_rgbZero ) );
+
     m_le_ulChecksum = GenerateChecksum( this );
 
     return JET_errSuccess;
 }
 
-INLINE void CJournalSegmentHeader::operator delete( _In_ void* const pv )
+INLINE void CJournalSegmentHeader::operator delete( _In_opt_ void* const pv )
 {
     OSMemoryPageFree( pv );
 }
 
 INLINE ERR CJournalSegmentHeader::ErrDump( _In_ CPRINTF* const pcprintf )
 {
-    (*pcprintf)(    "JOURNAL SEGMENT 0x%016I64x:\n", Spos() );
+    (*pcprintf)(    "Journal Segment 0x%016I64x:\n", Spos() );
     (*pcprintf)(    "\n" );
     (*pcprintf)(    "Fields:\n" );
     (*pcprintf)(    "        ulChecksum:  0x%08lx\n", LONG( m_le_ulChecksum ) );
+    (*pcprintf)(    "              clno:  0x%08lx\n", LONG( ClusterNumber( m_le_clno ) ) );
     (*pcprintf)(    "         rposFirst:  0x%016I64x\n", RposFirst() );
     (*pcprintf)(    "        dwUniqueId:  0x%08lx\n", DwUniqueId() );
     (*pcprintf)(    "    dwUniqueIdPrev:  0x%08lx\n", DwUniqueIdPrev() );
@@ -224,13 +234,27 @@ INLINE void* CJournalSegmentHeader::operator new( _In_ const size_t cb, _In_ con
 
 #pragma pop_macro( "new" )
 
-INLINE ERR CJournalSegmentHeader::ErrValidate()
+INLINE ERR CJournalSegmentHeader::ErrValidate( _In_ const QWORD ib )
 {
-    ERR err = JET_errSuccess;
+    ERR     err     = JET_errSuccess;
+    BOOL    fUninit = fFalse;
 
-    if ( m_le_ulChecksum == 0 && FUtilZeroed( (const BYTE*)this, sizeof( *this ) ) )
+    //  determine if the segment is uninitialized
+
+    fUninit = m_le_ulChecksum == 0 && FUtilZeroed( (const BYTE*)this, sizeof( *this ) );
+
+    //  indicate if the segment is uninitialized
+
+    if ( fUninit )
     {
         Error( ErrERRCheck( JET_errPageNotInitialized ) );
+    }
+
+    //  verify that we read the segment at the correct offset
+
+    if ( m_le_clno != ClusterNumber( ib / cbCachedBlock ) )
+    {
+        Error( ErrERRCheck( JET_errReadVerifyFailure ) );
     }
 
 HandleError:

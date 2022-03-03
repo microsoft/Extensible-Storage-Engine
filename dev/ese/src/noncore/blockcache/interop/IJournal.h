@@ -28,10 +28,14 @@ namespace Internal
                     /// <param name="journalPositionReplay">The approximate position required for replay.</param>
                     /// <param name="journalPositionDurableForWriteBack">The approximate position of the last durable entry for which write back may occur.</param>
                     /// <param name="segmentPositionDurable">The approximate position of the last durable entry.</param>
+                    /// <param name="journalPositionAppend">The approximate position that will be assigned to the next append.</param>
+                    /// <param name="journalPositionFull">The position at which the journal will be full.</param>
                     void GetProperties(
                         [Out] JournalPosition% journalPositionReplay,
                         [Out] JournalPosition% journalPositionDurableForWriteBack,
-                        [Out] JournalPosition% journalPositionDurable );
+                        [Out] JournalPosition% journalPositionDurable,
+                        [Out] JournalPosition% journalPositionAppend,
+                        [Out] JournalPosition% journalPositionFull );
 
                     /// <summary>
                     /// Delegate used to visit an entry in the journal.

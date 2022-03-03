@@ -4966,11 +4966,15 @@ HandleError:
 LOCAL ERR ErrDBUTLDumpCachedFileHeader( const WCHAR* const wszFilePath, const JET_GRBIT grbit )
 //  ================================================================
 {
-    ERR err = JET_errSuccess;
+    ERR                 err     = JET_errSuccess;
+    IBlockCacheFactory* pbcf    = NULL;
 
-    Call( ErrOSBCDumpCachedFileHeader( wszFilePath, grbit, CPRINTFSTDOUT::PcprintfInstance() ) );
+    Call( COSBlockCacheFactory::ErrCreate( &pbcf ) );
+
+    Call( pbcf->ErrDumpCachedFileHeader( wszFilePath, grbit, CPRINTFSTDOUT::PcprintfInstance() ) );
 
 HandleError:
+    delete pbcf;
     return err;
 }
 
@@ -4978,11 +4982,15 @@ HandleError:
 LOCAL ERR ErrDBUTLDumpCacheFile( const WCHAR* const wszFilePath, const JET_GRBIT grbit )
 //  ================================================================
 {
-    ERR err = JET_errSuccess;
+    ERR                 err     = JET_errSuccess;
+    IBlockCacheFactory* pbcf    = NULL;
 
-    Call( ErrOSBCDumpCacheFile( wszFilePath, grbit, CPRINTFSTDOUT::PcprintfInstance() ) );
+    Call( COSBlockCacheFactory::ErrCreate( &pbcf ) );
+
+    Call( pbcf->ErrDumpCacheFile( wszFilePath, grbit, CPRINTFSTDOUT::PcprintfInstance() ) );
 
 HandleError:
+    delete pbcf;
     return err;
 }
 

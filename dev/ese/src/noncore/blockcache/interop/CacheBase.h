@@ -48,7 +48,7 @@ namespace Internal
                             FileId fileid,
                             FileSerial fileserial,
                             Int64 offsetInBytes,
-                            ArraySegment<byte> data,
+                            MemoryStream^ data,
                             FileQOS fileQOS,
                             CachingPolicy cachingPolicy,
                             ICache::Complete^ complete );
@@ -58,7 +58,7 @@ namespace Internal
                             FileId fileid,
                             FileSerial fileserial,
                             Int64 offsetInBytes,
-                            ArraySegment<byte> data,
+                            MemoryStream^ data,
                             FileQOS fileQOS,
                             CachingPolicy cachingPolicy,
                             ICache::Complete^ complete );
@@ -214,62 +214,57 @@ namespace Internal
                     FileId fileid,
                     FileSerial fileserial,
                     Int64 offsetInBytes,
-                    ArraySegment<byte> data,
+                    MemoryStream^ data,
                     FileQOS fileQOS,
                     CachingPolicy cachingPolicy,
                     ICache::Complete^ complete )
                 {
                     ERR                 err             = JET_errSuccess;
-                    const DWORD         cbBlock         = OSMemoryPageCommitGranularity();
-                    DWORD               cbBuffer        = ( ( data.Count - 1 + cbBlock ) / cbBlock ) * cbBlock;
+                    const DWORD         cbData          = data == nullptr ? 0 : (DWORD)data->Length;
                     VOID*               pvBuffer        = NULL;
-                    BOOL                fReleaseBuffer  = fTrue;
-                    CComplete*          pcomplete       = NULL;
-                    TraceContextScope   tcScope;
+                    CompleteInverse^    completeInverse = nullptr;
+                    TraceContextScope   tcScope( iorpBlockCache );
 
-                    Alloc( pvBuffer = PvOSMemoryPageAlloc( cbBuffer, NULL ) );
+                    if ( cbData )
+                    {
+                        Alloc( pvBuffer = PvOSMemoryPageAlloc( roundup( cbData, OSMemoryPageCommitGranularity() ), NULL ) );
+                        array<byte>^ bytes = data->ToArray();
+                        pin_ptr<const byte> rgbData = &bytes[ 0 ];
+                        UtilMemCpy( pvBuffer, (const BYTE*)rgbData, cbData );
+                    }
 
                     if ( complete != nullptr )
                     {
-                        Alloc( pcomplete = new CComplete( fFalse, data.Array, data.Offset, data.Count, complete, pvBuffer ) );
-
-                        fReleaseBuffer = fFalse;
+                        completeInverse = gcnew CompleteInverse( false, data, complete, &pvBuffer );
                     }
-
-                    pin_ptr<const byte> rgbDataIn = &data.Array[ data.Offset ];
-                    UtilMemCpy( pvBuffer, (const BYTE*)rgbDataIn, data.Count );
 
                     Call( Pi->ErrRead(  *tcScope,
                                         (::VolumeId)volumeid,
                                         (::FileId)fileid,
                                         (::FileSerial)fileserial,
                                         offsetInBytes,
-                                        data.Count,
-                                        (BYTE*)pvBuffer,
+                                        cbData,
+                                        (BYTE*)( completeInverse == nullptr ? pvBuffer : completeInverse->PvBuffer ),
                                         (OSFILEQOS)fileQOS,
                                         (::ICache::CachingPolicy)cachingPolicy,
-                                        complete != nullptr ? ::ICache::PfnComplete( CComplete::Complete ) : NULL,
-                                        DWORD_PTR( pcomplete ) ) );
+                                        completeInverse == nullptr ? NULL : completeInverse->PfnComplete,
+                                        completeInverse == nullptr ? NULL : completeInverse->KeyComplete ) );
 
                 HandleError:
-                    if ( complete == nullptr )
+                    if ( completeInverse == nullptr && cbData )
                     {
-                        pin_ptr<byte> rgbData = &data.Array[ data.Offset ];
-                        UtilMemCpy( (BYTE*)rgbData, pvBuffer, data.Count );
+                        array<byte>^ bytes = gcnew array<byte>( cbData );
+                        pin_ptr<const byte> rgbData = &bytes[ 0 ];
+                        UtilMemCpy( (BYTE*)rgbData, completeInverse == nullptr ? pvBuffer : completeInverse->PvBuffer, cbData );
+                        data->Position = 0;
+                        data->Write( bytes, 0, bytes->Length );
                     }
+                    OSMemoryPageFree( pvBuffer );
                     if ( err < JET_errSuccess )
                     {
-                        delete pcomplete;
+                        delete completeInverse;
+                        throw EseException( err );
                     }
-                    if ( fReleaseBuffer )
-                    {
-                        OSMemoryPageFree( pvBuffer );
-                    }
-                    if ( err >= JET_errSuccess )
-                    {
-                        return;
-                    }
-                    throw EseException( err );
                 }
 
                 template< class TM, class TN, class TW >
@@ -278,57 +273,49 @@ namespace Internal
                     FileId fileid,
                     FileSerial fileserial,
                     Int64 offsetInBytes,
-                    ArraySegment<byte> data,
+                    MemoryStream^ data,
                     FileQOS fileQOS,
                     CachingPolicy cachingPolicy,
                     ICache::Complete^ complete )
                 {
                     ERR                 err             = JET_errSuccess;
-                    const DWORD         cbBlock         = OSMemoryPageCommitGranularity();
-                    DWORD               cbBuffer        = ( ( data.Count - 1 + cbBlock ) / cbBlock ) * cbBlock;
+                    const DWORD         cbData          = data == nullptr ? 0 : (DWORD)data->Length;
                     VOID*               pvBuffer        = NULL;
-                    BOOL                fReleaseBuffer  = fTrue;
-                    CComplete*          pcomplete       = NULL;
-                    TraceContextScope   tcScope;
+                    CompleteInverse^    completeInverse = nullptr;
+                    TraceContextScope   tcScope( iorpBlockCache );
 
-                    Alloc( pvBuffer = PvOSMemoryPageAlloc( cbBuffer, NULL ) );
+                    if ( cbData )
+                    {
+                        Alloc( pvBuffer = PvOSMemoryPageAlloc( roundup( cbData, OSMemoryPageCommitGranularity() ), NULL ) );
+                        array<byte>^ bytes = data->ToArray();
+                        pin_ptr<const byte> rgbData = &bytes[ 0 ];
+                        UtilMemCpy( pvBuffer, (const BYTE*)rgbData, cbData );
+                    }
 
                     if ( complete != nullptr )
                     {
-                        Alloc( pcomplete = new CComplete( fTrue, data.Array, data.Offset, data.Count, complete, pvBuffer ) );
-
-                        fReleaseBuffer = fFalse;
+                        completeInverse = gcnew CompleteInverse( true, data, complete, &pvBuffer );
                     }
-
-                    pin_ptr<const byte> rgbData = &data.Array[ data.Offset ];
-                    UtilMemCpy( pvBuffer, (const BYTE*)rgbData, data.Count );
 
                     Call( Pi->ErrWrite( *tcScope,
                                         (::VolumeId)volumeid,
                                         (::FileId)fileid,
                                         (::FileSerial)fileserial,
                                         offsetInBytes,
-                                        data.Count,
-                                        (const BYTE*)pvBuffer,
+                                        cbData,
+                                        (BYTE*)( completeInverse == nullptr ? pvBuffer : completeInverse->PvBuffer ),
                                         (OSFILEQOS)fileQOS,
                                         (::ICache::CachingPolicy)cachingPolicy,
-                                        complete != nullptr ? ::ICache::PfnComplete( CComplete::Complete ) : NULL,
-                                        DWORD_PTR( pcomplete ) ) );
+                                        completeInverse == nullptr ? NULL : completeInverse->PfnComplete,
+                                        completeInverse == nullptr ? NULL : completeInverse->KeyComplete ) );
 
                 HandleError:
+                    OSMemoryPageFree( pvBuffer );
                     if ( err < JET_errSuccess )
                     {
-                        delete pcomplete;
+                        delete completeInverse;
+                        throw EseException( err );
                     }
-                    if ( fReleaseBuffer )
-                    {
-                        OSMemoryPageFree( pvBuffer );
-                    }
-                    if ( err >= JET_errSuccess )
-                    {
-                        return;
-                    }
-                    throw EseException( err );
                 }
 
                 template< class TM, class TN, class TW >

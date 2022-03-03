@@ -9,12 +9,14 @@ class CCachedFileTableEntryBase  //  cfte
 {
     public:
 
-        CCachedFileTableEntryBase(  _In_ const VolumeId     volumeid,
+        CCachedFileTableEntryBase(  _In_ ICache* const      pc,
+                                    _In_ const VolumeId     volumeid,
                                     _In_ const FileId       fileid,
                                     _In_ const FileSerial   fileserial );
 
         virtual ~CCachedFileTableEntryBase();
 
+        ICache* Pc() const { return m_pc; }
         VolumeId Volumeid() const { return m_volumeid; }
         FileId Fileid() const { return m_fileid; }
         FileSerial Fileserial() const { return m_fileserial; }
@@ -100,6 +102,7 @@ class CCachedFileTableEntryBase  //  cfte
 
         typedef CInitOnce< ERR, decltype( &ErrOpenCachedFile_ ), CCachedFileTableEntryBase* const, IFileSystemFilter* const, IFileIdentification* const, IBlockCacheConfiguration* const, IFileFilter* const > CInitOnceCachedFile;
 
+        ICache* const                                   m_pc;
         const VolumeId                                  m_volumeid;
         const FileId                                    m_fileid;
         const FileSerial                                m_fileserial;
@@ -113,10 +116,12 @@ class CCachedFileTableEntryBase  //  cfte
         CInitOnceCachedFile                             m_initOnceCachedFile;
 };
 
-INLINE CCachedFileTableEntryBase::CCachedFileTableEntryBase(    _In_ const VolumeId     volumeid,
+INLINE CCachedFileTableEntryBase::CCachedFileTableEntryBase(    _In_ ICache* const      pc,
+                                                                _In_ const VolumeId     volumeid,
                                                                 _In_ const FileId       fileid,
                                                                 _In_ const FileSerial   fileserial )
-    :   m_volumeid( volumeid ),
+    :   m_pc( pc ),
+        m_volumeid( volumeid ),
         m_fileid( fileid ),
         m_fileserial( fileserial ),
         m_cref( 0 ),
@@ -130,7 +135,8 @@ INLINE CCachedFileTableEntryBase::CCachedFileTableEntryBase(    _In_ const Volum
 
 INLINE CCachedFileTableEntryBase::~CCachedFileTableEntryBase()
 {
-    Assert( m_cref == 0 || m_cref == 1 );
+    const LONG cref = AtomicRead( (LONG*)&m_cref );
+    Assert( cref == 0 || cref == 1 );
 
     delete m_pff;
     delete m_pcfconfig;
@@ -226,8 +232,8 @@ INLINE ERR CCachedFileTableEntryBase::ErrOpenCachedFile(    _In_ IFileSystemFilt
 
     //  cache commonly used configuration
 
-    m_filenumber = (ICacheTelemetry::FileNumber)pcfconfig->LCacheTelemetryFileNumber();
-    m_cbBlockSize = pcfconfig->CbBlockSize();
+    m_filenumber = (ICacheTelemetry::FileNumber)pcfconfig->UlCacheTelemetryFileNumber();
+    m_cbBlockSize = max( cbCachedBlock, pcfconfig->CbBlockSize() );
 
     //  make the cached file available for other opens
 

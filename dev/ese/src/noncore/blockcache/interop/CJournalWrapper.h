@@ -24,7 +24,9 @@ namespace Internal
 
                         ERR ErrGetProperties(   _Out_opt_ ::JournalPosition* const  pjposReplay,
                                                 _Out_opt_ ::JournalPosition* const  pjposDurableForWriteBack,
-                                                _Out_opt_ ::JournalPosition* const  pjposDurable ) override;
+                                                _Out_opt_ ::JournalPosition* const  pjposDurable,
+                                                _Out_opt_ ::JournalPosition* const  pjposAppend,
+                                                _Out_opt_ ::JournalPosition* const  pjposFull ) override;
 
                         ERR ErrVisitEntries(    _In_ const ::IJournal::PfnVisitEntry    pfnVisitEntry,
                                                 _In_ const DWORD_PTR                    keyVisitEntry ) override;
@@ -45,12 +47,16 @@ namespace Internal
                 template<class TM, class TN>
                 inline ERR CJournalWrapper<TM, TN>::ErrGetProperties(   _Out_opt_ ::JournalPosition* const  pjposReplay,
                                                                         _Out_opt_ ::JournalPosition* const  pjposDurableForWriteBack,
-                                                                        _Out_opt_ ::JournalPosition* const  pjposDurable )
+                                                                        _Out_opt_ ::JournalPosition* const  pjposDurable,
+                                                                        _Out_opt_ ::JournalPosition* const  pjposAppend,
+                                                                        _Out_opt_ ::JournalPosition* const  pjposFull )
                 {
                     ERR             err                                 = JET_errSuccess;
                     JournalPosition journalPositionReplay               = JournalPosition::Invalid;
                     JournalPosition journalPositionDurableForWriteBack  = JournalPosition::Invalid;
                     JournalPosition journalPositionDurable              = JournalPosition::Invalid;
+                    JournalPosition journalPositionAppend               = JournalPosition::Invalid;
+                    JournalPosition journalPositionFull                 = JournalPosition::Invalid;
 
                     if ( pjposReplay )
                     {
@@ -64,10 +70,20 @@ namespace Internal
                     {
                         *pjposDurable = ::jposInvalid;
                     }
+                    if ( pjposAppend )
+                    {
+                        *pjposAppend = ::jposInvalid;
+                    }
+                    if ( pjposFull )
+                    {
+                        *pjposFull = ::jposInvalid;
+                    }
 
                     ExCall( I()->GetProperties( journalPositionReplay,
                                                 journalPositionDurableForWriteBack,
-                                                journalPositionDurable ) );
+                                                journalPositionDurable,
+                                                journalPositionAppend,
+                                                journalPositionFull ) );
 
                     if ( pjposReplay )
                     {
@@ -80,6 +96,14 @@ namespace Internal
                     if ( pjposDurable )
                     {
                         *pjposDurable = (::JournalPosition)journalPositionDurable;
+                    }
+                    if ( pjposAppend )
+                    {
+                        *pjposAppend = (::JournalPosition)journalPositionAppend;
+                    }
+                    if ( pjposFull )
+                    {
+                        *pjposFull = (::JournalPosition)journalPositionFull;
                     }
 
                 HandleError:
@@ -96,6 +120,14 @@ namespace Internal
                         if ( pjposDurable )
                         {
                             *pjposDurable = ::jposInvalid;
+                        }
+                        if ( pjposAppend )
+                        {
+                            *pjposAppend = ::jposInvalid;
+                        }
+                        if ( pjposFull )
+                        {
+                            *pjposFull = ::jposInvalid;
                         }
                     }
                     return err;

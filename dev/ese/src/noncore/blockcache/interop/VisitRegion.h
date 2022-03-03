@@ -13,12 +13,12 @@ namespace Internal
         {
             namespace Interop
             {
-                ref class VisitRegion
+                ref class VisitRegion : MarshalByRefObject
                 {
                     public:
 
-                        VisitRegion(    const ::IJournalSegment::PfnVisitRegion pfnVisitRegion,
-                                        const DWORD_PTR                         keyVisitRegion )
+                        VisitRegion(    _In_ const ::IJournalSegment::PfnVisitRegion    pfnVisitRegion,
+                                        _In_ const DWORD_PTR                            keyVisitRegion )
                             :   pfnVisitRegion( pfnVisitRegion ),
                                 keyVisitRegion( keyVisitRegion )
                         {
@@ -26,6 +26,7 @@ namespace Internal
 
                         bool VisitRegion_(
                             RegionPosition regionPosition,
+                            RegionPosition regionPositionEnd,
                             ArraySegment<byte> region )
                         {
                             pin_ptr<const byte> rgbRegion =
@@ -33,6 +34,7 @@ namespace Internal
                                     ? nullptr
                                     : (region.Count == 0 ? &(gcnew array<byte>(1))[0] : &region.Array[ region.Offset ]);
                             return pfnVisitRegion(  (::RegionPosition)regionPosition,
+                                                    (::RegionPosition)regionPositionEnd,
                                                     CJournalBuffer( region.Count, rgbRegion ),
                                                     keyVisitRegion );
                         }

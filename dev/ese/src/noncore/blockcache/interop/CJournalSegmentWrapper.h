@@ -38,9 +38,11 @@ namespace Internal
                                                 _In_reads_( cjb )   CJournalBuffer* const   rgjb,
                                                 _In_                const DWORD             cbMin,
                                                 _Out_               ::RegionPosition* const prpos,
+                                                _Out_               ::RegionPosition* const prposEnd,
                                                 _Out_               DWORD* const            pcbActual ) override;
 
-                        ERR ErrSeal( _In_opt_ ::IJournalSegment::PfnSealed pfnSealed, _In_ const DWORD_PTR keySealed ) override;
+                        ERR ErrSeal(    _In_opt_ ::IJournalSegment::PfnSealed   pfnSealed,
+                                        _In_opt_ const DWORD_PTR                keySealed ) override;
                 };
 
                 template< class TM, class TN >
@@ -172,9 +174,9 @@ namespace Internal
                                                                             _In_ const DWORD_PTR                            keyVisitRegion )
                 {
                     ERR             err         = JET_errSuccess;
-                    VisitRegion^    visitregion = gcnew VisitRegion( pfnVisitRegion, keyVisitRegion );
+                    VisitRegion^    visitRegion = gcnew VisitRegion( pfnVisitRegion, keyVisitRegion );
 
-                    ExCall( I()->VisitRegions( gcnew Internal::Ese::BlockCache::Interop::IJournalSegment::VisitRegion( visitregion, &VisitRegion::VisitRegion_ ) ) );
+                    ExCall( I()->VisitRegions( gcnew Internal::Ese::BlockCache::Interop::IJournalSegment::VisitRegion( visitRegion, &VisitRegion::VisitRegion_ ) ) );
 
                 HandleError:
                     return err;
@@ -185,11 +187,13 @@ namespace Internal
                                                                             _In_reads_( cjb )   CJournalBuffer* const   rgjb,
                                                                             _In_                const DWORD             cbMin,
                                                                             _Out_               ::RegionPosition* const prpos,
+                                                                            _Out_               ::RegionPosition* const prposEnd,
                                                                             _Out_               DWORD* const            pcbActual )
                 {
                     ERR                         err                     = JET_errSuccess;
                     array<ArraySegment<byte>>^  payload                 = rgjb ? gcnew array<ArraySegment<byte>>( cjb ) : nullptr;
                     RegionPosition              regionPosition          = RegionPosition::Invalid;
+                    RegionPosition              regionPositionEnd       = RegionPosition::Invalid;
                     Int32                       payloadAppendedInBytes  = 0;
 
                     *prpos = ::rposInvalid;
@@ -210,12 +214,13 @@ namespace Internal
                         }
                     }
 
-                    ExCall( I()->AppendRegion(  payload,
-                                                cbMin,
-                                                regionPosition,
-                                                payloadAppendedInBytes) );
+                    ExCall( regionPosition = I()->AppendRegion( payload,
+                                                                cbMin,
+                                                                regionPositionEnd,
+                                                                payloadAppendedInBytes) );
 
                     *prpos = (::RegionPosition)regionPosition;
+                    *prposEnd = (::RegionPosition)regionPositionEnd;
                     *pcbActual = payloadAppendedInBytes;
 
                 HandleError:
@@ -229,7 +234,7 @@ namespace Internal
 
                 template<class TM, class TN>
                 inline ERR CJournalSegmentWrapper<TM, TN>::ErrSeal( _In_opt_    ::IJournalSegment::PfnSealed    pfnSealed, 
-                                                                    _In_        const DWORD_PTR                 keySealed )
+                                                                    _In_opt_    const DWORD_PTR                 keySealed )
                 {
                     ERR     err     = JET_errSuccess;
                     Sealed^ sealed  = pfnSealed ? gcnew Sealed( pfnSealed, keySealed ) : nullptr;

@@ -3733,6 +3733,9 @@ HandleError:
 
 void OSFSPostterm()
 {
+    g_fident.Cleanup();
+    g_crep.Cleanup();
+
     //  The proper location for this is OSFSTerm(), but the unit tests do not
     //  always call OSFSTerm(), but they do call OSFSPostterm().
 

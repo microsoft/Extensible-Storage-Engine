@@ -51,6 +51,12 @@ namespace Internal
                     /// </summary>
                     /// <returns>The file number.</returns>
                     int CacheTelemetryFileNumber();
+
+                    /// <summary>
+                    /// The size in bytes of the file to protect from write back.
+                    /// </summary>
+                    /// <returns>The size in bytes to protect from write back.</returns>
+                    int PinnedHeaderSizeInBytes();
                 };
             }
         }

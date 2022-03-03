@@ -49,10 +49,12 @@ namespace Internal
                     /// Delegate used to visit a region in the segment.
                     /// </summary>
                     /// <param name="regionPosition">The position of the region to visit.</param>
+                    /// <param name="regionPositionEnd">The last position occupied by the region to visit.</param>
                     /// <param name="region">The payload of the region to visit.</param>
                     /// <returns>True to continue visiting more regions.</returns>
                     delegate bool VisitRegion(
                         RegionPosition regionPosition,
+                        RegionPosition regionPositionEnd,
                         ArraySegment<byte> region );
 
                     /// <summary>
@@ -71,11 +73,13 @@ namespace Internal
                     /// <param name="payload">The payload as an array of byte arrays.</param>
                     /// <param name="minimumAppendSizeInBytes">The minimum amount of payload that must be appended.</param>
                     /// <param name="regionPosition">The position of the region appended.</param>
+                    /// <param name="regionPositionEnd">The last position occupied by the region.</param>
                     /// <param name="payloadAppendedInBytes">The actual amount of payload appended.</param>
-                    void AppendRegion(
+                    /// <returns>The position of the region appended.</returns>
+                    RegionPosition AppendRegion(
                         array<ArraySegment<byte>>^ payload,
                         Int32 minimumAppendSizeInBytes,
-                        [Out] RegionPosition% regionPosition,
+                        [Out] RegionPosition% regionPositionEnd,
                         [Out] Int32% payloadAppendedInBytes );
 
                     /// <summary>

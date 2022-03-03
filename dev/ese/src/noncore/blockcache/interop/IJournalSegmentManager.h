@@ -25,13 +25,17 @@ namespace Internal
                     /// <summary>
                     /// Gets the current properties of the set of segments.
                     /// </summary>
-                    /// <param name="segmentPositionReplay">The position of the last known replay segment.</param>
-                    /// <param name="segmentPositionDurable">The position of the last known durable segment.</param>
-                    /// <param name="segmentPositionLast">The position of the last known segment.</param>
+                    /// <param name="segmentPositionFirst">The position of the first segment.</param>
+                    /// <param name="segmentPositionReplay">The position of the replay segment.</param>
+                    /// <param name="segmentPositionDurable">The position of the last durable segment.</param>
+                    /// <param name="segmentPositionLast">The position of the last segment.</param>
+                    /// <param name="segmentPositionFull">The position of the segment at which the journal will be full.</param>
                     void GetProperties(
+                        [Out] SegmentPosition% segmentPositionFirst,
                         [Out] SegmentPosition% segmentPositionReplay,
                         [Out] SegmentPosition% segmentPositionDurable,
-                        [Out] SegmentPosition% segmentPositionLast );
+                        [Out] SegmentPosition% segmentPositionLast,
+                        [Out] SegmentPosition% segmentPositionFull );
 
                     /// <summary>
                     /// Delegate used to visit a segment in the journal.

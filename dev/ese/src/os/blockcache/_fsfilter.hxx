@@ -647,7 +647,7 @@ ERR TFileSystemFilter<I>::ErrFileOpenById(  _In_    const VolumeId              
 
         if ( ++cAttempt >= cAttemptMax )
         {
-            Call( ErrERRCheck( JET_errInternalError ) );
+            BlockCacheInternalError( "FileOpenByIdRetryLimit" );
         }
 
         //  if we have a file open from a previous attempt then close it
@@ -674,7 +674,7 @@ ERR TFileSystemFilter<I>::ErrFileOpenById(  _In_    const VolumeId              
 
     if ( fileserialActual != fileserial )
     {
-        Call( ErrERRCheck( JET_errFileNotFound ) );
+        Error( ErrERRCheck( JET_errFileNotFound ) );
     }
 
     //  return the opened file
@@ -718,7 +718,7 @@ ERR TFileSystemFilter<I>::ErrFileRename(    _In_    IFileAPI* const    pfapi,
 
     if ( TFileSystemWrapper<I>::FPathIsRelative( wszPathDest ) )
     {
-        Call( ErrERRCheck( JET_errInvalidParameter ) );
+        Error( ErrERRCheck( JET_errInvalidParameter ) );
     }
 
     //  wait to lock the entry for the source and destination files
@@ -993,6 +993,8 @@ void TFileSystemFilter<I>::ReleaseFile( _In_opt_    CFilePathTableEntry* const  
     BOOL    fDeleteFilePathTableEntry   = fFalse;
     BOOL    fDeleteOpenFile             = fFalse;
 
+    Assert( !pof && !pffr || pof && pffr );
+
     if ( !pfpte )
     {
         return;
@@ -1140,7 +1142,7 @@ ERR TFileSystemFilter<I>::ErrLockFile(  _In_z_  const WCHAR* const          wszK
         errFilePathHash = m_filePathHash.ErrInsertEntry( &lock, entry );
         if ( errFilePathHash == CFilePathHash::ERR::errOutOfMemory )
         {
-            Call( ErrERRCheck( JET_errOutOfMemory ) );
+            Error( ErrERRCheck( JET_errOutOfMemory ) );
         }
         Assert( errFilePathHash == CFilePathHash::ERR::errSuccess );
         fRemove = fTrue;
@@ -1682,7 +1684,7 @@ ERR TFileSystemFilter<I>::ErrInitFilePathTable()
 
     if ( m_filePathHash.ErrInit( 5.0, 1.0 ) == CFilePathHash::ERR::errOutOfMemory )
     {
-        Call( ErrERRCheck( JET_errOutOfMemory ) );
+        Error( ErrERRCheck( JET_errOutOfMemory ) );
     }
 
 HandleError:

@@ -3180,7 +3180,7 @@ HandleError:
     return err;
 }
 
-TICK COSFile::DtickIOElapsed( void* const pvIOContext ) const
+TICK COSFile::DtickIOElapsed( void* const pvIOContext )
 {
     IOREQ* const    pioreq = (IOREQ*)pvIOContext;
     const QWORD     cmsecIOElapsed = CmsecLatencyOfOSOperation( pioreq );

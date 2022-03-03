@@ -54,7 +54,7 @@ class TCacheWrapper  //  cw
                         _In_                    const OSFILEQOS             grbitQOS,
                         _In_                    const ICache::CachingPolicy cp,
                         _In_opt_                const ICache::PfnComplete   pfnComplete,
-                        _In_                    const DWORD_PTR             keyComplete ) override;
+                        _In_opt_                const DWORD_PTR             keyComplete ) override;
 
         ERR ErrWrite(   _In_                    const TraceContext&         tc,
                         _In_                    const VolumeId              volumeid,
@@ -66,7 +66,7 @@ class TCacheWrapper  //  cw
                         _In_                    const OSFILEQOS             grbitQOS,
                         _In_                    const ICache::CachingPolicy cp,
                         _In_opt_                const ICache::PfnComplete   pfnComplete,
-                        _In_                    const DWORD_PTR             keyComplete ) override;
+                        _In_opt_                const DWORD_PTR             keyComplete ) override;
         
         ERR ErrIssue(   _In_ const VolumeId     volumeid,
                         _In_ const FileId       fileid,
@@ -171,8 +171,8 @@ ERR TCacheWrapper<I>::ErrRead(  _In_                    const TraceContext&     
                                 _Out_writes_( cbData )  BYTE* const                 pbData,
                                 _In_                    const OSFILEQOS             grbitQOS,
                                 _In_                    const ICache::CachingPolicy cp,
-                                _In_                    const ICache::PfnComplete   pfnComplete,
-                                _In_                    const DWORD_PTR             keyComplete )
+                                _In_opt_                const ICache::PfnComplete   pfnComplete,
+                                _In_opt_                const DWORD_PTR             keyComplete )
 {
     return m_piInner->ErrRead( tc, volumeid, fileid, fileserial, ibOffset, cbData, pbData, grbitQOS, cp, pfnComplete, keyComplete );
 }
@@ -187,8 +187,8 @@ ERR TCacheWrapper<I>::ErrWrite( _In_                    const TraceContext&     
                                 _In_reads_( cbData )    const BYTE* const           pbData,
                                 _In_                    const OSFILEQOS             grbitQOS,
                                 _In_                    const ICache::CachingPolicy cp,
-                                _In_                    const ICache::PfnComplete   pfnComplete,
-                                _In_                    const DWORD_PTR             keyComplete )
+                                _In_opt_                const ICache::PfnComplete   pfnComplete,
+                                _In_opt_                const DWORD_PTR             keyComplete )
 {
     return m_piInner->ErrWrite( tc, volumeid, fileid, fileserial, ibOffset, cbData, pbData, grbitQOS, cp, pfnComplete, keyComplete );
 }

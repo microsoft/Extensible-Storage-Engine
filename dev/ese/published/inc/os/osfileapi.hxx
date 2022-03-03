@@ -531,7 +531,7 @@ class IFileAPI  //  fapi
 
         //  get the elapsed IO time of a pending IO via the pvIOContext from PfnIOHandoff
 
-        virtual TICK DtickIOElapsed( void* const pvIOContext ) const = 0;
+        virtual TICK DtickIOElapsed( void* const pvIOContext ) = 0;
 };
 
 DEFINE_ENUM_FLAG_OPERATORS_BASIC( IFileAPI::FileModeFlags )

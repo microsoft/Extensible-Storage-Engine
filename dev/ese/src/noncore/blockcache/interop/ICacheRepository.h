@@ -27,12 +27,12 @@ namespace Internal
                     /// </summary>
                     /// <param name="fsf>The File System Filter to use when opening the Cache.</param>
                     /// <param name="fsconfig>The File System Configuration to use when opening the Cache.</param>
-                    /// <param name="cconf>The Cache Configuration.</param>
+                    /// <param name="cconfig>The Cache Configuration.</param>
                     /// <returns>The Cache for a given Cache Configuration.</returns>
                     ICache^ Open(
                         IFileSystemFilter^ fsf, 
                         IFileSystemConfiguration^ fsconfig,
-                        ICacheConfiguration^ cconf );
+                        ICacheConfiguration^ cconfig );
 
                     /// <summary>
                     /// Gets an existing Cache by its physical identity.
