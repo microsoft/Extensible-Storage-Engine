@@ -2471,7 +2471,7 @@ ERR ErrRECIDeleteIndexEntry(
             case wrnNDFoundGreater:
                 // We found an entry but not the one we wanted and got a page latched.  Let go of all that.
                 DIRUp( pfucbIdx );
-                err = JET_errRecordNotFound;
+                err = ErrERRCheck( JET_errRecordNotFound );
                 break;
 
             default:
