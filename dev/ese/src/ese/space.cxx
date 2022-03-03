@@ -13327,6 +13327,7 @@ LOCAL ERR ErrSPIReserveSPBufPages(
     const PGNO pgnoReplace )
 {
     ERR err = JET_errSuccess;
+    FMP* const pfmp = &g_rgfmp[ pfucb->ifmp ];
     FCB* const pfcb = pfucb->u.pfcb;
     FUCB* pfucbParentLocal = pfucbParent;
     FUCB* pfucbOE = pfucbNil;
@@ -13335,7 +13336,7 @@ LOCAL ERR ErrSPIReserveSPBufPages(
     CArray<EXTENTINFO> arreiReleased( 10 );
 
     const PGNO pgnoParentFDP = PsphSPIRootPage( pfucb )->PgnoParent();
-    const PGNO pgnoLastBefore = g_rgfmp[ pfucb->ifmp ].PgnoLast();
+    const PGNO pgnoLastBefore = pfmp->PgnoLast();
 
     AssertSPIPfucbOnRoot( pfucb );
     AssertSPIPfucbNullOrUnlatched( pfucbParent );
@@ -13401,18 +13402,42 @@ LOCAL ERR ErrSPIReserveSPBufPages(
         }
     }
 
-    const PGNO pgnoLastAfter = g_rgfmp[ pfucb->ifmp ].PgnoLast();
+    const PGNO pgnoLastAfter = pfmp->PgnoLast();
 
     // Unshelving normally happens as part of growing the database to add secondary extents
     // to it. However, refilling the DB root's split buffers may also grow the database while
     // not adding a secondary extent, so we need to unshelve any pages in that range here.
-    if ( !g_rgfmp[ pfucb->ifmp ].FIsTempDB() && ( pfcb->PgnoFDP() == pgnoSystemRoot ) && ( pgnoLastAfter > pgnoLastBefore ) )
+    if ( !pfmp->FIsTempDB() && ( pfcb->PgnoFDP() == pgnoSystemRoot ) && ( pgnoLastAfter > pgnoLastBefore ) )
     {
         Call( ErrSPIUnshelvePagesInRange( pfucb, pgnoLastBefore + 1, pgnoLastAfter ) );
         Call( ErrSPIReserveSPBufPages( pfucb, pfucbParentLocal, cpgAddlReserveOE, cpgAddlReserveAE, pgnoReplace ) );
     }
 
 HandleError:
+    Assert( ( err < JET_errSuccess ) || ( arreiReleased.Size() == 0 ) );
+    for ( size_t iext = 0; iext < arreiReleased.Size(); iext++ )
+    {
+        BOOL fExtentFreed = fFalse;
+        const EXTENTINFO& extinfo = arreiReleased[ iext ];
+
+        // If we're failing due to low space at lower offsets during Shrink, try to return
+        // the pending space anyways (best effort) to avoid leakage.
+        if ( err == errSPNoSpaceBelowShrinkTarget )
+        {
+            // De-activate Shrink before trying to free up extents to avoid leaks.
+            Assert( pfmp->FShrinkIsRunning() );
+            pfmp->ResetPgnoShrinkTarget();
+
+            Assert( extinfo.FValid() && ( extinfo.CpgExtent() > 0 ) );
+            fExtentFreed = ErrSPIAEFreeExt( pfucb, extinfo.PgnoFirst(), extinfo.CpgExtent(), pfucbParentLocal ) >= JET_errSuccess;
+        }
+
+        if ( !fExtentFreed )
+        {
+            SPIReportSpaceLeak( pfucb, err, extinfo.PgnoFirst(), (CPG)extinfo.CpgExtent(), "SpBuffer" );
+        }
+    }
+
     if ( pfucbNil != pfucbOE )
     {
         BTClose( pfucbOE );
@@ -13437,13 +13462,6 @@ HandleError:
         }
         BTClose( pfucbParentLocal );
         pfucbParentLocal = pfucbNil;
-    }
-
-    Assert( ( err < JET_errSuccess ) || ( arreiReleased.Size() == 0 ) );
-    for ( size_t iext = 0; iext < arreiReleased.Size(); iext++ )
-    {
-        const EXTENTINFO& extinfoLeaked = arreiReleased[ iext ];
-        SPIReportSpaceLeak( pfucb, err, extinfoLeaked.PgnoFirst(), (CPG)extinfoLeaked.CpgExtent(), "SpBuffer" );
     }
 
     return err;
