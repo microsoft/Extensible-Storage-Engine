@@ -205,11 +205,21 @@ void PerfCollectorStart( HANDLE hCollector, const DWORD cmsecSampling )
 
     if ( pPerfCollector->cctrFormatted > 0 )
     {
-        CallVTrue( PerfCountersGetCounterValues( pPerfCollector->qFormatted, pPerfCollector->dblFormatted ) );
+        int cRetries = 0;
+        while ( ( cRetries++ < 100 ) && !PerfCountersGetCounterValues( pPerfCollector->qFormatted, pPerfCollector->dblFormatted ) )
+        {
+            Sleep( 100 );
+        }
+        CallVTrue( cRetries < 100 );
     }
     if ( pPerfCollector->cctrRaw > 0 )
     {
-        CallVTrue( PerfCountersGetCounterValuesRaw( pPerfCollector->qRaw, pPerfCollector->qwRaw1, NULL ) );
+        int cRetries = 0;
+        while ( ( cRetries++ < 100 ) && !PerfCountersGetCounterValuesRaw( pPerfCollector->qRaw, pPerfCollector->qwRaw1, NULL ) )
+        {
+            Sleep( 100 );
+        }
+        CallVTrue( cRetries < 100 );
     }   
     if ( pPerfCollector->cctrAvg > 0 )
     {
